@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Coverage for the workspace-trust gate.
 
 import "fake-indexeddb/auto"

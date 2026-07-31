@@ -1,11 +1,46 @@
+/** @jest-environment jsdom */
 // Coverage for the schema module — Dexie instance lifecycle, lazy seeding,
 // and the test reset helper. Also exercises the v5 (members[]) and v7
 // (appsEnabled={}) upgrade hooks indirectly: the seeder runs against a
 // freshly opened DB, which means the latest schema version opens cleanly.
 
 import "fake-indexeddb/auto"
-import { CogniaDB, __resetDbForTesting, getDb, whenSeeded } from "./schema"
+
+// This suite exercises historical upgrade hooks (v49 backfill etc.), which the
+// Jest collapsed-schema fast path skips — force the full version chain.
+;(globalThis as { __COGNIA_DB_FULL_SCHEMA__?: boolean }).__COGNIA_DB_FULL_SCHEMA__ = true
+
+import Dexie from "dexie"
+
+import {
+  CogniaDB,
+  LEGACY_COGNIA_DB_NAME,
+  __resetDbForTesting,
+  activateAccountDatabase,
+  backfillMemoryGovernanceV118,
+  backfillRootsForRow,
+  clearAccountDatabaseSelection,
+  getDb,
+  startBlockedYieldRetry,
+  whenSeeded,
+  withDbReopenRetry,
+} from "./schema"
 import type { OutboundJobRow } from "./connector-types"
+import { emit, listen } from "@tauri-apps/api/event"
+import { isTauri } from "@/lib/platform/detect"
+
+// The cross-window yield handshake lazily imports the Tauri event API and gates
+// on isTauri(); stub both so the Tauri path is exercisable under jsdom. isTauri
+// defaults to the real (false) detection so every non-Tauri suite is unchanged.
+jest.mock("@tauri-apps/api/event", () => ({
+  __esModule: true,
+  emit: jest.fn(() => Promise.resolve()),
+  listen: jest.fn(() => Promise.resolve(() => {})),
+}))
+jest.mock("@/lib/platform/detect", () => {
+  const actual = jest.requireActual("@/lib/platform/detect")
+  return { __esModule: true, ...actual, isTauri: jest.fn(actual.isTauri) }
+})
 
 /** Minimal valid `outboundQueue` row for index-behaviour tests. */
 function makeOutboundRow(
@@ -35,6 +70,81 @@ describe("getDb", () => {
     __resetDbForTesting()
   })
 
+  it("constructs an explicit database name for account-local databases", () => {
+    const db = new CogniaDB("cognia-account-acct_one")
+    expect(db.name).toBe("cognia-account-acct_one")
+    db.close()
+  })
+
+  it("backfills workspace roots from legacy directory fields and preserves existing roots", () => {
+    const withRoots = {
+      id: "proj-roots",
+      roots: [{ id: "root-existing", path: "D:/existing", isPrimary: true }],
+    }
+
+    expect(backfillRootsForRow(withRoots as never)).toBe(withRoots)
+    expect(withRoots.roots).toEqual([{ id: "root-existing", path: "D:/existing", isPrimary: true }])
+
+    const legacy = {
+      id: "proj-legacy",
+      rootDir: " D:/main ",
+      additionalDirs: ["D:/docs", "D:/docs", " "],
+    }
+
+    backfillRootsForRow(legacy as never)
+
+    expect((legacy as { roots?: Array<{ path: string; isPrimary?: boolean }> }).roots).toEqual([
+      expect.objectContaining({ path: "D:/main", isPrimary: true }),
+      expect.objectContaining({ path: "D:/docs", isPrimary: false }),
+    ])
+  })
+
+  it("opens the selected account database and closes the previous handle on switch", () => {
+    activateAccountDatabase("acct_one")
+    const first = getDb()
+    expect(first.name).toBe("cognia-account-acct_one")
+
+    activateAccountDatabase("acct_two")
+    const second = getDb()
+
+    expect(second.name).toBe("cognia-account-acct_two")
+    expect(second).not.toBe(first)
+    expect(first.isOpen()).toBe(false)
+  })
+
+  it("opens a physically isolated database for an account runtime target", () => {
+    activateAccountDatabase("acct_one", "web-standalone")
+
+    expect(getDb().name).toBe("cognia-account-acct_one-target-web-standalone")
+  })
+
+  it("leaves the cached handle untouched when account selection does not change", () => {
+    activateAccountDatabase("acct_one")
+    const first = getDb()
+
+    activateAccountDatabase("acct_one")
+
+    expect(getDb()).toBe(first)
+  })
+
+  it("can clear account database selection back to the legacy database for migration tests", () => {
+    activateAccountDatabase("acct_one")
+    expect(getDb().name).toBe("cognia-account-acct_one")
+
+    clearAccountDatabaseSelection()
+    const legacy = getDb()
+
+    expect(legacy.name).toBe(LEGACY_COGNIA_DB_NAME)
+  })
+
+  it("leaves the legacy cached handle untouched when account selection is already clear", () => {
+    const legacy = getDb()
+
+    clearAccountDatabaseSelection()
+
+    expect(getDb()).toBe(legacy)
+  })
+
   it("returns a CogniaDB instance with every advertised table wired", () => {
     const db = getDb()
     expect(db).toBeInstanceOf(CogniaDB)
@@ -50,18 +160,27 @@ describe("getDb", () => {
     expect(db.trustedWorkspaces).toBeDefined()
     expect(db.backupHistory).toBeDefined()
     expect(db.notifications).toBeDefined()
+    expect(db.siteProjects).toBeDefined()
+    expect(db.siteVersions).toBeDefined()
+    expect(db.siteArtifacts).toBeDefined()
+    expect(db.siteEnvironmentRevisions).toBeDefined()
+    expect(db.siteDeployments).toBeDefined()
+    expect(db.siteOperations).toBeDefined()
+    expect(db.siteOperationEvents).toBeDefined()
+    expect(db.siteResources).toBeDefined()
     expect(db.canvasDocuments).toBeDefined()
     expect(db.canvasVersions).toBeDefined()
     expect(db.canvasComments).toBeDefined()
+    expect(db.contextComments).toBeDefined()
     expect(db.canvasSessions).toBeDefined()
     expect(db.sessionState).toBeDefined()
     expect(db.tts_provider_keys).toBeDefined()
-    // §A-Schema (v15) — the five plugin tables added by the plugin port.
+    // §A-Schema (v15), minus the retired pluginScheduledJobs table (v113).
     expect(db.plugins).toBeDefined()
     expect(db.pluginPermissions).toBeDefined()
     expect(db.pluginReviews).toBeDefined()
     expect(db.pluginAnalytics).toBeDefined()
-    expect(db.pluginScheduledJobs).toBeDefined()
+    expect(db.tables.map((table) => table.name)).not.toContain("pluginScheduledJobs")
     // v17 — External Bridge (LLM Wiki + MCP audit) tables.
     expect(db.wikiArticles).toBeDefined()
     expect(db.wikiSections).toBeDefined()
@@ -76,12 +195,768 @@ describe("getDb", () => {
     expect(db.connectorAudit).toBeDefined()
     expect(db.connectorDrafts).toBeDefined()
     expect(db.connectorAttachments).toBeDefined()
+    // v114 — unified execution journal + IM presentation state.
+    expect(db.executionRuns).toBeDefined()
+    expect(db.executionRunEvents).toBeDefined()
+    expect(db.executionRunBindings).toBeDefined()
+    expect(db.executionRunInterrupts).toBeDefined()
     // v51 — Heartbeats split out of connectorAudit into their own table.
     expect(db.connectorHeartbeats).toBeDefined()
     // v27 — Plugin Dexie table registry (M0 platform feature).
     expect(db.pluginDexieMeta).toBeDefined()
     // v49 — Inbox telemetry ring buffer.
     expect(db.inboxTelemetryEvents).toBeDefined()
+    // v108 — Local code-adoption tracking.
+    expect(db.codeAdoptionTurns).toBeDefined()
+    // v109 — user-consent binary ledger.
+    expect(db.approvedBinaries).toBeDefined()
+    expect(db.browserProfiles).toBeDefined()
+    expect(db.browserDomainGrants).toBeDefined()
+    expect(db.memoryEvidence).toBeDefined()
+    expect(db.memoryJobs).toBeDefined()
+    expect(db.memoryAuditEvents).toBeDefined()
+    expect(db.petSpritePacks).toBeDefined()
+    expect(db.connectorConversationStates).toBeDefined()
+    expect(db.connectorInboundJobs).toBeDefined()
+  })
+
+  it("v122 indexes memories by sourceMessageId for chat memory chips", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(122)
+    expect(db.memories.schema.indexes.map((index) => index.name)).toContain("sourceMessageId")
+  })
+
+  it("v123 opens the certification projection table", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(123)
+    expect(db.agentCompatibilityRecords.schema.primKey.name).toBe("keyId")
+    expect(db.agentCompatibilityRecords.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["bundleId", "deploymentRef"])
+    )
+  })
+
+  it("v124 opens the canonical-session header projection table", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(124)
+    expect(db.agentCanonicalSessions.schema.primKey.name).toBe("canonicalSessionId")
+    expect(db.agentCanonicalSessions.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["sourceRuntime", "nativeSessionId", "updatedAt"])
+    )
+  })
+
+  it("v126 opens the Lark entry-surface tables", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(126)
+    expect(db.larkEntryContexts.schema.primKey.name).toBe("id")
+    expect(db.larkChatSurfaces.schema.primKey.name).toBe("[adapterId+chatId+surfaceType]")
+    expect(db.larkMessageImports.schema.indexes.map((index) => index.name)).toContain("sourceHash")
+    expect(db.larkWebSessions.schema.primKey.name).toBe("id")
+  })
+
+  it("v127 opens the Marketplace Integration control-plane tables", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(127)
+    expect(db.integrationAccounts.schema.indexes.map((index) => index.name)).toContain(
+      "[pluginId+integrationId+remoteAccountId]"
+    )
+    expect(db.integrationSubscriptions.schema.indexes.map((index) => index.name)).toContain(
+      "accountId"
+    )
+    expect(db.integrationEvents.schema.indexes.map((index) => index.name)).toContain(
+      "[accountId+deliveryId]"
+    )
+    expect(db.integrationActionJobs.schema.indexes.map((index) => index.name)).toContain("status")
+    expect(db.integrationAudit.schema.indexes.map((index) => index.name)).toContain("createdAt")
+  })
+
+  it("v130 partitions sync cursors by host", async () => {
+    const db = getDb()
+    await whenSeeded()
+    expect(db.verno).toBeGreaterThanOrEqual(130)
+
+    // Same table, two hosts, both retained — the compound primary key is what
+    // stops one host's watermark being used against another.
+    await db.hostSyncCursors.bulkPut([
+      { serverKey: "host-a", table: "messages", since: 5, lastSyncAt: 1, lastError: null },
+      { serverKey: "host-b", table: "messages", since: 900, lastSyncAt: 2, lastError: null },
+    ] as never)
+    expect(await db.hostSyncCursors.count()).toBe(2)
+    expect((await db.hostSyncCursors.get(["host-b", "messages"] as never))?.since).toBe(900)
+  })
+
+  it("v134 opens the chat-history search stores", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(134)
+
+    // `messageId` IS the primary key, and that is what makes re-projecting the
+    // same message from two of Tauri's WebViews an overwrite instead of a
+    // duplicate — the reason no leader election is needed.
+    expect(db.chatSearchText.schema.primKey.name).toBe("messageId")
+    expect(db.chatSearchText.schema.primKey.unique).toBe(true)
+    // `[createdAt+messageId]` rather than `createdAt` alone: messages routinely
+    // share a millisecond, and both the resident-corpus load and the
+    // older-history scan page through this index.
+    expect(db.chatSearchText.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining([
+        "sessionId",
+        "[sessionId+createdAt]",
+        "[createdAt+messageId]",
+        "projectId",
+        "[projectId+createdAt]",
+      ])
+    )
+    expect(db.chatSearchState.schema.primKey.name).toBe("id")
+  })
+
+  it("v135 opens the versioned provider catalog stores and indexes", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(135)
+
+    expect(db.providerCatalogRevisions.schema.primKey.name).toBe("id")
+    expect(db.providerCatalogModels.schema.primKey.name).toBe("[revisionId+id]")
+    expect(db.providerCatalogOfferings.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["revisionId", "[revisionId+providerRef]", "[revisionId+modelRef]"])
+    )
+    expect(db.providerConnectionInventory.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["deploymentRef", "providerRef", "status", "checkedAt"])
+    )
+  })
+
+  it("v135 upgrades v1 deployment model references and profile metadata", async () => {
+    const name = `cognia-v135-provider-catalog-${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(134).stores({
+      deploymentProfiles: "&id, providerRef, legacyProviderId",
+      profileStoreMeta: "&id",
+    })
+    await legacy.open()
+    await legacy.table("deploymentProfiles").put({
+      id: "openrouter-main",
+      providerRef: "openrouter",
+      endpoint: "https://openrouter.ai/api/v1",
+      transportProfileRef: "tp-openai-bearer",
+      models: [{ id: "openai/gpt-test" }],
+    })
+    await legacy.table("profileStoreMeta").put({
+      id: "singleton",
+      profileVersion: 4,
+      schemaVersion: 1,
+    })
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+
+    expect((await upgraded.deploymentProfiles.get("openrouter-main"))?.models[0]).toEqual({
+      id: "openai/gpt-test",
+      upstreamId: "openai/gpt-test",
+      offeringRef: "openrouter-main:openai/gpt-test",
+      canonicalModelRef: "openai:gpt-test",
+    })
+    expect((await upgraded.profileStoreMeta.get("singleton"))?.schemaVersion).toBe(2)
+    expect((await upgraded.profileStoreMeta.get("singleton"))?.profileVersion).toBe(4)
+
+    upgraded.close()
+    await Dexie.delete(name)
+  })
+
+  it("v136 quarantines unscoped outbound rows instead of replaying them to an arbitrary target", async () => {
+    const name = `cognia-account-acct_queue_${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(135).stores({
+      mobileOutboundQueue: "&id, status, [status+nextAttemptAt], createdAt, command",
+    })
+    await legacy.open()
+    await legacy.table("mobileOutboundQueue").put({
+      id: "legacy-pending",
+      command: "workflow_trigger_manual",
+      payload: { workflowId: "wf-1" },
+      status: "pending",
+      attempts: 0,
+      createdAt: 100,
+      nextAttemptAt: 100,
+      idempotencyKey: "legacy-key",
+    })
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+
+    await expect(upgraded.mobileOutboundQueue.get("legacy-pending")).resolves.toMatchObject({
+      accountId: expect.stringMatching(/^acct_queue_/),
+      targetId: "legacy-mixed",
+      status: "deadlettered",
+      lastError: expect.stringMatching(/could not be safely attributed/i),
+    })
+
+    upgraded.close()
+    await Dexie.delete(name)
+  })
+
+  it("v128 opens the content-addressed chat media store", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(128)
+    // The content hash IS the primary key — storing the same screenshot from
+    // twenty turns must not store it twenty times.
+    expect(db.messageMedia.schema.primKey.name).toBe("hash")
+    expect(db.messageMedia.schema.primKey.unique).toBe(true)
+    expect(db.messageMedia.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["createdAt", "lastUsedAt"])
+    )
+  })
+
+  it("v125 opens the Feishu unified identity registry tables", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(125)
+    expect(db.feishuTenants.schema.primKey.name).toBe("id")
+    expect(db.feishuTenants.schema.indexes.map((index) => index.name)).toContain(
+      "[tenantKey+appId]"
+    )
+    expect(db.feishuPrincipals.schema.indexes.map((index) => index.name)).toContain(
+      "[tenantKey+appId+openId]"
+    )
+    expect(db.feishuPrincipalBindRequests.schema.primKey.name).toBe("id")
+  })
+
+  it("v121 opens the Provider Profile Store tables and seeds meta", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(121)
+    expect(db.providerProfiles.schema.primKey.name).toBe("id")
+    expect(db.deploymentProfiles.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["providerRef", "legacyProviderId"])
+    )
+    expect(db.transportProfiles.schema.primKey.name).toBe("id")
+    // Fresh installs skip upgrade hooks (Dexie), so the CAS meta singleton
+    // appears on the first derived write, not at open time. Accessors treat
+    // a missing row as profileVersion 0.
+    expect(await db.profileStoreMeta.get("singleton")).toBeUndefined()
+  })
+
+  it("v121 upgrade derives profiles from an old-shape settings row", async () => {
+    // Seed a pre-121 database whose settings hold a vendor + relay + custom
+    // provider, then open at the current version and assert the derivation.
+    const name = `cognia-v121-provider-profiles-${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(108).stores({ settings: "&id" })
+    await legacy.open()
+    await legacy.table("settings").put({
+      id: "singleton",
+      providerSettings: {
+        zhipu: { providerId: "zhipu", enabled: true, apiKey: "sk-secret-zhipu" },
+        "glm-anthropic": { providerId: "glm-anthropic", enabled: true },
+      },
+      customProviders: [
+        {
+          id: "my-relay",
+          name: "My Relay",
+          enabled: true,
+          protocol: "anthropic",
+          baseURL: "https://relay.example/anthropic",
+          defaultModel: "claude-sonnet-5",
+        },
+      ],
+    })
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+    expect(upgraded.verno).toBeGreaterThanOrEqual(121)
+
+    const zhipu = await upgraded.providerProfiles.get("zhipu")
+    expect(zhipu?.deploymentRefs).toEqual(["glm-anthropic", "zhipu"])
+    const glm = await upgraded.deploymentProfiles.get("glm-anthropic")
+    expect(glm?.providerRef).toBe("zhipu")
+    expect(glm?.legacyProviderId).toBe("glm-anthropic")
+    const custom = await upgraded.deploymentProfiles.get("my-relay")
+    expect(custom?.endpoint).toBe("https://relay.example/anthropic")
+    // The derivation must not copy secret material.
+    const all = JSON.stringify({
+      p: await upgraded.providerProfiles.toArray(),
+      d: await upgraded.deploymentProfiles.toArray(),
+      t: await upgraded.transportProfiles.toArray(),
+    })
+    expect(all).not.toContain("sk-secret-zhipu")
+    expect(await upgraded.profileStoreMeta.get("singleton")).toMatchObject({ profileVersion: 1 })
+
+    await upgraded.delete()
+    upgraded.close()
+  })
+
+  it("v120 opens durable connector conversation and inbound job tables", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(120)
+    expect(db.connectorConversationStates.schema.primKey.name).toBe("conversationKey")
+    expect(db.connectorConversationStates.schema.indexes.map((index) => index.name)).toContain(
+      "activationStatus"
+    )
+    expect(db.connectorInboundJobs.schema.indexes.map((index) => index.name)).toContain(
+      "[adapterId+platformMessageId]"
+    )
+    expect(db.connectorInboundJobs.schema.indexes.map((index) => index.name)).toContain(
+      "[conversationKey+status+receivedAt]"
+    )
+  })
+
+  it("v119 opens petSpritePacks with displayName and createdAt indexes", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(119)
+    expect(db.petSpritePacks.schema.primKey.name).toBe("id")
+    expect(db.petSpritePacks.schema.primKey.unique).toBe(true)
+    expect(db.petSpritePacks.schema.indexes.map((index) => index.name)).toEqual([
+      "displayName",
+      "createdAt",
+    ])
+  })
+
+  it("v118 opens memory governance tables and preserves legacy rows explicitly", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(118)
+    expect(db.memoryEvidence.schema.indexes.map((index) => index.name)).toContain(
+      "[memoryId+createdAt]"
+    )
+    expect(db.memoryJobs.schema.indexes.map((index) => index.name)).toContain("[status+queuedAt]")
+
+    const legacy = backfillMemoryGovernanceV118({} as never)
+    expect(legacy).toMatchObject({
+      evidenceState: "legacy",
+      reviewStatus: "unreviewed",
+      contaminationState: "unknown",
+      sensitivity: "normal",
+    })
+  })
+
+  it("v117 opens host-local remote browser profile and domain-grant tables", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(117)
+    expect(db.browserProfiles.schema.indexes.map((index) => index.name)).toContain(
+      "[workspaceId+updatedAt]"
+    )
+    expect(db.browserDomainGrants.schema.indexes.map((index) => index.name)).toContain(
+      "[workspaceId+domain]"
+    )
+  })
+
+  it("v116 opens the Cognia Sites lifecycle tables and compound indexes", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(116)
+    expect(db.siteProjects.schema.indexes.map((index) => index.name)).toContain(
+      "[projectId+sourceRoot+sourceSubpath+executionTargetKey]"
+    )
+    expect(db.siteVersions.schema.indexes.map((index) => index.name)).toContain("[siteId+sequence]")
+    expect(db.siteOperationEvents.schema.indexes.map((index) => index.name)).toContain(
+      "[operationId+sequence]"
+    )
+  })
+
+  it("v114 opens the unified execution journal and its compound indexes", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(114)
+    expect(db.executionRuns.schema.indexes.map((index) => index.name)).toContain("[kind+sourceId]")
+    expect(db.executionRunEvents.schema.indexes.map((index) => index.name)).toContain("[runId+seq]")
+    expect(db.executionRunBindings.schema.indexes.map((index) => index.name)).toContain(
+      "[runId+conversationKey]"
+    )
+    expect(db.executionRunInterrupts.schema.indexes.map((index) => index.name)).toContain(
+      "[runId+status]"
+    )
+  })
+
+  it("v115 backfills Canvas comments into generalized context comments", async () => {
+    const name = `cognia-v115-context-comments-${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(114).stores({
+      canvasComments: "&id, documentId, [documentId+createdAt], parentId, resolvedAt, projectId",
+    })
+    await legacy.open()
+    await legacy.table("canvasComments").bulkPut([
+      {
+        id: "canvas-new",
+        documentId: "doc-1",
+        projectId: "project-1",
+        authorId: "user-1",
+        authorName: "Maya",
+        content: "Backfill me",
+        range: { startLine: 2, startColumn: 1, endLine: 2, endColumn: 5 },
+        reactions: [],
+        createdAt: 100,
+      },
+      {
+        id: "canvas-existing",
+        documentId: "doc-1",
+        authorId: "user-1",
+        authorName: "Maya",
+        content: "Do not overwrite",
+        range: { startLine: 1, startColumn: 1, endLine: 1, endColumn: 2 },
+        reactions: [],
+        createdAt: 90,
+      },
+    ])
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+
+    expect(upgraded.verno).toBeGreaterThanOrEqual(115)
+    expect(await upgraded.contextComments.count()).toBe(2)
+    expect(await upgraded.contextComments.get("canvas-new")).toEqual(
+      expect.objectContaining({
+        resourceKind: "canvas-document",
+        resourceId: "doc-1",
+        projectId: "project-1",
+        anchor: expect.objectContaining({ kind: "text-range" }),
+      })
+    )
+    expect((await upgraded.contextComments.get("canvas-existing"))?.content).toBe(
+      "Do not overwrite"
+    )
+
+    await upgraded.delete()
+    upgraded.close()
+  })
+
+  it("v108 stores a code-adoption turn and resolves its indexes", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(108)
+    await db.codeAdoptionTurns.bulkPut([
+      {
+        id: "s1:1",
+        runId: 1,
+        sessionId: "s1",
+        workspaceRoot: "/repo",
+        agentKind: "in-app",
+        model: "opus",
+        ts: 100,
+        totalFiles: 1,
+        totalAdded: 3,
+        totalRemoved: 0,
+        files: [{ path: "a.ts", added: 3, removed: 0, isNew: true, hunks: [[1, 3]] }],
+        truncated: false,
+      },
+      {
+        id: "s1:2",
+        runId: 2,
+        sessionId: "s1",
+        workspaceRoot: "/repo",
+        agentKind: "in-app",
+        model: "opus",
+        ts: 200,
+        totalFiles: 0,
+        totalAdded: 0,
+        totalRemoved: 0,
+        files: [],
+        truncated: false,
+      },
+    ])
+    expect(await db.codeAdoptionTurns.where("sessionId").equals("s1").count()).toBe(2)
+    expect(await db.codeAdoptionTurns.where("runId").equals(2).count()).toBe(1)
+    expect(await db.codeAdoptionTurns.where("workspaceRoot").equals("/repo").count()).toBe(2)
+    expect(
+      await db.codeAdoptionTurns.where("[sessionId+ts]").between(["s1", 150], ["s1", 300]).count()
+    ).toBe(1)
+  })
+
+  // v109 — binary trust-model rebuild. Two guarantees: the new consent ledger
+  // resolves its compound key + indexes, and the upgrade hook retires the v39
+  // placeholder seed from databases that already drank it — WITHOUT touching
+  // rows the user populated themselves.
+  it("v109 approvedBinaries round-trips on its compound key and indexes", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(109)
+
+    await db.approvedBinaries.bulkPut([
+      {
+        pluginId: "acme.ext",
+        binaryPath: "/plugins/acme.ext/server/lsp",
+        sha256: "a".repeat(64),
+        approvedAt: 100,
+      },
+      {
+        pluginId: "acme.ext",
+        binaryPath: "/plugins/acme.ext/bin/fmt",
+        sha256: "b".repeat(64),
+        approvedAt: 200,
+      },
+      {
+        pluginId: "other.ext",
+        binaryPath: "/plugins/other.ext/bin/tool",
+        sha256: "c".repeat(64),
+        approvedAt: 300,
+      },
+    ])
+
+    // Compound primary key resolves an exact (pluginId, binaryPath) pair.
+    expect(await db.approvedBinaries.get(["acme.ext", "/plugins/acme.ext/bin/fmt"])).toEqual(
+      expect.objectContaining({ sha256: "b".repeat(64), approvedAt: 200 })
+    )
+    // Same path under a different plugin is a different row — approvals never
+    // cross plugin boundaries.
+    expect(await db.approvedBinaries.where("pluginId").equals("acme.ext").count()).toBe(2)
+    expect(await db.approvedBinaries.where("sha256").equals("c".repeat(64)).count()).toBe(1)
+    expect(await db.approvedBinaries.where("approvedAt").above(150).count()).toBe(2)
+  })
+
+  it("v109_removes_placeholder_trusted_publishers", async () => {
+    const name = `cognia-v109-placeholder-purge-${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(108).stores({
+      trustedPublishers: "&publicKey, fingerprint, firstTrustedAt",
+    })
+    await legacy.open()
+    // Exactly the shape the v39 seed wrote — the strings that were checked
+    // into this repo and that any hostile .vsix could self-declare.
+    await legacy.table("trustedPublishers").bulkPut([
+      {
+        publicKey: "placeholder:microsoft.vscode",
+        fingerprint: "placeholder:microsoft.vscode",
+        authorName: "Microsoft",
+        firstTrustedAt: 0,
+        lastSeenAt: 0,
+        installCount: 0,
+      },
+      {
+        publicKey: "placeholder:openvsx.root",
+        fingerprint: "placeholder:openvsx.root",
+        authorName: "Open VSX Registry",
+        firstTrustedAt: 0,
+        lastSeenAt: 0,
+        installCount: 0,
+      },
+    ])
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+    expect(upgraded.verno).toBeGreaterThanOrEqual(109)
+
+    // Hop 1 of the exploit chain is gone: nothing is left to match against.
+    expect(await upgraded.trustedPublishers.count()).toBe(0)
+    expect(
+      await upgraded.trustedPublishers
+        .where("fingerprint")
+        .equals("placeholder:microsoft.vscode")
+        .first()
+    ).toBeUndefined()
+
+    await upgraded.delete()
+    upgraded.close()
+  })
+
+  // v110 — recorded browser flows (ADR-0072). Pure additive: no upgrade hook,
+  // so the guarantee to pin is that the table and its indexes resolve, and that
+  // a flow survives the round-trip with its nested step list intact.
+  it("v110 browserRecordings round-trips and resolves its indexes", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(110)
+
+    await db.browserRecordings.bulkPut([
+      {
+        id: "f1",
+        name: "login",
+        baseUrl: "http://localhost:3000",
+        createdAt: 100,
+        updatedAt: 100,
+        steps: [
+          { act: "navigate", at: 0, url: "http://localhost:3000/login" },
+          {
+            act: "click",
+            at: 1,
+            target: { selector: "#go", role: "button", name: "Go", domPath: "form > button" },
+          },
+        ],
+      },
+      {
+        id: "f2",
+        name: "checkout",
+        baseUrl: "http://localhost:3000",
+        createdAt: 200,
+        updatedAt: 300,
+        steps: [],
+      },
+      {
+        id: "f3",
+        name: "other app",
+        baseUrl: "http://localhost:4000",
+        createdAt: 400,
+        updatedAt: 400,
+        steps: [],
+      },
+    ])
+
+    // The nested step list survives structured cloning — a flow is stored whole.
+    expect((await db.browserRecordings.get("f1"))?.steps).toHaveLength(2)
+    // baseUrl scopes the pane's "flows for this origin" list.
+    expect(
+      await db.browserRecordings.where("baseUrl").equals("http://localhost:3000").count()
+    ).toBe(2)
+    // updatedAt drives recency ordering.
+    expect(await db.browserRecordings.where("updatedAt").above(150).count()).toBe(2)
+    // The compound index backs "this origin's flows, newest first".
+    expect(
+      await db.browserRecordings
+        .where("[baseUrl+updatedAt]")
+        .between(["http://localhost:3000", Dexie.minKey], ["http://localhost:3000", Dexie.maxKey])
+        .count()
+    ).toBe(2)
+  })
+
+  it("v111 browserAnnotations round-trips and resolves its compound index", async () => {
+    const db = new CogniaDB()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(111)
+    await db.browserAnnotations.put({
+      id: "a1",
+      sessionId: "s1",
+      baseUrl: "http://localhost:3000",
+      selection: {
+        paneId: "browser-pane",
+        tagName: "BUTTON",
+        selector: "button",
+        domPath: "main > button",
+        id: null,
+        classes: null,
+        rect: { x: 0, y: 0, width: 100, height: 40 },
+        outerHTML: "<button>Save</button>",
+        text: "Save",
+        pageUrl: "http://localhost:3000",
+        pageTitle: "Home",
+      },
+      comment: "Fix contrast",
+      intent: "fix",
+      severity: "important",
+      status: "pending",
+      thread: [],
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    expect(
+      await db.browserAnnotations
+        .where("[baseUrl+status]")
+        .equals(["http://localhost:3000", "pending"])
+        .count()
+    ).toBe(1)
+    db.close()
+  })
+
+  it("v112 behaviorEvents round-trips and resolves its compound index", async () => {
+    const db = new CogniaDB()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(112)
+    await db.behaviorEvents.put({
+      id: "event-1",
+      eventName: "chat.message.sent",
+      at: 1,
+      sessionId: "session-1",
+      attributes: { provider: "anthropic" },
+    })
+    expect(
+      await db.behaviorEvents.where("[eventName+at]").equals(["chat.message.sent", 1]).first()
+    ).toEqual(expect.objectContaining({ id: "event-1" }))
+    db.close()
+  })
+
+  it("v113 removes the unused pluginScheduledJobs table", async () => {
+    const db = new CogniaDB()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(113)
+    expect(db.tables.map((table) => table.name)).not.toContain("pluginScheduledJobs")
+    db.close()
+  })
+
+  it("v109_preserves_user_accepted_rows", async () => {
+    const name = `cognia-v109-preserve-user-${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(108).stores({
+      trustedPublishers: "&publicKey, fingerprint, firstTrustedAt",
+    })
+    await legacy.open()
+    await legacy.table("trustedPublishers").bulkPut([
+      // Seeded placeholder — must go.
+      {
+        publicKey: "placeholder:rust-lang.rust-analyzer",
+        fingerprint: "placeholder:rust-lang.rust-analyzer",
+        authorName: "rust-lang",
+        firstTrustedAt: 0,
+        lastSeenAt: 0,
+        installCount: 0,
+      },
+      // A row the user populated themselves — their data, must survive.
+      {
+        publicKey: "MCowBQYDK2VwAyEA-user-supplied-key",
+        fingerprint: "9f3a1c8e4b7d2f605a1938e7c4b0d6f2938475610badc0ffee1234567890abcd",
+        authorName: "A publisher the user added by hand",
+        firstTrustedAt: 111,
+        lastSeenAt: 222,
+        installCount: 7,
+      },
+    ])
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+
+    expect(await upgraded.trustedPublishers.count()).toBe(1)
+    const survivor = await upgraded.trustedPublishers.get("MCowBQYDK2VwAyEA-user-supplied-key")
+    expect(survivor).toEqual(
+      expect.objectContaining({
+        authorName: "A publisher the user added by hand",
+        firstTrustedAt: 111,
+        lastSeenAt: 222,
+        installCount: 7,
+      })
+    )
+    // The purge is keyed on the fingerprint marker, not on "everything".
+    expect(
+      await upgraded.trustedPublishers
+        .where("publicKey")
+        .equals("placeholder:rust-lang.rust-analyzer")
+        .first()
+    ).toBeUndefined()
+
+    await upgraded.delete()
+    upgraded.close()
+  })
+
+  it("v109 placeholder purge is idempotent on a database with no placeholders", async () => {
+    const name = `cognia-v109-idempotent-${Date.now()}`
+    const legacy = new Dexie(name)
+    legacy.version(108).stores({
+      trustedPublishers: "&publicKey, fingerprint, firstTrustedAt",
+    })
+    await legacy.open()
+    await legacy.table("trustedPublishers").put({
+      publicKey: "real-key",
+      fingerprint: "deadbeef".repeat(8),
+      authorName: "Real",
+      firstTrustedAt: 1,
+      lastSeenAt: 2,
+      installCount: 0,
+    })
+    legacy.close()
+
+    const upgraded = new CogniaDB(name)
+    await upgraded.open()
+    expect(await upgraded.trustedPublishers.count()).toBe(1)
+    await upgraded.delete()
+    upgraded.close()
   })
 
   // v49 — Inbox optimization pass: messages.platformMessageId index + new
@@ -141,6 +1016,135 @@ describe("getDb", () => {
     expect(newest.map((r) => r.id)).toEqual(["te-3", "te-2"])
   })
 
+  // v82 — Judge calibration loop. Both new tables accept rows via their primary
+  // keys and resolve via the [setId+createdAt] compound index.
+  it("v82 calibrationItems + calibrationRuns round-trip", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(82)
+
+    await db.calibrationItems.bulkPut([
+      {
+        id: "calit-1",
+        setId: "set-a",
+        criterion: "task completion",
+        rubric: "Pass only if complete.",
+        input: "q",
+        output: "a",
+        goldLabel: "pass",
+        source: "handwritten",
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: "calit-2",
+        setId: "set-a",
+        criterion: "task completion",
+        rubric: "Pass only if complete.",
+        input: "q2",
+        output: "a2",
+        goldLabel: "fail",
+        source: "handwritten",
+        createdAt: 2,
+        updatedAt: 2,
+      },
+    ])
+    const inSet = await db.calibrationItems.where("setId").equals("set-a").toArray()
+    expect(inSet).toHaveLength(2)
+
+    await db.calibrationRuns.put({
+      runId: "calrun-1",
+      setId: "set-a",
+      criterion: "task completion",
+      rubric: "Pass only if complete.",
+      judgeModel: "claude-sonnet-4-6",
+      itemCount: 2,
+      scoredCount: 2,
+      erroredCount: 0,
+      metrics: {
+        matrix: { tp: 1, fp: 0, tn: 1, fn: 0 },
+        n: 2,
+        tpr: 1,
+        tnr: 1,
+        precision: 1,
+        f1: 1,
+        accuracy: 1,
+        cohenKappa: 1,
+      },
+      verdicts: [],
+      createdAt: 10,
+    })
+    expect(await db.calibrationRuns.get("calrun-1")).toMatchObject({ setId: "set-a" })
+  })
+
+  // v83 — Connector CRM. New status / *labelIds indexes on conversationOverrides
+  // and the three new catalog/trail/library tables round-trip.
+  it("v83 connector CRM tables + override indexes round-trip", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(83)
+
+    await db.conversationOverrides.bulkPut([
+      {
+        id: "ov-1",
+        conversationKey: "discord:a:ch1",
+        sessionId: "s1",
+        status: "open",
+        labelIds: ["lbl-vip", "lbl-bug"],
+        assigneeKind: "team",
+        assignee: { kind: "team", id: "team-7", label: "Support" },
+        nextResponseDueAt: 5000,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: "ov-2",
+        conversationKey: "discord:a:ch2",
+        sessionId: "s2",
+        status: "resolved",
+        labelIds: ["lbl-vip"],
+        createdAt: 2,
+        updatedAt: 2,
+      },
+    ])
+    // status index
+    expect(await db.conversationOverrides.where("status").equals("open").count()).toBe(1)
+    // multi-entry *labelIds index
+    const vip = await db.conversationOverrides.where("labelIds").equals("lbl-vip").toArray()
+    expect(vip.map((r) => r.id).sort()).toEqual(["ov-1", "ov-2"])
+
+    await db.conversationLabels.put({
+      id: "lbl-vip",
+      name: "VIP",
+      color: "#f00",
+      sortOrder: 0,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    expect(await db.conversationLabels.get("lbl-vip")).toMatchObject({ name: "VIP" })
+
+    await db.conversationAssignmentEvents.bulkPut([
+      { id: "ev-1", conversationKey: "discord:a:ch1", kind: "assigned", at: 10 },
+      { id: "ev-2", conversationKey: "discord:a:ch1", kind: "status.resolved", at: 20 },
+    ])
+    const trail = await db.conversationAssignmentEvents
+      .where("[conversationKey+at]")
+      .between(["discord:a:ch1", 0], ["discord:a:ch1", Infinity])
+      .toArray()
+    expect(trail.map((e) => e.id)).toEqual(["ev-1", "ev-2"])
+
+    await db.cannedResponses.put({
+      id: "cr-1",
+      title: "Greeting",
+      body: "Hi {{contact.name}}",
+      labelIds: ["lbl-vip"],
+      sortOrder: 0,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    expect(await db.cannedResponses.get("cr-1")).toMatchObject({ title: "Greeting" })
+  })
+
   // v49 upgrade hook backfills platformMessageId from
   // metadata.platformMessage.messageId on pre-existing rows.
   it("v49 upgrade hook backfills platformMessageId on legacy messages", async () => {
@@ -188,6 +1192,455 @@ describe("getDb", () => {
     // The new index can locate the backfilled row.
     const byIndex = await db.messages.where("platformMessageId").equals("discord:msg-7").first()
     expect(byIndex?.id).toBe("m-legacy")
+  })
+
+  // v85 upgrade hook backfills the denormalized platformConversationKey index
+  // column from each session's existing platformBinding.conversationKey, so
+  // multi-session enumeration (control-plane /new /switch /sessions) can query
+  // the index instead of full-scanning.
+  it("v85 upgrade hook backfills platformConversationKey on legacy sessions", async () => {
+    const Dexie = (await import("dexie")).default
+    const legacy = new Dexie("cognia-claude")
+    // Open at v84 — the last version before the platformConversationKey index.
+    legacy.version(84).stores({
+      sessions: "id, updatedAt, createdAt, kind, characterId, teamId, parentSessionId",
+    })
+    await legacy.open()
+    await legacy.table("sessions").put({
+      id: "s-im-legacy",
+      title: "TG chat",
+      kind: "direct",
+      platformBinding: {
+        platform: "telegram",
+        adapterId: "tg-1",
+        conversationKey: "telegram:tg-1:42",
+        conversationRef: { platform: "telegram", adapterId: "tg-1" },
+      },
+      createdAt: 0,
+      updatedAt: 0,
+    })
+    // Direct (non-IM) session — no platformBinding, must stay undefined.
+    await legacy.table("sessions").put({
+      id: "s-direct-legacy",
+      title: "Direct",
+      kind: "direct",
+      createdAt: 0,
+      updatedAt: 0,
+    })
+    legacy.close()
+
+    // Re-open through production schema — v85 upgrade hook fires.
+    const db = getDb()
+    await db.open()
+    const im = await db.sessions.get("s-im-legacy")
+    expect(im?.platformConversationKey).toBe("telegram:tg-1:42")
+    const direct = await db.sessions.get("s-direct-legacy")
+    expect(direct?.platformConversationKey).toBeUndefined()
+
+    // The new index can locate the backfilled row.
+    const byIndex = await db.sessions
+      .where("platformConversationKey")
+      .equals("telegram:tg-1:42")
+      .first()
+    expect(byIndex?.id).toBe("s-im-legacy")
+  })
+
+  // v86 — Workspace (Project) isolation. The upgrade backfills `projectId`
+  // across every runtime table, attributing sessions via the legacy
+  // `Project.sessionIds[]` reverse map and falling back to an auto-created
+  // Default workspace when no project is active. End-to-end through the
+  // production schema (v85 → v86), exercising the real index + upgrade hook.
+  it("v86 upgrade backfills projectId across runtime tables via the reverse map", async () => {
+    const Dexie = (await import("dexie")).default
+    const legacy = new Dexie("cognia-claude")
+    // Open at v85 — the last version before the projectId columns.
+    legacy.version(85).stores({
+      sessions:
+        "id, updatedAt, createdAt, kind, characterId, teamId, parentSessionId, platformConversationKey",
+      messages: "id, sessionId, [sessionId+createdAt], senderId, platformMessageId, [createdAt+id]",
+      chatGoals: "&id, sessionId, [sessionId+status], status, characterId, createdAt, updatedAt",
+      projects: "&id, lastAccessedAt",
+      settings: "id",
+    })
+    await legacy.open()
+    // One project owning s-owned; s-orphan is referenced by no project.
+    await legacy.table("projects").put({
+      id: "proj-A",
+      name: "A",
+      roots: [],
+      knowledgeBase: [],
+      sessionIds: ["s-owned"],
+      sessionCount: 1,
+      messageCount: 1,
+      createdAt: new Date(0),
+      updatedAt: new Date(0),
+      lastAccessedAt: new Date(0),
+    })
+    await legacy.table("settings").put({ id: "singleton", activeProjectId: "proj-A" })
+    await legacy.table("sessions").bulkPut([
+      { id: "s-owned", title: "owned", kind: "direct", createdAt: 0, updatedAt: 0 },
+      { id: "s-orphan", title: "orphan", kind: "direct", createdAt: 0, updatedAt: 0 },
+    ])
+    await legacy.table("messages").put({
+      id: "m1",
+      sessionId: "s-owned",
+      role: "user",
+      parts: [],
+      createdAt: 0,
+    })
+    await legacy.table("chatGoals").put({
+      id: "g1",
+      sessionId: "s-orphan",
+      status: "active",
+      createdAt: 0,
+      updatedAt: 0,
+    })
+    legacy.close()
+
+    // Re-open through production schema — v86 upgrade hook fires.
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(86)
+
+    expect((await db.sessions.get("s-owned"))?.projectId).toBe("proj-A")
+    // Orphan session → fallback active project.
+    expect((await db.sessions.get("s-orphan"))?.projectId).toBe("proj-A")
+    expect((await db.messages.get("m1"))?.projectId).toBe("proj-A")
+    expect((await db.chatGoals.get("g1"))?.projectId).toBe("proj-A")
+
+    // The new compound index resolves the backfilled rows.
+    const scoped = await db.sessions.where("projectId").equals("proj-A").primaryKeys()
+    expect(scoped.sort()).toEqual(["s-orphan", "s-owned"])
+  })
+
+  // v131 — Session lineage repair. Branch sessions and workbench sidechats were
+  // written straight to Dexie without a `projectId`, which does not merely
+  // mis-scope them: `[projectId+updatedAt]` omits any row whose key path
+  // contains `undefined`, so they were absent from every scoped read (the
+  // sidebar) and from `deleteProjectCascade`. End-to-end through the production
+  // schema (v130 → v131), exercising the real index + upgrade hook.
+  it("v131 upgrade rescues orphaned branch + sidechat rows into the scoped index", async () => {
+    const Dexie = (await import("dexie")).default
+    const legacy = new Dexie("cognia-claude")
+    // Open at v130 with the pre-v131 sessions index (no surfaceBindingKey).
+    legacy.version(130).stores({
+      sessions:
+        "id, updatedAt, createdAt, kind, characterId, teamId, parentSessionId, platformConversationKey, projectId, [projectId+updatedAt]",
+      messages:
+        "id, sessionId, [sessionId+createdAt], senderId, platformMessageId, [createdAt+id], projectId, [projectId+createdAt]",
+      projects: "&id, lastAccessedAt",
+      settings: "id",
+    })
+    await legacy.open()
+    await legacy.table("projects").put({
+      id: "proj-A",
+      name: "A",
+      roots: [],
+      knowledgeBase: [],
+      sessionIds: [],
+      sessionCount: 0,
+      messageCount: 0,
+      createdAt: new Date(0),
+      updatedAt: new Date(0),
+      lastAccessedAt: new Date(0),
+    })
+    await legacy.table("settings").put({ id: "singleton", activeProjectId: "proj-A" })
+    await legacy.table("sessions").bulkPut([
+      {
+        id: "s-parent",
+        title: "parent",
+        kind: "direct",
+        projectId: "proj-A",
+        createdAt: 0,
+        updatedAt: 0,
+      },
+      // Written by `buildChildRow` — no projectId, so invisible to the sidebar.
+      {
+        id: "s-branch",
+        title: "parent (branch)",
+        kind: "direct",
+        parentSessionId: "s-parent",
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      // Written by `ensureResourceWorkbenchSession` — no projectId either, so
+      // it also escaped the workspace cascade.
+      {
+        id: "resource-workbench:session:s-parent",
+        title: "aside",
+        kind: "resource-workbench",
+        visibility: "embedded",
+        surfaceBinding: { kind: "session", sessionId: "s-parent" },
+        createdAt: 2,
+        updatedAt: 2,
+      },
+    ])
+    await legacy
+      .table("messages")
+      .put({ id: "m-branch", sessionId: "s-branch", role: "user", parts: [], createdAt: 1 })
+    legacy.close()
+
+    // Re-open through production schema — v131 upgrade hook fires.
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(131)
+
+    // Both orphans land in the PARENT's workspace, not merely the active one.
+    expect((await db.sessions.get("s-branch"))?.projectId).toBe("proj-A")
+    expect((await db.sessions.get("resource-workbench:session:s-parent"))?.projectId).toBe("proj-A")
+    expect((await db.messages.get("m-branch"))?.projectId).toBe("proj-A")
+
+    // The acceptance criterion for the whole migration: the branch is now
+    // reachable through the compound index the sidebar actually reads.
+    const scoped = await db.sessions
+      .where("[projectId+updatedAt]")
+      .between(["proj-A", Dexie.minKey], ["proj-A", Dexie.maxKey])
+      .primaryKeys()
+    expect(scoped).toContain("s-branch")
+
+    // And the sidechat is findable by binding without a full table scan.
+    expect(
+      (await db.sessions.where("surfaceBindingKey").equals("session:s-parent").first())?.id
+    ).toBe("resource-workbench:session:s-parent")
+  })
+
+  // v91 — Denormalised `triggeredBySource` index on `workflowRuns`. The upgrade
+  // backfills the new top-level column from `triggeredBy.source` (legacy rows
+  // with no `triggeredBy` default to "ui"), and the new index resolves only the
+  // IM-triggered runs the progress-runner cares about. End-to-end through the
+  // production schema (v90 → v91), exercising the real index + upgrade hook.
+  it("v91 upgrade backfills triggeredBySource and indexes IM-triggered runs", async () => {
+    const Dexie = (await import("dexie")).default
+    const legacy = new Dexie("cognia-claude")
+    // Open at v90 with the pre-v91 workflowRuns index (no triggeredBySource).
+    legacy.version(90).stores({
+      workflowRuns:
+        "&id, workflowId, status, startedAt, completedAt, [workflowId+startedAt], [workflowId+status], projectId, [projectId+startedAt]",
+    })
+    await legacy.open()
+    await legacy.table("workflowRuns").bulkPut([
+      {
+        id: "run-im",
+        workflowId: "wf-1",
+        status: "running",
+        startedAt: 1,
+        triggeredBy: { source: "im", adapterId: "tg-1", conversationKey: "telegram:tg-1:42" },
+      },
+      {
+        id: "run-ui",
+        workflowId: "wf-1",
+        status: "succeeded",
+        startedAt: 2,
+        triggeredBy: { source: "ui" },
+      },
+      // Legacy run with no triggeredBy at all → defaults to "ui".
+      { id: "run-legacy", workflowId: "wf-2", status: "succeeded", startedAt: 3 },
+    ])
+    legacy.close()
+
+    // Re-open through production schema — v91 upgrade hook fires.
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(91)
+
+    expect((await db.workflowRuns.get("run-im"))?.triggeredBySource).toBe("im")
+    expect((await db.workflowRuns.get("run-ui"))?.triggeredBySource).toBe("ui")
+    expect((await db.workflowRuns.get("run-legacy"))?.triggeredBySource).toBe("ui")
+
+    // The new index resolves only the IM-triggered run.
+    const imRuns = await db.workflowRuns.where("triggeredBySource").equals("im").primaryKeys()
+    expect(imRuns).toEqual(["run-im"])
+  })
+
+  // v102 — `triggerKind` index on `workflowRuns`. The Agent-Team runs list
+  // (`components/agent/team/runs-list.tsx`) and the CLI status projection
+  // (`lib/cli-bridge/handlers/agent-team.ts`) both resolve team runs via
+  // `.where("triggerKind").equals("trigger.team")`. Before v102 that keyPath was
+  // never indexed, so Dexie threw `SchemaError: KeyPath triggerKind on object
+  // store workflowRuns is not indexed` on first render of the team workspace.
+  // `triggerKind` is a required top-level column stamped at run creation, so
+  // (unlike v91's derived `triggeredBySource`) no backfill runs — the new index
+  // simply resolves existing rows. Opens v101 → production schema end-to-end.
+  it("v102 indexes workflowRuns.triggerKind so team runs resolve without a SchemaError", async () => {
+    const Dexie = (await import("dexie")).default
+    const legacy = new Dexie("cognia-claude")
+    // Open at v101 with the pre-v102 workflowRuns index (no triggerKind).
+    legacy.version(101).stores({
+      workflowRuns:
+        "&id, workflowId, status, startedAt, completedAt, [workflowId+startedAt], [workflowId+status], projectId, [projectId+startedAt], triggeredBySource, [triggeredBySource+startedAt]",
+    })
+    await legacy.open()
+    await legacy.table("workflowRuns").bulkPut([
+      {
+        id: "run-team",
+        workflowId: "wf-team",
+        status: "succeeded",
+        startedAt: 1,
+        triggerKind: "trigger.team",
+      },
+      {
+        id: "run-manual",
+        workflowId: "wf-1",
+        status: "succeeded",
+        startedAt: 2,
+        triggerKind: "trigger.manual",
+      },
+      {
+        id: "run-cron",
+        workflowId: "wf-2",
+        status: "running",
+        startedAt: 3,
+        triggerKind: "trigger.cron",
+      },
+    ])
+    legacy.close()
+
+    // Re-open through production schema — v102 adds the triggerKind index.
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(102)
+
+    // The exact query the runs list issues — threw the SchemaError before v102,
+    // now resolves only the team-triggered run.
+    const teamRuns = await db.workflowRuns.where("triggerKind").equals("trigger.team").primaryKeys()
+    expect(teamRuns).toEqual(["run-team"])
+  })
+
+  it("v103 adds the teamPrObservations table with team/run/status indexes", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(103)
+
+    const at = 100
+    await db.teamPrObservations.bulkPut([
+      {
+        id: "r1:pr1",
+        runId: "r1",
+        teamId: "team-a",
+        teammateId: "m1",
+        taskId: "t1",
+        prUrl: "pr1",
+        branch: "b1",
+        repo: "o/n",
+        facts: {} as never,
+        derivedStatus: "ci_failed",
+        lastNudgeSignature: {},
+        observedAt: at,
+        updatedAt: at,
+      },
+      {
+        id: "r1:pr2",
+        runId: "r1",
+        teamId: "team-a",
+        teammateId: "m2",
+        taskId: "t2",
+        prUrl: "pr2",
+        branch: "b2",
+        repo: "o/n",
+        facts: {} as never,
+        derivedStatus: "mergeable",
+        lastNudgeSignature: {},
+        observedAt: at,
+        updatedAt: at + 5,
+      },
+      {
+        id: "r2:pr3",
+        runId: "r2",
+        teamId: "team-b",
+        teammateId: "m3",
+        taskId: "t3",
+        prUrl: "pr3",
+        branch: "b3",
+        repo: "o/n",
+        facts: {} as never,
+        derivedStatus: "pr_open",
+        lastNudgeSignature: {},
+        observedAt: at,
+        updatedAt: at,
+      },
+    ])
+
+    expect(await db.teamPrObservations.where("teamId").equals("team-a").count()).toBe(2)
+    expect(await db.teamPrObservations.where("runId").equals("r1").primaryKeys()).toEqual([
+      "r1:pr1",
+      "r1:pr2",
+    ])
+    expect(
+      await db.teamPrObservations.where("derivedStatus").equals("ci_failed").primaryKeys()
+    ).toEqual(["r1:pr1"])
+  })
+
+  // v132 — unified portable template definitions/packages/provenance plus
+  // device-local bindings and rollback journal.
+  it("v132 adds the unified template platform tables and query indexes", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(132)
+
+    expect(db.templateDefinitions.schema.primKey.name).toBe("storageKey")
+    expect(db.templateDefinitions.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["id", "domain", "status", "version", "updatedAt", "[id+status]"])
+    )
+    expect(db.templatePackages.schema.primKey.name).toBe("key")
+    expect(db.templateInstances.schema.primKey.name).toBe("id")
+    expect(db.templateDeviceBindings.schema.indexes.map((index) => index.name)).toContain(
+      "[definitionId+slotId]"
+    )
+    expect(db.templateMigrationJournal.schema.indexes.map((index) => index.name)).toEqual(
+      expect.arrayContaining(["domain", "sourceKey", "status", "updatedAt"])
+    )
+  })
+
+  // v104 — Agent-Team board projection (team-board CQRS). Task rows and the
+  // team-meta row share the table; the sync delta cursors on `updatedAt` and
+  // the mobile board liveQueries `[teamId+updatedAt]`.
+  it("v104 adds the agentTeamBoard table with team/updatedAt/kind indexes", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(104)
+
+    await db.agentTeamBoard.bulkPut([
+      {
+        id: "task-1",
+        kind: "task",
+        teamId: "team-a",
+        title: "Ship",
+        description: "",
+        status: "pending",
+        priority: "normal",
+        dependencies: [],
+        tags: [],
+        order: 0,
+        commentCount: 0,
+        comments: [],
+        attachmentsCount: 0,
+        createdAt: 100,
+        updatedAt: 100,
+      },
+      {
+        id: "team:team-a",
+        kind: "team",
+        teamId: "team-a",
+        name: "Alpha",
+        status: "idle",
+        maxConcurrentTeammates: 2,
+        teammates: [{ id: "w1", name: "W", role: "teammate", status: "idle" }],
+        knowledgeTwinIds: [],
+        updatedAt: 150,
+      },
+    ])
+
+    expect(await db.agentTeamBoard.where("teamId").equals("team-a").count()).toBe(2)
+    expect(await db.agentTeamBoard.where("updatedAt").above(120).primaryKeys()).toEqual([
+      "team:team-a",
+    ])
+    expect(await db.agentTeamBoard.where("kind").equals("task").primaryKeys()).toEqual(["task-1"])
+    expect(
+      await db.agentTeamBoard
+        .where("[teamId+updatedAt]")
+        .between(["team-a", 0], ["team-a", Infinity])
+        .primaryKeys()
+    ).toEqual(["task-1", "team:team-a"])
   })
 
   // v50 — Built-in characters → first-party character pack (ADR-0030
@@ -292,6 +1745,62 @@ describe("getDb", () => {
     expect(coding?.packVersionAtClone).toBe("9.9.9")
   })
 
+  // v78 — Skills installed from the defunct SkillsMP marketplace lose their
+  // provenance fields (canonicalId / marketplaceSkillId) and survive as
+  // plain local skills; everything else is untouched.
+  it("v78 upgrade hook detaches skillsmp:* installs and leaves others alone", async () => {
+    const Dexie = (await import("dexie")).default
+    const legacy = new Dexie("cognia-claude")
+    legacy.version(77).stores({
+      skills: "&id, name, updatedAt, isBuiltIn, category, source, status, lastUsedAt, canonicalId",
+    })
+    await legacy.open()
+    await legacy.table("skills").bulkPut([
+      {
+        id: "skill-mp",
+        name: "Old SkillsMP install",
+        content: "x",
+        source: "marketplace",
+        canonicalId: "skillsmp:42",
+        marketplaceSkillId: "42",
+        createdAt: 0,
+        updatedAt: 0,
+      },
+      {
+        id: "skill-registry",
+        name: "Registry install",
+        content: "y",
+        source: "marketplace",
+        canonicalId: "registry:ai-elements",
+        marketplaceSkillId: "ai-elements",
+        createdAt: 0,
+        updatedAt: 0,
+      },
+      {
+        id: "skill-local",
+        name: "Local skill",
+        content: "z",
+        source: "custom",
+        createdAt: 0,
+        updatedAt: 0,
+      },
+    ])
+    legacy.close()
+
+    const db = getDb()
+    await db.open()
+    const detached = await db.skills.get("skill-mp")
+    expect(detached?.canonicalId).toBeUndefined()
+    expect(detached?.marketplaceSkillId).toBeUndefined()
+    expect(detached?.name).toBe("Old SkillsMP install")
+    // Registry installs and plain local skills survive verbatim.
+    const registry = await db.skills.get("skill-registry")
+    expect(registry?.canonicalId).toBe("registry:ai-elements")
+    expect(registry?.marketplaceSkillId).toBe("ai-elements")
+    const local = await db.skills.get("skill-local")
+    expect(local?.canonicalId).toBeUndefined()
+  })
+
   it("opens at schema v41 (IM connector complete gap closure)", async () => {
     const db = getDb()
     await db.open()
@@ -380,6 +1889,81 @@ describe("getDb", () => {
     expect(legacy?.lastWhoamiAt).toBeUndefined()
     expect(legacy?.lastWhoamiResult).toBeUndefined()
     expect(legacy?.userTokenStoredAt).toBeUndefined()
+  })
+
+  // v107 — inbound dispatch rules (W3 multi-bot). Additive optional JSON
+  // column on `adapterInstances`; verify the full rule shape round-trips
+  // and that pre-v107 rows read back with the field absent.
+  it("v107 dispatchRules round-trip on adapterInstances", async () => {
+    const db = getDb()
+    await db.open()
+    expect(db.verno).toBeGreaterThanOrEqual(107)
+    const now = Date.now()
+
+    await db.adapterInstances.put({
+      id: "tg-v107",
+      type: "telegram",
+      displayName: "Rules bot",
+      enabled: true,
+      transportMode: "longpoll",
+      settings: {},
+      credentialsRef: { keyringService: "com.cognia.platforms", accounts: [] },
+      trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
+      defaultMode: "auto",
+      dispatchRules: [
+        {
+          id: "rule-1",
+          enabled: true,
+          name: "Bug triage",
+          match: {
+            keywords: ["bug", "崩溃"],
+            pattern: "^\\[urgent\\]",
+            senderIds: ["u_ops"],
+            channelKinds: ["group", "private"],
+          },
+          action: { teamId: "team_triage" },
+        },
+        {
+          id: "rule-2",
+          match: {},
+          action: { characterId: "char_support", workflowId: "wf_escalate" },
+        },
+      ],
+      createdAt: now,
+      updatedAt: now,
+    })
+    const row = await db.adapterInstances.get("tg-v107")
+    expect(row?.dispatchRules).toHaveLength(2)
+    expect(row?.dispatchRules?.[0]).toEqual({
+      id: "rule-1",
+      enabled: true,
+      name: "Bug triage",
+      match: {
+        keywords: ["bug", "崩溃"],
+        pattern: "^\\[urgent\\]",
+        senderIds: ["u_ops"],
+        channelKinds: ["group", "private"],
+      },
+      action: { teamId: "team_triage" },
+    })
+    expect(row?.dispatchRules?.[1].action.workflowId).toBe("wf_escalate")
+
+    // Pre-v107 row (no dispatchRules) still reads back fine.
+    await db.adapterInstances.put({
+      id: "tg-pre-v107",
+      type: "telegram",
+      displayName: "Legacy bot",
+      enabled: false,
+      transportMode: "longpoll",
+      settings: {},
+      credentialsRef: { keyringService: "com.cognia.platforms", accounts: [] },
+      trigger: { rules: [], blockers: [], storeUnmatchedInDraftMode: false },
+      defaultMode: "manual",
+      createdAt: now,
+      updatedAt: now,
+    })
+    const legacyRules = await db.adapterInstances.get("tg-pre-v107")
+    expect(legacyRules?.dispatchRules).toBeUndefined()
   })
 
   // v45 — `adapter.heartbeat` AuditKind is accepted by the
@@ -895,16 +2479,6 @@ describe("getDb", () => {
       lastEventAt: now,
     })
 
-    await db.pluginScheduledJobs.put({
-      id: "job-1",
-      pluginId: "p1",
-      cron: "0 * * * *",
-      handler: "syncRepo",
-      status: "active",
-      createdAt: now,
-      updatedAt: now,
-    })
-
     expect(await db.plugins.get("p1")).toMatchObject({ name: "Test Plugin", enabled: true })
     expect(await db.pluginPermissions.get(["p1", "shell:execute"])).toMatchObject({
       decision: "allow",
@@ -913,7 +2487,6 @@ describe("getDb", () => {
     expect(await db.pluginAnalytics.get(["p1", "tool.git_status.invocations"])).toMatchObject({
       count: 7,
     })
-    expect(await db.pluginScheduledJobs.get("job-1")).toMatchObject({ status: "active" })
   })
 
   it("v15 plugin indexes drive filtered queries (multi-entry capabilities)", async () => {
@@ -978,6 +2551,167 @@ describe("getDb", () => {
   // the "happy path" return value: the false branch of that conditional is
   // hit in every spec. Documenting here so a future maintainer knows why
   // we don't claim to exercise the throw.
+})
+
+describe("cross-context upgrade yield channel", () => {
+  /**
+   * jsdom has no BroadcastChannel — stub one that records instances, posted
+   * messages, and lets tests deliver inbound messages via `onmessage`.
+   */
+  class FakeBroadcastChannel {
+    static instances: FakeBroadcastChannel[] = []
+    onmessage: ((ev: { data: unknown }) => void) | null = null
+    posted: unknown[] = []
+    closed = false
+    constructor(public name: string) {
+      FakeBroadcastChannel.instances.push(this)
+    }
+    postMessage(data: unknown): void {
+      this.posted.push(data)
+    }
+    close(): void {
+      this.closed = true
+    }
+  }
+
+  let infoSpy: jest.SpyInstance
+  let warnSpy: jest.SpyInstance
+
+  beforeEach(() => {
+    FakeBroadcastChannel.instances = []
+    ;(globalThis as { BroadcastChannel?: unknown }).BroadcastChannel = FakeBroadcastChannel
+    ;(emit as jest.Mock).mockClear()
+    ;(listen as jest.Mock).mockClear()
+    __resetDbForTesting()
+    // Dexie's constructor-registered blocked subscriber console.warns; ours
+    // console.infos. Silence both to keep test output clean.
+    infoSpy = jest.spyOn(console, "info").mockImplementation(() => {})
+    warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    __resetDbForTesting()
+    delete (globalThis as { BroadcastChannel?: unknown }).BroadcastChannel
+    // Restore the default (web) detection so later suites aren't left in Tauri
+    // mode by a test that opted in.
+    ;(isTauri as jest.Mock).mockReturnValue(false)
+    infoSpy.mockRestore()
+    warnSpy.mockRestore()
+  })
+
+  /** Flush the microtask + macrotask queue so lazy `import()`s settle. */
+  const flushAsync = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+  function activeChannel(): FakeBroadcastChannel {
+    const open = FakeBroadcastChannel.instances.filter((c) => !c.closed)
+    expect(open).toHaveLength(1)
+    return open[0]
+  }
+
+  it("creates the coordination channel lazily on getDb()", () => {
+    expect(FakeBroadcastChannel.instances).toHaveLength(0)
+    getDb()
+    expect(activeChannel().name).toBe("cognia-db-yield")
+  })
+
+  it("broadcasts a yield request when our upgrade is blocked", () => {
+    const db = getDb()
+    db.on("blocked").fire({ oldVersion: 1220, newVersion: 1230 })
+    expect(activeChannel().posted).toEqual([
+      { type: "dexie-yield", dbName: db.name, origin: expect.any(String) },
+    ])
+    expect(infoSpy).toHaveBeenCalled()
+  })
+
+  it("closes the cached connection when another context asks us to yield", () => {
+    const before = getDb()
+    activeChannel().onmessage?.({ data: { type: "dexie-yield", dbName: before.name } })
+    const after = getDb()
+    expect(after).not.toBe(before)
+  })
+
+  it("ignores yield requests for a different database name", () => {
+    const before = getDb()
+    const channel = activeChannel()
+    channel.onmessage?.({ data: { type: "dexie-yield", dbName: "cognia-account-other" } })
+    channel.onmessage?.({ data: { type: "something-else", dbName: before.name } })
+    channel.onmessage?.({ data: undefined })
+    expect(getDb()).toBe(before)
+  })
+
+  it("__resetDbForTesting closes the channel", () => {
+    getDb()
+    const channel = activeChannel()
+    __resetDbForTesting()
+    expect(channel.closed).toBe(true)
+  })
+
+  it("degrades gracefully when BroadcastChannel is unavailable", () => {
+    delete (globalThis as { BroadcastChannel?: unknown }).BroadcastChannel
+    const db = getDb()
+    // Firing blocked must not throw even though no channel could be created.
+    expect(() => db.on("blocked").fire({ oldVersion: 1220, newVersion: 1230 })).not.toThrow()
+    expect(FakeBroadcastChannel.instances).toHaveLength(0)
+  })
+
+  // BroadcastChannel does not cross separate WKWebView windows, so on Tauri the
+  // handshake also rides the Tauri event bus — the only channel that reaches the
+  // pet / fleet-island overlay webviews holding the base schema version.
+  it("does not touch the Tauri event bus off Tauri", () => {
+    const db = getDb()
+    db.on("blocked").fire({ oldVersion: 1220, newVersion: 1230 })
+    expect(emit).not.toHaveBeenCalled()
+    expect(listen).not.toHaveBeenCalled()
+  })
+
+  it("mirrors the yield request onto the Tauri event bus when blocked in Tauri", async () => {
+    ;(isTauri as jest.Mock).mockReturnValue(true)
+    const db = getDb()
+    db.on("blocked").fire({ oldVersion: 1220, newVersion: 1230 })
+    await flushAsync()
+    expect(emit).toHaveBeenCalledWith("cognia://db-yield", {
+      type: "dexie-yield",
+      dbName: db.name,
+      origin: expect.any(String),
+    })
+  })
+
+  it("closes the cached connection on a foreign-origin Tauri yield event", async () => {
+    ;(isTauri as jest.Mock).mockReturnValue(true)
+    const before = getDb()
+    await flushAsync() // let the lazy listen() registration settle
+    const handler = (listen as jest.Mock).mock.calls.at(-1)?.[1] as (ev: {
+      payload: { type: string; dbName: string; origin: string }
+    }) => void
+    handler({ payload: { type: "dexie-yield", dbName: before.name, origin: "other-window" } })
+    expect(getDb()).not.toBe(before)
+  })
+
+  it("ignores a Tauri yield event it emitted itself", async () => {
+    ;(isTauri as jest.Mock).mockReturnValue(true)
+    const before = getDb()
+    before.on("blocked").fire({ oldVersion: 1, newVersion: 2 })
+    await flushAsync()
+    const ownOrigin = (emit as jest.Mock).mock.calls.at(-1)?.[1]?.origin as string
+    const handler = (listen as jest.Mock).mock.calls.at(-1)?.[1] as (ev: {
+      payload: { type: string; dbName: string; origin: string }
+    }) => void
+    handler({ payload: { type: "dexie-yield", dbName: before.name, origin: ownOrigin } })
+    // Same instance — the upgrading window must never yank its own connection.
+    expect(getDb()).toBe(before)
+  })
+
+  it("ignores a Tauri yield event for a different database name", async () => {
+    ;(isTauri as jest.Mock).mockReturnValue(true)
+    const before = getDb()
+    await flushAsync()
+    const handler = (listen as jest.Mock).mock.calls.at(-1)?.[1] as (ev: {
+      payload: { type: string; dbName: string; origin: string }
+    }) => void
+    handler({ payload: { type: "dexie-yield", dbName: "cognia-account-other", origin: "x" } })
+    handler({ payload: { type: "not-a-yield", dbName: before.name, origin: "x" } })
+    expect(getDb()).toBe(before)
+  })
 })
 
 describe("whenSeeded", () => {
@@ -1085,6 +2819,14 @@ describe("schema upgrade hooks (round-trip via the latest version)", () => {
           createdAt: 0,
           updatedAt: 0,
         })
+        await legacy.table("skills").put({
+          id: "skill_builtin_legacy",
+          name: "builtin old",
+          content: "x",
+          isBuiltIn: true,
+          createdAt: 0,
+          updatedAt: 0,
+        })
       }
     )
     legacy.close()
@@ -1106,6 +2848,10 @@ describe("schema upgrade hooks (round-trip via the latest version)", () => {
     expect(skill?.status).toBe("enabled")
     expect(skill?.category).toBe("custom")
     expect(skill?.usageCount).toBe(0)
+
+    const builtInSkill = await db.skills.get("skill_builtin_legacy")
+    expect(builtInSkill?.source).toBe("builtin")
+    expect(builtInSkill?.category).toBe("meta")
   })
 
   it("v5 hook defaults to [] when memberCharacterIds is missing entirely", async () => {
@@ -1272,6 +3018,30 @@ describe("schema upgrade hooks (round-trip via the latest version)", () => {
       errSpy.mockRestore()
       fresh.__resetDbForTesting()
     })
+    jest.dontMock("./seed")
+  })
+
+  it("reopens and retries once when a schema mutation invalidates the seed transaction", async () => {
+    await jest.isolateModulesAsync(async () => {
+      const transactionInactive = Object.assign(new Error("transaction ended"), {
+        name: "TransactionInactiveError",
+      })
+      const seedBuiltIns = jest
+        .fn<Promise<void>, []>()
+        .mockRejectedValueOnce(transactionInactive)
+        .mockResolvedValueOnce(undefined)
+      jest.doMock("./seed", () => ({
+        seedBuiltIns,
+      }))
+      const fresh = await import("./schema")
+      fresh.__resetDbForTesting()
+
+      await fresh.whenSeeded()
+
+      expect(seedBuiltIns).toHaveBeenCalledTimes(2)
+      fresh.__resetDbForTesting()
+    })
+    jest.dontMock("./seed")
   })
 
   it("v16 upgrade hook migrates customThemes[].colors to tokens.{light,dark}", async () => {
@@ -1350,6 +3120,20 @@ describe("schema upgrade hooks (round-trip via the latest version)", () => {
             sidebarBorder: "#222222",
           },
         },
+        {
+          id: "legacy-light",
+          name: "Legacy Light Theme",
+          isDark: false,
+          colors: {
+            background: "#ffffff",
+            foreground: "#111111",
+            primary: "#0055cc",
+          },
+        },
+        {
+          id: "legacy-no-colors",
+          name: "Legacy Theme Without Colors",
+        },
       ],
     })
     legacy.close()
@@ -1360,7 +3144,8 @@ describe("schema upgrade hooks (round-trip via the latest version)", () => {
     const row = (await db.settings.get("singleton" as never)) as unknown as {
       customThemes?: Array<Record<string, unknown>>
     }
-    const t = row?.customThemes?.[0] as Record<string, unknown> | undefined
+    const t = row?.customThemes?.find((theme) => theme.id === "legacy-1") as
+      Record<string, unknown> | undefined
     expect(t).toBeDefined()
     expect(t?.baseVariant).toBe("dark")
     expect(t?.derivedVariant).toBe("light")
@@ -1378,6 +3163,16 @@ describe("schema upgrade hooks (round-trip via the latest version)", () => {
     // Legacy fields preserved for one-release rollback safety.
     expect(t?.colors).toBeDefined()
     expect(t?.isDark).toBe(true)
+
+    const light = row?.customThemes?.find((theme) => theme.id === "legacy-light") as
+      Record<string, unknown> | undefined
+    expect(light?.baseVariant).toBe("light")
+    expect(light?.derivedVariant).toBe("dark")
+    expect((light?.tokens as { light?: Record<string, string> })?.light?.primary).toBe("#0055cc")
+
+    const noColors = row?.customThemes?.find((theme) => theme.id === "legacy-no-colors") as
+      Record<string, unknown> | undefined
+    expect(noColors?.tokens).toBeUndefined()
   })
 
   it("v16 upgrade hook is idempotent — already-migrated rows untouched", async () => {
@@ -1548,6 +3343,75 @@ describe("schema upgrade hooks (round-trip via the latest version)", () => {
     expect(p?.sortOrder).toBe(0)
   })
 
+  it("v34 upgrade hook creates twin rows from legacy twin references", async () => {
+    const Dexie = (await import("dexie")).default
+    const legacy = new Dexie("cognia-claude")
+    legacy.version(33).stores({
+      twinSources: "&id, twinId",
+      twinChunks: "&id, twinId, sourceId",
+      twinProfile: "&id, twinId",
+      twinDrafts: "&id, twinId, jobId",
+      twinJobs: "&id, twinId, status",
+      characters: "id, name, updatedAt, isBuiltIn",
+      inboundLedger: "&id, adapterId, receivedAt",
+      outboundQueue: "&id, adapterId, status, nextAttemptAt, source",
+      connectorCallbackBindings: "&id, adapterId, actionId",
+      workflows: "&id, name, updatedAt, createdAt, isBuiltIn, isTemplate, *tags, schemaVersion",
+      skills: "id, name, updatedAt, isBuiltIn, category, source, status, lastUsedAt, canonicalId",
+    })
+    await legacy.open()
+    await legacy.transaction(
+      "rw",
+      [
+        legacy.table("twinSources"),
+        legacy.table("twinChunks"),
+        legacy.table("twinProfile"),
+        legacy.table("twinDrafts"),
+        legacy.table("twinJobs"),
+        legacy.table("characters"),
+      ],
+      async () => {
+        await legacy.table("twinSources").put({ id: "src-1", twinId: "twin-source" })
+        await legacy.table("twinChunks").put({
+          id: "chunk-1",
+          twinId: "twin-chunk",
+          sourceId: "src-1",
+        })
+        await legacy.table("twinProfile").put({ id: "profile-1", twinId: "twin-profile" })
+        await legacy.table("twinDrafts").put({
+          id: "draft-1",
+          twinId: "twin-draft",
+          jobId: "job-1",
+        })
+        await legacy.table("twinJobs").put({ id: "job-1", twinId: "twin-job", status: "done" })
+        await legacy.table("characters").put({
+          id: "char-with-twin",
+          name: "Readable Twin",
+          twinId: "twin-character",
+          createdAt: 0,
+          updatedAt: 0,
+          isBuiltIn: false,
+        })
+      }
+    )
+    legacy.close()
+
+    const db = getDb()
+    await db.open()
+
+    await expect(db.twins.get("twin-source")).resolves.toMatchObject({
+      id: "twin-source",
+      name: "twin-source",
+    })
+    await expect(db.twins.get("twin-character")).resolves.toMatchObject({
+      id: "twin-character",
+      name: "Readable Twin",
+    })
+    await expect(
+      db.twins.bulkGet(["twin-chunk", "twin-profile", "twin-draft", "twin-job"])
+    ).resolves.toHaveLength(4)
+  })
+
   it("v68 notifications table exposes the dedupeKey/groupKey + compound indexes", async () => {
     const db = getDb()
     await db.open()
@@ -1594,5 +3458,479 @@ describe("schema upgrade hooks (round-trip via the latest version)", () => {
       .between(["scheduler", -Infinity], ["scheduler", Infinity])
       .toArray()
     expect(sched.map((r) => r.id)).toEqual(["y"])
+  })
+})
+
+describe("v79 loop tables (/loop command)", () => {
+  it("registers loops + loopEvents with their indexes", async () => {
+    const db = getDb()
+    await whenSeeded()
+    expect(db.verno).toBeGreaterThanOrEqual(79)
+    await db.loops.add({
+      id: "lp_1",
+      sessionId: "ses_a",
+      mode: "interval",
+      rawPrompt: "check deploy",
+      safePrompt: "check deploy",
+      redactionMapEnc: "",
+      isSlashCommand: false,
+      status: "active",
+      iterations: 0,
+      tokensUsed: 0,
+      generationId: "gen-1",
+      config: {
+        maxIterations: 100,
+        maxTokens: 1_000_000,
+        minDelayMs: 60_000,
+        maxDelayMs: 3_600_000,
+        maxParseFailures: 3,
+      },
+      parseFailureCount: 0,
+      scheduledTaskId: "task_1",
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    await db.loopEvents.add({
+      id: "lev_1",
+      loopId: "lp_1",
+      kind: "loop_created",
+      ts: 1,
+      payload: {
+        kind: "loop_created",
+        mode: "interval",
+        safePrompt: "check deploy",
+        config: {
+          maxIterations: 100,
+          maxTokens: 1_000_000,
+          minDelayMs: 60_000,
+          maxDelayMs: 3_600_000,
+          maxParseFailures: 3,
+        },
+      },
+    })
+    // Compound [sessionId+status] serves the one-active-per-session lookup.
+    const active = await db.loops.where("[sessionId+status]").equals(["ses_a", "active"]).first()
+    expect(active?.id).toBe("lp_1")
+    // scheduledTaskId is indexed for scheduler-side reverse lookups.
+    expect((await db.loops.where("scheduledTaskId").equals("task_1").first())?.id).toBe("lp_1")
+    // [loopId+ts] serves the reverse-chrono activity feed.
+    const events = await db.loopEvents
+      .where("[loopId+ts]")
+      .between(["lp_1", -Infinity], ["lp_1", Infinity])
+      .toArray()
+    expect(events).toHaveLength(1)
+  })
+})
+
+describe("v80 chatInputHistory (composer ↑/↓ recall)", () => {
+  it("registers chatInputHistory with auto-increment id + [sessionId+createdAt]", async () => {
+    const db = getDb()
+    await whenSeeded()
+    expect(db.verno).toBeGreaterThanOrEqual(80)
+    const id = await db.chatInputHistory.add({ sessionId: "ses_h", text: "hello", createdAt: 1 })
+    expect(typeof id).toBe("number")
+    await db.chatInputHistory.add({ sessionId: "ses_h", text: "world", createdAt: 2 })
+    const rows = await db.chatInputHistory
+      .where("[sessionId+createdAt]")
+      .between(["ses_h", -Infinity], ["ses_h", Infinity])
+      .toArray()
+    expect(rows.map((r) => r.text)).toEqual(["hello", "world"])
+  })
+})
+
+describe("v81 conversation-branching lineage (parentSessionId index)", () => {
+  it("indexes sessions.parentSessionId so children resolve by parent", async () => {
+    const db = getDb()
+    await whenSeeded()
+    expect(db.verno).toBeGreaterThanOrEqual(81)
+    const now = Date.now()
+    await db.sessions.put({ id: "ses_parent", title: "Parent", createdAt: now, updatedAt: now })
+    await db.sessions.put({
+      id: "ses_child",
+      title: "Parent (branch)",
+      parentSessionId: "ses_parent",
+      branchedFromMessageId: "m_3",
+      branchKind: "summary",
+      branchSeed: { kind: "summary", content: "summary text" },
+      createdAt: now,
+      updatedAt: now,
+    })
+    const children = await db.sessions.where("parentSessionId").equals("ses_parent").toArray()
+    expect(children.map((s) => s.id)).toEqual(["ses_child"])
+    expect(children[0]?.branchSeed).toEqual({ kind: "summary", content: "summary text" })
+    // Legacy rows without the field are simply absent from the index.
+    const orphans = await db.sessions.where("parentSessionId").equals("ses_parent_missing").count()
+    expect(orphans).toBe(0)
+  })
+})
+
+describe("v89 runRecords (Run Panel second clock)", () => {
+  it("registers runRecords with a [sessionId+runId] key and startedAt ordering", async () => {
+    const db = getDb()
+    await whenSeeded()
+    expect(db.verno).toBeGreaterThanOrEqual(89)
+    await db.runRecords.put({
+      sessionId: "ses_r",
+      runId: 1,
+      startedAt: 100,
+      status: "done",
+      tools: [],
+      subagents: [],
+      todos: [],
+      todoCounts: { done: 0, total: 0 },
+      counts: { tools: 0, subagents: 0 },
+    })
+    await db.runRecords.put({
+      sessionId: "ses_r",
+      runId: 2,
+      startedAt: 300,
+      status: "running",
+      tools: [{ id: "t1", toolName: "Bash", status: "output-available" }],
+      subagents: [],
+      todos: [],
+      todoCounts: { done: 0, total: 0 },
+      counts: { tools: 1, subagents: 0 },
+    })
+    const rows = await db.runRecords
+      .where("[sessionId+startedAt]")
+      .between(["ses_r", -Infinity], ["ses_r", Infinity])
+      .toArray()
+    expect(rows.map((r) => r.runId)).toEqual([1, 2])
+    // The compound key uniquely identifies a run.
+    const r1 = await db.runRecords.get(["ses_r", 1])
+    expect(r1?.status).toBe("done")
+  })
+})
+
+describe("v90 sessionFolders (conversation folders)", () => {
+  it("registers sessionFolders with a [projectId+order] ordering index", async () => {
+    const db = getDb()
+    await whenSeeded()
+    expect(db.verno).toBeGreaterThanOrEqual(90)
+    await db.sessionFolders.put({
+      id: "f1",
+      projectId: "proj_a",
+      name: "Work",
+      order: 1,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    await db.sessionFolders.put({
+      id: "f2",
+      projectId: "proj_a",
+      name: "Personal",
+      order: 0,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    await db.sessionFolders.put({
+      id: "f3",
+      projectId: "proj_b",
+      name: "Other workspace",
+      order: 0,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+    const scoped = await db.sessionFolders
+      .where("[projectId+order]")
+      .between(["proj_a", -Infinity], ["proj_a", Infinity])
+      .toArray()
+    // Ordered by `order`, scoped to the workspace.
+    expect(scoped.map((f) => f.id)).toEqual(["f2", "f1"])
+  })
+})
+
+describe("v94 petInventory (pet economy)", () => {
+  it("round-trips inventory rows keyed by catalog item id", async () => {
+    const db = getDb()
+    await whenSeeded()
+    expect(db.verno).toBeGreaterThanOrEqual(94)
+    await db.petInventory.put({ id: "berry", qty: 3, acquiredAt: 100, updatedAt: 200 })
+    await db.petInventory.put({ id: "yarn-ball", qty: 1, acquiredAt: 150, updatedAt: 150 })
+    expect(await db.petInventory.count()).toBe(2)
+    expect((await db.petInventory.get("berry"))?.qty).toBe(3)
+    // PK upsert semantics — same id replaces, never duplicates.
+    await db.petInventory.put({ id: "berry", qty: 4, acquiredAt: 100, updatedAt: 300 })
+    expect(await db.petInventory.count()).toBe(2)
+    expect((await db.petInventory.get("berry"))?.qty).toBe(4)
+  })
+})
+
+describe("v106 instance-level AI binding defaults (multi-bot connectors W1/W2)", () => {
+  it("round-trips adapter binding defaults and the teamDisabled sentinel", async () => {
+    const db = getDb()
+    await whenSeeded()
+    expect(db.verno).toBeGreaterThanOrEqual(106)
+    const now = Date.now()
+
+    await db.adapterInstances.put({
+      id: "lark-v106",
+      type: "lark",
+      displayName: "Lark Bot A",
+      enabled: true,
+      transportMode: "webhook",
+      settings: {},
+      credentialsRef: {
+        keyringService: "com.cognia.platforms",
+        accounts: ["lark-v106:appSecret"],
+      },
+      trigger: {
+        rules: [{ kind: "private-default" }],
+        blockers: [],
+        storeUnmatchedInDraftMode: false,
+      },
+      defaultMode: "auto",
+      defaultTeamId: "team_alpha",
+      defaultModel: "claude-fable-5",
+      defaultProvider: "anthropic",
+      defaultReasoning: "high",
+      lastMissingScopes: ["im:chat:create"],
+      createdAt: now,
+      updatedAt: now,
+    })
+    const row = await db.adapterInstances.get("lark-v106")
+    expect(row?.defaultTeamId).toBe("team_alpha")
+    expect(row?.defaultModel).toBe("claude-fable-5")
+    expect(row?.defaultProvider).toBe("anthropic")
+    expect(row?.defaultReasoning).toBe("high")
+    expect(row?.lastMissingScopes).toEqual(["im:chat:create"])
+
+    await db.conversationOverrides.put({
+      id: "co-v106",
+      conversationKey: "lark:lark-v106:oc_v106",
+      sessionId: "s_v106",
+      teamDisabled: true,
+      createdAt: now,
+      updatedAt: now,
+    })
+    expect((await db.conversationOverrides.get("co-v106"))?.teamDisabled).toBe(true)
+
+    await db.outboundQueue.put({
+      id: "job-v106",
+      adapterId: "lark-v106",
+      conversationKey: "lark:lark-v106:oc_v106",
+      request: {
+        conversationRef: { platform: "lark", adapterId: "lark-v106", channelId: "oc_v106" },
+        segments: [{ type: "text", text: "hello" }],
+        metadata: { idempotencyKey: "idem-v106" },
+      },
+      source: "skill",
+      status: "pending",
+      attempts: 0,
+      createdAt: now,
+      nextAttemptAt: now,
+      idempotencyKey: "idem-v106",
+    })
+    expect((await db.outboundQueue.get("job-v106"))?.source).toBe("skill")
+  })
+})
+
+describe("schema seed error handling isolation", () => {
+  it("logs non-Error rejection values", async () => {
+    jest.resetModules()
+    await jest.isolateModulesAsync(async () => {
+      jest.doMock("./seed", () => ({
+        seedBuiltIns: () => Promise.reject("plain failure"),
+      }))
+      const errSpy = jest.spyOn(console, "error").mockImplementation(() => {})
+      const fresh = await import("./schema")
+      fresh.__resetDbForTesting()
+      fresh.getDb()
+      await fresh.whenSeeded()
+      expect(errSpy).toHaveBeenCalledWith("seedBuiltIns failed", "plain failure")
+      errSpy.mockRestore()
+      fresh.__resetDbForTesting()
+    })
+    jest.dontMock("./seed")
+    jest.resetModules()
+  })
+})
+
+// The `blocked` recovery cadence for a schema upgrade that a stale overlay
+// connection is holding open. Exercised in isolation from a real IndexedDB
+// block: fake timers drive the interval; the getDb glue that starts/stops it is
+// thin.
+describe("withDbReopenRetry", () => {
+  /** Dexie's rejection when the connection goes away under an in-flight op. */
+  function closedError(name = "DatabaseClosedError"): Error {
+    const err = new Error(
+      "Failed to execute 'get' on 'IDBObjectStore': The transaction is inactive or finished."
+    )
+    err.name = name
+    return err
+  }
+
+  it("passes the value through when nothing closed the connection", async () => {
+    const op = jest.fn(() => Promise.resolve("row"))
+    await expect(withDbReopenRetry(op, [0])).resolves.toBe("row")
+    expect(op).toHaveBeenCalledTimes(1)
+  })
+
+  it("re-issues the operation after the connection is closed under it", async () => {
+    const op = jest
+      .fn<Promise<string>, []>()
+      .mockRejectedValueOnce(closedError())
+      .mockResolvedValueOnce("row")
+    await expect(withDbReopenRetry(op, [0])).resolves.toBe("row")
+    expect(op).toHaveBeenCalledTimes(2)
+  })
+
+  it("also matches Dexie's shorter spelling of the same error", async () => {
+    const op = jest
+      .fn<Promise<string>, []>()
+      .mockRejectedValueOnce(closedError("DatabaseClosed"))
+      .mockResolvedValueOnce("row")
+    await expect(withDbReopenRetry(op, [0])).resolves.toBe("row")
+    expect(op).toHaveBeenCalledTimes(2)
+  })
+
+  it("retries the direct TransactionInactiveError emitted by an interrupted transaction", async () => {
+    const op = jest
+      .fn<Promise<string>, []>()
+      .mockRejectedValueOnce(closedError("TransactionInactiveError"))
+      .mockResolvedValueOnce("row")
+    await expect(withDbReopenRetry(op, [0])).resolves.toBe("row")
+    expect(op).toHaveBeenCalledTimes(2)
+  })
+
+  it("retries Dexie's PrematureCommitError after a schema-close race", async () => {
+    const op = jest
+      .fn<Promise<string>, []>()
+      .mockRejectedValueOnce(closedError("PrematureCommitError"))
+      .mockResolvedValueOnce("row")
+    await expect(withDbReopenRetry(op, [0])).resolves.toBe("row")
+    expect(op).toHaveBeenCalledTimes(2)
+  })
+
+  it("never retries an error that isn't a closed connection", async () => {
+    const boom = new Error("constraint violated")
+    boom.name = "ConstraintError"
+    const op = jest.fn<Promise<string>, []>().mockRejectedValue(boom)
+    await expect(withDbReopenRetry(op, [0, 0])).rejects.toThrow("constraint violated")
+    expect(op).toHaveBeenCalledTimes(1)
+  })
+
+  it("gives up once the backoff is exhausted, surfacing the last rejection", async () => {
+    const op = jest.fn<Promise<string>, []>().mockRejectedValue(closedError())
+    await expect(withDbReopenRetry(op, [0, 0])).rejects.toThrow(/transaction is inactive/)
+    // One attempt per delay, plus the initial one.
+    expect(op).toHaveBeenCalledTimes(3)
+  })
+
+  it("backs off on its own schedule when the caller supplies none", async () => {
+    const op = jest
+      .fn<Promise<string>, []>()
+      .mockRejectedValueOnce(closedError())
+      .mockResolvedValueOnce("row")
+    const started = Date.now()
+    await expect(withDbReopenRetry(op)).resolves.toBe("row")
+    // Default first backoff is 50ms — the retry must not be a hot loop, or it
+    // burns every attempt inside the close→open window it is waiting out.
+    expect(Date.now() - started).toBeGreaterThanOrEqual(40)
+  })
+})
+
+describe("schema v138 remote-terminal grant migration", () => {
+  const databaseName = "cognia-schema-v138-terminal-grant"
+
+  afterEach(async () => {
+    await Dexie.delete(databaseName)
+  })
+
+  it("seeds historical paired devices to false and preserves explicit grants", async () => {
+    const legacy = new Dexie(databaseName)
+    legacy.version(137).stores({
+      pairedDevices: "&deviceId, lastSeenAt, revokedAt, platform",
+    })
+    await legacy.open()
+    await legacy.table("pairedDevices").bulkPut([
+      {
+        deviceId: "historical-device",
+        label: "Old phone",
+        platform: "ios",
+        pubkey: "pk-old",
+        appVersion: "0.1.0",
+        pairedAt: 1,
+        lastSeenAt: 1,
+        allowRemoteControl: true,
+      },
+      {
+        deviceId: "explicit-terminal-device",
+        label: "Current phone",
+        platform: "android",
+        pubkey: "pk-current",
+        appVersion: "0.1.0",
+        pairedAt: 2,
+        lastSeenAt: 2,
+        allowRemoteTerminal: true,
+      },
+    ])
+    legacy.close()
+
+    const current = new CogniaDB(databaseName)
+    await current.open()
+    expect((await current.pairedDevices.get("historical-device"))?.allowRemoteTerminal).toBe(false)
+    expect((await current.pairedDevices.get("explicit-terminal-device"))?.allowRemoteTerminal).toBe(
+      true
+    )
+    current.close()
+  })
+})
+
+describe("startBlockedYieldRetry", () => {
+  beforeEach(() => {
+    jest.useFakeTimers()
+  })
+  afterEach(() => {
+    jest.runOnlyPendingTimers()
+    jest.useRealTimers()
+  })
+
+  it("re-nudges on an interval while the open stays blocked", () => {
+    const nudge = jest.fn()
+    startBlockedYieldRetry(nudge, { intervalMs: 100, maxAttempts: 20 })
+    expect(nudge).not.toHaveBeenCalled() // no immediate nudge; the caller sent the first
+    jest.advanceTimersByTime(100)
+    expect(nudge).toHaveBeenCalledTimes(1)
+    jest.advanceTimersByTime(250)
+    expect(nudge).toHaveBeenCalledTimes(3)
+  })
+
+  it("stops nudging once the returned handle is called (open became ready)", () => {
+    const nudge = jest.fn()
+    const stop = startBlockedYieldRetry(nudge, { intervalMs: 100, maxAttempts: 20 })
+    jest.advanceTimersByTime(100)
+    expect(nudge).toHaveBeenCalledTimes(1)
+    stop()
+    jest.advanceTimersByTime(1000)
+    expect(nudge).toHaveBeenCalledTimes(1)
+  })
+
+  it("uses the default interval and cap when no options are supplied", () => {
+    const nudge = jest.fn()
+    startBlockedYieldRetry(nudge)
+    jest.advanceTimersByTime(749)
+    expect(nudge).not.toHaveBeenCalled()
+    jest.advanceTimersByTime(1) // 750ms — the default interval
+    expect(nudge).toHaveBeenCalledTimes(1)
+    // Default cap is 20 nudges; the 21st tick gives up and stops.
+    jest.advanceTimersByTime(750 * 25)
+    expect(nudge).toHaveBeenCalledTimes(20)
+  })
+
+  it("gives up after the cap, firing onGiveUp once and nudging no further", () => {
+    const nudge = jest.fn()
+    const onGiveUp = jest.fn()
+    startBlockedYieldRetry(nudge, { intervalMs: 100, maxAttempts: 3, onGiveUp })
+    jest.advanceTimersByTime(300)
+    expect(nudge).toHaveBeenCalledTimes(3)
+    expect(onGiveUp).not.toHaveBeenCalled()
+    // The 4th tick exceeds the cap: give up, no further nudge.
+    jest.advanceTimersByTime(100)
+    expect(onGiveUp).toHaveBeenCalledTimes(1)
+    expect(nudge).toHaveBeenCalledTimes(3)
+    jest.advanceTimersByTime(500)
+    expect(nudge).toHaveBeenCalledTimes(3)
+    expect(onGiveUp).toHaveBeenCalledTimes(1)
   })
 })

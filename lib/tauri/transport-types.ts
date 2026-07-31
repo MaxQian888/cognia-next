@@ -9,6 +9,14 @@
  * Pinning the contract here lets `lib/tauri.ts` swap implementations at module
  * load time without touching any consumer of the named-export wrappers.
  */
+export interface TransportCallOptions {
+  /**
+   * Stable key owned by a durable queue row. Remote transports must reuse it
+   * across retries and channel fallback so the host can deduplicate writes.
+   */
+  idempotencyKey?: string
+}
+
 export interface Transport {
   /**
    * Invoke a named command on the underlying runtime and wait for its result.
@@ -16,7 +24,11 @@ export interface Transport {
    * Implementations MUST reject (not throw synchronously) so callers can rely
    * on `await transport.call(...)` semantics regardless of the backend.
    */
-  call<T = unknown>(name: string, args?: Record<string, unknown>): Promise<T>
+  call<T = unknown>(
+    name: string,
+    args?: Record<string, unknown>,
+    options?: TransportCallOptions
+  ): Promise<T>
 
   /**
    * Subscribe to a named event channel; `handler` runs for every payload the

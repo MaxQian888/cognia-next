@@ -1,0 +1,10 @@
+{
+  "asChart": "As Chart",
+  "asCode": "As Code",
+  "asDocument": "As Document",
+  "asHtml": "As HTML Page",
+  "asMath": "As Math Expression",
+  "asMermaid": "As Mermaid Diagram",
+  "asReact": "As React Component",
+  "createArtifact": "Create Artifact"
+}

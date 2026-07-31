@@ -1,3 +1,4 @@
+import { isRunnableArtifactType } from "./constants"
 import type { Artifact, ArtifactMetadata, ArtifactType } from "@/types"
 
 function normalizeArtifactContent(content: string): string {
@@ -55,6 +56,10 @@ export function buildArtifactSourceMetadata(params: {
 
   return {
     ...params.metadata,
+    // Stamped at creation so the "Runnable" badge has something to read. An
+    // explicit value in `params.metadata` wins — the field is an override, and
+    // a caller that set it deliberately outranks the type default.
+    runnable: params.metadata?.runnable ?? isRunnableArtifactType(params.type),
     sourceOrigin: params.sourceOrigin,
     sourceFingerprint,
     lineageId: params.metadata?.lineageId || sourceFingerprint,

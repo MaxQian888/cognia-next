@@ -6,13 +6,7 @@ import { useTranslations } from "next-intl"
 import { Badge } from "@/components/ui/badge"
 
 export type ProviderStatus =
-  | "connected"
-  | "testing"
-  | "failed"
-  | "ready"
-  | "stale"
-  | "unknown"
-  | "not-set"
+  "connected" | "testing" | "failed" | "ready" | "stale" | "unknown" | "not-set"
 
 interface ProviderStatusBadgeProps {
   status: ProviderStatus

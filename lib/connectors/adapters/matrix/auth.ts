@@ -32,12 +32,30 @@ export function normalizeHomeserver(url: string): string {
 /**
  * Resolve the bot's own `user_id` (e.g. `@bot:matrix.org`) for an access
  * token. Returns null on any non-2xx / parse failure so the adapter can
- * still start (self-mention detection then degrades).
+ * still start. NOTE: an empty selfId degrades BOTH self-mention detection
+ * AND own-echo suppression (the bot would answer its own messages), so the
+ * adapter lazily re-probes whoami at start / during the sync loop until it
+ * resolves (see index.ts `ensureSelfId`).
  */
 export async function matrixWhoami(
   homeserver: string,
   accessToken: string
 ): Promise<string | null> {
+  return (await matrixWhoamiDetailed(homeserver, accessToken))?.userId ?? null
+}
+
+export interface MatrixWhoamiResult {
+  userId: string
+  deviceId?: string
+}
+
+export type MatrixAccessTokenProbeResult =
+  { ok: true; userId: string; deviceId?: string } | { ok: false; error: string }
+
+export async function matrixWhoamiDetailed(
+  homeserver: string,
+  accessToken: string
+): Promise<MatrixWhoamiResult | null> {
   const base = normalizeHomeserver(homeserver)
   if (!base || !accessToken) return null
   try {
@@ -47,16 +65,61 @@ export async function matrixWhoami(
       headers: { Authorization: `Bearer ${accessToken}` },
     })
     if (resp.status < 200 || resp.status >= 300) return null
-    const parsed = JSON.parse(resp.body) as { user_id?: string }
-    return parsed.user_id ?? null
+    const parsed = JSON.parse(resp.body) as { user_id?: string; device_id?: string }
+    if (!parsed.user_id) return null
+    return {
+      userId: parsed.user_id,
+      ...(parsed.device_id ? { deviceId: parsed.device_id } : {}),
+    }
   } catch {
     return null
+  }
+}
+
+export async function probeMatrixAccessToken(
+  homeserver: string,
+  accessToken: string
+): Promise<MatrixAccessTokenProbeResult> {
+  const base = normalizeHomeserver(homeserver)
+  if (!base) return { ok: false, error: "Homeserver URL is required" }
+  if (!accessToken.trim()) return { ok: false, error: "Access token is required" }
+
+  try {
+    const resp = await connectorsHttpRequest({
+      url: `${base}${CLIENT_V3}/account/whoami`,
+      method: "GET",
+      headers: { Authorization: `Bearer ${accessToken.trim()}` },
+    })
+
+    let parsed: { user_id?: string; device_id?: string; error?: string; errcode?: string }
+    try {
+      parsed = JSON.parse(resp.body)
+    } catch {
+      return {
+        ok: false,
+        error: `Matrix whoami returned non-JSON body (status ${resp.status})`,
+      }
+    }
+
+    if (resp.status < 200 || resp.status >= 300 || !parsed.user_id) {
+      const reason = parsed.error ?? parsed.errcode ?? `status ${resp.status}`
+      return { ok: false, error: `Matrix whoami failed: ${reason}` }
+    }
+
+    return {
+      ok: true,
+      userId: parsed.user_id,
+      ...(parsed.device_id ? { deviceId: parsed.device_id } : {}),
+    }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }
 }
 
 export interface MatrixLoginResult {
   accessToken: string
   userId: string
+  deviceId?: string
 }
 
 /**
@@ -84,7 +147,13 @@ export async function matrixLoginWithPassword(
     }),
   })
 
-  let parsed: { access_token?: string; user_id?: string; error?: string; errcode?: string }
+  let parsed: {
+    access_token?: string
+    user_id?: string
+    device_id?: string
+    error?: string
+    errcode?: string
+  }
   try {
     parsed = JSON.parse(resp.body)
   } catch {
@@ -96,5 +165,9 @@ export async function matrixLoginWithPassword(
     throw new Error(`Matrix login failed: ${reason}`)
   }
 
-  return { accessToken: parsed.access_token, userId: parsed.user_id }
+  return {
+    accessToken: parsed.access_token,
+    userId: parsed.user_id,
+    ...(parsed.device_id ? { deviceId: parsed.device_id } : {}),
+  }
 }

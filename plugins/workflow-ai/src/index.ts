@@ -21,11 +21,13 @@ import { buildMutateTools } from "./tools/mutate-tools"
 import { buildLayoutTools } from "./tools/layout-tools"
 import { buildRunTools } from "./tools/run-tools"
 import { buildRunByNameTools } from "./tools/run-by-name-tools"
+import { buildRunTypedTools } from "./tools/run-typed-tools"
 import { buildProposeTools } from "./tools/propose-tools"
 import { buildTemplateTools } from "./tools/template-tools"
 import { buildResourceTools } from "./tools/resource-tools"
 import { buildNodeKindTools } from "./tools/node-kind-tools"
 import { buildDiagnosticTools } from "./tools/diagnostic-tools"
+import { buildWakeTools } from "./tools/wake-tools"
 
 const PLUGIN_ID = "cognia-workflow-ai"
 
@@ -38,20 +40,22 @@ export function buildWorkflowAiTools(): PluginTool[] {
     ...buildLayoutTools(),
     ...buildRunTools(),
     ...buildRunByNameTools(),
+    ...buildRunTypedTools(),
     ...buildResourceTools(),
     ...buildNodeKindTools(),
     ...buildDiagnosticTools(),
+    ...buildWakeTools(),
   ]
 }
 
 const I18N_MESSAGES = {
   en: {
     "plugin.workflow-ai.activated":
-      "Workflow AI tools registered (read / mutate / layout / run). Open a workflow editor to use them.",
+      "Workflow AI tools registered (read / mutate / layout / run). Editing tools need an open workflow editor; the run tools execute published workflows from any chat.",
   },
   "zh-CN": {
     "plugin.workflow-ai.activated":
-      "Workflow AI 工具已注册（读取 / 编辑 / 布局 / 运行）。打开一个工作流编辑器即可使用。",
+      "Workflow AI 工具已注册（读取 / 编辑 / 布局 / 运行）。编辑类工具需要打开工作流编辑器；运行类工具可在任意会话中直接执行已发布的工作流。",
   },
 } as const
 

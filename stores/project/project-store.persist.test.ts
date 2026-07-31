@@ -24,9 +24,37 @@ jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
 
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { getAllProjects, loadActiveProjectId } from "@/lib/db/projects"
+import { saveSettings } from "@/lib/db/settings"
 import { useProjectStore } from "./project-store"
 
 const flush = () => new Promise((r) => setTimeout(r, 0))
+
+/**
+ * Barrier for the store's fire-and-forget active-pointer writes.
+ *
+ * `persistActiveProjectId` funnels into `saveSettings`, which is a
+ * read-modify-write (`getSettings()` → merge → `put`) serialized on a
+ * module-level tail Promise. The Dexie *write* transaction therefore isn't
+ * even created until the read half resolves, so a single `flush()` macrotask
+ * routinely returns before the pointer lands and the assertion reads the
+ * previous value. Enqueueing an empty patch onto the same queue resolves only
+ * after every write queued before it has committed — a real completion signal
+ * rather than a longer sleep.
+ */
+const settleActivePointerWrites = () => saveSettings({})
+async function waitForCondition(assertion: () => Promise<void> | void): Promise<void> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      await assertion()
+      return
+    } catch (error) {
+      lastError = error
+      await flush()
+    }
+  }
+  throw lastError
+}
 
 beforeEach(async () => {
   await getDb().delete()
@@ -50,7 +78,7 @@ describe("load()", () => {
     await useProjectStore.getState().load()
     const p = useProjectStore.getState().createProject({ name: "Alpha", rootDir: "/tmp/a" })
     useProjectStore.getState().setActiveProject(p.id)
-    await flush()
+    await settleActivePointerWrites()
 
     // Simulate a restart: reset in-memory state, reload from Dexie.
     useProjectStore.setState({ projects: [], activeProjectId: null, loaded: false })
@@ -86,7 +114,7 @@ describe("load()", () => {
   it("keeps + persists an active pointer chosen before hydration", async () => {
     useProjectStore.getState().setActiveProject("pre-load-id")
     await useProjectStore.getState().load()
-    await flush()
+    await settleActivePointerWrites()
     expect(useProjectStore.getState().activeProjectId).toBe("pre-load-id")
     expect(await loadActiveProjectId()).toBe("pre-load-id")
   })
@@ -101,14 +129,14 @@ describe("mutations persist (only after load)", () => {
 
   it("createProject persists rootDir + additionalDirs after load", async () => {
     await useProjectStore.getState().load()
-    useProjectStore
+    const p = useProjectStore
       .getState()
       .createProject({ name: "Beta", rootDir: "/tmp/b", additionalDirs: ["/x", "/y"] })
     await flush()
     const rows = await getAllProjects()
-    expect(rows).toHaveLength(1)
-    expect(rows[0].rootDir).toBe("/tmp/b")
-    expect(rows[0].additionalDirs).toEqual(["/x", "/y"])
+    const row = rows.find((project) => project.id === p.id)
+    expect(row?.rootDir).toBe("/tmp/b")
+    expect(row?.additionalDirs).toEqual(["/x", "/y"])
   })
 
   it("updateProject persists changes", async () => {
@@ -127,8 +155,10 @@ describe("mutations persist (only after load)", () => {
     useProjectStore.getState().setActiveProject(p.id)
     await flush()
     useProjectStore.getState().deleteProject(p.id)
-    await flush()
-    expect((await getAllProjects()).find((x) => x.id === p.id)).toBeUndefined()
+    await waitForCondition(async () => {
+      expect((await getAllProjects()).find((x) => x.id === p.id)).toBeUndefined()
+    })
+    await settleActivePointerWrites()
     expect(await loadActiveProjectId()).toBeNull()
   })
 
@@ -136,7 +166,7 @@ describe("mutations persist (only after load)", () => {
     await useProjectStore.getState().load()
     const p = useProjectStore.getState().createProject({ name: "Eps" })
     useProjectStore.getState().setActiveProject(p.id)
-    await flush()
+    await settleActivePointerWrites()
     expect(await loadActiveProjectId()).toBe(p.id)
   })
 })

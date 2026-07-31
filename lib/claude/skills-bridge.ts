@@ -10,16 +10,20 @@
  *   behaviour of `lib/db/skills.ts:renderSkillsSection`.
  *
  * - **Plugin skills** (overlay). The discriminated `source` union has
- *   three shapes — `inline`, `local-folder`, and `anthropic-managed`:
- *   - `inline` and `local-folder` resolve to a markdown body that
- *     appends to the system prompt like a chat skill (handled by
- *     `resolveSkillMarkdown` in `skills-io.ts`).
- *   - `anthropic-managed` does not produce a body. Instead it carries a
- *     `containerSkillId` that gets forwarded to the sidecar as
- *     `container.skill_id` so the Anthropic API attaches the managed
- *     skill at request time. We surface these via
- *     `extractContainerSkillIds` so `build-options.ts` can populate
- *     `SendOptions.containerSkillIds`.
+ *   five shapes — `inline`, `local-folder`, `local-bundle`, `archive`,
+ *   and `anthropic-managed`:
+ *   - `inline`, `local-folder`, `local-bundle`, and `archive` resolve to a
+ *     markdown body that appends to the system prompt like a chat skill
+ *     (all handled by `resolveSkillMarkdown` in `skills-io.ts`).
+ *   - `anthropic-managed` does not produce a body. It carries a
+ *     `containerSkillId` that was *intended* to attach the managed skill at
+ *     request time. **This is not currently deliverable**: the Claude Agent
+ *     SDK exposes no `query()` option to attach uploaded skill_ids (verified
+ *     against sdk 0.3.x). `extractContainerSkillIds` still surfaces them so
+ *     `build-options.ts` can WARN the user (not silently drop), and so a
+ *     future SDK with the capability can be re-wired without a schema change.
+ *     See ADR-0020. Running uploaded skills would need an SDK feature or a
+ *     direct Messages-API bypass (out of scope).
  *
  * Plugin skills are namespaced by id (e.g. `"anthropic.code-review"`) so
  * collisions with chat skill ids are unlikely, but on collision the
@@ -31,7 +35,7 @@
 
 import { listEnabledSkillsByIds } from "@/lib/db/skills"
 import { getSkill, getSkillEntry } from "@/lib/plugin/registries/skill-registry"
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 import type { PluginSkillDef } from "@/types/plugin/plugin-skill"
 import { resolveSkillMarkdown } from "./skills-io"
 
@@ -126,9 +130,13 @@ export async function resolveSkillsForCharacter(skillIds: string[]): Promise<Res
 export const MAX_CONTAINER_SKILLS = 8
 
 /**
- * Extract Anthropic `container.skill_id` entries from a resolved set. Used
- * by `build-options.ts` to populate `SendOptions.containerSkillIds`, which
- * the sidecar forwards to the SDK. Truncates to `MAX_CONTAINER_SKILLS`.
+ * Extract Anthropic `container.skill_id` entries from a resolved set.
+ * Truncates to `MAX_CONTAINER_SKILLS`.
+ *
+ * @deprecated The result is no longer forwarded to the SDK — there is no
+ * `query()` option to attach uploaded skill_ids (sdk 0.3.x). `build-options.ts`
+ * uses this only to detect managed skills and warn the user. Kept for
+ * forward-compat re-wiring. See ADR-0020 and the module header.
  */
 export function extractContainerSkillIds(
   resolved: ResolvedSkill[]

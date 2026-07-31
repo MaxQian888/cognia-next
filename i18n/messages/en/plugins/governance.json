@@ -1,0 +1,17 @@
+{
+  "policy": {
+    "autoUpdate": "Auto-update plugins",
+    "autoUpdateHint": "Apply marketplace updates automatically when available.",
+    "governance": "Governance mode",
+    "governanceBlock": "Block",
+    "governanceHint": "Warn lets unknown points pass with a diagnostic; Block rejects them outright.",
+    "governanceWarn": "Warn",
+    "rateLimitsNote": "Rate limits and sandbox defaults are configured globally and visible per-plugin in the plugin detail.",
+    "securityPosture": "Strict sandboxing",
+    "securityPostureHint": "Deny network egress for plugins that didn't declare an allowlist, and prompt for every declared permission. Off (balanced) keeps the default: dangerous permissions still prompt; plugins without a declared allowlist keep unrestricted egress.",
+    "signatureRequired": "Require signed plugins",
+    "signatureRequiredHint": "Refuse to load plugins without a verified publisher signature.",
+    "trustedPublishersOnly": "Trusted publishers only",
+    "trustedPublishersOnlyHint": "Accept signatures only from the official key or publishers you trust; reject unknown signers."
+  }
+}

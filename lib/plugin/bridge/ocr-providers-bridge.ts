@@ -19,7 +19,12 @@ import type { PluginManifest } from "@/types/plugin/plugin"
 import type { PluginOcrProviderDef, PluginOcrProviderFactory } from "@/types/plugin/plugin-ocr"
 import type { OcrProvider } from "@/types/ocr"
 import { loggers } from "@/lib/plugin/core/logger"
+import { resolvePluginPath } from "@/lib/plugin/core/plugin-path"
 import { clearOcrProvidersForPlugin, createOcrAPI } from "@/lib/plugin/api/ocr-api"
+import {
+  createDescribedPythonContribution,
+  isPythonBackedContribution,
+} from "@/lib/plugin/bridge/_shared/python-backed-proxy"
 
 export interface OcrProvidersBridgeError {
   pluginId: string
@@ -80,7 +85,14 @@ export async function registerOcrProvidersForPlugin(
 
   for (const def of defs) {
     try {
-      const provider = await resolveProvider(def, pluginId, installRoot, importer, options)
+      const provider = await resolveProvider(
+        def,
+        pluginId,
+        manifest.type,
+        installRoot,
+        importer,
+        options
+      )
       ocrApi.registerProvider(provider)
       registered++
     } catch (err) {
@@ -96,14 +108,38 @@ export async function registerOcrProvidersForPlugin(
 async function resolveProvider(
   def: PluginOcrProviderDef,
   pluginId: string,
+  pluginType: string | undefined,
   installRoot: string,
   importer: NonNullable<OcrProvidersBridgeOptions["importer"]>,
   options: OcrProvidersBridgeOptions
 ): Promise<OcrProvider> {
+  // Python-backed providers have no JS module to import: `describe()` supplies
+  // the plain-data descriptor and `extract()` round-trips into the plugin's
+  // Python subprocess through the shared seam.
+  if (isPythonBackedContribution(def, pluginType)) {
+    const provider = await createDescribedPythonContribution<OcrProvider>({
+      pluginId,
+      contributionId: def.id,
+      methods: ["extract"],
+      label: "OCR provider",
+    })
+    if (typeof provider.label !== "string" || typeof provider.extract !== "function") {
+      throw new Error(`python contribution "${def.id}" returned an invalid OcrProvider descriptor`)
+    }
+    return { ...provider, id: def.id }
+  }
+
+  if (!def.entry || !def.export) {
+    throw new Error(
+      `JS-backed provider "${def.id}" must declare both "entry" and "export"` +
+        ` (set backend: "python" to run it in the plugin's Python subprocess)`
+    )
+  }
+
   // `manifest.ocrProviders[].entry` is a relative path validated at manifest
   // load time (`lib/plugin/core/validation.ts`). We resolve it against the
   // plugin install root before importing.
-  const resolved = `${installRoot.replace(/[\\/]+$/, "")}/${def.entry.replace(/^[\\/]+/, "")}`
+  const resolved = resolvePluginPath(installRoot, def.entry)
   const mod = await importer(resolved)
   const exported = mod[def.export]
   if (typeof exported !== "function") {

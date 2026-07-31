@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Coverage for `probeBotIdentity` — the Lark whoami probe.
  *

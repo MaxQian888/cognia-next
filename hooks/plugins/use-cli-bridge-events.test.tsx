@@ -12,7 +12,7 @@ jest.mock("@/lib/tauri", () => ({
   isTauri: jest.fn(() => true),
 }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: {
     plugin: {
       info: jest.fn(),
@@ -43,9 +43,7 @@ function makeUnlisten() {
 }
 
 type EventName =
-  | "cli-bridge:plugin-installed"
-  | "cli-bridge:plugin-uninstalled"
-  | "plugin-hot-reload"
+  "cli-bridge:plugin-installed" | "cli-bridge:plugin-uninstalled" | "plugin-hot-reload"
 
 type Callback = (event: { payload: { plugin_id: string; source?: string; via?: string } }) => void
 

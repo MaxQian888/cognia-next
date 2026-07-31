@@ -1,6 +1,11 @@
 import { invoke } from "@tauri-apps/api/core"
 import { isTauri } from "@/lib/tauri"
-import { redactText } from "@/lib/twin/ingest/redact"
+import { redactText } from "@cognia/redact"
+import {
+  DEFAULT_REDACTION_KEYS,
+  DEFAULT_REDACTION_PATTERNS,
+  DEFAULT_REDACTION_REPLACEMENT,
+} from "@cognia/logging/redaction-patterns"
 
 /**
  * Frontend → Rust crash-context bridge. The renderer pushes a **redacted**
@@ -10,24 +15,52 @@ import { redactText } from "@/lib/twin/ingest/redact"
  * native-crash report.
  *
  * Secrets/PII are the red line: every string value is run through
- * `redactText` (`lib/twin/ingest/redact.ts`) before it crosses the boundary,
+ * `redactText` (`packages/redact/src/index.ts`) before it crosses the boundary,
  * so even an accidental token in a config field is scrubbed.
  */
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
 
+const SENSITIVE_CONFIG_KEYS = new Set(DEFAULT_REDACTION_KEYS.map((key) => normalizeKey(key)))
+
+function normalizeKey(key: string): string {
+  return key
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_")
+}
+
+function shouldRedactKey(key: string): boolean {
+  const normalized = normalizeKey(key)
+  return [...SENSITIVE_CONFIG_KEYS].some(
+    (candidate) => normalized === candidate || normalized.includes(candidate)
+  )
+}
+
+function redactSharedPatterns(value: string): string {
+  return DEFAULT_REDACTION_PATTERNS.reduce((current, pattern) => {
+    try {
+      return current.replace(new RegExp(pattern, "gi"), DEFAULT_REDACTION_REPLACEMENT)
+    } catch {
+      return current
+    }
+  }, value)
+}
+
 /** Deep-redact every string value in a JSON-shaped config object. */
-export function redactConfig(value: unknown): Json {
+export function redactConfig(value: unknown, keyHint?: string): Json {
   if (typeof value === "string") {
-    return redactText(value).redacted
+    const redacted = redactSharedPatterns(redactText(value).redacted)
+    if (redacted !== value) return redacted
+    return keyHint && shouldRedactKey(keyHint) ? DEFAULT_REDACTION_REPLACEMENT : redacted
   }
   if (Array.isArray(value)) {
-    return value.map(redactConfig)
+    return value.map((item) => redactConfig(item))
   }
   if (value && typeof value === "object") {
     const out: { [key: string]: Json } = {}
     for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
-      out[key] = redactConfig(val)
+      out[key] = redactConfig(val, key)
     }
     return out
   }

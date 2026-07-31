@@ -11,7 +11,6 @@ describe("lib/plugin/core re-exports", () => {
       "createPluginContext",
       "createFullPluginContext",
       "isFullPluginContext",
-      "PluginSandbox",
       "validatePluginManifest",
       "validatePluginConfig",
       "parseManifest",

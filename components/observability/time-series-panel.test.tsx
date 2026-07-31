@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { TimeSeriesPanel, buildChartConfig } from "./time-series-panel"
 import { panelById } from "./panel-registry"
 import { useObservabilitySeries } from "@/hooks/observability/use-observability-series"
@@ -66,5 +66,20 @@ describe("TimeSeriesPanel", () => {
     const series = makeSeries()
     render(<TimeSeriesPanel panel={panelById("ts-latency")!} series={series} />)
     expect(screen.getByTestId("ts-chart-ts-latency")).toBeInTheDocument()
+  })
+
+  it("shows a clickable legend for multi-series panels and toggles visibility", () => {
+    const series = makeSeries()
+    render(<TimeSeriesPanel panel={panelById("ts-latency")!} series={series} />)
+    const p95 = screen.getByTestId("ts-legend-ts-latency-p95")
+    expect(p95).toHaveAttribute("aria-pressed", "true")
+    fireEvent.click(p95)
+    expect(p95).toHaveAttribute("aria-pressed", "false")
+  })
+
+  it("omits the legend for single-series panels", () => {
+    const series = makeSeries()
+    render(<TimeSeriesPanel panel={panelById("ts-cost")!} series={series} />)
+    expect(screen.queryByTestId("ts-legend-ts-cost")).not.toBeInTheDocument()
   })
 })

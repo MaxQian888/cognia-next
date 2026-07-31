@@ -5,7 +5,7 @@
 // Pure module: no React, no DOM, no allocations beyond what the caller
 // destructures. Easy to test.
 
-import type { ThemeColors } from "@/types/plugin/plugin-extended"
+import type { ThemeColors } from "@/types/plugin/plugin"
 
 export interface ThemeIconSwatches {
   background: string

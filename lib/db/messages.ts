@@ -1,9 +1,31 @@
 import type { UIMessage } from "ai"
-import type { StoredMessage } from "@/lib/claude/types"
-import { getDb } from "./schema"
+import type { StoredMessage } from "@cognia/agent-config-types"
+import { markMessagesRemoved, markSessionDirty } from "@/lib/chat/search/indexer"
+import { getDb, withDbReopenRetry } from "./schema"
+import { resolveScopeProjectId } from "./project-scope"
 
 function newId() {
   return "m_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
+}
+
+/** Max characters kept in the denormalized {@link ChatSession.lastMessagePreview}. */
+const PREVIEW_MAX = 120
+
+/** Concatenate the text of a message's `text` parts (ignores tool/file parts). */
+function messageText(parts: StoredMessage["parts"]): string {
+  let out = ""
+  for (const p of parts ?? []) {
+    if (p && typeof p === "object" && (p as { type?: unknown }).type === "text") {
+      const t = (p as { text?: unknown }).text
+      if (typeof t === "string") out += (out ? " " : "") + t
+    }
+  }
+  return out
+}
+
+/** One-line, length-capped preview derived from a message's text parts. */
+function previewOf(parts: StoredMessage["parts"]): string {
+  return messageText(parts).replace(/\s+/g, " ").trim().slice(0, PREVIEW_MAX)
 }
 
 /**
@@ -28,6 +50,28 @@ export function invalidatePersistSnapshot(sessionId: string): void {
   persistSnapshots.delete(sessionId)
 }
 
+/**
+ * Metadata keys that `listMessages` synthesizes from top-level columns. They
+ * exist on the in-memory `UIMessage` purely so the UI can read them without
+ * threading props; the column is the source of truth, so `persistMessages`
+ * strips them back out rather than duplicating them into the metadata blob.
+ */
+const HOISTED_META_KEYS = ["senderId", "senderKind", "sessionId", "createdAt"] as const
+
+/**
+ * Drop the hoisted keys from a message's metadata ahead of a write. Returns
+ * `undefined` when nothing else remains, matching the "don't store an empty
+ * blob" convention.
+ */
+export function stripHoistedMeta(
+  meta: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  if (!meta) return undefined
+  const copy = { ...meta }
+  for (const key of HOISTED_META_KEYS) delete copy[key]
+  return Object.keys(copy).length > 0 ? copy : undefined
+}
+
 export async function listMessages(sessionId: string): Promise<UIMessage[]> {
   const rows = await getDb()
     .messages.where("[sessionId+createdAt]")
@@ -40,11 +84,16 @@ export async function listMessages(sessionId: string): Promise<UIMessage[]> {
       // read them off the in-memory UIMessage. (The store itself uses
       // ai.UIMessage which has no senderId field.)
       // We also surface `sessionId` so per-message components like the
-      // trigger badge can read it without threading new props.
+      // trigger badge can read it without threading new props, and `createdAt`
+      // so the timeline minimap and the message action bar can show a real
+      // wall-clock time instead of falling back to "now".
+      // Every key hoisted here MUST be listed in HOISTED_META_KEYS so the next
+      // persist strips it back out — the column stays the source of truth.
       const metadata: Record<string, unknown> = { ...(r.metadata ?? {}) }
       if (r.senderId !== undefined) metadata.senderId = r.senderId
       if (r.senderKind !== undefined) metadata.senderKind = r.senderKind
       metadata.sessionId = r.sessionId
+      metadata.createdAt = r.createdAt
       return {
         id: r.id,
         role: r.role,
@@ -66,9 +115,19 @@ export async function persistMessages(sessionId: string, messages: UIMessage[]):
   const db = getDb()
   const now = Date.now()
 
+  // Owning workspace for these rows (Workspace isolation, Dexie v86). Resolved
+  // once per call from the session — messages inherit their session's project.
+  // Falls back to the active project for a session row that predates the column.
+  const session = await db.sessions.get(sessionId)
+  const projectId = session?.projectId ?? (await resolveScopeProjectId())
+
   // Captured outside the transaction so we can fan-out trigger.chat.message
   // events for newly-arrived user messages once the rows are persisted.
   const newUserMessageIds: string[] = []
+
+  // The last message's resolved timestamp + parts, captured in the write loop
+  // so we can denormalize a preview onto the session row after commit.
+  let lastPreviewSource: { createdAt: number; parts: StoredMessage["parts"] } | null = null
 
   const snapshot = persistSnapshots.get(sessionId)
   // Built inside the transaction, applied to `persistSnapshots` only after the
@@ -77,109 +136,112 @@ export async function persistMessages(sessionId: string, messages: UIMessage[]):
   let nextSnapshot: Map<string, { ref: UIMessage; createdAt: number }> | null = null
   let clearSnapshot = false
 
-  await db.transaction("rw", db.messages, async () => {
-    // Existing ids for this session — used to compute deletions. `primaryKeys`
-    // reads the index only (no row/parts deserialization), so this stays cheap.
-    const existingIds = new Set(
-      await db.messages.where("sessionId").equals(sessionId).primaryKeys()
-    )
+  await withDbReopenRetry(() => {
+    const transactionDb = getDb()
+    newUserMessageIds.length = 0
+    lastPreviewSource = null
+    nextSnapshot = null
+    clearSnapshot = false
+    return transactionDb.transaction("rw", transactionDb.messages, () => {
+      // Existing ids for this session — used to compute deletions. `primaryKeys`
+      // reads the index only (no row/parts deserialization), so this stays cheap.
+      return transactionDb.messages
+        .where("sessionId")
+        .equals(sessionId)
+        .primaryKeys()
+        .then((existingKeys) => {
+          const existingIds = new Set(existingKeys as string[])
 
-    if (messages.length === 0) {
-      if (existingIds.size > 0) {
-        await db.messages.bulkDelete([...existingIds])
-      }
-      clearSnapshot = true
-      return
-    }
+          if (messages.length === 0) {
+            clearSnapshot = true
+            return existingIds.size > 0
+              ? transactionDb.messages.bulkDelete([...existingIds])
+              : undefined
+          }
 
-    // createdAt source: prefer the in-memory snapshot; only fetch rows from
-    // Dexie for ids that exist on disk but aren't cached (cold start). In
-    // steady-state streaming the snapshot covers every existing id, so this
-    // read — the old per-event full-table `bulkGet` — is skipped entirely.
-    const createdAtById = new Map<string, number>()
-    if (snapshot) {
-      for (const [id, entry] of snapshot) createdAtById.set(id, entry.createdAt)
-    }
-    const missingIds = [...existingIds].filter((id) => !createdAtById.has(id))
-    if (missingIds.length > 0) {
-      const fetched = await db.messages.bulkGet(missingIds)
-      for (const r of fetched) {
-        if (r) createdAtById.set(r.id, r.createdAt)
-      }
-    }
+          // createdAt source: prefer the in-memory snapshot; only fetch rows from
+          // Dexie for ids that exist on disk but aren't cached (cold start). In
+          // steady-state streaming the snapshot covers every existing id, so this
+          // read — the old per-event full-table `bulkGet` — is skipped entirely.
+          const createdAtById = new Map<string, number>()
+          if (snapshot) {
+            for (const [id, entry] of snapshot) createdAtById.set(id, entry.createdAt)
+          }
+          const missingIds = [...existingIds].filter((id) => !createdAtById.has(id))
 
-    // Only changed/new rows are written; unchanged ones are skipped via
-    // ref-equality against the snapshot. `incomingIds` still covers *all*
-    // messages so deletion stays computed against the full set.
-    const rows: StoredMessage[] = []
-    const incomingIds = new Set<string>()
-    nextSnapshot = new Map<string, { ref: UIMessage; createdAt: number }>()
+          const persistRows = (fetched: Array<StoredMessage | undefined>): Promise<void> => {
+            for (const row of fetched) {
+              if (row) createdAtById.set(row.id, row.createdAt)
+            }
 
-    for (let i = 0; i < messages.length; i++) {
-      const m = messages[i]
-      const id = m.id ?? newId()
-      incomingIds.add(id)
+            // Only changed/new rows are written; unchanged ones are skipped via
+            // ref-equality against the snapshot. `incomingIds` still covers *all*
+            // messages so deletion stays computed against the full set.
+            const rows: StoredMessage[] = []
+            const incomingIds = new Set<string>()
+            nextSnapshot = new Map<string, { ref: UIMessage; createdAt: number }>()
 
-      const createdAt = createdAtById.get(id) ?? now + i
-      // Record every message in the next snapshot regardless of whether we
-      // rewrite its row, so the next persist can skip it.
-      nextSnapshot.set(id, { ref: m, createdAt })
+            for (let i = 0; i < messages.length; i++) {
+              const message = messages[i]
+              const id = message.id ?? newId()
+              incomingIds.add(id)
 
-      // Skip rewriting a row whose in-memory reference is unchanged since the
-      // last committed persist *and* that still exists on disk. The adapter
-      // keeps refs stable for untouched messages, so this is the common case
-      // during streaming (only the trailing assistant message mutates).
-      const prevEntry = snapshot?.get(id)
-      if (prevEntry !== undefined && prevEntry.ref === m && existingIds.has(id)) {
-        continue
-      }
+              const createdAt = createdAtById.get(id) ?? now + i
+              nextSnapshot.set(id, { ref: message, createdAt })
+              if (i === messages.length - 1) {
+                lastPreviewSource = { createdAt, parts: message.parts }
+              }
 
-      // `metadata` may carry usage/cost info plus team-routing fields
-      // (senderId/senderKind). The latter are hoisted into top-level columns
-      // so we can index by senderId for fast lookups.
-      const meta = (m as { metadata?: Record<string, unknown> }).metadata
-      const senderId = typeof meta?.senderId === "string" ? meta.senderId : undefined
-      const senderKindRaw = meta?.senderKind
-      const senderKind =
-        senderKindRaw === "user" || senderKindRaw === "assistant" || senderKindRaw === "system"
-          ? senderKindRaw
-          : undefined
-      // Strip the routing keys from metadata so we don't persist them twice.
-      let strippedMeta: Record<string, unknown> | undefined = meta
-      if (meta && (senderId !== undefined || senderKind !== undefined)) {
-        const copy = { ...meta }
-        delete copy.senderId
-        delete copy.senderKind
-        strippedMeta = Object.keys(copy).length > 0 ? copy : undefined
-      }
-      rows.push({
-        id,
-        sessionId,
-        role: m.role,
-        parts: m.parts,
-        senderId,
-        senderKind,
-        metadata: strippedMeta,
-        createdAt,
-      })
-      // Track new user-role messages so we can fan out the chat-message
-      // trigger after the write commits.
-      if (!existingIds.has(id) && m.role === "user") {
-        newUserMessageIds.push(id)
-      }
-    }
+              const prevEntry = snapshot?.get(id)
+              if (prevEntry !== undefined && prevEntry.ref === message && existingIds.has(id)) {
+                continue
+              }
 
-    const toDelete: string[] = []
-    for (const id of existingIds) {
-      if (!incomingIds.has(id)) toDelete.push(id)
-    }
+              const meta = (message as { metadata?: Record<string, unknown> }).metadata
+              const senderId = typeof meta?.senderId === "string" ? meta.senderId : undefined
+              const senderKindRaw = meta?.senderKind
+              const senderKind =
+                senderKindRaw === "user" ||
+                senderKindRaw === "assistant" ||
+                senderKindRaw === "system"
+                  ? senderKindRaw
+                  : undefined
+              rows.push({
+                id,
+                sessionId,
+                projectId,
+                role: message.role,
+                parts: message.parts,
+                senderId,
+                senderKind,
+                metadata: stripHoistedMeta(meta),
+                createdAt,
+              })
+              if (!existingIds.has(id) && message.role === "user") {
+                newUserMessageIds.push(id)
+              }
+            }
 
-    if (toDelete.length > 0) {
-      await db.messages.bulkDelete(toDelete)
-    }
-    if (rows.length > 0) {
-      await db.messages.bulkPut(rows)
-    }
+            const toDelete = [...existingIds].filter((id) => !incomingIds.has(id))
+            if (toDelete.length > 0) {
+              return transactionDb.messages
+                .bulkDelete(toDelete)
+                .then(() =>
+                  rows.length > 0
+                    ? transactionDb.messages.bulkPut(rows).then(() => undefined)
+                    : undefined
+                )
+            }
+            return rows.length > 0
+              ? transactionDb.messages.bulkPut(rows).then(() => undefined)
+              : Promise.resolve()
+          }
+
+          return missingIds.length > 0
+            ? transactionDb.messages.bulkGet(missingIds).then(persistRows)
+            : persistRows([])
+        })
+    })
   })
 
   // Commit the cache only after the transaction resolved cleanly.
@@ -189,15 +251,107 @@ export async function persistMessages(sessionId: string, messages: UIMessage[]):
     persistSnapshots.set(sessionId, nextSnapshot)
   }
 
+  // Denormalize a preview of the last message onto the session row so the
+  // sidebar can render a preview line without a per-row message query. Written
+  // only on a message *boundary* (a different `lastMessageAt`) — never on
+  // in-place streaming text growth, which would rewrite the row on every token
+  // batch and churn the sidebar's `useLiveQuery`. A long streamed reply's
+  // preview may therefore show an early chunk; it refreshes on the next message.
+  // Re-widen: `lastPreviewSource` is only ever assigned inside the transaction
+  // closure, so the compiler's outer-flow type stays at its `null` initializer.
+  const previewSource = lastPreviewSource as {
+    createdAt: number
+    parts: StoredMessage["parts"]
+  } | null
+  if (previewSource && session) {
+    const boundaryChanged =
+      session.lastMessageAt !== previewSource.createdAt || session.lastMessagePreview === undefined
+    if (boundaryChanged) {
+      await withDbReopenRetry(() =>
+        getDb().sessions.update(sessionId, {
+          lastMessagePreview: previewOf(previewSource.parts),
+          lastMessageAt: previewSource.createdAt,
+        })
+      )
+    }
+  }
+
   if (newUserMessageIds.length > 0) {
     // Fire-and-forget so persistence is never blocked by the workflow
     // subsystem. Each user-message arrival is its own trigger event so a
     // workflow scoped to the session/character fans out once per message.
-    void dispatchChatMessageTriggers(sessionId, newUserMessageIds).catch(() => {
-      // Swallow — the trigger fan-out is best-effort and must not surface
-      // to the chat send pipeline.
-    })
+    void dispatchChatMessageTriggers(sessionId, newUserMessageIds, session?.characterId).catch(
+      () => {
+        // Swallow — the trigger fan-out is best-effort and must not surface
+        // to the chat send pipeline.
+      }
+    )
   }
+
+  // Derived search text trails persistence by design. Marking is O(1); the
+  // shared search hook drains and reconciles this session off the typing and
+  // streaming hot paths.
+  markSessionDirty(sessionId)
+}
+
+/**
+ * Persist an append-only stream update without reconciling the full session.
+ *
+ * This is deliberately narrower than {@link persistMessages}: callers may use
+ * it only for mid-turn growth where the message set/order is unchanged and the
+ * trailing message is the sole mutation. A missing or incompatible snapshot
+ * falls back to the full reconciler, so the first chunk and every message
+ * boundary retain the normal insertion/deletion guarantees.
+ */
+export async function persistStreamingMessages(
+  sessionId: string,
+  messages: UIMessage[]
+): Promise<void> {
+  const last = messages.at(-1)
+  const snapshot = persistSnapshots.get(sessionId)
+  const lastEntry = last?.id ? snapshot?.get(last.id) : undefined
+  const first = messages[0]
+  const previous = messages.length > 1 ? messages[messages.length - 2] : undefined
+  const snapshotMatches =
+    last !== undefined &&
+    last.id.length > 0 &&
+    snapshot !== undefined &&
+    snapshot.size === messages.length &&
+    lastEntry !== undefined &&
+    (first === undefined || snapshot.has(first.id)) &&
+    (previous === undefined || snapshot.has(previous.id))
+
+  if (!snapshotMatches) {
+    await persistMessages(sessionId, messages)
+    return
+  }
+
+  const meta = (last as { metadata?: Record<string, unknown> }).metadata
+  const senderId = typeof meta?.senderId === "string" ? meta.senderId : undefined
+  const senderKindRaw = meta?.senderKind
+  const senderKind =
+    senderKindRaw === "user" || senderKindRaw === "assistant" || senderKindRaw === "system"
+      ? senderKindRaw
+      : undefined
+  const updated = await getDb().messages.update(last.id, {
+    role: last.role,
+    parts: last.parts,
+    senderId,
+    senderKind,
+    metadata: stripHoistedMeta(meta),
+  })
+
+  // An out-of-band delete can invalidate an otherwise compatible in-memory
+  // snapshot. Recover through the full path instead of silently dropping the
+  // streamed row.
+  if (updated === 0) {
+    invalidatePersistSnapshot(sessionId)
+    await persistMessages(sessionId, messages)
+    return
+  }
+
+  snapshot.set(last.id, { ref: last, createdAt: lastEntry.createdAt })
+  markSessionDirty(sessionId)
 }
 
 /**
@@ -210,25 +364,24 @@ export async function persistMessages(sessionId: string, messages: UIMessage[]):
  */
 async function dispatchChatMessageTriggers(
   sessionId: string,
-  newUserMessageIds: string[]
+  newUserMessageIds: string[],
+  characterId?: string
 ): Promise<void> {
-  // Lazy-load the workflow runtime so messages.ts stays cheap to import
-  // from db-only callers. Eager static imports here pull the orchestrator,
-  // hooks system and trigger registries into every test that touches the
-  // Dexie schema and previously caused 1+ GB worker memory spikes.
-  const [{ dispatchTrigger }, { findMatchingWorkflows }, audit] = await Promise.all([
-    import("@/lib/workflow/runtime/trigger-bridge"),
-    import("@/lib/workflow/runtime/trigger-subscriptions"),
-    import("@/lib/chat/trigger-audit-ring"),
-  ])
-
-  const session = await getDb().sessions.get(sessionId)
-  const characterId = session?.characterId
+  // Resolve the lightweight in-memory subscription index first. Most messages
+  // have no matching workflow, so avoid loading the orchestrator/plugin graph
+  // (and touching Dexie again) on that overwhelmingly common path.
+  const { findMatchingWorkflows } = await import("@/lib/workflow/runtime/trigger-subscriptions")
   const matches = findMatchingWorkflows("trigger.chat.message", {
     characterId,
     sessionId,
   })
   if (matches.length === 0) return
+
+  // Lazy-load the heavy runtime only when dispatch work actually exists.
+  const [{ dispatchTrigger }, audit] = await Promise.all([
+    import("@/lib/workflow/runtime/trigger-bridge"),
+    import("@/lib/chat/trigger-audit-ring"),
+  ])
 
   const originAt = Date.now()
   await Promise.all(
@@ -237,6 +390,7 @@ async function dispatchChatMessageTriggers(
         dispatchTrigger({
           workflowId: match.workflowId,
           kind: "trigger.chat.message",
+          triggerId: match.nodeId,
           payload: { messageId, sessionId, characterId },
           originAt,
           binding: { sessionId, characterId },
@@ -274,6 +428,24 @@ async function dispatchChatMessageTriggers(
 export async function clearMessages(sessionId: string): Promise<void> {
   await getDb().messages.where("sessionId").equals(sessionId).delete()
   invalidatePersistSnapshot(sessionId)
+  markSessionDirty(sessionId)
+}
+
+/**
+ * Delete one persisted message and invalidate every derived view of that row.
+ *
+ * UI callers should use this helper instead of writing to the Dexie table
+ * directly so the persist snapshot and indexed global search cannot retain a
+ * message that no longer exists.
+ */
+export async function deleteStoredMessage(messageId: string): Promise<void> {
+  const db = getDb()
+  const row = await db.messages.get(messageId)
+  if (!row) return
+
+  await db.messages.delete(messageId)
+  invalidatePersistSnapshot(row.sessionId)
+  markMessagesRemoved([messageId])
 }
 
 /**
@@ -295,13 +467,8 @@ export async function updateMessageMetadata(
   const db = getDb()
   const row = await db.messages.get(messageId)
   if (!row || row.sessionId !== sessionId) return
-  const merged: Record<string, unknown> = { ...(row.metadata ?? {}), ...patch }
-  delete merged.senderId
-  delete merged.senderKind
-  delete merged.sessionId
-  await db.messages.update(messageId, {
-    metadata: Object.keys(merged).length > 0 ? merged : undefined,
-  })
+  const merged = stripHoistedMeta({ ...(row.metadata ?? {}), ...patch })
+  await db.messages.update(messageId, { metadata: merged })
   // The row changed out-of-band from the persist snapshot; drop it so the next
   // `persistMessages` re-derives existence/createdAt from disk.
   invalidatePersistSnapshot(sessionId)
@@ -336,4 +503,5 @@ export async function truncateAfter(
   // The on-disk row set changed out-of-band from `persistMessages`; drop the
   // cache so the next persist re-derives existence/createdAt from Dexie.
   invalidatePersistSnapshot(sessionId)
+  markSessionDirty(sessionId)
 }

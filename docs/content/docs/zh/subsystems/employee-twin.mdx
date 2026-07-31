@@ -117,7 +117,7 @@ flowchart LR
 
 ### 3. redact
 
-**这是隐私红线。** `lib/twin/ingest/redact.ts` 在**任何 embed 或 LLM 调用之前**把 PII 替换为 `<KIND_NNN>` 占位符：
+**这是隐私红线。** `packages/redact/src/index.ts` 在**任何 embed 或 LLM 调用之前**把 PII 替换为 `<KIND_NNN>` 占位符：
 
 | 类别        | 检测                                              |
 | ----------- | ------------------------------------------------- |
@@ -383,7 +383,7 @@ Team chat（多个孪生角色在同一轮回复）通过 `BuildOptionsContext.p
 ## 测试
 
 <Callout type="error" title="安全关键：脱敏测试">
-  `lib/twin/ingest/redact.test.ts` 是整个仓库最安全关键的测试 —— 在合成 PII 串语料上断言
+  `packages/redact/src/index.test.ts` 是整个仓库最安全关键的测试 —— 在合成 PII 串语料上断言
   `hasNoLeakingPii`。改动它必须极为谨慎；只能加 fixture，绝不能删。
 </Callout>
 
@@ -395,7 +395,7 @@ Team chat（多个孪生角色在同一轮回复）通过 `BuildOptionsContext.p
 | 目标                     | 文件                                                                              |
 | ------------------------ | --------------------------------------------------------------------------------- |
 | 加一种 ingest 格式       | `lib/twin/ingest/dispatch.ts`、`lib/document/document-processor.ts`、`parse.ts`   |
-| 加强脱敏                 | `lib/twin/ingest/redact.ts`（连同测试！）                                         |
+| 加强脱敏                 | `packages/redact/src/index.ts`（连同测试！）                                         |
 | 加新的蒸馏 agent         | `lib/twin/distill/agents/`，在 `orchestrator.ts` 注册并加 `withTimeoutOrFallback` |
 | 调整 runtime 上下文形态  | `lib/twin/runtime/system-prompt-template.ts`                                      |
 | 在新发送路径接入 runtime | 在你的 build-options helper 中调用 `applyTwinContext`                             |

@@ -33,14 +33,7 @@ export type PetEyes = "dot" | "sleepy" | "wide" | "wink" | "star" | "spiral"
 
 /** Cosmetic hats. `tinyduck` is legendary-only; `none` is the common default. */
 export type PetHat =
-  | "none"
-  | "crown"
-  | "tophat"
-  | "propeller"
-  | "halo"
-  | "wizard"
-  | "beanie"
-  | "tinyduck"
+  "none" | "crown" | "tophat" | "propeller" | "halo" | "wizard" | "beanie" | "tinyduck"
 
 /** Body silhouette — affects the skeleton proportions. */
 export type PetBodyType = "round" | "tall" | "wide"
@@ -75,3 +68,10 @@ export interface PetBones {
   palette: PetPalette
   stats: PetStats
 }
+
+/**
+ * User-chosen cosmetic overrides applied over the genetic bones at render time.
+ * Restyling only — restricted to the non-identity visuals so species, rarity,
+ * stars, shiny, and stats (which drive the dex + achievements) stay immutable.
+ */
+export type PetCosmeticOverride = Partial<Pick<PetBones, "palette" | "hat" | "eyes" | "bodyType">>

@@ -1,6 +1,7 @@
 import {
   DEFAULT_THRESHOLDS,
   evalThreshold,
+  mergeThresholds,
   thresholdColorVar,
   type ThresholdConfig,
 } from "./thresholds"
@@ -48,5 +49,24 @@ describe("thresholds", () => {
     expect(DEFAULT_THRESHOLDS.errorRate.direction).toBe("above")
     expect(DEFAULT_THRESHOLDS.cacheHitRate.direction).toBe("below")
     expect(DEFAULT_THRESHOLDS.latencyP95.crit).toBeGreaterThan(DEFAULT_THRESHOLDS.latencyP95.warn)
+  })
+
+  describe("mergeThresholds", () => {
+    it("returns the defaults object when overrides are undefined", () => {
+      expect(mergeThresholds(undefined)).toBe(DEFAULT_THRESHOLDS)
+    })
+
+    it("overrides warn/crit while keeping the metric's direction", () => {
+      const merged = mergeThresholds({ latencyP95: { warn: 100, crit: 200 } })
+      expect(merged.latencyP95).toEqual({ warn: 100, crit: 200, direction: "above" })
+      // Untouched metrics keep their defaults.
+      expect(merged.cost).toEqual(DEFAULT_THRESHOLDS.cost)
+    })
+
+    it("falls back to the default bound when an override value is non-finite", () => {
+      const merged = mergeThresholds({ cost: { warn: Number.NaN, crit: 99 } })
+      expect(merged.cost.warn).toBe(DEFAULT_THRESHOLDS.cost.warn)
+      expect(merged.cost.crit).toBe(99)
+    })
   })
 })

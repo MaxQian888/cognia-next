@@ -2,6 +2,11 @@
 
 import { pinnedFetch as defaultPinnedFetch, type PinnedFetchInit } from "@/lib/tauri/pinned-fetch"
 import type { CompanionConfig } from "@/lib/tauri/transport-companion"
+import {
+  buildRoomDescriptorV2,
+  generatePersistableV2SigningIdentity,
+  type RoomDescriptorV2,
+} from "@/lib/signaling/v2-crypto"
 
 import { getDeviceLabel, getDevicePlatform, safeText } from "./pair-helpers"
 
@@ -21,15 +26,29 @@ import { getDeviceLabel, getDevicePlatform, safeText } from "./pair-helpers"
  * collapse to the same `RedeemResult`.
  */
 
-/** Wire-format response from `/api/v1/auth/pair` and `/redeem-code`. */
+/**
+ * Wire-format response from `/api/v1/auth/pair` and `/redeem-code`.
+ *
+ * The Rust `PairResponse` serializes camelCase (`deviceJwt`, …) — asserted by
+ * `pair_flow_test.rs`. The snake_case variants are kept as tolerated aliases
+ * because this module historically read them; `runRedeem` accepts either.
+ */
 export interface PairResponseBody {
-  device_id: string
-  device_jwt: string
-  server_version: string
-  /** ADR-0021 — optional for legacy desktops without WebRTC support. */
+  deviceId?: string
+  deviceJwt?: string
+  serverVersion?: string
+  rendezvousId?: string
+  roomDescriptor?: RoomDescriptorV2
+  signalingKeyRef?: string
+  /** ADR-0059 C4 — local account this pairing routes to. */
+  accountId?: string
+  device_id?: string
+  device_jwt?: string
+  server_version?: string
   rendezvous_id?: string
-  /** ADR-0021 — 32-byte HMAC secret, URL-safe base64 (unpadded). */
-  rendezvous_secret?: string
+  room_descriptor?: RoomDescriptorV2
+  signaling_key_ref?: string
+  account_id?: string
 }
 
 export interface PairCommonOptions {
@@ -121,6 +140,16 @@ async function runRedeem(
   common: PairCommonOptions,
   fetcher: PairFetcher
 ): Promise<RedeemResult> {
+  let signalingIdentity: Awaited<ReturnType<typeof generatePersistableV2SigningIdentity>>
+  try {
+    signalingIdentity = await generatePersistableV2SigningIdentity()
+  } catch (error) {
+    return {
+      kind: "network_error",
+      message: error instanceof Error ? error.message : String(error),
+    }
+  }
+  payload.mobile_signing_key = signalingIdentity.encodedPublicKey
   let response: Response
   try {
     response = await fetcher(url, {
@@ -154,18 +183,57 @@ async function runRedeem(
   }
 
   const body = (await response.json()) as PairResponseBody
+  const deviceJwt = body.deviceJwt ?? body.device_jwt
+  const deviceId = body.deviceId ?? body.device_id
+  if (!deviceJwt || !deviceId) {
+    return {
+      kind: "http_error",
+      status: response.status,
+      rawBody: "pair response missing deviceJwt/deviceId",
+    }
+  }
   const config: CompanionConfig = {
     baseUrl: trimSlash(common.baseUrl),
-    deviceJwt: body.device_jwt,
-    deviceId: body.device_id,
-    serverVersion: body.server_version,
+    deviceJwt,
+    deviceId,
+    serverVersion: body.serverVersion ?? body.server_version ?? "unknown",
   }
   if (common.serverFingerprint) {
     config.serverFingerprint = common.serverFingerprint
   }
-  if (body.rendezvous_id && body.rendezvous_secret) {
-    config.rendezvousId = body.rendezvous_id
-    config.rendezvousSecret = body.rendezvous_secret
+  const rendezvousId = body.rendezvousId ?? body.rendezvous_id
+  const roomDescriptor = body.roomDescriptor ?? body.room_descriptor
+  if (!rendezvousId || !roomDescriptor || roomDescriptor.v !== 2) {
+    return {
+      kind: "http_error",
+      status: response.status,
+      rawBody: "pair response missing signaling v2 room descriptor",
+    }
+  }
+  const verifiedDescriptor = await buildRoomDescriptorV2({
+    roomNonce: roomDescriptor.roomNonce,
+    desktopSigningKey: roomDescriptor.desktopSigningKey,
+    mobileSigningKey: roomDescriptor.mobileSigningKey,
+    notAfter: roomDescriptor.notAfter,
+  })
+  if (
+    verifiedDescriptor.roomId !== rendezvousId ||
+    verifiedDescriptor.roomId !== roomDescriptor.roomId ||
+    roomDescriptor.mobileSigningKey !== signalingIdentity.encodedPublicKey
+  ) {
+    return {
+      kind: "http_error",
+      status: response.status,
+      rawBody: "pair response signaling v2 descriptor verification failed",
+    }
+  }
+  config.rendezvousId = rendezvousId
+  config.signalingRoomDescriptor = roomDescriptor
+  config.signalingPrivateKeyJwk = signalingIdentity.privateKeyJwk
+  config.signalingPrivateKey = signalingIdentity.privateKey
+  const accountId = body.accountId ?? body.account_id
+  if (accountId) {
+    config.accountId = accountId
   }
   return { kind: "ok", body, config }
 }

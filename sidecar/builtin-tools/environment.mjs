@@ -150,14 +150,71 @@ export const systemInfoTool = tool(
   { alwaysLoad: true }
 )
 
+// ---- current_time ---------------------------------------------------------
+
+const currentTimeShape = {
+  timezone: z
+    .string()
+    .optional()
+    .describe(
+      "IANA timezone for the `local` field (e.g. 'America/New_York', 'Asia/Shanghai'). Defaults to the host timezone. UTC fields are always returned regardless."
+    ),
+}
+
+async function execCurrentTime(args) {
+  try {
+    const now = new Date()
+    const systemTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+    const timezone =
+      typeof args.timezone === "string" && args.timezone.length > 0 ? args.timezone : systemTimeZone
+
+    let local
+    try {
+      local = new Intl.DateTimeFormat("en-CA", {
+        timeZone: timezone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+        timeZoneName: "short",
+      }).format(now)
+    } catch {
+      return toolError(new Error(`Invalid timezone: ${args.timezone}`), "current_time")
+    }
+
+    return toolText({
+      iso: now.toISOString(),
+      utc: now.toUTCString(),
+      epochMs: now.getTime(),
+      epochSec: Math.floor(now.getTime() / 1000),
+      timezone,
+      local,
+    })
+  } catch (err) {
+    return toolError(err, "current_time")
+  }
+}
+
+export const currentTimeTool = tool(
+  "current_time",
+  "Get the current date and time. Returns UTC (iso/utc/epoch) plus a localized string for the given IANA timezone (defaults to the host timezone). Use this whenever you need to know the current time instead of guessing.",
+  currentTimeShape,
+  execCurrentTime,
+  { alwaysLoad: true }
+)
+
 // ---- Exports --------------------------------------------------------------
 
-export const environmentTools = [listEnvTool, getEnvTool, systemInfoTool]
+export const environmentTools = [listEnvTool, getEnvTool, systemInfoTool, currentTimeTool]
 
 export const __testExports = {
   execListEnv,
   execGetEnv,
   execSystemInfo,
+  execCurrentTime,
   isSecretKey,
   redactValue,
   safeUser,

@@ -33,6 +33,19 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "
   pending: "outline",
 }
 
+/**
+ * Whether a `trigger.team` run row is one of THIS team's synthesized runs.
+ * Synthesized team runs stamp exactly `{ teamId }`; user workflows started by
+ * the "on team finished" fan-out share the trigger kind but carry
+ * `event: "team.completed"` — exclude them so the team's run history shows
+ * only its own runs. Exported for tests (and reused by the CLI status
+ * projection, which must apply the same filter).
+ */
+export function isSynthesizedTeamRunPayload(payload: unknown, teamId: string): boolean {
+  const p = payload as { teamId?: string; event?: string } | undefined
+  return p?.teamId === teamId && p?.event === undefined
+}
+
 export function TeamRunsList({ teamId }: TeamRunsListProps): React.ReactElement {
   const t = useTranslations("agentTeam.runs")
   const runs = useLiveQuery(
@@ -43,10 +56,7 @@ export function TeamRunsList({ teamId }: TeamRunsListProps): React.ReactElement 
         .equals("trigger.team")
         .reverse()
         .sortBy("startedAt")
-      return all.filter((r) => {
-        const payload = r.triggerPayload as { teamId?: string } | undefined
-        return payload?.teamId === teamId
-      })
+      return all.filter((r) => isSynthesizedTeamRunPayload(r.triggerPayload, teamId))
     },
     [teamId],
     [] as WorkflowRunRow[]

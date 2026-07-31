@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { getStorageUsage, formatBytes } from "./usage"
 import type { BackupHistoryRow } from "@/lib/db/backup-history"
 

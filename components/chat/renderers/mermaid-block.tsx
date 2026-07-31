@@ -2,49 +2,87 @@
 
 import { useEffect, useRef, useState, useCallback } from "react"
 import { useTranslations } from "next-intl"
-import { AlertCircle, Copy, Check, Maximize2, Code2, Download, RefreshCw } from "lucide-react"
+import { AlertCircle, Copy, Check, Maximize2, Code2, Download, RefreshCw, Play } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { useCopy } from "@/hooks/ui/use-copy"
+import { useNearViewport } from "@/hooks/chat/use-near-viewport"
 import { downloadBlob } from "@/lib/files/download"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
+import {
+  getCachedMermaid,
+  readMermaidTheme,
+  renderMermaidCached,
+  subscribeMermaidTheme,
+} from "@cognia/mermaid"
 
 interface MermaidBlockProps {
   content: string
   className?: string
 }
 
+/**
+ * Source length past which the diagram is not rendered until asked for.
+ *
+ * Mermaid layout is superlinear in node count: a few hundred nodes is seconds
+ * of blocked main thread and megabytes of SVG. Past this point the block shows
+ * the source with a render button instead of freezing the transcript on the
+ * way past. Roughly a 200-node flowchart.
+ */
+export const MERMAID_AUTO_RENDER_MAX_CHARS = 8_000
+
+/** Synchronous cache lookup used to seed initial state (no Skeleton flash). */
+function seedMermaidSvg(content: string): string {
+  if (typeof document === "undefined") return ""
+  return getCachedMermaid(readMermaidTheme(), content.trim()) ?? ""
+}
+
 export function MermaidBlock({ content, className }: MermaidBlockProps) {
   const t = useTranslations("chat.renderers.mermaid")
   const containerRef = useRef<HTMLDivElement>(null)
   const fullscreenRef = useRef<HTMLDivElement>(null)
-  const [svg, setSvg] = useState<string>("")
+  // Seed from the shared render cache: a re-scrolled (or repeated) diagram
+  // paints synchronously instead of flashing the loading Skeleton while
+  // `mermaid.render` re-runs.
+  const [svg, setSvg] = useState<string>(() => seedMermaidSvg(content))
   const [error, setError] = useState<string | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
+  const [isLoading, setIsLoading] = useState(() => seedMermaidSvg(content) === "")
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [showSource, setShowSource] = useState(false)
   const { copied, copy } = useCopy({ logger: loggers.chat, scope: "chat" })
 
+  const oversized = content.length > MERMAID_AUTO_RENDER_MAX_CHARS
+  const [renderRequested, setRenderRequested] = useState(false)
+  // Already cached (a remount, or a second copy of the same diagram) costs
+  // nothing to paint, so don't make the user ask for it.
+  const deferred = oversized && !renderRequested && svg === ""
+
+  // Don't lay out every diagram in the transcript during the initial paint —
+  // wait until each is roughly a screen away. Latches, so scrolling back and
+  // forth never re-renders. A diagram already served from cache skips the
+  // observer entirely.
+  const near = useNearViewport(containerRef, { disabled: svg !== "" })
+
   const renderMermaid = useCallback(async () => {
+    const themeKey = readMermaidTheme()
+    const source = content.trim()
+
+    // Cache hit → paint immediately, skip the (expensive) render entirely.
+    const cached = getCachedMermaid(themeKey, source)
+    if (cached !== undefined) {
+      setSvg(cached)
+      setError(null)
+      setIsLoading(false)
+      return
+    }
+
     try {
       setIsLoading(true)
       setError(null)
-
-      const mermaid = (await import("mermaid")).default
-      const isDark = document.documentElement.classList.contains("dark")
-
-      mermaid.initialize({
-        startOnLoad: false,
-        theme: isDark ? "dark" : "default",
-        securityLevel: "loose",
-        fontFamily: "system-ui, -apple-system, sans-serif",
-      })
-
-      const id = `mermaid-${Date.now()}-${Math.random().toString(36).slice(2)}`
-      const { svg: renderedSvg } = await mermaid.render(id, content.trim())
-
+      const renderedSvg = await renderMermaidCached(themeKey, source)
       setSvg(renderedSvg)
       setIsLoading(false)
     } catch (err) {
@@ -57,6 +95,7 @@ export function MermaidBlock({ content, className }: MermaidBlockProps) {
   }, [content, t])
 
   useEffect(() => {
+    if (!near || deferred) return
     let mounted = true
     const doRender = async () => {
       if (mounted) {
@@ -67,20 +106,18 @@ export function MermaidBlock({ content, className }: MermaidBlockProps) {
     return () => {
       mounted = false
     }
-  }, [renderMermaid])
+  }, [renderMermaid, near, deferred])
 
-  // Re-render on theme change.
+  // Re-render on theme change, through the one observer shared by every
+  // diagram (`@cognia/mermaid/theme-source`). This block used to own a
+  // `MutationObserver` on `<html>`, so a transcript with fifty diagrams ran
+  // fifty observers that all woke on any attribute change, theme or not.
   useEffect(() => {
-    if (typeof window === "undefined") return
-    const observer = new MutationObserver(() => {
+    if (deferred) return
+    return subscribeMermaidTheme(() => {
       void renderMermaid()
     })
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    })
-    return () => observer.disconnect()
-  }, [renderMermaid])
+  }, [renderMermaid, deferred])
 
   const handleCopy = useCallback(async () => {
     await copy(content)
@@ -96,9 +133,34 @@ export function MermaidBlock({ content, className }: MermaidBlockProps) {
     void renderMermaid()
   }, [renderMermaid])
 
+  // A diagram past the auto-render budget: show the source and let the reader
+  // decide. Rendering it would block the main thread for seconds, and doing
+  // that to someone scrolling past a transcript is worse than asking.
+  if (deferred) {
+    return (
+      <div
+        ref={containerRef}
+        className={cn("my-4 flex flex-col gap-3 rounded-lg border bg-card p-4", className)}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm text-muted-foreground">
+            {t("tooLarge", { chars: content.length })}
+          </p>
+          <Button variant="secondary" size="sm" onClick={() => setRenderRequested(true)}>
+            <Play className="mr-1 h-3.5 w-3.5" />
+            {t("renderAnyway")}
+          </Button>
+        </div>
+        <pre className="max-h-40 overflow-auto rounded bg-muted/50 p-2 font-mono text-xs">
+          <code>{content}</code>
+        </pre>
+      </div>
+    )
+  }
+
   if (isLoading) {
     return (
-      <div className={cn("my-4 rounded-lg border bg-card p-4", className)}>
+      <div ref={containerRef} className={cn("my-4 rounded-lg border bg-card p-4", className)}>
         <Skeleton className="h-32 w-full" />
       </div>
     )
@@ -157,7 +219,7 @@ export function MermaidBlock({ content, className }: MermaidBlockProps) {
         role="figure"
         aria-label={t("diagramLabel")}
       >
-        <div className="absolute top-2 right-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity z-10 bg-background/80 rounded-lg p-0.5">
+        <div className="absolute top-2 right-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 transition-opacity z-10 bg-background/80 rounded-lg p-0.5">
           <TooltipIconButton
             variant="ghost"
             size="icon"

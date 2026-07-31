@@ -14,13 +14,10 @@ import {
  * (`m.in_reply_to`), threads (`m.thread`), and typing notifications are all
  * first-class.
  *
- * `send.image` / `send.file` are intentionally omitted: outbound media
- * requires uploading to the homeserver's media repo (`/_matrix/media`) with
- * a binary body, which the string-only Tauri HTTP proxy cannot carry in
- * Phase 1. Image / file segments degrade to a link in the message body (the
- * default degrade chain → `text`), which is honest about what the adapter
- * actually delivers. Outbound media upload is tracked for the Phase 4 media
- * pipeline.
+ * Media (`send.image` / `send.voice` / `send.video` / `send.file`) is native:
+ * the TS adapter asks the Tauri media-upload command to PUT/POST bytes to the
+ * homeserver media repository, then sends `m.image` / `m.file` / `m.audio` /
+ * `m.video` room events that reference the returned `mxc://` URI.
  *
  * Kept in alphabetical order for stable diffs.
  */
@@ -28,12 +25,16 @@ export const MATRIX_CAPS: readonly Capability[] = [
   "delete",
   "edit",
   "send.a2ui",
+  "send.file",
+  "send.image",
   "send.markdown",
   "send.mention",
   "send.reaction",
   "send.reply",
   "send.text",
   "send.thread",
+  "send.video",
+  "send.voice",
   "typing",
 ] as const
 
@@ -56,8 +57,10 @@ export const MATRIX_CAPS: readonly Capability[] = [
  *   - TextField / TextArea: same reply-correlation path.
  *
  * Fallback (rendered via `plainTextMirror`):
- *   - Image: clients block remote `<img>` `src` by default and outbound
- *     media upload is deferred, so an Image projects to its alt text.
+ *   - Image: an A2UI `Image` sub-component inside a surface is NOT uploaded to
+ *     the media repo — `a2uiToMatrixHtml` degrades it to an `[alt]` text
+ *     placeholder. (The native upload pipeline described above applies only to
+ *     top-level `image` MESSAGE segments, not A2UI Image nodes.)
  *   - Everything else (Checkbox / Slider / DatePicker / Table / Chart /
  *     overlay widgets) degrades to the plain-text mirror.
  */
@@ -75,5 +78,9 @@ export const MATRIX_A2UI_CAPABILITY: A2UICapabilityMatrix = buildA2UICapabilityM
   RadioGroup: "simulated",
   TextField: "simulated",
   TextArea: "simulated",
+  // A2UI Image degrades to an `[alt]` text placeholder in a2uiToMatrixHtml —
+  // it is not uploaded as native media (that path is only for top-level image
+  // message segments). Declaring it "native" mislead the assistant into
+  // emitting images that render as bare `[alt]` text for the recipient.
   Image: "fallback",
 })

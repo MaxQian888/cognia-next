@@ -27,9 +27,33 @@ const mockOnDeepLink = jest.fn().mockImplementation(async (handler: (urls: strin
   capturedDeepLinkHandler = handler
   return jest.fn() // unsubscribe fn
 })
+const mockLaunchDeepLink = jest.fn(async (): Promise<string[] | null> => null)
 jest.mock("@/lib/tauri/deep-link", () => ({
   onDeepLink: (...args: unknown[]) => mockOnDeepLink(...args),
+  getLaunchDeepLink: () => mockLaunchDeepLink(),
 }))
+
+// ── Mock Capacitor deeplink + browser (mobile branch) ────────────────────────
+let capturedCapHandler: ((route: { raw: string }) => void) | null = null
+const mockCapSubscribe = jest.fn(async (handler: (route: { raw: string }) => void) => {
+  capturedCapHandler = handler
+  return jest.fn()
+})
+const mockCapLaunchRoute = jest.fn(async (): Promise<{ raw: string } | null> => null)
+jest.mock("@/lib/capacitor/deeplink", () => ({
+  subscribe: (handler: (route: { raw: string }) => void) => mockCapSubscribe(handler),
+  getLaunchRoute: () => mockCapLaunchRoute(),
+}))
+const mockCapBrowserClose = jest.fn(async () => ({ kind: "ok" }))
+jest.mock("@/lib/capacitor/browser", () => ({
+  close: () => mockCapBrowserClose(),
+}))
+
+function setCapacitor(on: boolean) {
+  const w = window as unknown as Record<string, unknown>
+  if (on) w.Capacitor = { isNativePlatform: () => true }
+  else delete w.Capacitor
+}
 
 // ── Mock toast ────────────────────────────────────────────────────────────────
 const mockToastError = jest.fn()
@@ -48,11 +72,16 @@ function setOAuthState(state: string) {
 
 function clearOAuthState() {
   sessionStorage.removeItem("connector-oauth-state")
+  localStorage.removeItem("connector-oauth-state")
 }
 
 beforeEach(() => {
   jest.clearAllMocks()
   capturedDeepLinkHandler = null
+  capturedCapHandler = null
+  mockCapLaunchRoute.mockResolvedValue(null)
+  mockLaunchDeepLink.mockResolvedValue(null)
+  setCapacitor(false)
   oauthRegistry.clear()
   clearOAuthState()
 })
@@ -207,6 +236,100 @@ describe("ConnectorDeepLinkRouter", () => {
     await waitFor(() => {
       expect(mockToastError).toHaveBeenCalledWith(expect.stringContaining("token exchange failed"))
     })
+  })
+
+  it("replays a cold-start desktop launch URL, validating state from durable localStorage", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    // Cold-start: sessionStorage is empty; only the durable localStorage
+    // mirror carries the state (as the relay bounce would leave it).
+    localStorage.setItem("connector-oauth-state", "valid-state")
+    const fakeHandler = jest.fn().mockResolvedValue(undefined)
+    oauthRegistry.set("lark", fakeHandler)
+    mockLaunchDeepLink.mockResolvedValue([
+      "cognia://connector/oauth/lark?code=cold-code&state=valid-state",
+    ])
+
+    render(
+      <ConnectorDeepLinkRouter>
+        <div />
+      </ConnectorDeepLinkRouter>
+    )
+
+    await waitFor(() => {
+      expect(fakeHandler).toHaveBeenCalledWith("cold-code", "valid-state")
+      expect(mockToastSuccess).toHaveBeenCalledWith("lark connected successfully")
+    })
+    // State is cleared on use (both copies).
+    expect(sessionStorage.getItem("connector-oauth-state")).toBeNull()
+    expect(localStorage.getItem("connector-oauth-state")).toBeNull()
+  })
+
+  it("handles connector OAuth callbacks on the Capacitor shell (appUrlOpen)", async () => {
+    mockedIsTauri.mockReturnValue(false)
+    setCapacitor(true)
+    setOAuthState("valid-state")
+
+    const fakeHandler = jest.fn().mockResolvedValue(undefined)
+    oauthRegistry.set("slack", fakeHandler)
+
+    render(
+      <ConnectorDeepLinkRouter>
+        <div />
+      </ConnectorDeepLinkRouter>
+    )
+    await waitFor(() => expect(capturedCapHandler).not.toBeNull())
+
+    const raw = "cognia://connector/oauth/slack?code=exchange-code&state=valid-state"
+    capturedCapHandler!({ raw })
+    await waitFor(() => {
+      expect(fakeHandler).toHaveBeenCalledWith("exchange-code", "valid-state")
+      expect(mockToastSuccess).toHaveBeenCalledWith("slack connected successfully")
+    })
+    // The in-app browser sheet that hosted the authorize page is dismissed.
+    expect(mockCapBrowserClose).toHaveBeenCalled()
+
+    // Same URL again (e.g. launch replay) is deduped.
+    capturedCapHandler!({ raw })
+    await new Promise((r) => setTimeout(r, 30))
+    expect(fakeHandler).toHaveBeenCalledTimes(1)
+  })
+
+  it("replays a cold-start connector OAuth launch URL on Capacitor", async () => {
+    mockedIsTauri.mockReturnValue(false)
+    setCapacitor(true)
+    setOAuthState("valid-state")
+    const fakeHandler = jest.fn().mockResolvedValue(undefined)
+    oauthRegistry.set("slack", fakeHandler)
+    mockCapLaunchRoute.mockResolvedValue({
+      raw: "cognia://connector/oauth/slack?code=cold-code&state=valid-state",
+    })
+
+    render(
+      <ConnectorDeepLinkRouter>
+        <div />
+      </ConnectorDeepLinkRouter>
+    )
+    await waitFor(() => {
+      expect(fakeHandler).toHaveBeenCalledWith("cold-code", "valid-state")
+    })
+  })
+
+  it("ignores non-connector routes on Capacitor (pair / share / oauth/<provider>)", async () => {
+    mockedIsTauri.mockReturnValue(false)
+    setCapacitor(true)
+    render(
+      <ConnectorDeepLinkRouter>
+        <div />
+      </ConnectorDeepLinkRouter>
+    )
+    await waitFor(() => expect(capturedCapHandler).not.toBeNull())
+
+    capturedCapHandler!({ raw: "cognia://oauth/claude?code=x" })
+    capturedCapHandler!({ raw: "cognia://pair?payload=x" })
+    await new Promise((r) => setTimeout(r, 30))
+    expect(mockToastError).not.toHaveBeenCalled()
+    expect(mockToastSuccess).not.toHaveBeenCalled()
+    expect(mockCapBrowserClose).not.toHaveBeenCalled()
   })
 
   it("renders children", () => {

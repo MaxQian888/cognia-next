@@ -25,6 +25,7 @@ describe("appendMemory", () => {
       scope: "project",
       content: "remember this",
       cwd: "/cwd",
+      allowedRoots: null,
     })
   })
 
@@ -36,12 +37,26 @@ describe("appendMemory", () => {
       scope: "user",
       content: "x",
       cwd: null,
+      allowedRoots: null,
     })
     await appendMemory("user", "x", undefined)
     expect(mockedInvoke).toHaveBeenLastCalledWith("memory_append", {
       scope: "user",
       content: "x",
       cwd: null,
+      allowedRoots: null,
+    })
+  })
+
+  it("forwards the active workspace roots when supplied (project confinement)", async () => {
+    mockedIsTauri.mockReturnValue(true)
+    mockedInvoke.mockResolvedValue("/p/CLAUDE.md")
+    await appendMemory("project", "note", "/ws/app", ["/ws/app", "/ws/lib"])
+    expect(mockedInvoke).toHaveBeenLastCalledWith("memory_append", {
+      scope: "project",
+      content: "note",
+      cwd: "/ws/app",
+      allowedRoots: ["/ws/app", "/ws/lib"],
     })
   })
 

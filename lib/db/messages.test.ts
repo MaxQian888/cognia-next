@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Coverage for the messages CRUD layer — list/persist/clear/truncateAfter.
 // Persistence is diff-based so we exercise the upsert-vs-delete branches
 // directly, plus the metadata hoisting (senderId/senderKind) round-trip.
@@ -6,12 +7,26 @@ import "fake-indexeddb/auto"
 import type { UIMessage } from "ai"
 import {
   clearMessages,
+  deleteStoredMessage,
   listMessages,
   persistMessages,
+  persistStreamingMessages,
   truncateAfter,
   updateMessageMetadata,
 } from "./messages"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+
+jest.setTimeout(30_000)
+
+async function putSession(id: string, projectId = "proj-A"): Promise<void> {
+  await getDb().sessions.put({
+    id,
+    projectId,
+    title: id,
+    updatedAt: 1,
+    createdAt: 1,
+  } as never)
+}
 
 beforeEach(async () => {
   await getDb().delete()
@@ -19,7 +34,9 @@ beforeEach(async () => {
   getDb()
   await whenSeeded()
   await getDb().messages.clear()
-})
+  // The first cold open builds the full Dexie schema (now v99) which can exceed
+  // the default 5s hook budget under fake-indexeddb — give it room.
+}, 30_000)
 
 function msg(
   id: string,
@@ -71,6 +88,28 @@ describe("persistMessages + listMessages", () => {
     expect(stored?.metadata).toBeUndefined()
   })
 
+  it("hydrates the createdAt column onto metadata for the UI layer", async () => {
+    // The timeline minimap and the message action bar both read
+    // `metadata.createdAt`; without this hoist they silently render no time
+    // (timeline) or a bogus "now" (renderer fallback).
+    await persistMessages("s1", [msg("t1", "user", "when?")])
+    const stored = await getDb().messages.get("t1")
+    const list = await listMessages("s1")
+    const out = list[0] as UIMessage & { metadata?: Record<string, unknown> }
+    expect(out.metadata?.createdAt).toBe(stored?.createdAt)
+    expect(typeof out.metadata?.createdAt).toBe("number")
+  })
+
+  it("does not persist a hydrated createdAt back into the metadata blob", async () => {
+    // Round-trip: listMessages hoists createdAt in, persistMessages must strip
+    // it back out so the column stays the single source of truth.
+    await persistMessages("s1", [msg("t2", "user", "hi", { usage: { tokens: 3 } })])
+    const [loaded] = await listMessages("s1")
+    await persistMessages("s1", [loaded])
+    const stored = await getDb().messages.get("t2")
+    expect(stored?.metadata).toEqual({ usage: { tokens: 3 } })
+  })
+
   it("ignores invalid senderKind values", async () => {
     await persistMessages("s1", [msg("bad-kind", "assistant", "hey", { senderKind: "robot" })])
     const stored = await getDb().messages.get("bad-kind")
@@ -117,6 +156,26 @@ describe("persistMessages + listMessages", () => {
     expect(all).toHaveLength(1)
     expect(all[0].id).toMatch(/^m_/)
   })
+
+  it("updates only the trailing streaming row without scanning the session index", async () => {
+    const first = msg("a", "assistant", "preface")
+    const partial = msg("b", "assistant", "partial")
+    await persistMessages("s-stream", [first, partial])
+    const original = await getDb().messages.get("b")
+    const whereSpy = jest.spyOn(getDb().messages, "where")
+
+    await persistStreamingMessages("s-stream", [
+      first,
+      msg("b", "assistant", "partial response completed"),
+    ])
+
+    expect(whereSpy).not.toHaveBeenCalledWith("sessionId")
+    whereSpy.mockRestore()
+    const stored = await getDb().messages.get("b")
+    expect(stored?.parts).toEqual([{ type: "text", text: "partial response completed" }])
+    expect(stored?.createdAt).toBe(original?.createdAt)
+    expect(await getDb().messages.get("a")).toBeDefined()
+  }, 60_000)
 })
 
 describe("clearMessages", () => {
@@ -126,6 +185,20 @@ describe("clearMessages", () => {
     await clearMessages("s1")
     expect(await listMessages("s1")).toHaveLength(0)
     expect(await listMessages("s2")).toHaveLength(1)
+  })
+})
+
+describe("deleteStoredMessage", () => {
+  it("deletes only the requested row", async () => {
+    await persistMessages("s1", [msg("a", "user", "1"), msg("b", "assistant", "2")])
+
+    await deleteStoredMessage("a")
+
+    expect((await listMessages("s1")).map((message) => message.id)).toEqual(["b"])
+  })
+
+  it("ignores an unknown message id", async () => {
+    await expect(deleteStoredMessage("missing")).resolves.toBeUndefined()
   })
 })
 
@@ -218,5 +291,52 @@ describe("truncateAfter", () => {
     await persistMessages("s1", [msg("a", "user", "1"), msg("b", "user", "2")])
     await truncateAfter("s1", "b")
     expect((await listMessages("s1")).length).toBe(2)
+  })
+})
+
+describe("workspace (project) scoping", () => {
+  it("stamps each message with the owning session's projectId", async () => {
+    await getDb().sessions.put({
+      id: "s-scoped",
+      projectId: "proj-A",
+      title: "a",
+      updatedAt: 1,
+      createdAt: 1,
+    } as never)
+    await persistMessages("s-scoped", [msg("m1", "user", "hi")])
+    expect((await getDb().messages.get("m1"))?.projectId).toBe("proj-A")
+  })
+})
+
+describe("last-message preview denormalization", () => {
+  it("writes a capped preview + timestamp onto the session row", async () => {
+    await putSession("s-prev")
+    await persistMessages("s-prev", [msg("a", "user", "hello world")])
+    const row = await getDb().sessions.get("s-prev")
+    expect(row?.lastMessagePreview).toBe("hello world")
+    expect(typeof row?.lastMessageAt).toBe("number")
+  })
+
+  it("updates the preview on a new message boundary but not on in-place growth", async () => {
+    await putSession("s-prev")
+    await persistMessages("s-prev", [msg("a", "user", "hello")])
+    await persistMessages("s-prev", [msg("a", "user", "hello"), msg("b", "assistant", "wor")])
+    const afterBoundary = await getDb().sessions.get("s-prev")
+    expect(afterBoundary?.lastMessagePreview).toBe("wor")
+    const atBoundary = afterBoundary?.lastMessageAt
+
+    // Same last message id "b", grown text → boundary unchanged → preview frozen.
+    await persistMessages("s-prev", [
+      msg("a", "user", "hello"),
+      msg("b", "assistant", "wor... a much longer streamed reply"),
+    ])
+    const afterGrowth = await getDb().sessions.get("s-prev")
+    expect(afterGrowth?.lastMessagePreview).toBe("wor")
+    expect(afterGrowth?.lastMessageAt).toBe(atBoundary)
+  })
+
+  it("skips denormalization when no session row exists", async () => {
+    await persistMessages("s-orphan", [msg("a", "user", "hi")])
+    expect(await getDb().sessions.get("s-orphan")).toBeUndefined()
   })
 })

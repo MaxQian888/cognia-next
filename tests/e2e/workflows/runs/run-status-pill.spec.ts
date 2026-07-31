@@ -2,7 +2,7 @@
  * E2E: status pill colors / labels match the run row's status.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../../helpers/db-reset"
 import { seedAndOpenWorkflow, seedRun } from "../../helpers/seed-workflow"
 
@@ -17,7 +17,7 @@ test.describe("workflow run — status pill", () => {
     await seedRun(page, wfId, "succeeded")
     await seedRun(page, wfId, "failed")
     await seedRun(page, wfId, "running")
-    await page.goto(`/workflows/${wfId}/runs`)
+    await page.goto(`/workflows/runs?id=${wfId}`)
     await expect(page.getByTestId("run-status-succeeded")).toHaveCount(1)
     await expect(page.getByTestId("run-status-failed")).toHaveCount(1)
     await expect(page.getByTestId("run-status-running")).toHaveCount(1)

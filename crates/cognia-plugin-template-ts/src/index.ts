@@ -1,43 +1,78 @@
 /**
  * Cognia frontend plugin template (TypeScript).
  *
- * Demonstrates the two most common contribution points:
- *   - a synchronous agent tool (`template_echo`)
- *   - a slash command (`/template-greet`)
- *
- * Copy this file as the starting point for your own plugin. The host loads
- * `dist/index.js` (the esbuild output), not this source file, so make sure
- * `pnpm build` runs before packaging.
+ * Demonstrates a synchronous agent tool and a manifest-declared slash command
+ * without importing any host-private module.
  */
 
-import type { PluginContext, PluginDefinition } from "@/types/plugin"
+import {
+  definePlugin,
+  type ExtensionProps,
+  type FullPluginContext,
+  type PluginContext,
+} from "@cognia/plugin-sdk"
+import { TemplatePanel } from "./panel"
 
 /**
- * Arguments accepted by the `template_echo` tool.
+ * `PluginDefinition.activate` is declared against the narrow `PluginContext`,
+ * but the host always constructs and passes a `FullPluginContext` — that is
+ * where `extensions`, `theme` and the other v2 namespaces live. Narrow once
+ * here rather than optional-chaining every call site.
  */
+const full = (ctx: PluginContext): FullPluginContext => ctx as unknown as FullPluginContext
+
 interface EchoArgs {
   message?: string
 }
 
-const definition: PluginDefinition = {
-  // The runtime treats `plugin.json` as the source of truth for manifest
-  // fields; the inline manifest here is a development-time hint so unit
-  // tests and TS callers can introspect the plugin without re-reading the
-  // JSON. Keep the two in sync.
+const TRANSLATIONS = {
+  en: {
+    "panel.status.static": "Static",
+    "panel.status.live": "Live",
+    "panel.clicked": "Clicked {count}",
+  },
+  "zh-CN": {
+    "panel.status.static": "静态",
+    "panel.status.live": "实时",
+    "panel.clicked": "已点击 {count} 次",
+  },
+} as const
+
+const definition = definePlugin({
   manifest: {
     id: "cognia-plugin-template-ts",
     name: "Cognia Plugin Template TS",
     version: "0.1.0",
+    description: "Cognia frontend TypeScript plugin template",
     type: "frontend",
+    // UI slot contributions are gated by the `extension:ui` PERMISSION (see
+    // plugin.json) — there is no separate capability for them.
     capabilities: ["tools", "commands"],
     main: "dist/index.js",
-  } as never,
+    // Plain CSS — shipped from src/ rather than dist/ because nothing compiles
+    // it, and `cognia plugin build` errors on a `bundle_include` entry that
+    // does not exist yet.
+    styles: "src/panel.css",
+  },
 
   activate: async (ctx: PluginContext) => {
-    ctx.logger?.info("template-ts plugin activated")
+    ctx.logger.info("template-ts plugin activated")
+    for (const [locale, messages] of Object.entries(TRANSLATIONS)) {
+      full(ctx).i18n.registerTranslations(locale as "en" | "zh-CN", messages)
+    }
 
-    // ── Tool: template_echo ──────────────────────────────────────────────
-    ctx.agent?.registerTool?.({
+    // Mount a component into a host UI slot. The host wraps it in an error
+    // boundary and in `data-plugin-root`, which is what bounds `manifest.styles`
+    // to this plugin's subtree. `formFactor` arrives as a prop — read it rather
+    // than assuming, because the same component may be mounted into a 28px
+    // status bar and a full side panel.
+    full(ctx).extensions.registerExtension(
+      "chat.input.actions",
+      (props: ExtensionProps) => TemplatePanel({ ...props, ctx: full(ctx) }),
+      { priority: 0 }
+    )
+
+    ctx.agent.registerTool({
       name: "template_echo",
       pluginId: ctx.pluginId,
       definition: {
@@ -54,39 +89,26 @@ const definition: PluginDefinition = {
           required: ["message"],
           additionalProperties: false,
         },
-      } as never,
+      },
       execute: async (args: EchoArgs) => {
         const message = typeof args?.message === "string" ? args.message : ""
         return { ok: true, echoed: message }
       },
     })
 
-    // ── Slash command: /template-greet ───────────────────────────────────
-    const { registerSlashCommand } = await import("@/lib/chat/slash-command-registry")
-    registerSlashCommand({
-      id: "template-greet",
-      name: "Template Greet",
-      description: "Print a greeting back to the chat.",
-      pluginId: ctx.pluginId,
-      handler: async (argString: string) => {
-        const subject = argString.trim().length > 0 ? argString.trim() : "world"
-        return { message: `Hello, ${subject}!` }
+    return {
+      onCommand: async (command, args) => {
+        if (command !== "template-greet") return false
+        const subject = args.join(" ").trim() || "world"
+        ctx.ui.showToast(`Hello, ${subject}!`, "success")
+        return true
       },
-    } as never)
+    }
   },
 
   deactivate: async (ctx?: PluginContext) => {
-    // Slash commands registered with `pluginId` are auto-unregistered by the
-    // host when the plugin deactivates; tools follow the same rule. We
-    // still call the unregister helper defensively in case the host
-    // skipped the sweep (e.g. forced reload).
-    try {
-      const { unregisterCommandsByPlugin } = await import("@/lib/chat/slash-command-registry")
-      unregisterCommandsByPlugin(ctx?.pluginId ?? "cognia-plugin-template-ts")
-    } catch {
-      // The host may have torn down the registry already; that's fine.
-    }
+    ctx?.logger.info("template-ts plugin deactivated")
   },
-}
+})
 
 export default definition

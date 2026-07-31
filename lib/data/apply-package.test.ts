@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Verifies that applyBackupPackage applies the v3 payload to the local Dexie
 // database under each merge strategy, respects built-ins, and handles the
 // non-`id`-keyed tables (trustedWorkspaces / sessionState / ttsProviderKeys).
@@ -38,6 +39,118 @@ beforeEach(async () => {
 })
 
 describe("applyBackupPackage — merge strategies", () => {
+  it("validates and restores the secret-free Provider Profile Store", async () => {
+    const db = getDb()
+    const summary = await applyBackupPackage(
+      pkg({
+        providerProfileStore: {
+          schemaVersion: 2,
+          profileVersion: 4,
+          providerProfiles: [{ id: "openai", displayName: "OpenAI", deploymentRefs: ["openai"] }],
+          deploymentProfiles: [
+            {
+              id: "openai",
+              providerRef: "openai",
+              endpoint: "https://api.openai.com/v1",
+              transportProfileRef: "tp-openai",
+              credentialProfileRef: {
+                kind: "legacy-provider-settings",
+                providerId: "openai",
+              },
+              models: [
+                {
+                  id: "gpt-5",
+                  upstreamId: "gpt-5",
+                  canonicalModelRef: "openai:gpt-5",
+                  offeringRef: "openai:gpt-5",
+                },
+              ],
+            },
+          ],
+          transportProfiles: [{ id: "tp-openai", protocol: "openai", auth: { scheme: "bearer" } }],
+          legacyAliases: { openai: "openai" },
+        },
+      }),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false }
+    )
+
+    expect(await db.providerProfiles.get("openai")).toMatchObject({ displayName: "OpenAI" })
+    expect(await db.deploymentProfiles.get("openai")).toMatchObject({
+      providerRef: "openai",
+      models: [{ upstreamId: "gpt-5", offeringRef: "openai:gpt-5" }],
+    })
+    expect(await db.transportProfiles.get("tp-openai")).toBeDefined()
+    expect(await db.profileStoreMeta.get("singleton")).toMatchObject({
+      schemaVersion: 2,
+    })
+    expect(summary.added).toMatchObject({
+      providerProfiles: 1,
+      deploymentProfiles: 1,
+      transportProfiles: 1,
+    })
+  })
+
+  it("rejects Provider Profile Store payloads containing secret material", async () => {
+    const db = getDb()
+
+    await expect(
+      applyBackupPackage(
+        pkg({
+          providerProfileStore: {
+            schemaVersion: 2,
+            profileVersion: 1,
+            providerProfiles: [
+              {
+                id: "unsafe",
+                displayName: "Unsafe",
+                deploymentRefs: [],
+                apiKey: "sk-should-not-import",
+              } as never,
+            ],
+            deploymentProfiles: [],
+            transportProfiles: [],
+            legacyAliases: {},
+          },
+        }),
+        { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false }
+      )
+    ).rejects.toThrow("secret material is not allowed")
+    expect(await db.providerProfiles.get("unsafe")).toBeUndefined()
+  })
+
+  it("restores portable template rows without accepting device bindings", async () => {
+    const db = getDb()
+    await applyBackupPackage(
+      pkg({
+        templateDefinitions: [
+          {
+            storageKey: "draft:skill.restore",
+            apiVersion: "cognia.ai/templates/v1",
+            id: "skill.restore",
+            domain: "skill",
+            status: "draft",
+            revision: 1,
+            version: null,
+            metadata: { name: "Restore" },
+            payload: { content: "x" },
+            inputs: [],
+            dependencies: [],
+            capabilities: [],
+            compatibility: { platforms: ["desktop"] },
+            provenance: { source: "user" },
+            contentHash: "b".repeat(64),
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ],
+      }),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false }
+    )
+
+    expect(await db.templateDefinitions.get("draft:skill.restore")).toBeDefined()
+    expect(await db.templateDeviceBindings.toArray()).toEqual([])
+  })
+
   it("'skip' keeps the local row and counts the import row as skipped", async () => {
     const db = getDb()
     await db.promptPresets.put({
@@ -538,7 +651,51 @@ describe("applyBackupPackage — plugins domain", () => {
     expect(summary.added.plugins).toBe(1)
   })
 
-  it("imports permissions / scheduled-jobs / analytics only for imported plugin ids", async () => {
+  it("'duplicate' strategy retains every plugin child row under the fresh plugin id", async () => {
+    const db = getDb()
+    await db.plugins.put(pluginRow({ id: "plg-dup", name: "local" }))
+
+    const summary = await applyBackupPackage(
+      pkg({
+        plugins: [pluginRow({ id: "plg-dup", name: "remote" })],
+        pluginPermissions: [
+          {
+            pluginId: "plg-dup",
+            permission: "clipboard:read",
+            decision: "allow",
+            grantedAt: 1,
+          },
+        ],
+        pluginReviews: [{ pluginId: "plg-dup", id: "review-1", rating: 5, createdAt: 1 }],
+        pluginAnalytics: [{ pluginId: "plg-dup", key: "tool.invoke", count: 5, lastEventAt: 1 }],
+      }),
+      { mergeStrategy: "duplicate", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+
+    const duplicate = (await db.plugins.toArray()).find((row) => row.id !== "plg-dup")
+    expect(duplicate).toBeDefined()
+    const duplicateId = duplicate!.id
+    expect(await db.pluginPermissions.where("pluginId").equals(duplicateId).toArray()).toEqual([
+      {
+        pluginId: duplicateId,
+        permission: "clipboard:read",
+        decision: "allow",
+        grantedAt: 1,
+      },
+    ])
+    expect(await db.pluginReviews.where("pluginId").equals(duplicateId).toArray()).toEqual([
+      { pluginId: duplicateId, id: "review-1", rating: 5, createdAt: 1 },
+    ])
+    expect(await db.pluginAnalytics.where("pluginId").equals(duplicateId).toArray()).toEqual([
+      { pluginId: duplicateId, key: "tool.invoke", count: 5, lastEventAt: 1 },
+    ])
+    expect(summary.added.pluginPermissions).toBe(1)
+    expect(summary.added.pluginReviews).toBe(1)
+    expect(summary.added.pluginAnalytics).toBe(1)
+  })
+
+  it("imports permissions, reviews, and analytics only for imported plugin ids", async () => {
     const db = getDb()
     const summary = await applyBackupPackage(
       pkg({
@@ -556,38 +713,47 @@ describe("applyBackupPackage — plugins domain", () => {
           { pluginId: "plg-with-data", key: "tool.invoke", count: 5, lastEventAt: 1 },
           { pluginId: "plg-orphan", key: "tool.invoke", count: 5, lastEventAt: 1 },
         ],
-        pluginScheduledJobs: [
-          {
-            id: "j1",
-            pluginId: "plg-with-data",
-            cron: "0 * * * *",
-            handler: "tick",
-            status: "active",
-            createdAt: 1,
-            updatedAt: 1,
-          },
-          {
-            id: "j2",
-            pluginId: "plg-orphan",
-            cron: "0 * * * *",
-            handler: "tick",
-            status: "active",
-            createdAt: 1,
-            updatedAt: 1,
-          },
+        pluginReviews: [
+          { pluginId: "plg-with-data", id: "review-1", rating: 5, createdAt: 1 },
+          { pluginId: "plg-orphan", id: "review-2", rating: 1, createdAt: 1 },
         ],
       }),
       { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
       { projectMcp: async () => [] }
     )
     expect(await db.pluginPermissions.toArray()).toHaveLength(1)
+    expect(await db.pluginReviews.toArray()).toHaveLength(1)
     expect(await db.pluginAnalytics.toArray()).toHaveLength(1)
-    const jobs = await db.pluginScheduledJobs.toArray()
-    expect(jobs).toHaveLength(1)
-    expect(jobs[0]?.pluginId).toBe("plg-with-data")
     expect(summary.added.pluginPermissions).toBe(1)
+    expect(summary.added.pluginReviews).toBe(1)
     expect(summary.added.pluginAnalytics).toBe(1)
-    expect(summary.added.pluginScheduledJobs).toBe(1)
+  })
+
+  it("ignores the retired pluginScheduledJobs field in legacy backups", async () => {
+    const legacyPayload = {
+      plugins: [pluginRow({ id: "plg-legacy" })],
+      pluginScheduledJobs: [
+        {
+          id: "legacy-job",
+          pluginId: "plg-legacy",
+          cron: "0 * * * *",
+          handler: "tick",
+          status: "active",
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+    }
+
+    await expect(
+      applyBackupPackage(
+        pkg(legacyPayload as never),
+        { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
+        { projectMcp: async () => [] }
+      )
+    ).resolves.toBeDefined()
+    expect(await getDb().plugins.get("plg-legacy")).toBeDefined()
+    expect(getDb().tables.map((table) => table.name)).not.toContain("pluginScheduledJobs")
   })
 
   it("skip strategy preserves local plugin rows", async () => {
@@ -737,5 +903,178 @@ describe("applyBackupPackage — twin tables", () => {
     )
     expect(summary.added.twinSources).toBeUndefined()
     expect(summary.added.twinJobs).toBeUndefined()
+  })
+})
+
+describe("applyBackupPackage — learned memory", () => {
+  function memorySnapshot(): BackupPayloadV3 {
+    return {
+      memories: [
+        {
+          id: "mem_1",
+          scope: "workspace",
+          projectId: "project_1",
+          type: "semantic",
+          text: "The project uses pnpm.",
+          tags: ["tooling"],
+          importance: 8,
+          createdAt: 1,
+          updatedAt: 1,
+          lastAccessedAt: 1,
+          accessCount: 0,
+          version: 1,
+          status: "active",
+          pinned: false,
+          provenance: "user",
+          evidenceState: "supported",
+          reviewStatus: "verified",
+          contaminationState: "clean",
+          sensitivity: "normal",
+        },
+      ],
+      memoryEvidence: [
+        {
+          id: "mev_1",
+          memoryId: "mem_1",
+          kind: "message",
+          sourceId: "source_1",
+          contaminationState: "clean",
+          reviewed: true,
+          createdAt: 1,
+        },
+      ],
+      memoryJobs: [
+        {
+          id: "mjob_1",
+          dedupeKey: "turn:s1:m1",
+          kind: "turn-extraction",
+          status: "completed",
+          scope: "workspace",
+          projectId: "project_1",
+          provenance: "user",
+          evidenceIds: ["mev_1"],
+          queuedAt: 1,
+          completedAt: 2,
+          retryCount: 0,
+        },
+      ],
+      memoryAuditEvents: [
+        {
+          id: "maudit_1",
+          action: "created",
+          memoryId: "mem_1",
+          reason: "turn-extraction",
+          createdAt: 2,
+        },
+      ],
+    }
+  }
+
+  it("restores the complete memory provenance graph", async () => {
+    const db = getDb()
+    const summary = await applyBackupPackage(
+      pkg(memorySnapshot()),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+
+    expect((await db.memoryEvidence.get("mev_1"))?.memoryId).toBe("mem_1")
+    expect((await db.memoryJobs.get("mjob_1"))?.evidenceIds).toEqual(["mev_1"])
+    expect((await db.memoryAuditEvents.get("maudit_1"))?.memoryId).toBe("mem_1")
+    expect(summary.added.memories).toBe(1)
+    expect(summary.added.memoryEvidence).toBe(1)
+    expect(summary.added.memoryJobs).toBe(1)
+    expect(summary.added.memoryAuditEvents).toBe(1)
+  })
+
+  it("remaps child references when duplicate import ids collide", async () => {
+    const db = getDb()
+    await applyBackupPackage(
+      pkg(memorySnapshot()),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+    await applyBackupPackage(
+      pkg(memorySnapshot()),
+      { mergeStrategy: "duplicate", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+
+    const memories = await db.memories.toArray()
+    const duplicateMemory = memories.find((row) => row.id !== "mem_1")
+    const evidence = (await db.memoryEvidence.toArray()).find((row) => row.id !== "mev_1")
+    const job = (await db.memoryJobs.toArray()).find((row) => row.id !== "mjob_1")
+    const audit = (await db.memoryAuditEvents.toArray()).find((row) => row.id !== "maudit_1")
+
+    expect(duplicateMemory).toBeDefined()
+    expect(evidence?.memoryId).toBe(duplicateMemory?.id)
+    expect(job?.evidenceIds).toEqual([evidence?.id])
+    expect(audit?.memoryId).toBe(duplicateMemory?.id)
+  })
+
+  it("remaps supersession and conflict links inside duplicated memory rows", async () => {
+    const db = getDb()
+    const snapshot = memorySnapshot()
+    snapshot.memories!.push({
+      ...snapshot.memories![0],
+      id: "mem_2",
+      text: "The project uses npm.",
+      reviewStatus: "conflict",
+      conflictWithIds: ["mem_1"],
+    })
+    snapshot.memories![0] = {
+      ...snapshot.memories![0],
+      supersededById: "mem_2",
+      conflictWithIds: ["mem_2"],
+    }
+    await applyBackupPackage(
+      pkg(snapshot),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+    await applyBackupPackage(
+      pkg(snapshot),
+      { mergeStrategy: "duplicate", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+    const duplicated = (await db.memories.toArray()).filter(
+      (row) => row.id !== "mem_1" && row.id !== "mem_2"
+    )
+    const first = duplicated.find((row) => row.text === "The project uses pnpm.")
+    const second = duplicated.find((row) => row.text === "The project uses npm.")
+    expect(first?.supersededById).toBe(second?.id)
+    expect(first?.conflictWithIds).toEqual([second?.id])
+    expect(second?.conflictWithIds).toEqual([first?.id])
+  })
+
+  it("validates imported governance rows and redacts memory text before persistence", async () => {
+    const db = getDb()
+    const snapshot = memorySnapshot()
+    snapshot.memories![0] = {
+      ...snapshot.memories![0],
+      text: "Email alice@example.com about pnpm",
+    }
+    snapshot.memoryAuditEvents![0] = {
+      ...snapshot.memoryAuditEvents![0],
+      reason: "alice@example.com",
+      metadata: { safeCount: 1, leaked: "bob@example.com" },
+    }
+    snapshot.memoryEvidence!.push({ invalid: true } as never)
+
+    const summary = await applyBackupPackage(
+      pkg(snapshot),
+      { mergeStrategy: "overwrite", includeSessions: false, includeApiKey: false },
+      { projectMcp: async () => [] }
+    )
+
+    const memory = await db.memories.get("mem_1")
+    expect(memory?.text).not.toContain("alice@example.com")
+    expect(memory?.text).toContain("<EMAIL_")
+    expect(await db.memoryEvidence.count()).toBe(1)
+    expect(summary.added.memoryEvidence).toBe(1)
+    expect(await db.memoryAuditEvents.get("maudit_1")).toMatchObject({
+      reason: "imported",
+      metadata: { safeCount: 1 },
+    })
   })
 })

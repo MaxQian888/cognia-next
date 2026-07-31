@@ -50,12 +50,36 @@ describe("executeCodeWithSandboxPriority — Python (Tauri)", () => {
     expect(mockedInvoke).toHaveBeenCalledWith("canvas_run_python", {
       code: 'print("hi")',
       timeoutMs: 1500,
+      sandboxed: false,
     })
     expect(result.sandbox).toBe("tauri-python")
     expect(result.success).toBe(true)
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toBe("hi")
     expect(result.durationMs).toBe(25)
+  })
+
+  it("forwards sandboxed=true to canvas_run_python (ADR-0028 Phase 3)", async () => {
+    isTauriValue = true
+    mockedInvoke.mockResolvedValueOnce({
+      stdout: "ok",
+      stderr: "",
+      exit_code: 0,
+      duration_ms: 3,
+    })
+
+    await executeCodeWithSandboxPriority({
+      code: "print(1)",
+      language: "python",
+      timeoutMs: 2000,
+      sandboxed: true,
+    })
+
+    expect(mockedInvoke).toHaveBeenCalledWith("canvas_run_python", {
+      code: "print(1)",
+      timeoutMs: 2000,
+      sandboxed: true,
+    })
   })
 
   it("uses default timeout when none supplied", async () => {

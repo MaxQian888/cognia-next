@@ -1,6 +1,7 @@
 "use client"
 
 import React, { memo } from "react"
+import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Card, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
@@ -20,6 +21,7 @@ export const TemplateCard = memo(function TemplateCard({
   viewMode,
   onSelect,
 }: TemplateCardProps) {
+  const t = useTranslations("a2ui")
   const IconComponent = resolveIcon(template.icon)
 
   return (
@@ -70,7 +72,7 @@ export const TemplateCard = memo(function TemplateCard({
             }}
           >
             <Plus className="h-4 w-4 mr-1" />
-            Create
+            {t("create")}
           </Button>
         </div>
       )}

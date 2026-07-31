@@ -38,6 +38,8 @@ export interface PanelGridProps {
   editMode: boolean
   onLayoutChange: (layouts: PanelLayouts) => void
   renderPanel: (panel: PanelDef) => ReactNode
+  /** Panel ids to hide (RGL ignores layout items without a matching child). */
+  hiddenPanels?: string[]
 }
 
 /** Keep only the fields the store persists (RGL adds derived ones). */
@@ -50,8 +52,16 @@ function pickLayouts(all: ResponsiveLayouts): PanelLayouts {
   return { lg: at("lg"), md: at("md"), sm: at("sm") }
 }
 
-export function PanelGrid({ layouts, editMode, onLayoutChange, renderPanel }: PanelGridProps) {
+export function PanelGrid({
+  layouts,
+  editMode,
+  onLayoutChange,
+  renderPanel,
+  hiddenPanels,
+}: PanelGridProps) {
   const { width, containerRef, mounted } = useContainerWidth()
+  const hidden = new Set(hiddenPanels ?? [])
+  const visiblePanels = PANELS.filter((p) => !hidden.has(p.id))
 
   return (
     <div ref={containerRef} className="w-full" data-testid="panel-grid">
@@ -70,7 +80,7 @@ export function PanelGrid({ layouts, editMode, onLayoutChange, renderPanel }: Pa
             onLayoutChange(pickLayouts(all))
           }
         >
-          {PANELS.map((panel) => (
+          {visiblePanels.map((panel) => (
             <div key={panel.id} className="min-h-0 overflow-hidden">
               {renderPanel(panel)}
             </div>

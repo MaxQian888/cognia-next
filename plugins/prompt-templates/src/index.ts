@@ -1,24 +1,30 @@
 /**
  * Prompt Templates — built-in plugin.
  *
- * Stores user-defined prompt templates inside the plugin's storage
- * namespace and exposes them as slash commands so the user can paste them
- * into the chat with a single keystroke. Reuses
- * `lib/chat/slash-command-registry` rather than rolling its own dispatch
+ * Stores user-defined prompt templates inside the plugin's storage namespace
+ * and surfaces them two ways: as slash commands, and as a Context Workbench
+ * panel on the chat right rail's `templates` activity. Reuses
+ * `lib/slash-commands/registry` rather than rolling its own dispatch
  * surface so the templates show up in the same command palette as
  * built-in commands.
  *
+ * Neither surface inserts into the composer — no plugin API can write to it —
+ * so both hand the body back for the user to place: the command shows it, the
+ * panel copies it.
+ *
  * Slash commands:
- *   /template <name>            — insert the template body
+ *   /template <name>            — show the template body
  *   /template-add <name> <body> — store a new template
  *   /template-remove <name>     — delete a template
  *   /template-list              — list the available templates
  */
 
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/chat/slash-command-registry"
+import { createTemplatesPanel } from "./templates-panel"
+import manifestJson from "../plugin.json"
 
 const KEY_PREFIX = "template:"
+let disposeTemplatesPanel: (() => void) | undefined
 
 async function storeTemplate(ctx: PluginContext, name: string, body: string): Promise<void> {
   await ctx.storage?.set?.(`${KEY_PREFIX}${name}`, body)
@@ -51,87 +57,93 @@ function parseAdd(args: string): { name: string; body: string } | null {
 }
 
 const definition: PluginDefinition = {
+  // Spread plugin.json: `builtinManifest()` merges module-over-JSON, so a
+  // hand-written subset here WINS and would silently drop `commands[]`.
   manifest: {
-    id: "cognia-prompt-templates",
-    name: "Prompt Templates",
-    version: "0.1.0",
-    type: "frontend",
-    capabilities: ["commands"],
-    main: "src/index.ts",
+    ...(manifestJson as object),
   } as never,
   activate: async (ctx: PluginContext) => {
     ctx.logger?.info("prompt-templates activated")
 
-    registerSlashCommand({
-      id: "template",
-      name: "/template",
-      description: "Insert a stored prompt template by name.",
-      source: "plugin",
-      pluginId: ctx.pluginId,
-      handler: async (args) => {
-        const name = args.trim()
-        if (!name) {
-          return { message: "Usage: /template <name>" }
-        }
-        const body = await readTemplate(ctx, name)
-        if (!body) {
-          return { message: `Template "${name}" not found.` }
-        }
-        return { message: body }
-      },
+    // The chat right rail's `templates` activity has no native panel, so this
+    // is the surface a user browses their saved templates from. Registered on
+    // the `session` resource: that is the dock's fallback when no artifact is
+    // open, i.e. the rail's default state.
+    disposeTemplatesPanel = ctx.contextPanels?.register?.({
+      id: "templates",
+      activity: "templates",
+      label: "Prompt Templates",
+      labelKey: "panel.templates",
+      resourceKinds: ["session"],
+      icon: "FileText",
+      order: 20,
+      retention: "stateful",
+      renderer: createTemplatesPanel(ctx),
     })
-
-    registerSlashCommand({
-      id: "template-add",
-      name: "/template-add",
-      description: "Store a new prompt template.",
-      source: "plugin",
-      pluginId: ctx.pluginId,
-      handler: async (args) => {
-        const parsed = parseAdd(args)
-        if (!parsed) {
-          return { message: "Usage: /template-add <name> <body>" }
-        }
-        await storeTemplate(ctx, parsed.name, parsed.body)
-        return { message: `Saved template "${parsed.name}".` }
-      },
-    })
-
-    registerSlashCommand({
-      id: "template-remove",
-      name: "/template-remove",
-      description: "Delete a prompt template by name.",
-      source: "plugin",
-      pluginId: ctx.pluginId,
-      handler: async (args) => {
-        const name = args.trim()
-        if (!name) {
-          return { message: "Usage: /template-remove <name>" }
-        }
-        await deleteTemplate(ctx, name)
-        return { message: `Removed template "${name}".` }
-      },
-    })
-
-    registerSlashCommand({
-      id: "template-list",
-      name: "/template-list",
-      description: "List the templates this plugin has stored.",
-      source: "plugin",
-      pluginId: ctx.pluginId,
-      handler: async () => {
-        const list = await listTemplates(ctx)
-        if (list.length === 0) {
-          return { message: "No prompt templates saved yet." }
-        }
-        return { message: list.map((n) => `• ${n}`).join("\n") }
-      },
-    })
-  },
-  deactivate: async (ctx?: PluginContext) => {
-    if (ctx?.pluginId) {
-      unregisterCommandsByPlugin(ctx.pluginId)
+    // Pushed rather than declared via `getBadge`: the count only changes when a
+    // slash command writes storage, which happens outside any render. (The two
+    // are additive in the registry, so using both would double-count.)
+    const refreshBadge = async () => {
+      ctx.contextPanels?.setBadge?.("templates", (await listTemplates(ctx)).length)
     }
+    await refreshBadge()
+
+    // All four commands are DECLARED in plugin.json (`commands[]`) and handled
+    // here — the supported shape per the author-SDK migration table. The
+    // manager owns registration (namespaced ids, conflict detection, aliases,
+    // command-palette entries, idle-clock refresh) and teardown.
+    //
+    // `hooks.onCommand` hands over whitespace-split argv, so the raw tail is
+    // rejoined for the handlers that parse their own argument string.
+    return {
+      onCommand: async (command: string, argv: string[]) => {
+        const args = argv.join(" ")
+        const say = (message: string): true => {
+          ctx.ui?.showToast?.(message, "info")
+          return true
+        }
+        switch (command) {
+          case "template": {
+            const name = args.trim()
+            if (!name) return say("Usage: /template <name>")
+            const body = await readTemplate(ctx, name)
+            return say(body ? body : `Template "${name}" not found.`)
+          }
+          case "template-add": {
+            const parsed = parseAdd(args)
+            if (!parsed) return say("Usage: /template-add <name> <body>")
+            await storeTemplate(ctx, parsed.name, parsed.body)
+            await refreshBadge()
+            return say(`Saved template "${parsed.name}".`)
+          }
+          case "template-remove": {
+            const name = args.trim()
+            if (!name) return say("Usage: /template-remove <name>")
+            // Report the truth: this used to answer `Removed template "x"` for
+            // a name that never existed.
+            const existing = await readTemplate(ctx, name)
+            if (!existing) return say(`Template "${name}" not found.`)
+            await deleteTemplate(ctx, name)
+            await refreshBadge()
+            return say(`Removed template "${name}".`)
+          }
+          case "template-list": {
+            const list = await listTemplates(ctx)
+            return say(
+              list.length === 0
+                ? "No prompt templates saved yet."
+                : list.map((n) => `• ${n}`).join("\n")
+            )
+          }
+          default:
+            return false
+        }
+      },
+    }
+  },
+  deactivate: () => {
+    disposeTemplatesPanel?.()
+    disposeTemplatesPanel = undefined
   },
 }
 

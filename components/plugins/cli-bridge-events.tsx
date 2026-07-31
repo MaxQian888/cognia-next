@@ -14,8 +14,12 @@
  */
 
 import { useCliBridgeEvents } from "@/hooks/plugins/use-cli-bridge-events"
+import { useCliSessionHandoff } from "@/hooks/chat/use-cli-session-handoff"
 
 export function CliBridgeEventsBridge() {
   useCliBridgeEvents()
+  // Receive sessions handed off from the standalone agent CLI (`run --handoff`
+  // / `cognia-agent handoff <id>`) and open them in the desktop app.
+  useCliSessionHandoff()
   return null
 }

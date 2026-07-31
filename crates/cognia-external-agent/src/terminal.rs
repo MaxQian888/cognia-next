@@ -1,0 +1,714 @@
+//! ACP Terminal Management
+//!
+//! Provides terminal functionality for ACP agents.
+//! Handles spawning, output collection, and lifecycle management
+//! of terminal processes requested by external agents.
+
+use std::collections::HashMap;
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
+use std::process::Stdio;
+use std::sync::Arc;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::process::{Child, ChildStdin, Command};
+use tokio::sync::{mpsc, Mutex, RwLock};
+use tokio::time::{timeout, Duration};
+
+/// Terminal output line
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TerminalOutput {
+    pub text: String,
+    pub is_stderr: bool,
+    pub timestamp: u64,
+}
+
+/// Terminal process exit status
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalExitStatus {
+    pub exit_code: Option<i32>,
+    pub signal: Option<String>,
+}
+
+/// Lightweight liveness snapshot of one ACP terminal, consumed by the
+/// unified managed-process registry (`src-tauri/src/process_registry`). Kept
+/// deliberately small — just what the performance panel's "Managed Processes"
+/// tab needs to attribute + join the OS process by PID.
+#[derive(Debug, Clone)]
+pub struct AcpTerminalManagedInfo {
+    pub id: String,
+    pub session_id: String,
+    pub command: String,
+    pub pid: Option<u32>,
+    pub running: bool,
+}
+
+/// Terminal process state
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub enum TerminalState {
+    Running,
+    Exited(i32),
+    Killed,
+    Error(String),
+}
+
+/// ACP Terminal instance
+pub struct AcpTerminal {
+    pub id: String,
+    pub session_id: String,
+    pub command: String,
+    pub state: TerminalState,
+    child: Child,
+    stdin: Option<ChildStdin>,
+    output_rx: mpsc::Receiver<TerminalOutput>,
+    output_buffer: Vec<TerminalOutput>,
+    default_output_byte_limit: Option<usize>,
+    last_exit_code: Option<i32>,
+    last_exit_signal: Option<String>,
+}
+
+impl AcpTerminal {
+    fn update_exit_status_from_process_status(&mut self, status: std::process::ExitStatus) {
+        self.last_exit_code = status.code();
+        #[cfg(unix)]
+        {
+            self.last_exit_signal = status.signal().map(|s| s.to_string());
+        }
+        #[cfg(not(unix))]
+        {
+            self.last_exit_signal = None;
+        }
+        self.state = TerminalState::Exited(self.last_exit_code.unwrap_or(-1));
+    }
+
+    fn current_exit_status(&self) -> TerminalExitStatus {
+        TerminalExitStatus {
+            exit_code: self.last_exit_code,
+            signal: self.last_exit_signal.clone(),
+        }
+    }
+
+    fn truncate_output_tail(output: &str, max_bytes: usize) -> (String, bool) {
+        if output.len() <= max_bytes {
+            return (output.to_string(), false);
+        }
+        if max_bytes == 0 {
+            return (String::new(), !output.is_empty());
+        }
+
+        let mut start = output.len() - max_bytes;
+        while start < output.len() && !output.is_char_boundary(start) {
+            start += 1;
+        }
+        (output[start..].to_string(), true)
+    }
+
+    /// Write to terminal stdin
+    pub async fn write(&mut self, data: &str) -> Result<(), String> {
+        if let Some(stdin) = &mut self.stdin {
+            stdin
+                .write_all(data.as_bytes())
+                .await
+                .map_err(|e| format!("Failed to write to terminal: {}", e))?;
+            stdin
+                .flush()
+                .await
+                .map_err(|e| format!("Failed to flush terminal: {}", e))?;
+            Ok(())
+        } else {
+            Err("Terminal stdin not available".to_string())
+        }
+    }
+
+    /// Collect output from the terminal
+    pub async fn collect_output(&mut self) -> Vec<TerminalOutput> {
+        // Drain any pending output from the channel
+        while let Ok(output) = self.output_rx.try_recv() {
+            self.output_buffer.push(output);
+        }
+        self.output_buffer.clone()
+    }
+
+    /// Get accumulated output as string
+    pub async fn get_output_string(&mut self) -> String {
+        let outputs = self.collect_output().await;
+        outputs
+            .iter()
+            .map(|o| o.text.as_str())
+            .collect::<Vec<_>>()
+            .join("")
+    }
+
+    /// Get accumulated output with optional byte limit
+    pub async fn get_output_with_limit(
+        &mut self,
+        requested_limit: Option<usize>,
+    ) -> (String, bool) {
+        let output = self.get_output_string().await;
+        let limit = requested_limit.or(self.default_output_byte_limit);
+        if let Some(max_bytes) = limit {
+            return Self::truncate_output_tail(&output, max_bytes);
+        }
+        (output, false)
+    }
+
+    /// Check if the terminal is still running
+    pub async fn is_running(&mut self) -> bool {
+        match self.child.try_wait() {
+            Ok(None) => true,
+            Ok(Some(status)) => {
+                self.update_exit_status_from_process_status(status);
+                false
+            }
+            Err(e) => {
+                self.state = TerminalState::Error(e.to_string());
+                false
+            }
+        }
+    }
+
+    /// Get exit code if the process has exited
+    pub fn exit_code(&self) -> Option<i32> {
+        self.last_exit_code
+    }
+
+    /// Get terminal exit status
+    pub fn exit_status(&self) -> TerminalExitStatus {
+        self.current_exit_status()
+    }
+
+    /// Kill the terminal process
+    pub async fn kill(&mut self) -> Result<(), String> {
+        // Signal the whole process group first (Unix) so children the terminal
+        // command forked die too; then reap the leader. No-op on Windows.
+        super::proc_group::kill_process_group(self.child.id());
+        self.child
+            .kill()
+            .await
+            .map_err(|e| format!("Failed to kill terminal: {}", e))?;
+        self.state = TerminalState::Killed;
+        self.last_exit_code = None;
+        self.last_exit_signal = Some("killed".to_string());
+        Ok(())
+    }
+
+    /// Wait for the terminal to exit with optional timeout
+    pub async fn wait_for_exit(
+        &mut self,
+        timeout_secs: Option<u64>,
+    ) -> Result<TerminalExitStatus, String> {
+        let wait_future = async {
+            match self.child.wait().await {
+                Ok(status) => {
+                    self.update_exit_status_from_process_status(status);
+                    Ok(self.current_exit_status())
+                }
+                Err(e) => {
+                    self.state = TerminalState::Error(e.to_string());
+                    Err(format!("Failed to wait for terminal: {}", e))
+                }
+            }
+        };
+
+        if let Some(secs) = timeout_secs {
+            timeout(Duration::from_secs(secs), wait_future)
+                .await
+                .map_err(|_| "Timeout waiting for terminal to exit".to_string())?
+        } else {
+            wait_future.await
+        }
+    }
+}
+
+/// ACP Terminal Manager
+/// Manages all terminal instances for ACP agents
+pub struct AcpTerminalManager {
+    terminals: RwLock<HashMap<String, Arc<Mutex<AcpTerminal>>>>,
+    next_id: Mutex<u64>,
+}
+
+impl Default for AcpTerminalManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AcpTerminalManager {
+    pub fn new() -> Self {
+        Self {
+            terminals: RwLock::new(HashMap::new()),
+            next_id: Mutex::new(1),
+        }
+    }
+
+    /// Create a new terminal
+    pub async fn create(
+        &self,
+        session_id: &str,
+        command: &str,
+        args: &[String],
+        cwd: Option<&str>,
+        env: Option<&HashMap<String, String>>,
+        output_byte_limit: Option<usize>,
+    ) -> Result<String, String> {
+        // Generate unique terminal ID
+        let mut next_id = self.next_id.lock().await;
+        let terminal_id = format!("term_{}", *next_id);
+        *next_id += 1;
+        drop(next_id);
+
+        // Build command. Resolve the program against PATH (× PATHEXT on
+        // Windows) so `.cmd`/`.bat` shims spawn correctly, and kill the child
+        // on drop so releasing a still-running terminal cannot leak a process
+        // (mirrors the external-agent process layer).
+        let program = super::command_resolver::resolve_command(command);
+        let mut cmd = Command::new(&program);
+        cmd.args(args);
+        cmd.stdin(Stdio::piped());
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
+        cmd.kill_on_drop(true);
+
+        if let Some(dir) = cwd {
+            cmd.current_dir(dir);
+        }
+
+        if let Some(env_map) = env {
+            for (key, value) in env_map {
+                cmd.env(key, value);
+            }
+        }
+
+        // Set environment to prevent interactive prompts
+        #[cfg(windows)]
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+
+        // Own process group (Unix) so killing the terminal also kills any
+        // children the command forks. No-op on Windows.
+        super::proc_group::apply_process_group(&mut cmd);
+
+        // Spawn the process
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| format!("Failed to spawn terminal: {}", e))?;
+
+        // Take ownership of stdin
+        let stdin = child.stdin.take();
+
+        // Create output channel
+        let (output_tx, output_rx) = mpsc::channel::<TerminalOutput>(1000);
+
+        // Spawn stdout reader
+        if let Some(stdout) = child.stdout.take() {
+            let tx = output_tx.clone();
+            tokio::spawn(async move {
+                let reader = BufReader::new(stdout);
+                let mut lines = reader.lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    let output = TerminalOutput {
+                        text: format!("{}\n", line),
+                        is_stderr: false,
+                        timestamp: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64,
+                    };
+                    if tx.send(output).await.is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+
+        // Spawn stderr reader
+        if let Some(stderr) = child.stderr.take() {
+            let tx = output_tx;
+            tokio::spawn(async move {
+                let reader = BufReader::new(stderr);
+                let mut lines = reader.lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    let output = TerminalOutput {
+                        text: format!("{}\n", line),
+                        is_stderr: true,
+                        timestamp: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64,
+                    };
+                    if tx.send(output).await.is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+
+        // Create terminal instance
+        let terminal = AcpTerminal {
+            id: terminal_id.clone(),
+            session_id: session_id.to_string(),
+            command: command.to_string(),
+            state: TerminalState::Running,
+            child,
+            stdin,
+            output_rx,
+            output_buffer: Vec::new(),
+            default_output_byte_limit: output_byte_limit,
+            last_exit_code: None,
+            last_exit_signal: None,
+        };
+
+        // Store terminal
+        let mut terminals = self.terminals.write().await;
+        terminals.insert(terminal_id.clone(), Arc::new(Mutex::new(terminal)));
+
+        log::info!(
+            "[ACP Terminal] Created terminal {} for session {}",
+            terminal_id,
+            session_id
+        );
+
+        Ok(terminal_id)
+    }
+
+    /// Get output from a terminal
+    pub async fn get_output(
+        &self,
+        terminal_id: &str,
+        requested_limit: Option<usize>,
+    ) -> Result<(String, bool, TerminalExitStatus), String> {
+        let terminals = self.terminals.read().await;
+        let terminal = terminals
+            .get(terminal_id)
+            .ok_or_else(|| format!("Terminal not found: {}", terminal_id))?;
+
+        let mut terminal = terminal.lock().await;
+        let (output, truncated) = terminal.get_output_with_limit(requested_limit).await;
+        let exit_status = terminal.exit_status();
+
+        Ok((output, truncated, exit_status))
+    }
+
+    /// Kill a terminal
+    pub async fn kill(&self, terminal_id: &str) -> Result<(), String> {
+        let terminals = self.terminals.read().await;
+        let terminal = terminals
+            .get(terminal_id)
+            .ok_or_else(|| format!("Terminal not found: {}", terminal_id))?;
+
+        let mut terminal = terminal.lock().await;
+        terminal.kill().await?;
+
+        log::info!("[ACP Terminal] Killed terminal {}", terminal_id);
+        Ok(())
+    }
+
+    /// Release a terminal (remove from manager)
+    pub async fn release(&self, terminal_id: &str) -> Result<(), String> {
+        let mut terminals = self.terminals.write().await;
+        if terminals.remove(terminal_id).is_some() {
+            log::info!("[ACP Terminal] Released terminal {}", terminal_id);
+            Ok(())
+        } else {
+            Err(format!("Terminal not found: {}", terminal_id))
+        }
+    }
+
+    /// Wait for a terminal to exit
+    pub async fn wait_for_exit(
+        &self,
+        terminal_id: &str,
+        timeout_secs: Option<u64>,
+    ) -> Result<TerminalExitStatus, String> {
+        let terminals = self.terminals.read().await;
+        let terminal = terminals
+            .get(terminal_id)
+            .ok_or_else(|| format!("Terminal not found: {}", terminal_id))?
+            .clone();
+        drop(terminals);
+
+        let mut terminal = terminal.lock().await;
+        terminal.wait_for_exit(timeout_secs).await
+    }
+
+    /// Get all terminals for a session
+    pub async fn get_session_terminals(&self, session_id: &str) -> Vec<String> {
+        let terminals = self.terminals.read().await;
+        terminals
+            .iter()
+            .filter(|(_, t)| {
+                if let Ok(t) = t.try_lock() {
+                    t.session_id == session_id
+                } else {
+                    false
+                }
+            })
+            .map(|(id, _)| id.clone())
+            .collect()
+    }
+
+    /// Kill all terminals for a session
+    pub async fn kill_session_terminals(&self, session_id: &str) -> Result<(), String> {
+        let terminal_ids = self.get_session_terminals(session_id).await;
+        for id in terminal_ids {
+            let _ = self.kill(&id).await;
+            let _ = self.release(&id).await;
+        }
+        Ok(())
+    }
+
+    /// Kill and release every terminal. Used on app shutdown so agent-spawned
+    /// terminal children are not orphaned past app exit.
+    pub async fn kill_all(&self) -> Result<(), String> {
+        let ids = self.list().await;
+        for id in ids {
+            let _ = self.kill(&id).await;
+            let _ = self.release(&id).await;
+        }
+        Ok(())
+    }
+
+    /// Write to a terminal's stdin
+    pub async fn write(&self, terminal_id: &str, data: &str) -> Result<(), String> {
+        let terminals = self.terminals.read().await;
+        let terminal = terminals
+            .get(terminal_id)
+            .ok_or_else(|| format!("Terminal not found: {}", terminal_id))?;
+
+        let mut terminal = terminal.lock().await;
+        terminal.write(data).await
+    }
+
+    /// Check if a terminal is running
+    pub async fn is_running(&self, terminal_id: &str) -> Result<bool, String> {
+        let terminals = self.terminals.read().await;
+        let terminal = terminals
+            .get(terminal_id)
+            .ok_or_else(|| format!("Terminal not found: {}", terminal_id))?;
+
+        let mut terminal = terminal.lock().await;
+        Ok(terminal.is_running().await)
+    }
+
+    /// Get terminal info
+    pub async fn get_info(&self, terminal_id: &str) -> Result<serde_json::Value, String> {
+        let terminals = self.terminals.read().await;
+        let terminal = terminals
+            .get(terminal_id)
+            .ok_or_else(|| format!("Terminal not found: {}", terminal_id))?;
+
+        let terminal = terminal.lock().await;
+        Ok(serde_json::json!({
+            "id": terminal.id,
+            "sessionId": terminal.session_id,
+            "command": terminal.command,
+            "state": terminal.state,
+            "exitCode": terminal.exit_code(),
+            "exitStatus": terminal.exit_status()
+        }))
+    }
+
+    /// List all terminal IDs
+    pub async fn list(&self) -> Vec<String> {
+        let terminals = self.terminals.read().await;
+        terminals.keys().cloned().collect()
+    }
+
+    /// Snapshot every terminal for the unified managed-process registry.
+    ///
+    /// Uses `try_lock` so a terminal currently blocked in `wait_for_exit`
+    /// (which holds its `Mutex` across an `.await`) is skipped rather than
+    /// stalling the 1 Hz perf sampler that calls this. `child.id()` is the
+    /// live OS PID (None once the child has been reaped).
+    pub async fn managed_snapshot(&self) -> Vec<AcpTerminalManagedInfo> {
+        let terminals = self.terminals.read().await;
+        terminals
+            .values()
+            .filter_map(|t| {
+                t.try_lock().ok().map(|t| AcpTerminalManagedInfo {
+                    id: t.id.clone(),
+                    session_id: t.session_id.clone(),
+                    command: t.command.clone(),
+                    pid: t.child.id(),
+                    running: matches!(t.state, TerminalState::Running),
+                })
+            })
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ---- truncate_output_tail: byte-limit / char-boundary handling --------
+
+    #[test]
+    fn truncate_keeps_short_output_untouched() {
+        let (out, truncated) = AcpTerminal::truncate_output_tail("hello", 10);
+        assert_eq!(out, "hello");
+        assert!(!truncated);
+    }
+
+    #[test]
+    fn truncate_zero_limit_drops_everything_but_flags_truncated() {
+        let (out, truncated) = AcpTerminal::truncate_output_tail("hello", 0);
+        assert_eq!(out, "");
+        assert!(truncated);
+        // Empty input at a zero limit is not "truncated" — nothing was dropped.
+        let (out2, truncated2) = AcpTerminal::truncate_output_tail("", 0);
+        assert_eq!(out2, "");
+        assert!(!truncated2);
+    }
+
+    #[test]
+    fn truncate_returns_the_tail_when_over_limit() {
+        let (out, truncated) = AcpTerminal::truncate_output_tail("abcdefghij", 3);
+        assert_eq!(out, "hij");
+        assert!(truncated);
+    }
+
+    #[test]
+    fn truncate_respects_utf8_char_boundaries() {
+        // "é" is two bytes; a naive byte slice mid-character would panic. The
+        // tail is advanced to the next boundary, yielding valid UTF-8.
+        let input = "aéb"; // bytes: 'a'(1) 'é'(2) 'b'(1) = 4 bytes
+        let (out, truncated) = AcpTerminal::truncate_output_tail(input, 2);
+        assert!(truncated);
+        assert!(input.ends_with(&out));
+        // Result is always valid UTF-8 (String guarantees it; assert no panic).
+        assert!(out.len() <= 2);
+    }
+
+    // ---- manager error paths: every op rejects an unknown terminal id -----
+
+    #[tokio::test]
+    async fn unknown_terminal_ops_return_not_found() {
+        let mgr = AcpTerminalManager::new();
+        assert!(mgr.get_output("ghost", None).await.is_err());
+        assert!(mgr.kill("ghost").await.is_err());
+        assert!(mgr.release("ghost").await.is_err());
+        assert!(mgr.write("ghost", "x").await.is_err());
+        assert!(mgr.is_running("ghost").await.is_err());
+        assert!(mgr.wait_for_exit("ghost", Some(1)).await.is_err());
+        assert!(mgr.get_info("ghost").await.is_err());
+        assert!(mgr.list().await.is_empty());
+    }
+
+    // ---- real process lifecycle (unix-only: relies on `echo` / `cat`) -----
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn echo_runs_to_completion_and_reports_exit_zero() {
+        let mgr = AcpTerminalManager::new();
+        let id = mgr
+            .create("sess", "echo", &["hello".to_string()], None, None, None)
+            .await
+            .expect("spawn echo");
+
+        assert!(mgr.list().await.contains(&id));
+        assert!(mgr.get_info(&id).await.is_ok());
+
+        let status = mgr.wait_for_exit(&id, Some(5)).await.expect("wait echo");
+        assert_eq!(status.exit_code, Some(0));
+
+        // Release removes it from the manager; subsequent ops are not-found.
+        mgr.release(&id).await.expect("release");
+        assert!(!mgr.list().await.contains(&id));
+        assert!(mgr.get_output(&id, None).await.is_err());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn write_then_kill_transitions_state_to_killed() {
+        let mgr = AcpTerminalManager::new();
+        // `cat` echoes stdin and stays alive until its stdin closes — a stable
+        // target for exercising write() + kill() without a race to exit.
+        let id = mgr
+            .create("sess", "cat", &[], None, None, None)
+            .await
+            .expect("spawn cat");
+
+        mgr.write(&id, "data\n").await.expect("write to stdin");
+        mgr.kill(&id).await.expect("kill");
+
+        let info = mgr.get_info(&id).await.expect("info after kill");
+        assert_eq!(info["state"], serde_json::json!("Killed"));
+        assert_eq!(info["exitStatus"]["signal"], serde_json::json!("killed"));
+
+        mgr.release(&id).await.expect("release");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn kill_all_clears_every_terminal() {
+        let mgr = AcpTerminalManager::new();
+        let a = mgr
+            .create("sess-a", "cat", &[], None, None, None)
+            .await
+            .expect("spawn cat a");
+        let b = mgr
+            .create("sess-b", "cat", &[], None, None, None)
+            .await
+            .expect("spawn cat b");
+        assert_eq!(mgr.list().await.len(), 2);
+
+        mgr.kill_all().await.expect("kill_all");
+
+        assert!(mgr.list().await.is_empty());
+        assert!(mgr.get_info(&a).await.is_err());
+        assert!(mgr.get_info(&b).await.is_err());
+        // Idempotent on an already-empty manager.
+        mgr.kill_all().await.expect("kill_all empty");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn managed_snapshot_reports_live_terminal_with_pid() {
+        let mgr = AcpTerminalManager::new();
+        // Empty on a fresh manager.
+        assert!(mgr.managed_snapshot().await.is_empty());
+
+        let id = mgr
+            .create("sess", "cat", &[], None, None, None)
+            .await
+            .expect("spawn cat");
+
+        let snap = mgr.managed_snapshot().await;
+        let row = snap
+            .iter()
+            .find(|r| r.id == id)
+            .expect("terminal in snapshot");
+        assert_eq!(row.command, "cat");
+        assert_eq!(row.session_id, "sess");
+        assert!(row.running);
+        assert!(row.pid.is_some(), "live terminal should report an OS pid");
+
+        mgr.kill_all().await.expect("cleanup");
+        assert!(mgr.managed_snapshot().await.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn output_byte_limit_truncates_collected_output() {
+        let mgr = AcpTerminalManager::new();
+        let id = mgr
+            .create(
+                "sess",
+                "echo",
+                &["abcdefghij".to_string()],
+                None,
+                None,
+                Some(3),
+            )
+            .await
+            .expect("spawn echo");
+        mgr.wait_for_exit(&id, Some(5)).await.expect("wait echo");
+        // Give the stdout reader task a tick to drain the line into the channel.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let (output, truncated, _status) = mgr.get_output(&id, None).await.expect("output");
+        // echo appends a newline → "abcdefghij\n" (11 bytes), tail-limited to 3.
+        assert!(truncated);
+        assert_eq!(output.len(), 3);
+        mgr.release(&id).await.expect("release");
+    }
+}

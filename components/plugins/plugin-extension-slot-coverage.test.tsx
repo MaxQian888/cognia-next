@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-// Coverage harness for the 24 implemented `CanonicalExtensionPoint`s. Pairs
+// Coverage harness for every implemented `CanonicalExtensionPoint`. Pairs
 // with `scripts/audit-plugin-slots.ts`: the audit verifies each implemented
 // point has a host JSX mount in the right file; this test verifies the slot
 // API + the test helper actually render an extension at every point.

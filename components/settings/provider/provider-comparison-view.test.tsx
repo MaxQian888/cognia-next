@@ -25,10 +25,21 @@ jest.mock("next-intl", () => ({
       "comparison.codeGeneration": "Code Generation",
       "comparison.functionCalling": "Function Calling",
       "comparison.streaming": "Streaming",
+      "comparison.reasoning": "Reasoning",
+      "comparison.audio": "Audio",
+      "comparison.video": "Video",
+      "comparison.imageGeneration": "Image Generation",
+      "comparison.embedding": "Embedding",
       "comparison.avgLatency": "Avg Latency",
       "comparison.availability": "Availability",
       "comparison.inputPrice": "Input Price",
       "comparison.outputPrice": "Output Price",
+      "comparison.cacheReadPrice": "Cache Read Price",
+      "comparison.cacheWritePrice": "Cache Write Price",
+      "comparison.batchInputPrice": "Batch Input Price",
+      "comparison.batchOutputPrice": "Batch Output Price",
+      "comparison.audioInputPrice": "Audio Input Price",
+      "comparison.audioOutputPrice": "Audio Output Price",
       "comparison.estCostPer1K": "Est. Cost/1K calls",
       "comparison.bestValue": "Best value",
       "comparison.noPrice": "N/A",
@@ -73,7 +84,7 @@ jest.mock("@/stores", () => ({
 
 // ── Catalog mock ──────────────────────────────────────────────────────────────
 
-jest.mock("@/types/provider/built-in-provider-catalog", () => ({
+jest.mock("@cognia/provider-types/built-in-provider-catalog", () => ({
   getBuiltInProviderCatalog: () => [
     {
       id: "openai",
@@ -88,7 +99,12 @@ jest.mock("@/types/provider/built-in-provider-catalog", () => ({
           supportsTools: true,
           supportsVision: true,
           supportsStreaming: true,
-          pricing: { promptPer1M: 2.5, completionPer1M: 10.0 },
+          pricing: {
+            promptPer1M: 2.5,
+            completionPer1M: 10.0,
+            cachedInputPer1M: 0.25,
+            cacheCreationPer1M: 3.13,
+          },
         },
         {
           id: "gpt-4o-mini",
@@ -248,6 +264,45 @@ describe("ProviderComparisonView", () => {
 
     expect(screen.getByText("Input Price")).toBeInTheDocument()
     expect(screen.getByText("Output Price")).toBeInTheDocument()
+  })
+
+  it("renders extended pricing rows only for dimensions a model declares", () => {
+    render(<ProviderComparisonView onBack={onBack} />)
+
+    const checkboxes = screen.getAllByRole("checkbox")
+    fireEvent.click(checkboxes[0]) // GPT-4o declares cache read/write pricing
+
+    // Cache rows appear because GPT-4o declares them…
+    expect(screen.getByText("Cache Read Price")).toBeInTheDocument()
+    expect(screen.getByText("Cache Write Price")).toBeInTheDocument()
+    // …but batch/audio rows are skipped entirely when no selected model has them.
+    expect(screen.queryByText("Batch Input Price")).not.toBeInTheDocument()
+    expect(screen.queryByText("Audio Input Price")).not.toBeInTheDocument()
+  })
+
+  it("shows a dash for a model lacking a dimension another model declares", () => {
+    render(<ProviderComparisonView onBack={onBack} />)
+
+    const checkboxes = screen.getAllByRole("checkbox")
+    fireEvent.click(checkboxes[0]) // GPT-4o (has cache pricing)
+    fireEvent.click(checkboxes[2]) // Claude 3.5 Sonnet (no cache pricing)
+
+    // The cache row renders (GPT-4o has it) and the model that lacks it shows "—".
+    expect(screen.getByText("Cache Read Price")).toBeInTheDocument()
+    expect(screen.getAllByText("—").length).toBeGreaterThan(0)
+  })
+
+  it("renders the extended models.dev capability rows", () => {
+    render(<ProviderComparisonView onBack={onBack} />)
+
+    const checkboxes = screen.getAllByRole("checkbox")
+    fireEvent.click(checkboxes[0])
+
+    expect(screen.getByText("Reasoning")).toBeInTheDocument()
+    expect(screen.getByText("Audio")).toBeInTheDocument()
+    expect(screen.getByText("Video")).toBeInTheDocument()
+    expect(screen.getByText("Image Generation")).toBeInTheDocument()
+    expect(screen.getByText("Embedding")).toBeInTheDocument()
   })
 
   // ── 6. Capability indicators ──────────────────────────────────────────────

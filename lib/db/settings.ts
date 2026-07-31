@@ -1,21 +1,34 @@
-import type { AppSettings, BuiltinToolsConfig } from "@/lib/claude/types"
-import { DEFAULT_BIOMETRIC_GUARD, DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
-import { DEFAULT_TTS_SETTINGS } from "@/types/media/tts"
+import type { AppSettings, BuiltinToolsConfig } from "@cognia/agent-config-types"
+import {
+  DEFAULT_BIOMETRIC_GUARD,
+  DEFAULT_BUILTIN_TOOLS,
+  DEFAULT_UPDATE_SETTINGS,
+  DEFAULT_USER_PROFILE,
+} from "@cognia/agent-config-types"
+import { DEFAULT_TTS_SETTINGS } from "@cognia/tts/types"
 import {
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
   DEFAULT_SOURCE_VERIFICATION_SETTINGS,
   createDefaultSearchUsageStats,
-} from "@/lib/search/types"
+} from "@cognia/web-search/types"
 import { DEFAULT_BACKGROUND_SETTINGS } from "@/types/appearance"
 import { DEFAULT_NETWORK_PROXY_SETTINGS } from "@/types/network/proxy"
 import { DEFAULT_OCR_SETTINGS, type UserOcrSettings } from "@/types/ocr"
 import { DEFAULT_GIT_SETTINGS } from "@/types/git"
-import { DEFAULT_SIDEBAR_LAYOUT } from "@/types/shell/sidebar"
-import { getDb } from "./schema"
+import { DEFAULT_SIDEBAR_LAYOUT, DEFAULT_SIDEBAR_SIDE } from "@/types/shell/sidebar"
+import { DEFAULT_EVAL_SETTINGS } from "@/types/eval/settings"
+import { DEFAULT_AUTO_ROUTING, type AutoRoutingSettings } from "@cognia/provider-types/auto-router"
+import { DEFAULT_ROUTING_CONFIG } from "@cognia/provider-types/model-mapping"
+import type { DifficultyRoutingSettings } from "@/types/routing/tool-route"
+import { getDb, withDbReopenRetry } from "./schema"
 
 const SINGLETON_ID = "singleton" as const
 
-const DEFAULTS: AppSettings = {
+/**
+ * Canonical default settings. Exported so settings-profile reset/export can
+ * diff against and restore them without re-deriving the shape.
+ */
+export const DEFAULTS: AppSettings = {
   id: SINGLETON_ID,
   defaultModel: undefined,
   defaultSystemPrompt: undefined,
@@ -23,8 +36,18 @@ const DEFAULTS: AppSettings = {
   activeProjectId: undefined,
   permissionMode: "default",
   alwaysAllowTools: [],
+  // Canvas-executed code is confined by default (ADR-0028); independently
+  // overridable from Settings → Sandbox (does not affect chat-tool sandboxing).
+  canvasCodeSandboxEnabled: true,
   builtinTools: { ...DEFAULT_BUILTIN_TOOLS },
   routingFallbackEnabled: true,
+  autoRouting: { ...DEFAULT_AUTO_ROUTING },
+  // Cache-friendly prompt assembly is on by default: volatile per-turn sections
+  // (twin RAG, style few-shot, memory recall) are routed to the appended tail so
+  // the stable system prefix stays byte-identical across turns and provider
+  // prompt caches (Anthropic cache_control, DeepSeek/OpenAI auto-cache) keep
+  // hitting. Explicit `false` opts out (mirrors routingFallbackEnabled).
+  cacheOptimizationEnabled: true,
   apiKey: undefined,
   apiBaseUrl: undefined,
   activeProviderId: undefined,
@@ -33,19 +56,46 @@ const DEFAULTS: AppSettings = {
     watchDb: true,
     defaultPropagation: [],
   },
+  customLimitsSources: [],
+  limitsQueryEnabledAccounts: [],
   lastUpdateCheckAt: undefined,
+  updates: { ...DEFAULT_UPDATE_SETTINGS },
+  browserCookieImportEnabled: false,
+  remoteBrowserEnabled: false,
+  cliBridge: { autoSync: false },
+  webTools: { enabled: true },
   onboardingDismissedAt: undefined,
   theme: "system",
   fontScale: "md",
   language: "en",
   reduceMotion: false,
   workflowEditorPerformanceTier: undefined,
+  evalSettings: { ...DEFAULT_EVAL_SETTINGS },
   telemetryEnabled: false,
+  behaviorTelemetry: {
+    enabled: false,
+    destinations: { local: true, remote: false },
+    categories: {
+      chat: true,
+      workflow: true,
+      connector: true,
+      agentTeam: true,
+      system: true,
+    },
+    sampleRate: 1,
+    retentionDays: 30,
+    maxStoredEvents: 10_000,
+  },
+  storageRetention: { traceRetentionDays: 30 },
   sttLanguage: "en-US",
   selectedMicId: undefined,
   pinnedWorkflowIds: [],
   pinnedMeRowIds: [],
   sidebarLayout: DEFAULT_SIDEBAR_LAYOUT,
+  // A scalar, so `{ ...DEFAULTS, ...row }` in `getSettings` already seeds it
+  // for rows saved before the rail could move — no entry needed alongside the
+  // nested-object merges below.
+  sidebarSide: DEFAULT_SIDEBAR_SIDE,
   lastInboxViewedAt: 0,
   // TTS defaults (mirror types/media/tts.ts → DEFAULT_TTS_SETTINGS).
   ttsProvider: DEFAULT_TTS_SETTINGS.ttsProvider,
@@ -54,7 +104,9 @@ const DEFAULTS: AppSettings = {
   openaiModel: DEFAULT_TTS_SETTINGS.openaiModel,
   openaiSpeed: DEFAULT_TTS_SETTINGS.openaiSpeed,
   openaiInstructions: DEFAULT_TTS_SETTINGS.openaiInstructions,
+  openaiResponseFormat: DEFAULT_TTS_SETTINGS.openaiResponseFormat,
   geminiVoice: DEFAULT_TTS_SETTINGS.geminiVoice,
+  geminiModel: DEFAULT_TTS_SETTINGS.geminiModel,
   edgeVoice: DEFAULT_TTS_SETTINGS.edgeVoice,
   edgeRate: DEFAULT_TTS_SETTINGS.edgeRate,
   edgePitch: DEFAULT_TTS_SETTINGS.edgePitch,
@@ -71,6 +123,16 @@ const DEFAULTS: AppSettings = {
   cartesiaSpeed: DEFAULT_TTS_SETTINGS.cartesiaSpeed,
   cartesiaEmotion: DEFAULT_TTS_SETTINGS.cartesiaEmotion,
   deepgramVoice: DEFAULT_TTS_SETTINGS.deepgramVoice,
+  xiaomiVoice: DEFAULT_TTS_SETTINGS.xiaomiVoice,
+  xiaomiModel: DEFAULT_TTS_SETTINGS.xiaomiModel,
+  xiaomiStyle: DEFAULT_TTS_SETTINGS.xiaomiStyle,
+  xiaomiDialect: DEFAULT_TTS_SETTINGS.xiaomiDialect,
+  mistralVoiceId: DEFAULT_TTS_SETTINGS.mistralVoiceId,
+  mistralModel: DEFAULT_TTS_SETTINGS.mistralModel,
+  mistralResponseFormat: DEFAULT_TTS_SETTINGS.mistralResponseFormat,
+  realtimeVoice: DEFAULT_TTS_SETTINGS.realtimeVoice,
+  realtimeModel: DEFAULT_TTS_SETTINGS.realtimeModel,
+  realtimeInstructions: DEFAULT_TTS_SETTINGS.realtimeInstructions,
   ttsEnabled: DEFAULT_TTS_SETTINGS.ttsEnabled,
   ttsRate: DEFAULT_TTS_SETTINGS.ttsRate,
   ttsPitch: DEFAULT_TTS_SETTINGS.ttsPitch,
@@ -78,12 +140,14 @@ const DEFAULTS: AppSettings = {
   ttsAutoPlay: DEFAULT_TTS_SETTINGS.ttsAutoPlay,
   ttsCacheEnabled: DEFAULT_TTS_SETTINGS.ttsCacheEnabled,
   ttsStreamingEnabled: DEFAULT_TTS_SETTINGS.ttsStreamingEnabled,
+  ttsFallbackEnabled: DEFAULT_TTS_SETTINGS.ttsFallbackEnabled,
 
   // Web search defaults — providers are all installed-but-disabled until the
   // user enters an API key.
   searchEnabled: false,
   searchMaxResults: 5,
   searchFallbackEnabled: true,
+  searchMaxRetries: 2,
   defaultSearchProvider: "tavily",
   searchProviders: { ...DEFAULT_SEARCH_PROVIDER_SETTINGS },
   defaultSearchType: "general",
@@ -120,6 +184,10 @@ const DEFAULTS: AppSettings = {
   // are off until the user opts in via Settings → 应用安全.
   biometricRequiredFor: { ...DEFAULT_BIOMETRIC_GUARD },
 
+  // Browser/desktop Vault locks after 30 minutes of inactivity by default.
+  // Active local turns pause the timer; users may override or disable it.
+  accountAutoLockMinutes: 30,
+
   // OCR subsystem preferences. Driven by the settings page at
   // `components/settings/ocr/*`. Mirrors `lib/ocr/types.ts:DEFAULT_OCR_SETTINGS`.
   ocrSettings: { ...DEFAULT_OCR_SETTINGS },
@@ -127,19 +195,45 @@ const DEFAULTS: AppSettings = {
   // Source Control preferences (AI commit message generation, …).
   gitSettings: { ...DEFAULT_GIT_SETTINGS },
 
+  // Local user profile — empty by default; identity falls back to the
+  // credential-derived name/avatar (see `lib/profile/use-user-profile.ts`).
+  profile: { ...DEFAULT_USER_PROFILE },
+
   // Conversation title auto-generation — on by default (the instant
   // first-message truncation always runs; this gates the LLM upgrade).
   conversationTitle: { enabled: true },
   // Right-edge timeline minimap — feature on, collapsed by default, label
   // summaries off (they cost one model call per turn).
   conversationTimeline: { enabled: true, expanded: false, labelSummary: { enabled: false } },
+  // Conversation sidebar (ChannelList) — comfortable density, no preview line,
+  // workspace grouping (the axis conversations are already stamped with) +
+  // unread badges on, title-only search (content search is opt-in).
+  conversationSidebar: {
+    density: "comfortable",
+    showPreview: false,
+    groupBy: "workspace",
+    showUnreadBadges: true,
+    searchScope: "title",
+  },
+  // Token-level streaming for interactive chat — on by default.
+  streamPartialMessages: true,
 }
 
 export async function getSettings(): Promise<AppSettings> {
-  const row = await getDb().settings.get(SINGLETON_ID)
+  // Retried across a connection close: this read is what every window makes at
+  // boot, right when the plugin table bridge closes and reopens the shared
+  // connection to register plugin stores. Losing it used to strand the whole
+  // window on DEFAULTS for the rest of the session (see `withDbReopenRetry`).
+  const row = await withDbReopenRetry(() => getDb().settings.get(SINGLETON_ID))
   // Forward-compat: merge defaults under the persisted row so older installs
   // pick up new fields (e.g., searchProviders) without a schema migration.
   if (!row) return DEFAULTS
+  const autoRouting = mergeAutoRouting(row.autoRouting, row.difficultyRouting)
+  const routingConfig = {
+    ...DEFAULT_ROUTING_CONFIG,
+    ...(row.routingConfig ?? {}),
+    strategy: row.routingConfig?.strategy ?? autoRouting.strategy,
+  }
   return {
     ...DEFAULTS,
     ...row,
@@ -153,11 +247,36 @@ export async function getSettings(): Promise<AppSettings> {
     customCssEnabled: row.customCssEnabled ?? false,
     importedVscodeThemes: row.importedVscodeThemes ?? [],
     networkProxy: { ...DEFAULT_NETWORK_PROXY_SETTINGS, ...(row.networkProxy ?? {}) },
+    webTools: { enabled: row.webTools?.enabled ?? true },
+    cliBridge: { autoSync: row.cliBridge?.autoSync ?? false },
+    updates: { ...DEFAULT_UPDATE_SETTINGS, ...(row.updates ?? {}) },
     biometricRequiredFor: {
       ...DEFAULT_BIOMETRIC_GUARD,
       ...(row.biometricRequiredFor ?? {}),
     },
+    behaviorTelemetry: {
+      ...DEFAULTS.behaviorTelemetry!,
+      ...(row.behaviorTelemetry ?? {}),
+      enabled:
+        row.behaviorTelemetry?.enabled ??
+        row.telemetryEnabled ??
+        DEFAULTS.behaviorTelemetry!.enabled,
+      destinations: {
+        ...DEFAULTS.behaviorTelemetry!.destinations,
+        ...(row.behaviorTelemetry?.destinations ?? {}),
+      },
+      categories: {
+        ...DEFAULTS.behaviorTelemetry!.categories,
+        ...(row.behaviorTelemetry?.categories ?? {}),
+      },
+    },
     ocrSettings: mergeOcrSettings(row.ocrSettings),
+    storageRetention: {
+      traceRetentionDays:
+        row.storageRetention?.traceRetentionDays ??
+        DEFAULTS.storageRetention?.traceRetentionDays ??
+        30,
+    },
     gitSettings: {
       ...DEFAULT_GIT_SETTINGS,
       ...(row.gitSettings ?? {}),
@@ -165,12 +284,30 @@ export async function getSettings(): Promise<AppSettings> {
         ...DEFAULT_GIT_SETTINGS.commitMessageAI,
         ...(row.gitSettings?.commitMessageAI ?? {}),
       },
+      reviewAI: {
+        enabled: false,
+        ...DEFAULT_GIT_SETTINGS.reviewAI,
+        ...(row.gitSettings?.reviewAI ?? {}),
+      },
+      explainAI: {
+        enabled: false,
+        ...DEFAULT_GIT_SETTINGS.explainAI,
+        ...(row.gitSettings?.explainAI ?? {}),
+      },
     },
     // Forward-compat: a row saved before sidebar customization existed has no
     // `sidebarLayout` — fall back to the default so the rail renders pinned
     // features + "More". Arrays replace wholesale (an explicit empty `pinned`
     // is a deliberate user choice, not a missing field).
     sidebarLayout: { ...DEFAULT_SIDEBAR_LAYOUT, ...(row.sidebarLayout ?? {}) },
+    // `titleBarLayout` / `statusBarLayout` are deliberately NOT seeded here.
+    // "Absent" is load-bearing for them: `components/shell/use-bar-layout.ts`
+    // reads it as "this install has never customized the bar" and folds the
+    // legacy `barItems` visibility map (persisted by the UI store before the
+    // bars became orderable) into the first resolved layout. Defaulting them
+    // here would make every existing install look already-customized and throw
+    // that choice away.
+    profile: { ...DEFAULT_USER_PROFILE, ...(row.profile ?? {}) },
     conversationTitle: { ...DEFAULTS.conversationTitle, ...(row.conversationTitle ?? {}) },
     conversationTimeline: {
       ...DEFAULTS.conversationTimeline,
@@ -180,7 +317,47 @@ export async function getSettings(): Promise<AppSettings> {
         ...(row.conversationTimeline?.labelSummary ?? {}),
       },
     },
+    conversationSidebar: {
+      ...DEFAULTS.conversationSidebar,
+      ...(row.conversationSidebar ?? {}),
+    },
+    routingConfig,
+    autoRouting: { ...autoRouting, strategy: routingConfig.strategy },
     id: SINGLETON_ID,
+  }
+}
+
+function mergeAutoRouting(
+  stored: Partial<AutoRoutingSettings> | undefined,
+  legacyDifficulty: DifficultyRoutingSettings | undefined
+): AutoRoutingSettings {
+  const strategy =
+    stored?.strategy ??
+    (legacyDifficulty?.enabled ? ("difficulty" as const) : DEFAULT_AUTO_ROUTING.strategy)
+  return {
+    ...DEFAULT_AUTO_ROUTING,
+    ...(stored ?? {}),
+    strategy,
+    enabled: stored?.enabled ?? legacyDifficulty?.enabled ?? DEFAULT_AUTO_ROUTING.enabled,
+    defaultSelection:
+      stored?.defaultSelection ??
+      (stored?.enabled === true || legacyDifficulty?.enabled === true
+        ? "auto"
+        : DEFAULT_AUTO_ROUTING.defaultSelection),
+    preferredProviders: stored?.preferredProviders ?? [],
+    excludedProviders: stored?.excludedProviders ?? [],
+    dataPolicy: {
+      ...DEFAULT_AUTO_ROUTING.dataPolicy,
+      ...(stored?.dataPolicy ?? {}),
+    },
+    thresholds: {
+      ...DEFAULT_AUTO_ROUTING.thresholds,
+      ...(legacyDifficulty?.enabled ? { powerful: legacyDifficulty.threshold } : {}),
+      ...(stored?.thresholds ?? {}),
+    },
+    candidateAliases: stored?.candidateAliases?.length
+      ? [...stored.candidateAliases]
+      : [...DEFAULT_AUTO_ROUTING.candidateAliases],
   }
 }
 
@@ -214,16 +391,65 @@ function mergeBuiltinTools(stored: BuiltinToolsConfig | undefined): BuiltinTools
 // us a strict per-process write order without needing a mutex library.
 let saveQueue: Promise<unknown> = Promise.resolve()
 
-export async function saveSettings(patch: Partial<Omit<AppSettings, "id">>): Promise<AppSettings> {
-  const next = saveQueue.then(async () => {
-    const current = await getSettings()
-    // Bump `updatedAt` on every write so the companion sync source can tell
-    // when the singleton changed and re-emit it to paired phones (see
-    // `lib/sync/desktop-sync-source.ts:readSettingsDelta`).
-    const merged: AppSettings = { ...current, ...patch, id: SINGLETON_ID, updatedAt: Date.now() }
-    await getDb().settings.put(merged)
-    return merged
-  })
+export interface SaveSettingsOptions {
+  /**
+   * Whether a paired client should also enqueue this patch for its host.
+   *
+   * Defaults to `true`: every call site is a user edit, and mirroring is what
+   * makes a setting changed on the phone actually reach the desktop. Pass
+   * `false` for writes the user did not make — boot-time repairs and seeds —
+   * so a local cleanup is not replayed onto the host as an intentional edit.
+   */
+  mirrorToHost?: boolean
+}
+
+export async function saveSettings(
+  patch: Partial<Omit<AppSettings, "id">>,
+  options: SaveSettingsOptions = {}
+): Promise<AppSettings> {
+  // Same connection-close exposure as the read, with a worse failure: a patch
+  // dropped mid-boot is a setting the user watched themselves change and then
+  // lose. The whole read-modify-write retries as a unit — re-reading `current`
+  // is what keeps the merge correct on the second pass.
+  const next = saveQueue.then(() =>
+    withDbReopenRetry(async () => {
+      const current = await getSettings()
+      // Bump `updatedAt` on every write so the companion sync source can tell
+      // when the singleton changed and re-emit it to paired phones (see
+      // `lib/sync/desktop-sync-source.ts:readSettingsDelta`).
+      const merged: AppSettings = { ...current, ...patch, id: SINGLETON_ID, updatedAt: Date.now() }
+      await getDb().settings.put(merged)
+      // ADR-0090 Phase 1: keep the derived Provider Profile Store fresh.
+      // Runs inside the serialized queue so derivations observe writes in
+      // order; awaited so a caller that immediately reads profiles sees the
+      // updated set, but failures never poison the settings save itself.
+      if ("providerSettings" in patch || "customProviders" in patch) {
+        try {
+          const { syncProviderProfilesFromSettings } =
+            await import("@/lib/settings/provider-profile-sync")
+          await syncProviderProfilesFromSettings(merged)
+        } catch {
+          // The profile store is a re-derivable projection; a failed sync is
+          // recovered by the next provider-touching save.
+        }
+      }
+      // Mirror the host-writable subset up to the paired host. Outside the
+      // retry's critical section in spirit but inside it in code, because the
+      // enqueue must not happen if the local write never landed. Failures are
+      // swallowed: the local save is the user-visible outcome, and a queue that
+      // could not be written is reported by the offline banner, not by making
+      // the settings save look like it failed.
+      if (options.mirrorToHost !== false) {
+        try {
+          const { mirrorSettingsPatchToHost } = await import("@/lib/settings/mirror-to-host")
+          await mirrorSettingsPatchToHost(patch)
+        } catch {
+          // Non-fatal — see above.
+        }
+      }
+      return merged
+    })
+  )
   // Swallow rejection on the queue tail so a single failure doesn't poison
   // every subsequent caller — each awaiter still gets their own rejected
   // Promise via the `next` reference returned below.

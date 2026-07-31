@@ -5,7 +5,14 @@ const scorer = (id: string): Scorer => ({
   id,
   dimension: "tool-use",
   requiresLlm: false,
-  score: () => ({ scorerId: id, dimension: "tool-use", value: 1, passed: true }),
+  gating: true,
+  score: () => ({
+    scorerId: id,
+    dimension: "tool-use" as const,
+    status: "scored" as const,
+    value: 1,
+    passed: true,
+  }),
 })
 const all = [scorer("a"), scorer("b"), scorer("c")]
 

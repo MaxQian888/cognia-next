@@ -19,6 +19,7 @@
 
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 
 export type AgentRuntime = "claude-sdk" | "external"
 
@@ -45,6 +46,7 @@ export const useAgentRuntimeStore = create<AgentRuntimeState>()(
     }),
     {
       name: "cognia-next.agent-runtime",
+      storage: persistLocalStorage(),
       version: 1,
     }
   )

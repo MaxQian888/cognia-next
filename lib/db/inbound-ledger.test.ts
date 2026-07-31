@@ -1,17 +1,20 @@
+/** @jest-environment jsdom */
 /**
  * Tests for lib/db/inbound-ledger.ts — dedup ledger for inbound messages.
  */
 
 import "fake-indexeddb/auto"
-import { recordInbound, pruneOldest } from "./inbound-ledger"
+import { recordInbound, isInboundRecorded, pruneOldest } from "./inbound-ledger"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
 
+// The first cold open of the full schema (100+ Dexie versions) can exceed
+// jest's default 5 s hook timeout on a loaded machine.
 beforeEach(async () => {
   await getDb().delete()
   __resetDbForTesting()
   getDb()
   await whenSeeded()
-})
+}, 30_000)
 
 describe("inbound-ledger", () => {
   it("recordInbound returns true on first call for a message", async () => {
@@ -67,6 +70,52 @@ describe("inbound-ledger", () => {
       .first()
     expect(found).toBeDefined()
     expect(found?.namespace).toBe("callback")
+  })
+
+  it("scopes dedup by conversationKey: same messageId in two chats both record", async () => {
+    // Telegram message_id / Slack ts are only unique per CHAT — without the
+    // conversation scope the second chat's message was permanently dropped.
+    const first = await recordInbound("adp_1", "42", "inbound", "telegram:adp_1:chatA")
+    const second = await recordInbound("adp_1", "42", "inbound", "telegram:adp_1:chatB")
+    expect(first).toBe(true)
+    expect(second).toBe(true)
+    // A true redelivery in the SAME chat still dedups.
+    expect(await recordInbound("adp_1", "42", "inbound", "telegram:adp_1:chatA")).toBe(false)
+  })
+
+  it("isInboundRecorded probes without recording", async () => {
+    expect(await isInboundRecorded("adp_1", "probe_1", "callback")).toBe(false)
+    // The probe must not have consumed the id.
+    expect(await recordInbound("adp_1", "probe_1", "callback")).toBe(true)
+    expect(await isInboundRecorded("adp_1", "probe_1", "callback")).toBe(true)
+    // Scoped probe matches the scoped record.
+    await recordInbound("adp_1", "probe_2", "inbound", "telegram:adp_1:chatA")
+    expect(await isInboundRecorded("adp_1", "probe_2", "inbound", "telegram:adp_1:chatA")).toBe(
+      true
+    )
+    expect(await isInboundRecorded("adp_1", "probe_2", "inbound", "telegram:adp_1:chatB")).toBe(
+      false
+    )
+  })
+
+  it("maps a lost check-then-add race (ConstraintError) to the duplicate result", async () => {
+    // Force the read-side duplicate check to miss so both calls reach `.add`
+    // for the same primary key — deterministically reproducing two concurrent
+    // deliveries interleaving between check and add.
+    const db = getDb()
+    const whereSpy = jest.spyOn(db.inboundLedger, "where").mockReturnValue({
+      equals: () => ({ first: async () => undefined }),
+    } as unknown as ReturnType<typeof db.inboundLedger.where>)
+    try {
+      const first = await recordInbound("adp_1", "race_1")
+      const second = await recordInbound("adp_1", "race_1")
+      expect(first).toBe(true)
+      // The second .add throws ConstraintError → reported as duplicate, not
+      // as a pipeline failure.
+      expect(second).toBe(false)
+    } finally {
+      whereSpy.mockRestore()
+    }
   })
 
   it("pruneOldest is a no-op when count <= cap", async () => {

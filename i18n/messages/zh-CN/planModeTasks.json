@@ -1,0 +1,6 @@
+{
+  "headerDescription": "代理在计划模式下提交的任务，仅在当前会话有效。",
+  "headerTitle": "计划模式任务",
+  "triggerLabel": "打开计划任务面板（{count}）",
+  "triggerText": "计划任务（{count}）"
+}

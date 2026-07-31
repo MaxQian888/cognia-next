@@ -8,7 +8,7 @@
  * Yields each `TelegramUpdate` as it arrives; stops cleanly when `signal` fires.
  */
 
-import { listen } from "@tauri-apps/api/event"
+import { connectorListen as listen } from "@/lib/connectors/events"
 import type { TelegramUpdate } from "./parse"
 
 export interface WebhookOptions {

@@ -35,11 +35,23 @@ interface ContributionManifestShape {
   densityPresets?: Array<{ id?: string; name?: string }>
   mcpServerPresets?: Array<{ id?: string; name?: string }>
   externalAgentPresets?: Array<{ id?: string; name?: string }>
+  externalAgentAdapters?: Array<{ id?: string; label?: string }>
+  sessionImporters?: Array<{ id?: string; label?: string }>
   ocrProviders?: Array<{ id?: string; name?: string }>
   aiProviders?: Array<{ id?: string; name?: string }>
-  workspaceBackends?: Array<{ id?: string; name?: string }>
-  messageRenderers?: Array<{ id?: string; name?: string }>
-  modalMounts?: Array<{ id?: string; name?: string }>
+  workspaceBackends?: Array<{ id?: string; label?: string; name?: string }>
+  messageRenderers?: Array<{ partType?: string; id?: string; label?: string; name?: string }>
+  modalMounts?: Array<{ id?: string; label?: string; name?: string }>
+  terminalCompletionProviders?: Array<{ id?: string; label?: string; name?: string }>
+  routingStrategies?: Array<{ id?: string; label?: string; name?: string }>
+  deploymentFilters?: Array<{ id?: string; label?: string; name?: string }>
+  protocolAdapters?: Array<{ id?: string; label?: string; name?: string }>
+  toolRoutes?: Array<{ toolName?: string }>
+  contextProviders?: Array<{ id?: string; label?: string; name?: string }>
+  viewsContainers?: Array<{ id?: string; title?: string }>
+  views?: Array<{ id?: string; title?: string }>
+  webviews?: Array<{ id?: string; title?: string }>
+  authProviders?: Array<{ id?: string; label?: string }>
   chatMiddlewares?: Array<{ id?: string; name?: string }>
   connectors?: Array<{ id?: string; name?: string; adapter?: string }>
   lspServers?: Array<{ id?: string; name?: string; language?: string }>
@@ -50,7 +62,12 @@ interface ContributionManifestShape {
   subagents?: Array<{ id?: string; name?: string }>
   agentTeamTemplates?: Array<{ id?: string; name?: string }>
   sharedMemoryAdapters?: Array<{ id?: string; name?: string }>
+  balanceAdapters?: Array<{ id?: string; name?: string; key?: string }>
+  limitsSources?: Array<{ id?: string; name?: string; key?: string }>
+  compactionStrategies?: Array<{ id?: string; label?: string }>
   workflowTemplates?: Array<{ id?: string; name?: string }>
+  quickActions?: Array<{ id?: string; title?: string }>
+  cliTools?: Array<{ id?: string; name?: string }>
   workflows?: {
     nodeExecutors?: Array<{ id?: string; name?: string }>
     triggers?: Array<{ id?: string; name?: string }>
@@ -105,12 +122,42 @@ export function getContributionsForCapability(
       return compact(asArray(m.mcpServerPresets).map((s) => entry(s.id, s.name)))
     case "external-agent-preset":
       return compact(asArray(m.externalAgentPresets).map((s) => entry(s.id, s.name)))
+    case "external-agent-adapter":
+      // Adapters carry `label` (not `name`), mirroring authProviders/compactionStrategies.
+      return compact(asArray(m.externalAgentAdapters).map((s) => entry(s.id, s.label)))
+    case "session-importer":
+      // Session importers carry `label` (not `name`), like external-agent-adapters.
+      return compact(asArray(m.sessionImporters).map((s) => entry(s.id, s.label)))
     case "ai-provider":
     case "providers":
       return compact(asArray(m.aiProviders).map((s) => entry(s.id, s.name)))
     case "media":
       // OCR providers are the most common media contribution surface.
       return compact(asArray(m.ocrProviders).map((s) => entry(s.id, s.name)))
+    case "workspace-backend":
+      return compact(asArray(m.workspaceBackends).map((s) => entry(s.id, s.label ?? s.name)))
+    case "message-renderer":
+      return compact(
+        asArray(m.messageRenderers).map((s) => entry(s.partType ?? s.id, s.label ?? s.name))
+      )
+    case "density-preset":
+      return compact(asArray(m.densityPresets).map((s) => entry(s.name ?? s.id, s.name)))
+    case "modal-mount":
+      return compact(asArray(m.modalMounts).map((s) => entry(s.id, s.label ?? s.name)))
+    case "terminal-completion":
+      return compact(
+        asArray(m.terminalCompletionProviders).map((s) => entry(s.id, s.label ?? s.name))
+      )
+    case "routing-strategy":
+      return compact(asArray(m.routingStrategies).map((s) => entry(s.id, s.label ?? s.name)))
+    case "deployment-filter":
+      return compact(asArray(m.deploymentFilters).map((s) => entry(s.id, s.label ?? s.name)))
+    case "protocol-adapter":
+      return compact(asArray(m.protocolAdapters).map((s) => entry(s.id, s.label ?? s.name)))
+    case "tool-route":
+      return compact(asArray(m.toolRoutes).map((s) => entry(s.toolName, s.toolName)))
+    case "context-provider":
+      return compact(asArray(m.contextProviders).map((s) => entry(s.id, s.label ?? s.name)))
     case "connectors":
       return compact(asArray(m.connectors).map((s) => entry(s.id, s.name ?? s.adapter)))
     case "lsp-server":
@@ -133,8 +180,28 @@ export function getContributionsForCapability(
       return compact(asArray(m.agentTeamTemplates).map((s) => entry(s.id, s.name)))
     case "shared-memory-adapter":
       return compact(asArray(m.sharedMemoryAdapters).map((s) => entry(s.id, s.name)))
+    case "balance-adapter":
+      return compact(asArray(m.balanceAdapters).map((s) => entry(s.id, s.name ?? s.key)))
+    case "limits-source":
+      return compact(asArray(m.limitsSources).map((s) => entry(s.id, s.name ?? s.key)))
+    case "compaction-strategy":
+      return compact(asArray(m.compactionStrategies).map((s) => entry(s.id, s.label)))
     case "workflow-template":
       return compact(asArray(m.workflowTemplates).map((s) => entry(s.id, s.name)))
+    case "quick-action":
+      return compact(asArray(m.quickActions).map((s) => entry(s.id, s.title)))
+    case "cli-tools":
+      return compact(asArray(m.cliTools).map((s) => entry(s.id, s.name)))
+    case "chat-middleware":
+      return compact(asArray(m.chatMiddlewares).map((s) => entry(s.id, s.name)))
+    case "view-container":
+      return compact(asArray(m.viewsContainers).map((s) => entry(s.id, s.title)))
+    case "tree-view":
+      return compact(asArray(m.views).map((s) => entry(s.id, s.title)))
+    case "webview":
+      return compact(asArray(m.webviews).map((s) => entry(s.id, s.title)))
+    case "auth-provider":
+      return compact(asArray(m.authProviders).map((s) => entry(s.id, s.label)))
     default:
       return []
   }

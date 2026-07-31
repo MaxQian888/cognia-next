@@ -1,22 +1,23 @@
 ---
 title: Deployment
-description: Building Cognia for web, desktop (per platform), and the docs site, plus the Tauri auto-updater and code-signing checklist.
+description: Building Cognia for web, desktop (per platform), the docs site, and the self-host cloud suite (compose/k8s), plus the Tauri auto-updater and code-signing checklist.
 ---
 
 # Deployment
 
-Cognia ships in three forms:
+Cognia ships in four forms:
 
 1. **Web** — a static export deployable to any static host.
 2. **Desktop** — Tauri-bundled installers for Windows, macOS, and Linux.
-3. **Docs** — Fumadocs Next.js server, deployed independently.
+3. **Docs** — Fumadocs **static export**, deployed to Cloudflare Pages.
+4. **Self-host cloud suite** — the ADR-0059 services (signaling, share, headless cognia-server) as GHCR container images with a compose suite and a k8s kustomize tree.
 
 ```mermaid
 flowchart LR
   Source[/source code/]
   Source --> NW[pnpm build<br/>next.config.ts: output 'export']
   NW --> Out[(out/)]
-  Out --> Static[static host<br/>Netlify · Vercel · S3 · …]
+  Out --> Static[static host<br/>Netlify · Cloudflare Pages · S3 · …]
 
   Source --> NT[pnpm tauri build<br/>= pnpm build + cargo build]
   NT --> Bundle[(target/release/bundle/)]
@@ -25,17 +26,22 @@ flowchart LR
   Bundle --> LIN[Linux .AppImage / .deb / .rpm]
 
   Source --> ND[pnpm docs:build]
-  ND --> DocsOut[(docs/.next/)]
-  DocsOut --> NodeHost[Node host<br/>Vercel · Railway · …]
+  ND --> DocsOut[(docs/out/)]
+  DocsOut --> Pages[Cloudflare Pages<br/>wrangler pages deploy]
+
+  Source --> IM[images.yml<br/>docker build on v* tags]
+  IM --> GHCR[(ghcr.io/…/cognia-signaling<br/>cognia-share · cognia-server · cognia-runner)]
+  GHCR --> Compose[deploy/compose<br/>docker compose profiles]
+  GHCR --> K8s[deploy/k8s<br/>kustomize, 1 tenant = 1 namespace]
 
   classDef src fill:#0f172a,stroke:#475569,color:#cbd5e1
   classDef step fill:#1e293b,stroke:#3b82f6,color:#e2e8f0
   classDef out fill:#064e3b,stroke:#10b981,color:#a7f3d0
   classDef host fill:#312e81,stroke:#a78bfa,color:#ede9fe
   class Source src
-  class NW,NT,ND step
-  class Out,Bundle,DocsOut,WIN,MAC,LIN out
-  class Static,NodeHost host
+  class NW,NT,ND,IM step
+  class Out,Bundle,DocsOut,WIN,MAC,LIN,GHCR out
+  class Static,Pages,Compose,K8s host
 ```
 
 Each form has its own build pipeline.
@@ -154,18 +160,24 @@ Tauri supports cross-compilation only with significant setup (Docker images, sys
 
 ### Resources
 
-`tauri.conf.json` → `bundle.resources` lists files copied into the app bundle:
+`tauri.conf.json` → `bundle.resources` lists files copied into the app bundle (abridged — the real list has ~17 entries, including `vscode-ext-host/`, `webclone/`, terminal shell-integration scripts, and `hooks/builtin/`):
 
 ```jsonc
 "resources": [
   "../sidecar/claude-host.mjs",
   "../sidecar/a2ui-mcp.mjs",
   "../sidecar/package.json",
-  "../sidecar/node_modules/**/*"
+  "../sidecar/node_modules/**/*",
+  "../sidecar/webclone/package.json",
+  // … see tauri.conf.json for the full set
 ]
 ```
 
 The entire sidecar `node_modules/` is shipped because the sidecar runs as a separate Node process and needs its deps. Production users do not need Node installed — the bundled Node binary (or the host system's, if available) runs the sidecar.
+
+<Callout type="warn" title="tauri-build validates these paths at compile time">
+  Every plain-file path in `bundle.resources` must exist wherever the Rust crate compiles — including the headless `Dockerfile.cognia-server` build. Adding a resource without extending the Dockerfile's COPY set breaks the container image; `images.yml`'s PR paths cover the compile inputs so this fails in CI, not at tag time.
+</Callout>
 
 ## Code signing
 
@@ -178,6 +190,7 @@ Distributing unsigned Cognia builds will trigger SmartScreen / Gatekeeper / Linu
     - Tauri uses `signtool.exe`; ensure the Windows SDK is on PATH in CI.
   </Tab>
   <Tab value="macOS">
+    - The repository configures Tauri's ad-hoc `bundle.macOS.signingIdentity: "-"` baseline so Apple Silicon accepts builds downloaded from GitHub. Users may still need to approve the app in Privacy & Security.
     - Apple Developer Account + Developer ID Application certificate.
     - Notarisation: set `APPLE_ID`, `APPLE_PASSWORD` (app-specific), `APPLE_TEAM_ID` env vars; Tauri runs `notarytool` automatically.
     - Universal binaries: build separately for `aarch64-apple-darwin` and `x86_64-apple-darwin`, then `lipo` them.
@@ -191,59 +204,24 @@ Distributing unsigned Cognia builds will trigger SmartScreen / Gatekeeper / Linu
   </Tab>
 </Tabs>
 
-Cognia's repo includes a `.github/workflows/release.yml` that runs the Tauri build on a matrix of OS runners and uploads installers as release assets. Code signing env vars are referenced behind comments — uncomment when you have the certificates.
+Cognia's repo runs the Tauri build matrix via `release.yml` → `build-tauri.yml` (OS runners, installers uploaded to the published release). Updater signing is live through the `TAURI_SIGNING_*` secrets; macOS has an ad-hoc signing baseline, while authenticated OS trust signing (SmartScreen/notarization) remains opt-in per platform as above.
 
 ## In-app updater
 
-`tauri-plugin-updater` is **disabled** by default (`tauri.conf.json` → `plugins.updater.active = false`). Cognia ships with the plumbing in place but expects the maintainer to opt in.
+`tauri-plugin-updater` is **enabled**: `tauri.conf.json` carries the release endpoints, a real public key, and `createUpdaterArtifacts: true`, so every release build emits signed updater artifacts. `release.yml` (tag `v*`) calls `build-tauri.yml` with inherited secrets and publishes the signed `latest.json` manifest the updater polls on app start.
 
-To enable:
+The renderer has one shared update client (`lib/tauri/updater.ts`) for Settings, the command palette, tray actions, and background checks. It deduplicates concurrent fetches, closes stale native resources, applies the configured timeout and active network proxy, and keeps download and install separate. Settings → About exposes the automatic check interval, optional background download, post-install relaunch, request timeout, and proxy behavior. Tauri capabilities grant only `allow-check`, `allow-download`, `allow-install`, and process restart; combined download-and-install and process exit are not exposed.
 
-<Steps>
-  <Step>
-    ### Generate a signing key pair
+CI signing secrets (Tauri **v2** names — the v1 names `TAURI_PRIVATE_KEY` / `TAURI_KEY_PASSWORD` are ignored):
 
-    ```bash
-    pnpm tauri signer generate -w ~/.tauri/cognia-next.key
-    ```
+- `TAURI_SIGNING_PRIVATE_KEY` — contents of the private key file.
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` — its password (empty string if none).
 
-    <Callout type="error" title="Never commit the private key">
-      Keep `cognia-next.key` private (never commit, never share).
-      Distribute only `cognia-next.key.pub`.
-    </Callout>
+<Callout type="error" title="Never commit the private key">
+  Only the public key lives in `tauri.conf.json`. Rotating the key orphans every installed build's update path — treat the private key like a root credential.
+</Callout>
 
-  </Step>
-  <Step>
-    ### Wire the public key into `tauri.conf.json`
-
-    ```jsonc
-    "plugins": {
-      "updater": {
-        "active": true,
-        "endpoints": [
-          "https://github.com/MaxQian888/cognia-next/releases/latest/download/latest.json"
-        ],
-        "pubkey": "<paste public key here>"
-      }
-    }
-    ```
-
-  </Step>
-  <Step>
-    ### Set CI secrets
-
-    - `TAURI_PRIVATE_KEY` — base64-encoded contents of the private key file.
-    - `TAURI_KEY_PASSWORD` — the password (or empty string if you skipped one).
-
-  </Step>
-  <Step>
-    ### Tag a release
-
-    Tauri's GitHub Action publishes a `latest.json` manifest that the updater
-    plugin polls on app start.
-
-  </Step>
-</Steps>
+Forks: generate your own pair with `pnpm tauri signer generate -w ~/.tauri/cognia-next.key`, replace `plugins.updater.pubkey` + `endpoints`, and set the two secrets. Local unsigned builds: override `createUpdaterArtifacts` to `false` (see the build-and-package notes) instead of deleting the key.
 
 The full guide is in `src-tauri/UPDATER.md`.
 
@@ -275,44 +253,76 @@ The full guide is in `src-tauri/UPDATER.md`.
 pnpm docs:build
 ```
 
-Output: `docs/.next/`. This is a **full Next.js server build** (not a static export) because Fumadocs uses route handlers for full-text search.
+Output: `docs/out/` — the docs site is a **static export** (`docs/next.config.ts` → `output: "export"`), same as the main app. There is no Node server to run; `docs/package.json`'s `next start` does not apply to the exported site.
 
 Deploy to:
 
-- **Vercel** — set the project root to `docs/` when importing. Vercel auto-detects Next.js.
-- **Railway / Render / Fly.io** — push the `docs/` directory; run `pnpm install && pnpm build && pnpm start`.
-- **Self-hosted Node** — `cd docs && pnpm install --prod && pnpm build && pnpm start`. Default port 3001.
+- **Cloudflare Pages** (the wired path) — `deploy.yml`'s `deploy-docs` job runs `wrangler pages deploy docs/out`.
+- **Any static host** — point it at `docs/out/`.
 
 The docs build is independent of the main app build — there is no shared output directory. Both can be deployed at the same time without conflict.
 
 ### Search index
 
-Fumadocs uses Orama for in-browser full-text search. The index is generated at build time from the MDX content and shipped to the client. No external service is needed.
+Fumadocs uses Orama for in-browser full-text search. The index is generated at build time from the MDX content and shipped as static assets — no route handler, no external service.
+
+## Self-hosting the cloud services (ADR-0059)
+
+The cloud footprint — `signaling` (WebRTC rendezvous, 7892), `share` (public share links, 8787), and the headless `cognia-server` brain host (**27890**, HTTPS) — ships as GHCR images built by `images.yml` on `v*` tags:
+
+```
+ghcr.io/maxqian888/cognia-signaling
+ghcr.io/maxqian888/cognia-share
+ghcr.io/maxqian888/cognia-server        # -slim / -full variants
+ghcr.io/maxqian888/cognia-runner        # T2 per-agent runner image
+```
+
+- **Compose suite** — `deploy/compose/` with profiles for the phase ladder (`server`, `tls` Caddy/ACME front door, `observability` Prometheus, `logto` self-hosted OIDC IdP) and a T2 override that moves external agents into per-agent runner containers. Start at [`deploy/compose/README.md`](https://github.com/MaxQian888/cognia-next/blob/master/deploy/compose/README.md).
+- **Kubernetes** — `deploy/k8s/` kustomize tree, one tenant = one namespace; see `deploy/k8s/README.md` for the kind smoke and production notes (gVisor runtime class, mandatory `publicUrl`, per-tenant Logto wiring).
+- **Smoke** — `scripts/smoke/compose-smoke.mjs` drives a running stack in tiers (`services` / `server` / `tls`); `compose-e2e.yml` runs it in CI on every PR touching the suite.
+- Full architecture and the isolation/topology ladder: [ADR-0059](../adr/0059-cloud-deployment-headless-brain).
+
+### Browser Companion security
+
+The production Web client accepts Companion endpoints only through:
+
+- publicly trusted HTTPS;
+- HTTPS signed by an administrator-managed local CA that the browser already trusts; or
+- encrypted WebRTC, direct or through TURN.
+
+The browser cannot install or bypass a local CA automatically. Install the CA in the operating system/browser trust store first, then verify the certificate chain in the browser before pairing. Configure the Companion server with the matching certificate and private key. Plain HTTP is rejected in production; it is available only in a non-production build with `NEXT_PUBLIC_ALLOW_INSECURE_COMPANION_HTTP=1`, displays an insecure-mode warning, and must not be used for high-risk control.
+
+Authorize Web origins by exact HTTPS origin (`scheme://host[:port]`). Do not use `*` on authenticated endpoints. Keep the allowed methods and headers narrow, handle preflight explicitly, and permit Private Network Access only for the exact administrator-approved origins. A browser connection failure should be diagnosed separately as certificate trust, origin/CORS, PNA, expired or revoked JWT, missing TURN, or an offline host.
+
+One browser account can retain multiple encrypted Companion targets, but only one target is active. Provider keys, device JWTs, OIDC tokens, and signaling private material live in the browser Vault; the public target book contains connection metadata only. Each target also owns a separate IndexedDB database and outbound queue scope.
 
 ## CI/CD
 
-The repo includes `.github/workflows/`:
+`.github/workflows/` as it actually exists:
 
-| Workflow                 | Triggers                  | What it does                                                  |
-| ------------------------ | ------------------------- | ------------------------------------------------------------- |
-| `ci.yml` (or equivalent) | PR, push                  | Lint, typecheck, test, web build, sometimes Tauri smoke build |
-| `release.yml`            | Tag matching `v*.*.*`     | Tauri build matrix → upload installers as release assets      |
-| `docs.yml`               | Push to `main`, docs/\*\* | Build + deploy docs site                                      |
+| Workflow               | Triggers                                        | What it does                                                                                         |
+| ---------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `ci.yml`               | push/PR on `master`/`develop`                   | Orchestrates `quality.yml` + `test.yml` (lint, typecheck, Jest shards, coverage gate, E2E)           |
+| `build-tauri.yml`      | `workflow_call` / manual                        | Desktop build matrix; updater signing via `TAURI_SIGNING_*` secrets                                  |
+| `release.yml`          | tag `v*`                                        | Calls `build-tauri.yml` with inherited secrets → draft release + signed `latest.json`                |
+| `images.yml`           | tag `v*` / manual / PR on container inputs      | Builds+publishes the four GHCR images; PRs get a `cargo check` compile gate for `cognia-server`      |
+| `deploy.yml`           | **manual dispatch** / `workflow_call` only      | Gated by GitHub Environments + `DEPLOY_ENABLED`: Workers (`wrangler`), Fly axum twins, docs Pages    |
+| `compose-e2e.yml`      | PR on `deploy/compose/**`, services, smoke      | Boots the compose suite in CI and runs the tiered smoke                                              |
+| `signaling-server.yml` | push `master`/`dev` + PR on the service         | Service CI: clippy + tests + coverage + worker-build parity                                          |
+| `share-server.yml`     | push `master`/`dev` + PR on the service         | Service CI: clippy + tests + core↔Worker constants parity                                            |
 
-If you fork Cognia and want to ship binaries, fork these workflows too — they encode the matrix targets and signing wiring.
+Nothing deploys on plain pushes — `deploy.yml` is deliberately opt-in (forks stay green with no secrets).
 
 ## Versioning
 
-Cognia uses **semver** in `package.json` and `Cargo.toml`. They are kept in sync manually.
-
-`tauri.conf.json` → `version` is the user-facing version (shown in About dialog and used by the updater). It must match the npm/Cargo version.
+Cognia is versioned as **one unit** through [Changesets](https://github.com/changesets/changesets) — the root `package.json` version is the source of truth.
 
 For releases:
 
-1. Bump version in `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`.
-2. Update `CHANGELOG.md`.
-3. `git tag v0.2.0 && git push --tags`.
-4. The release workflow does the rest.
+1. During development, every user-facing change lands with a `pnpm changeset` entry.
+2. `pnpm release:version` — runs `changeset version` (consumes pending entries, bumps the root version, updates `CHANGELOG.md`) then `pnpm version:sync`, which propagates to `src-tauri/tauri.conf.json`, the `Cargo.toml`s, `cli/`, `sidecar/`, `mobile/`, and `docs/`.
+3. Commit, `git tag v0.2.0 && git push --tags`.
+4. `release.yml` + `images.yml` do the rest (installers + container images).
 
 ## Smoke tests
 

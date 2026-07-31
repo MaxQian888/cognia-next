@@ -1,0 +1,48 @@
+{
+  "alwaysAllowedTools": "始终允许的工具",
+  "bareMode": "极简模式",
+  "bareModeHint": "跳过磁盘上的自动发现（CLAUDE.md、hooks、插件、MCP）。冷启动更快；但 agent 看不到你的项目设置。",
+  "briefMode": "简短输出",
+  "briefModeHint": "在每次发送时附加一段「精简输出」指令。适合一问一答、快速分流。",
+  "cancel": "取消",
+  "chatMiddleware": "插件聊天中间件",
+  "chatMiddlewareHint": "实验性。允许已启用的插件通过其注册的聊天中间件包裹每次发送。默认关闭——没有插件提供中间件时不产生任何影响。",
+  "debugMode": "调试模式",
+  "debugModeHint": "为 SDK 和派生的 MCP / 子进程开启详细日志。可在 Tauri dev 控制台或 sidecar 日志中查看。",
+  "defaultModel": "默认模型",
+  "defaultSystemPrompt": "默认系统提示词",
+  "defaultSystemPromptPlaceholder": "可选。当会话未单独覆盖时,会在每段对话前自动追加。",
+  "dirPlaceholder": "/path/to/project",
+  "effort": {
+    "high": "high",
+    "low": "low",
+    "max": "max",
+    "medium": "medium",
+    "xhigh": "xhigh"
+  },
+  "model": {
+    "claude-haiku-4-5": "Claude Haiku 4.5",
+    "claude-opus-4-5": "Claude Opus 4.5",
+    "claude-opus-4-7": "Claude Opus 4.7",
+    "claude-sonnet-4-5": "Claude Sonnet 4.5"
+  },
+  "noneYet": "暂无。在审批弹窗中选择「始终允许」的工具会出现在这里。",
+  "orPasteModelId": "或粘贴自定义模型 id",
+  "permission": {
+    "acceptEdits": "acceptEdits",
+    "bypassPermissions": "bypassPermissions",
+    "default": "default",
+    "plan": "plan"
+  },
+  "permissionMode": "权限模式",
+  "permissionModeHintAfter": "。",
+  "permissionModeHintBefore": "控制 agent 如何处理工具调用。多数用户使用 ",
+  "permissionModeHintCode": "default",
+  "pickDirectory": "选择目录",
+  "removeFromAllowList": "从始终允许列表中移除 {tool}",
+  "save": "保存",
+  "saved": "设置已保存。",
+  "selectWorkingDirectory": "选择工作目录",
+  "useSdkDefault": "使用 SDK 默认值",
+  "workingDirectory": "工作目录"
+}

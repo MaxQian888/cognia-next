@@ -135,9 +135,7 @@ export function AcademicAnalysisPanel({
                 </div>
               </CardHeader>
               <CardContent className="pt-0">
-                <div className="prose prose-sm dark:prose-invert max-w-none">
-                  <div className="whitespace-pre-wrap text-sm">{analysisContent}</div>
-                </div>
+                <div className="whitespace-pre-wrap text-sm">{analysisContent}</div>
               </CardContent>
             </Card>
 

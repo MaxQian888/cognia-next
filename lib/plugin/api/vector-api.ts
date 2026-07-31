@@ -10,15 +10,17 @@ import {
   createVectorStore,
   type IVectorStore,
   type VectorDocument as LibVectorDocument,
-} from "@/lib/vector"
+} from "@cognia/vector"
 import {
   generateEmbedding,
   generateEmbeddings,
   DEFAULT_EMBEDDING_MODELS,
   resolveEmbeddingApiKey,
   type EmbeddingProvider,
-} from "@/lib/vector/embedding"
+} from "@cognia/vector/embedding"
 import { createPluginSystemLogger } from "../core/logger"
+import { createApiGuardedAPI } from "./api-permission-gate"
+import { assertNoLeakingPii, assertNoLeakingPiiDeep } from "./plugin-pii-gate"
 import type {
   PluginVectorAPI,
   VectorDocument,
@@ -27,8 +29,9 @@ import type {
   VectorSearchResult,
   CollectionOptions,
   CollectionStats,
-} from "@/types/plugin/plugin-extended"
+} from "@/types/plugin/plugin"
 import { nanoid } from "nanoid"
+import type { UserProviderSettings } from "@cognia/provider-types"
 
 /**
  * Create the Vector API for a plugin
@@ -41,12 +44,13 @@ export function createVectorAPI(pluginId: string): PluginVectorAPI {
     if (store) return store
 
     const settings = useSettingsStore.getState()
+    const providerSettings = (settings.providerSettings || {}) as Record<
+      string,
+      UserProviderSettings
+    >
     const vectorSettings = useVectorStore.getState().settings
     const embeddingProvider = (vectorSettings.embeddingProvider || "openai") as EmbeddingProvider
-    const embeddingApiKey = resolveEmbeddingApiKey(
-      embeddingProvider,
-      (settings.providerSettings || {}) as Record<string, { apiKey?: string }>
-    )
+    const embeddingApiKey = resolveEmbeddingApiKey(embeddingProvider, providerSettings)
     const embeddingDefaults = DEFAULT_EMBEDDING_MODELS[embeddingProvider]
 
     const provider = vectorSettings.provider || "native"
@@ -62,6 +66,8 @@ export function createVectorAPI(pluginId: string): PluginVectorAPI {
         provider: embeddingProvider,
         model: vectorSettings.embeddingModel || embeddingDefaults.model,
         dimensions: embeddingDefaults.dimensions,
+        bedrock:
+          embeddingProvider === "amazon-bedrock" ? providerSettings.bedrock?.bedrock : undefined,
       },
       embeddingApiKey,
       configId,
@@ -72,6 +78,11 @@ export function createVectorAPI(pluginId: string): PluginVectorAPI {
   }
 
   const getEmbeddingConfig = () => {
+    const settings = useSettingsStore.getState()
+    const providerSettings = (settings.providerSettings || {}) as Record<
+      string,
+      UserProviderSettings
+    >
     const vectorSettings = useVectorStore.getState().settings
     const embeddingProvider = (vectorSettings.embeddingProvider || "openai") as EmbeddingProvider
     const embeddingDefaults = DEFAULT_EMBEDDING_MODELS[embeddingProvider]
@@ -79,6 +90,8 @@ export function createVectorAPI(pluginId: string): PluginVectorAPI {
       provider: embeddingProvider,
       model: vectorSettings.embeddingModel || embeddingDefaults.model,
       dimensions: embeddingDefaults.dimensions,
+      bedrock:
+        embeddingProvider === "amazon-bedrock" ? providerSettings.bedrock?.bedrock : undefined,
     }
   }
 
@@ -86,7 +99,7 @@ export function createVectorAPI(pluginId: string): PluginVectorAPI {
     const settings = useSettingsStore.getState()
     return resolveEmbeddingApiKey(
       provider,
-      (settings.providerSettings || {}) as Record<string, { apiKey?: string }>
+      (settings.providerSettings || {}) as Record<string, UserProviderSettings>
     )
   }
 
@@ -120,7 +133,7 @@ export function createVectorAPI(pluginId: string): PluginVectorAPI {
       })(),
     }))
 
-  return {
+  const api: PluginVectorAPI = {
     createCollection: async (name: string, _options?: CollectionOptions) => {
       const vs = await getStore()
       const prefixedName = prefixCollection(name)
@@ -161,6 +174,19 @@ export function createVectorAPI(pluginId: string): PluginVectorAPI {
     },
 
     addDocuments: async (collection: string, docs: VectorDocument[]) => {
+      // Gate EVERY document's content + metadata: docs without an embedding
+      // get content sent to the embedder, and on cloud vector providers the
+      // stored content/metadata themselves leave the device.
+      assertNoLeakingPii(
+        pluginId,
+        "ctx.vector.addDocuments",
+        docs.map((d) => d.content)
+      )
+      assertNoLeakingPiiDeep(
+        pluginId,
+        "ctx.vector.addDocuments",
+        docs.map((d) => d.metadata)
+      )
       const vs = await getStore()
       const prefixedCollection = prefixCollection(collection)
 
@@ -178,6 +204,16 @@ export function createVectorAPI(pluginId: string): PluginVectorAPI {
     },
 
     updateDocuments: async (collection: string, docs: VectorDocument[]) => {
+      assertNoLeakingPii(
+        pluginId,
+        "ctx.vector.updateDocuments",
+        docs.map((d) => d.content)
+      )
+      assertNoLeakingPiiDeep(
+        pluginId,
+        "ctx.vector.updateDocuments",
+        docs.map((d) => d.metadata)
+      )
       const vs = await getStore()
       const prefixedCollection = prefixCollection(collection)
 
@@ -212,6 +248,8 @@ export function createVectorAPI(pluginId: string): PluginVectorAPI {
       query: string,
       options?: VectorSearchOptions
     ): Promise<VectorSearchResult[]> => {
+      // The store embeds the query text — same red-line as ctx.vector.embed.
+      assertNoLeakingPii(pluginId, "ctx.vector.search", [query])
       const vs = await getStore()
       const prefixedCollection = prefixCollection(collection)
       const mappedFilters = mapVectorFilters(options?.filters)
@@ -259,6 +297,8 @@ export function createVectorAPI(pluginId: string): PluginVectorAPI {
     },
 
     embed: async (text: string): Promise<number[]> => {
+      // PII red-line: embedding sends the text to the configured embedder.
+      assertNoLeakingPii(pluginId, "ctx.vector.embed", [text])
       const config = getEmbeddingConfig()
       const apiKey = getApiKey(config.provider)
       const result = await generateEmbedding(text, config, apiKey)
@@ -266,6 +306,7 @@ export function createVectorAPI(pluginId: string): PluginVectorAPI {
     },
 
     embedBatch: async (texts: string[]): Promise<number[][]> => {
+      assertNoLeakingPii(pluginId, "ctx.vector.embedBatch", texts)
       const config = getEmbeddingConfig()
       const apiKey = getApiKey(config.provider)
       const result = await generateEmbeddings(texts, config, apiKey)
@@ -293,4 +334,22 @@ export function createVectorAPI(pluginId: string): PluginVectorAPI {
       logger.info(`Cleared collection: ${collection}`)
     },
   }
+
+  // Store mutations need vector:write, queries vector:read; `embed`/`embedBatch`
+  // spend the user's embedding quota and require ai:embed.
+  return createApiGuardedAPI(pluginId, api, {
+    createCollection: "vector:write",
+    deleteCollection: "vector:write",
+    listCollections: "vector:read",
+    getCollectionInfo: "vector:read",
+    addDocuments: "vector:write",
+    updateDocuments: "vector:write",
+    deleteDocuments: "vector:write",
+    search: "vector:read",
+    searchByEmbedding: "vector:read",
+    embed: "ai:embed",
+    embedBatch: "ai:embed",
+    getDocumentCount: "vector:read",
+    clearCollection: "vector:write",
+  })
 }

@@ -17,7 +17,7 @@
  */
 
 import type { PluginCharacterPackDef } from "@/types/plugin/plugin-character-pack"
-import { PLUGIN_CHARACTER_PACK_SOFT_LIMIT } from "@/lib/plugin/sdk/define-character-pack"
+import { PLUGIN_CHARACTER_PACK_SOFT_LIMIT } from "@cognia/plugin-sdk"
 
 /**
  * Current file-format version emitted by `serializeLocalPackFile`. Bumped to
@@ -170,16 +170,12 @@ function validateV2CharacterFields(ch: Record<string, unknown>, i: number): stri
       return `characters[${i}].avatarImage must be an object`
     }
     const ai = ch.avatarImage as Record<string, unknown>
-    const tp = ai.tauriPath
     const wd = ai.webDataUrl
-    if (tp !== undefined && (typeof tp !== "string" || !tp.trim())) {
-      return `characters[${i}].avatarImage.tauriPath must be a non-empty string when set`
+    if ("tauriPath" in ai) {
+      return `characters[${i}].avatarImage.tauriPath is no longer supported; use webDataUrl`
     }
-    if (wd !== undefined && (typeof wd !== "string" || !wd.trim())) {
-      return `characters[${i}].avatarImage.webDataUrl must be a non-empty string when set`
-    }
-    if (tp === undefined && wd === undefined) {
-      return `characters[${i}].avatarImage must declare at least one of tauriPath / webDataUrl`
+    if (typeof wd !== "string" || !wd.trim()) {
+      return `characters[${i}].avatarImage.webDataUrl must be a non-empty string`
     }
   }
   if (ch.persona !== undefined) {

@@ -9,9 +9,9 @@
  * tools, the sidecar emits a `plugin_tool_exec` event back over stdout
  * and the renderer dispatches it via `handlePluginToolExec`.
  *
- * Mirrors the in-process AI-SDK flow in `agent-integration.ts` so a
- * plugin tool registered ONCE via `ctx.agent.registerTool()` lights up
- * both runtimes without the plugin author wiring anything extra.
+ * A plugin tool registered ONCE via `ctx.agent.registerTool()` (which
+ * writes straight to `PluginRegistry`) lights up the sidecar runtime here
+ * without the plugin author wiring anything extra.
  *
  * Wave 1 (terminal dock unification): the manifest can also carry a
  * block of synthetic terminal-dock entries when the user has flipped
@@ -23,6 +23,11 @@
  */
 import { usePluginStore } from "@/stores/plugin-runtime"
 
+import { buildAskUserManifestEntry } from "@/lib/claude/ask-user-tool"
+import {
+  buildDispatchAgentManifestEntry,
+  type DispatchAgentAvailableSubagent,
+} from "@/lib/claude/agents/dispatch-agent-tool"
 import {
   TERMINAL_DOCK_PLUGIN_ID,
   TERMINAL_DOCK_READ_RECENT_SCHEMA,
@@ -36,6 +41,13 @@ export interface PluginToolManifestEntry {
   description: string
   jsonSchema: object
   pluginId: string
+  /**
+   * Override the sidecar's round-trip timeout (ms) for this tool. Omit to use
+   * the 120s default. `0` disables the timeout entirely — for tools that block
+   * on a human (`ask_user`) or run their own bounded long task (`dispatch_agent`),
+   * where the 120s safety net would otherwise sever a still-valid call.
+   */
+  timeoutMs?: number
 }
 
 export interface BuildPluginToolsManifestOptions {
@@ -47,6 +59,33 @@ export interface BuildPluginToolsManifestOptions {
    * Default `false` keeps the agent out of the dock entirely.
    */
   exposeDockToAgents?: boolean
+  /**
+   * Nested-dispatch gate. When provided and `enabled`, the synthetic
+   * `dispatch_agent` entry is appended ONLY while `depth < maxDepth` — at the
+   * cap the entry is withheld so the running agent can no longer nest (the
+   * depth-N generalization of Claude Code's "Agent tool removed from
+   * subagents"). `available` seeds the `subagentId` enum + discovery list.
+   */
+  dispatchAgent?: {
+    enabled: boolean
+    depth: number
+    maxDepth: number
+    available: DispatchAgentAvailableSubagent[]
+  }
+}
+
+/**
+ * Build the synthetic `dispatch_agent` entry when nesting is enabled and the
+ * caller is still below the depth cap. Exported so unit tests can assert the
+ * gate in isolation.
+ */
+export function buildDispatchAgentManifestEntries(
+  opts: BuildPluginToolsManifestOptions = {}
+): PluginToolManifestEntry[] {
+  const gate = opts.dispatchAgent
+  if (!gate || !gate.enabled) return []
+  if (gate.depth >= gate.maxDepth) return []
+  return [buildDispatchAgentManifestEntry(gate.available)]
 }
 
 /**
@@ -123,5 +162,10 @@ export function buildPluginToolsManifest(
     }
   }
   result.push(...buildTerminalDockManifestEntries(opts))
+  // `ask_user` is a core, side-effect-free agent capability (pause and ask the
+  // user) — always available on both dispatch paths via the same relay.
+  result.push(buildAskUserManifestEntry())
+  // `dispatch_agent` — only when nesting is enabled and below the depth cap.
+  result.push(...buildDispatchAgentManifestEntries(opts))
   return result
 }

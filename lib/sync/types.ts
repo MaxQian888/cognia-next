@@ -31,6 +31,42 @@ export type SyncableTable =
   // Mobile mirrors these so the Inbox can render pinned/unread state when
   // the companion server is unreachable.
   | "conversationOverrides"
+  // Companion read-mostly views: mirror /goal console + long-term memory so
+  // the phone can show goal progress and recalled memories from Dexie while
+  // the desktop is unreachable. Both are authored on the desktop; mobile is
+  // a viewer.
+  | "goals"
+  | "memories"
+  // Workflow RUN history. Workflow *definitions* (`workflows`) already sync,
+  // but their runs never did — so every mobile run surface (the library's
+  // "active"/"sending" badges, RecentRunsFeed, MobileRunsList, the home
+  // active-runs card) sat permanently empty, and a workflow triggered from
+  // the phone vanished the moment its outbound job was sent. The phone is a
+  // read-only viewer; runs are authored on the desktop that executes them.
+  | "workflowRuns"
+  // ADR-0056 (Wave 4) — configured MCP servers. The standalone webview engine
+  // runs no MCP, and the phone has no `mcp_set_enabled` push RPC, so the mobile
+  // `/me/mcp` page is a paired-only read-only viewer of the desktop's servers.
+  // Mirroring this table is what lets it list the desktop's MCP config offline.
+  | "mcpServers"
+  // ADR-0039 (phase 2) — durable terminal command history. Authored on the
+  // desktop by the terminal spawn-orchestrator; the phone has no shell and
+  // never writes back, so this is a one-way read-only mirror powering the
+  // mobile `/me/command-history` browse/search viewer. Rows carry no
+  // `updatedAt`/`createdAt` — recency lives on the indexed `ts`, which the
+  // desktop projector cursors on (see readTerminalHistoryDelta).
+  | "terminalHistory"
+  // v104 — Agent-Team board projection (team-board CQRS). One-way mirror of
+  // the desktop agent-team-store (tasks + team-meta rows) so the phone can
+  // render the kanban offline. Mobile is a viewer; edits travel back as
+  // Companion RPC commands (`team_task_*`), never as data-level writes.
+  | "agentTeamBoard"
+  // Unified template platform portable projections. Device bindings,
+  // credentials, local Twin preferences, and migration rollback snapshots
+  // deliberately have no sync table.
+  | "templateDefinitions"
+  | "templatePackages"
+  | "templateInstances"
 
 export interface SyncCursor {
   /** Server-defined opaque cursor; defaults to 0 for the first sync. */
@@ -72,14 +108,24 @@ export interface SyncFailure {
 export type SyncOutcome = { ok: true; result: SyncResult } | { ok: false; failure: SyncFailure }
 
 /**
- * Persisted sync state per table (Dexie `syncCursors`, v44 / Wave 4).
+ * Persisted sync state per table (Dexie `hostSyncCursors`, v130 (was `syncCursors`, v44)).
  *
  * Pre-v44 installs ran with cursors only in memory; this table makes a
  * cold-started phone resume from the last successful `since` instead of
  * re-pulling the whole snapshot.
  */
 export interface SyncCursorRow {
-  /** Primary key — the SyncableTable name. */
+  /**
+   * Which host this watermark belongs to — the device id that host issued at
+   * pair time (v130). Part of the compound primary key `[serverKey+table]`.
+   *
+   * Before this existed the cursor was keyed by table alone, so a client that
+   * paired to a different host resumed from the previous host's watermark and
+   * asked the new one for everything since a timestamp that meant nothing
+   * there, blending two machines' data into one local store.
+   */
+  serverKey: string
+  /** Part of the compound primary key — the SyncableTable name. */
   table: SyncableTable
   /** Last successful `next_since` cursor returned by the server. */
   since: number

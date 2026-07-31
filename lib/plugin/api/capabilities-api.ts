@@ -14,6 +14,8 @@
 
 import { detectNativePlatform, type NativePlatform } from "@/lib/capacitor/_shared"
 import { isTauri } from "@/lib/native/utils"
+import { getSecretsBackendKind } from "./secrets-api"
+import type { PluginSecretsBackend } from "@/types/plugin/plugin"
 
 export interface PluginCapabilitiesAPI {
   /** True when the host is the Tauri desktop shell. */
@@ -29,6 +31,12 @@ export interface PluginCapabilitiesAPI {
    * `lib/capacitor/_shared`. Useful for switch-based dispatch.
    */
   platform: NativePlatform
+  /**
+   * Where `ctx.secrets` stores values at rest: OS keyring (desktop),
+   * AES-GCM-encrypted IndexedDB (browser/mobile), or in-memory only. A
+   * security-sensitive plugin can refuse to run on a weaker backend.
+   */
+  secretsBackend: PluginSecretsBackend
 }
 
 export function createCapabilitiesAPI(): PluginCapabilitiesAPI {
@@ -40,6 +48,7 @@ export function createCapabilitiesAPI(): PluginCapabilitiesAPI {
     web: platform === "web" && !tauri,
     browser: typeof window !== "undefined",
     platform,
+    secretsBackend: getSecretsBackendKind(),
   }
 }
 

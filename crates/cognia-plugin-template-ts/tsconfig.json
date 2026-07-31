@@ -1,24 +1,42 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "commonjs",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "isolatedModules": true,
+    // Automatic runtime — esbuild then emits `require("react/jsx-runtime")`,
+    // which `build` marks external so the host's React is used. See
+    // `--external` flags in package.json; a bundled second React breaks hooks.
+    "jsx": "react-jsx",
     "strict": true,
     "esModuleInterop": true,
-    "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "declaration": false,
     "outDir": "dist",
     "lib": ["ES2022", "DOM"],
-    "types": ["node", "jest"],
+    // `@testing-library/jest-dom` is listed so its matcher augmentation
+    // (`toBeInTheDocument`) is visible. `@types/react-dom` comes in for
+    // `@testing-library/react` only — `react-dom` itself is NOT a shared module
+    // and must never be imported by plugin code; see `build`'s `--external` set.
+    "types": ["node", "jest", "@testing-library/jest-dom"],
+    // The `@cognia/*` packages are not published to any registry, so they are
+    // vendored into `types/` by `cognia plugin new` (refresh with `cognia
+    // plugin sync-types`). Runtime resolution is unaffected: `build` marks both
+    // SDK and UI external and the host hands out its own already-evaluated
+    // instances — these entries exist purely so `tsc` can see the declarations.
+    // provider-types / provider-core appear because the SDK's public type
+    // surface reaches into them; they are not meant to be imported directly.
+    "baseUrl": ".",
     "paths": {
-      // Host modules (`@/types/*`, `@/lib/*`) are injected by cognia at
-      // runtime and externalized by esbuild at build time. For local
-      // type-checking + ts-jest, resolve them to the bundled shims under
-      // `src/__shims__/` (matches jest.config.cjs `moduleNameMapper`).
-      "@/*": ["./src/__shims__/*"]
+      "@cognia/plugin-sdk": ["./types/cognia-plugin-sdk.d.ts"],
+      "@cognia/plugin-ui": ["./types/cognia-plugin-ui.d.ts"],
+      "@cognia/provider-types": ["./types/provider-types/index.d.ts"],
+      "@cognia/provider-types/*": ["./types/provider-types/*.d.ts"],
+      "@cognia/provider-core": ["./types/provider-core/index.d.ts"],
+      "@cognia/provider-core/*": ["./types/provider-core/*.d.ts"]
     }
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
   "exclude": ["node_modules", "dist"]
 }

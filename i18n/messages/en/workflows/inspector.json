@@ -1,0 +1,37 @@
+{
+  "bulk": {
+    "cancel": "Cancel",
+    "clearSelection": "Clear selection",
+    "deleteAll": "{count, plural, one {Delete node} other {Delete {count} nodes}}",
+    "deleteAllConfirm": "Permanently remove the {count} selected nodes and their edges? This is a single undo step.",
+    "disabled": "Disabled",
+    "disabledHint": "Toggle to skip every selected node during runs.",
+    "disabledMixed": "Some selected nodes are disabled — toggle to set all the same.",
+    "notes": "Notes",
+    "notesApply": "Apply to all",
+    "notesClear": "Clear all",
+    "notesHint": "Applies the same note to every selected node.",
+    "notesPlaceholder": "Shared note for the selection…",
+    "title": "{count, plural, one {# node selected} other {# nodes selected}}"
+  },
+  "categoryBadge": {
+    "action": "Action",
+    "ai": "AI",
+    "annotation": "Annotation",
+    "data": "Data",
+    "flow": "Flow",
+    "io": "I/O",
+    "trigger": "Trigger"
+  },
+  "closeAria": "Close inspector",
+  "deleteNode": "Delete node",
+  "disabled": "Disabled",
+  "disabledHint": "Skipped during runs. Useful for staging without deleting.",
+  "empty": "Select a node on the canvas to configure it.",
+  "errorBadge": "{count, plural, one {# issue} other {# issues}}",
+  "jumpToError": "Jump to next error",
+  "label": "Label",
+  "noConfigYet": "No dedicated config form yet — edit the raw JSON above.",
+  "notes": "Notes",
+  "notesHint": "Sticky-note text shown under the node body."
+}

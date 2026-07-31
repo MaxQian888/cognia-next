@@ -7,11 +7,12 @@ jest.mock("next-intl", () => ({
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
-const skillsRef: { current: import("@/lib/claude/types").Skill[] } = { current: [] }
+const skillsRef: { current: import("@cognia/agent-config-types").Skill[] } = { current: [] }
 jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: () => skillsRef.current,
 }))
 jest.mock("@/lib/db/skills", () => ({
+  ...jest.requireActual("@/lib/db/skills"),
   listSkillsByIds: async () => skillsRef.current,
 }))
 
@@ -37,7 +38,7 @@ describe("SkillChipRow", () => {
         createdAt: 0,
         updatedAt: 0,
         source: "custom",
-      } as import("@/lib/claude/types").Skill,
+      } as import("@cognia/agent-config-types").Skill,
     ]
     render(<SkillChipRow ids={["s1"]} onRemove={jest.fn()} />)
     expect(screen.getByText("Alpha")).toBeInTheDocument()
@@ -52,11 +53,28 @@ describe("SkillChipRow", () => {
         createdAt: 0,
         updatedAt: 0,
         source: "custom",
-      } as import("@/lib/claude/types").Skill,
+      } as import("@cognia/agent-config-types").Skill,
     ]
     const onRemove = jest.fn()
     render(<SkillChipRow ids={["s1"]} onRemove={onRemove} />)
     fireEvent.click(screen.getByRole("button", { name: /removeChip.*Alpha/ }))
     expect(onRemove).toHaveBeenCalledWith("s1")
+  })
+
+  it("renders a disabled-for-session chip inert with a tooltip", () => {
+    skillsRef.current = [
+      {
+        id: "s1",
+        name: "Alpha",
+        content: "x",
+        createdAt: 0,
+        updatedAt: 0,
+        source: "custom",
+      } as import("@cognia/agent-config-types").Skill,
+    ]
+    render(<SkillChipRow ids={["s1"]} onRemove={jest.fn()} disabledIds={["s1"]} />)
+    const inertChip = screen.getByTitle(/inertChip/)
+    expect(inertChip).toHaveClass("line-through")
+    expect(screen.getByText("Alpha")).toBeInTheDocument()
   })
 })

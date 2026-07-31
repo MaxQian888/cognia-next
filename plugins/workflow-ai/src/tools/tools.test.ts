@@ -11,6 +11,7 @@ import type { PluginTool, PluginToolContext } from "@/types/plugin"
 import { buildReadTools } from "./read-tools"
 import { buildMutateTools } from "./mutate-tools"
 import { buildLayoutTools } from "./layout-tools"
+import * as autoLayoutModule from "@/lib/workflow/editor/auto-layout"
 
 function workflow(id: string): VisualWorkflow {
   return {
@@ -225,11 +226,98 @@ describe("mutate tools", () => {
     expect(result.ok).toBe(false)
     expect(result.failedAt).toBe(1)
     expect(result.error.code).toBe("unknown-op")
-    expect(store.getState().nodes.length).toBe(1)
+    expect(store.getState().nodes.length).toBe(0)
+  })
+
+  it("wf_batch_apply rolls back every op when a connection is invalid", async () => {
+    const store = createEditorStore(workflow("wf_a"))
+    registerEditorStore("wf_a", store)
+    const tool = findTool(buildMutateTools(), "wf_batch_apply")
+
+    const result = (await tool.execute(
+      {
+        ops: [
+          {
+            type: "add_node",
+            nodeId: "n_action",
+            kind: "flow.set",
+            position: { x: 0, y: 0 },
+          },
+          {
+            type: "add_node",
+            nodeId: "n_trigger",
+            kind: "trigger.manual",
+            position: { x: 200, y: 0 },
+          },
+          { type: "connect_edge", source: "n_action", target: "n_trigger" },
+        ],
+      },
+      EMPTY_CTX
+    )) as { ok: false; failedAt: number }
+
+    expect(result.ok).toBe(false)
+    expect(result.failedAt).toBe(2)
+    expect(store.getState().nodes).toEqual([])
+    expect(store.getState().edges).toEqual([])
+  })
+
+  it("single-op mutation tools reject missing node and edge ids", async () => {
+    const store = createEditorStore(workflow("wf_a"))
+    registerEditorStore("wf_a", store)
+    const tools = buildMutateTools()
+
+    await expect(
+      findTool(tools, "wf_remove_node").execute({ nodeId: "missing" }, EMPTY_CTX)
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "node-not-found" },
+    })
+    await expect(
+      findTool(tools, "wf_configure_node").execute({ nodeId: "missing", patch: {} }, EMPTY_CTX)
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "node-not-found" },
+    })
+    await expect(
+      findTool(tools, "wf_disconnect_edge").execute({ edgeId: "missing" }, EMPTY_CTX)
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "edge-not-found" },
+    })
   })
 })
 
 describe("layout tools", () => {
+  it("wf_auto_layout accepts every direction its schema advertises", async () => {
+    // `direction` is in the tool schema, i.e. a promise to the model. It used
+    // to be `void`ed, so a request for TB silently produced LR and still
+    // answered `{ ok: true }`. The mapping itself is pinned in
+    // lib/workflow/editor/auto-layout.test.ts.
+    const store = createEditorStore(workflow("wf_a"))
+    store.getState().addNode("ai.prompt", { x: 0, y: 0 })
+    registerEditorStore("wf_a", store)
+    const tool = findTool(buildLayoutTools(), "wf_auto_layout")
+    const schema = tool.definition.parametersSchema as {
+      properties: { direction: { enum: string[] } }
+    }
+    for (const direction of schema.properties.direction.enum) {
+      expect(direction in autoLayoutModule.ELK_DIRECTIONS).toBe(true)
+      const result = (await tool.execute({ direction }, EMPTY_CTX)) as { ok: boolean }
+      expect(result.ok).toBe(true)
+    }
+  })
+
+  it("maps every schema direction onto a real elk direction", () => {
+    // The tool's enum and the elk mapping must not drift apart.
+    expect(Object.keys(autoLayoutModule.ELK_DIRECTIONS).sort()).toEqual(["BT", "LR", "RL", "TB"])
+    expect(Object.values(autoLayoutModule.ELK_DIRECTIONS).sort()).toEqual([
+      "DOWN",
+      "LEFT",
+      "RIGHT",
+      "UP",
+    ])
+  })
+
   it("wf_select_nodes pushes ids into the store selection", async () => {
     const store = createEditorStore(workflow("wf_a"))
     const id = store.getState().addNode("ai.prompt", { x: 0, y: 0 })

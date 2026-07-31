@@ -8,10 +8,16 @@
 
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
+import { MessageCircleIcon } from "lucide-react"
+import { toast } from "sonner"
 import { InspectRow } from "./_shared/inspect-row"
 import { useUnifiedRecentRuns } from "@/hooks/scheduler/use-unified-recent-runs"
-import { schedulerDb } from "@/lib/scheduler/scheduler-db"
+import { getSchedulerDataSource } from "@/lib/scheduler/scheduler-data-source"
 import { formatNextRun } from "@/lib/scheduler/format-utils"
+import { findActiveSessionForConversation } from "@/lib/connectors/session-bindings"
+import { useChatStore } from "@/stores/chat"
+import { useUIStore } from "@/stores/ui"
+import { Button } from "@/components/ui/button"
 import type { ScheduledTask } from "@/types/scheduler"
 import type { UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
 
@@ -33,7 +39,7 @@ export function ConnectorDigestDetail({ taskId, onSelectRun }: ConnectorDigestDe
 
   useEffect(() => {
     let cancelled = false
-    schedulerDb
+    getSchedulerDataSource()
       .getTask(taskId)
       .then((row) => {
         if (!cancelled) setTask(row)
@@ -64,6 +70,16 @@ export function ConnectorDigestDetail({ taskId, onSelectRun }: ConnectorDigestDe
   const cronText =
     task.trigger.type === "cron" ? (task.trigger.cronExpression ?? "-") : task.trigger.type
   const nextRunText = task.nextRunAt ? formatNextRun(task.nextRunAt) : "-"
+  const openSourceConversation = async () => {
+    if (!payload.conversationKey) return
+    const session = await findActiveSessionForConversation(payload.conversationKey)
+    if (!session) {
+      toast.error(t("sourceConversationMissing"))
+      return
+    }
+    useChatStore.getState().setActiveSession(session.id)
+    useUIStore.getState().setSelectedGuild({ kind: "dm" })
+  }
 
   return (
     <div className="p-5 space-y-6">
@@ -75,7 +91,22 @@ export function ConnectorDigestDetail({ taskId, onSelectRun }: ConnectorDigestDe
           <InspectRow label={t("adapter") || "Adapter"} value={payload.adapterId ?? "-"} />
           <InspectRow
             label={t("conversation") || "Conversation"}
-            value={payload.conversationKey ?? "-"}
+            value={
+              payload.conversationKey ? (
+                <Button
+                  type="button"
+                  variant="link"
+                  size="sm"
+                  className="h-auto min-w-0 justify-start gap-1 p-0 text-xs"
+                  onClick={() => void openSourceConversation()}
+                >
+                  <MessageCircleIcon aria-hidden className="size-3 shrink-0" />
+                  <span className="truncate">{payload.conversationKey}</span>
+                </Button>
+              ) : (
+                "-"
+              )
+            }
           />
           <InspectRow label={t("character") || "Character"} value={payload.characterId ?? "-"} />
           <InspectRow label={t("cron") || "Cron"} value={cronText} />

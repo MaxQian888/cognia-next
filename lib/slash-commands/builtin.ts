@@ -15,12 +15,25 @@
 import type { ChatStatus, PermissionMode } from "@/stores/chat"
 import { useChatStore } from "@/stores/chat"
 import type { SettingsSectionId } from "@/components/settings/settings-nav-config"
-import { handleContext, handleCost, handleDoctor, handleStatus } from "./actions/diagnostics"
+import {
+  handleCompact,
+  handleContext,
+  handleCost,
+  handleDoctor,
+  handleStatus,
+} from "./actions/diagnostics"
+import { handleBalance, handleLogin, handleModels, handleUsage } from "./actions/billing"
 import { seedBuiltinSlashCommands } from "./registry"
+import type { SystemMessageBlock, SlashCommandResultBlock } from "./system-blocks"
 import { handleReset, handleResume, handleSessions } from "./actions/sessions"
 import { dispatchGoalSubcommand } from "./actions/goal"
+import { dispatchPetSubcommand } from "./actions/pet"
+import { dispatchLoopSubcommand } from "./actions/loop"
 import { dispatchRememberCommand } from "./actions/remember"
+import { dispatchMemorySubcommand } from "./actions/memory"
 import { WORKFLOW_SLASH_COMMANDS } from "./actions/workflow"
+import { handleRunWorkflow } from "./actions/run-saved-workflow"
+import { handleCouncil } from "./actions/council"
 
 /**
  * Names of the sections in the Settings page (URL `?section=` values).
@@ -47,11 +60,41 @@ export interface SlashContext {
   openSettings: (tab: SettingsSectionId) => void
   /** Force a permission mode change (Shift+Tab equivalent). */
   setPermissionMode: (mode: PermissionMode | null) => void
-  /** Push a system message into the active session — used by /help. */
-  pushSystemMessage: (markdown: string) => void
+  /**
+   * Push a system message into the active session. Accepts markdown (rendered
+   * as text — used by /help, /status, …), a structured
+   * {@link SystemMessageBlock} that renders as a diagnostics card
+   * (/context, /usage, /cost), or a {@link SlashCommandResultBlock} that
+   * renders as a compact inline result chip (/resume, …).
+   */
+  pushSystemMessage: (payload: string | SystemMessageBlock | SlashCommandResultBlock) => void
 }
 
-export type SlashScope = "builtin" | "project" | "user"
+export type SlashScope = "builtin" | "project" | "user" | "plugin"
+
+/** A single parameter the command's guided form collects. */
+export interface SlashParamSpec {
+  /** Flag/positional key, e.g. `provider` → `--provider <value>`. */
+  name: string
+  /** User-facing field label. */
+  label: string
+  /** Input kind. `enum` renders a select from `options`. */
+  type: "string" | "enum" | "number" | "boolean"
+  /** Required fields block form submission until filled. */
+  required?: boolean
+  /** Choices for `type: "enum"`. */
+  options?: string[]
+  /** Pre-filled default value. */
+  default?: string
+  /** Placeholder for free-text inputs. */
+  placeholder?: string
+  /**
+   * How the value is emitted into the args string:
+   *   - `"flag"` (default) → `--name value`
+   *   - `"positional"` → bare `value` (order follows the spec list)
+   */
+  style?: "flag" | "positional"
+}
 
 export interface SlashCommand {
   /** Display name without the leading slash. May contain `/` for nested commands. */
@@ -60,6 +103,8 @@ export interface SlashCommand {
   scope: SlashScope
   /** Hint text rendered next to the name (e.g. "<file>"). */
   argumentHint?: string
+  /** Literal first-argument values surfaced by the composer's inline completer. */
+  argumentOptions?: string[]
   /** Action handler. When set, picking the command runs it instead of inserting text. */
   handler?: (ctx: SlashContext) => void | Promise<void>
   /** Prompt template inserted into the textarea. Supports `$1..$9` and `$ARGUMENTS`. */
@@ -91,6 +136,13 @@ export interface SlashCommand {
    * Defaults to `"chat"` when omitted.
    */
   category?: string
+  /**
+   * Optional structured parameters. When present, picking the command opens a
+   * guided form (see `components/chat/composer/command-param-form.tsx`) instead
+   * of inserting raw text; the collected values are built into the args string
+   * via `lib/slash-commands/build-args.ts`.
+   */
+  params?: SlashParamSpec[]
 }
 
 const HELP_BODY_HEADER =
@@ -101,6 +153,7 @@ function buildHelpText(commands: SlashCommand[]): string {
     builtin: [],
     project: [],
     user: [],
+    plugin: [],
   }
   for (const c of commands) groups[c.scope].push(c)
   const sections: string[] = [HELP_BODY_HEADER]
@@ -189,6 +242,15 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
       "Please code-review the current uncommitted changes in this repo. " +
       "Focus on correctness, edge cases, and readability. " +
       "$ARGUMENTS",
+    params: [
+      {
+        name: "focus",
+        label: "Extra focus area",
+        type: "string",
+        style: "positional",
+        placeholder: "e.g. error handling, performance",
+      },
+    ],
   },
   {
     name: "reset",
@@ -232,6 +294,7 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
       "Set permission mode directly (default | acceptEdits | plan | bypassPermissions). " +
       "With no arg, cycles like /permissions.",
     argumentHint: "<mode?>",
+    argumentOptions: ["default", "acceptEdits", "plan", "bypassPermissions"],
     scope: "builtin",
     category: "system",
     handler: (ctx) => {
@@ -288,13 +351,16 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
   },
   {
     name: "compact",
-    description: "Ask the SDK to summarise older turns and free up the context window.",
+    description: "Summarise older turns and free up the context window.",
     scope: "builtin",
     category: "diagnostics",
-    // The Claude Agent SDK intercepts `/compact` as a user message and emits a
-    // `compact_boundary` event. We dispatch it as a regular template so the
-    // existing send pipeline carries it to the sidecar verbatim.
-    template: "/compact",
+    argumentHint: "[focus]",
+    // Routes a `claude_compact` control message to the sidecar so manual
+    // compaction works on BOTH paths: the generic (AI-SDK) path runs a summary
+    // now; the Anthropic path pushes a `/compact` turn the Agent SDK intercepts.
+    // An optional focus arg (e.g. `/compact the API changes`) steers what the
+    // summary preserves.
+    handler: handleCompact,
   },
   {
     name: "context",
@@ -309,6 +375,34 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
     scope: "builtin",
     category: "diagnostics",
     handler: handleDoctor,
+  },
+  {
+    name: "usage",
+    description: "Show Anthropic subscription quota windows (5h / 7d) and reset countdowns.",
+    scope: "builtin",
+    category: "diagnostics",
+    handler: handleUsage,
+  },
+  {
+    name: "balance",
+    description: "Show the latest balance for each subscription provider account.",
+    scope: "builtin",
+    category: "diagnostics",
+    handler: handleBalance,
+  },
+  {
+    name: "models",
+    description: "Sync the models.dev catalog and report provider / model counts.",
+    scope: "builtin",
+    category: "system",
+    handler: handleModels,
+  },
+  {
+    name: "login",
+    description: "Open Settings → Subscription to sign in to a provider.",
+    scope: "builtin",
+    category: "system",
+    handler: handleLogin,
   },
   {
     name: "export",
@@ -329,6 +423,7 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
     scope: "builtin",
     category: "goal",
     argumentHint: "<objective | status | pause | resume | stop | update <text> | show>",
+    argumentOptions: ["status", "pause", "resume", "stop", "update", "show"],
     handler: async (ctx) => {
       const result = await dispatchGoalSubcommand(ctx)
       if (!result) return
@@ -346,6 +441,35 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
     },
   },
   {
+    name: "pet",
+    description: "Check on or care for your desktop pet (feed, play, clean, …).",
+    scope: "builtin",
+    category: "system",
+    argumentHint: "<status | feed | play | pet | sleep | clean | treat>",
+    argumentOptions: ["status", "feed", "play", "pet", "sleep", "clean", "treat"],
+    handler: async (ctx) => {
+      const result = await dispatchPetSubcommand(ctx.args)
+      ctx.pushSystemMessage(result.system)
+    },
+  },
+  {
+    name: "loop",
+    description:
+      "Repeat a prompt — fixed interval (/loop 5m …) via the scheduler, or self-paced (/loop …) with model-chosen delays.",
+    scope: "builtin",
+    category: "loop",
+    argumentHint: "<[interval] prompt | status | list | pause | resume | stop>",
+    argumentOptions: ["status", "list", "pause", "resume", "stop"],
+    handler: async (ctx) => {
+      // Self-paced kick-off is NOT dispatched here: LoopRuntime fires its
+      // kickoff listener and the chat hook sends iteration 1 silently —
+      // the same path as every later continuation (and it bypasses the
+      // fresh-user-message preempt that would otherwise pause the loop).
+      const result = await dispatchLoopSubcommand(ctx)
+      if (result?.system) ctx.pushSystemMessage(result.system)
+    },
+  },
+  {
     name: "remember",
     description: "Save a durable fact about you to long-term memory.",
     scope: "builtin",
@@ -354,7 +478,38 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
     handler: async (ctx) => {
       const result = await dispatchRememberCommand(ctx)
       if (result?.system) ctx.pushSystemMessage(result.system)
+      if (result?.openMemory) ctx.openSettings("memory")
     },
+  },
+  {
+    name: "memory",
+    description: "View and manage long-term memory (list, forget, status).",
+    scope: "builtin",
+    category: "chat",
+    argumentHint: "[status | list [n] | forget <id>]",
+    argumentOptions: ["status", "list", "forget"],
+    handler: async (ctx) => {
+      const result = await dispatchMemorySubcommand(ctx)
+      if (result?.system) ctx.pushSystemMessage(result.system)
+      if (result?.openMemory) ctx.openSettings("memory")
+    },
+  },
+  {
+    name: "workflow",
+    description: "Run a saved workflow from chat by name or id. Progress shows as a toast.",
+    scope: "builtin",
+    category: "system",
+    argumentHint: "<name | id>",
+    handler: handleRunWorkflow,
+  },
+  {
+    name: "council",
+    description:
+      "Ask several models the same question and synthesize a consensus answer with a confidence rating.",
+    scope: "builtin",
+    category: "chat",
+    argumentHint: "<question> [--models a,b,c] [--synth alias]",
+    handler: handleCouncil,
   },
   // Workflow Copilot commands — only active inside workflow-editor sessions.
   // Each handler self-gates on activeSessionId so the picker never lists
@@ -369,14 +524,7 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommand[] = [
 // already does.
 seedBuiltinSlashCommands(BUILTIN_SLASH_COMMANDS)
 
-/**
- * Replace `$ARGUMENTS` and `$1..$9` placeholders in a template body. The
- * `args` string is split on whitespace for positional substitution; whole
- * `args` is used for `$ARGUMENTS`. Unfilled positionals collapse to empty.
- */
-export function applyTemplate(template: string, args: string): string {
-  const positional = args.trim().split(/\s+/).filter(Boolean)
-  let out = template.replace(/\$ARGUMENTS/g, args.trim())
-  out = out.replace(/\$([1-9])/g, (_, n) => positional[Number(n) - 1] ?? "")
-  return out
-}
+// `applyTemplate` moved to the pure sibling `./apply-template` so the CLI can
+// import it without `builtin.ts`'s store/React side effects. Re-exported here to
+// keep the existing `@/lib/slash-commands/builtin` import sites working.
+export { applyTemplate } from "./apply-template"

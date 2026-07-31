@@ -46,7 +46,18 @@ export type LaunchCogniaOutcome =
   | { kind: "denied"; reason?: string }
   | { kind: "error"; message: string }
 
-export async function launchCognia(input: LaunchCogniaInput): Promise<LaunchCogniaOutcome> {
+interface LaunchDockCommandInput {
+  cwd: string
+  shell?: string
+  store: LaunchCogniaInput["store"]
+  spawn?: typeof spawnFromDock
+  lookup?: typeof getLiveSession
+}
+
+async function launchDockCommand(
+  input: LaunchDockCommandInput,
+  command: string
+): Promise<LaunchCogniaOutcome> {
   const spawn = input.spawn ?? spawnFromDock
   const lookup = input.lookup ?? getLiveSession
   const shell = input.shell ?? resolveDefaultShell({})
@@ -79,8 +90,30 @@ export async function launchCognia(input: LaunchCogniaInput): Promise<LaunchCogn
     return { kind: "error", message: `session ${outcome.sessionId} is not live` }
   }
 
-  // Trailing CR submits the line; the shell runs `cognia …` and OSC 633
-  // markers capture the exit code into the store's `lastCommands` ring.
-  await session.write(`cognia ${input.command}\r`)
+  // Trailing CR submits the line; OSC 633 markers capture the exit code into
+  // the store's `lastCommands` ring.
+  await session.write(`${command}\r`)
   return { kind: "launched", sessionId: outcome.sessionId }
+}
+
+export async function launchCognia(input: LaunchCogniaInput): Promise<LaunchCogniaOutcome> {
+  return launchDockCommand(input, `cognia ${input.command}`)
+}
+
+export interface LaunchCogniaAgentInput extends LaunchDockCommandInput {
+  /** Desktop session whose confined handoff drop should be resumed. */
+  handoffSessionId: string
+}
+
+/** Launch the standalone chat TUI against a desktop-authored handoff drop. */
+export async function launchCogniaAgent(
+  input: LaunchCogniaAgentInput
+): Promise<LaunchCogniaOutcome> {
+  // The command is submitted through the user's shell. Session ids are opaque
+  // application identifiers, so reject shell metacharacters instead of trying
+  // to quote across zsh/bash/fish/PowerShell/cmd syntaxes.
+  if (!/^[A-Za-z0-9._-]+$/.test(input.handoffSessionId) || input.handoffSessionId.length > 256) {
+    return { kind: "error", message: "invalid handoff session id" }
+  }
+  return launchDockCommand(input, `cognia-agent resume ${input.handoffSessionId}`)
 }

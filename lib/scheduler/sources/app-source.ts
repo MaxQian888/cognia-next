@@ -30,6 +30,7 @@ import type {
   ScheduledItemSubscription,
 } from "./types"
 import { CONNECTOR_TASK_TYPE_PREFIX } from "./connector-source"
+import { filterRunsByKind, taskExecutionKind, toUnifiedFromTaskExecution } from "./run-mappers"
 
 /**
  * Tasks owned by the connector subsystem live in the same Dexie table as
@@ -37,7 +38,11 @@ import { CONNECTOR_TASK_TYPE_PREFIX } from "./connector-source"
  * them so they don't appear twice.
  */
 function isAppOwnedTask(task: ScheduledTask): boolean {
-  return !task.type.startsWith(CONNECTOR_TASK_TYPE_PREFIX)
+  return task.type !== "plugin" && !task.type.startsWith(CONNECTOR_TASK_TYPE_PREFIX)
+}
+
+function isPluginOwnedTask(task: ScheduledTask): boolean {
+  return task.type === "plugin"
 }
 
 /**
@@ -60,6 +65,11 @@ export interface AppSourceScheduler {
 export interface AppSourceDb {
   getAllTasks(): Promise<ScheduledTask[]>
   getTask(taskId: string): Promise<ScheduledTask | null>
+  getRecentExecutions?(limit: number): Promise<import("@/types/scheduler").TaskExecution[]>
+  getRecentExecutionsMatching?(
+    ownsTaskType: (taskType: string) => boolean,
+    limit: number
+  ): Promise<import("@/types/scheduler").TaskExecution[]>
 }
 
 export interface RawSourceObserver<T> {
@@ -88,17 +98,32 @@ export interface AppSourceDeps {
 export function createAppSource(
   deps: AppSourceDeps = {}
 ): ScheduledItemSource<CreateScheduledTaskInput, UpdateScheduledTaskInput> {
+  return createTaskSource("app", isAppOwnedTask, deps)
+}
+
+/** Real plugin tasks share SchedulerDB and the TaskScheduler lifecycle. */
+export function createPluginTaskSource(
+  deps: AppSourceDeps = {}
+): ScheduledItemSource<CreateScheduledTaskInput, UpdateScheduledTaskInput> {
+  return createTaskSource("plugin", isPluginOwnedTask, deps)
+}
+
+function createTaskSource(
+  kind: "app" | "plugin",
+  ownsTask: (task: ScheduledTask) => boolean,
+  deps: AppSourceDeps
+): ScheduledItemSource<CreateScheduledTaskInput, UpdateScheduledTaskInput> {
   const scheduler = deps.scheduler ?? getTaskScheduler()
   const db = deps.db ?? schedulerDb
   const observe = deps.observe ?? ((querier) => liveQuery(querier))
 
   return {
-    kind: "app",
+    kind,
 
     subscribe(observer: ScheduledItemSourceObserver): ScheduledItemSubscription {
       const sub = observe(() => db.getAllTasks()).subscribe({
         next: (tasks: ScheduledTask[]) => {
-          observer.next(tasks.filter(isAppOwnedTask).map(toUnified))
+          observer.next(tasks.filter(ownsTask).map(toUnified))
         },
         error: (err: unknown) => observer.error?.(err),
       })
@@ -107,13 +132,21 @@ export function createAppSource(
 
     async list(): Promise<UnifiedScheduledItem[]> {
       const tasks = await db.getAllTasks()
-      return tasks.filter(isAppOwnedTask).map(toUnified)
+      return tasks.filter(ownsTask).map(toUnified)
+    },
+
+    async listRuns(limit) {
+      const ownsExecution = (taskType: string) => taskExecutionKind(taskType) === kind
+      const executions = await (db.getRecentExecutionsMatching?.(ownsExecution, limit) ??
+        schedulerDb.getRecentExecutionsMatching(ownsExecution, limit))
+      const runs = executions.map(toUnifiedFromTaskExecution)
+      return filterRunsByKind(runs, kind)
     },
 
     async get(sourceId: string): Promise<UnifiedScheduledItem | undefined> {
       const task = await db.getTask(sourceId)
       if (!task) return undefined
-      if (!isAppOwnedTask(task)) return undefined
+      if (!ownsTask(task)) return undefined
       return toUnified(task)
     },
 
@@ -149,9 +182,10 @@ export function createAppSource(
  * adapter test can assert on the conversion without a Dexie roundtrip.
  */
 export function toUnified(task: ScheduledTask): UnifiedScheduledItem {
+  const kind = task.type === "plugin" ? "plugin" : "app"
   return {
-    unifiedId: makeUnifiedId("app", task.id),
-    kind: "app",
+    unifiedId: makeUnifiedId(kind, task.id),
+    kind,
     sourceId: task.id,
     name: task.name,
     description: task.description,

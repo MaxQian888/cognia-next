@@ -264,6 +264,34 @@ describe("SchedulerSidebar", () => {
     expect(screen.getByTestId("scheduler-status-dot").className).toMatch(/bg-gray-400/)
   })
 
+  it("labels whether the task list belongs to the local or remote host", () => {
+    const { rerender } = setup({ schedulerHost: "local" })
+    expect(screen.getByTestId("scheduler-host")).toHaveTextContent("host.local")
+
+    rerender(
+      <SchedulerSidebar
+        tasks={[]}
+        systemTasks={[]}
+        selectedTaskId={null}
+        schedulerStatus="running"
+        schedulerHost="remote"
+        statistics={baseStats}
+        activeCount={0}
+        pausedCount={0}
+        searchQuery=""
+        onSearchChange={jest.fn()}
+        activeFilter="all"
+        onFilterChange={jest.fn()}
+        onSelectTask={jest.fn()}
+        onRunNow={jest.fn()}
+        onPause={jest.fn()}
+        onResume={jest.fn()}
+        onDelete={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("scheduler-host")).toHaveTextContent("host.remote")
+  })
+
   it("renders the unified empty state when there are no tasks at all", () => {
     setup({
       tasks: [],

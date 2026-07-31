@@ -2,7 +2,15 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { PinIcon, PinOffIcon, Trash2Icon, XIcon } from "lucide-react"
+import {
+  ArchiveIcon,
+  ArchiveRestoreIcon,
+  Link2Icon,
+  PinIcon,
+  PinOffIcon,
+  Trash2Icon,
+  XIcon,
+} from "lucide-react"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,9 +25,14 @@ import { Button, buttonVariants } from "@/components/ui/button"
 
 export interface ChannelListBulkToolbarProps {
   count: number
+  /** When true the selection lives in the Archived view → show Unarchive only. */
+  archived?: boolean
   onDelete: () => void | Promise<void>
   onPin: () => void | Promise<void>
   onUnpin: () => void | Promise<void>
+  onArchive: () => void | Promise<void>
+  onUnarchive: () => void | Promise<void>
+  onShare: () => void
   onClear: () => void
 }
 
@@ -31,9 +44,13 @@ export interface ChannelListBulkToolbarProps {
  */
 export function ChannelListBulkToolbar({
   count,
+  archived = false,
   onDelete,
   onPin,
   onUnpin,
+  onArchive,
+  onUnarchive,
+  onShare,
   onClear,
 }: ChannelListBulkToolbarProps) {
   const t = useTranslations("desktop.channelList.bulk")
@@ -60,22 +77,57 @@ export function ChannelListBulkToolbar({
           size="icon"
           variant="ghost"
           className="size-6"
-          onClick={() => void onPin()}
-          aria-label={t("pin")}
-          title={t("pin")}
+          onClick={onShare}
+          aria-label={t("share")}
+          title={t("share")}
         >
-          <PinIcon className="size-3.5" />
+          <Link2Icon className="size-3.5" />
         </Button>
-        <Button
-          size="icon"
-          variant="ghost"
-          className="size-6"
-          onClick={() => void onUnpin()}
-          aria-label={t("unpin")}
-          title={t("unpin")}
-        >
-          <PinOffIcon className="size-3.5" />
-        </Button>
+        {archived ? (
+          <Button
+            size="icon"
+            variant="ghost"
+            className="size-6"
+            onClick={() => void onUnarchive()}
+            aria-label={t("unarchive")}
+            title={t("unarchive")}
+          >
+            <ArchiveRestoreIcon className="size-3.5" />
+          </Button>
+        ) : (
+          <>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-6"
+              onClick={() => void onPin()}
+              aria-label={t("pin")}
+              title={t("pin")}
+            >
+              <PinIcon className="size-3.5" />
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-6"
+              onClick={() => void onUnpin()}
+              aria-label={t("unpin")}
+              title={t("unpin")}
+            >
+              <PinOffIcon className="size-3.5" />
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-6"
+              onClick={() => void onArchive()}
+              aria-label={t("archive")}
+              title={t("archive")}
+            >
+              <ArchiveIcon className="size-3.5" />
+            </Button>
+          </>
+        )}
         <Button
           size="icon"
           variant="ghost"

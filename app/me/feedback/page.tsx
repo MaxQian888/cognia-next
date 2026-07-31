@@ -8,7 +8,6 @@
  *   • Permission / device check shortcut into `/me/device-info`.
  */
 
-import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { BugIcon, ClipboardCopyIcon, ExternalLinkIcon, HardDriveIcon } from "lucide-react"
 import { toast } from "sonner"
@@ -18,6 +17,7 @@ import { MeSection } from "@/components/mobile/me/me-section"
 import { SubPageShell } from "@/components/mobile/me/sub-page-shell"
 import { APP_VERSION } from "@/lib/app-version"
 import { snapshotSyncStates } from "@/lib/sync/companion-sync"
+import { useCopy } from "@/hooks/ui/use-copy"
 
 const ISSUES_URL = "https://github.com/anthropics/claude-code/issues/new"
 
@@ -30,7 +30,7 @@ function diagnosticsPayload(): string {
     sync = "(unavailable)"
   }
   return [
-    `cognia-next ${APP_VERSION}`,
+    `Cognia ${APP_VERSION}`,
     `UA: ${ua}`,
     `Date: ${new Date().toISOString()}`,
     `Sync snapshot:\n${sync}`,
@@ -40,20 +40,13 @@ function diagnosticsPayload(): string {
 export default function MobileFeedbackPage() {
   const t = useTranslations("mobile.me")
   const tFeedback = useTranslations("mobile.me.feedback")
-  const [copied, setCopied] = useState(false)
+  const { copied, copy } = useCopy(2000)
 
   const copyDiagnostics = async () => {
-    const payload = diagnosticsPayload()
-    try {
-      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(payload)
-      } else {
-        throw new Error("clipboard unavailable")
-      }
-      setCopied(true)
+    const ok = await copy(diagnosticsPayload())
+    if (ok) {
       toast.success(tFeedback("copyToast"))
-      setTimeout(() => setCopied(false), 2000)
-    } catch {
+    } else {
       toast.error(tFeedback("copyError"))
     }
   }

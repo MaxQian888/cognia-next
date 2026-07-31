@@ -1,27 +1,78 @@
+/** @jest-environment jsdom */
 // Coverage for session creation, focused on the default-preset auto-apply
 // path added in v12 of the preset feature uplift. The non-preset behaviour
 // of `createSession` was tested implicitly through the broader app; we
 // exercise it directly here so the auto-apply branch can't regress.
 
 import "fake-indexeddb/auto"
+import { liveQuery } from "dexie"
+import type { ChatSession } from "@cognia/agent-config-types"
 import {
   createSession,
   getSession,
   updateSession,
   listSessions,
+  listScopedSessions,
   deleteSession,
+  listSessionBranches,
+  countBranchesAtMessage,
   bulkDeleteSessions,
+  clearBranchSeed,
+  freezeImportedSession,
+  archiveSession,
+  unarchiveSession,
+  bulkArchiveSessions,
+  bulkUnarchiveSessions,
+  setSessionOrder,
 } from "./sessions"
+import { saveSettings } from "./settings"
 import { createPreset, setDefaultPreset } from "./prompt-presets"
 import { getDb, whenSeeded, __resetDbForTesting } from "./schema"
+import { createLoop, getLoop, listLoopsBySession } from "./loops"
+import { createGoal, listGoalsBySession } from "./goals"
+import { loggers } from "@cognia/logging"
+
+// The /loop cascade tears down backing scheduler tasks via a dynamic
+// import — mock the scheduler singleton so no real timing engine spins up.
+const schedulerMock = { deleteTask: jest.fn().mockResolvedValue(true) }
+jest.mock("@/lib/scheduler/task-scheduler", () => ({
+  getTaskScheduler: () => schedulerMock,
+}))
+
+// `purgeSessionStoreBuckets` reaches the artifact store through a dynamic
+// import too. Mocked so the purge is observable without standing up the real
+// persisted store — the store's own behaviour is covered by
+// `stores/artifact/artifact-store.test.ts`; what matters here is that the
+// cascade calls it at all, which is what was missing.
+const clearSessionDataMock = jest.fn()
+jest.mock("@/stores/artifact/artifact-store", () => ({
+  useArtifactStore: { getState: () => ({ clearSessionData: clearSessionDataMock }) },
+}))
+
+const markSessionRemovedMock = jest.fn()
+jest.mock("@/lib/chat/search/indexer", () => ({
+  markSessionRemoved: (sessionId: string) => markSessionRemovedMock(sessionId),
+}))
 
 beforeEach(async () => {
+  markSessionRemovedMock.mockClear()
   await getDb().delete()
   __resetDbForTesting()
   getDb()
   await whenSeeded()
   await getDb().promptPresets.clear()
-})
+  // Cold open builds the full Dexie schema (now v99); can exceed the default 5s
+  // hook budget under fake-indexeddb on the first test.
+}, 30_000)
+
+/** Poll until `pred` is true (liveQuery emissions land on microtask timing). */
+async function waitUntil(pred: () => boolean, timeoutMs = 3000): Promise<void> {
+  const start = Date.now()
+  while (!pred()) {
+    if (Date.now() - start > timeoutMs) throw new Error("waitUntil timed out")
+    await new Promise((r) => setTimeout(r, 20))
+  }
+}
 
 describe("createSession — without default preset", () => {
   it("creates a row with caller-supplied fields", async () => {
@@ -30,6 +81,69 @@ describe("createSession — without default preset", () => {
     expect(session.title).toBe("Test")
     expect(session.model).toBe("claude-y")
     expect(session.systemPrompt).toBeUndefined()
+  })
+
+  it("persists an Integration Inbox binding independently from platformBinding", async () => {
+    const integrationBinding = {
+      pluginId: "github-delivery",
+      integrationId: "github",
+      accountId: "acct-1",
+      projectionId: "pull-request",
+      threadKey: "owner/repo#42",
+    }
+    const session = await createSession({ title: "PR #42", integrationBinding })
+
+    expect(session.integrationBinding).toEqual(integrationBinding)
+    expect(session.platformBinding).toBeUndefined()
+    await expect(getSession(session.id)).resolves.toMatchObject({ integrationBinding })
+  })
+})
+
+describe("setSessionOrder", () => {
+  it("writes each id's index into manualOrder without bumping updatedAt", async () => {
+    const a = await createSession({ title: "A" })
+    const b = await createSession({ title: "B" })
+    const c = await createSession({ title: "C" })
+    const beforeA = (await getSession(a.id))!.updatedAt
+    await setSessionOrder([c.id, a.id, b.id], "date:today")
+    expect((await getSession(c.id))?.manualOrder).toBe(0)
+    expect((await getSession(a.id))?.manualOrder).toBe(1)
+    expect((await getSession(b.id))?.manualOrder).toBe(2)
+    // The order is tagged with the section it was dragged in, so it doesn't
+    // leak into other sections the session later migrates to.
+    expect((await getSession(c.id))?.manualOrderSection).toBe("date:today")
+    // Ordering is organizational — recency is intentionally left untouched.
+    expect((await getSession(a.id))?.updatedAt).toBe(beforeA)
+  })
+
+  it("is a no-op for an empty id list", async () => {
+    await expect(setSessionOrder([], "pinned")).resolves.toBeUndefined()
+  })
+
+  // Regression: the sidebar's liveQuery must re-emit after a reorder. It broke
+  // when `listScopedSessions` awaited `resolveScopeProjectId` before the Dexie
+  // read even for an explicit pid — the await hops through a native promise,
+  // Dexie's dependency-tracking zone is lost, and the (non-indexed)
+  // `manualOrder` write never re-emits → drag-reorder visually snaps back.
+  it("re-emits an explicit-pid liveQuery after a reorder", async () => {
+    const a = await createSession({ title: "A" })
+    const b = await createSession({ title: "B" })
+    const c = await createSession({ title: "C" })
+    const pid = (await getSession(a.id))!.projectId!
+
+    const emissions: Array<Map<string, number | undefined>> = []
+    const sub = liveQuery(() => listScopedSessions(pid)).subscribe({
+      next: (rows) => emissions.push(new Map(rows.map((r) => [r.id, r.manualOrder]))),
+    })
+    await waitUntil(() => emissions.length >= 1)
+    await setSessionOrder([c.id, a.id, b.id], "date:today")
+    await waitUntil(() => emissions.length >= 2)
+    sub.unsubscribe()
+
+    const last = emissions[emissions.length - 1]
+    expect(last.get(c.id)).toBe(0)
+    expect(last.get(a.id)).toBe(1)
+    expect(last.get(b.id)).toBe(2)
   })
 })
 
@@ -50,6 +164,38 @@ describe("createSession — default preset auto-apply", () => {
     const fresh = await getDb().promptPresets.get(preset.id)
     expect(fresh?.usageCount).toBe(1)
     expect(typeof fresh?.lastUsedAt).toBe("number")
+  })
+
+  it("clearBranchSeed removes only the branchSeed field", async () => {
+    const now = Date.now()
+    await getDb().sessions.put({
+      id: "b1",
+      title: "Branch",
+      parentSessionId: "p1",
+      branchSeed: { kind: "summary", content: "ctx" },
+      createdAt: now,
+      updatedAt: now,
+    })
+    await clearBranchSeed("b1")
+    const fresh = await getSession("b1")
+    expect(fresh?.branchSeed).toBeUndefined()
+    // Sibling lineage fields untouched.
+    expect(fresh?.parentSessionId).toBe("p1")
+  })
+
+  it("freezeImportedSession sets importFrozen (idempotent)", async () => {
+    const now = Date.now()
+    await getDb().sessions.put({
+      id: "import:codex:x1",
+      title: "Imported",
+      createdAt: now,
+      updatedAt: now,
+    })
+    await freezeImportedSession("import:codex:x1")
+    expect((await getSession("import:codex:x1"))?.importFrozen).toBe(true)
+    // Re-freezing stays true (no throw, no flip).
+    await freezeImportedSession("import:codex:x1")
+    expect((await getSession("import:codex:x1"))?.importFrozen).toBe(true)
   })
 
   it("does NOT auto-apply when a character is supplied", async () => {
@@ -150,6 +296,8 @@ describe("deletion tombstones (companion sync v61)", () => {
     expect(sessionTombs.map((t) => t.id)).toEqual([s.id])
     const messageTombs = await db.syncTombstones.where("table").equals("messages").toArray()
     expect(messageTombs.map((t) => t.id).sort()).toEqual(["m1", "m2"])
+    expect(markSessionRemovedMock).toHaveBeenCalledTimes(1)
+    expect(markSessionRemovedMock).toHaveBeenCalledWith(s.id)
   })
 
   it("records session tombstones on bulkDeleteSessions", async () => {
@@ -160,5 +308,306 @@ describe("deletion tombstones (companion sync v61)", () => {
       .map((t) => t.id)
       .sort()
     expect(ids).toEqual([a.id, b.id].sort())
+    expect(markSessionRemovedMock.mock.calls.map(([id]) => id).sort()).toEqual([a.id, b.id].sort())
+  })
+})
+
+describe("deleteSession — /loop + goal cascade (v79)", () => {
+  const LOOP_CONFIG = {
+    maxIterations: 100,
+    maxTokens: 1_000_000,
+    minDelayMs: 60_000,
+    maxDelayMs: 3_600_000,
+    maxParseFailures: 3,
+  }
+
+  it("drops the session's loops and tears down interval scheduler tasks", async () => {
+    schedulerMock.deleteTask.mockClear()
+    const s = await createSession({ title: "looped" })
+    await createLoop({
+      id: "lp_int",
+      sessionId: s.id,
+      mode: "interval",
+      rawPrompt: "p",
+      safePrompt: "p",
+      redactionMapEnc: "",
+      isSlashCommand: false,
+      status: "active",
+      iterations: 0,
+      tokensUsed: 0,
+      generationId: "g",
+      config: LOOP_CONFIG,
+      parseFailureCount: 0,
+      scheduledTaskId: "task_9",
+    })
+    await createLoop({
+      id: "lp_sp",
+      sessionId: s.id,
+      mode: "self_paced",
+      rawPrompt: "q",
+      safePrompt: "q",
+      redactionMapEnc: "",
+      isSlashCommand: false,
+      status: "stopped",
+      iterations: 2,
+      tokensUsed: 0,
+      generationId: "g2",
+      config: LOOP_CONFIG,
+      parseFailureCount: 0,
+    })
+    await deleteSession(s.id)
+    expect(await getLoop("lp_int")).toBeUndefined()
+    expect(await getLoop("lp_sp")).toBeUndefined()
+    expect(schedulerMock.deleteTask).toHaveBeenCalledWith("task_9")
+    expect(schedulerMock.deleteTask).toHaveBeenCalledTimes(1)
+  })
+
+  it("cascades goals on deleteSession (previously orphaned)", async () => {
+    const s = await createSession({ title: "goaled" })
+    await createGoal({
+      id: "g_1",
+      sessionId: s.id,
+      rawObjective: "o",
+      safeObjective: "o",
+      redactionMapEnc: "",
+      status: "stopped",
+      turnsUsed: 1,
+      tokensUsed: 0,
+      judgeFailureCount: 0,
+      config: { maxTurns: 20, maxTokens: 200_000, maxJudgeFailures: 3, timeoutMs: 1_800_000 },
+      generationId: "gen",
+    })
+    await deleteSession(s.id)
+    expect(await listGoalsBySession(s.id)).toHaveLength(0)
+  })
+
+  it("bulkDeleteSessions runs the same cascade per id", async () => {
+    schedulerMock.deleteTask.mockClear()
+    const a = await createSession({ title: "a" })
+    const b = await createSession({ title: "b" })
+    await createLoop({
+      id: "lp_a",
+      sessionId: a.id,
+      mode: "interval",
+      rawPrompt: "p",
+      safePrompt: "p",
+      redactionMapEnc: "",
+      isSlashCommand: false,
+      status: "active",
+      iterations: 0,
+      tokensUsed: 0,
+      generationId: "g",
+      config: LOOP_CONFIG,
+      parseFailureCount: 0,
+      scheduledTaskId: "task_a",
+    })
+    await bulkDeleteSessions([a.id, b.id])
+    expect(await listLoopsBySession(a.id)).toHaveLength(0)
+    expect(schedulerMock.deleteTask).toHaveBeenCalledWith("task_a")
+  })
+})
+
+describe("deleteSession — artifact store purge", () => {
+  beforeEach(() => {
+    clearSessionDataMock.mockReset()
+  })
+
+  it("drops the deleted session's artifacts from the persisted store", async () => {
+    const s = await createSession({ title: "with artifacts" })
+    await deleteSession(s.id)
+    expect(clearSessionDataMock).toHaveBeenCalledWith(s.id)
+  })
+
+  it("purges every id on bulkDeleteSessions", async () => {
+    const a = await createSession({ title: "a" })
+    const b = await createSession({ title: "b" })
+    await bulkDeleteSessions([a.id, b.id])
+    expect(clearSessionDataMock.mock.calls.map(([id]) => id).sort()).toEqual([a.id, b.id].sort())
+  })
+
+  // Artifacts are convenience state, not the record of truth: a store that is
+  // absent (SSR), stale, or throwing must never strand the session row itself.
+  it("still deletes the session when the store throws", async () => {
+    const warn = jest.spyOn(loggers.store, "warn").mockImplementation(() => {})
+    clearSessionDataMock.mockImplementationOnce(() => {
+      throw new Error("store unavailable")
+    })
+    const s = await createSession({ title: "doomed" })
+    await expect(deleteSession(s.id)).resolves.toBeUndefined()
+    expect(await getSession(s.id)).toBeUndefined()
+    expect(warn).toHaveBeenCalledWith("session artifact cleanup failed", {
+      sessionId: s.id,
+      error: "Error: store unavailable",
+    })
+    warn.mockRestore()
+  })
+})
+
+describe("workspace (project) scoping", () => {
+  it("createSession stamps the active project id", async () => {
+    await saveSettings({ activeProjectId: "proj-active" })
+    const s = await createSession({ title: "scoped" })
+    expect(s.projectId).toBe("proj-active")
+    expect((await getSession(s.id))?.projectId).toBe("proj-active")
+  })
+
+  it("createSession honours an explicit projectId override", async () => {
+    await saveSettings({ activeProjectId: "proj-active" })
+    const s = await createSession({ title: "explicit", projectId: "proj-other" })
+    expect(s.projectId).toBe("proj-other")
+  })
+
+  it("listScopedSessions returns only the workspace's sessions, newest-first", async () => {
+    await saveSettings({ activeProjectId: "proj-A" })
+    const a1 = await createSession({ title: "a1" })
+    await new Promise((r) => setTimeout(r, 2))
+    const a2 = await createSession({ title: "a2" })
+    const b1 = await createSession({ title: "b1", projectId: "proj-B" })
+
+    const scopedA = await listScopedSessions("proj-A")
+    expect(scopedA.map((s) => s.id)).toEqual([a2.id, a1.id])
+    expect(scopedA.some((s) => s.id === b1.id)).toBe(false)
+
+    // Defaulting to the active project yields the same result.
+    expect((await listScopedSessions()).map((s) => s.id)).toEqual([a2.id, a1.id])
+    // The unscoped escape hatch still sees every workspace.
+    expect((await listSessions()).map((s) => s.id).sort()).toEqual([a1.id, a2.id, b1.id].sort())
+  })
+})
+
+describe("archive / unarchive", () => {
+  it("archiveSession stamps archivedAt without touching updatedAt", async () => {
+    const s = await createSession({ title: "to archive" })
+    const before = (await getSession(s.id))!.updatedAt
+    await archiveSession(s.id)
+    const after = await getSession(s.id)
+    expect(typeof after?.archivedAt).toBe("number")
+    expect(after?.updatedAt).toBe(before)
+  })
+
+  it("unarchiveSession deletes the archivedAt field outright", async () => {
+    const s = await createSession({ title: "round trip" })
+    await archiveSession(s.id)
+    expect((await getSession(s.id))?.archivedAt).toEqual(expect.any(Number))
+    await unarchiveSession(s.id)
+    const after = await getSession(s.id)
+    expect(after).toBeDefined()
+    expect("archivedAt" in (after as object)).toBe(false)
+  })
+
+  it("bulkArchiveSessions archives every id in one pass and no-ops on empty", async () => {
+    const a = await createSession({ title: "a" })
+    const b = await createSession({ title: "b" })
+    await bulkArchiveSessions([])
+    expect((await getSession(a.id))?.archivedAt).toBeUndefined()
+    await bulkArchiveSessions([a.id, b.id, "missing-id"])
+    expect((await getSession(a.id))?.archivedAt).toEqual(expect.any(Number))
+    expect((await getSession(b.id))?.archivedAt).toEqual(expect.any(Number))
+  })
+
+  it("bulkUnarchiveSessions deletes archivedAt for every id in one pass and no-ops on empty", async () => {
+    const a = await createSession({ title: "a" })
+    const b = await createSession({ title: "b" })
+    await bulkArchiveSessions([a.id, b.id])
+    await bulkUnarchiveSessions([])
+    expect((await getSession(a.id))?.archivedAt).toEqual(expect.any(Number))
+    await bulkUnarchiveSessions([a.id, b.id, "missing-id"])
+    const afterA = await getSession(a.id)
+    const afterB = await getSession(b.id)
+    expect("archivedAt" in (afterA as object)).toBe(false)
+    expect("archivedAt" in (afterB as object)).toBe(false)
+  })
+})
+
+describe("branch lineage (v81 index, reverse direction)", () => {
+  const mkBranch = async (id: string, parentId: string, at?: string, createdAt = 1) => {
+    await getDb().sessions.put({
+      id,
+      title: id,
+      kind: "direct",
+      projectId: "p1",
+      parentSessionId: parentId,
+      branchedFromMessageId: at,
+      createdAt,
+      updatedAt: createdAt,
+    } as ChatSession)
+  }
+
+  it("lists a conversation's branches newest first", async () => {
+    // The v81 `parentSessionId` index existed for exactly this and had no
+    // query behind it: lineage was visible only from a child looking up.
+    await getDb().sessions.put({
+      id: "parent",
+      title: "Parent",
+      kind: "direct",
+      projectId: "p1",
+      createdAt: 1,
+      updatedAt: 1,
+    } as ChatSession)
+    await mkBranch("b1", "parent", "m1", 2)
+    await mkBranch("b2", "parent", "m1", 3)
+    await mkBranch("other", "somebody-else", "m1", 4)
+
+    expect((await listSessionBranches("parent")).map((s) => s.id)).toEqual(["b2", "b1"])
+  })
+
+  it("counts only the branches cut at a given message", async () => {
+    await mkBranch("b1", "parent", "m1", 2)
+    await mkBranch("b2", "parent", "m2", 3)
+    expect(await countBranchesAtMessage("parent", "m1")).toBe(1)
+    expect(await countBranchesAtMessage("parent", "nope")).toBe(0)
+  })
+})
+
+describe("deleteSession — branch survival", () => {
+  const mkSession = async (id: string, parentSessionId?: string) => {
+    await getDb().sessions.put({
+      id,
+      title: id,
+      kind: "direct",
+      projectId: "p1",
+      parentSessionId,
+      createdAt: 1,
+      updatedAt: 1,
+    } as ChatSession)
+  }
+
+  it("keeps the branches and re-points them at their grandparent", async () => {
+    // A branch is a standalone conversation — `direct` mode copies the messages
+    // outright — so deleting the parent must neither take it down nor strand it
+    // holding a pointer to a row that no longer exists.
+    await mkSession("grandparent")
+    await mkSession("parent", "grandparent")
+    await mkSession("child-a", "parent")
+    await mkSession("child-b", "parent")
+
+    await deleteSession("parent")
+
+    expect(await getDb().sessions.get("parent")).toBeUndefined()
+    expect((await getDb().sessions.get("child-a"))?.parentSessionId).toBe("grandparent")
+    expect((await getDb().sessions.get("child-b"))?.parentSessionId).toBe("grandparent")
+  })
+
+  it("clears the pointer entirely when the deleted session was top-level", async () => {
+    // `undefined` deletes the field — a branch of a root conversation ends up
+    // with no lineage, not a pointer to nothing.
+    await mkSession("root")
+    await mkSession("child", "root")
+
+    await deleteSession("root")
+
+    const child = await getDb().sessions.get("child")
+    expect(child).toBeDefined()
+    expect(child?.parentSessionId).toBeUndefined()
+  })
+
+  it("leaves unrelated sessions' lineage untouched", async () => {
+    await mkSession("parent")
+    await mkSession("elsewhere")
+    await mkSession("theirs", "elsewhere")
+
+    await deleteSession("parent")
+
+    expect((await getDb().sessions.get("theirs"))?.parentSessionId).toBe("elsewhere")
   })
 })

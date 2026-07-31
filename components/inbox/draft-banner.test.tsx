@@ -21,17 +21,16 @@ jest.mock("@/lib/db/connector-drafts", () => ({
 
 jest.mock("@/components/ui/sheet")
 
-let mockPendingDrafts: unknown[] = []
-
+// `DraftEditor` still reaches for Dexie through this hook.
 jest.mock("dexie-react-hooks", () => ({
-  useLiveQuery: jest.fn().mockImplementation(() => mockPendingDrafts),
+  useLiveQuery: jest.fn().mockImplementation(() => []),
 }))
 
 // ---------------------------------------------------------------------------
 // Subject + imported mocks
 // ---------------------------------------------------------------------------
 
-import { DraftBanner } from "./draft-banner"
+import { DraftNotice } from "./draft-banner"
 import { enqueueOutbound } from "@/lib/db/outbound-jobs"
 import { approveDraft, rejectDraft } from "@/lib/db/connector-drafts"
 import type { ConnectorDraftRow } from "@/lib/db/connector-types"
@@ -62,38 +61,36 @@ function makeDraft(overrides: Partial<ConnectorDraftRow> = {}): ConnectorDraftRo
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("DraftBanner", () => {
+// Draft selection ("is there a pending draft at all?") lives in
+// `InboxNoticeArea` and is pinned by its suite. This component is handed the
+// one draft to present.
+describe("DraftNotice", () => {
   beforeEach(() => {
-    mockPendingDrafts = []
     mockEnqueue.mockReset().mockResolvedValue({ id: "oqj_1" })
     mockApprove.mockReset().mockResolvedValue(undefined)
     mockReject.mockReset().mockResolvedValue(undefined)
   })
 
-  it("renders nothing when no pending drafts exist", () => {
-    mockPendingDrafts = []
-    const { container } = render(<DraftBanner conversationKey="ck1" />)
-    expect(container.firstChild).toBeNull()
-  })
-
-  it("shows banner when a pending draft exists", () => {
-    mockPendingDrafts = [makeDraft()]
-    render(<DraftBanner conversationKey="ck1" />)
+  it("shows the pending-draft row and its review affordance", () => {
+    render(<DraftNotice draft={makeDraft()} conversationKey="ck1" />)
     expect(screen.getByTestId("draft-banner")).toBeInTheDocument()
     expect(screen.getByTestId("draft-review-btn")).toBeInTheDocument()
   })
 
+  it("keeps the editor sheet closed until Review is clicked", () => {
+    render(<DraftNotice draft={makeDraft()} conversationKey="ck1" />)
+    expect(screen.queryByTestId("draft-editor")).not.toBeInTheDocument()
+  })
+
   it("opens sheet on Review click", () => {
-    mockPendingDrafts = [makeDraft()]
-    render(<DraftBanner conversationKey="ck1" />)
+    render(<DraftNotice draft={makeDraft()} conversationKey="ck1" />)
     fireEvent.click(screen.getByTestId("draft-review-btn"))
     expect(screen.getByTestId("sheet")).toBeInTheDocument()
     expect(screen.getByTestId("draft-editor")).toBeInTheDocument()
   })
 
   it("Approve & Send enqueues outbound + marks draft approved", async () => {
-    mockPendingDrafts = [makeDraft()]
-    render(<DraftBanner conversationKey="ck1" />)
+    render(<DraftNotice draft={makeDraft()} conversationKey="ck1" />)
     fireEvent.click(screen.getByTestId("draft-review-btn"))
 
     fireEvent.click(screen.getByTestId("draft-approve-btn"))
@@ -105,8 +102,7 @@ describe("DraftBanner", () => {
   })
 
   it("Reject marks draft rejected", async () => {
-    mockPendingDrafts = [makeDraft()]
-    render(<DraftBanner conversationKey="ck1" />)
+    render(<DraftNotice draft={makeDraft()} conversationKey="ck1" />)
     fireEvent.click(screen.getByTestId("draft-review-btn"))
 
     fireEvent.click(screen.getByTestId("draft-reject-btn"))

@@ -1,0 +1,15 @@
+{
+  "backAria": "返回我的",
+  "builtin": {
+    "description": "可在聊天输入框中以斜杠开头运行的命令。",
+    "title": "内置命令"
+  },
+  "intro": "浏览已配对桌面端可运行的斜杠命令。自定义命令在桌面端创建。",
+  "manageOnDesktop": "自定义斜杠命令以 .claude/commands/*.md 文件形式存储在已配对的桌面端。请在桌面端创建、编辑和删除。",
+  "plugin": {
+    "description": "由已启用插件贡献的命令。",
+    "empty": "暂无插件命令。",
+    "title": "插件命令"
+  },
+  "title": "斜杠命令"
+}

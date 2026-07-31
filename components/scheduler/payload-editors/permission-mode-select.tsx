@@ -8,9 +8,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import type { SendOptions } from "@/lib/claude/types"
+import type { SendOptions } from "@cognia/agent-config-types"
+import type { ExternalAgentProtocol } from "@/types/agent/external-agent"
+import { supportedPermissionModes } from "@/lib/ai/agent/external/permission-modes"
+import type { PermissionMode } from "@/lib/settings/permission-mode-escalation"
+import { permissionRiskMarker } from "@/lib/settings/permission-mode-meta"
 
-const SDK_MODES: SendOptions["permissionMode"][] = [
+const SDK_MODES: NonNullable<SendOptions["permissionMode"]>[] = [
   "default",
   "acceptEdits",
   "bypassPermissions",
@@ -22,9 +26,16 @@ const ACP_MODES = ["default", "acceptEdits", "bypassPermissions", "plan", "dontA
 export interface PermissionModeSelectProps {
   /**
    * `sdk` covers the four SDK-side modes used by chat / agent / skill tasks;
-   * `acp` adds the extra `dontAsk` value used by external ACP agents.
+   * `acp` adds the extra `dontAsk` value used by external ACP agents. Ignored
+   * when `protocol` is supplied.
    */
   flavor?: "sdk" | "acp"
+  /**
+   * When set, the option list is narrowed to the modes the chosen external-agent
+   * backend can actually enforce (e.g. Codex has no `dontAsk`). Takes precedence
+   * over `flavor`.
+   */
+  protocol?: ExternalAgentProtocol
   value: string | undefined
   onChange: (value: string | undefined) => void
   disabled?: boolean
@@ -37,6 +48,7 @@ const SENTINEL_DEFAULT = "__use_default__"
 
 export function PermissionModeSelect({
   flavor = "sdk",
+  protocol,
   value,
   onChange,
   disabled,
@@ -44,7 +56,11 @@ export function PermissionModeSelect({
   testId,
 }: PermissionModeSelectProps) {
   const t = useTranslations("scheduler")
-  const modes = flavor === "acp" ? ACP_MODES : SDK_MODES
+  const modes: readonly string[] = protocol
+    ? supportedPermissionModes(protocol)
+    : flavor === "acp"
+      ? ACP_MODES
+      : SDK_MODES
 
   return (
     <Select
@@ -57,11 +73,24 @@ export function PermissionModeSelect({
       </SelectTrigger>
       <SelectContent>
         <SelectItem value={SENTINEL_DEFAULT}>{t(placeholderKey)}</SelectItem>
-        {modes.map((m) => (
-          <SelectItem key={m} value={m as string}>
-            {t(`permissionModes.${m}`)}
-          </SelectItem>
-        ))}
+        {modes.map((m) => {
+          const marker = permissionRiskMarker(m as PermissionMode)
+          return (
+            <SelectItem key={m} value={m as string}>
+              <span className="flex items-center gap-1.5">
+                {marker && (
+                  <span
+                    aria-hidden
+                    className={marker === "⚠" ? "text-rose-500" : "text-muted-foreground"}
+                  >
+                    {marker}
+                  </span>
+                )}
+                {t(`permissionModes.${m}`)}
+              </span>
+            </SelectItem>
+          )
+        })}
       </SelectContent>
     </Select>
   )

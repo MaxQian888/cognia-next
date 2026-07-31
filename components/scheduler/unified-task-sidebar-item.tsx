@@ -7,11 +7,15 @@
  *
  * Replaces both `TaskSidebarItem` (app-only) and the inline `<div role="button">`
  * system-task block that used to live in `SchedulerSidebar`.
+ *
+ * Interaction contract: clicking the row only selects it; the quick actions
+ * live behind a hover-revealed "⋯" button so the menu never swallows the
+ * selection click.
  */
 
 import React from "react"
 import { useTranslations } from "next-intl"
-import { Play, Pause, Pencil, Trash2, ArrowUpRight } from "lucide-react"
+import { Play, Pause, Pencil, Trash2, ArrowUpRight, MoreVertical } from "lucide-react"
 import Link from "next/link"
 import {
   DropdownMenu,
@@ -73,7 +77,7 @@ export interface UnifiedTaskSidebarItemProps {
   isSelected?: boolean
 }
 
-export function UnifiedTaskSidebarItem({
+export const UnifiedTaskSidebarItem = React.memo(function UnifiedTaskSidebarItem({
   item,
   isActive,
   isHighlighted,
@@ -100,7 +104,7 @@ export function UnifiedTaskSidebarItem({
   const showDelete = !!onDelete && item.capabilities.delete
   const hasAnyAction = showRun || showPauseResume || showEdit || showDelete
 
-  const rowContent = (
+  return (
     <div
       role="button"
       tabIndex={0}
@@ -160,90 +164,102 @@ export function UnifiedTaskSidebarItem({
           item.status === "active" && "animate-pulse"
         )}
       />
-    </div>
-  )
 
-  if (!hasAnyAction) {
-    return rowContent
-  }
-
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>{rowContent}</DropdownMenuTrigger>
-      <DropdownMenuContent align="start" side="right" className="w-44">
-        {showRun && (
-          <DropdownMenuItem
-            onClick={(e) => {
-              e.stopPropagation()
-              onRunNow?.(item)
-            }}
-          >
-            <Play className="mr-2 h-3.5 w-3.5" />
-            {t("runNow") || "Run now"}
-          </DropdownMenuItem>
-        )}
-
-        {showPauseResume && (
-          <DropdownMenuItem
-            onClick={(e) => {
-              e.stopPropagation()
-              if (isPaused) onResume?.(item)
-              else onPause?.(item)
-            }}
-          >
-            {isPaused ? (
-              <>
+      {hasAnyAction && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label={t("moreOptions") || "More options"}
+              data-testid={`unified-row-menu-${item.unifiedId}`}
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => e.stopPropagation()}
+              className={cn(
+                "flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-opacity hover:bg-accent hover:text-foreground",
+                // Hover-revealed on pointer devices; always visible on touch
+                // (no hover) and while the menu is open.
+                "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100"
+              )}
+            >
+              <MoreVertical className="h-3.5 w-3.5" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" side="right" className="w-44">
+            {showRun && (
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onRunNow?.(item)
+                }}
+              >
                 <Play className="mr-2 h-3.5 w-3.5" />
-                {t("resume") || "Resume"}
-              </>
-            ) : (
+                {t("runNow") || "Run now"}
+              </DropdownMenuItem>
+            )}
+
+            {showPauseResume && (
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (isPaused) onResume?.(item)
+                  else onPause?.(item)
+                }}
+              >
+                {isPaused ? (
+                  <>
+                    <Play className="mr-2 h-3.5 w-3.5" />
+                    {t("resume") || "Resume"}
+                  </>
+                ) : (
+                  <>
+                    <Pause className="mr-2 h-3.5 w-3.5" />
+                    {t("pause") || "Pause"}
+                  </>
+                )}
+              </DropdownMenuItem>
+            )}
+
+            {(showEdit || showDelete) && (showRun || showPauseResume) && <DropdownMenuSeparator />}
+
+            {showEdit && (
+              <DropdownMenuItem
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onEdit?.(item)
+                }}
+              >
+                <Pencil className="mr-2 h-3.5 w-3.5" />
+                {t("edit") || "Edit"}
+              </DropdownMenuItem>
+            )}
+
+            {!item.capabilities.edit && (
+              <DropdownMenuItem asChild>
+                <Link href={item.origin.deepLinkHref}>
+                  <ArrowUpRight className="mr-2 h-3.5 w-3.5" />
+                  {t("openInSourceEditor") || "Open in source editor"}
+                </Link>
+              </DropdownMenuItem>
+            )}
+
+            {showDelete && (
               <>
-                <Pause className="mr-2 h-3.5 w-3.5" />
-                {t("pause") || "Pause"}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  variant="destructive"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onDelete?.(item)
+                  }}
+                >
+                  <Trash2 className="mr-2 h-3.5 w-3.5" />
+                  {t("delete") || "Delete"}
+                </DropdownMenuItem>
               </>
             )}
-          </DropdownMenuItem>
-        )}
-
-        {(showEdit || showDelete) && (showRun || showPauseResume) && <DropdownMenuSeparator />}
-
-        {showEdit && (
-          <DropdownMenuItem
-            onClick={(e) => {
-              e.stopPropagation()
-              onEdit?.(item)
-            }}
-          >
-            <Pencil className="mr-2 h-3.5 w-3.5" />
-            {t("edit") || "Edit"}
-          </DropdownMenuItem>
-        )}
-
-        {!item.capabilities.edit && (
-          <DropdownMenuItem asChild>
-            <Link href={item.origin.deepLinkHref}>
-              <ArrowUpRight className="mr-2 h-3.5 w-3.5" />
-              {t("openInSourceEditor") || "Open in source editor"}
-            </Link>
-          </DropdownMenuItem>
-        )}
-
-        {showDelete && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              variant="destructive"
-              onClick={(e) => {
-                e.stopPropagation()
-                onDelete?.(item)
-              }}
-            >
-              <Trash2 className="mr-2 h-3.5 w-3.5" />
-              {t("delete") || "Delete"}
-            </DropdownMenuItem>
-          </>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+    </div>
   )
-}
+})

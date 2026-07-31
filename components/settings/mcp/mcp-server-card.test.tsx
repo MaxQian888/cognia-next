@@ -19,14 +19,18 @@ jest.mock("@/lib/claude/ipc", () => ({ testMcpServer: (...a: unknown[]) => testM
 
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { mcp: { info: jest.fn(), error: jest.fn(), warn: jest.fn() } },
+}))
+
+jest.mock("@/hooks/mcp/use-mcp-server-logs", () => ({
+  mcpServerLogsHref: (s: string) => `/logs?src=mcp&module=mcp:${s}`,
 }))
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { toast } from "sonner"
 import { McpServerCard } from "./mcp-server-card"
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 
 const server: McpServer = {
   id: "mcp_1",
@@ -130,6 +134,12 @@ describe("McpServerCard", () => {
     // Button is disabled, but invoking the handler path via the row variant's
     // enabled state is covered above; assert the disabled affordance here.
     expect(screen.getByLabelText('test:{"name":"github"}')).toBeDisabled()
+  })
+
+  it("links to the per-server log view", () => {
+    render(<McpServerCard server={server} selected={false} favorite={false} {...handlers} />)
+    const link = screen.getByLabelText('logs:{"name":"github"}')
+    expect(link).toHaveAttribute("href", "/logs?src=mcp&module=mcp:github")
   })
 
   it("renders the compact row variant", () => {

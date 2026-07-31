@@ -1,0 +1,115 @@
+# Shared services: signaling (stateless) + share (sqlite state).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: signaling
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: signaling
+  template:
+    metadata:
+      labels:
+        app: signaling
+    spec:
+      containers:
+        - name: signaling
+          image: ghcr.io/maxqian888/cognia-signaling:latest
+          ports:
+            - containerPort: 7892
+          env:
+            - name: PORT
+              value: "7892"
+            # Comma-separated WebSocket Origin allowlist; unset allows all
+            # (same knob the compose suite exposes).
+            - name: SIGNALING_ALLOWED_ORIGINS
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: signalingAllowedOrigins
+                  optional: true
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 7892
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: signaling
+spec:
+  selector:
+    app: signaling
+  ports:
+    - port: 7892
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: share
+spec:
+  serviceName: share
+  replicas: 1
+  selector:
+    matchLabels:
+      app: share
+  template:
+    metadata:
+      labels:
+        app: share
+    spec:
+      containers:
+        - name: share
+          image: ghcr.io/maxqian888/cognia-share:latest
+          ports:
+            - containerPort: 8787
+          env:
+            - name: PORT
+              value: "8787"
+            - name: SHARE_DB_PATH
+              value: /data/shares.sqlite
+            - name: SHARE_UPLOAD_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: cognia-secrets
+                  key: SHARE_UPLOAD_SECRET
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8787
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: share
+spec:
+  selector:
+    app: share
+  ports:
+    - port: 8787

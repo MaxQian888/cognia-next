@@ -1,0 +1,78 @@
+---
+title: Optical Compaction
+description: Compacting conversation history as an image instead of a summary — the four conservative gates that must all pass, the vision read-back that proves the frame is legible, and the fallback to text that means context is never lost to an unreadable picture.
+---
+
+# Optical Compaction
+
+<Status variant="experimental">Experimental · ADR-0063 · opticalArchives (Dexie v101)</Status>
+
+<TLDR>
+  "Snapcompact" renders the middle of a conversation into a PNG and hands the model the image instead of a
+  text summary, on the bet that a legible rendering carries more of the original than a paraphrase at the
+  same token cost. It is deliberately hard to trigger. `compact.mjs` runs a **four-gate funnel** —
+  coverage, budget/overflow, worthwhile, and a round-trip readability check — and **any** gate that fails
+  returns `null`, at which point the caller summarizes the very same `middle` as text. Context is never
+  dropped into an unreadable image.
+</TLDR>
+
+<StatGrid>
+  <Stat label="Gates" value="4" hint="coverage → budget/overflow → worthwhile → readability" />
+  <Stat label="Sidecar modules" value="11" hint="sidecar/dispatch/optical — non-test .mjs" />
+  <Stat label="Dexie table" value="1" hint="opticalArchives — schema v101" />
+  <Stat label="Injected I/O" value="1" hint="transcribe — a one-shot vision read-back" />
+</StatGrid>
+
+Design rationale: [ADR-0063](../adr/0063-optical-context-compaction).
+
+## The readability gate is the whole idea
+
+The failure mode of rendering context to an image is silent illegibility: the model receives a picture it
+cannot read, and the conversation loses the history it thinks it still has. The last gate closes that by
+round-tripping — the rendered frame is transcribed back through a one-shot vision read (`transcribe`, the
+module's **only** I/O, and injected so the rest is testable offline) and compared against the source. If
+the read-back does not clear the bar, the frame is discarded and text summarization runs instead.
+
+The three earlier gates are cheaper filters: is enough of the middle actually covered, does the render fit
+the budget without overflowing, and is the result worth the substitution at all.
+
+## Where it lives
+
+```
+sidecar/dispatch/optical/
+  compact.mjs      # the orchestration + the four-gate funnel
+  normalize.mjs    # conversation middle → normalized text
+  layout.mjs       # planOpticalFrames — how the text is paginated into frames
+  render.mjs       # renderSnapcompactPng
+  raster.mjs  png.mjs  resample.mjs   # the rendering primitives
+  fonts.mjs  fonts-data.mjs           # embedded fonts, no system dependency
+  readability.mjs  # checkReadability — the round-trip gate
+  constants.mjs
+
+sidecar/dispatch/compaction.mjs · compaction-strategies.mjs   # the caller
+lib/claude/optical-archive-persist.ts     # compact_boundary event → Dexie
+lib/db/optical-archives.ts                # the opticalArchives table
+components/chat/message-parts/optical-archive-dialog.tsx   # inspect a frame
+```
+
+Fonts are embedded (`fonts-data.mjs`) rather than resolved from the system, so a frame renders identically
+regardless of what the host machine has installed — a rendering that varies by machine would make the
+readability gate non-reproducible.
+
+## Persistence is a deliberate side effect
+
+`lib/claude/optical-archive-persist.ts` bridges the sidecar's `compact_boundary` event to the Dexie store,
+and it is kept **out** of the pure `adapter.ts` reducer on purpose — it is a best-effort, browser-only side
+effect, mirroring how `pre_messages` routes to the in-memory undo registry. The Dexie module is imported
+dynamically so `adapter.ts` keeps no DB dependency and stays safe to import under SSR and in tests.
+
+The table itself is small: `opticalArchives: "&id, sessionId, createdAt, [sessionId+createdAt]"` — enough
+to list a session's archives in order and open any frame from the chat transcript.
+
+## Related
+
+<Cards>
+  <Card title="ADR-0063" href="../adr/0063-optical-context-compaction" description="The optical compaction decision record" />
+  <Card title="Sidecar & Claude SDK" href="../core/sidecar-and-claude-sdk" description="The dispatch pipeline this runs inside" />
+  <Card title="Storage" href="../data/storage" description="The Dexie schema opticalArchives lives in" />
+</Cards>

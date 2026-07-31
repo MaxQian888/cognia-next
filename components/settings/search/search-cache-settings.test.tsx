@@ -33,7 +33,7 @@ jest.mock("@/stores/settings", () => ({
     }),
 }))
 
-jest.mock("@/lib/search/search-cache", () => ({
+jest.mock("@cognia/web-search/search-cache", () => ({
   getSearchCache: () => ({
     clear: cacheClearMock,
     invalidate: cacheInvalidateMock,
@@ -47,7 +47,7 @@ jest.mock("next-intl", () => ({
 }))
 
 const mockLogInfo = jest.fn()
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   createLogger: () => ({
     info: (...args: unknown[]) => mockLogInfo(...args),
     error: jest.fn(),

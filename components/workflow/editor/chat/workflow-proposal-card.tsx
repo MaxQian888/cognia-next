@@ -40,8 +40,9 @@ import { cn } from "@/lib/utils"
 import { useProposalStore, type ProposalStatus } from "@/lib/workflow/editor/proposal-store"
 import { getEditorStore } from "@/lib/workflow/editor/store-registry"
 import { parseOutputJson } from "@/components/chat/message-parts/mcp-renderers/common"
-import type { ProposalOpCount } from "@/lib/workflow/editor/proposal-types"
+import type { ProposalOp, ProposalOpCount } from "@/lib/workflow/editor/proposal-types"
 import { PerfBoundary } from "@/lib/perf"
+import { workflowEditorRevision } from "@/lib/workflow/editor/editor-revision"
 
 interface ProposeBatchOutput {
   ok?: boolean
@@ -49,7 +50,44 @@ interface ProposeBatchOutput {
   workflowId?: string
   summary?: string
   opCount?: ProposalOpCount
+  baseRevision?: string
   error?: { code?: string; message?: string }
+  /**
+   * Echo of the full proposal (including `ops`) emitted by the tool. On the
+   * renderer that executed `wf_propose_batch` the proposal already sits in
+   * `useProposalStore`; on a DIFFERENT renderer of the same session (the
+   * mobile copilot pairs with a desktop that ran the tool, and vice versa)
+   * the store is empty — the card seeds it from this echo so Apply works
+   * against the local editor store.
+   */
+  messageParts?: Array<{
+    type?: string
+    proposalId?: string
+    workflowId?: string
+    summary?: string
+    ops?: ProposalOp[]
+    baseRevision?: string
+  }>
+}
+
+/** Node ids a proposal touches — drives the canvas highlight on card hover. */
+function affectedNodeIdsFromOps(ops: ReadonlyArray<ProposalOp>): string[] {
+  const ids = new Set<string>()
+  for (const op of ops) {
+    switch (op.type) {
+      case "add_node":
+      case "remove_node":
+      case "configure_node":
+        ids.add(op.nodeId)
+        break
+      case "connect_edge":
+        ids.add(op.source)
+        ids.add(op.target)
+        break
+      // disconnect_edge references an edge id, not nodes — nothing to ring.
+    }
+  }
+  return [...ids]
 }
 
 export function WorkflowProposalCard({ part }: { part: ToolUIPart }) {
@@ -68,6 +106,7 @@ export function WorkflowProposalCard({ part }: { part: ToolUIPart }) {
   const [, startApplyTransition] = useTransition()
   const [expanded, setExpanded] = useState(false)
   const [applyError, setApplyError] = useState<string | null>(null)
+  const [stale, setStale] = useState(false)
 
   if (!parsed) return null
   // Tool errored OR tool returned ok:false — show a compact error pill
@@ -80,9 +119,28 @@ export function WorkflowProposalCard({ part }: { part: ToolUIPart }) {
 
   const effectiveStatus = optimisticStatus ?? realStatus ?? "open"
 
+  // Full ops echoed in the tool result — the seed source when THIS renderer
+  // never ran the tool (cross-device copilot session).
+  const echoedProposal = parsed.messageParts?.find(
+    (p) => p?.type === "workflow-proposal" && p.proposalId === proposalId
+  )
+  const echoedOps = echoedProposal?.ops
+  const echoedBaseRevision = parsed.baseRevision ?? echoedProposal?.baseRevision ?? "legacy"
+
   const handleApply = () => {
     setApplyError(null)
-    const proposal = useProposalStore.getState().getProposal(proposalId)
+    let proposal = useProposalStore.getState().getProposal(proposalId)
+    if (!proposal && echoedOps && echoedOps.length > 0) {
+      // Seed the local proposal store from the tool-result echo so Apply /
+      // Discard / changelog behave exactly as if the tool ran here.
+      proposal = useProposalStore.getState().openProposal(workflowId, {
+        proposalId,
+        workflowId,
+        summary,
+        ops: echoedOps,
+        baseRevision: echoedBaseRevision,
+      })
+    }
     if (!proposal) {
       setApplyError(t("errorNotFound"))
       return
@@ -95,6 +153,12 @@ export function WorkflowProposalCard({ part }: { part: ToolUIPart }) {
       setApplyError(t("errorEditorNotOpen"))
       return
     }
+    const currentRevision = workflowEditorRevision(store.getState())
+    if (proposal.baseRevision !== "legacy" && proposal.baseRevision !== currentRevision) {
+      setStale(true)
+      setApplyError(t("errorStale"))
+      return
+    }
     let firstError: string | undefined
     startApplyTransition(() => {
       // Optimistic flip — the badge / button instantly switches to
@@ -103,7 +167,12 @@ export function WorkflowProposalCard({ part }: { part: ToolUIPart }) {
       // optimistic value auto-reverts to the real status (still "open")
       // once the transition settles.
       addOptimisticStatus("applied")
-      const result = store.getState().applyProposalOps(proposal.ops)
+      const result = store.getState().applyProposalOps(proposal.ops, proposal.baseRevision)
+      if (result.stale) {
+        firstError = t("errorStale")
+        setStale(true)
+        return
+      }
       if (result.firstError) {
         firstError = result.firstError
         return
@@ -119,6 +188,17 @@ export function WorkflowProposalCard({ part }: { part: ToolUIPart }) {
 
   const handleDiscard = () => {
     setApplyError(null)
+    // Cross-device seed (see handleApply) — `discardProposal` no-ops when the
+    // store has no open proposal, which would leave the badge stuck on "open".
+    if (!useProposalStore.getState().getProposal(proposalId) && echoedOps && echoedOps.length > 0) {
+      useProposalStore.getState().openProposal(workflowId, {
+        proposalId,
+        workflowId,
+        summary,
+        ops: echoedOps,
+        baseRevision: echoedBaseRevision,
+      })
+    }
     startApplyTransition(() => {
       addOptimisticStatus("discarded")
       useProposalStore.getState().discardProposal(workflowId)
@@ -126,7 +206,7 @@ export function WorkflowProposalCard({ part }: { part: ToolUIPart }) {
   }
 
   const proposal = useProposalStore.getState().getProposal(proposalId)
-  const opsForDisplay = proposal?.ops ?? []
+  const opsForDisplay = proposal?.ops ?? echoedOps ?? []
 
   const aggregate = formatAggregate(opCount)
 
@@ -140,6 +220,16 @@ export function WorkflowProposalCard({ part }: { part: ToolUIPart }) {
           "my-2 rounded-md border bg-card text-card-foreground transition-opacity",
           effectiveStatus === "discarded" && "opacity-60"
         )}
+        // Hovering the card highlights the nodes this proposal touches on the
+        // canvas (violet ring) so "what will the AI change?" is visible at a
+        // glance. No-op when the editor store isn't registered (e.g. the
+        // proposal renders on a device whose canvas is closed).
+        onMouseEnter={() =>
+          getEditorStore(workflowId)
+            ?.getState()
+            .setHighlightedNodes(affectedNodeIdsFromOps(opsForDisplay))
+        }
+        onMouseLeave={() => getEditorStore(workflowId)?.getState().setHighlightedNodes([])}
       >
         <div className="flex items-center justify-between gap-2 border-b bg-muted/40 px-3 py-2">
           <div className="flex min-w-0 items-center gap-2">
@@ -201,6 +291,27 @@ export function WorkflowProposalCard({ part }: { part: ToolUIPart }) {
               {applyError}
             </div>
           )}
+
+          {stale && effectiveStatus === "open" ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 px-2 text-[11px]"
+              onClick={() => {
+                const store = getEditorStore(workflowId)
+                if (!store) return
+                useProposalStore
+                  .getState()
+                  .rebaseProposal(workflowId, workflowEditorRevision(store.getState()))
+                setStale(false)
+                setApplyError(null)
+              }}
+              data-testid="workflow-proposal-rebase"
+            >
+              {t("rebase")}
+            </Button>
+          ) : null}
 
           {effectiveStatus === "open" && (
             <div className="flex items-center gap-1.5 pt-1">

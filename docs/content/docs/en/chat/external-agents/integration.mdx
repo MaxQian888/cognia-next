@@ -141,6 +141,30 @@ Plugins can also **contribute presets** via the `externalAgentPresets` manifest 
 `"external-agent-preset"` overlay capability (`lib/plugin/contracts/capability-bridge-map.ts:210`).
 See [Ecosystem & presets](./ecosystem-presets).
 
+### Contributing a new protocol (the `external-agent-adapter` capability)
+
+A preset only configures **how to launch** an agent that speaks one of the four built-in
+protocols (`acp` / `codex-app-server` / `opencode` / `a2a`). To integrate an agent that speaks a
+**genuinely new protocol**, a plugin contributes a *protocol adapter* — the targeted-behaviour twin
+of a preset:
+
+- Declare `externalAgentAdapters: [{ id, label, entry, export }]` in the manifest (or call
+  `ctx.agent.registerExternalAgentAdapter(id, factory)` at activate-time). `entry`/`export` point at a
+  renderer-side module exporting a `() => ProtocolAdapter` factory.
+- On enable, the **external-agent-adapters bridge** (`lib/plugin/bridge/external-agent-adapters-bridge.ts`)
+  lazy-imports the factory and registers it into the external-agent `protocolAdapterRegistry` under the
+  namespaced protocol `${pluginId}:${id}` — so it can never collide with a built-in or another plugin.
+  On disable it is removed.
+- A matching preset references that namespaced protocol, so the contributed agent appears in the
+  quick-start gallery and connects exactly like a built-in (`addAgent` → `protocolAdapterRegistry.create`
+  is origin-agnostic). `getExternalAgentExecutionBlock` is registry-aware, so the agent is executable
+  only while its providing plugin is enabled, and reports a clear "enable the plugin" reason otherwise.
+- The generic, hardened **Rust process layer** still owns subprocess spawn (see §4); a contributed
+  adapter only drives renderer-side protocol/session logic — never raw process spawning.
+
+Reference plugin: `plugins/external-agent-adapter-example/` (adapter + matching preset, end-to-end).
+See [ADR-0051](../../adr/0051-external-agent-adapter-plugin-type).
+
 ## 3 · Settings UI
 
 The settings nav defines section id `"agents"` (`settings-nav-config.ts:158`) with search keywords
@@ -154,12 +178,18 @@ hosts the runtime selector. The card component is
 External agents only execute on the Tauri desktop shell. There are **two** Rust surfaces:
 
 - **Process bridge** — `src-tauri/src/external_agent/` (`mod` at `lib.rs:14`), a pure stdio
-  pass-through that parses nothing. `spawn_external_agent` (`commands.rs:34`) starts the CLI;
-  `send_to_external_agent` (`:161`), `kill_external_agent` (`:172`), and
-  `receive_external_agent_stderr` (`:219`) drive it; the ACP terminal sub-protocol
-  (`acp_terminal_create` `:328`, `_output`, `_kill`, `_write`, …) backs the
-  [ACP client's terminal handlers](./acp-client). Registered in the invoke handler at
-  `lib.rs:427`–`:444`.
+  pass-through that parses nothing. `spawn_external_agent` (`commands.rs`) starts the CLI;
+  `send_to_external_agent` and `kill_external_agent` drive it. stdout/stderr/exit are forwarded
+  **event-driven** through an `ExternalAgentEventSink` (per-process reader + supervisor tasks emit
+  `external-agent://{stdout,stderr,exit,state-change}` — there is no polling loop and no
+  `receive_*` pull command). The spawn resolves the program against PATH × `PATHEXT` first
+  (`command_resolver.rs`) so bare preset commands that live as Windows `.cmd`/`.bat` shims
+  (`npx`, `opencode`, `cursor-agent`) actually launch — and `check_command_exists` (the readiness
+  probe) shares that resolver so a preset reported `executable` is one that will spawn. The ACP
+  terminal sub-protocol (`acp_terminal_create`, `_output`, `_kill`, `_write`, …) backs the
+  [ACP client's terminal handlers](./acp-client). On app exit both managers'
+  `kill_all()` run from the `RunEvent::Exit` handler (`lib.rs`) so auto-spawned servers and
+  terminals are not orphaned.
 - **Hook runtime** — `src-tauri/src/hooks/commands.rs`: `run_agent_hook` (`:55`, registered
   `lib.rs:308`) runs a settings.json hook for an external-agent lifecycle event (tool- or
   session-scoped), and `set_trusted_workspaces` (`:102`) is the project/local trust gate. The TS

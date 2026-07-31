@@ -6,6 +6,7 @@ import {
   vscodeCompletionKindToMonaco,
   vscodeCompletionItemToMonaco,
   vscodeCompletionResultToMonaco,
+  vscodeInlineCompletionResultToMonaco,
   vscodeDiagnosticSeverityToMonaco,
   lspDiagnosticSeverityToMonaco,
   vscodeDiagnosticToMonacoMarker,
@@ -109,8 +110,8 @@ describe("lsp-protocol-adapter", () => {
       expect(vscodeCompletionKindToMonaco(2)).toBe(0)
     })
 
-    it("maps VS Code Snippet (15) → Monaco Snippet (27)", () => {
-      expect(vscodeCompletionKindToMonaco(15)).toBe(27)
+    it("maps VS Code Snippet (15) → Monaco Snippet (28)", () => {
+      expect(vscodeCompletionKindToMonaco(15)).toBe(28)
     })
 
     it("maps VS Code TypeParameter (25) → Monaco TypeParameter (24)", () => {
@@ -128,7 +129,7 @@ describe("lsp-protocol-adapter", () => {
 
     it("covers all 25 enum entries", () => {
       const expected = [
-        18, 0, 1, 2, 3, 4, 5, 7, 8, 9, 12, 13, 15, 17, 27, 19, 20, 21, 23, 16, 14, 6, 10, 11, 24,
+        18, 0, 1, 2, 3, 4, 5, 7, 8, 9, 12, 13, 15, 17, 28, 19, 20, 21, 23, 16, 14, 6, 10, 11, 24,
       ]
       for (let i = 1; i <= 25; i++) {
         expect(vscodeCompletionKindToMonaco(i)).toBe(expected[i - 1])
@@ -153,12 +154,12 @@ describe("lsp-protocol-adapter", () => {
       expect(out.insertTextRules).toBeUndefined()
     })
 
-    it("extracts label.label from CompletionItemLabel object", () => {
+    it("preserves structured completion labels", () => {
       const out = vscodeCompletionItemToMonaco({
-        label: { label: "render", detail: "React" },
+        label: { label: "render", detail: "React", description: "component" },
         kind: 3,
       })
-      expect(out.label).toBe("render")
+      expect(out.label).toEqual({ label: "render", detail: "React", description: "component" })
     })
 
     it("emits InsertAsSnippet (4) when insertTextFormat is Snippet (2)", () => {
@@ -178,7 +179,7 @@ describe("lsp-protocol-adapter", () => {
       expect(out.documentation).toBe("**bold**")
     })
 
-    it("converts inserting/replacing range to Monaco range (picks replacing)", () => {
+    it("preserves Monaco's distinct inserting and replacing ranges", () => {
       const out = vscodeCompletionItemToMonaco({
         label: "x",
         range: {
@@ -187,10 +188,51 @@ describe("lsp-protocol-adapter", () => {
         },
       })
       expect(out.range).toEqual({
-        startLineNumber: 1,
-        startColumn: 1,
-        endLineNumber: 1,
-        endColumn: 6, // 5 + 1 (from replacing)
+        insert: {
+          startLineNumber: 1,
+          startColumn: 1,
+          endLineNumber: 1,
+          endColumn: 4,
+        },
+        replace: {
+          startLineNumber: 1,
+          startColumn: 1,
+          endLineNumber: 1,
+          endColumn: 6,
+        },
+      })
+    })
+
+    it("maps all acceptance metadata used by Monaco", () => {
+      const out = vscodeCompletionItemToMonaco({
+        label: "importThing",
+        tags: [1],
+        preselect: true,
+        commitCharacters: ["."],
+        additionalTextEdits: [
+          {
+            range: { start: { line: 1, character: 2 }, end: { line: 1, character: 2 } },
+            newText: "import { thing } from 'pkg'\n",
+          },
+        ],
+        command: { command: "editor.action.triggerParameterHints", title: "Hints", arguments: [1] },
+      })
+      expect(out).toMatchObject({
+        tags: [1],
+        preselect: true,
+        commitCharacters: ["."],
+        additionalTextEdits: [
+          {
+            range: {
+              startLineNumber: 2,
+              startColumn: 3,
+              endLineNumber: 2,
+              endColumn: 3,
+            },
+            text: "import { thing } from 'pkg'\n",
+          },
+        ],
+        command: { id: "editor.action.triggerParameterHints", title: "Hints", arguments: [1] },
       })
     })
 
@@ -209,15 +251,80 @@ describe("lsp-protocol-adapter", () => {
 
     it("handles a CompletionList result", () => {
       const out = vscodeCompletionResultToMonaco({
-        isIncomplete: false,
+        isIncomplete: true,
         items: [{ label: "x", kind: 6 }],
       })
       expect(out?.suggestions).toHaveLength(1)
+      expect(out?.incomplete).toBe(true)
     })
 
     it("returns null on null/undefined", () => {
       expect(vscodeCompletionResultToMonaco(null)).toBeNull()
       expect(vscodeCompletionResultToMonaco(undefined)).toBeNull()
+    })
+  })
+
+  describe("InlineCompletionResult", () => {
+    it("maps arrays, snippet text, ranges, edits, and commands", () => {
+      const out = vscodeInlineCompletionResultToMonaco([
+        {
+          insertText: { value: "call(${1:value})" },
+          range: { start: { line: 2, character: 3 }, end: { line: 2, character: 5 } },
+          additionalTextEdits: [
+            {
+              range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+              newText: "import { call } from 'pkg'\n",
+            },
+          ],
+          command: { command: "editor.action.triggerParameterHints", title: "Hints" },
+        },
+      ])
+
+      expect(out).toEqual({
+        items: [
+          {
+            insertText: { snippet: "call(${1:value})" },
+            range: {
+              startLineNumber: 3,
+              startColumn: 4,
+              endLineNumber: 3,
+              endColumn: 6,
+            },
+            additionalTextEdits: [
+              {
+                range: {
+                  startLineNumber: 1,
+                  startColumn: 1,
+                  endLineNumber: 1,
+                  endColumn: 1,
+                },
+                text: "import { call } from 'pkg'\n",
+              },
+            ],
+            command: { id: "editor.action.triggerParameterHints", title: "Hints" },
+          },
+        ],
+      })
+    })
+
+    it("preserves list-level commands and stability flags", () => {
+      const out = vscodeInlineCompletionResultToMonaco({
+        items: [{ insertText: "hello" }],
+        commands: [{ command: "ext.accepted", title: "Accepted", arguments: [1] }],
+        suppressSuggestions: true,
+        enableForwardStability: true,
+      })
+      expect(out).toMatchObject({
+        items: [{ insertText: "hello" }],
+        commands: [{ command: { id: "ext.accepted", title: "Accepted", arguments: [1] } }],
+        suppressSuggestions: true,
+        enableForwardStability: true,
+      })
+    })
+
+    it("returns null for nullish provider results", () => {
+      expect(vscodeInlineCompletionResultToMonaco(null)).toBeNull()
+      expect(vscodeInlineCompletionResultToMonaco(undefined)).toBeNull()
     })
   })
 

@@ -154,7 +154,13 @@ export function GoalAnalyticsPanel({ goals, now }: Props) {
           </CardHeader>
           <CardContent>
             <div className="h-48" data-testid="goal-analytics-donut">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer
+                width="100%"
+                height="100%"
+                minWidth={1}
+                minHeight={1}
+                initialDimension={{ width: 320, height: 192 }}
+              >
                 <PieChart>
                   <Pie
                     data={donutData}
@@ -200,7 +206,13 @@ export function GoalAnalyticsPanel({ goals, now }: Props) {
           </CardHeader>
           <CardContent>
             <div className="h-48" data-testid="goal-analytics-created-chart">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer
+                width="100%"
+                height="100%"
+                minWidth={1}
+                minHeight={1}
+                initialDimension={{ width: 320, height: 192 }}
+              >
                 <AreaChart
                   data={analytics.timeline}
                   margin={{ top: 8, right: 8, left: -16, bottom: 0 }}
@@ -231,7 +243,13 @@ export function GoalAnalyticsPanel({ goals, now }: Props) {
           </CardHeader>
           <CardContent>
             <div className="h-48" data-testid="goal-analytics-tokens-chart">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer
+                width="100%"
+                height="100%"
+                minWidth={1}
+                minHeight={1}
+                initialDimension={{ width: 320, height: 192 }}
+              >
                 <BarChart
                   data={analytics.timeline}
                   margin={{ top: 8, right: 8, left: -16, bottom: 0 }}

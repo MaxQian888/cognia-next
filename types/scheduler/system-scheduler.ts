@@ -15,12 +15,7 @@ export type RunLevel = "user" | "administrator"
 
 /** Status of a system task */
 export type SystemTaskStatus =
-  | "enabled"
-  | "disabled"
-  | "running"
-  | "completed"
-  | "failed"
-  | "unknown"
+  "enabled" | "disabled" | "running" | "completed" | "failed" | "unknown"
 
 /** Metadata completeness for system task */
 export type SystemTaskMetadataState = "full" | "degraded"
@@ -74,12 +69,7 @@ export interface OnEventTrigger {
 
 /** Union of all trigger types */
 export type SystemTaskTrigger =
-  | CronTrigger
-  | IntervalTrigger
-  | OnceTrigger
-  | OnBootTrigger
-  | OnLogonTrigger
-  | OnEventTrigger
+  CronTrigger | IntervalTrigger | OnceTrigger | OnBootTrigger | OnLogonTrigger | OnEventTrigger
 
 /** Script execution action */
 export interface ExecuteScriptAction {

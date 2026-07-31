@@ -1,0 +1,104 @@
+---
+title: Desktop Pet
+description: A Shimeji-style companion living in transparent overlay windows — five window roles, the two-rAF reveal that avoids a black rectangle on Windows, a needs/care/economy simulation, and two rendering backends (Live2D and sprites).
+---
+
+# Desktop Pet
+
+<Status variant="beta">Beta · ADR-0058 · Dexie (no schema bump)</Status>
+
+<TLDR>
+  The pet is not a widget inside the app window — it lives in its own transparent, always-on-top Tauri
+  windows, and `PetWindowRole` (`lib/pet/window-role.ts:18`) is what tells one bundle which of five roles
+  it is booting into. Rust creates those windows `visible(false)` and never shows them on the create path:
+  on Windows a `transparent(true)` window shown before its WebView commits a first paint renders as an
+  opaque black rectangle. The renderer calls the shared reveal (`lib/pet/reveal.ts`) after mount, waiting
+  **two rAFs** — layout, then post-commit — so the transparent frame is on screen before the window
+  appears. Underneath sits a real simulation: needs decay, care condition, coins and a shop, XP and
+  levelling, achievements, and a locomotion FSM with ballistics.
+</TLDR>
+
+<StatGrid>
+  <Stat label="Source files" value="195" hint="lib/pet — incl. tests" />
+  <Stat label="UI components" value="25+" hint="components/pet + console/ settings/ skins/" />
+  <Stat label="React hooks" value="20" hint="hooks/pet" />
+  <Stat label="Window roles" value="5" hint="main · overlay · popup · island · web" />
+  <Stat label="Domain modules" value="12" hint="soul · needs · care · economy · xp · achievements · behavior · live2d · sprite-v2 · bones · runtime · state" />
+</StatGrid>
+
+Design rationale: [ADR-0058](../adr/0058-desktop-pet-subsystem). Pet state persists in Dexie without its
+own schema bump.
+
+## Five window roles, one bundle
+
+```ts
+type PetWindowRole = "main" | "overlay" | "popup" | "island" | "web"
+```
+
+The same static export boots into every role; `getPetWindowRole()` (`lib/pet/window-role.ts:70`) resolves
+which one from the Tauri webview label — `PET_WINDOW_LABEL` (`"pet"`), `PET_POPUP_WINDOW_LABEL`
+(`"pet-popup"`), `ISLAND_WINDOW_LABEL` (`"island"`). `isSecondaryOverlayRole()` and `isMainAppWindow()`
+are the guards that keep main-window-only work — bootstrapping, migrations, singletons — from running
+three extra times in the overlay windows.
+
+## The reveal contract exists because of a real bug
+
+Transparent overlay windows are created hidden and revealed by the renderer, not by Rust. Showing a
+`transparent(true)` window before its WebView has committed a first paint produces an opaque black
+rectangle on Windows until something forces a recomposite — the "invisible / black until I click it"
+bug. `lib/pet/reveal.ts` waits two animation frames (layout, then post-commit) before calling
+`revealPetWindow()` / `revealIslandWindow()`, mirroring the main window's `WindowShowInitializer`
+contract.
+
+## Perchable surfaces are Windows-only, and say so
+
+The pet can climb onto and walk along the top edges of other visible top-level windows, Shimeji-style.
+`src-tauri/src/pet_window/surfaces.rs` splits that into three layers so the logic stays testable without a
+live desktop: the `PetSurface` / `PetSurfaces` serde DTO, the pure `filter_and_sort_surfaces` predicate
+over plain `WindowCandidate` records, and the thin `platform::enumerate` `EnumWindows` call. On non-Windows
+platforms `enumerate` returns an empty list and the overlay degrades to normal floor-wander behavior —
+declared inert rather than silently broken.
+
+<Callout type="warn">
+  `PetSurface` is a **named struct, not a tuple**. A bare tuple serializes as a JSON array and the
+  TypeScript wrapper then silently reads `undefined` — there is a regression note about exactly this in
+  `pet_window/mod.rs`.
+</Callout>
+
+## The simulation
+
+```
+lib/pet/
+  needs/decay.ts               # needs fall over time
+  care/condition.ts            # derived health from needs
+  care/evolution-flavor.ts     # how care history colours evolution
+  care/notify-care.ts  notify-scheduled-due.ts
+  economy/coin-table.ts  item-catalog.ts  shop.ts  streak.ts
+  xp/award-table.ts  leveling.ts
+  achievements/registry.ts  check.ts
+  behavior/locomotion-fsm.ts  ballistics.ts  wander-config.ts
+  soul/generate-soul.ts        # the generated personality
+  bones/generate.ts  palettes.ts  prng.ts  account-id.ts   # deterministic procedural look
+  state/reducer.ts             # the state machine
+  runtime/pet-controller.ts  pet-view.ts  init-pet.ts  apply-event.ts
+  overlay-geometry.ts  popup-geometry.ts  window-role.ts  reveal.ts
+```
+
+`bones/prng.ts` seeded from `account-id.ts` is what makes a pet's generated appearance stable for a given
+account instead of re-rolling on every boot.
+
+## Two rendering backends
+
+`live2d/` is the full Cubism path — model discovery, manifest parsing, zip import with validation, a
+plugin registration step, parameter/emotion mapping, lip-sync, and a URL resolver for model assets.
+`sprite-v2/import.ts` is the lighter sprite-pack path. Which one is active is resolved per character
+through `hooks/pet/use-active-live2d-model.ts` and `use-active-sprite-pack.ts`.
+
+## Related
+
+<Cards>
+  <Card title="ADR-0058" href="../adr/0058-desktop-pet-subsystem" description="The Desktop Pet decision record" />
+  <Card title="Characters" href="../chat/characters" description="Where a pet's character and skins come from" />
+  <Card title="Voice / TTS" href="./misc-subsystems" description="The TTS stack use-pet-speak drives" />
+  <Card title="Scheduler" href="./scheduler" description="What fires the pet's scheduled reminders" />
+</Cards>

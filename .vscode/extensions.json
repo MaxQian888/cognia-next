@@ -7,6 +7,7 @@
     "rust-lang.rust-analyzer",
     "usernamehw.errorlens",
     "orta.vscode-jest",
-    "streetsidesoftware.code-spell-checker"
+    "streetsidesoftware.code-spell-checker",
+    "Webnative.webnative"
   ]
 }

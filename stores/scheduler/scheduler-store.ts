@@ -5,6 +5,7 @@
 
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 import type {
   ScheduledTask,
   TaskExecution,
@@ -18,22 +19,26 @@ import type {
   TaskExecutionTriggerSource,
 } from "@/types/scheduler"
 import { DEFAULT_PERMISSION_POLICY } from "@/types/scheduler"
-import { getTaskScheduler } from "@/lib/scheduler/task-scheduler"
-import { schedulerDb } from "@/lib/scheduler/scheduler-db"
+import { getSchedulerDataSource } from "@/lib/scheduler/scheduler-data-source"
+import { isRemoteHostActive, subscribeActiveRemoteTransport } from "@/lib/tauri/transport-routing"
 import {
   cancelPluginTaskExecution,
   getActivePluginTaskCount,
   isPluginTaskExecutionActive,
 } from "@/lib/scheduler/executors/plugin-executor"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.store
 
 // Deduplication guard for concurrent initialize() calls
 let initPromise: Promise<void> | null = null
+// Invalidates an async initialize() when the runtime is stopped before it settles.
+let initializationGeneration = 0
 
 // Deduplication guard for concurrent refreshAll() calls
 let refreshPromise: Promise<void> | null = null
+let schedulerRoutingUnsubscribe: (() => void) | null = null
+let schedulerHostGeneration = 0
 
 // Scheduler system status
 export type SchedulerStatus = "idle" | "running" | "stopped"
@@ -83,6 +88,8 @@ interface SchedulerActions {
     taskId: string,
     opts?: { triggerSource?: TaskExecutionTriggerSource }
   ) => Promise<TaskExecution | null>
+  /** Re-run past schedule slots in [start, end]; resolves with the run count. */
+  backfillTask: (taskId: string, range: { start: Date; end: Date }) => Promise<number>
 
   // Data Loading
   loadTasks: () => Promise<void>
@@ -194,8 +201,7 @@ export const useSchedulerStore = create<SchedulerStore>()(
       createTask: async (input) => {
         set({ isLoading: true, error: null })
         try {
-          const scheduler = getTaskScheduler()
-          const task = await scheduler.createTask(input)
+          const task = await getSchedulerDataSource().createTask(input)
 
           if (task) {
             await get().refreshAll()
@@ -215,8 +221,8 @@ export const useSchedulerStore = create<SchedulerStore>()(
       updateTask: async (taskId, input) => {
         set({ isLoading: true, error: null })
         try {
-          const scheduler = getTaskScheduler()
-          const task = await scheduler.updateTask(taskId, input)
+          const taskType = get().tasks.find((task) => task.id === taskId)?.type
+          const task = await getSchedulerDataSource().updateTask(taskId, input, taskType)
 
           if (task) {
             await get().refreshAll()
@@ -236,8 +242,8 @@ export const useSchedulerStore = create<SchedulerStore>()(
       deleteTask: async (taskId) => {
         set({ isLoading: true, error: null })
         try {
-          const scheduler = getTaskScheduler()
-          const deleted = await scheduler.deleteTask(taskId)
+          const taskType = get().tasks.find((task) => task.id === taskId)?.type
+          const deleted = await getSchedulerDataSource().deleteTask(taskId, taskType)
 
           if (deleted) {
             const { selectedTaskId } = get()
@@ -262,8 +268,8 @@ export const useSchedulerStore = create<SchedulerStore>()(
 
       pauseTask: async (taskId) => {
         try {
-          const scheduler = getTaskScheduler()
-          const success = await scheduler.pauseTask(taskId)
+          const taskType = get().tasks.find((task) => task.id === taskId)?.type
+          const success = await getSchedulerDataSource().pauseTask(taskId, taskType)
 
           if (success) {
             await get().refreshAll()
@@ -278,8 +284,8 @@ export const useSchedulerStore = create<SchedulerStore>()(
 
       resumeTask: async (taskId) => {
         try {
-          const scheduler = getTaskScheduler()
-          const success = await scheduler.resumeTask(taskId)
+          const taskType = get().tasks.find((task) => task.id === taskId)?.type
+          const success = await getSchedulerDataSource().resumeTask(taskId, taskType)
 
           if (success) {
             await get().refreshAll()
@@ -295,8 +301,11 @@ export const useSchedulerStore = create<SchedulerStore>()(
       runTaskNow: async (taskId, opts) => {
         set({ isLoading: true, error: null })
         try {
-          const scheduler = getTaskScheduler()
-          const execution = await scheduler.runTaskNow(taskId, opts)
+          const taskType = get().tasks.find((task) => task.id === taskId)?.type
+          const execution = await getSchedulerDataSource().runTaskNow(taskId, {
+            ...opts,
+            taskType,
+          })
 
           if (execution) {
             await get().refreshAll()
@@ -313,19 +322,30 @@ export const useSchedulerStore = create<SchedulerStore>()(
         }
       },
 
+      backfillTask: async (taskId, range) => {
+        set({ isLoading: true, error: null })
+        try {
+          const executions = await getSchedulerDataSource().backfillTask(taskId, range)
+          if (executions.length > 0) {
+            await get().refreshAll()
+          }
+          return executions.length
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : "Failed to backfill task"
+          set({ error: errorMessage })
+          log.error("SchedulerStore: Backfill failed", error as Error)
+          throw error
+        } finally {
+          set({ isLoading: false })
+        }
+      },
+
       // ========== Data Loading ==========
 
       loadTasks: async () => {
         try {
           const { filter } = get()
-          let tasks: ScheduledTask[]
-
-          if (Object.keys(filter).length > 0) {
-            tasks = await schedulerDb.getFilteredTasks(filter)
-          } else {
-            tasks = await schedulerDb.getAllTasks()
-          }
-
+          const tasks = await getSchedulerDataSource().listTasks(filter)
           set({ tasks: sortTasksBySchedulerPriority(tasks) })
         } catch (error) {
           log.error("SchedulerStore: Load tasks failed", error as Error)
@@ -335,7 +355,12 @@ export const useSchedulerStore = create<SchedulerStore>()(
 
       loadTaskExecutions: async (taskId) => {
         try {
-          const executions = await schedulerDb.getTaskExecutions(taskId, EXECUTIONS_PAGE_SIZE)
+          const executions = await getSchedulerDataSource().getTaskExecutions(
+            taskId,
+            EXECUTIONS_PAGE_SIZE,
+            undefined,
+            get().tasks.find((task) => task.id === taskId)?.type
+          )
           const cursor =
             executions.length > 0 ? executions[executions.length - 1].startedAt.toISOString() : null
           set({
@@ -353,10 +378,11 @@ export const useSchedulerStore = create<SchedulerStore>()(
         if (!selectedTaskId || !executionsCursor || !hasMoreExecutions) return
 
         try {
-          const moreExecutions = await schedulerDb.getTaskExecutions(
+          const moreExecutions = await getSchedulerDataSource().getTaskExecutions(
             selectedTaskId,
             EXECUTIONS_PAGE_SIZE,
-            executionsCursor
+            executionsCursor,
+            get().tasks.find((task) => task.id === selectedTaskId)?.type
           )
           const newCursor =
             moreExecutions.length > 0
@@ -374,7 +400,7 @@ export const useSchedulerStore = create<SchedulerStore>()(
 
       loadStatistics: async () => {
         try {
-          const statistics = await schedulerDb.getStatistics()
+          const statistics = await getSchedulerDataSource().getStatistics()
           set({ statistics })
         } catch (error) {
           log.error("SchedulerStore: Load statistics failed", error as Error)
@@ -383,7 +409,7 @@ export const useSchedulerStore = create<SchedulerStore>()(
 
       loadRecentExecutions: async (limit = 50) => {
         try {
-          const recentExecutions = await schedulerDb.getRecentExecutions(limit)
+          const recentExecutions = await getSchedulerDataSource().getRecentExecutions(limit)
           set({ recentExecutions })
         } catch (error) {
           log.error("SchedulerStore: Load recent executions failed", error as Error)
@@ -392,7 +418,7 @@ export const useSchedulerStore = create<SchedulerStore>()(
 
       loadUpcomingTasks: async (limit = 10) => {
         try {
-          const upcomingTasks = await schedulerDb.getUpcomingTasks(limit)
+          const upcomingTasks = await getSchedulerDataSource().getUpcomingTasks(limit)
           set({ upcomingTasks })
         } catch (error) {
           log.error("SchedulerStore: Load upcoming tasks failed", error as Error)
@@ -407,19 +433,23 @@ export const useSchedulerStore = create<SchedulerStore>()(
           set({ isLoading: true })
           try {
             const { filter, selectedTaskId } = get()
+            const source = getSchedulerDataSource()
 
             // Fetch all data in parallel
             const [tasks, statistics, executions, recentExecutions, upcomingTasks] =
               await Promise.all([
-                Object.keys(filter).length > 0
-                  ? schedulerDb.getFilteredTasks(filter)
-                  : schedulerDb.getAllTasks(),
-                schedulerDb.getStatistics(),
+                source.listTasks(filter),
+                source.getStatistics(),
                 selectedTaskId
-                  ? schedulerDb.getTaskExecutions(selectedTaskId, EXECUTIONS_PAGE_SIZE)
+                  ? source.getTaskExecutions(
+                      selectedTaskId,
+                      EXECUTIONS_PAGE_SIZE,
+                      undefined,
+                      get().tasks.find((task) => task.id === selectedTaskId)?.type
+                    )
                   : Promise.resolve(get().executions),
-                schedulerDb.getRecentExecutions(50),
-                schedulerDb.getUpcomingTasks(10),
+                source.getRecentExecutions(50),
+                source.getUpcomingTasks(10),
               ])
 
             const cursor =
@@ -508,9 +538,10 @@ export const useSchedulerStore = create<SchedulerStore>()(
       bulkPause: async (taskIds) => {
         let count = 0
         try {
-          const scheduler = getTaskScheduler()
+          const source = getSchedulerDataSource()
           for (const taskId of taskIds) {
-            const success = await scheduler.pauseTask(taskId)
+            const taskType = get().tasks.find((task) => task.id === taskId)?.type
+            const success = await source.pauseTask(taskId, taskType)
             if (success) count++
           }
           if (count > 0) {
@@ -527,9 +558,10 @@ export const useSchedulerStore = create<SchedulerStore>()(
       bulkResume: async (taskIds) => {
         let count = 0
         try {
-          const scheduler = getTaskScheduler()
+          const source = getSchedulerDataSource()
           for (const taskId of taskIds) {
-            const success = await scheduler.resumeTask(taskId)
+            const taskType = get().tasks.find((task) => task.id === taskId)?.type
+            const success = await source.resumeTask(taskId, taskType)
             if (success) count++
           }
           if (count > 0) {
@@ -546,9 +578,10 @@ export const useSchedulerStore = create<SchedulerStore>()(
       bulkDelete: async (taskIds) => {
         let count = 0
         try {
-          const scheduler = getTaskScheduler()
+          const source = getSchedulerDataSource()
           for (const taskId of taskIds) {
-            const success = await scheduler.deleteTask(taskId)
+            const taskType = get().tasks.find((task) => task.id === taskId)?.type
+            const success = await source.deleteTask(taskId, taskType)
             if (success) count++
           }
           if (count > 0) {
@@ -571,8 +604,7 @@ export const useSchedulerStore = create<SchedulerStore>()(
 
       exportTasks: async (taskIds) => {
         try {
-          const scheduler = getTaskScheduler()
-          const data = await scheduler.exportTasks(taskIds)
+          const data = await getSchedulerDataSource().exportTasks(taskIds)
           return JSON.stringify(data, null, 2)
         } catch (error) {
           log.error("SchedulerStore: Export tasks failed", error as Error)
@@ -585,8 +617,7 @@ export const useSchedulerStore = create<SchedulerStore>()(
         set({ isLoading: true, error: null })
         try {
           const data = JSON.parse(json)
-          const scheduler = getTaskScheduler()
-          const result = await scheduler.importTasks(data, mode)
+          const result = await getSchedulerDataSource().importTasks(data, mode)
           if (result.imported > 0) {
             await get().refreshAll()
           }
@@ -608,13 +639,13 @@ export const useSchedulerStore = create<SchedulerStore>()(
 
       cloneTask: async (taskId) => {
         try {
-          const scheduler = getTaskScheduler()
-          const originalTask = await scheduler.getTask(taskId)
+          const source = getSchedulerDataSource()
+          const originalTask = await source.getTask(taskId)
           if (!originalTask) {
             set({ error: "Task not found" })
             return null
           }
-          const clonedTask = await scheduler.createTask({
+          const clonedTask = await source.createTask({
             name: `${originalTask.name} (Copy)`,
             description: originalTask.description,
             type: originalTask.type,
@@ -637,7 +668,7 @@ export const useSchedulerStore = create<SchedulerStore>()(
 
       cleanupOldExecutions: async (maxAgeDays = 30) => {
         try {
-          const deleted = await schedulerDb.cleanupOldExecutions(maxAgeDays)
+          const deleted = await getSchedulerDataSource().cleanupOldExecutions(maxAgeDays)
           if (deleted > 0) {
             log.info(`SchedulerStore: Cleaned up ${deleted} old executions`)
             await get().refreshAll()
@@ -707,6 +738,12 @@ export const useSchedulerStore = create<SchedulerStore>()(
       // ========== System Status ==========
 
       setSchedulerStatus: (status) => {
+        if (status === "stopped") {
+          initializationGeneration += 1
+          initPromise = null
+          set({ schedulerStatus: status, isInitialized: false, isLoading: false })
+          return
+        }
         set({ schedulerStatus: status })
       },
 
@@ -718,36 +755,62 @@ export const useSchedulerStore = create<SchedulerStore>()(
         // Deduplicate concurrent calls (SchedulerInitializer + useScheduler may both call)
         if (initPromise) return initPromise
 
-        initPromise = (async () => {
+        const generation = initializationGeneration
+        const currentPromise = (async () => {
           set({ isLoading: true })
           try {
-            const { initSchedulerSystem } = await import("@/lib/scheduler")
-            await initSchedulerSystem()
+            const { initSchedulerSystem, stopSchedulerSystem } = await import("@/lib/scheduler")
+            if (isRemoteHostActive()) {
+              await stopSchedulerSystem()
+            } else {
+              await initSchedulerSystem()
+            }
+            if (generation !== initializationGeneration) return
 
             // Load initial data
             await get().refreshAll()
+            if (generation !== initializationGeneration) return
 
             set({ isInitialized: true })
+            if (!schedulerRoutingUnsubscribe) {
+              schedulerRoutingUnsubscribe = subscribeActiveRemoteTransport(() => {
+                void rebindSchedulerHost()
+              })
+            }
           } catch (error) {
-            log.error("SchedulerStore: Initialization failed", error as Error)
-            set({ error: "Failed to initialize scheduler" })
+            if (generation === initializationGeneration) {
+              log.error("SchedulerStore: Initialization failed", error as Error)
+              set({ error: "Failed to initialize scheduler" })
+            }
+            throw error
           } finally {
-            set({ isLoading: false })
-            initPromise = null
+            if (generation === initializationGeneration) {
+              set({ isLoading: false })
+            }
           }
         })()
+        initPromise = currentPromise
 
-        return initPromise
+        try {
+          await currentPromise
+        } finally {
+          if (initPromise === currentPromise) {
+            initPromise = null
+          }
+        }
       },
 
       // ========== Reset ==========
 
       reset: () => {
+        initializationGeneration += 1
+        initPromise = null
         set(initialState)
       },
     }),
     {
       name: "cognia-scheduler",
+      storage: persistLocalStorage(),
       partialize: (state) => ({
         autoRefreshInterval: state.autoRefreshInterval,
         filter: state.filter,
@@ -756,6 +819,17 @@ export const useSchedulerStore = create<SchedulerStore>()(
     }
   )
 )
+
+async function rebindSchedulerHost(): Promise<void> {
+  if (!useSchedulerStore.getState().isInitialized) return
+  const generation = ++schedulerHostGeneration
+  const remote = isRemoteHostActive()
+  const { initSchedulerSystem, stopSchedulerSystem } = await import("@/lib/scheduler")
+  await stopSchedulerSystem()
+  if (!remote) await initSchedulerSystem()
+  if (generation !== schedulerHostGeneration || remote !== isRemoteHostActive()) return
+  await useSchedulerStore.getState().refreshAll()
+}
 
 // ========== Selectors ==========
 

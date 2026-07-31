@@ -1,0 +1,702 @@
+{
+  "chatRuntime": {
+    "title": "聊天当前为只读",
+    "states": {
+      "available": "聊天可用。",
+      "readOnly": "仍可查看缓存会话，但暂时不能发送消息。",
+      "queued": "当前主机重连后将发送此操作。",
+      "offline": "当前主机离线。草稿只保存在此浏览器中，不会自动发送。",
+      "requiresUnlock": "请先解锁本地 Vault，再使用当前主机。",
+      "requiresPairing": "请将此浏览器与主机配对，或切换到独立模式。",
+      "requiresGrant": "当前设备缺少主机授予的聊天权限。",
+      "incompatible": "当前主机未提供兼容的聊天协议。",
+      "unsupported": "当前运行目标尚未实现聊天能力。"
+    },
+    "actions": {
+      "pair": "配对主机",
+      "connectionSettings": "连接设置"
+    }
+  },
+  "barCustomize": {
+    "dragHint": "拖拽调整顺序",
+    "hidden": "已隐藏",
+    "hiddenEmpty": "没有隐藏项。",
+    "hideItem": "从栏中移除",
+    "inBar": "栏内显示",
+    "inBarEmpty": "栏内没有任何项目——全部已隐藏。",
+    "items": {
+      "accountStatus": "账户",
+      "accountTop": "账户",
+      "appIcon": "应用图标",
+      "attention": "待处理事项",
+      "branch": "Git 分支",
+      "commandCenter": "命令中心",
+      "connectivity": "连接状态",
+      "jobs": "运行中的任务",
+      "layoutControls": "视图菜单",
+      "navArrows": "前进 / 后退",
+      "notifications": "通知",
+      "panelToggle": "底部面板开关",
+      "perf": "性能监视",
+      "primarySidebarToggle": "左侧栏开关",
+      "quickActions": "快捷开关",
+      "runStatus": "运行状态",
+      "search": "搜索与标题",
+      "secondarySidebarToggle": "右侧栏开关",
+      "sync": "同步状态",
+      "usage": "用量与额度",
+      "workspace": "工作区"
+    },
+    "restoreDefaults": "恢复默认",
+    "showItem": "加回栏中",
+    "zoneHint": "项目只能在所属区域（起始、居中、末端）内移动，因为窗口控制和拖拽区域是固定的。",
+    "zones": {
+      "center": "居中",
+      "end": "末端",
+      "start": "起始"
+    }
+  },
+  "channelList": {
+    "bucketOlder": "更早",
+    "bucketPrev30": "过去 30 天",
+    "bucketPrev7": "过去 7 天",
+    "bucketToday": "今天",
+    "bucketYesterday": "昨天",
+    "bulk": {
+      "archive": "归档",
+      "archiveSuccess": "已归档 {count} 个会话",
+      "cancel": "取消",
+      "delete": "删除",
+      "deleteConfirmBody": "将永久删除这些会话及其所有消息，不可撤销。",
+      "deleteConfirmTitle": "删除 {count} 个会话？",
+      "deleteSuccess": "已删除 {count} 个会话",
+      "pin": "置顶",
+      "pinSuccess": "已置顶 {count} 个会话",
+      "selectedCount": "已选 {count} 项",
+      "share": "分享",
+      "unarchive": "取消归档",
+      "unarchiveSuccess": "已恢复 {count} 个会话",
+      "unpin": "取消置顶",
+      "unpinSuccess": "已取消置顶 {count} 个会话"
+    },
+    "cancel": "取消",
+    "clearSearch": "清空搜索",
+    "compactDensity": "紧凑行距",
+    "conversationsTitle": "会话",
+    "deleteFolder": "删除文件夹",
+    "deleteFolderConfirmBody": "仅删除文件夹；其中的会话会保留并回到日期列表。此操作不可撤销。",
+    "deleteFolderConfirmTitle": "删除文件夹「{name}」？",
+    "directMessages": "私信",
+    "displayOptions": "显示选项",
+    "emptyArchived": "没有已归档的会话。",
+    "emptyDm": "还没有聊天，挑选一个角色开始。",
+    "emptyFolder": "空文件夹——把会话移动到这里。",
+    "emptySearch": "没有与「{query}」匹配的会话。",
+    "emptyTeam": "还没有会话，从上方开启一个吧。",
+    "folderActions": "文件夹操作",
+    "groupBy": {
+      "label": "分组方式",
+      "options": {
+        "agent": "角色",
+        "date": "日期",
+        "none": "不分组",
+        "team": "私信 / 团队",
+        "workspace": "工作区"
+      }
+    },
+    "groupOther": "其它",
+    "newChat": "新建聊天",
+    "newConversation": "新建会话",
+    "newFolder": "新建文件夹",
+    "newFolderName": "新建文件夹",
+    "openSessions": "打开会话列表",
+    "renameFolder": "重命名文件夹",
+    "resizeHandle": "调整侧边栏宽度",
+    "searchAria": "搜索会话",
+    "searchMessageContent": "搜索消息正文",
+    "searchPlaceholder": "搜索会话…",
+    "searchTruncated": "部分结果可能被隐藏——请细化搜索。",
+    "sectionPinned": "置顶",
+    "sectionRecent": "最近",
+    "showPreview": "显示消息预览",
+    "showUnreadBadges": "显示未读角标",
+    "teamFallback": "团队",
+    "ungroupedAgent": "未绑定角色",
+    "ungroupedWorkspace": "未归属工作区",
+    "viewActive": "显示活跃会话",
+    "viewArchived": "显示已归档会话"
+  },
+  "commandPalette": {
+    "actions": {
+      "checkUpdates": "检查更新",
+      "clearChat": "清空当前会话",
+      "exportMd": "将当前聊天导出为 Markdown",
+      "manageApiKey": "管理 API 密钥",
+      "manageCharacters": "管理角色",
+      "manageMcp": "管理 MCP 服务器",
+      "manageSkills": "管理技能",
+      "manageTeams": "管理团队",
+      "newChat": "新建聊天",
+      "newChatHint": "新建",
+      "openFolder": "打开文件夹为工作区…",
+      "openSettings": "打开设置",
+      "toggleTheme": "切换主题"
+    },
+    "description": "搜索命令和会话",
+    "empty": "未找到匹配项。",
+    "groups": {
+      "actions": "操作",
+      "messages": "消息",
+      "navigate": "前往",
+      "newChat": "与角色开始新聊天",
+      "pluginActions": "插件操作",
+      "sessions": "会话",
+      "settings": "设置",
+      "switchTeam": "切换团队",
+      "workbenchPanels": "工作台面板",
+      "workspaces": "切换工作区"
+    },
+    "placeholder": "输入命令或会话名…",
+    "search": {
+      "coverage": "正在索引较早的历史记录，部分匹配项可能暂未显示。",
+      "error": "消息搜索暂时不可用。",
+      "jumpFailed": "无法打开匹配的消息。",
+      "loading": "正在搜索消息历史…"
+    },
+    "title": "命令面板",
+    "titles": {
+      "chatWith": "与 {name} 的聊天"
+    },
+    "toasts": {
+      "conversationCleared": "会话已清空。",
+      "nothingToExport": "没有可导出的内容 — 先开始一次对话吧。",
+      "openFolderDesktopOnly": "仅桌面端支持将文件夹打开为工作区。",
+      "upToDate": "已是最新版本。",
+      "updateAvailable": "有可用更新：{version}",
+      "updateFailed": "检查更新失败：{message}",
+      "updatesDesktopOnly": "仅桌面端支持检查更新。"
+    }
+  },
+  "find": {
+    "close": "关闭查找",
+    "matchOf": "第 {index} / {total} 项",
+    "next": "下一个匹配",
+    "noMatches": "无结果",
+    "placeholder": "在页面中查找",
+    "previous": "上一个匹配"
+  },
+  "guildRail": {
+    "agentRuns": "智能体运行",
+    "agentTeams": "智能体团队",
+    "auxiliaryGroup": "个人与日志",
+    "browser": "浏览器",
+    "canvas": "画布",
+    "createTeam": "创建团队",
+    "customize": {
+      "description": "把常用项固定到导航栏，其余收进「更多」菜单。可拖拽排序，或隐藏从不使用的项。",
+      "dragHint": "拖拽以排序",
+      "hidden": "已隐藏",
+      "hiddenEmpty": "暂无隐藏项。",
+      "hideItem": "隐藏",
+      "more": "更多菜单中",
+      "moreEmpty": "「更多」菜单为空——所有项均已固定或隐藏。",
+      "moveToMore": "移至更多",
+      "pin": "固定到导航栏",
+      "pinned": "已固定",
+      "pinnedEmpty": "暂无固定项——所有项都在「更多」菜单中。",
+      "restoreDefaults": "恢复默认",
+      "showItem": "显示",
+      "side": "导航栏位置",
+      "sideLeft": "左侧",
+      "sideRight": "右侧",
+      "title": "自定义侧边栏"
+    },
+    "directMessages": "私信",
+    "discover": "发现",
+    "eval": "评估",
+    "featuresGroup": "功能",
+    "goals": "目标",
+    "inbox": "收件箱",
+    "label": "频道导航栏",
+    "logs": "日志",
+    "me": "我的",
+    "memory": "记忆",
+    "more": "更多",
+    "observability": "可观测性",
+    "openSettings": "打开设置",
+    "performance": "性能",
+    "pet": "宠物",
+    "plugins": "插件",
+    "scheduler": "调度器",
+    "settings": "设置",
+    "skills": "技能",
+    "sourceControl": "源代码管理",
+    "templates": "模板",
+    "twin": "数字分身",
+    "workflows": "工作流",
+    "workspacesGroup": "工作区"
+  },
+  "jobCenter": {
+    "actions": {
+      "cancel": "取消",
+      "cancelAria": "取消后台运行 {runId}",
+      "clearSettled": "清除已结束",
+      "collect": "收集",
+      "collectAria": "收集后台运行 {runId}",
+      "logTail": "日志",
+      "reDispatched": "已重新派发",
+      "rerun": "重新运行",
+      "stop": "停止"
+    },
+    "delivery": {
+      "pending": "待投递",
+      "pendingHint": "当发起的聊天打开且空闲时投递。"
+    },
+    "description": "当前主机上的代理运行、受监管后台进程与持久 Monitor。",
+    "duration": {
+      "minutesSeconds": "{minutes} 分 {seconds} 秒",
+      "seconds": "{seconds} 秒"
+    },
+    "empty": {
+      "activeDescription": "仍在运行的分离子代理会显示在这里。",
+      "activeTitle": "暂无活动后台任务",
+      "historyDescription": "完成、失败和中断的运行会保留在这里，直到被清除。",
+      "historyTitle": "暂无后台历史",
+      "supervisorDescription": "后台命令与 Monitor 监视会显示在这里。",
+      "supervisorTitle": "暂无受监管任务或 Monitor"
+    },
+    "fields": {
+      "elapsed": "耗时：{value}",
+      "startedAt": "开始：{value}",
+      "tokens": "Tokens：{value}",
+      "toolCalls": "工具：{value}"
+    },
+    "kind": {
+      "pluginAgent": "插件代理",
+      "subagent": "子代理",
+      "teamDelegation": "团队委托"
+    },
+    "mode": {
+      "background": "后台",
+      "foreground": "前台"
+    },
+    "notify": {
+      "autoResumed": "{count, plural, other {已自动恢复 # 个被中断的后台运行}}",
+      "body": "运行 {runId}",
+      "doneTitle": "子代理“{subagentId}”已完成（{elapsed}）",
+      "failedTitle": "子代理“{subagentId}”失败（{elapsed}）"
+    },
+    "open": "打开任务中心",
+    "status": {
+      "done": "完成",
+      "error": "错误",
+      "interrupted": "已中断",
+      "running": "运行中"
+    },
+    "supervisor": {
+      "jobStatus": {
+        "exited": "已退出",
+        "failed": "失败",
+        "interrupted": "已中断",
+        "killed": "已终止",
+        "running": "运行中"
+      },
+      "jobs": "后台任务",
+      "monitorStatus": {
+        "cancelled": "已取消",
+        "expired": "已过期",
+        "fired": "已触发",
+        "unsatisfiable": "条件不再可满足",
+        "waiting": "等待中"
+      },
+      "monitors": "Monitor",
+      "noOutput": "暂无输出。",
+      "owner": {
+        "app": "应用",
+        "scheduledTask": "任务 {id}",
+        "session": "会话 {id}"
+      }
+    },
+    "tabs": {
+      "active": "活动",
+      "history": "历史",
+      "running": "正在运行",
+      "supervisor": "进程"
+    },
+    "title": "任务中心",
+    "toast": {
+      "cancelUnavailable": "这个后台运行已无法取消。",
+      "cancelled": "后台运行已取消。",
+      "clearFailed": "无法清除已结束任务：{error}",
+      "cleared": "已清除结束的后台任务。",
+      "collectFailed": "无法收集后台结果：{error}",
+      "collectMissing": "这个后台运行已不可用。",
+      "collected": "已收集后台结果。",
+      "jobStopFailed": "无法停止后台任务：{error}",
+      "jobStopped": "后台任务已停止。",
+      "logFailed": "无法读取任务输出：{error}",
+      "monitorCancelFailed": "无法取消 Monitor：{error}",
+      "monitorCancelled": "Monitor 已取消。",
+      "rerunFailed": "无法重新运行：{reason}",
+      "rerunStarted": "已在后台重新运行。"
+    },
+    "trigger": "任务"
+  },
+  "memberList": {
+    "charsCount": "{count} 字符",
+    "empty": "暂无成员。",
+    "heading": "成员 — {count}",
+    "hide": "隐藏成员列表",
+    "label": "团队成员",
+    "mentionTitle": "@提及 {name}",
+    "notesPlaceholder": "笔记会在每轮对话中注入到所有成员的对话上下文中…",
+    "sharedNotes": "共享笔记",
+    "show": "显示成员列表",
+    "statusLabel": "状态：{status}",
+    "stopMember": "停止该成员"
+  },
+  "menu": {
+    "edit": {
+      "copy": "复制",
+      "cut": "剪切",
+      "find": "查找…",
+      "label": "编辑",
+      "paste": "粘贴",
+      "redo": "重做",
+      "selectAll": "全选",
+      "undo": "撤销"
+    },
+    "file": {
+      "label": "文件",
+      "newAgentTeam": "新建智能体团队",
+      "newCharacter": "新建角色",
+      "newChat": "新建对话",
+      "newWorkflow": "新建工作流",
+      "openLogs": "打开日志",
+      "openSettings": "设置…",
+      "openWorkspace": "打开工作区…",
+      "quit": "退出 Cognia",
+      "recentSessions": "最近会话",
+      "recentSessionsEmpty": "暂无最近会话"
+    },
+    "go": {
+      "a2ui": "迷你应用",
+      "agentTeams": "智能体团队",
+      "canvas": "Canvas",
+      "discover": "发现",
+      "dms": "直接消息",
+      "inbox": "收件箱",
+      "label": "前往",
+      "logs": "日志",
+      "plugins": "插件",
+      "scheduler": "调度器",
+      "settings": "设置",
+      "sites": "站点",
+      "skills": "技能",
+      "twin": "Twin 工作台",
+      "workflows": "工作流"
+    },
+    "help": {
+      "about": "关于 Cognia",
+      "documentation": "文档",
+      "keyboardShortcuts": "键盘快捷键…",
+      "keyboardShortcutsClose": "关闭",
+      "keyboardShortcutsDescription": "Cognia 桌面外壳支持的全部快捷键。",
+      "keyboardShortcutsTitle": "键盘快捷键",
+      "label": "帮助"
+    },
+    "run": {
+      "agentTeams": "智能体团队",
+      "killSwitch": "自动化紧急停止",
+      "label": "运行",
+      "newWorkflowRun": "新建工作流运行",
+      "openScheduler": "打开调度器"
+    },
+    "shortcut": {
+      "cmdOrCtrl0": "Ctrl+0",
+      "cmdOrCtrl1": "Ctrl+1",
+      "cmdOrCtrl2": "Ctrl+2",
+      "cmdOrCtrl3": "Ctrl+3",
+      "cmdOrCtrl4": "Ctrl+4",
+      "cmdOrCtrl5": "Ctrl+5",
+      "cmdOrCtrl6": "Ctrl+6",
+      "cmdOrCtrl7": "Ctrl+7",
+      "cmdOrCtrl8": "Ctrl+8",
+      "cmdOrCtrlAltI": "Ctrl+Alt+I",
+      "cmdOrCtrlB": "Ctrl+B",
+      "cmdOrCtrlComma": "Ctrl+,",
+      "cmdOrCtrlF": "Ctrl+F",
+      "cmdOrCtrlMinus": "Ctrl+-",
+      "cmdOrCtrlN": "Ctrl+N",
+      "cmdOrCtrlO": "Ctrl+O",
+      "cmdOrCtrlPlus": "Ctrl+=",
+      "cmdOrCtrlR": "Ctrl+R",
+      "cmdOrCtrlShiftL": "Ctrl+Shift+L",
+      "cmdOrCtrlShiftN": "Ctrl+Shift+N",
+      "cmdOrCtrlShiftP": "Ctrl+Shift+P",
+      "ctrlAltK": "Ctrl+Alt+K",
+      "f11": "F11"
+    },
+    "terminal": {
+      "label": "终端",
+      "new": "新建终端",
+      "restartSidecar": "重启 Sidecar",
+      "togglePanel": "切换终端面板"
+    },
+    "tools": {
+      "automationKillSwitch": "自动化紧急停止",
+      "automationKillSwitchToastDone": "已停止所有自动化操作。",
+      "automationKillSwitchToastFail": "紧急停止失败：{message}",
+      "clearCache": "清除缓存…",
+      "clearCacheConfirm": "清除搜索结果、TTS 音频和请求快照的缓存？设置和会话不受影响。",
+      "clearCacheToastDone": "缓存已清除。",
+      "clearCacheToastFail": "清除缓存失败：{message}",
+      "commandPalette": "命令面板…",
+      "label": "工具",
+      "manageConnectors": "管理连接器…",
+      "manageMcpServer": "管理 MCP 服务器…",
+      "pluginDevtools": "插件开发者工具",
+      "sidecarRestart": "重启 Sidecar",
+      "sidecarRestartToastDone": "Sidecar 已重启。",
+      "sidecarRestartToastFail": "Sidecar 重启失败：{message}"
+    },
+    "view": {
+      "commandPalette": "命令面板…",
+      "label": "视图",
+      "language": "语言",
+      "languageChinese": "简体中文",
+      "languageEnglish": "English",
+      "openLogs": "打开日志",
+      "reduceMotion": "减弱动效",
+      "reload": "重新加载",
+      "theme": "主题",
+      "themeDark": "深色",
+      "themeLight": "浅色",
+      "themeSystem": "跟随系统",
+      "toggleDevtools": "切换开发者工具",
+      "toggleFullscreen": "切换全屏",
+      "toggleGuildRail": "切换功能栏",
+      "toggleSidebar": "切换侧边栏",
+      "toggleStatusBar": "切换状态栏",
+      "zoomIn": "放大",
+      "zoomOut": "缩小",
+      "zoomReset": "重置缩放"
+    },
+    "window": {
+      "alwaysOnTop": "置顶窗口",
+      "close": "关闭",
+      "label": "窗口",
+      "maximize": "最大化",
+      "minimize": "最小化",
+      "restore": "还原"
+    }
+  },
+  "onboarding": {
+    "apiKeyHintHost": "console.anthropic.com",
+    "apiKeyHintPrefix": "在 ",
+    "apiKeyHintSuffix": " 申请一个。密钥不会离开本机。",
+    "apiKeyLabel": "Anthropic API 密钥",
+    "apiKeyPlaceholder": "sk-ant-…",
+    "back": "返回",
+    "continue": "继续",
+    "done": "完成",
+    "provider": {
+      "apiKey": {
+        "cta": "使用 API 密钥",
+        "description": "如果你在 console.anthropic.com 拿到的是工作空间 API 密钥而非订阅，用这种方式。",
+        "title": "粘贴 Anthropic API 密钥"
+      },
+      "backToChooser": "换一种登录方式",
+      "claude": {
+        "cta": "使用 Anthropic 登录",
+        "description": "通过浏览器 PKCE 登录你的 Anthropic 订阅。",
+        "title": "Claude Pro / Max"
+      },
+      "codex": {
+        "cta": "使用 ChatGPT 登录",
+        "description": "用设备代码流将本应用与 ChatGPT 订阅配对。",
+        "title": "ChatGPT Plus / Pro（Codex）"
+      },
+      "description": "用你已经付费的方式登录。后续可以在 设置 → 订阅 添加更多账号。",
+      "loggedInBadge": "已连接",
+      "loggedInDescription": "{provider} 已连接。可以继续下一步，或在下方选择另一个角色。",
+      "opencode": {
+        "cta": "粘贴 OpenCode 密钥",
+        "description": "粘贴 OpenCode Zen 的 API 密钥，可选填写区域 Base URL。",
+        "title": "OpenCode Zen"
+      },
+      "title": "选择登录方式"
+    },
+    "saving": "保存中…",
+    "skip": "暂时跳过",
+    "step1Description": "选择你想使用的登录方式。订阅登录会写入系统密钥环；粘贴的 API 密钥仅保存在本机 IndexedDB 与内嵌的 Node 子进程中。",
+    "step1Title": "欢迎使用 Cognia",
+    "step2Description": "每个角色都自带系统提示与工具。稍后可以在 设置 → 角色 中编辑、复制或新建更多。",
+    "step2Title": "挑选一个角色开始",
+    "toastNeedKey": "粘贴你的 Anthropic API 密钥以继续。",
+    "tour": {
+      "computerUse": {
+        "cta": "打开自动化设置",
+        "description": "Computer Use 默认关闭。可按角色启用，并选择权限等级（关闭 / 白名单 / 单次询问）。",
+        "title": "让 AI 操作桌面"
+      },
+      "connectors": {
+        "cta": "配置连接器",
+        "description": "把助手运行为常用平台上的机器人，支持自动 / 手动 / 草稿三种模式。",
+        "title": "对接 Telegram、Discord、Slack、飞书、OneBot"
+      },
+      "description": "这些功能已经上线。如果不需要可以直接跳过。",
+      "done": "完成",
+      "mobile": {
+        "cta": "打开配对设置",
+        "description": "生成 5 分钟有效的配对凭据让手机扫码。优先 mDNS，依次回退到 WebRTC 和 Cloudflare 隧道。",
+        "title": "在局域网或公网上配对手机"
+      },
+      "next": "下一个",
+      "ocr": {
+        "cta": "配置 OCR",
+        "description": "在输入栏悬浮附件即可把文字拉进对话。本地引擎离线可用；云端提供商可选。",
+        "title": "从图片和 PDF 中提取文字"
+      },
+      "openSettings": "打开设置",
+      "previous": "上一个",
+      "progress": "第 {current} / {total} 个",
+      "sandbox": {
+        "cta": "打开沙盒设置",
+        "description": "Bash / Edit / Write 可以经由 OS 沙盒（sandbox-exec / bwrap / Windows 合成用户）或可选的 e2b microVM 执行。任何后端不健康时严格模式直接拒绝调用，没有 bypass。",
+        "title": "Shell 工具在沙盒中运行"
+      },
+      "skip": "跳过引导",
+      "title": "接下来你可以做什么",
+      "twin": {
+        "cta": "打开数字分身设置",
+        "description": "上传文档后，蒸馏流水线会生成一份脱敏的风格画像，可以绑定到任意角色。",
+        "title": "用你自己的写作训练数字分身"
+      }
+    }
+  },
+  "sessionRow": {
+    "actionsMenu": "会话操作",
+    "archive": "归档",
+    "branchedFrom": "分支会话——打开父会话",
+    "cancel": "取消",
+    "cogniaAgentChecking": "正在检查 Cognia 代理…",
+    "cogniaAgentNotInstalled": "未安装 Cognia 代理 CLI",
+    "delete": "删除",
+    "deleteConfirmAction": "删除会话",
+    "deleteConfirmBody": "将永久删除此会话及其全部消息，且无法撤销。",
+    "deleteConfirmBranches": "{count, plural, other {它的 # 个分支将作为独立会话保留。}}",
+    "deleteConfirmTitle": "删除「{title}」？",
+    "deselect": "取消选择",
+    "dragHandle": "拖拽以重新排序或移动到文件夹",
+    "moveToFolder": "移动到文件夹",
+    "openInTerminal": "在终端打开",
+    "openInTerminalFailed": "无法导出此会话到终端",
+    "openedInTerminal": "在终端运行：{command}",
+    "pin": "置顶",
+    "pinned": "已置顶",
+    "removeFromFolder": "移出文件夹",
+    "rename": "重命名",
+    "select": "选择",
+    "unarchive": "取消归档",
+    "unpin": "取消置顶",
+    "untitled": "（无标题）"
+  },
+  "shell": {
+    "desktopOnlyBodyMiddle": " 启动应用，而不是 ",
+    "desktopOnlyBodyPrefix": "Claude Code 代理运行在桌面构建一同打包的 Node 子进程中。请使用 ",
+    "desktopOnlyBodySuffix": "。",
+    "desktopOnlyTitle": "请在 Tauri 中运行",
+    "emptyTitle": "Cognia"
+  },
+  "shellLayout": {
+    "customizeStatusBar": "自定义状态栏…",
+    "customizeTitleBar": "自定义布局…",
+    "description": {
+      "dialog": "选择侧边栏、顶部栏和底部栏显示哪些内容，以及它们的顺序。",
+      "section": "选择侧边栏、顶部栏和底部栏显示哪些内容，以及它们的顺序。修改立即生效，并会同步到你的其他设备。",
+      "sidebar": "把最常用的项目固定到导航栏，其余的会收进「更多」菜单。拖拽可调整顺序，也可以隐藏从不使用的项目。",
+      "status": "底部栏承载环境状态。隐藏的分段会被卸载而不只是不可见，因此隐藏性能监视也会同时停止采样。",
+      "title": "顶部栏承载导航、搜索和窗口控制。隐藏的项目会被完全移除——窗口按钮和应用菜单始终保留。",
+      "workbench": "右侧工作台内的图标列。拖拽可调整顺序；隐藏只会移除它的按钮——面板仍可通过命令面板和快捷键到达。"
+    },
+    "tab": {
+      "sidebar": "侧边栏",
+      "status": "底部栏",
+      "title": "顶部栏",
+      "workbench": "工作台"
+    },
+    "title": "界面布局"
+  },
+  "shellLayoutNotice": {
+    "description": "面板开关、主题、缩放和语言已移到标题栏的「视图」菜单，桌宠、OCR、剪贴板按钮也在那里。按 ⌘B 可显示或隐藏会话列表。",
+    "title": "布局已简化"
+  },
+  "statusBar": {
+    "awaitingApproval": "等待批准",
+    "connOffline": "离线",
+    "connOnline": "在线",
+    "connReconnecting": "重新连接中…",
+    "error": "错误",
+    "idle": "空闲",
+    "perf": "性能",
+    "perfCpu": "CPU",
+    "perfMem": "内存",
+    "streaming": "流式响应中",
+    "syncLast": "已同步 {time}",
+    "syncNever": "未同步",
+    "syncNow": "立即同步",
+    "usage": "用量与额度",
+    "usageOpen": "打开用量与额度"
+  },
+  "titleBar": {
+    "alwaysOnTop": "置顶窗口",
+    "appName": "Cognia",
+    "back": "后退",
+    "close": "关闭",
+    "commandCenter": {
+      "goToView": "前往视图",
+      "menuLabel": "命令中心菜单",
+      "noRecent": "暂无最近会话",
+      "recentSessions": "最近会话",
+      "untitled": "未命名"
+    },
+    "forward": "前进",
+    "kbdHint": "Ctrl+K",
+    "layout": {
+      "appearanceGroup": "外观",
+      "customize": "自定义布局",
+      "customizeBars": "自定义布局…",
+      "localeEn": "English",
+      "localeZh": "简体中文",
+      "openBrowser": "打开浏览器面板",
+      "themeDark": "深色",
+      "themeLight": "浅色",
+      "themeSystem": "跟随系统",
+      "title": "自定义布局",
+      "toggleGuildRail": "切换工会侧栏",
+      "togglePanel": "切换面板",
+      "toggleRightSidebar": "切换右侧栏",
+      "toggleSidebar": "切换侧栏",
+      "toggleStatusBar": "切换状态栏",
+      "zoomIn": "放大",
+      "zoomLabel": "缩放",
+      "zoomOut": "缩小",
+      "zoomReset": "重置缩放"
+    },
+    "maximize": "最大化",
+    "minimize": "最小化",
+    "openMenus": "打开菜单",
+    "quickActions": {
+      "capture": "内容采集",
+      "hidePet": "隐藏桌面宠物",
+      "ocr": "屏幕 OCR",
+      "showPet": "显示桌面宠物"
+    },
+    "restore": "还原",
+    "searchPlaceholder": "搜索或运行命令…",
+    "separator": " — ",
+    "workspace": "工作区",
+    "workspaceUntitled": "未命名工作区"
+  }
+}

@@ -1,0 +1,83 @@
+---
+title: Source Control
+description: A VS Code-shaped Git panel over a native Rust backend — 65 Tauri commands with a 1:1 TypeScript surface, a filesystem watcher, interactive rebase and the sequencer, plus AI commit messages, diff explanations and review.
+---
+
+# Source Control
+
+<Status variant="stable">Stable · ADR-0038</Status>
+
+<TLDR>
+  Git is implemented in Rust (`crates/cognia-git/`), not shelled out from the renderer, and exposed as
+  **65 Tauri commands** with an almost exactly matching TypeScript surface of 67 functions in
+  `lib/git/commands.ts` — a rare 1:1 backend/frontend mapping with no dormant half. The panel
+  (51 components under `components/source-control/`) is VS Code-shaped: staging by hunk, a commit graph,
+  blame, stash, worktrees and interactive rebase driven through `sequencer.rs`. Three AI helpers sit on
+  top — commit-message generation, diff explanation and review — each built as prompt builders plus one
+  generate call, so the prompt construction is testable without a model.
+</TLDR>
+
+<StatGrid>
+  <Stat label="Rust modules" value="25" hint="crates/cognia-git/src" />
+  <Stat label="Tauri commands" value="65" hint="crates/cognia-git/src/commands.rs" />
+  <Stat label="TS command surface" value="67" hint="lib/git/commands.ts" />
+  <Stat label="UI components" value="51" hint="components/source-control" />
+  <Stat label="AI helpers" value="3" hint="commit message · diff explain · review" />
+</StatGrid>
+
+Design rationale: [ADR-0038](../adr/0038-source-control-panel). Panel preferences live in
+`AppSettings.gitSettings.panel` — this subsystem has no Dexie tables of its own.
+
+## The Rust layer is the whole of Git
+
+Each file in `crates/cognia-git/src/` owns one area of Git, which is what keeps the command surface flat
+rather than a single god-object:
+
+```
+repo.rs        # discovery + open
+status.rs      # working-tree status
+stage.rs       # stage / unstage, including by hunk
+diff.rs        diff_stat.rs   # diffs and their summaries
+commit.rs      history.rs     # writing and reading history
+branch.rs      merge.rs       reset.rs      restore.rs
+stash.rs       tag.rs         remote.rs     worktree.rs
+blame.rs       read.rs
+interactive_rebase.rs  sequencer.rs   # rebase todo list + in-progress sequencer state
+watcher.rs     # filesystem watch → panel refresh
+exec.rs        error.rs       types.rs
+commands.rs    # the 65 Tauri commands
+```
+
+`watcher.rs` is why the panel does not poll: the backend watches the repository and pushes change events,
+consumed on the TS side through `lib/git/events.ts`.
+
+## Frontend modules
+
+```
+lib/git/
+  commands.ts          # 67 wrappers over the Tauri commands
+  events.ts            # watcher event subscription
+  load.ts              # panel data loading
+  workspace-changes.ts # multi-root aggregation
+  hunk-review.ts       # per-hunk staging decisions
+  commit-graph.ts      lane-palette.ts   # graph layout + lane colours
+  language-map.ts      # path → language for diff highlighting
+  panel-prefs.ts       # AppSettings.gitSettings.panel
+  ai-commit.ts  ai-explain.ts  ai-review.ts
+```
+
+## The AI helpers are prompt builders first
+
+Each helper splits into pure prompt construction plus a single generate call, so the interesting part is
+unit-testable without a model in the loop. `ai-commit.ts` exposes `buildCommitSystemPrompt()`,
+`buildCommitUserPrompt()`, `clampDiff()` — which trims a diff to a character budget before it reaches the
+model — and `stripFences()`, with `generateCommitMessage()` (`lib/git/ai-commit.ts:102`) as the only
+model-touching function. `ai-explain.ts` follows the same shape with `generateDiffExplanation()`.
+
+## Related
+
+<Cards>
+  <Card title="ADR-0038" href="../adr/0038-source-control-panel" description="The Source Control panel decision record" />
+  <Card title="Integrated Terminal" href="./integrated-terminal" description="The other developer surface inside the app" />
+  <Card title="Sandbox" href="./sandbox" description="Where agent-driven repository work is confined" />
+</Cards>

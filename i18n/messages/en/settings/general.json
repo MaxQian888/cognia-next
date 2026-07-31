@@ -1,0 +1,48 @@
+{
+  "alwaysAllowedTools": "Always-allowed tools",
+  "bareMode": "Bare mode",
+  "bareModeHint": "Skip on-disk auto-discovery (CLAUDE.md, hooks, plugins, MCP). Faster cold starts; the agent won't see your project's settings.",
+  "briefMode": "Brief output",
+  "briefModeHint": "Append a concise-output instruction to every send. Useful for chat triage and one-shot questions.",
+  "cancel": "Cancel",
+  "chatMiddleware": "Plugin chat middleware",
+  "chatMiddlewareHint": "Experimental. Let enabled plugins wrap each send via their registered chat middleware. Off by default — no effect unless a plugin provides one.",
+  "debugMode": "Debug mode",
+  "debugModeHint": "Verbose logs from the SDK and any spawned MCP / sub-process. Look for them in the Tauri dev console or the sidecar log file.",
+  "defaultModel": "Default model",
+  "defaultSystemPrompt": "Default system prompt",
+  "defaultSystemPromptPlaceholder": "Optional. Prepended to every conversation when a session has no override.",
+  "dirPlaceholder": "/path/to/project",
+  "effort": {
+    "high": "high",
+    "low": "low",
+    "max": "max",
+    "medium": "medium",
+    "xhigh": "xhigh"
+  },
+  "model": {
+    "claude-haiku-4-5": "Claude Haiku 4.5",
+    "claude-opus-4-5": "Claude Opus 4.5",
+    "claude-opus-4-7": "Claude Opus 4.7",
+    "claude-sonnet-4-5": "Claude Sonnet 4.5"
+  },
+  "noneYet": "None yet. Tools you mark \"Allow always\" in approval dialogs appear here.",
+  "orPasteModelId": "Or paste a custom model id",
+  "permission": {
+    "acceptEdits": "acceptEdits",
+    "bypassPermissions": "bypassPermissions",
+    "default": "default",
+    "plan": "plan"
+  },
+  "permissionMode": "Permission mode",
+  "permissionModeHintAfter": ".",
+  "permissionModeHintBefore": "Controls how the agent treats tool calls. Most users want ",
+  "permissionModeHintCode": "default",
+  "pickDirectory": "Pick directory",
+  "removeFromAllowList": "Remove {tool} from always-allow list",
+  "save": "Save",
+  "saved": "Settings saved.",
+  "selectWorkingDirectory": "Select working directory",
+  "useSdkDefault": "Use SDK default",
+  "workingDirectory": "Working directory"
+}

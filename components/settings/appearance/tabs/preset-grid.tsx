@@ -23,7 +23,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { synthesizeThemeSwatches } from "@/lib/appearance/synthesize-theme-icon"
-import type { ThemeColors } from "@/types/plugin/plugin-extended"
+import type { ThemeColors } from "@/types/plugin/plugin"
 import { cn } from "@/lib/utils"
 
 export type PresetSource = "builtin" | "imported" | "plugin"
@@ -35,6 +35,13 @@ export interface PresetItem {
   name: string
   /** Palette used for the swatch and (later) for activation. */
   colors: ThemeColors
+  /**
+   * Both authored variants, when the source ships them (built-in VSCode +
+   * designed themes). Preferred over deriving on clone so a theme's
+   * hand-authored opposite variant is preserved instead of being replaced by
+   * an algorithmic inversion.
+   */
+  tokens?: { light: ThemeColors; dark: ThemeColors }
   /** Drives the variant pill + light/dark filter. */
   isDark: boolean
   /** Origin badge. */
@@ -43,6 +50,16 @@ export interface PresetItem {
   pluginId?: string
   /** For `plugin` source: human-readable plugin name (badge text). */
   pluginName?: string
+  /**
+   * For `plugin` source: the theme's registry id (`<pluginId>.<contributionId>`).
+   * Drives direct activation (`activePluginThemeId`) without cloning.
+   */
+  pluginThemeId?: string
+  /**
+   * For `plugin` source: raw extra CSS vars from a `cssVariables` theme,
+   * carried into a clone so a "copy" keeps every declared override.
+   */
+  cssVars?: Record<string, string>
   /** For `imported` source: persistent CustomTheme id (used by Remove action). */
   customThemeId?: string
 }

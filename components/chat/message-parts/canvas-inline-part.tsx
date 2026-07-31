@@ -13,7 +13,7 @@
  * "text"`) and provide a single click to jump into the full editor.
  */
 
-import { useState } from "react"
+import { memo, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   Artifact as ArtifactShell,
@@ -36,7 +36,10 @@ interface CanvasInlinePartProps {
   className?: string
 }
 
-export function CanvasInlinePart({ part, className }: CanvasInlinePartProps) {
+export const CanvasInlinePart = memo(function CanvasInlinePart({
+  part,
+  className,
+}: CanvasInlinePartProps) {
   const t = useTranslations("chat.canvasInline")
   const tArtifact = useTranslations("chat.artifactPart")
   const canvas = useArtifactStore((s) => s.canvasDocuments[part.canvasId])
@@ -82,7 +85,7 @@ export function CanvasInlinePart({ part, className }: CanvasInlinePartProps) {
         <ArtifactActions>
           <a
             href={canvasHref}
-            className="inline-flex size-8 items-center justify-center rounded-md p-0 text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="inline-flex size-8 items-center justify-center rounded-md p-0 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
             data-testid="canvas-inline-part-open"
             aria-label={t("openInCanvas")}
             title={t("openInCanvas")}
@@ -126,6 +129,6 @@ export function CanvasInlinePart({ part, className }: CanvasInlinePartProps) {
       )}
     </ArtifactShell>
   )
-}
+})
 
 export default CanvasInlinePart

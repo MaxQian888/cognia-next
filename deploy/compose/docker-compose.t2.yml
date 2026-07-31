@@ -1,0 +1,102 @@
+# T2 topology override (ADR-0059 D5/D9): split execution plane.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.t2.yml \
+#     --profile server up -d
+#
+# cognia-server + the brain stay in the main container (the bridge couples
+# them tightly); external agents move to per-workspace cognia-runner
+# containers spawned via ExecBackend::Container (R13, feature
+# `container-exec`). The backend creates ONE runner container per agent —
+# the agent binary is the container's PID 1, attached over stdio; there is
+# no warm pool and no `docker exec` (see external_agent/container_backend.rs).
+#
+# The backend talks to Docker through a locked-down socket proxy — never the
+# raw socket: only container lifecycle + image pull are reachable, so a
+# compromised server process cannot mount the host or escalate via the
+# Docker API surface.
+
+services:
+  docker-socket-proxy:
+    profiles: [server]
+    image: tecnativa/docker-socket-proxy:0.3
+    environment:
+      # Default-deny; allow exactly what ExecBackend::Container needs.
+      CONTAINERS: "1" # create/attach/start/wait/kill/remove runners
+      IMAGES: "1" # auto-pull the runner image on first spawn
+      POST: "1" # mutating verbs for the two above
+      # Exec stays denied: the backend never uses the exec API (one
+      # container per agent, agent as PID 1 — not exec-into-warm-runner).
+      EXEC: "0"
+      # Everything else (volumes, networks, swarm, host info) stays denied.
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+
+  cognia-server:
+    depends_on:
+      docker-socket-proxy:
+        condition: service_started
+    environment:
+      COGNIA_EXEC_BACKEND: container
+      COGNIA_RUNNER_IMAGE: ${COGNIA_RUNNER_IMAGE:-ghcr.io/maxqian888/cognia-runner:latest}
+      DOCKER_HOST: tcp://docker-socket-proxy:2375
+      # Workspaces live on a named volume shared with the runners. BOTH vars
+      # matter: COGNIA_WORKSPACES_DIR is where cognia-server sees the tree;
+      # COGNIA_WORKSPACES_VOLUME tells the backend to mount runner workspaces
+      # as subpaths of that VOLUME (volume + subpath) instead of bind-mounting
+      # a host path — the /workspaces path only exists inside this container,
+      # so a host bind would hand every runner an empty directory.
+      COGNIA_WORKSPACES_DIR: /workspaces
+      COGNIA_WORKSPACES_VOLUME: cognia_workspaces
+      # ADR-0085 hard gate. Both this server flag and each user's local
+      # experiment toggle must be true before `browser` is advertised.
+      COGNIA_REMOTE_BROWSER_ENABLED: ${COGNIA_REMOTE_BROWSER_ENABLED:-false}
+      COGNIA_WORKSPACE_RUNTIME_URL_TEMPLATE: http://workspace-runtime-{workspace_id}:27910
+      COGNIA_WORKSPACE_RUNTIME_SECRET_DIR: /runtime-secrets
+      COGNIA_WORKSPACE_RUNTIME_WORKSPACES: ${COGNIA_WORKSPACE_RUNTIME_WORKSPACES:-default}
+    volumes:
+      - cognia_workspaces:/workspaces
+      - cognia_workspace_default:/workspaces/default
+      - cognia_runtime_secrets:/runtime-secrets:ro
+
+  workspace-runtime-default:
+    profiles: [remote-browser]
+    image: ${COGNIA_WORKSPACE_RUNTIME_IMAGE:-ghcr.io/maxqian888/cognia-workspace-runtime:latest}
+    build:
+      context: ../../
+      dockerfile: services/workspace-runtime/Dockerfile
+    environment:
+      COGNIA_WORKSPACE_ID: default
+      COGNIA_WORKSPACE_RUNTIME_SECRET: ${COGNIA_WORKSPACE_RUNTIME_SECRET:?set a 32+ character runtime secret}
+    volumes:
+      - cognia_workspace_default:/workspace
+      - cognia_browser_profiles_default:/profiles
+      - cognia_runtime_secrets:/runtime-secrets
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fsS -H 'Authorization: Bearer '$$COGNIA_WORKSPACE_RUNTIME_SECRET http://localhost:27910/v1/health >/dev/null",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID]
+    pids_limit: 512
+    mem_limit: 2g
+    cpus: 2
+    shm_size: 1gb
+    restart: unless-stopped
+
+volumes:
+  cognia_workspaces:
+    # Fixed name so COGNIA_WORKSPACES_VOLUME above matches regardless of the
+    # compose project name (`name: cognia` would otherwise prefix it).
+    name: cognia_workspaces
+  cognia_workspace_default:
+  cognia_browser_profiles_default:
+  cognia_runtime_secrets:

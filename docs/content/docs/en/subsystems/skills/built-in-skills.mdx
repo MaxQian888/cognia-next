@@ -1,11 +1,11 @@
 ---
 title: Built-in skills
-description: The ADR-0026 typed-tool tier — a code-reviewed registry of MCP tools (40 Lark skills) the assistant calls directly, gated by a PII/allowlist/IM-access/HITL dispatcher and re-fired through the connector bus on confirm-card approval.
+description: The ADR-0026 typed-tool tier — a code-reviewed registry of MCP tools the assistant calls directly, including desktop plugin conversion and connector operations, gated by PII, access controls, and HITL.
 ---
 
 # Built-in skills
 
-<Status variant="beta">ADR-0026 — lib/skills/built-in · 40 Lark skills · HITL via A2UI confirm cards</Status>
+<Status variant="beta">ADR-0026 — lib/skills/built-in · typed MCP tools · desktop and connector HITL</Status>
 
 <TLDR>
   A built-in skill is a **typed MCP tool the model calls**, not a prompt snippet. Each one is a frozen
@@ -15,9 +15,10 @@ description: The ADR-0026 typed-tool tier — a code-reviewed registry of MCP to
   single never-throwing entry point that runs a 6-gate pipeline (registry → Zod → PII → allowlist → IM-access →
   mutation routing). Write/destructive skills render an A2UI confirm card, persist a `skill_invoke` callback
   binding (`a2ui-mapper.ts:171`), and re-enter via the connector bus (`bus.ts:893`) once the user clicks
-  Confirm. The 40 Lark skills shell out to a user-installed `lark-cli` (`exec-lark-cli.ts:101`) with OAuth
+  Confirm. The Lark skills shell out to a user-installed `lark-cli` (`exec-lark-cli.ts:101`) with OAuth
   credentials pulled from the existing Lark connector (`auth-bridge.ts:86`). Runtime wiring lives in
-  `build-options.ts:895` and `plugin-tool-ipc.ts:144`.
+  `build-options.ts` and `plugin-tool-ipc.ts`. The desktop-only `plugin.conversion` family instead reuses the
+  deterministic in-app converter and confines all paths to the active workspace.
 </TLDR>
 
 <Callout type="warn" title="Not the same thing as seeded `skill_builtin_*` rows">
@@ -39,6 +40,8 @@ description: The ADR-0026 typed-tool tier — a code-reviewed registry of MCP to
 | `lib/skills/built-in/dispatcher.ts` | `runBuiltInSkill` — the 6-gate trust pipeline; never throws |
 | `lib/skills/built-in/index.ts` | Public barrel; `import "./lark"` triggers all registrations |
 | `lib/skills/built-in/lark/` | 40 Lark skills across 6 families + the lark-cli exec/auth bridge |
+| `lib/skills/built-in/plugin-conversion/` | Desktop-only inspect/apply tools for deterministic whole-plugin conversion |
+| `lib/plugin/convert/agent-service.ts` | Source snapshot, expiring plan, empty-target enforcement, and filesystem write adapter |
 | `lib/claude/build-options.ts:895` | Gate + manifest build + fold into `allowedTools` / `pluginTools` |
 | `lib/claude/plugin-tool-ipc.ts:144` | Renderer-side IPC fallback: MCP tool name → `runBuiltInSkill` |
 | `lib/connectors/bus.ts:893` | `skill_invoke` callback short-circuit (HITL confirm re-fire) |
@@ -182,17 +185,16 @@ flowchart TD
 
 Gates 4 and 5 are no-ops for desktop in-app (non-IM) sessions (`dispatcher.ts:123`) — built-in skills are
 always exposed in desktop chat because the user is already watching it. The PII gate reuses
-`hasNoLeakingPii` from `lib/twin/ingest/redact.ts` (`dispatcher.ts:36`), the same red-line that protects Twin,
+`hasNoLeakingPii` from `packages/redact/src/index.ts` (`dispatcher.ts:36`), the same red-line that protects Twin,
 Goal, and connector auto-mode.
 
 ```ts
 // lib/skills/built-in/dispatcher.ts:338 — the mutation → HITL decision
 function computeHitlRequired(skill, isImSession, requireHitlForWrites, bypass): boolean {
   if (bypass) return false                  // callback re-fire after Confirm
-  if (!isImSession) return false            // desktop in-app: no confirm card
   if (skill.mutation === "read") return false
   if (skill.mutation === "destructive") return true   // always — channel toggle ignored
-  return requireHitlForWrites !== false     // write: default true
+  return requireHitlForWrites !== false     // write: desktop + IM default true
 }
 ```
 
@@ -235,6 +237,29 @@ sequenceDiagram
   CLI-->>D: { status: "ok", data }
   D->>A: surfaces skill result through the chat loop
 ```
+
+## Plugin conversion family
+
+`plugin.conversion` couples a seeded prompt skill (`skills/built-in/plugin-conversion/SKILL.md`) with two
+typed tools:
+
+| Tool | Mutation | Contract |
+| --- | --- | --- |
+| `inspect_plugin_conversion` | `read` | Detect the source ecosystem, run the canonical converter, return fidelity/issues/files, and mint an expiring plan without writing |
+| `apply_plugin_conversion` | `write` | Re-read the source, reject a stale plan or non-empty/overlapping target, then write only deterministic converter output after desktop approval |
+
+Both tools declare `imAccess: "blocked"`. `resolveSendOptions` exposes them only when the prompt skill is
+active (or the opt-in `Skill` self-loader can activate it), a desktop workspace cwd exists, and the workspace
+filesystem backend is available. Source and output arguments are workspace-relative; Rust's workspace
+filesystem commands enforce containment again at the disk boundary.
+
+The plan binds `workspaceRoot + sourceDir + target` to a source snapshot digest and expires after 15 minutes.
+`apply` consumes it after a successful write. A changed source, expired or unknown plan, non-empty output, or
+source/output overlap fails closed. Unsupported capabilities remain in the structured `blocking` report; the
+agent is instructed not to approximate or hand-author converted runtime files.
+
+Whole-bundle conversion supports Claude Code, Codex, or Gemini CLI → Cognia and Cognia → any of those three.
+Foreign → foreign conversion is intentionally unsupported.
 
 ## The Lark CLI bridge
 
@@ -318,6 +343,12 @@ const builtInSkillsRequested =
   Boolean(session?.platformBinding?.adapterId) || character?.enableBuiltInSkills === true
 ```
 
+`plugin.conversion` is deliberately outside that broad switch. Its entries are filtered out of the general
+desktop manifest and appended separately only when the `builtin:plugin-conversion` prompt skill is active or
+the `Skill` self-loader is enabled. This keeps the filesystem write tool unavailable to characters that merely
+enabled unrelated built-in connector skills. It is also appended outside `disablePluginTools`, because that
+flag governs third-party plugin tools rather than first-party conversion.
+
 ### Renderer dispatch fallback
 
 The sidecar proxies every `cognia-builtin-skills` tool call back over the existing `plugin_tool_exec` IPC
@@ -379,8 +410,8 @@ the cached `lastKnownSkillCapabilities`, not a live registry walk.
     `binary_not_found` error (`exec-lark-cli.ts:118`), not a crash.
   - Audit is best-effort: `safeAppendAudit` (`dispatcher.ts:387`) swallows Dexie failures so a missing audit
     store never breaks a skill.
-  - Desktop in-app chat runs write skills **without** a confirm card today (`dispatcher.ts:345`) — the user is
-    already watching the chat; a desktop consent overlay is the documented future hook.
+  - Desktop writes suspend on the standard tool-approval dialog. `apply_plugin_conversion` cannot write until
+    the user approves; cancelling or timing out returns a structured denial.
 </Callout>
 
 ## Related

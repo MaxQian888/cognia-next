@@ -1,4 +1,5 @@
-import { getOsInfo, isMacPlatform } from "./os"
+/** @jest-environment jsdom */
+import { getOsInfo, isLinuxPlatform, isMacPlatform } from "./os"
 
 jest.mock("@tauri-apps/plugin-os", () => ({
   arch: jest.fn(),
@@ -133,6 +134,44 @@ describe("lib/tauri/os", () => {
         throw new Error("plat boom")
       })
       expect(isMacPlatform()).toBe(false)
+    })
+  })
+
+  describe("isLinuxPlatform", () => {
+    it("uses navigator.platform outside Tauri (linux match)", () => {
+      Object.defineProperty(navigator, "platform", {
+        configurable: true,
+        value: "Linux x86_64",
+      })
+      expect(isLinuxPlatform()).toBe(true)
+    })
+
+    it("uses navigator.platform outside Tauri (non-linux)", () => {
+      Object.defineProperty(navigator, "platform", {
+        configurable: true,
+        value: "Win32",
+      })
+      expect(isLinuxPlatform()).toBe(false)
+    })
+
+    it("returns true when native platform is 'linux' in Tauri", () => {
+      setTauri(true)
+      mockedPlatform.mockReturnValue("linux" as ReturnType<typeof platformNative>)
+      expect(isLinuxPlatform()).toBe(true)
+    })
+
+    it("returns false when native platform is not 'linux'", () => {
+      setTauri(true)
+      mockedPlatform.mockReturnValue("macos" as ReturnType<typeof platformNative>)
+      expect(isLinuxPlatform()).toBe(false)
+    })
+
+    it("returns false when native platform throws", () => {
+      setTauri(true)
+      mockedPlatform.mockImplementation(() => {
+        throw new Error("plat boom")
+      })
+      expect(isLinuxPlatform()).toBe(false)
     })
   })
 })

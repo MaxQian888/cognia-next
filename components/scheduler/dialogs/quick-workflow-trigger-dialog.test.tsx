@@ -26,4 +26,25 @@ describe("QuickWorkflowTriggerDialog module", () => {
   it("exports a function component named QuickWorkflowTriggerDialog", () => {
     expect(typeof mod.QuickWorkflowTriggerDialog).toBe("function")
   })
+
+  it("persists the selected timezone on the canonical workflow trigger row", () => {
+    expect(
+      mod.createCronTriggerRow({
+        triggerId: "trigger-1",
+        workflowId: "workflow-1",
+        cron: " 0 9 * * * ",
+        timezone: "Asia/Shanghai",
+        now: 123,
+      })
+    ).toEqual({
+      id: "trigger-1",
+      workflowId: "workflow-1",
+      kind: "trigger.cron",
+      enabled: true,
+      cron: "0 9 * * *",
+      timezone: "Asia/Shanghai",
+      createdAt: 123,
+      updatedAt: 123,
+    })
+  })
 })

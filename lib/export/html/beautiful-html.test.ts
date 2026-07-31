@@ -6,7 +6,7 @@
 import { exportToBeautifulHtml } from "./beautiful-html"
 import { exportToAnimatedHtml } from "./animated-html"
 import { THEMES } from "./syntax-themes"
-import type { ChatSession, StoredMessage } from "@/lib/claude/types"
+import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 
 const session: ChatSession = {
   id: "s1",
@@ -90,7 +90,89 @@ describe("exportToBeautifulHtml", () => {
   })
 })
 
+describe("exportToBeautifulHtml — style presets", () => {
+  it("injects the arknights banner, footer tag, and preset CSS", () => {
+    const html = exportToBeautifulHtml({ session, messages, exportedAt, theme: "arknights" })
+    expect(html).toContain('class="preset-banner">TACTICAL COMMUNICATION LOG')
+    expect(html).toContain("PRTS // RECORD SEALED")
+    expect(html).toContain(".preset-banner")
+    expect(html).toContain(THEMES.arknights.accent)
+  })
+
+  it("every theme now ships preset chrome (light renders its banner)", () => {
+    const html = exportToBeautifulHtml({ session, messages, exportedAt, theme: "light" })
+    expect(html).toContain('class="preset-banner">CONVERSATION')
+    expect(html).toContain("Exported with Cognia")
+  })
+
+  it("renders the new immersive theme banners", () => {
+    const gen = exportToBeautifulHtml({ session, messages, exportedAt, theme: "genshin" })
+    expect(gen).toContain("TEYVAT ADVENTURE LOG")
+    const hk = exportToBeautifulHtml({ session, messages, exportedAt, theme: "honkai" })
+    expect(hk).toContain("ASTRAL EXPRESS LOG")
+  })
+
+  it("preset CSS uses custom tokens when a custom theme overrides a styled base", () => {
+    const html = exportToBeautifulHtml({
+      session,
+      messages,
+      exportedAt,
+      theme: "arknights",
+      customTheme: { ...THEMES.arknights, accent: "#123456" },
+    })
+    expect(html).toContain("#123456")
+    expect(html).toContain("preset-banner")
+  })
+
+  it("sakura preset has a banner but no footer tagline", () => {
+    const html = exportToBeautifulHtml({ session, messages, exportedAt, theme: "sakura" })
+    expect(html).toContain("HANAMI LOG")
+    expect(html).toMatch(/Exported from Cognia · [^·]*<\/footer>/)
+  })
+})
+
+describe("exportToBeautifulHtml — theme wallpaper backdrop", () => {
+  const dataUrl = "data:image/webp;base64,QUJD"
+
+  it("inlines the wallpaper with a scrim and transparent body when provided", () => {
+    const html = exportToBeautifulHtml({
+      session,
+      messages,
+      exportedAt,
+      theme: "arknights",
+      wallpaperDataUrl: dataUrl,
+    })
+    expect(html).toContain(`url("${dataUrl}")`)
+    expect(html).toContain("background-color: transparent")
+    expect(html).toContain("linear-gradient(rgba(")
+  })
+
+  it("renders no backdrop when no wallpaper is provided", () => {
+    const html = exportToBeautifulHtml({ session, messages, exportedAt, theme: "arknights" })
+    expect(html).not.toContain("data:image/webp")
+    expect(html).not.toContain("background-color: transparent")
+  })
+})
+
 describe("exportToAnimatedHtml", () => {
+  it("inherits the wallpaper backdrop from the base export", () => {
+    const html = exportToAnimatedHtml({
+      session,
+      messages,
+      exportedAt,
+      theme: "aurora",
+      wallpaperDataUrl: "data:image/webp;base64,WFla",
+    })
+    expect(html).toContain("data:image/webp;base64,WFla")
+    expect(html).toContain("classList.add('show')")
+  })
+
+  it("keeps the preset chrome from the base export", () => {
+    const html = exportToAnimatedHtml({ session, messages, exportedAt, theme: "arknights" })
+    expect(html).toContain("preset-banner")
+    expect(html).toContain("classList.add('show')")
+  })
+
   it("includes the animation script", () => {
     const html = exportToAnimatedHtml({ session, messages, exportedAt })
     expect(html).toContain("<script>")
@@ -151,8 +233,34 @@ describe("exportToBeautifulHtml — additional rendering branches", () => {
       ],
       exportedAt,
     })
-    expect(html).toContain('href="https://files/x.png"')
+    expect(html).toContain('<img src="https://files/x.png" alt="x.png"')
     expect(html).toContain("noLink.txt")
+  })
+
+  it("renders Markdown links with balanced parentheses without swallowing punctuation", () => {
+    const html = exportToBeautifulHtml({
+      session,
+      messages: [
+        {
+          id: "links",
+          sessionId: "s1",
+          role: "assistant",
+          parts: [
+            {
+              type: "text",
+              text: "Read [the docs](https://example.com/a_(b)). Then visit https://example.org/x).",
+            },
+          ],
+          createdAt: 1_700_000_000_000,
+        },
+      ],
+      exportedAt,
+    })
+
+    expect(html).toContain('<a href="https://example.com/a_(b)"')
+    expect(html).toContain(">the docs</a>.")
+    expect(html).toContain('<a href="https://example.org/x"')
+    expect(html).toContain(">https://example.org/x</a>).")
   })
 
   it("renders source-url parts as plain anchor links", () => {

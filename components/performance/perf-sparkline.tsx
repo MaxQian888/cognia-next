@@ -37,7 +37,16 @@ export function PerfSparkline({
 
   return (
     <div className={cn("h-8 w-16", className)} data-testid={testId}>
-      <ResponsiveContainer width="100%" height="100%">
+      {/* `initialDimension` covers the first render. The non-zero minimums also
+          cover transient 0×0 ResizeObserver reports while the bottom status
+          bar is being collapsed or re-laid out. */}
+      <ResponsiveContainer
+        width="100%"
+        height="100%"
+        minWidth={1}
+        minHeight={1}
+        initialDimension={{ width: 64, height: 32 }}
+      >
         <AreaChart data={data} margin={{ top: 1, right: 0, left: 0, bottom: 0 }}>
           <Area
             type="monotone"

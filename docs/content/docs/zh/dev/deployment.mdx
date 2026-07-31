@@ -1,21 +1,22 @@
 ---
 title: 部署
-description: 把 Cognia 打包为 Web、桌面（按平台）和文档站点，加上 Tauri 自动更新与代码签名清单。
+description: 把 Cognia 打包为 Web、桌面（按平台）、文档站点与自托管云端套件（compose/k8s），加上 Tauri 自动更新与代码签名清单。
 ---
 
 # 部署
-Cognia 有三种发布形式：
+Cognia 有四种发布形式：
 
 1. **Web** —— 静态导出，可部署到任意静态托管。
 2. **桌面** —— Tauri 打包的 Windows / macOS / Linux 安装包。
-3. **文档** —— Fumadocs Next.js 服务，独立部署。
+3. **文档** —— Fumadocs **静态导出**，部署到 Cloudflare Pages。
+4. **自托管云端套件** —— ADR-0059 的云服务（signaling、share、headless cognia-server）以 GHCR 容器镜像发布，配 compose 套件与 k8s kustomize 树。
 
 ```mermaid
 flowchart LR
   Source[/源码/]
   Source --> NW[pnpm build<br/>next.config.ts: output 'export']
   NW --> Out[(out/)]
-  Out --> Static[静态托管<br/>Netlify · Vercel · S3 · …]
+  Out --> Static[静态托管<br/>Netlify · Cloudflare Pages · S3 · …]
 
   Source --> NT[pnpm tauri build<br/>= pnpm build + cargo build]
   NT --> Bundle[(target/release/bundle/)]
@@ -24,17 +25,22 @@ flowchart LR
   Bundle --> LIN[Linux .AppImage / .deb / .rpm]
 
   Source --> ND[pnpm docs:build]
-  ND --> DocsOut[(docs/.next/)]
-  DocsOut --> NodeHost[Node 托管<br/>Vercel · Railway · …]
+  ND --> DocsOut[(docs/out/)]
+  DocsOut --> Pages[Cloudflare Pages<br/>wrangler pages deploy]
+
+  Source --> IM[images.yml<br/>v* tag 上 docker build]
+  IM --> GHCR[(ghcr.io/…/cognia-signaling<br/>cognia-share · cognia-server · cognia-runner)]
+  GHCR --> Compose[deploy/compose<br/>docker compose profiles]
+  GHCR --> K8s[deploy/k8s<br/>kustomize，1 租户 = 1 namespace]
 
   classDef src fill:#1e293b,stroke:#475569,color:#e2e8f0
   classDef step fill:#1e293b,stroke:#3b82f6,color:#e2e8f0
   classDef out fill:#064e3b,stroke:#10b981,color:#a7f3d0
   classDef host fill:#312e81,stroke:#a78bfa,color:#ede9fe
   class Source src
-  class NW,NT,ND step
-  class Out,Bundle,DocsOut,WIN,MAC,LIN out
-  class Static,NodeHost host
+  class NW,NT,ND,IM step
+  class Out,Bundle,DocsOut,WIN,MAC,LIN,GHCR out
+  class Static,Pages,Compose,K8s host
 ```
 
 每种各有自己的构建管线。
@@ -151,24 +157,30 @@ Tauri 跨编译需要可观的搭建（Docker 镜像、sysroot）。日常做法
 
 ### 资源
 
-`tauri.conf.json` → `bundle.resources` 列出要拷到包里的文件：
+`tauri.conf.json` → `bundle.resources` 列出要拷到包里的文件（节选 —— 实际约 17 项，还包括 `vscode-ext-host/`、`webclone/`、终端 shell-integration 脚本和 `hooks/builtin/`）：
 
 ```jsonc title="src-tauri/tauri.conf.json"
 "resources": [
   "../sidecar/claude-host.mjs",
   "../sidecar/a2ui-mcp.mjs",
   "../sidecar/package.json",
-  "../sidecar/node_modules/**/*"
+  "../sidecar/node_modules/**/*",
+  "../sidecar/webclone/package.json",
+  // …完整列表见 tauri.conf.json
 ]
 ```
 
 Sidecar 的整个 `node_modules/` 都被打进去，因为 sidecar 作为独立 Node 进程运行，需要这些依赖。生产用户**不**需要本地 Node —— 包内的 Node 二进制（或宿主系统的）会运行 sidecar。
 
+<Callout type="warn" title="tauri-build 在编译期校验这些路径">
+  `bundle.resources` 里每个普通文件路径在任何编译 Rust crate 的地方都必须存在 —— 包括 headless 的 `Dockerfile.cognia-server` 构建。新增资源但不同步扩 Dockerfile 的 COPY 集会弄坏容器镜像；`images.yml` 的 PR paths 已覆盖编译输入，让它在 CI 就失败而不是拖到打 tag。
+</Callout>
+
 ### 已安装 Tauri 插件
 
 `tauri.conf.json` + `Cargo.toml` 中目前接入的 Tauri 插件包括：
 
-- `plugin-autostart`、`plugin-cli`、`plugin-clipboard-manager`、`plugin-deep-link`（`cognia://` scheme）、`plugin-dialog`、`plugin-fs`、`plugin-notification`、`plugin-opener`、`plugin-os`、`plugin-process`、`plugin-store`、`plugin-updater`（默认未启用，见下）、`plugin-window-state`。
+- `plugin-autostart`、`plugin-cli`、`plugin-clipboard-manager`、`plugin-deep-link`（`cognia://` scheme）、`plugin-dialog`、`plugin-fs`、`plugin-notification`、`plugin-opener`、`plugin-os`、`plugin-process`、`plugin-store`、`plugin-updater`（已启用，见下）、`plugin-window-state`。
 
 deep-link 的桌面 scheme 是 `cognia`，移动端列表留空（[移动端架构](../ui/mobile-architecture)章节单独管）。
 
@@ -183,6 +195,7 @@ deep-link 的桌面 scheme 是 `cognia`，移动端列表留空（[移动端架�
     - Tauri 使用 `signtool.exe`；CI 中确保 Windows SDK 在 PATH。
   </Tab>
   <Tab value="macOS">
+    - 仓库已配置 Tauri ad-hoc 基线 `bundle.macOS.signingIdentity: "-"`，避免 Apple Silicon 拒绝从 GitHub 下载的构建；用户仍可能需要在“隐私与安全性”中批准应用。
     - Apple Developer 账号 + Developer ID Application 证书。
     - 公证：设 `APPLE_ID`、`APPLE_PASSWORD`（应用专用）、`APPLE_TEAM_ID` 环境变量；Tauri 自动调 `notarytool`。
     - 通用二进制：分别构建 `aarch64-apple-darwin` 与 `x86_64-apple-darwin`，再 `lipo` 合并。
@@ -196,58 +209,24 @@ deep-link 的桌面 scheme 是 `cognia`，移动端列表留空（[移动端架�
   </Tab>
 </Tabs>
 
-仓库自带 `.github/workflows/release.yml`，配合 `build-tauri.yml` 在多 OS 矩阵上跑 Tauri 构建并把安装包作为 release asset 上传。代码签名 env 注释保留 —— 拿到证书后取消注释。
+仓库通过 `release.yml` → `build-tauri.yml` 在多 OS 矩阵上跑 Tauri 构建并把安装包上传到已发布的 release。updater 签名已通过 `TAURI_SIGNING_*` secrets 生效；macOS 已有 ad-hoc 签名基线，经过认证的操作系统信任签名（SmartScreen / 公证）仍按上文各平台自行接入。
 
 ## 应用内更新
 
-`tauri-plugin-updater` 默认**禁用**（`tauri.conf.json` → `plugins.updater.active = false`）。Cognia 已搭好管线，但等维护者主动开启。
+`tauri-plugin-updater` **已启用**：`tauri.conf.json` 带上了 release endpoints、真实公钥和 `createUpdaterArtifacts: true`，每次 release 构建都会产出带签名的 updater 产物。`release.yml`（`v*` tag）以继承 secrets 的方式调用 `build-tauri.yml`，发布 updater 启动时轮询的签名 `latest.json`。
 
-启用步骤：
+设置、命令面板、托盘操作和后台检查统一复用 `lib/tauri/updater.ts`。该客户端会合并并发拉取、释放过期的原生更新资源、应用自定义超时和当前网络代理，并将下载与安装拆分。设置 → 关于提供自动检查间隔、后台下载、安装后重启、请求超时和代理选项。Tauri capability 仅开放 `allow-check`、`allow-download`、`allow-install` 和进程重启，不开放组合式下载安装与进程退出权限。
 
-<Steps>
-  <Step>
-    ### 生成签名密钥对
+CI 签名 secrets（Tauri **v2** 名称 —— v1 的 `TAURI_PRIVATE_KEY` / `TAURI_KEY_PASSWORD` 不会被读取）：
 
-    ```bash
-    pnpm tauri signer generate -w ~/.tauri/cognia-next.key
-    ```
+- `TAURI_SIGNING_PRIVATE_KEY` —— 私钥文件内容。
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` —— 私钥密码（无密码则空字符串）。
 
-    <Callout type="error" title="切勿提交私钥">
-      私钥 `cognia-next.key` 不可入仓、不可分享。
-      只分发 `cognia-next.key.pub`。
-    </Callout>
+<Callout type="error" title="切勿提交私钥">
+  入仓的只有公钥。换钥会让所有已安装的构建失去更新通道 —— 把私钥当 root 凭据对待。
+</Callout>
 
-  </Step>
-  <Step>
-    ### 把公钥写进 `tauri.conf.json`
-
-    ```jsonc title="src-tauri/tauri.conf.json"
-    "plugins": {
-      "updater": {
-        "active": true,
-        "endpoints": [
-          "https://github.com/MaxQian888/cognia-next/releases/latest/download/latest.json"
-        ],
-        "pubkey": "<paste public key here>"
-      }
-    }
-    ```
-
-  </Step>
-  <Step>
-    ### 设置 CI secrets
-
-    - `TAURI_PRIVATE_KEY` —— 私钥文件 base64。
-    - `TAURI_KEY_PASSWORD` —— 密码（或留空字符串）。
-
-  </Step>
-  <Step>
-    ### 打 tag 发版
-
-    Tauri GitHub Action 会发布 `latest.json` 清单，updater 在启动时轮询。
-
-  </Step>
-</Steps>
+Fork 的话：用 `pnpm tauri signer generate -w ~/.tauri/cognia-next.key` 生成自己的密钥对，替换 `plugins.updater.pubkey` + `endpoints`，配好上面两个 secrets。本地不签名构建：覆盖 `createUpdaterArtifacts` 为 `false`，不要删公钥。
 
 完整指南见 `src-tauri/UPDATER.md`。
 
@@ -279,47 +258,76 @@ deep-link 的桌面 scheme 是 `cognia`，移动端列表留空（[移动端架�
 pnpm docs:build
 ```
 
-输出：`docs/.next/`。这是**完整 Next.js 服务端构建**（不是静态导出），因为 Fumadocs 用路由处理器实现全文搜索。
+输出：`docs/out/` —— 文档站和主应用一样是**静态导出**（`docs/next.config.ts` → `output: "export"`）。没有需要运行的 Node 服务；`docs/package.json` 的 `next start` 对导出产物不适用。
 
 部署到：
 
-- **Vercel** —— 导入项目时把根目录设为 `docs/`，Vercel 自动识别 Next.js。
-- **Railway / Render / Fly.io** —— 推 `docs/` 目录；跑 `pnpm install && pnpm build && pnpm start`。
-- **自建 Node** —— `cd docs && pnpm install --prod && pnpm build && pnpm start`。默认端口 3001。
+- **Cloudflare Pages**（已接线的路径）—— `deploy.yml` 的 `deploy-docs` job 执行 `wrangler pages deploy docs/out`。
+- **任意静态托管** —— 指向 `docs/out/`。
 
 文档构建独立于主应用 —— 没有共享输出目录。两者可同时部署而不冲突。
 
 ### 搜索索引
 
-Fumadocs 用 Orama 在浏览器内做全文搜索。索引在构建期由 MDX 内容生成并发到客户端。无需外部服务。
+Fumadocs 用 Orama 在浏览器内做全文搜索。索引在构建期由 MDX 内容生成、随静态资产发布 —— 没有路由处理器，也无需外部服务。
+
+## 自托管云服务（ADR-0059）
+
+云端组件 —— `signaling`（WebRTC 会合，7892）、`share`（公开分享链接，8787）、headless 的 `cognia-server` 大脑宿主（**27890**，HTTPS）—— 以 GHCR 镜像发布，由 `images.yml` 在 `v*` tag 上构建：
+
+```
+ghcr.io/maxqian888/cognia-signaling
+ghcr.io/maxqian888/cognia-share
+ghcr.io/maxqian888/cognia-server        # -slim / -full 两个变体
+ghcr.io/maxqian888/cognia-runner        # T2 每 agent 一容器的 runner 镜像
+```
+
+- **Compose 套件** —— `deploy/compose/`，用 profile 承载阶段阶梯（`server`、`tls` Caddy/ACME 前门、`observability` Prometheus、`logto` 自托管 OIDC IdP），另有把外部 agent 拆到独立 runner 容器的 T2 override。入口见 [`deploy/compose/README.md`](https://github.com/MaxQian888/cognia-next/blob/master/deploy/compose/README.md)。
+- **Kubernetes** —— `deploy/k8s/` kustomize 树，1 租户 = 1 namespace；kind 冒烟与生产注意事项（gVisor RuntimeClass、必填 `publicUrl`、按租户接 Logto）见 `deploy/k8s/README.md`。
+- **冒烟** —— `scripts/smoke/compose-smoke.mjs` 按 tier（`services` / `server` / `tls`）驱动运行中的栈；`compose-e2e.yml` 在每个触及套件的 PR 上跑它。
+- 完整架构与隔离/拓扑阶梯：ADR-0059（英文版：`docs/content/docs/en/adr/0059-cloud-deployment-headless-brain.md`）。
+
+### 浏览器 Companion 安全要求
+
+生产环境的 Web 客户端只接受以下 Companion 通道：
+
+- 公共 CA 信任的 HTTPS；
+- 管理员本地 CA 签发、且浏览器已经信任的 HTTPS；或
+- 加密 WebRTC（直连或 TURN 中继）。
+
+浏览器无法自动安装或绕过本地 CA。配对前必须先把 CA 安装到操作系统/浏览器信任库，并在浏览器中验证完整证书链；Companion server 同时配置对应证书和私钥。生产构建拒绝明文 HTTP。只有非生产构建显式设置 `NEXT_PUBLIC_ALLOW_INSECURE_COMPANION_HTTP=1` 时才允许 HTTP，并持续显示不安全警告；高风险控制不得使用该模式。
+
+Web Origin 必须按完整 HTTPS Origin（`scheme://host[:port]`）精确授权。带认证的接口禁止使用 `*`；methods、headers 和 preflight 保持最小范围，Private Network Access 也只能放行管理员明确配置的 Origin。排障时分别识别证书不受信、Origin/CORS、PNA、JWT 过期或撤销、缺少 TURN、宿主离线，不能统一显示为“网络错误”。
+
+同一浏览器账号可以保存多个加密 Companion 目标，但一次只激活一个。Provider key、device JWT、OIDC token 与 signaling 私钥只进入浏览器 Vault，公开目标簿只保存连接元数据；每个目标还拥有独立 IndexedDB 数据库和 outbound queue 作用域。
 
 ## CI/CD
 
-仓库自带 `.github/workflows/`：
+`.github/workflows/` 的真实清单：
 
-| Workflow          | 触发             | 内容                                                      |
-| ----------------- | ---------------- | --------------------------------------------------------- |
-| `ci.yml`          | PR、push         | Lint、typecheck、test 全套（开箱即用，不需要任何 secret） |
-| `quality.yml`     | `workflow_call`  | ESLint + typecheck + security audit；release 链路复用     |
-| `test.yml`        | `workflow_call`  | `pnpm test:coverage`；release 链路复用                    |
-| `build-tauri.yml` | `workflow_call`  | 跨 OS 矩阵跑 `pnpm tauri build`；release 链路复用         |
-| `release.yml`     | 匹配 `v*` 的 tag | 串联 quality → test → build-tauri → 上传安装包            |
-| `deploy.yml`      | push 到 `main`   | 部署 Web / 文档（按配置）                                 |
+| Workflow               | 触发                                     | 内容                                                                             |
+| ---------------------- | ---------------------------------------- | -------------------------------------------------------------------------------- |
+| `ci.yml`               | `master`/`develop` 的 push/PR            | 编排 `quality.yml` + `test.yml`（lint、typecheck、Jest 分片、覆盖率门禁、E2E）   |
+| `build-tauri.yml`      | `workflow_call` / 手动                   | 桌面构建矩阵；updater 签名走 `TAURI_SIGNING_*` secrets                           |
+| `release.yml`          | `v*` tag                                 | 继承 secrets 调用 `build-tauri.yml` → draft release + 签名 `latest.json`         |
+| `images.yml`           | `v*` tag / 手动 / 容器输入相关 PR        | 构建并发布四个 GHCR 镜像；PR 上对 `cognia-server` 跑 `cargo check` 编译门禁      |
+| `deploy.yml`           | **仅手动 dispatch** / `workflow_call`    | GitHub Environments + `DEPLOY_ENABLED` 双门禁：Workers（wrangler）、Fly、docs Pages |
+| `compose-e2e.yml`      | `deploy/compose/**`、services、smoke 的 PR | 在 CI 里拉起 compose 套件并跑分层冒烟                                            |
+| `signaling-server.yml` | `master`/`dev` push + 服务相关 PR        | 服务 CI：clippy + 测试 + 覆盖率 + worker-build 校验                              |
+| `share-server.yml`     | `master`/`dev` push + 服务相关 PR        | 服务 CI：clippy + 测试 + core↔Worker 常量一致性                                  |
 
-如要 fork Cognia 并发布二进制，把这些 workflow 一起 fork —— 它们编码了矩阵目标和签名接线。
+普通 push 不会部署任何东西 —— `deploy.yml` 是刻意 opt-in 的（fork 无 secrets 也保持绿色）。
 
 ## 版本管理
 
-Cognia 在 `package.json` 与 `Cargo.toml` 都用 **semver**，需手动同步。
-
-`tauri.conf.json` → `version` 是用户可见版本（关于对话框、updater 都用它），必须与 npm/Cargo 版本一致。
+Cognia 作为**一个整体**用 [Changesets](https://github.com/changesets/changesets) 管理版本 —— 根 `package.json` 的 version 是唯一事实源。
 
 发版流程：
 
-1. 在 `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json` 改版本号。
-2. 更新 `CHANGELOG.md`。
-3. `git tag v0.2.0 && git push --tags`。
-4. release workflow 跑剩余流程。
+1. 开发期间，每个用户可见的变更都随代码提交一条 `pnpm changeset` 记录。
+2. `pnpm release:version` —— 先 `changeset version`（消费积累的条目、抬根版本、更新 `CHANGELOG.md`），再 `pnpm version:sync` 把新版本传播到 `src-tauri/tauri.conf.json`、各 `Cargo.toml`、`cli/`、`sidecar/`、`mobile/`、`docs/`。
+3. 提交，`git tag v0.2.0 && git push --tags`。
+4. `release.yml` + `images.yml` 跑剩余流程（安装包 + 容器镜像）。
 
 ## 冒烟测试
 

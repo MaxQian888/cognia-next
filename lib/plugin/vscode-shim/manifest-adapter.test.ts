@@ -27,6 +27,7 @@ const emptyInference: VsCodePermissionInference = {
   reasons: [],
   confidence: "high",
   unparsedBundle: false,
+  unsupportedApis: [],
 }
 
 describe("adaptVscodeManifest", () => {
@@ -44,6 +45,43 @@ describe("adaptVscodeManifest", () => {
     expect(result.manifest.id).toBe("esbenp.prettier-vscode")
   })
 
+  it("projects contributes.languages onto manifest.vscodeLanguages", () => {
+    const result = adaptVscodeManifest({
+      vsix: makeVsixResult({
+        name: "svelte",
+        publisher: "svelte",
+        version: "1.0.0",
+        engines: { vscode: ">=1.74.0" },
+        contributes: {
+          languages: [
+            { id: "svelte", extensions: [".svelte"], aliases: ["Svelte"] },
+            // Malformed entry (no id) must be dropped.
+            { extensions: [".bad"] } as never,
+          ],
+        },
+      }),
+      inference: emptyInference,
+      source: "openvsx",
+    })
+    expect(result.manifest.vscodeLanguages).toEqual([
+      { id: "svelte", extensions: [".svelte"], aliases: ["Svelte"] },
+    ])
+  })
+
+  it("omits vscodeLanguages when no languages are contributed", () => {
+    const result = adaptVscodeManifest({
+      vsix: makeVsixResult({
+        name: "no-lang",
+        publisher: "acme",
+        version: "1.0.0",
+        engines: { vscode: ">=1.74.0" },
+      }),
+      inference: emptyInference,
+      source: "openvsx",
+    })
+    expect(result.manifest.vscodeLanguages).toBeUndefined()
+  })
+
   it("escapes characters disallowed in plugin ids", () => {
     const result = adaptVscodeManifest({
       vsix: makeVsixResult({
@@ -56,6 +94,91 @@ describe("adaptVscodeManifest", () => {
       source: "vsix-upload",
     })
     expect(result.manifest.id).toBe("publisher-with-symbols.weird-name-with-spaces")
+  })
+
+  it("records the resolved targetPlatform so the update check can re-query it", () => {
+    // A `universal` fallback install must keep asking Open VSX for
+    // `universal`. Re-deriving the platform from the asking machine would
+    // silently offer a platform-specific build as an "update".
+    const result = adaptVscodeManifest({
+      vsix: makeVsixResult({
+        name: "rust-analyzer",
+        publisher: "rust-lang",
+        version: "1.0.0",
+        engines: { vscode: ">=1.74.0" },
+      }),
+      inference: emptyInference,
+      source: "openvsx",
+      targetPlatform: "universal",
+    })
+    expect(result.manifest.vscodeExtension?.targetPlatform).toBe("universal")
+  })
+
+  it("omits targetPlatform for a .vsix upload, which has no registry platform", () => {
+    const result = adaptVscodeManifest({
+      vsix: makeVsixResult({
+        name: "local",
+        publisher: "acme",
+        version: "1.0.0",
+        engines: { vscode: ">=1.74.0" },
+      }),
+      inference: emptyInference,
+      source: "vsix-upload",
+    })
+    // Absent, not `""` / `"universal"` — we must not invent a platform claim.
+    expect(result.manifest.vscodeExtension).not.toHaveProperty("targetPlatform")
+  })
+
+  it("persists unsupportedApis onto the manifest so the card warning survives install", () => {
+    const result = adaptVscodeManifest({
+      vsix: makeVsixResult({
+        name: "dbg",
+        publisher: "acme",
+        version: "1.0.0",
+        engines: { vscode: "^1.93.0" },
+        main: "./out/extension.js",
+      }),
+      inference: { ...emptyInference, unsupportedApis: ["vscode.debug"] },
+      source: "openvsx",
+    })
+    expect(result.manifest.vscodeExtension?.unsupportedApis).toEqual(["vscode.debug"])
+    expect(result.warnings).toContainEqual(
+      expect.stringContaining("uses APIs cognia doesn't implement")
+    )
+  })
+
+  it("omits unsupportedApis entirely when the walk found none", () => {
+    // `[]` would assert "we looked and found none" — a claim the minified
+    // path can't support. Absent means "no evidence recorded".
+    const result = adaptVscodeManifest({
+      vsix: makeVsixResult({
+        name: "clean",
+        publisher: "acme",
+        version: "1.0.0",
+        engines: { vscode: ">=1.74.0" },
+      }),
+      inference: emptyInference,
+      source: "openvsx",
+    })
+    expect(result.manifest.vscodeExtension).not.toHaveProperty("unsupportedApis")
+  })
+
+  it("an engine range the shim can't satisfy warns but still produces a manifest", () => {
+    const result = adaptVscodeManifest({
+      vsix: makeVsixResult({
+        name: "modern",
+        publisher: "acme",
+        version: "1.0.0",
+        engines: { vscode: "^1.93.0" },
+        main: "./out/extension.js",
+      }),
+      inference: emptyInference,
+      source: "openvsx",
+    })
+    // Adaptation succeeded — the range is never a gate.
+    expect(result.manifest.id).toBe("acme.modern")
+    expect(result.manifest.vscodeExtension?.engineVscode).toBe("^1.93.0")
+    expect(result.warnings).toContainEqual(expect.stringContaining("requires VS Code ^1.93.0"))
   })
 
   it("sets type to vscode-extension and main to vscodeMain", () => {
@@ -113,6 +236,7 @@ describe("adaptVscodeManifest", () => {
         reasons: [],
         confidence: "high",
         unparsedBundle: false,
+        unsupportedApis: [],
       },
       source: "vsix-upload",
     })
@@ -137,6 +261,7 @@ describe("adaptVscodeManifest", () => {
         reasons: [],
         confidence: "high",
         unparsedBundle: false,
+        unsupportedApis: [],
       },
       source: "vsix-upload",
     })
@@ -478,5 +603,63 @@ describe("mapActivationEvent", () => {
     expect(mapActivationEvent("onAuthenticationRequest", warnings)).toBe("onAuthenticationRequest")
     expect(mapActivationEvent("onUri", warnings)).toBe("onUri")
     expect(mapActivationEvent("onTerminal", warnings)).toBe("onTerminal")
+  })
+})
+
+// ── W5.1: grammars / iconThemes / snippets projections ───────────────────────
+describe("adaptVscodeManifest W5.1 projections", () => {
+  it("projects grammars, icon themes, and snippets onto the manifest", () => {
+    const result = adaptVscodeManifest({
+      vsix: makeVsixResult({
+        name: "svelte",
+        publisher: "svelte",
+        version: "1.0.0",
+        engines: { vscode: ">=1.74.0" },
+        contributes: {
+          grammars: [
+            { language: "svelte", scopeName: "source.svelte", path: "syntaxes/svelte.json" },
+            // Malformed (no scopeName) must be dropped.
+            { language: "bad", path: "syntaxes/bad.json" } as never,
+          ],
+          iconThemes: [
+            { id: "svelte-icons", label: "Svelte Icons", path: "icons/theme.json" },
+            { path: "icons/broken.json" } as never,
+          ],
+          snippets: [
+            { language: "svelte", path: "snippets/svelte.json" },
+            { language: 42, path: "snippets/bad.json" } as never,
+          ],
+        },
+      }),
+      inference: emptyInference,
+      source: "openvsx",
+    })
+    expect(result.manifest.vscodeGrammars).toEqual([
+      { language: "svelte", scopeName: "source.svelte", path: "syntaxes/svelte.json" },
+    ])
+    expect(result.manifest.vscodeIconThemes).toEqual([
+      { id: "svelte-icons", label: "Svelte Icons", path: "icons/theme.json" },
+    ])
+    expect(result.manifest.vscodeSnippets).toEqual([
+      { language: "svelte", path: "snippets/svelte.json" },
+    ])
+    // Bundle-less grammar/snippet contributions still yield a capability.
+    expect(result.manifest.capabilities).toContain("themes")
+  })
+
+  it("omits the fields when nothing is contributed", () => {
+    const result = adaptVscodeManifest({
+      vsix: makeVsixResult({
+        name: "plain",
+        publisher: "acme",
+        version: "1.0.0",
+        engines: { vscode: ">=1.74.0" },
+      }),
+      inference: emptyInference,
+      source: "openvsx",
+    })
+    expect(result.manifest.vscodeGrammars).toBeUndefined()
+    expect(result.manifest.vscodeIconThemes).toBeUndefined()
+    expect(result.manifest.vscodeSnippets).toBeUndefined()
   })
 })

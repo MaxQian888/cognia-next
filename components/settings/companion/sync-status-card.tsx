@@ -30,7 +30,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { SYNC_HANDLER_TABLES, runSyncDown, snapshotSyncStates } from "@/lib/sync/companion-sync"
-import { formatRelative } from "@/lib/time/relative"
+import { formatRelative } from "@cognia/time"
 import { cn } from "@/lib/utils"
 import type { SyncableTable } from "@/lib/sync/types"
 
@@ -175,57 +175,61 @@ export function SyncStatusCard() {
         </Button>
       </CardHeader>
       <CardContent>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{t("colTable")}</TableHead>
-              <TableHead>{t("colLastSync")}</TableHead>
-              <TableHead>{t("colCursor")}</TableHead>
-              <TableHead className="w-[100px] text-right">{t("colActions")}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((row) => {
-              const rowBusy = isBusy(row.table)
-              return (
-                <TableRow key={row.table} data-testid={`sync-status-row-${row.table}`}>
-                  <TableCell className="font-mono text-xs">
-                    {t(`tableLabels.${row.table}`)}
-                    {row.lastError && (
-                      <p
-                        className="mt-0.5 text-[10px] text-destructive break-all"
-                        data-testid={`sync-status-row-${row.table}-error`}
-                      >
-                        {row.lastError}
-                      </p>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {row.lastSyncAt ? formatRelative(row.lastSyncAt) : t("never")}
-                  </TableCell>
-                  <TableCell className="font-mono text-[10px] text-muted-foreground">
-                    {row.since === 0 ? "—" : `#${row.since}`}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => onSyncOne(row.table)}
-                      disabled={rowBusy || busy === "all"}
-                      aria-label={t("syncNowAria", { table: t(`tableLabels.${row.table}`) })}
-                    >
-                      {rowBusy ? (
-                        <LoaderIcon className={cn("h-3.5 w-3.5 animate-spin")} />
-                      ) : (
-                        <RefreshCwIcon className="h-3.5 w-3.5" />
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="whitespace-nowrap">{t("colTable")}</TableHead>
+                <TableHead className="whitespace-nowrap">{t("colLastSync")}</TableHead>
+                <TableHead className="whitespace-nowrap">{t("colCursor")}</TableHead>
+                <TableHead className="w-[100px] whitespace-nowrap text-right">
+                  {t("colActions")}
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((row) => {
+                const rowBusy = isBusy(row.table)
+                return (
+                  <TableRow key={row.table} data-testid={`sync-status-row-${row.table}`}>
+                    <TableCell className="font-mono text-xs">
+                      {t(`tableLabels.${row.table}`)}
+                      {row.lastError && (
+                        <p
+                          className="mt-0.5 text-[10px] text-destructive break-all"
+                          data-testid={`sync-status-row-${row.table}-error`}
+                        >
+                          {row.lastError}
+                        </p>
                       )}
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              )
-            })}
-          </TableBody>
-        </Table>
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {row.lastSyncAt ? formatRelative(row.lastSyncAt) : t("never")}
+                    </TableCell>
+                    <TableCell className="font-mono text-[10px] text-muted-foreground">
+                      {row.since === 0 ? "—" : `#${row.since}`}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => onSyncOne(row.table)}
+                        disabled={rowBusy || busy === "all"}
+                        aria-label={t("syncNowAria", { table: t(`tableLabels.${row.table}`) })}
+                      >
+                        {rowBusy ? (
+                          <LoaderIcon className={cn("h-3.5 w-3.5 animate-spin")} />
+                        ) : (
+                          <RefreshCwIcon className="h-3.5 w-3.5" />
+                        )}
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
+            </TableBody>
+          </Table>
+        </div>
       </CardContent>
     </Card>
   )

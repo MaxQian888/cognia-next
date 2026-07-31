@@ -1,0 +1,64 @@
+{
+  "accounts": {
+    "add": "Add account",
+    "approvedOrigin": "Approved self-hosted HTTPS origin (optional)",
+    "authStrategy": "Authentication method",
+    "credentialHandle": "Credential handle",
+    "integration": "Integration",
+    "label": "Account label",
+    "providerId": "Auth provider ID",
+    "remoteAccountId": "Remote account ID",
+    "selectAuthStrategy": "Select an authentication method",
+    "selectIntegration": "Select an integration",
+    "title": "Accounts"
+  },
+  "approvals": {
+    "approve": "Approve",
+    "cancel": "Cancel",
+    "empty": "No action jobs yet.",
+    "title": "Approvals and jobs"
+  },
+  "audit": {
+    "empty": "No integration audit entries yet.",
+    "title": "Audit"
+  },
+  "description": "Manage Marketplace accounts, scoped event subscriptions, approvals, health, and audit without exposing credentials to plugins.",
+  "disable": "Disable",
+  "emptyPlugins": "Install an Integration-capable Marketplace plugin to begin.",
+  "enable": "Enable",
+  "health": {
+    "degraded": "Degraded",
+    "healthy": "Healthy",
+    "revoked": "Revoked",
+    "unknown": "Unknown"
+  },
+  "installed": "Installed integrations",
+  "remove": "Remove",
+  "risk": {
+    "destructive": "Destructive",
+    "read": "Read",
+    "write": "Write"
+  },
+  "status": {
+    "awaiting_approval": "Awaiting approval",
+    "cancelled": "Cancelled",
+    "deadlettered": "Dead-lettered",
+    "failed": "Failed",
+    "queued": "Queued",
+    "retry_wait": "Waiting to retry",
+    "running": "Running",
+    "succeeded": "Succeeded"
+  },
+  "subscriptions": {
+    "account": "Account",
+    "add": "Add subscription",
+    "allResources": "All resources",
+    "eventTypes": "Event types, comma-separated",
+    "ingressSecret": "Webhook secret (required when ingress is enabled)",
+    "resourceId": "Resource ID (optional)",
+    "resourceKind": "Resource kind (optional)",
+    "selectAccount": "Select an account",
+    "title": "Subscriptions"
+  },
+  "title": "Integrations"
+}

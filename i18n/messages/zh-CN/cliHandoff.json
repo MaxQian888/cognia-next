@@ -1,0 +1,4 @@
+{
+  "failed": "导入移交的会话失败",
+  "received": "已从 CLI 移交会话「{title}」"
+}

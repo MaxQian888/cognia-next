@@ -43,11 +43,11 @@ beforeEach(() => {
   isMobileValue = false
 })
 
-test("renders toolbar, left, center, and right panes on desktop", () => {
+test("renders the direct header, left, center, and right panes on desktop", () => {
   render(
     <FeaturePageShell
       storageId="example"
-      toolbar={<div data-testid="example-toolbar" />}
+      header={<header data-testid="example-header" />}
       leftPane={{ label: "Filters", content: <div data-testid="example-left" /> }}
       rightPane={{ label: "Preview", content: <div data-testid="example-right" /> }}
     >
@@ -55,9 +55,9 @@ test("renders toolbar, left, center, and right panes on desktop", () => {
     </FeaturePageShell>
   )
   expect(screen.getByTestId("feature-shell-example")).toBeInTheDocument()
-  expect(screen.getByTestId("feature-shell-example-toolbar")).toBeInTheDocument()
+  expect(screen.getByTestId("feature-shell-example-header")).toBeInTheDocument()
   expect(screen.getByTestId("feature-shell-example-center")).toBeInTheDocument()
-  expect(screen.getByTestId("example-toolbar")).toBeInTheDocument()
+  expect(screen.getByTestId("example-header")).toBeInTheDocument()
   expect(screen.getByTestId("example-left")).toBeInTheDocument()
   expect(screen.getByTestId("example-center")).toBeInTheDocument()
   expect(screen.getByTestId("example-right")).toBeInTheDocument()

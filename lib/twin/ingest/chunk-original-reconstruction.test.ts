@@ -10,7 +10,7 @@
  * pins that property and demonstrates the naive slice is wrong.
  */
 
-import { redactText, unredactText } from "./redact"
+import { redactText, unredactText } from "@cognia/redact"
 import { prepareChunks } from "./chunk"
 
 describe("chunk original reconstruction (T1.1)", () => {

@@ -27,6 +27,8 @@ import {
 } from "@/types/workflow/visual"
 import { nodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
 import { tNode } from "@/lib/workflow/i18n/node-translate"
+import { reduceStepStream } from "@/hooks/workflow/use-step-stream"
+import { formatCostUsd, formatTokens } from "@/lib/workflow/runs/usage-aggregate"
 import { formatDurationMs } from "./format"
 
 const CATEGORY_BADGE = {
@@ -83,6 +85,30 @@ export function RunStepDetail({
   }, [stepId, workflow.nodes, events])
 
   const logEvents = useMemo(() => stepEvents.filter((e) => e.type === "run_log"), [stepEvents])
+
+  // Retry history (step_retrying events — one per backoff wait).
+  const retryEvents = useMemo(
+    () => stepEvents.filter((e) => e.type === "step_retrying"),
+    [stepEvents]
+  )
+
+  // Live streaming output (step_stream events) + the step's token/cost usage.
+  const stream = useMemo(() => reduceStepStream(stepEvents, stepId), [stepEvents, stepId])
+  const usage = useMemo(() => {
+    const usageEv = [...stepEvents].reverse().find((e) => e.type === "step_usage")
+    return (
+      (usageEv?.payload as
+        | {
+            inputTokens?: number
+            outputTokens?: number
+            totalTokens?: number
+            costUsd?: number
+            providerId?: string
+            modelId?: string
+          }
+        | undefined) ?? null
+    )
+  }, [stepEvents])
 
   const filteredLogs = useMemo(() => {
     const q = logQuery.trim().toLowerCase()
@@ -152,7 +178,74 @@ export function RunStepDetail({
                 value={new Date((completedEv ?? failedEv ?? skippedEv)!.ts).toLocaleTimeString()}
               />
             ) : null}
+            {usage ? (
+              <>
+                <Stat
+                  label={t("tokens")}
+                  value={`${formatTokens(usage.totalTokens ?? 0)} (${formatTokens(usage.inputTokens ?? 0)} / ${formatTokens(usage.outputTokens ?? 0)})`}
+                />
+                <Stat
+                  label={t("cost")}
+                  value={
+                    usage.costUsd !== undefined
+                      ? `${formatCostUsd(usage.costUsd)} ${t("costEstimateSuffix")}`
+                      : "—"
+                  }
+                />
+                {usage.providerId ? (
+                  <Stat
+                    label={t("servedBy")}
+                    value={`${usage.providerId}${usage.modelId ? ` · ${usage.modelId}` : ""}`}
+                  />
+                ) : null}
+              </>
+            ) : null}
           </div>
+        ) : null}
+
+        {stream.isStreaming ? (
+          <Section title={t("streaming")}>
+            <pre
+              className="whitespace-pre-wrap rounded-md border border-wf-status-running/40 bg-wf-status-running/5 p-3 text-xs"
+              data-testid="step-streaming-output"
+            >
+              {stream.text}
+              <span className="animate-pulse">▌</span>
+            </pre>
+          </Section>
+        ) : null}
+
+        {retryEvents.length > 0 ? (
+          <Section title={t("attempts")}>
+            <div
+              className="space-y-1.5 rounded-md border bg-muted/30 p-2"
+              data-testid="step-attempts"
+            >
+              {retryEvents.map((e) => {
+                const payload = e.payload as
+                  | { attempt?: number; maxAttempts?: number; delayMs?: number; error?: string }
+                  | undefined
+                return (
+                  <div key={e.id} className="flex items-start gap-2 text-xs">
+                    <Badge variant="outline" className="shrink-0 font-mono text-wf-status-running">
+                      {t("attemptBadge", {
+                        attempt: payload?.attempt ?? 0,
+                        max: payload?.maxAttempts ?? 0,
+                      })}
+                    </Badge>
+                    <div className="min-w-0 flex-1 break-words text-muted-foreground">
+                      {payload?.error ?? "—"}
+                      {typeof payload?.delayMs === "number" ? (
+                        <span className="ml-1 opacity-70">
+                          {t("retryIn", { delay: formatDurationMs(payload.delayMs) })}
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </Section>
         ) : null}
 
         {failedError ? (

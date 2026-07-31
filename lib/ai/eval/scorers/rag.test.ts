@@ -158,6 +158,61 @@ describe("makeRagScorer — context-recall (deterministic)", () => {
 
   it("is not-applicable without an expectedContext reference", async () => {
     const s = makeRagScorer({ metric: "context-recall" })
-    expect((await s.score(sample("answer", [{ text: "x" }]), makeCase())).error).toBeDefined()
+    const score = await s.score(sample("answer", [{ text: "x" }]), makeCase())
+    expect(score.status).toBe("not-applicable")
+    expect(score.error).toBeDefined()
+  })
+})
+
+describe("makeRagScorer — status separation", () => {
+  const chunks = [{ text: "Paris is the capital of France." }]
+
+  it("reports a provider failure as errored, never as not-applicable", async () => {
+    // The two must not look alike: "no RAG references in this dataset" and
+    // "the judge provider is down" call for completely different reactions.
+    const s = makeRagScorer({
+      metric: "faithfulness",
+      client: {
+        complete: async () => {
+          throw new Error("upstream 503")
+        },
+      },
+    })
+    const score = await s.score(sample("answer", chunks), makeCase())
+    expect(score.status).toBe("errored")
+    expect(score.error).toBe("upstream 503")
+  })
+
+  it("stringifies a non-Error rejection", async () => {
+    const s = makeRagScorer({
+      metric: "answer-relevancy",
+      client: {
+        complete: async () => {
+          throw "rate limited"
+        },
+      },
+    })
+    const score = await s.score(sample("answer", chunks), makeCase())
+    expect(score.status).toBe("errored")
+    expect(score.error).toBe("rate limited")
+  })
+
+  it("reports a malformed judge payload as errored", async () => {
+    const s = makeRagScorer({
+      metric: "context-precision",
+      client: { complete: async () => "not json at all" } as LlmClient,
+    })
+    const score = await s.score(sample("answer", chunks), makeCase())
+    expect(score.status).toBe("errored")
+    expect(score.error).toContain("rag parse error")
+  })
+
+  it("reports no-retrieval as not-applicable for the LLM metrics", async () => {
+    const s = makeRagScorer({
+      metric: "faithfulness",
+      client: { complete: async () => "{}" } as LlmClient,
+    })
+    const score = await s.score(sample("answer"), makeCase())
+    expect(score.status).toBe("not-applicable")
   })
 })

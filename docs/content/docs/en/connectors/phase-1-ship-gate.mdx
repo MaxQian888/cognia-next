@@ -114,8 +114,9 @@ Before proceeding to manual checks, confirm all automated gates are green:
 
 ## §8 — Draft mode
 
-> Phase 1 note: the AI pipeline in auto mode is stubbed (records a placeholder job).  
-> Draft mode only produces a draft row — verify that flow end-to-end.
+> Current note: auto mode and scheduled digests now run the shared AI turn path via
+> `runConnectorDigestTurn`. Draft mode still produces a draft row first — verify the
+> approval/rejection flow end-to-end.
 
 - [ ] Set an adapter conversation to **draft** mode via the ConversationHeader switcher.
 - [ ] Send an inbound message.
@@ -183,11 +184,7 @@ The following items are explicitly deferred and must **not** block this release:
 
 | Deferred item                                                       | Tracking                                        |
 | ------------------------------------------------------------------- | ----------------------------------------------- |
-| Auto mode real AI round-trip (`sendPrompt` → reply → `sendMessage`) | Task 40+                                        |
-| Attachment caching (`connectorAttachments` fetch pipeline)          | Phase 2                                         |
-| Slack / Lark OAuth hosted redirect URL                              | Phase 2                                         |
 | Full Playwright E2E (`pnpx playwright test`)                        | Requires `pnpm add -D @playwright/test express` |
-| `connection:scheduled:digest` real AI call                          | Task 40+                                        |
 
 ---
 

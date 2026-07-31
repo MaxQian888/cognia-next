@@ -1,0 +1,14 @@
+{
+  "activation": "{pluginName} 激活失败",
+  "config": "{pluginName} 设置应用失败",
+  "disable": "{pluginName} 禁用失败",
+  "enable": "{pluginName} 启用失败",
+  "hotReload": "{pluginName} 热重载失败",
+  "install": "{pluginName} 安装失败",
+  "installRollback": "{pluginName} 安装失败后回滚出错",
+  "load": "{pluginName} 加载失败",
+  "localInstall": "{pluginName} 本地插件安装失败",
+  "permissionRegister": "{pluginName} 权限注册失败",
+  "uninstall": "{pluginName} 卸载失败",
+  "wasmPreload": "{pluginName} WASM 预加载失败"
+}

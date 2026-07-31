@@ -13,8 +13,8 @@
 import { useEffect, useRef } from "react"
 import { useSearchParams } from "next/navigation"
 import type { Density, LogPanelFilterState, ViewMode, PanelSource } from "./use-log-panel-filters"
-import type { LogLevel } from "@/lib/logging"
-import type { PresetTimeRange } from "@/lib/logging/filter-presets"
+import type { LogLevel } from "@cognia/logging"
+import type { PresetTimeRange } from "@cognia/logging/filter-presets"
 
 const VALID_LEVELS = new Set<LogLevel | "all">([
   "all",

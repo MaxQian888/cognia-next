@@ -16,12 +16,17 @@ export { workflowDesignerAgent } from "./workflow-designer"
 export { workflowDebuggerAgent } from "./workflow-debugger"
 export { workflowRefactorerAgent } from "./workflow-refactorer"
 export { workflowDocWriterAgent } from "./workflow-doc-writer"
+export { exploreAgent } from "./explore"
+export { planAgent } from "./plan"
 export type { AgentDefinition } from "./types"
 
 import { workflowDesignerAgent } from "./workflow-designer"
 import { workflowDebuggerAgent } from "./workflow-debugger"
 import { workflowRefactorerAgent } from "./workflow-refactorer"
 import { workflowDocWriterAgent } from "./workflow-doc-writer"
+import { exploreAgent } from "./explore"
+import { planAgent } from "./plan"
+import type { AgentDefinition } from "./types"
 import { listSubagentEntries } from "@/lib/plugin/registries/subagent-registry"
 import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
@@ -63,6 +68,9 @@ function projectPluginSubagent(entry: {
   if (entry.entry.model) def.model = entry.entry.model
   if (entry.entry.maxTurns !== undefined) def.maxTurns = entry.entry.maxTurns
   if (entry.entry.effort) def.effort = entry.entry.effort
+  if (entry.entry.externalPresetId) def.externalPresetId = entry.entry.externalPresetId
+  if (entry.entry.mcpServerIds?.length) def.mcpServerIds = entry.entry.mcpServerIds
+  if (entry.entry.hidden) def.hidden = true
   // Anonymous plugins (no pluginId tag) are still legal — emit the bare id
   // so the dispatcher can address them, but flag the empty namespace
   // segment so a malicious plugin cannot masquerade as another's id.
@@ -96,6 +104,11 @@ function projectSubagentTemplate(tpl: SubAgentTemplate): {
   if (tpl.config.tools) def.tools = tpl.config.tools
   if (tpl.config.model) def.model = tpl.config.model
   if (tpl.config.maxSteps !== undefined) def.maxTurns = tpl.config.maxSteps
+  // External-CLI backing (A2): route this subagent to an external agent when the
+  // template names a preset, so the dispatching model runs it on Claude Code /
+  // Codex / … instead of the built-in executor.
+  if (tpl.config.externalPresetId) def.externalPresetId = tpl.config.externalPresetId
+  if (tpl.config.mcpServerIds?.length) def.mcpServerIds = tpl.config.mcpServerIds
   return { id: `template:${slugifySubagentName(tpl.name)}`, def }
 }
 
@@ -115,17 +128,36 @@ function projectSubagentTemplate(tpl: SubAgentTemplate): {
  *   templates (Settings starting points) are deliberately NOT auto-injected
  *   into every direct-chat turn.
  */
+/**
+ * ADR-0090 Phase 7 (delegation-mode): a NATIVE (SDK Task) subagent runs
+ * inside the parent's process and inherits its route/provider/credential —
+ * only a frozen model role may differ. A def that pins a DIFFERENT provider
+ * or an external backing therefore may NOT ride the native agents map: the
+ * SDK would silently run it on the parent's runtime, ignoring the pinned
+ * intent. Such defs stay reachable through the orchestrated `dispatch_agent`
+ * rail, which honors them.
+ */
+function isNativeDelegationEligible(def: {
+  provider?: string
+  externalPresetId?: string
+}): boolean {
+  return !def.provider && !def.externalPresetId
+}
+
 export function resolveAllSubagents(opts: {
   context: "workflow-editor" | "team" | "direct"
 }): Record<string, Record<string, unknown>> {
   if (opts.context === "direct") {
     const result: Record<string, Record<string, unknown>> = {}
     for (const entry of listSubagentEntries()) {
+      if (entry.entry.disabled) continue
+      if (!isNativeDelegationEligible(entry.entry)) continue
       const { id, def } = projectPluginSubagent(entry)
       result[id] = def
     }
     for (const tpl of Object.values(useSubagentRuntimeStore.getState().templates)) {
-      if (tpl.isBuiltIn) continue
+      if (tpl.isBuiltIn || tpl.disabled) continue
+      if (!isNativeDelegationEligible(tpl.config ?? {})) continue
       const { id, def } = projectSubagentTemplate(tpl)
       result[id] = def
     }
@@ -138,6 +170,8 @@ export function resolveAllSubagents(opts: {
   // Team context — union with plugin entries.
   const result: Record<string, Record<string, unknown>> = { ...builtIn }
   for (const entry of listSubagentEntries()) {
+    if (entry.entry.disabled) continue
+    if (!isNativeDelegationEligible(entry.entry)) continue
     const { id, def } = projectPluginSubagent(entry)
     result[id] = def
   }
@@ -151,4 +185,108 @@ export function resolveAllSubagents(opts: {
  */
 export function listAllTeamSubagentIds(): string[] {
   return Object.keys(resolveAllSubagents({ context: "team" }))
+}
+
+/** Display labels for the host-bundled workflow-* built-ins. */
+const BUILT_IN_DISPATCH_LABELS: Record<string, string> = {
+  "workflow-designer": "Workflow Designer",
+  "workflow-debugger": "Workflow Debugger",
+  "workflow-refactorer": "Workflow Refactorer",
+  "workflow-doc-writer": "Workflow Doc Writer",
+  Explore: "Explore",
+  Plan: "Plan",
+}
+
+/**
+ * Project the 4 host-bundled workflow-* `AgentDefinition`s into dispatchable
+ * defs so `dispatch_agent` can target them directly (not only via
+ * `SendOptions.agents` in workflow-editor/team sessions). They keep their bare
+ * dispatcher ids (no `<pluginId>:`/`template:` prefix) and stay leaves
+ * (`allowNesting` omitted). The dispatcher self-selects by `description`, so a
+ * general chat won't pick a workflow-specific agent unless the task fits.
+ */
+function builtInDispatchableSubagents(): Array<{ id: string; def: PluginSubagentDef }> {
+  const builtins: Array<[string, AgentDefinition]> = [
+    ["workflow-designer", workflowDesignerAgent],
+    ["workflow-debugger", workflowDebuggerAgent],
+    ["workflow-refactorer", workflowRefactorerAgent],
+    ["workflow-doc-writer", workflowDocWriterAgent],
+    ["Explore", exploreAgent],
+    ["Plan", planAgent],
+  ]
+  return builtins.map(([id, a]) => ({
+    id,
+    def: {
+      id,
+      name: BUILT_IN_DISPATCH_LABELS[id] ?? id,
+      description: a.description,
+      prompt: a.prompt,
+      ...(a.tools ? { tools: a.tools } : {}),
+      ...(a.disallowedTools ? { disallowedTools: a.disallowedTools } : {}),
+      ...(a.model ? { model: a.model } : {}),
+      ...(a.maxTurns !== undefined ? { maxTurns: a.maxTurns } : {}),
+      ...(a.effort ? { effort: a.effort } : {}),
+      ...(a.hidden ? { hidden: true } : {}),
+      ...(a.disabled ? { disabled: true } : {}),
+    },
+  }))
+}
+
+/**
+ * Resolve the subagents the `dispatch_agent` host tool can target, as FULL
+ * {@link PluginSubagentDef} objects keyed by their projected dispatcher id:
+ * the 4 host-bundled workflow-* built-ins, UNIONED with plugin-registered
+ * subagents and the user's own templates.
+ *
+ * Distinct from {@link resolveAllSubagents} (which returns the bare SDK
+ * `AgentDefinition` map for `SendOptions.agents`): the nested-dispatch path
+ * dispatches via an inline def — `getSubagent` can't resolve projected ids
+ * (`<pluginId>:<id>`, `template:<slug>`) — so it needs the full def, including
+ * the `allowNesting` / `maxDepth` fields that gate whether the dispatched child
+ * may itself nest.
+ */
+export function resolveDispatchableSubagents(): Array<{ id: string; def: PluginSubagentDef }> {
+  // `disabled` defs are excluded everywhere; `hidden` defs stay dispatchable
+  // (UI pickers filter them out on their side — OpenCode semantics).
+  const out: Array<{ id: string; def: PluginSubagentDef }> = builtInDispatchableSubagents().filter(
+    (x) => !x.def.disabled
+  )
+  for (const entry of listSubagentEntries()) {
+    if (entry.entry.disabled) continue
+    const id = entry.pluginId ? `${entry.pluginId}:${entry.id}` : entry.id
+    out.push({ id, def: { ...entry.entry, id } })
+  }
+  for (const tpl of Object.values(useSubagentRuntimeStore.getState().templates)) {
+    if (tpl.isBuiltIn || tpl.disabled) continue
+    const id = `template:${slugifySubagentName(tpl.name)}`
+    out.push({
+      id,
+      def: {
+        id,
+        name: tpl.name,
+        description: tpl.description,
+        prompt: tpl.config.systemPrompt ?? tpl.taskTemplate ?? tpl.description,
+        ...(tpl.config.tools ? { tools: tpl.config.tools } : {}),
+        ...(tpl.config.model ? { model: tpl.config.model } : {}),
+        ...(tpl.config.maxSteps !== undefined ? { maxTurns: tpl.config.maxSteps } : {}),
+        // External-CLI backing (A2): a template naming a preset dispatches to
+        // that external agent, with its declared MCP servers forwarded into the
+        // ACP session. Without these two, `dispatch_agent` would silently route
+        // the template to the built-in executor instead.
+        ...(tpl.config.externalPresetId ? { externalPresetId: tpl.config.externalPresetId } : {}),
+        ...(tpl.config.mcpServerIds?.length ? { mcpServerIds: tpl.config.mcpServerIds } : {}),
+        ...(tpl.config.allowNesting ? { allowNesting: true } : {}),
+        ...(tpl.config.maxNestingDepth !== undefined
+          ? { maxDepth: tpl.config.maxNestingDepth }
+          : {}),
+        ...(tpl.hidden ? { hidden: true } : {}),
+      },
+    })
+  }
+  return out
+}
+
+/** Resolve a single dispatchable subagent def by its projected id. */
+export function getDispatchableSubagentDef(id: string): PluginSubagentDef | undefined {
+  return resolveDispatchableSubagents().find((x) => x.id === id)?.def
 }

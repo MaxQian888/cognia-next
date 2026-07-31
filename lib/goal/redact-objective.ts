@@ -1,6 +1,6 @@
 /**
  * PII redaction for `/goal` objectives — thin wrapper around
- * `lib/twin/ingest/redact.ts` so the cloud-bound objective text never
+ * `packages/redact/src/index.ts` so the cloud-bound objective text never
  * carries emails, phone numbers, bank cards, API keys, or other recognised
  * PII shapes.
  *
@@ -16,7 +16,7 @@
  * case the "nothing to encrypt" path.
  */
 
-import { redactText, type RedactionRecord, unredactText } from "@/lib/twin/ingest/redact"
+import { redactText, type RedactionRecord, unredactText } from "@cognia/redact"
 import { decryptRedactionMap, encryptRedactionMap } from "@/lib/twin/ingest/redaction-key"
 
 export interface RedactObjectiveResult {

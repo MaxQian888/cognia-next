@@ -1,6 +1,6 @@
 "use client"
 
-import { createElement, memo } from "react"
+import { createElement, memo, useMemo } from "react"
 import { Handle, Position, type NodeProps } from "@xyflow/react"
 import {
   Loader2 as LoadingIcon,
@@ -12,16 +12,20 @@ import {
   Pin as PinIcon,
 } from "lucide-react"
 import { getNodeIcon } from "@/lib/workflow/editor/node-icons"
-import { useFormatter, useTranslations } from "next-intl"
+import { useFormatter, useNow, useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import { workflowNodeCategory, type WorkflowNodeKind } from "@/types/workflow/visual"
 import type { WorkflowNodeData } from "@/types/workflow/visual"
 import type { NodeRunStatus } from "@/lib/workflow/editor/store"
+import { defaultLabelFor } from "@/lib/workflow/editor/store"
+import { nodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
+import { tNodeField as translateNodeLabel } from "@/lib/workflow/i18n/node-translate"
 import type { LastRunSummary } from "@/lib/workflow/runtime/last-run-summary"
 import { useEditorStoreOrNull } from "@/lib/workflow/editor/store-context"
 import { useNodeDecoration } from "@/lib/workflow/editor/use-node-decoration"
+import { useNodeDiagnostics } from "@/lib/workflow/editor/use-diagnostics"
 import { getEdgeById, hasEdgeBetween } from "@/lib/workflow/editor/edge-index"
-import { outputHandlesFor } from "@/lib/workflow/editor/node-handles"
+import { hasErrorHandle, outputHandlesFor } from "@/lib/workflow/editor/node-handles"
 import { useShallow } from "zustand/react/shallow"
 import { flagsForTier, resolveEffectiveTier } from "@/lib/workflow/editor/performance-tier"
 import { buildClipboardEnvelope, serializeClipboard } from "@/lib/workflow/editor/clipboard"
@@ -114,9 +118,10 @@ function StatusCornerBadge({ status }: { status: NodeRunStatus }) {
 function LastRunFooter({ lastRun }: { lastRun: LastRunSummary }) {
   const t = useTranslations("workflows.node.lastRun")
   const fmt = useFormatter()
+  const now = useNow()
   const ago = (() => {
     try {
-      return fmt.relativeTime(new Date(lastRun.finishedAt))
+      return fmt.relativeTime(new Date(lastRun.finishedAt), now)
     } catch {
       return new Date(lastRun.finishedAt).toLocaleTimeString()
     }
@@ -126,14 +131,18 @@ function LastRunFooter({ lastRun }: { lastRun: LastRunSummary }) {
     if (lastRun.durationMs < 1000) return `${lastRun.durationMs}ms`
     return `${(lastRun.durationMs / 1000).toFixed(1)}s`
   })()
-  const colors =
-    lastRun.status === "succeeded"
+  // "handled" = the step failed but its per-node error handling substituted
+  // an output and the run continued — amber warning, not plain success.
+  const colors = lastRun.handled
+    ? "border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-300"
+    : lastRun.status === "succeeded"
       ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300"
       : lastRun.status === "failed"
         ? "border-rose-500/30 bg-rose-500/5 text-rose-700 dark:text-rose-300"
         : "border-zinc-500/30 bg-zinc-500/5 text-zinc-700 dark:text-zinc-300"
-  const message =
-    lastRun.status === "succeeded"
+  const message = lastRun.handled
+    ? t("handled", { ago })
+    : lastRun.status === "succeeded"
       ? duration
         ? t("succeeded", { ago, duration })
         : t("succeededNoDuration", { ago })
@@ -145,7 +154,7 @@ function LastRunFooter({ lastRun }: { lastRun: LastRunSummary }) {
       title={lastRun.errorMessage ?? undefined}
       className={cn("border-t px-3 py-1 text-[10px] font-medium", colors)}
       data-testid="wf-node-last-run-footer"
-      data-status={lastRun.status}
+      data-status={lastRun.handled ? "handled" : lastRun.status}
     >
       {message}
       {lastRun.attempt > 1 ? <span className="ml-1 opacity-70">×{lastRun.attempt}</span> : null}
@@ -173,15 +182,69 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
   // mounted (test renders, storybook).
   const decoration = useNodeDecoration(id)
   const tNode = useTranslations("workflows.node")
+  // Catalog translator. A freshly-dropped node carries the un-localized
+  // `defaultLabelFor(kind)` in `data.label`; while it remains untouched we
+  // render the translated catalog label so the canvas is localized out of the
+  // box. Built-ins resolve under `workflows.nodes.<kind>`, plugin nodes under
+  // their `plugin.<id>.workflow.nodes.<rawKind>` overlay. Once the user renames
+  // the node, `data.label` diverges from the default and we show their custom
+  // text verbatim. A root translator covers both namespaces.
+  const tRoot = useTranslations() as unknown as ((key: string) => string) & {
+    has?: (key: string) => boolean
+  }
+  // (A9) Catalog lookup + label translation are stable per (kind, label) —
+  // memoized so hover/selection re-renders skip the registry + i18n walk.
+  const catalogEntry = useMemo(() => nodeCatalogEntry(data.kind), [data.kind])
+  const displayLabel = useMemo(
+    () =>
+      data.label === defaultLabelFor(data.kind)
+        ? translateNodeLabel(tRoot, {
+            kind: data.kind,
+            pluginId: catalogEntry?.pluginId,
+            field: "label",
+            fallback: catalogEntry?.label ?? data.label,
+          })
+        : data.label,
+    [data.label, data.kind, catalogEntry, tRoot]
+  )
   const status: NodeRunStatus = decoration.runStatus ?? data.runStatus ?? "idle"
   const validationFields = decoration.validation?.fields
   const validationSummary = decoration.validation?.summary
   const errorCount = validationFields
     ? Object.keys(validationFields).length
     : (data.validationErrorCount ?? data.validationErrors?.length ?? 0)
-  const hasErrors = errorCount > 0
   const errorTooltip = validationSummary ?? data.validationErrors
   const effectiveLastRun = decoration.lastRun ?? data.lastRun
+
+  // (A4) Diagnostics supersede the param-only badge when a store is mounted:
+  // they're the superset (param errors PLUS expression-ref / orphan /
+  // credential / desktop-only issues) and carry severity. Without a store
+  // (headless renders) we fall back to the legacy `data.*` validation fields.
+  const tDiag = useTranslations() as unknown as (
+    key: string,
+    values?: Record<string, string | number>
+  ) => string
+  const nodeDiagnostics = useNodeDiagnostics(id)
+  const usingDiagnostics = nodeDiagnostics.length > 0
+  const diagErrorCount = usingDiagnostics
+    ? nodeDiagnostics.filter((d) => d.severity === "error").length
+    : errorCount
+  const diagWarningCount = usingDiagnostics
+    ? nodeDiagnostics.filter((d) => d.severity === "warning").length
+    : 0
+  const hasErrors = diagErrorCount > 0
+  const hasWarningsOnly = !hasErrors && diagWarningCount > 0
+  const diagnosticsTooltip = usingDiagnostics
+    ? nodeDiagnostics
+        .map((d) => {
+          try {
+            return tDiag(d.messageKey, d.messageParams)
+          } catch {
+            return d.messageKey
+          }
+        })
+        .join("\n")
+    : (errorTooltip?.join("\n") ?? `${errorCount} validation issue(s)`)
 
   // Pull whatever store context we can — `null` in headless tests is fine.
   const store = useEditorStoreOrNull()
@@ -190,27 +253,53 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
   // during editing) no longer re-render every node. Per-render reads of
   // those arrays go through `store.getState()` + the indexed helpers in
   // `edge-index.ts`, which are O(1).
+  //
+  // (A9) The global signals (`hoveredNodeId`, `spotlightedNodeId`,
+  // `hoveredEdgeId`, `connectionState`) are derived to *per-node booleans*
+  // INSIDE the selector: hovering one node used to flip the raw id in every
+  // node's slice and re-render the whole graph; now only the two nodes whose
+  // derived flags actually change (the previous and next hover target)
+  // re-render. Same for connection drags — pointer moves that don't change
+  // this node's candidate/ring status are no-ops for it.
   const storeSelector = useShallow(
     (
       s: Parameters<NonNullable<typeof store>>[0] extends (state: infer S) => unknown ? S : never
-    ) => ({
-      hoveredNodeId: s.hoveredNodeId,
-      setHoveredNode: s.setHoveredNode,
-      setSelectedNodes: s.setSelectedNodes,
-      removeNodes: s.removeNodes,
-      performanceTier: s.performanceTier,
-      nodeCount: s.nodes.length,
-      spotlightedNodeId: s.spotlightedNodeId,
-      hoveredEdgeId: s.hoveredEdgeId,
-      connectionState: s.connectionState,
-      requestContextMenu: s.requestContextMenu,
-      requestRunFromStep: s.requestRunFromStep,
-      errorPolicy: s.baseWorkflow.settings.errorPolicy,
-    })
+    ) => {
+      const cs = s.connectionState
+      let connectionRing: "compatible" | "incompatible" | null = null
+      let isActiveCandidate = false
+      if (cs && cs.sourceId !== id && showInput) {
+        isActiveCandidate = cs.candidate?.nodeId === id
+        const kindOk = !data.kind.startsWith("trigger.") && data.kind !== "annotation.note"
+        // (A5) Disallow self / multi-incoming-cycle creation cheaply via the
+        // indexed edge lookup. The canonical gate runs through
+        // `validateConnection` when the actual drop happens.
+        const wouldCycle = hasEdgeBetween(s.edges, id, cs.sourceId)
+        connectionRing = kindOk && !wouldCycle ? "compatible" : "incompatible"
+      }
+      const hoveredEdge = s.hoveredEdgeId ? getEdgeById(s.edges, s.hoveredEdgeId) : null
+      return {
+        isHovered: s.hoveredNodeId === id,
+        isSpotlit: s.spotlightedNodeId === id,
+        isHoveredEdgeEndpoint:
+          !!hoveredEdge && (hoveredEdge.source === id || hoveredEdge.target === id),
+        isActiveCandidate,
+        connectionRing,
+        setHoveredNode: s.setHoveredNode,
+        setSelectedNodes: s.setSelectedNodes,
+        removeNodes: s.removeNodes,
+        performanceTier: s.performanceTier,
+        nodeCount: s.nodes.length,
+        touchConnect: s.touchConnect,
+        requestContextMenu: s.requestContextMenu,
+        requestRunFromStep: s.requestRunFromStep,
+        errorPolicy: s.baseWorkflow.settings.errorPolicy,
+      }
+    }
   )
   const storeBits = store?.(storeSelector)
-  const isHovered = storeBits?.hoveredNodeId === id
-  const isSpotlit = storeBits?.spotlightedNodeId === id
+  const isHovered = storeBits?.isHovered ?? false
+  const isSpotlit = storeBits?.isSpotlit ?? false
   const motionEnabled = storeBits
     ? flagsForTier(
         resolveEffectiveTier(storeBits.performanceTier, {
@@ -223,53 +312,58 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
       ).nodeCardTransitions
     : true
 
-  // Hovered-edge endpoint ring: when an edge in the workflow is being
-  // hovered and one of its endpoints is THIS node, draw a thin primary ring
-  // so the user sees which two nodes the edge connects.
-  // (A5) Read via the indexed `getEdgeById` helper — O(1) lookup against
-  // a WeakMap-cached edge index instead of O(E) `Array.find` per render.
-  const isHoveredEdgeEndpoint = (() => {
-    if (!storeBits?.hoveredEdgeId || !store) return false
-    const edge = getEdgeById(store.getState().edges, storeBits.hoveredEdgeId)
-    return !!edge && (edge.source === id || edge.target === id)
-  })()
+  // Hovered-edge endpoint ring + connection-state handle styling (Flowith
+  // drag silk) are derived per-node inside the selector above — read the
+  // precomputed flags here. When a connection is in flight from another
+  // node, this node's target handle renders green (compatible) / red
+  // (incompatible) / thick primary (active candidate). The source node
+  // stays neutral so the user doesn't confuse the source with a candidate.
+  const isHoveredEdgeEndpoint = storeBits?.isHoveredEdgeEndpoint ?? false
+  const connectionRing = storeBits?.connectionRing ?? null
+  const isActiveCandidate = storeBits?.isActiveCandidate ?? false
 
-  // Connection-state handle styling (Flowith drag silk). When a connection
-  // is in flight from another node, this node's target handle is rendered
-  // green (compatible) / red (incompatible) / thick primary (active
-  // candidate). The source node itself stays neutral so the user doesn't
-  // confuse the source with a candidate.
-  const cs = storeBits?.connectionState ?? null
-  const isConnectionSource = cs?.sourceId === id
-  let connectionRing: "compatible" | "incompatible" | null = null
-  let isActiveCandidate = false
-  if (cs && !isConnectionSource && showInput && store) {
-    isActiveCandidate = cs.candidate?.nodeId === id
-    const kindOk = !data.kind.startsWith("trigger.") && data.kind !== "annotation.note"
-    // (A5) Disallow self / multi-incoming-cycle creation cheaply via the
-    // indexed edge lookup. The canonical gate runs through
-    // `validateConnection` when the actual drop happens.
-    const wouldCycle = hasEdgeBetween(store.getState().edges, id, cs.sourceId)
-    connectionRing = kindOk && !wouldCycle ? "compatible" : "incompatible"
+  // Mobile tap-to-connect entry: tapping a source handle arms a connection
+  // rooted at that handle (carrying the handle id so branch/switch outputs
+  // route to the right edge). `stopPropagation` keeps the tap from bubbling to
+  // the node click (which would select + open the inspector). Gated on the
+  // store's `touchConnect` flag — only the mobile editor sets it, so desktop
+  // drag-to-connect is completely untouched (a stationary tap never moves the
+  // node thanks to `nodeDragThreshold`, and on desktop this handler returns
+  // immediately).
+  const armConnectFromHandle = (
+    e: { stopPropagation: () => void },
+    sourceHandle: string | null
+  ) => {
+    if (!storeBits?.touchConnect || !store) return
+    e.stopPropagation()
+    store.getState().beginConnection({ sourceId: id, sourceHandle })
   }
 
-  // Error-branch handle: shown on fallible nodes (not triggers/annotations)
-  // when the workflow opts into `errorPolicy: "branch"`.
+  // Error-branch handle: per-node `errorHandling.onError === "errorBranch"`
+  // is the primary signal; the legacy workflow-level `errorPolicy: "branch"`
+  // keeps showing the handle on every fallible node for existing workflows.
   const showErrorHandle =
     showOutput &&
-    storeBits?.errorPolicy === "branch" &&
     !data.kind.startsWith("trigger.") &&
-    !isAnnotation
+    !isAnnotation &&
+    (hasErrorHandle({ kind: data.kind, errorHandling: data.errorHandling }) ||
+      storeBits?.errorPolicy === "branch")
 
   // Labeled decision handles (branch/switch v2) — single source of truth in
   // `node-handles.ts`, shared with the connection validator and smart edge.
-  const decisionHandles = showOutput
-    ? outputHandlesFor({
-        kind: data.kind,
-        typeVersion: data.typeVersion,
-        params: (data.params as Record<string, unknown>) ?? {},
-      })
-    : null
+  // Memoized on the actual inputs so unrelated re-renders skip the handle
+  // resolution walk.
+  const decisionHandles = useMemo(
+    () =>
+      showOutput
+        ? outputHandlesFor({
+            kind: data.kind,
+            typeVersion: data.typeVersion,
+            params: (data.params as Record<string, unknown>) ?? {},
+          })
+        : null,
+    [showOutput, data.kind, data.typeVersion, data.params]
+  )
 
   // The lastRun footer is suppressed while a run is actively in progress so
   // the user sees current-run state, not stale history.
@@ -303,7 +397,15 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
         // pair the hovered edge connects.
         isHoveredEdgeEndpoint &&
           !selected &&
-          "ring-2 ring-primary/40 ring-offset-1 ring-offset-background"
+          "ring-2 ring-primary/40 ring-offset-1 ring-offset-background",
+        // Copilot reference ring (violet) — the node is attached to the AI
+        // composer (a `@` chip / the "reference selection" action) or under a
+        // transient highlight (the `@`-picker's active row / a proposal-card
+        // hover). Sits below the selection ring so an explicit selection still
+        // wins visually.
+        decoration.referenced &&
+          !selected &&
+          "ring-2 ring-violet-400 ring-offset-2 ring-offset-background dark:ring-violet-500"
       )}
       // Give the card room for every stacked decision handle + label chip.
       style={
@@ -316,6 +418,7 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
       data-testid={`wf-node-${data.kind}`}
       data-run-status={status}
       data-spotlit={isSpotlit ? "true" : undefined}
+      data-referenced={decoration.referenced ? "true" : undefined}
       data-hovered-endpoint={isHoveredEdgeEndpoint ? "true" : undefined}
       data-connection-candidate={isActiveCandidate ? "true" : undefined}
       onMouseEnter={() => storeBits?.setHoveredNode(id)}
@@ -325,9 +428,9 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
       {data.authoredBy === "ai" ? (
         <span
           className="absolute -top-1.5 -left-1.5 z-10 inline-flex items-center justify-center rounded-full bg-violet-500 px-1.5 text-[9px] font-bold tracking-wide text-white shadow ring-2 ring-background"
-          title="Authored by the workflow-AI assistant — Ctrl+Z to revert."
+          title={tNode("aiBadge.title")}
           data-testid="wf-node-ai-badge"
-          aria-label="AI-authored node"
+          aria-label={tNode("aiBadge.label")}
         >
           AI
         </span>
@@ -352,7 +455,12 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
               /* best effort */
             }
           }}
-          onConfigure={() => storeBits.setSelectedNodes([id])}
+          onConfigure={() => {
+            storeBits.setSelectedNodes([id])
+            // Explicit configure gesture — reveal the inspector even when
+            // another right-sidebar tab is pinned.
+            store?.getState().requestInspectorPanel()
+          }}
           onDelete={() => storeBits.removeNodes([id])}
           onMore={(rect) => {
             // Anchor the canvas context menu at the More button's screen
@@ -385,7 +493,9 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
         {createElement(icon, { className: "size-4 shrink-0 mt-0.5", "aria-hidden": true })}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
-            <div className="text-sm font-medium truncate text-foreground flex-1">{data.label}</div>
+            <div className="text-sm font-medium truncate text-foreground flex-1">
+              {displayLabel}
+            </div>
             {decoration.pinned ? (
               <span
                 title={tNode("pinnedTitle")}
@@ -397,12 +507,21 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
             ) : null}
             {hasErrors ? (
               <span
-                title={errorTooltip?.join("\n") ?? `${errorCount} validation issue(s)`}
+                title={diagnosticsTooltip}
                 className="inline-flex items-center gap-0.5 rounded-full bg-destructive/15 px-1.5 py-px text-[10px] font-semibold text-destructive"
                 data-testid="wf-node-error-badge"
               >
                 <WarnIcon className="size-3" aria-hidden="true" />
-                {errorCount}
+                {diagErrorCount}
+              </span>
+            ) : hasWarningsOnly ? (
+              <span
+                title={diagnosticsTooltip}
+                className="inline-flex items-center gap-0.5 rounded-full bg-amber-500/15 px-1.5 py-px text-[10px] font-semibold text-amber-600 dark:text-amber-400"
+                data-testid="wf-node-warning-badge"
+              >
+                <WarnIcon className="size-3" aria-hidden="true" />
+                {diagWarningCount}
               </span>
             ) : null}
           </div>
@@ -430,10 +549,11 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
                     id={h.id}
                     position={Position.Right}
                     style={{ top }}
+                    onClick={(e) => armConnectFromHandle(e, h.id)}
                     className={cn(
                       "!h-3 !w-3 !rounded-full !border-2 !bg-background",
-                      h.kind === "true" && "!border-emerald-500",
-                      h.kind === "false" && "!border-rose-500",
+                      (h.kind === "true" || h.kind === "approved") && "!border-emerald-500",
+                      (h.kind === "false" || h.kind === "rejected") && "!border-rose-500",
                       (h.kind === "case" || h.kind === "default") && "!border-current"
                     )}
                     data-testid={`wf-node-handle-out-${id}-${h.id}`}
@@ -456,6 +576,7 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
                 style={{
                   top: `${Math.round(((decisionHandles.length + 1) / (decisionHandles.length + 2)) * 100)}%`,
                 }}
+                onClick={(e) => armConnectFromHandle(e, "error")}
                 className="!h-3 !w-3 !rounded-full !border-2 !border-rose-500 !bg-background"
                 data-testid={`wf-node-handle-error-${id}`}
               />
@@ -471,6 +592,7 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
               type="source"
               position={Position.Right}
               style={{ top: "38%" }}
+              onClick={(e) => armConnectFromHandle(e, null)}
               className="!h-3 !w-3 !rounded-full !border-2 !border-current !bg-background"
               data-testid={`wf-node-handle-source-${id}`}
             />
@@ -479,6 +601,7 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
               id="error"
               position={Position.Right}
               style={{ top: "68%" }}
+              onClick={(e) => armConnectFromHandle(e, "error")}
               className="!h-3 !w-3 !rounded-full !border-2 !border-rose-500 !bg-background"
               data-testid={`wf-node-handle-error-${id}`}
             />
@@ -487,7 +610,9 @@ export const WorkflowNodeComponent = memo(function WorkflowNodeComponent(
           <Handle
             type="source"
             position={Position.Right}
+            onClick={(e) => armConnectFromHandle(e, null)}
             className="!h-3 !w-3 !rounded-full !border-2 !border-current !bg-background"
+            data-testid={`wf-node-handle-source-${id}`}
           />
         )
       ) : null}

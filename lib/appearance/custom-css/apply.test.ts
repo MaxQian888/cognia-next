@@ -41,7 +41,7 @@ describe("applyUserCss", () => {
   it("creates the style tag on first call and writes sanitized css", () => {
     const before = document.getElementById(__INTERNALS__.STYLE_ELEMENT_ID)
     expect(before).toBeNull()
-    const res = applyUserCss(`body { color: lime }`, true)
+    const res = applyUserCss(`body { color: lime }`, true, "global")
     const tag = document.getElementById(__INTERNALS__.STYLE_ELEMENT_ID)
     expect(tag).not.toBeNull()
     expect(tag?.textContent).toBe("body { color: lime }")
@@ -49,8 +49,8 @@ describe("applyUserCss", () => {
   })
 
   it("updates the existing tag instead of duplicating it", () => {
-    applyUserCss(`a { color: red }`, true)
-    applyUserCss(`a { color: blue }`, true)
+    applyUserCss(`a { color: red }`, true, "global")
+    applyUserCss(`a { color: blue }`, true, "global")
     const tags = document.querySelectorAll(`#${__INTERNALS__.STYLE_ELEMENT_ID}`)
     expect(tags.length).toBe(1)
     expect(tags[0].textContent).toBe("a { color: blue }")
@@ -85,15 +85,35 @@ describe("applyUserCss", () => {
     expect(res.css).not.toContain("@import")
   })
 
-  it("is a no-op without a document (SSR)", () => {
-    const originalDocument = globalThis.document
-    // Simulate SSR by removing the JSDOM document. The cast keeps TS happy
-    // because `document` on the cast type is optional.
-    delete (globalThis as { document?: Document }).document
-    const res = applyUserCss(`a { color: red }`, true)
-    expect(res.removedCount).toBe(0)
-    expect(res.css).toBe(`a { color: red }`)
-    globalThis.document = originalDocument
+  // The no-document (SSR) branch lives in `apply.ssr.test.ts` — jsdom's
+  // `document` is non-configurable from Node 26 on, so it can only be tested
+  // in the node project, where there is genuinely no document.
+})
+
+describe("applyUserCss — scope", () => {
+  it('wraps the css in @scope (#app) by default ("app" scope)', () => {
+    applyUserCss(`a { color: red }`, true)
+    const tag = document.getElementById(__INTERNALS__.STYLE_ELEMENT_ID)
+    expect(tag?.textContent).toBe("@scope (#app) {\na { color: red }\n}")
+  })
+
+  it('wraps the css in @scope (#app) when "app" is explicit', () => {
+    applyUserCss(`a { color: red }`, true, "app")
+    const tag = document.getElementById(__INTERNALS__.STYLE_ELEMENT_ID)
+    expect(tag?.textContent).toContain("@scope (#app) {")
+  })
+
+  it('injects raw css document-wide for "global" scope', () => {
+    applyUserCss(`a { color: red }`, true, "global")
+    const tag = document.getElementById(__INTERNALS__.STYLE_ELEMENT_ID)
+    expect(tag?.textContent).toBe("a { color: red }")
+  })
+
+  it("reports the unwrapped sanitized css + removed count regardless of scope", () => {
+    const res = applyUserCss(`@import url("https://evil/x.css"); a { color: red }`, true, "app")
+    // Returned css is the sanitized-but-unwrapped rules so the UI count is accurate.
+    expect(res.css).not.toContain("@scope")
+    expect(res.removedCount).toBe(1)
   })
 })
 
@@ -107,12 +127,5 @@ describe("removeUserCss", () => {
   it("is a no-op when the tag is missing", () => {
     expect(() => removeUserCss()).not.toThrow()
   })
-  it("is a no-op without a document", () => {
-    const originalDocument = globalThis.document
-    // Simulate SSR by removing the JSDOM document. The cast keeps TS happy
-    // because `document` on the cast type is optional.
-    delete (globalThis as { document?: Document }).document
-    expect(() => removeUserCss()).not.toThrow()
-    globalThis.document = originalDocument
-  })
+  // No-document branch: see `apply.ssr.test.ts`.
 })

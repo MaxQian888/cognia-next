@@ -59,7 +59,7 @@ describe("toUnifiedTrigger", () => {
       edit: false,
       delete: false,
     })
-    expect(u.origin.deepLinkHref).toBe("/workflows/wf-1")
+    expect(u.origin.deepLinkHref).toBe("/workflows/editor?id=wf-1")
   })
 
   it("maps disabled rows to paused", () => {
@@ -111,6 +111,15 @@ describe("createWorkflowSource", () => {
     const items = await source.list()
     expect(items).toHaveLength(1)
     expect(items[0].unifiedId).toBe("workflow:trigger-1")
+  })
+
+  it("loads recent workflow runs through the source contract", async () => {
+    const { db, sync, run } = makeStubs()
+    const listRuns = jest.fn(async () => [])
+    const source = createWorkflowSource({ db, sync, run, listRuns })
+
+    await expect(source.listRuns?.(7)).resolves.toEqual([])
+    expect(listRuns).toHaveBeenCalledWith(7)
   })
 
   it("get() returns undefined for missing trigger", async () => {

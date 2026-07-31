@@ -1,0 +1,8 @@
+{
+  "cancel": "取消",
+  "description": "你想把 Cognia 最小化到系统托盘，还是直接退出？",
+  "minimizeToTray": "最小化到托盘",
+  "quit": "直接退出",
+  "remember": "记住我的选择，不再询问",
+  "title": "退出 Cognia？"
+}

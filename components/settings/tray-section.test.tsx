@@ -1,8 +1,26 @@
 import { render, screen, fireEvent, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { TraySection } from "./tray-section"
 import { __resetTrayStoreForTesting, useTrayStore } from "@/lib/tray/store"
 import { __resetSlashCommandsForTesting, registerSlashCommand } from "@/lib/slash-commands/registry"
-import { DEFAULT_TRAY_ITEMS } from "@/lib/tray/defaults"
+import { DEFAULT_TRAY_DISPLAY, DEFAULT_TRAY_ITEMS } from "@/lib/tray/defaults"
+
+// The display card's usage feed hits the subscription transport when real —
+// stub it (its own behavior is covered by lib/tray/usage.test.ts).
+jest.mock("@/lib/tray/usage", () => ({
+  useTrayUsage: jest.fn(() => ({
+    accounts: [
+      {
+        key: "anthropic:a1",
+        provider: "anthropic",
+        accountLabel: "Claude Pro",
+        worst: { id: "session", kind: "window", usedPct: 42, status: "ok", resetAt: null },
+        meters: [],
+      },
+    ],
+    fetchedAt: 1,
+  })),
+}))
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, vars?: { fallback?: string }) => vars?.fallback ?? key,
@@ -30,18 +48,21 @@ beforeEach(() => {
 describe("TraySection", () => {
   it("renders every item from the store with its label", () => {
     render(<TraySection />)
-    expect(screen.getByText("tray.show")).toBeInTheDocument()
+    expect(screen.getByText("tray.toggleWindow")).toBeInTheDocument()
     expect(screen.getByText("tray.allCommands")).toBeInTheDocument()
     expect(screen.getByText("tray.quit")).toBeInTheDocument()
   })
 
   it("moveDown reorders adjacent rows", () => {
     render(<TraySection />)
+    const idOf = () => useTrayStore.getState().items.map((i) => ("id" in i ? i.id : "(sep)"))
+    const [first0, first1] = idOf()
     const downButtons = screen.getAllByLabelText("Move down")
     fireEvent.click(downButtons[0])
-    const labels = useTrayStore.getState().items.map((i) => ("id" in i ? i.id : "(sep)"))
-    expect(labels[0]).toBe("tray.new-chat")
-    expect(labels[1]).toBe("tray.show")
+    const after = idOf()
+    // The first two rows must have swapped, nothing else shifted.
+    expect(after[0]).toBe(first1)
+    expect(after[1]).toBe(first0)
   })
 
   it("remove drops the row from the store", () => {
@@ -57,6 +78,38 @@ describe("TraySection", () => {
     render(<TraySection />)
     fireEvent.click(screen.getByText("Reset"))
     expect(useTrayStore.getState().items).toEqual(DEFAULT_TRAY_ITEMS)
+  })
+
+  it("display card toggles persist through the tray store", async () => {
+    const user = userEvent.setup()
+    render(<TraySection />)
+    expect(useTrayStore.getState().display).toEqual(DEFAULT_TRAY_DISPLAY)
+
+    await user.click(screen.getByLabelText("showUsageInTooltip"))
+    expect(useTrayStore.getState().display.showUsageInTooltip).toBe(true)
+
+    await user.click(screen.getByLabelText("showUsageInMenu"))
+    expect(useTrayStore.getState().display.showUsageInMenu).toBe(false)
+  })
+
+  it("shows the pinned-subscription picker only when a compact surface is on", async () => {
+    const user = userEvent.setup()
+    render(<TraySection />)
+    expect(screen.queryByLabelText("pinnedSubscription")).not.toBeInTheDocument()
+    await user.click(screen.getByLabelText("showUsageInTooltip"))
+    expect(screen.getByLabelText("pinnedSubscription")).toBeInTheDocument()
+  })
+
+  it("icon color changes persist through the tray store", () => {
+    render(<TraySection />)
+    fireEvent.change(screen.getByLabelText("iconColor"), { target: { value: "#ff0000" } })
+    expect(useTrayStore.getState().display.iconColor).toBe("#ff0000")
+  })
+
+  it("tooltip base text edits persist through the tray store", () => {
+    render(<TraySection />)
+    fireEvent.change(screen.getByLabelText("tooltipBase"), { target: { value: "My App" } })
+    expect(useTrayStore.getState().tooltip).toBe("My App")
   })
 
   it("Add item picker exposes registered slash commands", async () => {

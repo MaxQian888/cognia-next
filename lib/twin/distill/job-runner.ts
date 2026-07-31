@@ -9,8 +9,8 @@
 import { listTwinChunksByTwin, updateTwinChunk } from "@/lib/db/twin-chunks"
 import { bulkCreateTwinDrafts } from "@/lib/db/twin-drafts"
 import { updateJobProgress } from "@/lib/db/twin-jobs"
-import { hasNoLeakingPii, redactText } from "@/lib/twin/ingest/redact"
-import { loggers } from "@/lib/logging"
+import { hasNoLeakingPii, redactText } from "@cognia/redact"
+import { loggers } from "@cognia/logging"
 import {
   upsertPlaybooks,
   upsertStyleSamples,
@@ -18,7 +18,7 @@ import {
   setVoiceSummary,
   upsertEntities,
 } from "@/lib/db/twin-profile"
-import { generateEmbedding } from "@/lib/ai/embedding/embedding"
+import { generateEmbedding } from "@cognia/vector/embedding"
 import type { TwinDraft, TwinJob } from "@/types/twin"
 import type { EmbeddingConfig } from "@/lib/twin/ingest/embed"
 import type { LlmClient } from "./llm"
@@ -94,7 +94,17 @@ export async function runDistillJob(input: RunDistillInput): Promise<RunDistillR
   // the runtime falls back to token-overlap when the field is absent.
   const embeddingFn = input.embedding
     ? async (summary: string): Promise<number[]> => {
-        const result = await generateEmbedding(summary, input.embedding!)
+        const config = input.embedding!
+        const result = await generateEmbedding(
+          summary,
+          {
+            provider: config.provider,
+            model: config.model,
+            baseURL: config.baseURL,
+            bedrock: config.bedrock,
+          },
+          config.apiKey
+        )
         return result.embedding
       }
     : undefined
@@ -143,20 +153,18 @@ export async function runDistillJob(input: RunDistillInput): Promise<RunDistillR
   // Use the same placeholder index to look up the evaluation, then drop the
   // placeholder so Dexie mints the real id.
   const draftRows = await bulkCreateTwinDrafts(
-    sanitizedDrafts.map(
-      (draft, i): Omit<TwinDraft, "id" | "status" | "createdAt"> => ({
-        twinId: job.twinId,
-        jobId: job.id,
-        kind: draft.payload.kind,
-        payload: draft.payload,
-        provenance: {
-          chunkIds: chunks.slice(-10).map((c) => c.id),
-          playbookIds: draft.sourcePlaybookId ? [draft.sourcePlaybookId] : undefined,
-          rationale: draft.rationale,
-        },
-        evaluation: result.evaluations[`tmp_${i}`],
-      })
-    )
+    sanitizedDrafts.map((draft, i): Omit<TwinDraft, "id" | "status" | "createdAt"> => ({
+      twinId: job.twinId,
+      jobId: job.id,
+      kind: draft.payload.kind,
+      payload: draft.payload,
+      provenance: {
+        chunkIds: chunks.slice(-10).map((c) => c.id),
+        playbookIds: draft.sourcePlaybookId ? [draft.sourcePlaybookId] : undefined,
+        rationale: draft.rationale,
+      },
+      evaluation: result.evaluations[`tmp_${i}`],
+    }))
   )
 
   await updateJobProgress(job.id, { phase: "completed", progress: 99 })
@@ -181,18 +189,39 @@ export async function runDistillJob(input: RunDistillInput): Promise<RunDistillR
  * Mutates a *new* draft object (no in-place mutation of the orchestrator
  * output) so partial-failure code paths don't see surprises.
  */
-function sanitizeDraftPayload<
+/**
+ * Recursively re-redact every string leaf under `value`, at any nesting depth.
+ * The previous top-level-only walk let PII reach a persisted draft as soon as a
+ * payload carried a nested array/object — matching the edit-time deep guard
+ * (`draft-pii-guard.ts:hasNoLeakingPiiDeep`) keeps one source of truth. Draft
+ * payloads are parsed LLM JSON, so there are no cycles to guard against.
+ */
+function sanitizeDeep(value: unknown, onLeak: () => void): unknown {
+  if (typeof value === "string") {
+    if (hasNoLeakingPii(value)) return value
+    onLeak()
+    return redactText(value).redacted
+  }
+  if (Array.isArray(value)) {
+    return value.map((v) => sanitizeDeep(v, onLeak))
+  }
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = sanitizeDeep(v, onLeak)
+    }
+    return out
+  }
+  return value
+}
+
+export function sanitizeDraftPayload<
   T extends { payload: { kind: string; data: Record<string, unknown> } },
 >(draft: T, jobId: string, twinId: string): T {
-  const data = draft.payload.data
   let mutated = false
-  const sanitizedData: Record<string, unknown> = { ...data }
-  for (const [key, value] of Object.entries(data)) {
-    if (typeof value !== "string") continue
-    if (hasNoLeakingPii(value)) continue
+  const sanitizedData = sanitizeDeep(draft.payload.data, () => {
     mutated = true
-    sanitizedData[key] = redactText(value).redacted
-  }
+  }) as Record<string, unknown>
   if (!mutated) return draft
   loggers.scheduler.warn("twin distill: re-redacted draft payload after PII leak", {
     jobId,

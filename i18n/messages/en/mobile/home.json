@@ -1,0 +1,60 @@
+{
+  "actions": {
+    "agentTeams": "Agent teams",
+    "discover": "Discover",
+    "fleet": "Agent fleet",
+    "inbox": "Inbox",
+    "me": "Me",
+    "newChat": "New chat",
+    "search": "Search",
+    "twin": "Digital twin",
+    "workflows": "Workflows"
+  },
+  "activeRuns": {
+    "empty": "No active runs",
+    "title": "{count, plural, =1 {1 workflow running} other {# workflows running}}",
+    "viewRuns": "View runs"
+  },
+  "bucketOlder": "Older",
+  "bucketPrev30": "Previous 30 Days",
+  "bucketPrev7": "Previous 7 Days",
+  "bucketToday": "Today",
+  "bucketYesterday": "Yesterday",
+  "customize": {
+    "active": "On your home",
+    "activeEmpty": "No quick actions — add some below.",
+    "add": "Add",
+    "available": "Add actions",
+    "availableEmpty": "Every action is on your home.",
+    "description": "Pick which quick actions and sections show on your home screen.",
+    "dragHint": "Drag to reorder",
+    "remove": "Remove",
+    "restoreDefaults": "Restore defaults",
+    "sections": "Sections",
+    "title": "Customize home"
+  },
+  "edit": "Edit",
+  "emptyArchived": "No archived chats.",
+  "emptyChats": "No chats yet. Tap + to start one.",
+  "emptyFiltered": "No chats match “{query}”.",
+  "pinned": "Pinned",
+  "presenceStreaming": "Streaming",
+  "quickActions": "Quick actions",
+  "recent": "Recent",
+  "renameAria": "Rename conversation",
+  "search": "Search chats…",
+  "searchAria": "Search chats",
+  "searchTruncated": "Some results may be hidden — refine your search.",
+  "sections": {
+    "activeRuns": "Active runs",
+    "recents": "Recent chats"
+  },
+  "swipeArchive": "Archive",
+  "swipeDelete": "Delete",
+  "swipePin": "Pin",
+  "swipeUnarchive": "Unarchive",
+  "swipeUnpin": "Unpin",
+  "unreadCount": "{count, plural, =1 {1 unread} other {# unread}}",
+  "viewActive": "Show active chats",
+  "viewArchived": "Show archived chats"
+}

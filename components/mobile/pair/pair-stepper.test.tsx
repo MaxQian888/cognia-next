@@ -51,4 +51,13 @@ describe("<PairStepper />", () => {
     render(<PairStepper current="discover" />)
     expect(screen.getByTestId("pair-stepper")).toBeInTheDocument()
   })
+
+  it("renders only the given subset of steps (web flow has no Discover)", () => {
+    render(<PairStepper current="pair" steps={["pair", "paired"]} />)
+    const items = screen.getAllByRole("listitem")
+    expect(items).toHaveLength(2)
+    expect(items[0]).toHaveTextContent("Pair")
+    expect(items[0]).toHaveAttribute("data-status", "current")
+    expect(items[1]).toHaveAttribute("data-status", "todo")
+  })
 })

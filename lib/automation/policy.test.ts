@@ -25,8 +25,8 @@ import {
   saveAutomationPolicy,
   hydrateAutomationPolicy,
 } from "./policy"
-import { DEFAULT_AUTOMATION_POLICY } from "@/lib/claude/types"
-import type { AutomationPolicy, AppSettings } from "@/lib/claude/types"
+import { DEFAULT_AUTOMATION_POLICY } from "@cognia/agent-config-types"
+import type { AutomationPolicy, AppSettings } from "@cognia/agent-config-types"
 
 const mockCall = transport.call as unknown as jest.Mock
 const mockIsTauri = isTauri as unknown as jest.Mock

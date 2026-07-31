@@ -27,6 +27,7 @@
  */
 
 import type { E2BBackend } from "@/lib/github/workspace"
+import type { PluginContributionBackend } from "@/types/plugin/plugin"
 
 /**
  * Runtime shape every plugin-contributed workspace backend implements.
@@ -50,10 +51,16 @@ export interface PluginWorkspaceBackendDef {
   id: string
   /** Human label for picker UI. */
   label: string
-  /** Relative path inside the plugin install root. */
-  entry: string
-  /** Named export resolving to `PluginWorkspaceBackendFactory`. */
-  export: string
+  /**
+   * Which runtime owns this backend's factory. Omit to inherit the plugin type
+   * (`python` plugins default to `"python"`); declaring `entry` pins it to
+   * `"js"`. See {@link PluginContributionBackend}.
+   */
+  backend?: PluginContributionBackend
+  /** Relative path inside the plugin install root. Required for JS backends. */
+  entry?: string
+  /** Named export resolving to `PluginWorkspaceBackendFactory`. JS only. */
+  export?: string
   /** Short description shown in the workspace picker. */
   description?: string
 }

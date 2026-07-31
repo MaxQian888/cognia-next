@@ -1,0 +1,10 @@
+{
+  "compare": "Compare",
+  "description": "Run the same query against two providers side-by-side.",
+  "noResult": "No result yet",
+  "providerA": "Provider A",
+  "providerB": "Provider B",
+  "query": "Query",
+  "queryPlaceholder": "Type a query…",
+  "title": "Compare providers"
+}

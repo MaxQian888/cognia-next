@@ -39,7 +39,7 @@ import type { A2UIAppTemplate } from "@/lib/a2ui/templates"
 // Mocks — external dependencies
 // ---------------------------------------------------------------------------
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: {
     ui: { warn: jest.fn(), error: jest.fn(), info: jest.fn(), debug: jest.fn() },
     ai: { warn: jest.fn(), error: jest.fn(), info: jest.fn(), debug: jest.fn() },

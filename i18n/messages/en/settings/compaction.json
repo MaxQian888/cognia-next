@@ -1,0 +1,112 @@
+{
+  "algorithm": {
+    "description": "How older turns are compacted when the trigger fires.",
+    "heading": "Compaction method",
+    "label": "Compaction method",
+    "options": {
+      "hybrid": "Hybrid (recent verbatim + summary)",
+      "optical": "Optical (older turns rendered as images)",
+      "recursive": "Recursive (chunked summary)",
+      "selective": "Selective (keep important, summarise rest)",
+      "sliding-window": "Sliding window (drop oldest)",
+      "summary": "Summary"
+    }
+  },
+  "anthropicNotice": {
+    "description": "These controls only apply to non-Anthropic models. Anthropic self-manages compaction; only compact instructions and notifications take effect.",
+    "fieldDisabledTooltip": "Not applicable on the Anthropic path.",
+    "heading": "Anthropic manages compaction itself"
+  },
+  "description": "Summarise older turns so long chats stay within the model's context window.",
+  "enableUndo": {
+    "description": "Capture a snapshot so a compaction can be undone while the session is live.",
+    "heading": "Allow undo",
+    "label": "Enable compaction undo"
+  },
+  "enabled": {
+    "description": "Automatically summarise older turns when the context window fills.",
+    "heading": "Auto-compaction",
+    "label": "Enable auto-compaction"
+  },
+  "focus": {
+    "description": "Steer what a compaction preserves and seed the default for /compact.",
+    "heading": "Compact instructions",
+    "label": "Compact instructions",
+    "placeholder": "e.g. Focus on decisions, file paths, and unresolved threads."
+  },
+  "importance": {
+    "description": "Selective strategy keeps messages scoring at or above this importance.",
+    "heading": "Importance threshold",
+    "label": "Importance threshold percentage",
+    "suffix": "%"
+  },
+  "keepRecent": {
+    "description": "How many of the most recent turns are kept verbatim, never summarised.",
+    "heading": "Keep recent turns",
+    "label": "Recent turns to keep"
+  },
+  "messageCount": {
+    "description": "Compact once the conversation reaches this many messages.",
+    "heading": "Message-count threshold",
+    "label": "Message-count threshold"
+  },
+  "notify": {
+    "description": "Show a toast whenever the conversation is compacted.",
+    "heading": "Compaction notifications",
+    "label": "Show compaction notifications"
+  },
+  "preserveSystem": {
+    "description": "Keep every system message verbatim instead of summarising interleaved ones.",
+    "heading": "Preserve system messages",
+    "label": "Preserve system messages"
+  },
+  "preserveToolMeta": {
+    "description": "Keep the tool name and status when a large tool result is truncated.",
+    "heading": "Preserve tool metadata",
+    "label": "Preserve tool-call metadata"
+  },
+  "recursiveChunkSize": {
+    "description": "Messages per chunk when summarising recursively.",
+    "heading": "Recursive chunk size",
+    "label": "Recursive chunk size"
+  },
+  "retained": {
+    "description": "Compact down to at most this fraction of the window, leaving headroom.",
+    "heading": "Retained threshold",
+    "label": "Retained threshold percentage",
+    "suffix": "% of window"
+  },
+  "strategy": {
+    "builtin": "Built-in",
+    "description": "Choose a plugin-contributed compaction strategy, or the built-in default.",
+    "heading": "Plugin strategy",
+    "label": "Compaction strategy"
+  },
+  "threshold": {
+    "description": "Fraction of the context window at which auto-compaction triggers.",
+    "heading": "Trigger threshold",
+    "label": "Trigger threshold percentage",
+    "suffix": "% of window"
+  },
+  "title": "Context compaction",
+  "toolResultCap": {
+    "description": "Cap each tool result to this many tokens during compaction.",
+    "heading": "Tool-result cap",
+    "label": "Max tool-result tokens"
+  },
+  "trigger": {
+    "description": "What causes a compaction to run.",
+    "heading": "Trigger mode",
+    "label": "Trigger mode",
+    "options": {
+      "manual": "Manual only",
+      "message-count": "Message count",
+      "token-threshold": "Token threshold"
+    }
+  },
+  "useAISummarization": {
+    "description": "Use the model to summarise. When off, an extractive (non-AI) summary is used.",
+    "heading": "AI summarisation",
+    "label": "Use AI summarisation"
+  }
+}

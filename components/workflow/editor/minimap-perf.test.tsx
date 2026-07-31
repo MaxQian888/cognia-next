@@ -76,4 +76,28 @@ describe("PerfMiniMap", () => {
     rerender(<PerfMiniMap degraded={true} nodeColor={liveColor} />)
     expect(renderCount).toBe(2)
   })
+
+  it("renders a static placeholder and never mounts the live MiniMap while frozen", () => {
+    const { getByTestId, queryByTestId } = render(
+      <PerfMiniMap degraded frozen nodeColor={liveColor} className="rounded-md" />
+    )
+    // The non-subscribing placeholder occupies the corner; React Flow's MiniMap
+    // (the per-frame SVG repaint) is not mounted, so it logged no props.
+    const placeholder = getByTestId("minimap-frozen")
+    expect(placeholder.className).toContain("rounded-md")
+    expect(placeholder.getAttribute("aria-hidden")).toBe("true")
+    expect(queryByTestId("minimap")).not.toBeInTheDocument()
+    expect(_lastMinimapProps).toBeNull()
+    expect(renderCount).toBe(0)
+  })
+
+  it("mounts the live MiniMap again once frozen clears", () => {
+    const { getByTestId, queryByTestId, rerender } = render(
+      <PerfMiniMap degraded frozen nodeColor={liveColor} />
+    )
+    expect(queryByTestId("minimap")).not.toBeInTheDocument()
+    rerender(<PerfMiniMap degraded frozen={false} nodeColor={liveColor} />)
+    expect(getByTestId("minimap")).toBeInTheDocument()
+    expect(queryByTestId("minimap-frozen")).not.toBeInTheDocument()
+  })
 })

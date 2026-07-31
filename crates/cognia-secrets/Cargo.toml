@@ -1,0 +1,58 @@
+# ADR-0067 Tier-B prep — the secrets foundation extracted from app_lib:
+# `secret_store` (single-keychain encrypted store), `keyring_secrets`
+# (namespaced string secrets on top of it) and `api_key` (in-process Anthropic
+# provider env store). Kept separate from `cognia-core` on purpose: this crate
+# pulls keyring + aes-gcm, and folding those into core would put them on the
+# critical path of every extracted crate's check loop.
+#
+# The `test-inmemory` feature replaces the file+keyring-backed process global
+# with the in-memory store. `#[cfg(test)]` only applies when THIS crate is the
+# test target, so dependent crates (app_lib, cognia-subscription, …) must turn
+# the feature on from their [dev-dependencies] to keep their own test suites
+# hermetic — otherwise their tests would hit the real OS keyring.
+[package]
+name = "cognia-secrets"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89.0"
+description = "Encrypted single-keychain secret store + provider env state shared across cognia subsystem crates."
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "cognia_secrets"
+path = "src/lib.rs"
+
+[features]
+# In-memory secret store + stubbed legacy keyring, for dependents' tests.
+test-inmemory = []
+
+[dependencies]
+cognia-core = { path = "../cognia-core" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+aes-gcm = { version = "0.10", features = ["aes"] }
+parking_lot = "0.12"
+rand = "0.8"
+hex = "0.4"
+dirs = "6"
+log = "0.4"
+keyring = { version = "3", default-features = false }
+tokio = { version = "1", features = ["sync"] }
+
+# Real OS credential store backends — same platform matrix as src-tauri.
+# Without these features keyring silently uses its mock store.
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# `crypto-rust` encrypts the D-Bus session transfer with RustCrypto so no
+# system OpenSSL is needed at build time. Chosen over `linux-native` (kernel
+# keyutils) because keyutils is wiped on reboot.
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }

@@ -103,6 +103,8 @@ export const PERMISSION_GROUPS: Record<string, PluginPermission[]> = {
   ],
   git: ["git:read", "git:write"],
   goal: ["goal:read", "goal:write"],
+  memory: ["memory:read", "memory:write"],
+  team: ["team:read", "team:write"],
   connectors: ["connectors:read", "connectors:send", "connectors:manage"],
   share: ["share:read", "share:create"],
   backup: ["backup:read", "backup:write"],
@@ -115,7 +117,22 @@ export const PERMISSION_GROUPS: Record<string, PluginPermission[]> = {
     "automation:window",
   ],
   companion: ["companion:read", "companion:control", "companion:goal-control"],
-  dangerous: ["shell:execute", "process:spawn", "python:execute", "terminal:spawn"],
+  templates: [
+    "templates:read",
+    "templates:contribute",
+    "templates:instantiate",
+    "templates:library:write",
+  ],
+  native: ["native:input", "native:screen", "native:filesystem", "native:process"],
+  dangerous: [
+    "shell:execute",
+    "process:spawn",
+    "python:execute",
+    "terminal:spawn",
+    "debug:control",
+    "tests:run",
+    "notebook:execute",
+  ],
 }
 
 export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
@@ -134,6 +151,32 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
   "settings:write": "Modify application settings",
   "session:read": "Read chat sessions",
   "session:write": "Modify chat sessions",
+  "session:delete": "Delete chat sessions",
+  "project:read": "Read project metadata and files through scoped APIs",
+  "project:write": "Create and modify projects, their knowledge files, tags, and linked sessions",
+  "project:delete": "Delete projects",
+  "canvas:read": "Read Canvas document metadata and selection",
+  "canvas:write": "Create, modify, and delete Canvas documents",
+  "canvas:run": "Run code blocks and actions inside Canvas documents",
+  "canvas:collaborate": "Join and act in Canvas collaboration sessions",
+  "artifact:read": "Read artifact metadata",
+  "artifact:write": "Create and modify artifacts",
+  "workflow:read": "Read workflow metadata and selection",
+  "editor:read":
+    "See what you are looking at in the project editor — the focused file, your selection, and its diagnostics",
+  "editor:write": "Open files and reveal edits in the project editor",
+  "debug:control": "Start, inspect, and control debug sessions",
+  "tests:run": "Discover and run tests through the IDE",
+  "notebook:execute": "Execute notebook cells and notebook kernels",
+  "vector:read": "Search the vector store",
+  "vector:write": "Add to and delete from the vector store",
+  "ai:chat": "Send prompts to a language model on your account (consumes your quota)",
+  "ai:embed": "Generate embeddings on your account (consumes your quota)",
+  "export:session": "Export chat sessions out of the app",
+  "export:project": "Export whole projects out of the app",
+  "theme:read": "Read the active theme",
+  "theme:write": "Change the active theme",
+  "extension:ui": "Contribute trusted UI to host extension surfaces",
   "media:image:read": "Read image media assets",
   "media:image:write": "Write image media assets",
   "media:video:read": "Read video media assets",
@@ -141,6 +184,9 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
   "media:video:export": "Export rendered video outputs",
   "agent:control": "Control agent execution",
   "agent:dispatch-external": "Dispatch external coding agents (Claude Code / Codex / …)",
+  "agent:dispatch": "Dispatch built-in subagents and agent teams",
+  "agent:shared-memory:read": "Read team shared-memory entries",
+  "twin:read": "Query the employee twin's memory",
   "python:execute": "Execute Python code",
   "sandbox:web-execute": "Execute code inside the browser sandbox",
   "secrets:read": "Read secrets from the OS keyring",
@@ -154,11 +200,19 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
   "git:write": "Stage, commit, branch, push, stash, or discard changes in the active repository",
   "goal:read": "Read your goals and their progress",
   "goal:write": "Create, update, complete, and decompose your goals",
+  "memory:read": "Search and list what the assistant remembers about you",
+  "memory:write":
+    "Store, update, and forget long-term memories (PII-screened; can never change working instructions)",
+  "team:read": "Read your agent teams, task boards, run events, and execution reports",
+  "team:write":
+    "Create/edit/assign tasks, comment, move cards, and manage non-lead teammates and team config on your agent-team boards (never starts runs)",
   "subscription:read": "Read subscription plan and usage metrics",
   "perf:read": "Read performance dashboard snapshots and the live sample stream",
-  "connectors:read": "List connector adapters and observe inbound platform events",
-  "connectors:send": "Send outbound messages through a connected platform",
-  "connectors:manage": "Create, reconfigure, enable, or delete your connected platform accounts",
+  "connectors:read":
+    "List connector adapters, bots, and conversation bindings; observe inbound platform events",
+  "connectors:send": "Send outbound messages through a connected platform (direct or queued)",
+  "connectors:manage":
+    "Create, reconfigure, enable, or delete your connected platform accounts; manage dispatch rules, chats, and contact lookups",
   "share:read": "Read your created public share links and their view stats",
   "share:create": "Create and revoke public share links (publishes data online)",
   "backup:read": "Build and read encrypted backups and the backup history",
@@ -172,14 +226,48 @@ export const PERMISSION_DESCRIPTIONS: Record<PluginPermission, string> = {
   "companion:read": "List paired devices and their remote-control grants",
   "companion:control": "Grant or revoke a paired device's remote-control capability",
   "companion:goal-control": "Pause, resume, or stop your running goal loops",
+  "cli:execute": "Run an external command-line tool this plugin declares (e.g. ripgrep, ffmpeg)",
+  "native:input": "Send native keyboard and mouse input through a native Anthropic tool",
+  "native:screen": "Capture your screen through a native Anthropic tool",
+  "native:filesystem": "Read and write files on this device through the sandboxed tools backend",
+  "native:process": "Run programs on this device through the sandboxed tools backend",
+  "ipc:call": "Call or send messages to another plugin over inter-plugin IPC (incl. RPC)",
+  "ipc:expose": "Expose RPC methods that other plugins can invoke over IPC",
+  "events:publish": "Emit events other plugins can listen for",
+  "events:subscribe": "Listen for events other plugins emit",
+  "auth:provide": "Register a native auth/OAuth provider other plugins can use",
+  "auth:consume": "Consume sessions from a registered auth provider",
+  "integrations:read": "Read Integration definitions, accounts, subscriptions, and job status",
+  "integrations:events": "Publish normalized Integration events to workflows and Inbox",
+  "integrations:execute": "Run Integration actions and authenticated platform requests",
+  "integrations:manage": "Manage Integration accounts, subscriptions, ingress, and migrations",
+  "pet:read": "Read the desktop pet's public state and subscribe to its events",
+  "pet:interact": "Care for the desktop pet and grant budget-capped rewards",
+  "hooks:chat-intercept":
+    "Intercept every chat prompt, tool call, and tool result — can rewrite or block them",
+  "templates:read": "Read the unified template catalog and validation results",
+  "templates:contribute": "Register lifecycle-scoped template packages",
+  "templates:instantiate": "Preflight and instantiate templates after confirmation",
+  "templates:library:write": "Create user-owned template drafts after confirmation",
 }
 
 export const DANGEROUS_PERMISSIONS: PluginPermission[] = [
+  // Chat interception sees (and can rewrite) everything the user and the
+  // model exchange, including tool inputs/outputs — surveillance-grade.
+  "hooks:chat-intercept",
   "shell:execute",
   "process:spawn",
   "python:execute",
+  "debug:control",
+  "tests:run",
+  "notebook:execute",
   "filesystem:write",
   "secrets:write",
+  // Network egress reaches any host and can carry whatever the plugin can read
+  // (secrets, clipboard, fs) off-device — an unrecallable exfiltration channel.
+  // Gate it behind consent instead of granting it silently on enable.
+  "network:fetch",
+  "network:websocket",
   // Dispatching an external coding agent spawns an outside process that can
   // read/edit files and run commands — same risk tier as `process:spawn`.
   "agent:dispatch-external",
@@ -218,6 +306,27 @@ export const DANGEROUS_PERMISSIONS: PluginPermission[] = [
   // (`companion:goal-control` is NOT dangerous: it is a strict subset of the
   // non-dangerous `goal:write` — pause/resume/stop only.)
   "companion:control",
+  // Running a declared external CLI executes a real process with the user's
+  // privileges — argv templating prevents injection but the binary itself can
+  // do anything (`shell:execute` risk tier).
+  "cli:execute",
+]
+
+/**
+ * WASM host capabilities that are declared in the WIT contract but have no real
+ * backend in the current api-version (0.1). Their host stubs return a typed
+ * `cognia:not-implemented` error (see `src-tauri/src/plugin_api/wasm/mod.rs`),
+ * so granting them buys the plugin nothing today. The install-time grant sheet
+ * renders these disabled with a hint and never adds them to the granted set, so
+ * a user is not misled into believing a stubbed capability works.
+ *
+ * `ai.generate-text` is intentionally NOT listed: it has no dedicated
+ * permission (it rides `network:fetch`, which is a real, enforced capability).
+ * `notification` is omitted too: its host impl still emits an audit-log entry.
+ */
+export const WASM_UNIMPLEMENTED_PERMISSIONS: PluginPermission[] = [
+  "clipboard:read",
+  "clipboard:write",
 ]
 
 // =============================================================================
@@ -789,10 +898,30 @@ export function createGuardedAPI<T extends object>(
      * still require the granted permission — they just skip the prompt.
      */
     consentExempt?: ReadonlyArray<keyof T>
+    /**
+     * Method names intentionally NOT permission-gated — pure helpers or
+     * non-security methods. Listing them is REQUIRED: a function property that
+     * is neither in `permissionMap` nor here fails closed (throws on call)
+     * rather than silently passing through ungated, so a method added to the
+     * API without updating the map can't drift into being unprotected.
+     * Non-function properties always pass through unchanged.
+     */
+    unguarded?: ReadonlyArray<keyof T>
+    /**
+     * Invoked once per permission immediately after a "confirm"-tier consent
+     * resolves *allowed*, before the underlying method runs. Host-gated
+     * namespaces (the native fs/secrets/clipboard/network gateway) use this to
+     * persist a ledger grant so the follow-up `plugin_api_invoke` — and future
+     * calls — pass the independent Rust permission gate. Silent-tier methods
+     * never reach the consent path, so the hook never fires for them. Errors
+     * thrown by the hook are swallowed (it must never break the guarded call).
+     */
+    onConsentGranted?: (permission: PluginPermission) => void
   } = {}
 ): T {
   const guard = getPermissionGuard()
   const consentExempt = new Set<keyof T>(options.consentExempt ?? [])
+  const unguarded = new Set<keyof T>(options.unguarded ?? [])
 
   return new Proxy(api, {
     get(target, prop: string | symbol) {
@@ -804,7 +933,17 @@ export function createGuardedAPI<T extends object>(
 
       const requiredPermissions = permissionMap[prop as keyof T]
       if (!requiredPermissions) {
-        return value
+        // Explicitly unguarded helper → pass through. Otherwise fail closed.
+        if (unguarded.has(prop as keyof T)) {
+          return value
+        }
+        return () => {
+          throw new PermissionError(
+            `Method "${String(prop)}" on plugin "${pluginId}" is neither permission-mapped nor declared unguarded; refusing to call it.`,
+            pluginId,
+            "" as PluginPermission
+          )
+        }
       }
 
       return (...args: unknown[]) => {
@@ -847,6 +986,14 @@ export function createGuardedAPI<T extends object>(
                 pluginId,
                 permission
               )
+            }
+            if (options.onConsentGranted) {
+              try {
+                options.onConsentGranted(permission)
+              } catch {
+                // The hook is best-effort (e.g. persisting a host ledger grant);
+                // never let it break the guarded call after consent succeeded.
+              }
             }
           }
           return (value as (...args: unknown[]) => unknown).apply(target, args)

@@ -30,6 +30,13 @@ export interface NotifyDeps {
   osNotify?: (opts: { title: string; body?: string }) => void | Promise<void>
   /** Mobile push fan-out. */
   push?: (rec: NotificationRecord) => void | Promise<void>
+  /**
+   * IM proactive-push fan-out (control-plane notifications). Routes the record
+   * to a bound IM conversation (resolved from `record.sourceRef`), gated on the
+   * per-conversation opt-in + PII. Wired in `runtime.ts` to
+   * `lib/notifications/im-deliver`.
+   */
+  imDeliver?: (rec: NotificationRecord) => void | Promise<void>
   /** Gate OS delivery on permission (defaults to allowed). */
   isOsPermitted?: () => boolean | Promise<boolean>
   /** Reactive store hook — called after persist so the badge/panel update. */
@@ -128,6 +135,8 @@ export async function notify(input: NotificationInput, deps: NotifyDeps): Promis
       }
     } else if (channel === "push" && deps.push) {
       if (await runSafely("push", () => deps.push!(record))) delivered.push("push")
+    } else if (channel === "im" && deps.imDeliver) {
+      if (await runSafely("im", () => deps.imDeliver!(record))) delivered.push("im")
     }
   }
   record.deliveredVia = delivered

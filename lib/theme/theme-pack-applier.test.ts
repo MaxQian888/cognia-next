@@ -1,7 +1,7 @@
 import { applyThemePack, type ThemePackApplyDeps } from "./theme-pack-applier"
 import type { RegisteredThemePack } from "./theme-pack-registry"
 import type { PluginTheme } from "./theme-registry"
-import type { ThemeColors } from "@/types/plugin/plugin-extended"
+import type { ThemeColors } from "@/types/plugin/plugin"
 
 const COLORS = { background: "#ffffff", foreground: "#000000" } as unknown as ThemeColors
 

@@ -1,0 +1,24 @@
+{
+  "cancel": "取消",
+  "createSessionFailed": "新建会话失败，请重试。",
+  "derivedTitle": {
+    "fallback": "新会话",
+    "fromUrl": "来自 {hostname} 的分享"
+  },
+  "draftSavedToast": "已保存为草稿。",
+  "errorDescription": "无法加载会话列表来接收分享内容。请重试，或打开 Cognia 后重新发起分享。",
+  "errorTitle": "分享页面加载失败",
+  "inboxDraftCta": "收件箱草稿",
+  "intro": "选择要把这条内容发到的会话。",
+  "newSessionCta": "新建会话",
+  "noConversations": "尚无可发送的会话。",
+  "noConversationsDescription": "请先打开一个会话，然后再来分享。",
+  "orExistingSession": "或发送到现有会话",
+  "queuedToast": "已加入发送队列。",
+  "receivedText": "收到内容",
+  "receivedUrl": "链接",
+  "retry": "重试",
+  "sendCta": "发送到此会话",
+  "targetSearchPlaceholder": "搜索会话…",
+  "title": "通过 cognia 分享"
+}

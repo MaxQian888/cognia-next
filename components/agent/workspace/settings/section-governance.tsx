@@ -27,6 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { DEFAULT_TEAM_CONFIG } from "@/types/agent/agent-team"
 import type {
   AgentTeam,
   AgentTeamConfig,
@@ -34,6 +35,11 @@ import type {
   TeamGovernancePolicy,
 } from "@/types/agent/agent-team"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import {
+  clampMaxRevisions,
+  DEFAULT_TASK_REVIEW_MAX_REVISIONS,
+  MAX_TASK_REVIEW_REVISIONS,
+} from "@/lib/ai/agent/team/task-review-policy"
 import { markSettingsSaved } from "./settings-save-indicator"
 import { ConfirmActionDialog } from "./confirm-action-dialog"
 
@@ -45,6 +51,13 @@ const DANGEROUS_CRITICAL: ReadonlySet<TeamBudgetEscalationAction> = new Set([
 
 export interface GovernanceSectionProps {
   team: AgentTeam
+}
+
+/** Runtime defaults for the nudge guards, so the panel cannot drift from them. */
+const DEFAULT_NUDGES: Required<NonNullable<AgentTeamConfig["nudges"]>> = {
+  enabled: DEFAULT_TEAM_CONFIG.nudges?.enabled ?? true,
+  maxPerMemberPerHour: DEFAULT_TEAM_CONFIG.nudges?.maxPerMemberPerHour ?? 2,
+  busySignalWindowMs: DEFAULT_TEAM_CONFIG.nudges?.busySignalWindowMs ?? 60_000,
 }
 
 const ESCALATION_ACTIONS: ReadonlyArray<TeamBudgetEscalationAction> = [
@@ -103,6 +116,20 @@ export function GovernanceSection({ team }: GovernanceSectionProps) {
     [patchPolicy, policy]
   )
 
+  // Defaults come from the type's own DEFAULT_TEAM_CONFIG so the numbers the
+  // operator sees are the numbers the runtime uses when the field is unset —
+  // hard-coding them here is how a settings panel drifts from its runtime.
+  const nudges = team.config.nudges ?? DEFAULT_NUDGES
+
+  const patchNudges = useCallback(
+    (patch: Partial<NonNullable<AgentTeamConfig["nudges"]>>) => {
+      patchConfig({
+        nudges: { ...DEFAULT_NUDGES, ...(team.config.nudges ?? {}), ...patch },
+      })
+    },
+    [patchConfig, team.config.nudges]
+  )
+
   const handleOnCriticalChange = (v: string) => {
     const action = v as TeamBudgetEscalationAction
     if (DANGEROUS_CRITICAL.has(action)) {
@@ -144,6 +171,57 @@ export function GovernanceSection({ team }: GovernanceSectionProps) {
             }
           />
         </div>
+        <div className="flex items-center justify-between">
+          <Label className="text-xs">{t("approval.requireResultReview")}</Label>
+          <Switch
+            checked={policy.approval.requireResultReview === true}
+            onCheckedChange={(v) =>
+              patchPolicy({
+                ...policy,
+                approval: { ...policy.approval, requireResultReview: v },
+              })
+            }
+          />
+        </div>
+        <p className="text-[11px] text-muted-foreground">{t("approval.requireResultReviewHint")}</p>
+
+        {/* Blocking lead review (ADR-0071). Sits under Approval because it is
+            the automated sibling of requireResultReview — the two compose. */}
+        <div className="flex items-center justify-between">
+          <Label className="text-xs">{t("approval.taskReview")}</Label>
+          <Switch
+            data-testid="task-review-toggle"
+            checked={team.config.taskReview?.enabled === true}
+            onCheckedChange={(v) =>
+              patchConfig({ taskReview: { ...team.config.taskReview, enabled: v } })
+            }
+          />
+        </div>
+        <p className="text-[11px] text-muted-foreground">{t("approval.taskReviewHint")}</p>
+        {team.config.taskReview?.enabled === true && (
+          <div className="flex items-center justify-between gap-2">
+            <Label className="text-xs">{t("approval.taskReviewMaxRevisions")}</Label>
+            <Input
+              type="number"
+              min={0}
+              max={MAX_TASK_REVIEW_REVISIONS}
+              className="h-7 w-20 text-xs"
+              data-testid="task-review-max-revisions"
+              defaultValue={
+                team.config.taskReview?.maxRevisions ?? DEFAULT_TASK_REVIEW_MAX_REVISIONS
+              }
+              onBlur={(e) =>
+                patchConfig({
+                  taskReview: {
+                    ...team.config.taskReview,
+                    // Same bounds the runtime resolves against — see task-review-policy.
+                    maxRevisions: clampMaxRevisions(Number.parseInt(e.target.value, 10)),
+                  },
+                })
+              }
+            />
+          </div>
+        )}
       </div>
 
       {/* Budget */}
@@ -255,6 +333,69 @@ export function GovernanceSection({ team }: GovernanceSectionProps) {
         </div>
       </div>
 
+      {/* Adaptive re-planning (config-level) */}
+      <div className="space-y-2">
+        <p className="text-xs font-medium">{t("adaptiveReplan.heading")}</p>
+        <p className="text-[11px] text-muted-foreground">{t("adaptiveReplan.description")}</p>
+        <div className="flex items-center justify-between">
+          <Label className="text-xs">{t("adaptiveReplan.enabled")}</Label>
+          <Switch
+            checked={team.config.adaptiveReplan?.enabled === true}
+            onCheckedChange={(v) =>
+              patchConfig({ adaptiveReplan: { ...team.config.adaptiveReplan, enabled: v } })
+            }
+          />
+        </div>
+        <div className="flex items-center justify-between">
+          <Label className="text-xs">{t("adaptiveReplan.requireApproval")}</Label>
+          <Switch
+            checked={team.config.adaptiveReplan?.requireApproval === true}
+            onCheckedChange={(v) =>
+              patchConfig({ adaptiveReplan: { ...team.config.adaptiveReplan, requireApproval: v } })
+            }
+          />
+        </div>
+      </div>
+
+      {/* Autonomous progress ledger (stall detection + escalation) */}
+      <div className="space-y-2">
+        <p className="text-xs font-medium">{t("progressLedger.heading")}</p>
+        <p className="text-[11px] text-muted-foreground">{t("progressLedger.description")}</p>
+        <div className="flex items-center justify-between">
+          <Label className="text-xs">{t("progressLedger.enabled")}</Label>
+          <Switch
+            checked={team.config.progressLedger?.enabled === true}
+            onCheckedChange={(v) =>
+              patchConfig({ progressLedger: { ...team.config.progressLedger, enabled: v } })
+            }
+          />
+        </div>
+        <div className="flex items-center justify-between">
+          <Label className="text-xs">{t("progressLedger.allowAutonomousConsensus")}</Label>
+          <Switch
+            checked={team.config.progressLedger?.allowAutonomousConsensus === true}
+            disabled={team.config.progressLedger?.enabled !== true}
+            onCheckedChange={(v) =>
+              patchConfig({
+                progressLedger: { ...team.config.progressLedger, allowAutonomousConsensus: v },
+              })
+            }
+          />
+        </div>
+        <div className="flex items-center justify-between">
+          <Label className="text-xs">{t("progressLedger.allowAutonomousDelegation")}</Label>
+          <Switch
+            checked={team.config.progressLedger?.allowAutonomousDelegation === true}
+            disabled={team.config.progressLedger?.enabled !== true}
+            onCheckedChange={(v) =>
+              patchConfig({
+                progressLedger: { ...team.config.progressLedger, allowAutonomousDelegation: v },
+              })
+            }
+          />
+        </div>
+      </div>
+
       {/* Refusal detection (config-level, not policy-level) */}
       <div className="space-y-2">
         <p className="text-xs font-medium">{t("refusal.heading")}</p>
@@ -281,6 +422,55 @@ export function GovernanceSection({ team }: GovernanceSectionProps) {
             placeholder={t("refusal.patternsPlaceholder")}
             className="text-xs"
           />
+        </div>
+      </div>
+
+      {/* Guarded nudges. The runtime has honoured `config.nudges` since it was
+          added — parsing a provider rate-limit cooldown and scheduling one
+          "continue" nudge instead of aborting the wave — but no surface ever
+          exposed it, so every team silently ran on the defaults below. */}
+      <div className="space-y-2" data-testid="governance-nudges">
+        <p className="text-xs font-medium">{t("nudges.heading")}</p>
+        <p className="text-[11px] text-muted-foreground">{t("nudges.description")}</p>
+        <div className="flex items-center justify-between">
+          <Label className="text-xs">{t("nudges.enabled")}</Label>
+          <Switch
+            checked={nudges.enabled !== false}
+            onCheckedChange={(v) => patchNudges({ enabled: v })}
+            data-testid="nudges-enabled"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">{t("nudges.maxPerMemberPerHour")}</Label>
+          <Input
+            type="number"
+            min={0}
+            max={20}
+            value={nudges.maxPerMemberPerHour ?? DEFAULT_NUDGES.maxPerMemberPerHour}
+            onChange={(e) =>
+              patchNudges({ maxPerMemberPerHour: clamp(Number(e.target.value), 0, 20) })
+            }
+            className="h-8 text-xs"
+            disabled={nudges.enabled === false}
+            data-testid="nudges-max-per-hour"
+          />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">{t("nudges.busySignalWindowMs")}</Label>
+          <Input
+            type="number"
+            min={0}
+            max={600_000}
+            step={1_000}
+            value={nudges.busySignalWindowMs ?? DEFAULT_NUDGES.busySignalWindowMs}
+            onChange={(e) =>
+              patchNudges({ busySignalWindowMs: clamp(Number(e.target.value), 0, 600_000) })
+            }
+            className="h-8 text-xs"
+            disabled={nudges.enabled === false}
+            data-testid="nudges-busy-window"
+          />
+          <p className="text-[11px] text-muted-foreground">{t("nudges.busySignalHint")}</p>
         </div>
       </div>
 

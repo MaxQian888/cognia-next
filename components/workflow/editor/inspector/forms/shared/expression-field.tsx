@@ -17,7 +17,7 @@
  * so back-compat is preserved.
  */
 
-import { useEffect, useMemo, useRef } from "react"
+import { useCallback, useEffect, useMemo, useRef } from "react"
 import { useShallow } from "zustand/react/shallow"
 import {
   flagsForTier,
@@ -40,14 +40,24 @@ import {
   type CompletionContext,
   type CompletionResult,
 } from "@codemirror/autocomplete"
+import { linter, type Diagnostic as CmLintDiagnostic } from "@codemirror/lint"
+import { useTranslations } from "next-intl"
 import { workflowExpressionLanguage } from "@/lib/workflow/editor/expression-language"
-import { buildExpressionSuggestions } from "@/lib/workflow/editor/expression-suggestions"
+import {
+  buildExpressionSuggestions,
+  deriveExpressionScopeHints,
+} from "@/lib/workflow/editor/expression-suggestions"
+import { computeExpressionDiagnostics } from "@/lib/workflow/editor/expression-diagnostics"
+import { computeUpstreamNodeIds } from "@/lib/workflow/editor/upstream-graph"
+import { flattenSchema } from "@/lib/workflow/editor/node-io-data"
 import { buildNodeRef, EXPR_DRAG_MIME, parseExprDrag } from "@/lib/workflow/editor/expr-ref"
 import { resolveExpression } from "@/lib/workflow/runtime/expression"
 import { useLatestRunOutputs } from "@/hooks/workflow/use-latest-run-outputs"
 import type { EditorStore, EditorState as WfEditorState } from "@/lib/workflow/editor/store"
+import type { WorkflowNode } from "@/types/workflow/visual"
 import { cn } from "@/lib/utils"
 import { useInspectorExpressionCtx } from "./inspector-context"
+import { VariablePicker } from "./variable-picker"
 
 interface ExpressionFieldProps {
   value: string
@@ -91,23 +101,57 @@ export function ExpressionField({
   const ctx = useInspectorExpressionCtx()
   const store = storeProp ?? ctx?.store
   const currentNodeId = currentNodeIdProp ?? ctx?.currentNodeId
+  const tDiag = useTranslations("workflows.diagnostics")
 
   // Pull latest workflow nodes from the store if available — this drives
   // node-aware completions. `useShallow` must be called unconditionally to
   // satisfy rules-of-hooks; the resulting selector is then optionally invoked.
   const shallowSelector = useShallow((s: WfEditorState) => ({
     nodes: s.nodes,
+    edges: s.edges,
     workflowId: s.baseWorkflow.id,
     variables: s.baseWorkflow.variables,
     pinData: s.baseWorkflow.pinData,
+    staticData: s.baseWorkflow.staticData,
+    workflowInputSchema: s.baseWorkflow.interface?.inputSchema,
     isDraggingAny: s.isDraggingAny,
     performanceTier: s.performanceTier as PerformanceTier,
   }))
   const editorState = store?.(shallowSelector)
   const nodes = useMemo(() => editorState?.nodes ?? [], [editorState?.nodes])
+  const edges = useMemo(() => editorState?.edges ?? [], [editorState?.edges])
+  const expressionNodes = useMemo<WorkflowNode[]>(
+    () =>
+      nodes.map((node) => ({
+        id: node.id,
+        type: node.data.kind,
+        typeVersion: node.data.typeVersion,
+        position: node.position,
+        data: node.data,
+        width: node.width,
+        height: node.height,
+        parentId: node.parentId,
+      })),
+    [nodes]
+  )
+  // Projections for the variable picker (B3) — minimal {id,kind,label} / edges.
+  const pickerNodes = useMemo(
+    () =>
+      nodes.map((n) => ({
+        id: n.id,
+        kind: n.data.kind as string,
+        label: (n.data.label as string) ?? n.id,
+      })),
+    [nodes]
+  )
+  const pickerEdges = useMemo(
+    () => edges.map((e) => ({ source: e.source, target: e.target })),
+    [edges]
+  )
   const workflowId = editorState?.workflowId
   const varKeys = useMemo(() => Object.keys(editorState?.variables ?? {}), [editorState?.variables])
   const pinData = editorState?.pinData
+  const staticData = editorState?.staticData
   const isDraggingAny = editorState?.isDraggingAny ?? false
   // Gate the live-query on the resolved tier's `liveQueryWhileDragging` flag.
   // Tests / headless renders without a store fall back to "always enabled"
@@ -140,8 +184,89 @@ export function ExpressionField({
     [runOutputs, pinData]
   )
 
+  const upstreamNodeIds = useMemo(
+    () =>
+      currentNodeId
+        ? computeUpstreamNodeIds(
+            currentNodeId,
+            nodes.map((node) => ({ id: node.id, kind: node.data.kind as string })),
+            edges.map((edge) => ({ source: edge.source, target: edge.target }))
+          )
+        : undefined,
+    [currentNodeId, nodes, edges]
+  )
+  const outputSchemas = useMemo(() => {
+    const schemas: Record<string, string[]> = {}
+    for (const [stepId, output] of Object.entries(upstreamOutputs)) {
+      if (output && typeof output === "object") {
+        schemas[stepId] = flattenSchema(output, { maxDepth: 3, maxRows: 60 }).map((row) => row.path)
+      }
+    }
+    return schemas
+  }, [upstreamOutputs])
+  const scopeHints = useMemo(
+    () =>
+      deriveExpressionScopeHints({
+        nodes: expressionNodes,
+        upstreamNodeIds,
+        staticData,
+        outputs: upstreamOutputs,
+        workflowInputSchema: editorState?.workflowInputSchema,
+      }),
+    [
+      expressionNodes,
+      upstreamNodeIds,
+      staticData,
+      upstreamOutputs,
+      editorState?.workflowInputSchema,
+    ]
+  )
+
+  // Insert a reference at the current cursor — shared by the variable picker
+  // (B3) and reusing the exact dispatch the drag-drop handler uses.
+  const insertAtCursor = useCallback((ref: string) => {
+    const view = viewRef.current
+    if (!view) return
+    const pos = view.state.selection.main.head
+    view.dispatch({
+      changes: { from: pos, to: pos, insert: ref },
+      selection: { anchor: pos + ref.length },
+    })
+    view.focus()
+  }, [])
+
   // Build a stable compartment so completions can be reconfigured live.
   const completionCompartment = useMemo(() => new Compartment(), [])
+  // Separate compartment for the invalid-reference linter (B2).
+  const lintCompartment = useMemo(() => new Compartment(), [])
+
+  // Linter: underline `$node['id']` references that point at an unknown node
+  // (error) or a node that isn't upstream of this one (warning). Rebuilt when
+  // the graph or current node changes; debounced so typing isn't re-linted
+  // every keystroke.
+  const lintExtension = useMemo(() => {
+    return linter(
+      (view): CmLintDiagnostic[] => {
+        if (!currentNodeId) return []
+        const graphNodes = nodes.map((n) => ({ id: n.id, kind: n.data.kind as string }))
+        const graphEdges = edges.map((e) => ({ source: e.source, target: e.target }))
+        return computeExpressionDiagnostics(
+          view.state.doc.toString(),
+          currentNodeId,
+          graphNodes,
+          graphEdges
+        ).map((d) => ({
+          from: d.from,
+          to: d.to,
+          severity: d.severity,
+          message: tDiag(d.code === "unknownNode" ? "exprUnknownNode" : "exprNotUpstream", {
+            ref: d.ref,
+          }),
+        }))
+      },
+      { delay: 300 }
+    )
+  }, [nodes, edges, currentNodeId, tDiag])
 
   // Build the completion source, regenerated when nodes change.
   const completionSource = useMemo(() => {
@@ -153,17 +278,14 @@ export function ExpressionField({
       const from = word
         ? word.from + (word.text.startsWith("{{") ? word.text.indexOf("$") : 0)
         : ctx.pos
-      const outputSchemas: Record<string, string[]> = {}
-      for (const [stepId, output] of Object.entries(upstreamOutputs)) {
-        if (output && typeof output === "object" && !Array.isArray(output)) {
-          outputSchemas[stepId] = Object.keys(output as Record<string, unknown>)
-        }
-      }
       const entries = buildExpressionSuggestions({
-        nodes: nodes as unknown as Parameters<typeof buildExpressionSuggestions>[0]["nodes"],
+        nodes: expressionNodes,
         currentNodeId,
         outputSchemas,
         varKeys,
+        upstreamNodeIds,
+        staticKeys: scopeHints.staticKeys,
+        triggerHints: scopeHints.triggerHints,
       })
       return {
         from,
@@ -177,7 +299,7 @@ export function ExpressionField({
         validFor: /[\w$.[\]'"-]*$/,
       }
     }
-  }, [nodes, currentNodeId, upstreamOutputs, varKeys])
+  }, [expressionNodes, currentNodeId, outputSchemas, varKeys, upstreamNodeIds, scopeHints])
 
   // Mount the EditorView once.
   useEffect(() => {
@@ -197,6 +319,7 @@ export function ExpressionField({
             activateOnTyping: true,
           })
         ),
+        lintCompartment.of(lintExtension),
         EditorView.theme({
           "&": {
             fontSize: "12px",
@@ -266,6 +389,14 @@ export function ExpressionField({
     })
   }, [completionSource, completionCompartment])
 
+  // Reconfigure the linter when the graph / current node changes.
+  useEffect(() => {
+    if (!viewRef.current) return
+    viewRef.current.dispatch({
+      effects: lintCompartment.reconfigure(lintExtension),
+    })
+  }, [lintExtension, lintCompartment])
+
   // Sync the doc when `value` changes externally (e.g., undo).
   useEffect(() => {
     const view = viewRef.current
@@ -284,7 +415,7 @@ export function ExpressionField({
       const resolved = resolveExpression(value, {
         upstream: upstreamOutputs,
         trigger: { workflowId: workflowId ?? "", kind: "trigger.manual", payload: {}, originAt: 0 },
-        staticData: {},
+        staticData: staticData ?? {},
         params: {},
       })
       if (typeof resolved === "string") return resolved
@@ -294,13 +425,24 @@ export function ExpressionField({
     } catch (err) {
       return err instanceof Error ? `error: ${err.message}` : "error"
     }
-  }, [value, upstreamOutputs, workflowId])
+  }, [value, upstreamOutputs, workflowId, staticData])
 
   return (
     <div
       className={cn("rounded-md border bg-background", className)}
       data-multiline={multiline ? "true" : "false"}
     >
+      {store && currentNodeId ? (
+        <div className="flex justify-end border-b px-1 py-0.5">
+          <VariablePicker
+            currentNodeId={currentNodeId}
+            nodes={pickerNodes}
+            edges={pickerEdges}
+            outputs={upstreamOutputs}
+            onInsert={insertAtCursor}
+          />
+        </div>
+      ) : null}
       <div
         ref={hostRef}
         id={id}

@@ -9,8 +9,8 @@ Use this checklist after any change that could affect the WebRTC tier
 end-to-end: signaling envelope schema, SDP/ICE handshake, pair-flow
 mints, rendezvous-server upgrades, or the `TransportRtc` state machine.
 The automated `pnpm webrtc:smoke` covers the rendezvous-server side only —
-this checklist exercises the full mobile (Capacitor) ↔ desktop (Tauri)
-path.
+this checklist exercises both mobile (Capacitor) ↔ desktop (Tauri) and
+browser (Web Companion) ↔ desktop/cloud paths.
 
 ## Setup
 
@@ -19,6 +19,8 @@ You need:
 - A desktop machine with the latest `pnpm tauri dev` build.
 - A phone with the matching mobile build (`pnpm mobile:sync` + Xcode /
   Android Studio).
+- A production Web build served from an allowed HTTPS origin. Unlock its
+  browser Vault and pair it to the same host with the invite link or payload.
 - The phone on **cellular** (not the same Wi-Fi as the desktop) — that
   forces the WebRTC tier to do real NAT traversal rather than landing on
   `ws-lan`.
@@ -31,8 +33,8 @@ You need:
 1. From the desktop, generate a pair QR (Settings → Mobile companion →
    Pair device → Generate QR).
 2. On the phone, run the in-app pair flow: Discover → Pair → scan the
-   QR. The phone redeems `POST /api/v1/auth/pair`; this returns
-   `rendezvousId` + `rendezvousSecret`.
+   QR. The phone redeems `POST /api/v1/auth/pair`; this returns a
+   `RoomDescriptorV2` and installs a non-extractable mobile role key.
 3. Within ~5 seconds the desktop's WebRTC card should show the new
    device transitioning **offline → awaiting → negotiating → connected**.
 4. On the mobile Settings panel, the Transport row should land on
@@ -45,13 +47,16 @@ minute, jump to [Step 4](#step-4--symmetric-nat--turn).
 
 1. With the DataChannel open, open `chrome://webrtc-internals` on the
    desktop.
-2. Find the `RTCDataChannel:cognia.v1` row → expand the parent peer
+2. Find the `RTCDataChannel:cognia.v2` row → expand the parent peer
    connection → `RTCIceCandidatePair` → look at the **local candidate's**
    `type`.
 3. Expected: `host` (same LAN; you shouldn't be on cellular if so) or
    `srflx` (typical cellular). `prflx` is also fine. If the type is
    `relay`, see [Step 4](#step-4--symmetric-nat--turn).
 4. Screenshot this row for the PR description.
+
+Confirm the connection uses `/v2/signaling` and the status reports
+`v2 role-isolated`. Any v1 route or downgrade is a release blocker.
 
 ## Step 3 — Mid-session reconnect
 
@@ -95,6 +100,22 @@ curl -s https://signaling.cognia.cn/metrics | grep -E "signaling_(rooms|peers|fr
 # → non-zero counters; specifically `signaling_rooms_active >= 1` and
 #   `signaling_peers_active >= 2` while the room is live.
 ```
+
+## Step 6 — Browser security and fallback
+
+1. Repeat pairing in the Web build. Confirm the target book in
+   `localStorage` contains no device JWT, provider key, OIDC token, or private
+   JWK; those values must remain encrypted in the unlocked Vault.
+2. Reject the host certificate (or use an untrusted local CA) and verify the
+   UI reports certificate trust rather than an undifferentiated offline
+   state. Install the CA, reload, and verify HTTPS succeeds.
+3. Remove the Web origin from the host allowlist and verify CORS/PNA is
+   reported without falling back to plaintext HTTP. Restore the exact origin.
+4. Block direct ICE candidates. With TURN configured, the tier must become
+   `rtc-relay`; without TURN, the UI must explain that relay is unavailable.
+5. Switch to another saved target and back. Subscriptions, IndexedDB data, and
+   queued writes must remain bound to their original `accountId` and
+   `targetId`.
 
 ## Reporting
 

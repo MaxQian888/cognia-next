@@ -129,10 +129,20 @@ actions on the host.
 
 ### Inbound A2UI from platform rich content
 
-`lib/connectors/a2ui-bridge/segments-to-a2ui.ts:segmentsToA2UI` projects
-a `MessageSegment[]` (text + image + file + location) into an A2UI
-Surface so the inbox renderer treats inbound rich content identically
-to assistant-emitted surfaces.
+`lib/connectors/adapters/_shared/inbound-a2ui-dispatch.ts:projectInboundToA2UI`
+dispatches an inbound platform payload to the matching per-platform
+`inbound-to-a2ui.ts` mapper, producing an `InboundA2UIBlock`
+(`inbound-a2ui-types.ts`) that is persisted onto
+`StoredMessage.metadata.inboundA2UI` and rendered by
+`components/chat/message-parts/inbound-a2ui-renderer.tsx` so the inbox
+shows the platform's native rich structure.
+
+> Note: an earlier draft of this ADR described a
+> `lib/connectors/a2ui-bridge/segments-to-a2ui.ts:segmentsToA2UI` that
+> folded a `MessageSegment[]` into an A2UI Surface. That module was never
+> wired in (zero callers) and has since been **removed as dead code**; the
+> `InboundA2UIBlock` path above is the real inbound projection, and it is
+> not the inverse of the outbound `a2ui-to-segments.ts` projection.
 
 ## Consequences
 

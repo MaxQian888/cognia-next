@@ -27,8 +27,12 @@ export const MOBILE_OUTBOUND_COMMANDS = [
   "connector_send",
   "connector_approve_draft",
   "connector_reject_draft",
-  // Workflow subsystem (mobile trigger button).
+  // Workflow subsystem (mobile trigger button + delete mirror + schedule
+  // pause/resume from the row-actions sheet).
   "workflow_trigger_manual",
+  "workflow_delete",
+  "workflow_schedule_pause",
+  "workflow_schedule_resume",
   // Twin subsystem (twin-sources + twin-drafts panels).
   "twin_ingest_source",
   // Wave 2 desktop-write mutating RPCs.
@@ -39,6 +43,12 @@ export const MOBILE_OUTBOUND_COMMANDS = [
   "plugin_set_enabled",
   "adapter_update_policy",
   "app_settings_update",
+  // Long-term memory mutations — mobile edits must reach the desktop
+  // authority instead of only changing the offline sync mirror.
+  "memory_update",
+  "memory_forget",
+  // External agents (ADR-0056, Wave 4) — enable/disable + permission-mode edit.
+  "external_agent_update",
 ] as const
 
 export type MobileOutboundCommand = (typeof MOBILE_OUTBOUND_COMMANDS)[number]
@@ -48,6 +58,10 @@ export type MobileOutboundStatus = "pending" | "sending" | "sent" | "failed" | "
 export interface MobileOutboundJobRow {
   /** UUIDv4 primary key. */
   id: string
+  /** Local account that created the row. Never inferred at dispatch time. */
+  accountId: string
+  /** Runtime target that must receive the row. */
+  targetId: string
   /** Mapped to the `_rpc/<command>` endpoint on the desktop server. */
   command: MobileOutboundCommand
   /** Forwarded as the JSON body of the RPC call. */

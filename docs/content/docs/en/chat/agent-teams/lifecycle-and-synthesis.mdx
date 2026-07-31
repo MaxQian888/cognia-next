@@ -259,6 +259,36 @@ const workflow: VisualWorkflow = {
 | `settings.maxConcurrency` | `initialConcurrency` | Seeded from `team.config.maxConcurrentTeammates` |
 | node `typeVersion` | `1` | Pinned executor contract version |
 
+### Blocking lead review (ADR-0071)
+
+When `team.config.taskReview.enabled`, the synthesizer emits a second node per
+task — `action.team.task.review`, id `review:<taskId>` — and **repoints every
+dependent edge onto it**:
+
+```
+  taskA ──▶ review:taskA ──▶ taskB ──▶ review:taskB
+```
+
+That indirection is the whole mechanism: an unapproved task's dependents are not
+runnable, so the gate is enforced by the ready-set scheduler rather than by
+downstream nodes remembering to check a flag. Off by default → the DAG is
+exactly as it was.
+
+| Detail | Behaviour |
+| --- | --- |
+| Dep satisfied outside this workflow (`satisfiedDependencyIds`) | No review node — a prior wave already ran and reviewed it |
+| `params.dependencies` | Still carries **task** ids, not node ids, so the blackboard read is unchanged |
+| `params.maxRevisions` | Frozen at synthesis, so a mid-run config edit can't change a budget the DAG was shaped by |
+| Cycle detection | Unaffected — Kahn's runs over task ids, not node ids |
+
+The executor asks the lead for a structured `{ verdict, feedback }`, showing it
+the worker's output plus ≤64 KiB of deterministic diff evidence
+(`review-evidence.ts`). `changes_requested` re-dispatches the **same** worker in
+the **same** worktree with the feedback; approval sets the task `completed` (or
+`review`, when the human `requireResultReview` gate also applies). Anything
+unresolved — exhausted budget, missing worker, reviewer failure — fails the task
+and the run. See [ADR-0071](../adr/0071-blocking-lead-task-review).
+
 ## Per-run shared state — `lib/ai/agent/team/team-run-context.ts`
 
 The synthesizer registers an immutable `TeamRunContext` keyed by `runId` before calling `runWorkflow`, so the dispatch executor can recover the live pool / budget / notifier from inside a node. The interface is verbatim:
@@ -486,4 +516,5 @@ Because a team run **is** a workflow run (`triggerKind: "team"`), there is no te
   <Card title="Ultracode & Patterns" href="./ultracode-and-patterns" description="Complexity-aware trigger and the higher-order pattern nodes." />
   <Card title="Visual Workflows" href="../subsystems/visual-workflows" description="The orchestrator, node executors, and run persistence the synthesizer reuses." />
   <Card title="ADR-0022" href="../adr/0022-agent-team-runtime-hardening" description="The runtime-hardening decision behind the F-path spine." />
+  <Card title="ADR-0071" href="../adr/0071-blocking-lead-task-review" description="The blocking lead review node, its diff evidence, and the revision loop." />
 </Cards>

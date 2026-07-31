@@ -6,6 +6,8 @@
  * with aliases for backward compatibility (prompt/completion).
  */
 
+import { getBuiltInProviderCatalogEntry } from "@cognia/provider-types/built-in-provider-catalog"
+
 export interface TokenUsage {
   /** Input/prompt tokens */
   prompt: number
@@ -17,6 +19,15 @@ export interface TokenUsage {
   inputTokens?: number
   /** Alias for completion tokens (AI SDK naming) */
   outputTokens?: number
+  /**
+   * Reasoning / "thinking" tokens, when the provider reports them separately
+   * (OpenAI o-series/gpt-5 via `reasoningTokens`, AI SDK v6 usage). These are
+   * a SUBSET of output tokens — already billed at the output rate — surfaced
+   * for observability, not added to the cost again. `undefined` when the
+   * provider doesn't break them out (e.g. native Anthropic bundles thinking
+   * into output_tokens).
+   */
+  reasoningTokens?: number
 }
 
 /** Request status for tracking success/error states */
@@ -276,9 +287,15 @@ export const MODEL_PRICING_CNY: Record<string, { input: number; output: number }
 }
 
 /**
- * Get pricing for a model, checking USD first then CNY (converted to USD)
+ * Get pricing for a model, checking USD table, CNY table, and finally the
+ * built-in provider catalog when a `providerId` is supplied. The catalog
+ * fallback is what gives OpenCode Zen / Go specific models (e.g. `kimi-k2.6`,
+ * `glm-5.1`) a price even when they are absent from the global tables.
  */
-export function getModelPricingUSD(model: string): { input: number; output: number } | null {
+export function getModelPricingUSD(
+  model: string,
+  providerId?: string
+): { input: number; output: number } | null {
   const usdPricing = MODEL_PRICING[model]
   if (usdPricing) return usdPricing
 
@@ -291,14 +308,27 @@ export function getModelPricingUSD(model: string): { input: number; output: numb
     }
   }
 
+  if (providerId) {
+    const entry = getBuiltInProviderCatalogEntry(providerId)?.models?.find((m) => m.id === model)
+    const pricing = entry?.pricing
+    if (pricing) {
+      const rate =
+        pricing.currency === "CNY" ? CURRENCIES.CNY.rateFromUSD : CURRENCIES.USD.rateFromUSD
+      return {
+        input: pricing.promptPer1M / rate,
+        output: pricing.completionPer1M / rate,
+      }
+    }
+  }
+
   return null
 }
 
 /**
  * Calculate cost from token usage
  */
-export function calculateCost(model: string, tokens: TokenUsage): number {
-  const pricing = getModelPricingUSD(model)
+export function calculateCost(model: string, tokens: TokenUsage, providerId?: string): number {
+  const pricing = getModelPricingUSD(model, providerId)
   if (!pricing) return 0
 
   const inputCost = (tokens.prompt / 1_000_000) * pricing.input
@@ -313,9 +343,10 @@ export function calculateCost(model: string, tokens: TokenUsage): number {
 export function calculateCostFromTokens(
   model: string,
   inputTokens: number,
-  outputTokens: number
+  outputTokens: number,
+  providerId?: string
 ): number {
-  const pricing = getModelPricingUSD(model)
+  const pricing = getModelPricingUSD(model, providerId)
   if (!pricing) return 0
 
   const inputCost = (inputTokens / 1_000_000) * pricing.input
@@ -352,6 +383,71 @@ export function formatTokens(tokens: number): string {
   if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`
   if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}K`
   return String(tokens)
+}
+
+/**
+ * Output-token throughput in tokens/second across a turn or a summed window
+ * (`outputTokens` ÷ `durationMs`). Returns `null` when there is no timed
+ * generation to divide by — a non-SDK turn that reported `durationMs: 0`, or no
+ * output — so callers can render a "—" placeholder instead of a bogus
+ * `Infinity`/`0`.
+ */
+export function tokensPerSecond(outputTokens: number, durationMs: number): number | null {
+  if (!Number.isFinite(outputTokens) || !Number.isFinite(durationMs)) return null
+  if (outputTokens <= 0 || durationMs <= 0) return null
+  return outputTokens / (durationMs / 1000)
+}
+
+/**
+ * Format a tokens/second value for display (no unit — callers append a
+ * localized "tok/s"). Compact above 1K ("1.2K"); whole numbers at ≥ 10; one
+ * decimal below. Returns "0" for non-positive / non-finite input.
+ */
+export function formatTokensPerSec(tokPerSec: number): string {
+  if (!Number.isFinite(tokPerSec) || tokPerSec <= 0) return "0"
+  if (tokPerSec >= 1000) return `${(tokPerSec / 1000).toFixed(1)}K`
+  if (tokPerSec >= 10) return String(Math.round(tokPerSec))
+  return tokPerSec.toFixed(1)
+}
+
+/**
+ * Prompt-cache hit rate = cacheRead ÷ (cacheRead + cacheWrite), in [0, 1]. "Of
+ * the cache-eligible prompt tokens, what fraction were served cheaply from the
+ * cache rather than freshly written at full price." Returns 0 when there was no
+ * cache activity at all. Distinct from the session-report `cacheEfficiency`
+ * assessment (a read÷write *ratio* that can exceed 1).
+ */
+export function cacheHitRate(cacheReadTokens: number, cacheCreationTokens: number): number {
+  const read = Number.isFinite(cacheReadTokens) ? Math.max(0, cacheReadTokens) : 0
+  const write = Number.isFinite(cacheCreationTokens) ? Math.max(0, cacheCreationTokens) : 0
+  const denom = read + write
+  return denom > 0 ? read / denom : 0
+}
+
+/** Format a [0, 1] fraction as an integer percent string, clamped: 0.383 → "38%". */
+export function formatPercent(fraction: number): string {
+  if (!Number.isFinite(fraction)) return "0%"
+  return `${Math.round(Math.min(1, Math.max(0, fraction)) * 100)}%`
+}
+
+/**
+ * Compact human duration from milliseconds: "820ms", "3.1s", "1m 03s",
+ * "1h 02m". Returns "0s" for non-positive / non-finite input.
+ */
+export function formatDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return "0s"
+  if (ms < 1000) return `${Math.round(ms)}ms`
+  const totalSec = Math.round(ms / 1000)
+  if (totalSec < 60) {
+    const s = ms / 1000
+    return `${s >= 10 ? String(Math.round(s)) : s.toFixed(1)}s`
+  }
+  const totalMin = Math.floor(totalSec / 60)
+  const secRem = totalSec % 60
+  if (totalMin < 60) return `${totalMin}m ${String(secRem).padStart(2, "0")}s`
+  const hours = Math.floor(totalMin / 60)
+  const minRem = totalMin % 60
+  return `${hours}h ${String(minRem).padStart(2, "0")}m`
 }
 
 /**
@@ -462,7 +558,8 @@ export function formatCost(cost: number): string {
  */
 export function formatModelPricing(
   modelId: string,
-  currency: CurrencyCode = "USD"
+  currency: CurrencyCode = "USD",
+  providerId?: string
 ): { input: string; output: string } | null {
   // For CNY currency, prefer native CNY pricing if available
   if (currency === "CNY") {
@@ -478,7 +575,7 @@ export function formatModelPricing(
     }
   }
 
-  const pricing = getModelPricingUSD(modelId)
+  const pricing = getModelPricingUSD(modelId, providerId)
   if (!pricing) return null
 
   const config = CURRENCIES[currency]

@@ -137,7 +137,7 @@ describe("scanLan", () => {
     const fetchMock = makeFetch((url) => {
       calls.push(url)
       // Only one IP in the /24 returns a cognia 401; the rest return random shape.
-      if (url.startsWith("https://192.168.5.42:7890")) return cogniaResp({ code: "x" })
+      if (url.startsWith("https://192.168.5.42:27890")) return cogniaResp({ code: "x" })
       return okResp()
     })
     const result = await scanLan({
@@ -152,7 +152,7 @@ describe("scanLan", () => {
     expect(calls.length).toBeGreaterThan(50) // many probes
     expect(result).toHaveLength(1)
     expect(result[0]).toMatchObject({
-      id: "192.168.5.42:7890",
+      id: "192.168.5.42:27890",
       source: "probe",
       ip: "192.168.5.42",
     })
@@ -209,7 +209,7 @@ describe("scanLan", () => {
       probeConcurrency: 16,
     })
     expect(result).toHaveLength(1)
-    expect(result[0].id).toBe("192.168.0.99:7890")
+    expect(result[0].id).toBe("192.168.0.99:27890")
     expect(calls).toBeGreaterThan(1)
   })
 
@@ -419,14 +419,12 @@ describe("scanLan — paired tier and multi-port", () => {
     const mdns = makeMdns()
     const fetchMock = makeFetch(() => cogniaResp())
     const onFound = jest.fn()
-    const healthzFetcher = jest.fn(
-      async (): Promise<HealthzResult> => ({
-        version: "0.5.0",
-        fingerprint: "HEALTHZ-FP",
-        advertisedPort: 7890,
-        serverId: "0123456789abcdef0123456789abcdef",
-      })
-    )
+    const healthzFetcher = jest.fn(async (): Promise<HealthzResult> => ({
+      version: "0.5.0",
+      fingerprint: "HEALTHZ-FP",
+      advertisedPort: 7890,
+      serverId: "0123456789abcdef0123456789abcdef",
+    }))
     const result = await scanLan({
       signal: new AbortController().signal,
       onFound,
@@ -471,14 +469,12 @@ describe("scanLan — paired tier and multi-port", () => {
     // emit must not downgrade the paired tier.
     const mdns = makeMdns()
     const fetchMock = makeFetch(() => cogniaResp())
-    const healthzFetcher = jest.fn(
-      async (): Promise<HealthzResult> => ({
-        version: "0.5.0",
-        fingerprint: "HEALTHZ-FP",
-        advertisedPort: 7890,
-        serverId: "deadbeefdeadbeefdeadbeefdeadbeef",
-      })
-    )
+    const healthzFetcher = jest.fn(async (): Promise<HealthzResult> => ({
+      version: "0.5.0",
+      fingerprint: "HEALTHZ-FP",
+      advertisedPort: 7890,
+      serverId: "deadbeefdeadbeefdeadbeefdeadbeef",
+    }))
     const result = await scanLan({
       signal: new AbortController().signal,
       onFound: jest.fn(),

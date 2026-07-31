@@ -1,5 +1,5 @@
 import { buildGoalJudgeClient } from "./judge-client"
-import type { AppSettings, ChatSession } from "@/lib/claude/types"
+import type { AppSettings, ChatSession } from "@cognia/agent-config-types"
 
 /**
  * These tests run the real provider-resolution chain

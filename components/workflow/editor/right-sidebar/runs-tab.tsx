@@ -24,6 +24,7 @@ import type { WorkflowRunEventRow } from "@/types/workflow/visual"
 import { RunStatusPill } from "@/components/workflow/runs/run-status-pill"
 import { RunTimeline } from "@/components/workflow/runs/run-timeline"
 import { RunStepDetail } from "@/components/workflow/runs/run-step-detail"
+import { DeadLetterPanel } from "@/components/workflow/runs/dead-letter-panel"
 import { formatRunStartedAt, formatRunDuration } from "@/components/workflow/runs/format"
 
 export interface RunsTabProps {
@@ -89,6 +90,7 @@ function RunListRail({
 
   return (
     <ScrollArea className="h-full" data-testid="runs-tab">
+      <DeadLetterPanel workflowId={workflowId} />
       <ul className="divide-y">
         {runs.map((run) => (
           <li key={run.id}>
@@ -159,20 +161,17 @@ function RunDetailRail({
   const revealOnCanvas = (stepId: string) => {
     const state = useStore.getState()
     const node = state.nodes.find((n) => n.id === stepId)
-    if (node && reactFlowInstance && typeof window !== "undefined") {
+    if (node && reactFlowInstance) {
+      // Pane-aware centring — see spotlight-search.tsx:handleSelect. `setCenter`
+      // centres within the canvas pane; window-width setViewport math would push
+      // the node right of centre when the sidebar is open.
       const zoom = 1.2
       const w = node.width ?? node.measured?.width ?? 240
       const h = node.height ?? node.measured?.height ?? 80
-      const cxFlow = node.position.x + w / 2
-      const cyFlow = node.position.y + h / 2
-      reactFlowInstance.setViewport(
-        {
-          x: window.innerWidth / 2 - cxFlow * zoom,
-          y: window.innerHeight / 2 - cyFlow * zoom,
-          zoom,
-        },
-        { duration: 240 }
-      )
+      reactFlowInstance.setCenter(node.position.x + w / 2, node.position.y + h / 2, {
+        zoom,
+        duration: 240,
+      })
     }
     state.setSelectedNodes([stepId])
     state.pulseNode(stepId, 3000)

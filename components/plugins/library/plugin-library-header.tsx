@@ -6,33 +6,41 @@
 //   - Library sub-filter chips (All / Enabled / Updates / Configurable / Errored)
 //   - View-mode toggle (list / card)
 //   - Filter sheet trigger
-//   - Plugin panel toolbar (Install split-button / Check updates / Sync registry)
 //
-// Lives inside the FeaturePageShell's `toolbar` slot so it stays stuck to
-// the top of the center pane on every breakpoint.
+// Lives inside the FeaturePageHeader controls slot. Primary and page-level
+// actions are hosted by the header's fixed action tier so they remain visible
+// when this dense controls row scrolls horizontally.
 
 import { useTranslations } from "next-intl"
-import { FilterIcon, SearchIcon } from "lucide-react"
-import { usePluginsStore } from "@/stores/plugins"
+import { ArrowDownUpIcon, FilterIcon, SearchIcon } from "lucide-react"
+import { usePluginsStore, type PluginSortMode } from "@/stores/plugins"
 import { usePlugins } from "@/hooks/plugins"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { PluginCategorySheet } from "../dialogs/plugin-category-sheet"
-import { PluginPanelToolbar } from "../plugin-panel-toolbar"
 import { PluginActiveFilters } from "./plugin-active-filters"
 import { PluginLibrarySubFilter } from "./plugin-library-sub-filter"
 import { PluginLibraryViewToggle } from "./plugin-library-view-toggle"
 
-interface Props {
-  onCheckUpdates?: () => void
-  onSyncRegistry?: () => Promise<void> | void
-  syncing?: boolean
-}
+const SORT_MODES: readonly PluginSortMode[] = ["name", "updated", "usage", "rating"]
 
-export function PluginLibraryHeader({ onCheckUpdates, onSyncRegistry, syncing }: Props) {
+export function PluginLibraryHeader() {
   const t = useTranslations("plugins.panel")
-  const filters = usePluginsStore((s) => s.filters)
+  const tSort = useTranslations("plugins.filterSheet")
+  // Narrow selectors — subscribing to the whole `filters` object would
+  // re-render the header (and its toolbar subtree) on every filter change,
+  // including ones this component doesn't display.
+  const query = usePluginsStore((s) => s.filters.query)
+  const sort = usePluginsStore((s) => s.filters.sort)
   const setQuery = usePluginsStore((s) => s.setQuery)
+  const setFilters = usePluginsStore((s) => s.setFilters)
   const setFilterSheetOpen = usePluginsStore((s) => s.setFilterSheetOpen)
   const { filtered, totals, loading } = usePlugins()
   // Only surface the count when the visible set is narrower than the total
@@ -46,7 +54,7 @@ export function PluginLibraryHeader({ onCheckUpdates, onSyncRegistry, syncing }:
         <div className="relative flex-1 min-w-0">
           <SearchIcon className="absolute left-2 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
           <Input
-            value={filters.query}
+            value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={t("searchPlaceholder")}
             className="pl-7 h-8 text-sm"
@@ -67,12 +75,26 @@ export function PluginLibraryHeader({ onCheckUpdates, onSyncRegistry, syncing }:
             equivalent affordance as a Sheet trigger so the capability
             filter axis stays reachable. */}
         <PluginCategorySheet className="lg:hidden" />
+        <Select value={sort} onValueChange={(v) => setFilters({ sort: v as PluginSortMode })}>
+          <SelectTrigger
+            className="h-8 w-auto gap-1.5 text-xs"
+            aria-label={t("sortBy")}
+            data-testid="plugin-library-sort"
+          >
+            <ArrowDownUpIcon className="size-3.5" />
+            <span className="hidden sm:inline">
+              <SelectValue />
+            </span>
+          </SelectTrigger>
+          <SelectContent>
+            {SORT_MODES.map((mode) => (
+              <SelectItem key={mode} value={mode}>
+                {tSort(`sortMode.${mode}` as never)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <PluginLibraryViewToggle />
-        <PluginPanelToolbar
-          onCheckUpdates={onCheckUpdates}
-          onSyncRegistry={onSyncRegistry}
-          syncing={syncing}
-        />
       </div>
       <PluginLibrarySubFilter />
       <PluginActiveFilters />

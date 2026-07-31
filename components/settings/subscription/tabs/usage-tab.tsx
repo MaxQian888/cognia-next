@@ -6,18 +6,28 @@
  * A full usage dashboard built from two persisted sources:
  *   • `subscriptionUsage` (rate-limit header snapshots) drives the current-
  *     window gauges + reset countdowns and the utilization trend chart.
- *   • `sessionUsage` (per-turn SDK usage) drives the per-model cost/token
- *     breakdown, the daily cost chart, and the top-sessions table — with
- *     real per-token cost back-filled when the SDK reported none.
+ *   • `sessionUsage` (per-turn SDK usage) drives the headline stat tiles, the
+ *     per-model cost/token breakdown, the daily cost chart, and the top-sessions
+ *     table — with real per-token cost back-filled when the SDK reported none.
  *
  * All aggregation is delegated to the pure helpers in
  * `lib/subscription/anthropic/usage-analytics.ts` and `lib/usage/session-
- * analytics.ts` so this file stays presentational and testable. A range
- * toggle (7d / 30d / all) filters every section; CSV/JSON export dumps the
- * raw billable rows.
+ * analytics.ts` so this file stays presentational and testable.
+ *
+ * Display is mode-aware (simplified / standard / detailed) via the global
+ * `useUsageDisplayMode`, mirroring the chat agent-flow pattern: simplified keeps
+ * only the headline tiles + current window open, standard opens the charts and
+ * tables, detailed additionally opens the raw snapshots and shows extra columns.
+ * Each section folds independently (mode-default + session-local override, like
+ * `tool-activity-group`), with an expand/collapse-all control. Motion is gated
+ * through `useFlowMotion` so it honours reduced-motion.
+ *
+ * A range toggle (7d / 30d / all) filters every section; CSV/JSON export dumps
+ * the raw billable rows.
  */
 
 import { useEffect, useMemo, useState } from "react"
+import { useSubscriptionNow } from "@/lib/subscription/core/now-ticker"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
@@ -33,10 +43,23 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
-import { CoinsIcon, DownloadIcon, HashIcon, RepeatIcon } from "lucide-react"
+import {
+  ChevronDownIcon,
+  CoinsIcon,
+  DatabaseZapIcon,
+  DownloadIcon,
+  FoldVerticalIcon,
+  HashIcon,
+  GaugeIcon,
+  RefreshCwIcon,
+  RepeatIcon,
+  Share2Icon,
+  UnfoldVerticalIcon,
+} from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -52,11 +75,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import {
-  SettingsAlert,
-  SettingsCard,
-  SettingsEmptyState,
-} from "@/components/settings/common/settings-section"
+import { SettingsAlert, SettingsEmptyState } from "@/components/settings/common/settings-section"
 import { StatCard } from "@/components/scheduler/stat-card"
 import { cn } from "@/lib/utils"
 
@@ -67,31 +86,41 @@ import { isTauri } from "@/lib/tauri"
 import { getDb } from "@/lib/db/schema"
 import { listSessions } from "@/lib/db/sessions"
 import { downloadBlob } from "@/lib/files/download"
-import { formatCostInCurrency, formatTokens } from "@/types/system/usage"
+import {
+  formatCostInCurrency,
+  formatTokens,
+  formatTokensPerSec,
+  tokensPerSecond,
+} from "@/types/system/usage"
 import { useAnthropicUsage } from "@/lib/subscription/anthropic/hooks"
 import { useAccounts } from "@/lib/subscription/core/hooks"
-import { BalanceCard } from "@/components/settings/subscription/balance-card"
-import type { ProviderId } from "@/types/subscription"
-import {
-  buildUtilizationSeries,
-  splitCountdown,
-  summarizeCurrentWindow,
-  type CurrentWindowSummary,
-  type UsageLevel,
-  type WindowStatus,
-} from "@/lib/subscription/anthropic/usage-analytics"
+import { ProviderQuotaPanel } from "@/components/settings/subscription/provider-quota-panel"
+import { WindowGaugeCard } from "@/components/settings/subscription/window-gauge-card"
+import { UsageShareDialog } from "@/components/settings/subscription/usage-share-dialog"
+import { UsageDisplayToggle } from "@/components/settings/subscription/usage-display-toggle"
+import { useUsageDisplayMode } from "@/hooks/usage/use-usage-display-mode"
+import { useCountUp } from "@/hooks/usage/use-count-up"
+import { MotionCollapse, MotionReveal, useFlowMotion } from "@/components/chat/motion/motion-reveal"
+import type { UsageDisplayMode } from "@/types/appearance"
+import type { LimitsMeter, ProviderId } from "@/types/subscription"
+import { buildUtilizationSeries } from "@/lib/subscription/anthropic/usage-analytics"
+import { resolveUsageWindows } from "@/lib/subscription/anthropic/overview-windows"
+import { useProviderLimits } from "@/lib/subscription/limits/hooks"
 import {
   aggregateByDay,
   aggregateByModel,
   aggregateBySession,
+  analyzeUsageContributors,
   buildUsageFilename,
   filterByRange,
   toUsageCsv,
   toUsageJson,
+  type ModelUsageRow,
+  type UsageContributors,
 } from "@/lib/usage/session-analytics"
-import type { SessionUsageRow } from "@/lib/db/session-usage"
+import type { SessionUsageRow, UsageSurface } from "@/lib/db/session-usage"
 import type { SubscriptionUsageRow } from "@/types/subscription"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import { useChatStore } from "@/stores/chat"
 
 const DAY_MS = 86_400_000
@@ -104,16 +133,33 @@ const RANGES = [
 
 type RangeKey = (typeof RANGES)[number]["key"]
 
-const LEVEL_BAR: Record<UsageLevel, string> = {
-  ok: "bg-emerald-500",
-  warn: "bg-amber-500",
-  crit: "bg-destructive",
+const SURFACE_FILTERS = ["all", "chat", "workflow", "agent-team"] as const
+type SurfaceFilter = (typeof SURFACE_FILTERS)[number]
+
+/** Keep rows whose producing surface matches the active filter. */
+function filterBySurface(
+  rows: readonly SessionUsageRow[],
+  surface: SurfaceFilter
+): SessionUsageRow[] {
+  if (surface === "all") return [...rows]
+  return rows.filter((r) => (r.surface ?? "chat") === (surface as UsageSurface))
 }
 
-const LEVEL_TEXT: Record<UsageLevel, string> = {
-  ok: "text-emerald-500",
-  warn: "text-amber-500",
-  crit: "text-destructive",
+/* ── Section folding ────────────────────────────────────────────────────── */
+
+/** Ids of the collapsible sections, in render order. */
+const SECTION_IDS = ["window", "trend", "models", "insights", "cost", "sessions", "raw"] as const
+type SectionId = (typeof SECTION_IDS)[number]
+
+/**
+ * Mode-driven default open state, mirroring the agent-flow progressive density:
+ * the current window is always open, charts/tables open from `standard` up, and
+ * the raw snapshot table only opens in `detailed`.
+ */
+function defaultOpenForMode(id: SectionId, mode: UsageDisplayMode): boolean {
+  if (id === "window") return true
+  if (id === "raw") return mode === "detailed"
+  return mode !== "simplified"
 }
 
 /* ── Root ──────────────────────────────────────────────────────────────── */
@@ -121,6 +167,7 @@ const LEVEL_TEXT: Record<UsageLevel, string> = {
 export function SubscriptionUsageTab() {
   const t = useTranslations("subscription")
   const tabReady = isTauri()
+  const { mode } = useUsageDisplayMode()
   const { rows: snapshotRows, latest, loading } = useAnthropicUsage(500)
 
   const liveSessionUsage = useLiveQuery(() => getDb().sessionUsage.toArray(), [])
@@ -128,19 +175,54 @@ export function SubscriptionUsageTab() {
 
   const [range, setRange] = useState<RangeKey>("7d")
   const rangeDays = useMemo(() => RANGES.find((r) => r.key === range)?.days ?? null, [range])
+  const [surface, setSurface] = useState<SurfaceFilter>("all")
 
-  // Tick once a minute so reset countdowns and range cutoffs stay fresh
-  // without reading `Date.now()` impurely during render.
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 60_000)
-    return () => clearInterval(id)
-  }, [])
+  // Per-section fold overrides, scoped to the active mode: switching mode resets
+  // folding to that mode's defaults (no effect syncing — a stale mode is treated
+  // as an empty override set during render). Same convention as the agent-flow
+  // tool-activity-group's sparse-map approach.
+  const [fold, setFold] = useState<{ mode: UsageDisplayMode; map: Map<SectionId, boolean> }>(
+    () => ({
+      mode,
+      map: new Map(),
+    })
+  )
+  const overrides = fold.mode === mode ? fold.map : null
+  const isOpen = (id: SectionId) =>
+    overrides?.has(id) ? (overrides.get(id) as boolean) : defaultOpenForMode(id, mode)
+  const toggleSection = (id: SectionId) =>
+    setFold((prev) => {
+      const base = prev.mode === mode ? prev.map : new Map<SectionId, boolean>()
+      const next = new Map(base)
+      const current = base.has(id) ? (base.get(id) as boolean) : defaultOpenForMode(id, mode)
+      next.set(id, !current)
+      return { mode, map: next }
+    })
+  const setAllSections = (open: boolean) =>
+    setFold(() => ({ mode, map: new Map(SECTION_IDS.map((id) => [id, open])) }))
+
+  // Shared clock: this page also renders the overview gauges and the quota
+  // panel, which used to run their own intervals at a different period, so the
+  // same window's countdown ticked at two different moments.
+  const now = useSubscriptionNow()
 
   const filteredSessionRows = useMemo(
-    () => filterByRange(sessionRows, rangeDays, now),
-    [sessionRows, rangeDays, now]
+    () => filterBySurface(filterByRange(sessionRows, rangeDays, now), surface),
+    [sessionRows, rangeDays, now, surface]
   )
+  const models = useMemo(() => aggregateByModel(filteredSessionRows), [filteredSessionRows])
+  const contributors = useMemo(
+    () => analyzeUsageContributors(filteredSessionRows),
+    [filteredSessionRows]
+  )
+  // Which surfaces actually appear in-range — drives the filter's visibility so
+  // the toggle only shows up once non-chat usage exists.
+  const availableSurfaces = useMemo(() => {
+    const rangeRows = filterByRange(sessionRows, rangeDays, now)
+    const set = new Set<UsageSurface>()
+    for (const r of rangeRows) set.add(r.surface ?? "chat")
+    return set
+  }, [sessionRows, rangeDays, now])
 
   if (!tabReady) {
     return (
@@ -163,16 +245,145 @@ export function SubscriptionUsageTab() {
   }
 
   return (
-    <div className="space-y-4" data-testid="usage-tab">
-      <UsageToolbar range={range} onRange={setRange} exportRows={filteredSessionRows} />
-      <BalancesSection />
-      <CurrentWindowCard latest={latest} now={now} />
-      <UtilizationTrendCard rows={snapshotRows} rangeDays={rangeDays} now={now} />
-      <ModelBreakdownCard rows={filteredSessionRows} />
-      <CostOverTimeCard rows={filteredSessionRows} />
-      <TopSessionsCard rows={filteredSessionRows} />
-      <RawSamplesCard rows={snapshotRows} rangeDays={rangeDays} now={now} />
+    <div className="space-y-4" data-testid="usage-tab" data-mode={mode}>
+      <UsageToolbar
+        range={range}
+        onRange={setRange}
+        surface={surface}
+        onSurface={setSurface}
+        availableSurfaces={availableSurfaces}
+        exportRows={filteredSessionRows}
+        onExpandAll={() => setAllSections(true)}
+        onCollapseAll={() => setAllSections(false)}
+      />
+      {/* Was the one section on this tab rendered outside `MotionReveal`, so it
+          popped in while everything below it faded up in sequence. */}
+      <MotionReveal index={0}>
+        <BalancesSection now={now} />
+      </MotionReveal>
+      {models.length > 0 && (
+        <MotionReveal index={1}>
+          <UsageStatGrid models={models} />
+        </MotionReveal>
+      )}
+      <MotionReveal index={2}>
+        <CurrentWindowCard
+          latest={latest}
+          now={now}
+          open={isOpen("window")}
+          onToggle={() => toggleSection("window")}
+        />
+      </MotionReveal>
+      <MotionReveal index={3}>
+        <UtilizationTrendCard
+          rows={snapshotRows}
+          rangeDays={rangeDays}
+          now={now}
+          open={isOpen("trend")}
+          onToggle={() => toggleSection("trend")}
+        />
+      </MotionReveal>
+      <MotionReveal index={4}>
+        <ModelBreakdownCard
+          models={models}
+          mode={mode}
+          open={isOpen("models")}
+          onToggle={() => toggleSection("models")}
+        />
+      </MotionReveal>
+      <MotionReveal index={5}>
+        <InsightsCard
+          contributors={contributors}
+          open={isOpen("insights")}
+          onToggle={() => toggleSection("insights")}
+        />
+      </MotionReveal>
+      <MotionReveal index={6}>
+        <CostOverTimeCard
+          rows={filteredSessionRows}
+          open={isOpen("cost")}
+          onToggle={() => toggleSection("cost")}
+        />
+      </MotionReveal>
+      <MotionReveal index={7}>
+        <TopSessionsCard
+          rows={filteredSessionRows}
+          mode={mode}
+          open={isOpen("sessions")}
+          onToggle={() => toggleSection("sessions")}
+        />
+      </MotionReveal>
+      <MotionReveal index={8}>
+        <RawSamplesCard
+          rows={snapshotRows}
+          rangeDays={rangeDays}
+          now={now}
+          open={isOpen("raw")}
+          onToggle={() => toggleSection("raw")}
+        />
+      </MotionReveal>
     </div>
+  )
+}
+
+/* ── Collapsible section shell ──────────────────────────────────────────── */
+
+/**
+ * Controlled collapsible card matching `SettingsCard`'s look, but driven by an
+ * external open state so the toolbar's expand/collapse-all can steer every
+ * section at once. The body reveals through `MotionCollapse` (gated on
+ * reduced-motion) for a consistent fold animation.
+ */
+function UsageSection({
+  title,
+  description,
+  open,
+  onToggle,
+  children,
+  testid,
+}: {
+  title: string
+  description?: string
+  open: boolean
+  onToggle: () => void
+  children: React.ReactNode
+  testid?: string
+}) {
+  return (
+    <Card data-testid={testid}>
+      <CardHeader
+        className="cursor-pointer pb-3 transition-colors hover:bg-muted/50"
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        onClick={onToggle}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault()
+            onToggle()
+          }
+        }}
+        data-testid={testid ? `${testid}-header` : undefined}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <CardTitle className="text-base">{title}</CardTitle>
+            {description && (
+              <CardDescription className="mt-0.5 text-xs">{description}</CardDescription>
+            )}
+          </div>
+          <ChevronDownIcon
+            className={cn(
+              "h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200",
+              open && "rotate-180"
+            )}
+          />
+        </div>
+      </CardHeader>
+      <MotionCollapse open={open}>
+        <CardContent className="space-y-4">{children}</CardContent>
+      </MotionCollapse>
+    </Card>
   )
 }
 
@@ -181,11 +392,21 @@ export function SubscriptionUsageTab() {
 function UsageToolbar({
   range,
   onRange,
+  surface,
+  onSurface,
+  availableSurfaces,
   exportRows,
+  onExpandAll,
+  onCollapseAll,
 }: {
   range: RangeKey
   onRange: (key: RangeKey) => void
+  surface: SurfaceFilter
+  onSurface: (key: SurfaceFilter) => void
+  availableSurfaces: Set<UsageSurface>
   exportRows: SessionUsageRow[]
+  onExpandAll: () => void
+  onCollapseAll: () => void
 }) {
   const t = useTranslations("subscription.usage")
 
@@ -195,193 +416,383 @@ function UsageToolbar({
     downloadBlob(new Blob([content], { type: mime }), buildUsageFilename(format))
   }
 
+  // Only worth showing the surface toggle once spend exists beyond plain chat.
+  const showSurface = availableSurfaces.has("workflow") || availableSurfaces.has("agent-team")
+
   return (
     <div className="flex flex-wrap items-center justify-between gap-2">
-      <div className="flex gap-1" role="group" aria-label={t("range.label")}>
-        {RANGES.map((r) => (
-          <Button
-            key={r.key}
-            variant={range === r.key ? "default" : "ghost"}
-            size="sm"
-            onClick={() => onRange(r.key)}
-            data-testid={`usage-range-${r.key}`}
-            aria-pressed={range === r.key}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex gap-1" role="group" aria-label={t("range.label")}>
+          {RANGES.map((r) => (
+            <Button
+              key={r.key}
+              variant={range === r.key ? "default" : "ghost"}
+              size="sm"
+              onClick={() => onRange(r.key)}
+              data-testid={`usage-range-${r.key}`}
+              aria-pressed={range === r.key}
+            >
+              {t(`range.${r.key}`)}
+            </Button>
+          ))}
+        </div>
+        {showSurface && (
+          <div
+            className="flex gap-1"
+            role="group"
+            aria-label={t("surface.label")}
+            data-testid="usage-surface-filter"
           >
-            {t(`range.${r.key}`)}
-          </Button>
-        ))}
+            {SURFACE_FILTERS.map((s) => (
+              <Button
+                key={s}
+                variant={surface === s ? "default" : "ghost"}
+                size="sm"
+                onClick={() => onSurface(s)}
+                data-testid={`usage-surface-${s}`}
+                aria-pressed={surface === s}
+              >
+                {t(`surface.${s === "agent-team" ? "agentTeam" : s}`)}
+              </Button>
+            ))}
+          </div>
+        )}
       </div>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
+      <div className="flex items-center gap-2">
+        <div className="flex gap-1">
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
-            disabled={exportRows.length === 0}
-            data-testid="usage-export-trigger"
+            onClick={onExpandAll}
+            data-testid="usage-expand-all"
+            title={t("expandAll")}
+            aria-label={t("expandAll")}
           >
-            <DownloadIcon className="size-3.5" />
-            {t("export.label")}
+            <UnfoldVerticalIcon className="size-3.5" />
           </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem onClick={() => onExport("csv")} data-testid="usage-export-csv">
-            {t("export.csv")}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => onExport("json")} data-testid="usage-export-json">
-            {t("export.json")}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onCollapseAll}
+            data-testid="usage-collapse-all"
+            title={t("collapseAll")}
+            aria-label={t("collapseAll")}
+          >
+            <FoldVerticalIcon className="size-3.5" />
+          </Button>
+        </div>
+        <UsageDisplayToggle />
+        <UsageShareDialog
+          rows={exportRows}
+          rangeLabel={t(`range.${range}`)}
+          trigger={
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={exportRows.length === 0}
+              data-testid="usage-share-card-trigger"
+            >
+              <Share2Icon className="size-3.5" />
+              {t("shareCard.action")}
+            </Button>
+          }
+        />
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={exportRows.length === 0}
+              data-testid="usage-export-trigger"
+            >
+              <DownloadIcon className="size-3.5" />
+              {t("export.label")}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => onExport("csv")} data-testid="usage-export-csv">
+              {t("export.csv")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onExport("json")} data-testid="usage-export-json">
+              {t("export.json")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
     </div>
   )
 }
 
-/* ── Non-anthropic account balances ────────────────────────────────────── */
+/* ── Non-anthropic account limits (windows + credit balances) ──────────── */
 
 const BALANCE_PROVIDERS: readonly ProviderId[] = ["codex", "opencode"]
 
-function BalancesSection() {
+function BalancesSection({ now }: { now: number }) {
   return (
     <div className="space-y-3" data-testid="balances-section">
       {BALANCE_PROVIDERS.map((provider) => (
-        <ProviderBalances key={provider} provider={provider} />
+        <ProviderQuotaPanel key={provider} provider={provider} now={now} />
       ))}
     </div>
   )
 }
 
-/**
- * Render a balance card for the active account of one non-anthropic provider.
- * Only the active account is shown — the relay/preset it's bound to drives
- * which balance adapter (if any) matches. No active account → nothing renders.
- */
-function ProviderBalances({ provider }: { provider: ProviderId }) {
-  const { accounts, activeAccountId } = useAccounts(provider)
-  if (!activeAccountId) return null
-  const active = accounts.find((a) => a.id === activeAccountId)
+/* ── Headline stat tiles ───────────────────────────────────────────────── */
+
+/** A single stat tile whose value counts up to its target (gated on motion). */
+function UsageStatCard({
+  label,
+  value,
+  format,
+  icon,
+  valueClassName,
+  accentGradient,
+  iconBgClassName,
+  testid,
+}: {
+  label: string
+  value: number
+  format: (n: number) => string
+  icon: React.ReactNode
+  valueClassName: string
+  accentGradient: string
+  iconBgClassName: string
+  testid: string
+}) {
+  const { reduce } = useFlowMotion()
+  const shown = useCountUp(value, { disabled: reduce })
   return (
-    <BalanceCard
-      provider={provider}
-      accountId={activeAccountId}
-      label={active?.label ?? active?.email ?? activeAccountId}
+    <StatCard
+      label={label}
+      value={format(shown)}
+      icon={icon}
+      valueClassName={valueClassName}
+      accentGradient={accentGradient}
+      iconBgClassName={iconBgClassName}
+      size="sm"
+      testid={testid}
     />
+  )
+}
+
+function UsageStatGrid({ models }: { models: ModelUsageRow[] }) {
+  const t = useTranslations("subscription.usage.models")
+  const totals = useMemo(
+    () =>
+      models.reduce(
+        (acc, m) => {
+          acc.tokens += m.inputTokens + m.outputTokens + m.cacheReadTokens
+          acc.cost += m.costUsd
+          acc.turns += m.turns
+          acc.input += m.inputTokens
+          acc.cacheRead += m.cacheReadTokens
+          acc.output += m.outputTokens
+          acc.duration += m.durationMs
+          return acc
+        },
+        { tokens: 0, cost: 0, turns: 0, input: 0, cacheRead: 0, output: 0, duration: 0 }
+      ),
+    [models]
+  )
+  // Same ratio convention as lib/db/agent-traces.ts traceSummary:
+  // cacheRead / (input + cacheRead), 0 when no input recorded.
+  const cacheHitRate =
+    totals.input + totals.cacheRead > 0 ? totals.cacheRead / (totals.input + totals.cacheRead) : 0
+  // Aggregate output-token throughput; null when no turn reported a duration.
+  const speed = tokensPerSecond(totals.output, totals.duration)
+
+  return (
+    <div
+      className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5"
+      data-testid="usage-stat-grid"
+    >
+      <UsageStatCard
+        label={t("totalTokens")}
+        value={totals.tokens}
+        format={formatTokens}
+        icon={<HashIcon className="h-5 w-5 text-blue-500" aria-hidden />}
+        valueClassName="text-blue-500"
+        accentGradient="from-blue-500 to-sky-400"
+        iconBgClassName="bg-blue-500/10"
+        testid="usage-model-stat-tokens"
+      />
+      <UsageStatCard
+        label={t("totalCost")}
+        value={totals.cost}
+        format={(n) => formatCostInCurrency(n, "USD")}
+        icon={<CoinsIcon className="h-5 w-5 text-violet-500" aria-hidden />}
+        valueClassName="text-violet-500"
+        accentGradient="from-violet-500 to-purple-400"
+        iconBgClassName="bg-violet-500/10"
+        testid="usage-model-stat-cost"
+      />
+      <UsageStatCard
+        label={t("totalTurns")}
+        value={totals.turns}
+        format={(n) => String(Math.round(n))}
+        icon={<RepeatIcon className="h-5 w-5 text-emerald-500" aria-hidden />}
+        valueClassName="text-emerald-500"
+        accentGradient="from-emerald-500 to-green-400"
+        iconBgClassName="bg-emerald-500/10"
+        testid="usage-model-stat-turns"
+      />
+      <UsageStatCard
+        label={t("cacheHitRate")}
+        value={cacheHitRate * 100}
+        format={(n) => `${Math.round(n)}%`}
+        icon={<DatabaseZapIcon className="h-5 w-5 text-amber-500" aria-hidden />}
+        valueClassName="text-amber-500"
+        accentGradient="from-amber-500 to-yellow-400"
+        iconBgClassName="bg-amber-500/10"
+        testid="usage-model-stat-cache-hit-rate"
+      />
+      <UsageStatCard
+        label={t("speed")}
+        value={speed ?? 0}
+        format={(n) => (speed == null ? "—" : t("speedUnit", { value: formatTokensPerSec(n) }))}
+        icon={<GaugeIcon className="h-5 w-5 text-cyan-500" aria-hidden />}
+        valueClassName="text-cyan-500"
+        accentGradient="from-cyan-500 to-sky-400"
+        iconBgClassName="bg-cyan-500/10"
+        testid="usage-model-stat-speed"
+      />
+    </div>
   )
 }
 
 /* ── Current window gauges ─────────────────────────────────────────────── */
 
-function CurrentWindowCard({ latest, now }: { latest: SubscriptionUsageRow | null; now: number }) {
+/** Map a meter id onto the section's stable gauge testid slots. */
+const WINDOW_TESTID: Record<string, string> = {
+  session: "usage-window-5h",
+  weekly: "usage-window-7d",
+  weekly_opus: "usage-window-7d-opus",
+  weekly_sonnet: "usage-window-7d-sonnet",
+}
+
+function CurrentWindowCard({
+  latest,
+  now,
+  open,
+  onToggle,
+}: {
+  latest: SubscriptionUsageRow | null
+  now: number
+  open: boolean
+  onToggle: () => void
+}) {
   const t = useTranslations("subscription.usage.window")
-  const summary: CurrentWindowSummary | null = useMemo(
-    () => summarizeCurrentWindow(latest, { now }),
-    [latest, now]
+  // Fuse the free OAuth-endpoint snapshot with the header sample — newest
+  // wins (see resolveUsageWindows). This keeps the gauges live even when the
+  // user hasn't sent a chat message, and adds the opus/sonnet weekly windows
+  // the header path can't see.
+  const { activeAccountId } = useAccounts("anthropic")
+  const { snapshot, refreshing, refresh } = useProviderLimits("anthropic", activeAccountId ?? "")
+  const resolved = useMemo(() => resolveUsageWindows(snapshot, latest), [snapshot, latest])
+
+  const bySlot = new Map(resolved.windows.map((m) => [m.id, m]))
+  const extraWindows = resolved.windows.filter((m) => !(m.id === "session" || m.id === "weekly"))
+
+  const refreshButton = (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={() => void refresh({ force: true })}
+      disabled={refreshing || !activeAccountId}
+      data-testid="usage-window-refresh"
+      aria-label={t("refresh")}
+    >
+      <RefreshCwIcon className={cn("size-3.5", refreshing && "animate-spin")} aria-hidden />
+      {t("refresh")}
+    </Button>
   )
 
-  if (!summary) {
-    return (
-      <SettingsCard title={t("title")} description={t("description")}>
-        <p className="text-xs text-muted-foreground" data-testid="usage-window-empty">
-          {t("noSnapshot")}
-        </p>
-      </SettingsCard>
-    )
-  }
-
   return (
-    <SettingsCard title={t("title")} description={t("description")}>
-      <div className="grid gap-4 sm:grid-cols-2" data-testid="usage-current-window">
-        <WindowGauge
-          label={t("fiveHour")}
-          window={summary.fiveHour}
-          representative={summary.representativeClaim === "five_hour"}
-          testid="usage-window-5h"
-        />
-        <WindowGauge
-          label={t("sevenDay")}
-          window={summary.sevenDay}
-          representative={summary.representativeClaim === "seven_day"}
-          testid="usage-window-7d"
-        />
-      </div>
-      {summary.fallbackPercentage != null && (
-        <SettingsAlert>
-          {t("fallback", { pct: Math.round(summary.fallbackPercentage) })}
-        </SettingsAlert>
+    <UsageSection
+      title={t("title")}
+      description={t("description")}
+      open={open}
+      onToggle={onToggle}
+      testid="usage-window-section"
+    >
+      {resolved.windows.length === 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-muted-foreground" data-testid="usage-window-empty">
+            {t("noSnapshot")}
+          </p>
+          {refreshButton}
+        </div>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-muted-foreground" data-testid="usage-window-source">
+              {resolved.source === "endpoint" ? t("sourceEndpoint") : t("sourceHeaders")}
+            </p>
+            {refreshButton}
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2" data-testid="usage-current-window">
+            <WindowSlot
+              meter={bySlot.get("session") ?? null}
+              label={t("fiveHour")}
+              now={now}
+              representative={resolved.representativeClaim === "five_hour"}
+              testid="usage-window-5h"
+            />
+            <WindowSlot
+              meter={bySlot.get("weekly") ?? null}
+              label={t("sevenDay")}
+              now={now}
+              representative={resolved.representativeClaim === "seven_day"}
+              testid="usage-window-7d"
+            />
+            {extraWindows.map((meter) => (
+              <WindowGaugeCard
+                key={meter.id}
+                meter={meter}
+                now={now}
+                testid={WINDOW_TESTID[meter.id] ?? `usage-window-${meter.id}`}
+              />
+            ))}
+          </div>
+          {resolved.fallbackPercentage != null && (
+            <SettingsAlert>
+              {t("fallback", { pct: Math.round(resolved.fallbackPercentage) })}
+            </SettingsAlert>
+          )}
+          {resolved.overageDisabledReason && (
+            <SettingsAlert variant="destructive">
+              {t("overageDisabled", { reason: resolved.overageDisabledReason })}
+            </SettingsAlert>
+          )}
+        </>
       )}
-      {summary.overageDisabledReason && (
-        <SettingsAlert variant="destructive">
-          {t("overageDisabled", { reason: summary.overageDisabledReason })}
-        </SettingsAlert>
-      )}
-    </SettingsCard>
+    </UsageSection>
   )
 }
 
-function WindowGauge({
+/** A gauge slot that renders a placeholder when its window wasn't reported. */
+function WindowSlot({
+  meter,
   label,
-  window,
+  now,
   representative,
   testid,
 }: {
+  meter: LimitsMeter | null
   label: string
-  window: WindowStatus | null
+  now: number
   representative: boolean
   testid: string
 }) {
   const t = useTranslations("subscription.usage.window")
-
-  if (!window) {
+  if (!meter) {
     return (
       <div className="rounded-lg border p-4 text-xs text-muted-foreground" data-testid={testid}>
         <span className="font-medium text-foreground">{label}</span> — {t("noData")}
       </div>
     )
   }
-
-  const pct = Math.max(0, Math.min(100, Math.round(window.utilization)))
-  const countdown =
-    window.msUntilReset == null
-      ? t("resetUnknown")
-      : (() => {
-          const parts = splitCountdown(window.msUntilReset)
-          if (parts.expired) return t("resetExpired")
-          return parts.hours > 0
-            ? t("resetsInHm", { hours: parts.hours, minutes: parts.minutes })
-            : t("resetsInM", { minutes: parts.minutes })
-        })()
-
-  return (
-    <div className="space-y-2 rounded-lg border p-4" data-testid={testid}>
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-sm font-medium">{label}</span>
-        {representative && (
-          <Badge variant="outline" className="text-[10px]">
-            {t("representative")}
-          </Badge>
-        )}
-      </div>
-      <div className="flex items-baseline gap-2">
-        <span className={cn("text-2xl font-bold tabular-nums", LEVEL_TEXT[window.level])}>
-          {Math.round(window.utilization)}%
-        </span>
-        <span className="text-xs text-muted-foreground">{t(`level.${window.level}`)}</span>
-      </div>
-      <div
-        className="h-2 w-full overflow-hidden rounded-full bg-muted"
-        role="progressbar"
-        aria-valuenow={pct}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-label={label}
-      >
-        <div
-          className={cn("h-full rounded-full transition-all", LEVEL_BAR[window.level])}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      <p className="text-xs text-muted-foreground">{countdown}</p>
-    </div>
-  )
+  return <WindowGaugeCard meter={meter} now={now} representative={representative} testid={testid} />
 }
 
 /* ── Utilization trend ─────────────────────────────────────────────────── */
@@ -390,13 +801,18 @@ function UtilizationTrendCard({
   rows,
   rangeDays,
   now,
+  open,
+  onToggle,
 }: {
   rows: SubscriptionUsageRow[]
   rangeDays: number | null
   now: number
+  open: boolean
+  onToggle: () => void
 }) {
   const t = useTranslations("subscription.usage.trend")
   const colors = useThemeColors()
+  const { reduce } = useFlowMotion()
   const series = useMemo(
     () =>
       buildUtilizationSeries(rows, {
@@ -407,15 +823,37 @@ function UtilizationTrendCard({
   )
 
   return (
-    <SettingsCard title={t("title")} description={t("description")}>
+    <UsageSection
+      title={t("title")}
+      description={t("description")}
+      open={open}
+      onToggle={onToggle}
+      testid="usage-trend-section"
+    >
       {series.length === 0 ? (
         <p className="text-xs text-muted-foreground" data-testid="usage-trend-empty">
           {t("empty")}
         </p>
       ) : (
         <div className="h-56" data-testid="usage-trend-chart">
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer
+            width="100%"
+            height="100%"
+            minWidth={1}
+            minHeight={1}
+            initialDimension={{ width: 320, height: 224 }}
+          >
             <AreaChart data={series} margin={CHART_MARGINS.compact}>
+              <defs>
+                <linearGradient id="usage-trend-5h" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={paletteColor(colors, 0)} stopOpacity={0.4} />
+                  <stop offset="100%" stopColor={paletteColor(colors, 0)} stopOpacity={0.04} />
+                </linearGradient>
+                <linearGradient id="usage-trend-7d" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={paletteColor(colors, 2)} stopOpacity={0.4} />
+                  <stop offset="100%" stopColor={paletteColor(colors, 2)} stopOpacity={0.04} />
+                </linearGradient>
+              </defs>
               <XAxis dataKey="at" hide />
               <YAxis
                 domain={[0, 100]}
@@ -435,56 +873,59 @@ function UtilizationTrendCard({
                 dataKey="fiveHour"
                 name={t("fiveHour")}
                 stroke={paletteColor(colors, 0)}
-                fill={paletteColor(colors, 0)}
-                fillOpacity={0.15}
+                fill="url(#usage-trend-5h)"
                 connectNulls
-                isAnimationActive={false}
+                isAnimationActive={!reduce}
               />
               <Area
                 type="monotone"
                 dataKey="sevenDay"
                 name={t("sevenDay")}
                 stroke={paletteColor(colors, 2)}
-                fill={paletteColor(colors, 2)}
-                fillOpacity={0.15}
+                fill="url(#usage-trend-7d)"
                 connectNulls
-                isAnimationActive={false}
+                isAnimationActive={!reduce}
               />
             </AreaChart>
           </ResponsiveContainer>
         </div>
       )}
-    </SettingsCard>
+    </UsageSection>
   )
 }
 
 /* ── Per-model breakdown ───────────────────────────────────────────────── */
 
-function ModelBreakdownCard({ rows }: { rows: SessionUsageRow[] }) {
+function ModelBreakdownCard({
+  models,
+  mode,
+  open,
+  onToggle,
+}: {
+  models: ModelUsageRow[]
+  mode: UsageDisplayMode
+  open: boolean
+  onToggle: () => void
+}) {
   const t = useTranslations("subscription.usage.models")
   const colors = useThemeColors()
-  const models = useMemo(() => aggregateByModel(rows), [rows])
-  const totals = useMemo(
-    () =>
-      models.reduce(
-        (acc, m) => {
-          acc.tokens += m.inputTokens + m.outputTokens + m.cacheReadTokens
-          acc.cost += m.costUsd
-          acc.turns += m.turns
-          return acc
-        },
-        { tokens: 0, cost: 0, turns: 0 }
-      ),
-    [models]
-  )
+  const { reduce } = useFlowMotion()
+  const showCacheWrite = mode === "detailed"
+  const totalCost = useMemo(() => models.reduce((acc, m) => acc + m.costUsd, 0), [models])
 
   if (models.length === 0) {
     return (
-      <SettingsCard title={t("title")} description={t("description")}>
+      <UsageSection
+        title={t("title")}
+        description={t("description")}
+        open={open}
+        onToggle={onToggle}
+        testid="usage-models-section"
+      >
         <p className="text-xs text-muted-foreground" data-testid="usage-models-empty">
           {t("empty")}
         </p>
-      </SettingsCard>
+      </UsageSection>
     )
   }
 
@@ -494,44 +935,23 @@ function ModelBreakdownCard({ rows }: { rows: SessionUsageRow[] }) {
     .map((m, i) => ({ key: m.model, value: m.costUsd, color: paletteColor(colors, i) }))
 
   return (
-    <SettingsCard title={t("title")} description={t("description")}>
-      <div className="grid grid-cols-3 gap-3">
-        <StatCard
-          label={t("totalTokens")}
-          value={formatTokens(totals.tokens)}
-          icon={<HashIcon className="h-5 w-5 text-blue-500" aria-hidden />}
-          valueClassName="text-blue-500"
-          accentGradient="from-blue-500 to-sky-400"
-          iconBgClassName="bg-blue-500/10"
-          size="sm"
-          testid="usage-model-stat-tokens"
-        />
-        <StatCard
-          label={t("totalCost")}
-          value={formatCostInCurrency(totals.cost, "USD")}
-          icon={<CoinsIcon className="h-5 w-5 text-violet-500" aria-hidden />}
-          valueClassName="text-violet-500"
-          accentGradient="from-violet-500 to-purple-400"
-          iconBgClassName="bg-violet-500/10"
-          size="sm"
-          testid="usage-model-stat-cost"
-        />
-        <StatCard
-          label={t("totalTurns")}
-          value={totals.turns}
-          icon={<RepeatIcon className="h-5 w-5 text-emerald-500" aria-hidden />}
-          valueClassName="text-emerald-500"
-          accentGradient="from-emerald-500 to-green-400"
-          iconBgClassName="bg-emerald-500/10"
-          size="sm"
-          testid="usage-model-stat-turns"
-        />
-      </div>
-
+    <UsageSection
+      title={t("title")}
+      description={t("description")}
+      open={open}
+      onToggle={onToggle}
+      testid="usage-models-section"
+    >
       <div className="grid gap-4 lg:grid-cols-2">
         {donut.length > 0 && (
-          <div className="h-56" data-testid="usage-model-donut">
-            <ResponsiveContainer width="100%" height="100%">
+          <div className="relative h-56" data-testid="usage-model-donut">
+            <ResponsiveContainer
+              width="100%"
+              height="100%"
+              minWidth={1}
+              minHeight={1}
+              initialDimension={{ width: 320, height: 224 }}
+            >
               <PieChart>
                 <Pie
                   data={donut}
@@ -542,7 +962,7 @@ function ModelBreakdownCard({ rows }: { rows: SessionUsageRow[] }) {
                   innerRadius="55%"
                   outerRadius="80%"
                   paddingAngle={2}
-                  isAnimationActive={false}
+                  isAnimationActive={!reduce}
                 >
                   {donut.map((d) => (
                     <Cell key={d.key} fill={d.color} />
@@ -556,6 +976,15 @@ function ModelBreakdownCard({ rows }: { rows: SessionUsageRow[] }) {
                 />
               </PieChart>
             </ResponsiveContainer>
+            {/* Donut center read-out — total spend across all priced models. */}
+            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                {t("donutCenter")}
+              </span>
+              <span className="text-lg font-bold tabular-nums">
+                {formatCostInCurrency(totalCost, "USD")}
+              </span>
+            </div>
           </div>
         )}
 
@@ -568,6 +997,12 @@ function ModelBreakdownCard({ rows }: { rows: SessionUsageRow[] }) {
                 <TableHead className="text-right">{t("colInput")}</TableHead>
                 <TableHead className="text-right">{t("colOutput")}</TableHead>
                 <TableHead className="hidden text-right sm:table-cell">{t("colCache")}</TableHead>
+                {showCacheWrite && (
+                  <TableHead className="hidden text-right sm:table-cell">
+                    {t("colCacheWrite")}
+                  </TableHead>
+                )}
+                <TableHead className="hidden text-right sm:table-cell">{t("colSpeed")}</TableHead>
                 <TableHead className="text-right">{t("colCost")}</TableHead>
               </TableRow>
             </TableHeader>
@@ -587,6 +1022,17 @@ function ModelBreakdownCard({ rows }: { rows: SessionUsageRow[] }) {
                   <TableCell className="hidden text-right text-xs tabular-nums sm:table-cell">
                     {formatTokens(m.cacheReadTokens)}
                   </TableCell>
+                  {showCacheWrite && (
+                    <TableCell className="hidden text-right text-xs tabular-nums sm:table-cell">
+                      {formatTokens(m.cacheCreationTokens)}
+                    </TableCell>
+                  )}
+                  <TableCell className="hidden text-right text-xs tabular-nums sm:table-cell">
+                    {(() => {
+                      const s = tokensPerSecond(m.outputTokens, m.durationMs)
+                      return s == null ? "—" : t("speedUnit", { value: formatTokensPerSec(s) })
+                    })()}
+                  </TableCell>
                   <TableCell className="text-right font-mono text-xs">
                     {formatCostInCurrency(m.costUsd, "USD")}
                   </TableCell>
@@ -596,58 +1042,148 @@ function ModelBreakdownCard({ rows }: { rows: SessionUsageRow[] }) {
           </Table>
         </div>
       </div>
-    </SettingsCard>
+    </UsageSection>
+  )
+}
+
+/* ── Contributing-factor insights ──────────────────────────────────────── */
+
+/**
+ * "What's contributing to your usage?" — Claude-Code-style characteristics of
+ * the in-range usage (long-context turns, automated-surface cost share). Each is
+ * an independent characteristic, not a breakdown that sums to 100%, and is shown
+ * only when it applies; when none do, an empty hint keeps the section honest.
+ */
+function InsightsCard({
+  contributors,
+  open,
+  onToggle,
+}: {
+  contributors: UsageContributors
+  open: boolean
+  onToggle: () => void
+}) {
+  const t = useTranslations("subscription.usage.insights")
+  const items = contributors.contributors
+  return (
+    <UsageSection
+      title={t("title")}
+      description={t("description")}
+      open={open}
+      onToggle={onToggle}
+      testid="usage-insights-section"
+    >
+      {items.length === 0 ? (
+        <p className="text-xs text-muted-foreground" data-testid="usage-insights-empty">
+          {t("empty")}
+        </p>
+      ) : (
+        <ul className="space-y-3" data-testid="usage-insights-list">
+          {items.map((item) => (
+            <li key={item.id} className="flex gap-2.5" data-testid={`usage-insight-${item.id}`}>
+              <span aria-hidden className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary" />
+              <div className="min-w-0 space-y-0.5">
+                <p className="text-sm font-medium">
+                  {t(
+                    `${item.id === "high-context" ? "highContext" : "automatedSurface"}.headline`,
+                    {
+                      pct: item.pct,
+                    }
+                  )}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {t(`${item.id === "high-context" ? "highContext" : "automatedSurface"}.advice`)}
+                </p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </UsageSection>
   )
 }
 
 /* ── Cost over time ────────────────────────────────────────────────────── */
 
-function CostOverTimeCard({ rows }: { rows: SessionUsageRow[] }) {
+function CostOverTimeCard({
+  rows,
+  open,
+  onToggle,
+}: {
+  rows: SessionUsageRow[]
+  open: boolean
+  onToggle: () => void
+}) {
   const t = useTranslations("subscription.usage.costOverTime")
   const colors = useThemeColors()
+  const { reduce } = useFlowMotion()
   const daily = useMemo(() => aggregateByDay(rows), [rows])
 
-  if (daily.length === 0) {
-    return (
-      <SettingsCard title={t("title")} description={t("description")}>
+  return (
+    <UsageSection
+      title={t("title")}
+      description={t("description")}
+      open={open}
+      onToggle={onToggle}
+      testid="usage-cost-section"
+    >
+      {daily.length === 0 ? (
         <p className="text-xs text-muted-foreground" data-testid="usage-cost-empty">
           {t("empty")}
         </p>
-      </SettingsCard>
-    )
-  }
-
-  return (
-    <SettingsCard title={t("title")} description={t("description")}>
-      <div className="h-48" data-testid="usage-cost-chart">
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={daily} margin={CHART_MARGINS.compact}>
-            <XAxis dataKey="date" hide />
-            <YAxis
-              width={48}
-              tick={{ fontSize: 11 }}
-              tickFormatter={(v) => formatCostInCurrency(Number(v), "USD")}
-            />
-            <Tooltip
-              contentStyle={TOOLTIP_STYLE.contentStyle}
-              labelStyle={TOOLTIP_STYLE.labelStyle}
-              itemStyle={TOOLTIP_STYLE.itemStyle}
-              formatter={(value) => formatCostInCurrency(Number(value), "USD")}
-            />
-            <Bar dataKey="cost" fill={paletteColor(colors, 3)} isAnimationActive={false} />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-    </SettingsCard>
+      ) : (
+        <div className="h-48" data-testid="usage-cost-chart">
+          <ResponsiveContainer
+            width="100%"
+            height="100%"
+            minWidth={1}
+            minHeight={1}
+            initialDimension={{ width: 320, height: 192 }}
+          >
+            <BarChart data={daily} margin={CHART_MARGINS.compact}>
+              <XAxis dataKey="date" hide />
+              <YAxis
+                width={48}
+                tick={{ fontSize: 11 }}
+                tickFormatter={(v) => formatCostInCurrency(Number(v), "USD")}
+              />
+              <Tooltip
+                contentStyle={TOOLTIP_STYLE.contentStyle}
+                labelStyle={TOOLTIP_STYLE.labelStyle}
+                itemStyle={TOOLTIP_STYLE.itemStyle}
+                formatter={(value) => formatCostInCurrency(Number(value), "USD")}
+              />
+              <Bar
+                dataKey="cost"
+                fill={paletteColor(colors, 3)}
+                radius={[4, 4, 0, 0]}
+                isAnimationActive={!reduce}
+              />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </UsageSection>
   )
 }
 
 /* ── Top sessions ──────────────────────────────────────────────────────── */
 
-function TopSessionsCard({ rows }: { rows: SessionUsageRow[] }) {
+function TopSessionsCard({
+  rows,
+  mode,
+  open,
+  onToggle,
+}: {
+  rows: SessionUsageRow[]
+  mode: UsageDisplayMode
+  open: boolean
+  onToggle: () => void
+}) {
   const t = useTranslations("subscription.usage.topSessions")
   const setActiveSession = useChatStore((s) => s.setActiveSession)
   const [titles, setTitles] = useState<Map<string, ChatSession>>(new Map())
+  const showSplit = mode === "detailed"
 
   const summaries = useMemo(
     () =>
@@ -673,7 +1209,13 @@ function TopSessionsCard({ rows }: { rows: SessionUsageRow[] }) {
   }, [])
 
   return (
-    <SettingsCard title={t("title")} description={t("description")}>
+    <UsageSection
+      title={t("title")}
+      description={t("description")}
+      open={open}
+      onToggle={onToggle}
+      testid="usage-sessions-section"
+    >
       {summaries.length === 0 ? (
         <p
           className="rounded border bg-muted/30 p-4 text-center text-xs italic text-muted-foreground"
@@ -688,6 +1230,8 @@ function TopSessionsCard({ rows }: { rows: SessionUsageRow[] }) {
               <TableHead>#</TableHead>
               <TableHead>{t("colSession")}</TableHead>
               <TableHead className="text-right">{t("colTurns")}</TableHead>
+              {showSplit && <TableHead className="text-right">{t("colInput")}</TableHead>}
+              {showSplit && <TableHead className="text-right">{t("colOutput")}</TableHead>}
               <TableHead className="text-right">{t("colTokens")}</TableHead>
               <TableHead className="text-right">{t("colCost")}</TableHead>
               <TableHead className="text-right">{t("colActions")}</TableHead>
@@ -706,6 +1250,16 @@ function TopSessionsCard({ rows }: { rows: SessionUsageRow[] }) {
                     </p>
                   </TableCell>
                   <TableCell className="text-right text-xs">{s.turns}</TableCell>
+                  {showSplit && (
+                    <TableCell className="text-right text-xs tabular-nums">
+                      {formatTokens(s.inputTokens)}
+                    </TableCell>
+                  )}
+                  {showSplit && (
+                    <TableCell className="text-right text-xs tabular-nums">
+                      {formatTokens(s.outputTokens)}
+                    </TableCell>
+                  )}
                   <TableCell className="text-right text-xs">{formatTokens(s.tokens)}</TableCell>
                   <TableCell className="text-right font-mono text-xs">
                     {formatCostInCurrency(s.costUsd, "USD")}
@@ -727,7 +1281,7 @@ function TopSessionsCard({ rows }: { rows: SessionUsageRow[] }) {
           </TableBody>
         </Table>
       )}
-    </SettingsCard>
+    </UsageSection>
   )
 }
 
@@ -737,10 +1291,14 @@ function RawSamplesCard({
   rows,
   rangeDays,
   now,
+  open,
+  onToggle,
 }: {
   rows: SubscriptionUsageRow[]
   rangeDays: number | null
   now: number
+  open: boolean
+  onToggle: () => void
 }) {
   const t = useTranslations("subscription.usage")
   const filtered = useMemo(() => {
@@ -750,11 +1308,12 @@ function RawSamplesCard({
   }, [rows, rangeDays, now])
 
   return (
-    <SettingsCard
+    <UsageSection
       title={t("tableTitle")}
       description={t("tableDescription")}
-      collapsible
-      defaultOpen={false}
+      open={open}
+      onToggle={onToggle}
+      testid="usage-raw-section"
     >
       {filtered.length === 0 ? (
         <p className="text-xs text-muted-foreground" data-testid="usage-raw-empty">
@@ -796,6 +1355,6 @@ function RawSamplesCard({
           </Table>
         </ScrollArea>
       )}
-    </SettingsCard>
+    </UsageSection>
   )
 }

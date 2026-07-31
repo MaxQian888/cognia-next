@@ -1,0 +1,23 @@
+{
+  "defaultModel": "Default model",
+  "fontScale": "Font scale",
+  "fontScaleLg": "L",
+  "fontScaleMd": "M",
+  "fontScaleSm": "S",
+  "language": "Language",
+  "privacyTitle": "Accessibility & privacy",
+  "reconnectButton": "Reconnect WebRTC",
+  "reconnectFailed": "Reconnect failed ({reason}).",
+  "reconnectInactive": "WebRTC tier isn't active right now.",
+  "reconnectSuccess": "Reconnect requested.",
+  "reconnectThrottled": "Slow down — wait a few seconds between reconnects.",
+  "reduceMotion": "Reduce motion",
+  "reduceMotionHelp": "Minimize animations and transitions across the app.",
+  "telemetry": "Share usage telemetry",
+  "telemetryHelp": "Send anonymous diagnostics to help improve the app.",
+  "theme": "Theme",
+  "themeDark": "Dark",
+  "themeLight": "Light",
+  "themeSystem": "System",
+  "transportTier": "Transport"
+}

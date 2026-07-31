@@ -34,6 +34,40 @@ const fakeBackend = (): E2BBackend => ({
   remove: jest.fn().mockResolvedValue(true),
 })
 
+describe("workspace-backend-bridge python backend", () => {
+  beforeEach(() => {
+    __resetWorkspaceBackendRegistryForTesting()
+    __resetWorkspaceApiForTesting()
+  })
+
+  it("registers a python-backed backend without importing any JS", async () => {
+    const importer = jest.fn()
+    const result = await registerWorkspaceBackendsForPlugin(
+      manifest({
+        type: "python",
+        pythonMain: "main.py",
+        workspaceBackends: [{ id: "py-sandbox", label: "Py sandbox" }],
+      }),
+      "/plugins/p",
+      { importer }
+    )
+
+    expect(result).toEqual({ registered: 1, errors: [] })
+    expect(importer).not.toHaveBeenCalled()
+  })
+
+  it("reports a JS-backed backend that omits entry/export", async () => {
+    const result = await registerWorkspaceBackendsForPlugin(
+      manifest({ workspaceBackends: [{ id: "broken", label: "Broken" }] }),
+      "/plugins/p",
+      { importer: jest.fn() }
+    )
+
+    expect(result.registered).toBe(0)
+    expect(result.errors[0]!.message).toMatch(/must declare both "entry" and "export"/)
+  })
+})
+
 describe("workspace-backend-bridge", () => {
   beforeEach(() => {
     __resetWorkspaceBackendRegistryForTesting()

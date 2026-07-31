@@ -1,0 +1,22 @@
+{
+  "bridgeHint": "桥接离线：在连接前 install / dev 热重载无法送达运行中的应用。",
+  "bridgeWarning": "cognia CLI 桥接未运行——此命令可能无法送达应用。",
+  "bundleFilter": "插件包",
+  "cmd": {
+    "build": "构建",
+    "dev": "开发",
+    "install": "安装…",
+    "lint": "检查",
+    "new": "新建"
+  },
+  "description": "在终端标签里对插件项目运行 cognia CLI。",
+  "invalidProject": "该目录下未找到有效的 plugin.json。",
+  "launchDenied": "终端启动被拒绝。",
+  "launchFailed": "无法启动命令：{message}",
+  "needsCli": "请先在上方安装 cognia CLI 以启用这些命令。",
+  "noProject": "尚未选择项目。",
+  "pickBundleTitle": "选择要安装的插件包",
+  "pickProject": "选择项目…",
+  "pickProjectTitle": "选择插件项目目录",
+  "title": "运行 cognia 命令"
+}

@@ -3,7 +3,7 @@
  * dispatches via the mock Lark server.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../../../helpers/db-reset"
 import { configureMockBaseUrls, seedAndOpenWorkflow } from "../../../helpers/seed-workflow"
 import {
@@ -22,15 +22,17 @@ test.describe("workflow node — action.connector.send", () => {
     await configureMockBaseUrls(page, { lark: process.env.E2E_LARK_BASE_URL! })
   })
 
-  test("seeded connector send renders + adapter + conversation + content persist", async ({
+  test("seeded connector send renders + adapter + conversation + content fields render; node survives reload", async ({
     page,
   }) => {
     const wfId = await seedAndOpenWorkflow(page, "action-connector-send")
     await assertNodeOnCanvas(page, { kind: "action.connector.send", label: "Send" })
     await openNodeInspector(page, "action.connector.send")
-    await expect(page.locator("#ins-adapterId, [name=adapterId]").first()).toBeVisible()
-    await expect(page.locator("#ins-conversationKey, [name=conversationKey]").first()).toBeVisible()
-    await expect(page.locator("#ins-content, [name=content]").first()).toBeVisible()
+    await expect(page.locator("#ins-adapterId, [data-field=adapterId]").first()).toBeVisible()
+    await expect(
+      page.locator("#ins-conversationKey, [data-field=conversationKey]").first()
+    ).toBeVisible()
+    await expect(page.locator("#ins-content, [data-field=content]").first()).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "action.connector.send" })
   })

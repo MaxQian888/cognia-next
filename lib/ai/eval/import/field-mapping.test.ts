@@ -93,3 +93,68 @@ describe("mapRowsToCases", () => {
     expect(out.cases[0].id).toMatch(/^evc_/)
   })
 })
+
+describe("mapRowsToCases — split, grading and provenance", () => {
+  const rows = { columns: ["q", "a", "s"], rows: [{ q: "hi", a: "yo", s: "validation" }] }
+
+  it("writes a literal split onto every case", () => {
+    // Nothing used to write `split` at all, so `CaseSubset.split` — wired end to
+    // end everywhere else — could never match an imported case.
+    const out = mapRowsToCases(rows, { input: "q", splitLiteral: "test" }, deps)
+    expect(out.cases[0].split).toBe("test")
+  })
+
+  it("prefers a mapped split column over the literal", () => {
+    const out = mapRowsToCases(rows, { input: "q", split: "s", splitLiteral: "test" }, deps)
+    expect(out.cases[0].split).toBe("validation")
+  })
+
+  it("falls back to the literal when the split column is blank on a row", () => {
+    const out = mapRowsToCases(
+      { columns: ["q", "s"], rows: [{ q: "hi", s: "" }] },
+      { input: "q", split: "s", splitLiteral: "test" },
+      deps
+    )
+    expect(out.cases[0].split).toBe("test")
+  })
+
+  it("omits split entirely when neither is given", () => {
+    expect(mapRowsToCases(rows, { input: "q" }, deps).cases[0]).not.toHaveProperty("split")
+  })
+
+  it("stamps the grading rule onto a single-column golden answer", () => {
+    const out = mapRowsToCases(
+      rows,
+      { input: "q", expected: "a", grading: { mode: "exact", normalize: { stripArticles: true } } },
+      deps
+    )
+    expect(out.cases[0].reference).toEqual({
+      expectedOutput: "yo",
+      grading: { mode: "exact", normalize: { stripArticles: true } },
+    })
+  })
+
+  it("stamps the grading rule onto a multi-column alias set", () => {
+    const out = mapRowsToCases(
+      rows,
+      { input: "q", expected: ["a", "s"], grading: { mode: "contains-any" } },
+      deps
+    )
+    expect(out.cases[0].reference).toEqual({
+      expectedContains: ["yo", "validation"],
+      grading: { mode: "contains-any" },
+    })
+  })
+
+  it("does not persist a grading rule with nothing to compare against", () => {
+    const out = mapRowsToCases(rows, { input: "q", grading: { mode: "exact" } }, deps)
+    expect(out.cases[0].reference).toBeUndefined()
+  })
+
+  it("records real provenance instead of labelling every import handwritten", () => {
+    expect(mapRowsToCases(rows, { input: "q" }, deps).cases[0].source).toBe("handwritten")
+    expect(
+      mapRowsToCases(rows, { input: "q", sourceKind: "synthetic" }, deps).cases[0].source
+    ).toBe("synthetic")
+  })
+})

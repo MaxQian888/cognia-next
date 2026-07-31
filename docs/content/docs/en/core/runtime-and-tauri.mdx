@@ -171,7 +171,7 @@ Key fields:
 {
   "productName": "Cognia",
   "version": "0.1.0",
-  "identifier": "com.reactquickstarter.desktop",
+  "identifier": "com.cognia.desktop",
   "build": {
     "frontendDist": "../out",
     "devUrl": "http://localhost:3000",
@@ -209,7 +209,7 @@ Key fields:
 ### About the bundle identifier
 
 <Callout type="error" title="Don't rename without a migration">
-  `identifier` is `com.reactquickstarter.desktop` — a legacy value carried over
+  `identifier` is `com.cognia.desktop` — a legacy value carried over
   from the original starter. Tauri uses this string to derive the **per-user app
   data directory**. Changing it would orphan every existing installation's
   settings, vector store, and chat history.
@@ -222,9 +222,9 @@ Tauri-derived per-user data directory by platform:
 
 | Platform | Path                                                           |
 | -------- | -------------------------------------------------------------- |
-| Windows  | `%APPDATA%\com.reactquickstarter.desktop\`                     |
-| macOS    | `~/Library/Application Support/com.reactquickstarter.desktop/` |
-| Linux    | `~/.local/share/com.reactquickstarter.desktop/`                |
+| Windows  | `%APPDATA%\com.cognia.desktop\`                     |
+| macOS    | `~/Library/Application Support/com.cognia.desktop/` |
+| Linux    | `~/.local/share/com.cognia.desktop/`                |
 
 If you must rename it, plan a migration:
 

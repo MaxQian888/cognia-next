@@ -450,7 +450,10 @@ describe("PluginMarketplace", () => {
           version: "1.0.0",
           warnings: [],
         })
-        mockGetSignatureVerifier.mockReturnValue({ verify })
+        mockGetSignatureVerifier.mockReturnValue({
+          verify,
+          getConfig: () => ({ requireSignatures: false }),
+        })
 
         const result = await marketplace.installPlugin("trusted-plugin", "1.0.0")
 
@@ -469,7 +472,10 @@ describe("PluginMarketplace", () => {
           reason: "Cryptographic verification failed",
           warnings: [],
         })
-        mockGetSignatureVerifier.mockReturnValue({ verify })
+        mockGetSignatureVerifier.mockReturnValue({
+          verify,
+          getConfig: () => ({ requireSignatures: false }),
+        })
 
         const result = await marketplace.installPlugin("trusted-plugin", "1.0.0")
 
@@ -487,7 +493,10 @@ describe("PluginMarketplace", () => {
           version: "1.0.0",
           warnings: ["Plugin is not signed"],
         })
-        mockGetSignatureVerifier.mockReturnValue({ verify })
+        mockGetSignatureVerifier.mockReturnValue({
+          verify,
+          getConfig: () => ({ requireSignatures: false }),
+        })
 
         const result = await marketplace.installPlugin("trusted-plugin", "1.0.0")
 
@@ -499,6 +508,36 @@ describe("PluginMarketplace", () => {
             expected: false,
           }),
           expect.any(Error)
+        )
+      })
+
+      it("(d) forwards the signature policy + integrity claims to the host download", async () => {
+        seedDesktopFetches()
+        const verify = jest.fn().mockResolvedValue({
+          valid: true,
+          pluginId: "trusted-plugin",
+          version: "1.0.0",
+          warnings: [],
+        })
+        // Policy requires signatures — the host must receive requireSignature:true
+        // so an unsigned archive is rejected in Rust before unpacking.
+        mockGetSignatureVerifier.mockReturnValue({
+          verify,
+          getConfig: () => ({ requireSignatures: true }),
+        })
+
+        await marketplace.installPlugin("trusted-plugin", "1.0.0")
+
+        const downloadCall = mockInvoke.mock.calls.find(
+          ([cmd]) => cmd === "plugin_download_version"
+        )
+        expect(downloadCall).toBeDefined()
+        expect(downloadCall?.[1]).toEqual(
+          expect.objectContaining({
+            pluginId: "trusted-plugin",
+            version: "1.0.0",
+            requireSignature: true,
+          })
         )
       })
     })
@@ -578,6 +617,39 @@ describe("PluginMarketplace", () => {
       await marketplace.getPlugin("cached-plugin")
       expect(mockFetch).toHaveBeenCalledTimes(2)
     })
+
+    it("negative-caches getPlugin network failures so repeated checks don't re-fetch", async () => {
+      mockFetch.mockRejectedValue(new Error("Failed to fetch"))
+
+      expect(await marketplace.getPlugin("offline-plugin")).toBeNull()
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+
+      // A second lookup within the negative-cache window short-circuits — this
+      // is what stops "Check for updates" from re-hitting the registry (and
+      // re-logging) once per installed plugin, every check.
+      expect(await marketplace.getPlugin("offline-plugin")).toBeNull()
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+    })
+
+    it("negative-caches getPlugin 404s", async () => {
+      mockFetch.mockResolvedValue({ ok: false, status: 404 })
+
+      expect(await marketplace.getPlugin("missing")).toBeNull()
+      expect(await marketplace.getPlugin("missing")).toBeNull()
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+    })
+
+    it("re-fetches a previously-failed getPlugin after clearCache", async () => {
+      mockFetch.mockRejectedValue(new Error("Failed to fetch"))
+
+      await marketplace.getPlugin("offline-plugin")
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+
+      marketplace.clearCache()
+
+      await marketplace.getPlugin("offline-plugin")
+      expect(mockFetch).toHaveBeenCalledTimes(2)
+    })
   })
 
   describe("Popular and Recent Plugins", () => {
@@ -605,6 +677,81 @@ describe("PluginMarketplace", () => {
       const calledUrl = mockFetch.mock.calls[0][0] as string
       expect(calledUrl).toContain("sort=updated")
       expect(result).toHaveLength(1)
+    })
+  })
+
+  describe("Transactional update staging", () => {
+    const version = {
+      version: "2.0.0",
+      publishedAt: new Date(),
+      downloadUrl: "https://registry.example/acme-2.0.0.tar.gz",
+      checksum: "ab".repeat(32),
+      signature: "signature",
+      publicKey: "public-key",
+    }
+
+    beforeEach(() => {
+      isTauri.mockReturnValue(true)
+      mockGetSignatureVerifier.mockReturnValue({
+        getConfig: () => ({ requireSignatures: true }),
+      })
+    })
+
+    it("stages without committing and forwards every integrity claim", async () => {
+      mockInvoke.mockResolvedValueOnce({
+        transactionId: "123e4567-e89b-42d3-a456-426614174000",
+        pluginId: "acme",
+        version: "2.0.0",
+        stagedPath: "/host-state/update-transactions/acme/package",
+        manifest: {
+          id: "acme",
+          name: "Acme",
+          version: "2.0.0",
+          description: "Acme plugin",
+          type: "frontend",
+          capabilities: [],
+          main: "index.js",
+        },
+        sizeBytes: 1024,
+      })
+
+      await expect(marketplace.stagePluginUpdate("acme", version)).resolves.toMatchObject({
+        pluginId: "acme",
+        version: "2.0.0",
+      })
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_stage_version", {
+        pluginId: "acme",
+        version: "2.0.0",
+        downloadUrl: version.downloadUrl,
+        checksum: version.checksum,
+        signatureHex: version.signature,
+        publicKeyHex: version.publicKey,
+        requireSignature: true,
+      })
+      expect(
+        mockInvoke.mock.calls.some(([command]) => command === "plugin_commit_staged_update")
+      ).toBe(false)
+    })
+
+    it("rejects and discards a staged package whose public manifest is invalid", async () => {
+      mockInvoke
+        .mockResolvedValueOnce({
+          transactionId: "123e4567-e89b-42d3-a456-426614174000",
+          pluginId: "acme",
+          version: "2.0.0",
+          stagedPath: "/host-state/update-transactions/acme/package",
+          manifest: { id: "acme", version: "2.0.0" },
+          sizeBytes: 1024,
+        })
+        .mockResolvedValueOnce(undefined)
+
+      await expect(marketplace.stagePluginUpdate("acme", version)).rejects.toThrow(
+        "Staged plugin manifest is invalid"
+      )
+      expect(mockInvoke).toHaveBeenLastCalledWith("plugin_discard_staged_update", {
+        pluginId: "acme",
+        transactionId: "123e4567-e89b-42d3-a456-426614174000",
+      })
     })
   })
 

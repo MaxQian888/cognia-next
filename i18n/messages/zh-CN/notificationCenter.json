@@ -1,0 +1,71 @@
+{
+  "bell": {
+    "hasActivity": "有新动态",
+    "label": "通知",
+    "unreadAria": "{count} 条未读通知"
+  },
+  "buckets": {
+    "earlier": "更早",
+    "today": "今天",
+    "yesterday": "昨天"
+  },
+  "center": {
+    "active": "收件箱",
+    "archiveAll": "全部归档",
+    "archived": "已归档",
+    "clearAll": "清空",
+    "clearAllBody": "这将永久删除所有通知，包括已归档的通知。此操作无法撤销。",
+    "clearAllCancel": "取消",
+    "clearAllConfirm": "全部清除",
+    "clearAllTitle": "清除所有通知？",
+    "empty": "已全部处理完毕。",
+    "emptyArchived": "暂无已归档通知。",
+    "filterAll": "全部来源",
+    "groupCount": "另有 {count} 条更新",
+    "hideDone": "隐藏已归档",
+    "itemActions": "通知操作",
+    "loadMore": "加载更多（{count}）",
+    "markAllRead": "全部标为已读",
+    "markDone": "归档",
+    "markRead": "标为已读",
+    "moreActions": "更多操作",
+    "open": "打开",
+    "refresh": "刷新",
+    "remove": "移除",
+    "restore": "恢复到收件箱",
+    "settings": "通知设置",
+    "showDone": "显示已归档",
+    "snooze": "暂停提醒",
+    "title": "通知",
+    "unreadCount": "{count} 条未读",
+    "unsnooze": "取消暂停"
+  },
+  "levels": {
+    "critical": "严重",
+    "error": "错误",
+    "info": "信息",
+    "success": "成功",
+    "warning": "警告"
+  },
+  "session": {
+    "errorBody": "会话以错误结束。",
+    "errorTitle": "Cognia · 会话出错",
+    "readyBody": "Claude 已生成完成。",
+    "readyTitle": "Cognia · 回复就绪"
+  },
+  "snoozePresets": {
+    "15m": "15 分钟",
+    "1d": "1 天",
+    "1h": "1 小时",
+    "3h": "3 小时"
+  },
+  "sources": {
+    "agent-team": "智能体团队",
+    "connector": "消息",
+    "plugin": "插件",
+    "scheduler": "计划任务",
+    "session": "会话",
+    "system": "系统",
+    "workflow": "工作流"
+  }
+}

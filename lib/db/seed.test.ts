@@ -1,20 +1,21 @@
+/** @jest-environment jsdom */
 // Coverage for the first-run seeder — verifies that all four seed surfaces
 // (characters, skills, presets, teams) are populated after one call, and
 // that re-invoking is idempotent.
 
 import "fake-indexeddb/auto"
 import { seedBuiltIns } from "./seed"
-import { __resetDbForTesting, getDb } from "./schema"
+import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
 
 beforeEach(async () => {
   await getDb().delete()
   __resetDbForTesting()
   getDb()
+  await whenSeeded()
 })
 
 describe("seedBuiltIns", () => {
   it("populates every built-in surface", async () => {
-    await seedBuiltIns()
     const db = getDb()
     const characters = (await db.characters.toArray()).filter((c) => c.isBuiltIn)
     const skills = (await db.skills.toArray()).filter((s) => s.isBuiltIn)
@@ -28,7 +29,6 @@ describe("seedBuiltIns", () => {
 
   it("re-running is idempotent (no duplicates)", async () => {
     await seedBuiltIns()
-    await seedBuiltIns()
     const db = getDb()
     const presets = (await db.promptPresets.toArray()).filter((p) => p.isBuiltIn)
     const characters = (await db.characters.toArray()).filter((c) => c.isBuiltIn)
@@ -40,7 +40,6 @@ describe("seedBuiltIns", () => {
   })
 
   it("teams seed references existing built-in characters", async () => {
-    await seedBuiltIns()
     const db = getDb()
     const teams = (await db.teams.toArray()).filter((t) => t.isBuiltIn)
     const characterIds = new Set((await db.characters.toArray()).map((c) => c.id))

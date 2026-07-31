@@ -13,11 +13,16 @@ export function CharCounter() {
   const controller = usePromptInputController()
   const len = controller.textInput.value.length
   if (len === 0) return null
+  // Only announce to assistive tech once the count actually matters (nearing /
+  // over the limit). A permanent `aria-live` would read the running total on
+  // every single keystroke — a chatty a11y anti-pattern.
+  const announce = len >= AMBER_THRESHOLD
   return (
     <span
-      aria-live="polite"
+      aria-live={announce ? "polite" : "off"}
       className={cn(
-        "pointer-events-none absolute right-2 bottom-1 select-none text-[10px] tabular-nums text-muted-foreground/60",
+        // `end-2` (logical) keeps the counter in the trailing corner under RTL.
+        "pointer-events-none absolute end-2 bottom-1 select-none text-[10px] tabular-nums text-muted-foreground/60",
         len >= AMBER_THRESHOLD && len < RED_THRESHOLD && "text-amber-500",
         len >= RED_THRESHOLD && "text-destructive"
       )}

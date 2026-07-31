@@ -1,0 +1,12 @@
+{
+  "description": "智能体可以在工作区的文件夹内运行 Bash、编辑文件并驱动计算机操作。在允许之前请先信任该文件夹；未受信任的工作区以受限模式运行（仅只读工具）。",
+  "enabledHint": "关闭后，所有工作区都视为受信任，不再应用受限模式。",
+  "enabledLabel": "启用工作区信任",
+  "noTrusted": "尚未信任任何文件夹。",
+  "promptOnSwitchHint": "一旦切换到未受信任的工作区就提示信任，而非等到首次发消息。",
+  "promptOnSwitchLabel": "切换工作区时提示",
+  "revoke": "撤销",
+  "title": "工作区信任",
+  "trustedAt": "信任于 {date}",
+  "trustedFoldersLabel": "已信任的文件夹"
+}

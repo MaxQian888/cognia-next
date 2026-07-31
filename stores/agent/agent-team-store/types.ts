@@ -2,6 +2,9 @@ import {
   type AgentTeam,
   type AgentTeammate,
   type AgentTeamTask,
+  type AgentTaskComment,
+  type TaskCommentAttachment,
+  type AddTaskCommentInput,
   type AgentTeamMessage,
   type AgentTeamConfig,
   type AgentTeamTemplate,
@@ -14,6 +17,7 @@ import {
   type TeamDisplayMode,
   type AgentTeamWorkspaceTab,
   type AgentTeamWorkspaceFocus,
+  type AgentTeamEditorSession,
   type TeamDelegationRecord,
   type TeamDelegationStatus,
   type TeamExecutionReport,
@@ -27,6 +31,7 @@ import {
   type StructuredMessagePayload,
 } from "@/types/agent/agent-team"
 import type { CapabilityAuditWarning } from "@/lib/ai/agent/team/capability-audit"
+import type { TaskMoveError } from "@/lib/ai/agent/team/task-move-guard"
 
 export interface AgentTeamState {
   // Data
@@ -54,6 +59,13 @@ export interface AgentTeamState {
   workspaceTab: AgentTeamWorkspaceTab
   workspaceFocus: AgentTeamWorkspaceFocus
   workspaceDetailOpen: boolean
+  /** Tasks tab presentation: flat list or kanban board. Persisted. */
+  tasksView: "list" | "board"
+  /**
+   * Per-team project Editor tab session (open files, active file, selected
+   * root, layout). Persisted so reopening the tab restores the working set.
+   */
+  editorSession: Record<string, AgentTeamEditorSession>
 
   // Settings
   defaultConfig: AgentTeamConfig
@@ -80,6 +92,8 @@ export interface AgentTeamState {
     warnings: CapabilityAuditWarning[]
   ) => void
   deleteTeam: (teamId: string) => void
+  /** Workspace isolation cascade: drop all teams/teammates/tasks for a project (templates kept). */
+  purgeProject: (projectId: string) => void
   setTeamStatus: (teamId: string, status: TeamStatus) => void
 
   // Teammate CRUD
@@ -105,8 +119,20 @@ export interface AgentTeamState {
   updateTask: (taskId: string, updates: Partial<AgentTeamTask>) => void
   deleteTask: (taskId: string) => void
   setTaskStatus: (taskId: string, status: TeamTaskStatus, result?: string, error?: string) => void
+  /**
+   * Human-owned board move (drag, action sheet, RPC, plugin API). Validates
+   * the transition through `canMoveTask` — the single guard shared with the
+   * board UI and remote surfaces — and applies status side-effects (claim
+   * release + timestamp resets on `→ pending`, completion stamps on
+   * terminal statuses).
+   */
+  moveTask: (taskId: string, to: TeamTaskStatus) => { ok: boolean; reason?: TaskMoveError }
+  /** Same-column reorder: place the task at `targetIndex` and renumber. */
+  reorderTask: (taskId: string, targetIndex: number) => void
   claimTask: (taskId: string, teammateId: string) => void
   assignTask: (taskId: string, teammateId: string) => void
+  addTaskComment: (input: AddTaskCommentInput) => AgentTaskComment | null
+  attachTaskFile: (taskId: string, attachment: Omit<TaskCommentAttachment, "id">) => void
 
   // Messages
   addMessage: (input: SendMessageInput) => AgentTeamMessage
@@ -138,15 +164,16 @@ export interface AgentTeamState {
   setDisplayMode: (mode: TeamDisplayMode) => void
   setIsPanelOpen: (open: boolean) => void
   setWorkspaceTab: (tab: AgentTeamWorkspaceTab) => void
+  setTasksView: (view: "list" | "board") => void
   setWorkspaceFocus: (focus: Partial<AgentTeamWorkspaceFocus>) => void
   setWorkspaceTeamFromRoute: (teamId: string | null | undefined) => void
   closeAgentTeamWorkspaceDetail: () => void
-
   // Selectors
   getTeam: (teamId: string) => AgentTeam | undefined
   getTeammate: (teammateId: string) => AgentTeammate | undefined
   getTeammates: (teamId: string) => AgentTeammate[]
   getTeamTasks: (teamId: string) => AgentTeamTask[]
+  getTaskComments: (taskId: string) => AgentTaskComment[]
   getTeamMessages: (teamId: string) => AgentTeamMessage[]
   getUnreadMessages: (teammateId: string) => AgentTeamMessage[]
   getActiveTeam: () => AgentTeam | undefined

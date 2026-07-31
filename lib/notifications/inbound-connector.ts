@@ -43,7 +43,7 @@ export function buildConnectorNotification(event: NormalizedInboundEvent): {
     title,
     body: previewOf(event.plainText),
     directed,
-    href: `/inbox/c/${encodeURIComponent(event.conversationKey)}`,
+    href: `/inbox/c?key=${encodeURIComponent(event.conversationKey)}`,
     groupKey: event.conversationKey,
   }
 }

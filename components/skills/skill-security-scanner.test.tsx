@@ -27,7 +27,7 @@ jest.mock("@/lib/tauri", () => ({
 
 import { render, screen } from "@testing-library/react"
 import { SkillSecurityScanner } from "./skill-security-scanner"
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 
 const skill = { id: "s1", content: "echo hi" } as Skill
 

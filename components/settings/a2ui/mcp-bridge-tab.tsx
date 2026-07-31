@@ -22,7 +22,7 @@ import {
 } from "@/lib/a2ui/mcp-tool-schemas"
 import { useA2UIStore } from "@/stores/a2ui"
 import { useBridgeHealth } from "@/hooks/a2ui"
-import type { AgentId, McpServer } from "@/lib/claude/types"
+import type { AgentId, McpServer } from "@cognia/agent-config-types"
 
 const MANAGED_AGENTS: AgentId[] = [
   "claude-code",

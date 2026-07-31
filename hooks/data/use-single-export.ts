@@ -4,13 +4,14 @@
 // renders, and saves to disk (Tauri) or triggers a browser download.
 
 import { useCallback, useState } from "react"
-import { isTauri } from "@/lib/tauri"
 import { renderSingleExport } from "@/lib/export/single"
 import type { SingleExportFormat } from "@/lib/export/single"
-import type { ChatSession, StoredMessage } from "@/lib/claude/types"
+import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 import type { ThemeId, ThemeTokens } from "@/lib/export/html/syntax-themes"
+import { resolveThemeWallpaper } from "@/lib/export/html/theme-wallpaper"
 import { getDb } from "@/lib/db/schema"
 import { getPluginEventHooks } from "@/lib/plugin"
+import { saveExport, type SaveExportOutcome } from "@/lib/files/save-export"
 
 interface RunArgs {
   format: SingleExportFormat
@@ -22,12 +23,17 @@ interface RunArgs {
   includeMetadata?: boolean
   includeTimestamps?: boolean
   includeTokens?: boolean
+  /** Lay the theme's real wallpaper behind the export (HTML/animated only). */
+  withWallpaper?: boolean
+  /** JSONL formats only — include every regeneration branch (see renderSingleExport). */
+  includeAllBranches?: boolean
 }
 
-export type SingleExportResult =
-  | { ok: true; canceled: false; filename: string; sizeBytes: number }
-  | { ok: true; canceled: true }
-  | { ok: false; error: string }
+/**
+ * Outcome of a single export. Mirrors {@link SaveExportOutcome} so callers feed
+ * it straight into `notifyExportOutcome` for the where-did-it-go toast.
+ */
+export type SingleExportResult = SaveExportOutcome
 
 export function useSingleExport() {
   const [busy, setBusy] = useState(false)
@@ -42,6 +48,8 @@ export function useSingleExport() {
         args.messages ??
         (await getDb().messages.where("sessionId").equals(args.session.id).sortBy("createdAt"))
 
+      const wallpaperDataUrl = await resolveThemeWallpaper(args.theme, args.withWallpaper ?? false)
+
       const rendered = renderSingleExport({
         format: args.format,
         session: args.session,
@@ -51,6 +59,8 @@ export function useSingleExport() {
         includeMetadata: args.includeMetadata,
         includeTimestamps: args.includeTimestamps,
         includeTokens: args.includeTokens,
+        wallpaperDataUrl,
+        includeAllBranches: args.includeAllBranches,
       })
 
       // Plugin host: let plugins rewrite the export payload before it's
@@ -59,42 +69,20 @@ export function useSingleExport() {
       const transformed = await hooks.dispatchExportTransform(rendered.content, args.format)
       const out = { ...rendered, content: transformed }
 
-      if (isTauri()) {
-        const { save } = await import("@tauri-apps/plugin-dialog")
-        const { writeTextFile } = await import("@tauri-apps/plugin-fs")
-        const ext = extOf(out.filename)
-        const path = await save({
-          defaultPath: out.filename,
-          filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
-        })
-        if (!path) {
-          hooks.dispatchExportComplete(args.session.id, args.format, false)
-          return { ok: true, canceled: true }
-        }
-        await writeTextFile(path, out.content)
-      } else {
-        const blob = new Blob([out.content], { type: out.mimeType })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement("a")
-        a.href = url
-        a.download = out.filename
-        a.click()
-        URL.revokeObjectURL(url)
-      }
-      hooks.dispatchExportComplete(args.session.id, args.format, true)
-      return { ok: true, canceled: false, filename: out.filename, sizeBytes: out.content.length }
+      const outcome = await saveExport({
+        filename: out.filename,
+        data: out.content,
+        mimeType: out.mimeType,
+      })
+      hooks.dispatchExportComplete(args.session.id, args.format, outcome.kind === "saved")
+      return outcome
     } catch (err) {
       hooks.dispatchExportComplete(args.session.id, args.format, false)
-      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+      return { kind: "error", message: err instanceof Error ? err.message : String(err) }
     } finally {
       setBusy(false)
     }
   }, [])
 
   return { run, busy }
-}
-
-function extOf(filename: string): string {
-  const dot = filename.lastIndexOf(".")
-  return dot >= 0 ? filename.slice(dot + 1) : "txt"
 }

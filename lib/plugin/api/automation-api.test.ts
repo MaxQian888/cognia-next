@@ -28,6 +28,8 @@ const desktop = {
   drag: jest.fn(async () => undefined),
   scroll: jest.fn(async () => undefined),
   windowOp: jest.fn(async () => undefined),
+  paste: jest.fn(async () => undefined),
+  launchApp: jest.fn(async () => undefined),
 }
 jest.mock("@/lib/automation/client", () => ({
   desktop: new Proxy(
@@ -50,7 +52,7 @@ describe("createAutomationAPI", () => {
   beforeEach(() => {
     jest.clearAllMocks()
     resetPermissionGuard()
-    guard = getPermissionGuard()
+    guard = getPermissionGuard({ confirmDangerousByDefault: false })
   })
 
   it("gates each method behind its specific automation permission", () => {
@@ -60,8 +62,10 @@ describe("createAutomationAPI", () => {
     expect(() => api.getFocus()).toThrow(PermissionError)
     expect(() => api.click({ x: 0, y: 0 } as never)).toThrow(PermissionError)
     expect(() => api.type("hi")).toThrow(PermissionError)
+    expect(() => api.paste("hi")).toThrow(PermissionError)
     expect(() => api.mouseMove({ x: 0, y: 0 })).toThrow(PermissionError)
     expect(() => api.windowOp({ id: "w" } as never, "focus" as never)).toThrow(PermissionError)
+    expect(() => api.launchApp("notepad.exe", "launch")).toThrow(PermissionError)
   })
 
   it("does not let an unrelated permission unlock another group", () => {
@@ -116,6 +120,14 @@ describe("createAutomationAPI", () => {
       expect(desktop.drag).toHaveBeenCalledWith({ x: 0, y: 0 }, { x: 9, y: 9 }, {}, PLUGIN_CTX)
       await api.windowOp({ id: "w" } as never, "maximize" as never)
       expect(desktop.windowOp).toHaveBeenCalledWith({ id: "w" }, "maximize", PLUGIN_CTX)
+    })
+
+    it("forwards paste + launchApp tagged with the plugin surface", async () => {
+      const api = createAutomationAPI(PLUGIN)
+      await api.paste("long text")
+      expect(desktop.paste).toHaveBeenCalledWith("long text", PLUGIN_CTX)
+      await api.launchApp("notepad.exe", "launch")
+      expect(desktop.launchApp).toHaveBeenCalledWith("notepad.exe", "launch", PLUGIN_CTX)
     })
 
     it("forwards the remaining read + pointer + low-level primitives", async () => {

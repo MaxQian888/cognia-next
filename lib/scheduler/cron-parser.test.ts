@@ -15,7 +15,9 @@ import {
   describeCronExpression,
   formatCronExpression,
   matchesCronExpression,
+  validateWorkflowCronExpression,
 } from "./cron-parser"
+import dialectContract from "@/test-fixtures/scheduler/cron-dialect.json"
 
 /** Read the wall-clock hour of `date` in a given IANA zone. */
 function hourInZone(date: Date, timeZone: string): number {
@@ -28,6 +30,39 @@ function hourInZone(date: Date, timeZone: string): number {
 }
 
 describe("Cron Parser", () => {
+  describe("workflow TS/Rust dialect contract", () => {
+    it.each(dialectContract.cases)(
+      "keeps parser acceptance and next-fire parity for $expression",
+      (testCase) => {
+        const validation = validateWorkflowCronExpression(testCase.expression)
+        expect(validation.valid).toBe(testCase.accepted)
+        if (!testCase.accepted) return
+
+        const next = getNextCronTime(
+          testCase.expression,
+          new Date(dialectContract.anchorUtc),
+          dialectContract.timezone
+        )
+        expect(next?.toISOString()).toBe(new Date(testCase.nextUtc as string).toISOString())
+      }
+    )
+
+    it.each(dialectContract.timezoneCases)(
+      "keeps one local daily fire across $name DST",
+      (testCase) => {
+        const next = getNextCronTimes(
+          testCase.expression,
+          testCase.nextUtc.length,
+          new Date(testCase.anchorUtc),
+          testCase.timezone
+        )
+        expect(next.map((date) => date.toISOString())).toEqual(
+          testCase.nextUtc.map((value) => new Date(value).toISOString())
+        )
+      }
+    )
+  })
+
   describe("parseCronExpression", () => {
     it("should parse valid 5-field cron expression", () => {
       const result = parseCronExpression("0 9 * * 1")

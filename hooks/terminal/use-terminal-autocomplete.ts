@@ -14,22 +14,24 @@
  *    to drive from the xterm input + key handlers, plus the current ghost
  *    `view` to render.
  *
- * `accept()` returns the suffix the caller must write into the PTY — the
- * hook never executes anything itself.
+ * `accept()` / `acceptSelected()` return the PTY edit (backspaces + text)
+ * the caller must apply — the hook never executes anything itself.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
+import { classifyCommand } from "@/lib/claude/permissions/command-safety"
 import { detectPlatform } from "@/lib/terminal/shell-detect"
 import { AutocompleteController, type AutocompleteView } from "@/lib/terminal/completion/controller"
 import {
   buildAutocompleteContext,
   ensureBuiltinCompletionProviders,
 } from "@/lib/terminal/completion/builtins"
-import type { AppSettings } from "@/lib/claude/types"
-import type { TerminalCompletionSuggestion } from "@/lib/terminal/completion/types"
+import { getCompletions } from "@/lib/terminal/completion/registry"
+import type { AppSettings } from "@cognia/agent-config-types"
+import type { AcceptEdit, TerminalCompletionSuggestion } from "@/lib/terminal/completion/types"
 
 const MIN_DEBOUNCE = 50
 const MAX_DEBOUNCE = 2000
@@ -43,11 +45,22 @@ function readAutocompleteSettings(): AutocompleteSettings | undefined {
 
 export interface UseTerminalAutocompleteResult {
   enabled: boolean
+  /** Whether the multi-candidate popup feature is switched on. */
+  popupEnabled: boolean
   ghost: string
-  suggestion: TerminalCompletionSuggestion | null
+  ghostSuggestion: TerminalCompletionSuggestion | null
+  /** Whether the candidate popup is open (and has candidates to show). */
+  listOpen: boolean
+  candidates: TerminalCompletionSuggestion[]
+  selectedIndex: number
   feed: (chunk: string) => void
-  /** Accept the suggestion; returns the suffix to write into the PTY, or null. */
-  accept: () => string | null
+  /** Accept the ghost suggestion; returns the PTY edit to apply, or null. */
+  accept: () => AcceptEdit | null
+  /** Accept the highlighted popup candidate. */
+  acceptSelected: () => AcceptEdit | null
+  openList: () => void
+  closeList: () => void
+  moveSelection: (delta: number) => void
   dismiss: () => void
   reset: () => void
 }
@@ -57,12 +70,19 @@ export function useTerminalAutocomplete(sessionId: string): UseTerminalAutocompl
     (s) => (s.settings?.terminal as NonNullable<AppSettings["terminal"]>)?.autocomplete
   )
   const enabled = !!ac?.enabled
+  const popupEnabled = enabled && ac?.popup !== false
   const debounceMs = Math.min(
     MAX_DEBOUNCE,
     Math.max(MIN_DEBOUNCE, ac?.debounceMs ?? DEFAULT_DEBOUNCE)
   )
 
-  const [view, setView] = useState<AutocompleteView>({ ghost: "", suggestion: null })
+  const [view, setView] = useState<AutocompleteView>({
+    ghost: "",
+    ghostSuggestion: null,
+    listOpen: false,
+    candidates: [],
+    selectedIndex: 0,
+  })
   const controllerRef = useRef<AutocompleteController | null>(null)
 
   // Register the built-in providers once. `getSettings` / `buildClient` read
@@ -93,7 +113,16 @@ export function useTerminalAutocomplete(sessionId: string): UseTerminalAutocompl
           recentCommands: (row.lastCommands ?? []).map((c) => c.cmd),
           input,
           platform: detectPlatform(),
+          projectId: row.projectId ?? null,
         })
+      },
+      // Registry fan-out plus the safety floor: a candidate whose resulting
+      // line the classifier outright denies is never shown anywhere — not
+      // as ghost text, not in the popup. (`ask` verdicts surface with a
+      // warning badge in the popup instead.)
+      query: async (qctx, signal) => {
+        const results = await getCompletions(qctx, signal)
+        return results.filter((s) => classifyCommand(s.text).verdict !== "deny")
       },
       onChange: () => setView(controller.getView()),
     })
@@ -101,7 +130,13 @@ export function useTerminalAutocomplete(sessionId: string): UseTerminalAutocompl
     return () => {
       controller.dispose()
       controllerRef.current = null
-      setView({ ghost: "", suggestion: null })
+      setView({
+        ghost: "",
+        ghostSuggestion: null,
+        listOpen: false,
+        candidates: [],
+        selectedIndex: 0,
+      })
     }
   }, [sessionId, debounceMs])
 
@@ -118,13 +153,44 @@ export function useTerminalAutocomplete(sessionId: string): UseTerminalAutocompl
     [enabled]
   )
 
-  const accept = useCallback((): string | null => {
+  const accept = useCallback((): AcceptEdit | null => {
     if (!enabled) return null
     return controllerRef.current?.accept() ?? null
   }, [enabled])
 
+  const acceptSelected = useCallback((): AcceptEdit | null => {
+    if (!enabled) return null
+    return controllerRef.current?.acceptSelected() ?? null
+  }, [enabled])
+
+  const openList = useCallback(() => {
+    if (!enabled || !popupEnabled) return
+    controllerRef.current?.openList()
+  }, [enabled, popupEnabled])
+
+  const closeList = useCallback(() => controllerRef.current?.closeList(), [])
+  const moveSelection = useCallback(
+    (delta: number) => controllerRef.current?.moveSelection(delta),
+    []
+  )
   const dismiss = useCallback(() => controllerRef.current?.dismiss(), [])
   const reset = useCallback(() => controllerRef.current?.reset(), [])
 
-  return { enabled, ghost: view.ghost, suggestion: view.suggestion, feed, accept, dismiss, reset }
+  return {
+    enabled,
+    popupEnabled,
+    ghost: view.ghost,
+    ghostSuggestion: view.ghostSuggestion,
+    listOpen: view.listOpen,
+    candidates: view.candidates,
+    selectedIndex: view.selectedIndex,
+    feed,
+    accept,
+    acceptSelected,
+    openList,
+    closeList,
+    moveSelection,
+    dismiss,
+    reset,
+  }
 }

@@ -102,6 +102,7 @@ export const CLAUDE_CODE_RELATED: RelatedTarget[] = [
   { section: "ccswitch", labelKey: "ccswitch" },
   { section: "mcp", labelKey: "mcp" },
   { section: "hooks", labelKey: "hooks" },
+  { section: "fleet", labelKey: "fleet" },
   { section: "slash-commands", labelKey: "slashCommands" },
   { section: "subagents", labelKey: "subagents" },
   { section: "tools", labelKey: "tools" },

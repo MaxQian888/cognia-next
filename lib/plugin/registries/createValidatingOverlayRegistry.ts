@@ -58,6 +58,13 @@ export interface CreateValidatingOverlayRegistryOptions<T, W> {
    * clears any previously stamped warnings for that id.
    */
   validate: (entry: T) => readonly W[]
+  /**
+   * Structural validation (W4.4). A non-empty result REJECTS the
+   * registration with a thrown error — use for contributions that are
+   * broken beyond use (missing entry point, malformed shape), keeping the
+   * soft `validate` warnings for advisory `requires` checks.
+   */
+  hardValidate?: (entry: T) => readonly string[]
 }
 
 export function createValidatingOverlayRegistry<T, W>(
@@ -79,6 +86,10 @@ export function createValidatingOverlayRegistry<T, W>(
 
   return {
     register(id, entry, opts) {
+      const problems = options.hardValidate?.(entry) ?? []
+      if (problems.length > 0) {
+        throw new Error(`${options.name ?? "registry"} rejected "${id}": ${problems.join("; ")}`)
+      }
       const previous = registry.register(id, entry, opts)
       stamp(id, entry)
       return previous

@@ -4,10 +4,9 @@
  * Additional hook definitions for deeper integration with the application.
  */
 
-import type { PluginHooks, PluginMessage } from "./plugin"
+import type { PluginHooks, PluginMessage, PluginCanvasDocument } from "./plugin"
 import type { Project, KnowledgeFile, ChatMode } from "./_compat"
 import type { Artifact } from "../artifact/artifact"
-import type { PluginCanvasDocument } from "./plugin-extended"
 
 // =============================================================================
 // Project Hooks
@@ -79,6 +78,68 @@ export interface GoalHookEvents {
   onGoalComplete?: (goal: GoalHookPayload) => void | Promise<void>
   /** A goal row was deleted (History "remove"). */
   onGoalDelete?: (goalId: string) => void | Promise<void>
+}
+
+// =============================================================================
+// Pet Hooks
+// =============================================================================
+
+/**
+ * Pet interaction snapshot handed to pet hook listeners. Deliberately carries
+ * NO event meta at all — `talked` events' meta.userText is PII and must never
+ * reach plugin hooks. Fired by `lib/pet/runtime/pet-controller.ts` for the 7
+ * direct interaction kinds only (radar/passive kinds are excluded for perf).
+ */
+export interface PetInteractHookPayload {
+  /** fed | played | petted | talked | slept | cleaned | treated */
+  kind: string
+  /** user | plugin | workflow | system */
+  source: string
+  /** Resolved XP award for this interaction (0 if none). */
+  xp: number
+  /** Epoch ms. */
+  at: number
+}
+
+export interface PetLevelUpHookPayload {
+  level: number
+  stage: string
+  at: number
+}
+
+export interface PetEvolvedHookPayload {
+  stage: string
+  level: number
+  at: number
+}
+
+export interface PetAchievementUnlockedHookPayload {
+  achievementId: string
+  at: number
+}
+
+export interface PetUnwellHookPayload {
+  /** Always "unwell" today; kept for forward-compat with richer conditions. */
+  condition: string
+  at: number
+}
+
+/**
+ * Pet lifecycle hooks (desktop-pet nurture wave). Fired by
+ * `lib/pet/runtime/pet-controller.ts` — interactions on every direct care
+ * action, the rest on controller-detected transitions.
+ */
+export interface PetHookEvents {
+  /** A direct care interaction was processed (feed/play/pet/talk/sleep/clean/treat). */
+  onPetInteract?: (payload: PetInteractHookPayload) => void | Promise<void>
+  /** The pet leveled up. */
+  onPetLevelUp?: (payload: PetLevelUpHookPayload) => void | Promise<void>
+  /** The pet evolved into a new stage. */
+  onPetEvolved?: (payload: PetEvolvedHookPayload) => void | Promise<void>
+  /** An achievement unlocked. */
+  onPetAchievementUnlocked?: (payload: PetAchievementUnlockedHookPayload) => void | Promise<void>
+  /** The pet crossed the well → unwell care edge. */
+  onPetUnwell?: (payload: PetUnwellHookPayload) => void | Promise<void>
 }
 
 // =============================================================================
@@ -374,7 +435,17 @@ export interface AIHookEvents {
     sessionId: string
   ) => PostToolUseResult | Promise<PostToolUseResult>
 
-  /** Called before context compression */
+  /**
+   * Called before context compression.
+   *
+   * DORMANT — not yet wired to a live compaction trigger. The Anthropic path
+   * self-manages compaction inside the Agent SDK and the generic (AI-SDK) path
+   * summarizes in the sidecar, which cannot call back into `lib/`. Registering
+   * this hook today is a silent no-op. Kept for contract parity (mirrored in the
+   * Python `PluginHook.ON_PRE_COMPACT` enum, guarded by `runtime-proof-audit`).
+   * See `hooks-system.ts` `dispatchPreCompact`.
+   * @deprecated Dormant: no host call site yet — registering this is a silent no-op.
+   */
   onPreCompact?: (context: PreCompactContext) => PreCompactResult | Promise<PreCompactResult>
 
   /** Called after receiving AI response */
@@ -535,6 +606,63 @@ export interface TerminalHookEvents {
 }
 
 /**
+ * Connector (IM / platform) lifecycle hook events (plugin⇄IM extensibility).
+ *
+ * These are the IM-specific analogue of the chat `onMessageReceive` /
+ * `onMessageSend` hooks: they carry full IM context (`adapterId`,
+ * `conversationKey`, `platform`) and are dispatched from the connector bus
+ * (`onConnectorInbound`, before route resolution) and the outbound runner
+ * (`onConnectorOutbound`, before the adapter send). Resolution mirrors
+ * `onTerminalWillSpawn` — observe + veto + transform:
+ *
+ *   * Each subscriber returns a `ConnectorHookDecision`:
+ *     - `{ action: "allow" }` / `void` / `undefined` — pass through.
+ *     - `{ action: "block", reason? }` — drop the message (first-block-wins,
+ *       short-circuits remaining subscribers).
+ *     - `{ action: "transform", segments }` — replace the segments. Transforms
+ *       chain in priority order.
+ *   * Any transform's result is re-checked by the host through the PII gate
+ *     (fail-closed): a transform that injects leaking PII is REJECTED (the
+ *     original is kept) and audited — a plugin can never smuggle PII past the
+ *     redaction line.
+ *   * Hook error / timeout → treated as `allow` so a buggy plugin never wedges
+ *     the IM pipeline.
+ */
+export interface ConnectorInboundHookPayload {
+  adapterId: string
+  conversationKey: string
+  platform: string
+  /** Mutable view of the inbound segments (transform replaces this whole list). */
+  segments: unknown[]
+  plainText: string
+  messageId: string
+}
+
+export interface ConnectorOutboundHookPayload {
+  adapterId: string
+  conversationKey: string
+  platform: string
+  segments: unknown[]
+  /** Outbound provenance: "ai-run" | "manual" | "workflow" | "draft-approved". */
+  source: string
+  idempotencyKey: string
+}
+
+export type ConnectorHookDecision =
+  | { action: "allow" }
+  | { action: "block"; reason?: string }
+  | { action: "transform"; segments: unknown[] }
+
+export interface ConnectorHookEvents {
+  onConnectorInbound?: (
+    payload: ConnectorInboundHookPayload
+  ) => ConnectorHookDecision | void | Promise<ConnectorHookDecision | void>
+  onConnectorOutbound?: (
+    payload: ConnectorOutboundHookPayload
+  ) => ConnectorHookDecision | void | Promise<ConnectorHookDecision | void>
+}
+
+/**
  * UI interaction hook events
  */
 export interface UIHookEvents {
@@ -578,6 +706,13 @@ export interface PluginHooksAll extends PluginHooks {
   onGoalProgress?: GoalHookEvents["onGoalProgress"]
   onGoalComplete?: GoalHookEvents["onGoalComplete"]
   onGoalDelete?: GoalHookEvents["onGoalDelete"]
+
+  // Pet hooks
+  onPetInteract?: PetHookEvents["onPetInteract"]
+  onPetLevelUp?: PetHookEvents["onPetLevelUp"]
+  onPetEvolved?: PetHookEvents["onPetEvolved"]
+  onPetAchievementUnlocked?: PetHookEvents["onPetAchievementUnlocked"]
+  onPetUnwell?: PetHookEvents["onPetUnwell"]
 
   // Share-link hooks
   onShareLinkCreate?: ShareHookEvents["onShareLinkCreate"]
@@ -626,6 +761,7 @@ export interface PluginHooksAll extends PluginHooks {
   onUserPromptSubmit?: AIHookEvents["onUserPromptSubmit"]
   onPreToolUse?: AIHookEvents["onPreToolUse"]
   onPostToolUse?: AIHookEvents["onPostToolUse"]
+  /** @deprecated Dormant: not yet wired to a compaction trigger — registering this is a silent no-op. See `AIHookEvents.onPreCompact`. */
   onPreCompact?: AIHookEvents["onPreCompact"]
   onPostChatReceive?: AIHookEvents["onPostChatReceive"]
   onBuildOptions?: AIHookEvents["onBuildOptions"]
@@ -655,6 +791,10 @@ export interface PluginHooksAll extends PluginHooks {
   // Terminal hooks
   onTerminalWillSpawn?: TerminalHookEvents["onTerminalWillSpawn"]
   onTerminalLifecycle?: TerminalHookEvents["onTerminalLifecycle"]
+
+  // Connector (IM) hooks — observe + veto + transform over IM inbound/outbound.
+  onConnectorInbound?: ConnectorHookEvents["onConnectorInbound"]
+  onConnectorOutbound?: ConnectorHookEvents["onConnectorOutbound"]
 
   // Message lifecycle hooks
   onMessageDelete?: PluginHooks["onMessageDelete"]

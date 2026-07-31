@@ -5,7 +5,16 @@ description: "把 AI 驱动的 PR 审阅、Issue → PR 闭环、Release 自动�
 
 # ADR 0018 — GitHub Delivery
 
-**Status:** Accepted
+**Status:** Accepted — **removed 2026-07-28.** The built-in delivery stack (the
+Settings section, the `/github-delivery` board, the thirteen `action.github.*`
+workflow kinds, `trigger.github.webhook`, and `plugins/github-delivery/`) was
+removed in favour of the Marketplace Integration runtime (ADR-0026). A
+one-major-version compatibility installer ships at
+`packages/plugin-sdk/contract/compat/`. The generic pieces survive:
+`lib/github/pr-observe/` feeds Agent Team's PR feedback loop, and
+`lib/github/workspace-backend-registry.ts` is the plugin-facing workspace
+backend seam. This record is retained for its decision history — nothing below
+describes shipping code.
 **Date:** 2026-05-12
 **Branch:** `feat/github-delivery`
 
@@ -40,7 +49,6 @@ webhook 接收器上加一个 `signatureMode: "github"`,让 `x-hub-signature-256
 plugins/github-delivery/
 ├── plugin.json            — 声明 4 张 Dexie 表 + 1 个连接器
 ├── src/index.ts           — 插件入口,注入 runtime + 适配器
-├── src/github-poll.ts     — ETag 轮询任务
 ├── src/connector/         — Inbox 桥(ghEventToInbound)
 ├── src/adapter/           — PlatformAdapter 实现 + conversationKey 编解码
 ├── src/approval/          — HITL 草稿桥(draft-bridge)
@@ -94,8 +102,8 @@ token 由 `@octokit/auth-app` 铸造,按 `(appId, installationId)` 缓存,**提�
 
 - **Webhook(默认)。** `trigger.github.webhook` 在 Rust axum 接收器上注册路径。校验逻辑读取
   `x-hub-signature-256`(签名模式 = `github`)。用户粘贴公开 URL;一键 cloudflared 在 M4 上线。
-- **轮询(后备)。** `github-poll` 调度任务每 5 分钟轮询一次 `/repos/{owner}/{repo}/events`,
-  带条件 GET(ETag)。结果与 `events` 表 diff,做去重。
+- **Webhook only (superseded 2026-07-16).** The unintegrated polling prototype was removed;
+  inbound events now use the Rust webhook receiver exclusively.
 
 两路最终都吐出同一个 `NormalizedGhEvent`,下游只面对一种形状。
 

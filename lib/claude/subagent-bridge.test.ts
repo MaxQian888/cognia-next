@@ -1,6 +1,11 @@
 import type { UIMessage } from "ai"
 import type { SubAgent } from "@/types/agent/sub-agent"
-import { applySubagentUpdate } from "./subagent-bridge"
+import {
+  applySubagentUpdate,
+  selectSessionSubagents,
+  applySubagentsToMessages,
+  subagentSignature,
+} from "./subagent-bridge"
 import { isSubagentPart, type SubagentPart } from "./parts-extensions"
 
 function assistantMessage(id: string, parts: unknown[] = []): UIMessage {
@@ -107,5 +112,144 @@ describe("applySubagentUpdate", () => {
     const msgs: UIMessage[] = [userMessage("u1"), a1, userMessage("u2"), a2]
     const out = applySubagentUpdate(msgs, makeSubAgent({ parentAgentId: "wanted" }))
     expect((out[1].parts ?? []).filter(isSubagentPart)).toHaveLength(1)
+  })
+
+  // gap7 — terminal snapshot freezing.
+  it("does NOT freeze toolCalls/logs onto the part while the run is still running", () => {
+    const msgs: UIMessage[] = [assistantMessage("a1")]
+    const sa = makeSubAgent({
+      status: "running",
+      toolCalls: [{ id: "c1", name: "read", state: "running" }],
+      logs: [{ timestamp: new Date(2026, 4, 1), level: "info", message: "working" }],
+      toolUses: 1,
+    })
+    const out = applySubagentUpdate(msgs, sa)
+    const part = ((out[0].parts ?? []) as unknown[]).filter(isSubagentPart)[0] as SubagentPart
+    expect(part.toolCalls).toBeUndefined()
+    expect(part.logs).toBeUndefined()
+    expect(part.toolUses).toBeUndefined()
+  })
+
+  it("freezes toolCalls/logs/finalResponse/toolUses onto the part on a terminal status", () => {
+    const msgs: UIMessage[] = [assistantMessage("a1")]
+    const sa = makeSubAgent({
+      status: "completed",
+      completedAt: new Date(2026, 4, 1, 12, 5, 0),
+      toolCalls: [{ id: "c1", name: "read", input: { path: "/x" }, output: "ok", state: "done" }],
+      logs: [{ timestamp: new Date(2026, 4, 1), level: "info", message: "done", data: { a: 1 } }],
+      toolUses: 3,
+      result: { finalResponse: "all set", success: true, steps: [], totalSteps: 0, duration: 0 },
+    })
+    const out = applySubagentUpdate(msgs, sa)
+    const part = ((out[0].parts ?? []) as unknown[]).filter(isSubagentPart)[0] as SubagentPart
+    expect(part.toolCalls).toHaveLength(1)
+    expect(part.toolCalls?.[0]?.name).toBe("read")
+    expect(part.finalResponse).toBe("all set")
+    expect(part.toolUses).toBe(3)
+    // logs stripped of the non-serializable Date timestamp
+    expect(part.logs).toEqual([{ level: "info", message: "done", data: { a: 1 } }])
+    expect((part.logs?.[0] as { timestamp?: unknown }).timestamp).toBeUndefined()
+  })
+
+  it("terminal snapshot does NOT change subagentSignature (no per-tick churn)", () => {
+    const terminal = makeSubAgent({
+      id: "s1",
+      status: "completed",
+      toolCalls: [{ id: "c1", name: "read", state: "done" }],
+      logs: [{ timestamp: new Date(), level: "info", message: "x" }],
+      result: { finalResponse: "done", success: true, steps: [], totalSteps: 0, duration: 0 },
+    })
+    const withoutSnapshot = makeSubAgent({
+      id: "s1",
+      status: "completed",
+      result: { finalResponse: "done", success: true, steps: [], totalSteps: 0, duration: 0 },
+    })
+    expect(subagentSignature([terminal])).toBe(subagentSignature([withoutSnapshot]))
+  })
+})
+
+function withSession(sa: SubAgent, sessionId: string): SubAgent {
+  return {
+    ...sa,
+    context: {
+      parentAgentId: sa.parentAgentId,
+      sessionId,
+      startTime: sa.createdAt,
+      currentStep: 0,
+    },
+  }
+}
+
+describe("selectSessionSubagents", () => {
+  it("returns only the roots whose context.sessionId matches", () => {
+    const a = withSession(makeSubAgent({ id: "a" }), "sess-1")
+    const b = withSession(makeSubAgent({ id: "b" }), "sess-2")
+    const record = { a, b }
+    const out = selectSessionSubagents(record, "sess-1")
+    expect(out.map((s) => s.id)).toEqual(["a"])
+  })
+
+  it("includes transitive descendants linked by parentSubagentId", () => {
+    const root = withSession(makeSubAgent({ id: "root" }), "sess-1")
+    const child = makeSubAgent({ id: "child", parentSubagentId: "root" }) // ephemeral session
+    const grandchild = makeSubAgent({ id: "gc", parentSubagentId: "child" })
+    const unrelated = makeSubAgent({ id: "x", parentSubagentId: "other" })
+    const out = selectSessionSubagents({ root, child, grandchild, unrelated }, "sess-1")
+    expect(out.map((s) => s.id).sort()).toEqual(["child", "gc", "root"])
+  })
+
+  it("returns [] when no root matches the session", () => {
+    const a = withSession(makeSubAgent({ id: "a" }), "other")
+    expect(selectSessionSubagents({ a }, "sess-1")).toEqual([])
+  })
+})
+
+describe("applySubagentsToMessages", () => {
+  it("folds multiple subagents onto the assistant message", () => {
+    const msgs: UIMessage[] = [assistantMessage("a1")]
+    const out = applySubagentsToMessages(msgs, [
+      makeSubAgent({ id: "s1" }),
+      makeSubAgent({ id: "s2" }),
+    ])
+    const parts = ((out[0].parts ?? []) as unknown[]).filter(isSubagentPart) as SubagentPart[]
+    expect(parts.map((p) => p.subagentId).sort()).toEqual(["s1", "s2"])
+  })
+
+  it("returns the same reference when given no subagents", () => {
+    const msgs: UIMessage[] = [assistantMessage("a1")]
+    expect(applySubagentsToMessages(msgs, [])).toBe(msgs)
+  })
+})
+
+describe("subagentSignature", () => {
+  it("changes when status changes, stable otherwise", () => {
+    const base = makeSubAgent({ id: "s1", status: "running", progress: 10 })
+    const sig1 = subagentSignature([base])
+    expect(subagentSignature([{ ...base }])).toBe(sig1)
+    expect(subagentSignature([{ ...base, status: "completed" }])).not.toBe(sig1)
+  })
+
+  it("IGNORES progress changes (the transcript card never renders progress)", () => {
+    const base = makeSubAgent({ id: "s1", status: "running", progress: 10 })
+    const sig1 = subagentSignature([base])
+    expect(subagentSignature([{ ...base, progress: 50 }])).toBe(sig1)
+    expect(subagentSignature([{ ...base, progress: 95 }])).toBe(sig1)
+  })
+
+  it("changes when the final-response summary appears", () => {
+    const base = makeSubAgent({ id: "s1", status: "running" })
+    const sig1 = subagentSignature([base])
+    const withSummary = makeSubAgent({
+      id: "s1",
+      status: "running",
+      result: { finalResponse: "done", success: true, steps: [], totalSteps: 0, duration: 0 },
+    })
+    expect(subagentSignature([withSummary])).not.toBe(sig1)
+  })
+
+  it("is order-independent", () => {
+    const a = makeSubAgent({ id: "a" })
+    const b = makeSubAgent({ id: "b" })
+    expect(subagentSignature([a, b])).toBe(subagentSignature([b, a]))
   })
 })

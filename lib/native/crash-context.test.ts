@@ -41,6 +41,18 @@ describe("redactConfig", () => {
     expect((out.list as string[])[1]).toMatch(/<API_KEY_\d{3}>/)
   })
 
+  it("applies shared logger key and pattern redaction before crossing to native", () => {
+    const out = redactConfig({
+      token: "short",
+      authHeader: "Bearer abcdefghijklmnop",
+      nested: { clientSecret: "tiny" },
+    }) as Record<string, unknown>
+
+    expect(out.token).toBe("[REDACTED]")
+    expect(out.authHeader).toBe("[REDACTED]")
+    expect((out.nested as Record<string, unknown>).clientSecret).toBe("[REDACTED]")
+  })
+
   it("preserves non-string primitives and drops non-serializable values", () => {
     const out = redactConfig({
       count: 5,

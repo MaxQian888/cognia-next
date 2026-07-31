@@ -79,6 +79,22 @@ export const ARTIFACT_TYPES: ArtifactType[] = [
 ]
 
 /**
+ * Types whose content is something the user can execute or run a live preview
+ * of, as opposed to read.
+ *
+ * Drives both the Context Workbench `run` capability and the "Runnable" badge.
+ * Kept in one place because it was previously inlined at the capability site
+ * while the badge read a per-artifact `metadata.runnable` override that nothing
+ * ever wrote — so the badge never appeared and the two could not disagree only
+ * because one of them never fired.
+ */
+export const RUNNABLE_ARTIFACT_TYPES: readonly ArtifactType[] = ["code", "html", "react", "jupyter"]
+
+export function isRunnableArtifactType(type: ArtifactType): boolean {
+  return RUNNABLE_ARTIFACT_TYPES.includes(type)
+}
+
+/**
  * i18n keys for artifact type labels
  */
 export const ARTIFACT_TYPE_KEYS: Record<ArtifactType, string> = {

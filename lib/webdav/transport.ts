@@ -40,6 +40,8 @@ function dataToString(data: unknown): string {
 
 /** Transport over the Tauri reqwest bridge. */
 class TauriHttpTransport implements WebDavTransport {
+  constructor(private readonly trustSelfSigned: boolean) {}
+
   async send(req: WebDavRequest): Promise<WebDavResponse> {
     const resp = await connectorsHttpRequest({
       url: req.url,
@@ -47,6 +49,7 @@ class TauriHttpTransport implements WebDavTransport {
       headers: req.headers,
       body: req.body,
       timeoutMs: req.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      allowInvalidCertificates: this.trustSelfSigned,
     })
     return {
       status: resp.status,
@@ -96,7 +99,7 @@ export function createWebDavTransport(opts: CreateTransportOptions = {}): WebDav
     return new CapacitorHttpTransport(opts.trustSelfSigned ?? false)
   }
   if (isTauri()) {
-    return new TauriHttpTransport()
+    return new TauriHttpTransport(opts.trustSelfSigned ?? false)
   }
   throw new WebDavError("WebDAV is only available in the desktop or mobile app", 0)
 }

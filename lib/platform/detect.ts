@@ -18,10 +18,11 @@
  * - `tauri`  — Tauri desktop shell. `__TAURI_INTERNALS__` is on `window`.
  * - `mobile` — Capacitor mobile shell. `window.Capacitor.isNativePlatform()` is true.
  * - `web`    — vanilla browser, dev mode, or a server-rendered initial paint.
+ * - `headless` — the Node brain process serving a headless Cognia host.
  *
  * The runtime never changes after first paint, so callers memoize freely.
  */
-export type Platform = "tauri" | "mobile" | "web"
+export type Platform = "tauri" | "mobile" | "web" | "headless"
 
 type CapacitorGlobal = { Capacitor?: { isNativePlatform?: () => boolean } }
 
@@ -36,6 +37,9 @@ function capacitorIsNative(): boolean {
  * pathological case deterministically).
  */
 export function detectPlatform(): Platform {
+  // The brain installs a window shim on globalThis, so host detection must
+  // precede every browser/WebView marker check.
+  if (isHeadlessHost()) return "headless"
   if (typeof window === "undefined") return "web"
   if ("__TAURI_INTERNALS__" in window) return "tauri"
   if (capacitorIsNative()) return "mobile"
@@ -54,6 +58,17 @@ export function isTauri(): boolean {
  */
 export function isCapacitor(): boolean {
   return typeof window !== "undefined" && capacitorIsNative()
+}
+
+/**
+ * True inside the headless brain process (`cognia-agent serve`, ADR-0059
+ * T-A10). The serve boot sets the `__COGNIA_HEADLESS__` marker before any
+ * lib module runs; browsers/WebViews never have it. Distinct from
+ * {@link detectPlatform} — headless is a HOST property, not a webview kind
+ * (there is no webview at all).
+ */
+export function isHeadlessHost(): boolean {
+  return (globalThis as Record<string, unknown>).__COGNIA_HEADLESS__ === true
 }
 
 /**

@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // CRUD coverage for the v15 plugin tables. Each table's module mirrors the
 // pattern set by `lib/db/skills.ts`, so the assertions focus on:
 //   * defaults applied by `create*` / `upsert*` helpers,
@@ -45,16 +46,6 @@ import {
   clearReviewsForPlugin,
   averageRatingForPlugin,
 } from "./plugin-reviews"
-import {
-  listAllScheduledJobs,
-  listActiveScheduledJobs,
-  listScheduledJobsForPlugin,
-  getScheduledJob,
-  createScheduledJob,
-  updateScheduledJob,
-  deleteScheduledJob,
-  deleteScheduledJobsForPlugin,
-} from "./plugin-scheduled-jobs"
 import { getDb, whenSeeded, __resetDbForTesting } from "./schema"
 import type { PluginRow } from "./plugin-types"
 
@@ -330,64 +321,5 @@ describe("plugin-reviews CRUD", () => {
     const result = await averageRatingForPlugin("p1")
     expect(result?.average).toBe(4)
     expect(result?.count).toBe(2)
-  })
-})
-
-describe("plugin-scheduled-jobs CRUD", () => {
-  it("createScheduledJob applies defaults and timestamps", async () => {
-    const row = await createScheduledJob({ pluginId: "p1", cron: "* * * * *", handler: "h" })
-    expect(row.status).toBe("active")
-    expect(row.id).toMatch(/^pjob_/)
-    expect(row.createdAt).toBeGreaterThan(0)
-  })
-
-  it("createScheduledJob honors explicit ids and status", async () => {
-    const row = await createScheduledJob({
-      id: "fixed-id",
-      pluginId: "p1",
-      cron: "* * * * *",
-      handler: "h",
-      status: "paused",
-    })
-    expect(row.id).toBe("fixed-id")
-    expect(row.status).toBe("paused")
-  })
-
-  it("listAllScheduledJobs / listActiveScheduledJobs filter on status", async () => {
-    await createScheduledJob({ pluginId: "p1", cron: "*", handler: "a", status: "active" })
-    await createScheduledJob({ pluginId: "p1", cron: "*", handler: "b", status: "paused" })
-    expect((await listAllScheduledJobs()).length).toBe(2)
-    expect((await listActiveScheduledJobs()).map((r) => r.handler)).toEqual(["a"])
-  })
-
-  it("listScheduledJobsForPlugin filters by pluginId", async () => {
-    await createScheduledJob({ pluginId: "p1", cron: "*", handler: "a" })
-    await createScheduledJob({ pluginId: "p2", cron: "*", handler: "b" })
-    const rows = await listScheduledJobsForPlugin("p1")
-    expect(rows.map((r) => r.handler)).toEqual(["a"])
-  })
-
-  it("updateScheduledJob bumps updatedAt and merges fields", async () => {
-    const created = await createScheduledJob({ pluginId: "p1", cron: "*", handler: "h" })
-    await new Promise((r) => setTimeout(r, 5))
-    await updateScheduledJob(created.id, { status: "paused" })
-    const updated = await getScheduledJob(created.id)
-    expect(updated?.status).toBe("paused")
-    expect(updated?.updatedAt).toBeGreaterThanOrEqual(created.updatedAt)
-  })
-
-  it("deleteScheduledJob removes a single row", async () => {
-    const row = await createScheduledJob({ pluginId: "p1", cron: "*", handler: "h" })
-    await deleteScheduledJob(row.id)
-    expect(await getScheduledJob(row.id)).toBeUndefined()
-  })
-
-  it("deleteScheduledJobsForPlugin drops only that plugin's rows", async () => {
-    await createScheduledJob({ pluginId: "p1", cron: "*", handler: "a" })
-    await createScheduledJob({ pluginId: "p1", cron: "*", handler: "b" })
-    await createScheduledJob({ pluginId: "p2", cron: "*", handler: "c" })
-    expect(await deleteScheduledJobsForPlugin("p1")).toBe(2)
-    expect(await listScheduledJobsForPlugin("p1")).toEqual([])
-    expect(await listScheduledJobsForPlugin("p2")).toHaveLength(1)
   })
 })

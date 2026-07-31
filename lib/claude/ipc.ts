@@ -11,37 +11,305 @@ import type {
   ChatSession,
   ClaudeEvent,
   PluginToolExecEvent,
+  SdkContextUsage,
+  SdkMcpServerStatus,
+  SdkModelInfo,
+  SdkSlashCommand,
   SendContent,
   SendOptions,
-} from "./types"
-import { isPluginToolExecEvent } from "./types"
+  SessionControlMethod,
+  StoredMessage,
+} from "@cognia/agent-config-types"
+import {
+  isControlResponseEvent,
+  isPluginToolExecEvent,
+  isProtocolAdapterCancelEvent,
+} from "@cognia/agent-config-types"
 import type { PluginToolExecResponse } from "./plugin-tool-ipc"
+import type { ProtocolAdapterExecEvent } from "./protocol-adapter-ipc"
+import type { ProtocolAdapterCancelEvent } from "@cognia/agent-config-types"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
+import { isRemoteExecutionContext, type RemoteExecutionContext } from "./remote-execution"
 
 const SIDECAR_EVENT = "claude://message"
+/** Canonical agent-event channel (ADR-0090 Phase 3). */
+const AGENT_EVENT = "agent://message"
+const remoteApprovalContexts = new Map<string, RemoteExecutionContext>()
+
+function remoteApprovalKey(sessionId: string, requestId: string): string {
+  return `${sessionId}:${requestId}`
+}
 
 export async function sendPrompt(
   sessionId: string,
   prompt: SendContent,
   options?: SendOptions
 ): Promise<void> {
-  await transport.call("claude_send", { sessionId, prompt, options })
+  if (
+    !hasNoLeakingPiiDeep({
+      prompt,
+      systemPrompt: options?.systemPrompt,
+      appendSystemPrompt: options?.appendSystemPrompt,
+    })
+  ) {
+    throw new Error("prompt rejected by the renderer PII gate")
+  }
+  // Sends carrying a frozen execution spec use the canonical command (same
+  // impl body Rust-side; the alias split feeds the Phase 9 telemetry).
+  const command = options?.execution ? "agent_send" : "claude_send"
+  await transport.call(command, { sessionId, prompt, options })
+}
+
+/**
+ * Subscribe to canonical `AgentEventEnvelope` frames (ADR-0090 Phase 3).
+ * Emitted only for sessions that carry a frozen execution spec — legacy
+ * sessions produce nothing here.
+ */
+export async function subscribeAgentEvents(
+  onEnvelope: (
+    envelope: import("@cognia/agent-config-types/agent-execution").AgentEventEnvelope
+  ) => void
+): Promise<UnlistenFn> {
+  const { isAgentEventEnvelope } = await import("@cognia/agent-config-types/agent-execution")
+  return transport.subscribe<{ type: string; envelope?: unknown }>(AGENT_EVENT, (payload) => {
+    const envelope = payload?.envelope
+    if (isAgentEventEnvelope(envelope)) onEnvelope(envelope)
+  })
 }
 
 export async function interruptSession(sessionId: string): Promise<void> {
   await transport.call("claude_interrupt", { sessionId })
 }
 
+/**
+ * Manually compact a running session's context. Mirrors {@link interruptSession}
+ * — a fire-and-forget control message routed to the sidecar. On the generic
+ * (AI-SDK) path the sidecar runs a summary round-trip now; on the Anthropic
+ * path it pushes a `/compact` turn the Agent SDK intercepts. `focus` is the
+ * optional compact-instruction argument (e.g. from `/compact <focus>`).
+ */
+export async function compactSession(sessionId: string, focus?: string): Promise<void> {
+  await transport.call("claude_compact", { sessionId, focus })
+}
+
+/**
+ * Undo a prior compaction by restoring the pre-compaction message snapshot.
+ * Mirrors {@link compactSession}: a fire-and-forget control message. `messages`
+ * is the sidecar-format snapshot captured on the `compact_boundary` event
+ * (`compact_metadata.pre_messages`) — NOT renderer UIMessages. Only valid on the
+ * generic (AI-SDK) path while the session is still live and idle.
+ */
+export async function restoreSession(sessionId: string, messages: unknown[]): Promise<void> {
+  if (!hasNoLeakingPiiDeep(messages)) {
+    throw new Error("session restore rejected by the renderer PII gate")
+  }
+  await transport.call("claude_restore", { sessionId, messages })
+}
+
+/**
+ * Change a running session's permission mode in place — without tearing down
+ * and respawning the sidecar (which would lose the in-process conversation).
+ * Mirrors {@link compactSession}: a fire-and-forget control message. On the
+ * Anthropic path the sidecar calls the live SDK `Query.setPermissionMode`; on
+ * both paths it mutates the session's `sendOptions.permissionMode` so the next
+ * tool gate honours the change.
+ */
+export async function setSessionMode(
+  sessionId: string,
+  mode: NonNullable<SendOptions["permissionMode"]>
+): Promise<void> {
+  await transport.call("claude_set_mode", { sessionId, mode })
+}
+
+// ---- Live session introspection & control (SDK Query control methods) ----
+//
+// The renderer drives the Claude Agent SDK `Query`'s streaming-input-only
+// control methods on a LIVE session through a request/response round-trip:
+// `claude_session_control` writes a `control` line to the sidecar stdin; the
+// sidecar invokes `q[method](...)` and replies with a `control_response` event
+// (correlated by `requestId`) on the same `claude://message` channel. The
+// correlation reuses the single `onClaudeMessage` subscription — exactly like
+// {@link subscribePluginToolExec} — so it is decoupled from the chat hook's
+// lifecycle (the Settings MCP tab can call it with no chat mounted).
+
+interface PendingControl {
+  resolve: (value: unknown) => void
+  reject: (error: Error) => void
+  timer: ReturnType<typeof setTimeout>
+}
+
+const pendingControl = new Map<string, PendingControl>()
+/** Lazily-created singleton listener that settles `control_response` events. */
+let controlListener: Promise<UnlistenFn> | null = null
+
+function ensureControlListener(): Promise<UnlistenFn> {
+  if (!controlListener) {
+    controlListener = onClaudeMessage((evt) => {
+      // Fail-fast on a sidecar crash/restart: the PROCESS died, so every
+      // in-flight control request (model picker, MCP settings action,
+      // context-usage poll) can never be answered. Reject them now instead of
+      // each waiting out CONTROL_TIMEOUT_MS — mirrors run-and-capture's
+      // `sidecar_exited` posture so a control issued just before a restart
+      // doesn't hang the UI for 8s.
+      if (evt.type === "sidecar_exited") {
+        for (const [id, pending] of pendingControl) {
+          pendingControl.delete(id)
+          clearTimeout(pending.timer)
+          pending.reject(new Error("sidecar exited"))
+        }
+        return
+      }
+      if (!isControlResponseEvent(evt)) return
+      const pending = pendingControl.get(evt.requestId)
+      if (!pending) return
+      pendingControl.delete(evt.requestId)
+      clearTimeout(pending.timer)
+      if (evt.ok) pending.resolve(evt.result)
+      else pending.reject(new Error(evt.error ?? "control_failed"))
+    })
+  }
+  return controlListener
+}
+
+/** Reject if the sidecar hasn't replied within this window. */
+const CONTROL_TIMEOUT_MS = 8000
+
+/**
+ * Invoke an allowlisted SDK `Query` control method on a live session and await
+ * its result. Rejects with `control "<method>" timed out` after
+ * {@link CONTROL_TIMEOUT_MS}, or with the sidecar's stable error code
+ * (`no_active_session` | `unsupported_provider` | `unknown_method`) when the
+ * call can't run. Anthropic-path + open-session only — callers degrade
+ * gracefully on rejection.
+ */
+async function sessionControlRequest<T>(
+  sessionId: string,
+  method: SessionControlMethod,
+  params?: Record<string, unknown>
+): Promise<T> {
+  // Await the subscription before firing so a fast reply can't race the listener.
+  await ensureControlListener()
+  const requestId = crypto.randomUUID()
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pendingControl.delete(requestId)
+      reject(new Error(`control "${method}" timed out`))
+    }, CONTROL_TIMEOUT_MS)
+    pendingControl.set(requestId, {
+      resolve: (value) => resolve(value as T),
+      reject,
+      timer,
+    })
+    transport
+      .call("claude_session_control", { sessionId, requestId, method, params })
+      .catch((err) => {
+        const pending = pendingControl.get(requestId)
+        if (!pending) return
+        pendingControl.delete(requestId)
+        clearTimeout(timer)
+        reject(err instanceof Error ? err : new Error(String(err)))
+      })
+  })
+}
+
+export async function sessionControl<T = unknown>(
+  sessionId: string,
+  method: Exclude<SessionControlMethod, "steer">,
+  params?: Record<string, unknown>
+): Promise<T> {
+  if ((method as SessionControlMethod) === "steer") {
+    throw new Error("steer must use the PII-gated steerSession wrapper")
+  }
+  return sessionControlRequest<T>(sessionId, method, params)
+}
+
+/** Live context-window usage from the SDK (authoritative window + breakdown). */
+export function getSessionContextUsage(sessionId: string): Promise<SdkContextUsage> {
+  return sessionControl<SdkContextUsage>(sessionId, "getContextUsage")
+}
+
+/** Live MCP client status for the running session (one entry per server). */
+export function getSessionMcpStatus(sessionId: string): Promise<SdkMcpServerStatus[]> {
+  return sessionControl<SdkMcpServerStatus[]>(sessionId, "mcpServerStatus")
+}
+
+/** Reconnect a failed/needs-auth MCP server on the running session. */
+export function reconnectSessionMcpServer(sessionId: string, name: string): Promise<void> {
+  return sessionControl<void>(sessionId, "reconnectMcpServer", { name })
+}
+
+/** Enable/disable an MCP server on the running session. */
+export function toggleSessionMcpServer(
+  sessionId: string,
+  name: string,
+  enabled: boolean
+): Promise<unknown> {
+  return sessionControl<unknown>(sessionId, "toggleMcpServer", { name, enabled })
+}
+
+/** Account-authoritative model list (with per-model capability flags). */
+export function getSessionSupportedModels(sessionId: string): Promise<SdkModelInfo[]> {
+  return sessionControl<SdkModelInfo[]>(sessionId, "supportedModels")
+}
+
+/** Agent-facing slash-command list as the SDK currently sees it. */
+export function getSessionSupportedCommands(sessionId: string): Promise<SdkSlashCommand[]> {
+  return sessionControl<SdkSlashCommand[]>(sessionId, "supportedCommands")
+}
+
+/** Switch the model on the running query in place (no session restart). */
+export function setSessionModel(sessionId: string, model: string): Promise<void> {
+  return sessionControl<void>(sessionId, "setModel", { model })
+}
+
+/**
+ * Queue a user message into the active Anthropic streaming-input query.
+ * Success acknowledges sidecar queue acceptance only; the SDK applies the
+ * message at its next supported boundary and may not mutate an HTTP request
+ * that is already in flight.
+ */
+export async function steerSession(
+  sessionId: string,
+  prompt: SendContent,
+  sourceMessageId?: string
+): Promise<{ accepted: true }> {
+  if (!hasNoLeakingPiiDeep(prompt)) {
+    throw new Error("live-steer prompt rejected by the renderer PII gate")
+  }
+  return sessionControlRequest<{ accepted: true }>(sessionId, "steer", {
+    prompt,
+    priority: "now",
+    ...(sourceMessageId ? { sourceMessageId } : {}),
+  })
+}
+
 // ---- Mobile-only message + session RPCs (mobile completeness Phase 2) ----
 
 /**
  * Page of sessions returned by `session_list`. Sorted desktop-side by
- * `updatedAt` descending. `next_offset` is set when more rows remain
- * after `offset + rows.length`.
+ * `updatedAt` descending. Rows are lightweight list projections rather than
+ * full execution configuration. `next_offset`/`has_more` are set when more
+ * rows remain; direct/degraded stores may additionally return `total`.
  */
 export interface SessionListPage {
-  rows: ChatSession[]
-  total: number
+  rows: Array<
+    Pick<
+      ChatSession,
+      | "id"
+      | "title"
+      | "kind"
+      | "projectId"
+      | "characterId"
+      | "teamId"
+      | "lastMessagePreview"
+      | "lastMessageAt"
+      | "createdAt"
+      | "updatedAt"
+    >
+  >
+  total?: number
   next_offset?: number
+  has_more?: boolean
 }
 
 /**
@@ -84,14 +352,15 @@ export async function listSessions(opts: {
  * Paginated read of one session's messages. Used by the mobile companion to
  * hydrate a chat history without taking ownership of the desktop's Dexie
  * snapshot. Round-trips through `_rpc/message_get_by_session` → desktop
- * Tauri command → `messageRepository.list`.
+ * Tauri command → an indexed raw `StoredMessage` page.
  *
  * Returns rows sorted by `createdAt` ascending so the mobile client can
  * append them to its scrollback in order.
  */
 export interface MobileMessagesPage {
-  rows: UIMessage[]
-  total: number
+  rows: StoredMessage[]
+  /** Present on legacy/direct-store responses; omitted by the indexed bridge. */
+  total?: number
   next_offset?: number
 }
 
@@ -136,14 +405,42 @@ export async function approveTool(
   requestId: string,
   decision: ApprovalDecision,
   message?: string,
-  updatedInput?: unknown
+  updatedInput?: unknown,
+  remoteExecutionContext?: RemoteExecutionContext
 ): Promise<void> {
-  await transport.call("claude_approve", {
+  const key = remoteApprovalKey(sessionId, requestId)
+  const context = remoteExecutionContext ?? remoteApprovalContexts.get(key)
+  try {
+    await transport.call("claude_approve", {
+      sessionId,
+      requestId,
+      decision,
+      message,
+      updatedInput,
+      ...(context ? { remoteExecutionContext: context } : {}),
+    })
+  } finally {
+    remoteApprovalContexts.delete(key)
+  }
+}
+
+/**
+ * Answer a `tool_result_review` (the plugin Agent SDK's PostToolUse rewrite).
+ * `updatedToolOutput` is the rewritten output the model should see; pass
+ * `undefined` to leave the tool result unchanged. Mirrors
+ * `approveTool`/`claude_approve` but for tool OUTPUT.
+ */
+export async function toolResultDecision(
+  sessionId: string,
+  reviewId: string,
+  updatedToolOutput?: unknown,
+  remoteExecutionContext?: RemoteExecutionContext
+): Promise<void> {
+  await transport.call("claude_tool_result_decision", {
     sessionId,
-    requestId,
-    decision,
-    message,
-    updatedInput,
+    reviewId,
+    updatedToolOutput,
+    remoteExecutionContext,
   })
 }
 
@@ -166,9 +463,24 @@ export async function setApiKey(key: string | null): Promise<void> {
  *
  * Pass `null` for either field to clear it. Empty strings are treated as null
  * by the Rust side.
+ *
+ * `customHeaders` carries relay-required headers (e.g.
+ * `{ "anthropic-beta": "context-1m-2025-08-07" }` for the 1M window), forwarded
+ * as `ANTHROPIC_CUSTOM_HEADER_*` at sidecar spawn. Semantics on the Rust side:
+ * `undefined` leaves the existing header set untouched (legacy callers that
+ * don't manage headers); an explicit object — including `{}` — replaces it, so
+ * switching to a provider without headers clears a previous relay's headers.
  */
-export async function setProviderEnv(apiKey: string | null, baseUrl: string | null): Promise<void> {
-  await transport.call("claude_set_provider_env", { apiKey, baseUrl })
+export async function setProviderEnv(
+  apiKey: string | null,
+  baseUrl: string | null,
+  customHeaders?: Record<string, string>
+): Promise<void> {
+  await transport.call("claude_set_provider_env", {
+    apiKey,
+    baseUrl,
+    customHeaders: customHeaders ? Object.entries(customHeaders) : undefined,
+  })
 }
 
 export async function hasApiKey(): Promise<boolean> {
@@ -193,7 +505,23 @@ export async function restartSidecar(): Promise<void> {
 }
 
 export async function onClaudeMessage(handler: (evt: ClaudeEvent) => void): Promise<UnlistenFn> {
-  return transport.subscribe<ClaudeEvent>(SIDECAR_EVENT, handler)
+  return transport.subscribe<ClaudeEvent>(SIDECAR_EVENT, (event) => {
+    const routed = event as ClaudeEvent & { remoteExecutionContext?: unknown }
+    if (
+      (routed as { type?: string }).type === "permission_request" &&
+      "sessionId" in routed &&
+      "requestId" in routed &&
+      typeof routed.sessionId === "string" &&
+      typeof routed.requestId === "string" &&
+      isRemoteExecutionContext(routed.remoteExecutionContext)
+    ) {
+      remoteApprovalContexts.set(
+        remoteApprovalKey(routed.sessionId, routed.requestId),
+        routed.remoteExecutionContext
+      )
+    }
+    handler(event)
+  })
 }
 
 /**
@@ -203,7 +531,7 @@ export async function onClaudeMessage(handler: (evt: ClaudeEvent) => void): Prom
  * `onClaudeMessage` subscription + the `ClaudeEvent` type guard. No-op in web.
  */
 export async function subscribePluginToolExec(
-  handler: (req: PluginToolExecEvent) => void
+  handler: (req: PluginToolExecEvent & { remoteExecutionContext?: RemoteExecutionContext }) => void
 ): Promise<UnlistenFn> {
   return onClaudeMessage((evt) => {
     if (isPluginToolExecEvent(evt)) handler(evt)
@@ -214,12 +542,55 @@ export async function subscribePluginToolExec(
  * Write a `plugin_tool_response` back onto the sidecar stdin so the pending
  * `pendingPluginToolCalls` entry resolves. Mirrors `approveTool`/`claude_approve`.
  */
-export async function sendPluginToolResponse(resp: PluginToolExecResponse): Promise<void> {
+export async function sendPluginToolResponse(
+  resp: PluginToolExecResponse,
+  remoteExecutionContext?: RemoteExecutionContext
+): Promise<void> {
   await transport.call("claude_plugin_tool_response", {
     sessionId: resp.sessionId,
     toolUseId: resp.toolUseId,
     result: resp.result,
     error: resp.error,
+    ...(remoteExecutionContext ? { remoteExecutionContext } : {}),
+  })
+}
+
+/**
+ * Subscribe to `protocol_adapter_exec` events (P2-E code adapter round-trip)
+ * and forward them to `handler`. Reuses the single `onClaudeMessage`
+ * subscription. No-op in web.
+ */
+export async function subscribeProtocolAdapterExec(
+  handler: (req: ProtocolAdapterExecEvent) => void
+): Promise<UnlistenFn> {
+  return onClaudeMessage((evt) => {
+    if ((evt as { type?: string }).type === "protocol_adapter_exec") {
+      handler(evt as unknown as ProtocolAdapterExecEvent)
+    }
+  })
+}
+
+export async function subscribeProtocolAdapterCancel(
+  handler: (req: ProtocolAdapterCancelEvent) => void
+): Promise<UnlistenFn> {
+  return onClaudeMessage((evt) => {
+    if (isProtocolAdapterCancelEvent(evt)) handler(evt)
+  })
+}
+
+/** Write a `protocol_adapter_{chunk,done,error}` line onto the sidecar stdin. */
+export async function sendProtocolAdapterMessage(
+  message: Record<string, unknown>,
+  remoteExecutionContext?: RemoteExecutionContext
+): Promise<void> {
+  const routedMessage = {
+    ...message,
+    messageId: crypto.randomUUID(),
+  }
+  await transport.call("claude_protocol_adapter_message", {
+    message: routedMessage,
+    ...(typeof message.sessionId === "string" ? { sessionId: message.sessionId } : {}),
+    ...(remoteExecutionContext ? { remoteExecutionContext } : {}),
   })
 }
 
@@ -233,8 +604,27 @@ export async function writeTextFile(path: string, content: string): Promise<void
   await transport.call("write_text_file", { path, content })
 }
 
+/**
+ * Write a text file confined to `allowedRoots` (the active workspace roots).
+ * The authoritative on-disk counterpart to {@link writeTextFile}: the Rust host
+ * canonicalizes and rejects writes that escape the roots — including via a
+ * symlink the lexical TS pre-flight can't see. Prefer this for in-app writes.
+ */
+export async function writeTextFileConfined(
+  path: string,
+  content: string,
+  allowedRoots: string[]
+): Promise<void> {
+  await transport.call("write_text_file_confined", { path, content, allowedRoots })
+}
+
 export async function ensureDir(path: string): Promise<void> {
   await transport.call("ensure_dir", { path })
+}
+
+/** Ensure a directory exists, confined to `allowedRoots` (see {@link writeTextFileConfined}). */
+export async function ensureDirConfined(path: string, allowedRoots: string[]): Promise<void> {
+  await transport.call("ensure_dir_confined", { path, allowedRoots })
 }
 
 export async function defaultExportDir(): Promise<string> {
@@ -371,6 +761,17 @@ export interface InstallSkillMirroredResponse {
   trashedFrom?: string | null
 }
 
+export interface HostSkillsCatalog {
+  cognia: NativeSkill[]
+  claude: NativeSkill[]
+  codex: NativeSkill[]
+}
+
+export interface SkillBundleUploadHandle {
+  handleId: string
+  chunkBytes: number
+}
+
 export interface SkillScanIssue {
   severity: "low" | "medium" | "high"
   kind: string
@@ -380,6 +781,58 @@ export interface SkillScanIssue {
 
 export async function skillsScanNative(): Promise<NativeSkill[]> {
   return transport.call<NativeSkill[]>("skills_scan_native")
+}
+
+export async function skillsCatalogGet(): Promise<HostSkillsCatalog> {
+  return transport.call<HostSkillsCatalog>("skills_catalog_get")
+}
+
+export async function skillsBundleUploadOpen(
+  expectedSize: number,
+  expectedHash: string
+): Promise<SkillBundleUploadHandle> {
+  return transport.call<SkillBundleUploadHandle>("skills_bundle_upload_open", {
+    request: { expectedSize, expectedHash },
+  })
+}
+
+export async function skillsBundleUploadWrite(args: {
+  handleId: string
+  offset: number
+  dataBase64: string
+  chunkHash: string
+}): Promise<number> {
+  return transport.call<number>("skills_bundle_upload_write", args)
+}
+
+export async function skillsBundleUploadCommit(handleId: string): Promise<void> {
+  return transport.call<void>("skills_bundle_upload_commit", { handleId })
+}
+
+export async function skillsBundleUploadAbort(handleId: string): Promise<void> {
+  return transport.call<void>("skills_bundle_upload_abort", { handleId })
+}
+
+export async function skillsInstallAtomic(
+  handleId: string,
+  adminLease: string
+): Promise<InstallSkillMirroredResponse> {
+  return transport.call<InstallSkillMirroredResponse>("skills_install_atomic", {
+    handleId,
+    adminLease,
+  })
+}
+
+export async function skillsUninstall(
+  target: SkillsTarget,
+  dirName: string,
+  adminLease: string
+): Promise<{ removed: boolean; directory: string }> {
+  return transport.call<{ removed: boolean; directory: string }>("skills_uninstall", {
+    target,
+    dirName,
+    adminLease,
+  })
 }
 
 export async function skillsScanDir(path: string): Promise<NativeSkill[]> {
@@ -424,6 +877,21 @@ export async function skillsUninstallNative(
 
 export async function skillsFetchRemoteMd(url: string): Promise<string> {
   return transport.call<string>("skills_fetch_remote_md", { url })
+}
+
+/** Response of the Rust JSON GET proxy. Non-2xx statuses are returned (not thrown). */
+export interface SkillsRemoteGetResponse {
+  status: number
+  body: string
+  retryAfter?: string | null
+}
+
+export async function skillsFetchRemoteJson(req: {
+  url: string
+  bearerToken?: string
+  accept?: string
+}): Promise<SkillsRemoteGetResponse> {
+  return transport.call<SkillsRemoteGetResponse>("skills_fetch_remote_json", { req })
 }
 
 export async function skillsLoadRegistry(): Promise<RegistrySkillEntry[]> {

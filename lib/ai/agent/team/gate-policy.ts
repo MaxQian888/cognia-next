@@ -1,0 +1,122 @@
+/**
+ * Headless HITL gate policy for team runs.
+ *
+ * `runTeamLifecycle` has six approval gates that block on `waitForDecision`
+ * (capability-audit, plan-approval, deadlock, budget, teammate-fix, replan).
+ * Interactive runs surface them through the pending-gates UI, but headless
+ * surfaces — scheduler, remote-control, external bridge, plugin SDK, IM,
+ * team→team delegation — have no operator watching a modal, so a gated run
+ * used to hang forever. This module maps each gate × run-origin to an
+ * explicit behavior:
+ *
+ *  - `block`        — wait for the operator (interactive default).
+ *  - `auto-approve` — proceed as if approved. Only safe where approval merely
+ *                     acknowledges degradation (capability-audit: stale ids
+ *                     simply don't resolve).
+ *  - `auto-reject`  — resolve as rejected where reject is already fail-open
+ *                     (teammate-fix: run continues on the remaining workers;
+ *                     replan: the original plan proceeds).
+ *  - `fail-fast`    — the caller must abort/fail the run instead of waiting
+ *                     (plan approval without a human is meaningless; deadlock
+ *                     and budget block indefinitely by design).
+ */
+
+import type { ApprovalDecision } from "@/lib/runtime/approval-bus"
+import type { TeamRunOrigin } from "@/types/agent/agent-team"
+
+/**
+ * Canonical definition lives in `types/agent/agent-team.ts` so `types/`
+ * consumers (plugin SDK options, manager interfaces) never import `lib/`.
+ * Re-exported here as the policy module's natural home.
+ */
+export type { TeamRunOrigin }
+
+export type GateBehavior = "block" | "auto-approve" | "auto-reject" | "fail-fast"
+
+export interface TeamGatePolicy {
+  capabilityAudit: GateBehavior
+  planApproval: GateBehavior
+  deadlock: GateBehavior
+  budget: GateBehavior
+  teammateFix: GateBehavior
+  replan: GateBehavior
+}
+
+export function isHeadlessOrigin(origin: TeamRunOrigin | undefined): boolean {
+  return origin !== undefined && origin !== "interactive"
+}
+
+const INTERACTIVE_POLICY: TeamGatePolicy = {
+  capabilityAudit: "block",
+  planApproval: "block",
+  deadlock: "block",
+  budget: "block",
+  teammateFix: "block",
+  replan: "block",
+}
+
+const HEADLESS_POLICY: TeamGatePolicy = {
+  // Stale capability ids only degrade (they don't resolve) — warn + proceed.
+  capabilityAudit: "auto-approve",
+  // requirePlanApproval defaults to false, so `true` was an explicit operator
+  // choice — failing fast (before burning planning tokens) is honest;
+  // auto-approving would silently void the operator's gate.
+  planApproval: "fail-fast",
+  // These block indefinitely by design; aborting beats hanging headless.
+  deadlock: "fail-fast",
+  budget: "fail-fast",
+  // Reject is already fail-open: the run continues on the remaining workers.
+  teammateFix: "auto-reject",
+  // Reject is fail-open: the original plan proceeds (replan-gate.ts:49-52).
+  replan: "auto-reject",
+}
+
+/** Resolve the gate policy for a run origin. Undefined → interactive. */
+export function resolveGatePolicy(origin: TeamRunOrigin | undefined): TeamGatePolicy {
+  return isHeadlessOrigin(origin) ? HEADLESS_POLICY : INTERACTIVE_POLICY
+}
+
+export interface ApplyGateOptions {
+  /**
+   * Optional cap on a `block` wait. On expiry the gate resolves with
+   * `fallback` (default `fail-fast`). Off by default — enabling it is an
+   * explicit caller decision, not a policy default.
+   */
+  timeoutMs?: number
+  fallback?: Exclude<GateBehavior, "block">
+}
+
+function resolveNonBlocking(behavior: Exclude<GateBehavior, "block">): ApprovalDecision {
+  return behavior === "auto-approve"
+    ? { outcome: "approve" }
+    : { outcome: "reject", feedback: `headless-policy:${behavior}` }
+}
+
+/**
+ * Apply a gate behavior: non-blocking behaviors resolve immediately without
+ * registering a waiter; `block` awaits `wait()` (optionally raced against
+ * `timeoutMs`, with the timer cleaned up on settle).
+ */
+export async function applyGateBehavior(
+  behavior: GateBehavior,
+  wait: () => Promise<ApprovalDecision>,
+  opts: ApplyGateOptions = {}
+): Promise<ApprovalDecision> {
+  if (behavior !== "block") return resolveNonBlocking(behavior)
+  if (!opts.timeoutMs) return wait()
+
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      wait(),
+      new Promise<ApprovalDecision>((resolve) => {
+        timer = setTimeout(
+          () => resolve(resolveNonBlocking(opts.fallback ?? "fail-fast")),
+          opts.timeoutMs
+        )
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}

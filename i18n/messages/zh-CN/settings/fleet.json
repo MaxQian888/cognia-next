@@ -1,0 +1,76 @@
+{
+  "claude": {
+    "desc": "将转发 hooks 安装到 ~/.claude/settings.json，让每个 Claude Code 会话上报到这里。失败即放行：Cognia 关闭时立即退出。",
+    "label": "Claude Code hooks"
+  },
+  "codex": {
+    "desc": "把转发脚本注册进 ~/.codex/hooks.json。采用合并写入，其它工具已注册的 hook 照常工作；卸载只移除我们自己的条目。",
+    "label": "Codex hooks",
+    "trustHint": "Codex 只运行你信任过的 hook，且信任与 hook 的命令原文绑定——安装后请在 Codex TUI 里确认信任提示。条目一旦被改动就会失去信任，重新安装前不会触发。"
+  },
+  "description": "监控并控制本机任意位置启动的编码 Agent（终端、编辑器）——不限于 Cognia 启动的实例。",
+  "error": "舰队操作失败：{detail}",
+  "history": {
+    "activeFor": "已活动 {duration}",
+    "clear": "清空",
+    "clearEnded": "清除已结束",
+    "count": "{count} 个会话",
+    "delete": "从历史中移除",
+    "empty": "尚无会话记录。",
+    "endedAgo": "{ago}前结束",
+    "filterAll": "全部",
+    "filterAria": "按 Agent 筛选",
+    "import": "导入…",
+    "ranFor": "运行 {duration}",
+    "showLess": "收起",
+    "showMore": "显示全部 {count} 条",
+    "title": "最近会话"
+  },
+  "island": {
+    "desc": "刘海附近的置顶状态条，实时显示各 Agent 会话。",
+    "diagnostics": {
+      "copied": "灵动岛诊断信息已复制到剪贴板。",
+      "copy": "复制",
+      "copyFailed": "无法写入剪贴板。",
+      "desc": "复制灵动岛定位所依赖的全部输入。请分别在普通桌面、有 App 全屏时、以及外接显示器上各取一次。",
+      "label": "定位诊断",
+      "unavailable": "灵动岛诊断信息仅在桌面端可用。"
+    },
+    "hideOnFullscreen": {
+      "desc": "当某个应用全屏占据灵动岛所在的显示器时，收起灵动岛，把顶部让给它。有会话需要你处理时仍会自动出现。仅 macOS 生效。",
+      "label": "全屏应用时隐藏"
+    },
+    "label": "灵动岛悬浮层",
+    "monitor": {
+      "label": "显示在哪个屏幕",
+      "option": "{name}（{width}×{height}）",
+      "primary": "主显示器"
+    }
+  },
+  "liveness": {
+    "dropping": "事件被丢弃",
+    "live": "活跃 · {ago}前",
+    "silent": "尚未收到事件"
+  },
+  "monitor": {
+    "desc": "外部 Agent hook 的本地事件入口。运行在 companion 服务器上，仅监听回环地址。",
+    "label": "舰队监控",
+    "running": "正在监听 127.0.0.1:{port}。"
+  },
+  "opencode": {
+    "desc": "在 ~/.config/opencode/plugin 安装插件。可在灵动岛上观察会话并批准/拒绝权限。",
+    "label": "OpenCode 插件"
+  },
+  "saved": "舰队设置已更新。",
+  "status": {
+    "codexStale": "需重新安装",
+    "codexUnavailable": "未找到 Codex",
+    "installed": "已安装",
+    "opencodeUnavailable": "未找到 OpenCode",
+    "partial": "不完整",
+    "stale": "已被修改",
+    "unavailable": "未找到 Claude Code"
+  },
+  "summaryAria": "{count} 项集成已启用",
+  "title": "Agent 舰队监控"
+}

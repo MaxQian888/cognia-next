@@ -52,7 +52,18 @@ export interface InboundA2UIBlock {
   v: 1
   /** Top-level platform identifier so the renderer can show a chip
    *  ("Slack Block Kit", "Lark Card", etc.). */
-  source: "slack" | "lark" | "discord" | "telegram" | "onebot"
+  source:
+    | "slack"
+    | "lark"
+    | "discord"
+    | "telegram"
+    | "onebot"
+    | "wecom"
+    | "wechat-personal"
+    | "wechat-oa"
+    | "matrix"
+    | "qq-official"
+    | "dingtalk"
   /** Optional human-readable title for the rendered surface. */
   title?: string
   /** Top-level tree — the renderer walks this array in order. */

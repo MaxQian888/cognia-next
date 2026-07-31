@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { usePluginsStore } from "@/stores/plugins"
+import { validatePluginManifest } from "@/lib/plugin/core/validation"
 
 interface Props {
   open: boolean
@@ -52,6 +53,14 @@ export function PluginInstallFromUrlDialog({ open, onOpenChange }: Props) {
       const res = await fetch(trimmed, { credentials: "omit" })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const manifest = (await res.json()) as Record<string, unknown>
+      // Host-side schema validation BEFORE staging — a raw URL can return any
+      // JSON, and the downstream import path trusts the manifest's id/version.
+      // Reject on hard errors; warnings (e.g. governance) still stage.
+      const validation = validatePluginManifest(manifest)
+      if (!validation.valid) {
+        setError(t("invalidManifest", { errors: validation.errors.join("; ") }))
+        return
+      }
       setImportStaging({
         drafts: [
           {

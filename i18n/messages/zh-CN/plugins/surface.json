@@ -1,0 +1,10 @@
+{
+  "description": "{error}",
+  "diagnostic": {
+    "compactHint": "失败的紧凑型贡献已被移除，不会影响周围界面。",
+    "message": "插件表面“{surfaceId}”在渲染时崩溃：{error}",
+    "retryHint": "请重试该表面。若再次失败，请检查插件组件和诊断信息。"
+  },
+  "retry": "重试",
+  "title": "{pluginName} 无法渲染"
+}

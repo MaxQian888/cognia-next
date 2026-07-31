@@ -34,9 +34,33 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tauri::{AppHandle, Emitter};
 use tokio::sync::oneshot;
 use uuid::Uuid;
+
+use super::bridge_transport::BridgeTransport;
+
+/// Serialize a typed bridge payload and emit it, cleaning up the pending slot
+/// on either serialization or transport failure. Shared by all five methods.
+fn emit_or_cleanup<T: Serialize>(
+    bridge: &DesktopMessagesBridge,
+    transport: &dyn BridgeTransport,
+    request_id: &str,
+    event: &str,
+    payload: T,
+) -> Result<(), String> {
+    let value = match serde_json::to_value(&payload) {
+        Ok(v) => v,
+        Err(err) => {
+            bridge.pending.lock().remove(request_id);
+            return Err(format!("failed to serialize {event}: {err}"));
+        }
+    };
+    if let Err(err) = transport.emit(event, value) {
+        bridge.pending.lock().remove(request_id);
+        return Err(err);
+    }
+    Ok(())
+}
 
 const UPDATE_EVENT: &str = "companion://message-update-request";
 const DELETE_EVENT: &str = "companion://message-delete-request";
@@ -112,8 +136,12 @@ pub struct SendMessageRequest {
 /// `result` for success and leaves `error` for failure (or vice-versa);
 /// both being `None` is a malformed bridge state and is reported as an
 /// error.
+///
+/// The alias accepts the camelCase key the TS side sends verbatim over the
+/// headless bridge WS (`ws_bridge::route_respond`).
 #[derive(Debug, Clone, Deserialize)]
 pub struct MessageBridgeResponse {
+    #[serde(alias = "requestId")]
     pub request_id: String,
     pub result: Option<Value>,
     pub error: Option<String>,
@@ -135,7 +163,7 @@ impl DesktopMessagesBridge {
     /// Run a `message_update` round-trip through the bridge.
     pub async fn update_message(
         self: Arc<Self>,
-        app: &AppHandle,
+        transport: &dyn BridgeTransport,
         session_id: String,
         message_id: String,
         updates: Value,
@@ -149,17 +177,14 @@ impl DesktopMessagesBridge {
             message_id,
             updates,
         };
-        if let Err(err) = app.emit(UPDATE_EVENT, payload) {
-            self.pending.lock().remove(&request_id);
-            return Err(format!("failed to emit message-update-request: {err}"));
-        }
+        emit_or_cleanup(&self, transport, &request_id, UPDATE_EVENT, payload)?;
         self.await_response(request_id, rx, timeout).await
     }
 
     /// Run a `message_delete` round-trip through the bridge.
     pub async fn delete_message(
         self: Arc<Self>,
-        app: &AppHandle,
+        transport: &dyn BridgeTransport,
         session_id: String,
         message_id: String,
         timeout: Duration,
@@ -171,17 +196,14 @@ impl DesktopMessagesBridge {
             session_id,
             message_id,
         };
-        if let Err(err) = app.emit(DELETE_EVENT, payload) {
-            self.pending.lock().remove(&request_id);
-            return Err(format!("failed to emit message-delete-request: {err}"));
-        }
+        emit_or_cleanup(&self, transport, &request_id, DELETE_EVENT, payload)?;
         self.await_response(request_id, rx, timeout).await
     }
 
     /// Run a `session_list` round-trip through the bridge.
     pub async fn list_sessions(
         self: Arc<Self>,
-        app: &AppHandle,
+        transport: &dyn BridgeTransport,
         limit: u32,
         offset: u32,
         before: Option<i64>,
@@ -195,17 +217,14 @@ impl DesktopMessagesBridge {
             offset,
             before,
         };
-        if let Err(err) = app.emit(LIST_EVENT, payload) {
-            self.pending.lock().remove(&request_id);
-            return Err(format!("failed to emit session-list-request: {err}"));
-        }
+        emit_or_cleanup(&self, transport, &request_id, LIST_EVENT, payload)?;
         self.await_response(request_id, rx, timeout).await
     }
 
     /// Run a `message_get_by_session` round-trip through the bridge (Phase A1).
     pub async fn get_messages_by_session(
         self: Arc<Self>,
-        app: &AppHandle,
+        transport: &dyn BridgeTransport,
         session_id: String,
         limit: Option<u32>,
         offset: Option<u32>,
@@ -219,17 +238,14 @@ impl DesktopMessagesBridge {
             limit,
             offset,
         };
-        if let Err(err) = app.emit(GET_BY_SESSION_EVENT, payload) {
-            self.pending.lock().remove(&request_id);
-            return Err(format!("failed to emit message-get-by-session-request: {err}"));
-        }
+        emit_or_cleanup(&self, transport, &request_id, GET_BY_SESSION_EVENT, payload)?;
         self.await_response(request_id, rx, timeout).await
     }
 
     /// Run a `message_send` round-trip through the bridge (Phase A2).
     pub async fn send_message(
         self: Arc<Self>,
-        app: &AppHandle,
+        transport: &dyn BridgeTransport,
         session_id: String,
         content: String,
         role: Option<String>,
@@ -243,10 +259,7 @@ impl DesktopMessagesBridge {
             content,
             role,
         };
-        if let Err(err) = app.emit(SEND_EVENT, payload) {
-            self.pending.lock().remove(&request_id);
-            return Err(format!("failed to emit message-send-request: {err}"));
-        }
+        emit_or_cleanup(&self, transport, &request_id, SEND_EVENT, payload)?;
         self.await_response(request_id, rx, timeout).await
     }
 
@@ -309,8 +322,55 @@ impl DesktopMessagesBridge {
 
 #[cfg(test)]
 mod tests {
+    use super::super::bridge_transport::test_support::RecordingBridgeTransport;
     use super::*;
     use serde_json::json;
+
+    #[tokio::test]
+    async fn list_sessions_emits_camel_case_request_through_the_transport() {
+        let bridge = DesktopMessagesBridge::new();
+        let transport = RecordingBridgeTransport::new();
+        let t = Arc::clone(&transport);
+        let b = Arc::clone(&bridge);
+        let handle = tokio::spawn(async move {
+            b.list_sessions(t.as_ref(), 10, 0, None, DEFAULT_TIMEOUT)
+                .await
+        });
+        let (channel, payload) = loop {
+            if let Some(entry) = transport.last() {
+                break entry;
+            }
+            tokio::task::yield_now().await;
+        };
+        assert_eq!(channel, LIST_EVENT);
+        assert_eq!(payload["kind"], "session_list");
+        // camelCase on the wire (requestId).
+        let request_id = payload["requestId"].as_str().unwrap().to_string();
+        bridge.resolve(MessageBridgeResponse {
+            request_id,
+            result: Some(json!({ "rows": [] })),
+            error: None,
+        });
+        assert_eq!(handle.await.unwrap().unwrap(), json!({ "rows": [] }));
+    }
+
+    #[tokio::test]
+    async fn send_message_emit_failure_clears_the_pending_slot() {
+        let bridge = DesktopMessagesBridge::new();
+        let transport = RecordingBridgeTransport::failing();
+        let err = Arc::clone(&bridge)
+            .send_message(
+                transport.as_ref(),
+                "s1".into(),
+                "hi".into(),
+                None,
+                DEFAULT_TIMEOUT,
+            )
+            .await
+            .expect_err("emit fails");
+        assert!(err.contains("forced failure"));
+        assert_eq!(bridge.pending_count(), 0);
+    }
 
     #[tokio::test]
     async fn resolve_completes_a_pending_request() {

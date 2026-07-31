@@ -10,6 +10,17 @@ export const RESTRICTED_MODE_DENIED_TOOLS = [
   "Write",
   "MultiEdit",
   "NotebookEdit",
+  // Core file-tool suite mutators (sidecar `coreFiles` category, ai-sdk
+  // path). Bare names are how the ai-sdk bridge registers them; the
+  // namespaced forms cover the Anthropic escape hatch registration.
+  "bash",
+  "edit",
+  "write",
+  "multi_edit",
+  "mcp__cognia-tools__bash",
+  "mcp__cognia-tools__edit",
+  "mcp__cognia-tools__write",
+  "mcp__cognia-tools__multi_edit",
 ] as const
 
 /**

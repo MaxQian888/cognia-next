@@ -126,4 +126,23 @@ describe("useA2UIMessageIntegration", () => {
 
     expect(mockProcessMessages).toHaveBeenCalledTimes(2)
   })
+
+  it("detects A2UI in object payloads via marker scan (no full parse)", () => {
+    const { result } = renderHook(() => useA2UIMessageIntegration())
+
+    const { detectA2UIContent } = jest.requireMock("@/lib/a2ui/parser")
+    const { parseA2UIInput } = jest.requireMock("@/lib/a2ui/parser")
+    parseA2UIInput.mockClear()
+
+    expect(result.current.hasA2UIContent({ type: "createSurface", surfaceId: "s1" })).toBe(true)
+    expect(result.current.hasA2UIContent({ foo: "bar" })).toBe(false)
+
+    // Object payloads go through the serialized marker scan, never a full parse
+    expect(detectA2UIContent).toHaveBeenCalledWith(
+      JSON.stringify({ type: "createSurface", surfaceId: "s1" })
+    )
+    expect(parseA2UIInput).not.toHaveBeenCalled()
+    expect(result.current.hasA2UIContent(42)).toBe(false)
+    expect(result.current.hasA2UIContent(null)).toBe(false)
+  })
 })

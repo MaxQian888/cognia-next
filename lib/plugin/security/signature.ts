@@ -59,6 +59,20 @@ export interface SignatureConfig {
   cacheVerifications: boolean
 }
 
+/**
+ * Host-written attestation of HOW a plugin's install bytes were validated,
+ * persisted by `install_archive_into_plugin_dir` and read back via the
+ * `plugin_read_verification` Tauri command. `signature` means an Ed25519
+ * provenance signature was verified against the archive; `checksum` means only
+ * SHA-256 integrity was confirmed. Absent → the install never cleared an
+ * integrity check (e.g. a local/dev install).
+ */
+export interface PluginVerificationReceipt {
+  verifiedVia: "signature" | "checksum"
+  version: string
+  verifiedAt: string
+}
+
 const USER_PUBLISHERS_STORAGE_KEY = "plugin:security:user-publishers"
 
 /**
@@ -163,113 +177,57 @@ export class PluginSignatureVerifier {
 
     const warnings: string[] = []
 
-    try {
-      const signatureData = await this.readSignatureFile(pluginPath)
-
-      if (!signatureData) {
-        if (this.config.requireSignatures) {
-          return this.createResult(pluginPath, false, "Signature required but not found", warnings)
-        }
-        warnings.push("Plugin is not signed")
+    // The AUTHORITATIVE integrity + signature check for marketplace/github
+    // bundles runs host-side over the raw archive bytes
+    // (`verify_download_integrity` in src-tauri) BEFORE anything is written to
+    // disk, and its outcome is persisted as a per-plugin verification receipt.
+    // When the policy requires signatures, consult that receipt (via
+    // `plugin_read_verification`): an install passes only if the host verified
+    // a real Ed25519 provenance signature. A checksum-only or absent receipt
+    // (e.g. a local/dev install) is rejected. WASM bundles use the separate
+    // detached-signature path (`verifyDetachedBundleSignature`).
+    if (this.config.requireSignatures) {
+      const receipt = await this.readVerificationReceipt(pluginPath)
+      if (receipt?.verifiedVia === "signature") {
         return this.createResult(pluginPath, true, undefined, warnings)
       }
-
-      // Check expiration
-      if (signatureData.expiresAt && new Date(signatureData.expiresAt) < new Date()) {
-        return this.createResult(
-          pluginPath,
-          false,
-          "Signature has expired",
-          warnings,
-          signatureData
-        )
-      }
-
-      // Verify signature cryptographically
-      const cryptoValid = await this.verifyCryptographic(pluginPath, signatureData)
-      if (!cryptoValid) {
-        return this.createResult(
-          pluginPath,
-          false,
-          "Cryptographic verification failed",
-          warnings,
-          signatureData
-        )
-      }
-
-      // Check if signer is trusted
-      const signer = this.findPublisher(signatureData.publicKey)
-
-      if (!signer) {
-        if (this.config.trustedPublishersOnly) {
-          return this.createResult(
-            pluginPath,
-            false,
-            "Signer is not in trusted publishers list",
-            warnings,
-            signatureData
-          )
-        }
-        warnings.push("Signer is not in trusted publishers list")
-      }
-
-      if (!this.config.allowUntrusted && (!signer || signer.trustLevel === "untrusted")) {
-        return this.createResult(
-          pluginPath,
-          false,
-          "Untrusted publishers not allowed",
-          warnings,
-          signatureData
-        )
-      }
-
-      const result: SignatureVerificationResult = {
-        valid: true,
-        pluginId: signatureData.pluginId,
-        version: signatureData.version,
-        signer: signer
-          ? {
-              name: signer.name,
-              organization: signer.name,
-              verified: true,
-              trustedLevel: signer.trustLevel,
-            }
-          : {
-              name: "Unknown",
-              verified: false,
-              trustedLevel: "unknown",
-            },
-        warnings,
-      }
-
-      if (this.config.cacheVerifications) {
-        this.verificationCache.set(pluginPath, result)
-      }
-
-      return result
-    } catch (error) {
-      return this.createResult(
-        pluginPath,
-        false,
-        `Verification error: ${error instanceof Error ? error.message : String(error)}`,
-        warnings
-      )
+      const reason = receipt
+        ? `Signature required but the install was only verified via ${receipt.verifiedVia}`
+        : "Signature required but not found"
+      return this.createResult(pluginPath, false, reason, warnings)
     }
+    warnings.push("Plugin is not signed")
+    return this.createResult(pluginPath, true, undefined, warnings)
   }
 
-  private async verifyCryptographic(
-    pluginPath: string,
-    signature: PluginSignature
-  ): Promise<boolean> {
+  /**
+   * Read the host-written verification receipt for the plugin at `pluginPath`
+   * (keyed by its derived id). Returns `null` off-Tauri (no host) or when no
+   * receipt exists / the command fails — the caller treats that as unverified.
+   */
+  private async readVerificationReceipt(
+    pluginPath: string
+  ): Promise<PluginVerificationReceipt | null> {
+    if (!isTauri()) return null
     try {
-      return await invoke<boolean>("plugin_verify_signature", {
-        pluginPath,
-        signature: signature.signature,
-        publicKey: signature.publicKey,
-        algorithm: signature.algorithm,
+      const receipt = await invoke<PluginVerificationReceipt | null>("plugin_read_verification", {
+        pluginId: this.extractPluginId(pluginPath),
       })
-    } catch {
-      return false
+      return receipt ?? null
+    } catch (error) {
+      recordSilentFailure(
+        "<signature>",
+        {
+          site: "signature.readVerificationReceipt",
+          message: "Could not read host verification receipt.",
+          // Unreachable off-Tauri (the early return above bails first) and the
+          // `plugin_read_verification` handler is registered, so reaching this
+          // catch is always a real failure.
+          expected: false,
+        },
+        error
+      )
+      return null
     }
   }
 
@@ -447,36 +405,6 @@ export class PluginSignatureVerifier {
         },
         error
       )
-    }
-  }
-
-  private async readSignatureFile(pluginPath: string): Promise<PluginSignature | null> {
-    const candidates = ["signature.json", "plugin-signature.json"].map((fileName) => {
-      const normalizedPath = pluginPath.replace(/[/\\]+$/, "")
-      return `${normalizedPath}/${fileName}`
-    })
-
-    try {
-      const { readTextFile } = await import("@tauri-apps/plugin-fs")
-      for (const path of candidates) {
-        try {
-          const raw = await readTextFile(path)
-          const parsed = JSON.parse(raw) as Omit<PluginSignature, "signedAt" | "expiresAt"> & {
-            signedAt: string | Date
-            expiresAt?: string | Date
-          }
-          return {
-            ...parsed,
-            signedAt: new Date(parsed.signedAt),
-            expiresAt: parsed.expiresAt ? new Date(parsed.expiresAt) : undefined,
-          }
-        } catch {
-          // Try next candidate path.
-        }
-      }
-      return null
-    } catch {
-      return null
     }
   }
 }

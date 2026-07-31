@@ -1,0 +1,35 @@
+{
+  "risk": {
+    "surfaces": {
+      "computer-use": {
+        "description": "该运行可以控制本机的屏幕、鼠标和键盘。",
+        "label": "电脑操作"
+      },
+      "credential-auth": {
+        "description": "该运行可以访问已存储的凭证、密钥或订阅信息。",
+        "label": "凭证访问"
+      },
+      "data-destructive": {
+        "description": "该运行的目标涉及删除、重置或清空数据。",
+        "label": "破坏性数据变更"
+      },
+      "external-send": {
+        "description": "该运行可以向应用外的真实接收者发送消息。",
+        "label": "对外发送"
+      },
+      "file-write-broad": {
+        "description": "该运行可以在沙箱之外写入文件。",
+        "label": "非沙箱文件写入"
+      },
+      "native-command": {
+        "description": "该运行可以执行 Shell 或原生操作系统命令。",
+        "label": "原生命令"
+      }
+    },
+    "tier": {
+      "high": "高风险",
+      "low": "低风险",
+      "medium": "中风险"
+    }
+  }
+}

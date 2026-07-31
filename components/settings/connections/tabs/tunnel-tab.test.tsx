@@ -154,11 +154,101 @@ describe("TunnelTab", () => {
     wrap(<TunnelTab />)
     await waitFor(() =>
       expect(screen.getByTestId("tunnel-adapter-url-lark-1")).toHaveTextContent(
-        "https://abc.trycloudflare.com/connectors/lark/lark-1"
+        "https://abc.trycloudflare.com/webhook/lark/lark-1"
       )
     )
     // OneBot uses reverse-WS, so no public URL.
     expect(screen.queryByTestId("tunnel-adapter-url-onebot-1")).not.toBeInTheDocument()
+  })
+
+  it("does not advertise Discord interaction URLs while Discord is gateway-only", async () => {
+    mockIsTauri.mockReturnValue(true)
+    mockCurrent.mockResolvedValue({
+      publicUrl: "https://abc.trycloudflare.com",
+      localUrl: "https://127.0.0.1:7842",
+    })
+    setAdapters([
+      baseAdapter({
+        id: "discord-1",
+        type: "discord",
+        displayName: "Discord Prod",
+        transportMode: "gateway",
+      }),
+    ])
+
+    wrap(<TunnelTab />)
+
+    await waitFor(() => expect(screen.getByTestId("tunnel-public-url")).toBeInTheDocument())
+    expect(screen.getByTestId("tunnel-adapter-row-discord-1")).toBeInTheDocument()
+    expect(screen.queryByTestId("tunnel-adapter-url-discord-1")).not.toBeInTheDocument()
+  })
+
+  it("renders the WeChat OA webhook URL because that adapter is webhook-only", async () => {
+    mockIsTauri.mockReturnValue(true)
+    mockCurrent.mockResolvedValue({
+      publicUrl: "https://abc.trycloudflare.com",
+      localUrl: "https://127.0.0.1:7842",
+    })
+    setAdapters([
+      baseAdapter({
+        id: "wxoa-1",
+        type: "wechat-oa",
+        displayName: "WeChat OA",
+        transportMode: "webhook",
+      }),
+    ])
+
+    wrap(<TunnelTab />)
+
+    await waitFor(() =>
+      expect(screen.getByTestId("tunnel-adapter-url-wxoa-1")).toHaveTextContent(
+        "https://abc.trycloudflare.com/webhook/wechat-oa/wxoa-1"
+      )
+    )
+  })
+
+  it("does not advertise Slack URLs while Slack is in socket-mode", async () => {
+    mockIsTauri.mockReturnValue(true)
+    mockCurrent.mockResolvedValue({
+      publicUrl: "https://abc.trycloudflare.com",
+      localUrl: "https://127.0.0.1:7842",
+    })
+    setAdapters([
+      baseAdapter({
+        id: "slack-1",
+        type: "slack",
+        displayName: "Slack Socket Mode",
+        transportMode: "gateway",
+      }),
+    ])
+
+    wrap(<TunnelTab />)
+
+    await waitFor(() => expect(screen.getByTestId("tunnel-public-url")).toBeInTheDocument())
+    expect(screen.getByTestId("tunnel-adapter-row-slack-1")).toBeInTheDocument()
+    expect(screen.queryByTestId("tunnel-adapter-url-slack-1")).not.toBeInTheDocument()
+  })
+
+  it("does not advertise Telegram URLs while Telegram is in long-poll mode", async () => {
+    mockIsTauri.mockReturnValue(true)
+    mockCurrent.mockResolvedValue({
+      publicUrl: "https://abc.trycloudflare.com",
+      localUrl: "https://127.0.0.1:7842",
+    })
+    setAdapters([
+      baseAdapter({
+        id: "telegram-1",
+        type: "telegram",
+        displayName: "Telegram Long Poll",
+        transportMode: "longpoll",
+      }),
+    ])
+
+    wrap(<TunnelTab />)
+
+    await waitFor(() => expect(screen.getByTestId("tunnel-public-url")).toBeInTheDocument())
+    expect(screen.getByTestId("tunnel-adapter-row-telegram-1")).toBeInTheDocument()
+    expect(screen.queryByTestId("tunnel-adapter-url-telegram-1")).not.toBeInTheDocument()
   })
 
   it("disables the start button on web (not Tauri)", async () => {

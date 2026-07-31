@@ -1,0 +1,64 @@
+{
+  "batch": {
+    "deselectAll": "Clear selection",
+    "empty": "No conversations to export.",
+    "exportButton": "Export ZIP",
+    "exporting": "Building ZIP…",
+    "progress": "Exporting {completed}/{total} — {current}",
+    "selectAll": "Select all",
+    "selectedCount": "{count} of {total} selected",
+    "sessionsLabel": "Sessions",
+    "someSelected": "partial selection",
+    "success": "{count, plural, =1 {# session} other {# sessions}} exported."
+  },
+  "batchDescription": "Pick the sessions to bundle into a single ZIP archive.",
+  "batchTitle": "Bulk export",
+  "downloadPng": "Download image (PNG)",
+  "downloadingPng": "Rendering…",
+  "exportButton": "Export",
+  "exporting": "Exporting…",
+  "format": {
+    "animated": "Animated HTML",
+    "html": "HTML (beautiful)",
+    "json": "JSON (lossless)",
+    "jsonl": "JSONL (per message)",
+    "jsonlChat": "JSONL (per conversation)",
+    "markdown": "Markdown (.md)",
+    "text": "Plain text",
+    "zip": "ZIP archive"
+  },
+  "formatHint": {
+    "jsonl": "One JSON object per line — archival; preserves every regeneration branch.",
+    "jsonlChat": "One conversation per line as '{'messages:[…]'}' — OpenAI/Anthropic training & interop."
+  },
+  "formatLabel": "Format",
+  "location": {
+    "exportFailed": "Export failed: {message}",
+    "revealInFolder": "Show in folder",
+    "savedToDownloads": "Downloaded to your Downloads folder — {filename}",
+    "savedToPath": "Saved to {path}",
+    "shareFile": "Share"
+  },
+  "options": {
+    "includeAllBranches": "Include all branches",
+    "includeMetadata": "Include conversation info",
+    "includeTimestamps": "Include timestamps",
+    "includeTokens": "Include token usage",
+    "includeWallpaper": "Theme wallpaper"
+  },
+  "optionsLabel": "Options",
+  "pngError": "Failed to render the image. Try again.",
+  "pngTooLong": "This conversation is too long to render as one image — export HTML instead.",
+  "singleDescription": "Export \"{title}\" to a file you can share or archive.",
+  "singleTitle": "Export conversation",
+  "theme": {
+    "customTitle": "Custom theme",
+    "deleteTheme": "Delete theme",
+    "namePlaceholder": "Theme name",
+    "saveNew": "Save",
+    "savedThemes": "Saved themes",
+    "seedFrom": "Seed from",
+    "update": "Update"
+  },
+  "themeLabel": "Theme"
+}

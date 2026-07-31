@@ -3,12 +3,15 @@
 /**
  * Provider circuit-breaker store (ADR-0043 Phase 4).
  *
- * Per-provider fault tolerance. `record{Success,Failure}` (from
+ * Per-DEPLOYMENT fault tolerance (`providerId::modelId[::keyId]` keys — see
+ * `types/provider/deployment.ts`). `record{Success,Failure}` (from
  * `lib/claude/provider-telemetry.ts`) drive the pure FSM in
  * `lib/ai/providers/circuit-breaker-machine`; the routing engine drops a
- * provider from rotation when `isAvailable` is false (breaker open). When
- * `enabled` is false the store is inert (records no-op, everything available)
- * so reliability routing is strictly opt-in. In-memory only (non-persisted).
+ * deployment from rotation when its breaker is open, and provider-level reads
+ * reduce across the provider's deployments (best state wins) so one tripped
+ * model does not blackhole the whole provider. When `enabled` is false the
+ * store is inert (records no-op, everything available) so reliability routing
+ * is strictly opt-in. In-memory only (non-persisted).
  */
 
 import { create } from "zustand"
@@ -17,15 +20,21 @@ import {
   currentStateValue,
   recordFailure as machineRecordFailure,
   recordSuccess as machineRecordSuccess,
-} from "@/lib/ai/providers/circuit-breaker-machine"
+} from "@cognia/provider-core/providers/circuit-breaker-machine"
+import {
+  deploymentKeyOf,
+  DEPLOYMENT_MODEL_WILDCARD,
+  providerIdOfDeploymentKey,
+} from "@cognia/provider-types/deployment"
 import {
   DEFAULT_CIRCUIT_BREAKER_CONFIG,
   INITIAL_CIRCUIT_BREAKER_STATE,
   type CircuitBreakerConfig,
+  type CircuitBreakerRecordOptions,
   type CircuitBreakerStateValue,
   type CircuitBreakerStoreState,
   type ProviderCircuitBreaker,
-} from "@/types/provider/circuit-breaker"
+} from "@cognia/provider-types/circuit-breaker"
 
 export type { CircuitBreakerConfig, CircuitBreakerStateValue }
 
@@ -41,30 +50,70 @@ interface CircuitBreakerStore extends CircuitBreakerStoreState {
   setSettings: (patch: Partial<CircuitBreakerConfig>) => void
 }
 
+/** Store key for a record; unencodable ids fall back to the raw providerId. */
+function deploymentKeyFor(providerId: string, opts?: CircuitBreakerRecordOptions): string {
+  return (
+    deploymentKeyOf({
+      providerId,
+      modelId: opts?.modelId ?? DEPLOYMENT_MODEL_WILDCARD,
+      ...(opts?.keyId !== undefined ? { keyId: opts.keyId } : {}),
+    }) ?? providerId
+  )
+}
+
+function keyBelongsToProvider(key: string, providerId: string): boolean {
+  return key === providerId || providerIdOfDeploymentKey(key) === providerId
+}
+
 function ensureBreaker(
   breakers: Record<string, ProviderCircuitBreaker>,
+  deploymentKey: string,
   providerId: string,
-  settings: CircuitBreakerConfig
+  settings: CircuitBreakerConfig,
+  providerConfigs: Record<string, Partial<CircuitBreakerConfig>>
 ): ProviderCircuitBreaker {
   return (
-    breakers[providerId] ?? {
+    breakers[deploymentKey] ?? {
       providerId,
-      config: settings,
+      deploymentKey,
+      config: { ...settings, ...providerConfigs[providerId] },
       state: { ...INITIAL_CIRCUIT_BREAKER_STATE },
     }
   )
+}
+
+const STATE_RANK: Record<CircuitBreakerStateValue, number> = {
+  closed: 0,
+  "half-open": 1,
+  open: 2,
 }
 
 export const useCircuitBreakerStore = create<CircuitBreakerStore>((set, get) => ({
   enabled: false,
   settings: DEFAULT_CIRCUIT_BREAKER_CONFIG,
   breakers: {},
+  providerConfigs: {},
 
   setEnabled: (enabled) => set({ enabled }),
   setSettings: (patch) => set((s) => ({ settings: { ...s.settings, ...patch } })),
 
   getState: (providerId) => {
-    const b = get().breakers[providerId]
+    const s = get()
+    const now = Date.now()
+    // Best state across the provider's deployments wins (closed > half-open >
+    // open): the provider stays routable while any of its models is healthy.
+    let best: CircuitBreakerStateValue | null = null
+    for (const b of Object.values(s.breakers)) {
+      if (!keyBelongsToProvider(b.deploymentKey, providerId)) continue
+      const v = currentStateValue(b.state, b.config, now)
+      if (best === null || STATE_RANK[v] < STATE_RANK[best]) best = v
+      if (best === "closed") break
+    }
+    return best ?? "closed"
+  },
+
+  getDeploymentState: (deploymentKey) => {
+    const b = get().breakers[deploymentKey]
     if (!b) return "closed"
     return currentStateValue(b.state, b.config, Date.now())
   },
@@ -74,42 +123,53 @@ export const useCircuitBreakerStore = create<CircuitBreakerStore>((set, get) => 
     return get().getState(providerId) !== "open"
   },
 
-  recordSuccess: (providerId) => {
+  isDeploymentAvailable: (deploymentKey) => {
+    if (!get().enabled) return true
+    return get().getDeploymentState(deploymentKey) !== "open"
+  },
+
+  recordSuccess: (providerId, opts) => {
     if (!get().enabled) return
+    const key = deploymentKeyFor(providerId, opts)
     set((s) => {
-      const b = ensureBreaker(s.breakers, providerId, s.settings)
+      const b = ensureBreaker(s.breakers, key, providerId, s.settings, s.providerConfigs)
       const state = machineRecordSuccess(b.state, b.config, Date.now())
-      return { breakers: { ...s.breakers, [providerId]: { ...b, state } } }
+      return { breakers: { ...s.breakers, [key]: { ...b, state } } }
     })
   },
 
-  recordFailure: (providerId) => {
+  recordFailure: (providerId, opts) => {
     if (!get().enabled) return
+    const key = deploymentKeyFor(providerId, opts)
     set((s) => {
-      const b = ensureBreaker(s.breakers, providerId, s.settings)
-      const state = machineRecordFailure(b.state, b.config, Date.now())
-      return { breakers: { ...s.breakers, [providerId]: { ...b, state } } }
+      const b = ensureBreaker(s.breakers, key, providerId, s.settings, s.providerConfigs)
+      const state = machineRecordFailure(b.state, b.config, Date.now(), {
+        retryAfterMs: opts?.retryAfterMs,
+      })
+      return { breakers: { ...s.breakers, [key]: { ...b, state } } }
     })
   },
 
   resetBreaker: (providerId) =>
     set((s) => {
-      const b = ensureBreaker(s.breakers, providerId, s.settings)
-      return {
-        breakers: {
-          ...s.breakers,
-          [providerId]: { ...b, state: { ...INITIAL_CIRCUIT_BREAKER_STATE } },
-        },
+      const breakers = { ...s.breakers }
+      for (const [key, b] of Object.entries(s.breakers)) {
+        if (!keyBelongsToProvider(key, providerId)) continue
+        breakers[key] = { ...b, state: { ...INITIAL_CIRCUIT_BREAKER_STATE } }
       }
+      return { breakers }
     }),
 
-  resetAll: () => set({ breakers: {} }),
+  resetAll: () => set({ breakers: {}, providerConfigs: {} }),
 
   updateConfig: (providerId, config) =>
     set((s) => {
-      const b = ensureBreaker(s.breakers, providerId, s.settings)
-      return {
-        breakers: { ...s.breakers, [providerId]: { ...b, config: { ...b.config, ...config } } },
+      const merged = { ...s.providerConfigs[providerId], ...config }
+      const breakers = { ...s.breakers }
+      for (const [key, b] of Object.entries(s.breakers)) {
+        if (!keyBelongsToProvider(key, providerId)) continue
+        breakers[key] = { ...b, config: { ...b.config, ...config } }
       }
+      return { breakers, providerConfigs: { ...s.providerConfigs, [providerId]: merged } }
     }),
 }))

@@ -82,6 +82,9 @@ jest.mock("@/components/mobile/me/account-card", () => ({
 jest.mock("@/components/mobile/me/today-stats-card", () => ({
   TodayStatsCard: () => <div data-testid="stub-today-stats" />,
 }))
+jest.mock("@/components/mobile/me/backup-reminder-banner", () => ({
+  BackupReminderBanner: () => <div data-testid="stub-backup-reminder" />,
+}))
 jest.mock("@/components/mobile/me/quick-action-grid", () => ({
   QuickActionGrid: () => <div data-testid="stub-quick-action-grid" />,
 }))
@@ -129,8 +132,20 @@ describe("MePage platform gate", () => {
     expect(screen.getByTestId("stub-connection-badge")).toBeInTheDocument()
     expect(screen.getByTestId("stub-transport-tier")).toBeInTheDocument()
     expect(screen.getByTestId("stub-notif-cta")).toBeInTheDocument()
+    expect(screen.getByTestId("stub-backup-reminder")).toBeInTheDocument()
     expect(screen.getByTestId("stub-sign-out")).toBeInTheDocument()
     expect(routerReplace).not.toHaveBeenCalled()
+  })
+
+  it("emphasizes the sticky header once the body is scrolled", () => {
+    platformValue = "mobile"
+    const { container } = render(<MePage />)
+    const main = screen.getByTestId("me-page")
+    const header = container.querySelector("header")
+    expect(header).toHaveAttribute("data-scrolled", "false")
+    fireEvent.scroll(main, { target: { scrollTop: 40 } })
+    expect(header).toHaveAttribute("data-scrolled", "true")
+    expect(header?.className).toMatch(/shadow-sm/)
   })
 
   it("renders all six MeSection groups", () => {
@@ -144,11 +159,30 @@ describe("MePage platform gate", () => {
     expect(screen.getByTestId("me-section-about")).toBeInTheDocument()
   })
 
+  it("reflows the section grid responsively (2-col tablet, 3-col landscape)", () => {
+    platformValue = "mobile"
+    const { container } = render(<MePage />)
+    const grid = container.querySelector(".grid")
+    expect(grid?.className).toMatch(/sm:grid-cols-2/)
+    expect(grid?.className).toMatch(/lg:grid-cols-3/)
+    // The content column widens with the 3-col grid so columns stay readable.
+    expect(grid?.parentElement?.className).toMatch(/lg:max-w-4xl/)
+  })
+
   it("renders the scheduler row in the automation section pointing at /me/scheduler", () => {
     platformValue = "mobile"
     render(<MePage />)
     expect(screen.getByTestId("me-row-scheduler")).toBeInTheDocument()
     expect(hrefOf("me-row-scheduler")).toBe("/me/scheduler")
+  })
+
+  it("renders companion illustrations on the selected core feature entries", () => {
+    platformValue = "mobile"
+    render(<MePage />)
+
+    expect(screen.getByTestId("mobile-spot-icon-profile")).toBeInTheDocument()
+    expect(screen.getByTestId("mobile-spot-icon-workflows")).toBeInTheDocument()
+    expect(screen.getByTestId("mobile-spot-icon-secure-backup")).toBeInTheDocument()
   })
 
   it("surfaces the new terminal and remote-sessions entries", () => {
@@ -183,18 +217,18 @@ describe("MePage platform gate", () => {
     expect(screen.getByTestId("me-row-sync")).toHaveTextContent(/ago/)
   })
 
-  it("renders null and redirects to /settings on web", () => {
+  it("renders null and redirects to the account overview on web", () => {
     platformValue = "web"
     const { container } = render(<MePage />)
     expect(container.firstChild).toBeNull()
-    expect(routerReplace).toHaveBeenCalledWith("/settings")
+    expect(routerReplace).toHaveBeenCalledWith("/settings?section=account")
   })
 
-  it("renders null and redirects to /settings on Tauri", () => {
+  it("renders null and redirects to the account overview on Tauri", () => {
     platformValue = "tauri"
     const { container } = render(<MePage />)
     expect(container.firstChild).toBeNull()
-    expect(routerReplace).toHaveBeenCalledWith("/settings")
+    expect(routerReplace).toHaveBeenCalledWith("/settings?section=account")
   })
 })
 

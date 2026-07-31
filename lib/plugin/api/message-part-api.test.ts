@@ -45,6 +45,8 @@ describe("createMessagePartAPI", () => {
       "a2ui",
       "subagent",
       "agent-team-dispatch",
+      // Routed through the host's tool renderer, same as `tool-*`.
+      "dynamic-tool",
     ]) {
       api.registerPartRenderer(type, Stub)
       expect(getMessagePartRenderer(type)).toBeUndefined()

@@ -29,7 +29,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { getDb } from "@/lib/db/schema"
 import { upsertByConversationKey } from "@/lib/db/conversation-overrides"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 interface ProviderModelSwitcherProps {
   conversationKey: string
@@ -40,14 +40,19 @@ interface ProviderModelSwitcherProps {
   onChange?: (next: { providerOverride?: string; modelOverride?: string }) => void
 }
 
-interface ProviderModelOption {
+export interface ProviderModelOption {
   providerId: string
   modelId: string
   /** Display label for the menu item. */
   label: string
 }
 
-function collectOptions(settings: AppSettings | undefined): ProviderModelOption[] {
+/**
+ * Enumerate the configured provider+model pairs from app settings. Exported
+ * (pure) so the adapter-detail `AiBindingDefaults` section reuses the exact
+ * same option source as this per-conversation switcher.
+ */
+export function collectOptions(settings: AppSettings | undefined): ProviderModelOption[] {
   const out: ProviderModelOption[] = []
   if (!settings) return out
 

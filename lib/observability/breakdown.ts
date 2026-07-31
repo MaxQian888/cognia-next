@@ -18,6 +18,34 @@ export interface BreakdownRow {
   avgLatencyMs: number
 }
 
+/** Which measure a breakdown panel plots — user-switchable at the panel. */
+export type BreakdownMetric = "spans" | "cost" | "errors"
+
+/** Read the selected measure off a breakdown row. */
+export function breakdownValue(row: BreakdownRow, metric: BreakdownMetric): number {
+  switch (metric) {
+    case "cost":
+      return row.costUsd
+    case "errors":
+      return row.errors
+    default:
+      return row.spans
+  }
+}
+
+/** Top-N rows sorted by the selected measure (desc), tie-broken by key. */
+export function topByMetric(
+  rows: BreakdownRow[],
+  metric: BreakdownMetric,
+  n: number
+): BreakdownRow[] {
+  return [...rows]
+    .sort(
+      (a, b) => breakdownValue(b, metric) - breakdownValue(a, metric) || a.key.localeCompare(b.key)
+    )
+    .slice(0, n)
+}
+
 /** Resolve a span's value for a dimension. Returns null when absent (e.g. a
  * non-tool span under the "tool" dimension) so it's skipped from rollups. */
 function dimValue(span: AgentTraceSpan, dim: Dimension): string | null {

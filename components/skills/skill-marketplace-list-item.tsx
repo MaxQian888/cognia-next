@@ -34,7 +34,7 @@ export const SkillMarketplaceListItem = memo(function SkillMarketplaceListItem({
       type="button"
       onClick={() => onSelect(item)}
       className={cn(
-        "flex w-full min-w-0 items-center gap-2.5 rounded-lg border-l-2 border-l-transparent px-2.5 py-2 text-left transition-colors",
+        "flex w-full min-w-0 items-center gap-2.5 rounded-lg border-l-2 border-l-transparent px-2.5 py-2 text-left transition-colors min-h-11 md:min-h-0",
         active ? "border-l-primary bg-accent font-medium" : "hover:bg-muted/50"
       )}
     >
@@ -45,11 +45,15 @@ export const SkillMarketplaceListItem = memo(function SkillMarketplaceListItem({
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm">{item.name}</span>
-        {item.author && (
-          <span className="block truncate text-[11px] font-normal text-muted-foreground">
-            {tMp("byAuthor", { author: item.author })}
-          </span>
-        )}
+        <span className="block truncate text-[11px] font-normal text-muted-foreground">
+          {item.author ? tMp("byAuthor", { author: item.author }) : item.repository}
+          {typeof item.downloads === "number" && (
+            <span className="tabular-nums">
+              {(item.author ?? item.repository) ? " · " : ""}
+              {tMp("installs", { count: item.downloads.toLocaleString() })}
+            </span>
+          )}
+        </span>
       </span>
       {installed && (
         <CheckIcon className="size-3.5 shrink-0 text-emerald-500" aria-label={tMp("installed")} />

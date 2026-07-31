@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for the shared A2UI mapper toolkit.
  *
@@ -151,6 +152,30 @@ describe("callback binding persistence", () => {
 
   it("resolveCallbackBinding returns undefined for unknown actionId", async () => {
     expect(await resolveCallbackBinding("adp_1", "missing")).toBeUndefined()
+  })
+
+  it("resolveCallbackBinding treats an expired binding as unresolved", async () => {
+    // Expiry is enforced at read time, not only by the daily cleanup sweep —
+    // a click on a stale card must not resolve until the sweep happens to run.
+    await recordCallbackBinding({
+      adapterId: "adp_1",
+      actionId: "act_expired",
+      surfaceId: "s",
+      createdAt: Date.now() - 60_000,
+      expiresAt: Date.now() - 1,
+    })
+    expect(await resolveCallbackBinding("adp_1", "act_expired")).toBeUndefined()
+
+    // A binding without expiresAt (pre-TTL legacy row) never expires here.
+    await getDb().connectorCallbackBindings.add({
+      id: "adp_1:act_legacy",
+      adapterId: "adp_1",
+      actionId: "act_legacy",
+      kind: "callback_query",
+      surfaceId: "s_legacy",
+      createdAt: Date.now() - 365 * 24 * 60 * 60 * 1000,
+    })
+    expect((await resolveCallbackBinding("adp_1", "act_legacy"))?.surfaceId).toBe("s_legacy")
   })
 
   it("pruneOldCallbackBindings deletes rows older than TTL for the given adapter", async () => {

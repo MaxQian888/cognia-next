@@ -1,18 +1,37 @@
 "use client"
 
 import { create } from "zustand"
-import type { AppSettings, AppLanguage, AppTheme, BuiltinToolsConfig } from "@/lib/claude/types"
-import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
-import type { ColorThemePreset, CustomTheme } from "@/types/plugin/plugin-extended"
-import type { BackgroundSettings, ImportedThemeRecord, Wallpaper } from "@/types/appearance"
-import { DEFAULT_BACKGROUND_SETTINGS } from "@/types/appearance"
+import type {
+  AppSettings,
+  AppLanguage,
+  AppTheme,
+  BuiltinToolsConfig,
+  UpdateSettings,
+} from "@cognia/agent-config-types"
+import { DEFAULT_BUILTIN_TOOLS, DEFAULT_UPDATE_SETTINGS } from "@cognia/agent-config-types"
+import { createDiagnostic } from "@cognia/diagnostics"
+import { dispatchDiagnostic } from "@/lib/diagnostics/bus"
+import type { ColorThemePreset, CustomTheme } from "@/types/plugin/plugin"
+import type {
+  AutoModeSettings,
+  BackgroundSettings,
+  CustomCssScope,
+  ImportedThemeRecord,
+  MonacoLinkSettings,
+  Wallpaper,
+} from "@/types/appearance"
+import {
+  DEFAULT_AUTOMODE,
+  DEFAULT_BACKGROUND_SETTINGS,
+  DEFAULT_MONACO_LINK,
+} from "@/types/appearance"
 import type {
   CustomModelMetadata,
   CustomProviderSettings,
   ProviderModelUsageEntry,
   ProviderUIPreferences,
   UserProviderSettings,
-} from "@/types/provider/provider"
+} from "@cognia/provider-types/provider"
 
 // Re-export rich provider types so existing components that import them
 // from "@/stores/settings/settings-store" (matching Cognia's pattern)
@@ -25,6 +44,13 @@ export type {
   UserProviderSettings,
 }
 import { addAlwaysAllow, getSettings, removeAlwaysAllow, saveSettings } from "@/lib/db/settings"
+import {
+  resolveSkillPanelPrefs,
+  type PartialLastSkillView,
+  type PartialSkillPanelPrefs,
+  type SkillPanelPrefs,
+} from "@/lib/skills/preferences"
+import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
 import { restartSidecar, setApiKey, setProviderEnv } from "@/lib/claude/ipc"
 import { isTauri } from "@/lib/tauri"
 import type {
@@ -37,22 +63,56 @@ import type {
   SearchType,
   SearchUsageEntry,
   SourceVerificationSettings,
-} from "@/lib/search/types"
+} from "@cognia/web-search/types"
 import {
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
   createDefaultSearchUsageEntry,
   createDefaultSearchUsageStats,
-} from "@/lib/search/types"
+} from "@cognia/web-search/types"
 import {
   clearProviderKey,
   loadAllProviderKeys,
   setProviderKey,
   type KeyringProviderId,
 } from "@/lib/tts/keyring"
+import {
+  DEFAULT_ROUTING_CONFIG,
+  type ModelMapping,
+  type RoutingConfig,
+} from "@cognia/provider-types/model-mapping"
+import type { BuiltInPresetId } from "@cognia/provider-types/routing-presets"
+import { DEFAULT_ROUTING_PRESETS_STATE } from "@cognia/provider-types/routing-presets"
+import {
+  adaptPresetToEnabledProviders,
+  getBuiltInPreset,
+} from "@cognia/provider-routing/built-in-presets"
+import {
+  computeEnabledProviderIds,
+  seedDefaultMappingsIfNeeded,
+} from "@/lib/routing/seed-default-mappings"
 
 interface SettingsState {
   settings: AppSettings | null
   loaded: boolean
+  /**
+   * True when `load()` fell back to `DEFAULTS` because the Dexie read threw.
+   *
+   * This is NOT cosmetic. Without it the whole session silently runs on default
+   * settings — no provider, no API key, no theme — and the user has no way to
+   * tell that from "I never configured this". The flag drives
+   * `components/error/settings-load-failed-banner.tsx`, which stays on screen
+   * until a retry succeeds.
+   *
+   * Note that persistence itself stays safe while this is set: `saveSettings`
+   * re-reads the row from Dexie inside its retry wrapper and merges the patch
+   * onto *that*, never onto the in-memory defaults — so a write cannot clobber
+   * the real settings. The damage is purely that the session runs blind.
+   */
+  loadFailed: boolean
+  /** Raw failure text for the banner's diagnostics / crash report. */
+  loadError: string | null
+  /** Clear `loadFailed` and re-run `load()`. Resolves once the retry settles. */
+  retryLoad: () => Promise<void>
   /**
    * In-memory mirror of the OS keyring (Tauri) or web-fallback Dexie store
    * for TTS provider API keys. Populated lazily on first TTS use (or when the
@@ -67,6 +127,14 @@ interface SettingsState {
   providerKeysLoaded: boolean
   load: () => Promise<void>
   save: (patch: Partial<Omit<AppSettings, "id">>) => Promise<void>
+  /** Serialize partial updater preference writes so rapid controls cannot overwrite each other. */
+  saveUpdateSettings: (patch: Partial<UpdateSettings>) => Promise<void>
+  /**
+   * Restore settings to their defaults. With `keys`, resets just those keys
+   * (per-section reset); without, resets all preferences but keeps credentials
+   * and identity fields. Reuses `save` so all persistence side-effects run.
+   */
+  resetSettings: (keys?: (keyof AppSettings)[]) => Promise<void>
   toggleAlwaysAllow: (toolName: string, allow: boolean) => Promise<void>
   /**
    * Toggle a single category in `AppSettings.builtinTools`. The next agent
@@ -74,6 +142,13 @@ interface SettingsState {
    * promise from `saveSettings` so callers can await persistence.
    */
   setBuiltinToolEnabled: (category: keyof BuiltinToolsConfig, enabled: boolean) => Promise<void>
+  setWebToolsEnabled: (enabled: boolean) => Promise<void>
+  setWebToolsNativeOnAnthropic: (nativeOnAnthropic: boolean) => Promise<void>
+  setWebToolsAllowPrivateHosts: (allowPrivateHosts: boolean) => Promise<void>
+  setWebToolsAlwaysDistill: (alwaysDistill: boolean) => Promise<void>
+  setSkillToolEnabled: (enabled: boolean) => Promise<void>
+  setSlashCommandToolEnabled: (enabled: boolean) => Promise<void>
+  setTeamCollaborationToolEnabled: (enabled: boolean) => Promise<void>
   /**
    * Persist the API key to Dexie *and* push it down to the Rust process. If
    * the key changed, also tells the sidecar to restart so the SDK re-reads
@@ -110,6 +185,13 @@ interface SettingsState {
   setRoutingFallbackEnabled: (enabled: boolean) => Promise<void>
 
   /**
+   * Toggle the desktop → cognia CLI auto-sync. When enabled, the desktop
+   * pushes its agent config + provider credentials into the CLI home on boot
+   * (and immediately on enable). Default off. See `lib/cli-bridge/`.
+   */
+  setCliBridgeAutoSync: (enabled: boolean) => Promise<void>
+
+  /**
    * Update one or both skill-bundle mirror toggles. Defaults are
    * `{ claude: true, codex: true }` so the writer can rely on a complete
    * pair after this call. The cognia-owned canonical at
@@ -117,10 +199,23 @@ interface SettingsState {
    */
   setSkillBundleMirrors: (patch: { claude?: boolean; codex?: boolean }) => Promise<void>
 
+  /**
+   * Merge a partial Skills-panel preferences patch over the current value and
+   * persist. Mirrors `setSkillBundleMirrors`: the resolver applies defaults at
+   * read time, so a patch need only carry the changed fields.
+   */
+  setSkillPanelPrefs: (patch: PartialSkillPanelPrefs) => Promise<void>
+  /**
+   * Persist the last Skills-panel view snapshot (tab + sort + non-query
+   * filters). Callers should only invoke this when `rememberLastView` is on.
+   */
+  setLastSkillView: (patch: PartialLastSkillView) => Promise<void>
+
   // ---- Web search actions (all persist via saveSettings) ----
   setSearchEnabled: (v: boolean) => Promise<void>
   setSearchMaxResults: (n: number) => Promise<void>
   setSearchFallbackEnabled: (v: boolean) => Promise<void>
+  setSearchMaxRetries: (n: number) => Promise<void>
   setDefaultSearchProvider: (p: SearchProviderType) => Promise<void>
   setSearchProviderEnabled: (id: SearchProviderType, enabled: boolean) => Promise<void>
   setSearchProviderApiKey: (id: SearchProviderType, key: string) => Promise<void>
@@ -185,6 +280,8 @@ interface SettingsState {
   language: AppLanguage
   customThemes: CustomTheme[]
   activeCustomThemeId: string | null
+  activePluginThemeId: string | null
+  accentColor: string | null
   defaultProvider: string
   providerSettings: Record<string, UserProviderSettings>
   customProviders: CustomProviderSettings[]
@@ -202,6 +299,30 @@ interface SettingsState {
   updateCustomTheme: (id: string, updates: Partial<CustomTheme>) => void
   deleteCustomTheme: (id: string) => void
   setActiveCustomTheme: (id: string | null) => void
+  /**
+   * Activate a registered plugin theme by registry id (or null to clear).
+   * Mutually exclusive with `activeCustomThemeId` — activating one nulls the
+   * other. Applied live by `PluginThemeApplier`.
+   */
+  setActivePluginTheme: (id: string | null) => void
+  /** Set (or clear, with null) the standalone accent color override. */
+  setAccentColor: (color: string | null) => Promise<void>
+
+  // ---- Alias routing (model mappings / strategy / presets) ----
+  /** Merge a patch into `routingConfig` (strategy, constraints, timeouts). */
+  setRoutingConfig: (patch: Partial<RoutingConfig>) => Promise<void>
+  /** Insert or replace a model-alias mapping (stamps `updatedAt`). */
+  upsertModelMapping: (mapping: ModelMapping) => Promise<void>
+  removeModelMapping: (mappingId: string) => Promise<void>
+  /**
+   * Activate a built-in routing preset. Snapshots the current strategy /
+   * mappings / config into `routingPresets.preActivationSnapshot` first so
+   * `revertRoutingPreset` can undo. `mode` decides whether preset mappings
+   * merge into (alias-keyed replace) or wholesale overwrite the existing list.
+   */
+  activateRoutingPreset: (presetId: BuiltInPresetId, mode: "merge" | "overwrite") => Promise<void>
+  /** Restore the pre-activation snapshot (no-op when none exists). */
+  revertRoutingPreset: () => Promise<void>
 
   setDefaultProvider: (providerId: string) => Promise<void>
   setProviderConfig: (providerId: string, patch: Partial<UserProviderSettings>) => Promise<void>
@@ -223,12 +344,16 @@ interface SettingsState {
     customName: string
     baseURL: string
     apiKey: string
-    apiProtocol: import("@/types/provider/provider").ApiProtocol
+    apiProtocol: import("@cognia/provider-types/provider").ApiProtocol
+    apiFlavor?: import("@cognia/provider-types/provider").ApiFlavor
     customModels: string[]
     defaultModel?: string
     enabled?: boolean
-    customModelMetadata?: Record<string, import("@/types/provider/provider").CustomModelMetadata>
-    discoveredModels?: import("@/types/provider/provider").ProviderModelDiscoveryEntry[]
+    customModelMetadata?: Record<
+      string,
+      import("@cognia/provider-types/provider").CustomModelMetadata
+    >
+    discoveredModels?: import("@cognia/provider-types/provider").ProviderModelDiscoveryEntry[]
     discoveredModelsLastFetched?: number
     id?: string
   }) => Promise<string>
@@ -276,6 +401,12 @@ interface SettingsState {
   wallpapers: Wallpaper[]
   customCss: string
   customCssEnabled: boolean
+  /** User-CSS injection scope ("app" = wrapped in @scope (#app), "global" = document-wide). */
+  customCssScope: CustomCssScope
+  /** Monaco/Canvas editor theme linking. */
+  monacoLink: MonacoLinkSettings
+  /** Automatic light/dark switching (system / schedule / sunset). */
+  autoMode: AutoModeSettings
   importedVscodeThemes: ImportedThemeRecord[]
 
   setBackground: (patch: Partial<BackgroundSettings>) => Promise<void>
@@ -285,6 +416,8 @@ interface SettingsState {
   setActiveWallpaper: (id: string | null) => Promise<void>
   setCustomCss: (css: string) => Promise<void>
   setCustomCssEnabled: (enabled: boolean) => Promise<void>
+  /** Set the plugin security posture (strict | balanced). Persisted. */
+  setPluginSecurityPosture: (posture: "strict" | "balanced") => Promise<void>
   addImportedTheme: (record: ImportedThemeRecord) => Promise<void>
   removeImportedTheme: (customThemeId: string) => Promise<void>
 }
@@ -294,6 +427,42 @@ const DEFAULTS: AppSettings = {
   permissionMode: "default",
   alwaysAllowTools: [],
   builtinTools: { ...DEFAULT_BUILTIN_TOOLS },
+  updates: { ...DEFAULT_UPDATE_SETTINGS },
+  // Canvas-executed code is confined by default (ADR-0028); independently
+  // overridable from Settings → Sandbox.
+  canvasCodeSandboxEnabled: true,
+}
+
+/**
+ * Both of these used to be `console.warn` and nothing else, which made their
+ * user-visible consequences invisible:
+ *
+ *  - a proxy that failed to reach the Rust side means outgoing requests are
+ *    silently NOT going through the proxy the user configured — a privacy
+ *    consequence, not a cosmetic one;
+ *  - a sidecar that failed to restart keeps serving the OLD environment, so a
+ *    just-changed API key or base URL appears to have had no effect.
+ *
+ * They stay non-throwing (both are fire-and-forget side effects of a save that
+ * already succeeded) but now raise a diagnostic that reaches the notification
+ * center.
+ */
+function reportProxyFailure(err: unknown): void {
+  dispatchDiagnostic(
+    createDiagnostic("proxyApplyFailed", {
+      source: "settings",
+      message: err instanceof Error ? err.message : String(err),
+    })
+  )
+}
+
+function reportSidecarRestartFailure(err: unknown): void {
+  dispatchDiagnostic(
+    createDiagnostic("sidecarUnreachable", {
+      source: "settings",
+      message: err instanceof Error ? err.message : String(err),
+    })
+  )
 }
 
 async function syncApiKeyToTauri(key: string | null | undefined) {
@@ -302,6 +471,50 @@ async function syncApiKeyToTauri(key: string | null | undefined) {
     await setApiKey(key && key.trim() ? key : null)
   } catch (err) {
     console.warn("setApiKey failed", err)
+  }
+}
+
+// `claude_set_provider_env` only mutates the sidecar's in-memory env state —
+// the running subprocess still has to be restarted for the Anthropic SDK to
+// pick up a new ANTHROPIC_API_KEY/ANTHROPIC_BASE_URL (it reads env once, at
+// spawn time). Editing the field in Settings fires `setProviderConfig` on
+// every keystroke, so restart immediately would kill in-flight turns —
+// coalesce rapid edits into a single restart after the user stops typing.
+const ANTHROPIC_ENV_RESTART_DEBOUNCE_MS = 800
+let anthropicEnvRestartTimer: ReturnType<typeof setTimeout> | null = null
+let lastAppliedAnthropicEnv: { apiKey: string | null; baseURL: string | null } | null = null
+
+function scheduleAnthropicSidecarRestart(apiKey: string | null, baseURL: string | null) {
+  if (
+    lastAppliedAnthropicEnv &&
+    lastAppliedAnthropicEnv.apiKey === apiKey &&
+    lastAppliedAnthropicEnv.baseURL === baseURL
+  ) {
+    return
+  }
+  lastAppliedAnthropicEnv = { apiKey, baseURL }
+  if (anthropicEnvRestartTimer) clearTimeout(anthropicEnvRestartTimer)
+  anthropicEnvRestartTimer = setTimeout(() => {
+    anthropicEnvRestartTimer = null
+    restartSidecar().catch((err) => {
+      console.warn("restartSidecar failed", err)
+      reportSidecarRestartFailure(err)
+    })
+  }, ANTHROPIC_ENV_RESTART_DEBOUNCE_MS)
+}
+
+/**
+ * Record an Anthropic env that was applied via an *immediate* restart (e.g. the
+ * provider switch in `setDefaultProvider`). Keeping `lastAppliedAnthropicEnv` in
+ * sync means a subsequent identical `setProviderConfig` edit is correctly
+ * deduped by `scheduleAnthropicSidecarRestart` instead of triggering a second,
+ * redundant debounced restart that could kill an in-flight turn.
+ */
+function markAnthropicEnvApplied(apiKey: string | null, baseURL: string | null) {
+  lastAppliedAnthropicEnv = { apiKey, baseURL }
+  if (anthropicEnvRestartTimer) {
+    clearTimeout(anthropicEnvRestartTimer)
+    anthropicEnvRestartTimer = null
   }
 }
 
@@ -365,6 +578,8 @@ interface FlatPluginFields {
   language: AppLanguage
   customThemes: CustomTheme[]
   activeCustomThemeId: string | null
+  activePluginThemeId: string | null
+  accentColor: string | null
   defaultProvider: string
   providerSettings: Record<string, UserProviderSettings>
   customProviders: CustomProviderSettings[]
@@ -376,6 +591,9 @@ interface FlatPluginFields {
   wallpapers: Wallpaper[]
   customCss: string
   customCssEnabled: boolean
+  customCssScope: CustomCssScope
+  monacoLink: MonacoLinkSettings
+  autoMode: AutoModeSettings
   importedVscodeThemes: ImportedThemeRecord[]
 }
 
@@ -396,6 +614,8 @@ function deriveFlatPluginFields(s: AppSettings | null): FlatPluginFields {
     language: s?.language ?? "en",
     customThemes: s?.customThemes ?? [],
     activeCustomThemeId: s?.activeCustomThemeId ?? null,
+    activePluginThemeId: s?.activePluginThemeId ?? null,
+    accentColor: s?.accentColor ?? null,
     defaultProvider: s?.defaultProvider ?? "",
     providerSettings: s?.providerSettings ?? {},
     customProviders: s?.customProviders ?? [],
@@ -410,6 +630,9 @@ function deriveFlatPluginFields(s: AppSettings | null): FlatPluginFields {
     wallpapers: s?.wallpapers ?? [],
     customCss: s?.customCss ?? "",
     customCssEnabled: s?.customCssEnabled ?? false,
+    customCssScope: s?.customCssScope ?? "app",
+    monacoLink: { ...DEFAULT_MONACO_LINK, ...(s?.monacoLink ?? {}) },
+    autoMode: { ...DEFAULT_AUTOMODE, ...(s?.autoMode ?? {}) },
     importedVscodeThemes: s?.importedVscodeThemes ?? [],
   }
 }
@@ -421,6 +644,12 @@ function deriveFlatPluginFields(s: AppSettings | null): FlatPluginFields {
  * Exported as a pure helper so the sync layer can call it without
  * subscribing to the store (the sync layer runs from non-React contexts).
  */
+// Re-export the pure skill-panel-prefs resolver (and its types) so components
+// and the non-React sync/injection layers can import them from the settings
+// store alongside `resolveSkillBundleMirrors` — matching the existing pattern.
+export { resolveSkillPanelPrefs }
+export type { SkillPanelPrefs, PartialSkillPanelPrefs, PartialLastSkillView }
+
 export function resolveSkillBundleMirrors(settings: AppSettings | null | undefined): {
   claude: boolean
   codex: boolean
@@ -430,6 +659,15 @@ export function resolveSkillBundleMirrors(settings: AppSettings | null | undefin
     claude: raw?.claude ?? true,
     codex: raw?.codex ?? true,
   }
+}
+
+let updateSettingsSaveQueue: Promise<void> = Promise.resolve()
+let providerMutationQueue: Promise<unknown> = Promise.resolve()
+
+function enqueueProviderMutation<T>(task: () => Promise<T>): Promise<T> {
+  const next = providerMutationQueue.catch(() => undefined).then(task)
+  providerMutationQueue = next.catch(() => undefined)
+  return next
 }
 
 export const useSettingsStore = create<SettingsState>((rawSet, get) => {
@@ -457,6 +695,8 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
   return {
     settings: null,
     loaded: false,
+    loadFailed: false,
+    loadError: null,
     providerKeys: {},
     providerKeysLoaded: false,
     ...deriveFlatPluginFields(null),
@@ -465,15 +705,30 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
       if (get().loaded) return
       try {
         const raw = await getSettings()
-        const s = repairImportedVscodeThemes(raw)
-        // If the repair produced changes, persist them so subsequent loads
-        // observe the cleaned-up state. The repair is purely subtractive
-        // (drops orphans / collapses duplicate sourceKey rows) so it never
-        // loses the user's intent.
-        if (s.importedVscodeThemes !== raw.importedVscodeThemes) {
-          await saveSettings({ importedVscodeThemes: s.importedVscodeThemes })
+        const repaired = repairImportedVscodeThemes(raw)
+        // Seed default tier aliases (fast/balanced/powerful/reasoning) once for
+        // fresh users so the alias-routing engine activates without manual
+        // setup. Idempotent: returns the same object when mappings already
+        // exist or no providers are enabled.
+        const s = seedDefaultMappingsIfNeeded(repaired)
+        // Persist whatever the repair + seed changed so subsequent loads observe
+        // it. The repair is purely subtractive (drops orphans / collapses
+        // duplicate sourceKey rows) and the seed only fills an empty
+        // modelMappings, so neither loses the user's intent.
+        const patch: Partial<Omit<AppSettings, "id">> = {}
+        if (repaired.importedVscodeThemes !== raw.importedVscodeThemes) {
+          patch.importedVscodeThemes = repaired.importedVscodeThemes
         }
-        set({ settings: s, loaded: true })
+        if (s.modelMappings !== repaired.modelMappings) {
+          patch.modelMappings = s.modelMappings
+        }
+        if (Object.keys(patch).length > 0) {
+          // A repair, not an edit — the user never asked for it, so a paired
+          // client must not replay it onto its host (dropping an orphaned
+          // imported-theme row locally should not delete it on the desktop).
+          await saveSettings(patch, { mirrorToHost: false })
+        }
+        set({ settings: s, loaded: true, loadFailed: false, loadError: null })
         // Push the API key to the Rust process on first load. The user expects
         // their previously-entered key to be active without a manual save.
         if (s.apiKey) {
@@ -485,18 +740,40 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
         // store doesn't cycle through this file.
         if (s.networkProxy) {
           try {
-            const { applyProxyToRust } = await import("@/stores/network-proxy")
+            const { applyProxyToRust, maybeAutoDetectProxy } =
+              await import("@/stores/network-proxy")
             await applyProxyToRust(s.networkProxy)
+            // Fire-and-forget: when mode is `auto`, re-probe local proxies and
+            // adopt the current port without blocking boot.
+            void maybeAutoDetectProxy()
           } catch (err) {
             console.warn("networkProxy.applyToRust failed", err)
+            // Outgoing requests are now bypassing a proxy the user configured.
+            // That is a privacy consequence, not a cosmetic one.
+            reportProxyFailure(err)
           }
         }
         // TTS provider keys are loaded lazily (see `ensureProviderKeys`), NOT
         // here — keeping the `1 + N` keyring round-trips off the boot path.
       } catch (err) {
+        // Falling back to DEFAULTS keeps the app usable, but running the whole
+        // session on defaults without telling anyone is how a user loses an
+        // afternoon wondering where their provider went. Record the failure so
+        // `SettingsLoadFailedBanner` can say so and offer a retry.
         console.error("settings.load failed", err)
-        set({ settings: DEFAULTS, loaded: true })
+        set({
+          settings: DEFAULTS,
+          loaded: true,
+          loadFailed: true,
+          loadError: err instanceof Error ? err.message : String(err),
+        })
       }
+    },
+
+    retryLoad: async () => {
+      // `load()` early-returns on `loaded`, so clear both flags first.
+      set({ loaded: false, loadFailed: false, loadError: null })
+      await get().load()
     },
 
     save: async (patch) => {
@@ -511,8 +788,30 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
           await applyProxyToRust(next.networkProxy)
         } catch (err) {
           console.warn("networkProxy.applyToRust failed", err)
+          reportProxyFailure(err)
         }
       }
+    },
+
+    saveUpdateSettings: (patch) => {
+      const task = updateSettingsSaveQueue
+        .catch(() => undefined)
+        .then(() =>
+          get().save({
+            updates: {
+              ...DEFAULT_UPDATE_SETTINGS,
+              ...get().settings?.updates,
+              ...patch,
+            },
+          })
+        )
+      updateSettingsSaveQueue = task
+      return task
+    },
+
+    resetSettings: async (keys) => {
+      const { buildResetPatch } = await import("@/lib/settings/profile-transfer")
+      await get().save(buildResetPatch(keys))
     },
 
     toggleAlwaysAllow: async (toolName, allow) => {
@@ -533,6 +832,62 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
       set({ settings: next })
     },
 
+    setWebToolsEnabled: async (enabled) => {
+      const current = get().settings?.webTools
+      const next = await saveSettings({ webTools: { ...current, enabled } })
+      set({ settings: next })
+    },
+
+    setCliBridgeAutoSync: async (enabled) => {
+      const current = get().settings?.cliBridge
+      const next = await saveSettings({ cliBridge: { ...current, autoSync: enabled } })
+      set({ settings: next })
+    },
+
+    setWebToolsNativeOnAnthropic: async (nativeOnAnthropic) => {
+      const current = get().settings?.webTools
+      const next = await saveSettings({
+        webTools: { enabled: current?.enabled ?? true, nativeOnAnthropic },
+      })
+      set({ settings: next })
+    },
+
+    setWebToolsAllowPrivateHosts: async (allowPrivateHosts) => {
+      const current = get().settings?.webTools
+      const next = await saveSettings({
+        webTools: { enabled: current?.enabled ?? true, ...current, allowPrivateHosts },
+      })
+      set({ settings: next })
+    },
+
+    setWebToolsAlwaysDistill: async (alwaysDistill) => {
+      const current = get().settings?.webTools
+      const next = await saveSettings({
+        webTools: { enabled: current?.enabled ?? true, ...current, alwaysDistill },
+      })
+      set({ settings: next })
+    },
+
+    setSkillToolEnabled: async (enabled) => {
+      const current = get().settings?.selfInvokeTools
+      const next = await saveSettings({ selfInvokeTools: { ...current, skill: enabled } })
+      set({ settings: next })
+    },
+
+    setSlashCommandToolEnabled: async (enabled) => {
+      const current = get().settings?.selfInvokeTools
+      const next = await saveSettings({ selfInvokeTools: { ...current, slashCommand: enabled } })
+      set({ settings: next })
+    },
+
+    setTeamCollaborationToolEnabled: async (enabled) => {
+      const current = get().settings?.selfInvokeTools
+      const next = await saveSettings({
+        selfInvokeTools: { ...current, teamCollaboration: enabled },
+      })
+      set({ settings: next })
+    },
+
     setApiKey: async (key) => {
       const previous = get().settings?.apiKey ?? undefined
       const trimmed = key && key.trim() ? key.trim() : undefined
@@ -545,6 +900,7 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
           await restartSidecar()
         } catch (err) {
           console.warn("restartSidecar failed", err)
+          reportSidecarRestartFailure(err)
         }
       }
     },
@@ -565,6 +921,22 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
       set({ settings: next })
     },
 
+    setSkillPanelPrefs: async (patch) => {
+      // Merge over the raw stored partial (not the resolved value) so we only
+      // persist fields the user has actually touched.
+      const cur = get().settings?.skillPanelPrefs ?? {}
+      const skillPanelPrefs = { ...cur, ...patch }
+      const next = await saveSettings({ skillPanelPrefs })
+      set({ settings: next })
+    },
+
+    setLastSkillView: async (patch) => {
+      const cur = get().settings?.lastSkillView ?? {}
+      const lastSkillView = { ...cur, ...patch }
+      const next = await saveSettings({ lastSkillView })
+      set({ settings: next })
+    },
+
     // ---- Web search ----
     setSearchEnabled: async (searchEnabled) => {
       const next = await saveSettings({ searchEnabled })
@@ -576,6 +948,12 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
     },
     setSearchFallbackEnabled: async (searchFallbackEnabled) => {
       const next = await saveSettings({ searchFallbackEnabled })
+      set({ settings: next })
+    },
+    setSearchMaxRetries: async (searchMaxRetries) => {
+      // Clamp to a sane range so a runaway value can't stack unbounded retries.
+      const clamped = Math.max(0, Math.min(5, Math.round(searchMaxRetries)))
+      const next = await saveSettings({ searchMaxRetries: clamped })
       set({ settings: next })
     },
     setDefaultSearchProvider: async (defaultSearchProvider) => {
@@ -811,16 +1189,19 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
     setTheme: async (mode) => {
       const next = await saveSettings({ theme: mode })
       set({ settings: next })
+      emitSystemBusEvent(SystemEvents.THEME_CHANGED, { theme: mode })
     },
 
     setColorTheme: async (preset) => {
       const next = await saveSettings({ colorTheme: preset })
       set({ settings: next })
+      emitSystemBusEvent(SystemEvents.THEME_CHANGED, { colorTheme: preset })
     },
 
     setLanguage: async (language) => {
       const next = await saveSettings({ language })
       set({ settings: next })
+      emitSystemBusEvent(SystemEvents.SETTINGS_CHANGED, { language })
     },
 
     createCustomTheme: (theme) => {
@@ -870,74 +1251,216 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
 
     setActiveCustomTheme: (id) => {
       const cur = get().settings
-      set({ settings: { ...(cur ?? DEFAULTS), activeCustomThemeId: id } })
-      void saveSettings({ activeCustomThemeId: id }).catch((err) =>
+      // Activating a custom theme (or a preset via null) clears any live
+      // plugin theme so the two active pointers never both apply.
+      const patch = { activeCustomThemeId: id, activePluginThemeId: null }
+      set({ settings: { ...(cur ?? DEFAULTS), ...patch } })
+      void saveSettings(patch).catch((err) =>
         console.warn("setActiveCustomTheme persist failed", err)
       )
     },
 
-    setDefaultProvider: async (providerId) => {
-      const next = await saveSettings({ defaultProvider: providerId })
-      set({ settings: next })
-      // Phase D wiring: push the newly-selected provider's credentials to
-      // the sidecar so the next chat send uses them. Sidecar does an atomic
-      // env restart via `claude_set_provider_env` (Rust). Skipped on web.
-      if (isTauri()) {
-        const cfg =
-          next.providerSettings?.[providerId] ??
-          next.customProviders?.find((p) => p.id === providerId)
-        try {
-          await setProviderEnv(cfg?.apiKey ?? null, cfg?.baseURL ?? null)
-        } catch (err) {
-          console.warn("setProviderEnv failed", err)
-        }
-      }
+    setActivePluginTheme: (id) => {
+      const cur = get().settings
+      // Mutually exclusive with the custom-theme pointer (see above).
+      const patch = { activePluginThemeId: id, activeCustomThemeId: null }
+      set({ settings: { ...(cur ?? DEFAULTS), ...patch } })
+      void saveSettings(patch).catch((err) =>
+        console.warn("setActivePluginTheme persist failed", err)
+      )
+      emitSystemBusEvent(SystemEvents.THEME_CHANGED, { activePluginThemeId: id })
     },
 
-    setProviderConfig: async (providerId, patch) => {
-      const cur = get().settings
-      const existing =
-        cur?.providerSettings?.[providerId] ??
-        ({
-          providerId,
-          enabled: false,
-          defaultModel: "",
-        } as UserProviderSettings)
-      const map = { ...(cur?.providerSettings ?? {}) }
-      map[providerId] = { ...existing, ...patch, providerId }
-      const next = await saveSettings({ providerSettings: map })
+    setAccentColor: async (color) => {
+      const next = await saveSettings({ accentColor: color })
       set({ settings: next })
-      // If this is the active default provider AND the patch touched
-      // `apiKey` or `baseURL`, push the change to the sidecar so the next
-      // chat turn picks it up without requiring a default-provider switch.
-      if (
-        isTauri() &&
-        next.defaultProvider === providerId &&
-        ("apiKey" in patch || "baseURL" in patch)
-      ) {
-        const cfg = map[providerId]
-        try {
-          await setProviderEnv(cfg?.apiKey ?? null, cfg?.baseURL ?? null)
-        } catch (err) {
-          console.warn("setProviderEnv failed", err)
-        }
-      }
+      emitSystemBusEvent(SystemEvents.THEME_CHANGED, { accentColor: color })
     },
+
+    // ---- Alias routing (model mappings / strategy / presets) ----
+
+    setRoutingConfig: async (patch) => {
+      const cur = get().settings?.routingConfig ?? DEFAULT_ROUTING_CONFIG
+      const next = await saveSettings({ routingConfig: { ...cur, ...patch } })
+      set({ settings: next })
+    },
+
+    upsertModelMapping: async (mapping) => {
+      const list = get().settings?.modelMappings ?? []
+      const stamped = { ...mapping, updatedAt: Date.now() }
+      const idx = list.findIndex((m) => m.id === mapping.id)
+      const updated =
+        idx >= 0 ? list.map((m) => (m.id === mapping.id ? stamped : m)) : [...list, stamped]
+      const next = await saveSettings({ modelMappings: updated })
+      set({ settings: next })
+    },
+
+    removeModelMapping: async (mappingId) => {
+      const list = get().settings?.modelMappings ?? []
+      const next = await saveSettings({ modelMappings: list.filter((m) => m.id !== mappingId) })
+      set({ settings: next })
+    },
+
+    activateRoutingPreset: async (presetId, mode) => {
+      const cur = get().settings
+      const preset = getBuiltInPreset(presetId)
+      if (!preset) return
+
+      // Adapt to the providers that are actually enabled right now (shared with
+      // the fresh-user seeding path). Anthropic works without a providerSettings
+      // entry (sidecar OAuth/API key), so it is always considered enabled unless
+      // explicitly disabled.
+      const enabledIds = computeEnabledProviderIds(cur)
+      const adapted = adaptPresetToEnabledProviders(preset, enabledIds)
+
+      const existingMappings = cur?.modelMappings ?? []
+      const existingConfig = cur?.routingConfig ?? DEFAULT_ROUTING_CONFIG
+      const presets = cur?.routingPresets ?? DEFAULT_ROUTING_PRESETS_STATE
+
+      const now = Date.now()
+      const stamped: ModelMapping[] = adapted.mappings.map((m, i) => ({
+        ...m,
+        id: `${preset.id}-${m.alias}-${now + i}`,
+        createdAt: now,
+        updatedAt: now,
+      }))
+
+      // Merge = preset aliases replace same-alias mappings, everything else
+      // survives. Overwrite = the preset's list wins wholesale.
+      const presetAliases = new Set(stamped.map((m) => m.alias.toLowerCase()))
+      const mergedMappings =
+        mode === "overwrite"
+          ? stamped
+          : [
+              ...existingMappings.filter((m) => !presetAliases.has(m.alias.toLowerCase())),
+              ...stamped,
+            ]
+
+      const next = await saveSettings({
+        modelMappings: mergedMappings,
+        routingConfig: { ...existingConfig, ...adapted.routingConfig, strategy: adapted.strategy },
+        routingPresets: {
+          ...presets,
+          activePresetId: preset.id,
+          preActivationSnapshot: {
+            strategy: existingConfig.strategy,
+            mappings: existingMappings,
+            routingConfig: existingConfig,
+            timestamp: now,
+          },
+        },
+      })
+      set({ settings: next })
+    },
+
+    revertRoutingPreset: async () => {
+      const cur = get().settings
+      const snapshot = cur?.routingPresets?.preActivationSnapshot
+      if (!snapshot) return
+      const next = await saveSettings({
+        modelMappings: snapshot.mappings,
+        routingConfig: snapshot.routingConfig,
+        routingPresets: {
+          ...(cur?.routingPresets ?? DEFAULT_ROUTING_PRESETS_STATE),
+          activePresetId: null,
+          preActivationSnapshot: null,
+        },
+      })
+      set({ settings: next })
+    },
+
+    setDefaultProvider: (providerId) =>
+      enqueueProviderMutation(async () => {
+        const cur = get().settings
+        // Keep the (defaultModel, defaultProvider) pair coherent: a stale model
+        // from the previous provider would otherwise ride along and be sent to
+        // the new provider's base URL. Only rewritten when the current default
+        // model isn't servable by the new provider (see the resolver's contract).
+        const { resolveDefaultModelForProvider } = await import("@/lib/ai/model-options")
+        const syncedModel = resolveDefaultModelForProvider(
+          providerId,
+          cur?.defaultModel,
+          cur?.providerSettings,
+          cur?.customProviders
+        )
+        const next = await saveSettings({
+          defaultProvider: providerId,
+          ...(syncedModel !== undefined ? { defaultModel: syncedModel } : {}),
+        })
+        set({ settings: next })
+        // `ApiKeyState` (Rust) is an Anthropic-only env slot — only push to it,
+        // and only restart the sidecar, when switching TO the Anthropic
+        // provider. Every other provider is read fresh per-turn by the ai-sdk
+        // dispatch path (`providerCredentials`), so no push/restart is needed
+        // and pushing here would silently corrupt the Anthropic env slot.
+        if (isTauri() && providerId === "anthropic") {
+          const cfg = next.providerSettings?.[providerId]
+          const apiKey = cfg?.apiKey ?? null
+          const baseURL = cfg?.baseURL ?? null
+          try {
+            await setProviderEnv(apiKey, baseURL)
+            await restartSidecar()
+            // We just restarted with this exact env — record it so a following
+            // identical config edit doesn't schedule a second debounced restart.
+            markAnthropicEnvApplied(apiKey, baseURL)
+          } catch (err) {
+            console.warn("setProviderEnv/restartSidecar failed", err)
+          }
+        }
+      }),
+
+    setProviderConfig: (providerId, patch) =>
+      enqueueProviderMutation(async () => {
+        const cur = get().settings
+        const existing =
+          cur?.providerSettings?.[providerId] ??
+          ({
+            providerId,
+            enabled: false,
+            defaultModel: "",
+          } as UserProviderSettings)
+        const map = { ...(cur?.providerSettings ?? {}) }
+        map[providerId] = { ...existing, ...patch, providerId }
+        const next = await saveSettings({ providerSettings: map })
+        set({ settings: next })
+        // If this is the active default provider AND the patch touched
+        // `apiKey` or `baseURL`, push the change to the sidecar and schedule a
+        // (debounced) restart so the next chat turn actually picks it up —
+        // `ApiKeyState` only holds Anthropic's env, so this only applies when
+        // the edited provider IS Anthropic (see `scheduleAnthropicSidecarRestart`).
+        if (
+          isTauri() &&
+          providerId === "anthropic" &&
+          next.defaultProvider === providerId &&
+          ("apiKey" in patch || "baseURL" in patch)
+        ) {
+          const cfg = map[providerId]
+          const apiKey = cfg?.apiKey ?? null
+          const baseURL = cfg?.baseURL ?? null
+          try {
+            await setProviderEnv(apiKey, baseURL)
+            scheduleAnthropicSidecarRestart(apiKey, baseURL)
+          } catch (err) {
+            console.warn("setProviderEnv failed", err)
+          }
+        }
+      }),
 
     updateProviderSettings: async (providerId, patch) => {
       // Cognia-compatible alias — components written for Cognia call this.
       await get().setProviderConfig(providerId, patch)
     },
 
-    upsertCustomProvider: async (provider) => {
-      const cur = get().settings
-      const list = cur?.customProviders ?? []
-      const idx = list.findIndex((p) => p.id === provider.id)
-      const updated =
-        idx >= 0 ? list.map((p) => (p.id === provider.id ? provider : p)) : [...list, provider]
-      const next = await saveSettings({ customProviders: updated })
-      set({ settings: next })
-    },
+    upsertCustomProvider: (provider) =>
+      enqueueProviderMutation(async () => {
+        const cur = get().settings
+        const list = cur?.customProviders ?? []
+        const idx = list.findIndex((p) => p.id === provider.id)
+        const updated =
+          idx >= 0 ? list.map((p) => (p.id === provider.id ? provider : p)) : [...list, provider]
+        const next = await saveSettings({ customProviders: updated })
+        set({ settings: next })
+      }),
 
     addCustomProvider: async (provider) => {
       const id = provider.id || `custom-${Date.now().toString(36)}`
@@ -948,6 +1471,7 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
         enabled: provider.enabled ?? true,
         apiKey: provider.apiKey,
         baseURL: provider.baseURL,
+        ...(provider.apiFlavor ? { apiFlavor: provider.apiFlavor } : {}),
         // CustomProviderSettings extension
         id,
         isCustom: true,
@@ -964,47 +1488,105 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
       return id
     },
 
-    updateCustomProvider: async (providerId, patch) => {
-      const cur = get().settings
-      const list = cur?.customProviders ?? []
-      const idx = list.findIndex((p) => p.id === providerId)
-      if (idx < 0) return
-      const updated = [...list]
-      updated[idx] = { ...updated[idx], ...patch, id: providerId, isCustom: true }
-      const next = await saveSettings({ customProviders: updated })
-      set({ settings: next })
-    },
+    updateCustomProvider: (providerId, patch) =>
+      enqueueProviderMutation(async () => {
+        const cur = get().settings
+        const list = cur?.customProviders ?? []
+        const idx = list.findIndex((p) => p.id === providerId)
+        if (idx < 0) return
+        const updated = [...list]
+        updated[idx] = { ...updated[idx], ...patch, id: providerId, isCustom: true }
+        const next = await saveSettings({ customProviders: updated })
+        set({ settings: next })
+      }),
 
-    removeCustomProvider: async (providerId) => {
-      const cur = get().settings
-      const list = cur?.customProviders ?? []
-      const next = await saveSettings({ customProviders: list.filter((p) => p.id !== providerId) })
-      set({ settings: next })
-    },
+    removeCustomProvider: (providerId) =>
+      enqueueProviderMutation(async () => {
+        const cur = get().settings
+        const list = cur?.customProviders ?? []
+        const customProviders = list.filter((provider) => provider.id !== providerId)
+        const modelMappings = (cur?.modelMappings ?? [])
+          .map((mapping) => ({
+            ...mapping,
+            providers: mapping.providers.filter((entry) => entry.providerId !== providerId),
+          }))
+          .filter((mapping) => mapping.providers.length > 0)
+        const providerUIPreferences: ProviderUIPreferences = {
+          ...DEFAULT_PROVIDER_UI_PREFERENCES,
+          ...(cur?.providerUIPreferences ?? {}),
+          selectedProviderId:
+            cur?.providerUIPreferences?.selectedProviderId === providerId
+              ? undefined
+              : cur?.providerUIPreferences?.selectedProviderId,
+          comparisonProviderIds: cur?.providerUIPreferences?.comparisonProviderIds?.filter(
+            (id) => id !== providerId
+          ),
+        }
+        const patch: Partial<AppSettings> = {
+          customProviders,
+          modelMappings,
+          providerUIPreferences,
+        }
 
-    recordProviderUsage: async (providerId, modelId, entry) => {
-      const cur = get().settings
-      const stats = { ...(cur?.providerUsageStats ?? {}) }
-      const key = `${providerId}:${modelId}`
-      const list = stats[key] ?? []
-      // Cap retained history at 500 newest entries per (provider:model) pair
-      // so the singleton row doesn't grow without bound.
-      const trimmed = [...list, entry].slice(-500)
-      stats[key] = trimmed
-      const next = await saveSettings({ providerUsageStats: stats })
-      set({ settings: next })
-    },
+        if (cur?.defaultProvider === providerId) {
+          const fallbackProviderId =
+            Object.entries(cur.providerSettings ?? {}).find(
+              ([, settings]) => settings.enabled
+            )?.[0] ?? customProviders.find((provider) => provider.enabled)?.id
+          const { resolveDefaultModelForProvider } = await import("@/lib/ai/model-options")
+          patch.defaultProvider = fallbackProviderId
+          patch.defaultModel = fallbackProviderId
+            ? resolveDefaultModelForProvider(
+                fallbackProviderId,
+                undefined,
+                cur.providerSettings,
+                customProviders
+              )
+            : undefined
+        }
 
-    setProviderUIPreferences: async (patch) => {
-      const cur = get().settings
-      const merged: ProviderUIPreferences = {
-        ...DEFAULT_PROVIDER_UI_PREFERENCES,
-        ...(cur?.providerUIPreferences ?? {}),
-        ...patch,
-      }
-      const next = await saveSettings({ providerUIPreferences: merged })
-      set({ settings: next })
-    },
+        const next = await saveSettings({
+          ...patch,
+        })
+        set({ settings: next })
+      }),
+
+    recordProviderUsage: (providerId, modelId, entry) =>
+      enqueueProviderMutation(async () => {
+        const cur = get().settings
+        const stats = { ...(cur?.providerUsageStats ?? {}) }
+        const key = `${providerId}:${modelId}`
+        const list = stats[key] ?? []
+        // Cap retained history at 500 newest entries per (provider:model) pair
+        // so the singleton row doesn't grow without bound.
+        const trimmed = [...list, entry].slice(-500)
+        stats[key] = trimmed
+        const next = await saveSettings({ providerUsageStats: stats })
+        set({ settings: next })
+      }),
+
+    setProviderUIPreferences: (patch) =>
+      enqueueProviderMutation(async () => {
+        const cur = get().settings
+        const merged: ProviderUIPreferences = {
+          ...DEFAULT_PROVIDER_UI_PREFERENCES,
+          ...(cur?.providerUIPreferences ?? {}),
+          ...patch,
+        }
+        const optimisticSettings = cur ? { ...cur, providerUIPreferences: merged } : null
+        if (optimisticSettings) set({ settings: optimisticSettings })
+        try {
+          const next = await saveSettings({ providerUIPreferences: merged })
+          set({ settings: next })
+        } catch (error) {
+          // Roll back only if no unrelated settings update replaced this exact
+          // optimistic snapshot while the write was in flight.
+          if (optimisticSettings && get().settings === optimisticSettings) {
+            set({ settings: cur })
+          }
+          throw error
+        }
+      }),
 
     dismissProviderOnboarding: async () => {
       const next = await saveSettings({ providerOnboardingDismissed: true })
@@ -1135,6 +1717,11 @@ export const useSettingsStore = create<SettingsState>((rawSet, get) => {
 
     setCustomCssEnabled: async (enabled) => {
       const next = await saveSettings({ customCssEnabled: enabled })
+      set({ settings: next })
+    },
+
+    setPluginSecurityPosture: async (posture) => {
+      const next = await saveSettings({ pluginSecurityPosture: posture })
       set({ settings: next })
     },
 

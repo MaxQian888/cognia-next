@@ -15,7 +15,13 @@
 
 import { useCallback, useState } from "react"
 import { useTranslations } from "next-intl"
-import { CheckCircle2Icon, FileSearchIcon, Loader2Icon, XCircleIcon } from "lucide-react"
+import {
+  CheckCircle2Icon,
+  FileJson2Icon,
+  FileSearchIcon,
+  Loader2Icon,
+  XCircleIcon,
+} from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -23,6 +29,7 @@ import { Card } from "@/components/ui/card"
 import { canUseTauriInvoke } from "@/lib/native/utils"
 import { validatePluginManifest } from "@/lib/plugin/core/validation"
 import { previewLocalManifest } from "@/lib/plugin/local/install-from-directory"
+import { cn } from "@/lib/utils"
 import { CapabilityChips } from "@/components/plugins/_shared/capability-chips"
 import type { PluginManifest, PluginPermission } from "@/types/plugin"
 
@@ -105,14 +112,26 @@ export function ManifestValidator({ className }: { className?: string }) {
   }, [t])
 
   return (
-    <Card className={className}>
-      <div className="p-4 space-y-3">
-        <div className="flex items-start justify-between gap-2">
-          <div className="space-y-0.5">
-            <h3 className="text-sm font-semibold">{t("title")}</h3>
-            <p className="text-xs text-muted-foreground">{t("description")}</p>
+    <Card
+      className={cn(
+        "gap-0 overflow-hidden border-border/70 py-0 shadow-sm transition-[border-color,box-shadow] duration-200 hover:border-foreground/20 hover:shadow-md",
+        className
+      )}
+    >
+      <div className="flex h-full flex-col gap-4 p-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-muted/50">
+            <FileJson2Icon className="size-4 text-muted-foreground" aria-hidden="true" />
           </div>
+          <div className="min-w-0 space-y-1">
+            <h3 className="text-sm font-semibold tracking-tight">{t("title")}</h3>
+            <p className="text-xs leading-relaxed text-muted-foreground">{t("description")}</p>
+          </div>
+        </div>
+
+        <div className="mt-auto">
           <Button
+            className="w-full justify-center sm:w-auto"
             size="sm"
             variant="outline"
             onClick={() => void pickAndValidate()}
@@ -139,7 +158,7 @@ export function ManifestValidator({ className }: { className?: string }) {
         )}
 
         {state.status === "done" && !state.readError && (
-          <div className="space-y-3" data-testid="manifest-validator-result">
+          <div className="space-y-3 border-t pt-3" data-testid="manifest-validator-result">
             <div className="flex items-center gap-2 text-sm">
               {state.valid ? (
                 <>

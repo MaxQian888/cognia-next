@@ -9,6 +9,7 @@ export type TargetKind = "chat" | "team" | "workflow"
 export interface ChatTargetSpec {
   kind: "chat"
   label: string
+  providerId?: string
   model: string
   characterId?: string
   cwd?: string

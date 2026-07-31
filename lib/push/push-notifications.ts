@@ -17,6 +17,7 @@
  *      UI can route them to a banner / inbox.
  */
 
+import { makeDefaultLoader } from "@/lib/capacitor/_shared"
 import { transport as defaultTransport } from "@/lib/tauri"
 import type { Transport } from "@/lib/tauri/transport-types"
 
@@ -72,13 +73,14 @@ interface PushNotificationsPluginShape {
 
 export type PushPluginLoader = () => Promise<PushNotificationsPluginShape>
 
-const defaultLoader: PushPluginLoader = async () => {
-  const moduleId = "@capacitor/push-notifications"
-  const mod = (await import(/* webpackIgnore: true */ moduleId)) as {
-    PushNotifications: PushNotificationsPluginShape
-  }
-  return mod.PushNotifications
-}
+// Resolve through the shared loader: window.Capacitor.Plugins.PushNotifications
+// first (populated by registerNativePlugins at mobile boot), then the dynamic
+// import. A bare import alone always rejects inside the static-export WebView
+// (the npm module isn't bundled), which silently killed the whole push chain.
+const defaultLoader: PushPluginLoader = makeDefaultLoader<PushNotificationsPluginShape>(
+  "@capacitor/push-notifications",
+  "PushNotifications"
+)
 
 function detectPlatform(): PushPlatform {
   if (typeof window === "undefined") return "unknown"

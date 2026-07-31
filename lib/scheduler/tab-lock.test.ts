@@ -5,7 +5,7 @@
  * preferred and a heartbeat-based localStorage fallback.
  */
 
-jest.mock("@/lib/logging", () => {
+jest.mock("@cognia/logging", () => {
   const stub = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }
   return { loggers: { app: stub, scheduler: stub, store: stub, plugin: stub } }
 })

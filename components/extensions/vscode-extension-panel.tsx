@@ -16,6 +16,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react"
+import { useTranslations } from "next-intl"
 import {
   acquireVsCodeApiPolyfillSource,
   attachHostFrame,
@@ -39,6 +40,7 @@ interface VscodeExtensionPanelProps {
 }
 
 export function VscodeExtensionPanel({ slot }: VscodeExtensionPanelProps) {
+  const t = useTranslations("plugins.vscodeWebviews")
   const panels = useWebviewPanels(slot)
   if (panels.length === 0) {
     return (
@@ -46,7 +48,7 @@ export function VscodeExtensionPanel({ slot }: VscodeExtensionPanelProps) {
         className="flex h-full w-full items-center justify-center text-sm text-muted-foreground"
         data-testid="vscode-extension-panel-empty"
       >
-        No VS Code extensions registered any webviews yet.
+        {t("empty")}
       </div>
     )
   }
@@ -101,8 +103,7 @@ function VscodeWebviewIframe({ panel }: { panel: WebviewRecord }) {
     const onWindowMessage = (event: MessageEvent) => {
       if (event.source !== iframe.contentWindow) return
       const payload = event.data as
-        | { __cogniaWebviewKind?: string; data?: unknown; state?: unknown }
-        | undefined
+        { __cogniaWebviewKind?: string; data?: unknown; state?: unknown } | undefined
       if (!payload || typeof payload !== "object") return
       if (payload.__cogniaWebviewKind === "post" && payload.data !== undefined) {
         for (const listener of messageListeners) {

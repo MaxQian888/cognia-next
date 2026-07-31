@@ -6,12 +6,13 @@
  */
 
 import type { OutboundRequest } from "@/types/connectors/outbound"
-import { segmentsToLarkBody, segmentsToLarkBodyAsync } from "./card"
+import { segmentsToPlainText } from "@/types/connectors/segment"
+import { segmentsToLarkBody, segmentsToLarkBodyAsync, type LarkMessageBody } from "./card"
 
 const LARK_API_BASE = "https://open.feishu.cn/open-apis"
 
 export interface SerializedLarkCall {
-  method: "POST" | "PATCH" | "DELETE"
+  method: "POST" | "PUT" | "PATCH" | "DELETE"
   url: string
   payload: Record<string, unknown>
 }
@@ -27,6 +28,22 @@ function threadIdFromRef(req: OutboundRequest): string | undefined {
   const ref = req.conversationRef as Record<string, unknown>
   const ts = ref["threadTs"]
   return typeof ts === "string" ? ts : undefined
+}
+
+/**
+ * Extract the thread's reply-anchor message id from the conversation ref.
+ *
+ * `parse.ts` stamps `threadRootMessageId` (the om_ id of the latest inbound
+ * message seen in the thread — any in-thread message is a valid reply
+ * anchor) whenever a message carries a `thread_id`. Thread sends MUST go
+ * through `POST /im/v1/messages/:id/reply` with `reply_in_thread: true`:
+ * the plain create endpoint has no thread parameter and silently ignores
+ * unknown fields, so a "thread send" there lands in the main chat.
+ */
+function threadAnchorFromRef(req: OutboundRequest): string | undefined {
+  const ref = req.conversationRef as Record<string, unknown>
+  const id = ref["threadRootMessageId"]
+  return typeof id === "string" && id.length > 0 ? id : undefined
 }
 
 /**
@@ -65,15 +82,19 @@ function buildReceiveIdParams(
 }
 
 /**
- * Build a POST /im/v1/messages?receive_id_type=<type> call.
+ * Resolve the Lark `receive_id_type` + `receive_id` for an outbound request.
+ *
+ * A4 — honours an explicit `receiveIdType` + `receiveId` (or the convenience
+ * `openId` / `userId` / `email`) carried on the conversation ref, falling back
+ * to the prefix-sniff on the chat id for legacy bindings. Shared by BOTH the
+ * sync `serializeSend` and the async `serializeOutboundAsync` (the one the
+ * production `send()` actually calls) so the async path no longer silently
+ * collapses user_id / email targets down to chat_id.
  */
-export function serializeSend(req: OutboundRequest): SerializedLarkCall {
-  const chatId = chatIdFromRef(req)
-  const threadId = threadIdFromRef(req)
-  // A4 — honour explicit receiveIdType + receiveId when the conversation
-  // ref carries them. Closes the Phase-2 marker that previously forced
-  // every send through chat_id even when the caller wanted to target a
-  // user by open_id / user_id / email.
+function resolveReceiveId(
+  req: OutboundRequest,
+  chatId: string
+): { receiveIdType: string; receiveId: string } {
   const ref = req.conversationRef as Record<string, unknown>
   const explicitType =
     typeof ref["receiveIdType"] === "string" ? (ref["receiveIdType"] as string) : undefined
@@ -96,20 +117,65 @@ export function serializeSend(req: OutboundRequest): SerializedLarkCall {
         : typeof ref["email"] === "string"
           ? "email"
           : undefined)
-  const { receiveIdType, receiveId } = buildReceiveIdParams(chatId, inferredType, explicitReceiveId)
+  return buildReceiveIdParams(chatId, inferredType, explicitReceiveId)
+}
+
+/**
+ * Build a POST /im/v1/messages?receive_id_type=<type> call.
+ */
+export function serializeSend(req: OutboundRequest): SerializedLarkCall {
+  const chatId = chatIdFromRef(req)
+  const threadId = threadIdFromRef(req)
+  const { receiveIdType, receiveId } = resolveReceiveId(req, chatId)
 
   const body = segmentsToLarkBody(req.segments)
+
+  // Reply anchor: Lark replies go through a dedicated endpoint keyed by the
+  // quoted message id (no receive_id). Every other adapter already honours
+  // `req.replyTo`; without this branch the workflow send node's
+  // `replyToMessageId` silently degraded to a plain send on Lark.
+  const replyTargetId = req.replyTo?.messageId
+  if (replyTargetId) {
+    const payload: Record<string, unknown> = {
+      msg_type: body.msg_type,
+      content: body.content,
+      uuid: req.metadata.idempotencyKey,
+    }
+    if (threadId) payload["reply_in_thread"] = true
+    return {
+      method: "POST",
+      url: `${LARK_API_BASE}/im/v1/messages/${replyTargetId}/reply`,
+      payload,
+    }
+  }
+
+  // Thread send without an explicit replyTo: route through the reply
+  // endpoint anchored at the thread's known message id. Only
+  // POST /im/v1/messages/:id/reply accepts `reply_in_thread`; the create
+  // endpoint ignores unknown fields, so the old `reply_in_thread` +
+  // `parent_id` payload silently delivered thread replies to the main chat.
+  if (threadId) {
+    const anchor = threadAnchorFromRef(req)
+    if (anchor) {
+      return {
+        method: "POST",
+        url: `${LARK_API_BASE}/im/v1/messages/${encodeURIComponent(anchor)}/reply`,
+        payload: {
+          msg_type: body.msg_type,
+          content: body.content,
+          reply_in_thread: true,
+          uuid: req.metadata.idempotencyKey,
+        },
+      }
+    }
+    throw new Error("Cannot deliver a Lark topic message without a persisted thread reply anchor")
+  }
 
   const payload: Record<string, unknown> = {
     receive_id: receiveId,
     msg_type: body.msg_type,
     content: body.content,
-  }
-
-  // Reply inside a thread: set reply_in_thread flag and parent_id
-  if (threadId) {
-    payload["reply_in_thread"] = true
-    payload["parent_id"] = threadId
+    uuid: req.metadata.idempotencyKey,
   }
 
   return {
@@ -120,18 +186,69 @@ export function serializeSend(req: OutboundRequest): SerializedLarkCall {
 }
 
 /**
- * Build a PATCH /im/v1/messages/<message_id> call to edit a message.
+ * Route an edit to the correct Lark endpoint by rendered body type.
+ *
+ * Lark splits message editing across two APIs:
+ *   - PUT   /im/v1/messages/:id — edits text / post messages only
+ *     (payload `{msg_type, content}`).
+ *   - PATCH /im/v1/messages/:id — updates an interactive card sent by
+ *     the app (payload `{content}` — the new card JSON, no msg_type).
+ *
+ * Media bodies (image / file / audio / media) cannot be edited in place;
+ * they degrade to a PUT text edit carrying the plain-text projection so
+ * the edit is visible rather than a guaranteed 400.
+ */
+function buildEditCall(
+  messageId: string,
+  req: OutboundRequest,
+  body: LarkMessageBody
+): SerializedLarkCall {
+  const url = `${LARK_API_BASE}/im/v1/messages/${encodeURIComponent(messageId)}`
+  if (body.msg_type === "interactive") {
+    return { method: "PATCH", url, payload: { content: body.content } }
+  }
+  if (body.msg_type === "text" || body.msg_type === "post") {
+    return { method: "PUT", url, payload: { msg_type: body.msg_type, content: body.content } }
+  }
+  const text = segmentsToPlainText(req.segments)
+  return {
+    method: "PUT",
+    url,
+    payload: { msg_type: "text", content: JSON.stringify({ text: text || "[updated]" }) },
+  }
+}
+
+/**
+ * Build the edit call for a message (sync path — a2ui segments collapse
+ * to their plain-text mirror; the production adapter uses
+ * `serializeEditAsync` instead so edited cards keep their interactivity).
  */
 export function serializeEdit(messageId: string, req: OutboundRequest): SerializedLarkCall {
   const body = segmentsToLarkBody(req.segments)
-  return {
-    method: "PATCH",
-    url: `${LARK_API_BASE}/im/v1/messages/${encodeURIComponent(messageId)}`,
-    payload: {
-      msg_type: body.msg_type,
-      content: body.content,
-    },
-  }
+  return buildEditCall(messageId, req, body)
+}
+
+/**
+ * Async edit serializer used by the production adapter `edit()`.
+ *
+ * Routes a2ui segments through `segmentsToLarkBodyAsync` so an edited
+ * card is re-projected as a full Lark Interactive Card (with fresh
+ * `connectorCallbackBindings` for every interactive element) and shipped
+ * via the card-update PATCH endpoint instead of collapsing to its
+ * plain-text mirror on the text-edit PUT endpoint.
+ */
+export async function serializeEditAsync(
+  messageId: string,
+  req: OutboundRequest,
+  adapterId: string
+): Promise<SerializedLarkCall> {
+  const chatId = chatIdFromRef(req)
+  const threadId = threadIdFromRef(req)
+  const body = await segmentsToLarkBodyAsync(req.segments, {
+    adapterId,
+    conversationKey: buildConversationKeyFromRef(req, chatId, threadId),
+  })
+  return buildEditCall(messageId, req, body)
 }
 
 /**
@@ -161,6 +278,81 @@ export function serializeReaction(messageId: string, emojiType: string): Seriali
 }
 
 /**
+ * Build a DELETE /im/v1/messages/<message_id>/reactions/<reaction_id> call.
+ * The reaction_id comes from the `data.reaction_id` of a prior add.
+ */
+export function serializeRemoveReaction(messageId: string, reactionId: string): SerializedLarkCall {
+  return {
+    method: "DELETE",
+    url: `${LARK_API_BASE}/im/v1/messages/${encodeURIComponent(messageId)}/reactions/${encodeURIComponent(reactionId)}`,
+    payload: {},
+  }
+}
+
+/**
+ * Sniff the Lark `receive_id_type` + `receive_id` for a bare channel id
+ * (forward / merge-forward targets that carry only the destination id). Mirrors
+ * the prefix rule in `buildReceiveIdParams`: `ou_`/`on_` → open_id, else chat_id.
+ */
+export function sniffReceiveId(channelId: string): {
+  receiveIdType: string
+  receiveId: string
+} {
+  if (channelId.startsWith("ou_") || channelId.startsWith("on_")) {
+    return { receiveIdType: "open_id", receiveId: channelId }
+  }
+  return { receiveIdType: "chat_id", receiveId: channelId }
+}
+
+/**
+ * Build a POST /im/v1/messages/<message_id>/forward call — forward a single
+ * message verbatim to another conversation.
+ */
+export function serializeForward(
+  messageId: string,
+  receiveIdType: string,
+  receiveId: string
+): SerializedLarkCall {
+  return {
+    method: "POST",
+    url: `${LARK_API_BASE}/im/v1/messages/${encodeURIComponent(messageId)}/forward?receive_id_type=${encodeURIComponent(receiveIdType)}`,
+    payload: { receive_id: receiveId },
+  }
+}
+
+/**
+ * Build a POST /im/v1/messages/merge_forward call — merge several messages
+ * into one combined card and forward to another conversation.
+ */
+export function serializeMergeForward(
+  messageIds: readonly string[],
+  receiveIdType: string,
+  receiveId: string
+): SerializedLarkCall {
+  return {
+    method: "POST",
+    url: `${LARK_API_BASE}/im/v1/messages/merge_forward?receive_id_type=${encodeURIComponent(receiveIdType)}`,
+    payload: { receive_id: receiveId, message_id_list: [...messageIds] },
+  }
+}
+
+/**
+ * Build a PATCH /im/v1/messages/<message_id>/urgent_<via> call (加急).
+ * Requires the elevated `im:message.urgent*` scope; user ids are open_ids.
+ */
+export function serializeUrgent(
+  messageId: string,
+  userIds: readonly string[],
+  via: "app" | "sms" | "phone"
+): SerializedLarkCall {
+  return {
+    method: "PATCH",
+    url: `${LARK_API_BASE}/im/v1/messages/${encodeURIComponent(messageId)}/urgent_${via}?user_id_type=open_id`,
+    payload: { user_id_list: [...userIds] },
+  }
+}
+
+/**
  * Project an OutboundRequest into a send SerializedLarkCall (primary entry point).
  */
 export function serializeOutbound(req: OutboundRequest): SerializedLarkCall {
@@ -179,21 +371,60 @@ export async function serializeOutboundAsync(
 ): Promise<SerializedLarkCall> {
   const chatId = chatIdFromRef(req)
   const threadId = threadIdFromRef(req)
-  const { receiveIdType, receiveId } = buildReceiveIdParams(chatId)
+  // A4 — honour explicit open_id / user_id / email routing on the async path
+  // too (the production `send()` uses this serialiser). Previously this passed
+  // only the chat id, so a reply targeted at a user by user_id / email was
+  // silently delivered to a chat_id instead.
+  const { receiveIdType, receiveId } = resolveReceiveId(req, chatId)
 
   const body = await segmentsToLarkBodyAsync(req.segments, {
     adapterId,
     conversationKey: buildConversationKeyFromRef(req, chatId, threadId),
   })
 
+  // Reply anchor — same dedicated endpoint as the sync path (see
+  // `serializeSend`); the production `send()` uses THIS serialiser, so
+  // without the branch here `replyTo` never reached Lark at all.
+  const replyTargetId = req.replyTo?.messageId
+  if (replyTargetId) {
+    const payload: Record<string, unknown> = {
+      msg_type: body.msg_type,
+      content: body.content,
+      uuid: req.metadata.idempotencyKey,
+    }
+    if (threadId) payload["reply_in_thread"] = true
+    return {
+      method: "POST",
+      url: `${LARK_API_BASE}/im/v1/messages/${replyTargetId}/reply`,
+      payload,
+    }
+  }
+
+  // Thread send without an explicit replyTo — same anchored /reply routing
+  // as the sync path (see `serializeSend`); the create endpoint has no
+  // thread parameter.
+  if (threadId) {
+    const anchor = threadAnchorFromRef(req)
+    if (anchor) {
+      return {
+        method: "POST",
+        url: `${LARK_API_BASE}/im/v1/messages/${encodeURIComponent(anchor)}/reply`,
+        payload: {
+          msg_type: body.msg_type,
+          content: body.content,
+          reply_in_thread: true,
+          uuid: req.metadata.idempotencyKey,
+        },
+      }
+    }
+    throw new Error("Cannot deliver a Lark topic message without a persisted thread reply anchor")
+  }
+
   const payload: Record<string, unknown> = {
     receive_id: receiveId,
     msg_type: body.msg_type,
     content: body.content,
-  }
-  if (threadId) {
-    payload["reply_in_thread"] = true
-    payload["parent_id"] = threadId
+    uuid: req.metadata.idempotencyKey,
   }
 
   return {

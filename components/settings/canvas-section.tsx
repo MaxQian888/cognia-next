@@ -27,6 +27,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useCanvasSettingsStore } from "@/stores/canvas/canvas-settings-store"
+import { useKeybindingStore } from "@/stores/canvas/keybinding-store"
 import type { CanvasSettings } from "@/types/canvas/settings"
 import { isTauri } from "@/lib/tauri"
 import { KeybindingSettings } from "@/components/canvas/keybinding-settings"
@@ -98,7 +99,9 @@ export function CanvasSection() {
         </TabsContent>
         <TabsContent value="keys" className="m-0">
           <KeybindingsTab />
-          <ResetTabFooter onReset={() => resetSection("keybindings")} />
+          {/* Reset the real keybinding store (the settings object has no
+              keybindings field — the live bindings live in useKeybindingStore). */}
+          <ResetTabFooter onReset={() => useKeybindingStore.getState().resetAllBindings()} />
         </TabsContent>
         <TabsContent value="theme" className="m-0">
           <ThemeTab settings={settings} />
@@ -168,6 +171,20 @@ function EditorTab({ settings }: SectionProps) {
           </SelectContent>
         </Select>
       </Row>
+      <Toggle
+        label={t("fontLigatures")}
+        checked={e.fontLigatures}
+        onChange={(v) => update({ fontLigatures: v })}
+      />
+      <SliderRow
+        label={t("letterSpacing")}
+        value={e.letterSpacing}
+        min={-3}
+        max={8}
+        step={0.5}
+        unit="px"
+        onChange={(v) => update({ letterSpacing: v })}
+      />
       <SliderRow
         label={t("lineHeight")}
         value={e.lineHeight}
@@ -195,6 +212,17 @@ function EditorTab({ settings }: SectionProps) {
         onChange={(v) => update({ wordWrap: v })}
       />
       <Toggle label={t("minimap")} checked={e.minimap} onChange={(v) => update({ minimap: v })} />
+      {e.minimap && (
+        <SliderRow
+          label={t("minimapScale")}
+          value={e.minimapScale}
+          min={1}
+          max={3}
+          step={1}
+          unit="x"
+          onChange={(v) => update({ minimapScale: v })}
+        />
+      )}
       <Row label={t("lineNumbers")}>
         <Select
           value={e.lineNumbers}
@@ -227,10 +255,66 @@ function EditorTab({ settings }: SectionProps) {
           </SelectContent>
         </Select>
       </Row>
+      <Row label={t("renderLineHighlight")}>
+        <Select
+          value={e.renderLineHighlight}
+          onValueChange={(v) => update({ renderLineHighlight: v as typeof e.renderLineHighlight })}
+        >
+          <SelectTrigger className="w-48 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {(["none", "gutter", "line", "all"] as const).map((v) => (
+              <SelectItem key={v} value={v}>
+                {t(`renderLineHighlightOptions.${v}` as Parameters<typeof t>[0])}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Row>
       <Toggle
         label={t("scrollBeyondLastLine")}
         checked={e.scrollBeyondLastLine}
         onChange={(v) => update({ scrollBeyondLastLine: v })}
+      />
+      <Toggle
+        label={t("stickyScroll")}
+        checked={e.stickyScroll}
+        onChange={(v) => update({ stickyScroll: v })}
+      />
+      {e.stickyScroll && (
+        <SliderRow
+          label={t("stickyScrollMaxLines")}
+          value={e.stickyScrollMaxLines}
+          min={1}
+          max={10}
+          step={1}
+          onChange={(v) => update({ stickyScrollMaxLines: v })}
+        />
+      )}
+      <Toggle label={t("folding")} checked={e.folding} onChange={(v) => update({ folding: v })} />
+      {e.folding && (
+        <Row label={t("showFoldingControls")}>
+          <Select
+            value={e.showFoldingControls}
+            onValueChange={(v) =>
+              update({ showFoldingControls: v as typeof e.showFoldingControls })
+            }
+          >
+            <SelectTrigger className="w-48 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="always">{t("showFoldingControlsOptions.always")}</SelectItem>
+              <SelectItem value="mouseover">{t("showFoldingControlsOptions.mouseover")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </Row>
+      )}
+      <Toggle
+        label={t("inlineSuggest")}
+        checked={e.inlineSuggest}
+        onChange={(v) => update({ inlineSuggest: v })}
       />
       <Toggle
         label={t("autoClosingBrackets")}
@@ -286,6 +370,25 @@ function EditorTab({ settings }: SectionProps) {
           </SelectContent>
         </Select>
       </Row>
+      <Row label={t("cursorSmoothCaretAnimation")}>
+        <Select
+          value={e.cursorSmoothCaretAnimation}
+          onValueChange={(v) =>
+            update({ cursorSmoothCaretAnimation: v as typeof e.cursorSmoothCaretAnimation })
+          }
+        >
+          <SelectTrigger className="w-48 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {(["off", "explicit", "on"] as const).map((v) => (
+              <SelectItem key={v} value={v}>
+                {t(`cursorSmoothCaretAnimationOptions.${v}` as Parameters<typeof t>[0])}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Row>
       <Toggle
         label={t("smoothScrolling")}
         checked={e.smoothScrolling}
@@ -300,6 +403,24 @@ function EditorTab({ settings }: SectionProps) {
         label={t("bracketPairColorization")}
         checked={e.bracketPairColorization}
         onChange={(v) => update({ bracketPairColorization: v })}
+      />
+      <SliderRow
+        label={t("paddingTop")}
+        value={e.padding.top}
+        min={0}
+        max={40}
+        step={1}
+        unit="px"
+        onChange={(v) => update({ padding: { ...e.padding, top: v } })}
+      />
+      <SliderRow
+        label={t("paddingBottom")}
+        value={e.padding.bottom}
+        min={0}
+        max={40}
+        step={1}
+        unit="px"
+        onChange={(v) => update({ padding: { ...e.padding, bottom: v } })}
       />
       <Separator />
       <Toggle
@@ -605,26 +726,31 @@ function AccessibilityTab({ settings }: SectionProps) {
     <div className="space-y-5">
       <Toggle
         label={t("screenReaderOptimized")}
+        description={t("screenReaderOptimizedDesc")}
         checked={a.screenReaderOptimized}
         onChange={(v) => set({ accessibility: { ...a, screenReaderOptimized: v } })}
       />
       <Toggle
         label={t("highContrast")}
+        description={t("highContrastDesc")}
         checked={a.highContrast}
         onChange={(v) => set({ accessibility: { ...a, highContrast: v } })}
       />
       <Toggle
         label={t("reducedMotion")}
+        description={t("reducedMotionDesc")}
         checked={a.reducedMotion}
         onChange={(v) => set({ accessibility: { ...a, reducedMotion: v } })}
       />
       <Toggle
         label={t("focusIndicator")}
+        description={t("focusIndicatorDesc")}
         checked={a.focusIndicator}
         onChange={(v) => set({ accessibility: { ...a, focusIndicator: v } })}
       />
       <Toggle
         label={t("announceErrors")}
+        description={t("announceErrorsDesc")}
         checked={a.announceErrors}
         onChange={(v) => set({ accessibility: { ...a, announceErrors: v } })}
       />

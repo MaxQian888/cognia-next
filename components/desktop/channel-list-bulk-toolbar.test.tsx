@@ -15,6 +15,9 @@ function setup(overrides: Partial<Parameters<typeof ChannelListBulkToolbar>[0]> 
   const onDelete = jest.fn()
   const onPin = jest.fn()
   const onUnpin = jest.fn()
+  const onArchive = jest.fn()
+  const onUnarchive = jest.fn()
+  const onShare = jest.fn()
   const onClear = jest.fn()
   const utils = render(
     <ChannelListBulkToolbar
@@ -22,11 +25,14 @@ function setup(overrides: Partial<Parameters<typeof ChannelListBulkToolbar>[0]> 
       onDelete={onDelete}
       onPin={onPin}
       onUnpin={onUnpin}
+      onArchive={onArchive}
+      onUnarchive={onUnarchive}
+      onShare={onShare}
       onClear={onClear}
       {...overrides}
     />
   )
-  return { ...utils, onDelete, onPin, onUnpin, onClear }
+  return { ...utils, onDelete, onPin, onUnpin, onArchive, onUnarchive, onShare, onClear }
 }
 
 test("renders the i18n'd count with the selection size", () => {
@@ -44,11 +50,40 @@ test("clicking Pin and Unpin invokes their callbacks", async () => {
   expect(onUnpin).toHaveBeenCalledTimes(1)
 })
 
+test("clicking Share invokes the selected-conversation share callback", async () => {
+  const user = userEvent.setup()
+  const onShare = jest.fn()
+  setup({ onShare })
+
+  await user.click(screen.getByRole("button", { name: "share" }))
+
+  expect(onShare).toHaveBeenCalledTimes(1)
+})
+
 test("clicking Cancel (X) invokes onClear", async () => {
   const user = userEvent.setup()
   const { onClear } = setup()
   await user.click(screen.getByRole("button", { name: "cancel" }))
   expect(onClear).toHaveBeenCalledTimes(1)
+})
+
+test("active view shows Archive, which invokes onArchive", async () => {
+  const user = userEvent.setup()
+  const { onArchive } = setup()
+  await user.click(screen.getByRole("button", { name: "archive" }))
+  expect(onArchive).toHaveBeenCalledTimes(1)
+  // Pin/Unpin available in the active view; Unarchive is not.
+  expect(screen.getByRole("button", { name: "pin" })).toBeInTheDocument()
+  expect(screen.queryByRole("button", { name: "unarchive" })).toBeNull()
+})
+
+test("archived view swaps pin/archive for a single Unarchive action", async () => {
+  const user = userEvent.setup()
+  const { onUnarchive } = setup({ archived: true })
+  expect(screen.queryByRole("button", { name: "pin" })).toBeNull()
+  expect(screen.queryByRole("button", { name: "archive" })).toBeNull()
+  await user.click(screen.getByRole("button", { name: "unarchive" }))
+  expect(onUnarchive).toHaveBeenCalledTimes(1)
 })
 
 test("Delete opens the confirm dialog; the destructive action fires onDelete", async () => {

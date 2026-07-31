@@ -1,0 +1,96 @@
+{
+  "aiFeature": {
+    "customInstructions": {
+      "heading": "Custom instructions",
+      "placeholder": "Extra guidance for the model (focus areas, tone, language…)"
+    },
+    "model": {
+      "model": "Model",
+      "provider": "Provider",
+      "useDefault": "Use chat default"
+    }
+  },
+  "commitAi": {
+    "conventional": {
+      "description": "Constrain the generated message to the type(scope): summary format.",
+      "heading": "Conventional Commits"
+    },
+    "customInstructions": {
+      "heading": "Custom instructions",
+      "placeholder": "Extra guidance for the model (tone, scope conventions, language…)"
+    },
+    "description": "Show a button in the commit box to draft a message from the staged diff.",
+    "heading": "AI commit messages",
+    "model": {
+      "model": "Model",
+      "provider": "Provider",
+      "useDefault": "Use chat default"
+    }
+  },
+  "description": "AI commit-message generation and other Git panel preferences.",
+  "explainAi": {
+    "description": "Show an \"Explain\" button on file and commit diffs to summarize what changed and why.",
+    "heading": "AI change explanation"
+  },
+  "panel": {
+    "autoFetch": {
+      "description": "Periodically fetch from the remote in the background so ahead/behind stays current.",
+      "interval": "Interval (minutes)",
+      "label": "Auto-fetch"
+    },
+    "branchSort": {
+      "default": "Default",
+      "label": "Branch order",
+      "name": "Name (A–Z)"
+    },
+    "confirmDiscard": {
+      "description": "Ask before throwing away working-tree changes.",
+      "label": "Confirm before discarding"
+    },
+    "confirmForcePush": {
+      "description": "Ask before overwriting a remote branch with a force push.",
+      "label": "Confirm before force push"
+    },
+    "description": "How the panel presents diffs, guards destructive actions, automates commits, and stays in sync.",
+    "diffView": {
+      "inline": "Inline",
+      "label": "Diff view",
+      "sideBySide": "Side by side"
+    },
+    "fetchPrune": {
+      "description": "Remove remote-tracking refs that no longer exist on the remote.",
+      "label": "Prune on fetch"
+    },
+    "ignoreWhitespace": {
+      "description": "Hide whitespace-only differences in the diff viewer.",
+      "label": "Ignore whitespace changes"
+    },
+    "postCommit": {
+      "description": "Action run automatically after the Commit button succeeds.",
+      "label": "After commit",
+      "none": "Do nothing",
+      "push": "Push",
+      "sync": "Sync"
+    },
+    "pullRebase": {
+      "description": "Use --rebase for the default Pull.",
+      "label": "Pull with rebase"
+    },
+    "reset": "Reset panel preferences",
+    "smartCommit": {
+      "description": "When nothing is staged, the Commit button stages all changes first.",
+      "label": "Smart commit"
+    },
+    "timelineView": {
+      "graph": "Graph",
+      "label": "Default timeline view",
+      "list": "List"
+    },
+    "title": "Panel & workflow"
+  },
+  "reviewAi": {
+    "description": "Show an \"AI review\" button in the hunk review list to flag issues per hunk.",
+    "heading": "AI code review"
+  },
+  "title": "Source Control"
+}

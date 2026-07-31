@@ -55,7 +55,32 @@ mod tests {
         // yet — they're dispatcher-internal helpers. List them here when
         // the divergence is decided. Keep this list short or extend the
         // spec instead.
-        let allowed_missing: HashSet<&'static str> = HashSet::new();
+        // The host-neutral browser RPC family (ADR-0085) is served through its
+        // typed gateway but intentionally awaits a dedicated public-spec pass.
+        // Keep the exemption derived from the gateway's canonical list so a
+        // newly routed browser command cannot fail this gate merely because a
+        // second hand-maintained subset drifted.
+        let mut allowed_missing: HashSet<&'static str> =
+            crate::companion_api::browser_gateway::BROWSER_RPC_COMMANDS
+                .iter()
+                .copied()
+                .collect();
+        // These are service-token-only brain internals, not paired-device API.
+        // They are allowlisted for the shared dispatcher but deliberately
+        // absent from the public mobile Companion specification.
+        allowed_missing.extend([
+            "plugin_launch_js",
+            "plugin_invoke_js_callback",
+            "plugin_deactivate_js",
+            "plugin_stop_js",
+            "plugin_js_status",
+            "integration_ingress_register",
+            "integration_ingress_unregister",
+            "integration_ingress_get_url",
+            "integration_ingress_poll",
+            "integration_ingress_ack",
+            "integration_ingress_nack",
+        ]);
 
         let mut missing: Vec<&str> = Vec::new();
         for cmd in &known {

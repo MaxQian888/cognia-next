@@ -43,7 +43,7 @@ describe("MobileFeedbackPage", () => {
     })
     render(<Page />)
     fireEvent.click(screen.getByTestId("feedback-row-copy"))
-    await waitFor(() => expect(writeText).toHaveBeenCalled())
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(expect.stringContaining("Cognia ")))
     await waitFor(() => expect(toastMock.success).toHaveBeenCalled())
   })
 

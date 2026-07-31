@@ -28,9 +28,17 @@
  * through React props or context.
  */
 
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import type { LlmClient } from "@/lib/twin/distill/llm"
-import type { Goal, GoalConfig, GoalDefaults, GoalStatus } from "@/types/goal"
+import type {
+  ContinuationGate,
+  Goal,
+  GoalConfig,
+  GoalCreatedRisk,
+  GoalDefaults,
+  GoalRunOrigin,
+  GoalStatus,
+} from "@/types/goal"
 import { isTerminalGoalStatus } from "@/types/goal"
 import {
   appendGoalEvent,
@@ -44,8 +52,13 @@ import {
 } from "@/lib/db/goals"
 import { isTauri } from "@/lib/platform/detect"
 import { getDb } from "@/lib/db/schema"
+import { getActiveLoopForSession } from "@/lib/db/loops"
 import { readForResolution } from "@/lib/db/conversation-overrides"
 import { append as appendConnectorAudit } from "@/lib/db/connector-audit"
+import { getCharacter } from "@/lib/db/characters"
+import { classifyRisk } from "@/lib/policy/risk/classify-risk"
+import { requiredCeremony } from "@/lib/policy/risk/ceremony"
+import { buildGoalRiskInput } from "./risk-input"
 import { redactObjective } from "./redact-objective"
 import { decomposeObjective, toSubgoals } from "./subgoals"
 import { onGoalTerminal, toGoalHookPayload } from "./completion-linkage"
@@ -74,6 +87,21 @@ export class GoalImBlocked extends Error {
     this.adapterId = adapterId
   }
 }
+
+/**
+ * Thrown by `GoalRuntime.createGoal` when the session already runs an
+ * active self-paced `/loop` — both pump the chat hook's turn-complete
+ * driver, so running them together would double-dispatch continuations.
+ * The mirror check lives in `lib/loop/runtime.ts:createLoop`.
+ */
+export class GoalLoopConflict extends Error {
+  constructor(sessionId: string) {
+    super(
+      `goal blocked: session ${sessionId} has an active self-paced /loop driving the same turn loop`
+    )
+    this.name = "GoalLoopConflict"
+  }
+}
 import { renderObjectiveUpdatedMessage } from "./prompts"
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -95,6 +123,8 @@ export const DEFAULT_GOAL_CONFIG: GoalConfig = {
   maxTokens: 200_000,
   maxJudgeFailures: 3,
   timeoutMs: 30 * 60_000,
+  // ADR-0070: risk-driven ceremony is on unless explicitly opted out.
+  riskGating: true,
 }
 
 /**
@@ -109,12 +139,23 @@ export function resolveGoalConfig(
   return {
     maxTurns: overrides.maxTurns ?? defaults?.maxTurns ?? DEFAULT_GOAL_CONFIG.maxTurns,
     maxTokens: overrides.maxTokens ?? defaults?.maxTokens ?? DEFAULT_GOAL_CONFIG.maxTokens,
+    // Optional per-turn USD ceiling — no hard default (undefined ⇒ off).
+    maxBudgetUsd: overrides.maxBudgetUsd ?? defaults?.maxBudgetUsd,
     maxJudgeFailures:
       overrides.maxJudgeFailures ??
       defaults?.maxJudgeFailures ??
       DEFAULT_GOAL_CONFIG.maxJudgeFailures,
     timeoutMs: overrides.timeoutMs ?? defaults?.timeoutMs ?? DEFAULT_GOAL_CONFIG.timeoutMs,
     inlineStopCondition: overrides.inlineStopCondition,
+    // The acceptance gate had no creation-time passthrough — it was only
+    // reachable post-hoc via the settings tab, so `createGoal({ config: {
+    // requireAcceptance: true } })` silently dropped it. ADR-0070's raise-only
+    // guarantee depends on reading the caller's own choice here, so it is
+    // threaded through now. No app-level default: `GoalDefaults` has no mirror.
+    requireAcceptance: overrides.requireAcceptance,
+    // Risk-driven ceremony (ADR-0070). Default ON — an explicit `false` (per
+    // goal or as a settings default) is the only way out.
+    riskGating: overrides.riskGating ?? defaults?.riskGating ?? true,
     // Judge customization + pacing — optional, no hard default (undefined ⇒
     // the consumer falls back to its own built-in: chat model / temp 0 /
     // 200 tokens / no delay).
@@ -126,6 +167,12 @@ export function resolveGoalConfig(
     manualContinue: overrides.manualContinue ?? defaults?.manualContinue,
     continuationIntervalMs: overrides.continuationIntervalMs ?? defaults?.continuationIntervalMs,
     quietHours: overrides.quietHours ?? defaults?.quietHours,
+    // Completion-promise gate + adaptive pacing. The promise TEXT is
+    // per-goal only (a global default token would weaken the gate); the
+    // denial cap and the pacing opt-in mirror the other defaults.
+    completionPromise: overrides.completionPromise,
+    maxPromiseDenials: overrides.maxPromiseDenials ?? defaults?.maxPromiseDenials,
+    adaptivePacing: overrides.adaptivePacing ?? defaults?.adaptivePacing,
   }
 }
 
@@ -224,6 +271,51 @@ class GoalRuntime {
    * (active | paused) goal, it's terminated as `stopped` first so the
    * session-scoped uniqueness invariant holds.
    */
+  /**
+   * Classify a goal and merge the ceremony it owes into its config (ADR-0070
+   * Phase 2). Returns the possibly-raised config plus the assessment to record
+   * on `goal_created`.
+   *
+   * Two invariants, both load-bearing:
+   *  - **Raise only.** Every merge is `configured || raised`, so a flag the user
+   *    set true survives a `low` assessment. The policy adds ceremony; it never
+   *    removes any.
+   *  - **`manualContinue` is interactive-only.** Holding every turn for a human
+   *    who isn't there would park a headless goal forever — a hang, not a gate.
+   *    The ceremony map cannot see the origin, so the suppression lives here.
+   */
+  private async applyGoalRiskGating(params: {
+    config: GoalConfig
+    safeObjective: string
+    characterId?: string
+    appSettings: AppSettings | null
+    origin: GoalRunOrigin
+  }): Promise<{ config: GoalConfig; risk?: GoalCreatedRisk }> {
+    const { config, safeObjective, characterId, appSettings, origin } = params
+    if (config.riskGating === false) return { config }
+
+    const character = characterId
+      ? await getCharacter(characterId).catch(() => undefined)
+      : undefined
+    const assessment = classifyRisk(buildGoalRiskInput({ safeObjective, character, appSettings }))
+    const ceremony = requiredCeremony(assessment)
+    if (!ceremony.gate) return { config }
+
+    return {
+      config: {
+        ...config,
+        requireAcceptance: config.requireAcceptance === true || ceremony.requireAcceptance,
+        manualContinue:
+          config.manualContinue === true || (ceremony.manualContinue && origin === "interactive"),
+      },
+      risk: {
+        tier: assessment.tier,
+        surfaces: [...new Set(assessment.surfaces.map((s) => s.id))],
+        reason: assessment.reason,
+      },
+    }
+  }
+
   async createGoal(input: {
     sessionId: string
     characterId?: string
@@ -232,6 +324,12 @@ class GoalRuntime {
     nameHints?: Iterable<string>
     appSettings?: AppSettings | null
     startPaused?: boolean
+    /**
+     * Where this goal is being created from (ADR-0070 Phase 2). Headless
+     * origins never get a risk-raised `manualContinue` — nobody is there to
+     * click Continue, so the goal would park forever. Defaults to interactive.
+     */
+    origin?: GoalRunOrigin
   }): Promise<Goal> {
     // ── v49 IM guardrail (inbox-optimization plan) ───────────────────────
     // Self-driving goals must be opted-in per-IM-conversation. If the
@@ -279,6 +377,13 @@ class GoalRuntime {
       }
     }
 
+    // Self-paced /loop exclusivity — both features pump the same
+    // turn-complete driver (see GoalLoopConflict docstring).
+    const activeLoop = await getActiveLoopForSession(input.sessionId)
+    if (activeLoop?.mode === "self_paced") {
+      throw new GoalLoopConflict(input.sessionId)
+    }
+
     const existing = await getOpenGoalForSession(input.sessionId)
     if (existing) {
       this.fireAbort(existing.id)
@@ -289,11 +394,24 @@ class GoalRuntime {
         payload: { kind: "user_stopped" },
       })
     }
-    const config = resolveGoalConfig(input.appSettings ?? null, input.config ?? {})
+    const resolved = resolveGoalConfig(input.appSettings ?? null, input.config ?? {})
     const { safeObjective, redactionMapEnc } = await redactObjective(
       input.rawObjective,
       input.nameHints
     )
+
+    // ── Pre-start risk assessment (ADR-0070 Phase 2) ──────────────────────
+    // Classify the redacted objective + the session's configured posture and
+    // raise the ceremony this goal owes. Raise-only: a flag the user set
+    // explicitly is never cleared here.
+    const { config, risk } = await this.applyGoalRiskGating({
+      config: resolved,
+      safeObjective,
+      characterId: input.characterId,
+      appSettings: input.appSettings ?? null,
+      origin: input.origin ?? "interactive",
+    })
+
     const status: GoalStatus = input.startPaused ? "paused" : "active"
     const row = await createGoal({
       id: crypto.randomUUID(),
@@ -312,7 +430,7 @@ class GoalRuntime {
     await appendGoalEvent({
       goalId: row.id,
       kind: "goal_created",
-      payload: { kind: "goal_created", safeObjective, config },
+      payload: { kind: "goal_created", safeObjective, config, ...(risk ? { risk } : {}) },
     })
     void getPluginEventHooks().dispatchGoalCreate(toGoalHookPayload(row))
     return row
@@ -346,6 +464,10 @@ class GoalRuntime {
       generationId: newGen,
       // Reset judge failure count — old failures shouldn't bleed into the new objective.
       judgeFailureCount: 0,
+      // Same for the completion-promise gate: a pending verification turn and
+      // accumulated denials are meaningless against a different objective.
+      awaitingPromise: false,
+      promiseDenialCount: 0,
     })
     await appendGoalEvent({
       goalId,
@@ -475,6 +597,46 @@ class GoalRuntime {
     void emitGoalStatus(updated)
     if (updated) void getPluginEventHooks().dispatchGoalUpdate(toGoalHookPayload(updated))
     return updated
+  }
+
+  /**
+   * Persist the pacing gate's decision so the status pill can render
+   * "next continuation at HH:mm" without new subscription plumbing
+   * (adaptive pacing): a defer stamps `nextContinuationAt` + source and logs
+   * a `pacing_decided` event; a send clears the stamp. Best-effort — pacing
+   * bookkeeping must never break the loop itself.
+   */
+  async recordPacingDecision(
+    goalId: string,
+    gate: ContinuationGate,
+    suggestedMs?: number
+  ): Promise<void> {
+    try {
+      if (gate.kind === "defer") {
+        await updateGoal(goalId, {
+          nextContinuationAt: gate.untilMs,
+          nextContinuationSource: gate.reason,
+        })
+        await appendGoalEvent({
+          goalId,
+          kind: "pacing_decided",
+          payload: {
+            kind: "pacing_decided",
+            source: gate.reason,
+            untilMs: gate.untilMs,
+            ...(typeof suggestedMs === "number" ? { suggestedMs } : {}),
+          },
+        })
+      } else if (gate.kind === "send") {
+        await updateGoal(goalId, {
+          nextContinuationAt: undefined,
+          nextContinuationSource: undefined,
+        })
+      }
+      // hold → nothing to stamp; the pill already shows the Continue button.
+    } catch {
+      // Best-effort.
+    }
   }
 
   // ───────────────────────────────────────────────────────────────────────────

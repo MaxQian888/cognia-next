@@ -1,0 +1,54 @@
+---
+title: Policy, Routing and Certification
+description: Feature flags, provider profiles, gateway route tickets, and the signed compatibility-manifest pipeline that gates auto runtime selection.
+---
+
+# Policy, Routing and Certification
+
+## Feature flags
+
+Five flags (env `NEXT_PUBLIC_*` > `localStorage` > default **off**; reader in
+`lib/ai/agent/execution/feature-flags.ts`, same idiom as the canvas flags —
+env/localStorage only, no settings writer; this is an ops-gated rollout):
+
+| Flag | Gates |
+| --- | --- |
+| `agentExecutionResolverV2` | The resolver becomes the execution authority (Phase 6 cutover) |
+| `genericAgentHostCommands` | `agent_*` Tauri commands + `agent://message` channel |
+| `gatewayAgentRouteTickets` | Gateway route-ticket minting + ticket-scoped requests |
+| `headlessLlmGateway` | `cognia-server` gateway hosting |
+| `experimentalAnthropicDeploymentAgentSdk` | Per-deployment opt-in card for Claude-Agent-SDK-over-gateway |
+
+## Provider profiles (ADR-0090 Phase 1)
+
+`ProviderProfile → DeploymentProfile → TransportProfile` with
+`CredentialReference`s only (legacy-provider-settings · subscription-vault ·
+secret-store · env). Relay catalog entries fold into their vendor via
+`relayOf`; the legacy provider id **is** the deployment id, so nothing loses
+identity. Desktop persists in Dexie (v121, double-written from settings with
+hash-guarded derivation); headless mirrors through `SqliteProfileStore`. The
+shared header-policy fixture (`packages/provider-types/fixtures/`) pins
+TS↔Rust byte parity for the transport header validator.
+
+## Gateway route tickets (Phase 2)
+
+A ticket (`sk-cognia-rt-…`, memory-only secret, metadata persisted) freezes a
+candidate deployment set + model bindings at mint time. Requests on a ticket
+bypass alias/decide entirely; unmapped models 400; credential resolution
+happens per attempt at send time; failover is pre-first-byte only, sticky
+affinity never switches accounts on 401/403. Snapshot publication is CAS'd
+(`profileVersion` + authority) — no last-writer-wins between desktop and
+headless publishers.
+
+## Certification (Phase 5)
+
+`auto` runtime adoption accepts exactly three evidence levels —
+`native`, `vendor-certified`, `cognia-verified` — from **signed**
+`CompatibilityManifest` bundles (Ed25519; CI issuer or explicitly-local).
+Probes and opt-ins are *typed out* of the gate: they cannot reach
+`certifiedPath` because only `evaluateCompatibilityGate` output can construct
+it. Staleness invalidates on ANY version-axis drift (SDK, claude-code,
+gateway crate, suite) — pinned by `scripts/gates/check-runtime-versions.mjs`.
+Per-capability circuit breaking (3 consecutive failures → 10-minute open)
+can only DOWN-rank. Vendor certification is a billing-acknowledged local CLI
+(`scripts/certify/run-vendor-certification.mjs`), refused in CI.

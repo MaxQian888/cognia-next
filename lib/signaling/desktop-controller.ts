@@ -7,7 +7,7 @@
  * Responsibilities:
  *
  * 1. **Hydrate at boot.** After Dexie is open, push the current list of
- *    paired devices (those with a `rendezvousId` + `rendezvousSecret`)
+ *    paired devices (those with a v2 room descriptor + host key reference)
  *    plus the current signaling URL / ICE / TURN configuration to the
  *    Rust hub via Tauri commands.
  * 2. **Subscribe to changes.** Dexie's `liveQuery` fires on every
@@ -45,14 +45,22 @@ function isTauriRenderer(): boolean {
 import { listPairedDevices } from "@/lib/db/paired-devices"
 import { getSettings } from "@/lib/db/settings"
 import { resolveTurnServerCredentials } from "@/lib/credentials/turn-credentials"
+import {
+  startTurnProvisioner,
+  type ProvisionerHandle,
+} from "@/lib/credentials/turn-provisioning-cache"
+import { publishProvisionedTurnServers } from "@/lib/signaling/provisioned-turn-state"
 // Leaf `types` module (constants only) — avoids the `@/lib/signaling` barrel
 // and its TDZ cycle described above.
 import { DEFAULT_SIGNALING_URL } from "@/lib/signaling/types"
+import type { RoomDescriptorV2 } from "@/lib/signaling/v2-crypto"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 interface DeviceRegistration {
   deviceId: string
   rendezvousId: string
-  rendezvousSecret: string
+  roomDescriptor: RoomDescriptorV2
+  signalingKeyRef: string
 }
 
 interface IceServerSpec {
@@ -80,6 +88,10 @@ const DEFAULT_STUN: IceServerSpec[] = [
 export interface DesktopSignalingControllerOptions {
   /** Override the Tauri-detection (test injection). */
   isTauriOverride?: boolean
+  /** Test injection of the settings reader (defaults to Dexie `getSettings`). */
+  getSettingsOverride?: () => Promise<AppSettings>
+  /** Test injection of the TURN provisioner (defaults to `startTurnProvisioner`). */
+  startTurnProvisionerOverride?: typeof startTurnProvisioner
 }
 
 /**
@@ -103,12 +115,14 @@ export function installDesktopSignalingController(
         (r) =>
           !r.revokedAt &&
           typeof r.rendezvousId === "string" &&
-          typeof r.rendezvousSecret === "string"
+          r.signalingRoomDescriptor?.v === 2 &&
+          typeof r.signalingKeyRef === "string"
       )
       const payload: DeviceRegistration[] = eligible.map((r) => ({
         deviceId: r.deviceId,
         rendezvousId: r.rendezvousId!,
-        rendezvousSecret: r.rendezvousSecret!,
+        roomDescriptor: r.signalingRoomDescriptor!,
+        signalingKeyRef: r.signalingKeyRef!,
       }))
       void transport
         .call<void>("companion_signaling_sync_devices", { devices: payload })
@@ -121,26 +135,81 @@ export function installDesktopSignalingController(
     },
   })
 
-  const settingsSub: Subscription = liveQuery(() => getSettings()).subscribe({
-    next: (settings) => {
-      // Resolve any `"kr:<keyId>"` sentinels in turnServers into real
-      // credentials by reading from the OS keyring. The Rust hub
-      // expects plaintext username + credential — the keyring lookup
-      // is the only place we ever hold the secret in renderer memory.
-      void (async () => {
-        const turn = settings.turnServers
-          ? await resolveTurnServerCredentials(settings.turnServers)
-          : []
-        const patch: SignalingConfigPatch = {
-          enabled: settings.webrtcEnabled ?? true,
-          signalingUrl: settings.signalingUrl ?? DEFAULT_SIGNALING_URL,
-          iceServers: normalizeServers(settings.iceServers) ?? DEFAULT_STUN,
-          turnServers: normalizeServers(turn) ?? [],
-        }
-        await transport.call<void>("companion_signaling_configure", { patch })
-      })().catch((err) => {
-        console.warn("companion_signaling_configure failed", err)
+  const readSettings = options.getSettingsOverride ?? getSettings
+  const startProvisioner = options.startTurnProvisionerOverride ?? startTurnProvisioner
+
+  // ADR-0021 — automatic ephemeral-TURN provisioning, mirroring the mobile
+  // controller. The desktop holds its OWN provider secret in its OS keyring
+  // and mints independent ephemeral credentials (TURN allocations are
+  // per-credential, so the peers don't share secrets).
+  let provisioner: ProvisionerHandle | null = null
+  let lastProviderKey: string | null = null
+  let lastSettings: AppSettings | null = null
+  let providerGeneration = 0
+  let configurationGeneration = 0
+
+  const pushConfigure = async (
+    settings: AppSettings,
+    providerServers: RTCIceServer[],
+    generation: number
+  ): Promise<void> => {
+    // Resolve any `"kr:<keyId>"` sentinels in turnServers into real
+    // credentials from the OS keyring before handing them to the Rust hub
+    // (which expects plaintext username + credential).
+    const turn = settings.turnServers
+      ? await resolveTurnServerCredentials(settings.turnServers)
+      : []
+    if (generation !== configurationGeneration) return
+    const patch = buildSignalingConfigPatch(settings, turn, providerServers)
+    await transport.call<void>("companion_signaling_configure", { patch })
+  }
+
+  const manageProvisioner = (settings: AppSettings): void => {
+    lastSettings = settings
+    const tp = settings.turnProvider
+    const key = tp && tp.kind !== "none" ? JSON.stringify(tp) : ""
+    if (key === lastProviderKey) return
+    lastProviderKey = key
+    const generation = ++providerGeneration
+    provisioner?.stop()
+    provisioner = null
+    publishProvisionedTurnServers([])
+    if (key && tp) {
+      provisioner = startProvisioner({
+        provider: tp,
+        onRefresh: (iceServers) => {
+          if (generation !== providerGeneration || !lastSettings) return
+          publishProvisionedTurnServers(iceServers)
+          const configureGeneration = ++configurationGeneration
+          void pushConfigure(lastSettings, iceServers, configureGeneration).catch((err) => {
+            console.warn("desktop-signaling-controller: provisioner re-push failed", err)
+          })
+        },
       })
+      const current = provisioner.current()
+      if (current.length > 0) publishProvisionedTurnServers(current)
+    }
+  }
+
+  const handleSettings = (settings: AppSettings): void => {
+    manageProvisioner(settings)
+    const generation = ++configurationGeneration
+    void pushConfigure(settings, provisioner?.current() ?? [], generation).catch((err) => {
+      console.warn("companion_signaling_configure failed", err)
+    })
+  }
+
+  // Initial deterministic push (does not depend on the liveQuery first-fire,
+  // which is unreliable under fake-indexeddb in tests).
+  void readSettings()
+    .then(handleSettings)
+    .catch((err) => {
+      console.warn("desktop-signaling-controller: initial settings read failed", err)
+    })
+
+  const settingsSub: Subscription = liveQuery(() => readSettings()).subscribe({
+    next: (settings) => {
+      handleSettings(settings)
     },
     error: (err) => {
       console.warn("desktop-signaling-controller: settings query error", err)
@@ -150,6 +219,28 @@ export function installDesktopSignalingController(
   return () => {
     devicesSub.unsubscribe()
     settingsSub.unsubscribe()
+    providerGeneration += 1
+    configurationGeneration += 1
+    provisioner?.stop()
+    publishProvisionedTurnServers([])
+  }
+}
+
+/**
+ * Build the `SignalingConfigPatch` sent to the Rust hub. Static STUN goes in
+ * `iceServers`; static (keyring-resolved) TURN plus any provider-provisioned
+ * ephemeral relays are merged into `turnServers`. Exported for unit tests.
+ */
+export function buildSignalingConfigPatch(
+  settings: AppSettings,
+  resolvedTurn: RTCIceServer[],
+  providerServers: RTCIceServer[]
+): SignalingConfigPatch {
+  return {
+    enabled: settings.webrtcEnabled ?? true,
+    signalingUrl: settings.signalingUrl ?? DEFAULT_SIGNALING_URL,
+    iceServers: normalizeServers(settings.iceServers) ?? DEFAULT_STUN,
+    turnServers: normalizeServers([...resolvedTurn, ...providerServers]) ?? [],
   }
 }
 

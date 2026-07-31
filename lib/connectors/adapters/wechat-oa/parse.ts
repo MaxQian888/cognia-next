@@ -3,12 +3,14 @@
  *
  * The Rust webhook handler verifies the signature, decrypts the safe-mode
  * payload, and emits the inner message XML. This parser reads the WeChat
- * message fields (CDATA-wrapped) and projects text / image / voice / video
- * messages. Public-account chats are always 1:1, so `selfMentioned` is true
- * and the at-gate's mention strategy passes.
+ * message fields (CDATA-wrapped) and projects text / image / voice / video /
+ * link / location messages. Public-account chats are always 1:1, so
+ * `selfMentioned` is true and the at-gate's mention strategy passes.
  *
- * Event pushes (subscribe / unsubscribe / menu click) are not message events;
- * they return null in v1 (no message persistence).
+ * Event pushes: `subscribe` becomes a `kind:"system"` / `member_added` event
+ * (the bus welcome flow consumes it and can greet the new follower), menu
+ * `CLICK` becomes a normalized text message carrying the EventKey; other
+ * events are dropped.
  */
 
 import type { NormalizedInboundEvent, PlatformIdentity } from "@/types/connectors/event"
@@ -27,6 +29,103 @@ export function extractXmlField(xml: string, field: string): string | undefined 
   return inner
 }
 
+interface Envelope {
+  adapterId: string
+  selfId: string
+  fromUser: string
+  conversationKey: string
+  sender: PlatformIdentity
+  timestamp: number
+}
+
+function buildEnvelope(
+  adapterId: string,
+  selfId: string,
+  fromUser: string,
+  createTime: number
+): Envelope {
+  const conversationKey = buildConversationKey("wechat-oa", adapterId, fromUser)
+  return {
+    adapterId,
+    selfId,
+    fromUser,
+    conversationKey,
+    sender: {
+      id: `wxoa:${adapterId}:${fromUser}`,
+      platform: "wechat-oa",
+      adapterId,
+      remoteUserId: fromUser,
+    },
+    timestamp: createTime > 0 ? createTime * 1000 : Date.now(),
+  }
+}
+
+function buildEvent(
+  env: Envelope,
+  messageId: string,
+  segments: MessageSegment[],
+  xml: string,
+  overrides?: Partial<Pick<NormalizedInboundEvent, "kind" | "systemKind" | "mentions">>
+): NormalizedInboundEvent {
+  return {
+    platform: "wechat-oa",
+    adapterId: env.adapterId,
+    selfId: env.selfId,
+    messageId,
+    conversationRef: { platform: "wechat-oa", adapterId: env.adapterId, openId: env.fromUser },
+    conversationKey: env.conversationKey,
+    sender: env.sender,
+    channel: { id: env.conversationKey, kind: "private", platformChannelId: env.fromUser },
+    segments,
+    plainText: segmentsToPlainText(segments),
+    mentions: { selfMentioned: true, users: [] },
+    timestamp: env.timestamp,
+    raw: xml,
+    kind: "create",
+    ...overrides,
+  }
+}
+
+/**
+ * Project an event push. `subscribe` mirrors what other adapters emit when
+ * the bot is added to a chat (`kind:"system"` + `systemKind:"member_added"`,
+ * empty segments — see OneBot's `v11SystemEvent` and the bus's
+ * `applySystemEvent`), so `maybeSendWelcome` can greet the new follower.
+ */
+function parseEventPush(env: Envelope, xml: string): NormalizedInboundEvent | null {
+  const event = extractXmlField(xml, "Event")
+  if (!event) return null
+  switch (event) {
+    case "subscribe":
+      return buildEvent(env, `event:subscribe:${env.timestamp}:${env.fromUser}`, [], xml, {
+        kind: "system",
+        systemKind: "member_added",
+        mentions: { selfMentioned: false, users: [] },
+      })
+    case "unsubscribe":
+      // The follower left; there is nothing to persist and no one left to
+      // reply to. Dropped deliberately (no member_removed audit in v1).
+      return null
+    case "CLICK": {
+      // A custom-menu click opens the 48h customer-service window; surface it
+      // as a normalized text message whose plainText is the EventKey so quick
+      // commands / the AI loop can respond to it.
+      const eventKey = extractXmlField(xml, "EventKey")
+      if (!eventKey) return null
+      return buildEvent(
+        env,
+        `event:CLICK:${env.timestamp}:${env.fromUser}`,
+        [{ type: "text", text: eventKey }],
+        xml
+      )
+    }
+    default:
+      // VIEW (link opened in the browser), SCAN, LOCATION reporting, etc.
+      // carry no conversational intent — dropped.
+      return null
+  }
+}
+
 export function parseWechatOaXml(
   adapterId: string,
   selfId: string,
@@ -35,12 +134,17 @@ export function parseWechatOaXml(
   const msgType = extractXmlField(xml, "MsgType")
   const fromUser = extractXmlField(xml, "FromUserName")
   if (!msgType || !fromUser) return null
-  // Event pushes are not chat messages in v1.
-  if (msgType === "event") return null
 
   const createTime = Number(extractXmlField(xml, "CreateTime") ?? "0")
+  const env = buildEnvelope(adapterId, selfId, fromUser, createTime)
+
+  if (msgType === "event") return parseEventPush(env, xml)
+
   const msgId = extractXmlField(xml, "MsgId") ?? `${createTime}:${fromUser}`
 
+  // GAP: media upload/download — `wxmedia://<MediaId>` pseudo-URLs are not
+  // resolved to fetchable bytes (needs /cgi-bin/media/get on the send-path
+  // token); downstream consumers treat them as opaque references.
   const segments: MessageSegment[] = []
   switch (msgType) {
     case "text": {
@@ -70,32 +174,32 @@ export function parseWechatOaXml(
       segments.push({ type: "video", url: `wxmedia://${mediaId ?? ""}` })
       break
     }
+    case "link": {
+      // No dedicated link segment exists in the MessageSegment union; carry
+      // title + description + url as text so triggers and the AI loop see it.
+      const title = extractXmlField(xml, "Title")
+      const desc = extractXmlField(xml, "Description")
+      const url = extractXmlField(xml, "Url")
+      const text = [title, desc, url].filter(Boolean).join("\n")
+      if (text) segments.push({ type: "text", text })
+      break
+    }
+    case "location": {
+      // Location_X is latitude, Location_Y is longitude.
+      const lat = Number(extractXmlField(xml, "Location_X"))
+      const lon = Number(extractXmlField(xml, "Location_Y"))
+      const label = extractXmlField(xml, "Label")
+      if (Number.isFinite(lat) && Number.isFinite(lon)) {
+        segments.push({ type: "location", lat, lon, name: label || undefined })
+      } else if (label) {
+        segments.push({ type: "text", text: `Location: ${label}` })
+      }
+      break
+    }
     default:
       return null
   }
+  if (segments.length === 0 && msgType !== "text") return null
 
-  const conversationKey = buildConversationKey("wechat-oa", adapterId, fromUser)
-  const sender: PlatformIdentity = {
-    id: `wxoa:${adapterId}:${fromUser}`,
-    platform: "wechat-oa",
-    adapterId,
-    remoteUserId: fromUser,
-  }
-
-  return {
-    platform: "wechat-oa",
-    adapterId,
-    selfId,
-    messageId: msgId,
-    conversationRef: { platform: "wechat-oa", adapterId, openId: fromUser },
-    conversationKey,
-    sender,
-    channel: { id: conversationKey, kind: "private", platformChannelId: fromUser },
-    segments,
-    plainText: segmentsToPlainText(segments),
-    mentions: { selfMentioned: true, users: [] },
-    timestamp: createTime > 0 ? createTime * 1000 : Date.now(),
-    raw: xml,
-    kind: "create",
-  }
+  return buildEvent(env, msgId, segments, xml)
 }

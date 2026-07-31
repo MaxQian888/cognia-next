@@ -29,6 +29,20 @@ describe("computeRuntimeAvailability", () => {
     expect(map["claude-code"]).toBe("no-agent")
     expect(map["gemini-cli"]).toBe("no-agent")
     expect(map["cursor-cli"]).toBe("no-agent")
+    // The widened preset catalog is fully covered (not just the original four).
+    expect(map.droid).toBe("no-agent")
+    expect(map["opencode-server"]).toBe("no-agent")
+    expect(map["qwen-code"]).toBe("no-agent")
+    expect(map["copilot-cli"]).toBe("no-agent")
+  })
+
+  it("marks a widened-catalog preset (droid) ready when its agent is connected", () => {
+    const map = computeRuntimeAvailability({
+      apiKey: "sk",
+      agents: [{ id: "d1", enabled: true, metadata: { preset: "droid" } }],
+      connectionStatus: { d1: "connected" },
+    })
+    expect(map.droid).toBe("ready")
   })
 
   it("returns disconnected when a matching agent exists but is not connected", () => {

@@ -1,5 +1,5 @@
 import { CLAUDE_CODE_AGENT } from "./claude-code"
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 
 function mkServer(
   partial: Pick<McpServer, "name" | "transport" | "config"> & {

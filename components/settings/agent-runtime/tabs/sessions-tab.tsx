@@ -56,8 +56,9 @@ import {
 } from "@/lib/db/sessions"
 import { getDb } from "@/lib/db/schema"
 import type { SessionUsageRow } from "@/lib/db/session-usage"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import { useChatStore } from "@/stores/chat"
+import { loggers } from "@cognia/logging"
 
 interface RowSummary {
   session: ChatSession
@@ -150,14 +151,33 @@ export function SessionsTab() {
     toast.success(t("resumedToast", { title: session.title || session.id }))
   }
 
-  const onFork = async (session: ChatSession) => {
+  /**
+   * Low-level SDK-session fork, kept only on this runtime/debug surface.
+   *
+   * The chat-side entry to this was removed: `branchSessionAtMessage` is a
+   * superset for anything a user wants (it reuses the same SDK fork at the tail
+   * AND carries the messages, the lineage and every per-session setting). What
+   * survives here is the raw operation — a new session bound to the parent's
+   * SDK conversation with no transcript — which is occasionally what you want
+   * when inspecting the runtime, and nothing else offers it.
+   */
+  const onForkSdkSession = async (session: ChatSession) => {
     setBusyId(session.id)
     try {
       const next = await forkSessionFromParent(session.id)
       setActiveSession(next.id)
       toast.success(t("forkedToast", { title: next.title }))
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
+      // `forkSessionFromParent` throws a bare English Error when the parent has
+      // no `sdkSessionId` yet — which is *always* the case for providers that
+      // never issue one. Surfacing `err.message` put untranslated internals in
+      // front of the user; the reason is already conveyed by the disabled state
+      // and its tooltip, so the toast just names the failure.
+      toast.error(t("forkFailedToast"))
+      loggers.chat.warn("sdk-session-fork-failed", {
+        sessionId: session.id,
+        err: err instanceof Error ? err.message : String(err),
+      })
     } finally {
       setBusyId(null)
     }
@@ -285,7 +305,7 @@ export function SessionsTab() {
                             size="icon"
                             variant="ghost"
                             className="size-7"
-                            onClick={() => void onFork(r.session)}
+                            onClick={() => void onForkSdkSession(r.session)}
                             disabled={busyId === r.session.id || !r.session.sdkSessionId}
                             aria-label={t("fork")}
                             title={r.session.sdkSessionId ? t("fork") : t("forkDisabledTip")}

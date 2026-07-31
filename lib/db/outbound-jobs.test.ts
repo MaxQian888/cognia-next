@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for lib/db/outbound-jobs.ts — outbound delivery queue CRUD.
  */
@@ -13,17 +14,30 @@ import {
   markSent,
   markFailed,
   markDeadlettered,
+  replayDeadlettered,
+  waitForOutboundTerminal,
+  unclaimSending,
+  recoverStaleSendingJobs,
+  sweepTerminalOutboundRows,
+  findDeliveredByIdempotencyKey,
+  findOlderActiveOutboundSibling,
+  OUTBOUND_TERMINAL_RETENTION_MS,
+  STALE_SENDING_GRACE_MS,
   type EnqueueInput,
 } from "./outbound-jobs"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
+import { saveSettings } from "./settings"
 import type { OutboundRequest } from "@/types/connectors/outbound"
 
+// Generous hook timeout: several tests bulk-seed 5000-row tables, and the
+// subsequent `getDb().delete()` + full schema re-migration can exceed jest's
+// 5 s default under CI/machine load.
 beforeEach(async () => {
   await getDb().delete()
   __resetDbForTesting()
   getDb()
   await whenSeeded()
-})
+}, 60_000)
 
 function makeRequest(idempotencyKey = crypto.randomUUID()): OutboundRequest {
   return {
@@ -214,6 +228,26 @@ describe("outbound-jobs", () => {
     expect(updated?.attempts).toBe(1)
   })
 
+  it("markSending is an atomic claim: only the first caller wins", async () => {
+    const row = await enqueue({
+      adapterId: "adp_1",
+      conversationKey: "conv_1",
+      request: makeRequest(),
+    })
+    const first = await markSending(row.id)
+    const second = await markSending(row.id)
+    expect(first).toBe(true)
+    // Second claim loses — the row is already 'sending', not pending/failed.
+    expect(second).toBe(false)
+    const updated = await getDb().outboundQueue.get(row.id)
+    // Attempts incremented exactly once (no double-send).
+    expect(updated?.attempts).toBe(1)
+  })
+
+  it("markSending returns false for an unknown job id", async () => {
+    expect(await markSending("nope")).toBe(false)
+  })
+
   it("markSent transitions to sent with platformMessageId", async () => {
     const row = await enqueue({
       adapterId: "adp_1",
@@ -252,6 +286,50 @@ describe("outbound-jobs", () => {
     expect(updated?.status).toBe("deadlettered")
     expect(updated?.lastErrorCode).toBe("auth_failed")
     expect(updated?.lastError).toBe("Invalid token")
+  })
+
+  it("replayDeadlettered re-arms a dead-lettered job and wakes the runner", async () => {
+    const row = await enqueue({
+      adapterId: "adp_1",
+      conversationKey: "conv_1",
+      request: makeRequest(),
+    })
+    await markDeadlettered(row.id, "auth_failed", "Invalid token")
+    let woken = 0
+    const unsub = subscribeOutboundEnqueued(() => {
+      woken++
+    })
+    try {
+      const replayed = await replayDeadlettered(row.id)
+      expect(replayed?.status).toBe("pending")
+      expect(replayed?.attempts).toBe(0)
+      expect(replayed?.lastError).toBeUndefined()
+      expect(replayed?.lastErrorCode).toBeUndefined()
+      expect(replayed?.nextAttemptAt).toBeGreaterThan(0)
+      const stored = await getDb().outboundQueue.get(row.id)
+      expect(stored?.status).toBe("pending")
+      // The replayed row is immediately due.
+      expect(await pickNextDue()).toMatchObject({ id: row.id })
+      expect(woken).toBeGreaterThan(0)
+    } finally {
+      unsub()
+    }
+  })
+
+  it("replayDeadlettered refuses a non-dead-lettered row", async () => {
+    const row = await enqueue({
+      adapterId: "adp_1",
+      conversationKey: "conv_1",
+      request: makeRequest(),
+    })
+    // Still pending — replay must no-op.
+    expect(await replayDeadlettered(row.id)).toBeUndefined()
+    const stored = await getDb().outboundQueue.get(row.id)
+    expect(stored?.status).toBe("pending")
+  })
+
+  it("replayDeadlettered returns undefined for a missing job", async () => {
+    expect(await replayDeadlettered("oqj_missing")).toBeUndefined()
   })
 
   it("FIFO: 3 conv_A and 2 conv_B interleaved, conv_A returns in createdAt order", async () => {
@@ -416,14 +494,16 @@ describe("outbound-jobs", () => {
       expect(audit[0].adapterId).toBe("adp_full")
       expect(audit[0].fields?.jobId).toBe("seed-0")
       expect(typeof audit[0].fields?.ageMs).toBe("number")
-    })
+    }, 120_000)
 
     it("does not age sending or already-deadlettered rows", async () => {
       // Pre-seed a row in `sending` status (in flight) and another in
       // `deadlettered` (terminal). Both must survive the cap enforcement.
+      // Active rows = 4999 pending + 1 sending (the deadlettered row is
+      // terminal and does NOT count), so the next enqueue crosses the cap.
       const db = getDb()
       const baseAt = Date.now() - 10_000_000
-      const seedRows = Array.from({ length: 4998 }, (_, idx) => ({
+      const seedRows = Array.from({ length: 4999 }, (_, idx) => ({
         id: `bulk-${idx}`,
         adapterId: "adp_mix",
         conversationKey: `c_${idx}`,
@@ -468,7 +548,7 @@ describe("outbound-jobs", () => {
         },
         ...seedRows,
       ])
-      expect(await db.outboundQueue.count()).toBe(5000)
+      expect(await db.outboundQueue.count()).toBe(5001)
 
       // Trip the cap with one more enqueue.
       await enqueue({
@@ -482,6 +562,382 @@ describe("outbound-jobs", () => {
       // The actual victim is the oldest PENDING row — `bulk-0`.
       expect((await db.outboundQueue.get("bulk-0"))?.status).toBe("deadlettered")
       expect((await db.outboundQueue.get("bulk-0"))?.lastErrorCode).toBe("queue_capped")
+    }, 120_000)
+  })
+
+  // ── P0 — the cap counts BACKLOG, not history ─────────────────────────
+  describe("soft cap ignores terminal rows", () => {
+    it("terminal rows alone above the cap never dead-letter a fresh enqueue", async () => {
+      // 5001 terminal rows (the pre-fix bug: these counted against the cap,
+      // so this seed alone would have dead-lettered EVERY new enqueue —
+      // total outbound outage). With the fix only active rows count.
+      const db = getDb()
+      const baseAt = Date.now() - 10_000_000
+      await db.outboundQueue.bulkAdd(
+        Array.from({ length: 5001 }, (_, idx) => ({
+          id: `hist-${idx}`,
+          adapterId: "adp_hist",
+          conversationKey: `c_${idx}`,
+          request: makeRequest(`hist_${idx}`),
+          status: (idx % 2 === 0 ? "sent" : "deadlettered") as "sent" | "deadlettered",
+          attempts: 1,
+          createdAt: baseAt + idx,
+          nextAttemptAt: baseAt + idx,
+          idempotencyKey: `hist_${idx}`,
+          source: "ai-run" as const,
+        }))
+      )
+
+      const fresh = await enqueue({
+        adapterId: "adp_live",
+        conversationKey: "c_live",
+        request: makeRequest("k_live"),
+      })
+
+      const stored = await db.outboundQueue.get(fresh.id)
+      expect(stored?.status).toBe("pending")
+      const capped = await db.connectorAudit.where("kind").equals("outbound.queue_capped").count()
+      expect(capped).toBe(0)
+    }, 30_000)
+  })
+
+  // ── P0 — terminal-row retention sweep ────────────────────────────────
+  describe("sweepTerminalOutboundRows", () => {
+    const seedRow = (
+      id: string,
+      status: "pending" | "failed" | "sending" | "sent" | "deadlettered",
+      createdAt: number
+    ) =>
+      getDb().outboundQueue.add({
+        id,
+        adapterId: "adp_sweep",
+        conversationKey: `c_${id}`,
+        request: makeRequest(`k_${id}`),
+        status,
+        attempts: 0,
+        createdAt,
+        nextAttemptAt: createdAt,
+        idempotencyKey: `k_${id}`,
+        source: "ai-run",
+      })
+
+    it("deletes only terminal rows older than the retention window", async () => {
+      const now = Date.now()
+      const old = now - OUTBOUND_TERMINAL_RETENTION_MS - 1_000
+      const young = now - 60_000
+      await seedRow("old-sent", "sent", old)
+      await seedRow("old-dead", "deadlettered", old)
+      await seedRow("old-pending", "pending", old) // active — must survive
+      await seedRow("old-failed", "failed", old) // active — must survive
+      await seedRow("young-sent", "sent", young) // inside retention — survives
+
+      const deleted = await sweepTerminalOutboundRows({ now })
+      expect(deleted).toBe(2)
+
+      const remaining = (await getDb().outboundQueue.toArray()).map((r) => r.id).sort()
+      expect(remaining).toEqual(["old-failed", "old-pending", "young-sent"])
     })
+
+    it("caps one run at batchLimit and reports the deleted count", async () => {
+      const now = Date.now()
+      const old = now - OUTBOUND_TERMINAL_RETENTION_MS - 1_000
+      for (let i = 0; i < 5; i++) await seedRow(`b-${i}`, "sent", old + i)
+      expect(await sweepTerminalOutboundRows({ now, batchLimit: 3 })).toBe(3)
+      expect(await getDb().outboundQueue.count()).toBe(2)
+      // The next run drains the remainder.
+      expect(await sweepTerminalOutboundRows({ now, batchLimit: 3 })).toBe(2)
+      expect(await getDb().outboundQueue.count()).toBe(0)
+    })
+
+    it("returns 0 on an empty / all-young table", async () => {
+      expect(await sweepTerminalOutboundRows()).toBe(0)
+    })
+  })
+
+  // ── P1 — stale `sending` claim recovery ──────────────────────────────
+  describe("recoverStaleSendingJobs", () => {
+    it("markSending stamps claimedAt for the recovery age signal", async () => {
+      const row = await enqueue({
+        adapterId: "adp_1",
+        conversationKey: "conv_claim",
+        request: makeRequest(),
+      })
+      const before = Date.now()
+      await markSending(row.id)
+      const stored = (await getDb().outboundQueue.get(row.id)) as
+        ({ claimedAt?: number } & typeof row) | undefined
+      expect(stored?.claimedAt).toBeGreaterThanOrEqual(before)
+    })
+
+    it("flips a stale sending row back to failed, retryable now", async () => {
+      const now = Date.now()
+      await getDb().outboundQueue.add({
+        id: "stale-1",
+        adapterId: "adp_1",
+        conversationKey: "conv_stale",
+        request: makeRequest("k_stale"),
+        status: "sending",
+        attempts: 1,
+        createdAt: now - 60 * 60_000,
+        nextAttemptAt: now - 60 * 60_000,
+        idempotencyKey: "k_stale",
+        source: "ai-run",
+        claimedAt: now - STALE_SENDING_GRACE_MS - 1_000,
+      } as never)
+
+      const recovered = await recoverStaleSendingJobs(now)
+      expect(recovered).toHaveLength(1)
+      expect(recovered[0].id).toBe("stale-1")
+
+      const stored = await getDb().outboundQueue.get("stale-1")
+      expect(stored?.status).toBe("failed")
+      expect(stored?.lastErrorCode).toBe("stale_sending_recovered")
+      expect(stored?.nextAttemptAt).toBe(now)
+      // The recovered row is immediately actionable again.
+      expect((await pickNextDue())?.id).toBe("stale-1")
+    })
+
+    it("leaves a fresh sending row (inside the grace window) untouched", async () => {
+      const row = await enqueue({
+        adapterId: "adp_1",
+        conversationKey: "conv_fresh",
+        request: makeRequest(),
+      })
+      await markSending(row.id) // claimedAt = now
+      const recovered = await recoverStaleSendingJobs(Date.now())
+      expect(recovered).toHaveLength(0)
+      expect((await getDb().outboundQueue.get(row.id))?.status).toBe("sending")
+    })
+
+    it("falls back to createdAt for legacy rows without a claim stamp", async () => {
+      const now = Date.now()
+      await getDb().outboundQueue.add({
+        id: "legacy-1",
+        adapterId: "adp_1",
+        conversationKey: "conv_legacy",
+        request: makeRequest("k_legacy"),
+        status: "sending",
+        attempts: 2,
+        createdAt: now - STALE_SENDING_GRACE_MS - 1_000,
+        nextAttemptAt: now - STALE_SENDING_GRACE_MS - 1_000,
+        idempotencyKey: "k_legacy",
+        source: "ai-run",
+      })
+      const recovered = await recoverStaleSendingJobs(now)
+      expect(recovered.map((r) => r.id)).toEqual(["legacy-1"])
+      expect((await getDb().outboundQueue.get("legacy-1"))?.status).toBe("failed")
+    })
+  })
+
+  // ── P3 — post-claim rate-limit unclaim ───────────────────────────────
+  describe("unclaimSending", () => {
+    it("reverts a sending claim to failed and refunds the attempt", async () => {
+      const row = await enqueue({
+        adapterId: "adp_1",
+        conversationKey: "conv_unclaim",
+        request: makeRequest(),
+      })
+      await markSending(row.id) // attempts 0 → 1
+      const nextAt = Date.now() + 1_000
+      await unclaimSending(row.id, "rate_limited", "Token bucket exhausted", nextAt)
+      const stored = await getDb().outboundQueue.get(row.id)
+      expect(stored?.status).toBe("failed")
+      expect(stored?.attempts).toBe(0)
+      expect(stored?.lastErrorCode).toBe("rate_limited")
+      expect(stored?.nextAttemptAt).toBe(nextAt)
+    })
+
+    it("no-ops on rows that are not sending", async () => {
+      const row = await enqueue({
+        adapterId: "adp_1",
+        conversationKey: "conv_unclaim2",
+        request: makeRequest(),
+      })
+      await unclaimSending(row.id, "rate_limited", "x", Date.now())
+      const stored = await getDb().outboundQueue.get(row.id)
+      expect(stored?.status).toBe("pending")
+      expect(stored?.attempts).toBe(0)
+    })
+  })
+
+  // ── P1 — persistent idempotency evidence ─────────────────────────────
+  describe("findDeliveredByIdempotencyKey", () => {
+    it("finds a delivered sibling with the same key, excluding the caller row", async () => {
+      const delivered = await enqueue({
+        adapterId: "adp_1",
+        conversationKey: "conv_ev",
+        request: makeRequest("shared-key"),
+      })
+      await markSent(delivered.id, "pm_evidence")
+      const retry = await enqueue({
+        adapterId: "adp_1",
+        conversationKey: "conv_ev",
+        request: makeRequest("shared-key"),
+      })
+      const hit = await findDeliveredByIdempotencyKey("shared-key", retry.id)
+      expect(hit?.id).toBe(delivered.id)
+      expect(hit?.platformMessageId).toBe("pm_evidence")
+      // The caller row itself never matches.
+      expect(await findDeliveredByIdempotencyKey("shared-key", delivered.id)).toBeUndefined()
+    })
+
+    it("ignores non-sent rows and sent rows without a platform id", async () => {
+      const pending = await enqueue({
+        adapterId: "adp_1",
+        conversationKey: "conv_ev2",
+        request: makeRequest("key-2"),
+      })
+      expect(await findDeliveredByIdempotencyKey("key-2")).toBeUndefined()
+      await getDb().outboundQueue.update(pending.id, { status: "sent" }) // no platformMessageId
+      expect(await findDeliveredByIdempotencyKey("key-2")).toBeUndefined()
+    })
+  })
+
+  // ── P2 — cross-pass FIFO blocker lookup ──────────────────────────────
+  describe("findOlderActiveOutboundSibling", () => {
+    it("returns the oldest active older sibling and skips terminal ones", async () => {
+      const older = await enqueue({
+        adapterId: "adp_1",
+        conversationKey: "conv_fifo",
+        request: makeRequest("k_older"),
+      })
+      await new Promise((r) => setTimeout(r, 2))
+      const newer = await enqueue({
+        adapterId: "adp_1",
+        conversationKey: "conv_fifo",
+        request: makeRequest("k_newer"),
+      })
+
+      // Older sibling deferred (failed) — it blocks the newer one.
+      await markFailed(older.id, "network", "retry later", Date.now() + 60_000)
+      expect((await findOlderActiveOutboundSibling(newer))?.id).toBe(older.id)
+
+      // Dead-lettered older sibling unblocks the newer one.
+      await markDeadlettered(older.id, "max_attempts", "gave up")
+      expect(await findOlderActiveOutboundSibling(newer)).toBeUndefined()
+
+      // Sent older sibling unblocks too, and a job never blocks itself.
+      await getDb().outboundQueue.update(older.id, { status: "sent" })
+      expect(await findOlderActiveOutboundSibling(newer)).toBeUndefined()
+      expect(await findOlderActiveOutboundSibling(older)).toBeUndefined()
+    })
+
+    it("does not cross conversation boundaries", async () => {
+      const otherConv = await enqueue({
+        adapterId: "adp_1",
+        conversationKey: "conv_other",
+        request: makeRequest("k_other"),
+      })
+      await new Promise((r) => setTimeout(r, 2))
+      const mine = await enqueue({
+        adapterId: "adp_1",
+        conversationKey: "conv_mine",
+        request: makeRequest("k_mine"),
+      })
+      expect(otherConv.status).toBe("pending")
+      expect(await findOlderActiveOutboundSibling(mine)).toBeUndefined()
+    })
+  })
+
+  describe("workspace (project) scoping", () => {
+    it("inherits the conversation override's projectId when present", async () => {
+      await getDb().conversationOverrides.add({
+        id: "cov_x",
+        conversationKey: "telegram:adp_1:chat_1",
+        sessionId: "s",
+        projectId: "proj-A",
+        createdAt: 1,
+        updatedAt: 1,
+      } as never)
+      const job = await enqueue({
+        adapterId: "adp_1",
+        conversationKey: "telegram:adp_1:chat_1",
+        request: makeRequest("idem-scope"),
+      })
+      expect(job.projectId).toBe("proj-A")
+    })
+
+    it("falls back to the active project when no override exists", async () => {
+      await saveSettings({ activeProjectId: "proj-active" })
+      const job = await enqueue({
+        adapterId: "adp_1",
+        conversationKey: "telegram:adp_1:nokey",
+        request: makeRequest("idem-fallback"),
+      })
+      expect(job.projectId).toBe("proj-active")
+    })
+  })
+
+  // F1 — truthful feedback across failover / load-balance reroute.
+  describe("waitForOutboundTerminal — reroute following", () => {
+    it("resolves immediately for an already-sent job", async () => {
+      const job = await enqueue({
+        adapterId: "adp_1",
+        conversationKey: "c1",
+        request: makeRequest(),
+      })
+      await markSent(job.id, "om_direct")
+      const term = await waitForOutboundTerminal(job.id, 5_000)
+      expect(term?.status).toBe("sent")
+      expect(term?.platformMessageId).toBe("om_direct")
+    }, 30_000)
+
+    it("returns undefined for an unknown job id", async () => {
+      expect(await waitForOutboundTerminal("oqj_nope", 200)).toBeUndefined()
+    }, 30_000)
+
+    it("markDeadlettered stamps the reroute pointer + mechanism", async () => {
+      const job = await enqueue({
+        adapterId: "adp_1",
+        conversationKey: "c1",
+        request: makeRequest(),
+      })
+      await markDeadlettered(job.id, "balanced", "Balanced to adp_2", {
+        toJobId: "oqj_sibling",
+        mechanism: "balanced",
+      })
+      const row = await getDb().outboundQueue.get(job.id)
+      expect(row?.status).toBe("deadlettered")
+      expect(row?.reroutedToJobId).toBe("oqj_sibling")
+      expect(row?.reroutedMechanism).toBe("balanced")
+    }, 30_000)
+
+    it("follows a rerouted-deadlettered job to the sibling's real terminal status", async () => {
+      const original = await enqueue({
+        adapterId: "adp_1",
+        conversationKey: "c1",
+        request: makeRequest("orig"),
+      })
+      const sibling = await enqueue({
+        adapterId: "adp_2",
+        conversationKey: "c1",
+        request: makeRequest("sib"),
+      })
+      // Sibling actually delivered; original was dead-lettered as a reroute.
+      await markSent(sibling.id, "om_sibling")
+      await markDeadlettered(original.id, "failover", "Failed over to adp_2", {
+        toJobId: sibling.id,
+        mechanism: "failover",
+      })
+      // A caller awaiting the ORIGINAL must see the sibling's real delivery,
+      // not the reroute dead-letter (the F1 bug).
+      const term = await waitForOutboundTerminal(original.id, 5_000)
+      expect(term?.id).toBe(sibling.id)
+      expect(term?.status).toBe("sent")
+      expect(term?.platformMessageId).toBe("om_sibling")
+    }, 30_000)
+
+    it("returns a plain deadlettered job as-is when there is no reroute pointer", async () => {
+      const job = await enqueue({
+        adapterId: "adp_1",
+        conversationKey: "c1",
+        request: makeRequest(),
+      })
+      await markDeadlettered(job.id, "max_attempts", "gave up")
+      const term = await waitForOutboundTerminal(job.id, 5_000)
+      expect(term?.id).toBe(job.id)
+      expect(term?.status).toBe("deadlettered")
+      expect(term?.reroutedToJobId).toBeUndefined()
+    }, 30_000)
   })
 })

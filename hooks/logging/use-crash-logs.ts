@@ -20,7 +20,7 @@ import {
   clearRecentErrorLogs,
   getRecentErrorLogs,
   subscribeRecentErrorLogs,
-} from "@/lib/logging/recent-errors"
+} from "@cognia/logging/recent-errors"
 import { getLocalRuntimeDiagnostics } from "@/lib/native/local-runtime"
 import {
   getNativeLogDirectory,

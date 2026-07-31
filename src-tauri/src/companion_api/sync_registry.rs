@@ -92,6 +92,13 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
             has_tombstones: true,
         },
         SyncTableDescriptor {
+            name: "workflowRuns".to_string(),
+            description: "Workflow run history (read-only; cursors on max(startedAt, completedAt) so the mobile library badges + runs feed reflect desktop-executed runs)".to_string(),
+            // Runs are append-mostly; deletions are not tombstoned (the mobile
+            // runs viewer accumulates and ages them out of the recent feed).
+            has_tombstones: false,
+        },
+        SyncTableDescriptor {
             name: "twinProfile".to_string(),
             description: "Distilled twin profiles for the mobile twin switcher".to_string(),
             has_tombstones: false,
@@ -120,6 +127,65 @@ fn default_tables() -> Vec<SyncTableDescriptor> {
             description: "Per-conversation Inbox overrides (pinned, archived, lastReadAt, allowComputerUse, allowGoalDriving, mode)".to_string(),
             has_tombstones: false,
         },
+        // Companion read-mostly views. Both have desktop sync readers
+        // (`readGoalsDelta` / `readMemoriesDelta`) and TS handlers, but were
+        // never added to this allowlist — so `sync_pull` rejected them with
+        // "not exposed to mobile sync" and the mobile Goals console / memory
+        // viewer stayed empty. Same omission class as the workflowRuns gap.
+        SyncTableDescriptor {
+            name: "goals".to_string(),
+            description: "Goal console rows (read-only mirror; goals are authored on the desktop)".to_string(),
+            has_tombstones: false,
+        },
+        SyncTableDescriptor {
+            name: "memories".to_string(),
+            description: "Long-term memory rows (read-only mirror for the mobile memory viewer)".to_string(),
+            has_tombstones: false,
+        },
+        // ADR-0056 (Wave 4) — configured MCP servers. Read-only mirror so the
+        // mobile `/me/mcp` page lists the desktop's servers; the phone has no
+        // MCP push RPC and the standalone engine runs no MCP, so it never
+        // writes back.
+        SyncTableDescriptor {
+            name: "mcpServers".to_string(),
+            description: "Configured MCP servers (read-only mirror for the mobile /me/mcp viewer)".to_string(),
+            has_tombstones: false,
+        },
+        // ADR-0039 (phase 2) — durable terminal command history. One-way
+        // read-only mirror; the phone has no shell so it never writes back.
+        // The desktop projector cursors on `ts` (no updatedAt/createdAt on the
+        // row), and prune-deletions are not tombstoned (rows age out passively
+        // on the phone), same omission class as mcpServers/settings.
+        SyncTableDescriptor {
+            name: "terminalHistory".to_string(),
+            description: "Durable terminal command history (read-only mirror for the mobile /me/command-history viewer)".to_string(),
+            has_tombstones: false,
+        },
+        // v104 — Agent-Team board projection (team-board CQRS). One-way mirror
+        // of the desktop task board (task rows + team-meta rows) so the mobile
+        // workspace renders the kanban offline; edits travel back as the
+        // `team_task_*` / `team_run_*` control RPCs, never as data writes.
+        // Task/team deletions are tombstoned by the desktop projector.
+        SyncTableDescriptor {
+            name: "agentTeamBoard".to_string(),
+            description: "Agent-Team task board projection (read-only mirror; controls go through team_* RPCs)".to_string(),
+            has_tombstones: true,
+        },
+        SyncTableDescriptor {
+            name: "templateDefinitions".to_string(),
+            description: "Portable template definitions (read-only mobile catalog projection)".to_string(),
+            has_tombstones: false,
+        },
+        SyncTableDescriptor {
+            name: "templatePackages".to_string(),
+            description: "Template package metadata and trust (no assets or device bindings)".to_string(),
+            has_tombstones: false,
+        },
+        SyncTableDescriptor {
+            name: "templateInstances".to_string(),
+            description: "Template instance provenance and update baselines".to_string(),
+            has_tombstones: false,
+        },
     ]
 }
 
@@ -132,7 +198,16 @@ mod tests {
         let r = SyncTableRegistry::with_defaults();
         assert!(r.contains("characters"));
         assert!(r.contains("workflows"));
+        assert!(r.contains("workflowRuns"));
+        assert!(r.contains("goals"));
+        assert!(r.contains("memories"));
+        assert!(r.contains("mcpServers"));
+        assert!(r.contains("terminalHistory"));
         assert!(r.contains("settings"));
+        assert!(r.contains("agentTeamBoard"));
+        assert!(r.contains("templateDefinitions"));
+        assert!(r.contains("templatePackages"));
+        assert!(r.contains("templateInstances"));
         assert!(!r.contains("ohai"));
     }
 

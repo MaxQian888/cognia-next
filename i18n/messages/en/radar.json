@@ -1,0 +1,48 @@
+{
+  "panel": {
+    "empty": "No report yet. Run the radar to analyze your recent info diet.",
+    "meta": "{count} items analyzed · {days}-day window",
+    "run": "Run now",
+    "runAria": "Generate a new radar report",
+    "title": "Attention Radar"
+  },
+  "section": {
+    "actions": "Actions",
+    "atAGlance": "At a glance",
+    "blindSpots": "Blind spots",
+    "graveyard": "Graveyard",
+    "heatmap": "Activity",
+    "infoDiet": "Info diet",
+    "subconscious": "Subconscious",
+    "topics": "Topics"
+  },
+  "settings": {
+    "enabled": "Enable radar",
+    "enabledDesc": "Auto-generate reports and nudge via the pet.",
+    "intervalDays": "Min interval (days)",
+    "save": "Save",
+    "saved": "Radar settings saved.",
+    "scheduleAction": {
+      "created": "Radar schedule created.",
+      "updated": "Radar schedule updated."
+    },
+    "scheduleCleared": "Radar schedule cleared.",
+    "scheduleCustomCronLabel": "Cron expression",
+    "scheduleInvalidCron": "Invalid cron expression: {expression}",
+    "scheduleMode": {
+      "custom": "Custom",
+      "daily": "Daily",
+      "off": "Off",
+      "weekly": "Weekly"
+    },
+    "scheduleModeLabel": "Schedule",
+    "scheduleSaveAria": "Save radar settings",
+    "windowDays": "Window (days)"
+  },
+  "toast": {
+    "failed": "Radar failed: {message}",
+    "generated": "Radar report generated.",
+    "noModel": "No LLM API key configured. Add one in Settings → Providers.",
+    "skipped": "Not enough recent activity yet — nothing to report."
+  }
+}

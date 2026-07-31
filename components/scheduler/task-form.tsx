@@ -26,6 +26,7 @@ import {
   type CreateScheduledTaskInput,
   type ScheduledTask,
   type ScheduledTaskType,
+  type TaskOverlapPolicy,
   type TaskTriggerType,
   type NotificationChannel,
   CRON_PRESETS,
@@ -34,17 +35,32 @@ import {
 import {
   ChatPayloadEditor,
   ExternalAgentPayloadEditor,
+  TeamPayloadEditor,
+  GoalPayloadEditor,
+  PlanPayloadEditor,
   EMPTY_CHAT_LIKE_DRAFT,
   EMPTY_EXTERNAL_AGENT_DRAFT,
+  EMPTY_AGENT_TEAM_DRAFT,
+  EMPTY_GOAL_DRAFT,
+  EMPTY_PLAN_DRAFT,
   payloadToChatLikeDraft,
   payloadToExternalAgentDraft,
+  payloadToAgentTeamDraft,
+  payloadToGoalDraft,
+  payloadToPlanDraft,
   chatLikeDraftToPayload,
   externalAgentDraftToPayload,
+  agentTeamDraftToPayload,
+  goalDraftToPayload,
+  planDraftToPayload,
   isChatLikeTaskType,
   isStructuredEditableTaskType,
   DraftValidationError,
   type ChatLikeDraft,
   type ExternalAgentDraft,
+  type AgentTeamDraft,
+  type GoalDraft,
+  type PlanDraft,
 } from "@/components/scheduler/payload-editors"
 import {
   validateCronExpression,
@@ -74,10 +90,15 @@ const TASK_TYPES: Array<{ value: ScheduledTaskType }> = [
   { value: "agent" },
   { value: "skill" },
   { value: "external-agent" },
+  { value: "agent-team" },
+  { value: "goal" },
+  { value: "plan" },
   { value: "workflow" },
   { value: "sync" },
   { value: "backup" },
   { value: "script" },
+  { value: "background-command" },
+  { value: "monitor" },
   { value: "ai-generation" },
   { value: "test" },
   { value: "custom" },
@@ -92,6 +113,121 @@ const TRIGGER_TYPES: Array<{ value: TaskTriggerType; icon: React.ReactNode }> = 
 ]
 
 type PayloadEditorMode = "structured" | "json"
+
+const OVERLAP_POLICIES: TaskOverlapPolicy[] = [
+  "skip",
+  "allow",
+  "queue-one",
+  "queue-all",
+  "cancel-previous",
+]
+
+/** i18n sub-keys under `scheduler.overlapPolicies.*` per policy value. */
+const OVERLAP_POLICY_KEYS: Record<TaskOverlapPolicy, string> = {
+  skip: "skip",
+  allow: "allow",
+  "queue-one": "queueOne",
+  "queue-all": "queueAll",
+  "cancel-previous": "cancelPrevious",
+}
+
+function toLocalDateInput(date: Date): string {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, "0")
+  const d = String(date.getDate()).padStart(2, "0")
+  return `${y}-${m}-${d}`
+}
+
+function toLocalTimeInput(date: Date): string {
+  const h = String(date.getHours()).padStart(2, "0")
+  const min = String(date.getMinutes()).padStart(2, "0")
+  return `${h}:${min}`
+}
+
+/** Chip-style multi-select over existing tasks (used by the forward chains). */
+function TaskChipSelect({
+  label,
+  description,
+  placeholder,
+  emptyText,
+  testId,
+  selected,
+  onChange,
+  existingTasks,
+}: {
+  label: string
+  description: string
+  placeholder: string
+  emptyText: string
+  testId: string
+  selected: string[]
+  onChange: (ids: string[]) => void
+  existingTasks: ScheduledTask[]
+}) {
+  return (
+    <div className="mt-3 space-y-2" data-testid={testId}>
+      <Label className="text-xs font-medium text-muted-foreground">{label}</Label>
+      <p className="text-[11px] text-muted-foreground">{description}</p>
+      <Select
+        value=""
+        onValueChange={(taskId) => {
+          if (taskId && !selected.includes(taskId)) {
+            onChange([...selected, taskId])
+          }
+        }}
+      >
+        <SelectTrigger className="h-9 text-xs" data-testid={`${testId}-trigger`}>
+          <SelectValue placeholder={placeholder} />
+        </SelectTrigger>
+        <SelectContent>
+          {existingTasks
+            .filter((task) => !selected.includes(task.id))
+            .map((task) => (
+              <SelectItem key={task.id} value={task.id}>
+                <span className="flex items-center gap-2">
+                  <span
+                    className={cn(
+                      "h-1.5 w-1.5 rounded-full",
+                      task.status === "active"
+                        ? "bg-green-500"
+                        : task.status === "paused"
+                          ? "bg-yellow-500"
+                          : "bg-gray-400"
+                    )}
+                  />
+                  {task.name}
+                </span>
+              </SelectItem>
+            ))}
+        </SelectContent>
+      </Select>
+      {selected.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {selected.map((id) => {
+            const task = existingTasks.find((t) => t.id === id)
+            return (
+              <span
+                key={id}
+                className="inline-flex items-center gap-1 rounded-full border bg-muted/50 px-2 py-1 text-[11px]"
+              >
+                {task?.name || id}
+                <button
+                  type="button"
+                  onClick={() => onChange(selected.filter((x) => x !== id))}
+                  className="ml-0.5 text-muted-foreground hover:text-destructive"
+                >
+                  ×
+                </button>
+              </span>
+            )
+          })}
+        </div>
+      ) : (
+        <p className="text-[11px] text-muted-foreground/70">{emptyText}</p>
+      )}
+    </div>
+  )
+}
 
 interface TaskFormState {
   name: string
@@ -111,6 +247,12 @@ interface TaskFormState {
   chatLikeDraft: ChatLikeDraft
   /** Structured-mode draft for external-agent task type. */
   externalAgentDraft: ExternalAgentDraft
+  /** Structured-mode draft for agent-team task type. */
+  agentTeamDraft: AgentTeamDraft
+  /** Structured-mode draft for goal task type. */
+  goalDraft: GoalDraft
+  /** Structured-mode draft for plan task type. */
+  planDraft: PlanDraft
   /**
    * Which editor to render. Toggling structured → JSON serializes the draft
    * into payloadJson; toggling back parses payloadJson into the draft. Free-
@@ -123,12 +265,34 @@ interface TaskFormState {
   notifyOnComplete: boolean
   notifyOnError: boolean
   notificationChannels: NotificationChannel[]
+  /**
+   * Conversation the `im` channel delivers to. Empty means "use the global ops
+   * channel from settings" — the second layer of the two-layer fallback, so an
+   * operator who wants everything in one place configures it once.
+   */
+  notificationImConversationKey: string
   taskTimeout: number
   maxRetries: number
   retryDelay: number
   runMissedOnStartup: boolean
   maxMissedRuns: number
-  allowConcurrent: boolean
+  /** Overlap policy — replaces the legacy allowConcurrent switch. */
+  overlapPolicy: TaskOverlapPolicy
+  /** Max buffered starts; only meaningful for the queue-all policy. */
+  maxQueueSize: number
+  /** 0 = unlimited runs. */
+  maxRuns: number
+  /** 0 = never auto-pause. */
+  pauseAfterConsecutiveFailures: number
+  /** 0 = unlimited catch-up window (minutes in the UI, ms in the model). */
+  catchupWindowMinutes: number
+  /** 0 = no scheduling jitter (seconds in the UI, ms in the model). */
+  jitterSeconds: number
+  /** Empty strings = no end bound. */
+  endAtDate: string
+  endAtTime: string
+  onSuccessTaskIds: string[]
+  onFailureTaskIds: string[]
   showAdvanced: boolean
   cronError: string | null
   payloadError: string | null
@@ -141,6 +305,70 @@ interface TaskFormState {
 
 function formReducer(state: TaskFormState, update: Partial<TaskFormState>): TaskFormState {
   return { ...state, ...update }
+}
+
+/**
+ * Build the typed payload for whichever structured task type is active.
+ * Throws `DraftValidationError` (surfaced as per-field messages) on invalid
+ * input — same contract as the individual `*DraftToPayload` converters.
+ */
+function buildStructuredPayload(f: TaskFormState): Record<string, unknown> {
+  switch (f.taskType) {
+    case "external-agent":
+      return externalAgentDraftToPayload(f.externalAgentDraft) as Record<string, unknown>
+    case "agent-team":
+      return agentTeamDraftToPayload(f.agentTeamDraft) as Record<string, unknown>
+    case "goal":
+      return goalDraftToPayload(f.goalDraft) as Record<string, unknown>
+    case "plan":
+      return planDraftToPayload(f.planDraft) as Record<string, unknown>
+    default:
+      return chatLikeDraftToPayload(f.taskType, f.chatLikeDraft) as Record<string, unknown>
+  }
+}
+
+/**
+ * Serialize the active structured draft to JSON for the "Edit as JSON" toggle.
+ * Best-effort: when validation fails we dump the raw draft so the user keeps
+ * what they typed.
+ */
+function serializeStructuredDraft(f: TaskFormState): string {
+  try {
+    return JSON.stringify(buildStructuredPayload(f), null, 2)
+  } catch {
+    const raw =
+      f.taskType === "external-agent"
+        ? f.externalAgentDraft
+        : f.taskType === "agent-team"
+          ? f.agentTeamDraft
+          : f.taskType === "goal"
+            ? f.goalDraft
+            : f.taskType === "plan"
+              ? f.planDraft
+              : f.chatLikeDraft
+    return JSON.stringify(raw, null, 2)
+  }
+}
+
+/** Parse a JSON payload into the right structured draft for the given type. */
+function parseIntoDraftUpdates(
+  taskType: ScheduledTaskType,
+  parsed: unknown
+): Partial<TaskFormState> {
+  switch (taskType) {
+    case "external-agent":
+      return { externalAgentDraft: payloadToExternalAgentDraft(parsed) }
+    case "agent-team":
+      return { agentTeamDraft: payloadToAgentTeamDraft(parsed) }
+    case "goal":
+      return { goalDraft: payloadToGoalDraft(parsed) }
+    case "plan":
+      return { planDraft: payloadToPlanDraft(parsed) }
+    default:
+      return isChatLikeTaskType(taskType)
+        ? { chatLikeDraft: payloadToChatLikeDraft(taskType, parsed) }
+        : {}
+  }
 }
 
 function createInitialState(initialValues?: Partial<CreateScheduledTaskInput>): TaskFormState {
@@ -167,12 +395,21 @@ function createInitialState(initialValues?: Partial<CreateScheduledTaskInput>): 
       initialType === "external-agent"
         ? payloadToExternalAgentDraft(initialValues?.payload)
         : { ...EMPTY_EXTERNAL_AGENT_DRAFT },
+    agentTeamDraft:
+      initialType === "agent-team"
+        ? payloadToAgentTeamDraft(initialValues?.payload)
+        : { ...EMPTY_AGENT_TEAM_DRAFT },
+    goalDraft:
+      initialType === "goal" ? payloadToGoalDraft(initialValues?.payload) : { ...EMPTY_GOAL_DRAFT },
+    planDraft:
+      initialType === "plan" ? payloadToPlanDraft(initialValues?.payload) : { ...EMPTY_PLAN_DRAFT },
     payloadEditorMode: startInStructured ? "structured" : "json",
     payloadFieldErrors: {},
     notifyOnStart: initialValues?.notification?.onStart ?? false,
     notifyOnComplete: initialValues?.notification?.onComplete ?? true,
     notifyOnError: initialValues?.notification?.onError ?? true,
     notificationChannels: initialValues?.notification?.channels || ["toast"],
+    notificationImConversationKey: initialValues?.notification?.imTarget?.conversationKey ?? "",
     taskTimeout: initialValues?.config?.timeout || DEFAULT_EXECUTION_CONFIG.timeout,
     maxRetries: initialValues?.config?.maxRetries || DEFAULT_EXECUTION_CONFIG.maxRetries,
     retryDelay: initialValues?.config?.retryDelay || DEFAULT_EXECUTION_CONFIG.retryDelay,
@@ -180,8 +417,23 @@ function createInitialState(initialValues?: Partial<CreateScheduledTaskInput>): 
       initialValues?.config?.runMissedOnStartup ?? DEFAULT_EXECUTION_CONFIG.runMissedOnStartup,
     maxMissedRuns:
       initialValues?.config?.maxMissedRuns ?? DEFAULT_EXECUTION_CONFIG.maxMissedRuns ?? 1,
-    allowConcurrent:
-      initialValues?.config?.allowConcurrent ?? DEFAULT_EXECUTION_CONFIG.allowConcurrent,
+    overlapPolicy:
+      initialValues?.config?.overlapPolicy ??
+      (initialValues?.config?.allowConcurrent ? "allow" : "skip"),
+    maxQueueSize:
+      initialValues?.config?.maxQueueSize ?? DEFAULT_EXECUTION_CONFIG.maxQueueSize ?? 10,
+    maxRuns: initialValues?.config?.maxRuns ?? 0,
+    pauseAfterConsecutiveFailures: initialValues?.config?.pauseAfterConsecutiveFailures ?? 0,
+    catchupWindowMinutes: initialValues?.config?.catchupWindowMs
+      ? Math.round(initialValues.config.catchupWindowMs / 60_000)
+      : 0,
+    jitterSeconds: initialValues?.trigger?.jitterMs
+      ? Math.round(initialValues.trigger.jitterMs / 1_000)
+      : 0,
+    endAtDate: initialValues?.endAt ? toLocalDateInput(initialValues.endAt) : "",
+    endAtTime: initialValues?.endAt ? toLocalTimeInput(initialValues.endAt) : "",
+    onSuccessTaskIds: initialValues?.onSuccessTaskIds || [],
+    onFailureTaskIds: initialValues?.onFailureTaskIds || [],
     showAdvanced: false,
     cronError: null,
     payloadError: null,
@@ -231,26 +483,32 @@ export function TaskForm({
     }
   }, [f.cronExpression])
 
-  // Test notification channel
-  const handleTestNotification = useCallback(async (channel: NotificationChannel) => {
-    updateForm({ isTestingNotification: true, notificationTestResult: null })
-    try {
-      const result = await testNotificationChannel(channel)
-      updateForm({
-        notificationTestResult: { channel, success: result.success, error: result.error },
-        isTestingNotification: false,
-      })
-    } catch (err) {
-      updateForm({
-        notificationTestResult: {
-          channel,
-          success: false,
-          error: err instanceof Error ? err.message : "Test failed",
-        },
-        isTestingNotification: false,
-      })
-    }
-  }, [])
+  // Test notification channel. The IM channel needs the conversation the user
+  // just typed (still unsaved), so the test resolves the same two layers a real
+  // delivery would instead of only reading persisted config.
+  const imConversationKey = f.notificationImConversationKey
+  const handleTestNotification = useCallback(
+    async (channel: NotificationChannel) => {
+      updateForm({ isTestingNotification: true, notificationTestResult: null })
+      try {
+        const result = await testNotificationChannel(channel, undefined, imConversationKey)
+        updateForm({
+          notificationTestResult: { channel, success: result.success, error: result.error },
+          isTestingNotification: false,
+        })
+      } catch (err) {
+        updateForm({
+          notificationTestResult: {
+            channel,
+            success: false,
+            error: err instanceof Error ? err.message : "Test failed",
+          },
+          isTestingNotification: false,
+        })
+      }
+    },
+    [imConversationKey]
+  )
 
   // ---- Payload editor mode + task-type change -----------------------------
 
@@ -263,31 +521,15 @@ export function TaskForm({
    */
   const togglePayloadEditorMode = useCallback(() => {
     if (f.payloadEditorMode === "structured") {
-      // structured → json: serialize draft (best-effort, ignore validation)
-      let serialized: string = f.payloadJson
-      try {
-        const built =
-          f.taskType === "external-agent"
-            ? externalAgentDraftToPayload(f.externalAgentDraft)
-            : chatLikeDraftToPayload(f.taskType, f.chatLikeDraft)
-        serialized = JSON.stringify(built, null, 2)
-      } catch {
-        // Validation failed — fall back to a partial dump so the user keeps
-        // whatever fragments they typed.
-        if (f.taskType === "external-agent") {
-          serialized = JSON.stringify(f.externalAgentDraft, null, 2)
-        } else {
-          serialized = JSON.stringify(f.chatLikeDraft, null, 2)
-        }
-      }
+      // structured → json: serialize the active draft (best-effort).
       updateForm({
         payloadEditorMode: "json",
-        payloadJson: serialized,
+        payloadJson: serializeStructuredDraft(f),
         payloadError: null,
         payloadFieldErrors: {},
       })
     } else {
-      // json → structured: parse JSON into the appropriate draft
+      // json → structured: parse JSON into the appropriate draft.
       let parsed: unknown
       try {
         parsed = JSON.parse(f.payloadJson || "{}")
@@ -301,16 +543,10 @@ export function TaskForm({
         payloadEditorMode: "structured",
         payloadError: null,
         payloadFieldErrors: {},
-        chatLikeDraft: isChatLikeTaskType(f.taskType)
-          ? payloadToChatLikeDraft(f.taskType, parsed)
-          : f.chatLikeDraft,
-        externalAgentDraft:
-          f.taskType === "external-agent"
-            ? payloadToExternalAgentDraft(parsed)
-            : f.externalAgentDraft,
+        ...parseIntoDraftUpdates(f.taskType, parsed),
       })
     }
-  }, [f.payloadEditorMode, f.taskType, f.chatLikeDraft, f.externalAgentDraft, f.payloadJson, t])
+  }, [f, t])
 
   /**
    * Handle the user picking a different task type. We migrate the structured
@@ -328,46 +564,47 @@ export function TaskForm({
         payloadError: null,
       }
 
-      if (willBeStructured && !wasStructured) {
-        // Switching INTO a structured-aware type — try to seed the draft from
-        // the current JSON, but fall back to empty if it doesn't parse.
-        let parsed: unknown = {}
+      if (willBeStructured) {
+        // chat ↔ agent ↔ skill share one draft shape — keep it as-is.
+        if (isChatLikeTaskType(f.taskType) && isChatLikeTaskType(next)) {
+          updateForm(updates)
+          return
+        }
+        // Seed the target draft from the current structured draft (when
+        // already in a structured type) or from the free-form JSON otherwise.
+        let source: unknown = {}
         try {
-          parsed = JSON.parse(f.payloadJson || "{}")
+          source = wasStructured
+            ? JSON.parse(serializeStructuredDraft(f))
+            : JSON.parse(f.payloadJson || "{}")
         } catch {
-          parsed = {}
+          source = {}
         }
-        if (isChatLikeTaskType(next)) {
-          updates.chatLikeDraft = payloadToChatLikeDraft(next, parsed)
-        } else {
-          updates.externalAgentDraft = payloadToExternalAgentDraft(parsed)
+        const draftUpdates = parseIntoDraftUpdates(next, source)
+        // Carry a free-text prompt across into the goal objective for a smoother
+        // switch from a chat-like draft.
+        if (
+          next === "goal" &&
+          draftUpdates.goalDraft &&
+          !draftUpdates.goalDraft.objective &&
+          isChatLikeTaskType(f.taskType) &&
+          f.chatLikeDraft.prompt
+        ) {
+          draftUpdates.goalDraft = {
+            ...draftUpdates.goalDraft,
+            objective: f.chatLikeDraft.prompt,
+          }
         }
+        Object.assign(updates, draftUpdates)
         updates.payloadEditorMode = "structured"
-      } else if (willBeStructured && wasStructured) {
-        // chat ↔ agent ↔ skill share the same draft shape, so we keep it.
-        // Only swap the active draft when crossing the chat-like / external
-        // boundary.
-        const wasChatLike = isChatLikeTaskType(f.taskType)
-        const isChatLike = isChatLikeTaskType(next)
-        if (wasChatLike && !isChatLike) {
-          updates.externalAgentDraft = {
-            ...EMPTY_EXTERNAL_AGENT_DRAFT,
-            prompt: f.chatLikeDraft.prompt,
-          }
-        } else if (!wasChatLike && isChatLike) {
-          updates.chatLikeDraft = {
-            ...EMPTY_CHAT_LIKE_DRAFT,
-            prompt: f.externalAgentDraft.prompt,
-          }
-        }
-      } else if (!willBeStructured && wasStructured) {
+      } else if (wasStructured) {
         // Leaving the structured world entirely — leave payloadJson alone.
         updates.payloadEditorMode = "json"
       }
 
       updateForm(updates)
     },
-    [f.taskType, f.payloadJson, f.chatLikeDraft, f.externalAgentDraft]
+    [f]
   )
 
   // Apply task template to fill form
@@ -389,19 +626,29 @@ export function TaskForm({
         input.type === "external-agent"
           ? payloadToExternalAgentDraft(input.payload)
           : { ...EMPTY_EXTERNAL_AGENT_DRAFT },
+      agentTeamDraft:
+        input.type === "agent-team"
+          ? payloadToAgentTeamDraft(input.payload)
+          : { ...EMPTY_AGENT_TEAM_DRAFT },
+      goalDraft:
+        input.type === "goal" ? payloadToGoalDraft(input.payload) : { ...EMPTY_GOAL_DRAFT },
+      planDraft:
+        input.type === "plan" ? payloadToPlanDraft(input.payload) : { ...EMPTY_PLAN_DRAFT },
       payloadEditorMode: isStructuredEditableTaskType(input.type) ? "structured" : "json",
       payloadFieldErrors: {},
       notifyOnStart: input.notification?.onStart ?? false,
       notifyOnComplete: input.notification?.onComplete ?? true,
       notifyOnError: input.notification?.onError ?? true,
       notificationChannels: input.notification?.channels || ["toast"],
+      notificationImConversationKey: input.notification?.imTarget?.conversationKey ?? "",
       taskTimeout: input.config?.timeout || DEFAULT_EXECUTION_CONFIG.timeout,
       maxRetries: input.config?.maxRetries || DEFAULT_EXECUTION_CONFIG.maxRetries,
       retryDelay: input.config?.retryDelay || DEFAULT_EXECUTION_CONFIG.retryDelay,
       runMissedOnStartup:
         input.config?.runMissedOnStartup ?? DEFAULT_EXECUTION_CONFIG.runMissedOnStartup,
       maxMissedRuns: input.config?.maxMissedRuns ?? DEFAULT_EXECUTION_CONFIG.maxMissedRuns ?? 1,
-      allowConcurrent: input.config?.allowConcurrent ?? DEFAULT_EXECUTION_CONFIG.allowConcurrent,
+      overlapPolicy:
+        input.config?.overlapPolicy ?? (input.config?.allowConcurrent ? "allow" : "skip"),
       nameError: null,
       cronError: null,
       payloadError: null,
@@ -453,11 +700,7 @@ export function TaskForm({
     let payloadFieldErrors: Record<string, string> | undefined
     if (f.payloadEditorMode === "structured" && isStructuredEditableTaskType(f.taskType)) {
       try {
-        const built =
-          f.taskType === "external-agent"
-            ? externalAgentDraftToPayload(f.externalAgentDraft)
-            : chatLikeDraftToPayload(f.taskType, f.chatLikeDraft)
-        payload = built as Record<string, unknown>
+        payload = buildStructuredPayload(f)
         const serialized = JSON.stringify(payload)
         if (serialized.length > MAX_PAYLOAD_SIZE) {
           errors.payloadError = t("payloadTooLarge") || "Payload exceeds 64KB limit"
@@ -500,6 +743,24 @@ export function TaskForm({
       type: f.triggerType,
       timezone: f.timezone,
       ...(f.dependsOn.length > 0 ? { dependsOn: f.dependsOn } : {}),
+      // Explicit undefined so edit-mode merges clear a previously-set jitter.
+      jitterMs:
+        (f.triggerType === "cron" || f.triggerType === "interval") && f.jitterSeconds > 0
+          ? f.jitterSeconds * 1_000
+          : undefined,
+    }
+
+    // Lifecycle end bound (recurring triggers only)
+    let endAt: Date | undefined
+    if ((f.triggerType === "cron" || f.triggerType === "interval") && f.endAtDate) {
+      endAt = new Date(`${f.endAtDate}T${f.endAtTime || "23:59"}`)
+      if (Number.isNaN(endAt.getTime())) {
+        errors.triggerError = t("lifecycle.endAtInvalid") || "Invalid end date"
+        hasErrors = true
+      } else if (endAt <= new Date()) {
+        errors.triggerError = t("lifecycle.endAtInPast") || "End time must be in the future"
+        hasErrors = true
+      }
     }
 
     switch (f.triggerType) {
@@ -554,7 +815,15 @@ export function TaskForm({
         retryDelay: f.retryDelay,
         runMissedOnStartup: f.runMissedOnStartup,
         maxMissedRuns: Math.max(0, f.maxMissedRuns),
-        allowConcurrent: f.allowConcurrent,
+        overlapPolicy: f.overlapPolicy,
+        // Mirror the legacy boolean for older readers of persisted configs.
+        allowConcurrent: f.overlapPolicy === "allow",
+        // Explicit undefined so edit-mode merges clear previously-set limits.
+        maxQueueSize: f.overlapPolicy === "queue-all" ? Math.max(1, f.maxQueueSize) : undefined,
+        maxRuns: f.maxRuns > 0 ? f.maxRuns : undefined,
+        pauseAfterConsecutiveFailures:
+          f.pauseAfterConsecutiveFailures > 0 ? f.pauseAfterConsecutiveFailures : undefined,
+        catchupWindowMs: f.catchupWindowMinutes > 0 ? f.catchupWindowMinutes * 60_000 : undefined,
       },
       notification: {
         onStart: f.notifyOnStart,
@@ -562,7 +831,16 @@ export function TaskForm({
         onError: f.notifyOnError,
         onProgress: false,
         channels: f.notificationChannels,
+        // Only persisted when the channel is actually on and a key was typed;
+        // an empty key means "fall back to the global ops channel", which is
+        // expressed by the field's absence rather than by an empty string.
+        ...(f.notificationChannels.includes("im") && f.notificationImConversationKey.trim()
+          ? { imTarget: { conversationKey: f.notificationImConversationKey.trim() } }
+          : {}),
       },
+      ...(endAt ? { endAt } : {}),
+      ...(f.onSuccessTaskIds.length > 0 ? { onSuccessTaskIds: f.onSuccessTaskIds } : {}),
+      ...(f.onFailureTaskIds.length > 0 ? { onFailureTaskIds: f.onFailureTaskIds } : {}),
     }
 
     await onSubmit(input)
@@ -856,9 +1134,30 @@ export function TaskForm({
               <Input
                 value={f.eventType}
                 onChange={(e) => updateForm({ eventType: e.target.value, triggerError: null })}
-                placeholder="e.g., message.created, workflow.completed"
+                placeholder={t("eventTypePlaceholder")}
                 className="h-10 transition-all focus:ring-2 focus:ring-primary/20"
               />
+            </div>
+          )}
+
+          {/* Scheduling jitter (recurring triggers only) */}
+          {(f.triggerType === "cron" || f.triggerType === "interval") && (
+            <div className="space-y-2 rounded-lg border border-dashed bg-muted/30 p-3">
+              <Label className="text-sm">{t("jitter.label") || "Jitter (seconds)"}</Label>
+              <Input
+                type="number"
+                min={0}
+                value={f.jitterSeconds}
+                onChange={(e) =>
+                  updateForm({ jitterSeconds: Math.max(0, parseInt(e.target.value) || 0) })
+                }
+                className="h-10 transition-all focus:ring-2 focus:ring-primary/20"
+                data-testid="scheduler-jitter-input"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                {t("jitter.help") ||
+                  "Random delay (0–N s) added to each fire to avoid load spikes. 0 disables."}
+              </p>
             </div>
           )}
 
@@ -866,6 +1165,63 @@ export function TaskForm({
           {f.triggerError && <p className="text-xs text-destructive">{f.triggerError}</p>}
         </div>
       </div>
+
+      {/* Lifecycle limits (recurring triggers only) */}
+      {(f.triggerType === "cron" || f.triggerType === "interval") && (
+        <div className="rounded-xl border bg-gradient-to-br from-card to-card/50 p-3 sm:p-4 shadow-sm">
+          <div className="mb-3 flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/10">
+              <Clock className="h-4 w-4 text-amber-500" />
+            </div>
+            <div>
+              <h3 className="font-semibold">{t("lifecycle.title") || "Lifecycle"}</h3>
+              <p className="text-xs text-muted-foreground">
+                {t("lifecycle.description") ||
+                  "Automatically expire the task after a date or a number of runs"}
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="space-y-2">
+              <Label className="text-sm">{t("lifecycle.endDate") || "End date"}</Label>
+              <Input
+                type="date"
+                value={f.endAtDate}
+                onChange={(e) => updateForm({ endAtDate: e.target.value, triggerError: null })}
+                className="h-10 transition-all focus:ring-2 focus:ring-primary/20"
+                data-testid="scheduler-end-date-input"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-sm">{t("lifecycle.endTime") || "End time"}</Label>
+              <Input
+                type="time"
+                value={f.endAtTime}
+                onChange={(e) => updateForm({ endAtTime: e.target.value, triggerError: null })}
+                disabled={!f.endAtDate}
+                className="h-10 transition-all focus:ring-2 focus:ring-primary/20"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-sm">{t("lifecycle.maxRuns") || "Max runs"}</Label>
+              <Input
+                type="number"
+                min={0}
+                value={f.maxRuns}
+                onChange={(e) =>
+                  updateForm({ maxRuns: Math.max(0, parseInt(e.target.value) || 0) })
+                }
+                className="h-10 transition-all focus:ring-2 focus:ring-primary/20"
+                data-testid="scheduler-max-runs-input"
+              />
+            </div>
+          </div>
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            {t("lifecycle.help") ||
+              "Leave empty / 0 for no limit. Failed runs count toward the run limit."}
+          </p>
+        </div>
+      )}
 
       {/* Task Payload Section */}
       <div className="rounded-xl border bg-gradient-to-br from-card to-card/50 p-3 sm:p-4 shadow-sm">
@@ -902,6 +1258,7 @@ export function TaskForm({
         {f.payloadEditorMode === "structured" && isChatLikeTaskType(f.taskType) && (
           <ChatPayloadEditor
             taskType={f.taskType}
+            taskName={f.name}
             draft={f.chatLikeDraft}
             onDraftChange={(draft) => {
               updateForm({
@@ -932,12 +1289,48 @@ export function TaskForm({
           />
         )}
 
+        {f.payloadEditorMode === "structured" && f.taskType === "agent-team" && (
+          <TeamPayloadEditor
+            draft={f.agentTeamDraft}
+            onDraftChange={(draft) =>
+              updateForm({ agentTeamDraft: draft, payloadError: null, payloadFieldErrors: {} })
+            }
+            errors={f.payloadFieldErrors}
+            disabled={isSubmitting}
+            testId="scheduler-task-team-editor"
+          />
+        )}
+
+        {f.payloadEditorMode === "structured" && f.taskType === "goal" && (
+          <GoalPayloadEditor
+            draft={f.goalDraft}
+            onDraftChange={(draft) =>
+              updateForm({ goalDraft: draft, payloadError: null, payloadFieldErrors: {} })
+            }
+            errors={f.payloadFieldErrors}
+            disabled={isSubmitting}
+            testId="scheduler-task-goal-editor"
+          />
+        )}
+
+        {f.payloadEditorMode === "structured" && f.taskType === "plan" && (
+          <PlanPayloadEditor
+            draft={f.planDraft}
+            onDraftChange={(draft) =>
+              updateForm({ planDraft: draft, payloadError: null, payloadFieldErrors: {} })
+            }
+            errors={f.payloadFieldErrors}
+            disabled={isSubmitting}
+            testId="scheduler-task-plan-editor"
+          />
+        )}
+
         {(f.payloadEditorMode === "json" || !isStructuredEditableTaskType(f.taskType)) && (
           <div className="space-y-2">
             <Textarea
               value={f.payloadJson}
               onChange={(e) => updateForm({ payloadJson: e.target.value, payloadError: null })}
-              placeholder='{"key": "value"}'
+              placeholder={t("payload.jsonPlaceholder")}
               className={cn(
                 "min-h-[100px] resize-none font-mono text-sm transition-all",
                 f.payloadError
@@ -1004,7 +1397,7 @@ export function TaskForm({
           <div className="space-y-2">
             <Label className="text-sm font-medium">{t("notificationChannels") || "Channels"}</Label>
             <div className="flex gap-2">
-              {(["desktop", "toast"] as NotificationChannel[]).map((channel) => (
+              {(["desktop", "toast", "im"] as NotificationChannel[]).map((channel) => (
                 <div key={channel} className="flex-1 space-y-1">
                   <button
                     type="button"
@@ -1034,6 +1427,23 @@ export function TaskForm({
                 </div>
               ))}
             </div>
+            {f.notificationChannels.includes("im") && (
+              <div className="space-y-1">
+                <Label
+                  htmlFor="notification-im-conversation"
+                  className="text-xs font-medium text-muted-foreground"
+                >
+                  {t("notifyImConversation")}
+                </Label>
+                <Input
+                  id="notification-im-conversation"
+                  value={f.notificationImConversationKey}
+                  onChange={(e) => updateForm({ notificationImConversationKey: e.target.value })}
+                  placeholder={t("notifyImConversationPlaceholder")}
+                />
+                <p className="text-[10px] text-muted-foreground">{t("notifyImConversationHint")}</p>
+              </div>
+            )}
             {f.notificationTestResult && (
               <p
                 className={cn(
@@ -1138,16 +1548,89 @@ export function TaskForm({
                 />
               </div>
             </div>
-            <div className="space-y-2 rounded-lg border bg-background/50 px-3 py-2.5 sm:col-span-2">
-              <div className="flex items-center justify-between">
+            <div className="space-y-2 sm:col-span-2">
+              <Label className="text-xs font-medium text-muted-foreground">
+                {t("overlapPolicies.label") || "Overlap policy"}
+              </Label>
+              <Select
+                value={f.overlapPolicy}
+                onValueChange={(v) => updateForm({ overlapPolicy: v as TaskOverlapPolicy })}
+              >
+                <SelectTrigger
+                  className="h-9 text-sm"
+                  data-testid="scheduler-overlap-policy-trigger"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {OVERLAP_POLICIES.map((policy) => (
+                    <SelectItem key={policy} value={policy}>
+                      {t(`overlapPolicies.${OVERLAP_POLICY_KEYS[policy]}.title`) || policy}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground">
+                {t(`overlapPolicies.${OVERLAP_POLICY_KEYS[f.overlapPolicy]}.desc`) || ""}
+              </p>
+            </div>
+            {f.overlapPolicy === "queue-all" && (
+              <div className="space-y-2">
                 <Label className="text-xs font-medium text-muted-foreground">
-                  {t("allowConcurrent") || "Allow Concurrent"}
+                  {t("overlapPolicies.maxQueueSize") || "Max queued starts"}
                 </Label>
-                <Switch
-                  checked={f.allowConcurrent}
-                  onCheckedChange={(v) => updateForm({ allowConcurrent: v })}
+                <Input
+                  type="number"
+                  min={1}
+                  value={f.maxQueueSize}
+                  onChange={(e) =>
+                    updateForm({ maxQueueSize: Math.max(1, parseInt(e.target.value) || 1) })
+                  }
+                  className="h-9 text-sm transition-all focus:ring-2 focus:ring-primary/20"
+                  data-testid="scheduler-max-queue-size-input"
                 />
               </div>
+            )}
+            <div className="space-y-2">
+              <Label className="text-xs font-medium text-muted-foreground">
+                {t("pauseAfterFailures.label") || "Auto-pause after consecutive failures"}
+              </Label>
+              <Input
+                type="number"
+                min={0}
+                value={f.pauseAfterConsecutiveFailures}
+                onChange={(e) =>
+                  updateForm({
+                    pauseAfterConsecutiveFailures: Math.max(0, parseInt(e.target.value) || 0),
+                  })
+                }
+                className="h-9 text-sm transition-all focus:ring-2 focus:ring-primary/20"
+                data-testid="scheduler-pause-after-failures-input"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                {t("pauseAfterFailures.help") || "0 disables auto-pause"}
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-xs font-medium text-muted-foreground">
+                {t("catchupWindow.label") || "Catch-up window (minutes)"}
+              </Label>
+              <Input
+                type="number"
+                min={0}
+                value={f.catchupWindowMinutes}
+                onChange={(e) =>
+                  updateForm({
+                    catchupWindowMinutes: Math.max(0, parseInt(e.target.value) || 0),
+                  })
+                }
+                className="h-9 text-sm transition-all focus:ring-2 focus:ring-primary/20"
+                data-testid="scheduler-catchup-window-input"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                {t("catchupWindow.help") ||
+                  "Missed runs older than this are skipped instead of re-run. 0 = no limit."}
+              </p>
             </div>
           </div>
 
@@ -1223,6 +1706,38 @@ export function TaskForm({
                 </p>
               )}
             </div>
+          )}
+
+          {/* Forward chains — run other tasks after this one finishes */}
+          {existingTasks && existingTasks.length > 0 && (
+            <>
+              <TaskChipSelect
+                label={t("successChain.title") || "Run on success"}
+                description={
+                  t("successChain.description") ||
+                  "Tasks started after this task completes successfully"
+                }
+                placeholder={t("successChain.add") || "Add task"}
+                emptyText={t("successChain.none") || "No success chain configured"}
+                testId="scheduler-success-chain"
+                selected={f.onSuccessTaskIds}
+                onChange={(ids) => updateForm({ onSuccessTaskIds: ids })}
+                existingTasks={existingTasks}
+              />
+              <TaskChipSelect
+                label={t("failureChain.title") || "Run on failure"}
+                description={
+                  t("failureChain.description") ||
+                  "Tasks started after this task fails terminally (all retries exhausted)"
+                }
+                placeholder={t("failureChain.add") || "Add task"}
+                emptyText={t("failureChain.none") || "No failure chain configured"}
+                testId="scheduler-failure-chain"
+                selected={f.onFailureTaskIds}
+                onChange={(ids) => updateForm({ onFailureTaskIds: ids })}
+                existingTasks={existingTasks}
+              />
+            </>
           )}
         </CollapsibleContent>
       </Collapsible>

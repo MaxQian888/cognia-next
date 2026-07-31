@@ -1,16 +1,26 @@
 import type { PlatformKind } from "./platform-kind"
 import type { A2UICapabilityMatrix, Capability } from "./capability"
-import type { ConversationReference, NormalizedInboundEvent } from "./event"
+import type {
+  ChatMembersInput,
+  ChatMembersResult,
+  ContactCandidate,
+  CreateChatInput,
+  CreateChatResult,
+  ResolveContactsInput,
+  UpdateChatInput,
+} from "./chat-management"
+import type {
+  ConversationDeliveryTarget,
+  ConversationReference,
+  NormalizedInboundEvent,
+} from "./event"
 import type { OutboundRequest, OutboundResult } from "./outbound"
+import type { PresenceStatusInput } from "./presence"
+import type { RunPresentationDriver } from "@/types/execution/run"
+import type { ConnectorRuntimeCapabilityMatrix } from "./runtime-capability"
 
 export type TransportMode =
-  | "longpoll"
-  | "webhook"
-  | "reverse-ws"
-  | "forward-ws"
-  | "gateway"
-  | "imap-smtp"
-  | "stub" // tests only
+  "longpoll" | "webhook" | "reverse-ws" | "forward-ws" | "gateway" | "imap-smtp" | "stub" // tests only
 
 export interface AdapterMeta {
   type: PlatformKind
@@ -64,6 +74,20 @@ export interface HistoryFetchOpts {
   before?: string
   after?: string
   max?: number
+}
+
+export type PlatformHistoryCursor =
+  | {
+      kind: "timestamp"
+      beforeTimestamp?: number
+      afterTimestamp?: number
+      pageToken?: string
+    }
+  | { kind: "message_id"; beforeMessageId?: string; afterMessageId?: string; pageToken?: string }
+
+export interface HistoryPage {
+  events: NormalizedInboundEvent[]
+  nextCursor?: PlatformHistoryCursor
 }
 
 /**
@@ -132,6 +156,45 @@ export interface TauriWsHandle {
   close: () => Promise<void>
 }
 
+/**
+ * Reference to a platform reaction, returned by `addReaction` so the same
+ * reaction can later be removed. `reactionId` is absent when the platform's
+ * reaction API doesn't surface a handle.
+ */
+export interface ReactionRef {
+  reactionId?: string
+}
+
+/** One reader of a message, from `getReadReceipt`. */
+export interface MessageReader {
+  /** Platform user id (open_id on Lark). */
+  userId: string
+  /** Unix ms when the user read the message, when the platform reports it. */
+  readAt?: number
+}
+
+/** Read-receipt snapshot for a single message. */
+export interface ReadReceipt {
+  readers: MessageReader[]
+  /** True when the platform paginated and more readers exist beyond this page. */
+  hasMore: boolean
+}
+
+/** Urgent (加急) escalation channel for {@link PlatformAdapter.sendUrgent}. */
+export type UrgentChannel = "app" | "sms" | "phone"
+
+/**
+ * Input for {@link PlatformAdapter.forwardMessage}. Provide EITHER a single
+ * `messageId` (plain forward) OR `messageIds` (merge-forward several messages
+ * into one combined card). `target` is a conversation key
+ * (`platform:adapterId:channelId`) or a raw platform receive id.
+ */
+export interface ForwardMessageInput {
+  messageId?: string
+  messageIds?: string[]
+  target: string
+}
+
 export interface PlatformAdapter {
   readonly meta: AdapterMeta
   readonly id: string
@@ -139,6 +202,23 @@ export interface PlatformAdapter {
   start(ctx: AdapterContext): Promise<void>
   stop(): Promise<void>
   health(): AdapterHealth
+
+  /**
+   * Native projection for durable execution runs. This is also the TypeScript
+   * connector-plugin extension contract; the plugin bridge preserves the
+   * driver by identity. Absence selects the generic A2UI/edit/append fallback.
+   * Snapshot labels and targets are already IM-safe and must not be replaced
+   * with raw prompts, tool input/output, commands, queries, or error bodies.
+   */
+  readonly runPresentation?: RunPresentationDriver
+  /**
+   * Explicit runtime/presentation degradation contract for built-in and
+   * TypeScript plugin adapters. Declare actual capabilities; callers must not
+   * infer message editing support from the presence of a platform message id.
+   */
+  readonly runtimeCapabilities?: ConnectorRuntimeCapabilityMatrix
+  /** Native cursor domain expected by the legacy history stream. */
+  readonly historyCursorKind?: "message_id" | "timestamp"
 
   send(req: OutboundRequest): Promise<OutboundResult>
   /**
@@ -159,13 +239,97 @@ export interface PlatformAdapter {
   streamReply?(req: StreamReplyRequest): Promise<void>
   edit?(messageId: string, patch: OutboundRequest): Promise<OutboundResult>
   delete?(messageId: string): Promise<void>
+  /**
+   * Add an emoji reaction to an existing platform message. `emojiType` is
+   * the platform's reaction code (Lark reaction type like "THUMBSUP") or a
+   * unicode emoji, adapter-interpreted. Optional — only platforms with a
+   * reaction API implement it; callers treat absence as unsupported.
+   *
+   * Returns a {@link ReactionRef} carrying the platform reaction id (when the
+   * platform surfaces one) so the same reaction can later be removed via
+   * {@link removeReaction}. Legacy callers that ignore the return value are
+   * unaffected.
+   */
+  addReaction?(messageId: string, emojiType: string): Promise<ReactionRef | void>
+  /**
+   * Remove a previously added reaction by its platform reaction id (obtained
+   * from {@link addReaction}). Optional; paired with the same `send.reaction`
+   * capability. Callers treat absence as unsupported.
+   */
+  removeReaction?(messageId: string, reactionId: string): Promise<void>
+  /**
+   * Forward an existing message (`input.messageId`) — or merge-forward several
+   * (`input.messageIds`) as one combined card — into another conversation.
+   * Optional; declared alongside the `forward` capability. Returns the same
+   * `{ ok, platformMessageId, error }` shape as {@link send}.
+   */
+  forwardMessage?(input: ForwardMessageInput): Promise<OutboundResult>
+  /**
+   * Escalate an already-sent message to the given users via an urgent channel
+   * (Feishu 加急: in-app / SMS / phone). Optional; declared alongside the
+   * `urgent` capability. NOTE: requires an elevated platform scope
+   * (`im:message.urgent*` on Lark) that many bots lack — callers surface a
+   * scope error to the operator.
+   */
+  sendUrgent?(messageId: string, userIds: string[], via?: UrgentChannel): Promise<void>
+  /**
+   * Query who has read an already-sent message (read receipts). Optional
+   * feedback surface — only platforms with a read-user API implement it
+   * (Feishu `GET /im/v1/messages/:id/read_users`). Callers treat absence as
+   * "read state unknown".
+   */
+  getReadReceipt?(messageId: string): Promise<ReadReceipt>
   setTyping?(conversationKey: string, on: boolean): Promise<void>
   uploadFile?(file: AttachmentDescriptor): Promise<AdapterAttachmentRef>
   fetchHistory?(
     conversationKey: string,
     opts: HistoryFetchOpts
   ): AsyncIterable<NormalizedInboundEvent>
+  /**
+   * Durable history contract. The complete delivery target is mandatory so
+   * adapters never reverse-engineer a destination from an opaque key.
+   */
+  fetchHistoryPage?(
+    target: ConversationDeliveryTarget,
+    cursor: PlatformHistoryCursor | undefined,
+    opts: { max: number }
+  ): Promise<HistoryPage>
   refreshCredentials?(): Promise<void>
+  /**
+   * Surface a short, periodically refreshed status text on the platform
+   * (Lark 系统状态 badge, Slack `users.profile.set`, Discord gateway
+   * presence). Optional — only adapters whose platform exposes a status
+   * API implement it; they must also declare the `presence.status`
+   * capability. Callers treat a throw as a soft failure (audited, retried
+   * on the next refresh tick) — it must never break another flow.
+   */
+  setPresenceStatus?(input: PresenceStatusInput): Promise<void>
+  /**
+   * Pin a platform message so a periodically edited card stays visible at
+   * the top of a conversation. Optional; paired with the `pin` capability.
+   */
+  pinMessage?(conversationKey: string, messageId: string): Promise<void>
+  /**
+   * Remove a previously pinned message. Optional; paired with the same `pin`
+   * capability. Callers treat absence as unsupported.
+   */
+  unpinMessage?(messageId: string): Promise<void>
+  /**
+   * Chat management (W2 multi-bot) — all optional, each paired with a
+   * capability flag the adapter must also declare:
+   *   `createChat` ↔ `chat.create`, `addChatMembers`/`removeChatMembers` ↔
+   *   `chat.members`, `updateChat` ↔ `chat.update`, `resolveContacts` ↔
+   *   `contact.resolve`.
+   * Consumed by the platform-neutral `im.*` built-in skills through
+   * `getRunningAdapter(adapterId)` — never through platform-specific paths.
+   * Permission failures throw `ChatManagementScopeError` so callers can
+   * surface the missing console scope to the operator.
+   */
+  createChat?(input: CreateChatInput): Promise<CreateChatResult>
+  addChatMembers?(input: ChatMembersInput): Promise<ChatMembersResult>
+  removeChatMembers?(input: ChatMembersInput): Promise<ChatMembersResult>
+  updateChat?(input: UpdateChatInput): Promise<void>
+  resolveContacts?(input: ResolveContactsInput): Promise<ContactCandidate[]>
   /**
    * Per-adapter A2UI projection matrix. Returned synchronously so
    * `build-options.ts:resolveSendOptions` can inject a capability-aware

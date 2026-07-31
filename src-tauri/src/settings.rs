@@ -179,33 +179,20 @@ fn write_settings_payload_at(
         serde_json::to_string_pretty(payload).map_err(|e| format!("serialize: {}", e))?;
     let serialized = format!("{}\n", serialized);
 
-    let backup_path = if path.exists() {
-        let ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        let bp = path.with_extension(format!("json.bak.{}", ts));
-        std::fs::copy(path, &bp).map_err(|e| format!("backup: {}", e))?;
-        Some(bp.to_string_lossy().into_owned())
-    } else {
-        None
+    let plan = crate::fs_atomic::AtomicWritePlan {
+        path: path.to_path_buf(),
+        expected_mtime: None,
+        tmp_suffix: "tmp".into(),
+        backup_suffix: "bak".into(),
     };
-    let tmp_path = path.with_extension("json.tmp");
-    {
-        use std::io::Write as _;
-        let mut f = std::fs::File::create(&tmp_path).map_err(|e| format!("create tmp: {}", e))?;
-        f.write_all(serialized.as_bytes())
-            .map_err(|e| format!("write tmp: {}", e))?;
-        f.sync_all().ok();
-    }
-    std::fs::rename(&tmp_path, path).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp_path);
-        format!("rename into place: {}", e)
-    })?;
+    let out = crate::fs_atomic::atomic_write_with_mtime_check(&plan, serialized.as_bytes())
+        .map_err(|e| format!("write {}: {}", path.display(), e))?;
 
     Ok(ClaudeSettingsWriteResult {
         path: path.to_string_lossy().into_owned(),
-        backup_path,
+        backup_path: out
+            .backup_path
+            .map(|backup| backup.to_string_lossy().into_owned()),
     })
 }
 
@@ -315,14 +302,14 @@ pub fn write_claude_settings_env(
     // renaming the temp file into place; if CCSwitch or another tool wrote
     // between these two points, we abort with drift_detected and the
     // renderer reloads.
-    let (bytes, mtime) =
-        crate::fs_atomic::read_with_mtime(&path).map_err(|e| format!("read {}: {}", path.display(), e))?;
+    let (bytes, mtime) = crate::fs_atomic::read_with_mtime(&path)
+        .map_err(|e| format!("read {}: {}", path.display(), e))?;
 
     let root: serde_json::Map<String, Value> = if bytes.is_empty() {
         serde_json::Map::new()
     } else {
-        let raw = std::str::from_utf8(&bytes)
-            .map_err(|e| format!("read {}: {}", path.display(), e))?;
+        let raw =
+            std::str::from_utf8(&bytes).map_err(|e| format!("read {}: {}", path.display(), e))?;
         if raw.trim().is_empty() {
             serde_json::Map::new()
         } else {
@@ -590,8 +577,12 @@ mod tests {
     fn write_settings_payload_preserves_extra_keys_via_flatten() {
         let path = temp_settings_path("settings.json");
         let mut payload = ClaudeSettings::default();
-        payload.extra.insert("customThing".into(), json!({ "x": 1 }));
-        payload.extra.insert("apiKeyHelper".into(), json!("/usr/bin/keys"));
+        payload
+            .extra
+            .insert("customThing".into(), json!({ "x": 1 }));
+        payload
+            .extra
+            .insert("apiKeyHelper".into(), json!("/usr/bin/keys"));
 
         write_settings_payload_at(&path, &payload, false).expect("write");
         let back = read_back(&path);
@@ -620,6 +611,45 @@ mod tests {
 
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(bp);
+    }
+
+    #[test]
+    fn write_settings_payload_rapid_writes_keep_distinct_backups() {
+        let path = temp_settings_path("settings.json");
+        std::fs::write(&path, b"{\"model\":\"original\"}\n").unwrap();
+
+        let mut first_payload = ClaudeSettings::default();
+        first_payload.model = Some("first".into());
+        let first = write_settings_payload_at(&path, &first_payload, false)
+            .expect("first write")
+            .backup_path
+            .expect("first write should back up original");
+
+        let mut second_payload = ClaudeSettings::default();
+        second_payload.model = Some("second".into());
+        let second = write_settings_payload_at(&path, &second_payload, false)
+            .expect("second write")
+            .backup_path
+            .expect("second write should back up first");
+
+        assert_ne!(first, second, "rapid writes must not reuse backup paths");
+        assert!(
+            std::fs::read_to_string(&first)
+                .expect("read first backup")
+                .contains("original"),
+            "first backup should retain the original settings"
+        );
+        assert!(
+            std::fs::read_to_string(&second)
+                .expect("read second backup")
+                .contains("first"),
+            "second backup should retain the first write"
+        );
+        assert_eq!(read_back(&path).get("model"), Some(&json!("second")));
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(first);
+        let _ = std::fs::remove_file(second);
     }
 
     #[test]
@@ -692,8 +722,8 @@ mod tests {
 
         write_settings_payload_at(&path, &parsed, false).expect("write");
 
-        let back: ClaudeSettings = serde_json::from_str(&std::fs::read_to_string(&path).unwrap())
-            .unwrap();
+        let back: ClaudeSettings =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(back.model.as_deref(), Some("haiku"));
         assert_eq!(back.extra.get("unknownThing"), Some(&json!({ "a": 1 })));
 

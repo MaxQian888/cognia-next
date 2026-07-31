@@ -7,7 +7,7 @@
  *
  * Node count: 10. Complexity: advanced. The redaction step calls the
  * sandboxed `data.code` executor with a hand-rolled gate so it composes
- * cleanly with `lib/twin/ingest/redact.ts:hasNoLeakingPii` in production
+ * cleanly with `packages/redact/src/index.ts:hasNoLeakingPii` in production
  * runtimes (where the editor can swap the snippet for a direct import).
  */
 
@@ -53,7 +53,7 @@ export function inboxTriageTwinTemplate(): VisualWorkflow {
             language: "javascript",
             timeoutMs: 2000,
             code:
-              "// Replace with `import { hasNoLeakingPii } from '@/lib/twin/ingest/redact'`\n" +
+              "// Replace with `import { hasNoLeakingPii } from '@cognia/redact'`\n" +
               "// in a real runtime. Inline here so the template is self-contained.\n" +
               "const body = String($input.body ?? '');\n" +
               "const redacted = body\n" +

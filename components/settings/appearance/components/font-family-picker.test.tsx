@@ -63,4 +63,20 @@ describe("FontFamilyPicker", () => {
     expect(screen.getByText("monospace")).toBeInTheDocument()
     expect(screen.queryByText("sans-serif")).toBeNull()
   })
+
+  it("monoOnly keeps system fonts by their monospaced flag, not the name", () => {
+    // A proportional family whose name lacks any mono keyword must be hidden,
+    // and a monospace family whose name also lacks one must be kept — proving
+    // the real flag drives the filter, not the heuristic.
+    setSystemFonts([
+      { family: "Helvetica Neue", monospaced: false },
+      { family: "Iosevka Term", monospaced: true },
+    ])
+    render(
+      <FontFamilyPicker labelKey="font.monoLabel" value={undefined} onChange={jest.fn()} monoOnly />
+    )
+    fireEvent.click(screen.getByRole("combobox"))
+    expect(screen.getByText("Iosevka Term")).toBeInTheDocument()
+    expect(screen.queryByText("Helvetica Neue")).toBeNull()
+  })
 })

@@ -1,0 +1,181 @@
+{
+  "actions": {
+    "collapse": "Collapse workbench",
+    "expand": "Expand workbench",
+    "focus": "Focus mode",
+    "layoutMenu": "Layout options",
+    "narrow": "Narrow mode",
+    "pin": "Pin panel",
+    "pinHint": "Pinned panels stay put — automatic reveals become badges instead",
+    "resetLayout": "Reset layout",
+    "resize": "Resize workbench",
+    "retry": "Retry panel",
+    "switchPanel": "Switch panel",
+    "unpin": "Unpin panel",
+    "wide": "Wide mode"
+  },
+  "activities": {
+    "ai": "AI",
+    "comments": "Comments",
+    "inspect": "Inspect",
+    "preview-run": "Preview / run",
+    "review": "Review",
+    "templates": "Templates",
+    "workspace": "Workspace"
+  },
+  "activityRailLabel": "Context Workbench activities",
+  "aiActions": "AI actions",
+  "aiLoading": "Preparing the resource conversation…",
+  "artifactSelectionComment": {
+    "label": "Selection instruction",
+    "placeholder": "Tell AI what to do with this selection",
+    "selectFirst": "Select a range in the artifact before sending an instruction.",
+    "selectionReady": "This instruction will be scoped to the selected range.",
+    "sendToAi": "Send to AI"
+  },
+  "asides": {
+    "actionError": "That didn't work.",
+    "cancel": "Cancel",
+    "clear": "Clear",
+    "clearBody": "The messages in this aside will be permanently deleted. The aside itself stays.",
+    "clearTitle": "Clear this aside?",
+    "cleared": "Aside cleared.",
+    "createError": "Couldn't create an aside.",
+    "defaultName": "Aside {n}",
+    "delete": "Delete",
+    "deleteBody": "This aside and its messages will be permanently deleted.",
+    "deleteTitle": "Delete this aside?",
+    "deleted": "Aside deleted.",
+    "fallbackName": "Aside",
+    "listLabel": "Asides",
+    "moreAria": "Aside actions",
+    "nameLabel": "Aside name",
+    "newAria": "New aside",
+    "promote": "Promote to a conversation",
+    "promoted": "Promoted. It's now a conversation of its own.",
+    "rename": "Rename",
+    "renameTitle": "Rename aside",
+    "save": "Save",
+    "switchAria": "Switch aside"
+  },
+  "comments": "Comments",
+  "commentsPanel": {
+    "add": "Add comment",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "empty": "No comments yet.",
+    "hideResolved": "Hide resolved",
+    "placeholder": "Write a comment",
+    "reopen": "Reopen",
+    "reply": "Reply",
+    "replyPlaceholder": "Write a reply",
+    "resolve": "Resolve",
+    "resolved": "Resolved",
+    "save": "Save",
+    "sendToChat": "Ask AI",
+    "sendToChatAria": "Add {author}'s comment to the next message",
+    "showResolved": "Show resolved",
+    "stale": "Outdated anchor",
+    "toggleReaction": "Toggle {emoji} reaction",
+    "you": "You"
+  },
+  "customize": {
+    "persistentRail": "Keep the icon rail on screen",
+    "persistentRailHint": "Closing the workbench leaves its activity icons in a narrow column you can drag back open. Turn this off to have the whole right column collapse away.",
+    "dragHint": "Drag to reorder",
+    "hidden": "Hidden",
+    "hiddenEmpty": "Nothing hidden.",
+    "hideItem": "Hide",
+    "hint": "Hiding an activity removes its rail button only — the panel stays reachable from the command palette and its shortcut.",
+    "onRail": "On the rail",
+    "onRailEmpty": "No activities on the rail.",
+    "restoreDefaults": "Restore defaults",
+    "showItem": "Show"
+  },
+  "exportResourceSession": "Export this resource conversation",
+  "metadata": {
+    "artifactTitle": "Artifact properties",
+    "artifactType": "Type",
+    "canvasTitle": "Document properties",
+    "createdAt": "Created",
+    "documentType": "Type",
+    "goToSource": "Go to source message",
+    "language": "Language",
+    "messageCount": "Messages",
+    "model": "Model",
+    "notRun": "Not run",
+    "provider": "Provider",
+    "revision": "Revision",
+    "runtimeStatus": "Runtime",
+    "saveState": "Save state",
+    "sessionId": "Conversation ID",
+    "sessionTitle": "Conversation",
+    "unknown": "Unknown",
+    "updatedAt": "Updated",
+    "version": "Version",
+    "workingDir": "Working directory"
+  },
+  "mobileDescription": "AI, comments, inspection, review, and preview tools for the current resource.",
+  "mobileTitle": "Context Workbench",
+  "panelError": "Panel unavailable",
+  "panelErrorDescription": "This panel stopped unexpectedly. The rest of your work is unchanged.",
+  "projectProposal": {
+    "apply": "Apply accepted",
+    "discard": "Discard",
+    "empty": "No file proposal is waiting for review.",
+    "rebase": "Rebase proposal",
+    "stale": "The file changed after this proposal was created. Rebase or discard it before applying.",
+    "undo": "Undo apply"
+  },
+  "proposalReview": "Proposal review",
+  "resourceChat": "AI conversation",
+  "sessionSidechat": "Side chat",
+  "sessionSources": {
+    "description": "Files, web pages, retrieved context, and tools used in this conversation.",
+    "emptyDescription": "Files, citations, retrieved context, and tool activity will appear here as the conversation develops.",
+    "emptyTitle": "No sources yet",
+    "filters": {
+      "all": "All",
+      "files": "Files",
+      "other": "Other",
+      "web": "Web"
+    },
+    "labels": {
+      "anthropic": "Web",
+      "document": "Document",
+      "file": "File",
+      "footnote": "Note",
+      "memory": "Memory",
+      "tool": "Tool",
+      "twinRag": "Twin",
+      "twinStyle": "Style",
+      "web": "Web"
+    },
+    "messageLabel": "Message {n}",
+    "noResultsDescription": "Try another keyword or source type.",
+    "noResultsTitle": "No matching sources",
+    "searchLabel": "Search conversation sources",
+    "searchPlaceholder": "Search files, web pages, and tools…",
+    "title": "Conversation sources"
+  },
+  "sidechatPlaceholder": {
+    "description": "Open a conversation first, then use Side chat to investigate something without adding noise to the main thread.",
+    "title": "No conversation is open"
+  },
+  "unavailable": {
+    "comments": {
+      "description": "This resource does not currently provide comment threads. Other workbench activities remain available.",
+      "title": "Comments are not available"
+    },
+    "preview": {
+      "description": "This resource cannot be previewed in the workbench.",
+      "title": "Preview is not available"
+    },
+    "workspace": {
+      "description": "Filesystem workspace tools require a supported desktop or sandbox backend.",
+      "title": "Workspace is not available"
+    }
+  },
+  "webviewPanelPending": "This panel's webview has not loaded yet."
+}

@@ -1,158 +1,264 @@
 # CI/CD Pipeline Documentation
 
-This document provides comprehensive information about the CI/CD pipeline configured for this React + Next.js + Tauri project.
+How this repository verifies itself: which checks exist, where each one runs,
+what to do when one goes red, and how to set up the optional integrations.
 
-## Overview
+> **Historical note, because it explains several decisions below.** The main
+> pipeline (`ci.yml`) had **never completed a single run**. All 205 runs since
+> the repository's first commit ended in `startup_failure`, so `quality.yml`,
+> `test.yml` and `build-tauri.yml` had zero executions between them. The cause
+> was a permissions escalation: `build-tauri.yml` declared
+> `permissions: contents: write` while `ci.yml` calls it with the repository's
+> read-only default token, and a called workflow may not request more scope
+> than its caller holds. The write scope now lives on the caller
+> (`release.yml`). Everything below is arranged so a failure of that shape is
+> visible instead of silent.
 
-The CI/CD pipeline is implemented using GitHub Actions and includes the following jobs:
+---
 
-1. **Code Quality & Security** - Linting, type checking, and security audits
-2. **Test Suite** - Unit tests with coverage reporting
-3. **Deploy Preview** - Automatic preview deployments for pull requests
-4. **Deploy Production** - Production deployments (disabled by default)
-5. **Build Tauri** - Cross-platform desktop application builds
-6. **Create Release** - Automated GitHub releases for tagged versions
+## Tiers
 
-## Workflow Triggers
+| Tier         | Trigger                           | Runs                                                                     |
+| ------------ | --------------------------------- | ------------------------------------------------------------------------ |
+| **Hot path** | push to `dev`/`master`, any PR    | `ci.yml` → `quality.yml` + `test.yml`                                    |
+| **Nightly**  | `nightly.yml`, 03:00 UTC + manual | full test matrix, 4-platform Tauri bundles, Tauri E2E (Windows), iOS E2E |
+| **Release**  | `v*` tag                          | `release.yml` → quality + test + signed Tauri release                    |
+| **Report**   | `workflow_run` after the hot path | `report.yml` → PR comment + job summary                                  |
+| **Services** | changes under `services/**`       | `share-server.yml`, `signaling-server.yml`, `compose-e2e.yml`            |
+| **Deploy**   | manual, opt-in                    | `deploy.yml` (see below)                                                 |
 
-The pipeline runs on:
+Tauri **bundling** is deliberately off the hot path — it is the largest
+wall-clock item in the repo. The Tauri crate is still compiled on every run:
+`cargo-test-windows` builds the static export and then runs `cargo test`
+inside `src-tauri`, which is a full compile of the desktop app.
 
-- **Push** to `master` or `develop` branches via `.github/workflows/ci.yml`
-- **Pull requests** to `master` or `develop` branches via `.github/workflows/ci.yml`
-- **Tags** starting with `v` via `.github/workflows/release.yml`
-- **Manual dispatch** for `.github/workflows/quality.yml` and `.github/workflows/test.yml` (for isolated debugging)
+`schedule` only fires from the repository's **default branch**. That is why
+the nightly tier lives in its own top-level workflow instead of a `schedule:`
+key inside `test.yml`: the old arrangement silently never ran, because the
+default branch's copy of `test.yml` had no schedule.
 
-## Jobs Overview
+### Concurrency
 
-### 1. Code Quality & Security
+Every workflow that is triggered by a ref declares a `concurrency` group keyed
+on that ref. Hot-path runs use `cancel-in-progress: true` so a rapid series of
+pushes does not queue; `release.yml` and `nightly.yml` use `false`, because
+cancelling a half-built release is worse than letting it finish.
 
-**Runs on:** Called by `ci.yml` / `release.yml` (or manual dispatch)  
-**Duration:** ~2-3 minutes
+`build-tauri.yml` deliberately declares none. It is `workflow_call` only — it
+has no ref of its own to key on, and it runs the tagged release build, so a
+group that could cancel it is exactly the hazard the `false` above avoids. Its
+caller (`release.yml`) owns the concurrency decision.
 
-This job performs:
+---
 
-- ESLint code linting
-- TypeScript type checking (`tsc --noEmit`)
-- Security audit of dependencies (`pnpm audit`)
-- Check for outdated dependencies
+## Quality gates
 
-**Note:** Some steps continue on error to avoid blocking the pipeline for warnings.
+The gate list lives in exactly one place: **`scripts/gates/check-all.mjs`**.
 
-### 2. Test Suite
+```bash
+pnpm check:all                    # every gate, in CI order
+pnpm check:all -- --runtime node  # skip the python/rust gates
+pnpm check:all -- --group audit   # one CI group
+pnpm check:all -- --bail          # stop at the first failure
+```
 
-**Runs on:** Called by `ci.yml` / `release.yml` (or manual dispatch)  
-**Duration:** ~3-5 minutes
+`quality.yml` does not restate the list. Its `prepare` job calls
+`check-all.mjs --list-groups --json` and the `gates` job fans out one runner
+per group with `fail-fast: false`, so a single run reports **every** failure
+rather than stopping at the first.
 
-This job performs:
+**Adding a gate**: add it to `REGISTRY` in `check-all.mjs`. Nothing in the
+workflow changes — a brand-new group becomes a new matrix entry automatically.
+`pnpm gates:registry` fails the build if a verification-shaped script exists
+that is neither registered nor exempted with a written reason.
 
-- Runs all Jest tests with coverage
-- Generates multiple coverage report formats (HTML, LCOV, Cobertura, JUnit)
-- Uploads coverage to Codecov (if configured)
-- Posts coverage summary as PR comment
-- Publishes test results with annotations
-- Builds the Next.js application
-- Checks bundle size
+| Group          | What it covers                                                                                                                                                                                                                                                                    |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lint`         | eslint, prettier                                                                                                                                                                                                                                                                  |
+| `types`        | `tsc --noEmit`                                                                                                                                                                                                                                                                    |
+| `i18n`         | key parity, hardcoded-string baseline, generated-bundle freshness                                                                                                                                                                                                                 |
+| `artifacts`    | generated files match their sources (`build:packages`, skills, plugin bundles, plugin contract)                                                                                                                                                                                   |
+| `audit`        | repo-specific structural audits — slots, trusted publishers, silent-failure flags, PII boundaries, command parity, E2E governance, co-located tests, static export, plugin-SDK WIT, plugin author imports; plus CLAUDE.md freshness, **advisory** until the subsystem map settles |
+| `sync`         | mirrored config/version files agree                                                                                                                                                                                                                                               |
+| `gate-tests`   | the gate tooling's own `node --test` suites                                                                                                                                                                                                                                       |
+| `plugin-sdk`   | the SDK's TS / Python / Rust contract surface                                                                                                                                                                                                                                     |
+| `rust`         | `cargo fmt --check`, ratcheted clippy                                                                                                                                                                                                                                             |
+| `supply-chain` | `pnpm audit`, `cargo deny` — **advisory**, never blocking                                                                                                                                                                                                                         |
 
-**Coverage Thresholds:**
+---
 
-- Branches: 60%
-- Functions: 60%
-- Lines: 70%
-- Statements: 70%
+## Test runners
 
-### 3. Deploy Preview
+Six runners, each with one owner:
 
-**Runs on:** Pull requests only  
-**Duration:** ~2-3 minutes
+| Runner                           | Scope                    | Where it runs                                                                     |
+| -------------------------------- | ------------------------ | --------------------------------------------------------------------------------- |
+| Jest (`node` + `jsdom` projects) | 5,600+ co-located suites | `test.yml`, 4 coverage shards                                                     |
+| `node --test` (scripts)          | `scripts/**/*.test.mjs`  | `quality.yml`, `gate-tests` group                                                 |
+| `node --test` (sidecar)          | `sidecar/**`             | `test.yml`, `sidecar` job                                                         |
+| Playwright                       | `tests/e2e/**`           | `test.yml` — chromium + mobile-pixel-7, 2 shards each; tauri + iOS nightly        |
+| `cargo test`                     | 23 crates                | `test.yml` — `--workspace --exclude cognia-next` on Linux, `src-tauri` on Windows |
+| pytest                           | `plugin-sdk/python`      | `quality.yml`, `plugin-sdk` group                                                 |
 
-Automatically deploys preview versions of the application for pull requests.
+`src-tauri` is excluded from the Linux workspace run because its
+`tauri::generate_context!()` needs the Next.js static export at compile time;
+the Windows job builds the export first and covers it there.
 
-**Required Secrets:**
+---
 
-- `VERCEL_TOKEN` - Vercel deployment token
-- `VERCEL_ORG_ID` - Vercel organization ID
-- `VERCEL_PROJECT_ID` - Vercel project ID
+## Coverage
 
-**Setup Instructions:**
+Two levels, and they are not the same number.
 
-1. Install Vercel CLI: `npm i -g vercel`
-2. Run `vercel login` and authenticate
-3. Run `vercel link` in your project directory
-4. Get your tokens:
+- **Changed files: ≥90%** lines/branches/functions — the real bar for anything
+  you touch. `pnpm test:coverage:changed -- --strict`, gated on every PR.
+- **Repo-wide: layered floors** in `scripts/test/coverage-thresholds.json`,
+  enforced by `scripts/test/merge-coverage.mjs --check` after the shards
+  merge. They sit far below 90. `pnpm coverage:ratchet` reports which floors
+  have gained enough headroom to raise; `-- --write` locks the gain in.
 
-   ```bash
-   vercel whoami
-   cat .vercel/project.json
-   ```
+Jest shards run with `--coverageThreshold='{}'` because a shard only sees
+partial coverage for files whose tests landed elsewhere; the real gate is the
+merge job.
 
-5. Add secrets to GitHub repository settings
+---
 
-### 4. Deploy Production (DISABLED BY DEFAULT)
+## Baselines and ratchets
 
-**Runs on:** Pushes to `master` branch (when enabled)  
-**Duration:** ~2-3 minutes
+Several gates record pre-existing debt instead of failing on it. In every case
+the recorded list **may only shrink**, and anything new is a hard failure.
 
-⚠️ **This job is commented out by default for safety.**
+| Gate                   | Baseline file                                | Regenerate with                                  |
+| ---------------------- | -------------------------------------------- | ------------------------------------------------ |
+| Hardcoded i18n strings | `scripts/i18n-baseline.json`                 | `pnpm lint:i18n:baseline`                        |
+| Co-located tests       | `scripts/gates/colocated-test-baseline.json` | `pnpm audit:colocated-tests -- --write-baseline` |
+| Clippy                 | `scripts/gates/clippy-baseline.json`         | `pnpm rust:clippy -- --write-baseline`           |
+| E2E governance         | `scripts/e2e/governance-exceptions.json`     | hand-edited, entries carry `reviewAfter`         |
+| Coverage floors        | `scripts/test/coverage-thresholds.json`      | `pnpm coverage:ratchet -- --write`               |
 
-**To Enable Production Deployments:**
+Regenerating a baseline to make a red build green is the failure mode these
+are most exposed to. Regenerate only after _fixing_ something; the gates print
+how many entries became removable so the gain is visible.
 
-1. **Set up GitHub Environment Protection:**
-   - Go to `Settings > Environments`
-   - Create a new environment named `production`
-   - Add required reviewers (recommended)
-   - Add deployment branch restrictions (optional)
-   - Add environment secrets
+---
 
-2. **Configure Required Secrets:**
-   - `VERCEL_TOKEN`
-   - `VERCEL_ORG_ID`
-   - `VERCEL_PROJECT_ID`
+## Reports
 
-3. **Uncomment the job** in `.github/workflows/ci.yml`
+Reporting is two-stage, and the split is load-bearing rather than stylistic.
 
-4. **Update the environment URL** to match your production domain
+1. **In-run** — every gate group writes a ✓/✗ table to `GITHUB_STEP_SUMMARY`.
+   No token, no artifacts, no second workflow: it works even when stage two
+   cannot run.
+2. **`report.yml`** — triggered by `workflow_run`, so it executes in the base
+   repository's context and may legally hold `pull-requests: write`. It
+   downloads the run's artifacts, downloads the same artifacts from the trunk
+   branch's last successful run as a baseline, and upserts a single PR comment.
 
-**Additional Safety Measures:**
+The main pipeline cannot post comments itself. It runs on the read-only
+default token, fork and Dependabot PRs get read-only tokens that `permissions:`
+cannot escalate, and requesting write inside a called workflow is precisely
+what broke the pipeline before.
 
-- Consider requiring specific labels on commits
-- Only deploy on tagged releases
-- Add time-based deployment windows
-- Require manual approval via GitHub Environments
+The report covers: failed Jest tests with messages, slowest suites, Playwright
+failures, **flaky specs** (passed only on retry — otherwise invisible, since
+`retries: 1` reports them green), coverage deltas, and bundle-size deltas.
 
-### 5. Build Tauri Desktop Application
+Nothing is persisted: no metrics branch, no committed snapshots. The trade-off
+is that trends are always "versus the trunk branch's last green run", and
+cross-run flake history is not available.
 
-**Runs on:** All pushes and pull requests  
-**Duration:** ~10-20 minutes per platform
+---
 
-Builds cross-platform desktop applications for:
+## Caching
 
-- **Linux** (x86_64): AppImage and .deb packages
-- **Windows** (x64): MSI and NSIS installers
-- **macOS** (x64 and ARM64): DMG and .app bundles
+| Cache                      | Key                                      | Job                                                                     |
+| -------------------------- | ---------------------------------------- | ----------------------------------------------------------------------- |
+| pnpm store                 | lockfile hash (via `actions/setup-node`) | all Node jobs                                                           |
+| Next.js `.next/cache`      | lockfile + source hash                   | `build`, `build-e2e` (separate keys — the E2E flag changes the output)  |
+| TypeScript `*.tsbuildinfo` | lockfile + source hash                   | `gates (types)` — advisory; stale or missing falls back to a full check |
+| Playwright browsers        | lockfile hash                            | `e2e`                                                                   |
+| cargo `target/`            | `Swatinem/rust-cache`                    | every Rust job                                                          |
 
-**Platform-Specific Requirements:**
+---
 
-#### Linux (Ubuntu)
+## Artifacts
 
-No additional setup required. System dependencies are installed automatically:
+| Artifact              | Retention | Description                                                |
+| --------------------- | --------- | ---------------------------------------------------------- |
+| `jest-shard-*`        | 7 days    | per-shard istanbul map + JUnit XML                         |
+| `coverage-report`     | 30 days   | merged coverage (`coverage-final.json`, lcov, HTML)        |
+| `bundle-size`         | 30 days   | structured static-export measurement (feeds the size diff) |
+| `playwright-report`   | 14 days   | merged HTML report                                         |
+| `playwright-json`     | 14 days   | merged JSON report (feeds failure + flake reporting)       |
+| `playwright-traces-*` | 14 days   | traces and screenshots, failures only                      |
+| `nextjs-build`        | 7 days    | the static export                                          |
+| `nextjs-build-e2e`    | 3 days    | `NEXT_PUBLIC_E2E=1` export consumed by the e2e jobs        |
 
-- libgtk-3-dev
-- libwebkit2gtk-4.1-dev
-- libappindicator3-dev
-- librsvg2-dev
-- patchelf
-- libssl-dev
+`report.yml` reads `coverage-report` and `bundle-size` from **both** this run
+and the trunk branch's last successful run — which is why their retention is
+longer than the rest.
 
-#### Windows
+---
 
-**Optional Code Signing:**
+## Optional integrations and secrets
 
-To enable code signing, add these secrets:
+The pipeline works out of the box with **no secrets**. Each item below is
+opt-in.
 
-- `WINDOWS_CERTIFICATE` - Base64-encoded PFX certificate
-- `WINDOWS_CERTIFICATE_PASSWORD` - Certificate password
+### Tauri updater signing (required for a real release)
 
-**How to prepare certificate:**
+- `TAURI_SIGNING_PRIVATE_KEY` — base64 of the updater private key
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` — its password (`""` if none)
+
+`bundle.createUpdaterArtifacts: true` in `tauri.conf.json` makes the build
+sign the bundles; without these a tagged build **fails by design**, because an
+unsigned release would be un-updatable. See `src-tauri/UPDATER.md`.
+
+### Service deployments (`deploy.yml`, manual/opt-in)
+
+`workflow_dispatch` only — never on push. Targets (ADR-0059 P0.1):
+
+| Target             | Platform          | Source                              |
+| ------------------ | ----------------- | ----------------------------------- |
+| `signaling-worker` | Cloudflare Worker | `services/signaling-server/worker/` |
+| `share-worker`     | Cloudflare Worker | `services/share-server/worker/`     |
+| `signaling-fly`    | Fly.io (axum)     | `services/signaling-server/`        |
+| `share-fly`        | Fly.io (axum)     | `services/share-server/`            |
+
+Dispatch inputs: `environment` (`staging` / `production`) and `target` (`all`,
+`workers`, `fly`, or one of the four above). Staging Workers deploy via the
+`[env.staging]` stanzas in each `wrangler.toml`.
+
+Three gates keep forks green with zero configuration: manual trigger only, the
+repository variable `DEPLOY_ENABLED` must be the string `true`, and each
+platform job requires its secret to be present. A failing gate **skips** the
+job rather than failing it.
+
+The GitHub Environments `staging` and `production` hold the same names, so the
+workflow reads one set:
+
+| Kind     | Name                       | Notes                                        |
+| -------- | -------------------------- | -------------------------------------------- |
+| secret   | `CLOUDFLARE_API_TOKEN`     | Workers deploy token                         |
+| secret   | `FLY_API_TOKEN`            | `fly tokens create deploy`                   |
+| variable | `CLOUDFLARE_ACCOUNT_ID`    |                                              |
+| variable | `CF_SHARE_KV_NAMESPACE_ID` | injected into `wrangler.toml` at deploy time |
+| variable | `FLY_SIGNALING_APP`        | e.g. `cognia-signaling` / `-staging`         |
+| variable | `FLY_SHARE_APP`            | e.g. `cognia-share` / `-staging`             |
+
+Give `production` protection rules (required reviewers, branch restriction)
+under **Settings → Environments**. One-time provisioning per environment is
+documented in each service README: R2 bucket, KV namespace,
+`wrangler secret put SHARE_UPLOAD_SECRET`, `flyctl volumes create share_data`.
+
+### Codecov
+
+- `CODECOV_TOKEN` — the integration is commented out in `test.yml`.
+
+### Windows code signing
+
+- `WINDOWS_CERTIFICATE` — base64-encoded PFX certificate
+- `WINDOWS_CERTIFICATE_PASSWORD`
 
 ```powershell
 # Convert PFX to base64
@@ -161,37 +267,24 @@ $base64 = [System.Convert]::ToBase64String($bytes)
 $base64 | Out-File certificate.txt
 ```
 
-#### macOS
+### macOS code signing and notarization
 
-**Optional Code Signing and Notarization:**
-
-To enable code signing and notarization, add these secrets:
-
-- `APPLE_CERTIFICATE` - Base64-encoded .p12 certificate
-- `APPLE_CERTIFICATE_PASSWORD` - Certificate password
-- `APPLE_SIGNING_IDENTITY` - Developer ID Application identity
-- `APPLE_ID` - Apple ID email
-- `APPLE_PASSWORD` - App-specific password
-- `APPLE_TEAM_ID` - Apple Developer Team ID
-
-**How to prepare certificate:**
+- `APPLE_CERTIFICATE` — base64-encoded `.p12`
+- `APPLE_CERTIFICATE_PASSWORD`
+- `APPLE_SIGNING_IDENTITY` — Developer ID Application identity
+- `APPLE_ID`, `APPLE_PASSWORD` (app-specific), `APPLE_TEAM_ID`
 
 ```bash
-# Export certificate from Keychain as .p12
-# Then convert to base64
+# Export the certificate from Keychain as .p12, then:
 base64 -i certificate.p12 -o certificate.txt
 ```
 
-**How to create app-specific password:**
+App-specific password: <https://appleid.apple.com> → Security → App-Specific
+Passwords.
 
-1. Go to <https://appleid.apple.com>
-2. Sign in with your Apple ID
-3. Go to Security > App-Specific Passwords
-4. Generate a new password
-
-**Tauri Configuration:**
-
-Update `src-tauri/tauri.conf.json` for code signing:
+Authenticated OS signing stays **disabled** by default; macOS still receives
+the ad-hoc identity configured in `tauri.conf.json` so Apple Silicon accepts
+Internet-downloaded bundles.
 
 ```json
 {
@@ -209,164 +302,65 @@ Update `src-tauri/tauri.conf.json` for code signing:
 }
 ```
 
-### 6. Create Release
+---
 
-**Runs on:** Tags starting with `v` (e.g., `v1.0.0`)  
-**Duration:** ~1-2 minutes
-
-Automatically creates a GitHub release with all built artifacts when you push a version tag.
-
-**How to Create a Release:**
+## Releasing
 
 ```bash
-# Create and push a version tag
-git tag v1.0.0
-git push origin v1.0.0
+pnpm changeset          # during development, per user-facing change
+pnpm release:version    # consumes the changesets, bumps + syncs every artifact
+git tag v1.0.0 && git push origin v1.0.0
 ```
 
-The release will be created as a **draft** with:
+The tag triggers `release.yml`: quality → test → `build-tauri.yml` with
+`tagName`. `tauri-action` creates the release **published, not draft** —
+`releases/latest` only resolves to a published release, and the in-app updater
+points at `releases/latest/download/latest.json`, so a draft would leave the
+updater endpoint 404-ing.
 
-- Auto-generated release notes
-- All platform-specific installers attached
-- Changelog based on commits since last tag
+---
 
-**Review and publish the draft release manually** after verifying the artifacts.
+## When something is red
 
-## Caching Strategy
-
-The pipeline uses multiple caching strategies to improve performance:
-
-1. **pnpm Store Cache** - Caches downloaded packages
-2. **Next.js Build Cache** - Caches Next.js build outputs
-3. **Rust Cache** - Caches Rust dependencies and build artifacts
-
-**Expected Speed Improvements:**
-
-- First run: ~15-25 minutes (full build)
-- Cached runs: ~5-10 minutes (incremental build)
-
-## Concurrency Control
-
-The pipeline uses concurrency groups to automatically cancel outdated workflow runs when new commits are pushed to the same branch or PR.
-
-**Configuration:**
-
-```yaml
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+```bash
+pnpm check:all -- --group <group>        # reproduce one CI group locally
+pnpm test -- path/to/file.test.ts        # one Jest suite
+pnpm test:coverage:changed -- --strict   # the 90% bar on your changed files
+node scripts/gates/check-all.mjs --list-groups   # what groups exist
 ```
 
-## Artifacts
+Every gate script prints its own fix instruction. If one tells you to run a
+command that does not exist, that is a bug in the gate — fix the message, not
+just the symptom. (Two such dangling references existed before this document
+was rewritten.)
 
-All jobs upload artifacts that are retained for 7-30 days:
+**Tests fail in CI but pass locally** — check the Node version matches, that
+`pnpm-lock.yaml` is committed, and that the suite does not depend on local
+state (`pnpm clean:db`).
 
-| Artifact          | Retention | Description                  |
-| ----------------- | --------- | ---------------------------- |
-| `test-results`    | 30 days   | JUnit XML test results       |
-| `coverage-report` | 30 days   | HTML coverage reports        |
-| `nextjs-build`    | 7 days    | Built Next.js application    |
-| `tauri-*`         | 30 days   | Platform-specific installers |
+**Tauri build fails** — Linux: system dependencies; Windows: Rust toolchain;
+macOS: Xcode Command Line Tools. Then review `src-tauri/tauri.conf.json`.
 
-## Required GitHub Secrets
+**Code signing fails** — verify the secrets exist, the certificate has not
+expired, and the signing identity matches the certificate.
 
-### For Preview/Production Deployments (Optional)
+Never bypass a hook with `--no-verify`. If a hook fails, fix the cause,
+re-stage, and make a **new** commit.
 
-- `VERCEL_TOKEN`
-- `VERCEL_ORG_ID`
-- `VERCEL_PROJECT_ID`
+---
 
-### For Codecov Integration (Optional)
+## Cost
 
-- `CODECOV_TOKEN`
+The repository is **public**, so GitHub-hosted standard runners are free and
+minutes are not the constraint — wall clock and noise are. That is what the
+tier split optimizes for: the hot path avoids the 4-platform Tauri matrix, and
+`cancel-in-progress` discards superseded runs.
 
-### For Windows Code Signing (Optional)
+---
 
-- `WINDOWS_CERTIFICATE`
-- `WINDOWS_CERTIFICATE_PASSWORD`
+## Additional resources
 
-### For macOS Code Signing (Optional)
-
-- `APPLE_CERTIFICATE`
-- `APPLE_CERTIFICATE_PASSWORD`
-- `APPLE_SIGNING_IDENTITY`
-- `APPLE_ID`
-- `APPLE_PASSWORD`
-- `APPLE_TEAM_ID`
-
-## Troubleshooting
-
-### Tests Failing in CI but Passing Locally
-
-1. Check Node.js version matches (20.x)
-2. Ensure `pnpm-lock.yaml` is committed
-3. Check for environment-specific issues
-4. Review test logs in GitHub Actions
-
-### Tauri Build Failing
-
-1. **Linux:** Check system dependencies are installed
-2. **Windows:** Verify Rust toolchain is properly set up
-3. **macOS:** Check Xcode Command Line Tools are available
-4. Review Tauri configuration in `src-tauri/tauri.conf.json`
-
-### Code Signing Issues
-
-1. Verify secrets are properly set in GitHub
-2. Check certificate validity and expiration
-3. Ensure signing identity matches certificate
-4. Review Tauri documentation for platform-specific requirements
-
-### Deployment Failures
-
-1. Verify all required secrets are set
-2. Check Vercel project configuration
-3. Review deployment logs in GitHub Actions
-4. Ensure build artifacts are generated correctly
-
-## Best Practices
-
-1. **Always test locally** before pushing
-2. **Use feature branches** for development
-3. **Create pull requests** for code review
-4. **Tag releases** with semantic versioning (v1.0.0)
-5. **Review draft releases** before publishing
-6. **Monitor CI/CD costs** and optimize as needed
-7. **Keep dependencies updated** regularly
-8. **Review security audit** results
-
-## Monitoring and Notifications
-
-### GitHub Actions Dashboard
-
-View workflow runs at: `https://github.com/YOUR_ORG/YOUR_REPO/actions`
-
-### Email Notifications
-
-Configure in: `Settings > Notifications > Actions`
-
-### Slack Integration (Optional)
-
-Add Slack notifications using the `slack-send` action.
-
-## Cost Optimization
-
-### GitHub Actions Minutes
-
-- **Free tier:** 2,000 minutes/month for private repos
-- **Paid plans:** Additional minutes available
-
-### Optimization Tips
-
-1. Use caching effectively (already implemented)
-2. Cancel outdated runs (already implemented)
-3. Run expensive jobs only when needed
-4. Consider self-hosted runners for heavy workloads
-
-## Additional Resources
-
-- [GitHub Actions Documentation](https://docs.github.com/en/actions)
-- [Tauri Documentation](https://tauri.app/v1/guides/)
-- [Next.js Deployment](https://nextjs.org/docs/deployment)
-- [Vercel Documentation](https://vercel.com/docs)
-- [Code Signing Guide](https://tauri.app/v1/guides/distribution/sign-macos)
+- [GitHub Actions documentation](https://docs.github.com/en/actions)
+- [Tauri documentation](https://tauri.app/)
+- [Tauri code-signing guide](https://tauri.app/v1/guides/distribution/sign-macos)
+- [Next.js static exports](https://nextjs.org/docs/app/building-your-application/deploying/static-exports)

@@ -22,6 +22,7 @@ import {
   Plug,
   Cog,
 } from "lucide-react"
+import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
@@ -69,25 +70,15 @@ export function SchedulerContentHeader({
   const t = useTranslations("scheduler")
 
   return (
-    <div className="border-b bg-background/95 backdrop-blur px-4 py-3 sm:px-6">
-      <div className="flex items-center gap-2 sm:gap-3">
-        {/* Sidebar trigger */}
-        <SidebarTrigger className="h-8 w-8 shrink-0" />
-
-        {/* Vertical separator (desktop only) */}
-        <Separator orientation="vertical" className="hidden h-4 sm:block" />
-
-        {/* Breadcrumb — the flexible region: shrinks + truncates so the action
-            cluster on the right never overflows on narrow screens. The root
-            crumb collapses below `sm`, leaving just the truncating leaf. */}
+    <FeaturePageHeader
+      icon={<Calendar />}
+      title={t("title")}
+      context={
         <nav
           aria-label={t("breadcrumb")}
-          className="flex min-w-0 flex-1 items-center gap-1 text-sm text-muted-foreground"
+          className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground"
         >
-          <span className="hidden shrink-0 items-center gap-1 sm:flex">
-            <span className="font-medium text-foreground">{t("title") || "Scheduler"}</span>
-            <ChevronRight className="h-3.5 w-3.5 shrink-0" />
-          </span>
+          <ChevronRight className="size-3 shrink-0" />
           <span
             data-testid="scheduler-breadcrumb-leaf"
             className={cn(
@@ -95,13 +86,18 @@ export function SchedulerContentHeader({
               selectedTaskName ? "font-medium text-foreground" : "text-muted-foreground"
             )}
           >
-            {selectedTaskName ?? (t("overview") || "Overview")}
+            {selectedTaskName ?? t("overview")}
           </span>
         </nav>
-
-        {/* Action cluster — pinned, never clipped */}
+      }
+      breadcrumb={
+        <div className="flex items-center gap-2">
+          <SidebarTrigger className="size-7 shrink-0" />
+          <Separator orientation="vertical" className="h-4" />
+        </div>
+      }
+      actions={
         <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-          {/* Overflow menu */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -116,25 +112,24 @@ export function SchedulerContentHeader({
             <DropdownMenuContent align="end" className="w-48">
               <DropdownMenuItem onClick={onOpenTemplates}>
                 <LayoutGrid className="mr-2 h-4 w-4" />
-                {t("templateGallery.title") || "Templates"}
+                {t("templateGallery.title")}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={onExport}>
                 <Download className="mr-2 h-4 w-4" />
-                {t("exportTasks") || "Export"}
+                {t("exportTasks")}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={onImport}>
                 <Upload className="mr-2 h-4 w-4" />
-                {t("importTasks") || "Import"}
+                {t("importTasks")}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={onCleanup}>
                 <Trash2 className="mr-2 h-4 w-4" />
-                {t("quickActions.cleanup") || "Cleanup"}
+                {t("quickActions.cleanup")}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
 
-          {/* Refresh */}
           <Button
             variant="outline"
             size="sm"
@@ -145,9 +140,6 @@ export function SchedulerContentHeader({
             <RefreshCw className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")} />
           </Button>
 
-          {/* Split-button "New Task" — primary action stays "create app task",
-            the caret reveals the per-kind menu. Preserves the existing
-            data-testid so legacy tests keep working. */}
           <div className="inline-flex">
             <Button
               size="sm"
@@ -156,7 +148,7 @@ export function SchedulerContentHeader({
               className="rounded-r-none"
             >
               <Plus className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline ml-1">{t("createTask") || "New Task"}</span>
+              <span className="ml-1 hidden sm:inline">{t("createTask")}</span>
             </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -165,7 +157,7 @@ export function SchedulerContentHeader({
                   variant="default"
                   className="rounded-l-none border-l border-primary-foreground/20 px-1.5"
                   data-testid="scheduler-new-task-kind-menu"
-                  aria-label={t("createTaskKind") || "Choose task kind"}
+                  aria-label={t("createTaskKind")}
                 >
                   <ChevronDown className="h-3.5 w-3.5" />
                 </Button>
@@ -173,7 +165,7 @@ export function SchedulerContentHeader({
               <DropdownMenuContent align="end" className="w-52">
                 <DropdownMenuItem onClick={onCreate} data-testid="scheduler-new-app-task">
                   <Calendar className="mr-2 h-3.5 w-3.5" />
-                  {t("kindFilter.app") || "App task"}
+                  {t("kindFilter.app")}
                 </DropdownMenuItem>
                 {onCreateWorkflowTrigger && (
                   <DropdownMenuItem
@@ -181,7 +173,7 @@ export function SchedulerContentHeader({
                     data-testid="scheduler-new-workflow-trigger"
                   >
                     <Workflow className="mr-2 h-3.5 w-3.5" />
-                    {t("kindFilter.workflow") || "Workflow trigger"}
+                    {t("kindFilter.workflow")}
                   </DropdownMenuItem>
                 )}
                 {onOpenBackupSettings && (
@@ -190,7 +182,7 @@ export function SchedulerContentHeader({
                     data-testid="scheduler-open-backup-settings"
                   >
                     <Archive className="mr-2 h-3.5 w-3.5" />
-                    {t("kindFilter.backup") || "Backup schedule"}
+                    {t("kindFilter.backup")}
                   </DropdownMenuItem>
                 )}
                 {onOpenPluginSettings && (
@@ -199,7 +191,7 @@ export function SchedulerContentHeader({
                     data-testid="scheduler-open-plugin-settings"
                   >
                     <Plug className="mr-2 h-3.5 w-3.5" />
-                    {t("kindFilter.plugin") || "Plugin job"}
+                    {t("kindFilter.plugin")}
                   </DropdownMenuItem>
                 )}
                 {onCreateSystemTask && (
@@ -210,7 +202,7 @@ export function SchedulerContentHeader({
                       data-testid="scheduler-new-system-task"
                     >
                       <Cog className="mr-2 h-3.5 w-3.5" />
-                      {t("kindFilter.system") || "System task"}
+                      {t("kindFilter.system")}
                     </DropdownMenuItem>
                   </>
                 )}
@@ -218,7 +210,7 @@ export function SchedulerContentHeader({
             </DropdownMenu>
           </div>
         </div>
-      </div>
-    </div>
+      }
+    />
   )
 }

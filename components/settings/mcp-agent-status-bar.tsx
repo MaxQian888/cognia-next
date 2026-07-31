@@ -23,7 +23,7 @@ import { cn } from "@/lib/utils"
 import { isTauri } from "@/lib/tauri"
 import { syncToAgent, type SyncResult } from "@/lib/claude/sync"
 import { useAgentStatuses, type AgentStatus } from "@/hooks/agent"
-import type { AgentId } from "@/lib/claude/types"
+import type { AgentId } from "@cognia/agent-config-types"
 
 export function McpAgentStatusBar() {
   const t = useTranslations("mcp.agents")

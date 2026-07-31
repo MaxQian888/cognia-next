@@ -18,6 +18,10 @@ test("server name + version match the shared JSON", () => {
 test("TOOL_NAMES_BY_CATEGORY exposes every category bucket", () => {
   const ids = Object.keys(TOOL_NAMES_BY_CATEGORY).sort()
   assert.deepEqual(ids, [
+    "astGrep",
+    "codeGraph",
+    "coreFiles",
+    "dependencyResearch",
     "environment",
     "fileExtras",
     "git",
@@ -25,6 +29,7 @@ test("TOOL_NAMES_BY_CATEGORY exposes every category bucket", () => {
     "process",
     "shellAdvanced",
     "terminalRepl",
+    "webclone",
   ])
 })
 
@@ -73,6 +78,16 @@ test("buildCogniaToolsServer composes tools from all enabled categories", () => 
   assert.equal(all?.name, "cognia-tools")
 })
 
+test("buildCogniaToolsServer accepts a per-tool timeout (incl. 0 to disable)", () => {
+  // The read-only deadline wrapping is exercised in read-only-timeout.test.mjs;
+  // here we just lock that the param threads through construction on both the
+  // default-net and disabled paths.
+  const explicit = buildCogniaToolsServer({ enabled: { git: true }, toolExecutionTimeoutMs: 5000 })
+  assert.equal(explicit?.name, "cognia-tools")
+  const disabled = buildCogniaToolsServer({ enabled: { git: true }, toolExecutionTimeoutMs: 0 })
+  assert.equal(disabled?.name, "cognia-tools")
+})
+
 test("namespacedName prepends the SDK prefix", () => {
   assert.equal(namespacedName("file_hash"), "mcp__cognia-tools__file_hash")
 })
@@ -80,12 +95,17 @@ test("namespacedName prepends the SDK prefix", () => {
 test("namesForDisabledCategories returns nothing when everything is enabled", () => {
   const out = namesForDisabledCategories({
     fileExtras: true,
+    coreFiles: true,
     git: true,
     process: true,
     environment: true,
     shellAdvanced: true,
     terminalRepl: true,
     lsp: true,
+    codeGraph: true,
+    astGrep: true,
+    dependencyResearch: true,
+    webclone: true,
   })
   assert.deepEqual(out, [])
 })
@@ -138,8 +158,17 @@ test("no tool name collides with SDK built-ins", () => {
     "WebFetch",
     "WebSearch",
     "TodoWrite",
+    "TaskCreate",
+    "TaskGet",
+    "TaskList",
+    "TaskUpdate",
   ])
-  for (const names of Object.values(TOOL_NAMES_BY_CATEGORY)) {
+  for (const [category, names] of Object.entries(TOOL_NAMES_BY_CATEGORY)) {
+    // The coreFiles suite intentionally names its todo tool exactly
+    // "TodoWrite" so the renderer's existing task card renders the ai-sdk
+    // path with zero changes. It is default-OFF on the Anthropic path (and
+    // namespaced there), so no SDK-level collision can occur.
+    if (category === "coreFiles") continue
     for (const n of names) {
       assert.equal(sdkBuiltIns.has(n), false, `${n} collides with SDK built-in`)
     }

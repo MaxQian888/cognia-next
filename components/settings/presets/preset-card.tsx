@@ -27,7 +27,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
-import type { SystemPromptPreset } from "@/lib/claude/types"
+import type { SystemPromptPreset } from "@cognia/agent-config-types"
 import { getCategorySpec } from "@/lib/presets/categories"
 
 interface Props {

@@ -43,6 +43,23 @@ describe("MobileQuickActions", () => {
     expect(screen.getByTestId("mobile-quick-action-workflows")).toBeInTheDocument()
   })
 
+  it("uses the matching Cognia companion illustration on spacious action cards", () => {
+    render(<MobileQuickActions onNewChat={jest.fn()} onSearch={jest.fn()} />)
+
+    expect(screen.getByTestId("mobile-spot-icon-chat")).toHaveAttribute(
+      "src",
+      "/icons/cognia-mobile-spots/png/chat.png"
+    )
+    expect(screen.getByTestId("mobile-spot-icon-discover")).toHaveAttribute(
+      "src",
+      "/icons/cognia-mobile-spots/png/discover.png"
+    )
+    expect(screen.getByTestId("mobile-spot-icon-workflows")).toHaveAttribute(
+      "src",
+      "/icons/cognia-mobile-spots/png/workflows.png"
+    )
+  })
+
   it("returns null when the section is hidden", () => {
     setLayout({ quickActions: ["newChat"], hiddenSections: ["quickActions"] })
     const { container } = render(<MobileQuickActions onNewChat={jest.fn()} onSearch={jest.fn()} />)

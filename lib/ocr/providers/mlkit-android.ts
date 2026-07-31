@@ -1,10 +1,14 @@
 /**
  * Android ML Kit Text Recognition OCR provider.
  *
- * Delegates to `@pantrist/capacitor-plugin-ml-kit-text-recognition` (or a
- * thin custom plugin under `mobile/src/plugins/ocr-android/` when the
- * upstream package lacks Capacitor 7 compat). Only available in the
- * Capacitor mobile shell.
+ * Delegates to `@pantrist/capacitor-plugin-ml-kit-text-recognition` (v8):
+ * the plugin exports `TextRecognition` with a single method
+ * `detectText({ base64Image, rotation? })` returning `{ text, blocks }`
+ * where each block carries `text`, a `boundingBox` (left/top/right/bottom)
+ * and a `recognizedLanguage`. ML Kit auto-detects the script — the plugin
+ * takes no language or script parameters. Only available in the Capacitor
+ * mobile shell, and only when the native plugin is bundled into the
+ * mobile app.
  */
 
 import { withPlugin } from "@/lib/capacitor/_shared"
@@ -18,60 +22,68 @@ import {
   type OcrResult,
 } from "@/types/ocr"
 
-export interface MlkitAndroidPluginShape {
-  recognizeText(input: {
-    base64: string
-    mimeType: string
-    /** "latin" | "chinese" | "devanagari" | "japanese" | "korean" — script hint. */
-    script?: string
-  }): Promise<{
+/** npm package that ships the Capacitor ML Kit text-recognition plugin. */
+export const MLKIT_PLUGIN_PACKAGE = "@pantrist/capacitor-plugin-ml-kit-text-recognition"
+
+/** Block shape returned by the upstream plugin (`Block extends TextBase`). */
+export interface MlKitTextBlock {
+  text: string
+  boundingBox?: { left: number; top: number; right: number; bottom: number } | null
+  recognizedLanguage?: string
+}
+
+/**
+ * Upstream plugin surface — mirrors `TextRecognitionPlugin` from
+ * `@pantrist/capacitor-plugin-ml-kit-text-recognition/src/definitions.ts`.
+ */
+export interface MlKitTextRecognitionPluginShape {
+  detectText(options: { base64Image: string; rotation?: number }): Promise<{
     text: string
-    blocks?: Array<{
-      text: string
-      bbox?: { x: number; y: number; width: number; height: number }
-      confidence?: number
-    }>
+    blocks?: MlKitTextBlock[]
   }>
 }
 
 export interface MlkitAndroidConfig {
-  pluginLoader?: () => Promise<MlkitAndroidPluginShape>
-  /** BCP-47 -> ML Kit script hint mapping override. */
-  scriptFor?: (bcp47: string) => string
+  pluginLoader?: () => Promise<MlKitTextRecognitionPluginShape>
 }
 
-let pluginLoader: (() => Promise<MlkitAndroidPluginShape>) | null = null
+let pluginLoader: (() => Promise<MlKitTextRecognitionPluginShape>) | null = null
 
 export function __setMlkitAndroidPluginLoader(
-  impl: (() => Promise<MlkitAndroidPluginShape>) | null
+  impl: (() => Promise<MlKitTextRecognitionPluginShape>) | null
 ): void {
   pluginLoader = impl
 }
 
-const DEFAULT_PLUGIN_LOADER: () => Promise<MlkitAndroidPluginShape> = async () => {
-  const moduleId = "@pantrist/capacitor-plugin-ml-kit-text-recognition"
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const mod = (await import(/* webpackIgnore: true */ moduleId)) as any
-  return (mod.TextRecognition ?? mod.default ?? mod) as MlkitAndroidPluginShape
-}
+/**
+ * Default loader — dynamic-imports the upstream package and returns its
+ * `TextRecognition` export. The module spec is dynamic so TS/webpack don't
+ * try to resolve the (optional, native-only) package during web/desktop
+ * builds. When the package isn't bundled the import rejects and `withPlugin`
+ * collapses to `{ kind: "unsupported" }`, which the providers surface as
+ * `unsupported_shell` naming the missing package.
+ */
+export const loadMlKitTextRecognitionPlugin: () => Promise<MlKitTextRecognitionPluginShape> =
+  async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mod = (await import(/* webpackIgnore: true */ MLKIT_PLUGIN_PACKAGE)) as any
+    const plugin = mod?.TextRecognition
+    if (!plugin) {
+      throw new Error(`${MLKIT_PLUGIN_PACKAGE} did not export TextRecognition`)
+    }
+    return plugin as MlKitTextRecognitionPluginShape
+  }
 
-const DEFAULT_SCRIPT_MAP: Record<string, string> = {
-  en: "latin",
-  fr: "latin",
-  de: "latin",
-  es: "latin",
-  it: "latin",
-  pt: "latin",
-  zh: "chinese",
-  ja: "japanese",
-  ko: "korean",
-  hi: "devanagari",
-  ar: "latin", // ML Kit doesn't have a dedicated Arabic recognizer yet; fall back to Latin.
-}
-
-export function defaultScriptFor(bcp47: string): string {
-  const lower = bcp47.toLowerCase().split("-")[0]
-  return DEFAULT_SCRIPT_MAP[lower] ?? "latin"
+/** Map the plugin's left/top/right/bottom box to the x/y/width/height bbox. */
+export function mapMlKitBlock(block: MlKitTextBlock): OcrBlock {
+  const box = block.boundingBox
+  return {
+    text: block.text,
+    bbox: box
+      ? { x: box.left, y: box.top, width: box.right - box.left, height: box.bottom - box.top }
+      : undefined,
+    kind: "paragraph",
+  }
 }
 
 export function buildMlkitAndroidProvider(): OcrProvider {
@@ -99,34 +111,23 @@ export async function mlkitAndroidExtract(
     )
   }
   const config = (ctx.config ?? {}) as MlkitAndroidConfig
-  const loader = config.pluginLoader ?? pluginLoader ?? DEFAULT_PLUGIN_LOADER
-  const scriptFor = config.scriptFor ?? defaultScriptFor
+  const loader = config.pluginLoader ?? pluginLoader ?? loadMlKitTextRecognitionPlugin
   const normalized = await normalizeImage(input.source)
   const start = Date.now()
-  const firstLang = (input.languages ?? ["en"])[0]!
   const outcome = await withPlugin(loader, async (plugin) =>
-    plugin.recognizeText({
-      base64: bytesToBase64(normalized.bytes),
-      mimeType: normalized.mimeType,
-      script: scriptFor(firstLang),
-    })
+    plugin.detectText({ base64Image: bytesToBase64(normalized.bytes) })
   )
   if ("kind" in outcome) {
     if (outcome.kind === "unsupported") {
       throw new OcrError(
         "unsupported_shell",
         "mlkit-android",
-        "ML Kit Text Recognition plugin is not available on this device."
+        `ML Kit Text Recognition requires the ${MLKIT_PLUGIN_PACKAGE} Capacitor plugin, which is not included in this build.`
       )
     }
     throw new OcrError("provider_failed", "mlkit-android", outcome.message)
   }
-  const blocks: OcrBlock[] = (outcome.blocks ?? []).map((b) => ({
-    text: b.text,
-    bbox: b.bbox,
-    confidence: b.confidence,
-    kind: "paragraph",
-  }))
+  const blocks: OcrBlock[] = (outcome.blocks ?? []).map(mapMlKitBlock)
   return {
     providerId: "mlkit-android",
     pages: [

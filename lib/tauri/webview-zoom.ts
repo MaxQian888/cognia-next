@@ -1,7 +1,7 @@
 "use client"
 
 import { isTauri } from "@/lib/tauri"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.ui
 

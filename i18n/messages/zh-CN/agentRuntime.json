@@ -1,0 +1,12 @@
+{
+  "ariaLabel": "选择代理运行时",
+  "claudeSdk": "Claude SDK",
+  "claudeSdkDesc": "内置 Anthropic SDK sidecar（默认）",
+  "external": "外部代理",
+  "externalAgentLabel": "选择外部代理",
+  "externalDesc": "拉起 CLI 代理（Codex、Claude Code、Gemini、Cursor…）",
+  "externalEmpty": "尚未配置外部代理 — 前往 设置 → 外部代理 添加",
+  "externalUnconfigured": "外部代理（未选择）",
+  "label": "代理运行时",
+  "tooltip": "当前代理运行时 — Claude SDK 或外部代理"
+}

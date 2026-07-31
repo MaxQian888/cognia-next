@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for wasm-loader.ts
  *
@@ -8,9 +9,14 @@
 import type { PluginManifest } from "@/types/plugin"
 
 const invokeMock = jest.fn()
+const transportCallMock = jest.fn()
 
 jest.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
+}))
+
+jest.mock("@/lib/tauri/transport-instance", () => ({
+  transport: { call: (...args: unknown[]) => transportCallMock(...args) },
 }))
 
 import {
@@ -18,7 +24,11 @@ import {
   loadWasmDefinition,
   callWasmExport,
   unloadWasmPlugin,
+  buildWasmToolDefinitions,
+  buildWasmNodeDefs,
 } from "./wasm-loader"
+import type { PluginToolContext } from "@/types/plugin"
+import type { StepExecutionContext } from "@/types/workflow/visual"
 
 const baseManifest: PluginManifest = {
   id: "demo.wasm",
@@ -47,14 +57,117 @@ function setTauri(present: boolean) {
 
 beforeEach(() => {
   invokeMock.mockReset()
+  transportCallMock.mockReset()
+  delete (globalThis as Record<string, unknown>).__COGNIA_HEADLESS__
 })
 
 describe("isWasmHostAvailable", () => {
-  it("returns true only when Tauri internals are present", () => {
+  it("returns true for either a Tauri or headless native host", () => {
     setTauri(false)
     expect(isWasmHostAvailable()).toBe(false)
+    ;(globalThis as Record<string, unknown>).__COGNIA_HEADLESS__ = true
+    expect(isWasmHostAvailable()).toBe(true)
+    delete (globalThis as Record<string, unknown>).__COGNIA_HEADLESS__
     setTauri(true)
     expect(isWasmHostAvailable()).toBe(true)
+  })
+})
+
+describe("buildWasmToolDefinitions", () => {
+  beforeEach(() => setTauri(true))
+
+  it("maps manifest.tools to PluginTools that dispatch through the tool-execute export", async () => {
+    invokeMock.mockResolvedValue(JSON.stringify({ formatted: "fn main() {}" }))
+    const manifest: PluginManifest = {
+      ...baseManifest,
+      tools: [
+        {
+          name: "format_rust",
+          description: "Format a Rust source string",
+          parametersSchema: { type: "object", properties: { source: { type: "string" } } },
+        },
+      ],
+    }
+
+    const tools = buildWasmToolDefinitions(manifest)
+
+    expect(tools).toHaveLength(1)
+    expect(tools[0].name).toBe("demo.wasm:format_rust")
+    expect(tools[0].pluginId).toBe("demo.wasm")
+    expect(tools[0].definition).toEqual({
+      name: "format_rust",
+      description: "Format a Rust source string",
+      parametersSchema: { type: "object", properties: { source: { type: "string" } } },
+    })
+
+    const result = await tools[0].execute({ source: "fn main(){}" }, {} as PluginToolContext)
+
+    // The guest's single `tool-execute` export dispatches by the `kind` field;
+    // the host's extract_kind reads it, so the tool name must ride in the payload.
+    expect(invokeMock).toHaveBeenCalledWith("plugin_wasm_call", {
+      pluginId: "demo.wasm",
+      exportName: "tool-execute",
+      payloadJson: JSON.stringify({ kind: "format_rust", source: "fn main(){}" }),
+    })
+    expect(result).toEqual({ formatted: "fn main() {}" })
+  })
+
+  it("returns an empty list when the manifest declares no tools", () => {
+    expect(buildWasmToolDefinitions(baseManifest)).toEqual([])
+  })
+})
+
+describe("buildWasmNodeDefs", () => {
+  beforeEach(() => setTauri(true))
+
+  const nodeManifest: PluginManifest = {
+    ...baseManifest,
+    workflows: {
+      nodes: [
+        {
+          kind: "action.format",
+          typeVersion: 1,
+          category: "plugin",
+          label: "Format",
+          description: "Format source",
+          iconName: "Box",
+          paramsSchema: { type: "object", properties: { source: { type: "string" } } },
+          retryable: false,
+          timeoutMs: 5000,
+        },
+      ],
+    },
+  }
+
+  it("projects manifest.workflows.nodes into executors that route through workflow-node-execute", async () => {
+    invokeMock.mockResolvedValue(JSON.stringify({ formatted: "ok" }))
+    const defs = buildWasmNodeDefs(nodeManifest)
+    expect(defs).toHaveLength(1)
+    expect(defs[0].kind).toBe("action.format")
+    expect(defs[0].typeVersion).toBe(1)
+    expect(defs[0].retryable).toBe(false)
+    expect(defs[0].timeoutMs).toBe(5000)
+
+    const result = await defs[0].execute({
+      params: { source: "x" },
+      upstream: { n1: { out: 1 } },
+    } as unknown as StepExecutionContext)
+
+    // The guest dispatches by the UNPREFIXED manifest kind carried in the payload.
+    expect(invokeMock).toHaveBeenCalledWith("plugin_wasm_call", {
+      pluginId: "demo.wasm",
+      exportName: "workflow-node-execute",
+      payloadJson: JSON.stringify({
+        kind: "action.format",
+        params: { source: "x" },
+        upstream: { n1: { out: 1 } },
+      }),
+    })
+    expect(result).toEqual({ output: { formatted: "ok" } })
+  })
+
+  it("returns an empty list when the manifest declares no workflow nodes", () => {
+    expect(buildWasmNodeDefs(baseManifest)).toEqual([])
   })
 })
 
@@ -85,6 +198,20 @@ describe("loadWasmDefinition", () => {
     const sent = JSON.parse(invokeMock.mock.calls[0][1].manifestJson)
     expect(sent.id).toBe("demo.wasm")
     expect(def.manifest.id).toBe("demo.wasm")
+  })
+
+  it("routes a headless load through the installed service transport", async () => {
+    setTauri(false)
+    ;(globalThis as Record<string, unknown>).__COGNIA_HEADLESS__ = true
+    transportCallMock.mockResolvedValueOnce({ pluginApiVersion: "0.1.0" })
+
+    await loadWasmDefinition(baseManifest, "/plugins/demo")
+
+    expect(transportCallMock).toHaveBeenCalledWith(
+      "plugin_wasm_load",
+      expect.objectContaining({ pluginId: "demo.wasm", pluginPath: "/plugins/demo" })
+    )
+    expect(invokeMock).not.toHaveBeenCalled()
   })
 
   it("propagates plugin_wasm_load errors with the plugin id", async () => {
@@ -120,7 +247,7 @@ describe("loadWasmDefinition", () => {
       config: {},
     } as unknown as Parameters<typeof def.activate>[0]
     await def.activate(ctx)
-    expect(ctx.logger.warn).toHaveBeenCalledWith(expect.stringContaining("Tauri desktop runtime"))
+    expect(ctx.logger.warn).toHaveBeenCalledWith(expect.stringContaining("native Cognia host"))
   })
 })
 

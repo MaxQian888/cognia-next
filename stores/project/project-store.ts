@@ -28,6 +28,7 @@ import {
   deleteProjectRow,
   persistActiveProjectId,
 } from "@/lib/db/projects"
+import { deleteProjectCascade, ensureDefaultProject } from "@/lib/db/project-scope"
 
 export interface CreateProjectOptions {
   name?: string
@@ -113,11 +114,20 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         // gated on `loaded`). In-memory rows win on id conflicts, and any row
         // that isn't yet persisted is flushed below so it survives a reload.
         const inMemory = get().projects
-        const pending = inMemory.filter((p) => !persisted.some((q) => q.id === p.id))
-        const byId = new Map(persisted.map((p) => [p.id, p]))
-        for (const p of inMemory) byId.set(p.id, p)
         const preloadActiveId = get().activeProjectId
-        const activeProjectId = preloadActiveId ?? persistedActiveId
+        let activeProjectId = preloadActiveId ?? persistedActiveId
+        let fallbackProject: Project | null = null
+        if (!activeProjectId) {
+          fallbackProject = await ensureDefaultProject()
+          activeProjectId = fallbackProject.id
+        }
+        const persistedWithFallback =
+          fallbackProject && !persisted.some((project) => project.id === fallbackProject.id)
+            ? [...persisted, fallbackProject]
+            : persisted
+        const pending = inMemory.filter((p) => !persistedWithFallback.some((q) => q.id === p.id))
+        const byId = new Map(persistedWithFallback.map((p) => [p.id, p]))
+        for (const p of inMemory) byId.set(p.id, p)
         set({ projects: [...byId.values()], activeProjectId, loaded: true })
 
         // Flush mutations made while the gate was closed.
@@ -199,7 +209,18 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         return { projects, activeProjectId }
       })
       if (removed) {
-        if (get().loaded) void deleteProjectRow(id).catch(() => {})
+        if (get().loaded) {
+          // Cascade-delete the workspace's runtime data (sessions, messages,
+          // goals/plans/loops, canvas, workflow runs, connector routing rows,
+          // + artifact/agent-team buckets) BEFORE dropping the project row, so
+          // no orphaned per-project data survives. Best-effort + fire-and-forget
+          // to match the store's non-blocking persistence contract.
+          void deleteProjectCascade(id)
+            .catch(() => {})
+            .finally(() => {
+              void deleteProjectRow(id).catch(() => {})
+            })
+        }
         // Deleting the active workspace clears the pointer — persist that too.
         if (previouslyActive) persistActive(get().activeProjectId)
         void getPluginEventHooks().dispatchProjectDelete(id)

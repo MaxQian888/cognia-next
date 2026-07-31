@@ -1,8 +1,8 @@
 "use client"
 
 import { useTranslations } from "next-intl"
-import { useLiveQuery } from "dexie-react-hooks"
 import { CheckIcon, SparklesIcon } from "lucide-react"
+import { useLiveQueryState } from "@/hooks/ui/use-live-query-state"
 import {
   CommandDialog,
   CommandEmpty,
@@ -27,12 +27,35 @@ interface Props {
  */
 export function SkillPicker({ open, onOpenChange, value, onChange }: Props) {
   const t = useTranslations("skills.composer.skillPicker")
-  const skills = useLiveQuery(() => listSkills(), []) ?? []
-  const visible = skills.filter((s) => !s.isBuiltIn && (s.status ?? "enabled") === "enabled")
+  // Only observe the (whole) skills table while the dialog is open — the
+  // picker stays mounted for the toolbar trigger, and the table is written on
+  // every send (usage telemetry), so an always-on liveQuery would re-render
+  // the closed dialog on each message.
+  // `?? []` here used to collapse "not read yet" into "there are none", so the
+  // dialog opened onto its "no skills" copy and then popped the list in.
+  const { data: skills, isLoading } = useLiveQueryState(
+    () => (open ? listSkills() : Promise.resolve([])),
+    [open]
+  )
+  const enabled = (skills ?? []).filter((s) => (s.status ?? "enabled") === "enabled")
+  const custom = enabled.filter((s) => !s.isBuiltIn)
+  const builtin = enabled.filter((s) => s.isBuiltIn)
 
   const toggle = (id: string) => {
     onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id])
   }
+
+  const renderItem = (s: (typeof enabled)[number]) => (
+    <CommandItem
+      key={s.id}
+      value={`${s.name} ${s.description ?? ""}`}
+      onSelect={() => toggle(s.id)}
+    >
+      <SparklesIcon className="mr-2 size-4" />
+      <span className="flex-1">{s.name}</span>
+      {value.includes(s.id) && <CheckIcon className="size-4" />}
+    </CommandItem>
+  )
 
   return (
     <CommandDialog
@@ -43,20 +66,15 @@ export function SkillPicker({ open, onOpenChange, value, onChange }: Props) {
     >
       <CommandInput placeholder={t("searchPlaceholder")} />
       <CommandList>
-        <CommandEmpty>{t("empty")}</CommandEmpty>
-        <CommandGroup heading={t("groupHeading")}>
-          {visible.map((s) => (
-            <CommandItem
-              key={s.id}
-              value={`${s.name} ${s.description ?? ""}`}
-              onSelect={() => toggle(s.id)}
-            >
-              <SparklesIcon className="mr-2 size-4" />
-              <span className="flex-1">{s.name}</span>
-              {value.includes(s.id) && <CheckIcon className="size-4" />}
-            </CommandItem>
-          ))}
-        </CommandGroup>
+        {/* Suppressed while the read is in flight — cmdk renders this whenever
+            no items match, which during load is "not yet" rather than "none". */}
+        {isLoading ? null : <CommandEmpty>{t("empty")}</CommandEmpty>}
+        {custom.length > 0 && (
+          <CommandGroup heading={t("groupHeading")}>{custom.map(renderItem)}</CommandGroup>
+        )}
+        {builtin.length > 0 && (
+          <CommandGroup heading={t("builtinGroupHeading")}>{builtin.map(renderItem)}</CommandGroup>
+        )}
       </CommandList>
     </CommandDialog>
   )

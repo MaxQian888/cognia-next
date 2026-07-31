@@ -21,14 +21,14 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { useSettingsStore } from "@/stores"
 import { useModelsDevCatalog } from "@/hooks/settings/use-models-dev-catalog"
-import { mergePricing } from "@/lib/ai/providers/model-discovery"
-import type { ModelsDevCatalogModel } from "@/lib/ai/providers/models-dev"
-import type { ModelPricing } from "@/types/provider/provider"
-import { getBuiltInProviderCatalog } from "@/types/provider/built-in-provider-catalog"
+import { mergePricing } from "@cognia/provider-core/providers/model-discovery"
+import type { ModelsDevCatalogModel } from "@cognia/provider-core/providers/models-dev"
+import type { ModelPricing } from "@cognia/provider-types/provider"
+import { getBuiltInProviderCatalog } from "@cognia/provider-types/built-in-provider-catalog"
 import type {
   BuiltInProviderCatalogEntry,
   BuiltInProviderModelEntry,
-} from "@/types/provider/built-in-provider-catalog"
+} from "@cognia/provider-types/built-in-provider-catalog"
 
 /* ── Types ───────────────────────────────────────────────────────────────── */
 
@@ -58,6 +58,9 @@ function formatPrice(pricePerMillion: number): string {
   if (pricePerMillion === 0) return "Free"
   return `$${pricePerMillion.toFixed(2)} / 1M`
 }
+
+/** Numeric per-1M pricing fields (everything on ModelPricing except `currency`). */
+type NumericPricingField = Exclude<keyof ModelPricing, "currency">
 
 function formatLatency(ms: number | undefined): string {
   if (!ms) return "—"
@@ -97,6 +100,8 @@ function enrichComparisonEntry(
     supportsAudio: entry.supportsAudio || Boolean(dev.supportsAudio),
     supportsVideo: entry.supportsVideo || Boolean(dev.supportsVideo),
     supportsReasoning: entry.supportsReasoning || dev.supportsReasoning,
+    supportsImageGeneration: entry.supportsImageGeneration || dev.supportsImageGeneration,
+    supportsEmbedding: entry.supportsEmbedding || dev.supportsEmbedding,
     // Static catalog wins; models.dev fills missing pricing fields. Reuses the
     // canonical field-level merge so all pricing keys (cache/batch/audio/
     // currency) and the precedence stay consistent with model-discovery. The
@@ -206,6 +211,26 @@ export function ProviderComparisonView({ onBack }: ProviderComparisonViewProps) 
       if (prev.length >= MAX_MODELS) return prev
       return [...prev, modelId]
     })
+  }
+
+  /* Render one optional pricing-dimension row — skipped entirely when none of
+   * the selected models declares a rate for it, so cache/batch/audio rows only
+   * appear when there's something to compare. */
+  const renderPriceRow = (field: NumericPricingField, label: string) => {
+    const anyHas = selectedModels.some((m) => typeof m.entry.pricing?.[field] === "number")
+    if (!anyHas) return null
+    return (
+      <ComparisonRow label={label}>
+        {selectedModels.map((model) => {
+          const v = model.entry.pricing?.[field]
+          return (
+            <td key={model.modelId} className="px-3 py-2 text-center text-sm font-mono">
+              {typeof v === "number" ? formatPrice(v) : "—"}
+            </td>
+          )
+        })}
+      </ComparisonRow>
+    )
   }
 
   /* ── Render ─────────────────────────────────────────────────────────────── */
@@ -407,6 +432,51 @@ export function ProviderComparisonView({ onBack }: ProviderComparisonViewProps) 
                   ))}
                 </ComparisonRow>
 
+                {/* Reasoning */}
+                <ComparisonRow label={t("comparison.reasoning")}>
+                  {selectedModels.map((model) => (
+                    <td key={model.modelId} className="px-3 py-2 text-center">
+                      <CapabilityCell supported={Boolean(model.entry.supportsReasoning)} />
+                    </td>
+                  ))}
+                </ComparisonRow>
+
+                {/* Audio */}
+                <ComparisonRow label={t("comparison.audio")}>
+                  {selectedModels.map((model) => (
+                    <td key={model.modelId} className="px-3 py-2 text-center">
+                      <CapabilityCell supported={Boolean(model.entry.supportsAudio)} />
+                    </td>
+                  ))}
+                </ComparisonRow>
+
+                {/* Video */}
+                <ComparisonRow label={t("comparison.video")}>
+                  {selectedModels.map((model) => (
+                    <td key={model.modelId} className="px-3 py-2 text-center">
+                      <CapabilityCell supported={Boolean(model.entry.supportsVideo)} />
+                    </td>
+                  ))}
+                </ComparisonRow>
+
+                {/* Image generation */}
+                <ComparisonRow label={t("comparison.imageGeneration")}>
+                  {selectedModels.map((model) => (
+                    <td key={model.modelId} className="px-3 py-2 text-center">
+                      <CapabilityCell supported={Boolean(model.entry.supportsImageGeneration)} />
+                    </td>
+                  ))}
+                </ComparisonRow>
+
+                {/* Embedding */}
+                <ComparisonRow label={t("comparison.embedding")}>
+                  {selectedModels.map((model) => (
+                    <td key={model.modelId} className="px-3 py-2 text-center">
+                      <CapabilityCell supported={Boolean(model.entry.supportsEmbedding)} />
+                    </td>
+                  ))}
+                </ComparisonRow>
+
                 {/* Avg Latency — from usage stats if available */}
                 <ComparisonRow label={t("comparison.avgLatency")}>
                   {selectedModels.map((model) => {
@@ -455,6 +525,15 @@ export function ProviderComparisonView({ onBack }: ProviderComparisonViewProps) 
                     </td>
                   ))}
                 </ComparisonRow>
+
+                {/* Extended pricing dimensions (cache / batch / audio) — each
+                    row renders only when at least one selected model declares it. */}
+                {renderPriceRow("cachedInputPer1M", t("comparison.cacheReadPrice"))}
+                {renderPriceRow("cacheCreationPer1M", t("comparison.cacheWritePrice"))}
+                {renderPriceRow("batchInputPer1M", t("comparison.batchInputPrice"))}
+                {renderPriceRow("batchOutputPer1M", t("comparison.batchOutputPrice"))}
+                {renderPriceRow("audioInputPer1M", t("comparison.audioInputPrice"))}
+                {renderPriceRow("audioOutputPer1M", t("comparison.audioOutputPrice"))}
 
                 {/* Est. Cost/1K calls */}
                 <ComparisonRow label={t("comparison.estCostPer1K")}>

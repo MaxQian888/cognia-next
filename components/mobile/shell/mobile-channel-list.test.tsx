@@ -1,12 +1,14 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, within } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 import { MobileChannelList } from "./mobile-channel-list"
+import { useProjectStore } from "@/stores/project/project-store"
+import type { Project } from "@/types"
 
 const updateSessionMock: jest.Mock<Promise<void>, [string, Record<string, unknown>]> = jest.fn()
 jest.mock("@/lib/db/sessions", () => ({
@@ -42,17 +44,31 @@ jest.mock("@/hooks/data", () => ({
 }))
 
 jest.mock("next-intl", () => ({
+  useFormatter: () => ({ relativeTime: () => "now" }),
+  useNow: () => new Date(),
   useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
     const map: Record<string, string> = {
       search: "Search",
       searchAria: "Search aria",
       pinned: "Pinned",
       recent: "Recent",
+      bucketToday: "Today",
+      bucketYesterday: "Yesterday",
+      bucketPrev7: "Previous 7 Days",
+      bucketPrev30: "Previous 30 Days",
+      bucketOlder: "Older",
+      renameAria: "Rename",
       emptyChats: "Empty",
       emptyFiltered: `No "${vars?.query ?? ""}"`,
       swipePin: "Pin",
       swipeUnpin: "Unpin",
       swipeDelete: "Delete",
+      swipeArchive: "Archive",
+      swipeUnarchive: "Unarchive",
+      viewActive: "Show active",
+      viewArchived: "Show archived",
+      emptyArchived: "No archived",
+      searchTruncated: "Some results hidden",
       unreadCount: `${vars?.count ?? 0} unread`,
     }
     return map[key] ?? key
@@ -62,6 +78,42 @@ jest.mock("next-intl", () => ({
 jest.mock("@/lib/capacitor/haptics", () => ({
   impact: () => Promise.resolve({ kind: "ok" }),
   selectionFeedback: () => Promise.resolve({ kind: "ok" }),
+}))
+
+// Static UI-store mock: view/collapse are mirrored to local state in the
+// component, so no-op setters are enough (spies let us assert persistence).
+const setChannelListView = jest.fn()
+const setCollapsedFolders = jest.fn()
+const setGroupCollapsed = jest.fn()
+jest.mock("@/stores/ui", () => ({
+  useUIStore: <T,>(selector: (s: Record<string, unknown>) => T): T =>
+    selector({
+      channelListView: "active",
+      setChannelListView,
+      collapsedFolderIds: [],
+      setCollapsedFolders,
+      groupCollapseOverrides: {},
+      setGroupCollapsed,
+    }),
+}))
+
+// Behavior prefs default to today's behavior; tests override as needed.
+let conversationSidebar: Record<string, unknown> | null = null
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: <T,>(selector: (s: { settings: unknown }) => T): T =>
+    selector({ settings: conversationSidebar ? { conversationSidebar } : null }),
+}))
+
+const useChatHistorySearch = jest.fn()
+let historySearchState = {
+  results: [] as Array<{ sessionId: string }>,
+  moreOlderHistory: false,
+  indexIncomplete: false,
+  loading: false,
+  error: null as Error | null,
+}
+jest.mock("@/hooks/chat/use-chat-history-search", () => ({
+  useChatHistorySearch: (...args: unknown[]) => useChatHistorySearch(...args),
 }))
 
 const baseSession = (id: string, overrides: Partial<ChatSession> = {}): ChatSession => ({
@@ -85,9 +137,25 @@ describe("<MobileChannelList />", () => {
     updateSessionMock.mockResolvedValue(undefined)
     charactersRef.value = []
     sessionStatesRef.value = []
+    setChannelListView.mockReset()
+    setCollapsedFolders.mockReset()
+    setGroupCollapsed.mockReset()
+    useProjectStore.setState({ projects: [], activeProjectId: null, loaded: false })
+    conversationSidebar = null
+    historySearchState = {
+      results: [],
+      moreOlderHistory: false,
+      indexIncomplete: false,
+      loading: false,
+      error: null,
+    }
+    useChatHistorySearch.mockReset()
+    useChatHistorySearch.mockImplementation(() => historySearchState)
   })
 
-  it("groups pinned and recent sessions", () => {
+  it("groups pinned sessions and buckets the rest by date", () => {
+    // Date buckets are one option now; the default axis is the workspace.
+    conversationSidebar = { groupBy: "date" }
     render(
       <MobileChannelList
         sessions={sessions}
@@ -95,13 +163,122 @@ describe("<MobileChannelList />", () => {
         onSelect={jest.fn()}
         onNewDirect={jest.fn()}
         onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
       />
     )
     const pinned = screen.getByTestId("mobile-channel-pinned")
-    const recent = screen.getByTestId("mobile-channel-recent")
+    // updatedAt values are epoch-tiny → the non-pinned sessions land in "Older".
+    const older = screen.getByTestId("mobile-channel-bucket-older")
     expect(within(pinned).getByText("Daily standup")).toBeInTheDocument()
-    expect(within(recent).getByText("Octopus Tutor")).toBeInTheDocument()
-    expect(within(recent).getByText("Side note")).toBeInTheDocument()
+    expect(within(older).getByText("Octopus Tutor")).toBeInTheDocument()
+    expect(within(older).getByText("Side note")).toBeInTheDocument()
+    // The pinned session is not duplicated into the date bucket.
+    expect(within(older).queryByText("Daily standup")).toBeNull()
+  })
+
+  it("groups by workspace by default, folding every workspace but the active one", async () => {
+    // Only `id`/`name` are read by the grouping path.
+    useProjectStore.setState({
+      projects: [
+        { id: "w1", name: "Alpha" },
+        { id: "w2", name: "Beta" },
+      ] as unknown as Project[],
+      activeProjectId: "w1",
+      loaded: true,
+    })
+    render(
+      <MobileChannelList
+        sessions={[
+          baseSession("here", { title: "Here", projectId: "w1" }),
+          baseSession("there", { title: "There", projectId: "w2" }),
+        ]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
+      />
+    )
+    const alpha = screen.getByTestId("mobile-channel-group-workspace:w1")
+    const beta = screen.getByTestId("mobile-channel-group-workspace:w2")
+    expect(within(alpha).getByText("Here")).toBeInTheDocument()
+    expect(within(beta).queryByText("There")).toBeNull()
+
+    await userEvent.click(screen.getByRole("button", { name: "Beta" }))
+    expect(setGroupCollapsed).toHaveBeenCalledWith("workspace:w2", false)
+  })
+
+  it("labels the leftovers generically when grouping by agent", () => {
+    conversationSidebar = { groupBy: "agent" }
+    render(
+      <MobileChannelList
+        sessions={[baseSession("loose", { title: "Loose" })]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
+      />
+    )
+    expect(screen.getByRole("button", { name: "ungroupedAgent" })).toBeInTheDocument()
+    expect(screen.getByText("Loose")).toBeInTheDocument()
+  })
+
+  it("does not expose embedded resource sessions in the mobile conversation list", () => {
+    render(
+      <MobileChannelList
+        sessions={[
+          ...sessions,
+          {
+            id: "embedded",
+            title: "Canvas assistant",
+            kind: "resource-workbench",
+            visibility: "embedded",
+            createdAt: 0,
+            updatedAt: 20,
+          } as ChatSession,
+        ]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
+      />
+    )
+
+    expect(screen.queryByText("Canvas assistant")).toBeNull()
+  })
+
+  it("renames a session via long-press inline edit", async () => {
+    const onRename = jest.fn()
+    const user = userEvent.setup()
+    render(
+      <MobileChannelList
+        sessions={sessions}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={onRename}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
+      />
+    )
+    // Long-press opens the inline rename input for that row.
+    const row = screen.getByTestId("mobile-channel-row-s2")
+    await user.pointer({ keys: "[TouchA>]", target: row })
+    const input = await screen.findByTestId("mobile-channel-rename-s2")
+    await user.clear(input)
+    await user.type(input, "Renamed{Enter}")
+    expect(onRename).toHaveBeenCalledWith("s2", "Renamed")
   })
 
   it("marks the active session", () => {
@@ -112,6 +289,9 @@ describe("<MobileChannelList />", () => {
         onSelect={jest.fn()}
         onNewDirect={jest.fn()}
         onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
       />
     )
     expect(screen.getByTestId("mobile-channel-row-s2")).toHaveAttribute("data-active", "true")
@@ -127,10 +307,17 @@ describe("<MobileChannelList />", () => {
         onSelect={jest.fn()}
         onNewDirect={jest.fn()}
         onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
       />
     )
     await user.type(screen.getByTestId("mobile-channel-search"), "octopus")
-    expect(screen.queryByTestId("mobile-channel-row-s1")).not.toBeInTheDocument()
+    // The value fed to the grouping model is debounced (150ms), so the field
+    // value updates immediately but the filtered result settles a tick later.
+    await waitFor(() =>
+      expect(screen.queryByTestId("mobile-channel-row-s1")).not.toBeInTheDocument()
+    )
     expect(screen.queryByTestId("mobile-channel-row-s3")).not.toBeInTheDocument()
     expect(screen.getByTestId("mobile-channel-row-s2")).toBeInTheDocument()
   })
@@ -144,10 +331,16 @@ describe("<MobileChannelList />", () => {
         onSelect={jest.fn()}
         onNewDirect={jest.fn()}
         onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
       />
     )
     await user.type(screen.getByTestId("mobile-channel-search"), "zzz")
-    expect(screen.getByTestId("mobile-channel-empty")).toHaveTextContent('No "zzz"')
+    // Debounced filter (150ms) before the empty-state copy appears.
+    await waitFor(() =>
+      expect(screen.getByTestId("mobile-channel-empty")).toHaveTextContent('No "zzz"')
+    )
   })
 
   it("invokes onSelect when a row is tapped", async () => {
@@ -160,6 +353,9 @@ describe("<MobileChannelList />", () => {
         onSelect={onSelect}
         onNewDirect={jest.fn()}
         onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
       />
     )
     await user.click(screen.getByTestId("mobile-channel-row-s2"))
@@ -175,6 +371,9 @@ describe("<MobileChannelList />", () => {
         onSelect={jest.fn()}
         onNewDirect={jest.fn()}
         onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
       />
     )
     await user.click(screen.getAllByTestId("swipe-action-pin")[0])
@@ -194,6 +393,9 @@ describe("<MobileChannelList />", () => {
         onSelect={jest.fn()}
         onNewDirect={onNewDirect}
         onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
       />
     )
     await user.click(screen.getByTestId("mobile-channel-new"))
@@ -208,6 +410,9 @@ describe("<MobileChannelList />", () => {
         onSelect={jest.fn()}
         onNewDirect={jest.fn()}
         onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
       />
     )
     expect(screen.getByTestId("mobile-channel-empty")).toHaveTextContent("Empty")
@@ -222,6 +427,9 @@ describe("<MobileChannelList />", () => {
         onSelect={jest.fn()}
         onNewDirect={jest.fn()}
         onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
       />
     )
     expect(screen.getByTestId("mobile-channel-unread-s2")).toHaveAttribute("aria-label", "3 unread")
@@ -240,6 +448,9 @@ describe("<MobileChannelList />", () => {
         onSelect={jest.fn()}
         onNewDirect={jest.fn()}
         onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
       />
     )
     expect(screen.getByText("🐙")).toBeInTheDocument()
@@ -254,6 +465,9 @@ describe("<MobileChannelList />", () => {
         onSelect={jest.fn()}
         onNewDirect={jest.fn()}
         onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
       />
     )
     await user.type(screen.getByTestId("mobile-channel-search"), "abc")
@@ -271,9 +485,175 @@ describe("<MobileChannelList />", () => {
         onSelect={jest.fn()}
         onNewDirect={jest.fn()}
         onDelete={onDelete}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
       />
     )
     await user.click(screen.getAllByTestId("swipe-action-delete")[0])
     expect(onDelete).toHaveBeenCalled()
+  })
+
+  it("renders a collapsible folder section for foldered sessions", async () => {
+    const folders = [
+      { id: "f1", name: "Work", projectId: "p", order: 0, createdAt: 0, updatedAt: 0 },
+    ] as never
+    const foldered: ChatSession[] = [
+      baseSession("s1", { title: "Inside work", folderId: "f1", updatedAt: 100 }),
+    ]
+    const user = userEvent.setup()
+    render(
+      <MobileChannelList
+        sessions={foldered}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
+        folders={folders}
+      />
+    )
+    const folderSection = screen.getByTestId("mobile-channel-folder-f1")
+    expect(within(folderSection).getByText("Inside work")).toBeInTheDocument()
+    // Tapping the folder header collapses it, hiding its rows.
+    await user.click(screen.getByRole("button", { name: "Work" }))
+    expect(screen.queryByTestId("mobile-channel-row-s1")).not.toBeInTheDocument()
+  })
+
+  it("archives a session via the swipe action", async () => {
+    const onArchive = jest.fn()
+    const user = userEvent.setup()
+    render(
+      <MobileChannelList
+        sessions={sessions}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={onArchive}
+        onUnarchive={jest.fn()}
+      />
+    )
+    await user.click(screen.getAllByTestId("swipe-action-archive")[0])
+    expect(onArchive).toHaveBeenCalled()
+  })
+
+  it("toggles to the archived view and unarchives via swipe", async () => {
+    const onUnarchive = jest.fn()
+    const archivedSessions: ChatSession[] = [
+      baseSession("a1", { title: "Archived chat", archivedAt: 5, updatedAt: 10 }),
+    ]
+    const user = userEvent.setup()
+    render(
+      <MobileChannelList
+        sessions={archivedSessions}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={onUnarchive}
+      />
+    )
+    // Active view hides the archived session; the empty state shows.
+    expect(screen.queryByTestId("mobile-channel-row-a1")).not.toBeInTheDocument()
+    await user.click(screen.getByTestId("mobile-channel-view-toggle"))
+    // Archived view reveals it; swipe-archive now restores it.
+    expect(screen.getByTestId("mobile-channel-row-a1")).toBeInTheDocument()
+    await user.click(screen.getAllByTestId("swipe-action-archive")[0])
+    expect(onUnarchive).toHaveBeenCalledWith("a1")
+  })
+
+  it("persists the archived-view choice to the shared UI store", async () => {
+    const user = userEvent.setup()
+    render(
+      <MobileChannelList
+        sessions={sessions}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
+      />
+    )
+    await user.click(screen.getByTestId("mobile-channel-view-toggle"))
+    expect(setChannelListView).toHaveBeenCalledWith("archived")
+  })
+
+  it("hides the unread dot when showUnreadBadges is off", () => {
+    conversationSidebar = { showUnreadBadges: false }
+    sessionStatesRef.value = [{ sessionId: "s2", lastReadAt: 0, unreadCount: 3 }]
+    render(
+      <MobileChannelList
+        sessions={sessions}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
+      />
+    )
+    expect(screen.queryByTestId("mobile-channel-unread-s2")).not.toBeInTheDocument()
+  })
+
+  it("shows the message preview subtitle when showPreview is on", () => {
+    conversationSidebar = { showPreview: true }
+    const withPreview: ChatSession[] = [
+      baseSession("s1", { title: "Daily standup", lastMessagePreview: "see you at 9", updatedAt: 100 }),
+    ]
+    render(
+      <MobileChannelList
+        sessions={withPreview}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("mobile-channel-subtitle-s1")).toHaveTextContent("see you at 9")
+  })
+
+  it("surfaces content-only matches when searchScope is titleAndContent", async () => {
+    conversationSidebar = { searchScope: "titleAndContent" }
+    historySearchState = {
+      ...historySearchState,
+      results: [{ sessionId: "s3" }],
+    }
+    const user = userEvent.setup()
+    render(
+      <MobileChannelList
+        sessions={sessions}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+        onArchive={jest.fn()}
+        onUnarchive={jest.fn()}
+      />
+    )
+    // "zzz" matches no title; only the content set contains s3 (Side note).
+    await user.type(screen.getByTestId("mobile-channel-search"), "zzz")
+    await waitFor(() =>
+      expect(useChatHistorySearch).toHaveBeenLastCalledWith(
+        "zzz",
+        expect.objectContaining({ collapseBySession: true })
+      )
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId("mobile-channel-row-s3")).toBeInTheDocument()
+    )
+    expect(screen.queryByTestId("mobile-channel-row-s2")).not.toBeInTheDocument()
   })
 })

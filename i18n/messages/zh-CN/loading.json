@@ -1,0 +1,20 @@
+{
+  "cancel": "取消",
+  "loading": "加载中…",
+  "offline": "当前离线 —— 网络恢复后会自动重试",
+  "page": {
+    "description": "正在加载界面、偏好设置和最近使用的内容",
+    "progressLabel": "工作区准备进度",
+    "reload": "重新载入应用",
+    "reloadHint": "加载时间超出预期，你可以重新载入后再试。",
+    "stages": {
+      "finalizing": "正在完成最后设置",
+      "interface": "正在启动界面",
+      "workspace": "正在恢复工作区"
+    },
+    "title": "正在准备你的工作区"
+  },
+  "pageLoading": "加载中…",
+  "stillWorking": "仍在进行…（{seconds} 秒）",
+  "thinking": "Claude 正在思考…"
+}

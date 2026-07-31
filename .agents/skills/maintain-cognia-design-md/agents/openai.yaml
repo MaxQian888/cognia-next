@@ -1,0 +1,4 @@
+interface:
+  display_name: "Maintain Cognia DESIGN.md"
+  short_description: "Audit and maintain Cognia’s agent-ready design system"
+  default_prompt: "Use $maintain-cognia-design-md to create or refresh Cognia’s root DESIGN.md from the current implementation."

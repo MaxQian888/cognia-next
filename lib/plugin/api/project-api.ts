@@ -5,21 +5,18 @@
  */
 
 import { useProjectStore } from "@/stores/project/project-store"
-import type {
-  PluginProjectAPI,
-  ProjectFilter,
-  ProjectFileInput,
-} from "@/types/plugin/plugin-extended"
+import type { PluginProjectAPI, ProjectFilter, ProjectFileInput } from "@/types/plugin/plugin"
 import type { Project, KnowledgeFile } from "@/types"
-import { inferKnowledgeFileTypeFromFilename } from "@/lib/document"
+import { inferKnowledgeFileTypeFromFilename } from "@cognia/document"
 import { createPluginSystemLogger } from "../core/logger"
+import { createApiGuardedAPI } from "./api-permission-gate"
 
 /**
  * Create the Project API for a plugin
  */
 export function createProjectAPI(pluginId: string): PluginProjectAPI {
   const logger = createPluginSystemLogger(pluginId)
-  return {
+  const api: PluginProjectAPI = {
     getCurrentProject: () => {
       const store = useProjectStore.getState()
       if (!store.activeProjectId) return null
@@ -213,4 +210,27 @@ export function createProjectAPI(pluginId: string): PluginProjectAPI {
       logger.info(`Removed tag "${tag}" from project ${projectId}`)
     },
   }
+
+  return createApiGuardedAPI(pluginId, api, {
+    getCurrentProject: "project:read",
+    getCurrentProjectId: "project:read",
+    getProject: "project:read",
+    createProject: "project:write",
+    updateProject: "project:write",
+    deleteProject: "project:delete",
+    setActiveProject: "project:write",
+    listProjects: "project:read",
+    archiveProject: "project:write",
+    unarchiveProject: "project:write",
+    addKnowledgeFile: "project:write",
+    removeKnowledgeFile: "project:write",
+    updateKnowledgeFile: "project:write",
+    getKnowledgeFiles: "project:read",
+    linkSession: "project:write",
+    unlinkSession: "project:write",
+    getProjectSessions: "project:read",
+    onProjectChange: "project:read",
+    addTag: "project:write",
+    removeTag: "project:write",
+  })
 }

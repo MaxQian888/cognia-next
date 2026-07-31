@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { createWorkflow } from "@/lib/db/workflows"
+import { defaultTypeVersionFor } from "@/lib/workflow/editor/node-handles"
 
 export interface WorkflowCreateDialogProps {
   open: boolean
@@ -49,7 +50,9 @@ export function WorkflowCreateDialog({
           {
             id: "n_start",
             type: "trigger.manual",
-            typeVersion: 1,
+            // Latest-version metadata — keep in lockstep with the editor's
+            // add-node path (store.addNode) instead of hardcoding 1.
+            typeVersion: defaultTypeVersionFor("trigger.manual"),
             position: { x: 80, y: 120 },
             data: { label: tToolbar("run"), params: {} },
           },
@@ -59,7 +62,7 @@ export function WorkflowCreateDialog({
       onOpenChange(false)
       setName("")
       setDescription("")
-      router.push(`/workflows/${wf.id}`)
+      router.push(`/workflows/editor?id=${encodeURIComponent(wf.id)}`)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("create"))
     } finally {

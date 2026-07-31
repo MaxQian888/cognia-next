@@ -119,4 +119,14 @@ describe("MobileTabCustomizer", () => {
     fireEvent.click(screen.getByTestId("mobile-tab-customizer-row"))
     expect(screen.getByTestId("mobile-tab-customizer")).toBeInTheDocument()
   })
+
+  it("closes the sheet on Android hardware back (popstate)", () => {
+    render(<MobileTabCustomizer />)
+    fireEvent.click(screen.getByTestId("mobile-tab-customizer-row"))
+    expect(screen.getByTestId("mobile-tab-customizer-sheet")).toBeInTheDocument()
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate"))
+    })
+    expect(screen.queryByTestId("mobile-tab-customizer-sheet")).not.toBeInTheDocument()
+  })
 })

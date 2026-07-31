@@ -1,0 +1,177 @@
+/**
+ * Terminal handling for bot-menu outcomes that must not reach the model
+ * (plan 2026-07-24 P4.2): `unknown` event_keys get a fixed bilingual notice
+ * plus a `menu.unknown_key` audit, and `link` commands reply with a URL
+ * resolved against the configured web entry base.
+ *
+ * Both replies address the operator's p2p chat by open_id (the menu event
+ * carries no chat_id) and are deduped per event_id via the outbound
+ * idempotency key, so transport redeliveries never double-post.
+ */
+
+import type { LarkFlagAdapterSettings } from "@/lib/connectors/feature-flags"
+import { appendAudit } from "@/lib/connectors/audit"
+import {
+  buildAuthorizedConversationLink,
+  resolveWebEntryBase,
+} from "@/lib/connectors/entry/deep-links"
+import { hashOpenId, resolveConnectorPrincipal } from "@/lib/connectors/principal/resolve"
+import type { AdapterInstanceRow } from "@/lib/db/connector-types"
+import { enqueueOutbound } from "@/lib/db/outbound-jobs"
+import type { LarkBotMenuOutcome } from "./parse"
+
+export interface MenuActionDependencies {
+  enqueue: typeof enqueueOutbound
+  audit: typeof appendAudit
+  resolvePrincipal: typeof resolveConnectorPrincipal
+  buildConversationLink: typeof buildAuthorizedConversationLink
+  now: () => number
+}
+
+function withDefaults(overrides: Partial<MenuActionDependencies>): MenuActionDependencies {
+  return {
+    enqueue: enqueueOutbound,
+    audit: appendAudit,
+    resolvePrincipal: resolveConnectorPrincipal,
+    buildConversationLink: buildAuthorizedConversationLink,
+    now: Date.now,
+    ...overrides,
+  }
+}
+
+/** Bilingual IM literals (follow-up-control convention — not next-intl). */
+const UNKNOWN_KEY_REPLY = [
+  "This menu action isn't configured yet. Ask your administrator to map it in Cognia → Settings → Connections.",
+  "该菜单项尚未配置。请联系管理员在 Cognia → 设置 → 连接 中完成映射。",
+].join("\n")
+
+const DISABLED_KEY_REPLY = [
+  "This Cognia menu action is currently disabled. Ask your administrator to enable it in Cognia → Settings → Connections.",
+  "此 Cognia 菜单项当前已停用。请联系管理员在 Cognia → 设置 → 连接 中启用。",
+].join("\n")
+
+const LINK_BASE_MISSING_REPLY = [
+  "The Cognia web entry isn't configured for this workspace yet, so this menu can't open a link.",
+  "当前工作区尚未配置 Cognia Web 入口，此菜单暂时无法打开链接。",
+].join("\n")
+
+function p2pReply(
+  adapterId: string,
+  openId: string,
+  eventId: string,
+  slot: string,
+  text: string
+): Parameters<typeof enqueueOutbound>[0] {
+  return {
+    adapterId,
+    conversationKey: `lark:${adapterId}:${openId}`,
+    request: {
+      conversationRef: { platform: "lark", adapterId, channelId: openId },
+      segments: [{ type: "text", text }],
+      metadata: { idempotencyKey: `${slot}:${adapterId}:${eventId}` },
+    },
+    source: "ai-run",
+  }
+}
+
+/**
+ * Unknown event_key → audit (open_id only as a hash) + fixed notice.
+ * Deliberately NOT throttled per-day like the unbound notice: each distinct
+ * click is one distinct misconfiguration signal, and event_id dedup already
+ * absorbs redeliveries.
+ */
+export async function handleMenuUnknownKey(
+  adapterId: string,
+  outcome: Extract<LarkBotMenuOutcome, { kind: "unknown" }>,
+  overrides: Partial<MenuActionDependencies> = {}
+): Promise<void> {
+  const deps = withDefaults(overrides)
+  const now = deps.now()
+  await deps.audit({
+    adapterId,
+    kind: "menu.unknown_key",
+    at: now,
+    conversationKey: `lark:${adapterId}:${outcome.openId}`,
+    reason: "unmapped_event_key",
+    fields: {
+      eventKey: outcome.eventKey,
+      openIdHash: await hashOpenId(outcome.openId),
+      ...(outcome.identityScope?.tenantKey ? { tenantKey: outcome.identityScope.tenantKey } : {}),
+    },
+  })
+  await deps.enqueue(
+    p2pReply(adapterId, outcome.openId, outcome.eventId, "menu-unknown", UNKNOWN_KEY_REPLY)
+  )
+}
+
+/**
+ * A recognized built-in whose feature batch is disabled is not an unknown key:
+ * reply with an operational notice, but do not emit the misconfiguration audit
+ * or `unmapped_event_key` metric used for genuinely unrecognized event keys.
+ */
+export async function handleMenuDisabledKey(
+  adapterId: string,
+  outcome: { openId: string; eventId: string },
+  overrides: Partial<MenuActionDependencies> = {}
+): Promise<void> {
+  const deps = withDefaults(overrides)
+  await deps.enqueue(
+    p2pReply(adapterId, outcome.openId, outcome.eventId, "menu-disabled", DISABLED_KEY_REPLY)
+  )
+}
+
+/**
+ * Link command → reply with a URL under the configured web entry base.
+ * When the principal registry + web SSO are on, the reply carries a
+ * personal single-use entry link into the operator's own conversation
+ * (mint failure inside the builder falls back to the bare base — never a
+ * raw key); otherwise it degrades to the plain app URL. No base
+ * configured → explanatory notice (never a raw internal URL).
+ */
+export async function handleMenuLink(
+  adapterId: string,
+  adapterRow: LarkFlagAdapterSettings | undefined,
+  outcome: Extract<LarkBotMenuOutcome, { kind: "link" }>,
+  overrides: Partial<MenuActionDependencies> = {}
+): Promise<void> {
+  const deps = withDefaults(overrides)
+  const base = resolveWebEntryBase(adapterRow)
+  const path = outcome.command.action.value
+  if (!base) {
+    await deps.enqueue(
+      p2pReply(adapterId, outcome.openId, outcome.eventId, "menu-link", LINK_BASE_MISSING_REPLY)
+    )
+    return
+  }
+
+  let url: string | null = null
+  const resolution = await deps
+    .resolvePrincipal({
+      platform: "lark",
+      adapterRow: {
+        settings: adapterRow?.settings ?? {},
+        lastWhoamiResult: (adapterRow as Partial<AdapterInstanceRow> | undefined)?.lastWhoamiResult,
+      },
+      remoteUserId: outcome.openId,
+      identityScope: outcome.identityScope,
+    })
+    .catch(() => ({ status: "legacy" as const }))
+  if (resolution.status === "resolved") {
+    url = await deps
+      .buildConversationLink({
+        adapterRow,
+        adapterId,
+        principalId: resolution.principal.id,
+        accountId: resolution.accountId,
+        openId: outcome.openId,
+        tenantKey: resolution.principal.tenantKey,
+        appId: resolution.principal.appId,
+        entryType: "bot_menu",
+        conversationKey: `lark:${adapterId}:${outcome.openId}`,
+      })
+      .catch(() => null)
+  }
+  url ??= `${base}${path === "/" ? "" : path}`
+  const text = `${outcome.command.label ?? path}\n${url}`
+  await deps.enqueue(p2pReply(adapterId, outcome.openId, outcome.eventId, "menu-link", text))
+}

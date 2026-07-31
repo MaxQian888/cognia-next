@@ -3,22 +3,47 @@ import { render } from "@testing-library/react"
 jest.mock("@/lib/claude/ipc", () => ({
   subscribePluginToolExec: jest.fn(),
   sendPluginToolResponse: jest.fn(),
+  subscribeProtocolAdapterExec: jest.fn().mockResolvedValue(() => {}),
+  subscribeProtocolAdapterCancel: jest.fn().mockResolvedValue(() => {}),
+  sendProtocolAdapterMessage: jest.fn(),
 }))
 jest.mock("@/lib/claude/plugin-tool-ipc", () => ({
   handlePluginToolExec: jest.fn(),
 }))
+jest.mock("@/lib/claude/protocol-adapter-ipc", () => ({
+  dispatchProtocolAdapterExec: jest.fn().mockResolvedValue(undefined),
+}))
+const mockActiveHostSupportsFeature = jest.fn((_feature?: unknown, _operation?: unknown) => true)
+jest.mock("@/stores/remote-host/remote-host-store", () => ({
+  activeHostSupportsFeature: (feature: unknown, operation?: unknown) =>
+    mockActiveHostSupportsFeature(feature, operation),
+}))
 
 import { PluginToolDispatchProvider } from "./plugin-tool-dispatch-provider"
-import { subscribePluginToolExec, sendPluginToolResponse } from "@/lib/claude/ipc"
+import {
+  subscribePluginToolExec,
+  sendPluginToolResponse,
+  subscribeProtocolAdapterExec,
+  subscribeProtocolAdapterCancel,
+  sendProtocolAdapterMessage,
+} from "@/lib/claude/ipc"
 import { handlePluginToolExec } from "@/lib/claude/plugin-tool-ipc"
-import type { PluginToolExecEvent } from "@/lib/claude/types"
+import { dispatchProtocolAdapterExec } from "@/lib/claude/protocol-adapter-ipc"
+import type { PluginToolExecEvent } from "@cognia/agent-config-types"
 
 const mockSubscribe = subscribePluginToolExec as jest.Mock
 const mockSend = sendPluginToolResponse as jest.Mock
 const mockHandle = handlePluginToolExec as jest.Mock
+const mockSubscribeProtocolExec = subscribeProtocolAdapterExec as jest.Mock
+const mockSubscribeProtocolCancel = subscribeProtocolAdapterCancel as jest.Mock
+const mockSendProtocolAdapterMessage = sendProtocolAdapterMessage as jest.Mock
+const mockDispatchProtocolAdapterExec = dispatchProtocolAdapterExec as jest.Mock
 
 describe("PluginToolDispatchProvider", () => {
-  beforeEach(() => jest.clearAllMocks())
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockActiveHostSupportsFeature.mockReturnValue(true)
+  })
 
   it("runs handlePluginToolExec and writes the response when an event arrives", async () => {
     let captured: ((req: PluginToolExecEvent) => void) | null = null
@@ -48,6 +73,95 @@ describe("PluginToolDispatchProvider", () => {
     )
   })
 
+  it("returns a remote response with the exact server-issued execution context", async () => {
+    let captured:
+      ((req: PluginToolExecEvent & { remoteExecutionContext?: object }) => void) | null = null
+    mockSubscribe.mockImplementation(
+      async (
+        handler: (request: PluginToolExecEvent & { remoteExecutionContext?: object }) => void
+      ) => {
+        captured = handler
+        return () => {}
+      }
+    )
+    const context = {
+      hostId: "host-a",
+      originDeviceId: "device-a",
+      sessionId: "s1",
+      generation: 1,
+      requestId: "request-a",
+      issuedAt: 1,
+      expiresAt: 2,
+    }
+    const response = {
+      type: "plugin_tool_response",
+      sessionId: "s1",
+      toolUseId: "t1",
+      result: "ok",
+    }
+    mockHandle.mockResolvedValue(response)
+
+    render(<PluginToolDispatchProvider>child</PluginToolDispatchProvider>)
+    await Promise.resolve()
+    captured!({
+      type: "plugin_tool_exec",
+      sessionId: "s1",
+      toolUseId: "t1",
+      name: "x",
+      args: {},
+      remoteExecutionContext: context,
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(mockSend).toHaveBeenCalledWith(response, context)
+  })
+
+  it("fails a remote plugin tool closed when the proxy feature is not advertised", async () => {
+    let captured:
+      ((req: PluginToolExecEvent & { remoteExecutionContext?: object }) => void) | null = null
+    mockActiveHostSupportsFeature.mockReturnValue(false)
+    mockSubscribe.mockImplementation(
+      async (
+        handler: (request: PluginToolExecEvent & { remoteExecutionContext?: object }) => void
+      ) => {
+        captured = handler
+        return () => {}
+      }
+    )
+    mockSend.mockResolvedValue(undefined)
+    const context = {
+      hostId: "host-a",
+      originDeviceId: "device-a",
+      sessionId: "s1",
+      generation: 1,
+      requestId: "request-a",
+      issuedAt: 1,
+      expiresAt: 2,
+    }
+
+    render(<PluginToolDispatchProvider>child</PluginToolDispatchProvider>)
+    await Promise.resolve()
+    captured!({
+      type: "plugin_tool_exec",
+      sessionId: "s1",
+      toolUseId: "t1",
+      name: "x",
+      args: {},
+      remoteExecutionContext: context,
+    })
+    await Promise.resolve()
+
+    expect(mockHandle).not.toHaveBeenCalled()
+    expect(mockSend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolUseId: "t1",
+        error: expect.stringContaining("REMOTE_FEATURE_UNSUPPORTED"),
+      }),
+      context
+    )
+  })
+
   it("unsubscribes on unmount", async () => {
     const unlisten = jest.fn()
     mockSubscribe.mockResolvedValue(unlisten)
@@ -55,5 +169,92 @@ describe("PluginToolDispatchProvider", () => {
     await Promise.resolve()
     unmount()
     expect(unlisten).toHaveBeenCalled()
+  })
+
+  it("cancels an in-flight protocol adapter execution when the sidecar cancels it", async () => {
+    let execHandler:
+      ((req: { type: "protocol_adapter_exec"; sessionId: string; execId: string }) => void) | null =
+      null
+    let cancelHandler:
+      | ((req: {
+          type: "protocol_adapter_cancel"
+          sessionId: string
+          execId: string
+          reason?: string
+        }) => void)
+      | null = null
+    const cancel = jest.fn()
+    mockSubscribeProtocolExec.mockImplementation(async (h) => {
+      execHandler = h
+      return () => {}
+    })
+    mockSubscribeProtocolCancel.mockImplementation(async (h) => {
+      cancelHandler = h
+      return () => {}
+    })
+    mockDispatchProtocolAdapterExec.mockReturnValue({ done: new Promise(() => {}), cancel })
+
+    render(<PluginToolDispatchProvider>child</PluginToolDispatchProvider>)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    execHandler!({
+      type: "protocol_adapter_exec",
+      sessionId: "s1",
+      execId: "ex1",
+    })
+    cancelHandler!({
+      type: "protocol_adapter_cancel",
+      sessionId: "s1",
+      execId: "ex1",
+      reason: "interrupted",
+    })
+
+    expect(cancel).toHaveBeenCalledWith("interrupted")
+  })
+
+  it("fails a remote protocol adapter closed when the proxy feature is not advertised", async () => {
+    let execHandler:
+      | ((req: {
+          type: "protocol_adapter_exec"
+          sessionId: string
+          execId: string
+          remoteExecutionContext: object
+        }) => void)
+      | null = null
+    mockActiveHostSupportsFeature.mockReturnValue(false)
+    mockSubscribeProtocolExec.mockImplementation(async (handler) => {
+      execHandler = handler
+      return () => {}
+    })
+    mockSendProtocolAdapterMessage.mockResolvedValue(undefined)
+    const context = {
+      hostId: "host-a",
+      originDeviceId: "device-a",
+      sessionId: "s1",
+      generation: 1,
+      requestId: "request-a",
+      issuedAt: 1,
+      expiresAt: 2,
+    }
+
+    render(<PluginToolDispatchProvider>child</PluginToolDispatchProvider>)
+    await Promise.resolve()
+    execHandler!({
+      type: "protocol_adapter_exec",
+      sessionId: "s1",
+      execId: "ex1",
+      remoteExecutionContext: context,
+    })
+    await Promise.resolve()
+
+    expect(mockDispatchProtocolAdapterExec).not.toHaveBeenCalled()
+    expect(mockSendProtocolAdapterMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "protocol_adapter_error",
+        error: expect.stringContaining("REMOTE_FEATURE_UNSUPPORTED"),
+      }),
+      context
+    )
   })
 })

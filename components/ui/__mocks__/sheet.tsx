@@ -4,6 +4,7 @@ import * as React from "react"
 // dialog mock — content gated on `open === true`.
 
 type DivProps = React.HTMLAttributes<HTMLDivElement> & { children?: React.ReactNode }
+type SheetContentProps = DivProps & { showCloseButton?: boolean }
 type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
   asChild?: boolean
   children?: React.ReactNode
@@ -33,7 +34,7 @@ export function Sheet({
   )
 }
 
-export function SheetContent({ children, ...rest }: DivProps) {
+export function SheetContent({ children, showCloseButton: _showCloseButton, ...rest }: SheetContentProps) {
   return (
     <div data-testid="sheet-content" {...rest}>
       {children}

@@ -31,8 +31,6 @@ import {
   unregisterCharacterPacksByPlugin,
 } from "@/lib/plugin/registries/character-pack-registry"
 import { refreshAllWorkflowTemplateWarnings } from "@/lib/plugin/registries/workflow-template-registry"
-import { unregisterCommandsByPlugin } from "@/lib/chat/slash-command-registry"
-import { PLUGIN_ID } from "./ids"
 import { I18N_MESSAGES } from "./i18n"
 import { ZHIHU_ROLE_PACK } from "./characters/pack"
 import { ZHIHU_SKILLS } from "./skills/definitions"
@@ -42,28 +40,17 @@ import { makeSaveTopicsNode } from "./nodes/save-topics"
 import { TOPIC_DISCOVERY_TEMPLATE } from "./workflow/template"
 import { WRITING_CREW_TEMPLATE } from "./team/template"
 import { setPipelineDbFromDexie } from "./db/runtime"
-import { registerZhihuCommands } from "./commands"
+import { handleZhihuCommand } from "./commands"
+import manifestJson from "../plugin.json"
 
 /** Disposer for the imperatively-registered save-topics node. */
 let disposeSaveTopics: (() => void) | null = null
 
 const definition: PluginDefinition = {
+  // Spread plugin.json: `builtinManifest()` merges module-over-JSON, so a
+  // hand-written subset here WINS and would silently drop `commands[]`.
   manifest: {
-    id: PLUGIN_ID,
-    name: "Zhihu Content Pipeline",
-    version: "0.1.0",
-    type: "frontend",
-    capabilities: [
-      "character-pack",
-      "skills",
-      "mcp-server-preset",
-      "tools",
-      "workflow",
-      "workflow-template",
-      "agent-team-template",
-      "commands",
-    ],
-    main: "src/index.ts",
+    ...(manifestJson as object),
     characterPacks: [ZHIHU_ROLE_PACK],
     skills: ZHIHU_SKILLS,
     mcpServerPresets: STATIC_MCP_PRESETS,
@@ -109,7 +96,15 @@ const definition: PluginDefinition = {
     }
     // The `/zhihu` slash command opens the review modal (the verified-rendered
     // UI surface). Registered last so the modal's deps are wired.
-    registerZhihuCommands(ctx)
+    // `/zhihu` is DECLARED in plugin.json (`commands[]`) and handled here.
+    return {
+      onCommand: async (command: string) => {
+        const message = handleZhihuCommand(ctx, command)
+        if (message === null) return false
+        ctx.ui?.showToast?.(message, "info")
+        return true
+      },
+    }
   },
   deactivate: async (ctx?: PluginContext) => {
     disposeSaveTopics?.()
@@ -117,7 +112,6 @@ const definition: PluginDefinition = {
     setPipelineDbFromDexie(null)
     if (ctx?.pluginId) {
       unregisterCharacterPacksByPlugin(ctx.pluginId)
-      unregisterCommandsByPlugin(ctx.pluginId)
     }
   },
 }

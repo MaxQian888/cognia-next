@@ -1,5 +1,13 @@
 "use client"
 
+/**
+ * DORMANT — vendored from the AI Elements registry, currently zero call sites.
+ * cognia picks TTS voices from the speech settings surfaces
+ * (`components/settings/speech/`), which read the provider catalogue in
+ * `packages/tts/` rather than a generic command palette. Kept as part of the
+ * registry mirror; delete only alongside that decision.
+ */
+
 import { useControllableState } from "@radix-ui/react-use-controllable-state"
 import { Button } from "@/components/ui/button"
 import {

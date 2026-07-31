@@ -1,6 +1,13 @@
+/** @jest-environment jsdom */
 import { act, renderHook } from "@testing-library/react"
-import { useMemberStatus, useUIStore, type SelectedGuild } from "./ui-store"
+import { DEFAULT_BAR_ITEMS, useMemberStatus, useUIStore, type SelectedGuild } from "./ui-store"
 import { getPluginEventHooks } from "@/lib/plugin"
+import {
+  DEFAULT_STATUS_BAR_LAYOUT,
+  DEFAULT_TITLE_BAR_LAYOUT,
+  STATUS_BAR_ITEMS,
+  TITLE_BAR_ITEMS,
+} from "@/types/shell/bars"
 
 const RESET = {
   selectedGuild: { kind: "dm" } as SelectedGuild,
@@ -13,6 +20,11 @@ const RESET = {
   guildRailCollapsed: false,
   statusBarCollapsed: false,
   sidebarCollapsed: false,
+  sidebarWidth: 256,
+  channelListView: "active" as const,
+  collapsedFolderIds: [] as string[],
+  barItems: { ...DEFAULT_BAR_ITEMS },
+  findOpen: false,
 }
 
 describe("useUIStore", () => {
@@ -35,6 +47,16 @@ describe("useUIStore", () => {
       expect(result.current.selectedGuild).toEqual({ kind: "canvas" })
       act(() => result.current.setSelectedGuild({ kind: "dm" }))
       expect(result.current.selectedGuild).toEqual({ kind: "dm" })
+    })
+
+    it("bumps selectedGuildEpoch on every set", () => {
+      const { result } = renderHook(() => useUIStore())
+      const start = result.current.selectedGuildEpoch
+      act(() => result.current.setSelectedGuild({ kind: "team", teamId: "t1" }))
+      const afterFirst = result.current.selectedGuildEpoch
+      expect(afterFirst).toBeGreaterThan(start)
+      act(() => result.current.setSelectedGuild({ kind: "dm" }))
+      expect(result.current.selectedGuildEpoch).toBeGreaterThan(afterFirst)
     })
   })
 
@@ -203,13 +225,87 @@ describe("useUIStore", () => {
         showMemberList: false,
         scratchpadCollapsed: { ts1: true },
         sidebarCollapsed: false,
+        sidebarWidth: 256,
+        channelListView: "active",
+        collapsedFolderIds: [],
+        groupCollapseOverrides: {},
         guildRailCollapsed: true,
         statusBarCollapsed: true,
+        barItems: { ...DEFAULT_BAR_ITEMS },
       })
       // Transient fields explicitly excluded
       expect(parsed.state.memberStatus).toBeUndefined()
       expect(parsed.state.stopRequestedFor).toBeUndefined()
       expect(parsed.state.pendingSettingsRequest).toBeUndefined()
+    })
+  })
+
+  describe("v3 migration", () => {
+    // `partialize` writes barItems / statusBarCollapsed / guildRailCollapsed
+    // unconditionally and `merge` lets the persisted value win, so anyone who
+    // has ever opened the app pins the old chrome defaults forever. Changing
+    // DEFAULT_BAR_ITEMS without this migration ships a no-op to every existing
+    // install.
+    const writeV2Snapshot = (state: Record<string, unknown>) =>
+      window.localStorage.setItem("cognia-ui", JSON.stringify({ state, version: 2 }))
+
+    it("drops the stale chrome keys so the new defaults apply", async () => {
+      writeV2Snapshot({
+        selectedGuild: { kind: "dm" },
+        sidebarWidth: 320,
+        collapsedFolderIds: ["f1"],
+        guildRailCollapsed: true,
+        statusBarCollapsed: true,
+        barItems: { ...DEFAULT_BAR_ITEMS, accountTop: true, quickActions: true },
+      })
+      await act(async () => {
+        await useUIStore.persist.rehydrate()
+      })
+      const { result } = renderHook(() => useUIStore())
+      expect(result.current.barItems.accountTop).toBe(false)
+      expect(result.current.barItems.quickActions).toBe(false)
+      expect(result.current.guildRailCollapsed).toBe(false)
+      expect(result.current.statusBarCollapsed).toBe(false)
+    })
+
+    it("keeps the preferences the user actually chose", async () => {
+      writeV2Snapshot({
+        selectedGuild: { kind: "team", teamId: "t9" },
+        sidebarWidth: 320,
+        collapsedFolderIds: ["f1"],
+        channelListView: "archived",
+        barItems: { ...DEFAULT_BAR_ITEMS },
+      })
+      await act(async () => {
+        await useUIStore.persist.rehydrate()
+      })
+      const { result } = renderHook(() => useUIStore())
+      expect(result.current.selectedGuild).toEqual({ kind: "team", teamId: "t9" })
+      expect(result.current.sidebarWidth).toBe(320)
+      expect(result.current.collapsedFolderIds).toEqual(["f1"])
+      expect(result.current.channelListView).toBe("archived")
+    })
+
+    it("leaves a v3 snapshot untouched", async () => {
+      window.localStorage.setItem(
+        "cognia-ui",
+        JSON.stringify({
+          state: {
+            guildRailCollapsed: true,
+            statusBarCollapsed: true,
+            barItems: { ...DEFAULT_BAR_ITEMS, usage: false },
+          },
+          version: 3,
+        })
+      )
+      await act(async () => {
+        await useUIStore.persist.rehydrate()
+      })
+      const { result } = renderHook(() => useUIStore())
+      // Post-migration choices are the user's own — never reset them again.
+      expect(result.current.guildRailCollapsed).toBe(true)
+      expect(result.current.statusBarCollapsed).toBe(true)
+      expect(result.current.barItems.usage).toBe(false)
     })
   })
 
@@ -248,6 +344,160 @@ describe("useUIStore", () => {
       expect(result.current.statusBarCollapsed).toBe(true)
       act(() => result.current.setStatusBarCollapsed(false))
       expect(result.current.statusBarCollapsed).toBe(false)
+    })
+  })
+
+  // `barItems` is legacy: both bars persist a full `{ order, hidden }` layout
+  // on AppSettings now (see `@/types/shell/bars`). It survives only as the
+  // migration source `components/shell/use-bar-layout.ts` folds in once, so
+  // what matters here is that it still reads back — not that it can be written.
+  describe("barItems (legacy migration source)", () => {
+    it("exposes no setter", () => {
+      const { result } = renderHook(() => useUIStore())
+      expect((result.current as unknown as Record<string, unknown>).toggleBarItem).toBeUndefined()
+    })
+
+    it("keeps ids that match the new bar catalogs, so migration is an identity map", () => {
+      const catalogIds = new Set([
+        ...TITLE_BAR_ITEMS.map((m) => m.id),
+        ...STATUS_BAR_ITEMS.map((m) => m.id),
+      ])
+      for (const id of Object.keys(DEFAULT_BAR_ITEMS)) {
+        expect(catalogIds.has(id)).toBe(true)
+      }
+    })
+
+    it("agrees with the shipped bar layouts about what is hidden", () => {
+      // A fresh install migrates through this map, so a disagreement here would
+      // silently change the default chrome for everyone.
+      const legacyOff = Object.entries(DEFAULT_BAR_ITEMS)
+        .filter(([, on]) => !on)
+        .map(([id]) => id)
+        .sort()
+      const shippedHidden = [
+        ...DEFAULT_TITLE_BAR_LAYOUT.hidden,
+        ...DEFAULT_STATUS_BAR_LAYOUT.hidden,
+      ].sort()
+      expect(legacyOff).toEqual(shippedHidden)
+    })
+
+    it("defaults to DEFAULT_BAR_ITEMS with perf off", () => {
+      const { result } = renderHook(() => useUIStore())
+      expect(result.current.barItems).toEqual(DEFAULT_BAR_ITEMS)
+      expect(result.current.barItems.perf).toBe(false)
+      expect(result.current.barItems.connectivity).toBe(true)
+    })
+
+    it("ships the account button in exactly one bar", () => {
+      // `accountTop` + `accountStatus` were both on, so the same control
+      // rendered in the title bar AND the status bar at once.
+      expect(DEFAULT_BAR_ITEMS.accountTop).toBe(false)
+      expect(DEFAULT_BAR_ITEMS.accountStatus).toBe(true)
+    })
+
+    it("keeps the one-off launchers out of the title bar by default", () => {
+      // Pet / OCR / clipboard are not touched per conversation — they belong in
+      // the Views menu, not in permanent 32px chrome.
+      expect(DEFAULT_BAR_ITEMS.quickActions).toBe(false)
+    })
+
+    it("reads back a persisted opt-out so the migration can see it", () => {
+      act(() => {
+        useUIStore.setState({ barItems: { ...DEFAULT_BAR_ITEMS, usage: false } })
+      })
+      expect(useUIStore.getState().barItems.usage).toBe(false)
+    })
+  })
+
+  describe("findOpen", () => {
+    it("defaults closed and toggles via openFind/closeFind", () => {
+      const { result } = renderHook(() => useUIStore())
+      expect(result.current.findOpen).toBe(false)
+      act(() => result.current.openFind())
+      expect(result.current.findOpen).toBe(true)
+      act(() => result.current.closeFind())
+      expect(result.current.findOpen).toBe(false)
+    })
+
+    it("is not persisted to localStorage", () => {
+      const { result } = renderHook(() => useUIStore())
+      act(() => result.current.openFind())
+      const raw = window.localStorage.getItem("cognia-ui")
+      const parsed = JSON.parse(raw as string) as { state: Record<string, unknown> }
+      expect(parsed.state.findOpen).toBeUndefined()
+    })
+  })
+
+  describe("sidebarWidth", () => {
+    it("defaults to 256 and clamps into [220, 420]", () => {
+      const { result } = renderHook(() => useUIStore())
+      expect(result.current.sidebarWidth).toBe(256)
+      act(() => result.current.setSidebarWidth(300))
+      expect(result.current.sidebarWidth).toBe(300)
+      act(() => result.current.setSidebarWidth(9999))
+      expect(result.current.sidebarWidth).toBe(420)
+      act(() => result.current.setSidebarWidth(10))
+      expect(result.current.sidebarWidth).toBe(220)
+    })
+
+    it("rounds fractional widths and rejects non-finite values", () => {
+      const { result } = renderHook(() => useUIStore())
+      act(() => result.current.setSidebarWidth(301.6))
+      expect(result.current.sidebarWidth).toBe(302)
+      act(() => result.current.setSidebarWidth(Number.NaN))
+      expect(result.current.sidebarWidth).toBe(256)
+    })
+  })
+
+  describe("channelListView", () => {
+    it("defaults to active and switches", () => {
+      const { result } = renderHook(() => useUIStore())
+      expect(result.current.channelListView).toBe("active")
+      act(() => result.current.setChannelListView("archived"))
+      expect(result.current.channelListView).toBe("archived")
+      act(() => result.current.setChannelListView("active"))
+      expect(result.current.channelListView).toBe("active")
+    })
+  })
+
+  describe("groupCollapseOverrides", () => {
+    it("records an explicit choice in both directions", () => {
+      const { result } = renderHook(() => useUIStore())
+      expect(result.current.groupCollapseOverrides).toEqual({})
+      // A tri-state: absent means "use the default", which is not uniform —
+      // every workspace but the active one starts collapsed.
+      act(() => result.current.setGroupCollapsed("workspace:w1", false))
+      expect(result.current.groupCollapseOverrides).toEqual({ "workspace:w1": false })
+      act(() => result.current.setGroupCollapsed("workspace:w1", true))
+      expect(result.current.groupCollapseOverrides).toEqual({ "workspace:w1": true })
+    })
+
+    it("no-ops when the value already matches", () => {
+      act(() => useUIStore.getState().setGroupCollapsed("agent:a1", true))
+      const before = useUIStore.getState().groupCollapseOverrides
+      act(() => useUIStore.getState().setGroupCollapsed("agent:a1", true))
+      expect(useUIStore.getState().groupCollapseOverrides).toBe(before)
+    })
+  })
+
+  describe("collapsedFolderIds", () => {
+    it("toggleCollapsedFolder adds then removes an id", () => {
+      const { result } = renderHook(() => useUIStore())
+      expect(result.current.collapsedFolderIds).toEqual([])
+      act(() => result.current.toggleCollapsedFolder("f1"))
+      expect(result.current.collapsedFolderIds).toEqual(["f1"])
+      act(() => result.current.toggleCollapsedFolder("f2"))
+      expect(result.current.collapsedFolderIds).toEqual(["f1", "f2"])
+      act(() => result.current.toggleCollapsedFolder("f1"))
+      expect(result.current.collapsedFolderIds).toEqual(["f2"])
+    })
+
+    it("setCollapsedFolders replaces the whole set", () => {
+      const { result } = renderHook(() => useUIStore())
+      act(() => result.current.setCollapsedFolders(["a", "b"]))
+      expect(result.current.collapsedFolderIds).toEqual(["a", "b"])
+      act(() => result.current.setCollapsedFolders([]))
+      expect(result.current.collapsedFolderIds).toEqual([])
     })
   })
 

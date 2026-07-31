@@ -6,6 +6,7 @@
 "use client"
 
 import { useEffect } from "react"
+import { isMainAppWindow } from "@/lib/pet/window-role"
 import { useShortcutStore } from "./registry"
 
 export function useSyncShortcutsToRust(): void {
@@ -13,7 +14,10 @@ export function useSyncShortcutsToRust(): void {
   const hydrate = useShortcutStore((s) => s.hydrate)
 
   useEffect(() => {
-    if (hydrated) return
+    // Hydration reads `shortcuts.custom.v1` via the shared store plugin, which
+    // least-privilege pet windows can't load (see
+    // `src-tauri/capabilities/pet.json`). Only the main window owns shortcuts.
+    if (hydrated || !isMainAppWindow()) return
     void hydrate()
   }, [hydrated, hydrate])
 }

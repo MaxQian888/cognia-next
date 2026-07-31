@@ -6,7 +6,7 @@
 
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { applyPlanModeBridge, mapStatus, parseTodos, soloTeamId } from "./plan-mode-bridge"
-import type { SDKAssistantMessage } from "@/lib/claude/types"
+import type { SDKAssistantMessage } from "@cognia/agent-config-types"
 
 function todoEvent(
   todos: Array<{ content: string; status?: string; activeForm?: string }>

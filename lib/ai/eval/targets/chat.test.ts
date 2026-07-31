@@ -155,7 +155,7 @@ describe("assembleSampleFromSpans", () => {
 
 describe("createChatTarget", () => {
   it("drives the turn, fetches spans, and assembles a sample", async () => {
-    const seen: { prompt?: string; sessionId?: string } = {}
+    const seen: { prompt?: unknown; sessionId?: string; cleanedSessionId?: string } = {}
     const target = createChatTarget(
       { label: "opus", model: "claude-opus-4-8" },
       {
@@ -167,16 +167,38 @@ describe("createChatTarget", () => {
           seen.sessionId = sessionId
           return [span({ operationName: "execute_tool", toolName: "Read", startTime: 1 })]
         },
+        cleanupSession: async (sessionId) => {
+          seen.cleanedSessionId = sessionId
+        },
         isToolCapable: () => true,
       }
     )
     const sample = await target.run(makeCase("PROMPT-TEXT"))
-    expect(seen.prompt).toContain("PROMPT-TEXT")
+    expect(seen.prompt).toBe("PROMPT-TEXT")
     expect(seen.sessionId).toBe("ses-xyz")
+    expect(seen.cleanedSessionId).toBe("ses-xyz")
     expect(sample.output).toBe("the answer")
     expect(sample.degraded).toBe(false)
     expect(sample.toolCalls).toHaveLength(1)
     expect(target.label).toBe("opus")
+  })
+
+  it("cleans up the isolated session even when trace loading fails", async () => {
+    const cleanupSession = jest.fn<Promise<void>, [string]>().mockResolvedValue()
+    const target = createChatTarget(
+      { label: "agent", model: "x" },
+      {
+        runTurn: async () => ({ text: "t", sessionId: "eval-session" }),
+        fetchSpans: async () => {
+          throw new Error("trace unavailable")
+        },
+        cleanupSession,
+        isToolCapable: () => true,
+      }
+    )
+
+    await expect(target.run(makeCase())).rejects.toThrow("trace unavailable")
+    expect(cleanupSession).toHaveBeenCalledWith("eval-session")
   })
 
   it("marks the sample degraded when the run is not tool-capable", async () => {
@@ -192,7 +214,7 @@ describe("createChatTarget", () => {
   })
 
   it("prepends conversation history to the prompt", async () => {
-    const seen: { prompt?: string } = {}
+    const seen: { prompt?: unknown } = {}
     const target = createChatTarget(
       { label: "t", model: "x" },
       {
@@ -205,7 +227,48 @@ describe("createChatTarget", () => {
       }
     )
     await target.run(makeCase("NOW", [{ role: "user", content: "EARLIER" }]))
-    expect(seen.prompt).toContain("EARLIER")
-    expect(seen.prompt).toContain("NOW")
+    expect(seen.prompt).toBe("USER: EARLIER\n\nNOW")
+  })
+
+  it("preserves ordered multimodal parts through the existing chat transport", async () => {
+    const runTurn = jest.fn(async () => ({ text: "ok", sessionId: "s" }))
+    const target = createChatTarget(
+      { label: "multimodal", providerId: "ollama", model: "x" },
+      {
+        runTurn,
+        resolveAsset: async () => ({ data: "base64-data", mediaType: "image/png" }),
+        fetchSpans: async () => [],
+        isToolCapable: () => true,
+      }
+    )
+    const evalCase = makeCase("legacy")
+    evalCase.contentParts = [
+      { type: "text", text: "inspect" },
+      {
+        type: "asset",
+        assetId: "asset-1",
+        mediaType: "image/png",
+        privacy: "scanned",
+      },
+    ]
+
+    await target.run(evalCase)
+
+    expect(runTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerId: "ollama",
+        prompt: [
+          { type: "text", text: "inspect" },
+          {
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: "image/png",
+              data: "base64-data",
+            },
+          },
+        ],
+      })
+    )
   })
 })

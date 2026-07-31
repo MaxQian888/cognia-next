@@ -6,8 +6,8 @@ import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { useTTS } from "@/hooks/media"
 import { useSettingsStore } from "@/stores/settings"
-import { loggers } from "@/lib/logging"
-import type { SpeechSettings } from "@/types/media/tts"
+import { loggers } from "@cognia/logging"
+import type { SpeechSettings } from "@cognia/tts/types"
 
 interface TestTtsButtonProps {
   /**

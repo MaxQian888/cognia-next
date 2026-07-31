@@ -24,12 +24,16 @@ import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultGroupChatPolicy } from "@/types/connectors/policy"
 import { requestLoginQr, pollLoginStatus } from "@/lib/connectors/adapters/wechat-personal/auth"
+import { isTauri } from "@/lib/tauri"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
 import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
 
 interface WeChatPersonalConfigDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Called with the new adapter id after a successful create, so the parent
+   * can auto-select and open the freshly created adapter. */
+  onCreated?: (id: string) => void
   /** null = creating a new instance */
   row: AdapterInstanceRow | null
 }
@@ -42,9 +46,11 @@ export function WeChatPersonalConfigDialog({
   open,
   onOpenChange,
   row,
+  onCreated,
 }: WeChatPersonalConfigDialogProps) {
   const t = useTranslations("settings.connections.wechatPersonal")
   const isNew = row === null
+  const desktop = isTauri()
 
   const [displayName, setDisplayName] = useState(row?.displayName ?? t("displayNamePlaceholder"))
   const [muted, setMuted] = useState<boolean>(row?.muted ?? false)
@@ -68,7 +74,14 @@ export function WeChatPersonalConfigDialog({
     if (persistingRef.current) return
     persistingRef.current = true
     try {
-      const settings = { baseUrl: baseUrl ?? undefined, accountId: accountId ?? undefined }
+      // On re-login, merge into the existing row's settings —
+      // `updateAdapterInstance` replaces the whole `settings` object, so a
+      // bare `{ baseUrl, accountId }` would wipe any other persisted keys.
+      const settings = {
+        ...(isNew ? {} : row.settings),
+        ...(baseUrl ? { baseUrl } : {}),
+        ...(accountId ? { accountId } : {}),
+      }
       let adapterId: string
       if (isNew) {
         const newRow = await createAdapterInstance({
@@ -96,6 +109,7 @@ export function WeChatPersonalConfigDialog({
       if (!isNew) emitCredentialsRotated(adapterId)
       setLoggedIn(true)
       toast.success(isNew ? t("adapterCreated") : t("adapterUpdated"))
+      if (isNew) onCreated?.(adapterId)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
       setLoginStatus("error")
@@ -105,6 +119,10 @@ export function WeChatPersonalConfigDialog({
   }
 
   const handleGetQr = async () => {
+    if (!desktop) {
+      toast.error(t("desktopOnly"))
+      return
+    }
     setLoginStatus("idle")
     setQrImg(null)
     try {
@@ -142,8 +160,16 @@ export function WeChatPersonalConfigDialog({
         if (cancelled) return
         if (res.status === "scaned") setLoginStatus("scaned")
         else if (res.status === "confirmed") {
-          setLoginStatus("confirmed")
-          if (res.bot_token) void persistRef.current(res.bot_token, res.baseurl, res.account_id)
+          if (res.bot_token) {
+            setLoginStatus("confirmed")
+            void persistRef.current(res.bot_token, res.baseurl, res.account_id)
+          } else {
+            // The gateway confirmed the scan but returned no bot_token —
+            // nothing can be persisted, and a silent "confirmed" would let
+            // handleSave close the dialog without creating anything.
+            setLoginStatus("error")
+            toast.error(t("confirmedNoToken"))
+          }
         } else if (res.status === "expired") setLoginStatus("expired")
       })
     }, POLL_INTERVAL_MS)
@@ -151,7 +177,7 @@ export function WeChatPersonalConfigDialog({
       cancelled = true
       clearInterval(timer)
     }
-  }, [qrcode, loginStatus])
+  }, [qrcode, loginStatus, t])
 
   const handleSave = async () => {
     if (!displayName.trim()) {
@@ -221,9 +247,19 @@ export function WeChatPersonalConfigDialog({
         ) : null}
 
         <div className="flex flex-col items-start gap-3">
-          <Button type="button" variant="outline" size="sm" onClick={() => void handleGetQr()}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void handleGetQr()}
+            disabled={!desktop || saving}
+          >
             {loggedIn ? t("reLogin") : t("getQrButton")}
           </Button>
+
+          {!desktop ? (
+            <p className="text-xs text-amber-600 dark:text-amber-400">{t("desktopOnly")}</p>
+          ) : null}
 
           {qrImg ? (
             <div className="space-y-2">

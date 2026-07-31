@@ -1,0 +1,14 @@
+{
+  "notFound": {
+    "body": "这个链接指向的页面已被移动或删除。",
+    "docs": "返回文档首页",
+    "heading": "页面不存在",
+    "other": "English version"
+  },
+  "pageActions": {
+    "copied": "已复制",
+    "failed": "复制失败",
+    "idle": "复制 Markdown",
+    "view": "查看 Markdown"
+  }
+}

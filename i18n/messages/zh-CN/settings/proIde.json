@@ -1,0 +1,22 @@
+{
+  "cancel": "取消",
+  "clean": "清理旧版本",
+  "cleanDone": "已释放 {size}。",
+  "description": "项目编辑器可选的内嵌 VS Code。此处管理安装；正在运行的实例见「性能 → 托管进程」。",
+  "diskUsage": "磁盘占用",
+  "download": "立即下载",
+  "downloadDone": "已安装 code-server {version}。",
+  "failed": "操作失败：{error}",
+  "installed": "已安装",
+  "location": "安装位置",
+  "notInstalled": "未安装",
+  "reclaimable": "可回收",
+  "staleVersions": "旧版本：{versions}",
+  "title": "Pro IDE（code-server）",
+  "uninstall": "卸载",
+  "uninstallConfirmBody": "这会停止所有正在运行的实例，并删除安装及其编辑器状态（设置、扩展、打开的文件）。下次切到 Pro IDE 会重新下载。",
+  "uninstallConfirmTitle": "确定卸载 code-server？",
+  "uninstallDone": "已卸载，释放 {size}。",
+  "unsupported": "code-server 没有发布适配此平台的版本，因此这里无法使用 Pro IDE。",
+  "version": "锁定版本"
+}

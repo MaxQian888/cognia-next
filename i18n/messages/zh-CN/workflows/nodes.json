@@ -1,0 +1,670 @@
+{
+  "action": {
+    "agent": {
+      "turn": {
+        "description": "执行一次完整的智能体回合——桌面端经 sidecar 启用工具（受审批门控），Web 端降级为纯文本。",
+        "label": "智能体回合"
+      }
+    },
+    "approval": {
+      "request": {
+        "description": "暂停执行，等待人工批准或拒绝——可在桌面通知中心或已配对手机上处理。按「已批准 / 已拒绝」端口路由下游。",
+        "label": "请求审批"
+      }
+    },
+    "character": {
+      "create": {
+        "description": "新建一个角色（员工）。",
+        "label": "创建角色"
+      },
+      "send": {
+        "description": "以选定的角色身份向会话发送消息。",
+        "label": "以角色身份发送"
+      },
+      "update": {
+        "description": "更新现有角色的字段。",
+        "label": "更新角色"
+      }
+    },
+    "connector": {
+      "delete": {
+        "description": "通过已连接的适配器撤回/删除已发送的平台消息。",
+        "label": "删除消息"
+      },
+      "draft": {
+        "description": "把建议的回复保存为草稿，供人工在收件箱中审核。",
+        "label": "保存为草稿"
+      },
+      "forward": {
+        "description": "通过已连接的适配器把一条消息（或合并多条）转发到另一个会话。",
+        "label": "转发消息"
+      },
+      "reaction": {
+        "description": "通过已连接的适配器给平台消息添加表情回应。",
+        "label": "消息表情回应"
+      },
+      "send": {
+        "description": "通过连接器适配器的出站队列发送消息。",
+        "label": "通过连接器发送"
+      },
+      "waitReply": {
+        "description": "暂停运行直到会话中出现匹配的入站消息（或等待超时），并把回复文本传给下游。",
+        "label": "等待回复"
+      }
+    },
+    "desktop": {
+      "expandElement": {
+        "description": "分页展开 canonical AX 树中某个元素的子节点。",
+        "label": "展开应用元素"
+      },
+      "getAppState": {
+        "description": "捕获最新 AX revision 及与之匹配的窗口截图。",
+        "label": "获取应用状态"
+      },
+      "listApps": {
+        "description": "列出可用于应用级 Computer Use session 的应用。",
+        "label": "列出桌面应用"
+      },
+      "performAction": {
+        "description": "执行一个绑定 revision 和 turn 的语义或像素操作。",
+        "label": "执行应用操作"
+      },
+      "queryElements": {
+        "description": "查询某个已捕获应用 revision 中的元素。",
+        "label": "查询应用元素"
+      }
+    },
+    "git": {
+      "branch": {
+        "description": "创建或切换分支。",
+        "label": "Git 分支"
+      },
+      "commit": {
+        "description": "以指定信息提交已暂存的变更（可附加署名）。",
+        "label": "Git 提交"
+      },
+      "push": {
+        "description": "推送提交到远端（可设置上游分支）。",
+        "label": "Git 推送"
+      },
+      "stage": {
+        "description": "暂存仓库中的文件（git add），默认作用于当前工作区根目录。",
+        "label": "Git 暂存"
+      }
+    },
+    "goal": {
+      "analytics": {
+        "description": "计算目标的完成度、状态、token 与时间线分析。",
+        "label": "目标分析"
+      },
+      "clearSubgoals": {
+        "description": "移除目标上已保存的子目标清单。",
+        "label": "清除子目标"
+      },
+      "create": {
+        "description": "通过 GoalRuntime 为聊天会话创建一个自驱动的 /goal。",
+        "label": "创建目标"
+      },
+      "decomposeSubgoals": {
+        "description": "使用配置的评审模型把目标拆解为清单。",
+        "label": "拆解子目标"
+      },
+      "delete": {
+        "description": "通过 GoalRuntime 清理流程删除目标及其事件日志。",
+        "label": "删除目标"
+      },
+      "events": {
+        "description": "读取目标的生命周期事件时间线。",
+        "label": "列出目标事件"
+      },
+      "get": {
+        "description": "按 id 读取单个目标，并返回脱敏安全的快照。",
+        "label": "获取目标"
+      },
+      "list": {
+        "description": "全局、按会话，或按会话的活跃/未完成目标列出目标。",
+        "label": "列出目标"
+      },
+      "pause": {
+        "description": "暂停活跃目标并中止其进行中的回合驱动。",
+        "label": "暂停目标"
+      },
+      "preempt": {
+        "description": "将活跃目标标记为被外部工作取代。",
+        "label": "抢占目标"
+      },
+      "resume": {
+        "description": "恢复已暂停的目标，使其回合循环继续。",
+        "label": "恢复目标"
+      },
+      "stop": {
+        "description": "停止一个非终态目标并触发目标的终态副作用。",
+        "label": "停止目标"
+      },
+      "template": {
+        "createGoal": {
+          "description": "解析目标模板，并为会话创建由 GoalRuntime 支撑的目标。",
+          "label": "从模板创建目标"
+        },
+        "delete": {
+          "description": "删除用户创建的目标模板；内置模板受保护。",
+          "label": "删除目标模板"
+        },
+        "favorite": {
+          "description": "设置目标模板的收藏标记，使其在选择器中靠前排序。",
+          "label": "收藏目标模板"
+        },
+        "list": {
+          "description": "列出内置与用户创建的目标模板，支持收藏/搜索过滤。",
+          "label": "列出目标模板"
+        },
+        "upsert": {
+          "description": "创建或更新用户目标模板，同时保留内置克隆语义。",
+          "label": "新增或更新目标模板"
+        }
+      },
+      "toggleSubgoal": {
+        "description": "翻转某个子目标清单项的完成状态。",
+        "label": "切换子目标"
+      },
+      "updateConfig": {
+        "description": "修改非终态目标的节奏、预算、评审与超时设置。",
+        "label": "更新目标配置"
+      },
+      "updateObjective": {
+        "description": "通过 GoalRuntime 脱敏路径替换非终态目标的目标内容。",
+        "label": "更新目标内容"
+      }
+    },
+    "mcp": {
+      "invokeTool": {
+        "description": "调用已配置的 MCP 服务器上的工具。",
+        "label": "调用 MCP 工具"
+      }
+    },
+    "memory": {
+      "recall": {
+        "description": "对长期记忆库做混合检索（BM25 + 已配置时的向量检索）。",
+        "label": "记忆召回"
+      },
+      "store": {
+        "description": "经共享整合器把一条持久事实写入长期记忆（强制 PII 防护）。",
+        "label": "写入记忆"
+      }
+    },
+    "mobile": {
+      "camera": {
+        "description": "在已配对手机上打开相机，把拍摄结果（base64）返回给运行。",
+        "label": "手机拍照"
+      },
+      "location": {
+        "description": "从已配对手机读取当前 GPS 位置。",
+        "label": "获取手机定位"
+      },
+      "notify": {
+        "description": "在已配对手机上显示一条本地通知。",
+        "label": "通知手机"
+      },
+      "scanBarcode": {
+        "description": "在已配对手机上打开扫码器，返回条码/二维码原始值。",
+        "label": "手机扫码"
+      },
+      "share": {
+        "description": "在已配对手机上打开系统分享面板，分享给定文本或链接。",
+        "label": "从手机分享"
+      }
+    },
+    "pet": {
+      "interact": {
+        "description": "喂食 / 陪玩 / 清洁桌面宠物（可选按 id 消耗一件商店物品）。",
+        "label": "照顾宠物"
+      }
+    },
+    "plan": {
+      "approve": {
+        "description": "将草稿或待定计划转入已批准状态。",
+        "label": "批准计划"
+      },
+      "cancel": {
+        "description": "取消非终态计划并发出运行时退出事件。",
+        "label": "取消计划"
+      },
+      "create": {
+        "description": "通过 PlanRuntime 生命周期为会话创建智能体计划。",
+        "label": "创建计划"
+      },
+      "delete": {
+        "description": "通过 PlanRuntime 清理流程删除计划及其事件日志。",
+        "label": "删除计划"
+      },
+      "events": {
+        "description": "读取计划最新的生命周期与步骤事件。",
+        "label": "列出计划事件"
+      },
+      "get": {
+        "description": "按 id 读取单个已持久化的智能体计划。",
+        "label": "获取计划"
+      },
+      "list": {
+        "description": "按工作区或会话列出计划，可按状态过滤。",
+        "label": "列出计划"
+      },
+      "pause": {
+        "description": "暂停执行中的计划并中止活跃的运行控制器。",
+        "label": "暂停计划"
+      },
+      "refine": {
+        "description": "使用规划模型修复、扩展、简化、重排或优化计划。",
+        "label": "优化计划"
+      },
+      "reject": {
+        "description": "取消待定计划并记录拒绝反馈。",
+        "label": "拒绝计划"
+      },
+      "resume": {
+        "description": "将已暂停的计划恢复为执行中状态。",
+        "label": "恢复计划"
+      },
+      "run": {
+        "description": "通过编排的 PlanRuntime 路径执行已批准的计划。",
+        "label": "运行计划"
+      },
+      "setStepStatus": {
+        "description": "更新单个计划步骤的状态并重新计算计划进度。",
+        "label": "设置计划步骤状态"
+      },
+      "updateDraft": {
+        "description": "修改非执行中计划的标题、步骤、配置或元数据。",
+        "label": "更新计划草稿"
+      }
+    },
+    "plugin": {
+      "invoke": {
+        "description": "调用插件运行时中注册的任务处理器。",
+        "label": "调用插件"
+      }
+    },
+    "scheduler": {
+      "event": {
+        "trigger": {
+          "description": "将事件分发到由事件触发的调度任务。",
+          "label": "触发调度事件"
+        }
+      },
+      "execution": {
+        "get": {
+          "description": "按 id 读取单条调度执行记录。",
+          "label": "获取调度执行记录"
+        }
+      },
+      "executions": {
+        "recent": {
+          "description": "读取所有计划任务中最近的调度执行记录。",
+          "label": "列出最近的调度执行"
+        }
+      },
+      "statistics": {
+        "description": "读取调度任务与执行的聚合计数。",
+        "label": "获取调度统计"
+      },
+      "status": {
+        "description": "读取原生调度守护进程的健康与生命周期状态。",
+        "label": "获取调度器状态"
+      },
+      "task": {
+        "backfill": {
+          "description": "在指定时间窗口内重放某个计划任务。",
+          "label": "回填计划任务"
+        },
+        "create": {
+          "description": "通过 TaskScheduler 生命周期创建一个原生调度任务。",
+          "label": "创建计划任务"
+        },
+        "delete": {
+          "description": "删除调度任务及其执行记录。",
+          "label": "删除计划任务"
+        },
+        "executions": {
+          "description": "读取某个调度任务最近的执行历史。",
+          "label": "列出任务执行记录"
+        },
+        "export": {
+          "description": "导出选定的调度任务定义以用于迁移或备份。",
+          "label": "导出计划任务"
+        },
+        "get": {
+          "description": "按 id 读取单个原生计划任务。",
+          "label": "获取计划任务"
+        },
+        "import": {
+          "description": "从导出的 JSON 包导入调度任务定义。",
+          "label": "导入计划任务"
+        },
+        "list": {
+          "description": "列出原生调度任务，可按状态、类型、标签和搜索过滤。",
+          "label": "列出计划任务"
+        },
+        "pause": {
+          "description": "暂停原生调度任务并解除其下次运行。",
+          "label": "暂停计划任务"
+        },
+        "resume": {
+          "description": "恢复已暂停的调度任务并重新计算下次运行。",
+          "label": "恢复计划任务"
+        },
+        "runNow": {
+          "description": "通过已注册的任务执行器立即执行调度任务。",
+          "label": "立即运行计划任务"
+        },
+        "update": {
+          "description": "修改计划任务的元数据、触发器、载荷、配置或生命周期状态。",
+          "label": "更新计划任务"
+        }
+      },
+      "upcoming": {
+        "description": "读取任务注册表中接下来要触发的调度任务。",
+        "label": "列出即将到来的计划任务"
+      }
+    },
+    "skill": {
+      "invoke": {
+        "description": "把技能注入到下一个 AI 节点的提示词中。",
+        "label": "调用技能"
+      },
+      "upsert": {
+        "description": "用给定的 Markdown 内容新建或更新技能。",
+        "label": "新增或更新技能"
+      }
+    },
+    "system": {
+      "terminal": {
+        "description": "在集成终端中执行 shell 命令，stdout 与退出码传递给下游。",
+        "label": "运行终端命令"
+      }
+    },
+    "team": {
+      "compose": {
+        "description": "从单条目标自动编排智能体团队：路由评估、成员组建与任务分解（经 PII 门控），可选择立即启动团队。",
+        "label": "按目标自动组建团队"
+      },
+      "create": {
+        "description": "新建一个智能体团队。",
+        "label": "创建团队"
+      },
+      "delegate": {
+        "description": "以团队名义把子问题委派给数字孪生、后台智能体、外部智能体或另一个团队，可选择等待结果。",
+        "label": "团队委派"
+      },
+      "message": {
+        "description": "向智能体团队的共享聊天/黑板发布消息，可指定接收成员或关联到某个任务。",
+        "label": "发布团队消息"
+      },
+      "reconcile": {
+        "description": "在工作区隔离下，对本次运行至今产生的各派发分支进行合并 / 择优 / 流水线整合。",
+        "label": "整合智能体工作树"
+      },
+      "run": {
+        "description": "启动智能体团队的生命周期并等待执行完成。",
+        "label": "运行团队"
+      },
+      "status": {
+        "description": "在工作流中读取智能体团队的实时状态：状态、最终结果，可选包含任务、成员与委派记录。",
+        "label": "查询团队状态"
+      },
+      "task": {
+        "dispatch": {
+          "description": "由智能体团队合成器生成的内部节点，每个团队任务一个，不可手工编排。",
+          "label": "派发团队任务"
+        }
+      },
+      "update": {
+        "description": "更新现有团队的成员或编排模式。",
+        "label": "更新团队"
+      }
+    },
+    "terminal": {
+      "readRecent": {
+        "description": "读取终端 dock 标签页的最近命令环（命令、退出码、结束时间）。",
+        "label": "读取终端历史"
+      },
+      "script": {
+        "description": "以正确的解释器运行脚本文件（.sh / .ps1 / .py / .js / …），按扩展名自动检测，也可显式覆盖。",
+        "label": "运行脚本文件"
+      },
+      "session": {
+        "close": {
+          "description": "关闭本次运行中打开的终端会话。运行结束时会自动关闭遗留会话。",
+          "label": "关闭终端会话"
+        },
+        "open": {
+          "description": "打开持久终端会话（可见 dock 标签，或无人值守模式下的私有后台 shell），用于多步命令执行。",
+          "label": "打开终端会话"
+        },
+        "run": {
+          "description": "在本次运行中已打开的会话里执行一条命令并等待其退出码。",
+          "label": "在终端会话中运行"
+        }
+      },
+      "waitForExit": {
+        "description": "阻塞直到终端 dock 标签页中正在运行的命令结束，并按退出码路由。",
+        "label": "等待终端命令结束"
+      }
+    },
+    "twin": {
+      "ingest": {
+        "description": "为数字分身的导入流水线排队新的数据源。",
+        "label": "数字分身导入"
+      },
+      "rag": {
+        "description": "在数字分身的向量库上执行 RAG，返回 top-K 片段。",
+        "label": "数字分身 RAG"
+      }
+    }
+  },
+  "ai": {
+    "browserModel": {
+      "description": "在浏览器中本地运行明确选择的 Transformers.js 模型。",
+      "label": "浏览器模型"
+    },
+    "classify": {
+      "description": "基于 LLM 把输入分到 N 个标签之一。",
+      "label": "分类"
+    },
+    "council": {
+      "description": "把同一 prompt 并行发给多个模型，再合成出共识答案。",
+      "label": "合议"
+    },
+    "embed": {
+      "description": "为语义相似度计算生成嵌入向量。",
+      "label": "生成嵌入向量"
+    },
+    "ensemble": {
+      "description": "运行目标 N 次，然后对样本投票 / 阈值 / 取最优 / 综合。",
+      "label": "集成"
+    },
+    "extract": {
+      "description": "按 JSON Schema 从自由文本抽取结构化数据。",
+      "label": "结构化抽取"
+    },
+    "prompt": {
+      "description": "直接调用 LLM，使用已配置的提供方路由。",
+      "label": "AI 提示"
+    }
+  },
+  "annotation": {
+    "group": {
+      "description": "围绕多个节点的视觉分组框，不参与执行。",
+      "label": "分组框"
+    },
+    "note": {
+      "description": "画布上的自由文本便签，不参与执行。",
+      "label": "便签"
+    }
+  },
+  "data": {
+    "aggregate": {
+      "description": "归约列表：收集 / 拼接 / 合并 / 分组 / 去重 / 数值 / 自定义。",
+      "label": "聚合"
+    },
+    "code": {
+      "description": "自定义 JS 表达式，超时 5 秒。",
+      "label": "自定义代码"
+    },
+    "template": {
+      "description": "用 mustache 风格模板对上游数据进行渲染。",
+      "label": "模板"
+    },
+    "transform": {
+      "description": "对输入数组或对象执行 map / filter / reduce / sort。",
+      "label": "数据转换"
+    }
+  },
+  "eval": {
+    "gate": {
+      "description": "按阈值对评估运行给出通过/失败判定，并按结果分支。",
+      "label": "评估门限"
+    },
+    "run": {
+      "description": "对聊天/团队/工作流目标运行评估数据集并输出通过率。",
+      "label": "运行评估"
+    }
+  },
+  "flow": {
+    "branch": {
+      "description": "根据条件把执行分到两条分支之一。",
+      "label": "If / Else 分支"
+    },
+    "break": {
+      "description": "在当前迭代结束后停止最内层循环。",
+      "label": "跳出循环"
+    },
+    "catch": {
+      "description": "仅在工作流终态失败时运行；接收错误并驱动恢复/通知路径。",
+      "label": "捕获失败"
+    },
+    "continue": {
+      "description": "跳过当前循环迭代的剩余部分。",
+      "label": "继续下一轮"
+    },
+    "join": {
+      "description": "按 all / any / race 语义汇聚并行分支。",
+      "label": "汇聚"
+    },
+    "loop": {
+      "description": "以 for-each / while / 固定次数重复子图。",
+      "label": "循环"
+    },
+    "set": {
+      "description": "为工作流作用域的变量赋值。",
+      "label": "设置变量"
+    },
+    "split": {
+      "description": "把执行扇出到多个并行分支。纯透传——每个分支收到相同输入；不做数据切分或分片（需要切分请用 flow.loop 或 data.aggregate 的 group-by）。",
+      "label": "并行分发"
+    },
+    "subworkflow": {
+      "description": "把另一个工作流作为一个步骤来调用。",
+      "label": "调用子工作流"
+    },
+    "switch": {
+      "description": "根据表达式的值做多路分支。",
+      "label": "Switch 多分支"
+    },
+    "wait": {
+      "description": "暂停固定时长，或等待唤醒事件到达。",
+      "label": "等待"
+    }
+  },
+  "io": {
+    "http": {
+      "description": "调用外部 HTTP API，支持重试和超时。",
+      "label": "HTTP 请求"
+    },
+    "output": {
+      "description": "声明工作流的类型化终端输出（发布接口）。",
+      "label": "输出"
+    },
+    "webClone": {
+      "description": "对在线网页做快照（HTML + 全部 CSS/JS/图片/字体资源），打包成自包含文件或目录，可选做组件提取与框架代码生成。",
+      "label": "网页克隆"
+    },
+    "webhook": {
+      "respond": {
+        "description": "向触发本次执行的入站 Webhook 返回响应负载。",
+        "label": "Webhook 响应"
+      }
+    }
+  },
+  "ocr": {
+    "extract": {
+      "description": "对图片或 PDF（URL、base64 或屏幕）执行 OCR 并输出文本。",
+      "label": "提取文本（OCR）"
+    }
+  },
+  "trigger": {
+    "chat": {
+      "message": {
+        "description": "当用户在绑定角色的会话中发送消息时触发。",
+        "label": "聊天消息触发"
+      }
+    },
+    "connector": {
+      "inbound": {
+        "description": "当外部平台（Telegram、Slack 等）收到消息时触发。",
+        "label": "收到消息"
+      }
+    },
+    "cron": {
+      "description": "按 cron 计划触发。运行时由 Tauri 调度器驱动。",
+      "label": "按计划执行"
+    },
+    "desktop": {
+      "event": {
+        "description": "当 UIA 焦点 / 结构 / 属性事件匹配时触发。",
+        "label": "UIA 事件触发"
+      }
+    },
+    "goal": {
+      "completed": {
+        "description": "当 /goal 达到终态（完成、停止、预算/轮次/超时）时触发。",
+        "label": "目标完成时"
+      }
+    },
+    "integration": {
+      "event": {
+        "description": "当已安装的 Marketplace Integration 发布规范化事件时触发。",
+        "label": "Integration 事件触发"
+      }
+    },
+    "manual": {
+      "description": "在编辑器中点击「运行」按钮时触发。",
+      "label": "手动运行"
+    },
+    "pet": {
+      "event": {
+        "description": "当桌面宠物升级、进化、解锁成就或生病时触发。",
+        "label": "宠物事件触发"
+      }
+    },
+    "team": {
+      "description": "由智能体团队合成器在团队运行启动时触发的内部触发器，不可手工编排。",
+      "label": "团队运行开始时"
+    },
+    "terminal": {
+      "command": {
+        "description": "当用户自己打开的终端 dock 标签页中有命令结束时触发。可按会话、项目、退出状态或命令子串过滤。",
+        "label": "终端命令结束时"
+      }
+    },
+    "webhook": {
+      "description": "当 HTTP 请求命中工作流的 Webhook 路径时触发。",
+      "label": "Webhook 触发"
+    },
+    "workflow": {
+      "completed": {
+        "description": "当另一个工作流的运行结束（成功或失败）时触发，并把其输出作为触发载荷。",
+        "label": "工作流完成时"
+      }
+    }
+  }
+}

@@ -77,6 +77,7 @@ Cross-cutting concerns of the desktop shell (command palette, approval dialogs, 
 - **Character / preset selector** — a Popover containing `<Select>`, collaborating with the `usePresets()` + `useCharacter()` data hooks.
 - **Export trigger** — `single-export-trigger.tsx` (`components/chat/dialogs/`), opens a dialog with five options: Markdown / JSON / Plain text / Beautiful HTML / Animated HTML. See [Backup & Data](../data/backup-and-data#single-session-export) for details.
 - **Session cost badge** — `session-cost-badge.tsx`, accumulating tokens and cost estimates.
+- **Agent-flow display toggle** — `agent-flow-display-toggle.tsx`, a 3-way `ToggleGroup` (simplified / standard / detailed) driving the global agent-flow display mode (see [Agent-flow display modes](#agent-flow-display-modes)).
 - **Twin badge** — `twin-header-badge.tsx`, displayed when the session is bound to an employee digital twin.
 - **Permission mode indicator** — `permission-mode-indicator.tsx`: allow / deny / ask / plan.
 
@@ -161,6 +162,45 @@ flowchart TB
 - **Body**: input parameters (collapsible JSON).
 - **Content**: tool output — text, JSON, image, or Markdown.
 - **Approval inline**: for tools requiring user approval (write file, execute shell), an "Approve / Deny" button group is inserted below the Body, writing to the `pendingApprovals` store.
+
+### Agent-flow display modes
+
+The agent invocation flow (tool calls, reasoning, sub-agents) renders in one of three **display modes**, a global appearance preference distinct from `density` (which only tunes spacing):
+
+| Mode | Tool calls | Reasoning / sub-agents |
+| --- | --- | --- |
+| **simplified** | One-line rows (`ToolCallRow`): icon + tool name + concise target + **result summary chip** + status glyph, expandable on click. | Collapsed by default. |
+| **standard** (default) | The full `Tool` card — opens while running, collapses when complete. | Auto open/close (reasoning), per-card collapse. |
+| **detailed** | Every card force-expanded with full input/output. | Reasoning + sub-agent trees expanded. |
+
+- **State** — `AppSettings.agentFlowMode` (`{ mode }`), read/written through `hooks/chat/use-agent-flow-mode.ts` (`useAgentFlowMode`). Defaults to `standard`; persisted via the settings store's generic `save()`.
+- **Two entry points, one value** — the chat-header quick toggle (`components/chat/agent-flow-display-toggle.tsx`, a 3-way `ToggleGroup`) and the appearance settings card (`components/settings/appearance/components/agent-flow-card.tsx`) both drive the same preference, so switching from either place applies everywhere.
+- **One-line summaries** — `lib/chat/tool-summary.ts` (`summarizeToolCall`) extracts a concise target per tool (file basename, command head, pattern, url host, query…) plus an icon bucket.
+- **Result summaries** — `lib/chat/tool-result-summary.ts` (`describeToolResult`) distills a tool's *output* into a compact, i18n-neutral descriptor — grep → `matches`, glob → `files`, ls → `entries`, read/bash → `lines`, edit/write → `diff` (`+N −M` from the input), and any errored tool → the first error line. The descriptor's `tone` (`neutral`/`success`/`error`) colours the chip; the row component (`ToolResultChip`) maps `kind` → a translated label (`chat.agentFlow.result.*`). Returns `null` while still streaming or when there's no natural summary, so the chip never shows a premature "0". Logic mirrors the CLI's `cli/src/tui/format/tools.ts` result helpers, adapted to the web `ToolUIPart` shape (string / MCP content-block arrays / objects). Note tool parts carry **no per-tool timing**, so no fabricated durations are shown.
+
+#### Activity grouping
+
+Runs of **≥2 consecutive tool calls** collapse into a single foldable **activity group** (`ToolActivityGroup`) — e.g. "5 tool calls ✓" — with an aggregate status glyph, a **type-count tally preview** (`read ×3 · grep ×1 · edit ×1`, via `lib/chat/tool-summary.ts:tallyToolNames` — first-seen order, namespace-folded), and an **expand-all / collapse-all** control. The tally keeps the collapsed group glanceable without expanding. Segmentation is a pure function (`lib/chat/agent-flow-grouping.ts:groupAgentParts`): sub-agent parts are transparent (they render once as a dispatch tree), `TodoWrite` is excluded (it renders as a plan), and a lone tool call stays a single card (no group chrome). In simplified mode the group owns each row's open state; in standard/detailed it delegates to `renderCard` with an optional `forceOpen` override.
+
+#### Sub-agent dispatch tree
+
+The same three display modes drive the **sub-agent dispatch tree** (`SubagentTree` → `SubagentPart`), the core of the agent-invocation flow when an agent spawns sub-agents:
+
+- **simplified** — each node collapses to a one-line `SubagentPart` row (bot icon + name + status glyph + duration), expandable to reveal progress + logs. Matches the `ToolCallRow` visual language.
+- **standard** — the full card, collapsed by default.
+- **detailed** — the full card, expanded by default (progress + logs visible).
+
+`SubagentTree` owns a tree-wide **expand-all / collapse-all** control (shown when ≥2 nodes) plus per-node toggling, via a sparse `Map<id, boolean>` override: an absent entry means the node follows the mode default (open in `detailed`, collapsed otherwise), so the tree stays reactive to mode changes without a state-syncing effect. Each node gets a `MotionReveal` entrance. The team-dispatch banner (`AgentTeamDispatchPart`) also honours the mode — `simplified` drops the task body to stay compact.
+
+#### Motion
+
+`components/chat/motion/motion-reveal.tsx` is the single motion vocabulary for the agent-flow surfaces (`useFlowMotion` resolves `reduce` + `speed` from appearance settings + OS `prefers-reduced-motion`):
+
+- **`MotionReveal`** — a staggered **spring** entrance (fade + small translateY) for new tool cards/rows, sub-agent nodes, and dispatch banners.
+- **`MotionCollapse`** — the *unified* expand/collapse: a gentle, low-overshoot spring on height + opacity, shared by the tool rows, the activity group body, and the sub-agent rows so everything reveals the same way (previously the rows snapped open instantly while only the group animated). Collapses to a plain show/hide when motion is reduced.
+- **`MotionStatusSwap`** — crossfades a small status glyph when it changes (e.g. running → done) with `mode="wait"` to avoid a double-glyph flash; used by the tool row, the activity-group aggregate glyph, and the sub-agent row.
+
+All three are GPU-friendly (only `opacity` + `transform` / animated height, no `backdrop-filter`), scale pace by `motion.speed`, and degrade to plain markup under `motion.reduce` / `prefers-reduced-motion`.
 
 ### artifact part
 
@@ -272,7 +312,17 @@ import {
 | `!`    | At line start                | Skills list                      | `useSkills()`                        |
 | `#`    | Any position                 | Knowledge references / documents | `lib/search/`                        |
 
-When matched, a popover appears (`components/chat/composer-popover.tsx`), with arrow-key navigation + Enter to select, then `spliceToken` replaces the prefix fragment.
+When matched, a popover appears (`components/chat/composer-popover.tsx`), with arrow-key navigation + Enter to select, then `spliceToken` replaces the prefix fragment. Arrow / Tab navigation keeps the highlighted row scrolled into view.
+
+Candidate lists are ranked by a shared fuzzy matcher (`lib/chat/completion/fuzzy-match.ts`): every query character must appear in order (a subsequence), with score bonuses for word-boundary hits (after `/ - _ . :`), consecutive runs, and early/short matches. Slash commands rank on the command name (description is a demoted secondary source); `@`-mentions use the same scorer so both surfaces feel identical. The popover width follows the composer's own width (`--radix-popper-anchor-width`, capped at 480px) so it never spills past a narrow side panel.
+
+### Ghost text (inline autocomplete)
+
+When enabled (`Settings → Conversation → Composer assistance`), the composer shows a dim single-line continuation of the current draft (`hooks/chat/use-composer-ghost-text.ts` → `lib/chat/completion/ghost-controller.ts`). `Tab` accepts, `Esc` dismisses. Suggestions are debounced, cached, PII-gated before the utility-LLM call, and suppressed while a trigger popover is open, while streaming, or when the caret isn't at the end of the input.
+
+### Responsive composer (narrow side panels)
+
+The composer wrapper declares `@container/composer`. Below `@sm`, the textarea owns the first row while the attachment and send clusters share a second row; at `@sm` it reflows to a single `[attach | textarea | send]` line. The placeholder stays on one line so a constrained text area clips the hint instead of making the entire control taller. The **bottom toolbar** measures its own width (`hooks/use-element-width.ts`): model, permission, context usage, and `⋯ More` stay on one line down to 384px, then split into two compact rows with the secondary status controls grouped at the end. Session-shape controls (sandbox / agent runtime / mode / external agent / plugin slots) remain in the More popover at every width. Each control mounts in exactly one place — re-mounting these popover triggers inside a `DropdownMenuItem` would desync their open-state — and the More button shows a dot when an overflow control is active. This keeps every control reachable inside the workflow-editor chat sidebar (resizable down to 20% of the viewport).
 
 ### Attachments
 

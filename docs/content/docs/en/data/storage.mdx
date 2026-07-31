@@ -5,19 +5,19 @@ description: The IndexedDB schema, version evolution, and how to add or migrate 
 
 # Storage (Dexie schema)
 
-<Status variant="stable">v54</Status>
+<Status variant="stable">v115</Status>
 
 <TLDR>
 All browser-side state lives in IndexedDB via Dexie under the database name `cognia-claude`. Schema versions are append-only — every release adds new `.version(n)` blocks; old ones are never edited. Migrations are idempotent and run on every database open.
 </TLDR>
 
 <StatGrid>
-  <Stat label="Schema version" value="54" hint="current" />
+  <Stat label="Schema version" value="115" hint="current" />
   <Stat label="Database name" value="cognia-claude" hint="historical, kept stable" />
   <Stat label="Singletons" value="1" hint="settings table" />
 </StatGrid>
 
-All browser-side state is persisted in **IndexedDB via Dexie**. The schema is defined in `lib/db/schema.ts` and is currently at **v54**. Schema versions are append-only — never mutate an existing `.version(n).stores({...})` block.
+All browser-side state is persisted in **IndexedDB via Dexie**. The schema is defined in `lib/db/schema.ts` and is currently at **v115**. Schema versions are append-only — never mutate an existing `.version(n).stores({...})` block.
 
 ## Database identity
 
@@ -44,7 +44,7 @@ The Dexie database name is `cognia-claude` (the original codename — kept stabl
 | `backupHistory`       | `BackupHistoryRow`        | `id`, `completedAt`, `status`                      | Capped at 50 newest                         |
 | `canvasDocuments`     | `CanvasDocumentRow`       | `id`, `sessionId`, `updatedAt`                     | Long-form artifacts                         |
 | `canvasVersions`      | `CanvasVersionRow`        | `id`, `documentId`, `[documentId+createdAt]`       | Version history                             |
-| `canvasComments`      | `CanvasCommentRow`        | `id`, `documentId`, `createdAt`                    | Inline comments                             |
+| `canvasComments`      | `CanvasCommentRow`        | `id`, `documentId`, `createdAt`                    | Legacy Canvas compatibility projection      |
 | `canvasSessions`      | `CanvasSessionRow`        | `id`, `documentId`, `updatedAt`                    | Per-session canvas state                    |
 | `a2uiApps`            | `A2UIAppRow`              | `id`, `name`, `updatedAt`                          | A2UI app instances                          |
 | `a2uiSurfaces`        | `A2UISurfaceRow`          | `id`, `appId`, `[appId+createdAt]`                 | A2UI rendered surfaces                      |
@@ -59,7 +59,6 @@ The Dexie database name is `cognia-claude` (the original codename — kept stabl
 | `pluginPermissions`   | `PluginPermissionRow`     | `[pluginId+permission]` (composite key)            | Granted permissions                         |
 | `pluginReviews`       | `PluginReviewRow`         | `[pluginId+rating]` (composite key)                | Marketplace review cache                    |
 | `pluginAnalytics`     | `PluginAnalyticsRow`      | `[pluginId+day]` (composite key)                   | Per-day plugin stats                        |
-| `pluginScheduledJobs` | `PluginScheduledJobRow`   | `id`, `pluginId`, `enabled`                        | Plugin scheduled jobs                       |
 
 ## Version history
 
@@ -102,7 +101,13 @@ Every `.version(n)` block in `lib/db/schema.ts`:
 | **v13** | `a2uiEventHistory`; index reshuffle.                                                                            |
 | **v14** | Twin tables — `twinSources`, `twinChunks`, `twinProfile`, `twinDrafts`, `twinJobs`.                             |
 | **v15** | Plugin tables — `plugins`, `pluginPermissions`, `pluginReviews`, `pluginAnalytics`, `pluginScheduledJobs`.      |
-| **v16–v54** | Subsequent additions: workflow tables, goal tracker, OCR results, subscription usage, sync cursors, share links, agent-team persistence, character pack overlays, GitHub delivery state, ext. agent configs, mobile sync, perf samples, terminal sessions, etc. Read `lib/db/schema.ts` for the exact diffs. |
+| **v113** | Retired the unused `pluginScheduledJobs` table; plugin schedules are `type: "plugin"` tasks in SchedulerDB. |
+| **v16–v112** | Subsequent additions: workflow tables, goal tracker, OCR results, subscription usage, sync cursors, share links, agent-team persistence, character pack overlays, GitHub delivery state, ext. agent configs, mobile sync, perf samples, terminal sessions, etc. Read `lib/db/schema.ts` for the exact diffs. |
+| **v115** | Adds `contextComments` as the writable cross-resource comment table and idempotently backfills Canvas comments. Existing historical version blocks remain unchanged. |
+
+### Resource comments (v115)
+
+`contextComments` indexes resource kind/id, parent, resolution, creation time, and project scope. It stores resource-level, text/line-range, and workflow node/edge anchors plus revision and stale-anchor metadata. Canvas stores, plugin APIs, legacy Canvas UI, and backup/import compatibility use adapters over this table so there is one writable source of truth.
 
 <Callout type="info" title="Idempotent upgrades">
 Each version is idempotent — opening an old database upgrades it through every intermediate version automatically. Dexie applies them in order. **Never modify a previous `.version(n)` block.**

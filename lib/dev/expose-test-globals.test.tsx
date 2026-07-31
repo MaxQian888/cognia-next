@@ -1,6 +1,8 @@
 /** @jest-environment jsdom */
+import "fake-indexeddb/auto"
 import { render, waitFor, cleanup } from "@testing-library/react"
 import { ExposeTestGlobals } from "./expose-test-globals"
+import { getDb } from "@/lib/db/schema"
 
 const originalEnv = process.env.NEXT_PUBLIC_E2E
 
@@ -16,6 +18,10 @@ const cleanWindowKeys: Array<keyof Window> = [
   "__cogniaMockBaseUrls",
   "__cogniaSaveCompanionConfig",
   "__cogniaClearCompanionConfig",
+  "__cogniaSetSettings",
+  "__cogniaE2EWebRtc",
+  "__cogniaE2EWebRtcEvents",
+  "__cogniaE2EWebRtcReady",
   "__cogniaTestGlobalsReady",
 ] as Array<keyof Window>
 
@@ -23,11 +29,13 @@ beforeEach(() => {
   for (const k of cleanWindowKeys) {
     delete (window as unknown as Record<string, unknown>)[k as string]
   }
+  delete window.__cogniaPluginRuntimeReady
   window.localStorage.clear()
 })
 
 afterEach(() => {
   cleanup()
+  delete window.__cogniaPluginRuntimeReady
   process.env.NEXT_PUBLIC_E2E = originalEnv
 })
 
@@ -51,6 +59,7 @@ describe("ExposeTestGlobals", () => {
     expect(window.__cogniaSeedRun).toBeUndefined()
     expect(window.__cogniaSetMockBaseUrls).toBeUndefined()
     expect(window.__cogniaSaveCompanionConfig).toBeUndefined()
+    expect(window.__cogniaSetSettings).toBeUndefined()
     expect(window.__cogniaTestGlobalsReady).toBeUndefined()
   })
 
@@ -70,6 +79,71 @@ describe("ExposeTestGlobals", () => {
     expect(typeof window.__cogniaSetMockBaseUrls).toBe("function")
     expect(typeof window.__cogniaSaveCompanionConfig).toBe("function")
     expect(typeof window.__cogniaClearCompanionConfig).toBe("function")
+    expect(typeof window.__cogniaSetSettings).toBe("function")
+    // ADR-0021 real-pair harness seam.
+    expect(typeof window.__cogniaE2EWebRtc?.connect).toBe("function")
+    expect(typeof window.__cogniaE2EWebRtc?.reconnectNow).toBe("function")
+    expect(window.__cogniaE2EWebRtcEvents).toEqual({})
+  })
+
+  it("waits for an in-progress plugin schema upgrade before opening the fixture bridge", async () => {
+    process.env.NEXT_PUBLIC_E2E = "1"
+    window.__cogniaPluginRuntimeReady = false
+
+    render(<ExposeTestGlobals />)
+
+    await waitFor(() => {
+      expect(window.__cogniaE2EWebRtcReady).toBe(true)
+    })
+    expect(window.__cogniaTestGlobalsReady).not.toBe(true)
+
+    window.__cogniaPluginRuntimeReady = true
+    await waitFor(() => {
+      expect(window.__cogniaTestGlobalsReady).toBe(true)
+    })
+  })
+
+  it("__cogniaE2EWebRtc.getState returns 'idle' before connect and reconnectNow returns 'no-instance'", async () => {
+    process.env.NEXT_PUBLIC_E2E = "1"
+    render(<ExposeTestGlobals />)
+    await waitFor(() => {
+      expect(window.__cogniaTestGlobalsReady).toBe(true)
+    })
+    // No handshake started yet — the seam reports a benign default rather than
+    // throwing, so the driver can poll state before connect().
+    expect(window.__cogniaE2EWebRtc!.getState()).toBe("idle")
+    expect(window.__cogniaE2EWebRtc!.reconnectNow()).toBe("no-instance")
+  })
+
+  it("seeds a sendable connector draft with canonical segments and preview", async () => {
+    process.env.NEXT_PUBLIC_E2E = "1"
+    render(<ExposeTestGlobals />)
+    await waitFor(() => {
+      expect(window.__cogniaTestGlobalsReady).toBe(true)
+    })
+
+    const id = await window.__cogniaSeedConnectorDraft!({
+      adapterId: "adapter-e2e",
+      conversationKey: "lark:adapter-e2e:chat-e2e",
+      content: "Pending reply",
+    })
+    const row = await getDb().connectorDrafts.get(id)
+
+    expect(row).toMatchObject({
+      id,
+      conversationKey: "lark:adapter-e2e:chat-e2e",
+      segments: [{ type: "text", text: "Pending reply" }],
+      status: "pending",
+      outboundPreview: {
+        conversationRef: {
+          platform: "lark",
+          adapterId: "adapter-e2e",
+          chatId: "chat-e2e",
+        },
+        segments: [{ type: "text", text: "Pending reply" }],
+        metadata: { idempotencyKey: expect.any(String) },
+      },
+    })
   })
 
   it("removes every global on unmount", async () => {
@@ -80,8 +154,8 @@ describe("ExposeTestGlobals", () => {
     })
     unmount()
     for (const k of cleanWindowKeys) {
-      if (k === "__cogniaTestGlobalsReady") {
-        expect(window.__cogniaTestGlobalsReady).toBe(false)
+      if (k === "__cogniaTestGlobalsReady" || k === "__cogniaE2EWebRtcReady") {
+        expect((window as unknown as Record<string, unknown>)[k]).toBe(false)
       } else {
         expect((window as unknown as Record<string, unknown>)[k as string]).toBeUndefined()
       }

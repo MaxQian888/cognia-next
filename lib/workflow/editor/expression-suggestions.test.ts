@@ -1,4 +1,8 @@
-import { buildExpressionSuggestions, probeOutputFields } from "./expression-suggestions"
+import {
+  buildExpressionSuggestions,
+  deriveExpressionScopeHints,
+  probeOutputFields,
+} from "./expression-suggestions"
 import type { WorkflowNode } from "@/types/workflow/visual"
 
 function n(id: string, type: WorkflowNode["type"], label?: string): WorkflowNode {
@@ -28,6 +32,14 @@ describe("buildExpressionSuggestions", () => {
     })
     expect(out.find((e) => e.label === "$trigger.payload.body")?.detail).toBe("trigger.webhook")
     expect(out.some((e) => e.label === "$trigger.payload.headers")).toBe(true)
+  })
+
+  it("joins array-root trigger payload paths without a spurious dot", () => {
+    const out = buildExpressionSuggestions({
+      nodes: [],
+      triggerHints: { kind: "trigger.webhook", payloadKeys: ["[0].id"] },
+    })
+    expect(out.some((e) => e.label === "$trigger.payload[0].id")).toBe(true)
   })
 
   it("emits one entry per static-data key", () => {
@@ -88,6 +100,84 @@ describe("buildExpressionSuggestions", () => {
     const out = buildExpressionSuggestions({ nodes })
     const baseRow = out.find((e) => e.label === "$node['greet']")
     expect(baseRow?.detail).toBe("Greeting prompt (ai.prompt)")
+  })
+
+  it("restricts node references to the upstream set when supplied", () => {
+    const nodes = [n("a", "trigger.manual"), n("b", "ai.prompt"), n("c", "ai.prompt")]
+    const out = buildExpressionSuggestions({
+      nodes,
+      currentNodeId: "c",
+      upstreamNodeIds: new Set(["a"]),
+    })
+    expect(out.some((e) => e.label === "$node['a']")).toBe(true)
+    // b is not upstream of c → excluded; c is the current node → excluded.
+    expect(out.some((e) => e.label === "$node['b']")).toBe(false)
+    expect(out.some((e) => e.label === "$node['c']")).toBe(false)
+  })
+
+  it("joins nested + array-index field paths correctly", () => {
+    const nodes = [n("p", "ai.prompt")]
+    const out = buildExpressionSuggestions({
+      nodes,
+      outputSchemas: { p: ["result.text", "items[0].name", "[0]"] },
+    })
+    const labels = out.map((e) => e.label)
+    expect(labels).toContain("$node['p'].result.text")
+    expect(labels).toContain("$node['p'].items[0].name")
+    // A leading-bracket path must not get a spurious dot.
+    expect(labels).toContain("$node['p'][0]")
+  })
+})
+
+describe("deriveExpressionScopeHints", () => {
+  it("connects static data and nested manual-trigger schema fields", () => {
+    const trigger = n("start", "trigger.manual")
+    trigger.data.params = {
+      inputSchema: {
+        type: "object",
+        properties: {
+          user: {
+            type: "object",
+            properties: { id: { type: "string" } },
+          },
+          items: {
+            type: "array",
+            items: { type: "object", properties: { sku: { type: "string" } } },
+          },
+        },
+      },
+    }
+
+    expect(
+      deriveExpressionScopeHints({
+        nodes: [trigger, n("current", "ai.prompt")],
+        upstreamNodeIds: new Set(["start"]),
+        staticData: { counter: 1, cache: {} },
+        outputs: {},
+      })
+    ).toEqual({
+      staticKeys: ["cache", "counter"],
+      triggerHints: {
+        kind: "trigger.manual",
+        payloadKeys: ["items", "items[0]", "items[0].sku", "user", "user.id"],
+      },
+    })
+  })
+
+  it("uses the latest trigger output for every trigger kind and dedupes schema paths", () => {
+    const trigger = n("webhook", "trigger.webhook")
+    expect(
+      deriveExpressionScopeHints({
+        nodes: [trigger],
+        outputs: { webhook: { payload: { body: { id: 1 }, headers: ["x"] } } },
+      })
+    ).toEqual({
+      staticKeys: [],
+      triggerHints: {
+        kind: "trigger.webhook",
+        payloadKeys: ["body", "body.id", "headers", "headers[0]"],
+      },
+    })
   })
 })
 

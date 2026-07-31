@@ -5,7 +5,8 @@
  * clears both:
  *   • the Anthropic subscription credential — `useActiveAnthropicCredential().signOut()`
  *     (no-op outside Tauri, but harmless to call universally).
- *   • the pairing JWT — `companionStorage().clear()`.
+ *   • the pairing JWT — `clearCompanionConfig()` (wipes SecureStorage *and*
+ *     the transport's in-memory config cache).
  *
  * The call is gated by `verify()` from `lib/capacitor/biometric.ts` when
  * `AppSettings.biometricRequiredFor.signOut` is true (default). After a
@@ -17,14 +18,13 @@ import { useCallback, useState } from "react"
 import { useRouter } from "next/navigation"
 
 import { verify, type VerifyOutcome } from "@/lib/capacitor/biometric"
-import { companionStorage } from "@/lib/tauri/companion-storage"
+import { clearCompanionConfig } from "@/lib/tauri/transport-companion"
 import { useActiveAnthropicCredential } from "@/lib/subscription/anthropic/hooks"
 import { useSettingsStore } from "@/stores/settings"
-import { DEFAULT_BIOMETRIC_GUARD } from "@/lib/claude/types"
+import { DEFAULT_BIOMETRIC_GUARD } from "@cognia/agent-config-types"
 
 export type SignOutOutcome =
-  | { kind: "ok" }
-  | { kind: "blocked"; reason: "cancelled" | "lockout" | "error"; message?: string }
+  { kind: "ok" } | { kind: "blocked"; reason: "cancelled" | "lockout" | "error"; message?: string }
 
 export interface UseCompanionSignOutOptions {
   /** Localised biometric prompt copy. */
@@ -83,7 +83,12 @@ export function useCompanionSignOut(opts: UseCompanionSignOutOptions): UseCompan
         // would otherwise block the pair clear that mobile actually
         // depends on.
       }
-      await companionStorage().clear()
+      // clearCompanionConfig() — NOT companionStorage().clear() — so the
+      // transport's module-level `cachedConfig` is wiped too. Clearing only
+      // the on-disk backend leaves the live transport believing it is still
+      // paired (stale WS, stale `loadCompanionConfig()`), which then strands
+      // the re-pair flow.
+      await clearCompanionConfig()
 
       router.replace(redirectTo)
       return { kind: "ok" }

@@ -204,3 +204,50 @@ describe("icons bridge", () => {
     })
   })
 })
+
+// ── W5.1: enable-time manifest registration + active theme ───────────────────
+jest.mock("@/lib/file/file-operations", () => ({
+  readTextFile: jest.fn(),
+}))
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const fileOps = require("@/lib/file/file-operations") as { readTextFile: jest.Mock }
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { registerIconThemesForPlugin, getActiveIconTheme } = require("./icons-bridge") as {
+  registerIconThemesForPlugin: (
+    pluginId: string,
+    entries: Array<{ id: string; label: string; path: string }>,
+    baseDir: string
+  ) => Promise<{ registered: number; errors: string[] }>
+  getActiveIconTheme: () => { id: string; baseDir?: string } | undefined
+}
+
+describe("registerIconThemesForPlugin (W5.1)", () => {
+  beforeEach(() => {
+    __resetIconThemesForTesting()
+    fileOps.readTextFile.mockReset()
+  })
+
+  it("registers a theme read from the plugin dir with its baseDir", async () => {
+    fileOps.readTextFile.mockResolvedValue(
+      JSON.stringify({ iconDefinitions: { _f: { iconPath: "./icons/f.svg" } }, file: "_f" })
+    )
+    const result = await registerIconThemesForPlugin(
+      "p1",
+      [{ id: "material", label: "Material", path: "icons/theme.json" }],
+      "/plugins/p1"
+    )
+    expect(result).toEqual({ registered: 1, errors: [] })
+    expect(getActiveIconTheme()).toMatchObject({ id: "p1.material", baseDir: "/plugins/p1" })
+  })
+
+  it("collects malformed JSON as a per-entry error", async () => {
+    fileOps.readTextFile.mockResolvedValue("not json")
+    const result = await registerIconThemesForPlugin(
+      "p1",
+      [{ id: "broken", label: "Broken", path: "icons/theme.json" }],
+      "/plugins/p1"
+    )
+    expect(result.registered).toBe(0)
+    expect(result.errors).toHaveLength(1)
+  })
+})

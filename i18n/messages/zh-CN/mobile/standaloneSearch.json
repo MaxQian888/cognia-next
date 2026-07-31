@@ -1,0 +1,22 @@
+{
+  "answerTitle": "回答",
+  "backAria": "返回我的页面",
+  "configureCta": "配置服务商",
+  "errors": {
+    "answer-failed": "无法生成回答",
+    "empty-query": "请输入问题",
+    "no-model-provider": "尚未配置模型服务商",
+    "no-search-provider": "尚未配置网络搜索服务商",
+    "search-failed": "网络搜索失败"
+  },
+  "idleHint": "输入问题，搜索网络并生成带引用的回答。",
+  "loading": "正在搜索并生成回答…",
+  "modelUnavailableTitle": "已找到来源，但尚未配置模型",
+  "noResults": "未找到来源。",
+  "placeholder": "输入一个网络问题…",
+  "queryAria": "网络搜索问题",
+  "run": "搜索",
+  "sourcesTitle": "来源",
+  "stop": "停止",
+  "title": "网络搜索"
+}

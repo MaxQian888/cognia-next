@@ -1,0 +1,5 @@
+.ref-badge,
+[data-tree-node="reference-root"] {
+  outline: 2px solid rgb(239, 68, 68);
+  outline-offset: 2px;
+}

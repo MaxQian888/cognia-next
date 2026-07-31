@@ -35,7 +35,13 @@ import {
   listTeams,
   updateTeam,
 } from "@/lib/db/teams"
-import type { Character, McpServer, Team, TeamMember, TeamOrchestration } from "@/lib/claude/types"
+import type {
+  Character,
+  McpServer,
+  Team,
+  TeamMember,
+  TeamOrchestration,
+} from "@cognia/agent-config-types"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   ChevronDownIcon,
@@ -49,7 +55,7 @@ import { useEffect, useState } from "react"
 import { toast } from "sonner"
 import { useTranslations } from "next-intl"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 
 const log = createLogger("settings.teams")
 

@@ -11,7 +11,7 @@
  * `pnpx playwright install webkit`.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { createMockV2Server, type MockV2Server } from "./mock-v2-server"
 import { injectCapacitor } from "../helpers/inject-capacitor"
 import { resetCogniaDb } from "../helpers/db-reset"
@@ -77,7 +77,7 @@ test.describe("mobile pair flow — UI state machine (existing smoke)", () => {
 test.describe("mobile pair flow — V2 server round-trip", () => {
   const validJwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0Iiwic2NwIjoicGFpciJ9.signature"
 
-  test("happy path: server returns deviceJwt, paired step renders, config persisted", async ({
+  test("@smoke @critical happy path pairs and persists the device config", async ({
     page,
   }) => {
     server.setPairScenario({ kind: "ok", body: { server_version: "9.9.9" } })
@@ -156,7 +156,7 @@ test.describe("mobile pair flow — V2 server round-trip", () => {
     // sets it via QR scan. Drive it via the Capacitor mock instead.
     await page.evaluate((fp) => {
       ;(
-        window as { __cogniaCapMock: { setBarcodeResult: (s: string) => void } }
+        window as unknown as { __cogniaCapMock: { setBarcodeResult: (s: string) => void } }
       ).__cogniaCapMock.setBarcodeResult(
         JSON.stringify({ b: window.location.origin, j: "aaa", f: fp })
       )

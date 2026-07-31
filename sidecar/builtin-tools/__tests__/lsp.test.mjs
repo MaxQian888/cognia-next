@@ -46,6 +46,22 @@ test("goto_definition converts 1-based position to 0-based and formats", async (
   assert.match(res.content[0].text, /a\.ts:5:3/)
 })
 
+test("goto_definition returns resolver failures as compact tool errors", async () => {
+  const resolver = fakeResolver()
+  resolver.request = async () => {
+    throw new Error("resolver down")
+  }
+  const tools = createLspTools(resolver)
+  const res = await find(tools, "lsp_goto_definition").handler({
+    file: "/proj/a.ts",
+    line: 10,
+    character: 3,
+  })
+  assert.equal(res.isError, true)
+  assert.equal(res.content[0].type, "text")
+  assert.match(res.content[0].text, /lsp_goto_definition: resolver down/)
+})
+
 test("find_references routes to the references method", async () => {
   const resolver = fakeResolver({ requestResult: [] })
   const tools = createLspTools(resolver)
@@ -65,6 +81,16 @@ test("hover renders markdown content value", async () => {
   const tools = createLspTools(resolver)
   const res = await find(tools, "lsp_hover").handler({ file: "/p/a.ts", line: 2, character: 2 })
   assert.equal(res.content[0].text, "fn foo()")
+})
+
+test("document_symbols routes to the documentSymbol method", async () => {
+  const resolver = fakeResolver({
+    requestResult: [{ name: "Foo", kind: 5, range: { start: { line: 0 } } }],
+  })
+  const tools = createLspTools(resolver)
+  const res = await find(tools, "lsp_document_symbols").handler({ file: "/p/a.ts" })
+  assert.equal(resolver.calls.request[0].method, "documentSymbol")
+  assert.match(res.content[0].text, /class Foo/)
 })
 
 test("diagnostics formats cached errors and warnings", async () => {

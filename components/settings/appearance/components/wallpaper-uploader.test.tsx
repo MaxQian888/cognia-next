@@ -98,17 +98,6 @@ describe("WallpaperUploader", () => {
     expect(onUpload).not.toHaveBeenCalled()
   })
 
-  it("supports drag-and-drop", async () => {
-    const onUpload = jest.fn()
-    render(<WallpaperUploader onUpload={onUpload} />)
-    const dropzone = screen.getByTestId("wallpaper-dropzone")
-    const file = new File([new Uint8Array([1])], "drop.png", { type: "image/png" })
-    await act(async () => {
-      fireEvent.drop(dropzone, { dataTransfer: { files: [file] } })
-    })
-    await waitFor(() => expect(onUpload).toHaveBeenCalledTimes(1))
-  })
-
   it("triggers the file picker via the browse button", async () => {
     render(<WallpaperUploader onUpload={() => {}} />)
     const input = document.querySelector('input[type="file"]') as HTMLInputElement
@@ -117,14 +106,10 @@ describe("WallpaperUploader", () => {
     expect(clickSpy).toHaveBeenCalled()
   })
 
-  it("ignores interaction while disabled", async () => {
-    const onUpload = jest.fn()
-    render(<WallpaperUploader onUpload={onUpload} disabled />)
-    const dropzone = screen.getByTestId("wallpaper-dropzone")
-    const file = new File([new Uint8Array([1])], "x.png", { type: "image/png" })
-    await act(async () => {
-      fireEvent.drop(dropzone, { dataTransfer: { files: [file] } })
-    })
-    expect(onUpload).not.toHaveBeenCalled()
+  // Drag-and-drop moved to the gallery grid (see `wallpaper-tab.test.tsx`);
+  // both paths share `intakeWallpaperFile`, so the validation above covers it.
+  it("disables the browse button while busy elsewhere", () => {
+    render(<WallpaperUploader onUpload={() => {}} disabled />)
+    expect(screen.getByText("browse").closest("button")).toBeDisabled()
   })
 })

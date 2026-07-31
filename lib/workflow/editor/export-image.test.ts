@@ -6,7 +6,7 @@ import type { Node } from "@xyflow/react"
 import { exportWorkflowImage, renderWorkflowImageBlob } from "./export-image"
 
 const mockHtml2canvas = jest.fn()
-jest.mock("html2canvas", () => ({
+jest.mock("html2canvas-pro", () => ({
   __esModule: true,
   default: (...args: unknown[]) => mockHtml2canvas(...args),
 }))

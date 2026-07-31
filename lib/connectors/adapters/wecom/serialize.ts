@@ -11,10 +11,10 @@
  * orchestrated by `index.ts`, which consumes this split.
  */
 
-import type { A2UIMessageSegment, MessageSegment } from "@/types/connectors/segment"
+import type { A2UIMessageSegment, MessageSegment, PlatformCard } from "@/types/connectors/segment"
 import { isA2UISegment } from "@/types/connectors/segment"
 import type { SegmentDowngrade } from "@/types/connectors/outbound"
-import { WECOM_MARKDOWN_MAX_BYTES } from "./protocol"
+import { WECOM_MARKDOWN_MAX_BYTES, type WeComTemplateCard } from "./protocol"
 
 export interface WeComMediaSegment {
   type: "image" | "voice" | "video" | "file"
@@ -30,7 +30,33 @@ export interface WeComSerialized {
   a2uiSurfaces: A2UIMessageSegment[]
   /** Media segments needing a chunked upload before send. */
   media: WeComMediaSegment[]
+  /**
+   * Pass-through `template_card` payloads carried by generic card segments
+   * whose `payload` is already template_card-shaped (has a string
+   * `card_type`). Sent as native card frames by `index.ts`.
+   */
+  cards: WeComTemplateCard[]
   downgrades: SegmentDowngrade[]
+}
+
+/** Return the payload as a template card when it is template_card-shaped. */
+function asWeComTemplateCard(card: PlatformCard): WeComTemplateCard | null {
+  const p = card.payload
+  if (p && typeof p === "object" && typeof (p as { card_type?: unknown }).card_type === "string") {
+    return p as WeComTemplateCard
+  }
+  return null
+}
+
+/** Best-effort text alternative for an opaque (non-WeCom) card payload. */
+function cardTextAlternative(card: PlatformCard): string | null {
+  const p = card.payload as Record<string, unknown> | null | undefined
+  if (!p || typeof p !== "object") return null
+  for (const key of ["text", "content", "title"]) {
+    const v = p[key]
+    if (typeof v === "string" && v.trim()) return v
+  }
+  return null
 }
 
 /** Truncate a UTF-8 string to at most `maxBytes`, keeping whole code points. */
@@ -59,6 +85,7 @@ export function serializeSegments(segments: MessageSegment[]): WeComSerialized {
   const lines: string[] = []
   const a2uiSurfaces: A2UIMessageSegment[] = []
   const media: WeComMediaSegment[] = []
+  const cards: WeComTemplateCard[] = []
   const downgrades: SegmentDowngrade[] = []
 
   for (const seg of segments) {
@@ -106,12 +133,25 @@ export function serializeSegments(segments: MessageSegment[]): WeComSerialized {
       case "file":
         media.push({ type: "file", url: seg.url, name: seg.name, mimeType: seg.mimeType })
         break
-      case "card":
-        // Opaque platform card — degrade to a one-liner; the assistant should
-        // emit A2UI surfaces instead for WeCom.
+      case "card": {
+        // Template_card-shaped payloads pass through natively; other card
+        // payloads degrade to their text alternative when one exists, and
+        // only truly opaque cards fall back to the "[card]" marker.
+        const passthrough = asWeComTemplateCard(seg.card)
+        if (passthrough) {
+          cards.push(passthrough)
+          break
+        }
+        const alt = cardTextAlternative(seg.card)
+        if (alt) {
+          downgrades.push({ from: "card", to: "text", reason: "wecom_card_text_alternative" })
+          lines.push(alt)
+          break
+        }
         downgrades.push({ from: "card", to: "text", reason: "wecom_no_generic_card" })
         lines.push("[card]")
         break
+      }
     }
   }
 
@@ -119,6 +159,7 @@ export function serializeSegments(segments: MessageSegment[]): WeComSerialized {
     markdown: clampUtf8(lines.join("\n\n").trim(), WECOM_MARKDOWN_MAX_BYTES),
     a2uiSurfaces,
     media,
+    cards,
     downgrades,
   }
 }

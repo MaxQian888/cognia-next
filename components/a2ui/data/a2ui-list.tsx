@@ -5,7 +5,8 @@
  * Renders a dynamic list of items with templates
  */
 
-import React, { useMemo, memo, useState } from "react"
+import React, { useMemo, memo, useState, useRef } from "react"
+import { useVirtualizer } from "@tanstack/react-virtual"
 import { cn } from "@/lib/utils"
 import type { A2UIComponentProps, A2UIListComponent } from "@/types/a2ui/schema"
 import { useA2UIData, useA2UIActions } from "@/hooks/a2ui"
@@ -13,6 +14,16 @@ import { resolveArrayOrPath, getValueByPath } from "@/lib/a2ui/data-model"
 import { A2UIChildRenderer } from "../a2ui-child-renderer"
 import { getItemKey, getItemDisplayText } from "@/lib/a2ui/list-utils"
 import { useA2UIListNavigation } from "@/hooks/a2ui/use-a2ui-keyboard"
+
+/**
+ * Lists above this item count switch to windowed rendering so a large
+ * agent-generated list (hundreds/thousands of rows) keeps the DOM bounded
+ * instead of mounting every item. Smaller lists render inline exactly as
+ * before — the common case stays untouched, including all existing tests.
+ */
+export const LIST_VIRTUALIZE_THRESHOLD = 100
+/** Estimated row height (px) used to seed the virtualizer before measurement. */
+export const ESTIMATED_LIST_ITEM_HEIGHT = 40
 
 export const A2UIList = memo(function A2UIList({
   component,
@@ -57,6 +68,30 @@ export const A2UIList = memo(function A2UIList({
     }
   }
 
+  // Windowed rendering for large lists. The hook is always called (count 0 when
+  // below threshold) to respect the rules of hooks; it is a no-op until the
+  // virtualized branch below actually mounts the scroll container.
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const shouldVirtualize = items.length > LIST_VIRTUALIZE_THRESHOLD
+  const virtualizer = useVirtualizer({
+    count: shouldVirtualize ? items.length : 0,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => ESTIMATED_LIST_ITEM_HEIGHT,
+    overscan: 8,
+  })
+
+  // Per-item body, shared by the inline and virtualized paths so the three
+  // list modes (template / children / simple) render identically either way.
+  const renderItemBody = (item: unknown): React.ReactNode => {
+    if (component.template?.itemId) {
+      return renderChild(component.template.itemId)
+    }
+    if (component.children && component.children.length > 0) {
+      return <A2UIChildRenderer childIds={component.children} />
+    }
+    return getItemDisplayText(item)
+  }
+
   // Empty state
   if (items.length === 0 && component.emptyText) {
     return (
@@ -65,6 +100,41 @@ export const A2UIList = memo(function A2UIList({
         style={component.style as React.CSSProperties}
       >
         {component.emptyText}
+      </div>
+    )
+  }
+
+  // Virtualized path for large lists — bounded DOM via @tanstack/react-virtual.
+  if (shouldVirtualize) {
+    return (
+      <div
+        ref={scrollRef}
+        className={cn("max-h-[480px] overflow-auto", component.className)}
+        style={component.style as React.CSSProperties}
+        data-testid="a2ui-list-virtualized"
+      >
+        <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
+          {virtualizer.getVirtualItems().map((virtualRow) => {
+            const item = items[virtualRow.index]
+            return (
+              <div
+                key={getItemKey(item, virtualRow.index)}
+                data-index={virtualRow.index}
+                ref={virtualizer.measureElement}
+                className={cn(
+                  "absolute top-0 left-0 w-full px-2 py-1",
+                  component.itemClickAction &&
+                    "cursor-pointer hover:bg-muted/50 rounded-md transition-colors",
+                  component.dividers && virtualRow.index > 0 && "border-t"
+                )}
+                style={{ transform: `translateY(${virtualRow.start}px)` }}
+                onClick={() => handleItemClick(item, virtualRow.index)}
+              >
+                {renderItemBody(item)}
+              </div>
+            )
+          })}
+        </div>
       </div>
     )
   }

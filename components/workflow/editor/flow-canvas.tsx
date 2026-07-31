@@ -55,11 +55,7 @@ import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import type { EditorStore, EditorState } from "@/lib/workflow/editor/store"
 import { validateConnection } from "@/lib/workflow/editor/connection-validator"
-import {
-  computeAlignmentGuides,
-  type GuidesResult,
-  type RectLike,
-} from "@/lib/workflow/editor/alignment-guides"
+import { computeAlignmentGuides, type RectLike } from "@/lib/workflow/editor/alignment-guides"
 import { useDragSnapshot } from "@/hooks/workflow/use-drag-snapshot"
 import { useRafThrottle } from "@/hooks/workflow/use-raf-throttle"
 import type { EffectivePerfTier } from "@/hooks/workflow/use-effective-perf-tier"
@@ -67,18 +63,20 @@ import type { WorkflowNodeKind } from "@/types/workflow/visual"
 import { PerfMiniMap } from "./minimap-perf"
 import { ViewportBreadcrumb } from "./viewport-breadcrumb"
 import { LassoOverlay } from "./lasso-overlay"
-import { AlignmentOverlay } from "./alignment-overlay"
+import { AlignmentGuidesLayer, type AlignmentGuidesHandle } from "./alignment-overlay"
 import { ConnectionPointerListener } from "./connection-overlay"
 import { PerfBoundary } from "@/lib/perf"
 import type { CanvasBackgroundVariant } from "./canvas-toolbar"
 import { WorkflowNodeComponent } from "./nodes/workflow-node"
 import { LoopContainerNode } from "./nodes/loop-container-node"
+import { GroupContainerNode } from "./nodes/group-container-node"
 import { pickContainerTarget } from "@/lib/workflow/editor/node-handles"
 import { SmartEdge } from "./edges/smart-edge"
 
 const nodeTypes: NodeTypes = {
   workflowNode: WorkflowNodeComponent as unknown as NodeTypes[string],
   loopContainer: LoopContainerNode as unknown as NodeTypes[string],
+  groupContainer: GroupContainerNode as unknown as NodeTypes[string],
 }
 
 const edgeTypes: EdgeTypes = {
@@ -110,6 +108,8 @@ export interface FlowCanvasProps {
   onPaneContextMenu: (event: React.MouseEvent | MouseEvent) => void
   onNodeContextMenu: (event: React.MouseEvent, node: { id: string }) => void
   onEdgeContextMenu: (event: React.MouseEvent, edge: { id: string }) => void
+  /** Explicit configure gesture — CanvasInner reveals the inspector. */
+  onNodeDoubleClick?: (event: React.MouseEvent, node: { id: string }) => void
   /**
    * Toolbars + empty-state, created by `CanvasInner`. Rendered inside the
    * canvas wrapper (so they stay positioned over the flow) but their element
@@ -135,10 +135,19 @@ export function FlowCanvas({
   onPaneContextMenu,
   onNodeContextMenu,
   onEdgeContextMenu,
+  onNodeDoubleClick,
   overlays,
 }: FlowCanvasProps) {
   const useStore = store
   const rf = useReactFlow()
+  // Keep a ref to the React Flow instance so callbacks can read
+  // `screenToFlowPosition` without taking `rf` as a dependency — the prod
+  // instance is stable, but keeping it out of deps preserves stable callback
+  // identities (which React Flow relies on to avoid re-attaching listeners).
+  const rfRef = useRef(rf)
+  useEffect(() => {
+    rfRef.current = rf
+  }, [rf])
   const tConnection = useTranslations("workflows.editor.connection")
 
   // The ONLY per-frame subscription in the editor. `setNodes` replaces these
@@ -178,8 +187,10 @@ export function FlowCanvas({
   }, [rf, viewport])
 
   // Alignment guides — populated by `onNodeDrag` while a node is moving,
-  // cleared on drag stop so the overlay doesn't linger.
-  const [alignmentGuides, setAlignmentGuides] = useState<GuidesResult | null>(null)
+  // cleared on drag stop so the overlay doesn't linger. Held in a self-contained
+  // layer (driven imperatively via this ref) so the ~60×/s guide updates
+  // re-render ONLY the overlay, never this component or the `<ReactFlow>` tree.
+  const guidesRef = useRef<AlignmentGuidesHandle | null>(null)
   // Track whether the user is actively panning/zooming the viewport so the
   // minimap can drop to its flat-colour degrade path (same as node-drag).
   const [isMovingViewport, setIsMovingViewport] = useState(false)
@@ -216,7 +227,9 @@ export function FlowCanvas({
   const onConnect = useCallback(
     (connection: Connection) => {
       const s = useStore.getState()
-      const result = validateConnection(connection, s.nodes, s.edges)
+      const result = validateConnection(connection, s.nodes, s.edges, {
+        errorPolicy: s.baseWorkflow.settings.errorPolicy,
+      })
       if (!result.valid) {
         toast.error(tConnection(result.reasonKey))
         return
@@ -238,7 +251,9 @@ export function FlowCanvas({
   const isValidConnection = useCallback(
     (connection: Connection | { source: string | null; target: string | null }) => {
       const s = useStore.getState()
-      return validateConnection(connection, s.nodes, s.edges).valid
+      return validateConnection(connection, s.nodes, s.edges, {
+        errorPolicy: s.baseWorkflow.settings.errorPolicy,
+      }).valid
     },
     [useStore]
   )
@@ -256,7 +271,25 @@ export function FlowCanvas({
     [useStore]
   )
   const handleConnectEnd = useCallback<OnConnectEnd>(
-    () => useStore.getState().endConnection(),
+    (event, connectionState) => {
+      const conn = useStore.getState().connectionState
+      useStore.getState().endConnection()
+      // Landed on a valid target handle → React Flow's onConnect makes the edge.
+      if (connectionState?.isValid) return
+      if (!conn) return
+      // Released on the empty pane → stage a "create node from this handle"
+      // request; the canvas opens the palette and wires the edge on pick (C2).
+      const point =
+        "changedTouches" in event && event.changedTouches.length > 0
+          ? { x: event.changedTouches[0].clientX, y: event.changedTouches[0].clientY }
+          : { x: (event as MouseEvent).clientX, y: (event as MouseEvent).clientY }
+      const dropPos = rfRef.current.screenToFlowPosition(point)
+      useStore.getState().setPendingConnectFrom({
+        sourceId: conn.sourceId,
+        sourceHandle: conn.sourceHandle,
+        dropPos,
+      })
+    },
     [useStore]
   )
 
@@ -280,7 +313,7 @@ export function FlowCanvas({
     (dragged: RectLike) => {
       const index = drag.getAlignmentIndex()
       if (!index) return
-      setAlignmentGuides(computeAlignmentGuides(dragged, index))
+      guidesRef.current?.setGuides(computeAlignmentGuides(dragged, index))
     },
     [drag]
   )
@@ -354,20 +387,20 @@ export function FlowCanvas({
       dragThrottled.cancel()
       drag.release()
       dragRectRef.current = null
-      setAlignmentGuides(null)
+      guidesRef.current?.setGuides(null)
       useStore.getState().setIsDraggingAny(false)
 
-      // Loop-container drop: re-parent a node dropped over a container's
-      // body. (Dragging OUT is intentionally not a drag gesture — children
-      // carry `extent: 'parent'` so they can't leave by accident; use the
-      // node context menu / `setNodeParent(id, null)`.)
+      // Container drop: re-parent a node dropped over a loop OR group
+      // container's body. (Dragging OUT is intentionally not a drag gesture —
+      // children carry `extent: 'parent'` so they can't leave by accident;
+      // use the node context menu / `setNodeParent(id, null)`.)
       if (!draggedNode) return
       const s = useStore.getState()
       const dropped = rf.getNode(draggedNode.id)
       if (!dropped) return
       const intersecting = rf
         .getIntersectingNodes(dropped)
-        .filter((n) => n.type === "loopContainer")
+        .filter((n) => n.type === "loopContainer" || n.type === "groupContainer")
         .map((n) => ({
           id: n.id,
           width: (n.measured?.width as number | undefined) ?? n.width,
@@ -434,6 +467,7 @@ export function FlowCanvas({
           onPaneContextMenu={onPaneContextMenu}
           onNodeContextMenu={onNodeContextMenu}
           onEdgeContextMenu={onEdgeContextMenu}
+          onNodeDoubleClick={onNodeDoubleClick}
           onInit={setReactFlowInstance}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
@@ -469,12 +503,13 @@ export function FlowCanvas({
           ) : null}
           {perfTier.flags.showMinimap && minimapVisible ? (
             <PerfMiniMap
-              degraded={isDraggingAny || isMovingViewport || perfTier.flags.minimapDegraded}
+              frozen={isDraggingAny}
+              degraded={isMovingViewport || perfTier.flags.minimapDegraded}
               nodeColor={minimapNodeColor}
               className="!rounded-md !border !bg-background"
             />
           ) : null}
-          <AlignmentOverlay guides={alignmentGuides} />
+          <AlignmentGuidesLayer ref={guidesRef} />
         </ReactFlow>
       </PerfBoundary>
       {overlays}

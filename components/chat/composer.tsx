@@ -19,13 +19,21 @@ import {
   usePromptInputAttachments,
   usePromptInputController,
 } from "@/components/ai-elements/prompt-input"
-import type { ChatStatus as PromptStatus } from "ai"
-import { ArrowUpIcon, FolderIcon, Loader2Icon, PaperclipIcon, SquareIcon } from "lucide-react"
+import type { ChatStatus as PromptStatus, UIMessage } from "ai"
+import {
+  ArrowUpIcon,
+  FileTextIcon,
+  Loader2Icon,
+  SparklesIcon,
+  SquareIcon,
+  XIcon,
+} from "lucide-react"
 import {
   ChangeEvent,
   ClipboardEvent as ReactClipboardEvent,
   forwardRef,
   KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
   type Ref,
   useCallback,
   useEffect,
@@ -35,13 +43,41 @@ import {
   useState,
 } from "react"
 import { useTranslations } from "next-intl"
-import { useChatStore } from "@/stores/chat"
+import { useChatStore, type ChatStatus as StoreChatStatus } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { search, formatSearchResultsForLLM } from "@/lib/search/search-service"
-import type { SendContent, SendContentBlock, ChatSession, Character } from "@/lib/claude/types"
+import { formatContextSelectionsForLLM } from "@/lib/artifacts/format-selection-context"
+import { formatReviewReceiptsForLLM } from "@/lib/artifacts/format-review-receipt"
+import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import type { SendContent, ChatSession, Character } from "@cognia/agent-config-types"
+import {
+  buildSendContent,
+  INLINE_TOKEN_CEILING,
+  type AttachmentManifestEntry,
+  type ExtractedAttachment,
+  type SubmittedFile,
+} from "@/lib/chat/attachments/dispatch"
+import { prepareComposerAttachments } from "@/lib/chat/attachments/prepare"
+import { applyOrder } from "@/lib/chat/attachments/reorder"
+import { StagedAttachmentsProvider, useStagedAttachments } from "./composer/staged-attachment-store"
+import { buildLinkContextBlocks, mergeContextBlocks, removeHttpUrl } from "@/lib/chat/link-context"
+import { collectDroppedFiles, MAX_DROPPED_DIR_FILES } from "@/lib/chat/drop-entries"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { getDocumentAcceptExtensions } from "@cognia/document/support-matrix"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
+import { collapsePaste, expandPastes, findPastePlaceholders } from "@/lib/paste-collapse"
 import { usePlatform } from "@/hooks/use-platform"
+import { useElementHeight } from "@/hooks/use-element-height"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -49,11 +85,21 @@ import {
   detectTrigger,
   spliceToken,
   type ComposerTrigger,
+  type MentionableWorkflowElement,
   type MentionMode,
 } from "./composer-trigger"
 import { ComposerPopover, type ComposerPopoverHandle, type PopoverItem } from "./composer-popover"
+import { getMentionPickHandler } from "@/lib/chat/mentions/pick-registry"
+import { useMentionableSubagents } from "@/hooks/chat/use-mentionable-subagents"
+import { useMarkdownChatAgents } from "@/hooks/chat/use-markdown-chat-agents"
+import { useMentionableSkills } from "@/hooks/chat/use-mentionable-skills"
+import { useMentionablePresets } from "@/hooks/chat/use-mentionable-presets"
+import { usePluginSlashCommands } from "@/hooks/chat/use-plugin-slash-commands"
+import { useApplyPreset } from "@/hooks/chat/use-apply-preset"
+import { useEffectiveCwd } from "@/hooks/chat/use-effective-cwd"
 import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
-import { ReferenceChips } from "./reference-chips"
+import { ContextChipBar } from "./composer/context-chip-bar"
+import { ComposerAttachMenu } from "./composer/attach-menu"
 import { nextPermissionMode } from "./permission-mode-indicator"
 import { useResolvedConnectorMode } from "./use-resolved-connector-mode"
 import { enqueueOutbound } from "@/lib/db/outbound-jobs"
@@ -79,38 +125,88 @@ import {
   type SlashContext,
 } from "@/lib/slash-commands/builtin"
 import { loadCustomSlashCommands } from "@/lib/slash-commands/custom"
+import {
+  DIAGNOSTICS_PART_TYPE,
+  type SystemMessageBlock,
+  type SlashCommandResultBlock,
+} from "@/lib/slash-commands/system-blocks"
+import { parseSegments, splitMentionSegments } from "@/lib/slash-commands/parse-segments"
+import { pillDeleteRange } from "./composer-pill-delete"
+import { runSegments } from "@/lib/slash-commands/run-segments"
+import { useComposerCommandStore } from "@/stores/chat/composer-command-store"
+import { ComposerChipOverlay, TEXTAREA_TYPOGRAPHY } from "./composer-chip-overlay"
+import { ComposerGhostText } from "./composer/composer-ghost-text"
+import { MobileGhostAccept } from "./composer/mobile-ghost-accept"
+import { useComposerGhostText } from "@/hooks/chat/use-composer-ghost-text"
+import { useInputHistory } from "./composer/hooks/use-input-history"
+import { CommandParamForm } from "./composer/command-param-form"
 import { executeShell, formatShellResult } from "@/lib/shell/exec"
+import { runInTerminalDock } from "@/lib/terminal/run-in-dock"
+import { detectInteractiveCommand } from "@/lib/claude/permissions/interactive-command"
+import { isTauri } from "@/lib/tauri"
 import { appendMemory, type MemoryScope } from "@/lib/files/memory"
 import { useUpdateSession } from "@/lib/data-hooks/context"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
+import { impact, notify } from "@/lib/capacitor/haptics"
+import { hideKeyboard } from "@/lib/capacitor/keyboard"
 import { MentionPopover } from "@/components/mobile/chat/mention-popover"
+import {
+  ComposerPlusMenu,
+  attachmentToFiles,
+  type ComposerAttachment,
+} from "@/components/mobile/chat/composer-plus-menu"
 import {
   clearDraft as clearChatDraft,
   getDraft as getChatDraft,
   setDraftDebounced as setChatDraftDebounced,
+  type DraftAttachmentMeta,
 } from "@/lib/db/chat-drafts"
-import { AttachmentPreview } from "./composer/attachment-preview"
+import { draftAttachmentsFromFiles } from "@/lib/chat/draft-attachments"
+import { mergeComposerIntentPrompt } from "@/lib/chat/merge-composer-intent"
+import { useComposerIntentStore } from "@/stores/chat/composer-intent-store"
+import { DraftRestoredAttachments } from "./composer/draft-restored-attachments"
 import { OcrResultBubble } from "./composer/ocr-result-bubble"
 import { applyComposerOcr } from "./composer/ocr-attachment-action"
 import { useOcr } from "@/hooks/use-ocr"
 import { buildOcrDeps } from "@/lib/ocr/deps"
 import type { OcrResult } from "@/types/ocr"
+import { AnimatePresence, motion } from "motion/react"
+import { mobileTransition, useReducedMotionTransition } from "@/lib/ui/motion"
 import { BottomToolbar } from "./composer/bottom-toolbar"
+import { Collapse } from "./composer/collapse"
 import { SkillChipRow } from "./composer/skill-chip-row"
 import { GoalStatusPill } from "@/components/goal/goal-status-pill"
+import { PlanModeBanner } from "@/components/chat/plan-mode-banner"
+import { LoopStatusPill } from "@/components/loop/loop-status-pill"
 import { CharCounter } from "./composer/char-counter"
 import { DragOverlay } from "./composer/drag-overlay"
 import { HelperHints } from "./composer/helper-hints"
-import { ScreenshotButton } from "./composer/screenshot-button"
 import { VoiceControls } from "./composer/voice-controls"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { InboxComposerActionsHost } from "@/components/inbox/inbox-composer-actions-host"
+import { CannedResponsePicker } from "@/components/inbox/canned-response-picker"
+import { EnhanceButton } from "./composer/enhance-button"
+import { WebSearchToggle } from "./composer/web-search-toggle"
+import { SkillPicker } from "./skill-picker"
 
 interface Props {
   session?: ChatSession | null
+  /**
+   * Status of the pane that owns this composer. Multi-pane chat passes this
+   * explicitly so a background stream does not inherit the focused pane's
+   * Send/Stop state.
+   */
+  status?: StoreChatStatus
   onStartNewSession: () => void | Promise<void>
   onOpenSettings: (tab: SettingsTab) => void
-  onSend: (content: SendContent) => void | Promise<void>
+  /**
+   * Dispatch the turn. `manifest` describes the leading attachment blocks so the
+   * transcript can render file cards instead of raw extracted text.
+   */
+  onSend: (
+    content: SendContent,
+    manifest?: readonly AttachmentManifestEntry[]
+  ) => void | Promise<void>
   onStop: () => void | Promise<void>
   disabled?: boolean
   /**
@@ -135,6 +231,24 @@ interface Props {
    * was a two-tap affair. Desktop callers leave this undefined.
    */
   mobileMentionMembers?: readonly Character[]
+  /**
+   * Workflow-editor copilot integration. When set, `@` (and `@node:` /
+   * `@edge:`) open a picker over the workflow's graph elements; picking one
+   * stages a reference chip. Its presence also flips `@` mode to `"workflow"`.
+   * Undefined for every non-workflow composer.
+   */
+  workflowMention?: ComposerWorkflowMention
+}
+
+/** Copilot ⇄ workflow-editor wiring passed down from the workflow chat tab. */
+export interface ComposerWorkflowMention {
+  /** The workflow's `@`-mentionable nodes + edges (from the editor store). */
+  elements: readonly MentionableWorkflowElement[]
+  /**
+   * Transiently highlight these node ids on the canvas — driven by the picker's
+   * active row. Called with `[]` when the highlight clears.
+   */
+  onHighlight?: (ids: string[]) => void
 }
 
 /**
@@ -149,52 +263,23 @@ export interface ComposerHandle {
   focus: () => void
 }
 
-const SUPPORTED_IMAGE_PREFIX = "image/"
 const MAX_FILES = 6
 const MAX_FILE_SIZE = 10 * 1024 * 1024
+// Max composer textarea height before it scrolls. Single source of truth so the
+// CSS cap (`maxHeight`) and the JS auto-resize fallback can't drift apart. The
+// px form assumes the app's default 16px root (the JS path only runs on old
+// WebViews lacking `field-sizing`).
+const COMPOSER_MAX_HEIGHT_REM = 12
+const COMPOSER_MAX_HEIGHT_PX = COMPOSER_MAX_HEIGHT_REM * 16
 
 // --- Helpers ---------------------------------------------------------------
 
-interface SubmittedFile {
-  url?: string
-  mediaType?: string
-  filename?: string
-}
-
-function buildSendContent(
-  text: string,
-  files: SubmittedFile[]
-): { content: SendContent; rejected: number } {
-  const trimmed = text.trim()
-  const imageBlocks: SendContentBlock[] = []
-  let rejected = 0
-
-  for (const f of files) {
-    const url = f.url ?? ""
-    const media = f.mediaType ?? ""
-    if (!media.startsWith(SUPPORTED_IMAGE_PREFIX) || !url.startsWith("data:")) {
-      rejected++
-      continue
-    }
-    const commaIdx = url.indexOf(",")
-    if (commaIdx < 0) {
-      rejected++
-      continue
-    }
-    const data = url.slice(commaIdx + 1)
-    imageBlocks.push({
-      type: "image",
-      source: { type: "base64", media_type: media, data },
-    })
-  }
-
-  if (imageBlocks.length === 0) {
-    return { content: trimmed, rejected }
-  }
-  const blocks: SendContentBlock[] = [...imageBlocks]
-  if (trimmed) blocks.push({ type: "text", text: trimmed })
-  return { content: blocks, rejected }
-}
+// Accept images plus every text/binary document type lib/document can extract
+// (pdf, docx, xlsx, pptx, csv, md, code, …). A folder picked from the attach
+// menu takes the @-mention reference path instead (absolute path, read on
+// demand); only a *dropped* folder is flattened into this attachment input,
+// since a drop carries no absolute path.
+const ATTACHMENT_ACCEPT = ["image/*", ...getDocumentAcceptExtensions("chat")].join(",")
 
 const blobUrlToDataUrl = async (url: string): Promise<string | null> => {
   try {
@@ -217,7 +302,21 @@ interface InnerProps {
   session?: ChatSession | null
   status: PromptStatus
   disabled?: boolean
-  onSubmit: (text: string, files: SubmittedFile[]) => void | Promise<void>
+  /**
+   * Submit a turn. Resolves `true` when the turn was handled (the input should
+   * be cleared) and `false` when the user cancelled (e.g. declined the oversize
+   * confirmation) so the composer keeps the draft + attachments intact.
+   *
+   * `precomputed` carries the staging-time extraction results (see
+   * `staged-attachment-store`). It is threaded through the callback rather than
+   * read from a hook because `handleSubmit` lives OUTSIDE `PromptInputProvider`
+   * and so cannot reach the store.
+   */
+  onSubmit: (
+    text: string,
+    files: SubmittedFile[],
+    precomputed?: ReadonlyMap<string, ExtractedAttachment>
+  ) => boolean | Promise<boolean>
   onStop: () => void | Promise<void>
   onCommand: (cmd: SlashCommand, args: string) => Promise<boolean>
   onSubmitMemory: (scope: MemoryScope, text: string) => Promise<boolean>
@@ -228,6 +327,10 @@ interface InnerProps {
   mentionables?: readonly MentionTarget[]
   placeholder?: string
   mobileMentionMembers?: readonly Character[]
+  workflowMention?: ComposerWorkflowMention
+  /** Compact mode embeds the model and agent controls into the input surface. */
+  compactLayout?: boolean
+  toolbar?: ReactNode
 }
 
 function ComposerInner(props: InnerProps) {
@@ -235,6 +338,7 @@ function ComposerInner(props: InnerProps) {
   const tAttach = useTranslations("chat.composer.attachments")
   const tCommands = useTranslations("chat.composer.commands")
   const tMemory = useTranslations("chat.composer.memory")
+  const tSkill = useTranslations("chat.composer.skills")
   const platform = usePlatform()
   const isDesktop = platform === "tauri"
   // Capacitor native shell. Mobile gets a Claude-style vertical layout
@@ -242,20 +346,39 @@ function ComposerInner(props: InnerProps) {
   // width; web/desktop keep the container-query responsive layout below.
   const isMobile = platform === "mobile"
   const hasPendingDrafts = (props.pendingDraftCount ?? 0) > 0
+  // Non-LLM composer behavior toggles (AppSettings.composerBehavior). Each
+  // defaults ON via `!== false` so an absent block preserves prior behavior.
+  const composerBehavior = useSettingsStore((s) => s.settings?.composerBehavior)
+  const compactLayout = props.compactLayout === true
+  const sendOnEnter = composerBehavior?.sendOnEnter !== false
+  const clearAfterSendEnabled = composerBehavior?.clearAfterSend !== false
+  const inputHistoryRecall = composerBehavior?.inputHistoryRecall !== false
+  const persistDrafts = composerBehavior?.persistDrafts !== false
   const controller = usePromptInputController()
   const attachments = usePromptInputAttachments()
+  // Extraction results / chip order / OCR opt-in for the staged attachments.
+  const staged = useStagedAttachments()
   const ocr = useOcr(() => buildOcrDeps())
   const [ocrBubbleOpen, setOcrBubbleOpen] = useState(false)
   const [ocrBubbleResult, setOcrBubbleResult] = useState<OcrResult | null>(null)
   const [ocrBubbleImageSrc, setOcrBubbleImageSrc] = useState<string | null>(null)
+  const capabilityMenu =
+    props.session?.kind === "workflow-editor" ? null : (
+      <ComposerCapabilityMenu
+        session={props.session}
+        status={props.status}
+        disabled={props.disabled}
+      />
+    )
 
-  // Composer attachment OCR: an image/PDF attachment's hover menu offers
-  // "extract text to input" (appends plain text to the draft) or "view result"
-  // (opens the per-page sheet). The attachment already holds a blob URL, so we
-  // resolve it to a Blob and hand a `blob` source straight to `extract()` — no
-  // attachment-id resolver needed.
-  const handleOcrSelect = useCallback(
-    async (action: "extract-to-input" | "view-result", attachmentId: string) => {
+  // Composer attachment OCR. It used to live on a hover menu on the chip and
+  // append text straight into the draft — which silently doubled the payload,
+  // because the image itself stayed attached and both went to the model. OCR is
+  // now one layer of the attachment preview panel's "model view": the text is
+  // stored ON the staged attachment with an explicit opt-in, so the token badge
+  // reflects the real cost before the user commits to it.
+  const runComposerOcr = useCallback(
+    async (attachmentId: string, action: "extract-to-input" | "view-result") => {
       const file = attachments.files.find((f) => f.id === attachmentId)
       if (!file?.url) return
       let blob: Blob
@@ -272,19 +395,53 @@ function ComposerInner(props: InnerProps) {
         getInput: () => controller.textInput.value,
         setInput: (value) => controller.textInput.setInput(value),
         showResult: (result) => {
+          // Panel gets the flat text (that is what would be sent); the per-page
+          // result stays available behind the panel's "details" action so the
+          // richer Live-Text sheet doesn't become unreachable.
+          staged.setOcrText(attachmentId, result.combinedText)
           setOcrBubbleResult(result)
           setOcrBubbleImageSrc(
             (file.mediaType ?? "").startsWith("image/") ? (file.url ?? null) : null
           )
-          setOcrBubbleOpen(true)
         },
       })
     },
-    [attachments, ocr, controller.textInput]
+    [attachments, ocr, controller.textInput, staged]
+  )
+  const handleRunOcrForPanel = useCallback(
+    (attachmentId: string) => runComposerOcr(attachmentId, "view-result"),
+    [runComposerOcr]
+  )
+  /** Second OCR route, kept from the old chip menu: text straight into the draft. */
+  const handleExtractOcrToInput = useCallback(
+    (attachmentId: string) => runComposerOcr(attachmentId, "extract-to-input"),
+    [runComposerOcr]
   )
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const attachmentPrepareCountRef = useRef(0)
+  const [attachmentPrepareCount, setAttachmentPrepareCount] = useState(0)
+  const isPreparingAttachments = attachmentPrepareCount > 0
+  const attachmentFileCountRef = useRef(attachments.files.length)
+  useEffect(() => {
+    attachmentFileCountRef.current = attachments.files.length
+  }, [attachments.files])
+  // Send protection: the chat store only flips to "streaming" once the dispatch
+  // pipeline reaches `setSessionStatus`, leaving a window after the click where
+  // the button would still read as "send". `isSending` is set synchronously the
+  // instant a turn is dispatched so the button shows the running state
+  // immediately and a second submit (a fast Enter / double-click) is rejected.
+  // The ref is the synchronous re-entrancy guard; the state drives the render.
+  const [isSending, setIsSending] = useState(false)
+  const isSendingRef = useRef(false)
+  const chipOverlayRef = useRef<HTMLDivElement>(null)
+  const ghostOverlayRef = useRef<HTMLDivElement>(null)
+  const ghost = useComposerGhostText(props.session)
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null)
+  // Measured composer height — feeds the mobile @-mention popover so it floats
+  // exactly above the composer instead of a hardcoded guess (which broke once
+  // the composer grew with attachments / goal·loop pills / multi-line drafts).
+  const composerHeight = useElementHeight(containerEl)
   const popoverRef = useRef<ComposerPopoverHandle | null>(null)
 
   const [caret, setCaret] = useState(0)
@@ -293,16 +450,65 @@ function ComposerInner(props: InnerProps) {
     kind: string
   } | null>(null)
   const [customCommands, setCustomCommands] = useState<SlashCommand[]>([])
+  // When a picked command declares `params`, we open a guided form instead of
+  // inserting raw text. The captured token range tells us where to splice the
+  // built `/command <args>` chip back in.
+  const [paramForm, setParamForm] = useState<{
+    command: SlashCommand
+    tokenStart: number
+    tokenEnd: number
+  } | null>(null)
   const [isComposing, setIsComposing] = useState(false)
+  // Restored draft attachments whose binary did NOT survive (evicted by the
+  // draft quota, or saved before binaries were persisted at all). Declared here
+  // so `handleSend`'s clear path can reset it. Everything else is re-staged as
+  // a real attachment; these are the leftovers that surface as "re-attach"
+  // reminder chips above the input.
+  const [restoredAttachments, setRestoredAttachments] = useState<DraftAttachmentMeta[]>([])
   const [dragDepth, setDragDepth] = useState(0)
+  // Oversized text pastes are folded into a `[Pasted N lines #id]` placeholder
+  // (mirrors the CLI's paste-collapse): the full body is held aside, keyed by
+  // its placeholder, and re-expanded at send time. Removable chips above the
+  // textarea show what was folded. `pasteSeq` keeps ids stable + unique.
+  const [pastedBlocks, setPastedBlocks] = useState<Record<string, string>>({})
+  const pasteSeq = useRef(0)
   const isDragging = dragDepth > 0
 
   const setPermissionMode = useChatStore((s) => s.setPermissionMode)
   const permissionMode = useChatStore((s) => s.permissionMode)
   const addReferencedPath = useChatStore((s) => s.addReferencedPath)
   const updateSession = useUpdateSession()
-  const cwd = props.session?.workingDir ?? null
+  // Effective cwd (session override → workspace root → character → default) —
+  // NOT the raw session.workingDir, so `@` file refs, custom slash commands
+  // and the footer chip agree with what a send actually runs in.
+  const cwd = useEffectiveCwd(props.session)
   const sessionId = props.session?.id ?? null
+
+  // `@` mode resolution. Callers may set `mentionMode` explicitly (team chat →
+  // "agents", etc.). Otherwise a DIRECT chat defaults to the combined panel
+  // (subagents + files), so every general-chat composer gets `@agent` without
+  // each call site opting in; non-direct composers keep the file picker.
+  const resolvedMentionMode: MentionMode =
+    props.mentionMode ??
+    (props.workflowMention ? "workflow" : props.session?.kind === "direct" ? "combined" : "files")
+  const isCombinedMention = resolvedMentionMode === "combined"
+  // Reactive subagent list for the combined panel (no-op cost otherwise). The
+  // built-in/plugin/template subagents union with on-disk markdown agents
+  // (`.cognia/agents/*.md`) so both surface in the `@` "Agents" section.
+  const mentionableSubagents = useMentionableSubagents()
+  const markdownAgents = useMarkdownChatAgents(cwd, isCombinedMention)
+  const chatAgents = useMemo(() => {
+    if (!isCombinedMention) return undefined
+    if (markdownAgents.length === 0) return mentionableSubagents
+    // Dedupe by id; the reactive (built-in/plugin/template) list wins so a
+    // markdown file can't shadow a registered subagent's display metadata.
+    const seen = new Set(mentionableSubagents.map((t) => t.id))
+    return [...mentionableSubagents, ...markdownAgents.filter((t) => !seen.has(t.id))]
+  }, [isCombinedMention, mentionableSubagents, markdownAgents])
+  // `@skill:` / `@preset:` namespaced mention sources (general chat only).
+  const chatSkills = useMentionableSkills(isCombinedMention)
+  const chatPresets = useMentionablePresets(isCombinedMention)
+  const applyPreset = useApplyPreset()
 
   // --- Per-cwd custom slash commands ------------------------------------
   useEffect(() => {
@@ -364,14 +570,55 @@ function ComposerInner(props: InnerProps) {
     })
   }, [permissionMode, props.session, updateSession])
 
+  // Plugin-contributed slash commands (registered in the unified registry but
+  // historically never surfaced in the chat `/` picker). Reactive: a plugin
+  // enabling/disabling adds/removes its commands live.
+  const pluginCommands = usePluginSlashCommands()
+
   const slashCommands = useMemo(
-    () => [...BUILTIN_SLASH_COMMANDS, ...customCommands].filter((c) => !c.hiddenFromPicker),
-    [customCommands]
+    () =>
+      [...BUILTIN_SLASH_COMMANDS, ...customCommands, ...pluginCommands].filter(
+        (c) => !c.hiddenFromPicker
+      ),
+    [customCommands, pluginCommands]
   )
+
+  // Name → command map for submit-time multi-command dispatch. Built from the
+  // UNFILTERED list (includes `hiddenFromPicker` commands) so a typed command
+  // still resolves even when it's not shown in the picker.
+  const commandMap = useMemo(
+    () =>
+      new Map(
+        [...BUILTIN_SLASH_COMMANDS, ...customCommands, ...pluginCommands].map((c) => [c.name, c])
+      ),
+    [customCommands, pluginCommands]
+  )
+
+  // Segment the live input for the submit-time command pipeline (`runSegments`)
+  // and the `hasCommand` check. NO mentions here — `runSegments` expects the
+  // plain command/text view.
+  const segments = useMemo(
+    () => parseSegments(controller.textInput.value, (name) => commandMap.has(name)),
+    [controller.textInput.value, commandMap]
+  )
+
+  // The chip overlay's view: derive `@mention` pills from the already-parsed
+  // `segments` (commands pass through, only text is sub-split) so we don't run a
+  // second full tokenizer pass over the input on every keystroke.
+  const overlaySegments = useMemo(() => splitMentionSegments(segments), [segments])
+
+  // Recent / pinned slash commands for the popover's empty-query view.
+  const recentCommands = useComposerCommandStore((s) => s.recentCommands)
+  const pinnedCommands = useComposerCommandStore((s) => s.pinnedCommands)
+  const noteCommandUsed = useComposerCommandStore((s) => s.noteCommandUsed)
+  const togglePinnedCommand = useComposerCommandStore((s) => s.togglePin)
+
+  // Shell-style ↑/↓ recall of previously sent messages for this session.
+  const history = useInputHistory(sessionId)
 
   const trigger = useMemo<ComposerTrigger | null>(() => {
     const tg = detectTrigger(controller.textInput.value, caret, {
-      mentionMode: props.mentionMode,
+      mentionMode: resolvedMentionMode,
     })
     if (!tg) return null
     if (
@@ -382,18 +629,18 @@ function ComposerInner(props: InnerProps) {
       return null
     }
     return tg
-  }, [controller.textInput.value, caret, popoverDismissed, props.mentionMode])
+  }, [controller.textInput.value, caret, popoverDismissed, resolvedMentionMode])
 
   useEffect(() => {
     if (!popoverDismissed) return
     const tg = detectTrigger(controller.textInput.value, caret, {
-      mentionMode: props.mentionMode,
+      mentionMode: resolvedMentionMode,
     })
     if (!tg || tg.kind !== popoverDismissed.kind || tg.tokenStart !== popoverDismissed.tokenStart) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setPopoverDismissed(null)
     }
-  }, [controller.textInput.value, caret, popoverDismissed, props.mentionMode])
+  }, [controller.textInput.value, caret, popoverDismissed, resolvedMentionMode])
 
   const dismissPopover = useCallback(() => {
     if (trigger) {
@@ -412,6 +659,11 @@ function ComposerInner(props: InnerProps) {
       const cur = controller.textInput.value
       const result = spliceToken(cur, trigger.tokenStart, trigger.tokenEnd, replacement)
       controller.textInput.setInput(result.value)
+      // Keep the caret STATE in step with the programmatic move (the DOM
+      // selection is set in rAF below, but setSelectionRange does not fire a
+      // `select` event, so trigger detection / ghost suppression would read a
+      // stale caret without this).
+      setCaret(result.caret)
       requestAnimationFrame(() => {
         const ta2 = textareaRef.current
         if (ta2) {
@@ -424,51 +676,81 @@ function ComposerInner(props: InnerProps) {
     [trigger, controller.textInput, dismissPopover]
   )
 
+  // Delete the active trigger token outright (no replacement, no trailing
+  // space) — used by the `@skill:` / `@preset:` picks, which act on the
+  // session config rather than inserting text.
+  const removeTriggerToken = useCallback(() => {
+    if (!trigger) return
+    const cur = controller.textInput.value
+    const before = cur.slice(0, trigger.tokenStart)
+    const after = cur.slice(trigger.tokenEnd)
+    const next = before + after
+    controller.textInput.setInput(next)
+    setCaret(before.length)
+    requestAnimationFrame(() => {
+      const ta = textareaRef.current
+      if (ta) {
+        ta.setSelectionRange(before.length, before.length)
+        ta.focus()
+      }
+    })
+    dismissPopover()
+  }, [trigger, controller.textInput, dismissPopover])
+
+  // The picker's active row → a transient canvas highlight. Depend on the
+  // (memoized) onHighlight fn, not the whole props object, so this callback
+  // stays stable and the popover's highlight effect doesn't re-fire per render.
+  const workflowOnHighlight = props.workflowMention?.onHighlight
+  const handleHighlightElement = useCallback(
+    (element: MentionableWorkflowElement | null) => {
+      workflowOnHighlight?.(element ? [element.id] : [])
+    },
+    [workflowOnHighlight]
+  )
+
   const onPickPopoverItem = useCallback(
     async (item: PopoverItem) => {
       if (!trigger) return
-      if (item.kind === "slash") {
+      if (item.kind === "slashArgument") {
+        const currentValue = controller.textInput.value
+        const result = spliceToken(currentValue, item.replaceStart, item.replaceEnd, item.value)
+        controller.textInput.setInput(result.value)
+        setCaret(result.caret)
+        requestAnimationFrame(() => {
+          const textarea = textareaRef.current
+          if (textarea) {
+            textarea.setSelectionRange(result.caret, result.caret)
+            textarea.focus()
+          }
+        })
+        dismissPopover()
+      } else if (item.kind === "slash") {
         const cmd = item.command
         if (cmd.disabled) {
           toast.info(tCommands("unavailable", { name: cmd.name }))
           return
         }
-        const args = trigger.query.replace(new RegExp(`^${cmd.name}\\s*`), "").trim()
-        const handled = await props.onCommand(cmd, args)
-        if (handled) {
-          if (cmd.handler) {
-            controller.textInput.clear()
-          } else if (cmd.template) {
-            const filled = applyTemplate(cmd.template, args)
-            controller.textInput.setInput(filled)
-            if (cmd.model || cmd.allowedTools || cmd.paths) {
-              useChatStore.getState().setPendingCommandOverrides({
-                model: cmd.model,
-                allowedTools: cmd.allowedTools,
-                paths: cmd.paths,
-              })
-            } else {
-              useChatStore.getState().setPendingCommandOverrides(null)
-            }
-            requestAnimationFrame(() => {
-              const ta2 = textareaRef.current
-              if (ta2) {
-                ta2.setSelectionRange(filled.length, filled.length)
-                ta2.focus()
-              }
-            })
-          }
+        // Commands with structured params open a guided form; defer insertion
+        // until the user confirms. Capture the token range to splice into.
+        if (cmd.params && cmd.params.length > 0) {
+          setParamForm({ command: cmd, tokenStart: trigger.tokenStart, tokenEnd: trigger.tokenEnd })
+          dismissPopover()
+          return
         }
-        dismissPopover()
-      } else if (item.kind === "file") {
-        const e = item.entry
-        addReferencedPath({
-          absolute: e.absolutePath,
-          relative: e.relPath,
-          isDir: e.isDir,
-        })
-        const replacement = `@${e.relPath}${e.isDir ? "/" : ""}`
-        insertReplacement(replacement)
+        // Don't run the command on pick — drop it into the composer so the user
+        // can review / append args and send it together with the rest of their
+        // message. Both action handlers and templates are expanded on submit by
+        // `runSegments` (see the submit handler), so the behavior is uniform:
+        // pick → stays in the box → Enter sends.
+        //
+        // Replace the whole typed `/<query>` token with `/<name>`. `trigger.query`
+        // is only the command-name fragment the user typed (the slash token ends
+        // at the first whitespace), so it must NOT be re-appended as args — doing
+        // so turned a fuzzy pick like "res" → /reset into "/reset res". Any real
+        // args typed after a space live outside [tokenStart, tokenEnd) and are
+        // preserved by spliceToken, which also adds the trailing space.
+        insertReplacement(`/${cmd.name}`)
+        noteCommandUsed(cmd.name)
       } else if (item.kind === "memory") {
         const text = trigger.query.trim()
         if (!text) {
@@ -478,9 +760,28 @@ function ComposerInner(props: InnerProps) {
         const ok = await props.onSubmitMemory(item.scope, text)
         if (ok) controller.textInput.clear()
         dismissPopover()
-      } else if (item.kind === "agent") {
-        const replacement = `@${item.target.name}`
-        insertReplacement(replacement)
+      } else {
+        // Mention-style picks (file / agent / subagent / skill / preset /
+        // wfElement) dispatch through the registry — adding a new mentionable
+        // kind is a `registerMentionPickHandler` call, not a composer edit.
+        const handler = getMentionPickHandler(item.kind)
+        if (handler) {
+          await handler.onPick(item, {
+            insertReplacement,
+            removeTriggerToken,
+            addReferencedPath,
+            toggleEphemeralSkill: (skillId) =>
+              useChatStore.getState().toggleEphemeralSkill(skillId),
+            addReferencedWorkflowElement: (el) =>
+              useChatStore.getState().addReferencedWorkflowElement(el),
+            applyPreset: (preset, session) => applyPreset(preset, session).then(() => {}),
+            session: props.session,
+            clearWorkflowHighlight: () => props.workflowMention?.onHighlight?.([]),
+            strings: {
+              skillEnabled: (name) => tSkill("enabled", { name }),
+            },
+          })
+        }
       }
     },
     [
@@ -488,41 +789,264 @@ function ComposerInner(props: InnerProps) {
       controller.textInput,
       addReferencedPath,
       insertReplacement,
+      removeTriggerToken,
+      applyPreset,
       props,
       dismissPopover,
+      noteCommandUsed,
       tCommands,
       tMemory,
+      tSkill,
     ]
   )
+
+  // Param-form confirm: splice `/command <args>` into the captured token range
+  // as a chip the user can review/send. Cancel just closes (leaving the typed
+  // partial command intact).
+  const handleParamFormSubmit = useCallback(
+    (args: string) => {
+      setParamForm((current) => {
+        if (!current) return null
+        const cur = controller.textInput.value
+        const replacement = `/${current.command.name}${args ? ` ${args}` : ""}`
+        const { value, caret } = spliceToken(cur, current.tokenStart, current.tokenEnd, replacement)
+        controller.textInput.setInput(value)
+        noteCommandUsed(current.command.name)
+        requestAnimationFrame(() => {
+          const ta = textareaRef.current
+          if (ta) {
+            ta.setSelectionRange(caret, caret)
+            ta.focus()
+          }
+        })
+        return null
+      })
+    },
+    [controller.textInput, noteCommandUsed]
+  )
+
+  const handleParamFormCancel = useCallback(() => {
+    setParamForm(null)
+    textareaRef.current?.focus()
+  }, [])
 
   // --- Submit handler ----------------------------------------------------
   const submit = useCallback(async () => {
     const text = controller.textInput.value
     if (props.disabled) return
+    if (attachmentPrepareCountRef.current > 0) return
+    // Re-entrancy guard (send protection): reject a second dispatch while one is
+    // already in flight — covers the window between the click and the store
+    // flipping to "streaming", where a fast Enter could otherwise double-send.
+    if (isSendingRef.current) return
 
-    const filesToSend: SubmittedFile[] = await Promise.all(
-      attachments.files.map(async ({ id: _id, ...item }) => {
-        if (item.url?.startsWith("blob:")) {
-          const dataUrl = await blobUrlToDataUrl(item.url)
-          return { ...item, url: dataUrl ?? item.url }
-        }
-        return item
-      })
-    )
-
-    const empty = text.trim().length === 0 && filesToSend.length === 0
+    // Emptiness is decided from the synchronous attachment count (blob→data-url
+    // conversion below preserves count) so the guard can be armed BEFORE the
+    // first await, leaving no race for a concurrent submit to slip through.
+    const empty = text.trim().length === 0 && attachments.files.length === 0
     if (empty) return
 
-    await props.onSubmit(text, filesToSend)
-    controller.textInput.clear()
-    attachments.clear()
-    if (sessionId) {
-      void clearChatDraft(sessionId)
+    isSendingRef.current = true
+    setIsSending(true)
+
+    // Tactile confirmation for the most frequent chat action. The wrapper
+    // no-ops off the Capacitor shell, so this is safe unconditionally.
+    if (isMobile) void impact("light")
+
+    // Post-send focus policy: desktop refocuses the textarea for rapid
+    // follow-ups; mobile blurs it and collapses the soft keyboard so the
+    // streaming reply isn't hidden behind it (ChatGPT-app behavior).
+    const settleFocusAfterSend = () => {
+      if (isMobile) {
+        textareaRef.current?.blur()
+        void hideKeyboard()
+      } else {
+        textareaRef.current?.focus()
+      }
     }
-    textareaRef.current?.focus()
-  }, [controller.textInput, attachments, props, sessionId])
+
+    // Snapshot the attachments BEFORE the optimistic clear so the actual send
+    // still has them (and so a failed send can restore the composer). The chip
+    // order is the user's (drag-reordered) order, and the model must receive
+    // them in exactly that order — see `buildAttachmentBlocks`.
+    const snapshotFiles = applyOrder([...attachments.files], staged.order)
+    // `id` is RETAINED here (unlike before): it is the key `buildSendContent`
+    // uses to look each file up in the staging-time extraction cache.
+    const snapshotAttachmentInputs = snapshotFiles.map((item) => ({ ...item }))
+    // Snapshot the folded-paste bodies too: the optimistic clear wipes them, so
+    // the send (and a restore-on-failure) reads from this stable map.
+    const pasteMap = pastedBlocks
+
+    // ── Optimistic clear ───────────────────────────────────────────────────
+    // Natural chat UX: the box empties the instant you hit send — not after the
+    // whole turn resolves (`onSubmit` only settles once the send pipeline has
+    // run, which is why the text used to linger for the entire response). We
+    // snapshot first and restore on a rejected/failed send. `clearAfterSend`
+    // off keeps everything in place (the user resends/tweaks), so skip then.
+    let cleared = false
+    const clearInputOptimistically = () => {
+      if (!clearAfterSendEnabled || cleared) return
+      // Optimistically clear ONLY the text + folded-paste chips. Attachments are
+      // deliberately held back until the send is confirmed (`finalizeSend`):
+      // `attachments.clear()` revokes every staged blob URL, so clearing here
+      // would irrecoverably destroy the files on any rejected / cancelled /
+      // thrown send (e.g. declining the oversize dialog).
+      controller.textInput.clear()
+      setPastedBlocks({})
+      cleared = true
+    }
+    // Run only once a send is CONFIRMED successful: now it is safe to drop (and
+    // revoke) the staged attachments, the reminder chips, and the saved draft.
+    const finalizeSend = () => {
+      if (clearAfterSendEnabled) {
+        attachments.clear()
+        setRestoredAttachments([])
+        if (sessionId) void clearChatDraft(sessionId)
+      }
+      settleFocusAfterSend()
+    }
+    const restoreInputAfterFailure = () => {
+      if (!cleared) return
+      controller.textInput.setInput(text)
+      setPastedBlocks(pasteMap)
+      cleared = false
+      // Attachments were never cleared, so there is nothing to restore — the
+      // staged files are still live in the controller.
+    }
+    clearInputOptimistically()
+
+    try {
+      // Let any in-flight staging extraction land first, so the send reuses it
+      // instead of re-parsing the same document. Resolves synchronously when
+      // nothing is pending, which is the overwhelmingly common case.
+      await staged.whenSettled()
+      const precomputed = staged.precomputed
+      const filesToSend: SubmittedFile[] = await Promise.all(
+        snapshotAttachmentInputs.map(async (item) => {
+          // A file whose extraction is cached never needs its bytes again —
+          // skip the blob→data-URL round trip entirely.
+          if (precomputed.has(item.id)) return item
+          if (item.url?.startsWith("blob:")) {
+            const dataUrl = await blobUrlToDataUrl(item.url)
+            return { ...item, url: dataUrl ?? item.url }
+          }
+          return item
+        })
+      )
+
+      // Record the exact typed text for ↑/↓ recall (before any command stripping).
+      history.record(text)
+
+      // Multi-command: the live `segments` memo already split this input into
+      // ordered command / text segments. A `!shell` / `#memory` whole-message
+      // prefix is left to the outer handleSubmit (the parser ignores those). When
+      // the message contains one or more line-start `/commands`, run them in
+      // order: action handlers execute via `props.onCommand` (context-rich,
+      // self-toasting), template commands expand inline, and the leftover prose is
+      // what gets sent.
+      const hasCommand = segments.some((s) => s.kind === "command")
+      if (hasCommand) {
+        // Remember every runnable command sent (covers typed-not-picked ones).
+        // Skip disabled/coming-soon commands so they can't pollute Recent — the
+        // pick path already guards them before noteCommandUsed.
+        for (const seg of segments) {
+          if (seg.kind === "command" && !commandMap.get(seg.name)?.disabled) {
+            noteCommandUsed(seg.name)
+          }
+        }
+        const { outgoingText, overrides, ranAction } = await runSegments(segments, {
+          commandMap,
+          runAction: async (command, args) => {
+            await props.onCommand(command, args)
+          },
+          applyTemplate,
+        })
+        useChatStore.getState().setPendingCommandOverrides(overrides)
+        // Only send a turn when there is prose or attachments. An action-only
+        // batch (e.g. `/clear`) mutates client state and sends nothing — mirroring
+        // today's "action command clears the input, no turn" behavior.
+        let sent = true
+        if (outgoingText.length > 0 || filesToSend.length > 0) {
+          sent = await props.onSubmit(
+            expandPastes(outgoingText, pasteMap),
+            filesToSend,
+            precomputed
+          )
+        } else if (!ranAction) {
+          // Defensive: no prose, no files, no action — nothing was dispatched,
+          // so restore the optimistically-cleared input rather than lose it.
+          restoreInputAfterFailure()
+          return
+        }
+        if (sent) finalizeSend()
+        else {
+          restoreInputAfterFailure()
+          if (isMobile) void notify("error")
+        }
+        return
+      }
+
+      const sent = await props.onSubmit(expandPastes(text, pasteMap), filesToSend, precomputed)
+      if (sent) finalizeSend()
+      else {
+        restoreInputAfterFailure()
+        if (isMobile) void notify("error")
+      }
+    } catch (err) {
+      // A thrown send must not leave the user's text lost — restore the
+      // optimistically-cleared input and surface the failure (don't rethrow
+      // into the fire-and-forget click handler).
+      restoreInputAfterFailure()
+      if (isMobile) void notify("error")
+      loggers.chat.error("composer send failed", err)
+    } finally {
+      // Always release the guard. On a successful send the store has already
+      // flipped to "streaming" (so the button stays in stop state); on a
+      // rejected/aborted send it returns to the idle send state so the user can
+      // retry.
+      isSendingRef.current = false
+      setIsSending(false)
+    }
+  }, [
+    controller.textInput,
+    attachments,
+    staged,
+    props,
+    sessionId,
+    commandMap,
+    segments,
+    history,
+    clearAfterSendEnabled,
+    pastedBlocks,
+    noteCommandUsed,
+    isMobile,
+  ])
+
+  // Accept the inline ghost-text suggestion: write the completed value back
+  // into the textarea and park the caret at the end. Shared by the keyboard
+  // (Tab) path below and the mobile tap affordance (`MobileGhostAccept`), since
+  // touch devices have no Tab key. Returns false when there was nothing to
+  // accept so the Tab keystroke can fall through to its default behavior.
+  const acceptGhost = useCallback((): boolean => {
+    const next = ghost.accept()
+    if (next === null) return false
+    controller.textInput.setInput(next)
+    setCaret(next.length)
+    requestAnimationFrame(() => {
+      const ta = textareaRef.current
+      if (ta) {
+        ta.setSelectionRange(next.length, next.length)
+        ta.focus()
+      }
+    })
+    return true
+  }, [ghost, controller.textInput])
 
   // --- Textarea key handling --------------------------------------------
+  // Local handles so the key handler depends on the specific props it reads,
+  // not the whole `props` object (react-hooks/exhaustive-deps).
+  const turnStatus = props.status
+  const onStopTurn = props.onStop
   const onKeyDown = useCallback(
     (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
       // Shift+Tab cycles permission mode regardless of popover state.
@@ -532,13 +1056,21 @@ function ComposerInner(props: InnerProps) {
         setPermissionMode(next)
         return
       }
+      // While an IME composition is active, Enter / Arrow / Tab / Escape belong
+      // to the candidate window — let them fall through so picking a Chinese (or
+      // Japanese, etc.) candidate doesn't accidentally confirm/navigate the
+      // popover. `nativeEvent.isComposing` is authoritative for the keystroke
+      // that ends composition; the state flag is a belt-and-suspenders backup.
+      if (trigger && (isComposing || e.nativeEvent.isComposing)) {
+        return
+      }
       if (trigger) {
         if (e.key === "Escape") {
           e.preventDefault()
           dismissPopover()
           return
         }
-        if (e.key === "ArrowDown" || (e.key === "Tab" && !e.shiftKey && trigger.kind !== "bash")) {
+        if (e.key === "ArrowDown") {
           e.preventDefault()
           popoverRef.current?.navigate(1)
           return
@@ -546,6 +1078,13 @@ function ComposerInner(props: InnerProps) {
         if (e.key === "ArrowUp") {
           e.preventDefault()
           popoverRef.current?.navigate(-1)
+          return
+        }
+        // Tab selects the highlighted item. Bash mode has no list to confirm,
+        // so Tab falls through there to default textarea behavior.
+        if (e.key === "Tab" && !e.shiftKey && trigger.kind !== "bash") {
+          e.preventDefault()
+          popoverRef.current?.confirm()
           return
         }
         if (e.key === "Enter" && !e.shiftKey) {
@@ -561,21 +1100,138 @@ function ComposerInner(props: InnerProps) {
           }
         }
       }
-      // Regular Enter (no modifiers, not composing) → submit.
-      if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !isComposing) {
+      // Atomic pill delete: a Backspace/Delete next to an already-inserted
+      // `/command` or `@mention` removes the WHOLE token in one keystroke, so a
+      // picked chip deletes as a unit instead of nibbling `/rese`. Only when no
+      // popover is open (mid-typing edits stay normal), not composing, plain key
+      // (let ⌥/⌘ word/line deletes through), and the selection is collapsed.
+      if (
+        !trigger &&
+        !isComposing &&
+        !e.nativeEvent.isComposing &&
+        (e.key === "Backspace" || e.key === "Delete") &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.altKey
+      ) {
+        const ta = e.currentTarget
+        if (ta.selectionStart === ta.selectionEnd) {
+          const range = pillDeleteRange(
+            controller.textInput.value,
+            ta.selectionStart,
+            overlaySegments,
+            e.key === "Backspace" ? "backward" : "forward"
+          )
+          if (range) {
+            e.preventDefault()
+            const cur = controller.textInput.value
+            const next = cur.slice(0, range.start) + cur.slice(range.end)
+            controller.textInput.setInput(next)
+            setCaret(range.start)
+            requestAnimationFrame(() => {
+              const ta2 = textareaRef.current
+              if (ta2) {
+                ta2.setSelectionRange(range.start, range.start)
+                ta2.focus()
+              }
+            })
+            return
+          }
+        }
+      }
+      // Inline ghost-text acceptance (only when no `/@!#` popover is open).
+      // Tab accepts the dim continuation; Esc dismisses it. Both fall through
+      // to existing behavior when there is no ghost to act on.
+      if (!trigger && ghost.ghost) {
+        if (e.key === "Tab" && !e.shiftKey) {
+          if (acceptGhost()) {
+            e.preventDefault()
+            return
+          }
+        }
+        if (e.key === "Escape") {
+          e.preventDefault()
+          ghost.dismiss()
+          return
+        }
+      }
+      // Esc interrupts the running turn — the keystroke behind the run-status
+      // bar's "Esc to interrupt" affordance — once no popover/ghost claimed it.
+      if (e.key === "Escape" && turnStatus === "streaming") {
         e.preventDefault()
-        void submit()
+        void onStopTurn()
+        return
+      }
+      // ↑/↓ recall of previously sent messages (only when no popover is open
+      // and not composing). ↑ engages from the very start of the input; while
+      // navigating, both arrows walk the history and ↓ past the newest restores
+      // the stashed draft.
+      if (inputHistoryRecall && (e.key === "ArrowUp" || e.key === "ArrowDown") && !isComposing) {
+        const ta = e.currentTarget
+        const caretAtStart = ta.selectionStart === 0 && ta.selectionEnd === 0
+        const next = history.recall(e.key === "ArrowUp" ? "up" : "down", {
+          value: controller.textInput.value,
+          caretAtStart,
+        })
+        if (next !== null) {
+          e.preventDefault()
+          controller.textInput.setInput(next)
+          setCaret(next.length)
+          requestAnimationFrame(() => {
+            const t = textareaRef.current
+            if (t) {
+              t.setSelectionRange(next.length, next.length)
+              t.focus()
+            }
+          })
+          return
+        }
+      }
+      // Submit on Enter. Default: plain Enter sends, Shift+Enter is a newline.
+      // When `sendOnEnter` is off: Enter inserts a newline and ⌘/Ctrl+Enter
+      // sends instead (the non-submit cases fall through to the textarea).
+      if (e.key === "Enter" && !e.nativeEvent.isComposing && !isComposing) {
+        const wantsSubmit = sendOnEnter ? !e.shiftKey : e.metaKey || e.ctrlKey
+        if (wantsSubmit) {
+          e.preventDefault()
+          void submit()
+        }
       }
     },
-    [trigger, permissionMode, setPermissionMode, dismissPopover, submit, isComposing]
+    [
+      trigger,
+      permissionMode,
+      setPermissionMode,
+      dismissPopover,
+      submit,
+      isComposing,
+      history,
+      controller.textInput,
+      overlaySegments,
+      ghost,
+      acceptGhost,
+      inputHistoryRecall,
+      sendOnEnter,
+      turnStatus,
+      onStopTurn,
+    ]
   )
 
   const onChange = useCallback(
     (e: ChangeEvent<HTMLTextAreaElement>) => {
       controller.textInput.setInput(e.target.value)
       setCaret(e.target.selectionStart ?? e.target.value.length)
+      // Re-mirror the scroll onto the chip + ghost overlays. Shrinking the text
+      // (or clearing it) can reset the textarea's scrollTop WITHOUT firing a
+      // scroll event, which would otherwise strand the overlays at a stale
+      // translateY from the last scroll.
+      const offset = `translateY(${-e.target.scrollTop}px)`
+      if (chipOverlayRef.current) chipOverlayRef.current.style.transform = offset
+      if (ghostOverlayRef.current) ghostOverlayRef.current.style.transform = offset
+      // Typing exits history-recall mode so the next ↑ starts from the newest.
+      history.noteEdit()
     },
-    [controller.textInput]
+    [controller.textInput, history]
   )
 
   const onSelect = useCallback((e: React.SyntheticEvent<HTMLTextAreaElement>) => {
@@ -585,26 +1241,64 @@ function ComposerInner(props: InnerProps) {
 
   // --- Paste / drag for attachments -------------------------------------
   const acceptFiles = useCallback(
-    (files: FileList | File[]) => {
-      const incoming = [...files].filter((f) => f.type.startsWith(SUPPORTED_IMAGE_PREFIX))
-      const sized = incoming.filter((f) => f.size <= MAX_FILE_SIZE)
-      const rejected = incoming.length - sized.length
-      if (rejected > 0) {
-        toast.warning(
-          tAttach("fileSizeExceeded", {
-            count: rejected,
-            max: MAX_FILE_SIZE / (1024 * 1024),
-          })
-        )
+    async (files: FileList | File[]) => {
+      attachmentPrepareCountRef.current += 1
+      setAttachmentPrepareCount((count) => count + 1)
+      try {
+        const prepared = await prepareComposerAttachments([...files], {
+          maxFileSize: MAX_FILE_SIZE,
+        })
+        if (prepared.unsupportedCount > 0) {
+          toast.warning(tAttach("unsupported", { count: prepared.unsupportedCount }))
+        }
+        if (prepared.tooLargeCount > 0) {
+          toast.warning(
+            tAttach("fileSizeExceeded", {
+              count: prepared.tooLargeCount,
+              max: MAX_FILE_SIZE / (1024 * 1024),
+            })
+          )
+        }
+        if (prepared.optimizedCount > 0) {
+          toast.success(tAttach("optimized", { count: prepared.optimizedCount }))
+        }
+        // Preparation is async for oversized images. Track the latest staged
+        // list in a ref so two concurrent pick/drop operations cannot both see
+        // stale headroom and exceed MAX_FILES.
+        const headroom = Math.max(0, MAX_FILES - attachmentFileCountRef.current)
+        const take = prepared.files.slice(0, headroom)
+        if (prepared.files.length > headroom) {
+          toast.warning(tAttach("countLimit", { max: MAX_FILES }))
+        }
+        if (take.length > 0) {
+          attachmentFileCountRef.current += take.length
+          attachments.add(take)
+        }
+      } finally {
+        attachmentPrepareCountRef.current = Math.max(0, attachmentPrepareCountRef.current - 1)
+        setAttachmentPrepareCount((count) => Math.max(0, count - 1))
       }
-      const headroom = Math.max(0, MAX_FILES - attachments.files.length)
-      const take = sized.slice(0, headroom)
-      if (sized.length > headroom) {
-        toast.warning(tAttach("countLimit", { max: MAX_FILES }))
-      }
-      if (take.length > 0) attachments.add(take)
     },
     [attachments, tAttach]
+  )
+
+  // Mobile "+" menu → fold every pick (camera / album multi-pick / files)
+  // into the same acceptFiles gate the paperclip input uses, so the size /
+  // count / type limits and their toasts stay single-source.
+  const onPlusAttach = useCallback(
+    (attachment: ComposerAttachment) => {
+      void attachmentToFiles(attachment)
+        .then((files) => {
+          if (files.length > 0) void acceptFiles(files)
+        })
+        .catch((err: unknown) => {
+          loggers.chat.warn("plus-menu attach failed", {
+            err: err instanceof Error ? err.message : String(err),
+          })
+          toast.error(err instanceof Error ? err.message : String(err))
+        })
+    },
+    [acceptFiles]
   )
 
   const onPaste = useCallback(
@@ -621,9 +1315,53 @@ function ComposerInner(props: InnerProps) {
       if (files.length > 0) {
         e.preventDefault()
         acceptFiles(files)
+        return
+      }
+      // Fold an oversized text paste into a `[Pasted N lines #id]` placeholder
+      // rather than flooding the textarea. Small pastes fall through to the
+      // browser's native insert. The full body is held in `pastedBlocks` and
+      // re-expanded on send.
+      const text = e.clipboardData?.getData("text") ?? ""
+      if (!text) return
+      const folded = collapsePaste(text, pasteSeq.current)
+      if (!folded.isLarge) return
+      e.preventDefault()
+      pasteSeq.current += 1
+      const ta = textareaRef.current
+      const cur = controller.textInput.value
+      const start = ta?.selectionStart ?? cur.length
+      const end = ta?.selectionEnd ?? cur.length
+      const result = spliceToken(cur, start, end, folded.display)
+      controller.textInput.setInput(result.value)
+      setCaret(result.caret)
+      setPastedBlocks((prev) => ({ ...prev, [folded.display]: folded.stored }))
+      requestAnimationFrame(() => {
+        const ta2 = textareaRef.current
+        if (ta2) {
+          ta2.setSelectionRange(result.caret, result.caret)
+          ta2.focus()
+        }
+      })
+    },
+    [acceptFiles, controller.textInput]
+  )
+
+  // Drop a folded paste: remove its placeholder from the text and forget the
+  // stored body (chip "×" or editing the placeholder out by hand).
+  const removePastedBlock = useCallback(
+    (placeholder: string) => {
+      setPastedBlocks((prev) => {
+        if (!(placeholder in prev)) return prev
+        const next = { ...prev }
+        delete next[placeholder]
+        return next
+      })
+      const cur = controller.textInput.value
+      if (cur.includes(placeholder)) {
+        controller.textInput.setInput(cur.split(placeholder).join(""))
       }
     },
-    [acceptFiles]
+    [controller.textInput]
   )
 
   const onDragEnter = useCallback((e: React.DragEvent<HTMLDivElement>) => {
@@ -633,23 +1371,46 @@ function ComposerInner(props: InnerProps) {
   const onDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     if (e.dataTransfer?.types?.includes("Files")) e.preventDefault()
   }, [])
-  const onDragLeave = useCallback(() => {
+  const onDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    // Symmetric with onDragEnter: only file drags incremented the depth, so
+    // only file drags may decrement it. An interleaved non-file dragleave would
+    // otherwise prematurely drop the counter and flicker the overlay off.
+    if (!e.dataTransfer?.types?.includes("Files")) return
     setDragDepth((d) => Math.max(0, d - 1))
   }, [])
+  // Drops are resolved generically: plain files and whole directories arrive
+  // through the same handler, and a dropped folder is flattened into its files
+  // rather than staging one junk zero-byte attachment. (A dropped directory
+  // carries no absolute path, so it cannot take the reference path the attach
+  // menu's native folder picker uses — see lib/chat/drop-entries.ts.)
   const onDrop = useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
       setDragDepth(0)
-      const files = e.dataTransfer?.files
-      if (!files || files.length === 0) return
+      const dataTransfer = e.dataTransfer
+      const hasPayload =
+        (dataTransfer?.files?.length ?? 0) > 0 || (dataTransfer?.items?.length ?? 0) > 0
+      if (!dataTransfer || !hasPayload) return
       e.preventDefault()
-      acceptFiles(files)
+      void collectDroppedFiles(dataTransfer)
+        .then((dropped) => {
+          if (dropped.truncated) {
+            toast.warning(tAttach("folderTruncated", { max: MAX_DROPPED_DIR_FILES }))
+          }
+          if (dropped.files.length > 0) return acceptFiles(dropped.files)
+          if (dropped.directories > 0) toast.warning(tAttach("folderEmpty"))
+        })
+        .catch((err: unknown) => {
+          loggers.chat.warn("drop resolution failed", {
+            err: err instanceof Error ? err.message : String(err),
+          })
+        })
     },
-    [acceptFiles]
+    [acceptFiles, tAttach]
   )
 
   const onFilePick = useCallback(
     (e: ChangeEvent<HTMLInputElement>) => {
-      if (e.target.files) acceptFiles(e.target.files)
+      if (e.target.files) void acceptFiles(e.target.files)
       e.target.value = ""
     },
     [acceptFiles]
@@ -658,6 +1419,14 @@ function ComposerInner(props: InnerProps) {
   const openFileDialog = useCallback(() => {
     fileInputRef.current?.click()
   }, [])
+
+  const removeLink = useCallback(
+    (url: string) => {
+      controller.textInput.setInput(removeHttpUrl(controller.textInput.value, url))
+      requestAnimationFrame(() => textareaRef.current?.focus())
+    },
+    [controller.textInput]
+  )
 
   // ── Mobile inline mention popover ──────────────────────────────────────
   // When `mobileMentionMembers` is supplied, the chat shell wants the inline
@@ -681,18 +1450,87 @@ function ComposerInner(props: InnerProps) {
 
   // ── Per-session draft persistence (Phase 3.2) ─────────────────────────
   const [draftHydratedFor, setDraftHydratedFor] = useState<string | null>(null)
-
+  const pendingComposerIntent = useComposerIntentStore((state) =>
+    sessionId ? state.pendingBySession[sessionId] : undefined
+  )
+  const consumeComposerIntent = useComposerIntentStore((state) => state.consume)
+  // See `restoredAttachments` above: only the ones we could not bring back.
+  const tDraft = useTranslations("chat.composer.draftRestore")
+  // The next-intl translator isn't a stable reference, so we read it through a
+  // ref instead of listing it as an effect dependency — depending on it would
+  // re-run the hydration effect every render and loop on its setState calls.
+  const tDraftRef = useRef(tDraft)
   useEffect(() => {
+    tDraftRef.current = tDraft
+  }, [tDraft])
+
+  // Tracks the session we last reset the box for. A ref (not state) so it can't
+  // race the async draft load below.
+  const clearedForSessionRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!persistDrafts) return
     if (!sessionId) return
     if (draftHydratedFor === sessionId) return
+    // Reset the input SYNCHRONOUSLY, once per session change. The Composer is
+    // not remounted per session (no `key`), so without this the previous
+    // session's text + staged attachments bleed into this one and then get
+    // persisted into its draft. The ref guard means a re-render during the
+    // async load (e.g. the user typing in the gap) doesn't wipe their input a
+    // second time.
+    if (clearedForSessionRef.current !== sessionId) {
+      clearedForSessionRef.current = sessionId
+      controller.textInput.setInput("")
+      attachments.clear()
+      // Folded-paste bodies are in-memory only (not persisted); drop them too.
+      setPastedBlocks({})
+    }
     let cancelled = false
     getChatDraft(sessionId)
       .then((row) => {
         if (cancelled) return
+        // Populate the saved draft only when the target actually has one — never
+        // clobber text the user typed during this async gap with an empty draft.
         if (row?.text) {
           controller.textInput.setInput(row.text)
         }
-
+        // Attachments whose binary survived are re-staged for real: the file
+        // comes back, ready to send. Seed the store with its cached extraction
+        // first so re-staging doesn't re-parse a document we already read.
+        // Anything whose blob was evicted (quota) still degrades to a chip.
+        const restored = row?.attachments ?? []
+        const revivable = restored.filter((a) => a.bytes)
+        if (revivable.length > 0) {
+          staged.seedIncoming(
+            revivable.map((a) => ({
+              filename: a.name,
+              sizeBytes: a.size,
+              state: {
+                status: "ready" as const,
+                sizeBytes: a.size,
+                bytes: a.bytes,
+                ...(a.extractedText
+                  ? {
+                      extracted: {
+                        kind: "document" as const,
+                        block: { type: "text" as const, text: a.extractedText },
+                        tokens: a.tokens ?? 0,
+                        text: a.extractedText,
+                      },
+                    }
+                  : {}),
+              },
+            }))
+          )
+          attachments.add(
+            revivable.map((a) => new File([a.bytes as BlobPart], a.name, { type: a.mediaType }))
+          )
+        }
+        // Reminder chips are now only for the ones we could NOT bring back.
+        const reminders = restored.filter((a) => !a.bytes)
+        setRestoredAttachments(reminders)
+        if (reminders.length > 0) {
+          toast.info(tDraftRef.current("toast", { count: reminders.length }))
+        }
         setDraftHydratedFor(sessionId)
       })
       .catch(() => {
@@ -703,17 +1541,50 @@ function ComposerInner(props: InnerProps) {
     return () => {
       cancelled = true
     }
-  }, [sessionId, draftHydratedFor, controller.textInput])
+  }, [persistDrafts, sessionId, draftHydratedFor, controller.textInput, attachments, staged])
 
+  // A system-selection action arrives while the main window and target session
+  // are being activated. Consume it only after the saved draft has finished
+  // hydrating, otherwise the async draft read can overwrite the inserted stock
+  // instruction. Ask has no stock prompt and only focuses the textarea.
   useEffect(() => {
+    if (!sessionId || !pendingComposerIntent) return
+    if (persistDrafts && draftHydratedFor !== sessionId) return
+    const intent = consumeComposerIntent(sessionId, pendingComposerIntent.candidateId)
+    if (!intent) return
+    if (intent.prompt) {
+      controller.textInput.setInput(
+        mergeComposerIntentPrompt(controller.textInput.value, intent.prompt)
+      )
+    }
+    requestAnimationFrame(() => textareaRef.current?.focus())
+  }, [
+    consumeComposerIntent,
+    controller.textInput,
+    draftHydratedFor,
+    pendingComposerIntent,
+    persistDrafts,
+    sessionId,
+  ])
+
+  // Memoised on the file list + staged state so the persist effect below — which
+  // also depends on the text value — doesn't rebuild these rows on every
+  // keystroke. The blobs come from `staged`, which already holds the bytes it
+  // fetched for extraction, so persisting a draft costs no extra reads.
+  const draftAttachments = useMemo(
+    () => draftAttachmentsFromFiles(attachments.files, staged.byId),
+    [attachments.files, staged.byId]
+  )
+  useEffect(() => {
+    if (!persistDrafts) return
     if (!sessionId) return
     if (draftHydratedFor !== sessionId) return
     try {
-      setChatDraftDebounced(sessionId, controller.textInput.value)
+      setChatDraftDebounced(sessionId, controller.textInput.value, draftAttachments)
     } catch {
       // Dexie unavailable (e.g., SSR / tests without fake-indexeddb) — drafts are best-effort.
     }
-  }, [controller.textInput.value, sessionId, draftHydratedFor])
+  }, [controller.textInput.value, draftAttachments, sessionId, draftHydratedFor, persistDrafts])
 
   // Auto-resize textarea (JS fallback for browsers without field-sizing:content
   // support, e.g. older iOS/Android WebViews). field-sizing-content in the
@@ -732,7 +1603,7 @@ function ComposerInner(props: InnerProps) {
     if (typeof CSS !== "undefined" && CSS.supports?.("field-sizing", "content")) return
     if (isComposing) return
     ta.style.height = "auto"
-    ta.style.height = `${Math.min(ta.scrollHeight, 12 * 16)}px`
+    ta.style.height = `${Math.min(ta.scrollHeight, COMPOSER_MAX_HEIGHT_PX)}px`
   }, [controller.textInput.value, isComposing])
 
   // Imperative handle: insert `@name ` at the caret. Used by the desktop
@@ -767,26 +1638,123 @@ function ComposerInner(props: InnerProps) {
   )
 
   const isStreaming = props.status === "streaming"
+  // Cross-fade transition for the send/stop button icon swap (reduced-motion aware).
+  const sendIconTransition = useReducedMotionTransition(mobileTransition("fast"))
+
+  // Drive the inline ghost-text engine off the current draft. Suppress while a
+  // `/@!#` trigger popover is open, the caret isn't at the end of the text, or
+  // a turn is streaming / the composer is disabled — the controller debounces
+  // and only the most recent feed is queried, so this always reflects state.
+  const ghostFeed = ghost.feed
+  useEffect(() => {
+    const value = controller.textInput.value
+    const suppress = !!trigger || isStreaming || !!props.disabled || caret !== value.length
+    ghostFeed(value, { suppress })
+  }, [controller.textInput.value, caret, trigger, isStreaming, props.disabled, ghostFeed])
 
   const ephemeralSkillIds = useChatStore((s) => s.ephemeralSkillIds)
   const toggleEphemeralSkill = useChatStore((s) => s.toggleEphemeralSkill)
 
   return (
     <div ref={setContainerEl}>
-      <ReferenceChips />
-      <AttachmentPreview onOcrSelect={handleOcrSelect} ocrBusy={ocr.status === "running"} />
-      <OcrResultBubble
-        open={ocrBubbleOpen}
-        onOpenChange={setOcrBubbleOpen}
-        result={ocrBubbleResult}
-        imageSrc={ocrBubbleImageSrc ?? undefined}
-        onCopy={(text) => void navigator.clipboard?.writeText(text)}
-        onCopyPage={(_page, text) => void navigator.clipboard?.writeText(text)}
-      />
-      <PluginExtensionSlot point="chat.input.above" className="px-1 empty:hidden" />
-      <SkillChipRow ids={ephemeralSkillIds} onRemove={toggleEphemeralSkill} />
-      {/* ADR-0019 — active/paused goal status + controls; self-hides when none. */}
-      <GoalStatusPill sessionId={sessionId} />
+      {/* Every band stacked above the textarea shares one scroll container with
+          a height cap. Six attachments plus an active goal, an open loop and the
+          plan-mode banner could otherwise push the input off the bottom of the
+          screen. Each band still animates its own height inside it. */}
+      <div className="max-h-[40vh] overflow-y-auto overscroll-contain">
+        <ContextChipBar
+          onRunOcr={handleRunOcrForPanel}
+          ocrBusy={ocr.status === "running"}
+          onExtractOcrToInput={handleExtractOcrToInput}
+          onViewOcrDetail={ocrBubbleResult ? () => setOcrBubbleOpen(true) : undefined}
+          text={controller.textInput.value}
+          onRemoveLink={removeLink}
+        />
+        <Collapse>
+          <DraftRestoredAttachments
+            items={restoredAttachments}
+            onDismiss={() => setRestoredAttachments([])}
+          />
+        </Collapse>
+        <OcrResultBubble
+          open={ocrBubbleOpen}
+          onOpenChange={setOcrBubbleOpen}
+          result={ocrBubbleResult}
+          imageSrc={ocrBubbleImageSrc ?? undefined}
+          onCopy={(text) => void navigator.clipboard?.writeText(text)}
+          onCopyPage={(_page, text) => void navigator.clipboard?.writeText(text)}
+        />
+        <PluginExtensionSlot point="chat.input.above" className="px-1 empty:hidden" />
+        <Collapse>
+          <SkillChipRow
+            ids={ephemeralSkillIds}
+            onRemove={toggleEphemeralSkill}
+            disabledIds={props.session?.disabledSkillIds}
+          />
+        </Collapse>
+        {/* Folded large-paste chips — only those whose placeholder is still in the
+          text (manual deletion drops the chip too). */}
+        <Collapse>
+          {(() => {
+            const chips = Object.entries(pastedBlocks).filter(([ph]) =>
+              controller.textInput.value.includes(ph)
+            )
+            if (chips.length === 0) return null
+            return (
+              <div className="flex flex-wrap gap-1 px-1 pb-1" data-testid="composer-pasted-chips">
+                {chips.map(([ph, body]) => (
+                  <span
+                    key={ph}
+                    className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[11px] text-muted-foreground"
+                  >
+                    <FileTextIcon className="size-3 shrink-0" aria-hidden />
+                    {t("pastedChip", { count: body.split("\n").length })}
+                    <button
+                      type="button"
+                      onClick={() => removePastedBlock(ph)}
+                      aria-label={t("removePastedChip")}
+                      className="text-muted-foreground/60 hover:text-foreground"
+                    >
+                      <XIcon className="size-3" aria-hidden />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )
+          })()}
+        </Collapse>
+        {/* Re-paste reminder: a restored draft can carry `[Pasted …]` placeholders
+          whose bodies weren't persisted. Nudge the user to re-paste (the
+          placeholder text stays visible so they see exactly where). */}
+        <Collapse>
+          {(() => {
+            const orphans = findPastePlaceholders(controller.textInput.value).filter(
+              (ph) => !(ph in pastedBlocks)
+            )
+            if (orphans.length === 0) return null
+            return (
+              <div
+                className="px-1 pb-1 text-[11px] text-amber-600 dark:text-amber-500"
+                data-testid="composer-paste-reminder"
+              >
+                {t("pasteReminder", { count: orphans.length })}
+              </div>
+            )
+          })()}
+        </Collapse>
+        {/* ADR-0019 — active/paused goal status + controls; self-hides when none. */}
+        <Collapse>
+          <GoalStatusPill sessionId={sessionId} />
+        </Collapse>
+        {/* /loop status + controls; self-hides when no open loop. */}
+        <Collapse>
+          <LoopStatusPill sessionId={sessionId} />
+        </Collapse>
+        {/* Plan-mode state banner; self-hides outside plan mode. */}
+        <Collapse>
+          <PlanModeBanner />
+        </Collapse>
+      </div>
       <div
         className={cn(
           // Claude-style stack on every platform when the container is narrow:
@@ -796,9 +1764,23 @@ function ComposerInner(props: InnerProps) {
           // re-forms the single-row [attach | textarea | send] layout; the
           // flex-1 textarea (basis-0) then prevents any further wrapping.
           // Mobile (Capacitor) keeps the stack at every width.
-          "relative flex flex-wrap items-end gap-2 rounded-2xl border border-input/60 bg-background/70 px-2 py-2 shadow-sm transition-shadow",
-          "focus-within:border-primary/40 focus-within:shadow-md focus-within:ring-2 focus-within:ring-ring/15"
+          "relative flex flex-wrap items-end gap-2 rounded-2xl border border-input/60 bg-background/70 px-2 py-2 shadow-sm transition-[border-color,box-shadow,background-color] duration-200 motion-reduce:transition-none",
+          "focus-within:border-primary/40 focus-within:shadow-md focus-within:ring-2 focus-within:ring-ring/15",
+          compactLayout &&
+            "gap-1.5 rounded-[1.75rem] border-border/70 bg-background/85 px-3 py-2.5 shadow-md",
+          // Plan mode: amber tint on the input surface (with the banner above)
+          // so the read-only state is unmistakable (Claude Code parity).
+          permissionMode === "plan" &&
+            "border-amber-500/50 focus-within:border-amber-500/70 focus-within:ring-amber-500/15"
         )}
+        // Opt the input surface into the shared wallpaper-aware tonality system
+        // (app/globals.css §5): when a background is active the hardcoded
+        // bg-background/70 is replaced by the token-driven translucent surface
+        // + blur, so the composer adapts like every other surface and honours
+        // prefers-reduced-transparency. Falls back to bg-background/70 when no
+        // wallpaper is set.
+        data-tonality="translucent"
+        data-composer-layout={compactLayout ? "compact" : "default"}
         onDragEnter={onDragEnter}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
@@ -807,7 +1789,7 @@ function ComposerInner(props: InnerProps) {
         <DragOverlay visible={isDragging} />
 
         <input
-          accept="image/*"
+          accept={ATTACHMENT_ACCEPT}
           aria-label={t("ariaUploadImage")}
           className="hidden"
           multiple
@@ -819,42 +1801,70 @@ function ComposerInner(props: InnerProps) {
         <div
           className={cn(
             "order-2 flex shrink-0 items-center gap-0.5",
-            !isMobile && "@sm/composer:order-none"
+            !isMobile && !compactLayout && "@sm/composer:order-none"
           )}
         >
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                aria-label={t("ariaAttachImage")}
-                className="size-9 text-muted-foreground hover:text-foreground"
-                disabled={props.disabled}
-                onClick={openFileDialog}
-                size="icon"
-                type="button"
-                variant="ghost"
-              >
-                <PaperclipIcon className="size-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("attachImageTooltip")}</TooltipContent>
-          </Tooltip>
+          {isMobile ? (
+            // Mobile: one WeChat-style "+" menu (camera / album multi-pick /
+            // files) replaces the paperclip + camera button pair — fewer
+            // 44px targets competing for composer width. Voice stays with
+            // the transcription bridge below (speech → text), so the menu's
+            // record-as-attachment branch is hidden. Desktop compact keeps the
+            // paperclip: the "+" menu's camera/album branches both degrade to
+            // the same file picker off-mobile, so three entries would be
+            // redundant there.
+            <ComposerPlusMenu
+              showVoice={false}
+              fileAccept={ATTACHMENT_ACCEPT}
+              onAttach={onPlusAttach}
+              onError={(_code, message) => toast.error(message)}
+              capabilities={capabilityMenu}
+            />
+          ) : (
+            // One paperclip for both attachment models: files inline, folders
+            // as references. Links need no button — typed or pasted URLs are
+            // recognised in the text and chipped by `ContextChipBar`.
+            <ComposerAttachMenu
+              disabled={props.disabled}
+              onPickFiles={openFileDialog}
+              capabilities={capabilityMenu}
+            />
+          )}
 
-          {isDesktop && <ScreenshotButton disabled={props.disabled} />}
-
+          {/* Voice stays outside the menu: it's an input method (speech →
+              text), not a way to produce an attachment. */}
           <VoiceTranscriptionBridge disabled={props.disabled} />
+          <ComposerAppendBridge sessionId={props.session?.id} />
         </div>
 
         <div
           className={cn(
-            "relative order-1 w-full",
+            "relative order-1 w-full min-w-0",
             !isMobile &&
+              !compactLayout &&
               "@sm/composer:order-none @sm/composer:w-auto @sm/composer:flex-1 @sm/composer:self-center"
           )}
         >
+          <ComposerChipOverlay
+            ref={chipOverlayRef}
+            value={controller.textInput.value}
+            segments={overlaySegments}
+          />
+          <ComposerGhostText
+            ref={ghostOverlayRef}
+            value={controller.textInput.value}
+            ghost={ghost.ghost}
+            // The "Tab" hint is meaningless on touch — mobile gets the tappable
+            // accept/dismiss control below instead.
+            acceptHint={isMobile ? undefined : t("ghostAcceptHint")}
+          />
           <Textarea
             aria-label={t("ariaMessage")}
             className={cn(
-              "field-sizing-content block min-h-6 w-full resize-none border-0 bg-transparent px-1 py-1.5 pr-10 text-sm leading-6 shadow-none outline-none ring-0 placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0"
+              "field-sizing-content relative z-[1] block min-h-9 w-full resize-none break-words overflow-y-auto overscroll-contain border-0 bg-transparent shadow-none outline-none ring-0 [scrollbar-width:none] placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0 [&::-webkit-scrollbar]:hidden",
+              compactLayout && "min-h-14 py-1.5",
+              !compactLayout && controller.textInput.value.length === 0 && "h-9 overflow-hidden",
+              TEXTAREA_TYPOGRAPHY
             )}
             disabled={props.disabled}
             name="message"
@@ -863,22 +1873,41 @@ function ComposerInner(props: InnerProps) {
             onCompositionStart={() => setIsComposing(true)}
             onKeyDown={onKeyDown}
             onPaste={onPaste}
+            onScroll={(e) => {
+              // Mirror vertical scroll onto the chip + ghost overlays
+              // imperatively (no React state → no re-render churn while
+              // scrolling).
+              const offset = `translateY(${-e.currentTarget.scrollTop}px)`
+              const el = chipOverlayRef.current
+              if (el) el.style.transform = offset
+              const ghostEl = ghostOverlayRef.current
+              if (ghostEl) ghostEl.style.transform = offset
+            }}
             onSelect={onSelect}
             placeholder={
               props.disabled ? t("placeholderDisabled") : (props.placeholder ?? t("placeholder"))
             }
             ref={textareaRef}
             rows={1}
-            style={{ maxHeight: "12rem" }}
+            style={{ maxHeight: `${COMPOSER_MAX_HEIGHT_REM}rem` }}
             value={controller.textInput.value}
           />
           <CharCounter />
+          <MobileGhostAccept
+            visible={isMobile && !!ghost.ghost}
+            onAccept={acceptGhost}
+            onDismiss={ghost.dismiss}
+          />
         </div>
+
+        {props.toolbar ? (
+          <div className="order-2 min-w-0 flex-1 self-end">{props.toolbar}</div>
+        ) : null}
 
         <div
           className={cn(
-            "order-3 ml-auto flex shrink-0 items-center",
-            !isMobile && "@sm/composer:order-none @sm/composer:ml-0"
+            "order-3 ms-auto flex shrink-0 items-center",
+            !isMobile && !compactLayout && "@sm/composer:order-none @sm/composer:ms-0"
           )}
         >
           <Tooltip>
@@ -896,11 +1925,28 @@ function ComposerInner(props: InnerProps) {
                 </Button>
               ) : (
                 <Button
-                  aria-label={isStreaming ? t("ariaStop") : t("ariaSend")}
-                  className="size-9 rounded-full"
+                  aria-label={
+                    isStreaming
+                      ? t("ariaStop")
+                      : isSending
+                        ? t("ariaSending")
+                        : isPreparingAttachments
+                          ? tAttach("preparing")
+                          : t("ariaSend")
+                  }
+                  className={cn(
+                    "size-9 rounded-full transition-transform duration-200 ease-out active:scale-90 disabled:scale-100",
+                    // Mobile: 44px minimum tap target (primary send/stop action).
+                    isMobile && "touch-target"
+                  )}
                   disabled={
                     // In web mode, platform-bound sessions cannot send outbound messages.
                     (!isDesktop && !!props.session?.platformBinding) ||
+                    // A turn is being dispatched: the button is a non-interactive
+                    // spinner until the store flips to "streaming" (then it becomes
+                    // the live Stop button).
+                    isSending ||
+                    isPreparingAttachments ||
                     (!isStreaming &&
                       (props.disabled ||
                         (controller.textInput.value.trim().length === 0 &&
@@ -909,14 +1955,36 @@ function ComposerInner(props: InnerProps) {
                   onClick={() => (isStreaming ? void props.onStop() : void submit())}
                   size="icon"
                   type="button"
+                  variant={isStreaming ? "destructive" : "default"}
                 >
-                  {isStreaming ? (
-                    <SquareIcon className="size-4" />
-                  ) : props.status === "submitted" ? (
-                    <Loader2Icon className="size-4 animate-spin" />
-                  ) : (
-                    <ArrowUpIcon className="size-4" />
-                  )}
+                  {/* Icon swap genuinely cross-fades + zooms on each state
+                      change (send → running → stop): AnimatePresence keeps the
+                      outgoing icon mounted through its exit while the incoming
+                      one fades in, keyed by state. Honors reduced motion. */}
+                  <AnimatePresence mode="wait" initial={false}>
+                    <motion.span
+                      key={
+                        isStreaming
+                          ? "stop"
+                          : isSending || isPreparingAttachments || props.status === "submitted"
+                            ? "sending"
+                            : "send"
+                      }
+                      className="inline-flex"
+                      initial={{ opacity: 0, scale: 0.75 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.75 }}
+                      transition={sendIconTransition}
+                    >
+                      {isStreaming ? (
+                        <SquareIcon className="size-4" />
+                      ) : isSending || isPreparingAttachments || props.status === "submitted" ? (
+                        <Loader2Icon className="size-4 animate-spin" />
+                      ) : (
+                        <ArrowUpIcon className="size-4" />
+                      )}
+                    </motion.span>
+                  </AnimatePresence>
                 </Button>
               )}
             </TooltipTrigger>
@@ -933,30 +2001,6 @@ function ComposerInner(props: InnerProps) {
 
       <PluginExtensionSlot point="chat.input.below" className="px-1 pt-1 empty:hidden" />
 
-      {/* Inbox-only composer actions (IM-completion §C). Mounted only when
-       * the active session is bound to an external platform conversation;
-       * keeps the inbox extension surface separate from the generic
-       * chat.input.actions one so a regular chat session never sees them.
-       */}
-      {props.session?.platformBinding && (
-        <InboxComposerActionsHost
-          conversationKey={props.session.platformBinding.conversationKey}
-          adapterId={props.session.platformBinding.adapterId}
-          platform={props.session.platformBinding.platform}
-          sessionId={props.session.id}
-          className="px-1 pt-1 flex items-center gap-1 empty:hidden"
-        />
-      )}
-
-      {cwd && (
-        <div className="flex items-center gap-1 px-2 pb-1 text-[11px] text-muted-foreground">
-          <FolderIcon className="size-3 shrink-0" />
-          <span className="truncate font-mono" title={cwd}>
-            {cwd}
-          </span>
-        </div>
-      )}
-
       <ComposerPopover
         ref={popoverRef}
         trigger={desktopTrigger}
@@ -964,6 +2008,14 @@ function ComposerInner(props: InnerProps) {
         slashCommands={slashCommands}
         anchor={containerEl}
         mentionables={props.mentionables}
+        chatAgents={chatAgents}
+        chatSkills={chatSkills}
+        chatPresets={chatPresets}
+        workflowElements={props.workflowMention?.elements}
+        onHighlightElement={props.workflowMention ? handleHighlightElement : undefined}
+        recentCommands={recentCommands}
+        pinnedCommands={pinnedCommands}
+        onTogglePin={togglePinnedCommand}
         onPick={onPickPopoverItem}
         onDismiss={dismissPopover}
       />
@@ -973,10 +2025,17 @@ function ComposerInner(props: InnerProps) {
           open={mobileMentionOpen}
           query={mobileMentionQuery}
           members={props.mobileMentionMembers ?? []}
+          composerHeight={composerHeight}
           onPick={onPickMobileMember}
           onDismiss={dismissPopover}
         />
       ) : null}
+
+      <CommandParamForm
+        command={paramForm?.command ?? null}
+        onSubmit={handleParamFormSubmit}
+        onCancel={handleParamFormCancel}
+      />
     </div>
   )
 }
@@ -995,11 +2054,117 @@ function VoiceTranscriptionBridge({ disabled }: { disabled?: boolean }) {
   return <VoiceControls disabled={disabled} onTranscription={onTranscription} />
 }
 
+/** Window-event name a chat-message card dispatches to append text to the composer. */
+export const COMPOSER_APPEND_EVENT = "cognia:composer-append"
+
+/** Detail of a {@link COMPOSER_APPEND_EVENT}. */
+export interface ComposerAppendDetail {
+  text?: string
+  /**
+   * Which composer should take the text. More than one composer is mounted at
+   * once — split view has two, and a workbench sidechat adds another — so an
+   * un-addressed event would land in all of them. Omit only when the intent
+   * really is "whichever composer is focused"; `undefined` is treated as
+   * addressed to the active session.
+   */
+  sessionId?: string
+}
+
+/** Append text to one composer's draft. See {@link ComposerAppendDetail}. */
+export function dispatchComposerAppend(detail: ComposerAppendDetail): void {
+  window.dispatchEvent(new CustomEvent(COMPOSER_APPEND_EVENT, { detail }))
+}
+
+/**
+ * Lets components outside the PromptInput controller context (e.g. the OCR
+ * result card in the message list, or a sidechat handing a conclusion back)
+ * append text to the composer by dispatching `COMPOSER_APPEND_EVENT`.
+ */
+function ComposerAppendBridge({ sessionId }: { sessionId?: string }) {
+  const controller = usePromptInputController()
+  const activeSessionId = useChatStore((s) => s.activeSessionId)
+  useEffect(() => {
+    const onAppend = (e: Event) => {
+      const detail = (e as CustomEvent<ComposerAppendDetail>).detail
+      const text = detail?.text
+      if (!text || !text.trim()) return
+      // Addressed events go to exactly one composer. An un-addressed event is
+      // legacy shorthand for "the active session", which keeps the single-pane
+      // callers working without making every composer echo it.
+      const target = detail?.sessionId ?? activeSessionId
+      if (target && sessionId && target !== sessionId) return
+      const cur = controller.textInput.value
+      const sep = cur && !cur.endsWith(" ") ? " " : ""
+      controller.textInput.setInput(`${cur}${sep}${text}`)
+    }
+    window.addEventListener(COMPOSER_APPEND_EVENT, onAppend)
+    return () => window.removeEventListener(COMPOSER_APPEND_EVENT, onAppend)
+  }, [controller.textInput, activeSessionId, sessionId])
+  return null
+}
+
+function ComposerCapabilityMenu({
+  session,
+  status,
+  disabled,
+}: {
+  session?: ChatSession | null
+  status: PromptStatus
+  disabled?: boolean
+}) {
+  const controller = usePromptInputController()
+  const ephemeralSkillIds = useChatStore((s) => s.ephemeralSkillIds) ?? []
+  const setEphemeralSkillIds = useChatStore((s) => s.setEphemeralSkillIds) ?? (() => {})
+  const enhanceEnabled = useSettingsStore(
+    (s) => s.settings?.composerAssistance?.enhance?.enabled !== false
+  )
+  const tSkill = useTranslations("skills.composer.skillPicker")
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const isMobile = usePlatform() === "mobile"
+  const isStreaming = status === "streaming"
+  const controlsDisabled = disabled || isStreaming
+
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-2" data-testid="composer-capability-menu">
+        {enhanceEnabled ? (
+          <EnhanceButton
+            value={controller.textInput.value}
+            onApply={(next) => controller.textInput.setInput(next)}
+            session={session}
+            disabled={controlsDisabled}
+          />
+        ) : null}
+        <WebSearchToggle disabled={controlsDisabled} />
+        <Button
+          type="button"
+          size="icon"
+          variant={ephemeralSkillIds.length > 0 ? "default" : "ghost"}
+          onClick={() => setPickerOpen(true)}
+          aria-label={tSkill("trigger")}
+          disabled={controlsDisabled}
+          className={cn("size-7", isMobile && "touch-target")}
+          data-testid="composer-skill-trigger"
+        >
+          <SparklesIcon className="size-3.5" />
+        </Button>
+      </div>
+      <SkillPicker
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        value={ephemeralSkillIds}
+        onChange={setEphemeralSkillIds}
+      />
+    </>
+  )
+}
+
 // --- Outer component ------------------------------------------------------
 
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   {
     session,
+    status: paneStatus,
     onStartNewSession,
     onOpenSettings,
     onSend,
@@ -1009,6 +2174,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     mentionables,
     placeholder,
     mobileMentionMembers,
+    workflowMention,
   },
   ref
 ) {
@@ -1018,17 +2184,30 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const tAttach = useTranslations("chat.composer.attachments")
   const tWebSearch = useTranslations("webSearchToggle")
   const tDraftReview = useTranslations("chat.composer.draftReview")
-  const status = useChatStore((s) => s.status)
+  const compactLayout = useSettingsStore(
+    (s) => s.settings?.composerBehavior?.compactLayout === true
+  )
+  const focusedStatus = useChatStore((s) => s.status)
+  const status = paneStatus ?? focusedStatus
   const setPermissionMode = useChatStore((s) => s.setPermissionMode)
   const appendMessage = useChatStore((s) => s.appendMessage)
   const clearReferencedPaths = useChatStore((s) => s.clearReferencedPaths)
+  const clearContextSelections = useChatStore((s) => s.clearContextSelections)
 
-  const cwd = session?.workingDir ?? null
+  // Same effective-cwd chain the send path uses — a selected workspace must
+  // let `!` shell commands and memory appends run without a per-session dir.
+  const cwd = useEffectiveCwd(session)
 
   // ── Platform connector mode ─────────────────────────────────────────────
   const resolvedMode = useResolvedConnectorMode(session)
   const [pendingDrafts, setPendingDrafts] = useState<ConnectorDraftRow[]>([])
   const [draftDialogOpen, setDraftDialogOpen] = useState(false)
+  // Oversize attachment confirmation: handleSubmit parks a resolver here while
+  // the dialog below collects the user's choice (send anyway / cancel).
+  const [oversizeConfirm, setOversizeConfirm] = useState<{
+    tokens: number
+    resolve: (ok: boolean) => void
+  } | null>(null)
 
   // Poll pending drafts when in draft mode
   useEffect(() => {
@@ -1048,11 +2227,18 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   }, [session?.platformBinding?.conversationKey, resolvedMode])
 
   const pushSystemMessage = useCallback(
-    (markdown: string) => {
+    (payload: string | SystemMessageBlock | SlashCommandResultBlock) => {
+      // Strings render as markdown text; any structured block (diagnostics card
+      // or slash-result chip) rides the same data part and is dispatched by the
+      // message renderer on its `kind`.
+      const parts =
+        typeof payload === "string"
+          ? [{ type: "text", text: payload }]
+          : [{ type: DIAGNOSTICS_PART_TYPE, data: payload }]
       appendMessage({
         id: `sys-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         role: "system",
-        parts: [{ type: "text", text: markdown }],
+        parts: parts as UIMessage["parts"],
       })
     },
     [appendMessage]
@@ -1104,6 +2290,25 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         toast.error(tShell("needsCwd"))
         return false
       }
+      // An interactive command (ssh, a REPL, a login flow, `git rebase -i`, …)
+      // needs a TTY the capture path lacks — it would hang or read EOF. Route it
+      // to the real integrated terminal instead (desktop only; on web the
+      // capture path below already surfaces the desktop-only error).
+      if (isTauri() && detectInteractiveCommand(cmd).interactive) {
+        try {
+          await runInTerminalDock(cmd, cwd, session?.id ?? "")
+          pushSystemMessage(tShell("interactiveRoutedToTerminal", { cmd }))
+        } catch (err) {
+          loggers.chat.error("interactive shell routing failed", err, { cmd, cwd })
+          pushSystemMessage(
+            tShell("failed", {
+              cmd,
+              error: err instanceof Error ? err.message : String(err),
+            })
+          )
+        }
+        return true
+      }
       pushSystemMessage(tShell("runningHint", { cmd, cwd }))
       try {
         const result = await executeShell(cmd, cwd)
@@ -1119,13 +2324,15 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       }
       return true
     },
-    [cwd, pushSystemMessage, tShell]
+    [cwd, pushSystemMessage, tShell, session]
   )
 
   const handleMemorySubmit = useCallback(
     async (scope: MemoryScope, text: string): Promise<boolean> => {
       try {
-        const path = await appendMemory(scope, text, cwd)
+        // Project memory is written at <cwd>/CLAUDE.md — confine the write to
+        // the working dir so a stray cwd can't escape it. User scope ignores it.
+        const path = await appendMemory(scope, text, cwd, cwd ? [cwd] : null)
         toast.success(tMemory("appended", { path }))
         return true
       } catch (err) {
@@ -1138,15 +2345,19 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   )
 
   const handleSubmit = useCallback(
-    async (text: string, files: SubmittedFile[]) => {
+    async (
+      text: string,
+      files: SubmittedFile[],
+      precomputed?: ReadonlyMap<string, ExtractedAttachment>
+    ) => {
       const trimmed = text.trim()
       if (trimmed.startsWith("!")) {
         await handleBashSubmit(trimmed.slice(1))
-        return
+        return true
       }
       if (trimmed.startsWith("#")) {
         toast.info(tMemory("pickScope"))
-        return
+        return true
       }
 
       // ── Platform connector short-circuit ─────────────────────────────────
@@ -1155,7 +2366,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       if (session?.platformBinding && resolvedMode && resolvedMode !== "auto") {
         const { adapterId, conversationKey, conversationRef } = session.platformBinding
         if (resolvedMode === "manual") {
-          if (!trimmed && files.length === 0) return
+          if (!trimmed && files.length === 0) return true
           // Build outbound job for manual delivery
           const job = await enqueueOutbound({
             adapterId,
@@ -1177,14 +2388,14 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
             metadata: { outboundJobId: job.id },
             createdAt: now,
           })
-          return // skip standard sendPrompt — caller's input cleared by ComposerInner
+          return true // skip standard sendPrompt — caller's input cleared by ComposerInner
         }
         if (resolvedMode === "draft") {
           // In draft mode, the submit button opens the draft reviewer dialog
           const drafts = await listPendingDrafts(conversationKey)
           setPendingDrafts(drafts)
           setDraftDialogOpen(true)
-          return
+          return true
         }
       }
       // ── END platform connector short-circuit ──────────────────────────────
@@ -1203,6 +2414,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
             providerSettings: settings?.searchProviders,
             provider: settings?.defaultSearchProvider,
             fallbackEnabled: settings?.searchFallbackEnabled ?? true,
+            maxRetries: settings?.searchMaxRetries,
             maxResults: settings?.searchMaxResults ?? 5,
             searchType: settings?.defaultSearchType,
             searchDepth: settings?.defaultSearchDepth,
@@ -1233,21 +2445,88 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         useChatStore.getState().setWebSearchOnForNextSend(false)
       }
 
-      const { content, rejected } = buildSendContent(augmented, files)
+      // ── Context selections ──────────────────────────────────────────
+      // Prepend the selected material + comment as context, and record the
+      // edit target so the assistant reply routes into a per-hunk review
+      // proposal against the targeted artifact. The first selection wins; the
+      // rest contribute context only. That is now stated in the UI — the lead
+      // chip carries an "edit target" badge and the others promote on click
+      // (`artifact-selection-chips.tsx`) — where it used to be a `debug` log
+      // nobody would ever see.
+      const contextSelections = useChatStore.getState().contextSelections
+      if (contextSelections.length > 0 && session?.id) {
+        const selectionCtx = formatContextSelectionsForLLM(contextSelections)
+        augmented = augmented.trim() ? `${selectionCtx}\n\n---\n\n${augmented}` : selectionCtx
+        // The first *artifact*, not the first selection. A file, comment or web
+        // reference has nothing for a revision proposal to diff against, so
+        // reading index 0 blindly would let a staged workspace file silently
+        // disarm the whole review round trip — the AI's reply would then
+        // auto-create a duplicate artifact instead of proposing hunks against
+        // the one the user was actually working on.
+        const primary = contextSelections.find((sel) => sel.kind === "artifact")
+        if (primary) {
+          useChatStore.getState().setPendingArtifactEditTarget(session.id, {
+            artifactId: primary.artifactId,
+            requestId: crypto.randomUUID(),
+          })
+        }
+      }
+
+      // ── Review outcomes ─────────────────────────────────────────────
+      // Close the revision round trip the block above opens. Rejecting a
+      // proposal (or keeping 2 of its 5 hunks) used to be invisible to the
+      // assistant, which could then re-propose exactly what the user had just
+      // turned down. Read here but consumed only once the send commits, below —
+      // the same lifetime as a staged selection — so a receipt rides exactly
+      // one message and survives a send that bails before `onSend`.
+      const sentReceipts = session?.id
+        ? useArtifactStore.getState().peekReviewReceipts(session.id)
+        : []
+      if (sentReceipts.length > 0) {
+        const receiptCtx = formatReviewReceiptsForLLM(sentReceipts)
+        if (receiptCtx) {
+          augmented = augmented.trim() ? `${receiptCtx}\n\n---\n\n${augmented}` : receiptCtx
+        }
+      }
+
+      const linkContext = await buildLinkContextBlocks(text)
+      // `precomputed` makes this a map lookup for anything already extracted at
+      // staging time; files it doesn't cover still extract inline here.
+      const attachmentResult = await buildSendContent(augmented, files, { precomputed })
+      const content = mergeContextBlocks(attachmentResult.content, linkContext.blocks)
+      const rejected = attachmentResult.rejected
+      const tokens = attachmentResult.tokens + linkContext.tokens
       const isEmpty =
         (typeof content === "string" && !content.trim()) ||
         (Array.isArray(content) && content.length === 0)
-      if (isEmpty) return
-      if (rejected > 0) {
-        toast.warning(tAttach("skipped", { count: rejected }))
+      if (isEmpty) return true
+      if (rejected.length > 0) {
+        toast.warning(tAttach("skipped", { count: rejected.length }))
       }
-      await onSend(content)
+      if (linkContext.rejected.length > 0) {
+        toast.warning(tAttach("linkSkipped", { count: linkContext.rejected.length }))
+      }
+      // Oversize guard: above the inline-token ceiling we ask the user to
+      // confirm before sending — never silently truncate. The promise resolves
+      // when they pick an option in the dialog rendered below.
+      if (tokens > INLINE_TOKEN_CEILING) {
+        const ok = await new Promise<boolean>((resolve) => {
+          setOversizeConfirm({ tokens, resolve })
+        })
+        setOversizeConfirm(null)
+        if (!ok) return false
+      }
+      await onSend(content, attachmentResult.manifest)
       clearReferencedPaths()
+      clearContextSelections()
+      useArtifactStore.getState().consumeReviewReceipts(sentReceipts)
+      return true
     },
     [
       onSend,
       handleBashSubmit,
       clearReferencedPaths,
+      clearContextSelections,
       pushSystemMessage,
       tAttach,
       tMemory,
@@ -1293,26 +2572,82 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   }, [])
 
   return (
-    <div className="@container/composer border-t bg-background/70 p-2 sm:p-3">
-      <PromptInputProvider>
-        <ComposerInner
-          session={session}
-          status={promptStatus}
-          disabled={disabled}
-          onSubmit={handleSubmit}
-          onStop={onStop}
-          onCommand={handleSlashCommand}
-          onSubmitMemory={handleMemorySubmit}
-          handleRef={ref}
-          pendingDraftCount={pendingDrafts.length}
-          mentionMode={mentionMode}
-          mentionables={mentionables}
-          placeholder={placeholder}
-          mobileMentionMembers={mobileMentionMembers}
-        />
-        <BottomToolbar session={session ?? null} />
-        <HelperHints />
-      </PromptInputProvider>
+    <div
+      className="@container/composer shrink-0 bg-gradient-to-t from-background via-background/95 to-transparent pb-3 pt-5 sm:pb-4 sm:pt-6"
+      // Frosted-glass chrome over an active wallpaper (app/globals.css §5),
+      // matching the other toolbar surfaces; bg-background/70 stays the
+      // no-wallpaper fallback.
+      data-tonality="glass"
+    >
+      {/* Padding lives INSIDE the max-width cap so the composer box and the
+          message text share one content edge. With the padding on the bar
+          instead, the cap measured the padded box and the composer ran 20px
+          wider per side than the messages above it on any pane past ~872px
+          (see `message-list.tsx`'s reading column, which caps then pads). */}
+      <div
+        className="mx-auto w-full max-w-[52rem] px-3 sm:px-5"
+        data-slot="composer-reading-column"
+      >
+        <PromptInputProvider>
+          {/* Owns per-attachment extraction / order / OCR opt-in. Must sit INSIDE
+              the prompt-input provider: it derives everything from that
+              provider's file list. */}
+          <StagedAttachmentsProvider>
+            <ComposerInner
+              session={session}
+              status={promptStatus}
+              disabled={disabled}
+              onSubmit={handleSubmit}
+              onStop={onStop}
+              onCommand={handleSlashCommand}
+              onSubmitMemory={handleMemorySubmit}
+              handleRef={ref}
+              pendingDraftCount={pendingDrafts.length}
+              mentionMode={mentionMode}
+              mentionables={mentionables}
+              placeholder={placeholder}
+              mobileMentionMembers={mobileMentionMembers}
+              workflowMention={workflowMention}
+              compactLayout={compactLayout}
+              toolbar={
+                compactLayout ? (
+                  <BottomToolbar session={session ?? null} status={status} variant="embedded" />
+                ) : null
+              }
+            />
+            {compactLayout ? null : (
+              <BottomToolbar
+                session={session ?? null}
+                status={status}
+                leading={
+                  session?.platformBinding ? (
+                    <>
+                      <CannedResponsePicker
+                        conversationKey={session.platformBinding.conversationKey}
+                        context={{
+                          conversation: {
+                            title: session.title,
+                            platform: session.platformBinding.platform,
+                          },
+                          contact: { platform: session.platformBinding.platform },
+                        }}
+                      />
+                      <InboxComposerActionsHost
+                        conversationKey={session.platformBinding.conversationKey}
+                        adapterId={session.platformBinding.adapterId}
+                        platform={session.platformBinding.platform}
+                        sessionId={session.id}
+                        className="flex shrink-0 items-center gap-1 empty:hidden"
+                      />
+                    </>
+                  ) : null
+                }
+              />
+            )}
+            <HelperHints />
+          </StagedAttachmentsProvider>
+        </PromptInputProvider>
+      </div>
 
       {/* Draft review dialog — shown when the session has pending connector drafts */}
       <Dialog open={draftDialogOpen} onOpenChange={setDraftDialogOpen}>
@@ -1349,6 +2684,34 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Oversize attachment confirmation — large inlined documents (decision:
+          warn + confirm, never silently truncate). */}
+      <AlertDialog
+        open={oversizeConfirm !== null}
+        onOpenChange={(next) => {
+          if (!next) oversizeConfirm?.resolve(false)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{tAttach("oversizeTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {tAttach("oversizeBody", {
+                tokens: Math.round((oversizeConfirm?.tokens ?? 0) / 1000),
+              })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => oversizeConfirm?.resolve(false)}>
+              {tAttach("oversizeCancel")}
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={() => oversizeConfirm?.resolve(true)}>
+              {tAttach("oversizeConfirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 })

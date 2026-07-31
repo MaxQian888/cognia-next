@@ -10,15 +10,11 @@ import type {
   SkillResource,
   SystemPromptPreset,
   Team,
-} from "@/lib/claude/types"
-import type {
-  PluginAnalyticsRow,
-  PluginPermissionRow,
-  PluginRow,
-  PluginScheduledJobRow,
-} from "@/lib/db/plugin-types"
-import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
+} from "@cognia/agent-config-types"
+import type { PluginAnalyticsRow, PluginPermissionRow, PluginRow } from "@/lib/db/plugin-types"
+import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 import { getDb } from "@/lib/db/schema"
+import { listAllCanvasCommentRows } from "@/lib/db/context-comments"
 import { applyBackupPackage } from "@/lib/data/apply-package"
 import {
   EXPORT_SCHEMA_VERSION,
@@ -66,6 +62,13 @@ export interface DomainSpec {
   key: DomainKey
   /** UI label key under `settings.data.domain.<key>.title`. */
   labelKey: string
+  /**
+   * Human-readable label for plugin-contributed specs. Builtins leave this
+   * unset and are translated via `labelKey`; a plugin has no entry in the
+   * app's message catalog, so without this its row would render the raw key
+   * path. The UI prefers `displayName` when present.
+   */
+  displayName?: string
   /** Read the rows currently in Dexie. Returns the v3 payload subset. */
   read: () => Promise<BackupPayloadV3>
   /** Default merge strategy applied when the user hasn't picked one. */
@@ -162,12 +165,11 @@ export const DOMAIN_TRANSFERS: DomainSpec[] = [
   }),
   makeSpec("plugins", "plugins", async () => {
     const db = getDb()
-    const [plugins, pluginPermissions, pluginScheduledJobs, pluginAnalytics] = (await Promise.all([
+    const [plugins, pluginPermissions, pluginAnalytics] = (await Promise.all([
       db.plugins.toArray(),
       db.pluginPermissions.toArray(),
-      db.pluginScheduledJobs.toArray(),
       db.pluginAnalytics.toArray(),
-    ])) as [PluginRow[], PluginPermissionRow[], PluginScheduledJobRow[], PluginAnalyticsRow[]]
+    ])) as [PluginRow[], PluginPermissionRow[], PluginAnalyticsRow[]]
     // Don't carry built-in plugins (re-seeded locally) or marketplace
     // review caches (remote-derived). Keep permissions/jobs/analytics only
     // for user-installed plugins so the export stays self-contained.
@@ -176,7 +178,6 @@ export const DOMAIN_TRANSFERS: DomainSpec[] = [
     return {
       plugins: userPlugins,
       pluginPermissions: pluginPermissions.filter((r) => userIds.has(r.pluginId)),
-      pluginScheduledJobs: pluginScheduledJobs.filter((r) => userIds.has(r.pluginId)),
       pluginAnalytics: pluginAnalytics.filter((r) => userIds.has(r.pluginId)),
     }
   }),
@@ -185,7 +186,7 @@ export const DOMAIN_TRANSFERS: DomainSpec[] = [
     const [canvasDocuments, canvasVersions, canvasComments, canvasSessions] = await Promise.all([
       db.canvasDocuments.toArray(),
       db.canvasVersions.toArray(),
-      db.canvasComments.toArray(),
+      listAllCanvasCommentRows(),
       db.canvasSessions.toArray(),
     ])
     return { canvasDocuments, canvasVersions, canvasComments, canvasSessions }

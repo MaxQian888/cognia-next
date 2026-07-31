@@ -12,6 +12,7 @@
 
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 
 export interface DevProjectState {
   /** Absolute path to the current plugin project dir, or null if unset. */
@@ -30,6 +31,6 @@ export const useDevProjectStore = create<DevProjectState>()(
       setProject: (dir, name = null) => set({ projectDir: dir, projectName: name }),
       clearProject: () => set({ projectDir: null, projectName: null }),
     }),
-    { name: "cognia-plugin-dev-project" }
+    { name: "cognia-plugin-dev-project", storage: persistLocalStorage() }
   )
 )

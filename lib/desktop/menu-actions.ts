@@ -22,12 +22,15 @@ import type { AppRouterInstance } from "next/dist/shared/lib/app-router-context.
 import { transport } from "@/lib/tauri"
 import { getDb } from "@/lib/db/schema"
 import { listSessions } from "@/lib/db/sessions"
-import { loggers } from "@/lib/logging"
+import { filterExposedSessions } from "@/lib/chat/session-exposure"
+import { loggers } from "@cognia/logging"
 import { desktop as automation } from "@/lib/automation/client"
-import { useChatStore } from "@/stores/chat/chat-store"
+import { startNewSession } from "@/lib/chat/start-session"
+import { isMainAppWindow } from "@/lib/pet/window-role"
 import { useUIStore } from "@/stores/ui/ui-store"
-import { useSettingsStore } from "@/stores/settings"
-import type { AppLanguage, AppSettings, ChatSession } from "@/lib/claude/types"
+import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
+import { useTerminalStore } from "@/stores/terminal/terminal-store"
+import type { AppLanguage, AppSettings, ChatSession } from "@cognia/agent-config-types"
 
 const log = loggers.ui
 
@@ -52,6 +55,13 @@ export const MENU_ACTION_IDS = [
   "toggle-sidebar",
   "toggle-guild-rail",
   "toggle-status-bar",
+  // Added with the shell de-crowding pass. Both panels previously had exactly
+  // one entry point — an icon button in the title bar — so on macOS, where the
+  // in-window menubar is suppressed, folding those buttons into the Views menu
+  // would have left the artifact dock and the terminal unreachable from any
+  // menu at all.
+  "toggle-right-sidebar",
+  "toggle-terminal",
   "reload",
   "toggle-fullscreen",
   "zoom-in",
@@ -66,6 +76,7 @@ export const MENU_ACTION_IDS = [
   // Go
   "go-inbox",
   "go-workflows",
+  "go-sites",
   "go-twin",
   "go-skills",
   "go-plugins",
@@ -157,6 +168,7 @@ export async function verifyMenuActionParity(): Promise<MenuActionParityReport |
 export const GO_ROUTES: Record<string, string> = {
   "go-inbox": "/inbox/all",
   "go-workflows": "/workflows",
+  "go-sites": "/sites",
   "go-twin": "/twin",
   "go-skills": "/skills",
   "go-plugins": "/plugins",
@@ -172,10 +184,23 @@ export const GO_ROUTES: Record<string, string> = {
 // File menu
 // --------------------------------------------------------------------------
 
+/**
+ * Cmd+N / File → New Chat / tray. Starts a real conversation rather than
+ * clearing to the welcome page: `clear()` dropped every open pane and left the
+ * user with no session, so "New Chat" meant something different here than it
+ * did for the in-app "+" and the command palette.
+ *
+ * Main-window only. Rust broadcasts `menu://*` / `tray://*` to EVERY window
+ * (`app.emit`), and the pet overlay / popup / island load this same root
+ * layout, so their subscribers run this too. Creating a session is not
+ * idempotent — without this guard one Cmd+N with the pet overlay open would
+ * create two conversations.
+ */
 export function newChatAction(): void {
+  if (!isMainAppWindow()) return
   log.info("menu action new-chat")
-  useChatStore.getState().clear()
   useUIStore.getState().setSelectedGuild({ kind: "dm" })
+  void startNewSession()
 }
 
 export function newWorkflowAction(router: AppRouterInstance): void {
@@ -204,15 +229,11 @@ export function newCharacterAction(router: AppRouterInstance): void {
 export async function openWorkspaceAction(): Promise<void> {
   log.info("menu action open-workspace")
   try {
-    const { open: openDialog } = await import("@tauri-apps/plugin-dialog")
-    const picked = await openDialog({
-      directory: true,
-      multiple: false,
-      title: "Select workspace",
-    })
-    if (typeof picked === "string") {
-      await useSettingsStore.getState().save({ defaultWorkingDir: picked })
-    }
+    // Unified flow: pick a folder and create/activate a real workspace Project
+    // (visible in the switcher, binds the Git panel + agent cwd). The old
+    // `defaultWorkingDir`-only write was shadowed by the active workspace root.
+    const { openFolderAsWorkspace } = await import("@/lib/workspace/open-folder")
+    await openFolderAsWorkspace()
   } catch (err) {
     log.warn("menu action open-workspace failed", {
       error: err instanceof Error ? err.message : String(err),
@@ -246,7 +267,7 @@ export async function quitAction(): Promise<void> {
 export async function loadRecentSessions(limit = 8): Promise<ChatSession[]> {
   try {
     const all = await listSessions()
-    return all.slice(0, limit)
+    return filterExposedSessions(all, "main-list").slice(0, limit)
   } catch (err) {
     log.warn("menu action loadRecentSessions failed", {
       error: err instanceof Error ? err.message : String(err),
@@ -288,6 +309,16 @@ export function toggleGuildRailAction(): void {
 export function toggleStatusBarAction(): void {
   log.info("menu action toggle-status-bar")
   useUIStore.getState().toggleStatusBar()
+}
+
+export function toggleRightSidebarAction(): void {
+  log.info("menu action toggle-right-sidebar")
+  useArtifactDockLayoutStore.getState().toggleDock()
+}
+
+export function toggleTerminalAction(): void {
+  log.info("menu action toggle-terminal")
+  useTerminalStore.getState().togglePanel()
 }
 
 export function reloadAction(): void {

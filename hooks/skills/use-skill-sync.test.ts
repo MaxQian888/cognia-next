@@ -3,6 +3,24 @@
  */
 import { act, renderHook } from "@testing-library/react"
 
+jest.mock("next-intl", () => ({
+  useTranslations:
+    () =>
+    (key: string, values?: { count?: number }): string => {
+      const count = values?.count
+      const messages: Record<string, string> = {
+        unavailableWrite: "Skill writes are unavailable for the current host.",
+        unavailableRead: "Skills are unavailable for the current host.",
+        noChanges: "No changes.",
+      }
+      if (key === "pushed") return `${count} pushed`
+      if (key === "pulled") return `${count} pulled`
+      if (key === "skipped") return `${count} skipped`
+      if (key === "errored") return `${count} errored`
+      return messages[key] ?? key
+    },
+}))
+
 const isTauriMock = jest.fn().mockReturnValue(true)
 jest.mock("@/lib/tauri", () => ({
   isTauri: () => isTauriMock(),
@@ -12,6 +30,8 @@ const pushMock = jest.fn()
 const pullMock = jest.fn()
 const pushOneMock = jest.fn()
 jest.mock("@/lib/skills/sync", () => ({
+  canReadHostSkills: () => isTauriMock(),
+  canWriteHostSkills: () => isTauriMock(),
   pushAllToNative: () => pushMock(),
   pullAllFromNative: () => pullMock(),
   pushOneToNative: (id: string) => pushOneMock(id),
@@ -44,13 +64,13 @@ beforeEach(() => {
 })
 
 describe("useSkillSync", () => {
-  it("push/pull short-circuit outside Tauri with an error toast", async () => {
+  it("push/pull short-circuit when the current host lacks Skills operations", async () => {
     isTauriMock.mockReturnValue(false)
     const { result } = renderHook(() => useSkillSync())
     await act(async () => {
       await result.current.push()
     })
-    expect(toastError).toHaveBeenCalledWith("Sync requires desktop mode.")
+    expect(toastError).toHaveBeenCalledWith("Skill writes are unavailable for the current host.")
     await act(async () => {
       await result.current.pull()
     })
@@ -118,13 +138,13 @@ describe("useSkillSync", () => {
     expect(toastError).toHaveBeenCalledWith("string-failure")
   })
 
-  it("pushOne short-circuits outside Tauri", async () => {
+  it("pushOne short-circuits when the current host cannot write Skills", async () => {
     isTauriMock.mockReturnValue(false)
     const { result } = renderHook(() => useSkillSync())
     await act(async () => {
       await result.current.pushOne("skill_1")
     })
-    expect(toastError).toHaveBeenCalledWith("Sync requires desktop mode.")
+    expect(toastError).toHaveBeenCalledWith("Skill writes are unavailable for the current host.")
     expect(pushOneMock).not.toHaveBeenCalled()
   })
 

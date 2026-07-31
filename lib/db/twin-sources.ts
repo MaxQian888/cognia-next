@@ -9,7 +9,7 @@
  */
 
 import type { TwinSource, TwinSourceKind, TwinSourceStatus } from "@/types/twin"
-import { getDb } from "./schema"
+import { getDb, withDbReopenRetry } from "./schema"
 
 function newId(): string {
   return "tws_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -37,6 +37,7 @@ export async function createTwinSource(draft: TwinSourceDraft): Promise<TwinSour
     tags: draft.tags,
     redacted: draft.redacted,
     redactionMapEnc: draft.redactionMapEnc,
+    speakers: draft.speakers,
   }
   await getDb().twinSources.add(row)
   return row
@@ -97,10 +98,17 @@ export async function deleteTwinSource(id: string): Promise<void> {
   // Cascade-delete chunks for this source. The runtime (vector store side)
   // is responsible for removing remote vectors via `vectorDocId` before
   // calling this — see `lib/twin/ingest/persist.ts` (Phase 4).
-  const db = getDb()
-  await db.transaction("rw", db.twinSources, db.twinChunks, async () => {
-    await db.twinChunks.where("sourceId").equals(id).delete()
-    await db.twinSources.delete(id)
+  await withDbReopenRetry(async () => {
+    const db = getDb()
+    await db.transaction("rw", db.twinSources, db.twinChunks, async () => {
+      // Keep both IndexedDB requests live in the same transaction. When a
+      // source has no chunks, awaiting that empty delete before scheduling the
+      // source delete can let stricter IDB implementations auto-commit.
+      await Promise.all([
+        db.twinChunks.where("sourceId").equals(id).delete(),
+        db.twinSources.delete(id),
+      ])
+    })
   })
 }
 

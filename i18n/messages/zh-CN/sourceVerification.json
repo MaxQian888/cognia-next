@@ -1,0 +1,32 @@
+{
+  "autoFilterLow": "自动过滤低可信度",
+  "autoFilterLowDesc": "低于阈值的来源直接丢弃",
+  "autoFilterWarning": "可信度低于 {percentage}% 的来源会被静默丢弃。",
+  "blocked": "已屏蔽",
+  "blockedDomainPlaceholder": "example.com",
+  "blockedDomains": "屏蔽",
+  "description": "在结果注入对话前对其可信度打分。",
+  "domainManagement": "信任 / 屏蔽域名",
+  "enableCrossValidation": "交叉验证",
+  "enableCrossValidationDesc": "对比多个来源的论断",
+  "loose": "宽松",
+  "minimumThreshold": "最低可信度",
+  "mode": {
+    "ask": "询问",
+    "askDesc": "弹窗确认",
+    "auto": "自动",
+    "autoDesc": "静默自动验证",
+    "disabled": "关闭",
+    "disabledDesc": "完全跳过验证"
+  },
+  "removeDomain": "移除 {domain}",
+  "rules": "条规则",
+  "showBadges": "显示徽章",
+  "showBadgesDesc": "在结果上显示可信度徽章",
+  "strict": "严格",
+  "title": "来源验证",
+  "trusted": "已信任",
+  "trustedDomainPlaceholder": "example.com",
+  "trustedDomains": "信任",
+  "verificationMode": "模式"
+}

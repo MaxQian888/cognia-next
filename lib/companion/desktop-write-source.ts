@@ -20,13 +20,24 @@
 import { createCharacter, deleteCharacter, updateCharacter } from "@/lib/db/characters"
 import type { CharacterDraft } from "@/lib/db/characters"
 import { approveDraft, rejectDraft } from "@/lib/db/connector-drafts"
+import { enqueueOutbound } from "@/lib/db/outbound-jobs"
 import { attachSession, detachSession } from "@/lib/companion/remote-attach-registry"
+import {
+  handleTeamRunPause,
+  handleTeamRunResume,
+  handleTeamRunStop,
+  handleTeamTaskComment,
+  handleTeamTaskCreate,
+  handleTeamTaskMove,
+} from "@/lib/companion/agent-team-write-handlers"
 import { getGoalRuntime } from "@/lib/goal/runtime"
 import { getDb } from "@/lib/db/schema"
 import { getSettings, saveSettings } from "@/lib/db/settings"
-import type { AppSettings, StoredMessage } from "@/lib/claude/types"
+import type { AppSettings, StoredMessage } from "@cognia/agent-config-types"
 import { enqueueIngestJob } from "@/lib/twin/ingest"
 import { dispatchTrigger } from "@/lib/workflow/runtime/trigger-bridge"
+import { isCapabilityId } from "@/lib/platform/capabilities"
+import { recordDeviceCapabilities } from "@/lib/db/paired-devices"
 import {
   createWorkflow,
   deleteWorkflow,
@@ -36,10 +47,34 @@ import {
   type WorkflowPatch,
 } from "@/lib/db/workflows"
 import { createWorkflowSource } from "@/lib/scheduler/sources/workflow-source"
-import { requestCancelRun } from "@/lib/workflow/runtime/run-cancel-registry"
-import { deleteTwin } from "@/lib/db/twins"
-import { deleteTwinSource, listTwinSourcesByTwin, updateTwinSource } from "@/lib/db/twin-sources"
-import type { TwinSource } from "@/types/twin"
+import { dispatchScheduledTaskRpc, isScheduledTaskRpc } from "@/lib/scheduler/scheduled-task-rpc"
+import { createTwin, deleteTwin, type TwinInput } from "@/lib/db/twins"
+import {
+  createTwinSource,
+  deleteTwinSource,
+  listTwinSourcesByTwin,
+  updateTwinSource,
+  type TwinSourceDraft,
+} from "@/lib/db/twin-sources"
+import {
+  addEntity,
+  addPlaybook,
+  addStyleSample,
+  removeEntity,
+  removePlaybook,
+  removeStyleSample,
+  resetTwinProfile,
+  setEntityPinned,
+  setPlaybookPinned,
+  setStyleSamplePinned,
+  setVoiceSummary,
+  updateEntity,
+  updatePlaybook,
+  updateStyleSample,
+} from "@/lib/db/twin-profile"
+import { getActiveGoalForSession, getGoal, listGoalsBySession } from "@/lib/db/goals"
+import type { GoalConfig } from "@/types/goal"
+import type { Playbook, ProfileEntity, StyleSample, TwinSource } from "@/types/twin"
 import {
   cancelJob,
   getTwinJob,
@@ -60,6 +95,12 @@ import type {
   ImportOptions,
   ImportMergeStrategy,
 } from "@/lib/data/types"
+import { adaptPermissionMode } from "@/lib/ai/agent/external/permission-modes"
+import type {
+  AcpPermissionMode,
+  ExternalAgentProtocol,
+  UpdateExternalAgentInput,
+} from "@/types/agent/external-agent"
 import { listen } from "@tauri-apps/api/event"
 import { invoke } from "@tauri-apps/api/core"
 
@@ -130,6 +171,9 @@ export async function dispatchCommand(
   command: string,
   payload: Record<string, unknown>
 ): Promise<unknown> {
+  if (isScheduledTaskRpc(command)) {
+    return dispatchScheduledTaskRpc(command, payload)
+  }
   switch (command) {
     case "character_upsert":
       return characterUpsert(payload)
@@ -147,6 +191,10 @@ export async function dispatchCommand(
       return appSettingsUpdate(payload)
     case "twin_profile_get":
       return twinProfileGet(payload)
+    case "host_capabilities":
+      return hostCapabilities()
+    case "host_feature_manifest":
+      return hostFeatureManifest(payload)
     // Mobile outbound-queue commands (Gap 3 reconciliation) — these go
     // through the same generic desktop_writes_bridge but land in
     // subsystem-specific dispatch arms below. Production callers:
@@ -163,6 +211,14 @@ export async function dispatchCommand(
       return connectorRejectDraft(payload)
     case "workflow_trigger_manual":
       return workflowTriggerManual(payload)
+    case "workflow_approval_list":
+      return workflowApprovalList()
+    case "workflow_approval_respond":
+      return workflowApprovalRespond(payload)
+    case "workflow_step_result":
+      return workflowStepResult(payload)
+    case "device_capabilities_report":
+      return deviceCapabilitiesReport(payload)
     case "twin_ingest_source":
       return twinIngestSource(payload)
     // Remote Session Control — attach / detach a remote watcher to a host
@@ -183,6 +239,21 @@ export async function dispatchCommand(
       return goalTransition(payload, "resume")
     case "goal_stop":
       return goalTransition(payload, "stop")
+    // Agent-Team board control (team-board CQRS). Handlers revalidate every
+    // move through the shared canMoveTask guard and answer { ok, reason? } —
+    // see lib/companion/agent-team-write-handlers.ts.
+    case "team_task_move":
+      return handleTeamTaskMove(payload)
+    case "team_task_create":
+      return handleTeamTaskCreate(payload)
+    case "team_task_comment":
+      return handleTeamTaskComment(payload)
+    case "team_run_pause":
+      return handleTeamRunPause(payload)
+    case "team_run_resume":
+      return handleTeamRunResume(payload)
+    case "team_run_stop":
+      return handleTeamRunStop(payload)
     // Workflow CRUD (ADR-0027 Wave 4.1). Definitions live in Dexie; these
     // mirror the desktop editor's create/update/delete + schedule pause/resume
     // and a run listing + remote cancel.
@@ -219,6 +290,43 @@ export async function dispatchCommand(
       return twinJobAction(payload, "resume")
     case "twin_job_retry":
       return twinJobAction(payload, "retry")
+    case "twin_create":
+      return twinCreate(payload)
+    case "twin_source_create":
+      return twinSourceCreate(payload)
+    case "twin_profile_update":
+      return twinProfileUpdate(payload)
+    // Goal create / update / status (coarse remote surface).
+    case "goal_create":
+      return goalCreate(payload)
+    case "goal_update":
+      return goalUpdate(payload)
+    case "goal_status":
+      return goalStatus(payload)
+    // Long-term memory (ADR-0069). All five delegate to the shared
+    // `lib/memory/api/*` helpers with `sourceChannel: "rpc"` — PII gate,
+    // `external` provenance, never procedural. Writes are CONTROL-gated on
+    // the Rust side; policy blocks come back as structured `{ ok: false }`.
+    case "memory_search":
+      return memorySearchRpc(payload)
+    case "memory_list":
+      return memoryListRpc(payload)
+    case "memory_store":
+      return memoryStoreRpc(payload)
+    case "memory_update":
+      return memoryUpdateRpc(payload)
+    case "memory_forget":
+      return memoryForgetRpc(payload)
+    // External agents (ADR-0056, Wave 4). The desktop's external-agent config
+    // lives in the `cognia-external-agents` Zustand/localStorage store (NOT a
+    // Dexie table, so no sync mirror) — these arms project + mutate it for the
+    // phone's `/me/external-agents` page.
+    //   - external_agent_list   → read-only projection (mirrors twin_profile_get)
+    //   - external_agent_update → enable/disable + permission-mode edit
+    case "external_agent_list":
+      return externalAgentList()
+    case "external_agent_update":
+      return externalAgentUpdate(payload)
     // Settings — per-conversation overrides (pin/archive/title).
     case "conversation_overrides_update":
       return conversationOverridesUpdate(payload)
@@ -266,6 +374,222 @@ async function goalTransition(
   return { goal }
 }
 
+/** Read string[] nameHints from the payload, tolerating an absent field. */
+function readNameHints(payload: Record<string, unknown>): string[] {
+  const raw = payload.nameHints
+  if (raw === undefined || raw === null) return []
+  if (!Array.isArray(raw) || raw.some((s) => typeof s !== "string")) {
+    throw new Error("nameHints must be an array of strings")
+  }
+  return raw as string[]
+}
+
+/**
+ * Start a new self-driving goal for a session. Delegates to the canonical
+ * `GoalRuntime.createGoal`, so every guardrail the desktop /goal command runs
+ * (PII redaction of the objective, the IM opt-in gate, /loop exclusivity,
+ * superseding an existing open goal) applies identically to the remote path.
+ * App settings are loaded locally to feed the redaction allowlist.
+ */
+async function goalCreate(payload: Record<string, unknown>): Promise<{ goal: unknown }> {
+  const sessionId = payload.sessionId as string | undefined
+  const rawObjective = payload.rawObjective as string | undefined
+  if (!sessionId) throw new Error("goal_create.sessionId is required")
+  if (typeof rawObjective !== "string" || rawObjective.trim().length === 0) {
+    throw new Error("goal_create.rawObjective is required")
+  }
+  const appSettings = await getSettings().catch(() => null)
+  const goal = await getGoalRuntime().createGoal({
+    sessionId,
+    rawObjective,
+    characterId: payload.characterId as string | undefined,
+    config: payload.config as Partial<GoalConfig> | undefined,
+    nameHints: readNameHints(payload),
+    startPaused: payload.startPaused === true,
+    appSettings,
+    // A paired device drives this — the operator is not at the desktop's
+    // Continue button, so treat it as headless for manual-continue (ADR-0070
+    // Phase 2). The acceptance gate still applies and resolves from either end.
+    origin: "remote",
+  })
+  return { goal }
+}
+
+/**
+ * Re-aim or reconfigure an open goal. `rawObjective` re-runs the redaction +
+ * objective-update flow (returning the model-facing update prompt); `config`
+ * patches the goal config. At least one must be present.
+ */
+async function goalUpdate(
+  payload: Record<string, unknown>
+): Promise<{ goal: unknown; updatePrompt?: string }> {
+  const goalId = payload.goalId as string | undefined
+  if (!goalId) throw new Error("goal_update.goalId is required")
+  const rawObjective = payload.rawObjective as string | undefined
+  const config = payload.config as Partial<GoalConfig> | undefined
+  if (rawObjective === undefined && config === undefined) {
+    throw new Error("goal_update requires rawObjective and/or config")
+  }
+
+  let goal: unknown = null
+  let updatePrompt: string | undefined
+  if (rawObjective !== undefined) {
+    if (typeof rawObjective !== "string" || rawObjective.trim().length === 0) {
+      throw new Error("goal_update.rawObjective must be a non-empty string")
+    }
+    const result = await getGoalRuntime().updateObjective(
+      goalId,
+      rawObjective,
+      readNameHints(payload)
+    )
+    // `null` means the goal is missing/terminal or the objective is unchanged.
+    if (result) {
+      goal = result.goal
+      updatePrompt = result.updatePrompt
+    }
+  }
+  if (config !== undefined) {
+    if (!config || typeof config !== "object") {
+      throw new Error("goal_update.config must be an object")
+    }
+    goal = await getGoalRuntime().updateConfig(goalId, config)
+  }
+  // Fall back to the current persisted state when nothing changed, so the
+  // caller always gets the goal it referenced rather than a bare null.
+  if (goal === null) {
+    goal = (await getGoal(goalId)) ?? null
+  }
+  return { goal, updatePrompt }
+}
+
+/**
+ * Read goal status. With `goalId`, returns that goal; with `sessionId`,
+ * returns the session's active goal plus the full goal list. Pure read.
+ */
+async function goalStatus(
+  payload: Record<string, unknown>
+): Promise<{ goal?: unknown; activeGoal?: unknown; goals?: unknown[] }> {
+  const goalId = payload.goalId as string | undefined
+  if (goalId) {
+    const goal = await getGoal(goalId)
+    return { goal: goal ?? null }
+  }
+  const sessionId = payload.sessionId as string | undefined
+  if (!sessionId) {
+    throw new Error("goal_status requires goalId or sessionId")
+  }
+  const [activeGoal, goals] = await Promise.all([
+    getActiveGoalForSession(sessionId),
+    listGoalsBySession(sessionId),
+  ])
+  return { activeGoal: activeGoal ?? null, goals }
+}
+
+// ── Long-term memory (ADR-0069) ─────────────────────────────────────────────
+
+async function memorySearchRpc(payload: Record<string, unknown>): Promise<unknown> {
+  const query = payload.query as string | undefined
+  if (typeof query !== "string" || query.trim().length === 0) {
+    throw new Error("memory_search.query is required")
+  }
+  const { searchMemoriesExternal } = await import("@/lib/memory/api/search-memory")
+  const result = await searchMemoriesExternal({
+    query,
+    topK: typeof payload.k === "number" ? payload.k : undefined,
+    types: payload.types as never,
+    characterId: payload.characterId as string | undefined,
+    projectId: payload.projectId as string | undefined,
+    agentId: payload.agentId as string | undefined,
+    branch: payload.branch as string | undefined,
+    path: payload.path as string | undefined,
+  })
+  if (!result.ok) return result
+  const { toMemoryWireRow } = await import("@/lib/memory/api/wire")
+  return {
+    ok: true,
+    hits: result.hits.map((h) => ({
+      memory: toMemoryWireRow(h.memory),
+      relevance: h.relevance,
+      score: h.score,
+    })),
+  }
+}
+
+async function memoryListRpc(payload: Record<string, unknown>): Promise<unknown> {
+  const [{ getSettings: loadSettings }, { resolveMemoryConfig }] = await Promise.all([
+    import("@/lib/db/settings"),
+    import("@/types/memory/memory"),
+  ])
+  const settings = await loadSettings().catch(() => undefined)
+  const config = resolveMemoryConfig(settings?.memory)
+  if (!config.enabled) return { ok: false, reason: "disabled" }
+  if (config.temporary) return { ok: false, reason: "temporary" }
+  const [{ listMemories }, { toMemoryWireRow }] = await Promise.all([
+    import("@/lib/db/memories"),
+    import("@/lib/memory/api/wire"),
+  ])
+  const rows = await listMemories({
+    type: payload.type as never,
+    scope: payload.scope as never,
+    characterId: payload.characterId as string | undefined,
+    projectId: payload.projectId as string | undefined,
+    agentId: payload.agentId as string | undefined,
+    branch: payload.branch as string | undefined,
+    pathPattern: payload.pathPattern as string | undefined,
+    status: "active",
+  })
+  const limit = Math.min(200, Math.max(1, typeof payload.limit === "number" ? payload.limit : 50))
+  return { ok: true, memories: rows.slice(0, limit).map(toMemoryWireRow) }
+}
+
+async function memoryStoreRpc(payload: Record<string, unknown>): Promise<unknown> {
+  const text = payload.text as string | undefined
+  if (typeof text !== "string" || text.trim().length === 0) {
+    throw new Error("memory_store.text is required")
+  }
+  const { storeExternalMemory } = await import("@/lib/memory/api/store-memory")
+  return storeExternalMemory(
+    {
+      text,
+      type: payload.type as never,
+      scope: payload.scope as never,
+      characterId: payload.characterId as string | undefined,
+      projectId: payload.projectId as string | undefined,
+      agentId: payload.agentId as string | undefined,
+      branch: payload.branch as string | undefined,
+      pathPattern: payload.pathPattern as string | undefined,
+      key: payload.key as string | undefined,
+      importance: typeof payload.importance === "number" ? payload.importance : undefined,
+      tags: payload.tags as string[] | undefined,
+    },
+    { channel: "rpc" }
+  )
+}
+
+async function memoryUpdateRpc(payload: Record<string, unknown>): Promise<unknown> {
+  const id = payload.id as string | undefined
+  if (typeof id !== "string" || id.trim().length === 0) {
+    throw new Error("memory_update.id is required")
+  }
+  const { updateExternalMemory } = await import("@/lib/memory/api/mutate-memory")
+  return updateExternalMemory(id, {
+    text: payload.text as string | undefined,
+    importance: typeof payload.importance === "number" ? payload.importance : undefined,
+    tags: payload.tags as string[] | undefined,
+    key: payload.key as string | undefined,
+    pinned: typeof payload.pinned === "boolean" ? payload.pinned : undefined,
+  })
+}
+
+async function memoryForgetRpc(payload: Record<string, unknown>): Promise<unknown> {
+  const id = payload.id as string | undefined
+  if (typeof id !== "string" || id.trim().length === 0) {
+    throw new Error("memory_forget.id is required")
+  }
+  const { forgetExternalMemory } = await import("@/lib/memory/api/mutate-memory")
+  return forgetExternalMemory(id)
+}
+
 async function characterUpsert(payload: Record<string, unknown>): Promise<{ character: unknown }> {
   const id = payload.id as string | undefined
   const draft = payload.draft as CharacterDraft
@@ -311,13 +635,48 @@ async function skillSetEnabled(payload: Record<string, unknown>): Promise<null> 
   return null
 }
 
+/** A plugin enable/disable failure that is NOT a genuine runtime error
+ *  (dependency / activation failure) but rather "there is no live manager to
+ *  drive here" — an uninitialized PluginManager (headless cognia-server, or a
+ *  test context) or a plugin the running store has never discovered. In those
+ *  cases we safely fall back to persisting the flag. Genuine enable failures
+ *  must surface to the caller, not be masked by a silent flag flip. */
+function isPluginManagerUnavailable(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return /initialized PluginManager|Plugin not found/i.test(message)
+}
+
 async function pluginSetEnabled(payload: Record<string, unknown>): Promise<null> {
   const id = payload.id as string | undefined
   const enabled = payload.enabled as boolean | undefined
   if (!id) throw new Error("plugin_set_enabled.id is required")
   if (typeof enabled !== "boolean") throw new Error("plugin_set_enabled.enabled must be boolean")
-  await getDb().plugins.update(id, { enabled, updatedAt: Date.now() })
-  return null
+
+  // Mirror the desktop toggle: drive the live PluginManager through the plugin
+  // runtime store so the plugin actually loads/unloads, its required
+  // dependencies are resolved, contributions register/unregister, and the
+  // enabled flag is persisted to Dexie + the Rust backend by the manager's
+  // `syncBackendStatus`. A bare Dexie flag write (the previous behavior) only
+  // took effect on the next renderer reload and skipped dependency resolution.
+  try {
+    const { usePluginStore } = await import("@/stores/plugin-runtime/plugin-store")
+    const store = usePluginStore.getState()
+    if (enabled) {
+      await store.enablePlugin(id)
+    } else {
+      await store.disablePlugin(id)
+    }
+    return null
+  } catch (error) {
+    // No live manager (headless / uninitialized) or unknown-to-store plugin:
+    // persist the flag so it applies on the next load. Re-throw genuine enable
+    // failures (dependency / activation errors) so the remote caller sees them.
+    if (isPluginManagerUnavailable(error)) {
+      await getDb().plugins.update(id, { enabled, updatedAt: Date.now() })
+      return null
+    }
+    throw error
+  }
 }
 
 type ConnectorMode = "auto" | "manual" | "draft"
@@ -384,6 +743,45 @@ async function twinProfileGet(payload: Record<string, unknown>): Promise<unknown
   return { profile: profile ?? null }
 }
 
+/**
+ * What this host can do, from the host's own point of view.
+ *
+ * A client driving a remote host had no way to ask this. `remoteCapabilityUnion`
+ * aggregates devices that paired *into* this machine, so it structurally cannot
+ * see the host you are driving — which meant workflow preflight judged a remote
+ * cloud server by the desktop's own baseline and rejected `always-on` /
+ * `headless` work the server could have run.
+ *
+ * Answered here rather than in Rust deliberately: the capability vocabulary
+ * lives in `lib/platform/capabilities.ts`, and this handler is installed by both
+ * the desktop renderer and the headless brain, so one implementation serves both
+ * kinds of host and there is no second list to drift.
+ */
+async function hostCapabilities(): Promise<unknown> {
+  const [{ detectLocalCapabilities }, { detectPlatform }] = await Promise.all([
+    import("@/lib/platform/capabilities"),
+    import("@/lib/platform/detect"),
+  ])
+  return { platform: detectPlatform(), capabilities: detectLocalCapabilities() }
+}
+
+async function hostFeatureManifest(payload: Record<string, unknown>): Promise<unknown> {
+  const [{ buildLocalHostFeatureManifest }, { detectPlatform }] = await Promise.all([
+    import("@/lib/platform/host-feature-manifest"),
+    import("@/lib/platform/detect"),
+  ])
+  const callerDeviceGrants = payload.callerDeviceGrants
+  const deviceGrants =
+    Array.isArray(callerDeviceGrants) &&
+    callerDeviceGrants.every((grant) => typeof grant === "string" && grant.length > 0)
+      ? callerDeviceGrants
+      : undefined
+  return buildLocalHostFeatureManifest({
+    platform: detectPlatform(),
+    deviceGrants,
+  })
+}
+
 // ---------------------------------------------------------------------------
 // Mobile outbound-queue handlers (Gap 3 reconciliation)
 // ---------------------------------------------------------------------------
@@ -392,7 +790,14 @@ type ConnectorSegment = { type?: string; text?: string }
 
 /** Insert a user-authored message into the named session. Production caller
  *  is the share-target page, which receives a piece of shared text/url from
- *  the OS and routes it to a selected chat session. */
+ *  the OS and routes it to a selected chat session.
+ *
+ *  NOTE: the `connector_send` name is historical (it shares the mobile
+ *  outbound-queue command set) — this does NOT transmit to any external
+ *  connector platform and does NOT trigger an AI reply. It only appends a
+ *  local `role: "user"` message row. Real connector outbound goes through
+ *  `connector_approve_draft` → the desktop outbound runner; an AI turn goes
+ *  through `claude_send`. */
 async function connectorSend(payload: Record<string, unknown>): Promise<{ messageId: string }> {
   const sessionId = payload.sessionId as string | undefined
   const segmentsRaw = payload.segments as unknown
@@ -424,6 +829,15 @@ async function connectorSend(payload: Record<string, unknown>): Promise<{ messag
 async function connectorApproveDraft(payload: Record<string, unknown>): Promise<null> {
   const draftId = payload.draftId as string | undefined
   if (!draftId) throw new Error("connector_approve_draft.draftId is required")
+  const draft = await getDb().connectorDrafts.get(draftId)
+  if (draft?.outboundPreview) {
+    await enqueueOutbound({
+      adapterId: draft.outboundPreview.conversationRef.adapterId,
+      conversationKey: draft.conversationKey,
+      request: draft.outboundPreview,
+      source: "draft-approved",
+    })
+  }
   await approveDraft(draftId)
   return null
 }
@@ -443,12 +857,86 @@ async function connectorRejectDraft(payload: Record<string, unknown>): Promise<n
 async function workflowTriggerManual(payload: Record<string, unknown>): Promise<null> {
   const workflowId = payload.workflowId as string | undefined
   if (!workflowId) throw new Error("workflow_trigger_manual.workflowId is required")
-  await dispatchTrigger({
-    workflowId,
-    kind: "trigger.manual",
-    payload: payload.input ?? null,
-    originAt: Date.now(),
+  // `callerDeviceId` is injected by the Rust RPC layer from the verified
+  // device JWT (ADR-0060) — never trusted from the raw client payload.
+  const deviceId = payload.callerDeviceId as string | undefined
+  await dispatchTrigger(
+    {
+      workflowId,
+      kind: "trigger.manual",
+      payload: payload.input ?? null,
+      originAt: Date.now(),
+    },
+    { triggeredBy: { source: "api", ...(deviceId ? { deviceId } : {}) } }
+  )
+  return null
+}
+
+/** Read-only projection of the pending workflow-approval registry (ADR-0061). */
+async function workflowApprovalList(): Promise<{ approvals: unknown[] }> {
+  const { listPendingApprovals } = await import("@/lib/workflow/runtime/approval-registry")
+  return { approvals: listPendingApprovals() }
+}
+
+/** Resolve a pending `action.approval.request` gate from a paired device.
+ *  Control-gated in Rust; the responder identity is the JWT-verified
+ *  `callerDeviceId` injected by the RPC layer (spoof-proof). */
+async function workflowApprovalRespond(
+  payload: Record<string, unknown>
+): Promise<{ ok: boolean; reason?: string }> {
+  const approvalIdArg = payload.approvalId as string | undefined
+  if (!approvalIdArg) throw new Error("workflow_approval_respond.approvalId is required")
+  const decision = payload.decision
+  if (decision !== "approved" && decision !== "rejected") {
+    throw new Error("workflow_approval_respond.decision must be 'approved' or 'rejected'")
+  }
+  const deviceId = payload.callerDeviceId as string | undefined
+  const { respondToApproval } = await import("@/lib/workflow/runtime/approval-registry")
+  const result = respondToApproval(approvalIdArg, {
+    decision,
+    respondedBy: deviceId ? `device:${deviceId}` : "companion",
   })
+  return result.ok ? { ok: true } : { ok: false, reason: result.reason }
+}
+
+/** Feed one chunk of a remote-step result into the broker (ADR-0061 P3).
+ *  The responder identity is the JWT-injected `callerDeviceId`; the broker
+ *  rejects answers from any device other than the request's target. */
+async function workflowStepResult(
+  payload: Record<string, unknown>
+): Promise<{ ok: boolean; complete?: boolean; reason?: string }> {
+  const deviceId = payload.callerDeviceId as string | undefined
+  if (!deviceId) throw new Error("workflow_step_result.callerDeviceId is required")
+  const requestId = payload.requestId as string | undefined
+  if (!requestId) throw new Error("workflow_step_result.requestId is required")
+  const { resolveRemoteStep } = await import("@/lib/workflow/runtime/remote-step-broker")
+  const outcome = resolveRemoteStep(deviceId, {
+    requestId,
+    seq: payload.seq as number,
+    total: payload.total as number,
+    chunk: payload.chunk as string,
+  })
+  return outcome.ok
+    ? { ok: true, complete: outcome.complete }
+    : { ok: false, reason: outcome.reason }
+}
+
+/** Hard cap on the persisted capability list — well above the core vocabulary
+ *  plus any sane number of `plugin:<id>` tags; bounds a hostile payload. */
+const MAX_REPORTED_CAPABILITIES = 64
+
+/** Persist a paired device's platform capability manifest (ADR-0060) onto its
+ *  `pairedDevices` row. `callerDeviceId` comes from the Rust RPC layer (JWT
+ *  identity, spoof-proof); the capability list is validated + capped here. */
+async function deviceCapabilitiesReport(payload: Record<string, unknown>): Promise<null> {
+  const deviceId = payload.callerDeviceId as string | undefined
+  if (!deviceId) throw new Error("device_capabilities_report.callerDeviceId is required")
+  const raw = payload.capabilities
+  if (!Array.isArray(raw)) {
+    throw new Error("device_capabilities_report.capabilities must be an array")
+  }
+  const capabilities = raw.filter(isCapabilityId).slice(0, MAX_REPORTED_CAPABILITIES)
+  await recordDeviceCapabilities(deviceId, capabilities)
   return null
 }
 
@@ -457,9 +945,21 @@ async function workflowTriggerManual(payload: Record<string, unknown>): Promise<
 async function twinIngestSource(payload: Record<string, unknown>): Promise<{ jobId: string }> {
   const twinId = payload.twinId as string | undefined
   if (!twinId) throw new Error("twin_ingest_source.twinId is required")
+  // Scope the ingest to the caller-supplied source ids when present; an
+  // omitted or empty list means "ingest every source attached to the twin"
+  // (the desktop scheduler's default). Reject a malformed `sourceIds` rather
+  // than silently widening the scope.
+  const rawSourceIds = payload.sourceIds
+  let sourceIds: string[] = []
+  if (rawSourceIds !== undefined && rawSourceIds !== null) {
+    if (!Array.isArray(rawSourceIds) || rawSourceIds.some((s) => typeof s !== "string")) {
+      throw new Error("twin_ingest_source.sourceIds must be an array of strings")
+    }
+    sourceIds = rawSourceIds as string[]
+  }
   const job = await enqueueIngestJob({
     twinId,
-    sourceIds: [],
+    sourceIds,
   })
   return { jobId: job.id }
 }
@@ -503,30 +1003,15 @@ async function workflowRunList(payload: Record<string, unknown>): Promise<{ runs
   return { runs }
 }
 
-const TERMINAL_RUN_STATUSES = new Set(["succeeded", "failed", "cancelled"])
-
 async function workflowCancelRun(
   payload: Record<string, unknown>
-): Promise<{ cancelled: boolean; live: boolean }> {
+): Promise<{ cancelled: boolean; live: boolean; mode: string }> {
   const runId = payload.runId as string | undefined
   if (!runId) throw new Error("workflow_cancel_run.runId is required")
-  // Abort a run executing in this runtime, if any.
-  const live = requestCancelRun(runId, "cancelled via Companion API")
-  // Soft-cancel: when the run is not live here (e.g. already finished, or owned
-  // by another process) mark a non-terminal row as cancelled so the UI reflects
-  // it. A live abort lets the orchestrator finalize the row itself.
-  let cancelled = live
-  if (!live) {
-    const row = await getDb().workflowRuns.get(runId)
-    if (row && !TERMINAL_RUN_STATUSES.has(row.status)) {
-      await getDb().workflowRuns.update(runId, {
-        status: "cancelled",
-        completedAt: Date.now(),
-      })
-      cancelled = true
-    }
-  }
-  return { cancelled, live }
+  // Shared cancel ladder (ADR 0061 P4): local abort → lease signal to the
+  // owning executor → soft-cancel with companion fan-out.
+  const { cancelWorkflowRun } = await import("@/lib/workflow/runtime/cancel-run")
+  return cancelWorkflowRun(runId, "cancelled via Companion API")
 }
 
 async function workflowScheduleSet(
@@ -582,6 +1067,135 @@ async function twinSourceDelete(payload: Record<string, unknown>): Promise<null>
   return null
 }
 
+/** Create a new twin. Closes the "remote can delete but not create" gap. */
+async function twinCreate(payload: Record<string, unknown>): Promise<{ twin: unknown }> {
+  const input = payload.twin as TwinInput | undefined
+  if (!input || typeof input !== "object") {
+    throw new Error("twin_create.twin is required")
+  }
+  if (typeof input.name !== "string" || input.name.trim().length === 0) {
+    throw new Error("twin_create.twin.name is required")
+  }
+  const twin = await createTwin(input)
+  return { twin }
+}
+
+/** Create a new twin source row (the remote add-path that `twin_ingest_source`
+ *  never provided — ingest scopes existing sources but does not create them). */
+async function twinSourceCreate(payload: Record<string, unknown>): Promise<{ source: unknown }> {
+  const draft = payload.source as TwinSourceDraft | undefined
+  if (!draft || typeof draft !== "object") {
+    throw new Error("twin_source_create.source is required")
+  }
+  if (typeof draft.twinId !== "string" || draft.twinId.length === 0) {
+    throw new Error("twin_source_create.source.twinId is required")
+  }
+  const source = await createTwinSource(draft)
+  return { source }
+}
+
+/**
+ * Unified twin-profile mutation. A single coarse RPC arm covers the whole
+ * persona-edit surface (voice summary, entities, playbooks, style samples,
+ * reset) via a discriminated `op`, so the remote device has parity with the
+ * desktop profile editor without exploding the wire surface into ~15 arms.
+ * Returns the updated profile.
+ */
+async function twinProfileUpdate(payload: Record<string, unknown>): Promise<{ profile: unknown }> {
+  const twinId = payload.twinId as string | undefined
+  const op = payload.op as string | undefined
+  if (!twinId) throw new Error("twin_profile_update.twinId is required")
+  if (!op) throw new Error("twin_profile_update.op is required")
+
+  const requireString = (field: string): string => {
+    const v = payload[field]
+    if (typeof v !== "string" || v.length === 0) {
+      throw new Error(`twin_profile_update.${field} is required for op=${op}`)
+    }
+    return v
+  }
+  const requireObject = <T>(field: string): T => {
+    const v = payload[field]
+    if (!v || typeof v !== "object") {
+      throw new Error(`twin_profile_update.${field} is required for op=${op}`)
+    }
+    return v as T
+  }
+  const requireBool = (field: string): boolean => {
+    const v = payload[field]
+    if (typeof v !== "boolean") {
+      throw new Error(`twin_profile_update.${field} must be boolean for op=${op}`)
+    }
+    return v
+  }
+
+  let profile: unknown
+  switch (op) {
+    case "setVoiceSummary":
+      profile = await setVoiceSummary(twinId, requireString("voiceSummary"))
+      // setVoiceSummary returns void — re-read for a consistent envelope below.
+      break
+    case "reset":
+      profile = await resetTwinProfile(twinId)
+      break
+    case "addEntity":
+      profile = await addEntity(twinId, requireObject<ProfileEntity>("entity"))
+      break
+    case "updateEntity":
+      profile = await updateEntity(
+        twinId,
+        requireString("name"),
+        requireObject<ProfileEntity>("entity")
+      )
+      break
+    case "removeEntity":
+      profile = await removeEntity(twinId, requireString("name"))
+      break
+    case "setEntityPinned":
+      profile = await setEntityPinned(twinId, requireString("name"), requireBool("pinned"))
+      break
+    case "addPlaybook":
+      profile = await addPlaybook(twinId, requireObject<Playbook>("playbook"))
+      break
+    case "updatePlaybook":
+      profile = await updatePlaybook(
+        twinId,
+        requireString("playbookId"),
+        requireObject<Playbook>("playbook")
+      )
+      break
+    case "removePlaybook":
+      profile = await removePlaybook(twinId, requireString("playbookId"))
+      break
+    case "setPlaybookPinned":
+      profile = await setPlaybookPinned(twinId, requireString("playbookId"), requireBool("pinned"))
+      break
+    case "addStyleSample":
+      profile = await addStyleSample(twinId, requireObject<StyleSample>("sample"))
+      break
+    case "updateStyleSample":
+      profile = await updateStyleSample(
+        twinId,
+        requireString("sampleId"),
+        requireObject<StyleSample>("sample")
+      )
+      break
+    case "removeStyleSample":
+      profile = await removeStyleSample(twinId, requireString("sampleId"))
+      break
+    case "setStyleSamplePinned":
+      profile = await setStyleSamplePinned(twinId, requireString("sampleId"), requireBool("pinned"))
+      break
+    default:
+      throw new Error(`twin_profile_update.op is not supported: ${op}`)
+  }
+  // `setVoiceSummary` resolves to void; re-read so every op returns the profile.
+  if (op === "setVoiceSummary") {
+    profile = (await getDb().twinProfile.get(twinId)) ?? null
+  }
+  return { profile: profile ?? null }
+}
+
 async function twinJobStatus(payload: Record<string, unknown>): Promise<unknown> {
   const jobId = payload.jobId as string | undefined
   if (jobId) {
@@ -617,6 +1231,115 @@ async function twinJobAction(
       break
   }
   return null
+}
+
+// ---------------------------------------------------------------------------
+// External agents (ADR-0056, Wave 4)
+// ---------------------------------------------------------------------------
+
+/** Compact, wire-safe projection of one external agent for the phone list. */
+interface ExternalAgentSummary {
+  id: string
+  name: string
+  protocol: ExternalAgentProtocol
+  transport: string
+  enabled: boolean
+  defaultPermissionMode: AcpPermissionMode
+}
+
+/** Lazily reach the desktop Zustand store. Dynamic so the heavy
+ *  persist-backed store (and `localStorage`) is only touched on the desktop
+ *  dispatch path, never at module import time (keeps the headless/test paths
+ *  and the SSR bundle clean). */
+async function getExternalAgentStoreState() {
+  const { useExternalAgentStore } = await import("@/stores/agent/external-agent-store")
+  return useExternalAgentStore.getState()
+}
+
+/** Read-only projection of the desktop's configured external agents. Mirrors
+ *  the `twin_profile_get` read arm — invoked directly via `transport.call`,
+ *  not through the outbound queue. */
+async function externalAgentList(): Promise<{ agents: ExternalAgentSummary[] }> {
+  const store = await getExternalAgentStoreState()
+  const agents: ExternalAgentSummary[] = store.getAllAgents().map((agent) => ({
+    id: agent.id,
+    name: agent.name,
+    protocol: agent.protocol,
+    transport: agent.transport,
+    enabled: agent.enabled,
+    defaultPermissionMode: agent.defaultPermissionMode ?? "default",
+  }))
+  return { agents }
+}
+
+/**
+ * Enable/disable an external agent and/or change its default permission mode
+ * from the phone. The permission mode is clamped through
+ * {@link adaptPermissionMode} against the agent's own protocol, so the phone
+ * can never persist a mode the backend can't enforce (e.g. `dontAsk` on
+ * Codex) — the desktop store is the authority, so the clamp lives here.
+ */
+async function externalAgentUpdate(
+  payload: Record<string, unknown>
+): Promise<{ agent: ExternalAgentSummary | null }> {
+  const id = payload.id as string | undefined
+  if (!id) throw new Error("external_agent_update.id is required")
+  const patch = payload.patch as { enabled?: unknown; defaultPermissionMode?: unknown } | undefined
+  if (!patch || typeof patch !== "object") {
+    throw new Error("external_agent_update.patch is required")
+  }
+
+  const store = await getExternalAgentStoreState()
+  const agent = store.getAgent(id)
+  if (!agent) throw new Error(`external_agent_update: agent not found: ${id}`)
+
+  const updates: UpdateExternalAgentInput = {}
+  if (Object.prototype.hasOwnProperty.call(patch, "enabled")) {
+    if (typeof patch.enabled !== "boolean") {
+      throw new Error("external_agent_update.patch.enabled must be boolean")
+    }
+    updates.enabled = patch.enabled
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "defaultPermissionMode")) {
+    const requested = patch.defaultPermissionMode
+    if (!isAcpPermissionMode(requested)) {
+      throw new Error("external_agent_update.patch.defaultPermissionMode is invalid")
+    }
+    // Clamp toward restriction for the agent's protocol — never escalate past
+    // what the backend can enforce.
+    updates.defaultPermissionMode = adaptPermissionMode(requested, agent.protocol).mode
+  }
+  if (Object.keys(updates).length === 0) {
+    throw new Error("external_agent_update.patch has no editable fields")
+  }
+
+  store.updateAgent(id, updates)
+
+  const next = store.getAgent(id)
+  return {
+    agent: next
+      ? {
+          id: next.id,
+          name: next.name,
+          protocol: next.protocol,
+          transport: next.transport,
+          enabled: next.enabled,
+          defaultPermissionMode: next.defaultPermissionMode ?? "default",
+        }
+      : null,
+  }
+}
+
+const ACP_PERMISSION_MODES: readonly AcpPermissionMode[] = [
+  "default",
+  "acceptEdits",
+  "bypassPermissions",
+  "plan",
+  "dontAsk",
+]
+
+function isAcpPermissionMode(value: unknown): value is AcpPermissionMode {
+  return typeof value === "string" && ACP_PERMISSION_MODES.includes(value as AcpPermissionMode)
 }
 
 // ---------------------------------------------------------------------------

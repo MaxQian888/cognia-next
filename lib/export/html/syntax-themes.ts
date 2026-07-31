@@ -28,6 +28,14 @@ export interface ThemeTokens {
 }
 
 export type ThemeId =
+  | "arknights"
+  | "cyberpunk"
+  | "terminal"
+  | "sakura"
+  | "catppuccin-mocha"
+  | "aurora"
+  | "genshin"
+  | "honkai"
   | "light"
   | "dark"
   | "sepia"
@@ -38,6 +46,116 @@ export type ThemeId =
   | "monokai"
 
 export const THEMES: Record<ThemeId, ThemeTokens> = {
+  // Rhodes Island / PRTS-inspired tactical-log palette. Pairs with the
+  // "arknights" style preset in `style-presets.ts` for the full look.
+  arknights: {
+    bg: "#0c0f14",
+    surface: "#141a23",
+    text: "#d6e2ee",
+    muted: "#6b7a8c",
+    border: "#26313f",
+    accent: "#23d5ff",
+    userBg: "#12293b",
+    assistantBg: "#10151d",
+    codeBg: "#080b10",
+    codeText: "#9fdcff",
+    detailBg: "#161e29",
+  },
+  cyberpunk: {
+    bg: "#0a0612",
+    surface: "#160d24",
+    text: "#efe6ff",
+    muted: "#8f7bb0",
+    border: "#3b2260",
+    accent: "#ff2ea6",
+    userBg: "#241040",
+    assistantBg: "#120a1e",
+    codeBg: "#07040d",
+    codeText: "#f7e94a",
+    detailBg: "#1b1030",
+  },
+  terminal: {
+    bg: "#040804",
+    surface: "#0a120a",
+    text: "#9dfc9d",
+    muted: "#4e7a4e",
+    border: "#1d3a1d",
+    accent: "#33ff66",
+    userBg: "#0e1f0e",
+    assistantBg: "#081008",
+    codeBg: "#020502",
+    codeText: "#baffba",
+    detailBg: "#0c180c",
+  },
+  sakura: {
+    bg: "#fdf3f5",
+    surface: "#fbe8ec",
+    text: "#4a2e38",
+    muted: "#a3798a",
+    border: "#f2cdd8",
+    accent: "#d4477a",
+    userBg: "#f9dbe4",
+    assistantBg: "#fcedf1",
+    codeBg: "#3c2530",
+    codeText: "#f7d9e3",
+    detailBg: "#f7dee6",
+  },
+  // Catppuccin Mocha — the community-favourite soft-dark pastel palette.
+  "catppuccin-mocha": {
+    bg: "#1e1e2e",
+    surface: "#313244",
+    text: "#cdd6f4",
+    muted: "#a6adc8",
+    border: "#45475a",
+    accent: "#cba6f7",
+    userBg: "#45475a",
+    assistantBg: "#181825",
+    codeBg: "#11111b",
+    codeText: "#cdd6f4",
+    detailBg: "#313244",
+  },
+  // Aurora — deep teal night sky with a luminous mint-cyan aurora accent.
+  aurora: {
+    bg: "#071a1c",
+    surface: "#0e2a2d",
+    text: "#e6fff7",
+    muted: "#6fa89e",
+    border: "#17403f",
+    accent: "#4fe3c1",
+    userBg: "#10383a",
+    assistantBg: "#0b2427",
+    codeBg: "#041214",
+    codeText: "#a7f3d0",
+    detailBg: "#103032",
+  },
+  // Genshin — a Teyvat adventurer's parchment journal, teal-and-gold trim.
+  genshin: {
+    bg: "#f3ead3",
+    surface: "#fbf5e6",
+    text: "#4a3f2e",
+    muted: "#9c8a68",
+    border: "#ddceac",
+    accent: "#3d8ca3",
+    userBg: "#e6dcc0",
+    assistantBg: "#fbf5e6",
+    codeBg: "#2e4a52",
+    codeText: "#d8ecef",
+    detailBg: "#ede0c4",
+  },
+  // Honkai — Astral Express deep-space navy with a trailblazing gold accent.
+  honkai: {
+    bg: "#0b0a1a",
+    surface: "#16142e",
+    text: "#ece9ff",
+    muted: "#8781b0",
+    border: "#2a2652",
+    accent: "#e9b949",
+    userBg: "#201b46",
+    assistantBg: "#110f26",
+    codeBg: "#070613",
+    codeText: "#f3d98a",
+    detailBg: "#1c1838",
+  },
   light: {
     bg: "#ffffff",
     surface: "#f9fafb",
@@ -145,6 +263,14 @@ export const THEMES: Record<ThemeId, ThemeTokens> = {
 }
 
 export const THEME_LIST: { id: ThemeId; label: string }[] = [
+  { id: "arknights", label: "Arknights (PRTS)" },
+  { id: "cyberpunk", label: "Cyberpunk" },
+  { id: "terminal", label: "Terminal" },
+  { id: "sakura", label: "Sakura" },
+  { id: "catppuccin-mocha", label: "Catppuccin Mocha" },
+  { id: "aurora", label: "Aurora" },
+  { id: "genshin", label: "Genshin (Teyvat)" },
+  { id: "honkai", label: "Honkai: Star Rail" },
   { id: "light", label: "Light" },
   { id: "dark", label: "Dark" },
   { id: "sepia", label: "Sepia" },

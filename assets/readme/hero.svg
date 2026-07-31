@@ -1,0 +1,138 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400"
+     role="img" aria-labelledby="heroTitle heroDesc" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif">
+  <title id="heroTitle">Cognia</title>
+  <desc id="heroDesc">Cognia — an AI desktop client for Claude Code. One Next.js codebase shipped to browser, Tauri desktop, and Capacitor mobile, over a Rust core and a Node agent sidecar.</desc>
+
+  <defs>
+    <linearGradient id="coreGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5B9BFF"/>
+      <stop offset="1" stop-color="#33E1F2"/>
+    </linearGradient>
+    <linearGradient id="nameGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#BFD3F5"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#1E64C8" stop-opacity="0.55"/>
+      <stop offset="0.55" stop-color="#123A78" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#0A0E1A" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="coreGlow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#37E0F5" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#37E0F5" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- background -->
+  <rect width="1200" height="400" rx="24" fill="#0A0E1A"/>
+  <rect x="1" y="1" width="1198" height="398" rx="23" fill="none" stroke="#1B2740" stroke-width="1"/>
+  <ellipse cx="952" cy="200" rx="360" ry="300" fill="url(#glow)"/>
+
+  <!-- faint corner node motif -->
+  <g fill="#37E0F5" opacity="0.5">
+    <circle cx="40" cy="40" r="2.5"/>
+    <circle cx="1160" cy="40" r="2.5"/>
+    <circle cx="40" cy="360" r="2.5"/>
+    <circle cx="1160" cy="360" r="2.5"/>
+  </g>
+  <g stroke="#233150" stroke-width="1" opacity="0.7">
+    <path d="M40 52 V70 M52 40 H70"/>
+    <path d="M1160 52 V70 M1148 40 H1130"/>
+    <path d="M40 348 V330 M52 360 H70"/>
+    <path d="M1160 348 V330 M1148 360 H1130"/>
+  </g>
+
+  <!-- ===================== title block ===================== -->
+  <g transform="translate(72 0)">
+    <!-- eyebrow -->
+    <g transform="translate(0 118)" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">
+      <rect x="0" y="-15" width="8" height="8" rx="2" fill="#37E0F5"/>
+      <text x="20" y="-7" font-size="15" letter-spacing="3" fill="#7FD9E8">AI&#160;DESKTOP&#160;CLIENT</text>
+      <text x="235" y="-7" font-size="15" letter-spacing="3" fill="#4A5B7A">·</text>
+      <text x="255" y="-7" font-size="15" letter-spacing="3" fill="#6B7FA3">BUILT&#160;AROUND&#160;CLAUDE&#160;CODE</text>
+    </g>
+
+    <!-- name -->
+    <text x="-4" y="228" font-size="118" font-weight="800" letter-spacing="-2" fill="url(#nameGrad)">Cognia</text>
+
+    <!-- description -->
+    <text x="2" y="278" font-size="21" fill="#C6D3EC">One Next.js codebase, shipped to <tspan fill="#8FD0FF" font-weight="600">desktop</tspan>, <tspan fill="#8FD0FF" font-weight="600">mobile</tspan> &amp; <tspan fill="#8FD0FF" font-weight="600">web</tspan>.</text>
+    <text x="2" y="308" font-size="21" fill="#8394B4">Rust core · agent sidecar · plugin runtime · visual workflows.</text>
+
+    <!-- metadata pills -->
+    <g transform="translate(2 348)" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="13">
+      <g>
+        <rect x="0" y="-16" width="72" height="24" rx="12" fill="#111C33" stroke="#26365A"/>
+        <text x="14" y="1" fill="#9FB2D4">v0.1.0</text>
+      </g>
+      <g transform="translate(84 0)">
+        <rect x="0" y="-16" width="92" height="24" rx="12" fill="#111C33" stroke="#26365A"/>
+        <text x="14" y="1" fill="#9FB2D4">AGPL-3.0</text>
+      </g>
+      <g transform="translate(188 0)">
+        <rect x="0" y="-16" width="150" height="24" rx="12" fill="#111C33" stroke="#26365A"/>
+        <text x="14" y="1" fill="#9FB2D4">Rust + TypeScript</text>
+      </g>
+      <g transform="translate(350 0)">
+        <rect x="0" y="-16" width="78" height="24" rx="12" fill="#111C33" stroke="#26365A"/>
+        <text x="14" y="1" fill="#9FB2D4">78 ADRs</text>
+      </g>
+    </g>
+  </g>
+
+  <!-- ===================== hub emblem ===================== -->
+  <g transform="translate(952 196)">
+    <!-- outer dashed ring -->
+    <circle r="140" fill="none" stroke="#233150" stroke-width="1.25" stroke-dasharray="2 7"/>
+    <circle r="112" fill="none" stroke="#1A2740" stroke-width="1"/>
+
+    <!-- connectors core -> shells -->
+    <g stroke="#2C4372" stroke-width="1.4">
+      <path d="M0 -14 L0 -100"/>
+      <path d="M12 8 L104 62"/>
+      <path d="M-12 8 L-104 62"/>
+    </g>
+    <g fill="#37E0F5">
+      <circle cx="0" cy="-58" r="3"/>
+      <circle cx="58" cy="35" r="3"/>
+      <circle cx="-58" cy="35" r="3"/>
+    </g>
+
+    <!-- shell node: web (top) -->
+    <g transform="translate(0 -100)">
+      <rect x="-66" y="-24" width="132" height="44" rx="12" fill="#101B31" stroke="#2C4372"/>
+      <circle cx="-42" cy="-2" r="10" fill="none" stroke="#37E0F5" stroke-width="1.6"/>
+      <path d="M-52 -2 H-32 M-42 -12 a14 14 0 0 1 0 20 M-42 -12 a14 14 0 0 0 0 20" stroke="#37E0F5" stroke-width="1.2" fill="none"/>
+      <text x="-24" y="-6" font-size="14" font-weight="600" fill="#E4ECFB">Browser</text>
+      <text x="-24" y="10" font-size="10.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#7789AC">pnpm dev</text>
+    </g>
+
+    <!-- shell node: desktop (lower-right) -->
+    <g transform="translate(104 62)">
+      <rect x="-66" y="-24" width="132" height="44" rx="12" fill="#101B31" stroke="#2C4372"/>
+      <rect x="-52" y="-13" width="24" height="17" rx="2.5" fill="none" stroke="#5B9BFF" stroke-width="1.5"/>
+      <path d="M-46 7 H-34" stroke="#5B9BFF" stroke-width="1.5"/>
+      <text x="-22" y="-6" font-size="14" font-weight="600" fill="#E4ECFB">Desktop</text>
+      <text x="-22" y="10" font-size="10.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#7789AC">Tauri 2</text>
+    </g>
+
+    <!-- shell node: mobile (lower-left) -->
+    <g transform="translate(-104 62)">
+      <rect x="-66" y="-24" width="132" height="44" rx="12" fill="#101B31" stroke="#2C4372"/>
+      <rect x="-50" y="-14" width="15" height="24" rx="3" fill="none" stroke="#5B9BFF" stroke-width="1.5"/>
+      <circle cx="-42.5" cy="6" r="1.4" fill="#5B9BFF"/>
+      <text x="-28" y="-6" font-size="14" font-weight="600" fill="#E4ECFB">Mobile</text>
+      <text x="-28" y="10" font-size="10.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#7789AC">Capacitor 8</text>
+    </g>
+
+    <!-- core -->
+    <circle r="70" fill="url(#coreGlow)" opacity="0.6"/>
+    <circle r="46" fill="#0B1327" stroke="url(#coreGrad)" stroke-width="2"/>
+    <circle r="46" fill="url(#coreGrad)" opacity="0.10"/>
+    <text x="0" y="-4" text-anchor="middle" font-size="14.5" font-weight="700" fill="#EAF2FF">one</text>
+    <text x="0" y="14" text-anchor="middle" font-size="12.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#8FD0FF">codebase</text>
+  </g>
+
+  <!-- emblem caption -->
+  <text x="952" y="372" text-anchor="middle" font-size="12.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" letter-spacing="1" fill="#5E7096">static export &#8594; out/ &#160;·&#160; Rust core + Node sidecar</text>
+</svg>

@@ -66,11 +66,21 @@ export interface PreInstallTarget {
 
 interface Props {
   target: PreInstallTarget | null
+  /**
+   * Extra context shown on the permission step, above the permission list.
+   *
+   * Exists for the Open VSX path: a VS Code extension is an ordinary Node
+   * program with real filesystem / network / process access, and the permission
+   * list alone reads like a sandbox manifest — which would imply a confinement
+   * we do not provide. Optional and absent by default, so the cognia-registry
+   * chain renders exactly as before.
+   */
+  notice?: string
   onContinue: (value?: unknown) => void
   onCancel: () => void
 }
 
-export function PluginPreInstallDialog({ target, onContinue, onCancel }: Props) {
+export function PluginPreInstallDialog({ target, notice, onContinue, onCancel }: Props) {
   const t = useTranslations("plugins.preInstall")
   const open = target !== null
 
@@ -102,6 +112,7 @@ export function PluginPreInstallDialog({ target, onContinue, onCancel }: Props) 
             {target.step === "permission" && target.permission && (
               <PermissionStep
                 permission={target.permission}
+                notice={notice}
                 onContinue={() => onContinue()}
                 onCancel={onCancel}
               />
@@ -192,19 +203,32 @@ function ConflictStep({
 
 function PermissionStep({
   permission,
+  notice,
   onContinue,
   onCancel,
 }: {
   permission: PreInstallPermissionPayload
+  notice?: string
   onContinue: () => void
   onCancel: () => void
 }) {
   const t = useTranslations("plugins.preInstall")
   const hasAny = permission.declared.length > 0 || permission.optional.length > 0
+  const domains = permission.networkAccess?.allowedDomains
+  const anyHost = domains?.some((d) => d.trim() === "*")
 
   return (
     <>
       <p className="text-sm text-muted-foreground">{t("permissionsHint")}</p>
+      {notice && (
+        <Card
+          className="flex flex-row items-start gap-2 p-3"
+          data-testid="pre-install-permission-notice"
+        >
+          <AlertTriangleIcon className="mt-0.5 size-4 shrink-0 text-destructive" />
+          <p className="text-xs text-muted-foreground">{notice}</p>
+        </Card>
+      )}
       {!hasAny ? (
         <p className="text-sm text-muted-foreground">{t("permissionsNone")}</p>
       ) : (
@@ -214,6 +238,28 @@ function PermissionStep({
           )}
           {permission.optional.length > 0 && (
             <PermissionListCard title={t("permissionsOptional")} perms={permission.optional} />
+          )}
+          {domains && domains.length > 0 && (
+            <Card className="p-3 space-y-2" data-testid="pre-install-network-access">
+              <div className="flex items-center gap-2 text-xs font-semibold">
+                {anyHost && <AlertTriangleIcon className="size-3 text-destructive shrink-0" />}
+                {t("networkAccessTitle")}
+              </div>
+              <ul className="space-y-1 text-xs">
+                {domains.map((d) => (
+                  <li key={d}>
+                    <code className="font-mono">
+                      {anyHost && d.trim() === "*" ? t("networkAnyHost") : d}
+                    </code>
+                  </li>
+                ))}
+              </ul>
+              {permission.networkAccess?.reasoning && (
+                <p className="text-xs text-muted-foreground">
+                  {permission.networkAccess.reasoning}
+                </p>
+              )}
+            </Card>
           )}
         </div>
       )}
@@ -229,7 +275,14 @@ function PermissionStep({
   )
 }
 
-function PermissionListCard({ title, perms }: { title: string; perms: PluginPermission[] }) {
+/**
+ * Exported so the import dialog can show the same permission read-out. Import
+ * only stages a `discovered` row rather than running the marketplace install
+ * chain, so it can't reuse the whole `PermissionStep` — but "here is what this
+ * plugin declares, with the dangerous ones flagged" must look identical
+ * wherever the user is asked to accept a manifest.
+ */
+export function PermissionListCard({ title, perms }: { title: string; perms: PluginPermission[] }) {
   return (
     <Card className="p-3 space-y-2">
       <div className="text-xs font-semibold">{title}</div>

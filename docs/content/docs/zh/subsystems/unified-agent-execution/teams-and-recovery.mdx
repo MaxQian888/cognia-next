@@ -1,0 +1,47 @@
+---
+title: 团队、委派与恢复
+description: 异构成员执行绑定、委派深度、运行预算 governor、诚实保真度的 canonical 会话与严格占优恢复。
+---
+
+# 团队、委派与恢复
+
+## 执行绑定（Phase 7）
+
+成员可绑定 `inherit | pinned | pool`（`TeammateConfig.execution`）,按固定
+优先级 **managed > member > run > team 默认 > app 默认** 解析——managed 覆盖
+显式记入决策 trace。pool 模式只暴露候选 deployment **id**（当前确定性选
+第一个候选）。新的原始 `apiKey`/`baseURL` 成员写入在所有 store 路径被拒;
+legacy 行保持可读,并在派发时迁移为其 provider-id deployment 引用。
+
+`decideDelegationMode` 按六轴（runtime、route、host、deployment、凭证、硬
+能力）判定 native/orchestrated:只有冻结的模型角色差异保持 native。钉了
+provider 或外部后端的 subagent def 被排除出 SDK-native agents map——由
+orchestrated 的 `dispatch_agent` 轨道诚实执行,而非被 SDK 静默错跑。团队间
+委派携带校验过的无密钥 `HandoffEnvelope`,并受 `maxTeamDelegationDepth`
+门控（默认 2）。唯一的 `RunBudgetGovernor` 在根池上按子账本记录用量/
+attempt/失败;插件预算重基于它。
+
+## Canonical 会话（Phase 8）
+
+`CanonicalSession`（`packages/agent-config-types/src/canonical-session.ts`）
+是运行时中立的记录:五级保真度
+（`native-exact > structured > contextual > summary-only > unsupported`）、
+完整性校验的序列 digest、每次转换必附的诚实 `SessionLossReport`。
+claude-code/codex/opencode 导入 adapter 声明 codec;导入把 header 投影进
+Dexie v124（`agentCanonicalSessions`,可重建),导入对话框按来源展示保真度
+报告。
+
+R1 spike（`sidecar/dispatch/session-materialize.spike.live.test.mjs`）对真
+SDK 钉住结论:**不存在公开 materialize API**、外来 id resume 绝不静默成功、
+绝不伪造私有 JSONL——因此 claude-code 物化为 `contextual`（重放 prompt 种子
+新原生会话）。spike 留在套件中作为 SDK 升级绊线。
+
+## 恢复（Phase 8）
+
+canonical 运行日志即 workflow event-log 上的 `AgentEventEnvelope` 流
+（`run_log` 行 + `agent_envelope` 判别子;按 `eventId` 幂等）。`recoverRun`
+**先**认领单写者 run lease,再按严格占优规划:自动恢复要求唯一候选具有
+superset 覆盖、≥ 保真度、共享前缀 digest 一致——分叉、平局与副作用歧义一律
+以一等 `run.recovery_required` 事件暂停。`RecoveryCandidate` 无修改时间
+字段,last-modified-wins 在结构上不可能。权限恢复绝不回放 allow;路由
+ticket 只对完全相同的冻结 spec 重签。

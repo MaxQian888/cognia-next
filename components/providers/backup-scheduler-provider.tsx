@@ -1,228 +1,95 @@
 "use client"
 
-// Mounts at app startup and runs the scheduled-backup loop. Every 30 minutes
-// (and once on mount) we check `appSettings.backupAutoSchedule`; if it's
-// enabled and the interval has elapsed since the last success, we kick off a
-// new auto-key-encrypted backup.
+/** React host for the shared scheduled-backup runtime (ADR-0059 T-A6). */
 
-import { useEffect, useRef } from "react"
+import { useEffect } from "react"
+import { useTranslations } from "next-intl"
+
 import { isTauri } from "@/lib/tauri"
-import { getSettings, saveSettings } from "@/lib/db/settings"
-import { DEFAULT_BACKUP_AUTO_SCHEDULE } from "@/lib/claude/types"
 import {
-  buildBackupPackage,
-  defaultExportFileName,
-  serializePackage,
-} from "@/lib/data/build-package"
-import { getDefaultBackupPassphrase } from "@/lib/data/backup-key"
-import { appendBackupHistory, getLatestSuccessful } from "@/lib/db/backup-history"
-import { pruneScheduledBackups, shouldRunScheduledBackup } from "@/lib/data/scheduler"
-import {
-  encryptSnapshotBody,
-  uploadSnapshotToWebDav,
-  webdavSnapshotName,
-} from "@/lib/data/destinations/webdav"
-import { getSyncPassphrase, hasSyncPassphrase } from "@/lib/webdav/passphrase-cache"
+  maybeUploadToWebDav as maybeUploadShared,
+  runScheduledBackupOnce,
+  startBackupScheduler,
+  type BackupFilesystem,
+  type ScheduledBackupMessages,
+} from "@/lib/data/backup-scheduler"
+import { loadMessageResolver } from "@/lib/headless/i18n"
 import type { BackupPackageV3 } from "@/lib/data/types"
 
-const CHECK_INTERVAL_MS = 30 * 60 * 1000
+let activeMessages: ScheduledBackupMessages | null = null
+
+function tauriBackupFilesystem(): BackupFilesystem | null {
+  if (!isTauri()) return null
+  return {
+    async writeTextFile(path, contents) {
+      const { writeTextFile } = await import("@tauri-apps/plugin-fs")
+      await writeTextFile(path, contents)
+    },
+    async readDirNames(path) {
+      const { readDir } = await import("@tauri-apps/plugin-fs")
+      const entries = await readDir(path)
+      return entries.flatMap((entry) => (entry.name ? [entry.name] : []))
+    },
+    async remove(path) {
+      const { remove } = await import("@tauri-apps/plugin-fs")
+      await remove(path)
+    },
+  }
+}
+
+async function fallbackMessages(): Promise<ScheduledBackupMessages> {
+  const resolve = await loadMessageResolver("en")
+  return {
+    missingDestination: resolve("settings.data.webdav.startup.scheduledMissingDestination"),
+    autoKeyUnavailable: resolve("settings.data.webdav.startup.autoKeyUnavailable"),
+    syncPassphraseLocked: resolve("settings.data.webdav.startup.syncPassphraseLocked"),
+    newerTitle: resolve("settings.data.webdav.startup.newerFound"),
+    newerBody: resolve("settings.data.webdav.startup.newerBody"),
+  }
+}
 
 export function BackupSchedulerProvider({ children }: { children: React.ReactNode }) {
-  const ranOnceRef = useRef(false)
+  const t = useTranslations("settings.data.webdav.startup")
 
   useEffect(() => {
-    // The provider becomes a no-op in test runs unless explicitly enabled —
-    // we don't want every component test to drag the scheduler in.
-    if (process.env.NODE_ENV === "test") return
-    if (typeof window === "undefined") return
+    if (process.env.NODE_ENV === "test" || typeof window === "undefined") return
 
-    const tick = async () => {
-      try {
-        await runOnce()
-      } catch (err) {
-        // Schedule failures bubble up via backupHistory; nothing else to do.
-        console.warn("scheduled backup tick failed", err)
-      }
+    const messages: ScheduledBackupMessages = {
+      missingDestination: t("scheduledMissingDestination"),
+      autoKeyUnavailable: t("autoKeyUnavailable"),
+      syncPassphraseLocked: t("syncPassphraseLocked"),
+      newerTitle: t("newerFound"),
+      newerBody: t("newerBody"),
     }
-
-    if (!ranOnceRef.current) {
-      ranOnceRef.current = true
-      void tick()
+    activeMessages = messages
+    const stop = startBackupScheduler({
+      filesystem: tauriBackupFilesystem(),
+      messages,
+      log: (_level, message) => console.warn("scheduled backup tick failed", message),
+    })
+    return () => {
+      stop()
+      if (activeMessages === messages) activeMessages = null
     }
-    const id = window.setInterval(() => {
-      void tick()
-    }, CHECK_INTERVAL_MS)
-    return () => window.clearInterval(id)
-  }, [])
+  }, [t])
 
   return <>{children}</>
 }
 
-/**
- * Single iteration of the scheduler. Exported for tests + manual triggers.
- * Returns true when a backup actually ran, false otherwise.
- */
+/** Manual/scheduler-source entry preserved for existing callers. */
 export async function runOnce(): Promise<boolean> {
-  const settings = await getSettings()
-  const config = settings.backupAutoSchedule
-  if (!config?.enabled) return false
-
-  const lastSuccessful = await getLatestSuccessful()
-  const lastFromSchedule = lastSuccessful?.type === "scheduled" ? lastSuccessful : undefined
-  if (
-    !shouldRunScheduledBackup({
-      config,
-      lastSuccessAt: lastFromSchedule?.completedAt,
-    })
-  ) {
-    return false
-  }
-  if (!isTauri() || !config.dirPath) {
-    // Without a destination folder we don't have anywhere to write silently.
-    // Web users get reminders; Tauri without a configured folder is also a no-op.
-    await appendBackupHistory({
-      completedAt: Date.now(),
-      type: "scheduled",
-      success: false,
-      encryption: "auto-key",
-      errorMessage: "Schedule enabled but no destination folder configured.",
-    })
-    return false
-  }
-
-  try {
-    const pkg = await buildBackupPackage({ includeSessions: true, includeApiKey: false })
-    const plaintext = serializePackage(pkg)
-    const passphrase = await getDefaultBackupPassphrase()
-    if (!passphrase) {
-      throw new Error("Auto-key not available on this runtime.")
-    }
-    const body = await encryptSnapshotBody(plaintext, pkg, passphrase)
-    const fileName = defaultExportFileName(new Date(), "encrypted")
-    const sep = config.dirPath.includes("\\") ? "\\" : "/"
-    const target = `${config.dirPath.replace(/[/\\]+$/, "")}${sep}${fileName}`
-
-    const { writeTextFile, readDir, remove } = await import("@tauri-apps/plugin-fs")
-    await writeTextFile(target, body)
-
-    // Prune older auto-backups so the directory doesn't grow unbounded.
-    try {
-      const entries = await readDir(config.dirPath)
-      const candidates = entries
-        .filter((e) => e.name && e.name.endsWith(".enc.cbk"))
-        .map((e) => ({
-          name: `${config.dirPath}${sep}${e.name}`,
-          completedAt: 0,
-        }))
-      // We can't read mtime here without a stat call; approximate by lex order
-      // of the date-stamped filename — defaultExportFileName is `cognia-backup-YYYY-MM-DD.enc.cbk`.
-      const sorted = candidates.sort((a, b) => (a.name < b.name ? 1 : -1))
-      const toRemove = pruneScheduledBackups(
-        sorted.map((c, i) => ({ ...c, completedAt: -i })),
-        config.retainCount
-      )
-      for (const c of toRemove) {
-        try {
-          await remove(c.name)
-        } catch {
-          // Best-effort.
-        }
-      }
-    } catch {
-      // readDir/permissions failure — non-fatal.
-    }
-
-    await appendBackupHistory({
-      completedAt: Date.now(),
-      type: "scheduled",
-      success: true,
-      encryption: "auto-key",
-      sizeBytes: body.length,
-      filename: fileName,
-    })
-
-    // WebDAV upload piggybacks on the local schedule. It re-encrypts the same
-    // package with the zero-knowledge sync passphrase (so other devices can
-    // decrypt) — only when sync is enabled AND unlocked this session.
-    await maybeUploadToWebDav(settings.webdavSync?.enabled === true, pkg, plaintext)
-
-    // Stamp lastRunAt for cross-device sync + UI "next run at".
-    try {
-      await saveSettings({
-        backupAutoSchedule: {
-          ...(config ?? DEFAULT_BACKUP_AUTO_SCHEDULE),
-          lastRunAt: new Date().toISOString(),
-        },
-      })
-    } catch {
-      // Non-fatal.
-    }
-    return true
-  } catch (err) {
-    await appendBackupHistory({
-      completedAt: Date.now(),
-      type: "scheduled",
-      success: false,
-      encryption: "auto-key",
-      errorMessage: err instanceof Error ? err.message : String(err),
-    })
-    return false
-  }
+  return runScheduledBackupOnce({
+    filesystem: tauriBackupFilesystem(),
+    messages: activeMessages ?? (await fallbackMessages()),
+  })
 }
 
-/**
- * Upload the just-built package to WebDAV, re-encrypted under the session sync
- * passphrase. No-op when sync is disabled. When enabled but locked, records a
- * single failure row so the user understands why auto-sync didn't fire.
- * Best-effort: a WebDAV failure never fails the local backup.
- */
+/** Compatibility export used by existing focused tests and callers. */
 export async function maybeUploadToWebDav(
   enabled: boolean,
   pkg: BackupPackageV3,
   plaintext: string
 ): Promise<void> {
-  if (!enabled) return
-  if (!hasSyncPassphrase()) {
-    await appendBackupHistory({
-      completedAt: Date.now(),
-      type: "scheduled",
-      success: false,
-      encryption: "passphrase",
-      errorMessage: "WebDAV upload skipped — sync passphrase locked this session.",
-    })
-    return
-  }
-  try {
-    const syncPass = getSyncPassphrase() as string
-    const body = await encryptSnapshotBody(plaintext, pkg, syncPass)
-    const filename = webdavSnapshotName(pkg.manifest.exportedAt)
-    const result = await uploadSnapshotToWebDav(body, {
-      filename,
-      exportedAt: pkg.manifest.exportedAt,
-      sizeBytes: body.length,
-    })
-    await appendBackupHistory({
-      completedAt: Date.now(),
-      type: "scheduled",
-      success: result.ok,
-      encryption: "passphrase",
-      sizeBytes: result.ok ? body.length : undefined,
-      filename: result.ok ? filename : undefined,
-      errorMessage: result.ok ? undefined : result.error,
-    })
-    if (result.ok) {
-      const settings = await getSettings()
-      await saveSettings({
-        webdavSync: { ...(settings.webdavSync ?? {}), lastSyncAt: new Date().toISOString() },
-      })
-    }
-  } catch (err) {
-    await appendBackupHistory({
-      completedAt: Date.now(),
-      type: "scheduled",
-      success: false,
-      encryption: "passphrase",
-      errorMessage: err instanceof Error ? err.message : String(err),
-    })
-  }
+  const messages = activeMessages ?? (await fallbackMessages())
+  return maybeUploadShared(enabled, pkg, plaintext, messages)
 }

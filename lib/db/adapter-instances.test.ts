@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for lib/db/adapter-instances.ts — CRUD for the v18 adapterInstances table.
  */
@@ -10,6 +11,7 @@ import {
   listEnabledAdapterInstances,
   listAdapterInstancesByType,
   updateAdapterInstance,
+  patchAdapterInstanceSettings,
   deleteAdapterInstance,
 } from "./adapter-instances"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
@@ -89,6 +91,19 @@ describe("adapter-instances", () => {
     expect(updated?.displayName).toBe("Updated Bot")
     expect(updated?.enabled).toBe(false)
     expect(updated?.updatedAt).toBeGreaterThan(row.updatedAt)
+  })
+
+  it("atomically merges concurrent settings patches against the latest row", async () => {
+    const row = await createAdapterInstance(baseInput())
+
+    await Promise.all([
+      patchAdapterInstanceSettings(row.id, { larkChatTab: true }),
+      patchAdapterInstanceSettings(row.id, { larkWebSso: true }),
+    ])
+
+    await expect(getAdapterInstance(row.id)).resolves.toMatchObject({
+      settings: { larkChatTab: true, larkWebSso: true },
+    })
   })
 
   it("deleteAdapterInstance removes the row", async () => {

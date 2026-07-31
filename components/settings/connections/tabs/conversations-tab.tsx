@@ -183,7 +183,7 @@ export function ConversationsTab() {
                       type="button"
                       className="font-mono text-xs truncate hover:underline text-left"
                       onClick={() =>
-                        router.push(`/inbox/c/${encodeURIComponent(row.conversationKey)}`)
+                        router.push(`/inbox/c?key=${encodeURIComponent(row.conversationKey)}`)
                       }
                       data-testid={`conv-link-${row.id}`}
                     >
@@ -268,7 +268,7 @@ export function ConversationsTab() {
                       size="icon"
                       className="h-7 w-7"
                       onClick={() =>
-                        router.push(`/inbox/c/${encodeURIComponent(row.conversationKey)}`)
+                        router.push(`/inbox/c?key=${encodeURIComponent(row.conversationKey)}`)
                       }
                       aria-label={t("openConversation")}
                       data-testid={`open-btn-${row.id}`}

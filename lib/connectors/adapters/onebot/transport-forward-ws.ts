@@ -16,6 +16,7 @@
  */
 
 import { listen } from "@tauri-apps/api/event"
+import { reconnectBackoffMs } from "../_shared/reconnect-backoff"
 import {
   connectorsWsOpen,
   connectorsWsSend,
@@ -64,6 +65,13 @@ export function createForwardWsTransport(opts: ForwardWsOptions): OneBotTranspor
   let unlistenMessage: UnlistenFn | null = null
   let unlistenClose: UnlistenFn | null = null
   let attempts = 0
+  /** Dial failures since the last successful open (drives onConnectFailed). */
+  let failedConnects = 0
+
+  function noteConnectFailure(): void {
+    failedConnects += 1
+    handlers?.onConnectFailed?.(failedConnects)
+  }
 
   function cleanupListeners(): void {
     if (unlistenMessage) {
@@ -110,6 +118,7 @@ export function createForwardWsTransport(opts: ForwardWsOptions): OneBotTranspor
     const id = await connectorsWsOpen(opts.url, headers)
     handleId = id
     attempts = 0
+    failedConnects = 0
     unlistenMessage = await listen<string>(`connectors://ws/${id}/message`, (e) =>
       routeFrame(e.payload)
     )
@@ -125,7 +134,7 @@ export function createForwardWsTransport(opts: ForwardWsOptions): OneBotTranspor
     cleanupListeners()
     if (abort.signal.aborted) return
     attempts += 1
-    const backoff = backoffBaseMs * Math.min(2 ** attempts, 32)
+    const backoff = reconnectBackoffMs(backoffBaseMs, attempts)
     try {
       await delay(backoff, abort.signal)
     } catch {
@@ -135,6 +144,7 @@ export function createForwardWsTransport(opts: ForwardWsOptions): OneBotTranspor
     try {
       await connectOnce()
     } catch {
+      noteConnectFailure()
       void scheduleReconnect()
     }
   }
@@ -145,6 +155,7 @@ export function createForwardWsTransport(opts: ForwardWsOptions): OneBotTranspor
       try {
         await connectOnce()
       } catch {
+        noteConnectFailure()
         void scheduleReconnect()
       }
     },

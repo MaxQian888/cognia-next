@@ -1,25 +1,32 @@
 ---
 title: 构建流水线
-description: cognia 插件构建 —— 强制 lint、工具链预检、按 manifest.type 在 cargo-component 与 esbuild 之间分发、手写的 cognia:api-version LEB128 自定义段，以及两条路径共用的 deflate 压缩 zip bundle 布局。
+description: cognia 插件构建 —— 强制 lint、工具链预检、按 manifest.type 分发到 cargo-component、esbuild 或 build-free 的现有入口文件打包路径，外加手写的 cognia:api-version LEB128 自定义段和 deflate zip 布局。
 ---
 
 # 构建流水线 —— `cognia plugin build`
 
 <TLDR>
-  `cmd_build::run()` 先做 lint（出现 error 即中止 —— `cmd_build.rs:44-71`），再按
-  `manifest.type` 分发（`cmd_build.rs:94-104`）：**wasm** → 工具链预检 → `cargo component
+  `cmd_build::run()` 先做 lint（出现 error 即中止 —— `cmd_build.rs:47-75`），再按
+  `manifest.type` 分发（`cmd_build.rs:104-128`）：**wasm** → 工具链预检 → `cargo component
   build --release` → 在 `target/wasm32-wasip{2,1}/release` 下定位产物 → 剥离并
   重新嵌入 `cognia:api-version` 自定义段（手写 LEB128，`packaging.rs:30-65`）→
   打包成 zip；**frontend** → 解析 TS 入口 → 以 13 个固定参数调用 `npx --no-install esbuild`
-  （`build_ts.rs:116-132`）→ 打包成 zip。两种 bundle 都落在 `target/cognia/<id>-<version>.zip`，
-  布局相同：先是漂亮打印的 `plugin.json`，然后是产物，再是去重后的
-  `bundle_include[]` 附加文件，全部经 Deflate 压缩。
+  （`build_ts.rs:116-132`）→ 打包成 zip；**python / hybrid / vscode-extension** → 通过
+  `pack_existing_entry_bundle()`（`packaging.rs:278-294`）打包 manifest 声明的现有入口文件
+  （`pythonMain`、`main`、`vscodeMain`、可选 `styles`）以及 `bundle_include[]`。所有 bundle 都落在
+  `target/cognia/<id>-<version>.zip`，基础布局相同：先是漂亮打印的 `plugin.json`，然后是运行时产物条目，
+  再是去重后的 `bundle_include[]` 附加文件，全部经 Deflate 压缩。
 </TLDR>
 
 ## Flags
 
-`cognia plugin build [--path .] [--out <zip>] [--skip-build]` —— `--skip-build` 跳过
-编译器/打包器步骤，直接把磁盘上已有的内容重新打包（在外部构建之后很有用）。
+`cognia plugin build [--path .] [--out <zip>] [--skip-build] [--json]` —— 对有编译/打包步骤的运行时
+（`wasm`、`frontend`），`--skip-build` 会跳过该步骤，直接把磁盘上已有的内容重新打包。
+从 CLI 视角看，Python、hybrid 和 VS Code-extension 插件始终是 build-free：声明的入口文件必须在打包前已经存在。
+`--json` 模式下，缺失或不可读取的插件根目录 / manifest 使用 `stage: "input"` 并带上 `{path, error}`；
+lint 失败使用 `stage: "lint"` 并嵌入 lint 报告；工具链、构建、嵌入和打包失败则输出
+结构化的 `{ok:false, action:"build", stage, pluginId, version, pluginType, bundle, error}` payload，
+所有 JSON 失败都会保持 stderr 为空。
 
 ## 端到端流程
 
@@ -27,24 +34,30 @@ description: cognia 插件构建 —— 强制 lint、工具链预检、按 mani
 flowchart TD
   RUN[cmd_build::run] --> LINT[cmd_lint::validate_at<br/>cmd_build.rs:44]
   LINT -- errors --> ABORT[bail → run cognia plugin lint]
-  LINT -- warnings only --> TYPE{manifest.type<br/>cmd_build.rs:94-104}
-  TYPE -- wasm --> PRE[preflight: cargo component --version<br/>+ rustup target list ∋ wasm32-wasip2<br/>cmd_build.rs:228-275]
-  PRE --> CARGO[cargo component build --release<br/>cmd_build.rs:215-222]
+  LINT -- warnings only --> TYPE{manifest.type<br/>cmd_build.rs:104-128}
+  TYPE -- wasm --> PRE[preflight: cargo component --version<br/>+ rustup target list ∋ wasm32-wasip2<br/>cmd_build.rs:287-304]
+  PRE --> CARGO[cargo component build --release<br/>cmd_build.rs:274-282]
   CARGO --> FIND[locate .wasm<br/>target/wasm32-wasip2|1/release<br/>packaging.rs:165-189]
   FIND --> EMBED[embed_api_version<br/>strip + append custom section<br/>packaging.rs:30-51]
-  EMBED --> ZIPW[write_bundle<br/>packaging.rs:209-251]
+  EMBED --> ZIPW[write_bundle<br/>packaging.rs:222-264]
   TYPE -- frontend --> ENTRY[resolve_ts_entry<br/>tsEntry → src/index.ts|tsx → src/main.ts<br/>build_ts.rs:70-93]
   ENTRY --> ESB[npx --no-install esbuild …<br/>build_ts.rs:116-132]
   ESB --> CHECK[verify manifest.main exists<br/>build_ts.rs:44-48]
   CHECK --> ZIPF[pack_frontend_bundle<br/>build_ts.rs:145-199]
+  TYPE -- python --> PYPACK[pack_existing_entry_bundle<br/>pythonMain + bundle_include<br/>packaging.rs:278-294]
+  TYPE -- hybrid --> HYPACK[pack_existing_entry_bundle<br/>main + pythonMain + styles + bundle_include]
+  TYPE -- vscode-extension --> VSPACK[pack_existing_entry_bundle<br/>vscodeMain + styles + bundle_include]
   ZIPW --> OUT[target/cognia/&lt;id&gt;-&lt;version&gt;.zip]
   ZIPF --> OUT
-  TYPE -- other --> NOPE[bail: supported wasm, frontend]
+  PYPACK --> OUT
+  HYPACK --> OUT
+  VSPACK --> OUT
+  TYPE -- other --> NOPE[bail: supported wasm, frontend, python, hybrid, vscode-extension]
 ```
 
 ## WASM 路径
 
-### 工具链预检（`cmd_build.rs:228-275`）
+### 工具链预检（`cmd_build.rs:287-304`）
 
 两项检查，都附带可直接复制粘贴的补救命令：
 
@@ -94,8 +107,9 @@ pub fn embed_api_version(wasm: &[u8], version: &str) -> Result<Vec<u8>> {
 
 `strip_section`（`packaging.rs:67-106`）用 `wasmparser` 丢弃任何已存在的副本，因此
 重新构建和手动重新嵌入都是幂等的。独立的应急出口是
-`cognia plugin embed-version <wasm> <ver> [--out]`（`main.rs:348-362`），它用
-`looks_like_semver` 校验版本（`--version must be MAJOR.MINOR.PATCH`），默认就地覆盖输入。
+`cognia plugin embed-version <wasm> <ver> [--out wasm] [--json]`，它用 `looks_like_semver`
+校验版本（`--version must be MAJOR.MINOR.PATCH`），默认就地覆盖输入。JSON 模式下失败会用
+`stage: "input" | "read" | "embed" | "write"` 标明失败阶段。
 
 <Callout type="info" title="一句话说清契约版本管理">
   CLI 把 WIT 契约版本（当前为 0.1.0）写入每一个 WASM bundle；没有匹配 linker 的 host
@@ -137,12 +151,25 @@ cmd.current_dir(crate_root)
 - **host 模块用 `--external`** —— `@/types/plugin`、`@/lib/*`、`react`、`react-dom` 由
   host 在加载时提供；把它们打进去会重复打包 React 并破坏 shim。
 
-## Bundle 布局（两种类型）
+## Build-free 运行时路径
+
+`python`、`hybrid` 和 `vscode-extension` 的 manifest 已经描述了 host 直接加载的文件：
+
+- `pythonMain` 会被 subprocess host 转成 Python import module。
+- 当 hybrid 插件有 JS 侧时，`main` 由 frontend module loader 加载。
+- `vscodeMain` 会作为扩展入口脚本传给 VS Code sidecar。
+- `styles` 存在时会随这些入口一起复制。
+
+`pack_existing_entry_bundle()`（`packaging.rs:278-294`）会确认每个声明入口都是插件目录内的相对文件，
+拒绝缺失文件，然后写入 `plugin.json`、去重后的入口文件和 `bundle_include[]` 附加文件。这匹配 host 的
+build-free 本地安装契约，而不是猜测 Python 打包、hybrid frontend 构建或 VSIX 编译方式。
+
+## Bundle 布局（所有类型）
 
 | 顺序 | 条目 | 来源 |
 | --- | --- | --- |
 | 1 | `plugin.json` | 漂亮打印（`serde_json::to_vec_pretty`），这样 `unzip -p bundle.zip plugin.json \| jq` 能正常工作 |
-| 2 | 产物 | wasm：`manifest.wasmMain` 名称；frontend：`manifest.main` 路径（分隔符归一化为 `/`） |
+| 2 | 运行时产物条目 | wasm：`manifest.wasmMain`；frontend：`manifest.main`；python：`manifest.pythonMain`；hybrid：声明的 `main` / `pythonMain` / `styles`；VS Code extension：`manifest.vscodeMain` / `styles` |
 | 3… | `bundle_include[]` 附加文件 | 相对于 crate 根的路径，去重，缺失文件 = 硬错误 |
 
 各处压缩一律为 `zip::CompressionMethod::Deflated`（`packaging.rs:217`、

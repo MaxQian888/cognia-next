@@ -4,7 +4,7 @@ import {
   resolveBuiltinMcpConfig,
   type BuiltinMcpResolveContext,
 } from "./resolve"
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 import { A2UI_BRIDGE_SERVER_ID, A2UI_BRIDGE_SERVER_NAME } from "@/lib/a2ui/mcp-tool-schemas"
 
 const ctx: BuiltinMcpResolveContext = {

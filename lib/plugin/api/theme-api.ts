@@ -8,9 +8,12 @@
  * in Dexie indefinitely (ADR-0007 follow-up).
  */
 
-import { useSettingsStore } from "@/stores"
+import { useSettingsStore } from "@/stores/settings/settings-store"
 import { resolveActiveThemeColors } from "@/lib/themes"
+import { getPluginTheme } from "@/lib/theme/theme-registry"
 import { createPluginSystemLogger } from "../core/logger"
+import { createApiGuardedAPI } from "./api-permission-gate"
+import { readAppliedThemeTokens } from "./theme-tokens"
 import type {
   PluginThemeAPI,
   ThemeMode,
@@ -18,7 +21,7 @@ import type {
   ThemeColors,
   CustomTheme,
   ThemeState,
-} from "@/types/plugin/plugin-extended"
+} from "@/types/plugin/plugin"
 
 /**
  * Per-plugin ownership of `CustomTheme` row ids created through the API. The
@@ -47,11 +50,38 @@ function getThemeState(): ThemeState {
   const resolvedMode = getResolvedMode(mode)
   const colorPreset = store.colorTheme
   const customThemeId = store.activeCustomThemeId
+  const activePluginThemeId = store.activePluginThemeId
+
+  // A directly-activated plugin theme wins — reflect its palette so plugins
+  // reading `getColors()` see what's actually painted.
+  // Motion / density / typography / radius are read off the applied CSS rather
+  // than the settings store: they can be set by a level, a theme pack or a
+  // plugin-contributed density preset, and only the computed value says which
+  // won. Shared by both return paths below.
+  const applied = readAppliedThemeTokens()
+
+  if (activePluginThemeId) {
+    const pluginTheme = getPluginTheme(activePluginThemeId)
+    if (pluginTheme?.colors) {
+      return {
+        mode,
+        resolvedMode,
+        colorPreset,
+        customThemeId: null,
+        activePluginThemeId,
+        colors: pluginTheme.colors,
+        themeSource: "plugin",
+        ...applied,
+      }
+    }
+  }
+
   const resolved = resolveActiveThemeColors({
     colorTheme: colorPreset,
     resolvedTheme: resolvedMode,
     activeCustomThemeId: customThemeId,
     customThemes: store.customThemes,
+    accentColor: store.accentColor,
   })
 
   return {
@@ -59,8 +89,10 @@ function getThemeState(): ThemeState {
     resolvedMode,
     colorPreset,
     customThemeId,
+    activePluginThemeId: activePluginThemeId ?? null,
     colors: resolved.colors as ThemeColors,
     themeSource: resolved.themeSource,
+    ...applied,
   }
 }
 
@@ -74,6 +106,7 @@ function createThemeChangeKey(): string {
     mode: state.theme,
     colorTheme: state.colorTheme,
     customThemeId: state.activeCustomThemeId,
+    activePluginThemeId: state.activePluginThemeId,
     activeCustomTheme,
   })
 }
@@ -83,7 +116,7 @@ function createThemeChangeKey(): string {
  */
 export function createThemeAPI(pluginId: string): PluginThemeAPI {
   const logger = createPluginSystemLogger(pluginId)
-  return {
+  const api: PluginThemeAPI = {
     getTheme: (): ThemeState => getThemeState(),
 
     getMode: () => {
@@ -119,26 +152,33 @@ export function createThemeAPI(pluginId: string): PluginThemeAPI {
 
     registerCustomTheme: (theme: Omit<CustomTheme, "id">): string => {
       const store = useSettingsStore.getState()
-      // Ensure required color fields are present.
-      // Phase 2: `colors` is optional on CustomTheme — coerce to {} when
-      // a plugin omits it. The new `tokens` shape is preferred at read
-      // time but we keep the legacy single-set write path here until
-      // Task 9 migrates plugin authors to the dual-variant shape.
-      const incoming = theme.colors ?? {}
-      const themeWithDefaults = {
-        name: theme.name,
-        isDark: theme.isDark ?? false,
-        colors: {
-          ...incoming,
-          primary: incoming.primary || "#3b82f6",
-          secondary: incoming.secondary || "#64748b",
-          accent: incoming.accent || "#3b82f6",
-          background: incoming.background || "#ffffff",
-          foreground: incoming.foreground || "#0f172a",
-          muted: incoming.muted || "#f1f5f9",
-        },
+      // A plugin may now supply the dual-variant `tokens.{light,dark}` shape
+      // (preferred) OR the legacy single `colors` set. We persist whichever
+      // was given and always fill a legacy `colors` set so pre-`tokens`
+      // readers keep working. The row is stamped with `ownerPluginId` so it
+      // can be garbage-collected across restarts when the plugin is disabled.
+      const baseVariant: "light" | "dark" = theme.baseVariant ?? (theme.isDark ? "dark" : "light")
+      const incoming = theme.tokens?.[baseVariant] ?? theme.colors ?? {}
+      const colors = {
+        ...incoming,
+        primary: incoming.primary || "#3b82f6",
+        secondary: incoming.secondary || "#64748b",
+        accent: incoming.accent || "#3b82f6",
+        background: incoming.background || "#ffffff",
+        foreground: incoming.foreground || "#0f172a",
+        muted: incoming.muted || "#f1f5f9",
       }
-      const id = store.createCustomTheme(themeWithDefaults)
+      const seed: Omit<CustomTheme, "id"> = {
+        name: theme.name,
+        isDark: theme.isDark ?? baseVariant === "dark",
+        baseVariant,
+        colors,
+        ownerPluginId: pluginId,
+        ...(theme.tokens ? { tokens: theme.tokens } : {}),
+        ...(theme.derivedVariant ? { derivedVariant: theme.derivedVariant } : {}),
+        ...(theme.cssVars ? { cssVars: theme.cssVars } : {}),
+      }
+      const id = store.createCustomTheme(seed)
       const owned = ownedByPlugin.get(pluginId) ?? new Set<string>()
       owned.add(id)
       ownedByPlugin.set(pluginId, owned)
@@ -152,6 +192,12 @@ export function createThemeAPI(pluginId: string): PluginThemeAPI {
       const storeUpdates: Record<string, unknown> = {}
       if (updates.name) storeUpdates.name = updates.name
       if (updates.isDark !== undefined) storeUpdates.isDark = updates.isDark
+      // Dual-variant fields pass straight through (the store spreads any
+      // fields), so plugins can now supply proper light+dark palettes.
+      if (updates.baseVariant !== undefined) storeUpdates.baseVariant = updates.baseVariant
+      if (updates.derivedVariant !== undefined) storeUpdates.derivedVariant = updates.derivedVariant
+      if (updates.tokens !== undefined) storeUpdates.tokens = updates.tokens
+      if (updates.cssVars !== undefined) storeUpdates.cssVars = updates.cssVars
       if (updates.colors) {
         const existing = store.customThemes.find((theme) => theme.id === id)
         const existingColors = existing?.colors ?? {}
@@ -191,6 +237,12 @@ export function createThemeAPI(pluginId: string): PluginThemeAPI {
       logger.info(`Activated custom theme: ${id}`)
     },
 
+    activateRegisteredTheme: (themeId: string | null) => {
+      const store = useSettingsStore.getState()
+      store.setActivePluginTheme(themeId)
+      logger.info(`Activated registered plugin theme: ${themeId ?? "<none>"}`)
+    },
+
     onThemeChange: (handler: (theme: ThemeState) => void) => {
       let lastState = createThemeChangeKey()
 
@@ -199,6 +251,7 @@ export function createThemeAPI(pluginId: string): PluginThemeAPI {
           mode: state.theme,
           colorTheme: state.colorTheme,
           customThemeId: state.activeCustomThemeId,
+          activePluginThemeId: state.activePluginThemeId,
           activeCustomTheme: state.activeCustomThemeId
             ? state.customThemes.find((theme) => theme.id === state.activeCustomThemeId)
             : null,
@@ -236,6 +289,27 @@ export function createThemeAPI(pluginId: string): PluginThemeAPI {
       }
     },
   }
+
+  // theme:read is a default grant (initializePluginPermissions), so read
+  // methods keep working for undeclared plugins; mutations need theme:write.
+  return createApiGuardedAPI(pluginId, api, {
+    getTheme: "theme:read",
+    getMode: "theme:read",
+    getResolvedMode: "theme:read",
+    setMode: "theme:write",
+    getColorPreset: "theme:read",
+    setColorPreset: "theme:write",
+    getAvailablePresets: "theme:read",
+    getColors: "theme:read",
+    registerCustomTheme: "theme:write",
+    updateCustomTheme: "theme:write",
+    deleteCustomTheme: "theme:write",
+    getCustomThemes: "theme:read",
+    activateCustomTheme: "theme:write",
+    activateRegisteredTheme: "theme:write",
+    onThemeChange: "theme:read",
+    applyScopedColors: "theme:write",
+  })
 }
 
 /**
@@ -246,13 +320,24 @@ export function createThemeAPI(pluginId: string): PluginThemeAPI {
  * second call for the same plugin is a no-op.
  */
 export function clearCustomThemesForPluginContext(pluginId: string): void {
-  const owned = ownedByPlugin.get(pluginId)
-  if (!owned) return
   const store = useSettingsStore.getState()
-  for (const id of owned) {
+
+  // Persistent GC: rows stamped with `ownerPluginId` survive restarts, so the
+  // in-memory `ownedByPlugin` map alone would leak them after a reload. Delete
+  // every persisted row this plugin owns, unioned with the in-memory set.
+  const persisted = store.customThemes.filter((t) => t.ownerPluginId === pluginId).map((t) => t.id)
+  const ids = new Set<string>([...(ownedByPlugin.get(pluginId) ?? []), ...persisted])
+  for (const id of ids) {
     store.deleteCustomTheme(id)
   }
   ownedByPlugin.delete(pluginId)
+
+  // If this plugin's directly-activated theme is live, clear it so the UI
+  // falls back to the preset instead of holding a dangling registry id.
+  const active = store.activePluginThemeId
+  if (active && active.startsWith(`${pluginId}.`)) {
+    store.setActivePluginTheme(null)
+  }
 }
 
 /** Test-only. */

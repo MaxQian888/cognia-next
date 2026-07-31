@@ -13,28 +13,104 @@ import type {
   A2UISurfaceType,
 } from "../artifact/a2ui"
 import type { AgentModeConfig } from "../agent/agent-mode"
+import type { LspServerConfig } from "../lsp/config"
 import type { ExternalAgentPresetConfig } from "@/lib/ai/agent/external/presets"
-import type { Skill as _Skill } from "./_compat"
+import type { ProtocolAdapterFactory } from "@/lib/ai/agent/external/protocol-adapter"
+import type {
+  Skill as _Skill,
+  Session,
+  CreateSessionInput,
+  UpdateSessionInput,
+  UIMessage,
+  Project,
+  CreateProjectInput,
+  UpdateProjectInput,
+  KnowledgeFile,
+  ChatMode,
+} from "./_compat"
 import type { PluginMcpServerPresetDef } from "./plugin-mcp-preset"
 import type { PluginNativeAnthropicToolDef } from "./plugin-native-tool"
 import type { PluginCharacterPackDef } from "./plugin-character-pack"
 import type { PluginSchedulerAPI } from "./plugin-scheduler"
 import type { PluginSkillDef } from "./plugin-skill"
+import type { PluginIPCAPI, PluginEventAPI } from "./plugin-messaging"
+import type {
+  PluginAgentRun,
+  PluginAgentRunOptions,
+  PluginAgentRunResult,
+  PluginDispatchSubagentOptions,
+  PluginSubagentDispatchResult,
+  PluginRunTeamOptions,
+  PluginRunTeamResult,
+} from "./plugin-agent-sdk"
+import type { PluginAgentGuardrailsAPI } from "./plugin-agent-guardrails"
+import type { PluginAgentSessionsAPI } from "./plugin-agent-session"
+import type { PluginAgentContextAPI, PluginContextProviderDef } from "./plugin-context-provider"
+import type { PluginSubagentDef } from "./plugin-subagent"
+import type { AgentTeam } from "@/types/agent/agent-team"
 import type { PluginVerificationSnapshot } from "./plugin-verification"
 import type { PluginOcrProviderDef } from "./plugin-ocr"
 import type { PluginWorkspaceBackendDef } from "./plugin-workspace-backend"
 import type { PluginMessageRendererDef } from "./plugin-message-renderer"
+import type { PluginToolRendererDef } from "./plugin-tool-renderer"
 import type { PluginAiProviderDef } from "./plugin-ai-provider"
 import type { PluginTerminalCompletionProviderDef } from "./plugin-terminal-completion"
 import type { PluginModalMountDef } from "./plugin-modal"
+import type { PluginViewContainerDef } from "./plugin-view-container"
+import type { PluginViewDef } from "./plugin-view"
+import type { PluginWebviewDef } from "./plugin-webview"
+import type { PluginAuthProviderDef } from "./plugin-auth"
 import type { PluginChatMiddlewareDef } from "./plugin-chat-middleware"
+import type { PluginCliToolDef } from "./plugin-cli-tool"
+import type { PluginRoutingStrategyDef } from "./plugin-routing-strategy"
+import type { PluginDeploymentFilterDef } from "./plugin-deployment-filter"
+import type { PluginProtocolAdapterDef } from "./plugin-protocol-adapter"
+import type { PluginExternalAgentAdapterDef } from "./plugin-external-agent-adapter"
+import type { PluginSessionImporterDef } from "./plugin-session-importer"
+import type { PluginContextPanelDef } from "./plugin-context-panel"
+import type { PluginExtensionDef } from "./plugin-extension"
+import type { PluginIdeManifest } from "./plugin-ide"
+import type { PluginIntegrationDef, PluginIntegrationsAPI } from "./plugin-integration"
+// Re-exported so the SDK manifest barrel (`@cognia/plugin-sdk/manifest`) can
+// source it from this module, the documented source of truth.
+export type { PluginExternalAgentAdapterDef } from "./plugin-external-agent-adapter"
+export type { PluginSessionImporterDef } from "./plugin-session-importer"
+import type { PluginToolRouteDef } from "./plugin-tool-route"
 // `ActivationEventDeclaration` lives in `lib/plugin/contracts/plugin-points`,
 // added by Task #10. Importing the real type keeps the manifest schema and
 // the runtime parser in lockstep — historically a local alias was used to
 // avoid a dep cycle, but the contracts module has no upward imports so the
 // real type is safe to bring in here.
 import type { ActivationEventDeclaration } from "@/lib/plugin/contracts/plugin-points"
-import type { VsCodeExtensionBlock } from "./plugin-vscode"
+import type { PluginSurfaceFormFactor } from "./plugin-surface"
+import type { PluginIconName } from "./plugin-icon"
+import type { VsCodeExtensionBlock, VsCodeLanguage } from "./plugin-vscode"
+import type {
+  Artifact,
+  ArtifactLanguage,
+  CanvasDocumentVersion,
+  CanvasSuggestion,
+} from "../artifact/artifact"
+import type {
+  CanvasActionConfig,
+  CanvasActionExecutionOptions,
+  CanvasActionResult,
+  CanvasActionType,
+  StreamingCallbacks,
+} from "@/lib/ai/generation/canvas-actions"
+import type { AddCommentInput, ReplyInput } from "@/lib/db/canvas-comments"
+import type { AgentSessionSourceAdapter } from "@/lib/session-import/types"
+import type { ChatImporter } from "@/lib/data/importers/types"
+import type { PythonExecResult } from "@/lib/tauri/canvas"
+import type { CanvasComment, CollaborativeSession } from "../canvas/collaboration"
+// PluginMediaAPI and CanonicalExtensionPoint live in `lib/plugin/api/media-api`
+// and `lib/plugin/contracts/plugin-points` respectively. We mark
+// `PluginMediaAPI` as an opaque object type rather than a
+// `Record<string, unknown>` so the real media API type (with named methods, no
+// index signature) can be assigned to it without the structural mismatch
+// flagged by TS2322.
+type PluginMediaAPI = object
+type CanonicalExtensionPoint = string
 
 // =============================================================================
 // Core Plugin Types
@@ -49,6 +125,25 @@ export type PluginType =
   | "hybrid" // Combination of frontend and Python components
   | "wasm" // WASM Component Model plugin (wasmtime host, Tauri-only — ADR 0013)
   | "vscode-extension" // VS Code extension running in Node sidecar (Tauri-only — see ~/.claude/plans/vscode-snug-squid.md)
+
+/**
+ * Runtime that executes a module-bridge contribution's factory.
+ *
+ * Resolution order (see `effectiveContributionBackend` in
+ * `lib/plugin/core/validation.ts` and `isPythonBackedContribution` in
+ * `lib/plugin/bridge/_shared/python-backed-proxy.ts` — all three are kept
+ * rule-for-rule in lockstep with the Rust lint):
+ *   1. this explicit field;
+ *   2. a declared JS module path (`entry`) — writing one *is* the declaration
+ *      of JS intent, so it is never silently ignored;
+ *   3. the plugin type (`python` → `"python"`, everything else → `"js"`).
+ *
+ * `hybrid` plugins should set this explicitly: an omitted backend resolves to
+ * `"js"`, which is rarely what a hybrid author means for a Python handler.
+ * Only capabilities whose contract marks `pythonExecution` as
+ * `supported`/`experimental` may resolve to `"python"`.
+ */
+export type PluginContributionBackend = "js" | "python"
 
 /**
  * Plugin capabilities - what the plugin can provide
@@ -69,12 +164,28 @@ export type PluginCapability =
   | "providers" // Provides AI model providers
   | "exporters" // Provides export formats
   | "importers" // Provides import handlers
+  | "configuration" // Declarative settings schema (auto-rendered form + ctx.configuration)
   | "a2ui" // A2UI integration
   | "python" // Python runtime capability
   | "scheduler" // Provides scheduled tasks
+  | "workspace-backend" // Contributes workspace execution backends (sandbox/local runners)
+  | "message-renderer" // Contributes per-message-part renderers
+  | "tool-renderer" // Contributes result cards for its own MCP tools
+  | "density-preset" // Contributes named appearance density presets
+  | "chat-middleware" // Contributes guarded chat request middleware
+  | "modal-mount" // Contributes declarative modal mount points
+  | "terminal-completion" // Contributes terminal inline completion providers
+  | "routing-strategy" // Contributes model routing strategies
+  | "deployment-filter" // Contributes pre-call deployment filters
+  | "protocol-adapter" // Contributes custom provider protocol adapters
+  | "tool-route" // Contributes semantic utterance routes for plugin tools
+  | "context-provider" // Contributes declarative agent context providers
   | "external-agent-preset" // cognia-next: contributes external-agent presets (Claude Code / Codex / etc.)
+  | "external-agent-adapter" // cognia-next: contributes external-agent protocol adapters (new protocols)
+  | "session-importer" // cognia-next: contributes external-agent session-history importers (Cursor / Cline / Windsurf / …)
   | "mcp-server-preset" // Contributes MCP server presets to the gallery
   | "connectors" // Provides Platform Connector adapters (Task 110)
+  | "integrations" // Provides Marketplace service integrations (events/actions/resources)
   | "workflow" // Contributes custom workflow node executors (ADR 0017)
   | "workflow-trigger" // Contributes custom workflow trigger sources (ADR 0017)
   | "tray" // Contributes items to the desktop system tray menu (ADR-pending)
@@ -84,11 +195,28 @@ export type PluginCapability =
   | "wallpapers" // Contributes built-in wallpaper entries (bundled images/gradients/colors)
   | "character-pack" // Bundles ready-to-use characters into a portable pack (ADR-0030)
   | "subagent" // Contributes Claude SDK subagents callable by teams + workflow editor
+  | "template-package" // Contributes immutable packages to the unified template catalog
   | "agent-team-template" // Contributes complete agent-team blueprints surfaced in the team picker
   | "shared-memory-adapter" // Contributes a bidirectional backing store for agent-team shared memory
   | "workflow-template" // Contributes complete visual-workflow blueprints surfaced in the editor (ADR-0017/0032)
   | "automation" // Drives the desktop via Computer Use (screenshot/click/type/…) — gates ctx.automation
   | "companion" // Manages paired devices + remote-control grants — gates ctx.companion
+  | "quick-action" // Contributes quick actions surfaced in the command palette / composer menu / tray
+  | "cli-tools" // Declaratively wraps external CLI binaries as agent tools (manifest.cliTools)
+  | "balance-adapter" // Contributes a subscription balance adapter (Usage balance cards / /balance)
+  | "limits-source" // Contributes a unified subscription limits/usage source (Usage tab / TUI /limits)
+  | "im-rate-source" // Contributes a per-conversation IM send gate (connector runtime ai-run branch)
+  | "compaction-strategy" // Contributes a conversation-compaction strategy (summary prompt + thresholds)
+  | "view-container" // Contributes a rail-mounted view container (B1) — own icon + middle-column panel
+  | "tree-view" // Contributes tree data providers / custom React views (B2) mounted into a view container
+  | "webview" // Contributes sandboxed HTML webview panels (B3) mounted into a view container
+  | "context-panel" // Contributes resource-scoped trusted React panels to the Context Workbench
+  | "auth-provider" // Contributes a native auth/OAuth provider (C1) — ctx.auth.registerProvider
+  | "uri-handler" // Handles cognia://plugin/<id>/... deep-links (C2) — ctx.uri.registerHandler
+  | "editor" // Drives the live project editor — gates ctx.editor (engine-agnostic: Monaco or the code-server Pro IDE)
+  | "pet" // Reads + nurtures the desktop pet — gates ctx.pet (rate-limited, budget-clamped)
+  | "pet-achievement" // Contributes data-only pet achievements (condition DSL, manifest.petAchievements)
+  | "pet-item" // Contributes data-only pet shop items (manifest.petItems)
 
 /**
  * Plugin status in the lifecycle
@@ -102,6 +230,7 @@ export type PluginStatus =
   | "enabled" // Active and running
   | "disabling" // Currently disabling
   | "disabled" // Loaded but inactive
+  | "suspended" // Idle-suspended: contributions torn down, user-enabled intent preserved
   | "unloading" // Currently unloading
   | "error" // Error state
   | "updating" // Being updated
@@ -116,7 +245,7 @@ export type PluginSource =
   | "git" // Cloned from git repository
   | "dev" // Development mode (hot reload enabled)
 
-export type PluginRuntimeProfile = "browser" | "tauri"
+export type PluginRuntimeProfile = "browser" | "tauri" | "mobile" | "headless"
 
 export type PluginRuntimeAvailability = "supported" | "degraded" | "blocked"
 
@@ -129,6 +258,19 @@ export interface PluginRuntimeCompatibilityTarget {
 export interface PluginRuntimeCompatibilityMap {
   browser?: PluginRuntimeCompatibilityTarget
   tauri?: PluginRuntimeCompatibilityTarget
+  /**
+   * Node brain plus cognia-server native hosts. Legacy manifests inherit the
+   * browser target for renderer-style frontend plugins and the Tauri target
+   * for Node/native plugin types; new packages should declare this explicitly.
+   */
+  headless?: PluginRuntimeCompatibilityTarget
+  /**
+   * Capacitor mobile (WebView) shell. A browser-class runtime that lacks the
+   * Tauri invoke bridge, Node sidecar, desktop automation, and several WebView
+   * APIs (screen capture, native clipboard, unrestricted filesystem). When a
+   * plugin omits this key the host falls back to {@link browser} availability.
+   */
+  mobile?: PluginRuntimeCompatibilityTarget
 }
 
 export interface PluginReview {
@@ -147,14 +289,7 @@ export type PluginInstallRootKind = "builtin" | "installed" | "dev"
  * Actions supported by a normalized extension record.
  */
 export type ExtensionOperation =
-  | "install"
-  | "update"
-  | "enable"
-  | "disable"
-  | "reload"
-  | "rollback"
-  | "uninstall"
-  | "configure"
+  "install" | "update" | "enable" | "disable" | "reload" | "rollback" | "uninstall" | "configure"
 
 export interface ExtensionCompatibilityDiagnostic {
   code: string
@@ -274,6 +409,31 @@ export type PluginPermission =
   | "settings:write" // Modify settings
   | "session:read" // Read chat sessions
   | "session:write" // Modify chat sessions
+  | "session:delete" // Delete chat sessions
+  | "project:read" // Read project metadata and files through scoped APIs
+  | "project:write" // Create/modify projects, their knowledge files and links
+  | "project:delete" // Delete projects
+  | "canvas:read" // Read Canvas document metadata and selection
+  | "canvas:write" // Create/modify/delete Canvas documents
+  | "canvas:run" // Execute Canvas code blocks and actions
+  | "canvas:collaborate" // Join Canvas collaboration sessions
+  | "artifact:read" // Read artifact metadata
+  | "artifact:write" // Create and modify artifacts
+  | "workflow:read" // Read workflow metadata and selection
+  | "editor:read" // Read what the user is looking at in the project editor
+  | "editor:write" // Open files and reflect edits in the project editor
+  | "debug:control" // Start, inspect, and control debug sessions
+  | "tests:run" // Discover and run tests through an IDE test controller
+  | "notebook:execute" // Execute notebook cells or notebook-backed kernels
+  | "vector:read" // Query the vector store
+  | "vector:write" // Write to and delete from the vector store
+  | "ai:chat" // Send prompts to a language model on the user's account
+  | "ai:embed" // Generate embeddings on the user's account
+  | "export:session" // Export chat sessions
+  | "export:project" // Export whole projects
+  | "theme:read" // Read the active theme
+  | "theme:write" // Change the active theme
+  | "extension:ui" // Contribute trusted host-rendered UI
   | "media:image:read" // Read image media assets
   | "media:image:write" // Write image media assets
   | "media:video:read" // Read video media assets
@@ -281,10 +441,23 @@ export type PluginPermission =
   | "media:video:export" // Export rendered video output
   | "agent:control" // Control agent execution (tool-enabled headless runs)
   | "agent:dispatch-external" // Dispatch external coding agents (Claude Code / Codex / …)
+  | "agent:dispatch" // Dispatch built-in subagents / agent teams in-process
+  | "agent:shared-memory:read" // Read team shared-memory entries (ACL-gated)
+  | "twin:read" // Query the employee twin's RAG memory
+  | "templates:read" // Read the unified template catalog and validation results
+  | "templates:contribute" // Register lifecycle-scoped template packages
+  | "templates:instantiate" // Request guarded preflight/instantiation
+  | "templates:library:write" // Create user-owned template drafts after confirmation
+  | "ipc:call" // Call/send to another plugin over inter-plugin IPC (incl. RPC)
+  | "ipc:expose" // Expose RPC methods other plugins can invoke over IPC
+  | "events:publish" // Emit onto the cross-plugin event bus
+  | "events:subscribe" // Listen on the cross-plugin event bus
   | "python:execute" // Execute Python code
   | "sandbox:web-execute" // Execute code in browser sandbox (Pyodide/JS)
   | "secrets:read" // Read from OS keyring / secure storage
   | "secrets:write" // Write to OS keyring / secure storage
+  | "auth:provide" // Register a native auth/OAuth provider (C1)
+  | "auth:consume" // Consume sessions from a registered auth provider (C1)
   | "terminal:spawn" // Open a new PTY session in the integrated terminal dock
   | "terminal:write" // Pipe bytes into an existing terminal session's stdin
   | "terminal:kill" // Signal-terminate an existing terminal session
@@ -294,11 +467,19 @@ export type PluginPermission =
   | "git:write" // Mutate the active repo (stage/commit/checkout/push/stash/discard)
   | "goal:read" // Read the user's goals and their progress
   | "goal:write" // Create, update, complete, and decompose goals
+  | "memory:read" // Search/list the user's long-term memories
+  | "memory:write" // Store, update, and forget long-term memories (PII-gated, never procedural)
+  | "team:read" // Read agent teams, rosters, and their task boards
+  | "team:write" // Create tasks / comment / guarded card moves on team boards (no run control)
   | "subscription:read" // Read subscription plan + usage metrics (never raw credentials)
   | "perf:read" // Read performance dashboard snapshots + live sample stream
   | "connectors:read" // List connector adapters + subscribe to inbound bus events
   | "connectors:send" // Send outbound messages through a connector adapter
   | "connectors:manage" // Create / update / delete / enable connector adapter instances
+  | "integrations:read" // Read Integration definitions, accounts, subscriptions, jobs, and audit
+  | "integrations:events" // Publish verified normalized Integration events
+  | "integrations:execute" // Queue Integration actions through host risk policy
+  | "integrations:manage" // Create/update/remove Integration accounts and subscriptions
   | "share:read" // Read the local mirror of created public share links + their stats
   | "share:create" // Create / revoke public share links (publishes data to the share worker)
   | "backup:read" // Build + read encrypted backup packages and the backup history
@@ -314,7 +495,23 @@ export type PluginPermission =
   // Companion remote-control management (host-side). read is sensitive, control is DANGEROUS.
   | "companion:read" // List paired devices, read remote-control grants + inbound activity
   | "companion:control" // Grant / revoke a device's remote-control capability
+  | "cli:execute" // Run an allowlisted external CLI declared via manifest.cliTools — DANGEROUS
   | "companion:goal-control" // Pause / resume / stop a host goal loop
+  // Native Anthropic computer-use tool bridge (declared by computer-use; keyed
+  // on by the automation settings UI and the plugin-sdk native-tool examples).
+  | "native:input" // Synthesize native keyboard / mouse input via a native Anthropic tool
+  | "native:screen" // Capture the native screen via a native Anthropic tool
+  // Sandboxed core tools (ADR-0028; declared by cognia-sandboxed-tools).
+  | "native:filesystem" // Read/write the host filesystem through the sandboxed-tools backend
+  | "native:process" // Run host processes through the sandboxed-tools backend
+  // Desktop pet (gated by the "pet" capability; see lib/plugin/api/pet-api.ts).
+  | "pet:read" // Read the pet's public view (level/stage/needs/mood) + subscribe to sanitized events
+  | "pet:interact" // Emit nurture interactions and budget-capped XP/coin rewards
+  // Chat interception (W3.2). High-risk: lets a plugin rewrite/block every
+  // prompt, tool call, and tool result. Required to declare the
+  // onUserPromptSubmit / onPreToolUse / onPostToolUse / onMessageSend /
+  // onMessageReceive hooks.
+  | "hooks:chat-intercept" // Intercept and rewrite chat prompts, tool calls, and tool results
 
 export type PluginPermissionDecision = "allow" | "deny"
 export type PluginPermissionPolicy = "ask" | "allow" | "deny"
@@ -336,6 +533,33 @@ export interface PluginBinaryRequirement {
   minVersion?: string
   /** Optional URL the missing-binary dialog deep-links to for install help. */
   documentation?: string
+}
+
+/**
+ * Per-plugin fault-tolerance policy for the resilience layer
+ * (`lib/plugin/resilience/`). All fields optional — unset values fall back to
+ * the global `DEFAULT_PLUGIN_RESILIENCE` defaults. Retry is OFF by default and
+ * must be explicitly opted in (per manifest or per tool) so non-idempotent
+ * tools are never silently re-executed.
+ */
+export interface PluginResilienceConfig {
+  /** Per-attempt wall-clock budget for tool execution (ms). Default 30_000. */
+  timeoutMs?: number
+  /** Extra attempts after the first. Only applies when `retryable` is true. Default 0. */
+  maxRetries?: number
+  /** Manifest-wide retry opt-in. Default false. A tool's own `retryable` overrides this. */
+  retryable?: boolean
+  /** Circuit-breaker scope: per-tool (default) or aggregated per-plugin. */
+  breakerScope?: "tool" | "plugin"
+  /** Circuit-breaker tuning. */
+  breaker?: {
+    /** Consecutive failures that open the breaker. Default 5. */
+    failureThreshold?: number
+    /** Time the breaker stays open before a half-open probe (ms). Default 30_000. */
+    cooldownMs?: number
+    /** Half-open successes needed to close. Default 2. */
+    successThreshold?: number
+  }
 }
 
 /**
@@ -445,6 +669,44 @@ export interface PluginManifest {
    */
   vscodeExtension?: VsCodeExtensionBlock
 
+  /**
+   * Versioned, engine-neutral IDE contribution contract. The host normalizes
+   * this block before projecting it to Monaco or a managed code-server proxy.
+   */
+  ide?: PluginIdeManifest
+
+  /**
+   * VS Code `contributes.languages[]` projected onto the cognia manifest at
+   * install time (`manifest-adapter.ts`). The plugin manager registers these
+   * through `languages-bridge` on enable so contributed language ids surface
+   * in Monaco (`monaco.languages.register` + `setLanguageConfiguration`) and
+   * cognia's filename → language detection. See ADR-0026 (VS Code reuse layer)
+   * and `docs/.../plugin-system`.
+   */
+  vscodeLanguages?: VsCodeLanguage[]
+
+  /**
+   * VS Code `contributes.grammars[]` projected onto the manifest at install
+   * time (W5.1). Registered through `grammars-bridge` on enable; the shiki
+   * highlight seam consumes registered TextMate grammars for contributed
+   * languages. Paths are relative to the plugin root.
+   */
+  vscodeGrammars?: Array<{ scopeName: string; language?: string; path: string }>
+
+  /**
+   * VS Code `contributes.iconThemes[]` projected onto the manifest at install
+   * time (W5.1). Registered through `icons-bridge` on enable; the project
+   * file tree resolves file icons from the active contributed theme.
+   */
+  vscodeIconThemes?: Array<{ id: string; label: string; path: string }>
+
+  /**
+   * VS Code `contributes.snippets[]` projected onto the manifest at install
+   * time (W5.1). Registered through `snippets-bridge` on enable; the Monaco
+   * completion source (`lib/monaco/snippets.ts`) already reads the bridge.
+   */
+  vscodeSnippets?: Array<{ language: string; path: string }>
+
   /** Style entry point (CSS) */
   styles?: string
 
@@ -498,6 +760,9 @@ export interface PluginManifest {
   /** JSON Schema for plugin configuration */
   configSchema?: PluginConfigSchema
 
+  /** Fault-tolerance policy (timeout/retry/circuit-breaker) for this plugin. */
+  resilience?: PluginResilienceConfig
+
   /** Default configuration values */
   defaultConfig?: Record<string, unknown>
 
@@ -507,6 +772,40 @@ export interface PluginManifest {
 
   /** Optional permissions (requested at runtime) */
   optionalPermissions?: PluginPermission[]
+
+  /**
+   * Concrete filesystem scope for Node-target JavaScript plugins. The host
+   * only converts these paths into Node `--allow-fs-*` flags when the matching
+   * `filesystem:*` permission is also declared; missing or empty lists deny by
+   * default.
+   */
+  fileScope?: {
+    readPaths?: string[]
+    writePaths?: string[]
+  }
+
+  /**
+   * Declarative allowlist of shell programs this plugin may run via
+   * `ctx.shell.execute` (program names, e.g. `["git", "node"]`). The host
+   * enforces this deny-by-default: a plugin holding `shell:execute` can only
+   * run a command listed here. Omitting it (or an empty list) means the plugin
+   * can run NO command even with the permission granted.
+   */
+  shellCommands?: string[]
+
+  /**
+   * Declarative network egress allowlist (Figma-style). When present, the host
+   * clamps this plugin's `network:fetch`/`download`/`upload` to the listed
+   * domains; subdomains match (`example.com` matches `api.example.com`). Use
+   * `["*"]` for any host (state `reasoning`) or `["none"]` for no network.
+   * Omitting `networkAccess` leaves egress unrestricted (the `network:fetch`
+   * grant + consent remains the boundary).
+   */
+  networkAccess?: {
+    allowedDomains?: string[]
+    /** Why the plugin needs the declared access — shown in the consent prompt. */
+    reasoning?: string
+  }
 
   /**
    * Per-permission justification strings — surfaced verbatim in the
@@ -528,18 +827,52 @@ export interface PluginManifest {
   /** Agent tools provided */
   tools?: PluginToolDef[]
 
+  /**
+   * Declarative CLI wrapper tools — external binaries exposed as agent
+   * tools with zero plugin code. Requires the `"cli-tools"` capability and
+   * the `"cli:execute"` permission (DANGEROUS, confirm-tier).
+   */
+  cliTools?: PluginCliToolDef[]
+
   /** Agent modes provided */
   modes?: PluginModeDef[]
 
   /** Slash commands provided */
   commands?: PluginManifestCommandDef[]
 
+  /**
+   * Quick actions surfaced in the command palette / composer menu / tray.
+   * Requires the `"quick-action"` capability. Each entry must name a
+   * dispatch target (`command` or `slash`).
+   */
+  quickActions?: PluginQuickActionDef[]
+
+  /**
+   * Declarative native tray items. Requires the `"tray"` capability and a
+   * dispatch target (`command` or `slash`).
+   */
+  trayItems?: PluginManifestTrayItemDef[]
+
   // Activation
   /** Activation events - when to load the plugin */
   activationEvents?: PluginActivationEvent[]
 
+  /**
+   * React components contributed to canonical host UI extension points.
+   * The host derives `onView:<point>` activation events from these entries.
+   */
+  extensions?: PluginExtensionDef[]
+
   /** Whether plugin should be loaded at startup */
   activateOnStartup?: boolean
+
+  /**
+   * Opt in to host idle-suspension: when true, the host may tear the plugin's
+   * contributions down after it has been idle past the threshold (reclaiming
+   * resources) and transparently resume it on the next activation event. Off by
+   * default — never auto-suspend startup/connector/scheduler plugins.
+   */
+  idleSuspend?: boolean
 
   // Scheduled Tasks
   /** Scheduled tasks provided by this plugin */
@@ -552,6 +885,14 @@ export interface PluginManifest {
    * instantiate a `PlatformAdapter`.
    */
   connectors?: PluginConnectorDef[]
+
+  /**
+   * Marketplace service integrations. Unlike connectors, these model external
+   * resources, webhook events, typed actions, and optional Inbox projections.
+   */
+  integrations?: PluginIntegrationDef[]
+  /** One-major compatibility aliases resolved only while this plugin is enabled. */
+  workflowKindAliases?: Record<string, string>
 
   // Plugin-first Computer Use plumbing (M1·T1)
   /** MCP server presets contributed by this plugin (mcp-server-preset capability). */
@@ -571,6 +912,17 @@ export interface PluginManifest {
    */
   characterPacks?: PluginCharacterPackDef[]
   /**
+   * Data-only pet achievements (`pet-achievement` capability). Compiled from
+   * their condition DSL into predicates at check time; ids namespace as
+   * `plugin:<pluginId>:<id>`. See `lib/plugin/registries/pet-achievement-registry.ts`.
+   */
+  petAchievements?: import("./plugin-pet").PluginPetAchievementDef[]
+  /**
+   * Data-only pet shop items (`pet-item` capability), unioned into the host
+   * catalog static-first. See `lib/plugin/registries/pet-item-registry.ts`.
+   */
+  petItems?: import("./plugin-pet").PluginPetItemDef[]
+  /**
    * Subagents contributed by this plugin (`subagent` capability). Each entry
    * mirrors the Claude Code SDK `AgentDefinition` shape and is registered
    * into `subagent-registry` on enable. Teams and the workflow editor union
@@ -580,6 +932,11 @@ export interface PluginManifest {
    * they never collide with built-in dispatcher names.
    */
   subagents?: import("./plugin-subagent").PluginSubagentDef[]
+  /**
+   * Immutable unified template packages (`template-package` capability).
+   * Definitions are overlay-only and are removed with the plugin lifecycle.
+   */
+  templatePackages?: import("@/packages/plugin-sdk/src/templates").PluginTemplatePackageContribution[]
   /**
    * Agent team templates contributed by this plugin (`agent-team-template`
    * capability). Each template carries a roster of teammates, optional
@@ -598,6 +955,42 @@ export interface PluginManifest {
    * `shared-memory-adapter-registry` on enable.
    */
   sharedMemoryAdapters?: import("./plugin-shared-memory-adapter").PluginSharedMemoryAdapterDef[]
+
+  /**
+   * Subscription balance adapters contributed by this plugin
+   * (`balance-adapter` capability). Each adapter resolves "how much credit /
+   * quota is left" for a provider account from a pure authed GET; registered
+   * into `balance-adapter-registry` on enable and consulted by
+   * `findBalanceAdapter` ahead of the built-in adapters.
+   */
+  balanceAdapters?: import("./plugin-balance-adapter").PluginBalanceAdapterDef[]
+
+  /**
+   * Unified subscription limits/usage sources contributed by this plugin
+   * (`limits-source` capability). Each source resolves normalized
+   * `ProviderLimits` (utilization windows and/or credit meters) for a provider
+   * account; registered into `limits-source-registry` on enable and consulted
+   * by `resolveLimitsSources` ahead of the built-in sources.
+   */
+  limitsSources?: import("./plugin-limits-source").PluginLimitsSourceDef[]
+
+  /**
+   * Per-conversation IM send gates contributed by this plugin
+   * (`im-rate-source` capability). Each source decides whether an
+   * inbound-triggered AI reply may proceed for a conversation; registered into
+   * `im-rate-source-registry` on enable and consulted by `evaluateImRate` at
+   * the top of the connector runtime's ai-run branch (advisory/additive).
+   */
+  imRateSources?: import("./plugin-im-rate-source").PluginImRateSourceDef[]
+
+  /**
+   * Conversation-compaction strategies contributed by this plugin
+   * (`compaction-strategy` capability). Each strategy declaratively carries a
+   * summary prompt and/or threshold knobs; registered into
+   * `compaction-strategy-registry` on enable and resolved by
+   * `resolveSendOptions` when the compaction settings select its id.
+   */
+  compactionStrategies?: import("./plugin-compaction-strategy").PluginCompactionStrategyDef[]
 
   // Visual Workflows (ADR 0017)
   /**
@@ -745,6 +1138,15 @@ export interface PluginManifest {
   messageRenderers?: PluginMessageRendererDef[]
 
   /**
+   * Result cards for MCP tools this plugin provides. Tool parts are host-owned
+   * (`tool-*` / `dynamic-tool` never reach the message-part registry), so this
+   * is the declarative seam for rendering a plugin tool's output richly instead
+   * of falling through to the generic content-blocks card. Registered with
+   * `lib/plugin/api/tool-result-renderers.ts`. Permission gate: `extension:ui`.
+   */
+  toolRenderers?: PluginToolRendererDef[]
+
+  /**
    * Plugin-internal AI providers (LLM completion + embedding). Strictly NOT
    * a replacement for the main chat backend — the chat pipeline always
    * resolves through Claude Code SDK. Plugins call `ctx.ai.complete()` /
@@ -771,6 +1173,47 @@ export interface PluginManifest {
   modalMounts?: PluginModalMountDef[]
 
   /**
+   * Custom view containers (B1) — rail-mounted destinations that swap the
+   * middle column to a plugin-owned panel hosting the plugin's views.
+   * Registered via the `view-container` overlay capability on enable and
+   * auto-unregistered on disable. Permission gate: `extension:ui`.
+   */
+  viewsContainers?: PluginViewContainerDef[]
+
+  /**
+   * Tree data providers / custom React views (B2) mounted into the plugin's
+   * view containers. Lazy `{ id, containerId, type, entry, export }` factories
+   * resolved by `lib/plugin/bridge/view-bridge.ts` on enable and dropped on
+   * disable. Permission gate: `extension:ui`.
+   */
+  views?: PluginViewDef[]
+
+  /**
+   * Resource-scoped trusted React panels mounted in the shared Context
+   * Workbench. Lazy `{ id, entry, export }` modules; sandboxed webviews are
+   * deliberately excluded from this surface. Permission gate:
+   * `extension:ui` plus the read permission for every declared resource kind.
+   */
+  contextPanels?: PluginContextPanelDef[]
+
+  /**
+   * Sandboxed webview panels (B3) — arbitrary HTML rendered in an isolated
+   * `<iframe sandbox="allow-scripts">` mounted into a view container. Resolved
+   * by `lib/plugin/bridge/plugin-webview-bridge.ts` on enable; the CSP is
+   * derived from `networkAccess.allowedDomains`. Permission gate: `extension:ui`.
+   */
+  webviews?: PluginWebviewDef[]
+
+  /**
+   * Native auth/OAuth providers (C1). Declarative `{ id, label }` for
+   * validation + the consent UI; the live provider object is supplied
+   * imperatively via `ctx.auth.registerProvider` at activation. Registered
+   * into the auth-provider registry on enable and dropped on disable.
+   * Permission gate: `auth:provide`.
+   */
+  authProviders?: PluginAuthProviderDef[]
+
+  /**
    * Around-style chat middleware. Each middleware wraps the build-options +
    * send pipeline; the runner enforces per-middleware timeout, error
    * isolation, and a 3-strike circuit breaker that disables the plugin on
@@ -778,6 +1221,73 @@ export interface PluginManifest {
    * key (see ADR-0026 §4).
    */
   chatMiddlewares?: PluginChatMiddlewareDef[]
+
+  /**
+   * Plugin-contributed provider routing strategies (LiteLLM
+   * CustomRoutingStrategy analog). ADR-0026 lazy-factory entries
+   * registered into the routing strategy registry on enable under the
+   * namespaced id `${pluginId}:${id}` (`routing-strategy` capability,
+   * field-driven module bridge).
+   */
+  routingStrategies?: PluginRoutingStrategyDef[]
+
+  /**
+   * Plugin-contributed pre-call deployment filters (LiteLLM
+   * optional_pre_call_checks analog). ADR-0026 lazy-factory entries
+   * registered into the deployment-filter registry on enable under the
+   * namespaced id `${pluginId}:${id}` (`deployment-filter` capability,
+   * field-driven module bridge). Users opt them into the routing
+   * chain via `RoutingConfig.filterChain`.
+   */
+  deploymentFilters?: PluginDeploymentFilterDef[]
+
+  /**
+   * Plugin-contributed outbound protocol adapters: declarative
+   * `openai-compatible-variant` specs registered under `${pluginId}:${id}`
+   * and forwarded to the sidecar per-send (`protocol-adapter` capability,
+   * field-driven module bridge). Pure data; no plugin code ever loads
+   * into the sidecar process.
+   */
+  protocolAdapters?: PluginProtocolAdapterDef[]
+
+  /**
+   * External-agent protocol adapters (`external-agent-adapter` capability).
+   * Each entry lazy-imports a `() => ProtocolAdapter` factory on enable and
+   * registers it into the external-agent `protocolAdapterRegistry` under the
+   * namespaced protocol id `${pluginId}:${id}` (`external-agent-adapter`
+   * capability, field-driven module bridge). Lets a plugin contribute a
+   * genuinely new external-agent
+   * protocol, not just a preset over a built-in one.
+   */
+  externalAgentAdapters?: PluginExternalAgentAdapterDef[]
+
+  /**
+   * External-agent SESSION IMPORTERS (`session-importer` capability, ADR-0062).
+   * Each entry lazy-imports a `() => AgentSessionSourceAdapter` factory on enable
+   * and registers it into the session-source registry under the namespaced id
+   * `${pluginId}:${id}`. Lets a plugin add a new agent's on-disk session-history
+   * importer (Cursor, Cline, Windsurf, …) with no host change — field-driven
+   * module bridge, mirroring `externalAgentAdapters`.
+   */
+  sessionImporters?: PluginSessionImporterDef[]
+
+  /**
+   * Semantic tool routes: example utterances attached to this plugin's
+   * tools, persisted into the `toolRoutes` table on enable and consumed
+   * by the opt-in semantic tool-routing matcher (`tool-route` capability,
+   * field-driven module bridge).
+   */
+  toolRoutes?: PluginToolRouteDef[]
+
+  /**
+   * Plugin-contributed agent context providers (ADR-0026 Package E). Lazy-
+   * factory entries registered into the context-provider registry on enable
+   * under the namespaced id `${pluginId}:${id}` (`context-provider` capability,
+   * field-driven module bridge). Each provider's `provide()` output is
+   * appended to the system prompt of the plugin's agent runs. This is the
+   * declarative counterpart to `ctx.agent.context.registerProvider`.
+   */
+  contextProviders?: PluginContextProviderDef[]
 
   /**
    * Optional custom settings UI component. When present, the host renders
@@ -801,10 +1311,11 @@ export interface PluginManifest {
  * a full ThemeColors object or point at a VSCode `.json` file shipped with
  * the plugin. The bridge uses path-traversal guards on `vscodeJsonPath`.
  *
- * Note: `ThemeColors` lives in `types/plugin/plugin-extended.ts`; we use a
- * structural alias here to avoid importing across the plugin/type boundary
- * (which would otherwise pull `Skill` and the agent-mode chain into this
- * module). The bridge enforces the full shape at runtime.
+ * Note: `ThemeColors` is defined further down in this module; we use a
+ * structural alias here to keep the manifest surface free of the deeper
+ * runtime dependencies (`Skill`, the agent-mode chain, the canvas APIs) that
+ * the full API interfaces pull in. The bridge enforces the full shape at
+ * runtime.
  */
 export type PluginManifestThemeColors = Record<string, string>
 
@@ -961,46 +1472,7 @@ export interface PluginExternalAgentPresetDef extends ExternalAgentPresetConfig 
  * layer. The host materialises a per-surface workspace (via
  * `lsp-workspace-manager`) when the LSP's first document opens.
  */
-export interface PluginLspServerDef {
-  /**
-   * Stable id within the plugin. Globally namespaced as
-   * `<pluginId>:<id>` — uniqueness is enforced at register time and
-   * surfaced as an install-time validation error otherwise.
-   */
-  id: string
-  /** Display name shown in the Settings → Language Servers list. */
-  name: string
-  /** Monaco language ids this server handles (e.g. `["typescript", "javascript"]`). */
-  languages: string[]
-  /**
-   * Path to the binary. Relative paths resolve against the plugin's
-   * install directory; absolute paths are honoured but only if the user
-   * explicitly granted them via the binary policy.
-   */
-  command: string
-  /**
-   * Arguments. Supports `${workspaceFolder}` substitution — the workspace
-   * manager replaces it with the absolute path of the active
-   * Skill/Canvas/Artifact workspace at spawn time.
-   */
-  args?: string[]
-  /** Environment variables forwarded to the spawned process. */
-  env?: Record<string, string>
-  /** Transport. Stdio is the only supported value today. */
-  transport?: "stdio"
-  /** Optional initialization options forwarded as LSP `initializationOptions`. */
-  initializationOptions?: Record<string, unknown>
-  /** Optional `workspace/configuration` defaults the server reads at startup. */
-  settings?: Record<string, unknown>
-  /**
-   * When `true`, the registry materialises a real on-disk workspace via
-   * `lsp-workspace-manager` before spawning. Set this for servers that
-   * need filesystem access (rust-analyzer, gopls, pylsp); leave it
-   * `false` for pure stdio servers like vscode-eslint that work with
-   * just textDocument/didOpen.
-   */
-  workspaceFolderRequired?: boolean
-}
+export type PluginLspServerDef = LspServerConfig
 
 /**
  * Scheduled task definition in plugin manifest
@@ -1052,18 +1524,40 @@ export interface PluginConfigSchema {
   required?: string[]
 }
 
+/**
+ * VS Code-style configuration scope. Advisory today (cognia has a single
+ * config store per plugin); persisted + validated so a future per-resource
+ * override layer can honour it without a schema change.
+ */
+export type PluginConfigScope = "application" | "machine" | "window" | "resource"
+
 export interface PluginConfigProperty {
-  type: "string" | "number" | "boolean" | "array" | "object"
+  type: "string" | "number" | "integer" | "boolean" | "array" | "object"
   title?: string
   description?: string
+  /** Markdown description rendered (sanitised) in place of `description` when set. */
+  markdownDescription?: string
   default?: unknown
   enum?: unknown[]
+  /** Per-enum-value plain-text descriptions, surfaced beside each option. */
   enumDescriptions?: string[]
+  /** Per-enum-value markdown descriptions (takes precedence over enumDescriptions). */
+  markdownEnumDescriptions?: string[]
+  /** UI sort key within the form (lower first; unset sorts after, then by declaration order). */
+  order?: number
+  /** Advisory config scope (VS Code parity). */
+  scope?: PluginConfigScope
+  /** When set, the field renders a deprecation warning carrying this message. */
+  deprecationMessage?: string
   minimum?: number
   maximum?: number
   minLength?: number
   maxLength?: number
   pattern?: string
+  /** Custom message shown when a value fails the `pattern` check. */
+  patternMessage?: string
+  /** Input hint for string fields: render a wider textarea or validate a known format. */
+  format?: "email" | "url" | "uri" | "textarea"
   items?: PluginConfigProperty
   properties?: Record<string, PluginConfigProperty>
 }
@@ -1094,7 +1588,7 @@ export interface A2UIPluginComponentDef {
   category?: "layout" | "form" | "display" | "data" | "custom"
 
   /** Icon (Lucide name) */
-  icon?: string
+  icon?: PluginIconName
 
   /** JSON Schema for component props */
   propsSchema?: Record<string, unknown>
@@ -1123,7 +1617,7 @@ export interface A2UITemplateDef {
   category?: string
 
   /** Icon */
-  icon?: string
+  icon?: PluginIconName
 
   /** Surface type */
   surfaceType: A2UISurfaceType
@@ -1204,6 +1698,13 @@ export interface PluginToolDef {
   /** Whether tool requires user approval */
   requiresApproval?: boolean
 
+  /**
+   * Opt this tool into automatic retry on transient failures. Default false —
+   * only set it for idempotent tools (re-running has no extra side effect).
+   * Overrides the manifest-level `resilience.retryable`.
+   */
+  retryable?: boolean
+
   /** JSON Schema for parameters */
   parametersSchema: Record<string, unknown>
 }
@@ -1263,7 +1764,7 @@ export interface PluginModeDef {
   description: string
 
   /** Icon (Lucide name) */
-  icon: string
+  icon: PluginIconName
 
   /** System prompt */
   systemPrompt?: string
@@ -1292,15 +1793,87 @@ export interface PluginManifestCommandDef {
   description?: string
 
   /** Icon (Lucide name) */
-  icon?: string
+  icon?: PluginIconName
 
   /** Optional slash command aliases */
   aliases?: string[]
 }
 
 // =============================================================================
+// Quick Actions
+// =============================================================================
+
+/** Surfaces a quick action can appear on. Defaults to all three. */
+export type PluginQuickActionSurface = "palette" | "composer" | "tray"
+
+/**
+ * Declarative quick-action contribution (manifest `quickActions[]`).
+ * One registration surfaces in up to three places: the command palette
+ * ("Plugin actions" group), the chat composer's quick-actions dropdown,
+ * and the tray "All Commands ▶ Plugins" bucket.
+ *
+ * A quick action IS a command — registration mirrors it into
+ * `lib/plugin/commands/registry.ts`, so dispatch (palette select, tray
+ * click, shortcut accelerator) reuses `executeCommand` with zero new
+ * dispatch rails. Manifest actions must name a dispatch target via
+ * `command` (a command-registry id) or `slash` (a slash-command line);
+ * imperative registrations may pass a `run` handler instead.
+ */
+export interface PluginQuickActionDef {
+  /** Local id — the host prefixes it with the plugin id. */
+  id: string
+  /** Display title (literal string, shown verbatim on every surface). */
+  title: string
+  /** Plugin i18n key preferred over `title` when present for the active locale. */
+  labelKey?: string
+  /** One-line description shown in the palette. */
+  description?: string
+  /** Lucide icon name; resolved by the renderer. */
+  icon?: PluginIconName
+  /** Tray bucket (see `lib/tray/all-commands.ts`). Defaults to "plugins". */
+  category?: string
+  /** `when` expression evaluated by `lib/tray/when.ts` before rendering. */
+  when?: string
+  /** Optional keyboard chord bound through the plugin shortcut bridge. */
+  accelerator?: string
+  /** Dispatch target: a command-registry id to execute. */
+  command?: string
+  /** Dispatch target: a slash-command line (with or without leading `/`). */
+  slash?: string
+  /** Surfaces to appear on. Defaults to all three. */
+  surfaces?: PluginQuickActionSurface[]
+}
+
+/** Imperative registration shape — adds an inline handler option. */
+export interface PluginQuickActionInput extends PluginQuickActionDef {
+  /** Inline handler; takes precedence over `command` / `slash`. */
+  run?: () => void | Promise<void>
+}
+
+/**
+ * Quick Actions API surfaced via `ctx.quickActions`. Gated on the
+ * `"quick-action"` capability — without it every method is a warn-once
+ * no-op, mirroring `PluginTrayAPI`.
+ */
+export interface PluginQuickActionsAPI {
+  /** Register one quick action. Returns a disposer. */
+  register: (action: PluginQuickActionInput) => () => void
+  /** Convenience for multiple actions; the disposer drops all of them. */
+  registerMany: (actions: PluginQuickActionInput[]) => () => void
+}
+
+// =============================================================================
 // Plugin Hooks
 // =============================================================================
+
+/**
+ * Payload for the `onUpdate` lifecycle hook — the persisted version the host
+ * last activated and the version it is loading now.
+ */
+export interface PluginUpdateInfo {
+  fromVersion: string
+  toVersion: string
+}
 
 /**
  * Hook definitions that plugins can implement
@@ -1311,6 +1884,16 @@ export interface PluginHooks {
   onEnable?: () => Promise<void> | void
   onDisable?: () => Promise<void> | void
   onUnload?: () => Promise<void> | void
+  /** Fired once, the first time the plugin successfully loads after install. */
+  onInstall?: () => Promise<void> | void
+  /** Fired just before the plugin's files are removed — last chance to clean up external state. */
+  onUninstall?: () => Promise<void> | void
+  /** Fired when a load detects the persisted version changed (carries both versions). */
+  onUpdate?: (info: PluginUpdateInfo) => Promise<void> | void
+  /** Fired when the host idle-suspends the plugin (contributions torn down, user intent preserved). */
+  onSuspend?: () => Promise<void> | void
+  /** Fired when a suspended plugin is reactivated by an activation event. */
+  onResume?: () => Promise<void> | void
   onConfigChange?: (config: Record<string, unknown>) => void
 
   // A2UI hooks
@@ -1484,7 +2067,7 @@ export interface PluginTeamDelegationStartPayload {
   delegationId: string
   sourceTeamId: string
   sourceTaskId: string
-  targetType: "sub_agent" | "team" | "background"
+  targetType: "sub_agent" | "team" | "background" | "twin"
   targetId?: string
 }
 
@@ -1541,7 +2124,7 @@ export interface PluginCommand {
   description?: string
 
   /** Icon */
-  icon?: string
+  icon?: PluginIconName
 
   /** Keyboard shortcut */
   shortcut?: string
@@ -1560,7 +2143,7 @@ export interface PluginCommand {
 /**
  * Context provided to plugins
  */
-export interface PluginContext {
+export interface PluginBaseContext {
   /** Plugin ID */
   pluginId: string
 
@@ -1622,6 +2205,13 @@ export interface PluginContext {
    */
   tray: PluginTrayAPI
 
+  /**
+   * Quick Actions API — register actions surfaced in the command palette,
+   * composer quick-actions menu, and tray. Available only when the plugin
+   * declares the `"quick-action"` capability; otherwise a warn-once no-op.
+   */
+  quickActions: PluginQuickActionsAPI
+
   /** Window API */
   window: PluginWindowAPI
 
@@ -1662,12 +2252,73 @@ export interface PluginContext {
   /** Modal stack push/close (ADR-0026 §3 §A). */
   modal?: import("@/lib/plugin/api/modal-api").PluginModalAPI
 
+  /** Sandboxed webview create + messaging (B3). */
+  webview?: import("@/lib/plugin/api/webview-api").PluginWebviewAPI
+
+  /** Native auth/OAuth provider register + session consume (C1). */
+  auth?: import("@/lib/plugin/api/auth-api").PluginAuthAPI
+
+  /** URI / deep-link handler registration (C2). */
+  uri?: import("@/lib/plugin/api/uri-api").PluginUriAPI
+
   /** Chat-middleware registration (ADR-0026 §4 §A). */
   chat?: import("@/lib/plugin/api/chat-api").PluginChatAPI
 
   /** Platform-capability flags (ADR-0026 §5 §C). */
   capabilities?: import("@/lib/plugin/api/capabilities-api").PluginCapabilitiesAPI
+
+  /** Resource-scoped Context Workbench panel registration. */
+  contextPanels?: import("@/lib/plugin/api/context-panel-api").PluginContextPanelAPI
+
+  /**
+   * Live project editor — open files, reflect edits, read what the user is
+   * looking at. Engine-agnostic: the built-in Monaco workbench and the embedded
+   * code-server "Pro IDE" both answer.
+   */
+  editor?: import("@/lib/plugin/api/editor-api").PluginEditorAPI
+
+  /** Desktop pet — available only with the "pet" capability; warn-once no-op otherwise. */
+  pet?: import("@/lib/plugin/api/pet-api").PluginPetAPI
 }
+
+/** Host-mounted namespaces present on every activated plugin context. */
+export interface PluginHostContextAPI {
+  ocr: import("@/lib/plugin/api/ocr-api").PluginOcrAPI
+  workspace: import("@/lib/plugin/api/workspace-api").PluginWorkspaceAPI
+  modal: import("@/lib/plugin/api/modal-api").PluginModalAPI
+  webview: import("@/lib/plugin/api/webview-api").PluginWebviewAPI
+  auth: import("@/lib/plugin/api/auth-api").PluginAuthAPI
+  uri: import("@/lib/plugin/api/uri-api").PluginUriAPI
+  chat: import("@/lib/plugin/api/chat-api").PluginChatAPI
+  capabilities: import("@/lib/plugin/api/capabilities-api").PluginCapabilitiesAPI
+  git: import("@/lib/plugin/api/git-api").PluginGitAPI
+  goals: import("@/lib/plugin/api/goal-api").PluginGoalAPI
+  memory: import("@/lib/plugin/api/memory-api").PluginMemoryAPI
+  team: import("@/lib/plugin/api/team-api").PluginTeamAPI
+  subscription: import("@/lib/plugin/api/subscription-api").PluginSubscriptionAPI
+  terminal: import("@/lib/plugin/api/terminal-api").PluginTerminalAPI
+  perf: import("@/lib/plugin/api/perf-api").PluginPerfAPI
+  connectors: import("@/lib/plugin/api/connectors-api").PluginConnectorsAPI
+  integrations: PluginIntegrationsAPI
+  share: import("@/lib/plugin/api/share-api").PluginShareAPI
+  backup: import("@/lib/plugin/api/backup-api").PluginBackupAPI
+  automation: import("@/lib/plugin/api/automation-api").PluginAutomationAPI
+  companion: import("@/lib/plugin/api/companion-api").PluginCompanionAPI
+  pet: import("@/lib/plugin/api/pet-api").PluginPetAPI
+}
+
+/**
+ * Complete public context passed to `activate` and `deactivate`.
+ *
+ * `PluginBaseContext` exists only for the host's construction pipeline;
+ * plugin authors always receive this fully mounted contract.
+ */
+export type PluginContext = Omit<
+  PluginBaseContext,
+  keyof PluginContextAPI | keyof PluginHostContextAPI
+> &
+  PluginContextAPI &
+  PluginHostContextAPI
 
 /**
  * Plugin-facing API for contributing workflow nodes and triggers to the
@@ -1692,9 +2343,11 @@ export interface PluginWorkflowAPI {
    * Convenience for plugins whose triggers want to forward an event
    * synthesized from outside the trigger context (e.g. a webhook the
    * plugin registered with the host's HTTP router). Routes to the
-   * orchestrator's standard trigger queue.
+   * orchestrator's standard trigger queue. Pass `triggerId` when a workflow
+   * can contain multiple enabled nodes of this kind; legacy calls are
+   * inferred only when exactly one matching root exists.
    */
-  emitTriggerEvent(workflowId: string, kind: string, payload: unknown): void
+  emitTriggerEvent(workflowId: string, kind: string, payload: unknown, triggerId?: string): void
 }
 
 export interface PluginLogger {
@@ -1736,6 +2389,18 @@ export interface PluginEventEmitter {
   off: (event: string, handler: (...args: unknown[]) => void) => void
   emit: (event: string, ...args: unknown[]) => void
   once: (event: string, handler: (...args: unknown[]) => void) => () => void
+  /**
+   * Inter-plugin IPC — directed / broadcast / RPC messaging between plugins.
+   * Present on the full runtime context (`createFullPluginContext`); optional
+   * here because the minimal base context does not attach it. `call`/`expose`
+   * are gated by the `ipc:call` / `ipc:expose` permissions.
+   */
+  ipc?: PluginIPCAPI
+  /**
+   * Global cross-plugin pub/sub event bus (system lifecycle events live under
+   * the `system:*` namespace). Present on the full runtime context.
+   */
+  bus?: PluginEventAPI
 }
 
 export interface PluginUIAPI {
@@ -1744,8 +2409,6 @@ export interface PluginUIAPI {
   showDialog: (options: PluginDialog) => Promise<unknown>
   showInputDialog: (options: PluginInputDialog) => Promise<string | null>
   showConfirmDialog: (options: PluginConfirmDialog) => Promise<boolean>
-  registerStatusBarItem: (item: PluginStatusBarItem) => () => void
-  registerSidebarPanel: (panel: PluginSidebarPanel) => () => void
 }
 
 export interface PluginNotification {
@@ -1753,7 +2416,7 @@ export interface PluginNotification {
   body?: string
   message?: string
   type?: "info" | "success" | "warning" | "error"
-  icon?: string
+  icon?: PluginIconName
   timeout?: number
   actions?: Array<{ label: string; action: string }>
 }
@@ -1780,23 +2443,6 @@ export interface PluginConfirmDialog {
   variant?: "default" | "destructive"
 }
 
-export interface PluginStatusBarItem {
-  id: string
-  text: string
-  icon?: string
-  tooltip?: string
-  onClick?: () => void
-  priority?: number
-}
-
-export interface PluginSidebarPanel {
-  id: string
-  title: string
-  icon: string
-  component: React.ComponentType
-  position?: "top" | "bottom"
-}
-
 export interface PluginA2UIAPI {
   createSurface: (id: string, type: A2UISurfaceType, options?: { title?: string }) => void
   deleteSurface: (id: string) => void
@@ -1812,6 +2458,35 @@ export interface PluginAgentAPI {
   unregisterTool: (name: string) => void
   registerMode: (mode: AgentModeConfig) => void
   unregisterMode: (id: string) => void
+  /**
+   * Run one agent turn and resolve with the typed result. The embeddable
+   * counterpart to the chat agent: text-only by default, tool-enabled (sidecar
+   * loop) when `toolsEnabled` is set (requires the `agent:control` permission).
+   * Supports structured output (`outputFormat`) and a rewrite-capable
+   * `canUseTool` permission gate. See ADR-0026 §Agent-SDK.
+   */
+  run: (prompt: string, options?: PluginAgentRunOptions) => Promise<PluginAgentRunResult>
+  /**
+   * Run one agent turn as a live async-iterable of typed events (`text-delta`
+   * / `tool-call` / `tool-result` / `result`). The handle also exposes a
+   * `result` promise and `cancel()`.
+   */
+  runStreamed: (prompt: string, options?: PluginAgentRunOptions) => PluginAgentRun
+  /**
+   * Invoke a host/plugin tool by name and resolve with its result — lets a
+   * plugin reuse the host's tool surface (including its own registered tools)
+   * from inside its code. Routes through the unified `invokePluginTool` seam
+   * (ownership + permission gate + lazy activation). Requires `agent:control`.
+   */
+  invokeTool: (
+    name: string,
+    args: Record<string, unknown>,
+    opts?: { signal?: AbortSignal }
+  ) => Promise<unknown>
+  /**
+   * @deprecated Use {@link run} / {@link runStreamed}. Retained as a thin shim
+   * mapping the legacy untyped config bag onto `run()`.
+   */
   executeAgent: (config: Record<string, unknown>) => Promise<unknown>
   cancelAgent: (agentId: string) => void
   /**
@@ -1843,6 +2518,51 @@ export interface PluginAgentAPI {
   registerNativeAnthropicTool: (def: PluginNativeAnthropicToolDef) => void
   registerSkill: (def: PluginSkillDef) => void
   registerExternalAgentPreset: (def: PluginExternalAgentPresetDef) => void
+  /**
+   * Imperative twin of the declarative `manifest.externalAgentAdapters` field.
+   * Registers a `() => ProtocolAdapter` factory into the external-agent
+   * `protocolAdapterRegistry` under the namespaced protocol `${pluginId}:${id}`
+   * (collision-safe), so a plugin can contribute a brand-new external-agent
+   * protocol at activate-time. Unregistered in bulk on plugin disable.
+   */
+  registerExternalAgentAdapter: (id: string, factory: ProtocolAdapterFactory) => void
+  /**
+   * Input/output guardrails (Package B). Register reusable guardrails that a
+   * run opts into by id via `PluginAgentRunOptions.guardrails`. A tripped
+   * guardrail aborts the run with a `PluginGuardrailTripwireError`.
+   */
+  guardrails: PluginAgentGuardrailsAPI
+  /**
+   * Dispatch a built-in/plugin subagent on a prompt (Package C). Resolves a
+   * registered subagent by id or accepts an inline definition; maps it onto a
+   * one-shot tool-enabled run. Requires the `agent:dispatch` permission.
+   */
+  dispatchSubagent: (
+    idOrDef: string | PluginSubagentDef,
+    prompt: string,
+    options?: PluginDispatchSubagentOptions
+  ) => Promise<PluginSubagentDispatchResult>
+  /**
+   * Run an Agent Team headlessly (Package C) by existing team id or ad-hoc team
+   * config. Reuses the host team runtime (inflight guard + configured deps).
+   * Requires the `agent:dispatch` permission.
+   */
+  runTeam: (
+    teamOrConfig: string | AgentTeam,
+    options?: PluginRunTeamOptions
+  ) => Promise<PluginRunTeamResult>
+  /**
+   * Durable multi-turn sessions (Package D). Create or resume a session a
+   * plugin owns; each `send` resumes the prior conversation. Requires the
+   * `session:write` (create) / `session:read` (resume) permissions.
+   */
+  sessions: PluginAgentSessionsAPI
+  /**
+   * Context/memory providers + guarded reads (Package E). Register providers
+   * that inject ambient context into the plugin's runs; read team
+   * shared-memory (agent:shared-memory:read) and twin memory (twin:read).
+   */
+  context: PluginAgentContextAPI
 }
 
 export interface PluginSettingsAPI {
@@ -2046,6 +2766,13 @@ export interface PluginShellAPI {
 }
 
 export interface ShellOptions {
+  /**
+   * Arguments passed to the program literally — never interpreted by a shell.
+   * The `command` is the program name (the declared allowlist key); put each
+   * argument here so a declared command can't smuggle extra commands through a
+   * single string.
+   */
+  args?: string[]
   cwd?: string
   env?: Record<string, string>
   timeout?: number
@@ -2148,21 +2875,29 @@ export interface ShortcutRegistration {
 }
 
 /**
+ * Declarative tray contribution stored in `manifest.trayItems[]`.
+ */
+export interface PluginManifestTrayItemDef {
+  /** Local id — the host prefixes it with the plugin id. */
+  id: string
+  label: string
+  /** Plugin i18n key preferred over `label` for the active locale. */
+  labelKey?: string
+  icon?: PluginIconName
+  when?: string
+  category?: string
+  accelerator?: string
+  command?: string
+  slash?: string
+}
+
+/**
  * Tray menu item contributed by a plugin. Mirrors `ContextMenuItem` but
  * targets the system-tray surface rather than the right-click context menu.
  */
-export interface PluginTrayItemInput {
+export interface PluginTrayItemInput extends Omit<PluginManifestTrayItemDef, "command" | "slash"> {
   /** Local id — the host prefixes it with the plugin id before recording. */
   id: string
-  label: string
-  /** Optional Lucide icon name; resolved by the renderer. */
-  icon?: string
-  /** Optional `when` expression evaluated by `lib/tray/when.ts`. */
-  when?: string
-  /** Free-form category used by `lib/tray/all-commands.ts` for grouping. */
-  category?: string
-  /** Optional accelerator hint, cosmetic. */
-  accelerator?: string
   /** Click handler — invoked by the renderer when the tray dispatches. */
   onClick: () => void
 }
@@ -2191,8 +2926,17 @@ export interface PluginContextMenuAPI {
 export interface ContextMenuItem {
   id: string
   label: string
-  icon?: string
+  icon?: PluginIconName
+  /** Which zone(s) this item targets. `undefined` = every zone. */
   when?: ContextMenuContext | ContextMenuContext[]
+  /**
+   * Declarative state condition evaluated against the context-key store
+   * (`lib/plugin/context-keys`) — e.g. `"chat.active && !chat.streaming"`.
+   * Distinct from `when` (which selects zones): the item is shown only while
+   * `whenExpr` holds. Absent = no state gate. Fail-closed on a malformed
+   * expression.
+   */
+  whenExpr?: string
   onClick: (context: ContextMenuClickContext) => void
   submenu?: ContextMenuItem[]
   separator?: boolean
@@ -2260,11 +3004,13 @@ export interface PluginWindow {
   minimize: () => void
   maximize: () => void
   unmaximize: () => void
-  isMaximized: () => boolean
+  // Geometry getters are async: they query the real host window rather than
+  // returning the hardcoded placeholders the SDK used to fabricate.
+  isMaximized: () => Promise<boolean>
   setSize: (width: number, height: number) => void
-  getSize: () => { width: number; height: number }
+  getSize: () => Promise<{ width: number; height: number }>
   setPosition: (x: number, y: number) => void
-  getPosition: () => { x: number; y: number }
+  getPosition: () => Promise<{ x: number; y: number }>
   center: () => void
   setAlwaysOnTop: (flag: boolean) => void
   show: () => void
@@ -2284,7 +3030,14 @@ export interface PluginSecretsAPI {
   delete: (key: string) => Promise<void>
   /** Check if a secret exists */
   has: (key: string) => Promise<boolean>
+  /** Key names this plugin has stored (for migration / cleanup UIs). */
+  keys: () => Promise<string[]>
+  /** VS Code parity — fires after store/delete on this plugin's namespace. */
+  onDidChange: (listener: (e: { key: string }) => void) => () => void
 }
+
+/** Where a plugin's secrets are stored at rest, so a plugin can detect strength. */
+export type PluginSecretsBackend = "os-keyring" | "encrypted-web" | "memory"
 
 // =============================================================================
 // Plugin Instance
@@ -2494,6 +3247,50 @@ export interface PythonHookRegistration {
 }
 
 /**
+ * Host-level per-plugin runtime settings (user state persisted on the
+ * Dexie plugins row — NOT a manifest field). Wire-exact counterpart of
+ * `PythonHostSettings` in `src-tauri/src/plugin_api/python/commands.rs`.
+ *
+ * There is deliberately no `lazySpawn` knob: the first load is always
+ * eager (dependency validation + tool/hook collection); the perf win
+ * comes from `idleShutdownMin` demotion + transparent respawn.
+ */
+export interface PythonHostSettings {
+  /** Absolute interpreter override for this plugin (beats venv + global). */
+  interpreterPath?: string
+  /** Extra environment variables for the host process. */
+  env?: Record<string, string>
+  /** Per-plugin override of the default 120s call timeout (clamped 1s–1h). */
+  callTimeoutMs?: number
+  /** `false` opts out of an existing venv (default: use it when present). */
+  useVenv?: boolean
+  /** Idle minutes before the host is demoted to a lazy slot; 0 = never. */
+  idleShutdownMin?: number
+  /** In-flight request cap per host (default 4). */
+  maxConcurrentCalls?: number
+  /**
+   * ADR-0028 Phase 3 — run the interpreter under the OS sandbox
+   * (`bwrap` / `sandbox-exec`) on Linux/macOS. Off by default; defaults from
+   * the global sandbox toggle at load. Windows is not wrapped yet (its
+   * restricted-token runner can't host a long-lived stdio JSON-RPC process).
+   */
+  sandboxed?: boolean
+}
+
+/** One `@hook` declared by a python plugin, from `import_main`'s reply. */
+export interface PythonHookDeclaration {
+  event: string
+  name: string
+}
+
+/** Reply of `plugin_python_load` (the host's `import_main` info). */
+export interface PythonLoadResult {
+  tool_count: number
+  hook_count: number
+  hooks?: PythonHookDeclaration[]
+}
+
+/**
  * IPC message types for Python communication
  */
 export type PythonIPCMessage =
@@ -2574,4 +3371,1521 @@ export interface PluginDexieAPI {
    * The plugin is responsible for only reading/writing its own tables.
    */
   rawDb(): import("dexie").Dexie
+}
+
+// =============================================================================
+// Extended Plugin APIs (session / project / vector / theme / export / import /
+// canvas / artifact / notifications / storage / AI provider / extensions /
+// permissions) — the feature-specific API surface consumed by ctx.*
+// =============================================================================
+
+// =============================================================================
+// Session API - Chat Session Management
+// =============================================================================
+
+/**
+ * Filter options for listing sessions
+ */
+export interface SessionFilter {
+  projectId?: string
+  mode?: ChatMode
+  hasMessages?: boolean
+  createdAfter?: Date
+  createdBefore?: Date
+  limit?: number
+  offset?: number
+  sortBy?: "createdAt" | "updatedAt" | "title"
+  sortOrder?: "asc" | "desc"
+}
+
+/**
+ * Options for querying messages
+ */
+export interface MessageQueryOptions {
+  limit?: number
+  offset?: number
+  branchId?: string
+  includeDeleted?: boolean
+  afterId?: string
+  beforeId?: string
+}
+
+/**
+ * Options for sending messages
+ */
+export interface SendMessageOptions {
+  role?: "user" | "assistant" | "system"
+  attachments?: MessageAttachment[]
+  metadata?: Record<string, unknown>
+  skipProcessing?: boolean
+}
+
+/**
+ * Message attachment for plugin use
+ */
+export interface MessageAttachment {
+  type: "file" | "image" | "code" | "url"
+  name: string
+  content?: string
+  url?: string
+  mimeType?: string
+  size?: number
+}
+
+/**
+ * Session API for plugins
+ */
+export interface PluginSessionAPI {
+  /** Get the currently active session */
+  getCurrentSession: () => Session | null
+
+  /** Get the current session ID */
+  getCurrentSessionId: () => string | null
+
+  /** Get a session by ID */
+  getSession: (id: string) => Promise<Session | null>
+
+  /** Create a new session */
+  createSession: (options?: CreateSessionInput) => Promise<Session>
+
+  /** Update a session */
+  updateSession: (id: string, updates: UpdateSessionInput) => Promise<void>
+
+  /** Switch to a different session */
+  switchSession: (id: string) => Promise<void>
+
+  /** Delete a session */
+  deleteSession: (id: string) => Promise<void>
+
+  /** List sessions with optional filtering */
+  listSessions: (filter?: SessionFilter) => Promise<Session[]>
+
+  /** Get messages for a session */
+  getMessages: (sessionId: string, options?: MessageQueryOptions) => Promise<UIMessage[]>
+
+  /** Add a message to a session */
+  addMessage: (
+    sessionId: string,
+    content: string,
+    options?: SendMessageOptions
+  ) => Promise<UIMessage>
+
+  /** Update a message */
+  updateMessage: (
+    sessionId: string,
+    messageId: string,
+    updates: Partial<UIMessage>
+  ) => Promise<void>
+
+  /** Delete a message */
+  deleteMessage: (sessionId: string, messageId: string) => Promise<void>
+
+  /** Subscribe to session changes */
+  onSessionChange: (handler: (session: Session | null) => void) => () => void
+
+  /** Subscribe to message changes in a session */
+  onMessagesChange: (sessionId: string, handler: (messages: UIMessage[]) => void) => () => void
+
+  /** Get session statistics */
+  getSessionStats: (sessionId: string) => Promise<SessionStats>
+}
+
+/**
+ * Session statistics
+ */
+export interface SessionStats {
+  messageCount: number
+  userMessageCount: number
+  assistantMessageCount: number
+  totalTokens: number
+  averageResponseTime: number
+  branchCount: number
+  attachmentCount: number
+}
+
+// =============================================================================
+// Project API - Project Management
+// =============================================================================
+
+/**
+ * Filter options for listing projects
+ */
+export interface ProjectFilter {
+  isArchived?: boolean
+  tags?: string[]
+  createdAfter?: Date
+  createdBefore?: Date
+  limit?: number
+  offset?: number
+  sortBy?: "createdAt" | "updatedAt" | "lastAccessedAt" | "name"
+  sortOrder?: "asc" | "desc"
+}
+
+/**
+ * Project file input for adding to knowledge base
+ */
+export interface ProjectFileInput {
+  name: string
+  content: string
+  type?: KnowledgeFile["type"]
+  mimeType?: string
+}
+
+/**
+ * Project API for plugins
+ */
+export interface PluginProjectAPI {
+  /** Get the currently active project */
+  getCurrentProject: () => Project | null
+
+  /** Get the current project ID */
+  getCurrentProjectId: () => string | null
+
+  /** Get a project by ID */
+  getProject: (id: string) => Promise<Project | null>
+
+  /** Create a new project */
+  createProject: (options: CreateProjectInput) => Promise<Project>
+
+  /** Update a project */
+  updateProject: (id: string, updates: UpdateProjectInput) => Promise<void>
+
+  /** Delete a project */
+  deleteProject: (id: string) => Promise<void>
+
+  /** Set the active project */
+  setActiveProject: (id: string | null) => Promise<void>
+
+  /** List projects with optional filtering */
+  listProjects: (filter?: ProjectFilter) => Promise<Project[]>
+
+  /** Archive a project */
+  archiveProject: (id: string) => Promise<void>
+
+  /** Unarchive a project */
+  unarchiveProject: (id: string) => Promise<void>
+
+  /** Add a file to project knowledge base */
+  addKnowledgeFile: (projectId: string, file: ProjectFileInput) => Promise<KnowledgeFile>
+
+  /** Remove a file from project knowledge base */
+  removeKnowledgeFile: (projectId: string, fileId: string) => Promise<void>
+
+  /** Update a knowledge file */
+  updateKnowledgeFile: (projectId: string, fileId: string, content: string) => Promise<void>
+
+  /** Get all knowledge files for a project */
+  getKnowledgeFiles: (projectId: string) => Promise<KnowledgeFile[]>
+
+  /** Link a session to a project */
+  linkSession: (projectId: string, sessionId: string) => Promise<void>
+
+  /** Unlink a session from a project */
+  unlinkSession: (projectId: string, sessionId: string) => Promise<void>
+
+  /** Get all sessions for a project */
+  getProjectSessions: (projectId: string) => Promise<string[]>
+
+  /** Subscribe to project changes */
+  onProjectChange: (handler: (project: Project | null) => void) => () => void
+
+  /** Add a tag to a project */
+  addTag: (projectId: string, tag: string) => Promise<void>
+
+  /** Remove a tag from a project */
+  removeTag: (projectId: string, tag: string) => Promise<void>
+}
+
+// =============================================================================
+// Vector/RAG API - Semantic Search and Retrieval
+// =============================================================================
+
+/**
+ * Vector document for storage
+ */
+export interface VectorDocument {
+  id?: string
+  content: string
+  metadata?: Record<string, unknown>
+  embedding?: number[]
+}
+
+/**
+ * Vector search options
+ */
+export interface VectorSearchOptions {
+  topK?: number
+  threshold?: number
+  filters?: VectorFilter[]
+  filterMode?: "and" | "or"
+  includeMetadata?: boolean
+  includeEmbeddings?: boolean
+}
+
+/**
+ * Vector filter for search
+ */
+export interface VectorFilter {
+  key: string
+  value: string | number | boolean
+  operation: "eq" | "ne" | "gt" | "lt" | "gte" | "lte" | "contains" | "in"
+}
+
+/**
+ * Vector search result
+ */
+export interface VectorSearchResult {
+  id: string
+  content: string
+  metadata?: Record<string, unknown>
+  score: number
+  embedding?: number[]
+}
+
+/**
+ * Collection options for vector store
+ */
+export interface CollectionOptions {
+  embeddingModel?: string
+  dimensions?: number
+  metadata?: Record<string, unknown>
+}
+
+/**
+ * Collection statistics
+ */
+export interface CollectionStats {
+  name: string
+  documentCount: number
+  dimensions: number
+  createdAt: Date
+  lastUpdated: Date
+  sizeBytes?: number
+}
+
+/**
+ * Vector/RAG API for plugins
+ */
+export interface PluginVectorAPI {
+  /** Create a new collection */
+  createCollection: (name: string, options?: CollectionOptions) => Promise<string>
+
+  /** Delete a collection */
+  deleteCollection: (name: string) => Promise<void>
+
+  /** List all collections */
+  listCollections: () => Promise<string[]>
+
+  /** Get collection info */
+  getCollectionInfo: (name: string) => Promise<CollectionStats>
+
+  /** Add documents to a collection */
+  addDocuments: (collection: string, docs: VectorDocument[]) => Promise<string[]>
+
+  /** Update documents in a collection */
+  updateDocuments: (collection: string, docs: VectorDocument[]) => Promise<void>
+
+  /** Delete documents from a collection */
+  deleteDocuments: (collection: string, ids: string[]) => Promise<void>
+
+  /** Search documents in a collection */
+  search: (
+    collection: string,
+    query: string,
+    options?: VectorSearchOptions
+  ) => Promise<VectorSearchResult[]>
+
+  /** Search with a pre-computed embedding */
+  searchByEmbedding: (
+    collection: string,
+    embedding: number[],
+    options?: VectorSearchOptions
+  ) => Promise<VectorSearchResult[]>
+
+  /** Generate embedding for text */
+  embed: (text: string) => Promise<number[]>
+
+  /** Generate embeddings for multiple texts */
+  embedBatch: (texts: string[]) => Promise<number[][]>
+
+  /** Get document count in a collection */
+  getDocumentCount: (collection: string) => Promise<number>
+
+  /** Clear all documents in a collection */
+  clearCollection: (collection: string) => Promise<void>
+}
+
+// =============================================================================
+// Theme API - Appearance Customization
+// =============================================================================
+
+/**
+ * Theme mode
+ */
+export type ThemeMode = "light" | "dark" | "system"
+
+/**
+ * Color theme preset
+ */
+export type ColorThemePreset =
+  "default" | "ocean" | "forest" | "sunset" | "lavender" | "rose" | "slate" | "amber"
+
+/**
+ * Theme colors structure
+ */
+export interface ThemeColors {
+  primary: string
+  primaryForeground: string
+  secondary: string
+  secondaryForeground: string
+  accent: string
+  accentForeground: string
+  background: string
+  foreground: string
+  muted: string
+  mutedForeground: string
+  card: string
+  cardForeground: string
+  popover: string
+  popoverForeground: string
+  input: string
+  border: string
+  ring: string
+  destructive: string
+  destructiveForeground: string
+  sidebar: string
+  sidebarForeground: string
+  sidebarPrimary: string
+  sidebarBorder: string
+  sidebarPrimaryForeground: string
+  sidebarAccent: string
+  sidebarAccentForeground: string
+  sidebarRing: string
+}
+
+/**
+ * Custom theme definition.
+ *
+ * Phase 2 of the theme/background fix introduced a dual-variant shape:
+ * a saved theme now carries both `tokens.light` and `tokens.dark` so the
+ * runtime can render the right palette regardless of which side the
+ * `next-themes` resolver lands on. The legacy `colors`/`isDark` fields
+ * are retained one release for migration safety — Task 8 ships the
+ * Dexie v16 migration that fills `tokens` for older rows.
+ */
+export interface CustomTheme {
+  id: string
+  name: string
+
+  // ----- New dual-variant fields (Phase 2) -----
+  /** User's original variant intent — drives default light/dark when activated. */
+  baseVariant?: "light" | "dark"
+  /** Both variant palettes. The `derivedVariant` was filled by the algorithm. */
+  tokens?: { light: ThemeColors; dark: ThemeColors }
+  /**
+   * Marks which side was auto-derived (vs hand-edited or imported).
+   * Set by the v16 migration (Task 8) when promoting legacy rows, and by the
+   * VSCode import path (Task 9) when one variant is filled by deriveOppositeVariant.
+   */
+  derivedVariant?: "light" | "dark"
+
+  // ----- Legacy single-set fields (kept one release for migration safety) -----
+  /** @deprecated Read via `tokens` instead. Retained for pre-v16 rows. */
+  colors?: Partial<ThemeColors>
+  /** @deprecated Read via `baseVariant` instead. Retained for pre-v16 rows. */
+  isDark?: boolean
+
+  /**
+   * Plugin id this theme was seeded from when the user activated a plugin
+   * preset. Metadata only — the row lives in `customThemes` independently
+   * of plugin enable/disable, matching the user's "what I'm using is mine"
+   * intuition. Useful for badging "originated from <plugin>".
+   */
+  sourcePluginId?: string
+  /**
+   * Built-in VSCode preset name this theme was cloned from (e.g., "Dracula").
+   * Set when the user activates a built-in preset card so subsequent clicks
+   * on the same card reuse this row instead of spawning N clones. Mutually
+   * exclusive with `sourcePluginId`.
+   */
+  sourceBuiltinName?: string
+
+  /**
+   * Extra CSS custom properties beyond the 27 standard `ThemeColors` tokens,
+   * carried verbatim from a plugin's `cssVariables` theme contribution
+   * (ADR-0026 §3 §D). Applied inline after the structured token pass by
+   * `CustomThemeApplier` so a cloned CSS-var plugin theme keeps ALL of its
+   * variables — not just the two the structured swatch path captures. Each
+   * key is a full custom-property name (`--foo`); values are pre-sanitized by
+   * the themes-bridge. Undefined for hand-built / VSCode-imported themes.
+   */
+  cssVars?: Record<string, string>
+
+  /**
+   * Plugin id that created this row through the imperative `ctx.theme` API.
+   * Persisted (unlike the in-memory ownership map) so
+   * `clearCustomThemesForPluginContext` can garbage-collect orphan rows after
+   * a restart. Distinct from `sourcePluginId`, which merely records where a
+   * user-activated preset originated; `ownerPluginId` means the plugin owns
+   * the row's lifecycle and it is removed when the plugin is disabled.
+   */
+  ownerPluginId?: string
+}
+
+/**
+ * Current theme state
+ */
+/**
+ * Motion preferences, in the form a plugin's *JavaScript* can act on.
+ *
+ * CSS-driven animation already follows the user automatically: plugin UI
+ * inherits `--motion-duration-scale` and the `reduce-motion` reset through the
+ * cascade. Anything driven from JS — `Element.animate`, `requestAnimationFrame`,
+ * a bundled animation library — cannot see either, so without this a plugin
+ * keeps animating after the user has explicitly asked it not to.
+ */
+export interface ThemeMotionState {
+  /** Multiplier to apply to your own durations. Mirrors `--motion-duration-scale`. */
+  durationScale: number
+  /**
+   * True when animation should be suppressed. Covers BOTH the in-app setting
+   * and the OS-level `prefers-reduced-motion`, which the app otherwise handles
+   * only in CSS — so this is the single check a plugin needs.
+   */
+  reduced: boolean
+}
+
+/** Spacing scale currently applied, mirroring the `--density-*` variables. */
+export interface ThemeDensityState {
+  level: "compact" | "comfortable" | "spacious"
+  spacing: string
+  gap: string
+  rowPadding: string
+  inputHeight: string
+  lineHeight: string
+}
+
+/** Type scale currently applied, mirroring the typography variables. */
+export interface ThemeTypographyState {
+  lineHeightScale: number
+  letterSpacingEm: number
+}
+
+export interface ThemeState {
+  mode: ThemeMode
+  resolvedMode: "light" | "dark"
+  colorPreset: ColorThemePreset
+  customThemeId: string | null
+  /** Id of the directly-activated plugin theme (registry id), or null. */
+  activePluginThemeId?: string | null
+  themeSource?: "preset" | "custom" | "plugin"
+  colors: ThemeColors
+  /** Motion preferences — check `motion.reduced` before animating from JS. */
+  motion: ThemeMotionState
+  /** Applied spacing scale. Prefer the CSS variables where you can use them. */
+  density: ThemeDensityState
+  /** Applied type scale. */
+  typography: ThemeTypographyState
+  /** Corner radius in rem, mirroring `--radius`. */
+  radius: number
+}
+
+/**
+ * Theme API for plugins
+ */
+export interface PluginThemeAPI {
+  /** Get current theme state */
+  getTheme: () => ThemeState
+
+  /** Get current theme mode */
+  getMode: () => ThemeMode
+
+  /** Get resolved theme mode (light or dark) */
+  getResolvedMode: () => "light" | "dark"
+
+  /** Set theme mode */
+  setMode: (mode: ThemeMode) => void
+
+  /** Get current color preset */
+  getColorPreset: () => ColorThemePreset
+
+  /** Set color preset */
+  setColorPreset: (preset: ColorThemePreset) => void
+
+  /** Get all color presets */
+  getAvailablePresets: () => ColorThemePreset[]
+
+  /** Get current theme colors */
+  getColors: () => ThemeColors
+
+  /** Register a custom theme */
+  registerCustomTheme: (theme: Omit<CustomTheme, "id">) => string
+
+  /** Update a custom theme */
+  updateCustomTheme: (id: string, updates: Partial<CustomTheme>) => void
+
+  /** Delete a custom theme */
+  deleteCustomTheme: (id: string) => void
+
+  /** Get all custom themes */
+  getCustomThemes: () => CustomTheme[]
+
+  /** Activate a custom theme */
+  activateCustomTheme: (id: string) => void
+
+  /**
+   * Activate a theme registered in the in-memory plugin theme registry
+   * (`manifest.themes`) directly, without cloning it into `customThemes`.
+   * The theme applies live via a `<style data-plugin-theme>` block and is
+   * cleared automatically when the owning plugin is disabled. Pass `null`
+   * to deactivate and fall back to the preset / custom theme. The id is the
+   * fully-qualified registry id (`<pluginId>.<contributionId>`).
+   */
+  activateRegisteredTheme: (themeId: string | null) => void
+
+  /** Subscribe to theme changes */
+  onThemeChange: (handler: (theme: ThemeState) => void) => () => void
+
+  /** Apply CSS variables for a component (scoped styling) */
+  applyScopedColors: (element: HTMLElement, colors: Partial<ThemeColors>) => () => void
+}
+
+// =============================================================================
+// Export API - Data Export
+// =============================================================================
+
+/**
+ * Export format types
+ */
+export type ExportFormat =
+  "markdown" | "json" | "html" | "animated-html" | "pdf" | "text" | "docx" | "csv"
+
+/**
+ * Export options
+ */
+export interface ExportOptions {
+  format: ExportFormat
+  theme?: "light" | "dark" | "system"
+  showTimestamps?: boolean
+  showTokens?: boolean
+  showThinkingProcess?: boolean
+  showToolCalls?: boolean
+  includeMetadata?: boolean
+  includeAttachments?: boolean
+  includeCoverPage?: boolean
+  includeTableOfContents?: boolean
+}
+
+/**
+ * Custom exporter definition
+ */
+export interface CustomExporter {
+  id: string
+  name: string
+  description: string
+  format: string
+  extension: string
+  mimeType: string
+  export: (data: ExportData) => Promise<Blob | string>
+}
+
+/**
+ * Export data payload
+ */
+export interface ExportData {
+  session?: Session
+  messages?: UIMessage[]
+  project?: Project
+  exportedAt: Date
+  metadata?: Record<string, unknown>
+}
+
+/**
+ * Export result
+ */
+export interface ExportResult {
+  success: boolean
+  blob?: Blob
+  filename?: string
+  error?: string
+}
+
+/**
+ * Export API for plugins
+ */
+export interface PluginExportAPI {
+  /** Export a session */
+  exportSession: (sessionId: string, options: ExportOptions) => Promise<ExportResult>
+
+  /** Export a project */
+  exportProject: (projectId: string, options: ExportOptions) => Promise<ExportResult>
+
+  /** Export messages */
+  exportMessages: (messages: UIMessage[], options: ExportOptions) => Promise<ExportResult>
+
+  /** Download an export result */
+  download: (result: ExportResult, filename?: string) => void
+
+  /** Register a custom exporter */
+  registerExporter: (exporter: CustomExporter) => () => void
+
+  /** Get available export formats */
+  getAvailableFormats: () => ExportFormat[]
+
+  /** Get custom exporters */
+  getCustomExporters: () => CustomExporter[]
+
+  /** Generate filename for export */
+  generateFilename: (title: string, extension: string) => string
+}
+
+// =============================================================================
+// Import API - content importers (symmetric counterpart of the Export API)
+// =============================================================================
+
+/**
+ * Raw input handed to a {@link CustomImporter}. `content` is text for textual
+ * formats or an `ArrayBuffer` for binary ones; `filename`/`mimeType` drive
+ * extension/format matching when present.
+ */
+export interface ImportSource {
+  content: string | ArrayBuffer
+  filename?: string
+  mimeType?: string
+}
+
+/**
+ * Outcome of an import run. `data` is whatever the importer parsed (the plugin
+ * decides the shape and what to do with it via other `ctx.*` APIs); `error` is
+ * set on failure.
+ */
+export interface ImportResult<T = unknown> {
+  success: boolean
+  data?: T
+  error?: string
+}
+
+/**
+ * A content-import contribution — the symmetric counterpart of
+ * {@link CustomExporter}. Register at activation via
+ * `ctx.import.registerImporter(...)`; the host matches by `format` (and may
+ * pre-filter candidates by `extensions`).
+ */
+export interface CustomImporter<T = unknown> {
+  id: string
+  name: string
+  description: string
+  /** Format key the host matches against (symmetric to `CustomExporter.format`). */
+  format: string
+  /** File extensions this importer handles (no leading dot, e.g. `["md","markdown"]`). */
+  extensions: string[]
+  mimeType?: string
+  import: (source: ImportSource) => Promise<ImportResult<T>> | ImportResult<T>
+}
+
+/**
+ * A chat-export importer contributed by a plugin (§A-4).
+ *
+ * Differs from the host's {@link ChatImporter} in two ways, both so the host
+ * stays in control of the namespace:
+ *   - `format` is the plugin's own bare id (`"slack"`); the host stores it as
+ *     `${pluginId}:${format}` so a plugin can never claim or collide with a
+ *     built-in format.
+ *   - `label` is required, because a plugin format has no entry in the import
+ *     dialog's label switch or in the message catalog.
+ */
+export interface PluginChatImporter<TData = unknown> extends Omit<
+  ChatImporter<TData>,
+  "format" | "label"
+> {
+  format: string
+  label: string
+}
+
+/**
+ * Import API for plugins. Mirrors {@link PluginExportAPI}: a per-plugin
+ * registry of {@link CustomImporter}s plus a `importContent` runner that
+ * dispatches to the importer registered for a format.
+ */
+export interface PluginImportAPI {
+  /** Register a custom importer. Returns a disposer that unregisters it. */
+  registerImporter: <T = unknown>(importer: CustomImporter<T>) => () => void
+
+  /** All custom importers currently registered (across plugins). */
+  getCustomImporters: () => CustomImporter[]
+
+  /** Run the importer registered for `format` against `source`. */
+  importContent: (source: ImportSource, format: string) => Promise<ImportResult>
+
+  /**
+   * Register an agent session-history source (ADR-0062). Lets a plugin add a
+   * new importable coding-agent (e.g. an OpenCode variant, Cursor, Cline) so its
+   * past on-disk sessions surface in the session-import dialog and convert to
+   * continuable conversations. The adapter id is namespaced `${pluginId}:${id}`;
+   * a plugin can never shadow a built-in source. Returns a disposer.
+   */
+  registerSessionSource: (adapter: AgentSessionSourceAdapter) => () => void
+
+  /**
+   * Register a chat-export importer (§A-4). Lets a plugin teach the app to
+   * recognise and parse a conversation-export format the host doesn't ship
+   * (Slack, Discord, Poe, …); once registered the format is sniffed by
+   * `detectFormat` and offered in the chat-import dialog like a built-in.
+   * The format id is namespaced `${pluginId}:${format}`. Returns a disposer.
+   */
+  registerChatImporter: <T = unknown>(importer: PluginChatImporter<T>) => () => void
+}
+
+// =============================================================================
+// Configuration API - typed access to the plugin's own settings
+// =============================================================================
+
+/**
+ * Runtime access to the plugin's declarative configuration (the values backing
+ * `manifest.configSchema` / the settings form). Reads are seeded with schema
+ * defaults so a key is non-`undefined` even before the user opens settings.
+ * `update` validates against the schema, persists, and fans the change out to
+ * the plugin's `onConfigChange` hook + `onChange` subscribers.
+ */
+export interface PluginConfigAPI {
+  /** Read a config value (seeded with the schema default when unset). */
+  get: <T = unknown>(key: string) => T | undefined
+  /** Read a config value, returning `fallback` when it is `undefined`. */
+  getOrDefault: <T = unknown>(key: string, fallback: T) => T
+  /** Snapshot of the whole config (seeded with schema defaults). */
+  getAll: () => Record<string, unknown>
+  /** Validate + persist a single key; rejects if the new value fails the schema. */
+  update: (key: string, value: unknown) => Promise<void>
+  /** Subscribe to config changes (any source). Returns a disposer. */
+  onChange: (listener: (config: Record<string, unknown>) => void) => () => void
+}
+
+// =============================================================================
+// I18n API - Internationalization
+// =============================================================================
+
+/**
+ * Supported locales
+ */
+export type Locale = "en" | "zh-CN"
+
+/**
+ * Translation parameters
+ */
+export type TranslationParams = Record<string, string | number | boolean>
+
+/**
+ * I18n API for plugins
+ */
+export interface PluginI18nAPI {
+  /** Get current locale */
+  getCurrentLocale: () => Locale
+
+  /** Get available locales */
+  getAvailableLocales: () => Locale[]
+
+  /** Get locale display name */
+  getLocaleName: (locale: Locale) => string
+
+  /** Translate a key */
+  t: (key: string, params?: TranslationParams) => string
+
+  /** Register plugin translations */
+  registerTranslations: (locale: Locale, translations: Record<string, string>) => void
+
+  /** Check if a translation key exists */
+  hasTranslation: (key: string) => boolean
+
+  /** Subscribe to locale changes */
+  onLocaleChange: (handler: (locale: Locale) => void) => () => void
+
+  /** Format date according to locale */
+  formatDate: (date: Date, options?: Intl.DateTimeFormatOptions) => string
+
+  /** Format number according to locale */
+  formatNumber: (number: number, options?: Intl.NumberFormatOptions) => string
+
+  /** Format relative time */
+  formatRelativeTime: (date: Date) => string
+}
+
+// =============================================================================
+// Canvas API - Document Editing
+// =============================================================================
+
+/**
+ * Canvas document for editing
+ */
+export interface PluginCanvasDocument {
+  id: string
+  sessionId: string
+  title: string
+  content: string
+  language: ArtifactLanguage
+  type: "code" | "text"
+  createdAt: Date
+  updatedAt: Date
+  suggestions?: CanvasSuggestion[]
+  versions?: CanvasDocumentVersion[]
+}
+
+/**
+ * Canvas document creation options
+ */
+export interface CreateCanvasDocumentOptions {
+  sessionId?: string
+  title: string
+  content: string
+  language: ArtifactLanguage
+  type: "code" | "text"
+}
+
+/**
+ * Canvas selection
+ */
+export interface CanvasSelection {
+  start: number
+  end: number
+  text: string
+}
+
+/**
+ * Canvas API for plugins
+ */
+export interface PluginCanvasAPI {
+  /** Get current canvas document */
+  getCurrentDocument: () => PluginCanvasDocument | null
+
+  /** Get a canvas document by ID */
+  getDocument: (id: string) => PluginCanvasDocument | null
+
+  /** Create a new canvas document */
+  createDocument: (options: CreateCanvasDocumentOptions) => Promise<string>
+
+  /** Update a canvas document */
+  updateDocument: (id: string, updates: Partial<PluginCanvasDocument>) => void
+
+  /** Delete a canvas document */
+  deleteDocument: (id: string) => void
+
+  /** Open a canvas document */
+  openDocument: (id: string) => void
+
+  /** Close the canvas panel */
+  closeCanvas: () => void
+
+  /** Get current selection in canvas */
+  getSelection: () => CanvasSelection | null
+
+  /** Set selection in canvas */
+  setSelection: (start: number, end: number) => void
+
+  /** Insert text at cursor position */
+  insertText: (text: string) => void
+
+  /** Replace selected text */
+  replaceSelection: (text: string) => void
+
+  /** Get document content */
+  getContent: (id?: string) => string
+
+  /** Set document content */
+  setContent: (content: string, id?: string) => void
+
+  /** Save a version of the document */
+  saveVersion: (id: string, description?: string) => Promise<string>
+
+  /** Restore a version */
+  restoreVersion: (documentId: string, versionId: string) => void
+
+  /** Get all versions of a document */
+  getVersions: (id: string) => CanvasDocumentVersion[]
+
+  /** Subscribe to canvas changes */
+  onCanvasChange: (handler: (doc: PluginCanvasDocument | null) => void) => () => void
+
+  /** Subscribe to content changes */
+  onContentChange: (handler: (content: string) => void) => () => void
+
+  // ---------------------------------------------------------------------------
+  // Python sandbox (Tauri-only)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Run Python code in the bundled sandbox. Throws in web mode.
+   * Requires the `canvas:run` permission.
+   */
+  executePython: (code: string, timeoutMs?: number) => Promise<PythonExecResult>
+
+  // ---------------------------------------------------------------------------
+  // AI actions (proxies to lib/ai/generation/canvas-actions)
+  // ---------------------------------------------------------------------------
+
+  executeAction: (
+    actionType: CanvasActionType,
+    content: string,
+    config: CanvasActionConfig,
+    options?: CanvasActionExecutionOptions
+  ) => Promise<CanvasActionResult>
+
+  executeActionStreaming: (
+    actionType: CanvasActionType,
+    content: string,
+    config: CanvasActionConfig,
+    callbacks: StreamingCallbacks,
+    options?: CanvasActionExecutionOptions
+  ) => Promise<void>
+
+  // ---------------------------------------------------------------------------
+  // Comments (Dexie-backed)
+  // ---------------------------------------------------------------------------
+
+  getComments: (docId: string) => Promise<CanvasComment[]>
+  addComment: (input: AddCommentInput) => Promise<CanvasComment>
+  updateComment: (commentId: string, content: string) => Promise<void>
+  resolveComment: (commentId: string, resolvedBy?: string) => Promise<void>
+  replyToComment: (parentId: string, reply: ReplyInput) => Promise<CanvasComment>
+  deleteComment: (commentId: string) => Promise<void>
+
+  // ---------------------------------------------------------------------------
+  // Collaboration sessions (CRDT + Dexie)
+  // ---------------------------------------------------------------------------
+
+  /** Create a new collab session for a document. Requires `canvas:collaborate`. */
+  createCollaborationSession: (documentId: string, content: string) => CollaborativeSession
+  /** Look up a session by id (in-memory or from Dexie). */
+  getCollaborationSession: (sessionId: string) => Promise<CollaborativeSession | undefined>
+  /** Active session for the given document, if one exists. */
+  getActiveCollaborationSession: (documentId: string) => Promise<CollaborativeSession | undefined>
+  /** N most-recent persisted sessions (newest-first). */
+  listRecentCollaborationSessions: (limit?: number) => Promise<CollaborativeSession[]>
+  /** Soft-close a session (sets isActive=false, drops in-memory state). */
+  closeCollaborationSession: (sessionId: string) => void
+}
+
+// =============================================================================
+// Artifact API - Artifact Management
+// =============================================================================
+
+/**
+ * Artifact creation options
+ */
+export interface CreateArtifactOptions {
+  title: string
+  content: string
+  language: ArtifactLanguage
+  sessionId?: string
+  messageId?: string
+  type?: "code" | "text" | "react" | "html" | "svg" | "mermaid"
+  metadata?: Artifact["metadata"]
+}
+
+/**
+ * Artifact filter options
+ */
+export interface ArtifactFilter {
+  sessionId?: string
+  language?: ArtifactLanguage
+  type?: string
+  limit?: number
+  offset?: number
+}
+
+/**
+ * Artifact API for plugins
+ */
+export interface PluginArtifactAPI {
+  /** Get active artifact */
+  getActiveArtifact: () => Artifact | null
+
+  /** Get an artifact by ID */
+  getArtifact: (id: string) => Artifact | null
+
+  /** Create a new artifact */
+  createArtifact: (options: CreateArtifactOptions) => Promise<string>
+
+  /** Update an artifact */
+  updateArtifact: (id: string, updates: Partial<Artifact>) => void
+
+  /** Delete an artifact */
+  deleteArtifact: (id: string) => void
+
+  /** List artifacts */
+  listArtifacts: (filter?: ArtifactFilter) => Artifact[]
+
+  /** Open artifact panel with specific artifact */
+  openArtifact: (id: string) => void
+
+  /** Close artifact panel */
+  closeArtifact: () => void
+
+  /** Subscribe to artifact changes */
+  onArtifactChange: (handler: (artifact: Artifact | null) => void) => () => void
+
+  /** Register a custom artifact renderer */
+  registerRenderer: (type: string, renderer: ArtifactRenderer) => () => void
+}
+
+/**
+ * Artifact renderer definition
+ */
+export interface ArtifactRenderer {
+  type: string
+  name: string
+  canRender: (artifact: Artifact) => boolean
+  render: (artifact: Artifact, container: HTMLElement) => () => void
+}
+
+// =============================================================================
+// Notification Center API
+// =============================================================================
+
+/**
+ * Notification options
+ */
+export interface NotificationOptions {
+  title: string
+  message: string
+  type?: "info" | "success" | "warning" | "error"
+  duration?: number
+  icon?: PluginIconName
+  actions?: NotificationAction[]
+  persistent?: boolean
+  progress?: number
+}
+
+/**
+ * Notification action
+ */
+export interface NotificationAction {
+  label: string
+  action: string
+  variant?: "default" | "primary" | "destructive"
+}
+
+/**
+ * Notification instance
+ */
+export interface Notification {
+  id: string
+  title: string
+  message: string
+  type: "info" | "success" | "warning" | "error"
+  createdAt: Date
+  actions?: NotificationAction[]
+  progress?: number
+  persistent: boolean
+}
+
+/**
+ * Notification Center API for plugins
+ */
+export interface PluginNotificationCenterAPI {
+  /** Create a notification */
+  create: (options: NotificationOptions) => string
+
+  /** Update a notification */
+  update: (id: string, updates: Partial<NotificationOptions>) => void
+
+  /** Dismiss a notification */
+  dismiss: (id: string) => void
+
+  /** Dismiss all notifications */
+  dismissAll: () => void
+
+  /** Get all active notifications */
+  getAll: () => Notification[]
+
+  /** Subscribe to notification actions */
+  onAction: (handler: (id: string, action: string) => void) => () => void
+
+  /** Create a progress notification */
+  createProgress: (
+    title: string,
+    message: string
+  ) => {
+    id: string
+    update: (progress: number, message?: string) => void
+    complete: (message?: string) => void
+    error: (message: string) => void
+  }
+}
+
+// =============================================================================
+// Storage API - Per-plugin persistent key-value storage
+// =============================================================================
+
+/**
+ * Per-plugin persistent storage API
+ *
+ * Each plugin gets an isolated key-value namespace backed by localStorage.
+ * Storage is limited to 5MB per plugin.
+ */
+export interface PluginStorageAPI {
+  /** Get a value by key */
+  get<T = unknown>(key: string): Promise<T | undefined>
+  /** Get a value by key with a default */
+  getOrDefault<T = unknown>(key: string, defaultValue: T): Promise<T>
+  /** Set a value by key */
+  set<T = unknown>(key: string, value: T): Promise<void>
+  /** Remove a value by key */
+  remove(key: string): Promise<void>
+  /** Delete alias for compatibility with legacy PluginStorage */
+  delete(key: string): Promise<void>
+  /** Check if a key exists */
+  has(key: string): Promise<boolean>
+  /** Get all keys in this plugin's namespace */
+  keys(): Promise<string[]>
+  /** Clear all plugin storage */
+  clear(): Promise<void>
+  /** Get storage usage in bytes (approximate) */
+  getUsage(): Promise<number>
+  /** Store a value encrypted at rest with the host-managed plugin key. */
+  setSecure<T = unknown>(key: string, value: T): Promise<void>
+  /** Retrieve and decrypt a value previously written by `setSecure`. */
+  getSecure<T = unknown>(key: string): Promise<T | undefined>
+  /** Check whether the stored value uses the encrypted envelope. */
+  isEncrypted(key: string): Promise<boolean>
+}
+
+// =============================================================================
+// AI Provider API - Custom AI Providers
+// =============================================================================
+
+/**
+ * Chat message for AI
+ */
+export interface AIChatMessage {
+  role: "user" | "assistant" | "system"
+  content: string
+  name?: string
+}
+
+/**
+ * Chat options
+ */
+export interface AIChatOptions {
+  model?: string
+  temperature?: number
+  maxTokens?: number
+  topP?: number
+  stop?: string[]
+  stream?: boolean
+  /**
+   * Cancellation signal. When it aborts, the underlying provider stream is
+   * torn down so the plugin stops accruing tokens mid-generation. Forwarded
+   * to the built-in fallback provider; custom providers receive it too and
+   * may honour it.
+   */
+  signal?: AbortSignal
+}
+
+/**
+ * Chat response chunk
+ */
+export interface AIChatChunk {
+  content: string
+  finishReason?: "stop" | "length" | "tool_calls"
+  usage?: {
+    promptTokens: number
+    completionTokens: number
+    totalTokens: number
+  }
+}
+
+/**
+ * AI model definition
+ */
+export interface AIModel {
+  id: string
+  name: string
+  provider: string
+  contextLength: number
+  capabilities: ("chat" | "completion" | "embedding" | "vision" | "function_calling")[]
+}
+
+/**
+ * Custom AI provider definition
+ */
+export interface AIProviderDefinition {
+  id: string
+  name: string
+  description: string
+  icon?: PluginIconName
+  models: AIModel[]
+  chat: (messages: AIChatMessage[], options?: AIChatOptions) => AsyncIterable<AIChatChunk>
+  embed?: (texts: string[]) => Promise<number[][]>
+  validateApiKey?: (apiKey: string) => Promise<boolean>
+}
+
+/**
+ * AI Provider API for plugins
+ */
+export interface PluginAIProviderAPI {
+  /** Register a custom AI provider */
+  registerProvider: (provider: AIProviderDefinition) => () => void
+
+  /** Get available models */
+  getAvailableModels: () => AIModel[]
+
+  /** Get models for a specific provider */
+  getProviderModels: (providerId: string) => AIModel[]
+
+  /** Chat with a model */
+  chat: (messages: AIChatMessage[], options?: AIChatOptions) => AsyncIterable<AIChatChunk>
+
+  /** Generate embeddings */
+  embed: (texts: string[]) => Promise<number[][]>
+
+  /** Get current default model */
+  getDefaultModel: () => string
+
+  /** Get current default provider */
+  getDefaultProvider: () => string
+}
+
+// =============================================================================
+// Extension Points API - UI Extensions
+// =============================================================================
+
+/**
+ * UI extension points
+ */
+export type ExtensionPoint = CanonicalExtensionPoint
+
+/**
+ * Extension options
+ */
+export interface ExtensionOptions {
+  priority?: number
+  /** Plugin i18n key used by contribution discovery UI. */
+  labelKey?: string
+  condition?: () => boolean
+  /**
+   * Declarative `when` clause evaluated against the context-key store
+   * (`lib/plugin/context-keys/context-key-store`). When set, the extension is
+   * only rendered while the clause holds — e.g. `"chat.active && !chat.streaming"`.
+   * Combined with `condition` (both must pass). Prefer `when` over `condition`
+   * for visibility that depends on app state, so the host re-renders on key
+   * changes without a custom subscription.
+   */
+  when?: string
+  /**
+   * Inline-size floor for this contribution's box, in CSS pixels.
+   *
+   * A *request*, not a guarantee: the host clamps it to the slot's own inline
+   * size, so a contribution can never be wider than the region hosting it no
+   * matter what number is passed. Non-finite and non-positive values are
+   * dropped at registration.
+   *
+   * Declaring either bound has a real cost — the wrapper stops being
+   * `display: contents` and starts generating a layout box (see
+   * `PluginExtensionBoundary`). In a flex toolbar that turns the contribution
+   * from a direct flex child into a nested one. Omit both unless the
+   * contribution genuinely needs reserved width.
+   */
+  minWidth?: number
+  /** Inline-size ceiling, in CSS pixels. Same clamping and same cost as `minWidth`. */
+  maxWidth?: number
+}
+
+/**
+ * Extension registration
+ */
+export interface ExtensionRegistration {
+  id: string
+  pluginId: string
+  point: ExtensionPoint
+  component: React.ComponentType<ExtensionProps>
+  options: ExtensionOptions
+}
+
+/**
+ * Props passed to extension components
+ */
+export interface ExtensionProps {
+  pluginId: string
+  extensionId: string
+  /** Host-declared shape of the slot receiving this contribution. */
+  formFactor: PluginSurfaceFormFactor
+}
+
+/**
+ * Extension Points API for plugins
+ */
+export interface PluginExtensionAPI {
+  /** Register a UI extension */
+  registerExtension: (
+    point: ExtensionPoint,
+    component: React.ComponentType<ExtensionProps>,
+    options?: ExtensionOptions
+  ) => () => void
+
+  /** Get all extensions for a point */
+  getExtensions: (point: ExtensionPoint) => ExtensionRegistration[]
+
+  /** Check if extensions exist for a point */
+  hasExtensions: (point: ExtensionPoint) => boolean
+}
+
+// =============================================================================
+// Permission API - Security
+// =============================================================================
+
+/**
+ * Plugin API permissions for extended features
+ */
+export type PluginAPIPermission =
+  | "session:read"
+  | "session:write"
+  | "session:delete"
+  | "project:read"
+  | "project:write"
+  | "project:delete"
+  | "vector:read"
+  | "vector:write"
+  | "canvas:read"
+  | "canvas:write"
+  | "canvas:run"
+  | "canvas:collaborate"
+  | "artifact:read"
+  | "artifact:write"
+  | "workflow:read"
+  | "ai:chat"
+  | "ai:embed"
+  | "agent:control"
+  | "agent:dispatch-external"
+  | "agent:dispatch"
+  | "agent:shared-memory:read"
+  | "twin:read"
+  | "templates:read"
+  | "templates:contribute"
+  | "templates:instantiate"
+  | "templates:library:write"
+  | "export:session"
+  | "export:project"
+  | "theme:read"
+  | "theme:write"
+  | "media:image:read"
+  | "media:image:write"
+  | "media:video:read"
+  | "media:video:write"
+  | "media:video:export"
+  | "extension:ui"
+  | "notification:show"
+  | "ipc:call"
+  | "ipc:expose"
+  | "events:publish"
+  | "events:subscribe"
+
+/**
+ * Permission API for plugins
+ */
+/**
+ * Any permission introspectable through `ctx.permissions`: an API permission
+ * (granted via `permissionMapping`) or a manifest-level permission enforced
+ * by the `PermissionGuard` (e.g. `git:write`, `terminal:execute`).
+ * Introspection consults both stores so it agrees with enforcement.
+ */
+export type IntrospectablePluginPermission = PluginAPIPermission | PluginPermission
+
+export interface PluginPermissionAPI {
+  /** Check if plugin has a permission (API or guard-enforced) */
+  hasPermission: (permission: IntrospectablePluginPermission) => boolean
+
+  /** Request a permission from user */
+  requestPermission: (permission: PluginAPIPermission, reason?: string) => Promise<boolean>
+
+  /** Get all granted permissions (API and guard-enforced) */
+  getGrantedPermissions: () => IntrospectablePluginPermission[]
+
+  /** Check multiple permissions */
+  hasAllPermissions: (permissions: IntrospectablePluginPermission[]) => boolean
+
+  /** Check if any permission is granted */
+  hasAnyPermission: (permissions: IntrospectablePluginPermission[]) => boolean
+}
+
+// =============================================================================
+// Plugin Context API
+// =============================================================================
+
+/**
+ * Plugin context API with all feature-specific APIs
+ */
+export interface PluginContextAPI {
+  /** Session management API */
+  session: PluginSessionAPI
+
+  /** Resource-scoped Context Workbench panel registration. */
+  contextPanels: import("@/lib/plugin/api/context-panel-api").PluginContextPanelAPI
+
+  /** Live project editor — open files, reflect edits, read the active editor. */
+  editor: import("@/lib/plugin/api/editor-api").PluginEditorAPI
+
+  /** Project management API */
+  project: PluginProjectAPI
+
+  /** Vector/RAG API */
+  vector: PluginVectorAPI
+
+  /** Theme customization API */
+  theme: PluginThemeAPI
+
+  /** Export API */
+  export: PluginExportAPI
+
+  /** Import API — content importers (symmetric counterpart of `export`). */
+  import: PluginImportAPI
+
+  /** Typed access to the plugin's own declarative configuration. */
+  configuration: PluginConfigAPI
+
+  /** Internationalization API */
+  i18n: PluginI18nAPI
+
+  /** Canvas editing API */
+  canvas: PluginCanvasAPI
+
+  /** Artifact management API */
+  artifact: PluginArtifactAPI
+
+  /** Media processing API */
+  media: PluginMediaAPI
+
+  /** Notification center API */
+  notifications: PluginNotificationCenterAPI
+
+  /** Per-plugin persistent key-value storage */
+  storage: PluginStorageAPI
+
+  /** AI provider API */
+  ai: PluginAIProviderAPI
+
+  /** UI extension points API */
+  extensions: PluginExtensionAPI
+
+  /** Permission management API */
+  permissions: PluginPermissionAPI
+
+  /** Unified template catalog, validation, contribution and guarded execution API. */
+  templates: import("@/packages/plugin-sdk/src/templates").PluginTemplatesAPI
+
+  /**
+   * Message-part renderer API — register a React component for a custom
+   * `UIMessage.parts[].type` value. Optional so older plugin builds keep
+   * compiling; new code should use it instead of trying to monkey-patch
+   * the chat renderer.
+   */
+  messagePart: import("@/lib/plugin/api/message-part-api").PluginMessagePartAPI
+
+  /**
+   * Tool-result renderer API — register the React card that renders this
+   * plugin's own MCP tool result in chat. Tool parts are host-owned
+   * (`messagePart` reserves the `tool-` prefix), so this is the supported way
+   * for a plugin to render its tool's output richly instead of falling through
+   * to the generic content-blocks card. Optional for the same back-compat
+   * reason as `messagePart`.
+   */
+  toolResult: import("@/lib/plugin/api/tool-result-api").PluginToolResultAPI
 }

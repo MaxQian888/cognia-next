@@ -2,7 +2,8 @@
 // persisted rows. Unlock conditions are evaluated against the pet profile and the
 // activity ledger. See `lib/pet/achievements/registry.ts` + `check.ts`.
 
-import type { PetBones } from "./bones"
+import type { PetBones, PetStats } from "./bones"
+import type { PetCareState } from "./care"
 import type { PetProfile, PetActivityRow } from "./profile"
 
 /** Stable achievement identifier. */
@@ -17,6 +18,10 @@ export interface PetAchievementContext {
   activity: PetActivityRow[]
   /** Aggregate counters derived from the full ledger (e.g. fed: 50). */
   counters: Record<string, number>
+  /** Effective (base + earned growth) stats, for stat-milestone achievements. */
+  effectiveStats: PetStats
+  /** Derived care state, for care/recovery achievements. */
+  care: PetCareState
 }
 
 /** Static achievement definition. */

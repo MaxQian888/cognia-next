@@ -5,19 +5,24 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-const mockWriteFile = jest.fn()
-const mockShare = jest.fn()
+// The component now delegates the platform write + feedback to the unified
+// saver; mock those seams (their internals are covered by save-export.test.ts
+// and export-feedback.test.ts). `mockSaveExport` stands in for "the export
+// write ran".
+const mockSaveExport = jest.fn()
+const mockNotify = jest.fn()
 const mockBuildBackupPackage = jest.fn()
 const mockEncryptBackupPackage = jest.fn()
+const mockDecryptBackupPackage = jest.fn()
 const mockApplyBackupPackage = jest.fn()
 const mockMigrateEnvelope = jest.fn()
 
-jest.mock("@/lib/capacitor/filesystem", () => ({
-  writeFile: (...args: unknown[]) => mockWriteFile(...args),
+jest.mock("@/lib/files/save-export", () => ({
+  saveExport: (...args: unknown[]) => mockSaveExport(...args),
 }))
 
-jest.mock("@/lib/capacitor/share", () => ({
-  share: (...args: unknown[]) => mockShare(...args),
+jest.mock("@/lib/files/export-feedback", () => ({
+  notifyExportOutcome: (...args: unknown[]) => mockNotify(...args),
 }))
 
 jest.mock("sonner", () => ({
@@ -33,6 +38,7 @@ jest.mock("@/lib/data/build-package", () => ({
 
 jest.mock("@/lib/data/crypto", () => ({
   encryptBackupPackage: (...args: unknown[]) => mockEncryptBackupPackage(...args),
+  decryptBackupPackage: (...args: unknown[]) => mockDecryptBackupPackage(...args),
 }))
 
 jest.mock("@/lib/data/apply-package", () => ({
@@ -41,6 +47,19 @@ jest.mock("@/lib/data/apply-package", () => ({
 
 jest.mock("@/lib/data/migrate", () => ({
   migrateEnvelope: (...args: unknown[]) => mockMigrateEnvelope(...args),
+  // Mirror the real structural sniff (lib/data/migrate.ts:isEncryptedEnvelope)
+  // — the import path branches on it. Inlined rather than requireActual'd:
+  // spreading the actual module's interop exports proved unreliable here.
+  isEncryptedEnvelope: (input: unknown) => {
+    if (!input || typeof input !== "object") return false
+    const obj = input as { version?: unknown; ciphertext?: unknown; kdf?: unknown }
+    return (
+      obj.version === "enc-v1" &&
+      typeof obj.ciphertext === "string" &&
+      !!obj.kdf &&
+      typeof obj.kdf === "object"
+    )
+  },
 }))
 
 jest.mock("@/lib/db/backup-history", () => ({
@@ -108,6 +127,8 @@ jest.mock("next-intl", () => ({
       importing: "Restoring…",
       importSuccess: "Restore complete",
       importFailed: `Restore failed: ${(vars?.message as string) ?? ""}`,
+      importPassphraseRequired: "Enter the backup passphrase before importing",
+      importWrongPassphrase: "Wrong passphrase",
       autoBackup: "Auto backup",
       autoBackupHint: "Back up automatically.",
       autoBackupInterval: "Interval (days)",
@@ -189,40 +210,15 @@ describe("<MobileBackupSection />", () => {
   })
 
   describe("export flow", () => {
-    it("shows a toast with a share action on successful export", async () => {
-      mockWriteFile.mockResolvedValue({
-        kind: "ok" as const,
-        value: { uri: "file://documents/cognia/backups/test.cog.bak" },
-      })
-
-      render(<MobileBackupSection />)
-
-      const input = screen.getByTestId("backup-passphrase")
-      fireEvent.change(input, { target: { value: "password123" } })
-
-      const button = screen.getByTestId("backup-export")
-      fireEvent.click(button)
-
-      await waitFor(() => {
-        expect(mockWriteFile).toHaveBeenCalled()
-      })
-
-      expect(mockToastSuccess).toHaveBeenCalledTimes(1)
-      const [message, options] = mockToastSuccess.mock.calls[0] as [
-        string,
-        { action?: { label: string; onClick: () => void } },
-      ]
-      expect(message).toBe("Written to file://documents/cognia/backups/test.cog.bak")
-      expect(options?.action).toBeDefined()
-      expect(options?.action?.label).toBe("Share file")
-    })
-
-    it("calls share() with the file URI when the toast action is clicked", async () => {
-      mockWriteFile.mockResolvedValue({
-        kind: "ok" as const,
-        value: { uri: "file://documents/cognia/backups/test.cog.bak" },
-      })
-      mockShare.mockResolvedValue({ kind: "shared" as const })
+    it("delegates the encrypted backup to saveExport and reports the outcome", async () => {
+      const outcome = {
+        kind: "saved" as const,
+        platform: "mobile" as const,
+        location: "file://documents/cognia/backups/test.cog.bak",
+        uri: "file://documents/cognia/backups/test.cog.bak",
+        filename: "test.cog.bak",
+      }
+      mockSaveExport.mockResolvedValue(outcome)
 
       render(<MobileBackupSection />)
 
@@ -232,30 +228,34 @@ describe("<MobileBackupSection />", () => {
       fireEvent.click(screen.getByTestId("backup-export"))
 
       await waitFor(() => {
-        expect(mockToastSuccess).toHaveBeenCalled()
+        expect(mockSaveExport).toHaveBeenCalledTimes(1)
       })
 
-      const [, options] = mockToastSuccess.mock.calls[0] as [
-        string,
-        { action: { label: string; onClick: () => void } },
-      ]
-      options.action.onClick()
+      // Backup goes to the dedicated backups subdir as an opaque binary blob.
+      const arg = mockSaveExport.mock.calls[0][0] as {
+        filename: string
+        mimeType: string
+        mobileSubdir: string
+      }
+      expect(arg.mobileSubdir).toBe("cognia/backups")
+      expect(arg.mimeType).toBe("application/octet-stream")
+      expect(arg.filename).toMatch(/\.cog\.bak$/)
 
-      expect(mockShare).toHaveBeenCalledTimes(1)
-      expect(mockShare).toHaveBeenCalledWith({
-        title: "Cognia Backup",
-        files: ["file://documents/cognia/backups/test.cog.bak"],
-      })
+      // Feedback (location toast + share action) is delegated to notifyExportOutcome.
+      expect(mockNotify).toHaveBeenCalledWith(
+        outcome,
+        expect.objectContaining({ shareTitle: "Cognia Backup" })
+      )
     })
 
-    it("uses Buffer fallback for base64 when btoa is unavailable", async () => {
-      mockWriteFile.mockResolvedValue({
-        kind: "ok" as const,
-        value: { uri: "file://test" },
-      })
-      const originalBtoa = globalThis.btoa
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      delete (globalThis as any).btoa
+    it("still notifies (web download path) when saveExport falls back to web", async () => {
+      const outcome = {
+        kind: "saved" as const,
+        platform: "web" as const,
+        location: "downloads",
+        filename: "test.cog.bak",
+      }
+      mockSaveExport.mockResolvedValue(outcome)
 
       render(<MobileBackupSection />)
 
@@ -265,57 +265,8 @@ describe("<MobileBackupSection />", () => {
       fireEvent.click(screen.getByTestId("backup-export"))
 
       await waitFor(() => {
-        expect(mockToastSuccess).toHaveBeenCalled()
+        expect(mockNotify).toHaveBeenCalledWith(outcome, expect.anything())
       })
-
-      // Restore btoa
-      globalThis.btoa = originalBtoa
-    })
-
-    it("shows an error toast without action on export failure", async () => {
-      mockWriteFile.mockResolvedValue({
-        kind: "error" as const,
-        message: "Disk full",
-      })
-
-      render(<MobileBackupSection />)
-
-      fireEvent.change(screen.getByTestId("backup-passphrase"), {
-        target: { value: "password123" },
-      })
-      fireEvent.click(screen.getByTestId("backup-export"))
-
-      await waitFor(() => {
-        expect(mockToastError).toHaveBeenCalledTimes(1)
-      })
-
-      const [message, options] = mockToastError.mock.calls[0] as [string, unknown]
-      expect(message).toBe("Backup failed: Disk full")
-      // Error toast should not have an action
-      const opts = options as { action?: unknown } | undefined
-      expect(opts?.action).toBeUndefined()
-    })
-
-    it("does not add a share action on the web fallback path", async () => {
-      mockWriteFile.mockResolvedValue({ kind: "unsupported" as const })
-
-      render(<MobileBackupSection />)
-
-      fireEvent.change(screen.getByTestId("backup-passphrase"), {
-        target: { value: "password123" },
-      })
-      fireEvent.click(screen.getByTestId("backup-export"))
-
-      await waitFor(() => {
-        expect(mockToastSuccess).toHaveBeenCalledTimes(1)
-      })
-
-      const [, options] = mockToastSuccess.mock.calls[0] as [
-        string,
-        { action?: unknown },
-      ]
-      // Web fallback toast should not have a share action
-      expect(options?.action).toBeUndefined()
     })
 
     it("disables the export button when passphrase is too short", () => {
@@ -367,6 +318,69 @@ describe("<MobileBackupSection />", () => {
       })
     })
 
+    // jsdom's File/Blob text() is unreliable in this environment (it returns
+    // constant content regardless of the blob parts), so the encrypted-import
+    // tests dispatch the change event with a minimal file stub exposing the
+    // one member the handler reads: text().
+    const uploadStub = (content: string) => {
+      const input = screen.getByTestId("backup-import-input")
+      fireEvent.change(input, {
+        target: { files: [{ text: async () => content }] },
+      })
+    }
+    const encryptedEnvelopeJson = JSON.stringify({
+      version: "enc-v1",
+      ciphertext: "abc",
+      kdf: { salt: "s" },
+    })
+
+    it("decrypts an encrypted envelope with the passphrase field before applying", async () => {
+      // Mobile exports are always encrypted; the import path must round-trip
+      // them (this exact flow used to throw IsEncryptedError unconditionally).
+      mockDecryptBackupPackage.mockResolvedValue(JSON.stringify({ decrypted: true }))
+      mockMigrateEnvelope.mockResolvedValue({})
+      mockApplyBackupPackage.mockResolvedValue(undefined)
+
+      render(<MobileBackupSection />)
+      await userEvent.type(screen.getByTestId("backup-passphrase"), "hunter2-passphrase")
+      uploadStub(encryptedEnvelopeJson)
+
+      await waitFor(() => {
+        expect(mockToastSuccess).toHaveBeenCalledWith("Restore complete")
+      })
+      expect(mockDecryptBackupPackage).toHaveBeenCalledWith(
+        expect.objectContaining({ version: "enc-v1" }),
+        "hunter2-passphrase"
+      )
+      expect(mockMigrateEnvelope).toHaveBeenCalledWith({ decrypted: true })
+    })
+
+    it("refuses to import an encrypted envelope without a valid passphrase", async () => {
+      render(<MobileBackupSection />)
+      uploadStub(encryptedEnvelopeJson)
+
+      await waitFor(() => {
+        expect(mockToastError).toHaveBeenCalledWith("Enter the backup passphrase before importing")
+      })
+      expect(mockDecryptBackupPackage).not.toHaveBeenCalled()
+      expect(mockApplyBackupPackage).not.toHaveBeenCalled()
+    })
+
+    it("maps a wrong-passphrase OperationError to actionable copy", async () => {
+      const opError = new Error("The operation failed")
+      opError.name = "OperationError"
+      mockDecryptBackupPackage.mockRejectedValue(opError)
+
+      render(<MobileBackupSection />)
+      await userEvent.type(screen.getByTestId("backup-passphrase"), "wrong-passphrase")
+      uploadStub(encryptedEnvelopeJson)
+
+      await waitFor(() => {
+        expect(mockToastError).toHaveBeenCalledWith("Wrong passphrase")
+      })
+      expect(mockApplyBackupPackage).not.toHaveBeenCalled()
+    })
+
     it("shows error toast with stringified non-Error throw", async () => {
       mockMigrateEnvelope.mockRejectedValue("plain string error")
 
@@ -411,7 +425,7 @@ describe("<MobileBackupSection />", () => {
 
   describe("biometric guard", () => {
     it("shows biometric blocked toast when guard returns blocked", async () => {
-      mockWriteFile.mockResolvedValue({
+      mockSaveExport.mockResolvedValue({
         kind: "ok" as const,
         value: { uri: "file://test" },
       })
@@ -465,7 +479,7 @@ describe("<MobileBackupSection />", () => {
       // cancelled should NOT trigger toast.error for biometric blocked
       expect(mockToastError).not.toHaveBeenCalledWith("Biometric failed.")
       // runExport should NOT have been called
-      expect(mockWriteFile).not.toHaveBeenCalled()
+      expect(mockSaveExport).not.toHaveBeenCalled()
     })
   })
 
@@ -537,7 +551,7 @@ describe("<MobileBackupSection />", () => {
 
     it("fires auto-backup useEffect when enabled with valid passphrase", async () => {
       jest.useFakeTimers()
-      mockWriteFile.mockResolvedValue({
+      mockSaveExport.mockResolvedValue({
         kind: "ok" as const,
         value: { uri: "file://test" },
       })
@@ -555,7 +569,7 @@ describe("<MobileBackupSection />", () => {
       jest.advanceTimersByTime(24 * 60 * 60 * 1000 + 100)
 
       await waitFor(() => {
-        expect(mockWriteFile).toHaveBeenCalled()
+        expect(mockSaveExport).toHaveBeenCalled()
       })
 
       jest.useRealTimers()
@@ -563,7 +577,7 @@ describe("<MobileBackupSection />", () => {
 
     it("respects last success time when checking overdue backup", async () => {
       jest.useFakeTimers()
-      mockWriteFile.mockResolvedValue({
+      mockSaveExport.mockResolvedValue({
         kind: "ok" as const,
         value: { uri: "file://test" },
       })
@@ -586,7 +600,7 @@ describe("<MobileBackupSection />", () => {
       jest.advanceTimersByTime(24 * 60 * 60 * 1000 - 1000)
 
       // Export should NOT be called because it's not yet overdue
-      expect(mockWriteFile).not.toHaveBeenCalled()
+      expect(mockSaveExport).not.toHaveBeenCalled()
 
       jest.useRealTimers()
     })
@@ -613,7 +627,7 @@ describe("<MobileBackupSection />", () => {
     it("ignores second click while export is in progress", async () => {
       // Make writeFile hang so exporting stays true
       const resolver: { resolve: ((v: unknown) => void) | null } = { resolve: null }
-      mockWriteFile.mockImplementation(
+      mockSaveExport.mockImplementation(
         () =>
           new Promise((resolve) => {
             resolver.resolve = resolve
@@ -630,29 +644,35 @@ describe("<MobileBackupSection />", () => {
       fireEvent.click(screen.getByTestId("backup-export"))
 
       await waitFor(() => {
-        expect(mockWriteFile).toHaveBeenCalledTimes(1)
+        expect(mockSaveExport).toHaveBeenCalledTimes(1)
       })
 
       // Second click while still exporting should bail out early
       fireEvent.click(screen.getByTestId("backup-export"))
 
-      // Resolve the hanging writeFile inside act
+      // Resolve the hanging saveExport inside act
       await waitFor(async () => {
         expect(resolver.resolve).not.toBeNull()
-        resolver.resolve!({ kind: "ok" as const, value: { uri: "file://test" } })
+        resolver.resolve!({
+          kind: "saved" as const,
+          platform: "mobile" as const,
+          location: "file://test",
+          uri: "file://test",
+          filename: "x.cog.bak",
+        })
       })
 
       await waitFor(() => {
-        expect(mockToastSuccess).toHaveBeenCalledTimes(1)
+        expect(mockNotify).toHaveBeenCalledTimes(1)
       })
 
-      // writeFile should only be called once (second click was ignored)
-      expect(mockWriteFile).toHaveBeenCalledTimes(1)
+      // saveExport should only be called once (second click was ignored)
+      expect(mockSaveExport).toHaveBeenCalledTimes(1)
     })
 
     it("cancels auto-backup interval on unmount", async () => {
       jest.useFakeTimers()
-      mockWriteFile.mockResolvedValue({
+      mockSaveExport.mockResolvedValue({
         kind: "ok" as const,
         value: { uri: "file://test" },
       })
@@ -670,14 +690,14 @@ describe("<MobileBackupSection />", () => {
 
       // Advance timers — should not throw and writeFile should not be called
       jest.advanceTimersByTime(24 * 60 * 60 * 1000 + 100)
-      expect(mockWriteFile).not.toHaveBeenCalled()
+      expect(mockSaveExport).not.toHaveBeenCalled()
 
       jest.useRealTimers()
     })
 
     it("does not fire auto-backup when intervalDays is zero or negative", async () => {
       jest.useFakeTimers()
-      mockWriteFile.mockResolvedValue({
+      mockSaveExport.mockResolvedValue({
         kind: "ok" as const,
         value: { uri: "file://test" },
       })
@@ -695,7 +715,7 @@ describe("<MobileBackupSection />", () => {
       fireEvent.change(intervalInput, { target: { value: "0" } })
 
       jest.advanceTimersByTime(24 * 60 * 60 * 1000 + 100)
-      expect(mockWriteFile).not.toHaveBeenCalled()
+      expect(mockSaveExport).not.toHaveBeenCalled()
 
       jest.useRealTimers()
     })

@@ -32,7 +32,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import {
   useKeybindingStore,
   formatKeybinding,

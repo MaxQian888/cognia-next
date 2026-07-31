@@ -16,7 +16,7 @@ import { useEffect, useRef } from "react"
 
 import { isTauri } from "@/lib/tauri"
 import { onTauriEvent, TAURI_EVENTS } from "@/lib/tauri/events"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { useSettingsStore } from "@/stores/settings"
 import {
   aboutAction,
@@ -46,6 +46,8 @@ import {
   toggleReduceMotionAction,
   toggleSidebarAction,
   toggleStatusBarAction,
+  toggleRightSidebarAction,
+  toggleTerminalAction,
   type MenuActionId,
 } from "@/lib/desktop/menu-actions"
 
@@ -140,6 +142,12 @@ export function useMenuEventRouter(options: UseMenuEventRouterOptions = {}): voi
           case "toggle-status-bar":
             toggleStatusBarAction()
             break
+          case "toggle-right-sidebar":
+            toggleRightSidebarAction()
+            break
+          case "toggle-terminal":
+            toggleTerminalAction()
+            break
           case "reload":
             reloadAction()
             break
@@ -166,6 +174,7 @@ export function useMenuEventRouter(options: UseMenuEventRouterOptions = {}): voi
             break
           case "go-inbox":
           case "go-workflows":
+          case "go-sites":
           case "go-twin":
           case "go-skills":
           case "go-plugins":

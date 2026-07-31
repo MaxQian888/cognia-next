@@ -82,7 +82,13 @@ export function createTeamNotifier(
   const isDuplicate = (key: string): boolean => {
     const last = dedupeCache.get(key)
     if (last === undefined) return false
-    return now() - last < DEDUPE_WINDOW_MS
+    if (now() - last >= DEDUPE_WINDOW_MS) {
+      // Window elapsed — evict so the cache can't grow unbounded over a
+      // long-lived run with many distinct dedupe keys (e.g. per-task keys).
+      dedupeCache.delete(key)
+      return false
+    }
+    return true
   }
 
   const recordFire = (key: string): void => {

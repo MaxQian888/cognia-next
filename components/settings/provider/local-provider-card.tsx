@@ -24,6 +24,7 @@ import {
   Wrench,
   ImageIcon,
   MessageSquare,
+  Rocket,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Input } from "@/components/ui/input"
@@ -35,12 +36,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import type { LocalProviderName } from "@/types/provider/local-provider"
-import { LOCAL_PROVIDER_CONFIGS } from "@/lib/ai/providers/local-providers"
+import type { LocalProviderName } from "@cognia/provider-types/local-provider"
+import { LOCAL_PROVIDER_CONFIGS } from "@cognia/provider-core/providers/local-providers"
 import {
   getProviderCapabilities,
   getInstallInstructions,
-} from "@/lib/ai/providers/local-provider-service"
+} from "@cognia/provider-core/providers/local-provider-service"
 
 export interface LocalProviderCardProps {
   providerId: LocalProviderName
@@ -56,6 +57,8 @@ export interface LocalProviderCardProps {
   onBaseUrlChange: (url: string) => void
   onTestConnection: () => Promise<{ success: boolean; message: string; latency?: number }>
   onManageModels?: () => void
+  /** Opens the step-by-step install/setup guide for this provider. */
+  onSetup?: () => void
   compact?: boolean
 }
 
@@ -73,6 +76,7 @@ export function LocalProviderCard({
   onBaseUrlChange,
   onTestConnection,
   onManageModels,
+  onSetup,
   compact = false,
 }: LocalProviderCardProps) {
   const t = useTranslations("providers")
@@ -166,7 +170,9 @@ export function LocalProviderCard({
                 <>
                   {t("connected")}
                   {modelsCount !== undefined && (
-                    <span className="ml-1">({modelsCount} models)</span>
+                    <span className="ml-1">
+                      ({modelsCount} {t("modelsCount")})
+                    </span>
                   )}
                   {latency && <span className="ml-1 text-xs opacity-70">{latency}ms</span>}
                 </>
@@ -176,6 +182,22 @@ export function LocalProviderCard({
             </span>
           </div>
           <div className="flex items-center gap-1">
+            {onSetup && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    onClick={onSetup}
+                    aria-label={t("setupGuide")}
+                  >
+                    <Rocket className="h-3.5 w-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{t("setupGuide")}</TooltipContent>
+              </Tooltip>
+            )}
             {capabilities.canPullModels && onManageModels && (
               <Tooltip>
                 <TooltipTrigger asChild>

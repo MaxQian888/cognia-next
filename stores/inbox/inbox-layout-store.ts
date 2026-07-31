@@ -12,6 +12,7 @@
 
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 
 export interface InboxLayoutState {
   sidebarSize: number
@@ -80,6 +81,7 @@ export const useInboxLayoutStore = create<InboxLayoutState>()(
     }),
     {
       name: "cognia-inbox-layout",
+      storage: persistLocalStorage(),
       // v2: v1 layouts were persisted while `<InboxShell />` passed bare
       // numbers to react-resizable-panels v4 (interpreted as pixels, not
       // percent), so every drag stored clamped garbage — discard them.

@@ -5,14 +5,17 @@
 // shells) can reuse the grid without bringing in the full panel header
 // and tabs.
 
+import { useCallback } from "react"
 import { useTranslations } from "next-intl"
 import { BoxesIcon } from "lucide-react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { setPluginEnabled } from "@/lib/db/plugins"
+import type { PluginRow } from "@/lib/db/plugin-types"
 import { usePlugins } from "@/hooks/plugins"
 import { usePluginsStore } from "@/stores/plugins"
 import { PluginCard } from "./plugin-card"
+import { PluginLibraryGridSkeleton } from "./library/plugin-library-skeleton"
 
 export function PluginPanelGrid() {
   const t = useTranslations("plugins.grid")
@@ -26,8 +29,19 @@ export function PluginPanelGrid() {
   const setRollbackTarget = usePluginsStore((s) => s.setRollbackTarget)
   const setActiveSection = usePluginsStore((s) => s.setActiveSection)
 
+  // Stable handlers keep the memoized PluginCards from re-rendering when
+  // unrelated store state (search query, selection elsewhere) changes.
+  const handleToggleEnabled = useCallback(
+    (plugin: PluginRow) => void setPluginEnabled(plugin.id, !plugin.enabled),
+    []
+  )
+  const handleUninstall = useCallback(
+    (plugin: PluginRow) => setDeleteTarget({ pluginId: plugin.id, name: plugin.name }),
+    [setDeleteTarget]
+  )
+
   if (loading) {
-    return <p className="text-sm text-muted-foreground">{t("loading")}</p>
+    return <PluginLibraryGridSkeleton />
   }
 
   if (totals.total === 0) {
@@ -51,22 +65,28 @@ export function PluginPanelGrid() {
     )
   }
 
+  // Column count tracks the grid's OWN width (`@container/plugin-grid`),
+  // not the viewport. The grid renders inside the center pane (and is reused
+  // in narrower embedded shells), so viewport breakpoints would pack 2–3
+  // columns into a cramped pane and overlap the cards.
   return (
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-      {filtered.map((p) => (
-        <PluginCard
-          key={p.id}
-          plugin={p}
-          selected={selection.has(p.id)}
-          onToggleSelect={toggleSelection}
-          onOpen={openDetail}
-          onConfigure={openConfigure}
-          onToggleEnabled={(plugin) => void setPluginEnabled(plugin.id, !plugin.enabled)}
-          onUninstall={(plugin) => setDeleteTarget({ pluginId: plugin.id, name: plugin.name })}
-          onReviewPermissions={openPermissionReview}
-          onRollback={setRollbackTarget}
-        />
-      ))}
+    <div className="@container/plugin-grid">
+      <div className="grid gap-3 @lg/plugin-grid:grid-cols-2 @4xl/plugin-grid:grid-cols-3">
+        {filtered.map((p) => (
+          <PluginCard
+            key={p.id}
+            plugin={p}
+            selected={selection.has(p.id)}
+            onToggleSelect={toggleSelection}
+            onOpen={openDetail}
+            onConfigure={openConfigure}
+            onToggleEnabled={handleToggleEnabled}
+            onUninstall={handleUninstall}
+            onReviewPermissions={openPermissionReview}
+            onRollback={setRollbackTarget}
+          />
+        ))}
+      </div>
     </div>
   )
 }

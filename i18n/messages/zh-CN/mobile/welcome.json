@@ -1,0 +1,10 @@
+{
+  "byokCta": "配置 API Key",
+  "byokDescription": "在手机上独立运行——聊天、搜索、文档都使用你自己的服务商密钥，无需桌面端。",
+  "byokTitle": "使用我自己的 API Key",
+  "pairCta": "与桌面端配对",
+  "pairDescription": "连接电脑上的 Cognia 桌面应用，同步会话并远程执行任务。",
+  "pairTitle": "与桌面端配对",
+  "subtitle": "选择这台手机的运行方式",
+  "title": "欢迎使用 Cognia"
+}

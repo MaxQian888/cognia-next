@@ -46,15 +46,21 @@ import { listPairedDevices } from "@/lib/db/paired-devices"
 import { encodePairPayload } from "@/lib/qr/pair-payload"
 import { cn } from "@/lib/utils"
 import { APP_VERSION } from "@/lib/app-version"
+import { useAccountStore } from "@/stores/account/account-store"
+import { ChannelMatrixCard } from "./channel-matrix-card"
 import { PairedDevicesCard } from "./paired-devices-card"
 import { WebRtcCard } from "./webrtc-card"
 import { SyncStatusCard } from "./sync-status-card"
+import { LogtoLoginCard } from "./logto-login-card"
+import { RemoteBrowserCard } from "./remote-browser-card"
 
 // ---------------------------------------------------------------------------
 // Tauri command shapes — mirror src-tauri/src/companion_api/commands.rs
 // ---------------------------------------------------------------------------
 
-const DEFAULT_PORT = 7890
+// Mirrors Rust `companion_api::server::DEFAULT_PORT` — 27890, outside the
+// 789x Clash mixed/SOCKS range so it can't collide with a local proxy.
+const DEFAULT_PORT = 27890
 
 type BindMode = "loopback" | "lan"
 
@@ -101,6 +107,7 @@ async function startServer(bindMode: BindMode): Promise<number> {
   // semantics — a grant revoked while the desktop was down is not retained.
   // Best-effort: a failure here only means a granted phone must re-toggle.
   await seedRemoteControlAllowList()
+  await seedLockedComputerUseAllowList()
   return port
 }
 
@@ -108,12 +115,39 @@ async function seedRemoteControlAllowList(): Promise<void> {
   if (!isTauri()) return
   try {
     const devices = await listPairedDevices()
-    const allowed = devices
-      .filter((d) => d.allowRemoteControl === true && d.revokedAt === undefined)
-      .map((d) => d.deviceId)
-    await transport.call<void>("companion_seed_remote_control", { deviceIds: allowed })
+    const live = devices.filter((d) => d.revokedAt === undefined)
+    await transport.call<void>("companion_seed_remote_control", {
+      deviceIds: live.filter((d) => d.allowRemoteControl === true).map((d) => d.deviceId),
+    })
+    // Seeded from its own column, not derived from remote control: the two are
+    // independent grants, and inferring one from the other would quietly widen
+    // whichever the user actually chose.
+    await transport.call<void>("companion_seed_agent_control", {
+      deviceIds: live.filter((d) => d.allowAgentControl === true).map((d) => d.deviceId),
+    })
+    await transport.call<void>("companion_seed_remote_terminal", {
+      deviceIds: live.filter((d) => d.allowRemoteTerminal === true).map((d) => d.deviceId),
+    })
   } catch (err) {
     console.warn("seedRemoteControlAllowList failed", err)
+  }
+}
+
+async function seedLockedComputerUseAllowList(): Promise<void> {
+  if (!isTauri()) return
+  try {
+    const devices = await listPairedDevices()
+    const allowed = devices
+      .filter(
+        (device) =>
+          device.allowRemoteControl === true &&
+          device.allowLockedComputerUse === true &&
+          device.revokedAt === undefined
+      )
+      .map((device) => device.deviceId)
+    await transport.call<void>("companion_seed_locked_computer_use", { deviceIds: allowed })
+  } catch (err) {
+    console.warn("seedLockedComputerUseAllowList failed", err)
   }
 }
 
@@ -121,8 +155,8 @@ async function stopServer(): Promise<void> {
   await transport.call<void>("companion_server_stop")
 }
 
-async function issuePairJwt(): Promise<PairJwtIssue> {
-  return transport.call<PairJwtIssue>("companion_issue_pair_jwt")
+async function issuePairJwt(localAccountId: string): Promise<PairJwtIssue> {
+  return transport.call<PairJwtIssue>("companion_issue_pair_jwt", { localAccountId })
 }
 
 async function startMdnsBroadcast(args: {
@@ -187,6 +221,9 @@ export function CompanionSection() {
   return (
     <div className="space-y-3 p-4" data-testid="companion-section">
       <CompanionGroup id="network" title={t("network")} defaultOpen>
+        {/* First, because it is the question the four cards below only answer
+            between them: which routes does this desktop actually answer on. */}
+        <ChannelMatrixCard />
         <ServerStatusCard />
         <TunnelCard />
         <MdnsCard />
@@ -196,14 +233,20 @@ export function CompanionSection() {
         <PairDeviceCard />
         <PairedDevicesCard />
       </CompanionGroup>
+      <CompanionGroup id="cloud" title={t("cloud")} defaultOpen={false}>
+        <RemoteBrowserCard />
+        <LogtoLoginCard />
+      </CompanionGroup>
       <CompanionGroup id="push" title={t("push")} defaultOpen>
         <PushCredentialsCard />
       </CompanionGroup>
-      {/* Diagnostics + per-table sync state are power-user surfaces; collapse
-          them by default so the common pairing / push path isn't buried. */}
+      {/* Per-table sync state is a power-user surface; collapsed by default so
+          the common pairing / push path isn't buried. The reachability probe
+          that used to live here moved into the channel matrix above, where its
+          results are attributed to a channel instead of printed as a flat list
+          of URLs. */}
       <CompanionGroup id="advanced" title={t("advanced")} defaultOpen={false}>
         <SyncStatusCard />
-        <ReachabilityDiagnosticsCard />
       </CompanionGroup>
     </div>
   )
@@ -411,7 +454,7 @@ function TunnelCard() {
 
         {mode === "quick" && (
           <div className="flex items-center justify-between gap-2">
-            <span>{info ? info.publicUrl : t("off")}</span>
+            <span className="min-w-0 break-all">{info ? info.publicUrl : t("off")}</span>
             <Switch
               checked={!!info}
               onCheckedChange={onToggle}
@@ -753,7 +796,7 @@ function StatusBadge({
 }) {
   if (!desktop) {
     return (
-      <span className="text-[10px] uppercase text-muted-foreground" title="Desktop-only">
+      <span className="text-[10px] uppercase text-muted-foreground" title={t("desktopOnly")}>
         {t("statusWeb")}
       </span>
     )
@@ -778,6 +821,7 @@ function StatusBadge({
 function PairDeviceCard() {
   const t = useTranslations("mobile.companion.pair")
   const desktop = isTauri()
+  const localAccountId = useAccountStore((state) => state.unlockedAccountId)
   const [issue, setIssue] = useState<PairJwtIssue | null>(null)
   const [busy, setBusy] = useState(false)
   const [now, setNow] = useState<number>(() => Date.now())
@@ -795,9 +839,13 @@ function PairDeviceCard() {
       toast.error(t("desktopOnlyError"))
       return
     }
+    if (!localAccountId) {
+      toast.error(t("accountLocked"))
+      return
+    }
     setBusy(true)
     try {
-      const next = await issuePairJwt()
+      const next = await issuePairJwt(localAccountId)
       setIssue(next)
       setNow(Date.now())
     } catch (err) {
@@ -805,7 +853,7 @@ function PairDeviceCard() {
     } finally {
       setBusy(false)
     }
-  }, [desktop, t])
+  }, [desktop, localAccountId, t])
 
   const expired = issue ? now >= issue.expiresAtMs : false
   const remainingSecs = issue ? Math.max(0, Math.floor((issue.expiresAtMs - now) / 1000)) : 0
@@ -955,80 +1003,6 @@ function formatRemaining(secs: number): string {
 // ---------------------------------------------------------------------------
 // Reachability diagnostics card (Phase C2)
 // ---------------------------------------------------------------------------
-
-interface ReachabilityRow {
-  url: string
-  reachable: boolean
-  latencyMs?: number
-  error?: string
-}
-
-async function probeLocalReachability(): Promise<ReachabilityRow[]> {
-  if (!isTauri()) return []
-  return transport.call<ReachabilityRow[]>("companion_test_local_reachability")
-}
-
-function ReachabilityDiagnosticsCard() {
-  const [rows, setRows] = useState<ReachabilityRow[] | null>(null)
-  const [busy, setBusy] = useState(false)
-  const desktop = isTauri()
-  const t = useTranslations("mobile.companion.diagnostics")
-
-  const onTest = useCallback(async () => {
-    setBusy(true)
-    try {
-      const out = await probeLocalReachability()
-      setRows(out)
-    } catch (err) {
-      toast.error(t("probeFailed", { message: err instanceof Error ? err.message : String(err) }))
-    } finally {
-      setBusy(false)
-    }
-  }, [t])
-
-  return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-medium">{t("title")}</CardTitle>
-        <CardDescription className="text-xs">{t("description")}</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <Button size="sm" variant="outline" onClick={onTest} disabled={!desktop || busy}>
-          {busy ? t("probing") : t("testButton")}
-        </Button>
-        {!desktop && <p className="text-xs text-muted-foreground">{t("desktopOnly")}</p>}
-        {rows && rows.length > 0 && (
-          <div className="space-y-1.5">
-            {rows.map((row) => (
-              <div
-                key={row.url}
-                className={cn(
-                  "flex items-start gap-2 rounded border px-3 py-2 text-xs",
-                  row.reachable
-                    ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                    : "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-300"
-                )}
-              >
-                <CircleIcon
-                  className={cn("mt-0.5 h-2 w-2 shrink-0 fill-current", row.reachable ? "" : "")}
-                />
-                <div className="flex-1 space-y-0.5">
-                  <div className="font-mono">{row.url}</div>
-                  <div className="text-[10px] text-muted-foreground">
-                    {row.reachable
-                      ? `${t("ok")} · ${row.latencyMs ?? "—"} ${t("ms")}`
-                      : `${t("failed")}${row.error ? ` · ${row.error}` : ""}`}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-        {rows && rows.length === 0 && <p className="text-xs text-muted-foreground">{t("empty")}</p>}
-      </CardContent>
-    </Card>
-  )
-}
 
 // ---------------------------------------------------------------------------
 // Push credentials card (Phase B follow-up)
@@ -1229,13 +1203,13 @@ function PushCredentialsCard() {
               </Badge>
             ) : null}
           </div>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <div className="space-y-1">
               <Label className="text-[10px] text-muted-foreground">{t("keyId")}</Label>
               <Input
                 value={apns.keyId}
                 onChange={(e) => setApns({ ...apns, keyId: e.target.value })}
-                placeholder="ABC1234DEF"
+                placeholder={t("apnsKeyIdPlaceholder")}
                 disabled={!desktop || busy}
                 className="font-mono text-xs"
               />
@@ -1245,17 +1219,17 @@ function PushCredentialsCard() {
               <Input
                 value={apns.teamId}
                 onChange={(e) => setApns({ ...apns, teamId: e.target.value })}
-                placeholder="TEAM1234DE"
+                placeholder={t("apnsTeamIdPlaceholder")}
                 disabled={!desktop || busy}
                 className="font-mono text-xs"
               />
             </div>
-            <div className="col-span-2 space-y-1">
+            <div className="space-y-1 sm:col-span-2">
               <Label className="text-[10px] text-muted-foreground">{t("bundleId")}</Label>
               <Input
                 value={apns.bundleId}
                 onChange={(e) => setApns({ ...apns, bundleId: e.target.value })}
-                placeholder="com.cognia.mobile"
+                placeholder={t("apnsBundleIdPlaceholder")}
                 disabled={!desktop || busy}
                 className="font-mono text-xs"
               />

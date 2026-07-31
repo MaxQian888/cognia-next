@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+Inbox: stop opening a conversation behind a wall of chrome. Five independent banners — a degraded adapter, a saturated outbound queue, a stalled inbound job, a pending draft, the activity log — each used to mount itself as a full-bleed coloured band from two different places, so a busy conversation began six horizontal seams down the pane. They now share one notice area: one seam, one palette, a severity rail instead of four bespoke colour schemes, and a collapsed summary once there is more than one. Severity is stated to assistive tech rather than carried by colour alone, and only an actual problem interrupts a screen reader — ambient activity is announced politely. The conversation header folds its secondary actions into an overflow menu, the conversation list gains a real filter menu and a last-inbound chip, and adapter-level notices stay hidden on a phone where the per-conversation badges already carry the signal — while the draft notice, the only route to the draft editor on a phone, stays put.

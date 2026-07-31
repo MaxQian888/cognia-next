@@ -22,7 +22,7 @@ import {
 import { listAccounts } from "@/lib/subscription/core/transport"
 import { useSettingsStore } from "@/stores/settings"
 import { updateSession } from "@/lib/db/sessions"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 type Account = {
   id: string

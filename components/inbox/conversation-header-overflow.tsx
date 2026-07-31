@@ -1,0 +1,242 @@
+"use client"
+
+/**
+ * The conversation header's `⋯` overflow.
+ *
+ * The header used to lay twenty controls flat in one non-wrapping row. There
+ * was no CSS fix available: `buttonVariants` and `badgeVariants` both bake
+ * `shrink-0` into their base, so nearly every child refused to compress and
+ * the row simply ran past the pane — which `ResizablePanel` clips with
+ * `overflow-hidden`, putting the trailing gear and contact buttons out of
+ * reach entirely. Removing controls from the strip is the only fix.
+ *
+ * ## Why a Popover and not a DropdownMenu
+ *
+ * Six of these controls own an overlay of their own — `LifecycleStatusChip`,
+ * `AssigneeChip`, `LabelPicker` and `ProviderModelSwitcher` each mount a
+ * `DropdownMenu`; `AdapterHealthBadge` mounts a `Popover`; `ComputerUseToggle`
+ * awaits a blocking biometric prompt. Inside a `DropdownMenuContent` all six
+ * break: the nested content portals outside the menu's DOM, so every click in
+ * it reads as "outside" and closes the parent, unmounting the child mid-flight;
+ * non-`menuitem` children also break roving tabindex and typeahead.
+ *
+ * `components/chat/composer/bottom-toolbar.tsx` hit exactly this and settled on
+ * a Popover, whose DismissableLayer stack handles nesting. Inside one, all six
+ * work unmodified.
+ */
+
+import { useTranslations } from "next-intl"
+import { ListChecksIcon, MoreHorizontalIcon, UserRoundIcon } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { useAdapterHealth } from "@/hooks/connectors/use-adapter-health"
+import { decideBadge } from "./adapter-health-decision"
+import { effectiveStatus } from "@/lib/db/conversation-overrides"
+import type { ConversationOverrideRow } from "@/lib/db/connector-types"
+import type { TriggerPolicy } from "@/types/connectors/policy"
+import { LifecycleStatusChip } from "./lifecycle-status-chip"
+import { AssigneeChip } from "./assignee-chip"
+import { SlaBadge } from "./sla-badge"
+import { LabelPicker } from "./label-picker"
+import { LastInboundChip } from "./last-inbound-chip"
+import { ProviderModelSwitcher } from "./provider-model-switcher"
+import { QuietHoursChip } from "./quiet-hours-chip"
+import { AtStrategyChip } from "./at-strategy-chip"
+import { TopicRuntimeChip } from "./topic-runtime-chip"
+import { PolicyInfo } from "./policy-info"
+import { AdapterHealthBadge } from "./adapter-health-badge"
+import { ComputerUseToggle } from "./overrides/computer-use-toggle"
+import { ComputerUseChip } from "./computer-use-chip"
+
+/**
+ * Whether the `⋯` should carry an attention dot — i.e. whether anything behind
+ * it differs from the quiet default. Pure so it can be covered without
+ * driving the popover open.
+ */
+export function hasOverflowAttention(
+  row: ConversationOverrideRow | undefined,
+  healthDegraded: boolean
+): boolean {
+  if (healthDegraded) return true
+  if (effectiveStatus(row) !== "open") return true
+  if (row?.assignee) return true
+  if ((row?.labelIds?.length ?? 0) > 0) return true
+  if (row?.allowComputerUse === true) return true
+  return false
+}
+
+/** Labelled group inside the popover. Hides itself when it has no children. */
+function OverflowGroup({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1.5 empty:hidden">
+      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </p>
+      <div className="flex flex-wrap items-center gap-2">{children}</div>
+    </div>
+  )
+}
+
+export interface ConversationHeaderOverflowProps {
+  conversationKey: string
+  sessionId: string
+  /** Parsed from the conversationKey by the header; "" when unparseable. */
+  adapterId: string
+  policy: TriggerPolicy
+  overrideRow?: ConversationOverrideRow
+  providerOverride?: string
+  modelOverride?: string
+  /** Desktop-only surfaces are gated on this (Tauri shell). */
+  desktop: boolean
+  onOpenContact: () => void
+  onOpenBindings: () => void
+}
+
+export function ConversationHeaderOverflow({
+  conversationKey,
+  sessionId,
+  adapterId,
+  policy,
+  overrideRow,
+  providerOverride,
+  modelOverride,
+  desktop,
+  onOpenContact,
+  onOpenBindings,
+}: ConversationHeaderOverflowProps) {
+  const t = useTranslations("inbox.conversationHeader")
+  const tBindings = useTranslations("inbox.bindingsInspector")
+  // Resolved here rather than inside AdapterHealthBadge so the attention dot
+  // can reflect a degraded adapter while the popover is still closed.
+  const health = useAdapterHealth(adapterId || null)
+  const attention = hasOverflowAttention(overrideRow, decideBadge(health) !== null)
+  const label = attention ? t("moreAttention") : t("more")
+
+  return (
+    <Popover>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="relative size-7 shrink-0"
+              aria-label={label}
+              data-testid="conversation-header-more"
+            >
+              <MoreHorizontalIcon className="size-3.5" />
+              {attention && (
+                <span
+                  aria-hidden
+                  data-testid="conversation-header-more-dot"
+                  className="absolute right-1 top-1 size-1.5 rounded-full bg-primary"
+                />
+              )}
+            </Button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent>{label}</TooltipContent>
+      </Tooltip>
+
+      <PopoverContent
+        align="end"
+        className="w-72 space-y-3 p-3"
+        data-testid="conversation-header-overflow"
+      >
+        <OverflowGroup label={t("groupStatus")}>
+          <LifecycleStatusChip
+            conversationKey={conversationKey}
+            sessionId={sessionId}
+            status={effectiveStatus(overrideRow)}
+          />
+          <AssigneeChip
+            conversationKey={conversationKey}
+            sessionId={sessionId}
+            assignee={overrideRow?.assignee}
+          />
+          <SlaBadge
+            nextResponseDueAt={overrideRow?.nextResponseDueAt}
+            status={effectiveStatus(overrideRow)}
+          />
+          <LabelPicker
+            conversationKey={conversationKey}
+            sessionId={sessionId}
+            selectedIds={overrideRow?.labelIds ?? []}
+          />
+          <LastInboundChip conversationKey={conversationKey} />
+        </OverflowGroup>
+
+        <OverflowGroup label={t("groupRouting")}>
+          {/* A6 — per-channel provider/model override (ADR-0009 v41). */}
+          {desktop && (
+            <ProviderModelSwitcher
+              conversationKey={conversationKey}
+              sessionId={sessionId}
+              providerOverride={providerOverride}
+              modelOverride={modelOverride}
+            />
+          )}
+          {adapterId && <QuietHoursChip adapterId={adapterId} conversationKey={conversationKey} />}
+          {adapterId && <AtStrategyChip adapterId={adapterId} />}
+          {adapterId && (
+            <TopicRuntimeChip adapterId={adapterId} conversationKey={conversationKey} />
+          )}
+          <PolicyInfo policy={policy} />
+        </OverflowGroup>
+
+        {adapterId && (
+          <OverflowGroup label={t("groupHealth")}>
+            {/* v49 — the wider health surface that picks up breaker /
+                rate-bucket signals from the heartbeat snapshots, not just
+                `current.state`. */}
+            <AdapterHealthBadge adapterId={adapterId} />
+          </OverflowGroup>
+        )}
+
+        <OverflowGroup label={t("groupTools")}>
+          {adapterId && desktop && (
+            <ComputerUseToggle
+              conversationKey={conversationKey}
+              sessionId={sessionId}
+              adapterId={adapterId}
+              currentValue={overrideRow?.allowComputerUse === true}
+            />
+          )}
+          {/* Web-mode mirror of the computer-use opt-in — read-only chip so the
+              operator still sees the elevated-permission state even when the
+              biometric toggle isn't available (web build / mobile shell). */}
+          {!desktop && <ComputerUseChip active={overrideRow?.allowComputerUse === true} />}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1.5 px-2 text-xs"
+            onClick={onOpenContact}
+            data-testid="conversation-header-contact"
+          >
+            <UserRoundIcon className="size-3.5" aria-hidden />
+            {t("openContact")}
+          </Button>
+          {/* A2UI callback-bindings inspector — diagnostic surface for triaging
+              "the button didn't route my surface". Desktop-only because the row
+              "test" action drives the live bus runtime. */}
+          {adapterId && desktop && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1.5 px-2 text-xs"
+              onClick={onOpenBindings}
+              data-testid="conversation-header-bindings"
+            >
+              <ListChecksIcon className="size-3.5" aria-hidden />
+              {tBindings("openInspector")}
+            </Button>
+          )}
+        </OverflowGroup>
+      </PopoverContent>
+    </Popover>
+  )
+}

@@ -19,6 +19,16 @@ describe("<EmptyState />", () => {
     expect(screen.getByTestId("empty-state-icon")).toBeInTheDocument()
   })
 
+  it("renders a larger companion illustration instead of the Lucide fallback", () => {
+    render(<EmptyState icon={InboxIcon} spotIcon="chat" title="No conversations" />)
+
+    expect(screen.getByTestId("mobile-spot-icon-chat")).toHaveAttribute(
+      "src",
+      "/icons/cognia-mobile-spots/png/chat.png"
+    )
+    expect(screen.queryByTestId("empty-state-icon")).not.toBeInTheDocument()
+  })
+
   it("renders no icon slot when none is provided", () => {
     render(<EmptyState title="No mail" />)
     expect(screen.queryByTestId("empty-state-icon")).not.toBeInTheDocument()

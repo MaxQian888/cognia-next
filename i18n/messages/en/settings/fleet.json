@@ -1,0 +1,76 @@
+{
+  "claude": {
+    "desc": "Install forwarder hooks into ~/.claude/settings.json so every Claude Code session reports here. Fail-open: with Cognia closed they exit instantly.",
+    "label": "Claude Code hooks"
+  },
+  "codex": {
+    "desc": "Register the forwarder in ~/.codex/hooks.json. Merged into the file, so hooks other tools registered keep working; uninstall removes only ours.",
+    "label": "Codex hooks",
+    "trustHint": "Codex only runs hooks you have trusted, and it keys that trust to the hook's exact command — approve the prompt in the Codex TUI after installing. A modified entry loses its trust and will not fire until reinstalled."
+  },
+  "description": "Watch and control coding agents launched anywhere on this machine (terminals, editors) — not just ones started by Cognia.",
+  "error": "Fleet action failed: {detail}",
+  "history": {
+    "activeFor": "active {duration}",
+    "clear": "Clear",
+    "clearEnded": "Clear ended",
+    "count": "{count, plural, one {# session} other {# sessions}}",
+    "delete": "Remove from history",
+    "empty": "No sessions recorded yet.",
+    "endedAgo": "ended {ago} ago",
+    "filterAll": "All",
+    "filterAria": "Filter by agent",
+    "import": "Import…",
+    "ranFor": "ran {duration}",
+    "showLess": "Show fewer",
+    "showMore": "Show all {count}",
+    "title": "Recent sessions"
+  },
+  "island": {
+    "desc": "Dynamic-Island-style always-on-top strip showing live agent sessions near the notch.",
+    "diagnostics": {
+      "copied": "Island diagnostics copied to the clipboard.",
+      "copy": "Copy",
+      "copyFailed": "Could not write to the clipboard.",
+      "desc": "Copy every input the island uses to place itself. Sample it once on a normal Space, once with an app full-screen, and once on an external display.",
+      "label": "Placement diagnostics",
+      "unavailable": "Island diagnostics are only available in the desktop app."
+    },
+    "hideOnFullscreen": {
+      "desc": "Withdraw the island while a full-screen app owns its display, leaving the top strip to that app. A session that needs you still brings it back. macOS only.",
+      "label": "Hide under full-screen apps"
+    },
+    "label": "Island overlay",
+    "monitor": {
+      "label": "Show on display",
+      "option": "{name} ({width}×{height})",
+      "primary": "Primary display"
+    }
+  },
+  "liveness": {
+    "dropping": "Events dropped",
+    "live": "Active · {ago} ago",
+    "silent": "No events yet"
+  },
+  "monitor": {
+    "desc": "Local event ingress for external agent hooks. Runs on the companion server, loopback only.",
+    "label": "Fleet monitoring",
+    "running": "Listening on 127.0.0.1:{port}."
+  },
+  "opencode": {
+    "desc": "Install a plugin into ~/.config/opencode/plugin. Observe sessions and approve/deny permissions from the island.",
+    "label": "OpenCode plugin"
+  },
+  "saved": "Fleet settings updated.",
+  "status": {
+    "codexStale": "Reinstall needed",
+    "codexUnavailable": "Codex not found",
+    "installed": "Installed",
+    "opencodeUnavailable": "OpenCode not found",
+    "partial": "Partial",
+    "stale": "Modified",
+    "unavailable": "Claude Code not found"
+  },
+  "summaryAria": "{count} integrations active",
+  "title": "Agent fleet monitor"
+}

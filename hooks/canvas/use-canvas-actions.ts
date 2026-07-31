@@ -16,9 +16,13 @@ import {
   buildActionUserPrompt,
   type CanvasActionType,
 } from "@/lib/ai/generation/canvas-actions"
-import { getProviderModel } from "@/lib/ai/core/client"
+import { getProviderModel } from "@cognia/provider-core/core/client"
+import { createFeatureProviderModel } from "@/lib/ai/provider-consumption"
+import { resolveStandaloneProvider } from "@/lib/ai/chat/resolve-standalone-provider"
+import { browserDirectHeaders, getStreamingFetch } from "@/lib/runtime/streaming-fetch"
 import { useSettingsStore } from "@/stores/settings"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
+import { hasNoLeakingPii } from "@cognia/redact"
 
 export interface CanvasActionInvocation {
   actionType: CanvasActionType
@@ -51,15 +55,27 @@ const INITIAL: CanvasActionState = {
 
 export function useCanvasActions(): UseCanvasActionsResult {
   const [state, setState] = useState<CanvasActionState>(INITIAL)
-  const apiKey = useSettingsStore((s) => s.settings?.apiKey)
+  const settings = useSettingsStore((s) => s.settings)
 
   const buildModel = useCallback(() => {
+    // Prefer the user's configured provider (any of Anthropic/OpenAI/Google/…)
+    // resolved from settings, with the streaming-capable fetch + browser-direct
+    // headers — this is what makes standalone BYOK on non-Anthropic providers
+    // work. Falls back to the legacy single-key Anthropic path for users whose
+    // key isn't in `providerSettings` (e.g. subscription/OAuth on desktop).
+    const resolution = resolveStandaloneProvider(settings)
+    if (resolution.kind === "resolved") {
+      return createFeatureProviderModel(resolution, {
+        fetch: getStreamingFetch(),
+        headers: browserDirectHeaders(resolution.protocol),
+      })
+    }
     return getProviderModel({
       provider: "anthropic",
       model: "claude-sonnet-4-5",
-      apiKey: apiKey ?? undefined,
+      apiKey: settings?.apiKey ?? undefined,
     })
-  }, [apiKey])
+  }, [settings])
 
   const run = useCallback(
     async (req: CanvasActionInvocation) => {
@@ -67,6 +83,9 @@ export function useCanvasActions(): UseCanvasActionsResult {
       try {
         const system = ACTION_PROMPTS[req.actionType] ?? ACTION_PROMPTS.custom
         const user = buildActionUserPrompt(req)
+        if (!hasNoLeakingPii(system) || !hasNoLeakingPii(user)) {
+          throw new Error("Canvas action blocked by PII gate")
+        }
         const { text } = await generateText({
           model: buildModel(),
           system,
@@ -94,6 +113,9 @@ export function useCanvasActions(): UseCanvasActionsResult {
       try {
         const system = ACTION_PROMPTS[req.actionType] ?? ACTION_PROMPTS.custom
         const user = buildActionUserPrompt(req)
+        if (!hasNoLeakingPii(system) || !hasNoLeakingPii(user)) {
+          throw new Error("Canvas action blocked by PII gate")
+        }
         const result = streamText({ model: buildModel(), system, prompt: user })
         for await (const delta of result.textStream) {
           acc += delta

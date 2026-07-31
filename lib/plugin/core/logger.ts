@@ -4,7 +4,7 @@
  * Centralized logging for the plugin system using the unified logger.
  */
 
-import { createLogger, type Logger } from "@/lib/logging"
+import { createLogger, type Logger } from "@cognia/logging"
 import type { PluginLogger } from "@/types/plugin"
 
 export type LogLevel = "trace" | "debug" | "info" | "warn" | "error" | "fatal"

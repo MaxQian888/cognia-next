@@ -114,8 +114,8 @@ description: "平台连接器 Phase 1 发布的人工验证清单。在将 feat/
 
 ## §8 —— 草稿模式
 
-> Phase 1 说明：auto 模式下的 AI 流水线是桩实现（记录一个占位任务）。  
-> 草稿模式只产生一行草稿 —— 请端到端验证该流程。
+> 当前说明：auto 模式和 scheduled digest 现在都会通过 `runConnectorDigestTurn`
+> 走共享 AI 回合路径。草稿模式仍会先产生一行草稿 —— 请端到端验证批准/拒绝流程。
 
 - [ ] 通过 ConversationHeader 的切换器将某个适配器会话设为 **draft** 模式。
 - [ ] 发送一条入站消息。
@@ -183,11 +183,7 @@ description: "平台连接器 Phase 1 发布的人工验证清单。在将 feat/
 
 | 推迟的条目                                                          | 跟踪                                            |
 | ------------------------------------------------------------------- | ----------------------------------------------- |
-| auto 模式真实 AI 往返（`sendPrompt` → 回复 → `sendMessage`）        | 任务 40+                                        |
-| 附件缓存（`connectorAttachments` 拉取流水线）                       | Phase 2                                         |
-| Slack / Lark OAuth 托管重定向 URL                                   | Phase 2                                         |
 | 完整 Playwright E2E（`pnpx playwright test`）                       | 需要 `pnpm add -D @playwright/test express`     |
-| `connection:scheduled:digest` 真实 AI 调用                          | 任务 40+                                        |
 
 ---
 

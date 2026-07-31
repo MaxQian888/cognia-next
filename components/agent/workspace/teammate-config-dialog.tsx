@@ -47,12 +47,18 @@ import { ExternalPresetSection } from "@/components/settings/presets/editor-sect
 import { TeamCapabilityOverlaySection } from "@/components/settings/presets/editor-sections/team-capability-overlay-section"
 import { listSkills } from "@/lib/db/skills"
 import { listMcpServers } from "@/lib/db/mcp-servers"
+import { listTwins } from "@/lib/db/twins"
 import {
   presetStateToTeammateConfig,
   teammateToPresetState,
 } from "@/lib/ai/agent/team/teammate-preset-adapter"
+import type { ProviderName } from "@cognia/provider-types/provider"
 import type { AgentTeam, AgentTeammate, TeammateRuntime } from "@/types/agent/agent-team"
+import { getProviderDisplayName } from "@/lib/ai/icons"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import { useSettingsStore } from "@/stores/settings"
+import { TeammateExecutionBindingField } from "@/components/agent/team/teammate-execution-binding-field"
+import { RUNTIME_OPTIONS, runtimeLabelKey } from "./runtime-options"
 
 export interface TeammateConfigDialogProps {
   open: boolean
@@ -61,30 +67,63 @@ export interface TeammateConfigDialogProps {
   team: AgentTeam
 }
 
-const RUNTIME_OPTIONS: ReadonlyArray<TeammateRuntime> = [
-  "claude",
-  "codex",
-  "claude-code",
-  "gemini-cli",
-  "cursor-cli",
-]
+/**
+ * Sentinel for the "inherit the app default provider" option (Radix reserves
+ * the empty string).
+ */
+const PROVIDER_DEFAULT_VALUE = "__default__"
+
+/** Sentinel for the "no twin" Select option (Radix reserves the empty string). */
+const TWIN_NONE_VALUE = "__none__"
 
 export function TeammateConfigDialog({
   open,
   onOpenChange,
-  teammate,
+  teammate: teammateProp,
   team,
 }: TeammateConfigDialogProps) {
   const t = useTranslations("agentTeamsWorkspace.teammateConfig")
+  const tRuntime = useTranslations("agentTeamsWorkspace.chat.runtime")
+
+  // The prop is the opener's click-time SNAPSHOT; every inline field persists
+  // through `updateTeammate` immediately, so spreading the snapshot's config
+  // would silently clobber edits made earlier in the same dialog session
+  // (e.g. an execution binding saved, then temperature dragged). Always spread
+  // from the LIVE store row.
+  const liveTeammate = useAgentTeamStore((s) => s.teammates?.[teammateProp.id])
+  const teammate = liveTeammate ?? teammateProp
+
+  // Provider ids the app actually has configured. Only meaningful for a lead:
+  // a lead is never dispatched through a runtime, it runs its planning/review
+  // turns on a resolved provider (see lib/ai/agent/team/lead-execution.ts).
+  const settings = useSettingsStore((s) => s.settings)
+  const providerOptions = useMemo(() => {
+    const builtIn = Object.entries(settings?.providerSettings ?? {})
+      .filter(([, entry]) => (entry as { enabled?: boolean } | undefined)?.enabled !== false)
+      // Built-ins have catalog display names ("anthropic" → "Anthropic").
+      .map(([id]) => ({ id, label: getProviderDisplayName(id) }))
+    const custom = (settings?.customProviders ?? []).map((p) => ({
+      id: p.id,
+      // A custom provider's own name is the only label it has; the catalog
+      // doesn't know it, and its id is a slug the user shouldn't have to read.
+      label: p.name || p.customName || p.id,
+    }))
+    const seen = new Set<string>()
+    return [...builtIn, ...custom].filter((p) => !seen.has(p.id) && seen.add(p.id))
+  }, [settings])
 
   const skillsRaw = useLiveQuery(() => listSkills(), [])
   const mcpRaw = useLiveQuery(() => listMcpServers(), [])
+  const twinsRaw = useLiveQuery(() => listTwins({ includeArchived: false }), [])
   const skills = useMemo(() => skillsRaw ?? [], [skillsRaw])
   const mcpServers = useMemo(() => mcpRaw ?? [], [mcpRaw])
+  const twins = useMemo(() => twinsRaw ?? [], [twinsRaw])
 
   const updateTeammate = useAgentTeamStore((s) => s.updateTeammate)
 
-  const initial = useMemo(() => teammateToPresetState(teammate, team), [teammate, team])
+  // PresetEditor seeds its internal state from `initial` — keep it pinned to
+  // the open-time snapshot so live inline edits don't churn the editor.
+  const initial = useMemo(() => teammateToPresetState(teammateProp, team), [teammateProp, team])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -154,12 +193,43 @@ export function TeammateConfigDialog({
                         <SelectContent>
                           {RUNTIME_OPTIONS.map((r) => (
                             <SelectItem key={r} value={r}>
-                              {r}
+                              {tRuntime(runtimeLabelKey(r))}
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
                     </div>
+                    {teammate.role === "lead" && (
+                      <div className="space-y-1">
+                        <Label className="text-xs">{t("rosterSection.provider")}</Label>
+                        <Select
+                          value={teammate.config.provider ?? PROVIDER_DEFAULT_VALUE}
+                          onValueChange={(v) => {
+                            updateTeammate(teammate.id, {
+                              config: {
+                                ...teammate.config,
+                                provider:
+                                  v === PROVIDER_DEFAULT_VALUE ? undefined : (v as ProviderName),
+                              },
+                            })
+                          }}
+                        >
+                          <SelectTrigger className="h-8 text-xs" data-testid="lead-provider-select">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={PROVIDER_DEFAULT_VALUE}>
+                              {t("rosterSection.providerDefault")}
+                            </SelectItem>
+                            {providerOptions.map((p) => (
+                              <SelectItem key={p.id} value={p.id}>
+                                {p.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
                     <div className="space-y-1">
                       <Label className="text-xs">{t("rosterSection.specialization")}</Label>
                       <Input
@@ -176,6 +246,47 @@ export function TeammateConfigDialog({
                       />
                     </div>
                   </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">{t("rosterSection.twin")}</Label>
+                    <Select
+                      value={teammate.config.twinId ?? TWIN_NONE_VALUE}
+                      onValueChange={(v) => {
+                        updateTeammate(teammate.id, {
+                          config: {
+                            ...teammate.config,
+                            twinId: v === TWIN_NONE_VALUE ? undefined : v,
+                          },
+                        })
+                      }}
+                    >
+                      <SelectTrigger className="h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={TWIN_NONE_VALUE}>
+                          {t("rosterSection.twinNone")}
+                        </SelectItem>
+                        {twins.map((tw) => (
+                          <SelectItem key={tw.id} value={tw.id}>
+                            {tw.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-[10px] text-muted-foreground">
+                      {t("rosterSection.twinHint")}
+                    </p>
+                  </div>
+                  {/* ADR-0090 Phase 7: inherit | pinned | pool execution binding. */}
+                  <TeammateExecutionBindingField
+                    value={teammate.config.execution}
+                    teamDefault={team.config.defaultExecution}
+                    onChange={(execution) =>
+                      updateTeammate(teammate.id, {
+                        config: { ...teammate.config, execution },
+                      })
+                    }
+                  />
                   <div className="space-y-1">
                     <Label className="text-xs">
                       {t("rosterSection.temperature", {

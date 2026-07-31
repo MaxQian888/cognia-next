@@ -4,7 +4,7 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 
 import { CharacterCard } from "./character-card"
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,

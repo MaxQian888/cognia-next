@@ -9,9 +9,10 @@ import type {
   SkillSource,
   SkillStatus,
   SkillValidationError,
-} from "@/lib/claude/types"
+} from "@cognia/agent-config-types"
 import type { MonacoLanguage } from "@/components/skills/editor/language-from-path"
 import type { SkillResourceDraft } from "@/lib/db/skill-resources"
+import type { LastSkillView, SkillPanelPrefs } from "@/lib/skills/preferences"
 
 export interface EditorFile {
   /** "main" for SKILL.md, otherwise the resource id. */
@@ -64,24 +65,44 @@ interface SkillsStoreState {
   filterSheetOpen: boolean
   /** When true, the mobile-only category navigator sheet is open. */
   categorySheetOpen: boolean
-  /** When non-null, show the editor pre-filled with this skill (or empty when "create"). */
-  editorTarget: { mode: "create" } | { mode: "edit"; skillId: string } | null
+  /**
+   * When non-null, the create-skill Sheet is open. Existing skills are edited
+   * in the workspace editor (Editor tab) — body in Monaco, metadata in its
+   * "Skill settings" panel — so there is no separate edit-mode Sheet.
+   */
+  editorTarget: { mode: "create" } | null
   /**
    * Skill-shaped seed used to pre-fill the create editor (e.g. picked from a
    * template). Only read while `editorTarget.mode === "create"`; cleared when
    * the editor closes.
    */
-  createSeed: import("@/lib/claude/types").Skill | null
+  createSeed: import("@cognia/agent-config-types").Skill | null
   /** When non-null, show the import dialog with these draft entries staged. */
   importStaging: ImportStaging | null
   /** When non-null, show the delete confirmation. */
   deleteTarget: { skillId: string; name: string } | null
+  /** When true, show the "Install from URL" dialog. */
+  urlInstallOpen: boolean
+  /**
+   * skillId → "newer snapshot available" flags from the last explicit
+   * "Check for updates" run. Shared so the toolbar (which runs the check),
+   * the list rows, and the detail pane (which render badges/buttons) stay
+   * in sync without prop-drilling.
+   */
+  updateAvailable: Record<string, boolean>
   /** VSCode-style workspace state for the Editor tab. UI-only, not persisted. */
   editorWorkspace: EditorWorkspace
 
   setActiveTab: (tab: SkillPanelTab) => void
   setFilters: (patch: Partial<SkillFilters>) => void
   resetFilters: () => void
+  /**
+   * Seed the ephemeral panel state from persisted preferences on mount:
+   * default tab + sort + status filter. When `lastView` is provided
+   * (`rememberLastView` on), restore the last tab and non-query filters
+   * instead. Never persists — the caller owns write-back.
+   */
+  hydrateFromPrefs: (prefs: SkillPanelPrefs, lastView?: LastSkillView | null) => void
   setQuery: (query: string) => void
   toggleSelection: (id: string) => void
   selectAll: (ids: string[]) => void
@@ -90,11 +111,13 @@ interface SkillsStoreState {
   closeDetail: () => void
   setFilterSheetOpen: (open: boolean) => void
   setCategorySheetOpen: (open: boolean) => void
-  openCreate: (seed?: import("@/lib/claude/types").Skill) => void
-  openEdit: (skillId: string) => void
+  openCreate: (seed?: import("@cognia/agent-config-types").Skill) => void
   closeEditor: () => void
   setImportStaging: (staging: ImportStaging | null) => void
   setDeleteTarget: (target: { skillId: string; name: string } | null) => void
+  setUrlInstallOpen: (open: boolean) => void
+  setUpdateAvailable: (map: Record<string, boolean>) => void
+  clearUpdateAvailable: (skillId: string) => void
   openSkillInEditor: (skillId: string, mainContent: string) => void
   openFile: (file: EditorFile) => void
   closeFile: (id: string, force?: boolean) => void
@@ -163,11 +186,36 @@ export const useSkillsStore = create<SkillsStoreState>((set, _get) => ({
   createSeed: null,
   importStaging: null,
   deleteTarget: null,
+  urlInstallOpen: false,
+  updateAvailable: {},
   editorWorkspace: DEFAULT_WORKSPACE,
 
   setActiveTab: (tab) => set({ activeTab: tab }),
   setFilters: (patch) => set((s) => ({ filters: { ...s.filters, ...patch } })),
   resetFilters: () => set({ filters: DEFAULT_FILTERS }),
+  hydrateFromPrefs: (prefs, lastView) =>
+    set((s) =>
+      lastView
+        ? {
+            activeTab: lastView.tab,
+            filters: {
+              ...s.filters,
+              sort: lastView.sort,
+              category: lastView.category,
+              source: lastView.source,
+              status: lastView.status,
+              tag: lastView.tag,
+            },
+          }
+        : {
+            activeTab: prefs.defaultTab,
+            filters: {
+              ...s.filters,
+              sort: prefs.defaultSort,
+              status: prefs.defaultStatusFilter,
+            },
+          }
+    ),
   setQuery: (query) => set((s) => ({ filters: { ...s.filters, query } })),
   toggleSelection: (id) =>
     set((s) => {
@@ -184,10 +232,18 @@ export const useSkillsStore = create<SkillsStoreState>((set, _get) => ({
   setCategorySheetOpen: (open) => set({ categorySheetOpen: open }),
   openCreate: (seed) =>
     set({ editorTarget: { mode: "create" }, createSeed: seed ?? null, detailSkillId: null }),
-  openEdit: (skillId) => set({ editorTarget: { mode: "edit", skillId }, detailSkillId: null }),
   closeEditor: () => set({ editorTarget: null, createSeed: null }),
   setImportStaging: (staging) => set({ importStaging: staging }),
   setDeleteTarget: (target) => set({ deleteTarget: target }),
+  setUrlInstallOpen: (open) => set({ urlInstallOpen: open }),
+  setUpdateAvailable: (map) => set({ updateAvailable: map }),
+  clearUpdateAvailable: (skillId) =>
+    set((s) => {
+      if (!s.updateAvailable[skillId]) return s
+      const next = { ...s.updateAvailable }
+      delete next[skillId]
+      return { updateAvailable: next }
+    }),
 
   openSkillInEditor: (skillId, mainContent) =>
     set({

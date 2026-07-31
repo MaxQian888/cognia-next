@@ -36,6 +36,9 @@ jest.mock("./plugin-detail-permissions", () => ({
 jest.mock("./plugin-detail-data", () => ({
   PluginDetailData: () => <div data-testid="data" />,
 }))
+jest.mock("./plugin-detail-logs", () => ({
+  PluginDetailLogs: () => <div data-testid="logs" />,
+}))
 jest.mock("./plugin-detail-empty", () => ({
   PluginDetailEmpty: () => <div data-testid="empty" />,
 }))
@@ -82,6 +85,34 @@ describe("PluginDetailPane", () => {
     usePluginsStore.setState({ detailPluginId: "alpha", detailSubTab: subTab })
     render(<PluginDetailPane />)
     expect(screen.getByTestId(testid)).toBeInTheDocument()
+  })
+
+  it("keeps the README/overview body visible even when a section is expanded", () => {
+    usePluginsStore.setState({ detailPluginId: "alpha", detailSubTab: "data" })
+    render(<PluginDetailPane />)
+    // Overview is the always-visible body; the deep-linked section expands too.
+    expect(screen.getByTestId("overview")).toBeInTheDocument()
+    expect(screen.getByTestId("data")).toBeInTheDocument()
+  })
+
+  it("renders collapsible section triggers for capabilities/configure/permissions/data", () => {
+    usePluginsStore.setState({ detailPluginId: "alpha", detailSubTab: "overview" })
+    render(<PluginDetailPane />)
+    for (const v of ["capabilities", "configure", "permissions", "data"]) {
+      expect(screen.getByTestId(`plugin-detail-section-${v}`)).toBeInTheDocument()
+    }
+    // Collapsed sections don't mount their content.
+    expect(screen.queryByTestId("capabilities")).not.toBeInTheDocument()
+  })
+
+  it("shows the Logs section only for python/hybrid plugins", () => {
+    usePluginsStore.setState({ detailPluginId: "alpha", detailSubTab: "overview" })
+    const { unmount } = render(<PluginDetailPane />)
+    expect(screen.queryByTestId("plugin-detail-section-logs")).not.toBeInTheDocument()
+    unmount()
+    mockPlugin = { ...makePlugin(), type: "python" }
+    render(<PluginDetailPane />)
+    expect(screen.getByTestId("plugin-detail-section-logs")).toBeInTheDocument()
   })
 
   it("renders the not-found hint when detailPluginId is set but the row is missing", () => {

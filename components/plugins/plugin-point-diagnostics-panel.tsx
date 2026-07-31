@@ -93,14 +93,18 @@ export function PluginPointDiagnosticsPanel({
   }
 
   return (
-    <Card className="p-4 space-y-4" data-testid="plugin-point-diagnostics-panel">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <Card
+      className="gap-4 border-border/70 bg-card/60 p-4 py-4 shadow-sm"
+      data-testid="plugin-point-diagnostics-panel"
+    >
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div className="space-y-1">
-          <h3 className="text-sm font-semibold">{t("title")}</h3>
-          <p className="text-xs text-muted-foreground max-w-prose">{t("hint")}</p>
+          <h3 className="text-sm font-semibold tracking-tight">{t("title")}</h3>
+          <p className="max-w-3xl text-xs leading-relaxed text-muted-foreground">{t("hint")}</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <ToggleGroup
+            className="bg-muted/60 p-1"
             type="single"
             size="sm"
             value={severity}
@@ -147,7 +151,10 @@ export function PluginPointDiagnosticsPanel({
       </div>
 
       {isEmpty ? (
-        <p className="text-sm text-muted-foreground" data-testid="diagnostics-empty">
+        <p
+          className="rounded-lg border border-dashed bg-muted/15 p-4 text-center text-sm text-muted-foreground"
+          data-testid="diagnostics-empty"
+        >
           {t("empty")}
         </p>
       ) : (

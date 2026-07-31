@@ -6,26 +6,21 @@
  */
 
 import { loggers } from "../core/logger"
-import { PLUGIN_MESSAGE_HISTORY_MAX } from "./constants"
+import { pluginHasApiPermission } from "@/lib/plugin/api/permission-api"
+import { PLUGIN_MESSAGE_HISTORY_MAX, PLUGIN_MESSAGE_MAX_BYTES } from "./constants"
+import type {
+  BusEvent,
+  EventSource,
+  EventFilter,
+  PluginEventAPI,
+} from "@/types/plugin/plugin-messaging"
+
+// Re-export the messaging type contracts (single source of truth in `types/`).
+export type { BusEvent, EventSource, EventFilter, PluginEventAPI }
 
 // =============================================================================
 // Types
 // =============================================================================
-
-export interface BusEvent<T = unknown> {
-  id: string
-  type: string
-  source: EventSource
-  payload: T
-  timestamp: number
-  metadata?: Record<string, unknown>
-}
-
-export interface EventSource {
-  type: "plugin" | "system" | "user"
-  id: string
-  name?: string
-}
 
 export interface EventSubscription {
   id: string
@@ -37,12 +32,6 @@ export interface EventSubscription {
   once: boolean
 }
 
-export interface EventFilter {
-  sourceType?: "plugin" | "system" | "user"
-  sourceId?: string
-  metadata?: Record<string, unknown>
-}
-
 export interface MessageBusConfig {
   maxHistory: number
   enableLogging: boolean
@@ -51,6 +40,51 @@ export interface MessageBusConfig {
 }
 
 type EventHandler<T = unknown> = (event: BusEvent<T>) => void
+
+/**
+ * The `system:` topic prefix is reserved for host-published events
+ * ({@link MessageBus.emitFromSystem}). A plugin emitting under it would be
+ * able to forge trustworthy-looking lifecycle signals (e.g.
+ * `system:agent:completed`) since subscribers key on the event type, not the
+ * source. {@link MessageBus.emit} rejects plugin-sourced `system:*` emits so a
+ * `system:*` event provably came from the host.
+ */
+export const RESERVED_EVENT_NAMESPACE = "system:"
+
+/**
+ * Thrown when a plugin tries to publish under the reserved `system:` namespace.
+ * Mirrors the IPC layer's typed errors so callers can pattern-match by `name`.
+ */
+export class BusNamespaceError extends Error {
+  constructor(
+    public readonly pluginId: string,
+    public readonly eventType: string
+  ) {
+    super(
+      `Plugin "${pluginId}" may not emit reserved "${eventType}" — the "${RESERVED_EVENT_NAMESPACE}" namespace is host-only.`
+    )
+    this.name = "BusNamespaceError"
+  }
+}
+
+/** Thrown when an emitted payload exceeds {@link PLUGIN_MESSAGE_MAX_BYTES}. */
+export class BusPayloadTooLargeError extends Error {
+  constructor(
+    public readonly eventType: string,
+    public readonly size: number
+  ) {
+    super(`Event "${eventType}" payload size ${size} exceeds maximum ${PLUGIN_MESSAGE_MAX_BYTES}`)
+    this.name = "BusPayloadTooLargeError"
+  }
+}
+
+/** Serialized byte length of a payload (mirrors IPC `validateMessage`). */
+function byteLengthOf(payload: unknown): number {
+  const serialized = JSON.stringify(payload) ?? ""
+  return typeof Buffer !== "undefined"
+    ? Buffer.byteLength(serialized, "utf8")
+    : new Blob([serialized]).size
+}
 
 // =============================================================================
 // Predefined Event Types
@@ -70,6 +104,13 @@ export const SystemEvents = {
   AGENT_ERROR: "system:agent:error",
   MESSAGE_SENT: "system:message:sent",
   MESSAGE_RECEIVED: "system:message:received",
+  // Per-tool-call lifecycle for the MAIN interactive Claude SDK chat. Emitted
+  // by lib/agent-trace/chat-tool-spans.ts at the execute_tool span open/close.
+  // ids + tool name + isError only (PII red-line) — never tool input/output.
+  // Observability plugins (audit log / cost tracker / tool-usage analytics)
+  // subscribe to react to per-tool execution in the primary chat.
+  TOOL_CALL_STARTED: "system:tool:started",
+  TOOL_CALL_COMPLETED: "system:tool:completed",
   THEME_CHANGED: "system:theme:changed",
   SETTINGS_CHANGED: "system:settings:changed",
   APP_READY: "system:app:ready",
@@ -110,6 +151,17 @@ export class MessageBus {
     source: EventSource,
     metadata?: Record<string, unknown>
   ): string {
+    // Anti-spoof: only the host may publish under the reserved namespace.
+    if (source.type === "plugin" && eventType.startsWith(RESERVED_EVENT_NAMESPACE)) {
+      throw new BusNamespaceError(source.id, eventType)
+    }
+    // Parity with IPC `validateMessage` — bound the payload size so a buggy or
+    // hostile plugin can't flood subscribers with an oversized event.
+    const size = byteLengthOf(payload)
+    if (size > PLUGIN_MESSAGE_MAX_BYTES) {
+      throw new BusPayloadTooLargeError(eventType, size)
+    }
+
     const event: BusEvent<T> = {
       id: this.generateId(),
       type: eventType,
@@ -199,6 +251,24 @@ export class MessageBus {
     this.removeSubscription(subscriptionId)
   }
 
+  /** Remove a subscription only when `ownerId` created it (W3.7). */
+  offOwned(ownerId: string, subscriptionId: string): void {
+    const owns = (sub: EventSubscription) => sub.id === subscriptionId && sub.source.id === ownerId
+    for (const sub of this.subscriptions.values()) {
+      if (owns(sub)) {
+        this.subscriptions.delete(sub.id)
+        return
+      }
+    }
+    if (this.wildcardSubscriptions.some(owns)) {
+      this.wildcardSubscriptions = this.wildcardSubscriptions.filter((sub) => !owns(sub))
+      return
+    }
+    this.patternSubscriptions = this.patternSubscriptions.filter(
+      ({ subscription }) => !owns(subscription)
+    )
+  }
+
   offAll(sourceId: string): void {
     // Remove from regular subscriptions
     for (const [id, sub] of this.subscriptions.entries()) {
@@ -259,7 +329,28 @@ export class MessageBus {
   // Event Delivery
   // ===========================================================================
 
+  /**
+   * Synchronous delivery depth. Handlers may emit while being delivered to;
+   * beyond MAX_SYNC_DELIVER_DEPTH the nested emit is deferred to a microtask
+   * so a re-emitting handler pair can't blow the stack (W3.7).
+   */
+  private deliverDepth = 0
+  private static readonly MAX_SYNC_DELIVER_DEPTH = 16
+
   private deliverEvent(event: BusEvent): void {
+    if (this.deliverDepth >= MessageBus.MAX_SYNC_DELIVER_DEPTH) {
+      queueMicrotask(() => this.deliverEvent(event))
+      return
+    }
+    this.deliverDepth++
+    try {
+      this.deliverEventNow(event)
+    } finally {
+      this.deliverDepth--
+    }
+  }
+
+  private deliverEventNow(event: BusEvent): void {
     const toRemove: string[] = []
 
     // Collect matching subscriptions
@@ -385,6 +476,14 @@ export class MessageBus {
     sourceId?: string
     since?: number
     limit?: number
+    /**
+     * Plugin id asking for history (W3.6). When set, payloads of OTHER
+     * plugins' events are stripped (replaced with undefined + a
+     * `payloadRedacted` metadata flag) — the retention window is not a
+     * cross-plugin data leak. System/user-sourced events keep their payloads
+     * (they are ids-only by design; see adapter-hooks' PII note).
+     */
+    viewerId?: string
   }): BusEvent[] {
     let events = [...this.eventHistory]
 
@@ -407,6 +506,19 @@ export class MessageBus {
 
     if (options?.limit) {
       events = events.slice(-options.limit)
+    }
+
+    const viewerId = options?.viewerId
+    if (viewerId) {
+      events = events.map((e) =>
+        e.source.type === "plugin" && e.source.id !== viewerId
+          ? {
+              ...e,
+              payload: undefined,
+              metadata: { ...e.metadata, payloadRedacted: true },
+            }
+          : e
+      )
     }
 
     return events
@@ -498,42 +610,75 @@ export function resetMessageBus(): void {
   }
 }
 
+/**
+ * Best-effort host publish of a `system:*` event. Wraps
+ * {@link MessageBus.emitFromSystem} in a try/catch so a bus failure (a buggy
+ * subscriber, a payload-bound violation) NEVER blocks the host action it rides
+ * on — mirrors the lifecycle-event emit in `lib/plugin/core/manager.ts`.
+ *
+ * Payloads must carry ids only (sessionId / teamId / runId / agentId), never
+ * message text or prompt content — the bus is reachable by any plugin holding
+ * `events:subscribe`.
+ */
+export function emitSystemBusEvent(
+  eventType: string,
+  payload: unknown,
+  metadata?: Record<string, unknown>
+): void {
+  try {
+    getMessageBus().emitFromSystem(eventType, payload, metadata)
+  } catch (error) {
+    loggers.manager.error(`[MessageBus] system emit failed for "${eventType}":`, error)
+  }
+}
+
 // =============================================================================
 // Plugin Event API Factory
 // =============================================================================
-
-export interface PluginEventAPI {
-  emit: <T>(eventType: string, payload: T, metadata?: Record<string, unknown>) => string
-  on: <T>(eventType: string | RegExp, handler: EventHandler<T>, filter?: EventFilter) => () => void
-  once: <T>(
-    eventType: string | RegExp,
-    handler: EventHandler<T>,
-    filter?: EventFilter
-  ) => () => void
-  off: (subscriptionId: string) => void
-  offAll: () => void
-  getHistory: (eventType?: string | RegExp, limit?: number) => BusEvent[]
-}
 
 export function createEventAPI(pluginId: string): PluginEventAPI {
   const bus = getMessageBus()
   const source: EventSource = { type: "plugin", id: pluginId }
 
+  // Pub/sub is permission-gated, mirroring the IPC façade. Publishing requires
+  // `events:publish`; subscribing / reading history requires `events:subscribe`.
+  // Cleanup (`off`/`offAll`) stays ungated so a revoked plugin can still tear
+  // its own subscriptions down. Reserved-namespace + payload-size guards live
+  // in `MessageBus.emit` so direct `emitFromPlugin` callers are covered too.
+  const requirePerm = (permission: "events:publish" | "events:subscribe", method: string): void => {
+    if (!pluginHasApiPermission(pluginId, permission)) {
+      throw new Error(
+        `events.${method} requires the "${permission}" permission — declare it in the plugin manifest.`
+      )
+    }
+  }
+
   return {
-    emit: <T>(eventType: string, payload: T, metadata?: Record<string, unknown>) =>
-      bus.emit(eventType, payload, source, metadata),
+    emit: <T>(eventType: string, payload: T, metadata?: Record<string, unknown>) => {
+      requirePerm("events:publish", "emit")
+      return bus.emit(eventType, payload, source, metadata)
+    },
 
-    on: <T>(eventType: string | RegExp, handler: EventHandler<T>, filter?: EventFilter) =>
-      bus.on(eventType, handler, { source, filter }),
+    on: <T>(eventType: string | RegExp, handler: EventHandler<T>, filter?: EventFilter) => {
+      requirePerm("events:subscribe", "on")
+      return bus.on(eventType, handler, { source, filter })
+    },
 
-    once: <T>(eventType: string | RegExp, handler: EventHandler<T>, filter?: EventFilter) =>
-      bus.once(eventType, handler, { source, filter }),
+    once: <T>(eventType: string | RegExp, handler: EventHandler<T>, filter?: EventFilter) => {
+      requirePerm("events:subscribe", "once")
+      return bus.once(eventType, handler, { source, filter })
+    },
 
-    off: (subscriptionId: string) => bus.off(subscriptionId),
+    // Owner-scoped (W3.7): a plugin can only remove ITS OWN subscriptions —
+    // `bus.off(id)` was owner-unaware, and the ids handed to plugins come from
+    // the unsubscribe closures anyway.
+    off: (subscriptionId: string) => bus.offOwned(pluginId, subscriptionId),
 
     offAll: () => bus.offAll(pluginId),
 
-    getHistory: (eventType?: string | RegExp, limit?: number) =>
-      bus.getHistory({ eventType, limit }),
+    getHistory: (eventType?: string | RegExp, limit?: number) => {
+      requirePerm("events:subscribe", "getHistory")
+      return bus.getHistory({ eventType, limit, viewerId: pluginId })
+    },
   }
 }

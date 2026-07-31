@@ -10,7 +10,7 @@
 //!        │    (tokio::sync::broadcast::Sender<EventFrame>)
 //!        │    ──broadcast──► WS client B
 //!        │
-//!        └─ VecDeque<EventFrame> (ring buffer, cap 200, 60 s retention)
+//!        └─ VecDeque<EventFrame> (ring buffer, cap 10,000, 24 h retention)
 //!             ▲
 //!             └── on reconnect: subscribe(since) → replay
 //! ```
@@ -20,8 +20,9 @@
 //! - **`broadcast::channel`** (capacity 256): slow receivers lag behind and
 //!   get `RecvError::Lagged` — treated as a disconnect on the WS side.
 //! - **Ring buffer**: capped at [`BUFFER_CAPACITY`] entries *and* entries
-//!   older than [`RETENTION_MS`] are pruned on every publish.  This keeps
-//!   the replay window bounded in both count and time.
+//!   older than [`RETENTION_MS`] are pruned periodically and on subscribe.
+//!   This keeps the replay window bounded in both count and time without an
+//!   O(n) scan on every publish.
 //! - **Atomic `seq_counter`**: each published frame gets a monotonically
 //!   increasing sequence number. The replay cursor `since` lets reconnecting
 //!   clients request only frames they haven't seen.
@@ -29,7 +30,7 @@
 use std::{
     collections::VecDeque,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicI64, AtomicU64, Ordering},
         Arc,
     },
 };
@@ -43,10 +44,17 @@ use serde_json::Value;
 // ---------------------------------------------------------------------------
 
 /// Maximum number of frames retained in the replay buffer.
-const BUFFER_CAPACITY: usize = 200;
+pub(super) const BUFFER_CAPACITY: usize = 10_000;
 
 /// How long (ms) to retain a frame in the replay buffer.
-const RETENTION_MS: i64 = 60_000;
+const RETENTION_MS: i64 = 24 * 60 * 60 * 1000;
+/// Controller-proxy payloads can contain tool arguments or provider requests.
+/// Retain them only for a brief reconnect grace, never the general event
+/// history window.
+const REQUEST_SCOPED_RETENTION_MS: i64 = 2 * 60 * 1000;
+/// Amortize retention pruning so high-frequency event streams do not scan the
+/// full replay buffer while holding its mutex on every publish.
+const PRUNE_INTERVAL_MS: i64 = 1000;
 
 /// Broadcast channel depth — must be a power of two per tokio's requirement.
 /// 256 slots give a comfortable burst margin before slow subscribers lag.
@@ -68,6 +76,19 @@ pub struct EventFrame {
     pub payload: Value,
     /// Unix timestamp (milliseconds) when the frame was published.
     pub ts_ms: i64,
+    /// Request-scoped controller destination. This routing field is never
+    /// serialized to clients; transports use it to suppress delivery to
+    /// non-origin devices.
+    #[serde(skip)]
+    pub target_device_id: Option<String>,
+}
+
+impl EventFrame {
+    pub fn visible_to(&self, device_id: &str) -> bool {
+        self.target_device_id
+            .as_deref()
+            .is_none_or(|target| target == device_id)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -97,6 +118,17 @@ pub struct EventBus {
     tx: tokio::sync::broadcast::Sender<EventFrame>,
     buffer: Mutex<VecDeque<EventFrame>>,
     seq_counter: AtomicU64,
+    last_prune_ms: AtomicI64,
+}
+
+/// Connector event sink shared by the public ingress router and connector
+/// command-plane RPC arms in headless mode.
+pub struct ConnectorEventEmitter(pub Arc<EventBus>);
+
+impl crate::connectors::axum_app::EventEmitter for ConnectorEventEmitter {
+    fn emit(&self, topic: &str, payload: Value) {
+        self.0.publish(topic.to_string(), payload);
+    }
 }
 
 impl EventBus {
@@ -107,7 +139,14 @@ impl EventBus {
             tx,
             buffer: Mutex::new(VecDeque::with_capacity(BUFFER_CAPACITY)),
             seq_counter: AtomicU64::new(0),
+            last_prune_ms: AtomicI64::new(0),
         })
+    }
+
+    /// Current global sequence high-water mark. A client advances to this
+    /// value only after its authoritative resync completes.
+    pub fn high_water_seq(&self) -> u64 {
+        self.seq_counter.load(Ordering::Relaxed)
     }
 
     /// Publish an event to all current subscribers and append it to the
@@ -117,24 +156,34 @@ impl EventBus {
     pub fn publish(&self, event_type: String, payload: Value) -> EventFrame {
         let seq = self.seq_counter.fetch_add(1, Ordering::Relaxed) + 1;
         let ts_ms = now_ms();
+        register_remote_pending_request(&payload);
 
         let frame = EventFrame {
             event_type,
             seq,
+            target_device_id: payload
+                .get("remoteExecutionContext")
+                .and_then(Value::as_object)
+                .and_then(|context| context.get("originDeviceId"))
+                .and_then(Value::as_str)
+                .map(str::to_owned),
             payload,
             ts_ms,
         };
 
-        // Append to ring buffer, enforce capacity + retention.
+        // Append to ring buffer, enforce capacity, and amortize retention
+        // pruning to at most once per interval across concurrent publishers.
         {
             let mut buf = self.buffer.lock();
-            // Evict expired entries. In production frames arrive in
-            // monotonic ts order so a `pop_front`-only sweep would
-            // suffice; a full `retain` is robust to manually-injected
-            // out-of-order frames (see retention_evicts_expired_entries
-            // test) at the cost of one extra O(n) scan per publish.
-            let cutoff = ts_ms - RETENTION_MS;
-            buf.retain(|f| f.ts_ms >= cutoff);
+            let last_prune = self.last_prune_ms.load(Ordering::Relaxed);
+            let prune_due = ts_ms.saturating_sub(last_prune) >= PRUNE_INTERVAL_MS
+                && self
+                    .last_prune_ms
+                    .compare_exchange(last_prune, ts_ms, Ordering::Relaxed, Ordering::Relaxed)
+                    .is_ok();
+            if prune_due {
+                retain_unexpired(&mut buf, ts_ms);
+            }
             // Enforce capacity cap.
             if buf.len() >= BUFFER_CAPACITY {
                 buf.pop_front();
@@ -173,12 +222,11 @@ impl EventBus {
             Some(s) => s,
             None => self.seq_counter.load(Ordering::Relaxed),
         };
-        let buf = self.buffer.lock();
+        let mut buf = self.buffer.lock();
+        retain_unexpired(&mut buf, now_ms);
 
         // Determine the oldest retained seq.
         let oldest_seq = buf.front().map(|f| f.seq);
-        let cutoff = now_ms - RETENTION_MS;
-
         // If the client is behind the oldest retained frame, we cannot replay
         // faithfully — signal a full resync.
         if since_seq > 0 {
@@ -194,7 +242,7 @@ impl EventBus {
         // Collect frames with seq > since and ts_ms within the retention window.
         let replay: Vec<EventFrame> = buf
             .iter()
-            .filter(|f| f.seq > since_seq && f.ts_ms >= cutoff)
+            .filter(|frame| frame.seq > since_seq)
             .cloned()
             .collect();
 
@@ -214,6 +262,41 @@ impl EventBus {
     }
 }
 
+fn retain_unexpired(buffer: &mut VecDeque<EventFrame>, at_ms: i64) {
+    let general_cutoff = at_ms - RETENTION_MS;
+    let request_cutoff = at_ms - REQUEST_SCOPED_RETENTION_MS;
+    buffer.retain(|frame| {
+        frame.ts_ms
+            >= if frame.target_device_id.is_some() {
+                request_cutoff
+            } else {
+                general_cutoff
+            }
+    });
+}
+
+fn register_remote_pending_request(payload: &Value) {
+    let Some(context_value) = payload.get("remoteExecutionContext") else {
+        return;
+    };
+    let Ok(context) = serde_json::from_value::<super::remote_execution::RemoteExecutionContext>(
+        context_value.clone(),
+    ) else {
+        return;
+    };
+    let response_id = match payload.get("type").and_then(Value::as_str) {
+        Some("permission_request") => payload.get("requestId"),
+        Some("plugin_tool_exec") => payload.get("toolUseId"),
+        Some("tool_result_review") => payload.get("reviewId"),
+        Some("protocol_adapter_exec") => payload.get("execId"),
+        _ => None,
+    }
+    .and_then(Value::as_str);
+    if let Some(response_id) = response_id {
+        let _ = super::remote_execution::global().register_pending(&context, response_id);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // register_tauri_event
 // ---------------------------------------------------------------------------
@@ -224,11 +307,7 @@ impl EventBus {
 /// same channel simply attaches a second listener (both forward the same
 /// event, harmless but wasteful).  The caller is responsible for deduplication
 /// if needed.
-pub fn register_tauri_event(
-    app: &tauri::AppHandle,
-    bus: Arc<EventBus>,
-    channel: &'static str,
-) {
+pub fn register_tauri_event(app: &tauri::AppHandle, bus: Arc<EventBus>, channel: &'static str) {
     use tauri::Listener as _;
     app.listen(channel, move |event| {
         let raw = event.payload();
@@ -307,7 +386,10 @@ mod tests {
         // Subscribe with since=Some(0) before new frames → get 5 replay events.
         let result = bus.subscribe(Some(0), now_ms());
         match result {
-            SubscribeResult::Ok { replay, mut receiver } => {
+            SubscribeResult::Ok {
+                replay,
+                mut receiver,
+            } => {
                 assert_eq!(replay.len(), 5, "expected 5 replay frames");
                 // Receiver is live: publish a new frame and it arrives.
                 bus.publish("ev".into(), json!(99));
@@ -328,9 +410,9 @@ mod tests {
             bus.publish("ev".into(), json!({}));
         }
         // since=1 means the client last saw seq=1; oldest retained is seq=1,
-        // so since < oldest is false here. Simulate a gap by publishing 200+
-        // more frames so seq=1 is evicted from the ring.
-        for _ in 0..200 {
+        // so since < oldest is false here. Simulate a gap by publishing past
+        // the configured capacity so seq=1 is evicted from the ring.
+        for _ in 0..BUFFER_CAPACITY {
             bus.publish("ev".into(), json!({}));
         }
         // Now oldest retained seq > 1.
@@ -384,17 +466,22 @@ mod tests {
                 seq: 9999,
                 payload: json!({}),
                 ts_ms: 1, // epoch + 1 ms → definitely expired
+                target_device_id: None,
             });
         }
         assert_eq!(bus.buffer_len(), 3);
 
         // A new publish triggers eviction of entries older than RETENTION_MS.
+        bus.last_prune_ms.store(0, Ordering::Relaxed);
         bus.publish("c".into(), json!(3));
 
         // The ancient entry should be gone.
         let buf = bus.buffer.lock();
         let has_ancient = buf.iter().any(|f| f.event_type == "ancient");
-        assert!(!has_ancient, "ancient entry must be evicted by retention logic");
+        assert!(
+            !has_ancient,
+            "ancient entry must be evicted by retention logic"
+        );
     }
 
     // ── subscribe replays only frames newer than `since` ─────────────────────
@@ -415,5 +502,88 @@ mod tests {
             }
             SubscribeResult::ResyncRequired => panic!("unexpected ResyncRequired"),
         }
+    }
+
+    #[test]
+    fn request_scoped_frames_are_visible_only_to_the_origin_device() {
+        let bus = EventBus::new();
+        let frame = bus.publish(
+            "claude://message".into(),
+            json!({
+                "type": "plugin_tool_exec",
+                "remoteExecutionContext": {
+                    "originDeviceId": "device-a"
+                }
+            }),
+        );
+
+        assert!(frame.visible_to("device-a"));
+        assert!(!frame.visible_to("device-b"));
+        assert!(
+            serde_json::to_value(&frame)
+                .unwrap()
+                .get("target_device_id")
+                .is_none(),
+            "routing metadata must remain host-internal"
+        );
+    }
+
+    #[test]
+    fn publishing_a_proxy_request_registers_its_pending_response_id() {
+        let context = crate::companion_api::remote_execution::global().register(
+            "host-a",
+            "device-a",
+            "event-bus-pending-session",
+            now_ms() as u64,
+        );
+        let bus = EventBus::new();
+        bus.publish(
+            "claude://message".into(),
+            json!({
+                "type": "plugin_tool_exec",
+                "sessionId": context.session_id,
+                "toolUseId": "tool-1",
+                "remoteExecutionContext": context.clone(),
+            }),
+        );
+
+        assert!(crate::companion_api::remote_execution::global()
+            .validate_and_consume(
+                &context,
+                "device-a",
+                "event-bus-pending-session",
+                "tool-1",
+                now_ms() as u64,
+            )
+            .is_ok());
+    }
+
+    #[test]
+    fn request_scoped_payloads_expire_before_general_event_history() {
+        let bus = EventBus::new();
+        let now = now_ms();
+        {
+            let mut buffer = bus.buffer.lock();
+            buffer.push_back(EventFrame {
+                event_type: "claude://message".into(),
+                seq: 100,
+                payload: json!({ "secret": "short-lived" }),
+                ts_ms: now - REQUEST_SCOPED_RETENTION_MS - 1,
+                target_device_id: Some("device-a".into()),
+            });
+            buffer.push_back(EventFrame {
+                event_type: "sync://updated".into(),
+                seq: 101,
+                payload: json!({ "table": "settings" }),
+                ts_ms: now - REQUEST_SCOPED_RETENTION_MS - 1,
+                target_device_id: None,
+            });
+        }
+
+        bus.last_prune_ms.store(0, Ordering::Relaxed);
+        bus.publish("test://tick".into(), json!({}));
+        let buffer = bus.buffer.lock();
+        assert!(!buffer.iter().any(|frame| frame.seq == 100));
+        assert!(buffer.iter().any(|frame| frame.seq == 101));
     }
 }

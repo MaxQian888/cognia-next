@@ -39,7 +39,7 @@ import {
 import { CharacterPackUpdateDialog } from "@/components/settings/character-pack-update-dialog"
 import { listMcpServers } from "@/lib/db/mcp-servers"
 import { listSkills } from "@/lib/db/skills"
-import type { AppSettings, Character, McpServer, Skill } from "@/lib/claude/types"
+import type { AppSettings, Character, McpServer, Skill } from "@cognia/agent-config-types"
 // ADR-0020 W2 — Computer Use sub-settings UI reads the live native-tool
 // registry so allowedToolIds is a real picker (one checkbox per
 // registered tool) instead of a free-form text field. `listEntries`
@@ -84,7 +84,7 @@ import {
   CARTESIA_TTS_VOICES,
   DEEPGRAM_TTS_VOICES,
   XIAOMI_TTS_VOICES,
-} from "@/types/media/tts"
+} from "@cognia/tts/types"
 import {
   Accordion,
   AccordionContent,
@@ -116,7 +116,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { characterToPackDef, filterCharacters } from "@/lib/plugin/character-pack/editor-projection"
 import { serializeLocalPackFile } from "@/lib/plugin/character-pack/schema"
 import { downloadBlob } from "@/lib/files/download"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 import { MODEL_PRESET_VALUES, PERMISSION_MODE_VALUES } from "@/lib/claude/model-presets"
 import { useUIStore } from "@/stores/ui/ui-store"
 
@@ -148,7 +148,7 @@ const VOICE_CATALOG: Partial<Record<TTSProvider, ReadonlyArray<{ id: string; nam
   xiaomi: XIAOMI_TTS_VOICES,
 }
 
-const PLATFORM_OPTIONS: PluginRuntimeProfile[] = ["tauri", "browser"]
+const PLATFORM_OPTIONS: PluginRuntimeProfile[] = ["tauri", "browser", "mobile"]
 
 /** Labelled 0.05-step slider for the voice rate / pitch / volume controls. */
 function VoiceSlider({
@@ -596,6 +596,7 @@ export function CharactersSection() {
             twinId: undefined,
             twinSettings: undefined,
             enableComputerUse: false,
+            enableBrowserTools: false,
             computerUseSettings: undefined,
             computerUseTarget: "local",
             sandboxEnabled: false,
@@ -712,6 +713,7 @@ function CharacterRow({
           twinId: character.twinId,
           twinSettings: character.twinSettings,
           enableComputerUse: Boolean(character.enableComputerUse),
+          enableBrowserTools: Boolean(character.enableBrowserTools),
           computerUseSettings: character.computerUseSettings,
           computerUseTarget:
             character.computerUseTarget && typeof character.computerUseTarget === "object"
@@ -1322,6 +1324,7 @@ export type EditorState = {
   twinId?: string
   twinSettings?: Character["twinSettings"]
   enableComputerUse: boolean
+  enableBrowserTools: boolean
   computerUseSettings?: Character["computerUseSettings"]
   /** ADR-0020 remote-target — `"local"` or a sandbox connection id. */
   computerUseTarget: "local" | string
@@ -1370,6 +1373,7 @@ type EditorOutput = {
   twinId?: string
   twinSettings?: Character["twinSettings"]
   enableComputerUse?: boolean
+  enableBrowserTools?: boolean
   computerUseSettings?: Character["computerUseSettings"]
   computerUseTarget?: Character["computerUseTarget"]
   sandboxEnabled?: boolean
@@ -1514,6 +1518,7 @@ export function CharacterEditor({
         twinId: s.twinId,
         twinSettings: s.twinSettings,
         enableComputerUse: s.enableComputerUse || undefined,
+        enableBrowserTools: s.enableBrowserTools || undefined,
         computerUseSettings: s.computerUseSettings,
         computerUseTarget:
           s.enableComputerUse && s.computerUseTarget && s.computerUseTarget !== "local"
@@ -1815,6 +1820,19 @@ export function CharacterEditor({
             />
           </>
         )}
+        <div className="flex items-center justify-between gap-3">
+          <div className="space-y-0.5">
+            <Label className="cursor-pointer text-xs">{t("browserToolsToggle.label")}</Label>
+            <p className="text-[10px] text-muted-foreground">
+              {t("browserToolsToggle.description")}
+            </p>
+          </div>
+          <Switch
+            checked={s.enableBrowserTools}
+            onCheckedChange={(v) => setS({ ...s, enableBrowserTools: v })}
+            aria-label={t("browserToolsToggle.aria")}
+          />
+        </div>
         <div className="flex items-center justify-between gap-3">
           <div className="space-y-0.5">
             <Label className="cursor-pointer text-xs">{tSandbox("enable.label")}</Label>

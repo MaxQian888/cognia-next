@@ -56,9 +56,7 @@ export interface PromptOptions {
 }
 
 export type AlertOutcome =
-  | { kind: "shown" }
-  | { kind: "unsupported" }
-  | { kind: "error"; message: string }
+  { kind: "shown" } | { kind: "unsupported" } | { kind: "error"; message: string }
 
 export type ConfirmOutcome =
   | { kind: "confirmed" }

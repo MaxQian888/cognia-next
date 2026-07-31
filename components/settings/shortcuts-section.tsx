@@ -24,6 +24,70 @@ const BUILT_IN_DEFAULTS: Array<{ id: string; chord: Chord; label: string }> = [
   { id: "tray.automation-kill", chord: "ctrl+alt+k", label: "Automation kill switch" },
 ]
 
+/**
+ * The selection-toolbar chords: the clipboard capture that starts it, plus the
+ * six action chords mirroring `SELECTION_ACTION_SHORTCUTS` in
+ * `src-tauri/src/selection_toolbar.rs`.
+ *
+ * The six actions are bound only while the toolbar is running, and
+ * `bind_action_shortcuts` deliberately leaves alone any chord the user has
+ * already re-bound (ADR-0093 §8). That defence is only reachable if the user
+ * has somewhere to re-bind them — which is here.
+ */
+const SELECTION_SHORTCUT_DEFAULTS = [
+  {
+    id: "selection.captureClipboard",
+    chord: "alt+shift+c",
+    labelKey: "selectionCaptureClipboard",
+    fallback: "Capture copied selection",
+  },
+  {
+    id: "selection.copy",
+    chord: "alt+shift+1",
+    labelKey: "selectionCopy",
+    fallback: "Selection toolbar: copy",
+  },
+  {
+    id: "selection.explain",
+    chord: "alt+shift+2",
+    labelKey: "selectionExplain",
+    fallback: "Selection toolbar: explain",
+  },
+  {
+    id: "selection.translate",
+    chord: "alt+shift+3",
+    labelKey: "selectionTranslate",
+    fallback: "Selection toolbar: translate",
+  },
+  {
+    id: "selection.ask",
+    chord: "alt+shift+4",
+    labelKey: "selectionAsk",
+    fallback: "Selection toolbar: ask",
+  },
+  {
+    id: "selection.remember",
+    chord: "alt+shift+5",
+    labelKey: "selectionRemember",
+    fallback: "Selection toolbar: add to memory",
+  },
+  {
+    id: "selection.speak",
+    chord: "alt+shift+6",
+    labelKey: "selectionSpeak",
+    fallback: "Selection toolbar: read aloud",
+  },
+] as const satisfies ReadonlyArray<{ id: string; chord: Chord; labelKey: string; fallback: string }>
+
+/**
+ * Ids with no built-in OS-level default (unlike `BUILT_IN_DEFAULTS`, Rust
+ * never seeds these — see `seed_builtins`) — the row starts unbound ("Not
+ * set") until the user records one. `id` must match a command registered in
+ * `lib/plugin/commands/registry.ts` so the bound chord actually dispatches
+ * somewhere (see `lib/pet/commands.ts:registerPetCommands`).
+ */
+const OPTIONAL_SHORTCUT_IDS = ["pet.toggle-window"] as const
+
 interface RecorderState {
   id: string
   chord: Chord | null
@@ -100,7 +164,9 @@ export function ShortcutsSection() {
   }
 
   async function resetRow(id: string) {
-    const def = BUILT_IN_DEFAULTS.find((b) => b.id === id)
+    const def =
+      BUILT_IN_DEFAULTS.find((b) => b.id === id) ??
+      SELECTION_SHORTCUT_DEFAULTS.find((b) => b.id === id)
     if (!def) {
       await unbind(id)
       return
@@ -112,7 +178,7 @@ export function ShortcutsSection() {
   // rebindable rows. Items without an accelerator are still bindable via the
   // settings dialog later, but only appear here once they have one — keeps
   // the panel scoped to "things with a current chord".
-  const trayShortcutRows: Array<{ id: string; label: string; chord: Chord }> = []
+  const trayShortcutRows: Array<{ id: string; label: string; chord: Chord | null }> = []
   for (const item of trayItems) {
     if (item.kind !== "action") continue
     const accel: string | undefined = (item as Extract<TrayMenuItem, { kind: "action" }>)
@@ -126,13 +192,31 @@ export function ShortcutsSection() {
     })
   }
 
-  const rows = [
+  const optionalLabels: Record<(typeof OPTIONAL_SHORTCUT_IDS)[number], string> = {
+    "pet.toggle-window": t("petToggleWindow", { fallback: "Toggle desktop pet" }),
+  }
+  const optionalShortcutRows: Array<{ id: string; label: string; chord: Chord | null }> =
+    OPTIONAL_SHORTCUT_IDS.map((id) => ({
+      id,
+      label: optionalLabels[id],
+      chord: bindings[id] ?? null,
+    }))
+
+  const rows: Array<{ id: string; label: string; chord: Chord | null; hasDefault: boolean }> = [
     ...BUILT_IN_DEFAULTS.map((def) => ({
       id: def.id,
       label: def.label,
       chord: bindings[def.id] ?? def.chord,
+      hasDefault: true,
     })),
-    ...trayShortcutRows,
+    ...SELECTION_SHORTCUT_DEFAULTS.map((def) => ({
+      id: def.id,
+      label: t(def.labelKey, { fallback: def.fallback }),
+      chord: bindings[def.id] ?? def.chord,
+      hasDefault: true,
+    })),
+    ...trayShortcutRows.map((row) => ({ ...row, hasDefault: false })),
+    ...optionalShortcutRows.map((row) => ({ ...row, hasDefault: false })),
   ]
 
   return (
@@ -159,7 +243,9 @@ export function ShortcutsSection() {
                     ? recorder?.chord
                       ? formatKeybinding(recorder.chord)
                       : t("pressKey", { fallback: "Press any key…" })
-                    : formatKeybinding(row.chord)}
+                    : row.chord
+                      ? formatKeybinding(row.chord)
+                      : t("notSet", { fallback: "Not set" })}
                 </div>
                 {isRecording && recorder?.conflict && recorder.conflict !== row.id && (
                   <div className="text-xs text-destructive">
@@ -182,14 +268,20 @@ export function ShortcutsSection() {
                     <Button size="sm" variant="outline" onClick={() => startRecording(row.id)}>
                       {t("record", { fallback: "Record" })}
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => resetRow(row.id)}
-                      aria-label={t("resetItem", { fallback: "Reset to default" })}
-                    >
-                      <RotateCcwIcon className="size-4" />
-                    </Button>
+                    {(row.hasDefault || row.chord) && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => resetRow(row.id)}
+                        aria-label={
+                          row.hasDefault
+                            ? t("resetItem", { fallback: "Reset to default" })
+                            : t("clear", { fallback: "Clear" })
+                        }
+                      >
+                        <RotateCcwIcon className="size-4" />
+                      </Button>
+                    )}
                   </>
                 )}
               </div>

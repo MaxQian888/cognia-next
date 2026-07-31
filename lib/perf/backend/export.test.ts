@@ -70,6 +70,7 @@ function makeSample(): PerfSample {
     },
     topSpans: [makeSpan()],
     systemMemory: null,
+    managed: [],
   }
 }
 

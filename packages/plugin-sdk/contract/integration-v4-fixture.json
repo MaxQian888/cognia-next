@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 4,
+  "id": "reference-delivery",
+  "name": "Reference Delivery",
+  "version": "1.0.0",
+  "type": "frontend",
+  "main": "dist/index.js",
+  "capabilities": ["integrations"],
+  "permissions": [
+    "integrations:read",
+    "integrations:events",
+    "integrations:execute",
+    "integrations:manage"
+  ],
+  "integrations": [
+    {
+      "id": "reference",
+      "label": "Reference",
+      "authStrategies": [
+        {
+          "id": "oauth",
+          "type": "oauth2",
+          "label": "OAuth",
+          "providerId": "reference-oauth",
+          "requestAuth": { "type": "bearer" }
+        }
+      ],
+      "resourceKinds": ["workspace", "item"],
+      "eventTypes": [
+        {
+          "id": "item.created",
+          "label": "Item created",
+          "resourceKinds": ["item"]
+        }
+      ],
+      "actions": [
+        {
+          "id": "createItem",
+          "label": "Create item",
+          "handler": "createItem",
+          "inputSchema": {
+            "type": "object",
+            "required": ["title"],
+            "properties": {
+              "title": { "type": "string" }
+            }
+          },
+          "risk": "write",
+          "idempotency": "required",
+          "timeoutMs": 30000
+        }
+      ],
+      "ingress": {
+        "normalizer": "normalizeReference",
+        "verification": {
+          "type": "hmac-sha256",
+          "signatureHeader": "x-reference-signature",
+          "encoding": "base64",
+          "timestampHeader": "x-reference-timestamp",
+          "maxSkewSeconds": 300,
+          "signedPayload": [
+            { "source": "header", "name": "x-reference-timestamp" },
+            { "source": "literal", "value": "." },
+            { "source": "body" }
+          ]
+        },
+        "deliveryIdHeader": "x-reference-delivery"
+      },
+      "allowedOrigins": ["https://api.reference.example"]
+    }
+  ]
+}

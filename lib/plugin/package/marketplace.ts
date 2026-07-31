@@ -87,7 +87,12 @@ export interface PluginVersionInfo {
   publishedAt: Date
   minAppVersion?: string
   downloadUrl: string
+  /** Lowercase hex SHA-256 of the archive — integrity, verified host-side. */
   checksum?: string
+  /** Hex Ed25519 signature over the `<id>:<ver>:<bytes>` digest — provenance. */
+  signature?: string
+  /** Hex Ed25519 public key the signature was produced with. */
+  publicKey?: string
 }
 
 /**
@@ -128,6 +133,15 @@ export interface InstallationProgress {
   progress: number
   message: string
   error?: string
+}
+
+export interface StagedPluginUpdate {
+  transactionId: string
+  pluginId: string
+  version: string
+  stagedPath: string
+  manifest: PluginManifest
+  sizeBytes: number
 }
 
 export type MarketplaceErrorCategory =
@@ -188,6 +202,12 @@ const DEFAULT_CONFIG: MarketplaceConfig = {
 }
 
 const MAX_CACHE_SIZE = 100
+
+// Negative-cache TTL for `getPlugin` lookups that fail or 404. Kept short so a
+// recovering registry / newly-published plugin is picked up quickly, but long
+// enough to collapse the burst of identical lookups that a single "Check for
+// updates" / Sync fires (one per installed plugin) into a single network hit.
+const NEGATIVE_CACHE_TTL = 60_000
 
 const RETRYABLE_CATEGORIES = new Set<MarketplaceErrorCategory>(["network", "rate_limit"])
 
@@ -443,6 +463,12 @@ function categoryFromMessage(message: string): MarketplaceErrorCategory {
   ) {
     return "network"
   }
+  // Host-side integrity failures from `plugin_download_version`
+  // ("archive checksum mismatch", "archive signature verification failed",
+  // "signature required by policy", "signature is incomplete").
+  if (lower.includes("checksum") || lower.includes("signature")) {
+    return "signature_invalid"
+  }
   if (
     lower.includes("invalid") ||
     lower.includes("validation") ||
@@ -455,7 +481,7 @@ function categoryFromMessage(message: string): MarketplaceErrorCategory {
   return "unknown"
 }
 
-function normalizeOperationError(
+export function normalizeOperationError(
   error: unknown,
   fallbackMessage: string,
   status?: number
@@ -513,6 +539,10 @@ function normalizeDownloadVersionResult(
 export class PluginMarketplace {
   private config: MarketplaceConfig
   private cache: Map<string, { data: unknown; timestamp: number }> = new Map()
+  // Remembers recently-failed `getPlugin` keys (value = expiry timestamp) so a
+  // burst of update checks against an unreachable registry doesn't re-fetch and
+  // re-log the same failure once per installed plugin, every check.
+  private missCache: Map<string, number> = new Map()
   private installListeners: Map<string, (progress: InstallationProgress) => void> = new Map()
 
   constructor(config: Partial<MarketplaceConfig> = {}) {
@@ -586,17 +616,32 @@ export class PluginMarketplace {
     const cached = this.getFromCache<PluginRegistryEntry>(cacheKey)
     if (cached) return cached
 
+    // A recent failure short-circuits: without this a single "Check for
+    // updates" re-fetches every installed plugin against a possibly-unreachable
+    // registry and floods the console with one error apiece — every check.
+    if (this.isRecentMiss(cacheKey)) return null
+
     let response: Response
     try {
       response = await proxyFetch(`${this.config.registryUrl}/plugins/${pluginId}`)
     } catch (error) {
-      loggers.marketplace.error("Get plugin failed:", error as Error)
+      // An unreachable registry (offline, or web/dev where the hosted registry
+      // isn't proxied) is an expected degraded state, not an application error.
+      // Log at debug with the message string — the raw Error serializes to `{}`
+      // — and remember the miss so we stop retrying on every subsequent check.
+      loggers.marketplace.debug("Get plugin failed", {
+        pluginId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+      this.rememberMiss(cacheKey)
       return null
     }
 
     if (!response.ok) {
-      if (response.status === 404) return null
-      loggers.marketplace.error("Get plugin failed: HTTP", new Error(String(response.status)))
+      if (response.status !== 404) {
+        loggers.marketplace.warn("Get plugin failed", { pluginId, status: response.status })
+      }
+      this.rememberMiss(cacheKey)
       return null
     }
 
@@ -619,7 +664,10 @@ export class PluginMarketplace {
 
       if (isTauri()) {
         const { invoke } = await import("@tauri-apps/api/core")
-        payload = await invoke<unknown>("plugin_marketplace_versions", { pluginId })
+        payload = await invoke<unknown>("plugin_marketplace_versions", {
+          pluginId,
+          registryUrl: this.config.registryUrl,
+        })
       } else {
         const response = await proxyFetch(`${this.config.registryUrl}/plugins/${pluginId}/versions`)
         if (!response.ok) {
@@ -896,9 +944,20 @@ export class PluginMarketplace {
       })
 
       if (version) {
+        // Integrity + provenance are enforced host-side (Rust) on the raw
+        // archive bytes before anything is unpacked. Pass the registry's
+        // claims plus the user's signature policy; an unsigned archive is
+        // rejected when the policy requires signatures.
+        const { getPluginSignatureVerifier } = await import("@/lib/plugin/security/signature")
+        const requireSignature = getPluginSignatureVerifier().getConfig().requireSignatures
         const downloadResultPayload = await invoke<unknown>("plugin_download_version", {
           pluginId,
           version: targetVersion.version,
+          downloadUrl: targetVersion.downloadUrl,
+          checksum: targetVersion.checksum,
+          signatureHex: targetVersion.signature,
+          publicKeyHex: targetVersion.publicKey,
+          requireSignature,
         })
         const downloadResult = normalizeDownloadVersionResult(
           downloadResultPayload,
@@ -1015,6 +1074,72 @@ export class PluginMarketplace {
   }
 
   /**
+   * Download, authenticate, extract, and validate an update into host-owned
+   * transaction storage. The current plugin directory is not modified.
+   */
+  async stagePluginUpdate(
+    pluginId: string,
+    version: PluginVersionInfo
+  ): Promise<StagedPluginUpdate> {
+    if (!isTauri()) {
+      throw new Error("Plugin update staging requires the Cognia desktop app")
+    }
+    const { invoke } = await import("@tauri-apps/api/core")
+    const { getPluginSignatureVerifier } = await import("@/lib/plugin/security/signature")
+    const staged = await invoke<StagedPluginUpdate>("plugin_stage_version", {
+      pluginId,
+      version: version.version,
+      downloadUrl: version.downloadUrl,
+      checksum: version.checksum,
+      signatureHex: version.signature,
+      publicKeyHex: version.publicKey,
+      requireSignature: getPluginSignatureVerifier().getConfig().requireSignatures,
+    })
+    if (
+      staged.pluginId !== pluginId ||
+      staged.version !== version.version ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        staged.transactionId
+      )
+    ) {
+      throw new Error("Host returned an invalid staged update descriptor")
+    }
+    const validation = validatePluginManifest(staged.manifest)
+    if (!validation.valid) {
+      await invoke("plugin_discard_staged_update", {
+        pluginId,
+        transactionId: staged.transactionId,
+      }).catch(() => undefined)
+      throw new Error(`Staged plugin manifest is invalid: ${validation.errors.join(", ")}`)
+    }
+    return staged
+  }
+
+  async commitStagedPluginUpdate(staged: StagedPluginUpdate): Promise<void> {
+    const { invoke } = await import("@tauri-apps/api/core")
+    await invoke("plugin_commit_staged_update", {
+      pluginId: staged.pluginId,
+      transactionId: staged.transactionId,
+    })
+  }
+
+  async discardStagedPluginUpdate(staged: StagedPluginUpdate): Promise<void> {
+    const { invoke } = await import("@tauri-apps/api/core")
+    await invoke("plugin_discard_staged_update", {
+      pluginId: staged.pluginId,
+      transactionId: staged.transactionId,
+    })
+  }
+
+  async finalizeStagedPluginUpdate(staged: StagedPluginUpdate): Promise<void> {
+    const { invoke } = await import("@tauri-apps/api/core")
+    await invoke("plugin_finalize_staged_update", {
+      pluginId: staged.pluginId,
+      transactionId: staged.transactionId,
+    })
+  }
+
+  /**
    * Update plugin using an optional target version.
    */
   async updatePlugin(pluginId: string, version?: string): Promise<PluginInstallResult> {
@@ -1051,6 +1176,30 @@ export class PluginMarketplace {
    */
   clearCache() {
     this.cache.clear()
+    this.missCache.clear()
+  }
+
+  /**
+   * Record a failed/absent `getPlugin` lookup so repeated checks within the
+   * negative-cache window short-circuit instead of re-hitting the registry.
+   */
+  private rememberMiss(cacheKey: string): void {
+    if (this.missCache.size >= MAX_CACHE_SIZE) {
+      const oldestKey = this.missCache.keys().next().value
+      if (oldestKey) this.missCache.delete(oldestKey)
+    }
+    this.missCache.set(cacheKey, Date.now() + NEGATIVE_CACHE_TTL)
+  }
+
+  /** Whether `cacheKey` failed recently enough to skip re-fetching. */
+  private isRecentMiss(cacheKey: string): boolean {
+    const expiry = this.missCache.get(cacheKey)
+    if (expiry === undefined) return false
+    if (Date.now() > expiry) {
+      this.missCache.delete(cacheKey)
+      return false
+    }
+    return true
   }
 
   // =============================================================================

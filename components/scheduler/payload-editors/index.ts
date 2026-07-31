@@ -4,6 +4,15 @@ export type { ChatPayloadEditorProps } from "./chat-payload-editor"
 export { ExternalAgentPayloadEditor } from "./external-agent-payload-editor"
 export type { ExternalAgentPayloadEditorProps } from "./external-agent-payload-editor"
 
+export { TeamPayloadEditor } from "./team-payload-editor"
+export type { TeamPayloadEditorProps } from "./team-payload-editor"
+
+export { GoalPayloadEditor } from "./goal-payload-editor"
+export type { GoalPayloadEditorProps } from "./goal-payload-editor"
+
+export { PlanPayloadEditor } from "./plan-payload-editor"
+export type { PlanPayloadEditorProps } from "./plan-payload-editor"
+
 export { ToolPicker, SDK_BUILTIN_TOOLS } from "./tool-picker"
 export type { ToolPickerProps } from "./tool-picker"
 
@@ -22,12 +31,28 @@ export type { AdditionalDirectoriesListProps } from "./additional-directories-li
 export {
   EMPTY_CHAT_LIKE_DRAFT,
   EMPTY_EXTERNAL_AGENT_DRAFT,
+  EMPTY_AGENT_TEAM_DRAFT,
+  EMPTY_GOAL_DRAFT,
+  EMPTY_PLAN_DRAFT,
   payloadToChatLikeDraft,
   payloadToExternalAgentDraft,
+  payloadToAgentTeamDraft,
+  payloadToGoalDraft,
+  payloadToPlanDraft,
   chatLikeDraftToPayload,
   externalAgentDraftToPayload,
+  agentTeamDraftToPayload,
+  goalDraftToPayload,
+  planDraftToPayload,
   isChatLikeTaskType,
   isStructuredEditableTaskType,
   DraftValidationError,
 } from "./types"
-export type { ChatLikeDraft, ExternalAgentDraft, McpPickerMode } from "./types"
+export type {
+  ChatLikeDraft,
+  ExternalAgentDraft,
+  AgentTeamDraft,
+  GoalDraft,
+  PlanDraft,
+  McpPickerMode,
+} from "./types"

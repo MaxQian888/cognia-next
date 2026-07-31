@@ -28,6 +28,7 @@ import {
   type CopilotSlotValues,
 } from "@/lib/workflow/copilot-templates"
 import { useProposalStore } from "@/lib/workflow/editor/proposal-store"
+import { workflowEditorRevision } from "@/lib/workflow/editor/editor-revision"
 import { summarizeOps, type ProposalOp } from "@/lib/workflow/editor/proposal-types"
 
 const PLUGIN_ID = "cognia-workflow-ai"
@@ -85,6 +86,7 @@ export function templateToProposalOps(
       type: "add_node",
       nodeId: realId,
       kind: node.type as WorkflowNodeKind,
+      typeVersion: node.typeVersion,
       position: node.position,
       data,
     })
@@ -229,6 +231,7 @@ export function buildTemplateTools(): PluginTool[] {
             workflowId,
             summary,
             ops,
+            baseRevision: workflowEditorRevision(state),
           })
           const template = getCopilotTemplate(templateId)
           return {
@@ -246,6 +249,7 @@ export function buildTemplateTools(): PluginTool[] {
                 summary: payload.summary,
                 ops: payload.ops,
                 opCount: payload.opCount,
+                baseRevision: payload.baseRevision,
               },
             ],
           }

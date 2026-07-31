@@ -1,0 +1,94 @@
+{
+  "agents": {
+    "claude-code": "Claude Code",
+    "codex": "Codex",
+    "opencode": "OpenCode"
+  },
+  "island": {
+    "empty": "暂无活动 Agent",
+    "legend": {
+      "done": "{count} 个已结束",
+      "idle": "{count} 个空闲",
+      "needsYou": "{count} 个待处理",
+      "working": "{count} 个工作中"
+    },
+    "summary": "{count} 个 Agent",
+    "summaryWaiting": "{count} 个 Agent · {waiting} 个待处理",
+    "toggle": "展开/收起 Agent 列表"
+  },
+  "permission": {
+    "allow": "允许",
+    "allowed": "已允许",
+    "countdown": "{seconds} 秒",
+    "denied": "已拒绝",
+    "deny": "拒绝",
+    "expired": "已在终端中处理",
+    "request": "权限请求：{tool}",
+    "requestGeneric": "收到权限请求"
+  },
+  "question": {
+    "expired": "已在终端中处理",
+    "submit": "提交",
+    "submitted": "已发送"
+  },
+  "reply": {
+    "open": "回复",
+    "placeholder": "发送消息…",
+    "send": "发送"
+  },
+  "row": {
+    "detail": {
+      "branch": "分支",
+      "cwd": "路径",
+      "duration": "运行 {duration}",
+      "ended": "结束于",
+      "pid": "PID {pid}",
+      "sessionRef": "会话",
+      "source": {
+        "clear": "已清空",
+        "compact": "已压缩",
+        "resume": "已恢复",
+        "startup": "全新启动"
+      },
+      "started": "开始于",
+      "toggleHide": "隐藏详情",
+      "toggleShow": "显示详情",
+      "tools": "{count} 次工具调用",
+      "turns": "{count} 轮对话"
+    },
+    "error": {
+      "tool": "工具错误",
+      "turn": "本轮失败"
+    },
+    "focusTerminal": "聚焦终端",
+    "interrupt": {
+      "error": {
+        "interrupt_identity_mismatch": "该进程已不是这个 Agent，未发送任何信号。",
+        "interrupt_not_running": "该会话已不可达。",
+        "interrupt_unsupported": "当前平台不支持中断。",
+        "unknown": "中断信号发送失败。"
+      },
+      "hint": "向 Agent 发送一次 Ctrl-C，取消当前回合。会话本身继续运行。",
+      "label": "中断本回合"
+    },
+    "meta": {
+      "model": "模型：{model}",
+      "permissionMode": "权限模式：{mode}"
+    },
+    "multiSelect": "可多选",
+    "openTranscript": "在文件管理器中显示会话记录",
+    "questionMore": "还有 {count} 个问题",
+    "status": {
+      "ended": "会话已结束",
+      "idle": "空闲",
+      "planPending": "计划等待在终端中确认",
+      "waitingInput": "正在终端中等待你的输入",
+      "waitingPermission": "等待权限审批",
+      "working": "工作中…"
+    },
+    "subagentBackground": "后台",
+    "subagents": "{count} 个子代理",
+    "waitingFor": "已等待 {duration}",
+    "you": "你："
+  }
+}

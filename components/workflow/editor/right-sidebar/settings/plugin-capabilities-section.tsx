@@ -63,7 +63,7 @@ export function PluginCapabilitiesSection() {
         settings: projected.settings,
         isTemplate: false,
       })
-      router.push(`/workflows/${row.id}`)
+      router.push(`/workflows/editor?id=${encodeURIComponent(row.id)}`)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
     }

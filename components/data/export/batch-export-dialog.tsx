@@ -28,11 +28,12 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useBatchExport } from "@/hooks/data/use-batch-export"
-import type { ChatSession } from "@/lib/claude/types"
+import { notifyExportOutcome } from "@/lib/files/export-feedback"
+import type { ChatSession } from "@cognia/agent-config-types"
 import type { SingleExportFormat } from "@/lib/export/single"
-import { toast } from "sonner"
 import { listSessions } from "@/lib/db/sessions"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
+import { filterExposedSessions } from "@/lib/chat/session-exposure"
 
 const log = createLogger("data-export")
 
@@ -52,8 +53,9 @@ export function BatchExportDialog({ trigger }: Props) {
     if (!open) return
     listSessions()
       .then((rows) => {
-        setSessions(rows)
-        setSelectedIds(new Set(rows.map((r) => r.id)))
+        const exposed = filterExposedSessions(rows, "standard-export")
+        setSessions(exposed)
+        setSelectedIds(new Set(exposed.map((row) => row.id)))
       })
       .catch((error) => {
         log.error("batch-export-list-sessions-failed", { error })
@@ -80,24 +82,18 @@ export function BatchExportDialog({ trigger }: Props) {
   const onSubmit = async () => {
     const picked = sessions.filter((s) => selectedIds.has(s.id))
     if (picked.length === 0) return
-    const result = await run({ sessions: picked, format })
-    if (result.ok) {
-      if (!result.canceled) {
-        log.info("batch-export-completed", {
-          format,
-          count: result.exportedCount,
-        })
-        toast.success(t("batch.success", { count: result.exportedCount }))
-        setOpen(false)
-      }
-    } else {
-      log.error("batch-export-failed", {
+    const { outcome, exportedCount } = await run({ sessions: picked, format })
+    if (outcome.kind === "saved") {
+      log.info("batch-export-completed", {
         format,
-        count: picked.length,
-        error: result.error,
+        count: exportedCount,
+        platform: outcome.platform,
       })
-      toast.error(result.error)
+      setOpen(false)
+    } else if (outcome.kind === "error") {
+      log.error("batch-export-failed", { format, count: picked.length, error: outcome.message })
     }
+    notifyExportOutcome(outcome, { t, shareTitle: t("batchTitle") })
   }
 
   const progressPct = useMemo(() => {

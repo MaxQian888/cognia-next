@@ -1,4 +1,4 @@
-jest.mock("@/lib/document/knowledge-rag", () => ({
+jest.mock("@cognia/document/knowledge-rag", () => ({
   buildProjectContext: jest.fn((project: unknown, _query: unknown) => {
     if (!project) return { systemPrompt: "", chunks: [] }
     return {

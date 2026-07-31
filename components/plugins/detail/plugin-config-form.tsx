@@ -18,20 +18,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { PluginExtensionBoundary } from "@/components/plugins/plugin-extension-slot"
+import { PluginSurface } from "@/components/plugins/plugin-surface"
 import {
   loadConfigComponent,
   type ConfigComponent,
 } from "@/lib/plugin/bridge/config-component-bridge"
 import type { PluginManifest } from "@/types/plugin/plugin"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -48,7 +40,20 @@ import { Card } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { getPlugin, setPluginConfig } from "@/lib/db/plugins"
 import type { PluginRow } from "@/lib/db/plugin-types"
-import { usePluginsStore } from "@/stores/plugins"
+
+/**
+ * Best-effort config-change fan-out (JS onConfigChange hook + python host
+ * push). Persisting via setPluginConfig stays the source of truth — a
+ * missing/uninitialized manager (web mode, tests) must never fail the save.
+ */
+async function notifyConfigChanged(pluginId: string, config: Record<string, unknown>) {
+  try {
+    const { getPluginManager } = await import("@/lib/plugin/core/manager")
+    await getPluginManager().notifyPluginConfigChanged(pluginId, config)
+  } catch {
+    // Manager not initialized — config still applies on next plugin load.
+  }
+}
 
 type FieldType =
   | "string"
@@ -120,7 +125,26 @@ function parseValidators(prop: Record<string, unknown>): FieldValidator | undefi
 }
 
 function describe(prop: Record<string, unknown>): string | undefined {
-  return typeof prop.description === "string" ? prop.description : undefined
+  if (typeof prop.description === "string") return prop.description
+  // markdownDescription is rendered as plain text here (untrusted plugin input
+  // is not passed through a markdown renderer); it is preferable to losing it.
+  if (typeof prop.markdownDescription === "string") return prop.markdownDescription
+  return undefined
+}
+
+/**
+ * Field entries sorted by the VS Code-style `order` (ascending; entries without
+ * an `order` sort last). Array.sort is stable, so declaration order is the
+ * tiebreaker.
+ */
+function orderedFieldEntries(fields: Record<string, SchemaField>): [string, SchemaField][] {
+  return Object.entries(fields).sort((a, b) => {
+    const oa =
+      typeof a[1].raw.order === "number" ? (a[1].raw.order as number) : Number.POSITIVE_INFINITY
+    const ob =
+      typeof b[1].raw.order === "number" ? (b[1].raw.order as number) : Number.POSITIVE_INFINITY
+    return oa - ob
+  })
 }
 
 function parseObjectProperties(schema: Record<string, unknown>): Record<string, SchemaField> {
@@ -246,43 +270,51 @@ const FORMAT_PATTERNS: Record<NonNullable<FieldValidator["format"]>, RegExp> = {
   uri: /^[a-z][a-z0-9+.-]*:[^\s]+$/i,
 }
 
-function validateField(field: SchemaField, value: unknown): string | null {
+/**
+ * Translator for the `plugins.configForm` namespace. Validation messages are
+ * user-facing, so they're produced through next-intl (`validation.*` keys)
+ * rather than hard-coded English. A plugin-supplied `patternMessage` is the
+ * one exception — the plugin owns that string, so it's surfaced verbatim.
+ */
+type ConfigFormTranslate = (key: string, values?: Record<string, string | number>) => string
+
+function validateField(field: SchemaField, value: unknown, t: ConfigFormTranslate): string | null {
   const v = field.validators
   if (!v) return null
   if (field.type === "string" || field.type === "enum") {
     if (typeof value !== "string") return null
     if (v.minLength !== undefined && value.length < v.minLength) {
-      return `Must be at least ${v.minLength} characters.`
+      return t("validation.minLength", { min: v.minLength })
     }
     if (v.maxLength !== undefined && value.length > v.maxLength) {
-      return `Must be at most ${v.maxLength} characters.`
+      return t("validation.maxLength", { max: v.maxLength })
     }
     if (v.pattern) {
       try {
         if (!new RegExp(v.pattern).test(value)) {
-          return v.patternMessage ?? `Must match pattern ${v.pattern}.`
+          return v.patternMessage ?? t("validation.pattern", { pattern: v.pattern })
         }
       } catch {
         // Bad regex from the manifest — skip silently rather than crash.
       }
     }
     if (v.format && !FORMAT_PATTERNS[v.format].test(value)) {
-      return `Must be a valid ${v.format}.`
+      return t("validation.format", { format: v.format })
     }
   }
   if (field.type === "number") {
     const n = typeof value === "number" ? value : Number(value)
-    if (Number.isNaN(n)) return "Must be a number."
-    if (v.min !== undefined && n < v.min) return `Must be ≥ ${v.min}.`
-    if (v.max !== undefined && n > v.max) return `Must be ≤ ${v.max}.`
+    if (Number.isNaN(n)) return t("validation.notNumber")
+    if (v.min !== undefined && n < v.min) return t("validation.min", { min: v.min })
+    if (v.max !== undefined && n > v.max) return t("validation.max", { max: v.max })
   }
   if (field.type === "array") {
     if (Array.isArray(value)) {
       if (v.minLength !== undefined && value.length < v.minLength) {
-        return `Must have at least ${v.minLength} items.`
+        return t("validation.minItems", { min: v.minLength })
       }
       if (v.maxLength !== undefined && value.length > v.maxLength) {
-        return `Must have at most ${v.maxLength} items.`
+        return t("validation.maxItems", { max: v.maxLength })
       }
     }
   }
@@ -296,6 +328,7 @@ function validateField(field: SchemaField, value: unknown): string | null {
 function collectErrors(
   fields: Record<string, SchemaField>,
   values: Record<string, unknown>,
+  t: ConfigFormTranslate,
   pathPrefix = ""
 ): Record<string, string> {
   const out: Record<string, string> = {}
@@ -305,7 +338,7 @@ function collectErrors(
     if (field.type === "object" && field.children) {
       Object.assign(
         out,
-        collectErrors(field.children, (value as Record<string, unknown>) ?? {}, path)
+        collectErrors(field.children, (value as Record<string, unknown>) ?? {}, t, path)
       )
       continue
     }
@@ -313,37 +346,27 @@ function collectErrors(
       value.forEach((row, idx) => {
         Object.assign(
           out,
-          collectErrors(field.children!, (row as Record<string, unknown>) ?? {}, `${path}[${idx}]`)
+          collectErrors(
+            field.children!,
+            (row as Record<string, unknown>) ?? {},
+            t,
+            `${path}[${idx}]`
+          )
         )
       })
       continue
     }
-    const err = validateField(field, value)
+    const err = validateField(field, value, t)
     if (err) out[path] = err
   }
   return out
 }
-export function PluginConfigForm() {
-  const target = usePluginsStore((s) => s.configTarget)
-  const close = usePluginsStore((s) => s.closeConfigure)
-  const open = target !== null
-  return (
-    <Dialog open={open} onOpenChange={(o) => !o && close()}>
-      <DialogContent className="w-[95vw] max-w-xl">
-        {target ? <PluginConfigFormContent pluginId={target.pluginId} onClose={close} /> : null}
-      </DialogContent>
-    </Dialog>
-  )
-}
-
 export function PluginConfigFormContent({
   pluginId,
   onClose,
-  variant = "modal",
 }: {
   pluginId: string
   onClose: () => void
-  variant?: PluginConfigFormVariant
 }) {
   const t = useTranslations("plugins.configForm")
   const plugin = useLiveQuery(() => getPlugin(pluginId), [pluginId])
@@ -353,13 +376,7 @@ export function PluginConfigFormContent({
   }
 
   return (
-    <PluginConfigFormBody
-      key={pluginId}
-      pluginId={pluginId}
-      plugin={plugin}
-      onClose={onClose}
-      variant={variant}
-    />
+    <PluginConfigFormBody key={pluginId} pluginId={pluginId} plugin={plugin} onClose={onClose} />
   )
 }
 
@@ -388,32 +405,20 @@ function seedValues(
   return seed
 }
 
-export type PluginConfigFormVariant = "modal" | "inline"
-
 /**
  * Form body for a plugin's `manifest.configSchema`.
  *
- * The same body is rendered in two contexts:
- *
- *   - **modal** — wrapped in `<Dialog>` by `PluginConfigForm`; uses Dialog
- *     primitives (`DialogHeader` / `DialogFooter`) so the modal chrome lines
- *     up with the rest of the panel's dialog hosts.
- *   - **inline** — embedded inside the right-pane detail's Configure
- *     sub-tab (`components/plugins/detail/plugin-detail-configure.tsx`).
- *     Replaces Dialog primitives with plain headings so the form blends
- *     into the surrounding pane instead of looking like a misplaced
- *     dialog. `onClose` is still wired (used as "save completed"
- *     callback) but no longer closes a host.
- *
- * Both variants share schema parsing, validation, default-seeding,
- * setPluginConfig persistence, and the saving/error state machine — only
- * the surrounding chrome differs.
+ * Rendered inline inside the right-pane detail's Configure section
+ * (`components/plugins/detail/plugin-detail-configure.tsx`) — plain
+ * `<header>` / `<div>` chrome so the form blends into the surrounding pane.
+ * `onClose` is wired as a "save completed" callback (there is no host to
+ * close). Handles schema parsing, validation, default-seeding,
+ * setPluginConfig persistence, and the saving/error state machine.
  */
 export function PluginConfigFormBody(props: {
   pluginId: string
   plugin: PluginRow
   onClose: () => void
-  variant?: PluginConfigFormVariant
 }) {
   // A plugin may ship its own React settings UI via `manifest.configComponent`
   // (ADR-0026 §3 §B). When declared, render it instead of the generic
@@ -432,12 +437,10 @@ function SchemaConfigBody({
   pluginId,
   plugin,
   onClose,
-  variant = "modal",
 }: {
   pluginId: string
   plugin: PluginRow
   onClose: () => void
-  variant?: PluginConfigFormVariant
 }) {
   const t = useTranslations("plugins.configForm")
   const schema = useMemo(
@@ -450,7 +453,7 @@ function SchemaConfigBody({
     seedValues(schema.fields, plugin.config ?? {})
   )
   const [saving, setSaving] = useState(false)
-  const errors = useMemo(() => collectErrors(schema.fields, values), [schema.fields, values])
+  const errors = useMemo(() => collectErrors(schema.fields, values, t), [schema.fields, values, t])
   const hasErrors = Object.keys(errors).length > 0
 
   const handleSave = async () => {
@@ -458,19 +461,17 @@ function SchemaConfigBody({
     setSaving(true)
     try {
       await setPluginConfig(pluginId, values)
+      await notifyConfigChanged(pluginId, values)
       onClose()
     } finally {
       setSaving(false)
     }
   }
 
-  const Header = variant === "modal" ? ModalHeader : InlineHeader
-  const Footer = variant === "modal" ? ModalFooter : InlineFooter
-
   if (schema.unknown || Object.keys(schema.fields).length === 0) {
     return (
       <>
-        <Header title={plugin.name} description={t("noSchema")} version={null} />
+        <FormHeader title={plugin.name} description={t("noSchema")} version={null} />
         <Card className="p-0">
           <ScrollArea className="max-h-[40vh]">
             <pre className="p-3 text-xs font-mono">
@@ -478,20 +479,20 @@ function SchemaConfigBody({
             </pre>
           </ScrollArea>
         </Card>
-        <Footer>
+        <FormFooter>
           <Button onClick={onClose}>{t("close")}</Button>
-        </Footer>
+        </FormFooter>
       </>
     )
   }
 
   return (
     <>
-      <Header title={plugin.name} version={plugin.version} description={t("description")} />
+      <FormHeader title={plugin.name} version={plugin.version} description={t("description")} />
 
       <ScrollArea className="max-h-[60vh]">
         <div className="space-y-4 pr-3">
-          {Object.entries(schema.fields).map(([key, field]) => (
+          {orderedFieldEntries(schema.fields).map(([key, field]) => (
             <FieldRow
               key={key}
               fieldKey={key}
@@ -505,22 +506,20 @@ function SchemaConfigBody({
         </div>
       </ScrollArea>
 
-      <Footer>
+      <FormFooter>
         <Button variant="outline" onClick={onClose} disabled={saving}>
           {t("cancel")}
         </Button>
         <Button onClick={handleSave} disabled={saving || hasErrors}>
           {saving ? t("saving") : t("save")}
         </Button>
-      </Footer>
+      </FormFooter>
     </>
   )
 }
 
 type CustomLoadState =
-  | { status: "loading" }
-  | { status: "ready"; Component: ConfigComponent }
-  | { status: "fallback" }
+  { status: "loading" } | { status: "ready"; Component: ConfigComponent } | { status: "fallback" }
 
 /**
  * Renders a plugin's `manifest.configComponent` (ADR-0026 §3 §B).
@@ -531,7 +530,7 @@ type CustomLoadState =
  * The bridge caches the resolved component per pluginId.
  *
  * States: `loading` → header + spinner text; `ready` → header + the custom
- * component wrapped in the shared `PluginExtensionBoundary` (a render crash
+ * component wrapped in the shared `PluginSurface` (a render crash
  * records a `plugin.silent-failure` diagnostic and collapses to nothing,
  * never taking down the panel); `fallback` → the generic `SchemaConfigBody`
  * (load returned null: no component, or the import errored).
@@ -540,12 +539,10 @@ function CustomConfigBody({
   pluginId,
   plugin,
   onClose,
-  variant = "modal",
 }: {
   pluginId: string
   plugin: PluginRow
   onClose: () => void
-  variant?: PluginConfigFormVariant
 }) {
   const t = useTranslations("plugins.configForm")
   const [state, setState] = useState<CustomLoadState>({ status: "loading" })
@@ -559,7 +556,7 @@ function CustomConfigBody({
         const Component = await loadConfigComponent(
           plugin.manifest as unknown as PluginManifest,
           plugin.path ?? "",
-          { importer: (entry) => manager.importPluginEntry(entry) }
+          { importer: (entry) => manager.importPluginEntry(entry, pluginId) }
         )
         if (cancelled) return
         setState(Component ? { status: "ready", Component } : { status: "fallback" })
@@ -575,23 +572,20 @@ function CustomConfigBody({
   const handleSave = useCallback(
     async (next: Record<string, unknown>) => {
       await setPluginConfig(pluginId, next)
+      await notifyConfigChanged(pluginId, next)
       onClose()
     },
     [pluginId, onClose]
   )
 
   if (state.status === "fallback") {
-    return (
-      <SchemaConfigBody pluginId={pluginId} plugin={plugin} onClose={onClose} variant={variant} />
-    )
+    return <SchemaConfigBody pluginId={pluginId} plugin={plugin} onClose={onClose} />
   }
-
-  const Header = variant === "modal" ? ModalHeader : InlineHeader
 
   if (state.status === "loading") {
     return (
       <>
-        <Header title={plugin.name} version={plugin.version} description={t("description")} />
+        <FormHeader title={plugin.name} version={plugin.version} description={t("description")} />
         <p className="text-sm text-muted-foreground p-4">{t("loadingComponent")}</p>
       </>
     )
@@ -600,10 +594,14 @@ function CustomConfigBody({
   const { Component } = state
   return (
     <>
-      <Header title={plugin.name} version={plugin.version} description={t("description")} />
-      <PluginExtensionBoundary pluginId={pluginId} extensionId={`${pluginId}:configComponent`}>
+      <FormHeader title={plugin.name} version={plugin.version} description={t("description")} />
+      <PluginSurface
+        pluginId={pluginId}
+        surfaceId={`${pluginId}:configComponent`}
+        formFactor="block"
+      >
         <Component config={plugin.config ?? {}} onSave={handleSave} pluginId={pluginId} />
-      </PluginExtensionBoundary>
+      </PluginSurface>
     </>
   )
 }
@@ -614,24 +612,7 @@ interface HeaderProps {
   description: string
 }
 
-function ModalHeader({ title, version, description }: HeaderProps) {
-  return (
-    <DialogHeader>
-      <DialogTitle>
-        {title}
-        {version ? (
-          <>
-            {" "}
-            <span className="text-muted-foreground text-sm font-normal">v{version}</span>
-          </>
-        ) : null}
-      </DialogTitle>
-      <DialogDescription>{description}</DialogDescription>
-    </DialogHeader>
-  )
-}
-
-function InlineHeader({ title, version, description }: HeaderProps) {
+function FormHeader({ title, version, description }: HeaderProps) {
   return (
     <header className="space-y-1 pb-2 border-b">
       <h2 className="text-base font-semibold">
@@ -648,11 +629,7 @@ function InlineHeader({ title, version, description }: HeaderProps) {
   )
 }
 
-function ModalFooter({ children }: { children: React.ReactNode }) {
-  return <DialogFooter>{children}</DialogFooter>
-}
-
-function InlineFooter({ children }: { children: React.ReactNode }) {
+function FormFooter({ children }: { children: React.ReactNode }) {
   return <div className="flex items-center justify-end gap-2 pt-2 border-t">{children}</div>
 }
 
@@ -674,12 +651,20 @@ function FieldRow({
   const t = useTranslations("plugins.configForm")
   const id = `plugin-config-${fieldPath.replace(/[.[\]]/g, "_")}`
   const error = errors[fieldPath]
+  const title = typeof field.raw.title === "string" ? field.raw.title : fieldKey
+  const deprecation =
+    typeof field.raw.deprecationMessage === "string" ? field.raw.deprecationMessage : undefined
   return (
     <div className="space-y-1.5">
       <Label htmlFor={id} className="text-xs font-medium">
-        {fieldKey}
+        {title}
       </Label>
       {field.description && <p className="text-xs text-muted-foreground">{field.description}</p>}
+      {deprecation && (
+        <p className="text-[10px] text-amber-600 dark:text-amber-400">
+          {t("deprecated")}: {deprecation}
+        </p>
+      )}
       {renderInput({ field, fieldPath, id, value, errors, onChange, t })}
       {error && <p className="text-[10px] text-destructive">{error}</p>}
     </div>
@@ -730,11 +715,25 @@ function renderInput(args: RenderArgs) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {(field.enumValues ?? []).map((opt) => (
-              <SelectItem key={opt} value={opt}>
-                {opt}
-              </SelectItem>
-            ))}
+            {(field.enumValues ?? []).map((opt, i) => {
+              const descs = field.raw.enumDescriptions
+              const desc =
+                Array.isArray(descs) && typeof descs[i] === "string"
+                  ? (descs[i] as string)
+                  : undefined
+              return (
+                <SelectItem key={opt} value={opt}>
+                  {desc ? (
+                    <span className="flex flex-col">
+                      <span>{opt}</span>
+                      <span className="text-[10px] text-muted-foreground">{desc}</span>
+                    </span>
+                  ) : (
+                    opt
+                  )}
+                </SelectItem>
+              )
+            })}
           </SelectContent>
         </Select>
       )

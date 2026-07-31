@@ -1,0 +1,146 @@
+{
+  "autoTitle": {
+    "description": "首次回复后用模型为对话命名。",
+    "heading": "自动生成标题",
+    "label": "生成对话标题"
+  },
+  "composerBehavior": {
+    "autoScroll": {
+      "hint": "回复流式输出时自动滚动到最新内容。",
+      "label": "流式输出时自动滚动"
+    },
+    "clearAfterSend": {
+      "hint": "消息发送后清空输入框。",
+      "label": "发送后清空输入框"
+    },
+    "compactLayout": {
+      "hint": "使用更紧凑的输入区布局，为会话内容留出更多空间。",
+      "label": "使用紧凑输入区布局"
+    },
+    "description": "控制消息输入框的输入、发送与草稿行为。",
+    "inputHistory": {
+      "hint": "在空输入框中按上/下方向键调出历史消息。",
+      "label": "调出输入历史"
+    },
+    "persistDrafts": {
+      "hint": "切换对话时保留每个对话中未发送的文本。",
+      "label": "保存未发送草稿"
+    },
+    "sendOnEnter": {
+      "hint": "按 Enter 发送；用 Shift+Enter 换行。",
+      "label": "按 Enter 发送"
+    },
+    "title": "输入框行为"
+  },
+  "description": "自动生成标题并配置时间线缩略图。",
+  "inputSend": {
+    "description": "消息输入框的键盘、发送与 AI 辅助设置。",
+    "title": "输入与发送"
+  },
+  "labelModel": {
+    "description": "用于时间线标签的后台模型。",
+    "heading": "标签模型"
+  },
+  "labelSummary": {
+    "description": "用模型把每个回合概括成短标签（每回合一次调用）。",
+    "heading": "美化时间线标签",
+    "label": "生成时间线标签"
+  },
+  "messageStream": {
+    "description": "控制助手回复到达时的显示方式。",
+    "title": "消息流"
+  },
+  "model": "模型",
+  "provider": "服务商",
+  "runStatusBar": {
+    "contextPct": {
+      "description": "最新回合后模型上下文窗口的占用比例。",
+      "heading": "上下文占用",
+      "label": "显示上下文占用"
+    },
+    "cost": {
+      "description": "本会话的估算成本。",
+      "heading": "成本",
+      "label": "显示成本"
+    },
+    "description": "选择输入框上方的运行状态条在回合运行时显示哪些指标。",
+    "elapsed": {
+      "description": "活跃工作计时（审批等待时暂停）。",
+      "heading": "耗时",
+      "label": "显示耗时"
+    },
+    "outputTokens": {
+      "description": "本会话生成的输出 token 总数。",
+      "heading": "输出 token",
+      "label": "显示输出 token"
+    },
+    "speed": {
+      "description": "生成吞吐（每秒 token）。",
+      "heading": "模型速度",
+      "label": "显示模型速度"
+    },
+    "title": "运行状态条",
+    "tools": {
+      "description": "运行回合中的工具调用次数。",
+      "heading": "工具数",
+      "label": "显示工具数"
+    }
+  },
+  "sidebar": {
+    "contentSearch": {
+      "description": "不仅匹配会话标题，也匹配消息正文内容（速度较慢）。",
+      "heading": "搜索消息内容",
+      "label": "在消息内容中搜索"
+    },
+    "density": {
+      "description": "收紧行间距以容纳更多会话。",
+      "heading": "紧凑行",
+      "label": "使用紧凑会话行"
+    },
+    "description": "调整聊天侧边栏列出和搜索会话的方式。",
+    "groupBy": {
+      "description": "选择会话列表的主分组维度。按工作区分组会列出所有工作区的会话；其他模式只显示当前工作区。",
+      "heading": "会话分组方式",
+      "label": "会话分组",
+      "options": {
+        "agent": "角色",
+        "date": "日期",
+        "none": "不分组",
+        "team": "私信 / 团队",
+        "workspace": "工作区"
+      }
+    },
+    "preview": {
+      "description": "在每个会话下方显示一行最新消息预览。",
+      "heading": "消息预览",
+      "label": "显示消息预览"
+    },
+    "resetWidth": {
+      "button": "重置宽度",
+      "description": "将可拖拽的侧边栏恢复到默认宽度。",
+      "heading": "侧边栏宽度"
+    },
+    "title": "会话侧边栏",
+    "unread": {
+      "description": "在有未读消息的会话上显示计数徽标。",
+      "heading": "未读徽标",
+      "label": "显示未读徽标"
+    }
+  },
+  "streaming": {
+    "description": "在助手生成回复时逐 token 实时显示。关闭后仅在回复完成时整条显示。",
+    "heading": "逐字流式输出",
+    "label": "逐 token 流式显示回复"
+  },
+  "timeline": {
+    "description": "在长对话右侧显示时间线缩略图。",
+    "heading": "对话时间线",
+    "label": "显示对话时间线"
+  },
+  "title": "会话",
+  "titleModel": {
+    "description": "用于生成标题的后台模型，默认使用对话模型。",
+    "heading": "标题模型"
+  },
+  "useDefault": "使用对话默认"
+}

@@ -1,0 +1,50 @@
+{
+  "connectFirst": "连接到你的桌面以查看其智能体队列。",
+  "empty": "暂无活动 Agent。",
+  "permission": {
+    "allow": "允许",
+    "allowed": "已允许",
+    "controlLost": "远程控制权限已被撤销。",
+    "countdown": "{seconds} 秒",
+    "denied": "已拒绝",
+    "deny": "拒绝",
+    "expired": "已在桌面处理",
+    "failed": "发送失败——请重试。",
+    "request": "权限请求：{tool}",
+    "requestGeneric": "收到权限请求"
+  },
+  "question": {
+    "answered": "已回答。",
+    "controlLost": "远程控制权限已被撤销。",
+    "countdown": "剩余 {seconds} 秒",
+    "expired": "回答窗口已关闭，请在终端里回答。",
+    "failed": "回答发送失败。",
+    "submit": "提交"
+  },
+  "reply": {
+    "failed": "发送失败——请重试。",
+    "open": "回复",
+    "placeholder": "发送消息…",
+    "send": "发送"
+  },
+  "row": {
+    "error": {
+      "tool": "工具错误",
+      "turn": "本轮失败"
+    },
+    "focus": "聚焦终端",
+    "focusFailed": "无法聚焦终端。",
+    "status": {
+      "ended": "会话已结束",
+      "idle": "空闲",
+      "planPending": "计划等待在桌面确认",
+      "waitingInput": "正在桌面等待输入",
+      "waitingPermission": "等待权限审批",
+      "working": "工作中…"
+    },
+    "you": "你："
+  },
+  "summary": "{total} 个 Agent",
+  "title": "智能体队列",
+  "waiting": "{count} 个待处理"
+}

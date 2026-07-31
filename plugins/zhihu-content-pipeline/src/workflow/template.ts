@@ -16,7 +16,7 @@
  * stubs without credentials).
  */
 
-import { defineWorkflowTemplate } from "@/lib/plugin/sdk/define-workflow-template"
+import { defineWorkflowTemplate } from "@cognia/plugin-sdk"
 import type {
   PluginWorkflowTemplateDef,
   PluginWorkflowTemplateNode,
@@ -43,7 +43,8 @@ const NODES: PluginWorkflowTemplateNode[] = [
       params: {
         text:
           "运行前：① 本机 `npm i -g zget-cli` 且 `zget login`（热榜步骤用终端节点跑 zget，桌面端 Tauri 限定）；" +
-          "② 在 Rank 节点填好 provider/model/apiKey（否则只会回显占位）。每天 09:00 自动跑，也可在编辑器点 Run 手动跑。",
+          "② 在「设置 → AI」里配好模型路由（Rank 节点用 routed 模式走应用已配置的 provider，无需在节点上填 key）。" +
+          "每天 09:00 自动跑（终端节点为无人值守模式，不会弹确认框），也可在编辑器点 Run 手动跑。",
       },
     },
   },
@@ -61,7 +62,15 @@ const NODES: PluginWorkflowTemplateNode[] = [
     position: { x: 240, y: 0 },
     data: {
       label: "知乎热榜",
-      params: { command: "zget hot --format json", onFailure: "throw" },
+      params: {
+        command: "zget hot --format json",
+        onFailure: "throw",
+        // A cron-triggered run has nobody present to answer a consent prompt.
+        // Without this the node takes the DOCK path (`terminal.ts`), which
+        // calls `requestAgentTrust` and opens a tab — so the 09:00 run just
+        // sat waiting on a dialog until it timed out and failed the workflow.
+        unattended: true,
+      },
     },
   },
   {
@@ -72,8 +81,17 @@ const NODES: PluginWorkflowTemplateNode[] = [
     data: {
       label: "聚类打分",
       params: {
+        // `routed` uses the app's configured provider routing. WITHOUT it the
+        // node falls into `ai-prompt-v2`'s explicit branch, which needs
+        // provider+model+apiKey ON THE NODE — the template has no place to put
+        // them, so every run hit the "using stub echo" fallback, `save` failed
+        // to parse the echo and swallowed it, and the daily cron wrote 0 rows
+        // while reporting success.
+        mode: "routed",
         systemPrompt: RANK_SYSTEM_PROMPT,
-        userPrompt: "知乎热榜原始数据如下，请产出候选选题 JSON：\n\n{{ $node['scan'].out.output }}",
+        // NOTE: no `.out` wrapper — the runtime stores a node's raw executor
+        // output at `upstream[id]` (see lib/workflow/editor/expr-ref.ts).
+        userPrompt: "知乎热榜原始数据如下，请产出候选选题 JSON：\n\n{{ $node['scan'].output }}",
       },
     },
   },
@@ -84,7 +102,7 @@ const NODES: PluginWorkflowTemplateNode[] = [
     position: { x: 720, y: 0 },
     data: {
       label: "存选题候选",
-      params: { candidates: "{{ $node['rank'].out.completion }}", source: "zhihu-hot" },
+      params: { candidates: "{{ $node['rank'].completion }}", source: "zhihu-hot" },
     },
   },
 ]
@@ -101,7 +119,7 @@ export const TOPIC_DISCOVERY_TEMPLATE = defineWorkflowTemplate({
   description:
     "每天抓知乎热榜 → 聚类打分 → 把候选选题写入流水线数据库，供审阅面板做选题确认。前段自动化，选题/写作走人工 + 团队对话。",
   category: "automation",
-  icon: "newspaper",
+  icon: "Newspaper",
   complexity: "intermediate",
   nodes: NODES,
   edges: EDGES,

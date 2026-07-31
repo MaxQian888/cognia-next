@@ -5,6 +5,7 @@
 
 import { create } from "zustand"
 import { persist, subscribeWithSelector } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 import type {
   A2UISurfaceState,
   A2UISurfaceType,
@@ -24,6 +25,24 @@ import {
 } from "@/lib/a2ui/parser"
 import { setValueByPath, getValueByPath, deepMerge, deepClone } from "@/lib/a2ui/data-model"
 import { globalEventEmitter, createUserAction, createDataModelChange } from "@/lib/a2ui/events"
+import { getA2UIPersistenceLimit } from "@/lib/a2ui/runtime-settings"
+import { useSettingsStore } from "@/stores/settings"
+import {
+  canDuplicateComponentSubtree,
+  collectComponentSubtreeIds,
+  getComponentChildReferences,
+  getComponentCollectionSlots,
+  hasComponentReferenceCycle,
+  rewriteComponentChildReferences,
+  rewriteComponentCollectionSlot,
+  type A2UIComponentPlacement,
+} from "@/lib/a2ui/component-tree"
+import {
+  deleteSurface as deleteDurableSurface,
+  listSurfaces as listDurableSurfaces,
+  upsertSurface as upsertDurableSurface,
+} from "@/lib/db/a2ui-surfaces"
+import type { A2UISurfaceRow } from "@/lib/db/a2ui-types"
 
 /**
  * History entry for undo/redo
@@ -34,15 +53,92 @@ export interface A2UIHistoryEntry {
   description: string
   components: Record<string, A2UIComponent>
   dataModel: Record<string, unknown>
+  rootId: string
 }
 
 const MAX_HISTORY_ENTRIES = 50
+
+function haveSameCollectionPlacements(left: A2UIComponent, right: A2UIComponent): boolean {
+  const leftSlots = getComponentCollectionSlots(left)
+  const rightSlots = getComponentCollectionSlots(right)
+  return (
+    leftSlots.length === rightSlots.length &&
+    leftSlots.every((leftSlot, slotIndex) => {
+      const rightSlot = rightSlots[slotIndex]
+      return (
+        leftSlot.id === rightSlot.id &&
+        leftSlot.childIds.length === rightSlot.childIds.length &&
+        leftSlot.childIds.every((childId, childIndex) => childId === rightSlot.childIds[childIndex])
+      )
+    })
+  )
+}
 const HISTORY_DEBOUNCE_MS = 300
+
+/**
+ * Compute the undo/redo stack update for a snapshot of `surfaceId`.
+ *
+ * Extracted so mutating actions (updateComponents / updateDataModel) can fold
+ * the snapshot into the same set() transaction as the mutation itself — a
+ * separate pushSnapshot set() would notify every subscriber twice per patch,
+ * which compounds badly during streaming.
+ *
+ * Returns null when the surface does not exist.
+ */
+function buildSnapshotUpdate(
+  state: Pick<A2UIState, "surfaces" | "undoStacks" | "redoStacks">,
+  surfaceId: string,
+  description: string
+): Partial<Pick<A2UIState, "undoStacks" | "redoStacks">> | null {
+  const surface = state.surfaces[surfaceId]
+  if (!surface) return null
+
+  const stack = state.undoStacks[surfaceId] || []
+  const lastEntry = stack[stack.length - 1]
+
+  // Debounce: merge consecutive same-description snapshots within 300ms
+  if (
+    lastEntry &&
+    lastEntry.description === description &&
+    Date.now() - lastEntry.timestamp < HISTORY_DEBOUNCE_MS
+  ) {
+    // Update the latest entry's timestamp (keep original snapshot)
+    const updatedStack = [...stack]
+    updatedStack[updatedStack.length - 1] = { ...lastEntry, timestamp: Date.now() }
+    return {
+      undoStacks: { ...state.undoStacks, [surfaceId]: updatedStack },
+    }
+  }
+
+  // The store mutates `components` / `dataModel` immutably (every
+  // update replaces them via structural sharing — see
+  // `lib/a2ui/data-model.ts`), so a snapshot can capture the current
+  // references directly instead of deep-cloning the whole tree on
+  // every component/data update. Structural sharing means the
+  // retained snapshots also share unchanged subtrees, so undo history
+  // costs O(changed-spine) memory rather than O(model size) per step.
+  const entry: A2UIHistoryEntry = {
+    id: `hist-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    timestamp: Date.now(),
+    description,
+    components: surface.components,
+    dataModel: surface.dataModel,
+    rootId: surface.rootId,
+  }
+
+  const newStack = [...stack, entry].slice(-MAX_HISTORY_ENTRIES)
+
+  return {
+    undoStacks: { ...state.undoStacks, [surfaceId]: newStack },
+    // Clear redo stack on new change
+    redoStacks: { ...state.redoStacks, [surfaceId]: [] },
+  }
+}
 
 /**
  * A2UI Store State
  */
-interface A2UIState {
+export interface A2UIState {
   // Surface management
   surfaces: Record<string, A2UISurfaceState>
   activeSurfaceId: string | null
@@ -68,18 +164,48 @@ interface A2UIState {
 /**
  * A2UI Store Actions
  */
-interface A2UIActions {
+export interface A2UIActions {
   // Surface lifecycle
   createSurface: (
     surfaceId: string,
     type: A2UISurfaceType,
     options?: { catalogId?: string; title?: string; widget?: A2UIWidgetMetadata }
   ) => void
+  restoreSurface: (surface: A2UISurfaceState) => boolean
   deleteSurface: (surfaceId: string) => void
   setActiveSurface: (surfaceId: string | null) => void
 
   // Component management
   updateComponents: (surfaceId: string, components: A2UIComponent[]) => void
+  addComponent: (
+    surfaceId: string,
+    component: A2UIComponent,
+    placement: A2UIComponentPlacement
+  ) => boolean
+  addComponentSubtree: (
+    surfaceId: string,
+    components: A2UIComponent[],
+    rootId: string,
+    placement: A2UIComponentPlacement
+  ) => boolean
+  addComponentSubtreeToRoot: (
+    surfaceId: string,
+    components: A2UIComponent[],
+    rootId: string
+  ) => boolean
+  moveComponent: (
+    surfaceId: string,
+    componentId: string,
+    placement: A2UIComponentPlacement
+  ) => boolean
+  removeComponent: (surfaceId: string, componentId: string) => boolean
+  duplicateComponent: (surfaceId: string, componentId: string) => string | null
+  replaceSurfaceContent: (
+    surfaceId: string,
+    components: A2UIComponent[],
+    dataModel: Record<string, unknown>,
+    rootId?: string
+  ) => boolean
   getComponent: (surfaceId: string, componentId: string) => A2UIComponent | undefined
 
   // Data model management
@@ -116,6 +242,7 @@ interface A2UIActions {
 
   // Utilities
   getSurface: (surfaceId: string) => A2UISurfaceState | undefined
+  flushPersistence: () => void
   clearEventHistory: () => void
   reset: () => void
 }
@@ -177,6 +304,9 @@ function normalizePersistedSurfaces(persistedSurfaces: unknown): Record<string, 
     }
 
     const surface = value as Partial<A2UISurfaceState>
+    if (surface.type === "inline") {
+      continue
+    }
     const rawComponents =
       surface.components && typeof surface.components === "object"
         ? (surface.components as Record<string, A2UIComponent>)
@@ -205,6 +335,144 @@ function normalizePersistedSurfaces(persistedSurfaces: unknown): Record<string, 
   }
 
   return normalized
+}
+
+function toDurableSurface(surface: A2UISurfaceState): A2UISurfaceRow {
+  return {
+    id: surface.id,
+    type: surface.type,
+    components: surface.components,
+    dataModel: surface.dataModel,
+    rootId: surface.rootId,
+    catalogId: surface.catalogId,
+    title: surface.title,
+    widget: surface.widget,
+    createdAt: surface.createdAt,
+    updatedAt: surface.updatedAt,
+  }
+}
+
+function fromDurableSurface(row: A2UISurfaceRow): A2UISurfaceState {
+  return {
+    ...row,
+    components: migrateComponentMap(row.components),
+    dataModel: deepClone(row.dataModel),
+    ready: Boolean(row.components[row.rootId]),
+  }
+}
+
+function readySurfaceCache(
+  surfaces: Record<string, A2UISurfaceState>
+): Record<string, A2UISurfaceState> {
+  const limit = getA2UIPersistenceLimit(useSettingsStore.getState().settings)
+  return Object.fromEntries(
+    Object.entries(surfaces)
+      .filter(([, surface]) => surface.type !== "inline" && surface.ready)
+      .sort(([, left], [, right]) => right.updatedAt - left.updatedAt)
+      .slice(0, limit)
+  )
+}
+
+let durableSurfaceHydrated = false
+let durableSurfaceAvailable = true
+let durableSurfaceSyncQueue = Promise.resolve()
+
+function enqueueDurableSurfaceSync(task: () => Promise<void>): void {
+  if (!durableSurfaceHydrated || !durableSurfaceAvailable) return
+  durableSurfaceSyncQueue = durableSurfaceSyncQueue.then(task).catch(() => {
+    durableSurfaceAvailable = false
+  })
+}
+
+function syncDurableSurfaceChanges(
+  surfaces: Record<string, A2UISurfaceState>,
+  previous: Record<string, A2UISurfaceState>
+): void {
+  for (const [id, surface] of Object.entries(surfaces)) {
+    if (surface.type === "inline" || !surface.ready) continue
+    const old = previous[id]
+    if (old === surface) continue
+    enqueueDurableSurfaceSync(() => upsertDurableSurface(toDurableSurface(surface)))
+  }
+  for (const [id, surface] of Object.entries(previous)) {
+    if (surface.type === "inline" || surfaces[id]) continue
+    enqueueDurableSurfaceSync(() => deleteDurableSurface(id))
+  }
+}
+
+function collectReachableComponentIds(
+  components: Record<string, A2UIComponent>,
+  rootId: string,
+  excluded: ReadonlySet<string>
+): Set<string> {
+  const reachable = new Set<string>()
+  const pending = [rootId]
+  while (pending.length > 0) {
+    const componentId = pending.pop()!
+    if (excluded.has(componentId) || reachable.has(componentId) || !components[componentId])
+      continue
+    reachable.add(componentId)
+    for (const reference of getComponentChildReferences(components[componentId])) {
+      pending.push(reference.id)
+    }
+  }
+  return reachable
+}
+
+function createCopyComponentId(componentId: string, occupied: Set<string>): string {
+  const base = `${componentId}-copy`
+  let candidate = base
+  let suffix = 2
+  while (occupied.has(candidate)) {
+    candidate = `${base}-${suffix}`
+    suffix += 1
+  }
+  occupied.add(candidate)
+  return candidate
+}
+
+interface PreparedComponentSubtree {
+  combinedComponents: Record<string, A2UIComponent>
+  reachable: Set<string>
+}
+
+function prepareComponentSubtree(
+  surface: A2UISurfaceState,
+  components: A2UIComponent[],
+  rootId: string
+): PreparedComponentSubtree | null {
+  if (components.length === 0) return null
+
+  const insertedComponents: Record<string, A2UIComponent> = {}
+  for (const sourceComponent of components) {
+    if (
+      !sourceComponent.id ||
+      insertedComponents[sourceComponent.id] ||
+      surface.components[sourceComponent.id]
+    ) {
+      return null
+    }
+    insertedComponents[sourceComponent.id] = migrateLegacyComponent(deepClone(sourceComponent))
+  }
+  if (!insertedComponents[rootId]) return null
+
+  const combinedComponents = { ...surface.components, ...insertedComponents }
+  const hasMissingReference = Object.values(insertedComponents).some((current) =>
+    getComponentChildReferences(current).some((reference) => !combinedComponents[reference.id])
+  )
+  if (hasMissingReference || hasComponentReferenceCycle(combinedComponents, rootId)) return null
+
+  const reachable = collectComponentSubtreeIds(combinedComponents, rootId)
+  const hasDetachedComponent = Object.keys(insertedComponents).some((id) => !reachable.has(id))
+  return hasDetachedComponent ? null : { combinedComponents, reachable }
+}
+
+function createRootLayoutId(components: Record<string, A2UIComponent>): string {
+  const base = "root-layout"
+  if (!components[base]) return base
+  let suffix = 2
+  while (components[`${base}-${suffix}`]) suffix += 1
+  return `${base}-${suffix}`
 }
 
 /**
@@ -239,6 +507,37 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
           }))
         },
 
+        restoreSurface: (surface) => {
+          const components = migrateComponentMap(surface.components)
+          if (!surface.id || !components[surface.rootId]) return false
+
+          set((state) => {
+            const { [surface.id]: _error, ...errors } = state.errors
+            const { [surface.id]: _loading, ...loadingSurfaces } = state.loadingSurfaces
+            const { [surface.id]: _streaming, ...streamingSurfaces } = state.streamingSurfaces
+            const { [surface.id]: _undo, ...undoStacks } = state.undoStacks
+            const { [surface.id]: _redo, ...redoStacks } = state.redoStacks
+            return {
+              surfaces: {
+                ...state.surfaces,
+                [surface.id]: {
+                  ...surface,
+                  components,
+                  dataModel: deepClone(surface.dataModel),
+                  ready: true,
+                },
+              },
+              activeSurfaceId: state.activeSurfaceId ?? surface.id,
+              errors,
+              loadingSurfaces,
+              streamingSurfaces,
+              undoStacks,
+              redoStacks,
+            }
+          })
+          return true
+        },
+
         deleteSurface: (surfaceId) => {
           set((state) => {
             const { [surfaceId]: _, ...remainingSurfaces } = state.surfaces
@@ -265,12 +564,12 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
 
         // Component management
         updateComponents: (surfaceId, components) => {
-          // Snapshot before mutation for undo
-          get().pushSnapshot(surfaceId, "updateComponents")
-
+          // Snapshot + mutation in one set() transaction (single notification)
           set((state) => {
             const surface = state.surfaces[surfaceId]
             if (!surface) return state
+
+            const snapshot = buildSnapshotUpdate(state, surfaceId, "updateComponents")
 
             const updatedComponents = { ...surface.components }
             for (const component of components) {
@@ -278,6 +577,7 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
             }
 
             return {
+              ...snapshot,
               surfaces: {
                 ...state.surfaces,
                 [surfaceId]: {
@@ -290,6 +590,303 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
           })
         },
 
+        addComponent: (surfaceId, component, placement) => {
+          return get().addComponentSubtree(surfaceId, [component], component.id, placement)
+        },
+
+        addComponentSubtree: (surfaceId, components, rootId, placement) => {
+          const surface = get().surfaces[surfaceId]
+          const parent = surface?.components[placement.parentId]
+          if (!surface || !parent) return false
+          const prepared = prepareComponentSubtree(surface, components, rootId)
+          if (!prepared || prepared.reachable.has(placement.parentId)) return false
+
+          const nextParent = rewriteComponentCollectionSlot(
+            parent,
+            placement.slotId,
+            (childIds) => {
+              const index = Math.max(
+                0,
+                Math.min(placement.index ?? childIds.length, childIds.length)
+              )
+              return [...childIds.slice(0, index), rootId, ...childIds.slice(index)]
+            }
+          )
+          if (!nextParent) return false
+
+          const nextComponents = {
+            ...prepared.combinedComponents,
+            [placement.parentId]: nextParent,
+          }
+          set((state) => {
+            const currentSurface = state.surfaces[surfaceId]
+            if (!currentSurface) return state
+            const snapshot = buildSnapshotUpdate(state, surfaceId, "addComponent")
+            return {
+              ...snapshot,
+              surfaces: {
+                ...state.surfaces,
+                [surfaceId]: {
+                  ...currentSurface,
+                  components: nextComponents,
+                  updatedAt: Date.now(),
+                },
+              },
+            }
+          })
+          return true
+        },
+
+        addComponentSubtreeToRoot: (surfaceId, components, rootId) => {
+          const surface = get().surfaces[surfaceId]
+          if (!surface || !surface.components[surface.rootId]) return false
+          const prepared = prepareComponentSubtree(surface, components, rootId)
+          if (!prepared || prepared.reachable.has(surface.rootId)) return false
+
+          const nextRootId = createRootLayoutId(prepared.combinedComponents)
+          const nextComponents = {
+            ...prepared.combinedComponents,
+            [nextRootId]: {
+              id: nextRootId,
+              component: "Column",
+              children: [surface.rootId, rootId],
+            } as A2UIComponent,
+          }
+          set((state) => {
+            const currentSurface = state.surfaces[surfaceId]
+            if (!currentSurface) return state
+            const snapshot = buildSnapshotUpdate(state, surfaceId, "addComponent")
+            return {
+              ...snapshot,
+              surfaces: {
+                ...state.surfaces,
+                [surfaceId]: {
+                  ...currentSurface,
+                  rootId: nextRootId,
+                  components: nextComponents,
+                  updatedAt: Date.now(),
+                },
+              },
+            }
+          })
+          return true
+        },
+
+        moveComponent: (surfaceId, componentId, placement) => {
+          const surface = get().surfaces[surfaceId]
+          const component = surface?.components[componentId]
+          const targetParent = surface?.components[placement.parentId]
+          if (!surface || !component || !targetParent || componentId === surface.rootId)
+            return false
+
+          const movingSubtree = collectComponentSubtreeIds(surface.components, componentId)
+          if (movingSubtree.has(placement.parentId)) return false
+
+          const nextComponents: Record<string, A2UIComponent> = {}
+          for (const [id, current] of Object.entries(surface.components)) {
+            nextComponents[id] = rewriteComponentChildReferences(current, (reference) =>
+              reference.kind === "collection" && reference.id === componentId ? [] : [reference.id]
+            )
+          }
+
+          const detachedTargetParent = nextComponents[placement.parentId]
+          const placedTargetParent = rewriteComponentCollectionSlot(
+            detachedTargetParent,
+            placement.slotId,
+            (childIds) => {
+              const index = Math.max(
+                0,
+                Math.min(placement.index ?? childIds.length, childIds.length)
+              )
+              return [...childIds.slice(0, index), componentId, ...childIds.slice(index)]
+            }
+          )
+          if (!placedTargetParent) return false
+          nextComponents[placement.parentId] = placedTargetParent
+
+          const changed = Object.entries(surface.components).some(
+            ([id, current]) => !haveSameCollectionPlacements(current, nextComponents[id])
+          )
+          if (!changed) return false
+
+          set((state) => {
+            const currentSurface = state.surfaces[surfaceId]
+            if (!currentSurface) return state
+            const snapshot = buildSnapshotUpdate(state, surfaceId, "moveComponent")
+            return {
+              ...snapshot,
+              surfaces: {
+                ...state.surfaces,
+                [surfaceId]: {
+                  ...currentSurface,
+                  components: nextComponents,
+                  updatedAt: Date.now(),
+                },
+              },
+            }
+          })
+          return true
+        },
+
+        removeComponent: (surfaceId, componentId) => {
+          const surface = get().surfaces[surfaceId]
+          if (!surface || componentId === surface.rootId || !surface.components[componentId]) {
+            return false
+          }
+
+          const forcedRoots = new Set([componentId])
+          let componentIdsToDelete = new Set<string>()
+
+          while (true) {
+            const candidates = new Set<string>()
+            for (const forcedRoot of forcedRoots) {
+              for (const id of collectComponentSubtreeIds(surface.components, forcedRoot)) {
+                candidates.add(id)
+              }
+            }
+
+            const reachable = collectReachableComponentIds(
+              surface.components,
+              surface.rootId,
+              forcedRoots
+            )
+            componentIdsToDelete = new Set(
+              [...candidates].filter((candidate) => !reachable.has(candidate))
+            )
+            if (componentIdsToDelete.has(surface.rootId)) return false
+
+            let addedRequiredOwner = false
+            for (const [ownerId, owner] of Object.entries(surface.components)) {
+              if (componentIdsToDelete.has(ownerId) || forcedRoots.has(ownerId)) continue
+              const losesRequiredReference = getComponentChildReferences(owner).some(
+                (reference) =>
+                  reference.kind === "required" && componentIdsToDelete.has(reference.id)
+              )
+              if (losesRequiredReference) {
+                if (ownerId === surface.rootId) return false
+                forcedRoots.add(ownerId)
+                addedRequiredOwner = true
+              }
+            }
+            if (!addedRequiredOwner) break
+          }
+
+          const nextComponents: Record<string, A2UIComponent> = {}
+          for (const [id, component] of Object.entries(surface.components)) {
+            if (componentIdsToDelete.has(id)) continue
+            nextComponents[id] = rewriteComponentChildReferences(component, (reference) =>
+              componentIdsToDelete.has(reference.id) ? [] : [reference.id]
+            )
+          }
+
+          set((state) => {
+            const currentSurface = state.surfaces[surfaceId]
+            if (!currentSurface) return state
+            const snapshot = buildSnapshotUpdate(state, surfaceId, "removeComponent")
+            return {
+              ...snapshot,
+              surfaces: {
+                ...state.surfaces,
+                [surfaceId]: {
+                  ...currentSurface,
+                  components: nextComponents,
+                  updatedAt: Date.now(),
+                },
+              },
+            }
+          })
+          return true
+        },
+
+        duplicateComponent: (surfaceId, componentId) => {
+          const surface = get().surfaces[surfaceId]
+          if (
+            !surface ||
+            !canDuplicateComponentSubtree(surface.components, surface.rootId, componentId)
+          ) {
+            return null
+          }
+
+          const subtreeIds = collectComponentSubtreeIds(surface.components, componentId)
+
+          const occupiedIds = new Set(Object.keys(surface.components))
+          const copiedIds = new Map<string, string>()
+          for (const originalId of subtreeIds) {
+            copiedIds.set(originalId, createCopyComponentId(originalId, occupiedIds))
+          }
+          const duplicateRootId = copiedIds.get(componentId)!
+
+          const nextComponents: Record<string, A2UIComponent> = { ...surface.components }
+          for (const originalId of subtreeIds) {
+            const copiedId = copiedIds.get(originalId)!
+            const source = deepClone(surface.components[originalId])
+            const rewritten = rewriteComponentChildReferences(source, (reference) => [
+              copiedIds.get(reference.id) ?? reference.id,
+            ])
+            nextComponents[copiedId] = { ...rewritten, id: copiedId } as A2UIComponent
+          }
+
+          for (const [ownerId, owner] of Object.entries(surface.components)) {
+            if (subtreeIds.has(ownerId)) continue
+            nextComponents[ownerId] = rewriteComponentChildReferences(owner, (reference) =>
+              reference.kind === "collection" && reference.id === componentId
+                ? [reference.id, duplicateRootId]
+                : [reference.id]
+            )
+          }
+
+          set((state) => {
+            const currentSurface = state.surfaces[surfaceId]
+            if (!currentSurface) return state
+            const snapshot = buildSnapshotUpdate(state, surfaceId, "duplicateComponent")
+            return {
+              ...snapshot,
+              surfaces: {
+                ...state.surfaces,
+                [surfaceId]: {
+                  ...currentSurface,
+                  components: nextComponents,
+                  updatedAt: Date.now(),
+                },
+              },
+            }
+          })
+          return duplicateRootId
+        },
+
+        replaceSurfaceContent: (surfaceId, components, dataModel, rootId) => {
+          const surface = get().surfaces[surfaceId]
+          if (!surface) return false
+
+          const nextComponents: Record<string, A2UIComponent> = {}
+          for (const component of components) {
+            nextComponents[component.id] = migrateLegacyComponent(component)
+          }
+          const nextRootId = rootId ?? surface.rootId
+          if (!nextComponents[nextRootId]) return false
+
+          set((state) => {
+            const currentSurface = state.surfaces[surfaceId]
+            if (!currentSurface) return state
+            const snapshot = buildSnapshotUpdate(state, surfaceId, "replaceSurfaceContent")
+            return {
+              ...snapshot,
+              surfaces: {
+                ...state.surfaces,
+                [surfaceId]: {
+                  ...currentSurface,
+                  components: nextComponents,
+                  dataModel: deepClone(dataModel),
+                  rootId: nextRootId,
+                  ready: true,
+                  updatedAt: Date.now(),
+                },
+              },
+            }
+          })
+          return true
+        },
+
         getComponent: (surfaceId, componentId) => {
           const surface = get().surfaces[surfaceId]
           return surface?.components[componentId]
@@ -297,16 +894,16 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
 
         // Data model management
         updateDataModel: (surfaceId, data, merge = true) => {
-          // Snapshot before mutation for undo
-          get().pushSnapshot(surfaceId, "updateDataModel")
-
+          // Snapshot + mutation in one set() transaction (single notification)
           set((state) => {
             const surface = state.surfaces[surfaceId]
             if (!surface) return state
 
+            const snapshot = buildSnapshotUpdate(state, surfaceId, "updateDataModel")
             const newDataModel = merge ? deepMerge(surface.dataModel, data) : deepClone(data)
 
             return {
+              ...snapshot,
               surfaces: {
                 ...state.surfaces,
                 [surfaceId]: {
@@ -320,13 +917,22 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
         },
 
         setDataValue: (surfaceId, path, value) => {
+          const changeEvent = createDataModelChange(surfaceId, path, value)
+
+          // Mutation + event-history append in one set() transaction so each
+          // keystroke fires a single store notification
           set((state) => {
+            const eventHistory = [changeEvent, ...state.eventHistory].slice(
+              0,
+              state.maxEventHistory
+            )
             const surface = state.surfaces[surfaceId]
-            if (!surface) return state
+            if (!surface) return { eventHistory }
 
             const newDataModel = setValueByPath(surface.dataModel, path, value)
 
             return {
+              eventHistory,
               surfaces: {
                 ...state.surfaces,
                 [surfaceId]: {
@@ -338,8 +944,8 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
             }
           })
 
-          // Emit data change event
-          get().emitDataChange(surfaceId, path, value)
+          // Emit to global event emitter
+          globalEventEmitter.emitDataChange(changeEvent)
         },
 
         getDataValue: <T = unknown>(surfaceId: string, path: string): T | undefined => {
@@ -521,43 +1127,7 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
 
         // Undo/redo
         pushSnapshot: (surfaceId, description) => {
-          const surface = get().surfaces[surfaceId]
-          if (!surface) return
-
-          set((state) => {
-            const stack = state.undoStacks[surfaceId] || []
-            const lastEntry = stack[stack.length - 1]
-
-            // Debounce: merge consecutive same-description snapshots within 300ms
-            if (
-              lastEntry &&
-              lastEntry.description === description &&
-              Date.now() - lastEntry.timestamp < HISTORY_DEBOUNCE_MS
-            ) {
-              // Update the latest entry's timestamp (keep original snapshot)
-              const updatedStack = [...stack]
-              updatedStack[updatedStack.length - 1] = { ...lastEntry, timestamp: Date.now() }
-              return {
-                undoStacks: { ...state.undoStacks, [surfaceId]: updatedStack },
-              }
-            }
-
-            const entry: A2UIHistoryEntry = {
-              id: `hist-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-              timestamp: Date.now(),
-              description,
-              components: deepClone(surface.components) as Record<string, A2UIComponent>,
-              dataModel: deepClone(surface.dataModel) as Record<string, unknown>,
-            }
-
-            const newStack = [...stack, entry].slice(-MAX_HISTORY_ENTRIES)
-
-            return {
-              undoStacks: { ...state.undoStacks, [surfaceId]: newStack },
-              // Clear redo stack on new change
-              redoStacks: { ...state.redoStacks, [surfaceId]: [] },
-            }
-          })
+          set((state) => buildSnapshotUpdate(state, surfaceId, description) ?? state)
         },
 
         undo: (surfaceId) => {
@@ -570,13 +1140,14 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
 
           const lastEntry = undoStack[undoStack.length - 1]
 
-          // Save current state to redo stack
+          // Save current state to redo stack — immutable refs (see pushSnapshot).
           const redoEntry: A2UIHistoryEntry = {
             id: `redo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
             timestamp: Date.now(),
             description: "undo",
-            components: deepClone(surface.components) as Record<string, A2UIComponent>,
-            dataModel: deepClone(surface.dataModel) as Record<string, unknown>,
+            components: surface.components,
+            dataModel: surface.dataModel,
+            rootId: surface.rootId,
           }
 
           set({
@@ -586,6 +1157,7 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
                 ...surface,
                 components: lastEntry.components,
                 dataModel: lastEntry.dataModel,
+                rootId: lastEntry.rootId,
                 updatedAt: Date.now(),
               },
             },
@@ -610,13 +1182,14 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
 
           const nextEntry = redoStack[redoStack.length - 1]
 
-          // Save current state to undo stack
+          // Save current state to undo stack — immutable refs (see pushSnapshot).
           const undoEntry: A2UIHistoryEntry = {
             id: `undo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
             timestamp: Date.now(),
             description: "redo",
-            components: deepClone(surface.components) as Record<string, A2UIComponent>,
-            dataModel: deepClone(surface.dataModel) as Record<string, unknown>,
+            components: surface.components,
+            dataModel: surface.dataModel,
+            rootId: surface.rootId,
           }
 
           set({
@@ -626,6 +1199,7 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
                 ...surface,
                 components: nextEntry.components,
                 dataModel: nextEntry.dataModel,
+                rootId: nextEntry.rootId,
                 updatedAt: Date.now(),
               },
             },
@@ -653,6 +1227,10 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
           return get().surfaces[surfaceId]
         },
 
+        flushPersistence: () => {
+          set((state) => ({ surfaces: state.surfaces }))
+        },
+
         clearEventHistory: () => {
           set({ eventHistory: [] })
         },
@@ -663,6 +1241,7 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
       }),
       {
         name: "cognia-a2ui-surfaces",
+        storage: persistLocalStorage(),
         version: 3,
         migrate: (persistedState) => {
           if (!persistedState || typeof persistedState !== "object") {
@@ -701,23 +1280,29 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
           state.activeSurfaceId = activeSurfaceId
         },
         partialize: (state) => {
-          // LRU: only persist the 20 most recently used surfaces (metadata only)
-          const MAX_PERSISTED_SURFACES = 20
+          // LRU: persist the configured number of most recently used surfaces
+          // in full. The
+          // component tree + data model MUST be persisted — nothing regenerates
+          // them on reload (custom apps have no template, and template apps
+          // carry user edits + live data-model state). Dropping them was what
+          // left every surface stuck at `ready:false` (perpetual loading
+          // spinner) after a refresh. `partialize` output round-trips through
+          // `normalizePersistedSurfaces` on rehydrate, which restores `ready`
+          // only when a renderable tree is present.
+          const maxPersistedSurfaces = getA2UIPersistenceLimit(useSettingsStore.getState().settings)
           const entries = Object.entries(state.surfaces)
           const sorted = entries
-            .filter(([, s]) => s.ready)
+            .filter(([, s]) => s.ready && s.type !== "inline")
             .sort(([, a], [, b]) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
-            .slice(0, MAX_PERSISTED_SURFACES)
+            .slice(0, maxPersistedSurfaces)
 
-          const lightSurfaces: Record<string, unknown> = {}
+          const persistedSurfaces: Record<string, A2UISurfaceState> = {}
           for (const [id, surface] of sorted) {
-            // Strip heavy data — components and dataModel are regenerated from templates
-            const { components: _c, dataModel: _d, ...metadata } = surface
-            lightSurfaces[id] = metadata
+            persistedSurfaces[id] = surface
           }
 
           return {
-            surfaces: lightSurfaces,
+            surfaces: persistedSurfaces,
             activeSurfaceId: state.activeSurfaceId,
             // Exclude undo/redo stacks from persistence
           }
@@ -726,6 +1311,70 @@ export const useA2UIStore = create<A2UIState & A2UIActions>()(
     )
   )
 )
+
+useA2UIStore.subscribe(
+  (state) => state.surfaces,
+  (surfaces, previous) => syncDurableSurfaceChanges(surfaces, previous)
+)
+
+/** Merge the durable Dexie source into the local ready-surface LRU cache. */
+export async function hydrateA2UISurfaceCache(): Promise<boolean> {
+  if (durableSurfaceHydrated) return durableSurfaceAvailable
+
+  let rows: A2UISurfaceRow[]
+  try {
+    rows = await listDurableSurfaces()
+  } catch {
+    durableSurfaceHydrated = true
+    durableSurfaceAvailable = false
+    return false
+  }
+
+  const local = useA2UIStore.getState().surfaces
+  const merged: Record<string, A2UISurfaceState> = {}
+  for (const row of rows) {
+    if (row.type !== "inline") merged[row.id] = fromDurableSurface(row)
+  }
+  for (const [id, surface] of Object.entries(local)) {
+    if (surface.type === "inline") {
+      merged[id] = surface
+      continue
+    }
+    const durable = merged[id]
+    if (!durable || surface.updatedAt >= durable.updatedAt) merged[id] = surface
+  }
+
+  const inline = Object.fromEntries(
+    Object.entries(merged).filter(([, surface]) => surface.type === "inline")
+  )
+  const cached = { ...inline, ...readySurfaceCache(merged) }
+  useA2UIStore.setState((state) => ({
+    surfaces: cached,
+    activeSurfaceId:
+      state.activeSurfaceId && cached[state.activeSurfaceId]
+        ? state.activeSurfaceId
+        : (Object.keys(cached)[0] ?? null),
+  }))
+
+  durableSurfaceHydrated = true
+  durableSurfaceAvailable = true
+  const durableSnapshot = Object.fromEntries(
+    rows.filter((row) => row.type !== "inline").map((row) => [row.id, fromDurableSurface(row)])
+  )
+  syncDurableSurfaceChanges(cached, durableSnapshot)
+  return true
+}
+
+/** Test/explicit-flush hook for queued Dexie writes. */
+export async function flushA2UISurfacePersistence(): Promise<void> {
+  await durableSurfaceSyncQueue
+}
+
+export function __resetA2UISurfacePersistenceForTesting(): void {
+  durableSurfaceHydrated = false
+  durableSurfaceAvailable = true
+  durableSurfaceSyncQueue = Promise.resolve()
+}
 
 /**
  * Selectors

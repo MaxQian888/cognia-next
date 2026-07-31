@@ -4,12 +4,19 @@
 
 import "fake-indexeddb/auto"
 
+/** Lets a test move the client onto a different host mid-run. */
+let companionConfig: { deviceId: string } | null = null
+jest.mock("@/lib/tauri/transport-companion", () => ({
+  loadCompanionConfig: () => companionConfig,
+}))
+
 import type { Transport } from "@/lib/tauri/transport-types"
 
 import { getDb, whenSeeded } from "@/lib/db/schema"
 
 import {
   __resetSyncStateForTests,
+  SYNC_HANDLER_TABLES,
   installEventDrivenSync,
   installForegroundSync,
   installNetworkSync,
@@ -38,6 +45,18 @@ function makeTransport(): Transport {
 
 beforeEach(() => {
   __resetSyncStateForTests()
+  // Unpaired unless the case says otherwise. Without this, a case that moves
+  // the client onto another host leaks that host into the next one, which now
+  // decides whether the cold-start mirror wipe fires.
+  companionConfig = null
+})
+
+describe("SYNC_HANDLER_TABLES registry", () => {
+  it("registers the terminalHistory handler (change point c)", () => {
+    // Guards against a TS-only sync addition that never wires its handler into
+    // DEFAULT_HANDLERS — the orchestrator would then silently skip the table.
+    expect(SYNC_HANDLER_TABLES).toContain("terminalHistory")
+  })
 })
 
 describe("runSyncDown", () => {
@@ -216,7 +235,9 @@ describe("installForegroundSync", () => {
 describe("cursor persistence (Wave 4 / ADR-0026)", () => {
   it("hydrates `since` from the Dexie syncCursors table on first runSyncDown", async () => {
     await whenSeeded()
-    await getDb().syncCursors.put({
+    await getDb().hostSyncCursors.put({
+      // Unpaired in tests, so the orchestrator's host key is the empty string.
+      serverKey: "",
       table: "characters",
       since: 777,
       lastSyncAt: 1_700_000_000_000,
@@ -241,7 +262,7 @@ describe("cursor persistence (Wave 4 / ADR-0026)", () => {
     // Fire-and-forget writes settle on the next microtask.
     await new Promise((r) => setTimeout(r, 5))
 
-    const persisted = await getDb().syncCursors.get("characters")
+    const persisted = await getDb().hostSyncCursors.get(["", "characters"])
     expect(persisted?.since).toBe(555)
     expect(persisted?.lastError).toBeNull()
   })
@@ -254,7 +275,7 @@ describe("cursor persistence (Wave 4 / ADR-0026)", () => {
     await runSyncDown({ transport: makeTransport(), handlers })
     await new Promise((r) => setTimeout(r, 5))
 
-    const persisted = await getDb().syncCursors.get("characters")
+    const persisted = await getDb().hostSyncCursors.get(["", "characters"])
     expect(persisted?.lastError).toContain("mock-transport")
     expect(persisted?.since).toBe(0)
   })
@@ -347,5 +368,157 @@ describe("installEventDrivenSync", () => {
 
     teardown()
     expect(unsub).toHaveBeenCalled()
+  })
+})
+
+describe("host isolation (v130)", () => {
+  it("does not resume from a cursor recorded against a different host", async () => {
+    // The corruption this closes: re-pairing elsewhere used to resume from the
+    // previous host's watermark and ask the new one for "everything since <a
+    // timestamp that means nothing here>", blending two machines' data.
+    await whenSeeded()
+    await getDb().hostSyncCursors.put({
+      serverKey: "other-host",
+      table: "characters",
+      since: 777,
+      lastSyncAt: 1,
+      lastError: null,
+    })
+
+    const handler = jest.fn().mockResolvedValue(makeOkOutcome("characters", 1, 5))
+    await runSyncDown({
+      transport: makeTransport(),
+      handlers: [{ table: "characters" as const, run: handler }],
+    })
+
+    expect(handler.mock.calls[0][1]).toEqual({ since: 0 })
+  })
+
+  it("keeps each host's watermark separately", async () => {
+    await whenSeeded()
+    await getDb().hostSyncCursors.bulkPut([
+      { serverKey: "", table: "characters", since: 11, lastSyncAt: 1, lastError: null },
+      { serverKey: "other-host", table: "characters", since: 99, lastSyncAt: 1, lastError: null },
+    ])
+
+    const handler = jest.fn().mockResolvedValue(makeOkOutcome("characters", 1, 12))
+    await runSyncDown({
+      transport: makeTransport(),
+      handlers: [{ table: "characters" as const, run: handler }],
+    })
+
+    expect(handler.mock.calls[0][1]).toEqual({ since: 11 })
+    // The other host's row is untouched — switching back must not re-pull.
+    expect((await getDb().hostSyncCursors.get(["other-host", "characters"]))?.since).toBe(99)
+  })
+
+  it("drops the mirrored rows when the host changes under it", async () => {
+    // Partitioning the cursors alone is not enough: the ROWS pulled from the
+    // previous host stay in the same tables, so two machines' sessions would
+    // simply pile up together. These tables are a cache of a host's state, not
+    // the client's own data, so clearing and re-pulling loses nothing.
+    await whenSeeded()
+    const db = getDb()
+    // A row that could only have come from the host we are leaving. Asserting
+    // on this specific row rather than a count keeps the test honest about
+    // seeded built-ins.
+    await db.characters.put({ id: "from-host-a", name: "A" } as never)
+
+    // First run hydrates against the current host key.
+    const handler = jest.fn().mockResolvedValue(makeOkOutcome("characters", 0, 1))
+    const handlers = [{ table: "characters" as const, run: handler }]
+    await runSyncDown({ transport: makeTransport(), handlers })
+    expect(await db.characters.get("from-host-a")).toBeDefined()
+
+    // Now the client is talking to a different host.
+    companionConfig = { deviceId: "device-on-host-b" }
+    await runSyncDown({ transport: makeTransport(), handlers })
+    await new Promise((r) => setTimeout(r, 5))
+
+    expect(await db.characters.get("from-host-a")).toBeUndefined()
+  })
+
+  it("keeps device-local settings when the host changes", async () => {
+    // `settings` is the one mirrored table the client also writes locally.
+    // Clearing it would throw away preferences the host never had.
+    await whenSeeded()
+    const db = getDb()
+    await db.settings.put({ id: "singleton", apiKey: "device-local" } as never)
+
+    const handler = jest.fn().mockResolvedValue(makeOkOutcome("characters", 0, 1))
+    const handlers = [{ table: "characters" as const, run: handler }]
+    await runSyncDown({ transport: makeTransport(), handlers })
+
+    companionConfig = { deviceId: "device-on-host-b" }
+    await runSyncDown({ transport: makeTransport(), handlers })
+    await new Promise((r) => setTimeout(r, 5))
+
+    expect((await db.settings.get("singleton"))?.apiKey).toBe("device-local")
+  })
+
+  it("drops rows left by a host it stopped talking to while it was not running", async () => {
+    // The in-process check only fires when THIS process already talked to
+    // another host. Re-pairing is a restart, and on iOS the app is routinely
+    // killed between the `CompanionConfig` write and the next sync tick — so
+    // without a durable record, host A's rows sat in the tables while host B's
+    // cursors started from zero, which is the blend v130 exists to prevent.
+    await whenSeeded()
+    const db = getDb()
+    // Let the beforeEach `clearCursors()` land before seeding the state the
+    // restart would have left behind.
+    await new Promise((r) => setTimeout(r, 5))
+    await db.characters.put({ id: "from-host-a", name: "A" } as never)
+    await db.hostSyncCursors.put({
+      serverKey: "device-on-host-a",
+      table: "characters",
+      since: 500,
+      lastSyncAt: 1,
+      lastError: null,
+    })
+
+    // Cold start: nothing in memory records host A — only the cursor row does.
+    companionConfig = { deviceId: "device-on-host-b" }
+    const handler = jest.fn().mockResolvedValue(makeOkOutcome("characters", 0, 1))
+    await runSyncDown({
+      transport: makeTransport(),
+      handlers: [{ table: "characters" as const, run: handler }],
+    })
+    await new Promise((r) => setTimeout(r, 5))
+
+    expect(await db.characters.get("from-host-a")).toBeUndefined()
+    expect(await db.hostSyncCursors.get(["device-on-host-a", "characters"])).toBeUndefined()
+    // ...and host B is asked for everything, not "since host A's watermark".
+    expect(handler.mock.calls[0][1]).toEqual({ since: 0 })
+  })
+
+  it("leaves the mirror alone while the companion config is still hydrating", async () => {
+    // `loadCompanionConfig` reads a cache that stays empty until
+    // `hydrateCompanionConfig` resolves at boot. Reading that as "a different
+    // host" would destroy the mirror of the host we are still paired to.
+    await whenSeeded()
+    const db = getDb()
+    await new Promise((r) => setTimeout(r, 5))
+    await db.characters.put({ id: "from-host-a", name: "A" } as never)
+    await db.hostSyncCursors.put({
+      serverKey: "device-on-host-a",
+      table: "characters",
+      since: 500,
+      lastSyncAt: 1,
+      lastError: null,
+    })
+
+    await runSyncDown({
+      transport: makeTransport(),
+      handlers: [
+        {
+          table: "characters" as const,
+          run: jest.fn().mockResolvedValue(makeOkOutcome("characters", 0, 1)),
+        },
+      ],
+    })
+    await new Promise((r) => setTimeout(r, 5))
+
+    expect(await db.characters.get("from-host-a")).toBeDefined()
+    expect(await db.hostSyncCursors.get(["device-on-host-a", "characters"])).toBeDefined()
   })
 })

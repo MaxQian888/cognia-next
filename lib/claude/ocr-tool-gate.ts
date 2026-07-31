@@ -11,7 +11,7 @@
  *   - for an IM session, the per-conversation `allowOcr === false`.
  */
 
-import type { Character } from "./types"
+import type { Character } from "@cognia/agent-config-types"
 
 export interface OcrToolGateInput {
   character?: Pick<Character, "enableOcr"> | null

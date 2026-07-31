@@ -2,15 +2,20 @@
 
 // Edit the cognia ThemeColors palette directly. The user picks an existing
 // theme (or "new"), tweaks tokens via the role-based `TokenGroup` clusters,
-// watches the `<ThemePreview />` update live, then saves. Saved themes are
+// watches the section's live preview update, then saves. Saved themes are
 // stored in `AppSettings.customThemes[]`; activation goes through
 // `setActiveCustomTheme` so the rest of the app picks them up.
 //
+// This editor owns no preview of its own: it publishes the draft to the one
+// `AppearancePreview` the Appearance section mounts in its detail header (see
+// `preview-draft-context.tsx`). Rendered outside that section the publish is
+// inert and the editor still works.
+//
 // Layout: xl+ renders two columns — the editor (name / dark switch /
 // action row / five collapsible token groups) on the left, and a sticky
-// column with the live preview plus the `SavedThemesRail` on the right.
-// Below xl everything stacks into a single column and the rail becomes a
-// wrapping horizontal strip (handled inside the rail component).
+// column with the `SavedThemesRail` on the right. Below xl everything stacks
+// into a single column and the rail becomes a wrapping horizontal strip
+// (handled inside the rail component).
 //
 // Interaction hardening on top of the original editor:
 //   1. Dirty-state protection — a `baseline` snapshot is kept for every
@@ -25,7 +30,7 @@
 // keeping the legacy `colors`/`isDark` fields populated for the
 // one-release rollback contract.
 
-import { useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -45,14 +50,14 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Trash2Icon } from "lucide-react"
 import { useSettingsStore } from "@/stores/settings"
-import type { CustomTheme, ThemeColors } from "@/types/plugin/plugin-extended"
+import type { CustomTheme, ThemeColors } from "@/types/plugin/plugin"
 import { THEME_COLOR_KEYS, DEFAULT_FALLBACKS } from "@/lib/appearance"
 import { auditThemeContrast } from "@/lib/appearance/contrast-audit"
 import { exportThemeToJson, importThemeFromJson } from "@/lib/appearance/theme-export"
 import { deriveOppositeVariant } from "@/lib/appearance/derive-variant"
 import { DEFAULT_GROUP_OPEN, TOKEN_GROUPS, TokenGroup } from "../components/token-group"
 import { SavedThemesRail } from "../components/saved-themes-rail"
-import { ThemePreview } from "../components/theme-preview"
+import { usePreviewDraftPublisher } from "../preview-draft-context"
 
 interface DraftTheme {
   id?: string
@@ -180,15 +185,24 @@ export function CustomThemeTab() {
   const fallback = DEFAULT_FALLBACKS[draft.isDark ? "dark" : "light"]
   const isExisting = Boolean(draft.id)
 
-  // The audit consumes a fully-populated palette, so we materialise the
-  // partial draft against the variant fallback. Memoised so per-row chips
-  // don't re-run the eight WCAG comparisons on every keystroke when the
-  // draft hasn't changed.
-  const auditTokens = useMemo(
+  // Both the audit and the section's preview consume a fully-populated
+  // palette, so we materialise the partial draft against the variant fallback.
+  // Memoised so per-row chips don't re-run the eight WCAG comparisons on every
+  // keystroke when the draft hasn't changed.
+  const resolvedTokens = useMemo(
     () => fillTokens(draft.colors, draft.isDark),
     [draft.colors, draft.isDark]
   )
-  const audit = useMemo(() => auditThemeContrast(auditTokens), [auditTokens])
+  const audit = useMemo(() => auditThemeContrast(resolvedTokens), [resolvedTokens])
+
+  // Drive the section's single preview off the draft, and hand it back when
+  // this panel unmounts. Keying off committed state covers every mutation
+  // path — event handlers and the render-phase reconciler above alike.
+  const publishDraft = usePreviewDraftPublisher()
+  useEffect(() => {
+    publishDraft({ colors: resolvedTokens, isDark: draft.isDark })
+    return () => publishDraft(null)
+  }, [resolvedTokens, draft.isDark, publishDraft])
 
   const doSelect = (theme: CustomTheme) => {
     applyDraft(buildDraftFromTheme(theme))
@@ -355,10 +369,14 @@ export function CustomThemeTab() {
         </div>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+      {/* Container-, not viewport-driven: this editor lives in the section's
+          ~700px detail pane, so a viewport breakpoint would split the columns
+          while the pane is far too narrow for them (it squeezed the hex inputs
+          to 26px). Only split once the pane itself can afford it. */}
+      <div className="grid gap-4 @4xl/appearance-pane:grid-cols-[minmax(0,1fr)_320px]">
         {/* Editor column */}
         <div className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-3 @xl/appearance-pane:grid-cols-2">
             <Input
               placeholder={t("namePlaceholder")}
               value={draft.name}
@@ -456,13 +474,9 @@ export function CustomThemeTab() {
           </div>
         </div>
 
-        {/* Preview + saved-themes column (sticky on xl so the preview stays
-            visible while scrolling through token groups) */}
+        {/* Saved-themes column (sticky on xl so the rail stays reachable while
+            scrolling through token groups) */}
         <div className="space-y-4 xl:sticky xl:top-4 xl:self-start">
-          <div className="space-y-2">
-            <Label className="text-xs">{t("previewLabel")}</Label>
-            <ThemePreview colors={draft.colors} fallback={fallback} />
-          </div>
           <SavedThemesRail
             themes={themes}
             activeId={activeId}

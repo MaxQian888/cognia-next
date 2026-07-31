@@ -26,12 +26,36 @@ import { useConnectionState } from "@/hooks/companion/use-connection-state"
 import { isMobile } from "@/lib/capacitor/_shared"
 import { runSyncDown, snapshotSyncStates } from "@/lib/sync/companion-sync"
 import { transport } from "@/lib/tauri"
-import type { TransportTier } from "@/lib/tauri/transport-companion"
+import type { ConnectionState, TransportTier } from "@/lib/tauri/transport-companion"
 import { cn } from "@/lib/utils"
 
 import { ConnectionDiagnosticsSheet } from "./connection-state-sheets/connection-diagnostics-sheet"
 import { MobilePairedServersSheet } from "./connection-state-sheets/mobile-paired-servers-sheet"
 import { MobileServerScanSheet } from "./connection-state-sheets/mobile-server-scan-sheet"
+
+/**
+ * Connection-state → (label key in `mobile.connectionState`, pill tone).
+ * Single source for every connection pill (the app-shell badge here and the
+ * in-session pill in `remote-session-detail.tsx`) so the two can't drift.
+ */
+export const CONNECTION_STATE_META: Record<ConnectionState, { labelKey: string; tone: string }> = {
+  connected: {
+    labelKey: "live",
+    tone: "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+  },
+  reconnecting: {
+    labelKey: "reconnecting",
+    tone: "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+  },
+  offline: {
+    labelKey: "offline",
+    tone: "border-zinc-500/40 bg-zinc-500/10 text-zinc-600 dark:text-zinc-400",
+  },
+  unauthenticated: {
+    labelKey: "repairNeeded",
+    tone: "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-300",
+  },
+}
 
 const TIER_DOT_CLASS: Record<TransportTier, string> = {
   "rtc-direct": "text-emerald-500",
@@ -60,6 +84,7 @@ export function ConnectionStateBadge({ className }: { className?: string }) {
   const t = useTranslations("mobile.connectionState")
   const state = useConnectionState()
   const router = useRouter()
+  const [menuOpen, setMenuOpen] = useState(false)
   const [scanOpen, setScanOpen] = useState(false)
   const [pairedOpen, setPairedOpen] = useState(false)
   const [diagOpen, setDiagOpen] = useState(false)
@@ -70,10 +95,16 @@ export function ConnectionStateBadge({ className }: { className?: string }) {
   // useState init so we don't pay a setState-in-effect cascade.
   const [mobile] = useState(() => isMobile())
 
+  // The relative "last synced" stamps only render inside the dropdown, so
+  // only run the refresh clock while it's open — this badge lives in the
+  // app-wide shell, so an always-on 30s interval ticked on every screen.
   useEffect(() => {
+    if (!menuOpen) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- deliberate one-shot clock seed so the relative "last synced" stamps are fresh the moment the dropdown opens, not stale from a prior open.
+    setNow(Date.now())
     const id = setInterval(() => setNow(Date.now()), 30_000)
     return () => clearInterval(id)
-  }, [])
+  }, [menuOpen])
 
   useEffect(() => {
     if (!mobile) return
@@ -88,43 +119,30 @@ export function ConnectionStateBadge({ className }: { className?: string }) {
 
   if (!state) return null
 
-  const styles = {
-    connected: {
-      labelKey: "live",
-      tone: "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
-    },
-    reconnecting: {
-      labelKey: "reconnecting",
-      tone: "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300",
-    },
-    offline: {
-      labelKey: "offline",
-      tone: "border-zinc-500/40 bg-zinc-500/10 text-zinc-600 dark:text-zinc-400",
-    },
-    unauthenticated: {
-      labelKey: "repairNeeded",
-      tone: "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-300",
-    },
-  } as const
-
-  const meta = styles[state]
+  const meta = CONNECTION_STATE_META[state]
   const label = t(meta.labelKey)
 
   async function handleReconnect() {
     // Re-run the WebRTC handshake when an RTC tier is active. If no tier
     // is wired (or we got throttled by the 5s defense), the sync kick
     // below still re-establishes the chat list so the UI feels responsive.
-    let outcome: "ok" | "no-tier" | "throttled" = "no-tier"
+    let outcome: "ok" | "busy" | "no-tier" | "throttled" = "no-tier"
     const txWithRtc = transport as unknown as {
-      reconnectRtc?: () => "ok" | "no-tier" | "throttled"
+      reconnectRtc?: () => "ok" | "busy" | "no-tier" | "throttled"
     }
     if (typeof txWithRtc.reconnectRtc === "function") {
       outcome = txWithRtc.reconnectRtc()
     }
     if (outcome === "throttled") {
       toast.info(t("toasts.reconnectThrottled"))
+    } else if (outcome === "busy") {
+      toast.info(t("toasts.reconnectBusy"))
     } else if (outcome === "ok") {
       toast.success(t("toasts.reconnectStarted"))
+    } else {
+      // Same "no RTC tier wired" feedback the diagnostics sheet gives, so
+      // the two reconnect buttons can't behave differently.
+      toast.message(t("toasts.noTier"))
     }
     try {
       await runSyncDown()
@@ -148,7 +166,7 @@ export function ConnectionStateBadge({ className }: { className?: string }) {
 
   return (
     <>
-      <DropdownMenu>
+      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
         <DropdownMenuTrigger asChild>
           <button
             type="button"

@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Coverage for `lib/db/wiki-articles.ts` — the v17 wiki articles CRUD layer.
  * Hits create/bulkCreate/get/listByScope/listByScopeAndModule/count, the

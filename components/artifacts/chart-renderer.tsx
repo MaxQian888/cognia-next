@@ -12,7 +12,7 @@ import { AlertCircle } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { CHART_COLORS } from "@/lib/artifacts"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import type { ChartDataPoint } from "@/types"
 import {
   LineChart,
@@ -230,7 +230,13 @@ export function ChartRenderer({
 
   return (
     <div className={cn("h-[300px] w-full p-4", className)}>
-      <ResponsiveContainer width="100%" height="100%">
+      <ResponsiveContainer
+        width="100%"
+        height="100%"
+        minWidth={1}
+        minHeight={1}
+        initialDimension={{ width: 320, height: 300 }}
+      >
         {renderChart()}
       </ResponsiveContainer>
     </div>

@@ -19,14 +19,19 @@
 import { PanelLeft, PanelRight } from "lucide-react"
 import { motion } from "motion/react"
 import { useTranslations } from "next-intl"
+import { Activity, useEffect, useRef } from "react"
+import type { PanelImperativeHandle } from "react-resizable-panels"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { useIsMobile } from "@/hooks/ui"
 import { useCanvasLayoutShortcuts } from "@/hooks/canvas/use-canvas-layout-shortcuts"
-import { useCanvasLayoutStore } from "@/stores/canvas/canvas-layout-store"
+import { CANVAS_LAYOUT_DEFAULTS, useCanvasLayoutStore } from "@/stores/canvas/canvas-layout-store"
 import { mobileTransition, useReducedMotionTransition } from "@/lib/ui/motion"
+import { magnetAsPercent, snapPanelSize } from "@/lib/ui/panel-snap"
+import { WORKBENCH_RAIL_WIDTH_PX } from "@/types/shell/workbench-rail"
+import { useWorkbenchRailPersistent } from "@/components/shell/use-workbench-rail-layout"
 import { CanvasDocumentRail } from "./canvas-document-rail"
 import { CanvasSidePanels } from "./canvas-side-panels"
 import { CanvasWorkspace } from "./canvas-workspace"
@@ -52,6 +57,16 @@ function CanvasDesktopShell() {
   const rightCollapsed = useCanvasLayoutStore((s) => s.rightCollapsed)
   const layoutVersion = useCanvasLayoutStore((s) => s.layoutVersion)
   const setSizes = useCanvasLayoutStore((s) => s.setSizes)
+  const setRightCollapsed = useCanvasLayoutStore((s) => s.setRightCollapsed)
+  const railPersistent = useWorkbenchRailPersistent()
+  // Same contract as the chat dock: collapsed means "shrunk to the activity
+  // rail" unless the user has switched the persistent rail off.
+  const rightCollapsedSize = railPersistent ? `${WORKBENCH_RAIL_WIDTH_PX}px` : "0%"
+  const rightPanelElementRef = useRef<HTMLDivElement | null>(null)
+  const rightPanelRef = useRef<PanelImperativeHandle | null>(null)
+  const latestRightPercentRef = useRef(rightSize)
+  const rightDragStartCollapsedRef = useRef(rightCollapsed)
+  const previousRightCollapsedRef = useRef(rightCollapsed)
 
   const clampedLeft = Math.max(CANVAS_SHELL_LEFT_MIN, Math.min(CANVAS_SHELL_LEFT_MAX, leftSize))
   const clampedRight = Math.max(CANVAS_SHELL_RIGHT_MIN, Math.min(CANVAS_SHELL_RIGHT_MAX, rightSize))
@@ -67,18 +82,80 @@ function CanvasDesktopShell() {
   // interpolation that framer drives via the `layout` prop.
   const collapseTransition = useReducedMotionTransition(mobileTransition("normal"))
 
+  // Drive the panel imperatively when the store's collapsed flag flips.
+  //
+  // `defaultSize` / `collapsedSize` are read once when the group lays out;
+  // changing the prop later moves nothing, and the group only re-keys on
+  // `layoutVersion`, which `resetLayout` alone bumps. So the rail toggle and
+  // ⌘J updated the store and left the column exactly where it was — the panel
+  // never shrank to the rail and never came back. The chat dock and the
+  // workflow editor already drive their panel this way.
+  useEffect(() => {
+    if (previousRightCollapsedRef.current === rightCollapsed) return
+    previousRightCollapsedRef.current = rightCollapsed
+    const panel = rightPanelRef.current
+    if (!panel) return
+    if (rightCollapsed) panel.collapse()
+    else panel.resize(`${panelRight}%`)
+    // `panelRight` is derived from the stored width and is only read on the
+    // expand branch, where it is the width to come back to.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rightCollapsed])
+
+  /** Release-snap for the right rail — see `lib/ui/panel-snap.ts`. */
+  const handleRightResizeRelease = () => {
+    const groupWidthPx = rightPanelElementRef.current?.parentElement?.offsetWidth ?? 0
+    const wasCollapsed = rightDragStartCollapsedRef.current
+    const snapped = snapPanelSize(latestRightPercentRef.current, {
+      // Canvas has no narrow/wide preset table; its one meaningful width is the
+      // shipped default, which is also what `resetLayout` restores.
+      presets: [CANVAS_LAYOUT_DEFAULTS.rightSize],
+      floor: CANVAS_SHELL_RIGHT_MIN,
+      expandTo: rightSize,
+      wasCollapsed,
+      magnet: magnetAsPercent(groupWidthPx),
+    })
+    if (snapped.kind === "collapsed") {
+      setRightCollapsed(true)
+      return
+    }
+    if (wasCollapsed) setRightCollapsed(false)
+    // Canvas sizes all three columns at once, so the snap has to give the width
+    // it takes back to the centre pane rather than to the group.
+    if (snapped.size !== latestRightPercentRef.current) {
+      setSizes([
+        panelLeft,
+        Math.max(CANVAS_SHELL_CENTER_MIN, 100 - panelLeft - snapped.size),
+        snapped.size,
+      ])
+    }
+  }
+
   return (
     <div className="flex w-full flex-1 min-h-0 overflow-hidden" data-bg-target="canvas">
       <ResizablePanelGroup
         key={layoutVersion}
         orientation="horizontal"
+        resizeTargetMinimumSize={{ coarse: 28, fine: 20 }}
         className="flex-1 min-h-0"
         onLayoutChanged={(layout) => {
           const order = ["canvas-left", "canvas-center", "canvas-right"] as const
           const sizes = order
             .map((id) => layout[id])
             .filter((v): v is number => typeof v === "number")
-          if (sizes.length === 3) setSizes(sizes)
+          if (sizes.length !== 3) return
+          // Tracked before the collapse check so a drag *out* of the rail still
+          // tells the release-snap where the pointer left it.
+          latestRightPercentRef.current = sizes[2] as number
+          if (rightCollapsed) return
+          // `react-resizable-panels` collapses on its own below `minSize`.
+          // Mirroring it keeps the rail toggle and ⌘J in step with the screen —
+          // the same gap the chat dock had.
+          if ((sizes[2] as number) < CANVAS_SHELL_RIGHT_MIN) {
+            setRightCollapsed(true)
+            return
+          }
+          setSizes(sizes)
         }}
       >
         <ResizablePanel
@@ -111,23 +188,36 @@ function CanvasDesktopShell() {
           </div>
         </ResizablePanel>
 
-        <ResizableHandle withHandle className={cn(rightCollapsed && "hidden")} />
+        {/* The divider stays live over a persistent rail: dragging this edge
+            outward is how the collapsed workbench is reopened. */}
+        <ResizableHandle
+          withHandle
+          className={cn("z-20 after:w-5", rightCollapsed && !railPersistent && "hidden")}
+          onPointerDown={() => {
+            rightDragStartCollapsedRef.current = rightCollapsed
+          }}
+          onPointerUp={handleRightResizeRelease}
+        />
         <ResizablePanel
           id="canvas-right"
-          defaultSize={rightCollapsed ? "0%" : `${panelRight}%`}
-          minSize={rightCollapsed ? "0%" : `${CANVAS_SHELL_RIGHT_MIN}%`}
+          panelRef={rightPanelRef}
+          elementRef={rightPanelElementRef}
+          defaultSize={rightCollapsed ? rightCollapsedSize : `${panelRight}%`}
+          minSize={rightCollapsed ? rightCollapsedSize : `${CANVAS_SHELL_RIGHT_MIN}%`}
           maxSize={`${CANVAS_SHELL_RIGHT_MAX}%`}
           collapsible
-          collapsedSize="0%"
+          collapsedSize={rightCollapsedSize}
         >
+          {/* Not faded out while the rail is persistent — the rail is the whole
+              point of that state and has to stay legible. */}
           <motion.div
             data-testid="canvas-right-wrapper"
             layout
-            animate={{ opacity: rightCollapsed ? 0 : 1 }}
+            animate={{ opacity: rightCollapsed && !railPersistent ? 0 : 1 }}
             transition={collapseTransition}
             className="flex h-full min-w-0 overflow-hidden"
           >
-            <CanvasSidePanels />
+            <CanvasSidePanels railOnly={rightCollapsed && railPersistent} />
           </motion.div>
         </ResizablePanel>
       </ResizablePanelGroup>
@@ -156,14 +246,22 @@ function CanvasMobileShell() {
           </SheetContent>
         </Sheet>
 
-        <Sheet open={mobileRightOpen} onOpenChange={setMobileRightOpen}>
+        <Sheet open={mobileRightOpen} onOpenChange={setMobileRightOpen} modal={mobileRightOpen}>
           <SheetTrigger asChild>
             <Button variant="ghost" size="icon" aria-label={t("openTools")}>
               <PanelRight className="size-4" />
             </Button>
           </SheetTrigger>
-          <SheetContent side="right" className="w-[min(85vw,360px)] p-0">
-            <CanvasSidePanels />
+          <SheetContent
+            forceMount
+            side="right"
+            className="w-[min(85vw,360px)] p-0"
+            inert={!mobileRightOpen}
+            aria-hidden={!mobileRightOpen}
+          >
+            <Activity mode={mobileRightOpen ? "visible" : "hidden"}>
+              <CanvasSidePanels mobile />
+            </Activity>
           </SheetContent>
         </Sheet>
       </div>

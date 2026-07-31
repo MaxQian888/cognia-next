@@ -5,6 +5,7 @@ import { useSettingsStore } from "@/stores/settings"
 import { applyUserCss } from "@/lib/appearance/custom-css/apply"
 import { disposeUrl, resolveSourceToCss } from "@/lib/appearance/wallpaper-storage"
 import { withBuiltinPresets } from "@/lib/appearance/presets"
+import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
 import type { BackgroundSettings, Wallpaper } from "@/types/appearance"
 
 /** Body data attributes the appearance module owns. globals.css selectors key off these. */
@@ -42,6 +43,7 @@ export function BackgroundApplier(): null {
   const wallpapers = useSettingsStore((s) => s.wallpapers)
   const customCss = useSettingsStore((s) => s.customCss)
   const customCssEnabled = useSettingsStore((s) => s.customCssEnabled)
+  const customCssScope = useSettingsStore((s) => s.customCssScope)
 
   const lastUrlRef = useRef<string | null>(null)
 
@@ -72,8 +74,8 @@ export function BackgroundApplier(): null {
   }, [background, wallpapers])
 
   useEffect(() => {
-    applyUserCss(customCss, customCssEnabled)
-  }, [customCss, customCssEnabled])
+    applyUserCss(customCss, customCssEnabled, customCssScope)
+  }, [customCss, customCssEnabled, customCssScope])
 
   return null
 }
@@ -88,6 +90,22 @@ interface ApplyArgs {
 async function applyBackground(args: ApplyArgs): Promise<void> {
   const { background, wallpapers, onApplied, isCancelled } = args
   const body = document.body
+
+  // The transparent desktop-pet windows (sprite overlay + click popup) load
+  // this same root layout, so the wallpaper machinery would otherwise paint a
+  // dimmed copy of the user's wallpaper into what must be a paint-through
+  // window — via `body[data-bg-enabled]::before` AND the `#app[data-bg-target]`
+  // layer for global/all scopes. Force wallpaper OFF in those windows: they own
+  // no surface that should carry the app background.
+  const role = getPetWindowRole()
+  if (isSecondaryOverlayRole(role)) {
+    body.setAttribute(ATTR_ENABLED, "false")
+    body.removeAttribute(ATTR_SCOPE)
+    clearScrim(body)
+    onApplied(null)
+    return
+  }
+
   if (!background.enabled || !background.activeId) {
     body.setAttribute(ATTR_ENABLED, "false")
     body.removeAttribute(ATTR_SCOPE)

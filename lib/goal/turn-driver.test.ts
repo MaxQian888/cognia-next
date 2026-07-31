@@ -1,8 +1,10 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 import type { Goal, GoalConfig } from "@/types/goal"
 import type { LlmClient } from "@/lib/twin/distill/llm"
-import { appendGoalEvent, createGoal, getGoal, listGoalEvents } from "@/lib/db/goals"
+import { appendGoalEvent, createGoal, getGoal, listGoalEvents, updateGoal } from "@/lib/db/goals"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
+import { listUsageForSession } from "@/lib/db/session-usage"
 
 const onGoalTerminalMock = jest.fn().mockResolvedValue(undefined)
 jest.mock("./completion-linkage", () => ({
@@ -144,6 +146,38 @@ describe("handleTurnComplete — turn delta persistence", () => {
     }
   })
 
+  it("records full goal usage when the caller provides SDK usage", async () => {
+    await createGoal(buildGoal({ id: "g1" }))
+    await handleTurnComplete({
+      goalId: "g1",
+      lastResponse: "x",
+      tokensDelta: 31,
+      usage: {
+        inputTokens: 20,
+        outputTokens: 11,
+        cacheReadInputTokens: 4,
+        cacheCreationInputTokens: 2,
+        totalCostUsd: 0.006,
+        durationMs: 900,
+      },
+      judgeClient: mockClient(() => '{"done": false, "reason": "x"}'),
+      capturedGenerationId: "gen-1",
+    })
+
+    const rows = await listUsageForSession("goal:g1")
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      messageId: "goal:g1:1",
+      surface: "goal",
+      inputTokens: 20,
+      outputTokens: 11,
+      cacheReadTokens: 4,
+      cacheCreationTokens: 2,
+      costUsd: 0.006,
+      durationMs: 900,
+    })
+  })
+
   it("clamps negative tokensDelta to 0", async () => {
     await createGoal(buildGoal({ id: "g1", tokensUsed: 50 }))
     await handleTurnComplete({
@@ -214,6 +248,49 @@ describe("handleTurnComplete — exit paths", () => {
     expect(out.exit).toBe("judge_done")
     expect(out.reason).toBe("haiku produced")
     expect((await getGoal("g1"))?.status).toBe("completed")
+  })
+
+  it("requireAcceptance parks a judge_done completion as paused + awaitingAcceptance", async () => {
+    await createGoal(buildGoal({ id: "g1", config: { ...SAMPLE_CONFIG, requireAcceptance: true } }))
+    const out = await handleTurnComplete({
+      goalId: "g1",
+      lastResponse: "done work",
+      tokensDelta: 0,
+      judgeClient: mockClient(() => '{"done": true, "reason": "objective met"}'),
+      capturedGenerationId: "gen-1",
+    })
+    expect(out.kind).toBe("exit")
+    if (out.kind !== "exit") return
+    expect(out.resultingStatus).toBe("paused")
+    expect(out.reason).toContain("awaiting acceptance")
+    const goal = await getGoal("g1")
+    expect(goal?.status).toBe("paused")
+    expect(goal?.awaitingAcceptance).toBe(true)
+    // Not terminal yet — completion linkage must NOT fire.
+    expect(onGoalTerminalMock).not.toHaveBeenCalled()
+    const events = await listGoalEvents("g1", 50)
+    expect(events.some((e) => e.kind === "acceptance_requested")).toBe(true)
+  })
+
+  it("requireAcceptance does NOT gate non-completed exits (user stop limits etc.)", async () => {
+    await createGoal(
+      buildGoal({
+        id: "g1",
+        turnsUsed: 19,
+        config: { ...SAMPLE_CONFIG, maxTurns: 20, requireAcceptance: true },
+      })
+    )
+    const out = await handleTurnComplete({
+      goalId: "g1",
+      lastResponse: "another turn",
+      tokensDelta: 0,
+      judgeClient: mockClient(() => '{"done": false, "reason": "keep going"}'),
+      capturedGenerationId: "gen-1",
+    })
+    expect(out.kind).toBe("exit")
+    if (out.kind !== "exit") return
+    expect(out.resultingStatus).toBe("turn_limited")
+    expect((await getGoal("g1"))?.awaitingAcceptance).not.toBe(true)
   })
 })
 
@@ -497,5 +574,158 @@ describe("handleTurnComplete — subgoal progress", () => {
     })
     expect(out.kind).toBe("continue")
     expect((await getGoal("g1"))?.subgoals).toBeUndefined()
+  })
+})
+
+describe("handleTurnComplete — completion-promise gate", () => {
+  const PROMISE = "ALL TESTS PASS"
+  const promiseConfig: GoalConfig = { ...SAMPLE_CONFIG, completionPromise: PROMISE }
+
+  it("judge done=true with a promise configured arms verification instead of exiting", async () => {
+    await createGoal(buildGoal({ id: "g1", config: promiseConfig }))
+    const out = await handleTurnComplete({
+      goalId: "g1",
+      lastResponse: "I believe everything is finished.",
+      tokensDelta: 0,
+      judgeClient: mockClient(() => '{"done": true, "reason": "looks complete"}'),
+      capturedGenerationId: "gen-1",
+    })
+    expect(out.kind).toBe("continue")
+    if (out.kind !== "continue") return
+    expect(out.userMessage).toContain(`<promise>${PROMISE}</promise>`)
+    const goal = await getGoal("g1")
+    expect(goal?.status).toBe("active")
+    expect(goal?.awaitingPromise).toBe(true)
+    const events = await listGoalEvents("g1")
+    expect(events.some((e) => e.kind === "promise_requested")).toBe(true)
+    expect(events.some((e) => e.kind === "judge_evaluated")).toBe(true)
+  })
+
+  it("short-circuits to completed when the arming response already carries the token", async () => {
+    await createGoal(buildGoal({ id: "g1", config: promiseConfig }))
+    const out = await handleTurnComplete({
+      goalId: "g1",
+      lastResponse: `Everything done.\n<promise>${PROMISE}</promise>`,
+      tokensDelta: 0,
+      judgeClient: mockClient(() => '{"done": true, "reason": "complete"}'),
+      capturedGenerationId: "gen-1",
+    })
+    expect(out.kind).toBe("exit")
+    if (out.kind !== "exit") return
+    expect(out.exit).toBe("judge_done")
+    expect((await getGoal("g1"))?.status).toBe("completed")
+    const events = await listGoalEvents("g1")
+    expect(events.some((e) => e.kind === "promise_confirmed")).toBe(true)
+    expect(events.some((e) => e.kind === "promise_requested")).toBe(false)
+  })
+
+  it("verification turn with the token completes the goal without re-judging", async () => {
+    await createGoal(buildGoal({ id: "g1", config: promiseConfig }))
+    await updateGoal("g1", { awaitingPromise: true, promiseDenialCount: 1 })
+    const judge = mockClient(() => '{"done": true, "reason": "x"}')
+    const out = await handleTurnComplete({
+      goalId: "g1",
+      lastResponse: `Verified.\n<promise>${PROMISE}</promise>`,
+      tokensDelta: 0,
+      judgeClient: judge,
+      capturedGenerationId: "gen-1",
+    })
+    expect(out.kind).toBe("exit")
+    if (out.kind !== "exit") return
+    expect(out.exit).toBe("judge_done")
+    expect(out.resultingStatus).toBe("completed")
+    expect(judge.complete).not.toHaveBeenCalled()
+    const goal = await getGoal("g1")
+    expect(goal?.status).toBe("completed")
+    expect(goal?.awaitingPromise).toBe(false)
+    expect(goal?.promiseDenialCount).toBe(0)
+    const events = await listGoalEvents("g1")
+    expect(events.some((e) => e.kind === "promise_confirmed")).toBe(true)
+  })
+
+  it("verification turn without the token denies below the cap and keeps working", async () => {
+    await createGoal(buildGoal({ id: "g1", config: promiseConfig }))
+    await updateGoal("g1", { awaitingPromise: true })
+    const judge = mockClient(() => '{"done": true, "reason": "x"}')
+    const out = await handleTurnComplete({
+      goalId: "g1",
+      lastResponse: "Actually the docs section is still missing; writing it now.",
+      tokensDelta: 0,
+      judgeClient: judge,
+      capturedGenerationId: "gen-1",
+    })
+    expect(out.kind).toBe("continue")
+    if (out.kind !== "continue") return
+    // Back to a NORMAL continuation — not the verification message.
+    expect(out.userMessage).toMatch(/Goal continuation/)
+    expect(out.userMessage).not.toContain("<promise>")
+    expect(judge.complete).not.toHaveBeenCalled()
+    const goal = await getGoal("g1")
+    expect(goal?.awaitingPromise).toBe(false)
+    expect(goal?.promiseDenialCount).toBe(1)
+    const events = await listGoalEvents("g1")
+    const denied = events.find((e) => e.kind === "promise_denied")
+    expect(denied).toBeDefined()
+    if (denied?.payload.kind !== "promise_denied") fail("payload mismatch")
+    expect(denied.payload.denialCount).toBe(1)
+    expect(denied.payload.overridden).toBe(false)
+  })
+
+  it("overrides to completed once denials reach the cap", async () => {
+    await createGoal(buildGoal({ id: "g1", config: { ...promiseConfig, maxPromiseDenials: 3 } }))
+    await updateGoal("g1", { awaitingPromise: true, promiseDenialCount: 2 })
+    const out = await handleTurnComplete({
+      goalId: "g1",
+      lastResponse: "Hmm, I still cannot promise that.",
+      tokensDelta: 0,
+      judgeClient: mockClient(() => '{"done": true, "reason": "x"}'),
+      capturedGenerationId: "gen-1",
+    })
+    expect(out.kind).toBe("exit")
+    if (out.kind !== "exit") return
+    expect(out.exit).toBe("judge_done")
+    expect(out.resultingStatus).toBe("completed")
+    const events = await listGoalEvents("g1")
+    const denied = events.find((e) => e.kind === "promise_denied")
+    if (denied?.payload.kind !== "promise_denied") fail("payload mismatch")
+    expect(denied.payload.denialCount).toBe(3)
+    expect(denied.payload.overridden).toBe(true)
+  })
+
+  it("pre-judge exits still win over a pending verification turn", async () => {
+    await createGoal(
+      buildGoal({
+        id: "g1",
+        turnsUsed: 19,
+        config: { ...promiseConfig, maxTurns: 20 },
+      })
+    )
+    await updateGoal("g1", { awaitingPromise: true })
+    const out = await handleTurnComplete({
+      goalId: "g1",
+      lastResponse: `<promise>${PROMISE}</promise>`,
+      tokensDelta: 0,
+      judgeClient: mockClient(() => '{"done": true, "reason": "x"}'),
+      capturedGenerationId: "gen-1",
+    })
+    expect(out.kind).toBe("exit")
+    if (out.kind !== "exit") return
+    expect(out.exit).toBe("turn_limited")
+  })
+
+  it("no promise configured → judge done=true exits exactly as before", async () => {
+    await createGoal(buildGoal({ id: "g1" }))
+    const out = await handleTurnComplete({
+      goalId: "g1",
+      lastResponse: "done",
+      tokensDelta: 0,
+      judgeClient: mockClient(() => '{"done": true, "reason": "complete"}'),
+      capturedGenerationId: "gen-1",
+    })
+    expect(out.kind).toBe("exit")
+    if (out.kind !== "exit") return
+    expect(out.exit).toBe("judge_done")
+    const events = await listGoalEvents("g1")
+    expect(events.some((e) => e.kind === "promise_requested")).toBe(false)
   })
 })

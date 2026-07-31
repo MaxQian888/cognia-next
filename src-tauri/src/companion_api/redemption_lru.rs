@@ -2,18 +2,25 @@
 //!
 //! A pair JWT has a 5-minute TTL and must be usable only once — presenting
 //! the same QR code twice must not pair a second device.  This module tracks
-//! redeemed JTIs in a bounded, in-memory ring buffer.
+//! redeemed JTIs keyed by their token's expiry.
 //!
 //! # Design
 //!
-//! - `parking_lot::Mutex<VecDeque<String>>` — no async overhead; the lock is
-//!   held only for a linear scan + optional eviction, well under 1 µs.
-//! - Cap of 256 entries covers the worst case: a burst of 256 pair attempts in
-//!   the 5-minute TTL window (wildly over-provisioned for typical desktop use).
-//! - Eviction is FIFO: when the deque is full, the oldest entry is dropped.
-//!   Because pair tokens expire in 5 minutes, an evicted JTI can only be
-//!   replayed if fewer than 256 newer tokens have been issued — practically
-//!   impossible in normal operation.
+//! - `parking_lot::Mutex<HashMap<String, i64>>` (`jti` → token `exp`, Unix
+//!   seconds) — the lock is held only for a prune + lookup + insert, well under
+//!   1 µs.
+//! - **Eviction never precedes expiry.** On every call we prune entries whose
+//!   token has already expired (`exp <= now`); a JTI is therefore only ever
+//!   dropped *after* the token it guards can no longer verify. This is what
+//!   makes single-use sound under load — the old fixed-size FIFO ring could
+//!   evict a still-valid JTI once 256 newer tokens were issued, letting a
+//!   captured pair JWT be replayed within its TTL. Keying on expiry closes
+//!   that window.
+//! - A high safety cap (`MAX_ENTRIES`) bounds memory against a pathological
+//!   flood of *simultaneously-valid* tokens; reaching it requires far more
+//!   issuances inside one 5-minute TTL than any real (or realistically
+//!   adversarial) desktop sees, and even then the soonest-to-expire entry is
+//!   the one dropped.
 //!
 //! # Thread safety
 //!
@@ -21,41 +28,56 @@
 //! exclusive access.  Callers may wrap it in `Arc` for shared ownership.
 
 use parking_lot::Mutex;
-use std::collections::VecDeque;
+use std::collections::HashMap;
 
-const CAP: usize = 256;
+/// Safety ceiling on simultaneously-valid tracked JTIs. Only reached under a
+/// flood of >4096 pair issuances within a single 5-minute TTL window.
+const MAX_ENTRIES: usize = 4096;
 
 // ---------------------------------------------------------------------------
 // Public type
 // ---------------------------------------------------------------------------
 
-/// In-memory single-use tracker for pair JWT IDs (`jti`).
+/// In-memory single-use tracker for pair JWT IDs (`jti`), keyed by expiry.
 pub struct RedemptionLru {
-    inner: Mutex<VecDeque<String>>,
+    /// `jti` → token expiry (Unix seconds).
+    inner: Mutex<HashMap<String, i64>>,
 }
 
 impl RedemptionLru {
     /// Construct an empty tracker.
     pub fn new() -> Self {
         Self {
-            inner: Mutex::new(VecDeque::with_capacity(CAP)),
+            inner: Mutex::new(HashMap::new()),
         }
     }
 
-    /// Attempt to mark `jti` as redeemed.
+    /// Attempt to mark `jti` (expiring at `exp_unix_secs`) as redeemed, relative
+    /// to `now_unix_secs`.
     ///
     /// Returns `true` if this is the **first** redemption (the caller should
-    /// proceed with pairing).  Returns `false` if `jti` is already present
-    /// (replay attack — reject the request).
-    pub fn mark_redeemed(&self, jti: &str) -> bool {
-        let mut deque = self.inner.lock();
-        if deque.iter().any(|s| s == jti) {
+    /// proceed with pairing). Returns `false` if `jti` is already present and
+    /// not yet expired (replay attack — reject the request).
+    pub fn mark_redeemed(&self, jti: &str, exp_unix_secs: i64, now_unix_secs: i64) -> bool {
+        let mut map = self.inner.lock();
+        // Drop entries whose token has already expired — only ever evicting a
+        // JTI after it can no longer verify keeps single-use sound.
+        map.retain(|_, &mut exp| exp > now_unix_secs);
+        if map.contains_key(jti) {
             return false;
         }
-        if deque.len() >= CAP {
-            deque.pop_front();
+        if map.len() >= MAX_ENTRIES {
+            // Pathological flood of still-valid tokens: shed the soonest to
+            // expire so memory stays bounded.
+            if let Some(victim) = map
+                .iter()
+                .min_by_key(|(_, &exp)| exp)
+                .map(|(k, _)| k.clone())
+            {
+                map.remove(&victim);
+            }
         }
-        deque.push_back(jti.to_string());
+        map.insert(jti.to_string(), exp_unix_secs);
         true
     }
 
@@ -80,58 +102,64 @@ impl Default for RedemptionLru {
 mod tests {
     use super::*;
 
+    // A pair token expires 5 min out; pick a `now` well inside the window.
+    const NOW: i64 = 1_700_000_000;
+    const EXP: i64 = NOW + 300;
+
     #[test]
     fn first_redemption_returns_true() {
         let lru = RedemptionLru::new();
-        assert!(lru.mark_redeemed("jti-1"));
+        assert!(lru.mark_redeemed("jti-1", EXP, NOW));
     }
 
     #[test]
     fn second_redemption_returns_false() {
         let lru = RedemptionLru::new();
-        assert!(lru.mark_redeemed("jti-1"));
-        assert!(!lru.mark_redeemed("jti-1"));
+        assert!(lru.mark_redeemed("jti-1", EXP, NOW));
+        assert!(!lru.mark_redeemed("jti-1", EXP, NOW));
     }
 
     #[test]
     fn different_jtis_are_independent() {
         let lru = RedemptionLru::new();
-        assert!(lru.mark_redeemed("jti-a"));
-        assert!(lru.mark_redeemed("jti-b"));
-        // Both are now marked redeemed.
-        assert!(!lru.mark_redeemed("jti-a"));
-        assert!(!lru.mark_redeemed("jti-b"));
+        assert!(lru.mark_redeemed("jti-a", EXP, NOW));
+        assert!(lru.mark_redeemed("jti-b", EXP, NOW));
+        assert!(!lru.mark_redeemed("jti-a", EXP, NOW));
+        assert!(!lru.mark_redeemed("jti-b", EXP, NOW));
     }
 
     #[test]
-    fn eviction_past_cap_allows_oldest_to_be_reinserted() {
+    fn high_load_does_not_evict_a_still_valid_jti() {
+        // The core fix for the replay-via-eviction bug: even after far more
+        // than the old 256-entry cap of *still-valid* tokens are redeemed, an
+        // earlier valid JTI must still be remembered (cannot be replayed).
         let lru = RedemptionLru::new();
-
-        // Fill to capacity with jti-0 .. jti-255.
-        for i in 0..CAP {
-            assert!(lru.mark_redeemed(&format!("jti-{i}")));
+        assert!(lru.mark_redeemed("jti-target", EXP, NOW));
+        for i in 0..1000 {
+            assert!(lru.mark_redeemed(&format!("jti-{i}"), EXP, NOW));
         }
-        assert_eq!(lru.len(), CAP);
-
-        // Inserting one more evicts "jti-0" (oldest).
-        assert!(lru.mark_redeemed("jti-overflow"));
-        assert_eq!(lru.len(), CAP); // still at cap
-
-        // "jti-0" was evicted so it can be re-inserted. Re-inserting at cap
-        // also evicts the new oldest ("jti-1"), per FIFO semantics.
-        assert!(
-            lru.mark_redeemed("jti-0"),
-            "evicted entry must be re-insertable"
-        );
-        // "jti-2" is still present — only the two oldest entries (`jti-0`
-        // by the overflow insert, then `jti-1` by the re-insertion) have
-        // been evicted.
-        assert!(!lru.mark_redeemed("jti-2"));
+        // The target is still tracked → replay rejected.
+        assert!(!lru.mark_redeemed("jti-target", EXP, NOW));
     }
 
     #[test]
-    fn cap_constant_is_256() {
-        assert_eq!(CAP, 256);
+    fn expired_entries_are_pruned_and_become_reusable() {
+        let lru = RedemptionLru::new();
+        assert!(lru.mark_redeemed("jti-old", NOW + 10, NOW));
+        // Advance past the token's expiry → the entry is pruned. (A fresh
+        // token would carry a new jti anyway; this just proves no leak.)
+        let later = NOW + 11;
+        assert!(lru.mark_redeemed("jti-old", later + 300, later));
+    }
+
+    #[test]
+    fn safety_cap_bounds_memory_under_flood() {
+        let lru = RedemptionLru::new();
+        // Insert MAX_ENTRIES + extra simultaneously-valid tokens.
+        for i in 0..(MAX_ENTRIES + 50) {
+            assert!(lru.mark_redeemed(&format!("flood-{i}"), EXP, NOW));
+        }
+        assert!(lru.len() <= MAX_ENTRIES, "memory must stay bounded");
     }
 
     #[test]

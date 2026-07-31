@@ -17,6 +17,15 @@ import { createLspResolver } from "./resolver.mjs"
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const LSP_SERVICE_PATH = path.resolve(HERE, "../vscode-ext-host/dist/lsp-service.js")
+const LSP_INSTALLER_PATH = path.resolve(HERE, "../vscode-ext-host/dist/lsp-installer.js")
+
+/**
+ * Hard ceiling for a binary resolution inside an agent turn. The npm install
+ * itself may take minutes — when it exceeds this budget the turn proceeds
+ * without the server (the install keeps running detached and the binary is
+ * picked up from the managed dir on a later touch).
+ */
+const ENSURE_COMMAND_TURN_BUDGET_MS = 30_000
 
 let lspServiceCtorPromise = null
 
@@ -41,11 +50,53 @@ function pathToImportUrl(p) {
 }
 
 /**
+ * Build the installer-backed `ensureCommand` (npm-first ladder: explicit →
+ * project node_modules/.bin → managed dir → PATH → npm install). Returns
+ * `null` when the compiled installer is unavailable so the resolver falls
+ * back to its built-in PATH probe.
+ *
+ * @param {{ installDir?: string, allowInstall?: boolean, logger?: object }} opts
+ */
+async function makeInstallerEnsureCommand(opts) {
+  let installer
+  try {
+    const mod = await import(pathToImportUrl(LSP_INSTALLER_PATH))
+    const createLspInstaller = mod.createLspInstaller ?? mod.default?.createLspInstaller
+    if (typeof createLspInstaller !== "function") return null
+    installer = createLspInstaller()
+  } catch {
+    return null
+  }
+  return async (command, ctx = {}) => {
+    const ladder = installer
+      .resolveBinary({
+        command,
+        npmPackage: ctx.install?.npmPackage,
+        version: ctx.install?.version,
+        projectRoot: ctx.root,
+        installDir: opts.installDir,
+        allowInstall: opts.allowInstall === true && !!opts.installDir,
+      })
+      .then((res) => {
+        if (res.status === "missing" && res.error) {
+          opts.logger?.warn?.(`[lsp] install failed for ${command}: ${res.error}`)
+        }
+        return res.resolvedPath
+      })
+    // Never let a slow install hold an agent turn hostage.
+    const budget = new Promise((resolve) =>
+      setTimeout(() => resolve(null), ENSURE_COMMAND_TURN_BUDGET_MS)
+    )
+    return Promise.race([ladder, budget])
+  }
+}
+
+/**
  * Create a resolver backed by a real per-session LspService. Returns
  * `null` when the LSP host can't be loaded (e.g. dist not built / mobile)
  * so callers can no-op gracefully.
  *
- * @param {{ cwd: string, logger?: object, ensureCommand?: Function }} opts
+ * @param {{ cwd: string, servers?: Array<object>, installDir?: string, allowInstall?: boolean, logger?: object, ensureCommand?: Function }} opts
  * @returns {Promise<ReturnType<typeof createLspResolver> | null>}
  */
 export async function createSessionLspResolver(opts) {
@@ -65,10 +116,13 @@ export async function createSessionLspResolver(opts) {
     if (method === "lsp:publishDiagnostics") resolverRef?.ingestDiagnostics(params)
   }, opts.logger ?? {})
 
+  const ensureCommand = opts.ensureCommand ?? (await makeInstallerEnsureCommand(opts)) ?? undefined
+
   const resolver = createLspResolver({
     service,
     cwd: opts.cwd,
-    ensureCommand: opts.ensureCommand,
+    servers: opts.servers,
+    ensureCommand,
     logger: opts.logger,
   })
   resolverRef = resolver

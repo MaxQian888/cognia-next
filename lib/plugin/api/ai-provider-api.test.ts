@@ -2,25 +2,26 @@
  * Tests for AI Provider Plugin API
  */
 
-import { embedMany, streamText } from "ai"
-import {
-  createFeatureProviderClient,
-  createFeatureProviderModel,
-  resolveFeatureProvider,
-} from "@/lib/ai/provider-consumption"
+import { streamText } from "ai"
+import { createFeatureProviderModel, resolveFeatureProvider } from "@/lib/ai/provider-consumption"
+import { generateEmbeddings } from "@cognia/vector/embedding"
 import {
   createAIProviderAPI,
   getCustomAIProviders,
   clearCustomAIProviders,
+  clearCustomAIProvidersByPlugin,
 } from "./ai-provider-api"
-import type {
-  AIProviderDefinition,
-  AIChatChunk,
-  AIChatMessage,
-} from "@/types/plugin/plugin-extended"
+import { initializePluginPermissions } from "./permission-api"
+import {
+  getProtocolAdapter,
+  getCodeAdapterExecutor,
+  __resetProtocolAdaptersForTesting,
+} from "@cognia/provider-core/providers/protocol-adapter-registry"
+import type { AIProviderDefinition, AIChatChunk, AIChatMessage } from "@/types/plugin/plugin"
+import type { CodeAdapterChunk } from "@/types/plugin/plugin-protocol-adapter"
 
 // Mock the settings store
-jest.mock("@/stores", () => ({
+jest.mock("@/stores/settings/settings-store", () => ({
   useSettingsStore: {
     getState: jest.fn(() => ({
       defaultProvider: "openai",
@@ -39,26 +40,25 @@ jest.mock("@/stores", () => ({
 
 jest.mock("ai", () => ({
   streamText: jest.fn(),
-  embedMany: jest.fn(),
+}))
+
+jest.mock("@cognia/vector/embedding", () => ({
+  generateEmbeddings: jest.fn(),
 }))
 
 jest.mock("@/lib/ai/provider-consumption", () => ({
   createProviderSettingsSnapshot: jest.fn((input) => input),
   resolveFeatureProvider: jest.fn(),
   createFeatureProviderModel: jest.fn(),
-  createFeatureProviderClient: jest.fn(),
 }))
 
 const mockStreamText = streamText as jest.MockedFunction<typeof streamText>
-const mockEmbedMany = embedMany as jest.MockedFunction<typeof embedMany>
+const mockGenerateEmbeddings = generateEmbeddings as jest.MockedFunction<typeof generateEmbeddings>
 const mockResolveFeatureProvider = resolveFeatureProvider as jest.MockedFunction<
   typeof resolveFeatureProvider
 >
 const mockCreateFeatureProviderModel = createFeatureProviderModel as jest.MockedFunction<
   typeof createFeatureProviderModel
->
-const mockCreateFeatureProviderClient = createFeatureProviderClient as jest.MockedFunction<
-  typeof createFeatureProviderClient
 >
 
 async function collectChunks(iterable: AsyncIterable<AIChatChunk>): Promise<AIChatChunk[]> {
@@ -75,6 +75,7 @@ describe("AI Provider API", () => {
   beforeEach(() => {
     // Clear custom providers before each test
     clearCustomAIProviders()
+    __resetProtocolAdaptersForTesting()
     jest.clearAllMocks()
 
     mockResolveFeatureProvider.mockReturnValue({
@@ -93,21 +94,20 @@ describe("AI Provider API", () => {
       fallbackProviderIds: [],
     })
     mockCreateFeatureProviderModel.mockReturnValue({ id: "built-in-chat-model" } as never)
-    mockCreateFeatureProviderClient.mockReturnValue({
-      embedding: jest.fn(() => ({ id: "built-in-embedding-model" })),
-    } as never)
     mockStreamText.mockReturnValue({
       textStream: (async function* () {
         yield "Hello"
         yield " from built-in"
       })(),
     } as never)
-    mockEmbedMany.mockResolvedValue({
+    mockGenerateEmbeddings.mockResolvedValue({
       embeddings: [
         [0.1, 0.2, 0.3],
         [0.4, 0.5, 0.6],
       ],
-    } as never)
+      model: "text-embedding-3-small",
+      provider: "openai",
+    })
   })
 
   describe("createAIProviderAPI", () => {
@@ -193,6 +193,107 @@ describe("AI Provider API", () => {
 
       unregister()
       expect(getCustomAIProviders().length).toBe(0)
+    })
+
+    it("registers a renderer code protocol adapter so the provider routes through chat() (not protocol:openai)", () => {
+      const api = createAIProviderAPI(testPluginId)
+      const id = `${testPluginId}:llm-provider`
+      const unregister = api.registerProvider({
+        id: "llm-provider",
+        name: "LLM Provider",
+        description: "",
+        models: [],
+        chat: async function* () {
+          yield { content: "hi" }
+        },
+      })
+      // A namespaced code protocol adapter + a renderer executor are registered,
+      // so build-options resolves {kind:"code"} and the agent send invokes chat().
+      expect(getProtocolAdapter(id)?.spec).toEqual({ kind: "code" })
+      expect(getCodeAdapterExecutor(id)).toBeDefined()
+      // Cleanup drops both.
+      unregister()
+      expect(getProtocolAdapter(id)).toBeUndefined()
+      expect(getCodeAdapterExecutor(id)).toBeUndefined()
+    })
+
+    it("bridges the provider chat() stream into CodeAdapterChunks (text-delta + finish + usage)", async () => {
+      const api = createAIProviderAPI(testPluginId)
+      const id = `${testPluginId}:stream-provider`
+      api.registerProvider({
+        id: "stream-provider",
+        name: "Stream Provider",
+        description: "",
+        models: [],
+        chat: async function* () {
+          yield { content: "Hello" }
+          yield {
+            content: " world",
+            finishReason: "stop",
+            usage: { promptTokens: 3, completionTokens: 2, totalTokens: 5 },
+          }
+        },
+      })
+      const factory = getCodeAdapterExecutor(id)!
+      const adapter = await factory({ adapterId: id, pluginId: testPluginId })
+      const chunks: CodeAdapterChunk[] = []
+      for await (const c of adapter.stream({
+        model: "m",
+        messages: [{ role: "user", content: "hi" }],
+        modelParams: { temperature: 0.5 },
+        credentials: {},
+      })) {
+        chunks.push(c)
+      }
+      expect(chunks).toEqual([
+        { type: "text-delta", text: "Hello" },
+        { type: "text-delta", text: " world" },
+        {
+          type: "finish",
+          finishReason: "stop",
+          usage: { promptTokens: 3, completionTokens: 2, totalTokens: 5 },
+        },
+      ])
+    })
+
+    it("maps AI SDK modelParams into plugin chat options for code adapters", async () => {
+      const api = createAIProviderAPI(testPluginId)
+      const id = `${testPluginId}:options-provider`
+      let capturedOptions: unknown
+      api.registerProvider({
+        id: "options-provider",
+        name: "Options Provider",
+        description: "",
+        models: [],
+        chat: async function* (_messages, options) {
+          capturedOptions = options
+          yield { content: "ok" }
+        },
+      })
+
+      const factory = getCodeAdapterExecutor(id)!
+      const adapter = await factory({ adapterId: id, pluginId: testPluginId })
+      for await (const _chunk of adapter.stream({
+        model: "m",
+        messages: [{ role: "user", content: "hi" }],
+        modelParams: {
+          temperature: 0.2,
+          maxOutputTokens: 128,
+          topP: 0.8,
+          stopSequences: ["</done>"],
+        },
+        credentials: {},
+      })) {
+        // drain
+      }
+
+      expect(capturedOptions).toEqual({
+        model: "m",
+        temperature: 0.2,
+        maxTokens: 128,
+        topP: 0.8,
+        stop: ["</done>"],
+      })
     })
   })
 
@@ -411,8 +512,11 @@ describe("AI Provider API", () => {
         [0.1, 0.2, 0.3],
         [0.4, 0.5, 0.6],
       ])
-      expect(mockCreateFeatureProviderClient).toHaveBeenCalled()
-      expect(mockEmbedMany).toHaveBeenCalled()
+      expect(mockGenerateEmbeddings).toHaveBeenCalledWith(
+        ["text1", "text2"],
+        expect.objectContaining({ provider: "openai", model: "text-embedding-3-small" }),
+        "sk-openai"
+      )
     })
 
     it("should use custom provider embedding function when available", async () => {
@@ -437,7 +541,43 @@ describe("AI Provider API", () => {
 
       expect(result.length).toBe(2)
       expect(result[0]).toEqual([0.1, 0.2, 0.3])
-      expect(mockEmbedMany).not.toHaveBeenCalled()
+      expect(mockGenerateEmbeddings).not.toHaveBeenCalled()
+    })
+
+    it("uses the canonical Bedrock embedding adapter for default-chain credentials", async () => {
+      mockResolveFeatureProvider.mockReturnValue({
+        kind: "resolved",
+        featureId: "plugin-ai-provider-fallback",
+        routeProfile: "general-text",
+        providerId: "bedrock",
+        model: "anthropic.claude-3-5-sonnet-20240620-v1:0",
+        apiKey: undefined,
+        baseURL: undefined,
+        bedrock: { authMode: "default-chain", region: "us-west-2", profile: "dev" },
+        protocol: "bedrock",
+        isCustomProvider: false,
+        executionMode: "direct-model",
+        useProxy: true,
+        attemptedProviderIds: ["bedrock"],
+        fallbackProviderIds: [],
+      })
+      mockGenerateEmbeddings.mockResolvedValueOnce({
+        embeddings: [[0.5]],
+        model: "amazon.titan-embed-text-v2:0",
+        provider: "amazon-bedrock",
+      })
+
+      const result = await createAIProviderAPI(testPluginId).embed(["safe text"])
+
+      expect(result).toEqual([[0.5]])
+      expect(mockGenerateEmbeddings).toHaveBeenCalledWith(
+        ["safe text"],
+        expect.objectContaining({
+          provider: "amazon-bedrock",
+          bedrock: expect.objectContaining({ authMode: "default-chain", profile: "dev" }),
+        }),
+        ""
+      )
     })
 
     it("should throw NO_PROVIDER_AVAILABLE when no custom or built-in embedding provider can be used", async () => {
@@ -526,5 +666,67 @@ describe("AI Provider API", () => {
       const providers = getCustomAIProviders()
       expect(providers.length).toBe(2)
     })
+  })
+})
+
+// W2.3: the AI API is permission-gated; grant the suite's plugin its perms.
+beforeAll(() => {
+  initializePluginPermissions("test-plugin", ["ai:chat", "ai:embed"])
+})
+
+describe("permission gate", () => {
+  it("throws PermissionError when ai:chat is not granted", () => {
+    const api = createAIProviderAPI("no-perms-plugin")
+    expect(() => api.chat([], {})).toThrow(/ai:chat/)
+  })
+})
+
+describe("PII gate (W2.4)", () => {
+  it("blocks chat when a message leaks PII", async () => {
+    const api = createAIProviderAPI("test-plugin")
+    const messages: AIChatMessage[] = [{ role: "user", content: "email me at leak@example.com" }]
+    // chat is an async generator — the gate throws on the first pull,
+    // before anything is dispatched to a provider.
+    await expect(api.chat(messages)[Symbol.asyncIterator]().next()).rejects.toThrow(/PII/)
+  })
+
+  it("blocks embed when a text leaks PII", async () => {
+    const api = createAIProviderAPI("test-plugin")
+    await expect(api.embed(["sk-ant-api03-abcdefghijklmnopqrstuvwx"])).rejects.toThrow(/PII/)
+  })
+})
+
+describe("clearCustomAIProvidersByPlugin (W4.3)", () => {
+  it("removes only the plugin's providers and their adapter registrations", () => {
+    const api = createAIProviderAPI("owner")
+    api.registerProvider({
+      id: "prov",
+      name: "Owner Provider",
+      models: [{ id: "m1", name: "M1", capabilities: ["chat"] }],
+      chat: async function* () {
+        yield { content: "x" }
+      },
+    } as never)
+    const otherApi = createAIProviderAPI("other")
+    otherApi.registerProvider({
+      id: "prov",
+      name: "Other Provider",
+      models: [{ id: "m2", name: "M2", capabilities: ["chat"] }],
+      chat: async function* () {
+        yield { content: "y" }
+      },
+    } as never)
+
+    expect(getCustomAIProviders().map((p) => p.id)).toEqual(
+      expect.arrayContaining(["owner:prov", "other:prov"])
+    )
+
+    expect(clearCustomAIProvidersByPlugin("owner")).toBe(1)
+    const remaining = getCustomAIProviders().map((p) => p.id)
+    expect(remaining).not.toContain("owner:prov")
+    expect(remaining).toContain("other:prov")
+    expect(getProtocolAdapter("owner:prov")).toBeUndefined()
+
+    clearCustomAIProvidersByPlugin("other")
   })
 })

@@ -1,8 +1,38 @@
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { ChangesView } from "./changes-view"
 import { useGitStore } from "@/stores/git/git-store"
+import { useSettingsStore } from "@/stores/settings/settings-store"
 import type { GitStatus } from "@/types/git"
 import type { UseGitActionsResult } from "@/hooks/git/use-git-actions"
+
+/** Set the confirm-discard panel preference (defaults to on when unset). */
+function setConfirmDiscard(confirmDiscard: boolean) {
+  act(() => {
+    useSettingsStore.setState({
+      settings: {
+        gitSettings: {
+          commitMessageAI: { enabled: false, conventionalCommits: true },
+          panel: { confirmDiscard },
+        },
+      } as never,
+    })
+  })
+}
+
+const renderView = (actions: UseGitActionsResult, s: GitStatus = status) =>
+  render(
+    <ChangesView
+      rootDir="/r"
+      status={s}
+      actions={actions}
+      committing={false}
+      selectedPath={null}
+      onSelectFile={() => {}}
+      onViewHistory={() => {}}
+      onViewBlame={() => {}}
+      onRestore={() => {}}
+    />
+  )
 
 const status: GitStatus = {
   branch: "main",
@@ -63,10 +93,28 @@ beforeEach(() => {
   act(() => {
     useGitStore.getState().reset()
     useGitStore.setState({ expandedGroups: { merge: true, staged: true, changes: true } })
+    useSettingsStore.setState({ settings: null as never })
   })
 })
 
 describe("ChangesView", () => {
+  it("propagates touch density to changed-file actions", () => {
+    render(
+      <ChangesView
+        density="touch"
+        rootDir="/r"
+        status={status}
+        actions={makeActions()}
+        committing={false}
+        selectedPath={null}
+        onSelectFile={jest.fn()}
+      />
+    )
+
+    expect(screen.getByTestId("stage-work.ts")).toHaveClass("size-11")
+    expect(screen.getByTestId("group-toggle-changes")).toHaveClass("min-h-11")
+  })
+
   it("renders all three groups", () => {
     render(
       <ChangesView
@@ -83,6 +131,23 @@ describe("ChangesView", () => {
     )
     expect(screen.getByTestId("change-group-merge")).toBeInTheDocument()
     expect(screen.getByTestId("change-group-staged")).toBeInTheDocument()
+    expect(screen.getByTestId("change-group-changes")).toBeInTheDocument()
+  })
+
+  it("hides the commit box in compact review mode", () => {
+    render(
+      <ChangesView
+        variant="review"
+        rootDir="/r"
+        status={status}
+        actions={makeActions()}
+        committing={false}
+        selectedPath={null}
+        onSelectFile={() => {}}
+      />
+    )
+
+    expect(screen.queryByTestId("commit-box")).not.toBeInTheDocument()
     expect(screen.getByTestId("change-group-changes")).toBeInTheDocument()
   })
 
@@ -168,5 +233,94 @@ describe("ChangesView", () => {
       />
     )
     expect(screen.getByTestId("no-changes")).toBeInTheDocument()
+  })
+
+  it("confirms before discarding a file when the pref is on (default)", async () => {
+    setConfirmDiscard(true)
+    const actions = makeActions()
+    renderView(actions)
+    fireEvent.click(screen.getByTestId("discard-work.ts"))
+    // Dialog intercepts — nothing discarded yet.
+    expect(actions.discard).not.toHaveBeenCalled()
+    fireEvent.click(await screen.findByTestId("discard-confirm-action"))
+    expect(actions.discard).toHaveBeenCalledWith(["work.ts"])
+  })
+
+  it("confirms before discarding all changes", async () => {
+    setConfirmDiscard(true)
+    const actions = makeActions()
+    renderView(actions)
+    fireEvent.click(screen.getByTestId("group-action-changes-discard-all"))
+    expect(actions.discardAll).not.toHaveBeenCalled()
+    fireEvent.click(await screen.findByTestId("discard-confirm-action"))
+    expect(actions.discardAll).toHaveBeenCalledWith(true)
+  })
+
+  it("discards immediately when the confirm pref is off", () => {
+    setConfirmDiscard(false)
+    const actions = makeActions()
+    renderView(actions)
+    fireEvent.click(screen.getByTestId("discard-work.ts"))
+    expect(actions.discard).toHaveBeenCalledWith(["work.ts"])
+    expect(screen.queryByTestId("discard-confirm")).not.toBeInTheDocument()
+  })
+
+  it("wires every group and file action", async () => {
+    setConfirmDiscard(false)
+    const actions = makeActions()
+    const onSelectFile = jest.fn()
+    const onViewHistory = jest.fn()
+    const onViewBlame = jest.fn()
+    const onRestore = jest.fn()
+    const writeText = jest.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    })
+
+    render(
+      <ChangesView
+        rootDir="/r"
+        status={status}
+        actions={actions}
+        committing={false}
+        selectedPath="conf.ts"
+        onSelectFile={onSelectFile}
+        onViewHistory={onViewHistory}
+        onViewBlame={onViewBlame}
+        onRestore={onRestore}
+      />
+    )
+
+    for (const group of ["merge", "staged", "changes"]) {
+      fireEvent.click(screen.getByTestId(`group-toggle-${group}`))
+      fireEvent.click(screen.getByTestId(`group-toggle-${group}`))
+    }
+    fireEvent.click(screen.getByTestId("group-action-staged-unstage-all"))
+    fireEvent.click(screen.getByTestId("unstage-staged.ts"))
+    fireEvent.click(screen.getByTestId("stage-work.ts"))
+    fireEvent.click(screen.getByTestId("change-item-conf.ts"))
+
+    const chooseMenuAction = async (path: string, name: string) => {
+      fireEvent.contextMenu(screen.getByTestId(`change-item-${path}`))
+      fireEvent.click(await screen.findByRole("menuitem", { name }))
+    }
+
+    for (const path of ["conf.ts", "staged.ts", "work.ts"]) {
+      await chooseMenuAction(path, "Copy Path")
+      await chooseMenuAction(path, "View File History")
+      await chooseMenuAction(path, "View Blame")
+    }
+    await chooseMenuAction("staged.ts", "Restore (to HEAD)")
+    fireEvent.keyDown(document, { key: "Escape" })
+    await chooseMenuAction("work.ts", "Restore (to HEAD)")
+
+    expect(actions.unstage).toHaveBeenCalledWith(["staged.ts"])
+    expect(actions.stage).toHaveBeenCalledWith(["work.ts"])
+    expect(onSelectFile).toHaveBeenCalledWith("conf.ts", false)
+    expect(writeText).toHaveBeenCalledTimes(3)
+    expect(onViewHistory).toHaveBeenCalledTimes(3)
+    expect(onViewBlame).toHaveBeenCalledTimes(3)
+    expect(onRestore).toHaveBeenCalledTimes(2)
   })
 })

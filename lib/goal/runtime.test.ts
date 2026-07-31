@@ -1,5 +1,6 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { __resetRedactionKey } from "@/lib/twin/ingest/redaction-key"
 import { listGoalEvents } from "@/lib/db/goals"
@@ -45,6 +46,13 @@ describe("resolveGoalConfig", () => {
     const settings = { goals: { maxTurns: 50 } } as unknown as AppSettings
     const out = resolveGoalConfig(settings, { maxTurns: 10 })
     expect(out.maxTurns).toBe(10)
+  })
+
+  it("resolves maxBudgetUsd from override > defaults, undefined when neither set", () => {
+    expect(resolveGoalConfig(null).maxBudgetUsd).toBeUndefined()
+    const fromDefaults = { goals: { maxBudgetUsd: 5 } } as unknown as AppSettings
+    expect(resolveGoalConfig(fromDefaults).maxBudgetUsd).toBe(5)
+    expect(resolveGoalConfig(fromDefaults, { maxBudgetUsd: 2 }).maxBudgetUsd).toBe(2)
   })
 
   it("preserves inlineStopCondition from overrides", () => {
@@ -140,6 +148,129 @@ describe("GoalRuntime.createGoal", () => {
       config: { maxTurns: 5 },
     })
     expect(goal.config.maxTurns).toBe(5)
+  })
+})
+
+// ── ADR-0070 Phase 2 — risk-driven ceremony ──────────────────────────────
+describe("GoalRuntime.createGoal — risk gating", () => {
+  /** A character that can drive the machine → computer-use → high risk. */
+  const riskyCharacter = async () => {
+    await getDb().characters.put({
+      id: "char_risky",
+      name: "Risky",
+      enableComputerUse: true,
+    } as never)
+    return "char_risky"
+  }
+
+  it("leaves a low-risk goal completely alone", async () => {
+    const rt = getGoalRuntime()
+    const goal = await rt.createGoal({ sessionId: "ses_a", rawObjective: "summarize the docs" })
+    expect(goal.config.requireAcceptance).toBeFalsy()
+    expect(goal.config.manualContinue).toBeFalsy()
+    const events = await listGoalEvents(goal.id)
+    const created = events.find((e) => e.kind === "goal_created")
+    expect((created?.payload as { risk?: unknown }).risk).toBeUndefined()
+  })
+
+  it("auto-enables requireAcceptance for a medium-risk objective", async () => {
+    const rt = getGoalRuntime()
+    // credential-auth is `elevated` → medium → acceptance but not manual hold.
+    const goal = await rt.createGoal({
+      sessionId: "ses_a",
+      rawObjective: "rotate the api key for staging",
+    })
+    expect(goal.config.requireAcceptance).toBe(true)
+    expect(goal.config.manualContinue).toBeFalsy()
+  })
+
+  it("high risk + interactive also holds each turn", async () => {
+    const rt = getGoalRuntime()
+    const goal = await rt.createGoal({
+      sessionId: "ses_a",
+      rawObjective: "clean things up",
+      characterId: await riskyCharacter(),
+    })
+    expect(goal.config.requireAcceptance).toBe(true)
+    expect(goal.config.manualContinue).toBe(true)
+  })
+
+  it.each(["scheduler", "plugin", "remote", "workflow"] as const)(
+    "high risk + %s origin gets acceptance but NEVER manualContinue",
+    async (origin) => {
+      // manualContinue headless would park the goal forever — a hang, not a gate.
+      const rt = getGoalRuntime()
+      const goal = await rt.createGoal({
+        sessionId: "ses_a",
+        rawObjective: "clean things up",
+        characterId: await riskyCharacter(),
+        origin,
+      })
+      expect(goal.config.requireAcceptance).toBe(true)
+      expect(goal.config.manualContinue).toBeFalsy()
+    }
+  )
+
+  it("records the assessment on goal_created so the operator sees WHY", async () => {
+    const rt = getGoalRuntime()
+    const goal = await rt.createGoal({
+      sessionId: "ses_a",
+      rawObjective: "x",
+      characterId: await riskyCharacter(),
+    })
+    const events = await listGoalEvents(goal.id)
+    const created = events.find((e) => e.kind === "goal_created")
+    const risk = (
+      created?.payload as { risk?: { tier: string; surfaces: string[]; reason: string } }
+    ).risk
+    expect(risk?.tier).toBe("high")
+    expect(risk?.surfaces).toContain("computer-use")
+    expect(risk?.reason).toMatch(/computer-use/)
+  })
+
+  it("riskGating:false restores the old behavior", async () => {
+    const rt = getGoalRuntime()
+    const goal = await rt.createGoal({
+      sessionId: "ses_a",
+      rawObjective: "delete everything",
+      characterId: await riskyCharacter(),
+      config: { riskGating: false },
+    })
+    expect(goal.config.requireAcceptance).toBeFalsy()
+    expect(goal.config.manualContinue).toBeFalsy()
+  })
+
+  it("never lowers a flag the user set explicitly", async () => {
+    // Raise-only: a low assessment must not clear the user's own choice.
+    const rt = getGoalRuntime()
+    const goal = await rt.createGoal({
+      sessionId: "ses_a",
+      rawObjective: "summarize the docs",
+      config: { requireAcceptance: true, manualContinue: true },
+    })
+    expect(goal.config.requireAcceptance).toBe(true)
+    expect(goal.config.manualContinue).toBe(true)
+  })
+
+  it("never lowers an explicit manualContinue even under a headless origin", async () => {
+    const rt = getGoalRuntime()
+    const goal = await rt.createGoal({
+      sessionId: "ses_a",
+      rawObjective: "summarize the docs",
+      config: { manualContinue: true },
+      origin: "scheduler",
+    })
+    expect(goal.config.manualContinue).toBe(true)
+  })
+
+  it("survives a character that no longer resolves", async () => {
+    const rt = getGoalRuntime()
+    const goal = await rt.createGoal({
+      sessionId: "ses_a",
+      rawObjective: "x",
+      characterId: "char_missing",
+    })
+    expect(goal.status).toBe("active")
   })
 })
 
@@ -494,5 +625,99 @@ describe("GoalRuntime — singleton lifecycle", () => {
     __resetGoalRuntimeForTesting()
     const b = getGoalRuntime()
     expect(a).not.toBe(b)
+  })
+})
+
+describe("resolveGoalConfig — promise gate + adaptive pacing", () => {
+  it("merges maxPromiseDenials and adaptivePacing from settings", () => {
+    const settings = {
+      goals: { maxPromiseDenials: 5, adaptivePacing: true },
+    } as unknown as AppSettings
+    const out = resolveGoalConfig(settings)
+    expect(out.maxPromiseDenials).toBe(5)
+    expect(out.adaptivePacing).toBe(true)
+  })
+
+  it("takes completionPromise from overrides only (never a global default)", () => {
+    const settings = {
+      goals: { completionPromise: "GLOBAL TOKEN" },
+    } as unknown as AppSettings
+    expect(resolveGoalConfig(settings).completionPromise).toBeUndefined()
+    expect(resolveGoalConfig(settings, { completionPromise: "PER GOAL" }).completionPromise).toBe(
+      "PER GOAL"
+    )
+  })
+
+  it("per-goal overrides win for the new fields", () => {
+    const settings = {
+      goals: { maxPromiseDenials: 5, adaptivePacing: true },
+    } as unknown as AppSettings
+    const out = resolveGoalConfig(settings, { maxPromiseDenials: 2, adaptivePacing: false })
+    expect(out.maxPromiseDenials).toBe(2)
+    expect(out.adaptivePacing).toBe(false)
+  })
+})
+
+describe("GoalRuntime.updateObjective — promise gate reset", () => {
+  it("clears awaitingPromise and promiseDenialCount on objective change", async () => {
+    const rt = getGoalRuntime()
+    const g = await rt.createGoal({ sessionId: "ses_a", rawObjective: "old objective" })
+    const { updateGoal: patchGoal, getGoal: readGoal } = await import("@/lib/db/goals")
+    await patchGoal(g.id, { awaitingPromise: true, promiseDenialCount: 2 })
+    const out = await rt.updateObjective(g.id, "completely new objective")
+    expect(out).not.toBeNull()
+    const updated = await readGoal(g.id)
+    expect(updated?.awaitingPromise).toBe(false)
+    expect(updated?.promiseDenialCount).toBe(0)
+  })
+})
+
+describe("GoalRuntime.recordPacingDecision", () => {
+  it("stamps nextContinuationAt + source and logs pacing_decided on defer", async () => {
+    const rt = getGoalRuntime()
+    const g = await rt.createGoal({ sessionId: "ses_a", rawObjective: "x" })
+    const untilMs = Date.now() + 120_000
+    await rt.recordPacingDecision(
+      g.id,
+      { kind: "defer", untilMs, reason: "model_suggested" },
+      300_000
+    )
+    const { getGoal: readGoal } = await import("@/lib/db/goals")
+    const updated = await readGoal(g.id)
+    expect(updated?.nextContinuationAt).toBe(untilMs)
+    expect(updated?.nextContinuationSource).toBe("model_suggested")
+    const events = await listGoalEvents(g.id)
+    const pacing = events.find((e) => e.kind === "pacing_decided")
+    expect(pacing).toBeDefined()
+    if (pacing?.payload.kind !== "pacing_decided") throw new Error("payload mismatch")
+    expect(pacing.payload.source).toBe("model_suggested")
+    expect(pacing.payload.untilMs).toBe(untilMs)
+    expect(pacing.payload.suggestedMs).toBe(300_000)
+  })
+
+  it("clears the stamp on send without logging an event", async () => {
+    const rt = getGoalRuntime()
+    const g = await rt.createGoal({ sessionId: "ses_a", rawObjective: "x" })
+    await rt.recordPacingDecision(
+      g.id,
+      { kind: "defer", untilMs: Date.now() + 1_000, reason: "interval" },
+      undefined
+    )
+    await rt.recordPacingDecision(g.id, { kind: "send" })
+    const { getGoal: readGoal } = await import("@/lib/db/goals")
+    const updated = await readGoal(g.id)
+    expect(updated?.nextContinuationAt).toBeUndefined()
+    expect(updated?.nextContinuationSource).toBeUndefined()
+    const events = await listGoalEvents(g.id)
+    expect(events.filter((e) => e.kind === "pacing_decided")).toHaveLength(1)
+  })
+
+  it("is a no-op for hold and never throws on a missing goal", async () => {
+    const rt = getGoalRuntime()
+    const g = await rt.createGoal({ sessionId: "ses_a", rawObjective: "x" })
+    await rt.recordPacingDecision(g.id, { kind: "hold", reason: "manual" })
+    const { getGoal: readGoal } = await import("@/lib/db/goals")
+    expect((await readGoal(g.id))?.nextContinuationAt).toBeUndefined()
+    await expect(rt.recordPacingDecision("missing-goal", { kind: "send" })).resolves.toBeUndefined()
   })
 })

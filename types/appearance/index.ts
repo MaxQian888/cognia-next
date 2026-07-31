@@ -5,6 +5,9 @@
 
 export type WallpaperPosition = "cover" | "contain" | "tile" | "center"
 
+/** User-CSS injection scope: limited to the app shell (`#app`) or document-wide. */
+export type CustomCssScope = "app" | "global"
+
 export type BackgroundScope = "all" | "global" | "chat" | "canvas" | "sidebar"
 
 export interface BackgroundSettings {
@@ -132,6 +135,10 @@ export interface AppearanceSettingsSlice {
   density?: DensitySettings
   radius?: RadiusSettings
   motion?: MotionSettings
+  /** Agent invocation-flow display mode (simplified / standard / detailed). */
+  agentFlowMode?: AgentFlowSettings
+  /** Usage / consumption statistics display mode (simplified / standard / detailed). */
+  usageDisplayMode?: UsageDisplaySettings
   typographyExt?: TypographyExtSettings
   a11y?: A11ySettings
   autoMode?: AutoModeSettings
@@ -139,7 +146,7 @@ export interface AppearanceSettingsSlice {
   /** Active theme-pack id (from plugin manifest.themePacks). null when nothing applied. */
   activeThemePackId?: string | null
   /** Whether `customCss` is wrapped in `@scope (#app) { ... }` (default) or applied globally. */
-  customCssScope?: "app" | "global"
+  customCssScope?: CustomCssScope
   /** Per-component surface customization (tonality / elevation / radius). */
   componentStyles?: ComponentStyles
 }
@@ -318,6 +325,70 @@ export interface MonacoLinkSettings {
 
 export const DEFAULT_MONACO_LINK: MonacoLinkSettings = { enabled: true }
 
+// ----------------------------------------------------------------------------
+// Agent invocation-flow display mode
+//
+// Controls how the chat renders an assistant turn's tool calls, reasoning, and
+// sub-agent steps. Distinct from `density` (which only tunes spacing): this
+// changes the *information density / verbosity* of the agent-flow surfaces.
+//   - simplified — one-line tool summaries (icon + name + target + status),
+//                  expandable on click; reasoning + sub-agents stay collapsed.
+//   - standard   — the current card-based view (cards open while running,
+//                  collapse on completion).
+//   - detailed   — every card expanded with full input/output + extra metadata
+//                  (tokens, duration); reasoning + sub-agent trees expanded.
+// ----------------------------------------------------------------------------
+
+export type AgentFlowMode = "simplified" | "standard" | "detailed"
+
+export interface AgentFlowSettings {
+  mode: AgentFlowMode
+}
+
+export const DEFAULT_AGENT_FLOW: AgentFlowSettings = { mode: "standard" }
+
+/** Ordered list for cycling/segmented controls. */
+export const AGENT_FLOW_MODES: readonly AgentFlowMode[] = ["simplified", "standard", "detailed"]
+
+/** Narrow an arbitrary string to a valid {@link AgentFlowMode}. */
+export function isAgentFlowMode(value: unknown): value is AgentFlowMode {
+  return value === "simplified" || value === "standard" || value === "detailed"
+}
+
+// ----------------------------------------------------------------------------
+// Usage / consumption statistics display mode
+//
+// Controls the information density of the usage & consumption surfaces (the
+// Subscription → Usage dashboard, the composer context read-out, the agent-team
+// runtime tile, and the mobile today-stats card). Progressive density, mirroring
+// {@link AgentFlowMode}:
+//   - simplified — headline stat tiles + current-window gauges only; charts and
+//                  tables collapse to a summary.
+//   - standard   — the full dashboard (charts + model/session tables).
+//   - detailed   — everything expanded, with extra columns (cache-write tokens,
+//                  per-session detail) and the raw snapshot table open.
+// ----------------------------------------------------------------------------
+
+export type UsageDisplayMode = "simplified" | "standard" | "detailed"
+
+export interface UsageDisplaySettings {
+  mode: UsageDisplayMode
+}
+
+export const DEFAULT_USAGE_DISPLAY: UsageDisplaySettings = { mode: "standard" }
+
+/** Ordered list for cycling/segmented controls. */
+export const USAGE_DISPLAY_MODES: readonly UsageDisplayMode[] = [
+  "simplified",
+  "standard",
+  "detailed",
+]
+
+/** Narrow an arbitrary string to a valid {@link UsageDisplayMode}. */
+export function isUsageDisplayMode(value: unknown): value is UsageDisplayMode {
+  return value === "simplified" || value === "standard" || value === "detailed"
+}
+
 /** Defaults filled in by `getSettings()` for back-compat with older rows. */
 export const DEFAULT_APPEARANCE_SLICE: Required<AppearanceSettingsSlice> = {
   background: DEFAULT_BACKGROUND_SETTINGS,
@@ -328,6 +399,8 @@ export const DEFAULT_APPEARANCE_SLICE: Required<AppearanceSettingsSlice> = {
   density: DEFAULT_DENSITY,
   radius: DEFAULT_RADIUS,
   motion: DEFAULT_MOTION,
+  agentFlowMode: DEFAULT_AGENT_FLOW,
+  usageDisplayMode: DEFAULT_USAGE_DISPLAY,
   typographyExt: DEFAULT_TYPOGRAPHY_EXT,
   a11y: DEFAULT_A11Y,
   autoMode: DEFAULT_AUTOMODE,

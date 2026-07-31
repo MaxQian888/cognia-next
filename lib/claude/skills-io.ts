@@ -16,10 +16,11 @@
 //   <markdown body>
 
 import matter from "gray-matter"
-import type { Skill, SkillCategory } from "./types"
+import type { Skill, SkillCategory } from "@cognia/agent-config-types"
 import type { SkillDraft } from "@/lib/db/skills"
 import type { PluginSkillDef } from "@/types/plugin/plugin-skill"
 import { isTauri } from "@/lib/tauri"
+import { replacePluginRootTokens } from "@/lib/plugin/utils/plugin-root-tokens"
 
 const VALID_CATEGORIES: SkillCategory[] = [
   "creative-design",
@@ -272,9 +273,11 @@ function parseList(v: unknown): string[] | undefined {
  */
 export async function resolveSkillMarkdown(def: PluginSkillDef): Promise<string | undefined> {
   const source = def.source
+  const bindRoot = (markdown: string): string =>
+    replacePluginRootTokens(markdown, def.runtimePluginRoot ?? "")
   switch (source.kind) {
     case "inline":
-      return source.markdown
+      return bindRoot(source.markdown)
     case "anthropic-managed":
       return undefined
     case "local-folder":
@@ -289,7 +292,7 @@ export async function resolveSkillMarkdown(def: PluginSkillDef): Promise<string 
         const { readTextFile } = await import("@tauri-apps/plugin-fs")
         const root = source.path.replace(/[/\\]+$/, "")
         const fullPath = `${root}/SKILL.md`
-        return await readTextFile(fullPath)
+        return bindRoot(await readTextFile(fullPath))
       } catch (err) {
         console.warn(
           `[skills-io] skill "${def.id}" SKILL.md read failed; dropped from prompt: ${err instanceof Error ? err.message : String(err)}`
@@ -307,7 +310,7 @@ export async function resolveSkillMarkdown(def: PluginSkillDef): Promise<string 
         // path when no plugin ships an archive skill.
         const { loadBundle } = await import("@/lib/skills/bundle/loader")
         const result = await loadBundle({ kind: "zip-path", path: source.path })
-        return result.draft.content
+        return bindRoot(result.draft.content)
       } catch (err) {
         console.warn(
           `[skills-io] skill "${def.id}" archive read failed; dropped from prompt: ${err instanceof Error ? err.message : String(err)}`

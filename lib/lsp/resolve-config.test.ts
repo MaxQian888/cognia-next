@@ -2,10 +2,12 @@ import { resolveLspServers } from "./resolve-config"
 import { BUILTIN_LSP_SERVERS } from "./builtin-defaults"
 import type { LspProjectFile, LspServerConfig } from "@/types/lsp/config"
 
+const ALL_BUILTIN_IDS = [...BUILTIN_LSP_SERVERS.map((s) => s.id)].sort()
+
 describe("resolveLspServers", () => {
   it("returns the builtin defaults when no other layer is given", async () => {
     const out = await resolveLspServers({})
-    expect(out.map((s) => s.id).sort()).toEqual(["gopls", "pyright", "rust-analyzer", "typescript"])
+    expect(out.map((s) => s.id).sort()).toEqual(ALL_BUILTIN_IDS)
     for (const s of out) expect(s.source).toBe("builtin")
   })
 
@@ -99,7 +101,7 @@ describe("resolveLspServers", () => {
       throw new Error("permission denied")
     }
     const out = await resolveLspServers({ rootDir: "/proj", readProjectFile })
-    expect(out.map((s) => s.id).sort()).toEqual(["gopls", "pyright", "rust-analyzer", "typescript"])
+    expect(out.map((s) => s.id).sort()).toEqual(ALL_BUILTIN_IDS)
   })
 
   it("ignores a project file with no servers array", async () => {

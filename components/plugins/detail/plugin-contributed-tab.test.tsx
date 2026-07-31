@@ -55,6 +55,11 @@ jest.mock("@/lib/ai/agent/external/presets", () => ({
   listDynamicPresetEntries: () => mockListDynamicPresetEntries(),
 }))
 
+const mockListPluginProtocolAdapters = jest.fn<unknown[], []>()
+jest.mock("@/lib/ai/agent/external/protocol-adapter", () => ({
+  listPluginProtocolAdapters: () => mockListPluginProtocolAdapters(),
+}))
+
 const mockGetPluginAdapterIds = jest.fn<readonly string[], [string]>()
 jest.mock("@/lib/plugin/bridge/connectors-bridge", () => ({
   getPluginAdapterIds: (id: string) => mockGetPluginAdapterIds(id),
@@ -64,6 +69,11 @@ const mockGetPluginCatalogSnapshot = jest.fn<unknown[], []>()
 jest.mock("@/lib/workflow/nodes/catalog", () => ({
   getPluginCatalogSnapshot: () => mockGetPluginCatalogSnapshot(),
   subscribePluginCatalog: () => () => undefined,
+}))
+
+const mockGetHooksByPlugin = jest.fn<string[], [string]>()
+jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
+  getPluginLifecycleHooks: () => ({ getHooksByPlugin: mockGetHooksByPlugin }),
 }))
 
 import { PluginContributedTab } from "./plugin-contributed-tab"
@@ -79,8 +89,10 @@ beforeEach(() => {
   mockListSkillEntries.mockReturnValue([])
   mockListNativeToolEntries.mockReturnValue([])
   mockListDynamicPresetEntries.mockReturnValue([])
+  mockListPluginProtocolAdapters.mockReturnValue([])
   mockGetPluginAdapterIds.mockReturnValue([])
   mockGetPluginCatalogSnapshot.mockReturnValue([])
+  mockGetHooksByPlugin.mockReturnValue([])
 })
 
 describe("PluginContributedTab", () => {
@@ -119,6 +131,27 @@ describe("PluginContributedTab", () => {
     expect(screen.queryByTestId("contributed-themes")).not.toBeInTheDocument()
   })
 
+  it("localizes the Eval Lab tool label without renaming other plugin tools", () => {
+    mockGetToolsByPlugin.mockReturnValue([
+      { name: "eval_project_v2" },
+      { name: "plugin_specific_tool" },
+    ])
+
+    render(<PluginContributedTab pluginId="p1" />)
+
+    expect(screen.getByText("toolLabels.eval_project_v2")).toBeInTheDocument()
+    expect(screen.getByText("plugin_specific_tool")).toBeInTheDocument()
+    expect(screen.queryByText("eval_project_v2")).not.toBeInTheDocument()
+  })
+
+  it("enumerates the plugin's contributed lifecycle hooks", () => {
+    mockGetHooksByPlugin.mockReturnValue(["onEnable", "onMessageSend"])
+    render(<PluginContributedTab pluginId="p1" />)
+    expect(screen.getByTestId("contributed-hooks")).toBeInTheDocument()
+    expect(screen.getByText("onEnable")).toBeInTheDocument()
+    expect(screen.getByText("onMessageSend")).toBeInTheDocument()
+  })
+
   it("filters themes / mcp presets / external presets / adapters / workflow entries by pluginId", () => {
     mockListPluginThemes.mockReturnValue([
       { id: "p1.dark", name: "Dark", pluginId: "p1", variables: {} },
@@ -130,6 +163,10 @@ describe("PluginContributedTab", () => {
     ])
     mockListDynamicPresetEntries.mockReturnValue([
       { id: "claude-fork", pluginId: "p1", config: {} },
+    ])
+    mockListPluginProtocolAdapters.mockReturnValue([
+      { protocol: "p1:demo-echo", pluginId: "p1" },
+      { protocol: "other:x", pluginId: "other" },
     ])
     mockGetPluginAdapterIds.mockReturnValue(["telegram-bot", "discord-bot"])
     mockGetPluginCatalogSnapshot.mockReturnValue([
@@ -162,6 +199,11 @@ describe("PluginContributedTab", () => {
 
     // External agent preset
     expect(screen.getByText("claude-fork")).toBeInTheDocument()
+
+    // External agent adapter — only p1's namespaced protocol
+    expect(screen.getByTestId("contributed-externalAgentAdapters")).toBeInTheDocument()
+    expect(screen.getByText("p1:demo-echo")).toBeInTheDocument()
+    expect(screen.queryByText("other:x")).not.toBeInTheDocument()
 
     // Connectors — both adapter ids
     expect(screen.getByText("telegram-bot")).toBeInTheDocument()

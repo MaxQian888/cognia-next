@@ -11,15 +11,15 @@
  * WAN where mDNS LAN is unreachable).
  *
  * Both peers exchange `{ id, method, params }` envelopes over a single
- * ordered/reliable DataChannel named `cognia.v1`. Responses come back as
+ * ordered/reliable DataChannel named `cognia.v2`. Responses come back as
  * `{ id, ok, result | error }`. Events flow as `{ event, payload, seq }`
  * with the same EventBus `seq` semantics as the existing
  * `/ws/v1/events` channel.
  *
- * Authentication: HMAC-signed via the rendezvous secret minted at pair
- * time (see `lib/signaling/envelope.ts`). After the DTLS handshake binds
- * the data channel to the SDP fingerprint exchanged over signaling, no
- * additional JWT is replayed on the data channel itself.
+ * Signaling v2 authenticates each role with ECDSA P-256, derives directional
+ * session keys with ephemeral P-256 ECDH + HKDF-SHA-256, and encrypts SDP/ICE
+ * using AES-256-GCM. The relay sees only authenticated metadata and
+ * ciphertext. DTLS then protects the negotiated DataChannel itself.
  */
 
 // Import from the leaf modules directly. The signaling barrel
@@ -29,6 +29,14 @@
 // → @/lib/signaling → desktop-controller → @/lib/tauri/transport-*` cycle
 // and trip TDZ on the `transport` binding.
 import { SignalingClient } from "@/lib/signaling/client"
+import type { RoomDescriptorV2 } from "@/lib/signaling/v2-crypto"
+import {
+  encodeRtcChunkAck,
+  encodeRtcChunkCancel,
+  encodeRtcLogicalMessage,
+  RtcChunkReassembler,
+} from "@/lib/tauri/datachannel-framing"
+import { remoteEventResyncCoordinator } from "@/lib/tauri/resync-coordinator"
 import {
   DATACHANNEL_LABEL,
   type Envelope,
@@ -47,6 +55,15 @@ import {
 export type RtcState =
   | "idle"
   | "signaling-connecting"
+  /**
+   * WSS subscribed, but the opposite peer is not yet in the rendezvous room.
+   * We hold here — WITHOUT arming the negotiation timeout — until a
+   * `peerJoined` (or a `subscribed` that already lists the peer) arrives.
+   * Before ADR-0021 F1 the mobile side sent its offer unconditionally on
+   * `subscribed`, which the server silently dropped into an empty room and
+   * stalled the whole cold-start until the 8 s negotiation timer expired.
+   */
+  | "awaiting-peer"
   | "negotiating"
   | "open"
   | "reconnecting"
@@ -60,12 +77,10 @@ export type RtcState =
  * mid-session disconnect. The inner `SignalingClient` runs its own WSS-level
  * reconnect; this schedule applies to the SDP/ICE handshake on top of it.
  *
- * Mirrors `signaling-server/src/...` / `src-tauri/.../signaling/client.rs:46`
+ * Mirrors `services/signaling-server/src/...` / `src-tauri/.../signaling/client.rs:46`
  * so the desktop and mobile retry at compatible cadences.
  */
-export const RECONNECT_BACKOFF_MS: readonly number[] = [
-  1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 60_000,
-]
+export const RECONNECT_BACKOFF_MS: readonly number[] = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000]
 
 /**
  * Minimum spacing between two manual `reconnectNow()` invocations from
@@ -83,6 +98,12 @@ export interface RtcMessage {
   id: string
   method: string
   params?: Record<string, unknown>
+  idempotencyKey?: string
+  protocolVersion: 2
+}
+
+export interface RtcCallOptions {
+  idempotencyKey?: string
 }
 
 export interface RtcResponseOk {
@@ -111,12 +132,14 @@ export interface RtcEvent {
 // ---------------------------------------------------------------------------
 
 export interface TransportRtcOptions {
-  /** Public signaling endpoint URL (e.g. `wss://signaling.cognia.cn/v1/signaling`). */
+  /** Public signaling endpoint URL (e.g. `wss://signaling.cognia.cn/v2/signaling`). */
   signalingUrl: string
   /** Rendezvous id minted at pair time, baked into CompanionConfig. */
   rendezvousId: string
-  /** 32-byte HMAC secret (URL-safe base64, unpadded). */
-  rendezvousSecret: string
+  /** Self-certifying room descriptor returned by the v2 pair exchange. */
+  signalingRoomDescriptor: RoomDescriptorV2
+  /** Non-extractable mobile role signing key loaded from secure storage. */
+  signalingPrivateKey: CryptoKey
   /** Stable device identifier — sent in the `hello` envelope. */
   deviceId: string
   /** Optional override of the local peer role. Defaults to `"mobile"`. */
@@ -127,12 +150,20 @@ export interface TransportRtcOptions {
    */
   rtcConfiguration?: RTCConfiguration
   /**
-   * Hard timeout for the SDP exchange + ICE gathering, in ms. If the
-   * DataChannel hasn't opened by then we tear down and surface `failed`
-   * so the caller can fall through to the cloudflared tunnel tier.
-   * Default 8000.
+   * Hard timeout for the SDP exchange + ICE gathering, in ms. Armed only
+   * once the opposite peer is present and we actually start negotiating
+   * (offer sent) — NOT while we sit in `awaiting-peer`. If the DataChannel
+   * hasn't opened by then we tear down and surface `failed` so the caller
+   * can fall through to the cloudflared tunnel tier. Default 20000.
    */
   negotiationTimeoutMs?: number
+  /**
+   * How long (ms) to sit in `awaiting-peer` waiting for the opposite peer to
+   * join the rendezvous before giving up. `0` disables this deadline, which
+   * is the production default: an offline peer is an `awaiting-peer` state,
+   * not a failed connection attempt.
+   */
+  peerWaitTimeoutMs?: number
   /**
    * Override for the reconnection backoff schedule (ms). Tests pass a
    * short schedule (e.g. `[5, 10]`) to exercise exhaustion without
@@ -142,7 +173,7 @@ export interface TransportRtcOptions {
   reconnectBackoffMs?: readonly number[]
   /**
    * How long (ms) to wait for ICE to re-converge after an ICE restart
-   * before escalating to a full peer teardown + reconnect. Default 8000.
+   * before escalating to a full peer teardown + reconnect. Default 12000.
    */
   iceRestartTimeoutMs?: number
   /**
@@ -152,6 +183,12 @@ export interface TransportRtcOptions {
    * ICE restart entirely (straight to full reconnect on ICE failure).
    */
   iceRestartMaxAttempts?: number
+  /** Grace window for a transient ICE `disconnected`/`failed` state. Default 5000. */
+  disconnectedGraceMs?: number
+  /** Healthy-open duration before recovery counters reset. Default 60000. */
+  healthyResetMs?: number
+  /** Full-jitter source in [0, 1); injectable for deterministic tests. */
+  reconnectRandom?: () => number
   /**
    * Optional override for the global `RTCPeerConnection` constructor.
    * Tests inject a polyfill / mock.
@@ -176,30 +213,64 @@ type Pending = {
 type EventHandler = (payload: unknown) => void
 
 const RPC_TIMEOUT_MS = 30_000
+const MAX_CONCURRENT_RPCS = 32
+const BUFFERED_AMOUNT_HIGH_WATER = 1024 * 1024
+const BUFFERED_AMOUNT_LOW_WATER = 256 * 1024
+const MAX_PENDING_REMOTE_ICE = 256
+const PENDING_REMOTE_ICE_TTL_MS = 30_000
+export const TERMINAL_DATACHANNEL_LABEL = "cognia.terminal"
 
 export class TransportRtc {
   private readonly opts: Required<
     Omit<
       TransportRtcOptions,
-      "rtcConfiguration" | "peerConnectionFactory" | "signalingClientFactory" | "reconnectBackoffMs"
+      | "rtcConfiguration"
+      | "peerConnectionFactory"
+      | "signalingClientFactory"
+      | "reconnectBackoffMs"
+      | "reconnectRandom"
     >
   > &
     Pick<TransportRtcOptions, "rtcConfiguration"> & {
       peerConnectionFactory: NonNullable<TransportRtcOptions["peerConnectionFactory"]>
       signalingClientFactory: NonNullable<TransportRtcOptions["signalingClientFactory"]>
       reconnectBackoffMs: readonly number[]
+      reconnectRandom: () => number
     }
 
   private signaling: SignalingClient | null = null
   private pc: RTCPeerConnection | null = null
   private dc: RTCDataChannel | null = null
+  private terminalDc: RTCDataChannel | null = null
   private state: RtcState = "idle"
   private negotiationTimer: ReturnType<typeof setTimeout> | null = null
+  /** Timer for the `awaiting-peer` phase (opposite peer not yet in room). */
+  private peerWaitTimer: ReturnType<typeof setTimeout> | null = null
+  /**
+   * Detaches this connect() attempt's signaling listeners and clears the
+   * peer-wait / negotiation timers. Set while a negotiation is in flight,
+   * invoked exactly once on the first settle (open or fail). Null otherwise.
+   */
+  private negotiationCleanup: (() => void) | null = null
+  /**
+   * Synchronous guard so a `subscribed`-with-peer and a racing `peerJoined`
+   * can't both kick off a negotiation before `this.pc` is assigned (the
+   * assignment sits behind an `await` in `startNegotiation`).
+   */
+  private negotiationKickedOff = false
   private negotiationSettled = false
   private nextRpcId = 1
   private pending: Map<string, Pending> = new Map()
+  private readonly reassembler = new RtcChunkReassembler()
   private channels: Map<string, Set<EventHandler>> = new Map()
   private highestSeq: Map<string, number> = new Map()
+  private eventCursor = 0
+  private resyncInFlight: Promise<void> | null = null
+  private pendingEventsDuringResync: RtcEvent[] = []
+  private pendingRemoteIce: Array<{
+    candidate: RTCIceCandidateInit
+    receivedAt: number
+  }> = []
   private stateListeners: Set<(s: RtcState) => void> = new Set()
   /** Index into [`RECONNECT_BACKOFF_MS`] for the next scheduled retry. */
   private reconnectAttempt = 0
@@ -211,6 +282,10 @@ export class TransportRtc {
   private iceRestartAttempt = 0
   /** Timer that escalates a stalled ICE restart to a full reconnect. */
   private iceRestartTimer: ReturnType<typeof setTimeout> | null = null
+  /** Timer for the transient ICE-disconnected grace phase. */
+  private disconnectedGraceTimer: ReturnType<typeof setTimeout> | null = null
+  /** Resets recovery counters only after a genuinely healthy minute. */
+  private healthyResetTimer: ReturnType<typeof setTimeout> | null = null
   /**
    * Wall-clock timestamp (ms) of the most recent `reconnectNow()` call.
    * Used by the throttle in `reconnectNow()` so XSS-driven floods are
@@ -220,22 +295,31 @@ export class TransportRtc {
   private lastManualReconnectMs = 0
 
   constructor(opts: TransportRtcOptions) {
+    if (opts.signalingRoomDescriptor.roomId !== opts.rendezvousId) {
+      throw new Error("TransportRtc: rendezvousId does not match the v2 room descriptor")
+    }
     this.opts = {
       signalingUrl: opts.signalingUrl,
       rendezvousId: opts.rendezvousId,
-      rendezvousSecret: opts.rendezvousSecret,
+      signalingRoomDescriptor: opts.signalingRoomDescriptor,
+      signalingPrivateKey: opts.signalingPrivateKey,
       deviceId: opts.deviceId,
       role: opts.role ?? "mobile",
       rtcConfiguration: opts.rtcConfiguration,
-      negotiationTimeoutMs: opts.negotiationTimeoutMs ?? 8000,
+      negotiationTimeoutMs: opts.negotiationTimeoutMs ?? 20_000,
+      peerWaitTimeoutMs: opts.peerWaitTimeoutMs ?? 0,
       reconnectBackoffMs: opts.reconnectBackoffMs ?? RECONNECT_BACKOFF_MS,
-      iceRestartTimeoutMs: opts.iceRestartTimeoutMs ?? 8000,
+      reconnectRandom: opts.reconnectRandom ?? Math.random,
+      iceRestartTimeoutMs: opts.iceRestartTimeoutMs ?? 12_000,
       iceRestartMaxAttempts: opts.iceRestartMaxAttempts ?? 2,
+      disconnectedGraceMs: opts.disconnectedGraceMs ?? 5_000,
+      healthyResetMs: opts.healthyResetMs ?? 60_000,
       peerConnectionFactory:
         opts.peerConnectionFactory ??
         ((config) => new RTCPeerConnection(config as RTCConfiguration | undefined)),
       signalingClientFactory: opts.signalingClientFactory ?? ((o) => new SignalingClient(o)),
     }
+    this.eventCursor = this.loadEventCursor()
   }
 
   // ── Public surface ─────────────────────────────────────────────────────
@@ -244,10 +328,31 @@ export class TransportRtc {
     return this.state
   }
 
+  /**
+   * Return the terminal-only ordered channel negotiated with this peer.
+   * Terminal framing and backpressure are owned by `TerminalHostConnection`;
+   * the Companion RPC channel never inspects terminal bytes.
+   */
+  getTerminalDataChannel(): RTCDataChannel | null {
+    return this.terminalDc
+  }
+
   onStateChange(handler: (state: RtcState) => void): () => void {
     this.stateListeners.add(handler)
     return () => {
       this.stateListeners.delete(handler)
+    }
+  }
+
+  /**
+   * Apply refreshed STUN/TURN credentials to both this connection and future
+   * rebuilds. `setConfiguration` does not itself restart ICE; the refreshed
+   * servers are consumed by the next ICE restart or negotiation cycle.
+   */
+  updateRtcConfiguration(configuration: RTCConfiguration | undefined): void {
+    this.opts.rtcConfiguration = configuration
+    if (this.pc && configuration) {
+      this.pc.setConfiguration(configuration)
     }
   }
 
@@ -268,24 +373,67 @@ export class TransportRtc {
     // Entry from reconnect timer leaves resources cleared by
     // `teardownPeer()`; from idle/closed/failed they're already null.
     this.negotiationSettled = false
+    this.negotiationKickedOff = false
     this.setState("signaling-connecting")
+
+    // Arm the peer-wait timer up front so the whole pre-negotiation phase —
+    // WSS connect, subscribe, AND `awaiting-peer` — is bounded. Without this a
+    // rendezvous whose server is unreachable (SignalingClient retries
+    // forever) or that never gains the opposite peer would hang connect()
+    // indefinitely; `beginNegotiation` swaps it for the negotiation timeout.
+    if (this.opts.peerWaitTimeoutMs > 0) {
+      this.peerWaitTimer = setTimeout(() => {
+        this.peerWaitTimer = null
+        this.settleNegotiationFailure(
+          new Error("no peer joined the rendezvous within the wait window")
+        )
+      }, this.opts.peerWaitTimeoutMs)
+    }
 
     const signaling = this.opts.signalingClientFactory({
       url: this.opts.signalingUrl,
-      rendezvousId: this.opts.rendezvousId,
-      rendezvousSecret: this.opts.rendezvousSecret,
+      descriptor: this.opts.signalingRoomDescriptor,
+      signingPrivateKey: this.opts.signalingPrivateKey,
       role: this.opts.role,
     })
     this.signaling = signaling
 
     const opened = new Promise<void>((resolve, reject) => {
-      const detachState = signaling.on("state", async (next) => {
-        if (next === "subscribed" && !this.pc) {
-          try {
-            await this.startNegotiation()
-          } catch (err) {
-            reject(err instanceof Error ? err : new Error(String(err)))
-          }
+      // ADR-0021 F1 — the room may already hold the opposite peer (it
+      // subscribed first), or it may arrive later via `peerJoined`. Only kick
+      // off the offer once the peer is actually present; otherwise sit in
+      // `awaiting-peer` (see `enterAwaitingPeer`) rather than firing an offer
+      // into an empty room that the server silently drops.
+      const detachSubscribed = signaling.on("subscribed", ({ peers }) => {
+        if (this.pc || this.negotiationKickedOff) return
+        // Only act while still in the pre-negotiation phase. A `subscribed`
+        // that lands after close()/fail() (e.g. a microtask queued by
+        // signaling.connect() before teardown) must not revive the transport.
+        if (this.state !== "signaling-connecting" && this.state !== "awaiting-peer") return
+        if (peers.some((peer) => peer.proof.role === this.peerRole())) {
+          void this.beginNegotiation()
+        } else {
+          this.enterAwaitingPeer()
+        }
+      })
+
+      const detachJoined = signaling.on("peerJoined", (role) => {
+        if (role !== this.peerRole()) return
+        if (this.pc || this.negotiationKickedOff) return
+        if (this.state !== "awaiting-peer" && this.state !== "signaling-connecting") return
+        void this.beginNegotiation()
+      })
+
+      const detachLeft = signaling.on("peerLeft", (role) => {
+        if (role !== this.peerRole()) return
+        if (this.state === "open") {
+          // Peer restarted mid-session — tear down + reconnect instead of
+          // waiting out an ICE timeout (ADR-0021 F7).
+          this.handleMidSessionDisconnect()
+        } else {
+          this.settleNegotiationFailure(
+            new Error("peer left the rendezvous before the channel opened")
+          )
         }
       })
 
@@ -300,65 +448,104 @@ export class TransportRtc {
       const detachErr = signaling.on("error", ({ code, message }) => {
         // Every server error code emitted during a relay — frame_too_large,
         // rate_limited, malformed_frame, binary_not_supported, not_subscribed
-        // (see signaling-server/src/ws.rs) — means a critical handshake frame
+        // (see services/signaling-server/src/ws.rs) — means a critical handshake frame
         // (offer / answer / ICE) was dropped, so the negotiation cannot
-        // complete. Fail fast instead of stalling until the negotiation timer
-        // fires; the caller falls back to HTTPS+WS immediately and the
-        // mobile-controller re-attempts the upgrade on the next
-        // network/resume trigger.
-        if (this.negotiationSettled) return
-        this.negotiationSettled = true
+        // complete. Fail fast instead of stalling until a timer fires; the
+        // caller falls back to HTTPS+WS immediately and the mobile-controller
+        // re-attempts the upgrade on the next network/resume trigger.
+        this.settleNegotiationFailure(
+          new Error(`signaling error during negotiation: ${code} ${message}`)
+        )
+      })
+
+      // One-shot cleanup for this attempt: detach every listener and clear
+      // both phase timers. Invoked by the resolvers below on first settle.
+      this.negotiationCleanup = () => {
+        detachSubscribed()
+        detachJoined()
+        detachLeft()
+        detachEnv()
+        detachErr()
         if (this.negotiationTimer) {
           clearTimeout(this.negotiationTimer)
           this.negotiationTimer = null
         }
-        detachState()
-        detachEnv()
-        detachErr()
-        const err = new Error(`signaling error during negotiation: ${code} ${message}`)
-        this.fail(err)
-        reject(err)
-      })
-
-      this.negotiationTimer = setTimeout(() => {
-        if (this.negotiationSettled) return
-        this.negotiationSettled = true
-        detachState()
-        detachEnv()
-        detachErr()
-        this.fail(new Error("WebRTC negotiation timed out"))
-        reject(new Error("WebRTC negotiation timed out"))
-      }, this.opts.negotiationTimeoutMs)
+        if (this.peerWaitTimer) {
+          clearTimeout(this.peerWaitTimer)
+          this.peerWaitTimer = null
+        }
+        this.negotiationCleanup = null
+      }
 
       // Bridge: when the DataChannel opens, we resolve the connect promise.
       this.onDcOpenResolvers.push(() => {
         if (this.negotiationSettled) return
         this.negotiationSettled = true
-        if (this.negotiationTimer) {
-          clearTimeout(this.negotiationTimer)
-          this.negotiationTimer = null
-        }
-        detachState()
-        detachEnv()
-        detachErr()
+        this.negotiationCleanup?.()
         resolve()
       })
       this.onDcFailResolvers.push((err) => {
         if (this.negotiationSettled) return
         this.negotiationSettled = true
-        if (this.negotiationTimer) {
-          clearTimeout(this.negotiationTimer)
-          this.negotiationTimer = null
-        }
-        detachState()
-        detachEnv()
-        detachErr()
+        this.negotiationCleanup?.()
         reject(err)
       })
     })
 
     signaling.connect()
     return opened
+  }
+
+  /** The role we expect on the other end of the rendezvous. */
+  private peerRole(): PeerRole {
+    return this.opts.role === "mobile" ? "desktop" : "mobile"
+  }
+
+  /**
+   * Enter the `awaiting-peer` hold: subscribed, but the opposite peer is not
+   * yet in the room. The peer-wait timer armed in `connect()` already bounds
+   * this phase, so this only flips the observable state (so the tier / UI can
+   * reflect "waiting for the desktop" distinctly from "connecting").
+   */
+  private enterAwaitingPeer(): void {
+    if (this.state === "awaiting-peer") return
+    this.setState("awaiting-peer")
+  }
+
+  /**
+   * Begin the SDP/ICE handshake now that the peer is present: swap the
+   * peer-wait timer for the negotiation timeout and run `startNegotiation`.
+   * Idempotent within one connect() attempt via `negotiationKickedOff`.
+   */
+  private async beginNegotiation(): Promise<void> {
+    if (this.negotiationKickedOff) return
+    if (this.state !== "signaling-connecting" && this.state !== "awaiting-peer") return
+    this.negotiationKickedOff = true
+    if (this.peerWaitTimer) {
+      clearTimeout(this.peerWaitTimer)
+      this.peerWaitTimer = null
+    }
+    if (!this.negotiationTimer) {
+      this.negotiationTimer = setTimeout(() => {
+        this.negotiationTimer = null
+        this.settleNegotiationFailure(new Error("WebRTC negotiation timed out"))
+      }, this.opts.negotiationTimeoutMs)
+    }
+    try {
+      await this.startNegotiation()
+    } catch (err) {
+      this.settleNegotiationFailure(err instanceof Error ? err : new Error(String(err)))
+    }
+  }
+
+  /**
+   * Fail the in-flight negotiation once. Routes through `fail()`, whose
+   * `onDcFailResolvers` run the cleanup + reject the connect() promise. A
+   * second call after settle is a no-op.
+   */
+  private settleNegotiationFailure(err: Error): void {
+    if (this.negotiationSettled) return
+    this.fail(err)
   }
 
   /**
@@ -376,14 +563,28 @@ export class TransportRtc {
    * - From `signaling-connecting` / `negotiating` / `closing`: no-op; an
    *   action is already in flight.
    */
-  reconnectNow(): boolean {
+  reconnectNow(): "started" | "busy" | "throttled" {
+    // An action already in flight can't be accelerated — report `busy`
+    // WITHOUT consuming the throttle window, so this early return never
+    // blocks a genuine reconnect the user attempts moments later. (Before
+    // ADR-0021 F3 this returned `true` here, so the UI toasted "reconnect
+    // started" for a no-op and burned the 5 s window on the way out.)
+    if (
+      this.state === "signaling-connecting" ||
+      this.state === "awaiting-peer" ||
+      this.state === "negotiating" ||
+      this.state === "closing"
+    ) {
+      return "busy"
+    }
+
     // Throttle: defend against XSS or runaway UI loops calling this in a
     // tight cycle. Genuine user double-taps land within ~300 ms so the
     // 5 s window doesn't block them on the first click; subsequent
     // accidental clicks are silently dropped.
     const now = Date.now()
     if (now - this.lastManualReconnectMs < RECONNECT_NOW_MIN_SPACING_MS) {
-      return false
+      return "throttled"
     }
     this.lastManualReconnectMs = now
 
@@ -397,28 +598,35 @@ export class TransportRtc {
       this.teardownPeer()
       this.setState("reconnecting")
       // Fall through to the connect() below.
-    } else if (
-      this.state === "signaling-connecting" ||
-      this.state === "negotiating" ||
-      this.state === "closing"
-    ) {
-      return true
     }
 
     void this.connect().catch((err) => {
       // Surface via state transitions; nothing else to do here.
       console.warn("TransportRtc.reconnectNow: connect rejected", err)
     })
-    return true
+    return "started"
   }
 
   /** Send an RPC; resolves with the result payload. */
-  call<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T> {
+  call<T = unknown>(
+    method: string,
+    params?: Record<string, unknown>,
+    options: RtcCallOptions = {}
+  ): Promise<T> {
     if (this.state !== "open" || !this.dc || this.dc.readyState !== "open") {
       return Promise.reject(new Error("TransportRtc: DataChannel is not open"))
     }
+    if (this.pending.size >= MAX_CONCURRENT_RPCS) {
+      return Promise.reject(new Error("TransportRtc: too many concurrent RPCs"))
+    }
     const id = `rpc-${this.nextRpcId++}`
-    const message: RtcMessage = { id, method, params }
+    const message: RtcMessage = {
+      id,
+      method,
+      params,
+      idempotencyKey: options.idempotencyKey,
+      protocolVersion: 2,
+    }
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id)
@@ -429,7 +637,13 @@ export class TransportRtc {
         reject,
         timer,
       })
-      this.dc!.send(JSON.stringify(message))
+      void this.sendLogicalMessage(JSON.stringify(message)).catch((error) => {
+        const pending = this.pending.get(id)
+        if (!pending) return
+        this.pending.delete(id)
+        if (pending.timer) clearTimeout(pending.timer)
+        pending.reject(error instanceof Error ? error : new Error(String(error)))
+      })
     })
   }
 
@@ -504,10 +718,16 @@ export class TransportRtc {
     if (this.state === "closed") return
     this.setState("closing")
     this.cancelIceRestart()
+    this.cancelRecoveryTimers()
     if (this.negotiationTimer) {
       clearTimeout(this.negotiationTimer)
       this.negotiationTimer = null
     }
+    if (this.peerWaitTimer) {
+      clearTimeout(this.peerWaitTimer)
+      this.peerWaitTimer = null
+    }
+    this.negotiationCleanup = null
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
@@ -524,6 +744,14 @@ export class TransportRtc {
         // ignored
       }
       this.dc = null
+    }
+    if (this.terminalDc) {
+      try {
+        this.terminalDc.close()
+      } catch {
+        // ignored
+      }
+      this.terminalDc = null
     }
     if (this.pc) {
       try {
@@ -562,6 +790,7 @@ export class TransportRtc {
 
   private async startNegotiation(): Promise<void> {
     this.setState("negotiating")
+    this.pendingRemoteIce = []
     // Announce our identity before the offer (HelloBody.deviceId). The
     // desktop logs it (informational — it maps the peer by its per-device
     // signaling task), completing the documented handshake contract. Sent
@@ -588,25 +817,22 @@ export class TransportRtc {
       // reconnect once the budget is spent. Only a healthy DataChannel
       // (re)open resets it (see attachDataChannel.onopen).
       if (ice === "connected" || ice === "completed") {
+        this.cancelDisconnectedGrace()
         if (this.iceRestarting) this.cancelIceRestart()
         return
       }
-      if (ice !== "failed" && ice !== "closed") return
+      if (ice === "disconnected" || ice === "failed") {
+        if (this.state !== "open") {
+          if (ice === "failed") this.fail(new Error(`ICE state ${ice}`))
+          return
+        }
+        this.scheduleIceRecovery(pc)
+        return
+      }
+      if (ice !== "closed") return
       if (this.state !== "open") {
         // ICE collapse during initial negotiation is a hard failure.
         this.fail(new Error(`ICE state ${ice}`))
-        return
-      }
-      // Mid-session ICE failure. Prefer a true ICE restart on the live peer
-      // (keeps DTLS + DataChannel) over a full teardown. Only `failed` is
-      // restartable; `closed` is terminal, and a restart already in flight
-      // (or exhausted attempts) escalates to a full reconnect.
-      if (
-        ice === "failed" &&
-        !this.iceRestarting &&
-        this.iceRestartAttempt < this.opts.iceRestartMaxAttempts
-      ) {
-        void this.attemptIceRestart()
         return
       }
       this.handleMidSessionDisconnect()
@@ -615,7 +841,7 @@ export class TransportRtc {
       if (pc.connectionState === "failed") {
         const err = new Error("peer connection failed")
         if (this.state === "open") {
-          this.handleMidSessionDisconnect()
+          this.scheduleIceRecovery(pc)
         } else {
           this.fail(err)
         }
@@ -625,6 +851,7 @@ export class TransportRtc {
     // Mobile is the offerer; desktop answers.
     const dc = pc.createDataChannel(DATACHANNEL_LABEL, { ordered: true })
     this.attachDataChannel(dc)
+    this.terminalDc = pc.createDataChannel(TERMINAL_DATACHANNEL_LABEL, { ordered: true })
 
     const offer = await pc.createOffer()
     await pc.setLocalDescription(offer)
@@ -642,10 +869,25 @@ export class TransportRtc {
       case "rtc:answer": {
         const body = envelope.body as RtcAnswerBody
         await pc.setRemoteDescription({ type: "answer", sdp: body.sdp })
+        await this.flushPendingRemoteIce(pc)
         break
       }
       case "rtc:ice": {
         const body = envelope.body as RtcIceBody
+        if (!pc.remoteDescription) {
+          const cutoff = Date.now() - PENDING_REMOTE_ICE_TTL_MS
+          this.pendingRemoteIce = this.pendingRemoteIce.filter(
+            (entry) => entry.receivedAt >= cutoff
+          )
+          if (this.pendingRemoteIce.length >= MAX_PENDING_REMOTE_ICE) {
+            throw new Error("TransportRtc: pending remote ICE queue overflow")
+          }
+          this.pendingRemoteIce.push({
+            candidate: body.candidate,
+            receivedAt: Date.now(),
+          })
+          break
+        }
         try {
           await pc.addIceCandidate(body.candidate)
         } catch (err) {
@@ -667,15 +909,27 @@ export class TransportRtc {
     }
   }
 
+  private async flushPendingRemoteIce(pc: RTCPeerConnection): Promise<void> {
+    const pending = this.pendingRemoteIce
+    this.pendingRemoteIce = []
+    const cutoff = Date.now() - PENDING_REMOTE_ICE_TTL_MS
+    for (const entry of pending) {
+      if (entry.receivedAt < cutoff) continue
+      try {
+        await pc.addIceCandidate(entry.candidate)
+      } catch (err) {
+        console.warn("TransportRtc: queued addIceCandidate failed", err)
+      }
+    }
+  }
+
   private attachDataChannel(dc: RTCDataChannel): void {
     this.dc = dc
+    dc.bufferedAmountLowThreshold = BUFFERED_AMOUNT_LOW_WATER
     dc.onopen = () => {
+      dc.send(JSON.stringify({ kind: "event-resume", since: this.eventCursor }))
       this.setState("open")
-      // Successful (re)open clears the backoff so the next mid-session
-      // disconnect starts from the smallest delay again, and resets the
-      // ICE-restart ladder.
-      this.reconnectAttempt = 0
-      this.iceRestartAttempt = 0
+      this.armHealthyReset()
       this.cancelIceRestart()
       const resolvers = this.onDcOpenResolvers
       this.onDcOpenResolvers = []
@@ -698,6 +952,39 @@ export class TransportRtc {
     }
   }
 
+  private async sendLogicalMessage(text: string): Promise<void> {
+    const dc = this.dc
+    if (!dc || dc.readyState !== "open") throw new Error("TransportRtc: DataChannel is not open")
+    const frames = encodeRtcLogicalMessage(text)
+    for (const frame of frames) {
+      if (this.dc !== dc || dc.readyState !== "open") {
+        throw new Error("TransportRtc: DataChannel changed during send")
+      }
+      if (dc.bufferedAmount > BUFFERED_AMOUNT_HIGH_WATER) {
+        await this.waitForDataChannelCapacity(dc)
+      }
+      dc.send(frame)
+    }
+  }
+
+  private async waitForDataChannelCapacity(dc: RTCDataChannel): Promise<void> {
+    if (typeof dc.bufferedAmount !== "number" || dc.bufferedAmount <= BUFFERED_AMOUNT_HIGH_WATER) {
+      return
+    }
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        dc.removeEventListener("bufferedamountlow", onLow)
+        reject(new Error("TransportRtc: DataChannel backpressure timed out"))
+      }, 15_000)
+      const onLow = () => {
+        clearTimeout(timeout)
+        dc.removeEventListener("bufferedamountlow", onLow)
+        resolve()
+      }
+      dc.addEventListener("bufferedamountlow", onLow)
+    })
+  }
+
   /**
    * Tear down the current peer/dc/signaling triple without flipping to
    * `failed`. Used by both auto-reconnect and `reconnectNow()` so the state
@@ -705,10 +992,18 @@ export class TransportRtc {
    */
   private teardownPeer(): void {
     this.cancelIceRestart()
+    this.cancelRecoveryTimers()
     if (this.negotiationTimer) {
       clearTimeout(this.negotiationTimer)
       this.negotiationTimer = null
     }
+    if (this.peerWaitTimer) {
+      clearTimeout(this.peerWaitTimer)
+      this.peerWaitTimer = null
+    }
+    // A fresh connect() installs a new cleanup + kickoff guard.
+    this.negotiationCleanup = null
+    this.negotiationKickedOff = false
     for (const p of this.pending.values()) {
       if (p.timer) clearTimeout(p.timer)
       p.reject(new Error("TransportRtc: connection reset"))
@@ -721,6 +1016,14 @@ export class TransportRtc {
         /* ignored */
       }
       this.dc = null
+    }
+    if (this.terminalDc) {
+      try {
+        this.terminalDc.close()
+      } catch {
+        /* ignored */
+      }
+      this.terminalDc = null
     }
     if (this.pc) {
       try {
@@ -781,6 +1084,55 @@ export class TransportRtc {
     }
   }
 
+  private scheduleIceRecovery(pc: RTCPeerConnection): void {
+    if (this.disconnectedGraceTimer || this.iceRestarting || this.state !== "open") return
+    const recover = () => {
+      this.disconnectedGraceTimer = null
+      if (this.pc !== pc || this.state !== "open") return
+      if (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed") return
+      if (this.iceRestartAttempt < this.opts.iceRestartMaxAttempts) {
+        void this.attemptIceRestart()
+      } else {
+        this.handleMidSessionDisconnect()
+      }
+    }
+    if (this.opts.disconnectedGraceMs === 0) {
+      recover()
+      return
+    }
+    this.disconnectedGraceTimer = setTimeout(recover, this.opts.disconnectedGraceMs)
+  }
+
+  private cancelDisconnectedGrace(): void {
+    if (this.disconnectedGraceTimer) {
+      clearTimeout(this.disconnectedGraceTimer)
+      this.disconnectedGraceTimer = null
+    }
+  }
+
+  private armHealthyReset(): void {
+    if (this.healthyResetTimer) clearTimeout(this.healthyResetTimer)
+    if (this.opts.healthyResetMs === 0) {
+      this.reconnectAttempt = 0
+      this.iceRestartAttempt = 0
+      return
+    }
+    this.healthyResetTimer = setTimeout(() => {
+      this.healthyResetTimer = null
+      if (this.state !== "open") return
+      this.reconnectAttempt = 0
+      this.iceRestartAttempt = 0
+    }, this.opts.healthyResetMs)
+  }
+
+  private cancelRecoveryTimers(): void {
+    this.cancelDisconnectedGrace()
+    if (this.healthyResetTimer) {
+      clearTimeout(this.healthyResetTimer)
+      this.healthyResetTimer = null
+    }
+  }
+
   /** Clear ICE-restart bookkeeping (flag + watchdog timer). */
   private cancelIceRestart(): void {
     this.iceRestarting = false
@@ -813,16 +1165,30 @@ export class TransportRtc {
 
     const delay = schedule[this.reconnectAttempt]
     this.reconnectAttempt += 1
+    const jitter = Math.min(0.999_999, Math.max(0, this.opts.reconnectRandom()))
+    const jitteredDelay = Math.floor(delay * jitter)
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null
       if (this.state !== "reconnecting") return
       void this.connect().catch((err) => {
         console.warn("TransportRtc: scheduled reconnect rejected", err)
       })
-    }, delay)
+    }, jitteredDelay)
   }
 
   private handleDataChannelMessage(raw: string): void {
+    const reassembled = this.reassembler.accept(raw)
+    if (reassembled.kind === "partial" || reassembled.kind === "ack") return
+    if (reassembled.kind === "cancel") {
+      if (reassembled.messageId && this.dc?.readyState === "open") {
+        this.dc.send(encodeRtcChunkCancel(reassembled.messageId, reassembled.reason))
+      }
+      return
+    }
+    if (reassembled.messageId && this.dc?.readyState === "open") {
+      this.dc.send(encodeRtcChunkAck(reassembled.messageId))
+    }
+    raw = this.reassembler.decode(reassembled)
     let frame: unknown
     try {
       frame = JSON.parse(raw)
@@ -832,19 +1198,26 @@ export class TransportRtc {
     }
     if (!frame || typeof frame !== "object") return
 
+    if ("kind" in frame && (frame as { kind: string }).kind === "resync_required") {
+      const notice = frame as {
+        kind: "resync_required"
+        domains?: string[]
+        cursor?: number
+      }
+      this.startAuthoritativeResync(notice)
+      return
+    }
+
     if ("kind" in frame && (frame as { kind: string }).kind === "event") {
       const ev = frame as RtcEvent
-      const prev = this.highestSeq.get(ev.event) ?? 0
-      if (ev.seq > prev) this.highestSeq.set(ev.event, ev.seq)
-      const handlers = this.channels.get(ev.event)
-      if (handlers) {
-        for (const h of handlers) {
-          try {
-            h(ev.payload)
-          } catch (err) {
-            console.warn("TransportRtc: event handler threw", err)
-          }
+      if (this.resyncInFlight) {
+        if (this.pendingEventsDuringResync.length >= 128) {
+          this.fail(new Error("TransportRtc: event queue overflow during resync"))
+          return
         }
+        this.pendingEventsDuringResync.push(ev)
+      } else {
+        this.deliverRtcEvent(ev)
       }
       return
     }
@@ -860,10 +1233,100 @@ export class TransportRtc {
     }
   }
 
+  private startAuthoritativeResync(notice: { domains?: string[]; cursor?: number }): void {
+    if (this.resyncInFlight) return
+    const domains = notice.domains?.length ? notice.domains : ["*"]
+    this.resyncInFlight = remoteEventResyncCoordinator
+      .resolve(domains)
+      .then(() => {
+        if (!Number.isSafeInteger(notice.cursor) || (notice.cursor ?? -1) < 0) {
+          throw new Error("resync notice omitted a valid cursor")
+        }
+        this.eventCursor = Math.max(this.eventCursor, notice.cursor!)
+        this.highestSeq.clear()
+        this.saveEventCursor()
+        for (const handlers of this.channels.values()) {
+          for (const handler of handlers) {
+            try {
+              handler({ type: "resync_required", domains })
+            } catch (error) {
+              console.warn("TransportRtc: resync handler threw", error)
+            }
+          }
+        }
+        const queued = this.pendingEventsDuringResync
+          .splice(0)
+          .sort((left, right) => left.seq - right.seq)
+        for (const event of queued) this.deliverRtcEvent(event)
+        if (this.dc?.readyState === "open") {
+          this.dc.send(JSON.stringify({ kind: "event-ack", seq: this.eventCursor }))
+        }
+      })
+      .catch((error) => {
+        this.pendingEventsDuringResync = []
+        this.fail(
+          new Error(
+            `TransportRtc: authoritative event resync failed: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          )
+        )
+      })
+      .finally(() => {
+        this.resyncInFlight = null
+      })
+  }
+
+  private deliverRtcEvent(ev: RtcEvent): void {
+    const prev = this.highestSeq.get(ev.event) ?? 0
+    if (!Number.isSafeInteger(ev.seq) || ev.seq <= prev || ev.seq <= this.eventCursor) return
+    this.highestSeq.set(ev.event, ev.seq)
+    this.eventCursor = ev.seq
+    this.saveEventCursor()
+    const handlers = this.channels.get(ev.event)
+    if (handlers) {
+      for (const handler of handlers) {
+        try {
+          handler(ev.payload)
+        } catch (error) {
+          console.warn("TransportRtc: event handler threw", error)
+        }
+      }
+    }
+    if (this.dc?.readyState === "open") {
+      this.dc.send(JSON.stringify({ kind: "event-ack", seq: this.eventCursor }))
+    }
+  }
+
+  private eventCursorStorageKey(): string {
+    return `cognia:rtc-event-cursor:${this.opts.rendezvousId}`
+  }
+
+  private loadEventCursor(): number {
+    try {
+      if (typeof localStorage === "undefined") return 0
+      const value = Number(localStorage.getItem(this.eventCursorStorageKey()))
+      return Number.isSafeInteger(value) && value >= 0 ? value : 0
+    } catch {
+      return 0
+    }
+  }
+
+  private saveEventCursor(): void {
+    try {
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem(this.eventCursorStorageKey(), String(this.eventCursor))
+      }
+    } catch {
+      // Cursor persistence is best-effort; the live in-memory cursor remains valid.
+    }
+  }
+
   private fail(err: Error): void {
     if (this.state === "failed" || this.state === "closed") return
     this.setState("failed")
     this.cancelIceRestart()
+    this.cancelRecoveryTimers()
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
@@ -873,6 +1336,7 @@ export class TransportRtc {
       p.reject(err)
     }
     this.pending.clear()
+    this.pendingRemoteIce = []
     const resolvers = this.onDcFailResolvers
     this.onDcFailResolvers = []
     for (const r of resolvers) r(err)

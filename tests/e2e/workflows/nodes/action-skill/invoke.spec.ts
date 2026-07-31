@@ -2,7 +2,7 @@
  * E2E: action.skill.invoke — invokes a registered skill by id.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../../../helpers/db-reset"
 import { seedAndOpenWorkflow, seedSkill } from "../../../helpers/seed-workflow"
 import {
@@ -20,12 +20,13 @@ test.describe("workflow node — action.skill.invoke", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded skill invoke renders + skillId + input persist", async ({ page }) => {
+  test("seeded skill invoke renders + skillId + input fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "action-skill-invoke")
     await assertNodeOnCanvas(page, { kind: "action.skill.invoke", label: "Invoke" })
     await openNodeInspector(page, "action.skill.invoke")
-    await expect(page.locator("#ins-skillId, [name=skillId]").first()).toBeVisible()
-    await expect(page.locator("#ins-input, [name=input]").first()).toBeVisible()
+    await expect(page.locator("#ins-skillIds, [data-field=skillIds]").first()).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "action.skill.invoke" })
   })

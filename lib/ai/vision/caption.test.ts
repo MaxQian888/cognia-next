@@ -1,4 +1,4 @@
-jest.mock("@/lib/ai/core/client", () => ({
+jest.mock("@cognia/provider-core/core/client", () => ({
   __esModule: true,
   getProviderModel: jest.fn(),
 }))
@@ -8,7 +8,7 @@ jest.mock("ai", () => ({
 }))
 
 import { generateImageCaption } from "./caption"
-import { getProviderModel as getProviderModelMock } from "@/lib/ai/core/client"
+import { getProviderModel as getProviderModelMock } from "@cognia/provider-core/core/client"
 import { generateText as generateTextMock } from "ai"
 
 const getProviderModel = getProviderModelMock as unknown as jest.Mock
@@ -36,6 +36,29 @@ describe("generateImageCaption", () => {
       model: "gpt-4o-mini",
       apiKey: "sk",
       baseURL: "https://example.test",
+    })
+  })
+
+  it("forwards apiFlavor and headers to getProviderModel", async () => {
+    getProviderModel.mockReturnValue({ stub: true })
+    generateText.mockResolvedValue({ text: "a chart" })
+
+    await generateImageCaption("data:image/png;base64,xyz", {
+      apiKey: "sk",
+      provider: "openai",
+      model: "gpt-4o-mini",
+      baseURL: "https://gateway.example/v1",
+      apiFlavor: "responses",
+      headers: { "OpenAI-Beta": "responses=experimental" },
+    })
+
+    expect(getProviderModel).toHaveBeenCalledWith({
+      provider: "openai",
+      model: "gpt-4o-mini",
+      apiKey: "sk",
+      baseURL: "https://gateway.example/v1",
+      apiFlavor: "responses",
+      headers: { "OpenAI-Beta": "responses=experimental" },
     })
   })
 

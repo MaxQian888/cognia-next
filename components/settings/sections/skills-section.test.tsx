@@ -12,16 +12,20 @@ jest.mock("@/components/skills", () => ({
 }))
 
 describe("SkillsSection", () => {
-  it("mounts SkillPanel inside a fixed-height settings container", () => {
+  it("mounts SkillPanel inside a fill-height flex container", () => {
     render(<SkillsSection />)
     const root = screen.getByTestId("skills-section")
     expect(root).toBeInTheDocument()
     expect(screen.getByTestId("stub-skill-panel")).toBeInTheDocument()
-    // Container must include a vh-relative height so the panel doesn't
-    // collapse inside the settings ScrollArea.
-    expect(root.className).toMatch(/h-\[calc\(100dvh/)
-    // Negative margins peel the panel out of the shell's section padding.
-    expect(root.className).toMatch(/-mx-3/)
+    // The panel fills its parent (the shell's fill-height branch) rather than
+    // guessing a viewport-relative height, so it adapts to the actual pane.
+    expect(root.className).toMatch(/\bflex-1\b/)
+    expect(root.className).toMatch(/\bmin-h-0\b/)
+    expect(root.className).toMatch(/\bh-full\b/)
+    // The old magic `100dvh - 8rem` calc and padding-cancelling negative
+    // margins are gone — the shell now supplies bounds and padding.
+    expect(root.className).not.toMatch(/h-\[calc\(100dvh/)
+    expect(root.className).not.toMatch(/-mx-3/)
   })
 
   it("merges an extra className from the parent", () => {

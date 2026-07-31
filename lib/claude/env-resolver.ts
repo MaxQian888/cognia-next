@@ -10,7 +10,9 @@
 // pointer.
 
 import { transport } from "@/lib/tauri"
-import type { AppSettings, Character, ChatSession } from "@/lib/claude/types"
+import { isStandaloneChatMode } from "@/lib/runtime/standalone-mode"
+import { useAccountStore } from "@/stores/account/account-store"
+import type { AppSettings, Character, ChatSession } from "@cognia/agent-config-types"
 
 /**
  * Walk the ADR-0028 precedence chain to pick the accountId for this turn:
@@ -51,14 +53,21 @@ export async function resolveAccountEnv(
   providerId: string,
   accountId: string | null
 ): Promise<Record<string, string>> {
+  if (isStandaloneChatMode()) return {}
   if (!accountId) return {}
+  const localAccountId = useAccountStore.getState().unlockedAccountId
+  if (!localAccountId) return {}
   try {
-    const pairs = await transport.call<Array<[string, string]> | null>("claude_env_for_account", {
-      provider: providerId,
-      accountId,
-    })
-    if (!pairs) return {}
-    return Object.fromEntries(pairs)
+    const entries = await transport.call<Array<{ key: string; value: string }> | null>(
+      "claude_env_for_account",
+      {
+        provider: providerId,
+        localAccountId,
+        accountId,
+      }
+    )
+    if (!entries) return {}
+    return Object.fromEntries(entries.map(({ key, value }) => [key, value]))
   } catch (err) {
     // Vault load failure or unknown provider — surface in logs but don't
     // block the send. The next layer (ActiveAccountState defaults) still
@@ -79,11 +88,13 @@ export async function resolveAccountEnv(
 export async function resolveProxyEnv(
   sessionId: string | null | undefined
 ): Promise<Record<string, string>> {
+  if (isStandaloneChatMode()) return {}
   try {
-    const pairs = await transport.call<Array<[string, string]>>("claude_proxy_env_for_session", {
-      sessionId: sessionId ?? "",
-    })
-    return Object.fromEntries(pairs ?? [])
+    const entries = await transport.call<Array<{ key: string; value: string }>>(
+      "claude_proxy_env_for_session",
+      { sessionId: sessionId ?? "" }
+    )
+    return Object.fromEntries((entries ?? []).map(({ key, value }) => [key, value]))
   } catch (err) {
     console.warn("resolveProxyEnv failed", err)
     return {}

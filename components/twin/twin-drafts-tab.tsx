@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { memo, useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useTranslations } from "next-intl"
 import { motion, useReducedMotion } from "motion/react"
@@ -18,7 +18,13 @@ import {
 import { createCharacter } from "@/lib/db/characters"
 import { createSkill } from "@/lib/db/skills"
 import { DraftEditorDialog } from "./draft-editor-dialog"
+import { UnredactDialog } from "./unredact-dialog"
 import { assertDraftBodyClean, DraftPiiError } from "@/lib/twin/distill/draft-pii-guard"
+import {
+  previewUnredact,
+  applyUnredactSelection,
+  type UnredactPlaceholder,
+} from "@/lib/twin/distill/unredact-draft"
 import type { TwinDraft, TwinDraftPayload } from "@/types/twin"
 
 const STATUS_VARIANT: Record<
@@ -40,25 +46,78 @@ function qualityKey(score?: number): QualityKey {
   return "qualityLow"
 }
 
+/** Chip order for the status filter row; "all" is prepended in the UI. */
+const FILTERABLE_STATUSES: TwinDraft["status"][] = ["pending", "accepted", "rejected", "edited"]
+
 export function TwinDraftsTab({ twinId }: { twinId: string }) {
   const t = useTranslations("twin.drafts")
-  const tKind = useTranslations("twin.kind")
+  const tStatus = useTranslations("twin.status")
   const prefersReducedMotion = useReducedMotion()
+  const [statusFilter, setStatusFilter] = useState<TwinDraft["status"] | "all">("all")
   const drafts = useLiveQuery(() => listTwinDraftsByTwin(twinId), [twinId], [])
-  const sorted = [...drafts].sort((a, b) => {
-    // Pending first; among pending, lowest qualityScore first.
-    if (a.status !== b.status) return a.status === "pending" ? -1 : 1
-    const sa = a.evaluation?.qualityScore ?? Number.POSITIVE_INFINITY
-    const sb = b.evaluation?.qualityScore ?? Number.POSITIVE_INFINITY
-    return sa - sb
-  })
+
+  const statusCounts = useMemo(() => {
+    const counts = new Map<TwinDraft["status"], number>()
+    for (const d of drafts) counts.set(d.status, (counts.get(d.status) ?? 0) + 1)
+    return counts
+  }, [drafts])
+
+  const sorted = useMemo(() => {
+    const base = statusFilter === "all" ? drafts : drafts.filter((d) => d.status === statusFilter)
+    return [...base].sort((a, b) => {
+      // Pending first; among pending, lowest qualityScore first.
+      if (a.status !== b.status) return a.status === "pending" ? -1 : 1
+      const sa = a.evaluation?.qualityScore ?? Number.POSITIVE_INFINITY
+      const sb = b.evaluation?.qualityScore ?? Number.POSITIVE_INFINITY
+      return sa - sb
+    })
+  }, [drafts, statusFilter])
+
+  const visibleFilters = FILTERABLE_STATUSES.filter((s) => (statusCounts.get(s) ?? 0) > 0)
 
   return (
     <div className="flex flex-col gap-3">
       <h2 className="text-lg font-medium">{t("headerCount", { count: drafts.length })}</h2>
+
+      {visibleFilters.length > 1 ? (
+        <div
+          className="flex flex-wrap items-center gap-1.5"
+          role="group"
+          aria-label={t("filterLabel")}
+          data-testid="twin-drafts-filter"
+        >
+          <Button
+            size="sm"
+            variant={statusFilter === "all" ? "secondary" : "ghost"}
+            className="h-7 px-2 text-xs"
+            onClick={() => setStatusFilter("all")}
+            aria-pressed={statusFilter === "all"}
+          >
+            {t("filterAll")} ({drafts.length})
+          </Button>
+          {visibleFilters.map((status) => (
+            <Button
+              key={status}
+              size="sm"
+              variant={statusFilter === status ? "secondary" : "ghost"}
+              className="h-7 px-2 text-xs"
+              onClick={() => setStatusFilter((prev) => (prev === status ? "all" : status))}
+              aria-pressed={statusFilter === status}
+              data-testid={`twin-drafts-filter-${status}`}
+            >
+              {tStatus(status)} ({statusCounts.get(status) ?? 0})
+            </Button>
+          ))}
+        </div>
+      ) : null}
+
       {drafts.length === 0 ? (
         <Card className="p-6 text-center">
           <p className="text-muted-foreground text-sm">{t("emptyHint")}</p>
+        </Card>
+      ) : sorted.length === 0 ? (
+        <Card className="p-6 text-center">
+          <p className="text-muted-foreground text-sm">{t("filterEmpty")}</p>
         </Card>
       ) : (
         <ul className="flex flex-col gap-2">
@@ -74,7 +133,7 @@ export function TwinDraftsTab({ twinId }: { twinId: string }) {
               }}
               className="list-none"
             >
-              <DraftRow draft={draft} t={t} tKind={tKind} />
+              <DraftRow draft={draft} />
             </motion.li>
           ))}
         </ul>
@@ -83,18 +142,18 @@ export function TwinDraftsTab({ twinId }: { twinId: string }) {
   )
 }
 
-function DraftRow({
-  draft,
-  t,
-  tKind,
-}: {
-  draft: TwinDraft
-  t: ReturnType<typeof useTranslations>
-  tKind: ReturnType<typeof useTranslations>
-}) {
+/**
+ * A single draft card. Memoised — live-query refreshes replace only changed
+ * drafts' objects, so unrelated cards skip re-rendering.
+ */
+const DraftRow = memo(function DraftRow({ draft }: { draft: TwinDraft }) {
+  const t = useTranslations("twin.drafts")
+  const tKind = useTranslations("twin.kind")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [editorOpen, setEditorOpen] = useState(false)
+  const [unredactOpen, setUnredactOpen] = useState(false)
+  const [unredactPlaceholders, setUnredactPlaceholders] = useState<UnredactPlaceholder[]>([])
   const data = draft.payload.data as Record<string, unknown>
   const name = typeof data.name === "string" ? data.name : t("untitled")
   const description = typeof data.description === "string" ? data.description : undefined
@@ -123,29 +182,70 @@ function DraftRow({
   const qKey = qualityKey(draft.evaluation?.qualityScore)
   const qualityText = t(qKey)
 
-  const accept = async () => {
+  // Write the accepted payload as a real Character / Skill row. `payload` is
+  // the draft payload after any PII restore — fields are re-derived from it so
+  // restored originals (not placeholders) land in the created row.
+  const finalizeAccept = async (payload: TwinDraftPayload) => {
+    const pData = payload.data as Record<string, unknown>
+    const pName = typeof pData.name === "string" ? pData.name : t("untitled")
+    const pDescription = typeof pData.description === "string" ? pData.description : undefined
+    const pBody =
+      typeof pData.systemPrompt === "string"
+        ? pData.systemPrompt
+        : typeof pData.content === "string"
+          ? pData.content
+          : ""
+    let acceptedId: string
+    if (payload.kind === "character") {
+      const character = await createCharacter({
+        name: pName,
+        description: pDescription,
+        avatarColor: "oklch(0.7 0.15 240)",
+        systemPrompt: pBody,
+        twinId: draft.twinId,
+      })
+      acceptedId = character.id
+    } else {
+      const skill = await createSkill({
+        name: pName,
+        description: pDescription,
+        content: pBody,
+      })
+      acceptedId = skill.id
+    }
+    await markTwinDraftAccepted(draft.id, acceptedId)
+  }
+
+  // Accept entry point. When the draft still carries restorable PII placeholders
+  // (`<EMAIL_001>` etc.), open the unredact dialog first so the user decides
+  // which originals to restore; otherwise write the row straight away.
+  const beginAccept = async () => {
     setBusy(true)
     setError(null)
     try {
-      let acceptedId: string
-      if (draft.payload.kind === "character") {
-        const character = await createCharacter({
-          name,
-          description,
-          avatarColor: "oklch(0.7 0.15 240)",
-          systemPrompt: body,
-          twinId: draft.twinId,
-        })
-        acceptedId = character.id
-      } else {
-        const skill = await createSkill({
-          name,
-          description,
-          content: body,
-        })
-        acceptedId = skill.id
+      const preview = await previewUnredact(draft, draft.twinId)
+      if (preview.placeholders.length > 0) {
+        setUnredactPlaceholders(preview.placeholders)
+        setUnredactOpen(true)
+        setBusy(false)
+        return
       }
-      await markTwinDraftAccepted(draft.id, acceptedId)
+      await finalizeAccept(draft.payload)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const confirmUnredact = async (
+    selection: ReadonlyArray<Pick<UnredactPlaceholder, "placeholder" | "original" | "keep">>
+  ) => {
+    setBusy(true)
+    setError(null)
+    try {
+      await finalizeAccept(applyUnredactSelection(draft.payload, selection))
+      setUnredactOpen(false)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -221,7 +321,7 @@ function DraftRow({
           <Button size="sm" variant="outline" onClick={() => void reject()} disabled={busy}>
             {t("reject")}
           </Button>
-          <Button size="sm" onClick={() => void accept()} disabled={busy}>
+          <Button size="sm" onClick={() => void beginAccept()} disabled={busy}>
             {t("accept")}
           </Button>
         </div>
@@ -233,6 +333,13 @@ function DraftRow({
         onSave={handleEditSave}
         busy={busy}
       />
+      <UnredactDialog
+        open={unredactOpen}
+        onOpenChange={setUnredactOpen}
+        placeholders={unredactPlaceholders}
+        onConfirm={confirmUnredact}
+        busy={busy}
+      />
     </Card>
   )
-}
+})

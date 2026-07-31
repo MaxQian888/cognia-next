@@ -17,14 +17,15 @@
  * runtime path stays silent so a stale pack doesn't spam the console.
  */
 
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 import type { PluginCharacterDef } from "@/types/plugin/plugin-character-pack"
-import { type SpeechSettings, type TTSProvider, TTS_PROVIDERS } from "@/types/media/tts"
+import { type SpeechSettings, type TTSProvider, TTS_PROVIDERS } from "@cognia/tts/types"
 
 /** Per-provider voice-id field on {@link SpeechSettings}. */
 const PROVIDER_VOICE_FIELD: Record<TTSProvider, keyof SpeechSettings> = {
   system: "systemVoice",
   openai: "openaiVoice",
+  "openai-realtime": "realtimeVoice",
   gemini: "geminiVoice",
   edge: "edgeVoice",
   elevenlabs: "elevenlabsVoice",
@@ -33,6 +34,7 @@ const PROVIDER_VOICE_FIELD: Record<TTSProvider, keyof SpeechSettings> = {
   cartesia: "cartesiaVoice",
   deepgram: "deepgramVoice",
   xiaomi: "xiaomiVoice",
+  mistral: "mistralVoiceId",
 }
 
 /**

@@ -25,9 +25,7 @@ function isLoadingSentinel(x: PluginRow | undefined | LoadingSentinel): x is Loa
 }
 
 export type PluginRowState =
-  | { state: "loading" }
-  | { state: "not-found" }
-  | { state: "ready"; row: PluginRow }
+  { state: "loading" } | { state: "not-found" } | { state: "ready"; row: PluginRow }
 
 export function usePluginRow(pluginId: string): PluginRowState {
   const result = useLiveQuery<PluginRow | undefined, LoadingSentinel>(

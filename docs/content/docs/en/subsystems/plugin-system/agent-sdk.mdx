@@ -1,0 +1,222 @@
+---
+title: Agent SDK (ctx.agent)
+description: The embeddable agent runtime exposed to plugins — typed run / runStreamed with structured output, rewrite-capable tool permission gates, and invokeTool for reusing host tools by name.
+---
+
+# Agent SDK (ctx.agent)
+
+<Status variant="experimental" />
+
+<TLDR>
+`ctx.agent` is the embeddable counterpart to the chat agent. Beyond the registration methods (`registerTool` / `registerSkill` / `registerSubagent` / …) it now exposes a typed run loop: `run(prompt, options)` (one-shot) and `runStreamed(prompt, options)` (an async-iterable of typed events). Both wrap `lib/ai/agent/agent-executor.ts:executeAgent` — text-only by default, tool-enabled through the desktop sidecar when `toolsEnabled` is set (gated by the `agent:control` permission). Runs support structured JSON output (`outputFormat`), a rewrite-capable `canUseTool` permission gate, and `invokeTool(name, args)` for calling any host/plugin tool by name. The legacy `executeAgent(config)` is kept as a deprecated shim.
+</TLDR>
+
+<StatGrid>
+  <Stat label="Entry points" value="run · runStreamed · invokeTool" hint="types/plugin/plugin-agent-sdk.ts" />
+  <Stat label="Runtime" value="lib/plugin/agent-sdk/" hint="run.ts · stream.ts · pii-gate.ts" />
+  <Stat label="Channels" value="text · sidecar" hint="result.channel reports which ran" />
+  <Stat label="Tool-enabled gate" value="agent:control" hint="permission required for toolsEnabled + invokeTool" />
+  <Stat label="Consent" value="canUseTool → allow / deny / rewrite" hint="reuses the sidecar permission_request round-trip" />
+  <Stat label="Structured output" value="outputFormat: json_schema" hint="buildJsonInstruction + parseStructured" />
+</StatGrid>
+
+## Why it exists
+
+Plugins could already register tools and subagents, but the only way to *run* an agentic turn was the untyped `ctx.agent.executeAgent(config: Record<string, unknown>)`. There was no typed contract, no streaming to the plugin, no structured output, no way to gate or rewrite tool-call arguments, and no way to invoke a host tool from inside plugin code. The Agent SDK closes those gaps, borrowing the embeddable-agent shape from the VS Code Language Model API, the Anthropic Claude Agent SDK (`query()`), the Cursor SDK, and the OpenAI Agents SDK.
+
+## run — one-shot
+
+```ts
+const result = await ctx.agent.run("Summarize the release notes", {
+  appendSystem: "Be concise.",
+  outputFormat: {
+    type: "json_schema",
+    schema: { type: "object", properties: { summary: { type: "string" } } },
+  },
+})
+result.text        // raw assistant text
+result.object      // parsed JSON when outputFormat was requested
+result.parseError  // set (never thrown) when parsing failed
+result.channel     // "text" | "sidecar"
+result.agentId     // cancellation handle
+```
+
+`run` resolves with a `PluginAgentRunResult`. Provider resolution flows through the same `lib/ai/provider-consumption.ts` path the chat agent and `ctx.ai.chat` use — `run` is the agentic, tool-loop-capable superset; `ctx.ai.chat` remains the lightweight raw completion.
+
+## runStreamed — live events
+
+```ts
+const run = ctx.agent.runStreamed("Research this topic", { appendSystem: "Cite sources." })
+for await (const event of run) {
+  if (event.type === "text-delta") process.stdout.write(event.delta)
+  if (event.type === "tool-call") console.log("calling", event.toolName)
+}
+const result = await run.result   // final PluginAgentRunResult
+run.cancel()                      // abort mid-flight
+```
+
+`runStreamed` returns a `PluginAgentRun` — an async-iterable of `text-delta` / `tool-call` / `tool-result` / `result` events, plus a `result` promise and `cancel()`. The streaming events are surfaced from the single assistant-block parse loop in `lib/claude/run-and-capture.ts` (via its `onEvent` hook) — no second event parser.
+
+## Structured output
+
+Set `outputFormat: { type: "json_schema", schema }`. A JSON-only instruction (`buildJsonInstruction`, from `lib/workflow/nodes/ai/structured.ts`) is appended to the system prompt, and the final text is parsed with `parseStructured`. The parsed value lands on `result.object`; a parse failure surfaces on `result.parseError` and is never thrown. This reuses the repository's established JSON-mode idiom and works identically on both channels — there is no native `generateObject` and no JSON-Schema-to-Zod converter.
+
+## canUseTool — allow / deny / rewrite
+
+The permission gate mirrors the Claude Agent SDK's `canUseTool`: it returns `allow` (optionally with `updatedInput` to **rewrite** the arguments) or `deny` (with a message fed back to the model).
+
+```ts
+const redactGate: PluginCanUseTool = async (_toolName, input) => ({
+  behavior: "allow",
+  updatedInput: redactPluginInput(input),
+})
+
+await ctx.agent.run("...", { toolsEnabled: true, canUseTool: redactGate })
+```
+
+For tool-enabled (sidecar) runs the gate answers the sidecar's existing `permission_request` round-trip and forwards a rewritten `updatedInput` via `approveTool` — reusing the rewrite-capable contract end-to-end. A run-level gate composes with per-tool `canUseTool`: the tool-level gate runs first, its rewritten input flows into the run-level gate, and a `deny` from either short-circuits. Cognia's built-in PII gate remains a host-only policy implementation; distributed plugins provide their own gate against the public `PluginCanUseTool` contract.
+
+> **Coverage limit.** Host tools auto-allowed by the permission ruleset do not emit a `permission_request`, so the gate intercepts only ask-tier host tools. A plugin's own inline tools are always gated.
+
+## invokeTool — call a host tool by name
+
+```ts
+const page = await ctx.agent.invokeTool("web_fetch", { url: "https://example.com" })
+```
+
+`invokeTool` routes through the unified `lib/plugin/core/invoke-plugin-tool.ts` seam (ownership check + permission tier + lazy activation) and returns the tool's result. It requires the `agent:control` permission.
+
+## Lifecycle hooks (Package A)
+
+`run` / `runStreamed` accept per-run `hooks` mirroring the Claude Agent SDK's PreToolUse / PostToolUse / Stop surface:
+
+```ts
+await ctx.agent.run("...", {
+  toolsEnabled: true,
+  hooks: {
+    onPreToolUse: (name, input) =>
+      name === "Bash" ? { behavior: "deny", message: "no shell" } : { behavior: "allow" },
+    onPostToolUse: ({ toolName, result }) => ({ updatedToolOutput: redact(result) }),
+    onStop: ({ text, channel, usage }) => log(`done on ${channel}`),
+  },
+})
+```
+
+- **`onPreToolUse`** composes into the same gate chain as `canUseTool`, running **last** (tool-level → run-level → hook); any `deny` wins and rewrites chain through.
+- **`onPostToolUse`** observes each tool result and may return `updatedToolOutput` to **rewrite** what the model sees. Output rewrite applies where the result is materialized in-process — the **ai-sdk channel and in-process MCP tools**; native Anthropic tools (Bash / Read / Edit / Grep) run inside the SDK subprocess and are **observe-only**. The capture loop fires the hook exactly once per tool (review on the ai-sdk channel, observation otherwise).
+- **`onStop`** fires once on completion, on **both** channels (graceful degradation: tool hooks never fire on the text channel, but `onStop` does).
+
+Output rewrite rides a new opt-in sidecar round-trip (`tool_result_review` → `tool_result_decision`, the `claude_tool_result_decision` Rust command) that mirrors `permission_request`; it only engages when an `onPostToolUse` hook is present. No new permission — hooks ride `agent:control`.
+
+## Guardrails (Package B)
+
+Input/output guardrails run **around** a run (OpenAI Agents SDK style). A tripped tripwire aborts with a typed `PluginGuardrailTripwireError`.
+
+```ts
+import { defineGuardrail } from "@cognia/plugin-sdk"
+
+ctx.agent.guardrails.register(
+  defineGuardrail({
+    id: "no-secrets",
+    type: "output",
+    run: ({ output }) => ({ tripwireTriggered: /sk-[a-z0-9]+/i.test(output) }),
+  })
+)
+
+await ctx.agent.run("...", { guardrails: ["no-secrets"] })
+```
+
+A run's `guardrails` is a mix of inline guardrail objects and ids of guardrails registered via `ctx.agent.guardrails`. Input guardrails run before the turn; output guardrails on the final text. Guardrails are channel-agnostic (full on the text channel) and ride `agent:control`.
+
+## Programmatic dispatch (Package C)
+
+```ts
+const review = await ctx.agent.dispatchSubagent("code-reviewer", "Review the diff")
+const team = await ctx.agent.runTeam("team-id", { ultracode: true })
+```
+
+- **`dispatchSubagent(idOrDef, prompt, opts)`** resolves a registered subagent (or an inline def) and runs it as a one-shot tool-enabled turn — subagent `{prompt, model, tools, maxTurns}` map onto the executor. (Subagents have no host direct-invoke entry; this is the faithful "run THIS subagent" path.)
+- **`runTeam(teamOrConfig, opts)`** runs an Agent Team headlessly by existing id or ad-hoc config, reusing `agentTeamManager.start` (live store binding, configured runtime deps, per-team inflight guard).
+
+Both require the **`agent:dispatch`** permission (non-dangerous). They degrade to text-only sub-runs / teammates when the sidecar is absent.
+
+## Sessions (Package D)
+
+Durable, multi-turn conversations a plugin owns:
+
+```ts
+const session = await ctx.agent.sessions.create({ characterId, maxTokens: 50_000 })
+await session.send("Start the analysis")
+await session.send("Now compare with last quarter")  // resumes the conversation
+const history = await session.history()
+await session.end()
+// later / after reload:
+const resumed = await ctx.agent.sessions.resume(session.id)
+```
+
+A session is a durable `ChatSession`. Each `send` resumes the prior conversation — native SDK resume (via the persisted `sdkSessionId`) on the sidecar, a replayed transcript on the text channel. Turns are recorded to Dexie so `history()` survives reload. `create` / `resume` reuse the existing `session:write` / `session:read` permissions. An optional cumulative `maxTokens` / `maxBudgetUsd` budget (Package F) refuses a send once exhausted (`PluginBudgetExceededError`).
+
+## Context & memory (Package E)
+
+```ts
+import { defineContextProvider } from "@cognia/plugin-sdk"
+
+ctx.agent.context.registerProvider(
+  defineContextProvider({ id: "recent-decisions", provide: async () => "Recent decisions: …" })
+)
+const shared = await ctx.agent.context.readSharedMemory("team-id")        // agent:shared-memory:read
+const chunks = await ctx.agent.context.queryTwinMemory(characterId, "q")  // twin:read
+```
+
+- **Context providers** contribute ambient text appended to the system prompt of every run the plugin starts (channel-agnostic; a throwing provider is skipped).
+- **`readSharedMemory(teamId)`** returns the ACL-readable operator view of a team's shared-memory blackboard (gated `agent:shared-memory:read`).
+- **`queryTwinMemory(characterId, query)`** runs RAG retrieval against the employee twin, reusing `tryBuildTwinDeps` + `applyTwinContext` (PII vetted at ingest); degrades to `[]` when unbound/unavailable (gated `twin:read`).
+
+## Robustness (Package F)
+
+Run-shaping knobs (no new methods, no new permissions):
+
+```ts
+await ctx.agent.run("...", {
+  fallbackModel: "claude-haiku-4-5",  // retry once with this model if the primary errors
+  maxTurns: 8,                        // alias of maxSteps (maxSteps wins)
+  trace: true,                        // emit a per-run agent-trace plugin-hook span
+})
+```
+
+`fallbackModel` retries a one-shot run once on primary failure (streamed runs do not retry — a retry would re-emit events). `trace` emits a `plugin-hook` span (start/end + usage + error) into the tracing dashboard via `lib/agent-trace/emitter.ts`.
+
+## Permission
+
+| Surface | Permission |
+| --- | --- |
+| `toolsEnabled` runs · `invokeTool` | `agent:control` |
+| hooks · guardrails · fallback/budget/trace | `agent:control` (ride existing runs) |
+| `runExternalAgent` | `agent:dispatch-external` |
+| `dispatchSubagent` · `runTeam` | `agent:dispatch` |
+| `sessions.create` / `sessions.resume` | `session:write` / `session:read` |
+| `context.readSharedMemory` | `agent:shared-memory:read` |
+| `context.queryTwinMemory` | `twin:read` |
+
+Text-only runs, context-provider/guardrail **registration**, and `onStop` are ungated. New permissions are mirrored in `lib/plugin/core/validation.ts` and the Rust `crates/cognia-cli/src/cmd_lint.rs` allow-list (parity-tested).
+
+## Authoring helpers
+
+`@cognia/plugin-sdk` re-exports `defineAgentTool()`, `defineGuardrail()`, and `defineContextProvider()` (typed pass-through for either a runtime provider object or a declarative `manifest.contextProviders[]` entry). Define helpers are imported from the package root; arbitrary `define/<name>` subpaths are not public. Host PII factories are intentionally excluded from the published author SDK.
+
+## Dogfood
+
+The trusted in-tree `cognia-web-tools` host module exercises the surface end-to-end: it gathers source pages with `ctx.agent.invokeTool("web_fetch", …)`, then summarizes them with `ctx.agent.runStreamed` using `outputFormat`, the host-only PII gate, an output **guardrail**, an `onStop` **hook**, and `trace`. On activate it registers a **context provider**. Bundled host modules are not third-party SDK examples; see `plugins/web-tools/src/index.ts`.
+
+## Key files
+
+| Concern | Location |
+| --- | --- |
+| Types | `types/plugin/plugin-agent-{sdk,hooks,guardrails,session}.ts` · `plugin-context-provider.ts` |
+| Runtime | `lib/plugin/agent-sdk/` — `run` · `stream` · `pii-gate` · `guardrails` · `dispatch` · `session` · `context-providers` · `budget` · `tracing` |
+| Registries | `lib/plugin/registries/{guardrail,context-provider}-registry.ts` |
+| Wiring | `lib/plugin/core/context.ts` (`createAgentAPI`); disable cleanup in `manager.ts` |
+| Executor | `lib/ai/agent/agent-executor.ts` (sessionId · priorMessages · onPostToolUse) |
+| Streaming + consent + review seam | `lib/claude/run-and-capture.ts` · sidecar `ai-sdk.mjs` · `claude_tool_result_decision` |
+| Tool invocation seam | `lib/plugin/core/invoke-plugin-tool.ts` |
+| Dispatch reuse | `lib/ai/agent/agent-team.ts` · `agent-team-runtime.ts` |

@@ -5,12 +5,23 @@
 
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useMemo } from "react"
+import { useRouter } from "next/navigation"
 import { useSettingsStore } from "@/stores/settings"
-import { DEFAULT_PET_SETTINGS } from "@/types/pet"
+import { DEFAULT_PET_DESKTOP_OVERLAY, DEFAULT_PET_SETTINGS } from "@/types/pet"
 import { usePetEventBus } from "@/hooks/pet/use-pet-event-bus"
+import { useActiveCharacterId } from "@/hooks/pet/use-active-character-id"
+import { useActivityTracker } from "@/hooks/pet/use-activity-tracker"
+import { usePetCareAlert } from "@/hooks/pet/use-pet-care-alert"
 import { ensurePetAccountId } from "@/lib/pet/bones/account-id"
 import { ensurePetProfile } from "@/lib/pet/runtime/init-pet"
+import { registerPetInteractionCommands, registerPetWindowCommand } from "@/lib/pet/commands"
+import { getPetWindowRole, isSecondaryOverlayRole } from "@/lib/pet/window-role"
+import { overlayWindowSize } from "@/lib/pet/overlay-geometry"
+import { isPetWindowOpen, onPetNativeStateChanged, openPetWindow } from "@/lib/tauri/pet-window"
+import { isTauri } from "@/lib/platform/detect"
+import { usePlatform } from "@/hooks/use-platform"
+import { startMainPetBridge } from "@/lib/pet/events/cross-window-bridge"
 import { PetWidget } from "./pet-widget"
 
 export function PetMount() {
@@ -18,11 +29,39 @@ export function PetMount() {
   const save = useSettingsStore((s) => s.save)
   const pet = settings?.petSettings ?? DEFAULT_PET_SETTINGS
   const enabled = pet.enabled
+  const activeCharacterId = useActiveCharacterId()
 
-  usePetEventBus(enabled)
+  // Resolve the window role once: the shared root layout mounts PetMount in
+  // every webview, but the controller (event bus + XP awards) and the widget
+  // must live only in the main window. Both secondary pet windows — the
+  // transparent overlay (`/pet-overlay`, label "pet") and the click popup
+  // (`/pet-popup`, label "pet-popup") — render presentation only, so here they
+  // must contribute nothing; otherwise XP double-awards.
+  const role = useMemo(() => getPetWindowRole(), [])
+  const secondary = isSecondaryOverlayRole(role)
+
+  // The floating in-app widget is a desktop / web affordance only. On the
+  // Capacitor mobile shell it would dock to a viewport corner with a 96px hit
+  // area that sits on top of page content — most visibly covering bottom-right
+  // action buttons (e.g. the preset editor's Save / Create), which is then
+  // untappable. Exclude the whole subsystem on mobile, mirroring the Perf HUD.
+  const isMobile = usePlatform() === "mobile"
+  const widgetEnabled = enabled && !secondary && !isMobile
+  // The main desktop window — where the global-hotkey → command dispatch lives.
+  // Independent of `enabled`: the toggle-window hotkey must summon the pet even
+  // when the widget is currently off.
+  const isMainDesktopWindow = !secondary && !isMobile && isTauri()
+  const desktopPet = pet.desktopPet ?? DEFAULT_PET_DESKTOP_OVERLAY
+
+  usePetEventBus(widgetEnabled, pet.twinAwareness)
+  // User-activity signal (Smart-Moving): feeds the proactive idle trigger and
+  // pings the overlay's wander gate over the bridge (throttled).
+  useActivityTracker(widgetEnabled)
+  // Gentle care notification when the pet first becomes unwell (main window only).
+  usePetCareAlert(widgetEnabled)
 
   useEffect(() => {
-    if (!enabled) return
+    if (!widgetEnabled) return
     let cancelled = false
     void (async () => {
       const accountId = await ensurePetAccountId(settings, save)
@@ -32,8 +71,92 @@ export function PetMount() {
     return () => {
       cancelled = true
     }
-  }, [enabled, settings, save])
+  }, [widgetEnabled, settings, save])
 
-  if (!enabled) return null
-  return <PetWidget settings={pet} />
+  // Main window owns the cross-window bridge: it broadcasts the controller's
+  // visual-state/bubble/one-shots and replays overlay interactions (including
+  // the popup's "open the /pet console at a tab" request — routed here because
+  // only this window has the app router). Pointless on the web (single
+  // browsing context), so gate on Tauri.
+  const router = useRouter()
+  useEffect(() => {
+    if (!widgetEnabled || !isTauri()) return
+    const dispose = startMainPetBridge({
+      onOpenConsole: (tab) => router.push(`/pet?tab=${tab}`),
+    })
+    return dispose
+  }, [widgetEnabled, router])
+
+  // The desktop-pet toggle command backs a global hotkey / tray quick action.
+  // Register it on the main desktop window regardless of `enabled` so a chord
+  // the user bound stays live (and isn't reserved-but-dead) when the pet is off.
+  useEffect(() => {
+    if (!isMainDesktopWindow) return
+    return registerPetWindowCommand()
+  }, [isMainDesktopWindow])
+
+  // Reconcile persisted intent after a cold start. The native window is
+  // process-local, so `desktopPet.enabled` can survive a restart while no
+  // `pet` webview exists. Probe first so React remounts never duplicate or
+  // unnecessarily raise an already-visible panel.
+  useEffect(() => {
+    if (!isMainDesktopWindow || !widgetEnabled || !desktopPet.enabled) return
+    let cancelled = false
+    void isPetWindowOpen().then((open) => {
+      if (cancelled || open) return
+      void openPetWindow({
+        ...overlayWindowSize(desktopPet.size),
+        x: desktopPet.position?.x,
+        y: desktopPet.position?.y,
+        clickThrough: desktopPet.clickThrough,
+      })
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [
+    desktopPet.clickThrough,
+    desktopPet.enabled,
+    desktopPet.position?.x,
+    desktopPet.position?.y,
+    desktopPet.size,
+    isMainDesktopWindow,
+    widgetEnabled,
+  ])
+
+  // Keep PetSettings in sync with NATIVE window mutations the renderer didn't
+  // initiate (tray toggle, tray click-through recovery): the Rust side
+  // broadcasts `pet://state-changed` on every open/close/click-through change;
+  // patch only on real drift so renderer-initiated changes (which already
+  // persisted) don't loop. Independent of `enabled` — a tray open must land in
+  // settings even while the widget is off.
+  useEffect(() => {
+    if (!isMainDesktopWindow) return
+    return onPetNativeStateChanged((native) => {
+      const store = useSettingsStore.getState()
+      const latest = store.settings?.petSettings
+      if (!latest) return
+      const desktop = latest.desktopPet ?? DEFAULT_PET_DESKTOP_OVERLAY
+      if (desktop.enabled === native.open && desktop.clickThrough === native.clickThrough) return
+      void store.save({
+        petSettings: {
+          ...latest,
+          desktopPet: {
+            ...desktop,
+            enabled: native.open,
+            clickThrough: native.clickThrough,
+          },
+        },
+      })
+    })
+  }, [isMainDesktopWindow])
+
+  // Feed/play/pet need the running controller, so gate them on the widget.
+  useEffect(() => {
+    if (!widgetEnabled) return
+    return registerPetInteractionCommands()
+  }, [widgetEnabled])
+
+  if (!widgetEnabled) return null
+  return <PetWidget settings={pet} activeCharacterId={activeCharacterId} />
 }

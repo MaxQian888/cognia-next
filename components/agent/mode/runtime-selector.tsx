@@ -11,6 +11,7 @@
  * agent record to dispatch to, only shown when runtime === "external").
  */
 
+import { useEffect } from "react"
 import { useTranslations } from "next-intl"
 import { BotIcon, ChevronDownIcon, PlugZapIcon } from "lucide-react"
 import {
@@ -43,6 +44,18 @@ export function AgentRuntimeSelector({ className, disabled }: Props) {
   const externalAgentName = useExternalAgentStore((s) =>
     externalAgentId ? s.agents[externalAgentId]?.name : undefined
   )
+  const hasConfiguredExternalAgent = useExternalAgentStore(
+    (s) => s.enabled && Object.values(s.agents).some((agent) => agent.enabled)
+  )
+
+  // A persisted external runtime can outlive its agent configuration. Keep the
+  // execution state valid instead of leaving the composer on an unusable
+  // "External (none selected)" lane after the last enabled agent is removed.
+  useEffect(() => {
+    if (runtime === "external" && !hasConfiguredExternalAgent) {
+      setRuntime("claude-sdk")
+    }
+  }, [hasConfiguredExternalAgent, runtime, setRuntime])
 
   const Icon = runtime === "external" ? PlugZapIcon : BotIcon
   const label =
@@ -55,23 +68,26 @@ export function AgentRuntimeSelector({ className, disabled }: Props) {
           <DropdownMenuTrigger
             disabled={disabled}
             className={cn(
-              "inline-flex h-6 items-center gap-1 rounded-md border border-transparent px-1.5 text-[11px] hover:border-border hover:bg-accent",
+              "inline-flex h-7 min-w-0 items-center gap-1.5 rounded-lg border border-transparent bg-muted/35 px-2 text-[11px] text-muted-foreground transition-colors hover:border-border/70 hover:bg-muted/70 hover:text-foreground disabled:pointer-events-none disabled:opacity-50",
               className
             )}
             aria-label={t("ariaLabel")}
           >
             <Icon className="size-3.5 shrink-0" />
-            <span className="max-w-[10rem] truncate font-mono">{label}</span>
-            <ChevronDownIcon className="size-3 opacity-60" />
+            <span className="min-w-0 truncate font-medium">{label}</span>
+            <ChevronDownIcon className="size-3 shrink-0 opacity-60" />
           </DropdownMenuTrigger>
         </TooltipTrigger>
         <TooltipContent side="top">{t("tooltip")}</TooltipContent>
       </Tooltip>
-      <DropdownMenuContent align="start" className="w-64">
+      <DropdownMenuContent align="start" sideOffset={8} className="w-72 rounded-xl p-1.5">
         <DropdownMenuLabel>{t("label")}</DropdownMenuLabel>
         <DropdownMenuRadioGroup
           value={runtime}
-          onValueChange={(value) => setRuntime(value as AgentRuntime)}
+          onValueChange={(value) => {
+            if (value === "external" && !hasConfiguredExternalAgent) return
+            setRuntime(value as AgentRuntime)
+          }}
         >
           <DropdownMenuRadioItem value="claude-sdk">
             <BotIcon className="mr-2 size-4" />
@@ -80,11 +96,13 @@ export function AgentRuntimeSelector({ className, disabled }: Props) {
               <span className="text-[10px] text-muted-foreground">{t("claudeSdkDesc")}</span>
             </div>
           </DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="external">
+          <DropdownMenuRadioItem value="external" disabled={!hasConfiguredExternalAgent}>
             <PlugZapIcon className="mr-2 size-4" />
             <div className="flex flex-col">
               <span className="text-sm">{t("external")}</span>
-              <span className="text-[10px] text-muted-foreground">{t("externalDesc")}</span>
+              <span className="text-[10px] text-muted-foreground">
+                {hasConfiguredExternalAgent ? t("externalDesc") : t("externalEmpty")}
+              </span>
             </div>
           </DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>

@@ -73,6 +73,7 @@ export interface A2UISurfaceRow {
   dataModel: Record<string, unknown>
   rootId: string
   catalogId?: string
+  title?: string
   widget?: A2UIWidgetMetadata
   createdAt: number
   updatedAt: number

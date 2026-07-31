@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Quiet hours + global mute tests for outbound-runner — Task 109.
  *

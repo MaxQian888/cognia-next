@@ -53,7 +53,13 @@ export function RunDurationSparkline({ workflowId }: { workflowId: string }) {
     <div className="flex flex-col gap-1">
       <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{t("title")}</p>
       <div className="h-8 w-32">
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer
+          width="100%"
+          height="100%"
+          minWidth={1}
+          minHeight={1}
+          initialDimension={{ width: 128, height: 32 }}
+        >
           <LineChart data={data}>
             <YAxis hide domain={["auto", "auto"]} />
             <Tooltip

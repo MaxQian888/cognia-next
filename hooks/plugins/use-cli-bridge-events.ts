@@ -22,7 +22,8 @@ import { useEffect } from "react"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
 
 import { isTauri } from "@/lib/tauri"
-import { loggers } from "@/lib/logging"
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
+import { loggers } from "@cognia/logging"
 import { getPluginManager } from "@/lib/plugin/core/manager"
 import {
   recordHotReloadEvent,
@@ -103,9 +104,9 @@ export function useCliBridgeEvents(): void {
         } else {
           // Listener resolved after unmount — clean up immediately so
           // we don't leak a Tauri channel.
-          unInstall()
-          unUninstall()
-          unReload()
+          safeUnlisten(unInstall)
+          safeUnlisten(unUninstall)
+          safeUnlisten(unReload)
         }
       } catch (err) {
         loggers.plugin.warn(`[cli-bridge] failed to subscribe`, { error: String(err) })
@@ -114,13 +115,7 @@ export function useCliBridgeEvents(): void {
 
     return () => {
       active = false
-      for (const off of unlisteners) {
-        try {
-          off()
-        } catch (err) {
-          loggers.plugin.warn(`[cli-bridge] unlisten failed`, { error: String(err) })
-        }
-      }
+      for (const off of unlisteners) safeUnlisten(off)
     }
   }, [])
 }

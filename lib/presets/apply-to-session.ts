@@ -9,7 +9,7 @@
 // tested without an IndexedDB harness. Callers persist the patch via
 // `updateSession` themselves.
 
-import type { ChatSession, SystemPromptPreset } from "@/lib/claude/types"
+import type { ChatSession, SystemPromptPreset } from "@cognia/agent-config-types"
 
 /**
  * Strategy for reconciling preset fields with non-empty session values.

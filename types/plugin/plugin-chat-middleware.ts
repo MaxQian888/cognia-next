@@ -25,6 +25,8 @@
  * `PluginPermission` union in plugin.ts). See ADR-0026 §4.
  */
 
+import type { PluginContributionBackend } from "@/types/plugin/plugin"
+
 import type { PluginMessage } from "./plugin"
 
 /**
@@ -42,12 +44,18 @@ export interface PluginChatMiddlewareDef {
   /** Human label shown in plugin settings. */
   label: string
   /** Relative path inside the plugin install root. */
-  entry: string
+  /**
+   * Which runtime owns this middleware. Omit to inherit the plugin type
+   * (`python` plugins default to `"python"`); declaring `entry` pins it to
+   * `"js"`. See {@link PluginContributionBackend}.
+   */
+  backend?: PluginContributionBackend
+  entry?: string
   /**
    * Named export on the entry module — must resolve to a
    * `ChatMiddleware` at runtime.
    */
-  export: string
+  export?: string
   /**
    * Execution priority. Higher runs *outer* in the Koa-style chain (i.e.
    * sees the request first, sees the response last). Default 0; range

@@ -1,17 +1,17 @@
 ---
 title: Scaffolding
-description: cognia plugin new — the six-question TTY wizard, name validation, and the embedded WASM / TypeScript templates (include_str! from two real template crates) with string-substitution and post-stamp manifest patching.
+description: cognia plugin new — the six-question TTY wizard, name validation, and the embedded WASM / TypeScript / Python / hybrid / VS Code-extension templates with string-substitution and post-stamp manifest patching.
 ---
 
 # Scaffolding — `cognia plugin new`
 
 <TLDR>
-  `cmd_new::run()` (`crates/cognia-cli/src/cmd_new.rs:40-104`) collects answers (interactive
+  `cmd_new::run()` (`crates/cognia-cli/src/cmd_new.rs:43-103`) collects answers (interactive
   wizard on a TTY, flags + defaults otherwise), **stamps** an embedded template
-  (`template.rs:72-150` — every file ships inside the binary via `include_str!` from
-  `crates/cognia-plugin-template{,-ts}/`), **patches** the wizard answers into the generated
-  `plugin.json` (`cmd_new.rs:253-278`), and optionally **embeds a fresh Ed25519 public key**
-  (`cmd_new.rs:281-302`). Substitution is two plain `String::replace` calls per file — the
+  (`template.rs:111-267` — every file ships inside the binary via `include_str!` from the five
+  sibling template source directories), **patches** the wizard answers into the generated
+  `plugin.json` (`cmd_new.rs:268-293`), and optionally **embeds a fresh Ed25519 public key**
+  (`cmd_new.rs:296-316`). Substitution is two plain `String::replace` calls per file — the
   template id and its humanized title. The target directory is refused if non-empty.
 </TLDR>
 
@@ -19,21 +19,21 @@ description: cognia plugin new — the six-question TTY wizard, name validation,
 
 ```mermaid
 flowchart TD
-  CMD["cognia plugin new &lt;name&gt; [flags]"] --> CA[collect_answers<br/>cmd_new.rs:108-212]
+  CMD["cognia plugin new &lt;name&gt; [flags]"] --> CA[collect_answers<br/>cmd_new.rs:106-222]
   CA -- "TTY: 6 prompts<br/>non-TTY: flags + defaults" --> WA[WizardAnswers]
-  WA --> ST[stamp<br/>cmd_new.rs:307-346]
-  ST --> VN{validate_name<br/>cmd_new.rs:348-367}
+  WA --> ST[stamp<br/>cmd_new.rs:322-364]
+  ST --> VN{validate_name<br/>cmd_new.rs:366-385}
   VN -- invalid --> ERR[bail]
   VN -- ok --> DIR{target dir<br/>empty?}
   DIR -- "exists, non-empty" --> ERR
-  DIR -- ok --> FF[files_for kind, name<br/>template.rs:72-150]
-  FF --> SUB[substitute_*_name<br/>template.rs:173-183]
+  DIR -- ok --> FF[files_for kind, name<br/>template.rs:111-267]
+  FF --> SUB[substitute_*_name<br/>template.rs:310-341]
   SUB --> W[write files]
-  W --> PM[patch_manifest<br/>cmd_new.rs:253-278]
+  W --> PM[patch_manifest<br/>cmd_new.rs:268-293]
   PM --> KG{--with-keygen?}
-  KG -- yes --> EK[generate keypair →<br/>.cognia/plugin.*.b64 +<br/>author.publicKey<br/>cmd_new.rs:281-302]
+  KG -- yes --> EK[generate keypair →<br/>.cognia/plugin.*.b64 +<br/>author.publicKey<br/>cmd_new.rs:296-316]
   KG -- no --> NS
-  EK --> NS[print next steps<br/>template.rs:155-167]
+  EK --> NS[print next steps<br/>template.rs:271-304]
 ```
 
 ## Inputs and defaults
@@ -41,38 +41,42 @@ flowchart TD
 | Input | Flag | TTY wizard | Non-TTY default |
 | --- | --- | --- | --- |
 | name | positional | prompted (CWD basename suggested if valid) | **required** — bails with hint (`cmd_new.rs:123`) |
-| kind | `--kind wasm\|ts` | select, 0 = wasm | `wasm` (`cmd_new.rs:136`) |
-| dir | `--dir <path>` | — | `./<name>` (`cmd_new.rs:309`) |
-| description | `--description` | prompted with suggestion | `"A cognia {kind} plugin"` (`cmd_new.rs:153`) |
-| author | `--author` | `git config user.name` as default (`cmd_new.rs:165-177`) | `"Anonymous"` |
+| kind | `--kind wasm\|ts\|python\|hybrid\|vscode-extension` (`vscode` alias accepted) | select, 0 = wasm | `wasm` (`cmd_new.rs:134`) |
+| dir | `--dir <path>` | — | `./<name>` (`cmd_new.rs:324`) |
+| description | `--description` | prompted with suggestion | `"A cognia {kind} plugin"` (`cmd_new.rs:165`) |
+| author | `--author` | `git config user.name` as default (`cmd_new.rs:177-188`) | `"Anonymous"` |
 | author email | `--author-email` | optional prompt | `None` |
-| keygen | `--with-keygen true\|false` | confirm, default **true** | `false` (`cmd_new.rs:192`) |
+| keygen | `--with-keygen true\|false` | confirm, default **true** | `false` (`cmd_new.rs:208`) |
 
-`TemplateKind::parse` (`template.rs:19-25`) also accepts `typescript` / `frontend` as aliases for
-`ts`.
+`TemplateKind::parse` (`template.rs:23-34`) also accepts `typescript` / `frontend` as aliases for
+`ts`, `py` as an alias for `python`, and `vscode` / `vs-code` as aliases for
+`vscode-extension`.
 
 ### Name validation
 
-`validate_name` (`cmd_new.rs:348-367`): ≤ 64 chars, ASCII alphanumeric start, then alphanumeric
-plus `-`, `_`, `.`. Exact failures:
+`validate_name` (`cmd_new.rs:366-385`): ≤ 64 chars, lowercase ASCII alphanumeric start and end,
+with lowercase alphanumeric plus `-`, `_`, `.` in between. Exact failures:
 
 ```text
-plugin name is empty                                       (cmd_new.rs:350)
-plugin name must be ≤ 64 characters                        (cmd_new.rs:353)
-plugin name must be lowercase alphanumeric plus -_. (got `…`)  (cmd_new.rs:364)
+plugin name is empty                                       (cmd_new.rs:368)
+plugin name must be ≤ 64 characters                        (cmd_new.rs:371)
+plugin name must be lowercase alphanumeric plus -_. (got `…`)  (cmd_new.rs:382)
 ```
 
-`"0plugin"` and `"foo.bar_1"` pass; `"has space"` and `"!banged"` fail (unit tests at
-`cmd_new.rs:375-386`).
+`"0plugin"` and `"foo.bar_1"` pass; `"has space"`, `"!banged"`, `"Uppercase"`, and
+`"trailing-"` fail (unit tests at
+`cmd_new.rs:393-404`).
 
-## Templates are real crates, embedded at compile time
+## Templates are embedded sibling sources
 
-The template sources live as two **buildable sibling crates** — `crates/cognia-plugin-template/`
-(WASM) and `crates/cognia-plugin-template-ts/` — and are pulled into the binary with
-`include_str!` (`template.rs:28-60`). The CLI ships no template directory; scaffolds work
+The template sources live as sibling directories — `crates/cognia-plugin-template/` (WASM),
+`crates/cognia-plugin-template-ts/` (TypeScript), `crates/cognia-plugin-template-python/`,
+`crates/cognia-plugin-template-hybrid/`, and
+`crates/cognia-plugin-template-vscode-extension/` — and are pulled into the binary with
+`include_str!` (`template.rs:38-104`). The CLI ships no template directory; scaffolds work
 offline.
 
-Substitution is intentionally dumb (`template.rs:173-197`):
+Substitution is intentionally dumb (`template.rs:310-341`):
 
 ```rust
 fn substitute_wasm_name(content: &str, target_name: &str) -> String {
@@ -84,19 +88,18 @@ fn substitute_wasm_name(content: &str, target_name: &str) -> String {
 ```
 
 Description / author / publicKey are **not** template placeholders — they are patched into the
-generated `plugin.json` afterwards by `patch_manifest` (`cmd_new.rs:253-278`), which re-reads,
+generated `plugin.json` afterwards by `patch_manifest` (`cmd_new.rs:268-293`), which re-reads,
 mutates, and pretty-prints the JSON.
 
 ## What each kind generates
 
-| WASM (6 files — `template.rs:74-99`) | TypeScript (10 files — `template.rs:100-148`) |
+| Kind | Files |
 | --- | --- |
-| `Cargo.toml` (substituted) | `package.json` (substituted) |
-| `src/lib.rs` (substituted) | `tsconfig.json` · `jest.config.cjs` |
-| `wit/world.wit` | `src/index.ts` · `src/index.test.ts` (substituted) |
-| `plugin.json` (substituted) | `src/__shims__/types/plugin.ts` |
-| `README.md` · `.gitignore` | `src/__shims__/lib/chat/slash-command-registry.ts` |
-| | `plugin.json` (substituted) · `README.md` · `.gitignore` |
+| WASM (6 files — `template.rs:113-137`) | `Cargo.toml`, `src/lib.rs`, `wit/world.wit`, `plugin.json`, `README.md`, `.gitignore` |
+| TypeScript (10 files — `template.rs:139-186`) | `package.json`, `tsconfig.json`, `jest.config.cjs`, `src/index.ts`, `src/index.test.ts`, shims, `plugin.json`, `README.md`, `.gitignore` |
+| Python (4 files — `template.rs:188-204`) | `plugin.json`, `main.py`, `README.md`, `.gitignore` |
+| Hybrid (6 files — `template.rs:206-230`) | `plugin.json`, `frontend/index.js`, `backend/main.py`, `styles.css`, `README.md`, `.gitignore` |
+| VS Code extension (6 files — `template.rs:232-267`) | `plugin.json`, `package.json`, `extension/out/extension.js`, `styles.css`, `README.md`, `.gitignore` |
 
 ### WASM scaffold highlights
 
@@ -138,24 +141,57 @@ Host modules (`@/types/plugin`, `@/lib/chat/slash-command-registry`) are mapped 
 `moduleNameMapper`, so the scaffold type-checks and its jest tests pass before the plugin ever
 meets a running cognia.
 
+### Python scaffold highlights
+
+`plugin.json` declares `type: "python"`, `capabilities: ["tools", "python"]`,
+`pythonMain: "main.py"`, `engines.cognia: ">=0.1.0"`, and one registered tool
+(`template_echo`). `main.py` imports the Python SDK surface with `from cognia import tool, log`,
+decorates `template_echo`, logs the received text, and returns `{"ok": True, "echoed": text}`.
+
+There is no build step for the Python scaffold. `cognia plugin build` packages the declared
+`pythonMain` and any `bundle_include[]` files directly, while `cognia plugin lint` validates that
+the manifest type and entrypoint agree before packaging.
+
+### Hybrid scaffold highlights
+
+`plugin.json` declares `type: "hybrid"`, `capabilities: ["tools", "python"]`,
+`main: "frontend/index.js"`, `pythonMain: "backend/main.py"`, and `styles: "styles.css"`.
+The frontend entry is plain CommonJS, so it can be syntax-checked with `node --check` and loaded
+without an npm install. The Python backend registers `template_echo`, letting the fresh scaffold
+exercise both halves of the hybrid loader while keeping packaging build-free.
+
+### VS Code-extension scaffold highlights
+
+`plugin.json` declares `type: "vscode-extension"`, `vscodeMain:
+"extension/out/extension.js"`, optional `styles`, and `bundle_include: ["package.json"]`.
+The entrypoint exports CommonJS `activate` / `deactivate` functions and registers one VS Code
+command through `require("vscode")`, matching the sidecar's extension-runner contract.
+
 ## Post-stamp output
 
-Printed next steps (`template.rs:155-167`):
+Printed next steps (`template.rs:271-304`):
 
 ```text
-# wasm                                   # ts
-cd <dir>                                 cd <dir>
-rustup target add wasm32-wasip2          pnpm install
-cargo install --locked cargo-component   pnpm test
-cognia plugin build                      cognia plugin lint
+# wasm                                   # ts                                      # python
+cd <dir>                                 cd <dir>                                  cd <dir>
+rustup target add wasm32-wasip2          pnpm install                              python -m py_compile main.py
+cargo install --locked cargo-component   pnpm test                                 cognia plugin lint
+cognia plugin build                      cognia plugin lint                        cognia plugin build
                                          cognia plugin build
+
+# hybrid                                 # vscode-extension
+cd <dir>                                 cd <dir>
+node --check frontend/index.js           node --check extension/out/extension.js
+python -m py_compile backend/main.py     cognia plugin lint
+cognia plugin lint                       cognia plugin build
+cognia plugin build
 ```
 
-With `--with-keygen`, the key block (`cmd_new.rs:85-100`) confirms
+With `--with-keygen`, the key block (`cmd_new.rs:78-98`) confirms
 `✓ embedded author.publicKey (…)` and points at `.cognia/plugin.private.b64` — the same files
 [`keygen`](./signing-and-keys) would create.
 
 <Callout type="warn" title="Existing directories are never merged">
-  `stamp()` bails with `"<path> already exists and is not empty"` (`cmd_new.rs:316`). There is no
+  `stamp()` bails with `"<path> already exists and is not empty"` (`cmd_new.rs:331`). There is no
   --force; pick a new directory or empty the target first.
 </Callout>

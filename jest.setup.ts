@@ -99,6 +99,83 @@ if (typeof globalThis.TransformStream === "undefined") {
   }
 }
 
+// undici (pulled in by cheerio's Node build) expects MessageChannel and
+// MessagePort globals. jsdom does not expose them, but Node's worker_threads
+// module does.
+if (
+  typeof (globalThis as { MessageChannel?: unknown }).MessageChannel === "undefined" ||
+  typeof (globalThis as { MessagePort?: unknown }).MessagePort === "undefined"
+) {
+  class TestMessagePort {
+    onmessage: ((event: MessageEvent) => void) | null = null
+    onmessageerror: ((event: MessageEvent) => void) | null = null
+    private peer: TestMessagePort | null = null
+    private closed = false
+    private readonly listeners = new Set<(event: MessageEvent) => void>()
+
+    setPeer(peer: TestMessagePort) {
+      this.peer = peer
+    }
+
+    postMessage(data: unknown) {
+      const target = this.peer
+      if (!target || target.closed) return
+      const deliver = () => {
+        if (target.closed) return
+        const event = { data } as MessageEvent
+        target.onmessage?.(event)
+        for (const listener of target.listeners) listener(event)
+      }
+      const handle =
+        typeof setImmediate === "function" ? setImmediate(deliver) : setTimeout(deliver, 0)
+      ;(handle as { unref?: () => void }).unref?.()
+    }
+
+    start() {}
+
+    close() {
+      this.closed = true
+      this.listeners.clear()
+      this.onmessage = null
+      this.onmessageerror = null
+    }
+
+    addEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+      if (type !== "message") return
+      const fn =
+        typeof listener === "function" ? listener : (event: Event) => listener.handleEvent(event)
+      this.listeners.add(fn as (event: MessageEvent) => void)
+    }
+
+    removeEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+      if (type !== "message") return
+      const fn =
+        typeof listener === "function" ? listener : (event: Event) => listener.handleEvent(event)
+      this.listeners.delete(fn as (event: MessageEvent) => void)
+    }
+
+    dispatchEvent(event: Event) {
+      if (event.type !== "message") return false
+      this.onmessage?.(event as MessageEvent)
+      for (const listener of this.listeners) listener(event as MessageEvent)
+      return true
+    }
+  }
+
+  class TestMessageChannel {
+    port1: TestMessagePort
+    port2: TestMessagePort
+
+    constructor() {
+      this.port1 = new TestMessagePort()
+      this.port2 = new TestMessagePort()
+      this.port1.setPeer(this.port2)
+      this.port2.setPeer(this.port1)
+    }
+  }
+  Object.assign(globalThis, { MessageChannel: TestMessageChannel, MessagePort: TestMessagePort })
+}
+
 // jsdom omits ResizeObserver / IntersectionObserver — Radix primitives use them
 // (Sheet, Slider, etc.). Provide a minimal polyfill so component tests can mount.
 class MockResizeObserver {
@@ -269,6 +346,16 @@ jest.mock("next-intl", () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const messages = require("./i18n/messages/en.json") as Record<string, unknown>
 
+  // Plugin i18n overlay. In production `<LocaleGate>` merges plugin-shipped
+  // strings (registered under `plugin.<id>.…`) into the next-intl bundle.
+  // Mirror that here as a strict fallback so plugin-localized surfaces (e.g.
+  // workflow plugin nodes) resolve in tests. Looked up only when `en.json`
+  // has no entry, so existing tests are unaffected.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const pluginI18n = require("./lib/i18n/plugin-i18n-registry") as {
+    lookupPluginMessage: (locale: string, key: string) => string | undefined
+  }
+
   const resolvePath = (root: Record<string, unknown> | undefined, dottedKey: string): unknown => {
     if (!root) return undefined
     const segments = dottedKey.split(".")
@@ -335,15 +422,26 @@ jest.mock("next-intl", () => {
     const root = namespace
       ? (resolvePath(messages, namespace) as Record<string, unknown> | undefined)
       : (messages as Record<string, unknown>)
+    // The full dotted key (namespace-qualified) used to consult the plugin
+    // overlay, which stores keys under their absolute `plugin.<id>.…` path.
+    const fullKey = (key: string) => (namespace ? `${namespace}.${key}` : key)
     const t = (key: string, values?: Record<string, unknown>) => {
-      const resolved = resolvePath(root, key)
+      let resolved = resolvePath(root, key)
+      if (typeof resolved !== "string") {
+        const overlay = pluginI18n.lookupPluginMessage("en", fullKey(key))
+        if (typeof overlay === "string") resolved = overlay
+      }
       const template = typeof resolved === "string" ? resolved : key
       return interpolate(template, values)
     }
     ;(t as unknown as { rich: typeof t }).rich = t
     ;(t as unknown as { markup: typeof t }).markup = t
     ;(t as unknown as { has: (k: string) => boolean }).has = (k: string) =>
-      typeof resolvePath(root, k) === "string"
+      typeof resolvePath(root, k) === "string" ||
+      typeof pluginI18n.lookupPluginMessage("en", fullKey(k)) === "string"
+    // `t.raw(key)` returns the un-interpolated value at the path (objects /
+    // arrays included) — used for things like the chat thinking-tips array.
+    ;(t as unknown as { raw: (k: string) => unknown }).raw = (k: string) => resolvePath(root, k)
     return t
   }
 

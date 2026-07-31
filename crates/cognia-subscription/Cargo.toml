@@ -1,0 +1,54 @@
+# ADR-0067 Tier B — unified subscription / OAuth credential vault (ADR-0025)
+# extracted from app_lib's `subscription/` module: the ProviderVault storage
+# layer, the anthropic (PKCE) / codex (device-code) / opencode providers,
+# migration and the per-provider command shells. The 17-command top-level IPC
+# surface stays app-side (it owns the sidecar-restart + ApiKeyState seams).
+[package]
+name = "cognia-subscription"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89.0"
+description = "Unified subscription / OAuth credential vault — Anthropic, Codex, OpenCode providers (ADR-0025)."
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "cognia_subscription"
+path = "src/lib.rs"
+
+[dependencies]
+cognia-secrets = { path = "../cognia-secrets" }
+tauri = { version = "=2.11.1" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+base64 = "0.22"
+url = "2"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "v7"] }
+parking_lot = "0.12"
+log = "0.4"
+dirs = "6"
+# Upstream-CLI credential discovery (~/.claude, ~/.codex keychain entries) —
+# deliberately raw keyring reads of OTHER apps' entries; our own storage goes
+# through cognia-secrets::secret_store.
+keyring = { version = "3", default-features = false }
+# Live re-discovery of upstream CLI credential files.
+notify = "6"
+# Codex device-auth flow.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "socks", "http2", "multipart"] }
+tokio = { version = "1", features = ["sync", "time", "rt", "macros"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
+
+[dev-dependencies]
+# Keep this crate's tests off the real OS keyring / disk store.
+cognia-secrets = { path = "../cognia-secrets", features = ["test-inmemory"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tempfile = "3"

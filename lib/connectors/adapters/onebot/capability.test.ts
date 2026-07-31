@@ -40,7 +40,11 @@ describe("ONEBOT_CAPS", () => {
     expect(ONEBOT_CAPS).toContain("send.reaction")
   })
 
-  it("has exactly 12 entries (removed send.markdown, added send.a2ui + send.reaction)", () => {
-    expect(ONEBOT_CAPS).toHaveLength(12)
+  it("includes forward (NapCat send_group/private_forward_msg)", () => {
+    expect(ONEBOT_CAPS).toContain("forward")
+  })
+
+  it("has exactly 13 entries (adds forward alongside send.a2ui + send.reaction)", () => {
+    expect(ONEBOT_CAPS).toHaveLength(13)
   })
 })

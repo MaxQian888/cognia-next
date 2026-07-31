@@ -40,9 +40,9 @@ export function createExtensionsNamespace(deps: ShimDependencies) {
     },
     getExtension(extensionId: string): ExtensionDescriptor | undefined {
       void connection
-        .sendRequest<
-          Partial<ExtensionDescriptor> | undefined
-        >("extensions:get", { id: extensionId })
+        .sendRequest<Partial<ExtensionDescriptor> | undefined>("extensions:get", {
+          id: extensionId,
+        })
         .catch(() => undefined)
       // Returning undefined is the correct VS Code spec value when the
       // extension isn't installed — we provide the synthetic API for

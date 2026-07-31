@@ -34,6 +34,8 @@ jest.mock("../core/logger", () => ({
   },
 }))
 
+const { listen: listenMock } = jest.requireMock("@tauri-apps/api/event") as { listen: jest.Mock }
+
 // Mock WebSocket
 class MockWebSocket {
   static OPEN = 1
@@ -67,6 +69,31 @@ describe("PluginDevServer", () => {
       await server.start()
 
       expect(server.isRunning()).toBe(true)
+    })
+
+    // Regression: Tauri's async unlisten rejects with `listeners[eventId].handlerId`
+    // when the registration eval lost the StrictMode mount/unmount race. It is not
+    // awaited here, so calling it raw floated the rejection past the surrounding
+    // try/catch and surfaced as an unhandled rejection.
+    it("swallows a rejecting Tauri unlisten on stop", async () => {
+      const onUnhandled = jest.fn()
+      process.on("unhandledRejection", onUnhandled)
+      try {
+        const unlisten = jest.fn(() =>
+          Promise.reject(new TypeError("listeners[eventId].handlerId"))
+        )
+        listenMock.mockResolvedValueOnce(unlisten)
+
+        await server.start()
+        await server.stop()
+        // Flush microtasks + a macrotask so any unhandled rejection would fire.
+        await new Promise((resolve) => setTimeout(resolve, 0))
+
+        expect(unlisten).toHaveBeenCalledTimes(1)
+        expect(onUnhandled).not.toHaveBeenCalled()
+      } finally {
+        process.off("unhandledRejection", onUnhandled)
+      }
     })
 
     it("should stop the server", async () => {

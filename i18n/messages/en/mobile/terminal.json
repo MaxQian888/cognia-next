@@ -1,0 +1,29 @@
+{
+  "accessory": {
+    "alt": "Alt",
+    "ctrl": "Ctrl+C",
+    "down": "Down",
+    "esc": "Esc",
+    "hideKeyboard": "Hide keyboard",
+    "label": "Terminal keyboard controls",
+    "left": "Left",
+    "paste": "Paste",
+    "right": "Right",
+    "showKeyboard": "Show keyboard",
+    "tab": "Tab",
+    "up": "Up"
+  },
+  "back": "Back",
+  "empty": {
+    "action": "Start session",
+    "notMobile": "The integrated terminal here runs as a desktop dock — switch to the desktop app to use it.",
+    "remoteReady": "No remote terminal sessions yet. Spawn one to connect via the paired desktop server.",
+    "unavailable": "Terminal isn't available in this browser preview. Use the desktop or Capacitor build."
+  },
+  "history": "Command history",
+  "historySubtitle": "Tap a command to copy it. Long-press to rerun.",
+  "historyTitle": "Recent commands",
+  "newSession": "New terminal session",
+  "search": "Search in terminal",
+  "title": "Terminal"
+}

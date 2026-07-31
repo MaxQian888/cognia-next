@@ -24,6 +24,8 @@ export interface MessagesRequestPayload {
   temperature?: number
   stop_sequences?: string[]
   metadata?: Record<string, unknown>
+  /** The Claude Agent SDK always streams; workflow executors call non-streaming. */
+  stream?: boolean
 }
 
 export interface MessagesResponse {
@@ -51,7 +53,7 @@ export type MessagesScenario =
   | { kind: "overloaded" }
   | { kind: "auth-error" }
   | { kind: "server-error"; status: number; message: string }
-  | { kind: "stream-text"; chunks: string[] }
+  | { kind: "stream-text"; chunks: string[]; delayMs?: number }
 
 export type OauthScenario =
   | {
@@ -98,11 +100,81 @@ export interface MockAnthropicServer {
   reset(): void
 }
 
+/**
+ * Write one Anthropic Messages SSE response carrying `chunks` as text deltas.
+ * Shared by the explicit `stream-text` scenario AND any request that sets
+ * `stream: true` (the Claude Agent SDK / claude-code CLI the chat sidecar
+ * spawns always streams), so the real chat path can consume this same mock.
+ */
+async function writeMessagesSse(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  res: any,
+  chunks: string[],
+  model: string,
+  delayMs = 0
+): Promise<void> {
+  // Track a client-side disconnect so an aborted stream (the interrupt path
+  // tears down the sidecar's HTTP request mid-flight) stops writing instead of
+  // throwing `ERR_STREAM_WRITE_AFTER_END` on the dead socket.
+  let aborted = false
+  res.on?.("close", () => {
+    aborted = true
+  })
+  res.set("content-type", "text/event-stream")
+  res.set("cache-control", "no-cache")
+  res.set("connection", "keep-alive")
+  res.flushHeaders?.()
+  const id = `msg_${Math.random().toString(36).slice(2, 10)}`
+  res.write(`event: message_start\n`)
+  res.write(
+    `data: ${JSON.stringify({ type: "message_start", message: { id, type: "message", role: "assistant", model, content: [], stop_reason: null, usage: { input_tokens: 1, output_tokens: 0 } } })}\n\n`
+  )
+  res.write(`event: content_block_start\n`)
+  res.write(
+    `data: ${JSON.stringify({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } })}\n\n`
+  )
+  for (const chunk of chunks) {
+    // A per-chunk delay keeps the turn streaming long enough for the interrupt
+    // spec to catch the live "streaming" state and click Stop.
+    if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs))
+    if (aborted || res.writableEnded) return
+    res.write(`event: content_block_delta\n`)
+    res.write(
+      `data: ${JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: chunk } })}\n\n`
+    )
+  }
+  if (aborted || res.writableEnded) return
+  res.write(`event: content_block_stop\n`)
+  res.write(`data: ${JSON.stringify({ type: "content_block_stop", index: 0 })}\n\n`)
+  res.write(`event: message_delta\n`)
+  res.write(
+    `data: ${JSON.stringify({ type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null }, usage: { output_tokens: chunks.join("").length } })}\n\n`
+  )
+  res.write(`event: message_stop\n`)
+  res.write(`data: ${JSON.stringify({ type: "message_stop" })}\n\n`)
+  res.end()
+}
+
 export function createMockAnthropicServer(): MockAnthropicServer {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const app = createExpressApp() as any
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const express = require("express") as typeof import("express")
+  // Permissive CORS: the standalone (BYOK) chat path calls this mock straight
+  // from the browser page (localhost:3000 → 127.0.0.1:<port>) with
+  // x-api-key/anthropic-version headers, which triggers a preflight the mock
+  // must answer. Native clients (sidecar, Tauri) never preflight.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.use((req: any, res: any, next: any) => {
+    res.setHeader("Access-Control-Allow-Origin", "*")
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+    res.setHeader("Access-Control-Allow-Headers", "*")
+    if (req.method === "OPTIONS") {
+      res.status(204).end()
+      return
+    }
+    next()
+  })
   app.use(express.json({ limit: "8mb" }))
   // OAuth token endpoint speaks application/x-www-form-urlencoded — the
   // anthropic OAuth module posts the body as form-encoded per the upstream
@@ -149,7 +221,7 @@ export function createMockAnthropicServer(): MockAnthropicServer {
 
   // ── POST /v1/messages ────────────────────────────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  app.post("/v1/messages", (req: any, res: any) => {
+  app.post("/v1/messages", async (req: any, res: any) => {
     const body = req.body as MessagesRequestPayload
     messagesCalls.push(body)
     for (const r of messagesResolvers.slice()) {
@@ -183,55 +255,36 @@ export function createMockAnthropicServer(): MockAnthropicServer {
           .status(scenario.status)
           .json({ type: "error", error: { type: "api_error", message: scenario.message } })
         return
-      case "stream-text": {
-        // Server-sent events stream framing.
-        res.set("content-type", "text/event-stream")
-        res.set("cache-control", "no-cache")
-        res.set("connection", "keep-alive")
-        res.flushHeaders?.()
-        const id = `msg_${Math.random().toString(36).slice(2, 10)}`
-        res.write(`event: message_start\n`)
-        res.write(
-          `data: ${JSON.stringify({ type: "message_start", message: { id, type: "message", role: "assistant", model: body.model, content: [], stop_reason: null, usage: { input_tokens: 1, output_tokens: 0 } } })}\n\n`
-        )
-        res.write(`event: content_block_start\n`)
-        res.write(
-          `data: ${JSON.stringify({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } })}\n\n`
-        )
-        for (const chunk of scenario.chunks) {
-          res.write(`event: content_block_delta\n`)
-          res.write(
-            `data: ${JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: chunk } })}\n\n`
-          )
-        }
-        res.write(`event: content_block_stop\n`)
-        res.write(`data: ${JSON.stringify({ type: "content_block_stop", index: 0 })}\n\n`)
-        res.write(`event: message_delta\n`)
-        res.write(
-          `data: ${JSON.stringify({ type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null }, usage: { output_tokens: scenario.chunks.join("").length } })}\n\n`
-        )
-        res.write(`event: message_stop\n`)
-        res.write(`data: ${JSON.stringify({ type: "message_stop" })}\n\n`)
-        res.end()
-        return
-      }
-      default: {
-        const text = renderText(body)
-        const out: MessagesResponse = {
-          id: `msg_${Math.random().toString(36).slice(2, 10)}`,
-          type: "message",
-          role: "assistant",
-          model: body.model,
-          content: [{ type: "text", text }],
-          stop_reason: "end_turn",
-          usage: {
-            input_tokens: Math.max(1, Math.ceil(text.length / 4)),
-            output_tokens: text.length,
-          },
-        }
-        res.json(out)
-      }
     }
+
+    // Non-error scenarios: echo / canned / json / stream-text. The chat sidecar
+    // (Claude Agent SDK CLI) always sets `stream: true`; the workflow ai.*
+    // executors call non-streaming. Serve SSE for either an explicit
+    // `stream-text` scenario OR any streaming request, so ONE shared mock backs
+    // both the chat path and the workflow path.
+    const wantsStream = body.stream === true
+    if (scenario.kind === "stream-text") {
+      await writeMessagesSse(res, scenario.chunks, body.model, scenario.delayMs ?? 0)
+      return
+    }
+    const text = renderText(body)
+    if (wantsStream) {
+      await writeMessagesSse(res, [text], body.model)
+      return
+    }
+    const out: MessagesResponse = {
+      id: `msg_${Math.random().toString(36).slice(2, 10)}`,
+      type: "message",
+      role: "assistant",
+      model: body.model,
+      content: [{ type: "text", text }],
+      stop_reason: "end_turn",
+      usage: {
+        input_tokens: Math.max(1, Math.ceil(text.length / 4)),
+        output_tokens: text.length,
+      },
+    }
+    res.json(out)
   })
 
   // ── POST /v1/oauth/token (form-encoded; PKCE exchange + refresh) ─────────
@@ -315,6 +368,33 @@ export function createMockAnthropicServer(): MockAnthropicServer {
     res.json(out)
   })
 
+  const doReset = (): void => {
+    scenario = { kind: "echo" }
+    oauthScenario = { kind: "granted" }
+    embeddingVector = Array.from({ length: 16 }, (_, i) => (i + 1) / 16)
+    messagesCalls.length = 0
+    embeddingsCalls.length = 0
+    oauthCalls.length = 0
+    messagesResolvers.length = 0
+  }
+
+  // ── Control plane (E2E-only) ─────────────────────────────────────────────
+  // The shared instance booted in global-setup is pointed at by the Tauri
+  // sidecar via ANTHROPIC_BASE_URL, but its in-process handle is NOT exported
+  // to specs. These endpoints let a spec (running in the Playwright node
+  // process) mutate the SAME instance over HTTP — drive an error/slow-stream
+  // scenario for the real chat path, then reset it so the next test sees echo.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.post("/__control/messages-scenario", (req: any, res: any) => {
+    scenario = req.body as MessagesScenario
+    res.json({ ok: true })
+  })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.post("/__control/reset", (_req: any, res: any) => {
+    doReset()
+    res.json({ ok: true })
+  })
+
   return {
     async start(port = 0): Promise<void> {
       await new Promise<void>((resolve) => {
@@ -374,13 +454,7 @@ export function createMockAnthropicServer(): MockAnthropicServer {
       return embeddingsCalls
     },
     reset() {
-      scenario = { kind: "echo" }
-      oauthScenario = { kind: "granted" }
-      embeddingVector = Array.from({ length: 16 }, (_, i) => (i + 1) / 16)
-      messagesCalls.length = 0
-      embeddingsCalls.length = 0
-      oauthCalls.length = 0
-      messagesResolvers.length = 0
+      doReset()
     },
   }
 }

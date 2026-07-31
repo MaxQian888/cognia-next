@@ -1,0 +1,34 @@
+---
+title: 兼容性与发布门禁
+description: 支持版本、主机、排除项、协议兼容与 stable release 验证。
+---
+
+# 兼容性与发布门禁
+
+| Host | Architecture | 结果 |
+| --- | --- | --- |
+| Linux | amd64 / arm64 | 支持 |
+| macOS | amd64 / arm64 | 支持 |
+| Windows | 任意 | `unsupported_platform`；无 npm fallback |
+
+本发布固定 code-server `4.128.0` 与 Code `1.128.0`。升级必须完成 upstream
+catalog diff、schema import digest 更新、generator 修改、compatibility fixture
+和真实 E2E 审批。远程 host 必须预加载匹配二进制；不匹配返回
+`REMOTE_CODE_SERVER_UPGRADE_REQUIRED`。
+
+Proposed/internal VS Code API、remote-authority、extension-management API、
+Windows host，以及 managed profile 中的第三方 `extensionDependencies` 都返回
+结构化兼容错误，不会 silent no-op。
+
+Stable release 需要 catalog-entry conformance、malformed/oversized frame、
+cancellation race、stale generation、reconnect、path/ticket security、profile
+isolation、deterministic proxy/update rollback、offline artifact、双 major
+negotiation，以及本地/配对真实 LSP、DAP、MCP、SCM、test、notebook、
+webview/custom editor 与 Chat E2E。
+
+性能门禁为：cold readiness 回归不超过 20% 且 2 秒；idle RSS 回归不超过 20% 且
+150 MiB；本地空 broker RPC p95 不超过 30 ms；远程 relay 排除物理 RTT 的额外开销
+p95 不超过 75 ms；声明容量内 control/lifecycle event 零丢失。
+
+远程 telemetry 必须 opt-in 且只含聚合数据。源码、路径、prompt、参数、环境、
+secret 与 content handle 永不进入 telemetry。

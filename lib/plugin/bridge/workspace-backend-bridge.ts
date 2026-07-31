@@ -16,10 +16,15 @@ import type {
   WorkspaceProvider,
 } from "@/types/plugin/plugin-workspace-backend"
 import { loggers } from "@/lib/plugin/core/logger"
+import { resolvePluginPath } from "@/lib/plugin/core/plugin-path"
 import {
   clearWorkspaceBackendsForPluginContext,
   createWorkspaceAPI,
 } from "@/lib/plugin/api/workspace-api"
+import {
+  createPythonBackedProxy,
+  isPythonBackedContribution,
+} from "@/lib/plugin/bridge/_shared/python-backed-proxy"
 
 export interface WorkspaceBackendBridgeError {
   pluginId: string
@@ -61,7 +66,14 @@ export async function registerWorkspaceBackendsForPlugin(
 
   for (const def of defs) {
     try {
-      const backend = await resolveBackend(def, pluginId, installRoot, importer, options)
+      const backend = await resolveBackend(
+        def,
+        pluginId,
+        manifest.type,
+        installRoot,
+        importer,
+        options
+      )
       api.registerBackend({
         id: def.id,
         label: def.label,
@@ -79,14 +91,35 @@ export async function registerWorkspaceBackendsForPlugin(
   return { registered, errors }
 }
 
+const WORKSPACE_BACKEND_METHODS = ["clone", "commitAndPush", "remove"] as const
+
 async function resolveBackend(
   def: PluginWorkspaceBackendDef,
   pluginId: string,
+  pluginType: string | undefined,
   installRoot: string,
   importer: NonNullable<WorkspaceBackendBridgeOptions["importer"]>,
   options: WorkspaceBackendBridgeOptions
 ): Promise<WorkspaceProvider> {
-  const resolved = `${installRoot.replace(/[\\/]+$/, "")}/${def.entry.replace(/^[\\/]+/, "")}`
+  // Python-backed backends need no descriptor round-trip: id/label/description
+  // come from the manifest def, so the provider is pure behaviour.
+  if (isPythonBackedContribution(def, pluginType)) {
+    return createPythonBackedProxy<WorkspaceProvider>({
+      pluginId,
+      contributionId: def.id,
+      methods: [...WORKSPACE_BACKEND_METHODS],
+      label: "workspace backend",
+    })
+  }
+
+  if (!def.entry || !def.export) {
+    throw new Error(
+      `JS-backed workspace backend "${def.id}" must declare both "entry" and "export"` +
+        ` (set backend: "python" to run it in the plugin's Python subprocess)`
+    )
+  }
+
+  const resolved = resolvePluginPath(installRoot, def.entry)
   const mod = await importer(resolved)
   const exported = mod[def.export]
   if (typeof exported !== "function") {

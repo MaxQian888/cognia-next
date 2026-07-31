@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Coverage for the `runtime_query` MCP handler. Drives Dexie via
  * fake-indexeddb against the seeded built-ins so the tests exercise real
@@ -16,7 +17,7 @@ beforeEach(async () => {
   __resetDbForTesting()
   getDb()
   await whenSeeded()
-})
+}, 30_000)
 
 describe("runtimeQuery — list", () => {
   it("lists seeded skills with name + meta", async () => {

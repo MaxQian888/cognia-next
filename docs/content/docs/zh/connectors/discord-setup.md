@@ -32,7 +32,7 @@ description: "创建 Discord 应用，获取机器人令牌与公钥，邀请机
 1. 在你的应用中，前往 **General Information**。
 2. 复制 **Public Key**（64 个字符的十六进制字符串）。
 
-它用于在 Discord 将交互负载发送到 webhook 端点时进行 Ed25519 签名验证。第 1 阶段（Phase 1）使用 Gateway（WebSocket）模式，因此目前它是 **可选** 的 —— 但为将来迁移到 webhook 而保存它是一个良好的做法。
+公钥用于 Interactions webhook 调用的 Ed25519 签名验证。仅当你在第 6 步选择 **Interactions webhook** 传输时才需要它；默认的 **Gateway** 传输不需要公钥。
 
 ---
 
@@ -44,17 +44,21 @@ description: "创建 Discord 应用，获取机器人令牌与公钥，邀请机
    - **Server Members Intent** —— 允许机器人查看服务器（guild）成员。
    - **Message Content Intent** —— 机器人读取服务器频道中消息内容所 **必需**。
 
-> 若没有 **Message Content Intent**，服务器消息的 `content` 字段将为空。私信（Direct Messages）不需要此 intent。
+> 若没有 **Message Content Intent**，服务器消息的 `content` 字段将为空。私信（Direct Messages）本身不需要此 intent，但机器人仍需订阅 `DIRECT_MESSAGES`（已包含在下面的默认值中）。
 
-cognia-next 默认使用 intent 位掩码 **33281**：
+cognia-next 默认使用 intent 位掩码 **46593**：
 
-| Intent          | 值        |
-| --------------- | --------- |
-| GUILDS          | 1         |
-| GUILD_MESSAGES  | 512       |
-| MESSAGE_CONTENT | 32768     |
-| DIRECT_MESSAGES | 4096      |
-| **合计**        | **33281** |
+| Intent                   | 值        |
+| ------------------------ | --------- |
+| GUILDS                   | 1         |
+| GUILD_MESSAGES           | 512       |
+| GUILD_MESSAGE_REACTIONS  | 1024      |
+| DIRECT_MESSAGES          | 4096      |
+| DIRECT_MESSAGE_REACTIONS | 8192      |
+| MESSAGE_CONTENT          | 32768     |
+| **合计**                 | **46593** |
+
+你可以在适配器 **交付与传输** 区域的 **Gateway intents** 字段覆盖该位掩码（留空则使用默认值）。无论位掩码如何，`MESSAGE_CONTENT` 都是特权 intent，必须在 Developer Portal 中开启，否则 Discord 会以关闭码 4014 断开连接。
 
 ---
 
@@ -79,11 +83,13 @@ cognia-next 默认使用 intent 位掩码 **33281**：
 3. 在 **Discord Configuration** 对话框中：
    - 为该机器人输入一个 **显示名称**（例如 "My Server Bot"）。
    - 粘贴你在第 2 步复制的 **Bot Token**。
-   - 可选地粘贴第 3 步中的 **Public Key**。
+   - 在 **交付与传输** 下，选择一种 **传输方式**：
+     - **Gateway (WebSocket)** —— 推荐。通过持久连接同时接收消息与交互，无需公网 URL。
+     - **Interactions webhook (HTTP)** —— **仅接收交互**（slash 命令、按钮、modal 提交），此模式下 **不会** 收到消息事件。需要 Cloudflared Tunnel（移动端伴侣设置）与 **Public Key**；把生成的 **Interactions Endpoint URL** 粘贴到 Developer Portal → General Information → Interactions Endpoint URL。
    - 点击 **Test** 验证该令牌能否成功连接到 Discord。
 4. 点击 **Create**。
 
-cognia-next 将使用 WebSocket 模式连接到 Discord Gateway，无需公网 URL。
+在 Gateway 模式下，cognia-next 通过 WebSocket 连接 Discord Gateway，无需公网 URL。
 
 ---
 
@@ -103,5 +109,7 @@ cognia-next 将使用 WebSocket 模式连接到 Discord Gateway，无需公网 U
 
 - **速率限制**：Discord 对机器人按每个频道每秒 50 条消息进行速率限制。cognia-next 的出站执行器会遵循可重试的错误（HTTP 429）。
 - **大型服务器**：对于加入 100 个以上服务器的机器人，你必须通过 Developer Portal 申请 **Gateway Privileged Intents**。
-- **分片（Sharding）**：第 1 阶段不支持，仅支持单分片运行。
-- **语音消息**：第 1 阶段不支持，计划在第 2 阶段（Phase 2）实现。
+- **分片（Sharding）**：不支持，仅支持单分片运行。
+- **交互组件（A2UI）**：按钮、下拉选择和 modal 在 Gateway 模式下可用 —— 机器人会在 Discord 的 3 秒窗口内确认每次交互，并作为普通频道消息回复。**Modal**（TextField / TextArea / Dialog 界面）仅在 Gateway 模式可用；在 webhook 模式下，modal 触发按钮会退化为普通回调。
+- **媒体**：图片、文件、视频和语音消息以真正的 multipart 附件上传（而非 URL 内嵌）。语音消息携带 `IS_VOICE_MESSAGE` 标志以及时长和波形元数据。
+- **Webhook 传输仅限交互**：Discord 的 Interactions Endpoint 永远不会投递消息事件，只投递交互。任何需要读取聊天消息或私信的机器人都请使用 Gateway 模式。

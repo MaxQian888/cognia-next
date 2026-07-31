@@ -2,11 +2,12 @@
  * Apple Vision OCR provider.
  *
  * Two run paths share this file:
- *   - **Tauri (macOS)** — delegates to the Swift sidecar at
- *     `src-tauri/sidecars/apple-vision-ocr/` via the shared
+ *   - **Tauri (macOS)** — delegates to the in-process Vision.framework
+ *     backend (`crates/cognia-ocr/src/backend/apple.rs`) via the shared
  *     `NativeOcrInvoker`.
- *   - **Capacitor (iOS)** — calls the `@pantrist/capacitor-plugin-ml-kit-text-
- *     recognition` plugin via `withPlugin()` from `lib/capacitor/_shared.ts`.
+ *   - **Capacitor (iOS)** — calls the `TextRecognition.detectText()` API of
+ *     `@pantrist/capacitor-plugin-ml-kit-text-recognition` via `withPlugin()`
+ *     from `lib/capacitor/_shared.ts`.
  *
  * The provider switches on `ctx.platform`; both branches share the same
  * `OcrResult` shape.
@@ -22,23 +23,20 @@ import {
   type OcrProviderContext,
   type OcrResult,
 } from "@/types/ocr"
-import type { NativeOcrInvoker, NativeOcrResult } from "./tesseract-native"
+import {
+  mapNativeInvokeError,
+  type NativeOcrInvoker,
+  type NativeOcrResult,
+} from "./tesseract-native"
+import {
+  loadMlKitTextRecognitionPlugin,
+  mapMlKitBlock,
+  MLKIT_PLUGIN_PACKAGE,
+  type MlKitTextRecognitionPluginShape,
+} from "./mlkit-android"
 
-export interface AppleVisionPluginShape {
-  recognizeText(input: {
-    base64: string
-    mimeType: string
-    languages?: string[]
-    automaticLanguageDetection?: boolean
-  }): Promise<{
-    text: string
-    blocks?: Array<{
-      text: string
-      bbox?: { x: number; y: number; width: number; height: number }
-      confidence?: number
-    }>
-  }>
-}
+/** iOS path uses the same Capacitor ML Kit plugin as the Android provider. */
+export type AppleVisionPluginShape = MlKitTextRecognitionPluginShape
 
 export interface AppleVisionConfig {
   /** Tauri invoker — used on macOS via Swift sidecar. */
@@ -60,15 +58,6 @@ export function __setAppleVisionPluginLoader(
   loader: (() => Promise<AppleVisionPluginShape>) | null
 ): void {
   mobileLoader = loader
-}
-
-const DEFAULT_PLUGIN_LOADER: () => Promise<AppleVisionPluginShape> = async () => {
-  // The plugin is an optional native dep — its module spec is dynamic so TS
-  // (and webpack/turbopack) don't try to resolve it during web/desktop builds.
-  const moduleId = "@pantrist/capacitor-plugin-ml-kit-text-recognition"
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const mod = (await import(/* webpackIgnore: true */ moduleId)) as any
-  return (mod.TextRecognition ?? mod.default ?? mod) as AppleVisionPluginShape
 }
 
 export function buildAppleVisionProvider(): OcrProvider {
@@ -111,12 +100,7 @@ export async function appleVisionExtract(
         languages,
       })
     } catch (err) {
-      throw new OcrError(
-        "provider_failed",
-        "apple-vision",
-        err instanceof Error ? err.message : String(err),
-        err
-      )
+      throw mapNativeInvokeError("apple-vision", "apple-vision", err)
     }
     return buildResult(
       payload.text,
@@ -129,31 +113,23 @@ export async function appleVisionExtract(
   }
 
   if (ctx.platform === "mobile") {
-    const loader = config.pluginLoader ?? mobileLoader ?? DEFAULT_PLUGIN_LOADER
+    const loader = config.pluginLoader ?? mobileLoader ?? loadMlKitTextRecognitionPlugin
     const outcome = await withPlugin(loader, async (plugin) =>
-      plugin.recognizeText({
-        base64: bytesToBase64(normalized.bytes),
-        mimeType: normalized.mimeType,
-        languages,
-      })
+      plugin.detectText({ base64Image: bytesToBase64(normalized.bytes) })
     )
     if ("kind" in outcome) {
       if (outcome.kind === "unsupported") {
         throw new OcrError(
           "unsupported_shell",
           "apple-vision",
-          "Apple Vision plugin is not available on this device."
+          `iOS text recognition requires the ${MLKIT_PLUGIN_PACKAGE} Capacitor plugin, which is not included in this build.`
         )
       }
       throw new OcrError("provider_failed", "apple-vision", outcome.message)
     }
     return buildResult(
       outcome.text,
-      (outcome.blocks ?? []).map((b) => ({
-        text: b.text,
-        bbox: b.bbox,
-        confidence: b.confidence,
-      })),
+      (outcome.blocks ?? []).map(mapMlKitBlock),
       undefined,
       undefined,
       input,

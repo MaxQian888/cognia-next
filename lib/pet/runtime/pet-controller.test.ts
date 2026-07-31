@@ -1,11 +1,42 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
+
+// Plugin hook fan-out — asserted per dispatch kind; the real hooks system is
+// deep-tested in lib/plugin/messaging/hooks-system.test.ts.
+const dispatchPetInteract = jest.fn().mockResolvedValue(undefined)
+const dispatchPetLevelUp = jest.fn().mockResolvedValue(undefined)
+const dispatchPetEvolved = jest.fn().mockResolvedValue(undefined)
+const dispatchPetAchievementUnlocked = jest.fn().mockResolvedValue(undefined)
+const dispatchPetUnwell = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/plugin/messaging/hooks-system", () => ({
+  getPluginEventHooks: () => ({
+    dispatchPetInteract,
+    dispatchPetLevelUp,
+    dispatchPetEvolved,
+    dispatchPetAchievementUnlocked,
+    dispatchPetUnwell,
+  }),
+}))
+
 import { handlePetEvent, whenPetEventsSettled } from "./pet-controller"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { getPetProfile, listPetAchievements, upsertPetProfile } from "@/lib/db/pet"
 import { createDefaultProfile } from "@/lib/pet/defaults"
+import { __resetPetEventBusForTesting, getPetEventBus } from "@/lib/pet/events/pet-event-bus"
 import { usePetStore } from "@/stores/pet/pet-store"
 import type { PetEvent } from "@/types/pet"
 
+afterEach(() => {
+  __resetPetEventBusForTesting()
+  dispatchPetInteract.mockClear()
+  dispatchPetLevelUp.mockClear()
+  dispatchPetEvolved.mockClear()
+  dispatchPetAchievementUnlocked.mockClear()
+  dispatchPetUnwell.mockClear()
+})
+
+// Cold fake-indexeddb open of the full (v100+) schema can exceed jest's 5s
+// default on the first test — same allowance as the other Dexie-cold suites.
 beforeEach(async () => {
   await getDb().delete()
   __resetDbForTesting()
@@ -17,7 +48,7 @@ beforeEach(async () => {
     getDb().petAchievements.clear(),
   ])
   usePetStore.setState({ visualState: "idle", oneShotQueue: [] })
-})
+}, 30_000)
 
 function event(kind: PetEvent["kind"], xp?: number): PetEvent {
   return { source: "user", kind, xp, at: 1000 }
@@ -65,6 +96,294 @@ describe("handlePetEvent", () => {
     const ids = (await listPetAchievements()).map((a) => a.id)
     expect(ids).toContain("first-xp")
     expect(ids).toContain("hatched")
+  })
+
+  it("emits achievementUnlocked on the bus once per newly-unlocked id", async () => {
+    await upsertPetProfile({
+      ...createDefaultProfile("acct-1", 0),
+      soul: { name: "Boba", personality: "x", hatchDate: "" },
+      stage: "baby",
+    })
+    const seen: PetEvent[] = []
+    getPetEventBus().subscribe((e) => {
+      if (e.kind === "achievementUnlocked") seen.push(e)
+    })
+
+    await handlePetEvent(event("goalComplete")) // unlocks first-xp + hatched
+    await whenPetEventsSettled()
+
+    const ids = seen.map((e) => e.meta?.achievementId)
+    expect(ids).toContain("first-xp")
+    expect(ids).toContain("hatched")
+    expect(seen.every((e) => e.source === "system" && e.at === 1000)).toBe(true)
+
+    // Replaying the same event unlocks nothing new → no further emits.
+    seen.length = 0
+    await handlePetEvent(event("goalComplete"))
+    await whenPetEventsSettled()
+    expect(seen).toHaveLength(0)
+  })
+
+  it("grows stats from work and surfaces the grown keys in the store", async () => {
+    await upsertPetProfile({
+      ...createDefaultProfile("acct-1", 0),
+      soul: { name: "Boba", personality: "x", hatchDate: "" },
+      stage: "baby",
+    })
+    await handlePetEvent(event("goalComplete"))
+    await whenPetEventsSettled()
+
+    const profile = await getPetProfile()
+    expect(profile?.statProgress?.patience).toBeGreaterThan(0)
+    expect(usePetStore.getState().lastGrewStats).toEqual(
+      expect.arrayContaining(["patience", "wisdom"])
+    )
+  })
+
+  it("raises a care alert and stamps notifiedAt when the pet becomes unwell", async () => {
+    const start = 2_000_000
+    await upsertPetProfile({
+      ...createDefaultProfile("acct-1", 0),
+      soul: { name: "Pip", personality: "x", hatchDate: "" },
+      stage: "baby",
+      needs: { energy: 5, mood: 5, bond: 50, lastTickAt: new Date(start).toISOString() },
+      care: {
+        lowSince: start,
+        condition: "well",
+        notifiedAt: null,
+        everUnwell: false,
+        careQuality: 50,
+      },
+    })
+    // An idle event 7h later crosses the sustain threshold.
+    await handlePetEvent({ source: "system", kind: "idle", at: start + 7 * 3_600_000 })
+    await whenPetEventsSettled()
+
+    const profile = await getPetProfile()
+    expect(profile?.care?.condition).toBe("unwell")
+    expect(profile?.care?.notifiedAt).toBe(start + 7 * 3_600_000)
+    expect(usePetStore.getState().careAlert).toEqual({
+      at: start + 7 * 3_600_000,
+      petName: "Pip",
+    })
+    expect(usePetStore.getState().visualState).toBe("unwell")
+  })
+
+  it("shows the expressive thinking/happy states for twin activity", async () => {
+    await upsertPetProfile({
+      ...createDefaultProfile("acct-2", 0),
+      soul: { name: "Pip", personality: "x", hatchDate: "" },
+      stage: "baby",
+    })
+    // twinBusy is expressive (not a PASSIVE_KIND) so it reaches the reducer.
+    await handlePetEvent({ source: "twin", kind: "twinBusy", at: 1000 })
+    await whenPetEventsSettled()
+    expect(usePetStore.getState().visualState).toBe("thinking")
+
+    await handlePetEvent({ source: "twin", kind: "twinMilestone", at: 1001 })
+    await whenPetEventsSettled()
+    expect(usePetStore.getState().visualState).toBe("happy")
+  })
+
+  it("persists coins and the care streak after a user interaction", async () => {
+    await upsertPetProfile({
+      ...createDefaultProfile("acct-1", 0),
+      soul: { name: "Boba", personality: "x", hatchDate: "" },
+      stage: "baby",
+    })
+    await handlePetEvent({ source: "user", kind: "fed", at: Date.now() })
+    await whenPetEventsSettled()
+
+    const profile = await getPetProfile()
+    expect(profile?.coins).toBeGreaterThan(0)
+    expect(profile?.streak?.days).toBe(1)
+  })
+
+  it("backfills the streak once from the ledger for legacy profiles", async () => {
+    const yesterdayNoon = (() => {
+      const d = new Date()
+      d.setDate(d.getDate() - 1)
+      d.setHours(12, 0, 0, 0)
+      return d.getTime()
+    })()
+    await upsertPetProfile({
+      ...createDefaultProfile("acct-1", 0),
+      soul: { name: "Boba", personality: "x", hatchDate: "" },
+      stage: "baby",
+    })
+    // Legacy ledger row from yesterday; profile has no streak cache yet.
+    await getDb().petActivityLog.add({ kind: "fed", source: "user", xp: 3, ts: yesterdayNoon })
+
+    await handlePetEvent({ source: "user", kind: "played", at: Date.now() })
+    await whenPetEventsSettled()
+
+    // Backfill found yesterday's day-1 streak; today's interaction extends it.
+    expect((await getPetProfile())?.streak?.days).toBe(2)
+  })
+
+  it("dispatches plugin hooks for interactions and transitions, never for radar", async () => {
+    await upsertPetProfile({
+      ...createDefaultProfile("acct-1", 0),
+      soul: { name: "Boba", personality: "x", hatchDate: "" },
+      stage: "baby",
+      xp: 990,
+      level: 4,
+    })
+
+    // Radar events never dispatch a pet hook.
+    await handlePetEvent({ source: "chat", kind: "thinking", at: 900 })
+    await whenPetEventsSettled()
+    expect(dispatchPetInteract).not.toHaveBeenCalled()
+
+    // A talked interaction with userText dispatches WITHOUT any meta field.
+    await handlePetEvent({
+      source: "user",
+      kind: "talked",
+      meta: { userText: "private words" },
+      at: 950,
+    })
+    await whenPetEventsSettled()
+    expect(dispatchPetInteract).toHaveBeenCalledWith({
+      kind: "talked",
+      source: "user",
+      xp: 2,
+      at: 950,
+    })
+
+    // Level-up + evolution transitions dispatch their hooks once.
+    await handlePetEvent({ source: "user", kind: "goalComplete", xp: 200, at: 1000 })
+    await whenPetEventsSettled()
+    expect(dispatchPetLevelUp).toHaveBeenCalledWith({ level: 5, stage: "juvenile", at: 1000 })
+    expect(dispatchPetEvolved).toHaveBeenCalledWith({ stage: "juvenile", level: 5, at: 1000 })
+    expect(dispatchPetAchievementUnlocked).toHaveBeenCalledWith(
+      expect.objectContaining({ achievementId: "first-xp" })
+    )
+  })
+
+  it("dispatches the unwell hook on the care edge", async () => {
+    const start = 2_000_000
+    await upsertPetProfile({
+      ...createDefaultProfile("acct-1", 0),
+      soul: { name: "Pip", personality: "x", hatchDate: "" },
+      stage: "baby",
+      needs: { energy: 5, mood: 5, bond: 50, lastTickAt: new Date(start).toISOString() },
+      care: {
+        lowSince: start,
+        condition: "well",
+        notifiedAt: null,
+        everUnwell: false,
+        careQuality: 50,
+      },
+    })
+    await handlePetEvent({ source: "system", kind: "idle", at: start + 7 * 3_600_000 })
+    await whenPetEventsSettled()
+    expect(dispatchPetUnwell).toHaveBeenCalledWith({
+      condition: "unwell",
+      at: start + 7 * 3_600_000,
+    })
+  })
+
+  it("re-emits levelUp/evolved lifecycle events on the bus after transitions", async () => {
+    await upsertPetProfile({
+      ...createDefaultProfile("acct-1", 0),
+      soul: { name: "Boba", personality: "x", hatchDate: "" },
+      stage: "baby",
+      xp: 990,
+      level: 4,
+    })
+    const seen: PetEvent[] = []
+    getPetEventBus().subscribe((e) => {
+      if (e.kind === "levelUp" || e.kind === "evolved") seen.push(e)
+    })
+
+    // +200 XP crosses level 5 → juvenile: both transitions fire once.
+    await handlePetEvent({ source: "user", kind: "goalComplete", xp: 200, at: 1000 })
+    await whenPetEventsSettled()
+
+    expect(seen.map((e) => e.kind)).toEqual(["levelUp", "evolved"])
+    expect(seen[0].meta?.level).toBe(5)
+    expect(seen[1].meta?.stage).toBe("juvenile")
+    expect(seen.every((e) => e.source === "system")).toBe(true)
+
+    // Replaying a lifecycle event never re-fires its own transition.
+    seen.length = 0
+    await handlePetEvent({ source: "system", kind: "levelUp", at: 1001 })
+    await whenPetEventsSettled()
+    expect(seen).toHaveLength(0)
+  })
+
+  it("emits a streakDay ceremony on day ≥ 2 advances only", async () => {
+    const DAY2 = new Date("2026-07-02T12:00:00").getTime()
+    await upsertPetProfile({
+      ...createDefaultProfile("acct-1", 0),
+      soul: { name: "Boba", personality: "x", hatchDate: "" },
+      stage: "baby",
+      streak: { days: 1, lastDay: "2026-07-01" },
+    })
+    const seen: PetEvent[] = []
+    getPetEventBus().subscribe((e) => {
+      if (e.kind === "streakDay") seen.push(e)
+    })
+
+    // Next-day interaction advances 1 → 2: ceremony fires with days+multiplier.
+    await handlePetEvent({ source: "user", kind: "fed", at: DAY2 })
+    await whenPetEventsSettled()
+    expect(seen).toHaveLength(1)
+    expect(seen[0].source).toBe("system")
+    expect(seen[0].meta?.days).toBe(2)
+    expect(typeof seen[0].meta?.multiplier).toBe("number")
+
+    // Same-day repeat — no advance, no ceremony.
+    await handlePetEvent({ source: "user", kind: "played", at: DAY2 + 60_000 })
+    await whenPetEventsSettled()
+    expect(seen).toHaveLength(1)
+  })
+
+  it("stays silent on the day-1 streak start", async () => {
+    const DAY = new Date("2026-07-02T12:00:00").getTime()
+    await upsertPetProfile({
+      ...createDefaultProfile("acct-1", 0),
+      soul: { name: "Boba", personality: "x", hatchDate: "" },
+      stage: "baby",
+    })
+    const seen: PetEvent[] = []
+    getPetEventBus().subscribe((e) => {
+      if (e.kind === "streakDay") seen.push(e)
+    })
+    await handlePetEvent({ source: "user", kind: "fed", at: DAY })
+    await whenPetEventsSettled()
+    expect(seen).toHaveLength(0)
+  })
+
+  it("re-emits an unwell event on the well → unwell edge", async () => {
+    const start = 2_000_000
+    await upsertPetProfile({
+      ...createDefaultProfile("acct-1", 0),
+      soul: { name: "Pip", personality: "x", hatchDate: "" },
+      stage: "baby",
+      needs: { energy: 5, mood: 5, bond: 50, lastTickAt: new Date(start).toISOString() },
+      care: {
+        lowSince: start,
+        condition: "well",
+        notifiedAt: null,
+        everUnwell: false,
+        careQuality: 50,
+      },
+    })
+    const seen: PetEvent[] = []
+    getPetEventBus().subscribe((e) => {
+      if (e.kind === "unwell") seen.push(e)
+    })
+
+    await handlePetEvent({ source: "system", kind: "idle", at: start + 7 * 3_600_000 })
+    await whenPetEventsSettled()
+    expect(seen).toHaveLength(1)
+    expect(seen[0].source).toBe("system")
+
+    // Still unwell on the next tick — no edge, no re-emit.
+    await handlePetEvent({ source: "system", kind: "idle", at: start + 8 * 3_600_000 })
+    await whenPetEventsSettled()
+    expect(seen).toHaveLength(1)
   })
 
   it("serializes concurrent events without losing XP", async () => {

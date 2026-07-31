@@ -11,12 +11,25 @@
 /** Codex / ChatGPT first-party client_id. Same value codex-cli uses. */
 export const CODEX_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 
-/** Device-code authorisation endpoint. */
-export const CODEX_OAUTH_DEVICE_CODE_URL = "https://auth.openai.com/oauth/device/code"
-/** Token grant + refresh endpoint. */
+// Codex's device login is OpenAI's *private* accounts-service dialect, NOT the
+// RFC-8628 standard. The actual HTTP calls happen in the Rust
+// `subscription/codex/oauth.rs`; these mirror its constants for documentation /
+// parity. Verified against `openai/codex` `codex-rs/login/src/device_code_auth.rs`.
+
+/** Device-code step 1 — request the user code. JSON body `{client_id}`. */
+export const CODEX_OAUTH_DEVICE_USERCODE_URL =
+  "https://auth.openai.com/api/accounts/deviceauth/usercode"
+/** Device-code step 2 — poll for the authorization code. 404/403 = pending. */
+export const CODEX_OAUTH_DEVICE_TOKEN_URL = "https://auth.openai.com/api/accounts/deviceauth/token"
+/** Standard OAuth token endpoint — code exchange (step 3) + refresh grant. */
 export const CODEX_OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
 /** Token revoke endpoint. Hit during full Sign Out (vs local-only clear). */
 export const CODEX_OAUTH_REVOKE_URL = "https://auth.openai.com/oauth/revoke"
+/** Redirect URI the device-code exchange echoes back. */
+export const CODEX_OAUTH_DEVICE_REDIRECT_URI =
+  "https://auth.openai.com/api/accounts/deviceauth/callback"
+/** Page the user opens to enter their `user_code`. */
+export const CODEX_OAUTH_VERIFICATION_URL = "https://auth.openai.com/codex/device"
 
 /** Default OAuth scopes. `offline_access` is what mints the refresh token. */
 export const CODEX_OAUTH_SCOPES = "openid profile email offline_access"

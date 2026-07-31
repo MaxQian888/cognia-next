@@ -1,0 +1,12 @@
+{
+  "alwaysAllowTool": "Always allow this tool for the current session",
+  "approvalDescription": "An external agent is requesting permission to run this tool.",
+  "approvalRequired": "Tool approval required",
+  "approve": "Approve",
+  "cancel": "Cancel",
+  "deny": "Deny",
+  "parameters": "Parameters",
+  "riskHigh": "High Risk",
+  "riskLow": "Low Risk",
+  "riskMedium": "Medium Risk"
+}

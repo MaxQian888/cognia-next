@@ -29,6 +29,12 @@ export interface PullToRefreshProps {
   className?: string
   /** Suppress haptic feedback (tests). */
   silent?: boolean
+  /**
+   * Reports the scrollable container element — the wrapper IS the scroller,
+   * so virtualized children need it to attach a virtualizer (store it in
+   * state and hand it to `getScrollElement`).
+   */
+  onScrollElChange?: (el: HTMLDivElement | null) => void
 }
 
 export function PullToRefresh({
@@ -38,6 +44,7 @@ export function PullToRefresh({
   maxPx = 96,
   className,
   silent = false,
+  onScrollElChange,
 }: PullToRefreshProps) {
   const [translate, setTranslate] = useState(0)
   const [refreshing, setRefreshing] = useState(false)
@@ -115,9 +122,17 @@ export function PullToRefresh({
     []
   )
 
+  const setContainerRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      containerRef.current = node
+      onScrollElChange?.(node)
+    },
+    [onScrollElChange]
+  )
+
   return (
     <div
-      ref={containerRef}
+      ref={setContainerRef}
       className={cn("relative h-full overflow-y-auto", className)}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}

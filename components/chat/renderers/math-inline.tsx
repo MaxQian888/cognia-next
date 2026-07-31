@@ -5,10 +5,10 @@ import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Check, Copy } from "lucide-react"
-import { renderMathSafe } from "@/lib/latex/cache"
+import { renderMathSafe } from "@cognia/latex"
 import { withMathErrorBoundary } from "./math-error-boundary"
 import { useCopy } from "@/hooks/ui/use-copy"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 interface MathInlineProps {
   content: string

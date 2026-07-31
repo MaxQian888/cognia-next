@@ -3,7 +3,7 @@
  */
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import type { Character, Team } from "@/lib/claude/types"
+import type { Character, Team } from "@cognia/agent-config-types"
 
 const logInfo = jest.fn()
 const logError = jest.fn()
@@ -13,15 +13,40 @@ jest.mock("next-intl", () => ({
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
-jest.mock("@/lib/logging", () => ({
-  loggers: {
+// `member-list` reaches lib/db/characters → the plugin registries → the plugin
+// manager → lsp-registry, which calls `loggers.plugin.child(...)` at import
+// time. Provide a Proxy that lazily materialises a full stub logger for ANY
+// namespace (with a `.child()` that recurses) so the module graph loads no
+// matter which loggers the transitive imports touch; the `ui` namespace stays
+// wired to the assertion spies.
+jest.mock("@cognia/logging", () => {
+  const makeLogger = (): Record<string, unknown> => ({
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    fatal: jest.fn(),
+    child: () => makeLogger(),
+  })
+  const cache: Record<string, unknown> = {
     ui: {
       info: (...args: unknown[]) => logInfo(...args),
       warn: jest.fn(),
       error: (...args: unknown[]) => logError(...args),
+      debug: jest.fn(),
+      fatal: jest.fn(),
+      child: () => makeLogger(),
     },
-  },
-}))
+  }
+  const loggers = new Proxy(cache, {
+    get: (target, prop) => {
+      if (typeof prop !== "string") return Reflect.get(target, prop)
+      if (!(prop in target)) target[prop] = makeLogger()
+      return target[prop]
+    },
+  })
+  return { loggers, logger: makeLogger(), createLogger: () => makeLogger() }
+})
 
 interface QueryStub<T> {
   current: T
@@ -139,12 +164,17 @@ test("renders members and clicking one fires onMention", async () => {
   queueQueries(sampleTeam, sampleMembers)
   const onMention = jest.fn()
   const user = userEvent.setup()
-  render(<MemberList teamSessionId="ts-1" teamId="t-1" onMention={onMention} />)
+  const { container } = render(
+    <MemberList teamSessionId="ts-1" teamId="t-1" onMention={onMention} />
+  )
   await user.click(screen.getByText("Alice"))
   expect(onMention).toHaveBeenCalledWith(sampleMembers[0])
   expect(logInfo).toHaveBeenCalledWith(
     "member-list mention",
     expect.objectContaining({ teamSessionId: "ts-1", characterId: "c-1" })
+  )
+  expect(container.querySelector('[data-slot="scroll-area"]')).toHaveClass(
+    "[&_[data-slot=scroll-area-scrollbar]]:hidden"
   )
 })
 
@@ -163,6 +193,22 @@ test("empty member list shows the empty-state copy", () => {
   expect(screen.getByText("empty")).toBeInTheDocument()
 })
 
+test("expanded rail opts into the chat wallpaper scope", () => {
+  queueQueries(sampleTeam, sampleMembers)
+  render(<MemberList teamSessionId="ts-1" teamId="t-1" onMention={jest.fn()} />)
+  const rail = screen.getByLabelText("label")
+  expect(rail).toHaveAttribute("data-bg-target", "chat")
+})
+
+test("collapsed strip also opts into the chat wallpaper scope", () => {
+  showMemberList.current = false
+  queueQueries(sampleTeam, sampleMembers)
+  const { container } = render(
+    <MemberList teamSessionId="ts-1" teamId="t-1" onMention={jest.fn()} />
+  )
+  expect(container.querySelector('[data-bg-target="chat"]')).not.toBeNull()
+})
+
 test("scratchpad textarea persists on a debounce", async () => {
   jest.useFakeTimers()
   queueQueries(sampleTeam, sampleMembers, { scratchpad: "" })
@@ -177,4 +223,57 @@ test("scratchpad textarea persists on a debounce", async () => {
     expect(updateSession).toHaveBeenCalledWith("ts-1", { scratchpad: "remember this" })
   })
   jest.useRealTimers()
+})
+
+// ── variant ────────────────────────────────────────────────────────────────
+// The mobile members Sheet mounts this component. Two things blanked it there:
+// the `lg:` breakpoint gate (a phone viewport never reaches it) and the
+// persisted `showMemberList` collapse, whose icon-strip fallback is ALSO
+// `lg:`-gated. The sheet variant opts out of both.
+
+test("the default rail variant keeps the lg breakpoint gate", () => {
+  queueQueries(sampleTeam, sampleMembers, { scratchpad: "" })
+  const { container } = render(
+    <MemberList teamSessionId="ts-1" teamId="t-1" onMention={jest.fn()} />
+  )
+  const aside = container.querySelector("aside")!
+  expect(aside).toHaveAttribute("data-variant", "rail")
+  expect(aside.className).toContain("hidden")
+  expect(aside.className).toContain("lg:flex")
+})
+
+test("the sheet variant renders members unconditionally on a phone viewport", () => {
+  queueQueries(sampleTeam, sampleMembers, { scratchpad: "" })
+  const { container } = render(
+    <MemberList variant="sheet" teamSessionId="ts-1" teamId="t-1" onMention={jest.fn()} />
+  )
+  const aside = container.querySelector("aside")!
+  expect(aside).toHaveAttribute("data-variant", "sheet")
+  expect(aside.className).not.toContain("hidden")
+  expect(aside.className).toContain("w-full")
+  expect(screen.getByText("Alice")).toBeInTheDocument()
+  expect(screen.getByText("Bob")).toBeInTheDocument()
+})
+
+test("the sheet variant ignores a collapsed showMemberList", () => {
+  // A user who collapsed the rail on desktop must not get an empty sheet on
+  // their phone — the two surfaces share one persisted flag.
+  showMemberList.current = false
+  queueQueries(sampleTeam, sampleMembers, { scratchpad: "" })
+  render(<MemberList variant="sheet" teamSessionId="ts-1" teamId="t-1" onMention={jest.fn()} />)
+  expect(screen.getByText("Alice")).toBeInTheDocument()
+})
+
+test("the sheet variant drops the collapse button (the sheet close is the collapse)", () => {
+  queueQueries(sampleTeam, sampleMembers, { scratchpad: "" })
+  render(<MemberList variant="sheet" teamSessionId="ts-1" teamId="t-1" onMention={jest.fn()} />)
+  expect(screen.queryByLabelText("hide")).not.toBeInTheDocument()
+})
+
+test("the rail variant still collapses to the icon strip", () => {
+  showMemberList.current = false
+  queueQueries(sampleTeam, sampleMembers, { scratchpad: "" })
+  render(<MemberList teamSessionId="ts-1" teamId="t-1" onMention={jest.fn()} />)
+  expect(screen.getByLabelText("show")).toBeInTheDocument()
+  expect(screen.queryByText("Alice")).not.toBeInTheDocument()
 })

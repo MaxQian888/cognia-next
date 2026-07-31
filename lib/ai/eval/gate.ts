@@ -6,25 +6,22 @@
  * "Pass rate is a product decision" — thresholds are explicit, not baked in.
  */
 
-import type { EvalReport } from "@/types/eval/eval"
+import type { EvalReport, ScorerAggregate } from "@/types/eval/eval"
+import type { GateThresholds, GateResult } from "@/types/eval/gate"
 
-export interface GateThresholds {
-  /** Minimum acceptable pass^k reliability. */
-  minPassHatK?: number
-  /** Minimum acceptable pass@1. */
-  minPassAt1?: number
-  /**
-   * Per-scorer pass-rate floor: a single number applied to every scorer, or a
-   * map of scorerId → floor (scorers absent from the report are ignored).
-   */
-  minScorerPassRate?: number | Record<string, number>
-  /** Maximum acceptable total cost. */
-  maxTotalCostUsd?: number
-}
+export type { GateThresholds, GateResult } from "@/types/eval/gate"
 
-export interface GateResult {
-  passed: boolean
-  failures: string[]
+/**
+ * True when this scorer actually produced verdicts. A scorer that graded
+ * nothing reports `passRate: 0`, which is an absence of signal — NOT a 0%
+ * pass. Gating on it would fail every run that simply doesn't use that scorer
+ * (e.g. the unbudgeted `cost` scorer, which only ever measures).
+ *
+ * Legacy reports carry no `scoredCount`; fall back to `observations` so their
+ * verdicts stay exactly what they were.
+ */
+function graded(agg: ScorerAggregate): boolean {
+  return (agg.scoredCount ?? agg.observations) > 0
 }
 
 export function evaluateGate(report: EvalReport, thresholds: GateThresholds): GateResult {
@@ -41,6 +38,7 @@ export function evaluateGate(report: EvalReport, thresholds: GateThresholds): Ga
     const spec = thresholds.minScorerPassRate
     if (typeof spec === "number") {
       for (const [scorerId, agg] of Object.entries(report.scorers)) {
+        if (!graded(agg)) continue
         if (agg.passRate < spec) {
           failures.push(`scorer ${scorerId} passRate ${agg.passRate.toFixed(3)} < ${spec}`)
         }
@@ -48,7 +46,8 @@ export function evaluateGate(report: EvalReport, thresholds: GateThresholds): Ga
     } else {
       for (const [scorerId, floor] of Object.entries(spec)) {
         const agg = report.scorers[scorerId]
-        if (agg && agg.passRate < floor) {
+        if (!agg || !graded(agg)) continue
+        if (agg.passRate < floor) {
           failures.push(`scorer ${scorerId} passRate ${agg.passRate.toFixed(3)} < ${floor}`)
         }
       }
@@ -60,6 +59,19 @@ export function evaluateGate(report: EvalReport, thresholds: GateThresholds): Ga
     report.totalCostUsd > thresholds.maxTotalCostUsd
   ) {
     failures.push(`cost ${report.totalCostUsd.toFixed(4)} > ${thresholds.maxTotalCostUsd}`)
+  }
+
+  // Guards against a high pass rate measured over almost nothing. Legacy
+  // reports have no ungraded counts, so the check is skipped for them rather
+  // than treated as "0% ungraded" — which would silently pass.
+  if (thresholds.maxUngradedRatio !== undefined && report.caseCount > 0) {
+    const ungraded = report.ungradedCaseCount
+    if (ungraded !== undefined) {
+      const ratio = ungraded / report.caseCount
+      if (ratio > thresholds.maxUngradedRatio) {
+        failures.push(`ungraded ${ratio.toFixed(3)} > ${thresholds.maxUngradedRatio}`)
+      }
+    }
   }
 
   return { passed: failures.length === 0, failures }

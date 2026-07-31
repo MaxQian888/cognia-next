@@ -131,6 +131,38 @@ describe("SessionCostBadge — popover with persisted rows", () => {
     expect(items[1]).toHaveTextContent("claude-sonnet-4-5")
   })
 
+  it("shows throughput, gen time and cache-hit rate when durations are reported", async () => {
+    liveQueryReturn = [
+      {
+        messageId: "m1",
+        sessionId: "s1",
+        at: 0,
+        model: "claude-x",
+        inputTokens: 100,
+        outputTokens: 500,
+        cacheCreationTokens: 200,
+        cacheReadTokens: 800,
+        costUsd: 0.05,
+        durationMs: 10_000,
+        reasoningTokens: 40,
+      },
+    ]
+    const user = userEvent.setup()
+    render(
+      <SessionCostBadge
+        sessionId="s1"
+        inMemoryUsage={{ totalCostUsd: 0.05 }}
+        tokensLabel={tokens}
+      />
+    )
+    await user.click(screen.getByTestId("session-cost-trigger"))
+    // speed available (500 out / 10s) → renders the tokPerSec row, not "—".
+    const speed = await screen.findByTestId("cost-popover-speed")
+    expect(speed).not.toHaveTextContent("—")
+    // cache hit = 800 / (800 + 200) = 80%.
+    expect(screen.getByTestId("cost-popover-cache-hit")).toHaveTextContent("80%")
+  })
+
   it("buckets rows with no model under '(unknown)'", async () => {
     liveQueryReturn = [
       {

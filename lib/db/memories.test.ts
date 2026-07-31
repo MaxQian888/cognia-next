@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 import type { Memory } from "@/types/memory/memory"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
@@ -7,11 +8,14 @@ import {
   createMemory,
   getMemoriesByVectorDocIds,
   getMemory,
+  hardDeleteMemories,
   hardDeleteMemory,
   invalidateMemory,
   listActiveForReader,
   listActiveProcedural,
   listMemories,
+  listMemoriesBySourceMessageId,
+  setMemoriesPinned,
   setMemoryPinned,
   touchMemories,
   updateMemory,
@@ -110,6 +114,20 @@ describe("memories CRUD", () => {
     await invalidateMemory("m1")
     expect((await getMemory("m1"))?.supersededById).toBeUndefined()
   })
+
+  it("listMemoriesBySourceMessageId returns that message's rows newest-first, incl. invalidated", async () => {
+    await createMemory(buildInput({ id: "m1", sourceMessageId: "msg-a", createdAt: 1000 }))
+    await createMemory(buildInput({ id: "m2", sourceMessageId: "msg-a", createdAt: 2000 }))
+    await createMemory(buildInput({ id: "m3", sourceMessageId: "msg-b" }))
+    await createMemory(buildInput({ id: "m4" }))
+    await invalidateMemory("m1")
+
+    const rows = await listMemoriesBySourceMessageId("msg-a")
+    expect(rows.map((m) => m.id)).toEqual(["m2", "m1"])
+    expect(rows[1].status).toBe("invalidated")
+    expect(await listMemoriesBySourceMessageId("")).toEqual([])
+    expect(await listMemoriesBySourceMessageId("missing")).toEqual([])
+  })
 })
 
 describe("touch / pin", () => {
@@ -160,12 +178,100 @@ describe("listing & scope-union", () => {
     expect(charA.map((m) => m.id)).toEqual(["cA"])
   })
 
+  it("listMemories can match a complete maintenance namespace", async () => {
+    await createMemory(buildInput({ id: "p1-root", scope: "workspace", projectId: "p1" }))
+    await createMemory(
+      buildInput({ id: "p1-branch", scope: "workspace", projectId: "p1", branch: "main" })
+    )
+    await createMemory(buildInput({ id: "p2-root", scope: "workspace", projectId: "p2" }))
+
+    const rows = await listMemories({
+      scope: "workspace",
+      status: "active",
+      projectId: "p1",
+      exactNamespace: true,
+    })
+
+    expect(rows.map((memory) => memory.id)).toEqual(["p1-root"])
+  })
+
   it("listActiveForReader unions global with the character's own override layer", async () => {
     await seed()
     const forA = await listActiveForReader("charA")
     expect(forA.map((m) => m.id).sort()).toEqual(["cA", "g1"]) // g2 invalidated, cB other char
     const noChar = await listActiveForReader()
     expect(noChar.map((m) => m.id)).toEqual(["g1"])
+  })
+
+  it("layers workspace and character memories over global stable keys", async () => {
+    await createMemory(buildInput({ id: "global", key: "package-manager", text: "Use npm" }))
+    await createMemory(
+      buildInput({
+        id: "workspace",
+        scope: "workspace",
+        projectId: "project-a",
+        key: "package-manager",
+        text: "Use pnpm",
+      })
+    )
+    await createMemory(
+      buildInput({
+        id: "character",
+        scope: "character",
+        characterId: "char-a",
+        projectId: "project-a",
+        key: "package-manager",
+        text: "Use Bun",
+      })
+    )
+
+    const rows = await listActiveForReader({ projectId: "project-a", characterId: "char-a" })
+    expect(
+      rows.filter((memory) => memory.key === "package-manager").map((memory) => memory.id)
+    ).toEqual(["character"])
+  })
+
+  it("keeps agent namespaces private and applies branch/path restrictions", async () => {
+    await createMemory(buildInput({ id: "global" }))
+    await createMemory(
+      buildInput({ id: "agent-a", scope: "agent", agentId: "agent-a", projectId: "p" })
+    )
+    await createMemory(
+      buildInput({ id: "agent-b", scope: "agent", agentId: "agent-b", projectId: "p" })
+    )
+    await createMemory(
+      buildInput({
+        id: "path-match",
+        scope: "workspace",
+        projectId: "p",
+        branch: "main",
+        pathPattern: "src/features",
+      })
+    )
+    await createMemory(
+      buildInput({
+        id: "path-miss",
+        scope: "workspace",
+        projectId: "p",
+        branch: "other",
+        pathPattern: "src/features",
+      })
+    )
+
+    const rows = await listActiveForReader({
+      projectId: "p",
+      agentId: "agent-a",
+      branch: "main",
+      path: "src/features/memory/panel.tsx",
+    })
+    expect(rows.map((memory) => memory.id).sort()).toEqual(["agent-a", "global", "path-match"])
+  })
+
+  it("retains conflicts for review but excludes them from recall", async () => {
+    await createMemory(buildInput({ id: "safe" }))
+    await createMemory(buildInput({ id: "conflict", reviewStatus: "conflict" }))
+    expect((await listActiveForReader()).map((memory) => memory.id)).toEqual(["safe"])
+    expect((await listMemories()).map((memory) => memory.id)).toContain("conflict")
   })
 
   it("listActiveProcedural returns only active procedural for the reader", async () => {
@@ -216,6 +322,35 @@ describe("delete & clear", () => {
     await createMemory(buildInput({ id: "g2" }))
     expect(await clearMemories()).toBe(2)
     expect((await listMemories()).length).toBe(0)
+  })
+
+  it("hardDeleteMemories removes the listed rows and returns the count", async () => {
+    await createMemory(buildInput({ id: "a" }))
+    await createMemory(buildInput({ id: "b" }))
+    await createMemory(buildInput({ id: "c" }))
+    expect(await hardDeleteMemories(["a", "c"])).toBe(2)
+    expect(await getMemory("a")).toBeUndefined()
+    expect(await getMemory("b")).toBeDefined()
+    expect(await getMemory("c")).toBeUndefined()
+  })
+
+  it("hardDeleteMemories is a no-op on empty input", async () => {
+    expect(await hardDeleteMemories([])).toBe(0)
+  })
+
+  it("setMemoriesPinned pins/unpins the listed rows in one pass", async () => {
+    await createMemory(buildInput({ id: "a", pinned: false }))
+    await createMemory(buildInput({ id: "b", pinned: false }))
+    await setMemoriesPinned(["a", "b"], true)
+    expect((await getMemory("a"))?.pinned).toBe(true)
+    expect((await getMemory("b"))?.pinned).toBe(true)
+    await setMemoriesPinned(["a"], false)
+    expect((await getMemory("a"))?.pinned).toBe(false)
+    expect((await getMemory("b"))?.pinned).toBe(true)
+  })
+
+  it("setMemoriesPinned is a no-op on empty input", async () => {
+    await expect(setMemoriesPinned([], true)).resolves.toBeUndefined()
   })
 })
 

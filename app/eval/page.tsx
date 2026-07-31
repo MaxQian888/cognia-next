@@ -1,6 +1,8 @@
 "use client"
 
 import { EvalWorkspace } from "@/components/eval/eval-workspace"
+import { EvalLabWorkspace } from "@/components/eval/eval-lab-workspace"
+import { isEvalLabEnabled } from "@/lib/ai/eval/feature-flags"
 
 /**
  * Dedicated full-page Agent evaluation route. Hosts the eval workspace
@@ -9,8 +11,8 @@ import { EvalWorkspace } from "@/components/eval/eval-workspace"
  */
 export default function EvalPage() {
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col">
-      <EvalWorkspace />
+    <div className="flex h-full min-h-0 flex-1 flex-col" data-bg-target="chat">
+      {isEvalLabEnabled() ? <EvalLabWorkspace /> : <EvalWorkspace />}
     </div>
   )
 }

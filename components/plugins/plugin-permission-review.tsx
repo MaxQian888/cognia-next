@@ -49,7 +49,7 @@ export function PluginPermissionReview() {
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && close()}>
-      <DialogContent className="w-[95vw] max-w-2xl max-h-[85vh] flex flex-col">
+      <DialogContent className="flex max-h-[85vh] w-[calc(100%-2rem)] min-w-0 max-w-3xl flex-col sm:max-w-3xl">
         {target ? <PermissionReviewContent pluginId={target.pluginId} onClose={close} /> : null}
       </DialogContent>
     </Dialog>
@@ -92,49 +92,41 @@ function PermissionReviewContent({ pluginId, onClose }: { pluginId: string; onCl
 
       <Card className="p-0 flex-1 min-h-0 flex flex-col overflow-hidden">
         <ScrollArea className="flex-1 min-h-0">
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
+          <Table className="table-fixed">
+            <TableHeader className="hidden sm:table-header-group">
+              <TableRow>
+                <TableHead>{t("colPermission")}</TableHead>
+                <TableHead className="w-20 text-center">{t("colGranted")}</TableHead>
+                <TableHead className="w-40">{t("colTier")}</TableHead>
+                <TableHead className="w-24 text-right">{t("colActions")}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {allListed.length === 0 ? (
                 <TableRow>
-                  <TableHead className="min-w-[8rem]">{t("colPermission")}</TableHead>
-                  <TableHead className="hidden md:table-cell min-w-[6rem] text-center">
-                    {t("colDeclared")}
-                  </TableHead>
-                  <TableHead className="hidden md:table-cell min-w-[6rem] text-center">
-                    {t("colOptional")}
-                  </TableHead>
-                  <TableHead className="min-w-[5rem] text-center">{t("colGranted")}</TableHead>
-                  <TableHead className="min-w-[9rem]">{t("colTier")}</TableHead>
-                  <TableHead className="min-w-[6rem] text-right">{t("colActions")}</TableHead>
+                  <TableCell colSpan={4} className="text-center text-sm text-muted-foreground">
+                    {t("empty")}
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {allListed.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">
-                      {t("empty")}
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  allListed.map((perm) => (
-                    <PermissionRow
-                      key={perm}
-                      perm={perm}
-                      declared={declared.includes(perm)}
-                      optional={optional.includes(perm)}
-                      granted={granted.has(perm)}
-                      dangerous={perms.isDangerous(perm)}
-                      onGrant={() => perms.grant(pluginId, perm, { grantedBy: "user" })}
-                      onRevoke={() => perms.revoke(pluginId, perm)}
-                      tier={perms.getTier(pluginId, perm)}
-                      onTierChange={(tier) => perms.setTier(pluginId, perm, tier)}
-                      description={justifications[perm] ?? perms.descriptions[perm] ?? perm}
-                    />
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
+              ) : (
+                allListed.map((perm) => (
+                  <PermissionRow
+                    key={perm}
+                    perm={perm}
+                    declared={declared.includes(perm)}
+                    optional={optional.includes(perm)}
+                    granted={granted.has(perm)}
+                    dangerous={perms.isDangerous(perm)}
+                    onGrant={() => perms.grant(pluginId, perm, { grantedBy: "user" })}
+                    onRevoke={() => perms.revoke(pluginId, perm)}
+                    tier={perms.getTier(pluginId, perm)}
+                    onTierChange={(tier) => perms.setTier(pluginId, perm, tier)}
+                    description={justifications[perm] ?? perms.descriptions[perm] ?? perm}
+                  />
+                ))
+              )}
+            </TableBody>
+          </Table>
         </ScrollArea>
       </Card>
 
@@ -190,26 +182,45 @@ export function PermissionRow({
 }) {
   const t = useTranslations("plugins.permissionReview")
   return (
-    <TableRow>
-      <TableCell className="space-y-0.5">
-        <div className="flex items-center gap-1.5">
-          <code className="font-mono text-xs">{perm}</code>
+    <TableRow className="grid grid-cols-[minmax(0,1fr)_minmax(9rem,auto)] gap-x-3 gap-y-2 p-3 sm:table-row sm:p-0">
+      <TableCell className="col-span-2 min-w-0 space-y-1 p-0 whitespace-normal sm:p-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+          <code className="break-all font-mono text-xs">{perm}</code>
           {dangerous && <AlertTriangleIcon className="size-3 text-destructive shrink-0" />}
         </div>
-        <p className="text-xs text-muted-foreground">{description}</p>
+        <p className="break-words text-xs text-muted-foreground">{description}</p>
+        {(declared || optional) && (
+          <div className="flex flex-wrap gap-1.5 text-[10px] text-muted-foreground">
+            {declared && (
+              <span className="inline-flex items-center gap-1">
+                <CheckCircle2Icon className="size-3" aria-hidden="true" />
+                {t("colDeclared")}
+              </span>
+            )}
+            {optional && (
+              <span className="inline-flex items-center gap-1">
+                <CheckCircle2Icon className="size-3" aria-hidden="true" />
+                {t("colOptional")}
+              </span>
+            )}
+          </div>
+        )}
       </TableCell>
-      <TableCell className="hidden md:table-cell text-center">
-        {declared && <CheckCircle2Icon className="size-3.5 inline text-foreground/60" />}
+      <TableCell className="flex items-center gap-2 p-0 text-left sm:table-cell sm:w-20 sm:p-2 sm:text-center">
+        <span className="text-xs text-muted-foreground sm:hidden">{t("colGranted")}</span>
+        {granted ? (
+          <CheckCircle2Icon
+            className="size-3.5 text-secondary-foreground sm:inline"
+            aria-label={t("colGranted")}
+          />
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        )}
       </TableCell>
-      <TableCell className="hidden md:table-cell text-center">
-        {optional && <CheckCircle2Icon className="size-3.5 inline text-foreground/60" />}
-      </TableCell>
-      <TableCell className="text-center">
-        {granted && <CheckCircle2Icon className="size-3.5 inline text-secondary-foreground" />}
-      </TableCell>
-      <TableCell>
+      <TableCell className="min-w-0 p-0 whitespace-normal sm:w-40 sm:p-2">
+        <span className="mb-1 block text-xs text-muted-foreground sm:hidden">{t("colTier")}</span>
         <Select value={tier} onValueChange={(v) => onTierChange(v as PluginPermissionTier)}>
-          <SelectTrigger className="h-7 text-xs" aria-label={t("colTier")}>
+          <SelectTrigger className="h-8 w-full min-w-0 text-xs" aria-label={t("colTier")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -218,15 +229,17 @@ export function PermissionRow({
             <SelectItem value="forbid">{t("tierLabel.forbid")}</SelectItem>
           </SelectContent>
         </Select>
-        <p className="text-[10px] text-muted-foreground mt-0.5">{t(`tierHint.${tier}`)}</p>
+        <p className="mt-1 hidden break-words text-[10px] leading-snug text-muted-foreground lg:block">
+          {t(`tierHint.${tier}`)}
+        </p>
       </TableCell>
-      <TableCell className="text-right">
+      <TableCell className="col-span-2 p-0 text-right sm:table-cell sm:w-24 sm:p-2">
         {granted ? (
-          <Button size="sm" variant="ghost" onClick={onRevoke}>
+          <Button className="w-full sm:w-auto" size="sm" variant="ghost" onClick={onRevoke}>
             {t("revoke")}
           </Button>
         ) : (
-          <Button size="sm" variant="outline" onClick={onGrant}>
+          <Button className="w-full sm:w-auto" size="sm" variant="outline" onClick={onGrant}>
             {t("grant")}
           </Button>
         )}

@@ -6,7 +6,7 @@
 // preview shown before the user clicks Apply.
 
 import { useTranslations } from "next-intl"
-import type { BackupPackageV3 } from "@/lib/data/types"
+import type { BackupPackageV3, BackupPayloadV3 } from "@/lib/data/types"
 
 const FIELDS: Array<{
   key: keyof BackupPackageV3["payload"]
@@ -35,13 +35,44 @@ const FIELDS: Array<{
   { key: "pluginPermissions", labelKey: "pluginPermissions" },
   { key: "pluginReviews", labelKey: "pluginReviews" },
   { key: "pluginAnalytics", labelKey: "pluginAnalytics" },
-  { key: "pluginScheduledJobs", labelKey: "pluginScheduledJobs" },
 ]
+
+/**
+ * Row counts for a v3 payload — the "blast radius" half of the preview, split
+ * out so the per-domain import can show the same numbers.
+ *
+ * A `DomainExportFile.payload` *is* a `BackupPayloadV3`, but a domain file has
+ * no manifest, so only this part is shared; the manifest header stays in
+ * `ImportPreview`. Keeping one counting loop means the two dialogs can't drift
+ * on what "12 characters" means.
+ */
+export function PayloadRowCounts({ payload }: { payload: BackupPayloadV3 }) {
+  const snapshotCount = Object.keys(payload.localStorageSnapshots ?? {}).length
+  return (
+    <ul className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-muted-foreground">
+      {FIELDS.map((f) => {
+        const v = payload[f.key]
+        const count = Array.isArray(v) ? v.length : v ? 1 : 0
+        return (
+          <li key={f.key as string}>
+            <span className="font-mono">{f.labelKey}:</span>{" "}
+            <span className={count > 0 ? "" : "italic"}>{count}</span>
+          </li>
+        )
+      })}
+      {snapshotCount > 0 && (
+        <li>
+          {/* i18n-exempt: raw payload key name, not UI prose */}
+          <span className="font-mono">localStorageSnapshots:</span> <span>{snapshotCount}</span>
+        </li>
+      )}
+    </ul>
+  )
+}
 
 export function ImportPreview({ pkg }: { pkg: BackupPackageV3 }) {
   const t = useTranslations("settings.data")
   const integrityShort = pkg.manifest.integrity.checksum.slice(0, 12)
-  const snapshotCount = Object.keys(pkg.payload.localStorageSnapshots ?? {}).length
   return (
     <div className="rounded-md border bg-muted/30 p-3 text-xs">
       <p className="mb-2 font-medium">{t("preview")}</p>
@@ -53,26 +84,11 @@ export function ImportPreview({ pkg }: { pkg: BackupPackageV3 }) {
         })}
       </p>
       <p className="mb-2 break-all font-mono text-[10px] text-muted-foreground">
+        {/* i18n-exempt: technical manifest diagnostics — schema/integrity/trace ids, not UI prose */}
         schema v{pkg.manifest.schemaVersion} · integrity {integrityShort}… · trace{" "}
         {pkg.manifest.traceId.slice(0, 8)}
       </p>
-      <ul className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-muted-foreground">
-        {FIELDS.map((f) => {
-          const v = pkg.payload[f.key]
-          const count = Array.isArray(v) ? v.length : v ? 1 : 0
-          return (
-            <li key={f.key as string}>
-              <span className="font-mono">{f.labelKey}:</span>{" "}
-              <span className={count > 0 ? "" : "italic"}>{count}</span>
-            </li>
-          )
-        })}
-        {snapshotCount > 0 && (
-          <li>
-            <span className="font-mono">localStorageSnapshots:</span> <span>{snapshotCount}</span>
-          </li>
-        )}
-      </ul>
+      <PayloadRowCounts payload={pkg.payload} />
     </div>
   )
 }

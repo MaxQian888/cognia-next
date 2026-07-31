@@ -89,7 +89,8 @@ impl ShortcutRegistry {
         chord: &str,
     ) -> Result<(), ShortcutError> {
         let normalized = normalize_chord(chord);
-        let parsed = parse_chord(&normalized).ok_or_else(|| ShortcutError::InvalidChord(chord.to_string()))?;
+        let parsed = parse_chord(&normalized)
+            .ok_or_else(|| ShortcutError::InvalidChord(chord.to_string()))?;
 
         {
             let guard = self.inner.lock();
@@ -184,6 +185,15 @@ impl ShortcutRegistry {
                 state.consent.clear_session_grants();
                 let _ = app.emit("automation:kill-switch", serde_json::Value::Null);
             }
+            "selection.captureClipboard" => {
+                crate::selection_toolbar::spawn_clipboard_capture(app);
+            }
+            // The six selection-toolbar action chords. Bound only while the
+            // feature is running (see `selection_toolbar::bind_action_shortcuts`),
+            // and a no-op unless a selection is currently on offer.
+            other if other.starts_with("selection.") => {
+                crate::selection_toolbar::dispatch_shortcut(app, other);
+            }
             _ => {}
         }
 
@@ -275,21 +285,47 @@ fn code_from_part(part: &str) -> Option<Code> {
         let c = part.chars().next()?;
         if c.is_ascii_alphabetic() {
             return Some(match c.to_ascii_uppercase() {
-                'A' => Code::KeyA, 'B' => Code::KeyB, 'C' => Code::KeyC, 'D' => Code::KeyD,
-                'E' => Code::KeyE, 'F' => Code::KeyF, 'G' => Code::KeyG, 'H' => Code::KeyH,
-                'I' => Code::KeyI, 'J' => Code::KeyJ, 'K' => Code::KeyK, 'L' => Code::KeyL,
-                'M' => Code::KeyM, 'N' => Code::KeyN, 'O' => Code::KeyO, 'P' => Code::KeyP,
-                'Q' => Code::KeyQ, 'R' => Code::KeyR, 'S' => Code::KeyS, 'T' => Code::KeyT,
-                'U' => Code::KeyU, 'V' => Code::KeyV, 'W' => Code::KeyW, 'X' => Code::KeyX,
-                'Y' => Code::KeyY, 'Z' => Code::KeyZ,
+                'A' => Code::KeyA,
+                'B' => Code::KeyB,
+                'C' => Code::KeyC,
+                'D' => Code::KeyD,
+                'E' => Code::KeyE,
+                'F' => Code::KeyF,
+                'G' => Code::KeyG,
+                'H' => Code::KeyH,
+                'I' => Code::KeyI,
+                'J' => Code::KeyJ,
+                'K' => Code::KeyK,
+                'L' => Code::KeyL,
+                'M' => Code::KeyM,
+                'N' => Code::KeyN,
+                'O' => Code::KeyO,
+                'P' => Code::KeyP,
+                'Q' => Code::KeyQ,
+                'R' => Code::KeyR,
+                'S' => Code::KeyS,
+                'T' => Code::KeyT,
+                'U' => Code::KeyU,
+                'V' => Code::KeyV,
+                'W' => Code::KeyW,
+                'X' => Code::KeyX,
+                'Y' => Code::KeyY,
+                'Z' => Code::KeyZ,
                 _ => return None,
             });
         }
         if c.is_ascii_digit() {
             return Some(match c {
-                '0' => Code::Digit0, '1' => Code::Digit1, '2' => Code::Digit2, '3' => Code::Digit3,
-                '4' => Code::Digit4, '5' => Code::Digit5, '6' => Code::Digit6, '7' => Code::Digit7,
-                '8' => Code::Digit8, '9' => Code::Digit9,
+                '0' => Code::Digit0,
+                '1' => Code::Digit1,
+                '2' => Code::Digit2,
+                '3' => Code::Digit3,
+                '4' => Code::Digit4,
+                '5' => Code::Digit5,
+                '6' => Code::Digit6,
+                '7' => Code::Digit7,
+                '8' => Code::Digit8,
+                '9' => Code::Digit9,
                 _ => return None,
             });
         }
@@ -305,25 +341,60 @@ fn code_from_part(part: &str) -> Option<Code> {
         "arrowdown" | "down" => Code::ArrowDown,
         "arrowleft" | "left" => Code::ArrowLeft,
         "arrowright" | "right" => Code::ArrowRight,
-        "f1" => Code::F1, "f2" => Code::F2, "f3" => Code::F3, "f4" => Code::F4,
-        "f5" => Code::F5, "f6" => Code::F6, "f7" => Code::F7, "f8" => Code::F8,
-        "f9" => Code::F9, "f10" => Code::F10, "f11" => Code::F11, "f12" => Code::F12,
+        "f1" => Code::F1,
+        "f2" => Code::F2,
+        "f3" => Code::F3,
+        "f4" => Code::F4,
+        "f5" => Code::F5,
+        "f6" => Code::F6,
+        "f7" => Code::F7,
+        "f8" => Code::F8,
+        "f9" => Code::F9,
+        "f10" => Code::F10,
+        "f11" => Code::F11,
+        "f12" => Code::F12,
         _ => return None,
     })
 }
 
 fn part_from_code(code: Code) -> String {
     match code {
-        Code::KeyA => "a", Code::KeyB => "b", Code::KeyC => "c", Code::KeyD => "d",
-        Code::KeyE => "e", Code::KeyF => "f", Code::KeyG => "g", Code::KeyH => "h",
-        Code::KeyI => "i", Code::KeyJ => "j", Code::KeyK => "k", Code::KeyL => "l",
-        Code::KeyM => "m", Code::KeyN => "n", Code::KeyO => "o", Code::KeyP => "p",
-        Code::KeyQ => "q", Code::KeyR => "r", Code::KeyS => "s", Code::KeyT => "t",
-        Code::KeyU => "u", Code::KeyV => "v", Code::KeyW => "w", Code::KeyX => "x",
-        Code::KeyY => "y", Code::KeyZ => "z",
-        Code::Digit0 => "0", Code::Digit1 => "1", Code::Digit2 => "2", Code::Digit3 => "3",
-        Code::Digit4 => "4", Code::Digit5 => "5", Code::Digit6 => "6", Code::Digit7 => "7",
-        Code::Digit8 => "8", Code::Digit9 => "9",
+        Code::KeyA => "a",
+        Code::KeyB => "b",
+        Code::KeyC => "c",
+        Code::KeyD => "d",
+        Code::KeyE => "e",
+        Code::KeyF => "f",
+        Code::KeyG => "g",
+        Code::KeyH => "h",
+        Code::KeyI => "i",
+        Code::KeyJ => "j",
+        Code::KeyK => "k",
+        Code::KeyL => "l",
+        Code::KeyM => "m",
+        Code::KeyN => "n",
+        Code::KeyO => "o",
+        Code::KeyP => "p",
+        Code::KeyQ => "q",
+        Code::KeyR => "r",
+        Code::KeyS => "s",
+        Code::KeyT => "t",
+        Code::KeyU => "u",
+        Code::KeyV => "v",
+        Code::KeyW => "w",
+        Code::KeyX => "x",
+        Code::KeyY => "y",
+        Code::KeyZ => "z",
+        Code::Digit0 => "0",
+        Code::Digit1 => "1",
+        Code::Digit2 => "2",
+        Code::Digit3 => "3",
+        Code::Digit4 => "4",
+        Code::Digit5 => "5",
+        Code::Digit6 => "6",
+        Code::Digit7 => "7",
+        Code::Digit8 => "8",
+        Code::Digit9 => "9",
         Code::Space => "space",
         Code::Enter => "enter",
         Code::Tab => "tab",
@@ -334,15 +405,24 @@ fn part_from_code(code: Code) -> String {
         Code::ArrowDown => "arrowdown",
         Code::ArrowLeft => "arrowleft",
         Code::ArrowRight => "arrowright",
-        Code::F1 => "f1", Code::F2 => "f2", Code::F3 => "f3", Code::F4 => "f4",
-        Code::F5 => "f5", Code::F6 => "f6", Code::F7 => "f7", Code::F8 => "f8",
-        Code::F9 => "f9", Code::F10 => "f10", Code::F11 => "f11", Code::F12 => "f12",
+        Code::F1 => "f1",
+        Code::F2 => "f2",
+        Code::F3 => "f3",
+        Code::F4 => "f4",
+        Code::F5 => "f5",
+        Code::F6 => "f6",
+        Code::F7 => "f7",
+        Code::F8 => "f8",
+        Code::F9 => "f9",
+        Code::F10 => "f10",
+        Code::F11 => "f11",
+        Code::F12 => "f12",
         _ => return String::new(),
     }
     .to_string()
 }
 
-/// Seed the three built-in shortcut ids on startup. The renderer overrides
+/// Seed the built-in shortcut ids on startup. The renderer overrides
 /// any of them via `shortcut_bind` later; this just guarantees the OS-level
 /// hot-keys are registered before the renderer has a chance to hydrate.
 pub fn seed_builtins<R: Runtime>(app: &AppHandle<R>, registry: &ShortcutRegistry) {
@@ -350,6 +430,7 @@ pub fn seed_builtins<R: Runtime>(app: &AppHandle<R>, registry: &ShortcutRegistry
         ("tray.show", "ctrl+shift+space"),
         ("tray.open-logs", "ctrl+shift+l"),
         ("tray.automation-kill", "ctrl+alt+k"),
+        ("selection.captureClipboard", "alt+shift+c"),
     ] {
         if let Err(e) = registry.bind(app, id, chord) {
             log::warn!("failed to seed built-in shortcut {id}={chord}: {e}");
@@ -405,10 +486,8 @@ mod tests {
             // Manually seed without going through `bind` to avoid needing
             // an AppHandle; conflict detection only reads the maps.
             let mut g = reg.inner.lock();
-            g.chord_to_id
-                .insert("ctrl+s".into(), "doc.save".into());
-            g.id_to_chord
-                .insert("doc.save".into(), "ctrl+s".into());
+            g.chord_to_id.insert("ctrl+s".into(), "doc.save".into());
+            g.id_to_chord.insert("doc.save".into(), "ctrl+s".into());
         }
         assert_eq!(reg.conflict_for("ctrl+s", "doc.save"), None);
         assert_eq!(

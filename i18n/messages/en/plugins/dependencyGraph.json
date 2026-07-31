@@ -1,0 +1,10 @@
+{
+  "conflictsTitle": "{count} conflicts",
+  "cyclesTitle": "{count} dependency cycles",
+  "loading": "Resolving dependencies…",
+  "missing": "missing",
+  "root": "root",
+  "title": "Dependency graph",
+  "unresolved": "Unresolved",
+  "warningsTitle": "{count} warnings"
+}

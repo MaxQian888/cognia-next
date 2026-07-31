@@ -20,7 +20,14 @@ jest.mock("next/navigation", () => ({
   usePathname: () => pathname,
 }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
+  createLogger: () => ({
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    child: jest.fn(),
+  }),
   loggers: {
     shell: {
       info: (...args: unknown[]) => logInfo(...args),
@@ -28,6 +35,13 @@ jest.mock("@/lib/logging", () => ({
       error: jest.fn(),
     },
     ui: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+    agent: {
+      debug: jest.fn(),
+      info: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn(),
+      child: () => ({ debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() }),
+    },
   },
 }))
 
@@ -76,7 +90,9 @@ jest.mock("@/hooks/desktop/use-menu-event-router", () => ({
   useMenuEventRouter: jest.fn(),
 }))
 jest.mock("@/components/ui/loading-states", () => ({
-  PageLoading: () => <div data-testid="page-loading" />,
+  PageLoading: ({ variant, allowReload }: { variant?: string; allowReload?: boolean }) => (
+    <div data-testid="page-loading" data-variant={variant} data-allow-reload={allowReload} />
+  ),
 }))
 
 const uiStateRef = {
@@ -85,6 +101,14 @@ const uiStateRef = {
 }
 jest.mock("@/stores/ui/ui-store", () => ({
   useUIStore: (selector: (s: typeof uiStateRef) => unknown) => selector(uiStateRef),
+}))
+
+const settingsStateRef: { settings: { sidebarSide?: "left" | "right" } | undefined } = {
+  settings: undefined,
+}
+jest.mock("@/stores/settings/settings-store", () => ({
+  useSettingsStore: (selector: (s: typeof settingsStateRef) => unknown) =>
+    selector(settingsStateRef),
 }))
 
 import { DesktopAppShell, isShellBypassRoute } from "./desktop-app-shell"
@@ -98,6 +122,7 @@ beforeEach(() => {
   platformValue = "web"
   uiStateRef.guildRailCollapsed = false
   uiStateRef.statusBarCollapsed = false
+  settingsStateRef.settings = undefined
 })
 
 test("renders TitleBar, StatusBar, GuildRail, CommandPalette, and resize edges", () => {
@@ -178,6 +203,8 @@ test("pre-hydration paint on an ordinary route shows a neutral loader (no chrome
   // Covers the boot/hydration gap with a neutral loader instead of a
   // half-painted shell or bare (empty) client children.
   expect(html).toContain("page-loading")
+  expect(html).toContain('data-variant="workspace"')
+  expect(html).toContain('data-allow-reload="true"')
   expect(html).not.toContain("route-content")
   expect(html).not.toContain("title-bar")
   expect(html).not.toContain("guild-rail-stub")
@@ -228,11 +255,19 @@ describe("isShellBypassRoute", () => {
     expect(isShellBypassRoute("/pair")).toBe(true)
     expect(isShellBypassRoute("/oauth")).toBe(true)
     expect(isShellBypassRoute("/canvas/join")).toBe(true)
+    // The transparent desktop-pet overlay + click popup routes must render
+    // full-bleed with no desktop chrome so the frameless windows stay transparent.
+    expect(isShellBypassRoute("/pet-overlay")).toBe(true)
+    expect(isShellBypassRoute("/island")).toBe(true)
+    expect(isShellBypassRoute("/pet-popup")).toBe(true)
+    expect(isShellBypassRoute("/selection-toolbar")).toBe(true)
+    expect(isShellBypassRoute("/selection-toolbar.html")).toBe(true)
   })
 
   test("matches nested bypass route", () => {
     expect(isShellBypassRoute("/share-target/abc")).toBe(true)
     expect(isShellBypassRoute("/canvas/join/room-123")).toBe(true)
+    expect(isShellBypassRoute("/pet-overlay/foo")).toBe(true)
   })
 
   test("does not match unrelated routes", () => {
@@ -274,5 +309,49 @@ describe("collapse toggles from ui-store", () => {
     )
     expect(screen.getByTestId("guild-rail-stub")).toBeInTheDocument()
     expect(screen.getByTestId("status-bar")).toBeInTheDocument()
+  })
+})
+
+describe("navigation rail placement", () => {
+  /** DOM order of the rail stub relative to the routed content. */
+  const railComesBeforeContent = () => {
+    const rail = screen.getByTestId("guild-rail-stub")
+    const content = screen.getByTestId("route-content")
+    // Node.DOCUMENT_POSITION_FOLLOWING — content comes after the rail.
+    return Boolean(rail.compareDocumentPosition(content) & Node.DOCUMENT_POSITION_FOLLOWING)
+  }
+
+  const renderShell = () =>
+    render(
+      <DesktopAppShell>
+        <div data-testid="route-content" />
+      </DesktopAppShell>
+    )
+
+  test("defaults to the leading edge", () => {
+    platformValue = "tauri"
+    renderShell()
+    expect(railComesBeforeContent()).toBe(true)
+  })
+
+  test("moves to the trailing edge when the setting says right", () => {
+    platformValue = "tauri"
+    settingsStateRef.settings = { sidebarSide: "right" }
+    renderShell()
+    expect(railComesBeforeContent()).toBe(false)
+  })
+
+  // The extension host bar appears only once a plugin registers a surface. The
+  // rail has to be outermost on whichever edge it takes, or every activation
+  // would slide it sideways.
+  test.each([
+    ["right", "lastElementChild"],
+    ["left", "firstElementChild"],
+  ] as const)("on the %s edge it is the row's %s", (side, position) => {
+    platformValue = "tauri"
+    settingsStateRef.settings = { sidebarSide: side }
+    renderShell()
+    const rail = screen.getByTestId("guild-rail-stub")
+    expect(rail.parentElement?.[position]).toBe(rail)
   })
 })

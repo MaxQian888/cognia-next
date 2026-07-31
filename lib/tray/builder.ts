@@ -12,9 +12,12 @@
 //   4. Strip render-only fields (`when`, `iconHint`, `hidden`) so the DTO
 //      matches the Rust shape exactly.
 
+import { buildAboutSection } from "./about-section"
 import { buildAllCommandsSubmenu } from "./all-commands"
+import { buildStatusSection } from "./status-section"
+import { buildUsageSection } from "./usage-section"
 import { evaluateWhen } from "./when"
-import type { TrayActionPayload, TrayMenuItem, TrayStateSnapshot } from "./types"
+import type { TrayActionPayload, TrayDisplayPrefs, TrayMenuItem, TrayStateSnapshot } from "./types"
 
 /** Minimal translator signature — compatible with what `useTranslations()`
  * returns from next-intl. Tests can pass a synthetic identity function. */
@@ -24,6 +27,12 @@ interface BuilderInput {
   items: TrayMenuItem[]
   t: TrayTranslator
   snapshot: TrayStateSnapshot
+  /**
+   * Display prefs gating the usage placeholder. Optional so existing callers
+   * and tests keep working — absent prefs fall back to "show when usage data
+   * exists" (`DEFAULT_TRAY_DISPLAY.showUsageInMenu` is `true`).
+   */
+  display?: Pick<TrayDisplayPrefs, "showUsageInMenu">
 }
 
 /** DTO shape mirrored on the Rust side in `src-tauri/src/tray/dto.rs`. */
@@ -35,14 +44,33 @@ export type TrayMenuItemDto =
       accelerator?: string
       payload: TrayActionPayload
       disabled?: boolean
+      checked?: boolean
     }
   | { kind: "separator"; id: string }
   | { kind: "submenu"; id: string; label: string; items: TrayMenuItemDto[] }
 
-export function buildTrayPayload({ items, t, snapshot }: BuilderInput): TrayMenuItemDto[] {
+/** Synthetic placeholder ids the builder expands from live state. */
+export const STATUS_PLACEHOLDER_ID = "tray.status"
+export const ABOUT_PLACEHOLDER_ID = "tray.about"
+export const USAGE_PLACEHOLDER_ID = "tray.usage"
+export const AUTOSTART_ITEM_ID = "tray.autostart"
+
+export function buildTrayPayload({ items, t, snapshot, display }: BuilderInput): TrayMenuItemDto[] {
   const out: TrayMenuItemDto[] = []
   for (const item of items) {
-    const built = transform(item, t, snapshot)
+    // The `tray.status` placeholder expands into *multiple* flat info rows at
+    // the top level (a submenu would bury the live state one click deep), so
+    // it is spliced here rather than returned as a single node by `transform`.
+    if (item.kind === "action" && item.id === STATUS_PLACEHOLDER_ID) {
+      if (!isHidden(item)) {
+        for (const row of buildStatusSection(snapshot)) {
+          const built = transform(row, t, snapshot, display)
+          if (built) out.push(built)
+        }
+      }
+      continue
+    }
+    const built = transform(item, t, snapshot, display)
     if (built) out.push(built)
   }
   return collapseAdjacentSeparators(out)
@@ -51,7 +79,8 @@ export function buildTrayPayload({ items, t, snapshot }: BuilderInput): TrayMenu
 function transform(
   item: TrayMenuItem,
   t: TrayTranslator,
-  snapshot: TrayStateSnapshot
+  snapshot: TrayStateSnapshot,
+  display?: BuilderInput["display"]
 ): TrayMenuItemDto | null {
   // `hidden` is the user's soft-hide toggle from the settings UI; `when` is
   // the state-driven predicate. Either suppresses the item.
@@ -70,10 +99,18 @@ function transform(
       let workingItems = item.items
       if (item.id === "tray.all-commands" && item.items.length === 0) {
         workingItems = buildAllCommandsSubmenu().items
+      } else if (item.id === ABOUT_PLACEHOLDER_ID && item.items.length === 0) {
+        workingItems = buildAboutSection(snapshot)
+      } else if (item.id === USAGE_PLACEHOLDER_ID && item.items.length === 0) {
+        // Usage section: gated on the display pref (default on) AND on live
+        // usage data being present — before the first refresh lands (or on
+        // web, or with every surface disabled) the submenu hides entirely.
+        if (display?.showUsageInMenu === false || !snapshot.usage) return null
+        workingItems = buildUsageSection(snapshot.usage)
       }
       const children: TrayMenuItemDto[] = []
       for (const child of workingItems) {
-        const built = transform(child, t, snapshot)
+        const built = transform(child, t, snapshot, display)
         if (built) children.push(built)
       }
       if (children.length === 0) return null
@@ -84,7 +121,11 @@ function transform(
         items: collapseAdjacentSeparators(children),
       }
     }
-    case "action":
+    case "action": {
+      // The autostart toggle's tick is state-driven, not stored in the
+      // layout — resolve it from the live snapshot so it always mirrors the
+      // real OS launch-at-login entry.
+      const checked = item.id === AUTOSTART_ITEM_ID ? snapshot.app.autostart : item.checked
       return {
         kind: "action",
         id: item.id,
@@ -92,7 +133,9 @@ function transform(
         accelerator: item.accelerator,
         payload: item.payload,
         disabled: item.disabled,
+        checked,
       }
+    }
   }
 }
 

@@ -1,34 +1,25 @@
 "use client"
 
 /**
- * Detail surface for a `/goal` (ADR-0013). Four tabs:
+ * Detail surface for a `/goal` (ADR-0019). Four tabs:
  *   - Overview   — status badge, objective, progress bars, last judge reason
- *   - Subgoals   — Phase 2 placeholder
+ *   - Subgoals   — LLM decomposition + checkable checklist (judge auto-marks steps)
  *   - Activity   — reverse-chrono event log from `chatGoalEvents`
  *   - Settings   — per-goal config knobs (maxTurns / maxTokens / etc.)
  *
- * Responsive (ADR-0019 Phase 3): a right-side Sheet on desktop, a bottom
- * Drawer on small screens. Both render the identical tab content.
+ * Responsive (ADR-0019 Phase 3): the Sheet-desktop / Drawer-mobile switch
+ * lives in the shared `ResponsiveDetailSheet`; the tab strip scrolls
+ * horizontally on narrow screens (44px touch targets) and snaps back to a
+ * 4-column grid from `md` up.
  */
 
+import { useState } from "react"
 import { useTranslations } from "next-intl"
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet"
-import {
-  Drawer,
-  DrawerContent,
-  DrawerDescription,
-  DrawerHeader,
-  DrawerTitle,
-} from "@/components/ui/drawer"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { useIsMobile } from "@/hooks/ui/use-mobile"
+import { Button } from "@/components/ui/button"
+import { ResponsiveDetailSheet } from "@/components/shared/responsive-detail-sheet"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
+import { resolveGoalAcceptance } from "@/lib/goal/acceptance"
 import type { Goal } from "@/types/goal"
 import { GoalOverviewTab } from "./tabs/overview-tab"
 import { GoalSubgoalsTab } from "./tabs/subgoals-tab"
@@ -41,10 +32,22 @@ interface Props {
   onOpenChange: (next: boolean) => void
 }
 
+const TAB_TRIGGER_CLASS = "min-h-11 shrink-0 md:min-h-0"
+
 export function GoalDetailSheet({ goal, open, onOpenChange }: Props) {
   const t = useTranslations("goal")
-  const isMobile = useIsMobile()
   const title = t("detailSheet.title", { status: t(`status.${goal.status}`) })
+  const [resolvingAcceptance, setResolvingAcceptance] = useState(false)
+
+  const resolveAcceptance = async (accepted: boolean) => {
+    if (resolvingAcceptance) return
+    setResolvingAcceptance(true)
+    try {
+      await resolveGoalAcceptance(goal.id, accepted)
+    } finally {
+      setResolvingAcceptance(false)
+    }
+  }
 
   // Plugin contribution row — e.g. "Copy summary", "Export". Conversation-
   // scoped context so contributions don't re-derive the goal identity.
@@ -56,64 +59,88 @@ export function GoalDetailSheet({ goal, open, onOpenChange }: Props) {
     />
   )
 
-  const tabs = (
-    <Tabs defaultValue="overview" className="mt-4 flex-1 overflow-y-auto px-4 pb-4">
-      <TabsList className="grid w-full grid-cols-4">
-        <TabsTrigger value="overview" data-testid="goal-tab-overview">
-          {t("detailSheet.tabs.overview")}
-        </TabsTrigger>
-        <TabsTrigger value="subgoals" data-testid="goal-tab-subgoals">
-          {t("detailSheet.tabs.subgoals")}
-        </TabsTrigger>
-        <TabsTrigger value="activity" data-testid="goal-tab-activity">
-          {t("detailSheet.tabs.activity")}
-        </TabsTrigger>
-        <TabsTrigger value="settings" data-testid="goal-tab-settings">
-          {t("detailSheet.tabs.settings")}
-        </TabsTrigger>
-      </TabsList>
-      <TabsContent value="overview" className="mt-4">
-        <GoalOverviewTab goal={goal} />
-      </TabsContent>
-      <TabsContent value="subgoals" className="mt-4">
-        <GoalSubgoalsTab goal={goal} />
-      </TabsContent>
-      <TabsContent value="activity" className="mt-4">
-        <GoalActivityTab goal={goal} />
-      </TabsContent>
-      <TabsContent value="settings" className="mt-4">
-        <GoalSettingsTab goal={goal} />
-      </TabsContent>
-    </Tabs>
-  )
-
-  if (isMobile) {
-    return (
-      <Drawer open={open} onOpenChange={onOpenChange}>
-        <DrawerContent className="max-h-[85vh]">
-          <DrawerHeader>
-            <DrawerTitle>{title}</DrawerTitle>
-            <DrawerDescription className="line-clamp-3 text-xs">
-              {goal.safeObjective}
-            </DrawerDescription>
-            {pluginActions}
-          </DrawerHeader>
-          {tabs}
-        </DrawerContent>
-      </Drawer>
-    )
-  }
-
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full max-w-md sm:max-w-lg">
-        <SheetHeader>
-          <SheetTitle>{title}</SheetTitle>
-          <SheetDescription className="line-clamp-3 text-xs">{goal.safeObjective}</SheetDescription>
-          {pluginActions}
-        </SheetHeader>
-        {tabs}
-      </SheetContent>
-    </Sheet>
+    <ResponsiveDetailSheet
+      open={open}
+      onOpenChange={onOpenChange}
+      title={title}
+      description={goal.safeObjective}
+      headerExtra={pluginActions}
+    >
+      {goal.status === "paused" && goal.awaitingAcceptance === true && (
+        // Acceptance gate banner: the judge declared the objective met, but
+        // `requireAcceptance` parked the goal for a human verdict.
+        <div
+          data-testid="goal-acceptance-banner"
+          className="mx-4 mt-3 space-y-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3"
+        >
+          <p className="text-sm font-medium">{t("acceptance.title")}</p>
+          <p className="text-xs text-muted-foreground">{t("acceptance.description")}</p>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              disabled={resolvingAcceptance}
+              onClick={() => void resolveAcceptance(true)}
+              data-testid="goal-acceptance-accept"
+            >
+              {t("acceptance.accept")}
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={resolvingAcceptance}
+              onClick={() => void resolveAcceptance(false)}
+              data-testid="goal-acceptance-request-changes"
+            >
+              {t("acceptance.requestChanges")}
+            </Button>
+          </div>
+        </div>
+      )}
+      <Tabs defaultValue="overview" className="mt-4 flex-1 overflow-y-auto px-4 pb-4">
+        <TabsList className="flex w-full justify-start overflow-x-auto md:grid md:grid-cols-4">
+          <TabsTrigger
+            value="overview"
+            className={TAB_TRIGGER_CLASS}
+            data-testid="goal-tab-overview"
+          >
+            {t("detailSheet.tabs.overview")}
+          </TabsTrigger>
+          <TabsTrigger
+            value="subgoals"
+            className={TAB_TRIGGER_CLASS}
+            data-testid="goal-tab-subgoals"
+          >
+            {t("detailSheet.tabs.subgoals")}
+          </TabsTrigger>
+          <TabsTrigger
+            value="activity"
+            className={TAB_TRIGGER_CLASS}
+            data-testid="goal-tab-activity"
+          >
+            {t("detailSheet.tabs.activity")}
+          </TabsTrigger>
+          <TabsTrigger
+            value="settings"
+            className={TAB_TRIGGER_CLASS}
+            data-testid="goal-tab-settings"
+          >
+            {t("detailSheet.tabs.settings")}
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="overview" className="mt-4">
+          <GoalOverviewTab goal={goal} />
+        </TabsContent>
+        <TabsContent value="subgoals" className="mt-4">
+          <GoalSubgoalsTab goal={goal} />
+        </TabsContent>
+        <TabsContent value="activity" className="mt-4">
+          <GoalActivityTab goal={goal} />
+        </TabsContent>
+        <TabsContent value="settings" className="mt-4">
+          <GoalSettingsTab goal={goal} />
+        </TabsContent>
+      </Tabs>
+    </ResponsiveDetailSheet>
   )
 }

@@ -23,7 +23,23 @@ import {
   EmptyMedia,
 } from "@/components/ui/empty"
 import { cn } from "@/lib/utils"
-import { Lightbulb, History as HistoryIcon, MessageSquare, Users, Play } from "lucide-react"
+import {
+  Bug,
+  Expand,
+  HelpCircle,
+  Lightbulb,
+  History as HistoryIcon,
+  Languages,
+  MessageSquare,
+  Minimize2,
+  Sparkles,
+  Wand2,
+  Users,
+  Play,
+  ListTree,
+  Eye,
+  InfoIcon,
+} from "lucide-react"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useCommentStore } from "@/stores/canvas/comment-store"
 import { useCanvasLayoutStore, type CanvasRightTab } from "@/stores/canvas/canvas-layout-store"
@@ -33,8 +49,36 @@ import { VersionHistoryPanel } from "./version-history-panel"
 import { CommentPanel } from "./comment-panel"
 import { CollaborationPanel } from "./collaboration-panel"
 import { CodeExecutionPanel } from "./code-execution-panel"
+import { CanvasOutlinePanel, countCanvasSymbols, parseCanvasSymbols } from "./canvas-outline-panel"
 import { useCanvasCodeExecution } from "@/hooks/canvas"
+import { useContextWorkbenchSurfaceFlag } from "@/hooks/context-workbench/use-context-workbench-surface-flag"
+import { useCanvasFeatureFlag } from "@/hooks/canvas/use-canvas-feature-flag"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
+import { ContextWorkbench } from "@/components/context-workbench/context-workbench"
+import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
+import type { ContextPanelDefinition, ContextResource } from "@/types/context-workbench"
+import { ResourceWorkbenchChatPanel } from "@/components/context-workbench/resource-workbench-chat-panel"
+import { CanvasReviewView } from "./canvas-review-view"
+import { CanvasPreviewPane } from "./canvas-preview-pane"
+import { ContextMetadataPanel } from "@/components/context-workbench/context-metadata-panel"
+import { ContextCommentsPanel } from "@/components/context-workbench/context-comments-panel"
+import { CanvasExportMenu } from "./canvas-export-menu"
+import { CanvasLanguageSelect } from "./canvas-language-select"
+import {
+  DocumentFormatToolbar,
+  type FormatAction,
+} from "@/components/document/document-format-toolbar"
+import { TRANSLATE_LANGUAGES } from "@/lib/canvas/constants"
+import type { CanvasActionType } from "@/lib/ai/generation/canvas-actions"
+import { useContextWorkbenchInstanceId } from "@/hooks/context-workbench/use-context-workbench-instance-id"
+import { resolveContextCapabilities } from "@/lib/context-workbench/capabilities"
+import { useContextCommentBadge } from "@/hooks/context-workbench/use-context-comment-badge"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 
 /**
  * Container-width threshold (driven by a ResizeObserver on the side-panel
@@ -46,7 +90,398 @@ import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
  */
 export const CANVAS_SIDE_PANELS_ICON_ONLY_BREAKPOINT = 280
 
-export function CanvasSidePanels() {
+export interface CanvasSidePanelsProps {
+  mobile?: boolean
+  /**
+   * The shell has shrunk this column to the activity rail. Only the Workbench
+   * surface honours it — the legacy rail predates the persistent minibar and
+   * exists solely as a one-release rollback path.
+   */
+  railOnly?: boolean
+}
+
+export function CanvasSidePanels({ mobile = false, railOnly = false }: CanvasSidePanelsProps) {
+  const enabled = useContextWorkbenchSurfaceFlag("canvas")
+  return enabled ? (
+    <CanvasContextWorkbench mobile={mobile} railOnly={railOnly} />
+  ) : (
+    <LegacyCanvasSidePanels />
+  )
+}
+
+function CanvasContextWorkbench({ mobile, railOnly }: { mobile: boolean; railOnly: boolean }) {
+  const tWorkbench = useTranslations("contextWorkbench")
+  const workbenchInstanceId = useContextWorkbenchInstanceId("canvas")
+  const activeId = useArtifactStore((state) => state.activeCanvasId)
+  const documents = useArtifactStore((state) => state.canvasDocuments)
+  const getCanvasVersions = useArtifactStore((state) => state.getCanvasVersions)
+  const pendingReview = useArtifactStore((state) =>
+    activeId ? (state.pendingReviews[activeId] ?? null) : null
+  )
+  const hadPendingReview = useRef(false)
+  const activeRightTab = useCanvasLayoutStore((state) => state.activeRightTab)
+  const setRightCollapsed = useCanvasLayoutStore((state) => state.setRightCollapsed)
+  const setMobileRightOpen = useCanvasLayoutStore((state) => state.setMobileRightOpen)
+  // `resetLayout` had lived on the store with no caller since it was written,
+  // so a canvas shell dragged to an unusable split had no way back. Same entry
+  // point as the chat dock's, in the workbench header's layout menu.
+  const resetCanvasLayout = useCanvasLayoutStore((state) => state.resetLayout)
+  const navigatePanel = useContextWorkbenchStore((state) => state.navigatePanel)
+  const smartReveal = useContextWorkbenchStore((state) => state.smartReveal)
+  const layouts = useContextWorkbenchStore((state) => state.layouts)
+  const document = activeId ? documents[activeId] : undefined
+  const unresolvedCommentCount = useContextCommentBadge("canvas-document", activeId)
+  const scopeKey = activeId ? `${workbenchInstanceId}::canvas:${activeId}` : null
+  const [selectionState, setSelectionState] = useState<
+    { documentId: string; start: number; end: number } | undefined
+  >()
+  const textSelection = useMemo(
+    () =>
+      selectionState?.documentId === activeId
+        ? { start: selectionState.start, end: selectionState.end }
+        : undefined,
+    [activeId, selectionState]
+  )
+
+  useEffect(() => {
+    const handleSelection = (event: Event) => {
+      const detail = (event as CustomEvent<{ documentId: string; start: number; end: number }>)
+        .detail
+      if (!activeId || detail.documentId !== activeId) return
+      setSelectionState(detail.start === detail.end ? undefined : detail)
+    }
+    window.addEventListener("canvas-context-selection", handleSelection)
+    return () => window.removeEventListener("canvas-context-selection", handleSelection)
+  }, [activeId])
+
+  useEffect(() => {
+    if (!scopeKey || layouts[scopeKey]?.activePanelId) return
+    navigatePanel(scopeKey, activeRightTab, "narrow")
+  }, [activeRightTab, layouts, navigatePanel, scopeKey])
+
+  useEffect(() => {
+    const appeared = !hadPendingReview.current && pendingReview !== null
+    hadPendingReview.current = pendingReview !== null
+    if (appeared && scopeKey) {
+      smartReveal(scopeKey, "proposal-review", "wide")
+    }
+  }, [pendingReview, scopeKey, smartReveal])
+
+  const panels = useMemo<ContextPanelDefinition[]>(
+    () => [
+      {
+        id: "ai-actions",
+        activity: "ai",
+        labelKey: "contextWorkbench.aiActions",
+        icon: Wand2,
+        order: 1,
+        appliesTo: (resource) => resource.kind === "canvas-document",
+        retention: "stateful",
+        renderer: () => <CanvasWorkbenchActions />,
+      },
+      {
+        id: "resource-chat",
+        activity: "ai",
+        labelKey: "contextWorkbench.resourceChat",
+        icon: Lightbulb,
+        order: 5,
+        appliesTo: (resource) => resource.kind === "canvas-document",
+        retention: "stateful",
+        requiresChatScope: true,
+        renderer: () => (
+          <ResourceWorkbenchChatPanel getResourceContext={() => document?.content ?? ""} />
+        ),
+      },
+      {
+        id: "suggestions",
+        activity: "ai",
+        labelKey: "canvas.panels.suggestions",
+        icon: Lightbulb,
+        order: 10,
+        appliesTo: (resource) => resource.kind === "canvas-document",
+        retention: "stateful",
+        getBadge: () =>
+          (document?.aiSuggestions ?? []).filter((suggestion) => suggestion.status === "pending")
+            .length,
+        renderer: () => (activeId ? <SuggestionsHost documentId={activeId} /> : null),
+      },
+      {
+        id: "comments",
+        activity: "comments",
+        labelKey: "canvas.panels.comments",
+        icon: MessageSquare,
+        order: 20,
+        appliesTo: (resource) => resource.kind === "canvas-document",
+        retention: "stateful",
+        getBadge: () => unresolvedCommentCount,
+        renderer: () =>
+          activeId && document ? (
+            <ContextCommentsPanel
+              resource={{
+                kind: "canvas-document",
+                id: activeId,
+                projectId: document.projectId,
+              }}
+              revision={document.currentVersionId ?? document.updatedAt.toISOString()}
+              anchor={
+                textSelection
+                  ? {
+                      kind: "text-range",
+                      start: textSelection.start,
+                      end: textSelection.end,
+                      revision: document.currentVersionId ?? document.updatedAt.toISOString(),
+                    }
+                  : undefined
+              }
+            />
+          ) : null,
+      },
+      {
+        id: "collaboration",
+        activity: "comments",
+        labelKey: "canvas.panels.collaboration",
+        icon: Users,
+        order: 30,
+        appliesTo: (resource) => resource.kind === "canvas-document",
+        retention: "stateful",
+        renderer: () => (activeId ? <CollaborationHost documentId={activeId} /> : null),
+      },
+      {
+        id: "properties",
+        activity: "inspect",
+        labelKey: "contextWorkbench.metadata.canvasTitle",
+        icon: InfoIcon,
+        order: 35,
+        appliesTo: (resource) => resource.kind === "canvas-document",
+        retention: "stateful",
+        renderer: () =>
+          document ? (
+            <div className="flex h-full min-h-0 flex-col">
+              <div className="flex items-center border-b p-2">
+                <CanvasLanguageSelect documentId={activeId} />
+              </div>
+              {document.type === "text" ? (
+                <div className="border-b p-2">
+                  <DocumentFormatToolbar
+                    onAction={(action) =>
+                      window.dispatchEvent(
+                        new CustomEvent<{ action: FormatAction }>("canvas-format", {
+                          detail: { action },
+                        })
+                      )
+                    }
+                    className="border-0 bg-transparent p-0 justify-start"
+                  />
+                </div>
+              ) : null}
+              <ContextMetadataPanel
+                title={tWorkbench("metadata.canvasTitle")}
+                fields={[
+                  { label: tWorkbench("metadata.language"), value: document.language },
+                  { label: tWorkbench("metadata.documentType"), value: document.type },
+                  {
+                    label: tWorkbench("metadata.saveState"),
+                    value: document.editorContext?.saveState ?? tWorkbench("metadata.unknown"),
+                  },
+                  {
+                    label: tWorkbench("metadata.revision"),
+                    value: document.currentVersionId ?? tWorkbench("metadata.unknown"),
+                  },
+                  {
+                    label: tWorkbench("metadata.updatedAt"),
+                    value: document.updatedAt.toLocaleString(),
+                  },
+                ]}
+              />
+            </div>
+          ) : null,
+      },
+      {
+        id: "outline",
+        activity: "inspect",
+        labelKey: "canvas.panels.outline",
+        icon: ListTree,
+        order: 40,
+        appliesTo: (resource) => resource.kind === "canvas-document",
+        retention: "stateful",
+        getBadge: () => countCanvasSymbols(parseCanvasSymbols(document)),
+        renderer: () => (activeId ? <CanvasOutlinePanel documentId={activeId} /> : null),
+      },
+      {
+        id: "proposal-review",
+        activity: "review",
+        labelKey: "contextWorkbench.proposalReview",
+        icon: HistoryIcon,
+        order: 45,
+        appliesTo: (resource) => resource.kind === "canvas-document",
+        retention: "stateful",
+        preferredMode: "wide",
+        getBadge: () => (pendingReview ? 1 : 0),
+        renderer: () =>
+          activeId ? <CanvasReviewView documentId={activeId} panelMode="desktop" /> : null,
+      },
+      {
+        id: "history",
+        activity: "review",
+        labelKey: "canvas.panels.history",
+        icon: HistoryIcon,
+        order: 44,
+        appliesTo: (resource) => resource.kind === "canvas-document",
+        retention: "stateful",
+        preferredMode: "wide",
+        getBadge: () => (activeId ? getCanvasVersions(activeId).length : 0),
+        renderer: () => (activeId ? <HistoryHost documentId={activeId} /> : null),
+      },
+      {
+        id: "preview",
+        activity: "preview-run",
+        labelKey: "canvas.previewAction",
+        icon: Eye,
+        order: 50,
+        appliesTo: (resource) => resource.kind === "canvas-document",
+        retention: "stateful",
+        preferredMode: "wide",
+        renderer: () =>
+          activeId ? (
+            <div className="flex h-full min-h-0 flex-col">
+              <div className="flex h-10 shrink-0 items-center justify-end border-b px-2">
+                <CanvasExportMenu documentId={activeId} />
+              </div>
+              <CanvasPreviewPane documentId={activeId} className="min-h-0 flex-1" />
+            </div>
+          ) : null,
+      },
+      {
+        id: "execution",
+        activity: "preview-run",
+        labelKey: "canvas.panels.execution",
+        icon: Play,
+        order: 60,
+        appliesTo: (resource) => resource.kind === "canvas-document",
+        retention: "stateful",
+        preferredMode: "wide",
+        renderer: () => (activeId ? <ExecutionHost documentId={activeId} /> : null),
+      },
+    ],
+    [
+      activeId,
+      document,
+      getCanvasVersions,
+      pendingReview,
+      tWorkbench,
+      textSelection,
+      unresolvedCommentCount,
+    ]
+  )
+
+  if (!activeId || !document) return <LegacyCanvasSidePanels />
+
+  const resource: ContextResource = {
+    kind: "canvas-document",
+    documentId: activeId,
+    revision: document.currentVersionId ?? document.updatedAt.toISOString(),
+    selection: textSelection
+      ? { kind: "canvas", blockIds: [], text: { kind: "text", ...textSelection } }
+      : undefined,
+    capabilities: resolveContextCapabilities({
+      kind: "canvas-document",
+      runnable: document.type === "code",
+    }),
+  }
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <PluginExtensionSlot
+        point="canvas.sidebar"
+        className="flex flex-col gap-1 border-b bg-muted/20 px-2 py-1 empty:hidden"
+      />
+      <ContextWorkbench
+        workbenchInstanceId={workbenchInstanceId}
+        resource={resource}
+        panels={panels}
+        onCollapse={() => (mobile ? setMobileRightOpen(false) : setRightCollapsed(true))}
+        onEnsureVisible={() => (mobile ? setMobileRightOpen(true) : setRightCollapsed(false))}
+        railOnly={mobile ? false : railOnly}
+        onResetLayout={resetCanvasLayout}
+        placement={mobile ? "mobile-sheet" : "adjacent-editor"}
+        manageOwnWidth={false}
+        className="w-full flex-1"
+      />
+    </div>
+  )
+}
+
+function CanvasWorkbenchActions() {
+  const t = useTranslations("canvas.actions")
+  const dispatchAction = (type: CanvasActionType, targetLanguage?: string) => {
+    window.dispatchEvent(
+      new CustomEvent("canvas-action", {
+        detail: { type, targetLanguage, proposalFirst: true },
+      })
+    )
+  }
+
+  return (
+    <div className="grid gap-2 p-3">
+      <Button variant="outline" className="justify-start" onClick={() => dispatchAction("review")}>
+        <Wand2 className="mr-2 size-4" />
+        {t("review")}
+      </Button>
+      <Button variant="outline" className="justify-start" onClick={() => dispatchAction("fix")}>
+        <Bug className="mr-2 size-4" />
+        {t("fix")}
+      </Button>
+      <Button variant="outline" className="justify-start" onClick={() => dispatchAction("improve")}>
+        <Sparkles className="mr-2 size-4" />
+        {t("improve")}
+      </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline" className="justify-start">
+            <Languages className="mr-2 size-4" />
+            {t("translate")}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start">
+          {TRANSLATE_LANGUAGES.map((language) => (
+            <DropdownMenuItem
+              key={language.value}
+              onClick={() => dispatchAction("translate", language.value)}
+            >
+              {language.label}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Button variant="outline" className="justify-start" onClick={() => dispatchAction("explain")}>
+        <HelpCircle className="mr-2 size-4" />
+        {t("explain")}
+      </Button>
+      <Button
+        variant="outline"
+        className="justify-start"
+        onClick={() => dispatchAction("simplify")}
+      >
+        <Minimize2 className="mr-2 size-4" />
+        {t("simplify")}
+      </Button>
+      <Button variant="outline" className="justify-start" onClick={() => dispatchAction("expand")}>
+        <Expand className="mr-2 size-4" />
+        {t("expand")}
+      </Button>
+      <Button
+        variant="outline"
+        className="justify-start"
+        onClick={() => window.dispatchEvent(new CustomEvent("canvas-action-suggest"))}
+      >
+        <Lightbulb className="mr-2 size-4" />
+        {t("suggest", { default: "Suggest" })}
+      </Button>
+    </div>
+  )
+}
+
+function LegacyCanvasSidePanels() {
   const t = useTranslations("canvas.panels")
   const activeId = useArtifactStore((s) => s.activeCanvasId)
   const activeRightTab = useCanvasLayoutStore((s) => s.activeRightTab)
@@ -82,6 +517,7 @@ export function CanvasSidePanels() {
       comments: comments.filter((c: { resolvedAt?: unknown }) => c.resolvedAt == null).length,
       collaboration: 0,
       execution: 0,
+      outline: countCanvasSymbols(parseCanvasSymbols(doc)),
     }
   }, [activeId, documents, getCanvasVersions, getCommentsForDocument])
 
@@ -157,6 +593,13 @@ export function CanvasSidePanels() {
             iconOnly={iconOnly}
             badge={tabBadges.execution}
           />
+          <PanelTab
+            value="outline"
+            icon={<ListTree className="size-3.5" />}
+            label={t("outline", { default: "Outline" })}
+            iconOnly={iconOnly}
+            badge={tabBadges.outline}
+          />
         </TabsList>
 
         <AnimatePresence mode="wait" initial={false}>
@@ -219,6 +662,15 @@ export function CanvasSidePanels() {
               {...tabContentMotionProps}
             >
               <ExecutionHost documentId={activeId} />
+            </motion.div>
+          </TabsContent>
+          <TabsContent key="outline" value="outline" className="m-0 flex-1 min-h-0 overflow-hidden">
+            <motion.div
+              key="outline"
+              data-testid="canvas-tab-motion-outline"
+              {...tabContentMotionProps}
+            >
+              <CanvasOutlinePanel documentId={activeId} />
             </motion.div>
           </TabsContent>
         </AnimatePresence>
@@ -296,7 +748,7 @@ function SuggestionsHost({ documentId }: { documentId: string }) {
   }
   return (
     <div className="flex-1 min-h-0 overflow-y-auto">
-      <SuggestionsPanel documentId={documentId} suggestions={suggestions} />
+      <SuggestionsPanel documentId={documentId} suggestions={suggestions} proposalFirst />
     </div>
   )
 }
@@ -422,6 +874,9 @@ function CommentsHost({ documentId }: { documentId: string }) {
  */
 function CollaborationHost({ documentId }: { documentId: string }) {
   const t = useTranslations("canvas.panels")
+  // Feature-flag gate: `canvas.collaboration.v1` (env / localStorage override).
+  // When disabled, the panel shows the hint but no "open collaboration" entry.
+  const collaborationEnabled = useCanvasFeatureFlag("canvas.collaboration.v1")
   const documents = useArtifactStore((s) => s.canvasDocuments)
   const doc = documents[documentId]
   return (
@@ -432,18 +887,20 @@ function CollaborationHost({ documentId }: { documentId: string }) {
         </EmptyMedia>
         <EmptyDescription className="text-xs">{t("collabHint")}</EmptyDescription>
       </EmptyHeader>
-      <EmptyContent>
-        <CollaborationPanel
-          documentId={documentId}
-          documentContent={doc?.content ?? ""}
-          trigger={
-            <Button size="sm" variant="outline" className="text-xs">
-              <Users className="mr-2 size-3.5" />
-              {t("openCollab", { default: "Open collaboration" })}
-            </Button>
-          }
-        />
-      </EmptyContent>
+      {collaborationEnabled && (
+        <EmptyContent>
+          <CollaborationPanel
+            documentId={documentId}
+            documentContent={doc?.content ?? ""}
+            trigger={
+              <Button size="sm" variant="outline" className="text-xs">
+                <Users className="mr-2 size-3.5" />
+                {t("openCollab", { default: "Open collaboration" })}
+              </Button>
+            }
+          />
+        </EmptyContent>
+      )}
     </Empty>
   )
 }

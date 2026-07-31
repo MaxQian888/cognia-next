@@ -125,7 +125,7 @@ The batch path `invokePluginApiBatch` calls `plugin_api_batch_invoke` (`:142`).
 
 ### B. ipc.ts — cross-plugin RPC
 
-The `IPCMessage` envelope (`ipc.ts:63`) is `{id, type, channel, senderId, targetId?, payload, timestamp, replyTo?}`, where `type` is one of four kinds: `request | response | broadcast | event`. A `pendingRequests` `Map<requestId, ResponseHandler>` tracks in-flight calls. `sendAndWait` (`:231`) registers under `requestId` with a timeout timer and an `AbortSignal` (`:257-272`); `respond` (`:298`) resolves by `requestId` (`:306`).
+The `IPCMessage` envelope (`ipc.ts:63`) is `{id, type, channel, senderId, targetId?, payload, timestamp, replyTo?}`, where `type` is one of four kinds: `request | response | broadcast | event`. Request/response RPC is served entirely by `call()` / `expose()` (below) — a one-way `send()` and a fire-and-forget `broadcast()` round out the surface. (A `sendAndWait`/`respond` request-reply twin once lived here but was removed: the reply path was structurally dead — `respond` was never on the plugin-facing `PluginIPCAPI` and the receiver never got the `requestId` to correlate a reply, so every façade-level `sendAndWait` hung to timeout. `call()` + `expose()` is the supported request-response path.)
 
 `createIPCAPI(pluginId).call` (`:807`) routes to `PluginIPC.call` (`:465`), which looks up `exposedMethods.get(targetPluginId).get(methodName)` (`:472-480`), guards a per-`(target::method)` circuit breaker (`:482-485`, `getBreaker` `:544`), races `withTimeout(handler)` against abort (`:518-520`), records success / failure (`:524` / `:534`), and emits `recordSilentFailure` once on a `closed → open` transition (`:565-575`):
 

@@ -6,12 +6,22 @@ import type { PluginContext } from "@/types/plugin"
 
 jest.mock("@/lib/tauri", () => ({ isTauri: () => false }))
 
-jest.mock("@/lib/chat/slash-command-registry", () => ({
+jest.mock("@/lib/slash-commands/registry", () => ({
   registerSlashCommand: jest.fn(),
   unregisterCommandsByPlugin: jest.fn(),
 }))
 
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/chat/slash-command-registry"
+// Virtual double for the desktop clipboard read path.
+const mockTauriReadText = jest.fn(async () => "")
+jest.mock(
+  "@tauri-apps/plugin-clipboard-manager",
+  () => ({
+    readText: (...a: unknown[]) => (mockTauriReadText as (...x: unknown[]) => unknown)(...a),
+  }),
+  { virtual: true }
+)
+
+import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
 import clipboardHistory from "./index"
 
 const registerMock = registerSlashCommand as jest.Mock
@@ -69,7 +79,7 @@ describe("clipboard-history (built-in)", () => {
       "clipboard_history_clear",
       "clipboard_history_list",
     ])
-    expect(registerMock).toHaveBeenCalledWith(expect.objectContaining({ id: "clipboard-history" }))
+    expect(registerMock).not.toHaveBeenCalled()
   })
 
   it("clipboard_history_add stores entries in the secure buffer", async () => {
@@ -116,10 +126,65 @@ describe("clipboard-history (built-in)", () => {
     expect(secureStore.get("buffer")).toEqual([])
   })
 
-  it("deactivate calls unregisterCommandsByPlugin", async () => {
+  it("leaves command teardown to the manager", async () => {
     const { ctx } = makeCtx()
     await clipboardHistory.activate?.(ctx)
     await clipboardHistory.deactivate?.(ctx)
-    expect(unregisterMock).toHaveBeenCalledWith("cognia-clipboard-history")
+    expect(unregisterMock).not.toHaveBeenCalled()
+  })
+
+  it("the declared command reports empty and formatted buffers", async () => {
+    const { ctx } = makeCtx()
+    const showToast = jest.fn()
+    ;(ctx as { ui?: unknown }).ui = { showToast }
+    const hooks = (await clipboardHistory.activate?.(ctx)) as unknown as {
+      onCommand?: (c: string, a: string[]) => Promise<boolean>
+    }
+    expect(await hooks?.onCommand?.("not-mine", [])).toBe(false)
+    expect(await hooks?.onCommand?.("clipboard-history", [])).toBe(true)
+    expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/empty/i), "info")
+  })
+
+  it("a successful Tauri poll persists the captured clipboard text", async () => {
+    jest.useFakeTimers()
+    mockTauriReadText.mockResolvedValue("desktop copied text")
+    const { ctx, secureStore } = makeCtx({ pollIntervalMs: 10, privacyMode: false })
+    ;(ctx as { capabilities?: { tauri: boolean } }).capabilities = { tauri: true }
+    try {
+      await clipboardHistory.activate?.(ctx)
+      await jest.advanceTimersByTimeAsync(10)
+      const buffer = secureStore.get("buffer") as Array<{ text: string }> | undefined
+      expect(buffer?.some((e) => e.text === "desktop copied text")).toBe(true)
+    } finally {
+      await clipboardHistory.deactivate?.(ctx)
+      jest.useRealTimers()
+    }
+  })
+
+  it("logs (does not crash) when a background poll cycle fails", async () => {
+    jest.useFakeTimers()
+    Object.defineProperty(navigator, "clipboard", {
+      value: { readText: async () => "captured text" },
+      configurable: true,
+    })
+    const warn = jest.fn()
+    const { ctx } = makeCtx({ pollIntervalMs: 10, privacyMode: false })
+    ctx.logger = { info: jest.fn(), warn, error: jest.fn() } as never
+    // Force the persist step to reject so the detached interval body hits the
+    // guard instead of producing an unhandled rejection.
+    ;(ctx.storage as { setSecure: (k: string, v: unknown) => Promise<void> }).setSecure =
+      async () => {
+        throw new Error("secure store unavailable")
+      }
+    try {
+      await clipboardHistory.activate?.(ctx)
+      await jest.advanceTimersByTimeAsync(10)
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringMatching(/poll failed: secure store unavailable/)
+      )
+    } finally {
+      await clipboardHistory.deactivate?.(ctx)
+      jest.useRealTimers()
+    }
   })
 })

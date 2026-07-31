@@ -4,7 +4,7 @@
 
 import { RendererTimingDriver } from "./renderer-driver"
 
-jest.mock("@/lib/logging", () => {
+jest.mock("@cognia/logging", () => {
   const stub = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }
   return { loggers: { scheduler: stub }, createLogger: () => stub }
 })

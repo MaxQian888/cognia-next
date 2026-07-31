@@ -1,9 +1,15 @@
 /**
  * WeChat Official Account access-token management.
  *
- *   GET https://api.weixin.qq.com/cgi-bin/token
- *       ?grant_type=client_credential&appid=<appId>&secret=<appSecret>
+ *   POST https://api.weixin.qq.com/cgi-bin/stable_token
+ *     { grant_type: "client_credential", appid, secret }
  *     → { access_token, expires_in } | { errcode, errmsg }
+ *
+ * Uses the stable_token endpoint (the recommended replacement for the legacy
+ * GET /cgi-bin/token) with the default `force_refresh: false` semantics —
+ * repeated calls return the same token until it nears expiry, so a crashed
+ * peer cannot invalidate our cached token.
+ * Doc: https://developers.weixin.qq.com/doc/offiaccount/Basic_Information/getStableAccessToken.html
  *
  * Tokens are app-wide and short-lived (~2h). Cached per (appId, appSecret)
  * and refreshed a minute before expiry. Used to call the 客服 message API for
@@ -31,8 +37,14 @@ export async function getWechatOaAccessToken(
   const cached = cache.get(key)
   if (cached && cached.expiresAt > now + 60_000) return cached.token
 
-  const url = `${apiBase}/cgi-bin/token?grant_type=client_credential&appid=${encodeURIComponent(appId)}&secret=${encodeURIComponent(appSecret)}`
-  const resp = await connectorsHttpRequest({ url, method: "GET" })
+  const resp = await connectorsHttpRequest({
+    url: `${apiBase}/cgi-bin/stable_token`,
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    // force_refresh defaults to false server-side: WeChat returns the current
+    // valid token instead of minting (and invalidating) a new one.
+    body: JSON.stringify({ grant_type: "client_credential", appid: appId, secret: appSecret }),
+  })
   let parsed: { access_token?: string; expires_in?: number; errcode?: number; errmsg?: string }
   try {
     parsed = JSON.parse(resp.body)
@@ -52,6 +64,18 @@ export async function getWechatOaAccessToken(
   return entry.token
 }
 
-export function clearWechatOaTokenCache(appId: string, appSecret: string): void {
-  cache.delete(`${appId}:${appSecret}`)
+/**
+ * Drop cached token(s) so the next `getWechatOaAccessToken` re-fetches.
+ *
+ * With both arguments, clears the single (appId, appSecret) entry. Without
+ * arguments, clears every entry — used by the adapter's send-path auth
+ * recovery and `refreshCredentials()`, which only hold an opaque token
+ * resolver and cannot name the credential pair.
+ */
+export function clearWechatOaTokenCache(appId?: string, appSecret?: string): void {
+  if (appId !== undefined && appSecret !== undefined) {
+    cache.delete(`${appId}:${appSecret}`)
+  } else {
+    cache.clear()
+  }
 }

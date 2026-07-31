@@ -129,6 +129,7 @@ describe("PerformanceDashboard", () => {
         },
         topSpans: [],
         systemMemory: null,
+        managed: [],
       },
     })
     render(<PerformanceDashboard />)

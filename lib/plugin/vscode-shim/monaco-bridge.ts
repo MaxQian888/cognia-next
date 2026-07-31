@@ -39,6 +39,7 @@ import {
   vscodeFoldingRangeToMonaco,
   vscodeHoverToMonaco,
   vscodeInlayHintToMonaco,
+  vscodeInlineCompletionResultToMonaco,
   vscodeLocationsToMonaco,
   vscodeSelectionRangeToMonaco,
   vscodeSemanticTokensToMonaco,
@@ -52,6 +53,7 @@ import {
   type VscodeFoldingRange,
   type VscodeHover,
   type VscodeInlayHint,
+  type VscodeInlineCompletionResult,
   type VscodeLocation,
   type VscodeRange as AdapterVscodeRange,
   type VscodeSelectionRange,
@@ -119,13 +121,14 @@ export interface MonacoDecorationOptions {
 }
 
 export interface MonacoCompletionItem {
-  label: string
+  label: string | { label: string; detail?: string; description?: string }
   /**
    * Monaco's numeric `CompletionItemKind` enum value (`Method = 0`,
    * `Function = 1`, ...). The `lsp-protocol-adapter` translates VS Code's
    * 1..25 enum into Monaco's enum before items reach this shape.
    */
   kind?: number
+  tags?: number[]
   detail?: string
   documentation?: string
   insertText: string
@@ -135,9 +138,13 @@ export interface MonacoCompletionItem {
    * VS Code `insertTextFormat` translation.
    */
   insertTextRules?: number
-  range?: MonacoRange
+  range?: MonacoRange | { insert: MonacoRange; replace: MonacoRange }
   filterText?: string
   sortText?: string
+  preselect?: boolean
+  commitCharacters?: string[]
+  additionalTextEdits?: MonacoTextEdit[]
+  command?: { id: string; title: string; arguments?: unknown[] }
 }
 
 export interface MonacoHover {
@@ -831,12 +838,12 @@ export function registerInlineCompletionProvider(req: InlineCompletionProviderRe
   const disposable = monacoApi!.languages.registerInlineCompletionsProvider(req.selector, {
     triggerCharacters: req.triggerCharacters,
     provideInlineCompletions: async (model, position) => {
-      const result = await dispatchRpc!<{ items: MonacoUnknownArray } | null>(
+      const result = await dispatchRpc!<VscodeInlineCompletionResult | null>(
         req.extensionId,
         "provideInlineCompletionItems",
         { token, uri: model.uri, position: monacoPositionToVscode(position) }
       )
-      return result ?? null
+      return vscodeInlineCompletionResultToMonaco(result)
     },
     freeInlineCompletions: () => {
       // No-op: cognia doesn't pool inline completion result objects.

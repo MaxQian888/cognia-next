@@ -10,15 +10,26 @@ jest.mock("@/lib/tauri", () => ({
   isCapacitor: () => mockIsCapacitor,
 }))
 
+import { __resetRoutingForTests, setActiveRemoteTransport } from "@/lib/tauri/transport-routing"
+import type { Transport } from "@/lib/tauri/transport-types"
 import {
   selectTerminalTransport,
   selectTerminalTransportChain,
   terminalAvailable,
 } from "./pick-transport"
 
+const activeRemoteFake: Transport = {
+  call: (async () => undefined) as Transport["call"],
+  subscribe: () => () => {},
+}
+
 beforeEach(() => {
   mockIsTauri = false
   mockIsCapacitor = false
+  __resetRoutingForTests()
+})
+afterEach(() => {
+  __resetRoutingForTests()
 })
 
 describe("selectTerminalTransport", () => {
@@ -65,12 +76,33 @@ describe("selectTerminalTransportChain", () => {
     expect(selectTerminalTransportChain()).toEqual(["tauri-channel"])
   })
 
-  it("returns ws on Capacitor (webrtc follow-up will join once wired)", () => {
+  it("tries LAN first and WebRTC second on Capacitor", () => {
     mockIsCapacitor = true
-    expect(selectTerminalTransportChain()).toEqual(["ws"])
+    expect(selectTerminalTransportChain()).toEqual(["ws", "webrtc"])
   })
 
   it("returns an empty chain in plain browser", () => {
     expect(selectTerminalTransportChain()).toEqual([])
+  })
+})
+
+describe("remote host active (ADR-0082)", () => {
+  it("selectTerminalTransport returns ws on desktop when a remote host is active", () => {
+    mockIsTauri = true
+    setActiveRemoteTransport(activeRemoteFake)
+    expect(selectTerminalTransport()).toBe("ws")
+  })
+
+  it("tries the active remote host over LAN then WebRTC", () => {
+    mockIsTauri = true
+    setActiveRemoteTransport(activeRemoteFake)
+    expect(selectTerminalTransportChain()).toEqual(["ws", "webrtc"])
+  })
+
+  it("reverts to tauri-channel once the remote host is cleared", () => {
+    mockIsTauri = true
+    setActiveRemoteTransport(activeRemoteFake)
+    setActiveRemoteTransport(null)
+    expect(selectTerminalTransport()).toBe("tauri-channel")
   })
 })

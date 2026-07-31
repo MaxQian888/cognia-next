@@ -12,10 +12,21 @@ import { z } from "zod"
 import { registerBuiltInSkill } from "../registry"
 import type { BuiltInSkill, BuiltInSkillMutation } from "../types"
 import type { BuiltInSkillImAccess } from "../types"
-import { argsToFlags, buildConfirmSurface, runLarkCli } from "./_helpers"
+import { argsToFlags, buildConfirmSurface, larkAdapterIdFromCtx, runLarkCli } from "./_helpers"
 
 const FAMILY = "lark.wiki"
 const PLATFORMS = ["lark"] as const
+
+// Shared, described params — serialized to the model via manifest.ts, so the
+// `.describe()` text (and the discovery chain for each token) is what it reads.
+const spaceIdParam = z
+  .string()
+  .min(1)
+  .describe("Wiki space id (a numeric string). Obtain it from lark.wiki.search_nodes.")
+const nodeTokenParam = z
+  .string()
+  .min(1)
+  .describe('Wiki node token (looks like "wikcn…"). Obtain it from lark.wiki.search_nodes.')
 
 function mk<S extends z.ZodTypeAny>(input: {
   id: string
@@ -46,6 +57,7 @@ function mk<S extends z.ZodTypeAny>(input: {
       runLarkCli({
         args: [...input.subcommand, ...argsToFlags(args as Record<string, unknown>)],
         confirmed: ctx.hitlBypass === true,
+        adapterId: larkAdapterIdFromCtx(ctx),
       }),
   }
   if (input.mutation !== "read") {
@@ -73,8 +85,11 @@ registerBuiltInSkill(
       "zh-CN": "按关键词搜索 Lark 知识库节点。",
     },
     schema: z.object({
-      query: z.string().min(1),
-      spaceId: z.string().optional(),
+      query: z.string().min(1).describe("Keywords to search wiki node titles/content for."),
+      spaceId: z
+        .string()
+        .optional()
+        .describe("Optional wiki space id to scope the search to one space."),
     }),
     subcommand: ["wiki", "+search-nodes"],
     mutation: "read",
@@ -92,8 +107,8 @@ registerBuiltInSkill(
       "zh-CN": "读取 Lark 知识库节点内容（解析至底层文档）。",
     },
     schema: z.object({
-      spaceId: z.string().min(1),
-      nodeToken: z.string().min(1),
+      spaceId: spaceIdParam,
+      nodeToken: nodeTokenParam,
     }),
     subcommand: ["wiki", "+read-node"],
     mutation: "read",
@@ -111,10 +126,16 @@ registerBuiltInSkill(
       "zh-CN": "在 Lark 知识空间中新建节点（默认为 docx），可指定父节点。",
     },
     schema: z.object({
-      spaceId: z.string().min(1),
-      title: z.string().min(1),
-      parentNodeToken: z.string().optional(),
-      objType: z.enum(["docx", "sheet", "bitable"]).optional(),
+      spaceId: spaceIdParam,
+      title: z.string().min(1).describe("Title of the new node."),
+      parentNodeToken: z
+        .string()
+        .optional()
+        .describe("Optional parent node token; omit to create at the space root."),
+      objType: z
+        .enum(["docx", "sheet", "bitable"])
+        .optional()
+        .describe("Document type to create (default docx)."),
     }),
     subcommand: ["wiki", "+create-node"],
     mutation: "write",
@@ -139,9 +160,12 @@ registerBuiltInSkill(
       "zh-CN": "在同一知识空间内将节点移动到另一个父节点下。",
     },
     schema: z.object({
-      spaceId: z.string().min(1),
-      nodeToken: z.string().min(1),
-      newParentNodeToken: z.string().min(1),
+      spaceId: spaceIdParam,
+      nodeToken: nodeTokenParam,
+      newParentNodeToken: z
+        .string()
+        .min(1)
+        .describe("Token of the destination parent node (same space)."),
     }),
     subcommand: ["wiki", "+move-node"],
     mutation: "write",

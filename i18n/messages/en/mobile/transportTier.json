@@ -1,0 +1,12 @@
+{
+  "offline": "Offline",
+  "offlineDescription": "Neither transport is reachable. Outgoing calls queue locally and retry.",
+  "rtcDirect": "WebRTC (direct)",
+  "rtcDirectDescription": "Direct DataChannel between this phone and the desktop. Lowest latency.",
+  "rtcRelay": "WebRTC (TURN relay)",
+  "rtcRelayDescription": "DataChannel routed through a TURN server because direct NAT traversal failed.",
+  "wsLan": "LAN (HTTPS)",
+  "wsLanDescription": "Same network as the desktop. No tunnel hop.",
+  "wsTunnel": "Tunnel (HTTPS)",
+  "wsTunnelDescription": "Public cloudflared tunnel to the desktop. Adds one hop."
+}

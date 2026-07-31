@@ -1,4 +1,6 @@
-import { SIDEBAR_NAV_META, DEFAULT_SIDEBAR_LAYOUT } from "./sidebar"
+import { SIDEBAR_NAV_META, DEFAULT_SIDEBAR_LAYOUT, DEFAULT_SIDEBAR_SIDE } from "./sidebar"
+import enMessages from "@/i18n/messages/en.json"
+import zhCnMessages from "@/i18n/messages/zh-CN.json"
 
 describe("sidebar nav meta", () => {
   it("has unique ids", () => {
@@ -23,13 +25,51 @@ describe("sidebar nav meta", () => {
     }
   })
 
-  it("default pinned equals the feature ids in catalog order", () => {
+  it.each([
+    ["en", enMessages],
+    ["zh-CN", zhCnMessages],
+  ])("defines every dynamic rail label in %s", (_locale, messages) => {
+    const labels = messages.desktop.guildRail as Record<string, unknown>
+    for (const item of SIDEBAR_NAV_META) {
+      expect(labels[item.i18nKey]).toEqual(expect.any(String))
+    }
+  })
+
+  it("pins the three work-arrives-here entries, in rail order", () => {
+    expect(DEFAULT_SIDEBAR_LAYOUT.pinned).toEqual(["inbox", "workflows", "agent-teams"])
+  })
+
+  it("leaves the remaining features to the More popover", () => {
+    // Pinning every `feature` (the old default) put 11 icons on a 64px rail.
+    // These configure-once destinations are one More click away instead.
     const featureIds = SIDEBAR_NAV_META.filter((m) => m.group === "feature").map((m) => m.id)
-    expect(DEFAULT_SIDEBAR_LAYOUT.pinned).toEqual(featureIds)
+    const unpinnedFeatures = featureIds.filter((id) => !DEFAULT_SIDEBAR_LAYOUT.pinned.includes(id))
+    expect(unpinnedFeatures.sort()).toEqual([
+      "browser",
+      "discover",
+      "goals",
+      "pet",
+      "plugins",
+      "scheduler",
+      "skills",
+      "templates",
+      "twin",
+    ])
+    // Unpinned is not hidden — `resolveSidebarLayout` derives overflow from
+    // catalog − pinned − hidden, so every one of them is still reachable.
+    expect(DEFAULT_SIDEBAR_LAYOUT.hidden).toEqual([])
   })
 
   it("default hides nothing", () => {
     expect(DEFAULT_SIDEBAR_LAYOUT.hidden).toEqual([])
+  })
+
+  it("ships the rail on the left edge", () => {
+    // The right edge shipped as the default briefly and read as disorienting —
+    // this is the Discord/Slack arrangement every muscle memory was built on.
+    // Still a preference (`sidebarSide`), just not where the rail lands by
+    // default.
+    expect(DEFAULT_SIDEBAR_SIDE).toBe("left")
   })
 
   it("every default-pinned id exists in the catalog", () => {
@@ -39,8 +79,10 @@ describe("sidebar nav meta", () => {
     }
   })
 
-  it("marks only the two known desktop-only auxiliary items", () => {
+  it("marks only the known desktop-only items", () => {
     const desktopOnly = SIDEBAR_NAV_META.filter((m) => m.desktopOnly).map((m) => m.id)
-    expect(desktopOnly.sort()).toEqual(["performance", "source-control"])
+    // `browser` is a feature-group entry rather than an auxiliary one, but the
+    // embedded webview only exists in the Tauri shell, so it is desktop-only too.
+    expect(desktopOnly.sort()).toEqual(["browser", "performance", "source-control"])
   })
 })

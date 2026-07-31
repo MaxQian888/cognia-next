@@ -11,8 +11,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { listCharacters } from "@/lib/db/characters"
-import { loggers } from "@/lib/logging"
-import type { Character } from "@/lib/claude/types"
+import { loggers } from "@cognia/logging"
+import type { Character } from "@cognia/agent-config-types"
 import { useSettingsStore } from "@/stores/settings"
 import { useClientLiveQuery } from "@/hooks/data"
 import { setActiveAccount } from "@/lib/subscription/core/transport"

@@ -47,6 +47,13 @@ jest.mock("next/navigation", () => ({
 
 jest.mock("@/lib/db/schema", () => ({ getDb: jest.fn() }))
 
+// Active workspace is read for conversation scoping (Dexie v86); keep it null
+// here so every fixture conversation renders (the query body is mocked anyway).
+jest.mock("@/stores/project/project-store", () => ({
+  useProjectStore: <T,>(selector: (s: { activeProjectId: string | null }) => T): T =>
+    selector({ activeProjectId: null }),
+}))
+
 // Platform badge / unread pill are implementation details; render simple stubs.
 jest.mock("./platform-badge", () => ({
   PlatformBadge: ({ platform }: { platform: string }) => <span data-testid={`badge-${platform}`} />,
@@ -57,7 +64,18 @@ jest.mock("./unread-pill", () => ({
     count > 0 ? <span data-testid="unread-pill">{count}</span> : null,
 }))
 
-jest.mock("@/components/ui/scroll-area")
+jest.mock("@/components/ui/scroll-area", () => ({
+  ScrollArea: ({ children, className }: { children: React.ReactNode; className?: string }) => (
+    <div data-slot="scroll-area" className={className}>
+      {children}
+    </div>
+  ),
+}))
+// The four filter chips live in a DropdownMenu now (they were permanently
+// visible Toggles). The shared manual mock renders menu content
+// unconditionally and fires `onCheckedChange` on click, so the chip test ids
+// stay reachable.
+jest.mock("@/components/ui/dropdown-menu")
 
 // SidebarTrigger requires a SidebarProvider ancestor that isn't mounted in
 // these unit tests. Stub it to a plain button so the trigger surface can still
@@ -78,7 +96,7 @@ jest.mock("@/components/ui/sidebar", () => ({
 // Build fake enriched data (mimic what useLiveQuery returns)
 // ---------------------------------------------------------------------------
 
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import type { ConversationOverrideRow } from "@/lib/db/connector-types"
 
 interface EnrichedSession {
@@ -151,9 +169,12 @@ describe("ConversationList", () => {
       { session: makeSession("s1", "ck1", 1000), override: undefined, unreadCount: 0 },
       { session: makeSession("s2", "ck2", 2000), override: undefined, unreadCount: 0 },
     ]
-    render(<ConversationList />)
+    const { container } = render(<ConversationList />)
     expect(screen.getByTestId("conversation-row-ck1")).toBeInTheDocument()
     expect(screen.getByTestId("conversation-row-ck2")).toBeInTheDocument()
+    expect(container.querySelector('[data-slot="scroll-area"]')).toHaveClass(
+      "[&_[data-slot=scroll-area-scrollbar]]:hidden"
+    )
   })
 
   it("pinned conversations appear before unread conversations", () => {
@@ -190,7 +211,7 @@ describe("ConversationList", () => {
     ]
     render(<ConversationList />)
     fireEvent.click(screen.getByTestId("conversation-row-button-ck-nav"))
-    expect(mockPush).toHaveBeenCalledWith(`/inbox/c/${encodeURIComponent("ck-nav")}`)
+    expect(mockPush).toHaveBeenCalledWith(`/inbox/c?key=${encodeURIComponent("ck-nav")}`)
   })
 
   it("archived conversations are hidden by default but shown after toggle", () => {
@@ -313,5 +334,34 @@ describe("ConversationList", () => {
     const resetBtn = screen.getByTestId("conversation-filter-reset")
     fireEvent.click(resetBtn)
     expect(screen.getByTestId("conversation-row-ck-x")).toBeInTheDocument()
+  })
+
+  it("resolved conversations are hidden by default but shown after toggle", () => {
+    mockEnriched = [
+      {
+        session: makeSession("s1", "ck-resolved", 1000),
+        override: makeOverride("ck-resolved", { status: "resolved" }),
+        unreadCount: 0,
+      },
+    ]
+    render(<ConversationList />)
+    expect(screen.queryByTestId("conversation-row-ck-resolved")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("conversation-list-toggle-resolved"))
+    expect(screen.getByTestId("conversation-row-ck-resolved")).toBeInTheDocument()
+  })
+
+  it("pending filter chip shows only pending conversations", () => {
+    mockEnriched = [
+      { session: makeSession("s1", "ck-plain", 1000), override: undefined, unreadCount: 0 },
+      {
+        session: makeSession("s2", "ck-pending", 2000),
+        override: makeOverride("ck-pending", { status: "pending" }),
+        unreadCount: 0,
+      },
+    ]
+    render(<ConversationList />)
+    fireEvent.click(screen.getByTestId("conversation-filter-pending"))
+    expect(screen.queryByTestId("conversation-row-ck-plain")).not.toBeInTheDocument()
+    expect(screen.getByTestId("conversation-row-ck-pending")).toBeInTheDocument()
   })
 })

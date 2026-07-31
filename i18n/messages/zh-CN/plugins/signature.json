@@ -1,0 +1,10 @@
+{
+  "failed": "签名失败",
+  "failedTooltip": "签名验证失败——启用前请仔细核查。",
+  "unknown": "未知",
+  "unknownTooltip": "无法判定签名状态。",
+  "unverified": "未签名",
+  "unverifiedTooltip": "此插件未携带已验证的发布者签名。",
+  "verified": "已验证",
+  "verifiedTooltip": "发布者签名已验证。"
+}

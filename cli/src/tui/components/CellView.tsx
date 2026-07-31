@@ -1,0 +1,542 @@
+/**
+ * Renders one transcript cell. A thin switch over the cell kinds — the
+ * substance (markdown tokenizing, diff formatting, tool summaries, todo parsing)
+ * lives in the pure `markdown/*` and `format/*` modules.
+ */
+import React from "react"
+import { Box, Text } from "ink"
+import Spinner from "ink-spinner"
+
+import { Markdown } from "./Markdown"
+import { DiffView } from "./DiffView"
+import { useTheme } from "../theme/context"
+import { useRenderPrefs } from "../render/context"
+import { useElapsedSeconds } from "../render/use-elapsed-seconds"
+import { diffFilePath, formatEditDiff } from "../markdown/diff"
+import { langFromPath } from "../markdown/highlight"
+import { renderResultLines, resultToText, toolResultLang } from "../format/result-render"
+import {
+  extractResultImages,
+  elideImageData,
+  formatBytes,
+  type ExtractedImage,
+} from "../format/result-images"
+import { buildImageEscape, detectGraphics } from "../format/terminal-graphics"
+import {
+  diffStat,
+  isDiffTool,
+  resultCountLabel,
+  resultPreview,
+  summarizeResult,
+  summarizeToolCall,
+  toolDisplayName,
+  toolFileLine,
+  toolFilePath,
+  toolKind,
+} from "../format/tools"
+import { isSubagentTool, subagentName, subagentTask } from "../format/subagent"
+import { planStats, planTitle } from "../runtime/plan"
+import { fileUri } from "../runtime/editor"
+import { osc8Link, supportsHyperlinks } from "../markdown/hyperlink"
+import path from "node:path"
+import type {
+  AssistantCell,
+  Cell,
+  BashCell,
+  ErrorCell,
+  NoticeCell,
+  PlanCell,
+  ThinkingCell,
+  Todo,
+  TodoCell,
+  ToolCell,
+  UserCell,
+} from "../state/types"
+
+function UserView({ cell }: { cell: UserCell }) {
+  const theme = useTheme()
+  return (
+    <Box>
+      <Text color={theme.userPrompt} bold>
+        ›{" "}
+      </Text>
+      <Text>{cell.text}</Text>
+    </Box>
+  )
+}
+
+function AssistantView({ cell }: { cell: AssistantCell }) {
+  return <Markdown raw={cell.raw} />
+}
+
+function ThinkingView({ cell }: { cell: ThinkingCell }) {
+  // `∴` (therefore) marks reasoning the way Claude Code / OpenCode do; the body
+  // is rendered as markdown (reusing {@link Markdown}) so a model's structured
+  // reasoning — lists, code, emphasis — reads properly when expanded.
+  const theme = useTheme()
+  return (
+    <Box flexDirection="column">
+      <Text color={theme.thinking} dimColor>
+        {cell.collapsed ? "▸" : "▾"} ∴ thinking
+      </Text>
+      {!cell.collapsed && (
+        <Box flexDirection="column" paddingLeft={2}>
+          <Markdown raw={cell.text} />
+        </Box>
+      )}
+    </Box>
+  )
+}
+
+const STATUS_ICON: Record<ToolCell["status"], string> = {
+  running: "⏳",
+  done: "✓",
+  error: "✗",
+}
+
+/** The leading status glyph for a tool/subagent card: an animated spinner while
+ * running (in the live region), else the static ✓/✗ icon. */
+function StatusGlyph({ status, color }: { status: ToolCell["status"]; color: string }) {
+  if (status === "running") {
+    return (
+      <Text color={color}>
+        <Spinner type="dots" />{" "}
+      </Text>
+    )
+  }
+  return <Text color={color}>{STATUS_ICON[status]} </Text>
+}
+
+/** A dim "· Ns" elapsed-time hint, shown only while a tool is running. */
+function ElapsedHint({ status }: { status: ToolCell["status"] }) {
+  const theme = useTheme()
+  const elapsed = useElapsedSeconds(status === "running")
+  if (status !== "running" || elapsed <= 0) return null
+  return (
+    <Text color={theme.muted} dimColor>
+      {" "}
+      · {elapsed}s
+    </Text>
+  )
+}
+
+/** "[mcp]" / "[plugin]" namespace badge; builtins get nothing. */
+function ToolBadge({ toolName }: { toolName: string }) {
+  const theme = useTheme()
+  const kind = toolKind(toolName)
+  if (kind === "builtin") return null
+  return (
+    <Text color={kind === "mcp" ? theme.toolMcp : theme.toolPlugin} dimColor>
+      [{kind}]{" "}
+    </Text>
+  )
+}
+
+/**
+ * Wrap a tool card's summary in an OSC-8 hyperlink to the file it references, so
+ * a terminal click opens the editor. Returns the plain summary unchanged when
+ * the tool has no file path or the terminal can't render hyperlinks (no escape
+ * bytes leak). VS Code's integrated terminal opens `vscode://file/…:line`; other
+ * terminals get a `file://` URL handled by the OS.
+ */
+function linkifyToolSummary(cell: ToolCell, summary: string): string {
+  if (!summary) return summary
+  const filePath = toolFilePath(cell.toolName, cell.input)
+  if (!filePath || !supportsHyperlinks(process.env)) return summary
+  const abs = path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd(), filePath)
+  const vscodeTerm = (process.env.TERM_PROGRAM ?? "").toLowerCase() === "vscode"
+  const line = toolFileLine(cell.toolName, cell.input)
+  return osc8Link(fileUri(abs, line, vscodeTerm ? "vscode" : "generic"), summary)
+}
+
+function ToolView({ cell }: { cell: ToolCell }) {
+  const theme = useTheme()
+  const STATUS_COLOR: Record<ToolCell["status"], string> = {
+    running: theme.statusRunning,
+    done: theme.statusDone,
+    error: theme.statusError,
+  }
+  const summary = summarizeToolCall(cell.toolName, cell.input)
+  // Make the file path a clickable OSC-8 hyperlink so a Ctrl/Cmd-click opens it
+  // in the editor (vscode://file inside a VS Code terminal, else file://). Only
+  // on terminals with confirmed OSC-8 support — the link bytes are zero-width, so
+  // the displayed text + column math are unchanged.
+  const summaryDisplay = linkifyToolSummary(cell, summary)
+  const diff = isDiffTool(cell.toolName) ? formatEditDiff(cell.toolName, cell.input) : []
+  const diffLang = diff.length > 0 ? langFromPath(diffFilePath(cell.input) ?? "") : undefined
+  const stat = diffStat(cell.toolName, cell.input)
+  // Result magnitude for the collapsed-card hint — only meaningful once a
+  // (non-diff) result has landed and the card is still collapsed.
+  const size =
+    cell.collapsed && diff.length === 0 && cell.result != null
+      ? summarizeResult(cell.result)
+      : { lines: 0, bytes: 0 }
+  // A tool-specific count ("12 matches", "3 files") reads better than a raw line
+  // count for search-shaped tools; falls back to the line count otherwise.
+  const countLabel =
+    cell.collapsed && diff.length === 0 && cell.result != null
+      ? resultCountLabel(cell.toolName, cell.result)
+      : undefined
+  // An errored, collapsed tool shows a one-line error preview in the header so
+  // the failure is visible without expanding the card.
+  const errorPreview =
+    cell.collapsed && cell.status === "error" && cell.result != null
+      ? resultPreview(cell.result)
+      : ""
+  return (
+    <Box flexDirection="column">
+      <Box>
+        <StatusGlyph status={cell.status} color={STATUS_COLOR[cell.status]} />
+        <ToolBadge toolName={cell.toolName} />
+        {/* Label from the protocol when there is one, canonical name otherwise —
+            `cell.toolName` still drives every formatter above. */}
+        <Text bold>{cell.displayTitle ?? toolDisplayName(cell.toolName)}</Text>
+        {summary ? <Text color={theme.muted}> {summaryDisplay}</Text> : null}
+        {stat.added > 0 ? <Text color={theme.diffAdded}> +{stat.added}</Text> : null}
+        {stat.removed > 0 ? <Text color={theme.diffRemoved}> -{stat.removed}</Text> : null}
+        <ElapsedHint status={cell.status} />
+        {errorPreview ? (
+          <Text color={theme.danger} dimColor>
+            {" "}
+            · {errorPreview}
+          </Text>
+        ) : countLabel ? (
+          <Text color={theme.muted} dimColor>
+            {" "}
+            · {countLabel}
+          </Text>
+        ) : size.lines > 0 ? (
+          <Text color={theme.muted} dimColor>
+            {" "}
+            · {size.lines} line{size.lines === 1 ? "" : "s"}
+          </Text>
+        ) : null}
+        {cell.collapsed && cell.result != null ? (
+          <Text color={theme.accent} dimColor>
+            {" "}
+            ▸ expand: /inspect
+          </Text>
+        ) : cell.collapsed ? (
+          <Text color={theme.muted} dimColor>
+            {" "}
+            ▸
+          </Text>
+        ) : null}
+      </Box>
+      {diff.length > 0 && <DiffView diff={diff} lang={diffLang} />}
+      {!cell.collapsed && diff.length === 0 && cell.result != null && (
+        <ToolResult result={cell.result} lang={toolResultLang(cell.toolName, cell.input)} />
+      )}
+    </Box>
+  )
+}
+
+/**
+ * Expanded tool result = any inline images (rendered as graphics) plus the
+ * textual body with image base64 elided, so an image result no longer floods
+ * the transcript with a base64 wall.
+ */
+function ToolResult({ result, lang }: { result: unknown; lang?: string }) {
+  const images = extractResultImages(result)
+  if (images.length === 0) return <ResultBody result={result} lang={lang} />
+  return (
+    <Box flexDirection="column">
+      <ToolImages images={images} />
+      <ResultBody result={elideImageData(result)} lang={lang} />
+    </Box>
+  )
+}
+
+/**
+ * Renders the image blocks pulled out of a tool result. On a graphics-capable
+ * terminal (iTerm2 / kitty / WezTerm) each image is emitted as an inline escape
+ * sequence — the transcript is written once (`<Static>`), so the bytes reach the
+ * terminal verbatim. Elsewhere it degrades to a one-line placeholder so the user
+ * at least knows an image came back (instead of a base64 wall).
+ */
+function ToolImages({ images }: { images: ExtractedImage[] }) {
+  const theme = useTheme()
+  const protocol = detectGraphics(process.env)
+  return (
+    <Box flexDirection="column">
+      {images.map((img, i) => {
+        const seq =
+          protocol === "none"
+            ? null
+            : buildImageEscape(protocol, Buffer.from(img.data, "base64"), `image-${i}`)
+        if (seq) return <Text key={i}>{seq}</Text>
+        return (
+          <Text key={i} color={theme.muted} dimColor>
+            🖼 image ({img.mediaType}, {formatBytes(img.bytes)}) — inline display needs
+            iTerm2/kitty/WezTerm
+          </Text>
+        )
+      })}
+    </Box>
+  )
+}
+
+/**
+ * Renders an expanded tool/file result: syntax-highlighted (per render prefs +
+ * the detected `lang`), optionally line-numbered, line-capped. A very large
+ * result (over `pagerThresholdLines`) collapses to a short preview plus a
+ * "open in pager" hint instead of flooding the transcript.
+ */
+function ResultBody({ result, lang }: { result: unknown; lang?: string }) {
+  const theme = useTheme()
+  const prefs = useRenderPrefs()
+  const text = resultToText(result)
+  if (!text) return null
+
+  const totalLines = text.split("\n").length
+  const colored = prefs.syntaxHighlightInline && Boolean(lang)
+  const tooBig = totalLines > prefs.pagerThresholdLines
+  const maxLines = tooBig ? Math.min(prefs.toolResultMaxLines, 20) : prefs.toolResultMaxLines
+
+  const rendered = renderResultLines(text, {
+    lang,
+    highlight: prefs.syntaxHighlightInline,
+    lineNumbers: prefs.fileLineNumbers,
+    palette: theme,
+    maxLines,
+  })
+
+  return (
+    <Box flexDirection="column">
+      {rendered.lines.map((line, i) =>
+        colored ? (
+          <Text key={i}>{line}</Text>
+        ) : (
+          <Text key={i} color={theme.muted}>
+            {line}
+          </Text>
+        )
+      )}
+      {tooBig ? (
+        <Text color={theme.warning} dimColor>
+          {`… ${totalLines} lines total — open full output: /expand`}
+        </Text>
+      ) : rendered.hiddenLines > 0 ? (
+        <Text color={theme.warning} dimColor>
+          {`… +${rendered.hiddenLines} more line${rendered.hiddenLines === 1 ? "" : "s"} hidden — /expand`}
+        </Text>
+      ) : null}
+    </Box>
+  )
+}
+
+const SUBAGENT_STATUS_LABEL: Record<ToolCell["status"], string> = {
+  running: "running",
+  done: "done",
+  error: "failed",
+}
+
+/**
+ * A sub-agent dispatch (`task` / `dispatch_agent` / `agent`) rendered as a
+ * first-class, inline-indented unit — a `◆` marker, the agent's name, the task
+ * it was handed, a status badge, and (when expanded) its reply. The data all
+ * rides the normal {@link ToolCell} pipeline; this view just frames it like a
+ * delegated agent instead of an opaque tool card.
+ */
+function SubagentView({ cell }: { cell: ToolCell }) {
+  const theme = useTheme()
+  const STATUS_COLOR: Record<ToolCell["status"], string> = {
+    running: theme.statusRunning,
+    done: theme.statusDone,
+    error: theme.statusError,
+  }
+  const name = subagentName(cell.input)
+  const task = subagentTask(cell.input)
+  const size =
+    cell.collapsed && cell.result != null ? summarizeResult(cell.result) : { lines: 0, bytes: 0 }
+  const errorPreview =
+    cell.collapsed && cell.status === "error" && cell.result != null
+      ? resultPreview(cell.result)
+      : ""
+  return (
+    <Box flexDirection="column">
+      <Box>
+        <StatusGlyph status={cell.status} color={STATUS_COLOR[cell.status]} />
+        <Text color={theme.accent} bold>
+          ◆ {name}
+        </Text>
+        <Text color={theme.muted} dimColor>
+          {" "}
+          subagent · {SUBAGENT_STATUS_LABEL[cell.status]}
+        </Text>
+        <ElapsedHint status={cell.status} />
+        {errorPreview ? (
+          <Text color={theme.danger} dimColor>
+            {" "}
+            · {errorPreview}
+          </Text>
+        ) : size.lines > 0 ? (
+          <Text color={theme.muted} dimColor>
+            {" "}
+            · {size.lines} line{size.lines === 1 ? "" : "s"}
+          </Text>
+        ) : null}
+        {cell.collapsed && cell.result != null ? (
+          <Text color={theme.accent} dimColor>
+            {" "}
+            ▸ expand: /inspect
+          </Text>
+        ) : cell.collapsed ? (
+          <Text color={theme.muted} dimColor>
+            {" "}
+            ▸
+          </Text>
+        ) : null}
+      </Box>
+      {task ? (
+        <Box paddingLeft={2}>
+          <Text color={theme.muted}>{task}</Text>
+        </Box>
+      ) : null}
+      {!cell.collapsed && cell.result != null && (
+        <Box paddingLeft={2}>
+          <ToolResult result={cell.result} />
+        </Box>
+      )}
+    </Box>
+  )
+}
+
+const TODO_MARK: Record<Todo["status"], string> = {
+  pending: "☐",
+  in_progress: "▣",
+  completed: "☑",
+}
+
+function TodoView({ cell }: { cell: TodoCell }) {
+  const theme = useTheme()
+  return (
+    <Box flexDirection="column">
+      <Text bold color={theme.accent}>
+        Todos
+      </Text>
+      {cell.todos.map((todo, i) => (
+        <Text
+          key={i}
+          color={
+            todo.status === "completed"
+              ? theme.statusDone
+              : todo.status === "in_progress"
+                ? theme.statusRunning
+                : undefined
+          }
+          strikethrough={todo.status === "completed"}
+        >
+          {TODO_MARK[todo.status]} {todo.content}
+        </Text>
+      ))}
+    </Box>
+  )
+}
+
+/** A plan-mode proposal, framed and labelled so it reads as a distinct artifact
+ * the user is meant to review and approve (vs. an ordinary reply). Compact by
+ * design: the full plan renders as a scrollable body inside the approval overlay
+ * (see `PlanApprovalOverlay`), so this transcript cell is just a reference line —
+ * the persistent full text stays reachable via `/plan`. */
+function PlanView({ cell }: { cell: PlanCell }) {
+  const theme = useTheme()
+  const { steps, lines } = planStats(cell.raw)
+  const title = planTitle(cell.raw)
+  const size = steps > 0 ? `${steps} step${steps === 1 ? "" : "s"}` : `${lines} lines`
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor={theme.border} paddingX={1}>
+      <Text color={theme.accent} bold>
+        📋 Plan ready for review
+      </Text>
+      <Text color={theme.muted} dimColor>
+        {`${title} · ${size} · review & approve below · full text via /plan`}
+      </Text>
+    </Box>
+  )
+}
+
+function ErrorView({ cell }: { cell: ErrorCell }) {
+  const theme = useTheme()
+  // A classified error carries a remediation hint — render it dim on a second
+  // line under the message so the fix is right there (not just the raw fault).
+  if (cell.hint) {
+    return (
+      <Box flexDirection="column">
+        <Text color={theme.danger}>✗ {cell.message}</Text>
+        <Text color={theme.muted} dimColor>
+          {"  ↳ "}
+          {cell.hint}
+        </Text>
+      </Box>
+    )
+  }
+  return <Text color={theme.danger}>✗ {cell.message}</Text>
+}
+
+function NoticeView({ cell }: { cell: NoticeCell }) {
+  const theme = useTheme()
+  return (
+    <Text color={theme.muted} dimColor>
+      • {cell.message}
+    </Text>
+  )
+}
+
+function BashView({ cell }: { cell: BashCell }) {
+  const theme = useTheme()
+  const color =
+    cell.status === "error"
+      ? theme.statusError
+      : cell.status === "running"
+        ? theme.statusRunning
+        : theme.muted
+  return (
+    <Box flexDirection="column">
+      <Text>
+        <Text color={theme.secondary}>! </Text>
+        <Text bold>{cell.command}</Text>
+        {cell.status === "running" ? (
+          <Text color={theme.statusRunning}> {cell.background ? "(background) …" : "…"}</Text>
+        ) : null}
+      </Text>
+      {cell.output ? (
+        <Text color={color} dimColor>
+          {cell.output}
+        </Text>
+      ) : null}
+      {cell.status === "running" ? (
+        <Text color={theme.muted} dimColor>
+          {cell.background
+            ? "/bashes to view · kill · foreground"
+            : "Ctrl+C kill · Ctrl+B background"}
+        </Text>
+      ) : null}
+    </Box>
+  )
+}
+
+export function CellView({ cell }: { cell: Cell }) {
+  switch (cell.kind) {
+    case "user":
+      return <UserView cell={cell} />
+    case "assistant":
+      return <AssistantView cell={cell} />
+    case "thinking":
+      return <ThinkingView cell={cell} />
+    case "tool":
+      return isSubagentTool(cell.toolName) ? <SubagentView cell={cell} /> : <ToolView cell={cell} />
+    case "todo":
+      return <TodoView cell={cell} />
+    case "plan":
+      return <PlanView cell={cell} />
+    case "error":
+      return <ErrorView cell={cell} />
+    case "notice":
+      return <NoticeView cell={cell} />
+    case "bash":
+      return <BashView cell={cell} />
+    default:
+      return null
+  }
+}

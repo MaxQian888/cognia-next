@@ -28,7 +28,12 @@ function createBus() {
   return { impl, trigger }
 }
 
-const noopHandlers = () => ({ onOpen: jest.fn(), onClose: jest.fn(), onEvent: jest.fn() })
+const noopHandlers = () => ({
+  onOpen: jest.fn(),
+  onClose: jest.fn(),
+  onEvent: jest.fn(),
+  onConnectFailed: jest.fn(),
+})
 
 beforeEach(() => {
   mockListen.mockReset()
@@ -159,6 +164,61 @@ describe("createForwardWsTransport", () => {
     await expect(transport.send({ action: "x", echo: "e3", params: {} })).rejects.toThrow(
       /not connected/
     )
+
+    await transport.stop()
+  })
+
+  it("reports consecutive connect failures via onConnectFailed", async () => {
+    const bus = createBus()
+    mockListen.mockImplementation(bus.impl)
+    mockWsOpen.mockRejectedValue(new Error("refused"))
+
+    const handlers = noopHandlers()
+    const transport = createForwardWsTransport({
+      adapterId: "ob-fw",
+      url: "ws://x",
+      _backoffBaseMs: 1,
+    })
+    await transport.start(handlers)
+
+    // First failure fires synchronously in start; the rest ride the 1ms-base
+    // reconnect backoff.
+    expect(handlers.onConnectFailed).toHaveBeenCalledWith(1)
+    await new Promise((r) => setTimeout(r, 60))
+    expect(handlers.onConnectFailed.mock.calls.length).toBeGreaterThanOrEqual(3)
+    expect(handlers.onConnectFailed).toHaveBeenCalledWith(2)
+    expect(handlers.onConnectFailed).toHaveBeenCalledWith(3)
+    // Counter is consecutive: monotonically increasing while never opening.
+    const counts = handlers.onConnectFailed.mock.calls.map((c) => c[0] as number)
+    expect(counts).toEqual([...counts].sort((a, b) => a - b))
+
+    await transport.stop()
+  })
+
+  it("resets the consecutive failure counter after a successful connect", async () => {
+    const bus = createBus()
+    mockListen.mockImplementation(bus.impl)
+    mockWsOpen.mockRejectedValueOnce(new Error("refused")).mockResolvedValue("h1")
+
+    const handlers = noopHandlers()
+    const transport = createForwardWsTransport({
+      adapterId: "ob-fw",
+      url: "ws://x",
+      _backoffBaseMs: 1,
+    })
+    await transport.start(handlers)
+    expect(handlers.onConnectFailed).toHaveBeenCalledWith(1)
+
+    // Wait for the reconnect to succeed, then drop the socket and fail again —
+    // the counter restarts at 1 instead of continuing at 2.
+    await new Promise((r) => setTimeout(r, 30))
+    expect(handlers.onOpen).toHaveBeenCalledTimes(1)
+
+    mockWsOpen.mockRejectedValue(new Error("refused again"))
+    bus.trigger("connectors://ws/h1/close", "")
+    await new Promise((r) => setTimeout(r, 30))
+    const counts = handlers.onConnectFailed.mock.calls.map((c) => c[0] as number)
+    expect(counts.filter((n) => n === 1).length).toBeGreaterThanOrEqual(2)
 
     await transport.stop()
   })

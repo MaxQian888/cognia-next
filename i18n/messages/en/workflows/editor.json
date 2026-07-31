@@ -1,0 +1,191 @@
+{
+  "bookmarks": {
+    "cancel": "Cancel",
+    "delete": "Delete view",
+    "dialogNameLabel": "Name",
+    "dialogNamePlaceholder": "e.g. \"Onboarding subgraph\"",
+    "dialogTitle": "Save view",
+    "empty": "No saved views yet.",
+    "label": "Views",
+    "save": "Save",
+    "saveCurrent": "Save current view…",
+    "savedToast": "View saved",
+    "viewAt": "View at {zoom}%"
+  },
+  "breadcrumb": {
+    "fitAll": "Fit all",
+    "untitledGroup": "Untitled group"
+  },
+  "canvasToolbar": {
+    "addGroup": "Add group",
+    "addNode": "Add node",
+    "addSticky": "Add sticky note",
+    "annotation": "Annotations",
+    "autoLayout": "Auto-layout",
+    "background": "Background",
+    "bgDots": "Dots",
+    "bgLines": "Lines",
+    "bgNone": "Off",
+    "fitView": "Fit view",
+    "lock": "Lock canvas",
+    "minimapTierHint": "Hidden by the current performance tier",
+    "redo": "Redo",
+    "search": "Search nodes (Ctrl+F)",
+    "showMinimap": "Show minimap",
+    "snapToGrid": "Snap to grid",
+    "undo": "Undo",
+    "unlock": "Unlock canvas",
+    "view": "View options",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "zoomReset": "Reset to 100%"
+  },
+  "connection": {
+    "annotation": "Annotations cannot be connected",
+    "compatible": "Drop to connect",
+    "duplicateEdge": "These nodes are already connected",
+    "endpointMissing": "Endpoint node is missing from the graph",
+    "errorHandleDisabled": "Enable \"Route to error branch\" in the node's error handling first",
+    "handleRequired": "Pick one of this node's output handles",
+    "incompatible": "Can't connect to this handle",
+    "missingEndpoint": "Connection must have both endpoints",
+    "notConnecting": "Not in connect mode",
+    "selfLoop": "Self-loops are not allowed",
+    "snapHint": "Snapping to nearest handle",
+    "triggerTarget": "Triggers are sources only",
+    "unknownHandle": "Unknown output handle on the source node"
+  },
+  "contextMenu": {
+    "edge": {
+      "delete": "Delete edge",
+      "editLabel": "Edit label",
+      "reverse": "Reverse direction",
+      "toConditional": "Convert to conditional"
+    },
+    "node": {
+      "addStickyAbove": "Add sticky note above",
+      "configure": "Configure",
+      "copy": "Copy",
+      "delete": "Delete",
+      "disable": "Disable",
+      "duplicate": "Duplicate",
+      "enable": "Enable",
+      "rename": "Rename",
+      "runFrom": "Run from here",
+      "runStep": "Run this step",
+      "toGroup": "Convert to group"
+    },
+    "pane": {
+      "addGroup": "Add group here",
+      "addNode": "Add node here…",
+      "addSticky": "Add sticky note here",
+      "paste": "Paste",
+      "resetView": "Reset view",
+      "toggleSnap": "Toggle grid snap"
+    }
+  },
+  "edge": {
+    "edgeKind": {
+      "approved": "approved",
+      "default": "default",
+      "else": "else",
+      "error": "on error",
+      "false": "false",
+      "rejected": "rejected",
+      "then": "then",
+      "true": "true"
+    },
+    "editLabelHint": "Double-click to edit label",
+    "labelPlaceholder": "Edge label…"
+  },
+  "errorHandling": {
+    "circuitBreaker": {
+      "cooldownHint": "How long to fail-fast before a trial attempt.",
+      "cooldownMs": "Cooldown (ms)",
+      "threshold": "Failure threshold",
+      "thresholdHint": "Consecutive failures that trip the breaker.",
+      "toggle": "Circuit breaker",
+      "toggleHint": "After N consecutive failures, fail-fast for a cooldown instead of re-running a node that keeps failing."
+    },
+    "configuredBadge": "On",
+    "defaultValue": {
+      "hint": "Substituted as this step's output when it fails; downstream keeps running.",
+      "invalidJson": "Invalid JSON — the value is not saved until it parses.",
+      "label": "Default value (JSON)"
+    },
+    "errorBranchHint": "Draw an edge from the red error handle; the success path is skipped on failure. Without an error edge the failure falls back to the workflow policy.",
+    "onError": {
+      "continue": "Continue with error output",
+      "defaultValue": "Use default value",
+      "errorBranch": "Route to error branch",
+      "fail": "Fail (workflow policy)",
+      "hint": "What happens when this step ultimately fails (after retries).",
+      "label": "On error"
+    },
+    "retry": {
+      "backoff": "Backoff",
+      "exponential": "Exponential",
+      "fixed": "Fixed",
+      "intervalMs": "Interval (ms)",
+      "maxHint": "Extra attempts after the first failure.",
+      "maxIntervalMs": "Max interval (ms)",
+      "maxRetries": "Retries",
+      "toggle": "Override retries",
+      "toggleHint": "Per-node retry policy. Off = workflow defaults. Keep 0 retries for non-idempotent steps (HTTP POST, git push, terminal)."
+    },
+    "title": "Error handling"
+  },
+  "lasso": {
+    "hint": "Hold Alt and drag to lasso-select",
+    "selected": "{count} nodes selected"
+  },
+  "miniToolbar": {
+    "configure": "Configure",
+    "copy": "Copy node",
+    "delete": "Delete",
+    "more": "More actions",
+    "run": "Run from here",
+    "runDisabled": "Triggers and annotations can't be run from here"
+  },
+  "performanceTier": {
+    "auto": "Auto",
+    "autoHint": "Pick the best tier from your system preference and workflow size.",
+    "balanced": "Balanced",
+    "balancedHint": "Drop edge animations and pause inspector preview while dragging.",
+    "description": "Tune canvas effects to match your device and workflow size.",
+    "effectiveLabel": "Effective: {tier}",
+    "high": "High",
+    "highHint": "Everything on: minimap, animations, live inspector preview.",
+    "reduced": "Reduced",
+    "reducedHint": "Hide minimap, freeze animations, skip alignment guides.",
+    "title": "Performance tier"
+  },
+  "selectionToolbar": {
+    "align": "Align & distribute",
+    "alignBottom": "Align bottom",
+    "alignCenterH": "Align horizontal centers",
+    "alignCenterV": "Align vertical centers",
+    "alignLeft": "Align left",
+    "alignRight": "Align right",
+    "alignTop": "Align top",
+    "delete": "Delete",
+    "distributeH": "Distribute horizontally",
+    "distributeV": "Distribute vertically",
+    "duplicate": "Duplicate",
+    "extract": "Extract to sub-workflow",
+    "fit": "Fit to selection",
+    "group": "Group",
+    "lock": "Lock",
+    "runBlock": "Run this block",
+    "selectChildren": "Select members",
+    "selected": "{count, plural, one {# selected} other {# selected}}",
+    "toggleGroupDisabled": "Enable / disable block",
+    "unlock": "Unlock"
+  },
+  "spotlight": {
+    "breadcrumbIn": "in {group}",
+    "empty": "No matching nodes.",
+    "openShortcut": "Search nodes (Ctrl+F)",
+    "placeholder": "Search nodes on this canvas…"
+  }
+}

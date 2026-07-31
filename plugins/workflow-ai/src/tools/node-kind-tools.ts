@@ -25,6 +25,7 @@ const PLUGIN_ID = "cognia-workflow-ai"
 
 interface ListedEntry {
   kind: string
+  typeVersion?: number
   category: NodeCatalogEntry["category"]
   label: string
   description: string
@@ -35,6 +36,7 @@ interface ListedEntry {
 function summarize(entry: NodeCatalogEntry): ListedEntry {
   return {
     kind: entry.kind,
+    typeVersion: entry.typeVersion,
     category: entry.category,
     label: entry.label,
     description: entry.description,

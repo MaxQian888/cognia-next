@@ -17,7 +17,6 @@ import {
   getExternalAgentStatus,
   listExternalAgents,
   killAllExternalAgents,
-  receiveExternalAgentStderr,
   isExternalAgentRunning,
   checkExternalAgentCommandExists,
   getExternalAgentInfo,
@@ -88,14 +87,6 @@ describe("external-agent commands", () => {
     mockedInvoke.mockResolvedValueOnce(undefined)
     await killAllExternalAgents()
     expect(mockedInvoke).toHaveBeenLastCalledWith("kill_all_external_agents")
-  })
-
-  it("receiveExternalAgentStderr forwards agentId", async () => {
-    mockedInvoke.mockResolvedValueOnce(["err line"])
-    await receiveExternalAgentStderr("a-1")
-    expect(mockedInvoke).toHaveBeenCalledWith("receive_external_agent_stderr", {
-      agentId: "a-1",
-    })
   })
 
   it("isExternalAgentRunning returns the boolean", async () => {

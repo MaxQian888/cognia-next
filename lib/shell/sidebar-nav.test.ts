@@ -1,4 +1,4 @@
-import { SIDEBAR_NAV_META, DEFAULT_SIDEBAR_LAYOUT } from "@/types/shell/sidebar"
+import { SIDEBAR_NAV_META, DEFAULT_SIDEBAR_LAYOUT, DEFAULT_PINNED_IDS } from "@/types/shell/sidebar"
 import {
   SIDEBAR_NAV_ICONS,
   applyDragReorder,
@@ -6,6 +6,7 @@ import {
   resolveSidebarLayout,
   type SidebarCatalogItem,
 } from "./sidebar-nav"
+import type { RuntimeSnapshot } from "@/lib/runtime/operation-availability"
 
 describe("SIDEBAR_NAV_ICONS", () => {
   it("maps every catalog id to an icon", () => {
@@ -28,12 +29,36 @@ describe("getSidebarCatalog", () => {
     expect(ids).not.toContain("performance")
     expect(ids).not.toContain("source-control")
     expect(ids).toContain("workflows")
-    expect(cat).toHaveLength(SIDEBAR_NAV_META.length - 2)
+    // Derived, not hard-coded — the browser pane addition broke a literal "-2".
+    expect(cat).toHaveLength(SIDEBAR_NAV_META.filter((m) => !m.desktopOnly).length)
   })
 
-  it("keeps desktop-only items on web", () => {
+  it("drops desktop-only items on web too (ADR-0059 F5 — no dead ends in a browser)", () => {
     const cat = getSidebarCatalog("web")
-    expect(cat.map((c) => c.id)).toContain("performance")
+    const ids = cat.map((c) => c.id)
+    expect(ids).not.toContain("performance")
+    expect(ids).not.toContain("source-control")
+    expect(ids).not.toContain("browser")
+    expect(ids).toContain("workflows")
+  })
+
+  it("restores a host-owned surface when the active Companion advertises it", () => {
+    const runtime: RuntimeSnapshot = {
+      target: {
+        id: "desktop",
+        kind: "companion",
+        hostKind: "desktop",
+        platform: "web",
+      },
+      vaultState: "unlocked",
+      connectionState: "online",
+      host: {
+        compatible: true,
+        operations: ["browser_session_ensure"],
+        grants: ["agent.run"],
+      },
+    }
+    expect(getSidebarCatalog("web", runtime).map((item) => item.id)).toContain("browser")
   })
 })
 
@@ -41,13 +66,13 @@ describe("resolveSidebarLayout", () => {
   const catalog = getSidebarCatalog("tauri")
   const ids = (items: SidebarCatalogItem[]) => items.map((i) => i.id)
 
-  it("applies the default layout: features pinned, auxiliary in overflow", () => {
+  // The de-crowded rail pins three ids and pushes everything else into "More",
+  // rather than pinning the whole `feature` group as it used to.
+  it("applies the default layout: three ids pinned, the rest in overflow", () => {
     const { pinned, overflow, hidden } = resolveSidebarLayout(catalog, DEFAULT_SIDEBAR_LAYOUT)
-    expect(ids(pinned)).toEqual(
-      SIDEBAR_NAV_META.filter((m) => m.group === "feature").map((m) => m.id)
-    )
+    expect(ids(pinned)).toEqual([...DEFAULT_PINNED_IDS])
     expect(ids(overflow)).toEqual(
-      SIDEBAR_NAV_META.filter((m) => m.group === "auxiliary").map((m) => m.id)
+      SIDEBAR_NAV_META.filter((m) => !DEFAULT_PINNED_IDS.includes(m.id as never)).map((m) => m.id)
     )
     expect(hidden).toEqual([])
   })

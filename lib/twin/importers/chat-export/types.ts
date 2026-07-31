@@ -13,6 +13,22 @@
 import type { RawSource } from "@/lib/twin/ingest/parse"
 import type { TwinChunkMetadata } from "@/types/twin"
 
+/**
+ * Parse a chat-export JSON body, turning a raw `SyntaxError` into a clear,
+ * platform-labelled error. A malformed export should dead-letter the ingest
+ * job with "Slack import: malformed JSON — Unexpected token …" rather than a
+ * bare "Unexpected token …" the user can't trace back to a file. Callers guard
+ * empty input before calling; this just hardens the parse.
+ */
+export function parseChatExportJson(text: string, platform: string): unknown {
+  try {
+    return JSON.parse(text)
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err)
+    throw new Error(`${platform} import: malformed JSON — ${reason}`)
+  }
+}
+
 /** One message, normalised to the lowest common form across all platforms. */
 export interface ChatMessageBlock {
   speaker: string

@@ -1,148 +1,126 @@
-/**
- * Tests for the External Bridge `computer_use` handler.
- *
- * Two code paths to cover:
- *   - **Renderer path** — `isTauri()` returns true. The handler calls
- *     `desktop.*` directly. The test mocks both modules.
- *   - **Sidecar path** — `isTauri()` returns false, and either
- *       (a) `COGNIA_AUTOMATION_PROXY` is unset → returns the
- *           "requires the Cognia desktop runtime" error envelope, or
- *       (b) the env is set → the handler opens a TCP socket and writes
- *           the JSON envelope. We boot a minimal echo server on a
- *           random localhost port for the round-trip.
- */
-
 jest.mock("@/lib/tauri", () => ({
   isTauri: jest.fn(),
 }))
 
 jest.mock("@/lib/automation/client", () => ({
   desktop: {
-    screenshot: jest.fn(),
-    click: jest.fn(),
-    type: jest.fn(),
-    keys: jest.fn(),
-    mouseMove: jest.fn(),
-    drag: jest.fn(),
-    scroll: jest.fn(),
-    holdKey: jest.fn(),
-    mouseButton: jest.fn(),
-    cursorPosition: jest.fn(),
+    listApps: jest.fn(),
+    getAppState: jest.fn(),
+    queryElements: jest.fn(),
+    expandElement: jest.fn(),
+    performAction: jest.fn(),
   },
 }))
 
-import { isTauri } from "@/lib/tauri"
-import { desktop } from "@/lib/automation/client"
-import { computerUse, __testing__ } from "./computer-use"
 import * as net from "node:net"
+import { desktop } from "@/lib/automation/client"
+import { isTauri } from "@/lib/tauri"
+import type { ActionRequest, AppLocator } from "@/lib/automation/types"
+import { __testing__, computerUse } from "./computer-use"
 
 const mockedIsTauri = isTauri as jest.Mock
 const mockedDesktop = desktop as jest.Mocked<typeof desktop>
+const locator: AppLocator = {
+  kind: "bundleId",
+  bundleId: "com.apple.TextEdit",
+}
 
 beforeEach(() => {
   jest.clearAllMocks()
   __testing__.resetProxyClient()
 })
 
-describe("computerUse — renderer path", () => {
-  beforeEach(() => {
-    mockedIsTauri.mockReturnValue(true)
-  })
+describe("computerUse canonical renderer adapter", () => {
+  beforeEach(() => mockedIsTauri.mockReturnValue(true))
 
-  it("screenshot returns base64 + dimensions", async () => {
-    mockedDesktop.screenshot.mockResolvedValueOnce({
-      bytes: "AA==",
-      width: 1280,
-      height: 800,
-      capturedAt: 0,
-      format: "png",
-    })
-    const result = await computerUse({ action: "screenshot" })
-    expect(result).toEqual({ ok: true, screenshot: "AA==", width: 1280, height: 800 })
-    expect(mockedDesktop.screenshot).toHaveBeenCalledWith({}, { surface: "mcp" })
-  })
-
-  it("click forwards count for triple-click", async () => {
-    mockedDesktop.click.mockResolvedValueOnce(undefined)
-    await computerUse({
-      action: "click",
-      coordinate: [10, 20],
-      button: "left",
-      count: 3,
-    })
-    expect(mockedDesktop.click).toHaveBeenCalledWith(
-      { kind: "point", x: 10, y: 20 },
-      { button: "left", double: undefined, count: 3 },
-      { surface: "mcp" }
-    )
-  })
-
-  it("cursor_position returns the Point", async () => {
-    mockedDesktop.cursorPosition.mockResolvedValueOnce({ x: 42, y: 99 })
-    const result = await computerUse({ action: "cursor_position" })
-    expect(result).toEqual({ ok: true, cursor: { x: 42, y: 99 } })
-  })
-
-  it("captures thrown errors", async () => {
-    mockedDesktop.click.mockRejectedValueOnce(new Error("denied"))
+  it("reads a screenshot-bound app revision with an authenticated turn key", async () => {
+    mockedDesktop.getAppState.mockResolvedValueOnce({ revision: 3 } as never)
     const result = await computerUse({
-      action: "click",
-      coordinate: [1, 2],
+      operation: "getAppState",
+      sessionId: "app-session",
+      turnKey: "message-1",
+      locator,
     })
-    expect(result).toEqual({ ok: false, error: "denied" })
-  })
-})
 
-describe("computerUse — sidecar path (no env)", () => {
-  beforeEach(() => {
-    mockedIsTauri.mockReturnValue(false)
-    delete process.env.COGNIA_AUTOMATION_PROXY
-    delete process.env.COGNIA_AUTOMATION_PROXY_TOKEN
+    expect(result).toEqual({ ok: true, result: { revision: 3 } })
+    expect(mockedDesktop.getAppState).toHaveBeenCalledWith("app-session", locator, undefined, {
+      surface: "mcp",
+      turnKey: "message-1",
+    })
   })
 
-  it("returns the structured 'requires desktop runtime' error", async () => {
-    const result = await computerUse({ action: "screenshot" })
+  it("forwards a canonical action request without translation", async () => {
+    const request = {
+      turnToken: "token",
+      target: {
+        kind: "pixel",
+        target: {
+          sessionId: "app-session",
+          lineageId: "lineage",
+          revision: 3,
+          point: { x: 10, y: 20 },
+          screenshotWidth: 100,
+          screenshotHeight: 80,
+        },
+      },
+      action: { kind: "click" },
+      strategy: "pixel",
+    } satisfies ActionRequest
+    mockedDesktop.performAction.mockResolvedValueOnce({ status: "unknown" } as never)
+
+    await computerUse({
+      operation: "performAction",
+      turnKey: "message-1",
+      request,
+    })
+
+    expect(mockedDesktop.performAction).toHaveBeenCalledWith(request, {
+      surface: "mcp",
+      turnKey: "message-1",
+    })
+  })
+
+  it("fails closed when a mutation has no authenticated turn key", async () => {
+    const result = await computerUse({
+      operation: "performAction",
+      turnKey: "",
+      request: {} as ActionRequest,
+    })
     expect(result.ok).toBe(false)
-    expect(result.error).toMatch(/Cognia desktop runtime/)
+    expect(result.error).toMatch(/turnKey/)
+    expect(mockedDesktop.performAction).not.toHaveBeenCalled()
   })
 })
 
-describe("computerUse — sidecar path (with echo proxy)", () => {
+describe("computerUse canonical sidecar adapter", () => {
   let server: net.Server
   let port: number
-  const TOKEN = "test-token-1234"
+  const seen: Record<string, unknown>[] = []
 
   beforeAll(async () => {
     server = net.createServer((socket) => {
       let buffer = ""
       socket.on("data", (chunk) => {
         buffer += chunk.toString("utf8")
-        let nl = buffer.indexOf("\n")
-        while (nl >= 0) {
-          const line = buffer.slice(0, nl)
-          buffer = buffer.slice(nl + 1)
-          try {
-            const req = JSON.parse(line)
-            // Pretend every command succeeds; echo command name back.
-            let result: unknown = { ok: true }
-            if (req.command === "desktop_screenshot") {
-              result = { bytes: "TEST", width: 100, height: 50 }
-            } else if (req.command === "desktop_cursor_position") {
-              result = { x: 7, y: 11 }
-            }
-            socket.write(JSON.stringify({ id: req.id, ok: true, result }) + "\n")
-          } catch {
-            // ignore
-          }
-          nl = buffer.indexOf("\n")
+        let newline = buffer.indexOf("\n")
+        while (newline >= 0) {
+          const line = buffer.slice(0, newline)
+          buffer = buffer.slice(newline + 1)
+          const request = JSON.parse(line) as Record<string, unknown>
+          seen.push(request)
+          socket.write(
+            `${JSON.stringify({
+              id: request.id,
+              ok: true,
+              result: { revision: 4 },
+            })}\n`
+          )
+          newline = buffer.indexOf("\n")
         }
       })
     })
-    await new Promise<void>((resolve) => {
-      server.listen(0, "127.0.0.1", () => resolve())
-    })
-    const addr = server.address() as net.AddressInfo
-    port = addr.port
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+    port = (server.address() as net.AddressInfo).port
   })
 
   afterAll(async () => {
@@ -151,9 +129,10 @@ describe("computerUse — sidecar path (with echo proxy)", () => {
   })
 
   beforeEach(() => {
+    seen.length = 0
     mockedIsTauri.mockReturnValue(false)
     process.env.COGNIA_AUTOMATION_PROXY = `127.0.0.1:${port}`
-    process.env.COGNIA_AUTOMATION_PROXY_TOKEN = TOKEN
+    process.env.COGNIA_AUTOMATION_PROXY_TOKEN = "secret"
   })
 
   afterEach(() => {
@@ -162,53 +141,31 @@ describe("computerUse — sidecar path (with echo proxy)", () => {
     delete process.env.COGNIA_AUTOMATION_PROXY_TOKEN
   })
 
-  it("screenshot round-trips through the proxy socket", async () => {
-    const result = await computerUse({ action: "screenshot" })
-    expect(result).toEqual({ ok: true, screenshot: "TEST", width: 100, height: 50 })
-  })
-
-  it("cursor_position round-trips through the proxy socket", async () => {
-    const result = await computerUse({ action: "cursor_position" })
-    expect(result).toEqual({ ok: true, cursor: { x: 7, y: 11 } })
-  })
-
-  it("click envelope reaches the proxy with count", async () => {
-    const seen: Record<string, unknown>[] = []
-    server.removeAllListeners("connection")
-    server.on("connection", (socket) => {
-      let buffer = ""
-      socket.on("data", (chunk) => {
-        buffer += chunk.toString("utf8")
-        let nl = buffer.indexOf("\n")
-        while (nl >= 0) {
-          const line = buffer.slice(0, nl)
-          buffer = buffer.slice(nl + 1)
-          try {
-            const req = JSON.parse(line) as Record<string, unknown>
-            seen.push(req)
-            socket.write(JSON.stringify({ id: req.id, ok: true, result: { ok: true } }) + "\n")
-          } catch {
-            // ignore
-          }
-          nl = buffer.indexOf("\n")
-        }
-      })
-    })
-    __testing__.resetProxyClient()
-
+  it("uses only the canonical get-app-state wire command", async () => {
     const result = await computerUse({
-      action: "click",
-      coordinate: [50, 60],
-      button: "left",
-      count: 3,
+      operation: "getAppState",
+      sessionId: "app-session",
+      turnKey: "message-2",
+      locator,
     })
-    expect(result).toEqual({ ok: true })
-    expect(seen.length).toBeGreaterThan(0)
-    const req = seen[0]
-    expect(req.command).toBe("desktop_click")
-    expect(req.token).toBe(TOKEN)
-    const args = req.args as Record<string, unknown>
-    expect(args.target).toEqual({ kind: "point", x: 50, y: 60 })
-    expect(args.opts).toEqual({ button: "left", double: undefined, count: 3 })
+
+    expect(result).toEqual({ ok: true, result: { revision: 4 } })
+    expect(seen[0]).toMatchObject({
+      token: "secret",
+      command: "desktop_get_app_state",
+      args: {
+        sessionId: "app-session",
+        turnKey: "message-2",
+        locator,
+        options: {},
+      },
+    })
+  })
+
+  it("reports a missing desktop runtime without opening a socket", async () => {
+    delete process.env.COGNIA_AUTOMATION_PROXY
+    const result = await computerUse({ operation: "listApps" })
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/Cognia desktop runtime/)
   })
 })

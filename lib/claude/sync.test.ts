@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Mock Dexie + IPC + tauri detection so the orchestrator can be exercised
 // purely in JS-land without a real backend.
 
@@ -34,7 +35,7 @@ import {
   syncToAgent,
 } from "./sync"
 import type { AgentReadResult, AgentWriteResult } from "./ipc"
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 import { A2UI_BRIDGE_SERVER_NAME } from "@/lib/a2ui/mcp-tool-schemas"
 
 const mIsTauri = isTauri as jest.Mock
@@ -118,6 +119,30 @@ describe("syncToAgent — gating", () => {
     mRead.mockResolvedValueOnce(cfg)
     const r = await syncToAgent("claude-code")
     expect(r).toEqual({ ok: false, skipped: true, reason: "no-path-on-os" })
+  })
+
+  it("refuses to overwrite an existing-but-unparseable file instead of wiping unmanaged keys", async () => {
+    mList.mockResolvedValueOnce([makeServer({ name: "fs", appsEnabled: { "claude-code": true } })])
+    const cfg: AgentReadResult = {
+      path: "/home/u/.claude.json",
+      exists: true,
+      writable: true,
+      format: "json",
+      raw: "{ broken",
+      parsed: null,
+      parseError: "json parse: expected value at line 1 column 3",
+    }
+    mRead.mockResolvedValueOnce(cfg)
+
+    const r = await syncToAgent("claude-code")
+    expect(r).toEqual({
+      ok: false,
+      skipped: false,
+      error: expect.stringContaining("refusing to overwrite"),
+    })
+    // Must NOT write — projecting onto a null tree would collapse to `{}` and
+    // silently drop plugins / marketplaces / projects / auth.
+    expect(mWrite).not.toHaveBeenCalled()
   })
 })
 
@@ -223,7 +248,16 @@ describe("syncAll", () => {
     mIsTauri.mockReturnValue(false) // shortcut: every result is "not-tauri"
     const out = await syncAll()
     expect(Object.keys(out).sort()).toEqual(
-      ["claude-code", "claude-desktop", "codex", "cursor", "gemini", "vscode", "windsurf"].sort()
+      [
+        "cognia",
+        "claude-code",
+        "claude-desktop",
+        "codex",
+        "cursor",
+        "gemini",
+        "vscode",
+        "windsurf",
+      ].sort()
     )
     for (const r of Object.values(out)) {
       expect(r).toEqual({ ok: false, skipped: true, reason: "not-tauri" })

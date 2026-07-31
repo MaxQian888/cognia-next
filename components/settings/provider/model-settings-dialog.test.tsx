@@ -4,7 +4,7 @@
 import React from "react"
 import { render, screen } from "@testing-library/react"
 import { ModelSettingsDialog } from "./model-settings-dialog"
-import type { Model } from "@/types/provider/provider"
+import type { Model } from "@cognia/provider-types/provider"
 
 const mockProviderIcon = jest.fn((_props?: unknown) => <div data-testid="provider-icon" />)
 

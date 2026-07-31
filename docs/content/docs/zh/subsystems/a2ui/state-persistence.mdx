@@ -1,6 +1,6 @@
 ---
 title: 状态与持久化
-description: Zustand store 是 A2UI 唯一的消息入口——它把 surface 元数据持久化到 localStorage（LRU 20，已剥离），而独立的 Dexie 层（apps · surfaces · templates · event-history）保存可持久化的行。
+description: Zustand 运行时 store 在 localStorage 中保留最近 20 个完整 surface；Dexie 保存已存应用，并通过 app-builder 边界恢复缺失的 surface。
 ---
 
 # 状态与持久化
@@ -9,14 +9,16 @@ description: Zustand store 是 A2UI 唯一的消息入口——它把 surface �
 
 <TLDR>
   A2UI 把状态保存在**两个相互独立的层**中，二者互不调用。Zustand store
-  (`stores/a2ui/a2ui-store.ts`) 是所有 server message 的唯一摄入入口，也是运行时的事实来源——但它**只把元数据**
-  持久化到 `localStorage`（key 为 `cognia-a2ui-surfaces`，按 LRU 上限保留 20 个 surface，并剥离 `components` 与
-  `dataModel`）。四张 Dexie 表（`a2uiApps`、`a2uiSurfaces`、`a2uiTemplates`、`a2uiEventHistory`）是一个**独立的可持久化层**，
-  由 renderer/hook 层调用，store 从不调用它。undo/redo 仅存在于内存中（50 条栈，300 ms 防抖）。
+  (`stores/a2ui/a2ui-store.ts`) 是所有 server message 的唯一摄入入口，也是运行时的事实来源。它把**最近 20 个
+  ready surface 的完整内容**持久化到 `localStorage`（key 为 `cognia-a2ui-surfaces`）。四张 Dexie 表
+  （`a2uiApps`、`a2uiSurfaces`、`a2uiTemplates`、`a2uiEventHistory`）是一个**独立的可持久化层**，由 renderer/hook
+  层调用，store 不直接 import 它。在迷你应用路由中，`hydratePersistedApps()` 读取已保存的 `a2uiApps` 行，并通过
+  `restoreSurface` 恢复缺失的运行时树；没有 durable row 的旧模板实例继续使用确定性重建作为兜底。undo/redo
+  仅存在于内存中（50 条栈，300 ms 防抖）。
 </TLDR>
 
 <StatGrid>
-  <Stat label="持久化层" value="2" hint="zustand→localStorage（元数据） · Dexie（可持久化行）" />
+  <Stat label="持久化层" value="2" hint="zustand→localStorage（20 个完整运行时 surface） · Dexie（durable 已保存行）" />
   <Stat label="localStorage LRU 上限" value="20" hint="MAX_PERSISTED_SURFACES，仅 ready surface" />
   <Stat label="撤销历史" value="50" hint="MAX_HISTORY_ENTRIES，300 ms 防抖" />
   <Stat label="event-history 上限" value="1000" hint="Dexie a2uiEventHistory，裁剪最旧 100 条" />
@@ -25,18 +27,18 @@ description: Zustand store 是 A2UI 唯一的消息入口——它把 surface �
 ## 两个持久化层（请先读这里）
 
 <Callout type="warn">
-  Zustand store 与 Dexie `a2ui-*` 表是**两个相互独立的持久化层**。store **只把元数据**持久化到 `localStorage`
-  （`partialize` 在 `a2ui-store.ts:680`，按 LRU 把 ready surface 上限定为 20，并在第 692 行**剥离 `components` 与
-  `dataModel`**——它们"从模板重新生成"）。Dexie 表（`lib/db/a2ui-*.ts`）是一个**独立的可持久化层**，store **从不
-  import** 它；把 surface/app/template 写入 Dexie 是由 renderer/hook 层发起的。不要以为写 store 就会把行持久化到
-  Dexie，反之亦然。
+  Zustand store 与 Dexie `a2ui-*` 表是**两个相互独立的持久化层**。store 的 `partialize` 按 LRU 把 localStorage
+  限制为最近 20 个 ready surface，但保留每个 surface 的完整 component tree 与 data model。Dexie **不被 store
+  直接 import**；Save、hydrate、metadata patch 与 delete 都在 hook 中跨越 durable 边界。写 store 不会写 Dexie，
+  但 `useA2UIAppBuilder.hydratePersistedApps()` 会有意读取 Dexie，并在运行时 surface 缺失时调用经过校验的
+  `restoreSurface()` action。
 </Callout>
 
 | 关注点 | Zustand store (`a2ui-store.ts`) | Dexie 表 (`lib/db/a2ui-*.ts`) |
 | --- | --- | --- |
 | 介质 | `localStorage`（zustand `persist`） | IndexedDB（Dexie） |
 | key / name | `cognia-a2ui-surfaces`（version 3） | 表 `a2uiApps` / `a2uiSurfaces` / `a2uiTemplates` / `a2uiEventHistory` |
-| 保存内容 | surface **仅元数据**（无 components/dataModel） | 完整行：components、dataModel、rootId、审计 |
+| 保存内容 | 20 个完整 ready 运行时 surface（含 components/dataModel） | 完整已保存行：components、dataModel、rootId、审计 |
 | 范围 | 运行时事实 + 上次会话恢复 | 用户保存的 app、panel/fullscreen surface、template、审计轨迹 |
 | 上限 / 淘汰 | LRU 20 个 ready surface，按 `updatedAt` 降序 | event-history 裁剪到 1000 行 |
 | 调用方 | 每条 server message + UI 动作 | renderer/hook 层（**不是** store） |
@@ -46,8 +48,10 @@ description: Zustand store 是 A2UI 唯一的消息入口——它把 surface �
 flowchart LR
   MSG["A2UIServerMessage"] --> STORE["a2ui-store.ts:351<br/>processMessage"]
   STORE --> MEM["内存 surfaces<br/>+ undo/redo 栈"]
-  STORE -.->|"partialize 680<br/>剥离 components+dataModel"| LS["localStorage<br/>cognia-a2ui-surfaces (v3)"]
-  REND["renderer / hook 层"] -->|"upsertSurface · upsertApp<br/>upsertTemplate · appendEvent"| DEXIE[("Dexie a2ui-* 表")]
+  STORE -.->|"partialize<br/>LRU 20 个完整 surface"| LS["localStorage<br/>cognia-a2ui-surfaces (v3)"]
+  REND["renderer / hook 层"] -->|"Save · metadata patch · delete"| DEXIE[("Dexie a2ui-* 表")]
+  DEXIE -->|"listApps"| HYDRATE["hydratePersistedApps"]
+  HYDRATE -->|"restoreSurface（仅缺失项）"| STORE
   STORE -. "不 import lib/db/a2ui-*" .- DEXIE
 
   classDef store fill:#1e293b,stroke:#a78bfa,color:#ede9fe
@@ -193,25 +197,27 @@ zustand `persist` 配置 (`641-702`)：
 
 | 项 | 行号 | 行为 |
 | --- | --- | --- |
-| `name` | 642 | `cognia-a2ui-surfaces` —— **localStorage**，不是 Dexie |
-| `version` | 643 | `3` |
-| `migrate` | 644 | → `normalizePersistedSurfaces` (653) |
-| `onRehydrateStorage` | 666 | 重新规范化 surface，重新推导 `activeSurfaceId` |
-| `partialize` | 680 | LRU 上限 + 剥离（见下） |
+| `name` | persist 配置 | `cognia-a2ui-surfaces` —— **localStorage**，不是 Dexie |
+| `version` | persist 配置 | `3` |
+| `migrate` | persist 配置 | → `normalizePersistedSurfaces` |
+| `onRehydrateStorage` | persist 配置 | 重新规范化 surface，重新推导 `activeSurfaceId` |
+| `partialize` | 当前 store persist 块 | LRU 上限 + 完整 surface（见下） |
 
-`partialize` (`680`) 是承重部分：
+`partialize` 是承重部分：
 
-1. 按 LRU 上限取 `MAX_PERSISTED_SURFACES = 20` (`682`)。
-2. **只保留 `ready` surface** (`685`)，按 `updatedAt` 降序。
-3. **剥离 `components` + `dataModel`** (`692`)——注释说明它们"从模板重新生成"。
-4. 持久化 `{ surfaces: metadataOnly, activeSurfaceId }`；undo/redo 栈被排除。
+1. 按 LRU 上限取 `MAX_PERSISTED_SURFACES = 20`。
+2. **只保留 `ready` surface**，按 `updatedAt` 降序。
+3. 完整保留入选 surface，包括 `components`、`dataModel` 与 `rootId`。
+4. 持久化 `{ surfaces: persistedSurfaces, activeSurfaceId }`；undo/redo 栈被排除。
 
-这就是为什么仅靠 store 层无法重建完整 surface——重负载被刻意丢弃，必须重新生成（从模板）或从 Dexie 层重新拉取。
+LRU 窗口内的最近 surface 可由 store 直接恢复；窗口外的已保存 surface 由 `hydratePersistedApps()` 从
+`a2uiApps` 恢复。只有不存在 durable row 的旧模板实例才走确定性模板重建。已有可渲染本地 surface 优先于
+durable row，因此 hydrate 不会覆盖尚未保存的运行时编辑。
 
 ## 四张 Dexie 表
 
-可持久化层位于 `lib/db/`。这些表最早在 Dexie `version(13)` 引入（`schema.ts:553` 块，定义 `573-576`）；
-**当前**的 schema 版本是 `version(65)` (`schema.ts:1692`)。表类声明在 `schema.ts:114-117`。
+可持久化层位于 `lib/db/`。这些表最早在 Dexie `version(13)` 引入；**当前**的 schema 版本是
+`version(118)`。表类声明在 `lib/db/schema.ts`。
 
 ### 行类型 (`lib/db/a2ui-types.ts`)
 
@@ -247,13 +253,12 @@ upsert 进程内 `a2ui-bridge` MCP server 行，并回填 `a2uiEnabled = false`�
 
 | 模块 | 函数 | 行号 | 说明 |
 | --- | --- | --- | --- |
-| `a2ui-apps.ts` | `listApps` | 7 | |
-| | `getApp` | 11 | |
-| | `upsertApp` | 15 | |
-| | `bulkUpsertApps` | 19 | 空守卫 |
-| | `deleteApp` | 24 | 若 `isBuiltIn` 则 **抛出** `"Cannot delete built-in app"` (26-28) |
-| | `deleteAllUserApps` | 32 | 内置保留（过滤 `!isBuiltIn`，35） |
-| | `touchApp` | 41 | 更新 `lastUsedAt` + `usageCount` |
+| `a2ui-apps.ts` | `listApps` / `getApp` | — | durable 已保存应用读取 |
+| | `upsertApp` / `bulkUpsertApps` | — | 事务写入；已有 built-in 会拒绝整次写入 |
+| | `patchAppMetadata` | — | 只改可变 metadata；未保存 id 返回 `false`；保留 component tree |
+| | `deleteApp` | — | 若 `isBuiltIn` 则**抛出** `"Cannot delete built-in app"` |
+| | `deleteAllUserApps` | — | 保留 built-in |
+| | `touchApp` | — | 更新 `lastUsedAt` + `usageCount` |
 | `a2ui-surfaces.ts` | `listSurfaces` | 8 | |
 | | `getSurface` | 12 | |
 | | `listSurfacesForSession` | 16 | |
@@ -273,9 +278,9 @@ upsert 进程内 `a2ui-bridge` MCP server 行，并回填 `a2uiEnabled = false`�
 
 ### 可持久化层不变式
 
-- **内置保护** —— `deleteApp` (`a2ui-apps.ts:24`) 在 `isBuiltIn` 置位时抛出 `"Cannot delete built-in app"`
-  (26-28)；`deleteAllUserApps` (32) 与 `deleteAllUserTemplates` (`a2ui-templates.ts:33`) 过滤掉内置，使其在
-  批量清除时保留。
+- **内置保护** —— single upsert、bulk upsert、metadata patch 与 delete 都拒绝修改已有 `isBuiltIn` app。
+  bulk upsert 使用事务，因此与 built-in 同批的用户行也不会被部分写入。`deleteAllUserApps` 与
+  `deleteAllUserTemplates` 都保留 built-in。
 - **inline 排除** —— `upsertSurface` (`a2ui-surfaces.ts:20`) 对 `type === "inline"` 提前返回 (22)：inline
   surface 仅运行时存在，从不写入 Dexie。只有 `panel` / `fullscreen`（以及 `dialog`）surface 是可持久化的。
 - **event-history 上限** —— `a2ui-event-history.ts` 以 `MAX_ROWS = 1000` (`9`) 为上限，超出时裁剪
@@ -284,9 +289,9 @@ upsert 进程内 `a2ui-bridge` MCP server 行，并回填 `a2uiEnabled = false`�
 ## schema 版本真相
 
 <Callout type="info">
-  a2ui 表**在 Dexie `version(13)` 引入**（`lib/db/schema.ts:553` 块，定义 `573-576`），其索引字符串自此未变。
-  **当前/最新**的 schema 版本是 `version(65)` (`schema.ts:1692`)。旧文档的"Dexie v13"把*引入*版本 (13) 与*当前*
-  版本 (65) 混为一谈——它们是不同的数字。引用 v13 表示"a2ui 表何时出现"，引用 v65 表示"线上 schema"。
+  A2UI 表**在 Dexie `version(13)` 引入**，该版本块包含四张 A2UI 表的定义，索引字符串自此未变。
+  **当前/最新** schema 版本是 `version(118)`。因此 “Dexie v13” 表示引入版本，而不是线上 schema：描述
+  “何时出现”时引用 v13，描述当前数据库时引用 v118。
 </Callout>
 
 ## 文件
@@ -298,9 +303,9 @@ stores/a2ui/
   index.ts               # barrel：useA2UIStore + 9 个选择器
 
 lib/db/
-  schema.ts              # 表声明 114-117；v13 块 553（定义 573-576）；当前 v65 @1692
+  schema.ts              # A2UI 表在 v13 引入；当前 schema v118
   a2ui-types.ts          # A2UIAppRow 35 · A2UISurfaceRow 65 · A2UITemplateRow 86 · A2UIEventHistoryRow 105
-  a2ui-apps.ts           # listApps 7 … deleteApp 24（内置抛错）… touchApp 41
+  a2ui-apps.ts           # 读取 · 受保护事务 upsert · metadata patch · delete · touch
   a2ui-surfaces.ts       # listSurfaces 8 … upsertSurface 20（排除 inline）… deleteAllSurfaces 30
   a2ui-templates.ts      # listTemplates 8 … upsertTemplate 20 … deleteAllUserTemplates 33
   a2ui-event-history.ts  # MAX_ROWS 1000 (9)、TRIM_BATCH 100 (11)、appendEvent 13、listEvents 33

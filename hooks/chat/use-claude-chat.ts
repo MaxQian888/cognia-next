@@ -1,6 +1,7 @@
 "use client"
 
-import { startTransition, useCallback, useEffect, useRef } from "react"
+import { startTransition, useCallback, useEffect, useRef, useState } from "react"
+import { useTranslations } from "next-intl"
 import type { UnlistenFn } from "@tauri-apps/api/event"
 import {
   applySdkEvent,
@@ -10,46 +11,77 @@ import {
   mergeMemorySourcesIntoLastAssistant,
   mergeTwinSourcesIntoLastAssistant,
 } from "@/lib/claude/adapter"
+import { toast } from "sonner"
+import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
+import { createDiagnostic } from "@cognia/diagnostics"
+import { toDiagnostic } from "@/lib/diagnostics/to-diagnostic"
+import { dispatchDiagnostic } from "@/lib/diagnostics/bus"
+import { flushProjectEditorEdits } from "@/lib/files/project-editor-bridge"
 import { getGoalRuntime } from "@/lib/goal/runtime"
 import { handleTurnComplete } from "@/lib/goal/turn-driver"
+import { defaultLifecycleFirer } from "@/lib/claude/hooks/lifecycle-firer"
 import { buildGoalJudgeClient } from "@/lib/goal/judge-client"
 import { buildUtilityLlmClient } from "@/lib/ai/generation/utility-client"
 import { runAutoModeForTool } from "@/lib/claude/permissions/auto-mode-runner"
+import { deriveAllowRuleFromApproval } from "@/lib/claude/permissions/approval-rule"
+import { setToolRule } from "@/lib/claude/permissions/ruleset-edit"
 import { getPluginCommandRulesets } from "@/lib/plugin/registries/command-safety-registry"
-import { generateConversationTitle } from "@/lib/ai/generation/title"
+import {
+  runTitleTask,
+  shouldGenerateTitle,
+  isPlaceholderTitle,
+} from "@/lib/ai/generation/run-title-task"
 import { generateTurnLabel } from "@/lib/ai/generation/turn-label"
 import { gateContinuation } from "@/lib/goal/pacing"
+import { parseSuggestedDelay } from "@/lib/goal/prompts"
+import { getLoopRuntime } from "@/lib/loop/runtime"
+import { handleLoopTurnComplete } from "@/lib/loop/turn-driver"
+import { gateLoopContinuation } from "@/lib/loop/pacing"
+import { renderLoopIterationMessage } from "@/lib/loop/prompts"
+import type { LoopStatus } from "@/types/loop"
 import type { GoalStatus } from "@/types/goal"
 import { attemptRoutingFallback } from "@/lib/claude/routing-fallback"
+import { notifyDroppedCapabilityOnce } from "@/lib/claude/dropped-capability-toast"
+import { notifyOverBudgetOnce } from "@/lib/claude/over-budget-toast"
 import { applyPlanModeBridge } from "@/lib/agent/plan-mode-bridge"
+import { steerBlocksOf, steerTextOf, type SteerMessageMeta } from "@/lib/claude/steer"
+import {
+  appendSteerMessage,
+  isSessionOpen,
+  markPendingSteersFailed,
+  maybeDrainSteer,
+  sessionExternalLane,
+  sessionStatusOf,
+  setSessionExternalLane,
+  setSteerMessageState,
+  steerArmed,
+} from "./steer-runtime"
+import {
+  maybeDrainBackgroundResults,
+  registerBackgroundReplaySend,
+} from "./background-result-runtime"
+import { getSubagentApprovalRoute } from "@/lib/claude/agents/subagent-approval-routes"
+import { tagBranchSiblings, tagEditSibling } from "@/lib/chat/branch-regen"
 import {
   approveTool,
   closeSession,
-  deleteMessage,
   interruptSession,
   onClaudeMessage,
   sendPrompt,
+  toolResultDecision,
 } from "@/lib/claude/ipc"
-import { detectPlatform } from "@/hooks/use-platform"
+import { isEmbeddedSession } from "@/lib/chat/session-exposure"
+import { gateWorkbenchProviderPayload } from "@/lib/context-workbench/provider-payload"
+import type { RemoteExecutionContext } from "@/lib/claude/remote-execution"
+import { COMPUTER_USE_PLUGIN_TOOL_NAMES } from "@/lib/claude/computer-use-tools"
+import { clearSessionGrants } from "@/lib/claude/computer-use-session-grants"
 
-// ADR-0020 W3 — the chat-modal session grant only ever applies to the
-// three plugin MCP tools that the `cognia-computer-use` plugin
-// contributes. Hard-coded as a tight const so a typo in a future tool
-// rename won't silently flip permissions on the wrong tool.
-const COMPUTER_USE_PLUGIN_TOOL_NAMES = new Set([
-  "computer_use",
-  "bash",
-  "text_editor",
-  // The sidecar surfaces them through the cognia-plugin-tools MCP, so
-  // the prefixed form lands on the chat side. Match both bare and
-  // prefixed in case the upstream renames the bridge.
-  "mcp__cognia-plugin-tools__computer_use",
-  "mcp__cognia-plugin-tools__bash",
-  "mcp__cognia-plugin-tools__text_editor",
-])
+// ADR-0020 W3 — keep grant recording and send-side suppression on the
+// same visual/execution tool-name contract.
+const COMPUTER_USE_PLUGIN_TOOL_NAME_SET = new Set<string>(COMPUTER_USE_PLUGIN_TOOL_NAMES)
 
 function isComputerUsePluginToolName(name: string): boolean {
-  return COMPUTER_USE_PLUGIN_TOOL_NAMES.has(name)
+  return COMPUTER_USE_PLUGIN_TOOL_NAME_SET.has(name)
 }
 import {
   armApprovalBackstop,
@@ -60,36 +92,109 @@ import { notifyRemoteNeedsInput } from "@/lib/companion/needs-input-notifier"
 import {
   listMessages,
   persistMessages,
-  truncateAfter,
+  persistStreamingMessages,
   updateMessageMetadata,
 } from "@/lib/db/messages"
-import { getDb } from "@/lib/db/schema"
-import { useRafThrottle, type RafThrottleHandle } from "@/hooks/workflow/use-raf-throttle"
+import { SessionCoalescingRegistry } from "@/hooks/chat/stream-coalescing"
 import {
-  useDebouncedCallback,
-  type DebouncedCallbackHandle,
-} from "@/hooks/workflow/use-debounced-callback"
-import { getSession, setSdkSessionId, touchSession, updateSession } from "@/lib/db/sessions"
+  getSession,
+  setSdkSessionId,
+  touchSession,
+  updateSession,
+  clearBranchSeed,
+  freezeImportedSession,
+} from "@/lib/db/sessions"
 import { recordResultUsage } from "@/lib/db/session-usage"
 import { recordProviderOutcome } from "@/lib/claude/provider-telemetry"
-import { endSpan, startSpan } from "@/lib/agent-trace/emitter"
+import { trackEvent } from "@/lib/telemetry/events/track-event"
+import { useInFlightStore } from "@/stores/settings/in-flight-store"
+import { endSpan, recordEvent, startSpan } from "@cognia/agent-trace/emitter"
+import { toTraceparent } from "@/lib/agent-trace/trace-context"
 import {
   clearToolSpansForSession,
   handleSdkEventForToolSpans,
-} from "@/lib/agent-trace/chat-tool-spans"
+  setToolSpanEventPublisher,
+} from "@cognia/agent-trace/chat-tool-spans"
+import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
+import { beginCodeAdoptionTurn } from "@/lib/code-adoption/client"
+import { markTaskWorkspaceTurnCancelled } from "@/lib/code-adoption/turn-tracker"
+import { runIdForTurn, taskIdForMessage } from "@/lib/task-workspace/client"
+import { openTaskWorkspaceRunLease } from "@/lib/task-workspace/run-lease"
+import { useTaskWorkspaceStore } from "@/stores/task-workspace-store"
 import { bumpUnread } from "@/lib/db/session-state"
 import { resolveSendOptions } from "@/lib/claude/build-options"
+import { useGitStore } from "@/stores/git/git-store"
+import { primaryRootOf } from "@/lib/workspace/roots"
+import { pendingRecoveryPhase } from "@/lib/usage/compaction-metrics"
+import {
+  buildChatMentionTargets,
+  resolveTargetAgentId,
+} from "@/lib/claude/agents/chat-mention-targets"
+import { discoverMarkdownAgentTargets } from "@/lib/claude/agents/markdown-mention-targets"
+import { resolveMentions } from "@/lib/chat/mentions/resolve-mentions"
 import { useProjectStore } from "@/stores/project/project-store"
+import { allRootPaths } from "@/lib/workspace/roots"
 import { isWorkspaceRestricted } from "@/lib/workspace/trust-gate"
 import {
   dispatchChatError as dispatchPluginChatError,
   dispatchUserPromptSubmit as dispatchPluginUserPromptSubmit,
   dispatchTokenUsage as dispatchPluginTokenUsage,
+  dispatchPostChatReceive as dispatchPluginPostChatReceive,
+  dispatchPreToolUse as dispatchPluginPreToolUse,
+  dispatchPostToolUse as dispatchPluginPostToolUse,
+  dispatchOnMessageSend as dispatchPluginMessageSend,
+  dispatchOnAssistantMessage as dispatchPluginAssistantMessage,
+  hasPostToolUseListeners,
 } from "@/lib/claude/adapter-hooks"
+
+setToolSpanEventPublisher((eventType, payload) => {
+  emitSystemBusEvent(eventType, payload)
+})
+
+// ── Plugin tool hooks (W3.1) ─────────────────────────────────────────────────
+// Correlates `tool_result_review` events back to the tool call's name + input
+// so `dispatchPostToolUse` receives real args. Fed from streamed assistant
+// `tool_use` blocks and from `permission_request` events; bounded so a long
+// session can't grow it unboundedly.
+const chatToolCallsById = new Map<string, { name: string; input: Record<string, unknown> }>()
+const behaviorTurnStartedAt = new Map<string, number>()
+
+function finishBehaviorTurn(sessionId: string): number | undefined {
+  const startedAt = behaviorTurnStartedAt.get(sessionId)
+  if (startedAt === undefined) return undefined
+  behaviorTurnStartedAt.delete(sessionId)
+  return Math.max(0, Date.now() - startedAt)
+}
+const CHAT_TOOL_CALLS_CAP = 500
+
+function rememberChatToolCall(id: string, name: string, input: Record<string, unknown>): void {
+  if (!id) return
+  if (chatToolCallsById.size >= CHAT_TOOL_CALLS_CAP) {
+    const oldest = chatToolCallsById.keys().next().value
+    if (oldest !== undefined) chatToolCallsById.delete(oldest)
+  }
+  chatToolCallsById.set(id, { name, input })
+}
+
+/** Pull assistant `tool_use` blocks out of a streamed SDK event envelope. */
+function rememberToolCallsFromSdkEvent(event: unknown): void {
+  const message = (event as { message?: { content?: unknown } } | undefined)?.message
+  const content = message?.content
+  if (!Array.isArray(content)) return
+  for (const block of content) {
+    const b = block as { type?: string; id?: string; name?: string; input?: unknown }
+    if (b?.type === "tool_use" && typeof b.id === "string" && typeof b.name === "string") {
+      rememberChatToolCall(b.id, b.name, (b.input as Record<string, unknown>) ?? {})
+    }
+  }
+}
 import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
 import { tryBuildMemoryDeps } from "@/lib/memory/runtime/build-deps"
+import { generateEmbedding } from "@cognia/provider-embedding/embedding"
 import { runTurnMemory } from "@/lib/memory/run-turn-memory"
 import { resolveMemoryConfig } from "@/types/memory/memory"
+import { isStandaloneChatMode } from "@/lib/runtime/standalone-mode"
+import { runStandaloneTurn } from "@/lib/ai/chat/standalone-engine"
 import type {
   ApprovalDecision,
   ChatSession,
@@ -98,13 +203,25 @@ import type {
   SDKEventEnvelope,
   SendContent,
   SendOptions,
-} from "@/lib/claude/types"
+} from "@cognia/agent-config-types"
+import { isSubSessionId } from "@/lib/claude/team-session-id"
 import { useChatStore } from "@/stores/chat"
+import { getExecutionBroker } from "@/lib/execution/broker"
+import { acquireChatLease } from "@/lib/execution/chat-lease"
+import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
+import {
+  selectSessionSubagents,
+  applySubagentsToMessages,
+  subagentSignature,
+} from "@/lib/claude/subagent-bridge"
 import { useSettingsStore } from "@/stores/settings"
-import { useAgentRuntimeStore } from "@/stores/agent"
+import { useAgentRuntimeStore, useExternalAgentStore } from "@/stores/agent"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import { routeAiRevision } from "@/lib/artifacts/route-ai-revision"
 import { isTauri } from "@/lib/tauri"
-import { mark as perfMark } from "@/lib/perf"
+import { isCapacitor } from "@/lib/platform/detect"
+import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
+import { chatTurnPerformance } from "@/lib/perf/chat-turn-performance"
 import type { UIMessage } from "ai"
 
 /**
@@ -135,17 +252,41 @@ function extractPlainText(message: UIMessage | undefined): string {
     .join("\n")
 }
 
+// The title gate + instant-preview predicate now live in the shared
+// title-task core so the chat and team hooks share one implementation.
+// Re-exported here to preserve the historical public surface (tests import
+// `shouldGenerateTitle` from this module).
+export { shouldGenerateTitle }
+
 /**
- * Decide whether the turn-complete path should generate an LLM conversation
- * title: the feature is on, this is the first assistant turn, and the title
- * hasn't been manually set. Exported for unit testing.
+ * Error surfaced on every in-flight session when the sidecar process dies.
+ *
+ * The sidecar does NOT emit a per-session `session_ended` on crash (only a
+ * single global `sidecar_exited`), so without this the foreground session
+ * freezes in `streaming` forever.
+ *
+ * This string is now ONLY a telemetry/log artifact for the agent-trace span.
+ * It used to be written into the session error as a sentinel and then
+ * string-compared back in `chat-view.tsx` to pick a localized message — a
+ * round-trip that existed purely because the store had no way to carry a code.
+ * The UI now reads the `sidecarExited` diagnostic directly, so this is
+ * deliberately module-private: re-exporting it invites the sentinel back.
  */
-export function shouldGenerateTitle(opts: {
-  titleEnabled: boolean | undefined
-  assistantCount: number
-  titleAuto: boolean | undefined
-}): boolean {
-  return opts.titleEnabled !== false && opts.assistantCount === 1 && opts.titleAuto !== false
+const SIDECAR_EXITED_TRACE_MESSAGE =
+  "The assistant process stopped unexpectedly. Your last turn was interrupted — retry to continue."
+
+/**
+ * Write the instant first-message title preview onto a session — but only when
+ * the session still carries a placeholder title (never clobber a user rename),
+ * re-reading a *fresh* row so a concurrent write can't be overwritten from a
+ * stale snapshot. Shared by both the external-agent and SDK send paths.
+ */
+async function applyInstantTitle(sessionId: string, content: SendContent): Promise<void> {
+  const preview = contentPreview(content, 40)
+  if (!preview) return
+  const fresh = await getSession(sessionId).catch(() => undefined)
+  if (fresh && !isPlaceholderTitle(fresh.title)) return
+  await updateSession(sessionId, { title: preview, titleAuto: true })
 }
 
 /**
@@ -175,29 +316,25 @@ function runUtilityModelTasks(sessionId: string, messages: UIMessage[]): void {
           titleAuto: sessionRow.titleAuto,
         })
       ) {
-        const client = buildUtilityLlmClient({
+        const firstUser = messages.find((m) => m.role === "user")
+        const firstAssistant = messages.find((m) => m.role === "assistant")
+        await runTitleTask({
           session: sessionRow,
           appSettings: settings,
           override: titleCfg,
           featureId: "conversation-title",
-        })
-        if (client) {
-          const firstUser = messages.find((m) => m.role === "user")
-          const firstAssistant = messages.find((m) => m.role === "assistant")
-          const title = await generateConversationTitle(client, {
-            firstUserText: extractPlainText(firstUser),
-            firstAssistantText: extractAssistantText(firstAssistant),
-            locale,
-          })
+          sourceText: extractPlainText(firstUser),
+          resultText: extractAssistantText(firstAssistant),
+          locale,
+          currentTitle: sessionRow.title,
           // Re-read titleAuto before writing — the user may have renamed the
           // session while the model call was in flight.
-          if (title) {
+          isStillAuto: async () => {
             const fresh = await getSession(sessionId).catch(() => undefined)
-            if (!fresh || fresh.titleAuto !== false) {
-              await updateSession(sessionId, { title, titleAuto: true })
-            }
-          }
-        }
+            return !fresh || fresh.titleAuto !== false
+          },
+          persist: (title) => updateSession(sessionId, { title, titleAuto: true }),
+        })
       }
 
       // ── Timeline minimap label for the latest user turn (opt-in) ──
@@ -280,7 +417,12 @@ function runMemoryTasks(sessionId: string, messages: UIMessage[]): void {
   void runTurnMemory(sessionId, {
     userText: extractPlainText(lastUser),
     assistantText: extractAssistantText(lastAssistant),
-    transcript: messages.map((m) => ({ role: m.role, text: extractPlainText(m) })),
+    assistantMessageId: lastAssistant?.id,
+    transcript: messages.map((m) => ({
+      role: m.role,
+      text: extractPlainText(m),
+      parts: m.parts,
+    })),
   })
 }
 
@@ -288,7 +430,12 @@ function runMemoryTasks(sessionId: string, messages: UIMessage[]): void {
 type SendFn = (
   content: SendContent,
   opts?: SendOptions,
-  callOptions?: { skipUserAppend?: boolean }
+  callOptions?: {
+    skipUserAppend?: boolean
+    bypassDelegation?: boolean
+    sessionId?: string
+    steerDrain?: boolean
+  }
 ) => Promise<void>
 
 /**
@@ -331,7 +478,8 @@ function scheduleGoalContinuation(
   sessionId: string,
   userMessage: string,
   sendRef: React.MutableRefObject<SendFn | null>,
-  activeRef: React.MutableRefObject<string | null>
+  activeRef: React.MutableRefObject<string | null>,
+  suggestedDelayMs?: number
 ): void {
   clearPendingContinuation(goalId)
   void (async () => {
@@ -339,7 +487,15 @@ function scheduleGoalContinuation(
     // Goal paused/stopped/replaced, or session backgrounded → drop silently.
     if (!goal || goal.id !== goalId || sessionId !== activeRef.current) return
 
-    const gate = gateContinuation(goal, Date.now(), goalLastContinuationAt.get(goalId))
+    const gate = gateContinuation(
+      goal,
+      Date.now(),
+      goalLastContinuationAt.get(goalId),
+      suggestedDelayMs
+    )
+    // Stamp nextContinuationAt (+ audit on defer) so the pill can show the
+    // schedule — best-effort, runs in the background.
+    void getGoalRuntime().recordPacingDecision(goalId, gate, suggestedDelayMs)
     if (gate.kind === "send") {
       goalLastContinuationAt.set(goalId, Date.now())
       void sendRef.current?.(userMessage, undefined, { skipUserAppend: true })
@@ -352,15 +508,86 @@ function scheduleGoalContinuation(
       })
       goalManualUnsub.set(goalId, unsub)
     } else {
-      // defer — re-gate at untilMs (quiet-hours window end / interval gap).
+      // defer — re-gate at untilMs (quiet-hours window end / interval gap /
+      // model-suggested delay). The suggestion threads through the timer
+      // recursion so the re-gate sees the same request.
       const delay = Math.max(0, gate.untilMs - Date.now())
       const timer = setTimeout(() => {
         goalDeferTimers.delete(goalId)
-        scheduleGoalContinuation(goalId, sessionId, userMessage, sendRef, activeRef)
+        scheduleGoalContinuation(
+          goalId,
+          sessionId,
+          userMessage,
+          sendRef,
+          activeRef,
+          suggestedDelayMs
+        )
       }, delay)
       goalDeferTimers.set(goalId, timer)
     }
   })()
+}
+
+/** Active defer timers, per self-paced loop. */
+const loopDeferTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+/** Tear down any pending continuation timer for a loop. */
+function clearPendingLoopContinuation(loopId: string): void {
+  const timer = loopDeferTimers.get(loopId)
+  if (timer) {
+    clearTimeout(timer)
+    loopDeferTimers.delete(loopId)
+  }
+}
+
+/**
+ * Schedule (or defer) a self-paced loop continuation. Mirrors
+ * `scheduleGoalContinuation`: re-reads the loop each attempt so a
+ * pause/stop between the turn-driver decision and dispatch cancels
+ * cleanly; the defer timer re-invokes this to re-gate.
+ */
+function scheduleLoopContinuation(
+  loopId: string,
+  sessionId: string,
+  userMessage: string,
+  sendRef: React.MutableRefObject<SendFn | null>,
+  activeRef: React.MutableRefObject<string | null>
+): void {
+  clearPendingLoopContinuation(loopId)
+  void (async () => {
+    const loop = await getLoopRuntime().getActiveLoopForSession(sessionId)
+    // Loop paused/stopped/replaced, or session backgrounded → drop silently.
+    if (!loop || loop.id !== loopId || sessionId !== activeRef.current) return
+
+    const gate = gateLoopContinuation(loop, Date.now())
+    if (gate.kind === "send") {
+      void sendRef.current?.(userMessage, undefined, { skipUserAppend: true })
+    } else {
+      const delay = Math.max(0, gate.untilMs - Date.now())
+      const timer = setTimeout(() => {
+        loopDeferTimers.delete(loopId)
+        scheduleLoopContinuation(loopId, sessionId, userMessage, sendRef, activeRef)
+      }, delay)
+      loopDeferTimers.set(loopId, timer)
+    }
+  })()
+}
+
+/**
+ * System card for a /loop terminal state. Hard-coded English, consistent
+ * with the goal exit card below and the slash-command cards.
+ */
+function renderLoopExitCard(resultingStatus: LoopStatus, reason: string): string {
+  const head: Record<string, string> = {
+    completed: "✅ **Loop completed**",
+    iteration_limited: "🛑 **Loop stopped — iteration cap reached**",
+    budget_limited: "🛑 **Loop stopped — token budget reached**",
+    expired: "⏱️ **Loop stopped — 7-day expiry**",
+    stopped: "⏹️ **Loop stopped**",
+    error: "⚠️ **Loop stopped — repeated trailer parse failures**",
+  }
+  const title = head[resultingStatus] ?? `🔁 **Loop ${resultingStatus}**`
+  return reason ? `${title}\n\n> ${reason}` : title
 }
 
 /**
@@ -389,6 +616,8 @@ function renderGoalExitCard(resultingStatus: GoalStatus, reason: string): string
  */
 export function useClaudeChat() {
   const store = useChatStore
+  const tRouting = useTranslations("providers.routingView")
+  const tInlineErr = useTranslations("chat.inlineError")
   // The active session id is captured per-render via a ref so the long-lived
   // event handler always sees the freshest value without resubscribing.
   const activeRef = useRef<string | null>(null)
@@ -403,15 +632,38 @@ export function useClaudeChat() {
   const messagesMirrorRef = useRef<Map<string, UIMessage[]>>(new Map())
   useEffect(() => {
     const unsub = useChatStore.subscribe((s) => {
-      if (activeRef.current !== s.activeSessionId) {
-        // Session switched — the prior session's streaming mirror is no longer
-        // the active base; drop the whole map so the next read hits the store.
-        messagesMirrorRef.current.clear()
-      }
+      // Concurrent sessions: the mirror is keyed per session and survives focus
+      // changes — a background session that is mid-stream keeps its
+      // authoritative base so switching away/back never drops its tokens. Each
+      // session's entry is cleared at its own turn boundary (turnComplete /
+      // session_ended) and on a new send/edit/regenerate, not on focus switch.
       activeRef.current = s.activeSessionId
     })
     activeRef.current = useChatStore.getState().activeSessionId
     return unsub
+  }, [])
+
+  // Surface dispatched sub-agent runs inline in the chat. `recordDispatch*`
+  // (the dispatch runtime store) is the producer; this is the consumer the
+  // subagent-bridge docstring promised. For the active session it folds each
+  // run's tree onto the spawning assistant turn, deduped by a cheap signature
+  // so progress ticks don't rewrite the message array needlessly.
+  const subagentSigRef = useRef<string>("")
+  useEffect(() => {
+    const apply = () => {
+      const sid = useChatStore.getState().activeSessionId
+      if (!sid) return
+      const subs = selectSessionSubagents(useSubagentRuntimeStore.getState().subAgents, sid)
+      const sig = subagentSignature(subs)
+      if (sig === subagentSigRef.current) return
+      subagentSigRef.current = sig
+      if (subs.length === 0) return
+      const current = useChatStore.getState().messages
+      const next = applySubagentsToMessages(current, subs)
+      if (next !== current) useChatStore.getState().replaceMessages(next)
+    }
+    apply()
+    return useSubagentRuntimeStore.subscribe(apply)
   }, [])
 
   // Always-allow tool list — also kept fresh via ref.
@@ -428,6 +680,9 @@ export function useClaudeChat() {
   // re-deriving from message parts (which lose the original SendContent shape
   // when they include attachments).
   const lastUserContentRef = useRef<Map<string, SendContent>>(new Map())
+  // Private resource context is kept outside the message log. It is reused for
+  // regenerate/edit-resend, but is only attached after plugin prompt hooks.
+  const lastResourceContextRef = useRef<Map<string, string>>(new Map())
   /**
    * Pending branch tag set by `regenerate` and consumed by the first
    * assistant message that arrives afterward. Keyed by sessionId so a regen
@@ -457,58 +712,56 @@ export function useClaudeChat() {
    */
   const eventQueuesRef = useRef<Map<string, Promise<void>>>(new Map())
 
-  /**
-   * Coalesce the React-visible store commit to ≤1 per animation frame during
-   * streaming. SDK events can arrive dozens of times per second; without this
-   * each one triggers a synchronous re-render of the message-list subtree.
-   * Latest snapshot wins.
-   */
-  const commit = useRafThrottle((msgs: UIMessage[]) => {
-    useChatStore.getState().replaceMessages(msgs)
-  })
+  // Per-session AbortControllers for in-flight standalone (BYOK) turns, so Stop
+  // can cancel the renderer streamText loop (the sidecar path uses
+  // `interruptSession` instead).
+  const standaloneAbortRef = useRef<Map<string, AbortController>>(new Map())
 
   /**
-   * Debounce the Dexie write during streaming so we don't run a transaction
-   * per token. Flushed (and the final state awaited) on turnComplete. 0ms in
-   * tests degrades to synchronous so existing persist-ordering assertions hold.
+   * Per-session streaming coalescers. Each open session gets its own
+   * rAF-throttled React commit (≤1/frame) + debounced Dexie write so multiple
+   * sessions can stream concurrently without their pending snapshots clobbering
+   * each other. The commit pushes into that session's slice via the
+   * session-scoped store action (which re-projects onto the top-level fields
+   * when the session is the focused one). 0ms persist in tests degrades to
+   * synchronous so existing persist-ordering assertions hold.
    */
   const PERSIST_DEBOUNCE_MS = process.env.NODE_ENV === "test" ? 0 : 250
-  const persistDebounced = useDebouncedCallback((sid: string, msgs: UIMessage[]) => {
-    void persistMessages(sid, msgs).catch((err) =>
-      console.error("debounced persistMessages failed", err)
-    )
-  }, PERSIST_DEBOUNCE_MS)
+  // Stable across renders (lazy `useState` initializer — created once, never
+  // accessed as a ref during render).
+  const [registry] = useState(
+    () =>
+      new SessionCoalescingRegistry({
+        onCommit: (sid, msgs) => {
+          useChatStore.getState().replaceSessionMessages(sid, msgs)
+          // Stamp per-tool start/end times off the freshly-committed parts so the
+          // Run Panel can show per-tool elapsed (no-op when nothing transitioned).
+          useChatStore.getState().syncToolTimestamps(sid, msgs)
+        },
+        onPersist: (sid, msgs) =>
+          void persistStreamingMessages(sid, msgs).catch((err) =>
+            console.error("debounced persistStreamingMessages failed", err)
+          ),
+        persistDelayMs: PERSIST_DEBOUNCE_MS,
+      })
+  )
 
-  // The handle objects are recreated each render (only their `call`/`flush`/
-  // `cancel` members are stable), so we read them through refs — both from the
-  // long-lived event handler and from the send/stop/edit/regenerate callbacks —
-  // to keep their dependency arrays free of an unstable object.
-  const commitRef = useRef<RafThrottleHandle<[UIMessage[]]>>(commit)
-  const persistRef = useRef<DebouncedCallbackHandle<[string, UIMessage[]]>>(persistDebounced)
+  // Best-effort flush of every session's pending streaming write on unmount so
+  // the last partial isn't lost when the hook tears down mid-turn.
   useEffect(() => {
-    commitRef.current = commit
-    persistRef.current = persistDebounced
-  })
-
-  // Best-effort flush of any pending streaming write on unmount so the last
-  // partial isn't lost when the hook tears down mid-turn.
-  useEffect(() => {
-    const persist = persistRef
     return () => {
-      persist.current.flush()
+      registry.flushAllPersist()
+      registry.clear()
     }
-  }, [])
+  }, [registry])
 
-  // Subscribe to sidecar events once.
-  useEffect(() => {
-    if (!isTauri()) return
-    let unlisten: UnlistenFn | null = null
-    let cancelled = false
-
-    onClaudeMessage((evt) => {
-      // Key by session so same-session events serialize; events without a
-      // session id (ready/log/sidecar_exited) share one chain — they're cheap
-      // no-ops in handleEvent but still kept in arrival order.
+  // Route one ClaudeEvent into the per-session serialized queue → `handleEvent`.
+  // Keyed by session so same-session events serialize; events without a session
+  // id (ready/log/sidecar_exited) share one chain. Shared by the Tauri transport
+  // subscription AND the standalone (BYOK) engine, so both producers drive the
+  // identical store/coalescing/persistence path.
+  const enqueueClaudeEvent = useCallback(
+    (evt: ClaudeEvent) => {
       const key =
         typeof (evt as { sessionId?: unknown }).sessionId === "string"
           ? (evt as { sessionId: string }).sessionId
@@ -520,8 +773,7 @@ export function useClaudeChat() {
         .then(() =>
           handleEvent(evt, activeRef, allowListRef, pendingBranchTagRef, sendRef, {
             messagesMirrorRef,
-            commitRef,
-            persistRef,
+            registry,
           })
         )
         .catch((err) => {
@@ -532,7 +784,22 @@ export function useClaudeChat() {
       void tail.finally(() => {
         if (queues.get(key) === tail) queues.delete(key)
       })
-    })
+      return tail
+    },
+    [registry]
+  )
+
+  // Subscribe to sidecar events once. Desktop gets them via Tauri events;
+  // Capacitor / web-companion renderers get the same `claude://message`
+  // channel mirrored over the companion events WebSocket (event_bus.rs), which
+  // is what carries the mobile workflow copilot's streamed turns. Plain web
+  // (WebStubTransport) has no event source — skip the subscription.
+  useEffect(() => {
+    if (!isTauri() && !isCapacitor() && !hasWebCompanionTarget()) return
+    let unlisten: UnlistenFn | null = null
+    let cancelled = false
+
+    onClaudeMessage((evt) => enqueueClaudeEvent(evt as ClaudeEvent))
       .then((u) => {
         if (cancelled) u()
         else unlisten = u
@@ -545,7 +812,7 @@ export function useClaudeChat() {
       cancelled = true
       unlisten?.()
     }
-  }, [])
+  }, [enqueueClaudeEvent])
 
   /**
    * Send a user prompt to the active session.
@@ -561,15 +828,161 @@ export function useClaudeChat() {
         /** Skip the optimistic user-message append. Used by `regenerate` so we
          *  don't duplicate the user turn when re-issuing the SDK request. */
         skipUserAppend?: boolean
+        /** Skip Thread-B delegation routing. Set on the built-in fallback
+         *  re-entry so a failed external delegation runs the SDK path without
+         *  re-evaluating (and re-matching) the delegation rules. */
+        bypassDelegation?: boolean
+        /** This turn is the steer queue replaying itself. Like `skipUserAppend`
+         *  it must not append a user message (each queued entry was already
+         *  shown optimistically when typed), but unlike it this IS a genuine
+         *  user turn: it still pauses a self-driving goal/loop, still counts as
+         *  a sent message, and still goes through delegation routing. Kept as
+         *  its own flag rather than reusing `skipUserAppend` precisely so those
+         *  three behaviors don't silently disappear. */
+        steerDrain?: boolean
+        /** Target session — defaults to the focused session. A multi-pane
+         *  composer passes its own session id so each pane sends to itself. */
+        sessionId?: string
+        /** Private Context Workbench snapshot/selection. This is never exposed
+         *  to plugin prompt hooks or persisted as visible message content. */
+        resourceContext?: string
+        /** Provenance for the leading attachment blocks, from
+         *  `buildSendContent`. Lets the optimistic user message render file
+         *  cards (with filenames) instead of raw extracted text. */
+        attachmentManifest?: readonly AttachmentManifestEntry[]
+        /** Stamp the optimistic USER message into a branch group.
+         *
+         *  Set by `editAndResend`, which keeps the original question as a
+         *  sibling instead of deleting it. Passed explicitly rather than via a
+         *  pending-tag ref (the shape `regenerate` uses) because the message
+         *  being tagged is created right here — a ref would have to survive
+         *  until an SDK event arrives, which is only necessary when the target
+         *  is an assistant message that does not exist yet. */
+        branchTag?: { groupId: string; index: number }
       }
     ) => {
-      const sessionId = useChatStore.getState().activeSessionId
+      const sessionId = callOptions?.sessionId ?? useChatStore.getState().activeSessionId
       if (!sessionId) {
-        useChatStore.getState().setError("No session selected")
+        useChatStore.getState().setError(tInlineErr("noSession"))
         return
       }
       if (typeof content === "string" && !content.trim()) return
       if (Array.isArray(content) && content.length === 0) return
+
+      // Concurrency cap backstop: never start a turn over the global execution
+      // ceiling. The composer already disables send + shows the inline over-cap
+      // notice; this guards programmatic sends too. A session that is already
+      // streaming is a continuation and never blocked (the broker exempts it).
+      // The cap now reflects the unified ExecutionBroker occupancy — headless
+      // legs (scheduler / connector / workflow / team) included — not just the
+      // renderer's streaming panels.
+      if (getExecutionBroker().isAtCapacity("ai-turn", sessionId)) {
+        console.warn("send blocked: concurrent stream cap reached", { sessionId })
+        return
+      }
+
+      // Steer instead of restart: a fresh user turn while THIS session is still
+      // streaming / awaiting approval must never re-enter the normal send path —
+      // a same-session send during a live turn makes the sidecar
+      // close-and-restart it (host `restartReason`), silently dropping its
+      // context. Internal re-issues (regenerate / routing fallback) pass
+      // `skipUserAppend`, and the queue's own replay passes `steerDrain`; both
+      // bypass this.
+      if (!callOptions?.skipUserAppend && !callOptions?.steerDrain) {
+        const st = sessionStatusOf(sessionId)
+        if (st === "streaming" || st === "awaiting_approval") {
+          const text = steerTextOf(content)
+          const blocks = steerBlocksOf(content)
+          if (!text && blocks.length === 0) return
+
+          // Show it immediately, in the user's own words. The model-facing
+          // framing (`STEER_PREFIX`) is added only on the replay payload; the
+          // transcript renders the original text via `stripSteerPrefix`. The
+          // `steer` metadata rides along into Dexie so a restart can tell a
+          // delivered follow-up from one that never arrived.
+          const entryId = crypto.randomUUID()
+          const steerMeta: SteerMessageMeta = { entryId, state: "queued" }
+          const optimistic = makeUserMessage(content)
+          ;(optimistic as { metadata?: Record<string, unknown> }).metadata = {
+            ...((optimistic as { metadata?: Record<string, unknown> }).metadata ?? {}),
+            steer: steerMeta,
+          }
+          appendSteerMessage(sessionId, optimistic)
+
+          // Live steer — the message reaches the model without ending the turn.
+          // Two lanes, both best-effort: an external adapter implementing
+          // turn/steer (Codex app-server), or the Anthropic sidecar's streaming
+          // input. Acceptance means the sidecar queued it into the running
+          // query, NOT that the model has already acted on it, so the bubble
+          // says "accepted" until the turn settles. Anything else (unsupported
+          // provider, input already closed, transport hiccup) falls through to
+          // the durable queue below.
+          //
+          // `awaiting_approval` is included deliberately: a turn paused on a
+          // tool prompt still holds its input open, and it is the moment when
+          // redirecting matters most — the composer stays writable there for
+          // exactly that reason.
+          //
+          // The lane comes from what THIS session dispatched
+          // (`sessionExternalLane`), not the composer's global runtime pick,
+          // which in split view describes whichever pane happens to be focused.
+          const externalAgentId = sessionExternalLane(sessionId)
+          if (externalAgentId) {
+            // Adapter steering carries text only (`turn/steer` takes a string),
+            // so an attachment-only follow-up has to queue on this lane.
+            if (text) {
+              try {
+                const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
+                const mgr = getExternalAgentManager()
+                if (mgr.supportsSteering(externalAgentId)) {
+                  await mgr.steerSession(externalAgentId, undefined, text)
+                  setSteerMessageState(sessionId, entryId, "accepted")
+                  return
+                }
+              } catch (err) {
+                console.warn("live steer failed; queueing instead", err)
+              }
+            }
+          } else {
+            // Anthropic streaming input. `steerSession` is PII-gated and rejects
+            // non-Anthropic providers sidecar-side, so a wrong-provider session
+            // simply falls through to the queue. It takes the whole `content`,
+            // so an attachment-only follow-up goes live here too.
+            try {
+              const { steerSession } = await import("@/lib/claude/ipc")
+              await steerSession(sessionId, content)
+              setSteerMessageState(sessionId, entryId, "accepted")
+              return
+            } catch (err) {
+              console.warn("live steer failed; queueing instead", err)
+            }
+          }
+
+          useChatStore.getState().enqueueSteer(sessionId, {
+            id: entryId,
+            text,
+            blocks: blocks.length > 0 ? blocks : undefined,
+          })
+          return
+        }
+      }
+
+      // The turn is definitely running now, so make disk honest before the agent's
+      // file tools read it. Those tools go straight to the filesystem, so a buffer
+      // the user edited but never saved is invisible to them: the agent would
+      // reason about stale content and its write would then clobber that work.
+      // No-op when no project editor is mounted, which is the common case.
+      const unflushed = await flushProjectEditorEdits()
+      if (unflushed.length > 0) {
+        // Proceed anyway — the turn may not touch these files at all — but say so,
+        // because for those files disk is not what the user is looking at.
+        toast.warning(
+          tInlineErr("unflushedEditorBuffers", {
+            count: unflushed.length,
+            files: unflushed.join(", "),
+          })
+        )
+      }
 
       const session = await getSession(sessionId)
 
@@ -581,6 +994,16 @@ export function useClaudeChat() {
       if (!callOptions?.skipUserAppend) {
         const openGoal = await getGoalRuntime().getActiveGoalForSession(sessionId)
         if (openGoal) await getGoalRuntime().pauseGoal(openGoal.id)
+        // Same posture for a self-paced /loop: a fresh user message is
+        // mid-course guidance — pause rather than fight over the session.
+        // Loop kick-offs and continuations pass `skipUserAppend`, so they
+        // never trip this branch. Interval loops fire through the scheduler
+        // and are unaffected by manual chatting.
+        const openLoop = await getLoopRuntime().getActiveLoopForSession(sessionId)
+        if (openLoop?.mode === "self_paced") {
+          clearPendingLoopContinuation(openLoop.id)
+          await getLoopRuntime().pauseLoop(openLoop.id)
+        }
       }
 
       // Extract a plain-text version of the user message for twin RAG. The
@@ -591,7 +1014,22 @@ export function useClaudeChat() {
         typeof content === "string"
           ? content
           : (content.find((b) => b.type === "text") as { text?: string } | undefined)?.text
-      let sendOptions = opts ?? (await buildSendOptions(session, userMessageText))
+      let sendOptions: SendOptions
+      try {
+        sendOptions = opts ?? (await buildSendOptions(session, userMessageText))
+      } catch (err) {
+        // RoutingNoCandidatesError (alias matched, every deployment down)
+        // and any other resolver failure surface as the chat error instead
+        // of an unhandled rejection.
+        const error = err instanceof Error ? err : new Error(String(err))
+        useChatStore
+          .getState()
+          .setSessionDiagnostic(
+            sessionId,
+            toDiagnostic(error, { source: "chat", meta: { sessionId } })
+          )
+        return
+      }
 
       // ephemeralSkillIds were consumed by buildSendOptions; clear them so
       // the next turn starts with a fresh attachment set.
@@ -617,6 +1055,28 @@ export function useClaudeChat() {
         useChatStore.getState().setPendingCommandOverrides(null)
       }
 
+      // Plugin PostToolUse (W3.1): only pay for the sidecar's
+      // tool_result_review round-trip when a plugin actually listens. The
+      // review events are answered in the `tool_result_review` case of the
+      // message pump below.
+      if (hasPostToolUseListeners()) {
+        sendOptions = { ...sendOptions, toolResultReviewEnabled: true }
+      }
+
+      // Advisory daily-budget overage — the routing engine selected a provider
+      // that is past its dailyCostBudget because nothing under budget was
+      // available. Surface once per provider per local day; never blocks.
+      notifyOverBudgetOnce(sendOptions.routingDecision?.overBudgetWarning, (v) =>
+        tRouting("overBudgetToast", v)
+      )
+
+      // Advisory capability drop — the chosen reasoning effort was silently
+      // dropped because the resolved model can't honour it. Surface once per
+      // model so the setting doesn't vanish without feedback; never blocks.
+      notifyDroppedCapabilityOnce(sendOptions.droppedCapabilityWarning, (v) =>
+        tRouting("droppedEffortToast", v)
+      )
+
       // Plugin opt-in — fire `onUserPromptSubmit` before the network call.
       // Block / modify / proceed semantics:
       //   • "block" — surface the plugin's reason as the chat error and bail.
@@ -638,7 +1098,14 @@ export function useClaudeChat() {
         {} as never
       )
       if (promptDecision.action === "block") {
-        store.getState().setError(promptDecision.reason ?? "A plugin blocked this prompt.")
+        store.getState().setSessionDiagnostic(
+          sessionId,
+          createDiagnostic("promptBlockedByPlugin", {
+            source: "plugin",
+            message: promptDecision.reason ?? "",
+            meta: { sessionId },
+          })
+        )
         return
       }
       if (promptDecision.action === "modify") {
@@ -669,31 +1136,191 @@ export function useClaudeChat() {
         }
       }
 
-      // Capture text from the (possibly plugin-modified) effective content.
-      const effectiveText =
-        typeof effectiveContent === "string"
-          ? effectiveContent
-          : ((effectiveContent.find((b) => b.type === "text") as { text?: string } | undefined)
-              ?.text ?? "")
+      // Pipeline hook (W3.3): `onMessageSend` — plugins may rewrite the
+      // outgoing user message. Same text-only constraint as `modifiedPrompt`;
+      // attachments and non-text blocks are untouched. Runs AFTER
+      // onUserPromptSubmit so a block decision wins over a rewrite.
+      {
+        const outboundText =
+          typeof effectiveContent === "string"
+            ? effectiveContent
+            : ((effectiveContent.find((b) => b.type === "text") as { text?: string } | undefined)
+                ?.text ?? "")
+        const piped = await dispatchPluginMessageSend({
+          id: `${sessionId}:outbound`,
+          role: "user",
+          content: outboundText,
+        })
+        if (typeof piped?.content === "string" && piped.content !== outboundText) {
+          if (typeof effectiveContent === "string") {
+            effectiveContent = piped.content
+          } else {
+            effectiveContent = effectiveContent.map((block) =>
+              block.type === "text" ? ({ ...block, text: piped.content } as typeof block) : block
+            )
+          }
+        }
+      }
 
       // New turn: drop any coalesced/debounced streaming work and the mirror
-      // from a prior turn so this turn's events read the fresh optimistic base.
-      commitRef.current.cancel()
-      persistRef.current.cancel()
+      // from a prior turn (this session only) so its events read the fresh
+      // optimistic base. Other sessions' coalescing is untouched.
+      registry.release(sessionId)
       messagesMirrorRef.current.delete(sessionId)
 
       // Optimistic user-message append. Skipped during regenerate so the
       // existing user anchor stays the single source of truth for that turn.
-      const previousMessages = useChatStore.getState().messages
-      const userMsg = makeUserMessage(effectiveContent)
-      const next = callOptions?.skipUserAppend ? previousMessages : [...previousMessages, userMsg]
-      if (!callOptions?.skipUserAppend) {
-        store.getState().replaceMessages(next)
+      // Base off this session's own slice — never the focused projection.
+      const previousMessages = store.getState().sessions[sessionId]?.messages ?? []
+      const userMsg = makeUserMessage(effectiveContent, undefined, callOptions?.attachmentManifest)
+      // Structured mention capture: persist the message's inline `@…` tokens
+      // as `metadata.mentions: ContextRef[]` so mentions are queryable without
+      // regex re-parsing. Known subagent handles resolve to their kind; other
+      // tokens fall back to `file` (the CLI's native reading of `@path`).
+      // Markdown-agent handles need async discovery and resolve as `file`
+      // here — a documented v1 narrowing, not a routing change (routing still
+      // uses the full union in resolveTargetAgentId below).
+      const mentionSourceText =
+        typeof effectiveContent === "string"
+          ? effectiveContent
+          : effectiveContent
+              .filter((b): b is Extract<typeof b, { type: "text" }> => b.type === "text")
+              .map((b) => b.text)
+              .join("\n")
+      if (mentionSourceText.includes("@")) {
+        const mentionTargets = buildChatMentionTargets()
+        const mentionRefs = resolveMentions(mentionSourceText, {
+          resolveAgentHandle: (name) => {
+            const hit = mentionTargets.find((t) => t.handle === name)
+            return hit ? { kind: "subagent", id: hit.handle, label: hit.name } : null
+          },
+        })
+        if (mentionRefs.length > 0) {
+          ;(userMsg as { metadata?: Record<string, unknown> }).metadata = {
+            ...((userMsg as { metadata?: Record<string, unknown> }).metadata ?? {}),
+            mentions: mentionRefs,
+          }
+        }
       }
-      store.getState().setStatus("streaming")
-      perfMark("stream-start")
-      store.getState().setError(null)
-      lastUserContentRef.current.set(sessionId, effectiveContent)
+      // Edit-as-branch: the replacement joins the original's sibling group, and
+      // is selected right away so the user sees their edit rather than watching
+      // it disappear behind a previously-pinned sibling.
+      if (callOptions?.branchTag) {
+        ;(userMsg as { metadata?: Record<string, unknown> }).metadata = {
+          ...((userMsg as { metadata?: Record<string, unknown> }).metadata ?? {}),
+          branchGroupId: callOptions.branchTag.groupId,
+          branchIndex: callOptions.branchTag.index,
+        }
+        store
+          .getState()
+          .setSessionActiveBranch(sessionId, callOptions.branchTag.groupId, userMsg.id)
+      }
+      // Both flags mean "the user turn is already in the transcript": a
+      // regenerate re-issues an existing one, a steer drain replays entries that
+      // were appended optimistically when typed. Appending again would double
+      // them. They diverge only on the *other* effects of a user turn — see
+      // `steerDrain`'s doc on the option type.
+      const skipAppend = callOptions?.skipUserAppend === true || callOptions?.steerDrain === true
+      const next = skipAppend ? previousMessages : [...previousMessages, userMsg]
+      const displayContent = effectiveContent
+      const shouldGateWorkbenchPayload =
+        callOptions?.resourceContext !== undefined || isEmbeddedSession(session ?? {})
+      const providerPayload = shouldGateWorkbenchPayload
+        ? gateWorkbenchProviderPayload(
+            { content: displayContent, sendOptions, messages: next },
+            callOptions?.resourceContext
+          )
+        : { content: displayContent, sendOptions, messages: next }
+      effectiveContent = providerPayload.content
+      sendOptions = providerPayload.sendOptions
+      const providerText =
+        typeof effectiveContent === "string"
+          ? effectiveContent
+          : ((
+              effectiveContent.find((block) => block.type === "text") as
+                { text?: string } | undefined
+            )?.text ?? "")
+      if (!skipAppend) {
+        store.getState().replaceSessionMessages(sessionId, next)
+      }
+      // Register this chat turn with the global execution broker so it counts
+      // toward — and is observable / cancellable via — the same governor as
+      // every headless leg. Acquired before the `streaming` flip so the broker
+      // watcher releases it on settle; gated by the `isAtCapacity` check above,
+      // so it admits immediately. Best-effort: a broker hiccup never blocks the
+      // turn the user already committed to.
+      try {
+        await acquireChatLease({
+          sessionId,
+          projectId: session?.projectId,
+          label: session?.title || `#${sessionId.slice(0, 8)}`,
+        })
+      } catch (leaseErr) {
+        console.warn("chat lease acquire failed; sending without admission", leaseErr)
+      }
+      store.getState().setSessionStatus(sessionId, "streaming")
+      chatTurnPerformance.begin(sessionId)
+      store.getState().setSessionError(sessionId, null)
+      lastUserContentRef.current.set(sessionId, displayContent)
+      if (callOptions?.resourceContext !== undefined) {
+        lastResourceContextRef.current.set(sessionId, callOptions.resourceContext)
+      }
+      // Plugin bus: the turn has committed (past the prompt-submit block gate).
+      // ids only — never the prompt text (PII red-line). Covers all run paths
+      // (external + SDK) since this is upstream of the branch below.
+      emitSystemBusEvent(SystemEvents.MESSAGE_SENT, { sessionId })
+      emitSystemBusEvent(SystemEvents.AGENT_STARTED, { sessionId })
+      if (!callOptions?.skipUserAppend) {
+        behaviorTurnStartedAt.set(sessionId, Date.now())
+        void trackEvent("chat.message.sent", {
+          sessionId,
+          provider:
+            sendOptions.provider ??
+            (useAgentRuntimeStore.getState().runtime === "external" ? "external" : "unknown"),
+          surface: "chat",
+        })
+      }
+
+      // Experimental task workspace: snapshot the live workspace and redirect
+      // this turn into an isolated worktree/shadow root before any agent starts.
+      // Regenerate/continuation keeps the same user-message task id while the
+      // chat run id creates a distinct TaskRun version.
+      const chatRunId = store.getState().sessions[sessionId]?.runId ?? 0
+      if (
+        useSettingsStore.getState().settings?.developer?.taskWorkspace === true &&
+        sendOptions.cwd
+      ) {
+        const anchorMessage = skipAppend
+          ? [...previousMessages].reverse().find((message) => message.role === "user")
+          : userMsg
+        const taskEnvelope = {
+          taskId: taskIdForMessage(anchorMessage?.id ?? userMsg.id),
+          sessionId,
+          runId: runIdForTurn(sessionId, chatRunId),
+          executionRunId: runIdForTurn(sessionId, chatRunId),
+          turnId: anchorMessage?.id ?? userMsg.id,
+          attemptId: "a1",
+          surface: "chat",
+          agentId: "built-in",
+          agentKind: "in-app",
+          workspaceRoot: sendOptions.cwd,
+        }
+        const taskLease = await openTaskWorkspaceRunLease(taskEnvelope)
+        sendOptions = { ...sendOptions, taskWorkspace: taskEnvelope }
+        if (taskLease) {
+          sendOptions = { ...sendOptions, cwd: taskLease.run.executionRoot }
+        }
+      }
+
+      // Code-adoption tracking (Phase 1): open a per-turn attribution window.
+      // Fire-and-forget — must never block or disrupt the turn. `runId` is read
+      // back from the store, whose streaming flip above bumped it for this turn.
+      void beginCodeAdoptionTurn(sendOptions.cwd, {
+        sessionId,
+        runId: chatRunId,
+        model: sendOptions.model ?? null,
+        agentKind: "in-app",
+      })
 
       // ── External agent branch ──────────────────────────────────────────
       // When the user selected "external" runtime in the composer toolbar,
@@ -702,22 +1329,137 @@ export function useClaudeChat() {
       // composer reflects the send immediately; the assistant reply is
       // appended from the manager result when it lands.
       const agentRuntime = useAgentRuntimeStore.getState().runtime
-      if (agentRuntime === "external") {
-        const extAgentId = useAgentRuntimeStore.getState().externalAgentId
+      const manualExternal = agentRuntime === "external"
+
+      // ── Thread B: rule-based delegation ─────────────────────────────────
+      // When the user did NOT manually pick the external runtime, evaluate the
+      // persisted delegation rules. A matching rule redirects this turn to its
+      // target external agent (with the prompt PII-filtered). Skipped for
+      // silent goal/loop continuations and on the built-in fallback re-entry,
+      // and a no-op when no external agents are connected (web/mobile).
+      let delegation: import("@/lib/ai/agent/external/delegation-router").RoutingDecision | null =
+        null
+      if (!manualExternal && !callOptions?.skipUserAppend && !callOptions?.bypassDelegation) {
+        try {
+          const { getExternalAgentManager } = await import("@/lib/ai/agent/external/manager")
+          const mgr = getExternalAgentManager()
+          if (mgr.getConnectedAgents().length > 0) {
+            mgr.setDelegationRules(useExternalAgentStore.getState().delegationRules)
+            const [{ routeDelegation }, { redactText }] = await Promise.all([
+              import("@/lib/ai/agent/external/delegation-router"),
+              import("@cognia/redact"),
+            ])
+            const decision = routeDelegation(
+              { prompt: providerText, context: { sessionId } },
+              {
+                checkDelegation: (t, c) => mgr.checkDelegation(t, c),
+                // PII gate ON for delegated external sends — the prompt leaves
+                // the trust boundary to a third-party CLI.
+                redact: (text) => redactText(text),
+              }
+            )
+            if (decision.shouldDelegate) delegation = decision
+          }
+        } catch (err) {
+          // Routing must never block a send — fall through to the built-in path.
+          console.error("delegation routing failed", err)
+        }
+      }
+
+      if (manualExternal || delegation) {
+        const extAgentId = manualExternal
+          ? useAgentRuntimeStore.getState().externalAgentId
+          : delegation!.targetAgentId
         if (!extAgentId) {
-          store.getState().replaceMessages(previousMessages)
-          store.getState().setError("No external agent selected")
-          store.getState().setStatus("idle")
+          store.getState().replaceSessionMessages(sessionId, previousMessages)
+          store.getState().setSessionDiagnostic(
+            sessionId,
+            createDiagnostic("externalAgentNotSelected", {
+              source: "external-agent",
+              meta: { sessionId },
+            })
+          )
+          store.getState().setSessionStatus(sessionId, "idle")
+          chatTurnPerformance.finish(sessionId, "failed")
           return
+        }
+        // Record the lane this session's turn is actually on, so a follow-up
+        // typed while it runs steers this agent rather than whatever the
+        // composer's global runtime selector happens to say (see
+        // `sessionExternalLane`). Cleared when the turn settles, in
+        // `maybeDrainSteer`.
+        setSessionExternalLane(sessionId, extAgentId)
+        // The text sent to the external agent: the PII-filtered prompt when
+        // delegated by rule, else the raw composer text.
+        const externalSendText = delegation ? delegation.filteredPrompt : providerText
+        // Badge metadata so the assistant bubble can show "delegated to <rule>".
+        const delegatedMeta = delegation
+          ? {
+              delegatedTo: {
+                agentId: extAgentId,
+                ruleId: delegation.matchedRuleId,
+                ruleName: delegation.matchedRuleName,
+              },
+            }
+          : undefined
+
+        // B3 — failure fallback. A rule-delegated turn that fails falls back to
+        // the built-in (trusted, in-process) path when `chatFailurePolicy` is
+        // "fallback"; under "strict" it surfaces the error like a manual run.
+        const chatFailurePolicy = useExternalAgentStore.getState().chatFailurePolicy
+        const handleExternalFailure = async (message: string, error?: Error): Promise<void> => {
+          if (delegation && chatFailurePolicy === "fallback") {
+            // Keep the user turn, drop any partial external assistant, then
+            // re-issue THIS turn through the SDK path (skipUserAppend so the
+            // user message isn't duplicated; bypassDelegation so we don't
+            // re-match the same rule and loop).
+            store.getState().replaceSessionMessages(sessionId, next)
+            store.getState().setSessionError(sessionId, null)
+            await sendRef.current?.(displayContent, opts, {
+              ...callOptions,
+              skipUserAppend: true,
+              bypassDelegation: true,
+            })
+            // Disclose the substitution. The user routed this turn to a specific
+            // external agent; it ran on the built-in one instead, which changes
+            // cost, tooling and output. Silently succeeding looked identical to
+            // the agent having worked.
+            dispatchDiagnostic(
+              createDiagnostic("fallbackToBuiltin", {
+                source: "external-agent",
+                message,
+                meta: { sessionId, agentId: extAgentId },
+              })
+            )
+            return
+          }
+          const durationMs = finishBehaviorTurn(sessionId)
+          if (durationMs !== undefined) {
+            void trackEvent("chat.turn.failed", {
+              sessionId,
+              provider: "external",
+              surface: "chat",
+              errorType: error?.name || "ExternalAgentError",
+              durationMs,
+            })
+          }
+          chatTurnPerformance.finish(sessionId, "failed")
+          store.getState().replaceSessionMessages(sessionId, previousMessages)
+          store.getState().setSessionDiagnostic(
+            sessionId,
+            toDiagnostic(error ?? message, {
+              source: "external-agent",
+              meta: { sessionId, agentId: extAgentId },
+            })
+          )
+          store.getState().setSessionStatus(sessionId, "idle")
+          if (error) dispatchPluginChatError(sessionId, error)
         }
 
         try {
           await persistMessages(sessionId, next)
           await touchSession(sessionId)
-          if (session && (session.title === "New chat" || !session.title)) {
-            const preview = contentPreview(effectiveContent, 40)
-            if (preview) await updateSession(sessionId, { title: preview, titleAuto: true })
-          }
+          await applyInstantTitle(sessionId, displayContent)
 
           const { executeOnExternalAgent } = await import("@/lib/ai/agent/external/manager")
           const { applyExternalAgentEventToParts } =
@@ -728,44 +1470,48 @@ export function useClaudeChat() {
           // ExternalAgentEvents arrive via the onEvent callback below.
           const assistantId = `assistant-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
           let assistantParts: UIMessage["parts"] = [] as unknown as UIMessage["parts"]
-          const baseList = useChatStore.getState().messages
+          const baseList = store.getState().sessions[sessionId]?.messages ?? []
 
           const writeAssistant = () => {
-            // Guard against a mid-run session switch: writing the in-flight
-            // external turn into the visible store would clobber whatever
-            // session is now active (the SDK path guards every write the same
-            // way via `activeRef`).
-            if (activeRef.current !== sessionId) return
+            // Write into this session's *own* slice — a mid-run focus switch is
+            // safe because the slice is keyed by session, so the in-flight
+            // external turn lands in its pane (live in background or focused),
+            // never clobbering whatever session is now focused.
             const assistantMsg: UIMessage = {
               id: assistantId,
               role: "assistant",
               parts: assistantParts,
+              ...(delegatedMeta ? { metadata: delegatedMeta } : {}),
             }
-            store.getState().replaceMessages([...baseList, assistantMsg])
+            store.getState().replaceSessionMessages(sessionId, [...baseList, assistantMsg])
           }
 
-          const result = await executeOnExternalAgent(effectiveText, {
+          chatTurnPerformance.markDispatched(sessionId)
+          const result = await executeOnExternalAgent(externalSendText, {
             agentId: extAgentId,
+            workingDirectory: sendOptions.cwd,
+            context: {
+              custom: {
+                additionalDirectories: sendOptions.additionalDirectories ?? [],
+              },
+            },
             onEvent: (event) => {
               const nextParts = applyExternalAgentEventToParts(assistantParts, event)
               if (nextParts !== assistantParts) {
                 assistantParts = nextParts as UIMessage["parts"]
+                chatTurnPerformance.markFirstResponse(sessionId)
                 writeAssistant()
               }
             },
           })
 
           if (!result) {
-            store.getState().replaceMessages(previousMessages)
-            store.getState().setError("No external agent available for this request")
-            store.getState().setStatus("idle")
+            await handleExternalFailure("No external agent available for this request")
             return
           }
 
           if (!result.success) {
-            store.getState().replaceMessages(previousMessages)
-            store.getState().setError(result.error ?? "External agent execution failed")
-            store.getState().setStatus("idle")
+            await handleExternalFailure(result.error ?? "External agent execution failed")
             return
           }
 
@@ -782,34 +1528,51 @@ export function useClaudeChat() {
               ...(assistantParts as unknown as Array<Record<string, unknown>>),
               { type: "text", text: result.finalResponse, state: "done" },
             ] as unknown as UIMessage["parts"]
+            chatTurnPerformance.markFirstResponse(sessionId)
             writeAssistant()
           }
 
-          // Persist always targets this session's Dexie rows, but only read the
-          // live store when this session is still active — otherwise build the
-          // final list locally so a session switch mid-run can't persist the
-          // now-active session's messages under this session id.
+          // Persist this session's final list. The slice already holds the
+          // live writes (keyed by session), so read it back; fall back to a
+          // locally-assembled list if the slice was somehow cleared.
           const finalAssistant: UIMessage = {
             id: assistantId,
             role: "assistant",
             parts: assistantParts,
+            ...(delegatedMeta ? { metadata: delegatedMeta } : {}),
           }
-          const finalMessages =
-            activeRef.current === sessionId
-              ? useChatStore.getState().messages
-              : [...baseList, finalAssistant]
+          const finalMessages = store.getState().sessions[sessionId]?.messages ?? [
+            ...baseList,
+            finalAssistant,
+          ]
+          chatTurnPerformance.beginFinalPersistence(sessionId)
           await persistMessages(sessionId, finalMessages)
-          store.getState().setStatus("idle")
+          chatTurnPerformance.endFinalPersistence(sessionId)
+          store.getState().setSessionStatus(sessionId, "idle")
+          chatTurnPerformance.finish(sessionId, "completed")
+          const durationMs = finishBehaviorTurn(sessionId)
+          if (durationMs !== undefined) {
+            void trackEvent("chat.turn.completed", {
+              sessionId,
+              provider: "external",
+              surface: "chat",
+              durationMs,
+            })
+          }
+          // Plugin bus: external-agent run finished (ids only).
+          emitSystemBusEvent(SystemEvents.MESSAGE_RECEIVED, { sessionId })
+          emitSystemBusEvent(SystemEvents.AGENT_COMPLETED, { sessionId })
         } catch (err) {
-          store.getState().replaceMessages(previousMessages)
           const error = err instanceof Error ? err : new Error(String(err))
-          store.getState().setError(error.message)
-          store.getState().setStatus("idle")
-          dispatchPluginChatError(sessionId, error)
+          await handleExternalFailure(error.message, error)
         }
         return
       }
       // ── End external agent branch ──────────────────────────────────────
+
+      // This turn runs on the built-in sidecar, so the session has no external
+      // lane — clear any left by a previous turn before a follow-up reads it.
+      setSessionExternalLane(sessionId, null)
 
       try {
         await persistMessages(sessionId, next)
@@ -818,10 +1581,7 @@ export function useClaudeChat() {
         // `titleAuto` marks the title as machine-set so the turn-complete path
         // may later upgrade it to an LLM-generated title (until the user
         // manually renames, which clears the flag).
-        if (session && (session.title === "New chat" || !session.title)) {
-          const preview = contentPreview(effectiveContent, 40)
-          if (preview) await updateSession(sessionId, { title: preview, titleAuto: true })
-        }
+        await applyInstantTitle(sessionId, displayContent)
         // Open an agent-trace span for this chat turn. The traceId / spanId
         // are echoed through SendOptions so the sidecar (and later, tool +
         // sub-agent spans) can attach as children. `endSpan` runs in the
@@ -837,11 +1597,121 @@ export function useClaudeChat() {
             requestModel: sendOptions.model,
             agentId: session?.characterId,
             metadata: sendOptions.provider ? { provider: sendOptions.provider } : undefined,
-            inputPreview: effectiveText || undefined,
+            inputPreview: providerText || undefined,
           })
-          sendOptions = { ...sendOptions, traceId: handle.traceId, spanId: handle.spanId }
+          sendOptions = {
+            ...sendOptions,
+            traceId: handle.traceId,
+            spanId: handle.spanId,
+            traceparent: toTraceparent({
+              traceId: handle.traceId,
+              rootSpanId: handle.spanId,
+            }),
+          }
         }
-        await sendPrompt(sessionId, effectiveContent, sendOptions)
+        if (!sendOptions.traceparent && sendOptions.traceId && sendOptions.spanId) {
+          sendOptions = {
+            ...sendOptions,
+            traceparent: toTraceparent({
+              traceId: sendOptions.traceId,
+              rootSpanId: sendOptions.spanId,
+            }),
+          }
+        }
+        if (sendOptions.traceId && sendOptions.spanId) {
+          useTaskWorkspaceStore
+            .getState()
+            .bindTrace(sessionId, sendOptions.traceId, sendOptions.spanId)
+        }
+        if (sendOptions.spanId && sendOptions.routingPlan) {
+          const plan = sendOptions.routingPlan
+          recordEvent(sendOptions.spanId, {
+            name: "routing.plan",
+            at: Date.now(),
+            attributes: {
+              decisionId: plan.decisionId,
+              surface: plan.surface,
+              strategy: plan.strategy,
+              providerId: plan.selected.providerId,
+              modelId: plan.selected.modelId,
+              candidateCount: plan.orderedCandidates.length,
+              reasonCodes: plan.reasonCodes,
+              ...(plan.classification
+                ? {
+                    category: plan.classification.category,
+                    complexity: plan.classification.complexity,
+                    difficultyScore: plan.classification.difficultyScore,
+                  }
+                : {}),
+            },
+          })
+          recordEvent(sendOptions.spanId, {
+            name: "routing.attempt",
+            at: Date.now(),
+            attributes: {
+              decisionId: plan.decisionId,
+              attemptIndex: 0,
+              providerId: plan.selected.providerId,
+              modelId: plan.selected.modelId,
+            },
+          })
+          if (plan.shadowComparison?.differs) {
+            recordEvent(sendOptions.spanId, {
+              name: "routing.shadow_diff",
+              at: Date.now(),
+              attributes: {
+                decisionId: plan.decisionId,
+                selectedProviderId: plan.selected.providerId,
+                selectedModelId: plan.selected.modelId,
+                shadowProviderId: plan.shadowComparison.selected.providerId,
+                shadowModelId: plan.shadowComparison.selected.modelId,
+              },
+            })
+          }
+        }
+        if (isStandaloneChatMode()) {
+          // Standalone (BYOK): run the turn in-renderer against the user's own
+          // provider. Fire-and-forget like `sendPrompt` — streaming reaches the
+          // store via the same event queue; the engine emits `session_ended`.
+          const controller = new AbortController()
+          standaloneAbortRef.current.set(sessionId, controller)
+          chatTurnPerformance.markDispatched(sessionId)
+          void runStandaloneTurn({
+            sessionId,
+            messages: providerPayload.messages,
+            sendOptions,
+            emit: enqueueClaudeEvent,
+            signal: controller.signal,
+          }).finally(() => {
+            if (standaloneAbortRef.current.get(sessionId) === controller) {
+              standaloneAbortRef.current.delete(sessionId)
+            }
+          })
+        } else {
+          chatTurnPerformance.markDispatched(sessionId)
+          await sendPrompt(sessionId, effectiveContent, sendOptions)
+        }
+        // Conversation-branching: consume the one-shot context seed now that
+        // `resolveSendOptions` has injected it into this send's
+        // `appendSystemPrompt`. Provider-agnostic once-only consumption — the
+        // ai-sdk path may never capture an `sdkSessionId`, so we can't rely on
+        // that gate alone. Fire-and-forget; failure just leaves the seed to be
+        // (harmlessly) re-injected next turn.
+        if (session?.branchSeed) {
+          void clearBranchSeed(sessionId).catch((err) =>
+            console.error("clearBranchSeed failed", err)
+          )
+          // Freeze-on-continue (ADR-0062): the user is now continuing an
+          // imported session, so Cognia takes ownership — the fs-watch
+          // re-import guard must stop mirroring source-side edits. This is the
+          // exact first-continuation signal (imported sessions always carry a
+          // `branchSeed`, consumed once here).
+          if (sessionId.startsWith("import:")) {
+            void freezeImportedSession(sessionId).catch((err) =>
+              console.error("freezeImportedSession failed", err)
+            )
+          }
+        }
         // Cache the post-routing send so a transient `session_ended.error`
         // can re-issue the turn against the next entry in the alias's
         // fallback chain. Set even when there is no alias — the retry
@@ -851,10 +1721,24 @@ export function useClaudeChat() {
           content: effectiveContent,
           options: sendOptions,
           attemptIndex: 0,
+          routingCommitted: false,
         })
+        // Least-busy signal: this turn is now in flight against the resolved
+        // deployment; `session_ended` (any flavor) settles it.
+        if (sendOptions.provider) {
+          useInFlightStore
+            .getState()
+            .begin(sessionId, sendOptions.provider, { modelId: sendOptions.model })
+        }
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err))
-        store.getState().setError(error.message)
+        store.getState().setSessionDiagnostic(
+          sessionId,
+          toDiagnostic(error, {
+            source: "chat",
+            meta: { sessionId, ...(sendOptions.spanId ? { spanId: sendOptions.spanId } : {}) },
+          })
+        )
         // Notify plugins; fire-and-forget — host already surfaced the error.
         dispatchPluginChatError(sessionId, error)
         // Local pre-sidecar failure — close the agent-trace span we just
@@ -865,9 +1749,20 @@ export function useClaudeChat() {
             errorMessage: error.message,
           })
         }
+        chatTurnPerformance.finish(sessionId, "failed")
+        const durationMs = finishBehaviorTurn(sessionId)
+        if (durationMs !== undefined) {
+          void trackEvent("chat.turn.failed", {
+            sessionId,
+            surface: "chat",
+            errorType: "send_failed",
+            durationMs,
+            ...(sendOptions.provider ? { provider: sendOptions.provider } : {}),
+          })
+        }
       }
     },
-    [store]
+    [store, tRouting, tInlineErr, registry, enqueueClaudeEvent]
   )
 
   // Keep the module-scope `handleEvent` pointed at the latest `send` so it can
@@ -879,27 +1774,148 @@ export function useClaudeChat() {
     }
   }, [send])
 
-  const stop = useCallback(async () => {
-    const sessionId = useChatStore.getState().activeSessionId
+  // Background-run result delivery: register the hook's send as the replay
+  // channel, and drain pending results whenever a session (re)opens idle —
+  // covers relaunches (journaled pending rows) and panes closed at settle.
+  useEffect(() => {
+    return registerBackgroundReplaySend((framedText, sessionId) => {
+      void sendRef.current?.(framedText, undefined, { sessionId })
+    })
+  }, [])
+  const openSessionIdsForDrain = useChatStore((s) => s.openSessionIds)
+  useEffect(() => {
+    for (const sessionId of openSessionIdsForDrain) maybeDrainBackgroundResults(sessionId)
+  }, [openSessionIdsForDrain])
+
+  // Self-paced /loop kick-off: when the runtime creates or resumes a loop
+  // for the ACTIVE session, dispatch its next iteration silently — the same
+  // skipUserAppend path as every later continuation, so the send never trips
+  // the fresh-user-message preempt above.
+  useEffect(() => {
+    const unsub = getLoopRuntime().onKickoff((loop) => {
+      if (loop.sessionId !== activeRef.current) return
+      void sendRef.current?.(renderLoopIterationMessage(loop), undefined, {
+        skipUserAppend: true,
+      })
+    })
+    return unsub
+  }, [])
+
+  const stop = useCallback(
+    async (targetSessionId?: string) => {
+      // Each pane wires its own Stop to its own session id; default to focused.
+      const sessionId = targetSessionId ?? useChatStore.getState().activeSessionId
+      if (!sessionId) return
+      // Plain stop discards any queued steer — the user is taking over, not
+      // steering — and disarms the drain so the settle doesn't replay it.
+      useChatStore.getState().clearSteerQueue(sessionId)
+      steerArmed.delete(sessionId)
+
+      // Seal the renderer state before waiting for the IPC acknowledgement.
+      // `claude_interrupt` is best-effort transport control; if its promise is
+      // delayed by a busy sidecar, the GUI must still leave the streaming
+      // state immediately and preserve the latest partial response.
+      const coalesce = registry.get(sessionId)
+      coalesce?.commit.flush()
+      coalesce?.persist.flush()
+      registry.release(sessionId)
+      messagesMirrorRef.current.delete(sessionId)
+      const chat = store.getState()
+      for (const approval of chat.sessions[sessionId]?.pendingApprovals ?? []) {
+        if (approval.status !== "interrupted") {
+          chat.markApprovalInterrupted(approval.requestId, approval.sessionId, "aborted")
+        }
+      }
+      const endingRunId = chat.sessions[sessionId]?.runId
+      if (typeof endingRunId === "number") {
+        markTaskWorkspaceTurnCancelled(sessionId, endingRunId)
+      }
+      chat.setSessionStatus(sessionId, "idle")
+      chatTurnPerformance.finish(sessionId, "cancelled")
+
+      try {
+        // Standalone (BYOK) turns are cancelled by aborting the renderer
+        // streamText loop; the engine then emits its own `session_ended`. The
+        // sidecar path interrupts the host instead. The follow-up
+        // `session_ended` remains idempotent with the optimistic local seal.
+        const standaloneController = standaloneAbortRef.current.get(sessionId)
+        if (standaloneController) {
+          standaloneController.abort()
+          standaloneAbortRef.current.delete(sessionId)
+        } else {
+          await interruptSession(sessionId)
+        }
+      } catch (err) {
+        console.error("interrupt failed", err)
+      }
+    },
+    [store, registry]
+  )
+
+  // "Interrupt & steer now": cut the running turn short so its settle replays
+  // the queued steer immediately, instead of waiting for the turn to finish.
+  // Arming covers the case where the abort surfaces as an errored
+  // `session_ended`. No-op when nothing is queued.
+  const interruptAndSteer = useCallback(async (targetSessionId?: string) => {
+    const sessionId = targetSessionId ?? useChatStore.getState().activeSessionId
     if (!sessionId) return
+    const queued = useChatStore.getState().sessions[sessionId]?.steerQueue ?? []
+    if (queued.length === 0) return
+    steerArmed.add(sessionId)
     try {
       await interruptSession(sessionId)
-      // Commit + persist whatever partial we have, then drop the mirror; the
-      // sidecar's follow-up session_ended is also flush-safe (idempotent).
-      commitRef.current.flush()
-      persistRef.current.flush()
-      messagesMirrorRef.current.delete(sessionId)
-      store.getState().setStatus("idle")
     } catch (err) {
-      console.error("interrupt failed", err)
+      console.error("interrupt(steer) failed", err)
+      steerArmed.delete(sessionId)
     }
-  }, [store])
+  }, [])
+
+  // Replay a session's queued steer NOW, without a turn boundary. Used by the
+  // Run Panel after an errored settle, where the queue is preserved but no
+  // settle event is coming — `interruptAndSteer` can't help (nothing to
+  // interrupt), so we drain directly. No-op when the queue is empty.
+  const flushSteer = useCallback((targetSessionId?: string) => {
+    const sessionId = targetSessionId ?? useChatStore.getState().activeSessionId
+    if (!sessionId) return
+    drainSteerVia(sessionId, sendRef)
+  }, [])
 
   const respondToApproval = useCallback(
     async (approval: PendingApproval, decision: ApprovalDecision): Promise<void> => {
-      // Persist always-allow choice.
+      // Built-in-skill desktop consent (W2 dual-channel HITL): synthetic
+      // approvals are resolved IN-RENDERER via the approval registry — there
+      // is no sidecar-side permission waiting, so `approveTool` must never
+      // see these request ids. "Always allow" maps to a session-scoped
+      // bypass (skills are renderer-side; the sidecar ruleset doesn't apply).
+      {
+        const { isBuiltInSkillApprovalRequestId, grantDesktopSkillSessionBypass } =
+          await import("@/lib/skills/built-in/desktop-hitl")
+        if (isBuiltInSkillApprovalRequestId(approval.requestId)) {
+          if (decision === "allow_always") {
+            grantDesktopSkillSessionBypass(approval.sessionId, approval.toolName)
+          }
+          const { resolveApproval } = await import("@/lib/connectors/hitl/approval-registry")
+          resolveApproval(approval.sessionId, approval.requestId, {
+            decision: decision === "deny" ? "deny" : "allow",
+          })
+          store.getState().clearApproval(approval.requestId, approval.sessionId)
+          return
+        }
+      }
+      // Persist the always-allow choice. Prefer a TARGET-SCOPED rule
+      // (`Bash(git *)`, `Read(/path/x)`) so the grant is precise and future
+      // matching calls auto-resolve via the sidecar ruleset — falling back to a
+      // coarse tool-NAME grant only when no useful target can be extracted.
       if (decision === "allow_always") {
-        await useSettingsStore.getState().toggleAlwaysAllow(approval.toolName, true)
+        const rule = deriveAllowRuleFromApproval(approval.toolName, approval.input)
+        if (rule) {
+          const settingsState = useSettingsStore.getState()
+          const ap = settingsState.settings?.agentPermissions ?? {}
+          const nextRules = setToolRule(ap.toolRules, rule.tool, rule.pattern, "allow")
+          await settingsState.save({ agentPermissions: { ...ap, toolRules: nextRules } })
+        } else {
+          await useSettingsStore.getState().toggleAlwaysAllow(approval.toolName, true)
+        }
       }
       // ADR-0020 W3 — remember the operator's Allow for any computer-use
       // plugin tool so subsequent turns inside this session skip the chat
@@ -923,159 +1939,162 @@ export function useClaudeChat() {
           decision === "allow_always" ? "allow" : decision
         )
       } finally {
-        store.getState().clearApproval(approval.requestId)
+        // Scope the clear to the approval's own session so resolving a gate in
+        // one pane never disturbs another pane's pending queue.
+        store.getState().clearApproval(approval.requestId, approval.sessionId)
       }
     },
     [store]
   )
 
-  const close = useCallback(async (sessionId: string) => {
-    try {
-      await closeSession(sessionId)
-    } catch (err) {
-      console.error("close session failed", err)
-    }
-  }, [])
+  const close = useCallback(
+    async (sessionId: string) => {
+      try {
+        await closeSession(sessionId)
+      } catch (err) {
+        console.error("close session failed", err)
+      } finally {
+        // Tear down this session's pane state: cancel its coalescing, drop its
+        // streaming mirror, and remove its store slice / tab.
+        chatTurnPerformance.finish(sessionId, "cancelled")
+        registry.release(sessionId)
+        messagesMirrorRef.current.delete(sessionId)
+        useChatStore.getState().closeSession(sessionId)
+        clearSessionGrants(sessionId)
+        // Drop this session's nested-dispatch state (budget guard + resolved
+        // permission ceiling) so neither leaks for the renderer's lifetime. Both
+        // are keyed by session id and kept alive across a turn's multiple
+        // dispatch_agent calls, so teardown is the only safe release point.
+        const { releaseDispatchStateForSession } =
+          await import("@/lib/claude/agents/dispatch-agent-handler")
+        releaseDispatchStateForSession(sessionId)
+      }
+    },
+    [registry]
+  )
 
   /**
-   * Truncate the message log starting from `messageId` (inclusive) and resend
-   * the supplied content. Used for "edit and resend" on a user message.
+   * Resend a user message with edited content, keeping the original as a
+   * sibling branch.
    *
-   * On mobile (Capacitor), the truncate also fans out to the desktop's
-   * Dexie via the companion RPC bridge so the authoritative store stays
-   * in lockstep with the phone. On desktop / web the local `truncateAfter`
-   * is the only mutation.
+   * This used to `truncateAfter(..., { inclusive: true })` — the original
+   * question and every reply beneath it were deleted from Dexie outright, so
+   * rewording a question halfway up a long thread silently destroyed the rest
+   * of it with no undo. Regenerate had kept its alternatives as branches since
+   * it was written; editing is the same shape of operation and now behaves the
+   * same way. `tagEditSibling` stamps the original into a branch group and
+   * re-parents its tail, and `selectVisibleMessages` hides that tail while the
+   * new variant is selected. Nothing is deleted; flipping the navigator back
+   * brings the original question and its whole subtree with it.
+   *
+   * Users who genuinely want the old behaviour have the explicit "delete this
+   * message and everything after it" action, which still truncates.
    */
   const editAndResend = useCallback(
-    async (messageId: string, newContent: SendContent) => {
-      const sessionId = useChatStore.getState().activeSessionId
+    async (
+      messageId: string,
+      newContent: SendContent,
+      targetSessionId?: string,
+      resourceContext?: string
+    ) => {
+      const sessionId = targetSessionId ?? useChatStore.getState().activeSessionId
       if (!sessionId) return
-      // Truncating the history invalidates any in-flight streaming mirror for
-      // this session; drop it (and pending work) so the rebuilt base wins.
-      commitRef.current.cancel()
-      persistRef.current.cancel()
+      // Rebuilding the branch base invalidates this session's streaming mirror;
+      // drop it (and pending coalescing work) so the rebuilt base wins.
+      registry.release(sessionId)
       messagesMirrorRef.current.delete(sessionId)
-      if (detectPlatform() === "mobile") {
-        await mirrorTruncateToDesktop(sessionId, messageId)
-      }
-      // Drop everything from this message onward, including the message itself.
-      await truncateAfter(sessionId, messageId, { inclusive: true })
-      // Re-hydrate the store from Dexie so the optimistic append in send() is
-      // applied to the correct base.
-      const remaining = await listMessages(sessionId)
-      store.getState().replaceMessages(remaining)
-      await send(newContent)
+
+      const messages = store.getState().sessions[sessionId]?.messages ?? []
+      const editedIdx = messages.findIndex((m) => m.id === messageId)
+      if (editedIdx < 0) return
+
+      const { merged, groupId, nextIndex } = tagEditSibling(messages, editedIdx)
+      store.getState().replaceSessionMessages(sessionId, merged)
+      await persistMessages(sessionId, merged)
+
+      await send(newContent, undefined, {
+        sessionId,
+        resourceContext: resourceContext ?? lastResourceContextRef.current.get(sessionId),
+        // The replacement is a *user* message, created inside `send` itself,
+        // so it is tagged there rather than through the assistant-event path
+        // `regenerate` uses.
+        branchTag: { groupId, index: nextIndex },
+      })
     },
-    [send, store]
+    [send, store, registry]
   )
 
   /**
    * Re-issue the most recent user turn. Drops the assistant reply that
    * followed it (and anything after) and resends the original content.
    */
-  const regenerate = useCallback(async () => {
-    const sessionId = useChatStore.getState().activeSessionId
-    if (!sessionId) return
+  const regenerate = useCallback(
+    async (targetSessionId?: string, resourceContext?: string) => {
+      const sessionId = targetSessionId ?? useChatStore.getState().activeSessionId
+      if (!sessionId) return
 
-    // Rebuilding the branch base invalidates any streaming mirror; drop it.
-    commitRef.current.cancel()
-    persistRef.current.cancel()
-    messagesMirrorRef.current.delete(sessionId)
+      // Rebuilding the branch base invalidates this session's streaming mirror;
+      // drop it (and pending coalescing work).
+      registry.release(sessionId)
+      messagesMirrorRef.current.delete(sessionId)
 
-    const messages = useChatStore.getState().messages
-    let lastUserIdx = -1
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role === "user") {
-        lastUserIdx = i
-        break
+      const messages = useChatStore.getState().sessions[sessionId]?.messages ?? []
+      let lastUserIdx = -1
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].role === "user") {
+          lastUserIdx = i
+          break
+        }
       }
-    }
-    if (lastUserIdx < 0) return
+      if (lastUserIdx < 0) return
 
-    const anchor = messages[lastUserIdx]
-    // Existing assistant siblings — every assistant message after the anchor
-    // belongs to the same branch group. We retain them with branchGroupId
-    // metadata so the user can switch back via the BranchNavigator.
-    const groupId = anchor.id
-    const existingSiblings = messages.slice(lastUserIdx + 1).filter((m) => m.role === "assistant")
-    const taggedSiblings = existingSiblings.map((m, i) => {
-      const meta = (m as { metadata?: Record<string, unknown> }).metadata ?? {}
-      // Preserve any prior branchGroupId — only stamp if missing.
-      const stampedGroup =
-        typeof meta.branchGroupId === "string" ? (meta.branchGroupId as string) : groupId
-      const stampedIndex = typeof meta.branchIndex === "number" ? (meta.branchIndex as number) : i
-      return {
-        ...m,
-        metadata: { ...meta, branchGroupId: stampedGroup, branchIndex: stampedIndex },
-      } as typeof m
-    })
+      const anchor = messages[lastUserIdx]
+      // Existing assistant siblings — every assistant message after the anchor
+      // belongs to the same branch group (direct chat = one reply per turn).
+      // We retain them with branchGroupId metadata so the user can switch back
+      // via the BranchNavigator.
+      const groupId = anchor.id
+      const { merged, nextIndexByGroup } = tagBranchSiblings(messages, lastUserIdx, () => groupId)
 
-    // Persist the tagged siblings (and untouched prefix) before the new send.
-    const prefix = messages.slice(0, lastUserIdx + 1)
-    const merged = [...prefix, ...taggedSiblings]
-    store.getState().replaceMessages(merged)
-    await persistMessages(sessionId, merged)
+      // Persist the tagged siblings (and untouched prefix) before the new send.
+      store.getState().replaceSessionMessages(sessionId, merged)
+      await persistMessages(sessionId, merged)
 
-    // Stash the next-branch tag in a ref so handleEvent can stamp the
-    // freshly-arrived assistant message with branchGroupId + the next index.
-    const nextIndex = existingSiblings.length
-    pendingBranchTagRef.current.set(sessionId, { groupId, index: nextIndex })
+      // Stash the next-branch tag in a ref so handleEvent can stamp the
+      // freshly-arrived assistant message with branchGroupId + the next index.
+      const nextIndex = nextIndexByGroup.get(groupId) ?? 0
+      pendingBranchTagRef.current.set(sessionId, { groupId, index: nextIndex })
 
-    // Prefer the original SendContent if we have it (preserves attachments);
-    // fall back to reconstructing from text parts.
-    const cached = lastUserContentRef.current.get(sessionId)
-    const content: SendContent =
-      cached ??
-      anchor.parts
-        .filter((p): p is { type: "text"; text: string } => {
-          const t = (p as { type?: string }).type
-          return t === "text"
-        })
-        .map((p) => p.text)
-        .join("")
-    await send(content, undefined, { skipUserAppend: true })
-  }, [send, store])
+      // Prefer the original SendContent if we have it (preserves attachments);
+      // fall back to reconstructing from text parts.
+      const cached = lastUserContentRef.current.get(sessionId)
+      const content: SendContent =
+        cached ??
+        anchor.parts
+          .filter((p): p is { type: "text"; text: string } => {
+            const t = (p as { type?: string }).type
+            return t === "text"
+          })
+          .map((p) => p.text)
+          .join("")
+      await send(content, undefined, {
+        skipUserAppend: true,
+        sessionId,
+        resourceContext: resourceContext ?? lastResourceContextRef.current.get(sessionId),
+      })
+    },
+    [send, store, registry]
+  )
 
   return {
     send,
     stop,
+    interruptAndSteer,
+    flushSteer,
     respondToApproval,
     close,
     editAndResend,
     regenerate,
-  }
-}
-
-/**
- * Mobile-only: mirror a `truncateAfter(sessionId, anchorId, { inclusive: true })`
- * to the desktop's Dexie by calling `message_delete` for the anchor + every
- * subsequent message. Reads from the local Dexie to compute the set, which
- * is fine because mobile sync keeps the local store in lockstep before
- * any edit operation.
- *
- * Errors from individual deletes are logged but never thrown — the local
- * truncate (and subsequent send) is the load-bearing path; a desktop write
- * failure surfaces later through sync rather than blocking the user.
- */
-async function mirrorTruncateToDesktop(sessionId: string, anchorMessageId: string): Promise<void> {
-  try {
-    const db = getDb()
-    const anchor = await db.messages.get(anchorMessageId)
-    if (!anchor || anchor.sessionId !== sessionId) return
-    const ids = await db.messages
-      .where("[sessionId+createdAt]")
-      .between([sessionId, anchor.createdAt], [sessionId, Number.MAX_SAFE_INTEGER])
-      .primaryKeys()
-    for (const rawId of ids) {
-      const id = rawId as string
-      try {
-        await deleteMessage(sessionId, id)
-      } catch (err) {
-        console.warn("mirrorTruncateToDesktop: deleteMessage failed", { id, err })
-      }
-    }
-  } catch (err) {
-    console.warn("mirrorTruncateToDesktop failed", err)
   }
 }
 
@@ -1090,6 +2109,28 @@ async function buildSendOptions(
   const referencedPaths = useChatStore
     .getState()
     .referencedPaths.map((r) => ({ absolute: r.absolute, isDir: r.isDir }))
+
+  // `@agent` single-turn routing: resolve the first @-mentioned subagent in the
+  // message to its dispatcher id. `resolveSendOptions` only honours it when the
+  // id is actually registered in this turn's agent map (membership guard), so a
+  // stale / unknown mention is harmless here. The target list unions the
+  // reactive subagents with on-disk markdown agents (`.cognia/agents/*.md`) —
+  // the SAME projection the composer `@` picker shows — so a picked markdown
+  // handle (handle === id === the `opts.agents` key) actually routes. Discovery
+  // is cached (3s) and returns `[]` off-Tauri, so this stays cheap.
+  let targetAgentId: string | undefined
+  if (userMessage) {
+    const ps = useProjectStore.getState()
+    const activeProjectForAgents = ps.activeProjectId
+      ? (ps.projects.find((p) => p.id === ps.activeProjectId) ?? null)
+      : null
+    const markdownTargets = await discoverMarkdownAgentTargets({
+      cwd: session?.workingDir ?? undefined,
+      roots: activeProjectForAgents ? allRootPaths(activeProjectForAgents) : [],
+    })
+    const mentionTargets = [...buildChatMentionTargets(), ...markdownTargets]
+    targetAgentId = resolveTargetAgentId(userMessage, mentionTargets) ?? undefined
+  }
 
   // Active workspace (project). Its `rootDir` joins the cwd resolution chain
   // and its `additionalDirs` are unioned into `additionalDirectories` for this
@@ -1114,11 +2155,25 @@ async function buildSendOptions(
   // run the injection based on `character.twinId`.
   const twinHandshake = userMessage?.trim() ? await tryBuildTwinDeps() : undefined
 
+  // Embed the user message ONCE per turn (when twin deps exist) so the twin RAG
+  // leg and the memory recall leg share one query vector instead of embedding
+  // the same text twice. Memory's vector backend shares the twin embedding model
+  // (resolveMemoryBackend), so the vector is valid for both. Best-effort — on
+  // failure the resolver falls back to per-leg embedding.
+  let turnEmbedding: number[] | undefined
+  if (twinHandshake && userMessage?.trim()) {
+    try {
+      turnEmbedding = (await generateEmbedding(userMessage, twinHandshake.embedding)).embedding
+    } catch {
+      turnEmbedding = undefined
+    }
+  }
+
   // Long-term memory: build the read-runtime deps when memory is enabled and
   // the turn carries a user message. `resolveSendOptions` decides (per its own
   // enabled/temporary gate) whether to actually recall + inject.
   const memoryHandshake = userMessage?.trim()
-    ? await tryBuildMemoryDeps(resolveMemoryConfig(appSettings?.memory))
+    ? await tryBuildMemoryDeps(resolveMemoryConfig(appSettings?.memory), twinHandshake)
     : undefined
 
   // Per-message ephemeral skills attached via the composer's SkillPicker.
@@ -1134,18 +2189,78 @@ async function buildSendOptions(
     ? ((await getGoalRuntime().getActiveGoalForSession(session.id)) ?? null)
     : null
 
+  // When a `/loop` run is driving this session, flag it so the surface-aware
+  // goal/loop guidance skill activates (parallel to `activeGoal` above; the
+  // loop has no per-turn Dexie context block of its own). Best-effort.
+  let activeLoop = false
+  try {
+    activeLoop = session?.id
+      ? Boolean(await getLoopRuntime().getActiveLoopForSession(session.id))
+      : false
+  } catch {
+    activeLoop = false
+  }
+
+  // One-shot post-compaction recovery: if a compaction boundary just landed and
+  // no assistant turn has followed it yet, this upcoming turn is the first of a
+  // new context phase — re-inject the recovery preamble. Stateless (derived from
+  // the transcript), so it fires exactly once per boundary.
+  const chatState = useChatStore.getState()
+  const sessionMessages = session?.id
+    ? chatState.activeSessionId === session.id
+      ? chatState.messages
+      : (chatState.sessions[session.id]?.messages ?? [])
+    : chatState.messages
+  const recoveryPhase = pendingRecoveryPhase(sessionMessages)
+  const postCompaction = recoveryPhase !== null ? { phaseNumber: recoveryPhase } : undefined
+  const memoryBranch = useGitStore.getState().status?.branch ?? undefined
+  const primaryRoot = activeProject ? primaryRootOf(activeProject)?.path : undefined
+  const referencedMemoryPath =
+    primaryRoot && referencedPaths
+      ? referencedPaths
+          .map((item) => item.absolute)
+          .find((absolute) => absolute === primaryRoot || absolute.startsWith(`${primaryRoot}/`))
+      : undefined
+  const memoryPath =
+    referencedMemoryPath && primaryRoot
+      ? referencedMemoryPath.slice(primaryRoot.length).replace(/^\/+/, "") || undefined
+      : undefined
+
   return resolveSendOptions({
+    postCompaction,
     session,
     appSettings,
     activeProject,
     workspaceRestricted,
     referencedPaths,
+    targetAgentId,
+    memoryBranch,
+    memoryPath,
     twinDeps: twinHandshake,
     twinUserMessage: twinHandshake ? userMessage : undefined,
     memoryDeps: memoryHandshake,
     memoryUserMessage: memoryHandshake ? userMessage : undefined,
+    // Project-scoped RAG (workspace knowledge base). Reuses the same twin deps
+    // (shared vector store + embedding); `resolveSendOptions` gates injection on
+    // the active workspace having knowledge files + project RAG enabled. Shares
+    // the turn's query embedding — no extra embed call.
+    projectKnowledgeDeps: twinHandshake,
+    projectKnowledgeUserMessage: twinHandshake ? userMessage : undefined,
+    precomputedQueryEmbedding: turnEmbedding,
+    // Routing context-window pre-check input (B4): always pass the raw user
+    // message (unlike twin/memory it needs no handshake gate).
+    routingContextHint: userMessage ? { promptText: userMessage } : undefined,
+    routingSurface: "chat",
     ephemeralSkillIds,
     activeGoal,
+    activeLoop,
+    // Open this turn's agent-trace ROOT span here (one mint per turn). The hook
+    // owns `endSpan` (result / error branches of `handleEvent`, keyed off the
+    // cached `sendOptions.spanId`). The inline `startSpan` fallback below stays
+    // only for the `opts`-bypass path (retry / loop) where buildSendOptions —
+    // and thus this resolver — is skipped.
+    emitTrace: true,
+    traceSurface: "chat",
   })
 }
 
@@ -1153,17 +2268,95 @@ async function buildSendOptions(
  * session id and the character id (see hooks/use-team-chat.ts). The direct
  * chat handler should ignore those — useTeamChat handles them. */
 function isTeamSubSession(sessionId: string): boolean {
-  return sessionId.includes("::char::")
+  return isSubSessionId(sessionId)
 }
 
 /**
- * Coalescing handles + authoritative mirror threaded in from the hook. Only the
- * active session uses these; background sessions persist immediately as before.
+ * Per-session coalescing registry + authoritative mirror threaded in from the
+ * hook. Every *open* session (active or a background pane) coalesces through
+ * the registry so it streams live into its own slice; sessions with no open
+ * pane persist immediately to Dexie and surface via unread badges as before.
  */
 interface StreamCoalescing {
   messagesMirrorRef: React.MutableRefObject<Map<string, UIMessage[]>>
-  commitRef: React.MutableRefObject<RafThrottleHandle<[UIMessage[]]>>
-  persistRef: React.MutableRefObject<DebouncedCallbackHandle<[string, UIMessage[]]>>
+  registry: SessionCoalescingRegistry
+}
+
+/**
+ * Upper bound on how long the renderer waits for Auto-mode's optional model
+ * judge before giving up and showing the manual approval modal. Prevents a
+ * wedged utility-LLM call from freezing a turn with no visible dialog.
+ */
+const AUTO_MODE_DECISION_TIMEOUT_MS = 12_000
+
+/** Read a session's current slice messages (its streaming base). */
+function sliceMessages(sessionId: string): UIMessage[] {
+  return useChatStore.getState().sessions[sessionId]?.messages ?? []
+}
+
+/** Drain a session's queued steer through this hook's send (direct replay). */
+function drainSteerVia(sessionId: string, sendRef: React.MutableRefObject<SendFn | null>) {
+  maybeDrainSteer(
+    sessionId,
+    (payload) => void sendRef.current?.(payload, undefined, { sessionId, steerDrain: true })
+  )
+}
+
+/**
+ * Run Auto-mode command-safety evaluation for a permission request and resolve
+ * it when the decision is definitive. Returns `true` when the ask was answered
+ * (allow/deny), `false` when it should fall through to the manual approval
+ * modal. Fail-open: any error is treated as undecided (`false`). Shared by the
+ * subagent-ask routing branch and the normal open-pane branch.
+ */
+async function tryAutoModeDecision(evt: {
+  sessionId: string
+  requestId: string
+  toolName: string
+  input: unknown
+}): Promise<boolean> {
+  try {
+    const settings = useSettingsStore.getState().settings
+    const judgeClient = buildUtilityLlmClient({
+      session: null,
+      appSettings: settings,
+      override: settings?.agentPermissions?.autoApprove?.judgeModel,
+      featureId: "command-safety",
+    })
+    // The model judge tier (`rules+model`) has no internal timeout, so a wedged
+    // utility-LLM fetch would otherwise hang this handler forever with NO
+    // approval dialog shown. Bound it: on timeout fall through to the manual
+    // modal (treat as undecided) instead of swallowing the request.
+    const decision = await Promise.race([
+      runAutoModeForTool({
+        toolName: evt.toolName,
+        input: evt.input,
+        settings,
+        client: judgeClient,
+        locale: settings?.language,
+        pluginRules: getPluginCommandRulesets(),
+      }),
+      new Promise<null>((resolve) => {
+        setTimeout(() => resolve(null), AUTO_MODE_DECISION_TIMEOUT_MS)
+      }),
+    ])
+    if (decision && decision.decision === "allow") {
+      await approveTool(evt.sessionId, evt.requestId, "allow")
+      return true
+    }
+    if (decision && decision.decision === "deny") {
+      await approveTool(
+        evt.sessionId,
+        evt.requestId,
+        "deny",
+        `auto-denied (${decision.source}): ${decision.reason}`
+      )
+      return true
+    }
+  } catch (err) {
+    console.error("auto-mode evaluation failed", err)
+  }
+  return false
 }
 
 async function handleEvent(
@@ -1174,9 +2367,7 @@ async function handleEvent(
   sendRef: React.MutableRefObject<SendFn | null>,
   coalescing: StreamCoalescing
 ) {
-  const { messagesMirrorRef, commitRef, persistRef } = coalescing
-  const commit = commitRef.current
-  const persistDebounced = persistRef.current
+  const { messagesMirrorRef, registry } = coalescing
   // Skip events for team sub-sessions outright — useTeamChat handles them.
   if (
     (evt.type === "event" ||
@@ -1191,8 +2382,61 @@ async function handleEvent(
   switch (evt.type) {
     case "ready":
     case "log":
-    case "sidecar_exited":
       return
+    case "sidecar_exited": {
+      // The sidecar process died. It will NOT emit the per-session
+      // `session_ended` events for the turns it was serving, so every
+      // streaming / awaiting-approval session would otherwise freeze forever
+      // (composer disabled, chat lease + in-flight counter stuck). Settle each
+      // one exactly as a terminal errored `session_ended` would: stop the
+      // in-flight counter, drop backstops / open tool spans, interrupt any live
+      // approval, seal the slice, and surface a retryable error (which also
+      // releases the chat lease via the status→error subscription). Mirrors the
+      // mobile transport's sidecar_exited handling (use-remote-session-stream).
+      const chat = useChatStore.getState()
+      for (const [sid, slice] of Object.entries(chat.sessions)) {
+        if (slice.status !== "streaming" && slice.status !== "awaiting_approval") continue
+        useInFlightStore.getState().settle(sid)
+        clearApprovalBackstops(sid)
+        clearToolSpansForSession(sid)
+        // A dead sidecar can't emit `permission_interrupted`, so interrupt any
+        // pending approval here — the same honest "interrupted" treatment.
+        for (const approval of slice.pendingApprovals) {
+          chat.markApprovalInterrupted(approval.requestId, sid, "sidecar exited")
+        }
+        if (isSessionOpen(sid)) {
+          registry.get(sid).commit.flush()
+          registry.get(sid).persist.flush()
+          registry.release(sid)
+          messagesMirrorRef.current.delete(sid)
+        }
+        chat.setSessionDiagnostic(
+          sid,
+          createDiagnostic("sidecarExited", { source: "chat", meta: { sessionId: sid } })
+        )
+        const cached = chat.lastSendBySession[sid] as
+          { options?: { spanId?: string; provider?: string } } | undefined
+        if (cached?.options?.spanId) {
+          endSpan(cached.options.spanId, {
+            errorType: "turn_error",
+            errorMessage: SIDECAR_EXITED_TRACE_MESSAGE,
+          })
+        }
+        chatTurnPerformance.finish(sid, "failed")
+        const durationMs = finishBehaviorTurn(sid)
+        if (durationMs !== undefined) {
+          void trackEvent("chat.turn.failed", {
+            sessionId: sid,
+            surface: "chat",
+            errorType: "sidecar_exited",
+            durationMs,
+            ...(cached?.options?.provider ? { provider: cached.options.provider } : {}),
+          })
+        }
+        chat.clearLastSend(sid)
+      }
+      return
+    }
     case "sdk_session_id": {
       // Persist the SDK conversation id so the next send can pass it as
       // `resumeSessionId` after a sidecar restart or app reload.
@@ -1202,27 +2446,50 @@ async function handleEvent(
       return
     }
     case "session_ended": {
-      // The turn is over — cancel any backstop deny still pending for a
-      // remote-routed approval on this session (Remote Session Control).
+      // The turn is over — settle the in-flight counter FIRST (idempotent;
+      // success, error, and abort all land here). A fallback retry below
+      // re-begins against the next provider in the chain.
+      useInFlightStore.getState().settle(evt.sessionId)
+      // Cancel any backstop deny still pending for a remote-routed approval
+      // on this session (Remote Session Control).
       clearApprovalBackstops(evt.sessionId)
       // Drop any open tool spans for this session — every tool_use should
       // have already paired with its tool_result, but cleanup keeps the
       // module-scope map from leaking entries when the SDK aborts mid-turn.
       clearToolSpansForSession(evt.sessionId)
-      const isActive = evt.sessionId === activeRef.current
-      if (isActive) {
+      // Per-session sealing: any *open* session (focused or a background pane)
+      // settles its own slice. Closed sessions only settled the in-flight
+      // counter above.
+      const sealOpen = isSessionOpen(evt.sessionId)
+      const sealSession = (sid: string) => {
+        registry.get(sid).commit.flush()
+        registry.get(sid).persist.flush()
+        registry.release(sid)
+        messagesMirrorRef.current.delete(sid)
+      }
+      if (sealOpen) {
         if (evt.error) {
           // ADR-0043 Phase 4 — record the failure against the provider that
           // errored BEFORE any fallback re-issues against the next chain entry
           // (which overwrites the cached send). Trips its breaker after repeats.
-          const failedProvider =
-            useChatStore.getState().lastSendBySession[evt.sessionId]?.options.provider
+          const failedSend = useChatStore.getState().lastSendBySession[evt.sessionId]
+          const failedProvider = failedSend?.options.provider
           if (failedProvider) {
             recordProviderOutcome({
               providerId: failedProvider,
               ok: false,
               latencyMs: 0,
               errorMessage: evt.error,
+              // Real HTTP status + Retry-After captured by the sidecar — drive
+              // the breaker's dynamic cooldown off authoritative data.
+              httpStatus: evt.httpStatus,
+              retryAfterMs: evt.retryAfterMs,
+              modelId: failedSend?.options.model,
+              sessionId: evt.sessionId,
+              // Provider child span nests under this turn's root span.
+              traceId: failedSend?.options.traceId,
+              parentSpanId: failedSend?.options.spanId,
+              surface: "chat",
             })
           }
           // P4 routing-fallback: re-issue against the next entry in the
@@ -1230,14 +2497,30 @@ async function handleEvent(
           // error class is transient. `attemptRoutingFallback` returns
           // `true` when a retry was scheduled — in that case suppress
           // the error toast so the UI stays in `streaming`.
-          const retried = await attemptRoutingFallback(evt.sessionId, evt.error)
+          const retried = isStandaloneChatMode()
+            ? false
+            : await attemptRoutingFallback(evt.sessionId, evt.error, {
+                httpStatus: evt.httpStatus,
+                retryAfterMs: evt.retryAfterMs,
+              })
           if (!retried) {
             // Permanent failure — commit + persist the final partial and drop
             // the mirror. (A retry re-issues `send`, which clears it itself.)
-            commit.flush()
-            persistDebounced.flush()
-            messagesMirrorRef.current.delete(evt.sessionId)
-            useChatStore.getState().setError(evt.error)
+            sealSession(evt.sessionId)
+            useChatStore.getState().setSessionDiagnostic(
+              evt.sessionId,
+              toDiagnostic(evt.error, {
+                source: "provider",
+                meta: {
+                  sessionId: evt.sessionId,
+                  ...(typeof evt.httpStatus === "number" ? { httpStatus: evt.httpStatus } : {}),
+                  ...(typeof evt.retryAfterMs === "number"
+                    ? { retryAfterMs: evt.retryAfterMs }
+                    : {}),
+                  ...(failedProvider ? { providerId: failedProvider } : {}),
+                },
+              })
+            )
             // End the agent-trace span on permanent failure (no retry). The
             // success path closes the span via the `sdkResult` branch in
             // case "event" instead.
@@ -1249,21 +2532,101 @@ async function handleEvent(
                 errorMessage: evt.error,
               })
             }
+            chatTurnPerformance.finish(evt.sessionId, "failed")
+            const durationMs = finishBehaviorTurn(evt.sessionId)
+            if (durationMs !== undefined) {
+              void trackEvent("chat.turn.failed", {
+                sessionId: evt.sessionId,
+                surface: "chat",
+                durationMs,
+                errorType:
+                  typeof evt.httpStatus === "number" ? `http_${evt.httpStatus}` : "provider_error",
+                ...(failedProvider ? { provider: failedProvider } : {}),
+              })
+            }
             useChatStore.getState().clearLastSend(evt.sessionId)
           }
         } else {
           // Clean end without a content-bearing result event (e.g. tool-only
           // turn): flush pending streaming work and drop the mirror.
-          commit.flush()
-          persistDebounced.flush()
-          messagesMirrorRef.current.delete(evt.sessionId)
-          useChatStore.getState().setStatus("idle")
+          sealSession(evt.sessionId)
+          useChatStore.getState().setSessionStatus(evt.sessionId, "idle")
+          chatTurnPerformance.finish(evt.sessionId, "completed")
+          const cached = useChatStore.getState().lastSendBySession[evt.sessionId]
+          const durationMs = finishBehaviorTurn(evt.sessionId)
+          if (durationMs !== undefined) {
+            void trackEvent("chat.turn.completed", {
+              sessionId: evt.sessionId,
+              provider: cached?.options.provider ?? "unknown",
+              surface: "chat",
+              durationMs,
+            })
+          }
           useChatStore.getState().clearLastSend(evt.sessionId)
         }
+        // Turn settled — replay any steer the user queued mid-run. A clean end
+        // always drains; an errored end drains only when an explicit
+        // "interrupt & steer" armed it (a natural error keeps the queue).
+        if (!evt.error || steerArmed.has(evt.sessionId)) {
+          drainSteerVia(evt.sessionId, sendRef)
+        } else {
+          // Errored end with nothing armed: the queue is deliberately preserved,
+          // but no settle is coming to deliver it. Say so on the bubbles so the
+          // user gets retry / discard instead of a message stuck on "queued".
+          markPendingSteersFailed(evt.sessionId, evt.error)
+        }
+        // Then deliver any settled background-run results. Steer wins: if the
+        // steer replay just started a new turn, the idle check inside defers
+        // this to the NEXT settle.
+        maybeDrainBackgroundResults(evt.sessionId)
       }
       return
     }
+    case "permission_interrupted": {
+      // The sidecar waiter died (turn aborted / session closed) — the tool was
+      // already denied SDK-side. Mark the approval instead of dropping it so
+      // the dialog shows an honest "interrupted" notice with Dismiss. Team
+      // sub-session ids are re-bucketed inside the store action (same routing
+      // as pushApproval), so this handles direct and team sessions alike.
+      useChatStore.getState().markApprovalInterrupted(evt.requestId, evt.sessionId, evt.reason)
+      return
+    }
     case "permission_request": {
+      // Remember the call for the post-tool (`tool_result_review`) hook.
+      rememberChatToolCall(
+        evt.toolUseID ?? "",
+        evt.toolName,
+        (evt.input as Record<string, unknown>) ?? {}
+      )
+      // Plugin tool firewall (`onPreToolUse`, W3.1): a deny short-circuits
+      // before every user-facing approval flow (allowlist, auto-mode, modal);
+      // a modify approves with the plugin's rewritten args (same semantics as
+      // the agent-executor responder). Fail-open — adapter-hooks swallows
+      // dispatcher errors and returns `allow`.
+      {
+        const pre = await dispatchPluginPreToolUse(evt.toolName, evt.input, evt.sessionId)
+        if (pre.action === "deny") {
+          try {
+            await approveTool(
+              evt.sessionId,
+              evt.requestId,
+              "deny",
+              pre.reason ?? "denied by plugin onPreToolUse"
+            )
+          } catch (err) {
+            console.error("plugin pre-tool deny failed", err)
+          }
+          return
+        }
+        if (pre.action === "modify" && pre.modifiedArgs) {
+          try {
+            await approveTool(evt.sessionId, evt.requestId, "allow", undefined, pre.modifiedArgs)
+          } catch (err) {
+            console.error("plugin pre-tool modify failed", err)
+          }
+          return
+        }
+      }
       // Auto-approve if the user has previously allowed this tool.
       if (allowListRef.current.includes(evt.toolName)) {
         try {
@@ -1273,10 +2636,53 @@ async function handleEvent(
         }
         return
       }
-      const isActive = evt.sessionId === activeRef.current
-      if (!isActive) {
+      // Dispatched-subagent ask: the run is on an ephemeral (never-open)
+      // session, so the legacy `!isOpen` branch below would silently
+      // auto-deny it. Route it to the PARENT chat session instead (Claude Code
+      // v2.1.186 parity) — unless the user opted back into auto-deny. The ask
+      // still runs through the auto-mode command-safety evaluation.
+      const subagentRoute = getSubagentApprovalRoute(evt.sessionId)
+      if (subagentRoute) {
+        const mode = useSettingsStore.getState().settings?.agentPermissions?.subagentAsks
+        if (mode === "auto-deny") {
+          try {
+            await approveTool(
+              evt.sessionId,
+              evt.requestId,
+              "deny",
+              "auto-denied: subagent asks disabled"
+            )
+          } catch (err) {
+            console.error("subagent auto-deny failed", err)
+          }
+          return
+        }
+        const decided = await tryAutoModeDecision(evt)
+        if (decided) return
+        useChatStore.getState().pushApproval({
+          sessionId: evt.sessionId,
+          requestId: evt.requestId,
+          toolUseID: evt.toolUseID,
+          toolName: evt.toolName,
+          input: evt.input,
+          title: evt.title,
+          displayName: evt.displayName,
+          description: evt.description,
+          blockedPath: evt.blockedPath,
+          decisionReason: evt.decisionReason,
+          origin: "subagent",
+          subagentId: subagentRoute.subagentId,
+          subagentRunId: subagentRoute.runId,
+        })
+        return
+      }
+      // An open pane (focused OR background tab/split) surfaces the approval
+      // inline in *its* pane — `pushApproval` routes by `approval.sessionId`,
+      // so a gate in session B never blocks or is confused with session A's.
+      const isOpen = isSessionOpen(evt.sessionId)
+      if (!isOpen) {
         // Remote Session Control: if a remote device is watching this
-        // (non-foreground) session, route the approval to it instead of
+        // (non-open) session, route the approval to it instead of
         // auto-denying. The remote already received this permission_request
         // frame over /ws/v1/events and will resolve it via claude_approve.
         // The sidecar's canUseTool has no timeout of its own, so arm a
@@ -1302,48 +2708,16 @@ async function handleEvent(
         }
         // No remote watcher — default-deny rather than block silently.
         try {
-          await approveTool(evt.sessionId, evt.requestId, "deny", "auto-denied: session not active")
+          await approveTool(evt.sessionId, evt.requestId, "deny", "auto-denied: session not open")
         } catch (err) {
-          console.error("non-active deny failed", err)
+          console.error("non-open deny failed", err)
         }
         return
       }
       // Auto mode: auto-decide shell-command safety (deterministic rules +
       // optional small-model judge). A non-"ask" decision short-circuits the
       // approval modal; anything uncertain falls through to the manual prompt.
-      // Fail-open: any error here just shows the normal approval.
-      try {
-        const settings = useSettingsStore.getState().settings
-        const judgeClient = buildUtilityLlmClient({
-          session: null,
-          appSettings: settings,
-          override: settings?.agentPermissions?.autoApprove?.judgeModel,
-          featureId: "command-safety",
-        })
-        const decision = await runAutoModeForTool({
-          toolName: evt.toolName,
-          input: evt.input,
-          settings,
-          client: judgeClient,
-          locale: settings?.language,
-          pluginRules: getPluginCommandRulesets(),
-        })
-        if (decision && decision.decision === "allow") {
-          await approveTool(evt.sessionId, evt.requestId, "allow")
-          return
-        }
-        if (decision && decision.decision === "deny") {
-          await approveTool(
-            evt.sessionId,
-            evt.requestId,
-            "deny",
-            `auto-denied (${decision.source}): ${decision.reason}`
-          )
-          return
-        }
-      } catch (err) {
-        console.error("auto-mode evaluation failed", err)
-      }
+      if (await tryAutoModeDecision(evt)) return
       const approval: PendingApproval = {
         sessionId: evt.sessionId,
         requestId: evt.requestId,
@@ -1359,6 +2733,37 @@ async function handleEvent(
       useChatStore.getState().pushApproval(approval)
       return
     }
+    case "tool_result_review": {
+      // Plugin PostToolUse rewrite (W3.1): the sidecar paused before feeding
+      // this tool result to the model. Dispatch to plugins; a returned
+      // `modifiedResult` becomes the model-visible output. Always answer —
+      // the sidecar is blocked on `claude_tool_result_decision`.
+      const call = evt.toolUseId ? chatToolCallsById.get(evt.toolUseId) : undefined
+      let updatedToolOutput: unknown
+      try {
+        const post = await dispatchPluginPostToolUse(
+          evt.toolName || call?.name || "",
+          call?.input ?? {},
+          evt.result,
+          evt.sessionId
+        )
+        updatedToolOutput = post.modifiedResult
+      } catch {
+        updatedToolOutput = undefined
+      }
+      try {
+        await toolResultDecision(
+          evt.sessionId,
+          evt.reviewId,
+          updatedToolOutput,
+          (evt as typeof evt & { remoteExecutionContext?: RemoteExecutionContext })
+            .remoteExecutionContext
+        )
+      } catch (err) {
+        console.error("tool result decision failed", err)
+      }
+      return
+    }
     case "event": {
       const env = evt as SDKEventEnvelope
       const sessionId = env.sessionId
@@ -1367,13 +2772,23 @@ async function handleEvent(
       // it) — cancel its backstop deny (Remote Session Control).
       clearApprovalBackstops(sessionId)
       const isActive = sessionId === activeRef.current
+      // Any open pane streams live into its slice; a closed (no-pane) session
+      // only touches Dexie. `isOpen ⊇ isActive` — the active session is always
+      // open.
+      const isOpen = isSessionOpen(sessionId)
 
       // Source of truth lives in Dexie. Load → apply → save → maybe sync store.
-      // Mirror-first for the active session: the store commit may be a frame
-      // behind (coalesced), so the mirror holds the true latest base.
-      const current = isActive
-        ? (messagesMirrorRef.current.get(sessionId) ?? useChatStore.getState().messages)
+      // Mirror-first for an open session: the store commit may be a frame
+      // behind (coalesced), so the mirror holds the true latest base. The base
+      // is that session's *own* slice — never the focused session's — so a
+      // background pane accumulates its own stream.
+      const current = isOpen
+        ? (messagesMirrorRef.current.get(sessionId) ?? sliceMessages(sessionId))
         : await listMessages(sessionId)
+
+      // Track assistant tool_use blocks so the post-tool hook can correlate
+      // `tool_result_review` events with the call's name + input.
+      rememberToolCallsFromSdkEvent(env.event)
 
       const {
         messages: appliedMessages,
@@ -1415,8 +2830,10 @@ async function handleEvent(
           }
           nextMessages = [...appliedMessages.slice(0, lastIdx), stamped]
           pendingBranchTagRef.current.delete(sessionId)
-          if (isActive) {
-            useChatStore.getState().setActiveBranch(pendingTag.groupId, stamped.id)
+          if (isOpen) {
+            useChatStore
+              .getState()
+              .setSessionActiveBranch(sessionId, pendingTag.groupId, stamped.id)
           }
         }
       }
@@ -1425,17 +2842,29 @@ async function handleEvent(
       // / TaskList / ExitPlanMode tool_use blocks to the agent-team store so
       // the workspace tasks panel surfaces the agent's own plan. Wrapped so
       // a bridge throw never breaks the chat event loop.
-      try {
-        const session = await getSession(sessionId)
-        applyPlanModeBridge(env.event, sessionId, session?.teamId)
-        // ExitPlanMode capture (ADR-0045): project the SDK plan-mode plan into
-        // a structured draft AgentPlan so it can be approved + executed through
-        // the unified plan pipeline. Runs once per turn (turnComplete). Lazy
-        // import keeps the plan runtime out of the hot path until used.
-        const { captureExitPlanMode } = await import("@/lib/agent/plan/exit-plan-capture")
-        await captureExitPlanMode(env.event, sessionId, session?.characterId)
-      } catch (err) {
-        console.warn("planModeBridge failed", err)
+      //
+      // Skipped for `stream_event` (token-delta) envelopes: every bridge below
+      // consumes only assistant / user / system frames and would no-op — but
+      // only AFTER this block paid a Dexie `getSession` read per token batch.
+      // Gating here keeps the streaming hot path free of per-token IO.
+      if (env.event.type !== "stream_event") {
+        try {
+          const session = await getSession(sessionId)
+          applyPlanModeBridge(env.event, sessionId, session?.teamId)
+          // Bridge SDK-native subagents (the `opts.agents` / Task-tool path used by
+          // workflow-editor and direct chat) into the runtime store so they render
+          // in the chat subagent tree alongside `dispatch_agent` runs.
+          const { applySdkSubagentBridge } = await import("@/lib/claude/sdk-subagent-bridge")
+          applySdkSubagentBridge(env.event, sessionId)
+          // ExitPlanMode capture (ADR-0045): project the SDK plan-mode plan into
+          // a structured draft AgentPlan so it can be approved + executed through
+          // the unified plan pipeline. Runs once per turn (turnComplete). Lazy
+          // import keeps the plan runtime out of the hot path until used.
+          const { captureExitPlanMode } = await import("@/lib/agent/plan/exit-plan-capture")
+          await captureExitPlanMode(env.event, sessionId, session?.characterId)
+        } catch (err) {
+          console.warn("planModeBridge failed", err)
+        }
       }
 
       // Twin sources injection — runs once per turn at `turnComplete`. The
@@ -1464,37 +2893,70 @@ async function handleEvent(
       }
 
       if (nextMessages !== current) {
-        if (isActive) {
-          // Mirror is the authoritative base for the next event (the store
+        const currentAssistant = [...current]
+          .reverse()
+          .find((message) => message.role === "assistant")
+        const nextAssistant = [...nextMessages]
+          .reverse()
+          .find((message) => message.role === "assistant")
+        if (nextAssistant && nextAssistant !== currentAssistant) {
+          chatTurnPerformance.markFirstResponse(sessionId)
+        }
+        const grewWithAssistant =
+          nextMessages.length > current.length &&
+          nextMessages[nextMessages.length - 1]?.role === "assistant"
+        if (grewWithAssistant) {
+          // The first visible assistant frame (including tool_use) is the
+          // routing commit point. A later provider error must preserve the
+          // partial turn instead of replaying user-visible or side-effecting
+          // work against another deployment.
+          const cachedSend = useChatStore.getState().lastSendBySession[sessionId]
+          if (!cachedSend?.routingCommitted && cachedSend?.options.spanId) {
+            recordEvent(cachedSend.options.spanId, {
+              name: "routing.commit",
+              at: Date.now(),
+              attributes: {
+                providerId: cachedSend.options.provider,
+                modelId: cachedSend.options.model,
+                attemptIndex: cachedSend.attemptIndex,
+              },
+            })
+          }
+          useChatStore.getState().markLastSendCommitted?.(sessionId)
+        }
+        if (isOpen) {
+          // Mirror is the authoritative base for the next event (the slice
           // commit below may be coalesced a frame behind). Always write it
-          // synchronously before scheduling any deferred work.
+          // synchronously before scheduling any deferred work. Keyed per
+          // session so concurrent streams never share a base.
           messagesMirrorRef.current.set(sessionId, nextMessages)
+          const coalesce = registry.get(sessionId)
           if (turnComplete) {
             // Seal the turn: drop any coalesced/debounced work from earlier
             // tokens and commit + durably persist the final state now. Use an
             // explicit synchronous commit (not commit.flush()) because the
             // twin-sources merge above may have rewritten `nextMessages` after
             // the last commit.call — flush would re-commit the pre-merge args.
-            commit.cancel()
-            persistDebounced.cancel()
-            useChatStore.getState().replaceMessages(nextMessages)
+            coalesce.commit.cancel()
+            coalesce.persist.cancel()
+            useChatStore.getState().replaceSessionMessages(sessionId, nextMessages)
             await persistMessages(sessionId, nextMessages)
           } else {
             // Mid-stream: coalesce the React commit to ≤1/frame and debounce
             // the Dexie write. The mirror keeps the read path correct.
-            commit.call(nextMessages)
-            persistDebounced.call(sessionId, nextMessages)
+            coalesce.commit.call(nextMessages)
+            coalesce.persist.call(nextMessages)
           }
         } else {
+          // No open pane — persist straight to Dexie (no live slice to feed).
+          if (turnComplete) chatTurnPerformance.beginFinalPersistence(sessionId)
           await persistMessages(sessionId, nextMessages)
-          if (
-            nextMessages.length > current.length &&
-            nextMessages[nextMessages.length - 1]?.role === "assistant"
-          ) {
-            // Background reply landed for a non-active session — bump the
-            // unread count so the channel list shows a dot.
-            await bumpUnread(sessionId).catch(() => {})
-          }
+          if (turnComplete) chatTurnPerformance.endFinalPersistence(sessionId)
+        }
+        // A reply landing for any *non-focused* session (open background pane
+        // or fully-backgrounded) bumps its unread badge.
+        if (sessionId !== activeRef.current && grewWithAssistant) {
+          await bumpUnread(sessionId).catch(() => {})
         }
       }
 
@@ -1503,13 +2965,17 @@ async function handleEvent(
       // on (messageId) — re-applying the same result overwrites the row.
       if (sdkResult) {
         const lastAssistant = [...nextMessages].reverse().find((m) => m.role === "assistant")
+        // The actual provider/model sent to the sidecar may differ from the
+        // session record when alias routing or preset model_mapping changed it.
+        const lastSendForSpan = useChatStore.getState().lastSendBySession[sessionId]
         if (lastAssistant) {
           const session = await getSession(sessionId).catch(() => undefined)
           await recordResultUsage({
             sessionId,
             messageId: lastAssistant.id,
             characterId: session?.characterId,
-            model: session?.model,
+            model: lastSendForSpan?.options.model ?? session?.model,
+            providerId: lastSendForSpan?.options.provider,
             result: sdkResult,
           }).catch((err) => {
             console.warn("recordResultUsage failed", err)
@@ -1519,11 +2985,11 @@ async function handleEvent(
         // cached on `lastSendBySession.options` (set right after
         // `sendPrompt` in `send`). `endSpan` is idempotent — fallback retries
         // that reuse the same spanId are safe.
-        const lastSendForSpan = useChatStore.getState().lastSendBySession[sessionId]
         // ADR-0043 Phase 4 — feed provider reliability telemetry on a clean
         // turn (drives the health-metrics + circuit-breaker stores the routing
         // engine reads). Best-effort; recordProviderOutcome never throws.
         const telemetryProvider = lastSendForSpan?.options.provider
+        const turnUsage = extractUsage(sdkResult)
         if (telemetryProvider) {
           const r = sdkResult as unknown as { duration_ms?: number; total_cost_usd?: number }
           recordProviderOutcome({
@@ -1531,12 +2997,37 @@ async function handleEvent(
             ok: true,
             latencyMs: typeof r.duration_ms === "number" ? r.duration_ms : 0,
             estimatedCostUsd: typeof r.total_cost_usd === "number" ? r.total_cost_usd : undefined,
+            modelId: lastSendForSpan?.options.model,
+            tokensUsed: turnUsage
+              ? (turnUsage.inputTokens ?? 0) + (turnUsage.outputTokens ?? 0)
+              : undefined,
+            // Token breakdown lets the sink estimate cost when the SDK reports
+            // none (ai-sdk / non-Anthropic path → total_cost_usd 0), keeping the
+            // budget mirror + daily rollup accurate for those providers.
+            inputTokens: turnUsage?.inputTokens,
+            outputTokens: turnUsage?.outputTokens,
+            cacheReadTokens: turnUsage?.cacheReadInputTokens,
+            cacheCreationTokens: turnUsage?.cacheCreationInputTokens,
+            sessionId,
+            // Provider child span nests under this turn's root span, carrying
+            // the resolved tokens + cost into the trace.
+            traceId: lastSendForSpan?.options.traceId,
+            parentSpanId: lastSendForSpan?.options.spanId,
+            surface: "chat",
           })
+          const durationMs = finishBehaviorTurn(sessionId)
+          if (durationMs !== undefined) {
+            void trackEvent("chat.turn.completed", {
+              sessionId,
+              provider: telemetryProvider,
+              surface: "chat",
+              durationMs,
+            })
+          }
         }
         // Plugin token-usage observability (System-A onTokenUsage) — previously
         // dormant on the built-in chat path. Fail-open + no-op when no plugin
         // registered the hook; fires regardless of whether a trace span is open.
-        const turnUsage = extractUsage(sdkResult)
         if (turnUsage) {
           dispatchPluginTokenUsage(sessionId, {
             inputTokens: turnUsage.inputTokens ?? 0,
@@ -1572,57 +3063,221 @@ async function handleEvent(
         }
       }
 
-      if (turnComplete && isActive) {
-        // Streaming sealed. Flush any still-pending coalesced commit / debounced
-        // write (covers the no-delta seal where the commit block above was
-        // skipped because nextMessages === current), then drop the mirror so the
-        // next turn's first event reads a fresh base from the store. Idempotent
-        // when the delta branch already committed + canceled above.
-        commit.flush()
-        persistDebounced.flush()
+      if (turnComplete && isOpen) {
+        // Streaming sealed. Commit the last visual frame, cancel the
+        // fire-and-forget debounced writer, and await one canonical durable
+        // snapshot before exposing the idle state. A result envelope commonly
+        // leaves `nextMessages === current`; merely flushing the debouncer in
+        // that case launched an unobserved Dexie promise, so a reload could
+        // terminate the page after the full reply appeared but before it was
+        // stored.
+        registry.get(sessionId).commit.flush()
+        registry.get(sessionId).persist.cancel()
+        chatTurnPerformance.beginFinalPersistence(sessionId)
+        await persistMessages(sessionId, nextMessages)
+        chatTurnPerformance.endFinalPersistence(sessionId)
+        registry.release(sessionId)
         messagesMirrorRef.current.delete(sessionId)
+        chatTurnPerformance.finish(sessionId, "completed")
 
-        // Don't immediately flip to idle if approvals are still pending; the
-        // store helper handles the precedence.
-        const { pendingApprovals } = useChatStore.getState()
-        if (pendingApprovals.length === 0) {
-          perfMark("stream-end")
+        // Don't immediately flip to idle if this session's approvals are still
+        // pending; the store helper handles the precedence. Read the session's
+        // own slice so a background pane's approval doesn't gate the focused one.
+        const sessionPending = useChatStore.getState().sessions[sessionId]?.pendingApprovals ?? []
+        if (sessionPending.length === 0) {
+          // Plugin bus: SDK-path agent run sealed successfully (ids only).
+          emitSystemBusEvent(SystemEvents.MESSAGE_RECEIVED, { sessionId })
+          emitSystemBusEvent(SystemEvents.AGENT_COMPLETED, { sessionId })
+          // Plugin post-turn hook (onPostChatReceive) — fires once the assistant
+          // turn truly sealed (no pending approvals). This is the canonical
+          // post-turn observation seam; it was previously dormant (no host call
+          // site). In-process hook (not the ids-only bus), so it may carry the
+          // assistant content. Fully guarded: a plugin-observability dispatch
+          // must never break turn completion (mirrors the artifacts block below).
+          try {
+            const sealedAssistant = [...nextMessages].reverse().find((m) => m.role === "assistant")
+            if (sealedAssistant) {
+              // Content extraction is isolated so it can never prevent the
+              // observability dispatch (the hook is fail-open by design).
+              let content = ""
+              try {
+                content = extractAssistantText(sealedAssistant) ?? ""
+              } catch {
+                /* fall back to empty content */
+              }
+              void dispatchPluginPostChatReceive({
+                sessionId,
+                message: { id: sealedAssistant.id, role: "assistant", content },
+                metadata: {
+                  model: useChatStore.getState().lastSendBySession[sessionId]?.options.model,
+                },
+              })
+              // Pipeline hook (W3.3): `onMessageReceive` — plugins may rewrite
+              // the sealed assistant message. Applied asynchronously after the
+              // seal (store + Dexie) so a slow plugin never blocks the turn.
+              void (async () => {
+                try {
+                  const piped = await dispatchPluginAssistantMessage({
+                    id: sealedAssistant.id,
+                    role: "assistant",
+                    content,
+                  })
+                  if (typeof piped?.content !== "string" || piped.content === content) return
+                  const base = useChatStore.getState().sessions[sessionId]?.messages ?? []
+                  const rewritten = base.map((m) =>
+                    m.id === sealedAssistant.id
+                      ? {
+                          ...m,
+                          parts: m.parts.map((p) =>
+                            p.type === "text" ? { ...p, text: piped.content } : p
+                          ),
+                        }
+                      : m
+                  )
+                  useChatStore.getState().setSessionMessages(sessionId, rewritten)
+                  await persistMessages(sessionId, rewritten)
+                } catch {
+                  // Pipeline rewrite is best-effort — never break the seal.
+                }
+              })()
+            }
+          } catch {
+            // onPostChatReceive is best-effort observability — never block the seal.
+          }
           // Wrap the streaming→idle flip in `startTransition` so the heavy
           // commit it triggers — unmounting Streamdown, mounting react-markdown
           // + sanitize, and lazy-loading any Mermaid/Math/Diff blocks via
           // next/dynamic — lands at transition priority. The user's scroll
           // and keyboard input remain interruptible during the swap.
           startTransition(() => {
-            useChatStore.getState().setStatus("idle")
+            useChatStore.getState().setSessionStatus(sessionId, "idle")
           })
         }
+
+        // The turn-driver block below (artifacts, utility-model titling, /goal
+        // + /loop auto-continuation) mutates the focused conversation and
+        // schedules continuations guarded by `activeRef`; it runs only for the
+        // focused session. Background panes still seal + go idle above.
+        const completedSession = await getSession(sessionId).catch(() => undefined)
 
         // Auto-detect artifacts in the assistant turn that just sealed.
         // Honors the artifacts settings block; off by default for
         // power-users that flip the toggle.
-        try {
-          const settings = useSettingsStore.getState().settings
-          const artifactsCfg = settings?.artifacts
-          if (artifactsCfg?.autoCreate !== false) {
+        if (isActive || completedSession?.kind === "resource-workbench") {
+          try {
+            const settings = useSettingsStore.getState().settings
+            const artifactsCfg = settings?.artifacts
             const lastAssistant = [...nextMessages].reverse().find((m) => m.role === "assistant")
             const text = extractAssistantText(lastAssistant)
             if (text && lastAssistant) {
-              void useArtifactStore.getState().autoCreateFromContent({
-                sessionId,
-                messageId: lastAssistant.id,
-                content: text,
-                config: {
+              const reviewEnabled = artifactsCfg?.reviewBeforeApply !== false
+              const editTarget =
+                useChatStore.getState().pendingArtifactEditTarget?.[sessionId] ?? null
+
+              // Codex-style review gate: when the user aimed this turn at an
+              // existing artifact (via a selection chip) and review is on, stage
+              // the revision as a pending diff proposal instead of auto-creating
+              // a duplicate artifact.
+              let routedToReview = false
+              if (editTarget && reviewEnabled) {
+                const { detectArtifacts, DEFAULT_DETECTION_CONFIG } =
+                  await import("@/lib/ai/generation/artifact-detector")
+                // Low line threshold so even a small targeted edit surfaces.
+                const detected = detectArtifacts(text, {
+                  ...DEFAULT_DETECTION_CONFIG,
                   autoCreate: true,
-                  minLines: artifactsCfg?.minLines,
-                  enabledTypes: artifactsCfg?.enabledTypes,
-                  showNotification: artifactsCfg?.showNotification !== false,
-                },
-              })
+                  minLines: 1,
+                })
+                const targetArtifact = useArtifactStore
+                  .getState()
+                  .getArtifact(editTarget.artifactId)
+                const route = routeAiRevision({
+                  reviewEnabled,
+                  target: editTarget,
+                  targetArtifactType: targetArtifact?.type,
+                  detected,
+                })
+                // The target is single-use — consume it regardless of outcome.
+                useChatStore.getState().setPendingArtifactEditTarget(sessionId, null)
+                if (route.action === "propose") {
+                  const proposal = useArtifactStore
+                    .getState()
+                    .proposeArtifactUpdate(route.artifactId, route.content, {
+                      requestId: route.requestId,
+                    })
+                  // A null proposal (artifact gone / identical content) falls
+                  // through to the normal auto-create path below — no lost work.
+                  routedToReview = proposal !== null
+                }
+              }
+
+              const binding = completedSession?.surfaceBinding
+              if (
+                !routedToReview &&
+                reviewEnabled &&
+                completedSession?.kind === "resource-workbench" &&
+                binding?.kind === "canvas-document"
+              ) {
+                const { detectArtifacts, DEFAULT_DETECTION_CONFIG } =
+                  await import("@/lib/ai/generation/artifact-detector")
+                const detected = detectArtifacts(text, {
+                  ...DEFAULT_DETECTION_CONFIG,
+                  autoCreate: true,
+                  minLines: 1,
+                })
+                const proposed = detected[0]?.content ?? text
+                routedToReview =
+                  useArtifactStore.getState().proposeCanvasReview(binding.documentId, proposed, {
+                    requestId: lastAssistant.id,
+                  }) !== null
+              }
+
+              if (
+                !routedToReview &&
+                reviewEnabled &&
+                completedSession?.kind === "resource-workbench" &&
+                binding?.kind === "project-file"
+              ) {
+                const { detectArtifacts, DEFAULT_DETECTION_CONFIG } =
+                  await import("@/lib/ai/generation/artifact-detector")
+                const detected = detectArtifacts(text, {
+                  ...DEFAULT_DETECTION_CONFIG,
+                  autoCreate: true,
+                  minLines: 1,
+                })
+                const { getProjectFileResourceKey, proposeProjectFileUpdate } =
+                  await import("@/lib/context-workbench/project-file-proposals")
+                routedToReview =
+                  proposeProjectFileUpdate(
+                    getProjectFileResourceKey(binding),
+                    detected[0]?.content ?? text,
+                    lastAssistant.id
+                  ) !== null
+              }
+
+              // Auto-detect artifacts in the assistant turn that just sealed.
+              // Honors the artifacts settings block; off by default for
+              // power-users that flip the toggle.
+              if (!routedToReview && artifactsCfg?.autoCreate !== false) {
+                void useArtifactStore.getState().autoCreateFromContent({
+                  sessionId,
+                  messageId: lastAssistant.id,
+                  content: text,
+                  config: {
+                    autoCreate: true,
+                    minLines: artifactsCfg?.minLines,
+                    enabledTypes: artifactsCfg?.enabledTypes,
+                    showNotification: artifactsCfg?.showNotification !== false,
+                  },
+                })
+              }
             }
+          } catch (err) {
+            console.warn("artifact turn-complete routing failed", err)
           }
-        } catch (err) {
-          console.warn("autoCreateFromContent failed", err)
         }
+
+        if (!isActive) return
 
         // Background utility-model work: upgrade the auto title to an
         // LLM-generated one on the first turn, and (opt-in) generate a
@@ -1639,6 +3294,57 @@ async function handleEvent(
         // the next turn's events; the generationId guard + AbortController
         // make a mid-turn pause/stop/update return `stale`/`aborted`.
         if (useChatStore.getState().pendingApprovals.length === 0) {
+          // Self-paced /loop driver — mutually exclusive with an active goal
+          // (enforced at create on both sides), so this only runs when the
+          // goal block below finds nothing.
+          try {
+            const activeLoop = await getLoopRuntime().getActiveLoopForSession(sessionId)
+            if (activeLoop?.mode === "self_paced") {
+              const lastAssistant = [...nextMessages].reverse().find((m) => m.role === "assistant")
+              const lastResponse = extractAssistantText(lastAssistant)
+              const usage = sdkResult ? extractUsage(sdkResult) : null
+              const tokensDelta = (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0)
+              const capturedGenerationId = activeLoop.generationId
+              const ac = new AbortController()
+              const unregister = getLoopRuntime().registerAbortController(activeLoop.id, ac)
+              let outcome: Awaited<ReturnType<typeof handleLoopTurnComplete>>
+              try {
+                outcome = await handleLoopTurnComplete({
+                  loopId: activeLoop.id,
+                  lastResponse,
+                  tokensDelta,
+                  signal: ac.signal,
+                  capturedGenerationId,
+                })
+              } finally {
+                unregister()
+              }
+              if (outcome.kind === "exit") {
+                useChatStore.getState().appendMessage({
+                  id: `sys-loop-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                  role: "system",
+                  parts: [
+                    {
+                      type: "text",
+                      text: renderLoopExitCard(outcome.resultingStatus, outcome.reason),
+                    },
+                  ],
+                })
+                await persistMessages(sessionId, useChatStore.getState().messages).catch(() => {})
+              } else if (outcome.kind === "continue") {
+                scheduleLoopContinuation(
+                  activeLoop.id,
+                  sessionId,
+                  outcome.userMessage,
+                  sendRef,
+                  activeRef
+                )
+              }
+              // aborted | stale | no_loop → no-op; a pause/stop owns the next step.
+            }
+          } catch (err) {
+            console.warn("loop turn-driver failed", err)
+          }
           try {
             const goal = await getGoalRuntime().getActiveGoalForSession(sessionId)
             if (goal) {
@@ -1684,10 +3390,16 @@ async function handleEvent(
                     goalId: goal.id,
                     lastResponse,
                     tokensDelta,
+                    usage: usage ?? undefined,
+                    budgetExceeded:
+                      (sdkResult as unknown as { subtype?: string } | null)?.subtype ===
+                      "error_max_budget_usd",
                     modelMessageId: lastAssistant?.id,
                     judgeClient,
                     signal: ac.signal,
                     capturedGenerationId,
+                    firer: defaultLifecycleFirer,
+                    hookContext: { agentId: "goal-judge", sessionId: goal.id },
                   })
                 } finally {
                   unregister()
@@ -1709,12 +3421,18 @@ async function handleEvent(
                   // manual "Continue" / defer past quiet-hours or the interval.
                   // The scheduler re-reads the goal so a pause/stop in the tiny
                   // window after handleTurnComplete returned cancels cleanly.
+                  // Adaptive pacing: the model's <next-delay/> trailer (opt-in)
+                  // feeds the gate as a slow-down-only suggestion.
+                  const suggested = goal.config.adaptivePacing
+                    ? parseSuggestedDelay(lastResponse)
+                    : null
                   scheduleGoalContinuation(
                     goal.id,
                     sessionId,
                     outcome.userMessage,
                     sendRef,
-                    activeRef
+                    activeRef,
+                    suggested?.ms
                   )
                 }
                 // aborted | stale | no_goal → no-op: a pause/stop/update owns
@@ -1725,6 +3443,9 @@ async function handleEvent(
             console.warn("goal turn-driver failed", err)
           }
         }
+      }
+      if (turnComplete && !isOpen) {
+        chatTurnPerformance.finish(sessionId, "completed")
       }
       return
     }

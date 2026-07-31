@@ -1,0 +1,66 @@
+---
+title: 概览
+description: ADR-0090 统一 Agent 执行权威——唯一 resolver 将运行时、路由、宿主与凭证冻结为不可变 spec;sidecar 按其分发;gateway 以 ticket 路由;所有调用方经由同一服务。
+---
+
+# 统一 Agent 执行
+
+# ADR-0090 · flag 门控灰度（`agentExecutionResolverV2`）· spec 版本 1
+
+Cognia 恰有**三条 Agent 运行时轨道**——Claude Agent SDK、供应商中立的 AI SDK
+工具环（两者都由 Node sidecar 承载）、以及 `ExternalAgentManager` 背后的外部
+Agent。其余都是*维度*而非轨道:gateway/direct 是**路由**,桌面/headless 是
+**宿主**,native/orchestrated 是**委派模式**,纯文本 `executeAgent` 通道是
+**completion 回退**,绝不是第四运行时。
+
+## 权威链
+
+```
+AgentExecutionPolicy（调用方声明式意图）
+        │
+        ▼
+resolveAgentExecutionSpec()      ← 唯一决策权威
+        │  lib/ai/agent/execution/resolve-agent-execution-spec.ts
+        ▼
+ResolvedAgentExecutionSpec（冻结:runtime · route · host · bindings ·
+        │                   capabilities · 凭证引用 · fingerprint）
+        ▼
+AgentExecutionService            ← 唯一执行入口
+        │  lib/ai/agent/execution/agent-execution-service.ts
+        ├── agent 轨   → resolveSendOptions 盖章 SendOptions.execution
+        │               → sidecar 按 runtimeAdapter 分发
+        ├── completion → 仅显式回退,结果携带 degradedReason
+        └── external   → ExternalAgentManager
+```
+
+spec 一旦为会话生成,**任何人不得**再从别处推导 runtime/route/host/凭证。
+`executionFingerprint`（canonical-JSON FNV-1a-128,排除易变字段）是 ticket、
+预算、恢复与审计共同锚定的身份。
+
+## Fail-closed 规则
+
+- 冻结运行时无法服务的硬能力（`policy.requires`）在**任何模型调用之前**拒绝
+  （`AgentCapabilityUnsatisfiedError`）——绝不静默改吃 completion。
+- 失去 Agent 宿主时仅当策略显式允许（`fallbackPolicy: "completion"`）才降级,
+  且结果携带机器可读的 `degradedReason`,贯穿 workflow 节点输出、team 派发
+  结果与插件 meta。
+- headless/受管安装直接禁止 legacy completion 回退。
+
+## 线上载体
+
+spec 经 `SendOptions.execution`（`AgentExecutionSendSpec`）传输,构造上无
+密钥:gateway 路由只带 endpoint + ticket **id**;direct 路由只带凭证**档案
+引用**。原始密钥仍走既有 `sendOptions.env` redaction 集。Rust `SendOptions`
+flatten 透传,sidecar dispatch（`sidecar/dispatch/index.mjs`）按
+`execution.runtimeAdapter` 分发,无 spec 的发送计入 `legacy_dispatch` 遥测。
+
+## 位置索引
+
+| 关注点 | 位置 |
+| --- | --- |
+| 契约（policy/spec/envelope/事件） | `packages/agent-config-types/src/agent-execution.ts` |
+| resolver + service + flags | `lib/ai/agent/execution/` |
+| Provider/Deployment/Transport 档案 | `packages/provider-types/`、`lib/db/provider-profiles.ts`、`src-tauri/src/provider_profiles/` |
+| Gateway（ticket、snapshot CAS、parity） | `crates/cognia-gateway/` |
+| 通用 Agent 宿主 | `sidecar/agent-host.mjs`（+ `claude-host.mjs` 兼容 shim） |
+| Conformance 套件 | `tests/conformance/`（`pnpm test:conformance`） |

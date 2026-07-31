@@ -24,7 +24,7 @@
  * leak through the reference.
  */
 
-import type { Character, PackPristineSnapshot, SendOptions } from "@/lib/claude/types"
+import type { Character, PackPristineSnapshot, SendOptions } from "@cognia/agent-config-types"
 import type {
   PluginCharacterAvatarImage,
   PluginCharacterDef,
@@ -76,6 +76,7 @@ const PACK_MANAGED_FIELDS = [
   "skillIds",
   "pluginSkillIds",
   "enableComputerUse",
+  "enableBrowserTools",
   "computerUseSettings",
   "sandboxTier",
   "a2uiEnabled",
@@ -136,14 +137,14 @@ export function buildPristineSnapshot(overlay: PluginCharacterDef): PackPristine
     skillIds: cloneArray(overlay.skillIds),
     pluginSkillIds: cloneArray(overlay.pluginSkillIds),
     enableComputerUse: overlay.enableComputerUse,
+    enableBrowserTools: overlay.enableBrowserTools,
     computerUseSettings: cloneJson(overlay.computerUseSettings) as Character["computerUseSettings"],
     sandboxTier: overlay.sandboxTier,
     a2uiEnabled: overlay.a2uiEnabled,
     a2uiCatalogId: overlay.a2uiCatalogId,
     platformDefaults: cloneJson(overlay.platformDefaults) as Character["platformDefaults"],
     availableOnPlatforms: cloneArray(overlay.availableOnPlatforms) as
-      | PluginRuntimeProfile[]
-      | undefined,
+      PluginRuntimeProfile[] | undefined,
     avatarImage: cloneJson(overlay.avatarImage) as PluginCharacterAvatarImage | undefined,
     persona: cloneJson(overlay.persona) as PluginCharacterPersona | undefined,
     voiceProfile: cloneJson(overlay.voiceProfile) as PluginCharacterVoiceProfile | undefined,

@@ -14,7 +14,7 @@ jest.mock("./unread-pill", () => ({
 }))
 
 import { ConversationRow, type ConversationRowItem } from "./conversation-row"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import type { ConversationOverrideRow } from "@/lib/db/connector-types"
 
 function makeItem(overrides: Partial<ConversationRowItem> = {}): ConversationRowItem {
@@ -89,6 +89,34 @@ describe("ConversationRow", () => {
     expect(container.querySelector("svg.lucide-pin")).toBeInTheDocument()
   })
 
+  it("shows a status dot for a non-open status and hides it for open", () => {
+    const resolved = render(
+      <ConversationRow
+        item={makeItem({
+          override: {
+            conversationKey: "slack:a1:C1",
+            status: "resolved",
+          } as ConversationOverrideRow,
+        })}
+        isActive={false}
+        onSelect={() => {}}
+      />
+    )
+    expect(resolved.getByTestId("conversation-row-status-slack:a1:C1")).toBeInTheDocument()
+    resolved.unmount()
+
+    const open = render(
+      <ConversationRow
+        item={makeItem({
+          override: { conversationKey: "slack:a1:C1", status: "open" } as ConversationOverrideRow,
+        })}
+        isActive={false}
+        onSelect={() => {}}
+      />
+    )
+    expect(open.queryByTestId("conversation-row-status-slack:a1:C1")).not.toBeInTheDocument()
+  })
+
   it("invokes onSelect with the conversationKey on click", () => {
     const onSelect = jest.fn()
     render(<ConversationRow item={makeItem()} isActive={false} onSelect={onSelect} />)
@@ -99,5 +127,53 @@ describe("ConversationRow", () => {
   it("applies the active background when isActive", () => {
     render(<ConversationRow item={makeItem()} isActive onSelect={() => {}} />)
     expect(screen.getByTestId("conversation-row-slack:a1:C1")).toHaveClass("bg-muted")
+  })
+
+  // `bg-muted` (active) and `bg-muted/60` (hover) are near-identical, so the
+  // fill alone could not say which row was selected.
+  it("marks the active row with an accent rail and aria-current", () => {
+    render(<ConversationRow item={makeItem()} isActive onSelect={() => {}} />)
+    expect(screen.getByTestId("conversation-row-slack:a1:C1")).toHaveClass("before:bg-primary")
+    expect(screen.getByTestId("conversation-row-button-slack:a1:C1")).toHaveAttribute(
+      "aria-current",
+      "true"
+    )
+  })
+
+  // Hovering an already-selected row used to *lighten* it, because
+  // `hover:bg-muted/60` sat on top of the active `bg-muted`.
+  it("drops the hover fill on the active row", () => {
+    const { rerender } = render(
+      <ConversationRow item={makeItem()} isActive={false} onSelect={() => {}} />
+    )
+    expect(screen.getByTestId("conversation-row-slack:a1:C1")).toHaveClass("hover:bg-muted/60")
+
+    rerender(<ConversationRow item={makeItem()} isActive onSelect={() => {}} />)
+    expect(screen.getByTestId("conversation-row-slack:a1:C1")).not.toHaveClass("hover:bg-muted/60")
+  })
+
+  it("leaves a read row unmarked and aria-current-free", () => {
+    render(<ConversationRow item={makeItem()} isActive={false} onSelect={() => {}} />)
+    expect(screen.getByTestId("conversation-row-slack:a1:C1")).not.toHaveClass("before:bg-primary")
+    expect(screen.getByTestId("conversation-row-button-slack:a1:C1")).not.toHaveAttribute(
+      "aria-current"
+    )
+  })
+
+  // Unread has to read at a glance from typography, not only from the pill.
+  it("weights the title and preview of an unread row", () => {
+    render(
+      <ConversationRow item={makeItem({ unreadCount: 3 })} isActive={false} onSelect={() => {}} />
+    )
+    expect(screen.getByText("Product team")).toHaveClass("font-semibold")
+    expect(screen.getByText("Hello there")).toHaveClass("text-foreground/80")
+  })
+
+  it("keeps a read row at the resting weight", () => {
+    render(
+      <ConversationRow item={makeItem({ unreadCount: 0 })} isActive={false} onSelect={() => {}} />
+    )
+    expect(screen.getByText("Product team")).toHaveClass("font-medium")
+    expect(screen.getByText("Hello there")).toHaveClass("text-muted-foreground")
   })
 })

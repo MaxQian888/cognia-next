@@ -150,47 +150,41 @@ describe("getLocalRuntimeDiagnostics — Tauri mode", () => {
     expect(diag?.appName).toBeUndefined()
   })
 
-  it("records an error status when readWebEnv itself throws", async () => {
-    isTauriValue = true
-    // Force the navigator.userAgent getter to throw, propagating to
-    // readWebEnv, which then bubbles into the outer try/catch.
-    const originalNavigator = (globalThis as { navigator?: unknown }).navigator
-    Object.defineProperty(globalThis, "navigator", {
+  // Make `navigator.userAgent` throw for the duration of `run`. Replacing the
+  // whole `navigator` global with a throwing getter no longer works: from Node
+  // 26 on, `typeof navigator` does not invoke that getter, so `readWebEnv`'s
+  // `typeof navigator === "undefined"` guard simply took the server branch and
+  // nothing ever threw. Poisoning the field the code actually reads is both
+  // Node-version-independent and closer to the real failure mode.
+  function withThrowingUserAgent(thrown: unknown, run: () => Promise<void>): Promise<void> {
+    const original = Object.getOwnPropertyDescriptor(globalThis.navigator, "userAgent")
+    Object.defineProperty(globalThis.navigator, "userAgent", {
       configurable: true,
       get() {
-        throw new Error("navigator gone")
+        throw thrown
       },
     })
-    try {
+    return run().finally(() => {
+      if (original) Object.defineProperty(globalThis.navigator, "userAgent", original)
+      else delete (globalThis.navigator as { userAgent?: unknown }).userAgent
+    })
+  }
+
+  it("records an error status when readWebEnv itself throws", async () => {
+    isTauriValue = true
+    await withThrowingUserAgent(new Error("navigator gone"), async () => {
       const diag = await getLocalRuntimeDiagnostics()
       expect(diag?.status).toBe("error")
       expect(diag?.lastError).toMatch(/navigator gone/)
-    } finally {
-      Object.defineProperty(globalThis, "navigator", {
-        value: originalNavigator,
-        configurable: true,
-      })
-    }
+    })
   })
 
   it("coerces non-Error throws to a string in lastError", async () => {
     isTauriValue = true
-    const originalNavigator = (globalThis as { navigator?: unknown }).navigator
-    Object.defineProperty(globalThis, "navigator", {
-      configurable: true,
-      get() {
-        throw "string-thrown"
-      },
-    })
-    try {
+    await withThrowingUserAgent("string-thrown", async () => {
       const diag = await getLocalRuntimeDiagnostics()
       expect(diag?.status).toBe("error")
       expect(diag?.lastError).toBe("string-thrown")
-    } finally {
-      Object.defineProperty(globalThis, "navigator", {
-        value: originalNavigator,
-        configurable: true,
-      })
-    }
+    })
   })
 })

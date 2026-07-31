@@ -53,7 +53,33 @@ describe("serializeSegments", () => {
   it("downgrades opaque platform cards to a text marker", () => {
     const out = serializeSegments([{ type: "card", card: { kind: "x", payload: {} } }])
     expect(out.markdown).toBe("[card]")
+    expect(out.cards).toEqual([])
     expect(out.downgrades).toEqual([{ from: "card", to: "text", reason: "wecom_no_generic_card" }])
+  })
+
+  it("passes template_card-shaped card payloads through natively", () => {
+    const payload = {
+      card_type: "button_interaction",
+      main_title: { title: "T" },
+      button_list: [{ key: "k", text: "Go" }],
+    }
+    const out = serializeSegments([
+      { type: "card", card: { kind: "wecom.template_card", payload } },
+    ])
+    expect(out.cards).toEqual([payload])
+    expect(out.markdown).toBe("")
+    expect(out.downgrades).toEqual([])
+  })
+
+  it("renders a card payload's text alternative when it is not template_card-shaped", () => {
+    const out = serializeSegments([
+      { type: "card", card: { kind: "other", payload: { text: "fallback body" } } },
+    ])
+    expect(out.cards).toEqual([])
+    expect(out.markdown).toBe("fallback body")
+    expect(out.downgrades).toEqual([
+      { from: "card", to: "text", reason: "wecom_card_text_alternative" },
+    ])
   })
 
   it("projects mention / reply / location / poll into text", () => {

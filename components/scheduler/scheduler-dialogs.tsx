@@ -168,6 +168,9 @@ export function SchedulerDialogs({
                   payload: selectedTask.payload,
                   config: selectedTask.config,
                   notification: selectedTask.notification,
+                  endAt: selectedTask.endAt,
+                  onSuccessTaskIds: selectedTask.onSuccessTaskIds,
+                  onFailureTaskIds: selectedTask.onFailureTaskIds,
                 }}
                 onSubmit={onEditTask}
                 onCancel={() => onShowEditSheetChange(false)}

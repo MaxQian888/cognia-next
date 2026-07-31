@@ -1,0 +1,21 @@
+{
+  "author": "作者",
+  "capabilities": "能力",
+  "clearAll": "清空",
+  "close": "关闭",
+  "count": "{count, plural, =0 {未加入对比} =1 {{count} 个插件} other {# 个插件}}",
+  "dangerousCount": "{count, plural, other {# 项危险}}",
+  "downloads": "下载量",
+  "empty": "对比队列为空。",
+  "install": "安装",
+  "installed": "已安装",
+  "no": "否",
+  "permissions": "权限",
+  "permissionsCount": "{count, plural, =0 {无} =1 {{count} 项权限} other {# 项权限}}",
+  "rating": "评分",
+  "removeAria": "将 {name} 从对比中移除",
+  "signed": "已签名",
+  "title": "对比插件",
+  "triggerLabel": "对比（{count}）",
+  "yes": "是"
+}

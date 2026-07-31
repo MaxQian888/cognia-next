@@ -11,7 +11,7 @@
 // built-ins use the stable `preset_builtin_<slug>` ids declared in
 // `lib/db/preset-built-ins.ts`.
 
-import type { SystemPromptPreset } from "@/lib/claude/types"
+import type { SystemPromptPreset } from "@cognia/agent-config-types"
 import { getDb } from "./schema"
 import { BUILT_IN_PRESET_IDS, buildBuiltInPresets } from "./preset-built-ins"
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cognia 技术方案"
+  short_description: "产出实现准确、结构完整且评审就绪的 Cognia 技术方案"
+  default_prompt: "Use $cognia-tech-proposal to turn this Cognia change into an implementation-accurate, review-ready technical proposal."

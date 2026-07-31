@@ -13,9 +13,32 @@
  */
 
 import { nanoid } from "nanoid"
-import type { AgentTeam, AgentTeamTask } from "@/types/agent/agent-team"
+import { isTaskReviewEnabled, resolveMaxRevisions, reviewNodeId } from "./task-review-policy"
+import type { AgentTeam, AgentTeamConfig, AgentTeamTask } from "@/types/agent/agent-team"
 import { DEFAULT_RETRY_POLICY } from "@/types/workflow/visual"
-import type { VisualWorkflow, WorkflowEdge, WorkflowNode } from "@/types/workflow/visual"
+import type {
+  VisualWorkflow,
+  WorkflowEdge,
+  WorkflowNode,
+  WorkflowRetryPolicy,
+} from "@/types/workflow/visual"
+
+/**
+ * Derive the per-node retry policy from a team's config. The orchestrator
+ * honors `settings.retryDefaults` for `retryable` nodes (the team dispatch node
+ * is retryable), so this is the single point that makes the UI-editable
+ * `maxRetries` / `enableTaskRetry` knobs actually affect a run.
+ *
+ * - `enableTaskRetry === false` → one attempt, no retry (overrides maxRetries).
+ * - otherwise `attempts = (maxRetries ?? 2) + 1` — i.e. initial try + retries.
+ *   The `?? 2` default preserves the prior hardcoded behavior (attempts: 3).
+ *
+ * Backoff shape (mode / baseMs / maxMs) is inherited from DEFAULT_RETRY_POLICY.
+ */
+export function resolveRetryPolicy(config: AgentTeamConfig | undefined): WorkflowRetryPolicy {
+  const retries = config?.enableTaskRetry === false ? 0 : (config?.maxRetries ?? 2)
+  return { ...DEFAULT_RETRY_POLICY, attempts: retries + 1 }
+}
 
 export interface SynthesizeInput {
   team: AgentTeam
@@ -24,6 +47,16 @@ export interface SynthesizeInput {
   wallClockTimeoutMs?: number
   /** Forwarded into node executor via TeamRunContext; not encoded into VW. */
   perTaskTimeoutMs?: number
+  /**
+   * Dependency task ids that are satisfied OUTSIDE this workflow (executed in a
+   * prior wave, or cancelled). Used by adaptive re-planning's wave runner: a
+   * wave is a subset of the full task DAG, so its tasks may depend on tasks not
+   * present here. Such deps skip reference-validation, edge creation, and
+   * in-degree counting, but are KEPT in node params so the dispatch executor
+   * still reads their blackboard results via `readDependencyResults`. Defaults
+   * to empty → the single-pass synthesis behaves exactly as before.
+   */
+  satisfiedDependencyIds?: ReadonlySet<string>
 }
 
 export interface SynthesizeResult {
@@ -47,22 +80,28 @@ export function synthesizeTeamWorkflow(input: SynthesizeInput): SynthesizeResult
   }
 
   const taskIdSet = new Set(input.tasks.map((t) => t.id))
+  const satisfied = input.satisfiedDependencyIds ?? new Set<string>()
+  // Intra-workflow deps drive validation / edges / scheduling; deps satisfied
+  // outside this workflow are skipped (kept in params only).
+  const isIntra = (dep: string): boolean => taskIdSet.has(dep)
 
-  // Validate dep references.
+  // Validate dep references. A dep is valid if it is in this workflow OR was
+  // declared satisfied outside it (prior wave / cancelled).
   for (const t of input.tasks) {
     for (const dep of t.dependencies) {
-      if (!taskIdSet.has(dep)) {
+      if (!taskIdSet.has(dep) && !satisfied.has(dep)) {
         throw new SynthesizeError("invalid_dep", `task "${t.id}" depends on unknown task "${dep}"`)
       }
     }
   }
 
-  // Cycle detection via Kahn's algorithm.
+  // Cycle detection via Kahn's algorithm — only over intra-workflow edges.
   const inDegree = new Map<string, number>()
   const adj = new Map<string, string[]>()
   for (const t of input.tasks) {
-    inDegree.set(t.id, t.dependencies.length)
-    for (const dep of t.dependencies) {
+    const intraDeps = t.dependencies.filter(isIntra)
+    inDegree.set(t.id, intraDeps.length)
+    for (const dep of intraDeps) {
       const arr = adj.get(dep) ?? []
       arr.push(t.id)
       adj.set(dep, arr)
@@ -104,17 +143,77 @@ export function synthesizeTeamWorkflow(input: SynthesizeInput): SynthesizeResult
             title: t.title,
             description: t.description,
             ...(t.expectedOutput ? { expectedOutput: t.expectedOutput } : {}),
+            // Skill-aware assignment: the pool prefers this teammate when free,
+            // falling back to round-robin (see teammate-pool ClaimOptions).
+            ...(t.assignedTo ? { assignedTo: t.assignedTo } : {}),
+            // Upstream task ids — the executor reads their blackboard results
+            // and injects them into the teammate prompt so the team builds on
+            // prior work (deps are also encoded as edges for scheduling).
+            ...(t.dependencies.length > 0 ? { dependencies: t.dependencies } : {}),
           },
         },
       }) as WorkflowNode
   )
 
+  // Blocking lead review (ADR-0071): one review node per task, gating its
+  // dispatch. Emitted here rather than by the executor so the *scheduler*
+  // enforces the gate — an unapproved task's dependents are simply not
+  // runnable, instead of relying on downstream nodes to check a flag.
+  const reviewEnabled = isTaskReviewEnabled(input.team.config)
+  if (reviewEnabled) {
+    const maxRevisions = resolveMaxRevisions(input.team.config)
+    for (const t of input.tasks) {
+      nodes.push({
+        id: reviewNodeId(t.id),
+        type: "action.team.task.review",
+        typeVersion: 1,
+        position: { x: 0, y: 0 },
+        data: {
+          label: t.title,
+          params: {
+            teamId: input.team.id,
+            taskId: t.id,
+            title: t.title,
+            description: t.description,
+            ...(t.expectedOutput ? { expectedOutput: t.expectedOutput } : {}),
+            // Where the executor reads the worker's output + author from
+            // `ctx.upstream`. The dispatch node's id IS the task id today, but
+            // naming it keeps the review node honest if that ever changes.
+            dispatchNodeId: t.id,
+            // Frozen at synthesis: the DAG was shaped by this budget, so a
+            // mid-run config edit must not change it under a running node.
+            maxRevisions,
+          },
+        },
+      } as WorkflowNode)
+    }
+  }
+
+  // An intra-workflow dep is satisfied by its task's review node when review is
+  // on, and by the task's dispatch node otherwise. This single indirection is
+  // what makes approval unlock downstream work.
+  const gateOf = (taskId: string): string => (reviewEnabled ? reviewNodeId(taskId) : taskId)
+
   const edges: WorkflowEdge[] = []
+  if (reviewEnabled) {
+    for (const t of input.tasks) {
+      edges.push({
+        id: `${t.id}->${reviewNodeId(t.id)}`,
+        source: t.id,
+        target: reviewNodeId(t.id),
+      } as WorkflowEdge)
+    }
+  }
   for (const t of input.tasks) {
     for (const dep of t.dependencies) {
+      // Only intra-workflow deps become scheduling edges; external (satisfied)
+      // deps stay as params-only blackboard reads. A dep satisfied outside this
+      // workflow was already reviewed in the wave that ran it, so it gets no
+      // review node here — hence gateOf is only consulted for intra deps.
+      if (!isIntra(dep)) continue
       edges.push({
-        id: `${dep}->${t.id}`,
-        source: dep,
+        id: `${gateOf(dep)}->${t.id}`,
+        source: gateOf(dep),
         target: t.id,
       } as WorkflowEdge)
     }
@@ -144,11 +243,14 @@ export function synthesizeTeamWorkflow(input: SynthesizeInput): SynthesizeResult
       timeoutMs: wallClock,
       concurrency: 1,
       maxConcurrency: input.initialConcurrency,
-      retryDefaults: DEFAULT_RETRY_POLICY,
+      retryDefaults: resolveRetryPolicy(input.team.config),
     },
   }
 
   const nodeIdToTaskId = new Map<string, string>(input.tasks.map((t) => [t.id, t.id]))
+  if (reviewEnabled) {
+    for (const t of input.tasks) nodeIdToTaskId.set(reviewNodeId(t.id), t.id)
+  }
 
   return { workflow, nodeIdToTaskId }
 }

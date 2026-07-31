@@ -28,9 +28,10 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tauri::{AppHandle, Emitter};
 use tokio::sync::oneshot;
 use uuid::Uuid;
+
+use super::bridge_transport::BridgeTransport;
 
 const REQUEST_EVENT: &str = "companion://desktop-write-request";
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -45,8 +46,12 @@ pub struct DesktopWriteRequest {
 }
 
 /// Generic response from the WebView. Same shape as the messages bridge.
+///
+/// The alias accepts the camelCase key the TS side sends verbatim over the
+/// headless bridge WS (`ws_bridge::route_respond`).
 #[derive(Debug, Clone, Deserialize)]
 pub struct DesktopWriteResponse {
+    #[serde(alias = "requestId")]
     pub request_id: String,
     pub result: Option<Value>,
     pub error: Option<String>,
@@ -67,7 +72,7 @@ impl DesktopWritesBridge {
     /// Round-trip a single command through the desktop WebView.
     pub async fn dispatch(
         self: Arc<Self>,
-        app: &AppHandle,
+        transport: &dyn BridgeTransport,
         command: &str,
         payload: Value,
         timeout: Duration,
@@ -78,9 +83,16 @@ impl DesktopWritesBridge {
             command: command.to_string(),
             payload,
         };
-        if let Err(err) = app.emit(REQUEST_EVENT, event_payload) {
+        let value = match serde_json::to_value(&event_payload) {
+            Ok(v) => v,
+            Err(err) => {
+                self.pending.lock().remove(&request_id);
+                return Err(format!("failed to serialize desktop-write-request: {err}"));
+            }
+        };
+        if let Err(err) = transport.emit(REQUEST_EVENT, value) {
             self.pending.lock().remove(&request_id);
-            return Err(format!("failed to emit desktop-write-request: {err}"));
+            return Err(err);
         }
         self.await_response(request_id, rx, timeout).await
     }
@@ -127,9 +139,7 @@ impl DesktopWritesBridge {
         let payload = match (response.result, response.error) {
             (Some(value), _) => Ok(value),
             (None, Some(err)) => Err(err),
-            (None, None) => {
-                Err("desktop-write-response had neither result nor error".to_string())
-            }
+            (None, None) => Err("desktop-write-response had neither result nor error".to_string()),
         };
         let _ = sender.send(payload);
     }
@@ -142,8 +152,60 @@ impl DesktopWritesBridge {
 
 #[cfg(test)]
 mod tests {
+    use super::super::bridge_transport::test_support::RecordingBridgeTransport;
     use super::*;
     use serde_json::json;
+
+    #[tokio::test]
+    async fn dispatch_emits_camel_case_request_through_the_transport() {
+        let bridge = DesktopWritesBridge::new();
+        let transport = RecordingBridgeTransport::new();
+        let t = Arc::clone(&transport);
+        let b = Arc::clone(&bridge);
+        let handle = tokio::spawn(async move {
+            b.dispatch(
+                t.as_ref(),
+                "character_upsert",
+                json!({ "id": "c1" }),
+                DEFAULT_TIMEOUT,
+            )
+            .await
+        });
+        let (channel, payload) = loop {
+            if let Some(entry) = transport.last() {
+                break entry;
+            }
+            tokio::task::yield_now().await;
+        };
+        assert_eq!(channel, REQUEST_EVENT);
+        assert_eq!(payload["command"], "character_upsert");
+        assert_eq!(payload["payload"]["id"], "c1");
+        // camelCase on the wire (requestId, not request_id).
+        let request_id = payload["requestId"].as_str().unwrap().to_string();
+        bridge.resolve(DesktopWriteResponse {
+            request_id,
+            result: Some(json!({ "ok": true })),
+            error: None,
+        });
+        assert_eq!(handle.await.unwrap().unwrap(), json!({ "ok": true }));
+    }
+
+    #[tokio::test]
+    async fn dispatch_emit_failure_clears_the_pending_slot() {
+        let bridge = DesktopWritesBridge::new();
+        let transport = RecordingBridgeTransport::failing();
+        let err = Arc::clone(&bridge)
+            .dispatch(
+                transport.as_ref(),
+                "character_upsert",
+                json!({}),
+                DEFAULT_TIMEOUT,
+            )
+            .await
+            .expect_err("emit fails");
+        assert!(err.contains("forced failure"));
+        assert_eq!(bridge.pending_count(), 0);
+    }
 
     #[tokio::test]
     async fn resolve_completes_a_pending_request() {

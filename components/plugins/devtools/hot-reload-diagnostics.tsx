@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { PluginEmptyState } from "@/components/plugins/_shared/plugin-empty-state"
+import { cn } from "@/lib/utils"
 import {
   useHotReloadHistoryStore,
   type HotReloadEntry,
@@ -30,10 +31,20 @@ export function HotReloadDiagnostics({ className }: { className?: string }) {
   const clear = useHotReloadHistoryStore((s) => s.clear)
 
   return (
-    <Card className={className}>
-      <div className="p-4 space-y-3">
-        <div className="flex items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold">{t("title")}</h3>
+    <Card
+      className={cn(
+        "gap-0 overflow-hidden border-border/70 py-0 shadow-sm transition-[border-color,box-shadow] duration-200 hover:border-foreground/20 hover:shadow-md",
+        className
+      )}
+    >
+      <div className="flex h-full flex-col gap-3 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-muted/50">
+              <RotateCwIcon className="size-4 text-muted-foreground" aria-hidden="true" />
+            </div>
+            <h3 className="truncate text-sm font-semibold tracking-tight">{t("title")}</h3>
+          </div>
           {entries.length > 0 && (
             <Button
               size="sm"
@@ -50,6 +61,7 @@ export function HotReloadDiagnostics({ className }: { className?: string }) {
           <PluginEmptyState
             icon={<RotateCwIcon className="size-5" />}
             hint={t("empty")}
+            className="min-h-28 gap-2 bg-muted/15 p-4 md:p-4 [&_[data-slot=empty-header]]:gap-1.5 [&_[data-slot=empty-icon]]:mb-0 [&_[data-slot=empty-title]]:text-base"
             dataTestId="hot-reload-empty"
           />
         ) : (

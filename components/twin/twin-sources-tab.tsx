@@ -1,18 +1,31 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { memo, useEffect, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { motion, useReducedMotion } from "motion/react"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
 import { StatusBadge } from "@/components/status-badge"
 import { listTwinSourcesByTwin, deleteTwinSource } from "@/lib/db/twin-sources"
+import { enqueueIngestJob } from "@/lib/twin/ingest"
 import type { TwinSource, TwinSourceStatus } from "@/types/twin"
-import { TwinSourceUploader } from "./twin-source-uploader"
+import { TwinAddSourceDialog } from "./add-source/add-source-dialog"
+import { TwinSourcePreviewDialog } from "./twin-source-preview-dialog"
 
 const STATUS_VARIANT: Record<
   TwinSourceStatus,
@@ -25,6 +38,9 @@ const STATUS_VARIANT: Record<
   deleted: "outline",
 }
 
+/** Chip order for the status filter row; "all" is prepended in the UI. */
+const FILTERABLE_STATUSES: TwinSourceStatus[] = ["pending", "parsing", "parsed", "failed"]
+
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
@@ -33,10 +49,55 @@ function formatBytes(n: number): string {
 
 export function TwinSourcesTab({ twinId }: { twinId: string }) {
   const t = useTranslations("twin.sources")
-  const tFormat = useTranslations("twin.format")
+  const tStatus = useTranslations("twin.charts.status")
   const prefersReducedMotion = useReducedMotion()
   const [showUploader, setShowUploader] = useState(false)
+  const [queuing, setQueuing] = useState(false)
+  const [statusFilter, setStatusFilter] = useState<TwinSourceStatus | "all">("all")
+  const [pendingDelete, setPendingDelete] = useState<TwinSource | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const sources = useLiveQuery(() => listTwinSourcesByTwin(twinId), [twinId], [])
+  const pendingSources = useMemo(() => sources.filter((s) => s.status === "pending"), [sources])
+
+  const statusCounts = useMemo(() => {
+    const counts = new Map<TwinSourceStatus, number>()
+    for (const s of sources) counts.set(s.status, (counts.get(s.status) ?? 0) + 1)
+    return counts
+  }, [sources])
+
+  const filtered = useMemo(
+    () => (statusFilter === "all" ? sources : sources.filter((s) => s.status === statusFilter)),
+    [sources, statusFilter]
+  )
+
+  // Bridge upload → ingest: uploaded sources land as `pending` and otherwise
+  // sit there until the user discovers the Jobs tab. Surface a one-click CTA so
+  // the next step is obvious without auto-spending embedding tokens.
+  const queuePendingIngest = async () => {
+    if (pendingSources.length === 0) return
+    setQueuing(true)
+    try {
+      await enqueueIngestJob({ twinId, sourceIds: pendingSources.map((s) => s.id) })
+    } finally {
+      setQueuing(false)
+    }
+  }
+
+  const confirmDelete = async () => {
+    if (!pendingDelete) return
+    setDeleting(true)
+    try {
+      await deleteTwinSource(pendingDelete.id)
+    } catch (error) {
+      toast.error(
+        t("deleteFailed", { message: error instanceof Error ? error.message : String(error) })
+      )
+      return
+    } finally {
+      setDeleting(false)
+    }
+    setPendingDelete(null)
+  }
 
   // Deep-link from the chat SourcesPart "View source" link: when the URL
   // carries ?sourceId=…, scroll the matching row into view and apply a
@@ -64,26 +125,81 @@ export function TwinSourcesTab({ twinId }: { twinId: string }) {
     return () => window.clearTimeout(handle)
   }, [activeHighlight])
 
+  const visibleFilters = FILTERABLE_STATUSES.filter((s) => (statusCounts.get(s) ?? 0) > 0)
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-medium">{t("headerCount", { count: sources.length })}</h2>
-        <Button size="sm" onClick={() => setShowUploader((v) => !v)}>
-          {showUploader ? t("cancelAdd") : t("addSource")}
+        <Button size="sm" onClick={() => setShowUploader(true)} data-testid="twin-sources-add">
+          {t("addSource")}
         </Button>
       </div>
 
-      {showUploader ? (
-        <TwinSourceUploader twinId={twinId} onUploaded={() => setShowUploader(false)} />
+      <TwinAddSourceDialog
+        twinId={twinId}
+        open={showUploader}
+        onOpenChange={setShowUploader}
+        onAdded={() => setShowUploader(false)}
+      />
+
+      {pendingSources.length > 0 ? (
+        <Card className="flex flex-wrap items-center justify-between gap-2 border-primary/40 bg-primary/5 p-3">
+          <p className="text-sm">{t("pendingIngestHint", { count: pendingSources.length })}</p>
+          <Button
+            size="sm"
+            onClick={() => void queuePendingIngest()}
+            disabled={queuing}
+            data-testid="twin-sources-queue-ingest"
+          >
+            {queuing ? t("pendingIngestBusy") : t("pendingIngestCta")}
+          </Button>
+        </Card>
+      ) : null}
+
+      {visibleFilters.length > 1 ? (
+        <div
+          className="flex flex-wrap items-center gap-1.5"
+          role="group"
+          aria-label={t("filterLabel")}
+          data-testid="twin-sources-filter"
+        >
+          <Button
+            size="sm"
+            variant={statusFilter === "all" ? "secondary" : "ghost"}
+            className="h-7 px-2 text-xs"
+            onClick={() => setStatusFilter("all")}
+            aria-pressed={statusFilter === "all"}
+          >
+            {t("filterAll")} ({sources.length})
+          </Button>
+          {visibleFilters.map((status) => (
+            <Button
+              key={status}
+              size="sm"
+              variant={statusFilter === status ? "secondary" : "ghost"}
+              className="h-7 px-2 text-xs"
+              onClick={() => setStatusFilter((prev) => (prev === status ? "all" : status))}
+              aria-pressed={statusFilter === status}
+              data-testid={`twin-sources-filter-${status}`}
+            >
+              {tStatus(status)} ({statusCounts.get(status) ?? 0})
+            </Button>
+          ))}
+        </div>
       ) : null}
 
       {sources.length === 0 ? (
         <Card className="p-6 text-center">
           <p className="text-muted-foreground text-sm">{t("emptyHint")}</p>
         </Card>
+      ) : filtered.length === 0 ? (
+        <Card className="p-6 text-center">
+          <p className="text-muted-foreground text-sm">{t("filterEmpty")}</p>
+        </Card>
       ) : (
         <ul className="flex flex-col gap-2">
-          {sources.map((source, index) => (
+          {filtered.map((source, index) => (
             <motion.li
               key={source.id}
               ref={(el) => {
@@ -103,24 +219,62 @@ export function TwinSourcesTab({ twinId }: { twinId: string }) {
               )}
               data-testid={`twin-source-${source.id}-row`}
             >
-              <SourceRow source={source} t={t} formatLabel={(f) => tFormat(f)} />
+              <SourceRow source={source} onDeleteRequest={setPendingDelete} />
             </motion.li>
           ))}
         </ul>
       )}
+
+      <AlertDialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("deleteConfirmTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("deleteConfirmDescription", { title: pendingDelete?.title ?? "" })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("deleteConfirmCancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => {
+                // Keep the controlled dialog mounted until the async cascade
+                // has captured its source and completed. Radix otherwise
+                // closes the action immediately, clearing `pendingDelete`
+                // before the async handler can start in some event orderings.
+                event.preventDefault()
+                void confirmDelete()
+              }}
+              disabled={deleting}
+              data-testid="twin-sources-delete-confirm"
+            >
+              {t("deleteConfirmAction")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
 
-function SourceRow({
+/**
+ * A single source row. Memoised — live-query refreshes replace only changed
+ * rows' objects, so unrelated rows skip re-rendering.
+ */
+const SourceRow = memo(function SourceRow({
   source,
-  t,
-  formatLabel,
+  onDeleteRequest,
 }: {
   source: TwinSource
-  t: ReturnType<typeof useTranslations>
-  formatLabel: (f: TwinSource["format"]) => string
+  onDeleteRequest: (source: TwinSource) => void
 }) {
+  const t = useTranslations("twin.sources")
+  const tFormat = useTranslations("twin.format")
+  const [previewOpen, setPreviewOpen] = useState(false)
   return (
     <Card className="flex items-center justify-between gap-3 p-3">
       <div className="flex min-w-0 flex-col gap-1">
@@ -135,7 +289,7 @@ function SourceRow({
             data-testid={`twin-source-${source.id}-status`}
           />
           <Badge variant="outline" className="shrink-0">
-            {formatLabel(source.format)}
+            {tFormat(source.format)}
           </Badge>
         </div>
         <div className="text-muted-foreground flex flex-wrap items-center gap-2 text-xs">
@@ -154,15 +308,20 @@ function SourceRow({
           ) : null}
         </div>
       </div>
-      <Button
-        size="sm"
-        variant="outline"
-        onClick={() => {
-          void deleteTwinSource(source.id)
-        }}
-      >
-        {t("delete")}
-      </Button>
+      <div className="flex shrink-0 items-center gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => setPreviewOpen(true)}
+          data-testid={`twin-source-${source.id}-preview`}
+        >
+          {t("preview")}
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => onDeleteRequest(source)}>
+          {t("delete")}
+        </Button>
+      </div>
+      <TwinSourcePreviewDialog source={source} open={previewOpen} onOpenChange={setPreviewOpen} />
     </Card>
   )
-}
+})

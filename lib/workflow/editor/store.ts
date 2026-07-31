@@ -25,10 +25,13 @@ import type { Viewport } from "@xyflow/react"
 import type {
   VisualWorkflow,
   WorkflowCredentialRef,
+  WorkflowInterface,
   WorkflowNodeData,
   WorkflowNodeKind,
+  WorkflowPublication,
   WorkflowSettings,
 } from "@/types/workflow/visual"
+import { WORKFLOW_NODE_KINDS } from "@/types/workflow/visual"
 import {
   reactFlowToWorkflow,
   workflowToReactFlow,
@@ -41,6 +44,7 @@ import {
   validateNodeParams,
   type NodeValidationResult,
 } from "@/lib/workflow/nodes/validate-params"
+import { nodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
 import {
   cloneNodesAndEdges,
   rehydrateFromEnvelope,
@@ -48,9 +52,21 @@ import {
   type ClipboardEnvelope,
 } from "./clipboard"
 import { defaultTypeVersionFor } from "./node-handles"
+import { validateConnection } from "./connection-validator"
+import { computeSplitEdges } from "./edge-insert"
 import type { ProposalOp } from "./proposal-types"
+import { workflowEditorRevision } from "./editor-revision"
 import type { PerformanceTier } from "./performance-tier"
 import type { LastRunSummary } from "@/lib/workflow/runtime/last-run-summary"
+import { runDiagnostics } from "@/lib/workflow/diagnostics/engine"
+import { EMPTY_DIAGNOSTICS, type DiagnosticsResult } from "@/lib/workflow/diagnostics/types"
+import { listRegisteredKinds } from "@/lib/workflow/nodes/registry"
+import { isTauri } from "@/lib/platform/detect"
+import type { WorkflowNodeGroupDefinition } from "@cognia/plugin-sdk/templates"
+import {
+  materializeWorkflowNodeGroup,
+  type MaterializedWorkflowNodeGroup,
+} from "@/lib/workflow/node-groups/materialize"
 
 export interface EditorStateSnapshot {
   nodes: RFWorkflowNode[]
@@ -103,12 +119,37 @@ export interface EditorState extends EditorStateSnapshot {
    */
   validationByStepId: Record<string, NodeValidationResult>
   /**
+   * Workflow-wide diagnostics (errors + warnings) — the union of param
+   * validation, graph integrity, expression-reference scope, credential
+   * preflight, etc. Recomputed debounced by the store's own driver whenever
+   * the graph changes; read by the Problems panel, the node/edge decorations,
+   * and the save/run gate. Distinct from `validationByStepId`, which is the
+   * inspector's fast per-field path. See `lib/workflow/diagnostics/`.
+   */
+  diagnostics: DiagnosticsResult
+  /**
    * Aggregated outcome of the most recent terminal event for each step.
    * Mirrored into the store by the canvas (which subscribes via Dexie
    * liveQuery `useLastRunSummaryByStep`) so that `useNodeDecoration` can
    * read per-node decorations with O(1) fine-grained subscriptions. (A4)
    */
   lastRunByStepId: Record<string, LastRunSummary>
+  /**
+   * Node ids the copilot composer currently references — attached via the
+   * `@` node/edge picker chips or the "reference selection" toolbar action.
+   * Drives a persistent highlight ring so the user can see which nodes are
+   * bound to the next AI turn. Ephemeral; not tracked in the undo history.
+   */
+  referencedNodeIds: Record<string, true>
+  setReferencedNodes: (ids: string[]) => void
+  /**
+   * Node ids under a transient highlight — the copilot `@`-picker's active
+   * row and the proposal card's hover. Cleared when the popover closes / the
+   * hover ends. Unioned with {@link referencedNodeIds} by `useNodeDecoration`.
+   * Ephemeral; not tracked in the undo history.
+   */
+  highlightedNodeIds: Record<string, true>
+  setHighlightedNodes: (ids: string[]) => void
 
   // ── editor preferences (ephemeral; not undoable) ──────────────────────────
   /**
@@ -178,6 +219,60 @@ export interface EditorState extends EditorStateSnapshot {
   ) => void
   endConnection: () => void
   /**
+   * Mobile-only switch: when true, the shared node renderer arms tap-to-connect
+   * from a source handle on click (touch can't reliably drag a 12px handle).
+   * Desktop never sets it, so the handle-tap path is a no-op there and the
+   * native drag-to-connect interaction is untouched. Set by the mobile editor
+   * when entering edit mode; cleared on read mode / unmount.
+   */
+  touchConnect: boolean
+  setTouchConnect: (v: boolean) => void
+  /**
+   * Pending "create node from a dragged handle" (C2). Set when a connection is
+   * released on the empty pane: the canvas opens the palette, and on pick
+   * routes through `addNodeConnected` to create the node at `dropPos` and wire
+   * `sourceId`(+`sourceHandle`) → it. Cleared when the palette closes.
+   */
+  pendingConnectFrom: {
+    sourceId: string
+    sourceHandle: string | null
+    dropPos: { x: number; y: number }
+  } | null
+  setPendingConnectFrom: (
+    v: { sourceId: string; sourceHandle: string | null; dropPos: { x: number; y: number } } | null
+  ) => void
+  /**
+   * Create a node at `position` and connect `from.sourceId`(+handle) → it in a
+   * single undo entry. Returns the new node id, or `null` if the resulting
+   * connection is invalid. Used by add-node-from-handle (C2) and keyboard
+   * create+connect (C3).
+   */
+  addNodeConnected: (
+    kind: WorkflowNodeKind,
+    position: { x: number; y: number },
+    from: { sourceId: string; sourceHandle: string | null }
+  ) => string | null
+  /**
+   * Replace a selected node set with a single new node (extract-to-subworkflow,
+   * C5). Removes the selected nodes (cascading their container children) and
+   * every edge touching them, adds `replacement`, and rewires the boundary
+   * edges: external inbound → new node, new node → external outbound (deduped).
+   * One undo entry. Returns the new node id.
+   */
+  replaceSelectionWithNode: (
+    selectedIds: string[],
+    replacement: {
+      kind: WorkflowNodeKind
+      params: Record<string, unknown>
+      position: { x: number; y: number }
+      label?: string
+    },
+    rewires: {
+      inbound: Array<{ source: string; sourceHandle?: string }>
+      outbound: Array<{ target: string; targetHandle?: string }>
+    }
+  ) => string
+  /**
    * Out-of-band signal from the mini toolbar's "More" button → canvas.
    * The canvas subscribes and opens the F1 context menu anchored at
    * `screenAnchor` for the supplied target kind. Cleared by the canvas
@@ -210,6 +305,24 @@ export interface EditorState extends EditorStateSnapshot {
   requestedRunSingleStepId: string | null
   requestRunSingleStep: (stepId: string) => void
   clearRequestedRunSingleStep: () => void
+  /**
+   * Signal → right sidebar to switch to the Problems tab. Set by the run gate
+   * when a run is blocked on errors so the user is taken straight to the list.
+   * The sidebar consumes it and clears it (respecting a pinned tab).
+   */
+  requestedProblemsPanel: boolean
+  requestProblemsPanel: () => void
+  clearRequestedProblemsPanel: () => void
+  /**
+   * Signal → right sidebar to reveal the Inspector tab. Set by explicit
+   * configure gestures (node double-click, context-menu "Configure") so the
+   * form surfaces even when the user pinned another tab. The sidebar consumes
+   * and clears it, and drops any pinned tab so subsequent selections resume
+   * auto-switching.
+   */
+  requestedInspectorPanel: boolean
+  requestInspectorPanel: () => void
+  clearRequestedInspectorPanel: () => void
 
   // ── mutators (graph) ──────────────────────────────────────────────────────
   setNodes: (nodes: RFWorkflowNode[]) => void
@@ -229,6 +342,18 @@ export interface EditorState extends EditorStateSnapshot {
     position: { x: number; y: number },
     overrides?: Partial<WorkflowNodeData>
   ) => string
+  /**
+   * Insert a new node onto an existing edge, splitting it
+   * `source → new → target` in a single undo entry. Preserves the original
+   * edge's source/target handles. No-ops (returns `null`) if the edge is gone
+   * or either replacement connection fails validation.
+   */
+  insertNodeOnEdge: (
+    edgeId: string,
+    kind: WorkflowNodeKind,
+    position: { x: number; y: number },
+    overrides?: Partial<WorkflowNodeData>
+  ) => string | null
   removeNodes: (ids: string[]) => void
   /**
    * Re-parent a node into (or out of, with `null`) a loop container's
@@ -246,12 +371,22 @@ export interface EditorState extends EditorStateSnapshot {
    * `params` is kind-specific and must not be bulk-written.
    */
   updateNodeDataBatch: (ids: string[], patch: Partial<WorkflowNodeData>) => void
+  /**
+   * Set `errorHandling.onError` across a selection, MERGING per node so each
+   * node keeps its own `retry` / `defaultValue` (a plain `updateNodeDataBatch`
+   * would replace the whole `errorHandling` object and drop them). `"fail"`
+   * clears the override (the default). One undo entry.
+   */
+  setBulkOnError: (
+    ids: string[],
+    onError: NonNullable<WorkflowNodeData["errorHandling"]>["onError"]
+  ) => void
   connect: (params: {
     source: string
     target: string
     sourceHandle?: string
     targetHandle?: string
-  }) => string
+  }) => string | null
   /** Update an edge's `data` field (undoable). Returns true if the edge existed. */
   updateEdgeData: (id: string, patch: Record<string, unknown>) => boolean
   /**
@@ -286,12 +421,21 @@ export interface EditorState extends EditorStateSnapshot {
   unpinNodeData: (nodeId: string) => void
 
   // ── lifecycle ─────────────────────────────────────────────────────────────
-  /** Replace entire state with a fresh workflow (e.g., on route change). */
-  loadWorkflow: (wf: VisualWorkflow) => void
+  /**
+   * Replace entire state with a fresh workflow (e.g., on route change).
+   * Imported content passes `dirty: true` until it is persisted under the
+   * current workflow id.
+   */
+  loadWorkflow: (wf: VisualWorkflow, options?: { dirty?: boolean }) => void
   /** Snapshot back into a `VisualWorkflow` for `replaceWorkflow(wf)`. */
   toWorkflow: () => VisualWorkflow
-  /** Mark the editor as saved at the current timestamp. */
-  markSaved: () => void
+  /**
+   * Mark the editor as saved and optionally synchronize canonical persistence
+   * metadata without replacing graph, selection, or undo history.
+   */
+  markSaved: (workflow?: VisualWorkflow) => void
+  /** Synchronize explicit publish/unpublish results without marking the graph dirty. */
+  syncPublication: (published?: WorkflowPublication, workflowInterface?: WorkflowInterface) => void
   resetDirty: () => void
 
   // ── productivity actions (undoable) ──────────────────────────────────────
@@ -313,12 +457,24 @@ export interface EditorState extends EditorStateSnapshot {
    * applied ops + the first error message if any op was rejected (e.g.,
    * `connect_edge` referencing a node that does not exist).
    */
-  applyProposalOps: (ops: ReadonlyArray<ProposalOp>) => { applied: number; firstError?: string }
+  applyProposalOps: (
+    ops: ReadonlyArray<ProposalOp>,
+    expectedRevision?: string
+  ) => { applied: number; firstError?: string; stale?: boolean; currentRevision?: string }
   /**
    * Wrap the given nodes in an `annotation.group` frame sized to the
    * selection bounding box (with padding). Returns the new group's id.
    */
   groupSelected: (ids: string[]) => string | null
+  /**
+   * Expand a unified-template node group into the current graph in one store
+   * mutation. All ids are rebased, internal edges are structurally validated,
+   * and the existing `annotation.group` frame is selected after insertion.
+   */
+  insertNodeGroup: (
+    definition: WorkflowNodeGroupDefinition,
+    position: { x: number; y: number }
+  ) => Pick<MaterializedWorkflowNodeGroup, "groupId" | "nodeIds">
   /** Select every node + edge in the workflow. */
   selectAll: () => void
 
@@ -343,6 +499,18 @@ export interface EditorState extends EditorStateSnapshot {
   revalidateNode: (id: string) => NodeValidationResult
   /** Run zod validation for every node and replace `validationByStepId`. */
   revalidateAll: () => Record<string, NodeValidationResult>
+  /**
+   * Recompute the full diagnostics result NOW (synchronous) and write it to
+   * the store if a cheap signature changed. Returns the (possibly unchanged)
+   * result. The save/run gate calls this directly to get a fresh count.
+   */
+  recomputeDiagnostics: () => DiagnosticsResult
+  /**
+   * Request a debounced diagnostics recompute. Coalesces a burst of graph
+   * mutations (and drag frames) into a single recompute ~300ms after the last
+   * change — never per frame. Wired via a store subscription in the factory.
+   */
+  scheduleDiagnostics: () => void
 }
 
 export type EditorStore = UseBoundStore<StoreApi<EditorState>> & {
@@ -365,8 +533,23 @@ const labelByKind: Partial<Record<WorkflowNodeKind, string>> = {
   "flow.set": "Set variable",
 }
 
-function defaultLabelFor(kind: WorkflowNodeKind): string {
+/**
+ * The label `addNode` bakes into a freshly-dropped node's `data.label`. This
+ * is intentionally the un-localized English/raw value (the store is a plain
+ * Zustand store with no access to next-intl) — the canvas renderer detects a
+ * still-default label and substitutes the translated `workflows.nodes.<kind>`
+ * catalog string. Exported so that comparison stays in one place.
+ */
+export function defaultLabelFor(kind: WorkflowNodeKind): string {
   return labelByKind[kind] ?? kind
+}
+
+function defaultParamsFor(kind: WorkflowNodeKind): Record<string, unknown> {
+  return { ...(nodeCatalogEntry(kind).defaultParams ?? {}) }
+}
+
+function authoringTypeVersionFor(kind: WorkflowNodeKind): number {
+  return nodeCatalogEntry(kind).typeVersion ?? defaultTypeVersionFor(kind)
 }
 
 /**
@@ -394,11 +577,29 @@ function shallowEqualValidation(a: NodeValidationResult, b: NodeValidationResult
  */
 export const EDITOR_HISTORY_LIMIT = 100
 
+/**
+ * Debounce window for the diagnostics recompute driver. Long enough that a
+ * drag (which fires `setNodes` per frame) only recomputes once after release.
+ */
+export const DIAGNOSTICS_DEBOUNCE_MS = 300
+
+/**
+ * Cheap signature for a `DiagnosticsResult` so `recomputeDiagnostics` can skip
+ * a no-op `set()`. Counts + the ordered id list capture every add/remove and
+ * cycle-membership change (cycle ids are per-node) without hashing messages.
+ */
+function diagnosticsSignature(r: DiagnosticsResult): string {
+  return `${r.errorCount}:${r.warningCount}:${r.infoCount}:${r.diagnostics.map((d) => d.id).join(",")}`
+}
+
 export function createEditorStore(initial: VisualWorkflow): EditorStore {
   const converted = workflowToReactFlow(initial)
   // Pre-drag snapshot held across begin/commit. A factory-closure ref (not
   // store state) so it never triggers a re-render and stays per-editor.
   let dragHistorySnapshot: { nodes: RFWorkflowNode[]; edges: RFWorkflowEdge[] } | null = null
+  // Debounce timer for the diagnostics recompute driver — closure-local so it
+  // never re-renders and is isolated per editor instance.
+  let diagnosticsTimer: ReturnType<typeof setTimeout> | null = null
   const useStore = create<EditorState>()(
     temporal(
       (set, get) => ({
@@ -412,7 +613,10 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         savedAt: initial.updatedAt > 0 ? initial.updatedAt : null,
         runStatusByStepId: {},
         validationByStepId: {},
+        diagnostics: EMPTY_DIAGNOSTICS,
         lastRunByStepId: {},
+        referencedNodeIds: {},
+        highlightedNodeIds: {},
         performanceTier: "auto",
         isDraggingAny: false,
         snapToGrid: true,
@@ -423,9 +627,13 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         palettePrefillPosition: null,
         spotlightedNodeId: null,
         connectionState: null,
+        touchConnect: false,
+        pendingConnectFrom: null,
         requestedContextMenu: null,
         requestedRunFromStepId: null,
         requestedRunSingleStepId: null,
+        requestedProblemsPanel: false,
+        requestedInspectorPanel: false,
 
         setPerformanceTier: (performanceTier) => set({ performanceTier }),
         setIsDraggingAny: (isDraggingAny) => set({ isDraggingAny }),
@@ -484,6 +692,8 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           })
         },
         endConnection: () => set({ connectionState: null }),
+        setTouchConnect: (v) => set({ touchConnect: v }),
+        setPendingConnectFrom: (v) => set({ pendingConnectFrom: v }),
         requestContextMenu: (target, screenAnchor) =>
           set({ requestedContextMenu: { target, screenAnchor } }),
         clearRequestedContextMenu: () => set({ requestedContextMenu: null }),
@@ -491,6 +701,10 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         clearRequestedRunFromStep: () => set({ requestedRunFromStepId: null }),
         requestRunSingleStep: (stepId) => set({ requestedRunSingleStepId: stepId }),
         clearRequestedRunSingleStep: () => set({ requestedRunSingleStepId: null }),
+        requestProblemsPanel: () => set({ requestedProblemsPanel: true }),
+        clearRequestedProblemsPanel: () => set({ requestedProblemsPanel: false }),
+        requestInspectorPanel: () => set({ requestedInspectorPanel: true }),
+        clearRequestedInspectorPanel: () => set({ requestedInspectorPanel: false }),
 
         setNodes: (nodes) => set({ nodes, dirty: true }),
         setEdges: (edges) => set({ edges, dirty: true }),
@@ -531,7 +745,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
             position,
             data: {
               label: overrides?.label ?? defaultLabelFor(kind),
-              params: overrides?.params ?? {},
+              params: overrides?.params ?? defaultParamsFor(kind),
               notes: overrides?.notes,
               credentialRefs: overrides?.credentialRefs,
               disabled: overrides?.disabled,
@@ -542,11 +756,182 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
               // New nodes author at the kind's current generation (e.g.
               // branch/switch v2 structured conditions); loaded graphs keep
               // their stored version.
-              typeVersion: defaultTypeVersionFor(kind),
+              typeVersion: authoringTypeVersionFor(kind),
             },
           }
           set({ nodes: [...get().nodes, node], dirty: true })
           return id
+        },
+
+        insertNodeOnEdge: (edgeId, kind, position, overrides) => {
+          const { nodes, edges, baseWorkflow } = get()
+          const edge = edges.find((e) => e.id === edgeId)
+          if (!edge) return null
+          const newId = "n_" + nanoid(8)
+          const newNode: RFWorkflowNode = {
+            id: newId,
+            type: "workflowNode",
+            position,
+            data: {
+              label: overrides?.label ?? defaultLabelFor(kind),
+              params: overrides?.params ?? defaultParamsFor(kind),
+              notes: overrides?.notes,
+              credentialRefs: overrides?.credentialRefs,
+              disabled: overrides?.disabled,
+              authoredBy: overrides?.authoredBy,
+              kind,
+              typeVersion: authoringTypeVersionFor(kind),
+            },
+          }
+          const { upstream, downstream } = computeSplitEdges(
+            {
+              source: edge.source,
+              target: edge.target,
+              sourceHandle: edge.sourceHandle,
+              targetHandle: edge.targetHandle,
+            },
+            newId
+          )
+          // Validate both replacement connections against the graph WITH the
+          // new node present; bail atomically if either is illegal.
+          const candidateNodes = [...nodes, newNode]
+          const otherEdges = edges.filter((e) => e.id !== edgeId)
+          const opts = { errorPolicy: baseWorkflow.settings.errorPolicy }
+          if (
+            !validateConnection(upstream, candidateNodes, otherEdges, opts).valid ||
+            !validateConnection(downstream, candidateNodes, otherEdges, opts).valid
+          ) {
+            return null
+          }
+          const upstreamEdge: RFWorkflowEdge = {
+            id: "e_" + nanoid(8),
+            source: upstream.source,
+            target: upstream.target,
+            sourceHandle: upstream.sourceHandle,
+            type: "default",
+          }
+          const downstreamEdge: RFWorkflowEdge = {
+            id: "e_" + nanoid(8),
+            source: downstream.source,
+            target: downstream.target,
+            targetHandle: downstream.targetHandle,
+            type: "default",
+          }
+          set({
+            nodes: candidateNodes,
+            edges: [...otherEdges, upstreamEdge, downstreamEdge],
+            selectedNodeIds: [newId],
+            dirty: true,
+          })
+          return newId
+        },
+
+        addNodeConnected: (kind, position, from) => {
+          const { nodes, edges, baseWorkflow } = get()
+          const newId = "n_" + nanoid(8)
+          const newNode: RFWorkflowNode = {
+            id: newId,
+            type: "workflowNode",
+            position,
+            data: {
+              label: defaultLabelFor(kind),
+              params: defaultParamsFor(kind),
+              kind,
+              typeVersion: authoringTypeVersionFor(kind),
+            },
+          }
+          const params = {
+            source: from.sourceId,
+            target: newId,
+            sourceHandle: from.sourceHandle ?? undefined,
+          }
+          if (
+            !validateConnection(params, [...nodes, newNode], edges, {
+              errorPolicy: baseWorkflow.settings.errorPolicy,
+            }).valid
+          ) {
+            return null
+          }
+          const newEdge: RFWorkflowEdge = {
+            id: "e_" + nanoid(8),
+            source: from.sourceId,
+            target: newId,
+            sourceHandle: from.sourceHandle ?? undefined,
+            type: "default",
+          }
+          set({
+            nodes: [...nodes, newNode],
+            edges: [...edges, newEdge],
+            selectedNodeIds: [newId],
+            dirty: true,
+          })
+          return newId
+        },
+
+        replaceSelectionWithNode: (selectedIds, replacement, rewires) => {
+          const { nodes, edges } = get()
+          // Cascade: removing a selected loop container also removes its body.
+          const removed = new Set(selectedIds)
+          let grew = true
+          while (grew) {
+            grew = false
+            for (const n of nodes) {
+              if (n.parentId && removed.has(n.parentId) && !removed.has(n.id)) {
+                removed.add(n.id)
+                grew = true
+              }
+            }
+          }
+          const newId = "n_" + nanoid(8)
+          const newNode: RFWorkflowNode = {
+            id: newId,
+            type: "workflowNode",
+            position: replacement.position,
+            data: {
+              label: replacement.label ?? defaultLabelFor(replacement.kind),
+              params: replacement.params,
+              kind: replacement.kind,
+              typeVersion: authoringTypeVersionFor(replacement.kind),
+            },
+          }
+          const keptNodes = nodes.filter((n) => !removed.has(n.id))
+          // Drop every edge touching a removed node; boundary edges are re-added rewired.
+          const keptEdges = edges.filter((e) => !removed.has(e.source) && !removed.has(e.target))
+          const seenIn = new Set<string>()
+          const inboundEdges: RFWorkflowEdge[] = []
+          for (const r of rewires.inbound) {
+            const key = `${r.source}\u0000${r.sourceHandle ?? ""}`
+            if (seenIn.has(key)) continue
+            seenIn.add(key)
+            inboundEdges.push({
+              id: "e_" + nanoid(8),
+              source: r.source,
+              target: newId,
+              sourceHandle: r.sourceHandle,
+              type: "default",
+            })
+          }
+          const seenOut = new Set<string>()
+          const outboundEdges: RFWorkflowEdge[] = []
+          for (const r of rewires.outbound) {
+            const key = `${r.target}\u0000${r.targetHandle ?? ""}`
+            if (seenOut.has(key)) continue
+            seenOut.add(key)
+            outboundEdges.push({
+              id: "e_" + nanoid(8),
+              source: newId,
+              target: r.target,
+              targetHandle: r.targetHandle,
+              type: "default",
+            })
+          }
+          set({
+            nodes: [...keptNodes, newNode],
+            edges: [...keptEdges, ...inboundEdges, ...outboundEdges],
+            selectedNodeIds: [newId],
+            dirty: true,
+          })
+          return newId
         },
 
         removeNodes: (ids) => {
@@ -579,9 +964,15 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           if (parentId !== null) {
             if (parentId === nodeId) return
             const parent = nodes.find((n) => n.id === parentId)
-            // Only loop containers host children; refuse cycles through the
+            // Only containers host children: loop containers (flow.loop v2) and
+            // group frames (annotation.group v2). Refuse cycles through the
             // node's own descendants.
-            if (!parent || parent.data.kind !== "flow.loop" || parent.data.typeVersion < 2) return
+            const parentKind = parent?.data.kind
+            const isContainerParent =
+              !!parent &&
+              (parentKind === "flow.loop" || parentKind === "annotation.group") &&
+              parent.data.typeVersion >= 2
+            if (!isContainerParent) return
             let cur: typeof parent | undefined = parent
             while (cur?.parentId) {
               if (cur.parentId === nodeId) return
@@ -646,7 +1037,31 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           })
         },
 
+        setBulkOnError: (ids, onError) => {
+          if (ids.length === 0) return
+          const idSet = new Set(ids)
+          set({
+            nodes: get().nodes.map((n) => {
+              if (!idSet.has(n.id)) return n
+              const eh = { ...(n.data.errorHandling ?? {}) }
+              if (onError === "fail") delete eh.onError
+              else eh.onError = onError
+              const nextEh = Object.keys(eh).length > 0 ? eh : undefined
+              return { ...n, data: { ...n.data, errorHandling: nextEh } }
+            }),
+            dirty: true,
+          })
+        },
+
         connect: ({ source, target, sourceHandle, targetHandle }) => {
+          const current = get()
+          const validation = validateConnection(
+            { source, target, sourceHandle, targetHandle },
+            current.nodes,
+            current.edges,
+            { errorPolicy: current.baseWorkflow.settings.errorPolicy }
+          )
+          if (!validation.valid) return null
           const id = "e_" + nanoid(8)
           const edge: RFWorkflowEdge = {
             id,
@@ -656,7 +1071,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
             targetHandle: targetHandle ?? undefined,
             type: "default",
           }
-          set({ edges: [...get().edges, edge], dirty: true })
+          set({ edges: [...current.edges, edge], dirty: true })
           return id
         },
 
@@ -742,7 +1157,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
             return { baseWorkflow: { ...s.baseWorkflow, pinData: nextPin }, dirty: true }
           }),
 
-        loadWorkflow: (wf) => {
+        loadWorkflow: (wf, options) => {
           const c = workflowToReactFlow(wf)
           set({
             baseWorkflow: wf,
@@ -751,7 +1166,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
             viewport: c.viewport,
             selectedNodeIds: [],
             selectedEdgeIds: [],
-            dirty: false,
+            dirty: options?.dirty ?? false,
             savedAt: wf.updatedAt > 0 ? wf.updatedAt : null,
           })
           // Reset history so the freshly loaded graph doesn't show "undo"
@@ -764,7 +1179,28 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           return reactFlowToWorkflow(s.baseWorkflow, s.nodes, s.edges, s.viewport)
         },
 
-        markSaved: () => set({ dirty: false, savedAt: Date.now() }),
+        markSaved: (workflow) =>
+          set((state) => ({
+            baseWorkflow: workflow
+              ? {
+                  ...state.baseWorkflow,
+                  schemaVersion: workflow.schemaVersion,
+                  interface: workflow.interface,
+                  published: workflow.published,
+                  updatedAt: workflow.updatedAt,
+                }
+              : state.baseWorkflow,
+            dirty: false,
+            savedAt: workflow?.updatedAt ?? Date.now(),
+          })),
+        syncPublication: (published, workflowInterface) =>
+          set((state) => ({
+            baseWorkflow: {
+              ...state.baseWorkflow,
+              published,
+              interface: workflowInterface,
+            },
+          })),
         resetDirty: () => set({ dirty: false }),
 
         duplicateNodes: (ids) => {
@@ -794,8 +1230,14 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           return cloned.nodes.map((n) => n.id)
         },
 
-        applyProposalOps: (ops) => {
+        applyProposalOps: (ops, expectedRevision) => {
           if (!ops || ops.length === 0) return { applied: 0 }
+          if (expectedRevision && expectedRevision !== "legacy") {
+            const currentRevision = workflowEditorRevision(get())
+            if (currentRevision !== expectedRevision) {
+              return { applied: 0, stale: true, currentRevision }
+            }
+          }
           perfMark("apply-start")
           // Compute terminal nodes/edges + validation map locally so the
           // whole batch lands in a single set() call — that's what makes
@@ -808,16 +1250,19 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           const edgeById = new Map(startEdges.map((e) => [e.id, e]))
           // Track ids touched so we know which nodes to re-validate.
           const touchedNodeIds = new Set<string>()
-          let firstError: string | undefined
           let applied = 0
+
+          const reject = (message: string) => {
+            perfMark("apply-end")
+            return { applied: 0, firstError: message }
+          }
 
           for (let i = 0; i < ops.length; i++) {
             const op = ops[i]
             switch (op.type) {
               case "add_node": {
                 if (nodeById.has(op.nodeId)) {
-                  firstError = firstError ?? `op ${i}: node id "${op.nodeId}" already exists`
-                  continue
+                  return reject(`op ${i}: node id "${op.nodeId}" already exists`)
                 }
                 const data: RFWorkflowNode["data"] = {
                   label: (op.data?.label as string | undefined) ?? defaultLabelFor(op.kind),
@@ -827,7 +1272,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
                   disabled: op.data?.disabled as boolean | undefined,
                   authoredBy: (op.data?.authoredBy as "ai" | "user" | undefined) ?? "ai",
                   kind: op.kind,
-                  typeVersion: 1,
+                  typeVersion: op.typeVersion ?? authoringTypeVersionFor(op.kind),
                 }
                 nodeById.set(op.nodeId, {
                   id: op.nodeId,
@@ -841,8 +1286,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
               }
               case "remove_node": {
                 if (!nodeById.has(op.nodeId)) {
-                  firstError = firstError ?? `op ${i}: node id "${op.nodeId}" does not exist`
-                  continue
+                  return reject(`op ${i}: node id "${op.nodeId}" does not exist`)
                 }
                 nodeById.delete(op.nodeId)
                 // drop incident edges
@@ -857,18 +1301,27 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
               }
               case "connect_edge": {
                 if (edgeById.has(op.edgeId)) {
-                  firstError = firstError ?? `op ${i}: edge id "${op.edgeId}" already exists`
-                  continue
+                  return reject(`op ${i}: edge id "${op.edgeId}" already exists`)
                 }
                 if (!nodeById.has(op.source)) {
-                  firstError =
-                    firstError ?? `op ${i}: connect_edge source "${op.source}" does not exist`
-                  continue
+                  return reject(`op ${i}: connect_edge source "${op.source}" does not exist`)
                 }
                 if (!nodeById.has(op.target)) {
-                  firstError =
-                    firstError ?? `op ${i}: connect_edge target "${op.target}" does not exist`
-                  continue
+                  return reject(`op ${i}: connect_edge target "${op.target}" does not exist`)
+                }
+                const connectionValidation = validateConnection(
+                  {
+                    source: op.source,
+                    target: op.target,
+                    sourceHandle: op.sourceHandle,
+                    targetHandle: op.targetHandle,
+                  },
+                  [...nodeById.values()],
+                  [...edgeById.values()],
+                  { errorPolicy: get().baseWorkflow.settings.errorPolicy }
+                )
+                if (!connectionValidation.valid) {
+                  return reject(`op ${i}: ${connectionValidation.reason}`)
                 }
                 const data =
                   typeof op.label === "string" && op.label.length > 0
@@ -888,8 +1341,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
               }
               case "disconnect_edge": {
                 if (!edgeById.has(op.edgeId)) {
-                  firstError = firstError ?? `op ${i}: edge id "${op.edgeId}" does not exist`
-                  continue
+                  return reject(`op ${i}: edge id "${op.edgeId}" does not exist`)
                 }
                 edgeById.delete(op.edgeId)
                 applied++
@@ -898,8 +1350,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
               case "configure_node": {
                 const node = nodeById.get(op.nodeId)
                 if (!node) {
-                  firstError = firstError ?? `op ${i}: node id "${op.nodeId}" does not exist`
-                  continue
+                  return reject(`op ${i}: node id "${op.nodeId}" does not exist`)
                 }
                 // Stamp authoredBy: "ai" by default on patches so the
                 // touched node carries provenance even if the agent forgot.
@@ -915,6 +1366,24 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
                 applied++
                 break
               }
+            }
+          }
+
+          // A configure op can change a node kind, version, handles, or error
+          // policy. Revalidate every resulting edge against the final graph so
+          // the batch cannot commit stale structural connections.
+          const finalNodes = [...nodeById.values()]
+          const finalEdges = [...edgeById.values()]
+          for (const edge of finalEdges) {
+            if (!touchedNodeIds.has(edge.source) && !touchedNodeIds.has(edge.target)) continue
+            const validation = validateConnection(
+              edge,
+              finalNodes,
+              finalEdges.filter((candidate) => candidate.id !== edge.id),
+              { errorPolicy: get().baseWorkflow.settings.errorPolicy }
+            )
+            if (!validation.valid) {
+              return reject(`final edge "${edge.id}": ${validation.reason}`)
             }
           }
 
@@ -952,7 +1421,7 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
             dirty: true,
           })
           perfMark("apply-end")
-          return firstError ? { applied, firstError } : { applied }
+          return { applied }
         },
 
         groupSelected: (ids) => {
@@ -962,29 +1431,73 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           if (!bounds) return null
           const padding = 32
           const id = "n_" + nanoid(8)
+          const width = bounds.width + padding * 2
+          const height = bounds.height + padding * 2.25
+          const groupPos = { x: bounds.x - padding, y: bounds.y - padding * 1.5 }
           const group: RFWorkflowNode = {
             id,
-            type: "workflowNode",
-            position: { x: bounds.x - padding, y: bounds.y - padding * 1.5 },
+            // typeVersion 2 renders as a real container (group-container-node)
+            // that hosts its members as React Flow children.
+            type: "groupContainer",
+            position: groupPos,
+            width,
+            height,
             data: {
               label: "Group",
               kind: "annotation.group",
-              typeVersion: 1,
-              params: {
-                title: "Group",
-                width: bounds.width + padding * 2,
-                height: bounds.height + padding * 2.25,
-              },
+              typeVersion: 2,
+              params: { title: "Group", width, height },
             },
           }
+          const memberSet = new Set(ids)
+          // Re-parent currently top-level members into the group, converting
+          // their positions to parent-relative so they stay visually in place.
+          // Members that already have a parent (e.g., inside a loop) are left
+          // alone — a node can only live in one container.
+          const reparented = nodes.map((n) => {
+            if (n.id === id || !memberSet.has(n.id) || n.parentId) return n
+            return {
+              ...n,
+              parentId: id,
+              extent: "parent" as const,
+              position: { x: n.position.x - groupPos.x, y: n.position.y - groupPos.y },
+            }
+          })
           set({
-            // Group goes FIRST in the array so React Flow paints it under
-            // its members (group should not occlude its contents).
-            nodes: [group, ...get().nodes],
+            // Group goes FIRST so React Flow paints it under its members and
+            // (v12 requirement) the parent precedes its children in the array.
+            nodes: [group, ...reparented],
             selectedNodeIds: [id],
             dirty: true,
           })
           return id
+        },
+
+        insertNodeGroup: (definition, position) => {
+          const materialized = materializeWorkflowNodeGroup(definition, position)
+          const state = get()
+          const nextNodes = [...state.nodes, ...materialized.nodes]
+          const nextEdges = [...state.edges]
+          for (const edge of materialized.edges) {
+            const validation = validateConnection(edge, nextNodes, nextEdges, {
+              errorPolicy: state.baseWorkflow.settings.errorPolicy,
+            })
+            if (!validation.valid) {
+              throw new Error(validation.reason ?? `Invalid node-group edge "${edge.id}"`)
+            }
+            nextEdges.push(edge)
+          }
+          set({
+            nodes: nextNodes,
+            edges: nextEdges,
+            selectedNodeIds: [materialized.groupId],
+            selectedEdgeIds: [],
+            dirty: true,
+          })
+          return {
+            groupId: materialized.groupId,
+            nodeIds: materialized.nodeIds,
+          }
         },
 
         selectAll: () => {
@@ -1002,6 +1515,20 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
         setRunStatusBatch: (entries) =>
           set({ runStatusByStepId: { ...get().runStatusByStepId, ...entries } }),
         clearRunStatus: () => set({ runStatusByStepId: {} }),
+        setReferencedNodes: (ids) => {
+          const cur = get().referencedNodeIds
+          if (Object.keys(cur).length === ids.length && ids.every((id) => cur[id])) return
+          const next: Record<string, true> = {}
+          for (const id of ids) next[id] = true
+          set({ referencedNodeIds: next })
+        },
+        setHighlightedNodes: (ids) => {
+          const cur = get().highlightedNodeIds
+          if (Object.keys(cur).length === ids.length && ids.every((id) => cur[id])) return
+          const next: Record<string, true> = {}
+          for (const id of ids) next[id] = true
+          set({ highlightedNodeIds: next })
+        },
 
         setValidation: (stepId, result) => {
           const next = { ...get().validationByStepId }
@@ -1055,6 +1582,41 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
           set({ validationByStepId: errs })
           return errs
         },
+        recomputeDiagnostics: () => {
+          const workflow = get().toWorkflow()
+          // `isKindAvailable` is optional on the engine input, and omitting it
+          // silently skips `checkKindAvailability` — this is the only
+          // production caller, so the check never ran until it was passed.
+          //
+          // Availability is the union of what this build ships and what is
+          // registered right now, NOT the executor registry alone. Built-in
+          // executors register as an import side effect of the orchestrator,
+          // which the editor does not import; asking the registry alone would
+          // report every built-in node as an uninstalled plugin whenever the
+          // editor loads first. `WORKFLOW_NODE_KINDS` is the static taxonomy,
+          // so it answers the same regardless of load order.
+          //
+          // Node typeVersion is deliberately not consulted: a version mismatch
+          // is a different diagnostic, and asking about the kind alone keeps a
+          // node whose provider registered a newer version out of this report.
+          const available = new Set<string>([...WORKFLOW_NODE_KINDS, ...listRegisteredKinds()])
+          const result = runDiagnostics({
+            workflow,
+            isWeb: !isTauri(),
+            isKindAvailable: (kind) => available.has(kind),
+          })
+          const prev = get().diagnostics
+          if (diagnosticsSignature(prev) === diagnosticsSignature(result)) return prev
+          set({ diagnostics: result })
+          return result
+        },
+        scheduleDiagnostics: () => {
+          if (diagnosticsTimer) clearTimeout(diagnosticsTimer)
+          diagnosticsTimer = setTimeout(() => {
+            diagnosticsTimer = null
+            get().recomputeDiagnostics()
+          }, DIAGNOSTICS_DEBOUNCE_MS)
+        },
       }),
       {
         // Track only nodes + edges in the temporal slice. Viewport and
@@ -1070,5 +1632,23 @@ export function createEditorStore(initial: VisualWorkflow): EditorStore {
       }
     )
   ) as EditorStore
+
+  // Single recompute driver: whenever the graph shape (nodes/edges identity)
+  // changes — via any mutator OR a React Flow change — schedule a debounced
+  // diagnostics recompute. One choke point, no per-mutator wiring, and it only
+  // resets a timer per drag frame (cheap), never recomputes inline. Writing
+  // `diagnostics` itself doesn't touch nodes/edges, so there is no feedback loop.
+  let lastNodes = useStore.getState().nodes
+  let lastEdges = useStore.getState().edges
+  useStore.subscribe((state) => {
+    if (state.nodes !== lastNodes || state.edges !== lastEdges) {
+      lastNodes = state.nodes
+      lastEdges = state.edges
+      state.scheduleDiagnostics()
+    }
+  })
+  // Seed the initial result so the Problems panel / badges are correct on open.
+  useStore.getState().recomputeDiagnostics()
+
   return useStore
 }

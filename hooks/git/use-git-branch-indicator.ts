@@ -9,8 +9,7 @@
 "use client"
 
 import { useEffect } from "react"
-import { isTauri } from "@/lib/tauri"
-import { gitWatchStart, gitWatchStop } from "@/lib/git/commands"
+import { gitWatchStart, gitWatchStop, isSourceControlUiAvailable } from "@/lib/git/commands"
 import { subscribeGitStatusChanged } from "@/lib/git/events"
 import { loadGitRepo, refreshGitStatus } from "@/lib/git/load"
 import { useProjectStore } from "@/stores/project/project-store"
@@ -37,8 +36,18 @@ export function __resetGitIndicatorBinding(): void {
   lastBoundProjectRoot = null
 }
 
-export function useGitBranchIndicator(): BranchIndicator {
-  const available = isTauri()
+export interface UseGitBranchIndicatorOptions {
+  /** Disable controller ownership while still observing the shared store. */
+  enabled?: boolean
+}
+
+export function useGitBranchIndicator({
+  enabled = true,
+}: UseGitBranchIndicatorOptions = {}): BranchIndicator {
+  // Source Control is desktop-only for now (see `isSourceControlUiAvailable`).
+  // The chip and the panel (`useGitRepo`) share this one gate, so a live chip
+  // can never navigate to a dead panel.
+  const available = enabled && isSourceControlUiAvailable()
   const rootDir = useGitStore((s) => s.rootDir)
   const setRootDir = useGitStore((s) => s.setRootDir)
   const branchInfo = useGitBranchInfo()
@@ -65,7 +74,8 @@ export function useGitBranchIndicator(): BranchIndicator {
     }
   }, [available, activeProjectRoot, setRootDir])
 
-  // Own the watcher + subscription for the bound repo.
+  // Own the native fs watcher + subscription for the bound repo. `available`
+  // implies Tauri, so watcher start/stop are unconditional here.
   useEffect(() => {
     if (!available || !rootDir) return undefined
     let cancelled = false

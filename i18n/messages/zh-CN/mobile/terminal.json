@@ -1,0 +1,29 @@
+{
+  "accessory": {
+    "alt": "Alt",
+    "ctrl": "Ctrl+C",
+    "down": "下",
+    "esc": "Esc",
+    "hideKeyboard": "隐藏键盘",
+    "label": "终端键盘控制",
+    "left": "左",
+    "paste": "粘贴",
+    "right": "右",
+    "showKeyboard": "显示键盘",
+    "tab": "Tab",
+    "up": "上"
+  },
+  "back": "返回",
+  "empty": {
+    "action": "开始会话",
+    "notMobile": "这里的集成终端以桌面 dock 形式运行 — 请切换到桌面应用使用。",
+    "remoteReady": "暂无远程终端会话。新建一个以通过已配对的桌面服务器连接。",
+    "unavailable": "该浏览器预览中暂不可用，请使用桌面或 Capacitor 构建。"
+  },
+  "history": "命令历史",
+  "historySubtitle": "轻触命令即复制；长按可重新执行。",
+  "historyTitle": "最近命令",
+  "newSession": "新建终端会话",
+  "search": "在终端中搜索",
+  "title": "终端"
+}

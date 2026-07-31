@@ -3,11 +3,10 @@
 import { useTranslations } from "next-intl"
 import { FileCodeIcon, FileTextIcon, ImageIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { Skill, SkillResource, SkillResourceKind } from "@/lib/claude/types"
+import type { Skill, SkillResource, SkillResourceKind } from "@cognia/agent-config-types"
 
 type Selection =
-  | { id: "main"; kind: "main" }
-  | { id: string; kind: "resource"; resource: SkillResource }
+  { id: "main"; kind: "main" } | { id: string; kind: "resource"; resource: SkillResource }
 
 interface Props {
   skill: Skill

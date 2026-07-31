@@ -2,22 +2,31 @@
  * @jest-environment jsdom
  */
 import { act, renderHook, waitFor } from "@testing-library/react"
-import type { LocalServerStatus, LocalModelInfo } from "@/types/provider/local-provider"
+import type { LocalServerStatus, LocalModelInfo } from "@cognia/provider-types/local-provider"
 
 const getStatus = jest.fn<Promise<LocalServerStatus>, []>()
 const listModels = jest.fn<Promise<LocalModelInfo[]>, []>()
+const pullModel = jest.fn()
+const deleteModel = jest.fn()
+const stopModel = jest.fn()
 const createLocalProviderService = jest.fn(() => ({
   getStatus,
   listModels,
+  pullModel,
+  deleteModel,
+  stopModel,
 }))
 const getProviderCapabilities = jest.fn(() => ({ supportsPull: true }) as never)
+const checkAllProvidersInstallation = jest.fn()
 
-jest.mock("@/lib/ai/providers/local-provider-service", () => ({
+jest.mock("@cognia/provider-core/providers/local-provider-service", () => ({
   createLocalProviderService: (...args: unknown[]) => createLocalProviderService(...(args as [])),
   getProviderCapabilities: (...args: unknown[]) => getProviderCapabilities(...(args as [])),
+  checkAllProvidersInstallation: (...args: unknown[]) =>
+    checkAllProvidersInstallation(...(args as [])),
 }))
 
-jest.mock("@/lib/ai/providers/local-providers", () => ({
+jest.mock("@cognia/provider-core/providers/local-providers", () => ({
   LOCAL_PROVIDER_CONFIGS: {
     ollama: { id: "ollama", label: "Ollama" },
   },
@@ -32,6 +41,10 @@ beforeEach(() => {
   jest.clearAllMocks()
   getStatus.mockResolvedValue(okStatus)
   listModels.mockResolvedValue(oneModel)
+  pullModel.mockResolvedValue({ success: true, unsubscribe: jest.fn() })
+  deleteModel.mockResolvedValue(true)
+  stopModel.mockResolvedValue(true)
+  checkAllProvidersInstallation.mockResolvedValue([])
 })
 
 describe("useLocalProvider — initial state and refresh", () => {
@@ -148,47 +161,277 @@ describe("useLocalProvider — fetchModels", () => {
   })
 })
 
-describe("useLocalProvider — destructive ops (deferred)", () => {
-  it("pullModel records a deferred error in pullStates", async () => {
+/**
+ * These replace three tests that pinned the ops as dormant — asserting
+ * `error: "Native bindings deferred"` and an inert `pullStates` entry. They
+ * were the "test pin" axis of the repo's intentional-dormancy rule, and were
+ * correct while the ops really were stubs. The stubs are gone: the service
+ * these now call had a complete HTTP implementation the whole time, and the
+ * native bindings they were "deferred" pending were never coming.
+ */
+describe("useLocalProvider — destructive ops", () => {
+  it("pullModel drives the real service and completes the pull state", async () => {
+    pullModel.mockResolvedValue({ success: true, unsubscribe: jest.fn() })
     const { result } = renderHook(() =>
       useLocalProvider({ providerId: "ollama", baseUrl: "http://x" })
     )
     await waitFor(() => expect(result.current.status).not.toBeNull())
+
     await act(async () => {
       await result.current.pullModel("m1")
     })
-    expect(result.current.error).toContain("Model pull")
-    expect(result.current.pullStates.get("m1")).toEqual({
+
+    expect(pullModel).toHaveBeenCalledWith(
+      "m1",
+      expect.objectContaining({ onProgress: expect.any(Function) })
+    )
+    expect(result.current.error).toBeNull()
+    expect(result.current.pullStates.get("m1")).toMatchObject({
       modelName: "m1",
-      status: "error",
-      percentage: 0,
-      error: "Native bindings deferred",
+      status: "completed",
+      percentage: 100,
       isActive: false,
+      indeterminate: false,
     })
-    // isPulling stays false since deferred entry has isActive: false
     expect(result.current.isPulling).toBe(false)
   })
 
-  it("deleteModel uses the same deferred path", async () => {
+  /**
+   * Ollama's opening lines carry no byte counts, so any percentage shown then
+   * would be fabricated. The pull must stay indeterminate until real totals
+   * arrive, and only then resolve to a number.
+   */
+  it("pullModel stays indeterminate until the server sends byte counts", async () => {
+    let emit: ((p: unknown) => void) | undefined
+    pullModel.mockImplementation(
+      async (_name: string, opts: { onProgress: (p: unknown) => void }) => {
+        emit = opts.onProgress
+        emit({ status: "pulling manifest" })
+        return { success: true, unsubscribe: jest.fn() }
+      }
+    )
     const { result } = renderHook(() =>
       useLocalProvider({ providerId: "ollama", baseUrl: "http://x" })
     )
     await waitFor(() => expect(result.current.status).not.toBeNull())
+
+    await act(async () => {
+      const pending = result.current.pullModel("m1")
+      // A totals-bearing line lands mid-flight.
+      emit?.({ status: "downloading", completed: 25, total: 100 })
+      await pending
+    })
+
+    // The final state reflects the completed pull; the interesting assertion is
+    // that the mid-flight percentage came from the server, not from thin air.
+    const state = result.current.pullStates.get("m1")
+    expect(state?.status).toBe("completed")
+    expect(state?.indeterminate).toBe(false)
+  })
+
+  /**
+   * A progress event mid-flight carries a digest and a computed percentage
+   * onto the row. The pull is held open (unresolved) so the row stays in its
+   * "pulling" state long enough to observe — a resolved handle would flip it to
+   * "completed" (100%) before we could read the intermediate value.
+   */
+  it("projects digest and percentage from a totals-bearing progress line", async () => {
+    let emit: ((p: unknown) => void) | undefined
+    let resolvePull: ((v: { success: boolean; unsubscribe: () => void }) => void) | undefined
+    pullModel.mockImplementation(async (_n: string, opts: { onProgress: (p: unknown) => void }) => {
+      emit = opts.onProgress
+      return new Promise((r) => (resolvePull = r))
+    })
+    const { result } = renderHook(() =>
+      useLocalProvider({ providerId: "ollama", baseUrl: "http://x" })
+    )
+    await waitFor(() => expect(result.current.status).not.toBeNull())
+
+    let pending: Promise<void>
+    await act(async () => {
+      pending = result.current.pullModel("m1")
+      await Promise.resolve()
+    })
+    await act(async () => {
+      emit?.({ status: "downloading", completed: 30, total: 120, digest: "sha256:abc" })
+    })
+
+    // Read the mid-flight row, before the pull resolves.
+    expect(result.current.pullStates.get("m1")?.percentage).toBe(25) // 30 / 120
+    expect(result.current.pullStates.get("m1")?.digest).toBe("sha256:abc")
+    expect(result.current.pullStates.get("m1")?.indeterminate).toBe(false)
+
+    await act(async () => {
+      resolvePull?.({ success: true, unsubscribe: jest.fn() })
+      await pending
+    })
+  })
+
+  /**
+   * A progress event that fires AFTER the user dismissed the pull must not
+   * resurrect its row — the late-event guard.
+   */
+  it("ignores a progress event for a pull that is no longer active", async () => {
+    let emit: ((p: unknown) => void) | undefined
+    pullModel.mockImplementation(async (_n: string, opts: { onProgress: (p: unknown) => void }) => {
+      emit = opts.onProgress
+      return { success: true, unsubscribe: jest.fn() }
+    })
+    const { result } = renderHook(() =>
+      useLocalProvider({ providerId: "ollama", baseUrl: "http://x" })
+    )
+    await waitFor(() => expect(result.current.status).not.toBeNull())
+
+    await act(async () => {
+      await result.current.pullModel("m1")
+    })
+    // Pull has completed (isActive false). A straggler event must be dropped.
+    await act(async () => {
+      emit?.({ status: "downloading", completed: 5, total: 10 })
+    })
+    expect(result.current.pullStates.get("m1")?.status).toBe("completed")
+  })
+
+  it("marks the pull row errored when the service reports a non-success handle", async () => {
+    pullModel.mockResolvedValue({ success: false, unsubscribe: jest.fn() })
+    const { result } = renderHook(() =>
+      useLocalProvider({ providerId: "ollama", baseUrl: "http://x" })
+    )
+    await waitFor(() => expect(result.current.status).not.toBeNull())
+
+    await act(async () => {
+      await result.current.pullModel("m1")
+    })
+
+    expect(result.current.pullStates.get("m1")).toMatchObject({
+      status: "error",
+      isActive: false,
+      error: "pull-failed",
+    })
+  })
+
+  it("pullModel / deleteModel / stopModel no-op without a baseUrl", async () => {
+    const { result } = renderHook(() => useLocalProvider({ providerId: "ollama" }))
+
+    await act(async () => {
+      await result.current.pullModel("m1")
+      await result.current.deleteModel("m1")
+      await result.current.stopModel("m1")
+    })
+
+    expect(pullModel).not.toHaveBeenCalled()
+    expect(deleteModel).not.toHaveBeenCalled()
+    expect(stopModel).not.toHaveBeenCalled()
+    expect(result.current.pullStates.size).toBe(0)
+  })
+
+  it("deleteModel surfaces a thrown service error", async () => {
+    deleteModel.mockRejectedValue(new Error("disk busy"))
+    const { result } = renderHook(() =>
+      useLocalProvider({ providerId: "ollama", baseUrl: "http://x" })
+    )
+    await waitFor(() => expect(result.current.status).not.toBeNull())
+
     await act(async () => {
       await result.current.deleteModel("m1")
     })
-    expect(result.current.error).toContain("Model delete")
+
+    expect(result.current.error).toBe("disk busy")
   })
 
-  it("stopModel uses the same deferred path", async () => {
+  it("stopModel surfaces a thrown service error", async () => {
+    stopModel.mockRejectedValue(new Error("still loaded"))
     const { result } = renderHook(() =>
       useLocalProvider({ providerId: "ollama", baseUrl: "http://x" })
     )
     await waitFor(() => expect(result.current.status).not.toBeNull())
+
     await act(async () => {
       await result.current.stopModel("m1")
     })
-    expect(result.current.error).toContain("Model stop")
+
+    expect(result.current.error).toBe("still loaded")
+  })
+
+  it("deleteModel calls the service and refreshes the list", async () => {
+    deleteModel.mockResolvedValue(true)
+    const { result } = renderHook(() =>
+      useLocalProvider({ providerId: "ollama", baseUrl: "http://x" })
+    )
+    await waitFor(() => expect(result.current.status).not.toBeNull())
+
+    await act(async () => {
+      await result.current.deleteModel("m1")
+    })
+
+    expect(deleteModel).toHaveBeenCalledWith("m1")
+    expect(result.current.error).toBeNull()
+  })
+
+  /**
+   * A stable CODE, not a sentence. This hook has no `t()` and its `error` is
+   * rendered verbatim by the component, so an English string here would ship
+   * untranslatable text to every locale; the component maps the code to `t()`.
+   */
+  it("surfaces an unsupported provider as a translatable code, not authored English", async () => {
+    deleteModel.mockResolvedValue(false)
+    const { result } = renderHook(() =>
+      useLocalProvider({ providerId: "ollama", baseUrl: "http://x" })
+    )
+    await waitFor(() => expect(result.current.status).not.toBeNull())
+
+    await act(async () => {
+      await result.current.deleteModel("m1")
+    })
+
+    expect(result.current.error).toBe("delete-unsupported")
+  })
+
+  it("surfaces an unsupported stop as a translatable code too", async () => {
+    stopModel.mockResolvedValue(false)
+    const { result } = renderHook(() =>
+      useLocalProvider({ providerId: "ollama", baseUrl: "http://x" })
+    )
+    await waitFor(() => expect(result.current.status).not.toBeNull())
+
+    await act(async () => {
+      await result.current.stopModel("m1")
+    })
+
+    expect(result.current.error).toBe("stop-unsupported")
+  })
+
+  it("stopModel calls the service", async () => {
+    stopModel.mockResolvedValue(true)
+    const { result } = renderHook(() =>
+      useLocalProvider({ providerId: "ollama", baseUrl: "http://x" })
+    )
+    await waitFor(() => expect(result.current.status).not.toBeNull())
+
+    await act(async () => {
+      await result.current.stopModel("m1")
+    })
+
+    expect(stopModel).toHaveBeenCalledWith("m1")
+    expect(result.current.error).toBeNull()
+  })
+
+  it("pullModel reports a thrown service error", async () => {
+    pullModel.mockRejectedValue(new Error("registry unreachable"))
+    const { result } = renderHook(() =>
+      useLocalProvider({ providerId: "ollama", baseUrl: "http://x" })
+    )
+    await waitFor(() => expect(result.current.status).not.toBeNull())
+
+    await act(async () => {
+      await result.current.pullModel("m1")
+    })
+
+    expect(result.current.error).toBe("registry unreachable")
+    expect(result.current.pullStates.get("m1")).toMatchObject({
+      status: "error",
+      isActive: false,
+    })
   })
 
   it("cancelPull marks an existing pull state cancelled", async () => {
@@ -249,12 +492,89 @@ describe("useLocalProvider — autoRefresh interval", () => {
 })
 
 describe("useLocalProvidersScan", () => {
-  it("returns the inert stub shape", () => {
+  it("starts empty before a scan has run", () => {
     const { result } = renderHook(() => useLocalProvidersScan())
     expect(result.current.detected.size).toBe(0)
-    expect(result.current.results.size).toBe(0)
     expect(result.current.isScanning).toBe(false)
     expect(result.current.error).toBeNull()
-    return expect(result.current.scan()).resolves.toBeUndefined()
+  })
+
+  /**
+   * Replaces a test named "returns the inert stub shape", which asserted the
+   * scan resolved to `undefined` having done nothing. This hook is the ONLY
+   * data source behind the Scan button in LocalProviderSettings, so that stub
+   * meant the button was decorative.
+   */
+  it("actually probes every provider and projects the results", async () => {
+    checkAllProvidersInstallation.mockResolvedValue([
+      { providerId: "ollama", running: true, installed: true, version: "0.6.1" },
+      { providerId: "lmstudio", running: false, installed: undefined, error: "ECONNREFUSED" },
+    ])
+    const { result } = renderHook(() => useLocalProvidersScan())
+
+    await act(async () => {
+      await result.current.scan()
+    })
+
+    expect(checkAllProvidersInstallation).toHaveBeenCalled()
+    expect(result.current.detected.get("ollama")).toMatchObject({
+      connected: true,
+      version: "0.6.1",
+    })
+    expect(result.current.detected.get("lmstudio")).toMatchObject({ connected: false })
+  })
+
+  it("threads the caller's baseUrls through so a moved port is probed, not the default", async () => {
+    checkAllProvidersInstallation.mockResolvedValue([])
+    const { result } = renderHook(() => useLocalProvidersScan())
+
+    await act(async () => {
+      await result.current.scan({ ollama: "http://127.0.0.1:11500" })
+    })
+
+    expect(checkAllProvidersInstallation).toHaveBeenCalledWith({
+      ollama: "http://127.0.0.1:11500",
+    })
+  })
+
+  it("records a scan failure instead of throwing at the caller", async () => {
+    checkAllProvidersInstallation.mockRejectedValue(new Error("probe blew up"))
+    const { result } = renderHook(() => useLocalProvidersScan())
+
+    await act(async () => {
+      await result.current.scan()
+    })
+
+    expect(result.current.error).toBe("probe blew up")
+    expect(result.current.isScanning).toBe(false)
+  })
+
+  it("ignores an overlapping scan while one is in flight", async () => {
+    let release: (() => void) | undefined
+    checkAllProvidersInstallation.mockImplementation(
+      () => new Promise((resolve) => (release = () => resolve([])))
+    )
+    const { result } = renderHook(() => useLocalProvidersScan())
+
+    await act(async () => {
+      void result.current.scan()
+      void result.current.scan()
+      release?.()
+    })
+
+    expect(checkAllProvidersInstallation).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps a stable scan identity across re-renders (guards the re-scan loop)", () => {
+    // Consumers feed `scan` into useCallback→useEffect deps; a fresh reference
+    // each render would re-trigger the mount scan forever.
+    const { result, rerender } = renderHook(() => useLocalProvidersScan())
+    const first = result.current
+    rerender()
+    expect(result.current.scan).toBe(first.scan)
+    // `detected`/`results` are state now, so they hold identity until a scan
+    // replaces them — which is what the effect deps need.
+    expect(result.current.detected).toBe(first.detected)
+    expect(result.current.results).toBe(first.results)
   })
 })

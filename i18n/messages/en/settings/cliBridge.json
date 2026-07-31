@@ -1,0 +1,23 @@
+{
+  "autoSync": {
+    "hint": "Push config and credentials to the CLI each time the desktop app starts. Credentials are written to an owner-only (0600) file in the CLI home.",
+    "label": "Auto-sync on launch"
+  },
+  "codexChatGptHint": "Codex API keys sync to the CLI, but Codex ChatGPT sign-ins aren't portable — sign in to Codex again in the CLI.",
+  "description": "Push this app's agent config and provider credentials to the standalone cognia-agent CLI so it runs with the same setup — no second login.",
+  "mcpHint": "MCP servers sync per-server from the MCP settings page — Cognia CLI is one of the agent targets there.",
+  "status": {
+    "checking": "Checking…",
+    "detected": "Detected at {home}",
+    "label": "CLI home",
+    "notDetected": "No CLI home found yet — it's created on first sync."
+  },
+  "syncNow": "Sync to CLI",
+  "title": "Cognia CLI sync",
+  "toast": {
+    "done": "Synced to the Cognia CLI ({ok} item(s)).",
+    "failed": "Sync to CLI failed: {error}",
+    "noHome": "No Cognia CLI home to sync to.",
+    "partial": "Synced with issues — {ok} ok, {errors} failed."
+  }
+}

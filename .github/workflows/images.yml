@@ -1,0 +1,216 @@
+name: Images
+
+# ============================================================================
+# GHCR container images (ADR-0059 P0.2 / W6 / D9):
+#   ghcr.io/<owner>/cognia-signaling      services/signaling-server
+#   ghcr.io/<owner>/cognia-share          services/share-server
+#   ghcr.io/<owner>/cognia-runner        deploy/runner (external agent CLIs)
+#   ghcr.io/<owner>/cognia-workspace-runtime services/workspace-runtime
+#   ghcr.io/<owner>/cognia-server        Dockerfile.cognia-server (slim/full)
+#
+# Publish happens on version tags (and manual dispatch with push=true).
+# PRs touching the container inputs get a compile check instead:
+#   - the two service images + runner build without pushing (gha cache)
+#   - cognia-server builds the `check` stage — cargo check over the cooked
+#     cargo-chef deps layer, no codegen/link — because a full release build of
+#     the whole tauri graph is 45–90 min cold.
+#
+# Cache strategy: the small images use the GHA cache; cognia-server uses a
+# REGISTRY cache ref (ghcr.io/<owner>/cognia-server:buildcache) because its
+# cooked deps layer alone would blow through the shared 10 GB GHA budget.
+# PR builds only read the cache (`cache-from`), never write it, so a fork PR
+# can't poison what trunk/tag builds consume.
+# ============================================================================
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      push:
+        description: "Push images to GHCR"
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - "Dockerfile.cognia-server"
+      - ".dockerignore"
+      - "deploy/runner/**"
+      - "services/signaling-server/Dockerfile"
+      - "services/share-server/Dockerfile"
+      - "services/workspace-runtime/**"
+      - "lib/browser/overlay.injected.js"
+      - ".github/workflows/images.yml"
+      # cognia-server compile inputs: the `check` stage COPYs these, so a PR
+      # touching them can break the image build without touching any
+      # Dockerfile (this exact gap shipped a broken tauri.conf.json resource
+      # once — sidecar/webclone/* landed unvalidated).
+      - "src-tauri/**"
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "services/signaling-server/core/**"
+      - "plugins/computer-use/rust/**"
+      - "sidecar/package.json"
+      - "sidecar/*.mjs"
+      - "sidecar/vscode-ext-host/package.json"
+      - "sidecar/webclone/package.json"
+      - "hooks/builtin/**"
+      - "docs/api/*.openapi.yaml"
+      - "lib/browser/overlay.injected.js"
+      - "cli/src/serve/fixtures/**"
+
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # Lowercase owner once — GHCR requires lowercase repository paths.
+  vars:
+    runs-on: ubuntu-latest
+    outputs:
+      owner: ${{ steps.o.outputs.owner }}
+      should_push: ${{ steps.o.outputs.should_push }}
+    steps:
+      - id: o
+        run: |
+          echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "push" ] || [ "${{ inputs.push }}" = "true" ]; then
+            echo "should_push=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_push=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  fast-images:
+    name: ${{ matrix.name }}
+    needs: vars
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: cognia-signaling
+            context: services/signaling-server
+            file: services/signaling-server/Dockerfile
+          - name: cognia-share
+            context: services/share-server
+            file: services/share-server/Dockerfile
+          - name: cognia-runner
+            context: deploy/runner
+            file: deploy/runner/Dockerfile
+          - name: cognia-workspace-runtime
+            context: .
+            file: services/workspace-runtime/Dockerfile
+    steps:
+      - uses: actions/checkout@v6
+
+      # The runner image lands with the Phase 3 artifacts; until its Dockerfile
+      # exists this matrix entry no-ops instead of failing the whole workflow.
+      - name: Check context exists
+        id: ctx
+        run: |
+          if [ -f "${{ matrix.file }}" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::${{ matrix.file }} not present — skipping ${{ matrix.name }}"
+          fi
+
+      - uses: docker/setup-buildx-action@v3
+        if: steps.ctx.outputs.present == 'true'
+
+      - uses: docker/login-action@v3
+        if: steps.ctx.outputs.present == 'true' && needs.vars.outputs.should_push == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        if: steps.ctx.outputs.present == 'true'
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ needs.vars.outputs.owner }}/${{ matrix.name }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      - uses: docker/build-push-action@v6
+        if: steps.ctx.outputs.present == 'true'
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          push: ${{ needs.vars.outputs.should_push == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: ${{ github.event_name != 'pull_request' && format('type=gha,scope={0},mode=max', matrix.name) || '' }}
+
+  cognia-server-check:
+    name: cognia-server (cargo check in Docker)
+    needs: vars
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.cognia-server
+          target: check
+          push: false
+          cache-from: type=registry,ref=ghcr.io/${{ needs.vars.outputs.owner }}/cognia-server:buildcache
+
+  cognia-server-image:
+    name: cognia-server (${{ matrix.variant }})
+    needs: vars
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [slim, full]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ needs.vars.outputs.owner }}/cognia-server
+          flavor: |
+            suffix=-${{ matrix.variant }},onlatest=true
+          tags: |
+            type=semver,pattern={{version}}
+            type=sha
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.cognia-server
+          target: runtime-${{ matrix.variant }}
+          push: ${{ needs.vars.outputs.should_push == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=ghcr.io/${{ needs.vars.outputs.owner }}/cognia-server:buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ needs.vars.outputs.owner }}/cognia-server:buildcache,mode=max

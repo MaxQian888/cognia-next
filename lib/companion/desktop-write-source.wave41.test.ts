@@ -126,7 +126,9 @@ describe("dispatchCommand: workflow CRUD", () => {
       live: boolean
     }
     expect(cancelRegistry.requestCancelRun).toHaveBeenCalledWith("run1", expect.any(String))
-    expect(res).toEqual({ cancelled: true, live: true })
+    // `mode` joined the payload with the execution-lease work (cross-device
+    // cancel); a live in-process abort reports "aborted".
+    expect(res).toEqual({ cancelled: true, live: true, mode: "aborted" })
   })
 
   it("workflow_cancel_run soft-cancels a non-live run", async () => {

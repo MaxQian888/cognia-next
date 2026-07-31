@@ -1,0 +1,115 @@
+{
+  "$comment": [
+    "Committed reference points for tests/e2e/mobile/chat-render-perf.spec.ts. The spec writes",
+    "each run to the gitignored test-results/; this file is what to diff against.",
+    "",
+    "Absolute timings are machine-bound (Apple Silicon laptop, Turbopack dev server) — read the",
+    "RATIOS. `jsHeapUsedBytes` is a single GC-dependent sample and swings 2x between identical",
+    "runs; treat it as an order of magnitude, not a measurement. The two numbers that are stable",
+    "enough to gate a judgement on are `scrollHeightDriftPx` (structural, not timing-dependent)",
+    "and `longTasks.totalMs`.",
+    "",
+    "Caveat on imageBytes: the seeder encodes full-frame noise, the worst case for a given",
+    "resolution — a real UI screenshot has flat regions and compresses better. The perf tier's",
+    "72MB across 40 frames is closer to what ~150 real 1568px screenshots weigh. The",
+    "amplification ratio is unaffected.",
+    "",
+    "SWEEP CHANGE: `preChange` was captured with a fraction-of-range sweep; every entry here",
+    "uses the screen-at-a-time sweep that replaced it. Improving the row-height estimator",
+    "changes the virtual total, so a fraction-based sweep silently covers more content per step",
+    "and reports the extra work as a regression. Only same-sweep rows compare."
+  ],
+  "runner": "pnpm dev (Turbopack), NODE_ENV=development, project mobile-pixel-7",
+  "tiers": {
+    "perf": {
+      "config": {
+        "turns": 60,
+        "images": 40,
+        "imageLongEdge": 1568,
+        "charts": 12,
+        "chartNodes": 12,
+        "tableRows": 0,
+        "codeLines": 0
+      },
+      "messages": 120,
+      "imageBytes": 72171364,
+      "runs": {
+        "preRenderHardening": {
+          "commit": "8c07f37fc",
+          "capturedAt": "2026-07-29",
+          "openMs": 5986,
+          "jsHeapUsedBytes": 345789536,
+          "reactCommits": { "count": 214, "totalMs": 794 },
+          "longTasks": { "count": 16, "totalMs": 3308, "worstMs": 1262 },
+          "scroll": {
+            "worstFrameMs": 108,
+            "medianFrameMs": 16,
+            "screens": 40,
+            "scrollHeightDriftPx": 8399
+          }
+        },
+        "postRenderHardening": {
+          "capturedAt": "2026-07-29",
+          "openMs": 4951,
+          "jsHeapUsedBytes": 300173380,
+          "reactCommits": { "count": 216, "totalMs": 864 },
+          "longTasks": { "count": 19, "totalMs": 3777, "worstMs": 1201 },
+          "scroll": {
+            "worstFrameMs": 511,
+            "medianFrameMs": 13,
+            "screens": 40,
+            "scrollHeightDriftPx": 2866
+          }
+        }
+      },
+      "reading": [
+        "scrollHeightDriftPx 8399 → 2866 (-66%): the content-derived row estimate is close enough that the virtualizer stops rewriting its own total as rows scroll in. This is the metric the estimator moves, and it is not timing-dependent.",
+        "Everything else is inside single-sample noise. This tier is image-dominated — 72MB of base64 across 40 frames — and none of the render-layer work touches that. Only the storage change can."
+      ]
+    },
+    "robust": {
+      "config": {
+        "turns": 200,
+        "images": 150,
+        "imageLongEdge": 2560,
+        "charts": 40,
+        "chartNodes": 40,
+        "tableRows": 5000,
+        "codeLines": 10000
+      },
+      "messages": 404,
+      "imageBytes": 717067386,
+      "runs": {
+        "preRenderHardening_OLD_SWEEP": {
+          "commit": "988dbdcaf",
+          "capturedAt": "2026-07-29",
+          "sweep": "fraction-of-range — NOT comparable to the row below",
+          "openMs": 18196,
+          "jsHeapUsedBytes": 1864157420,
+          "reactCommits": { "count": 104, "totalMs": 18246 },
+          "longTasks": { "count": 30, "totalMs": 27141, "worstMs": 9179 },
+          "scroll": { "worstFrameMs": 8067, "medianFrameMs": 23 }
+        },
+        "postRenderHardening": {
+          "capturedAt": "2026-07-29",
+          "openMs": 14730,
+          "jsHeapUsedBytes": 2238173184,
+          "reactCommits": { "count": 180, "totalMs": 9741 },
+          "longTasks": { "count": 19, "totalMs": 13506, "worstMs": 8851 },
+          "scroll": {
+            "worstFrameMs": 152,
+            "medianFrameMs": 13,
+            "screens": 40,
+            "scrollHeightDriftPx": 13981
+          }
+        }
+      },
+      "reading": [
+        "Long-task total 27.1s → 13.5s and React commit time 18.2s → 9.7s. The sweep changed between these two runs, so read the direction, not the exact ratio; the code-fence and table budgets are separately pinned by unit tests.",
+        "The single worst long task barely moved (9179 → 8851ms). That one is open-time work dominated by deserializing and decoding 717MB of inlined base64 — untouched by anything in the render layer.",
+        "jsHeapUsedBytes went UP (1.86 → 2.24GB). Not a regression to chase: it is one GC-dependent sample, and the surrounding numbers all improved. A real iOS WKWebView (~1-1.5GB per tab) is OOM-killed at either figure, which is the actual finding.",
+        "Verdict: render-layer hardening removes the multi-second scroll stalls but cannot make this tier viable. The payload has to shrink."
+      ]
+    }
+  }
+}

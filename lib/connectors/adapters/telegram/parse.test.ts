@@ -453,6 +453,87 @@ describe("parseTelegramUpdate", () => {
       }
       expect(parseTelegramUpdate(ADAPTER_ID, SELF_ID, u)).toBeNull()
     })
+
+    it("falls back to actor_chat for anonymous / channel reactions (audited fix #11)", () => {
+      const u: TelegramUpdate = {
+        update_id: 1,
+        message_reaction: {
+          chat: { id: -100, type: "channel", title: "Team" },
+          message_id: 42,
+          actor_chat: { id: -100200, type: "channel", title: "Anon Channel" },
+          date: 1700000000,
+          old_reaction: [],
+          new_reaction: [{ type: "emoji", emoji: "🔥" }],
+        },
+      }
+      const r = parseTelegramUpdate(ADAPTER_ID, SELF_ID, u)
+      expect(r).not.toBeNull()
+      expect(r!.systemKind).toBe("reaction_added")
+      expect(r!.sender.remoteUserId).toBe("-100200")
+      expect(r!.sender.displayName).toBe("Anon Channel")
+      expect(r!.messageId).toBe("tgreact:42:-100200:1700000000")
+    })
+
+    it("still drops reactions with neither user nor actor_chat", () => {
+      const u: TelegramUpdate = {
+        update_id: 1,
+        message_reaction: {
+          chat: { id: -100, type: "supergroup", title: "Team" },
+          message_id: 42,
+          date: 1700000000,
+          old_reaction: [],
+          new_reaction: [{ type: "emoji", emoji: "👍" }],
+        },
+      }
+      expect(parseTelegramUpdate(ADAPTER_ID, SELF_ID, u)).toBeNull()
+    })
+  })
+
+  describe("largest-photo selection (audited fix #10)", () => {
+    const baseChat = { id: 1, type: "private" as const, first_name: "Q" }
+    const baseFrom = { id: 1, first_name: "Q" }
+
+    it("defaults to the LAST PhotoSize when file_size is absent (small→large order)", () => {
+      const u: TelegramUpdate = {
+        update_id: 1,
+        message: {
+          message_id: 10,
+          chat: baseChat,
+          from: baseFrom,
+          date: 1,
+          photo: [
+            { file_id: "small", file_unique_id: "s", width: 90, height: 60 },
+            { file_id: "medium", file_unique_id: "m", width: 320, height: 213 },
+            { file_id: "large", file_unique_id: "l", width: 1280, height: 853 },
+          ],
+        },
+      }
+      const r = parseTelegramUpdate(ADAPTER_ID, SELF_ID, u)
+      expect(r!.segments[0]).toMatchObject({
+        type: "image",
+        url: "tg://file/large",
+        width: 1280,
+      })
+    })
+
+    it("picks the max file_size when sizes are present", () => {
+      const u: TelegramUpdate = {
+        update_id: 1,
+        message: {
+          message_id: 10,
+          chat: baseChat,
+          from: baseFrom,
+          date: 1,
+          photo: [
+            { file_id: "a", file_unique_id: "a", width: 90, height: 60, file_size: 1000 },
+            { file_id: "b", file_unique_id: "b", width: 1280, height: 853, file_size: 90000 },
+            { file_id: "c", file_unique_id: "c", width: 320, height: 213, file_size: 5000 },
+          ],
+        },
+      }
+      const r = parseTelegramUpdate(ADAPTER_ID, SELF_ID, u)
+      expect(r!.segments[0]).toMatchObject({ type: "image", url: "tg://file/b" })
+    })
   })
 })
 

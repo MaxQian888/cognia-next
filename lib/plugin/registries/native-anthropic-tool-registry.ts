@@ -19,9 +19,22 @@ import type {
   PluginNativeAnthropicToolDef,
 } from "@/types/plugin/plugin-native-tool"
 import { createOverlayRegistry } from "./createOverlayRegistry"
+import { reportRegistryConflict } from "@/lib/plugin/contracts/conflict-reporter"
 
 const registry = createOverlayRegistry<PluginNativeAnthropicToolDef>({
   name: "native-anthropic-tool",
+  // W4.2: without a conflict policy the default last-wins let plugin B hijack
+  // plugin A's native-anthropic-tool id (and unregistering B then dropped A's entry). Mirror
+  // the pet registries: the incumbent plugin wins, the rejection is reported.
+  conflictPolicy: "first-wins-cross-plugin",
+  onConflict: (info) => {
+    reportRegistryConflict({
+      pluginId: info.incomingPluginId ?? "unknown",
+      attemptedId: info.key,
+      registry: "native-anthropic-tool",
+      winnerPluginId: info.existingPluginId,
+    })
+  },
 })
 
 /** Register a plugin-contributed native Anthropic tool. */

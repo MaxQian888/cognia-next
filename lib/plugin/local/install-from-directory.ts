@@ -19,7 +19,7 @@ import { invoke } from "@tauri-apps/api/core"
 
 import { dispatchPluginError } from "@/lib/plugin/error-bus"
 import { isTauri } from "@/lib/tauri"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import type { PluginManifest } from "@/types/plugin"
 
 export interface InstallFromDirectoryReceipt {

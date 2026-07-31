@@ -77,6 +77,49 @@ describe("ConversationOverrideForm", () => {
     expect(persisted?.quietHours).toBeUndefined()
   })
 
+  it("persists the per-conversation mute flag and clears it when toggled off", async () => {
+    const onDone = jest.fn()
+    render(
+      <ConversationOverrideForm
+        adapterId="lark-1"
+        conversationKey="lark:lark-1:oc_mute"
+        sessionId="s_mute"
+        onDone={onDone}
+      />
+    )
+    fireEvent.click(screen.getByTestId("conv-override-muted"))
+    fireEvent.click(screen.getByTestId("conv-override-save"))
+    await waitFor(() => expect(onDone).toHaveBeenCalled())
+    const persisted = await getDb()
+      .conversationOverrides.where("conversationKey")
+      .equals("lark:lark-1:oc_mute")
+      .first()
+    expect(persisted?.muted).toBe(true)
+
+    // Toggle back off from the persisted row → cleared (undefined, not false).
+    const onDone2 = jest.fn()
+    render(
+      <ConversationOverrideForm
+        key="second"
+        adapterId="lark-1"
+        conversationKey="lark:lark-1:oc_mute"
+        sessionId="s_mute"
+        initialRow={persisted}
+        onDone={onDone2}
+      />
+    )
+    const mutedSwitches = screen.getAllByTestId("conv-override-muted")
+    fireEvent.click(mutedSwitches[mutedSwitches.length - 1])
+    const saves = screen.getAllByTestId("conv-override-save")
+    fireEvent.click(saves[saves.length - 1])
+    await waitFor(() => expect(onDone2).toHaveBeenCalled())
+    const cleared = await getDb()
+      .conversationOverrides.where("conversationKey")
+      .equals("lark:lark-1:oc_mute")
+      .first()
+    expect(cleared?.muted).toBeUndefined()
+  })
+
   it("persists whitelisted skill ids and clears them when toggling back to inherit", async () => {
     const onDone = jest.fn()
     render(
@@ -143,7 +186,9 @@ describe("ConversationOverrideForm", () => {
       sessionId: "s_seed",
       mode: "manual",
       characterId: "char_alpha",
+      workflowId: "wf_seed",
       allowComputerUse: true,
+      allowScheduleTools: true,
       providerOverride: "codex",
       modelOverride: "gpt-5",
       pinned: true,
@@ -162,7 +207,12 @@ describe("ConversationOverrideForm", () => {
     expect(screen.getByTestId("conv-override-character")).toHaveValue("char_alpha")
     expect(screen.getByTestId("conv-override-provider")).toHaveValue("codex")
     expect(screen.getByTestId("conv-override-model")).toHaveValue("gpt-5")
+    expect(screen.getByTestId("conv-override-workflow")).toHaveValue("wf_seed")
     expect(screen.getByTestId("conv-override-cu")).toHaveAttribute("data-state", "checked")
+    expect(screen.getByTestId("conv-override-schedule-tools")).toHaveAttribute(
+      "data-state",
+      "checked"
+    )
     expect(screen.getByTestId("conv-override-pinned")).toHaveAttribute("data-state", "checked")
   })
 
@@ -182,6 +232,13 @@ describe("ConversationOverrideForm", () => {
     fireEvent.change(screen.getByTestId("conv-override-provider"), {
       target: { value: "anthropic" },
     })
+    fireEvent.change(screen.getByTestId("conv-override-team"), {
+      target: { value: "team_research" },
+    })
+    fireEvent.change(screen.getByTestId("conv-override-workflow"), {
+      target: { value: "wf_nightly" },
+    })
+    fireEvent.click(screen.getByTestId("conv-override-proactive"))
     fireEvent.click(screen.getByTestId("conv-override-save"))
     await waitFor(() => expect(onDone).toHaveBeenCalled())
     const persisted = await getDb()
@@ -190,6 +247,83 @@ describe("ConversationOverrideForm", () => {
       .first()
     expect(persisted?.characterId).toBe("char_bravo")
     expect(persisted?.providerOverride).toBe("anthropic")
+    expect(persisted?.teamId).toBe("team_research")
+    expect(persisted?.workflowId).toBe("wf_nightly")
+    expect(persisted?.proactivePush).toBe(true)
+  })
+
+  it("persists the explicit scheduler-tool opt-in", async () => {
+    render(
+      <ConversationOverrideForm
+        adapterId="lark-1"
+        conversationKey="lark:lark-1:oc_schedule"
+        sessionId="s_schedule"
+      />
+    )
+    fireEvent.click(screen.getByTestId("conv-override-schedule-tools"))
+    fireEvent.click(screen.getByTestId("conv-override-save"))
+    await waitFor(async () => {
+      const row = await getDb()
+        .conversationOverrides.where("conversationKey")
+        .equals("lark:lark-1:oc_schedule")
+        .first()
+      expect(row?.allowScheduleTools).toBe(true)
+    })
+  })
+
+  it("persists the response-SLA minutes from the form", async () => {
+    const onDone = jest.fn()
+    render(
+      <ConversationOverrideForm
+        adapterId="lark-1"
+        conversationKey="lark:lark-1:oc_sla"
+        sessionId="s_sla"
+        onDone={onDone}
+      />
+    )
+    fireEvent.change(screen.getByTestId("conv-override-sla"), { target: { value: "45" } })
+    fireEvent.click(screen.getByTestId("conv-override-save"))
+    await waitFor(() => expect(onDone).toHaveBeenCalled())
+    const persisted = await getDb()
+      .conversationOverrides.where("conversationKey")
+      .equals("lark:lark-1:oc_sla")
+      .first()
+    expect(persisted?.slaResponseMinutes).toBe(45)
+  })
+
+  it("persists topic activation, queue/steer dispatch, and TTL overrides", async () => {
+    const initial: ConversationOverrideRow = {
+      id: "co-runtime",
+      conversationKey: "lark:lark-1:oc_runtime:omt_1",
+      sessionId: "s_runtime",
+      inboundActivationPolicy: "mention_activates",
+      activeRunDispatchMode: "steer",
+      activationTtlMs: 24 * 3_600_000,
+      createdAt: 0,
+      updatedAt: 0,
+    }
+    await getDb().conversationOverrides.put(initial)
+    const onDone = jest.fn()
+    render(
+      <ConversationOverrideForm
+        adapterId="lark-1"
+        conversationKey={initial.conversationKey}
+        sessionId={initial.sessionId}
+        initialRow={initial}
+        onDone={onDone}
+      />
+    )
+    fireEvent.change(screen.getByTestId("conv-override-activation-ttl"), {
+      target: { value: "48" },
+    })
+    fireEvent.click(screen.getByTestId("conv-override-save"))
+    await waitFor(() => expect(onDone).toHaveBeenCalled())
+
+    expect(await getDb().conversationOverrides.get(initial.id)).toMatchObject({
+      inboundActivationPolicy: "mention_activates",
+      activeRunDispatchMode: "steer",
+      activationTtlMs: 48 * 3_600_000,
+    })
   })
 
   it("updates an existing row in place (no second row created)", async () => {

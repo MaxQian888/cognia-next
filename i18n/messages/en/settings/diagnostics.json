@@ -1,0 +1,72 @@
+{
+  "crashReports": {
+    "delete": "Delete report",
+    "description": "Self-contained reports written by the Rust crash handler (panics) and the out-of-process minidump monitor (native faults). Each carries a full backtrace or .dmp, system details, and a redacted config snapshot.",
+    "desktopOnly": "Native crash reports are only available in the desktop app.",
+    "dialogTitle": "Crash report",
+    "empty": "No crash reports — nothing has crashed.",
+    "kindNative": "Native",
+    "kindPanic": "Panic",
+    "kindUnknown": "Report",
+    "openFolder": "Open folder",
+    "refresh": "Refresh",
+    "title": "Native crash reports",
+    "view": "View report"
+  },
+  "developer": {
+    "chatMiddleware": "Plugin chat middleware",
+    "chatMiddlewareHint": "Experimental. Let enabled plugins wrap each send via their registered chat middleware. Off by default — no effect unless a plugin provides one.",
+    "debugMode": "Debug mode",
+    "debugModeHint": "Verbose logs from the SDK and any spawned MCP / sub-process. Look for them in the Tauri dev console or the sidecar log file.",
+    "description": "Low-level toggles for debugging and experimental plugin behavior.",
+    "taskWorkspace": "Task resource workspace",
+    "taskWorkspaceHint": "Experimental. Run agents in isolated task workspaces, review their resources, and explicitly apply or undo attributed changes.",
+    "title": "Developer flags"
+  },
+  "inboxTelemetry": {
+    "description": "Breadcrumb log of recent inbox events (inbound, outbound, breaker, quiet hours, A2UI downgrade). Capped at 3000 rows; rotates fastest first.",
+    "emptyExport": "Nothing to export — the telemetry ring is empty.",
+    "exportCsv": "Export CSV",
+    "exportJson": "Export JSON",
+    "exported": "Exported {filename}",
+    "loadingCount": "Counting events…",
+    "refresh": "Refresh",
+    "rowCount": "{count, plural, =0 {No events captured yet} =1 {1 event captured} other {# events captured}}",
+    "title": "Inbox telemetry"
+  },
+  "pluginMessaging": {
+    "degradedTitle": "Degraded RPC endpoints",
+    "description": "Live inter-plugin messaging — exposed RPC methods, active channels, and circuit-breaker health across the IPC and event-bus singletons.",
+    "exposedEmpty": "No plugin has exposed any RPC methods.",
+    "exposedTitle": "Exposed RPC methods",
+    "refresh": "Refresh",
+    "stats": {
+      "busSubscriptions": "Event-bus subscriptions",
+      "channels": "IPC channels",
+      "exposedMethods": "Exposed methods",
+      "ipcMessages": "IPC messages",
+      "ipcSubscriptions": "IPC subscriptions"
+    },
+    "title": "Plugin messaging"
+  },
+  "sandboxAudit": {
+    "description": "Recent sandbox_exec calls — allow / deny / error, command, duration. Mirrors the in-memory audit ring.",
+    "empty": "No sandbox events recorded yet.",
+    "refresh": "Refresh",
+    "title": "Sandbox event log"
+  },
+  "sidecarRestart": {
+    "count": "Count",
+    "description": "How many times the Node sidecar has spawned since the app booted. A growing count usually means SDK errors are causing automatic restarts.",
+    "lastChecked": "Last polled",
+    "lastRestart": "Last restart",
+    "noRestart": "Not yet observed",
+    "title": "Sidecar restarts"
+  },
+  "tabs": {
+    "crashLogs": "Crash logs",
+    "label": "Diagnostics sections",
+    "nativeReports": "Native reports",
+    "system": "System"
+  }
+}

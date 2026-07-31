@@ -11,27 +11,44 @@
  * without spinning up a vector store, embedding API, or IndexedDB.
  */
 
-import { generateEmbedding } from "@/lib/ai/embedding/embedding"
+import type { RagEmbeddingProvider } from "@cognia/provider-embedding/embedding-catalog"
+import type { BedrockConnectionSettings } from "@cognia/provider-types"
+import { generateEmbedding } from "@cognia/vector/embedding"
+import {
+  ensureCollectionDimensionCompatible,
+  EmbeddingDimensionMismatchError,
+} from "@cognia/vector/dimension-guard"
 import { getTwinChunksByVectorDocIds } from "@/lib/db/twin-chunks"
 import { backfillStyleSampleEmbeddings, getTwinProfile } from "@/lib/db/twin-profile"
 import { getTwinSourcesByIds } from "@/lib/db/twin-sources"
-import type { Character } from "@/lib/claude/types"
-import type { IVectorStore } from "@/lib/vector/store"
+import type { Character } from "@cognia/agent-config-types"
+import type { IVectorStore } from "@cognia/vector/store"
 import type { StyleSample, TwinChunk, TwinSource, TwinSettings, VectorBackend } from "@/types/twin"
 import { DEFAULT_TWIN_SETTINGS } from "@/types/twin"
 import { getPluginEventHooks } from "@/lib/plugin"
 import { vectorCollectionName } from "../ingest/persist"
-import { reciprocalRankFusion } from "@/lib/ai/rag/hybrid-search"
+import { reciprocalRankFusion } from "@cognia/rag/hybrid-search"
+import { generateHypotheticalAnswer, generateStepBackQuery } from "@cognia/rag/query-expansion"
+import { formatCitations, type Citation } from "@cognia/rag/citation-formatter"
 import { applySystemPromptTemplate, type AppliedTemplate } from "./system-prompt-template"
 import { selectFewShotSamples } from "./few-shot-selector"
 import { keywordSearch } from "./bm25-index"
 import { rerank, type RerankCandidate, type RerankerOptions } from "./reranker"
+import { buildExpandedKeywordQuery } from "@/lib/ai/retrieval/query-expansion"
+import { filterByGrade } from "@/lib/ai/retrieval/corrective-filter"
+import { hasNoLeakingPii } from "@cognia/redact"
+import type { LanguageModel } from "ai"
 
 export interface TwinRuntimeEmbeddingConfig {
-  provider: "openai" | "google" | "cohere" | "mistral" | "transformersjs"
+  provider: RagEmbeddingProvider
   model: string
   apiKey: string
   baseURL?: string
+  bedrock?: BedrockConnectionSettings
+}
+
+function embed(text: string, config: TwinRuntimeEmbeddingConfig) {
+  return generateEmbedding(text, config, config.apiKey)
 }
 
 export interface ApplyTwinContextDeps {
@@ -53,6 +70,14 @@ export interface ApplyTwinContextDeps {
     /** Multiplier applied to topK before fetching candidates. Default 3. */
     overFetch?: number
   }
+  /**
+   * Optional LLM query-expansion (HyDE / step-back). When set AND the character
+   * opts in via `enableQueryExpansion`, the runtime generates an expanded query
+   * with this model, embeds it, runs a second vector search, and RRF-fuses the
+   * two vector rankings. Heuristic synonym expansion of the BM25 leg needs no
+   * dep — this only carries the LLM handle + strategy.
+   */
+  expansion?: { model: LanguageModel; strategy: "hyde" | "stepback" }
 }
 
 export interface ApplyTwinContextInput {
@@ -108,18 +133,29 @@ export interface ApplyTwinContextResult {
    * `retrievedChunks` so the user can see what shaped the reply.
    */
   selectedStyleSamples: StyleSample[]
+  /**
+   * Formatted source citations for the retrieved chunks. Present only when the
+   * character has `enableCitations` on. Metadata only — never alters the
+   * assembled system prompt (so the model's output is unaffected).
+   */
+  citations?: Citation[]
 }
 
 function settingsFor(character: Character): TwinSettings {
+  const s = character.twinSettings
   return {
-    enableRag: character.twinSettings?.enableRag ?? DEFAULT_TWIN_SETTINGS.enableRag,
-    ragTopK: character.twinSettings?.ragTopK ?? DEFAULT_TWIN_SETTINGS.ragTopK,
-    enableStyleFewShot:
-      character.twinSettings?.enableStyleFewShot ?? DEFAULT_TWIN_SETTINGS.enableStyleFewShot,
-    styleSamplesK: character.twinSettings?.styleSamplesK ?? DEFAULT_TWIN_SETTINGS.styleSamplesK,
-    enableHybrid: character.twinSettings?.enableHybrid ?? DEFAULT_TWIN_SETTINGS.enableHybrid,
-    hybridKeywordWeight:
-      character.twinSettings?.hybridKeywordWeight ?? DEFAULT_TWIN_SETTINGS.hybridKeywordWeight,
+    enableRag: s?.enableRag ?? DEFAULT_TWIN_SETTINGS.enableRag,
+    ragTopK: s?.ragTopK ?? DEFAULT_TWIN_SETTINGS.ragTopK,
+    enableStyleFewShot: s?.enableStyleFewShot ?? DEFAULT_TWIN_SETTINGS.enableStyleFewShot,
+    styleSamplesK: s?.styleSamplesK ?? DEFAULT_TWIN_SETTINGS.styleSamplesK,
+    enableHybrid: s?.enableHybrid ?? DEFAULT_TWIN_SETTINGS.enableHybrid,
+    hybridKeywordWeight: s?.hybridKeywordWeight ?? DEFAULT_TWIN_SETTINGS.hybridKeywordWeight,
+    enableQueryExpansion: s?.enableQueryExpansion ?? DEFAULT_TWIN_SETTINGS.enableQueryExpansion,
+    enableCorrectiveFilter:
+      s?.enableCorrectiveFilter ?? DEFAULT_TWIN_SETTINGS.enableCorrectiveFilter,
+    correctiveMinKeep: s?.correctiveMinKeep ?? DEFAULT_TWIN_SETTINGS.correctiveMinKeep,
+    enableCitations: s?.enableCitations ?? DEFAULT_TWIN_SETTINGS.enableCitations,
+    citationStyle: s?.citationStyle ?? DEFAULT_TWIN_SETTINGS.citationStyle,
   }
 }
 
@@ -145,7 +181,7 @@ function maybeBackfillStyleEmbeddings(
   const hasGap = samples.some((s) => !(Array.isArray(s.embedding) && s.embedding.length > 0))
   if (!hasGap || styleBackfillInFlight.has(twinId)) return
   const task = backfillStyleSampleEmbeddings(twinId, (summary) =>
-    generateEmbedding(summary, embedding).then((r) => r.embedding)
+    embed(summary, embedding).then((r) => r.embedding)
   )
     .catch(() => {
       // Swallow — a transient embed/DB failure just means we retry next turn.
@@ -200,7 +236,7 @@ export async function applyTwinContext(
   // Embed the user message — needed by both the RAG and style passes.
   if (!queryEmbedding && (settings.enableRag || settings.enableStyleFewShot)) {
     try {
-      const result = await generateEmbedding(userMessage, deps.embedding)
+      const result = await embed(userMessage, deps.embedding)
       queryEmbedding = result.embedding
     } catch (err) {
       degraded = true
@@ -224,9 +260,54 @@ export async function applyTwinContext(
         ? Math.max(settings.ragTopK * overFetch, settings.ragTopK)
         : settings.ragTopK
 
+      // Dimension guard: if the collection was built with a different
+      // embedding model than the one now configured, block before searching
+      // with a mismatched query vector (cloud backends error / native rejects).
+      await ensureCollectionDimensionCompatible(deps.store, collection, queryEmbedding.length, {
+        provider: deps.embedding.provider,
+        model: deps.embedding.model,
+      })
+
       const vectorHits = await deps.store.searchByEmbedding(collection, queryEmbedding, {
         limit: fetchLimit,
       })
+
+      // Vector ranking fed to the hybrid + rerank stages. Starts as the raw
+      // cosine hits; the optional LLM query-expansion leg (HyDE / step-back)
+      // fuses a second search over an LLM-generated query for extra recall.
+      let vectorRanking = vectorHits.map((h) => ({ id: h.id, score: h.score }))
+      if (settings.enableQueryExpansion && deps.expansion) {
+        if (hasNoLeakingPii(userMessage)) {
+          try {
+            const expandedText =
+              deps.expansion.strategy === "stepback"
+                ? await generateStepBackQuery(userMessage, deps.expansion.model)
+                : await generateHypotheticalAnswer(userMessage, deps.expansion.model)
+            if (expandedText.trim().length > 0) {
+              const expEmbedding = (await embed(expandedText, deps.embedding)).embedding
+              const expHits = await deps.store.searchByEmbedding(collection, expEmbedding, {
+                limit: fetchLimit,
+              })
+              // Original query dominant (0.6) over the LLM-expanded one (0.4).
+              vectorRanking = reciprocalRankFusion(
+                [vectorRanking, expHits.map((h) => ({ id: h.id, score: h.score }))],
+                [0.6, 0.4],
+                60
+              )
+            }
+          } catch (err) {
+            degraded = true
+            degradedReason =
+              err instanceof Error
+                ? `expansion-failed: ${err.message}`
+                : "expansion-failed: unknown"
+          }
+        } else {
+          // The raw message carries PII — never send it to the expansion LLM.
+          degraded = true
+          degradedReason = "expansion-pii-skip"
+        }
+      }
 
       // Hybrid retrieval: fuse the vector ranking with a BM25 keyword ranking
       // over the same corpus via Reciprocal Rank Fusion. Off by default — when
@@ -236,16 +317,20 @@ export async function applyTwinContext(
       let orderedIds: string[] = []
       const scoreById = new Map<string, number>()
       const setVectorOnly = (): void => {
-        orderedIds = vectorHits.map((h) => h.id)
+        orderedIds = vectorRanking.map((h) => h.id)
         scoreById.clear()
-        for (const h of vectorHits) scoreById.set(h.id, h.score)
+        for (const h of vectorRanking) scoreById.set(h.id, h.score)
       }
       if (settings.enableHybrid && character.twinId) {
         try {
-          const keywordHits = await keywordSearch(character.twinId, userMessage, fetchLimit)
+          // Heuristic synonym expansion widens the BM25 recall leg only.
+          const keywordQuery = settings.enableQueryExpansion
+            ? buildExpandedKeywordQuery(userMessage)
+            : userMessage
+          const keywordHits = await keywordSearch(character.twinId, keywordQuery, fetchLimit)
           const keywordWeight = Math.min(1, Math.max(0, settings.hybridKeywordWeight))
           const fused = reciprocalRankFusion(
-            [vectorHits.map((h) => ({ id: h.id, score: h.score })), keywordHits],
+            [vectorRanking, keywordHits],
             [1 - keywordWeight, keywordWeight],
             60
           )
@@ -312,10 +397,31 @@ export async function applyTwinContext(
       } else {
         retrievedChunks = enriched.slice(0, settings.ragTopK)
       }
+
+      // Corrective-RAG: drop low-relevance chunks (heuristic, no LLM). Never
+      // empties a non-empty pool below correctiveMinKeep, and keeps the pool
+      // untouched when it is already weak-but-only.
+      if (settings.enableCorrectiveFilter && retrievedChunks.length > 0) {
+        const kept = await filterByGrade(
+          userMessage,
+          retrievedChunks.map((rc) => ({
+            id: rc.chunk.vectorDocId,
+            content: rc.chunk.content,
+            score: rc.score,
+          })),
+          { minKeep: settings.correctiveMinKeep ?? 1 }
+        )
+        const keptIds = new Set(kept.map((k) => k.id))
+        retrievedChunks = retrievedChunks.filter((rc) => keptIds.has(rc.chunk.vectorDocId))
+      }
     } catch (err) {
       degraded = true
-      degradedReason =
-        err instanceof Error ? `retrieve-failed: ${err.message}` : "retrieve-failed: unknown"
+      if (err instanceof EmbeddingDimensionMismatchError) {
+        degradedReason = `dimension-mismatch: ${err.message}`
+      } else {
+        degradedReason =
+          err instanceof Error ? `retrieve-failed: ${err.message}` : "retrieve-failed: unknown"
+      }
     }
   } else if (settings.enableRag && queryEmbedding && !deps.store.searchByEmbedding) {
     // RAG was requested and we have a query embedding, but the configured store
@@ -352,6 +458,7 @@ export async function applyTwinContext(
     twinName: character.name || character.twinId,
     voiceSummary: profile?.voiceSummary,
     entities: profile?.entities ?? [],
+    playbooks: profile?.playbooks ?? [],
     retrievedChunks,
     styleSamples,
   })
@@ -371,6 +478,25 @@ export async function applyTwinContext(
     )
   }
 
+  // Optional citations for the Twin-RAG SourcesPart — metadata only. Built
+  // from the SAME final chunk set, so it never diverges from the prompt (which
+  // it does not touch: `applySystemPromptTemplate` above is unchanged).
+  const citations =
+    settings.enableCitations && retrievedChunks.length > 0
+      ? formatCitations(
+          retrievedChunks.map((rc) => ({
+            id: rc.chunk.vectorDocId,
+            content: rc.chunk.content,
+            rerankScore: rc.score,
+            metadata: {
+              title: rc.sourceTitle,
+              source: rc.sourceTitle ?? rc.chunk.sourceId,
+            },
+          })),
+          { style: settings.citationStyle ?? "simple", includeRelevanceScore: true }
+        ).citations
+      : undefined
+
   return {
     applied,
     degraded,
@@ -385,5 +511,6 @@ export async function applyTwinContext(
       sourceTitle: rc.sourceTitle,
     })),
     selectedStyleSamples: styleSamples,
+    ...(citations ? { citations } : {}),
   }
 }

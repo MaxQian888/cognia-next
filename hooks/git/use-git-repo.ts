@@ -10,30 +10,32 @@
 "use client"
 
 import { useCallback, useEffect } from "react"
-import { isTauri } from "@/lib/tauri"
-import { pickDirectory } from "@/lib/files/file-bridge"
+import { isSourceControlUiAvailable } from "@/lib/git/commands"
 import { loadGitRepo } from "@/lib/git/load"
 import { useGitStore } from "@/stores/git/git-store"
+import { openFolderAsWorkspace } from "@/lib/workspace/open-folder"
 
 export interface UseGitRepoResult {
   available: boolean
   rootDir: string | null
   refresh: () => Promise<void>
-  /** Open a folder picker and bind the panel to the chosen path. */
+  /** Open a folder as a real workspace and bind the panel to it. */
   openFolder: () => Promise<void>
 }
 
 export function useGitRepo(): UseGitRepoResult {
-  const available = isTauri()
+  const available = isSourceControlUiAvailable()
   const rootDir = useGitStore((s) => s.rootDir)
-  const setRootDir = useGitStore((s) => s.setRootDir)
 
   const refresh = useCallback(() => loadGitRepo(rootDir), [rootDir])
 
   const openFolder = useCallback(async () => {
-    const picked = await pickDirectory()
-    if (picked) setRootDir(picked)
-  }, [setRootDir])
+    // Unified flow: open the folder as a real workspace Project (visible in the
+    // switcher, persisted, drives the cwd chain). The always-mounted git
+    // indicator (`use-git-branch-indicator`) then binds `rootDir` to the new
+    // active project root — no direct `setRootDir` needed here.
+    await openFolderAsWorkspace()
+  }, [])
 
   // Initial load when the bound repo changes (idempotent with the controller).
   useEffect(() => {

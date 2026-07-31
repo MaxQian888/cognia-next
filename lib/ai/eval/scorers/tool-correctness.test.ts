@@ -162,10 +162,13 @@ describe("toolOrderScorer", () => {
 })
 
 describe("redundancyScorer", () => {
-  it("scores 1 for an empty trajectory (no calls, no redundancy)", async () => {
+  it("reports measurement for an empty trajectory — nothing was called, nothing passed", async () => {
+    // Regression guard: this used to return `passed: true`, so a dataset with
+    // no tool expectations at all got a free passing verdict on every case.
     const score = await redundancyScorer.score(sample([]), makeCase())
+    expect(score.status).toBe("measurement")
     expect(score.value).toBe(1)
-    expect(score.passed).toBe(true)
+    expect(score.passed).toBe(false)
   })
 
   it("scores 1 when every call is distinct", async () => {

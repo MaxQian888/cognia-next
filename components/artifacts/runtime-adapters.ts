@@ -1,23 +1,19 @@
 /**
  * Runtime adapter table — describes how each artifact type is rendered
  * (iframe / inline renderer / jupyter), the iframe sandbox attribute it
- * needs, the export formats it supports, and which authoring affordances
- * apply (canvas / embedded designer / full designer).
+ * needs, and the export formats it supports.
  *
- * Ported from Cognia. cognia-next has no Designer subsystem, so the
- * embedded/full-designer flags are dead in practice — the table itself is
- * preserved verbatim so future Designer work doesn't reshape the schema.
+ * The `authoring` block this table used to carry is gone. It described a
+ * Designer subsystem cognia-next never had: `fullDesigner` had no readers at
+ * all, and `embeddedDesigner` had exactly one — a gate on whether to mount a
+ * dialog that nothing could open. Visual authoring here is "Edit in Canvas"
+ * (`useArtifactPanelState.handleOpenInCanvas`), and which types it suits is
+ * `DESIGNABLE_TYPES` / `canDesign()` in `lib/artifacts/constants.ts`.
  */
 
 import type { Artifact, ArtifactExportFormat, ArtifactType } from "@/types"
 
 export type ArtifactRuntimeTransport = "iframe" | "renderer" | "jupyter"
-
-export interface ArtifactAuthoringCapabilities {
-  canvas: boolean
-  embeddedDesigner: boolean
-  fullDesigner: boolean
-}
 
 export interface ArtifactRuntimeAdapter {
   type: ArtifactType
@@ -25,7 +21,6 @@ export interface ArtifactRuntimeAdapter {
   rendererType?: "code" | "document" | "mermaid" | "chart" | "math"
   sandbox?: string
   exportFormats: ArtifactExportFormat[]
-  authoring: ArtifactAuthoringCapabilities
 }
 
 export const ARTIFACT_RUNTIME_ADAPTERS: Record<ArtifactType, ArtifactRuntimeAdapter> = {
@@ -34,73 +29,58 @@ export const ARTIFACT_RUNTIME_ADAPTERS: Record<ArtifactType, ArtifactRuntimeAdap
     transport: "renderer",
     rendererType: "code",
     exportFormats: ["raw"],
-    authoring: { canvas: true, embeddedDesigner: false, fullDesigner: false },
   },
   document: {
     type: "document",
     transport: "renderer",
     rendererType: "document",
     exportFormats: ["raw"],
-    authoring: { canvas: true, embeddedDesigner: false, fullDesigner: false },
   },
   svg: {
     type: "svg",
     transport: "iframe",
     sandbox: "allow-same-origin",
     exportFormats: ["raw", "svg"],
-    authoring: { canvas: true, embeddedDesigner: true, fullDesigner: true },
   },
   html: {
     type: "html",
     transport: "iframe",
     sandbox: "allow-same-origin",
     exportFormats: ["raw", "html"],
-    authoring: { canvas: true, embeddedDesigner: true, fullDesigner: true },
   },
   react: {
     type: "react",
     transport: "iframe",
     sandbox: "allow-scripts",
     exportFormats: ["raw"],
-    authoring: { canvas: true, embeddedDesigner: true, fullDesigner: true },
   },
   mermaid: {
     type: "mermaid",
     transport: "renderer",
     rendererType: "mermaid",
     exportFormats: ["raw"],
-    authoring: { canvas: true, embeddedDesigner: false, fullDesigner: false },
   },
   chart: {
     type: "chart",
     transport: "renderer",
     rendererType: "chart",
     exportFormats: ["raw"],
-    authoring: { canvas: true, embeddedDesigner: false, fullDesigner: false },
   },
   math: {
     type: "math",
     transport: "renderer",
     rendererType: "math",
     exportFormats: ["raw"],
-    authoring: { canvas: true, embeddedDesigner: false, fullDesigner: false },
   },
   jupyter: {
     type: "jupyter",
     transport: "jupyter",
     exportFormats: ["raw"],
-    authoring: { canvas: true, embeddedDesigner: false, fullDesigner: false },
   },
 }
 
 export function getArtifactRuntimeAdapter(type: ArtifactType): ArtifactRuntimeAdapter {
   return ARTIFACT_RUNTIME_ADAPTERS[type]
-}
-
-export function getArtifactAuthoringCapabilities(
-  type: ArtifactType
-): ArtifactAuthoringCapabilities {
-  return getArtifactRuntimeAdapter(type).authoring
 }
 
 export function getArtifactExportFormats(

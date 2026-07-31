@@ -264,7 +264,7 @@ describe("ConversationsDetail — navigation", () => {
     render(withIntl(<ConversationsDetail adapterId={ADAPTER_ID} />))
     fireEvent.click(screen.getByTestId("conv-detail-open-ov1"))
     expect(mockPush).toHaveBeenCalledWith(
-      `/inbox/c/${encodeURIComponent(`telegram:${ADAPTER_ID}:123`)}`
+      `/inbox/c?key=${encodeURIComponent(`telegram:${ADAPTER_ID}:123`)}`
     )
   })
 
@@ -274,7 +274,7 @@ describe("ConversationsDetail — navigation", () => {
     const openBtn = screen.getByRole("button", { name: /open conversation/i })
     fireEvent.click(openBtn)
     expect(mockPush).toHaveBeenCalledWith(
-      `/inbox/c/${encodeURIComponent(`telegram:${ADAPTER_ID}:123`)}`
+      `/inbox/c?key=${encodeURIComponent(`telegram:${ADAPTER_ID}:123`)}`
     )
   })
 })

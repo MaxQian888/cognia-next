@@ -121,6 +121,8 @@ export function createGoalAPI(pluginId: string): PluginGoalAPI {
         config: input.config,
         startPaused: input.startPaused,
         appSettings: useSettingsStore.getState().settings,
+        // Headless: no operator to hold turns for (ADR-0070 Phase 2).
+        origin: "plugin",
       }),
     updateObjective: async (goalId, rawObjective) => {
       // The runtime returns `{ goal, updatePrompt }` (the prompt is for the

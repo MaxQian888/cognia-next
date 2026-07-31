@@ -15,9 +15,13 @@ import {
   FolderIcon,
   FolderOpenIcon,
   KeyRoundIcon,
+  MailIcon,
   MessageSquareIcon,
   MoonIcon,
+  PanelRightIcon,
+  PencilRulerIcon,
   PlusIcon,
+  PuzzleIcon,
   RefreshCwIcon,
   ServerIcon,
   SettingsIcon,
@@ -29,25 +33,46 @@ import {
 } from "lucide-react"
 import { useTheme } from "next-themes"
 import { useTranslations } from "next-intl"
-import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { useSessions } from "@/hooks/chat"
+import { useChatHistorySearch } from "@/hooks/chat/use-chat-history-search"
+import { useDebouncedCallback } from "@/hooks/workflow/use-debounced-callback"
+import { usePlatform } from "@/hooks/use-platform"
+import { getSidebarCatalog } from "@/lib/shell/sidebar-nav"
+import {
+  getActiveContextRevision,
+  getActiveWorkbenchPanels,
+  revealActiveWorkbenchPanel,
+  subscribeActiveContext,
+} from "@/lib/context-workbench/active-context"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { useUIStore } from "@/stores/ui"
 import { useProjectStore } from "@/stores/project/project-store"
 import { primaryRootOf } from "@/lib/workspace/roots"
+import { guildFromSession } from "@/lib/claude/guild"
+import { jumpToSessionMessage } from "@/lib/chat/cross-session-jump"
 import { openFolderAsWorkspace } from "@/lib/workspace/open-folder"
 import { useClientLiveQuery } from "@/hooks/data"
 import { listCharacters } from "@/lib/db/characters"
 import { listTeams } from "@/lib/db/teams"
-import { loggers } from "@/lib/logging"
-import type { Character, Team } from "@/lib/claude/types"
+import { loggers } from "@cognia/logging"
+import type { Character, Team } from "@cognia/agent-config-types"
 import { messagesToMarkdown } from "@/components/ai-elements/conversation"
 import { isTauri } from "@/lib/tauri"
+import { checkForUpdate } from "@/lib/tauri/updater"
 import { getPluginEventHooks } from "@/lib/plugin"
 import { toast } from "sonner"
 import { AvatarBadge } from "./avatar-badge"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
+import { usePluginQuickActions } from "@/hooks/plugins/use-plugin-quick-actions"
+import {
+  runQuickAction,
+  type QuickActionEntry,
+} from "@/lib/plugin/registries/quick-action-registry"
+import { ChatHistorySearchResults } from "@/components/chat/search/chat-history-search-results"
+import type { ChatSearchResult } from "@/lib/chat/search/engine"
 
 const log = loggers.ui
 
@@ -58,7 +83,9 @@ interface Props {
 export function CommandPalette({ onOpenSettings }: Props) {
   const t = useTranslations("desktop.commandPalette")
   const [open, setOpen] = useState(false)
-  const { sessions, select, create } = useSessions()
+  const [searchInput, setSearchInput] = useState("")
+  const [searchQuery, setSearchQuery] = useState("")
+  const { sessions, select, create } = useSessions({ crossWorkspace: true })
   const messages = useChatStore((s) => s.messages)
   const settings = useSettingsStore((s) => s.settings)
   const setSelectedGuild = useUIStore((s) => s.setSelectedGuild)
@@ -68,6 +95,69 @@ export function CommandPalette({ onOpenSettings }: Props) {
   const activeProjectId = useProjectStore((s) => s.activeProjectId)
   const setActiveProject = useProjectStore((s) => s.setActiveProject)
   const { theme, setTheme } = useTheme()
+  const pluginQuickActions = usePluginQuickActions("palette")
+  const router = useRouter()
+  const platform = usePlatform()
+  const railT = useTranslations("desktop.guildRail")
+  const workbenchT = useTranslations()
+  const { call: debouncedSetSearchQuery, cancel: cancelSearchQuery } = useDebouncedCallback(
+    (next: string) => setSearchQuery(next),
+    150
+  )
+  const historySearch = useChatHistorySearch(searchQuery, {
+    enabled: open,
+    limit: 20,
+  })
+  const visibleSessions = useMemo(() => {
+    const needle = searchInput.trim().toLowerCase()
+    if (!needle) return sessions.slice(0, 12)
+    return sessions
+      .filter((session) => `${session.title} ${session.id}`.toLowerCase().includes(needle))
+      .slice(0, 20)
+  }, [sessions, searchInput])
+
+  const resetSearch = useCallback(() => {
+    setSearchInput("")
+    cancelSearchQuery()
+    setSearchQuery("")
+  }, [cancelSearchQuery])
+
+  const close = useCallback(() => {
+    setOpen(false)
+    resetSearch()
+  }, [resetSearch])
+
+  const handleOpenChange = useCallback(
+    (next: boolean) => {
+      if (next) setOpen(true)
+      else close()
+    },
+    [close]
+  )
+
+  const handleSearchChange = useCallback(
+    (next: string) => {
+      setSearchInput(next)
+      debouncedSetSearchQuery(next)
+    },
+    [debouncedSetSearchQuery]
+  )
+
+  // The whole nav catalog, including what the user hid from the rail: the
+  // palette is the fallback route to a destination they took off the rail, and
+  // the only one once the rail moved to the far edge.
+  const navItems = useMemo(() => getSidebarCatalog(platform), [platform])
+
+  // Panels of whichever workbench is in front. Empty on routes that mount none,
+  // which drops the group entirely rather than listing dead entries.
+  //
+  // Subscribed to the active *context* rather than `subscribeActiveWorkbench`:
+  // the latter also fires on every layout-store write, so dragging the dock's
+  // divider would re-render this always-mounted component once per frame. The
+  // snapshot is the revision counter — the panel accessor returns fresh clones,
+  // which React would reject as an uncached snapshot.
+  useSyncExternalStore(subscribeActiveContext, getActiveContextRevision, () => 0)
+  const workbenchPanels = getActiveWorkbenchPanels()
 
   // Global Cmd/Ctrl+K trigger.
   useEffect(() => {
@@ -80,17 +170,15 @@ export function CommandPalette({ onOpenSettings }: Props) {
         // Plugin host: announce the global Ctrl/Cmd+K shortcut so plugins can
         // observe / extend the command palette opening flow.
         void getPluginEventHooks().dispatchShortcut("command-palette.toggle")
-        setOpen((v) => {
-          log.info("command-palette toggle", { next: !v, source: "shortcut" })
-          return !v
-        })
+        const next = !open
+        log.info("command-palette toggle", { next, source: "shortcut" })
+        if (next) setOpen(true)
+        else close()
       }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [])
-
-  const close = () => setOpen(false)
+  }, [open, close])
 
   const handleNewChat = async () => {
     log.info("command-palette new-chat")
@@ -98,10 +186,41 @@ export function CommandPalette({ onOpenSettings }: Props) {
     await create()
   }
 
-  const handleSelect = (id: string) => {
-    log.info("command-palette select session", { sessionId: id })
+  const handleSelect = useCallback(
+    (id: string) => {
+      log.info("command-palette select session", { sessionId: id })
+      close()
+      const target = sessions.find((session) => session.id === id)
+      if (target?.projectId) {
+        const projectState = useProjectStore.getState()
+        if (target.projectId !== projectState.activeProjectId) {
+          projectState.setActiveProject(target.projectId)
+        }
+      }
+      if (target) setSelectedGuild(guildFromSession(target))
+      select(id)
+    },
+    [close, sessions, select, setSelectedGuild]
+  )
+
+  const handleHistorySelect = useCallback(
+    (result: ChatSearchResult) => {
+      handleSelect(result.sessionId)
+      void jumpToSessionMessage(result.sessionId, result.messageId, { align: "center" }).then(
+        (landed) => {
+          if (!landed) toast.error(t("search.jumpFailed"))
+        }
+      )
+    },
+    [handleSelect, t]
+  )
+
+  const handleQuickAction = (action: QuickActionEntry) => {
+    log.info("command-palette quick-action", { id: action.fullId })
     close()
-    select(id)
+    runQuickAction(action).catch((err) => {
+      log.warn("quick action dispatch failed", { id: action.fullId, error: String(err) })
+    })
   }
 
   const handleSettings = (tab?: string) => {
@@ -154,8 +273,7 @@ export function CommandPalette({ onOpenSettings }: Props) {
       return
     }
     try {
-      const { check } = await import("@tauri-apps/plugin-updater")
-      const update = await check()
+      const update = await checkForUpdate()
       if (!update) {
         toast.success(t("toasts.upToDate"))
         return
@@ -202,6 +320,35 @@ export function CommandPalette({ onOpenSettings }: Props) {
     setActiveProject(id)
   }
 
+  const handleNavigate = (route: string) => {
+    log.info("command-palette navigate", { route })
+    close()
+    router.push(route)
+  }
+
+  const handleSwitchGuild = (kind: "dm" | "canvas") => {
+    log.info("command-palette switch-guild", { kind })
+    close()
+    setSelectedGuild({ kind })
+    router.push("/")
+  }
+
+  const handleRevealPanel = (panelId: string) => {
+    log.info("command-palette reveal-panel", { panelId })
+    close()
+    revealActiveWorkbenchPanel(panelId)
+  }
+
+  /** Plugin panels namespace their label key; native ones live under the app tree. */
+  const panelLabel = (panel: (typeof workbenchPanels)[number]) => {
+    if (!panel.pluginId) return workbenchT(panel.labelKey as never)
+    const key = `plugin.${panel.pluginId}.${panel.labelKey}`
+    const has = (workbenchT as typeof workbenchT & { has?: (candidate: string) => boolean }).has
+    return typeof has === "function" && has(key)
+      ? workbenchT(key as never)
+      : (panel.label ?? panel.labelKey)
+  }
+
   const handleOpenFolder = async () => {
     log.info("command-palette open-folder")
     close()
@@ -215,13 +362,30 @@ export function CommandPalette({ onOpenSettings }: Props) {
   return (
     <CommandDialog
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={handleOpenChange}
       title={t("title")}
       description={t("description")}
     >
-      <CommandInput placeholder={t("placeholder")} />
+      <CommandInput
+        value={searchInput}
+        onValueChange={handleSearchChange}
+        placeholder={t("placeholder")}
+      />
       <CommandList>
         <CommandEmpty>{t("empty")}</CommandEmpty>
+
+        <ChatHistorySearchResults
+          query={searchQuery}
+          results={historySearch.results}
+          loading={historySearch.loading}
+          error={historySearch.error}
+          coverageIncomplete={historySearch.moreOlderHistory || historySearch.indexIncomplete}
+          heading={t("groups.messages")}
+          loadingLabel={t("search.loading")}
+          errorLabel={t("search.error")}
+          coverageLabel={t("search.coverage")}
+          onSelect={handleHistorySelect}
+        />
 
         <CommandGroup heading={t("groups.actions")}>
           <CommandItem onSelect={handleNewChat}>
@@ -248,6 +412,62 @@ export function CommandPalette({ onOpenSettings }: Props) {
             <span>{t("actions.openFolder")}</span>
           </CommandItem>
         </CommandGroup>
+
+        <CommandSeparator />
+
+        {/* Every destination the navigation rail can reach, hidden ones
+            included. Without this the rail was the only route to 19 pages —
+            and it now sits at the far edge, away from the conversation list it
+            drives. Reuses the rail's own catalog and labels, so a new section
+            appears here the moment it appears there. */}
+        <CommandGroup heading={t("groups.navigate")}>
+          <CommandItem
+            value={`navigate ${railT("directMessages")}`}
+            onSelect={() => handleSwitchGuild("dm")}
+          >
+            <MailIcon className="size-4" />
+            <span>{railT("directMessages")}</span>
+          </CommandItem>
+          <CommandItem
+            value={`navigate ${railT("canvas")}`}
+            onSelect={() => handleSwitchGuild("canvas")}
+          >
+            <PencilRulerIcon className="size-4" />
+            <span>{railT("canvas")}</span>
+          </CommandItem>
+          {navItems.map((item) => (
+            <CommandItem
+              key={item.id}
+              value={`navigate ${railT(item.i18nKey)} ${item.route}`}
+              onSelect={() => handleNavigate(item.route)}
+            >
+              <item.Icon className="size-4" />
+              <span>{railT(item.i18nKey)}</span>
+              <span className="ml-auto text-xs text-muted-foreground">{item.route}</span>
+            </CommandItem>
+          ))}
+        </CommandGroup>
+
+        {workbenchPanels.length > 0 && (
+          <>
+            <CommandSeparator />
+            {/* The right-hand workbench's panels. Reachable here even when the
+                user has hidden that activity from its rail — which is what
+                makes hiding safe to offer at all. */}
+            <CommandGroup heading={t("groups.workbenchPanels")}>
+              {workbenchPanels.map((panel) => (
+                <CommandItem
+                  key={panel.id}
+                  value={`panel ${panelLabel(panel)}`}
+                  onSelect={() => handleRevealPanel(panel.id)}
+                >
+                  <PanelRightIcon className="size-4" />
+                  <span className="truncate">{panelLabel(panel)}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </>
+        )}
 
         <CommandSeparator />
 
@@ -342,11 +562,11 @@ export function CommandPalette({ onOpenSettings }: Props) {
           </>
         )}
 
-        {sessions.length > 0 && (
+        {visibleSessions.length > 0 && (
           <>
             <CommandSeparator />
             <CommandGroup heading={t("groups.sessions")}>
-              {sessions.slice(0, 12).map((s) => (
+              {visibleSessions.map((s) => (
                 <CommandItem
                   key={s.id}
                   onSelect={() => handleSelect(s.id)}
@@ -354,6 +574,29 @@ export function CommandPalette({ onOpenSettings }: Props) {
                 >
                   <MessageSquareIcon className="size-4" />
                   <span className="truncate">{s.title}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </>
+        )}
+
+        {pluginQuickActions.length > 0 && (
+          <>
+            <CommandSeparator />
+            <CommandGroup heading={t("groups.pluginActions")}>
+              {pluginQuickActions.map((action) => (
+                <CommandItem
+                  key={action.fullId}
+                  value={`plugin ${action.title} ${action.description ?? ""}`}
+                  onSelect={() => handleQuickAction(action)}
+                >
+                  <PuzzleIcon className="size-4" />
+                  <span className="truncate">{action.title}</span>
+                  {action.description && (
+                    <span className="ml-auto truncate text-xs text-muted-foreground">
+                      {action.description}
+                    </span>
+                  )}
                 </CommandItem>
               ))}
             </CommandGroup>

@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Coverage for the per-skill resource bundle CRUD layer.
 
 import "fake-indexeddb/auto"

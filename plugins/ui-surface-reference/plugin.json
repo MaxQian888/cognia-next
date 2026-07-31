@@ -1,0 +1,226 @@
+{
+  "id": "ui-surface-reference",
+  "name": "UI Surface Reference",
+  "version": "0.1.0",
+  "description": "Reference plugin exercising every supported Cognia plugin UI surface.",
+  "type": "frontend",
+  "capabilities": [
+    "components",
+    "context-panel",
+    "view-container",
+    "tree-view",
+    "webview",
+    "modal-mount",
+    "message-renderer",
+    "tool-renderer",
+    "quick-action",
+    "tray",
+    "configuration",
+    "commands"
+  ],
+  "permissions": ["extension:ui", "session:read", "settings:read", "settings:write"],
+  "main": "src/index.tsx",
+  "styles": "styles.css",
+  "extensions": [
+    {
+      "point": "chat.input.actions",
+      "entry": "src/index.tsx",
+      "export": "ReferenceComposerAction",
+      "priority": 100,
+      "minWidth": 32,
+      "maxWidth": 80,
+      "labelKey": "surfaces.composerAction"
+    },
+    {
+      "point": "chat.input.menu",
+      "entry": "src/index.tsx",
+      "export": "ReferenceComposerMenu",
+      "priority": 100,
+      "labelKey": "surfaces.composerMenu"
+    }
+  ],
+  "contextPanels": [
+    {
+      "id": "reference-panel",
+      "label": "Reference panel",
+      "labelKey": "surfaces.contextPanel",
+      "entry": "src/index.tsx",
+      "export": "ReferenceContextPanel",
+      "resourceKinds": ["session"],
+      "activity": "inspect",
+      "icon": "PanelRight",
+      "order": 100
+    },
+    {
+      "id": "reference-webview-panel",
+      "label": "Reference webview panel",
+      "labelKey": "surfaces.contextWebview",
+      "webview": "context-webview",
+      "resourceKinds": ["session"],
+      "activity": "inspect",
+      "icon": "PanelsTopLeft",
+      "order": 101
+    }
+  ],
+  "viewsContainers": [
+    {
+      "id": "reference",
+      "title": "Reference surfaces",
+      "titleKey": "surfaces.viewContainer",
+      "icon": "LayoutPanelLeft",
+      "location": "rail",
+      "order": 100
+    }
+  ],
+  "views": [
+    {
+      "id": "reference-tree",
+      "containerId": "reference",
+      "title": "Reference tree",
+      "titleKey": "surfaces.treeView",
+      "type": "tree",
+      "entry": "src/index.tsx",
+      "export": "referenceTreeProvider"
+    },
+    {
+      "id": "reference-custom",
+      "containerId": "reference",
+      "title": "Reference custom view",
+      "titleKey": "surfaces.customView",
+      "type": "react",
+      "entry": "src/index.tsx",
+      "export": "ReferenceCustomView"
+    }
+  ],
+  "webviews": [
+    {
+      "id": "reference-webview",
+      "containerId": "reference",
+      "title": "Reference webview",
+      "titleKey": "surfaces.webview",
+      "html": "<main class=\"ref-badge\" data-reference-surface=\"webview\">Reference webview</main>"
+    },
+    {
+      "id": "context-webview",
+      "title": "Reference context webview",
+      "titleKey": "surfaces.contextWebview",
+      "html": "<main class=\"ref-badge\" data-reference-surface=\"context-webview\">Reference context webview</main>"
+    }
+  ],
+  "modalMounts": [
+    {
+      "id": "reference-modal",
+      "label": "Reference modal",
+      "labelKey": "surfaces.modal",
+      "entry": "src/index.tsx",
+      "export": "ReferenceModal"
+    }
+  ],
+  "messageRenderers": [
+    {
+      "id": "reference-message",
+      "partType": "ui-surface-reference",
+      "label": "Reference message renderer",
+      "entry": "src/index.tsx",
+      "export": "ReferenceMessageRenderer"
+    }
+  ],
+  "toolRenderers": [
+    {
+      "id": "reference-tool",
+      "toolName": "ui_surface_reference",
+      "label": "Reference tool renderer",
+      "entry": "src/index.tsx",
+      "export": "ReferenceToolRenderer"
+    }
+  ],
+  "quickActions": [
+    {
+      "id": "reference-action",
+      "title": "Reference action",
+      "labelKey": "surfaces.quickAction",
+      "icon": "Sparkles",
+      "command": "ui-surface-reference.reference.open",
+      "surfaces": ["composer", "palette", "tray"]
+    }
+  ],
+  "trayItems": [
+    {
+      "id": "reference-tray",
+      "label": "Reference tray item",
+      "labelKey": "surfaces.tray",
+      "icon": "PanelTop",
+      "command": "ui-surface-reference.reference.open"
+    }
+  ],
+  "commands": [
+    {
+      "id": "reference.open",
+      "name": "Open UI surface reference",
+      "icon": "PanelsTopLeft"
+    }
+  ],
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "crashSurface": {
+        "type": "string",
+        "default": ""
+      }
+    }
+  },
+  "configComponent": {
+    "entry": "src/index.tsx",
+    "export": "ReferenceConfig"
+  },
+  "i18n": {
+    "locales": {
+      "en": {
+        "surfaces.composerAction": "Composer action",
+        "surfaces.composerMenu": "Composer menu",
+        "surfaces.contextPanel": "Context panel",
+        "surfaces.contextWebview": "Context webview",
+        "surfaces.viewContainer": "Reference surfaces",
+        "surfaces.treeView": "Tree view",
+        "surfaces.customView": "Custom view",
+        "surfaces.webview": "Webview",
+        "surfaces.messageRenderer": "Message renderer",
+        "surfaces.toolRenderer": "Tool renderer",
+        "surfaces.modal": "Modal",
+        "surfaces.quickAction": "Quick action",
+        "surfaces.tray": "Tray item",
+        "surfaces.config": "Configuration"
+      },
+      "zh-CN": {
+        "surfaces.composerAction": "输入操作",
+        "surfaces.composerMenu": "输入菜单",
+        "surfaces.contextPanel": "上下文面板",
+        "surfaces.contextWebview": "上下文网页视图",
+        "surfaces.viewContainer": "参考界面",
+        "surfaces.treeView": "树视图",
+        "surfaces.customView": "自定义视图",
+        "surfaces.webview": "网页视图",
+        "surfaces.messageRenderer": "消息渲染器",
+        "surfaces.toolRenderer": "工具渲染器",
+        "surfaces.modal": "模态框",
+        "surfaces.quickAction": "快捷操作",
+        "surfaces.tray": "托盘项",
+        "surfaces.config": "配置"
+      }
+    }
+  },
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "supported",
+      "entrypoint": "src/index.tsx"
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.tsx"
+    },
+    "mobile": {
+      "availability": "blocked",
+      "reason": "Exercises rail view containers, tray items and modal mounts — surfaces the Capacitor shell does not render."
+    }
+  }
+}

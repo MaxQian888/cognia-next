@@ -4,10 +4,15 @@
 import { render, screen, fireEvent, act } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import type { Team } from "@/lib/claude/types"
+import type { Team } from "@cognia/agent-config-types"
 import type { SelectedGuild } from "@/stores/ui"
 import { useSettingsStore } from "@/stores/settings/settings-store"
-import { DEFAULT_SIDEBAR_LAYOUT } from "@/types/shell/sidebar"
+import {
+  DEFAULT_SIDEBAR_LAYOUT,
+  DEFAULT_SIDEBAR_SIDE,
+  SIDEBAR_NAV_META,
+} from "@/types/shell/sidebar"
+import { CHROME_BUDGET, countControls } from "@/lib/ui/chrome-budget"
 
 function withTooltipProvider(node: React.ReactNode) {
   return <TooltipProvider>{node}</TooltipProvider>
@@ -27,16 +32,8 @@ jest.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
 }))
 
-jest.mock("@/lib/logging", () => ({
-  loggers: {
-    ui: {
-      info: (...args: unknown[]) => logInfo(...args),
-      warn: jest.fn(),
-      error: jest.fn(),
-    },
-  },
-  // Pulled in transitively by the plugin extension slot → extension-api → core/logger.
-  createLogger: () => ({
+jest.mock("@cognia/logging", () => {
+  const stub = {
     trace: jest.fn(),
     debug: jest.fn(),
     info: jest.fn(),
@@ -49,7 +46,29 @@ jest.mock("@/lib/logging", () => ({
     withContext: function () {
       return this
     },
-  }),
+  }
+  return {
+    // A Proxy rather than a literal: the rail's customize dialog reaches
+    // `use-bar-layout` → `stores/ui/ui-store` → `lib/plugin`, which transitively
+    // touches namespaces beyond `ui` (agent, connectors, …). Enumerating them
+    // here would just be a list to keep re-growing.
+    loggers: new Proxy(
+      { ui: { ...stub, info: (...args: unknown[]) => logInfo(...args) } },
+      {
+        get: (target: Record<string, unknown>, prop: string) => target[prop] ?? stub,
+      }
+    ),
+    // Pulled in transitively by the plugin extension slot → extension-api → core/logger.
+    createLogger: () => stub,
+  }
+})
+
+jest.mock("@/components/plugins/plugin-extension-slot", () => ({
+  PluginExtensionSlot: () => null,
+}))
+
+jest.mock("./workspace-switcher", () => ({
+  WorkspaceSwitcher: () => <div data-testid="workspace-switcher" />,
 }))
 
 const teamsRef: { current: Team[] } = { current: [] }
@@ -109,30 +128,43 @@ beforeEach(() => {
 })
 
 test("renders the DM, Canvas, and Settings rail buttons", () => {
-  render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+  const { container } = render(
+    withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />)
+  )
   expect(screen.getByLabelText("directMessages")).toBeInTheDocument()
   expect(screen.getByLabelText("canvas")).toBeInTheDocument()
   expect(screen.getByLabelText("openSettings")).toBeInTheDocument()
+  expect(container.querySelector('[data-slot="scroll-area"]')).toHaveClass(
+    "[&_[data-slot=scroll-area-scrollbar]]:hidden"
+  )
+})
+
+test("does not render the account switcher in the rail", () => {
+  render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+  expect(screen.queryByTestId("account-switcher")).not.toBeInTheDocument()
 })
 
 test("renders a pinned rail button for every default-pinned feature", () => {
   render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
-  for (const key of [
-    "workflows",
-    "inbox",
-    "twin",
-    "discover",
-    "skills",
-    "plugins",
-    "agentTeams",
-    "scheduler",
-    "goals",
-  ]) {
+  // Three pins, not eleven: the rail keeps the destinations work arrives in.
+  for (const key of ["inbox", "workflows", "agentTeams"]) {
     expect(screen.getByLabelText(key)).toBeInTheDocument()
   }
-  // Auxiliary items are not pinned by default — they live behind "More".
-  expect(screen.queryByLabelText("logs")).not.toBeInTheDocument()
+  // Configure-once features and the auxiliary group both live behind "More".
+  for (const key of ["twin", "discover", "skills", "plugins", "scheduler", "goals", "logs"]) {
+    expect(screen.queryByLabelText(key)).not.toBeInTheDocument()
+  }
   expect(screen.getByTestId("guild-more")).toBeInTheDocument()
+})
+
+test("the More popover still reaches an unpinned feature", async () => {
+  // Unpinning must not equal hiding — every demoted feature is one click away.
+  const user = userEvent.setup()
+  render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+  await user.click(screen.getByTestId("guild-more"))
+  expect(screen.getByTestId("guild-more-item-skills")).toBeInTheDocument()
+  await user.click(screen.getByTestId("guild-more-item-skills"))
+  expect(routerPush).toHaveBeenCalledWith("/skills")
 })
 
 test("the More popover lists the overflow (auxiliary) items + Customize", async () => {
@@ -153,13 +185,13 @@ test("clicking an overflow item navigates to its route", async () => {
   expect(routerPush).toHaveBeenCalledWith("/logs")
 })
 
-test("the More button is hidden when nothing is in overflow", () => {
+test("the More button is hidden when every catalog item is pinned", () => {
   act(() => {
     useSettingsStore.setState({
       settings: {
         sidebarLayout: {
-          pinned: [...DEFAULT_SIDEBAR_LAYOUT.pinned, "observability", "logs", "me"],
-          hidden: ["source-control", "performance", "eval", "memory"],
+          pinned: SIDEBAR_NAV_META.map((m) => m.id),
+          hidden: [],
         },
       } as never,
     })
@@ -173,7 +205,7 @@ test("opening Customize from the More popover mounts the customizer dialog", asy
   render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
   await user.click(screen.getByTestId("guild-more"))
   await user.click(screen.getByTestId("guild-more-customize"))
-  expect(screen.getByTestId("sidebar-customize-dialog")).toBeInTheDocument()
+  expect(screen.getByTestId("shell-layout-dialog")).toBeInTheDocument()
   expect(screen.getByTestId("sidebar-customizer")).toBeInTheDocument()
 })
 
@@ -200,13 +232,23 @@ test("right-click context menu can open the full customizer", () => {
   render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
   fireEvent.contextMenu(screen.getByLabelText("workflows"))
   fireEvent.click(screen.getByText("customize.title"))
-  expect(screen.getByTestId("sidebar-customize-dialog")).toBeInTheDocument()
+  expect(screen.getByTestId("shell-layout-dialog")).toBeInTheDocument()
 })
 
 test("the More button reflects the active state when on an overflow route", () => {
   pathname = "/logs"
   render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
-  expect(screen.getByTestId("guild-more")).toHaveClass("bg-primary/10")
+  // The tint is a shared-layout indicator layer now, not a class on the button
+  // — that is what lets it slide between rail buttons instead of blinking.
+  const indicator = screen.getByTestId("guild-more").querySelector("span[aria-hidden]")
+  expect(indicator?.className).toContain("bg-primary/10")
+})
+
+test("only the active rail button carries the selection indicator", () => {
+  pathname = "/workflows"
+  render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+  expect(screen.getByLabelText("workflows").querySelector("span[aria-hidden]")).not.toBeNull()
+  expect(screen.getByLabelText("inbox").querySelector("span[aria-hidden]")).toBeNull()
 })
 
 test("a selected team button shows the active boxShadow when on the home route", () => {
@@ -336,4 +378,139 @@ test("clicking Create team and Settings invoke the props and log", async () => {
   await user.click(screen.getByLabelText("openSettings"))
   expect(onOpenSettings).toHaveBeenCalled()
   expect(logInfo).toHaveBeenCalledWith("guild open settings")
+})
+
+test("stays within the guild-rail chrome control budget", () => {
+  // Default state: no teams, no plugin view containers — the floor every user
+  // sees on first launch. Ratchet, not a target (lib/ui/chrome-budget.ts).
+  const { container } = render(
+    withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />)
+  )
+  expect(countControls(container.querySelector("aside"))).toBeLessThanOrEqual(
+    CHROME_BUDGET.guildRail
+  )
+})
+
+// ── variant ────────────────────────────────────────────────────────────────
+// The rail is mounted in two places with opposite width constraints. Only the
+// desktop one may carry the `md:` breakpoint gate: `DesktopAppShell` bails out
+// of the mobile shell on the Capacitor *runtime*, so a narrow desktop window
+// still renders the rail and needs it to collapse. The mobile nav Sheet is the
+// opposite case — a phone viewport is never `md`, so the gate blanked the rail.
+
+test("the default rail variant keeps the md breakpoint gate", () => {
+  const { container } = render(
+    withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />)
+  )
+  const aside = container.querySelector("aside")!
+  expect(aside).toHaveAttribute("data-variant", "rail")
+  expect(aside.className).toContain("hidden")
+  expect(aside.className).toContain("md:flex")
+})
+
+test("the sheet variant renders unconditionally on a phone viewport", () => {
+  const { container } = render(
+    withTooltipProvider(
+      <GuildRail variant="sheet" onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />
+    )
+  )
+  const aside = container.querySelector("aside")!
+  expect(aside).toHaveAttribute("data-variant", "sheet")
+  // `hidden` would be `display:none` at every width a phone can be.
+  expect(aside.className).not.toContain("hidden")
+  expect(aside.className).toContain("flex")
+})
+
+test("the sheet variant still reaches every navigation destination", async () => {
+  // The regression this guards: mounted-but-invisible. Assert the actual
+  // destinations, not just the container.
+  const user = userEvent.setup()
+  const onOpenSettings = jest.fn()
+  render(
+    withTooltipProvider(
+      <GuildRail variant="sheet" onCreateTeam={jest.fn()} onOpenSettings={onOpenSettings} />
+    )
+  )
+  expect(screen.getByTestId("workspace-switcher")).toBeInTheDocument()
+  expect(screen.getByLabelText("directMessages")).toBeInTheDocument()
+  expect(screen.getByLabelText("canvas")).toBeInTheDocument()
+  for (const key of ["inbox", "workflows", "agentTeams"]) {
+    expect(screen.getByLabelText(key)).toBeInTheDocument()
+  }
+  await user.click(screen.getByTestId("guild-more"))
+  expect(screen.getByTestId("guild-more-item-skills")).toBeInTheDocument()
+
+  await user.click(screen.getByLabelText("openSettings"))
+  expect(onOpenSettings).toHaveBeenCalled()
+})
+
+describe("which edge the rail occupies", () => {
+  const setSide = (side: "left" | "right" | undefined) =>
+    act(() => {
+      useSettingsStore.setState({
+        settings: { sidebarLayout: { ...DEFAULT_SIDEBAR_LAYOUT }, sidebarSide: side } as never,
+        save: saveMock as never,
+      })
+    })
+
+  test("defaults to the shipped edge and marks it on the container", () => {
+    const { container } = render(
+      withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />)
+    )
+    expect(container.querySelector("aside")).toHaveAttribute("data-side", DEFAULT_SIDEBAR_SIDE)
+  })
+
+  test("borders against the workbench on the right, but not on the left", () => {
+    setSide("right")
+    const { container, rerender } = render(
+      withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />)
+    )
+    // Both this rail and ContextWorkbench declare data-bg-target="sidebar", so
+    // with a wallpaper on, tone alone leaves no seam between them.
+    expect(container.querySelector("aside")!.className).toContain("border-l")
+
+    setSide("left")
+    rerender(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+    // Nothing to its left but the window edge — a border would draw the seam twice.
+    expect(container.querySelector("aside")!.className).not.toContain("border-l")
+  })
+
+  // Only the rail-on-the-right direction is asserted through Radix. jsdom has
+  // no layout, so every rect Floating UI measures is zero and its collision
+  // logic collapses a requested `side="right"` back to "left" — a probe
+  // confirms `left` survives and `right` does not. Asserting the mirror case
+  // here would be asserting jsdom, not the rail. The `left` edge is covered by
+  // the `data-side` assertions above, which are our own markup.
+  test("on the right edge the More popover opens inward", async () => {
+    setSide("right")
+    const user = userEvent.setup()
+    render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+    await user.click(screen.getByTestId("guild-more"))
+    expect(screen.getByTestId("guild-more-item-skills").closest("[data-side]")).toHaveAttribute(
+      "data-side",
+      "left"
+    )
+  })
+
+  test("on the right edge tooltips open inward", async () => {
+    setSide("right")
+    const user = userEvent.setup()
+    render(withTooltipProvider(<GuildRail onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />))
+    await user.hover(screen.getByLabelText("directMessages"))
+    const tip = await screen.findByRole("tooltip")
+    expect(tip.closest("[data-side]")).toHaveAttribute("data-side", "left")
+  })
+
+  test("the sheet variant ignores the desktop edge", () => {
+    // In the mobile drawer the rail is the leading column with the channel list
+    // beside it — not a window edge, so the desktop preference must not reach it.
+    setSide("right")
+    const { container } = render(
+      withTooltipProvider(
+        <GuildRail variant="sheet" onCreateTeam={jest.fn()} onOpenSettings={jest.fn()} />
+      )
+    )
+    expect(container.querySelector("aside")).toHaveAttribute("data-side", "left")
+    expect(container.querySelector("aside")!.className).not.toContain("border-l")
+  })
 })

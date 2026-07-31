@@ -6,13 +6,15 @@
  *   2. Receive HELLO (op 10) → start heartbeat loop
  *   3. Send IDENTIFY (op 2)
  *   4. Receive READY → cache selfId
- *   5. Yield MESSAGE_CREATE / MESSAGE_UPDATE dispatches
+ *   5. Yield message / reaction / interaction dispatches (see
+ *      FORWARDED_DISPATCH_TYPES) — everything parse.ts consumes
  *   6. Resume on disconnect where possible
  *
  * Inbound messages arrive via Tauri events at connectors://ws/<id>/message.
  */
 
 import { listen } from "@tauri-apps/api/event"
+import { reconnectBackoffMs } from "../_shared/reconnect-backoff"
 import {
   connectorsWsOpen,
   connectorsWsSend,
@@ -27,6 +29,7 @@ import type { DiscordDispatch } from "./parse"
 const OP_DISPATCH = 0
 const OP_HEARTBEAT = 1
 const OP_IDENTIFY = 2
+const OP_PRESENCE_UPDATE = 3
 const OP_RESUME = 6
 const OP_RECONNECT = 7
 const OP_INVALID_SESSION = 9
@@ -36,10 +39,59 @@ const OP_HEARTBEAT_ACK = 11
 const GATEWAY_URL = "wss://gateway.discord.gg/?v=10&encoding=json"
 
 /**
- * Default intents: GUILDS(1) | GUILD_MESSAGES(512) |
- * MESSAGE_CONTENT(32768) | DIRECT_MESSAGES(4096) = 33281
+ * Dispatch types forwarded from the gateway to the adapter — every event
+ * `parse.ts` / `parseDiscordInteraction` project. Anything else (READY,
+ * TYPING_START, GUILD_CREATE, …) is consumed internally and dropped so the
+ * adapter only sees actionable inbound events.
  */
-export const DEFAULT_GATEWAY_INTENTS = 33281
+const FORWARDED_DISPATCH_TYPES = new Set<string>([
+  "MESSAGE_CREATE",
+  "MESSAGE_UPDATE",
+  "MESSAGE_DELETE",
+  "MESSAGE_REACTION_ADD",
+  "MESSAGE_REACTION_REMOVE",
+  "INTERACTION_CREATE",
+])
+
+/**
+ * Default intents — every non-privileged event `parse.ts` projects plus the
+ * privileged MESSAGE_CONTENT:
+ *   GUILDS(1) | GUILD_MESSAGES(512) | GUILD_MESSAGE_REACTIONS(1024) |
+ *   DIRECT_MESSAGES(4096) | DIRECT_MESSAGE_REACTIONS(8192) |
+ *   MESSAGE_CONTENT(32768) = 46593
+ *
+ * MESSAGE_CONTENT is privileged and must ALSO be enabled in the Developer
+ * Portal (Bot → Privileged Gateway Intents); otherwise Discord closes the
+ * socket with code 4014. (The previous default 33281 silently omitted
+ * DIRECT_MESSAGES, so DMs never arrived.)
+ */
+export const DEFAULT_GATEWAY_INTENTS = 46593
+
+/**
+ * Gateway close codes that must NOT be retried: reconnecting with the same
+ * credentials/config would fail identically (auth) or is a config error
+ * (sharding / version / intents). See Discord Gateway close event codes.
+ */
+const FATAL_CLOSE_REASONS: Record<number, string> = {
+  4004: "authentication failed",
+  4010: "invalid shard",
+  4011: "sharding required",
+  4012: "invalid API version",
+  4013: "invalid intents",
+  4014: "disallowed intents",
+}
+
+/**
+ * Connection-lifecycle events surfaced to the adapter so `health()` can
+ * report "starting → running → degraded/down" truthfully.
+ */
+export type GatewayStatusEvent =
+  | { kind: "ready" }
+  | { kind: "resumed" }
+  /** A connect attempt failed (or a session dropped); `attempts` is the consecutive-failure count. */
+  | { kind: "connect_failed"; attempts: number }
+  /** Fatal close code received — the client stops reconnecting. */
+  | { kind: "fatal_close"; code: number; reason: string }
 
 export interface GatewayClientOptions {
   /** Bot token (without "Bot " prefix). */
@@ -47,6 +99,8 @@ export interface GatewayClientOptions {
   /** Intent bitmask. Defaults to DEFAULT_GATEWAY_INTENTS. */
   intents?: number
   signal: AbortSignal
+  /** Optional connection-lifecycle hook (READY/RESUMED/failures/fatal close). */
+  onStatus?: (status: GatewayStatusEvent) => void
   /** Override the Gateway URL (useful in tests). */
   _gatewayUrl?: string
   /** Override backoff base ms for tests. Default: 1000. */
@@ -58,6 +112,14 @@ export interface GatewayClient {
   readonly selfId: string
   /** The async generator of dispatched events. */
   readonly dispatches: AsyncGenerator<DiscordDispatch>
+  /**
+   * Send a Presence Update (op 3) with a Custom Status activity carrying
+   * `state`. Returns false when no gateway connection is currently live
+   * (presence has no REST fallback — it is gateway-only). Best-effort:
+   * Discord allows ~5 presence updates/min per connection, so callers
+   * should refresh at minute-cadence or slower.
+   */
+  updatePresence(state: string): Promise<boolean>
 }
 
 function delay(ms: number, signal: AbortSignal): Promise<void> {
@@ -92,6 +154,8 @@ export function startGatewayClient(opts: GatewayClientOptions): GatewayClient {
 
   let selfId = ""
   let attempts = 0
+  /** Live WS handle for out-of-band sends (presence). Null between connections. */
+  let activeHandleId: string | null = null
 
   async function* generateDispatches(): AsyncGenerator<DiscordDispatch> {
     while (!opts.signal.aborted) {
@@ -106,7 +170,8 @@ export function startGatewayClient(opts: GatewayClientOptions): GatewayClient {
       } catch {
         if (opts.signal.aborted) return
         attempts += 1
-        const backoff = backoffBaseMs * Math.min(Math.pow(2, attempts), 32)
+        opts.onStatus?.({ kind: "connect_failed", attempts })
+        const backoff = reconnectBackoffMs(backoffBaseMs, attempts)
         try {
           await delay(backoff, opts.signal)
         } catch {
@@ -116,11 +181,14 @@ export function startGatewayClient(opts: GatewayClientOptions): GatewayClient {
       }
 
       if (opts.signal.aborted) return
+      activeHandleId = handleId
 
       // Queue + wake pattern for inbound events
       const queue: string[] = []
       let wakeResolve: (() => void) | null = null
       let wsEnded = false
+      /** Close code from the /close payload (the Rust ws proxy emits `{code, reason}`; legacy proxies emit nothing). */
+      let closeCode: number | null = null
 
       const unlisten = await listen<string>(`connectors://ws/${handleId}/message`, (event) => {
         queue.push(event.payload)
@@ -128,7 +196,13 @@ export function startGatewayClient(opts: GatewayClientOptions): GatewayClient {
         wakeResolve = null
       })
 
-      const unlistenClose = await listen<void>(`connectors://ws/${handleId}/close`, () => {
+      // The close payload is `{code, reason}` on upgraded proxies and
+      // `undefined` on legacy ones — read it defensively.
+      const unlistenClose = await listen<unknown>(`connectors://ws/${handleId}/close`, (event) => {
+        const payload = event.payload as { code?: unknown } | undefined | null
+        if (payload && typeof payload === "object" && typeof payload.code === "number") {
+          closeCode = payload.code
+        }
         wsEnded = true
         wakeResolve?.()
         wakeResolve = null
@@ -144,6 +218,8 @@ export function startGatewayClient(opts: GatewayClientOptions): GatewayClient {
 
       let heartbeatTimer: ReturnType<typeof setTimeout> | null = null
       let shouldResume = false
+      /** True while a heartbeat is in flight without its ACK (op 11). */
+      let awaitingAck = false
 
       try {
         outer: while (!wsEnded && !opts.signal.aborted) {
@@ -170,9 +246,21 @@ export function startGatewayClient(opts: GatewayClientOptions): GatewayClient {
               case OP_HELLO: {
                 const { heartbeat_interval } = msg.d as { heartbeat_interval: number }
 
-                // Heartbeat loop
+                // Heartbeat loop with zombie detection: if the previous beat
+                // was never ACKed (op 11), the TCP link is half-dead — close
+                // the handle (non-1000) so the reconnect path resumes the
+                // session instead of idling forever while health()=running.
                 const sendHeartbeat = () => {
                   if (opts.signal.aborted || wsEnded) return
+                  if (awaitingAck) {
+                    shouldResume = true
+                    wsEnded = true
+                    wakeResolve?.()
+                    wakeResolve = null
+                    void connectorsWsClose(handleId).catch(() => {})
+                    return
+                  }
+                  awaitingAck = true
                   void connectorsWsSend(
                     handleId,
                     JSON.stringify({ op: OP_HEARTBEAT, d: session.sequence })
@@ -221,7 +309,29 @@ export function startGatewayClient(opts: GatewayClientOptions): GatewayClient {
                   session.sessionId = ready.session_id ?? null
                   session.resumeGatewayUrl = ready.resume_gateway_url ?? null
                   attempts = 0
-                } else if (msg.t === "MESSAGE_CREATE" || msg.t === "MESSAGE_UPDATE") {
+                  opts.onStatus?.({ kind: "ready" })
+                } else if (msg.t === "RESUMED") {
+                  // A successful RESUME is a healthy connection too — reset
+                  // the consecutive-failure counter, same as READY.
+                  attempts = 0
+                  opts.onStatus?.({ kind: "resumed" })
+                } else if (msg.t === "MESSAGE_DELETE_BULK") {
+                  // Fan out to individual MESSAGE_DELETE dispatches so the
+                  // adapter reuses the existing delete projection unchanged.
+                  const bulk = msg.d as {
+                    ids?: string[]
+                    channel_id?: string
+                    guild_id?: string
+                  }
+                  for (const id of bulk.ids ?? []) {
+                    yield {
+                      t: "MESSAGE_DELETE",
+                      s: msg.s,
+                      op: OP_DISPATCH,
+                      d: { id, channel_id: bulk.channel_id, guild_id: bulk.guild_id },
+                    }
+                  }
+                } else if (msg.t && FORWARDED_DISPATCH_TYPES.has(msg.t)) {
                   yield {
                     t: msg.t,
                     s: msg.s,
@@ -252,12 +362,22 @@ export function startGatewayClient(opts: GatewayClientOptions): GatewayClient {
               }
 
               case OP_HEARTBEAT_ACK:
+                awaitingAck = false
+                break
+
               case OP_HEARTBEAT:
+                // Server-requested heartbeat — the docs require an immediate
+                // beat in response (outside the regular interval cadence).
+                void connectorsWsSend(
+                  handleId,
+                  JSON.stringify({ op: OP_HEARTBEAT, d: session.sequence })
+                ).catch(() => {})
                 break
             }
           }
         }
       } finally {
+        activeHandleId = null
         if (heartbeatTimer !== null) clearTimeout(heartbeatTimer)
         opts.signal.removeEventListener("abort", abortHandler)
         unlisten()
@@ -269,10 +389,23 @@ export function startGatewayClient(opts: GatewayClientOptions): GatewayClient {
 
       if (opts.signal.aborted) return
 
+      // Fatal close codes (auth failure / bad shard config / invalid or
+      // disallowed intents) — reconnecting can only fail the same way, so
+      // stop entirely and let the adapter surface the reason via health().
+      if (closeCode !== null && FATAL_CLOSE_REASONS[closeCode] !== undefined) {
+        opts.onStatus?.({
+          kind: "fatal_close",
+          code: closeCode,
+          reason: FATAL_CLOSE_REASONS[closeCode],
+        })
+        return
+      }
+
       // Reconnect delay
       if (!shouldResume) {
         attempts += 1
-        const backoff = backoffBaseMs * Math.min(Math.pow(2, attempts), 32)
+        opts.onStatus?.({ kind: "connect_failed", attempts })
+        const backoff = reconnectBackoffMs(backoffBaseMs, attempts)
         try {
           await delay(backoff, opts.signal)
         } catch {
@@ -290,10 +423,34 @@ export function startGatewayClient(opts: GatewayClientOptions): GatewayClient {
 
   const dispatches = generateDispatches()
 
+  async function updatePresence(state: string): Promise<boolean> {
+    const handle = activeHandleId
+    if (!handle) return false
+    try {
+      await connectorsWsSend(
+        handle,
+        JSON.stringify({
+          op: OP_PRESENCE_UPDATE,
+          d: {
+            since: null,
+            // Activity type 4 = Custom Status; bots render the `state` text.
+            activities: [{ name: "Custom Status", type: 4, state }],
+            status: "online",
+            afk: false,
+          },
+        })
+      )
+      return true
+    } catch {
+      return false
+    }
+  }
+
   return {
     get selfId() {
       return selfId
     },
     dispatches,
+    updatePresence,
   }
 }

@@ -1,0 +1,28 @@
+{
+  "group": {
+    "canvas": "画布",
+    "editor": "编辑器",
+    "inspector": "检查器",
+    "run": "运行"
+  },
+  "items": {
+    "closeInspector": "关闭检查器",
+    "commands": "打开命令面板",
+    "copy": "复制选区",
+    "cut": "剪切选区",
+    "deleteNode": "删除选中节点",
+    "duplicate": "复制副本",
+    "group": "分组选区",
+    "panCanvas": "拖动画布",
+    "paste": "粘贴",
+    "redo": "重做",
+    "run": "运行工作流",
+    "save": "保存",
+    "selectAll": "全选节点",
+    "shortcuts": "显示键盘快捷键",
+    "togglePalette": "切换节点面板",
+    "toggleSidebar": "切换右侧栏",
+    "undo": "撤销"
+  },
+  "title": "键盘快捷键"
+}

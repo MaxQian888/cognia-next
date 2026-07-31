@@ -157,3 +157,33 @@ export function __resetSnippetsForTesting(): void {
   snippets.clear()
   listeners.clear()
 }
+
+// ── W5.1: enable-time registration from manifest.vscodeSnippets ──────────────
+import { isUnsafeRelativePath, readContainedPluginFile } from "./plugin-file-path"
+
+export interface SnippetManifestEntry {
+  language: string
+  path: string
+}
+
+export async function registerSnippetsForPlugin(
+  pluginId: string,
+  entries: readonly SnippetManifestEntry[],
+  baseDir: string
+): Promise<{ registered: number; errors: string[] }> {
+  const errors: string[] = []
+  let registered = 0
+  for (const entry of entries) {
+    try {
+      if (!entry.language) throw new Error("missing snippet language")
+      if (isUnsafeRelativePath(entry.path)) {
+        throw new Error(`unsafe snippet path "${entry.path}"`)
+      }
+      const source = await readContainedPluginFile(pluginId, baseDir, entry.path)
+      registered += registerSnippetFile(pluginId, entry.language, source).length
+    } catch (err) {
+      errors.push(`${entry.language || entry.path}: ${(err as Error).message}`)
+    }
+  }
+  return { registered, errors }
+}

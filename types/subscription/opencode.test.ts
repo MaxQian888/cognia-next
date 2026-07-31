@@ -5,8 +5,14 @@ import {
 } from "./opencode"
 
 describe("OPENCODE_WHITELIST", () => {
-  it("contains exactly the three known sub-providers", () => {
-    expect([...OPENCODE_WHITELIST]).toEqual(["anthropic", "openai", "opencode-zen"])
+  it("contains exactly the five known sub-providers", () => {
+    expect([...OPENCODE_WHITELIST]).toEqual([
+      "anthropic",
+      "openai",
+      "opencode",
+      "opencode-go",
+      "opencode-zen",
+    ])
   })
 })
 
@@ -14,12 +20,14 @@ describe("isWhitelistedOpencodeSubProvider", () => {
   it("returns true for whitelist members", () => {
     expect(isWhitelistedOpencodeSubProvider("anthropic")).toBe(true)
     expect(isWhitelistedOpencodeSubProvider("openai")).toBe(true)
+    expect(isWhitelistedOpencodeSubProvider("opencode")).toBe(true)
+    expect(isWhitelistedOpencodeSubProvider("opencode-go")).toBe(true)
     expect(isWhitelistedOpencodeSubProvider("opencode-zen")).toBe(true)
   })
 
   it("returns false for anything else", () => {
     expect(isWhitelistedOpencodeSubProvider("google")).toBe(false)
-    expect(isWhitelistedOpencodeSubProvider("opencode")).toBe(false)
+    expect(isWhitelistedOpencodeSubProvider("github-copilot")).toBe(false)
     expect(isWhitelistedOpencodeSubProvider("")).toBe(false)
   })
 })
@@ -37,5 +45,14 @@ describe("toOpencodeZenProviderCredential", () => {
       baseUrl: "https://zen.opencode.ai",
       storedAtMs: 1_700_000_000_000,
     })
+  })
+
+  it("carries the go plan tag through", () => {
+    const tagged = toOpencodeZenProviderCredential({
+      accessToken: "sk-go",
+      plan: "go",
+      storedAtMs: 1_700_000_000_000,
+    })
+    expect(tagged).toMatchObject({ provider: "opencode-zen", plan: "go" })
   })
 })

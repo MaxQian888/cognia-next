@@ -28,7 +28,7 @@
  * fires from the chat session close path.
  */
 
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 
 export type ActiveComputerUseSettings = NonNullable<Character["computerUseSettings"]>
 

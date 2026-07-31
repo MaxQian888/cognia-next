@@ -1,0 +1,27 @@
+{
+  "bulkHeading": "Per-plugin review",
+  "col": {
+    "holders": "Holders",
+    "permission": "Permission",
+    "plugins": "Plugins"
+  },
+  "dangerousSection": "Sensitive permissions",
+  "emptyAll": "No plugins are installed yet.",
+  "groups": {
+    "clipboard": "Clipboard",
+    "dangerous": "Dangerous",
+    "database": "Database",
+    "filesystem": "Filesystem",
+    "media": "Media",
+    "network": "Network",
+    "session": "Session",
+    "settings": "Settings"
+  },
+  "hint": "Permissions a plugin declares in its manifest are auto-granted at install. Optional and runtime-requested permissions prompt the user. Dangerous permissions (shell:execute, process:spawn, python:execute, filesystem:write) are highlighted.",
+  "holders": "{count} holders",
+  "loading": "Loading plugin permissions…",
+  "noPermissions": "No installed plugin currently uses any permission.",
+  "normalSection": "Standard permissions",
+  "reviewAria": "Review permissions for {name}",
+  "title": "Permissions"
+}

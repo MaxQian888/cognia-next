@@ -7,14 +7,13 @@ import {
   initLogger,
   removeTransport,
   updateLoggerConfig,
-} from "./core"
+} from "@cognia/logging/core"
 import { DEFAULT_UNIFIED_CONFIG } from "@/types/logging"
 import type {
   LogLevel,
   UnifiedLoggerConfig,
   RemoteTransportDetailSettings,
   LangfuseTransportDetailSettings,
-  OpenTelemetryTransportDetailSettings,
   NativeTransportDetailSettings,
   AgentTraceTransportDetailSettings,
   AgentTraceOtlpSettings,
@@ -22,30 +21,40 @@ import type {
   LoggingRetentionSettings,
   LoggingBootstrapState,
 } from "@/types/logging"
-import { configureSampling } from "./sampling"
+import { configureSampling } from "@cognia/logging/sampling"
 import {
   AgentTraceTransport,
   createAgentTraceTransport,
+  createBreadcrumbTransport,
   createConsoleTransport,
   createIndexedDBTransport,
   createLangfuseTransport,
   createNativeTransport,
-  createOtelTransport,
   createOtlpHttpTransport,
   createRemoteTransport,
-  grafanaCloudHeaders,
   IndexedDBTransport,
   OtlpHttpTransport,
 } from "./transports"
 import { setPlatformLoggingConfig } from "@/lib/native/native-logging"
-import { setAgentTraceWriter } from "@/lib/agent-trace/emitter"
-import { spanToLogEntry } from "@/lib/agent-trace/span-to-log-entry"
+import { setAgentTraceWriter } from "@cognia/agent-trace/emitter"
+import { spanToLogEntry } from "@cognia/agent-trace/span-to-log-entry"
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
+import { isTauri } from "@/lib/platform/detect"
+import {
+  configureTauriSidecarTelemetry,
+  createTauriOtlpFetch,
+  postTauriTelemetryJson,
+} from "./transports/tauri-fetch-shim"
+import {
+  extractLegacyTelemetrySecrets,
+  getTelemetrySecretForWeb,
+  persistLegacyTelemetrySecrets,
+} from "./telemetry-secrets"
+import { configureBehaviorEventExporter } from "@/lib/telemetry/events/track-event"
 
 export type {
   RemoteTransportDetailSettings,
   LangfuseTransportDetailSettings,
-  OpenTelemetryTransportDetailSettings,
   NativeTransportDetailSettings,
   AgentTraceTransportDetailSettings,
   AgentTraceOtlpSettings,
@@ -73,7 +82,6 @@ const DEFAULT_TRANSPORT_SETTINGS: LoggingTransportSettings = {
   native: true,
   remote: true,
   langfuse: true,
-  opentelemetry: true,
   agentTrace: true,
   nativeConfig: {
     minLevel: "warn",
@@ -89,14 +97,9 @@ const DEFAULT_TRANSPORT_SETTINGS: LoggingTransportSettings = {
   },
   langfuseConfig: {
     publicKey: "",
-    secretKey: "",
+    secretKeyConfigured: false,
     host: "https://cloud.langfuse.com",
     minLevel: "warn",
-  },
-  opentelemetryConfig: {
-    endpoint: "",
-    serviceName: "cognia-ai",
-    addAsSpanEvents: true,
   },
   agentTraceOtlp: false,
   agentTraceConfig: {
@@ -110,7 +113,7 @@ const DEFAULT_TRANSPORT_SETTINGS: LoggingTransportSettings = {
     headers: {},
     serviceName: "cognia-ai",
     environment: "",
-    grafanaCloud: { instanceId: "", apiToken: "" },
+    grafanaCloud: { instanceId: "", apiTokenConfigured: false },
   },
 }
 
@@ -149,17 +152,28 @@ function readStorageJSON<T>(key: string): Partial<T> | null {
 }
 
 function readTransportSettings(): LoggingTransportSettings {
-  const raw = readStorageJSON<LoggingTransportSettings>(LOGGING_TRANSPORTS_STORAGE_KEY)
+  let raw = readStorageJSON<LoggingTransportSettings>(LOGGING_TRANSPORTS_STORAGE_KEY)
   if (!raw) {
     return {
       ...DEFAULT_TRANSPORT_SETTINGS,
       nativeConfig: { ...DEFAULT_TRANSPORT_SETTINGS.nativeConfig },
       remoteConfig: { ...DEFAULT_TRANSPORT_SETTINGS.remoteConfig },
       langfuseConfig: { ...DEFAULT_TRANSPORT_SETTINGS.langfuseConfig },
-      opentelemetryConfig: { ...DEFAULT_TRANSPORT_SETTINGS.opentelemetryConfig },
       agentTraceConfig: { ...DEFAULT_TRANSPORT_SETTINGS.agentTraceConfig },
       agentTraceOtlpConfig: { ...DEFAULT_TRANSPORT_SETTINGS.agentTraceOtlpConfig },
     }
+  }
+
+  const migration = extractLegacyTelemetrySecrets(raw)
+  if (Object.keys(migration.secrets).length > 0) {
+    raw = migration.settings as Partial<LoggingTransportSettings>
+    void persistLegacyTelemetrySecrets(migration.secrets)
+      .then(() => {
+        // Erase plaintext only after every keyring write succeeds. A failed
+        // migration must leave the source intact so the next boot can retry.
+        localStorage.setItem(LOGGING_TRANSPORTS_STORAGE_KEY, JSON.stringify(migration.settings))
+      })
+      .catch(() => {})
   }
 
   const remoteConfig: Partial<RemoteTransportDetailSettings> =
@@ -173,10 +187,6 @@ function readTransportSettings(): LoggingTransportSettings {
   const langfuseConfig: Partial<LangfuseTransportDetailSettings> =
     raw.langfuseConfig && typeof raw.langfuseConfig === "object"
       ? (raw.langfuseConfig as Partial<LangfuseTransportDetailSettings>)
-      : {}
-  const opentelemetryConfig: Partial<OpenTelemetryTransportDetailSettings> =
-    raw.opentelemetryConfig && typeof raw.opentelemetryConfig === "object"
-      ? (raw.opentelemetryConfig as Partial<OpenTelemetryTransportDetailSettings>)
       : {}
   const agentTraceConfig: Partial<AgentTraceTransportDetailSettings> =
     raw.agentTraceConfig && typeof raw.agentTraceConfig === "object"
@@ -195,10 +205,6 @@ function readTransportSettings(): LoggingTransportSettings {
     remote: typeof raw.remote === "boolean" ? raw.remote : DEFAULT_TRANSPORT_SETTINGS.remote,
     langfuse:
       typeof raw.langfuse === "boolean" ? raw.langfuse : DEFAULT_TRANSPORT_SETTINGS.langfuse,
-    opentelemetry:
-      typeof raw.opentelemetry === "boolean"
-        ? raw.opentelemetry
-        : DEFAULT_TRANSPORT_SETTINGS.opentelemetry,
     agentTrace:
       typeof raw.agentTrace === "boolean" ? raw.agentTrace : DEFAULT_TRANSPORT_SETTINGS.agentTrace,
     agentTraceOtlp:
@@ -259,10 +265,10 @@ function readTransportSettings(): LoggingTransportSettings {
         typeof langfuseConfig.publicKey === "string"
           ? langfuseConfig.publicKey
           : DEFAULT_TRANSPORT_SETTINGS.langfuseConfig.publicKey,
-      secretKey:
-        typeof langfuseConfig.secretKey === "string"
-          ? langfuseConfig.secretKey
-          : DEFAULT_TRANSPORT_SETTINGS.langfuseConfig.secretKey,
+      secretKeyConfigured:
+        typeof langfuseConfig.secretKeyConfigured === "boolean"
+          ? langfuseConfig.secretKeyConfigured
+          : false,
       host:
         typeof langfuseConfig.host === "string" && langfuseConfig.host.trim().length > 0
           ? langfuseConfig.host
@@ -272,22 +278,6 @@ function readTransportSettings(): LoggingTransportSettings {
         VALID_LOG_LEVELS.has(langfuseConfig.minLevel as LogLevel)
           ? (langfuseConfig.minLevel as LogLevel)
           : DEFAULT_TRANSPORT_SETTINGS.langfuseConfig.minLevel,
-    },
-    opentelemetryConfig: {
-      endpoint:
-        typeof opentelemetryConfig.endpoint === "string" &&
-        opentelemetryConfig.endpoint.trim().length > 0
-          ? opentelemetryConfig.endpoint
-          : DEFAULT_TRANSPORT_SETTINGS.opentelemetryConfig.endpoint,
-      serviceName:
-        typeof opentelemetryConfig.serviceName === "string" &&
-        opentelemetryConfig.serviceName.trim().length > 0
-          ? opentelemetryConfig.serviceName
-          : DEFAULT_TRANSPORT_SETTINGS.opentelemetryConfig.serviceName,
-      addAsSpanEvents:
-        typeof opentelemetryConfig.addAsSpanEvents === "boolean"
-          ? opentelemetryConfig.addAsSpanEvents
-          : DEFAULT_TRANSPORT_SETTINGS.opentelemetryConfig.addAsSpanEvents,
     },
     agentTraceConfig: {
       captureContent:
@@ -337,7 +327,7 @@ function sanitizeGrafanaCloud(value: unknown): AgentTraceOtlpSettings["grafanaCl
   const v = value as Record<string, unknown>
   return {
     instanceId: typeof v.instanceId === "string" ? v.instanceId : "",
-    apiToken: typeof v.apiToken === "string" ? v.apiToken : "",
+    apiTokenConfigured: typeof v.apiTokenConfigured === "boolean" ? v.apiTokenConfigured : false,
   }
 }
 
@@ -358,7 +348,14 @@ function sanitizeOtlpHeaders(raw: unknown): Record<string, string> {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {}
   const out: Record<string, string> = {}
   for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
-    if (typeof k === "string" && k.trim().length > 0 && typeof v === "string") {
+    const normalized = k.trim().toLowerCase()
+    if (
+      normalized.length > 0 &&
+      !["authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key"].includes(
+        normalized
+      ) &&
+      typeof v === "string"
+    ) {
       out[k] = v
     }
   }
@@ -425,6 +422,23 @@ function sanitizeStringArray(value: unknown, fallback: string[]): string[] {
   return sanitized.length > 0 ? sanitized : [...fallback]
 }
 
+function sanitizePerModuleLevels(value: unknown): Record<string, LogLevel> {
+  if (!value || typeof value !== "object") {
+    return {}
+  }
+  const sanitized: Record<string, LogLevel> = {}
+  for (const [prefix, level] of Object.entries(value as Record<string, unknown>)) {
+    if (
+      prefix.trim().length > 0 &&
+      typeof level === "string" &&
+      VALID_LOG_LEVELS.has(level as LogLevel)
+    ) {
+      sanitized[prefix] = level as LogLevel
+    }
+  }
+  return sanitized
+}
+
 function sanitizeConfig(raw: Partial<UnifiedLoggerConfig> | null): Partial<UnifiedLoggerConfig> {
   if (!raw) {
     return {}
@@ -442,6 +456,10 @@ function sanitizeConfig(raw: Partial<UnifiedLoggerConfig> | null): Partial<Unifi
 
   if (typeof raw.includeSource === "boolean") {
     sanitized.includeSource = raw.includeSource
+  }
+
+  if (raw.perModuleLevels !== undefined) {
+    sanitized.perModuleLevels = sanitizePerModuleLevels(raw.perModuleLevels)
   }
 
   sanitized.bufferSize = clampNumber(raw.bufferSize, 1, 1000, DEFAULT_UNIFIED_CONFIG.bufferSize)
@@ -510,6 +528,7 @@ function getPersistedConfig(config: UnifiedLoggerConfig): Partial<UnifiedLoggerC
     minLevel: config.minLevel,
     includeStackTrace: config.includeStackTrace,
     includeSource: config.includeSource,
+    perModuleLevels: { ...(config.perModuleLevels ?? {}) },
     bufferSize: config.bufferSize,
     flushInterval: config.flushInterval,
     remoteQueueMaxEntries: config.remoteQueueMaxEntries,
@@ -586,6 +605,16 @@ function applyTransportSettings(
     minLevel: transports.nativeConfig.minLevel,
   })
 
+  // Breadcrumb transport rides the native toggle: it only has anything to do
+  // on desktop (it forwards to the Rust crash-context ring), and it's the
+  // first real consumer of `pushCrashBreadcrumb`. No separate setting — when
+  // native logging is on we also want crash breadcrumbs.
+  if (transports.native) {
+    addTransport(createBreadcrumbTransport())
+  } else {
+    removeTransport("breadcrumb")
+  }
+
   if (transports.remote && config.remoteEndpoint) {
     addTransport(
       createRemoteTransport({
@@ -614,28 +643,70 @@ function applyTransportSettings(
   }
 
   if (transports.langfuse) {
+    const langfuseHost = (transports.langfuseConfig.host || "https://cloud.langfuse.com").replace(
+      /\/$/,
+      ""
+    )
     addTransport(
       createLangfuseTransport({
         publicKey: transports.langfuseConfig.publicKey || undefined,
-        secretKey: transports.langfuseConfig.secretKey || undefined,
+        resolveSecretKey: () => getTelemetrySecretForWeb("langfuseSecretKey"),
+        nativeExport: isTauri()
+          ? async (entries) => {
+              const timestamp = new Date().toISOString()
+              const batch = entries.flatMap((entry) => {
+                const traceId = entry.traceId || entry.sessionId || crypto.randomUUID()
+                const eventId = crypto.randomUUID()
+                return [
+                  {
+                    id: crypto.randomUUID(),
+                    timestamp,
+                    type: "trace-create",
+                    body: {
+                      id: traceId,
+                      timestamp,
+                      name: "cognia.logger",
+                      sessionId: entry.sessionId,
+                      metadata: { source: "logger" },
+                      tags: ["log"],
+                    },
+                  },
+                  {
+                    id: eventId,
+                    timestamp,
+                    type: "event-create",
+                    body: {
+                      id: eventId,
+                      traceId,
+                      timestamp,
+                      name: `log.${entry.level}.${entry.module}`,
+                      input: entry.message,
+                      metadata: entry.data,
+                      level:
+                        entry.level === "error" || entry.level === "fatal"
+                          ? "ERROR"
+                          : entry.level === "warn"
+                            ? "WARNING"
+                            : entry.level === "trace" || entry.level === "debug"
+                              ? "DEBUG"
+                              : "DEFAULT",
+                    },
+                  },
+                ]
+              })
+              await postTauriTelemetryJson(
+                `${langfuseHost}/api/public/ingestion`,
+                JSON.stringify({ batch }),
+                { kind: "langfuse", publicKey: transports.langfuseConfig.publicKey }
+              )
+            }
+          : undefined,
         host: transports.langfuseConfig.host || undefined,
         minLevel: transports.langfuseConfig.minLevel,
       })
     )
   } else {
     removeTransport("langfuse")
-  }
-
-  if (transports.opentelemetry) {
-    addTransport(
-      createOtelTransport({
-        endpoint: transports.opentelemetryConfig.endpoint,
-        serviceName: transports.opentelemetryConfig.serviceName,
-        addAsSpanEvents: transports.opentelemetryConfig.addAsSpanEvents,
-      })
-    )
-  } else {
-    removeTransport("opentelemetry")
   }
 
   if (transports.agentTrace) {
@@ -669,7 +740,21 @@ function applyTransportSettings(
   // to a `degraded` health status inside the transport itself.
   if (transports.agentTraceOtlp) {
     const otlpExisting = getTransport<OtlpHttpTransport>("agent-trace-otlp")
-    const otlpHeaders = buildOtlpHeaders(transports.agentTraceOtlpConfig)
+    const otlpHeaders = { ...transports.agentTraceOtlpConfig.headers }
+    const grafanaCredential = {
+      kind: "grafanaCloud" as const,
+      instanceId: transports.agentTraceOtlpConfig.grafanaCloud.instanceId,
+    }
+    const fetchImpl = isTauri()
+      ? createTauriOtlpFetch({
+          credential:
+            transports.agentTraceOtlpConfig.preset === "grafana-cloud"
+              ? grafanaCredential
+              : { kind: "none" },
+        })
+      : transports.agentTraceOtlpConfig.preset === "grafana-cloud"
+        ? createWebGrafanaFetch(transports.agentTraceOtlpConfig.grafanaCloud.instanceId)
+        : globalThis.fetch.bind(globalThis)
     const otlpOptions = {
       endpoint: transports.agentTraceOtlpConfig.endpoint,
       headers: otlpHeaders,
@@ -679,6 +764,7 @@ function applyTransportSettings(
       },
       captureContent: transports.agentTraceConfig.captureContent,
       maxPreviewBytes: transports.agentTraceConfig.maxPreviewBytes,
+      fetchImpl,
     } as const
     if (otlpExisting && typeof otlpExisting.updateOptions === "function") {
       otlpExisting.updateOptions(otlpOptions)
@@ -690,34 +776,82 @@ function applyTransportSettings(
     // Make sure the emitter writer is wired even when the Dexie sink is off
     // — otherwise spans never reach any transport.
     setAgentTraceWriter(dispatchSpanToTransports)
+    if (isTauri()) {
+      void configureTauriSidecarTelemetry({
+        enabled: true,
+        endpoint: transports.agentTraceOtlpConfig.endpoint,
+        headers: otlpHeaders,
+        serviceName: "cognia-sidecar",
+        environment: transports.agentTraceOtlpConfig.environment,
+        credential:
+          transports.agentTraceOtlpConfig.preset === "grafana-cloud"
+            ? grafanaCredential
+            : { kind: "none" },
+      }).catch(() => {})
+    }
   } else {
     removeTransport("agent-trace-otlp")
+    if (isTauri()) {
+      void configureTauriSidecarTelemetry({
+        enabled: false,
+        endpoint: "http://localhost",
+        headers: {},
+        serviceName: "cognia-sidecar",
+        environment: "",
+        credential: { kind: "none" },
+      }).catch(() => {})
+    }
+  }
+
+  // Behavior telemetry has its own opt-in and remains independent of the
+  // engineering trace transport toggle. It may reuse the configured OTLP
+  // destination, but disabling traces must not disable behavior export.
+  const behaviorEndpoint = otlpLogsEndpoint(transports.agentTraceOtlpConfig.endpoint)
+  if (behaviorEndpoint) {
+    const behaviorHeaders = { ...transports.agentTraceOtlpConfig.headers }
+    const behaviorFetch = isTauri()
+      ? createTauriOtlpFetch({
+          credential:
+            transports.agentTraceOtlpConfig.preset === "grafana-cloud"
+              ? {
+                  kind: "grafanaCloud",
+                  instanceId: transports.agentTraceOtlpConfig.grafanaCloud.instanceId,
+                }
+              : { kind: "none" },
+        })
+      : transports.agentTraceOtlpConfig.preset === "grafana-cloud"
+        ? createWebGrafanaFetch(transports.agentTraceOtlpConfig.grafanaCloud.instanceId)
+        : globalThis.fetch.bind(globalThis)
+    configureBehaviorEventExporter(async (body) => {
+      const response = await behaviorFetch(behaviorEndpoint, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...behaviorHeaders },
+        body,
+      })
+      if (!response.ok) throw new Error(`OTLP logs export failed with ${response.status}`)
+    })
+  } else {
+    configureBehaviorEventExporter(null)
   }
 }
 
-/**
- * Merge the Grafana Cloud-derived Authorization header onto the
- * user-supplied headers when the OTLP preset is `grafana-cloud`. Manually
- * authored `headers.Authorization` still wins so the user can override
- * (e.g. when testing a self-issued token).
- */
-function buildOtlpHeaders(config: AgentTraceOtlpSettings): Record<string, string> {
-  const base = { ...config.headers }
-  if (
-    config.preset === "grafana-cloud" &&
-    !base.Authorization &&
-    config.grafanaCloud.instanceId &&
-    config.grafanaCloud.apiToken
-  ) {
-    return {
-      ...base,
-      ...grafanaCloudHeaders({
-        instanceId: config.grafanaCloud.instanceId,
-        apiToken: config.grafanaCloud.apiToken,
-      }),
-    }
+export function otlpLogsEndpoint(tracesEndpoint: string): string {
+  const trimmed = tracesEndpoint.trim()
+  if (!trimmed) return ""
+  if (/\/v1\/traces\/?$/.test(trimmed)) {
+    return trimmed.replace(/\/v1\/traces\/?$/, "/v1/logs")
   }
-  return base
+  return `${trimmed.replace(/\/$/, "")}/v1/logs`
+}
+
+function createWebGrafanaFetch(instanceId: string): typeof fetch {
+  return async (input, init) => {
+    const token = await getTelemetrySecretForWeb("grafanaCloudApiToken")
+    if (!token) throw new Error("Grafana Cloud API token is not configured")
+    const headers = new Headers(init?.headers)
+    headers.set("Authorization", `Basic ${globalThis.btoa(`${instanceId}:${token}`)}`)
+    return globalThis.fetch(input, { ...init, headers })
+  }
 }
 
 /** Emit a finished span as a synthetic `StructuredLogEntry` to every

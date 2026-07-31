@@ -1,0 +1,96 @@
+{
+  "aiFeature": {
+    "customInstructions": {
+      "heading": "自定义指令",
+      "placeholder": "给模型的额外指引（关注点、语气、语言…）"
+    },
+    "model": {
+      "model": "模型",
+      "provider": "服务商",
+      "useDefault": "使用聊天默认"
+    }
+  },
+  "commitAi": {
+    "conventional": {
+      "description": "将生成的信息约束为 type(scope): summary 格式。",
+      "heading": "Conventional Commits"
+    },
+    "customInstructions": {
+      "heading": "自定义指令",
+      "placeholder": "给模型的额外指引（语气、scope 约定、语言…）"
+    },
+    "description": "在提交框显示一个按钮，根据已暂存的 diff 起草提交信息。",
+    "heading": "AI 提交信息",
+    "model": {
+      "model": "模型",
+      "provider": "服务商",
+      "useDefault": "使用聊天默认"
+    }
+  },
+  "description": "AI 提交信息生成及其他 Git 面板偏好。",
+  "explainAi": {
+    "description": "在文件和提交差异上显示「解释」按钮，概括改动内容与原因。",
+    "heading": "AI 变更解释"
+  },
+  "panel": {
+    "autoFetch": {
+      "description": "在后台周期性从远程获取，让领先/落后指示保持最新。",
+      "interval": "间隔（分钟）",
+      "label": "自动获取"
+    },
+    "branchSort": {
+      "default": "默认",
+      "label": "分支排序",
+      "name": "名称（A–Z）"
+    },
+    "confirmDiscard": {
+      "description": "丢弃工作区更改前先询问。",
+      "label": "放弃前确认"
+    },
+    "confirmForcePush": {
+      "description": "用强制推送覆盖远程分支前先询问。",
+      "label": "强制推送前确认"
+    },
+    "description": "面板如何呈现差异、为破坏性操作设护栏、自动化提交并保持同步。",
+    "diffView": {
+      "inline": "内联",
+      "label": "差异视图",
+      "sideBySide": "并排"
+    },
+    "fetchPrune": {
+      "description": "移除远程已不存在的远程跟踪引用。",
+      "label": "获取时清除"
+    },
+    "ignoreWhitespace": {
+      "description": "在差异查看器中隐藏仅空白的差异。",
+      "label": "忽略空白更改"
+    },
+    "postCommit": {
+      "description": "提交按钮成功后自动执行的操作。",
+      "label": "提交之后",
+      "none": "不执行",
+      "push": "推送",
+      "sync": "同步"
+    },
+    "pullRebase": {
+      "description": "默认拉取使用 --rebase。",
+      "label": "拉取时变基"
+    },
+    "reset": "重置面板偏好",
+    "smartCommit": {
+      "description": "当没有已暂存内容时，提交按钮先暂存所有更改。",
+      "label": "智能提交"
+    },
+    "timelineView": {
+      "graph": "图形",
+      "label": "默认时间线视图",
+      "list": "列表"
+    },
+    "title": "面板与工作流"
+  },
+  "reviewAi": {
+    "description": "在代码块审阅列表显示「AI 审查」按钮，逐块标记问题。",
+    "heading": "AI 代码审查"
+  },
+  "title": "源代码管理"
+}

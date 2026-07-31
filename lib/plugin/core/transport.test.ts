@@ -4,21 +4,41 @@
 
 import type { PluginApiInvokeResponse } from "./transport"
 
-const mockInvoke = jest.fn()
+const mockDirectInvoke = jest.fn()
+const mockTransportCall = jest.fn()
 
 jest.mock("@tauri-apps/api/core", () => ({
-  invoke: (...args: unknown[]) => mockInvoke(...args),
+  invoke: (...args: unknown[]) => mockDirectInvoke(...args),
+}))
+
+jest.mock("@/lib/tauri/transport-instance", () => ({
+  transport: { call: (...args: unknown[]) => mockTransportCall(...args) },
 }))
 
 import {
   invokePluginApi,
   invokePluginApiBatch,
   getPluginCapabilities,
+  isPluginGatewayAvailable,
   grantPluginPermission,
   revokePluginPermission,
   listPluginPermissions,
   PluginGatewayError,
 } from "./transport"
+import { setActiveRemoteTransport, __resetRoutingForTests } from "@/lib/tauri/transport-routing"
+
+describe("isPluginGatewayAvailable", () => {
+  afterEach(() => __resetRoutingForTests())
+
+  it("recognizes an active separated remote host", () => {
+    expect(isPluginGatewayAvailable()).toBe(false)
+    setActiveRemoteTransport({
+      call: jest.fn(),
+      subscribe: jest.fn(() => () => {}),
+    })
+    expect(isPluginGatewayAvailable()).toBe(true)
+  })
+})
 
 describe("PluginGatewayError", () => {
   it("creates an error with the correct properties", () => {
@@ -48,7 +68,7 @@ describe("invokePluginApi", () => {
   })
 
   it("returns data on successful response", async () => {
-    mockInvoke.mockResolvedValue({
+    mockTransportCall.mockResolvedValue({
       requestId: "req-1",
       success: true,
       data: { result: "ok" },
@@ -58,7 +78,7 @@ describe("invokePluginApi", () => {
 
     const result = await invokePluginApi("my-plugin", "getStatus", { key: "val" })
     expect(result).toEqual({ result: "ok" })
-    expect(mockInvoke).toHaveBeenCalledWith("plugin_api_invoke", {
+    expect(mockTransportCall).toHaveBeenCalledWith("plugin_api_invoke", {
       request: expect.objectContaining({
         pluginId: "my-plugin",
         api: "getStatus",
@@ -66,10 +86,11 @@ describe("invokePluginApi", () => {
         sdkVersion: "2.0.0",
       }),
     })
+    expect(mockDirectInvoke).not.toHaveBeenCalled()
   })
 
   it("throws PluginGatewayError on failure without retries for non-retryable codes", async () => {
-    mockInvoke.mockResolvedValue({
+    mockTransportCall.mockResolvedValue({
       requestId: "req-1",
       success: false,
       error: { code: "PERMISSION_DENIED", message: "Not allowed" },
@@ -79,7 +100,7 @@ describe("invokePluginApi", () => {
 
     await expect(invokePluginApi("my-plugin", "doThing", {})).rejects.toThrow(PluginGatewayError)
     // Should only invoke once — PERMISSION_DENIED is not retryable
-    expect(mockInvoke).toHaveBeenCalledTimes(1)
+    expect(mockTransportCall).toHaveBeenCalledTimes(1)
   })
 
   it("retries on TIMEOUT errors up to the retry count", async () => {
@@ -91,14 +112,14 @@ describe("invokePluginApi", () => {
       compat: { sdkVersion: "2.0.0", minSupportedSdk: "1.0.0", compatible: true },
     }
 
-    mockInvoke.mockResolvedValue(timeoutResponse)
+    mockTransportCall.mockResolvedValue(timeoutResponse)
 
     await expect(
       invokePluginApi("my-plugin", "slowOp", {}, { retries: 2, retryDelayMs: 1 })
     ).rejects.toThrow(PluginGatewayError)
 
     // 1 initial + 2 retries = 3 total calls
-    expect(mockInvoke).toHaveBeenCalledTimes(3)
+    expect(mockTransportCall).toHaveBeenCalledTimes(3)
   })
 
   it("retries on INTERNAL errors", async () => {
@@ -117,33 +138,33 @@ describe("invokePluginApi", () => {
       compat: { sdkVersion: "2.0.0", minSupportedSdk: "1.0.0", compatible: true },
     }
 
-    mockInvoke.mockResolvedValueOnce(internalError).mockResolvedValueOnce(successResponse)
+    mockTransportCall.mockResolvedValueOnce(internalError).mockResolvedValueOnce(successResponse)
 
     const result = await invokePluginApi("my-plugin", "op", {}, { retries: 2, retryDelayMs: 1 })
     expect(result).toBe("recovered")
-    expect(mockInvoke).toHaveBeenCalledTimes(2)
+    expect(mockTransportCall).toHaveBeenCalledTimes(2)
   })
 
   it("uses default sdkVersion 2.0.0", async () => {
-    mockInvoke.mockResolvedValue({ success: true, data: null })
+    mockTransportCall.mockResolvedValue({ success: true, data: null })
 
     await invokePluginApi("p", "a", null)
-    expect(mockInvoke).toHaveBeenCalledWith("plugin_api_invoke", {
+    expect(mockTransportCall).toHaveBeenCalledWith("plugin_api_invoke", {
       request: expect.objectContaining({ sdkVersion: "2.0.0" }),
     })
   })
 
   it("allows overriding sdkVersion", async () => {
-    mockInvoke.mockResolvedValue({ success: true, data: null })
+    mockTransportCall.mockResolvedValue({ success: true, data: null })
 
     await invokePluginApi("p", "a", null, { sdkVersion: "3.0.0" })
-    expect(mockInvoke).toHaveBeenCalledWith("plugin_api_invoke", {
+    expect(mockTransportCall).toHaveBeenCalledWith("plugin_api_invoke", {
       request: expect.objectContaining({ sdkVersion: "3.0.0" }),
     })
   })
 
   it("falls back to INTERNAL code when response has no error object", async () => {
-    mockInvoke.mockResolvedValue({
+    mockTransportCall.mockResolvedValue({
       success: false,
       runtimeVersion: "2.0.0",
       compat: { sdkVersion: "2.0.0", minSupportedSdk: "1.0.0", compatible: true },
@@ -170,7 +191,7 @@ describe("invokePluginApiBatch", () => {
       { requestId: "r1", success: true, data: "a", runtimeVersion: "2.0.0", compat: {} },
       { requestId: "r2", success: true, data: "b", runtimeVersion: "2.0.0", compat: {} },
     ]
-    mockInvoke.mockResolvedValue({ success: true, results: batchResults })
+    mockTransportCall.mockResolvedValue({ success: true, results: batchResults })
 
     const results = await invokePluginApiBatch("my-plugin", [
       { api: "getA", payload: {} },
@@ -180,7 +201,7 @@ describe("invokePluginApiBatch", () => {
     expect(results).toHaveLength(2)
     expect(results[0].data).toBe("a")
     expect(results[1].data).toBe("b")
-    expect(mockInvoke).toHaveBeenCalledWith("plugin_api_batch_invoke", {
+    expect(mockTransportCall).toHaveBeenCalledWith("plugin_api_batch_invoke", {
       request: expect.objectContaining({
         pluginId: "my-plugin",
         strategy: "continueOnError",
@@ -190,13 +211,13 @@ describe("invokePluginApiBatch", () => {
   })
 
   it("uses abortOnError strategy when specified", async () => {
-    mockInvoke.mockResolvedValue({ success: true, results: [] })
+    mockTransportCall.mockResolvedValue({ success: true, results: [] })
 
     await invokePluginApiBatch("p", [{ api: "a", payload: null }], {
       strategy: "abortOnError",
     })
 
-    expect(mockInvoke).toHaveBeenCalledWith("plugin_api_batch_invoke", {
+    expect(mockTransportCall).toHaveBeenCalledWith("plugin_api_batch_invoke", {
       request: expect.objectContaining({ strategy: "abortOnError" }),
     })
   })
@@ -209,11 +230,11 @@ describe("getPluginCapabilities", () => {
 
   it("invokes the correct command", async () => {
     const caps = [{ api: "storage", supported: true, highRisk: false, requiredPermissions: [] }]
-    mockInvoke.mockResolvedValue(caps)
+    mockTransportCall.mockResolvedValue(caps)
 
     const result = await getPluginCapabilities()
     expect(result).toEqual(caps)
-    expect(mockInvoke).toHaveBeenCalledWith("plugin_get_capabilities")
+    expect(mockTransportCall).toHaveBeenCalledWith("plugin_get_capabilities", undefined)
   })
 })
 
@@ -222,13 +243,42 @@ describe("grantPluginPermission", () => {
     jest.clearAllMocks()
   })
 
-  it("invokes the correct command", async () => {
-    mockInvoke.mockResolvedValue(undefined)
+  it("routes flat Rust-signature args through the active host transport", async () => {
+    mockTransportCall.mockResolvedValue(undefined)
 
     await grantPluginPermission("my-plugin", "network:fetch")
-    expect(mockInvoke).toHaveBeenCalledWith("plugin_permission_grant", {
-      request: { pluginId: "my-plugin", permission: "network:fetch" },
+    expect(mockTransportCall).toHaveBeenCalledWith("plugin_permission_grant", {
+      pluginId: "my-plugin",
+      permission: "network:fetch",
+      grantedBy: "user",
+      expiresAt: null,
     })
+  })
+
+  it("threads grantedBy and expiresAt through", async () => {
+    mockTransportCall.mockResolvedValue(undefined)
+
+    await grantPluginPermission("my-plugin", "filesystem:read", "manifest", "2030-01-01T00:00:00Z")
+    expect(mockTransportCall).toHaveBeenCalledWith("plugin_permission_grant", {
+      pluginId: "my-plugin",
+      permission: "filesystem:read",
+      grantedBy: "manifest",
+      expiresAt: "2030-01-01T00:00:00Z",
+    })
+  })
+
+  it("never bypasses remote routing with a direct local Tauri invoke", async () => {
+    mockTransportCall.mockResolvedValue(undefined)
+
+    await grantPluginPermission("my-plugin", "notification", "manifest")
+
+    expect(mockTransportCall).toHaveBeenCalledWith("plugin_permission_grant", {
+      pluginId: "my-plugin",
+      permission: "notification",
+      grantedBy: "manifest",
+      expiresAt: null,
+    })
+    expect(mockDirectInvoke).not.toHaveBeenCalled()
   })
 })
 
@@ -237,12 +287,13 @@ describe("revokePluginPermission", () => {
     jest.clearAllMocks()
   })
 
-  it("invokes the correct command", async () => {
-    mockInvoke.mockResolvedValue(undefined)
+  it("routes flat args through the active host transport", async () => {
+    mockTransportCall.mockResolvedValue(undefined)
 
     await revokePluginPermission("my-plugin", "network:fetch")
-    expect(mockInvoke).toHaveBeenCalledWith("plugin_permission_revoke", {
-      request: { pluginId: "my-plugin", permission: "network:fetch" },
+    expect(mockTransportCall).toHaveBeenCalledWith("plugin_permission_revoke", {
+      pluginId: "my-plugin",
+      permission: "network:fetch",
     })
   })
 })
@@ -252,11 +303,56 @@ describe("listPluginPermissions", () => {
     jest.clearAllMocks()
   })
 
-  it("returns permission list", async () => {
-    mockInvoke.mockResolvedValue(["network:fetch", "fs:read"])
+  it("returns the active host permission list", async () => {
+    mockTransportCall.mockResolvedValue([
+      { permission: "network:fetch", grantedBy: "manifest" },
+      "fs:read",
+      { malformed: true },
+    ])
 
     const perms = await listPluginPermissions("my-plugin")
     expect(perms).toEqual(["network:fetch", "fs:read"])
-    expect(mockInvoke).toHaveBeenCalledWith("plugin_permission_list", { pluginId: "my-plugin" })
+    expect(mockTransportCall).toHaveBeenCalledWith("plugin_permission_list", {
+      pluginId: "my-plugin",
+    })
+  })
+})
+
+// ── W6.3: retry only idempotent APIs by default ──────────────────────────────
+describe("idempotency-aware retry (W6.3)", () => {
+  beforeEach(() => {
+    mockTransportCall.mockReset()
+  })
+
+  const timeoutResponse = {
+    requestId: "r",
+    success: false,
+    error: { code: "TIMEOUT", message: "slow" },
+    runtimeVersion: "1",
+    compat: { sdkVersion: "2.0.0", minSupportedSdk: "1.0.0", compatible: true },
+  }
+
+  it("retries a read-shaped api on TIMEOUT", async () => {
+    mockTransportCall
+      .mockResolvedValueOnce(timeoutResponse)
+      .mockResolvedValueOnce({ ...timeoutResponse, success: true, data: 42, error: undefined })
+    await expect(invokePluginApi("p", "secrets:get", {}, { retryDelayMs: 1 })).resolves.toBe(42)
+    expect(mockTransportCall).toHaveBeenCalledTimes(2)
+  })
+
+  it("does NOT retry a side-effecting api by default", async () => {
+    mockTransportCall.mockResolvedValue(timeoutResponse)
+    await expect(invokePluginApi("p", "secrets:set", {}, { retryDelayMs: 1 })).rejects.toThrow()
+    expect(mockTransportCall).toHaveBeenCalledTimes(1)
+  })
+
+  it("honours an explicit idempotent override", async () => {
+    mockTransportCall
+      .mockResolvedValueOnce(timeoutResponse)
+      .mockResolvedValueOnce({ ...timeoutResponse, success: true, data: "ok", error: undefined })
+    await expect(
+      invokePluginApi("p", "cache:set", {}, { idempotent: true, retryDelayMs: 1 })
+    ).resolves.toBe("ok")
+    expect(mockTransportCall).toHaveBeenCalledTimes(2)
   })
 })

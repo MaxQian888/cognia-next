@@ -24,8 +24,14 @@ const EVENT_TYPES: SchedulerEventType[] = [
   "backup:completed",
   "workflow:completed",
   "agent:completed",
+  "chat:completed",
+  "goal:completed",
+  "agent-team:completed",
+  "plan:completed",
   "connection:outbound:send",
   "connection:scheduled:digest",
+  "job:exited",
+  "monitor:fired",
   "custom",
 ]
 
@@ -40,8 +46,15 @@ const EVENT_KEY_MAP: Record<SchedulerEventType, string> = {
   "backup:completed": "backupCompleted",
   "workflow:completed": "workflowCompleted",
   "agent:completed": "agentCompleted",
+  "chat:completed": "chatCompleted",
+  "goal:completed": "goalCompleted",
+  "agent-team:completed": "agentTeamCompleted",
+  "plan:completed": "planCompleted",
   "connection:outbound:send": "connectionOutboundSend",
   "connection:scheduled:digest": "connectionScheduledDigest",
+  "connection:housekeeping:daily": "connectionHousekeepingDaily",
+  "job:exited": "jobExited",
+  "monitor:fired": "monitorFired",
   custom: "custom",
 }
 

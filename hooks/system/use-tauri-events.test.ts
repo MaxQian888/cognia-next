@@ -4,6 +4,8 @@
 import { renderHook } from "@testing-library/react"
 
 const isTauriMock = jest.fn().mockReturnValue(true)
+const transportInvoke = jest.fn()
+const isRemoteHostActive = jest.fn().mockReturnValue(false)
 const tauriHandlers: Record<string, (p: unknown) => void> = {}
 const tauriUnsub: jest.Mock[] = []
 
@@ -24,9 +26,15 @@ jest.mock("@/lib/tauri", () => ({
     cliMatches: "cli://matches",
     cliSecondInstance: "cli://second-instance",
     deepLink: "deep-link://received",
+    backgroundJobExited: "jobs://exited",
+    backgroundMonitorFired: "jobs://monitor-fired",
   },
   onTauriEvent: (event: string, fn: (p: unknown) => void) => onTauriEventMock(event, fn),
   isTauri: () => isTauriMock(),
+  transport: { call: (...args: unknown[]) => transportInvoke(...args) },
+}))
+jest.mock("@/lib/tauri/transport-routing", () => ({
+  isRemoteHostActive: () => isRemoteHostActive(),
 }))
 
 const TAURI_EVENTS = {
@@ -38,7 +46,14 @@ const TAURI_EVENTS = {
   cliMatches: "cli://matches",
   cliSecondInstance: "cli://second-instance",
   deepLink: "deep-link://received",
+  backgroundJobExited: "jobs://exited",
+  backgroundMonitorFired: "jobs://monitor-fired",
 }
+
+const emitSchedulerEvent = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/scheduler/event-integration", () => ({
+  emitSchedulerEvent: (...args: unknown[]) => emitSchedulerEvent(...args),
+}))
 
 const listenHandlers: Record<string, (e: { payload: unknown }) => void> = {}
 const listenUnsub: jest.Mock[] = []
@@ -65,8 +80,28 @@ jest.mock("sonner", () => ({
   },
 }))
 
+// The hook resolves tray update toasts via next-intl (reusing settings.about
+// keys). Resolve just the keys the tray path touches to their en.json copy.
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string, vars?: Record<string, unknown>) => {
+    const messages: Record<string, string> = {
+      "updates.updateAvailableToast": `Update available: ${vars?.version}`,
+      "updates.alreadyLatest": "You're on the latest version.",
+    }
+    return messages[key] ?? key
+  },
+}))
+
 const setActiveSession = jest.fn()
 const clearChatStore = jest.fn()
+const startNewSessionMock = jest.fn().mockResolvedValue({ id: "s-new" })
+jest.mock("@/lib/chat/start-session", () => ({
+  startNewSession: (...args: unknown[]) => startNewSessionMock(...args),
+}))
+const isMainAppWindowMock = jest.fn(() => true)
+jest.mock("@/lib/pet/window-role", () => ({
+  isMainAppWindow: () => isMainAppWindowMock(),
+}))
 const requestOpenSettings = jest.fn()
 const setSelectedGuild = jest.fn()
 const saveSettings = jest.fn().mockResolvedValue(undefined)
@@ -85,6 +120,15 @@ const uiStoreState = {
 jest.mock("@/stores/ui", () => ({
   useUIStore: { getState: () => uiStoreState },
 }))
+const findActiveSessionForConversation = jest.fn()
+jest.mock("@/lib/connectors/session-bindings", () => ({
+  findActiveSessionForConversation: (...args: unknown[]) =>
+    findActiveSessionForConversation(...args),
+}))
+const selectScheduledTask = jest.fn()
+jest.mock("@/stores/scheduler/scheduler-store", () => ({
+  useSchedulerStore: { getState: () => ({ selectTask: selectScheduledTask }) },
+}))
 const settingsStoreState = {
   save: (...a: unknown[]) => saveSettings(...a),
 }
@@ -95,6 +139,11 @@ jest.mock("@/stores/settings", () => ({
 const openDialogMock = jest.fn()
 jest.mock("@tauri-apps/plugin-dialog", () => ({
   open: (...a: unknown[]) => openDialogMock(...a),
+}))
+
+const openPathAsWorkspaceMock = jest.fn()
+jest.mock("@/lib/workspace/open-folder", () => ({
+  openPathAsWorkspace: (...a: unknown[]) => openPathAsWorkspaceMock(...a),
 }))
 
 const openExternalMock = jest.fn().mockResolvedValue(undefined)
@@ -109,10 +158,22 @@ jest.mock("@/lib/tray/dispatcher", () => ({
   dispatchShortcut: (...a: unknown[]) => dispatchShortcutMock(...a),
 }))
 
+const checkUpdatesMock = jest.fn()
+jest.mock("@/lib/tray/tray-actions", () => ({
+  checkUpdates: (...a: unknown[]) => checkUpdatesMock(...a),
+  copyDiagnostics: jest.fn().mockResolvedValue(undefined),
+  openDataFolder: jest.fn().mockResolvedValue(undefined),
+  openDocs: jest.fn().mockResolvedValue(undefined),
+  reportIssue: jest.fn().mockResolvedValue(undefined),
+  toggleAutostartAction: jest.fn().mockResolvedValue(true),
+}))
+
 import { useTauriEvents } from "./use-tauri-events"
 
 beforeEach(() => {
   isTauriMock.mockReturnValue(true)
+  isMainAppWindowMock.mockClear().mockReturnValue(true)
+  startNewSessionMock.mockClear()
   Object.keys(tauriHandlers).forEach((k) => delete tauriHandlers[k])
   Object.keys(listenHandlers).forEach((k) => delete listenHandlers[k])
   tauriUnsub.length = 0
@@ -125,11 +186,19 @@ beforeEach(() => {
   clearChatStore.mockClear()
   requestOpenSettings.mockClear()
   setSelectedGuild.mockClear()
+  findActiveSessionForConversation.mockReset()
+  selectScheduledTask.mockClear()
   saveSettings.mockClear()
   openDialogMock.mockReset()
+  openPathAsWorkspaceMock.mockReset()
   openExternalMock.mockClear()
   dispatchTrayClickMock.mockClear()
   dispatchShortcutMock.mockClear()
+  checkUpdatesMock.mockReset()
+  emitSchedulerEvent.mockClear()
+  transportInvoke.mockReset()
+  transportInvoke.mockResolvedValue(undefined)
+  isRemoteHostActive.mockReturnValue(false)
 })
 
 async function flushPromises() {
@@ -156,18 +225,35 @@ describe("useTauriEvents", () => {
       expect.any(Function)
     )
     expect(onTauriEventMock).toHaveBeenCalledWith(TAURI_EVENTS.deepLink, expect.any(Function))
-    expect(listenHandlers["menu://new-chat"]).toBeDefined()
     expect(listenHandlers[TAURI_EVENTS.menuOpenLogs]).toBeDefined()
-    expect(listenHandlers["menu://open-workspace"]).toBeDefined()
+    // menu://open-workspace and menu://new-chat are owned by
+    // use-menu-event-router, NOT here — a second listener would double-fire
+    // (two folder pickers / two sessions) for one menu click.
+    expect(listenHandlers["menu://open-workspace"]).toBeUndefined()
+    expect(listenHandlers["menu://new-chat"]).toBeUndefined()
     expect(listenHandlers["menu://documentation"]).toBeDefined()
   })
 
-  it("tray New Chat clears the active session and reselects DM guild", async () => {
+  it("tray New Chat starts a conversation in the DM guild", async () => {
     renderHook(() => useTauriEvents())
     await flushPromises()
     tauriHandlers[TAURI_EVENTS.trayNewChat]?.(null)
-    expect(clearChatStore).toHaveBeenCalled()
     expect(setSelectedGuild).toHaveBeenCalledWith({ kind: "dm" })
+    expect(startNewSessionMock).toHaveBeenCalled()
+    // The old behavior nuked every open pane and created nothing.
+    expect(clearChatStore).not.toHaveBeenCalled()
+  })
+
+  // Rust broadcasts tray://* to every window and the pet overlay / popup /
+  // island load this same root layout — an unguarded handler would create one
+  // conversation per open window.
+  it("tray New Chat is a no-op outside the main window", async () => {
+    isMainAppWindowMock.mockReturnValue(false)
+    renderHook(() => useTauriEvents())
+    await flushPromises()
+    tauriHandlers[TAURI_EVENTS.trayNewChat]?.(null)
+    expect(startNewSessionMock).not.toHaveBeenCalled()
+    expect(setSelectedGuild).not.toHaveBeenCalled()
   })
 
   it("tray Settings opens the settings dialog without a tab", async () => {
@@ -175,6 +261,36 @@ describe("useTauriEvents", () => {
     await flushPromises()
     tauriHandlers[TAURI_EVENTS.traySettings]?.(null)
     expect(requestOpenSettings).toHaveBeenCalledWith()
+  })
+
+  it("tray Check for updates opens Settings → About when an update is available", async () => {
+    checkUpdatesMock.mockResolvedValue({ kind: "available", version: "3.1.4" })
+    renderHook(() => useTauriEvents())
+    await flushPromises()
+    listenHandlers["tray://check-updates"]?.({ payload: null })
+    await flushPromises()
+    expect(toastSuccess).toHaveBeenCalledWith("Update available: 3.1.4")
+    expect(requestOpenSettings).toHaveBeenCalledWith("about")
+  })
+
+  it("tray Check for updates toasts and stays put when already current", async () => {
+    checkUpdatesMock.mockResolvedValue({ kind: "upToDate" })
+    renderHook(() => useTauriEvents())
+    await flushPromises()
+    listenHandlers["tray://check-updates"]?.({ payload: null })
+    await flushPromises()
+    expect(toastSuccess).toHaveBeenCalledWith("You're on the latest version.")
+    expect(requestOpenSettings).not.toHaveBeenCalled()
+  })
+
+  it("tray Check for updates swallows an error outcome without navigating", async () => {
+    checkUpdatesMock.mockResolvedValue({ kind: "error", message: "offline" })
+    renderHook(() => useTauriEvents())
+    await flushPromises()
+    listenHandlers["tray://check-updates"]?.({ payload: null })
+    await flushPromises()
+    expect(toastSuccess).not.toHaveBeenCalled()
+    expect(requestOpenSettings).not.toHaveBeenCalled()
   })
 
   it("tray Open Logs and menu Open Logs both navigate to /logs", async () => {
@@ -186,31 +302,22 @@ describe("useTauriEvents", () => {
     expect(routerPush).toHaveBeenNthCalledWith(2, "/logs")
   })
 
-  it("menu New Chat clears chat and selects DM", async () => {
+  it("does NOT subscribe to menu://new-chat (owned by the menu router)", async () => {
     renderHook(() => useTauriEvents())
     await flushPromises()
-    listenHandlers["menu://new-chat"]?.({ payload: null })
-    expect(clearChatStore).toHaveBeenCalled()
-    expect(setSelectedGuild).toHaveBeenCalledWith({ kind: "dm" })
+    // Subscribing here too would create a second session for one menu click —
+    // the listener was removed in favour of use-menu-event-router → newChatAction.
+    expect(listenHandlers["menu://new-chat"]).toBeUndefined()
+    expect(startNewSessionMock).not.toHaveBeenCalled()
   })
 
-  it("menu Open Workspace saves chosen path on success", async () => {
-    openDialogMock.mockResolvedValueOnce("/picked")
+  it("does NOT subscribe to menu://open-workspace (owned by the menu router)", async () => {
     renderHook(() => useTauriEvents())
     await flushPromises()
-    await listenHandlers["menu://open-workspace"]?.({ payload: null })
-    await flushPromises()
-    expect(saveSettings).toHaveBeenCalledWith({ defaultWorkingDir: "/picked" })
-    expect(toastSuccess).toHaveBeenCalled()
-  })
-
-  it("menu Open Workspace ignores cancellation (non-string result)", async () => {
-    openDialogMock.mockResolvedValueOnce(null)
-    renderHook(() => useTauriEvents())
-    await flushPromises()
-    await listenHandlers["menu://open-workspace"]?.({ payload: null })
-    await flushPromises()
-    expect(saveSettings).not.toHaveBeenCalled()
+    // Subscribing here too would fire a second folder picker for one click —
+    // the listener was intentionally removed in favour of use-menu-event-router.
+    expect(listenHandlers["menu://open-workspace"]).toBeUndefined()
+    expect(openDialogMock).not.toHaveBeenCalled()
   })
 
   it("menu Documentation opens the external Tauri URL", async () => {
@@ -250,15 +357,33 @@ describe("useTauriEvents", () => {
       expect(setActiveSession).not.toHaveBeenCalled()
     })
 
+    it("IM conversation deep link activates its bound session", async () => {
+      findActiveSessionForConversation.mockResolvedValue({ id: "session-im" })
+
+      await fireDeepLinks(["cognia://im?conversationKey=discord%3Aa1%3Ac1"])
+      await flushPromises()
+
+      expect(findActiveSessionForConversation).toHaveBeenCalledWith("discord:a1:c1")
+      expect(setActiveSession).toHaveBeenCalledWith("session-im")
+      expect(setSelectedGuild).toHaveBeenCalledWith({ kind: "dm" })
+    })
+
+    it("scheduler deep link selects the task and opens the scheduler", async () => {
+      await fireDeepLinks(["cognia://scheduler/task/task-42"])
+      await flushPromises()
+
+      expect(selectScheduledTask).toHaveBeenCalledWith("task-42")
+      expect(routerPush).toHaveBeenCalledWith("/scheduler")
+    })
+
     it("settings deep link forwards the tab parameter", async () => {
       await fireDeepLinks(["cognia://settings?tab=advanced"])
       expect(requestOpenSettings).toHaveBeenCalledWith("advanced")
     })
 
-    it("workspace deep link saves the path and toasts", async () => {
+    it("workspace deep link creates/activates a workspace for the path", async () => {
       await fireDeepLinks(["cognia://workspace?path=/work"])
-      expect(saveSettings).toHaveBeenCalledWith({ defaultWorkingDir: "/work" })
-      expect(toastSuccess).toHaveBeenCalled()
+      expect(openPathAsWorkspaceMock).toHaveBeenCalledWith("/work")
     })
 
     it("unknown deep link surfaces a toast warning", async () => {
@@ -332,5 +457,23 @@ describe("useTauriEvents", () => {
     for (const u of listenUnsub) {
       expect(u).toHaveBeenCalled()
     }
+  })
+})
+
+it("forwards native job and monitor terminal events into scheduler event tasks", async () => {
+  renderHook(() => useTauriEvents())
+  await flushPromises()
+
+  tauriHandlers[TAURI_EVENTS.backgroundJobExited]?.({ jobId: "job-1" })
+  tauriHandlers[TAURI_EVENTS.backgroundMonitorFired]?.({ id: "monitor-1" })
+
+  expect(emitSchedulerEvent).toHaveBeenCalledWith("job:exited", { jobId: "job-1" })
+  expect(emitSchedulerEvent).toHaveBeenCalledWith("monitor:fired", { id: "monitor-1" })
+
+  isRemoteHostActive.mockReturnValue(true)
+  tauriHandlers[TAURI_EVENTS.backgroundJobExited]?.({ jobId: "job-remote" })
+  expect(transportInvoke).toHaveBeenCalledWith("scheduled_task_emit_event", {
+    eventType: "job:exited",
+    data: { jobId: "job-remote" },
   })
 })

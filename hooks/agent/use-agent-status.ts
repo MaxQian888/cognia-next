@@ -17,7 +17,7 @@ import { MCP_AGENT_ADAPTERS, type McpAgentAdapter } from "@/lib/claude/agents"
 import { readAgentConfig } from "@/lib/claude/ipc"
 import { listMcpServers } from "@/lib/db/mcp-servers"
 import { isTauri } from "@/lib/tauri"
-import type { AgentId } from "@/lib/claude/types"
+import type { AgentId } from "@cognia/agent-config-types"
 
 export interface AgentStatus {
   agent: McpAgentAdapter

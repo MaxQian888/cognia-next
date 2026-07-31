@@ -15,12 +15,24 @@
 
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 import type { OutboundRequest } from "@/types/connectors/outbound"
-import type { TriggerPolicy, ConnectorMode } from "@/types/connectors/policy"
+import type {
+  ActiveRunDispatchMode,
+  DeliveryReadiness,
+  InboundActivationPolicy,
+  TriggerPolicy,
+  ConnectorMode,
+} from "@/types/connectors/policy"
 import type { TransportMode } from "@/types/connectors/adapter"
 import type { A2UICapabilityMatrix } from "@/types/connectors/capability"
 import type { PlatformSkillCapability } from "@/types/connectors/skill-capability"
-import type { ConversationReference, PlatformIdentity } from "@/types/connectors/event"
+import type {
+  ConversationDeliveryTarget,
+  ConversationReference,
+  NormalizedInboundEvent,
+  PlatformIdentity,
+} from "@/types/connectors/event"
 import type { AuditEntry } from "@/types/connectors/audit"
+import type { UsagePresenceConfig, UsagePresenceState } from "@/types/connectors/presence"
 import type { MessageSegment } from "@/types/connectors/segment"
 import type { ConnectorCallbackBindingRow } from "@/types/connectors/interaction"
 
@@ -52,6 +64,85 @@ export interface AdapterImplMetadata {
 }
 
 /**
+ * Match conditions for one inbound dispatch rule (W3 multi-bot). Every
+ * provided field must hold for the rule to match (AND across fields); the
+ * list-valued fields match on ANY entry (OR within a field). An empty /
+ * absent match object is a catch-all. Empty arrays are treated as "not
+ * provided" so a blanked-out settings field can never make a rule
+ * unmatchable by accident.
+ */
+export interface DispatchRuleMatch {
+  /** ANY keyword matches (case-insensitive substring of plainText). */
+  keywords?: string[]
+  /**
+   * Regex source tested against plainText (invalid patterns never match;
+   * compiled once and cached by source).
+   */
+  pattern?: string
+  /** ANY id matches event.sender.id OR event.sender.remoteUserId. */
+  senderIds?: string[]
+  /** Restrict to these channel kinds (types/connectors/event.ts ChannelKind). */
+  channelKinds?: Array<"private" | "group" | "channel" | "thread">
+}
+
+/**
+ * Routing target of a dispatch rule. At least one field must be set for
+ * the rule to participate in matching; `teamId` wins over `workflowId`
+ * wins over `characterId` at dispatch time.
+ */
+export interface DispatchRuleAction {
+  characterId?: string
+  teamId?: string
+  workflowId?: string
+  /**
+   * Deliver the reply through ANOTHER of our own bot instances (multi-bot
+   * cross-account send). Must reference an enabled adapter instance of the
+   * SAME platform; the runtime validates at dispatch time and falls back
+   * to the receiving bot (with an audit trail) when the target is missing,
+   * disabled, or cross-platform. A rule carrying ONLY this field is a
+   * valid routing target — it keeps the default character/team handling
+   * but swaps the sending bot.
+   */
+  respondViaAdapterId?: string
+}
+
+/** One declarative inbound dispatch rule — see `AdapterInstanceRow.dispatchRules`. */
+export interface DispatchRule {
+  id: string
+  /** default true */
+  enabled?: boolean
+  /** operator label for UI/audit */
+  name?: string
+  match: DispatchRuleMatch
+  /** at least one field; teamId wins over workflowId wins over characterId at dispatch */
+  action: DispatchRuleAction
+}
+
+/**
+ * Per-bot outbound throttle / circuit-breaker tuning. Every knob is
+ * optional — omitted knobs keep the runner's built-in defaults (token
+ * bucket 20 capacity / 5 refill per second; breaker 30 s window / 5 min
+ * events / 50 % failure threshold / 30 s cooldown). Values are validated
+ * at the consumption site (`sanitizeOutboundTuning`) so a hand-edited row
+ * with a zero/negative/NaN knob degrades to the default instead of
+ * stalling deliveries.
+ */
+export interface OutboundTuningConfig {
+  /** Token-bucket capacity (max burst size). */
+  rateCapacity?: number
+  /** Token-bucket refill rate, tokens per second (fractional allowed). */
+  rateRefillPerSec?: number
+  /** Circuit-breaker sliding window, ms. */
+  breakerWindowMs?: number
+  /** Minimum events inside the window before the threshold is evaluated. */
+  breakerMinEvents?: number
+  /** Failure percentage (0–100) that trips the breaker. */
+  breakerFailureThresholdPct?: number
+  /** How long the breaker stays open before probing again, ms. */
+  breakerCooldownMs?: number
+}
+
+/**
  * One row per configured adapter instance (one Telegram bot, one Discord
  * guild connection, etc.). The `credentialsRef` field points into the OS
  * keyring — it never holds the actual secret value.
@@ -77,6 +168,35 @@ export interface AdapterInstanceRow {
   quietHours?: { from: string; to: string; tz: string }
   /** Adapter is muted globally (drops outbound). */
   muted?: boolean
+  /**
+   * Per-bot outbound throttle / circuit-breaker tuning. Overrides the
+   * runner's built-in defaults for THIS adapter instance only. Consumed by
+   * `lib/connectors/outbound-runner.ts:getAdapterState`, which rebuilds the
+   * live bucket/breaker when the tuning fingerprint changes, so edits apply
+   * on the next delivery without restarting the runner.
+   */
+  outboundTuning?: OutboundTuningConfig
+  /**
+   * Ordered failover targets (multi-bot): when THIS adapter's circuit
+   * breaker is open at delivery time, the outbound runner re-enqueues the
+   * job through the first enabled same-platform sibling listed here instead
+   * of dead-lettering it. Single hop only — a failed-over job never fails
+   * over again (`request.metadata.failoverFromAdapterId` guard), so two
+   * bots cannot ping-pong a job between their open circuits.
+   */
+  failoverAdapterIds?: string[]
+  /**
+   * Ordered load-balancing spillover targets (multi-bot). When THIS
+   * adapter's outbound token bucket is exhausted at delivery time, the
+   * runner re-enqueues the job through the first enabled same-platform
+   * sibling listed here that still has send capacity, instead of deferring
+   * it behind the rate limit. Complements `failoverAdapterIds` (hard
+   * failure → failover; throughput pressure → balance). Single hop only —
+   * a rerouted job (either mechanism) is never rerouted again
+   * (`request.metadata.balancedFromAdapterId` / `failoverFromAdapterId`
+   * guards), so two saturated bots cannot ping-pong a job.
+   */
+  balanceAdapterIds?: string[]
   /**
    * Cache of `PlatformAdapter.a2uiCapability()` written at adapter start.
    * `lib/claude/build-options.ts:resolveSendOptions` reads this to inject
@@ -121,6 +241,14 @@ export interface AdapterInstanceRow {
    * added Lark bot that may have been invited into chatty group channels.
    */
   atResponseStrategy?: "always" | "mention_only" | "direct_only"
+  /** Platform-neutral successor to `atResponseStrategy`; legacy rows map explicitly at read time. */
+  inboundActivationPolicy?: InboundActivationPolicy
+  /** Default handling of new messages while this adapter already has an active run. */
+  activeRunDispatchMode?: ActiveRunDispatchMode
+  /** Sliding topic activation lifetime; defaults to 24 hours. */
+  activationTtlMs?: number
+  /** Runtime-observed delivery readiness; configuration alone never sets this to verified. */
+  deliveryReadiness?: DeliveryReadiness
   /**
    * Per-adapter chat allow/blocklist (v45). `chatAllowlist` non-empty means
    * "only these `chat_id`s may trigger a response"; `chatBlocklist` hit
@@ -130,6 +258,28 @@ export interface AdapterInstanceRow {
    */
   chatAllowlist?: string[]
   chatBlocklist?: string[]
+  /**
+   * How to treat inbound messages authored by ANOTHER of our own bot
+   * instances in the same remote chat (W5 multi-bot same-group
+   * collaboration; non-indexed additive, same placement rationale as
+   * `welcomeCardEnabled`). Detected by
+   * `lib/connectors/sibling-bots.ts:findSiblingBotSender` and enforced in
+   * the shared inbound gate (`lib/connectors/at-gate.ts:gateInboundEvent`).
+   *
+   *   - "ignore" (default) — never AI-respond to a sibling bot's message
+   *     (audited as `inbound.sibling_bot_ignored`), killing cross-instance
+   *     mention loops at the door.
+   *   - "respond" — sibling messages may trigger a response, but bounded by
+   *     `botInterplayBudget`; over-budget messages are dropped with
+   *     `inbound.sibling_bot_budget_exhausted`.
+   */
+  siblingBotPolicy?: "ignore" | "respond"
+  /**
+   * Max AI responses to sibling-bot messages per chat per sliding hour when
+   * `siblingBotPolicy === "respond"` (default 4). Guards against slow-burn
+   * bot↔bot ping-pong that the mention gate alone cannot stop.
+   */
+  botInterplayBudget?: number
   /**
    * Cross-provider help / welcome card settings (shared across every IM
    * adapter, same row-level placement rationale as `quietHours`/`muted`:
@@ -152,6 +302,77 @@ export interface AdapterInstanceRow {
   helpTriggers?: string[]
   welcomeText?: string
   /**
+   * In-chat control-command policy (control-plane completion). Governs who may
+   * run `/model`, `/mode`, `/new`, … from an inbound IM message. Non-indexed
+   * JSON column — same placement rationale as `welcomeCardEnabled` (no schema
+   * bump). Read by `lib/connectors/commands/dispatch.ts`.
+   *
+   *   - `mode: "everyone"`      — anyone in any chat may run state-changing
+   *                               commands.
+   *   - `mode: "private-only"`  — DEFAULT. State-changing commands only in 1:1
+   *                               DMs; group chats require the allowlist.
+   *   - `mode: "allowlist"`     — only `allowedUserIds` (matched against
+   *                               `event.sender.id`) may run state-changing
+   *                               commands, in any chat.
+   *
+   * Read-only commands (`/help` `/status` `/sessions` `/dir`) are always
+   * allowed regardless of mode. `enabled === false` disables the whole
+   * interceptor (inbound `/…` text flows to the AI as a normal message).
+   */
+  controlCommands?: {
+    enabled?: boolean
+    mode?: "everyone" | "private-only" | "allowlist"
+    allowedUserIds?: string[]
+  }
+  /**
+   * Instance-level AI binding defaults (per-bot "which agent answers"),
+   * same non-indexed-JSON placement rationale as `welcomeCardEnabled` — no
+   * schema-version index change (documented anchor: v106). `undefined`
+   * means "no bot-level default"; empty strings are treated as unset by
+   * every reader. Precedence: an explicit per-conversation override
+   * (`ConversationOverrideRow`) always wins; the bot default wins over the
+   * character's own `model`/`providerId` (an operator pinning a model on a
+   * bot expects that model even when the persona declares one); app
+   * settings are the final fallback.
+   *
+   *   - `defaultTeamId`   — dispatch inbound AI-runs to this Agent Team
+   *                         unless the conversation binds/disables one
+   *                         (`resolveEffectiveTeamBinding`).
+   *   - `defaultModel`    — model id or routing alias; resolved through the
+   *                         same alias engine as every other model source.
+   *   - `defaultProvider` — provider id; unknown ids keep the resolver's
+   *                         best-effort fallback semantics.
+   *   - `defaultReasoning`— reasoning-effort level; silently dropped by the
+   *                         existing `modelSupportsEffort` gate when the
+   *                         effective model cannot reason.
+   */
+  defaultTeamId?: string
+  defaultModel?: string
+  defaultProvider?: string
+  defaultReasoning?: "low" | "medium" | "high" | "xhigh" | "max"
+  /**
+   * Platform scopes observed missing at runtime (chat-management calls that
+   * failed with a permission error record the scope they needed here, e.g.
+   * Lark `im:chat:create`). Rendered as a warning row by the whoami panel so
+   * the operator learns which Developer Console permissions to enable.
+   * Best-effort, append-only-with-dedup; cleared by a successful re-probe.
+   * Non-indexed additive.
+   */
+  lastMissingScopes?: string[]
+  /**
+   * Declarative inbound dispatch rules (条件规则表, W3 multi-bot) — same
+   * non-indexed-JSON placement rationale as `welcomeCardEnabled`: no
+   * schema-version index change (documented anchor: v107). Evaluated in
+   * array order by `lib/connectors/dispatch-rules.ts:matchDispatchRule`;
+   * the first enabled rule whose match conditions ALL hold routes the
+   * inbound AI-run to the rule's character / team / workflow. Precedence:
+   * explicit conversation override (`/team`, `/character`, `/workflow`,
+   * `teamDisabled`) > first matching rule > instance defaults
+   * (`defaultTeamId` / `defaultCharacterId`). Deterministic condition
+   * table only — no AI triage in v1.
+   */
+  dispatchRules?: DispatchRule[]
+  /**
    * Cached bot identity probe written by
    * `lib/connectors/adapters/lark/whoami.ts:probeBotIdentity`. The
    * adapter detail Config tab renders this so the operator can confirm
@@ -161,6 +382,16 @@ export interface AdapterInstanceRow {
    * cached value; the probe runs the first time the operator opens the
    * detail panel.
    */
+  /**
+   * Token-usage presence settings + runner state (cross-provider, same
+   * non-indexed-JSON placement rationale as `welcomeCardEnabled` — no
+   * schema bump). `presence` is operator config; `presenceState` is
+   * refresh-runner state (pinned-card message id, last refresh, last
+   * error). Read/written by
+   * `lib/connectors/presence/usage-status-runner.ts`.
+   */
+  presence?: UsagePresenceConfig
+  presenceState?: UsagePresenceState
   lastWhoamiAt?: number
   lastWhoamiResult?: {
     /** Bot display name as registered on the Lark Developer Console. */
@@ -173,8 +404,9 @@ export interface AdapterInstanceRow {
     openId: string
     /**
      * Lark tenant key. Optional because the `/bot/v3/info` endpoint does
-     * not return it — the bus backfills this field from the first
-     * inbound event envelope's `tenant_key` header.
+     * not return it — the Lark adapter backfills this field from the first
+     * inbound event that carries a `tenant_key` (see
+     * `adapters/lark/index.ts:maybeBackfillTenantKey`).
      */
     tenantKey?: string
     /**
@@ -213,6 +445,13 @@ export interface AdapterInstanceRow {
 export interface PlatformIdentityRow extends PlatformIdentity {
   /** Last time we observed this identity; helps cleanup. */
   lastSeenAt: number
+  /**
+   * Lossless merge history (CRM, schema v83 — non-indexed blob, no migration).
+   * Each `mergeIdentities` call snapshots the absorbed secondary row here so
+   * `unmergeIdentity` can restore it exactly. Parallel to `mergedFromIds`
+   * (which keeps just the ids for quick membership checks).
+   */
+  mergedSnapshots?: PlatformIdentityRow[]
 }
 
 /**
@@ -240,7 +479,8 @@ export interface InboundLedgerRow {
   receivedAt: number
 }
 
-export type OutboundJobStatus = "pending" | "sending" | "sent" | "failed" | "deadlettered"
+export type OutboundJobStatus =
+  "pending" | "sending" | "sent" | "failed" | "deadlettered" | "delivery_unknown"
 
 /**
  * Provenance of an outbound job. Added at schema v41 so the inbox UI can
@@ -258,11 +498,20 @@ export type OutboundJobStatus = "pending" | "sending" | "sent" | "failed" | "dea
  *   - `"draft-approved"` — the message originated as a `ConnectorDraftRow`
  *                          (manual-mode AI reply), then the operator
  *                          clicked Approve.
+ *   - `"skill"`          — an `im.*` built-in skill (agent-invoked chat
+ *                          management: first message of a freshly created
+ *                          chat, or an `im.broadcast` fan-out target)
+ *                          enqueued the send after passing its own PII gate
+ *                          and HITL confirmation.
+ *   - `"plugin"`         — a plugin called `ctx.connectors.enqueueSend`
+ *                          (gated `connectors:send` + the enqueue-side PII
+ *                          gate) to ride the durable queue.
  *
  * Rows persisted before v41 backfill to `"ai-run"` because that's the
  * only path that existed when they were created.
  */
-export type OutboundJobSource = "ai-run" | "manual" | "workflow" | "draft-approved"
+export type OutboundJobSource =
+  "ai-run" | "manual" | "workflow" | "draft-approved" | "skill" | "plugin"
 
 /**
  * Cross-reference back to the Visual Workflow node that produced a
@@ -283,6 +532,8 @@ export interface OutboundJobWorkflowSource {
 export interface OutboundJobRow {
   id: string
   adapterId: string
+  /** Owning workspace id — Workspace isolation column (Dexie v86). Outbound routing is per-project. */
+  projectId?: string
   conversationKey: string
   request: OutboundRequest
   status: OutboundJobStatus
@@ -317,6 +568,18 @@ export interface OutboundJobRow {
    * transparently.
    */
   platformMessageId?: string
+  /**
+   * When the runner reroutes this job to a sibling bot (circuit-open
+   * failover or rate-limit load-balance), the ORIGINAL job is dead-lettered
+   * (reason `failover`/`balanced`) and this points at the NEW job on the
+   * sibling that actually carries the delivery. A caller awaiting the
+   * original follows this pointer (`waitForOutboundTerminal`) to the
+   * sibling's true terminal status instead of misreading the reroute as a
+   * failure. Non-indexed JSON column — no schema version bump.
+   */
+  reroutedToJobId?: string
+  /** How the reroute happened, set alongside {@link reroutedToJobId}. */
+  reroutedMechanism?: "failover" | "balanced"
 }
 
 /**
@@ -355,9 +618,21 @@ export interface WorkflowFanoutSubscriptionRow {
 export interface ConversationOverrideRow {
   id: string
   conversationKey: string
+  /**
+   * Owning workspace id — Workspace isolation column (Dexie v86). Per-project
+   * routing state; `conversationKey` stays the globally-unique primary key
+   * (one conversation maps to one workspace), so this is a plain filter index.
+   */
+  projectId?: string
   /** The cognia-next ChatSession this conversation maps to. */
   sessionId: string
   mode?: ConnectorMode
+  /** Optional topic/channel-specific override of the adapter admission policy. */
+  inboundActivationPolicy?: InboundActivationPolicy
+  /** Optional topic/channel-specific override of the adapter active-run policy. */
+  activeRunDispatchMode?: ActiveRunDispatchMode
+  /** Topic-specific sliding activation lifetime override. */
+  activationTtlMs?: number
   characterId?: string
   trigger?: Partial<TriggerPolicy>
   pinned?: boolean
@@ -391,6 +666,12 @@ export interface ConversationOverrideRow {
    */
   allowGoalDriving?: boolean
   /**
+   * Per-conversation opt-in for agent-facing scheduler MCP tools.
+   * Default OFF: an inbound prompt cannot create recurring work unless the
+   * operator explicitly enables this conversation.
+   */
+  allowScheduleTools?: boolean
+  /**
    * Per-conversation provider override (added at schema v41 in support
    * of A6). When set, takes precedence over the character / app default
    * provider in `lib/claude/build-options.ts:resolveSendOptions`. Use
@@ -408,6 +689,96 @@ export interface ConversationOverrideRow {
    * which Codex account is currently active") without changing provider.
    */
   modelOverride?: string
+  /**
+   * Per-conversation reasoning-effort ("thinking level") override
+   * (control-plane completion). Set by the `/reasoning <level>` in-chat
+   * command. Takes precedence over `session.effort` and
+   * `AppSettings.defaultEffort` in `lib/claude/build-options.ts`. Non-indexed
+   * additive field — no schema bump. Unknown levels are rejected at the
+   * command layer, so the resolver can trust a stored value.
+   */
+  reasoningOverride?: "low" | "medium" | "high" | "xhigh" | "max"
+  /**
+   * Pointer to the currently-active ChatSession for this IM conversation
+   * (control-plane multi-session). Set by `/new` and `/switch`; consulted by
+   * `findActiveSessionForConversation` so AI turns target the session the
+   * user switched to. Undefined → fall back to the most-recently-updated
+   * bound session (today's behaviour). Non-indexed — looked up via the unique
+   * `conversationKey`.
+   */
+  activeSessionId?: string
+  /**
+   * Per-conversation Agent Team binding (control-plane multi-agent). When set,
+   * an inbound AI-run dispatches to the team runtime (`runTeamLifecycle`) via
+   * `lib/connectors/team-dispatch.ts` instead of the single-character
+   * `runAndCapture` path. Coexists with `characterId` (which still seeds the
+   * session identity/title); `teamId` wins routing. Bound via `/team` or the
+   * inbox responder selector; `/team off` clears it. Non-indexed additive.
+   */
+  teamId?: string
+  /**
+   * Explicit "no team in this conversation" sentinel. `/team off` used to
+   * just clear `teamId`, which was indistinguishable from "never bound" —
+   * with `AdapterInstanceRow.defaultTeamId` in play that could no longer
+   * express "run single-character here even though the bot defaults to a
+   * team". `true` suppresses BOTH the conversation `teamId` and the bot's
+   * `defaultTeamId` (`resolveEffectiveTeamBinding`); re-binding via
+   * `/team <name>` clears the flag. Non-indexed additive.
+   */
+  teamDisabled?: boolean
+  /**
+   * Per-conversation Visual Workflow binding (workflow⇄IM parity). When set
+   * (and `teamId` is NOT set — `teamId` wins routing), an inbound AI-run
+   * dispatches to the workflow orchestrator (`startWorkflowFromIM`) via
+   * `lib/workflow/runtime/start-from-im.ts` instead of the single-character
+   * `runAndCapture` path; the message text is surfaced as `$trigger.payload`.
+   * Progress + final fan back through the same `workflow-progress-runner` the
+   * team path uses. Bound via `/workflow <name|id>` or the inbox override form;
+   * `/workflow off` clears it. Non-indexed additive (mirrors `teamId` — no
+   * Dexie bump).
+   */
+  workflowId?: string
+  /**
+   * Tool-approval mode for HITL ask-tier tools on this IM conversation
+   * (control-plane HITL). `"prompt"` (DEFAULT) projects an A2UI Allow/Deny
+   * card and waits for the user's button-press; `"yolo"` auto-approves every
+   * ask-tier tool (cc-connect parity). Toggled via `/mode yolo|prompt`.
+   * Non-indexed additive.
+   */
+  approvalMode?: "prompt" | "yolo"
+  /**
+   * Per-conversation opt-in for proactive event-driven notifications over IM
+   * (control-plane notifications). Fail-closed default OFF: the
+   * Notification Center's `im` delivery channel
+   * (`lib/notifications/im-deliver.ts`) only pushes task-complete / error /
+   * input-required events to this conversation when this flag is `true`.
+   * Non-indexed additive.
+   */
+  proactivePush?: boolean
+  /**
+   * Per-conversation opt-in for the live in-turn activity card
+   * (control-plane visibility — the cc-connect-style "the agent is
+   * working" live card). DEFAULT ON (`undefined`/`true`): the connector
+   * runtime wires `onEvent` on `runAndCaptureAssistantReply` so a single
+   * cumulative A2UI card updates in chat as the turn progresses (tool
+   * count, elapsed time, current action, per-file edits). Operators MAY
+   * set this to `false` to suppress the live card for noisy channels —
+   * the final reply still arrives through the normal outbound path.
+   * Read in `lib/connectors/runtime.ts` when building the capture
+   * options; non-indexed additive (mirrors `proactivePush`).
+   */
+  liveActivity?: boolean
+  /**
+   * Per-conversation opt-out for APPEND-mode live activity on adapters WITHOUT
+   * `edit()` (workflow⇄IM visibility parity). DEFAULT ON (`undefined`/`true`):
+   * such adapters get one compact progress line per throttled boundary during
+   * a turn instead of full suppression. Set `false` to suppress append lines on
+   * noisy channels (the final reply still arrives). Has no effect on adapters
+   * that support `edit()` (those use the cumulative card via `liveActivity`).
+   * Read in `lib/connectors/runtime.ts`; non-indexed additive (mirrors
+   * `liveActivity`).
+   */
+  appendActivity?: boolean
   /**
    * Per-conversation allowlist for built-in skills (ADR-0026 / schema v43).
    *
@@ -441,6 +812,123 @@ export interface ConversationOverrideRow {
    * "UTC", etc.). Cleared by leaving the form's quiet-hours toggle off.
    */
   quietHours?: { from: string; to: string; tz: string }
+  /**
+   * Per-conversation outbound mute (fine-grained control). When `true`,
+   * the outbound runner defers every delivery on THIS conversation exactly
+   * like the adapter-level `AdapterInstanceRow.muted` (60 s re-check, not a
+   * failure), while the bot keeps talking in its other conversations.
+   * Precedence: adapter-level mute is checked first (global wins), then
+   * this flag. Non-indexed additive — no Dexie bump.
+   */
+  muted?: boolean
+  /**
+   * Conversation lifecycle status (CRM maturation, schema v83). Chatwoot-style:
+   * absent / "open" (active) | "pending" (waiting on someone) | "snoozed"
+   * (muted until `snoozeUntil`) | "resolved" (closed). The bus auto-reopens a
+   * "resolved" conversation on fresh inbound. Read helpers default absent → "open".
+   */
+  status?: "open" | "pending" | "snoozed" | "resolved"
+  /** Epoch ms a "snoozed" conversation automatically wakes back to "open". */
+  snoozeUntil?: number
+  /**
+   * Current assignee (schema v83). The local app is single-user, so "human"
+   * carries no id; "character" / "team" reference the bound Character / Agent
+   * Team that should own replies. The full object is a non-indexed blob —
+   * IndexedDB can't index nested fields — so `assigneeKind` mirrors the kind
+   * for filtering.
+   */
+  assignee?: { kind: "human" | "character" | "team"; id?: string; label?: string }
+  /** Indexed discriminator mirroring `assignee.kind` (schema v83). */
+  assigneeKind?: "human" | "character" | "team"
+  /** Conversation label ids (schema v83). Multi-entry indexed via `*labelIds`. */
+  labelIds?: string[]
+  /** First-response SLA due time (epoch ms); set on first inbound, cleared on first outbound. */
+  firstResponseDueAt?: number
+  /** Next-response SLA due time (epoch ms); recomputed on inbound, cleared on outbound. */
+  nextResponseDueAt?: number
+  /** Epoch ms of the first outbound reply (SLA first-response measurement). */
+  firstRespondedAt?: number
+  /**
+   * Per-conversation response-SLA target in minutes (schema v83). When set,
+   * the connector bus stamps `nextResponseDueAt = computeDueAt(inboundTime,
+   * slaResponseMinutes, quietHours)` on each fresh inbound, and the outbound
+   * runner clears it (markResponded) on reply. Non-indexed; absent = no SLA.
+   */
+  slaResponseMinutes?: number
+  createdAt: number
+  updatedAt: number
+}
+
+export type ConnectorConversationActivationStatus = "inactive" | "active"
+
+/** Durable runtime state for one platform conversation scope (Dexie v120). */
+export interface ConnectorConversationStateRow {
+  /** Same value as the stable opaque conversation key. */
+  conversationKey: string
+  adapterId: string
+  activationStatus: ConnectorConversationActivationStatus
+  activatedBy?: string
+  activatedAt?: number
+  lastHumanActivityAt?: number
+  expiresAt?: number
+  dispatchMode?: ActiveRunDispatchMode
+  deliveryReadiness: DeliveryReadiness
+  deliveryTarget: ConversationDeliveryTarget
+  historyCursor?: {
+    beforeTimestamp?: number
+    afterTimestamp?: number
+    pageToken?: string
+  }
+  /**
+   * Cognia account this conversation last resolved to (Lark unified identity,
+   * plan 2026-07-24 P1.4). Optional: absent on legacy rows and whenever the
+   * principal registry flag is off.
+   */
+  accountId?: string
+  /** FeishuPrincipalRow id of the most recent resolved sender. */
+  lastPrincipalId?: string
+  createdAt: number
+  updatedAt: number
+}
+
+export type ConnectorInboundJobStatus =
+  | "queued"
+  | "steering"
+  | "running"
+  | "completed"
+  | "failed"
+  | "recovery_required"
+  | "dismissed"
+  | "history_only"
+
+/** Durable inbound execution unit, unique per adapter/platform message (Dexie v120). */
+export interface ConnectorInboundJobRow {
+  id: string
+  adapterId: string
+  /** Conversation-scoped platform identity used by the unique Dexie index. */
+  platformMessageId: string
+  /** Original adapter message id, retained for diagnostics and outbound anchors. */
+  sourceMessageId: string
+  conversationKey: string
+  event: NormalizedInboundEvent
+  dispatchMode: ActiveRunDispatchMode
+  status: ConnectorInboundJobStatus
+  attempts: number
+  leaseOwner?: string
+  leaseExpiresAt?: number
+  executionRunId?: string
+  recoveryReason?: string
+  lastError?: string
+  /**
+   * Cognia account/principal the event resolved to (Lark unified identity,
+   * plan 2026-07-24 P1.4). Stamped by the bus principal-resolution step;
+   * absent on legacy rows and whenever the principal registry flag is off.
+   * Recovery replays re-run resolution, so these are advisory denorms — the
+   * registry stays the authority.
+   */
+  accountId?: string
+  principalId?: string
+  receivedAt: number
   createdAt: number
   updatedAt: number
 }
@@ -483,6 +971,8 @@ export type ConnectorDraftStatus = "pending" | "approved" | "rejected" | "expire
 export interface ConnectorDraftRow {
   id: string
   conversationKey: string
+  /** Owning workspace id — Workspace isolation column (Dexie v86); inherits the session's project. */
+  projectId?: string
   sessionId: string
   segments: MessageSegment[]
   status: ConnectorDraftStatus
@@ -514,3 +1004,163 @@ export interface ConnectorAttachmentRow {
 
 /** Borrowed-shape: same ConversationReference as types/connectors/event.ts. */
 export type ConversationReferenceRow = ConversationReference
+
+// ─── Feishu unified identity registry (plan 2026-07-24, Phase 1) ────────────
+//
+// Server-authoritative mapping `tenantKey + appId + openId → Cognia
+// account/user`. These tables are the AUTHENTICATION authority for Lark
+// inbound events and callbacks when `larkPrincipalRegistry` is on;
+// `platformIdentities` above stays a display/contact directory only and never
+// authorizes anything. Uniqueness is enforced by compound Dexie indexes:
+// feishuTenants `&[tenantKey+appId]`, feishuPrincipals
+// `&[tenantKey+appId+openId]` — the same openId text under another tenant or
+// app is a DIFFERENT principal by construction.
+
+export type FeishuTenantStatus = "active" | "disabled"
+
+/** One row per (tenantKey, appId) pair an operator has admitted. */
+export interface FeishuTenantRow {
+  id: string
+  tenantKey: string
+  appId: string
+  /** Cognia account this tenant's traffic belongs to. */
+  cogniaAccountId: string
+  status: FeishuTenantStatus
+  configuredAt: number
+  disabledAt?: number
+  updatedAt: number
+}
+
+export type FeishuPrincipalStatus = "active" | "disabled" | "unlinked"
+
+/** One row per verified Feishu user identity within a tenant/app scope. */
+export interface FeishuPrincipalRow {
+  id: string
+  tenantKey: string
+  appId: string
+  openId: string
+  unionId?: string
+  cogniaAccountId: string
+  /** Account-local user id; equals the account id for single-user accounts. */
+  cogniaUserId: string
+  /** Web SSO linkage (P1.3): populated once the same person logs in via OIDC. */
+  logtoSubject?: string
+  logtoOrganizationId?: string
+  /** Display-identity reference into `platformIdentities` (directory only). */
+  platformIdentityId?: string
+  status: FeishuPrincipalStatus
+  linkedAt: number
+  lastVerifiedAt?: number
+  updatedAt: number
+  /** Optimistic revision, bumped on every mutation for audit/rebind flows. */
+  version: number
+}
+
+// ─── Lark entry surfaces (plan 2026-07-24, Phases 3-5; Dexie v126) ──────────
+
+/**
+ * Brain-side ledger of issued personal entry tokens (jti-keyed). The Rust
+ * companion enforces single-use via its in-process LRU; this ledger is the
+ * durable audit/ops view (issued → consumed) that survives restarts.
+ */
+export interface LarkEntryContextRow {
+  /** Token jti. */
+  id: string
+  adapterId: string
+  principalId: string
+  accountId: string
+  entryType: string
+  conversationKey: string
+  sessionId?: string
+  issuedAt: number
+  expiresAt: number
+  consumedAt?: number
+}
+
+export type LarkChatSurfaceType = "chat_tab" | "group_menu"
+
+/**
+ * `blocked` is terminal-until-reconfigured: the platform refused for a reason
+ * retrying cannot fix (scope not granted, or a p2p chat for a group-only
+ * surface). Retrying those on the exponential backoff produced a permanent
+ * error-log drip and burned tenant-token quota, so they park instead and are
+ * re-armed only by an explicit resync or a changed desired URL.
+ */
+export type LarkChatSurfaceStatus =
+  "pending" | "synced" | "error" | "blocked" | "rebuild_required" | "removed"
+
+/** Reconcile state for one platform-side chat surface (Chat Tab / 群菜单). */
+export interface LarkChatSurfaceRow {
+  adapterId: string
+  chatId: string
+  surfaceType: LarkChatSurfaceType
+  tenantKey?: string
+  appId?: string
+  /** Platform-side id of the created tab / menu, when known. */
+  platformSurfaceId?: string
+  urlVersion: number
+  desiredUrl?: string
+  status: LarkChatSurfaceStatus
+  attempt: number
+  nextAttemptAt?: number
+  lastSyncAt?: number
+  lastError?: string
+  createdAt: number
+  updatedAt: number
+}
+
+/** Idempotency + provenance record for one message-shortcut import. */
+export interface LarkMessageImportRow {
+  id: string
+  /** sha256(adapterId + chatId + sorted messageIds) — replay returns the row. */
+  sourceHash: string
+  adapterId: string
+  chatId: string
+  conversationKey: string
+  sessionId: string
+  messageIds: string[]
+  /** Per-message skip reasons (recalled, unsupported, fetch_failed …). */
+  skipped?: Array<{ messageId: string; reason: string }>
+  createdAt: number
+}
+
+/**
+ * Ledger of web SSO sessions the brain has SEEN (via entry resolves /
+ * intents). Enforcement lives in the token TTL; this row enables a future
+ * revocation UI and the audit trail. Keyed by a hash of the session jti —
+ * the raw token never lands in Dexie.
+ */
+export interface LarkWebSessionRow {
+  /** sha256 hash (first 12) of the session jti. */
+  id: string
+  adapterId: string
+  principalId?: string
+  openIdHash: string
+  tenantKey: string
+  appId: string
+  issuedAt: number
+  expiresAt: number
+  lastSeenAt: number
+  revokedAt?: number
+}
+
+export type FeishuBindRequestStatus = "pending" | "approved" | "rejected" | "expired"
+
+/**
+ * Pending admin-bind request for an unbound Feishu sender. The row id doubles
+ * as the short unguessable code shown to the user in the "not linked yet"
+ * reply, so an operator can approve it from the admin side.
+ */
+export interface FeishuPrincipalBindRequestRow {
+  id: string
+  openId: string
+  adapterId: string
+  tenantKey?: string
+  appId?: string
+  conversationKey?: string
+  status: FeishuBindRequestStatus
+  requestedAt: number
+  resolvedAt?: number
+  resolvedPrincipalId?: string
+  expiresAt: number
+}

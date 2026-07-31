@@ -19,11 +19,17 @@
  * only place that touches it.
  */
 
-export type IMQuickCommandActionType = "prompt" | "slash"
+export type IMQuickCommandActionType = "prompt" | "slash" | "link"
 
 export interface IMQuickCommandAction {
   type: IMQuickCommandActionType
-  /** Prompt text, or a slash-command line (e.g. "/agenda today"). */
+  /**
+   * Prompt text, a slash-command line (e.g. "/agenda today"), or — for
+   * `link` — an app-relative path (e.g. "/") resolved against the
+   * configured web entry base at reply time. Link commands never run an
+   * AI turn; the adapter replies with the resolved URL (plan 2026-07-24
+   * P4.2).
+   */
   value: string
 }
 
@@ -52,7 +58,11 @@ export function isLegacyEventKeyRow(row: unknown): row is LegacyEventKeyQuickCom
   if (typeof r.eventKey !== "string" || "triggerKey" in r) return false
   const action = r.action as Record<string, unknown> | undefined
   if (!action || typeof action !== "object") return false
-  return (action.type === "prompt" || action.type === "slash") && typeof action.value === "string"
+  return isQuickCommandActionType(action.type) && typeof action.value === "string"
+}
+
+function isQuickCommandActionType(value: unknown): value is IMQuickCommandActionType {
+  return value === "prompt" || value === "slash" || value === "link"
 }
 
 export function isIMQuickCommand(row: unknown): row is IMQuickCommand {
@@ -61,7 +71,7 @@ export function isIMQuickCommand(row: unknown): row is IMQuickCommand {
   if (typeof r.triggerKey !== "string") return false
   const action = r.action as Record<string, unknown> | undefined
   if (!action || typeof action !== "object") return false
-  return (action.type === "prompt" || action.type === "slash") && typeof action.value === "string"
+  return isQuickCommandActionType(action.type) && typeof action.value === "string"
 }
 
 /**

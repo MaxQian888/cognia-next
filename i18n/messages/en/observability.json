@@ -1,0 +1,158 @@
+{
+  "empty": {
+    "hint": "Agent runs, tool calls, chats and workflows record spans here. Start a conversation or run an agent, or widen the time range to see older telemetry.",
+    "title": "No telemetry in this window",
+    "widen": "Widen to last 30d"
+  },
+  "export": {
+    "dashboardJson": "Dashboard as JSON",
+    "importDashboard": "Import dashboard…",
+    "importFailed": "Could not import: invalid dashboard file",
+    "imported": "Dashboard config imported",
+    "label": "Export",
+    "noTraces": "No traces to export in this window",
+    "saveFailed": "Export failed: {message}",
+    "saved": "Saved to {location}",
+    "tracesCsv": "Traces as CSV"
+  },
+  "filters": {
+    "clear": "Clear",
+    "dims": {
+      "model": "Model",
+      "operation": "Operation",
+      "session": "Session",
+      "surface": "Surface",
+      "tool": "Tool"
+    },
+    "empty": "No options",
+    "search": "Search…"
+  },
+  "metricToggle": {
+    "cost": "Cost",
+    "errors": "Errors",
+    "label": "Measure",
+    "spans": "Spans"
+  },
+  "noData": "No data in this window",
+  "panels": {
+    "byModel": "Spans by model",
+    "bySurface": "Spans by surface",
+    "cacheHitRate": "Cache hit rate",
+    "costOverTime": "Cost over time",
+    "errorRate": "Error rate",
+    "errorRateOverTime": "Error rate",
+    "latencyPercentiles": "Latency percentiles",
+    "p95Latency": "Latency (p95)",
+    "recentTraces": "Recent traces",
+    "requestRate": "Request rate",
+    "tokenThroughput": "Token throughput",
+    "totalCost": "Total cost",
+    "totalSpans": "Total spans"
+  },
+  "range": {
+    "absolute": "Absolute range",
+    "apply": "Apply",
+    "custom": "Custom range",
+    "from": "From",
+    "presets": {
+      "15m": "Last 15m",
+      "1h": "Last 1h",
+      "24h": "Last 24h",
+      "30d": "Last 30d",
+      "5m": "Last 5m",
+      "6h": "Last 6h",
+      "7d": "Last 7d"
+    },
+    "quickRanges": "Quick ranges",
+    "to": "To"
+  },
+  "refresh": {
+    "hoursAgo": "{count}h ago",
+    "justNow": "just now",
+    "label": "Auto-refresh",
+    "minutesAgo": "{count}m ago",
+    "off": "Off",
+    "refreshNow": "Refresh now",
+    "secondsAgo": "{count}s ago"
+  },
+  "series": {
+    "cacheCreation": "Cache write",
+    "cacheRead": "Cache read",
+    "cost": "Cost",
+    "errorRate": "Error rate",
+    "input": "Input",
+    "output": "Output",
+    "p50": "p50",
+    "p95": "p95",
+    "p99": "p99",
+    "perSec": "Requests/s"
+  },
+  "settings": {
+    "data": {
+      "clearAll": "Clear all telemetry",
+      "clearCancel": "Cancel",
+      "clearConfirm": "Clear all",
+      "clearConfirmBody": "This permanently deletes every stored span. Dashboards will be empty until new telemetry is recorded. This cannot be undone.",
+      "clearConfirmTitle": "Clear all telemetry?",
+      "cleared": "Cleared {count} traces",
+      "olderThan": "Older than {days}d",
+      "prune": "Prune",
+      "pruneDone": "Pruned {count} traces",
+      "stored": "{count} spans stored",
+      "title": "Data"
+    },
+    "defaults": {
+      "range": "Default time range",
+      "refresh": "Auto-refresh",
+      "title": "Defaults"
+    },
+    "description": "Tune thresholds, panels and retention for the observability dashboard.",
+    "metrics": {
+      "cacheHitRate": "Cache hit rate",
+      "cost": "Window cost",
+      "errorRate": "Error rate",
+      "latencyP95": "Latency p95"
+    },
+    "panels": {
+      "description": "Hide panels you don't need — layout stays intact.",
+      "title": "Panels"
+    },
+    "thresholds": {
+      "crit": "Critical",
+      "description": "When a metric crosses these, its stat/chart turns amber then red.",
+      "reset": "Reset",
+      "title": "Thresholds",
+      "warn": "Warning"
+    },
+    "title": "Dashboard settings",
+    "unitFraction": "0–1 fraction",
+    "unitMs": "milliseconds",
+    "unitUsd": "USD"
+  },
+  "subtitle": "Agent telemetry — traces, tokens, cost and latency.",
+  "title": "Observability",
+  "toolbar": {
+    "edit": "Edit layout",
+    "lock": "Lock layout",
+    "resetLayout": "Reset layout",
+    "settings": "Dashboard settings"
+  },
+  "traces": {
+    "cost": "Cost",
+    "duration": "Duration",
+    "empty": "No traces in this window",
+    "root": "Trace",
+    "spans": "Spans",
+    "started": "Started",
+    "surface": "Surface"
+  },
+  "waterfall": {
+    "cost": "Cost {value}",
+    "empty": "No spans for this trace",
+    "spanCount": "{count} spans",
+    "title": "Trace detail",
+    "toggleEvents": "Toggle span details",
+    "tokens": "{count} tokens",
+    "totalDuration": "Duration {value}"
+  }
+}

@@ -90,4 +90,20 @@ describe("appendGoalContext", () => {
     const out = appendGoalContext({ appendSystemPrompt: "   ", activeGoal: goal })
     expect(out?.startsWith(GOAL_SECTION_MARKER)).toBe(true)
   })
+
+  it("skips injection when the goal section carries leaking PII (red-line gate)", () => {
+    const goal = buildGoal({
+      status: "active",
+      safeObjective: "email the report to john.doe@example.com before EOD",
+    })
+    const out = appendGoalContext({ appendSystemPrompt: "[brief]", activeGoal: goal })
+    expect(out).toBe("[brief]")
+    expect(out).not.toContain("john.doe@example.com")
+  })
+
+  it("still injects a clean goal section that has no PII", () => {
+    const goal = buildGoal({ status: "active", safeObjective: "ship the flag system" })
+    const out = appendGoalContext({ appendSystemPrompt: "[brief]", activeGoal: goal })
+    expect(out).toContain("ship the flag system")
+  })
 })

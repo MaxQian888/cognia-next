@@ -1,0 +1,29 @@
+{
+  "categories": {
+    "action": "action",
+    "ai": "AI",
+    "annotation": "annotation",
+    "data": "data",
+    "flow": "flow",
+    "io": "I/O",
+    "plugin": "plugin",
+    "trigger": "trigger"
+  },
+  "commands": {
+    "autoLayout": "Auto-layout",
+    "backToLibrary": "Back to library",
+    "exportJson": "Export workflow JSON",
+    "importJson": "Import workflow JSON",
+    "redo": "Redo",
+    "run": "Run workflow",
+    "save": "Save workflow",
+    "undo": "Undo"
+  },
+  "empty": "No results found.",
+  "headings": {
+    "addCategory": "Add {category} node",
+    "editorActions": "Editor actions",
+    "recent": "Switch to recent workflow"
+  },
+  "searchPlaceholder": "Type a command, search nodes, jump to a workflow…"
+}

@@ -448,6 +448,15 @@ export function createMockPluginContext(
         }
         return totalBytes * 2
       },
+      setSecure: async <T>(key: string, value: T): Promise<void> => {
+        localStorage.setItem(`mock:${pluginId}:secure:${key}`, JSON.stringify(value))
+      },
+      getSecure: async <T>(key: string): Promise<T | undefined> => {
+        const value = localStorage.getItem(`mock:${pluginId}:secure:${key}`)
+        return value ? (JSON.parse(value) as T) : undefined
+      },
+      isEncrypted: async (key: string): Promise<boolean> =>
+        localStorage.getItem(`mock:${pluginId}:secure:${key}`) !== null,
     },
 
     events: {

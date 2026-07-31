@@ -37,7 +37,10 @@ export const OAUTH_ENDPOINTS: Record<AnthropicAuthMode, OAuthEndpointConfig> = {
   subscription: {
     authorizeUrl: "https://claude.ai/oauth/authorize",
     redirectUri: "https://platform.claude.com/oauth/code/callback",
-    scopes: "user:profile user:inference user:sessions:claude_code",
+    // Mirrors the current Claude Code CLI scope set. `user:mcp_servers` was
+    // added upstream for OAuth-backed MCP access; included for parity so the
+    // consent screen matches the official client.
+    scopes: "user:profile user:inference user:sessions:claude_code user:mcp_servers",
   },
   console: {
     authorizeUrl: "https://console.anthropic.com/oauth/authorize",
@@ -58,10 +61,3 @@ export const OAUTH_REQUEST_HEADERS = {
   "anthropic-beta": OAUTH_REQUIRED_BETA_FEATURES.join(","),
   "x-app": "cli",
 } as const
-
-/**
- * The Claude Code CLI's user-agent string. Pinned to the version captured in
- * [hermes-agent#15080](https://github.com/NousResearch/hermes-agent/issues/15080);
- * Anthropic does *not* validate the version, only the `claude-cli/...` shape.
- */
-export const CLAUDE_CLI_USER_AGENT = "claude-cli/2.1.119 (external, cli)"

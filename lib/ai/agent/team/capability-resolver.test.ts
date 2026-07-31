@@ -1,6 +1,7 @@
 import type { AgentTeam, AgentTeammate } from "@/types/agent/agent-team"
 import { DEFAULT_TEAM_CONFIG } from "@/types/agent/agent-team"
 import {
+  clampCapabilitiesToRuntime,
   RESOLVED_CAPABILITY_KEYS,
   resolveTeamCapabilities,
   resolveTeammateCapabilities,
@@ -173,5 +174,41 @@ describe("capability-resolver", () => {
         "a2uiTemplateIds",
       ])
     })
+  })
+})
+
+describe("clampCapabilitiesToRuntime (ADR-0090 Phase 7)", () => {
+  const bundle = {
+    mcpServerIds: ["gh"],
+    skillIds: ["review"],
+    nativeAnthropicToolIds: ["computer"],
+    characterPackIds: ["pack"],
+    externalAgentPresetIds: ["codex"],
+    subagentIds: ["explore"],
+    a2uiTemplateIds: ["tpl"],
+  }
+
+  it("keeps everything when the runtime serves mcp, native subagents and tools", () => {
+    expect(
+      clampCapabilitiesToRuntime(bundle, ["mcp", "subagents.native", "tools.ordinary"])
+    ).toEqual(bundle)
+  })
+
+  it("empties exactly the id lists whose backing runtime capability is missing", () => {
+    const clamped = clampCapabilitiesToRuntime(bundle, ["tools.ordinary"])
+    expect(clamped.mcpServerIds).toEqual([])
+    expect(clamped.subagentIds).toEqual([])
+    expect(clamped.nativeAnthropicToolIds).toEqual(["computer"])
+    expect(clamped.skillIds).toEqual(["review"])
+  })
+
+  it("a tools-less runtime also drops skills and native tools; prompt-level bundles pass", () => {
+    const clamped = clampCapabilitiesToRuntime(bundle, [])
+    expect(clamped.nativeAnthropicToolIds).toEqual([])
+    expect(clamped.skillIds).toEqual([])
+    // Intersection only removes — prompt-level and runtime-selecting lists stay.
+    expect(clamped.characterPackIds).toEqual(["pack"])
+    expect(clamped.externalAgentPresetIds).toEqual(["codex"])
+    expect(clamped.a2uiTemplateIds).toEqual(["tpl"])
   })
 })

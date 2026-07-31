@@ -109,3 +109,20 @@ describe("skill-registry", () => {
     expect(listSkillEntries()).toEqual([])
   })
 })
+
+// ── W4.2: cross-plugin id hijack is rejected (first-wins) ────────────────────
+describe("first-wins-cross-plugin (W4.2)", () => {
+  it("keeps the incumbent plugin's skill and survives the loser's cleanup", () => {
+    const mkSkill = (name: string) =>
+      ({ id: "shared-id", name, description: "d", content: "c" }) as never
+    registerSkill("shared-id", mkSkill("A"), { pluginId: "plugin-a" })
+    registerSkill("shared-id", mkSkill("B"), { pluginId: "plugin-b" })
+
+    expect(getSkillEntry("shared-id")?.pluginId).toBe("plugin-a")
+
+    // Unregistering the rejected plugin must not drop the winner's entry.
+    expect(unregisterSkillsByPlugin("plugin-b")).toBe(0)
+    expect(getSkillEntry("shared-id")?.pluginId).toBe("plugin-a")
+    unregisterSkillsByPlugin("plugin-a")
+  })
+})

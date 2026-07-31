@@ -7,6 +7,13 @@ import { NextIntlClientProvider } from "next-intl"
 import { createEditorStore } from "@/lib/workflow/editor/store"
 import type { VisualWorkflow } from "@/types/workflow/visual"
 
+const publishWorkflow = jest.fn()
+const unpublishWorkflow = jest.fn()
+jest.mock("@/lib/workflow/publish/publish-workflow", () => ({
+  publishWorkflow: (...args: unknown[]) => publishWorkflow(...args),
+  unpublishWorkflow: (...args: unknown[]) => unpublishWorkflow(...args),
+}))
+
 const EMPTY_CATALOG: never[] = []
 jest.mock("@/lib/workflow/nodes/catalog", () => ({
   subscribePluginCatalog: () => () => {},
@@ -44,6 +51,12 @@ const messages = {
         maxMs: "Max (ms)",
       },
       timezone: { label: "Timezone", hint: "h" },
+      onFailure: {
+        title: "Failure handling",
+        hint: "h",
+        runCatchNodes: { label: "Run catch nodes", hint: "h" },
+        notify: { label: "Notify on failure", hint: "h" },
+      },
       variables: {
         title: "Variables",
         hint: "h",
@@ -72,6 +85,14 @@ const messages = {
         empty: "No plugin-contributed workflow capabilities installed.",
         sections: { nodes: "Nodes", triggers: "Triggers", templates: "Templates" },
         contributedBy: "Provided by {plugin}",
+      },
+      publish: {
+        title: "Publish",
+        hint: "Publish hint",
+        publish: "Publish",
+        publishedAs: "Published as tool",
+        republish: "Re-publish",
+        unpublish: "Unpublish",
       },
     },
   },
@@ -106,6 +127,11 @@ function mount() {
 }
 
 describe("SettingsTab", () => {
+  beforeEach(() => {
+    publishWorkflow.mockReset()
+    unpublishWorkflow.mockReset()
+  })
+
   it("renders all sections", () => {
     mount()
     expect(screen.getByTestId("workflow-settings-tab")).toBeInTheDocument()
@@ -123,9 +149,69 @@ describe("SettingsTab", () => {
     expect(store.getState().dirty).toBe(true)
   })
 
+  it("displays the shared max-concurrency default (4) when the field is absent", () => {
+    // makeWorkflow's settings carry no maxConcurrency — the input must show
+    // DEFAULT_MAX_CONCURRENCY, matching what the zod backfill actually runs,
+    // never the old sequential `1`.
+    mount()
+    expect(screen.getByLabelText("Max in-run nodes")).toHaveValue(4)
+  })
+
   it("editing a retry attempt count writes through setSettings", () => {
     const store = mount()
     fireEvent.change(screen.getByLabelText("Attempts"), { target: { value: "5" } })
     expect(store.getState().baseWorkflow.settings.retryDefaults.attempts).toBe(5)
+  })
+
+  it("toggling onFailure switches writes through setSettings", () => {
+    const store = mount()
+    // Default: runCatchNodes on (checked), notify off.
+    fireEvent.click(screen.getByTestId("wf-onfailure-runcatch"))
+    expect(store.getState().baseWorkflow.settings.onFailure?.runCatchNodes).toBe(false)
+    fireEvent.click(screen.getByTestId("wf-onfailure-notify"))
+    expect(store.getState().baseWorkflow.settings.onFailure?.notify).toBe(true)
+  })
+
+  // ── ADR-0070 Phase 3 — the risk-gating opt-out ──────────────────────────
+  it("toggling risk gating writes through setSettings", () => {
+    // Reachability is the point: the changeset documents `riskGating: false`
+    // as the escape hatch for a gated workflow, so it must be settable here.
+    const store = mount()
+    fireEvent.click(screen.getByTestId("wf-risk-gating"))
+    expect(store.getState().baseWorkflow.settings.riskGating).toBe(true)
+    fireEvent.click(screen.getByTestId("wf-risk-gating"))
+    expect(store.getState().baseWorkflow.settings.riskGating).toBe(false)
+  })
+
+  it("syncs publish and unpublish results into the editor store without marking it dirty", async () => {
+    const workflowInterface = {
+      inputSchema: { type: "object" },
+      outputSchema: { type: "string" },
+    }
+    publishWorkflow.mockResolvedValue({
+      toolName: "wf_wf",
+      workflowInterface,
+      created: true,
+      skillId: "skill_wf",
+    })
+    unpublishWorkflow.mockResolvedValue(undefined)
+    const store = mount()
+
+    fireEvent.click(screen.getByTestId("workflow-publish-button"))
+
+    await screen.findByText("wf_wf")
+    expect(store.getState().baseWorkflow.published).toEqual({
+      at: expect.any(Number),
+      toolName: "wf_wf",
+    })
+    expect(store.getState().baseWorkflow.interface).toEqual(workflowInterface)
+    expect(store.getState().dirty).toBe(false)
+
+    fireEvent.click(screen.getByText("Unpublish"))
+
+    await screen.findByTestId("workflow-publish-button")
+    expect(store.getState().baseWorkflow.published).toBeUndefined()
+    expect(store.getState().baseWorkflow.interface).toBeUndefined()
+    expect(store.getState().dirty).toBe(false)
   })
 })

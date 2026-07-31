@@ -38,18 +38,18 @@ Cognia 可以把一个产物——对话记录、工作流图、A2UI 应用或�
 
 ## 部署 worker（API）
 
-worker 位于仓库的 `share-server/worker/`，是独立项目（不在应用的 pnpm
+worker 位于仓库的 `services/share-server/worker/`，是独立项目（不在应用的 pnpm
 workspace 内）。它现在是纯 JSON API——viewer 改为应用自身的 `/share/view`
 路由，单独部署到 Cloudflare Pages（见下一节）。
 
 ```bash
 # 1. 安装依赖（独立项目——忽略应用 workspace）
-cd share-server/worker && pnpm install --ignore-workspace
+cd services/share-server/worker && pnpm install --ignore-workspace
 
 # 2. 创建 worker 绑定的存储
 wrangler r2 bucket create cognia-shares
 wrangler kv namespace create SHARE_KV
-#   → 把打印出的 namespace id 填进 share-server/worker/wrangler.toml
+#   → 把打印出的 namespace id 填进 services/share-server/worker/wrangler.toml
 #     的 [[kv_namespaces]] id = "..."
 
 # 3. 设置应用用于创建/撤销链接的 bearer 密钥
@@ -79,13 +79,13 @@ wrangler pages deploy out --project-name cognia-share-viewer
 
 把 Pages 项目绑定到你的分享主机（如 `share.cognia.cn`）。worker 的
 `…/v1/*` 路由优先级更高，因此 `/v1/*` 命中 API，`/share/view`（以及其余静态
-应用）由 Pages 提供。详见 `share-server/pages/README.md`，其中也说明了整个
+应用）由 Pages 提供。详见 `services/share-server/pages/README.md`，其中也说明了整个
 应用壳会在该主机上公开可达。
 
 无需账号也可随时跑测试（用 miniflare）：
 
 ```bash
-cd share-server/worker && pnpm test
+cd services/share-server/worker && pnpm test
 ```
 
 ## 让应用指向它

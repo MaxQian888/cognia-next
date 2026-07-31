@@ -151,6 +151,38 @@ export function validateCronExpression(expression: string): { valid: boolean; er
 }
 
 /**
+ * Validate the workflow daemon's cross-language cron subset. The general app
+ * parser intentionally supports OCPS modifiers such as L and #, while Rust's
+ * always-on daemon accepts classic 5/6-field schedules. Keeping this boundary
+ * explicit prevents the editor from accepting a trigger the daemon cannot arm.
+ */
+export function validateWorkflowCronExpression(expression: string): {
+  valid: boolean
+  error?: string
+} {
+  const general = validateCronExpression(expression)
+  if (!general.valid) return general
+
+  const trimmed = expression.trim()
+  if (/[L#]/i.test(trimmed)) {
+    return {
+      valid: false,
+      error: "Workflow cron does not support L or # modifiers",
+    }
+  }
+
+  const expanded = expandMacro(trimmed)
+  const fieldCount = expanded.split(/\s+/).length
+  if (fieldCount !== 5 && fieldCount !== 6) {
+    return {
+      valid: false,
+      error: "Workflow cron requires 5 or 6 fields",
+    }
+  }
+  return { valid: true }
+}
+
+/**
  * Get the next occurrence of a cron expression after `fromDate`.
  * @param timezone Optional IANA timezone. When omitted, the host's local zone
  *                 is used so wall-clock fields are interpreted locally.

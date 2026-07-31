@@ -8,7 +8,16 @@
  */
 
 import { isTauri, transport } from "@/lib/tauri"
-import type { PerfSample, PerfSnapshot, SpanSnapshot, SystemDetails, TraceFile } from "./types"
+import type {
+  ManagedControlAction,
+  ManagedProcess,
+  ManagedSubsystem,
+  PerfSample,
+  PerfSnapshot,
+  SpanSnapshot,
+  SystemDetails,
+  TraceFile,
+} from "./types"
 
 /** Tauri event channel the sampler emits frames on. */
 export const PERF_SAMPLE_EVENT = "perf://sample"
@@ -76,4 +85,27 @@ export async function perfOpenTraceDir(): Promise<void> {
 export function subscribePerfSample(handler: (sample: PerfSample) => void): () => void {
   if (!isTauri()) return () => {}
   return transport.subscribe<PerfSample>(PERF_SAMPLE_EVENT, handler)
+}
+
+/**
+ * List every cognia-managed child process. The performance panel reads the same
+ * data off `PerfSample.managed`; this is for non-perf callers. `[]` on web.
+ */
+export async function listManagedProcesses(): Promise<ManagedProcess[]> {
+  if (!isTauri()) return []
+  return transport.call<ManagedProcess[]>("list_managed_processes")
+}
+
+/**
+ * Control a Rust-supervised managed process (kill / restart). External agents
+ * are NOT routed here — the renderer controls them through
+ * `ExternalAgentManager` (see `managed-control.ts`).
+ */
+export async function controlManagedProcess(
+  subsystem: ManagedSubsystem,
+  id: string,
+  action: ManagedControlAction
+): Promise<void> {
+  if (!isTauri()) return
+  await transport.call("control_managed_process", { subsystem, id, action })
 }

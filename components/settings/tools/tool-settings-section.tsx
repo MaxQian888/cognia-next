@@ -9,9 +9,12 @@ import {
   ChevronRightIcon,
   CodeIcon,
   CpuIcon,
+  FileSearchIcon,
   FolderOpenIcon,
   GitBranchIcon,
+  GlobeIcon,
   ShieldIcon,
+  SparklesIcon,
   TerminalIcon,
 } from "lucide-react"
 
@@ -30,19 +33,24 @@ import {
   type BuiltinToolRiskLevel,
   namespaced,
 } from "@/lib/settings/builtin-tools"
-import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
+import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 
 import { AlwaysAllowList } from "./always-allow-list"
 import { ToolCatalogBrowser } from "./tool-catalog-browser"
 
 const CATEGORY_ICONS: Record<BuiltinToolCategoryId, React.ReactNode> = {
   fileExtras: <FolderOpenIcon className="h-4 w-4" />,
+  coreFiles: <FileSearchIcon className="h-4 w-4" />,
   git: <GitBranchIcon className="h-4 w-4" />,
   process: <CpuIcon className="h-4 w-4" />,
   environment: <BoxIcon className="h-4 w-4" />,
   shellAdvanced: <TerminalIcon className="h-4 w-4" />,
   terminalRepl: <TerminalIcon className="h-4 w-4" />,
   lsp: <CodeIcon className="h-4 w-4" />,
+  codeGraph: <CodeIcon className="h-4 w-4" />,
+  astGrep: <FileSearchIcon className="h-4 w-4" />,
+  dependencyResearch: <BoxIcon className="h-4 w-4" />,
+  webclone: <GlobeIcon className="h-4 w-4" />,
 }
 
 function riskLabelKey(level: BuiltinToolRiskLevel): string {
@@ -77,7 +85,22 @@ export function ToolSettingsSection() {
   const settings = useSettingsStore((s) => s.settings)
   const setBuiltinToolEnabled = useSettingsStore((s) => s.setBuiltinToolEnabled)
 
+  const setWebToolsEnabled = useSettingsStore((s) => s.setWebToolsEnabled)
+  const setWebToolsNativeOnAnthropic = useSettingsStore((s) => s.setWebToolsNativeOnAnthropic)
+  const setWebToolsAllowPrivateHosts = useSettingsStore((s) => s.setWebToolsAllowPrivateHosts)
+  const setWebToolsAlwaysDistill = useSettingsStore((s) => s.setWebToolsAlwaysDistill)
+  const setSkillToolEnabled = useSettingsStore((s) => s.setSkillToolEnabled)
+  const setSlashCommandToolEnabled = useSettingsStore((s) => s.setSlashCommandToolEnabled)
+  const setTeamCollaborationToolEnabled = useSettingsStore((s) => s.setTeamCollaborationToolEnabled)
+
   const builtinTools = settings?.builtinTools ?? DEFAULT_BUILTIN_TOOLS
+  const webToolsEnabled = settings?.webTools?.enabled ?? true
+  const webNativeOnAnthropic = settings?.webTools?.nativeOnAnthropic ?? false
+  const webAllowPrivateHosts = settings?.webTools?.allowPrivateHosts ?? false
+  const webAlwaysDistill = settings?.webTools?.alwaysDistill ?? false
+  const skillToolEnabled = settings?.selfInvokeTools?.skill ?? false
+  const slashCommandToolEnabled = settings?.selfInvokeTools?.slashCommand ?? false
+  const teamCollaborationToolEnabled = settings?.selfInvokeTools?.teamCollaboration ?? false
   const desktop = isTauri()
 
   return (
@@ -100,6 +123,124 @@ export function ToolSettingsSection() {
           <AlertDescription className="text-xs">{t("desktopRequiredDesc")}</AlertDescription>
         </Alert>
       )}
+
+      {/* Web tools are host-routed (renderer + CLI), so unlike the sidecar
+          categories they work in the browser too — not desktop-gated. */}
+      <Card className={!webToolsEnabled ? "opacity-60" : undefined}>
+        <CardHeader className="pb-2 pt-3 px-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <GlobeIcon className="h-4 w-4" />
+              <CardTitle className="text-sm truncate">{t("webCardTitle")}</CardTitle>
+              <Badge variant="outline" className={`text-[9px] uppercase ${riskBadgeClass("low")}`}>
+                {t("riskLow")}
+              </Badge>
+            </div>
+            <Switch
+              checked={webToolsEnabled}
+              onCheckedChange={(next) => setWebToolsEnabled(next)}
+              aria-label={t("toggleAriaLabel", { name: t("webCardTitle") })}
+            />
+          </div>
+          <CardDescription className="text-[11px] leading-snug pt-1">
+            {t("webCardDesc")}
+          </CardDescription>
+          {webToolsEnabled && desktop && (
+            <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-dashed px-3 py-2">
+              <div className="min-w-0">
+                <p className="text-[12px] font-medium">{t("webNativeAnthropicTitle")}</p>
+                <p className="text-[11px] leading-snug text-muted-foreground">
+                  {t("webNativeAnthropicDesc")}
+                </p>
+              </div>
+              <Switch
+                checked={webNativeOnAnthropic}
+                onCheckedChange={(next) => setWebToolsNativeOnAnthropic(next)}
+                aria-label={t("toggleAriaLabel", { name: t("webNativeAnthropicTitle") })}
+              />
+            </div>
+          )}
+          {webToolsEnabled && (
+            <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-dashed px-3 py-2">
+              <div className="min-w-0">
+                <p className="text-[12px] font-medium">{t("webAlwaysDistillTitle")}</p>
+                <p className="text-[11px] leading-snug text-muted-foreground">
+                  {t("webAlwaysDistillDesc")}
+                </p>
+              </div>
+              <Switch
+                checked={webAlwaysDistill}
+                onCheckedChange={(next) => setWebToolsAlwaysDistill(next)}
+                aria-label={t("toggleAriaLabel", { name: t("webAlwaysDistillTitle") })}
+              />
+            </div>
+          )}
+          {webToolsEnabled && (
+            <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-dashed border-amber-500/40 px-3 py-2">
+              <div className="min-w-0">
+                <p className="text-[12px] font-medium">{t("webAllowPrivateTitle")}</p>
+                <p className="text-[11px] leading-snug text-muted-foreground">
+                  {t("webAllowPrivateDesc")}
+                </p>
+              </div>
+              <Switch
+                checked={webAllowPrivateHosts}
+                onCheckedChange={(next) => setWebToolsAllowPrivateHosts(next)}
+                aria-label={t("toggleAriaLabel", { name: t("webAllowPrivateTitle") })}
+              />
+            </div>
+          )}
+        </CardHeader>
+      </Card>
+
+      {/* Agent self-invocation tools (Skill / SlashCommand). Host-routed, so
+          they work in the browser too — not desktop-gated. Opt-in (default off). */}
+      <Card>
+        <CardHeader className="pb-2 pt-3 px-4">
+          <div className="flex items-center gap-2 min-w-0">
+            <SparklesIcon className="h-4 w-4" />
+            <CardTitle className="text-sm truncate">{t("selfInvokeCardTitle")}</CardTitle>
+          </div>
+          <CardDescription className="text-[11px] leading-snug pt-1">
+            {t("selfInvokeCardDesc")}
+          </CardDescription>
+          <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-dashed px-3 py-2">
+            <div className="min-w-0">
+              <p className="text-[12px] font-medium">{t("skillToolTitle")}</p>
+              <p className="text-[11px] leading-snug text-muted-foreground">{t("skillToolDesc")}</p>
+            </div>
+            <Switch
+              checked={skillToolEnabled}
+              onCheckedChange={(next) => setSkillToolEnabled(next)}
+              aria-label={t("toggleAriaLabel", { name: t("skillToolTitle") })}
+            />
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-dashed px-3 py-2">
+            <div className="min-w-0">
+              <p className="text-[12px] font-medium">{t("slashToolTitle")}</p>
+              <p className="text-[11px] leading-snug text-muted-foreground">{t("slashToolDesc")}</p>
+            </div>
+            <Switch
+              checked={slashCommandToolEnabled}
+              onCheckedChange={(next) => setSlashCommandToolEnabled(next)}
+              aria-label={t("toggleAriaLabel", { name: t("slashToolTitle") })}
+            />
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-dashed px-3 py-2">
+            <div className="min-w-0">
+              <p className="text-[12px] font-medium">{t("teamCollabToolTitle")}</p>
+              <p className="text-[11px] leading-snug text-muted-foreground">
+                {t("teamCollabToolDesc")}
+              </p>
+            </div>
+            <Switch
+              checked={teamCollaborationToolEnabled}
+              onCheckedChange={(next) => setTeamCollaborationToolEnabled(next)}
+              aria-label={t("toggleAriaLabel", { name: t("teamCollabToolTitle") })}
+            />
+          </div>
+        </CardHeader>
+      </Card>
 
       <div className="grid gap-3 sm:grid-cols-2">
         {BUILTIN_TOOL_CATEGORIES.map((cat) => (

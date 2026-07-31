@@ -1,0 +1,9 @@
+{
+  "approvedAt": "Approved {date}",
+  "description": "Binaries you chose to remember. Each approval is pinned to the file's SHA-256 — if the bytes change, you are asked again.",
+  "empty": "No approved binaries. This plugin's executables prompt on every run.",
+  "hash": "sha256 {sha256}…",
+  "revoke": "Revoke",
+  "revokeAria": "Revoke the approval for {path}",
+  "title": "Approved binaries"
+}

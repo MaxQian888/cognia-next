@@ -3,7 +3,7 @@
 // key resolved here at click time. Mirrors the existing plugin
 // `onAction(id, action: string)` string-command convention.
 
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.ui
 

@@ -9,8 +9,8 @@ description: 应用如何找到（或拉取）cognia 二进制 —— 先在托�
   `detectCli("cognia")`（`lib/cli-bridge/detect-cli.ts:37-56`）会调用 Tauri 命令
   `detect_binary`，后者先查 300 秒缓存，优先 **应用托管目录**（应用自己下载的
   二进制），再通过运行 `cognia --version` 探测 `PATH`
-  （`src-tauri/src/cli_bridge/detect.rs:186-216`）。托管下载
-  （`download_cognia_cli`，`download.rs:197-310`）解析平台三元组，从 GitHub Releases
+  （`src-tauri/src/cli_bridge/detect.rs:230-265`）。托管下载
+  （`download_cognia_cli`，`download.rs:200-309`）解析平台三元组，从 GitHub Releases
   拉取 `cognia-<triple>.tar.gz`（+ `.sig` + `checksums.txt`），**始终强制
   SHA-256**，并对嵌入的发布密钥做 Ed25519 校验——除非它仍是占位符，
   随后做防穿越解压到 `<app_data>/cognia/cli/<version>`，在 Unix 上 chmod，注册
@@ -30,15 +30,15 @@ export interface BinaryDetectionResult {
 }
 ```
 
-Rust 这一侧（`detect.rs:186-216`）：
+Rust 这一侧（`detect.rs:230-265`）：
 
 1. 以 `(name, version_arg)` 为键的缓存查找，TTL 300 s（`detect.rs:21`）
 2. `find_in_managed_dirs(name)` —— 在过往下载注册的目录上做 LIFO
-   （`register_managed_dir`，`detect.rs:61-66`；该快照同时为
+   （`register_managed_dir`，`detect.rs:61-69`；该快照同时为
    [终端启动](./devtools-ui) 喂入 PATH 注入）
 3. 回退：从 `PATH` 启动 `name --version`；version = 去空白后的首行 stdout
    （`:118-122`）；path 经 `which`/`where` 解析（`:168-182`）
-4. 缓存结果；下载后 `invalidate("cognia")` 将其丢弃（`download.rs:301`）
+4. 缓存结果；下载后 `invalidate("cognia")` 将其丢弃（`download.rs:308`）
 
 `getCliBridgeStatus()`（`lib/cli-bridge/status.ts:26-49`）是
 [bridge](./bridge-server) 的姊妹探测：`{running, boundPort, endpointFile}`，在 web
@@ -83,6 +83,10 @@ sequenceDiagram
   （`normalize_signature`，`:313-324`）；占位符密钥 ⇒ 跳过并报
   `release signing key is a placeholder; skipping Ed25519 verification (SHA-256 enforced)`；
   真实密钥 ⇒ 失败即中止安装
+- **离线校验** —— `cognia release-verify <artifact> --checksums <checksums.txt> [--signature <sig>] [--json]`
+  在不下载、不安装的情况下复用同一套 checksum 与 release-key 策略。发布密钥是真实密钥时，
+  默认读取 `<artifact>.sig`；`--signature` 只是覆盖这个 sidecar 路径。JSON 会报告两个摘要、
+  `checksumVerified`、`signatureStatus` 和 release-key fingerprint。
 - **安装目录**（`:282-291`）—— `<app_data>/cognia/cli/<version_label>`（Roaming AppData /
   Application Support / `~/.config`），可按调用经 `targetDir` 覆盖
 - **解压**（`extract_tar_gz`，`:154-189`）—— gzip + tar 遍历，**拒绝路径穿越

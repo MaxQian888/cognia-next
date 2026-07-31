@@ -6,10 +6,11 @@ import { render, screen, fireEvent } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
+  useLocale: () => "en",
 }))
 
 const errorMock = jest.fn()
-jest.mock("@/lib/logging", () => {
+jest.mock("@cognia/logging", () => {
   const stub = () => jest.fn()
   return {
     loggers: {

@@ -61,8 +61,11 @@ import { getDb } from "@/lib/db/schema"
 import { clearMessages } from "@/lib/db/messages"
 import { clearSessionSdkLink, deleteSession, updateSession } from "@/lib/db/sessions"
 import { useChatStore } from "@/stores/chat"
-import { workflowSessionId } from "@/hooks/chat/use-workflow-editor-session"
-import type { ChatSession } from "@/lib/claude/types"
+import {
+  createWorkflowEditorSession,
+  workflowSessionId,
+} from "@/hooks/chat/use-workflow-editor-session"
+import type { ChatSession } from "@cognia/agent-config-types"
 import { cn } from "@/lib/utils"
 
 export interface SessionBarProps {
@@ -70,18 +73,17 @@ export interface SessionBarProps {
   workflowName?: string
   /** Sessions are filtered against this prefix (`workflow:${workflowId}`). */
   activeSessionId: string
+  onSwitchSession?: (sessionId: string) => void
+  onCreateSession?: (sessionId: string) => void
   className?: string
-}
-
-function makeAdditionalSessionId(workflowId: string): string {
-  const suffix = Math.random().toString(36).slice(2, 8)
-  return `${workflowSessionId(workflowId)}:${suffix}`
 }
 
 export function WorkflowSessionBar({
   workflowId,
   workflowName,
   activeSessionId,
+  onSwitchSession,
+  onCreateSession,
   className,
 }: SessionBarProps) {
   const t = useTranslations("workflowEditor.chat")
@@ -149,7 +151,7 @@ export function WorkflowSessionBar({
     try {
       await clearMessages(active.id)
       await clearSessionSdkLink(active.id)
-      useChatStore.getState().setMessages([])
+      useChatStore.getState().replaceSessionMessages(active.id, [])
       setClearOpen(false)
       toast.success(t("session.cleared"))
     } catch (err) {
@@ -160,30 +162,28 @@ export function WorkflowSessionBar({
   // ── Create + Switch ───────────────────────────────────────────────
   const handleCreate = useCallback(async () => {
     try {
-      const now = Date.now()
-      const id = makeAdditionalSessionId(workflowId)
-      const row: ChatSession = {
-        id,
-        title: workflowName
-          ? t("session.newSuffixed", { name: workflowName })
-          : t("session.newDefault"),
-        kind: "workflow-editor",
-        createdAt: now,
-        updatedAt: now,
-      }
-      await getDb().sessions.put(row)
-      useChatStore.getState().setActiveSession(id)
-      useChatStore.getState().setMessages([])
+      const title = workflowName
+        ? t("session.newSuffixed", { name: workflowName })
+        : t("session.newDefault")
+      const sessionId = await createWorkflowEditorSession(workflowId, title)
+      onCreateSession?.(sessionId)
       toast.success(t("session.created"))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
     }
-  }, [workflowId, workflowName, t])
+  }, [onCreateSession, workflowId, workflowName, t])
 
-  const handleSwitch = useCallback((id: string) => {
-    useChatStore.getState().setActiveSession(id)
-    useChatStore.getState().setMessages([])
-  }, [])
+  const handleSwitch = useCallback(
+    (id: string) => {
+      if (onSwitchSession) {
+        onSwitchSession(id)
+        return
+      }
+      useChatStore.getState().setActiveSession(id)
+      useChatStore.getState().setMessages([])
+    },
+    [onSwitchSession]
+  )
 
   const handleDelete = useCallback(
     async (sessionId: string) => {
@@ -194,15 +194,18 @@ export function WorkflowSessionBar({
       try {
         await deleteSession(sessionId)
         if (activeSessionId === sessionId) {
-          useChatStore.getState().setActiveSession(defaultSessionId)
-          useChatStore.getState().setMessages([])
+          if (onSwitchSession) onSwitchSession(defaultSessionId)
+          else {
+            useChatStore.getState().setActiveSession(defaultSessionId)
+            useChatStore.getState().setMessages([])
+          }
         }
         toast.success(t("session.deleted"))
       } catch (err) {
         toast.error(err instanceof Error ? err.message : String(err))
       }
     },
-    [activeSessionId, defaultSessionId, t]
+    [activeSessionId, defaultSessionId, onSwitchSession, t]
   )
 
   return (

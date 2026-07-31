@@ -1,0 +1,20 @@
+{
+  "id": "cognia-browser-tools",
+  "name": "Browser Tools",
+  "version": "0.1.0",
+  "description": "Host-neutral Agent browser loop with structured snapshots, ref actions, multi-page control, file bridge, console, and network inspection.",
+  "type": "frontend",
+  "capabilities": ["tools"],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": { "cognia": ">=0.1.0" },
+  "permissions": ["agent:control"],
+  "activationEvents": ["startup"],
+  "runtimeCompatibility": {
+    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "mobile": { "availability": "supported", "entrypoint": "src/index.ts" }
+  }
+}

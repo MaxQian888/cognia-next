@@ -1,0 +1,12 @@
+{
+  "ariaLabel": "批量操作",
+  "clearSelection": "清空选择",
+  "disableAll": "全部停用",
+  "enableAll": "全部启用",
+  "refresh": "刷新",
+  "selected": "已选择 {count}",
+  "uninstall": "卸载",
+  "updateAll": "更新 {count} 个",
+  "updateResult": "成功 {ok} 个，失败 {failed} 个",
+  "updating": "更新中…"
+}

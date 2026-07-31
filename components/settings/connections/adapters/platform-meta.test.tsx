@@ -3,7 +3,7 @@
  */
 
 import { render } from "@testing-library/react"
-import { getPlatformMeta } from "./platform-meta"
+import { getAdapterTransportLabelKey, getPlatformMeta } from "./platform-meta"
 import { getPlatformIcon } from "@/components/connectors/platform-icons"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 
@@ -36,5 +36,18 @@ describe("getPlatformMeta", () => {
     const { Icon } = getPlatformMeta("github")
     const { container } = render(<Icon className="size-4" />)
     expect(container.querySelector("svg")).not.toBeNull()
+  })
+})
+
+describe("getAdapterTransportLabelKey", () => {
+  it("uses the DingTalk Stream Mode label for the internal longpoll bucket", () => {
+    expect(getAdapterTransportLabelKey("dingtalk", "longpoll")).toBe(
+      "transportLabels.dingtalkStream"
+    )
+  })
+
+  it("keeps generic longpoll adapters on the raw transport label", () => {
+    expect(getAdapterTransportLabelKey("telegram", "longpoll")).toBeNull()
+    expect(getAdapterTransportLabelKey("matrix", "longpoll")).toBeNull()
   })
 })

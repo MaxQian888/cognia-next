@@ -15,19 +15,25 @@
   "main": "src/index.ts",
   "author": "cognia-next",
   "license": "MIT",
+  "minAppVersion": "0.1.0",
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "activationEvents": ["onStartup"],
+  "activationEvents": ["startup"],
   "runtimeCompatibility": {
     "browser": {
       "availability": "supported",
       "entrypoint": "src/index.ts",
-      "hint": "Characters, skills, and templates load in the browser; the agent.turn node is desktop-only (it drives the sidecar Claude Agent SDK)."
+      "reason": "Characters, skills, and templates load in the browser; the agent.turn node is desktop-only (it drives the sidecar Claude Agent SDK)."
     },
     "tauri": {
       "availability": "supported",
       "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "degraded",
+      "entrypoint": "src/index.ts",
+      "reason": "Characters, skills, and templates load on mobile; the agent.turn node needs the desktop sidecar Claude Agent SDK."
     }
   }
 }

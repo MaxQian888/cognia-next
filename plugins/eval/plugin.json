@@ -1,0 +1,28 @@
+{
+  "id": "cognia-eval",
+  "name": "Agent Eval",
+  "version": "0.1.0",
+  "description": "Run agent eval datasets and read their results from chat. Wraps the eval engine (lib/ai/eval) as agent tools.",
+  "type": "frontend",
+  "capabilities": ["tools"],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "permissions": [],
+  "activationEvents": ["startup"],
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "mobile": { "availability": "supported", "entrypoint": "src/index.ts" }
+  }
+}

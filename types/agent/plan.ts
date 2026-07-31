@@ -33,7 +33,8 @@
  *
  *   agent_turn        → an in-session turn by the main agent (visible, conversational)
  *   teammate_dispatch → delegate to a teammate / subagent — reuses `dispatchTeammate`
- *   tool_call         → a specific tool invocation with fixed input
+ *   tool_call         → a specific plugin-registered tool invocation with fixed input
+ *   mcp_tool_call     → a single MCP server tool invocation — reuses `lib/mcp/invoke`
  *   sub_workflow      → run a nested VisualWorkflow — reuses `runWorkflow`
  *   approval_gate     → human approval checkpoint — reuses `lib/runtime/approval-bus`
  */
@@ -41,6 +42,7 @@ export type PlanStepKind =
   | "agent_turn"
   | "teammate_dispatch"
   | "tool_call"
+  | "mcp_tool_call"
   | "sub_workflow"
   | "approval_gate"
 
@@ -49,6 +51,7 @@ export type PlanStepParams =
   | { kind: "agent_turn"; prompt?: string }
   | { kind: "teammate_dispatch"; teamId?: string; teammateId?: string; spawnPrompt?: string }
   | { kind: "tool_call"; toolName: string; input: Record<string, unknown> }
+  | { kind: "mcp_tool_call"; serverId: string; toolName: string; input?: Record<string, unknown> }
   | { kind: "sub_workflow"; workflowId: string; triggerPayload?: unknown }
   | { kind: "approval_gate"; prompt?: string }
 
@@ -68,13 +71,7 @@ export type PlanStepParams =
  *   blocked     → an upstream dep failed and error policy is "stop"
  */
 export type PlanStepStatus =
-  | "pending"
-  | "ready"
-  | "in_progress"
-  | "completed"
-  | "failed"
-  | "skipped"
-  | "blocked"
+  "pending" | "ready" | "in_progress" | "completed" | "failed" | "skipped" | "blocked"
 
 export interface PlanStep {
   /** UUIDv4, stable across edits and re-renders. */
@@ -191,6 +188,8 @@ export interface AgentPlan {
   id: string
   /** FK → ChatSession.id. Session-scoped: at most one "open" plan per session. */
   sessionId: string
+  /** Owning workspace id — Workspace isolation column (Dexie v86); inherits the session's project. */
+  projectId?: string
   /** Snapshot of the character at creation time (UI avatar; survives character switch). */
   characterId?: string
   title: string
@@ -318,6 +317,7 @@ export type PlanEventKind =
   | "plan_updated"
   | "approved"
   | "rejected"
+  | "deferred"
   | "refined"
   | "step_started"
   | "step_completed"
@@ -342,6 +342,8 @@ export type PlanEventPayload =
   | { kind: "plan_updated"; totalSteps: number }
   | { kind: "approved" }
   | { kind: "rejected"; feedback?: string }
+  /** "No, keep planning": approval deferred, plan retained as a draft. */
+  | { kind: "deferred"; feedback?: string }
   | {
       kind: "refined"
       refinementType: PlanRefinementType

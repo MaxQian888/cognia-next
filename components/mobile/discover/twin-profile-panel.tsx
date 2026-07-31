@@ -6,8 +6,9 @@
  * Shows a quick read of the twin's distilled state — entity count, style
  * sample count, last update — so the user knows what the bound twin
  * "knows" before sending a message. The full profile is a projection
- * computed by the desktop; we fetch it through the new
- * `twin_profile_get` RPC.
+ * computed by the desktop; we fetch the raw row through the
+ * `twin_profile_get` companion RPC and project it with the shared
+ * {@link summarizeTwinProfile} selector (the same one the desktop card uses).
  *
  * Reads happen on-mount and on `twinId` change; failures fall through
  * to a friendly empty state rather than blocking the page.
@@ -18,24 +19,18 @@ import { useTranslations } from "next-intl"
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { transport } from "@/lib/tauri"
-
-interface TwinProfileSummary {
-  twinId: string
-  updatedAt?: number
-  sampleCount?: number
-  entityCount?: number
-  styleSummary?: string
-}
+import { summarizeTwinProfile, type TwinProfileSummary } from "@/lib/twin/profile-summary"
+import type { TwinProfile } from "@/types/twin"
 
 interface TwinProfileResponse {
-  profile: TwinProfileSummary | null
+  profile: TwinProfile | null
 }
 
 export interface TwinProfilePanelProps {
-  twinId: string
+  twinId?: string
 }
 
-export function TwinProfilePanel({ twinId }: TwinProfilePanelProps) {
+export function TwinProfilePanel({ twinId = "default" }: TwinProfilePanelProps) {
   const t = useTranslations("mobile.twinProfile")
   const [profile, setProfile] = useState<TwinProfileSummary | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -59,8 +54,8 @@ export function TwinProfilePanel({ twinId }: TwinProfilePanelProps) {
       .call("twin_profile_get", { twinId })
       .then((res: unknown) => {
         if (cancelled) return
-        const profile = (res as TwinProfileResponse | null)?.profile ?? null
-        setProfile(profile)
+        const raw = (res as TwinProfileResponse | null)?.profile ?? null
+        setProfile(summarizeTwinProfile(raw))
       })
       .catch((err) => {
         if (cancelled) return
@@ -95,8 +90,8 @@ export function TwinProfilePanel({ twinId }: TwinProfilePanelProps) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-2 text-sm">
-        <Row label={t("samples")} value={String(profile.sampleCount ?? 0)} />
-        <Row label={t("entities")} value={String(profile.entityCount ?? 0)} />
+        <p className="text-muted-foreground">{t("samples", { count: profile.sampleCount })}</p>
+        <p className="text-muted-foreground">{t("entities", { count: profile.entityCount })}</p>
         {profile.styleSummary ? (
           <div className="space-y-1">
             <span className="text-xs font-medium text-muted-foreground">{t("style")}</span>
@@ -105,14 +100,5 @@ export function TwinProfilePanel({ twinId }: TwinProfilePanelProps) {
         ) : null}
       </CardContent>
     </Card>
-  )
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between gap-2">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <span className="font-mono text-xs">{value}</span>
-    </div>
   )
 }

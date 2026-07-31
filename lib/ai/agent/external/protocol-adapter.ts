@@ -23,7 +23,15 @@ import type {
   AcpConfigOption,
   ExternalAgentConnectionStatus,
   ExternalAgentSessionExtensionSupport,
+  AcpAvailableCommand,
 } from "@/types/agent/external-agent"
+import {
+  resolveCommandCompactionCapability,
+  resolveProviderUndoCapability,
+  type ExternalAgentCompactionCapability,
+  type ExternalAgentCompactionOptions,
+  type ExternalAgentProviderUndoCapability,
+} from "./session-capabilities"
 
 /**
  * Protocol adapter interface
@@ -128,7 +136,7 @@ export interface ProtocolAdapter {
   setConfigOption?: (
     sessionId: string,
     configId: string,
-    value: string
+    value: string | boolean
   ) => Promise<AcpConfigOption[]>
 
   /**
@@ -138,16 +146,43 @@ export interface ProtocolAdapter {
   getConfigOptions?: (sessionId: string) => AcpConfigOption[] | undefined
 
   /**
+   * Optional: Append user input to the session's in-flight turn without
+   * interrupting it (Codex app-server `turn/steer`). Rejects when no turn is
+   * active or the backend lacks the method — callers keep their
+   * queue-and-replay fallback for that case.
+   */
+  steerTurn?: (sessionId: string, text: string) => Promise<void>
+
+  /** Optional: discover native or advertised context-compaction routes. */
+  getCompactionCapability?: (sessionId: string) => Promise<ExternalAgentCompactionCapability>
+
+  /** Optional: compact a session and resolve after provider-confirmed completion. */
+  compactSession?: (sessionId: string, options?: ExternalAgentCompactionOptions) => Promise<void>
+
+  /** Optional: discover the provider's advertised `/undo` command. */
+  getProviderUndoCapability?: (sessionId: string) => Promise<ExternalAgentProviderUndoCapability>
+
+  /** Optional: execute provider-specific undo semantics. */
+  undoLastProviderChange?: (sessionId: string) => Promise<void>
+
+  /**
    * Optional: List sessions (ACP extension / unstable)
    */
-  listSessions?: () => Promise<
-    Array<{ sessionId: string; title?: string; createdAt?: string; updatedAt?: string }>
+  listSessions?: (options?: SessionListOptions) => Promise<
+    Array<{
+      sessionId: string
+      cwd?: string
+      additionalDirectories?: string[]
+      title?: string
+      createdAt?: string
+      updatedAt?: string
+    }>
   >
 
   /**
    * Optional: Fork session (ACP extension / unstable)
    */
-  forkSession?: (sessionId: string) => Promise<ExternalAgentSession>
+  forkSession?: (sessionId: string, options?: SessionCreateOptions) => Promise<ExternalAgentSession>
 
   /**
    * Optional: Resume session (ACP extension / unstable)
@@ -171,6 +206,18 @@ export interface ProtocolAdapter {
    * Optional: Authenticate with the agent (ACP)
    */
   authenticate?: (methodId: string, credentials?: Record<string, unknown>) => Promise<void>
+
+  /**
+   * Optional: Log out of the agent's authenticated session (ACP v1 `logout`).
+   */
+  logout?: () => Promise<void>
+
+  /**
+   * Optional: Delete a session from the agent's listings (ACP v1
+   * `session/delete`), as opposed to {@link closeSession} which only ends it.
+   * The return is `void` (ACP) or a `boolean` success flag (OpenCode SDK).
+   */
+  deleteSession?: (sessionId: string) => Promise<void | boolean>
 
   /**
    * Optional: Expose ACP initialization metadata from negotiated handshake.
@@ -216,6 +263,12 @@ export interface ProtocolAdapter {
   healthCheck(): Promise<boolean>
 }
 
+/** Optional filters for protocol-backed session discovery. */
+export interface SessionListOptions {
+  /** Absolute working directory filter defined by ACP session/list. */
+  cwd?: string
+}
+
 /**
  * Options for creating a session
  * @see https://agentclientprotocol.com/protocol/session-setup
@@ -223,10 +276,17 @@ export interface ProtocolAdapter {
 export interface SessionCreateOptions {
   /** Working directory for the session (absolute path, required by ACP) */
   cwd?: string
+  /** Additional absolute workspace roots (ACP `additionalDirectories`). */
+  additionalDirectories?: string[]
   /** MCP servers to connect to */
   mcpServers?: import("@/types/agent/external-agent").AcpMcpServerConfig[]
   /** Permission mode for the session */
   permissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan" | "dontAsk"
+  /**
+   * Pre-approved tool allow-list, consulted only under `dontAsk` to silently
+   * approve matching tools (see `ExternalAgentExecutionOptions.allowedTools`).
+   */
+  allowedTools?: string[]
   /** Context to pass to the agent */
   context?: Record<string, unknown>
   /** Structured instruction payload for protocol-specific metadata bridging */
@@ -302,6 +362,69 @@ export abstract class BaseProtocolAdapter implements ProtocolAdapter {
 
   async healthCheck(): Promise<boolean> {
     return this.isConnected()
+  }
+
+  protected async getAdvertisedCommandCompactionCapability(
+    sessionId: string
+  ): Promise<ExternalAgentCompactionCapability> {
+    const session = this.getSession(sessionId)
+    if (!session) {
+      return { status: "unknown", routes: [], reason: "session_not_found" }
+    }
+    return resolveCommandCompactionCapability(
+      (session.metadata?.availableCommands as AcpAvailableCommand[] | undefined) ?? []
+    )
+  }
+
+  protected async compactWithAdvertisedCommand(
+    sessionId: string,
+    options: ExternalAgentCompactionOptions = {}
+  ): Promise<void> {
+    const capability = await this.getAdvertisedCommandCompactionCapability(sessionId)
+    const route = capability.routes.find(
+      (candidate) => candidate.kind === "command" && (!options.focus || candidate.supportsFocus)
+    )
+    if (!route || route.kind !== "command") {
+      throw new Error("Agent does not support context compaction")
+    }
+    const text = options.focus ? `/${route.command} ${options.focus}` : `/${route.command}`
+    const result = await this.execute(sessionId, {
+      id: this.generateMessageId(),
+      role: "user",
+      content: [{ type: "text", text }],
+      timestamp: new Date(),
+    })
+    if (!result.success) {
+      throw new Error(result.error || "Context compaction failed")
+    }
+  }
+
+  protected async getAdvertisedProviderUndoCapability(
+    sessionId: string
+  ): Promise<ExternalAgentProviderUndoCapability> {
+    const session = this.getSession(sessionId)
+    if (!session) {
+      return { status: "unknown", reason: "session_not_found" }
+    }
+    return resolveProviderUndoCapability(
+      (session.metadata?.availableCommands as AcpAvailableCommand[] | undefined) ?? []
+    )
+  }
+
+  protected async undoWithAdvertisedCommand(sessionId: string): Promise<void> {
+    const capability = await this.getAdvertisedProviderUndoCapability(sessionId)
+    if (capability.status !== "supported") {
+      throw new Error("Agent does not support provider undo")
+    }
+    const result = await this.execute(sessionId, {
+      id: this.generateMessageId(),
+      role: "user",
+      content: [{ type: "text", text: "/undo" }],
+      timestamp: new Date(),
+    })
+    if (!result.success) {
+      throw new Error(result.error || "Provider undo failed")
+    }
   }
 
   /**
@@ -521,3 +644,150 @@ export class ProtocolAdapterRegistry {
  * Global protocol adapter registry
  */
 export const protocolAdapterRegistry = new ProtocolAdapterRegistry()
+
+/** Factory shape stored in the registry — what a plugin contributes. */
+export type ProtocolAdapterFactory = () => ProtocolAdapter
+
+// ============================================================================
+// Plugin-contributed adapter overlay
+//
+// Plugins contribute external-agent protocol adapters through the
+// `external-agent-adapter` capability. The contribution flows into the SAME
+// `protocolAdapterRegistry` the four built-ins use (so resolution stays
+// uniform — `addAgent` calls `create(protocol)` and never branches on origin),
+// but every plugin registration is namespaced `${pluginId}:${id}` and tracked
+// by owner so disabling a plugin removes exactly its adapters and never a
+// built-in. This is the targeted-behaviour twin of the preset overlay in
+// `presets.ts`: presets contribute configuration, adapters contribute protocol.
+// ============================================================================
+
+/** protocol id → owning pluginId, for bulk cleanup on plugin disable. */
+const pluginAdapterOwners = new Map<string, string>()
+
+// ----------------------------------------------------------------------------
+// Registry change notifications
+//
+// The agent selector, settings panel, and the startup rehydrator need to react
+// the moment a plugin-contributed adapter becomes available or unavailable
+// (a plugin enabling/disabling its `external-agent-adapter`). Polling the
+// registry can't catch that transition, so the overlay emits a tiny synchronous
+// change event. A faulty listener must never break plugin enable/disable, so
+// dispatch is wrapped per-listener.
+// ----------------------------------------------------------------------------
+
+export interface ProtocolAdapterRegistryChange {
+  /** "register" when adapters became available, "unregister" when removed. */
+  kind: "register" | "unregister"
+  /** Affected protocol ids (namespaced `${pluginId}:${id}` for plugin adapters). */
+  protocols: string[]
+  /** Owning pluginId for the overlay mutation that produced this change. */
+  pluginId: string
+}
+
+type ProtocolAdapterRegistryListener = (change: ProtocolAdapterRegistryChange) => void
+
+const registryChangeListeners = new Set<ProtocolAdapterRegistryListener>()
+
+/** Subscribe to plugin-overlay registry changes. Returns an unsubscribe fn. */
+export function onProtocolAdapterRegistryChange(
+  listener: ProtocolAdapterRegistryListener
+): () => void {
+  registryChangeListeners.add(listener)
+  return () => {
+    registryChangeListeners.delete(listener)
+  }
+}
+
+function emitProtocolAdapterRegistryChange(change: ProtocolAdapterRegistryChange): void {
+  if (change.protocols.length === 0) {
+    return
+  }
+  for (const listener of registryChangeListeners) {
+    try {
+      listener(change)
+    } catch {
+      // Swallow: a UI listener throwing must not abort the enable/disable flow.
+    }
+  }
+}
+
+/**
+ * Register a plugin-contributed protocol adapter. Refuses (returns `false`) if
+ * the protocol is already registered by the host or another plugin — with the
+ * `${pluginId}:${id}` namespacing the bridge applies, that collision is
+ * unreachable in practice, but the honest signal lets the bridge report it.
+ * Re-registering the SAME plugin's protocol replaces it (idempotent re-enable).
+ */
+export function registerPluginProtocolAdapter(
+  protocol: string,
+  factory: ProtocolAdapterFactory,
+  opts: { pluginId: string }
+): boolean {
+  const existingOwner = pluginAdapterOwners.get(protocol)
+  if (protocolAdapterRegistry.has(protocol) && existingOwner !== opts.pluginId) {
+    return false
+  }
+  protocolAdapterRegistry.register(protocol, factory)
+  pluginAdapterOwners.set(protocol, opts.pluginId)
+  emitProtocolAdapterRegistryChange({
+    kind: "register",
+    protocols: [protocol],
+    pluginId: opts.pluginId,
+  })
+  return true
+}
+
+/**
+ * Drop every protocol adapter contributed by `pluginId`. Returns the number
+ * removed. Called by the plugin manager on disable / uninstall.
+ */
+export function unregisterPluginProtocolAdaptersByPlugin(pluginId: string): number {
+  const removedProtocols: string[] = []
+  for (const [protocol, owner] of pluginAdapterOwners) {
+    if (owner === pluginId) {
+      protocolAdapterRegistry.unregister(protocol)
+      pluginAdapterOwners.delete(protocol)
+      removedProtocols.push(protocol)
+    }
+  }
+  emitProtocolAdapterRegistryChange({ kind: "unregister", protocols: removedProtocols, pluginId })
+  return removedProtocols.length
+}
+
+/** Returns the owning pluginId for a protocol, or undefined for a built-in. */
+export function getPluginProtocolAdapterOwner(protocol: string): string | undefined {
+  return pluginAdapterOwners.get(protocol)
+}
+
+/**
+ * Protocols currently contributed by `pluginId` (namespaced `${pluginId}:${id}`),
+ * in registration order. Lets the disable path capture a plugin's protocols
+ * *before* {@link unregisterPluginProtocolAdaptersByPlugin} drops them, so the
+ * external-agent manager can tear down exactly the agents those protocols back.
+ */
+export function getPluginProtocolAdapterProtocols(pluginId: string): string[] {
+  const protocols: string[] = []
+  for (const [protocol, owner] of pluginAdapterOwners) {
+    if (owner === pluginId) {
+      protocols.push(protocol)
+    }
+  }
+  return protocols
+}
+
+/** Every plugin-contributed adapter as `{ protocol, pluginId }`, registration order. */
+export function listPluginProtocolAdapters(): Array<{ protocol: string; pluginId: string }> {
+  return Array.from(pluginAdapterOwners, ([protocol, pluginId]) => ({ protocol, pluginId }))
+}
+
+/**
+ * Test-only escape hatch: drop every plugin-contributed adapter (and its
+ * registry entry) so a suite can reset the overlay without disturbing the four
+ * built-ins. Production code uses `unregisterPluginProtocolAdaptersByPlugin`.
+ */
+export function __resetPluginProtocolAdaptersForTesting(): void {
+  for (const protocol of pluginAdapterOwners.keys()) {
+    protocolAdapterRegistry.unregister(protocol)
+  }
+  pluginAdapterOwners.clear()
+}

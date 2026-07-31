@@ -116,7 +116,7 @@ jest.mock("../task-scheduler", () => ({
   registerTaskExecutor: (...args: unknown[]) => registerTaskExecutorMock(...args),
 }))
 
-jest.mock("@/lib/logging", () => {
+jest.mock("@cognia/logging", () => {
   const stub: Record<string, unknown> = {
     info: jest.fn(),
     warn: jest.fn(),
@@ -169,7 +169,7 @@ import {
   applyAdHocSkill,
 } from "./index"
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
-import type { SendOptions } from "@/lib/claude/types"
+import type { SendOptions } from "@cognia/agent-config-types"
 
 beforeEach(() => {
   isTauriValue = true

@@ -11,6 +11,49 @@ import type {
   A2UIArrayOrPath,
 } from "@/types/a2ui/schema"
 
+const UNSAFE_DATA_MODEL_KEYS = new Set(["__proto__", "constructor", "prototype"])
+
+/** Whether a key is addressable and safe under the editor's JSON Pointer contract. */
+export function isSafeDataModelKey(key: string): boolean {
+  return key.length > 0 && !UNSAFE_DATA_MODEL_KEYS.has(key)
+}
+
+/** Narrow an unknown value to a safe, finite, acyclic JSON object data model. */
+export function isA2UIDataModel(value: unknown): value is Record<string, unknown> {
+  return isJsonDataValue(value, new Set(), true)
+}
+
+function isJsonDataValue(value: unknown, ancestors: Set<object>, root = false): boolean {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return !root
+  if (typeof value === "number") return !root && Number.isFinite(value)
+  if (typeof value !== "object" || ancestors.has(value)) return false
+  if (root && Array.isArray(value)) return false
+
+  const prototype = Object.getPrototypeOf(value)
+  if (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) return false
+  const nextAncestors = new Set(ancestors).add(value)
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      if (!isJsonDataValue(entry, nextAncestors)) return false
+    }
+    return true
+  }
+
+  return Object.entries(value as Record<string, unknown>).every(
+    ([key, entry]) => isSafeDataModelKey(key) && isJsonDataValue(entry, nextAncestors)
+  )
+}
+
+function parseArrayIndex(segment: string): number | null {
+  if (!/^(0|[1-9]\d*)$/.test(segment)) return null
+  const index = Number(segment)
+  return Number.isSafeInteger(index) ? index : null
+}
+
+function hasUnsafePointerSegment(segments: string[]): boolean {
+  return segments.some((segment) => UNSAFE_DATA_MODEL_KEYS.has(segment))
+}
+
 /**
  * Parse a JSON Pointer string into path segments
  * RFC 6901: https://datatracker.ietf.org/doc/html/rfc6901
@@ -35,6 +78,9 @@ export function parseJsonPointer(pointer: string): string[] {
     .substring(1)
     .split("/")
     .map((segment) => {
+      if (/~(?![01])/.test(segment)) {
+        throw new Error(`Invalid JSON Pointer escape sequence in "${pointer}"`)
+      }
       // Unescape ~1 -> / and ~0 -> ~
       return segment.replace(/~1/g, "/").replace(/~0/g, "~")
     })
@@ -79,12 +125,18 @@ export function getValueByPath<T = unknown>(
       }
 
       if (Array.isArray(current)) {
-        const index = parseInt(segment, 10)
-        if (isNaN(index) || index < 0 || index >= current.length) {
+        const index = parseArrayIndex(segment)
+        if (index === null || index >= current.length) {
           return undefined
         }
         current = current[index]
       } else if (typeof current === "object") {
+        if (
+          !isSafeDataModelKey(segment) ||
+          !Object.prototype.hasOwnProperty.call(current, segment)
+        ) {
+          return undefined
+        }
         current = (current as Record<string, unknown>)[segment]
       } else {
         return undefined
@@ -98,8 +150,26 @@ export function getValueByPath<T = unknown>(
 }
 
 /**
- * Set a value in an object using a JSON Pointer path
- * Creates intermediate objects/arrays as needed
+ * Narrow an unknown value to a mutable container (object or array).
+ */
+function isContainerNode(value: unknown): value is Record<string, unknown> | unknown[] {
+  return typeof value === "object" && value !== null
+}
+
+/**
+ * Set a value in an object using a JSON Pointer path.
+ *
+ * Uses **structural sharing**: only the spine from the root to the mutated
+ * node is copied; every sibling subtree keeps its original reference. This
+ * keeps mutations O(depth) instead of O(model size) AND lets `getValueByPath`
+ * return referentially-identical results for untouched paths — the property
+ * the renderer relies on to skip re-rendering components whose bound data did
+ * not change. Setting a value `Object.is`-equal to the existing one returns
+ * the original object unchanged (no-op, no new identity).
+ *
+ * Creates intermediate objects/arrays as needed (array when the next segment
+ * is a numeric index, object otherwise), mirroring the prior deep-clone
+ * implementation's path-creation behavior.
  */
 export function setValueByPath(
   obj: Record<string, unknown>,
@@ -115,41 +185,64 @@ export function setValueByPath(
   }
 
   const segments = parseJsonPointer(pointer)
-  const result = deepClone(obj)
-  let current: Record<string, unknown> | unknown[] = result
+  if (hasUnsafePointerSegment(segments)) return obj
+  return setInNode(obj, segments, 0, value) as Record<string, unknown>
+}
 
-  for (let i = 0; i < segments.length - 1; i++) {
-    const segment = segments[i]
-    const nextSegment = segments[i + 1]
-    const isNextArray = /^\d+$/.test(nextSegment)
+function setInNode(node: unknown, segments: string[], index: number, value: unknown): unknown {
+  const segment = segments[index]
+  const isLast = index === segments.length - 1
 
-    if (Array.isArray(current)) {
-      const index = parseInt(segment, 10)
-      if (current[index] === undefined || current[index] === null) {
-        current[index] = isNextArray ? [] : {}
+  if (Array.isArray(node)) {
+    const arrIndex = parseArrayIndex(segment)
+    if (arrIndex === null) return node
+    if (isLast) {
+      if (arrIndex >= 0 && arrIndex < node.length && Object.is(node[arrIndex], value)) {
+        return node
       }
-      current = current[index] as Record<string, unknown> | unknown[]
-    } else {
-      if (current[segment] === undefined || current[segment] === null) {
-        current[segment] = isNextArray ? [] : {}
-      }
-      current = current[segment] as Record<string, unknown> | unknown[]
+      const copy = node.slice()
+      copy[arrIndex] = value
+      return copy
     }
+    const nextIsArray = /^\d+$/.test(segments[index + 1])
+    const child = node[arrIndex]
+    const childContainer = isContainerNode(child) ? child : nextIsArray ? [] : {}
+    const newChild = setInNode(childContainer, segments, index + 1, value)
+    if (Object.is(newChild, node[arrIndex])) return node
+    const copy = node.slice()
+    copy[arrIndex] = newChild
+    return copy
   }
 
-  const lastSegment = segments[segments.length - 1]
-  if (Array.isArray(current)) {
-    const index = parseInt(lastSegment, 10)
-    current[index] = value
-  } else {
-    current[lastSegment] = value
+  // Coerce non-container nodes to an object so a binding can create the path.
+  const objNode = isContainerNode(node) ? (node as Record<string, unknown>) : {}
+  if (isLast) {
+    if (
+      Object.prototype.hasOwnProperty.call(objNode, segment) &&
+      Object.is(objNode[segment], value)
+    ) {
+      return node
+    }
+    const copy = { ...objNode }
+    copy[segment] = value
+    return copy
   }
-
-  return result
+  const nextIsArray = /^\d+$/.test(segments[index + 1])
+  const child = objNode[segment]
+  const childContainer = isContainerNode(child) ? child : nextIsArray ? [] : {}
+  const newChild = setInNode(childContainer, segments, index + 1, value)
+  if (Object.is(newChild, objNode[segment])) return node
+  const copy = { ...objNode }
+  copy[segment] = newChild
+  return copy
 }
 
 /**
- * Delete a value from an object using a JSON Pointer path
+ * Delete a value from an object using a JSON Pointer path.
+ *
+ * Structural-sharing counterpart to {@link setValueByPath}: only the spine to
+ * the deleted node is copied, and a path that does not exist returns the
+ * original object unchanged (preserving identity for no-op deletes).
  */
 export function deleteValueByPath(
   obj: Record<string, unknown>,
@@ -160,35 +253,42 @@ export function deleteValueByPath(
   }
 
   const segments = parseJsonPointer(pointer)
-  const result = deepClone(obj)
-  let current: Record<string, unknown> | unknown[] = result
+  if (hasUnsafePointerSegment(segments)) return obj
+  return deleteInNode(obj, segments, 0) as Record<string, unknown>
+}
 
-  for (let i = 0; i < segments.length - 1; i++) {
-    const segment = segments[i]
+function deleteInNode(node: unknown, segments: string[], index: number): unknown {
+  if (!isContainerNode(node)) return node // Path doesn't exist — unchanged.
+  const segment = segments[index]
+  const isLast = index === segments.length - 1
 
-    if (Array.isArray(current)) {
-      const index = parseInt(segment, 10)
-      if (current[index] === undefined) {
-        return result // Path doesn't exist
-      }
-      current = current[index] as Record<string, unknown> | unknown[]
-    } else {
-      if (current[segment] === undefined) {
-        return result // Path doesn't exist
-      }
-      current = current[segment] as Record<string, unknown> | unknown[]
+  if (Array.isArray(node)) {
+    const arrIndex = parseArrayIndex(segment)
+    if (arrIndex === null || arrIndex >= node.length) return node
+    if (isLast) {
+      const copy = node.slice()
+      copy.splice(arrIndex, 1)
+      return copy
     }
+    const newChild = deleteInNode(node[arrIndex], segments, index + 1)
+    if (Object.is(newChild, node[arrIndex])) return node
+    const copy = node.slice()
+    copy[arrIndex] = newChild
+    return copy
   }
 
-  const lastSegment = segments[segments.length - 1]
-  if (Array.isArray(current)) {
-    const index = parseInt(lastSegment, 10)
-    current.splice(index, 1)
-  } else {
-    delete current[lastSegment]
+  const objNode = node as Record<string, unknown>
+  if (!Object.prototype.hasOwnProperty.call(objNode, segment)) return node
+  if (isLast) {
+    const copy = { ...objNode }
+    delete copy[segment]
+    return copy
   }
-
-  return result
+  const newChild = deleteInNode(objNode[segment], segments, index + 1)
+  if (Object.is(newChild, objNode[segment])) return node
+  const copy = { ...objNode }
+  copy[segment] = newChild
+  return copy
 }
 
 /**
@@ -219,32 +319,45 @@ export function deepMerge(
   target: Record<string, unknown>,
   source: Record<string, unknown>
 ): Record<string, unknown> {
-  const result = deepClone(target)
+  let changed = false
+  const result: Record<string, unknown> = { ...target }
 
   for (const key in source) {
-    if (Object.prototype.hasOwnProperty.call(source, key)) {
-      const sourceValue = source[key]
-      const targetValue = result[key]
+    if (!Object.prototype.hasOwnProperty.call(source, key)) continue
 
-      if (
-        sourceValue &&
-        typeof sourceValue === "object" &&
-        !Array.isArray(sourceValue) &&
-        targetValue &&
-        typeof targetValue === "object" &&
-        !Array.isArray(targetValue)
-      ) {
-        result[key] = deepMerge(
-          targetValue as Record<string, unknown>,
-          sourceValue as Record<string, unknown>
-        )
-      } else {
-        result[key] = deepClone(sourceValue)
+    const sourceValue = source[key]
+    const targetValue = result[key]
+
+    if (
+      sourceValue &&
+      typeof sourceValue === "object" &&
+      !Array.isArray(sourceValue) &&
+      targetValue &&
+      typeof targetValue === "object" &&
+      !Array.isArray(targetValue)
+    ) {
+      const merged = deepMerge(
+        targetValue as Record<string, unknown>,
+        sourceValue as Record<string, unknown>
+      )
+      // Structural sharing: only replace (and flag a change) when the nested
+      // merge actually produced a new subtree, so untouched branches keep
+      // their original reference.
+      if (!Object.is(merged, targetValue)) {
+        result[key] = merged
+        changed = true
       }
+    } else if (!Object.is(targetValue, sourceValue)) {
+      // `source` is an inbound message payload the store treats as immutable;
+      // clone it so the merged model never aliases the message object.
+      result[key] = deepClone(sourceValue)
+      changed = true
     }
   }
 
-  return result
+  // Return the original target untouched when the source introduced nothing
+  // new — preserves identity so downstream memoization can short-circuit.
+  return changed ? result : target
 }
 
 /**
@@ -524,5 +637,57 @@ export function extractReferencedPaths(components: { [key: string]: unknown }[])
   }
 
   components.forEach(traverse)
+  return Array.from(paths)
+}
+
+/**
+ * Component fields that carry a JSON Pointer as a **plain string** (not a
+ * `{ path }` PathValue object), and therefore are invisible to
+ * {@link extractReferencedPaths}. A component that reads the data model
+ * through one of these fields still needs to re-render when that data
+ * changes, so the renderer's change-detection must include them.
+ *
+ * Kept in sync with `types/a2ui/schema.ts`:
+ *   - `dataPath`           — List template array source
+ *   - `sortKeyPath` /
+ *     `sortDirectionPath`  — Table / explorer path-bound sort state
+ *   - `currentStepPath`    — Stepper current-step binding
+ */
+const STRING_POINTER_FIELDS = [
+  "dataPath",
+  "sortKeyPath",
+  "sortDirectionPath",
+  "currentStepPath",
+] as const
+
+/**
+ * Collect every data-model path a single component reads — the union of
+ * `{ path }` PathValue references and the plain-string pointer fields listed
+ * in {@link STRING_POINTER_FIELDS}. The renderer resolves these paths against
+ * the data model to decide whether a component's bound data actually changed
+ * (see `useBoundDataVersion`), so under-collecting would cause a component to
+ * miss a legitimate update — the collector is deliberately conservative.
+ */
+export function collectComponentDataPaths(component: unknown): string[] {
+  const paths = new Set<string>(extractReferencedPaths([component as { [key: string]: unknown }]))
+
+  const traverse = (obj: unknown): void => {
+    if (!obj || typeof obj !== "object") return
+    if (!Array.isArray(obj)) {
+      for (const field of STRING_POINTER_FIELDS) {
+        const value = (obj as Record<string, unknown>)[field]
+        if (typeof value === "string" && value) {
+          paths.add(value)
+        }
+      }
+    }
+    if (Array.isArray(obj)) {
+      obj.forEach(traverse)
+    } else {
+      Object.values(obj as object).forEach(traverse)
+    }
+  }
+
+  traverse(component)
   return Array.from(paths)
 }

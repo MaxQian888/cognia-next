@@ -31,11 +31,15 @@ import {
   pausePairedDevice,
   resumePairedDevice,
   revokePairedDevice,
+  setAgentControlAllowed,
+  setLockedComputerUseAllowed,
   setRemoteControlAllowed,
+  setRemoteTerminalAllowed,
 } from "@/lib/db/paired-devices"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
-import { formatRelative } from "@/lib/time/relative"
+import { formatRelative } from "@cognia/time"
 import { isTauri, transport } from "@/lib/tauri"
+import type { TerminalHostDescriptor } from "@/types/mobile/paired-device"
 
 async function revokeDeviceRustSide(deviceId: string): Promise<void> {
   if (!isTauri()) return
@@ -52,6 +56,41 @@ async function setRemoteControlRustSide(deviceId: string, allowed: boolean): Pro
   await transport.call<void>("companion_set_remote_control", { deviceId, allowed })
 }
 
+async function setAgentControlRustSide(deviceId: string, allowed: boolean): Promise<void> {
+  if (!isTauri()) return
+  await transport.call<void>("companion_set_agent_control", { deviceId, allowed })
+}
+
+async function setRemoteTerminalRustSide(deviceId: string, allowed: boolean): Promise<void> {
+  if (!isTauri()) return
+  await transport.call<void>("companion_set_remote_terminal", { deviceId, allowed })
+}
+
+async function provisionTerminalHostDescriptor(
+  deviceId: string,
+  devicePublicKey: string
+): Promise<TerminalHostDescriptor> {
+  const status = await transport.call<{ descriptor?: TerminalHostDescriptor }>(
+    "terminal_host_service",
+    {
+      action: {
+        kind: "provision",
+        deviceId,
+        devicePublicKey,
+      },
+    }
+  )
+  if (!status.descriptor) {
+    throw new Error("terminal host did not return a descriptor")
+  }
+  return status.descriptor
+}
+
+async function setLockedComputerUseRustSide(deviceId: string, allowed: boolean): Promise<void> {
+  if (!isTauri()) return
+  await transport.call<void>("companion_set_locked_computer_use", { deviceId, allowed })
+}
+
 export function PairedDevicesCard() {
   const rows = useLiveQuery(() => listPairedDevices(), [], [])
   const guard = useBiometricGuard()
@@ -60,6 +99,9 @@ export function PairedDevicesCard() {
   const tPause = useTranslations("mobile.companion.pause")
   const tResume = useTranslations("mobile.companion.resume")
   const tRc = useTranslations("mobile.companion.remoteControl")
+  const tAc = useTranslations("mobile.companion.agentControl")
+  const tTerminal = useTranslations("mobile.companion.remoteTerminal")
+  const tLocked = useTranslations("mobile.companion.lockedComputerUse")
 
   const onRevoke = useCallback(
     async (deviceId: string, label: string) => {
@@ -118,6 +160,8 @@ export function PairedDevicesCard() {
       // computer-use, so gate it on the biometric. Disabling reduces
       // privilege and applies immediately without a prompt.
       if (!next) {
+        await setLockedComputerUseAllowed(deviceId, false)
+        await setLockedComputerUseRustSide(deviceId, false)
         await setRemoteControlAllowed(deviceId, false)
         await setRemoteControlRustSide(deviceId, false)
         toast.success(tRc("disabledToast", { label }))
@@ -142,6 +186,111 @@ export function PairedDevicesCard() {
       toast.success(tRc("enabledToast", { label }))
     },
     [guard, tRc]
+  )
+
+  const onToggleAgentControl = useCallback(
+    async (deviceId: string, label: string, next: boolean) => {
+      // Strictly more sensitive than remote control: this lets the device start
+      // processes on this machine. The spawn policy still bounds which binary,
+      // which working directory and which environment variables — but within
+      // that, the device decides what runs. Same biometric gate on the
+      // enabling direction; disabling reduces privilege and applies at once.
+      if (!next) {
+        await setAgentControlAllowed(deviceId, false)
+        await setAgentControlRustSide(deviceId, false)
+        toast.success(tAc("disabledToast", { label }))
+        return
+      }
+      const result = await guard(
+        {
+          reason: tAc("reason", { label }),
+          title: tAc("title"),
+          description: tAc("description"),
+        },
+        async () => {
+          await setAgentControlAllowed(deviceId, true)
+          await setAgentControlRustSide(deviceId, true)
+        }
+      )
+      if (result.kind === "blocked") {
+        if (result.reason === "cancelled") return
+        toast.error(tAc("blocked", { reason: result.reason }))
+        return
+      }
+      toast.success(tAc("enabledToast", { label }))
+    },
+    [guard, tAc]
+  )
+
+  const onToggleRemoteTerminal = useCallback(
+    async (deviceId: string, devicePublicKey: string, label: string, next: boolean) => {
+      if (!next) {
+        await setRemoteTerminalRustSide(deviceId, false)
+        await setRemoteTerminalAllowed(deviceId, false)
+        toast.success(tTerminal("disabledToast", { label }))
+        return
+      }
+      let result
+      try {
+        result = await guard(
+          {
+            reason: tTerminal("reason", { label }),
+            title: tTerminal("title"),
+            description: tTerminal("description"),
+          },
+          async () => {
+            const descriptor = await provisionTerminalHostDescriptor(deviceId, devicePublicKey)
+            await setRemoteTerminalAllowed(deviceId, true, descriptor)
+            try {
+              await setRemoteTerminalRustSide(deviceId, true)
+            } catch (error) {
+              await setRemoteTerminalAllowed(deviceId, false)
+              await setRemoteTerminalRustSide(deviceId, false).catch(() => undefined)
+              throw error
+            }
+          }
+        )
+      } catch {
+        toast.error(tTerminal("operationFailed"))
+        return
+      }
+      if (result.kind === "blocked") {
+        if (result.reason === "cancelled") return
+        toast.error(tTerminal("blocked", { reason: result.reason }))
+        return
+      }
+      toast.success(tTerminal("enabledToast", { label }))
+    },
+    [guard, tTerminal]
+  )
+
+  const onToggleLockedComputerUse = useCallback(
+    async (deviceId: string, label: string, next: boolean) => {
+      if (!next) {
+        await setLockedComputerUseAllowed(deviceId, false)
+        await setLockedComputerUseRustSide(deviceId, false)
+        toast.success(tLocked("disabledToast", { label }))
+        return
+      }
+      const result = await guard(
+        {
+          reason: tLocked("reason", { label }),
+          title: tLocked("title"),
+          description: tLocked("description"),
+        },
+        async () => {
+          await setLockedComputerUseAllowed(deviceId, true)
+          await setLockedComputerUseRustSide(deviceId, true)
+        }
+      )
+      if (result.kind === "blocked") {
+        if (result.reason === "cancelled") return
+        toast.error(tLocked("blocked", { reason: result.reason }))
+        return
+      }
+      toast.success(tLocked("enabledToast", { label }))
+    },
+    [guard, tLocked]
   )
 
   const onResume = useCallback(
@@ -180,17 +329,24 @@ export function PairedDevicesCard() {
         {!rows || rows.length === 0 ? (
           <p className="text-xs text-muted-foreground">{t("empty")}</p>
         ) : (
-          <div className="max-h-[360px] overflow-y-auto">
+          <div className="max-h-[360px] overflow-x-auto overflow-y-auto">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>{t("colLabel")}</TableHead>
-                  <TableHead>{t("colPlatform")}</TableHead>
-                  <TableHead>{t("colFingerprint")}</TableHead>
-                  <TableHead>{t("colPaired")}</TableHead>
-                  <TableHead>{t("colLastSeen")}</TableHead>
-                  <TableHead className="text-center">{tRc("col")}</TableHead>
-                  <TableHead className="w-[80px] text-right">{t("colActions")}</TableHead>
+                  <TableHead className="whitespace-nowrap">{t("colLabel")}</TableHead>
+                  <TableHead className="whitespace-nowrap">{t("colPlatform")}</TableHead>
+                  <TableHead className="whitespace-nowrap">{t("colFingerprint")}</TableHead>
+                  <TableHead className="whitespace-nowrap">{t("colPaired")}</TableHead>
+                  <TableHead className="whitespace-nowrap">{t("colLastSeen")}</TableHead>
+                  <TableHead className="whitespace-nowrap text-center">{tRc("col")}</TableHead>
+                  <TableHead className="whitespace-nowrap text-center">{tAc("col")}</TableHead>
+                  <TableHead className="whitespace-nowrap text-center">
+                    {tTerminal("col")}
+                  </TableHead>
+                  <TableHead className="whitespace-nowrap text-center">{tLocked("col")}</TableHead>
+                  <TableHead className="w-[80px] whitespace-nowrap text-right">
+                    {t("colActions")}
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -245,6 +401,39 @@ export function PairedDevicesCard() {
                         }
                         aria-label={tRc("toggleAria", { label: row.label })}
                         data-testid={`paired-device-remote-control-${row.deviceId}`}
+                      />
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <Switch
+                        checked={row.allowAgentControl === true}
+                        disabled={row.revokedAt !== undefined}
+                        onCheckedChange={(next) =>
+                          onToggleAgentControl(row.deviceId, row.label, next)
+                        }
+                        aria-label={tAc("toggleAria", { label: row.label })}
+                        data-testid={`paired-device-agent-control-${row.deviceId}`}
+                      />
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <Switch
+                        checked={row.allowRemoteTerminal === true}
+                        disabled={row.revokedAt !== undefined || !isTauri()}
+                        onCheckedChange={(next) =>
+                          onToggleRemoteTerminal(row.deviceId, row.pubkey, row.label, next)
+                        }
+                        aria-label={tTerminal("toggleAria", { label: row.label })}
+                        data-testid={`paired-device-remote-terminal-${row.deviceId}`}
+                      />
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <Switch
+                        checked={row.allowLockedComputerUse === true}
+                        disabled={row.revokedAt !== undefined || row.allowRemoteControl !== true}
+                        onCheckedChange={(next) =>
+                          onToggleLockedComputerUse(row.deviceId, row.label, next)
+                        }
+                        aria-label={tLocked("toggleAria", { label: row.label })}
+                        data-testid={`paired-device-locked-computer-use-${row.deviceId}`}
                       />
                     </TableCell>
                     <TableCell className="text-right">

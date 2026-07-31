@@ -64,6 +64,20 @@ describe("<NotificationsSection />", () => {
     )
   })
 
+  it("closes the queue sheet on Android hardware back (popstate)", () => {
+    render(<NotificationsSection />)
+    fireEvent.click(screen.getByTestId("mobile-settings-notifications-queue-entry"))
+    expect(screen.getByTestId("notifications-queue-sheet-stub")).toHaveAttribute(
+      "data-open",
+      "true"
+    )
+    fireEvent.popState(window)
+    expect(screen.getByTestId("notifications-queue-sheet-stub")).toHaveAttribute(
+      "data-open",
+      "false"
+    )
+  })
+
   it("ignores other keys", () => {
     render(<NotificationsSection />)
     fireEvent.keyDown(screen.getByTestId("mobile-settings-notifications-queue-entry"), {

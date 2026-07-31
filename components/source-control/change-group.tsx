@@ -27,6 +27,7 @@ interface ChangeGroupProps {
   onToggle: () => void
   actions?: GroupAction[]
   children: React.ReactNode
+  density?: "compact" | "touch"
 }
 
 export function ChangeGroup({
@@ -36,18 +37,27 @@ export function ChangeGroup({
   onToggle,
   actions = [],
   children,
+  density = "compact",
 }: ChangeGroupProps) {
   const t = useTranslations("sourceControl")
   const Chevron = expanded ? ChevronDownIcon : ChevronRightIcon
 
   return (
     <section data-testid={`change-group-${group}`}>
-      <div className="group/header flex h-7 items-center gap-1 px-1">
+      <div
+        className={cn(
+          "group/header flex h-7 items-center gap-1 px-1",
+          density === "touch" && "h-auto min-h-11"
+        )}
+      >
         <button
           type="button"
           onClick={onToggle}
           aria-expanded={expanded}
-          className="flex min-w-0 flex-1 items-center gap-1 rounded px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground"
+          className={cn(
+            "flex min-w-0 flex-1 items-center gap-1 rounded px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground",
+            density === "touch" && "min-h-11"
+          )}
           data-testid={`group-toggle-${group}`}
         >
           <Chevron className="size-3.5 shrink-0" />
@@ -56,13 +66,22 @@ export function ChangeGroup({
             {count}
           </Badge>
         </button>
-        <span className="flex shrink-0 items-center opacity-0 transition-opacity group-hover/header:opacity-100">
+        <span
+          className={cn(
+            "flex shrink-0 items-center opacity-0 transition-opacity group-hover/header:opacity-100",
+            density === "touch" && "opacity-100"
+          )}
+        >
           {actions.map((action) => (
             <Button
               key={action.key}
               variant="ghost"
               size="icon"
-              className={cn("size-5", action.destructive && "text-destructive")}
+              className={cn(
+                "size-5",
+                density === "touch" && "size-11",
+                action.destructive && "text-destructive"
+              )}
               aria-label={action.label}
               title={action.label}
               onClick={action.onClick}

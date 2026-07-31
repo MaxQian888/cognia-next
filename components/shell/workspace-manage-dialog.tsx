@@ -29,8 +29,9 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { cn } from "@/lib/utils"
 import { isTauri } from "@/lib/tauri"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { useProjectStore } from "@/stores/project/project-store"
+import { WorkspaceKnowledgeSection } from "@/components/shell/workspace-knowledge-section"
 import { normalizeRoots } from "@/lib/workspace/roots"
 import {
   isWorkspaceTrusted,
@@ -403,6 +404,10 @@ export function WorkspaceManageDialog({ open, onOpenChange, autoCreateOnOpen }: 
                     )}
                   </div>
                 </div>
+
+                <Separator />
+
+                <WorkspaceKnowledgeSection project={editing} />
 
                 <Separator />
 

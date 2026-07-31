@@ -3,12 +3,27 @@
 // Compact card used in the marketplace browse grid. Mirrors the shape of
 // `components/skills/skill-marketplace-card.tsx` but adds plugin-specific
 // concerns: signature badge, danger-permission warning, capability count.
+//
+// Three optional props (`verifiedPublisher`, `integrityChecked`,
+// `unsupportedApis`) serve the Open VSX section. All three are additive: when
+// absent — which is every cognia-registry entry — the render is unchanged.
+// That is why this is one card rather than a parallel VS Code card that would
+// drift from this one on the first styling change.
 
 import { useTranslations } from "next-intl"
-import { DownloadIcon, StarIcon, AlertTriangleIcon, GitCompareIcon } from "lucide-react"
+import {
+  DownloadIcon,
+  StarIcon,
+  AlertTriangleIcon,
+  GitCompareIcon,
+  BadgeCheckIcon,
+  FileCheckIcon,
+  PlugZapIcon,
+} from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { PluginSignatureBadge, type SignatureState } from "../plugin-signature-badge"
 import { PluginSourceBadge } from "../plugin-source-badge"
 import type { PluginMarketplaceEntry } from "@/hooks/plugins/use-plugin-marketplace"
@@ -29,20 +44,81 @@ interface Props {
   }
   installed: boolean
   installing: boolean
+  /**
+   * Open VSX's `verified` flag: **its** assertion that the publisher controls
+   * the namespace. Rendered with the attribution baked into the label
+   * ("Publisher verified by Open VSX") because it is not our claim, and it is
+   * not a safety claim — a verified publisher can still ship malware.
+   *
+   * Never derive this from a signature check; we don't do one. See
+   * `use-openvsx-marketplace.ts:toMarketplaceEntry`.
+   */
+  verifiedPublisher?: boolean
+  /**
+   * The `.vsix` was verified against Open VSX's SHA-256 digest at install.
+   *
+   * Only ever true for something already installed — before an install nothing
+   * has been checked, and a badge claiming otherwise would be a lie about work
+   * we haven't done. The copy stays scoped to what a checksum proves: the
+   * transfer wasn't corrupted. It is **not** a signature, and it says nothing
+   * about a compromised registry (which serves the file and the digest).
+   */
+  integrityChecked?: boolean
+  /**
+   * `vscode.*` namespaces the extension references that cognia's shim doesn't
+   * implement, read back from the installed manifest so the warning outlives
+   * the install dialog. Best-effort — see `engine-compat.ts`.
+   */
+  unsupportedApis?: string[]
   onView: (id: string) => void
   onInstall: (id: string, version?: string) => void
   onUninstall: (id: string) => void
+}
+
+/** Badge + tooltip. Local because these three claims each need their caveat. */
+function ExplainedBadge({
+  icon: Icon,
+  label,
+  tooltip,
+  variant,
+  testId,
+}: {
+  icon: typeof BadgeCheckIcon
+  label: string
+  tooltip: string
+  variant: "secondary" | "outline" | "destructive"
+  testId: string
+}) {
+  return (
+    <TooltipProvider delayDuration={150}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Badge variant={variant} className="text-xs gap-1" data-testid={testId}>
+            <Icon className="size-3" />
+            {label}
+          </Badge>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p className="text-xs max-w-64">{tooltip}</p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
 }
 
 export function PluginMarketplaceCard({
   entry,
   installed,
   installing,
+  verifiedPublisher,
+  integrityChecked,
+  unsupportedApis,
   onView,
   onInstall,
   onUninstall,
 }: Props) {
   const t = useTranslations("plugins.marketplaceCard")
+  const tv = useTranslations("plugins.openVsx")
   const comparisonIds = usePluginMarketplaceStore((s) => s.comparisonIds)
   const addToComparison = usePluginMarketplaceStore((s) => s.addToComparison)
   const removeFromComparison = usePluginMarketplaceStore((s) => s.removeFromComparison)
@@ -93,6 +169,38 @@ export function PluginMarketplaceCard({
             <AlertTriangleIcon className="size-3" />
             {t("dangerous")}
           </Badge>
+        )}
+        {verifiedPublisher && (
+          <ExplainedBadge
+            icon={BadgeCheckIcon}
+            label={tv("publisherVerified")}
+            // The namespace is the thing Open VSX actually verified ownership
+            // of, so the tooltip names it rather than gesturing at "the
+            // publisher". `author` carries the namespace for Open VSX entries.
+            tooltip={tv("publisherVerifiedTooltip", {
+              namespace: entry.author ?? entry.id.split(".")[0],
+            })}
+            variant="secondary"
+            testId={`plugin-openvsx-verified-${entry.id}`}
+          />
+        )}
+        {integrityChecked && (
+          <ExplainedBadge
+            icon={FileCheckIcon}
+            label={tv("integrityChecked")}
+            tooltip={tv("integrityCheckedTooltip")}
+            variant="outline"
+            testId={`plugin-openvsx-integrity-${entry.id}`}
+          />
+        )}
+        {unsupportedApis && unsupportedApis.length > 0 && (
+          <ExplainedBadge
+            icon={PlugZapIcon}
+            label={tv("unsupportedApis", { apis: unsupportedApis.join(", ") })}
+            tooltip={tv("unsupportedApisTooltip", { apis: unsupportedApis.join(", ") })}
+            variant="destructive"
+            testId={`plugin-openvsx-unsupported-${entry.id}`}
+          />
         )}
       </div>
 

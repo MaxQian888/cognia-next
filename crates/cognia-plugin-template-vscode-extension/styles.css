@@ -1,0 +1,7 @@
+:root {
+  --cognia-plugin-template-vscode-accent: #7c3aed;
+}
+
+.cognia-plugin-template-vscode-extension {
+  color: var(--cognia-plugin-template-vscode-accent);
+}

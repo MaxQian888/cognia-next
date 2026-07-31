@@ -8,16 +8,16 @@ description: The declarative truth layer that states what a plugin may contribut
 <Status variant="experimental" />
 
 <TLDR>
-`lib/plugin/contracts/` is the declarative truth layer: `plugin-points.ts:979` and `plugin-capabilities.ts:61` catalog every extension point and capability with binding/docs/requiredTests proof fields, `capability-bridge-map.ts:156` and `module-bridge-map.ts:118` wire manifest fields to registries/bridges, and `runtime-proof-audit.ts:48` asserts every "implemented" surface has evidence. `lib/plugin/registries/` are typed overlay-registry stores (builtin ← plugin overlay, deduped by id); `lib/plugin/sdk/` are pure `define*()` type pass-throughs the host never consumes (`sdk/index.ts:8`).
+`lib/plugin/contracts/` is the declarative truth layer: `plugin-points.ts` and `plugin-capabilities.ts` catalog every extension point and capability with binding/docs/requiredTests proof fields, `capability-bridge-map.ts` and `module-bridge-map.ts` wire manifest fields to registries/bridges, and `runtime-proof-audit.ts` asserts every "implemented" surface has evidence. `lib/plugin/registries/` are typed overlay-registry stores (builtin ← plugin overlay, deduped by id); `packages/plugin-sdk/src/define/` contains the pure `define*()` type pass-throughs surfaced through the `@cognia/plugin-sdk` package root.
 </TLDR>
 
 <StatGrid>
-  <Stat label="Capability contracts" value="33" />
+  <Stat label="Capability contracts" value="66" />
   <Stat label="UI slots / hooks / activations" value="49 / ~150 / 26" />
   <Stat label="Runtime points" value="11" />
-  <Stat label="Sync overlay capabilities" value="9" />
-  <Stat label="Async module bridges" value="13" />
-  <Stat label="SDK define*() helpers" value="7" />
+  <Stat label="Sync overlay capabilities" value="16" />
+  <Stat label="Async module bridges" value="23" />
+  <Stat label="SDK define*() helpers" value="44" />
 </StatGrid>
 
 ## Purpose
@@ -25,11 +25,11 @@ description: The declarative truth layer that states what a plugin may contribut
 `lib/plugin/contracts/` is the **declarative truth layer**: it states what a plugin may contribute and whether each declared surface is actually wired. Two canonical catalogs anchor it:
 
 - `plugin-points.ts` — every UI-slot / hook / activation / runtime extension point, each carrying `binding`, `docs`, and `requiredTests` proof fields.
-- `plugin-capabilities.ts` — the 33 `PluginCapability` contracts.
+- `plugin-capabilities.ts` — the 66 `PluginCapability` contracts.
 
 `capability-contributions.ts:79` maps a plugin's capability tags to concrete manifest entries for UI summaries. Two wiring maps connect manifest fields to runtime stores: `capability-bridge-map.ts` for synchronous overlay-registry dispatch, and `module-bridge-map.ts` for asynchronous module-loading bridges. Provability is enforced by `runtime-proof-audit.ts`, `conflict-reporter.ts`, and `diagnostics-store.ts`, which prove every "implemented" surface has evidence and report conflicts and diagnostics.
 
-`lib/plugin/registries/` are typed in-memory stores built on the `createOverlayRegistry` substrate (builtin ← plugin overlay, deduped by id, plugin-tagged). `lib/plugin/sdk/` are author-facing `define*()` helpers — pure type pass-throughs (`define-skill.ts:23`, `define-subagent.ts:22`) that narrow inline manifest entries; the host never consumes them (`sdk/index.ts:8`).
+`lib/plugin/registries/` are typed in-memory stores built on the `createOverlayRegistry` substrate (builtin ← plugin overlay, deduped by id, plugin-tagged). `packages/plugin-sdk/src/define/` contains author-facing `define*()` helpers that narrow inline manifest entries. The host runtime consumes manifests and registries, not the helper functions; the helpers are public authoring affordances exported from the `@cognia/plugin-sdk` package root. Tooling can import the read-only contract catalogs and contribution-summary helpers from `@cognia/plugin-sdk/contracts` instead of reaching into `lib/plugin/contracts/*`.
 
 ## Overlay-registry pattern
 
@@ -86,11 +86,11 @@ const RUNTIME_POINT_BINDINGS: Record<CanonicalRuntimePoint, string> = {
 }
 ```
 
-The bridge maps are **not** keyed by point-id; they are keyed by manifest field / capability tag and reference the same registry singletons the runtime-point bindings name. `capability-bridge-map.ts` (`OVERLAY_REGISTRY_CAPABILITIES` `:156-303`) holds the 9 synchronous overlay capabilities with a uniform `register(id, def, { pluginId })` / `unregisterByPlugin(pluginId)` shape; `defineOverlayCapability<E>` is the single variance bridge (`:144-148`). `module-bridge-map.ts` (`MODULE_BRIDGE_CAPABILITIES` `:118-277`) holds the 13 asynchronous bridges, each normalized to `register(ctx) => Promise<void>` / `unregister(pluginId)` (`:97-110`). Both expose their `*_CAPABILITY_KEYS` via `Object.keys`.
+The bridge maps are **not** keyed by point-id; they are keyed by manifest field / capability tag and reference the same registry singletons the runtime-point bindings name. `capability-bridge-map.ts` (`OVERLAY_REGISTRY_CAPABILITIES`) holds the 16 synchronous overlay capabilities with a uniform `register(id, def, { pluginId })` / `unregisterByPlugin(pluginId)` shape; `defineOverlayCapability<E>` is the single variance bridge. `module-bridge-map.ts` (`MODULE_BRIDGE_CAPABILITIES`) holds the 20 asynchronous bridges, each normalized to `register(ctx) => Promise<void>` / `unregister(pluginId)`. Both expose their `*_CAPABILITY_KEYS` via `Object.keys`.
 
 ## Provable contribution
 
-`auditPluginPointContracts()` walks every contract; for `status === "implemented"` it asserts `binding`, `docs`, and `requiredTests` are non-empty, yielding a `proofStatus` of `"verified" | "missing_proof" | "not_applicable"` (`plugin-points.ts:990-1025`). `auditPluginCapabilityContracts()` does the same for the 33 capabilities, additionally requiring `builtinContributionPaths` for tools / commands / hooks (`plugin-capabilities.ts:826-905`). `runtime-proof-audit.ts:auditPluginRuntimeClaims()` composes both, plus hand-authored `RUNTIME_RISK_AUDITS`, into one `PluginRuntimeClaimsAuditReport` (`runtime-proof-audit.ts:48-54`).
+`auditPluginPointContracts()` walks every contract; for `status === "implemented"` it asserts `binding`, `docs`, and `requiredTests` are non-empty, yielding a `proofStatus` of `"verified" | "missing_proof" | "not_applicable"`. `auditPluginCapabilityContracts()` does the same for the 59 capabilities, additionally requiring `builtinContributionPaths` for tools / commands / hooks. `runtime-proof-audit.ts:auditPluginRuntimeClaims()` composes both, plus hand-authored `RUNTIME_RISK_AUDITS`, into one `PluginRuntimeClaimsAuditReport`.
 
 `diagnostics-store.ts` is a module-level `Map<pluginId, PluginPointDiagnostic[]>` with pub/sub — `recordPluginPointDiagnostic` / `getAllPluginPointDiagnostics` / `subscribePluginPointDiagnostics` (`diagnostics-store.ts:21-60`). `recordSilentFailure` branches on `expected`: web-mode-without-Tauri produces a debug log, while desktop produces a warning plus a `plugin.silent-failure` diagnostic (`diagnostics-store.ts:79-98`).
 
@@ -120,25 +120,35 @@ export function reportRegistryConflict(info: RegistryConflictInfo): void {
 | `character-pack-registry.ts` | `PluginCharacterPackDef` (validating) | `defineCharacterPack` | `registerCharacterPack :51`, `refreshAllPackWarnings :58`, `getPackCharacterByRuntimeId :122`, `buildOverlayCharacterId :162` |
 | `agent-team-template-registry.ts` | `PluginAgentTeamTemplateDef` (validating) | `defineAgentTeamTemplate` | `registerAgentTeamTemplate :132`, `validateTemplateRequires :88`, `getTemplateWarnings :161` |
 | `workflow-template-registry.ts` | `PluginWorkflowTemplateDef` (validating) | `defineWorkflowTemplate` | `registerWorkflowTemplate :111`, `validateWorkflowTemplateRequires :77`, `getWorkflowTemplateWarnings :124` |
-| `shared-memory-adapter-registry.ts` | `PluginSharedMemoryAdapterDef` (plain) | (none) | `registerSharedMemoryAdapter :24`, `unregisterSharedMemoryAdaptersByPlugin :28` |
+| `shared-memory-adapter-registry.ts` | `PluginSharedMemoryAdapterDef` (plain) | `defineSharedMemoryAdapter` | `registerSharedMemoryAdapter :24`, `unregisterSharedMemoryAdaptersByPlugin :28` |
 | `command-safety-registry.ts` | `ToolRules` per pluginId (plain, merge) | (none — `ctx.terminal` imperative) | `registerPluginCommandRules :30`, `getPluginCommandRulesets :48` |
+| `pet-achievement-registry.ts` | `PluginPetAchievementDef` (plain, data-only condition DSL) | (manifest `petAchievements`) | `registerPetAchievement`, `compilePluginAchievement`, `listCompiledPluginAchievements` |
+| `pet-item-registry.ts` | `PluginPetItemDef` (plain, data-only) | (manifest `petItems`) | `registerPetItem`, `projectPluginItem`, `listProjectedPluginItems` |
 | `createOverlayRegistry.ts` | factory — substrate | — | `createOverlayRegistry :144` |
 | `createValidatingOverlayRegistry.ts` | factory — requires-warning wrapper | — | `createValidatingOverlayRegistry :63` |
 
+## Desktop-pet integration surface
+
+The pet subsystem (ADR-0058) exposes four coordinated plugin surfaces:
+
+- **`ctx.pet`** (capability `pet`; permissions `pet:read` / `pet:interact`, `lib/plugin/api/pet-api.ts`) — read the PII-safe pet summary, subscribe to sanitized events, emit nurture interactions, and grant XP/coin rewards. Rewards are rate-limited (token buckets `pet:interact` / `pet:emit`) and clamped against a per-plugin daily budget (50 XP / 100 coins, `lib/plugin/api/pet-budget.ts`); lifecycle kinds are not emittable.
+- **Hooks** — `onPetInteract`, `onPetLevelUp`, `onPetEvolved`, `onPetAchievementUnlocked`, `onPetUnwell`, dispatched fire-and-forget by `lib/pet/runtime/pet-controller.ts`. Payloads carry no event meta (PII red-line); radar/passive kinds never dispatch.
+- **UI slots** — `pet.console.tab` (a host-owned "Plugins" tab in the /pet console, shown only while a contribution exists) and `pet.panel.actions` (interaction-panel action row, limit 4). Context bag: `level` / `stage` / `mood` / `condition`.
+- **Workflow nodes** — the built-in `trigger.pet.event` (levelUp / evolved / achievementUnlocked / unwell, runner in `lib/workflow/runtime/pet-event-trigger.ts`) and `action.pet.interact`.
+
+`plugins/pet-daily-quests` is the end-to-end reference (quest board in the console tab, rewards through the budgeted API, goal hook integration).
+
 ## SDK define*() catalog
 
-All helpers are pure type pass-throughs **except** `defineCharacterPack`, which validates eagerly.
+All helpers are pure type pass-throughs **except** `defineCharacterPack`, which validates eagerly. The package exposes every supported helper from the root barrel; source-file-shaped `define/<name>` imports are intentionally not exported.
 
-| Helper | Produces | :line |
+| Helper group | Examples | Produces |
 | --- | --- | --- |
-| `define-skill.ts` | `PluginSkillDef` | `:23` |
-| `define-subagent.ts` | `PluginSubagentDef` | `:22` |
-| `define-mcp-server-preset.ts` | `PluginMcpServerPresetDef` | `:23` |
-| `define-native-anthropic-tool.ts` | `PluginNativeAnthropicToolDef` | `:28` |
-| `define-agent-team-template.ts` | `PluginAgentTeamTemplateDef` (`requires` block) | `:27` |
-| `define-workflow-template.ts` | `PluginWorkflowTemplateDef` (`requires` block) | `:24` |
-| `define-character-pack.ts` | `PluginCharacterPackDef` — throws on empty / over-50 / duplicate-localId; warns on unknown TTS / oversized avatar | `:46` (limits `:35`, `:44`) |
-| `index.ts` | barrel of all 7 | `:16-22` |
+| Agent and workflow | `defineAgentTool`, `defineGuardrail`, `defineContextProvider`, `defineChatMiddleware`, `defineToolRoute`, `defineSkill`, `defineSubagent`, `defineAgentTeamTemplate`, `defineWorkflowTemplate`, `defineWorkflowNode`, `defineWorkflowTrigger` | Agent SDK tools, guardrails, context providers, chat middleware, semantic tool routing, teams, subagents, workflow nodes/triggers/templates |
+| Runtime and integration | `defineConnector`, `defineWorkspaceBackend`, `defineMcpServerPreset`, `defineNativeAnthropicTool`, `defineExternalAgentPreset`, `defineExternalAgentAdapter`, `defineRoutingStrategy`, `defineDeploymentFilter`, `defineProtocolAdapter`, `defineAuthProvider`, `defineUriHandler` | Connector and workspace adapters, MCP/native-tool overlays, external-agent presets/adapters, provider-routing extensions, auth and deep-link handlers |
+| UI and shell | `defineViewContainer`, `defineView`, `defineWebview`, `defineMessageRenderer`, `defineModalMount`, `defineTerminalCompletionProvider`, `defineQuickAction`, `defineTrayItem` | Rail containers, tree/custom views, sandboxed webviews, message renderers, modal mounts, terminal completions, command/composer/tray quick actions |
+| Appearance and resources | `defineTheme`, `defineThemePack`, `defineDensityPreset`, `defineFontContribution`, `defineWallpaper` | Theme colors, theme packs, density presets, bundled fonts, bundled wallpapers |
+| Policy and usage | `defineConfiguration`, `defineExporter`, `defineImporter`, `defineSharedMemoryAdapter`, `defineBalanceAdapter`, `defineLimitsSource`, `defineImRateSource`, `defineCompactionStrategy` | Config schemas, import/export providers, memory backing stores, usage/balance/rate-limit/compaction sources |
 
 ## Data flow
 
@@ -147,9 +157,9 @@ graph LR
   PP["plugin-points<br/>contracts/plugin-points.ts:979"]
   PC["plugin-capabilities<br/>contracts/plugin-capabilities.ts:61"]
   CC["capability-contributions<br/>contracts/capability-contributions.ts:79"]
-  CBM["OVERLAY_REGISTRY_CAPABILITIES<br/>contracts/capability-bridge-map.ts:156"]
-  MBM["MODULE_BRIDGE_CAPABILITIES<br/>contracts/module-bridge-map.ts:118"]
-  DEF["define star helpers<br/>sdk/index.ts:16"]
+  CBM["OVERLAY_REGISTRY_CAPABILITIES<br/>contracts/capability-bridge-map.ts:190"]
+  MBM["MODULE_BRIDGE_CAPABILITIES<br/>contracts/module-bridge-map.ts:146"]
+  DEF["define star helpers<br/>packages/plugin-sdk/src/index.ts"]
   COR["createOverlayRegistry<br/>registries/createOverlayRegistry.ts:144"]
   CVOR["createValidatingOverlayRegistry<br/>registries/createValidatingOverlayRegistry.ts:63"]
   REG["specific registries<br/>skill subagent mcp native char-pack"]
@@ -191,7 +201,7 @@ graph LR
 ## Gotchas
 
 - **Validating vs plain overlay.** Only `character-pack`, `agent-team-template`, and `workflow-template` use `createValidatingOverlayRegistry`; the rest are plain. Warnings are non-blocking — the entry registers regardless — so sibling overlay mutations must call `refreshAll*Warnings()` to clear stale missing-dependency warnings (wired at `capability-bridge-map.ts:165-176`).
-- **Capability vs module bridge map.** `capability-bridge-map.ts` is synchronous inline-def overlay capabilities (`:151-156`); `module-bridge-map.ts` is async module-loading capabilities normalized behind one `register(ctx) => Promise` / `unregister` (`:84-110`). Bespoke wiring (modes / commands / themes / lsp / a2ui) lives in neither (`capability-bridge-map.ts:10-16`). Several module-bridge keys are synthetic (workspace-backend, message-renderer, chat-middleware) — field-driven dispatch (`module-bridge-map.ts:113-117`).
+- **Capability vs module bridge map.** `capability-bridge-map.ts` is synchronous inline-def overlay capabilities (`:151-156`); `module-bridge-map.ts` is async module-loading capabilities normalized behind one `register(ctx) => Promise` / `unregister` (`:84-110`). Bespoke wiring (modes / commands / themes / lsp / a2ui) lives in neither (`capability-bridge-map.ts:10-16`). Field-driven module bridges are now canonical capability tags, and dispatch still gates on `manifest[manifestField]?.length` (`module-bridge-map.ts:113-117`).
 - **Audit "proof" is field-presence, not reachability.** The audit checks that proof strings are non-empty; real reachability is enforced by the separate static slot-audit script that branches on `REGISTRATION_HOST_EXTENSION_POINTS` / `hostKind` (`plugin-points.ts:222-233`).
 - **first-wins-cross-plugin is opt-in.** The default is last-wins; the plain id-keyed registries here silently last-wins on a cross-plugin id collision.
 

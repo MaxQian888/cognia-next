@@ -25,14 +25,18 @@
  * continues to render unchanged.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import {
+  InboxIcon,
+  KeyRoundIcon,
   MenuIcon,
   MoreVerticalIcon,
   SearchIcon,
   SettingsIcon,
+  Settings2Icon,
+  Share2Icon,
   UserPlusIcon,
   UsersIcon,
   XIcon,
@@ -40,6 +44,8 @@ import {
 import { toast } from "sonner"
 
 import { ChatPane } from "@/components/chat/chat-view"
+import { ArtifactWorkspaceDock } from "@/components/artifacts/artifact-workspace-dock"
+import { ArtifactDockToggle } from "@/components/artifacts/artifact-dock-toggle"
 import { CharacterPicker } from "@/components/chat/character-picker"
 import { GuildRail } from "@/components/shell/guild-rail"
 import { MemberList } from "@/components/shell/member-list"
@@ -49,11 +55,15 @@ import { ToolApprovalDialog } from "@/components/chat/tool-approval-dialog"
 import { CharacterHeader } from "@/components/mobile/shell/character-header"
 import { MobileWorkspaceChip } from "@/components/mobile/shell/mobile-workspace-chip"
 import { MobileChannelList } from "@/components/mobile/shell/mobile-channel-list"
+import { SingleExportDialog } from "@/components/data/export/single-export-dialog"
+import { SessionSettingsSheet } from "@/components/chat/session-settings-sheet"
 import { MobileQuickActions } from "@/components/mobile/home/mobile-quick-actions"
 import { MobileActiveRunsCard } from "@/components/mobile/home/mobile-active-runs-card"
 import { MobileCommandPalette } from "@/components/mobile/home/mobile-command-palette"
+import { JobCenterPanel } from "@/components/desktop/job-center-panel"
 import { useMobileHomeLayout } from "@/components/mobile/home/use-mobile-home-layout"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import {
   DropdownMenu,
@@ -63,19 +73,27 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import type { ComposerHandle } from "@/components/chat/composer"
+import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
+import { useCredentialStatus } from "@/hooks/chat/use-credential-status"
 import { useTeamMembers } from "@/hooks/use-team-members"
 import { useClientLiveQuery } from "@/hooks/data"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { useUIStore } from "@/stores/ui"
-import { whenSeeded } from "@/lib/db/schema"
+import { getDb, whenSeeded } from "@/lib/db/schema"
 import { markSessionRead } from "@/lib/db/session-state"
+import { updateSession } from "@/lib/db/sessions"
 import { listCharacters } from "@/lib/db/characters"
 import { getTeam } from "@/lib/db/teams"
+import type { PlanResumeMode } from "@/components/agent/plan/plan-approval-card"
 import { guildFromSession } from "@/lib/claude/guild"
-import { loggers } from "@/lib/logging"
-import type { Character, Team } from "@/lib/claude/types"
+import { resolveConversationGroupBy } from "@/lib/chat/conversation-grouping"
+import { useProjectStore } from "@/stores/project/project-store"
+import { loggers } from "@cognia/logging"
+import type { Character, SendContent, Team } from "@cognia/agent-config-types"
+import { decodeSubSession } from "@/lib/claude/team-session-id"
+import { impact, notify } from "@/lib/capacitor/haptics"
 
 const log = loggers.shell
 
@@ -83,7 +101,11 @@ export function AppShellMobile() {
   const t = useTranslations("desktop.shell")
   const tShell = useTranslations("mobile.shell")
   const router = useRouter()
-  const { sessions, activeSessionId, select, create, remove } = useSessions()
+  const sidebarGroupBy = resolveConversationGroupBy(
+    useSettingsStore((s) => s.settings?.conversationSidebar)
+  )
+  const { sessions, activeSessionId, select, create, remove, rename, archive, unarchive, folders } =
+    useSessions({ crossWorkspace: sidebarGroupBy === "workspace" })
   const directChat = useClaudeChat()
   const teamChat = useTeamChat()
 
@@ -92,14 +114,18 @@ export function AppShellMobile() {
   const pendingApproval = useChatStore((s) => s.pendingApprovals[0] ?? null)
 
   const loadSettings = useSettingsStore((s) => s.load)
+  const lastInboxViewedAt = useSettingsStore((s) => s.settings?.lastInboxViewedAt ?? 0)
   const selectedGuild = useUIStore((s) => s.selectedGuild)
   const setSelectedGuild = useUIStore((s) => s.setSelectedGuild)
   const pendingSettingsRequest = useUIStore((s) => s.pendingSettingsRequest)
   const clearPendingSettings = useUIStore((s) => s.clearPendingSettings)
   const { isSectionHidden } = useMobileHomeLayout()
 
+  const { keyOk } = useCredentialStatus()
+
   const [navOpen, setNavOpen] = useState(false)
   const [memberSheetOpen, setMemberSheetOpen] = useState(false)
+  const [sessionSettingsOpen, setSessionSettingsOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [characterPickerOpen, setCharacterPickerOpen] = useState(false)
   const [onboardingOpen, setOnboardingOpen] = useState(false)
@@ -185,8 +211,15 @@ export function AppShellMobile() {
   }, [errorMessage, lastErrorShown])
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) ?? null
+  const [exportOpen, setExportOpen] = useState(false)
   const isTeamSession = activeSession?.kind === "team" && Boolean(activeSession.teamId)
   const teamMembers = useTeamMembers(isTeamSession ? activeSession?.teamId : null)
+
+  const inboxUnread = useClientLiveQuery<number>(
+    () => getDb().inboundLedger.where("receivedAt").above(lastInboxViewedAt).count(),
+    [lastInboxViewedAt],
+    0
+  )
 
   const characters = useClientLiveQuery<Character[]>(() => listCharacters(), [], [])
   const activeCharacter = useMemo(() => {
@@ -203,14 +236,50 @@ export function AppShellMobile() {
   )
   const headerSubject = isTeamSession ? (activeTeam ?? null) : activeCharacter
 
-  const send = isTeamSession ? teamChat.send : directChat.send
   const stop = isTeamSession ? teamChat.stop : directChat.stop
+  // Tactile confirmation for the primary chat action: a light impact once the
+  // turn dispatches, an error notification if it throws. Both no-op off-mobile
+  // (the haptics wrapper resolves `unsupported`), so wrapping is harmless.
+  const handleSend = useCallback(
+    async (content: SendContent, manifest?: readonly AttachmentManifestEntry[]) => {
+      try {
+        if (isTeamSession) {
+          await teamChat.send(content, { attachmentManifest: manifest })
+        } else {
+          await directChat.send(content, undefined, { attachmentManifest: manifest })
+        }
+        void impact("light")
+      } catch (err) {
+        void notify("error")
+        throw err
+      }
+    },
+    [directChat, isTeamSession, teamChat]
+  )
+  // Resume the turn after a plan is approved in the mobile PlanApprovalDock.
+  // Mirrors `desktop-chat-workspace.resumeAfterPlanApproval`: set the store
+  // mode first (so the composer's persist effect can't clobber the row back
+  // to `plan`), write the session row authoritatively and AWAIT it before
+  // `send` (which resolves the mode from the row), and inject the resume turn
+  // with no user bubble. Plan mode is a direct-chat surface, so teams are
+  // excluded — the dock only renders here for the active bound session, so the
+  // active id IS the plan's session.
+  const resumeAfterPlanApproval = useCallback(
+    async (prompt: string, mode: PlanResumeMode) => {
+      const sid = activeSessionId
+      if (!sid || isTeamSession) return
+      useChatStore.getState().setPermissionMode(mode)
+      await updateSession(sid, { permissionMode: mode })
+      await directChat.send(prompt, undefined, { sessionId: sid, skipUserAppend: true })
+    },
+    [activeSessionId, isTeamSession, directChat]
+  )
   const respondToApproval = (
     approval: typeof pendingApproval,
     decision: Parameters<typeof directChat.respondToApproval>[1]
   ) => {
     if (!approval) return Promise.resolve()
-    return approval.sessionId.includes("::char::")
+    return decodeSubSession(approval.sessionId) !== null
       ? teamChat.respondToApproval(approval, decision)
       : directChat.respondToApproval(approval, decision)
   }
@@ -232,8 +301,14 @@ export function AppShellMobile() {
   const handleCreateTeam = () => openSettings("teams")
 
   const handleSwitchToSession = (id: string) => {
-    select(id)
     const target = sessions.find((s) => s.id === id)
+    // Follow the conversation into its workspace before focusing it — see the
+    // desktop counterpart in `desktop-chat-workspace.tsx`.
+    if (target?.projectId) {
+      const { activeProjectId, setActiveProject } = useProjectStore.getState()
+      if (target.projectId !== activeProjectId) setActiveProject(target.projectId)
+    }
+    select(id)
     if (!target) return
     setSelectedGuild(guildFromSession(target))
     setNavOpen(false)
@@ -255,7 +330,7 @@ export function AppShellMobile() {
 
   return (
     <div
-      className="relative flex h-[100dvh] w-full flex-col bg-background text-foreground safe-area-pt"
+      className="relative flex h-[100dvh] w-full flex-col bg-background text-foreground safe-area-pt safe-area-px"
       data-testid="app-shell-mobile"
     >
       {/* ── Top bar ────────────────────────────────────────────────────── */}
@@ -286,7 +361,14 @@ export function AppShellMobile() {
               <SheetTitle>{tShell("navSheetTitle")}</SheetTitle>
             </SheetHeader>
             <div className="flex flex-1 overflow-hidden">
+              {/* `variant="sheet"` drops the rail's `md:` breakpoint gate. A
+                  phone viewport never reaches `md`, so the default rail variant
+                  rendered this whole column — workspace switcher, DM/Canvas,
+                  pinned destinations, "More", teams, Settings — as
+                  `display:none`, leaving the drawer with only the session
+                  list. */}
               <GuildRail
+                variant="sheet"
                 onCreateTeam={handleCreateTeam}
                 onOpenSettings={() => {
                   setNavOpen(false)
@@ -303,6 +385,10 @@ export function AppShellMobile() {
                     handleNewDirect()
                   }}
                   onDelete={(id) => void remove(id)}
+                  onRename={(id, title) => void rename(id, title)}
+                  onArchive={(id) => void archive(id)}
+                  onUnarchive={(id) => void unarchive(id)}
+                  folders={folders}
                 />
               </div>
             </div>
@@ -317,7 +403,51 @@ export function AppShellMobile() {
 
         <MobileWorkspaceChip className="ml-2 shrink-0" />
 
+        {/* Missing-credential warning stays visible (blocking issue): a tap
+            opens the session sheet whose Account section resolves it. Never
+            buried in the overflow menu. */}
+        {keyOk === false && activeSession ? (
+          <Badge
+            variant="destructive"
+            className="ml-2 shrink-0 cursor-pointer gap-1"
+            onClick={() => setSessionSettingsOpen(true)}
+            data-testid="mobile-no-api-key"
+          >
+            <KeyRoundIcon className="size-3" />
+            {tShell("noApiKey")}
+          </Badge>
+        ) : null}
+
         <div className="ml-auto flex items-center gap-1 sm:gap-2">
+          {/* The artifact dock's only standing affordance on a phone. The copy
+              in `chat-header` never mounts here (the chat pane below is given
+              `showHeader={false}`), so without this the Sheet could only be
+              reached by tapping an artifact card that happened to be in the
+              thread — and once closed there was no way back to the session
+              panels (artifact library, browser, workspace) at all. It also
+              carries the unread dot, which had no host on this breakpoint. */}
+          <ArtifactDockToggle className="touch-target" />
+          <JobCenterPanel compact />
+
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="relative touch-target"
+            aria-label={tShell("inbox")}
+            onClick={() => router.push("/inbox/all")}
+            data-testid="mobile-inbox-trigger"
+          >
+            <InboxIcon className="size-5" />
+            {(inboxUnread ?? 0) > 0 ? (
+              <span
+                className="absolute right-1 top-1 size-2 rounded-full bg-primary"
+                aria-hidden="true"
+                data-testid="mobile-inbox-unread-dot"
+              />
+            ) : null}
+          </Button>
+
           <Button
             type="button"
             variant="ghost"
@@ -370,6 +500,30 @@ export function AppShellMobile() {
                 <SettingsIcon className="size-4" />
                 <span>{tShell("settings")}</span>
               </DropdownMenuItem>
+              {activeSession ? (
+                <DropdownMenuItem
+                  onSelect={() => {
+                    // Defer so the menu can close before the sheet grabs focus.
+                    setTimeout(() => setSessionSettingsOpen(true), 0)
+                  }}
+                  data-testid="mobile-action-session-settings"
+                >
+                  <Settings2Icon className="size-4" />
+                  <span>{tShell("sessionSettings")}</span>
+                </DropdownMenuItem>
+              ) : null}
+              {activeSession ? (
+                <DropdownMenuItem
+                  onSelect={() => {
+                    // Defer so the menu can close before the dialog grabs focus.
+                    setTimeout(() => setExportOpen(true), 0)
+                  }}
+                  data-testid="mobile-action-export"
+                >
+                  <Share2Icon className="size-4" />
+                  <span>{tShell("exportConversation")}</span>
+                </DropdownMenuItem>
+              ) : null}
               {activeSessionId ? (
                 <DropdownMenuItem
                   onSelect={() => {
@@ -390,36 +544,85 @@ export function AppShellMobile() {
         </div>
       </header>
 
+      {/* Conversation export / share-link dialog (reuses the desktop flow;
+          its download now writes to the device Files app on Capacitor). */}
+      {activeSession ? (
+        <SingleExportDialog
+          session={activeSession}
+          open={exportOpen}
+          onOpenChange={setExportOpen}
+        />
+      ) : null}
+
+      {/* Per-session settings (mobile relocates the inner ChatHeader here via
+          `showHeader={false}` below). `showAmbientStatus` surfaces the live
+          cost badge, plan-mode tasks, and the `chat.header` plugin slot at the
+          top of the sheet — the affordances the dropped header used to host. */}
+      {activeSession ? (
+        <SessionSettingsSheet
+          session={activeSession}
+          open={sessionSettingsOpen}
+          onOpenChange={setSessionSettingsOpen}
+          showAmbientStatus
+        />
+      ) : null}
+
       {/* ── Chat pane (single column) ─────────────────────────────────── */}
       <main
-        className="relative flex min-w-0 flex-1 flex-col overflow-hidden safe-area-pb"
+        // Reserve the fixed <MobileTabBar /> footprint (h-14 + its own
+        // safe-area inset) so the composer's bottom toolbar row isn't hidden
+        // behind it. The shell root is `h-[100dvh]`, which overrides the
+        // MobileShellWrapper's `pb` reservation, so we re-assert it here. This
+        // calc already includes env(safe-area-inset-bottom), superseding the
+        // bare `safe-area-pb` that only cleared the home indicator.
+        className="relative flex min-w-0 flex-1 flex-col overflow-hidden pb-[calc(theme(spacing.14)+env(safe-area-inset-bottom))]"
         data-bg-target="chat"
       >
         {!mounted ? null : (
-          <ChatPane
-            activeSession={activeSession}
-            onSend={send}
-            onStop={stop}
-            onRegenerate={isTeamSession ? teamChat.regenerate : directChat.regenerate}
-            onEditResend={isTeamSession ? teamChat.editAndResend : directChat.editAndResend}
-            onCreate={handleNewDirect}
-            onUseSample={(text) => void send(text)}
-            onOpenSettings={openSettings}
-            recentSessions={isSectionHidden("recents") ? undefined : recentSessions}
-            onResumeSession={handleSwitchToSession}
-            composerRef={composerRef}
-            mobileMentionMembers={isTeamSession ? teamMembers : undefined}
-            welcomeExtras={{
-              hideSamples: true,
-              header: <MobileActiveRunsCard />,
-              quickActions: (
-                <MobileQuickActions
-                  onNewChat={handleNewDirect}
-                  onSearch={() => setSearchOpen(true)}
-                />
-              ),
-            }}
-          />
+          // gap11 — wrap the chat in the artifact dock (mirrors the desktop
+          // workspace + /inbox/c). On mobile the dock renders an `ArtifactPanel`
+          // bottom Sheet that opens automatically when an artifact is created;
+          // without this mount an `ArtifactPart` tap had nothing to open.
+          <ArtifactWorkspaceDock>
+            <ChatPane
+              activeSession={activeSession}
+              // The mobile shell renders its own top bar (CharacterHeader) +
+              // relocates the inner ChatHeader's affordances into the session
+              // settings sheet, so suppress the duplicate inner header.
+              showHeader={false}
+              onSend={handleSend}
+              onStop={stop}
+              // Steer parity with desktop: without these the RunStatusBar's
+              // "steer now" button never renders and an errored settle would
+              // strand the queued steer with no flush affordance.
+              onSteerNow={isTeamSession ? teamChat.interruptAndSteer : directChat.interruptAndSteer}
+              onSteerFlush={isTeamSession ? teamChat.flushSteer : directChat.flushSteer}
+              onRegenerate={isTeamSession ? teamChat.regenerate : directChat.regenerate}
+              onEditResend={isTeamSession ? teamChat.editAndResend : directChat.editAndResend}
+              // Plan-mode approval dock — direct-chat only (teams never enter
+              // plan mode). Without this a plan awaiting approval stranded the
+              // turn on mobile: the composer can enter plan mode but the dock
+              // never rendered.
+              onResumeAfterPlanApproval={isTeamSession ? undefined : resumeAfterPlanApproval}
+              onCreate={handleNewDirect}
+              onUseSample={(text) => void handleSend(text)}
+              onOpenSettings={openSettings}
+              recentSessions={isSectionHidden("recents") ? undefined : recentSessions}
+              onResumeSession={handleSwitchToSession}
+              composerRef={composerRef}
+              mobileMentionMembers={isTeamSession ? teamMembers : undefined}
+              welcomeExtras={{
+                hideSamples: true,
+                header: <MobileActiveRunsCard />,
+                quickActions: (
+                  <MobileQuickActions
+                    onNewChat={handleNewDirect}
+                    onSearch={() => setSearchOpen(true)}
+                  />
+                ),
+              }}
+            />
+          </ArtifactWorkspaceDock>
         )}
       </main>
 
@@ -435,7 +638,11 @@ export function AppShellMobile() {
               <SheetTitle>{tShell("memberSheetTitle")}</SheetTitle>
             </SheetHeader>
             <div className="flex flex-1 overflow-hidden">
+              {/* Same story as the rail above: the default variant is gated on
+                  `lg:` and additionally on the persisted `showMemberList`
+                  toggle, so this sheet opened blank on every phone. */}
               <MemberList
+                variant="sheet"
                 teamSessionId={activeSession?.id ?? null}
                 teamId={activeSession?.teamId ?? null}
                 onMention={(c) => {

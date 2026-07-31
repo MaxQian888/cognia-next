@@ -1,0 +1,9 @@
+{
+  "title": "Agent CLI External Hosting",
+  "pages": [
+    "index",
+    "cognia-parity",
+    "runtime-and-events",
+    "security-auth-and-operations"
+  ]
+}

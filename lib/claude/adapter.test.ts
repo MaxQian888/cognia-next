@@ -14,7 +14,7 @@ import type {
   SDKResultMessage,
   SDKUserMessage,
   SendContent,
-} from "./types"
+} from "@cognia/agent-config-types"
 
 function asAssistant(message: BetaMessage, uuid = "evt-1"): SDKAssistantMessage {
   return { type: "assistant", message, uuid } as unknown as SDKAssistantMessage
@@ -43,10 +43,61 @@ describe("applySdkEvent — assistant", () => {
     expect((messages[0].parts[1] as { type: string }).type).toBe("reasoning")
   })
 
+  it("preserves provider metadata on text and thinking parts", () => {
+    const evt = asAssistant({
+      id: "asst-provider-meta",
+      content: [
+        {
+          type: "text",
+          text: "hi there",
+          providerMetadata: { provider: { traceId: "trace-text" } },
+        },
+        {
+          type: "thinking",
+          thinking: "let me think",
+          providerMetadata: { provider: { traceId: "trace-reasoning" } },
+        },
+      ],
+    } as unknown as BetaMessage)
+    const { messages } = applySdkEvent([], evt)
+    expect(messages[0].parts[0]).toMatchObject({
+      type: "text",
+      text: "hi there",
+      providerMetadata: { provider: { traceId: "trace-text" } },
+    })
+    expect(messages[0].parts[1]).toMatchObject({
+      type: "reasoning",
+      text: "let me think",
+      providerMetadata: { provider: { traceId: "trace-reasoning" } },
+    })
+  })
+
+  it("preserves assistant message metadata on the UI message", () => {
+    const evt = asAssistant({
+      id: "asst-message-meta",
+      metadata: { phase: "finish", traceId: "trace-message" },
+      content: [{ type: "text", text: "hi there" }],
+    } as unknown as BetaMessage)
+    const { messages } = applySdkEvent([], evt)
+    expect(messages[0].metadata).toEqual({ phase: "finish", traceId: "trace-message" })
+  })
+
   it("represents tool_use blocks with `tool-{name}` parts", () => {
     const evt = asAssistant({
       id: "asst-2",
-      content: [{ type: "tool_use", id: "t1", name: "Read", input: { path: "/x" } }],
+      content: [
+        {
+          type: "tool_use",
+          id: "t1",
+          name: "Read",
+          input: { path: "/x" },
+          providerExecuted: false,
+          providerMetadata: { provider: { traceId: "trace-tool" } },
+          toolMetadata: { display: "Read file" },
+          dynamic: false,
+          title: "Read file",
+        },
+      ],
     } as unknown as BetaMessage)
     const { messages } = applySdkEvent([], evt)
     const part = messages[0].parts[0] as {
@@ -54,11 +105,65 @@ describe("applySdkEvent — assistant", () => {
       toolCallId: string
       input: unknown
       state: string
+      providerExecuted?: boolean
+      providerMetadata?: Record<string, Record<string, unknown>>
+      toolMetadata?: Record<string, unknown>
+      dynamic?: boolean
+      title?: string
     }
     expect(part.type).toBe("tool-Read")
     expect(part.toolCallId).toBe("t1")
     expect(part.state).toBe("input-available")
     expect(part.input).toEqual({ path: "/x" })
+    expect(part.providerExecuted).toBe(false)
+    expect(part.providerMetadata?.provider.traceId).toBe("trace-tool")
+    expect(part.toolMetadata).toEqual({ display: "Read file" })
+    expect(part.dynamic).toBe(false)
+    expect(part.title).toBe("Read file")
+  })
+
+  it("preserves a streamed tool_use state when the mapper marks input as streaming", () => {
+    const evt = asAssistant({
+      id: "asst-stream-tool",
+      content: [
+        {
+          type: "tool_use",
+          id: "t-stream",
+          name: "Write",
+          input: { path: "draft.txt" },
+          state: "input-streaming",
+        },
+      ],
+    } as unknown as BetaMessage)
+    const { messages } = applySdkEvent([], evt)
+    const part = messages[0].parts[0] as { state: string; input?: unknown }
+    expect(part.state).toBe("input-streaming")
+    expect(part.input).toEqual({ path: "draft.txt" })
+  })
+
+  it("preserves approval-requested tool_use state and approval metadata", () => {
+    const evt = asAssistant({
+      id: "asst-approval-tool",
+      content: [
+        {
+          type: "tool_use",
+          id: "t-approval",
+          name: "Write",
+          input: { path: "secret.txt" },
+          state: "approval-requested",
+          approval: { id: "approval-1", signature: "sig-1" },
+        },
+      ],
+    } as unknown as BetaMessage)
+    const { messages } = applySdkEvent([], evt)
+    const part = messages[0].parts[0] as {
+      state: string
+      input?: unknown
+      approval?: { id: string; signature?: string }
+    }
+    expect(part.state).toBe("approval-requested")
+    expect(part.input).toEqual({ path: "secret.txt" })
+    expect(part.approval).toEqual({ id: "approval-1", signature: "sig-1" })
   })
 
   it("converts artifact_create tool_use into an ArtifactPart", () => {
@@ -89,6 +194,56 @@ describe("applySdkEvent — assistant", () => {
     expect(part.artifactId).toBe("art-1")
     expect(part.title).toBe("demo.md")
     expect(part.kind).toBe("document")
+  })
+
+  it("converts assistant file blocks into UI file parts", () => {
+    const evt = asAssistant({
+      id: "asst-file-1",
+      content: [
+        {
+          type: "file",
+          source: { type: "base64", media_type: "image/png", data: "QUJD" },
+          filename: "chart.png",
+        },
+      ],
+    } as unknown as BetaMessage)
+    const { messages } = applySdkEvent([], evt)
+    const part = messages[0].parts[0] as {
+      type: string
+      url: string
+      mediaType: string
+      filename?: string
+    }
+    expect(part).toEqual({
+      type: "file",
+      url: "data:image/png;base64,QUJD",
+      mediaType: "image/png",
+      filename: "chart.png",
+    })
+  })
+
+  it("converts assistant url file blocks into UI file parts", () => {
+    const evt = asAssistant({
+      id: "asst-url-file-1",
+      content: [
+        {
+          type: "file",
+          url: "https://files.example/chart.png",
+          media_type: "image/png",
+        },
+      ],
+    } as unknown as BetaMessage)
+    const { messages } = applySdkEvent([], evt)
+    const part = messages[0].parts[0] as {
+      type: string
+      url: string
+      mediaType: string
+    }
+    expect(part).toEqual({
+      type: "file",
+      url: "https://files.example/chart.png",
+      mediaType: "image/png",
+    })
   })
 
   it("falls back to evt.uuid when message.id is missing", () => {
@@ -133,6 +288,179 @@ describe("applySdkEvent — assistant", () => {
     const { messages } = applySdkEvent([], evt)
     expect((messages[0].parts[0] as { text: string }).text).toBe("")
     expect((messages[0].parts[1] as { text: string }).text).toBe("")
+  })
+})
+
+describe("applySdkEvent — compact boundary", () => {
+  const boundary = (extra: Record<string, unknown> = {}) =>
+    ({
+      type: "system",
+      subtype: "compact_boundary",
+      uuid: "cb-1",
+      session_id: "s",
+      compact_metadata: { trigger: "auto", pre_tokens: 1000, post_tokens: 200 },
+      ...extra,
+    }) as unknown as SDKResultMessage // narrow local SDKMessage union; cast for the test
+
+  it("appends a system compact-boundary marker carrying the metadata", () => {
+    const { messages, turnComplete } = applySdkEvent([], boundary())
+    expect(turnComplete).toBe(false)
+    expect(messages).toHaveLength(1)
+    expect(messages[0].role).toBe("system")
+    expect(messages[0].id).toBe("compact-cb-1")
+    const part = messages[0].parts[0] as {
+      type: string
+      trigger?: string
+      preTokens?: number
+      postTokens?: number
+    }
+    expect(part.type).toBe("compact-boundary")
+    expect(part.trigger).toBe("auto")
+    expect(part.preTokens).toBe(1000)
+    expect(part.postTokens).toBe(200)
+  })
+
+  it("registers an undo snapshot and tags the part when pre_messages are present", async () => {
+    const { hasUndoSnapshot, getUndoSnapshot, __resetUndoRegistryForTesting } =
+      await import("./compaction-undo")
+    __resetUndoRegistryForTesting()
+    const { messages } = applySdkEvent(
+      [],
+      boundary({
+        compact_metadata: {
+          trigger: "auto",
+          pre_tokens: 1000,
+          post_tokens: 200,
+          strategy: "selective",
+          pre_messages: [{ role: "user", content: "m0" }],
+        },
+      })
+    )
+    const part = messages[0].parts[0] as { strategy?: string; undoToken?: string }
+    expect(part.strategy).toBe("selective")
+    expect(part.undoToken).toBe("compact-cb-1")
+    expect(hasUndoSnapshot("compact-cb-1")).toBe(true)
+    expect(getUndoSnapshot("compact-cb-1")?.snapshot).toHaveLength(1)
+  })
+
+  it("does not tag an undo token when no snapshot was captured", () => {
+    const { messages } = applySdkEvent([], boundary())
+    const part = messages[0].parts[0] as { undoToken?: string }
+    expect(part.undoToken).toBeUndefined()
+  })
+
+  it("leaves other system messages (init) untouched", () => {
+    const existing = [{ id: "u1", role: "user", parts: [] }] as unknown as UIMessage[]
+    const evt = { type: "system", subtype: "init", session_id: "s" } as unknown as SDKResultMessage
+    const { messages } = applySdkEvent(existing, evt)
+    expect(messages).toBe(existing)
+  })
+
+  it("falls back to a generated id when the boundary carries no uuid", () => {
+    const { messages } = applySdkEvent([], boundary({ uuid: undefined }))
+    expect(messages[0].id).toMatch(/^compact-/)
+    expect(messages[0].id.length).toBeGreaterThan("compact-".length)
+  })
+})
+
+describe("applySdkEvent — hook fire", () => {
+  const hookFire = (extra: Record<string, unknown> = {}) =>
+    ({
+      type: "system",
+      subtype: "hook_fire",
+      hook_event: "PreToolUse",
+      tool_name: "Bash",
+      outcome: "blocked",
+      block: "command matches denylist",
+      additional_context: null,
+      warnings: ["hook timed out after 5000ms"],
+      ...extra,
+    }) as unknown as SDKResultMessage
+
+  it("projects a consequential fire into a system hook-notice marker", () => {
+    const { messages, turnComplete } = applySdkEvent([], hookFire())
+    expect(turnComplete).toBe(false)
+    expect(messages).toHaveLength(1)
+    expect(messages[0].role).toBe("system")
+    expect(messages[0].id).toMatch(/^hook-PreToolUse-/)
+    const part = messages[0].parts[0] as {
+      type: string
+      event: string
+      toolName?: string
+      outcome: string
+      block?: string
+      additionalContext?: string
+      warnings: string[]
+    }
+    expect(part.type).toBe("hook-notice")
+    expect(part.event).toBe("PreToolUse")
+    expect(part.toolName).toBe("Bash")
+    expect(part.outcome).toBe("blocked")
+    expect(part.block).toBe("command matches denylist")
+    expect(part.additionalContext).toBeFalsy()
+    expect(part.warnings).toEqual(["hook timed out after 5000ms"])
+  })
+
+  it("maps a context fire with no tool name", () => {
+    const { messages } = applySdkEvent(
+      [],
+      hookFire({
+        hook_event: "UserPromptSubmit",
+        tool_name: undefined,
+        outcome: "context",
+        block: undefined,
+        additional_context: "loaded 1.2KB of context",
+        warnings: [],
+      })
+    )
+    const part = messages[0].parts[0] as unknown as {
+      outcome: string
+      toolName?: string
+      warnings: string[]
+    }
+    expect(part.outcome).toBe("context")
+    expect(part.toolName).toBeUndefined()
+    expect(part.warnings).toEqual([])
+  })
+
+  it("defaults a missing outcome to warning and missing warnings to []", () => {
+    const { messages } = applySdkEvent(
+      [],
+      hookFire({ outcome: undefined, block: undefined, warnings: undefined })
+    )
+    const part = messages[0].parts[0] as unknown as { outcome: string; warnings: string[] }
+    expect(part.outcome).toBe("warning")
+    expect(part.warnings).toEqual([])
+  })
+})
+
+describe("applySdkEvent — permission denied dedup", () => {
+  const permDenied = (reason: string) =>
+    ({
+      type: "system",
+      subtype: "permission_denied",
+      uuid: "pd-1",
+      tool_name: "Bash",
+      decision_reason: reason,
+    }) as unknown as SDKResultMessage
+
+  it("suppresses the notice when the denial came from a hook", () => {
+    const existing = [{ id: "u1", role: "user", parts: [] }] as unknown as UIMessage[]
+    const { messages } = applySdkEvent(
+      existing,
+      permDenied("hook denied: command matches denylist")
+    )
+    // The hook_fire row already covers it — no extra session notice appended.
+    expect(messages).toBe(existing)
+  })
+
+  it("still appends a session notice for a non-hook denial", () => {
+    const { messages } = applySdkEvent([], permDenied("classifier auto-denied"))
+    expect(messages).toHaveLength(1)
+    const part = messages[0].parts[0] as { type: string; variant: string; reason?: string }
+    expect(part.type).toBe("session-notice")
+    expect(part.variant).toBe("permission-denied")
+    expect(part.reason).toBe("classifier auto-denied")
   })
 })
 
@@ -284,6 +612,174 @@ describe("applySdkEvent — user (tool results)", () => {
     expect(part.output).toBe('{"foo":"bar"}')
   })
 
+  it("preserves structured mcpContent when the result carries a non-text block (gap3)", () => {
+    const assistant: UIMessage = {
+      id: "a",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-mcp__some-server__capture",
+          toolCallId: "t-mcp",
+          state: "input-available",
+          input: {},
+        } as unknown as UIMessage["parts"][number],
+      ],
+    } as UIMessage
+    const result = applySdkEvent(
+      [assistant],
+      userToolResult([
+        {
+          type: "tool_result",
+          tool_use_id: "t-mcp",
+          content: [
+            { type: "text", text: "here is the screenshot" },
+            { type: "image", source: { type: "base64", media_type: "image/png", data: "AAAA" } },
+          ],
+          is_error: false,
+        },
+      ])
+    )
+    const part = result.messages[0].parts[0] as {
+      output?: string
+      mcpContent?: Array<{ type: string }>
+    }
+    // flattened string still present for back-compat
+    expect(part.output).toContain("here is the screenshot")
+    // …but the image is a compact placeholder, not a base64 wall: the bytes
+    // live on `mcpContent`, and nothing downstream can read them out of a
+    // string anyway (exports, share, CLI handoff all just print `output`).
+    expect(part.output).not.toContain("AAAA")
+    expect(part.output).toContain("[image image/png")
+    // structured blocks preserved verbatim
+    expect(part.mcpContent).toHaveLength(2)
+    expect(part.mcpContent?.[1]?.type).toBe("image")
+  })
+
+  it("summarises audio and resource blocks in the flattened output too", () => {
+    const assistant: UIMessage = {
+      id: "a",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-mcp__some-server__fetch",
+          toolCallId: "t-mixed",
+          state: "input-available",
+          input: {},
+        } as unknown as UIMessage["parts"][number],
+      ],
+    } as UIMessage
+    const result = applySdkEvent(
+      [assistant],
+      userToolResult([
+        {
+          type: "tool_result",
+          tool_use_id: "t-mixed",
+          content: [
+            { type: "audio", data: "BBBB", mimeType: "audio/wav" },
+            { type: "resource", resource: { uri: "file:///a.py", text: "print(1)" } },
+            // An unrecognised block keeps the honest JSON dump — no silent loss.
+            { type: "weird", payload: 1 },
+          ],
+          is_error: false,
+        },
+      ])
+    )
+    const part = result.messages[0].parts[0] as { output?: string }
+    expect(part.output).toContain("[audio audio/wav")
+    expect(part.output).not.toContain("BBBB")
+    expect(part.output).toContain("[resource file:///a.py]")
+    expect(part.output).toContain('{"type":"weird","payload":1}')
+  })
+
+  it("reports the decoded byte size of a media block, not the base64 length", () => {
+    const assistant: UIMessage = {
+      id: "a",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-Read",
+          toolCallId: "t-size",
+          state: "input-available",
+          input: {},
+        } as unknown as UIMessage["parts"][number],
+      ],
+    } as UIMessage
+    // 4 base64 chars with no padding → 3 decoded bytes.
+    const result = applySdkEvent(
+      [assistant],
+      userToolResult([
+        {
+          type: "tool_result",
+          tool_use_id: "t-size",
+          content: [{ type: "image", data: "AAAA", mimeType: "image/png" }],
+          is_error: false,
+        },
+      ])
+    )
+    const part = result.messages[0].parts[0] as { output?: string }
+    expect(part.output).toBe("[image image/png · 3 B]")
+  })
+
+  it("does NOT attach mcpContent for a pure-text array result (no behavior change)", () => {
+    const assistant: UIMessage = {
+      id: "a",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-Read",
+          toolCallId: "t-txt",
+          state: "input-available",
+          input: {},
+        } as unknown as UIMessage["parts"][number],
+      ],
+    } as UIMessage
+    const result = applySdkEvent(
+      [assistant],
+      userToolResult([
+        {
+          type: "tool_result",
+          tool_use_id: "t-txt",
+          content: [
+            { type: "text", text: "alpha" },
+            { type: "text", text: "beta" },
+          ],
+          is_error: false,
+        },
+      ])
+    )
+    const part = result.messages[0].parts[0] as { mcpContent?: unknown }
+    expect(part.mcpContent).toBeUndefined()
+  })
+
+  it("does NOT attach mcpContent for an error result", () => {
+    const assistant: UIMessage = {
+      id: "a",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool-mcp__x__y",
+          toolCallId: "t-err",
+          state: "input-available",
+          input: {},
+        } as unknown as UIMessage["parts"][number],
+      ],
+    } as UIMessage
+    const result = applySdkEvent(
+      [assistant],
+      userToolResult([
+        {
+          type: "tool_result",
+          tool_use_id: "t-err",
+          content: [{ type: "image", source: { data: "AAAA" } }],
+          is_error: true,
+        },
+      ])
+    )
+    const part = result.messages[0].parts[0] as { mcpContent?: unknown; state: string }
+    expect(part.state).toBe("output-error")
+    expect(part.mcpContent).toBeUndefined()
+  })
+
   it("returns the original list unchanged when the tool_use_id matches nothing", () => {
     const messages: UIMessage[] = [
       {
@@ -350,6 +846,44 @@ describe("applySdkEvent — result", () => {
       totalCostUsd: 0.05,
       durationMs: 1234,
     })
+  })
+
+  it("surfaces reasoning_tokens (> 0) as reasoningTokens, ignoring a zero", () => {
+    const withReasoning = applySdkEvent(
+      [{ id: "a", role: "assistant", parts: [] } as UIMessage],
+      asResult({ usage: { output_tokens: 40, reasoning_tokens: 32 } })
+    )
+    const meta1 = (withReasoning.messages[0] as { metadata?: { usage?: Record<string, unknown> } })
+      .metadata
+    expect(meta1?.usage?.reasoningTokens).toBe(32)
+
+    const zeroReasoning = applySdkEvent(
+      [{ id: "a", role: "assistant", parts: [] } as UIMessage],
+      asResult({ usage: { output_tokens: 20, reasoning_tokens: 0 } })
+    )
+    const meta2 = (zeroReasoning.messages[0] as { metadata?: { usage?: Record<string, unknown> } })
+      .metadata
+    // A non-reasoning turn must not carry a noisy reasoningTokens: 0.
+    expect(meta2?.usage?.reasoningTokens).toBeUndefined()
+  })
+
+  it("surfaces context_input_tokens (window prompt) only when it differs from input_tokens", () => {
+    // ai-sdk multi-leg turn: input_tokens is the summed billing figure; the
+    // window holds only the last leg → context_input_tokens carries it.
+    const differs = applySdkEvent(
+      [{ id: "a", role: "assistant", parts: [] } as UIMessage],
+      asResult({ usage: { input_tokens: 3000, output_tokens: 40, context_input_tokens: 1000 } })
+    )
+    const m1 = (differs.messages[0] as { metadata?: { usage?: Record<string, unknown> } }).metadata
+    expect(m1?.usage?.contextInputTokens).toBe(1000)
+
+    // Single-leg turn where the two coincide → no redundant field attached.
+    const same = applySdkEvent(
+      [{ id: "a", role: "assistant", parts: [] } as UIMessage],
+      asResult({ usage: { input_tokens: 1000, output_tokens: 40, context_input_tokens: 1000 } })
+    )
+    const m2 = (same.messages[0] as { metadata?: { usage?: Record<string, unknown> } }).metadata
+    expect(m2?.usage?.contextInputTokens).toBeUndefined()
   })
 
   it("looks for usage under message.usage when the top-level usage is absent", () => {
@@ -477,6 +1011,84 @@ describe("makeUserMessage", () => {
     )
     expect(msg.parts).toHaveLength(1)
     expect((msg.parts[0] as { text: string }).text).toBe("alpha")
+  })
+
+  describe("with an attachment manifest", () => {
+    // Without the manifest the transcript had no idea what a block came from:
+    // images lost their filename and a document's extracted text was rendered
+    // verbatim in the user's own bubble.
+    it("labels an image part with its original filename", () => {
+      const msg = makeUserMessage(
+        [{ type: "image", source: { type: "base64", media_type: "image/png", data: "AAAA" } }],
+        "id-4",
+        [{ filename: "screenshot.png", mediaType: "image/png", kind: "image" }]
+      )
+      const file = msg.parts[0] as { type: string; filename?: string; url: string }
+      expect(file.type).toBe("file")
+      expect(file.filename).toBe("screenshot.png")
+      expect(file.url).toBe("data:image/png;base64,AAAA")
+    })
+
+    it("turns a document's extracted text into a url-less file part", () => {
+      const extracted = 'Attached file "report.pdf":\n\nbody text'
+      const msg = makeUserMessage([{ type: "text", text: extracted }], "id-5", [
+        { filename: "report.pdf", mediaType: "application/pdf", kind: "document" },
+      ])
+      const part = msg.parts[0] as {
+        type: string
+        filename?: string
+        mediaType?: string
+        url?: string
+        text?: string
+      }
+      expect(part.type).toBe("file")
+      expect(part.filename).toBe("report.pdf")
+      expect(part.mediaType).toBe("application/pdf")
+      // The original binary is deliberately not persisted.
+      expect(part.url).toBeUndefined()
+      // …but the text the model saw rides along, so regenerate can rebuild it.
+      expect(part.text).toBe(extracted)
+    })
+
+    it("leaves the user's own prose a text part", () => {
+      const msg = makeUserMessage(
+        [
+          { type: "text", text: 'Attached file "a.txt":\n\ndoc' },
+          { type: "text", text: "what do you think?" },
+        ],
+        "id-6",
+        [{ filename: "a.txt", mediaType: "text/plain", kind: "document" }]
+      )
+      expect((msg.parts[0] as { type: string }).type).toBe("file")
+      // Index 1 has no manifest entry → it is the user's message, not a file.
+      expect(msg.parts[1] as { type: string; text: string }).toMatchObject({
+        type: "text",
+        text: "what do you think?",
+      })
+    })
+
+    it("keeps manifest alignment when images and documents are interleaved", () => {
+      const msg = makeUserMessage(
+        [
+          { type: "text", text: "doc one" },
+          { type: "image", source: { type: "base64", media_type: "image/png", data: "BBBB" } },
+          { type: "text", text: "trailing prose" },
+        ],
+        "id-7",
+        [
+          { filename: "one.txt", mediaType: "text/plain", kind: "document" },
+          { filename: "two.png", mediaType: "image/png", kind: "image" },
+        ]
+      )
+      expect(msg.parts.map((p) => (p as { type: string }).type)).toEqual(["file", "file", "text"])
+      expect((msg.parts[0] as { filename?: string }).filename).toBe("one.txt")
+      expect((msg.parts[1] as { filename?: string }).filename).toBe("two.png")
+    })
+
+    it("falls back to the old shape when no manifest is supplied", () => {
+      const msg = makeUserMessage([{ type: "text", text: "plain" }], "id-8")
+      expect((msg.parts[0] as { type: string }).type).toBe("text")
+    })
   })
 })
 
@@ -611,6 +1223,54 @@ describe("mergeTwinSourcesIntoLastAssistant", () => {
     expect(next).toBe(baseMessages)
   })
 
+  it("attaches a degraded-flagged SourcesPart when degraded with no retrieved context", () => {
+    const next = mergeTwinSourcesIntoLastAssistant(baseMessages, {
+      twinId: "twin_a",
+      retrievedChunks: [],
+      selectedStyleSamples: [],
+      degraded: true,
+    })
+    expect(next).not.toBe(baseMessages)
+    const sources = next[1].parts.find(
+      (p) => (p as { type?: string }).type === "sources"
+    ) as unknown as SourcesPart
+    expect(sources).toBeDefined()
+    expect(sources.sources).toHaveLength(0)
+    expect(sources.twinDegraded).toBe(true)
+  })
+
+  it("flags an existing SourcesPart as degraded while still attaching retrieved chunks", () => {
+    const next = mergeTwinSourcesIntoLastAssistant(baseMessages, {
+      twinId: "twin_a",
+      retrievedChunks: [
+        {
+          chunk: { vectorDocId: "v1", content: "doc", sourceId: "src1" },
+          score: 0.5,
+          sourceTitle: "doc.md",
+        },
+      ],
+      selectedStyleSamples: [],
+      degraded: true,
+    })
+    const sources = next[1].parts.find(
+      (p) => (p as { type?: string }).type === "sources"
+    ) as unknown as SourcesPart
+    expect(sources.sources).toHaveLength(1)
+    expect(sources.twinDegraded).toBe(true)
+  })
+
+  it("is idempotent for a degraded no-context merge", () => {
+    const ctx = {
+      twinId: "twin_a",
+      retrievedChunks: [],
+      selectedStyleSamples: [],
+      degraded: true,
+    }
+    const once = mergeTwinSourcesIntoLastAssistant(baseMessages, ctx)
+    const twice = mergeTwinSourcesIntoLastAssistant(once, ctx)
+    expect(twice).toBe(once)
+  })
+
   it("returns the same array when there is no assistant message", () => {
     const userOnly: UIMessage[] = [
       { id: "u1", role: "user", parts: [{ type: "text", text: "hi" } as never] },
@@ -691,5 +1351,431 @@ describe("mergeMemorySourcesIntoLastAssistant", () => {
       retrievedMemories: [{ id: "m1", type: "semantic", text: "fact", score: 0.5 }],
     })
     expect(next).toBe(userOnly)
+  })
+
+  it("stamps budget and degraded annotations onto the SourcesPart", () => {
+    const next = mergeMemorySourcesIntoLastAssistant(baseMessages, {
+      retrievedMemories: [{ id: "m1", type: "semantic", text: "fact", score: 0.5 }],
+      budget: { limit: 900, used: 321, truncated: true },
+      degraded: true,
+    })
+    const sources = next[1].parts.find(
+      (p) => (p as { type?: string }).type === "sources"
+    ) as unknown as SourcesPart
+    expect(sources.memoryBudget).toEqual({ limit: 900, used: 321, truncated: true })
+    expect(sources.memoryDegraded).toBe(true)
+  })
+
+  it("annotates a degraded turn even with zero recalled memories", () => {
+    const next = mergeMemorySourcesIntoLastAssistant(baseMessages, {
+      retrievedMemories: [],
+      degraded: true,
+    })
+    expect(next).not.toBe(baseMessages)
+    const sources = next[1].parts.find(
+      (p) => (p as { type?: string }).type === "sources"
+    ) as unknown as SourcesPart
+    expect(sources.sources).toHaveLength(0)
+    expect(sources.memoryDegraded).toBe(true)
+    expect(sources.memoryBudget).toBeUndefined()
+  })
+
+  it("preserves memory annotations across a later twin merge (stickiness)", () => {
+    const withMemory = mergeMemorySourcesIntoLastAssistant(baseMessages, {
+      retrievedMemories: [{ id: "m1", type: "semantic", text: "fact", score: 0.5 }],
+      budget: { limit: 900, used: 100, truncated: false },
+    })
+    const thenTwin = mergeTwinSourcesIntoLastAssistant(withMemory, {
+      twinId: "twin_a",
+      retrievedChunks: [
+        {
+          chunk: { vectorDocId: "v1", content: "doc", sourceId: "src1" },
+          score: 0.5,
+          sourceTitle: "doc.md",
+        },
+      ],
+      selectedStyleSamples: [],
+    })
+    const sources = thenTwin[1].parts.find(
+      (p) => (p as { type?: string }).type === "sources"
+    ) as unknown as SourcesPart
+    expect(sources.memoryBudget).toEqual({ limit: 900, used: 100, truncated: false })
+    expect(sources.sources.some((s) => s.origin === "twin-rag")).toBe(true)
+  })
+
+  it("is idempotent with annotations present", () => {
+    const ctx = {
+      retrievedMemories: [{ id: "m1", type: "semantic", text: "fact", score: 0.5 }],
+      budget: { limit: 900, used: 100, truncated: false },
+      degraded: false,
+    }
+    const once = mergeMemorySourcesIntoLastAssistant(baseMessages, ctx)
+    const twice = mergeMemorySourcesIntoLastAssistant(once, ctx)
+    expect(twice).toBe(once)
+  })
+})
+
+describe("applySdkEvent — stream_event (token-level streaming)", () => {
+  function streamEvt(event: Record<string, unknown>, uuid = "se-1") {
+    return {
+      type: "stream_event",
+      event,
+      parent_tool_use_id: null,
+      uuid,
+      session_id: "s1",
+    } as unknown as Parameters<typeof applySdkEvent>[1]
+  }
+
+  it("message_start seeds an empty assistant message keyed by id", () => {
+    const { messages, turnComplete } = applySdkEvent(
+      [],
+      streamEvt({ type: "message_start", message: { id: "asst-stream-1" } })
+    )
+    expect(turnComplete).toBe(false)
+    expect(messages).toHaveLength(1)
+    expect(messages[0].id).toBe("asst-stream-1")
+    expect(messages[0].role).toBe("assistant")
+    expect(messages[0].parts).toHaveLength(0)
+  })
+
+  it("message_start is idempotent (no duplicate for the same id)", () => {
+    const a = applySdkEvent([], streamEvt({ type: "message_start", message: { id: "m" } })).messages
+    const b = applySdkEvent(a, streamEvt({ type: "message_start", message: { id: "m" } })).messages
+    expect(b).toHaveLength(1)
+  })
+
+  it("message_start attaches live input/cache usage for a mid-turn ctx% refresh", () => {
+    const { messages } = applySdkEvent(
+      [],
+      streamEvt({
+        type: "message_start",
+        message: {
+          id: "asst-usage",
+          usage: {
+            input_tokens: 1200,
+            cache_read_input_tokens: 300,
+            cache_creation_input_tokens: 50,
+          },
+        },
+      })
+    )
+    const usage = (messages[0] as { metadata?: { usage?: Record<string, number> } }).metadata?.usage
+    expect(usage).toMatchObject({
+      inputTokens: 1200,
+      cacheReadInputTokens: 300,
+      cacheCreationInputTokens: 50,
+    })
+  })
+
+  it("message_delta merges the running output_tokens without dropping prior input", () => {
+    let msgs = applySdkEvent(
+      [],
+      streamEvt({
+        type: "message_start",
+        message: { id: "m", usage: { input_tokens: 1000 } },
+      })
+    ).messages
+    msgs = applySdkEvent(
+      msgs,
+      streamEvt({ type: "message_delta", usage: { output_tokens: 42 } })
+    ).messages
+    const usage = (msgs[0] as { metadata?: { usage?: Record<string, number> } }).metadata?.usage
+    // input from message_start is preserved; output added by message_delta.
+    expect(usage).toMatchObject({ inputTokens: 1000, outputTokens: 42 })
+  })
+
+  it("a usage-less message_start (ai-sdk path) attaches no metadata", () => {
+    const { messages } = applySdkEvent(
+      [],
+      streamEvt({ type: "message_start", message: { id: "ai-sdk" } })
+    )
+    expect((messages[0] as { metadata?: unknown }).metadata).toBeUndefined()
+  })
+
+  it("text_delta accumulates into a single streaming text part", () => {
+    let msgs = applySdkEvent(
+      [],
+      streamEvt({ type: "message_start", message: { id: "m" } })
+    ).messages
+    msgs = applySdkEvent(
+      msgs,
+      streamEvt({ type: "content_block_delta", delta: { type: "text_delta", text: "Hel" } })
+    ).messages
+    msgs = applySdkEvent(
+      msgs,
+      streamEvt({ type: "content_block_delta", delta: { type: "text_delta", text: "lo" } })
+    ).messages
+    expect(msgs[0].parts).toHaveLength(1)
+    const part = msgs[0].parts[0] as { type: string; text: string; state: string }
+    expect(part.type).toBe("text")
+    expect(part.text).toBe("Hello")
+    expect(part.state).toBe("streaming")
+  })
+
+  it("thinking_delta accumulates into a reasoning part, separate from text", () => {
+    let msgs = applySdkEvent(
+      [],
+      streamEvt({ type: "message_start", message: { id: "m" } })
+    ).messages
+    msgs = applySdkEvent(
+      msgs,
+      streamEvt({ type: "content_block_delta", delta: { type: "thinking_delta", thinking: "hmm" } })
+    ).messages
+    msgs = applySdkEvent(
+      msgs,
+      streamEvt({ type: "content_block_delta", delta: { type: "text_delta", text: "answer" } })
+    ).messages
+    const types = msgs[0].parts.map((p) => (p as { type: string }).type)
+    expect(types).toEqual(["reasoning", "text"])
+  })
+
+  it("step_start stream events append a step-start part to the active assistant", () => {
+    let msgs = applySdkEvent(
+      [],
+      streamEvt({ type: "message_start", message: { id: "m-step" } })
+    ).messages
+    msgs = applySdkEvent(msgs, streamEvt({ type: "step_start" })).messages
+    msgs = applySdkEvent(
+      msgs,
+      streamEvt({ type: "content_block_delta", delta: { type: "text_delta", text: "next" } })
+    ).messages
+
+    expect(msgs[0].parts.map((p) => (p as { type: string }).type)).toEqual(["step-start", "text"])
+  })
+
+  it("the final full assistant message replaces the streamed preview (same id)", () => {
+    let msgs = applySdkEvent(
+      [],
+      streamEvt({ type: "message_start", message: { id: "asst-9" } })
+    ).messages
+    msgs = applySdkEvent(
+      msgs,
+      streamEvt({ type: "content_block_delta", delta: { type: "text_delta", text: "partial" } })
+    ).messages
+    const final = applySdkEvent(
+      msgs,
+      asAssistant({
+        id: "asst-9",
+        content: [{ type: "text", text: "final answer" }],
+      } as unknown as BetaMessage)
+    ).messages
+    expect(final).toHaveLength(1)
+    expect(final[0].id).toBe("asst-9")
+    const part = final[0].parts[0] as { type: string; text: string; state: string }
+    expect(part.text).toBe("final answer")
+    expect(part.state).toBe("done")
+  })
+
+  it("preserves streamed step-start parts when the final assistant replaces the preview", () => {
+    let msgs = applySdkEvent(
+      [],
+      streamEvt({ type: "message_start", message: { id: "asst-step-final" } })
+    ).messages
+    msgs = applySdkEvent(msgs, streamEvt({ type: "step_start" })).messages
+    msgs = applySdkEvent(
+      msgs,
+      streamEvt({
+        type: "content_block_delta",
+        delta: { type: "text_delta", text: "preview" },
+      })
+    ).messages
+
+    const final = applySdkEvent(
+      msgs,
+      asAssistant({
+        id: "asst-step-final",
+        content: [{ type: "text", text: "final answer" }],
+      } as unknown as BetaMessage)
+    ).messages
+
+    expect(final[0].parts.map((p) => (p as { type: string }).type)).toEqual(["step-start", "text"])
+    expect((final[0].parts[1] as { text: string }).text).toBe("final answer")
+  })
+
+  it("does not merge a new turn's deltas into a prior turn's assistant message", () => {
+    // Turn 1 sealed (user1 + completed assistant). Turn 2 started: `send`
+    // appended the optimistic user2 message. A `content_block_delta` then
+    // arrives whose `message_start` was dropped (aborted / resent turn that
+    // "didn't send"). It must NOT grow the prior turn's finished assistant —
+    // doing so produces the garbled "greeting two + greeting one tail" merge.
+    const prior = [
+      { id: "u1", role: "user", parts: [{ type: "text", text: "hi" }] },
+      {
+        id: "a1",
+        role: "assistant",
+        parts: [{ type: "text", text: "greeting one", state: "done" }],
+      },
+      { id: "u2", role: "user", parts: [{ type: "text", text: "hi" }] },
+    ] as unknown as UIMessage[]
+    const out = applySdkEvent(
+      prior,
+      streamEvt({ type: "content_block_delta", delta: { type: "text_delta", text: " LEAK" } })
+    ).messages
+    // Reference unchanged and the prior assistant text is untouched.
+    expect(out).toBe(prior)
+    const a1 = out[1].parts[0] as { text: string }
+    expect(a1.text).toBe("greeting one")
+  })
+
+  it("grows the current turn's assistant once message_start seeds it after the user turn", () => {
+    // Same turn-2 base, but message_start arrives first → a fresh assistant is
+    // seeded after user2 and the delta lands there, never on the prior turn.
+    const base = [
+      { id: "u1", role: "user", parts: [{ type: "text", text: "hi" }] },
+      {
+        id: "a1",
+        role: "assistant",
+        parts: [{ type: "text", text: "greeting one", state: "done" }],
+      },
+      { id: "u2", role: "user", parts: [{ type: "text", text: "hi" }] },
+    ] as unknown as UIMessage[]
+    let msgs = applySdkEvent(
+      base,
+      streamEvt({ type: "message_start", message: { id: "a2" } })
+    ).messages
+    msgs = applySdkEvent(
+      msgs,
+      streamEvt({
+        type: "content_block_delta",
+        delta: { type: "text_delta", text: "greeting two" },
+      })
+    ).messages
+    expect(msgs).toHaveLength(4)
+    expect((msgs[1].parts[0] as { text: string }).text).toBe("greeting one")
+    expect(msgs[3].id).toBe("a2")
+    expect((msgs[3].parts[0] as { text: string }).text).toBe("greeting two")
+  })
+
+  it("ignores deltas with no active assistant message and unknown raw events", () => {
+    expect(
+      applySdkEvent(
+        [],
+        streamEvt({ type: "content_block_delta", delta: { type: "text_delta", text: "x" } })
+      ).messages
+    ).toHaveLength(0)
+    const seeded = applySdkEvent(
+      [],
+      streamEvt({ type: "message_start", message: { id: "m" } })
+    ).messages
+    expect(applySdkEvent(seeded, streamEvt({ type: "message_stop" })).messages).toBe(seeded)
+  })
+})
+
+describe("applySdkEvent — session notices (permission-denied + rate-limit)", () => {
+  function sysDenied(extra: Record<string, unknown> = {}) {
+    return {
+      type: "system",
+      subtype: "permission_denied",
+      tool_name: "Bash",
+      decision_reason: "blocked by deny rule",
+      message: "denied",
+      uuid: "pd-1",
+      ...extra,
+    } as unknown as Parameters<typeof applySdkEvent>[1]
+  }
+  function rateEvt(status: string, extra: Record<string, unknown> = {}) {
+    return {
+      type: "rate_limit_event",
+      rate_limit_info: { status, rateLimitType: "five_hour", resetsAt: 1781869200, ...extra },
+      uuid: "rl-1",
+      session_id: "s1",
+    } as unknown as Parameters<typeof applySdkEvent>[1]
+  }
+
+  it("permission_denied appends a session-notice marker with tool + reason", () => {
+    const { messages, turnComplete } = applySdkEvent([], sysDenied())
+    expect(turnComplete).toBe(false)
+    expect(messages).toHaveLength(1)
+    const part = messages[0].parts[0] as {
+      type: string
+      variant: string
+      toolName: string
+      reason: string
+    }
+    expect(messages[0].role).toBe("system")
+    expect(part.type).toBe("session-notice")
+    expect(part.variant).toBe("permission-denied")
+    expect(part.toolName).toBe("Bash")
+    expect(part.reason).toBe("blocked by deny rule")
+  })
+
+  it("rate_limit_event with status=allowed is ignored (no transcript spam)", () => {
+    expect(applySdkEvent([], rateEvt("allowed")).messages).toHaveLength(0)
+  })
+
+  it("rate_limit_event with allowed_warning / rejected appends a notice", () => {
+    const warn = applySdkEvent([], rateEvt("allowed_warning")).messages
+    expect(warn).toHaveLength(1)
+    expect((warn[0].parts[0] as unknown as { variant: string }).variant).toBe("rate-limit")
+    expect((warn[0].parts[0] as unknown as { status: string }).status).toBe("allowed_warning")
+    const rej = applySdkEvent([], rateEvt("rejected")).messages
+    expect((rej[0].parts[0] as unknown as { status: string }).status).toBe("rejected")
+  })
+
+  it("consecutive rate-limit notices collapse to one (latest wins)", () => {
+    let msgs = applySdkEvent([], rateEvt("allowed_warning", {})).messages
+    msgs = applySdkEvent(msgs, rateEvt("rejected")).messages
+    const notices = msgs.filter((m) => (m.parts[0] as { type?: string }).type === "session-notice")
+    expect(notices).toHaveLength(1)
+    expect((notices[0].parts[0] as unknown as { status: string }).status).toBe("rejected")
+  })
+
+  it("a rate-limit notice does NOT collapse a preceding permission-denied notice", () => {
+    let msgs = applySdkEvent([], sysDenied()).messages
+    msgs = applySdkEvent(msgs, rateEvt("rejected")).messages
+    expect(msgs).toHaveLength(2)
+  })
+
+  // The notice projects a *live* condition. Once the window resets the SDK
+  // re-emits with `allowed`, which must remove the marker — otherwise a single
+  // past warning stays pinned in the persisted transcript forever, still
+  // reading "limit reached" with a `resetsAt` in the past.
+  it("rate_limit_event with status=allowed clears an existing rate-limit notice", () => {
+    let msgs = applySdkEvent([], rateEvt("rejected")).messages
+    expect(msgs).toHaveLength(1)
+    msgs = applySdkEvent(msgs, rateEvt("allowed")).messages
+    expect(msgs).toEqual([])
+  })
+
+  it("status=allowed clears a rate-limit notice stranded earlier in the transcript", () => {
+    const reply = {
+      id: "a1",
+      role: "assistant",
+      parts: [{ type: "text", text: "done" }],
+    } as UIMessage
+    let msgs = applySdkEvent([], rateEvt("allowed_warning")).messages
+    msgs = [...msgs, reply]
+    msgs = applySdkEvent(msgs, rateEvt("allowed")).messages
+    expect(msgs).toEqual([reply])
+  })
+
+  // The old collapse only fired when the notice was the *last* message, so any
+  // assistant turn in between left one marker accumulating per turn.
+  it("collapses a rate-limit notice even when an assistant turn follows it", () => {
+    const reply = {
+      id: "a1",
+      role: "assistant",
+      parts: [{ type: "text", text: "done" }],
+    } as UIMessage
+    let msgs = applySdkEvent([], rateEvt("allowed_warning")).messages
+    msgs = [...msgs, reply]
+    msgs = applySdkEvent(msgs, rateEvt("rejected")).messages
+    const notices = msgs.filter((m) => (m.parts[0] as { type?: string }).type === "session-notice")
+    expect(notices).toHaveLength(1)
+    expect((notices[0].parts[0] as unknown as { status: string }).status).toBe("rejected")
+  })
+
+  it("status=allowed leaves a permission-denied notice alone", () => {
+    let msgs = applySdkEvent([], sysDenied()).messages
+    msgs = applySdkEvent(msgs, rateEvt("allowed")).messages
+    expect(msgs).toHaveLength(1)
+    expect((msgs[0].parts[0] as unknown as { variant: string }).variant).toBe("permission-denied")
+  })
+
+  // Rate-limit events arrive every turn; the persist layer and the chat store
+  // both key off identity, so a no-op must not churn the array.
+  it("status=allowed returns the same array identity when there is no notice", () => {
+    const base = [{ id: "a1", role: "assistant", parts: [] }] as UIMessage[]
+    expect(applySdkEvent(base, rateEvt("allowed")).messages).toBe(base)
   })
 })

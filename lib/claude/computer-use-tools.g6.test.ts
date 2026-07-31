@@ -7,7 +7,11 @@ import {
   getActiveComputerUseSettings,
   __resetForTesting as resetActiveComputerUseSettings,
 } from "./computer-use-active-settings"
-import type { Character, SendOptions } from "./types"
+import {
+  recordSessionGrant,
+  __resetForTesting as resetSessionGrants,
+} from "./computer-use-session-grants"
+import type { Character, SendOptions } from "@cognia/agent-config-types"
 
 jest.mock("@/lib/plugin/registries/native-anthropic-tool-registry", () => {
   return {
@@ -134,14 +138,39 @@ describe("applyComputerUseTools — auto chatConsentMode (audit fix)", () => {
     })
     expect(result.opts.suppressApprovalForTools).toEqual(
       expect.arrayContaining([
-        "computer_use",
-        "bash",
-        "text_editor",
-        "mcp__cognia-plugin-tools__computer_use",
-        "mcp__cognia-plugin-tools__bash",
-        "mcp__cognia-plugin-tools__text_editor",
+        "list_apps",
+        "get_app_state",
+        "query_elements",
+        "expand_element",
+        "perform_action",
+        "mcp__cognia-plugin-tools__list_apps",
+        "mcp__cognia-plugin-tools__get_app_state",
+        "mcp__cognia-plugin-tools__query_elements",
+        "mcp__cognia-plugin-tools__expand_element",
+        "mcp__cognia-plugin-tools__perform_action",
       ])
     )
+  })
+
+  it("session grants suppress app-session tools by bare and bridged names", () => {
+    resetSessionGrants()
+    recordSessionGrant("sess-grant", "query_elements")
+    recordSessionGrant("sess-grant", "mcp__cognia-plugin-tools__perform_action")
+    const char = {
+      ...baseChar,
+      computerUseSettings: { chatConsentMode: "session-grant" as const },
+    } as Character
+
+    const result = applyComputerUseTools({
+      character: char,
+      opts: emptyOpts(),
+      sessionId: "sess-grant",
+    })
+
+    expect(result.opts.suppressApprovalForTools).toEqual([
+      "query_elements",
+      "mcp__cognia-plugin-tools__perform_action",
+    ])
   })
 
   it("auto + computerUseGateTier=whitelist leaves the chat modal in charge", () => {

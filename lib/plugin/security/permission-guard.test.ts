@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for Plugin Permission Guard
  */
@@ -13,6 +14,7 @@ import {
   PERMISSION_GROUPS,
   PERMISSION_DESCRIPTIONS,
   DANGEROUS_PERMISSIONS,
+  WASM_UNIMPLEMENTED_PERMISSIONS,
 } from "./permission-guard"
 import type { PluginPermission as _PluginPermission } from "@/types/plugin"
 
@@ -217,7 +219,7 @@ describe("PermissionGuard", () => {
 
     it("should identify dangerous permissions", () => {
       expect(guard.isDangerousPermission("shell:execute")).toBe(true)
-      expect(guard.isDangerousPermission("network:fetch")).toBe(false)
+      expect(guard.isDangerousPermission("clipboard:read")).toBe(false)
     })
 
     it("should get permission descriptions", () => {
@@ -291,10 +293,10 @@ describe("PermissionGuard", () => {
   describe("confirmDangerousByDefault (C4 hardening flag)", () => {
     it("defaults ON: dangerous declared permissions register at the 'confirm' tier", () => {
       const g = new PermissionGuard()
-      g.registerPlugin("p1", ["shell:execute", "network:fetch"])
+      g.registerPlugin("p1", ["shell:execute", "clipboard:read"])
       // Secure by default — dangerous perms prompt; non-dangerous stay silent.
       expect(g.getTier("p1", "shell:execute")).toBe("confirm")
-      expect(g.getTier("p1", "network:fetch")).toBe("silent")
+      expect(g.getTier("p1", "clipboard:read")).toBe("silent")
     })
 
     it("when explicitly off: dangerous declared permissions stay 'silent'", () => {
@@ -305,16 +307,16 @@ describe("PermissionGuard", () => {
 
     it("when on: dangerous declared permissions register at the 'confirm' tier", () => {
       const g = new PermissionGuard({ confirmDangerousByDefault: true })
-      g.registerPlugin("p1", ["shell:execute", "terminal:write", "network:fetch"])
+      g.registerPlugin("p1", ["shell:execute", "terminal:write", "clipboard:read"])
       expect(g.getTier("p1", "shell:execute")).toBe("confirm")
       expect(g.getTier("p1", "terminal:write")).toBe("confirm")
       // Non-dangerous permissions are untouched.
-      expect(g.getTier("p1", "network:fetch")).toBe("silent")
+      expect(g.getTier("p1", "clipboard:read")).toBe("silent")
     })
 
     it("when on but no dangerous permissions declared: no tier rows are created", () => {
       const g = new PermissionGuard({ confirmDangerousByDefault: true })
-      g.registerPlugin("p1", ["network:fetch", "clipboard:read"])
+      g.registerPlugin("p1", ["clipboard:write", "clipboard:read"])
       expect(g.getTiersForPlugin("p1")).toEqual([])
     })
   })
@@ -325,9 +327,9 @@ describe("PermissionGuard", () => {
     })
 
     it("returns true for silent tier when the permission is granted", async () => {
-      guard.registerPlugin("p1", ["network:fetch"])
+      guard.registerPlugin("p1", ["clipboard:read"])
       const broker = stubBroker(true)
-      await expect(guard.checkWithConsent("p1", "network:fetch", broker)).resolves.toBe(true)
+      await expect(guard.checkWithConsent("p1", "clipboard:read", broker)).resolves.toBe(true)
       expect(broker.request).not.toHaveBeenCalled()
     })
 
@@ -368,14 +370,14 @@ describe("PermissionGuard", () => {
     })
 
     it("writes an audit entry per outcome (silent/forbid/confirm)", async () => {
-      guard.registerPlugin("p1", ["network:fetch"])
+      guard.registerPlugin("p1", ["clipboard:read"])
       const broker = stubBroker(false)
-      await guard.checkWithConsent("p1", "network:fetch", broker) // silent → check
-      guard.setTier("p1", "network:fetch", "forbid")
-      await guard.checkWithConsent("p1", "network:fetch", broker) // forbid → deny
-      guard.setTier("p1", "network:fetch", "confirm")
-      await guard.checkWithConsent("p1", "network:fetch", broker) // confirm → request + deny
-      const entries = guard.getAuditLog({ pluginId: "p1", permission: "network:fetch" })
+      await guard.checkWithConsent("p1", "clipboard:read", broker) // silent → check
+      guard.setTier("p1", "clipboard:read", "forbid")
+      await guard.checkWithConsent("p1", "clipboard:read", broker) // forbid → deny
+      guard.setTier("p1", "clipboard:read", "confirm")
+      await guard.checkWithConsent("p1", "clipboard:read", broker) // confirm → request + deny
+      const entries = guard.getAuditLog({ pluginId: "p1", permission: "clipboard:read" })
       // silent path uses "check"; forbid uses "deny"; confirm uses "request" + "deny".
       const actions = entries.map((e) => e.action)
       expect(actions).toEqual(expect.arrayContaining(["check", "deny", "request"]))
@@ -389,7 +391,7 @@ describe("createGuardedAPI", () => {
   beforeEach(() => {
     resetPermissionGuard()
     guard = getPermissionGuard()
-    guard.registerPlugin("plugin-a", ["network:fetch"])
+    guard.registerPlugin("plugin-a", ["clipboard:read"])
   })
 
   it("should create a guarded API", () => {
@@ -399,7 +401,7 @@ describe("createGuardedAPI", () => {
     }
 
     const guarded = createGuardedAPI("plugin-a", api, {
-      fetchData: "network:fetch",
+      fetchData: "clipboard:read",
       writeFile: "filesystem:write",
     })
 
@@ -407,7 +409,7 @@ describe("createGuardedAPI", () => {
     expect(() => guarded.writeFile()).toThrow(PermissionError)
   })
 
-  it("should allow methods without permission mapping", () => {
+  it("fails closed: an unmapped, non-unguarded method throws on call", () => {
     const api = {
       publicMethod: () => "public",
       protectedMethod: () => "protected",
@@ -417,7 +419,54 @@ describe("createGuardedAPI", () => {
       protectedMethod: "filesystem:write",
     })
 
-    expect(guarded.publicMethod()).toBe("public")
+    expect(() => guarded.publicMethod()).toThrow(/neither permission-mapped nor declared unguarded/)
+  })
+
+  it("onConsentGranted fires after a confirm-tier approval, but not for silent methods", async () => {
+    // fs:write is dangerous → confirm tier; clipboard:read stays silent. The
+    // hook lets a host-gated namespace persist a ledger grant once the user
+    // consents, so the desktop gateway accepts the follow-up call.
+    guard.registerPlugin("plugin-a", ["filesystem:write", "clipboard:read"])
+    const granted: string[] = []
+    const api = {
+      writeText: async () => "ok",
+      readText: () => "value",
+    }
+    const guarded = createGuardedAPI(
+      "plugin-a",
+      api,
+      { writeText: "filesystem:write", readText: "clipboard:read" },
+      { onConsentGranted: (permission) => granted.push(permission) }
+    )
+
+    await guarded.writeText()
+    expect(granted).toEqual(["filesystem:write"])
+
+    guarded.readText()
+    expect(granted).toEqual(["filesystem:write"]) // silent read does not consent
+  })
+
+  it("passes through a method explicitly listed in unguarded", () => {
+    const api = {
+      helper: () => "helper-result",
+      gated: () => "gated",
+    }
+
+    const guarded = createGuardedAPI(
+      "plugin-a",
+      api,
+      { gated: "filesystem:read" },
+      { unguarded: ["helper"] }
+    )
+
+    expect(guarded.helper()).toBe("helper-result")
+  })
+
+  it("passes through non-function properties unchanged", () => {
+    const api = { value: 42, builder: { make: () => "x" }, gated: () => "g" }
+    const guarded = createGuardedAPI("plugin-a", api, { gated: "filesystem:read" })
+    expect(guarded.value).toBe(42)
+    expect(guarded.builder.make()).toBe("x")
   })
 
   // Per-call consent path: a dangerous (confirm-tier) permission routes the
@@ -482,6 +531,25 @@ describe("Permission Constants", () => {
   it("should have dangerous permissions list", () => {
     expect(DANGEROUS_PERMISSIONS).toContain("shell:execute")
     expect(DANGEROUS_PERMISSIONS).toContain("process:spawn")
+  })
+
+  it("lists the WASM stub capabilities that have no backend in api-version 0.1", () => {
+    // These map to host stubs that return a typed `cognia:not-implemented`
+    // error; the grant sheet renders them disabled so a user isn't misled.
+    expect(WASM_UNIMPLEMENTED_PERMISSIONS).toContain("clipboard:read")
+    expect(WASM_UNIMPLEMENTED_PERMISSIONS).toContain("clipboard:write")
+    // network:fetch is a real, enforced capability (ai rides it) — not a stub.
+    expect(WASM_UNIMPLEMENTED_PERMISSIONS).not.toContain("network:fetch")
+    // notification still emits an audit-log entry, so it is not listed either.
+    expect(WASM_UNIMPLEMENTED_PERMISSIONS).not.toContain("notification")
+  })
+
+  it("flags network egress as dangerous (arbitrary-host fetch is an exfiltration channel)", () => {
+    // network:* reaches any host and can carry whatever the plugin can read
+    // (secrets, clipboard, fs). It must prompt for consent rather than being
+    // silently granted on enable.
+    expect(DANGEROUS_PERMISSIONS).toContain("network:fetch")
+    expect(DANGEROUS_PERMISSIONS).toContain("network:websocket")
   })
 
   describe("terminal:* permissions (plan: vscode-vivid-wilkinson)", () => {

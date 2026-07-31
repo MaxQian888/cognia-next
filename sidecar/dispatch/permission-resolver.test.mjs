@@ -55,3 +55,53 @@ test("resolveForToolCall resolves a non-shell tool target directly", () => {
   assert.equal(resolveForToolCall(rs, "Read", { file_path: "/proj/.env" }), "deny")
   assert.equal(resolveForToolCall(rs, "Read", { file_path: "/proj/index.ts" }), "ask")
 })
+
+test("core bash names resolve command segments against Bash rules", () => {
+  const rs = { Bash: { ls: "allow", "rm *": "deny" } }
+  assert.equal(resolveForToolCall(rs, "bash", { command: "ls" }), "allow")
+  assert.equal(resolveForToolCall(rs, "mcp__cognia-tools__bash", { command: "ls" }), "allow")
+  assert.equal(resolveForToolCall(rs, "bash", { command: "rm -rf x" }), "deny")
+  assert.equal(resolveForToolCall(rs, "bash", { command: "git push" }), "ask")
+})
+
+test("core bash also honours rules keyed under its own tool name (severe wins)", () => {
+  const rs = { Bash: { "git *": "allow" }, bash: { "git push*": "deny" } }
+  assert.equal(resolveForToolCall(rs, "bash", { command: "git status" }), "allow")
+  assert.equal(resolveForToolCall(rs, "bash", { command: "git push origin" }), "deny")
+})
+
+test("core file tools resolve file_path targets directly", () => {
+  const rs = { edit: { "**/*.env": "deny" }, write: "ask" }
+  assert.equal(resolveForToolCall(rs, "edit", { file_path: "a/b/.env" }), "deny")
+  assert.equal(resolveForToolCall(rs, "edit", { file_path: "src/x.ts" }), "ask")
+  assert.equal(resolveForToolCall(rs, "write", { file_path: "src/x.ts" }), "ask")
+})
+
+// A denied command hidden in a substitution used to produce a single segment
+// that matched nothing, resolved to "ask", and so fell out of this hard gate
+// into the approval round-trip — which an unattended run cannot answer.
+test("resolveForToolCall surfaces a denied command inside a substitution", () => {
+  const rs = { Bash: { "git push": "deny", "git push **": "deny" } }
+  for (const command of [
+    "echo $(git push)",
+    "echo `git push`",
+    "(git push)",
+    "FOO=$(git push origin main) echo done",
+    "echo $(echo $(git push))",
+  ]) {
+    assert.equal(resolveForToolCall(rs, "Bash", { command }), "deny", command)
+  }
+})
+
+test("resolveForToolCall does not split inside quotes", () => {
+  const rs = { Bash: { "git push": "deny", "git push **": "deny", "git commit **": "allow" } }
+  // `;` inside the quoted message is not a statement separator, so this stays
+  // one segment and keeps its explicit allow instead of fragmenting.
+  assert.equal(resolveForToolCall(rs, "Bash", { command: `git commit -m "a; b"` }), "allow")
+})
+
+test("resolveForToolCall splits on background and pipe operators", () => {
+  const rs = { Bash: { "git push": "deny", "git push **": "deny", "**": "allow" } }
+  assert.equal(resolveForToolCall(rs, "Bash", { command: "sleep 1 & git push" }), "deny")
+  assert.equal(resolveForToolCall(rs, "Bash", { command: "cat x | git push" }), "deny")
+})

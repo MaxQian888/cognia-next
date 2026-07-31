@@ -16,12 +16,20 @@
 //! disables the WebRTC tier; the task observes the change at the next
 //! `select!` poll and unwinds cleanly.
 
+use std::collections::VecDeque;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use cognia_signaling_core::proto::{ClientFrame, ServerFrame};
+use cognia_signaling_core::{
+    proto::{
+        ClientFrame, EnvelopeKind, PeerRole, PeerSnapshot, RoomDescriptorV2, ServerFrame,
+        SignalingEnvelopeV2, SubscribeProofV2,
+    },
+    v2::{validate_room_descriptor, verify_subscribe_proof},
+};
 use futures_util::{SinkExt, StreamExt};
+use rand::RngCore;
 use serde_json::{json, Value};
 use tokio::sync::{mpsc, watch};
 use tokio_tungstenite::{
@@ -33,24 +41,82 @@ use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
 
 use super::dispatch::spawn as spawn_dispatcher;
-use super::envelope::{
-    build_signed_envelope, decode_secret, encode_base64_url, fresh_nonce, now_ms,
-    verify_signed_envelope, Envelope, EnvelopeError, EnvelopeKind, PeerRole, ReplayWindow,
+use super::envelope_v2::{
+    build_envelope, build_subscribe_proof, now_ms, verify_and_decrypt_envelope,
+    StrictReplayWindowV2, V2EnvelopeError, V2EphemeralKey, V2Identity,
 };
-use super::peer::{PeerCallbacks, PeerSession};
+use super::peer::{
+    PeerCallbacks, PeerSession, ICE_QUEUE_CAPACITY, INBOUND_FRAME_QUEUE_CAPACITY,
+    STATE_QUEUE_CAPACITY,
+};
 use super::{DeviceTier, TierWriter};
 use crate::companion_api::SharedState;
 
 /// Reconnect backoff schedule (ms). Index = attempt count (capped). Matches
 /// `SIGNALING_BACKOFF_MS` in `lib/signaling/types.ts`.
-const BACKOFF_MS: &[u64] = &[1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 60_000];
+const BACKOFF_MS: &[u64] = &[1_000, 2_000, 4_000, 8_000, 16_000, 30_000];
+const HEALTHY_RESET_AFTER: Duration = Duration::from_secs(60);
+const MAX_PENDING_REMOTE_ICE: usize = 256;
+const PENDING_REMOTE_ICE_TTL: Duration = Duration::from_secs(30);
+
+#[derive(Default)]
+struct PendingRemoteIce {
+    candidates: VecDeque<(Instant, RTCIceCandidateInit)>,
+}
+
+impl PendingRemoteIce {
+    fn push(&mut self, candidate: RTCIceCandidateInit) -> Result<(), SessionError> {
+        self.push_at(candidate, Instant::now())
+    }
+
+    fn push_at(
+        &mut self,
+        candidate: RTCIceCandidateInit,
+        now: Instant,
+    ) -> Result<(), SessionError> {
+        self.remove_expired(now);
+        if self.candidates.len() >= MAX_PENDING_REMOTE_ICE {
+            return Err(SessionError::Protocol(
+                "pending remote ICE queue overflow".into(),
+            ));
+        }
+        self.candidates.push_back((now, candidate));
+        Ok(())
+    }
+
+    fn drain(&mut self) -> Vec<RTCIceCandidateInit> {
+        self.drain_at(Instant::now())
+    }
+
+    fn drain_at(&mut self, now: Instant) -> Vec<RTCIceCandidateInit> {
+        self.remove_expired(now);
+        self.candidates
+            .drain(..)
+            .map(|(_, candidate)| candidate)
+            .collect()
+    }
+
+    fn clear(&mut self) {
+        self.candidates.clear();
+    }
+
+    fn remove_expired(&mut self, now: Instant) {
+        while self.candidates.front().is_some_and(|(received_at, _)| {
+            now.saturating_duration_since(*received_at) > PENDING_REMOTE_ICE_TTL
+        }) {
+            self.candidates.pop_front();
+        }
+    }
+}
 
 /// Configuration passed to one signaling client task.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ClientConfig {
     pub signaling_url: String,
     pub rendezvous_id: String,
-    pub rendezvous_secret: String,
+    pub room_descriptor: RoomDescriptorV2,
+    pub signaling_key_ref: String,
+    pub signing_private_key: String,
     pub device_id: String,
     /// ICE servers used by the desktop peer. STUN and optional TURN.
     pub ice_servers: Vec<RTCIceServer>,
@@ -62,13 +128,9 @@ pub struct ClientConfig {
 /// Spawn a signaling client task. The returned watch-sender allows the
 /// caller to cancel the task by sending `true`; the corresponding watch-
 /// receiver is observed at every `select!` poll.
-pub fn spawn(
-    config: ClientConfig,
-    state: SharedState,
-    app: tauri::AppHandle,
-) -> ClientHandle {
+pub fn spawn(config: ClientConfig, state: SharedState) -> ClientHandle {
     let (cancel_tx, cancel_rx) = watch::channel(false);
-    let join = tokio::spawn(run_with_reconnect(config.clone(), state, app, cancel_rx));
+    let join = tokio::spawn(run_with_reconnect(config.clone(), state, cancel_rx));
     ClientHandle {
         config,
         cancel_tx,
@@ -78,8 +140,9 @@ pub fn spawn(
 
 /// Handle to a running signaling client. Drop the handle to keep the task
 /// running; call [`shutdown`] (or simply drop after sending `true`) to
-/// stop it. The task self-aborts when its `tauri::AppHandle` becomes
-/// invalid (app quit).
+/// stop it. The dispatch host is resolved per-message from the shared
+/// `SharedState` (see `signaling::dispatch`), so the task outlives any one
+/// host and works in the desktop, headless, and harness processes alike.
 pub struct ClientHandle {
     pub config: ClientConfig,
     cancel_tx: watch::Sender<bool>,
@@ -100,17 +163,18 @@ impl ClientHandle {
 async fn run_with_reconnect(
     config: ClientConfig,
     state: SharedState,
-    app: tauri::AppHandle,
     mut cancel_rx: watch::Receiver<bool>,
 ) {
-    if let Err(e) = decode_secret(&config.rendezvous_secret) {
+    if validate_room_descriptor(&config.room_descriptor, now_ms()).is_err()
+        || config.room_descriptor.room_id != config.rendezvous_id
+    {
         log::error!(
-            "signaling::client[{}]: invalid rendezvous secret: {e}",
+            "signaling::client[{}]: invalid signaling v2 room descriptor",
             config.device_id
         );
         config
             .tier_writer
-            .set_with_error(DeviceTier::Failed, format!("invalid rendezvous secret: {e}"));
+            .set_with_error(DeviceTier::Failed, "invalid signaling v2 room descriptor");
         return;
     }
 
@@ -119,7 +183,10 @@ async fn run_with_reconnect(
         if *cancel_rx.borrow() {
             return;
         }
-        let label = format!("device {} (room {})", config.device_id, config.rendezvous_id);
+        let label = format!(
+            "device {} (room {})",
+            config.device_id, config.rendezvous_id
+        );
         log::info!(
             "signaling::client[{label}]: connecting to {}",
             config.signaling_url
@@ -127,7 +194,8 @@ async fn run_with_reconnect(
         // Each attempt begins from `Offline` — the moment the WSS connection
         // is `subscribed` we'll bump to `Awaiting`.
         config.tier_writer.set(DeviceTier::Offline);
-        match run_one_session(&config, state.clone(), app.clone(), cancel_rx.clone()).await {
+        let session_started = Instant::now();
+        match run_one_session(&config, state.clone(), cancel_rx.clone()).await {
             Ok(()) => {
                 log::info!("signaling::client[{label}]: session ended cleanly");
                 attempt = 0;
@@ -145,6 +213,9 @@ async fn run_with_reconnect(
                 config
                     .tier_writer
                     .set_with_error(DeviceTier::Failed, e.to_string());
+                if session_started.elapsed() >= HEALTHY_RESET_AFTER {
+                    attempt = 0;
+                }
                 attempt = attempt.saturating_add(1);
             }
         }
@@ -180,6 +251,92 @@ impl std::fmt::Display for SessionError {
     }
 }
 
+struct PeerCrypto {
+    proof: SubscribeProofV2,
+    inbound_key: [u8; 32],
+    outbound_key: [u8; 32],
+}
+
+struct SessionCrypto {
+    identity: V2Identity,
+    ephemeral: V2EphemeralKey,
+    own_proof: SubscribeProofV2,
+    peer: Option<PeerCrypto>,
+    replay: StrictReplayWindowV2,
+}
+
+impl SessionCrypto {
+    fn accept_peer(
+        &mut self,
+        descriptor: &RoomDescriptorV2,
+        snapshot: &PeerSnapshot,
+    ) -> Result<(), SessionError> {
+        if snapshot.proof.role != PeerRole::Mobile {
+            return Err(SessionError::Protocol(
+                "signaling snapshot carried the wrong peer role".into(),
+            ));
+        }
+        verify_subscribe_proof(
+            descriptor,
+            &snapshot.proof,
+            &snapshot.proof.challenge,
+            now_ms(),
+        )
+        .map_err(|error| SessionError::Protocol(format!("peer proof: {error}")))?;
+        let inbound_key = self
+            .ephemeral
+            .derive_direction_key(
+                &snapshot.proof.ecdh_public_key,
+                &descriptor.room_id,
+                PeerRole::Mobile,
+                &snapshot.proof.epoch,
+            )
+            .map_err(v2_envelope_err)?;
+        let outbound_key = self
+            .ephemeral
+            .derive_direction_key(
+                &snapshot.proof.ecdh_public_key,
+                &descriptor.room_id,
+                PeerRole::Desktop,
+                &self.own_proof.epoch,
+            )
+            .map_err(v2_envelope_err)?;
+        self.peer = Some(PeerCrypto {
+            proof: snapshot.proof.clone(),
+            inbound_key,
+            outbound_key,
+        });
+        self.replay = StrictReplayWindowV2::default();
+        Ok(())
+    }
+
+    fn build_outbound(
+        &self,
+        room_id: &str,
+        seq: u64,
+        kind: EnvelopeKind,
+        body: &Value,
+    ) -> Result<SignalingEnvelopeV2, SessionError> {
+        let peer = self
+            .peer
+            .as_ref()
+            .ok_or_else(|| SessionError::Protocol("mobile peer is not authenticated".into()))?;
+        build_envelope(
+            room_id,
+            PeerRole::Desktop,
+            &self.own_proof.session_id,
+            &self.own_proof.epoch,
+            seq,
+            now_ms(),
+            kind,
+            body,
+            &self.identity,
+            &peer.outbound_key,
+        )
+        .map_err(v2_envelope_err)
+    }
+}
+
 // Wire frames are the single source of truth in `cognia-signaling-core` (also
 // used by the signaling server + its Cloudflare Worker), imported above so the
 // desktop peer can never drift from the server's frame schema. `ClientFrame`
@@ -194,7 +351,6 @@ impl std::fmt::Display for SessionError {
 async fn run_one_session(
     config: &ClientConfig,
     state: SharedState,
-    app: tauri::AppHandle,
     mut cancel_rx: watch::Receiver<bool>,
 ) -> Result<(), SessionError> {
     // Append the room id as `?rid=` so the Cloudflare Worker can route the
@@ -205,24 +361,75 @@ async fn run_one_session(
         .as_str()
         .into_client_request()
         .map_err(|e| SessionError::Websocket(format!("invalid URL: {e}")))?;
-    let (ws_stream, _resp) = connect_async(request)
+    let (mut ws_stream, _resp) =
+        tokio::time::timeout(Duration::from_secs(8), connect_async(request))
+            .await
+            .map_err(|_| SessionError::Websocket("signaling connect timed out".into()))?
+            .map_err(|e| SessionError::Websocket(e.to_string()))?;
+    let challenge_frame = tokio::time::timeout(Duration::from_secs(5), ws_stream.next())
         .await
-        .map_err(|e| SessionError::Websocket(e.to_string()))?;
-    let (mut write, mut read) = ws_stream.split();
-
-    // Subscribe immediately. Server replies `Subscribed`.
-    let nonce = fresh_nonce();
-    let subscribe = ClientFrame::Subscribe {
-        rendezvous_id: config.rendezvous_id.clone(),
-        role: PeerRole::Desktop,
-        client_nonce: nonce,
+        .map_err(|_| SessionError::Protocol("signaling challenge timed out".into()))?
+        .ok_or_else(|| SessionError::Websocket("stream ended before challenge".into()))?
+        .map_err(|error| SessionError::Websocket(error.to_string()))?;
+    let challenge = match challenge_frame {
+        Message::Text(text) => match serde_json::from_str::<ServerFrame>(&text)
+            .map_err(|error| SessionError::Protocol(format!("bad challenge frame: {error}")))?
+        {
+            ServerFrame::Challenge {
+                challenge,
+                expires_at,
+                ..
+            } if expires_at >= now_ms() => challenge,
+            _ => {
+                return Err(SessionError::Protocol(
+                    "expected a live signaling v2 challenge".into(),
+                ))
+            }
+        },
+        _ => {
+            return Err(SessionError::Protocol(
+                "expected a text signaling challenge".into(),
+            ))
+        }
     };
-    write
+    let private_bytes = URL_SAFE_NO_PAD
+        .decode(config.signing_private_key.as_bytes())
+        .map_err(|error| SessionError::Protocol(format!("signing key base64: {error}")))?;
+    let identity = V2Identity::from_private_bytes(&private_bytes).map_err(v2_envelope_err)?;
+    if identity.public_key_base64() != config.room_descriptor.desktop_signing_key {
+        return Err(SessionError::Protocol(
+            "desktop signing key does not match the room descriptor".into(),
+        ));
+    }
+    let ephemeral = V2EphemeralKey::generate();
+    let own_proof = build_subscribe_proof(
+        &config.room_descriptor,
+        PeerRole::Desktop,
+        fresh_v2_id(),
+        fresh_v2_id(),
+        now_ms(),
+        challenge,
+        &ephemeral,
+        &identity,
+    );
+    let subscribe = ClientFrame::Subscribe {
+        descriptor: Box::new(config.room_descriptor.clone()),
+        proof: Box::new(own_proof.clone()),
+    };
+    ws_stream
         .send(Message::Text(
             serde_json::to_string(&subscribe).expect("serialize subscribe"),
         ))
         .await
         .map_err(|e| SessionError::Websocket(e.to_string()))?;
+    let (mut write, mut read) = ws_stream.split();
+    let mut crypto = SessionCrypto {
+        identity,
+        ephemeral,
+        own_proof,
+        peer: None,
+        replay: StrictReplayWindowV2::default(),
+    };
 
     // Outbound queue → any task that wants to push a frame to the WSS sink
     // sends through here. Bounded so a runaway producer can't OOM us.
@@ -232,16 +439,18 @@ async fn run_one_session(
     // (i.e., each new offer). We hold the Options so we can drop them when
     // the peer dies and create fresh channels for the next offer.
     let mut peer_session: Option<Arc<PeerSession>> = None;
-    let mut peer_ice_rx: Option<mpsc::UnboundedReceiver<RTCIceCandidateInit>> = None;
-    let mut peer_state_rx: Option<mpsc::UnboundedReceiver<RTCPeerConnectionState>> = None;
-    let mut peer_data_rx: Option<mpsc::UnboundedReceiver<Vec<u8>>> = None;
+    let mut peer_ice_rx: Option<mpsc::Receiver<RTCIceCandidateInit>> = None;
+    let mut peer_state_rx: Option<mpsc::Receiver<RTCPeerConnectionState>> = None;
+    let mut peer_data_rx: Option<mpsc::Receiver<Vec<u8>>> = None;
     let mut dispatcher: Option<tokio::task::JoinHandle<()>> = None;
+    let mut pending_remote_ice = PendingRemoteIce::default();
 
     // Outbound envelope sequence counter (sender = "desktop").
     let mut next_seq: u64 = 1;
-    let mut replay = ReplayWindow::default();
-    let mut keepalive = tokio::time::interval(Duration::from_secs(25));
+    let mut keepalive = tokio::time::interval(Duration::from_secs(20));
     keepalive.tick().await; // skip the immediate first tick
+    let mut subscribe_deadline = Some(tokio::time::Instant::now() + Duration::from_secs(5));
+    let mut pong_deadline: Option<tokio::time::Instant> = None;
 
     loop {
         // Helpers for `select!` — extract receivers that may be `None` and
@@ -255,6 +464,7 @@ async fn run_one_session(
             _ = cancel_rx.changed() => {
                 if *cancel_rx.borrow() {
                     teardown(
+                        &config.device_id,
                         peer_session.take(),
                         dispatcher.take(),
                     ).await;
@@ -274,6 +484,25 @@ async fn run_one_session(
                 if let Err(e) = write.send(Message::Text(frame)).await {
                     return Err(SessionError::Websocket(e.to_string()));
                 }
+                pong_deadline = Some(tokio::time::Instant::now() + Duration::from_secs(10));
+            }
+
+            _ = async {
+                match subscribe_deadline {
+                    Some(deadline) => tokio::time::sleep_until(deadline).await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                return Err(SessionError::Protocol("signaling subscribe timed out".into()));
+            }
+
+            _ = async {
+                match pong_deadline {
+                    Some(deadline) => tokio::time::sleep_until(deadline).await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                return Err(SessionError::Websocket("signaling pong timed out".into()));
             }
 
             Some(candidate) = async {
@@ -285,13 +514,12 @@ async fn run_one_session(
                 // Forward our ICE candidate to the mobile peer as a signed
                 // rtc:ice envelope.
                 let body = json!({ "candidate": candidate });
-                let env = build_signed_envelope(
+                let env = crypto.build_outbound(
+                    &config.rendezvous_id,
                     next_seq,
                     EnvelopeKind::RtcIce,
-                    body,
-                    &config.rendezvous_secret,
-                )
-                .map_err(envelope_err)?;
+                    &body,
+                )?;
                 next_seq += 1;
                 push_relay(&out_tx, &config.rendezvous_id, &env).await?;
             }
@@ -311,10 +539,16 @@ async fn run_one_session(
                             "signaling::client[{}]: peer state {s:?} — tearing down",
                             config.device_id
                         );
-                        teardown(peer_session.take(), dispatcher.take()).await;
+                        teardown(
+                            &config.device_id,
+                            peer_session.take(),
+                            dispatcher.take(),
+                        )
+                        .await;
                         peer_ice_rx = None;
                         peer_state_rx = None;
                         peer_data_rx = None;
+                        pending_remote_ice.clear();
                         // Mobile peer dropped; we're still subscribed and
                         // awaiting a fresh offer.
                         config.tier_writer.set(DeviceTier::Awaiting);
@@ -338,69 +572,126 @@ async fn run_one_session(
                             SessionError::Protocol(format!("bad server frame: {e}"))
                         })?;
                         match frame {
-                            ServerFrame::Subscribed { .. } => {
+                            ServerFrame::Challenge { .. } => {
+                                return Err(SessionError::Protocol(
+                                    "unexpected second signaling challenge".into(),
+                                ));
+                            }
+                            ServerFrame::Subscribed { peers, .. } => {
+                                subscribe_deadline = None;
                                 log::info!(
                                     "signaling::client[{}]: subscribed",
                                     config.device_id
                                 );
+                                if let Some(peer) =
+                                    peers.iter().find(|peer| peer.proof.role == PeerRole::Mobile)
+                                {
+                                    crypto.accept_peer(&config.room_descriptor, peer)?;
+                                    config.tier_writer.set(DeviceTier::Negotiating);
+                                }
                                 // WSS is up and we're in the rendezvous —
                                 // sit at `Awaiting` until a mobile peer
                                 // joins (or `PeerJoined` for an already-
                                 // present mobile fires immediately after).
                                 config.tier_writer.set(DeviceTier::Awaiting);
                             }
-                            ServerFrame::PeerJoined { role, .. } => {
+                            ServerFrame::PeerJoined { peer, .. } => {
                                 log::info!(
                                     "signaling::client[{}]: peer-joined role={}",
                                     config.device_id,
-                                    role.as_str()
+                                    peer.proof.role.as_str()
                                 );
-                                if role == PeerRole::Mobile {
+                                if peer.proof.role == PeerRole::Mobile {
+                                    let replacing_live_session = crypto
+                                        .peer
+                                        .as_ref()
+                                        .is_some_and(|current| {
+                                            current.proof.session_id != peer.proof.session_id
+                                        });
+                                    if replacing_live_session {
+                                        teardown(
+                                            &config.device_id,
+                                            peer_session.take(),
+                                            dispatcher.take(),
+                                        )
+                                        .await;
+                                        peer_ice_rx = None;
+                                        peer_state_rx = None;
+                                        peer_data_rx = None;
+                                        pending_remote_ice.clear();
+                                    }
+                                    crypto.accept_peer(&config.room_descriptor, &peer)?;
                                     config.tier_writer.set(DeviceTier::Negotiating);
                                 }
                             }
-                            ServerFrame::PeerLeft { role, .. } => {
+                            ServerFrame::PeerLeft {
+                                role,
+                                session_id,
+                                ..
+                            } => {
                                 log::info!(
                                     "signaling::client[{}]: peer-left role={}",
                                     config.device_id,
                                     role.as_str()
                                 );
+                                if crypto.peer.as_ref().map(|peer| peer.proof.session_id.as_str())
+                                    != Some(session_id.as_str())
+                                {
+                                    continue;
+                                }
+                                crypto.peer = None;
+                                crypto.replay = StrictReplayWindowV2::default();
                                 // Mobile dropped — tear down our peer too.
-                                teardown(peer_session.take(), dispatcher.take()).await;
+                                teardown(
+                                    &config.device_id,
+                                    peer_session.take(),
+                                    dispatcher.take(),
+                                )
+                                .await;
                                 peer_ice_rx = None;
                                 peer_state_rx = None;
                                 peer_data_rx = None;
+                                pending_remote_ice.clear();
                                 if role == PeerRole::Mobile {
                                     config.tier_writer.set(DeviceTier::Awaiting);
                                 }
                             }
                             ServerFrame::Relay {
-                                from_role, payload, ..
+                                from_role,
+                                from_session_id,
+                                payload,
+                                ..
                             } => {
                                 handle_relay(
                                     from_role,
+                                    &from_session_id,
                                     &payload,
                                     config,
                                     &state,
-                                    &app,
                                     &out_tx,
                                     &mut next_seq,
-                                    &mut replay,
+                                    &mut crypto,
                                     &mut peer_session,
                                     &mut peer_ice_rx,
                                     &mut peer_state_rx,
                                     &mut peer_data_rx,
                                     &mut dispatcher,
+                                    &mut pending_remote_ice,
                                 )
                                 .await?;
                             }
-                            ServerFrame::Pong => {}
+                            ServerFrame::Pong => {
+                                pong_deadline = None;
+                            }
                             ServerFrame::Error { code, message } => {
                                 log::warn!(
                                     "signaling::client[{}]: server error {code}: {message}",
                                     config.device_id
                                 );
-                                if code == "rate_limited" {
+                                if matches!(
+                                    code.as_str(),
+                                    "rate_limited" | "auth_failed" | "session_replaced"
+                                ) {
                                     return Err(SessionError::Protocol(format!(
                                         "rate limited by signaling server: {message}"
                                     )));
@@ -427,11 +718,10 @@ async fn run_one_session(
 async fn push_relay(
     out_tx: &mpsc::Sender<String>,
     rendezvous_id: &str,
-    envelope: &Envelope,
+    envelope: &SignalingEnvelopeV2,
 ) -> Result<(), SessionError> {
-    let env_bytes =
-        serde_json::to_vec(envelope).map_err(|e| SessionError::Protocol(e.to_string()))?;
-    let payload = URL_SAFE_NO_PAD.encode(env_bytes);
+    let payload =
+        serde_json::to_string(envelope).map_err(|e| SessionError::Protocol(e.to_string()))?;
     let frame = ClientFrame::Relay {
         rendezvous_id: rendezvous_id.to_string(),
         payload,
@@ -460,45 +750,77 @@ fn append_rid(url: &str, rendezvous_id: &str) -> String {
     format!("{url}{sep}rid={rendezvous_id}")
 }
 
-fn envelope_err(e: EnvelopeError) -> SessionError {
-    SessionError::Protocol(format!("envelope: {e}"))
+fn v2_envelope_err(e: V2EnvelopeError) -> SessionError {
+    SessionError::Protocol(format!("signaling v2 envelope: {e}"))
 }
 
-/// Decode the inbound relay payload, verify HMAC + replay, and dispatch by
+fn fresh_v2_id() -> String {
+    let mut bytes = [0u8; 16];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    URL_SAFE_NO_PAD.encode(bytes)
+}
+
+/// Decrypt the inbound relay payload, verify signature + replay, and dispatch by
 /// envelope kind. May create a new `PeerSession` (on first `rtc:offer`) or
 /// tear down an existing one (on `rtc:close`).
 #[allow(clippy::too_many_arguments)]
 async fn handle_relay(
     from_role: PeerRole,
-    payload_b64: &str,
+    from_session_id: &str,
+    payload: &str,
     config: &ClientConfig,
     state: &SharedState,
-    app: &tauri::AppHandle,
     out_tx: &mpsc::Sender<String>,
     next_seq: &mut u64,
-    replay: &mut ReplayWindow,
+    crypto: &mut SessionCrypto,
     peer_session: &mut Option<Arc<PeerSession>>,
-    peer_ice_rx: &mut Option<mpsc::UnboundedReceiver<RTCIceCandidateInit>>,
-    peer_state_rx: &mut Option<mpsc::UnboundedReceiver<RTCPeerConnectionState>>,
-    peer_data_rx: &mut Option<mpsc::UnboundedReceiver<Vec<u8>>>,
+    peer_ice_rx: &mut Option<mpsc::Receiver<RTCIceCandidateInit>>,
+    peer_state_rx: &mut Option<mpsc::Receiver<RTCPeerConnectionState>>,
+    peer_data_rx: &mut Option<mpsc::Receiver<Vec<u8>>>,
     dispatcher: &mut Option<tokio::task::JoinHandle<()>>,
+    pending_remote_ice: &mut PendingRemoteIce,
 ) -> Result<(), SessionError> {
-    let envelope_bytes = URL_SAFE_NO_PAD
-        .decode(payload_b64.as_bytes())
-        .map_err(|e| SessionError::Protocol(format!("relay payload base64: {e}")))?;
-    let envelope: Envelope = serde_json::from_slice(&envelope_bytes)
+    let envelope: SignalingEnvelopeV2 = serde_json::from_str(payload)
         .map_err(|e| SessionError::Protocol(format!("relay envelope json: {e}")))?;
-
-    if let Err(e) = verify_signed_envelope(&envelope, &config.rendezvous_secret, None) {
+    let Some(peer_crypto) = crypto.peer.as_ref() else {
         log::warn!(
-            "signaling::client[{}]: rejected envelope: {e}",
+            "signaling::client[{}]: relay before peer auth",
+            config.device_id
+        );
+        return Ok(());
+    };
+    if from_role != PeerRole::Mobile
+        || from_session_id != peer_crypto.proof.session_id
+        || envelope.session_id != peer_crypto.proof.session_id
+        || envelope.epoch != peer_crypto.proof.epoch
+    {
+        log::warn!(
+            "signaling::client[{}]: rejected relay session metadata",
             config.device_id
         );
         return Ok(());
     }
-    // `from_role` is already the typed `PeerRole` off the wire frame — the
-    // server only routes `desktop`/`mobile`, and the frame type enforces that.
-    if let Err(e) = replay.observe(from_role, envelope.seq, &envelope.nonce) {
+    let body = match verify_and_decrypt_envelope(
+        &envelope,
+        &config.rendezvous_id,
+        PeerRole::Mobile,
+        &config.room_descriptor.mobile_signing_key,
+        &peer_crypto.inbound_key,
+        now_ms(),
+    ) {
+        Ok(body) => body,
+        Err(error) => {
+            log::warn!(
+                "signaling::client[{}]: rejected v2 envelope: {error}",
+                config.device_id
+            );
+            return Ok(());
+        }
+    };
+    if let Err(e) = crypto
+        .replay
+        .observe(&envelope.epoch, envelope.seq, now_ms())
+    {
         log::warn!(
             "signaling::client[{}]: replay detected: {e}",
             config.device_id
@@ -515,13 +837,11 @@ async fn handle_relay(
             );
         }
         EnvelopeKind::RtcOffer => {
-            let sdp = envelope
-                .body
+            let sdp = body
                 .get("sdp")
                 .and_then(Value::as_str)
                 .ok_or_else(|| SessionError::Protocol("rtc:offer missing sdp".into()))?;
-            let ice_restart = envelope
-                .body
+            let ice_restart = body
                 .get("iceRestart")
                 .and_then(Value::as_bool)
                 .unwrap_or(false);
@@ -542,24 +862,37 @@ async fn handle_relay(
                     .accept_offer(sdp.to_string())
                     .await
                     .map_err(|e| SessionError::Protocol(format!("accept_offer(restart): {e}")))?;
-                let answer = build_signed_envelope(
+                let answer = crypto.build_outbound(
+                    &config.rendezvous_id,
                     *next_seq,
                     EnvelopeKind::RtcAnswer,
-                    json!({ "sdp": answer_sdp }),
-                    &config.rendezvous_secret,
-                )
-                .map_err(envelope_err)?;
+                    &json!({ "sdp": answer_sdp }),
+                )?;
                 *next_seq += 1;
                 push_relay(out_tx, &config.rendezvous_id, &answer).await?;
             } else {
                 // First offer (or a non-restart re-offer): build a fresh peer.
                 // A prior peer/dispatcher, if any, is torn down below.
-                let (ice_tx, ice_rx) = mpsc::unbounded_channel();
-                let (data_tx, data_rx) = mpsc::unbounded_channel();
-                let (state_tx, state_rx) = mpsc::unbounded_channel();
+                let (ice_tx, ice_rx) = mpsc::channel(ICE_QUEUE_CAPACITY);
+                let (data_tx, data_rx) = mpsc::channel(INBOUND_FRAME_QUEUE_CAPACITY);
+                let (state_tx, state_rx) = mpsc::channel(STATE_QUEUE_CAPACITY);
                 let callbacks = PeerCallbacks {
                     outbound_ice: ice_tx,
                     inbound_data: data_tx,
+                    terminal_channel: Arc::new({
+                        let state = Arc::clone(state);
+                        let device_id = config.device_id.clone();
+                        move |channel| {
+                            let state = Arc::clone(&state);
+                            let device_id = device_id.clone();
+                            tokio::spawn(async move {
+                                crate::companion_api::ws_terminal::proxy_terminal_datachannel(
+                                    channel, device_id, state,
+                                )
+                                .await;
+                            });
+                        }
+                    }),
                     state_change: state_tx,
                 };
                 let new_peer = PeerSession::new(config.ice_servers.clone(), callbacks)
@@ -572,13 +905,20 @@ async fn handle_relay(
                     .accept_offer(sdp.to_string())
                     .await
                     .map_err(|e| SessionError::Protocol(format!("accept_offer: {e}")))?;
-                let answer = build_signed_envelope(
+                for candidate in pending_remote_ice.drain() {
+                    if let Err(e) = new_peer.add_remote_ice(candidate).await {
+                        log::warn!(
+                            "signaling::client[{}]: queued addRemoteIce failed: {e}",
+                            config.device_id
+                        );
+                    }
+                }
+                let answer = crypto.build_outbound(
+                    &config.rendezvous_id,
                     *next_seq,
                     EnvelopeKind::RtcAnswer,
-                    json!({ "sdp": answer_sdp }),
-                    &config.rendezvous_secret,
-                )
-                .map_err(envelope_err)?;
+                    &json!({ "sdp": answer_sdp }),
+                )?;
                 *next_seq += 1;
                 push_relay(out_tx, &config.rendezvous_id, &answer).await?;
 
@@ -601,7 +941,6 @@ async fn handle_relay(
                     Arc::clone(&new_peer),
                     data_rx_take,
                     state.clone(),
-                    app.clone(),
                     config.device_id.clone(),
                 );
                 *dispatcher = Some(handle);
@@ -617,8 +956,7 @@ async fn handle_relay(
             );
         }
         EnvelopeKind::RtcIce => {
-            let candidate = envelope
-                .body
+            let candidate = body
                 .get("candidate")
                 .cloned()
                 .ok_or_else(|| SessionError::Protocol("rtc:ice missing candidate".into()))?;
@@ -631,6 +969,8 @@ async fn handle_relay(
                         config.device_id
                     );
                 }
+            } else {
+                pending_remote_ice.push(init)?;
             }
         }
         EnvelopeKind::RtcClose => {
@@ -638,27 +978,25 @@ async fn handle_relay(
                 "signaling::client[{}]: peer requested rtc:close",
                 config.device_id
             );
-            teardown(peer_session.take(), dispatcher.take()).await;
+            teardown(&config.device_id, peer_session.take(), dispatcher.take()).await;
             *peer_ice_rx = None;
             *peer_state_rx = None;
             *peer_data_rx = None;
+            pending_remote_ice.clear();
             // Mobile cleanly closed its half — we're back to waiting for
             // the next offer.
             config.tier_writer.set(DeviceTier::Awaiting);
         }
     }
-    // Suppress unused-warnings for placeholders that fed into the macro
-    // expansions; the compiler keeps them around because we may need
-    // their values in future kinds.
-    let _ = encode_base64_url; // re-exported for tests
-    let _ = now_ms;
     Ok(())
 }
 
 async fn teardown(
+    device_id: &str,
     peer: Option<Arc<PeerSession>>,
     dispatcher: Option<tokio::task::JoinHandle<()>>,
 ) {
+    crate::companion_api::admin_lease::revoke_device(device_id);
     if let Some(d) = dispatcher {
         d.abort();
     }
@@ -683,20 +1021,106 @@ mod tests {
         assert!(!should_reuse_peer_for_offer(false, false));
     }
 
+    #[tokio::test]
+    async fn teardown_revokes_device_admin_leases_even_without_a_live_peer() {
+        let lease = crate::companion_api::admin_lease::issue(
+            "rtc-teardown-device",
+            vec!["external_bridge_start".into()],
+            Some(600),
+            true,
+            true,
+        )
+        .unwrap();
+        assert!(crate::companion_api::admin_lease::validate(
+            "rtc-teardown-device",
+            "external_bridge_start",
+            Some(&lease.token),
+        )
+        .is_ok());
+
+        teardown("rtc-teardown-device", None, None).await;
+
+        assert!(crate::companion_api::admin_lease::validate(
+            "rtc-teardown-device",
+            "external_bridge_start",
+            Some(&lease.token),
+        )
+        .is_err());
+    }
+
     #[test]
     fn append_rid_adds_query_param() {
         assert_eq!(
-            append_rid("wss://host/v1/signaling", "r1"),
-            "wss://host/v1/signaling?rid=r1"
+            append_rid("wss://host/v2/signaling", "r1"),
+            "wss://host/v2/signaling?rid=r1"
         );
     }
 
     #[test]
     fn append_rid_preserves_existing_query() {
         assert_eq!(
-            append_rid("wss://host/v1/signaling?x=1", "r1"),
-            "wss://host/v1/signaling?x=1&rid=r1"
+            append_rid("wss://host/v2/signaling?x=1", "r1"),
+            "wss://host/v2/signaling?x=1&rid=r1"
         );
+    }
+
+    #[test]
+    fn pending_remote_ice_preserves_order_until_offer_exists() {
+        let mut pending = PendingRemoteIce::default();
+        let now = std::time::Instant::now();
+        pending
+            .push_at(
+                RTCIceCandidateInit {
+                    candidate: "candidate:first".into(),
+                    ..Default::default()
+                },
+                now,
+            )
+            .unwrap();
+        pending
+            .push_at(
+                RTCIceCandidateInit {
+                    candidate: "candidate:second".into(),
+                    ..Default::default()
+                },
+                now,
+            )
+            .unwrap();
+
+        let drained = pending.drain_at(now);
+        assert_eq!(drained.len(), 2);
+        assert_eq!(drained[0].candidate, "candidate:first");
+        assert_eq!(drained[1].candidate, "candidate:second");
+        assert!(pending.drain_at(now).is_empty());
+    }
+
+    #[test]
+    fn pending_remote_ice_is_bounded_and_expires_old_candidates() {
+        let mut pending = PendingRemoteIce::default();
+        let now = std::time::Instant::now();
+        for index in 0..MAX_PENDING_REMOTE_ICE {
+            pending
+                .push_at(
+                    RTCIceCandidateInit {
+                        candidate: format!("candidate:{index}"),
+                        ..Default::default()
+                    },
+                    now,
+                )
+                .unwrap();
+        }
+        assert!(pending
+            .push_at(
+                RTCIceCandidateInit {
+                    candidate: "candidate:overflow".into(),
+                    ..Default::default()
+                },
+                now,
+            )
+            .is_err());
+        assert!(pending
+            .drain_at(now + PENDING_REMOTE_ICE_TTL + Duration::from_millis(1))
+            .is_empty());
     }
 
     // Wire-format round-trips for the shared frame types live in
@@ -706,9 +1130,25 @@ mod tests {
     #[test]
     fn desktop_subscribe_frame_serializes_with_desktop_role() {
         let frame = ClientFrame::Subscribe {
-            rendezvous_id: "r1".into(),
-            role: PeerRole::Desktop,
-            client_nonce: "n1".into(),
+            descriptor: Box::new(RoomDescriptorV2 {
+                v: 2,
+                room_id: "r1".into(),
+                room_nonce: "nonce".into(),
+                desktop_signing_key: "desktop-key".into(),
+                mobile_signing_key: "mobile-key".into(),
+                not_after: 1_800_000_000_000,
+            }),
+            proof: Box::new(SubscribeProofV2 {
+                v: 2,
+                room_id: "r1".into(),
+                role: PeerRole::Desktop,
+                session_id: "s1".into(),
+                epoch: "e1".into(),
+                issued_at: 1_700_000_000_000,
+                challenge: "c1".into(),
+                ecdh_public_key: "ephemeral-key".into(),
+                signature: "signature".into(),
+            }),
         };
         let text = serde_json::to_string(&frame).unwrap();
         assert!(text.contains(r#""kind":"subscribe""#));

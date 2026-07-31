@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Coverage for the pet Dexie CRUD layer (v67).
 
 import "fake-indexeddb/auto"
@@ -15,6 +16,10 @@ import {
   listPetBindings,
   listPetAchievements,
   recordPetAchievement,
+  listPetInventory,
+  getPetInventoryItem,
+  addPetInventory,
+  decrementPetInventory,
   resetPet,
   PET_ACTIVITY_CAP,
 } from "./pet"
@@ -116,16 +121,44 @@ describe("achievements", () => {
   })
 })
 
+describe("inventory (v94)", () => {
+  it("adds quantity, creating the row on first acquisition", async () => {
+    const first = await addPetInventory("berry", 2, 100)
+    expect(first).toEqual({ id: "berry", qty: 2, acquiredAt: 100, updatedAt: 100 })
+    const second = await addPetInventory("berry", 3, 200)
+    expect(second).toEqual({ id: "berry", qty: 5, acquiredAt: 100, updatedAt: 200 })
+    expect(await getPetInventoryItem("berry")).toEqual(second)
+    expect(await listPetInventory()).toHaveLength(1)
+  })
+
+  it("decrements and deletes the row at zero", async () => {
+    await addPetInventory("berry", 2, 100)
+    expect(await decrementPetInventory("berry", 1, 300)).toBe(true)
+    expect((await getPetInventoryItem("berry"))?.qty).toBe(1)
+    expect(await decrementPetInventory("berry")).toBe(true)
+    expect(await getPetInventoryItem("berry")).toBeUndefined()
+  })
+
+  it("refuses to decrement below the owned quantity", async () => {
+    expect(await decrementPetInventory("berry")).toBe(false)
+    await addPetInventory("berry", 1, 100)
+    expect(await decrementPetInventory("berry", 2)).toBe(false)
+    expect((await getPetInventoryItem("berry"))?.qty).toBe(1)
+  })
+})
+
 describe("resetPet", () => {
   it("clears every pet table", async () => {
     await upsertPetProfile(createDefaultProfile("acct-1"))
     await appendPetActivity(activity())
     await recordPetAchievement("a")
     await upsertPetBinding({ characterId: "c1", updatedAt: new Date().toISOString() })
+    await addPetInventory("berry", 2)
     await resetPet()
     expect(await getPetProfile()).toBeUndefined()
     expect(await listPetActivity()).toEqual([])
     expect(await listPetAchievements()).toEqual([])
     expect(await listPetBindings()).toEqual([])
+    expect(await listPetInventory()).toEqual([])
   })
 })

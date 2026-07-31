@@ -8,7 +8,7 @@
  * - Live logging
  */
 
-import type { PluginContext } from "@/types/plugin"
+import type { PluginBaseContext } from "@/types/plugin"
 import { loggers } from "../core/logger"
 
 // =============================================================================
@@ -438,7 +438,7 @@ export class PluginDebugger {
   // Context Factory
   // ===========================================================================
 
-  createDebugContext(pluginId: string, baseContext: PluginContext): PluginContext {
+  createDebugContext(pluginId: string, baseContext: PluginBaseContext): PluginBaseContext {
     // Wrap logger with debug logging using arrow functions to preserve 'this'
     const wrappedLogger = {
       debug: (msg: string, ...args: unknown[]) => {

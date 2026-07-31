@@ -53,6 +53,31 @@ describe("PluginCard", () => {
     expect(screen.getByText("plugin_test")).toBeInTheDocument()
   })
 
+  // Regression: in narrow grid columns the metadata footer + name badges must
+  // wrap, not overflow the card (status pill / "update available" spilling past
+  // the border). Lock the wrap classes so the layout fix can't silently regress.
+  it("lets the name-badge row and metadata footer wrap to avoid overflow", () => {
+    const cb = callbacks()
+    render(
+      <PluginCard
+        plugin={{ ...baseRow, manifest: { ...baseRow.manifest, updateAvailable: true } }}
+        selected={false}
+        {...cb}
+      />
+    )
+    // Name row carries version + update badges; must wrap below the name.
+    const nameRow = screen.getByText("Test Plugin").parentElement as HTMLElement
+    expect(nameRow).toHaveClass("flex-wrap")
+
+    // Source badge sits in the footer's left group; that group and the footer
+    // itself both wrap so the status pill drops below instead of overflowing.
+    const sourceBadge = screen.getByText("marketplace")
+    const leftGroup = sourceBadge.parentElement as HTMLElement
+    expect(leftGroup).toHaveClass("flex-wrap", "min-w-0")
+    const footer = leftGroup.parentElement as HTMLElement
+    expect(footer).toHaveClass("flex-wrap", "justify-between")
+  })
+
   it("renders capability chips with overflow indicator beyond the 3-chip cap", () => {
     const cb = callbacks()
     render(<PluginCard plugin={baseRow} selected={false} {...cb} />)

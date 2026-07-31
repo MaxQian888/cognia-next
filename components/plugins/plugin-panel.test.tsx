@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import type { PluginRow } from "@/lib/db/plugin-types"
 
 jest.mock("next-intl", () => ({
@@ -23,8 +23,9 @@ jest.mock("next/link", () => ({
 let mockSearchString = ""
 let mockSearchCacheKey = ""
 let mockSearchCacheValue = new URLSearchParams("")
+const mockReplace = jest.fn()
 jest.mock("next/navigation", () => ({
-  useRouter: () => ({ push: jest.fn(), replace: jest.fn(), back: jest.fn() }),
+  useRouter: () => ({ push: jest.fn(), replace: mockReplace, back: jest.fn() }),
   usePathname: () => "/plugins",
   useSearchParams: () => {
     if (mockSearchString !== mockSearchCacheKey) {
@@ -35,22 +36,36 @@ jest.mock("next/navigation", () => ({
   },
 }))
 
-const mockRows: PluginRow[] = [
-  {
-    id: "plugin_x",
-    name: "Test Plugin",
-    version: "1.2.3",
-    status: "enabled",
-    source: "builtin",
-    type: "frontend",
-    enabled: true,
-    capabilities: ["tools"],
-    path: "builtin://x",
-    manifest: { id: "plugin_x", permissions: ["clipboard:read"] },
-    createdAt: 1,
-    updatedAt: 1,
+const baseRow: PluginRow = {
+  id: "plugin_x",
+  name: "Test Plugin",
+  version: "1.2.3",
+  status: "enabled",
+  source: "builtin",
+  type: "frontend",
+  enabled: true,
+  capabilities: ["tools"],
+  path: "builtin://x",
+  manifest: { id: "plugin_x", permissions: ["clipboard:read"] },
+  createdAt: 1,
+  updatedAt: 1,
+}
+
+/** A VS Code extension row — installed from Open VSX, not cognia's registry. */
+const vscodeRow: PluginRow = {
+  ...baseRow,
+  id: "esbenp.prettier-vscode",
+  name: "Prettier",
+  source: "marketplace",
+  type: "vscode-extension",
+  path: "/ext/esbenp.prettier-vscode",
+  manifest: {
+    id: "esbenp.prettier-vscode",
+    vscodeExtension: { identifier: "esbenp.prettier-vscode", source: "openvsx" },
   },
-]
+}
+
+const mockRows: PluginRow[] = [baseRow]
 
 jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: () => mockRows,
@@ -61,6 +76,18 @@ jest.mock("@/lib/db/plugins", () => ({
   setPluginEnabled: jest.fn(),
   deletePlugin: jest.fn(),
   getPlugin: jest.fn(() => Promise.resolve(mockRows[0])),
+  updatePlugin: jest.fn(async () => undefined),
+}))
+
+jest.mock("@/lib/plugin/bridge/scheduled-task-bridge", () => ({
+  unregisterScheduledTasksForPlugin: jest.fn(async () => 0),
+}))
+
+// The cognia registry client behind the "Sync Registry" button.
+jest.mock("@/lib/plugin/package/marketplace", () => ({
+  getPluginMarketplace: jest.fn(() => ({
+    checkForUpdates: jest.fn(async () => []),
+  })),
 }))
 
 jest.mock("@/lib/db/schema", () => ({
@@ -68,12 +95,16 @@ jest.mock("@/lib/db/schema", () => ({
     pluginAnalytics: {
       orderBy: () => ({ reverse: () => ({ toArray: async () => [] }) }),
     },
-    pluginScheduledJobs: {
-      orderBy: () => ({ toArray: async () => [] }),
-      where: () => ({ equals: () => ({ delete: async () => undefined }) }),
-    },
     pluginPermissions: {
       where: () => ({ equals: () => ({ delete: async () => undefined }) }),
+    },
+    // The marketplace-sources hook writes each catalog fetch's outcome back to
+    // its row, so this stub has to cover the table too.
+    pluginMarketplaceSources: {
+      get: async () => undefined,
+      put: async () => undefined,
+      orderBy: () => ({ toArray: async () => [] }),
+      delete: async () => undefined,
     },
   }),
 }))
@@ -83,18 +114,18 @@ jest.mock("@/lib/db/schema", () => ({
 // section / which detail content is mounted).
 jest.mock("@/components/feature-shell/feature-page-shell", () => ({
   FeaturePageShell: ({
-    toolbar,
+    header,
     leftPane,
     rightPane,
     children,
   }: {
-    toolbar?: React.ReactNode
+    header?: React.ReactNode
     leftPane?: { content: React.ReactNode }
     rightPane?: { content: React.ReactNode }
     children: React.ReactNode
   }) => (
     <div data-testid="feature-page-shell">
-      <div data-testid="shell-toolbar">{toolbar}</div>
+      <div data-testid="shell-header">{header}</div>
       <div data-testid="shell-left">{leftPane?.content}</div>
       <div data-testid="shell-center">{children}</div>
       <div data-testid="shell-right">{rightPane?.content}</div>
@@ -102,15 +133,28 @@ jest.mock("@/components/feature-shell/feature-page-shell", () => ({
   ),
 }))
 
+jest.mock("./devtools/plugin-devtools-pane", () => ({
+  PluginDevtoolsPane: () => <div data-testid="plugin-devtools-pane" />,
+}))
+
 import { PluginPanel } from "./plugin-panel"
+import { getPluginMarketplace } from "@/lib/plugin/package/marketplace"
+import { deletePlugin } from "@/lib/db/plugins"
+import { unregisterScheduledTasksForPlugin } from "@/lib/plugin/bridge/scheduled-task-bridge"
 import { usePluginsStore, DEFAULT_PLUGIN_FILTERS } from "@/stores/plugins"
 
+const getPluginMarketplaceMock = getPluginMarketplace as unknown as jest.Mock
+
 beforeEach(() => {
+  mockRows.length = 0
+  mockRows.push(baseRow)
   mockSearchString = ""
   mockSearchCacheKey = ""
   mockSearchCacheValue = new URLSearchParams("")
+  mockReplace.mockClear()
+  jest.mocked(deletePlugin).mockClear()
+  jest.mocked(unregisterScheduledTasksForPlugin).mockClear()
   usePluginsStore.setState({
-    activeTab: "installed",
     activeSection: "library",
     librarySubFilter: "all",
     governanceView: "permissions",
@@ -120,7 +164,6 @@ beforeEach(() => {
     selection: new Set(),
     detailPluginId: null,
     filterSheetOpen: false,
-    configTarget: null,
     importStaging: null,
     deleteTarget: null,
     permissionReviewTarget: null,
@@ -157,6 +200,15 @@ describe("PluginPanel (3-pane shell)", () => {
     usePluginsStore.setState({ activeSection: "governance" })
     render(<PluginPanel />)
     expect(screen.getByTestId("plugin-governance-pane")).toBeInTheDocument()
+    expect(screen.getByTestId("shell-right")).toBeEmptyDOMElement()
+  })
+
+  it("uses the full workspace and hides plugin detail when activeSection=devtools", () => {
+    usePluginsStore.setState({ activeSection: "devtools" })
+    render(<PluginPanel />)
+
+    expect(screen.getByTestId("plugin-devtools-pane")).toBeInTheDocument()
+    expect(screen.getByTestId("shell-right")).toBeEmptyDOMElement()
   })
 
   it("opens the rollback dialog when the store target is set", () => {
@@ -165,11 +217,30 @@ describe("PluginPanel (3-pane shell)", () => {
     expect(screen.getAllByText(/title/).length).toBeGreaterThan(0)
   })
 
-  it("hydrates legacy ?tab=browse into both activeTab and activeSection=discover", () => {
+  it("removes real scheduler tasks before a direct uninstall", async () => {
+    usePluginsStore.setState({
+      deleteTarget: { pluginId: "plugin_x", name: "Test Plugin" },
+    })
+    render(<PluginPanel />)
+    fireEvent.click(screen.getByRole("button", { name: "confirm" }))
+
+    await waitFor(() => expect(unregisterScheduledTasksForPlugin).toHaveBeenCalledWith("plugin_x"))
+    expect(deletePlugin).toHaveBeenCalledWith("plugin_x")
+  })
+
+  it("redirects a legacy ?tab=browse deep link to the canonical ?section=discover URL", () => {
     mockSearchString = "tab=browse"
     render(<PluginPanel />)
-    expect(usePluginsStore.getState().activeTab).toBe("browse")
-    expect(usePluginsStore.getState().activeSection).toBe("discover")
+    expect(mockReplace).toHaveBeenCalledWith("/plugins?section=discover", { scroll: false })
+  })
+
+  it("redirects ?tab=configure to the configurable library + configure subtab", () => {
+    mockSearchString = "tab=configure"
+    render(<PluginPanel />)
+    expect(mockReplace).toHaveBeenCalledWith(
+      "/plugins?section=library&sub=configurable&subtab=configure",
+      { scroll: false }
+    )
   })
 
   it("hydrates new ?section=governance&gov=audit into the store on mount", () => {
@@ -189,14 +260,10 @@ describe("PluginPanel (3-pane shell)", () => {
     expect(usePluginsStore.getState().activeSection).toBe("discover")
   })
 
-  it("ignores unknown ?tab= values without overriding the current active tab", () => {
-    mockSearchString = "tab=installed"
-    const { rerender } = render(<PluginPanel />)
-    expect(usePluginsStore.getState().activeTab).toBe("installed")
-
+  it("does not redirect for an unknown ?tab= value", () => {
     mockSearchString = "tab=garbage"
-    rerender(<PluginPanel />)
-    expect(usePluginsStore.getState().activeTab).toBe("installed")
+    render(<PluginPanel />)
+    expect(mockReplace).not.toHaveBeenCalled()
   })
 
   it("ignores unknown ?section= values without overriding the current section", () => {
@@ -207,5 +274,29 @@ describe("PluginPanel (3-pane shell)", () => {
     mockSearchString = "section=garbage"
     rerender(<PluginPanel />)
     expect(usePluginsStore.getState().activeSection).toBe("library")
+  })
+
+  it("Sync Registry never sends VS Code extension ids to the cognia registry", async () => {
+    // Same leak as the one fixed in lifecycle/updater.ts, on a second path:
+    // this button hands every installed row to the *marketplace's* own
+    // checkForUpdates, which loops getPlugin(id) against cognia's registry.
+    // An Open VSX id there tells cognia's registry what the user has
+    // installed, and can never return an answer.
+    // The parameter is typed so `mock.calls[0][0]` is reachable — an untyped
+    // `jest.fn(async () => [])` infers a zero-length tuple and won't compile.
+    const checkForUpdates = jest.fn(
+      async (_installed: Array<{ id: string; version: string }>) => []
+    )
+    getPluginMarketplaceMock.mockReturnValue({ checkForUpdates })
+    mockRows.push(vscodeRow)
+
+    render(<PluginPanel />)
+    fireEvent.click(screen.getByLabelText("syncRegistryAria"))
+
+    await waitFor(() => expect(checkForUpdates).toHaveBeenCalled())
+    const sentIds = checkForUpdates.mock.calls[0][0].map((p) => p.id)
+    expect(sentIds).not.toContain("esbenp.prettier-vscode")
+    // ...while ordinary cognia plugins are still checked as before.
+    expect(sentIds).toEqual(["plugin_x"])
   })
 })

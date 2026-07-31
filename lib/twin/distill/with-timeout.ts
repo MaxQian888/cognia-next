@@ -14,4 +14,4 @@ export {
   TimeoutError,
   withTimeout,
   withTimeoutOrFallback,
-} from "@/lib/utils/with-timeout"
+} from "@cognia/primitives"

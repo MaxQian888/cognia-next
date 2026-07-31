@@ -76,7 +76,7 @@ export function RestoreDialog({ rootDir, path, onOpenChange, actions }: RestoreD
             list="restore-source-refs"
             value={source}
             onChange={(e) => setSource(e.target.value)}
-            placeholder="HEAD"
+            placeholder={t("restore.sourcePlaceholder")}
             data-testid="restore-source-input"
           />
           <datalist id="restore-source-refs">

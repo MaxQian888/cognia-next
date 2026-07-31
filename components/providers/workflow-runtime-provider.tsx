@@ -6,10 +6,24 @@ import {
   initTriggerSubscriptions,
   disposeTriggerSubscriptions,
 } from "@/lib/workflow/runtime/trigger-subscriptions"
+import {
+  initDesktopEventTrigger,
+  disposeDesktopEventTrigger,
+} from "@/lib/workflow/runtime/desktop-event-trigger"
+import {
+  initPetEventTrigger,
+  disposePetEventTrigger,
+} from "@/lib/workflow/runtime/pet-event-trigger"
+import { installApprovalNotificationActions } from "@/lib/workflow/runtime/approval-notify"
+import { isTauri } from "@/lib/tauri"
 import { listWorkflows } from "@/lib/db/workflows"
 import { syncWorkflowTriggers } from "@/lib/workflow/runtime/webhook-bridge"
+import {
+  disposePluginTriggerLifecycle,
+  initPluginTriggerLifecycle,
+} from "@/lib/workflow/triggers/lifecycle"
 import { resumeInFlightRuns } from "@/lib/workflow/runtime/resume-controller"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.scheduler
 
@@ -26,20 +40,21 @@ type Disposer = () => void | Promise<void>
  *      starts empty, so the first save after launch would otherwise be the
  *      only event Rust knows about.
  *
- * M2 extends this provider with `initTriggerSubscriptions()` for the chat /
- * connector inbound trigger flows.
+ * M2 extends this provider with `initTriggerSubscriptions()` for TS-hook
+ * trigger flows (chat, connector inbound, goal completion, terminal command).
  *
  * Web mode: all underlying Tauri calls are no-ops, so the provider mounts
  * cleanly but produces no Rust-side state. The sync loop still runs so
  * follow-up Tauri restarts pick up the existing workflow rows.
  */
-export function WorkflowRuntimeProvider({ children }: { children: React.ReactNode }) {
+export function WorkflowRuntimeProvider({ children }: { children?: React.ReactNode }) {
   const disposersRef = useRef<Disposer[]>([])
 
   useEffect(() => {
     if (typeof window === "undefined") return
 
     let cancelled = false
+    const startupController = new AbortController()
     const disposers: Disposer[] = []
 
     void (async () => {
@@ -68,10 +83,66 @@ export function WorkflowRuntimeProvider({ children }: { children: React.ReactNod
       }
 
       try {
+        initPluginTriggerLifecycle()
+        disposers.push(() => disposePluginTriggerLifecycle())
+        log.info?.("workflow runtime: plugin-trigger lifecycle initialised")
+      } catch (err) {
+        log.warn?.("workflow runtime: initPluginTriggerLifecycle failed", {
+          error: err instanceof Error ? err.message : String(err),
+        })
+      }
+
+      // Live desktop UI events (trigger.desktop.event) ride the Rust
+      // automation backend — Tauri-only; web/Capacitor have no event source.
+      if (isTauri()) {
+        try {
+          initDesktopEventTrigger()
+          disposers.push(() => disposeDesktopEventTrigger())
+          log.info?.("workflow runtime: desktop-event trigger initialised")
+        } catch (err) {
+          log.warn?.("workflow runtime: initDesktopEventTrigger failed", {
+            error: err instanceof Error ? err.message : String(err),
+          })
+        }
+      }
+
+      // Pet lifecycle events (trigger.pet.event) ride the in-renderer pet
+      // event bus — NOT Tauri-gated, the pet runs on web too.
+      try {
+        initPetEventTrigger()
+        disposers.push(() => disposePetEventTrigger())
+        log.info?.("workflow runtime: pet-event trigger initialised")
+      } catch (err) {
+        log.warn?.("workflow runtime: initPetEventTrigger failed", {
+          error: err instanceof Error ? err.message : String(err),
+        })
+      }
+
+      // Approval-gate notification actions (ADR 0061 P2) — the Approve /
+      // Reject buttons on `action.approval.request` notification rows.
+      // Not Tauri-gated: the notification center resolves approvals on web
+      // too (companion fan-out inside the notifier is Tauri-gated itself).
+      try {
+        disposers.push(installApprovalNotificationActions())
+        log.info?.("workflow runtime: approval notification actions installed")
+      } catch (err) {
+        log.warn?.("workflow runtime: installApprovalNotificationActions failed", {
+          error: err instanceof Error ? err.message : String(err),
+        })
+      }
+
+      try {
         const all = await listWorkflows()
-        await Promise.allSettled(all.map((w) => syncWorkflowTriggers(w)))
+        if (cancelled) return
+        const active = all.filter((workflow) => !workflow.isTemplate && !workflow.isBuiltIn)
+        await Promise.allSettled(
+          active.map((workflow) =>
+            syncWorkflowTriggers(workflow, { signal: startupController.signal })
+          )
+        )
+        if (cancelled) return
         log.info?.("workflow runtime: synced trigger registrations to Rust", {
-          count: all.length,
+          count: active.length,
         })
       } catch (err) {
         log.warn?.("workflow runtime: initial trigger sync failed", {
@@ -104,6 +175,7 @@ export function WorkflowRuntimeProvider({ children }: { children: React.ReactNod
 
     return () => {
       cancelled = true
+      startupController.abort()
       const pending = [...disposersRef.current].reverse()
       disposersRef.current = []
       for (const d of pending) {

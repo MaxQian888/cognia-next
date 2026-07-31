@@ -105,8 +105,7 @@ export function createSystemSource(
 
     async create(input: CreateSystemTaskInput): Promise<UnifiedScheduledItem> {
       const result = (await nativeAdapter.createSystemTask(input)) as
-        | { task?: SystemTask }
-        | unknown
+        { task?: SystemTask } | unknown
       const task =
         result && typeof result === "object" && "task" in result && result.task
           ? (result as { task: SystemTask }).task

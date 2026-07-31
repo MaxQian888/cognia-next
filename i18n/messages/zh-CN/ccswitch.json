@@ -1,0 +1,152 @@
+{
+  "agents": {
+    "claude-code": "Claude Code（~/.claude/settings.json）",
+    "claude-desktop": "Claude Desktop",
+    "codex": "Codex",
+    "gemini": "Gemini CLI",
+    "opencode": "OpenCode（~/.local/share/opencode/auth.json）"
+  },
+  "counts": {
+    "mcpServers": "MCP",
+    "prompts": "提示词",
+    "providers": "服务商",
+    "skills": "技能"
+  },
+  "description": "从本地 CCSwitch 安装中读取服务商、MCP 服务器、提示词与技能。在这里切换服务商会更新 Cognia 自带的 SDK，并可（按需）同步到选中的外部代理。",
+  "dialog": {
+    "agentsSection": "同时写入",
+    "apiKey": "API 密钥",
+    "baseUrl": "Base URL",
+    "body": "请确认本次切换将带来的变更。",
+    "bodyFor": "切换至 {name}。请在确认前查看本次变更。",
+    "cancel": "取消",
+    "close": "关闭",
+    "cogniaApplied": "已更新 Cognia。",
+    "cogniaSection": "Cognia-next",
+    "confirm": "执行切换",
+    "noChange": "Cognia 的 API 密钥与 base URL 已与该服务商一致 — 无需重启 sidecar。",
+    "notYetSupported": "尚未支持",
+    "subscriptionActivated": "已从已登录账号激活 Anthropic 订阅。",
+    "subscriptionAdopted": "已复用本机 Claude Code 登录并激活为 Anthropic 订阅。",
+    "subscriptionFailed": "无法激活 Anthropic 订阅：{error}",
+    "subscriptionNoneFound": "未找到 Anthropic 订阅——请在 设置 → 订阅 中登录，或运行 `claude login` 后重新切换。",
+    "title": "切换服务商",
+    "useSubscription": "官方 provider——cognia 将复用你的 Anthropic 订阅（已登录的订阅账号，或本机 Claude Code 登录），而不是 API key。",
+    "willRestart": "将重启自带 SDK sidecar 以让新环境变量生效。",
+    "willWrite": "将写入 {count, plural, =1 {1 个代理文件} other {# 个代理文件}}。"
+  },
+  "mcp": {
+    "emptyBody": "CCSwitch 的 mcp_servers 表为空。",
+    "emptyTitle": "CCSwitch 中没有 MCP 服务器",
+    "errorTitle": "无法列出 MCP 服务器",
+    "headerHint": "选中的 MCP 服务器将通过现有的「跳过 / 覆盖 / 复制」策略导入到 Cognia 的 MCP 列表。",
+    "importBtn": "导入 {count, plural, =0 {0 项} =1 {1 项} other {# 项}}",
+    "importing": "正在导入…",
+    "listTitle": "CCSwitch 中的 MCP 服务器",
+    "resultSummary": "新建 {imported}，更新 {updated}，跳过 {skipped}，失败 {errored}。",
+    "strategy": {
+      "duplicate": "副本",
+      "duplicateDesc": "在导入项的名称后追加「（imported）」后缀。",
+      "overwrite": "覆盖",
+      "overwriteDesc": "用 CCSwitch 的 command/args/url 替换已有值。",
+      "skip": "保留已有",
+      "skipDesc": "不修改已有记录，推荐。"
+    },
+    "strategyBody": "当 Cognia 已存在同名服务器时的处理方式。",
+    "strategyTitle": "名称冲突时"
+  },
+  "overview": {
+    "activeBody": "API key 与 base URL 与 Cognia 当前设置匹配的服务商。",
+    "activeTitle": "在 Cognia 中已激活",
+    "dbPath": "数据库",
+    "detectedBody": "Cognia 仅以只读方式读取该数据库；CCSwitch 仍是唯一的写入方。",
+    "detectedTitle": "已检测到 CCSwitch",
+    "driftBody": "Cognia 与至少一个外部代理的激活服务商不一致。请在「服务商」分页中选择一个进行同步。",
+    "driftTitle": "检测到不一致",
+    "errorTitle": "无法读取 CCSwitch 数据库",
+    "noActive": "没有 CCSwitch 服务商匹配",
+    "noActiveBody": "Cognia 当前使用的是手动输入的 API 密钥，或服务商记录与 CCSwitch 中均不一致。",
+    "notFoundBody": "未找到 ~/.cc-switch/cc-switch.db。请先安装 CCSwitch 并至少添加一个服务商。",
+    "notFoundTitle": "未检测到 CCSwitch",
+    "recheck": "重新检测",
+    "resolutionSource": {
+      "env": "来自 CC_SWITCH_HOME",
+      "manual": "手动指定",
+      "redirect": "来自 CCSwitch 重定向"
+    },
+    "webModeBody": "CCSwitch 互通需要读取本地 SQLite 数据库。请使用桌面模式（`pnpm tauri dev`）。",
+    "webModeTitle": "仅桌面端可用"
+  },
+  "prompts": {
+    "emptyBody": "CCSwitch 的 prompts 表为空。",
+    "emptyTitle": "CCSwitch 中没有提示词",
+    "errorTitle": "无法列出提示词",
+    "headerHint": "每条选中的提示词会成为一个新的 Cognia 提示词预设（分类「自定义」）。",
+    "importBtn": "导入 {count, plural, =0 {0 项} =1 {1 项} other {# 项}}",
+    "importing": "正在导入…",
+    "listTitle": "CCSwitch 中的提示词",
+    "resultSummary": "新建 {imported}，失败 {errored}。"
+  },
+  "providers": {
+    "activeBadge": "已激活",
+    "emptyBody": "请先在 CCSwitch 中添加服务商。",
+    "emptyTitle": "CCSwitch 中没有服务商",
+    "errorTitle": "无法列出服务商",
+    "headerHint": "CCSwitch 是这些记录的唯一编辑入口 — 添加 / 改名 / 删除请回到 CCSwitch。",
+    "importQuota": "导入额度",
+    "model": "模型",
+    "officialEndpoint": "Anthropic 官方端点",
+    "quotaImportErrorTitle": "未导入额度元数据",
+    "quotaImportFailed": "无法保存导入的额度源：{error}",
+    "quotaImportReason": {
+      "invalid-endpoint": "额度接口地址缺失或无效。",
+      "missing-credentials": "CCSwitch 记录中没有该额度接口所需的凭证。",
+      "missing-script": "该服务商没有 CCSwitch 额度元数据。",
+      "unsupported-provider": "该服务商需要原生签名或其他暂不支持的认证流程。",
+      "unsupported-template": "只能导入已识别的声明式 CCSwitch 额度模板；不会执行任意 JavaScript。"
+    },
+    "quotaImportSuccess": "已把 {name} 导入为默认关闭的自定义额度源。请在订阅设置中检查后再显式启用。",
+    "quotaImportSuccessTitle": "已导入额度元数据",
+    "refresh": "刷新",
+    "useHere": "在此使用",
+    "useHereAndIn": "在此并同步至…"
+  },
+  "skills": {
+    "emptyBody": "CCSwitch 的 skills 表为空。",
+    "emptyTitle": "CCSwitch 中没有技能",
+    "errorTitle": "无法列出技能",
+    "externalBadge": "外部文件",
+    "headerHint": "带有内联内容的技能会成为新的 Cognia 技能；指向外部文件的行（已置灰）需通过「设置 → 技能」单独导入。",
+    "importBtn": "导入 {count, plural, =0 {0 项} =1 {1 项} other {# 项}}",
+    "importing": "正在导入…",
+    "listTitle": "CCSwitch 中的技能",
+    "resultSummary": "新建 {imported}，跳过 {skipped}，失败 {errored}。"
+  },
+  "sync": {
+    "enabledBody": "关闭后该分区从侧栏隐藏，不再发起 IPC。",
+    "enabledLabel": "启用 CCSwitch 集成",
+    "flagsBody": "CCSwitch 分区的总开关与刷新行为。",
+    "flagsTitle": "CCSwitch 互通",
+    "manualDirBody": "覆盖 cognia 查找 cc-switch.db 的位置。当你的 CCSwitch 数据目录位于无法自动检测的位置（例如同步盘）时使用。",
+    "manualDirClear": "清除",
+    "manualDirHint": "优先级高于 CCSwitch 自身的重定向，但低于 CC_SWITCH_HOME 环境变量。留空则自动检测。",
+    "manualDirLabel": "包含 cc-switch.db 的文件夹",
+    "manualDirPlaceholder": "例如 ~/Dropbox/cc-switch",
+    "manualDirTitle": "手动数据目录",
+    "propagationBody": "在「在此并同步至…」对话框中预先勾选的代理。每次切换仍以本次勾选为准。",
+    "propagationTitle": "默认同步范围",
+    "save": "保存",
+    "saving": "保存中…",
+    "watchDbBody": "Cognia 窗口重新获得焦点时重新读取 cc-switch.db，使「已激活」徽标保持最新。",
+    "watchDbLabel": "聚焦时重新检测"
+  },
+  "tabs": {
+    "mcp": "MCP 服务器",
+    "overview": "概览",
+    "prompts": "提示词",
+    "providers": "服务商",
+    "skills": "技能",
+    "sync": "同步设置"
+  },
+  "title": "CCSwitch"
+}

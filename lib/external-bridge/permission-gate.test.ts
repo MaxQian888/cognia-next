@@ -5,6 +5,7 @@
 
 import type { ExternalBridgeSettings } from "@/types/wiki"
 import {
+  bridgeScopeForRagScope,
   checkRagCall,
   checkRuntimeCall,
   checkScope,
@@ -127,5 +128,33 @@ describe("requiredScopeForRuntimeEntity / checkRuntimeCall", () => {
     const result = checkRagCall(settings(), "made-up")
     expect(result.allowed).toBe(false)
     if (!result.allowed) expect(result.reason).toMatch(/unknown rag scope/)
+  })
+
+  it("checkRagCall allows the 'runtime' scope under rag:cognia (was previously always denied)", () => {
+    const s = settings({ enabledScopes: ["rag:cognia"] })
+    expect(checkRagCall(s, "runtime").allowed).toBe(true)
+  })
+
+  it("checkRagCall maps 'user-repo' to rag:user-repo (default OFF)", () => {
+    expect(checkRagCall(settings(), "user-repo").allowed).toBe(false)
+    expect(checkRagCall(settings({ enabledScopes: ["rag:user-repo"] }), "user-repo").allowed).toBe(
+      true
+    )
+  })
+})
+
+describe("bridgeScopeForRagScope", () => {
+  it("maps every known rag scope to its BridgeScope", () => {
+    expect(bridgeScopeForRagScope("twin")).toBe("rag:twin")
+    expect(bridgeScopeForRagScope("user-repo")).toBe("rag:user-repo")
+    expect(bridgeScopeForRagScope("cognia-self")).toBe("rag:cognia")
+    expect(bridgeScopeForRagScope("runtime")).toBe("rag:cognia")
+    expect(bridgeScopeForRagScope("all")).toBe("rag:cognia")
+    expect(bridgeScopeForRagScope(undefined)).toBe("rag:cognia")
+    expect(bridgeScopeForRagScope("")).toBe("rag:cognia")
+  })
+
+  it("returns undefined for an unknown scope so the caller can deny", () => {
+    expect(bridgeScopeForRagScope("made-up")).toBeUndefined()
   })
 })

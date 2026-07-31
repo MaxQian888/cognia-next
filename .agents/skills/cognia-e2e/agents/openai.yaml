@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cognia E2E"
+  short_description: "设计、审计、实现并验证 Cognia 端到端测试闭环"
+  default_prompt: "Use $cognia-e2e to assess this Cognia change, choose the correct E2E layer, and implement a verified test."

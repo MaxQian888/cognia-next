@@ -10,10 +10,10 @@ description: "The Rust execution-sandbox crate: the SandboxedExec trait, the pur
 <TLDR>
   `src-tauri/src/sandbox/` is the Tier-1 OS execution sandbox. The `sandbox_exec` Tauri command
   derives a `SandboxPolicy` from the tool name via `policy.rs:policy_for`, selects a per-platform
-  backend via `current_backend()`, and runs the command under that backend. **Linux (`bwrap`) and
-  macOS (`sandbox-exec`) are real, working backends**; **Windows is partial** (a two-binary
-  `runas`-based runner, with the deeper restricted-token vendoring still pending). Both Tauri commands
-  are registered (`lib.rs:349-350`).
+  backend via `current_backend()`, and runs the command under that backend. **Linux (`bwrap`),
+  macOS (`sandbox-exec`), and Windows (`cognia-sandbox-runner.exe`) are real backends**. The
+  Windows runner is the bundled restricted-token + low-integrity + Job Object crate and captures
+  stdout/stderr through its JSON contract. Both Tauri commands are registered (`lib.rs:349-350`).
 </TLDR>
 
 ## The trait — `traits.rs`
@@ -62,12 +62,6 @@ pub enum NetworkPolicy {
     On,
 }
 ```
-
-<Callout type="info">
-  The doc-comment at `types.rs:191` still says the Windows backend string is `"windows-codex"`. The
-  **live** string emitted by the Windows backend is `"windows-cognia-sandbox"` (`windows.rs:191`) —
-  the comment is stale.
-</Callout>
 
 ## The policy resolver — `policy.rs`
 
@@ -121,12 +115,6 @@ pub async fn sandbox_health_probe() -> Result<SandboxHealth, String> {
     Ok(current_backend().health())
 }
 ```
-
-<Callout type="warn">
-  The header comment in `mod.rs:11-15` claims `sandbox_exec` "stays UNREGISTERED until Phase 4.2+".
-  That comment is **stale** — both `sandbox::sandbox_health_probe` and `sandbox::sandbox_exec` are
-  registered in `lib.rs:349-350` today.
-</Callout>
 
 ```mermaid
 sequenceDiagram
@@ -183,8 +171,10 @@ NetworkPolicy::Allowlist { hosts: _ } => {
 - `health().backend == "linux-bwrap"`; `version` is `"bundled"` / `"system"` / empty.
 - Edit/Write/TextEditor `--bind` each **target file individually** (not the parent dir) and force
   `NetworkPolicy::Off`.
-- **Caveat:** `max_cpu_seconds` / `max_memory_mb` are accepted but **not** translated into
-  cgroup/rlimit flags yet.
+- `max_cpu_seconds` / `max_memory_mb` are resolved by `limits.rs` and applied to the `bwrap`
+  process in a `pre_exec` hook (`RLIMIT_CPU`, and `RLIMIT_AS` on Linux). The limits are inherited
+  across `bwrap`'s exec into the sandboxed command; the wall-clock watchdog still remains the
+  default timeout path.
 
 ### macOS — `sandbox-exec` (real)
 
@@ -201,47 +191,27 @@ NetworkPolicy::Allowlist { hosts: _ } =>
 - `health().backend == "macos-sandbox-exec"`, `version == "system"`.
 - Edit/Write/TextEditor allow `(literal "<file>")` writes only — a single file, never a subtree.
 - **Caveat:** allowlist degrades to full network at the SBPL layer (the renderer is the real host
-  gate); resource caps are not enforced via SBPL.
+  gate); CPU / memory caps are enforced by the shared `pre_exec` rlimit hook, not by SBPL.
 
-### Windows — two binaries (partial / vendor pending)
+### Windows — restricted-token runner (real)
 
-`WindowsSandboxBackend` composes two shipped binaries: `cognia-sandbox-setup.exe` (UAC-elevated,
-idempotent — creates the synthetic users `CogniaSandboxOffline` / `CogniaSandboxOnline` and the
-per-SID firewall rules, then writes a marker file) and `cognia-sandbox-runner.exe` (non-elevated —
-relaunches the argv under the synthetic user). `run()` is marker-gated; a fresh machine reports
-`SetupRequired` until setup runs.
+`WindowsSandboxBackend` shells out to the bundled `cognia-sandbox-runner.exe` from
+`crates/cognia-sandbox-runner/`. The runner launches the target with a restricted subset of the app's
+own token, lowers integrity, assigns the child to a Job Object, and returns captured stdout/stderr in
+a JSON result. It does **not** need elevation, separate OS accounts, or a setup marker for filesystem /
+privilege / process confinement.
 
-```rust title="src-tauri/src/sandbox/windows.rs:86-99 (online tier only for networked policies)"
-let network = match policy {
-    SandboxPolicy::Bash { network, .. } => network,
-    SandboxPolicy::Edit { .. } | SandboxPolicy::Write { .. }
-    | SandboxPolicy::TextEditor { .. } => &NetworkPolicy::Off,
-};
-match network {
-    NetworkPolicy::Off => OFFLINE_USER,
-    NetworkPolicy::On | NetworkPolicy::Allowlist { .. } => ONLINE_USER,
-}
+```rust title="crates/cognia-sandbox-runner/src/main.rs (restricted-token launch shape)"
+// 1. Duplicate the caller token.
+// 2. Create a restricted token and lower integrity.
+// 3. Create a Job Object with kill-on-close and optional memory cap.
+// 4. Spawn suspended under the restricted token, assign to the job, then resume.
 ```
 
-```rust title="src-tauri/src/bin/cognia-sandbox-runner.rs:87-100 (runas restricted relaunch)"
-let mut runas_args = vec![
-    format!("/user:{}", input.target_user),
-    "/trustlevel:0x20000".to_string(),
-];
-let quoted = input.argv.iter()
-    .map(|a| format!("\"{}\"", a.replace('"', "\\\"")))
-    .collect::<Vec<_>>().join(" ");
-runas_args.push(format!("cmd /c {quoted}"));
-```
-
-<Callout type="warn">
-  Windows is the least complete backend. Known gaps: `health().backend == "windows-cognia-sandbox"`
-  and `is_available()` is purely marker-file presence; the runner uses the shallow
-  `runas /trustlevel:0x20000` mechanism (the deeper restricted-token + `CreateProcessAsUser`
-  vendoring from `codex-rs/windows-sandbox-rs` is still pending); the runner **does not capture child
-  stdout/stderr** (`cognia-sandbox-runner.rs:114-116`); and `grant_logon_as_batch` in the setup
-  binary is a no-op note (`cognia-sandbox-setup.rs:133-145`).
-</Callout>
+`WindowsSandboxBackend::is_available()` now gates on the runner binary resolving next to the app
+executable. The legacy `target_user` payload field remains only for JSON compatibility with older
+payloads; the restricted-token runner ignores it. `cognia-sandbox-setup.exe` remains only for a
+future optional per-SID Firewall follow-up; it is no longer in the critical path.
 
 ### Fallback + test double
 
@@ -255,9 +225,9 @@ runas_args.push(format!("cmd /c {quoted}"));
 
 | Backend     | `health().backend` (live) | State                  | Real OS exec?                                                                 |
 | ----------- | ------------------------- | ---------------------- | ---------------------------------------------------------------------------- |
-| Linux       | `linux-bwrap`             | Real                   | Yes — resolves + execs `bwrap` under namespaces/timeout. Caps not enforced.  |
+| Linux       | `linux-bwrap`             | Real                   | Yes — resolves + execs `bwrap` under namespaces/timeout + opt-in rlimits.   |
 | macOS       | `macos-sandbox-exec`      | Real                   | Yes — execs `/usr/bin/sandbox-exec` with rendered SBPL. Allowlist → On.      |
-| Windows     | `windows-cognia-sandbox`  | Partial / vendor-pending | Yes-but-shallow — `runas /trustlevel`; no stdout capture; marker-gated.     |
+| Windows     | `windows-cognia-sandbox`  | Real                   | Yes — bundled restricted-token + low-integrity + Job Object runner captures stdout/stderr. |
 | Uninstalled | `uninstalled-<os>`        | Deny stub              | No — always Unavailable / SetupRequired.                                     |
 | Mock        | `mock`                    | Test fixture           | No — records calls, canned results.                                          |
 
@@ -266,11 +236,12 @@ runas_args.push(format!("cmd /c {quoted}"));
 In-file `#[cfg(test)]` suites cover the pure + observable surface without requiring a real sandbox at
 unit time: `policy.rs:127-276` (11 tests on defaults, empty-writable rejection, network parsing),
 `types.rs:227-285` (serde round-trips + tagged discriminators), `linux.rs:331-435` (argv baseline,
-per-file binds, share-net, backend string), `macos.rs:299-374` (SBPL rendering, literal vs subpath,
-escaping), `windows.rs:240-386` (marker gating, offline/online user selection, payload shape),
+per-file binds, share-net, resource-limit resolution, backend string), `macos.rs:299-374` (SBPL
+rendering, literal vs subpath, escaping), `windows.rs:240-386` (runner availability, compatibility
+payload shape, stdout/stderr JSON parsing),
 `uninstalled.rs:85-159`, `mock.rs:126-201`. Real-sandbox integration runs via
-`cargo test --test sandbox_integration` on Linux + macOS (the Windows runner is skipped under CI —
-UAC).
+`cargo test --test sandbox_integration` on Linux + macOS; the Windows runner crate is covered by its
+own unit tests.
 
 ## Next
 

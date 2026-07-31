@@ -56,10 +56,7 @@ export interface WeComInboundMsgBody {
 }
 
 export type WeComEventType =
-  | "enter_chat"
-  | "template_card_event"
-  | "feedback_event"
-  | "disconnected_event"
+  "enter_chat" | "template_card_event" | "feedback_event" | "disconnected_event"
 
 export interface WeComInboundEventBody {
   msgid?: string
@@ -180,6 +177,31 @@ export function buildStreamRespondFrame(
   }
 }
 
+/**
+ * Combined "finished stream + template card" reply. The platform accepts a
+ * card on a streamed reply ONLY through the single msgtype
+ * `"stream_with_template_card"` (official SDK `reply_stream_with_card`) — a
+ * separate `template_card` respond after a `finish:true` stream frame is
+ * dropped. `finish` is always true here: the combined frame closes the
+ * stream and attaches the card in one shot.
+ */
+export function buildStreamWithTemplateCardFrame(
+  reqId: string,
+  streamId: string,
+  content: string,
+  card: WeComTemplateCard
+): WeComFrameEnvelope {
+  return {
+    cmd: "aibot_respond_msg",
+    headers: { req_id: reqId },
+    body: {
+      msgtype: "stream_with_template_card",
+      stream: { id: streamId, content, finish: true },
+      template_card: card,
+    },
+  }
+}
+
 /** Non-streamed markdown reply (reuses the callback's req_id). */
 export function buildMarkdownRespondFrame(reqId: string, content: string): WeComFrameEnvelope {
   return {
@@ -241,12 +263,13 @@ export type WeComProactiveBody =
       msgtype: "template_card"
       template_card: WeComTemplateCard
     }
-  | {
-      chatid: string
-      chat_type: 0 | 1 | 2
-      msgtype: "image" | "voice" | "video" | "file"
-      media: { media_id: string }
-    }
+  // Media frames key the payload object BY msgtype — `{"msgtype":"image",
+  // "image":{"media_id":…}}` — exactly like the reply path; the protocol has
+  // no generic `media` key.
+  | { chatid: string; chat_type: 0 | 1 | 2; msgtype: "image"; image: { media_id: string } }
+  | { chatid: string; chat_type: 0 | 1 | 2; msgtype: "voice"; voice: { media_id: string } }
+  | { chatid: string; chat_type: 0 | 1 | 2; msgtype: "video"; video: { media_id: string } }
+  | { chatid: string; chat_type: 0 | 1 | 2; msgtype: "file"; file: { media_id: string } }
 
 /**
  * Proactive push (no triggering message). `chatid` is the user's `userid`
@@ -262,29 +285,46 @@ export function buildSendMsgFrame(reqId: string, body: WeComProactiveBody): WeCo
 // Media upload (3-step chunked) — used by media.ts
 // ---------------------------------------------------------------------------
 
-export function buildMediaInitFrame(
-  reqId: string,
-  filename: string,
-  totalSize: number,
-  mediaType: "image" | "voice" | "video" | "file"
-): WeComFrameEnvelope {
+export interface WeComMediaInit {
+  type: "image" | "voice" | "video" | "file"
+  filename: string
+  totalSize: number
+  totalChunks: number
+  /** MD5 hex digest of the complete file bytes. */
+  md5: string
+}
+
+/**
+ * Init frame of the 3-step upload. The protocol wants
+ * `{type, filename, total_size, total_chunks, md5}` — `md5` is the hex
+ * digest of the WHOLE file, `total_chunks` the number of chunk frames the
+ * server should expect.
+ */
+export function buildMediaInitFrame(reqId: string, init: WeComMediaInit): WeComFrameEnvelope {
   return {
     cmd: "aibot_upload_media_init",
     headers: { req_id: reqId },
-    body: { filename, total_size: totalSize, media_type: mediaType },
+    body: {
+      type: init.type,
+      filename: init.filename,
+      total_size: init.totalSize,
+      total_chunks: init.totalChunks,
+      md5: init.md5,
+    },
   }
 }
 
+/** Chunk frame — the protocol keys the fields `chunk_index` / `base64_data`. */
 export function buildMediaChunkFrame(
   reqId: string,
   uploadId: string,
-  seq: number,
+  chunkIndex: number,
   dataBase64: string
 ): WeComFrameEnvelope {
   return {
     cmd: "aibot_upload_media_chunk",
     headers: { req_id: reqId },
-    body: { upload_id: uploadId, seq, data: dataBase64 },
+    body: { upload_id: uploadId, chunk_index: chunkIndex, base64_data: dataBase64 },
   }
 }
 

@@ -7,7 +7,7 @@
  * skipped). Split into its own module so `maintenance.ts` can lazy-import it.
  */
 
-import type { ChatSession, AppSettings } from "@/lib/claude/types"
+import type { ChatSession, AppSettings } from "@cognia/agent-config-types"
 import type { MemoryConfig } from "@/types/memory/memory"
 import type { MemoryMaintenanceDeps } from "./maintenance"
 
@@ -38,9 +38,54 @@ export async function buildEpisodicMaintenanceDeps(
       consolidate: auto.consolidate,
     },
     decayDeps: {
-      listActive: (scope, characterId) =>
-        memDb.listMemories({ scope, status: "active", characterId }),
+      listActive: (scope, namespace) =>
+        memDb.listMemories({ scope, status: "active", ...namespace, exactNamespace: true }),
       invalidate: (id) => memDb.invalidateMemory(id),
+    },
+    recordDistillation: async (input, operations) => {
+      const { createMemoryEvidence, appendMemoryAuditEvent } =
+        await import("@/lib/db/memory-governance")
+      const contaminationState = input.contaminationState ?? "clean"
+      for (const operation of operations) {
+        const memoryId =
+          operation.op === "ADD" || operation.op === "CONFLICT"
+            ? operation.memory.id
+            : operation.op === "UPDATE"
+              ? operation.targetId
+              : undefined
+        if (!memoryId) continue
+        await memDb.updateMemory(memoryId, {
+          evidenceState: "supported",
+          reviewStatus: operation.op === "CONFLICT" ? "conflict" : "unreviewed",
+          contaminationState,
+          sensitivity: "normal",
+        })
+        await createMemoryEvidence({
+          memoryId,
+          kind: "message",
+          sourceId: `session-distill:${input.source?.sessionId ?? "unknown"}`,
+          sessionId: input.source?.sessionId,
+          contaminationState,
+          reviewed: false,
+        })
+        await appendMemoryAuditEvent({
+          action:
+            operation.op === "CONFLICT"
+              ? "conflict"
+              : operation.op === "ADD"
+                ? "created"
+                : "revised",
+          memoryId,
+          sessionId: input.source?.sessionId,
+          reason: "session_distillation",
+        })
+      }
+    },
+    recordDecay: async ({ reason, memoryIds, sessionId }) => {
+      const { appendMemoryAuditEvent } = await import("@/lib/db/memory-governance")
+      for (const memoryId of memoryIds) {
+        await appendMemoryAuditEvent({ action: "invalidated", memoryId, sessionId, reason })
+      }
     },
   }
 }

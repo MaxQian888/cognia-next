@@ -26,7 +26,7 @@ import { getDb } from "@/lib/db/schema"
 import { STAGGER_CONTAINER, STAGGER_CHILD } from "@/lib/ui/motion"
 import { usePendingDrafts } from "@/hooks/connectors/use-pending-drafts"
 import { parseConversationKey } from "@/types/connectors/event"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import type { ConnectorDraftRow } from "@/lib/db/connector-types"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 import { DraftEditor } from "./draft-editor"
@@ -117,7 +117,7 @@ export function DraftCenter() {
                   variant="ghost"
                   size="sm"
                   className="h-6 px-2 text-xs"
-                  onClick={() => router.push(`/inbox/c/${encodeURIComponent(ck)}`)}
+                  onClick={() => router.push(`/inbox/c?key=${encodeURIComponent(ck)}`)}
                   data-testid={`draft-group-open-${ck}`}
                 >
                   {t("open")}

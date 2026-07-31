@@ -1,5 +1,5 @@
 import { converter, formatCss, parse, type Color } from "culori"
-import type { ThemeColors } from "@/types/plugin/plugin-extended"
+import type { ThemeColors } from "@/types/plugin/plugin"
 
 const toOklch = converter("oklch")
 

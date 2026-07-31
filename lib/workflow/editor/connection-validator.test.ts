@@ -164,3 +164,52 @@ describe("validateConnection — labeled output handles (v2)", () => {
     expect(validateConnection({ source: "a", target: "b" }, nodes, [])).toEqual({ valid: true })
   })
 })
+
+describe("validateConnection — error-handle gating", () => {
+  const httpNode: NodeShapeForValidation = {
+    id: "http",
+    data: { kind: "io.http", typeVersion: 1, params: {} },
+  }
+  const httpWithBranch: NodeShapeForValidation = {
+    id: "http_eb",
+    data: {
+      kind: "io.http",
+      typeVersion: 1,
+      params: {},
+      errorHandling: { onError: "errorBranch" },
+    },
+  }
+  const nodes = [...NODES, httpNode, httpWithBranch]
+
+  it("rejects an error edge when the node has not opted into errorBranch", () => {
+    const r = validateConnection(
+      { source: "http", target: "a", sourceHandle: "error" },
+      nodes,
+      [],
+      { errorPolicy: "stop" }
+    )
+    expect(r).toMatchObject({ valid: false, reasonKey: "errorHandleDisabled" })
+  })
+
+  it("accepts an error edge when the node opted into errorBranch", () => {
+    expect(
+      validateConnection({ source: "http_eb", target: "a", sourceHandle: "error" }, nodes, [], {
+        errorPolicy: "stop",
+      })
+    ).toEqual({ valid: true })
+  })
+
+  it("accepts an error edge under the legacy workflow-level branch policy", () => {
+    expect(
+      validateConnection({ source: "http", target: "a", sourceHandle: "error" }, nodes, [], {
+        errorPolicy: "branch",
+      })
+    ).toEqual({ valid: true })
+  })
+
+  it("stays permissive when no options are passed (shape-only callers)", () => {
+    expect(
+      validateConnection({ source: "http", target: "a", sourceHandle: "error" }, nodes, [])
+    ).toEqual({ valid: true })
+  })
+})

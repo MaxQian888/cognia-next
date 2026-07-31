@@ -1,0 +1,154 @@
+{
+  "name": "@cognia/plugin-sdk",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Standalone TypeScript SDK for authoring Cognia plugins.",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.js"
+    },
+    "./manifest": {
+      "types": "./dist/manifest.d.ts",
+      "import": "./dist/manifest.js",
+      "require": "./dist/manifest.cjs",
+      "default": "./dist/manifest.js"
+    },
+    "./context": {
+      "types": "./dist/context.d.ts",
+      "import": "./dist/context.js",
+      "require": "./dist/context.cjs",
+      "default": "./dist/context.js"
+    },
+    "./contracts": {
+      "types": "./dist/contracts.d.ts",
+      "import": "./dist/contracts.js",
+      "require": "./dist/contracts.cjs",
+      "default": "./dist/contracts.js"
+    },
+    "./api/tool": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.js"
+    },
+    "./api/native-anthropic-tool": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.js"
+    },
+    "./api/connector": {
+      "types": "./dist/connector.d.ts",
+      "import": "./dist/connector.js",
+      "require": "./dist/connector.cjs",
+      "default": "./dist/connector.js"
+    },
+    "./api/integration": {
+      "types": "./dist/integration.d.ts",
+      "import": "./dist/integration.js",
+      "require": "./dist/integration.cjs",
+      "default": "./dist/integration.js"
+    },
+    "./api/context-panel": {
+      "types": "./dist/context-panel.d.ts",
+      "import": "./dist/context-panel.js",
+      "require": "./dist/context-panel.cjs",
+      "default": "./dist/context-panel.js"
+    },
+    "./api/editor": {
+      "types": "./dist/editor.d.ts",
+      "import": "./dist/editor.js",
+      "require": "./dist/editor.cjs",
+      "default": "./dist/editor.js"
+    },
+    "./api/webview": {
+      "types": "./dist/webview.d.ts",
+      "import": "./dist/webview.js",
+      "require": "./dist/webview.cjs",
+      "default": "./dist/webview.js"
+    },
+    "./events": {
+      "types": "./dist/events.d.ts",
+      "import": "./dist/events.js",
+      "require": "./dist/events.cjs",
+      "default": "./dist/events.js"
+    },
+    "./hooks": {
+      "types": "./dist/hooks.d.ts",
+      "import": "./dist/hooks.js",
+      "require": "./dist/hooks.cjs",
+      "default": "./dist/hooks.js"
+    },
+    "./permissions": {
+      "types": "./dist/permissions.d.ts",
+      "import": "./dist/permissions.js",
+      "require": "./dist/permissions.cjs",
+      "default": "./dist/permissions.js"
+    },
+    "./extensions": {
+      "types": "./dist/extensions.d.ts",
+      "import": "./dist/extensions.js",
+      "require": "./dist/extensions.cjs",
+      "default": "./dist/extensions.js"
+    },
+    "./templates": {
+      "types": "./dist/templates.d.ts",
+      "import": "./dist/templates.js",
+      "require": "./dist/templates.cjs",
+      "default": "./dist/templates.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "contract",
+    "wit",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "NODE_OPTIONS=--max-old-space-size=12288 tsup",
+    "typecheck": "node ../../scripts/plugin/test-sdk-package.mjs",
+    "pack:test": "pnpm --dir ../provider-types build && node ../../scripts/plugin/test-sdk-package.mjs"
+  },
+  "dependencies": {
+    "@cognia/provider-core": "workspace:*",
+    "@cognia/provider-routing": "workspace:*",
+    "@cognia/provider-types": "workspace:*"
+  },
+  "peerDependencies": {
+    "@types/json-schema": "^7.0.0",
+    "@types/node": ">=20.0.0",
+    "@types/react": "^19.0.0",
+    "ai": "^6.0.0",
+    "dexie": "^4.0.0",
+    "lucide-react": "^1.25.0",
+    "react": "^19.0.0",
+    "typescript": ">=5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "cognia",
+    "plugin",
+    "sdk",
+    "tauri"
+  ],
+  "engines": {
+    "node": ">=26.0.0"
+  }
+}

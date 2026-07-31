@@ -1,9 +1,14 @@
+import type { ComponentType } from "react"
+
 const mockRevealLineInCenter = jest.fn()
 const mockSetPosition = jest.fn()
 const mockFocus = jest.fn()
+const mockLayout = jest.fn()
 const mockSetMonacoTheme = jest.fn()
+let mockShowDynamicLoading = false
+let mockModifiedEditorAvailable = true
 
-jest.mock("next/dynamic", () => () => {
+jest.mock("next/dynamic", () => (_loader: unknown, options?: { loading?: ComponentType }) => {
   const React = jest.requireActual("react")
   // Stand in for the async-loaded Monaco DiffEditor. Fires `onMount` with a
   // fake diff editor so the jump-to-hunk wiring is exercised, and surfaces the
@@ -12,19 +17,28 @@ jest.mock("next/dynamic", () => () => {
     options?: { automaticLayout?: boolean }
     onMount?: (editor: unknown, monaco: unknown) => void
   }) => {
+    const showLoading = mockShowDynamicLoading && !!options?.loading
     const onMount = props?.onMount
     React.useEffect(() => {
+      if (showLoading) return
       onMount?.(
         {
-          getModifiedEditor: () => ({
-            revealLineInCenter: mockRevealLineInCenter,
-            setPosition: mockSetPosition,
-            focus: mockFocus,
-          }),
+          layout: mockLayout,
+          getModifiedEditor: () =>
+            mockModifiedEditorAvailable
+              ? {
+                  revealLineInCenter: mockRevealLineInCenter,
+                  setPosition: mockSetPosition,
+                  focus: mockFocus,
+                }
+              : undefined,
         },
         { editor: { defineTheme: () => {}, setTheme: mockSetMonacoTheme } }
       )
-    }, [onMount])
+    }, [onMount, showLoading])
+    if (showLoading && options?.loading) {
+      return React.createElement(options.loading)
+    }
     return (
       <div
         data-testid="monaco-diff-mock"
@@ -48,7 +62,7 @@ jest.mock("@/lib/canvas/monaco-diff-disposal", () => ({
   guardDiffEditorModelDisposal: jest.fn(),
 }))
 
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import { DiffViewer } from "./diff-viewer"
 import { configureMonacoLoader } from "@/lib/canvas/monaco-loader"
 import { guardDiffEditorModelDisposal } from "@/lib/canvas/monaco-diff-disposal"
@@ -74,6 +88,13 @@ const diff: GitDiff = {
 }
 
 describe("DiffViewer", () => {
+  afterEach(() => {
+    mockShowDynamicLoading = false
+    mockModifiedEditorAvailable = true
+    jest.useRealTimers()
+    Reflect.deleteProperty(globalThis, "ResizeObserver")
+  })
+
   it("shows the empty state with no diff", () => {
     render(<DiffViewer diff={null} staged={false} />)
     expect(screen.getByTestId("diff-empty")).toBeInTheDocument()
@@ -88,6 +109,13 @@ describe("DiffViewer", () => {
     render(<DiffViewer diff={diff} staged={false} />)
     expect(screen.getByTestId("monaco-diff-mock")).toBeInTheDocument()
     expect(configureMonacoLoader).toHaveBeenCalled()
+  })
+
+  it("renders the async Monaco loading state", () => {
+    mockShowDynamicLoading = true
+    render(<DiffViewer diff={diff} staged={false} />)
+    mockShowDynamicLoading = false
+    expect(screen.getByRole("status").parentElement).toHaveTextContent("Loading diff")
   })
 
   it("enables automaticLayout so the editor fills its container", () => {
@@ -106,6 +134,20 @@ describe("DiffViewer", () => {
     )
     fireEvent.click(screen.getByTestId("hunk-stage-0"))
     expect(onClick).toHaveBeenCalledWith(hunk)
+  })
+
+  it("uses touch-sized hunk controls in touch density", () => {
+    render(
+      <DiffViewer
+        diff={diff}
+        staged={false}
+        density="touch"
+        hunkActions={[{ icon: "stage", label: "Stage Hunk", onClick: jest.fn() }]}
+      />
+    )
+
+    expect(screen.getByTestId("hunk-stage-0")).toHaveClass("size-11")
+    expect(screen.getByTestId("hunk-jump-0")).toHaveClass("min-h-11")
   })
 
   it("guards diff model disposal on mount (monaco-react dispose-order bug)", () => {
@@ -131,5 +173,50 @@ describe("DiffViewer", () => {
     fireEvent.click(screen.getByTestId("hunk-jump-0"))
     expect(mockRevealLineInCenter).toHaveBeenCalledWith(hunk.newStart)
     expect(mockSetPosition).toHaveBeenCalledWith({ lineNumber: hunk.newStart, column: 1 })
+  })
+
+  it("tolerates a hunk jump before Monaco's modified editor is ready", () => {
+    mockModifiedEditorAvailable = false
+    render(
+      <DiffViewer
+        diff={{ ...diff, language: undefined }}
+        staged={false}
+        hunkActions={[{ icon: "stage", label: "Stage Hunk", onClick: jest.fn() }]}
+      />
+    )
+
+    expect(() => fireEvent.click(screen.getByTestId("hunk-jump-0"))).not.toThrow()
+  })
+
+  it("lays out Monaco after a container resize and disconnects on unmount", () => {
+    jest.useFakeTimers()
+    let resize: ResizeObserverCallback | null = null
+    const disconnect = jest.fn()
+    const observe = jest.fn()
+    class MockResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        resize = callback
+      }
+      observe = observe
+      disconnect = disconnect
+      unobserve = jest.fn()
+    }
+    Object.defineProperty(globalThis, "ResizeObserver", {
+      configurable: true,
+      value: MockResizeObserver,
+    })
+
+    const { unmount } = render(<DiffViewer diff={diff} staged={false} />)
+    expect(observe).toHaveBeenCalled()
+    act(() => {
+      resize?.([], {} as ResizeObserver)
+      resize?.([], {} as ResizeObserver)
+      jest.advanceTimersByTime(60)
+    })
+    expect(mockLayout).toHaveBeenCalled()
+
+    act(() => resize?.([], {} as ResizeObserver))
+    unmount()
+    expect(disconnect).toHaveBeenCalled()
   })
 })

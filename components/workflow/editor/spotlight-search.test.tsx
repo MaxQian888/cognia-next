@@ -110,9 +110,9 @@ describe("SpotlightSearch", () => {
     })
   })
 
-  it("selecting a row calls setViewport, selects the node, and pulses it", async () => {
+  it("selecting a row centers the node via setCenter, selects it, and pulses it", async () => {
     const { store, ids } = seed()
-    const { rfi, setViewport } = fakeRfi()
+    const { rfi, setCenter, setViewport } = fakeRfi()
     const onOpenChange = jest.fn()
     render(
       <SpotlightSearch
@@ -124,9 +124,15 @@ describe("SpotlightSearch", () => {
       />
     )
     fireEvent.click(await screen.findByTestId(`spotlight-row-${ids.action}`))
-    expect(setViewport).toHaveBeenCalledTimes(1)
-    const [vp, opts] = setViewport.mock.calls[0]
-    expect(vp.zoom).toBeCloseTo(1.2)
+    // Centering must go through setCenter (pane-aware) — NOT setViewport with
+    // window-width math, which lands the node right of the canvas centre when
+    // a sidebar is open. action node @ (800,200), 240×80 → centre (920, 240).
+    expect(setViewport).not.toHaveBeenCalled()
+    expect(setCenter).toHaveBeenCalledTimes(1)
+    const [cx, cy, opts] = setCenter.mock.calls[0]
+    expect(cx).toBe(920)
+    expect(cy).toBe(240)
+    expect(opts.zoom).toBeCloseTo(1.2)
     expect(opts.duration).toBe(240)
     expect(store.getState().selectedNodeIds).toEqual([ids.action])
     expect(store.getState().spotlightedNodeId).toBe(ids.action)
@@ -135,7 +141,7 @@ describe("SpotlightSearch", () => {
 
   it("uses duration=0 and ms=0 when animationsEnabled=false", async () => {
     const { store, ids } = seed()
-    const { rfi, setViewport } = fakeRfi()
+    const { rfi, setCenter } = fakeRfi()
     render(
       <SpotlightSearch
         open
@@ -146,7 +152,7 @@ describe("SpotlightSearch", () => {
       />
     )
     fireEvent.click(await screen.findByTestId(`spotlight-row-${ids.ai}`))
-    expect(setViewport.mock.calls[0][1].duration).toBe(0)
+    expect(setCenter.mock.calls[0][2].duration).toBe(0)
     // With ms=0, the spotlightedNodeId is cleared synchronously.
     expect(store.getState().spotlightedNodeId).toBeNull()
   })

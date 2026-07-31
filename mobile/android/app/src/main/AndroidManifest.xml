@@ -32,19 +32,25 @@
                 <data android:scheme="cognia" />
             </intent-filter>
 
-            <!-- Share target: text from system share sheet (Wave 3) -->
+            <!-- Share target: text/URL from the system share sheet (Wave 3).
+                 MainActivity rewrites ACTION_SEND into a cognia://share deep
+                 link (Capacitor's App plugin only surfaces data-URI intents).
+                 image/* is intentionally NOT declared: there is no stream
+                 receiver, so advertising it would drop shared images. -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/plain" />
             </intent-filter>
-            <intent-filter>
-                <action android:name="android.intent.action.SEND" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="image/*" />
-            </intent-filter>
 
         </activity>
+
+        <!-- Route FCM pushes into the high-importance channel the app creates
+             at boot (lib/capacitor/local-notifications DEFAULT_CHANNEL_ID);
+             without this they land on FCM's silent default channel. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="cognia-default" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

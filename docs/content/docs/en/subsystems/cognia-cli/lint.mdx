@@ -1,29 +1,31 @@
 ---
 title: Manifest linter
-description: cognia plugin lint — the 37-rule validation catalog over plugin.json, the hard-coded 45-permission / 34-capability / 5-type whitelists, the versioned JSON report, and the Jest parity test that keeps the Rust lists locked to the TypeScript host.
+description: cognia plugin lint — the diagnostic-code validation catalog over plugin.json, the hard-coded 70-permission / 63-capability / 5-type / 47-field whitelists, the versioned JSON report, and the Jest parity test that keeps the four Rust lists locked to the TypeScript host.
 ---
 
 # Manifest linter — `cognia plugin lint`
 
 <TLDR>
-  `cmd_lint.rs` (1 279 lines — the CLI's largest module) runs **37 distinct checks** over
-  `plugin.json` and emits either styled prose or a `schemaVersion: 1` JSON report. Severity is
-  two-level: **errors** fail the run (`exit 1`, and they block `build` — `cmd_build.rs:44-71`),
-  **warnings** don't. Three whitelists are hard-coded in Rust — 45 permissions
-  (`cmd_lint.rs:26-74`), 34 capabilities (`:82-116`), 5 plugin types (`:118`) — and a Jest test
-  (`lib/plugin/contracts/rust-capability-parity.test.ts`) regex-extracts them from the Rust
-  source and asserts set-equality with the host's canonical TS lists, so the CLI can never
+  `cmd_lint.rs` (the CLI's largest module) runs **60+ distinct diagnostic codes** over
+  `plugin.json` and emits either styled prose or a `schemaVersion: 2` JSON report. Severity is
+  three-level: **errors** fail the run (`exit 1`, and they block `build` through
+  `cmd_build::build_inner`); **warnings** don't gate unless you pass `-W` /
+  `--warnings-as-errors`; **notices** never gate. Four whitelists are hard-coded in Rust — 70
+  permissions (`VALID_PERMISSIONS`), 63 capabilities (`VALID_CAPABILITIES`), 5 plugin types
+  (`VALID_PLUGIN_TYPES`), and the 47-entry `CAPABILITY_FIELDS` map — and a Jest test
+  (`lib/plugin/contracts/rust-capability-parity.test.ts`) regex-extracts all four from the Rust
+  source and asserts set-equality with the host's canonical TS sources, so the CLI can never
   silently drift from what the desktop actually accepts.
 </TLDR>
 
 ## Invocation & report shape
 
 `cognia plugin lint [--path .] [--json]`. The manifest is located by `read_plugin_manifest`
-(`main.rs:425-441`) — `plugin.json` at the root, falling back to `manifest/plugin.json`.
+in `main.rs` — `plugin.json` at the root, falling back to `manifest/plugin.json`.
 
 ```rust
-// crates/cognia-cli/src/cmd_lint.rs:156-182
-pub enum Severity { Error, Warning }            // serialized lowercase
+// crates/cognia-cli/src/cmd_lint.rs (abridged)
+pub enum Severity { Error, Warning, Notice }    // serialized lowercase
 
 pub struct Diagnostic {
     pub severity: Severity,
@@ -34,68 +36,73 @@ pub struct Diagnostic {
 }
 
 pub struct LintReport {
-    pub schema_version: u32,  // "schemaVersion": 1 — version-pin for consumers
-    pub manifest_path: PathBuf,
+    pub schema_version: u32,  // "schemaVersion": 2 — version-pin for consumers
+    pub ok: bool,             // passed the gate (errors, or warnings under -W)
+    pub action: &'static str, // "lint"
+    pub stage: &'static str,  // "validate" (input-failure payload: "input")
+    pub manifest_path: PathBuf, // serialized as "manifestPath"
     pub valid: bool,          // no Error-severity diagnostics
     pub diagnostics: Vec<Diagnostic>,
 }
 ```
 
-`valid` is computed as `!diagnostics.iter().any(|d| d.severity == Severity::Error)`
-(`cmd_lint.rs:218`). Two consumption modes:
+`valid` is computed as `!diagnostics.iter().any(|d| d.severity == Severity::Error)` inside
+`LintReport`; `ok` is the gate result (`valid`, unless `--warnings-as-errors` escalates a warning).
+Two consumption modes:
 
-- **CLI** (`run`, `cmd_lint.rs:209-230`): human output via `print_human` (`:247-279`) —
+- **CLI** (`cmd_lint::run`): human output via `print_human` —
   `[ERROR] field: message`, hints prefixed `→ try:`, summary line `N error(s), M warning(s)` —
   then `exit(1)` if invalid.
-- **Library** (`validate_at`, `cmd_lint.rs:236-245`): returns the report; this is what `build`
+- **Library** (`cmd_lint::validate_at`): returns the report; this is what `build`
   calls before doing anything else.
 
 ## The rule catalog
 
-All rules live in one pass, `validate_manifest()` (`cmd_lint.rs:289-679`), plus two
-sub-validators for the `wasm` and `dexie` blocks.
+All rules live in one pass, `validate_manifest()`, plus focused
+sub-validators for the `wasm`, `dexie`, and `cliTools[]` blocks.
 
 ### Identity & required fields
 
 | Code | Severity | Constraint |
 | --- | --- | --- |
-| `manifest.invalid_type` | error | root must be a JSON object (`:298`) |
-| `manifest.id.missing` / `.invalid_format` | error | non-empty; `^[a-z0-9]([a-z0-9-_.]*[a-z0-9])?$` (`:306-316`) |
-| `manifest.name.missing` / `.long` | error / warning | non-empty; warn over 50 chars (`:321-329`) |
-| `manifest.version.missing` / `.invalid_format` | error | semver `MAJOR.MINOR.PATCH[-prerelease]` (`:334-344`) |
-| `manifest.description.missing` / `.long` | error / warning | non-empty; warn over 500 chars (`:349-357`) |
-| `manifest.minAppVersion.invalid` | error | semver when present (`:655-670`) |
+| `manifest.invalid_type` | error | root must be a JSON object |
+| `manifest.id.missing` / `.invalid_format` | error | non-empty; `^[a-z0-9]([a-z0-9-_.]*[a-z0-9])?$` |
+| `manifest.name.missing` / `.long` | error / warning | non-empty; warn over 50 chars |
+| `manifest.version.missing` / `.invalid_format` | error | semver `MAJOR.MINOR.PATCH[-prerelease]` |
+| `manifest.description.missing` / `.long` | error / warning | non-empty; warn over 500 chars |
+| `manifest.minAppVersion.invalid` | error | semver when present |
 
 ### Type & entry points
 
 `type` must be one of `frontend · python · hybrid · wasm · vscode-extension`
-(`manifest.type.invalid`, `:367-376`), and each type demands its entry field (`:490-511`):
+(`manifest.type.invalid`), and each type demands its entry field:
 
 | Type | Required field | Extra |
 | --- | --- | --- |
 | `frontend` | `main` | |
 | `python` | `pythonMain` | |
-| `wasm` | `wasmMain` | must end `.wasm` (`manifest.wasmMain.invalid_extension`, `:499`); `wasm` block validated |
+| `wasm` | `wasmMain` | must end `.wasm` (`manifest.wasmMain.invalid_extension`); `wasm` block validated |
 | `vscode-extension` | `vscodeMain` | |
 
-### The `wasm` block (`validate_wasm_block`, `:685-743`)
+### The `wasm` block (`validate_wasm_block`)
 
 | Code | Constraint |
 | --- | --- |
 | `manifest.wasm.required` | wasm plugins must declare the block with at least `apiVersion` |
-| `manifest.wasm.apiVersion.invalid` | strict `^\d+\.\d+\.\d+$` — **no prerelease** (`is_wasm_api_version`, `:910`) |
+| `manifest.wasm.apiVersion.invalid` | strict `^\d+\.\d+\.\d+$` — **no prerelease** (`is_wasm_api_version`) |
 | `manifest.wasm.memoryLimitMb.invalid` | number in (0, 4096] |
 | `manifest.wasm.callTimeoutMs.invalid` | number in (0, 600000] |
 
 ### Capabilities ↔ contribution parity
 
-Beyond membership in the 34-entry whitelist (`manifest.capabilities.invalid`, error), the linter
-cross-checks declarations against content using the 23-entry `CAPABILITY_FIELDS` map
-(`cmd_lint.rs:126-150`) — e.g. `"a2ui" → ["a2uiComponents", "a2uiTemplates"]`,
-`"scheduler" → ["scheduledTasks"]`, `"workflow-trigger" → ["workflows"]`:
+Beyond membership in the 63-entry whitelist (`manifest.capabilities.invalid`, error), the linter
+cross-checks declarations against content using the 47-entry `CAPABILITY_FIELDS` map
+(`cmd_lint.rs`) — e.g. `"a2ui" → ["a2uiComponents", "a2uiTemplates"]`,
+`"scheduler" → ["scheduledTasks"]`, `"workflow-trigger" → ["workflows"]`, and
+`"cli-tools" → ["cliTools"]`:
 
 ```rust
-// cmd_lint.rs:438-454 — declared but empty → warning
+// cmd_lint.rs — declared but empty → warning
 for (cap, fields) in CAPABILITY_FIELDS {
     if declared.contains(cap) && !fields.iter().any(|f| is_populated_array(f)) {
         out.push(Diagnostic { severity: Warning, code: "manifest.capability.field_missing", … });
@@ -103,7 +110,7 @@ for (cap, fields) in CAPABILITY_FIELDS {
 }
 ```
 
-The inverse (`manifest.capability.field_undeclared`, `:472-482`) warns when a contribution array
+The inverse (`manifest.capability.field_undeclared`) warns when a contribution array
 has entries but none of its mapped capabilities is declared. Both directions are warnings — the
 host loads such plugins, but the contribution is dead weight or silently ignored.
 
@@ -111,19 +118,21 @@ host loads such plugins, but the contribution is dead weight or silently ignored
 
 | Area | Codes | Notes |
 | --- | --- | --- |
-| `permissions` | `manifest.permissions.unknown` — **warning** (`:521-530`) | unknown permission strings don't block; the host's grant flow simply never offers them |
-| `tools[]` | `name` / `description` required per entry (`:583-598`) | |
-| `commands[]` | `id` / `name` required (`:610-627`) | |
-| `modes[]` | `id` / `name` / `icon` required (`:638-648`) | |
-| `activationEvents` / `activateOnStartup` | array of strings / boolean (`:542-571`) | |
-| `dexie` block | 8 rules (`validate_dexie_block`, `:745-839`) | `tables` non-empty array, ≤ 20 tables, names `^[a-z][a-zA-Z0-9_]{0,30}$`, unique, each with a non-empty `schema` string |
+| `permissions` | `manifest.permissions.unknown` — **warning** | unknown permission strings don't block; the host's grant flow simply never offers them |
+| `tools[]` | `name` / `description` required per entry | |
+| `cliTools[]` | 24 `manifest.cliTools.*` codes (`lint_cli_tools`) | requires `cli:execute`, validates binary provenance, argv tokens, parameter references, cwd/stdin/env policies, numeric knobs, output parsing, success codes, and version args |
+| `commands[]` | `id` / `name` required | |
+| `modes[]` | `id` / `name` / `icon` required | |
+| `activationEvents` / `activateOnStartup` | array of strings / boolean | |
+| `dexie` block | 8 rules (`validate_dexie_block`) | `tables` non-empty array, ≤ 20 tables, names `^[a-z][a-zA-Z0-9_]{0,30}$`, unique, each with a non-empty `schema` string |
 
-## The three whitelists and the parity contract
+## The four whitelists and the parity contract
 
 ```text
-VALID_PERMISSIONS   45 entries   cmd_lint.rs:26-74
-VALID_CAPABILITIES  34 entries   cmd_lint.rs:82-116
-VALID_PLUGIN_TYPES   5 entries   cmd_lint.rs:118-119
+VALID_PERMISSIONS   70 entries   cmd_lint.rs
+VALID_CAPABILITIES  63 entries   cmd_lint.rs
+VALID_PLUGIN_TYPES   5 entries   cmd_lint.rs
+CAPABILITY_FIELDS   47 entries   cmd_lint.rs
 ```
 
 The permission list spans 17 namespaces — `filesystem:* network:* clipboard:* shell process
@@ -135,13 +144,18 @@ plus bare `notification`.
 flowchart LR
   TS1[lib/plugin/contracts/plugin-capabilities.ts<br/>CANONICAL_PLUGIN_CAPABILITIES] --- T
   TS2[lib/plugin/core/validation.ts<br/>VALID_PERMISSIONS · VALID_PLUGIN_TYPES] --- T
-  T[rust-capability-parity.test.ts<br/>regex-extracts Rust array literals] --- RS[cmd_lint.rs<br/>three const arrays]
+  T[rust-capability-parity.test.ts<br/>regex-extracts Rust array literals] --- RS[cmd_lint.rs<br/>four whitelists]
 ```
 
-`rust-capability-parity.test.ts:26-61` reads `cmd_lint.rs` as text, extracts each
-`const NAME = [...]` with a quoted-string regex, and asserts **set equality** against the TS
-canonical lists. Add a permission on either side without the other and `pnpm test` fails — this
-is the only thing keeping a plain string list in a separate crate honest.
+`rust-capability-parity.test.ts` reads `cmd_lint.rs` (plus `validation.ts` and
+`plugin-capabilities.ts`) as text, extracts each Rust list with a quoted-string regex, and asserts
+**set equality** against the TS canonical sources: `VALID_PERMISSIONS`, `VALID_CAPABILITIES`,
+`VALID_PLUGIN_TYPES`, and the `CAPABILITY_FIELDS` map — the last derived from
+`PLUGIN_CAPABILITY_CONTRACTS[].manifestFields`, minus `python`'s entry-point fields, exactly as the
+host's own cross-check does. Add a permission or a capability field on either side without the other
+and `pnpm test` fails. Each source read is path-guarded, so a moved file fails the test *loudly*
+instead of silently disabling it — which is precisely what happened from 2026-07-13 (when ADR-0067
+relocated `api_bridge.rs`) until the guard was repointed.
 
 <Callout type="info" title="Why warnings for unknown permissions but errors for unknown capabilities?">
   A capability tag changes how the host wires the plugin (registries, loaders, slots) — an
@@ -154,8 +168,11 @@ is the only thing keeping a plain string list in a separate crate honest.
 
 ```json
 {
-  "schemaVersion": 1,
-  "manifest_path": "/work/my-plugin/plugin.json",
+  "schemaVersion": 2,
+  "ok": false,
+  "action": "lint",
+  "stage": "validate",
+  "manifestPath": "/work/my-plugin/plugin.json",
   "valid": false,
   "diagnostics": [
     { "severity": "error", "field": "id", "code": "manifest.id.missing",
@@ -167,5 +184,10 @@ is the only thing keeping a plain string list in a separate crate honest.
 }
 ```
 
-33 in-file unit tests (`cmd_lint.rs:936-1279`) pin minimal-valid manifests, every format rule,
-both parity directions, the dexie constraints, and JSON serialization.
+`valid` reports "no errors"; `ok` reports "passed the gate" (they diverge only under `-W`, where a
+warning flips `ok` to `false` while `valid` stays `true`). The input-failure payload shares this
+shape — same `schemaVersion` / `stage` / `manifestPath` keys, with `stage: "input"`.
+
+In-file unit tests (`cmd_lint.rs`) pin minimal-valid manifests, every format rule, both parity
+directions, `cliTools[]`, the lazy-factory `entry` path-safety checks, the `--warnings-as-errors`
+gate, the dexie constraints, and JSON serialization.

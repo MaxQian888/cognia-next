@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Coverage for the Rust → Dexie event bridge.
  *
@@ -12,6 +13,18 @@ import { installCompanionEventBridge } from "./event-bridge"
 import { transport } from "@/lib/tauri"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { listPairedDevices } from "@/lib/db/paired-devices"
+import { useAccountStore } from "@/stores/account/account-store"
+
+jest.mock("@/stores/account/account-store", () => {
+  const mockAccountStoreState = {
+    unlockedAccountId: "local_acct_a" as string | null,
+  }
+  return {
+    useAccountStore: {
+      getState: () => mockAccountStoreState,
+    },
+  }
+})
 
 type Handler = (payload: unknown) => void
 
@@ -32,6 +45,8 @@ beforeEach(async () => {
   __resetDbForTesting()
   getDb()
   await whenSeeded()
+  ;(useAccountStore.getState() as { unlockedAccountId: string | null }).unlockedAccountId =
+    "local_acct_a"
 })
 
 afterEach(() => {
@@ -75,6 +90,7 @@ describe("installCompanionEventBridge", () => {
       pubkey: "base64-pubkey",
       paired_at_ms: 1_700_000_000_000,
       app_version: "0.1.0",
+      account_id: "local_acct_a",
     })
 
     // The handler returns a Promise via `void` — flush microtasks.
@@ -87,10 +103,63 @@ describe("installCompanionEventBridge", () => {
       label: "Max iPhone",
       platform: "ios",
       pubkey: "base64-pubkey",
+      accountId: "local_acct_a",
       appVersion: "0.1.0",
       pairedAt: 1_700_000_000_000,
       lastSeenAt: 1_700_000_000_000,
     })
+  })
+
+  it("device-paired handler rejects a payload for another local account", async () => {
+    const { handlers } = captureHandlers()
+    installCompanionEventBridge()
+    const handler = handlers.get("companion://device-paired")!
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {})
+
+    handler({
+      device_id: "dev-wrong-account",
+      label: "Other account phone",
+      platform: "ios",
+      pubkey: "k",
+      paired_at_ms: 1_700_000_000_000,
+      app_version: "0.1.0",
+      account_id: "local_acct_b",
+    })
+    await flushMicrotasks()
+
+    await expect(listPairedDevices()).resolves.toEqual([])
+    warnSpy.mockRestore()
+  })
+
+  it("device-paired handler rejects missing and locked local account payloads", async () => {
+    const { handlers } = captureHandlers()
+    installCompanionEventBridge()
+    const handler = handlers.get("companion://device-paired")!
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {})
+
+    handler({
+      device_id: "dev-missing-account",
+      label: "Phone",
+      platform: "ios",
+      pubkey: "k",
+      paired_at_ms: 1_700_000_000_000,
+      app_version: "0.1.0",
+    })
+    await flushMicrotasks()
+    await expect(listPairedDevices()).resolves.toEqual([])
+    ;(useAccountStore.getState() as { unlockedAccountId: string | null }).unlockedAccountId = null
+    handler({
+      device_id: "dev-locked-account",
+      label: "Phone",
+      platform: "ios",
+      pubkey: "k",
+      paired_at_ms: 1_700_000_000_000,
+      app_version: "0.1.0",
+      account_id: "local_acct_a",
+    })
+    await flushMicrotasks()
+    await expect(listPairedDevices()).resolves.toEqual([])
+    warnSpy.mockRestore()
   })
 
   it("normalizes unknown platform strings to 'unknown'", async () => {
@@ -105,6 +174,7 @@ describe("installCompanionEventBridge", () => {
       pubkey: "k",
       paired_at_ms: 1_700_000_000_000,
       app_version: "0.0.1",
+      account_id: "local_acct_a",
     })
     await flushMicrotasks()
 
@@ -125,15 +195,50 @@ describe("installCompanionEventBridge", () => {
       pubkey: "k",
       paired_at_ms: 1_700_000_000_000,
       app_version: "0.1.0",
+      account_id: "local_acct_a",
     })
     await flushMicrotasks()
 
-    seenHandler({ device_id: "dev-C", seen_at_ms: 1_700_000_500_000 })
+    seenHandler({
+      device_id: "dev-C",
+      seen_at_ms: 1_700_000_500_000,
+      account_id: "local_acct_a",
+    })
     await flushMicrotasks()
 
     const rows = await listPairedDevices()
     expect(rows[0]?.lastSeenAt).toBe(1_700_000_500_000)
     expect(rows[0]?.pairedAt).toBe(1_700_000_000_000)
+  })
+
+  it("device-seen handler rejects a payload for another local account", async () => {
+    const { handlers } = captureHandlers()
+    installCompanionEventBridge()
+    const pairedHandler = handlers.get("companion://device-paired")!
+    const seenHandler = handlers.get("companion://device-seen")!
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {})
+
+    pairedHandler({
+      device_id: "dev-D",
+      label: "Phone",
+      platform: "android",
+      pubkey: "k",
+      paired_at_ms: 100,
+      app_version: "0.1.0",
+      account_id: "local_acct_a",
+    })
+    await flushMicrotasks()
+
+    seenHandler({
+      device_id: "dev-D",
+      seen_at_ms: 500,
+      account_id: "local_acct_b",
+    })
+    await flushMicrotasks()
+
+    const rows = await listPairedDevices()
+    expect(rows[0]?.lastSeenAt).toBe(100)
+    warnSpy.mockRestore()
   })
 
   it("returns an unsubscribe that detaches both handlers", () => {
@@ -163,6 +268,7 @@ describe("installCompanionEventBridge", () => {
         pubkey: "k",
         paired_at_ms: 1,
         app_version: "0.1.0",
+        account_id: "local_acct_a",
       })
     ).not.toThrow()
     await flushMicrotasks()

@@ -7,7 +7,7 @@
 
 import { useEffect, useState, useCallback } from "react"
 import { useTranslations } from "next-intl"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { cn } from "@/lib/utils"
 import { useA2UI } from "@/hooks/a2ui"
 import { A2UIInlineSurface } from "@/components/a2ui"

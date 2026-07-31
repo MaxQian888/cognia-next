@@ -15,16 +15,46 @@
  */
 
 import { createAnthropic } from "@ai-sdk/anthropic"
+import { createAzure } from "@ai-sdk/azure"
+import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock"
 import { createCohere } from "@ai-sdk/cohere"
 import { createGoogleGenerativeAI } from "@ai-sdk/google"
 import { createMistral } from "@ai-sdk/mistral"
 import { createOpenAI } from "@ai-sdk/openai"
+import { createAlibaba } from "@ai-sdk/alibaba"
+import { createXai } from "@ai-sdk/xai"
+import { createTogetherAI } from "@ai-sdk/togetherai"
+import { createFireworks } from "@ai-sdk/fireworks"
+import { createDeepInfra } from "@ai-sdk/deepinfra"
+import type { LanguageModelV3 } from "@ai-sdk/provider"
 
 import {
   LOCAL_PROVIDER_URLS,
   getOpenAICompatibleURL,
   type LocalProviderName,
-} from "@/types/provider/local-provider"
+} from "@cognia/provider-types/local-provider"
+import {
+  getBuiltInProviderCatalogEntry,
+  getBuiltInProviderDefaultBaseURL,
+  getBuiltInProviderDefaultModel,
+} from "@cognia/provider-types/built-in-provider-catalog"
+import type {
+  ApiFlavor,
+  ApiProtocol,
+  BedrockConnectionSettings,
+  ResolverProtocol,
+} from "@cognia/provider-types"
+import { validateBedrockConnectionSettings } from "@cognia/provider-types"
+import { createBedrockSidecarLanguageModel } from "@/lib/claude/feature-call"
+import { protectRawAnalysis } from "@/lib/ai/raw-analysis"
+// Single source of truth for provider→protocol (shared with the sidecar; the
+// sidecar can't import `lib/`, so the file lives under `sidecar/` and TS imports
+// it — see sidecar/dispatch/protocol-adapters/provider-protocol.mjs).
+import {
+  resolveProviderProtocol,
+  normalizeProtocol,
+  decideOpenAiEndpointFlavor,
+} from "../../sidecar/dispatch/protocol-adapters/provider-protocol.mjs"
 
 // =============================================================================
 // Types
@@ -39,6 +69,16 @@ export interface ProviderSettingsEntry {
   enabled?: boolean
   apiKey?: string
   baseURL?: string
+  bedrock?: BedrockConnectionSettings
+  /** OpenAI endpoint family override (responses/chat/auto); omitted = auto. */
+  apiFlavor?: ApiFlavor
+  /**
+   * Wire protocol override for built-in providers other than `"anthropic"`
+   * (which always dispatches through the native Claude Agent SDK subprocess
+   * regardless of this field). Undefined = use the catalog's fixed protocol
+   * for this provider id.
+   */
+  apiProtocol?: ApiProtocol
   defaultModel?: string
   /** Free-form per-provider config consumed by the AI SDK constructors. */
   options?: Record<string, unknown>
@@ -48,10 +88,26 @@ export interface ProviderSettingsEntry {
  * Custom (user-defined) provider, e.g., a self-hosted OpenAI-compatible
  * server. Stored in `AppSettings.customProviders`.
  */
+/**
+ * Wire protocol the resolver hands downstream. One of the five AI SDK
+ * families, or a plugin-contributed protocol-adapter id
+ * (`${pluginId}:${id}`) — the sidecar resolves those against the
+ * declarative adapter spec; renderer-side feature clients fall back to the
+ * openai-compatible client for unknown ids. `(string & {})` keeps literal
+ * autocompletion.
+ */
+// Single definition lives in `@cognia/provider-types` (imported at the top);
+// re-exported here so existing importers of this module keep working.
+export type { ResolverProtocol }
+
 export interface CustomProviderDefinition {
   id: string
   name: string
-  protocol?: "openai" | "anthropic" | "google" | "mistral" | "cohere"
+  /** `false` = the user disabled this provider; undefined counts as enabled. */
+  enabled?: boolean
+  protocol?: ResolverProtocol
+  /** OpenAI endpoint family override (responses/chat/auto); omitted = auto. */
+  apiFlavor?: ApiFlavor
   baseURL?: string
   apiKey?: string
   defaultModel?: string
@@ -66,15 +122,18 @@ export interface ProviderSettingsSnapshot {
 
 /** Convert a rich custom-provider row to the resolver-facing shape. */
 function richToDefinition(rich: RichCustomProviderEntry): CustomProviderDefinition {
-  // `apiProtocol` uses 'gemini' but the resolver wants 'google'.
+  // `apiProtocol` uses the renderer name 'gemini'; the resolver wants 'google'.
+  // normalizeProtocol is the single gemini→google bridge (provider-protocol.mjs).
   let protocol: CustomProviderDefinition["protocol"] | undefined = rich.protocol
   if (!protocol && rich.apiProtocol) {
-    protocol = rich.apiProtocol === "gemini" ? "google" : rich.apiProtocol
+    protocol = normalizeProtocol(rich.apiProtocol) as CustomProviderDefinition["protocol"]
   }
   return {
     id: rich.id,
     name: (rich as { name?: string }).name ?? rich.id,
+    enabled: rich.enabled,
     protocol,
+    apiFlavor: rich.apiFlavor,
     baseURL: rich.baseURL,
     apiKey: rich.apiKey,
     defaultModel: rich.defaultModel,
@@ -90,9 +149,13 @@ function richToDefinition(rich: RichCustomProviderEntry): CustomProviderDefiniti
  */
 export interface RichCustomProviderEntry {
   id: string
+  /** `false` = disabled in Settings; undefined counts as enabled. */
+  enabled?: boolean
   /** Either form of the protocol field — converted in `resolveOne`. */
-  protocol?: "openai" | "anthropic" | "google" | "mistral" | "cohere"
-  apiProtocol?: "openai" | "anthropic" | "gemini"
+  protocol?: ResolverProtocol
+  apiProtocol?: "openai" | "anthropic" | "gemini" | (string & {})
+  /** OpenAI endpoint family override (responses/chat/auto). */
+  apiFlavor?: ApiFlavor
   baseURL?: string
   apiKey?: string
   defaultModel?: string
@@ -135,9 +198,16 @@ export type ResolutionFailureNextAction =
 export interface ResolvedProvider {
   kind: "resolved"
   providerId: string
-  protocol: "openai" | "anthropic" | "google" | "mistral" | "cohere"
+  protocol: ResolverProtocol
+  /**
+   * OpenAI endpoint family override (responses/chat/auto). Forwarded to the
+   * sidecar via `providerCredentials.apiFlavor`; consumed by
+   * `decideOpenAiEndpointFlavor`. Omitted = "auto".
+   */
+  apiFlavor?: ApiFlavor
   apiKey: string | undefined
   baseURL: string | undefined
+  bedrock?: BedrockConnectionSettings
   model: string | undefined
   isCustomProvider: boolean
   useProxy: boolean
@@ -170,11 +240,7 @@ export interface UnresolvedProvider {
   supportedProviderIds?: string[]
   /** Machine-readable failure code, e.g., `"missing_credential"`. */
   code?:
-    | "missing_credential"
-    | "provider_disabled"
-    | "no_candidates"
-    | "policy_blocked"
-    | (string & {})
+    "missing_credential" | "provider_disabled" | "no_candidates" | "policy_blocked" | (string & {})
 }
 
 export type ProviderResolution = ResolvedProvider | UnresolvedProvider
@@ -183,9 +249,23 @@ export interface FeatureClientConfig {
   providerId: string
   apiKey: string | undefined
   baseURL: string | undefined
+  bedrock?: BedrockConnectionSettings
   protocol: ResolvedProvider["protocol"]
+  apiFlavor?: ApiFlavor
   isCustomProvider: boolean
   useProxy: boolean
+  /**
+   * Optional custom `fetch` threaded into the AI SDK provider client. The
+   * standalone (BYOK) mobile chat path injects a streaming-capable native
+   * WebView fetch here so token streaming survives Capacitor (whose patched
+   * global `fetch` buffers the whole response — see lib/runtime/streaming-fetch).
+   */
+  fetch?: typeof globalThis.fetch
+  /**
+   * Optional extra request headers (e.g. the Anthropic browser-direct opt-in
+   * `anthropic-dangerous-direct-browser-access`) merged by the provider client.
+   */
+  headers?: Record<string, string>
 }
 
 // =============================================================================
@@ -206,17 +286,18 @@ export function createProviderSettingsSnapshot(
 // Resolution
 // =============================================================================
 
-const BUILTIN_PROTOCOLS: Record<string, ResolvedProvider["protocol"]> = {
-  openai: "openai",
-  xai: "openai",
-  togetherai: "openai",
-  fireworks: "openai",
-  deepinfra: "openai",
-  groq: "openai",
-  anthropic: "anthropic",
-  google: "google",
-  cohere: "cohere",
-  mistral: "mistral",
+/**
+ * First non-empty string among `vals`. The settings UI persists cleared
+ * fields as `""` (controlled inputs), and a stale `providerSettings` entry
+ * can shadow a custom provider's real values through plain `??` — an empty
+ * base URL that shadows the configured one silently re-routes an
+ * openai-protocol turn to api.openai.com. Treat blank as unset everywhere.
+ */
+function pickNonEmpty(...vals: Array<string | undefined>): string | undefined {
+  for (const v of vals) {
+    if (typeof v === "string" && v.trim().length > 0) return v
+  }
+  return undefined
 }
 
 function resolveOne(
@@ -235,7 +316,11 @@ function resolveOne(
     }
   }
 
-  if (builtin && builtin.enabled === false) {
+  // The enabled toggle for a custom provider lives on the custom row itself;
+  // a same-id `providerSettings` shadow entry (parameter edits, legacy data)
+  // must not override it — and vice versa a disabled custom provider must
+  // actually be skipped (the Settings toggle was previously ignored here).
+  if (custom ? custom.enabled === false : builtin && builtin.enabled === false) {
     return {
       kind: "unresolved",
       reason: `Provider "${providerId}" is disabled.`,
@@ -244,12 +329,29 @@ function resolveOne(
     }
   }
 
-  const protocol: ResolvedProvider["protocol"] =
-    (custom?.protocol as ResolvedProvider["protocol"]) ?? BUILTIN_PROTOCOLS[providerId] ?? "openai"
+  // When a custom definition exists it is the source of truth for its own id
+  // (the Settings UI writes custom credentials to `customProviders`); the
+  // `providerSettings` entry is only a fallback shadow. Built-ins keep the
+  // `providerSettings`-first order. Blank strings never win (see pickNonEmpty).
+  const protocol: ResolvedProvider["protocol"] = normalizeProtocol(
+    (custom ? (custom.protocol ?? builtin?.apiProtocol) : builtin?.apiProtocol) ??
+      resolveProviderProtocol(providerId) ??
+      "openai"
+  ) as ResolvedProvider["protocol"]
 
-  const apiKey = builtin?.apiKey ?? custom?.apiKey
-  let baseURL = builtin?.baseURL ?? custom?.baseURL
-  const model = builtin?.defaultModel ?? custom?.defaultModel
+  const apiKey = custom
+    ? pickNonEmpty(custom.apiKey, builtin?.apiKey)
+    : pickNonEmpty(builtin?.apiKey)
+  let baseURL = custom
+    ? pickNonEmpty(custom.baseURL, builtin?.baseURL)
+    : pickNonEmpty(builtin?.baseURL)
+  const model = custom
+    ? pickNonEmpty(custom.defaultModel, builtin?.defaultModel)
+    : pickNonEmpty(builtin?.defaultModel)
+  // Explicit Responses/Chat override (built-in or custom), forwarded to the
+  // sidecar so the user can opt a gateway / Azure / custom URL into /responses.
+  const apiFlavor = custom ? (custom.apiFlavor ?? builtin?.apiFlavor) : builtin?.apiFlavor
+  const bedrock = !custom ? builtin?.bedrock : undefined
 
   // Local inference engines (Ollama, LM Studio, llama.cpp, vLLM, …) listen on
   // a well-known localhost port and need no API key. When the user enabled a
@@ -260,7 +362,21 @@ function resolveOne(
     baseURL = getOpenAICompatibleURL(LOCAL_PROVIDER_URLS[providerId as LocalProviderName])
   }
 
-  if (!apiKey && !baseURL) {
+  // Built-in cloud aggregators (OpenRouter, DeepSeek, Groq, xAI, TogetherAI, …)
+  // map to the "openai" protocol but live on their OWN host. Their catalog entry
+  // has `baseURLRequired: false`, so `buildDefaultBuiltInProviderSettings` never
+  // stores a base URL — the user only pastes a key. Without a fallback the
+  // openai client silently defaults to api.openai.com, so e.g. an OpenRouter key
+  // (sk-or-…) gets sent to OpenAI and rejected. Fall back to the catalog default
+  // base URL so the request reaches the provider the user actually selected.
+  if (!baseURL && !custom) {
+    baseURL = getBuiltInProviderDefaultBaseURL(providerId)
+  }
+
+  const validBedrockCredentials =
+    protocol === "bedrock" && bedrock ? validateBedrockConnectionSettings(bedrock).valid : false
+
+  if (!apiKey && !baseURL && !validBedrockCredentials) {
     return {
       kind: "unresolved",
       reason: `Provider "${providerId}" is missing both an API key and a base URL.`,
@@ -273,8 +389,10 @@ function resolveOne(
     kind: "resolved",
     providerId,
     protocol,
+    apiFlavor,
     apiKey,
     baseURL,
+    bedrock,
     model,
     isCustomProvider: Boolean(custom),
     useProxy: false,
@@ -298,6 +416,10 @@ export function resolveFeatureProvider(
     case "any":
       if (snapshot.defaultProvider) candidates.push(snapshot.defaultProvider)
       candidates.push(...Object.keys(snapshot.providers))
+      // Custom providers are configured exclusively in `customProviders` —
+      // without this they could never be picked implicitly, so a user whose
+      // ONLY configured provider is a custom gateway resolved to nothing.
+      candidates.push(...snapshot.customProviders.map((p) => p.id))
       break
   }
 
@@ -305,6 +427,7 @@ export function resolveFeatureProvider(
     candidates.push(...args.fallbackProviderOrder)
   } else if (args.fallbackMode === "first-eligible") {
     candidates.push(...Object.keys(snapshot.providers))
+    candidates.push(...snapshot.customProviders.map((p) => p.id))
   }
 
   // De-dupe while preserving order.
@@ -321,6 +444,12 @@ export function resolveFeatureProvider(
 
   for (const providerId of ordered) {
     attempted.push(providerId)
+    const catalogEntry = getBuiltInProviderCatalogEntry(providerId)
+    if (args.routeProfile === "general-text" && catalogEntry?.supportsChat === false) {
+      lastReason = `Provider "${providerId}" does not support chat completions.`
+      lastNextAction = "open_provider_settings"
+      continue
+    }
     const resolution = resolveOne(providerId, snapshot)
     if (resolution.kind === "resolved") return resolution
     lastReason = resolution.reason
@@ -340,10 +469,33 @@ export function resolveFeatureProvider(
 // =============================================================================
 
 export function createFeatureProviderClient(config: FeatureClientConfig) {
-  const { protocol, apiKey, baseURL } = config
-  const settings: { apiKey?: string; baseURL?: string } = {}
+  const { providerId, protocol, apiKey, baseURL, bedrock, fetch: fetchImpl, headers } = config
+  const settings: {
+    apiKey?: string
+    baseURL?: string
+    fetch?: typeof globalThis.fetch
+    headers?: Record<string, string>
+  } = {}
   if (apiKey) settings.apiKey = apiKey
   if (baseURL) settings.baseURL = baseURL
+  // `fetch` + `headers` are standard AI SDK `ProviderSettings` fields accepted
+  // by every create*() factory below; they default to undefined (global fetch)
+  // so non-standalone callers are unaffected.
+  if (fetchImpl) settings.fetch = fetchImpl
+  if (headers) settings.headers = headers
+
+  switch (providerId) {
+    case "qwen":
+      return createAlibaba(settings)
+    case "xai":
+      return createXai(settings)
+    case "togetherai":
+      return createTogetherAI(settings)
+    case "fireworks":
+      return createFireworks(settings)
+    case "deepinfra":
+      return createDeepInfra(settings)
+  }
 
   switch (protocol) {
     case "anthropic":
@@ -354,6 +506,28 @@ export function createFeatureProviderClient(config: FeatureClientConfig) {
       return createCohere(settings)
     case "mistral":
       return createMistral(settings)
+    case "azure":
+      return createAzure(settings)
+    case "bedrock":
+      if (bedrock?.authMode === "default-chain") {
+        throw new Error("Bedrock default-chain authentication requires the sidecar feature proxy.")
+      }
+      return createAmazonBedrock({
+        ...(bedrock?.authMode === "api-key" || (!bedrock && apiKey)
+          ? { apiKey: bedrock?.apiKey ?? apiKey }
+          : {}),
+        ...(bedrock?.authMode === "iam"
+          ? {
+              accessKeyId: bedrock.accessKeyId,
+              secretAccessKey: bedrock.secretAccessKey,
+              ...(bedrock.sessionToken ? { sessionToken: bedrock.sessionToken } : {}),
+            }
+          : {}),
+        ...(bedrock?.region ? { region: bedrock.region } : {}),
+        ...(baseURL ? { baseURL } : bedrock?.baseURL ? { baseURL: bedrock.baseURL } : {}),
+        ...(fetchImpl ? { fetch: fetchImpl } : {}),
+        ...(headers ? { headers } : {}),
+      })
     case "openai":
     default:
       return createOpenAI(settings)
@@ -363,43 +537,94 @@ export function createFeatureProviderClient(config: FeatureClientConfig) {
 /**
  * Build a model handle ready for `streamText` / `generateText`. The
  * resolution must come back from `resolveFeatureProvider` — pass it
- * straight in.
+ * straight in. `transport` optionally injects a custom `fetch` + extra
+ * `headers` (used by the standalone BYOK chat path for streaming + the
+ * browser-direct CORS opt-in); omit it for the default global-fetch behavior.
  */
-export function createFeatureProviderModel(resolved: ResolvedProvider) {
+export function createFeatureProviderModel(
+  resolved: ResolvedProvider,
+  transport?: { fetch?: typeof globalThis.fetch; headers?: Record<string, string> }
+) {
+  if (resolved.protocol === "bedrock" && resolved.bedrock?.authMode === "default-chain") {
+    const bedrock = resolved.bedrock
+    return protectRawAnalysis(
+      createBedrockSidecarLanguageModel({
+        modelId: resolved.model ?? catalogDefaultModel("bedrock", resolved.providerId),
+        providerId: resolved.providerId,
+        credentials: {
+          protocol: "bedrock",
+          bedrockAuthMode: "default-chain",
+          region: bedrock.region,
+          baseURL: resolved.baseURL ?? bedrock.baseURL,
+          profile: bedrock.profile,
+          roleArn: bedrock.roleArn,
+          roleSessionName: bedrock.roleSessionName,
+        },
+      }),
+      resolved.model ?? catalogDefaultModel("bedrock", resolved.providerId)
+    )
+  }
   const client = createFeatureProviderClient({
     providerId: resolved.providerId,
     apiKey: resolved.apiKey,
     baseURL: resolved.baseURL,
+    bedrock: resolved.bedrock,
     protocol: resolved.protocol,
+    apiFlavor: resolved.apiFlavor,
     isCustomProvider: resolved.isCustomProvider,
     useProxy: resolved.useProxy,
+    fetch: transport?.fetch,
+    headers: transport?.headers,
   })
 
-  const modelId = resolved.model ?? defaultModelForProtocol(resolved.protocol)
+  const modelId = resolved.model ?? catalogDefaultModel(resolved.protocol, resolved.providerId)
   // Cast through `any` so we can dispatch on either the function-call
   // form (`client(modelId)`) or the namespace form (`client.chat(modelId)`)
   // without TS narrowing the union to `never` after the first branch.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handle = client as any
-  if (typeof handle === "function") return handle(modelId)
-  if (typeof handle?.chat === "function") return handle.chat(modelId)
+  if (resolved.protocol === "openai" || resolved.protocol === "azure") {
+    const flavor = decideOpenAiEndpointFlavor({
+      apiFlavor: resolved.apiFlavor,
+      baseURL: resolved.baseURL,
+      providerId: resolved.providerId,
+    })
+    if (flavor === "responses" && typeof handle?.responses === "function") {
+      return protectRawAnalysis(handle.responses(modelId) as LanguageModelV3, modelId)
+    }
+    if (typeof handle?.chat === "function") {
+      return protectRawAnalysis(handle.chat(modelId) as LanguageModelV3, modelId)
+    }
+  }
+  if (typeof handle === "function") {
+    return protectRawAnalysis(handle(modelId) as LanguageModelV3, modelId)
+  }
+  if (typeof handle?.chat === "function") {
+    return protectRawAnalysis(handle.chat(modelId) as LanguageModelV3, modelId)
+  }
   throw new Error(
     `createFeatureProviderModel: client for ${resolved.providerId} has no model entrypoint`
   )
 }
 
-function defaultModelForProtocol(protocol: ResolvedProvider["protocol"]): string {
-  switch (protocol) {
-    case "anthropic":
-      return "claude-sonnet-4-6"
-    case "google":
-      return "gemini-1.5-flash"
-    case "cohere":
-      return "command-r"
-    case "mistral":
-      return "mistral-small-latest"
-    case "openai":
-    default:
-      return "gpt-4o-mini"
+const FALLBACK_PROVIDER_BY_PROTOCOL: Partial<Record<ResolvedProvider["protocol"], string>> = {
+  anthropic: "anthropic",
+  google: "google",
+  cohere: "cohere",
+  mistral: "mistral",
+  azure: "azure",
+  bedrock: "bedrock",
+  openai: "openai",
+}
+
+function catalogDefaultModel(protocol: ResolvedProvider["protocol"], providerId: string): string {
+  const model =
+    getBuiltInProviderDefaultModel(providerId) ??
+    getBuiltInProviderDefaultModel(FALLBACK_PROVIDER_BY_PROTOCOL[protocol] ?? "")
+  if (!model) {
+    throw new Error(
+      `createFeatureProviderModel: no catalog default model for ${providerId} (${protocol})`
+    )
   }
+  return model
 }

@@ -1,6 +1,6 @@
 //! Axum server bootstrap for the CLI bridge.
 //!
-//! Binds to `127.0.0.1:0` (ephemeral port), wires the four routes behind
+//! Binds to `127.0.0.1:0` (ephemeral port), wires the twelve routes behind
 //! the loopback + dev-token middleware, and returns
 //! `(bound_port, shutdown_tx)` so the caller can shut us down later.
 
@@ -53,6 +53,12 @@ pub async fn spawn(state: SharedState) -> Result<(u16, watch::Sender<()>)> {
 }
 
 pub fn build_router(state: SharedState) -> Router {
+    // NOTE: the `/api/v1/dev/*` prefix is a stable wire path shared with the
+    // `cognia-agent` CLI (see `cli/src/handoff/client.ts`) — it is NOT a
+    // debug/dev-build gate. This bridge is started unconditionally in release
+    // too (`mod.rs::init`); only the *dev-build binary discovery* is
+    // debug-gated. Do not rename these routes without a coordinated CLI change,
+    // or already-installed CLIs stop reaching the desktop.
     Router::new()
         .route("/api/v1/dev/health", get(handlers::health))
         // ── Read endpoints ──────────────────────────────────────────────
@@ -67,8 +73,32 @@ pub fn build_router(state: SharedState) -> Router {
         )
         // ── Write endpoints ─────────────────────────────────────────────
         .route("/api/v1/dev/plugins/install", post(handlers::install))
+        .route(
+            "/api/v1/dev/plugins/install-directory",
+            post(handlers::install_directory),
+        )
         .route("/api/v1/dev/plugins/uninstall", post(handlers::uninstall))
         .route("/api/v1/dev/plugins/reload", post(handlers::reload))
+        // ── ACP bridge token broker ─────────────────────────────────────
+        // Mints a device-scope companion JWT for the `cognia acp` stdio↔WS
+        // bridge (same loopback + dev-token trust model as plugin install).
+        .route("/api/v1/dev/acp/token", post(handlers::acp_token))
+        // ── Session handoff (standalone agent CLI → desktop) ────────────
+        // The CLI POSTs a session transcript; we emit it on
+        // `cli-bridge:session-handoff` for the renderer to import + open.
+        .route("/api/v1/dev/sessions/handoff", post(handlers::handoff))
+        // ── Renderer-backed routes (twin context / agent teams) ─────────
+        // These round-trip through the WebView via the renderer bridge —
+        // twin retrieval reads Dexie + the vector store, and AgentTeam
+        // definitions live in the renderer's Zustand store, so the Rust
+        // side cannot answer them directly.
+        .route("/api/v1/dev/twin/context", post(handlers::twin_context))
+        .route("/api/v1/dev/teams/list", post(handlers::teams_list))
+        .route("/api/v1/dev/teams/run", post(handlers::teams_run))
+        .route(
+            "/api/v1/dev/teams/run-status",
+            post(handlers::teams_run_status),
+        )
         .layer(from_fn_with_state(state.clone(), auth_middleware))
         .layer(RequestBodyLimitLayer::new(BODY_LIMIT_BYTES))
         .with_state(state)
@@ -131,6 +161,21 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 mod tests {
     use super::*;
 
+    const DOCUMENTED_DEV_ROUTES: [&str; 12] = [
+        "/api/v1/dev/health",
+        "/api/v1/dev/plugins/installed",
+        "/api/v1/dev/plugins/install",
+        "/api/v1/dev/plugins/install-directory",
+        "/api/v1/dev/plugins/uninstall",
+        "/api/v1/dev/plugins/reload",
+        "/api/v1/dev/acp/token",
+        "/api/v1/dev/sessions/handoff",
+        "/api/v1/dev/twin/context",
+        "/api/v1/dev/teams/list",
+        "/api/v1/dev/teams/run",
+        "/api/v1/dev/teams/run-status",
+    ];
+
     #[test]
     fn constant_time_eq_basic() {
         assert!(constant_time_eq(b"abc", b"abc"));
@@ -144,5 +189,25 @@ mod tests {
         // 4 MiB is enough for any plausible plugin manifest + path string
         // but small enough to refuse pathological payloads.
         assert_eq!(BODY_LIMIT_BYTES, 4 * 1024 * 1024);
+    }
+
+    #[test]
+    fn documented_dev_route_catalog_matches_router() {
+        let source = include_str!("server.rs");
+        let router_source = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("router source precedes tests");
+        assert_eq!(
+            router_source.matches(".route(").count(),
+            DOCUMENTED_DEV_ROUTES.len()
+        );
+        for route in DOCUMENTED_DEV_ROUTES {
+            assert_eq!(
+                router_source.matches(&format!("\"{route}\"")).count(),
+                1,
+                "route catalog drifted for {route}"
+            );
+        }
     }
 }

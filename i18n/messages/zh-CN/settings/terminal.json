@@ -1,0 +1,308 @@
+{
+  "autocomplete": {
+    "debounce": {
+      "label": "防抖（毫秒）"
+    },
+    "exe": {
+      "label": "命令名"
+    },
+    "helper": "输入时显示类似 GitHub Copilot 的内联命令建议。Tab 或 → 接受，Esc 取消。接受只会补全当前行，绝不会自动执行命令。",
+    "label": "AI 命令自动补全",
+    "path": {
+      "label": "文件路径"
+    },
+    "persistHistory": {
+      "helper": "在本地保存已执行的命令，重启后建议依然可用。形似密钥的命令行绝不会被保存。",
+      "label": "持久化命令历史"
+    },
+    "popup": {
+      "helper": "按 Ctrl+Space 或再次按 Tab，在光标处打开可用键盘导航的候选列表。",
+      "label": "候选弹窗"
+    },
+    "privacy": "启用 AI 后，当前命令、工作目录与近期历史会发送给你配置的模型以生成建议。形似密钥的内容（API key、令牌、凭据）会被检测并跳过该次请求。插件提供的补全源不受此设置影响。",
+    "source": {
+      "ai": "仅 AI",
+      "both": "历史 + AI",
+      "history": "仅历史",
+      "label": "建议来源"
+    },
+    "spec": {
+      "label": "CLI 参数"
+    }
+  },
+  "bell": {
+    "both": "闪烁并响铃",
+    "helper": "终端如何响应程序发出的 BEL 字符（\\a）— 例如 shell 补全失败或长命令完成时的提示音。",
+    "label": "终端响铃",
+    "none": "关闭",
+    "sound": "声音",
+    "visual": "视觉闪烁"
+  },
+  "boldBrightColors": {
+    "helper": "使用对应颜色的明亮变体渲染 ANSI 粗体文本。",
+    "label": "粗体使用明亮色"
+  },
+  "colorScheme": {
+    "auto": "自动（跟随应用主题）",
+    "darkGroup": "深色方案",
+    "label": "配色方案",
+    "lightGroup": "浅色方案"
+  },
+  "commandActions": {
+    "helper": "让每条命令左侧的状态点可交互：点击即可重跑命令或复制命令与输出，并显示退出码与耗时。",
+    "label": "命令操作"
+  },
+  "confirmOnClose": {
+    "helper": "关闭仍在运行命令的标签页前先询问，避免误关中断正在执行的命令。空闲标签页始终立即关闭。",
+    "label": "关闭运行中终端前确认"
+  },
+  "copyOnSelect": {
+    "helper": "开启后，终端中的任何文本选区都会自动复制到剪贴板。默认关闭，避免误选覆盖剪贴板。",
+    "label": "选中即复制"
+  },
+  "cursor": {
+    "bar": "竖线",
+    "blink": "光标闪烁",
+    "block": "方块",
+    "inactiveBar": "竖线",
+    "inactiveBlock": "方块",
+    "inactiveLabel": "非活动光标",
+    "inactiveNone": "隐藏",
+    "inactiveOutline": "轮廓",
+    "inactiveUnderline": "下划线",
+    "label": "光标样式",
+    "underline": "下划线",
+    "width": "光标宽度",
+    "widthHelper": "光标宽度适用于竖线样式，并限制在 1–10 像素。"
+  },
+  "customGlyphs": {
+    "helper": "使用 xterm 内置的线框与方块字形，使终端界面更清晰。",
+    "label": "自定义终端字形"
+  },
+  "exposeDockToAgents": {
+    "helper": "允许聊天智能体通过合成的 terminal_dock_* MCP 工具驱动你可见的终端标签。智能体与你共用同一个 PTY —— 同一个 shell、同一个 cwd、同一份历史。每个标签按会话需要单独授权。默认关闭。",
+    "label": "向智能体开放终端"
+  },
+  "fontFamily": {
+    "label": "字体",
+    "nerdFontHelper": "oh-my-posh 和 powerlevel10k 提示符的图标需要 Nerd Font。应用已内置 MesloLGS NF，图标开箱即用——点击下方即可选用，或填入你自己安装的 Nerd Font。",
+    "pickerHint": "从本机检测到的等宽字体中选择。",
+    "pickerLabel": "检测到的字体",
+    "reset": "恢复默认字体",
+    "useNerdFont": "使用内置 Nerd Font（MesloLGS NF）"
+  },
+  "fontPreview": {
+    "label": "预览",
+    "missing": "本机未安装「{family}」，终端会回退到字体栈中的下一个字体。",
+    "resolved": "当前以「{family}」{size}px 渲染。"
+  },
+  "fontSize": {
+    "label": "字号"
+  },
+  "fontWeight": {
+    "bold": "粗体",
+    "label": "字重",
+    "normal": "常规"
+  },
+  "fontWeightBold": {
+    "label": "粗体文本字重"
+  },
+  "forceUtf8": {
+    "helper": "将 PowerShell / cmd 的控制台输出锁定为 UTF-8，使 powerline 字形与中文在非 UTF-8 系统代码页（如中文 Windows 的 GBK）下正常显示。除非依赖旧代码页，否则保持开启。",
+    "label": "强制 UTF-8 输出"
+  },
+  "groups": {
+    "agents": "代理与自动化",
+    "ai": "AI 自动补全",
+    "appearance": "外观",
+    "behavior": "行为",
+    "host": "持久终端主机",
+    "productivity": "效率工具",
+    "shell": "Shell 与会话"
+  },
+  "heading": "集成终端",
+  "host": {
+    "diagnostics": {
+      "helper": "仅收集有界的传输生命周期、版本、队列溢出与错误代码诊断；绝不收集终端输入、输出、凭据或完整标识符。",
+      "label": "共享终端诊断"
+    },
+    "maxRemoteSessions": {
+      "helper": "每台已配对设备可远程创建的会话上限。",
+      "label": "每台设备的远程会话数"
+    },
+    "maxSessions": {
+      "helper": "此主机持有的本地与 SSH 实时会话总上限。",
+      "label": "实时会话数"
+    },
+    "operationFailed": "无法保存终端主机设置。",
+    "remoteAccess": {
+      "helper": "允许已单独授权的配对设备通过局域网或广域网连接终端。",
+      "label": "远程终端访问"
+    },
+    "replayPerSession": {
+      "helper": "每个实时会话最多保留的内存回放量（MiB）。",
+      "label": "每个会话的回放（MiB）"
+    },
+    "replayTotal": {
+      "helper": "所有实时会话合计最多占用的内存回放量（MiB）。",
+      "label": "回放内存总量（MiB）"
+    },
+    "startAtLogin": {
+      "helper": "登录系统时启动轻量终端主机，使 Cognia 尚未打开时远程终端仍可连接。",
+      "label": "登录时启动主机"
+    }
+  },
+  "letterSpacing": {
+    "label": "字间距（px）"
+  },
+  "ligatures": {
+    "helper": "渲染编程字体连字（Cascadia Code、JetBrains Mono、Fira Code）。默认关闭；切换会重新加载终端。",
+    "label": "字体连字"
+  },
+  "lineHeight": {
+    "helper": "行高按字号倍数缩放；字间距按像素在字形之间增加横向间隔。二者都会重新适配终端。",
+    "label": "行高"
+  },
+  "minContrast": {
+    "aa": "WCAG AA（4.5）",
+    "aaa": "WCAG AAA（7）",
+    "helper": "在文字与背景之间强制最低对比度以提升可读性。关闭则保留原始 ANSI 配色；AA / AAA 满足 WCAG；最大则强制黑白。",
+    "label": "最低对比度",
+    "max": "最大（21）",
+    "off": "关闭"
+  },
+  "profiles": {
+    "add": "添加配置文件",
+    "argsLabel": "启动参数（每行一个）",
+    "argsPlaceholder": "-NoLogo",
+    "cwdLabel": "工作目录",
+    "cwdPlaceholder": "工作目录（可选）",
+    "empty": "暂无配置文件。",
+    "envLabel": "环境变量（每行 KEY=VALUE）",
+    "envPlaceholder": "NODE_ENV=development",
+    "helper": "命名的 Shell 预设（shell + 工作目录），新建标签菜单可直接启动。可将其中一个设为默认，供普通“+ 新建”按钮使用。",
+    "isDefault": "默认",
+    "nameLabel": "配置文件名称",
+    "namePlaceholder": "配置文件名称",
+    "newName": "新配置文件",
+    "remove": "删除配置文件",
+    "setDefault": "设为默认",
+    "shellLabel": "Shell",
+    "syncError": "无法与终端主机同步终端配置",
+    "title": "启动配置文件"
+  },
+  "projectOverride": {
+    "cwdLabel": "工作目录",
+    "cwdPlaceholder": "/path/to/cwd",
+    "emptyProjects": "暂无项目 — 创建项目后即可在此覆盖。",
+    "helper": "选择项目以覆盖其 shell 或工作目录。留空则回退到全局默认。",
+    "selectProject": "选择一个项目…",
+    "shellLabel": "Shell",
+    "shellPlaceholder": "/usr/local/bin/fish",
+    "title": "按项目覆盖"
+  },
+  "quickFixes": {
+    "helper": "命令失败时在该命令处显示灯泡，提供修复建议：git push --set-upstream、“是否想输入”、创建 PR 链接、释放被占端口、pwsh 未找到命令等。",
+    "label": "快速修复"
+  },
+  "rescaleOverlappingGlyphs": {
+    "helper": "缩放可能覆盖相邻终端单元格的宽字形。",
+    "label": "缩放重叠字形"
+  },
+  "renderer": {
+    "auto": "自动",
+    "canvas": "Canvas",
+    "dom": "DOM",
+    "helper": "自动优先 GPU 加速的 WebGL，失败时回退到 Canvas 再到 DOM。若终端渲染为空白或花屏，可切换到 Canvas 或 DOM。",
+    "label": "渲染器",
+    "webgl": "WebGL"
+  },
+  "runInDockTimeout": {
+    "helper": "聊天中的「Run in dock」与智能体 terminal_dock_write 等候 command_end OSC 633 事件的时间上限。每次调用可单独覆盖，此处是默认值。范围 5–600，默认 60。",
+    "label": "Run-in-dock 超时（秒）"
+  },
+  "sandboxed": {
+    "helper": "在 OS 沙盒（bwrap / sandbox-exec）中启动 dock 终端：写入限制在会话工作目录内、主目录只读、网络保持开启。实验功能，默认关闭，Windows 暂不支持。",
+    "label": "沙盒终端"
+  },
+  "scrollSensitivity": {
+    "helper": "每滚动一格滚轮移动的行数。按住 Alt 滚动速度为 5 倍。",
+    "label": "滚动速度（行）"
+  },
+  "scrollback": {
+    "helper": "xterm 历史缓冲区保留的行数。范围 1000–100000。",
+    "label": "回滚行数"
+  },
+  "smoothScrolling": {
+    "helper": "为滚轮和触控板滚动添加动画，避免在终端行之间跳动。",
+    "label": "平滑滚动"
+  },
+  "shell": {
+    "auto": "自动检测（推荐）",
+    "bash": "bash",
+    "cmd": "命令提示符 (cmd.exe)",
+    "custom": "自定义路径…",
+    "customLabel": "自定义 shell 路径",
+    "helper": "自动检测在 Windows 上选用 pwsh，macOS 上选用 zsh，Linux 上选用 bash。按项目覆盖若已设置，优先采用。cmd.exe 启动时不附带 OSC 633 集成。",
+    "label": "默认 shell",
+    "powershell": "Windows PowerShell (powershell.exe)",
+    "pwsh": "PowerShell 7 (pwsh.exe)",
+    "zsh": "zsh"
+  },
+  "shellIntegration": {
+    "helper": "向 bash / zsh / pwsh 注入 OSC 633 提示符标记，让面板能展示命令状态和 cwd 徽章。若 shell 会解析错误，请关闭。",
+    "label": "启用 shell 集成"
+  },
+  "ssh": {
+    "add": "添加 SSH 主机",
+    "auth": {
+      "password": "密码",
+      "privateKey": "私钥"
+    },
+    "connect": "连接",
+    "connecting": "连接中…",
+    "empty": "尚未保存 SSH 主机。",
+    "fields": {
+      "authMethod": "认证方式",
+      "credentialSaved": "凭据已安全保存",
+      "host": "主机",
+      "hostPlaceholder": "server.example.com",
+      "name": "显示名称",
+      "passphrase": "私钥口令",
+      "passphraseOptional": "私钥口令（可选）",
+      "password": "密码",
+      "port": "端口",
+      "privateKeyPath": "私钥路径",
+      "privateKeyPathPlaceholder": "~/.ssh/id_ed25519",
+      "username": "用户名"
+    },
+    "helper": "凭据保存在系统密钥环中。首次连接会信任并保存主机指纹；后续若指纹发生变化将拒绝连接。",
+    "newName": "新 SSH 主机",
+    "remove": "移除 SSH 主机",
+    "title": "SSH 主机",
+    "toasts": {
+      "connectFailed": "SSH 连接失败",
+      "credentialRequired": "连接前请输入密码。",
+      "learned": "已连接并保存主机指纹",
+      "removeFailed": "无法移除 SSH 主机",
+      "syncFailed": "无法与终端主机同步 SSH 配置",
+      "verified": "已通过主机指纹校验并连接"
+    }
+  },
+  "stickyScroll": {
+    "helper": "查看长输出时，将当前命令的提示符行固定在视口顶部。",
+    "label": "粘性滚动"
+  },
+  "subheading": "底部终端面板的默认 shell、字体和回滚行数。按项目覆盖优先于全局默认。",
+  "unattended": {
+    "askPolicy": {
+      "consent": "在终端面板中询问",
+      "fail": "使该步骤失败",
+      "helper": "适用于安全分类器无法确定的命令（判定为 \"ask\"）。",
+      "label": "当命令需要确认时",
+      "run": "仍然执行"
+    },
+    "helper": "允许工作流的终端步骤在后台无界面执行 shell 命令 — 不占用终端标签页、无需逐条确认。每条命令都会先经过安全分类器筛查；明确危险的命令始终被拦截。",
+    "label": "允许无人值守执行"
+  }
+}

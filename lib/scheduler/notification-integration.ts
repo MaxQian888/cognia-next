@@ -9,7 +9,7 @@ import type { OutboundWebhookEvent, RemoteControlOutboundHeader } from "@/types/
 import { notify } from "@/lib/tauri/notification"
 import { notify as centerNotify } from "@/lib/notifications/runtime"
 import { toast } from "sonner"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { SchedulerError } from "./errors"
 import { formatDuration } from "./format-utils"
 
@@ -26,10 +26,11 @@ export const WEBHOOK_DELIVERY_LIMITS = {
   timeoutMs: 10_000,
 } as const
 
-type TaskEventType = "start" | "progress" | "complete" | "error"
+type TaskEventType = "start" | "progress" | "complete" | "error" | "auto-paused"
 
 function centerLevelFor(eventType: TaskEventType): NotificationLevel {
   if (eventType === "error") return "error"
+  if (eventType === "auto-paused") return "warning"
   if (eventType === "complete") return "success"
   return "info"
 }
@@ -55,13 +56,16 @@ export async function notifyTaskEvent(
 
   const { title, body } = getNotificationContent(task, execution, eventType)
 
-  // Desktop ("desktop" → os) + toast → one Notification Center emit.
+  // Desktop ("desktop" → os) + toast + im → ONE Notification Center emit.
   const wantsToast = channels.includes("toast")
   const wantsDesktop = channels.includes("desktop")
-  if (wantsToast || wantsDesktop) {
+  const wantsIm = channels.includes("im")
+  const imConversationKey = wantsIm ? await resolveImConversationKey(task) : undefined
+  if (wantsToast || wantsDesktop || imConversationKey) {
     const coreChannels: CenterChannel[] = ["center"]
     if (wantsToast) coreChannels.push("toast")
     if (wantsDesktop) coreChannels.push("os")
+    if (imConversationKey) coreChannels.push("im")
     try {
       await centerNotify({
         source: "scheduler",
@@ -71,7 +75,14 @@ export async function notifyTaskEvent(
         channels: coreChannels,
         dedupeKey: `task:${task.id}:${eventType}`,
         groupKey: `task:${task.id}`,
-        sourceRef: { kind: "task", id: task.id },
+        // `im-deliver.ts` resolves its destination from a `"conversation"`
+        // sourceRef and nothing else, so an IM-bound notification has to carry
+        // that instead of the task ref. Emitting two records (one per ref) would
+        // double every entry in the feed, so the conversation wins and
+        // `groupKey` keeps the task grouping intact either way.
+        sourceRef: imConversationKey
+          ? { kind: "conversation", id: imConversationKey }
+          : { kind: "task", id: task.id },
       })
     } catch (error) {
       log.error("Failed to dispatch scheduler notification to the center:", error)
@@ -95,6 +106,56 @@ export async function notifyTaskEvent(
     } catch (error) {
       log.error("Failed to send webhook notification:", error)
     }
+  }
+}
+
+/**
+ * Injected seam for the settings read behind the IM fallback. Tests swap it so
+ * they do not need Dexie; production resolves the real `getSettings`.
+ */
+let injectedSettingsReader: (() => Promise<{ fallbackConversationKey?: string }>) | null = null
+
+/** Test hook — override the scheduler-notification settings read. */
+export function __setSchedulerNotificationSettingsForTesting(
+  read: (() => Promise<{ fallbackConversationKey?: string }>) | null
+): void {
+  injectedSettingsReader = read
+}
+
+/**
+ * Resolve where the `im` channel should deliver — task-level target first, then
+ * the global ops channel (decision: two layers).
+ *
+ * Returns undefined when neither layer yields a conversation, which drops just
+ * the IM channel: the durable center record is still written by the caller, so
+ * the event is never lost, it simply has nowhere to be pushed.
+ *
+ * Deliberately does NOT verify the conversation still has a bound session —
+ * `im-deliver.ts` already audits `delivery_target_missing` / `opt_in_off` with
+ * the adapter context it alone has. Re-checking here would duplicate that logic
+ * and lose the audit trail.
+ */
+async function resolveImConversationKey(task: ScheduledTask): Promise<string | undefined> {
+  const taskTarget = task.notification.imTarget?.conversationKey?.trim()
+  if (taskTarget) return taskTarget
+  return resolveFallbackConversationKey()
+}
+
+/** Layer 2 alone — the global ops channel. Shared with the channel test. */
+async function resolveFallbackConversationKey(): Promise<string | undefined> {
+  try {
+    if (injectedSettingsReader) {
+      return (await injectedSettingsReader()).fallbackConversationKey?.trim() || undefined
+    }
+    // Lazy import: the settings module pulls in the Dexie graph, which the
+    // scheduler's pure-node test suites must not pay for.
+    const { getSettings } = await import("@/lib/db/settings")
+    const settings = await getSettings()
+    return settings?.schedulerNotifications?.fallbackConversationKey?.trim() || undefined
+  } catch (error) {
+    // A settings read failure must never break the other channels.
+    log.error("Failed to resolve the scheduler IM fallback conversation:", error)
+    return undefined
   }
 }
 
@@ -138,6 +199,13 @@ function getNotificationContent(
         icon: "❌",
       }
 
+    case "auto-paused":
+      return {
+        title: `Task Auto-Paused: ${task.name}`,
+        body: `The scheduled task "${task.name}" was paused after ${task.config.pauseAfterConsecutiveFailures ?? "several"} consecutive failures. Resume it from the scheduler once the underlying issue is fixed.`,
+        icon: "⏸️",
+      }
+
     default:
       return {
         title: `Task Event: ${task.name}`,
@@ -170,6 +238,9 @@ function sendToastNotification(title: string, body: string, eventType: TaskEvent
       break
     case "error":
       toast.error(title, { description: body })
+      break
+    case "auto-paused":
+      toast.warning(title, { description: body })
       break
     case "start":
     case "progress":
@@ -229,6 +300,7 @@ async function sendWebhookNotification(
     },
     event,
     signingSecret: cfg.signingSecret,
+    limits: cfg.delivery,
   })
 
   // Also fan the same event out to any standalone egress endpoints.
@@ -259,10 +331,40 @@ async function sendWebhookNotification(
  */
 export async function testNotificationChannel(
   channel: NotificationChannel,
-  webhookUrl?: string
+  webhookUrl?: string,
+  imConversationKey?: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
     switch (channel) {
+      case "im": {
+        // Resolve the same two layers a real delivery uses, so the test fails
+        // for exactly the reasons a real notification would.
+        const conversationKey =
+          imConversationKey?.trim() || (await resolveFallbackConversationKey())
+        if (!conversationKey) {
+          return {
+            success: false,
+            error:
+              "No IM conversation is configured for this task, and no global ops channel is set.",
+          }
+        }
+        const { notifyConversationOverIM } = await import("@/lib/notifications/conversation-notify")
+        await notifyConversationOverIM({
+          conversationKey,
+          source: "scheduler",
+          title: "Notification Test",
+          body: "This is a test notification from the scheduler.",
+          dedupeKey: `scheduler-im-test:${conversationKey}`,
+        })
+        // Honest wording: the push is opt-in and asynchronous (it goes through
+        // the durable outbound queue), so a queued test is NOT proof of arrival.
+        // `proactivePush` being off on the conversation is audited downstream as
+        // `notify.im_skipped`, not reported here.
+        return {
+          success: true,
+          error: undefined,
+        }
+      }
       case "desktop":
         await sendDesktopNotification(
           "Notification Test",

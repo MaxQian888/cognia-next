@@ -1,4 +1,4 @@
-import type { Team, TeamMember, TeamOrchestration } from "@/lib/claude/types"
+import type { Team, TeamMember, TeamOrchestration } from "@cognia/agent-config-types"
 import { getDb } from "./schema"
 
 function newId() {

@@ -10,7 +10,7 @@
  */
 
 import "fake-indexeddb/auto"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 // ── Module mocks ──────────────────────────────────────────────────────────────
@@ -31,7 +31,7 @@ jest.mock("@/lib/tauri/opener", () => ({
   revealInExplorer: jest.fn().mockResolvedValue(undefined),
 }))
 
-jest.mock("@/lib/vector/readiness", () => ({
+jest.mock("@cognia/vector/readiness", () => ({
   verifyVectorBackendReadiness: jest.fn(),
 }))
 
@@ -150,12 +150,16 @@ jest.mock("dexie-react-hooks", () => ({
 
 import { isTauri } from "@/lib/utils"
 import { usePlatform } from "@/hooks/use-platform"
-import { verifyVectorBackendReadiness } from "@/lib/vector/readiness"
+import { verifyVectorBackendReadiness } from "@cognia/vector/readiness"
 import { invoke } from "@tauri-apps/api/core"
 import { toast } from "sonner"
 import { saveTwinRuntimeSettings, observeTwinRuntimeSettings } from "@/lib/db/twin-runtime-settings"
 import { DEFAULT_TWIN_RUNTIME_SETTINGS } from "@/types/twin"
 import { TwinSettingsTab } from "./twin-settings-tab"
+import {
+  registerMockExtension,
+  clearAllMockExtensions,
+} from "@/components/plugins/test-utils/register-mock-extension"
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -181,6 +185,10 @@ beforeEach(() => {
   jest.clearAllMocks()
   // Default: not running under Tauri
   mockedIsTauri.mockReturnValue(false)
+})
+
+afterEach(() => {
+  clearAllMockExtensions()
 })
 
 // ── Test suite ────────────────────────────────────────────────────────────────
@@ -249,6 +257,60 @@ describe("TwinSettingsTab — native vector backend", () => {
     await waitFor(() => {
       expect(mockedSave).toHaveBeenCalledWith(
         expect.objectContaining({ reranker: expect.objectContaining({ enabled: true }) })
+      )
+    })
+  })
+
+  it("enables LLM query expansion and persists it on save", async () => {
+    mockedUsePlatform.mockReturnValue("web")
+    const user = userEvent.setup()
+    renderTab()
+
+    const toggle = screen.getByLabelText(/llm query expansion/i)
+    await user.click(toggle)
+    await user.click(screen.getByRole("button", { name: /save runtime settings/i }))
+
+    await waitFor(() => {
+      expect(mockedSave).toHaveBeenCalledWith(
+        expect.objectContaining({ queryExpansion: expect.objectContaining({ enabled: true }) })
+      )
+    })
+  })
+
+  // D1 privacy: extraNameHints textarea parses comma/newline input and saves.
+  it("persists extraNameHints parsed from the always-redact names textarea", async () => {
+    mockedUsePlatform.mockReturnValue("web")
+    const user = userEvent.setup()
+    renderTab()
+
+    const textarea = screen.getByTestId("twin-settings-extra-name-hints")
+    await user.type(textarea, "Alice, 张伟")
+    await user.click(screen.getByRole("button", { name: /save runtime settings/i }))
+
+    await waitFor(() => {
+      expect(mockedSave).toHaveBeenCalledWith(
+        expect.objectContaining({ extraNameHints: ["Alice", "张伟"] })
+      )
+    })
+  })
+
+  // Phase 4a: the reranker model selector persists the LLM-backed choice
+  it("lets the user pick the LLM reranker model and persists it", async () => {
+    mockedUsePlatform.mockReturnValue("web")
+    const user = userEvent.setup()
+    renderTab()
+
+    // The model selector only appears once reranking is enabled.
+    await user.click(screen.getByLabelText(/rerank retrieved results/i))
+    const modelSelect = (await screen.findByLabelText("Reranker model")) as HTMLSelectElement
+    await user.selectOptions(modelSelect, "llm")
+    await user.click(screen.getByRole("button", { name: /save runtime settings/i }))
+
+    await waitFor(() => {
+      expect(mockedSave).toHaveBeenCalledWith(
+        expect.objectContaining({
+          reranker: expect.objectContaining({ enabled: true, model: "llm" }),
+        })
       )
     })
   })
@@ -353,6 +415,73 @@ describe("TwinSettingsTab — native vector backend", () => {
 
     await waitFor(() => {
       expect(mockedToast.error).toHaveBeenCalledWith(expect.stringContaining("disk full"))
+    })
+  })
+})
+
+// ── Embedding / distill provider support ───────────────────────────────────────
+
+describe("TwinSettingsTab — plugin slot", () => {
+  it("mounts the twin.settings.cards plugin slot at the foot of the column", () => {
+    mockedUsePlatform.mockReturnValue("web")
+    registerMockExtension("twin.settings.cards", () => (
+      <span data-testid="settings-plugin">settings plugin</span>
+    ))
+    renderTab()
+    expect(screen.getByTestId("settings-plugin")).toBeInTheDocument()
+  })
+})
+
+describe("TwinSettingsTab — embedding & distill providers", () => {
+  const embeddingFieldset = () => screen.getByText("Embedding").closest("fieldset") as HTMLElement
+  const distillFieldset = () => screen.getByText("Distill LLM").closest("fieldset") as HTMLElement
+
+  it("exposes the full canonical embedding provider list (local + voyage)", () => {
+    mockedUsePlatform.mockReturnValue("web")
+    renderTab()
+
+    const select = within(embeddingFieldset()).getByLabelText("Provider") as HTMLSelectElement
+    const options = Array.from(select.options).map((o) => o.value)
+    expect(options).toEqual(
+      expect.arrayContaining(["openai", "voyage", "ollama", "lmstudio", "transformersjs"])
+    )
+  })
+
+  it("surfaces a Base URL field and hides the API key for a local provider", async () => {
+    mockedUsePlatform.mockReturnValue("web")
+    const user = userEvent.setup()
+    renderTab()
+
+    // Default provider is openai (cloud): API key shown, no Base URL.
+    expect(within(embeddingFieldset()).queryByText("Base URL")).toBeNull()
+    expect(within(embeddingFieldset()).queryByText("API key")).not.toBeNull()
+
+    const select = within(embeddingFieldset()).getByLabelText("Provider") as HTMLSelectElement
+    await user.selectOptions(select, "ollama")
+
+    // Ollama is keyless + local: Base URL appears, API key disappears.
+    expect(within(embeddingFieldset()).queryByText("Base URL")).not.toBeNull()
+    expect(within(embeddingFieldset()).queryByText("API key")).toBeNull()
+  })
+
+  it("persists the chosen distill LLM provider on save", async () => {
+    mockedUsePlatform.mockReturnValue("web")
+    const user = userEvent.setup()
+    renderTab()
+
+    const distillProvider = within(distillFieldset()).getByLabelText(
+      "Provider"
+    ) as HTMLSelectElement
+    const options = Array.from(distillProvider.options).map((o) => o.value)
+    expect(options).toEqual(["anthropic", "openai", "google", "mistral", "cohere"])
+
+    await user.selectOptions(distillProvider, "openai")
+    await user.click(screen.getByRole("button", { name: /save runtime settings/i }))
+
+    await waitFor(() => {
+      expect(mockedSave).toHaveBeenCalledWith(
+        expect.objectContaining({ llm: expect.objectContaining({ provider: "openai" }) })
+      )
     })
   })
 })

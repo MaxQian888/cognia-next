@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { ApprovalCard } from "./approval-card"
-import type { PendingApproval } from "@/lib/claude/types"
+import type { PendingApproval } from "@cognia/agent-config-types"
 
 const approval: PendingApproval = {
   sessionId: "s1",

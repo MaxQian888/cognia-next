@@ -13,7 +13,7 @@ jest.mock("next-intl", () => ({
 
 // Mock stores
 const mockAddCustomProvider = jest.fn()
-jest.mock("@/stores", () => ({
+jest.mock("@/stores/settings", () => ({
   useSettingsStore: (selector: (state: Record<string, unknown>) => unknown) => {
     const state = {
       addCustomProvider: mockAddCustomProvider,
@@ -26,6 +26,10 @@ jest.mock("@/stores", () => ({
 jest.mock("@/lib/ai/infrastructure/api-test", () => ({
   testCustomProviderConnectionByProtocol: jest.fn().mockResolvedValue({ success: true }),
 }))
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const apiTest = require("@/lib/ai/infrastructure/api-test") as {
+  testCustomProviderConnectionByProtocol: jest.Mock
+}
 
 // Mock UI components
 jest.mock("@/components/ui/button")
@@ -58,6 +62,9 @@ jest.mock("lucide-react", () => ({
   EyeOff: () => <span data-testid="icon-eye-off" />,
   Zap: () => <span data-testid="icon-zap" />,
   Search: () => <span data-testid="icon-search" />,
+  // Consumed by the shared `ConnectionStatusCard` (./provider-config-tab).
+  AlertTriangle: () => <span data-testid="icon-alert-triangle" />,
+  X: () => <span data-testid="icon-x" />,
 }))
 
 describe("QuickAddProviderDialog", () => {
@@ -68,6 +75,7 @@ describe("QuickAddProviderDialog", () => {
 
   beforeEach(() => {
     jest.clearAllMocks()
+    mockAddCustomProvider.mockResolvedValue("custom-provider")
   })
 
   describe("rendering", () => {
@@ -107,9 +115,54 @@ describe("QuickAddProviderDialog", () => {
       expect(screen.getByText("Moonshot AI (月之暗面)")).toBeInTheDocument()
     })
 
+    it("displays a brand asset for a supported provider preset", async () => {
+      const { container } = render(<QuickAddProviderDialog {...defaultProps} />)
+      const qwen = QUICK_ADD_PRESETS.find((preset) => preset.id === "qwen")
+
+      expect(qwen).toBeDefined()
+      const presetButton = screen.getByText(qwen!.name).closest("button")
+      expect(presetButton?.querySelector("img")).toHaveAttribute(
+        "src",
+        "/icons/lobe/qwen-color.svg"
+      )
+
+      await userEvent.click(presetButton!)
+      expect(container.querySelector('img[src="/icons/lobe/qwen-color.svg"]')).toBeInTheDocument()
+    })
+
     it("displays cancel button in footer", () => {
       render(<QuickAddProviderDialog {...defaultProps} />)
       expect(screen.getByText("cancel")).toBeInTheDocument()
+    })
+  })
+
+  describe("custom provider escape hatch", () => {
+    it("does not render the add-custom-provider link when onAddCustom is omitted", () => {
+      render(<QuickAddProviderDialog {...defaultProps} />)
+      expect(screen.queryByText("addCustomProvider")).not.toBeInTheDocument()
+    })
+
+    it("closes the dialog and calls onAddCustom when the link is clicked", async () => {
+      const user = userEvent.setup()
+      const onOpenChange = jest.fn()
+      const onAddCustom = jest.fn()
+      render(
+        <QuickAddProviderDialog
+          {...defaultProps}
+          onOpenChange={onOpenChange}
+          onAddCustom={onAddCustom}
+        />
+      )
+      await user.click(screen.getByText("addCustomProvider"))
+      expect(onOpenChange).toHaveBeenCalledWith(false)
+      expect(onAddCustom).toHaveBeenCalledTimes(1)
+    })
+
+    it("does not show the add-custom-provider link on the API key input view", async () => {
+      const user = userEvent.setup()
+      render(<QuickAddProviderDialog {...defaultProps} onAddCustom={jest.fn()} />)
+      await user.click(screen.getByText("SiliconFlow (硅基流动)"))
+      expect(screen.queryByText("addCustomProvider")).not.toBeInTheDocument()
     })
   })
 
@@ -178,6 +231,39 @@ describe("QuickAddProviderDialog", () => {
         )
       })
     })
+
+    it("keeps the dialog open until the provider has been persisted", async () => {
+      let resolveSave: ((providerId: string) => void) | undefined
+      mockAddCustomProvider.mockImplementationOnce(
+        () => new Promise<string>((resolve) => (resolveSave = resolve))
+      )
+      const onOpenChange = jest.fn()
+      render(<QuickAddProviderDialog open onOpenChange={onOpenChange} />)
+
+      await userEvent.click(screen.getByText("SiliconFlow (硅基流动)"))
+      await userEvent.type(screen.getByLabelText("apiKey"), "siliconflow-key")
+      await userEvent.click(screen.getByText("save"))
+
+      expect(screen.getByText("saving")).toBeDisabled()
+      expect(onOpenChange).not.toHaveBeenCalledWith(false)
+
+      resolveSave?.("custom-provider")
+      await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+    })
+
+    it("preserves the draft and shows a localized error when persistence fails", async () => {
+      mockAddCustomProvider.mockRejectedValueOnce(new Error("database unavailable"))
+      const onOpenChange = jest.fn()
+      render(<QuickAddProviderDialog open onOpenChange={onOpenChange} />)
+
+      await userEvent.click(screen.getByText("SiliconFlow (硅基流动)"))
+      await userEvent.type(screen.getByLabelText("apiKey"), "siliconflow-key")
+      await userEvent.click(screen.getByText("save"))
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("quickAddSaveFailed")
+      expect(screen.getByLabelText("apiKey")).toHaveValue("siliconflow-key")
+      expect(onOpenChange).not.toHaveBeenCalledWith(false)
+    })
   })
 
   describe("QUICK_ADD_PRESETS", () => {
@@ -208,6 +294,68 @@ describe("QuickAddProviderDialog", () => {
       QUICK_ADD_PRESETS.forEach((preset) => {
         expect(preset.models).toContain(preset.defaultModel)
       })
+    })
+  })
+
+  describe("connection test (shared useConnectionTest hook)", () => {
+    it("shows the ConnectionStatusCard success state and forwards latency", async () => {
+      apiTest.testCustomProviderConnectionByProtocol.mockResolvedValueOnce({
+        success: true,
+        message: "Connected successfully.",
+        latency_ms: 88,
+      })
+      render(<QuickAddProviderDialog {...defaultProps} />)
+      await userEvent.click(screen.getByText("SiliconFlow (硅基流动)"))
+      await userEvent.type(screen.getByLabelText("apiKey"), "sk-x")
+      await userEvent.click(screen.getByText("test"))
+
+      expect(await screen.findByText("configTab.connectionSuccess")).toBeInTheDocument()
+      expect(screen.getByText(/88/)).toBeInTheDocument()
+    })
+
+    it("shows the ConnectionStatusCard error state with the failure message", async () => {
+      apiTest.testCustomProviderConnectionByProtocol.mockResolvedValueOnce({
+        success: false,
+        message: "API error: 401",
+      })
+      render(<QuickAddProviderDialog {...defaultProps} />)
+      await userEvent.click(screen.getByText("SiliconFlow (硅基流动)"))
+      await userEvent.type(screen.getByLabelText("apiKey"), "bad-key")
+      await userEvent.click(screen.getByText("test"))
+
+      expect(await screen.findByText("configTab.connectionFailed")).toBeInTheDocument()
+      expect(screen.getByText("API error: 401")).toBeInTheDocument()
+    })
+
+    it("shows the amber 'limited' state instead of collapsing it into success", async () => {
+      apiTest.testCustomProviderConnectionByProtocol.mockResolvedValueOnce({
+        success: true,
+        outcome: "limited",
+        message: "Verified with caveats.",
+      })
+      render(<QuickAddProviderDialog {...defaultProps} />)
+      await userEvent.click(screen.getByText("SiliconFlow (硅基流动)"))
+      await userEvent.type(screen.getByLabelText("apiKey"), "sk-x")
+      await userEvent.click(screen.getByText("test"))
+
+      expect(await screen.findByText("verificationLimited")).toBeInTheDocument()
+      expect(screen.queryByText("configTab.connectionSuccess")).not.toBeInTheDocument()
+    })
+
+    it("clears a stale result when the api key is edited again", async () => {
+      apiTest.testCustomProviderConnectionByProtocol.mockResolvedValueOnce({
+        success: false,
+        message: "API error: 401",
+      })
+      render(<QuickAddProviderDialog {...defaultProps} />)
+      await userEvent.click(screen.getByText("SiliconFlow (硅基流动)"))
+      const apiKeyInput = screen.getByLabelText("apiKey")
+      await userEvent.type(apiKeyInput, "bad-key")
+      await userEvent.click(screen.getByText("test"))
+      expect(await screen.findByText("configTab.connectionFailed")).toBeInTheDocument()
+
+      await userEvent.type(apiKeyInput, "-retry")
+      expect(screen.queryByText("configTab.connectionFailed")).not.toBeInTheDocument()
     })
   })
 })

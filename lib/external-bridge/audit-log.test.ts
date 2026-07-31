@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Coverage for `lib/external-bridge/audit-log.ts` — the policy wrapper that
  * funnels every MCP call through `appendMcpAuditLog`.
@@ -13,7 +14,7 @@ beforeEach(async () => {
   __resetDbForTesting()
   getDb()
   await whenSeeded()
-})
+}, 30_000)
 
 describe("recordCall", () => {
   it("writes a row when the gate allowed the call", async () => {

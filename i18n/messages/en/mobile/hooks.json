@@ -1,0 +1,12 @@
+{
+  "backAria": "Back to Me",
+  "builtin": {
+    "description": "Product-bundled lifecycle hooks merged under your own hooks.",
+    "title": "Built-in hooks"
+  },
+  "defaultOff": "Off by default",
+  "defaultOn": "On by default",
+  "intro": "Review the product's built-in lifecycle hooks. Your own per-event hooks live in .claude/settings.json on the paired desktop.",
+  "manageOnDesktop": "User, project and local hooks are stored in .claude/settings.json on the paired desktop. Add, edit and toggle them there.",
+  "title": "Hooks"
+}

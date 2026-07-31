@@ -10,6 +10,7 @@ jest.mock("next-intl", () => ({
 
 import { TerminalTabStrip } from "./terminal-tab-strip"
 import type { TerminalSessionRow } from "@/stores/terminal/terminal-store"
+import { useSettingsStore } from "@/stores/settings/settings-store"
 
 function row(overrides: Partial<TerminalSessionRow> = {}): TerminalSessionRow {
   return {
@@ -30,6 +31,8 @@ function row(overrides: Partial<TerminalSessionRow> = {}): TerminalSessionRow {
     lastCommands: [],
     historyOpen: false,
     ...overrides,
+    hostId: overrides.hostId ?? null,
+    controllerId: overrides.controllerId ?? null,
   }
 }
 
@@ -102,6 +105,26 @@ describe("TerminalTabStrip", () => {
     fireEvent.contextMenu(screen.getByTestId("terminal-tab"))
     expect(onContextMenu).toHaveBeenCalledTimes(1)
     expect(onContextMenu.mock.calls[0][0]).toEqual(target)
+  })
+
+  it("still renders every tab when motion is reduced (animation collapses to instant)", () => {
+    useSettingsStore.setState({ settings: { motion: { reduce: true, speed: 1 } } as never })
+    const { unmount } = render(
+      <TerminalTabStrip
+        tabs={[row({ id: "a" }), row({ id: "b" })]}
+        activeId="a"
+        onSelect={jest.fn()}
+        onClose={jest.fn()}
+      />
+    )
+    expect(screen.getAllByTestId("terminal-tab").map((t) => t.getAttribute("data-id"))).toEqual([
+      "a",
+      "b",
+    ])
+    // Unmount before restoring the store so the reset doesn't re-render a live
+    // subscriber outside act().
+    unmount()
+    useSettingsStore.setState({ settings: {} as never })
   })
 
   it("honors custom testId override", () => {

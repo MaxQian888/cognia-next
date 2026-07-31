@@ -7,11 +7,87 @@ jest.mock("@/lib/plugin/core/policy-runtime", () => ({
   applyPluginPolicyToRuntime: (...args: unknown[]) => applyPolicyMock(...args),
 }))
 
-import { usePluginStore } from "./plugin-store"
+import { usePluginStore, normalizePersistedPluginStatus } from "./plugin-store"
 import * as barrel from "./"
+import type { PluginStatus } from "@/types/plugin/plugin"
 
 it("barrel re-exports usePluginStore", () => {
   expect(barrel.usePluginStore).toBe(usePluginStore)
+})
+
+describe("normalizePersistedPluginStatus", () => {
+  // Only `installed` / `disabled` are recoverable by the
+  // rehydrate → rediscover → activate path. Persisting any transient or error
+  // status verbatim leaves a built-in plugin permanently stuck after restart
+  // ("cannot be loaded from status: error"). User-disabled intent is preserved;
+  // everything else collapses to `installed`.
+  it("preserves the explicit user-disabled resting state", () => {
+    expect(normalizePersistedPluginStatus("disabled")).toBe("disabled")
+  })
+
+  it("keeps an already-installed plugin installed", () => {
+    expect(normalizePersistedPluginStatus("installed")).toBe("installed")
+  })
+
+  it("collapses the error status to installed so the plugin can recover", () => {
+    expect(normalizePersistedPluginStatus("error")).toBe("installed")
+  })
+
+  it.each<PluginStatus>([
+    "discovered",
+    "loading",
+    "loaded",
+    "enabling",
+    "enabled",
+    "disabling",
+    "suspended",
+    "unloading",
+    "updating",
+  ])("collapses the transient %s status to installed", (status) => {
+    expect(normalizePersistedPluginStatus(status)).toBe("installed")
+  })
+})
+
+describe("persist migration (v1 -> v2)", () => {
+  // Regression: a built-in plugin persisted in `status: "error"` by an older
+  // build could never recover — every restart re-threw
+  // "cannot be loaded from status: error". The v2 migration heals it back to a
+  // loadable resting state on rehydrate.
+  it("heals a non-recoverable persisted status on rehydrate", async () => {
+    window.localStorage.setItem(
+      "cognia-plugins",
+      JSON.stringify({
+        version: 1,
+        state: {
+          plugins: {
+            "cognia-clipboard-tools": {
+              manifest: { id: "cognia-clipboard-tools", name: "Clipboard Tools" },
+              status: "error",
+              source: "builtin",
+              path: "builtin://cognia-clipboard-tools",
+              config: {},
+            },
+            "user-disabled-plugin": {
+              manifest: { id: "user-disabled-plugin", name: "Disabled" },
+              status: "disabled",
+              source: "local",
+              path: "/tmp/disabled",
+              config: {},
+            },
+          },
+        },
+      })
+    )
+
+    await usePluginStore.persist.rehydrate()
+
+    const plugins = usePluginStore.getState().plugins
+    expect(plugins["cognia-clipboard-tools"].status).toBe("installed")
+    // User-disabled intent must be preserved through the migration.
+    expect(plugins["user-disabled-plugin"].status).toBe("disabled")
+
+    window.localStorage.clear()
+  })
 })
 
 describe("usePluginStore", () => {

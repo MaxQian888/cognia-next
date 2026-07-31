@@ -63,6 +63,11 @@ describe("OcrTryItTab", () => {
     )
     await user.click(screen.getByTestId("ocr-try-it-run"))
     expect(await screen.findByTestId("ocr-try-it-confirm")).toBeInTheDocument()
+    // The title interpolates {provider}; a missing value renders a raw ICU
+    // placeholder in tests (and throws FORMATTING_ERROR in production).
+    const title = screen.getByTestId("ocr-try-it-confirm-title")
+    expect(title).toHaveTextContent("mistral-ocr")
+    expect(title.textContent).not.toContain("{provider}")
     expect(mockRun).not.toHaveBeenCalled()
     await user.click(screen.getByTestId("ocr-try-it-confirm-cancel"))
     expect(mockRun).not.toHaveBeenCalled()

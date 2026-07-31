@@ -1,0 +1,10 @@
+{
+  "stdoutHello": {
+    "kind": 12,
+    "flags": 1,
+    "sessionId": "00112233-4455-6677-8899-aabbccddeeff",
+    "sequence": "72623859790382856",
+    "payloadUtf8": "hello",
+    "encodedHex": "434754480c000100112233445566778899aabbccddeeff01020304050607080000000568656c6c6f"
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "back": "Back",
+  "cancel": "Cancel",
+  "cancelledTitle": "Import stopped",
+  "cardBody": "Import past sessions from Claude Code, Codex, or OpenCode.",
+  "cardTitle": "Coding-agent sessions",
+  "close": "Close",
+  "description": "Bring your Claude Code, Codex, and OpenCode command-line histories into Cognia as continuable conversations.",
+  "deselectAll": "Clear selection",
+  "doneBody": "Added {sessions, plural, one {# conversation} other {# conversations}} with {messages, plural, one {# message} other {# messages}}.",
+  "doneTitle": "Import complete",
+  "empty": "No sessions found.",
+  "emptyHint": "Nothing was found on disk. Try choosing session files manually.",
+  "errorTitle": "Import failed",
+  "importSelected": "Import {count} selected",
+  "importing": "Importing…",
+  "liveSync": "Live sync",
+  "liveSyncHint": "Keep watching these agents and import new sessions automatically. A session you continue in Cognia is frozen and never overwritten.",
+  "loadMore": "Show {count} more",
+  "messagesLabel": "{count, plural, one {# message} other {# messages}}",
+  "parsingProgress": "Parsing {done}/{total}…",
+  "pickButton": "Choose files…",
+  "retry": "Try again",
+  "scanButton": "Scan installed agents",
+  "scanning": "Looking for sessions…",
+  "selectAll": "Select all",
+  "someSourcesFailed": "Some sources couldn't be read: {sources}",
+  "sources": {
+    "aider": "Aider",
+    "claude-code": "Claude Code",
+    "codex": "Codex CLI",
+    "continue-dev": "Continue",
+    "gemini-cli": "Gemini CLI",
+    "opencode": "OpenCode"
+  },
+  "title": "Import agent sessions",
+  "unrecognized": "These files weren't recognized as a supported agent session.",
+  "webHint": "Auto-scan and live sync are desktop-only. On iOS and the web, choose exported session files manually.",
+  "writingProgress": "Saving {done}/{total}…",
+  "fidelityReport": {
+    "title": "Conversion fidelity",
+    "rebuilt": "Reconstructed",
+    "rebuiltHint": "This record was rebuilt from trusted artifacts — it is provenance-marked and does not claim to be the original transcript.",
+    "noLosses": "Converted without loss.",
+    "lossCount": "{count, plural, one {# item was not carried over} other {# items were not carried over}}",
+    "lossKinds": {
+      "dropped": "Dropped",
+      "approximated": "Approximated",
+      "summarized": "Summarized"
+    },
+    "fidelity": {
+      "native-exact": "Native (exact)",
+      "structured": "Structured",
+      "contextual": "Contextual",
+      "summary-only": "Summary only",
+      "unsupported": "Unsupported"
+    },
+    "fidelityHint": {
+      "native-exact": "The runtime resumes this session exactly as its own.",
+      "structured": "Text and tool history carry over; runtime-private state does not.",
+      "contextual": "A new session is seeded with a replay of the transcript.",
+      "summary-only": "Only a summary of the conversation carries over.",
+      "unsupported": "This direction is not supported for this source."
+    }
+  }
+}

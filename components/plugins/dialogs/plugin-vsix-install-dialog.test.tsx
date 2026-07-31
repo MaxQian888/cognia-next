@@ -20,7 +20,7 @@ jest.mock("@/lib/native/utils", () => ({
   canUseTauriInvoke: () => canUseTauriInvokeMock(),
 }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { plugin: { error: jest.fn(), warn: jest.fn(), info: jest.fn() } },
 }))
 
@@ -172,5 +172,43 @@ describe("PluginVsixInstallDialog", () => {
     render(<PluginVsixInstallDialog open onOpenChange={jest.fn()} />)
     const dialog = screen.getByRole("dialog")
     expect(dialog.className).toContain("w-[95vw]")
+  })
+
+  it("persists the adapted manifest, never the raw package.json", async () => {
+    // Regression test for the dead install path: the dialog used to store
+    // `result.pkgJson` verbatim, so `loadVscodeDefinition` threw on every
+    // activate ("missing the vscodeExtension.identifier block"), and a hostile
+    // manifest could self-declare a trusted publisher fingerprint.
+    const parsed = fakeParsedVsix()
+    installVsixMock.mockResolvedValueOnce(parsed)
+    installFilePicker()
+    render(<PluginVsixInstallDialog open onOpenChange={jest.fn()} />)
+    fireEvent.click(screen.getByText("choose"))
+    await waitFor(() => screen.getByText("rust-analyzer"))
+    fireEvent.click(screen.getByText("install"))
+
+    await waitFor(() => expect(upsertPluginMock).toHaveBeenCalled())
+    const draft = upsertPluginMock.mock.calls[0][0]
+    expect(draft.manifest).not.toBe(parsed.pkgJson)
+    expect(draft.manifest.vscodeExtension.identifier).toBe("rust-lang.rust-analyzer")
+    expect(draft.manifest.vscodeExtension.publisherKeyFingerprint).toBeUndefined()
+    // The fixture's self-declared `pkgJson.permissions` must not survive.
+    expect(draft.manifest.permissions).not.toContain("shell:spawn")
+  })
+
+  it("reviews inferred permissions rather than the manifest's self-declared ones", async () => {
+    // The review body read `pkgJson.permissions` — a field VS Code manifests
+    // don't have — so this section never rendered and every install looked
+    // permission-free. It now renders the static-analysis result.
+    installVsixMock.mockResolvedValueOnce(fakeParsedVsix())
+    installFilePicker()
+    render(<PluginVsixInstallDialog open onOpenChange={jest.fn()} />)
+    fireEvent.click(screen.getByText("choose"))
+
+    await waitFor(() => screen.getByText("sectionPermissions"))
+    expect(screen.getByText("permissionsInferred")).toBeInTheDocument()
+    // The fixture declares these; they are not inferred from its (empty) bundle.
+    expect(screen.queryByText("shell:spawn")).not.toBeInTheDocument()
+    expect(screen.queryByText("fs:read")).not.toBeInTheDocument()
   })
 })

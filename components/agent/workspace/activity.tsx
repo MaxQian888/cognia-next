@@ -1,10 +1,10 @@
 "use client"
 
 import { useTranslations } from "next-intl"
-import { motion, useReducedMotion } from "motion/react"
-import { ActivityIcon } from "lucide-react"
+import { motion } from "motion/react"
+import { STAGGER_CHILD, STAGGER_CONTAINER, useReducedMotionVariants } from "@/lib/ui/motion"
+import { ActivityIcon, HistoryIcon } from "lucide-react"
 
-import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { StatusBadge } from "@/components/status-badge"
 import { Card } from "@/components/ui/card"
@@ -16,6 +16,8 @@ import type {
   TeamExecutionReport,
 } from "@/types/agent/agent-team"
 import { ConsensusPanel } from "./consensus-panel"
+import { DelegationsPanel } from "./delegations-panel"
+import { TeamRunsList } from "../team/runs-list"
 import {
   ReportKpiCards,
   ReportTaskline,
@@ -77,28 +79,29 @@ export function AgentTeamActivity({
 }: AgentTeamActivityProps) {
   const t = useTranslations("agentTeamsWorkspace.activity")
   const tReport = useTranslations("agentTeamsWorkspace.activity.report")
-  const prefersReducedMotion = useReducedMotion()
+  // Shared list-entrance variants (`@/lib/ui/motion`); the container supplies
+  // the stagger so rows no longer carry a hand-computed per-index delay.
+  const childVariants = useReducedMotionVariants(STAGGER_CHILD)
 
-  if (events.length === 0 && !report) {
-    return (
-      <div className="space-y-4">
-        <Empty data-testid="activity-empty">
-          <EmptyMedia variant="icon">
-            <ActivityIcon />
-          </EmptyMedia>
-          <EmptyHeader>
-            <EmptyTitle>{t("empty")}</EmptyTitle>
-          </EmptyHeader>
-        </Empty>
-        <ConsensusPanel />
-      </div>
-    )
+  // Live teammate-progress rows are surfaced in a dedicated pulsing block,
+  // one per task (latest frame wins — the store already replaces in place).
+  // They are kept OUT of the chronological event list to avoid churn.
+  const liveByTask = new Map<string, AgentTeamEvent>()
+  for (const e of events) {
+    if (e.type !== "progress_update" || !e.taskId) continue
+    const prev = liveByTask.get(e.taskId)
+    if (!prev || new Date(e.timestamp).getTime() >= new Date(prev.timestamp).getTime()) {
+      liveByTask.set(e.taskId, e)
+    }
   }
-
-  // Newest events first.
-  const ordered = [...events].sort(
+  const liveRows = [...liveByTask.values()].sort(
     (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
   )
+
+  // Newest events first, progress frames excluded (rendered above).
+  const ordered = [...events]
+    .filter((e) => e.type !== "progress_update")
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
 
   return (
     <div className="space-y-4">
@@ -118,34 +121,109 @@ export function AgentTeamActivity({
           </details>
         </div>
       ) : null}
-      <ScrollArea className="max-h-[60vh] rounded-md border">
-        <ul className="divide-y" data-testid="workspace-activity">
-          {ordered.map((event, i) => (
-            <motion.li
-              key={`${event.type}-${event.timestamp.toISOString?.() ?? i}`}
-              initial={prefersReducedMotion ? false : { opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{
-                duration: 0.15,
-                ease: "easeOut",
-                delay: prefersReducedMotion ? 0 : Math.min(i * 0.025, 0.12),
-              }}
-              className="flex items-center justify-between gap-2 px-3 py-2 text-xs"
-              data-testid={`activity-row-${i}`}
+      {liveRows.length > 0 ? (
+        <div className="space-y-1" data-testid="activity-live">
+          {liveRows.map((event) => {
+            const d = event.data ?? {}
+            const phase = String(d.phase ?? "running")
+            const isLive = phase === "start" || phase === "running"
+            const name = String(d.teammateName ?? event.teammateId ?? "")
+            const tool = typeof d.currentTool === "string" ? d.currentTool : undefined
+            const tools = Number(d.toolCount) || 0
+            const chars = Number(d.charCount) || 0
+            const secs = Math.round((Number(d.elapsedMs) || 0) / 1000)
+            return (
+              <div
+                key={event.taskId}
+                data-testid={`activity-live-${event.taskId}`}
+                className="flex items-center gap-2 rounded-md border px-3 py-2 text-xs"
+              >
+                <StatusBadge
+                  value={phase}
+                  pulse={isLive}
+                  labelNamespace="agentTeamsWorkspace.activity.progressPhase"
+                  className="text-[11px]"
+                />
+                {name ? <span className="font-medium">{name}</span> : null}
+                {tool ? (
+                  <Badge variant="secondary" className="font-mono text-[10px]">
+                    {tool}
+                  </Badge>
+                ) : null}
+                <span className="ml-auto font-mono text-[10px] text-muted-foreground">
+                  {phase === "start"
+                    ? t("liveProgressStarting")
+                    : t("liveProgress", { tools, chars, secs })}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      ) : null}
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Card className="space-y-3 p-4" data-testid="activity-events">
+          <p className="flex items-center gap-2 text-sm font-medium">
+            <ActivityIcon className="size-4 text-muted-foreground" aria-hidden />
+            {t("eventsTitle")}
+          </p>
+          {ordered.length === 0 ? (
+            <div
+              className="flex flex-col items-center justify-center gap-2 py-8 text-center text-muted-foreground"
+              data-testid="activity-empty"
             >
-              <StatusBadge
-                value={event.type}
-                labelNamespace="agentTeamsWorkspace.activity.eventKind"
-                className="text-[11px] font-mono"
-              />
-              <span className="font-mono text-[10px] text-muted-foreground">
-                {new Date(event.timestamp).toISOString()}
-              </span>
-            </motion.li>
-          ))}
-        </ul>
-      </ScrollArea>
-      <ConsensusPanel />
+              <ActivityIcon className="size-6 opacity-60" />
+              <p className="text-sm">{t("empty")}</p>
+            </div>
+          ) : (
+            <ScrollArea className="max-h-[60vh] rounded-md border">
+              <motion.ul
+                className="divide-y"
+                data-testid="workspace-activity"
+                variants={STAGGER_CONTAINER}
+                initial="initial"
+                animate="animate"
+              >
+                {ordered.map((event, i) => (
+                  <motion.li
+                    key={`${event.type}-${event.timestamp.toISOString?.() ?? i}`}
+                    variants={childVariants}
+                    className="flex items-center justify-between gap-2 px-3 py-2 text-xs"
+                    data-testid={`activity-row-${i}`}
+                  >
+                    <StatusBadge
+                      value={event.type}
+                      labelNamespace="agentTeamsWorkspace.activity.eventKind"
+                      className="text-[11px] font-mono"
+                    />
+                    <span
+                      className="font-mono text-[10px] text-muted-foreground"
+                      title={new Date(event.timestamp).toLocaleString()}
+                    >
+                      {new Date(event.timestamp).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </span>
+                  </motion.li>
+                ))}
+              </motion.ul>
+            </ScrollArea>
+          )}
+        </Card>
+        {team ? (
+          <Card className="space-y-3 p-4" data-testid="activity-runs">
+            <p className="flex items-center gap-2 text-sm font-medium">
+              <HistoryIcon className="size-4 text-muted-foreground" aria-hidden />
+              {t("runsTitle")}
+            </p>
+            <TeamRunsList teamId={team.id} />
+          </Card>
+        ) : null}
+      </div>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <ConsensusPanel />
+        <DelegationsPanel />
+      </div>
     </div>
   )
 }

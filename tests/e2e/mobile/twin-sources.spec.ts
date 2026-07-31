@@ -2,7 +2,7 @@
  * E2E: mobile twin sources panel — listing + add-source affordance.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../helpers/db-reset"
 import { injectCapacitor } from "../helpers/inject-capacitor"
 

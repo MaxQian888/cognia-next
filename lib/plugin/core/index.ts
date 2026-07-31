@@ -12,7 +12,6 @@ export {
   isFullPluginContext,
   type FullPluginContext,
 } from "./context"
-export { PluginSandbox } from "./sandbox"
 export { validatePluginManifest, validatePluginConfig, parseManifest } from "./validation"
 export type { ValidationError, ValidationResult, ConfigValidationResult } from "./validation"
 export { evaluatePluginCompatibility } from "./compatibility"

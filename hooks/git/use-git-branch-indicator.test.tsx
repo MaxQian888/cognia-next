@@ -1,7 +1,7 @@
-jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn() }))
 jest.mock("@/lib/git/commands", () => ({
   gitWatchStart: jest.fn(),
   gitWatchStop: jest.fn(),
+  isSourceControlUiAvailable: jest.fn(),
 }))
 jest.mock("@/lib/git/events", () => ({ subscribeGitStatusChanged: jest.fn() }))
 jest.mock("@/lib/git/load", () => ({
@@ -10,15 +10,14 @@ jest.mock("@/lib/git/load", () => ({
 }))
 
 import { act, renderHook, waitFor } from "@testing-library/react"
-import { isTauri } from "@/lib/tauri"
-import { gitWatchStart, gitWatchStop } from "@/lib/git/commands"
+import { gitWatchStart, gitWatchStop, isSourceControlUiAvailable } from "@/lib/git/commands"
 import { subscribeGitStatusChanged } from "@/lib/git/events"
 import { loadGitRepo, refreshGitStatus } from "@/lib/git/load"
 import { useGitBranchIndicator, __resetGitIndicatorBinding } from "./use-git-branch-indicator"
 import { useGitStore } from "@/stores/git/git-store"
 import { useProjectStore } from "@/stores/project/project-store"
 
-const isTauriMock = isTauri as jest.Mock
+const uiAvailableMock = isSourceControlUiAvailable as jest.Mock
 const watchStartMock = gitWatchStart as jest.Mock
 const watchStopMock = gitWatchStop as jest.Mock
 const subscribeMock = subscribeGitStatusChanged as jest.Mock
@@ -28,7 +27,7 @@ const refreshGitStatusMock = refreshGitStatus as jest.Mock
 let eventHandler: ((e: { rootDir: string }) => void) | null = null
 
 beforeEach(() => {
-  isTauriMock.mockReset().mockReturnValue(true)
+  uiAvailableMock.mockReset().mockReturnValue(true)
   loadGitRepoMock.mockReset().mockResolvedValue(undefined)
   refreshGitStatusMock.mockReset().mockResolvedValue(undefined)
   watchStartMock.mockReset().mockResolvedValue(undefined)
@@ -213,11 +212,27 @@ describe("useGitBranchIndicator", () => {
     expect(result.current.busy).toBe(true)
   })
 
-  it("is inert on web", async () => {
-    isTauriMock.mockReturnValue(false)
+  it("is inert and matches the panel gate when the SC UI is unavailable", async () => {
+    // Off the desktop the panel is unavailable; the chip must agree so a live
+    // chip can never navigate to a dead panel.
+    uiAvailableMock.mockReturnValue(false)
     act(() => useGitStore.setState({ rootDir: "/repo" }))
-    renderHook(() => useGitBranchIndicator())
+    const { result } = renderHook(() => useGitBranchIndicator())
     await Promise.resolve()
+    expect(result.current.available).toBe(false)
+    expect(loadGitRepoMock).not.toHaveBeenCalled()
     expect(watchStartMock).not.toHaveBeenCalled()
+    expect(subscribeMock).not.toHaveBeenCalled()
+  })
+
+  it("can observe the shared store without owning a native controller", async () => {
+    act(() => useGitStore.setState({ rootDir: "/repo" }))
+    const { result } = renderHook(() => useGitBranchIndicator({ enabled: false }))
+    await Promise.resolve()
+
+    expect(result.current.available).toBe(false)
+    expect(loadGitRepoMock).not.toHaveBeenCalled()
+    expect(watchStartMock).not.toHaveBeenCalled()
+    expect(subscribeMock).not.toHaveBeenCalled()
   })
 })

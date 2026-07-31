@@ -159,7 +159,14 @@ function PaneBox({
     <div
       className={cn(
         "relative h-full w-full",
-        !single && focused && "ring-1 ring-inset ring-primary/60"
+        !single && focused && "ring-1 ring-inset ring-primary/60",
+        // A freshly-split pane fades + slides in at its final slot. Only the
+        // wrapper's opacity/transform animate — the ResizablePanel takes its
+        // final size instantly so xterm fits once, not per frame. CSS (not
+        // motion) so it never fights react-resizable-panels' own sizing, and
+        // the global reduce-motion guard + `--motion-duration-scale` apply.
+        !single &&
+          "animate-in fade-in-0 slide-in-from-right-2 [animation-duration:calc(var(--motion-duration-scale,1)*0.18s)]"
       )}
       data-testid="terminal-pane"
       data-session-id={sessionId}

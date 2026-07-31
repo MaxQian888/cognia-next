@@ -8,7 +8,7 @@
 "use client"
 
 import { useState, useCallback, useEffect, useRef } from "react"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import type {
   CreateExternalAgentInput,
   ExternalAgentBenchmarkCapabilityEntry,
@@ -29,6 +29,7 @@ import type {
   AcpAuthMethod,
   AcpConfigOption,
   ExternalAgentLastRunSnapshot,
+  ExternalAgentPlanDocument,
   ExternalAgentValiditySnapshot,
 } from "@/types/agent/external-agent"
 import type { AgentTool } from "@/lib/ai/agent"
@@ -44,6 +45,66 @@ import {
 const externalAgentLogger = loggers.agent.child("external-agent-hook")
 import { isExternalAgentSessionExtensionUnsupportedForMethod } from "@/lib/ai/agent/external/session-extension-errors"
 import { normalizeExternalAgentValiditySnapshot } from "@/lib/ai/agent/external/canonical-contract"
+import type {
+  SessionCreateOptions,
+  SessionListOptions,
+} from "@/lib/ai/agent/external/protocol-adapter"
+import type {
+  ExternalAgentCompactionCapability,
+  ExternalAgentCompactionOptions,
+  ExternalAgentProviderUndoCapability,
+} from "@/lib/ai/agent/external/session-capabilities"
+
+// ============================================================================
+// Validity projection
+// ============================================================================
+
+interface CachedValidityNormalization {
+  fallbackProtocol: string | undefined
+  fallbackSource: string | undefined
+  value: ExternalAgentValiditySnapshot
+}
+
+/**
+ * `normalizeExternalAgentValiditySnapshot` builds a fresh object per call (and
+ * mints `checkedAt` when the input lacks one), so re-projecting an *unchanged*
+ * runtime validity used to yield a value that could never compare equal to the
+ * one already in the store. Caching by the source snapshot's identity makes the
+ * projection referentially stable, which is what lets `refresh()` below detect
+ * "nothing actually changed" and skip the write.
+ *
+ * Why that matters: `refresh()` writes into the store, and the store subscriber
+ * calls `refresh()` — so a write that isn't genuinely needed re-triggers itself
+ * forever. The manager replaces `instance.validity` wholesale on every real
+ * change (`updateInstanceState`), so keying on identity tracks real changes
+ * exactly. The options are part of the key because the same snapshot normalised
+ * under a different fallback protocol/source is a different value.
+ */
+const normalizedValidityBySource = new WeakMap<object, CachedValidityNormalization>()
+
+function stableNormalizeValidity(
+  snapshot: ExternalAgentValiditySnapshot,
+  options: { fallbackProtocol?: string; fallbackSource?: ExternalAgentValiditySnapshot["source"] }
+): ExternalAgentValiditySnapshot {
+  const cached = normalizedValidityBySource.get(snapshot)
+  if (
+    cached &&
+    cached.fallbackProtocol === options.fallbackProtocol &&
+    cached.fallbackSource === options.fallbackSource
+  ) {
+    return cached.value
+  }
+  const value = normalizeExternalAgentValiditySnapshot(snapshot, {
+    fallbackProtocol: options.fallbackProtocol as never,
+    fallbackSource: options.fallbackSource,
+  })
+  normalizedValidityBySource.set(snapshot, {
+    fallbackProtocol: options.fallbackProtocol,
+    fallbackSource: options.fallbackSource,
+    value,
+  })
+  return value
+}
 
 // ============================================================================
 // Types
@@ -75,6 +136,8 @@ export interface UseExternalAgentState {
   planEntries: AcpPlanEntry[]
   /** Current plan step index */
   planStep: number | null
+  /** Active ACP file/Markdown identified plan. */
+  planDocument: ExternalAgentPlanDocument | null
   /** Streaming response text */
   streamingResponse: string
   /** Last execution result */
@@ -106,19 +169,51 @@ export interface UseExternalAgentActions {
   /** Set the active agent */
   setActiveAgent: (agentId: string | null) => void
   /** Create a new session with the active agent */
-  createSession: (options?: { systemPrompt?: string }) => Promise<ExternalAgentSession>
+  createSession: (options?: SessionCreateOptions) => Promise<ExternalAgentSession>
   /** Close a session */
   closeSession: (sessionId: string) => Promise<void>
   /** List existing sessions (ACP extension) */
   listSessions: (
-    agentId?: string
-  ) => Promise<Array<{ sessionId: string; title?: string; createdAt?: string; updatedAt?: string }>>
+    agentId?: string,
+    options?: SessionListOptions
+  ) => Promise<
+    Array<{
+      sessionId: string
+      cwd?: string
+      additionalDirectories?: string[]
+      title?: string
+      createdAt?: string
+      updatedAt?: string
+    }>
+  >
   /** Fork a session (ACP extension) */
-  forkSession: (sessionId: string) => Promise<ExternalAgentSession>
+  forkSession: (sessionId: string, options?: SessionCreateOptions) => Promise<ExternalAgentSession>
+  /** Trigger provider-owned context compaction. */
+  compactSession: (sessionId: string, options?: ExternalAgentCompactionOptions) => Promise<void>
+  /** Whether the active agent supports provider-owned context compaction. */
+  supportsCompaction: boolean
+  /** Whether an advertised compaction command accepts focus instructions. */
+  supportsCompactionFocus: boolean
+  /** Provider capability snapshot used by advanced UI affordances. */
+  compactionCapability: ExternalAgentCompactionCapability
+  /** Whether compaction is waiting for provider-confirmed completion. */
+  isCompacting: boolean
+  /** Execute the provider's advertised `/undo` command. */
+  undoLastProviderChange: (sessionId: string) => Promise<void>
+  /** Provider-native undo capability snapshot. */
+  providerUndoCapability: ExternalAgentProviderUndoCapability
+  /** Whether the per-agent provider-undo warning has been acknowledged. */
+  providerUndoAcknowledged: boolean
+  /** Persist the provider-undo warning acknowledgement for this agent. */
+  acknowledgeProviderUndoWarning: () => void
+  /** Restore the provider-undo warning for this agent. */
+  resetProviderUndoWarning: () => void
+  /** Whether provider undo is currently running. */
+  isProviderUndoing: boolean
   /** Resume a session (ACP extension) */
   resumeSession: (
     sessionId: string,
-    options?: { systemPrompt?: string }
+    options?: SessionCreateOptions
   ) => Promise<ExternalAgentSession>
   /** Execute a prompt on the active agent */
   execute: (prompt: string, options?: ExternalAgentExecutionOptions) => Promise<ExternalAgentResult>
@@ -144,7 +239,7 @@ export interface UseExternalAgentActions {
   /** Authenticate with the agent */
   authenticate: (methodId: string, credentials?: Record<string, unknown>) => Promise<void>
   /** Set a session config option */
-  setConfigOption: (configId: string, value: string) => Promise<AcpConfigOption[]>
+  setConfigOption: (configId: string, value: string | boolean) => Promise<AcpConfigOption[]>
   /** Get session config options */
   getConfigOptions: () => AcpConfigOption[]
   /** Get agent tools as Cognia AgentTools */
@@ -231,6 +326,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
   const storeRemoveAgent = useExternalAgentStore((state) => state.removeAgent)
   const storeSetConnectionStatus = useExternalAgentStore((state) => state.setConnectionStatus)
   const storeSetAgentValidity = useExternalAgentStore((state) => state.setAgentValidity)
+  const storeUpdateAgent = useExternalAgentStore((state) => state.updateAgent)
   const storeGetAgentValidity = useExternalAgentStore((state) => state.getAgentValidity)
   const storeGetLastRunSnapshot = useExternalAgentStore((state) => state.getLastRunSnapshot)
   const storeGetBenchmarkCapabilities = useExternalAgentStore(
@@ -248,6 +344,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
   const [availableCommands, setAvailableCommands] = useState<AcpAvailableCommand[]>([])
   const [planEntries, setPlanEntries] = useState<AcpPlanEntry[]>([])
   const [planStep, setPlanStep] = useState<number | null>(null)
+  const [planDocument, setPlanDocument] = useState<ExternalAgentPlanDocument | null>(null)
   const [streamingResponse, setStreamingResponse] = useState("")
   const [configOptions, setConfigOptions] = useState<AcpConfigOption[]>([])
   const [lastResult, setLastResult] = useState<ExternalAgentResult | null>(null)
@@ -258,7 +355,24 @@ export function useExternalAgent(): UseExternalAgentReturn {
   const [activeBenchmarkCapabilities, setActiveBenchmarkCapabilities] = useState<
     ExternalAgentBenchmarkCapabilityEntry[]
   >([])
+  const [supportsCompaction, setSupportsCompaction] = useState(false)
+  const [compactionCapability, setCompactionCapability] =
+    useState<ExternalAgentCompactionCapability>({
+      status: "unknown",
+      routes: [],
+    })
+  const [providerUndoCapability, setProviderUndoCapability] =
+    useState<ExternalAgentProviderUndoCapability>({ status: "unknown" })
+  const [isCompacting, setIsCompacting] = useState(false)
+  const [isProviderUndoing, setIsProviderUndoing] = useState(false)
   const activeAgentId = storeActiveAgentId
+  const supportsCompactionFocus = compactionCapability.routes.some(
+    (route) => route.kind === "command" && route.supportsFocus
+  )
+  const providerUndoAcknowledged = Boolean(
+    agents.find((agent) => agent.config.id === activeAgentId)?.config.metadata
+      ?.providerUndoWarningAcknowledged
+  )
 
   // Type for the external agent manager
   type ExternalAgentManagerType = Awaited<
@@ -272,6 +386,15 @@ export function useExternalAgent(): UseExternalAgentReturn {
   const executingSessionIdRef = useRef<string | null>(null)
   const activeAgentIdRef = useRef<string | null>(activeAgentId)
   const previousActiveAgentIdRef = useRef<string | null>(activeAgentId)
+  const compactionInProgressRef = useRef(false)
+  const providerUndoInProgressRef = useRef(false)
+  const executionInProgressRef = useRef(false)
+  const sessionMutationCountRef = useRef(0)
+  const providerUndoAcknowledgedRef = useRef(providerUndoAcknowledged)
+
+  useEffect(() => {
+    providerUndoAcknowledgedRef.current = providerUndoAcknowledged
+  }, [providerUndoAcknowledged])
 
   // Get the external agent manager
   const getManager = useCallback(async (): Promise<ExternalAgentManagerType> => {
@@ -295,18 +418,27 @@ export function useExternalAgent(): UseExternalAgentReturn {
         if (runtime) {
           const currentStatus = storeGetConnectionStatus(config.id)
           const normalizedRuntimeValidity = runtime.validity
-            ? normalizeExternalAgentValiditySnapshot(runtime.validity, {
+            ? stableNormalizeValidity(runtime.validity, {
                 fallbackProtocol: config.protocol,
                 fallbackSource: runtime.validity.source,
               })
             : undefined
-          if (currentStatus !== runtime.connectionStatus || runtime.validity) {
+          // Write only what genuinely changed. The old guard was
+          // `|| runtime.validity`, which is truthy for the whole life of a
+          // connected agent — so this always wrote a fresh `agentValidity`
+          // object, the store subscriber saw a change and called `refresh()`
+          // again, and the two spun forever (starving the microtask queue and
+          // re-persisting the store on every turn).
+          const statusChanged = currentStatus !== runtime.connectionStatus
+          const validityChanged =
+            normalizedRuntimeValidity !== undefined &&
+            storeGetAgentValidity(config.id) !== normalizedRuntimeValidity
+          if (statusChanged || validityChanged) {
             useExternalAgentStore.setState((state) => ({
-              connectionStatus:
-                currentStatus !== runtime.connectionStatus
-                  ? { ...state.connectionStatus, [config.id]: runtime.connectionStatus }
-                  : state.connectionStatus,
-              agentValidity: normalizedRuntimeValidity
+              connectionStatus: statusChanged
+                ? { ...state.connectionStatus, [config.id]: runtime.connectionStatus }
+                : state.connectionStatus,
+              agentValidity: validityChanged
                 ? { ...state.agentValidity, [config.id]: normalizedRuntimeValidity }
                 : state.agentValidity,
             }))
@@ -418,19 +550,25 @@ export function useExternalAgent(): UseExternalAgentReturn {
         const storeState = useExternalAgentStore.getState()
         const protocol = storeState.agents[event.agentId]?.protocol ?? "acp"
         const normalizedValidity = event.validity
-          ? normalizeExternalAgentValiditySnapshot(event.validity, {
+          ? stableNormalizeValidity(event.validity, {
               fallbackProtocol: protocol,
               fallbackSource: event.validity.source,
             })
           : undefined
         const currentStatus = storeState.getConnectionStatus(event.agentId)
-        if (currentStatus !== event.connectionStatus || event.validity) {
+        // Same idempotence rule as `refresh()`: a lifecycle event that carries
+        // an unchanged validity must not rewrite the store, or it needlessly
+        // re-triggers the store subscriber (and a persist write) per event.
+        const statusChanged = currentStatus !== event.connectionStatus
+        const validityChanged =
+          normalizedValidity !== undefined &&
+          storeState.getAgentValidity(event.agentId) !== normalizedValidity
+        if (statusChanged || validityChanged) {
           useExternalAgentStore.setState((state) => ({
-            connectionStatus:
-              currentStatus !== event.connectionStatus
-                ? { ...state.connectionStatus, [event.agentId]: event.connectionStatus }
-                : state.connectionStatus,
-            agentValidity: normalizedValidity
+            connectionStatus: statusChanged
+              ? { ...state.connectionStatus, [event.agentId]: event.connectionStatus }
+              : state.connectionStatus,
+            agentValidity: validityChanged
               ? { ...state.agentValidity, [event.agentId]: normalizedValidity }
               : state.agentValidity,
           }))
@@ -438,6 +576,13 @@ export function useExternalAgent(): UseExternalAgentReturn {
         if (normalizedValidity) {
           if (!activeAgentIdRef.current || activeAgentIdRef.current === event.agentId) {
             setActiveAgentValidity(normalizedValidity)
+          }
+        }
+
+        if (event.lastRunSnapshot) {
+          storeState.setLastRunSnapshot(event.agentId, event.lastRunSnapshot)
+          if (!activeAgentIdRef.current || activeAgentIdRef.current === event.agentId) {
+            setActiveLastRunSnapshot(event.lastRunSnapshot)
           }
         }
 
@@ -525,8 +670,15 @@ export function useExternalAgent(): UseExternalAgentReturn {
         setAvailableCommands([])
         setPlanEntries([])
         setPlanStep(null)
+        setPlanDocument(null)
         return
       }
+
+      setAvailableCommands([])
+      setPlanEntries([])
+      setPlanStep(null)
+      setPlanDocument(null)
+      setConfigOptions([])
 
       const manager = await getManager()
 
@@ -539,6 +691,18 @@ export function useExternalAgent(): UseExternalAgentReturn {
         if (event.type === "plan_update") {
           setPlanEntries(event.entries)
           setPlanStep(event.step ?? null)
+          if (event.removed) {
+            setPlanDocument((current) => (current?.planId === event.planId ? null : current))
+          } else if (event.planId && (event.kind === "file" || event.kind === "markdown")) {
+            setPlanDocument({
+              planId: event.planId,
+              kind: event.kind,
+              ...(event.uri ? { uri: event.uri } : {}),
+              ...(event.content !== undefined ? { content: event.content } : {}),
+            })
+          } else if (event.kind === "items" || !event.kind) {
+            setPlanDocument(null)
+          }
         }
         if (event.type === "config_options_update") {
           setConfigOptions(event.configOptions)
@@ -547,7 +711,9 @@ export function useExternalAgent(): UseExternalAgentReturn {
           // Sync configOptions mode value if present
           setConfigOptions((prev) =>
             prev.map((opt) =>
-              opt.category === "mode" ? { ...opt, currentValue: event.modeId } : opt
+              opt.type === "select" && opt.category === "mode"
+                ? { ...opt, currentValue: event.modeId }
+                : opt
             )
           )
         }
@@ -556,11 +722,12 @@ export function useExternalAgent(): UseExternalAgentReturn {
       if (activeSession) {
         const session = manager.getSession(activeAgentId, activeSession.id)
         const sessionCommands = session?.metadata?.availableCommands as
-          | AcpAvailableCommand[]
-          | undefined
+          AcpAvailableCommand[] | undefined
         const sessionPlan = session?.metadata?.plan as AcpPlanEntry[] | undefined
         const sessionConfigOptions = session?.metadata?.configOptions as
-          | AcpConfigOption[]
+          AcpConfigOption[] | undefined
+        const sessionPlans = session?.metadata?.plans as
+          | Record<string, { type?: string; planId?: string; uri?: string; content?: string }>
           | undefined
         if (sessionCommands) {
           setAvailableCommands(sessionCommands)
@@ -572,6 +739,21 @@ export function useExternalAgent(): UseExternalAgentReturn {
         }
         if (sessionConfigOptions) {
           setConfigOptions(sessionConfigOptions)
+        }
+        if (sessionPlans) {
+          const document = Object.values(sessionPlans)
+            .reverse()
+            .find((plan) => plan.type === "file" || plan.type === "markdown")
+          setPlanDocument(
+            document?.planId && (document.type === "file" || document.type === "markdown")
+              ? {
+                  planId: document.planId,
+                  kind: document.type,
+                  ...(document.uri ? { uri: document.uri } : {}),
+                  ...(document.content !== undefined ? { content: document.content } : {}),
+                }
+              : null
+          )
         }
       }
     }
@@ -820,19 +1002,24 @@ export function useExternalAgent(): UseExternalAgentReturn {
 
   // Create a new session
   const createSession = useCallback(
-    async (options?: { systemPrompt?: string }): Promise<ExternalAgentSession> => {
+    async (options?: SessionCreateOptions): Promise<ExternalAgentSession> => {
       if (!activeAgentId) {
         throw new Error("No active agent selected")
       }
+      if (compactionInProgressRef.current) {
+        throw new Error("Cannot create a session while context compaction is in progress")
+      }
+      if (providerUndoInProgressRef.current) {
+        throw new Error("Cannot create a session while provider undo is in progress")
+      }
 
+      sessionMutationCountRef.current += 1
       setIsLoading(true)
       setError(null)
 
       try {
         const manager = await getManager()
-        const session = await manager.createSession(activeAgentId, {
-          systemPrompt: options?.systemPrompt,
-        })
+        const session = await manager.createSession(activeAgentId, options)
         setActiveSession(session)
         executingSessionIdRef.current = session.id
         return session
@@ -841,6 +1028,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
         setError(message)
         throw err
       } finally {
+        sessionMutationCountRef.current -= 1
         setIsLoading(false)
       }
     },
@@ -853,7 +1041,14 @@ export function useExternalAgent(): UseExternalAgentReturn {
       if (!activeAgentId) {
         return
       }
+      if (compactionInProgressRef.current) {
+        throw new Error("Cannot close a session while context compaction is in progress")
+      }
+      if (providerUndoInProgressRef.current) {
+        throw new Error("Cannot close a session while provider undo is in progress")
+      }
 
+      sessionMutationCountRef.current += 1
       setIsLoading(true)
       setError(null)
 
@@ -870,6 +1065,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
         setError(message)
         throw err
       } finally {
+        sessionMutationCountRef.current -= 1
         setIsLoading(false)
       }
     },
@@ -908,7 +1104,8 @@ export function useExternalAgent(): UseExternalAgentReturn {
 
   const listSessions = useCallback(
     async (
-      agentId?: string
+      agentId?: string,
+      options?: SessionListOptions
     ): Promise<
       Array<{ sessionId: string; title?: string; createdAt?: string; updatedAt?: string }>
     > => {
@@ -919,7 +1116,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
       let manager: ExternalAgentManagerType | null = null
       try {
         manager = await getManager()
-        return await manager.listSessions(targetAgentId)
+        return await manager.listSessions(targetAgentId, options)
       } catch (err) {
         const unsupported = isExternalAgentSessionExtensionUnsupportedForMethod(err, "session/list")
         if (!unsupported) {
@@ -934,14 +1131,21 @@ export function useExternalAgent(): UseExternalAgentReturn {
   )
 
   const forkSession = useCallback(
-    async (sessionId: string): Promise<ExternalAgentSession> => {
+    async (sessionId: string, options?: SessionCreateOptions): Promise<ExternalAgentSession> => {
       if (!activeAgentId) {
         throw new Error("No active agent selected")
       }
+      if (compactionInProgressRef.current) {
+        throw new Error("Cannot fork a session while context compaction is in progress")
+      }
+      if (providerUndoInProgressRef.current) {
+        throw new Error("Cannot fork a session while provider undo is in progress")
+      }
+      sessionMutationCountRef.current += 1
       let manager: ExternalAgentManagerType | null = null
       try {
         manager = await getManager()
-        const forked = await manager.forkSession(activeAgentId, sessionId)
+        const forked = await manager.forkSession(activeAgentId, sessionId, options)
         setActiveSession(forked)
         executingSessionIdRef.current = forked.id
         return forked
@@ -952,26 +1156,144 @@ export function useExternalAgent(): UseExternalAgentReturn {
         }
         throw err
       } finally {
+        sessionMutationCountRef.current -= 1
         syncActiveAgentValidityFromRuntime(activeAgentId, manager)
       }
     },
     [getManager, activeAgentId, syncActiveAgentValidityFromRuntime]
   )
 
-  const resumeSession = useCallback(
-    async (
-      sessionId: string,
-      options?: { systemPrompt?: string }
-    ): Promise<ExternalAgentSession> => {
+  // Probe session-level provider capabilities whenever the active runtime
+  // changes. ACP itself has no compaction RPC, so adapters may report either a
+  // native route or an exact runtime-advertised slash command.
+  useEffect(() => {
+    let active = true
+    void (async () => {
+      if (!activeAgentId || !activeSession) {
+        if (active) {
+          setSupportsCompaction(false)
+          setCompactionCapability({ status: "unknown", routes: [] })
+          setProviderUndoCapability({ status: "unknown" })
+        }
+        return
+      }
+      try {
+        const manager = await getManager()
+        const [compaction, providerUndo] = await Promise.all([
+          manager.getCompactionCapability(activeAgentId, activeSession.id),
+          manager.getProviderUndoCapability(activeAgentId, activeSession.id),
+        ])
+        if (active) {
+          setCompactionCapability(compaction)
+          setSupportsCompaction(compaction.status === "supported")
+          setProviderUndoCapability(providerUndo)
+        }
+      } catch {
+        if (active) {
+          setSupportsCompaction(false)
+          setCompactionCapability({ status: "unknown", routes: [] })
+          setProviderUndoCapability({ status: "unknown" })
+        }
+      }
+    })()
+    return () => {
+      active = false
+    }
+  }, [activeAgentId, activeSession, getManager])
+
+  const compactSession = useCallback(
+    async (sessionId: string, options?: ExternalAgentCompactionOptions): Promise<void> => {
       if (!activeAgentId) {
         throw new Error("No active agent selected")
       }
+      if (
+        executionInProgressRef.current ||
+        sessionMutationCountRef.current > 0 ||
+        compactionInProgressRef.current ||
+        providerUndoInProgressRef.current
+      ) {
+        throw new Error("Another session operation is already in progress")
+      }
+      compactionInProgressRef.current = true
+      setIsCompacting(true)
+      setProgress(0)
+      try {
+        const manager = await getManager()
+        const capability = await manager.getCompactionCapability(activeAgentId, sessionId)
+        if (capability.status !== "supported") {
+          throw new Error("Agent does not support context compaction")
+        }
+        await manager.compactSession(activeAgentId, sessionId, options)
+        setProgress(100)
+      } finally {
+        compactionInProgressRef.current = false
+        setIsCompacting(false)
+      }
+    },
+    [getManager, activeAgentId]
+  )
+
+  const undoLastProviderChange = useCallback(
+    async (sessionId: string): Promise<void> => {
+      if (!activeAgentId) throw new Error("No active agent selected")
+      if (
+        !providerUndoAcknowledgedRef.current ||
+        executionInProgressRef.current ||
+        sessionMutationCountRef.current > 0 ||
+        compactionInProgressRef.current ||
+        providerUndoInProgressRef.current
+      ) {
+        throw new Error(
+          providerUndoAcknowledgedRef.current
+            ? "Another session operation is already in progress"
+            : "Provider undo warning must be acknowledged"
+        )
+      }
+      providerUndoInProgressRef.current = true
+      setIsProviderUndoing(true)
+      try {
+        const manager = await getManager()
+        await manager.undoLastProviderChange(activeAgentId, sessionId)
+      } finally {
+        providerUndoInProgressRef.current = false
+        setIsProviderUndoing(false)
+      }
+    },
+    [activeAgentId, getManager]
+  )
+
+  const acknowledgeProviderUndoWarning = useCallback(() => {
+    if (!activeAgentId) return
+    providerUndoAcknowledgedRef.current = true
+    storeUpdateAgent(activeAgentId, {
+      metadata: { providerUndoWarningAcknowledged: true },
+    })
+  }, [activeAgentId, storeUpdateAgent])
+
+  const resetProviderUndoWarning = useCallback(() => {
+    if (!activeAgentId) return
+    providerUndoAcknowledgedRef.current = false
+    storeUpdateAgent(activeAgentId, {
+      metadata: { providerUndoWarningAcknowledged: false },
+    })
+  }, [activeAgentId, storeUpdateAgent])
+
+  const resumeSession = useCallback(
+    async (sessionId: string, options?: SessionCreateOptions): Promise<ExternalAgentSession> => {
+      if (!activeAgentId) {
+        throw new Error("No active agent selected")
+      }
+      if (compactionInProgressRef.current) {
+        throw new Error("Cannot resume a session while context compaction is in progress")
+      }
+      if (providerUndoInProgressRef.current) {
+        throw new Error("Cannot resume a session while provider undo is in progress")
+      }
+      sessionMutationCountRef.current += 1
       let manager: ExternalAgentManagerType | null = null
       try {
         manager = await getManager()
-        const resumed = await manager.resumeSession(activeAgentId, sessionId, {
-          systemPrompt: options?.systemPrompt,
-        })
+        const resumed = await manager.resumeSession(activeAgentId, sessionId, options)
         setActiveSession(resumed)
         executingSessionIdRef.current = resumed.id
         return resumed
@@ -985,6 +1307,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
         }
         throw err
       } finally {
+        sessionMutationCountRef.current -= 1
         syncActiveAgentValidityFromRuntime(activeAgentId, manager)
       }
     },
@@ -1000,7 +1323,15 @@ export function useExternalAgent(): UseExternalAgentReturn {
       if (!activeAgentId) {
         throw new Error("No active agent selected")
       }
+      if (
+        executionInProgressRef.current ||
+        compactionInProgressRef.current ||
+        providerUndoInProgressRef.current
+      ) {
+        throw new Error("Cannot send while a provider session operation is in progress")
+      }
 
+      executionInProgressRef.current = true
       setIsExecuting(true)
       setError(null)
       setProgress(0)
@@ -1075,6 +1406,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
 
         throw err
       } finally {
+        executionInProgressRef.current = false
         setIsExecuting(false)
         setProgress(100)
         setPendingPermission(null)
@@ -1093,7 +1425,15 @@ export function useExternalAgent(): UseExternalAgentReturn {
       if (!activeAgentId) {
         throw new Error("No active agent selected")
       }
+      if (
+        executionInProgressRef.current ||
+        compactionInProgressRef.current ||
+        providerUndoInProgressRef.current
+      ) {
+        throw new Error("Cannot send while a provider session operation is in progress")
+      }
 
+      executionInProgressRef.current = true
       setIsExecuting(true)
       setError(null)
       setProgress(0)
@@ -1152,6 +1492,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
         setError(message)
         throw err
       } finally {
+        executionInProgressRef.current = false
         setIsExecuting(false)
         setProgress(100)
         setPendingPermission(null)
@@ -1268,7 +1609,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
 
   // Set config option
   const setConfigOption = useCallback(
-    async (configId: string, value: string): Promise<AcpConfigOption[]> => {
+    async (configId: string, value: string | boolean): Promise<AcpConfigOption[]> => {
       if (!activeAgentId || !activeSession) {
         throw new Error("No active session to update")
       }
@@ -1338,6 +1679,7 @@ export function useExternalAgent(): UseExternalAgentReturn {
     availableCommands,
     planEntries,
     planStep,
+    planDocument,
     streamingResponse,
     lastResult,
     configOptions,
@@ -1355,6 +1697,17 @@ export function useExternalAgent(): UseExternalAgentReturn {
     closeSession,
     listSessions,
     forkSession,
+    compactSession,
+    supportsCompaction,
+    supportsCompactionFocus,
+    compactionCapability,
+    isCompacting,
+    undoLastProviderChange,
+    providerUndoCapability,
+    providerUndoAcknowledged,
+    acknowledgeProviderUndoWarning,
+    resetProviderUndoWarning,
+    isProviderUndoing,
     resumeSession,
     execute,
     executeStreaming,

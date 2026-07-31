@@ -18,7 +18,7 @@
 import { invoke } from "@tauri-apps/api/core"
 import { isTauri } from "@/lib/tauri"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 import type {
   ExternalAgentEvent,
   ExternalAgentPermissionRequestEvent,
@@ -38,6 +38,52 @@ export interface AgentHookContext {
   agentId: string
   sessionId: string
   cwd?: string
+}
+
+/**
+ * Payload describing a consequential hook fire, surfaced so the manager can
+ * forward it as a synthetic `hook_fire` ExternalAgentEvent and the chat can
+ * render an inline hook-notice row. Mirrors the built-in agent's
+ * `HookNoticePartData` (minus the part discriminant).
+ */
+export interface ExternalHookFireNotice {
+  event: string
+  toolName?: string
+  outcome: "blocked" | "context" | "warning"
+  block?: string
+  additionalContext?: string
+  warnings: string[]
+}
+
+/** Sink the manager passes so a consequential fire reaches the chat timeline. */
+export type EmitHookNotice = (notice: ExternalHookFireNotice) => void
+
+/**
+ * Build a notice from a hook decision, or `null` when the fire was a no-op.
+ * Outcome precedence matches the Rust side: block > context > warning.
+ */
+export function noticeFromDecision(
+  event: string,
+  toolName: string | undefined,
+  decision: AgentHookDecision | null
+): ExternalHookFireNotice | null {
+  if (!decision) return null
+  const block = decision.block?.trim() || undefined
+  const additionalContext = decision.additionalContext?.trim() || undefined
+  const warnings = decision.warnings ?? []
+  const outcome = block
+    ? "blocked"
+    : additionalContext
+      ? "context"
+      : warnings.length > 0
+        ? "warning"
+        : null
+  if (!outcome) return null
+  return { event, toolName, outcome, block, additionalContext, warnings }
+}
+
+function maybeEmit(emit: EmitHookNotice | undefined, notice: ExternalHookFireNotice | null): void {
+  if (emit && notice) emit(notice)
 }
 
 /**
@@ -69,12 +115,18 @@ export async function fireAgentHook(
  * (`onExternalAgentToolCall`) and the System-B settings hooks (SessionStart,
  * PostToolUse/Failure, Stop, SessionEnd, StopFailure). Never throws.
  */
-export function observeExternalAgentEvent(ctx: AgentHookContext, event: ExternalAgentEvent): void {
+export async function observeExternalAgentEvent(
+  ctx: AgentHookContext,
+  event: ExternalAgentEvent,
+  emit?: EmitHookNotice
+): Promise<void> {
   const plugin = getPluginEventHooks()
   switch (event.type) {
-    case "session_start":
-      void fireAgentHook("SessionStart", ctx)
+    case "session_start": {
+      const d = await fireAgentHook("SessionStart", ctx)
+      maybeEmit(emit, noticeFromDecision("SessionStart", undefined, d))
       break
+    }
     case "tool_use_start":
       plugin.dispatchExternalAgentToolCall(
         ctx.agentId,
@@ -85,24 +137,32 @@ export function observeExternalAgentEvent(ctx: AgentHookContext, event: External
       break
     case "tool_result": {
       const failed = event.isError === true
-      void fireAgentHook(failed ? "PostToolUseFailure" : "PostToolUse", ctx, {
-        toolName: event.toolName ?? "unknown",
+      const evName = failed ? "PostToolUseFailure" : "PostToolUse"
+      const toolName = event.toolName ?? "unknown"
+      const d = await fireAgentHook(evName, ctx, {
+        toolName,
         payload: {
-          tool_name: event.toolName ?? "unknown",
+          tool_name: toolName,
           tool_use_id: event.toolUseId,
           is_error: failed,
           tool_response: event.result,
         },
       })
+      maybeEmit(emit, noticeFromDecision(evName, toolName, d))
       break
     }
-    case "done":
-      void fireAgentHook("Stop", ctx, { payload: { success: event.success } })
-      void fireAgentHook("SessionEnd", ctx)
+    case "done": {
+      const stop = await fireAgentHook("Stop", ctx, { payload: { success: event.success } })
+      maybeEmit(emit, noticeFromDecision("Stop", undefined, stop))
+      const end = await fireAgentHook("SessionEnd", ctx)
+      maybeEmit(emit, noticeFromDecision("SessionEnd", undefined, end))
       break
-    case "error":
-      void fireAgentHook("StopFailure", ctx, { payload: { error: event.error } })
+    }
+    case "error": {
+      const d = await fireAgentHook("StopFailure", ctx, { payload: { error: event.error } })
+      maybeEmit(emit, noticeFromDecision("StopFailure", undefined, d))
       break
+    }
     default:
       break
   }
@@ -117,7 +177,8 @@ export function observeExternalAgentEvent(ctx: AgentHookContext, event: External
 export async function gateExternalAgentPermission(
   ctx: AgentHookContext,
   event: ExternalAgentPermissionRequestEvent,
-  deny: (requestId: string, reason: string) => Promise<void>
+  deny: (requestId: string, reason: string) => Promise<void>,
+  emit?: EmitHookNotice
 ): Promise<boolean> {
   const req = event.request
   const toolName = req.toolInfo?.name ?? "unknown"
@@ -139,6 +200,10 @@ export async function gateExternalAgentPermission(
     toolName,
     payload: { tool_name: toolName, tool_input: toolInput },
   })
+
+  // Surface any consequential PreToolUse fire (block / context / warnings) as an
+  // inline hook row — the external analog of the built-in agent's hook_fire.
+  maybeEmit(emit, noticeFromDecision("PreToolUse", toolName, decision))
 
   if (decision?.block) {
     try {

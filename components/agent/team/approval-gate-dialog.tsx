@@ -24,7 +24,22 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 
-export type ApprovalGateType = "budget" | "deadlock" | "plan" | "teammate_fix"
+export type ApprovalGateType =
+  "budget" | "deadlock" | "plan" | "teammate_fix" | "replan" | "capability_audit"
+
+/**
+ * Maps a `gateType` to its i18n namespace under `agentTeam.approvalGate`.
+ * `teammate_fix` uses the camelCase `teammateFix` key (the message catalog is
+ * camelCased), so a direct `${gateType}.title` lookup would miss.
+ */
+const GATE_I18N_KEY: Record<ApprovalGateType, string> = {
+  budget: "budget",
+  deadlock: "deadlock",
+  plan: "plan",
+  teammate_fix: "teammateFix",
+  replan: "replan",
+  capability_audit: "capabilityAudit",
+}
 
 export interface ApprovalGateDialogProps {
   open: boolean
@@ -47,6 +62,8 @@ export function ApprovalGateDialog(props: ApprovalGateDialogProps): React.ReactE
 
   if (!props.open) return null
 
+  const i18nKey = GATE_I18N_KEY[props.gateType]
+
   const handleApprove = (): void => {
     switch (props.gateType) {
       case "budget":
@@ -59,6 +76,11 @@ export function ApprovalGateDialog(props: ApprovalGateDialogProps): React.ReactE
         props.onApprove({ action: "rejoin" })
         return
       case "plan":
+      case "replan":
+      case "capability_audit":
+        // Approve applies the lead's proposed re-plan / runs with the stale
+        // capabilities as-is; reject continues the original plan / cancels
+        // the run. No edit payload.
         props.onApprove()
         return
     }
@@ -68,12 +90,10 @@ export function ApprovalGateDialog(props: ApprovalGateDialogProps): React.ReactE
     <Dialog open={props.open} onOpenChange={(open) => !open && props.onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{t(`${props.gateType}.title`)}</DialogTitle>
+          <DialogTitle>{t(`${i18nKey}.title`)}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
-          <p className="text-sm text-muted-foreground">
-            {props.body ?? t(`${props.gateType}.body`)}
-          </p>
+          <p className="text-sm text-muted-foreground">{props.body ?? t(`${i18nKey}.body`)}</p>
           {props.gateType === "budget" && (
             <div className="space-y-2">
               <Label htmlFor="extra-tokens">{t("budget.extraTokensLabel")}</Label>
@@ -122,9 +142,13 @@ export function ApprovalGateDialog(props: ApprovalGateDialogProps): React.ReactE
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={() => props.onReject()}>
-            {t("reject")}
+            {props.gateType === "capability_audit" ? t("capabilityAudit.rejectLabel") : t("reject")}
           </Button>
-          <Button onClick={handleApprove}>{t("approve")}</Button>
+          <Button onClick={handleApprove}>
+            {props.gateType === "capability_audit"
+              ? t("capabilityAudit.approveLabel")
+              : t("approve")}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

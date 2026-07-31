@@ -1,5 +1,5 @@
 /**
- * Slack OAuth handler — completes the Phase 1 stub (ADR-0009 D1).
+ * Slack OAuth handler — completes the Slack OAuth code exchange path.
  *
  * The deep-link router (cognia://connector/oauth/slack?code=...&state=...)
  * invokes `handleSlackOAuth(code, {state})` after validating state. This
@@ -12,7 +12,7 @@
  *      from the keyring.
  *   3. POST oauth.v2.access (form-encoded) for the bot token (+ optional user
  *      token).
- *   4. Store `botToken` (and `user_token` when present) in the keyring.
+ *   4. Store `botToken` (and `userToken` when present) in the keyring.
  *   5. Stamp connected-team metadata onto AdapterInstanceRow.settings.
  */
 
@@ -22,6 +22,7 @@ import {
   connectorsKeyringGet,
   connectorsKeyringSet,
 } from "@/lib/connectors/tauri/commands"
+import { recordGrantedScopes, type ConnectedScopes } from "@/lib/connectors/oauth-scope-audit"
 
 export function buildSlackOAuthState(adapterId: string, nonce: string): string {
   return `slack:${adapterId}:${nonce}`
@@ -114,25 +115,37 @@ export async function handleSlackOAuth(
   // The bot token is what `buildSlackAdapter` reads as `botToken`.
   await connectorsKeyringSet(adapterId, "botToken", body.access_token)
   if (body.authed_user?.access_token) {
-    await connectorsKeyringSet(adapterId, "user_token", body.authed_user.access_token)
+    // "userToken" is the key `buildSlackAdapter` resolves for
+    // setPresenceStatus (with a legacy fallback to the old "user_token"
+    // key this handler wrote before the unification).
+    await connectorsKeyringSet(adapterId, "userToken", body.authed_user.access_token)
   }
 
+  const now = Date.now()
   const connectedTeam: SlackConnectedTeam = {
     teamId: body.team?.id ?? "",
     teamName: body.team?.name,
     botUserId: body.bot_user_id,
     authedUserId: body.authed_user?.id,
-    connectedAtMs: Date.now(),
+    connectedAtMs: now,
   }
+  // Persist the granted scopes (and audit a change vs the prior grant) so the
+  // Connections detail can show what this adapter was authorized for.
+  const { connectedScopes } = await recordGrantedScopes({
+    adapterId,
+    raw: body.scope,
+    previous: adapter.settings.connectedScopes as ConnectedScopes | undefined,
+    now,
+  })
   await updateAdapterInstance(adapterId, {
-    settings: { ...adapter.settings, connectedTeam },
+    settings: { ...adapter.settings, connectedTeam, connectedScopes },
     credentialsRef: {
       ...adapter.credentialsRef,
       accounts: Array.from(
         new Set([
           ...adapter.credentialsRef.accounts,
           "botToken",
-          ...(body.authed_user?.access_token ? ["user_token"] : []),
+          ...(body.authed_user?.access_token ? ["userToken"] : []),
         ])
       ),
     },

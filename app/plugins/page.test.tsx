@@ -37,10 +37,6 @@ jest.mock("@/lib/db/schema", () => ({
     pluginAnalytics: {
       orderBy: () => ({ reverse: () => ({ toArray: async () => [] }) }),
     },
-    pluginScheduledJobs: {
-      orderBy: () => ({ toArray: async () => [] }),
-      where: () => ({ equals: () => ({ delete: async () => undefined }) }),
-    },
     pluginPermissions: {
       where: () => ({ equals: () => ({ delete: async () => undefined }) }),
     },

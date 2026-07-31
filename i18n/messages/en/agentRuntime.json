@@ -1,0 +1,12 @@
+{
+  "ariaLabel": "Choose agent runtime",
+  "claudeSdk": "Claude SDK",
+  "claudeSdkDesc": "Built-in Anthropic SDK sidecar (default)",
+  "external": "External agent",
+  "externalAgentLabel": "Choose external agent",
+  "externalDesc": "Spawn a CLI agent (Codex, Claude Code, Gemini, Cursor…)",
+  "externalEmpty": "No external agents — add one in Settings → Agents",
+  "externalUnconfigured": "External (none selected)",
+  "label": "Agent runtime",
+  "tooltip": "Active agent runtime — Claude SDK or an external agent"
+}

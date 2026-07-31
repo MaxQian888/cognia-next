@@ -1,0 +1,101 @@
+{
+  "assessments": {
+    "label": {
+      "cacheEfficiency": "Cache efficiency",
+      "context": "Context pressure",
+      "costPerCommit": "Cost per commit",
+      "overhead": "Overhead",
+      "redundancy": "Redundancy",
+      "thrashing": "Thrashing",
+      "toolHealth": "Tool health"
+    },
+    "level": {
+      "critical": "Critical",
+      "healthy": "Healthy",
+      "info": "Info",
+      "warning": "Warning"
+    },
+    "reasoning": {
+      "cacheEfficiency": {
+        "healthy": "Strong cache reuse ({ratio}× read/write).",
+        "info": "No prompt cache in use yet.",
+        "warning": "Low cache reuse ({ratio}× read/write) — context is being rebuilt often."
+      },
+      "context": {
+        "critical": "Peak context fill {pct}% — at the auto-compact threshold.",
+        "healthy": "Peak context fill {pct}% of the window.",
+        "warning": "Peak context fill {pct}% — compaction is approaching."
+      },
+      "costPerCommit": {
+        "healthy": "${cost} per commit across {commits} commit(s).",
+        "info": "No commits this session.",
+        "warning": "${cost} per commit across {commits} commit(s) — expensive iterations."
+      },
+      "overhead": {
+        "healthy": "Got to work quickly ({turns} setup turn(s)).",
+        "info": "{turns} setup turns before the first real action.",
+        "warning": "{turns} setup turns before the first real action — high startup overhead."
+      },
+      "redundancy": {
+        "healthy": "No redundant tool calls.",
+        "info": "{duplicates} duplicate tool call(s).",
+        "warning": "{duplicates} duplicate tool call(s) — work is being repeated."
+      },
+      "thrashing": {
+        "healthy": "No repeated command/edit thrashing.",
+        "info": "{events} repeated command/edit events.",
+        "warning": "{events} thrash events — the same commands/files are being redone."
+      },
+      "toolHealth": {
+        "critical": "{pct}% of tool calls errored ({errors}) — tools are failing often.",
+        "healthy": "{pct}% of tool calls errored ({errors}).",
+        "info": "No tool calls yet.",
+        "warning": "{pct}% of tool calls errored ({errors}) — watch for flaky steps."
+      }
+    },
+    "title": "Health assessments"
+  },
+  "averages": {
+    "cost": "Cost",
+    "duration": "Gen time",
+    "title": "Per-turn averages",
+    "tokens": "Tokens"
+  },
+  "degradedTree": "Conversation shown as a linear timeline (branch data isn't stored).",
+  "empty": "Not enough activity to analyze yet.",
+  "idle": {
+    "headline": "{count} idle gap(s) over {seconds}s between turns"
+  },
+  "kpi": {
+    "cacheHit": "Cache hit",
+    "cost": "Cost",
+    "denials": "Denials",
+    "duration": "Gen time",
+    "errors": "Errors",
+    "idleGaps": "Idle gaps",
+    "modelSwitches": "Model switches",
+    "reasoning": "Reasoning",
+    "speed": "Speed",
+    "tokens": "Tokens",
+    "tools": "Tool calls",
+    "turns": "Turns"
+  },
+  "loading": "Analyzing session…",
+  "models": {
+    "title": "Per-model usage",
+    "turns": "{count} turns"
+  },
+  "open": "Insights",
+  "signals": {
+    "empty": "No friction or thrashing detected.",
+    "friction": "{count} friction signal(s) in your messages",
+    "tests": "{passed} passed, {failed} failed",
+    "thinking": "{count} thinking block(s)",
+    "thrashing": "Repeated command/edit thrashing detected",
+    "title": "Friction & thrashing"
+  },
+  "title": "Session insights",
+  "units": {
+    "tokPerSec": "{value} tok/s"
+  }
+}

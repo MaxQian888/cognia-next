@@ -15,16 +15,27 @@ jest.mock("@/lib/db/mcp-servers", () => ({
   updateMcpServer: jest.fn().mockResolvedValue(undefined),
 }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { mcp: { info: jest.fn(), error: jest.fn(), warn: jest.fn() } },
 }))
 
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
 jest.mock("../mcp-import-dialog", () => ({ McpImportDialog: () => <div data-testid="import" /> }))
+// Stub the card like every other child of this tab. It drags in a deep chain
+// (`use-log-stream` → a module-scope IndexedDB transport, `@/stores/chat` →
+// `lib/execution/broker`) that this suite never asserts on, and hand-stubbing
+// each export that chain reaches breaks again every time it grows. The card has
+// its own suite in mcp-live-session-card.test.tsx.
+jest.mock("./mcp-live-session-card", () => ({
+  McpLiveSessionCard: () => <div data-testid="live-session" />,
+}))
 jest.mock("../mcp-agent-chip-group", () => ({ refreshAgentAvailability: jest.fn() }))
 jest.mock("./mcp-batch-actions-bar", () => ({
   McpBatchActionsBar: () => <div data-testid="batch" />,
+}))
+jest.mock("./mcp-filter-sheet", () => ({
+  McpFilterSheet: () => <div data-testid="filter-sheet" />,
 }))
 jest.mock("./mcp-server-list", () => ({
   McpServerList: ({
@@ -55,7 +66,7 @@ import { McpMyServersTab } from "./mcp-my-servers-tab"
 import { useMcpPanelStore } from "@/stores/mcp/mcp-panel-store"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { updateMcpServer } from "@/lib/db/mcp-servers"
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 
 const server = (id: string): McpServer =>
   ({
@@ -72,6 +83,7 @@ const server = (id: string): McpServer =>
 beforeEach(() => {
   mockServers = []
   useMcpPanelStore.setState({
+    activeTab: "my-servers",
     search: "",
     transportFilter: "all",
     statusFilter: "all",
@@ -89,6 +101,36 @@ describe("McpMyServersTab", () => {
     render(<McpMyServersTab />)
     expect(screen.getByText("empty")).toBeInTheDocument()
     expect(screen.queryByTestId("server-list")).not.toBeInTheDocument()
+  })
+
+  it("switches to the presets tab from the empty-state CTA", () => {
+    render(<McpMyServersTab />)
+    fireEvent.click(screen.getByText("emptyBrowsePresets"))
+    expect(useMcpPanelStore.getState().activeTab).toBe("presets")
+  })
+
+  it("opens the create editor from the empty-state Add button", async () => {
+    render(<McpMyServersTab />)
+    // Second "Add server" in DOM order is the empty-state CTA (toolbar is first).
+    fireEvent.click(screen.getAllByText("addServer")[1])
+    await waitFor(() =>
+      expect(useMcpPanelStore.getState().editorTarget).toMatchObject({ mode: "create" })
+    )
+  })
+
+  it("selects and clears all visible servers via the select-all toggle", () => {
+    mockServers = [server("a"), server("b")]
+    render(<McpMyServersTab />)
+    fireEvent.click(screen.getByText('selectAll:{"count":2}'))
+    expect(useMcpPanelStore.getState().selection).toEqual(new Set(["a", "b"]))
+    // Label flips to "clear" once everything visible is selected.
+    fireEvent.click(screen.getByText("clearSelection"))
+    expect(useMcpPanelStore.getState().selection.size).toBe(0)
+  })
+
+  it("hides the select-all row while the empty state is showing", () => {
+    render(<McpMyServersTab />)
+    expect(screen.queryByLabelText("selectAllAria")).not.toBeInTheDocument()
   })
 
   it("renders the list when servers exist", () => {
@@ -121,7 +163,9 @@ describe("McpMyServersTab", () => {
 
   it("opens the create editor via the seeded add button", async () => {
     render(<McpMyServersTab />)
-    fireEvent.click(screen.getByText("addServer"))
+    // With no servers the empty-state CTA also renders an "Add server" button, so
+    // target the toolbar one (first in DOM order).
+    fireEvent.click(screen.getAllByText("addServer")[0])
     await waitFor(() =>
       expect(useMcpPanelStore.getState().editorTarget).toMatchObject({ mode: "create" })
     )
@@ -132,5 +176,21 @@ describe("McpMyServersTab", () => {
     render(<McpMyServersTab />)
     fireEvent.click(screen.getByText("toggle-first"))
     await waitFor(() => expect(updateMcpServer).toHaveBeenCalledWith("a", { enabled: false }))
+  })
+
+  it("opens the filter sheet from the Filters trigger", () => {
+    render(<McpMyServersTab />)
+    fireEvent.click(screen.getByLabelText("filters"))
+    expect(useMcpPanelStore.getState().filterSheetOpen).toBe(true)
+    expect(screen.getByTestId("filter-sheet")).toBeInTheDocument()
+  })
+
+  it("shows an active-filter count badge only when a non-default axis is set", () => {
+    const { rerender } = render(<McpMyServersTab />)
+    // No active transport/status filter → no badge.
+    expect(screen.queryByText("1")).not.toBeInTheDocument()
+    useMcpPanelStore.setState({ transportFilter: "http", statusFilter: "disabled" })
+    rerender(<McpMyServersTab />)
+    expect(screen.getByText("2")).toBeInTheDocument()
   })
 })

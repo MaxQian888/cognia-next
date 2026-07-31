@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 import { executeTwinTask } from "./twin-executor"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"

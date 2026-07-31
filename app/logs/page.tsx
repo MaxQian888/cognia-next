@@ -2,9 +2,10 @@
 
 import Link from "next/link"
 import { useTranslations } from "next-intl"
-import { Keyboard } from "lucide-react"
+import { Keyboard, ScrollTextIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -60,33 +61,35 @@ function LogsPageHeader() {
     total: api.totalCount,
   })
   return (
-    <header
-      data-testid="logs-page-header"
-      className="flex h-14 shrink-0 items-center gap-3 border-b px-4"
-    >
-      <Breadcrumb>
-        <BreadcrumbList>
-          <BreadcrumbItem>
-            <BreadcrumbLink asChild>
-              <Link href="/">{t("pageHeader.breadcrumbHome")}</Link>
-            </BreadcrumbLink>
-          </BreadcrumbItem>
-          <BreadcrumbSeparator />
-          <BreadcrumbItem>
-            <BreadcrumbPage>{t("pageHeader.breadcrumbLogs")}</BreadcrumbPage>
-          </BreadcrumbItem>
-        </BreadcrumbList>
-      </Breadcrumb>
-
-      <Badge
-        variant="secondary"
-        data-testid="logs-page-header-live-pill"
-        className="font-mono text-xs tabular-nums"
-      >
-        {liveLabel}
-      </Badge>
-
-      <div className="ml-auto flex items-center gap-2">
+    <FeaturePageHeader
+      testId="logs-page-header"
+      icon={<ScrollTextIcon />}
+      title={t("pageHeader.breadcrumbLogs")}
+      breadcrumb={
+        <Breadcrumb>
+          <BreadcrumbList>
+            <BreadcrumbItem>
+              <BreadcrumbLink asChild>
+                <Link href="/">{t("pageHeader.breadcrumbHome")}</Link>
+              </BreadcrumbLink>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              <BreadcrumbPage>{t("pageHeader.breadcrumbLogs")}</BreadcrumbPage>
+            </BreadcrumbItem>
+          </BreadcrumbList>
+        </Breadcrumb>
+      }
+      status={
+        <Badge
+          variant="secondary"
+          data-testid="logs-page-header-live-pill"
+          className="font-mono text-xs tabular-nums"
+        >
+          {liveLabel}
+        </Badge>
+      }
+      controls={
         <Select value={api.activePresetId} onValueChange={api.handlePresetChange}>
           <SelectTrigger className="h-8 w-[200px]" data-testid="log-page-header-preset-trigger">
             <SelectValue placeholder={t("presets")} />
@@ -100,7 +103,8 @@ function LogsPageHeader() {
             ))}
           </SelectContent>
         </Select>
-
+      }
+      actions={
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -116,7 +120,7 @@ function LogsPageHeader() {
           </TooltipTrigger>
           <TooltipContent>{t("pageHeader.help")}</TooltipContent>
         </Tooltip>
-      </div>
-    </header>
+      }
+    />
   )
 }

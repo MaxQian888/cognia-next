@@ -70,7 +70,7 @@ describe("WORKFLOW_SLASH_COMMANDS — gating", () => {
       const ctx = makeCtx({
         activeSessionId: "s_main",
         pushSystemMessage: (m) => {
-          pushes.push(m)
+          if (typeof m === "string") pushes.push(m)
         },
       })
       await cmdByName.validate.handler!(ctx)
@@ -136,7 +136,7 @@ describe("WORKFLOW_SLASH_COMMANDS — gating", () => {
         makeCtx({
           args: "  ",
           pushSystemMessage: (m) => {
-            pushes.push(m)
+            if (typeof m === "string") pushes.push(m)
           },
         })
       )

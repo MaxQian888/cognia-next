@@ -1,0 +1,6 @@
+{
+  "addManualTrigger": "添加手动触发",
+  "browseTemplates": "浏览模板",
+  "description": "从左侧拖入一个触发节点开始，然后连接到操作节点。",
+  "title": "空工作流"
+}

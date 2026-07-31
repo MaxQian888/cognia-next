@@ -5,6 +5,11 @@
 import { validatePluginManifest, validatePluginConfig } from "./validation"
 import type { PluginConfigSchema } from "@/types/plugin"
 import type { PluginManifest } from "@/types/plugin"
+import {
+  CANONICAL_CONTEXT_ACTIVITIES,
+  CONTEXT_RESOURCE_READ_PERMISSIONS,
+} from "@/types/context-workbench"
+import type { ContextResourceKind } from "@/types/context-workbench"
 
 describe("Plugin Validation", () => {
   describe("validatePluginManifest", () => {
@@ -24,6 +29,889 @@ describe("Plugin Validation", () => {
 
       expect(result.valid).toBe(true)
       expect(result.errors).toHaveLength(0)
+    })
+
+    it("rejects malformed unified template package contributions", () => {
+      const manifest = createValidManifest()
+      manifest.capabilities = ["template-package"]
+      manifest.templatePackages = [
+        {
+          manifest: {
+            schemaVersion: 1,
+            apiVersion: "cognia.ai/templates/v1",
+            id: "another-plugin.templates",
+            version: "1.0.0",
+            name: "Templates",
+            entrypoints: ["missing@1.0.0"],
+            definitions: [],
+            assets: [],
+          },
+          definitions: [],
+        },
+      ]
+
+      const result = validatePluginManifest(manifest)
+
+      expect(result.valid).toBe(false)
+      expect(result.diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "manifest.templatePackages.manifest.invalid",
+            severity: "error",
+          }),
+        ])
+      )
+    })
+
+    it("validates manifest.ide through the locked Code 1.128 catalog", () => {
+      const manifest = createValidManifest()
+      manifest.permissions = ["editor:read"]
+      manifest.ide = {
+        schemaVersion: 1,
+        targets: ["monaco", "pro-ide"],
+        providers: [{ id: "hover", kind: "hover", handler: "provideHover" }],
+      }
+      expect(validatePluginManifest(manifest).valid).toBe(true)
+
+      manifest.ide.contributions = { proposedViews: [] } as never
+      const result = validatePluginManifest(manifest)
+      expect(result.valid).toBe(false)
+      expect(result.diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "manifest.ide.ide_contribution_unclassified",
+            severity: "error",
+          }),
+        ])
+      )
+    })
+
+    it("accepts a complete Marketplace Integration contribution", () => {
+      const manifest = createValidManifest()
+      manifest.capabilities = ["integrations"]
+      manifest.permissions = [
+        "integrations:read",
+        "integrations:events",
+        "integrations:execute",
+        "integrations:manage",
+      ]
+      manifest.integrations = [
+        {
+          id: "github",
+          label: "GitHub",
+          authStrategies: [
+            {
+              id: "oauth",
+              type: "oauth2",
+              label: "OAuth",
+              providerId: "github",
+              scopes: ["repo"],
+              requestAuth: { type: "bearer" },
+            },
+          ],
+          resourceKinds: ["repository", "issue"],
+          eventTypes: [
+            {
+              id: "issue.updated",
+              label: "Issue updated",
+              resourceKinds: ["issue"],
+            },
+          ],
+          actions: [
+            {
+              id: "issue.comment",
+              label: "Comment",
+              handler: "commentIssue",
+              inputSchema: { type: "object" },
+              risk: "write",
+              idempotency: "required",
+            },
+          ],
+          allowedOrigins: ["https://api.github.com"],
+        },
+      ]
+
+      expect(validatePluginManifest(manifest).valid).toBe(true)
+    })
+
+    it("rejects unsafe or incomplete Marketplace Integration definitions", () => {
+      const manifest = createValidManifest()
+      manifest.capabilities = ["integrations"]
+      manifest.integrations = [
+        {
+          id: "github",
+          label: "GitHub",
+          authStrategies: [],
+          resourceKinds: ["issue"],
+          eventTypes: [],
+          actions: [
+            {
+              id: "issue.delete",
+              label: "Delete",
+              handler: "",
+              inputSchema: {},
+              risk: "admin" as never,
+              idempotency: "sometimes" as never,
+            },
+          ],
+          allowedOrigins: ["http://github.example"],
+        },
+      ]
+
+      expect(validatePluginManifest(manifest).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ field: "integrations[0].actions[0].handler" }),
+          expect.objectContaining({ field: "integrations[0].actions[0].risk" }),
+          expect.objectContaining({ field: "integrations[0].actions[0].idempotency" }),
+          expect.objectContaining({ field: "integrations[0].allowedOrigins[0]" }),
+        ])
+      )
+    })
+
+    it("rejects malformed Integration auth strategies and credential injection", () => {
+      const manifest = createValidManifest()
+      manifest.capabilities = ["integrations"]
+      manifest.integrations = [
+        {
+          id: "gitlab",
+          label: "GitLab",
+          authStrategies: [
+            {
+              id: "token",
+              type: "personal-access-token",
+              label: "Token",
+              providerId: "gitlab-token",
+              requestAuth: { type: "header", name: "bad header" },
+            },
+            {
+              id: "token",
+              type: "unknown" as never,
+              label: "",
+              providerId: "",
+              scopes: ["", 42 as never],
+            },
+          ],
+          resourceKinds: [],
+          eventTypes: [],
+          actions: [],
+        },
+      ]
+
+      expect(validatePluginManifest(manifest).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "integrations[0].authStrategies[0].requestAuth",
+          }),
+          expect.objectContaining({
+            field: "integrations[0].authStrategies[1].id",
+          }),
+          expect.objectContaining({
+            field: "integrations[0].authStrategies[1].type",
+          }),
+          expect.objectContaining({
+            field: "integrations[0].authStrategies[1].providerId",
+          }),
+          expect.objectContaining({
+            field: "integrations[0].authStrategies[1].scopes",
+          }),
+        ])
+      )
+    })
+
+    it("restricts workflow kind alias targets to the owning Integration plugin", () => {
+      const manifest = createValidManifest()
+      manifest.id = "github-delivery"
+      manifest.workflowKindAliases = {
+        "trigger.github.webhook": "trigger.integration.event",
+        "action.github.openPr": "github-delivery.action.openPr",
+      }
+      expect(validatePluginManifest(manifest).valid).toBe(true)
+
+      manifest.workflowKindAliases["action.github.mergePr"] = "other-plugin.action.mergePr"
+      expect(validatePluginManifest(manifest).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "manifest.workflow_kind_aliases.target_outside_plugin",
+          }),
+        ])
+      )
+    })
+
+    it("enforces capability minimums through engines.cognia", () => {
+      const manifest = createValidManifest()
+      manifest.engines = { cognia: ">=0.0.9" }
+      const incompatible = validatePluginManifest(manifest)
+      expect(incompatible.diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "engines.cognia",
+            code: "manifest.engines.cognia.capability_minimum",
+            severity: "error",
+          }),
+        ])
+      )
+
+      manifest.engines = { cognia: ">=0.1.0" }
+      expect(validatePluginManifest(manifest).valid).toBe(true)
+    })
+
+    it.each([
+      "externalAgentAdapters",
+      "sessionImporters",
+      "contextProviders",
+      "terminalCompletionProviders",
+      "deploymentFilters",
+      "views",
+      "webviews",
+      "protocolAdapters",
+      "contextPanels",
+      "workspaceBackends",
+      "messageRenderers",
+      "aiProviders",
+      "ocrProviders",
+      "modalMounts",
+      "routingStrategies",
+      "chatMiddlewares",
+    ])("rejects traversal in executable contribution field %s", (field) => {
+      const manifest = createValidManifest() as unknown as Record<string, unknown>
+      manifest.permissions = [
+        "extension:ui",
+        "project:read",
+        "canvas:read",
+        "artifact:read",
+        "workflow:read",
+      ]
+      manifest[field] = [
+        {
+          id: "unsafe-entry",
+          label: "Unsafe Entry",
+          labelKey: "unsafe.entry",
+          entry: "../../outside.js",
+          export: "createEntry",
+          resourceKinds: ["project-file"],
+          activity: "inspect",
+          spec: {},
+        },
+      ]
+
+      const result = validatePluginManifest(manifest)
+
+      expect(result.diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: `${field}[0].entry`,
+            code: `manifest.${field}.entry.traversal`,
+            severity: "error",
+          }),
+        ])
+      )
+    })
+
+    it.each(["main", "pythonMain", "wasmMain", "vscodeMain", "styles"])(
+      "rejects an unsafe top-level runtime entry at %s",
+      (field) => {
+        const manifest = createValidManifest() as unknown as Record<string, unknown>
+        manifest[field] = "C:outside.js"
+        if (field === "pythonMain") manifest.type = "python"
+        if (field === "wasmMain") {
+          manifest.type = "wasm"
+          manifest.wasm = { apiVersion: "0.1.0" }
+        }
+        if (field === "vscodeMain") manifest.type = "vscode-extension"
+
+        const result = validatePluginManifest(manifest)
+
+        expect(result.diagnostics).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              field,
+              code: `manifest.${field}.entry.absolute`,
+              severity: "error",
+            }),
+          ])
+        )
+      }
+    )
+
+    it.each(["vscodeGrammars", "vscodeIconThemes", "vscodeSnippets"])(
+      "rejects traversal in VS Code asset field %s",
+      (field) => {
+        const manifest = createValidManifest() as unknown as Record<string, unknown>
+        manifest[field] = [{ id: "asset", language: "ts", path: "..\\outside.json" }]
+
+        const result = validatePluginManifest(manifest)
+
+        expect(result.diagnostics).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              field: `${field}[0].path`,
+              code: `manifest.${field}.path.traversal`,
+              severity: "error",
+            }),
+          ])
+        )
+      }
+    )
+
+    it("requires a JavaScript entry for Python manifests with JS lazy contributions", () => {
+      const manifest = createValidManifest() as unknown as Record<string, unknown>
+      manifest.type = "python"
+      delete manifest.main
+      manifest.pythonMain = "main.py"
+      manifest.capabilities = ["session-importer"]
+      manifest.sessionImporters = [
+        {
+          id: "legacy-session",
+          label: "Legacy Session",
+          entry: "dist/importer.js",
+          export: "createImporter",
+        },
+      ]
+
+      const result = validatePluginManifest(manifest)
+
+      expect(result.diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "sessionImporters",
+            code: "manifest.contributions.javascript.unsupported_for_python",
+            severity: "error",
+          }),
+        ])
+      )
+    })
+
+    it("rejects JavaScript contributions in Python-only plugins even when main is declared", () => {
+      const manifest = createValidManifest() as unknown as Record<string, unknown>
+      manifest.type = "python"
+      manifest.main = "dist/index.js"
+      manifest.pythonMain = "main.py"
+      manifest.capabilities = ["session-importer"]
+      manifest.sessionImporters = [
+        {
+          id: "legacy-session",
+          label: "Legacy Session",
+          entry: "dist/importer.js",
+          export: "createImporter",
+        },
+      ]
+
+      expect(validatePluginManifest(manifest).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "sessionImporters",
+            code: "manifest.contributions.javascript.unsupported_for_python",
+            severity: "error",
+          }),
+        ])
+      )
+    })
+
+    it("rejects JavaScript contributions for a runtime without a JavaScript entry", () => {
+      const manifest = createValidManifest() as unknown as Record<string, unknown>
+      manifest.type = "wasm"
+      delete manifest.main
+      manifest.wasmMain = "plugin.wasm"
+      manifest.wasm = { apiVersion: "0.1.0" }
+      manifest.contextPanels = [
+        { id: "panel", label: "Panel", entry: "dist/panel.js", export: "createPanel" },
+      ]
+
+      expect(validatePluginManifest(manifest).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "manifest.contributions.javascript.unsupported_for_plugin_type",
+            severity: "error",
+          }),
+        ])
+      )
+    })
+
+    it.each([...CANONICAL_CONTEXT_ACTIVITIES])(
+      "accepts a context panel on the canonical %s activity",
+      (activity) => {
+        // The validator used to hold a hand-copied list, so `workspace` passed
+        // tsc via `CanonicalContextActivity` and then failed at install time.
+        // Driving this from the same source keeps the two from drifting again.
+        const manifest = createValidManifest()
+        manifest.capabilities = ["context-panel"] as PluginManifest["capabilities"]
+        manifest.permissions = ["extension:ui", "canvas:read"]
+        ;(manifest as unknown as Record<string, unknown>).contextPanels = [
+          {
+            id: "outline",
+            label: "Outline",
+            labelKey: "panels.outline",
+            entry: "panel.js",
+            export: "OutlinePanel",
+            resourceKinds: ["canvas-document"],
+            activity,
+          },
+        ]
+
+        const result = validatePluginManifest(manifest, { governanceMode: "warn" })
+
+        expect(result.diagnostics ?? []).not.toEqual(
+          expect.arrayContaining([expect.objectContaining({ code: "activity.invalid" })])
+        )
+      }
+    )
+
+    it.each([
+      [
+        "file-text",
+        "FileText",
+        "legacy kebab-case",
+        "manifest.contextPanels.icon.legacy_kebab_case",
+        "warning",
+      ],
+      ["PanelRight", undefined, "current PascalCase", undefined, undefined],
+      ["not-an-icon", undefined, "unknown", "manifest.contextPanels.icon.invalid", "error"],
+    ] as const)(
+      "handles a %s context-panel icon (%s)",
+      (icon, _replacement, _label, expectedCode, expectedSeverity) => {
+        // `PLUGIN_CONTEXT_PANEL_ICONS` was this surface's published contract and
+        // it was kebab-case, so this is where an installed third-party plugin is
+        // most likely to be holding the old spelling.
+        const manifest = createValidManifest()
+        manifest.capabilities = ["context-panel"] as PluginManifest["capabilities"]
+        manifest.permissions = ["extension:ui", "canvas:read"]
+        ;(manifest as unknown as Record<string, unknown>).contextPanels = [
+          {
+            id: "outline",
+            label: "Outline",
+            labelKey: "panels.outline",
+            entry: "panel.js",
+            export: "OutlinePanel",
+            resourceKinds: ["canvas-document"],
+            activity: "canvas",
+            icon,
+          },
+        ]
+
+        const diagnostics =
+          validatePluginManifest(manifest, { governanceMode: "warn" }).diagnostics ?? []
+        const iconDiagnostics = diagnostics.filter((d) => d.code.includes("icon"))
+
+        if (expectedCode === undefined) {
+          expect(iconDiagnostics).toEqual([])
+          return
+        }
+        expect(iconDiagnostics).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ code: expectedCode, severity: expectedSeverity }),
+          ])
+        )
+      }
+    )
+
+    it.each(
+      Object.entries(CONTEXT_RESOURCE_READ_PERMISSIONS) as Array<[ContextResourceKind, string]>
+    )("accepts a context panel targeting the %s resource kind", (kind, readPermission) => {
+      // Same drift, one field over: this map was hand-copied here without
+      // `session` — the chat dock's fallback resource — so a declarative panel
+      // aimed at the right rail's default state failed to install.
+      const manifest = createValidManifest()
+      manifest.capabilities = ["context-panel"] as PluginManifest["capabilities"]
+      manifest.permissions = ["extension:ui", readPermission] as PluginManifest["permissions"]
+      ;(manifest as unknown as Record<string, unknown>).contextPanels = [
+        {
+          id: "outline",
+          label: "Outline",
+          labelKey: "panels.outline",
+          entry: "panel.js",
+          export: "OutlinePanel",
+          resourceKinds: [kind],
+          activity: "inspect",
+        },
+      ]
+      manifest.i18n = {
+        locales: {
+          en: { "panels.outline": "Outline" },
+          "zh-CN": { "panels.outline": "大纲" },
+        },
+      }
+
+      const result = validatePluginManifest(manifest, { governanceMode: "warn" })
+
+      expect(result.diagnostics ?? []).not.toEqual(
+        expect.arrayContaining([expect.objectContaining({ code: "resourceKinds.invalid" })])
+      )
+    })
+
+    it("accepts a webview-backed context panel without entry/export", () => {
+      const manifest = createValidManifest()
+      manifest.capabilities = ["context-panel", "webview"] as PluginManifest["capabilities"]
+      manifest.permissions = ["extension:ui", "session:read"]
+      ;(manifest as unknown as Record<string, unknown>).webviews = [
+        { id: "inspector", html: "<main></main>" },
+      ]
+      ;(manifest as unknown as Record<string, unknown>).contextPanels = [
+        {
+          id: "inspector",
+          label: "Inspector",
+          labelKey: "panels.inspector",
+          webview: "inspector",
+          resourceKinds: ["session"],
+          activity: "inspect",
+        },
+      ]
+      manifest.i18n = {
+        locales: {
+          en: { "panels.inspector": "Inspector" },
+          "zh-CN": { "panels.inspector": "检查器" },
+        },
+      }
+
+      const result = validatePluginManifest(manifest, { governanceMode: "warn" })
+
+      expect(result.diagnostics ?? []).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ field: expect.stringContaining("contextPanels") }),
+        ])
+      )
+    })
+
+    it("rejects a context panel declaring both webview and entry/export", () => {
+      const manifest = createValidManifest()
+      manifest.capabilities = ["context-panel", "webview"] as PluginManifest["capabilities"]
+      manifest.permissions = ["extension:ui", "session:read"]
+      ;(manifest as unknown as Record<string, unknown>).webviews = [
+        { id: "inspector", html: "<main></main>" },
+      ]
+      ;(manifest as unknown as Record<string, unknown>).contextPanels = [
+        {
+          id: "inspector",
+          label: "Inspector",
+          labelKey: "panels.inspector",
+          webview: "inspector",
+          entry: "panel.js",
+          export: "Panel",
+          resourceKinds: ["session"],
+          activity: "inspect",
+        },
+      ]
+
+      expect(validatePluginManifest(manifest, { governanceMode: "warn" }).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "manifest.contextPanels.webview.conflict",
+            severity: "error",
+          }),
+        ])
+      )
+    })
+
+    it("rejects a context panel referencing a webview id that is not declared", () => {
+      const manifest = createValidManifest()
+      manifest.capabilities = ["context-panel", "webview"] as PluginManifest["capabilities"]
+      manifest.permissions = ["extension:ui", "session:read"]
+      ;(manifest as unknown as Record<string, unknown>).webviews = [
+        { id: "other", html: "<main></main>" },
+      ]
+      ;(manifest as unknown as Record<string, unknown>).contextPanels = [
+        {
+          id: "inspector",
+          label: "Inspector",
+          labelKey: "panels.inspector",
+          webview: "inspector",
+          resourceKinds: ["session"],
+          activity: "inspect",
+        },
+      ]
+
+      expect(validatePluginManifest(manifest, { governanceMode: "warn" }).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "manifest.contextPanels.webview.unknown",
+            severity: "error",
+          }),
+        ])
+      )
+    })
+
+    it("downgrades a webview reference to a warning when webviews[] is absent", () => {
+      // First-party plugins carry contributions on the module-manifest overlay,
+      // so the raw JSON may lack `webviews[]`; the merged manifest is what the
+      // manager validates at enable.
+      const manifest = createValidManifest()
+      manifest.capabilities = ["context-panel", "webview"] as PluginManifest["capabilities"]
+      manifest.permissions = ["extension:ui", "session:read"]
+      ;(manifest as unknown as Record<string, unknown>).contextPanels = [
+        {
+          id: "inspector",
+          label: "Inspector",
+          labelKey: "panels.inspector",
+          webview: "inspector",
+          resourceKinds: ["session"],
+          activity: "inspect",
+        },
+      ]
+
+      const diagnostics = validatePluginManifest(manifest, { governanceMode: "warn" }).diagnostics
+
+      expect(diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "manifest.contextPanels.webview.unresolved",
+            severity: "warning",
+          }),
+        ])
+      )
+      expect(diagnostics).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ code: "manifest.contextPanels.entry.missing" }),
+        ])
+      )
+    })
+
+    it("still requires entry/export when webview is an empty string", () => {
+      const manifest = createValidManifest()
+      manifest.capabilities = ["context-panel"] as PluginManifest["capabilities"]
+      manifest.permissions = ["extension:ui", "session:read"]
+      ;(manifest as unknown as Record<string, unknown>).contextPanels = [
+        {
+          id: "inspector",
+          label: "Inspector",
+          labelKey: "panels.inspector",
+          webview: "",
+          resourceKinds: ["session"],
+          activity: "inspect",
+        },
+      ]
+
+      expect(validatePluginManifest(manifest, { governanceMode: "warn" }).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ code: "manifest.contextPanels.webview.invalid" }),
+          expect.objectContaining({ code: "manifest.contextPanels.entry.missing" }),
+        ])
+      )
+    })
+
+    it("accepts declarative-only VS Code extensions without vscodeMain", () => {
+      const manifest = createValidManifest() as unknown as Record<string, unknown>
+      manifest.type = "vscode-extension"
+      delete manifest.main
+      manifest.themes = [{ id: "dark", name: "Dark", vscodeJsonPath: "themes/dark.json" }]
+
+      expect(validatePluginManifest(manifest).diagnostics).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ code: "manifest.runtime_entry.required_any_of" }),
+        ])
+      )
+    })
+
+    it.each([
+      ["ocrProviders", "media", { id: "ocr", label: "OCR", entry: "ocr.js", export: "createOcr" }],
+      [
+        "aiProviders",
+        "ai-provider",
+        {
+          id: "ai",
+          label: "AI",
+          entry: "ai.js",
+          export: "createAi",
+          kind: "embedding",
+          dimensions: 3,
+        },
+      ],
+    ])("rejects %s JavaScript providers in Python-only plugins", (field, capability, entry) => {
+      const manifest = createValidManifest() as unknown as Record<string, unknown>
+      manifest.type = "python"
+      delete manifest.main
+      manifest.pythonMain = "main.py"
+      manifest.capabilities = [capability]
+      manifest[field] = [entry]
+
+      expect(validatePluginManifest(manifest).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field,
+            code: "manifest.contributions.javascript.unsupported_for_python",
+          }),
+        ])
+      )
+    })
+
+    it("rejects traversal in theme vscodeJsonPath", () => {
+      const manifest = createValidManifest() as unknown as Record<string, unknown>
+      manifest.themes = [{ id: "escape", name: "Escape", vscodeJsonPath: "../../outside.json" }]
+
+      expect(validatePluginManifest(manifest).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "themes[0].vscodeJsonPath",
+            code: "manifest.themes.vscodeJsonPath.traversal",
+          }),
+        ])
+      )
+    })
+
+    it.each([
+      ["fonts", { fonts: [{ family: "X", files: [{ weight: 400, src: "../font.woff2" }] }] }],
+      [
+        "wallpapers",
+        {
+          wallpapers: [
+            {
+              id: "escape",
+              name: "Escape",
+              source: {
+                kind: "image",
+                relPath: "..\\wallpaper.png",
+                mime: "image/png",
+                width: 1,
+                height: 1,
+              },
+            },
+          ],
+        },
+      ],
+      [
+        "cliTools",
+        {
+          cliTools: [
+            {
+              id: "escape",
+              name: "Escape",
+              description: "Escape",
+              permission: "cli:execute",
+              binary: { kind: "plugin-dir", relPath: "../../tool" },
+              argv: [],
+            },
+          ],
+        },
+      ],
+      ["vscodeLanguages", { vscodeLanguages: [{ id: "x", configuration: "../language.json" }] }],
+      [
+        "vscodeLanguages",
+        { vscodeLanguages: [{ id: "x", icon: { light: "../light.svg", dark: "dark.svg" } }] },
+      ],
+    ])("rejects traversal in %s asset paths", (_field, contribution) => {
+      const manifest = Object.assign(createValidManifest(), contribution)
+      expect(validatePluginManifest(manifest as PluginManifest).valid).toBe(false)
+    })
+
+    it("accepts host-only variants in Python and rejects only code-backed variants", () => {
+      const base = createValidManifest() as unknown as Record<string, unknown>
+      base.type = "python"
+      delete base.main
+      base.pythonMain = "main.py"
+      base.protocolAdapters = [
+        {
+          id: "data",
+          label: "Data",
+          spec: {
+            kind: "openai-compatible-variant",
+            urlTemplate: "https://example.test",
+            responsePaths: { textDelta: "delta" },
+          },
+        },
+      ]
+      base.webviews = [{ id: "inline", containerId: "main", html: "<p>safe</p>" }]
+      expect(validatePluginManifest(base as unknown as PluginManifest).valid).toBe(true)
+
+      base.protocolAdapters = [
+        { id: "code", label: "Code", spec: { kind: "code" }, entry: "adapter.js", export: "x" },
+      ]
+      expect(validatePluginManifest(base as unknown as PluginManifest).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "protocolAdapters",
+            code: "manifest.contributions.javascript.unsupported_for_python",
+          }),
+        ])
+      )
+    })
+
+    it("treats connectors on a Python plugin as an experimental python-backed contribution", () => {
+      // `connectors` declares no JS module path (its `factory` is just a symbol
+      // name a python handler can own too), so on a python plugin the backend
+      // defaults to python and routes through the plugin_python_call seam.
+      // The capability is pythonExecution "experimental", hence the warning.
+      const manifest = createValidManifest() as unknown as Record<string, unknown>
+      manifest.type = "python"
+      delete manifest.main
+      manifest.pythonMain = "main.py"
+      manifest.connectors = [
+        {
+          type: "custom",
+          factory: "createConnector",
+          configSchema: {},
+          transportModes: ["polling"],
+        },
+      ]
+      const diagnostics = validatePluginManifest(manifest as unknown as PluginManifest).diagnostics
+      expect(diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "connectors",
+            code: "manifest.contributions.python.experimental",
+            severity: "warning",
+          }),
+        ])
+      )
+      expect((diagnostics ?? []).filter((d) => d.severity === "error")).toEqual([])
+    })
+
+    it("rejects an explicitly JS-backed connector on a Python-only plugin", () => {
+      const manifest = createValidManifest() as unknown as Record<string, unknown>
+      manifest.type = "python"
+      delete manifest.main
+      manifest.pythonMain = "main.py"
+      manifest.connectors = [
+        {
+          type: "custom",
+          backend: "js",
+          factory: "createConnector",
+          configSchema: {},
+          transportModes: ["polling"],
+        },
+      ]
+      expect(validatePluginManifest(manifest as unknown as PluginManifest).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "connectors",
+            code: "manifest.contributions.javascript.unsupported_for_python",
+            severity: "error",
+          }),
+        ])
+      )
+    })
+
+    it.each([
+      ["main", { main: "..\\outside.js" }],
+      ["browser", { browser: "..\\outside.js" }],
+      ["l10n", { l10n: "..\\outside" }],
+      ["languages", { contributes: { languages: [{ configuration: "..\\outside.json" }] } }],
+      [
+        "language icons",
+        {
+          contributes: {
+            languages: [{ icon: { light: "../../outside.svg", dark: "icons/dark.svg" } }],
+          },
+        },
+      ],
+      ["grammars", { contributes: { grammars: [{ path: "..\\outside.json" }] } }],
+      ["themes", { contributes: { themes: [{ path: "..\\outside.json" }] } }],
+      ["iconThemes", { contributes: { iconThemes: [{ path: "..\\outside.json" }] } }],
+      ["productIconThemes", { contributes: { productIconThemes: [{ path: "..\\outside.json" }] } }],
+      ["snippets", { contributes: { snippets: [{ path: "..\\outside.json" }] } }],
+      ["chatInstructions", { contributes: { chatInstructions: [{ path: "..\\outside.md" }] } }],
+      ["chatPromptFiles", { contributes: { chatPromptFiles: [{ path: "..\\outside.md" }] } }],
+    ])("rejects traversal in nested VS Code %s paths", (_field, vscodeExtension) => {
+      const manifest = createValidManifest() as unknown as Record<string, unknown>
+      manifest.type = "vscode-extension"
+      manifest.vscodeMain = "dist/extension.js"
+      manifest.vscodeExtension = vscodeExtension
+
+      expect(validatePluginManifest(manifest).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: expect.stringMatching(/\.traversal$/),
+            severity: "error",
+          }),
+        ])
+      )
     })
 
     it("should reject missing id", () => {
@@ -73,6 +961,19 @@ describe("Plugin Validation", () => {
         manifest.id = id
         const result = validatePluginManifest(manifest)
         expect(result.valid).toBe(true)
+      }
+    })
+
+    it("should reject host-reserved and overlong plugin ids", () => {
+      for (const id of [".host-state", "_marketplace_cache", "_backups", "a".repeat(129)]) {
+        const manifest = createValidManifest()
+        manifest.id = id
+        const result = validatePluginManifest(manifest)
+        expect(result.diagnostics).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ code: "manifest.id.invalid_format", field: "id" }),
+          ])
+        )
       }
     })
 
@@ -133,6 +1034,74 @@ describe("Plugin Validation", () => {
           }),
         ])
       )
+    })
+
+    describe("networkAccess", () => {
+      const withNetworkAccess = (networkAccess: unknown): PluginManifest => {
+        const manifest = createValidManifest() as unknown as Record<string, unknown>
+        manifest.networkAccess = networkAccess
+        return manifest as unknown as PluginManifest
+      }
+
+      it("accepts a domain allowlist without reasoning", () => {
+        const result = validatePluginManifest(
+          withNetworkAccess({ allowedDomains: ["api.example.com", "*.github.com"] })
+        )
+        expect(result.errors).toHaveLength(0)
+      })
+
+      it("accepts any-host access when reasoning is provided", () => {
+        const result = validatePluginManifest(
+          withNetworkAccess({ allowedDomains: ["*"], reasoning: "needs arbitrary web fetch" })
+        )
+        expect(result.errors).toHaveLength(0)
+        expect(
+          result.diagnostics!.some((d) => d.code === "manifest.networkAccess.reasoning.required")
+        ).toBe(false)
+      })
+
+      it("warns when '*' is requested without reasoning", () => {
+        const result = validatePluginManifest(withNetworkAccess({ allowedDomains: ["*"] }))
+        expect(result.diagnostics).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              severity: "warning",
+              field: "networkAccess.reasoning",
+              code: "manifest.networkAccess.reasoning.required",
+            }),
+          ])
+        )
+      })
+
+      it("rejects a non-object networkAccess", () => {
+        const result = validatePluginManifest(withNetworkAccess("everything"))
+        expect(result.valid).toBe(false)
+        expect(result.diagnostics!.some((d) => d.code === "manifest.networkAccess.invalid")).toBe(
+          true
+        )
+      })
+
+      it("rejects allowedDomains that is not an array", () => {
+        const result = validatePluginManifest(withNetworkAccess({ allowedDomains: "example.com" }))
+        expect(result.valid).toBe(false)
+        expect(
+          result.diagnostics!.some(
+            (d) => d.code === "manifest.networkAccess.allowedDomains.invalid"
+          )
+        ).toBe(true)
+      })
+
+      it("rejects blank/non-string allowedDomains entries", () => {
+        const result = validatePluginManifest(
+          withNetworkAccess({ allowedDomains: ["ok.com", "  "] })
+        )
+        expect(result.valid).toBe(false)
+        expect(
+          result.diagnostics!.some(
+            (d) => d.code === "manifest.networkAccess.allowedDomains.entry.invalid"
+          )
+        ).toBe(true)
+      })
     })
 
     describe("requires.binaries", () => {
@@ -245,10 +1214,22 @@ describe("Plugin Validation", () => {
       delete pythonManifest.main
       expect(validatePluginManifest(pythonManifest).valid).toBe(true)
 
-      // Test hybrid type (needs main, pythonMain is optional)
+      // Hybrid plugins always own a Python runtime and therefore require pythonMain.
       const hybridManifest = createValidManifest()
       hybridManifest.type = "hybrid"
+      hybridManifest.pythonMain = "main.py"
       expect(validatePluginManifest(hybridManifest).valid).toBe(true)
+
+      delete hybridManifest.pythonMain
+      expect(validatePluginManifest(hybridManifest).diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "pythonMain",
+            code: "manifest.pythonMain.required",
+            severity: "error",
+          }),
+        ])
+      )
     })
 
     it("should handle empty capabilities", () => {
@@ -272,9 +1253,13 @@ describe("Plugin Validation", () => {
       expect(result.errors.some((e) => e.includes("capability"))).toBe(true)
     })
 
-    it("should surface partial capability diagnostics in warn mode", () => {
+    it("should surface experimental capability diagnostics in warn mode", () => {
+      // `processors` is still an `experimental` capability in the host
+      // contract. (`themes`, used here before, was promoted
+      // partial→supported and no longer emits a diagnostic — and no
+      // capability remains in the `partial` status.)
       const manifest = createValidManifest()
-      manifest.capabilities = ["themes"]
+      manifest.capabilities = ["processors"]
 
       const result = validatePluginManifest(manifest, { governanceMode: "warn" })
 
@@ -284,7 +1269,7 @@ describe("Plugin Validation", () => {
           expect.objectContaining({
             severity: "warning",
             field: "capabilities",
-            code: "manifest.capabilities.plugin.capability.partial",
+            code: "manifest.capabilities.plugin.capability.experimental",
           }),
         ])
       )
@@ -346,6 +1331,94 @@ describe("Plugin Validation", () => {
         ).toBe(false)
       })
 
+      it("does not flag the manifest's own capabilities array as a contribution field", () => {
+        // The api-only contracts (media / canvas / ai-provider) used to list
+        // "capabilities" as their manifest field, which made every manifest
+        // emit a bogus field_undeclared warning.
+        const manifest = createValidManifest()
+        ;(manifest as unknown as Record<string, unknown>).tools = [
+          { name: "t", description: "d", parametersSchema: {} },
+        ]
+        const result = validatePluginManifest(manifest, { governanceMode: "warn" })
+        expect(
+          result.diagnostics!.some(
+            (d) =>
+              d.code === "manifest.capability.field_undeclared" &&
+              d.message.includes('"capabilities"')
+          )
+        ).toBe(false)
+      })
+
+      it("treats api-only capabilities (media) as satisfied without a contribution field", () => {
+        const manifest = createValidManifest()
+        manifest.capabilities = ["media"] as PluginManifest["capabilities"]
+        const result = validatePluginManifest(manifest, { governanceMode: "warn" })
+        expect(
+          result.diagnostics!.some((d) => d.code === "manifest.capability.field_missing")
+        ).toBe(false)
+      })
+
+      it("accepts every PluginPermission union member without an unknown-permission warning", () => {
+        const manifest = createValidManifest()
+        // The drift-prone tail of the union — media/sandbox/native entries
+        // were historically missing from VALID_PERMISSIONS.
+        manifest.permissions = [
+          "media:image:read",
+          "media:image:write",
+          "media:video:read",
+          "media:video:write",
+          "media:video:export",
+          "sandbox:web-execute",
+          "native:input",
+          "native:screen",
+        ] as PluginManifest["permissions"]
+        const result = validatePluginManifest(manifest, { governanceMode: "warn" })
+        expect(result.diagnostics!.some((d) => d.code === "manifest.permissions.unknown")).toBe(
+          false
+        )
+      })
+
+      it("recognizes the workflows object block as a populated contribution field", () => {
+        const manifest = createValidManifest()
+        manifest.capabilities = ["workflow"] as PluginManifest["capabilities"]
+        ;(manifest as unknown as Record<string, unknown>).workflows = {
+          nodes: [{ kind: "demo.node", entry: "src/index.ts", export: "demoNode" }],
+        }
+        const result = validatePluginManifest(manifest, { governanceMode: "warn" })
+        expect(
+          result.diagnostics!.some(
+            (d) => d.code === "manifest.capability.field_missing" && d.message.includes("workflows")
+          )
+        ).toBe(false)
+      })
+
+      it("treats an empty workflows object block as missing", () => {
+        const manifest = createValidManifest()
+        manifest.capabilities = ["workflow"] as PluginManifest["capabilities"]
+        ;(manifest as unknown as Record<string, unknown>).workflows = { nodes: [], triggers: [] }
+        const result = validatePluginManifest(manifest, { governanceMode: "warn" })
+        expect(
+          result.diagnostics!.some(
+            (d) => d.code === "manifest.capability.field_missing" && d.message.includes("workflows")
+          )
+        ).toBe(true)
+      })
+
+      it("flags a populated workflows block whose capability tag is missing", () => {
+        const manifest = createValidManifest()
+        manifest.capabilities = []
+        ;(manifest as unknown as Record<string, unknown>).workflows = {
+          triggers: [{ kind: "demo.trigger", entry: "src/index.ts", export: "demoTrigger" }],
+        }
+        const result = validatePluginManifest(manifest, { governanceMode: "warn" })
+        expect(
+          result.diagnostics!.some(
+            (d) =>
+              d.code === "manifest.capability.field_undeclared" && d.message.includes("workflows")
+          )
+        ).toBe(true)
+      })
+
       it("accepts the newly-contracted capabilities without an invalid-capability error", () => {
         for (const cap of ["theme-pack", "fonts", "wallpapers", "tray"]) {
           const manifest = createValidManifest()
@@ -353,6 +1426,178 @@ describe("Plugin Validation", () => {
           const result = validatePluginManifest(manifest, { governanceMode: "warn" })
           expect(result.errors.some((e) => e.includes("Invalid capability"))).toBe(false)
         }
+      })
+
+      it("recognizes field-driven module bridge capabilities and their manifest fields", () => {
+        const cases: Array<{
+          capability: string
+          field: string
+          value: unknown
+        }> = [
+          {
+            capability: "workspace-backend",
+            field: "workspaceBackends",
+            value: [{ id: "local", label: "Local", entry: "workspace.js", export: "create" }],
+          },
+          {
+            capability: "message-renderer",
+            field: "messageRenderers",
+            value: [{ id: "demo", partType: "x-demo", entry: "renderer.js", export: "Renderer" }],
+          },
+          {
+            capability: "density-preset",
+            field: "densityPresets",
+            value: [{ name: "compact-plus", vars: { "--density-spacing": "0.75rem" } }],
+          },
+          {
+            capability: "chat-middleware",
+            field: "chatMiddlewares",
+            value: [{ id: "redact", label: "Redact", entry: "chat.js", export: "create" }],
+          },
+          {
+            capability: "modal-mount",
+            field: "modalMounts",
+            value: [{ id: "settings", label: "Settings", entry: "modal.js", export: "Modal" }],
+          },
+          {
+            capability: "terminal-completion",
+            field: "terminalCompletionProviders",
+            value: [{ id: "shell", label: "Shell", entry: "terminal.js", export: "create" }],
+          },
+          {
+            capability: "routing-strategy",
+            field: "routingStrategies",
+            value: [{ id: "cost", label: "Cost", entry: "routing.js", export: "create" }],
+          },
+          {
+            capability: "deployment-filter",
+            field: "deploymentFilters",
+            value: [{ id: "region", label: "Region", entry: "filter.js", export: "create" }],
+          },
+          {
+            capability: "protocol-adapter",
+            field: "protocolAdapters",
+            value: [
+              {
+                id: "variant",
+                label: "Variant",
+                spec: {
+                  kind: "openai-compatible-variant",
+                  urlTemplate: "{baseURL}/chat",
+                  responsePaths: { textDelta: "choices[0].delta.content" },
+                },
+              },
+            ],
+          },
+          {
+            capability: "tool-route",
+            field: "toolRoutes",
+            value: [{ toolName: "search_docs", utterances: ["search the docs"] }],
+          },
+          {
+            capability: "context-provider",
+            field: "contextProviders",
+            value: [{ id: "repo", label: "Repo", entry: "context.js", export: "create" }],
+          },
+          {
+            capability: "context-panel",
+            field: "contextPanels",
+            value: [
+              {
+                id: "outline",
+                label: "Outline",
+                labelKey: "panels.outline",
+                entry: "panel.js",
+                export: "OutlinePanel",
+                resourceKinds: ["canvas-document"],
+                activity: "inspect",
+              },
+            ],
+          },
+        ]
+
+        for (const { capability, field, value } of cases) {
+          const manifest = createValidManifest()
+          manifest.capabilities = [capability] as PluginManifest["capabilities"]
+          if (capability === "context-panel") {
+            manifest.permissions = ["extension:ui", "canvas:read"]
+            manifest.i18n = {
+              locales: {
+                en: { "panels.outline": "Outline" },
+                "zh-CN": { "panels.outline": "大纲" },
+              },
+            }
+          }
+          ;(manifest as unknown as Record<string, unknown>)[field] = value
+
+          const result = validatePluginManifest(manifest, { governanceMode: "warn" })
+
+          expect(result.valid).toBe(true)
+          expect(result.diagnostics!.some((d) => d.code === "manifest.capabilities.invalid")).toBe(
+            false
+          )
+          expect(
+            result.diagnostics!.some(
+              (d) =>
+                d.code === "manifest.capability.field_missing" &&
+                d.message.includes(`"${capability}"`)
+            )
+          ).toBe(false)
+        }
+      })
+    })
+
+    describe("modalMounts presentation options", () => {
+      const withModalMount = (options: unknown): PluginManifest => {
+        const manifest = createValidManifest()
+        manifest.capabilities = ["modal-mount"] as PluginManifest["capabilities"]
+        ;(manifest as unknown as Record<string, unknown>).modalMounts = [
+          { id: "wizard", label: "Wizard", entry: "modal.js", export: "Modal", options },
+        ]
+        return manifest
+      }
+
+      it("accepts a declared size and variant", () => {
+        const result = validatePluginManifest(
+          withModalMount({ size: "lg", variant: "sheet-right" }),
+          { governanceMode: "warn" }
+        )
+        expect(result.valid).toBe(true)
+      })
+
+      it("accepts an omitted options block", () => {
+        const result = validatePluginManifest(withModalMount(undefined), {
+          governanceMode: "warn",
+        })
+        expect(result.valid).toBe(true)
+      })
+
+      it("rejects a non-object options block", () => {
+        const result = validatePluginManifest(withModalMount("large"), { governanceMode: "warn" })
+        expect(result.valid).toBe(false)
+        expect(
+          result.diagnostics!.some((d) => d.code === "manifest.modalMounts.options.invalid")
+        ).toBe(true)
+      })
+
+      it("rejects an unknown size", () => {
+        const result = validatePluginManifest(withModalMount({ size: "enormous" }), {
+          governanceMode: "warn",
+        })
+        expect(result.valid).toBe(false)
+        expect(
+          result.diagnostics!.some((d) => d.code === "manifest.modalMounts.options.size.invalid")
+        ).toBe(true)
+      })
+
+      it("rejects an unknown variant", () => {
+        const result = validatePluginManifest(withModalMount({ variant: "sheet-left" }), {
+          governanceMode: "warn",
+        })
+        expect(result.valid).toBe(false)
+        expect(
+          result.diagnostics!.some((d) => d.code === "manifest.modalMounts.options.variant.invalid")
+        ).toBe(true)
       })
     })
 
@@ -595,6 +1840,37 @@ describe("Plugin Validation", () => {
 
       expect(result.valid).toBe(true)
       expect(result.errors).toHaveLength(0)
+    })
+
+    it("should accept a whole-number value for an integer field", () => {
+      const schema: PluginConfigSchema = {
+        type: "object",
+        properties: { retries: { type: "integer", minimum: 0, maximum: 10 } },
+      }
+      const result = validatePluginConfig({ retries: 3 }, schema)
+      expect(result.valid).toBe(true)
+    })
+
+    it("should reject a non-whole value for an integer field", () => {
+      const schema: PluginConfigSchema = {
+        type: "object",
+        properties: { retries: { type: "integer" } },
+      }
+      const result = validatePluginConfig({ retries: 3.5 }, schema)
+      expect(result.valid).toBe(false)
+      expect(result.errors).toContainEqual(
+        expect.objectContaining({ field: "retries", code: "invalid_type" })
+      )
+    })
+
+    it("should enforce minimum/maximum on an integer field", () => {
+      const schema: PluginConfigSchema = {
+        type: "object",
+        properties: { retries: { type: "integer", minimum: 1, maximum: 5 } },
+      }
+      expect(validatePluginConfig({ retries: 0 }, schema).valid).toBe(false)
+      expect(validatePluginConfig({ retries: 9 }, schema).valid).toBe(false)
+      expect(validatePluginConfig({ retries: 3 }, schema).valid).toBe(true)
     })
 
     it("should reject missing required fields", () => {
@@ -922,6 +2198,160 @@ describe("Plugin Validation", () => {
         expect(result.valid).toBe(false)
         expect(result.diagnostics!.some((d) => d.code === "manifest.i18n.too_many_keys")).toBe(true)
       })
+
+      it("rejects a UI label key missing from any declared locale", () => {
+        const manifest = createValidManifest()
+        manifest.quickActions = [
+          {
+            id: "open",
+            title: "Open",
+            labelKey: "actions.open",
+            command: "open",
+          },
+        ]
+        manifest.i18n = {
+          locales: {
+            en: { "actions.open": "Open" },
+            "zh-CN": {},
+          },
+        }
+
+        const result = validatePluginManifest(manifest)
+
+        expect(result.diagnostics).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              field: "quickActions[0].labelKey",
+              code: "manifest.i18n.key.missing",
+              severity: "error",
+            }),
+          ])
+        )
+      })
+    })
+
+    describe("manifest.extensions", () => {
+      it("accepts a canonical declarative extension with localized metadata", () => {
+        const manifest = createValidManifest()
+        manifest.capabilities = ["components"]
+        manifest.permissions = ["extension:ui"]
+        manifest.extensions = [
+          {
+            point: "chat.input.actions",
+            entry: "dist/surfaces.js",
+            export: "ComposerAction",
+            minWidth: 24,
+            maxWidth: 48,
+            labelKey: "surfaces.composerAction",
+          },
+        ]
+        manifest.i18n = {
+          locales: {
+            en: { "surfaces.composerAction": "Reference action" },
+            "zh-CN": { "surfaces.composerAction": "参考操作" },
+          },
+        }
+
+        expect(validatePluginManifest(manifest).valid).toBe(true)
+      })
+
+      it("rejects unknown points, unsafe entries, and missing UI permission", () => {
+        const manifest = createValidManifest() as unknown as Record<string, unknown>
+        manifest.extensions = [
+          {
+            point: "chat.unknown",
+            entry: "../outside.js",
+            export: "Bad export",
+          },
+        ]
+
+        const result = validatePluginManifest(manifest)
+
+        expect(result.diagnostics).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ code: "manifest.extensions.point.invalid" }),
+            expect.objectContaining({ code: "manifest.extensions.entry.traversal" }),
+            expect.objectContaining({ code: "manifest.extensions.export.invalid" }),
+          ])
+        )
+      })
+    })
+
+    describe("manifest.trayItems", () => {
+      it("accepts a localized tray item with one dispatch target", () => {
+        const manifest = createValidManifest()
+        manifest.capabilities = ["tray"]
+        manifest.trayItems = [
+          {
+            id: "open",
+            label: "Open",
+            labelKey: "tray.open",
+            icon: "PanelTop",
+            command: "reference.open",
+          },
+        ]
+        manifest.i18n = {
+          locales: {
+            en: { "tray.open": "Open" },
+            "zh-CN": { "tray.open": "打开" },
+          },
+        }
+
+        expect(validatePluginManifest(manifest).valid).toBe(true)
+      })
+
+      it("rejects tray items without exactly one dispatch target", () => {
+        const manifest = createValidManifest()
+        manifest.capabilities = ["tray"]
+        manifest.trayItems = [{ id: "open", label: "Open" }]
+
+        const result = validatePluginManifest(manifest)
+
+        expect(result.diagnostics).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ code: "manifest.trayItems.dispatch.invalid" }),
+          ])
+        )
+      })
+    })
+
+    it("rejects unknown Lucide names across native manifest icon fields", () => {
+      const manifest = createValidManifest()
+      manifest.commands = [{ id: "run", name: "Run", icon: "NotARealLucideIcon" as never }]
+
+      const result = validatePluginManifest(manifest)
+
+      expect(result.diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "commands[0].icon",
+            code: "manifest.icon.invalid",
+            severity: "error",
+          }),
+        ])
+      )
+    })
+
+    it("still installs a plugin pinned to the retired kebab-case icon spelling", () => {
+      // `PLUGIN_CONTEXT_PANEL_ICONS` published these names, so a third-party
+      // plugin using one was following the documentation it was written
+      // against. Warn and name the replacement rather than refusing to load.
+      const manifest = createValidManifest()
+      manifest.commands = [{ id: "run", name: "Run", icon: "file-text" as never }]
+
+      const result = validatePluginManifest(manifest)
+
+      expect(result.valid).toBe(true)
+      expect(result.diagnostics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: "commands[0].icon",
+            code: "manifest.icon.legacy_kebab_case",
+            severity: "warning",
+            message: expect.stringContaining("FileText"),
+          }),
+        ])
+      )
     })
 
     // -----------------------------------------------------------------------
@@ -1113,6 +2543,53 @@ describe("Plugin Validation", () => {
         ).toBe(true)
       })
 
+      it("aiProviders accepts catalog-only declarations but rejects Certified and unknown adapters", () => {
+        const valid = withLazy({
+          aiProviders: [
+            {
+              id: "catalog",
+              label: "Catalog",
+              kind: "llm",
+              catalog: {
+                tier: "experimental",
+                adapterFamily: "openai-compatible",
+                modalities: ["language"],
+                offerings: [],
+              },
+            },
+          ],
+        })
+        expect(validatePluginManifest(valid).valid).toBe(true)
+
+        const invalid = withLazy({
+          aiProviders: [
+            {
+              id: "catalog",
+              label: "Catalog",
+              kind: "llm",
+              catalog: {
+                tier: "certified",
+                adapterFamily: "remote-code",
+                modalities: ["language"],
+                offerings: [],
+              },
+            },
+          ],
+        })
+        const result = validatePluginManifest(invalid)
+        expect(result.valid).toBe(false)
+        expect(
+          result.diagnostics!.some(
+            (diagnostic) => diagnostic.code === "manifest.aiProviders.catalog.tier.invalid"
+          )
+        ).toBe(true)
+        expect(
+          result.diagnostics!.some(
+            (diagnostic) => diagnostic.code === "manifest.aiProviders.catalog.adapterFamily.invalid"
+          )
+        ).toBe(true)
+      })
+
       it("chatMiddlewares rejects out-of-range priority and timeout", () => {
         const manifest = withLazy({
           chatMiddlewares: [
@@ -1148,5 +2625,223 @@ describe("Plugin Validation", () => {
         expect(result.valid).toBe(true)
       })
     })
+  })
+})
+
+describe("validatePluginManifest resilience", () => {
+  const withResilience = (resilience: unknown): PluginManifest =>
+    ({
+      id: "test-plugin",
+      name: "Test Plugin",
+      version: "1.0.0",
+      description: "A test plugin",
+      type: "frontend",
+      capabilities: ["tools"],
+      main: "index.js",
+      resilience,
+    }) as unknown as PluginManifest
+
+  it("accepts a well-formed resilience block", () => {
+    const result = validatePluginManifest(
+      withResilience({
+        timeoutMs: 5000,
+        maxRetries: 2,
+        retryable: true,
+        breakerScope: "tool",
+        breaker: { failureThreshold: 3, cooldownMs: 1000, successThreshold: 2 },
+      })
+    )
+    expect(result.valid).toBe(true)
+  })
+
+  it("rejects a non-object resilience block", () => {
+    const result = validatePluginManifest(withResilience("nope"))
+    expect(result.valid).toBe(false)
+    expect(result.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "manifest.resilience.invalid_type" }),
+      ])
+    )
+  })
+
+  it("rejects a non-positive timeoutMs and a negative maxRetries", () => {
+    const result = validatePluginManifest(withResilience({ timeoutMs: 0, maxRetries: -1 }))
+    expect(result.valid).toBe(false)
+    expect(result.errors.some((e) => e.includes("timeoutMs"))).toBe(true)
+    expect(result.errors.some((e) => e.includes("maxRetries"))).toBe(true)
+  })
+
+  it("rejects an invalid breakerScope", () => {
+    const result = validatePluginManifest(withResilience({ breakerScope: "weird" }))
+    expect(result.valid).toBe(false)
+    expect(result.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "manifest.resilience.invalid_scope" }),
+      ])
+    )
+  })
+
+  it("warns when the worst-case budget exceeds the sidecar IPC ceiling", () => {
+    const result = validatePluginManifest(
+      withResilience({ retryable: true, timeoutMs: 60_000, maxRetries: 1 })
+    )
+    expect(result.valid).toBe(true)
+    expect(result.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "manifest.resilience.budget_exceeds_ipc" }),
+      ])
+    )
+  })
+})
+
+describe("validatePluginManifest cliTools", () => {
+  const cliManifest = (overrides: Record<string, unknown> = {}): PluginManifest =>
+    ({
+      id: "cli-demo",
+      name: "CLI Demo",
+      version: "1.0.0",
+      description: "demo",
+      type: "frontend",
+      capabilities: ["cli-tools"],
+      main: "index.js",
+      permissions: ["cli:execute"],
+      requires: { binaries: [{ name: "rg" }] },
+      cliTools: [
+        {
+          name: "ripgrep_search",
+          description: "Search files",
+          parameters: {
+            type: "object",
+            properties: {
+              pattern: { type: "string" },
+              globs: { type: "array", items: { type: "string" } },
+              path: { type: "string" },
+            },
+          },
+          binary: { kind: "requires", name: "rg" },
+          argv: [
+            { literal: "--json" },
+            { param: "globs", eachPrefixedBy: "--glob", omitWhenEmpty: true },
+            { param: "pattern" },
+            { param: "path", omitWhenEmpty: true },
+          ],
+          outputParse: "lines",
+          successExitCodes: [0, 1],
+          timeoutMs: 30000,
+          maxOutputBytes: 500000,
+        },
+      ],
+      ...overrides,
+    }) as unknown as PluginManifest
+
+  const codesOf = (result: ReturnType<typeof validatePluginManifest>) =>
+    (result.diagnostics ?? []).map((d) => d.code)
+
+  it("accepts a fully-specified valid cliTool", () => {
+    const result = validatePluginManifest(cliManifest())
+    expect(result.errors).toHaveLength(0)
+    expect(result.valid).toBe(true)
+  })
+
+  it("requires the cli:execute permission when cliTools is non-empty", () => {
+    const result = validatePluginManifest(cliManifest({ permissions: [] }))
+    expect(result.valid).toBe(false)
+    expect(codesOf(result)).toContain("manifest.cliTools.permission.missing")
+  })
+
+  it("rejects a requires binary not declared in requires.binaries", () => {
+    const manifest = cliManifest()
+    ;(manifest.cliTools![0].binary as { name: string }).name = "ffmpeg"
+    const result = validatePluginManifest(manifest)
+    expect(codesOf(result)).toContain("manifest.cliTools.binary.name.undeclared")
+  })
+
+  it("rejects plugin-dir binaries with traversal or absolute paths", () => {
+    for (const relPath of ["../evil.exe", "/usr/bin/evil", "C:\\evil.exe", "a/../../b"]) {
+      const manifest = cliManifest()
+      manifest.cliTools![0].binary = { kind: "plugin-dir", relPath }
+      const result = validatePluginManifest(manifest)
+      expect(codesOf(result)).toContain("manifest.cliTools.binary.relPath.invalid")
+    }
+    // A safe nested relative path passes.
+    const manifest = cliManifest()
+    manifest.cliTools![0].binary = { kind: "plugin-dir", relPath: "bin/tool.exe" }
+    expect(validatePluginManifest(manifest).valid).toBe(true)
+  })
+
+  it("rejects argv tokens referencing undeclared params", () => {
+    const manifest = cliManifest()
+    manifest.cliTools![0].argv.push({ param: "ghost" })
+    const result = validatePluginManifest(manifest)
+    expect(codesOf(result)).toContain("manifest.cliTools.argv.param.undeclared")
+  })
+
+  it("rejects argv tokens with both or neither of literal/param", () => {
+    const manifest = cliManifest()
+    ;(manifest.cliTools![0].argv as unknown[]).push({ literal: "-x", param: "pattern" }, {})
+    const result = validatePluginManifest(manifest)
+    expect(
+      codesOf(result).filter((c) => c === "manifest.cliTools.argv.token.invalid")
+    ).toHaveLength(2)
+  })
+
+  it("rejects stdin/cwd referencing undeclared params and bad cwd kinds", () => {
+    const manifest = cliManifest()
+    manifest.cliTools![0].stdin = { param: "ghost" }
+    manifest.cliTools![0].cwd = { kind: "param", param: "ghost" } as never
+    const result = validatePluginManifest(manifest)
+    expect(codesOf(result)).toContain("manifest.cliTools.stdin.invalid")
+    expect(codesOf(result)).toContain("manifest.cliTools.cwd.param.undeclared")
+
+    const manifest2 = cliManifest()
+    manifest2.cliTools![0].cwd = { kind: "anywhere" } as never
+    expect(codesOf(validatePluginManifest(manifest2))).toContain("manifest.cliTools.cwd.invalid")
+  })
+
+  it("rejects non-string env values and bad numeric knobs", () => {
+    const manifest = cliManifest()
+    manifest.cliTools![0].env = { GOOD: "1", BAD: 2 } as never
+    manifest.cliTools![0].timeoutMs = -5
+    manifest.cliTools![0].maxOutputBytes = 1.5
+    const result = validatePluginManifest(manifest)
+    const codes = codesOf(result)
+    expect(codes).toContain("manifest.cliTools.env.invalid")
+    expect(codes).toContain("manifest.cliTools.timeoutMs.invalid")
+    expect(codes).toContain("manifest.cliTools.maxOutputBytes.invalid")
+  })
+
+  it("rejects bad outputParse, non-integer exit codes, duplicate names, bad parameters shape", () => {
+    const manifest = cliManifest()
+    manifest.cliTools!.push({
+      ...manifest.cliTools![0],
+      name: "ripgrep_search", // duplicate
+      outputParse: "yaml" as never,
+      successExitCodes: [0, "ok"] as never,
+      parameters: { type: "string" } as never,
+    })
+    const result = validatePluginManifest(manifest)
+    const codes = codesOf(result)
+    expect(codes).toContain("manifest.cliTools.name.duplicate")
+    expect(codes).toContain("manifest.cliTools.outputParse.invalid")
+    expect(codes).toContain("manifest.cliTools.successExitCodes.invalid")
+    expect(codes).toContain("manifest.cliTools.parameters.invalid")
+  })
+
+  it("rejects a non-array cliTools and non-object entries", () => {
+    const bad = cliManifest({ cliTools: "nope" })
+    expect(codesOf(validatePluginManifest(bad))).toContain("manifest.cliTools.invalid")
+    const badEntry = cliManifest({ cliTools: [42] })
+    expect(codesOf(validatePluginManifest(badEntry))).toContain("manifest.cliTools.entry.invalid")
+  })
+
+  it("warns (not errors) when capability is declared but cliTools is empty", () => {
+    const manifest = cliManifest({ cliTools: [] })
+    const result = validatePluginManifest(manifest)
+    expect(result.valid).toBe(true)
+    expect(
+      (result.diagnostics ?? []).some(
+        (d) => d.code === "manifest.capability.field_missing" && d.severity === "warning"
+      )
+    ).toBe(true)
   })
 })

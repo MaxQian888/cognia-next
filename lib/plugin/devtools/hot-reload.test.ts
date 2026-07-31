@@ -1,3 +1,5 @@
+/** @jest-environment jsdom */
+
 /**
  * Tests for Plugin Hot Reload
  */
@@ -12,6 +14,20 @@ jest.mock("@tauri-apps/api/core", () => ({
 jest.mock("@tauri-apps/api/event", () => ({
   listen: jest.fn().mockResolvedValue(() => {}),
 }))
+
+// reloadPythonHost dynamic-imports the manager; default to "not initialized"
+// so non-python tests exercise the silent no-op path.
+jest.mock("@/lib/plugin/core/manager", () => ({
+  getPluginManager: jest.fn(() => {
+    throw new Error("Plugin manager not initialized")
+  }),
+}))
+
+const { getPluginManager: getPluginManagerMock } = jest.requireMock(
+  "@/lib/plugin/core/manager"
+) as { getPluginManager: jest.Mock }
+
+const { listen: listenMock } = jest.requireMock("@tauri-apps/api/event") as { listen: jest.Mock }
 
 describe("PluginHotReload", () => {
   let reloader: PluginHotReload
@@ -96,6 +112,32 @@ describe("PluginHotReload", () => {
       await reloader.stopWatching()
       // No error means success
     })
+
+    // Regression: Tauri's async unlisten rejects with `listeners[eventId].handlerId`
+    // when the registration eval lost the StrictMode mount/unmount race. It is not
+    // awaited here, so calling it raw floated the rejection past the surrounding
+    // try/catch and surfaced as an unhandled rejection.
+    it("swallows a rejecting Tauri unlisten on stopWatching", async () => {
+      const onUnhandled = jest.fn()
+      process.on("unhandledRejection", onUnhandled)
+      try {
+        const unlisten = jest.fn(() =>
+          Promise.reject(new TypeError("listeners[eventId].handlerId"))
+        )
+        listenMock.mockResolvedValueOnce(unlisten)
+        reloader.setConfig({ enabled: true, watchPaths: ["/path/to/plugin-a"] })
+
+        await reloader.startWatching([] as never)
+        await reloader.stopWatching()
+        // Flush microtasks + a macrotask so any unhandled rejection would fire.
+        await new Promise((resolve) => setTimeout(resolve, 0))
+
+        expect(unlisten).toHaveBeenCalledTimes(1)
+        expect(onUnhandled).not.toHaveBeenCalled()
+      } finally {
+        process.off("unhandledRejection", onUnhandled)
+      }
+    })
   })
 
   describe("Plugin Reloading", () => {
@@ -111,6 +153,60 @@ describe("PluginHotReload", () => {
       const results = await reloader.reloadAll()
 
       expect(Array.isArray(results)).toBe(true)
+    })
+  })
+
+  describe("Python host cycling", () => {
+    afterEach(() => {
+      getPluginManagerMock.mockReset()
+      getPluginManagerMock.mockImplementation(() => {
+        throw new Error("Plugin manager not initialized")
+      })
+    })
+
+    const fakeManager = (type: string) => ({
+      getPlugin: jest.fn(() => ({ manifest: { id: "py-plugin", type } })),
+      unloadPythonPlugin: jest.fn().mockResolvedValue(undefined),
+      loadPythonPlugin: jest.fn().mockResolvedValue(undefined),
+    })
+
+    it("cycles the python host (unload then load) for python plugins", async () => {
+      const manager = fakeManager("python")
+      getPluginManagerMock.mockImplementation(() => manager)
+
+      const result = await reloader.reloadPlugin("py-plugin")
+      expect(result.success).toBe(true)
+      expect(manager.unloadPythonPlugin).toHaveBeenCalledWith("py-plugin")
+      expect(manager.loadPythonPlugin).toHaveBeenCalledWith("py-plugin")
+      // Order: unload strictly before load.
+      const unloadOrder = manager.unloadPythonPlugin.mock.invocationCallOrder[0]
+      const loadOrder = manager.loadPythonPlugin.mock.invocationCallOrder[0]
+      expect(unloadOrder).toBeLessThan(loadOrder)
+    })
+
+    it("does not touch the python host for frontend plugins", async () => {
+      const manager = fakeManager("frontend")
+      getPluginManagerMock.mockImplementation(() => manager)
+
+      const result = await reloader.reloadPlugin("js-plugin")
+      expect(result.success).toBe(true)
+      expect(manager.unloadPythonPlugin).not.toHaveBeenCalled()
+      expect(manager.loadPythonPlugin).not.toHaveBeenCalled()
+    })
+
+    it("reports a failed reload when the python host cycle fails", async () => {
+      const manager = fakeManager("hybrid")
+      manager.loadPythonPlugin.mockRejectedValue(new Error("import boom"))
+      getPluginManagerMock.mockImplementation(() => manager)
+
+      const result = await reloader.reloadPlugin("py-plugin")
+      expect(result.success).toBe(false)
+      expect(result.error).toContain("import boom")
+    })
+
+    it("silently skips when the manager is not initialized", async () => {
+      const result = await reloader.reloadPlugin("plugin-a")
+      expect(result.success).toBe(true)
     })
   })
 
@@ -181,3 +277,4 @@ describe("Singleton", () => {
     expect(instance1).toBe(instance2)
   })
 })
+/** @jest-environment jsdom */

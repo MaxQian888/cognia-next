@@ -4,7 +4,7 @@ import { useMemo } from "react"
 import { listCharactersByIds } from "@/lib/db/characters"
 import { getTeam } from "@/lib/db/teams"
 import { useClientLiveQuery } from "@/hooks/data"
-import type { Character, Team } from "@/lib/claude/types"
+import type { Character, Team } from "@cognia/agent-config-types"
 
 export function useTeamMembers(teamId: string | null | undefined): readonly Character[] {
   const team = useClientLiveQuery<Team | undefined>(

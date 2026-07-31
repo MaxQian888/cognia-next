@@ -14,7 +14,48 @@
 
 import { extract, type ExtractDeps } from "@/lib/ocr/index"
 import { OcrError } from "@/lib/ocr/errors"
+import { documentConfidence } from "@/lib/ocr/confidence"
 import { type OcrInput, type OcrOutputFormat, type OcrResult } from "@/types/ocr"
+
+/** Where the OCR'd image came from — lets the chat card show a thumbnail. */
+export interface OcrSourceRef {
+  kind: "data-url" | "file-path" | "attachment-id"
+  value: string
+}
+
+/**
+ * gap4 — custom chat message part emitted by `/ocr` (and the `ocr.extract`
+ * tool) so the recognized text renders as a rich, selectable card instead of a
+ * plain markdown bubble. Rendered by `plugins/ocr/src/ocr-result-card.tsx`,
+ * registered through the plugin message-part registry.
+ */
+export interface OcrResultPart {
+  type: "ocr-result"
+  providerId: string
+  languages: string[]
+  text: string
+  markdown: string
+  durationMs: number
+  cached: boolean
+  /** Mean block confidence (0..1), or null when the provider reports none. */
+  confidence: number | null
+  sourceRef?: OcrSourceRef
+}
+
+/** Project an OcrResult into the persisted `ocr-result` chat part. */
+export function buildOcrResultPart(result: OcrResult, sourceRef?: OcrSourceRef): OcrResultPart {
+  return {
+    type: "ocr-result",
+    providerId: result.providerId,
+    languages: result.languages,
+    text: result.combinedText,
+    markdown: result.combinedMarkdown,
+    durationMs: result.durationMs,
+    cached: result.cached,
+    confidence: documentConfidence(result.document),
+    ...(sourceRef ? { sourceRef } : {}),
+  }
+}
 
 export interface SlashOcrInput {
   /** Raw argv after the `/ocr ` prefix. */
@@ -39,6 +80,8 @@ export interface SlashOcrResult {
   composerText?: string
   /** Raw result — useful for plugin authors. */
   result?: OcrResult
+  /** Where the OCR'd image came from — fed into the chat card thumbnail. */
+  sourceRef?: OcrSourceRef
   /** Error code when the command failed. */
   errorCode?: OcrError["code"]
 }
@@ -136,10 +179,15 @@ export async function handleOcrSlashCommand(input: SlashOcrInput): Promise<Slash
   try {
     const result = await extractFn(ocrInput, deps)
     const body = renderResultMarkdown(result)
+    const sourceRef: OcrSourceRef =
+      parsed.source.kind === "attachment-id"
+        ? { kind: "attachment-id", value: parsed.source.attachmentId }
+        : { kind: "file-path", value: parsed.source.path }
     return {
       system: body,
       composerText: parsed.into === "composer" ? result.combinedMarkdown : undefined,
       result,
+      sourceRef,
     }
   } catch (err) {
     if (err instanceof OcrError) {

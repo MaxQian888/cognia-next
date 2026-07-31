@@ -1,0 +1,23 @@
+{
+  "actions": {
+    "allowOnce": "仅本次允许",
+    "allowSession": "本次会话始终允许",
+    "close": "关闭",
+    "reject": "拒绝"
+  },
+  "ariaLabel": "插件授权对话框",
+  "binary": {
+    "rememberHint": "仅对这些确切的字节跳过本提示。该批准与文件的 SHA-256 绑定，因此二进制文件一旦发生任何改动——更新、重新构建或被篡改——都会再次询问你。它不会信任该插件的发布者，也不适用于任何其他二进制文件。你可以随时在该插件的「权限」标签页中撤销。",
+    "rememberLabel": "记住此二进制文件"
+  },
+  "fields": {
+    "autoReject": "{seconds} 秒后自动拒绝",
+    "binary": "二进制文件：",
+    "defaultReason": "未提供理由。",
+    "morePending": "还有 {count} 个待处理",
+    "permission": "权限：",
+    "plugin": "插件：",
+    "reason": "理由："
+  },
+  "title": "插件请求权限"
+}

@@ -40,6 +40,27 @@ describe("GoalSettingsTab", () => {
     expect(screen.getByTestId("goal-config-inline-stop")).toBeInTheDocument()
   })
 
+  // ── ADR-0070 Phase 2 — the risk-gating opt-out ─────────────────────────
+  it("shows risk gating ON by default and keeps save clean", async () => {
+    const g = await createTestGoal()
+    render(<GoalSettingsTab goal={g} />)
+    expect(screen.getByTestId("goal-config-risk-gating")).toBeChecked()
+    expect(screen.getByTestId("goal-config-save")).toBeDisabled()
+  })
+
+  it("turning risk gating off persists an explicit false", async () => {
+    // The whole reason this toggle exists: three surfaces document
+    // `riskGating: false` as the escape hatch, and it must be reachable.
+    const g = await createTestGoal()
+    render(<GoalSettingsTab goal={g} />)
+    fireEvent.click(screen.getByTestId("goal-config-risk-gating"))
+    fireEvent.click(screen.getByTestId("goal-config-save"))
+    await waitFor(async () => {
+      const fresh = await getGoalRuntime().listGoalsBySession("ses_a")
+      expect(fresh[0]?.config.riskGating).toBe(false)
+    })
+  })
+
   it("save button is disabled when nothing is dirty", async () => {
     const g = await createTestGoal()
     render(<GoalSettingsTab goal={g} />)
@@ -120,5 +141,16 @@ describe("GoalSettingsTab", () => {
     // The component coerces NaN back to the previous draft value, so the
     // visible value matches the prior state.
     expect(Number(turns.value)).toBe(g.config.maxTurns)
+  })
+})
+
+it("toggles requireAcceptance and persists it through the runtime", async () => {
+  const g = await createTestGoal()
+  render(<GoalSettingsTab goal={g} />)
+  fireEvent.click(screen.getByTestId("goal-config-require-acceptance"))
+  fireEvent.click(screen.getByTestId("goal-config-save"))
+  await waitFor(async () => {
+    const fresh = await getGoalRuntime().listGoalsBySession("ses_a")
+    expect(fresh[0]?.config.requireAcceptance).toBe(true)
   })
 })

@@ -36,8 +36,8 @@ export function assertPathInside(rootCwd, target) {
   // Use realpath where possible so symlink escapes are caught. Fall back to
   // the lexically resolved path when the target doesn't exist yet (e.g.
   // before file_write).
-  const canonicalRoot = safeRealpath(absRoot)
-  const canonicalTarget = safeRealpath(absTarget) ?? absTarget
+  const canonicalRoot = safeRealpath(absRoot) ?? absRoot
+  const canonicalTarget = canonicalisePartial(absTarget)
   // Normalise trailing separators so a root of "/a" doesn't accept "/aa".
   const rootWithSep = canonicalRoot.endsWith(path.sep) ? canonicalRoot : canonicalRoot + path.sep
   if (canonicalTarget !== canonicalRoot && !canonicalTarget.startsWith(rootWithSep)) {
@@ -46,12 +46,39 @@ export function assertPathInside(rootCwd, target) {
   return canonicalTarget
 }
 
-function safeRealpath(p) {
+export function safeRealpath(p) {
   try {
     return fs.realpathSync.native(p)
   } catch {
     return null
   }
+}
+
+/**
+ * Canonicalise a path that may not exist yet (write targets). Resolves the
+ * longest existing ancestor via realpath — so platform symlinks like macOS's
+ * `/var` -> `/private/var` are collapsed the same way the root is — then
+ * re-appends the not-yet-created trailing segments. Without this, a write
+ * target under a symlinked temp dir is compared lexically against a realpath'd
+ * root and falsely reported as escaping it.
+ *
+ * @param {string} absTarget  An absolute path.
+ * @returns {string}
+ */
+export function canonicalisePartial(absTarget) {
+  let current = absTarget
+  const missing = [] // segments collected deepest-first
+  for (;;) {
+    const real = safeRealpath(current)
+    if (real !== null) {
+      return missing.length ? path.join(real, ...missing.reverse()) : real
+    }
+    const parent = path.dirname(current)
+    if (parent === current) break // reached the filesystem root; nothing exists
+    missing.push(path.basename(current))
+    current = parent
+  }
+  return absTarget
 }
 
 /**
@@ -382,7 +409,10 @@ export function validateShellCommand(command, args) {
  * @param {{ isError?: boolean }} [opts]
  */
 export function toolText(payload, opts = {}) {
-  const text = typeof payload === "string" ? payload : JSON.stringify(payload, null, 2)
+  // Compact (not pretty-printed) JSON: the model parses either form identically,
+  // but dropping the 2-space indentation + newlines on every object result trims
+  // real tokens across the many object-returning tools (search, hash, stat, …).
+  const text = typeof payload === "string" ? payload : JSON.stringify(payload)
   return {
     content: [{ type: "text", text }],
     ...(opts.isError ? { isError: true } : {}),
@@ -401,4 +431,20 @@ export function toolError(err, contextLabel) {
   const message = err instanceof Error ? err.message : typeof err === "string" ? err : String(err)
   const text = contextLabel ? `${contextLabel}: ${message}` : message
   return toolText(text, { isError: true })
+}
+
+/**
+ * Build an MCP `CallToolResult` carrying a single image content block. The
+ * claude-agent-sdk relays this to Claude as a tool_result image; the ai-sdk
+ * bridge maps it to a multimodal tool-result part via `toModelOutput`.
+ *
+ * @param {string} data      Base64-encoded image bytes.
+ * @param {string} mimeType  e.g. "image/png".
+ * @param {string} [caption] Optional leading text block (path / note).
+ */
+export function toolImage(data, mimeType, caption) {
+  const content = []
+  if (caption) content.push({ type: "text", text: caption })
+  content.push({ type: "image", data, mimeType })
+  return { content }
 }

@@ -42,12 +42,10 @@ function row(over: Partial<PluginRow>): PluginRow {
 beforeEach(() => {
   mockRows = undefined
   usePluginsStore.setState({
-    activeTab: "installed",
     filters: DEFAULT_PLUGIN_FILTERS,
     selection: new Set(),
     detailPluginId: null,
     filterSheetOpen: false,
-    configTarget: null,
     importStaging: null,
     deleteTarget: null,
     permissionReviewTarget: null,

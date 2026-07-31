@@ -7,6 +7,7 @@ import {
   DEFAULT_CONTEXT_WINDOW,
   getLatestUsage,
   getModelContextWindow,
+  sumSessionUsage,
   tokensInWindow,
 } from "./usage"
 import type { UsageInfo } from "./adapter"
@@ -30,8 +31,14 @@ describe("getModelContextWindow", () => {
     expect(getModelContextWindow("")).toBe(DEFAULT_CONTEXT_WINDOW)
   })
 
-  it("falls back to the default for an unknown model id", () => {
-    expect(getModelContextWindow("gpt-5-turbo")).toBe(200_000)
+  it("falls back to the conservative 128k default for an unknown model id", () => {
+    expect(getModelContextWindow("gpt-5-turbo")).toBe(128_000)
+    expect(getModelContextWindow("gpt-5-turbo")).toBe(DEFAULT_CONTEXT_WINDOW)
+  })
+
+  it("uses the reconciled 128k window for DeepSeek tiers", () => {
+    expect(getModelContextWindow("deepseek-chat")).toBe(128_000)
+    expect(getModelContextWindow("deepseek-reasoner")).toBe(128_000)
   })
 
   it("returns 1M for any model carrying the .1m / -1m build suffix", () => {
@@ -80,6 +87,28 @@ describe("tokensInWindow", () => {
   it("treats undefined fields as zero", () => {
     expect(tokensInWindow({})).toBe(0)
     expect(tokensInWindow({ inputTokens: 7 })).toBe(7)
+  })
+
+  it("prefers contextInputTokens (last leg) over the summed inputTokens for the window", () => {
+    // ai-sdk agent loop: `inputTokens` sums every leg's prompt (billing), but the
+    // window only holds the last leg's prompt — `contextInputTokens` reports it.
+    const usage: UsageInfo = {
+      inputTokens: 3000, // 3 legs × ~1000
+      contextInputTokens: 1000, // last leg's prompt = actual window occupancy
+      outputTokens: 50,
+    }
+    expect(tokensInWindow(usage)).toBe(1050)
+  })
+
+  it("prefers an authoritative live-context token count from an external agent", () => {
+    expect(
+      tokensInWindow({
+        inputTokens: 10,
+        outputTokens: 5,
+        cacheReadInputTokens: 2,
+        contextTokens: 120_000,
+      })
+    ).toBe(120_000)
   })
 })
 
@@ -153,6 +182,11 @@ describe("getLatestUsage", () => {
     expect(getLatestUsage(messages)).toBeNull()
   })
 
+  it("recognises authoritative external context usage without billable fields", () => {
+    const usage: UsageInfo = { contextTokens: 120_000, contextWindow: 272_000 }
+    expect(getLatestUsage([asUiMessage("assistant", { usage })])).toEqual(usage)
+  })
+
   it("walks from the tail forward, picking the most recent assistant usage", () => {
     const usageOld: UsageInfo = { inputTokens: 1, outputTokens: 1 }
     const usageNew: UsageInfo = { inputTokens: 100, outputTokens: 50 }
@@ -175,5 +209,63 @@ describe("getLatestUsage", () => {
     const noMetaAssistant = asUiMessage("assistant")
     const messages = [asUiMessage("assistant", { usage }), noMetaAssistant]
     expect(getLatestUsage(messages)).toEqual(usage)
+  })
+})
+
+describe("sumSessionUsage", () => {
+  it("returns all-zero totals for an empty list", () => {
+    expect(sumSessionUsage([])).toEqual({
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+      totalCostUsd: 0,
+      turns: 0,
+    })
+  })
+
+  it("sums every assistant turn's token fields and cost, counting turns", () => {
+    const a: UsageInfo = {
+      inputTokens: 100,
+      outputTokens: 50,
+      cacheReadInputTokens: 10,
+      cacheCreationInputTokens: 5,
+      totalCostUsd: 0.002,
+    }
+    const b: UsageInfo = { inputTokens: 200, outputTokens: 80, totalCostUsd: 0.003 }
+    const messages = [
+      asUiMessage("assistant", { usage: a }),
+      asUiMessage("user"),
+      asUiMessage("assistant", { usage: b }),
+    ]
+    expect(sumSessionUsage(messages)).toEqual({
+      inputTokens: 300,
+      outputTokens: 130,
+      cacheCreationInputTokens: 5,
+      cacheReadInputTokens: 10,
+      totalCostUsd: 0.005,
+      turns: 2,
+    })
+  })
+
+  it("ignores user messages and assistant messages without usage metadata", () => {
+    const a: UsageInfo = { inputTokens: 7 }
+    const messages = [
+      asUiMessage("user"),
+      asUiMessage("assistant"),
+      asUiMessage("assistant", {}),
+      asUiMessage("assistant", { usage: a }),
+    ]
+    const total = sumSessionUsage(messages)
+    expect(total.inputTokens).toBe(7)
+    expect(total.turns).toBe(1)
+  })
+
+  it("counts a turn even when only cost is present (no token fields)", () => {
+    // A result message can carry cost without token counts; it is still a turn.
+    const messages = [asUiMessage("assistant", { usage: { totalCostUsd: 0.001 } as UsageInfo })]
+    const total = sumSessionUsage(messages)
+    expect(total.totalCostUsd).toBeCloseTo(0.001, 6)
+    expect(total.turns).toBe(1)
   })
 })

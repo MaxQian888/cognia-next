@@ -49,7 +49,11 @@ export interface UsePluginMarketplace {
 export interface MarketplaceClient {
   searchPlugins: (opts: {
     query: string
-  }) => Promise<{ entries: PluginMarketplaceEntry[] } | PluginMarketplaceEntry[]>
+  }) => Promise<
+    | { entries: PluginMarketplaceEntry[] }
+    | { plugins: PluginMarketplaceEntry[] }
+    | PluginMarketplaceEntry[]
+  >
   getFeaturedPlugins?: () => Promise<PluginMarketplaceEntry[]>
   getPopularPlugins?: (limit?: number) => Promise<PluginMarketplaceEntry[]>
   getRecentPlugins?: (limit?: number) => Promise<PluginMarketplaceEntry[]>
@@ -98,14 +102,31 @@ export function __resetPluginMarketplaceClientForTests(client: MarketplaceClient
   cachedClient = client
 }
 
-function unwrapEntries(
-  result: Awaited<ReturnType<MarketplaceClient["searchPlugins"]>>
-): PluginMarketplaceEntry[] {
+function normalizeEntries(result: unknown): PluginMarketplaceEntry[] {
   if (Array.isArray(result)) return result
-  return result.entries
+  if (!result || typeof result !== "object") return []
+
+  const wrapped = result as { entries?: unknown; plugins?: unknown }
+  if (Array.isArray(wrapped.entries)) return wrapped.entries
+  if (Array.isArray(wrapped.plugins)) return wrapped.plugins
+  return []
 }
 
-export function usePluginMarketplace(): UsePluginMarketplace {
+export interface UsePluginMarketplaceOptions {
+  /**
+   * Whether to fire an initial marketplace query (search + featured / popular /
+   * recent) on mount. Defaults to `true` for the discover / marketplace
+   * surfaces that render this data immediately. Surfaces that only need the
+   * imperative `refresh()` (e.g. the Library panel's Sync Registry button)
+   * should pass `false` so merely opening the plugins page does not kick off a
+   * network search — that auto-search was the source of the
+   * `[plugin:marketplace] Search failed` log on every page entry.
+   */
+  autoLoad?: boolean
+}
+
+export function usePluginMarketplace(options?: UsePluginMarketplaceOptions): UsePluginMarketplace {
+  const autoLoad = options?.autoLoad ?? true
   const [query, setQuery] = useState("")
   const [state, setState] = useState<PluginMarketplaceQueryState>({ kind: "idle" })
   const [featured, setFeatured] = useState<PluginMarketplaceEntry[]>([])
@@ -123,10 +144,10 @@ export function usePluginMarketplace(): UsePluginMarketplace {
         client.getPopularPlugins?.(10) ?? Promise.resolve([]),
         client.getRecentPlugins?.(10) ?? Promise.resolve([]),
       ])
-      setState({ kind: "ready", results: unwrapEntries(s) })
-      setFeatured(f)
-      setPopular(p)
-      setRecent(r)
+      setState({ kind: "ready", results: normalizeEntries(s) })
+      setFeatured(normalizeEntries(f))
+      setPopular(normalizeEntries(p))
+      setRecent(normalizeEntries(r))
     } catch (err) {
       setState({
         kind: "error",
@@ -156,12 +177,15 @@ export function usePluginMarketplace(): UsePluginMarketplace {
   }, [])
 
   // Initial load — kept simple, no debounce here. Components that wire the
-  // search box should debounce setQuery before calling refresh().
+  // search box should debounce setQuery before calling refresh(). Skipped
+  // entirely when `autoLoad` is false so consumers that only need the
+  // imperative refresh() don't trigger a marketplace search on mount.
   useEffect(() => {
+    if (!autoLoad) return
     const timer = setTimeout(() => void refresh(), 0)
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [autoLoad])
 
   return useMemo(
     () => ({

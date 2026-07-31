@@ -51,7 +51,7 @@ jest.mock("./composer", () => {
 jest.mock("./chat-header", () => ({ ChatHeader: () => null }))
 jest.mock("./character-missing-banner", () => ({ CharacterMissingBanner: () => null }))
 jest.mock("./empty-state", () => ({ EmptyChatState: () => null }))
-jest.mock("./inline-error", () => ({ InlineError: () => null }))
+jest.mock("@/components/error/diagnostic-card", () => ({ InlineError: () => null }))
 jest.mock("./message-list", () => ({ MessageList: () => null }))
 jest.mock("@/components/agent/external-agent/session-panel", () => ({
   ExternalAgentSessionPanel: () => null,
@@ -60,7 +60,11 @@ jest.mock("@/components/plugins/plugin-extension-slot", () => ({
   PluginExtensionSlot: () => null,
 }))
 jest.mock("sonner", () => ({ toast: { success: jest.fn() } }))
-jest.mock("@/lib/ui/motion", () => ({ mobileTransition: () => ({}) }))
+jest.mock("@/lib/ui/motion", () => ({
+  mobileTransition: () => ({}),
+  MOBILE_SPRING: {},
+  useReducedMotionTransition: (t: unknown) => t,
+}))
 jest.mock("next-intl", () => ({ useTranslations: () => (k: string) => k }))
 jest.mock("@/lib/data-hooks/context", () => ({ useCharacter: jest.fn(() => undefined) }))
 
@@ -71,9 +75,29 @@ const storeState = {
   messages: [] as unknown[],
   status: "idle" as const,
   errorMessage: null as string | null,
+  messagesLoading: false,
+  messagesLoadError: null as string | null,
+  // Raw-selector consumers (RunPanel's usage signature, the run-record
+  // persistence subscription) read per-session slices off the state object.
+  sessions: {} as Record<string, { messages: unknown[] }>,
 }
 jest.mock("@/stores/chat", () => ({
-  useChatStore: jest.fn((sel: (s: typeof storeState) => unknown) => sel(storeState)),
+  useChatStore: Object.assign(
+    jest.fn((sel: (s: typeof storeState) => unknown) => sel(storeState)),
+    { getState: () => storeState, subscribe: () => () => {} }
+  ),
+  useSessionMessages: () => storeState.messages,
+  useSessionStatus: () => storeState.status,
+  useSessionErrorMessage: () => storeState.errorMessage,
+  useSessionErrorDiagnostic: () => null,
+  useSessionHasMessages: () => storeState.messages.length > 0,
+  useSessionMessagesLoading: () => storeState.messagesLoading,
+  useSessionMessagesLoadError: () => storeState.messagesLoadError,
+  useIsAtStreamCap: () => false,
+  useSessionRunTiming: () => ({ startedAt: null, pausedAt: null, pausedAccumMs: 0 }),
+  useSessionSteerQueue: () => [],
+  useSessionRunId: () => 0,
+  useSessionToolTimestamps: () => ({}),
 }))
 
 jest.mock("@/stores/settings", () => {
@@ -85,7 +109,7 @@ jest.mock("@/stores/settings", () => {
 })
 
 import { ChatPane } from "./chat-view"
-import type { ChatSession, SendContent } from "@/lib/claude/types"
+import type { ChatSession, SendContent } from "@cognia/agent-config-types"
 
 const mockSession = { id: "s1", title: "Test" } as unknown as ChatSession
 

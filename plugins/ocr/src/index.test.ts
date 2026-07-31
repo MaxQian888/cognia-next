@@ -1,7 +1,15 @@
+/** @jest-environment jsdom */
+import { createNullOcrCache, createNullOcrPageCache } from "@/lib/ocr/cache-contract"
 import "fake-indexeddb/auto"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
-import { ocrPluginDefinition, runOcrTool, type OcrToolInput } from "./index"
-import { createOcrRegistry } from "@/lib/ocr/registry"
+import {
+  defaultDepsBuilder,
+  ocrPluginDefinition,
+  runOcrTool,
+  TOOL_PARAMETERS,
+  type OcrToolInput,
+} from "./index"
+import { createOcrRegistry, getSharedOcrRegistry } from "@/lib/ocr/registry"
 import { DEFAULT_OCR_SETTINGS, type OcrProvider, type OcrResult } from "@/types/ocr"
 
 function makeProvider(): OcrProvider {
@@ -33,6 +41,8 @@ function makeDeps() {
     settings: { ...DEFAULT_OCR_SETTINGS, defaultProviderId: "mock" },
     platform: "web" as const,
     credentialsResolver: async () => ({ secrets: {} }),
+    cache: createNullOcrCache(),
+    pageCache: createNullOcrPageCache(),
   }
 }
 
@@ -108,6 +118,8 @@ describe("runOcrTool", () => {
           settings: { ...DEFAULT_OCR_SETTINGS },
           platform: "web",
           credentialsResolver: async () => ({ secrets: {} }),
+          cache: createNullOcrCache(),
+          pageCache: createNullOcrPageCache(),
         }),
       }
     )
@@ -143,6 +155,8 @@ describe("runOcrTool", () => {
           settings: { ...DEFAULT_OCR_SETTINGS, defaultProviderId: "boom" },
           platform: "web",
           credentialsResolver: async () => ({ secrets: {} }),
+          cache: createNullOcrCache(),
+          pageCache: createNullOcrPageCache(),
         }),
       }
     )
@@ -182,5 +196,30 @@ describe("runOcrTool", () => {
     const out = await runOcrTool({ source: { kind: "screen" } }, { captureScreen })
     expect(out.ok).toBe(false)
     if (!out.ok) expect(out.error).toMatch(/automation disabled/)
+  })
+})
+
+describe("file-path source wiring", () => {
+  // `buildOcrDeps` leaves `filePathResolver` undefined unless a caller supplies
+  // one, and the plugin supplied nothing — so `/ocr <path>` (the usage string
+  // the slash command itself prints) threw
+  // "file-path source requires a filePathResolver" 100% of the time.
+  it("supplies a filePathResolver to the extract deps", async () => {
+    const registry = getSharedOcrRegistry()
+    registry.register(makeProvider())
+    const deps = await defaultDepsBuilder()
+    expect(deps).not.toBeNull()
+    expect(typeof deps?.filePathResolver).toBe("function")
+  })
+
+  it("does not advertise a source kind nothing can resolve", () => {
+    // `attachment_id` has no producer anywhere in the app, so offering it to
+    // the model only ever yields a guaranteed resolver error.
+    const kinds = (
+      TOOL_PARAMETERS as unknown as {
+        properties: { source: { properties: { kind: { enum: string[] } } } }
+      }
+    ).properties.source.properties.kind.enum
+    expect([...kinds]).toEqual(["data_url", "file_path", "screen"])
   })
 })

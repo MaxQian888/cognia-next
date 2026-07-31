@@ -1,0 +1,304 @@
+import { renderHook, act } from "@testing-library/react"
+import { usePetSpeak } from "./use-pet-speak"
+import { emitPetEvent, __resetPetEventBusForTesting } from "@/lib/pet/events/pet-event-bus"
+import { __resetSpeakLimiterForTesting } from "@/lib/pet/bubbles/speak-limiter"
+import { usePetStore } from "@/stores/pet/pet-store"
+import type { PetProfile } from "@/types/pet"
+import type { PetView } from "@/lib/pet/runtime/pet-view"
+import type { AppSettings } from "@cognia/agent-config-types"
+
+const complete = jest.fn()
+const buildUtilityLlmClient = jest.fn()
+jest.mock("@/lib/ai/generation/utility-client", () => ({
+  buildUtilityLlmClient: (...a: unknown[]) => buildUtilityLlmClient(...a),
+}))
+
+// Hermetic storage + memory mocks: no IndexedDB / vector stack in this test.
+const appendPetTurn = jest.fn()
+const listRecentPetTurns = jest.fn()
+jest.mock("@/lib/db/pet-conversation", () => ({
+  appendPetTurn: (...a: unknown[]) => appendPetTurn(...a),
+  listRecentPetTurns: (...a: unknown[]) => listRecentPetTurns(...a),
+}))
+jest.mock("@/lib/memory/runtime/build-deps", () => ({
+  tryBuildMemoryDeps: jest.fn().mockResolvedValue(undefined),
+}))
+
+// Spy on the recall bridge so we can prove PII text never reaches the embedder.
+const recallAboutUser = jest.fn()
+jest.mock("@/lib/pet/llm/recall", () => ({
+  recallAboutUser: (...a: unknown[]) => recallAboutUser(...a),
+}))
+
+// The persona resolver is dynamically imported inside the hook; mock it so we
+// can pin the resolved string and assert it reaches the system prompt.
+const resolveCharacterPersona = jest.fn()
+jest.mock("@/lib/pet/llm/character-persona", () => ({
+  resolveCharacterPersona: (...a: unknown[]) => resolveCharacterPersona(...a),
+}))
+
+// The pet's new voice (W11): mock the speak entry + the character loader so the
+// test stays hermetic (no orchestrator / Dexie).
+const speakPetText = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/lib/tts/speak-pet", () => ({
+  speakPetText: (...a: unknown[]) => speakPetText(...a),
+}))
+const resolveCharacterById = jest.fn().mockResolvedValue(null)
+jest.mock("@/lib/db/characters", () => ({
+  resolveCharacterById: (...a: unknown[]) => resolveCharacterById(...a),
+}))
+
+const stateRef: { current: { settings: Partial<AppSettings> | null } } = {
+  current: { settings: null },
+}
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: (selector: (state: unknown) => unknown) => selector(stateRef.current),
+}))
+
+const profile = {
+  soul: { name: "Boba", personality: "curious and playful" },
+  stage: "adult",
+  level: 3,
+} as unknown as PetProfile
+const view = {
+  effectiveBones: { species: "cat", rarity: "common" },
+  mood: "content",
+  needs: { energy: 80, mood: 70, bond: 40, lastTickAt: "" },
+} as unknown as PetView
+
+function setLlmSpeak(enabled: boolean, petMemory?: { enabled: boolean }) {
+  stateRef.current = {
+    settings: {
+      petSettings: {
+        enabled: true,
+        anchor: "bottom-right",
+        motion: "auto",
+        mutedBubbles: false,
+        size: 96,
+        llmSpeak: { enabled },
+        ...(petMemory ? { petMemory } : {}),
+      },
+    } as Partial<AppSettings>,
+  }
+}
+
+async function emitTalk(userText?: string) {
+  await act(async () => {
+    emitPetEvent({
+      source: "user",
+      kind: "talked",
+      meta: userText ? { userText } : undefined,
+    })
+    // Let the async pipeline (history → recall → speak → record) settle: a
+    // macrotask flush drains all chained microtasks.
+    await new Promise((r) => setTimeout(r, 0))
+    await new Promise((r) => setTimeout(r, 0))
+  })
+}
+
+beforeEach(() => {
+  __resetPetEventBusForTesting()
+  __resetSpeakLimiterForTesting()
+  usePetStore.setState({ bubble: null, oneShotQueue: [] })
+  complete.mockReset().mockResolvedValue("Hehe, hello friend!")
+  buildUtilityLlmClient.mockReset().mockReturnValue({ complete })
+  appendPetTurn.mockReset().mockResolvedValue(1)
+  listRecentPetTurns.mockReset().mockResolvedValue([])
+  recallAboutUser.mockReset().mockResolvedValue("")
+  resolveCharacterPersona.mockReset().mockResolvedValue(null)
+  speakPetText.mockReset().mockResolvedValue(undefined)
+  resolveCharacterById.mockReset().mockResolvedValue(null)
+  setLlmSpeak(true)
+})
+
+afterEach(() => {
+  // Clear any pending bubble timers.
+  usePetStore.setState({ bubble: null })
+})
+
+describe("usePetSpeak", () => {
+  it("answers typed talk with an LLM bubble", async () => {
+    renderHook(() => usePetSpeak({ profile, view, enabled: true }))
+    await emitTalk("hello there")
+    const bubble = usePetStore.getState().bubble
+    expect(bubble?.origin).toBe("llm")
+    expect(bubble?.text).toBe("Hehe, hello friend!")
+    expect(buildUtilityLlmClient).toHaveBeenCalledWith(
+      expect.objectContaining({ featureId: "pet-speak", session: null })
+    )
+  })
+
+  it("falls back to a template when LLM speak is disabled", async () => {
+    setLlmSpeak(false)
+    renderHook(() => usePetSpeak({ profile, view, enabled: true }))
+    await emitTalk("hello there")
+    const bubble = usePetStore.getState().bubble
+    expect(bubble?.origin).toBe("template")
+    expect(buildUtilityLlmClient).not.toHaveBeenCalled()
+  })
+
+  it("speaks the LLM reply aloud (W11)", async () => {
+    renderHook(() => usePetSpeak({ profile, view, enabled: true }))
+    await emitTalk("hello there")
+    expect(speakPetText).toHaveBeenCalledWith("Hehe, hello friend!", undefined)
+  })
+
+  it("speaks in the bound character's voice", async () => {
+    resolveCharacterById.mockResolvedValue({
+      voiceProfile: { provider: "openai", voiceId: "nova" },
+    })
+    renderHook(() => usePetSpeak({ profile, view, enabled: true, activeCharacterId: "c1" }))
+    await emitTalk("hi")
+    expect(resolveCharacterById).toHaveBeenCalledWith("c1")
+    expect(speakPetText).toHaveBeenCalledWith("Hehe, hello friend!", {
+      voiceProfile: { provider: "openai", voiceId: "nova" },
+    })
+  })
+
+  it("does not speak template fallbacks — only real replies", async () => {
+    setLlmSpeak(false)
+    renderHook(() => usePetSpeak({ profile, view, enabled: true }))
+    await emitTalk("hi")
+    expect(speakPetText).not.toHaveBeenCalled()
+  })
+
+  it("acknowledges bare talk (no text) with a template, never the LLM", async () => {
+    renderHook(() => usePetSpeak({ profile, view, enabled: true }))
+    await emitTalk()
+    expect(usePetStore.getState().bubble?.origin).toBe("template")
+    expect(buildUtilityLlmClient).not.toHaveBeenCalled()
+  })
+
+  it("rate-limits rapid talk into template fallbacks", async () => {
+    renderHook(() => usePetSpeak({ profile, view, enabled: true }))
+    await emitTalk("first")
+    expect(usePetStore.getState().bubble?.origin).toBe("llm")
+    // Immediately again — inside the min interval.
+    await emitTalk("second")
+    expect(usePetStore.getState().bubble?.origin).toBe("template")
+    expect(complete).toHaveBeenCalledTimes(1)
+  })
+
+  it("falls back when the model returns nothing", async () => {
+    complete.mockResolvedValueOnce("")
+    renderHook(() => usePetSpeak({ profile, view, enabled: true }))
+    await emitTalk("hello")
+    expect(usePetStore.getState().bubble?.origin).toBe("template")
+  })
+
+  it("never sends PII text to the model OR the recall embedder", async () => {
+    renderHook(() => usePetSpeak({ profile, view, enabled: true }))
+    await emitTalk("my email is alice@example.com please remember it")
+    // Gated before both the recall embed and the model call.
+    expect(recallAboutUser).not.toHaveBeenCalled()
+    expect(complete).not.toHaveBeenCalled()
+    // Still acknowledged, just by template.
+    expect(usePetStore.getState().bubble?.origin).toBe("template")
+  })
+
+  it("does run recall for clean talk text (the gate only blocks PII)", async () => {
+    renderHook(() => usePetSpeak({ profile, view, enabled: true }))
+    await emitTalk("what did we talk about yesterday?")
+    expect(recallAboutUser).toHaveBeenCalledWith(
+      undefined,
+      expect.objectContaining({ queryText: "what did we talk about yesterday?" })
+    )
+    expect(complete).toHaveBeenCalled()
+  })
+
+  it("falls back when no client resolves", async () => {
+    buildUtilityLlmClient.mockReturnValue(null)
+    renderHook(() => usePetSpeak({ profile, view, enabled: true }))
+    await emitTalk("hello")
+    expect(usePetStore.getState().bubble?.origin).toBe("template")
+  })
+
+  it("strips a leading emotion tag and plays the mapped one-shot", async () => {
+    complete.mockResolvedValue("[love] You are the best!")
+    renderHook(() => usePetSpeak({ profile, view, enabled: true }))
+    await emitTalk("do you like me?")
+    const bubble = usePetStore.getState().bubble
+    expect(bubble?.text).toBe("You are the best!")
+    expect(bubble?.origin).toBe("llm")
+    expect(usePetStore.getState().oneShotQueue).toContain("love")
+  })
+
+  it("layers live state + history into the system prompt", async () => {
+    listRecentPetTurns.mockResolvedValue([{ at: 1, userText: "hi", reply: "hey!" }])
+    renderHook(() => usePetSpeak({ profile, view, enabled: true }))
+    await emitTalk("hello")
+    const system = complete.mock.calls[0][1].system as string
+    expect(system).toContain("mood: content")
+    expect(system).toContain("level: 3")
+    expect(system).toContain("Recent things you said together:")
+    expect(system).toContain("emotion tag in square brackets")
+  })
+
+  it("persists the turn when pet memory is on (default)", async () => {
+    renderHook(() => usePetSpeak({ profile, view, enabled: true }))
+    await emitTalk("remember this chat")
+    expect(appendPetTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ userText: "remember this chat", reply: "Hehe, hello friend!" })
+    )
+  })
+
+  it("neither reads nor writes history when pet memory is off", async () => {
+    setLlmSpeak(true, { enabled: false })
+    renderHook(() => usePetSpeak({ profile, view, enabled: true }))
+    await emitTalk("do not remember")
+    expect(usePetStore.getState().bubble?.origin).toBe("llm")
+    expect(listRecentPetTurns).not.toHaveBeenCalled()
+    expect(appendPetTurn).not.toHaveBeenCalled()
+  })
+
+  it("injects the bound character's persona into the system prompt", async () => {
+    resolveCharacterPersona.mockResolvedValue("Warm mentor; tone: gentle")
+    renderHook(() => usePetSpeak({ profile, view, enabled: true, activeCharacterId: "char_1" }))
+    await emitTalk("hello")
+    expect(resolveCharacterPersona).toHaveBeenCalledWith("char_1")
+    const system = complete.mock.calls[0][1].system as string
+    expect(system).toContain("Your human's current persona is: Warm mentor; tone: gentle.")
+  })
+
+  it("omits the persona but still speaks when the resolved persona trips the PII gate", async () => {
+    resolveCharacterPersona.mockResolvedValue("Reach me at bob@example.com any time")
+    renderHook(() => usePetSpeak({ profile, view, enabled: true, activeCharacterId: "char_1" }))
+    await emitTalk("hello")
+    const bubble = usePetStore.getState().bubble
+    expect(bubble?.origin).toBe("llm")
+    const system = complete.mock.calls[0][1].system as string
+    expect(system).not.toContain("Your human's current persona is")
+  })
+
+  it("adds no persona layer when no character is bound", async () => {
+    renderHook(() => usePetSpeak({ profile, view, enabled: true }))
+    await emitTalk("hello")
+    expect(resolveCharacterPersona).not.toHaveBeenCalled()
+    const system = complete.mock.calls[0][1].system as string
+    expect(system).not.toContain("Your human's current persona is")
+  })
+
+  it("caches the resolved persona per character id across talks", async () => {
+    resolveCharacterPersona.mockResolvedValue("Warm mentor")
+    renderHook(() => usePetSpeak({ profile, view, enabled: true, activeCharacterId: "char_1" }))
+    await emitTalk("first")
+    // The limiter would otherwise turn the second talk into a template fallback
+    // before the async block runs — reset it so the cache path is exercised.
+    __resetSpeakLimiterForTesting()
+    await emitTalk("second")
+    expect(resolveCharacterPersona).toHaveBeenCalledTimes(1)
+  })
+
+  it("ignores non-talked events and does nothing when disabled", async () => {
+    renderHook(() => usePetSpeak({ profile, view, enabled: true }))
+    await act(async () => {
+      emitPetEvent({ source: "user", kind: "fed" })
+    })
+    expect(usePetStore.getState().bubble).toBeNull()
+
+    __resetPetEventBusForTesting()
+    renderHook(() => usePetSpeak({ profile, view, enabled: false }))
+    await emitTalk("hello")
+    expect(usePetStore.getState().bubble).toBeNull()
+  })
+})

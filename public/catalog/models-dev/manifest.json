@@ -1,0 +1,1417 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-07-31T03:52:24.109Z",
+  "source": "https://models.dev/api.json",
+  "upstreamRevision": "486b3bf3deeb693cf4e2d26e522f2c7195996ede",
+  "providers": [
+    {
+      "id": "302ai",
+      "path": "providers/302ai.json",
+      "models": 97,
+      "bytes": 51189,
+      "gzipBytes": 4991,
+      "checksum": "sha256:564f0e3bb72546d9532443f4ddf8ad55287fdcb6644c693e4a2580beb8102fa8"
+    },
+    {
+      "id": "abacus",
+      "path": "providers/abacus.json",
+      "models": 95,
+      "bytes": 49590,
+      "gzipBytes": 6279,
+      "checksum": "sha256:98b96d53776eb0ff08a62a3b191b4da8de5beb961367214954cc0c6789075a69"
+    },
+    {
+      "id": "abliteration-ai",
+      "path": "providers/abliteration-ai.json",
+      "models": 2,
+      "bytes": 1414,
+      "gzipBytes": 559,
+      "checksum": "sha256:94f3ad2d2aa3975f0bf8fb9d70dd024c56cecef5f43557958763fd5d759631bd"
+    },
+    {
+      "id": "ai-router",
+      "path": "providers/ai-router.json",
+      "models": 5,
+      "bytes": 3385,
+      "gzipBytes": 800,
+      "checksum": "sha256:f89f9e6485a9881915186ec64810ba555fa0d6596593e4d91c22839e1611b59c"
+    },
+    {
+      "id": "aiand",
+      "path": "providers/aiand.json",
+      "models": 8,
+      "bytes": 4993,
+      "gzipBytes": 1156,
+      "checksum": "sha256:ceb1ad72af64f39a3a3a9bd521a4c7a99e0ff99a152032942978d3fb3c2a30f9"
+    },
+    {
+      "id": "aihubmix",
+      "path": "providers/aihubmix.json",
+      "models": 67,
+      "bytes": 47237,
+      "gzipBytes": 5099,
+      "checksum": "sha256:16e7f11afd04a1c45e54ac9cf064885b44fd2ad5519b11298084a6e95f66eb4a"
+    },
+    {
+      "id": "aki-io",
+      "path": "providers/aki-io.json",
+      "models": 6,
+      "bytes": 3376,
+      "gzipBytes": 974,
+      "checksum": "sha256:182b69c386afd19417a04ebe11e849ba4436c223fbea2fd50c2647e49bcc4502"
+    },
+    {
+      "id": "alibaba",
+      "path": "providers/alibaba.json",
+      "models": 51,
+      "bytes": 27188,
+      "gzipBytes": 3105,
+      "checksum": "sha256:165beb891b7375ef9270a0b80c63a09aae791a0a579eb68614331249138cece5"
+    },
+    {
+      "id": "alibaba-cn",
+      "path": "providers/alibaba-cn.json",
+      "models": 84,
+      "bytes": 44432,
+      "gzipBytes": 4601,
+      "checksum": "sha256:6d46d005b6e610ed9e9010653114fc73801f6334fb15d278a65b30a5cac66188"
+    },
+    {
+      "id": "alibaba-coding-plan",
+      "path": "providers/alibaba-coding-plan.json",
+      "models": 12,
+      "bytes": 6730,
+      "gzipBytes": 1221,
+      "checksum": "sha256:96aeba803bcbe548e7de3ecc76b5de4413a1675464a3b11f54204c514c9d38d9"
+    },
+    {
+      "id": "alibaba-coding-plan-cn",
+      "path": "providers/alibaba-coding-plan-cn.json",
+      "models": 12,
+      "bytes": 6698,
+      "gzipBytes": 1224,
+      "checksum": "sha256:3507c66859f7f3db3a89c2f08cb27bee085f4cc8c04549b8e8292c71e6ea412a"
+    },
+    {
+      "id": "alibaba-token-plan",
+      "path": "providers/alibaba-token-plan.json",
+      "models": 22,
+      "bytes": 12706,
+      "gzipBytes": 1976,
+      "checksum": "sha256:def963103a34f8fd2a68697cf53369c9910892b249c070b5fd13db6039fd2844"
+    },
+    {
+      "id": "alibaba-token-plan-cn",
+      "path": "providers/alibaba-token-plan-cn.json",
+      "models": 22,
+      "bytes": 12582,
+      "gzipBytes": 1986,
+      "checksum": "sha256:adf009edb4647c77d72c8934c6e8eceb81a8905055bbc021165ab1548d2e57e6"
+    },
+    {
+      "id": "amazon-bedrock",
+      "path": "providers/amazon-bedrock.json",
+      "models": 116,
+      "bytes": 71439,
+      "gzipBytes": 6306,
+      "checksum": "sha256:918dd061d4bc925e2f4e96ccf70e46c831619d645fd1fbb40fd49ab74e184fd8"
+    },
+    {
+      "id": "ambient",
+      "path": "providers/ambient.json",
+      "models": 9,
+      "bytes": 5514,
+      "gzipBytes": 1212,
+      "checksum": "sha256:a263298c330ac911e124d1ec99952553e2573ec06527ae039f0da4f95f2ef4d4"
+    },
+    {
+      "id": "anthropic",
+      "path": "providers/anthropic.json",
+      "models": 15,
+      "bytes": 10671,
+      "gzipBytes": 1442,
+      "checksum": "sha256:14fd0d9ba521a2ed4e53d34cc04205557226178f56609bda544bd9b3d2c78dd8"
+    },
+    {
+      "id": "anyapi",
+      "path": "providers/anyapi.json",
+      "models": 30,
+      "bytes": 16857,
+      "gzipBytes": 2712,
+      "checksum": "sha256:1cf83fa7040ad997133bce32242089140e256dbe433a02bc3bcdd3eee0977c2c"
+    },
+    {
+      "id": "atomic-chat",
+      "path": "providers/atomic-chat.json",
+      "models": 5,
+      "bytes": 2571,
+      "gzipBytes": 676,
+      "checksum": "sha256:7116eb7d7703ec1e78e750b2998deda83728d36db0ff14709a124ce4291d5d6b"
+    },
+    {
+      "id": "auriko",
+      "path": "providers/auriko.json",
+      "models": 15,
+      "bytes": 10203,
+      "gzipBytes": 1961,
+      "checksum": "sha256:1df4fc5244950891b276c633c40096573186fc5c4c308a8d901fc5e82ff3865b"
+    },
+    {
+      "id": "azure",
+      "path": "providers/azure.json",
+      "models": 81,
+      "bytes": 47708,
+      "gzipBytes": 5803,
+      "checksum": "sha256:e7934d10be5157badc660f2f2057d2c4cbacdddfd4dc232d3310a4c8f681669a"
+    },
+    {
+      "id": "azure-cognitive-services",
+      "path": "providers/azure-cognitive-services.json",
+      "models": 68,
+      "bytes": 40121,
+      "gzipBytes": 4872,
+      "checksum": "sha256:184918b01d49b72188052074de39fea6b022e3fddf3b38885fcb6dccab8a5b3f"
+    },
+    {
+      "id": "bailing",
+      "path": "providers/bailing.json",
+      "models": 2,
+      "bytes": 1159,
+      "gzipBytes": 510,
+      "checksum": "sha256:cc099f0550727a43a881d93395e101ea1b6d5d6450fdc8c27ec139e43ab1c5ac"
+    },
+    {
+      "id": "baseten",
+      "path": "providers/baseten.json",
+      "models": 16,
+      "bytes": 9683,
+      "gzipBytes": 1677,
+      "checksum": "sha256:4a69f73134c0af005cfa0a026132306a60cbfb3b8150d6753d80e83bc0be1cf6"
+    },
+    {
+      "id": "berget",
+      "path": "providers/berget.json",
+      "models": 9,
+      "bytes": 5410,
+      "gzipBytes": 1311,
+      "checksum": "sha256:6865e1806a45be6b5931d1ed1dffa196437a3a59b4785e0c2c415fe45728e9ec"
+    },
+    {
+      "id": "blueclaw",
+      "path": "providers/blueclaw.json",
+      "models": 2,
+      "bytes": 1168,
+      "gzipBytes": 500,
+      "checksum": "sha256:03eab22004edea63656202a485afb866fc51d39dbbda9e4e46001b63abd40bf1"
+    },
+    {
+      "id": "cerebras",
+      "path": "providers/cerebras.json",
+      "models": 3,
+      "bytes": 1842,
+      "gzipBytes": 666,
+      "checksum": "sha256:d7fd1268e41396d772abee2e02485f0458e9dbbee241539d602589bd98d76502"
+    },
+    {
+      "id": "chutes",
+      "path": "providers/chutes.json",
+      "models": 15,
+      "bytes": 8777,
+      "gzipBytes": 1711,
+      "checksum": "sha256:3bb46a4c4b07300654f390f2ea562161f7549f6a59b1dcc0de7c92b8efbb3f60"
+    },
+    {
+      "id": "clarifai",
+      "path": "providers/clarifai.json",
+      "models": 12,
+      "bytes": 7054,
+      "gzipBytes": 1526,
+      "checksum": "sha256:8eff158d1e295db1467d6025e481d6a1ea9a755991044f0f1935b7a965969d57"
+    },
+    {
+      "id": "claudinio",
+      "path": "providers/claudinio.json",
+      "models": 2,
+      "bytes": 1134,
+      "gzipBytes": 419,
+      "checksum": "sha256:1e2a9fd2f912f6f0e8c155c3e92fc0e3d06dc591023bcc40d9f95fae7176a7b8"
+    },
+    {
+      "id": "cline-pass",
+      "path": "providers/cline-pass.json",
+      "models": 11,
+      "bytes": 7200,
+      "gzipBytes": 1441,
+      "checksum": "sha256:46a7eced62b5a07f3c780e575aa6f7a0fe54367a81c3f570dd15c5e01c9a8e42"
+    },
+    {
+      "id": "cloudferro-sherlock",
+      "path": "providers/cloudferro-sherlock.json",
+      "models": 5,
+      "bytes": 2972,
+      "gzipBytes": 840,
+      "checksum": "sha256:95a4a8d0c6d1fc51beb0f0abbeb7a966f478f672da1d4bba707fcb9567e47bd3"
+    },
+    {
+      "id": "cloudflare-ai-gateway",
+      "path": "providers/cloudflare-ai-gateway.json",
+      "models": 84,
+      "bytes": 48436,
+      "gzipBytes": 5102,
+      "checksum": "sha256:46d0abe2c96904a21831e60315ff402c58ba58e9bde56e578da401cfb5edc225"
+    },
+    {
+      "id": "cloudflare-workers-ai",
+      "path": "providers/cloudflare-workers-ai.json",
+      "models": 22,
+      "bytes": 12786,
+      "gzipBytes": 2332,
+      "checksum": "sha256:04baf51df344e84c80b51842eff4b8fb3066cb892a1e0c2d50b4dfbe9cf930f9"
+    },
+    {
+      "id": "cohere",
+      "path": "providers/cohere.json",
+      "models": 14,
+      "bytes": 7167,
+      "gzipBytes": 1332,
+      "checksum": "sha256:43aa5f916751a6d3829770f0f1328c6446add23c304d49c97001c18783314027"
+    },
+    {
+      "id": "cortecs",
+      "path": "providers/cortecs.json",
+      "models": 58,
+      "bytes": 30903,
+      "gzipBytes": 4421,
+      "checksum": "sha256:c387fb4f5a0b35079d51c08bac99ae3005e8a5a8b041e5a4dd543c1e80a4b811"
+    },
+    {
+      "id": "crof",
+      "path": "providers/crof.json",
+      "models": 25,
+      "bytes": 15608,
+      "gzipBytes": 2326,
+      "checksum": "sha256:df83541a4c1b87cc32fa93a8f3ed80fa6cc627c08dc2615f8e83841bf3c4bc65"
+    },
+    {
+      "id": "crossmodel",
+      "path": "providers/crossmodel.json",
+      "models": 46,
+      "bytes": 31624,
+      "gzipBytes": 4346,
+      "checksum": "sha256:048a22b26520e2da69e369f134a917bd483f23bff1f672d5911c180ba2a65931"
+    },
+    {
+      "id": "daoxe",
+      "path": "providers/daoxe.json",
+      "models": 9,
+      "bytes": 5556,
+      "gzipBytes": 1231,
+      "checksum": "sha256:227c108295973e71e6bf4053b8990d5ec77b58df3cd6e3f0f1b3a083b348d192"
+    },
+    {
+      "id": "databricks",
+      "path": "providers/databricks.json",
+      "models": 30,
+      "bytes": 21046,
+      "gzipBytes": 2975,
+      "checksum": "sha256:88b70e61ede59b32b10a739c38e3deae7d2e2462836ed440bc0273b6419d7353"
+    },
+    {
+      "id": "deepinfra",
+      "path": "providers/deepinfra.json",
+      "models": 41,
+      "bytes": 23903,
+      "gzipBytes": 3255,
+      "checksum": "sha256:6aa744893073ec89b4e54b85ede07824fdb21e31d097df13ed8a403c382a0269"
+    },
+    {
+      "id": "deepseek",
+      "path": "providers/deepseek.json",
+      "models": 4,
+      "bytes": 2605,
+      "gzipBytes": 719,
+      "checksum": "sha256:9332c08f6bfee0cfd0141da7c8f2645f561433e3bc07eb28c8a16eadba9cfbc4"
+    },
+    {
+      "id": "digitalocean",
+      "path": "providers/digitalocean.json",
+      "models": 82,
+      "bytes": 45846,
+      "gzipBytes": 5547,
+      "checksum": "sha256:81901f9810006cf6b1440a88f20fc02aacd6aeb4d31dd5badcb2603bda402d6a"
+    },
+    {
+      "id": "dinference",
+      "path": "providers/dinference.json",
+      "models": 6,
+      "bytes": 3166,
+      "gzipBytes": 854,
+      "checksum": "sha256:cb5c28cd7b039fd116abdca4a69eeff73acad9752787e70bf19c1273ec40082e"
+    },
+    {
+      "id": "drun",
+      "path": "providers/drun.json",
+      "models": 3,
+      "bytes": 1708,
+      "gzipBytes": 625,
+      "checksum": "sha256:62b87c7ca8996db8a5f6383dc4363824c67960415e87c16b0074ebb478cb0706"
+    },
+    {
+      "id": "ebcloud",
+      "path": "providers/ebcloud.json",
+      "models": 4,
+      "bytes": 2471,
+      "gzipBytes": 753,
+      "checksum": "sha256:0d8998dd29eca35d375f9c0059ad40b8f23204d30688770f0b62d198802961bd"
+    },
+    {
+      "id": "empiriolabs",
+      "path": "providers/empiriolabs.json",
+      "models": 37,
+      "bytes": 24140,
+      "gzipBytes": 3408,
+      "checksum": "sha256:a0779daeb6956603f9fbc09ef896d27d37aa761db2c43c95e494dd32fed91b5f"
+    },
+    {
+      "id": "evroc",
+      "path": "providers/evroc.json",
+      "models": 16,
+      "bytes": 8530,
+      "gzipBytes": 1881,
+      "checksum": "sha256:d6304439ba64dc40a54117e4d351a2b6dcc2127cd01ad9599c8d0248a3b6ca56"
+    },
+    {
+      "id": "fastrouter",
+      "path": "providers/fastrouter.json",
+      "models": 47,
+      "bytes": 25048,
+      "gzipBytes": 3665,
+      "checksum": "sha256:65993d3c59fd72396d335a99ce649cc88156296d7d6259991456a5c0f5c191a5"
+    },
+    {
+      "id": "fireworks-ai",
+      "path": "providers/fireworks-ai.json",
+      "models": 16,
+      "bytes": 10531,
+      "gzipBytes": 1588,
+      "checksum": "sha256:94125af4f58065222e55c8ad4a625c337c1f400140ba473163a4b07b59e83964"
+    },
+    {
+      "id": "freemodel",
+      "path": "providers/freemodel.json",
+      "models": 10,
+      "bytes": 6851,
+      "gzipBytes": 1309,
+      "checksum": "sha256:13c2b0352b034081d19eb0a7c9d64f39c8904eb26b35aae2c53407ceabe4fadd"
+    },
+    {
+      "id": "friendli",
+      "path": "providers/friendli.json",
+      "models": 6,
+      "bytes": 3667,
+      "gzipBytes": 1029,
+      "checksum": "sha256:e2195aec6c56e0fb9a53288c7bed18f50e7573822c6f023973ef63230ce4c6e5"
+    },
+    {
+      "id": "frogbot",
+      "path": "providers/frogbot.json",
+      "models": 26,
+      "bytes": 14601,
+      "gzipBytes": 2248,
+      "checksum": "sha256:cd21d9336503091705e0f64ca16b166063c9ad8a14c93f0fcffcb39e5cf9016a"
+    },
+    {
+      "id": "github-copilot",
+      "path": "providers/github-copilot.json",
+      "models": 29,
+      "bytes": 19942,
+      "gzipBytes": 2985,
+      "checksum": "sha256:55abf652c8b78746206c2578864b76d7656b33273f4b25b05ce03e5a54a10f69"
+    },
+    {
+      "id": "github-models",
+      "path": "providers/github-models.json",
+      "models": 55,
+      "bytes": 28659,
+      "gzipBytes": 2648,
+      "checksum": "sha256:8b187854603fd2bee4c8baed1bd3181f079a3fc35f649a233c12edf95d0c0756"
+    },
+    {
+      "id": "gitlab",
+      "path": "providers/gitlab.json",
+      "models": 23,
+      "bytes": 13581,
+      "gzipBytes": 1517,
+      "checksum": "sha256:b9f7f0aebdf62e8c9a4f14bf930ef44e0f0cb8a11ad176c8eda1d4e116cf19fb"
+    },
+    {
+      "id": "gmicloud",
+      "path": "providers/gmicloud.json",
+      "models": 13,
+      "bytes": 8188,
+      "gzipBytes": 1783,
+      "checksum": "sha256:b39193e19506f15dd2a8082f7b903059b10ff33e2c49b1cf410459f47ec9a4ba"
+    },
+    {
+      "id": "google",
+      "path": "providers/google.json",
+      "models": 41,
+      "bytes": 25534,
+      "gzipBytes": 3414,
+      "checksum": "sha256:bc7d037057abea8bdf9649b1c2f0f0cc23178bd0790a8dc1b7c639adb1bc250f"
+    },
+    {
+      "id": "google-vertex",
+      "path": "providers/google-vertex.json",
+      "models": 41,
+      "bytes": 28606,
+      "gzipBytes": 3604,
+      "checksum": "sha256:ef7a60f782f46f72796a86413734b4aad7d049ced4320ed092e306b1c99f7ffa"
+    },
+    {
+      "id": "google-vertex-anthropic",
+      "path": "providers/google-vertex-anthropic.json",
+      "models": 12,
+      "bytes": 8723,
+      "gzipBytes": 1382,
+      "checksum": "sha256:20cf7e29e996fdd16196bb183b899e0cacc34802d144370cb3992e7acc68497d"
+    },
+    {
+      "id": "greenpt",
+      "path": "providers/greenpt.json",
+      "models": 26,
+      "bytes": 13299,
+      "gzipBytes": 2373,
+      "checksum": "sha256:154a2ca3163ab5d1d0ff8f657eae321dd4c5bcf911b0a78a58d87e72c3e77213"
+    },
+    {
+      "id": "groq",
+      "path": "providers/groq.json",
+      "models": 15,
+      "bytes": 7655,
+      "gzipBytes": 1487,
+      "checksum": "sha256:9ff7a2ab39597f3340d1a5e1b81df9f98b6805fd8de7d44d95ded8b2e040af84"
+    },
+    {
+      "id": "helicone",
+      "path": "providers/helicone.json",
+      "models": 90,
+      "bytes": 47754,
+      "gzipBytes": 5161,
+      "checksum": "sha256:b239cffbd3244fa1b86aca6c737f67c2c018f3e812efa49370c8d070eaca29f1"
+    },
+    {
+      "id": "hetzner",
+      "path": "providers/hetzner.json",
+      "models": 1,
+      "bytes": 772,
+      "gzipBytes": 456,
+      "checksum": "sha256:542582df6852ece970e03c4f643094c4ec0e94e9b374d0e1b0647dc82f8fa202"
+    },
+    {
+      "id": "hpc-ai",
+      "path": "providers/hpc-ai.json",
+      "models": 9,
+      "bytes": 5767,
+      "gzipBytes": 1380,
+      "checksum": "sha256:1c4cb54217bd3c9bb889033ba6585be69583b6066710c14bbd15ea27094baf99"
+    },
+    {
+      "id": "huggingface",
+      "path": "providers/huggingface.json",
+      "models": 55,
+      "bytes": 29464,
+      "gzipBytes": 3688,
+      "checksum": "sha256:80603568890907a2ac3121d8d37fd86498dbbdd404519c7f8e2c6c8cdee01b23"
+    },
+    {
+      "id": "hyper",
+      "path": "providers/hyper.json",
+      "models": 23,
+      "bytes": 12265,
+      "gzipBytes": 2287,
+      "checksum": "sha256:9d80eff2f80b0448367423d47e7253175125724631035b63c4ac1d5874791d29"
+    },
+    {
+      "id": "iflowcn",
+      "path": "providers/iflowcn.json",
+      "models": 14,
+      "bytes": 6745,
+      "gzipBytes": 1047,
+      "checksum": "sha256:f35627d1291356a1945d7c4f2b2386bdbc589eaa8528f974bce3d0998e2ebae7"
+    },
+    {
+      "id": "inception",
+      "path": "providers/inception.json",
+      "models": 2,
+      "bytes": 1281,
+      "gzipBytes": 523,
+      "checksum": "sha256:fe2c5e37dedf203a2505d7af50a9246bd9e233bf21893755910f01f3c0765841"
+    },
+    {
+      "id": "inceptron",
+      "path": "providers/inceptron.json",
+      "models": 6,
+      "bytes": 3929,
+      "gzipBytes": 962,
+      "checksum": "sha256:71911d08e16c4d4735074c0e20c0860dc6adb343bf7696583230feebe0955b80"
+    },
+    {
+      "id": "inference",
+      "path": "providers/inference.json",
+      "models": 9,
+      "bytes": 4775,
+      "gzipBytes": 929,
+      "checksum": "sha256:ab91fae4e3925818ada22927200e61fb2eae51f08c7fc8d9247980d066ffea33"
+    },
+    {
+      "id": "inferx",
+      "path": "providers/inferx.json",
+      "models": 6,
+      "bytes": 3439,
+      "gzipBytes": 800,
+      "checksum": "sha256:31ef5f7765249a4f556623f6f4e6057fa82b4fca27f8e13f686a4063cb483463"
+    },
+    {
+      "id": "io-net",
+      "path": "providers/io-net.json",
+      "models": 17,
+      "bytes": 9677,
+      "gzipBytes": 1807,
+      "checksum": "sha256:411cb5dac1b959e66a3fdbc8a54a2f197240f0df0c9554e3253b73c4190893ff"
+    },
+    {
+      "id": "jiekou",
+      "path": "providers/jiekou.json",
+      "models": 61,
+      "bytes": 31713,
+      "gzipBytes": 3215,
+      "checksum": "sha256:f1ed8f2323eb3da5a8617a5534b874b1ff87864b3b99604971a7930981025d02"
+    },
+    {
+      "id": "kenari",
+      "path": "providers/kenari.json",
+      "models": 38,
+      "bytes": 20889,
+      "gzipBytes": 2936,
+      "checksum": "sha256:bfc7ad105e9c7a94847d993a848d8b0c83f9b954deba44236253572294f63bc3"
+    },
+    {
+      "id": "kilo",
+      "path": "providers/kilo.json",
+      "models": 346,
+      "bytes": 177379,
+      "gzipBytes": 16523,
+      "checksum": "sha256:33810c9b04e79b78ad9905dcaf4c8d0394ceecb271b610004dbfe1b533583f1f"
+    },
+    {
+      "id": "kimi-for-coding",
+      "path": "providers/kimi-for-coding.json",
+      "models": 4,
+      "bytes": 2606,
+      "gzipBytes": 764,
+      "checksum": "sha256:484ec8cd8da78d4c4e4acf7dbc867ae29606e8fc29a8d4c43ebaec8f4bdf398e"
+    },
+    {
+      "id": "kuae-cloud-coding-plan",
+      "path": "providers/kuae-cloud-coding-plan.json",
+      "models": 1,
+      "bytes": 847,
+      "gzipBytes": 487,
+      "checksum": "sha256:25c429919696b7a5a1c080f4174f3e76b9b42df941452b06105ff9c52ec51a93"
+    },
+    {
+      "id": "lilac",
+      "path": "providers/lilac.json",
+      "models": 4,
+      "bytes": 2600,
+      "gzipBytes": 830,
+      "checksum": "sha256:1145f0ae90cddde693f2c63bce358e2ce01ad7d421acc3cf1be97b33006b76ac"
+    },
+    {
+      "id": "llama",
+      "path": "providers/llama.json",
+      "models": 7,
+      "bytes": 3858,
+      "gzipBytes": 659,
+      "checksum": "sha256:2ebd86ee74b3fbe766d11fac23c592205814c7cceb2a9415065be5f53f951ddf"
+    },
+    {
+      "id": "llmgateway",
+      "path": "providers/llmgateway.json",
+      "models": 186,
+      "bytes": 104836,
+      "gzipBytes": 12594,
+      "checksum": "sha256:95711ba5d12bae3a618d481a52f63817158fde8e8a2f07271545fa8e0b3894ce"
+    },
+    {
+      "id": "llmtr",
+      "path": "providers/llmtr.json",
+      "models": 6,
+      "bytes": 2778,
+      "gzipBytes": 794,
+      "checksum": "sha256:19dd6436faafc7af8e0db8d57da078dead1a135e64b246a646ffaeab3f06d098"
+    },
+    {
+      "id": "lmstudio",
+      "path": "providers/lmstudio.json",
+      "models": 3,
+      "bytes": 1682,
+      "gzipBytes": 634,
+      "checksum": "sha256:ee19dac7226b17e907ddd9fd19f6c8a9d3eb4174661816c7f31686bfb1c42180"
+    },
+    {
+      "id": "longcat",
+      "path": "providers/longcat.json",
+      "models": 1,
+      "bytes": 761,
+      "gzipBytes": 435,
+      "checksum": "sha256:409ed50ccfdb1dc512196d7e69be623b543d9122b07645285598918bd212f50f"
+    },
+    {
+      "id": "lucidquery",
+      "path": "providers/lucidquery.json",
+      "models": 4,
+      "bytes": 2272,
+      "gzipBytes": 665,
+      "checksum": "sha256:df66b8a7157dfd496067d6ce5d3ffd2740c20176279883e8694fb2117358fe8b"
+    },
+    {
+      "id": "lynkr",
+      "path": "providers/lynkr.json",
+      "models": 1,
+      "bytes": 762,
+      "gzipBytes": 466,
+      "checksum": "sha256:9f995b590b8ca25caa39ce832218241a0982efb49f842c27d554dcfd00ff9a37"
+    },
+    {
+      "id": "meganova",
+      "path": "providers/meganova.json",
+      "models": 19,
+      "bytes": 10151,
+      "gzipBytes": 1701,
+      "checksum": "sha256:7e1853dd5807b9e76923f54accf1275f587e4cb7c167d3a6d563fa45dc680f1f"
+    },
+    {
+      "id": "merge-gateway",
+      "path": "providers/merge-gateway.json",
+      "models": 145,
+      "bytes": 86168,
+      "gzipBytes": 9661,
+      "checksum": "sha256:3214a5ce14c9b0ab80adc7db567c1846c527c6907d9398311bf8a9c48ac144fd"
+    },
+    {
+      "id": "meta",
+      "path": "providers/meta.json",
+      "models": 1,
+      "bytes": 829,
+      "gzipBytes": 493,
+      "checksum": "sha256:0055f179471e709d21827f310041a035d2901e8c01d44e5a056c4b18e7bbca49"
+    },
+    {
+      "id": "minimax",
+      "path": "providers/minimax.json",
+      "models": 7,
+      "bytes": 3911,
+      "gzipBytes": 903,
+      "checksum": "sha256:06bab833ae2394a95fb1a0032e77ea25391a7df475b6c54d1cc1093f8a32a71e"
+    },
+    {
+      "id": "minimax-cn",
+      "path": "providers/minimax-cn.json",
+      "models": 7,
+      "bytes": 3855,
+      "gzipBytes": 749,
+      "checksum": "sha256:5d10c1530dbce5e443f59cc1fc6cb5c2b4ce7b15d75bc1ccf93faf8dbfa2c6e6"
+    },
+    {
+      "id": "minimax-cn-coding-plan",
+      "path": "providers/minimax-cn-coding-plan.json",
+      "models": 7,
+      "bytes": 3686,
+      "gzipBytes": 679,
+      "checksum": "sha256:dd5c9c35c31e952a2158f6ccf0fc1fc3136576750a3a98a0f07c377274e178ea"
+    },
+    {
+      "id": "minimax-coding-plan",
+      "path": "providers/minimax-coding-plan.json",
+      "models": 7,
+      "bytes": 3674,
+      "gzipBytes": 675,
+      "checksum": "sha256:b196fc7b812f08cacc734f36469f2ab47a152ddb96238948d8199c9dbc42f0aa"
+    },
+    {
+      "id": "mistral",
+      "path": "providers/mistral.json",
+      "models": 30,
+      "bytes": 15286,
+      "gzipBytes": 1965,
+      "checksum": "sha256:f1cd26a39699bdd28a769b52e68654b6cf4098f30c6613fd5a77b58a0d6fd3ff"
+    },
+    {
+      "id": "mixlayer",
+      "path": "providers/mixlayer.json",
+      "models": 5,
+      "bytes": 2654,
+      "gzipBytes": 514,
+      "checksum": "sha256:525dd8153ac26830402eb5cbd755e7e0f5ac15af0fc6f773195db63f24458522"
+    },
+    {
+      "id": "moark",
+      "path": "providers/moark.json",
+      "models": 2,
+      "bytes": 1187,
+      "gzipBytes": 527,
+      "checksum": "sha256:6839cd2058d797134c338990cc78d1ee9555efbaf8f8e37eba0409b3d1208d95"
+    },
+    {
+      "id": "modal",
+      "path": "providers/modal.json",
+      "models": 1,
+      "bytes": 815,
+      "gzipBytes": 490,
+      "checksum": "sha256:f3cee0dde6caa2feda6097c89f0e449596ca67a374711057920490c8e29fe9df"
+    },
+    {
+      "id": "model-oracle-ai",
+      "path": "providers/model-oracle-ai.json",
+      "models": 15,
+      "bytes": 8343,
+      "gzipBytes": 1599,
+      "checksum": "sha256:bd401a7f29a85e9b257a4188c43a474f5ff0671cb992c32e39e048e72b67dbac"
+    },
+    {
+      "id": "modelscope",
+      "path": "providers/modelscope.json",
+      "models": 7,
+      "bytes": 3849,
+      "gzipBytes": 782,
+      "checksum": "sha256:85b15d3195af8f4f6340df9a749b86f560f34427754ec81472c0baf1594dac07"
+    },
+    {
+      "id": "moonshotai",
+      "path": "providers/moonshotai.json",
+      "models": 10,
+      "bytes": 5932,
+      "gzipBytes": 1124,
+      "checksum": "sha256:47c158cc3d8cfdcaef3acee786640269737ab58f17ecf896bd97ce64468fa0bb"
+    },
+    {
+      "id": "moonshotai-cn",
+      "path": "providers/moonshotai-cn.json",
+      "models": 10,
+      "bytes": 5946,
+      "gzipBytes": 1133,
+      "checksum": "sha256:25d5e2b70c5bd66ded688064158bf8e67b34804569a637f44fa4c57a039247f4"
+    },
+    {
+      "id": "morph",
+      "path": "providers/morph.json",
+      "models": 3,
+      "bytes": 1533,
+      "gzipBytes": 551,
+      "checksum": "sha256:64d2bab25f3a5c0bf1291f34f489d73a6de01e421f817246f3514bce183086e6"
+    },
+    {
+      "id": "nano-gpt",
+      "path": "providers/nano-gpt.json",
+      "models": 617,
+      "bytes": 318859,
+      "gzipBytes": 26718,
+      "checksum": "sha256:4cd646fd8254375af36ca2358ce92351c4af12294929c0ad01ef98531bfb922c"
+    },
+    {
+      "id": "nearai",
+      "path": "providers/nearai.json",
+      "models": 37,
+      "bytes": 22108,
+      "gzipBytes": 3422,
+      "checksum": "sha256:3a11fc6d1eb2fc534170d3896944b64523b4fd96c1846e634b349f4de063d620"
+    },
+    {
+      "id": "nebius",
+      "path": "providers/nebius.json",
+      "models": 33,
+      "bytes": 20103,
+      "gzipBytes": 2687,
+      "checksum": "sha256:87ce39eae553b99c49470bf5373bcb543d0ac87c614f1867aadf13c3adb582be"
+    },
+    {
+      "id": "neon",
+      "path": "providers/neon.json",
+      "models": 36,
+      "bytes": 24099,
+      "gzipBytes": 3252,
+      "checksum": "sha256:c91d5da32a5a3387e205dfd120f583eea704377a0243f8aedbd2dde90302b725"
+    },
+    {
+      "id": "neuralwatt",
+      "path": "providers/neuralwatt.json",
+      "models": 20,
+      "bytes": 11144,
+      "gzipBytes": 1573,
+      "checksum": "sha256:223322736710777c26fd14935c7d39e90c2c775ad1e51ae9cee015278a0872c6"
+    },
+    {
+      "id": "nova",
+      "path": "providers/nova.json",
+      "models": 2,
+      "bytes": 1258,
+      "gzipBytes": 485,
+      "checksum": "sha256:a7af8b696b741d1b3c0e1cd324ab1cd33bc7e20b4ae21de282e478078e8f79b1"
+    },
+    {
+      "id": "novita-ai",
+      "path": "providers/novita-ai.json",
+      "models": 107,
+      "bytes": 56897,
+      "gzipBytes": 6146,
+      "checksum": "sha256:c0a1dd3e200dd941c87d2fea3b24deab12b2a4d64e7b8e365c573ed9d7dca6bc"
+    },
+    {
+      "id": "nvidia",
+      "path": "providers/nvidia.json",
+      "models": 98,
+      "bytes": 49852,
+      "gzipBytes": 6022,
+      "checksum": "sha256:c31aed2919bd248969d8fc37895ed6ea34071f276408b716c51ef01d588a43fc"
+    },
+    {
+      "id": "ofox",
+      "path": "providers/ofox.json",
+      "models": 13,
+      "bytes": 8783,
+      "gzipBytes": 1669,
+      "checksum": "sha256:8c98a7ef68b60750f08408bf1dca9624f2edb5442736151db961d03daa2d5025"
+    },
+    {
+      "id": "ollama-cloud",
+      "path": "providers/ollama-cloud.json",
+      "models": 19,
+      "bytes": 9172,
+      "gzipBytes": 1635,
+      "checksum": "sha256:80d7c83c2ac5dae35360fe8de19afd1593673db6acd6ba7dd866b401b08ceb99"
+    },
+    {
+      "id": "openai",
+      "path": "providers/openai.json",
+      "models": 47,
+      "bytes": 29220,
+      "gzipBytes": 3563,
+      "checksum": "sha256:0fbe80269eb1bb190cdeb060b517d5e70bc0c2a484a00b591a4d38159f673a15"
+    },
+    {
+      "id": "opencode",
+      "path": "providers/opencode.json",
+      "models": 85,
+      "bytes": 53886,
+      "gzipBytes": 5595,
+      "checksum": "sha256:d51975f28d5ba991c87186a1806530d38a69ff5183a939a6c7be42f30f014022"
+    },
+    {
+      "id": "opencode-go",
+      "path": "providers/opencode-go.json",
+      "models": 22,
+      "bytes": 13831,
+      "gzipBytes": 2208,
+      "checksum": "sha256:7e8e1e0d83838b40efd2f93103e9e7f5db56371fcbfdd4219e1016a7a1f0350a"
+    },
+    {
+      "id": "openrouter",
+      "path": "providers/openrouter.json",
+      "models": 335,
+      "bytes": 193231,
+      "gzipBytes": 19447,
+      "checksum": "sha256:9e719b5a5d0cc897a894844505604726eb253e9ca9ca40740010e12dbbb8b7b9"
+    },
+    {
+      "id": "orcarouter",
+      "path": "providers/orcarouter.json",
+      "models": 81,
+      "bytes": 48831,
+      "gzipBytes": 5653,
+      "checksum": "sha256:cec34870ce4e03003a894b4d05bc7658ff0aa68809fd6bfb720b4781f3ddb3fe"
+    },
+    {
+      "id": "ovhcloud",
+      "path": "providers/ovhcloud.json",
+      "models": 14,
+      "bytes": 7246,
+      "gzipBytes": 1340,
+      "checksum": "sha256:ac3d038a675288d490cadff111e2c017354bbcc0266e9dbf311b66050d3d62c2"
+    },
+    {
+      "id": "perplexity",
+      "path": "providers/perplexity.json",
+      "models": 4,
+      "bytes": 2234,
+      "gzipBytes": 660,
+      "checksum": "sha256:79d9394de7a1ab1c257c4823da1653782fca096bf171bc201481ba2fd258bc5b"
+    },
+    {
+      "id": "perplexity-agent",
+      "path": "providers/perplexity-agent.json",
+      "models": 20,
+      "bytes": 12897,
+      "gzipBytes": 1979,
+      "checksum": "sha256:7dac33b80d23a0e7aa997c877391d2b8d05d7bfc2052e30d0d3a373814c5517f"
+    },
+    {
+      "id": "pioneer",
+      "path": "providers/pioneer.json",
+      "models": 76,
+      "bytes": 48775,
+      "gzipBytes": 5727,
+      "checksum": "sha256:95578b116cf5af4d561d5fbb34e08c2767dabf38e675caed85e325c9274b9f90"
+    },
+    {
+      "id": "poe",
+      "path": "providers/poe.json",
+      "models": 137,
+      "bytes": 67848,
+      "gzipBytes": 6442,
+      "checksum": "sha256:afe58b9b783977de513b0eb18dd76352923cc5ae849c42f099a534d22e64a927"
+    },
+    {
+      "id": "poolside",
+      "path": "providers/poolside.json",
+      "models": 3,
+      "bytes": 1987,
+      "gzipBytes": 558,
+      "checksum": "sha256:a0af315f7d66cbe83c6a29e34acd4a561ddaeb5d8b49cc28a23928f3a4c73c8e"
+    },
+    {
+      "id": "privatemode-ai",
+      "path": "providers/privatemode-ai.json",
+      "models": 5,
+      "bytes": 2820,
+      "gzipBytes": 898,
+      "checksum": "sha256:4eaaa8fa9a5a8689ed33989b250eccde2773af5df4ba35039214053457b81cb3"
+    },
+    {
+      "id": "qihang-ai",
+      "path": "providers/qihang-ai.json",
+      "models": 9,
+      "bytes": 5317,
+      "gzipBytes": 1160,
+      "checksum": "sha256:e48a5ee1d7acc31c5be0f991c867e839d23457ef7a19fe9f52dd86d533c60d46"
+    },
+    {
+      "id": "qiniu-ai",
+      "path": "providers/qiniu-ai.json",
+      "models": 91,
+      "bytes": 42592,
+      "gzipBytes": 4051,
+      "checksum": "sha256:d31f4c4a94c96ad3e8640fe363c3113ae463183f5497b81877afd9c4c21e48aa"
+    },
+    {
+      "id": "qvac",
+      "path": "providers/qvac.json",
+      "models": 9,
+      "bytes": 4402,
+      "gzipBytes": 823,
+      "checksum": "sha256:91bbfa45eb239c55c09ff1cfeace7bf1e34bbad1ff5f12ece40d392c0a3310fc"
+    },
+    {
+      "id": "regolo-ai",
+      "path": "providers/regolo-ai.json",
+      "models": 13,
+      "bytes": 6408,
+      "gzipBytes": 1274,
+      "checksum": "sha256:509c1baddea0209308da2b9e849ab8c26e626bf18ffaaf3db9d637060e569a52"
+    },
+    {
+      "id": "requesty",
+      "path": "providers/requesty.json",
+      "models": 38,
+      "bytes": 24951,
+      "gzipBytes": 2657,
+      "checksum": "sha256:222d2597a29464217b5c9e465fcc3f2ff85f27ef0fb1678dc8ef690ecd43ef3d"
+    },
+    {
+      "id": "routing-run",
+      "path": "providers/routing-run.json",
+      "models": 15,
+      "bytes": 8759,
+      "gzipBytes": 1476,
+      "checksum": "sha256:3a2d73f9b5b564aad1dee152404dc56d469d3f7ebea19ac7550a6fb1bca44f5a"
+    },
+    {
+      "id": "sakana",
+      "path": "providers/sakana.json",
+      "models": 3,
+      "bytes": 2201,
+      "gzipBytes": 587,
+      "checksum": "sha256:ed5412e3cb655e7c7fa52ac803ac14f280f2da0925a7e1c60965f4ab27c7cc05"
+    },
+    {
+      "id": "sap-ai-core",
+      "path": "providers/sap-ai-core.json",
+      "models": 43,
+      "bytes": 25067,
+      "gzipBytes": 3055,
+      "checksum": "sha256:9f45720b21907f967a9aa93c5dcee93a7eb39ec73d2c61c90320feec11b06a43"
+    },
+    {
+      "id": "sarvam",
+      "path": "providers/sarvam.json",
+      "models": 2,
+      "bytes": 1287,
+      "gzipBytes": 517,
+      "checksum": "sha256:4397ae713447edfd4fea0abc923be3488302a5b8b1bb7dc6639f10859aa7314e"
+    },
+    {
+      "id": "scaleway",
+      "path": "providers/scaleway.json",
+      "models": 14,
+      "bytes": 7661,
+      "gzipBytes": 1667,
+      "checksum": "sha256:e7e8157d48d3cd867f094c6f8827bf90dcb81471ccfd31cd9015ed7e25f8a9fd"
+    },
+    {
+      "id": "siliconflow",
+      "path": "providers/siliconflow.json",
+      "models": 49,
+      "bytes": 26988,
+      "gzipBytes": 2902,
+      "checksum": "sha256:8d06d520929c0b2163e2f169520a48daee63291913a7d9d67d1df83c5d002d15"
+    },
+    {
+      "id": "siliconflow-cn",
+      "path": "providers/siliconflow-cn.json",
+      "models": 47,
+      "bytes": 25797,
+      "gzipBytes": 2727,
+      "checksum": "sha256:4e1ef2822141945fefacb37a33095c4b89951b75432b15334c8dad39baceea4d"
+    },
+    {
+      "id": "snowflake-cortex",
+      "path": "providers/snowflake-cortex.json",
+      "models": 21,
+      "bytes": 12015,
+      "gzipBytes": 2190,
+      "checksum": "sha256:f9b8aa16a96a7aab695a77175360d996eb29eef0540c603a9d901eff25de2a2a"
+    },
+    {
+      "id": "stackit",
+      "path": "providers/stackit.json",
+      "models": 8,
+      "bytes": 4421,
+      "gzipBytes": 1047,
+      "checksum": "sha256:562efa219ffb9e9556d48bff44bfa1d06150e74632fcc4314400cecd728fc5f9"
+    },
+    {
+      "id": "stepfun",
+      "path": "providers/stepfun.json",
+      "models": 8,
+      "bytes": 4248,
+      "gzipBytes": 983,
+      "checksum": "sha256:0eef9e519c79b1d78cd7448ddfd1eaaa5d21742ae3deb86a8fc493b1bd5bb7fa"
+    },
+    {
+      "id": "stepfun-ai",
+      "path": "providers/stepfun-ai.json",
+      "models": 8,
+      "bytes": 4253,
+      "gzipBytes": 989,
+      "checksum": "sha256:464b409a2f9e0d46148b9204779b31f3300eb971305d2b2fddd46fb26c2bfcef"
+    },
+    {
+      "id": "stepfun-ai-step-plan",
+      "path": "providers/stepfun-ai-step-plan.json",
+      "models": 3,
+      "bytes": 1955,
+      "gzipBytes": 616,
+      "checksum": "sha256:faf0e039ff33ebe81457594c58f7ba0fd93c2903d854c9926903f6f0150b3d89"
+    },
+    {
+      "id": "stepfun-step-plan",
+      "path": "providers/stepfun-step-plan.json",
+      "models": 4,
+      "bytes": 2389,
+      "gzipBytes": 693,
+      "checksum": "sha256:d3ef62932dcf9f26ab32af228222287d7a069a9a2ea65290903fed5fd9600c33"
+    },
+    {
+      "id": "subconscious",
+      "path": "providers/subconscious.json",
+      "models": 2,
+      "bytes": 1355,
+      "gzipBytes": 580,
+      "checksum": "sha256:d78dee3c2ae32eb73aba4364b2fa55181be5572ad4131405c28083329d95cce5"
+    },
+    {
+      "id": "submodel",
+      "path": "providers/submodel.json",
+      "models": 9,
+      "bytes": 4628,
+      "gzipBytes": 959,
+      "checksum": "sha256:b3548de0092c468d601a7175f3557d1136aa9999e00189d6dac0b2f9a8dd96b3"
+    },
+    {
+      "id": "synthetic",
+      "path": "providers/synthetic.json",
+      "models": 8,
+      "bytes": 5225,
+      "gzipBytes": 1259,
+      "checksum": "sha256:e3903ca946f4ade1ac73b819120a446f910cf79f40cefaa2794fb09ddae6e6fc"
+    },
+    {
+      "id": "tencent-coding-plan",
+      "path": "providers/tencent-coding-plan.json",
+      "models": 8,
+      "bytes": 4475,
+      "gzipBytes": 933,
+      "checksum": "sha256:876615bae6b20ec5be1ed9bdf94cb2f2b58bb8ba0d2e68b7b5b36307d5203055"
+    },
+    {
+      "id": "tencent-token-plan",
+      "path": "providers/tencent-token-plan.json",
+      "models": 1,
+      "bytes": 808,
+      "gzipBytes": 478,
+      "checksum": "sha256:8057be87c8ae5160be5f3fc5ed6745d130b90c0dde9bb852757d4683be9f39b9"
+    },
+    {
+      "id": "tencent-tokenhub",
+      "path": "providers/tencent-tokenhub.json",
+      "models": 2,
+      "bytes": 1348,
+      "gzipBytes": 509,
+      "checksum": "sha256:f35313aae22ad7c37b52f7d8add92d7c2ed294c37b8e492f4dc31c376beba42a"
+    },
+    {
+      "id": "the-grid-ai",
+      "path": "providers/the-grid-ai.json",
+      "models": 9,
+      "bytes": 6067,
+      "gzipBytes": 1052,
+      "checksum": "sha256:e4363eb7f20f21f76ed898576aa00e8bda4d23cf71954fa0965befab2cc2e210"
+    },
+    {
+      "id": "thinkingmachines",
+      "path": "providers/thinkingmachines.json",
+      "models": 2,
+      "bytes": 1531,
+      "gzipBytes": 553,
+      "checksum": "sha256:37d3d013d30339fa82ebb671294bc0ccfe64e110d5df040a1c6db01bad0d2ba3"
+    },
+    {
+      "id": "tinfoil",
+      "path": "providers/tinfoil.json",
+      "models": 7,
+      "bytes": 4051,
+      "gzipBytes": 1099,
+      "checksum": "sha256:2d9f7bae45bb344dff3474f06d98a71ba2d75d5e279055c7647722edfa0e96c3"
+    },
+    {
+      "id": "togetherai",
+      "path": "providers/togetherai.json",
+      "models": 34,
+      "bytes": 18554,
+      "gzipBytes": 2922,
+      "checksum": "sha256:3fab5a7e7163ed00933a4327874012e2f84fdbda10ef6d15bcace66af390ff2d"
+    },
+    {
+      "id": "trustedrouter",
+      "path": "providers/trustedrouter.json",
+      "models": 7,
+      "bytes": 3815,
+      "gzipBytes": 727,
+      "checksum": "sha256:9555b2db155cb1ec4195891ca414be9da9d62adbffd5c8d1ab72ccb816f6fa79"
+    },
+    {
+      "id": "umans-ai",
+      "path": "providers/umans-ai.json",
+      "models": 5,
+      "bytes": 3231,
+      "gzipBytes": 865,
+      "checksum": "sha256:ab34ff2b00a916e261b44341eaaafc66e0bcb6d6dfe5005f3e77471e801ea7e8"
+    },
+    {
+      "id": "umans-ai-coding-plan",
+      "path": "providers/umans-ai-coding-plan.json",
+      "models": 6,
+      "bytes": 3983,
+      "gzipBytes": 895,
+      "checksum": "sha256:b4333ae55decbc9e815c86411f13e1ef18be351c8b5a0942c0ebf6f2c8e86ffb"
+    },
+    {
+      "id": "unorouter",
+      "path": "providers/unorouter.json",
+      "models": 23,
+      "bytes": 12218,
+      "gzipBytes": 2005,
+      "checksum": "sha256:ca0d7b8cf5f2fa293c6fc5394940e845010ec44058b346d03043514e46b1a312"
+    },
+    {
+      "id": "upstage",
+      "path": "providers/upstage.json",
+      "models": 3,
+      "bytes": 1744,
+      "gzipBytes": 599,
+      "checksum": "sha256:66fa71e86e57b3192df8f11c079623a718db3b63dbcfabf0bf262be887e00fc8"
+    },
+    {
+      "id": "v0",
+      "path": "providers/v0.json",
+      "models": 3,
+      "bytes": 1510,
+      "gzipBytes": 424,
+      "checksum": "sha256:915d01bd3365f9848d6609fb0873ad69a23153c1aaba97a7a9b5044b04efa6b6"
+    },
+    {
+      "id": "venice",
+      "path": "providers/venice.json",
+      "models": 89,
+      "bytes": 52782,
+      "gzipBytes": 6346,
+      "checksum": "sha256:08b377339b7302174884f64922463e512bc3e6a0d12a8500e69a34376274b988"
+    },
+    {
+      "id": "vercel",
+      "path": "providers/vercel.json",
+      "models": 308,
+      "bytes": 161418,
+      "gzipBytes": 16278,
+      "checksum": "sha256:fec141fb6167f1c66a7083bca293acd0b733e06607f0b314213fb39e7d025477"
+    },
+    {
+      "id": "vivgrid",
+      "path": "providers/vivgrid.json",
+      "models": 17,
+      "bytes": 11231,
+      "gzipBytes": 1686,
+      "checksum": "sha256:d21a2af10106228665f049f726dbf42b6fad0f2f862ebeac5c4ba2fee18dc5dc"
+    },
+    {
+      "id": "vultr",
+      "path": "providers/vultr.json",
+      "models": 10,
+      "bytes": 5573,
+      "gzipBytes": 1287,
+      "checksum": "sha256:6fe7db343dcde90cec71267ef6c1bf29d17011f31054e7edec5d583c026aae98"
+    },
+    {
+      "id": "wafer.ai",
+      "path": "providers/wafer.ai.json",
+      "models": 5,
+      "bytes": 3518,
+      "gzipBytes": 1066,
+      "checksum": "sha256:55f9f8d47fa1efd72ea90105128303d669e92ceb64749049f41349f3e1876183"
+    },
+    {
+      "id": "wandb",
+      "path": "providers/wandb.json",
+      "models": 31,
+      "bytes": 18558,
+      "gzipBytes": 3007,
+      "checksum": "sha256:a565165413e7c36586a130ea91edcb41a7543b503e718ad10c4a2ad6adcea3f9"
+    },
+    {
+      "id": "xai",
+      "path": "providers/xai.json",
+      "models": 10,
+      "bytes": 6204,
+      "gzipBytes": 1051,
+      "checksum": "sha256:0e4b769de341dea0896120f217d0c7ed4b9927fbc5b531cf96136e490d36a685"
+    },
+    {
+      "id": "xiaomi",
+      "path": "providers/xiaomi.json",
+      "models": 6,
+      "bytes": 3752,
+      "gzipBytes": 829,
+      "checksum": "sha256:59fbbf9dc409cae6d2464a64dc3a40c6a1032aa8d479e96b3012e42fc376e85c"
+    },
+    {
+      "id": "xiaomi-token-plan-ams",
+      "path": "providers/xiaomi-token-plan-ams.json",
+      "models": 7,
+      "bytes": 3723,
+      "gzipBytes": 782,
+      "checksum": "sha256:b2bdfe09e309cfdd560df8a3a376d745c278c8fcaba091e8be8b0f384fc481e3"
+    },
+    {
+      "id": "xiaomi-token-plan-cn",
+      "path": "providers/xiaomi-token-plan-cn.json",
+      "models": 7,
+      "bytes": 3719,
+      "gzipBytes": 781,
+      "checksum": "sha256:62c27e2cf9a9158f97a2d917f7c4ecbc13f3e2b7c5ff546fdba6e5eb9d50d36e"
+    },
+    {
+      "id": "xiaomi-token-plan-sgp",
+      "path": "providers/xiaomi-token-plan-sgp.json",
+      "models": 7,
+      "bytes": 3726,
+      "gzipBytes": 785,
+      "checksum": "sha256:096b2ab90c65df3966c04ed65fa1c72ef0446f4482995ad5cf131cf637c50819"
+    },
+    {
+      "id": "xpersona",
+      "path": "providers/xpersona.json",
+      "models": 13,
+      "bytes": 8784,
+      "gzipBytes": 1463,
+      "checksum": "sha256:91fb81c38dae150b91f6a0521f689b449478b20ee7f240cfbe5e675f5bfdd1d4"
+    },
+    {
+      "id": "zai",
+      "path": "providers/zai.json",
+      "models": 14,
+      "bytes": 7787,
+      "gzipBytes": 1347,
+      "checksum": "sha256:32b86b782e0fa111081e424228cb296cdc2d8602fe14fe9e37f7ab1618b916ad"
+    },
+    {
+      "id": "zai-coding-plan",
+      "path": "providers/zai-coding-plan.json",
+      "models": 6,
+      "bytes": 3598,
+      "gzipBytes": 827,
+      "checksum": "sha256:9cfce57213e20dfaf0b5ac366cd0fafb84263ea590b345151a0edc7d4d9a09a0"
+    },
+    {
+      "id": "zeldoc",
+      "path": "providers/zeldoc.json",
+      "models": 1,
+      "bytes": 746,
+      "gzipBytes": 443,
+      "checksum": "sha256:8fbdbf2508d41febcf507ca92bab201e9def36854db54e71d1b207087acdefa5"
+    },
+    {
+      "id": "zenifra",
+      "path": "providers/zenifra.json",
+      "models": 1,
+      "bytes": 733,
+      "gzipBytes": 438,
+      "checksum": "sha256:42c5f0c0cc35edfe78b649310214b5d02654d9f3f0b41ac3746cea0c6b29354e"
+    },
+    {
+      "id": "zenmux",
+      "path": "providers/zenmux.json",
+      "models": 120,
+      "bytes": 71763,
+      "gzipBytes": 6978,
+      "checksum": "sha256:3ab0c4716db6ac91e3e3dc9ac1a63be31c2ff0c3c5c24c50ef8958e078ec0c70"
+    },
+    {
+      "id": "zhipuai",
+      "path": "providers/zhipuai.json",
+      "models": 13,
+      "bytes": 7243,
+      "gzipBytes": 1298,
+      "checksum": "sha256:ca584f686bd70fd8141724e9d0c54b8adb84a915efacc8b43b27e49b2f504d6f"
+    },
+    {
+      "id": "zhipuai-coding-plan",
+      "path": "providers/zhipuai-coding-plan.json",
+      "models": 7,
+      "bytes": 4128,
+      "gzipBytes": 867,
+      "checksum": "sha256:b205eb81d8e1b0b8e45d8044834add0336a4f7f9fb20959367fbb7a3c8bb127a"
+    }
+  ],
+  "stats": { "providers": 176, "models": 5907, "searchIndexGzipBytes": 62444 }
+}

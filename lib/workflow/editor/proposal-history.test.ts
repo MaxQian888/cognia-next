@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Coverage for workflow-proposal-history CRUD. Uses fake-indexeddb so we
 // exercise the actual Dexie path.
 

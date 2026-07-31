@@ -20,7 +20,7 @@ description: How a phone finds and trusts a desktop — mDNS subscribe, the LAN 
 
 <StatGrid>
   <Stat label="mDNS service" value="_cognia._tcp" hint="mdns-discovery.ts:42" />
-  <Stat label="Probe ports" value="7890·7891·7900·8443" hint="lan-scanner.ts:119" />
+  <Stat label="Probe ports" value="27890·7890·7891·7900·8443" hint="lan-scanner.ts:119" />
   <Stat label="Probe target" value="GET /api/v1/whoami → 401" hint="lan-scanner.ts:357" />
   <Stat label="Candidate order" value="mDNS → tunnel → cache" hint="connection-strategy.ts:43" />
 </StatGrid>
@@ -66,7 +66,7 @@ flowchart TB
 A candidate is accepted **only** if it returns HTTP `401` with a `{code,message}` body
 (`evaluateProbeResponse`, `:409-432`) — an unauthenticated request to `/api/v1/whoami` *should* be
 rejected, which is exactly what proves the host is a Cognia server. The result is then enriched with
-the TLS fingerprint via `healthz`. Default port `7890` (`:110`); the extra ports `[7890, 7891, 7900,
+the TLS fingerprint via `healthz`. Default port `27890` (`:110`); the extra ports `[27890, 7890, 7891, 7900,
 8443]` (`:119`) are tried only for paired/emulator IPs.
 
 ### The local-IP trick — `local-ip.ts:50`
@@ -106,9 +106,11 @@ file via Tauri (`startBroadcast` → `companion_mdns_start`, `:172`).
 </Step>
 <Step>
 **Pair** — `pair-step.tsx`. Either scan the QR (`barcode.ts` → parse the payload) or type the 6-digit
-code. The submit calls `pair-api.ts`, which redeems against `POST /api/v1/auth/pair` (QR) or
-`/api/v1/auth/pair/redeem-code` (code), receiving `{ deviceJwt, deviceId, serverVersion,
-rendezvousId, rendezvousSecret, fingerprint }`. Validation lives in `pair-helpers.ts`.
+code. The submit calls `pair-api.ts`, which generates the mobile P-256 role key and redeems against
+`POST /api/v1/auth/pair` (QR) or `/api/v1/auth/pair/redeem-code` (code), receiving
+`{ deviceJwt, deviceId, serverVersion, rendezvousId, roomDescriptor, fingerprint }`.
+Validation lives in `pair-helpers.ts`; the private key is stored separately and never enters
+the public pairing row.
 </Step>
 <Step>
 **Paired** — `paired-step.tsx` runs a read-only smoke test (`claude_sidecar_status`), verifies the WS

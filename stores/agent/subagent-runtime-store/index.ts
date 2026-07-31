@@ -12,25 +12,28 @@
  *    `deleteTemplate` refuse on `isBuiltIn: true`.
  *
  *  - `subAgents` — ephemeral runtime registry of currently-executing
- *    SubAgents. Producers (the Rust orchestrator wired in a future phase)
- *    push events through `upsert` / `setStatus` / `setProgress` /
- *    `appendLog`. Consumers (the chat-side `SubagentPart` renderer in
- *    Phase 8 + the Settings Runtime tab) subscribe to read.
- *
- * Note: until a producer is wired, the runtime slice is permanently empty
- * and the Settings Runtime tab shows its "no running subagents" empty
- * state. That's an intentional handoff point, not a bug.
+ *    SubAgents. The producer is `lib/claude/agents/dispatch-runtime.ts`
+ *    (`recordDispatchStart/Complete/Failed/Rejected`), driven by the
+ *    `dispatch_agent` host tool. Consumers subscribe to read: the chat-side
+ *    `SubagentPart` tree (via `subagent-bridge` → `use-claude-chat`) and the
+ *    Settings Runtime tab.
  */
 
 import { create } from "zustand"
-import { persist, createJSONStorage } from "zustand/middleware"
+import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 import {
   BUILT_IN_SUBAGENT_TEMPLATES,
   type SubAgent,
   type SubAgentLog,
   type SubAgentStatus,
   type SubAgentTemplate,
+  type SubAgentTokenUsage,
+  type SubAgentToolCall,
 } from "@/types/agent/sub-agent"
+
+/** Cap on the live tool-call list retained per run (most recent kept). */
+const MAX_SUBAGENT_TOOL_CALLS = 100
 
 interface TemplatesSlice {
   templates: Record<string, SubAgentTemplate>
@@ -44,7 +47,30 @@ interface RuntimeSlice {
   upsert: (subAgent: SubAgent) => void
   setStatus: (id: string, status: SubAgentStatus) => void
   setProgress: (id: string, progress: number) => void
+  setToolUses: (id: string, toolUses: number) => void
   appendLog: (id: string, log: SubAgentLog) => void
+  /**
+   * Apply log + progress + toolUses for a single run event in ONE store write
+   * (one map spread, one subscriber notification) instead of 3 separate
+   * mutators. The hot path is `dispatch-runtime`'s tool-call event sink.
+   */
+  applyRunEvent: (
+    id: string,
+    patch: {
+      log?: SubAgentLog
+      progress?: number
+      toolUses?: number
+      /** Push a freshly-started tool call (state "running"). */
+      toolStart?: { id: string; name: string; input?: Record<string, unknown> }
+      /** Resolve a previously-started tool call by id (output / error). */
+      toolEnd?: { id: string; output?: unknown; isError?: boolean }
+      /** Replace the live cumulative token usage (dispatch run tracker). */
+      usage?: SubAgentTokenUsage
+      /** Record a transient-failure retry (bumps `retryCount`). */
+      retry?: { attempt: number }
+    }
+  ) => void
+  pushStreamText: (id: string, text: string) => void
   remove: (id: string) => void
   clearRuntime: () => void
 }
@@ -103,6 +129,15 @@ export const useSubagentRuntimeStore = create<SubagentRuntimeState>()(
           const clamped = Math.max(0, Math.min(100, progress))
           return { subAgents: { ...s.subAgents, [id]: { ...sa, progress: clamped } } }
         }),
+      setToolUses: (id, toolUses) =>
+        set((s) => {
+          const sa = s.subAgents[id]
+          if (!sa) return s
+          // Monotonic, honest tool-call count (never negative). Drives the
+          // chat SubagentPart "N tools" counter.
+          const count = Math.max(0, Math.floor(toolUses))
+          return { subAgents: { ...s.subAgents, [id]: { ...sa, toolUses: count } } }
+        }),
       appendLog: (id, log) =>
         set((s) => {
           const sa = s.subAgents[id]
@@ -110,7 +145,104 @@ export const useSubagentRuntimeStore = create<SubagentRuntimeState>()(
           return {
             subAgents: {
               ...s.subAgents,
-              [id]: { ...sa, logs: [...sa.logs, log] },
+              [id]: { ...sa, logs: [...sa.logs, log].slice(-50), lastActivityAt: new Date() },
+            },
+          }
+        }),
+      applyRunEvent: (id, patch) =>
+        set((s) => {
+          const sa = s.subAgents[id]
+          if (!sa) return s
+          // Apply the same caps/clamps the single mutators use, but in one pass.
+          const next: SubAgent = { ...sa }
+          let changed = false
+          if (patch.log) {
+            next.logs = [...sa.logs, patch.log].slice(-50)
+            next.lastActivityAt = new Date()
+            changed = true
+          }
+          if (typeof patch.progress === "number") {
+            next.progress = Math.max(0, Math.min(100, patch.progress))
+            changed = true
+          }
+          if (typeof patch.toolUses === "number") {
+            next.toolUses = Math.max(0, Math.floor(patch.toolUses))
+            changed = true
+          }
+          if (patch.toolStart) {
+            const call: SubAgentToolCall = {
+              id: patch.toolStart.id,
+              name: patch.toolStart.name,
+              state: "running",
+              ...(patch.toolStart.input ? { input: patch.toolStart.input } : {}),
+            }
+            next.toolCalls = [...(sa.toolCalls ?? []), call].slice(-MAX_SUBAGENT_TOOL_CALLS)
+            changed = true
+          }
+          if (patch.usage) {
+            next.tokenUsage = patch.usage
+            next.lastActivityAt = new Date()
+            changed = true
+          }
+          if (patch.retry) {
+            next.retryCount = Math.max(0, Math.floor(patch.retry.attempt))
+            changed = true
+          }
+          if (patch.toolEnd) {
+            const { id: callId, output, isError } = patch.toolEnd
+            const calls = next.toolCalls ?? sa.toolCalls ?? []
+            // Resolve the most recent running call with this id.
+            let resolved = false
+            const updated = calls
+              .slice()
+              .reverse()
+              .map((c) => {
+                if (!resolved && c.id === callId) {
+                  resolved = true
+                  return {
+                    ...c,
+                    state: isError ? ("error" as const) : ("done" as const),
+                    ...(output !== undefined ? { output } : {}),
+                    ...(isError ? { isError: true } : {}),
+                  }
+                }
+                return c
+              })
+              .reverse()
+            if (resolved) {
+              next.toolCalls = updated
+              changed = true
+            }
+          }
+          if (!changed) return s
+          return { subAgents: { ...s.subAgents, [id]: next } }
+        }),
+      // Coalesce a growing streaming-text line into ONE log entry (marked
+      // `data.stream === "text"`): replace a trailing stream-text entry, else
+      // append a fresh one. Keeps live token streaming from flooding the cap.
+      pushStreamText: (id, text) =>
+        set((s) => {
+          const sa = s.subAgents[id]
+          if (!sa) return s
+          const logs = sa.logs.slice()
+          const last = logs[logs.length - 1]
+          const entry: SubAgentLog = {
+            timestamp: new Date(),
+            level: "info",
+            message: text,
+            data: { stream: "text" },
+          }
+          const isStreamText =
+            !!last &&
+            typeof last.data === "object" &&
+            last.data !== null &&
+            (last.data as { stream?: unknown }).stream === "text"
+          if (isStreamText) logs[logs.length - 1] = entry
+          else logs.push(entry)
+          return {
+            subAgents: {
+              ...s.subAgents,
+              [id]: { ...sa, logs: logs.slice(-50), lastActivityAt: new Date() },
             },
           }
         }),
@@ -125,16 +257,7 @@ export const useSubagentRuntimeStore = create<SubagentRuntimeState>()(
     }),
     {
       name: "cognia.subagent-runtime",
-      storage: createJSONStorage(() => {
-        if (typeof window === "undefined") {
-          return {
-            getItem: () => null,
-            setItem: () => undefined,
-            removeItem: () => undefined,
-          }
-        }
-        return window.localStorage
-      }),
+      storage: persistLocalStorage(),
       // Only persist templates; runtime data is ephemeral by design.
       partialize: (state) => ({ templates: state.templates }) as Partial<SubagentRuntimeState>,
       // On rehydrate, re-seed any missing built-ins so a contributor

@@ -21,55 +21,95 @@ import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 
-import { ChatPane } from "@/components/chat/chat-view"
+import { ChatPaneGroup } from "@/components/chat/chat-pane-group"
+import { Button } from "@/components/ui/button"
+import type { PlanResumeMode } from "@/components/agent/plan/plan-approval-card"
 import { CharacterPicker } from "@/components/chat/character-picker"
 import { ChannelList } from "@/components/desktop/channel-list"
 import { MemberList } from "@/components/shell/member-list"
-import { ArtifactPanel } from "@/components/artifacts/artifact-panel"
-import { CanvasShell } from "@/components/canvas"
+import { ArtifactWorkspaceDock } from "@/components/artifacts/artifact-workspace-dock"
+import { CanvasShell } from "@/components/canvas/canvas-shell"
 import { OnboardingDialog } from "@/components/shell/onboarding-dialog"
 import { shouldShowOnboarding } from "@/lib/onboarding/should-show"
-import { ToolApprovalDialog } from "@/components/chat/tool-approval-dialog"
 import { WorkspaceTrustGate } from "@/components/chat/workspace-trust-gate"
 import type { ComposerHandle } from "@/components/chat/composer"
-import type { ApprovalDecision, Character, SendContent } from "@/lib/claude/types"
+import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
+import type {
+  ApprovalDecision,
+  Character,
+  PendingApproval,
+  SendContent,
+} from "@cognia/agent-config-types"
+import { decodeSubSession } from "@/lib/claude/team-session-id"
 import { useClaudeChat, useSessions, useTeamChat } from "@/hooks/chat"
-import { usePlatform } from "@/hooks/use-platform"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { useUIStore } from "@/stores/ui"
 import { markSessionRead } from "@/lib/db/session-state"
+import { updateSession, setSessionOrder } from "@/lib/db/sessions"
 import { guildFromSession } from "@/lib/claude/guild"
-import { loggers } from "@/lib/logging"
+import { resolveConversationGroupBy } from "@/lib/chat/conversation-grouping"
+import { useProjectStore } from "@/stores/project/project-store"
+import { planGuildReconcile } from "@/lib/shell/guild-session-sync"
+import { loggers } from "@cognia/logging"
+import { useRuntimeSnapshot } from "@/hooks/use-runtime-snapshot"
+import {
+  resolveOperationAvailability,
+  type OperationAvailabilityState,
+} from "@/lib/runtime/operation-availability"
 
 const log = loggers.shell
 
 export function DesktopChatWorkspace() {
-  const platform = usePlatform()
   const router = useRouter()
+  const runtimeT = useTranslations("desktop.chatRuntime")
+  const runtimeSnapshot = useRuntimeSnapshot()
+  const chatAvailability = resolveOperationAvailability({
+    snapshot: runtimeSnapshot,
+    command: "claude_send",
+    localExecutorAvailable: runtimeSnapshot.target?.kind === "standalone",
+    readOnlyFallback: true,
+  })
+  const composerDisabled = chatAvailability.state !== "available"
+  // Grouping by workspace is the one mode that needs conversations from every
+  // workspace; every other mode keeps the sidebar workspace-isolated.
+  const sidebarGroupBy = resolveConversationGroupBy(
+    useSettingsStore((s) => s.settings?.conversationSidebar)
+  )
   const {
     sessions,
     isLoadingSessions,
     activeSessionId,
+    activeSession,
+    activeSessionState,
     select,
     create,
     remove,
     rename,
     bulkRemove,
     bulkSetPinned,
-  } = useSessions()
+    archive,
+    unarchive,
+    bulkArchive,
+    bulkUnarchive,
+    folders,
+    createFolder,
+    renameFolder,
+    deleteFolder,
+    assignToFolder,
+  } = useSessions({ crossWorkspace: sidebarGroupBy === "workspace" })
   const directChat = useClaudeChat()
   const teamChat = useTeamChat()
 
   const errorMessage = useChatStore((s) => s.errorMessage)
-  const pendingApproval = useChatStore((s) => s.pendingApprovals[0] ?? null)
+  const activeSessionEpoch = useChatStore((s) => s.activeSessionEpoch)
 
   const loadSettings = useSettingsStore((s) => s.load)
   const selectedGuild = useUIStore((s) => s.selectedGuild)
+  const selectedGuildEpoch = useUIStore((s) => s.selectedGuildEpoch)
   const setSelectedGuild = useUIStore((s) => s.setSelectedGuild)
   const pendingSettingsRequest = useUIStore((s) => s.pendingSettingsRequest)
   const clearPendingSettings = useUIStore((s) => s.clearPendingSettings)
-  const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed)
 
   const [lastErrorShown, setLastErrorShown] = useState<string | null>(null)
   const [characterPickerOpen, setCharacterPickerOpen] = useState(false)
@@ -112,35 +152,52 @@ export function DesktopChatWorkspace() {
     }
   }, [mounted, sessions.length])
 
+  // Keep the active chat session in lockstep with the selected guild. The two
+  // live in separate stores (guild in useUIStore, session in useChatStore), so
+  // when they disagree we reconcile by navigation epoch: whichever the user
+  // touched most recently wins. A deliberate team click in the rail resumes
+  // that team's most recent conversation; a team with no conversations lands
+  // on the welcome empty state (the CTA / "+" create one explicitly — the
+  // reconcile never silently inserts a session row). A session resumed from
+  // elsewhere still pulls the guild over to match it.
   useEffect(() => {
     if (!mounted) return
-    if (!activeSessionId) return
-    if (selectedGuild.kind !== "team") return
-    const current = sessions.find((s) => s.id === activeSessionId)
-    if (!current) return
-    if (current.kind === "team" && current.teamId === selectedGuild.teamId) return
-    const target = guildFromSession(current)
-    log.info("auto guild-switch from active session", {
-      sessionId: current.id,
-      target,
+    const action = planGuildReconcile({
+      guild: selectedGuild,
+      guildWins: selectedGuildEpoch > activeSessionEpoch,
+      activeSession,
+      // `useSessions` resolves the active id against Dexie, not against the
+      // (eventually-consistent) list, so a conversation that was just created
+      // reconciles as itself instead of looking deleted for a render.
+      activeSessionPending: activeSessionState === "pending",
+      sessions,
     })
-    setSelectedGuild(target)
-  }, [mounted, activeSessionId, sessions, selectedGuild, setSelectedGuild])
-
-  useEffect(() => {
-    if (!mounted) return
-    if (activeSessionId) return
-    const matching = sessions.find((s) => {
-      if (selectedGuild.kind === "team") {
-        return s.kind === "team" && s.teamId === selectedGuild.teamId
-      }
-      return s.kind !== "team"
-    })
-    if (matching) {
-      log.info("auto-select session", { sessionId: matching.id })
-      select(matching.id)
+    switch (action.type) {
+      case "none":
+        break
+      case "select":
+        log.info("auto-select session", { sessionId: action.sessionId })
+        select(action.sessionId)
+        break
+      case "clear":
+        select(null)
+        break
+      case "sync-guild":
+        log.info("auto guild-switch from active session", { target: action.guild })
+        setSelectedGuild(action.guild)
+        break
     }
-  }, [mounted, activeSessionId, sessions, selectedGuild, select])
+  }, [
+    mounted,
+    selectedGuild,
+    selectedGuildEpoch,
+    activeSessionEpoch,
+    sessions,
+    activeSession,
+    activeSessionState,
+    select,
+    setSelectedGuild,
+  ])
 
   useEffect(() => {
     if (errorMessage && errorMessage !== lastErrorShown) {
@@ -152,11 +209,6 @@ export function DesktopChatWorkspace() {
       setLastErrorShown(null)
     }
   }, [errorMessage, lastErrorShown])
-
-  const activeSession = useMemo(
-    () => sessions.find((s) => s.id === activeSessionId) ?? null,
-    [sessions, activeSessionId]
-  )
 
   // Recent sessions for the welcome-page "Continue" group (newest first,
   // excluding the one already open).
@@ -189,13 +241,14 @@ export function DesktopChatWorkspace() {
   const handleNewDirect = useCallback(() => {
     log.info("new-direct (open character picker)")
     setCharacterPickerOpen(true)
-  }, [])
+  }, [setCharacterPickerOpen])
 
   const handleNewTeamConversation = useCallback(
     async (teamId: string) => {
       log.info("new-team-conversation", { teamId })
       const s = await create({ title: "New conversation", kind: "team", teamId })
       select(s.id)
+      return s
     },
     [create, select]
   )
@@ -203,8 +256,24 @@ export function DesktopChatWorkspace() {
   const handleSwitchToSession = useCallback(
     (id: string) => {
       log.info("switch-to-session", { sessionId: id })
-      select(id)
       const target = sessions.find((s) => s.id === id)
+      // Follow the conversation into its workspace *before* focusing it. Under
+      // `groupBy: "workspace"` the list spans every workspace, and everything
+      // downstream of the chat pane — artifacts, terminals, the workspace panel,
+      // memories — resolves against `activeProjectId`. Selecting without this
+      // leaves all of them pointed at the workspace the user just left, and the
+      // conversation itself reads as `absent` (see `use-sessions.ts`).
+      if (target?.projectId) {
+        const { activeProjectId, setActiveProject } = useProjectStore.getState()
+        if (target.projectId !== activeProjectId) {
+          log.info("switch-to-session crosses workspace", {
+            sessionId: id,
+            projectId: target.projectId,
+          })
+          setActiveProject(target.projectId)
+        }
+      }
+      select(id)
       if (!target) return
       setSelectedGuild(guildFromSession(target))
     },
@@ -214,19 +283,83 @@ export function DesktopChatWorkspace() {
   const isTeamSession = activeSession?.kind === "team" && Boolean(activeSession.teamId)
   const isCanvasGuild = selectedGuild.kind === "canvas"
 
-  const send = isTeamSession ? teamChat.send : directChat.send
-  const stop = isTeamSession ? teamChat.stop : directChat.stop
+  // Kind lookup for the per-pane dispatchers below: a team session routes to
+  // useTeamChat, everything else to useClaudeChat. Both hooks are session-
+  // parameterized, so team and direct panes share one ChatPaneGroup.
+  const isTeamSessionId = useCallback(
+    (sid: string) => {
+      // Prefer the resolved active row: a conversation created moments ago is
+      // not in the list yet, and misreading it as a direct chat would route its
+      // send / close through the wrong hook.
+      const s =
+        (activeSession?.id === sid ? activeSession : null) ?? sessions.find((x) => x.id === sid)
+      return s?.kind === "team" && Boolean(s.teamId)
+    },
+    [sessions, activeSession]
+  )
 
   // Workspace Trust: bump a nonce on each send so the trust gate can lazily
-  // prompt (once per session) when the active workspace is restricted. Trust
-  // applies to direct chat — team sessions resolve cwd per-member elsewhere.
+  // prompt (once per session) when the active workspace is restricted. The
+  // gate applies to team sessions too — a member's cwd resolves through the
+  // same session.workingDir → workspace root chain as direct chat.
   const [trustPromptNonce, setTrustPromptNonce] = useState(0)
-  const sendWithTrustPrompt = useCallback(
-    (content: SendContent) => {
-      if (!isTeamSession) setTrustPromptNonce((n) => n + 1)
-      return send(content)
+
+  // Per-session handlers for the concurrent chat panes. Each binds to an
+  // explicit session id so a background pane sends / stops / regenerates
+  // against itself. Trust-prompting wraps the send for the targeted pane.
+  const paneSend = useCallback(
+    (content: SendContent, sid: string, manifest?: readonly AttachmentManifestEntry[]) => {
+      setTrustPromptNonce((n) => n + 1)
+      return isTeamSessionId(sid)
+        ? teamChat.send(content, { sessionId: sid, attachmentManifest: manifest })
+        : directChat.send(content, undefined, {
+            sessionId: sid,
+            attachmentManifest: manifest,
+          })
     },
-    [send, isTeamSession]
+    [directChat, teamChat, isTeamSessionId]
+  )
+  const paneStop = useCallback(
+    (sid: string) => (isTeamSessionId(sid) ? teamChat.stop(sid) : directChat.stop(sid)),
+    [directChat, teamChat, isTeamSessionId]
+  )
+  const paneSteer = useCallback(
+    (sid: string) =>
+      isTeamSessionId(sid) ? teamChat.interruptAndSteer(sid) : directChat.interruptAndSteer(sid),
+    [directChat, teamChat, isTeamSessionId]
+  )
+  const paneFlush = useCallback(
+    (sid: string) => (isTeamSessionId(sid) ? teamChat.flushSteer(sid) : directChat.flushSteer(sid)),
+    [directChat, teamChat, isTeamSessionId]
+  )
+  const paneRegenerate = useCallback(
+    (sid: string) => (isTeamSessionId(sid) ? teamChat.regenerate(sid) : directChat.regenerate(sid)),
+    [directChat, teamChat, isTeamSessionId]
+  )
+  const paneEditResend = useCallback(
+    (messageId: string, content: SendContent, sid: string) =>
+      isTeamSessionId(sid)
+        ? teamChat.editAndResend(messageId, content, sid)
+        : directChat.editAndResend(messageId, content, sid),
+    [directChat, teamChat, isTeamSessionId]
+  )
+  // After a plan is approved in the plan-approval dock, switch the session's
+  // permission mode and resume the turn. The store mode is set FIRST (so the
+  // composer's persist effect can't clobber the row back to `plan`), the row is
+  // then written authoritatively and AWAITED before `send` — `send` resolves the
+  // mode from the session row, not the store, so a stale row would run the resume
+  // turn in `plan` mode. `skipUserAppend` injects the turn with no user bubble.
+  const resumeAfterPlanApproval = useCallback(
+    async (prompt: string, mode: PlanResumeMode, sid: string) => {
+      // Plan mode is a direct-chat surface (principled exclusion for teams).
+      if (isTeamSessionId(sid)) return
+      if (useChatStore.getState().activeSessionId === sid) {
+        useChatStore.getState().setPermissionMode(mode)
+      }
+      await updateSession(sid, { permissionMode: mode })
+      await directChat.send(prompt, undefined, { sessionId: sid, skipUserAppend: true })
+    },
+    [directChat, isTeamSessionId]
   )
 
   const handleChannelNewDirect = useCallback(() => {
@@ -253,6 +386,10 @@ export function DesktopChatWorkspace() {
     },
     [rename]
   )
+
+  const handleReorderSessions = useCallback((ids: string[], sectionKey: string) => {
+    void setSessionOrder(ids, sectionKey)
+  }, [])
 
   // `useTranslations` returns a fresh function reference on each render. Hold
   // it in a ref so the bulk callbacks (consumed by ChannelList) stay
@@ -292,12 +429,60 @@ export function DesktopChatWorkspace() {
     [bulkSetPinned]
   )
 
-  const handleUseSample = useCallback(
-    (text: string) => {
-      void send(text)
+  const handleChannelBulkArchive = useCallback(
+    async (ids: string[]) => {
+      const count = ids.length
+      log.info("channel bulk-archive", { count })
+      await bulkArchive(ids)
+      toast.success(bulkTRef.current("archiveSuccess", { count }))
     },
-    [send]
+    [bulkArchive]
   )
+
+  const handleChannelBulkUnarchive = useCallback(
+    async (ids: string[]) => {
+      const count = ids.length
+      log.info("channel bulk-unarchive", { count })
+      await bulkUnarchive(ids)
+      toast.success(bulkTRef.current("unarchiveSuccess", { count }))
+    },
+    [bulkUnarchive]
+  )
+
+  // Starter cards / follow-up chips. On the welcome page there is no session
+  // yet, so this has to start one before sending: `send` drops the prompt when
+  // no session is selected, which made the cards read as dead buttons. The new
+  // session is addressed explicitly — the store pointer has not propagated to
+  // this closure yet.
+  const handleUseSample = useCallback(
+    async (text: string) => {
+      const active = useChatStore.getState().activeSessionId
+      if (active) {
+        if (isTeamSessionId(active)) await teamChat.send(text, { sessionId: active })
+        else await directChat.send(text, undefined, { sessionId: active })
+        return
+      }
+      // Quick-start respects the selected guild, same as the welcome CTA. A
+      // bare `create()` auto-applies the default preset, so a direct
+      // quick-start needs no character pick.
+      if (selectedGuild.kind === "team") {
+        const s = await handleNewTeamConversation(selectedGuild.teamId)
+        await teamChat.send(text, { sessionId: s.id })
+      } else {
+        const s = await create()
+        await directChat.send(text, undefined, { sessionId: s.id })
+      }
+    },
+    [directChat, teamChat, isTeamSessionId, create, selectedGuild, handleNewTeamConversation]
+  )
+
+  // The welcome CTA / tab-strip "+" respect the selected guild: a team guild
+  // starts a new conversation with that team, everything else opens the
+  // character picker for a direct chat.
+  const handleCreate = useCallback(() => {
+    if (selectedGuild.kind === "team") void handleNewTeamConversation(selectedGuild.teamId)
+    else handleNewDirect()
+  }, [selectedGuild, handleNewTeamConversation, handleNewDirect])
 
   const handleMemberMention = useCallback((c: Character) => {
     composerRef.current?.insertMention(c.name)
@@ -338,14 +523,14 @@ export function DesktopChatWorkspace() {
     [create, select, setSelectedGuild]
   )
 
-  const handleToolApprovalRespond = useCallback(
-    (decision: ApprovalDecision) => {
-      if (!pendingApproval) return Promise.resolve()
-      return pendingApproval.sessionId.includes("::char::")
-        ? teamChat.respondToApproval(pendingApproval, decision)
-        : directChat.respondToApproval(pendingApproval, decision)
-    },
-    [pendingApproval, teamChat, directChat]
+  // Inline pane gates carry approvals for both kinds; team approvals arrive
+  // tagged with the member sub-session id, so route them to useTeamChat.
+  const handleApprovalRespond = useCallback(
+    (approval: PendingApproval, decision: ApprovalDecision) =>
+      decodeSubSession(approval.sessionId) !== null
+        ? teamChat.respondToApproval(approval, decision)
+        : directChat.respondToApproval(approval, decision),
+    [teamChat, directChat]
   )
 
   return (
@@ -356,52 +541,102 @@ export function DesktopChatWorkspace() {
         ) : null
       ) : (
         <>
-          {!sidebarCollapsed && (
-            <ChannelList
-              sessions={sessions}
-              loading={isLoadingSessions}
-              activeSessionId={activeSessionId}
-              onSelect={handleSwitchToSession}
-              onNewDirect={handleChannelNewDirect}
-              onNewTeamConversation={handleChannelNewTeam}
-              onDelete={handleChannelDelete}
-              onRename={handleChannelRename}
-              onTogglePinned={handleChannelTogglePinned}
-              onBulkDelete={handleChannelBulkDelete}
-              onBulkSetPinned={handleChannelBulkSetPinned}
-            />
-          )}
+          {/* Always mounted so the rail can animate its width to 0 when
+              collapsed (a smooth transition needs the element to stay in the
+              DOM). It self-hides to a 0-width column — no leftover strip — and
+              is restored from the chat-header toggle. State is the single
+              `sidebarCollapsed` store field shared with the title/status bars,
+              View menu, and ⌘B. */}
+          <ChannelList
+            sessions={sessions}
+            loading={isLoadingSessions}
+            activeSessionId={activeSessionId}
+            onSelect={handleSwitchToSession}
+            onNewDirect={handleChannelNewDirect}
+            onNewTeamConversation={handleChannelNewTeam}
+            onDelete={handleChannelDelete}
+            onRename={handleChannelRename}
+            onTogglePinned={handleChannelTogglePinned}
+            onArchive={archive}
+            onUnarchive={unarchive}
+            onBulkDelete={handleChannelBulkDelete}
+            onBulkSetPinned={handleChannelBulkSetPinned}
+            onBulkArchive={handleChannelBulkArchive}
+            onBulkUnarchive={handleChannelBulkUnarchive}
+            folders={folders}
+            onCreateFolder={createFolder}
+            onRenameFolder={renameFolder}
+            onDeleteFolder={deleteFolder}
+            onAssignToFolder={assignToFolder}
+            onReorderSessions={handleReorderSessions}
+          />
 
-          <main
-            className="relative flex min-w-0 flex-1 flex-col overflow-hidden"
-            data-bg-target="chat"
-          >
-            {!mounted ? null : platform !== "tauri" ? (
-              <DesktopOnlyBanner />
-            ) : (
-              <>
-                {!isTeamSession && (
+          <ArtifactWorkspaceDock>
+            <main
+              className="relative flex min-w-0 flex-1 flex-col overflow-hidden"
+              data-bg-target="chat"
+            >
+              {!mounted ? null : (
+                <>
                   <WorkspaceTrustGate
                     sessionId={activeSession?.id ?? null}
                     promptNonce={trustPromptNonce}
                   />
-                )}
-                <ChatPane
-                  activeSession={activeSession}
-                  onSend={sendWithTrustPrompt}
-                  onStop={stop}
-                  onRegenerate={isTeamSession ? teamChat.regenerate : directChat.regenerate}
-                  onEditResend={isTeamSession ? teamChat.editAndResend : directChat.editAndResend}
-                  onCreate={handleNewDirect}
-                  onUseSample={handleUseSample}
-                  onOpenSettings={openSettings}
-                  recentSessions={recentSessions}
-                  onResumeSession={handleSwitchToSession}
-                  composerRef={composerRef}
-                />
-              </>
-            )}
-          </main>
+                  {composerDisabled ? (
+                    <div
+                      className="mx-3 mt-3 flex items-center justify-between gap-3 rounded-lg border border-border bg-muted/60 px-3 py-2 text-sm"
+                      role="status"
+                      data-testid="chat-runtime-notice"
+                    >
+                      <div className="min-w-0">
+                        <p className="font-medium">{runtimeT("title")}</p>
+                        <p className="text-muted-foreground">
+                          {runtimeT(
+                            `states.${runtimeAvailabilityMessageKey(chatAvailability.state)}`
+                          )}
+                        </p>
+                      </div>
+                      {runtimeRecoveryRoute(chatAvailability.state) ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => router.push(runtimeRecoveryRoute(chatAvailability.state)!)}
+                        >
+                          {runtimeT(
+                            chatAvailability.state === "requires-pairing"
+                              ? "actions.pair"
+                              : "actions.connectionSettings"
+                          )}
+                        </Button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {/* Concurrent chat workspace (direct AND team sessions):
+                    optional split, each pane bound to its own session slice +
+                    inline approval gate, dispatched by session kind. */}
+                  <ChatPaneGroup
+                    sessions={sessions}
+                    send={paneSend}
+                    stop={paneStop}
+                    steerNow={paneSteer}
+                    steerFlush={paneFlush}
+                    regenerate={paneRegenerate}
+                    editResend={paneEditResend}
+                    respondToApproval={handleApprovalRespond}
+                    onCreate={handleCreate}
+                    onUseSample={handleUseSample}
+                    onOpenSettings={openSettings}
+                    recentSessions={recentSessions}
+                    onResumeSession={handleSwitchToSession}
+                    composerRef={composerRef}
+                    composerDisabled={composerDisabled}
+                    onResumeAfterPlanApproval={resumeAfterPlanApproval}
+                  />
+                </>
+              )}
+            </main>
+          </ArtifactWorkspaceDock>
 
           {isTeamSession && (
             <MemberList
@@ -410,7 +645,6 @@ export function DesktopChatWorkspace() {
               onMention={handleMemberMention}
             />
           )}
-          <ArtifactPanel />
         </>
       )}
 
@@ -425,26 +659,18 @@ export function DesktopChatWorkspace() {
         onOpenChange={handleOnboardingOpenChange}
         onPickCharacter={handleOnboardingPickCharacter}
       />
-
-      <ToolApprovalDialog approval={pendingApproval} onRespond={handleToolApprovalRespond} />
     </>
   )
 }
 
-function DesktopOnlyBanner() {
-  const t = useTranslations("desktop.shell")
-  return (
-    <div className="flex flex-1 items-center justify-center p-6">
-      <div className="max-w-md space-y-3 text-center">
-        <h2 className="text-xl font-semibold">{t("desktopOnlyTitle")}</h2>
-        <p className="text-sm text-muted-foreground">
-          {t("desktopOnlyBodyPrefix")}
-          <code className="rounded bg-muted px-1 py-0.5">pnpm tauri dev</code>
-          {t("desktopOnlyBodyMiddle")}
-          <code className="rounded bg-muted px-1 py-0.5">pnpm dev</code>
-          {t("desktopOnlyBodySuffix")}
-        </p>
-      </div>
-    </div>
-  )
+function runtimeAvailabilityMessageKey(state: OperationAvailabilityState): string {
+  return state.replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase())
+}
+
+function runtimeRecoveryRoute(state: OperationAvailabilityState): string | null {
+  if (state === "requires-pairing") return "/pair"
+  if (state === "requires-grant" || state === "incompatible" || state === "offline") {
+    return "/settings?section=remote-hosts"
+  }
+  return null
 }

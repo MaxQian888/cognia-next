@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Coverage for the MCP server CRUD module. Uses fake-indexeddb to hit the
 // Dexie store directly. We mock the lazy-imported sync module so we never
 // pull Tauri IPC into jsdom.
@@ -22,6 +23,7 @@ import {
   updateMcpServer,
   deleteMcpServer,
   buildMcpServerMap,
+  buildMcpServerMapWithAuth,
   bulkImportMcpServers,
   parseClaudeMcpConfig,
   MCP_TRANSPORTS,
@@ -285,6 +287,112 @@ describe("buildMcpServerMap", () => {
       url: "https://example.com/sse",
       headers: { Authorization: "Bearer x" },
     })
+  })
+
+  it("emits keys in sorted-name order regardless of input order", async () => {
+    const z = await createMcpServer({ name: "zeta", transport: "stdio", config: { command: "z" } })
+    const a = await createMcpServer({
+      name: "alpha2",
+      transport: "stdio",
+      config: { command: "a" },
+    })
+    const m = await createMcpServer({ name: "mid", transport: "stdio", config: { command: "m" } })
+    expect(Object.keys(buildMcpServerMap([z, m, a]))).toEqual(["alpha2", "mid", "zeta"])
+    expect(Object.keys(buildMcpServerMap([a, z, m]))).toEqual(["alpha2", "mid", "zeta"])
+  })
+})
+
+describe("buildMcpServerMapWithAuth", () => {
+  it("injects a bearer header for a remote server with a stored token", async () => {
+    const row = await createMcpServer({
+      name: "remote",
+      transport: "http",
+      config: { url: "https://x/mcp" },
+    })
+    const out = await buildMcpServerMapWithAuth([row], {
+      loadEntry: async () => ({ accessToken: "tok-123" }),
+    })
+    expect(out.remote).toMatchObject({
+      type: "http",
+      url: "https://x/mcp",
+      headers: { Authorization: "Bearer tok-123" },
+    })
+  })
+
+  it("merges the bearer header alongside existing static headers", async () => {
+    const row = await createMcpServer({
+      name: "remote",
+      transport: "sse",
+      config: { url: "https://x/sse", headers: { "X-Trace": "1" } },
+    })
+    const out = await buildMcpServerMapWithAuth([row], {
+      loadEntry: async () => ({ accessToken: "abc" }),
+    })
+    expect(out.remote.headers).toEqual({ "X-Trace": "1", Authorization: "Bearer abc" })
+  })
+
+  it("leaves stdio servers and tokenless remotes untouched", async () => {
+    const stdio = await createMcpServer({
+      name: "alpha",
+      transport: "stdio",
+      config: { command: "x" },
+    })
+    const remote = await createMcpServer({
+      name: "beta",
+      transport: "http",
+      config: { url: "https://y" },
+    })
+    const out = await buildMcpServerMapWithAuth([stdio, remote], {
+      loadEntry: async () => undefined,
+    })
+    expect(out.alpha).not.toHaveProperty("headers")
+    expect(out.beta).not.toHaveProperty("headers")
+  })
+
+  it("refreshes a near-expiry token before injecting it", async () => {
+    const row = await createMcpServer({
+      name: "remote",
+      transport: "http",
+      config: { url: "https://x" },
+    })
+    const refresh = jest.fn(async () => ({ accessToken: "fresh", expiresAtMs: 10_000 }))
+    const out = await buildMcpServerMapWithAuth([row], {
+      loadEntry: async () => ({ accessToken: "stale", expiresAtMs: 1_000 }),
+      refresh,
+      now: () => 900, // 1000 - 900 = 100ms left < 60s skew
+    })
+    expect(refresh).toHaveBeenCalledWith("remote")
+    expect(out.remote.headers).toEqual({ Authorization: "Bearer fresh" })
+  })
+
+  it("does not refresh a token that is comfortably valid", async () => {
+    const row = await createMcpServer({
+      name: "remote",
+      transport: "http",
+      config: { url: "https://x" },
+    })
+    const refresh = jest.fn()
+    const out = await buildMcpServerMapWithAuth([row], {
+      loadEntry: async () => ({ accessToken: "ok", expiresAtMs: 10_000_000 }),
+      refresh,
+      now: () => 0,
+    })
+    expect(refresh).not.toHaveBeenCalled()
+    expect(out.remote.headers).toEqual({ Authorization: "Bearer ok" })
+  })
+
+  it("falls back to the un-authed config when the auth lookup throws", async () => {
+    const row = await createMcpServer({
+      name: "remote",
+      transport: "http",
+      config: { url: "https://x" },
+    })
+    const out = await buildMcpServerMapWithAuth([row], {
+      loadEntry: async () => {
+        throw new Error("keyring unavailable")
+      },
+    })
+    expect(out.remote).not.toHaveProperty("headers")
   })
 })
 

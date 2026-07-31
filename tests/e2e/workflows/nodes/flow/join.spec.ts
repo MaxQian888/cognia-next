@@ -2,7 +2,7 @@
  * E2E: flow.join — converging branch wait-for-all / wait-for-any.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../../../helpers/db-reset"
 import { seedAndOpenWorkflow } from "../../../helpers/seed-workflow"
 import {
@@ -24,7 +24,7 @@ test.describe("workflow node — flow.join", () => {
     const wfId = await seedAndOpenWorkflow(page, "flow-split-join")
     await assertNodeOnCanvas(page, { kind: "flow.join", label: "Join" })
     await openNodeInspector(page, "flow.join")
-    await expect(page.locator("#ins-strategy, [name=strategy]").first()).toBeVisible()
+    await expect(page.locator("#ins-joinPolicy, [data-field=joinPolicy]").first()).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "flow.join" })
   })

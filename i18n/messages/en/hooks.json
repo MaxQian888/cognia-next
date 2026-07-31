@@ -1,0 +1,119 @@
+{
+  "categories": {
+    "lifecycle": "Lifecycle",
+    "permissions": "Permissions",
+    "session": "Session",
+    "tasks": "Tasks",
+    "tools": "Tools"
+  },
+  "events": {
+    "ConfigChange": {
+      "desc": "Fires when settings.json changes.",
+      "label": "Config changed"
+    },
+    "CwdChanged": {
+      "desc": "Fires when the working directory changes.",
+      "label": "Directory changed"
+    },
+    "Elicitation": {
+      "desc": "Fires when the agent prompts you for structured input.",
+      "label": "Elicitation"
+    },
+    "ElicitationResult": {
+      "desc": "Fires once you answer an elicitation prompt.",
+      "label": "Elicitation result"
+    },
+    "FileChanged": {
+      "desc": "Fires when a watched file changes on disk.",
+      "label": "File changed"
+    },
+    "InstructionsLoaded": {
+      "desc": "Fires when CLAUDE.md / instructions are loaded.",
+      "label": "Instructions loaded"
+    },
+    "Notification": {
+      "desc": "Fires on a runtime notification (idle, awaiting input).",
+      "label": "Notification"
+    },
+    "PermissionDenied": {
+      "desc": "Fires when a permission request is denied.",
+      "label": "Permission denied"
+    },
+    "PermissionRequest": {
+      "desc": "Fires when a tool asks for permission; can auto-decide.",
+      "label": "Permission request"
+    },
+    "PostCompact": {
+      "desc": "Fires after the context window is compacted.",
+      "label": "After compaction"
+    },
+    "PostToolBatch": {
+      "desc": "Fires once after a batch of parallel tool calls completes.",
+      "label": "After tool batch"
+    },
+    "PostToolUse": {
+      "desc": "Fires after a tool returns; inspect or annotate the result.",
+      "label": "After tool"
+    },
+    "PostToolUseFailure": {
+      "desc": "Fires when a tool call errors out.",
+      "label": "After tool failure"
+    },
+    "PreCompact": {
+      "desc": "Fires before the context window is compacted.",
+      "label": "Before compaction"
+    },
+    "PreToolUse": {
+      "desc": "Fires before a tool runs; a hook can block or rewrite the call.",
+      "label": "Before tool"
+    },
+    "SessionEnd": {
+      "desc": "Fires when a session ends; run cleanup or logging.",
+      "label": "Session end"
+    },
+    "SessionStart": {
+      "desc": "Fires when a session begins; good for injecting standing context.",
+      "label": "Session start"
+    },
+    "Stop": {
+      "desc": "Fires when the assistant finishes its turn.",
+      "label": "Stop"
+    },
+    "StopFailure": {
+      "desc": "Fires when a turn ends because of an error.",
+      "label": "Stop (failed)"
+    },
+    "SubagentStop": {
+      "desc": "Fires when a subagent finishes its run.",
+      "label": "Subagent stop"
+    },
+    "TaskCompleted": {
+      "desc": "Fires when an agent task completes.",
+      "label": "Task completed"
+    },
+    "TaskCreated": {
+      "desc": "Fires when an agent task is created.",
+      "label": "Task created"
+    },
+    "TeammateIdle": {
+      "desc": "Fires when an agent-team member goes idle.",
+      "label": "Teammate idle"
+    },
+    "UserPromptExpansion": {
+      "desc": "Fires while a prompt's macros are expanded.",
+      "label": "Prompt expansion"
+    },
+    "UserPromptSubmit": {
+      "desc": "Fires when you send a prompt; can inject context or block it.",
+      "label": "Prompt submitted"
+    },
+    "WorktreeCreate": {
+      "desc": "Fires when a git worktree is created.",
+      "label": "Worktree created"
+    },
+    "WorktreeRemove": {
+      "desc": "Fires when a git worktree is removed.",
+      "label": "Worktree removed"
+    }
+  }
+}

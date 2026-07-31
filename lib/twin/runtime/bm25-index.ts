@@ -15,7 +15,7 @@
  * see — so the keyword and vector lanes agree on what's in the corpus.
  */
 
-import { BM25Index } from "@/lib/ai/rag/hybrid-search"
+import { BM25Index } from "@cognia/rag/hybrid-search"
 import { getTwinChunksVersion, listTwinChunksByTwin } from "@/lib/db/twin-chunks"
 
 interface CachedIndex {

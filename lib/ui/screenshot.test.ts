@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { captureScreenshot } from "./screenshot"
 
 type DisplayMediaMock = jest.Mock<Promise<MediaStream>, [MediaStreamConstraints?]>

@@ -1,5 +1,5 @@
 import { renderHook, act } from "@testing-library/react"
-import type { SearchOptions, SearchResponse } from "@/lib/search/types"
+import type { SearchOptions, SearchResponse } from "@cognia/web-search/types"
 
 const searchMock = jest.fn()
 const cacheGetMock = jest.fn()
@@ -11,7 +11,7 @@ jest.mock("@/lib/search/search-service", () => ({
   search: (...args: unknown[]) => searchMock(...args),
 }))
 
-jest.mock("@/lib/search/search-cache", () => ({
+jest.mock("@cognia/web-search/search-cache", () => ({
   getSearchCache: () => ({
     get: cacheGetMock,
     set: cacheSetMock,

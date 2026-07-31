@@ -24,7 +24,7 @@ jest.mock("next-intl", () => ({
 }))
 
 const mockLogInfo = jest.fn()
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   createLogger: () => ({
     info: (...args: unknown[]) => mockLogInfo(...args),
     error: jest.fn(),
@@ -66,9 +66,9 @@ beforeEach(() => {
 })
 
 describe("SearchDefaultsSettings", () => {
-  it("renders title", () => {
+  it("renders the search-type group label", () => {
     render(<SearchDefaultsSettings />)
-    expect(screen.getByText("title")).toBeInTheDocument()
+    expect(screen.getByText("searchType")).toBeInTheDocument()
   })
 
   it("renders all search type buttons", () => {

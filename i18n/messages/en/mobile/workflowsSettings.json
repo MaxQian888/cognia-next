@@ -1,0 +1,12 @@
+{
+  "backAria": "Back to Me",
+  "sectionDescription": "Tune how much motion and live computation the visual workflow editor uses.",
+  "sectionTitle": "Editor performance",
+  "tierAuto": "Auto",
+  "tierBalanced": "Balanced",
+  "tierHelp": "Auto chooses a tier from your reduce-motion setting and the workflow size. Lower tiers trade visual polish for smoother editing on large graphs.",
+  "tierHigh": "High",
+  "tierLabel": "Performance tier",
+  "tierReduced": "Reduced",
+  "title": "Workflow settings"
+}

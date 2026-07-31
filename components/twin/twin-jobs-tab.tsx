@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { memo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useTranslations } from "next-intl"
 import { motion, useReducedMotion } from "motion/react"
@@ -26,7 +26,6 @@ const STATUS_VARIANT: Record<TwinJobStatus, "default" | "secondary" | "destructi
 
 export function TwinJobsTab({ twinId }: { twinId: string }) {
   const t = useTranslations("twin.jobs")
-  const tKind = useTranslations("twin.kind")
   const prefersReducedMotion = useReducedMotion()
   const jobs = useLiveQuery(() => listTwinJobsByTwin(twinId), [twinId], [])
 
@@ -72,7 +71,7 @@ export function TwinJobsTab({ twinId }: { twinId: string }) {
               }}
               className="list-none"
             >
-              <JobRow job={job} t={t} tKind={tKind} />
+              <JobRow job={job} />
             </motion.li>
           ))}
         </ul>
@@ -81,15 +80,14 @@ export function TwinJobsTab({ twinId }: { twinId: string }) {
   )
 }
 
-function JobRow({
-  job,
-  t,
-  tKind,
-}: {
-  job: TwinJob
-  t: ReturnType<typeof useTranslations>
-  tKind: ReturnType<typeof useTranslations>
-}) {
+/**
+ * A single job card. Memoised — live-query refreshes (progress ticks on the
+ * running job) replace only that job's object, so finished rows skip
+ * re-rendering.
+ */
+const JobRow = memo(function JobRow({ job }: { job: TwinJob }) {
+  const t = useTranslations("twin.jobs")
+  const tKind = useTranslations("twin.kind")
   const [retrying, setRetrying] = useState(false)
   const [retryError, setRetryError] = useState<string | null>(null)
   const deadLetter = parseDeadLetter(job.errorMessage)
@@ -146,6 +144,23 @@ function JobRow({
           {t("draftsProduced", { count: job.outputDraftIds.length })}
         </p>
       ) : null}
+      {job.partialFailures && Object.keys(job.partialFailures).length > 0 ? (
+        <div className="flex flex-col gap-1" data-testid={`twin-job-${job.id}-partial`}>
+          <div className="flex items-center gap-2">
+            <Badge variant="secondary" className="text-[10px]">
+              {t("partialBadge")}
+            </Badge>
+            <span className="text-muted-foreground text-xs">{t("partialTitle")}</span>
+          </div>
+          <ul className="text-muted-foreground list-disc pl-5 text-xs">
+            {Object.entries(job.partialFailures).map(([agent, reason]) => (
+              <li key={agent}>
+                <span className="font-medium">{agent}</span>: {reason}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       {canRetry ? (
         <div className="flex items-center justify-end gap-2">
           {retryError ? (
@@ -166,4 +181,4 @@ function JobRow({
       ) : null}
     </Card>
   )
-}
+})

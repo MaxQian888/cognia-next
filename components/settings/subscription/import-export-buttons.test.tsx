@@ -59,6 +59,19 @@ jest.mock("@/types/subscription", () => ({
 
 import { ImportExportButtons } from "./import-export-buttons"
 
+// The panel refuses to render in web mode (the credential vault is
+// keychain-backed), so the suite has to declare itself desktop.
+const TAURI_MARKER = "__TAURI_INTERNALS__"
+function setDesktop(on: boolean) {
+  if (on) {
+    ;(window as unknown as Record<string, unknown>)[TAURI_MARKER] = {}
+  } else {
+    delete (window as unknown as Record<string, unknown>)[TAURI_MARKER]
+  }
+}
+beforeAll(() => setDesktop(true))
+afterAll(() => setDesktop(false))
+
 beforeEach(() => {
   decryptMock.mockReset()
   encryptMock.mockReset()
@@ -182,5 +195,15 @@ describe("ImportExportButtons import flow", () => {
     await waitFor(() => {
       expect(screen.getByText("preview.empty")).toBeInTheDocument()
     })
+  })
+})
+
+describe("ImportExportButtons in web mode", () => {
+  beforeEach(() => setDesktop(false))
+  afterEach(() => setDesktop(true))
+
+  it("shows the keychain banner instead of a surface that cannot work", () => {
+    render(<ImportExportButtons />)
+    expect(screen.getByText("webModeBanner")).toBeInTheDocument()
   })
 })

@@ -1,0 +1,14 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    // The root config narrows `types` to `["node"]`; co-located tests here need
+    // the Jest globals too, and `types` is replaced wholesale by a child config
+    // rather than merged.
+    "types": ["node", "jest"],
+    "paths": {
+      "@web/*": ["./*"]
+    }
+  },
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules", "out", ".next"]
+}

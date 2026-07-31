@@ -297,7 +297,10 @@ export function processPromptTemplateVariables(
     "{{datetime}}": now.toLocaleString(),
     "{{weekday}}": now.toLocaleDateString("en-US", { weekday: "long" }),
     "{{timezone}}": context.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
-    "{{language}}": context.language || navigator?.language || "en",
+    "{{language}}":
+      context.language ||
+      (typeof navigator !== "undefined" ? navigator.language : undefined) ||
+      "en",
     "{{tools_list}}": context.tools?.length
       ? context.tools.join(", ")
       : "No specific tools configured",

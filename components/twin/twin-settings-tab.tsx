@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -37,7 +38,12 @@ import { observeTwinRuntimeSettings, saveTwinRuntimeSettings } from "@/lib/db/tw
 import { isTauri } from "@/lib/utils"
 import { usePlatform } from "@/hooks/use-platform"
 import { revealInExplorer } from "@/lib/tauri/opener"
-import { verifyVectorBackendReadiness } from "@/lib/vector/readiness"
+import { verifyVectorBackendReadiness } from "@cognia/vector/readiness"
+import {
+  RAG_EMBEDDING_PROVIDERS,
+  embeddingProviderRequiresApiKey,
+  embeddingProviderRequiresBaseURL,
+} from "@cognia/provider-embedding/embedding-catalog"
 import type { StorageBackendReadinessState } from "@/lib/storage/persistence/types"
 import {
   DEFAULT_TWIN_RUNTIME_SETTINGS,
@@ -47,6 +53,7 @@ import {
 import { TwinOverviewCard } from "./twin-overview-card"
 import { TwinCronCard } from "./twin-cron-card"
 import { TwinInjectLogCard } from "./twin-inject-log-card"
+import { TwinSettingsPluginSlot } from "./twin-plugin-slots"
 
 const VECTOR_BACKENDS: VectorBackend[] = [
   "qdrant",
@@ -56,6 +63,9 @@ const VECTOR_BACKENDS: VectorBackend[] = [
   "chroma",
   "native",
 ]
+
+// Distill LLM providers wired through `createLlmClient` (lib/twin/distill/llm.ts).
+const DISTILL_LLM_PROVIDERS = ["anthropic", "openai", "google", "mistral", "cohere"] as const
 
 export function TwinSettingsTab({ twinId }: { twinId: string }) {
   const t = useTranslations("twin.settings")
@@ -70,7 +80,7 @@ export function TwinSettingsTab({ twinId }: { twinId: string }) {
   return (
     <div className="flex flex-col gap-3">
       <h2 className="text-lg font-medium">{t("title")}</h2>
-      <Card className="grid gap-3 p-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+      <Card className="grid gap-3 p-4 @sm/twin:grid-cols-2 @md/twin:grid-cols-3 @lg/twin:grid-cols-4">
         <Stat label={t("statsTwinId")} value={twinId} mono />
         <Stat label={t("statsSources")} value={String(sourceCount)} />
         <Stat label={t("statsChunks")} value={String(chunkCount)} />
@@ -94,6 +104,7 @@ export function TwinSettingsTab({ twinId }: { twinId: string }) {
       </Card>
       <RuntimeConfigCard />
       <TwinInjectLogCard twinId={twinId} />
+      <TwinSettingsPluginSlot twinId={twinId} />
     </div>
   )
 }
@@ -106,6 +117,10 @@ function RuntimeConfigCard() {
   // unrelated tab; once the user saves, we clear the dirty flag and let
   // `live` resume driving the form.
   const [settings, setSettings] = useState<TwinRuntimeSettings>(live)
+  // Raw textarea text for extraNameHints — kept separate from the parsed
+  // array so in-progress separators ("Alice, ") aren't normalized away on
+  // every keystroke by a join/split round-trip.
+  const [nameHintsText, setNameHintsText] = useState(live.extraNameHints.join(", "))
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState<number | null>(null)
   const dirtyRef = useRef(false)
@@ -123,6 +138,7 @@ function RuntimeConfigCard() {
   useEffect(() => {
     if (dirtyRef.current) return
     setSettings(live)
+    setNameHintsText(live.extraNameHints.join(", "))
   }, [live])
 
   const updateField = (next: TwinRuntimeSettings) => {
@@ -140,6 +156,86 @@ function RuntimeConfigCard() {
       setSaving(false)
     }
   }
+
+  const embeddingProvider = settings.embedding.provider
+  const embeddingFields: FieldDef[] = [
+    {
+      label: t("provider"),
+      kind: "select",
+      value: embeddingProvider,
+      options: RAG_EMBEDDING_PROVIDERS,
+      onChange: (v) =>
+        updateField({
+          ...settings,
+          embedding: {
+            ...settings.embedding,
+            provider: v as TwinRuntimeSettings["embedding"]["provider"],
+          },
+        }),
+    },
+    {
+      label: t("model"),
+      kind: "input",
+      value: settings.embedding.model,
+      onChange: (v) => updateField({ ...settings, embedding: { ...settings.embedding, model: v } }),
+    },
+    // Base URL only for local engines (ollama/lmstudio/…) + proxy overrides.
+    ...(embeddingProviderRequiresBaseURL(embeddingProvider)
+      ? ([
+          {
+            label: t("baseURL"),
+            kind: "input",
+            value: settings.embedding.baseURL ?? "",
+            onChange: (v: string) =>
+              updateField({ ...settings, embedding: { ...settings.embedding, baseURL: v } }),
+          },
+        ] as FieldDef[])
+      : []),
+    // API key only for cloud providers; local engines need none.
+    ...(embeddingProviderRequiresApiKey(embeddingProvider)
+      ? ([
+          {
+            label: t("apiKey"),
+            kind: "secret",
+            value: settings.embedding.apiKey,
+            onChange: (v: string) =>
+              updateField({ ...settings, embedding: { ...settings.embedding, apiKey: v } }),
+          },
+        ] as FieldDef[])
+      : []),
+  ]
+
+  const distillFields: FieldDef[] = [
+    {
+      label: t("provider"),
+      kind: "select",
+      value: settings.llm.provider,
+      options: DISTILL_LLM_PROVIDERS,
+      onChange: (v) =>
+        updateField({
+          ...settings,
+          llm: { ...settings.llm, provider: v as TwinRuntimeSettings["llm"]["provider"] },
+        }),
+    },
+    {
+      label: t("model"),
+      kind: "input",
+      value: settings.llm.model,
+      onChange: (v) => updateField({ ...settings, llm: { ...settings.llm, model: v } }),
+    },
+    {
+      label: t("baseURL"),
+      kind: "input",
+      value: settings.llm.baseURL ?? "",
+      onChange: (v) => updateField({ ...settings, llm: { ...settings.llm, baseURL: v } }),
+    },
+    {
+      label: t("apiKey"),
+      kind: "secret",
+      value: settings.llm.apiKey,
+      onChange: (v) => updateField({ ...settings, llm: { ...settings.llm, apiKey: v } }),
+    },
+  ]
 
   return (
     <Card className="flex flex-col gap-4 p-4">
@@ -180,58 +276,107 @@ function RuntimeConfigCard() {
         <span className="text-muted-foreground text-xs">{t("rerankerToggleHint")}</span>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-2">
-        <FieldGroup
-          legend={t("embedding")}
-          fields={[
-            {
-              label: t("provider"),
-              kind: "select",
-              value: settings.embedding.provider,
-              options: ["openai", "google", "cohere", "mistral", "transformersjs"],
-              onChange: (v) =>
-                updateField({
-                  ...settings,
-                  embedding: {
-                    ...settings.embedding,
-                    provider: v as TwinRuntimeSettings["embedding"]["provider"],
-                  },
-                }),
-            },
-            {
-              label: t("model"),
-              kind: "input",
-              value: settings.embedding.model,
-              onChange: (v) =>
-                updateField({ ...settings, embedding: { ...settings.embedding, model: v } }),
-            },
-            {
-              label: t("apiKey"),
-              kind: "secret",
-              value: settings.embedding.apiKey,
-              onChange: (v) =>
-                updateField({ ...settings, embedding: { ...settings.embedding, apiKey: v } }),
-            },
-          ]}
+      <div className="flex items-center gap-3">
+        <Switch
+          id="twin-query-expansion-enabled"
+          checked={settings.queryExpansion?.enabled ?? false}
+          onCheckedChange={(v) =>
+            updateField({
+              ...settings,
+              queryExpansion: {
+                enabled: v,
+                strategy: settings.queryExpansion?.strategy ?? "hyde",
+              },
+            })
+          }
         />
+        <Label htmlFor="twin-query-expansion-enabled" className="text-sm">
+          {t("queryExpansionToggleLabel")}
+        </Label>
+        <span className="text-muted-foreground text-xs">{t("queryExpansionToggleHint")}</span>
+      </div>
 
-        <FieldGroup
-          legend={t("distillLlm")}
-          fields={[
-            {
-              label: t("model"),
-              kind: "input",
-              value: settings.llm.model,
-              onChange: (v) => updateField({ ...settings, llm: { ...settings.llm, model: v } }),
-            },
-            {
-              label: t("apiKey"),
-              kind: "secret",
-              value: settings.llm.apiKey,
-              onChange: (v) => updateField({ ...settings, llm: { ...settings.llm, apiKey: v } }),
-            },
-          ]}
+      <div className="flex flex-col gap-1">
+        <Label htmlFor="twin-extra-name-hints">{t("extraNameHintsLabel")}</Label>
+        <Textarea
+          id="twin-extra-name-hints"
+          data-testid="twin-settings-extra-name-hints"
+          value={nameHintsText}
+          placeholder={t("extraNameHintsPlaceholder")}
+          rows={2}
+          onChange={(e) => {
+            setNameHintsText(e.target.value)
+            updateField({
+              ...settings,
+              extraNameHints: e.target.value
+                .split(/[,\n]/)
+                .map((s) => s.trim())
+                .filter(Boolean),
+            })
+          }}
         />
+        <span className="text-muted-foreground text-xs">{t("extraNameHintsHelp")}</span>
+      </div>
+
+      {settings.reranker?.enabled ? (
+        <div className="flex flex-col gap-1 pl-11">
+          <Label htmlFor="twin-reranker-model">{t("rerankerModelLabel")}</Label>
+          <Select
+            value={settings.reranker?.model ?? "lexical"}
+            onValueChange={(next) =>
+              updateField({
+                ...settings,
+                reranker: { enabled: true, model: next },
+              })
+            }
+          >
+            <SelectTrigger
+              id="twin-reranker-model"
+              aria-label={t("rerankerModelLabel")}
+              className="w-full @sm/twin:w-[16rem]"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="lexical">{t("rerankerModelLexical")}</SelectItem>
+              <SelectItem value="llm">{t("rerankerModelLlm")}</SelectItem>
+            </SelectContent>
+          </Select>
+          <span className="text-muted-foreground text-xs">{t("rerankerModelHint")}</span>
+        </div>
+      ) : null}
+
+      {settings.queryExpansion?.enabled ? (
+        <div className="flex flex-col gap-1 pl-11">
+          <Label htmlFor="twin-query-expansion-strategy">{t("queryExpansionStrategyLabel")}</Label>
+          <Select
+            value={settings.queryExpansion?.strategy ?? "hyde"}
+            onValueChange={(next) =>
+              updateField({
+                ...settings,
+                queryExpansion: { enabled: true, strategy: next as "hyde" | "stepback" },
+              })
+            }
+          >
+            <SelectTrigger
+              id="twin-query-expansion-strategy"
+              aria-label={t("queryExpansionStrategyLabel")}
+              className="w-full @sm/twin:w-[16rem]"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="hyde">{t("queryExpansionStrategyHyde")}</SelectItem>
+              <SelectItem value="stepback">{t("queryExpansionStrategyStepback")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      ) : null}
+
+      <div className="grid gap-3 @md/twin:grid-cols-2">
+        <FieldGroup legend={t("embedding")} fields={embeddingFields} />
+
+        <FieldGroup legend={t("distillLlm")} fields={distillFields} />
       </div>
 
       <fieldset className="border-border flex flex-col gap-3 rounded border p-3">
@@ -255,7 +400,7 @@ function RuntimeConfigCard() {
             <SelectTrigger
               id="twin-vector-backend"
               aria-label={t("backend")}
-              className="w-full sm:w-[16rem]"
+              className="w-full @sm/twin:w-[16rem]"
             >
               <SelectValue />
             </SelectTrigger>
@@ -303,7 +448,7 @@ function BackendSpecificFields({ settings, onPatch }: BackendFieldsProps) {
   if (backend === "qdrant") {
     const qdrant = settings.storage.qdrant ?? { url: "" }
     return (
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 @sm/twin:grid-cols-2">
         <Field
           label={t("url")}
           value={qdrant.url}
@@ -321,7 +466,7 @@ function BackendSpecificFields({ settings, onPatch }: BackendFieldsProps) {
   if (backend === "pinecone") {
     const p = settings.storage.pinecone ?? { apiKey: "", indexName: "" }
     return (
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 @sm/twin:grid-cols-2">
         <Field
           label={t("apiKey")}
           secret
@@ -344,7 +489,7 @@ function BackendSpecificFields({ settings, onPatch }: BackendFieldsProps) {
   if (backend === "weaviate") {
     const w = settings.storage.weaviate ?? { url: "" }
     return (
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 @sm/twin:grid-cols-2">
         <Field
           label={t("url")}
           value={w.url}
@@ -362,7 +507,7 @@ function BackendSpecificFields({ settings, onPatch }: BackendFieldsProps) {
   if (backend === "milvus") {
     const m = settings.storage.milvus ?? { address: "" }
     return (
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 @sm/twin:grid-cols-2">
         <Field
           label={t("address")}
           value={m.address}
@@ -382,7 +527,7 @@ function BackendSpecificFields({ settings, onPatch }: BackendFieldsProps) {
     const tChromaMode = (mode: "embedded" | "server") =>
       mode === "embedded" ? t("chromaModeEmbedded") : t("chromaModeServer")
     return (
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 @sm/twin:grid-cols-2">
         <div className="flex flex-col gap-1">
           <Label htmlFor="twin-chroma-mode">{t("mode")}</Label>
           <Select
@@ -394,7 +539,7 @@ function BackendSpecificFields({ settings, onPatch }: BackendFieldsProps) {
             <SelectTrigger
               id="twin-chroma-mode"
               aria-label={t("mode")}
-              className="w-full sm:w-[12rem]"
+              className="w-full @sm/twin:w-[12rem]"
             >
               <SelectValue>{tChromaMode(c.mode)}</SelectValue>
             </SelectTrigger>
@@ -467,6 +612,7 @@ function NativeBackendFields({ settings }: { settings: TwinRuntimeSettings }) {
         embeddingConfig: {
           provider: settings.embedding.provider,
           model: settings.embedding.model,
+          baseURL: settings.embedding.baseURL,
         },
         embeddingApiKey: settings.embedding.apiKey,
         native: {},

@@ -2,13 +2,63 @@
  * @jest-environment jsdom
  */
 
-import { spawnFromDock, killFromDock, restartFromDock } from "./spawn-orchestrator"
+import { detachFromDock, spawnFromDock, killFromDock, restartFromDock } from "./spawn-orchestrator"
 import { __clearLiveSessionsForTesting, getLiveSession } from "./session-registry"
 import type { SpawnRequest, SessionInfo } from "./types"
+
+// The persist path (`persistCommandHistory`) lazy-imports these three —
+// mocked so command_end events in every test stay deterministic and the
+// durable-history gating is assertable.
+jest.mock("@/lib/db/terminal-history", () => ({
+  recordTerminalHistory: jest.fn(async () => undefined),
+}))
+jest.mock("@/stores/settings/settings-store", () => {
+  const state = { persistHistory: undefined as boolean | undefined }
+  return {
+    __mockSettingsState: state,
+    useSettingsStore: {
+      getState: () => ({
+        settings: { terminal: { autocomplete: { persistHistory: state.persistHistory } } },
+      }),
+    },
+  }
+})
+jest.mock("@cognia/redact", () => {
+  const state = { piiOk: true }
+  return {
+    __mockPiiState: state,
+    hasNoLeakingPii: () => state.piiOk,
+  }
+})
+// The command_end fan-out (`fanOutCommandTrigger`) lazy-imports this —
+// mocked so the workflow runtime never loads in these tests.
+jest.mock("./command-trigger", () => ({
+  dispatchTerminalCommandTriggers: jest.fn(async () => undefined),
+}))
+
+const { recordTerminalHistory: mockRecordHistory } = jest.requireMock(
+  "@/lib/db/terminal-history"
+) as { recordTerminalHistory: jest.Mock }
+const { __mockSettingsState } = jest.requireMock("@/stores/settings/settings-store") as {
+  __mockSettingsState: { persistHistory: boolean | undefined }
+}
+const { __mockPiiState } = jest.requireMock("@cognia/redact") as {
+  __mockPiiState: { piiOk: boolean }
+}
+const { dispatchTerminalCommandTriggers: mockDispatchCommandTriggers } = jest.requireMock(
+  "./command-trigger"
+) as { dispatchTerminalCommandTriggers: jest.Mock }
+
+/** Flush the fire-and-forget persist chain (dynamic imports + awaits). */
+async function flushPersist(): Promise<void> {
+  await new Promise((r) => setTimeout(r, 0))
+  await new Promise((r) => setTimeout(r, 0))
+}
 
 interface FakeSession {
   info: SessionInfo
   killed: number
+  detached: number
   writes: Array<string | Uint8Array>
   onIntegrationListeners: Array<
     (e: { kind: string; cwd?: string; exit_code?: number | null }) => void
@@ -16,6 +66,7 @@ interface FakeSession {
   onExitListeners: Array<(code: number | null) => void>
   id: string
   kill: () => Promise<void>
+  detach: () => Promise<void>
   write: (data: string | Uint8Array) => Promise<void>
   onIntegration: (
     l: (e: { kind: string; cwd?: string; exit_code?: number | null }) => void
@@ -37,12 +88,16 @@ function makeFakeSession(id: string, info: Partial<SessionInfo> = {}): FakeSessi
   const session: FakeSession = {
     info: fullInfo,
     killed: 0,
+    detached: 0,
     writes: [],
     onIntegrationListeners,
     onExitListeners,
     id,
     kill: async () => {
       session.killed += 1
+    },
+    detach: async () => {
+      session.detached += 1
     },
     write: async (data) => {
       session.writes.push(data)
@@ -183,9 +238,78 @@ const baseReq: SpawnRequest = {
 
 beforeEach(() => {
   __clearLiveSessionsForTesting()
+  mockRecordHistory.mockClear()
+  mockDispatchCommandTriggers.mockClear()
+  __mockSettingsState.persistHistory = undefined
+  __mockPiiState.piiOk = true
 })
 
 describe("spawnFromDock", () => {
+  it("falls through the transport chain when the LAN attempt fails", async () => {
+    const store = makeFakeStore()
+    const hooks = makeFakeHooks()
+    const wan = makeFakeSession("wan-session", { origin: "remote" })
+    const attempts: string[] = []
+
+    const out = await spawnFromDock({
+      req: baseReq,
+      store,
+      hooks: hooks as unknown as ReturnType<typeof import("@/lib/plugin").getPluginEventHooks>,
+      transportSpawns: [
+        async () => {
+          attempts.push("lan")
+          throw new Error("LAN unavailable")
+        },
+        async () => {
+          attempts.push("webrtc")
+          return wan as unknown as import("./base-session").BaseTerminalSession
+        },
+      ],
+    })
+
+    expect(out).toEqual({ kind: "spawned", sessionId: "wan-session", shell: "/bin/bash" })
+    expect(attempts).toEqual(["lan", "webrtc"])
+  })
+
+  it("kills a late session created by a timed-out transport attempt", async () => {
+    jest.useFakeTimers()
+    try {
+      const store = makeFakeStore()
+      const hooks = makeFakeHooks()
+      const late = makeFakeSession("late-session", { origin: "remote" })
+      const fallback = makeFakeSession("fallback-session", { origin: "remote" })
+      let resolveLate: ((session: import("./base-session").BaseTerminalSession) => void) | undefined
+
+      const outcome = spawnFromDock({
+        req: baseReq,
+        store,
+        hooks: hooks as unknown as ReturnType<typeof import("@/lib/plugin").getPluginEventHooks>,
+        transportSpawns: [
+          () =>
+            new Promise((resolve) => {
+              resolveLate = resolve
+            }),
+          async () => fallback as unknown as import("./base-session").BaseTerminalSession,
+        ],
+      })
+
+      await jest.advanceTimersByTimeAsync(7_500)
+      await expect(outcome).resolves.toEqual({
+        kind: "spawned",
+        sessionId: "fallback-session",
+        shell: "/bin/bash",
+      })
+
+      resolveLate?.(late as unknown as import("./base-session").BaseTerminalSession)
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(late.killed).toBe(1)
+      expect(getLiveSession("late-session")).toBeUndefined()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   it("denies the spawn when a plugin returns 'deny'", async () => {
     const hooks = makeFakeHooks()
     hooks.willSpawnDecision = "deny"
@@ -357,6 +481,55 @@ describe("spawnFromDock", () => {
     expect(store.commands[0]).toMatchObject({ id: "s-1", cmd: "ls -la", exitCode: 0 })
   })
 
+  it("command_end fans out to the trigger.terminal.command dispatcher", async () => {
+    const hooks = makeFakeHooks()
+    const store = makeFakeStore()
+    const fake = makeFakeSession("s-1")
+    await spawnFromDock({
+      req: { rows: 24, cols: 80, shell: "" },
+      store,
+      hooks: hooks as unknown as ReturnType<typeof import("@/lib/plugin").getPluginEventHooks>,
+      spawn: async () =>
+        fake as unknown as Awaited<ReturnType<typeof import("./session").TerminalSession.spawn>>,
+    })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (fake as any).write("pnpm test\r")
+    fake.onIntegrationListeners[0]?.({ kind: "command_start" })
+    fake.onIntegrationListeners[0]?.({ kind: "command_end", exit_code: 1 })
+    await flushPersist()
+    expect(mockDispatchCommandTriggers).toHaveBeenCalledTimes(1)
+    expect(mockDispatchCommandTriggers).toHaveBeenCalledWith({
+      sessionId: "s-1",
+      projectId: "proj-a",
+      agentSpawner: null,
+      command: "pnpm test",
+      exitCode: 1,
+      endedAt: expect.any(Number),
+    })
+  })
+
+  it("command_end forwards the row's agentSpawner so the dispatcher can gate", async () => {
+    const hooks = makeFakeHooks()
+    const store = makeFakeStore()
+    const fake = makeFakeSession("s-1")
+    await spawnFromDock({
+      req: { rows: 24, cols: 80, shell: "" },
+      store,
+      hooks: hooks as unknown as ReturnType<typeof import("@/lib/plugin").getPluginEventHooks>,
+      spawn: async () =>
+        fake as unknown as Awaited<ReturnType<typeof import("./session").TerminalSession.spawn>>,
+      agentSpawner: "run-42",
+    })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (fake as any).write("echo hi\r")
+    fake.onIntegrationListeners[0]?.({ kind: "command_start" })
+    fake.onIntegrationListeners[0]?.({ kind: "command_end", exit_code: 0 })
+    await flushPersist()
+    expect(mockDispatchCommandTriggers).toHaveBeenCalledWith(
+      expect.objectContaining({ agentSpawner: "run-42" })
+    )
+  })
+
   it("handles backspace + DEL while capturing input", async () => {
     const hooks = makeFakeHooks()
     const store = makeFakeStore()
@@ -417,6 +590,81 @@ describe("spawnFromDock", () => {
     expect(store.commands[0]?.cmd).toBe("ls")
   })
 
+  describe("durable history persistence", () => {
+    async function runCommand(cmd: string, exitCode = 0) {
+      const hooks = makeFakeHooks()
+      const store = makeFakeStore()
+      const fake = makeFakeSession("s-1")
+      await spawnFromDock({
+        req: baseReq,
+        store,
+        hooks: hooks as unknown as ReturnType<typeof import("@/lib/plugin").getPluginEventHooks>,
+        spawn: async () =>
+          fake as unknown as Awaited<ReturnType<typeof import("./session").TerminalSession.spawn>>,
+      })
+      fake.onIntegrationListeners[0]?.({ kind: "cwd_changed", cwd: "/work" })
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (fake as any).write(`${cmd}\r`)
+      fake.onIntegrationListeners[0]?.({ kind: "command_start" })
+      fake.onIntegrationListeners[0]?.({ kind: "command_end", exit_code: exitCode })
+      await flushPersist()
+      return { store, fake }
+    }
+
+    it("records the command with shell, cwd, project, and exit code", async () => {
+      await runCommand("git status")
+      expect(mockRecordHistory).toHaveBeenCalledWith({
+        command: "git status",
+        shell: "/bin/bash",
+        cwd: "/work",
+        exitCode: 0,
+        sessionId: "s-1",
+        projectId: "proj-a",
+      })
+    })
+
+    it("still pushes the ring record exactly once (consume-once capture)", async () => {
+      const { store } = await runCommand("ls -la")
+      expect(store.commands).toHaveLength(1)
+      expect(store.commands[0]?.cmd).toBe("ls -la")
+      expect(mockRecordHistory).toHaveBeenCalledTimes(1)
+    })
+
+    it("skips persistence when the setting is off", async () => {
+      __mockSettingsState.persistHistory = false
+      await runCommand("git status")
+      expect(mockRecordHistory).not.toHaveBeenCalled()
+    })
+
+    it("skips persistence when the PII gate fails", async () => {
+      __mockPiiState.piiOk = false
+      await runCommand("export TOKEN=sk-secret")
+      expect(mockRecordHistory).not.toHaveBeenCalled()
+    })
+
+    it("skips persistence for an empty captured command", async () => {
+      const hooks = makeFakeHooks()
+      const store = makeFakeStore()
+      const fake = makeFakeSession("s-1")
+      await spawnFromDock({
+        req: baseReq,
+        store,
+        hooks: hooks as unknown as ReturnType<typeof import("@/lib/plugin").getPluginEventHooks>,
+        spawn: async () =>
+          fake as unknown as Awaited<ReturnType<typeof import("./session").TerminalSession.spawn>>,
+      })
+      // command_end with no typed input → blank capture.
+      fake.onIntegrationListeners[0]?.({ kind: "command_end", exit_code: 0 })
+      await flushPersist()
+      expect(mockRecordHistory).not.toHaveBeenCalled()
+    })
+
+    it("never throws when the history write rejects", async () => {
+      mockRecordHistory.mockRejectedValueOnce(new Error("quota exceeded"))
+      await expect(runCommand("git status")).resolves.toBeDefined()
+    })
+  })
+
   it("honors mutated request from the plugin hook", async () => {
     const hooks = makeFakeHooks()
     hooks.willSpawnMutate = { shell: "/usr/local/bin/fish" }
@@ -435,6 +683,29 @@ describe("spawnFromDock", () => {
       },
     })
     expect(capturedReq!.shell).toBe("/usr/local/bin/fish")
+  })
+})
+
+describe("detachFromDock", () => {
+  it("detaches the viewer without terminating the host-owned process", async () => {
+    const hooks = makeFakeHooks()
+    const store = makeFakeStore()
+    const fake = makeFakeSession("s-1")
+    await spawnFromDock({
+      req: baseReq,
+      store,
+      hooks: hooks as unknown as ReturnType<typeof import("@/lib/plugin").getPluginEventHooks>,
+      spawn: async () =>
+        fake as unknown as Awaited<ReturnType<typeof import("./session").TerminalSession.spawn>>,
+    })
+
+    await detachFromDock("s-1", store)
+
+    expect(fake.detached).toBe(1)
+    expect(fake.killed).toBe(0)
+    expect(getLiveSession("s-1")).toBeUndefined()
+    expect(store.removed).toEqual(["s-1"])
+    expect(hooks.lifecycle.find((event) => event.kind === "killed")).toBeUndefined()
   })
 })
 

@@ -9,6 +9,7 @@
  */
 
 export { usePlugins, type PluginsView } from "./use-plugins"
+export { PluginsViewProvider } from "./use-plugins-provider"
 export { usePluginPermissions, type UsePluginPermissions } from "./use-plugin-permissions"
 export {
   usePluginAnalytics,
@@ -22,6 +23,14 @@ export {
   type PluginMarketplaceEntry,
   __resetPluginMarketplaceClientForTests,
 } from "./use-plugin-marketplace"
+export {
+  useOpenVsxMarketplace,
+  toMarketplaceEntry,
+  OPEN_VSX_SEARCH_DEBOUNCE_MS,
+  type UseOpenVsxMarketplace,
+  type OpenVsxMarketplaceEntry,
+  type OpenVsxMarketplaceState,
+} from "./use-openvsx-marketplace"
 export {
   useBuiltinPluginEntries,
   mapBuiltinRowToEntry,

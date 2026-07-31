@@ -98,4 +98,112 @@ describe("SendTestMessageSection", () => {
     fireEvent.change(screen.getByTestId("send-test-chat-id"), { target: { value: "   " } })
     expect(screen.getByTestId("send-test-button")).toBeDisabled()
   })
+
+  it.each([
+    [
+      "onebot",
+      "ob-1",
+      "10001",
+      {
+        userId: "10001",
+        chatKey: "p:10001",
+      },
+    ],
+    [
+      "wechat-oa",
+      "wxoa-1",
+      "openid-123",
+      {
+        openId: "openid-123",
+      },
+    ],
+    [
+      "qq-official",
+      "qq-1",
+      "group:group-openid-123",
+      {
+        scene: "group",
+        sceneId: "group-openid-123",
+      },
+    ],
+    [
+      "dingtalk",
+      "dt-1",
+      "single:staff-123",
+      {
+        conversationType: "1",
+        userId: "staff-123",
+      },
+    ],
+    [
+      "dingtalk",
+      "dt-2",
+      "group:cid-123",
+      {
+        conversationType: "2",
+        openConversationId: "cid-123",
+      },
+    ],
+    [
+      "wecom",
+      "wc-1",
+      "group:chatid-123",
+      {
+        chatId: "chatid-123",
+        chatType: "group",
+      },
+    ],
+    // Matrix room ids contain a colon but their prefix is NOT a kind —
+    // "!abcd" must not be stripped off as one (regression guard).
+    [
+      "matrix",
+      "mx-1",
+      "!abcd:matrix.org",
+      {
+        roomId: "!abcd:matrix.org",
+      },
+    ],
+    // Unknown colon prefixes on other platforms pass through raw too.
+    [
+      "telegram",
+      "tg-9",
+      "weird:12345",
+      {
+        chatId: "weird:12345",
+        channelId: "weird:12345",
+      },
+    ],
+  ] as const)(
+    "builds a %s conversationRef that its adapter runtime can address",
+    async (platform, adapterId, target, expectedRef) => {
+      mockSendOutbound.mockResolvedValue({ ok: true, platformMessageId: "msg-42" })
+      render(<SendTestMessageSection adapterId={adapterId} platform={platform} />)
+
+      fireEvent.change(screen.getByTestId("send-test-chat-id"), { target: { value: target } })
+      fireEvent.click(screen.getByTestId("send-test-button"))
+
+      await waitFor(() => {
+        expect(mockSendOutbound).toHaveBeenCalledWith(
+          adapterId,
+          expect.objectContaining({
+            conversationRef: expect.objectContaining({
+              platform,
+              adapterId,
+              ...expectedRef,
+            }),
+          })
+        )
+      })
+    }
+  )
+
+  it("disables proactive test sends for reply-only personal WeChat", () => {
+    render(<SendTestMessageSection adapterId="wxp-1" platform="wechat-personal" />)
+    fireEvent.change(screen.getByTestId("send-test-chat-id"), {
+      target: { value: "user-123" },
+    })
+
+    expect(screen.getByTestId("send-test-button")).toBeDisabled()
+    expect(mockSendOutbound).not.toHaveBeenCalled()
+  })
 })

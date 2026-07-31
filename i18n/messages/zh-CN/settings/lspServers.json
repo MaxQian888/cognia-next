@@ -1,0 +1,116 @@
+{
+  "add": {
+    "cancel": "取消",
+    "description": "指向你机器上一个兼容 LSP 的二进制。cognia 会在 sidecar 中启动它，并将其诊断信息桥接到编辑器。",
+    "editTitle": "编辑语言服务器",
+    "error": {
+      "command": "命令必填。",
+      "duplicate": "已存在相同 id 的服务器。",
+      "languages": "至少需要一种语言。",
+      "name": "名称必填。",
+      "settings": "Settings 必须是合法的 JSON 对象。"
+    },
+    "field": {
+      "args": "参数",
+      "command": "命令",
+      "enabled": "启用",
+      "env": "环境变量",
+      "extensions": "文件扩展名",
+      "languages": "语言",
+      "name": "显示名称",
+      "rootMarkers": "根目录标记",
+      "settings": "Settings（JSON）",
+      "workspaceFolderRequired": "需要磁盘工作区"
+    },
+    "hint": {
+      "args": "每行一个参数。支持 ${workspaceFolder} 占位符。",
+      "command": "绝对路径或相对于 cognia 安装目录的路径。支持 ${workspaceFolder} 占位符。",
+      "env": "每行一个 KEY=VALUE，合并到进程环境变量。",
+      "extensions": "逗号分隔，带不带前导点均可。agent 运行时用它匹配文件。",
+      "languages": "逗号分隔的 Monaco 语言 id 列表。",
+      "rootMarkers": "逗号分隔的标记文件 — agent 会在最近包含其一的目录启动服务器（如 Cargo.toml）。",
+      "settings": "服务器专属配置，用于响应 workspace/configuration 拉取。"
+    },
+    "placeholder": {
+      "args": "每行一个参数，如 --stdio",
+      "command": "/usr/local/bin/eslint-server 或 node_modules/.bin/eslint-server",
+      "env": "RA_LOG=info",
+      "extensions": ".ts, .tsx",
+      "languages": "typescript, javascript",
+      "name": "ESLint",
+      "rootMarkers": "package.json, tsconfig.json",
+      "settings": "'{' \"rust-analyzer\": '{' \"cargo\": '{' \"features\": \"all\" '}' '}' '}'"
+    },
+    "save": "保存",
+    "submit": "添加",
+    "title": "添加语言服务器"
+  },
+  "addAriaLabel": "添加新的语言服务器",
+  "addButton": "添加服务器",
+  "badge": {
+    "builtin": "内置",
+    "overridden": "已覆盖"
+  },
+  "builtinGroup": "内置服务器",
+  "builtinHint": "随应用内置的默认服务器，agent 按需启动。可以禁用，或编辑以覆盖其命令、参数或 settings — 覆盖后也会在编辑器中运行。",
+  "col": {
+    "actions": "操作",
+    "command": "命令",
+    "enabled": "启用",
+    "languages": "语言",
+    "name": "名称"
+  },
+  "customGroup": "你的服务器",
+  "description": "添加 Language Server Protocol (LSP) 服务器，为 Skills、Canvas 和 Artifact 编辑器提供补全、悬停、诊断和跳转到定义。在这里添加的服务器会在每次启动 cognia 时自动加载。",
+  "editAriaLabel": "编辑 {name}",
+  "effectivePreview": {
+    "description": "合并内置默认、你的服务器和当前项目 .cognia/lsp.json 后实际生效的配置。",
+    "empty": "解析后没有剩余服务器 — 全部已禁用。",
+    "overridden": "已覆盖",
+    "overridesBuiltin": "覆盖内置",
+    "source": {
+      "builtin": "内置",
+      "plugin": "插件",
+      "project": "项目",
+      "user": "用户"
+    },
+    "title": "生效配置"
+  },
+  "empty": "尚未配置语言服务器。点击\"添加服务器\"指向你机器上已安装的二进制（如 eslint-server / pyright-langserver / rust-analyzer）。",
+  "enabledAriaLabel": "切换 {name}",
+  "health": {
+    "broken": "已失效",
+    "crashed": "已崩溃",
+    "running": "运行中",
+    "starting": "启动中",
+    "stopped": "已停止"
+  },
+  "install": {
+    "ariaLabel": "安装 {name}",
+    "button": "安装",
+    "phase": {
+      "done": "已安装",
+      "error": "安装失败",
+      "installing": "安装中…",
+      "resolving": "解析中…"
+    }
+  },
+  "logs": {
+    "button": "日志",
+    "description": "来自 LSP sidecar 的服务器 stderr 与生命周期事件（最新在最后）。",
+    "empty": "暂无日志 — 语言服务器启动后才会产生日志。",
+    "openAriaLabel": "打开语言服务器日志",
+    "refreshAriaLabel": "刷新日志",
+    "title": "语言服务器日志"
+  },
+  "overrideAriaLabel": "覆盖 {name}",
+  "removeAriaLabel": "删除 {name}",
+  "resetAriaLabel": "重置 {name} 为默认",
+  "status": {
+    "installed": "已安装",
+    "managed": "托管安装",
+    "missing": "未安装"
+  },
+  "tableAriaLabel": "已配置的语言服务器",
+  "title": "语言服务器"
+}

@@ -8,7 +8,14 @@
 import React, { useMemo, useCallback, memo, lazy, Suspense, type ComponentType } from "react"
 import type { A2UIComponent, A2UIComponentProps } from "@/types/a2ui/schema"
 import type { A2UIRendererProps } from "@/types/a2ui/renderer"
-import { useA2UIContext, useA2UIVisibility, useA2UIDisabled } from "@/hooks/a2ui/use-a2ui-context"
+import {
+  useA2UIActions,
+  useA2UIData,
+  useA2UIVisibility,
+  useA2UIDisabled,
+} from "@/hooks/a2ui/use-a2ui-context"
+import { useBoundDataVersion } from "@/hooks/a2ui/use-bound-data-version"
+import { collectComponentDataPaths } from "@/lib/a2ui/data-model"
 import { getComponent } from "@/lib/a2ui/catalog"
 
 // Import layout components
@@ -59,6 +66,7 @@ import { A2UIList } from "./data/a2ui-list"
 
 // Import academic adapter for withA2UIContext integration
 import { A2UIAnalysisAdapter } from "./academic/a2ui-analysis-adapter"
+import { A2UISearchResultsAdapter } from "./academic/a2ui-search-results-adapter"
 import { A2UIStepperShell } from "./layout/a2ui-stepper-shell"
 import { A2UIMockupFrame } from "./layout/a2ui-mockup-frame"
 
@@ -88,6 +96,7 @@ import { A2UICarousel } from "./navigation/a2ui-carousel"
 import { A2UIDrawer } from "./navigation/a2ui-drawer"
 import { A2UISheet } from "./navigation/a2ui-sheet"
 import { A2UIScrollArea } from "./navigation/a2ui-scroll-area"
+import { Skeleton } from "@/components/ui/skeleton"
 import { A2UIPagination } from "./navigation/a2ui-pagination"
 import { A2UISidebar } from "./navigation/a2ui-sidebar"
 
@@ -160,6 +169,10 @@ const builtInComponents = new Map<string, A2UIComponentType>([
   ["InteractiveGuide", A2UIInteractiveGuide as A2UIComponentType],
   // Academic components (wrapped with withA2UIContext bridge)
   ["AcademicAnalysis", withA2UIContext(A2UIAnalysisAdapter) as unknown as A2UIComponentType],
+  [
+    "AcademicSearchResults",
+    withA2UIContext(A2UISearchResultsAdapter) as unknown as A2UIComponentType,
+  ],
   // P0 display
   ["Avatar", A2UIAvatar as A2UIComponentType],
   ["Skeleton", A2UISkeleton as A2UIComponentType],
@@ -209,8 +222,20 @@ export const A2UIRenderer = memo(function A2UIRenderer({
   component,
   className,
 }: A2UIRendererProps) {
-  const context = useA2UIContext()
-  const { surfaceId, dataModel, emitAction, setDataValue, renderChild, catalog } = context
+  // Split-context access: actions are referentially stable; only the data
+  // context re-renders this node on a surface data change.
+  const { surfaceId, emitAction, setDataValue, renderChild, catalog } = useA2UIActions()
+  const { dataModel } = useA2UIData()
+
+  // Fine-grained change detection: resolve only the paths THIS component binds
+  // to. Thanks to the structural-sharing data model, those references stay
+  // identical when an unrelated path changes, so `dataVersion` (and therefore
+  // the memoized props below) stay stable and the leaf component skips its
+  // re-render entirely. Containers that bind no data never recompute their
+  // props on data changes — their children still update via their own context
+  // subscription.
+  const boundPaths = useMemo(() => collectComponentDataPaths(component), [component])
+  const dataVersion = useBoundDataVersion(boundPaths, dataModel)
 
   // Check visibility
   const isVisible = useA2UIVisibility(component.visible)
@@ -224,7 +249,13 @@ export const A2UIRenderer = memo(function A2UIRenderer({
     [emitAction, component.id]
   )
 
-  // Build props for the component (must be before early return to satisfy hooks rules)
+  // Build props for the component (must be before early return to satisfy hooks rules).
+  // `dataModel` is intentionally omitted from the dependency list in favor of
+  // `dataVersion`: when the component's bound data is unchanged we keep the
+  // previously-captured (referentially-consistent) dataModel so the memoized
+  // props — and the leaf component memoized on them — stay stable. `dataVersion`
+  // bumps exactly when a bound path changes, at which point the closure also
+  // captures the current `dataModel`.
   const componentProps: A2UIComponentProps = useMemo(
     () => ({
       component: {
@@ -238,7 +269,8 @@ export const A2UIRenderer = memo(function A2UIRenderer({
       onDataChange: setDataValue,
       renderChild,
     }),
-    [component, isDisabled, className, surfaceId, dataModel, onAction, setDataValue, renderChild]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [component, isDisabled, className, surfaceId, dataVersion, onAction, setDataValue, renderChild]
   )
 
   // Don't render if not visible
@@ -260,13 +292,7 @@ export const A2UIRenderer = memo(function A2UIRenderer({
 
   return (
     <A2UIErrorBoundary componentType={component.component} componentId={component.id}>
-      {isLazy ? (
-        <Suspense fallback={<div className="animate-pulse h-8 bg-muted rounded" />}>
-          {element}
-        </Suspense>
-      ) : (
-        element
-      )}
+      {isLazy ? <Suspense fallback={<Skeleton className="h-8" />}>{element}</Suspense> : element}
     </A2UIErrorBoundary>
   )
 })
@@ -280,7 +306,8 @@ export function withA2UIContext<P extends A2UIComponentProps>(
   return function A2UIContextWrapper(
     props: Omit<P, keyof A2UIComponentProps> & { component: A2UIComponent }
   ) {
-    const { surfaceId, dataModel, emitAction, setDataValue, renderChild } = useA2UIContext()
+    const { surfaceId, emitAction, setDataValue, renderChild } = useA2UIActions()
+    const { dataModel } = useA2UIData()
 
     const onAction = useCallback(
       (action: string, data?: Record<string, unknown>) => {

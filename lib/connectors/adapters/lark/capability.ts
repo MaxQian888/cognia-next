@@ -21,9 +21,21 @@ import {
  *    upload.
  */
 export const LARK_CAPS: readonly Capability[] = [
+  // Chat management (W2 multi-bot): implemented by
+  // `lark/chat-management.ts` over /im/v1/chats + /contact/v3 — paired with
+  // the optional PlatformAdapter methods wired in `lark/index.ts`.
+  "chat.create",
+  "chat.members",
+  "chat.update",
+  "contact.resolve",
   "delete",
   "edit",
+  // forward + merge_forward via `POST /im/v1/messages/:id/forward` and
+  // `/im/v1/messages/merge_forward` (lark/index.ts `forwardMessage`).
+  "forward",
   "history.fetch",
+  "pin",
+  "presence.status",
   "rich-card.lark",
   "send.a2ui",
   "send.card",
@@ -37,12 +49,17 @@ export const LARK_CAPS: readonly Capability[] = [
   "send.thread",
   "send.video",
   "send.voice",
+  // 加急 (urgent) via `PATCH /im/v1/messages/:id/urgent_{app,sms,phone}`
+  // (lark/index.ts `sendUrgent`). Implemented but requires the elevated
+  // `im:message.urgent*` scope; a bot without it surfaces a scope error.
+  "urgent",
 ] as const
 
 /**
  * A2UI capability matrix for the Lark adapter (G3.4, extended at ADR-0009
- * v41 / B4 for Checkbox simulated tier, extended again at ADR-0026 for
- * `form_dialog` Modal projection).
+ * v41 / B4 for Checkbox simulated tier; Dialog / Drawer / Sheet render as
+ * inline titled sections — the mapper emits card JSON 1.0 which has no
+ * modal runtime and never emits Card 2.0 `form_dialog` containers).
  *
  * Native rendering (via `buildLarkA2UICard`):
  *   - Text / Link / Divider / Card (header) / Alert → div+lark_md / hr.
@@ -50,7 +67,9 @@ export const LARK_CAPS: readonly Capability[] = [
  *   - Button / ButtonGroup → `action[].button` with callback bindings.
  *   - Select / RadioGroup → `action[].select_static`.
  *   - DatePicker / TimePicker → `action[].picker_date` / `picker_time`.
- *   - TextField / TextArea → `input` element (rows=4 for TextArea).
+ *   - TextField / TextArea → `input` inside an `action` module (the
+ *     message-card schema rejects root-level inputs; TextArea renders as
+ *     the same single-line input — there is no rows prop).
  *   - Row / Column / List → layout-only.
  *
  * Simulated (functional but multi-step UX, or stand-in component):
@@ -64,13 +83,16 @@ export const LARK_CAPS: readonly Capability[] = [
  *     platforms with native checkbox support. The user-visible UX is
  *     "tap the dropdown, pick ✓ or ✗" — single round-trip but two
  *     visible steps, hence simulated.
- *   - Dialog / Drawer / Sheet → Lark Interactive Card v2 `form_dialog`
- *     element (ADR-0026 Track B). The mapper emits a Button that, when
- *     clicked, opens a Lark `form_dialog` carrying the surface's
- *     TextField / Select / DatePicker children. Callback round-trips
- *     through the `connectorCallbackBindings` table with
- *     `kind: "modal_open"` so the bus knows to project the submit
- *     payload back as `actionType: "submit"`.
+ *   - Dialog / Drawer / Sheet → inline section projection. Lark v1
+ *     interactive cards have no modal/drawer runtime, so the mapper
+ *     renders the overlay as a divider + bold title followed by its
+ *     children inline (TextField / Select / DatePicker / Button all keep
+ *     their individual callback bindings). The overlay semantics degrade
+ *     to "titled form section in the same card" — functional but not an
+ *     actual overlay, hence simulated. The mapper never emits Card 2.0
+ *     form containers, so `form_value` submits only arrive from cards
+ *     produced elsewhere; when they do, `parseLarkInteractiveCallback`
+ *     lifts them to `actionType: "submit"`.
  *
  * Fallback (renders via plain text mirror):
  *   - Slider / Table / Chart / Pagination.
@@ -94,7 +116,8 @@ export const LARK_A2UI_CAPABILITY: A2UICapabilityMatrix = buildA2UICapabilityMat
   Column: "native",
   List: "native",
   Checkbox: "simulated",
-  // ADR-0026 Track B — overlays projected as Lark form_dialog two-hop.
+  // Overlays render inline as titled sections (divider + bold title +
+  // children); card JSON 1.0 has no modal / form_dialog runtime.
   Dialog: "simulated",
   Drawer: "simulated",
   Sheet: "simulated",

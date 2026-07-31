@@ -1,32 +1,11 @@
 /**
- * Logger Transports
- * Export all transport implementations
+ * Logger Transports — app barrel (ADR-0068 E4). Re-exports the
+ * framework-agnostic implementations from `@cognia/logging/transports` plus
+ * the app-coupled ones that stay here (native bridge, crash breadcrumbs,
+ * agent-trace Dexie sink, OTLP with PII redaction, Langfuse client).
  */
 
-export {
-  ConsoleTransport,
-  createConsoleTransport,
-  type ConsoleTransportOptions,
-} from "./console-transport"
-export {
-  IndexedDBTransport,
-  createIndexedDBTransport,
-  type IndexedDBTransportOptions,
-} from "./indexeddb-transport"
-export {
-  RemoteTransport,
-  createRemoteTransport,
-  sentryTransform,
-  logglyTransform,
-  type RemoteTransportOptions,
-} from "./remote-transport"
-export {
-  OtelTransport,
-  createOtelTransport,
-  getOtelContext,
-  withOtelSpan,
-  type OtelTransportOptions,
-} from "./otel-transport"
+export * from "@cognia/logging/transports"
 export {
   LangfuseTransport,
   createLangfuseTransport,
@@ -38,6 +17,11 @@ export {
   type NativeTransportOptions,
 } from "./native-transport"
 export {
+  BreadcrumbTransport,
+  createBreadcrumbTransport,
+  type BreadcrumbTransportOptions,
+} from "./breadcrumb-transport"
+export {
   AgentTraceTransport,
   createAgentTraceTransport,
   type AgentTraceTransportOptions,
@@ -45,15 +29,5 @@ export {
 export {
   OtlpHttpTransport,
   createOtlpHttpTransport,
-  grafanaCloudHeaders,
   type OtlpHttpTransportOptions,
 } from "./otlp-http-transport"
-export {
-  IndexedDBRemoteRetryQueueStore,
-  createRemoteRetryQueueStore,
-  type RemoteRetryQueueStore,
-  type RemoteRetryQueueBatch,
-  type RemoteRetryQueueStats,
-  type RemoteRetryQueueLimits,
-  type RemoteRetryQueueEnqueueResult,
-} from "./remote-retry-queue-store"

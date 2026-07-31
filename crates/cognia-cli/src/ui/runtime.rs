@@ -25,7 +25,9 @@ impl ColorMode {
             "auto" => Ok(Self::Auto),
             "always" => Ok(Self::Always),
             "never" => Ok(Self::Never),
-            other => Err(format!("invalid --color value `{other}` (use auto/always/never)")),
+            other => Err(format!(
+                "invalid --color value `{other}` (use auto/always/never)"
+            )),
         }
     }
 }
@@ -36,9 +38,7 @@ pub struct UiFlags {
     pub color: ColorMode,
     pub json: bool,
     pub quiet: bool,
-    /// 0 = default, 1 = -v, 2 = -vv. Reserved for future log routing;
-    /// parsed by `main()` but not yet read by any subcommand.
-    #[allow(dead_code)]
+    /// 0 = default, 1 = -v, 2 = -vv.
     pub verbose: u8,
     pub yes: bool,
 }
@@ -130,6 +130,19 @@ impl RuntimeUi {
         !self.flags.quiet
     }
 
+    /// Verbose diagnostics are human-only stderr lines. They stay disabled
+    /// under `--quiet` and per-command `--json` so automation contracts remain
+    /// parseable and quiet mode remains silent on successful commands.
+    pub fn show_verbose(&self) -> bool {
+        self.flags.verbose > 0 && !self.flags.quiet && !self.flags.json
+    }
+
+    pub fn verbose(&self, message: impl AsRef<str>) {
+        if self.show_verbose() {
+            eprintln!("cognia: {}", message.as_ref());
+        }
+    }
+
     /// Convenience: `--yes` short-circuits any `Confirm` prompt to true.
     /// Most callers read `ui.flags.yes` directly; this method exists for
     /// downstream consumers who want a stable read-only accessor.
@@ -173,10 +186,16 @@ fn compute_color(mode: ColorMode, is_tty: bool) -> bool {
         ColorMode::Never => false,
         ColorMode::Always => true,
         ColorMode::Auto => {
-            if env::var_os("NO_COLOR").map(|v| !v.is_empty()).unwrap_or(false) {
+            if env::var_os("NO_COLOR")
+                .map(|v| !v.is_empty())
+                .unwrap_or(false)
+            {
                 return false;
             }
-            if env::var("FORCE_COLOR").map(|v| !v.is_empty() && v != "0").unwrap_or(false) {
+            if env::var("FORCE_COLOR")
+                .map(|v| !v.is_empty() && v != "0")
+                .unwrap_or(false)
+            {
                 return true;
             }
             is_tty
@@ -187,6 +206,12 @@ fn compute_color(mode: ColorMode, is_tty: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
 
     #[test]
     fn color_never_overrides_tty() {
@@ -201,6 +226,7 @@ mod tests {
 
     #[test]
     fn color_auto_follows_tty_when_env_clean() {
+        let _guard = env_lock();
         // Snapshot + clear env to avoid host pollution leaking into the test.
         let prior_no = env::var_os("NO_COLOR");
         let prior_force = env::var_os("FORCE_COLOR");
@@ -218,6 +244,7 @@ mod tests {
 
     #[test]
     fn color_auto_no_color_env_disables_color_even_on_tty() {
+        let _guard = env_lock();
         let prior = env::var_os("NO_COLOR");
         env::set_var("NO_COLOR", "1");
         assert!(!compute_color(ColorMode::Auto, true));
@@ -230,6 +257,7 @@ mod tests {
 
     #[test]
     fn color_auto_force_color_enables_color_off_tty() {
+        let _guard = env_lock();
         let prior_no = env::var_os("NO_COLOR");
         let prior_force = env::var_os("FORCE_COLOR");
         env::remove_var("NO_COLOR");
@@ -260,5 +288,21 @@ mod tests {
         assert!(!f.json);
         assert!(!f.yes);
         assert_eq!(f.verbose, 0);
+    }
+
+    #[test]
+    fn verbose_is_human_only_and_respects_quiet_and_json() {
+        let mut ui = RuntimeUi::new(UiFlags {
+            verbose: 1,
+            ..UiFlags::default()
+        });
+        assert!(ui.show_verbose());
+
+        ui.flags.quiet = true;
+        assert!(!ui.show_verbose());
+
+        ui.flags.quiet = false;
+        ui.flags.json = true;
+        assert!(!ui.show_verbose());
     }
 }

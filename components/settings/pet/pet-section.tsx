@@ -1,6 +1,8 @@
-// Settings → Pet. Toggles the subsystem, picks the dock corner + motion mode,
-// mutes bubbles, sizes the widget, and offers a hard reset. Persists through the
-// settings store `save()` action (durable), mirroring the other settings cards.
+// Settings → Pet. Toggles the subsystem and offers a hard reset; the per-area
+// controls (appearance, interaction, sound, care, desktop overlay) are the same
+// presentational components the /pet Customize tab renders, so both surfaces
+// stay in lockstep against one persisted PetSettings (via the settings store
+// `save()`).
 
 "use client"
 
@@ -9,19 +11,17 @@ import { PawPrintIcon } from "lucide-react"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Button } from "@/components/ui/button"
-import { Slider } from "@/components/ui/slider"
 import { useSettingsStore } from "@/stores/settings"
 import { resetPet } from "@/lib/db/pet"
-import {
-  DEFAULT_PET_SETTINGS,
-  type PetAnchor,
-  type PetMotionPreference,
-  type PetSettings,
-} from "@/types/pet"
+import { CapabilityGate } from "@/components/platform/capability-gate"
+import { DEFAULT_PET_SETTINGS, type PetSettings } from "@/types/pet"
 import { SettingsCard } from "../common/settings-section"
-
-const ANCHORS: PetAnchor[] = ["bottom-right", "bottom-left", "top-right", "top-left"]
-const MOTIONS: PetMotionPreference[] = ["auto", "full", "reduced"]
+import { PetAppearanceControls } from "@/components/pet/settings/pet-appearance-controls"
+import { PetInteractionControls } from "@/components/pet/settings/pet-interaction-controls"
+import { PetSoundControls } from "@/components/pet/settings/pet-sound-controls"
+import { PetCareControls } from "@/components/pet/settings/pet-care-controls"
+import { PetDesktopControls } from "@/components/pet/settings/pet-desktop-controls"
+import { PetTwinAwarenessControls } from "@/components/pet/settings/pet-twin-awareness-controls"
 
 export function PetSection() {
   const t = useTranslations("settings.pet")
@@ -49,60 +49,16 @@ export function PetSection() {
         />
       </div>
 
-      <div className="flex items-center justify-between gap-4">
-        <Label htmlFor="pet-anchor">{t("anchor.label")}</Label>
-        <select
-          id="pet-anchor"
-          className="rounded-md border bg-background px-2 py-1 text-sm"
-          value={pet.anchor}
-          onChange={(e) => patch({ anchor: e.target.value as PetAnchor })}
-        >
-          {ANCHORS.map((a) => (
-            <option key={a} value={a}>
-              {t(`anchor.options.${a}`)}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div className="flex items-center justify-between gap-4">
-        <Label htmlFor="pet-motion">{t("motion.label")}</Label>
-        <select
-          id="pet-motion"
-          className="rounded-md border bg-background px-2 py-1 text-sm"
-          value={pet.motion}
-          onChange={(e) => patch({ motion: e.target.value as PetMotionPreference })}
-        >
-          {MOTIONS.map((m) => (
-            <option key={m} value={m}>
-              {t(`motion.options.${m}`)}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div className="flex items-center justify-between gap-4">
-        <div className="space-y-0.5">
-          <Label htmlFor="pet-muted">{t("mutedBubbles.label")}</Label>
-          <p className="text-sm text-muted-foreground">{t("mutedBubbles.description")}</p>
-        </div>
-        <Switch
-          id="pet-muted"
-          checked={pet.mutedBubbles}
-          onCheckedChange={(v) => patch({ mutedBubbles: v })}
-        />
-      </div>
-
-      <div className="space-y-2">
-        <Label>{t("size.label", { size: pet.size })}</Label>
-        <Slider
-          min={64}
-          max={144}
-          step={8}
-          value={[pet.size]}
-          onValueChange={([v]) => patch({ size: v })}
-        />
-      </div>
+      <PetAppearanceControls pet={pet} patch={patch} />
+      <PetInteractionControls pet={pet} patch={patch} />
+      <PetSoundControls pet={pet} patch={patch} />
+      <PetCareControls pet={pet} patch={patch} />
+      {/* The overlay window is bound to the local desktop shell — a
+          server-backed profile can't host it (ADR-0059 F5). */}
+      <CapabilityGate profiles={["desktop"]}>
+        <PetDesktopControls pet={pet} patch={patch} />
+      </CapabilityGate>
+      <PetTwinAwarenessControls pet={pet} patch={patch} />
 
       <div className="flex items-center justify-between gap-4 border-t pt-4">
         <div className="space-y-0.5">

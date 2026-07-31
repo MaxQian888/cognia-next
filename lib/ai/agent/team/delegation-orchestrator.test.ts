@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Delegation orchestrator tests.
  *
@@ -38,11 +39,42 @@ jest.mock("@/lib/ai/agent/agent-executor", () => ({
   executeAgent: jest.fn(),
 }))
 
+const externalExecuteMock = jest.fn()
+jest.mock("@/lib/ai/agent/external/manager", () => ({
+  getExternalAgentManager: jest.fn(() => ({ execute: externalExecuteMock })),
+}))
+
 jest.mock("@/lib/connectors/outbound-runner", () => ({
   isInQuietHours: jest.fn(() => false),
 }))
 import { isInQuietHours } from "@/lib/connectors/outbound-runner"
 const isInQuietHoursMock = isInQuietHours as unknown as jest.Mock
+
+const teamStartMock = jest.fn()
+const teamGetMock = jest.fn()
+jest.mock("@/lib/ai/agent/agent-team", () => ({
+  agentTeamManager: {
+    start: (...a: unknown[]) => teamStartMock(...a),
+    get: (...a: unknown[]) => teamGetMock(...a),
+  },
+}))
+const abortTeamMock = jest.fn()
+jest.mock("@/lib/ai/agent/agent-team-runtime", () => ({
+  abortTeam: (...a: unknown[]) => abortTeamMock(...a),
+}))
+// Twin runtime — dynamic-imported by runTwinDelegation.
+const tryBuildTwinDepsMock = jest.fn()
+jest.mock("@/lib/twin/runtime/build-deps", () => ({
+  tryBuildTwinDeps: (...a: unknown[]) => tryBuildTwinDepsMock(...a),
+}))
+const applyTeammateTwinContextMock = jest.fn()
+jest.mock("@/lib/ai/agent/team/twin-context", () => ({
+  applyTeammateTwinContext: (...a: unknown[]) => applyTeammateTwinContextMock(...a),
+}))
+const getTwinMock = jest.fn()
+jest.mock("@/lib/db/twins", () => ({
+  getTwin: (...a: unknown[]) => getTwinMock(...a),
+}))
 
 import * as bgManagerModule from "@/lib/ai/agent/background-agent-manager"
 import { executeAgent } from "@/lib/ai/agent/agent-executor"
@@ -58,29 +90,46 @@ const {
 const executeAgentMock = executeAgent as unknown as jest.Mock
 
 import {
+  __resetPendingDelegationRunsForTesting,
   approveDelegation,
   cancelDelegation,
   completeExternalDelegation,
   delegateToBackground,
   delegateToExternal,
+  delegateToTeam,
+  delegateToTwin,
+  wouldCreateTeamCycle,
 } from "./delegation-orchestrator"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import type { AgentTeam } from "@/types/agent/agent-team"
+
+/** Flush pending microtasks + a macrotask so async re-dispatch settles. */
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 describe("delegation-orchestrator", () => {
   beforeEach(() => {
     useAgentTeamStore.getState().reset()
+    __resetPendingDelegationRunsForTesting()
     dispatchOnTeamDelegationStart.mockReset()
     dispatchOnTeamDelegationComplete.mockReset()
     registerAgentMock.mockReset()
     cancelAgentMock.mockReset()
     finishAgentMock.mockReset()
     executeAgentMock.mockReset()
+    externalExecuteMock.mockReset()
     registerAgentMock.mockImplementation(() => {
       const controller = new AbortController()
       return controller.signal
     })
     executeAgentMock.mockResolvedValue({ text: "ok" })
+    externalExecuteMock.mockResolvedValue({ success: true, finalResponse: "external result" })
     isInQuietHoursMock.mockReturnValue(false)
+    tryBuildTwinDepsMock.mockReset()
+    applyTeammateTwinContextMock.mockReset()
+    getTwinMock.mockReset()
+    tryBuildTwinDepsMock.mockResolvedValue({ store: {}, embedding: {} })
+    applyTeammateTwinContextMock.mockResolvedValue({ systemPrompt: "TWIN-INJECTED", applied: true })
+    getTwinMock.mockResolvedValue({ id: "tw1", name: "Alice" })
   })
 
   describe("delegateToBackground", () => {
@@ -156,32 +205,169 @@ describe("delegation-orchestrator", () => {
     })
   })
 
+  describe("delegateToTwin", () => {
+    it("creates a twin delegation, injects the persona + knowledge, and settles completed", async () => {
+      executeAgentMock.mockResolvedValue({ text: "twin answer" })
+      const { delegation, completionPromise } = delegateToTwin({
+        sourceTeamId: "team-1",
+        sourceTaskId: "task-1",
+        twinId: "tw1",
+        prompt: "analyze the incident",
+        reason: "ask the domain expert",
+      })
+      expect(delegation.targetType).toBe("twin")
+      expect(delegation.targetId).toMatch(/^bg_/)
+      expect((delegation.metadata as { twinId?: string } | undefined)?.twinId).toBe("tw1")
+      expect(dispatchOnTeamDelegationStart).toHaveBeenCalledWith(
+        expect.objectContaining({ delegationId: delegation.id, targetType: "twin" })
+      )
+      const settled = await completionPromise
+      expect(applyTeammateTwinContextMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          twinId: "tw1",
+          userPrompt: "analyze the incident",
+          source: "team-delegation",
+        })
+      )
+      expect(executeAgentMock).toHaveBeenCalledWith(
+        "analyze the incident",
+        expect.objectContaining({ systemPrompt: "TWIN-INJECTED" })
+      )
+      expect(settled.status).toBe("completed")
+      expect(settled.result).toBe("twin answer")
+    })
+
+    it("degrades to the plain prompt when the twin runtime is unavailable", async () => {
+      tryBuildTwinDepsMock.mockResolvedValue(undefined)
+      executeAgentMock.mockResolvedValue({ text: "ok" })
+      const { completionPromise } = delegateToTwin({
+        sourceTeamId: "team-1",
+        sourceTaskId: "task-1",
+        twinId: "tw1",
+        prompt: "p",
+        systemPrompt: "BASE",
+        reason: "r",
+      })
+      await completionPromise
+      expect(applyTeammateTwinContextMock).not.toHaveBeenCalled()
+      expect(executeAgentMock).toHaveBeenCalledWith(
+        "p",
+        expect.objectContaining({ systemPrompt: "BASE" })
+      )
+    })
+
+    it("defers to awaiting_approval and re-dispatches (with injection) on approval", async () => {
+      executeAgentMock.mockResolvedValue({ text: "late answer" })
+      const { delegation, completionPromise } = delegateToTwin({
+        sourceTeamId: "team-1",
+        sourceTaskId: "task-1",
+        twinId: "tw1",
+        prompt: "p",
+        reason: "needs review",
+        awaitingApproval: true,
+      })
+      expect(delegation.status).toBe("awaiting_approval")
+      await completionPromise
+      expect(applyTeammateTwinContextMock).not.toHaveBeenCalled()
+      approveDelegation(delegation.id)
+      await flush()
+      expect(applyTeammateTwinContextMock).toHaveBeenCalled()
+      expect(executeAgentMock).toHaveBeenCalledWith(
+        "p",
+        expect.objectContaining({ systemPrompt: "TWIN-INJECTED" })
+      )
+    })
+
+    it("cancelDelegation aborts the underlying background agent", () => {
+      const { delegation } = delegateToTwin({
+        sourceTeamId: "team-1",
+        sourceTaskId: "task-1",
+        twinId: "tw1",
+        prompt: "p",
+        reason: "r",
+        awaitingApproval: true,
+      })
+      cancelDelegation(delegation.id)
+      expect(cancelAgentMock).toHaveBeenCalledWith(delegation.targetId)
+      expect(useAgentTeamStore.getState().delegations[delegation.id]!.status).toBe("cancelled")
+    })
+  })
+
   describe("delegateToExternal", () => {
-    it("creates an active sub_agent delegation and fires onTeamDelegationStart", () => {
-      const out = delegateToExternal({
+    it("creates an active sub_agent delegation, fires the start hook, and executes", async () => {
+      const { delegation, completionPromise } = delegateToExternal({
         sourceTeamId: "team-1",
         sourceTaskId: "task-1",
         targetAgentId: "claude-code",
+        prompt: "do the thing",
         reason: "use external",
       })
-      expect(out.status).toBe("active")
-      expect(out.targetType).toBe("sub_agent")
-      expect(out.targetId).toBe("claude-code")
+      expect(delegation.status).toBe("active")
+      expect(delegation.targetType).toBe("sub_agent")
+      expect(delegation.targetId).toBe("claude-code")
       expect(dispatchOnTeamDelegationStart).toHaveBeenCalled()
+      const settled = await completionPromise
+      expect(externalExecuteMock).toHaveBeenCalledWith(
+        "claude-code",
+        "do the thing",
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      )
+      expect(settled.status).toBe("completed")
+      expect(settled.result).toBe("external result")
+      expect(dispatchOnTeamDelegationComplete).toHaveBeenCalledWith({
+        delegationId: delegation.id,
+        status: "completed",
+      })
     })
 
-    it("completeExternalDelegation settles status and fires the complete hook", () => {
-      const out = delegateToExternal({
+    it("settles to failed when the external run returns success=false", async () => {
+      externalExecuteMock.mockResolvedValue({ success: false, error: "agent exploded" })
+      const { completionPromise } = delegateToExternal({
         sourceTeamId: "team-1",
         sourceTaskId: "task-1",
         targetAgentId: "codex",
-        reason: "x",
+        prompt: "x",
+        reason: "y",
       })
-      const settled = completeExternalDelegation(out.id, "completed", "external result")
+      const settled = await completionPromise
+      expect(settled.status).toBe("failed")
+      expect(settled.result).toBe("agent exploded")
+    })
+
+    it("settles to timeout when the watchdog fires", async () => {
+      externalExecuteMock.mockImplementation(
+        (_id: string, _p: string, opts: { signal: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            opts.signal.addEventListener("abort", () => reject(new Error("aborted by watchdog")))
+          })
+      )
+      const { completionPromise } = delegateToExternal({
+        sourceTeamId: "team-1",
+        sourceTaskId: "task-1",
+        targetAgentId: "codex",
+        prompt: "x",
+        reason: "y",
+        timeoutMs: 5,
+      })
+      const settled = await completionPromise
+      expect(settled.status).toBe("timeout")
+    })
+
+    it("completeExternalDelegation still settles out-of-band runs (manual escape hatch)", () => {
+      // Manager hangs → the auto-run never settles; the manual call wins.
+      externalExecuteMock.mockReturnValue(new Promise(() => {}))
+      const { delegation } = delegateToExternal({
+        sourceTeamId: "team-1",
+        sourceTaskId: "task-1",
+        targetAgentId: "codex",
+        prompt: "x",
+        reason: "y",
+      })
+      const settled = completeExternalDelegation(delegation.id, "completed", "manual result")
       expect(settled?.status).toBe("completed")
-      expect(settled?.result).toBe("external result")
+      expect(settled?.result).toBe("manual result")
       expect(dispatchOnTeamDelegationComplete).toHaveBeenCalledWith({
-        delegationId: out.id,
+        delegationId: delegation.id,
         status: "completed",
       })
     })
@@ -193,7 +379,73 @@ describe("delegation-orchestrator", () => {
   })
 
   describe("approveDelegation", () => {
-    it("flips awaiting_approval to active", () => {
+    it("flips awaiting_approval to active AND re-dispatches the background run", async () => {
+      const { delegation } = delegateToBackground({
+        sourceTeamId: "team-1",
+        sourceTaskId: "task-1",
+        prompt: "investigate later",
+        reason: "y",
+        awaitingApproval: true,
+      })
+      expect(executeAgentMock).not.toHaveBeenCalled()
+      const after = approveDelegation(delegation.id)
+      expect(after?.status).toBe("active")
+      await flush()
+      expect(executeAgentMock).toHaveBeenCalledWith(
+        "investigate later",
+        expect.objectContaining({})
+      )
+      expect(useAgentTeamStore.getState().delegations[delegation.id].status).toBe("completed")
+    })
+
+    it("re-dispatches a deferred external run on approval", async () => {
+      isInQuietHoursMock.mockReturnValue(true)
+      const team = useAgentTeamStore.getState().createTeam({ name: "Quiet", task: "t" })
+      useAgentTeamStore.setState((s) => {
+        const existing = s.teams[team.id]
+        const updated: AgentTeam = {
+          ...existing,
+          config: {
+            ...existing.config,
+            // `config.governancePolicy` is optional, so spreading it would
+            // widen the required approval/budget/escalation fields to
+            // `| undefined`. Provide a complete policy literal instead; the
+            // orchestrator only reads `delivery.quietHours`.
+            governancePolicy: {
+              approval: { requirePlanApproval: false, requireDelegationApproval: false },
+              budget: {
+                tokenBudget: 0,
+                warningThreshold: 0.8,
+                criticalThreshold: 0.95,
+                onCritical: "notify",
+              },
+              escalation: { allowOperatorPatternOverride: true, pauseOnHighRisk: false },
+              delivery: { quietHours: { from: "00:00", to: "23:59", tz: "UTC" } },
+            },
+          },
+        }
+        return { teams: { ...s.teams, [team.id]: updated } }
+      })
+      const { delegation } = delegateToExternal({
+        sourceTeamId: team.id,
+        sourceTaskId: "task-q",
+        targetAgentId: "claude-code",
+        prompt: "handoff payload",
+        reason: "handoff",
+      })
+      expect(delegation.status).toBe("awaiting_approval")
+      expect(externalExecuteMock).not.toHaveBeenCalled()
+      approveDelegation(delegation.id)
+      await flush()
+      expect(externalExecuteMock).toHaveBeenCalledWith(
+        "claude-code",
+        "handoff payload",
+        expect.objectContaining({})
+      )
+      expect(useAgentTeamStore.getState().delegations[delegation.id].status).toBe("completed")
+    })
+
+    it("no-ops on non-awaiting delegations", () => {
       const { delegation } = delegateToBackground({
         sourceTeamId: "team-1",
         sourceTaskId: "task-1",
@@ -201,18 +453,9 @@ describe("delegation-orchestrator", () => {
         reason: "y",
         awaitingApproval: true,
       })
+      // Approve once (→ active), then approving again is a no-op.
+      approveDelegation(delegation.id)
       const after = approveDelegation(delegation.id)
-      expect(after?.status).toBe("active")
-    })
-
-    it("no-ops on non-awaiting delegations", () => {
-      const out = delegateToExternal({
-        sourceTeamId: "team-1",
-        sourceTaskId: "task-1",
-        targetAgentId: "x",
-        reason: "y",
-      })
-      const after = approveDelegation(out.id)
       expect(after?.status).toBe("active")
     })
   })
@@ -235,15 +478,17 @@ describe("delegation-orchestrator", () => {
     })
 
     it("no-ops on already-settled delegations", () => {
-      const out = delegateToExternal({
+      externalExecuteMock.mockReturnValue(new Promise(() => {})) // hang so only the manual settle wins
+      const { delegation } = delegateToExternal({
         sourceTeamId: "team-1",
         sourceTaskId: "task-1",
         targetAgentId: "x",
+        prompt: "p",
         reason: "y",
       })
-      completeExternalDelegation(out.id, "completed")
+      completeExternalDelegation(delegation.id, "completed")
       cancelAgentMock.mockReset()
-      const after = cancelDelegation(out.id)
+      const after = cancelDelegation(delegation.id)
       expect(after?.status).toBe("completed")
       expect(cancelAgentMock).not.toHaveBeenCalled()
     })
@@ -313,17 +558,20 @@ describe("delegation-orchestrator", () => {
       expect(executeAgentMock).toHaveBeenCalledTimes(1)
     })
 
-    it("defers an external delegation to awaiting_approval during quiet hours", () => {
+    it("defers an external delegation to awaiting_approval during quiet hours", async () => {
       isInQuietHoursMock.mockReturnValue(true)
       const teamId = seedTeamWithQuietHours()
-      const delegation = delegateToExternal({
+      const { delegation, completionPromise } = delegateToExternal({
         sourceTeamId: teamId,
         sourceTaskId: "task-q",
         targetAgentId: "claude-code",
+        prompt: "handoff payload",
         reason: "handoff",
       })
       expect(delegation.status).toBe("awaiting_approval")
       expect(delegation.metadata?.quietHoursDeferred).toBe(true)
+      expect((await completionPromise).status).toBe("awaiting_approval")
+      expect(externalExecuteMock).not.toHaveBeenCalled()
     })
 
     it("does not gate when no quiet-hours policy is configured", async () => {
@@ -336,5 +584,234 @@ describe("delegation-orchestrator", () => {
       })
       expect(delegation.status).toBe("active")
     })
+  })
+})
+
+describe("delegateToTeam (team → team)", () => {
+  function seedTeam(id: string, patch: Record<string, unknown> = {}) {
+    useAgentTeamStore.setState((s) => ({
+      teams: {
+        ...s.teams,
+        [id]: { id, name: id, teammateIds: [], status: "idle", ...patch } as never,
+      },
+    }))
+  }
+
+  beforeEach(() => {
+    useAgentTeamStore.getState().reset()
+    dispatchOnTeamDelegationStart.mockReset()
+    dispatchOnTeamDelegationComplete.mockReset()
+    teamStartMock.mockReset().mockResolvedValue(undefined)
+    teamGetMock.mockReset()
+    abortTeamMock.mockReset()
+    isInQuietHoursMock.mockReturnValue(false)
+  })
+
+  it("rejects self-delegation as a cycle", async () => {
+    const { delegation, completionPromise } = delegateToTeam({
+      sourceTeamId: "a",
+      sourceTaskId: "t",
+      targetTeamId: "a",
+      reason: "loop",
+    })
+    expect(delegation.status).toBe("failed")
+    expect(delegation.metadata?.error).toMatch(/cycle/)
+    expect((await completionPromise).status).toBe("failed")
+    expect(teamStartMock).not.toHaveBeenCalled()
+  })
+
+  it("detects a multi-hop cycle in the active delegation graph", () => {
+    // Active edge b → a already exists; delegating a → b would close the cycle.
+    useAgentTeamStore.setState((s) => ({
+      delegations: {
+        d1: {
+          id: "d1",
+          sourceTeamId: "b",
+          sourceTaskId: "t",
+          targetType: "team",
+          targetId: "a",
+          status: "active",
+          reason: "r",
+          manual: true,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        } as never,
+        ...s.delegations,
+      },
+    }))
+    expect(wouldCreateTeamCycle("a", "b")).toBe(true)
+    expect(wouldCreateTeamCycle("a", "c")).toBe(false)
+  })
+
+  it("runs the target team and settles completed with its finalResult", async () => {
+    teamGetMock.mockReturnValue({ id: "b" })
+    teamStartMock.mockImplementation(async () => {
+      seedTeam("b", { status: "completed", finalResult: "team B output" })
+    })
+    const { delegation, completionPromise } = delegateToTeam({
+      sourceTeamId: "a",
+      sourceTaskId: "t",
+      targetTeamId: "b",
+      reason: "split work",
+    })
+    expect(delegation.status).toBe("active")
+    expect(dispatchOnTeamDelegationStart).toHaveBeenCalledWith(
+      expect.objectContaining({ targetType: "team", targetId: "b" })
+    )
+    const settled = await completionPromise
+    expect(teamStartMock).toHaveBeenCalledWith("b", { origin: "delegation" })
+    expect(settled.status).toBe("completed")
+    expect(settled.result).toBe("team B output")
+    expect(dispatchOnTeamDelegationComplete).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "completed" })
+    )
+  })
+
+  it("fails when the target team is not found", async () => {
+    teamGetMock.mockReturnValue(undefined)
+    const { completionPromise } = delegateToTeam({
+      sourceTeamId: "a",
+      sourceTaskId: "t",
+      targetTeamId: "ghost",
+      reason: "x",
+    })
+    const settled = await completionPromise
+    expect(settled.status).toBe("failed")
+    expect(teamStartMock).not.toHaveBeenCalled()
+  })
+
+  it("fails when the target team run ends non-terminally", async () => {
+    teamGetMock.mockReturnValue({ id: "b" })
+    teamStartMock.mockImplementation(async () => seedTeam("b", { status: "failed" }))
+    const settled = await delegateToTeam({
+      sourceTeamId: "a",
+      sourceTaskId: "t",
+      targetTeamId: "b",
+      reason: "x",
+    }).completionPromise
+    expect(settled.status).toBe("failed")
+  })
+
+  it("defers to awaiting_approval inside quiet hours", async () => {
+    isInQuietHoursMock.mockReturnValue(true)
+    seedTeam("a", {
+      config: {
+        governancePolicy: { delivery: { quietHours: { from: "22:00", to: "07:00", tz: "UTC" } } },
+      },
+    })
+    const { delegation, completionPromise } = delegateToTeam({
+      sourceTeamId: "a",
+      sourceTaskId: "t",
+      targetTeamId: "b",
+      reason: "x",
+    })
+    expect(delegation.status).toBe("awaiting_approval")
+    expect((await completionPromise).status).toBe("awaiting_approval")
+    expect(teamStartMock).not.toHaveBeenCalled()
+  })
+
+  it("cancelDelegation aborts the target team run", () => {
+    teamGetMock.mockReturnValue({ id: "b" })
+    teamStartMock.mockReturnValue(new Promise(() => {})) // never settles
+    const { delegation } = delegateToTeam({
+      sourceTeamId: "a",
+      sourceTaskId: "t",
+      targetTeamId: "b",
+      reason: "x",
+    })
+    cancelDelegation(delegation.id)
+    expect(abortTeamMock).toHaveBeenCalledWith("b", expect.any(String))
+    expect(useAgentTeamStore.getState().delegations[delegation.id].status).toBe("cancelled")
+  })
+
+  // ── ADR-0090 Phase 7: HandoffEnvelope + maxTeamDelegationDepth ─────────────
+
+  function seedActiveEdge(id: string, sourceTeamId: string, targetId: string) {
+    useAgentTeamStore.setState((s) => ({
+      delegations: {
+        ...s.delegations,
+        [id]: {
+          id,
+          sourceTeamId,
+          sourceTaskId: "t",
+          targetType: "team",
+          targetId,
+          status: "active",
+          reason: "r",
+          manual: true,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        } as never,
+      },
+    }))
+  }
+
+  it("persists a secret-free HandoffEnvelope with identity chain and depth", () => {
+    teamGetMock.mockReturnValue({ id: "b" })
+    teamStartMock.mockReturnValue(new Promise(() => {}))
+    const { delegation } = delegateToTeam({
+      sourceTeamId: "a",
+      sourceTaskId: "task-9",
+      targetTeamId: "b",
+      reason: "split the work",
+    })
+    expect(delegation.envelope).toMatchObject({
+      envelopeVersion: 1,
+      identity: {
+        parentRunId: "a",
+        childRunId: delegation.id,
+        taskId: "task-9",
+        depth: 1,
+        parentChain: ["a"],
+      },
+      task: { prompt: "split the work" },
+      execution: { mode: "orchestrated" },
+    })
+    expect(JSON.stringify(delegation.envelope)).not.toMatch(/sk-[a-z0-9]{6,}|api[_-]?key/i)
+  })
+
+  it("depths 0/1/2 may delegate; a depth-2 source is refused with the typed code", async () => {
+    // Active chain: root → a → b, so b sits at delegation depth 2.
+    seedActiveEdge("d-root-a", "root", "a")
+    seedActiveEdge("d-a-b", "a", "b")
+    teamGetMock.mockReturnValue({ id: "c" })
+    teamStartMock.mockReturnValue(new Promise(() => {}))
+
+    // From depth-1 team "a": child would be depth 2 — allowed.
+    const fromA = delegateToTeam({
+      sourceTeamId: "a",
+      sourceTaskId: "t",
+      targetTeamId: "c",
+      reason: "ok",
+    })
+    expect(fromA.delegation.status).toBe("active")
+    expect(fromA.delegation.envelope?.identity.depth).toBe(2)
+
+    // From depth-2 team "b": child would be depth 3 — refused before dispatch.
+    teamStartMock.mockClear()
+    const fromB = delegateToTeam({
+      sourceTeamId: "b",
+      sourceTaskId: "t",
+      targetTeamId: "d",
+      reason: "too deep",
+    })
+    expect(fromB.delegation.status).toBe("failed")
+    expect(fromB.delegation.metadata?.errorCode).toBe("delegation-depth-exceeded")
+    expect((await fromB.completionPromise).status).toBe("failed")
+    expect(teamStartMock).not.toHaveBeenCalled()
+  })
+
+  it("honors a per-team maxTeamDelegationDepth override", () => {
+    seedTeam("a", { config: { maxTeamDelegationDepth: 0 } })
+    teamGetMock.mockReturnValue({ id: "b" })
+    const { delegation } = delegateToTeam({
+      sourceTeamId: "a",
+      sourceTaskId: "t",
+      targetTeamId: "b",
+      reason: "never allowed",
+    })
+    expect(delegation.status).toBe("failed")
+    expect(delegation.metadata?.errorCode).toBe("delegation-depth-exceeded")
+    expect(delegation.metadata?.maxDepth).toBe(0)
   })
 })

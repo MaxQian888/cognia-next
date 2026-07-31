@@ -1,0 +1,60 @@
+{
+  "id": "cognia-python-runtime-demo",
+  "name": "Python Runtime Contributions Demo",
+  "version": "0.1.0",
+  "description": "First-party reference for python-backed module-bridge contributions: an OCR provider, an AI provider, a workspace backend, and a flag-gated connector — all executing in the Python subprocess.",
+  "type": "python",
+  "capabilities": ["python", "media", "ai-provider", "workspace-backend", "connectors"],
+  "pythonMain": "main.py",
+  "author": "cognia-next",
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": {
+    "cognia": ">=0.1.0",
+    "python": ">=3.9"
+  },
+  "permissions": ["python:execute"],
+  "ocrProviders": [
+    {
+      "id": "echo-ocr",
+      "label": "Echo OCR (Python)",
+      "description": "Returns the input path as recognized text — proves the seam, not the OCR."
+    }
+  ],
+  "aiProviders": [
+    {
+      "id": "echo-llm",
+      "label": "Echo LLM (Python)",
+      "kind": "llm",
+      "models": ["echo-small"]
+    }
+  ],
+  "workspaceBackends": [
+    {
+      "id": "memory-workspace",
+      "label": "In-memory workspace (Python)",
+      "description": "Records clone/commit/remove calls in the subprocess."
+    }
+  ],
+  "connectors": [
+    {
+      "type": "echo-chat",
+      "factory": "EchoConnector",
+      "configSchema": { "type": "object" },
+      "transportModes": ["longpoll"]
+    }
+  ],
+  "runtimeCompatibility": {
+    "tauri": {
+      "availability": "supported"
+    },
+    "browser": {
+      "availability": "blocked",
+      "reason": "Python plugins run in the desktop subprocess host."
+    },
+    "mobile": {
+      "availability": "blocked",
+      "reason": "Python plugins run in the desktop subprocess host — unavailable on mobile."
+    }
+  }
+}

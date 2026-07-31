@@ -30,6 +30,7 @@ import {
 } from "@/lib/logging"
 import { cleanupTauriLogBridge, initTauriLogBridge } from "@/lib/native/tauri-log-bridge"
 import { getNativeLoggingReadiness } from "@/lib/native/native-logging"
+import { installGlobalErrorHandlers } from "@cognia/logging/global-error-handlers"
 import { isTauri } from "@/lib/tauri"
 
 // Re-export types for backward compatibility.
@@ -97,6 +98,14 @@ export function LoggerProvider({
   }))
   const [stats, setStats] = useState({ total: 0, byLevel: {} as Record<LogLevel, number> })
   const attachedTransportNamesRef = useRef(new Set<string>())
+
+  // Install global uncaught-error / unhandled-rejection capture. Runs on web
+  // *and* desktop — on web it feeds the recent-errors ring (so the error page
+  // can export them), on desktop it additionally reaches the native log file +
+  // crash breadcrumbs. The handler is idempotent; this returns the cleanup.
+  useEffect(() => {
+    return installGlobalErrorHandlers()
+  }, [])
 
   // Bridge Rust → frontend log records via the `log://log` event emitted by
   // tauri-plugin-log's webview target. Without this, native logs never reach

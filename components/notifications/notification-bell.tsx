@@ -52,7 +52,12 @@ export function NotificationBell({ className }: { className?: string }) {
           )}
         </button>
       </PopoverTrigger>
-      <PopoverContent align="end" sideOffset={4} className="w-auto p-0">
+      <PopoverContent
+        align="end"
+        sideOffset={4}
+        collisionPadding={8}
+        className="w-auto max-w-[calc(100vw-0.5rem)] overflow-hidden p-0"
+      >
         <NotificationCenter onNavigate={() => setOpen(false)} />
       </PopoverContent>
     </Popover>

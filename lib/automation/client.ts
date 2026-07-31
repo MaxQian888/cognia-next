@@ -13,28 +13,69 @@
  */
 
 import { transport } from "@/lib/tauri"
+import { DEFAULT_CONSENT_TIMEOUT_MS } from "./consent-durations"
 
 import type {
+  ActionRequest,
+  ActionResult,
+  AppLocator,
   ButtonTransition,
   Capabilities,
   ClickOpts,
   ClickTarget,
   DragOpts,
   ElementInfo,
+  ElementHandle,
   ElementRef,
+  ExpandedElements,
+  EventFilter,
+  GetAppStateOptions,
   KeyChord,
   Locator,
   MouseButton,
   PatternKind,
   Point,
+  ResolvedApplication,
   Screenshot,
   ScreenshotOpts,
   ScrollOpts,
   ScrollTarget,
   TreeOpts,
   TypeOpts,
+  UiStateRevision,
+  UiTreeNode,
   WindowOp,
 } from "./types"
+
+/** Tauri event name carrying live UI events from the Rust watcher threads. */
+export const UIA_EVENT_NAME = "automation:uia-event"
+
+/** Mirror of Rust `automation::events::UiaEventPayload` (serde camelCase). */
+export interface UiaEventPayload {
+  subscriptionId: number
+  kind: string
+  /** Focused element's accessible name — may carry user text; PII-gate before
+   * forwarding into workflow payloads. */
+  name?: string
+  controlType?: string
+  processId?: number
+  property?: string
+  structureChangeType?: string
+  runtimeId?: number[]
+  at: number
+}
+
+/**
+ * Listen for live UI events. Returns the unlisten fn. Kept out of the
+ * `desktop` transport object because event listening is Tauri-only (the
+ * companion HTTP transport has no event channel).
+ */
+export async function listenUiaEvents(
+  handler: (payload: UiaEventPayload) => void
+): Promise<() => void> {
+  const { listen } = await import("@tauri-apps/api/event")
+  return listen<UiaEventPayload>(UIA_EVENT_NAME, (event) => handler(event.payload))
+}
 
 export type Surface = "workflow" | "computerUse" | "mcp" | "plugin" | "sandbox"
 
@@ -85,6 +126,28 @@ export interface CallContext {
    * `lib/claude/computer-use-target-state.ts`).
    */
   sandboxConnectionId?: string
+  /**
+   * ADR-0028 — when set, the native `bash` / `text_editor` Computer Use tools
+   * run OS-sandboxed / path-confined instead of unconfined. Deserialized into
+   * `CallContext.sandbox_confine`. Populated by the computer-use plugin's
+   * `execute()` callback when the session has the sandbox enabled (see
+   * `lib/claude/sandbox-confine-state.ts`).
+   */
+  sandboxConfine?: {
+    writable?: string[]
+    readable?: string[]
+    network?: "off" | "on" | "allowlist"
+    networkHosts?: string[]
+  }
+  /**
+   * Originating chat session. The Rust gate stores it in
+   * `GateContext.session_key` and
+   * from there in the consent prompt, so a time-boxed "don't ask again"
+   * grant is scoped to one conversation instead of the whole app session.
+   */
+  sessionKey?: string
+  /** Authenticated model message or workflow-step id for revision tokens. */
+  turnKey?: string
 }
 
 /**
@@ -124,6 +187,49 @@ export const desktop = {
     return transport.call<ElementInfo>("desktop_get_focus", { ctx })
   },
 
+  listApps(ctx: CallContext = {}): Promise<ResolvedApplication[]> {
+    return transport.call<ResolvedApplication[]>("desktop_list_apps", { ctx })
+  },
+
+  getAppState(
+    sessionId: string,
+    locator: AppLocator,
+    options: GetAppStateOptions = {},
+    ctx: CallContext = {}
+  ): Promise<UiStateRevision> {
+    return transport.call<UiStateRevision>("desktop_get_app_state", {
+      args: { sessionId, locator, options, ctx },
+    })
+  },
+
+  queryElements(
+    state: Pick<UiStateRevision, "sessionId" | "lineageId" | "revision">,
+    locator: Locator,
+    limit = 100,
+    ctx: CallContext = {}
+  ): Promise<UiTreeNode[]> {
+    return transport.call<UiTreeNode[]>("desktop_query_elements", {
+      args: { ...state, locator, limit, ctx },
+    })
+  },
+
+  expandElement(
+    handle: ElementHandle,
+    continuationToken: string | null = null,
+    limit = 250,
+    ctx: CallContext = {}
+  ): Promise<ExpandedElements> {
+    return transport.call<ExpandedElements>("desktop_expand_element", {
+      args: { handle, continuationToken, limit, ctx },
+    })
+  },
+
+  performAction(request: ActionRequest, ctx: CallContext = {}): Promise<ActionResult> {
+    return transport.call<ActionResult>("desktop_perform_action", {
+      args: { request, ctx },
+    })
+  },
+
   readTree(
     root: ElementRef | null,
     opts: TreeOpts = {},
@@ -156,6 +262,27 @@ export const desktop = {
     return transport.call<void>("desktop_type", {
       args: { text, opts, ctx },
     })
+  },
+
+  /**
+   * Clipboard-paste fast path: Rust saves the current clipboard, writes
+   * `text`, sends Ctrl/Cmd+V, then restores the clipboard. Gated +
+   * audited as a driving call ("paste"). Prefer over `type` for long or
+   * sensitive text — keystrokes never hit per-key hooks. (Plain `type`
+   * also upgrades to this path automatically past the configurable
+   * `pasteThresholdChars` setting.)
+   */
+  paste(text: string, ctx: CallContext = {}): Promise<void> {
+    return transport.call<void>("desktop_paste", { args: { text, ctx } })
+  },
+
+  /**
+   * Launch an application (executable path or app name) or focus an
+   * existing window by process name. Driving call ("launch_app") — gated
+   * + audited.
+   */
+  launchApp(app: string, action: "launch" | "focus", ctx: CallContext = {}): Promise<void> {
+    return transport.call<void>("desktop_launch_app", { args: { app, action, ctx } })
   },
 
   keys(chord: KeyChord, ctx: CallContext = {}): Promise<void> {
@@ -231,6 +358,21 @@ export const desktop = {
   },
 
   /**
+   * Subscribe to live UI events (v1: `focus-changed` on Windows). Read-only
+   * observing call. Events arrive on the `automation:uia-event` Tauri event
+   * (see {@link UIA_EVENT_NAME} / {@link UiaEventPayload}); the returned
+   * subscription id pairs with {@link desktop.unsubscribeEvents}.
+   */
+  subscribeEvents(filter: EventFilter = {}, ctx: CallContext = {}): Promise<number> {
+    return transport.call<number>("desktop_subscribe_events", { filter, ctx })
+  },
+
+  /** Stop a live UI-event subscription started by {@link desktop.subscribeEvents}. */
+  unsubscribeEvents(sub: number, ctx: CallContext = {}): Promise<void> {
+    return transport.call<void>("desktop_unsubscribe", { sub, ctx })
+  },
+
+  /**
    * Resolve the topmost UI element at the given screen coordinates.
    * Read-only — used by Inspector's "Pick" affordance after the overlay
    * captures the user's intended target.
@@ -275,6 +417,13 @@ export const desktop = {
     allow: boolean
     persist?: boolean
     prompt?: ConsentPromptPayload
+    /**
+     * How long a `persist` grant should live, in ms. Ignored unless
+     * `allow && persist`. Omitted = the broker's default window. The broker
+     * also clamps the ceiling, so this is a request rather than a mandate —
+     * see `lib/automation/consent-durations.ts`.
+     */
+    grantDurationMs?: number
   }): Promise<void> {
     return transport.call<void>("automation_consent_respond", { args })
   },
@@ -289,9 +438,23 @@ export const desktop = {
     return transport.call<AutomationSettings>("automation_settings_get", {})
   },
 
-  /** Replace the permission settings. */
+  /** Replace the permission settings. Never resumes an engaged kill switch. */
   settingsSet(settings: AutomationSettings): Promise<void> {
     return transport.call<void>("automation_settings_set", { settings })
+  },
+
+  /**
+   * Explicit operator toggle of the master enable flag. Enabling is the
+   * deliberate "resume" action that releases an engaged kill switch — unlike a
+   * bulk `settingsSet`, which never does.
+   */
+  setEnabled(enabled: boolean): Promise<void> {
+    return transport.call<void>("automation_set_enabled", { enabled })
+  },
+
+  /** Whether the runtime emergency kill switch is currently engaged. */
+  killSwitchEngaged(): Promise<boolean> {
+    return transport.call<boolean>("automation_kill_switch_engaged", {})
   },
 
   /** Engage the global kill switch — every in-flight call rejects with KILL_SWITCH_ACTIVE. */
@@ -356,15 +519,52 @@ export interface ConsentPromptPayload {
   pluginId: string | null
   processName: string | null
   windowTitle: string | null
+  /**
+   * What the call will actually do — the shell command for `bash`, a
+   * `create <path>` summary for `text_editor`. Present only for shell-class
+   * actions; lets the overlay show the operator the real command instead of a
+   * bare verb. Absent (`null`/`undefined`) for self-describing actions.
+   */
+  commandDetail?: string | null
+  /**
+   * Chat session this call belongs to. Part of the session-grant key, so a
+   * grant created in one conversation never covers another. Absent for calls
+   * with no chat context (workflow steps, the headless MCP proxy).
+   */
+  sessionKey?: string | null
 }
 
 /**
  * Full event payload — includes the broker id the renderer must pass back
  * to `desktop.consentRespond`, plus the timeout the broker honors.
  */
+/**
+ * Screen thumbnail attached to a consent request so a remote approver isn't
+ * deciding blind. Display-only: it never affects the decision, the session
+ * grant, or the audit row, and it rides the authenticated `/ws/v1/events`
+ * frame only — never a push payload.
+ */
+export interface ConsentThumbnail {
+  /** Base64-encoded PNG (no `data:` prefix). */
+  bytes: string
+  width: number
+  height: number
+  /**
+   * The capture was blanked because the host's foreground window is a
+   * credential prompt. Surfaces render an explicit note so a black frame reads
+   * as "it is touching a password box" rather than a broken image.
+   */
+  redacted: boolean
+}
+
 export interface ConsentRequestEvent extends ConsentPromptPayload {
   id: string
   timeoutMs: number
+  /**
+   * Absent when capture failed or nothing fit the transport's frame budget —
+   * consumers degrade to the text-only rendering.
+   */
+  thumbnail?: ConsentThumbnail | null
 }
 
 export type AuditDecision = "allow" | "deny" | "consent"
@@ -411,6 +611,17 @@ export interface AuditSettings {
   exportEnabled: boolean
 }
 
+/**
+ * Screenshot down-scaling applied Rust-side before frames reach vision
+ * models. Disabled by default; 1280×800 (WXGA) is the Anthropic-recommended
+ * sweet spot for computer-use click accuracy vs token cost.
+ */
+export interface ScreenshotScalingSettings {
+  enabled: boolean
+  maxWidth: number
+  maxHeight: number
+}
+
 export interface AutomationSettings {
   enabled: boolean
   defaultTier: Tier
@@ -418,6 +629,28 @@ export interface AutomationSettings {
   perSurface: PerSurfacePolicies
   audit: AuditSettings
   redactScreenshots: boolean
+  screenshotScaling: ScreenshotScalingSettings
+  /**
+   * The action mapper returns "screen unchanged" text instead of a
+   * duplicate image when consecutive screenshots hash identically.
+   * Default ON.
+   */
+  screenshotDedup: boolean
+  /** Suppress the thread-scoped Computer Use picture-in-picture surface. */
+  alwaysHidePictureInPicture: boolean
+  /**
+   * `type` calls longer than this many chars transparently use the
+   * clipboard-paste fast path. 0 disables. Default 200.
+   */
+  pasteThresholdChars: number
+  /**
+   * How long a Per-Call consent prompt waits for an answer before
+   * fail-closing (rejecting). Default 90s — long enough for a push to reach a
+   * backgrounded phone, be unlocked, and answered. The host clamps this to
+   * `[MIN_CONSENT_TIMEOUT_MS, MAX_CONSENT_TIMEOUT_MS]`
+   * (`lib/automation/consent-durations.ts`).
+   */
+  consentTimeoutMs: number
 }
 
 export function defaultAutomationSettings(): AutomationSettings {
@@ -433,5 +666,17 @@ export function defaultAutomationSettings(): AutomationSettings {
     },
     audit: { retentionDays: 30, exportEnabled: true },
     redactScreenshots: false,
+    // On by default. An un-scaled Retina frame inlines as several MB of base64
+    // into `messages.parts` and a session's worth costs gigabytes of renderer
+    // heap (`tests/e2e/mobile/chat-render-perf.baseline.json`). The canonical
+    // Rust surface keeps model/source transforms together. Must match
+    // `ScreenshotScalingSettings::default()` in the Rust crate — whichever side
+    // answers first wins, so a mismatch reads as scaling that depends on boot
+    // order.
+    screenshotScaling: { enabled: true, maxWidth: 1280, maxHeight: 800 },
+    screenshotDedup: true,
+    alwaysHidePictureInPicture: false,
+    pasteThresholdChars: 200,
+    consentTimeoutMs: DEFAULT_CONSENT_TIMEOUT_MS,
   }
 }

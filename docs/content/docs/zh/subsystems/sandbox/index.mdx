@@ -33,9 +33,9 @@ description: "cognia-next 中的四大隔离体系——ADR-0028 五层执行沙
 
 | 体系                    | 隔离对象                                                 | 机制                                                                       | ADR  | 状态                                    |
 | ----------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------- | ---- | --------------------------------------- |
-| **执行沙盒**            | 模型工具调用（`Bash` / `Edit` / `Write` / editor）       | OS 原生（`bwrap`/`sandbox-exec`/runner）· microVM · 按动作策略             | 0028 | Linux/macOS 已落地 · Windows 部分       |
+| **执行沙盒**            | 模型工具调用（`Bash` / `Edit` / `Write` / editor）       | OS 原生（`bwrap`/`sandbox-exec`/runner）· microVM · 按动作策略             | 0028 | Linux/macOS/Windows 已落地              |
 | **CUA 远程沙盒**        | 远程桌面上的 computer-use（GUI 操控）                     | 通过 WebSocket 驱动的 Docker `cua-xfce` 容器                               | 0020 | 已完全接通                              |
-| **插件隔离**            | 第三方插件代码（JS / Node / WASM）                       | `PluginSandbox` globals · Node 24 `--permission` · Wasmtime/WASI          | 0028 | 渲染端已发布 · T2/T3 表层已锁定         |
+| **插件隔离**            | 第三方插件代码（JS / Node / WASM）                       | `PluginSandbox` globals · Node 24 `--permission` · Wasmtime/WASI          | 0028 | Renderer + T2/T3 已接线                 |
 | **渲染沙盒**            | 一次性模型制品（HTML / SVG / React）                     | iframe + CSP + DOMPurify（见 [制品 / 沙盒](../artifacts-sandbox)）         | —    | 稳定                                    |
 
 第五个，即 **web 代码执行沙盒**（`lib/sandbox/web`），目前是一个有意保留的桩——
@@ -105,9 +105,11 @@ flowchart TB
     <File name="linux.rs · macos.rs · windows.rs — 各平台后端" />
     <File name="uninstalled.rs · mock.rs — 回退 + 测试替身" />
   </Folder>
+  <Folder name="crates/cognia-sandbox-runner/">
+    <File name="src/main.rs — Windows restricted-token + low-integrity + Job Object runner，带 stdout/stderr capture" />
+  </Folder>
   <Folder name="src-tauri/src/bin/">
-    <File name="cognia-sandbox-setup.rs — Windows UAC 安装器（合成用户 + 防火墙）" />
-    <File name="cognia-sandbox-runner.rs — Windows 非提权 runner（runas）" />
+    <File name="cognia-sandbox-setup.rs — 保留给未来可选 per-SID firewall setup" />
   </Folder>
   <Folder name="src-tauri/src/cua_sandbox/ (CUA 远程)">
     <File name="mod.rs — cua_sandbox_start / stop / health" />
@@ -132,7 +134,7 @@ flowchart TB
   </Folder>
   <Folder name="UI + 数据">
     <File name="components/chat/composer/sandbox-shield.tsx — 输入框指示器" />
-    <File name="components/settings/sandbox/* — 设置区块（已构建但未接入）" />
+    <File name="components/settings/sandbox/* — 设置区块（已接入：导航 + shell）" />
     <File name="components/settings/automation/sandbox-connections-tab.tsx — CUA 注册表 UI" />
     <File name="lib/db/sandbox-connections.ts — Dexie v57 sandboxConnections" />
   </Folder>
@@ -174,7 +176,7 @@ flowchart TB
   <Card
     title="可观测性与 UI"
     href="./observability-and-ui"
-    description="输入框 shield、诊断审计卡片、未接入的设置区块、引导流程"
+    description="输入框 shield、诊断审计卡片、已接入的设置区块、引导流程"
   />
   <Card
     title="制品 / 沙盒（渲染）"

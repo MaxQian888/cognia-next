@@ -16,8 +16,10 @@
  *              segments so adapters can route them through the per-platform
  *              A2UI mappers.
  *
- * Call `installScheduledOutboundHandlers()` once at app startup (after the bus
- * and runner are initialised).
+ * Call `installScheduledOutboundHandlers()` once at app startup — done
+ * synchronously in `ConnectorBusProvider`'s boot effect, before the async
+ * adapter/runner boot, so the executors are registered before any due
+ * `connection:*` scheduler task can fire.
  */
 
 import { registerTaskExecutor } from "@/lib/scheduler/task-scheduler"
@@ -27,14 +29,22 @@ import { readForResolution } from "@/lib/db/conversation-overrides"
 import { getCharacter } from "@/lib/db/characters"
 import { getSettings } from "@/lib/db/settings"
 import { resolveSendOptions, type InboxSendPolicy } from "@/lib/claude/build-options"
-import { parseConversationKey } from "@/types/connectors/event"
+import { tryBuildTwinDeps } from "@/lib/twin/runtime/build-deps"
+import { tryBuildMemoryDeps } from "@/lib/memory/runtime/build-deps"
+import { resolveMemoryConfig } from "@/types/memory/memory"
 import { assistantReplyToSegments } from "@/lib/connectors/a2ui-bridge/a2ui-to-segments"
 import { safeSendPrompt, PiiGateBlocked } from "@/lib/connectors/ai-loop/safe-send-prompt"
+import {
+  formatScheduledSlot,
+  resolveScheduledNoticeI18n,
+} from "@/lib/connectors/scheduled-notice-i18n"
+import { isLateDelivery } from "@/lib/scheduler/catchup-policy"
 import { findSessionByConversationKey } from "./runtime"
 import { appendAudit } from "./audit"
 import type { MessageSegment } from "@/types/connectors/segment"
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
 import type { OutboundJobSource, OutboundJobWorkflowSource } from "@/lib/db/connector-types"
+import { getConnectorConversationState } from "@/lib/db/connector-conversation-state"
 
 // ---------------------------------------------------------------------------
 // Payload shapes (informal — the scheduler passes Record<string,unknown>)
@@ -109,17 +119,21 @@ async function handleOutboundSend(
   const { adapterId, conversationKey, segments, idempotencyKey } = payload
   const now = Date.now()
 
-  // Recover platform from the conversationKey so we don't lie about the
-  // ref shape (the prior stub hard-coded `"telegram"`, which corrupted
-  // any non-Telegram adapter the operator scheduled an outbound on).
-  const { platform } = parseConversationKey(conversationKey)
+  const deliveryTarget = (await getConnectorConversationState(conversationKey))?.deliveryTarget
+  if (!deliveryTarget || deliveryTarget.address.adapterId !== adapterId) {
+    return {
+      success: false,
+      error: "No persisted delivery target is available for this scheduled conversation",
+    }
+  }
 
   try {
     const job = await enqueueOutbound({
       adapterId,
       conversationKey,
       request: {
-        conversationRef: { platform, adapterId },
+        conversationRef: deliveryTarget.conversationRef,
+        deliveryTarget,
         segments,
         metadata: {
           idempotencyKey: idempotencyKey ?? crypto.randomUUID(),
@@ -181,6 +195,13 @@ export interface RunDigestInput {
   prompt: string
   /** Optional id surfaced in audit fields (scheduled task id, callback trigger id, etc.). */
   sourceTaskId?: string
+  /**
+   * The slot this run was supposed to fire at, when it fired LATE (catch-up or
+   * backfill). Set it and the reply carries a "delayed" note, because a digest
+   * that lands at 09:12 otherwise reads as the 09:12 state. Leave undefined for
+   * on-time runs and for callback-driven turns, which are never late.
+   */
+  lateForSlot?: Date
 }
 
 export interface RunDigestResult {
@@ -195,7 +216,7 @@ export interface RunDigestResult {
  * can call it directly without registering an extra task type.
  */
 export async function runConnectorDigestTurn(input: RunDigestInput): Promise<RunDigestResult> {
-  const { adapterId, conversationKey, characterId, prompt, sourceTaskId } = input
+  const { adapterId, conversationKey, characterId, prompt, sourceTaskId, lateForSlot } = input
   const now = Date.now()
 
   // ── Step 1: resolve the ChatSession bound to this conversation ────────
@@ -228,10 +249,24 @@ export async function runConnectorDigestTurn(input: RunDigestInput): Promise<Run
   ])
 
   const inboxPolicy: InboxSendPolicy = {
-    quietHours: adapterRow?.quietHours,
+    // Per-conversation override wins over the adapter-level default — same
+    // precedence as the delivery-time check in outbound-runner.ts.
+    quietHours: overrideRow?.quietHours ?? adapterRow?.quietHours,
     muted: adapterRow?.muted,
     forcedMode: overrideRow?.mode,
   }
+
+  // Twin runtime injection (parity with runtime.ts ai-run + the in-app chat
+  // path): ground a twin-bound character's digest reply in the twin's
+  // knowledge. Best-effort — undefined when the twin runtime is disabled or
+  // the character is not twin-bound.
+  const twinHandshake = character?.twinId && prompt.trim() ? await tryBuildTwinDeps() : undefined
+
+  // Long-term memory recall parity (see runtime.ts): ground the scheduled
+  // digest reply in the operator's memory store. No-ops when memory is off.
+  const memoryHandshake = prompt.trim()
+    ? await tryBuildMemoryDeps(resolveMemoryConfig(appSettings?.memory))
+    : undefined
 
   const sendOptions = await resolveSendOptions({
     session,
@@ -240,6 +275,10 @@ export async function runConnectorDigestTurn(input: RunDigestInput): Promise<Run
     conversationKey,
     platformBinding: session.platformBinding,
     inboxPolicy,
+    twinDeps: twinHandshake,
+    twinUserMessage: twinHandshake ? prompt : undefined,
+    memoryDeps: memoryHandshake,
+    memoryUserMessage: memoryHandshake ? prompt : undefined,
   })
 
   // ── Step 3: suppression gate (quiet hours / muted / forced manual) ───
@@ -282,24 +321,39 @@ export async function runConnectorDigestTurn(input: RunDigestInput): Promise<Run
   }
 
   // ── Step 5: project text + A2UI surfaces into outbound segments ─────
+  const deliveryTarget = session.platformBinding?.deliveryTarget
+  if (!deliveryTarget || deliveryTarget.address.adapterId !== adapterId) {
+    return { success: false, error: "Scheduled digest has no persisted delivery target" }
+  }
+  const platform = deliveryTarget.address.platform
+  // A run that fired from a missed slot is labelled before projection, so the
+  // note rides the same `text` segment every adapter already knows how to send
+  // (rather than needing a per-platform surface). See `catchup-policy.ts` for
+  // which task types can be late at all.
+  const locale = appSettings?.language
+  const deliveredText = lateForSlot
+    ? `${resolveScheduledNoticeI18n(locale).lateDelivery(
+        formatScheduledSlot(lateForSlot, locale)
+      )}\n\n${captured.text}`
+    : captured.text
   const outboundSegments: MessageSegment[] = assistantReplyToSegments({
-    text: captured.text,
+    text: deliveredText,
     a2uiSurfaces: captured.a2uiSurfaces,
     a2uiSurfaceOrder: captured.a2uiSurfaceOrder,
+    telemetry: { adapterId, platform },
   })
   const idempotencyKey = `airun:${captured.messageId}`
 
   // Re-derive the platform from the conversationKey rather than trusting
   // a payload field — the conversationKey format is the single source of
   // truth (it round-trips through `buildConversationKey`).
-  const { platform } = parseConversationKey(conversationKey)
-
   try {
     const job = await enqueueOutbound({
       adapterId,
       conversationKey,
       request: {
-        conversationRef: session.platformBinding?.conversationRef ?? { platform, adapterId },
+        conversationRef: deliveryTarget.conversationRef,
+        deliveryTarget,
         segments: outboundSegments,
         metadata: {
           idempotencyKey,
@@ -355,12 +409,20 @@ async function handleScheduledDigest(
   if (!isScheduledDigestPayload(payload)) {
     return { success: false, error: "Invalid connection:scheduled:digest payload" }
   }
+  // `scheduledFor` is the slot the scheduler intended; on a catch-up/backfill run
+  // it is in the past, and the reply says so. Absent it there is nothing honest
+  // to claim, so the note is skipped even for a late trigger source.
+  const lateForSlot =
+    isLateDelivery(execution.triggerSource) && execution.scheduledFor
+      ? execution.scheduledFor
+      : undefined
   return runConnectorDigestTurn({
     adapterId: payload.adapterId,
     conversationKey: payload.conversationKey,
     characterId: payload.characterId,
     prompt: payload.prompt,
     sourceTaskId: task.id,
+    lateForSlot,
   })
 }
 

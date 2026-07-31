@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { listPlanEvents } from "@/lib/db/plans"
@@ -30,6 +31,8 @@ jest.mock("@/lib/workflow/runtime/orchestrator", () => ({
 
 const isTauriMock = detect.isTauri as jest.Mock
 
+// 30s: the first cold Dexie open (full schema migration chain) can exceed the
+// 5s default on slower disks — same bump as the other cold-Dexie suites.
 beforeEach(async () => {
   await getDb().delete()
   __resetDbForTesting()
@@ -38,7 +41,7 @@ beforeEach(async () => {
   __resetPlanRuntimeForTesting()
   isTauriMock.mockReturnValue(false)
   runWorkflowMock.mockReset()
-})
+}, 30_000)
 
 function createInput(over: Partial<CreatePlanInput> = {}): CreatePlanInput {
   return {
@@ -115,6 +118,29 @@ describe("lifecycle transitions", () => {
     const events = await listPlanEvents(plan.id)
     const rej = events.find((e) => e.kind === "rejected")
     expect(rej?.payload).toMatchObject({ kind: "rejected", feedback: "too vague" })
+  })
+
+  it("keepPlanning defers awaiting_approval → draft, keeps the plan, logs deferred", async () => {
+    const rt = getPlanRuntime()
+    const plan = await rt.createPlan(createInput())
+    const deferred = await rt.keepPlanning(plan.id, "cover mobile too")
+    expect(deferred?.status).toBe("draft")
+    // Non-destructive: still the session's open plan (not cancelled).
+    expect((await rt.getOpenPlanForSession("ses_a"))?.id).toBe(plan.id)
+    const ev = (await listPlanEvents(plan.id)).find((e) => e.kind === "deferred")
+    expect(ev?.payload).toMatchObject({ kind: "deferred", feedback: "cover mobile too" })
+    // A fresh ExitPlanMode capture replaces the lingering draft.
+    const next = await rt.createPlan(createInput({ title: "Round two" }))
+    expect((await rt.getPlan(plan.id))?.status).toBe("cancelled")
+    expect((await rt.getOpenPlanForSession("ses_a"))?.id).toBe(next.id)
+  })
+
+  it("keepPlanning is a no-op outside awaiting_approval", async () => {
+    const rt = getPlanRuntime()
+    expect(await rt.keepPlanning("ghost")).toBeNull()
+    const plan = await rt.createPlan(createInput({ config: { requireApproval: false } }))
+    // Approved (not awaiting) — unchanged.
+    expect((await rt.keepPlanning(plan.id))?.status).toBe("approved")
   })
 
   it("pause/resume round-trips an executing plan and fires the abort controller", async () => {

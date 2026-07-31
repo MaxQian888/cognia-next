@@ -1,0 +1,16 @@
+{
+  "deletePairing": {
+    "help": "清除本机配对前先验证生物识别。",
+    "label": "退出登录 / 解除配对"
+  },
+  "description": "在敏感操作前要求 Face ID 或指纹。",
+  "exportBackup": {
+    "help": "写入备份文件前先验证生物识别。",
+    "label": "导出加密备份"
+  },
+  "revealSecrets": {
+    "help": "显示 API 密钥或令牌前先验证生物识别。",
+    "label": "显示已存密钥"
+  },
+  "title": "生物识别保护"
+}

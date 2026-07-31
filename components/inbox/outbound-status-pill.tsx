@@ -39,6 +39,7 @@ const STATUS_CONFIG: Record<
   sending: { icon: LoaderIcon, colorClass: "text-amber-500" },
   sent: { icon: CheckIcon, colorClass: "text-emerald-500" },
   failed: { icon: AlertCircleIcon, colorClass: "text-destructive" },
+  delivery_unknown: { icon: AlertCircleIcon, colorClass: "text-amber-600" },
   deadlettered: { icon: BanIcon, colorClass: "text-destructive" },
 }
 
@@ -120,7 +121,7 @@ function OutboundSourceBadge({ job }: { job: OutboundJobRow }) {
       <Tooltip>
         <TooltipTrigger asChild>
           <Link
-            href={`/workflows/${workflowId}/runs/${runId}#node-${nodeId}`}
+            href={`/workflows/run?id=${encodeURIComponent(workflowId)}&runId=${encodeURIComponent(runId)}#node-${nodeId}`}
             data-testid={`outbound-source-badge-${job.id}`}
             data-source="workflow"
             className="inline-flex items-center gap-0.5 rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 hover:bg-amber-500/20 dark:text-amber-400"
@@ -156,6 +157,32 @@ function OutboundSourceBadge({ job }: { job: OutboundJobRow }) {
         className="inline-flex items-center rounded border border-violet-500/30 bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-medium text-violet-600 dark:text-violet-400"
       >
         {t("draftApproved")}
+      </span>
+    )
+  }
+
+  if (job.source === "plugin") {
+    // ctx.connectors.enqueueSend — plugin-driven durable sends.
+    return (
+      <span
+        data-testid={`outbound-source-badge-${job.id}`}
+        data-source="plugin"
+        className="inline-flex items-center rounded border border-rose-500/30 bg-rose-500/10 px-1.5 py-0.5 text-[10px] font-medium text-rose-600 dark:text-rose-400"
+      >
+        {t("plugin")}
+      </span>
+    )
+  }
+
+  if (job.source === "skill") {
+    // im.* built-in skill sends (W2): new-chat first message / broadcast.
+    return (
+      <span
+        data-testid={`outbound-source-badge-${job.id}`}
+        data-source="skill"
+        className="inline-flex items-center rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400"
+      >
+        {t("skill")}
       </span>
     )
   }

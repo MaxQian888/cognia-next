@@ -21,19 +21,21 @@ import type {
   PluginThemeContribution,
   PluginManifestThemeColors,
 } from "@/types/plugin/plugin"
-import type { ThemeColors } from "@/types/plugin/plugin-extended"
+import type { ThemeColors } from "@/types/plugin/plugin"
 import {
   registerPluginTheme,
   unregisterThemesByPlugin,
   type PluginTheme,
 } from "@/lib/theme/theme-registry"
 import { registerThemePack, unregisterThemePacksByPlugin } from "@/lib/theme/theme-pack-registry"
-import { readTextFile } from "@/lib/file/file-operations"
+import { isUnsafeRelativePath, readContainedPluginFile } from "./plugin-file-path"
 import {
   stripJsonComments,
   vscodeThemeToCustomTheme,
   type VscodeThemeJson,
 } from "@/lib/appearance/vscode-theme/parse-json"
+import { DEFAULT_FALLBACKS, THEME_COLOR_KEYS } from "@/lib/appearance/vscode-theme/token-mapping"
+import { themeKeyToCssVar } from "@/lib/appearance/css-var"
 import { loggers } from "@/lib/plugin/core/logger"
 
 export interface ThemesBridgeError {
@@ -45,28 +47,6 @@ export interface ThemesBridgeError {
 export interface ThemesBridgeRegisterResult {
   registered: number
   errors: ThemesBridgeError[]
-}
-
-/**
- * Reject `vscodeJsonPath` values that try to escape the plugin root.
- * Allowed: relative subpaths like `themes/dark.json` or `./dark.json`.
- * Blocked: `..` segments, leading `/`, leading `\`, drive letters.
- */
-function isUnsafeRelativePath(path: string): boolean {
-  if (typeof path !== "string" || path.length === 0) return true
-  // Drive letter (Windows) or POSIX absolute.
-  if (/^([A-Za-z]:)?[\\/]/.test(path)) return true
-  // Any `..` segment after splitting on either separator.
-  const segments = path.split(/[\\/]+/)
-  return segments.some((seg) => seg === "..")
-}
-
-function joinPluginPath(baseDir: string, relative: string): string {
-  if (baseDir.endsWith("/") || baseDir.endsWith("\\")) {
-    return baseDir + relative
-  }
-  // Use `/` — Tauri's plugin-fs accepts both separators on Windows.
-  return `${baseDir}/${relative}`
 }
 
 /**
@@ -154,6 +134,26 @@ function sanitizeCssVariables(
 export { sanitizeCssVariables as __sanitizeCssVariablesForTesting }
 
 /**
+ * Project a sanitized CSS-variable map onto the full 27-token `ThemeColors`
+ * shape. Starts from the light/dark neutral fallback so every slot is
+ * populated (swatch synthesis, preview, and shell-sync all assume a complete
+ * palette), then overrides each token whose matching `--kebab` variable is
+ * present in the map. Replaces the earlier 2-key `{background, foreground}`
+ * fabrication that left swatches and the clone path degraded.
+ */
+function cssVariablesToThemeColors(vars: Record<string, string>, isDark: boolean): ThemeColors {
+  const base = isDark ? DEFAULT_FALLBACKS.dark : DEFAULT_FALLBACKS.light
+  const out: ThemeColors = { ...base }
+  for (const key of THEME_COLOR_KEYS) {
+    const value = vars[themeKeyToCssVar(key)]
+    if (typeof value === "string" && value.length > 0) {
+      out[key] = value
+    }
+  }
+  return out
+}
+
+/**
  * Resolve a single contribution to a structured `ThemeColors` + `isDark` pair.
  * Throws on hard errors so the caller can collect them per-contribution.
  */
@@ -168,12 +168,10 @@ async function resolveContribution(
     // legacy fallback path stays well-defined) and pass the sanitized
     // variable map through for the runtime injection layer.
     const sanitized = sanitizeCssVariables(contribution.cssVariables, pluginId ?? "<unknown>")
+    const isDark = contribution.isDark === true
     return {
-      colors: {
-        background: sanitized["--background"] ?? "#000",
-        foreground: sanitized["--foreground"] ?? "#fff",
-      } as unknown as ThemeColors,
-      isDark: contribution.isDark === true,
+      colors: cssVariablesToThemeColors(sanitized, isDark),
+      isDark,
       cssVariables: sanitized,
     }
   }
@@ -183,8 +181,11 @@ async function resolveContribution(
         `Unsafe vscodeJsonPath rejected: "${contribution.vscodeJsonPath}". Path must be relative and free of ".." segments.`
       )
     }
-    const fullPath = joinPluginPath(baseDir, contribution.vscodeJsonPath)
-    const text = await readTextFile(fullPath)
+    const text = await readContainedPluginFile(
+      pluginId ?? "<unknown>",
+      baseDir,
+      contribution.vscodeJsonPath
+    )
     const cleaned = stripJsonComments(text)
     let parsed: VscodeThemeJson
     try {
@@ -258,6 +259,10 @@ export class PluginThemesBridge {
           pluginName,
           colors,
           isDark,
+          // Only CSS-var contributions carry a raw override map; keep it so
+          // the clone path and PluginThemeApplier can inject every variable
+          // the author declared (not just the structured projection).
+          ...(cssVariables ? { cssVars: cssVariables } : {}),
         }
         registerPluginTheme(theme)
         registered += 1

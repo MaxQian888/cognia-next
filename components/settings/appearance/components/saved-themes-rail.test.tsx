@@ -34,7 +34,7 @@ jest.mock("@/components/ui/dropdown-menu", () => ({
 }))
 
 import { SavedThemesRail, type SavedThemesRailLabels } from "./saved-themes-rail"
-import type { CustomTheme, ThemeColors } from "@/types/plugin/plugin-extended"
+import type { CustomTheme, ThemeColors } from "@/types/plugin/plugin"
 
 const labels: SavedThemesRailLabels = {
   title: "Saved themes",

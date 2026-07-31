@@ -21,11 +21,18 @@
 
 import type { MicrovmExec, MicrovmExecPayload, MicrovmResult } from "@/lib/sandbox/microvm-bridge"
 
-import type { E2BSandboxFacade, E2BSandboxFactory } from "./workspace-backend"
+import type { E2BSandboxConnection, E2BSandboxFacade, E2BSandboxFactory } from "./workspace-backend"
+import { resolveSandboxConnection } from "./workspace-backend"
 
 export interface MicrovmExecOptions {
   /** API key forwarded to the sandbox factory. */
   apiKey?: string
+  /** E2B-compatible API URL. AgentENV documents this as E2B_API_URL. */
+  apiUrl?: string
+  /** Native @e2b/sdk domain override. Takes precedence over apiUrl. */
+  domain?: string
+  /** Dynamic config resolver used by the plugin settings lifecycle. */
+  connection?: () => E2BSandboxConnection
   /** Factory override — tests inject a mock here. */
   sandboxFactory?: E2BSandboxFactory
   /** Override `Date.now()` for deterministic timing in tests. */
@@ -43,7 +50,7 @@ export function buildMicrovmExec(opts: MicrovmExecOptions = {}): MicrovmExec {
 
   return async function microvmExec(payload: MicrovmExecPayload): Promise<MicrovmResult> {
     const started = now()
-    const sandbox = await factory({ apiKey: opts.apiKey ?? process.env.E2B_API_KEY })
+    const sandbox = await factory(resolveSandboxConnection(opts))
     try {
       const cmd = buildBashCommand(payload)
       const result = await sandbox.exec({
@@ -109,7 +116,7 @@ function escapeShellName(name: string): string {
  * present, so users opting into the microvm tier without the SDK get a
  * clean strict-mode failure rather than a build break.
  */
-async function defaultMicrovmSandboxFactory(opts: { apiKey?: string }): Promise<E2BSandboxFacade> {
+async function defaultMicrovmSandboxFactory(opts: E2BSandboxConnection): Promise<E2BSandboxFacade> {
   let mod: { Sandbox?: unknown } | undefined
   try {
     mod = (await (Function("s", "return import(s)") as (s: string) => Promise<unknown>)(
@@ -117,15 +124,14 @@ async function defaultMicrovmSandboxFactory(opts: { apiKey?: string }): Promise<
     )) as { Sandbox?: unknown }
   } catch {
     throw new Error(
-      "@e2b/sdk is not installed. Install it with `pnpm add @e2b/sdk -w` and set " +
-        "E2B_API_KEY to use the microVM sandbox tier."
+      "@e2b/sdk is not installed. Install it with `pnpm add @e2b/sdk -w`, then configure " +
+        "E2B Sandbox in Settings → Plugins."
     )
   }
   const SandboxCtor = mod?.Sandbox as
-    | { create?: (opts: unknown) => Promise<E2BSandboxFacade> }
-    | undefined
+    { create?: (opts: unknown) => Promise<E2BSandboxFacade> } | undefined
   if (!SandboxCtor || typeof SandboxCtor.create !== "function") {
     throw new Error("@e2b/sdk does not export `Sandbox.create` — incompatible SDK version")
   }
-  return SandboxCtor.create({ apiKey: opts.apiKey })
+  return SandboxCtor.create(opts)
 }

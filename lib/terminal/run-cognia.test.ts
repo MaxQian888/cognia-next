@@ -1,4 +1,4 @@
-import { launchCognia } from "./run-cognia"
+import { launchCognia, launchCogniaAgent } from "./run-cognia"
 
 function makeStore() {
   return { setPanelOpen: jest.fn() } as never
@@ -91,5 +91,43 @@ describe("launchCognia", () => {
     const arg = spawn.mock.calls[0][0]
     expect(typeof arg.req.shell).toBe("string")
     expect(arg.req.shell.length).toBeGreaterThan(0)
+  })
+})
+
+describe("launchCogniaAgent", () => {
+  it("opens a dock tab and runs the desktop handoff resume command", async () => {
+    const write = jest.fn().mockResolvedValue(undefined)
+    const spawn = jest
+      .fn()
+      .mockResolvedValue({ kind: "spawned", sessionId: "terminal-1", shell: "/bin/zsh" })
+    const lookup = jest.fn().mockReturnValue({ write })
+    const store = makeStore() as never as { setPanelOpen: jest.Mock }
+
+    const out = await launchCogniaAgent({
+      handoffSessionId: "chat_123-safe",
+      cwd: "/home/u",
+      shell: "/bin/zsh",
+      store: store as never,
+      spawn,
+      lookup,
+    })
+
+    expect(store.setPanelOpen).toHaveBeenCalledWith(true)
+    expect(write).toHaveBeenCalledWith("cognia-agent resume chat_123-safe\r")
+    expect(out).toEqual({ kind: "launched", sessionId: "terminal-1" })
+  })
+
+  it("rejects a session id that could alter the shell command", async () => {
+    const spawn = jest.fn()
+    const out = await launchCogniaAgent({
+      handoffSessionId: "safe; rm -rf ~",
+      cwd: "/home/u",
+      shell: "/bin/zsh",
+      store: makeStore(),
+      spawn,
+      lookup: jest.fn(),
+    })
+    expect(out).toEqual({ kind: "error", message: "invalid handoff session id" })
+    expect(spawn).not.toHaveBeenCalled()
   })
 })

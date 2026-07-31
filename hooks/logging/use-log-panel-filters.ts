@@ -10,7 +10,7 @@ import {
   createLogFilterPreset,
   loadLogFilterPresets,
   serializeLogFilterPresets,
-} from "@/lib/logging/filter-presets"
+} from "@cognia/logging/filter-presets"
 import type {
   LogFilterPreset,
   LogFilterPresetFilters,
@@ -34,13 +34,32 @@ export type {
 
 const BOOKMARKS_STORAGE_KEY = "cognia-log-bookmarks"
 const DENSITY_STORAGE_KEY = "cognia-log-density"
+const AUTO_REFRESH_STORAGE_KEY = "cognia-log-auto-refresh"
 const VALID_DENSITIES: Density[] = ["compact", "comfortable", "spacious"]
 const EMPTY_PRESET_VALUE = "__none__"
 
 export function useLogPanelFilters(options: UseLogPanelFiltersOptions = {}): LogPanelFilterState {
   const { defaultAutoRefresh = false, sources } = options
 
-  const [autoRefresh, setAutoRefresh] = useState(defaultAutoRefresh)
+  // Persisted across sessions (like density) — reopening the panel keeps the
+  // user's live-follow preference instead of resetting to off.
+  const [autoRefresh, setAutoRefreshState] = useState(() => {
+    if (typeof window === "undefined") return defaultAutoRefresh
+    try {
+      const stored = window.localStorage.getItem(AUTO_REFRESH_STORAGE_KEY)
+      return stored === null ? defaultAutoRefresh : stored === "1"
+    } catch {
+      return defaultAutoRefresh
+    }
+  })
+  const setAutoRefresh = useCallback((next: boolean) => {
+    setAutoRefreshState(next)
+    try {
+      window.localStorage.setItem(AUTO_REFRESH_STORAGE_KEY, next ? "1" : "0")
+    } catch {
+      // ignore storage quota / private-mode errors
+    }
+  }, [])
   const [levelFilter, setLevelFilter] = useState<LogLevel | "all">("all")
   const [moduleFilter, setModuleFilter] = useState<string>("all")
   const [sourceFilter, setSourceFilter] = useState<PanelSource | "all">(
@@ -353,6 +372,7 @@ export function useLogPanelFilters(options: UseLogPanelFiltersOptions = {}): Log
     }),
     [
       autoRefresh,
+      setAutoRefresh,
       levelFilter,
       moduleFilter,
       sourceFilter,

@@ -1,0 +1,15 @@
+{
+  "bridgeDown": "桥接离线",
+  "bridgeRunning": "桥接已连接",
+  "chipBridgeDown": "cognia CLI 已安装（桥接离线）",
+  "chipMissing": "未安装 cognia CLI",
+  "chipReady": "cognia CLI 就绪",
+  "description": "插件作者 CLI 用于脚手架、构建、签名和热重载插件。",
+  "docs": "文档",
+  "install": "安装 cognia CLI",
+  "installedUnknownVersion": "已安装",
+  "missingHint": "未在 PATH 上找到。安装后即可脚手架和热重载插件。",
+  "probing": "检测中…",
+  "reveal": "在文件夹中显示",
+  "title": "cognia CLI"
+}

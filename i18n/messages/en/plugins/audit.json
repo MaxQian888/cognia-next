@@ -1,0 +1,16 @@
+{
+  "colAction": "Action",
+  "colPermission": "Permission",
+  "colPlugin": "Plugin",
+  "colReason": "Reason",
+  "colTime": "Time",
+  "description": "Recent grant/deny/revoke decisions across all plugins. The buffer holds the last 200 entries — older events are dropped.",
+  "empty": "No audit events yet.",
+  "exportCsv": "Export CSV",
+  "exportFilename": "plugin-audit-log.csv",
+  "filterPermissionAll": "All permissions",
+  "filterPermissionLabel": "Permission",
+  "filterPluginAll": "All plugins",
+  "filterPluginLabel": "Plugin",
+  "title": "Audit log"
+}

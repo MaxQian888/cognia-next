@@ -5,6 +5,10 @@
  * Supports two transports:
  *   - long-connection (default): uses /im/v1/wsServer + WSS
  *   - webhook: subscribes to Tauri event channel from Rust HTTP proxy
+ *
+ * GAP: webhook `url_verification` challenge echo is answered by the Rust
+ * webhook receiver (not TS-side). Card 2.0 migration and E2EE-style
+ * advanced messaging features are out of scope for this adapter revision.
  */
 
 import type {
@@ -12,15 +16,33 @@ import type {
   AdapterContext,
   AdapterHealth,
   AdapterHealthState,
+  ReactionRef,
+  ReadReceipt,
+  ForwardMessageInput,
+  UrgentChannel,
+  HistoryPage,
+  PlatformHistoryCursor,
 } from "@/types/connectors/adapter"
-import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
+import { createLarkRunPresentationDriver } from "@/lib/connectors/run-presentation/lark-driver"
+import type { OutboundError, OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
+import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
 import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
+import { extractLarkCode, LARK_PERMISSION_CODES } from "./http"
 import { LARK_A2UI_CAPABILITY, LARK_CAPS } from "./capability"
 import {
   parseLarkEventEnvelope,
   parseLarkBotMenuEvent,
   parseLarkInteractiveCallback,
 } from "./parse"
+import { applyTenantKeyBackfill } from "./tenant-key-backfill"
+import { isLarkFeatureEnabled } from "@/lib/connectors/feature-flags"
+import { recordConnectorMetric } from "@/lib/connectors/metrics"
+import { handleMenuDisabledKey, handleMenuLink, handleMenuUnknownKey } from "./menu-actions"
+import { reconcileChatTabSurface } from "./chat-tabs"
+import { reconcileGroupMenuSurface } from "./group-menu"
+import { sweepLarkChatSurfaces } from "./surface-sweep"
+import { bootstrapFeishuRegistry } from "@/lib/connectors/principal/bootstrap"
+import { getAdapterInstance } from "@/lib/db/adapter-instances"
 import { getBus } from "@/lib/connectors/bus"
 import type { LarkEventEnvelope } from "./parse"
 import type { LarkQuickCommand } from "./quick-commands"
@@ -28,18 +50,26 @@ import { normalizeQuickCommandList } from "@/lib/connectors/quick-commands"
 import { gateInboundEvent } from "@/lib/connectors/at-gate"
 import {
   serializeOutboundAsync,
-  serializeEdit,
+  serializeEditAsync,
   serializeDelete,
   serializeReaction,
+  serializeRemoveReaction,
+  serializeForward,
+  serializeMergeForward,
+  serializeUrgent,
+  sniffReceiveId,
 } from "./serialize"
-import { getTenantAccessToken } from "./auth"
-import { LarkApiError, withTatRefresh } from "./auth-retry"
+import { getTenantAccessToken, getUserAccessToken } from "./auth"
+import { LarkApiError, withTatRefresh, withUserTokenRefresh } from "./auth-retry"
+import { createLarkChatManagement } from "./chat-management"
 import { resolveLarkMediaKeys } from "./upload"
+import { enrichLarkInboundMedia } from "./inbound-media"
+import { createLarkPresence } from "./presence"
 import { startLarkLongConn } from "./transport-long-conn"
 import { startLarkWebhookTransport } from "./transport-webhook"
 import { parseConversationKey } from "@/types/connectors/event"
-import type { NormalizedInboundEvent } from "@/types/connectors/event"
-import { loggers } from "@/lib/logging"
+import type { ConversationDeliveryTarget, NormalizedInboundEvent } from "@/types/connectors/event"
+import { loggers } from "@cognia/logging"
 
 export interface LarkAdapterOptions {
   id: string
@@ -62,6 +92,14 @@ export interface LarkAdapterOptions {
    * factory itself re-normalises as defense-in-depth.
    */
   quickCommands?: LarkQuickCommand[]
+  /**
+   * When true and a user access token is connected (via the OAuth flow in
+   * `oauth-handler.ts`), outbound `send()` acts on behalf of the authorised
+   * user (user_access_token) instead of the bot (tenant_access_token). Opt-in
+   * per adapter via `settings.sendAsUser`. Falls back to the bot identity when
+   * no user token is connected or it cannot be refreshed.
+   */
+  sendAsUser?: boolean
   transport: "webhook" | "long-connection"
   /**
    * Cap on `/im/v1/messages` pages walked per `fetchHistory` call. Each
@@ -73,6 +111,46 @@ export interface LarkAdapterOptions {
 }
 
 const LARK_API_BASE = "https://open.feishu.cn/open-apis"
+
+/**
+ * Map a send/edit/forward failure onto the OutboundError contract
+ * (`types/connectors/outbound.ts`). Previously every failure became
+ * `platform_5xx / retryable:true`, so 4xx business errors (invalid
+ * receive_id, permission code 99991672, card schema rejects) were retried
+ * until deadletter even though the same payload can never succeed.
+ *
+ *   - 429                    → rate_limited, retryable (server asks to slow down)
+ *   - 401 / 403 / permission → auth_failed, NOT retryable (the one automatic
+ *     token refresh already ran inside withTatRefresh before we got here)
+ *   - other 4xx + Lark business codes in a 2xx envelope → platform_4xx,
+ *     NOT retryable (request itself is invalid; message carries the code)
+ *   - 5xx                    → platform_5xx, retryable
+ *   - non-LarkApiError (Rust bridge / fetch failures) → network, retryable
+ */
+function larkOutboundError(err: unknown): OutboundError {
+  if (err instanceof LarkApiError) {
+    const message = err.message
+    // 99991400 is Lark's app frequency-limit business code (shipped inside
+    // an HTTP 400) — same meaning as a bare 429 from the gateway.
+    if (err.status === 429 || err.code === 99991400) {
+      return { code: "rate_limited", message, retryable: true }
+    }
+    if (
+      err.status === 401 ||
+      err.status === 403 ||
+      (err.code !== null && LARK_PERMISSION_CODES.has(err.code))
+    ) {
+      return { code: "auth_failed", message, retryable: false }
+    }
+    if (err.status >= 500) return { code: "platform_5xx", message, retryable: true }
+    return { code: "platform_4xx", message, retryable: false }
+  }
+  return {
+    code: "network",
+    message: err instanceof Error ? err.message : String(err),
+    retryable: true,
+  }
+}
 
 const LARK_CONFIG_SCHEMA = {
   $schema: "http://json-schema.org/draft-07/schema#",
@@ -101,9 +179,58 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
   opts = { ...opts, quickCommands: normalizedQuickCommands }
 
   let abortController: AbortController | null = null
+  // Health state machine:
+  //   starting → running   on the first inbound envelope OR first successful
+  //                        send (evidence the transport / API actually works —
+  //                        `start()` returning only proves credentials resolved)
+  //   running  → down      generator ended without abort ("no_data")
+  //   running  → degraded  generator threw ("transport_error")
+  //   degraded → running   next inbound envelope (transport recovered)
+  // Limitation: the Rust lark_ws bridge owns per-cycle reconnection and the
+  // TS generator only surfaces terminal close/throw — individual failed
+  // reconnect cycles are not observable here, so "running" means "was
+  // delivering recently", refined by `lastActivityAt` staleness.
   let healthState: AdapterHealthState = "starting"
+  // Stable machine code (not a sentence) explaining a non-running health
+  // state, surfaced to the UI via `health().reason` → heartbeat →
+  // `useAdapterHealth`. Localized in the renderer by `healthReasonLabel`.
+  let healthReason: string | undefined = undefined
   let lastActivityAt: number | undefined = undefined
   let stopCalled = false
+  // One-shot guard for the tenant_key backfill below (`/bot/v3/info` can't
+  // return it, so the first real inbound event supplies it).
+  let tenantKeyBackfilled = false
+
+  /** Inbound traffic proves the transport is delivering — mark running. */
+  function markInboundActivity(): void {
+    lastActivityAt = Date.now()
+    if (healthState !== "running") {
+      healthState = "running"
+      healthReason = undefined
+    }
+  }
+
+  /**
+   * Backfill `lastWhoamiResult.tenantKey` from the first inbound envelope that
+   * carries a `tenant_key` (external-group tenant awareness). Best-effort and
+   * fire-and-forget: it must never block or fail an inbound dispatch. Settles
+   * at most once per adapter session; `applyTenantKeyBackfill` returns whether
+   * it is done (written / already present) so we stop calling.
+   */
+  async function maybeBackfillTenantKey(envelope: LarkEventEnvelope): Promise<void> {
+    if (tenantKeyBackfilled) return
+    try {
+      const { getAdapterInstance, updateAdapterInstance } =
+        await import("@/lib/db/adapter-instances")
+      const done = await applyTenantKeyBackfill(opts.id, envelope, {
+        getAdapterInstance,
+        updateAdapterInstance,
+      })
+      if (done) tenantKeyBackfilled = true
+    } catch {
+      // Best-effort — a read/write failure just leaves it for the next event.
+    }
+  }
 
   // Per-adapter-session URL → file_key / image_key cache so repeated sends
   // of the same media don't re-upload. Cleared on `stop()`.
@@ -119,39 +246,77 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     return { appId, appSecret }
   }
 
-  async function doRequest(
-    method: "GET" | "POST" | "PATCH" | "DELETE",
+  /** Issue one authenticated Lark API call with an explicit bearer token. */
+  async function sendHttp(
+    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
     urlPath: string,
-    body?: unknown
+    body: unknown,
+    token: string
+  ): Promise<unknown> {
+    const resp = await connectorsHttpRequest({
+      url: `${LARK_API_BASE}${urlPath}`,
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json; charset=utf-8",
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    })
+    if (resp.status >= 400) {
+      // Lark embeds its business error code in the body even on HTTP >= 400
+      // (e.g. 99991663 "invalid access_token" inside a 400). Extract it so
+      // `isLarkTatInvalidation` / retryability mapping see the real code —
+      // with `code: null` the main send path never triggered a TAT refresh.
+      throw new LarkApiError({
+        status: resp.status,
+        code: extractLarkCode(resp.body),
+        message: `Lark API ${method} ${urlPath} → ${resp.status}: ${resp.body}`,
+      })
+    }
+    const parsed = resp.body ? (JSON.parse(resp.body) as { code?: number; msg?: string }) : null
+    if (parsed && typeof parsed.code === "number" && parsed.code !== 0) {
+      throw new LarkApiError({
+        status: resp.status,
+        code: parsed.code,
+        message: `Lark API error: code=${parsed.code}, msg=${parsed.msg ?? "unknown"}`,
+      })
+    }
+    return parsed
+  }
+
+  async function doRequest(
+    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
+    urlPath: string,
+    body?: unknown,
+    reqOpts?: { asUser?: boolean }
   ): Promise<unknown> {
     const creds = await resolveCredentials()
+
+    // Opt-in send-as-user path: act on behalf of the connected user when a user
+    // token is present, refreshing it once on invalidation. Any failure of the
+    // user path degrades to the bot (tenant) identity so the message still
+    // goes out — the user just needs to re-authorise to restore their identity.
+    if (reqOpts?.asUser) {
+      const userToken = await getUserAccessToken(opts.id).catch(() => null)
+      if (userToken) {
+        try {
+          return await withUserTokenRefresh({ adapterId: opts.id, ...creds }, async () => {
+            const tok = (await getUserAccessToken(opts.id)) ?? userToken
+            return sendHttp(method, urlPath, body, tok)
+          })
+        } catch (err) {
+          loggers.network.warn("[lark] user-token send failed; falling back to bot identity", {
+            id: opts.id,
+            reason: err instanceof Error ? err.message : String(err),
+          })
+          // fall through to the tenant path below
+        }
+      }
+    }
+
     return withTatRefresh(creds, async () => {
       const tat = await getTenantAccessToken(creds)
-      const resp = await connectorsHttpRequest({
-        url: `${LARK_API_BASE}${urlPath}`,
-        method,
-        headers: {
-          Authorization: `Bearer ${tat}`,
-          "Content-Type": "application/json; charset=utf-8",
-        },
-        body: body !== undefined ? JSON.stringify(body) : undefined,
-      })
-      if (resp.status >= 400) {
-        throw new LarkApiError({
-          status: resp.status,
-          code: null,
-          message: `Lark API ${method} ${urlPath} → ${resp.status}: ${resp.body}`,
-        })
-      }
-      const parsed = resp.body ? (JSON.parse(resp.body) as { code?: number; msg?: string }) : null
-      if (parsed && typeof parsed.code === "number" && parsed.code !== 0) {
-        throw new LarkApiError({
-          status: resp.status,
-          code: parsed.code,
-          message: `Lark API error: code=${parsed.code}, msg=${parsed.msg ?? "unknown"}`,
-        })
-      }
-      return parsed
+      return sendHttp(method, urlPath, body, tat)
     })
   }
 
@@ -168,14 +333,26 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     try {
       creds = await resolveCredentials()
     } catch (err) {
+      // Resolving credentials can fail for reasons that are *not* an
+      // app-level fault — most commonly the OS keyring denying access to a
+      // not-yet-configured adapter (e.g. the user only reuses the Claude
+      // subscription and never set up Lark, or a dev rebuild changed the
+      // signing identity so the keychain ACL no longer matches). The outcome
+      // is identical to the empty-credential case below — the adapter simply
+      // cannot start — so skip it cleanly with a single non-alarming warn
+      // (reason attached for diagnosis) instead of a red ERROR that re-fires
+      // on every boot.
       healthState = "down"
-      loggers.network.error("[lark] adapter not started — credential lookup failed", err, {
+      healthReason = "credentials_unavailable"
+      loggers.network.warn("[lark] adapter skipped — credentials unavailable", {
         id: opts.id,
+        reason: err instanceof Error ? err.message : String(err),
       })
       return
     }
     if (!creds.appId || !creds.appSecret) {
       healthState = "down"
+      healthReason = "credentials_missing"
       loggers.network.warn("[lark] adapter skipped — appId/appSecret not configured", {
         id: opts.id,
       })
@@ -185,7 +362,24 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     abortController = new AbortController()
     const signal = abortController.signal
 
-    healthState = "running"
+    // Deliberately stay in "starting": credentials resolving only proves the
+    // keyring works. `markInboundActivity` (first envelope) or the first
+    // successful send flips to "running"; the transport loops below flip to
+    // down/degraded on terminal end/throw.
+    healthState = "starting"
+    healthReason = undefined
+
+    // An empty selfBotOpenId silently disables self-mention detection —
+    // under the default `mention_only` at-strategy every group message
+    // would be dropped with no trace. Warn loudly so the operator knows
+    // to run the whoami probe (which persists the bot's open_id).
+    if (!opts.selfBotOpenId) {
+      loggers.network.warn(
+        "[lark] selfBotOpenId is empty — @-mention detection is disabled; " +
+          "run the bot identity probe (whoami) so mention_only gating can work",
+        { id: opts.id }
+      )
+    }
 
     // Inbound observability — the long-conn path was previously silent on
     // success and swallowed failures, so a non-working bot left no trace.
@@ -195,6 +389,40 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
       transport: opts.transport,
     })
 
+    // Start-time chat-surface sweep (plan 2026-07-24 P4.1/P4.3): reconcile
+    // pending / backoff-elapsed / stale Cognia Chat Tabs + group menus.
+    // Flag-gated inside the sweep; fire-and-forget so a platform outage
+    // can never delay transport startup.
+    void sweepLarkChatSurfaces({ adapterId: opts.id, resolveCreds: resolveCredentials }).catch(
+      (err) =>
+        loggers.network.warn("[lark] chat-surface sweep failed", {
+          id: opts.id,
+          error: err instanceof Error ? err.message : String(err),
+        })
+    )
+
+    // Registry seeding (plan 2026-07-24 P1.1). Runs before the first inbound
+    // event so an existing workspace never sees a "not linked yet" reply for
+    // people it has already been talking to. Flag-gated and once-per-tenant
+    // inside the bootstrap; fire-and-forget for the same reason as the sweep.
+    void (async () => {
+      const row = await getAdapterInstance(opts.id)
+      if (!row) return
+      const result = await bootstrapFeishuRegistry({ adapterId: opts.id, adapterRow: row })
+      if (result.status === "seeded") {
+        loggers.network.info("[lark] principal registry seeded", {
+          id: opts.id,
+          seeded: result.seeded,
+          skipped: result.skipped,
+        })
+      }
+    })().catch((err) =>
+      loggers.network.warn("[lark] principal registry bootstrap failed", {
+        id: opts.id,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    )
+
     /**
      * Shared envelope dispatcher — handles both the long-connection and
      * webhook paths. Interactive-card callbacks (G3.4) go through the
@@ -202,12 +430,23 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
      * `ctx.emit` as a normalised message event.
      */
     const dispatchEnvelope = async (envelope: LarkEventEnvelope): Promise<void> => {
+      // Any envelope — even one that gets gated or fails to parse — proves
+      // the transport is connected and delivering.
+      markInboundActivity()
+      // Record the sender's tenant on first sight (external-group awareness).
+      void maybeBackfillTenantKey(envelope)
       loggers.network.info("[lark] inbound envelope", {
         id: opts.id,
         eventType: envelope.header?.event_type,
       })
-      // Interactive card callbacks — route to the callback channel.
-      if (envelope.header?.event_type === "im.interactive_message.action_triggered_v1") {
+      // Interactive card callbacks — route to the callback channel. Both
+      // the legacy v1 event name and the Card 2.0 `card.action.trigger`
+      // callback are accepted; `parseLarkInteractiveCallback` normalises
+      // the two payload shapes.
+      if (
+        envelope.header?.event_type === "im.interactive_message.action_triggered_v1" ||
+        envelope.header?.event_type === "card.action.trigger"
+      ) {
         const callback = parseLarkInteractiveCallback(opts.id, opts.selfBotOpenId, envelope)
         if (callback) {
           lastActivityAt = Date.now()
@@ -215,21 +454,72 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
         }
         return
       }
-      // Bot-menu (快捷指令) clicks — map event_key → action, then run the
-      // same gate → bus → ai-run path as a regular message.
+      // Bot-menu (快捷指令) clicks — mapped keys run the same gate → bus →
+      // ai-run path as a regular message; link / unknown outcomes are
+      // terminal at the adapter (URL reply / bilingual notice + audit) and
+      // never reach the model (plan 2026-07-24 P4.2).
       if (envelope.header?.event_type === "application.bot.menu_v6") {
-        const menuEvent = parseLarkBotMenuEvent(
+        const outcome = parseLarkBotMenuEvent(
           opts.id,
           opts.selfBotOpenId,
           envelope,
           opts.quickCommands
         )
-        if (menuEvent) {
-          if (!(await gateInboundEvent(opts.id, menuEvent))) return
-          lastActivityAt = Date.now()
-          await ctx.emit(menuEvent)
+        if (!outcome) return
+        lastActivityAt = Date.now()
+        // Row read is per-click so web-entry-base / flag edits apply without
+        // an adapter restart; lookup failure degrades to the global defaults.
+        // Configured mapped commands skip the read entirely (hot path).
+        const needsAdapterRow = outcome.kind !== "mapped" || outcome.builtIn
+        const adapterRow = needsAdapterRow
+          ? await getAdapterInstance(opts.id).catch(() => undefined)
+          : undefined
+        // Reserved cognia.* built-ins are the "command menu batch" — gated
+        // per adapter (larkNativeSlash). Adapter-configured rows are never
+        // gated. Gated-off clicks get a terminal disabled notice without
+        // polluting the unknown-key audit/metric.
+        if (
+          outcome.kind !== "unknown" &&
+          outcome.builtIn &&
+          !isLarkFeatureEnabled("larkNativeSlash", adapterRow)
+        ) {
+          await handleMenuDisabledKey(opts.id, {
+            openId: outcome.openId,
+            eventId: outcome.eventId,
+          })
+          return
+        }
+        if (outcome.kind === "mapped") {
+          if (!(await gateInboundEvent(opts.id, outcome.event))) return
+          if (outcome.builtIn) recordConnectorMetric("lark_native_slash_total")
+          await ctx.emit(outcome.event)
+          return
+        }
+        if (outcome.kind === "link") {
+          await handleMenuLink(opts.id, adapterRow ?? undefined, outcome)
+        } else {
+          await handleMenuUnknownKey(opts.id, outcome)
         }
         return
+      }
+      // Bot newly added to a chat → seed/reconcile its Cognia surfaces
+      // (flag-gated inside the reconcilers; failures audit + back off).
+      // Falls through — the member_added system event still parses below.
+      if (envelope.header?.event_type === "im.chat.member.bot.added_v1") {
+        const addedChatId = (envelope.event as { chat_id?: string } | undefined)?.chat_id
+        if (addedChatId) {
+          const surfaceCtx = { adapterId: opts.id, resolveCreds: resolveCredentials }
+          const logSurfaceError = (surface: string) => (err: unknown) =>
+            loggers.network.warn("[lark] chat-surface reconcile failed", {
+              id: opts.id,
+              surface,
+              error: err instanceof Error ? err.message : String(err),
+            })
+          void reconcileChatTabSurface(surfaceCtx, addedChatId).catch(logSurfaceError("chat_tab"))
+          void reconcileGroupMenuSurface(surfaceCtx, addedChatId).catch(
+            logSurfaceError("group_menu")
+          )
+        }
       }
       const event = parseLarkEventEnvelope(opts.id, opts.selfBotOpenId, envelope)
       if (!event) {
@@ -251,6 +541,10 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
       }
       lastActivityAt = Date.now()
       loggers.network.info("[lark] inbound event passed gate → emit to bus", { id: opts.id })
+      // Second pass: download inbound rich media (image / file bytes) so the
+      // model + inbound OCR see actual content rather than a bare platform key.
+      // Best-effort and self-contained — never blocks or fails the dispatch.
+      await enrichLarkInboundMedia(event, { getAccessToken: getTat })
       await ctx.emit(event)
     }
 
@@ -267,6 +561,7 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
           }
           if (!stopCalled) {
             healthState = "down"
+            healthReason = "no_data"
             loggers.network.warn("[lark] long-conn generator ended (no data, health=down)", {
               id: opts.id,
             })
@@ -274,6 +569,7 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
         } catch (err) {
           if (!stopCalled) {
             healthState = "degraded"
+            healthReason = "transport_error"
             loggers.network.error("[lark] long-conn generator threw (health=degraded)", err, {
               id: opts.id,
             })
@@ -294,10 +590,12 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
           }
           if (!stopCalled) {
             healthState = "down"
+            healthReason = "no_data"
           }
         } catch {
           if (!stopCalled) {
             healthState = "degraded"
+            healthReason = "transport_error"
           }
         }
       })()
@@ -309,11 +607,12 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     abortController?.abort()
     abortController = null
     healthState = "down"
+    healthReason = undefined
     uploadCache.clear()
   }
 
   function health(): AdapterHealth {
-    return { state: healthState, lastActivityAt }
+    return { state: healthState, reason: healthReason, lastActivityAt }
   }
 
   async function send(req: OutboundRequest): Promise<OutboundResult> {
@@ -330,17 +629,29 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
       )
       const call = await serializeOutboundAsync({ ...req, segments: resolvedSegments }, opts.id)
       const urlPath = call.url.replace(LARK_API_BASE, "")
-      await doRequest(call.method, urlPath, call.payload)
-      return { ok: true }
-    } catch (err) {
-      return {
-        ok: false,
-        error: {
-          code: "platform_5xx",
-          message: err instanceof Error ? err.message : String(err),
-          retryable: true,
-        },
+      // Replies are the identity-bearing path — send as the connected user when
+      // opted in. Edits / deletes / reactions stay on the bot identity (they act
+      // on bot-owned messages such as live-activity / progress cards).
+      const resp = (await doRequest(call.method, urlPath, call.payload, {
+        asUser: opts.sendAsUser === true,
+      })) as { data?: { message_id?: string } } | null
+      // Surface the real platform message id so the outbound runner persists
+      // it on the job row — downstream consumers (workflow send node output,
+      // edit/reaction chains, delivery audit) need the `om_…` id, not the
+      // idempotency-key placeholder the runner falls back to.
+      const messageId = resp?.data?.message_id
+      // A successful send is activity too (not just inbound traffic), and —
+      // while still "starting" — it is evidence the credentials + API work.
+      // It must NOT clear a down/degraded transport state: outbound HTTP
+      // succeeding says nothing about the inbound long-conn being alive.
+      lastActivityAt = Date.now()
+      if (healthState === "starting") {
+        healthState = "running"
+        healthReason = undefined
       }
+      return { ok: true, ...(messageId ? { platformMessageId: messageId } : {}) }
+    } catch (err) {
+      return { ok: false, error: larkOutboundError(err) }
     }
   }
 
@@ -353,19 +664,19 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
           uploadCache,
         })
       )
-      const call = serializeEdit(messageId, { ...patch, segments: resolvedSegments })
+      const call = await serializeEditAsync(
+        messageId,
+        { ...patch, segments: resolvedSegments },
+        opts.id
+      )
       const urlPath = call.url.replace(LARK_API_BASE, "")
       await doRequest(call.method, urlPath, call.payload)
-      return { ok: true }
+      // An edit keeps the platform message id — echo it back so callers
+      // (workflow send node with editTargetMessageId, runner audit) get the
+      // same feedback shape as a fresh send.
+      return { ok: true, platformMessageId: messageId }
     } catch (err) {
-      return {
-        ok: false,
-        error: {
-          code: "platform_5xx",
-          message: err instanceof Error ? err.message : String(err),
-          retryable: true,
-        },
-      }
+      return { ok: false, error: larkOutboundError(err) }
     }
   }
 
@@ -385,82 +696,308 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
    *   - per-page size = 50 (Lark default; max 50)
    *   - max pages    = `opts.historyMaxPages` ?? 20
    *   - `historyOpts.before` / `historyOpts.after` are forwarded as
-   *     `end_time` / `start_time` (Lark expects ISO seconds-since-epoch
-   *     strings; the caller must already provide that format).
+   *     `end_time` / `start_time`. Lark expects epoch SECONDS; callers that
+   *     pass epoch-milliseconds (any value > 10^12) are normalised down,
+   *     since a ms value would otherwise select an empty window in the
+   *     year ~56000.
    *   - `historyOpts.max` further caps the total messages yielded.
    */
+  function toEpochSeconds(value: string): string {
+    const n = Number(value)
+    if (!Number.isFinite(n)) return value
+    return n > 1e12 ? String(Math.floor(n / 1000)) : value
+  }
+
+  async function fetchHistoryPage(
+    target: ConversationDeliveryTarget,
+    cursor: PlatformHistoryCursor | undefined,
+    pageOpts: { max: number }
+  ): Promise<HistoryPage> {
+    if (cursor && cursor.kind !== "timestamp") {
+      throw new Error("Lark history requires a timestamp cursor; message ids are not timestamps")
+    }
+    const chatId = target.address.containerId
+    const conversationKey = target.address.conversationKey
+    const pageSize = Math.max(1, Math.min(50, pageOpts.max))
+    const params: Record<string, string> = {
+      container_id_type: "chat",
+      container_id: chatId,
+      page_size: String(pageSize),
+    }
+    if (cursor?.pageToken) params["page_token"] = cursor.pageToken
+    if (cursor?.afterTimestamp !== undefined) {
+      params["start_time"] = toEpochSeconds(String(cursor.afterTimestamp))
+    }
+    if (cursor?.beforeTimestamp !== undefined) {
+      params["end_time"] = toEpochSeconds(String(cursor.beforeTimestamp))
+    }
+
+    const search = new URLSearchParams(params).toString()
+    const response = (await doRequest("GET", `/im/v1/messages?${search}`)) as {
+      data?: {
+        items?: Array<Record<string, unknown>>
+        page_token?: string
+        has_more?: boolean
+      }
+    } | null
+
+    const events: NormalizedInboundEvent[] = []
+    const items = response?.data?.items ?? []
+    for (const item of items) {
+      if (events.length >= pageOpts.max) break
+      // History items differ from live push events in TWO shapes (proven
+      // against the real API): the type field is `msg_type` (live:
+      // `message_type`) and the content JSON lives under `body.content`
+      // (live: `content`). Normalise into the live shape so
+      // `parseLarkEventEnvelope` → `buildSegments` sees real content
+      // instead of silently yielding empty events. Recalled messages
+      // ("This message was recalled") and system notices carry no
+      // recoverable content — skip them.
+      const raw = item as {
+        message_id?: string
+        chat_id?: string
+        chat_type?: string
+        msg_type?: string
+        body?: { content?: string }
+        mentions?: unknown
+        create_time?: string
+        thread_id?: string | null
+        deleted?: boolean
+      }
+      if (raw.deleted === true || raw.msg_type === "system") continue
+      const normalizedMessage = {
+        message_id: raw.message_id ?? "",
+        chat_id: raw.chat_id ?? chatId,
+        chat_type: raw.chat_type ?? (chatId.startsWith("oc_") ? "group" : "p2p"),
+        message_type: raw.msg_type ?? "",
+        content: raw.body?.content ?? "",
+        mentions: raw.mentions,
+        create_time: raw.create_time,
+        thread_id: raw.thread_id ?? null,
+      }
+      const envelope: LarkEventEnvelope = {
+        schema: "2.0",
+        header: {
+          event_id: `hist:${raw.message_id ?? "?"}`,
+          event_type: "im.message.receive_v1",
+        },
+        event: {
+          sender: (item as { sender?: LarkEventEnvelope["event"]["sender"] }).sender,
+          message: normalizedMessage as unknown as LarkEventEnvelope["event"]["message"],
+        },
+      }
+      const event = parseLarkEventEnvelope(opts.id, opts.selfBotOpenId, envelope)
+      // Feishu only exposes chat-level history. A response may therefore
+      // contain the parent chat and every topic in it; retain exactly the
+      // requested opaque conversation scope after normalisation.
+      if (event?.conversationKey === conversationKey) {
+        events.push(event)
+      }
+    }
+
+    const nextToken = response?.data?.page_token
+    const hasMore = response?.data?.has_more
+    const nextCursor =
+      hasMore && nextToken
+        ? {
+            kind: "timestamp" as const,
+            beforeTimestamp: cursor?.beforeTimestamp,
+            afterTimestamp: cursor?.afterTimestamp,
+            pageToken: nextToken,
+          }
+        : undefined
+    return { events, nextCursor }
+  }
+
   async function* fetchHistory(
     conversationKey: string,
     historyOpts: { before?: string; after?: string; max?: number }
   ): AsyncIterable<NormalizedInboundEvent> {
+    // Compatibility surface for plugin/API callers. Runtime recovery uses
+    // fetchHistoryPage with the persisted target and never enters this parser.
     const parsed = parseConversationKey(conversationKey)
-    const chatId = parsed.remoteChatId
+    const target: ConversationDeliveryTarget = {
+      address: {
+        conversationKey,
+        platform: "lark",
+        adapterId: opts.id,
+        scopeKind: parsed.threadId ? "thread" : "group",
+        containerId: parsed.remoteChatId,
+        ...(parsed.threadId ? { topicId: parsed.threadId } : {}),
+      },
+      conversationRef: {
+        platform: "lark",
+        adapterId: opts.id,
+        channelId: parsed.remoteChatId,
+        ...(parsed.threadId ? { threadTs: parsed.threadId } : {}),
+      },
+      refreshedAt: Date.now(),
+    }
     const maxPages = opts.historyMaxPages ?? 20
     const overallCap = historyOpts.max ?? Number.POSITIVE_INFINITY
-
-    let pageToken: string | undefined = undefined
+    let cursor: PlatformHistoryCursor | undefined = {
+      kind: "timestamp",
+      beforeTimestamp: historyOpts.before ? Number(historyOpts.before) : undefined,
+      afterTimestamp: historyOpts.after ? Number(historyOpts.after) : undefined,
+    }
     let yielded = 0
-
-    for (let page = 0; page < maxPages; page++) {
-      const params: Record<string, string> = {
-        container_id_type: "chat",
-        container_id: chatId,
-        page_size: "50",
-      }
-      if (pageToken) params["page_token"] = pageToken
-      if (historyOpts.after) params["start_time"] = historyOpts.after
-      if (historyOpts.before) params["end_time"] = historyOpts.before
-
-      const search = new URLSearchParams(params).toString()
-      const response = (await doRequest("GET", `/im/v1/messages?${search}`)) as {
-        data?: {
-          items?: Array<Record<string, unknown>>
-          page_token?: string
-          has_more?: boolean
-        }
-      } | null
-
-      const items = response?.data?.items ?? []
-      for (const item of items) {
+    for (let pageIndex = 0; pageIndex < maxPages && yielded < overallCap; pageIndex++) {
+      const page = await fetchHistoryPage(target, cursor, {
+        max: 50,
+      })
+      for (const event of page.events) {
         if (yielded >= overallCap) return
-        const envelope: LarkEventEnvelope = {
-          schema: "2.0",
-          header: {
-            event_id: `hist:${(item as { message_id?: string }).message_id ?? "?"}`,
-            event_type: "im.message.receive_v1",
-          },
-          event: {
-            sender: (item as { sender?: LarkEventEnvelope["event"]["sender"] }).sender,
-            message: item as unknown as LarkEventEnvelope["event"]["message"],
-          },
-        }
-        const event = parseLarkEventEnvelope(opts.id, opts.selfBotOpenId, envelope)
-        if (event) {
-          yielded++
-          yield event
-        }
+        yielded++
+        yield event
       }
-
-      const nextToken = response?.data?.page_token
-      const hasMore = response?.data?.has_more
-      if (!hasMore || !nextToken || nextToken.length === 0) return
-      pageToken = nextToken
+      if (!page.nextCursor) return
+      cursor = page.nextCursor
     }
   }
 
-  async function setTyping(_conversationKey: string, _on: boolean): Promise<void> {
-    // Lark has no native typing indicator for bots; no-op.
-  }
+  // No setTyping: Lark has no typing indicator for bots. The adapter
+  // contract treats an ABSENT method as "unsupported" (matching `typing`
+  // not being declared in LARK_CAPS) — a silent no-op would instead tell
+  // callers the indicator was set.
 
   async function refreshCredentials(): Promise<void> {
     // All token resolvers call fresh on each request; cache handles the rest.
   }
 
-  async function addReaction(messageId: string, emojiType: string): Promise<void> {
+  // Presence (系统状态 badge + pin). Status-id persistence rides the adapter
+  // row's `presenceState` JSON column via lazy imports so the Dexie graph
+  // stays out of the adapter's eager bundle.
+  const presence = createLarkPresence({
+    adapterId: opts.id,
+    request: (method, urlPath, body) => doRequest(method, urlPath, body),
+    getStatusId: async () => {
+      const { getAdapterInstance } = await import("@/lib/db/adapter-instances")
+      const row = await getAdapterInstance(opts.id)
+      return row?.presenceState?.platformStatusId
+    },
+    setStatusId: async (id) => {
+      const { getAdapterInstance, updateAdapterInstance } =
+        await import("@/lib/db/adapter-instances")
+      const row = await getAdapterInstance(opts.id)
+      await updateAdapterInstance(opts.id, {
+        presenceState: { ...row?.presenceState, platformStatusId: id },
+      })
+    },
+  })
+
+  async function addReaction(messageId: string, emojiType: string): Promise<ReactionRef> {
     const call = serializeReaction(messageId, emojiType)
+    const urlPath = call.url.replace(LARK_API_BASE, "")
+    // Surface the platform reaction_id so callers can later `removeReaction`
+    // exactly this reaction (Lark keys removals by reaction_id, not emoji).
+    const resp = (await doRequest(call.method, urlPath, call.payload)) as {
+      data?: { reaction_id?: string }
+    } | null
+    return { ...(resp?.data?.reaction_id ? { reactionId: resp.data.reaction_id } : {}) }
+  }
+
+  async function removeReaction(messageId: string, reactionId: string): Promise<void> {
+    const call = serializeRemoveReaction(messageId, reactionId)
     const urlPath = call.url.replace(LARK_API_BASE, "")
     await doRequest(call.method, urlPath, call.payload)
   }
+
+  /**
+   * Forward a single message, or merge-forward several as one card, to another
+   * conversation. `input.target` is a conversation key
+   * (`lark:adapterId:channelId`) or a bare Lark receive id.
+   */
+  async function forwardMessage(input: ForwardMessageInput): Promise<OutboundResult> {
+    try {
+      const channelId = input.target.includes(":")
+        ? parseConversationKey(input.target).remoteChatId
+        : input.target
+      const { receiveIdType, receiveId } = sniffReceiveId(channelId)
+      const ids = (input.messageIds ?? []).filter(Boolean)
+      const singleId = input.messageId ?? ids[0]
+      // Guard the degenerate call: with neither messageId nor messageIds the
+      // old code built POST /im/v1/messages//forward (guaranteed 4xx after a
+      // pointless network round-trip).
+      if (!singleId && ids.length === 0) {
+        return {
+          ok: false,
+          error: {
+            code: "validation",
+            message: "forwardMessage requires messageId or a non-empty messageIds",
+            retryable: false,
+          },
+        }
+      }
+      const call =
+        ids.length > 1
+          ? serializeMergeForward(ids, receiveIdType, receiveId)
+          : serializeForward(singleId ?? "", receiveIdType, receiveId)
+      const urlPath = call.url.replace(LARK_API_BASE, "")
+      const resp = (await doRequest(call.method, urlPath, call.payload)) as {
+        data?: { message_id?: string }
+      } | null
+      const messageId = resp?.data?.message_id
+      return { ok: true, ...(messageId ? { platformMessageId: messageId } : {}) }
+    } catch (err) {
+      return { ok: false, error: larkOutboundError(err) }
+    }
+  }
+
+  /**
+   * Escalate an already-sent message to `userIds` (open_ids) via an urgent
+   * channel (加急). Requires the elevated `im:message.urgent*` scope — a bot
+   * without it throws a Lark scope error, which the caller surfaces.
+   */
+  async function sendUrgent(
+    messageId: string,
+    userIds: string[],
+    via: UrgentChannel = "app"
+  ): Promise<void> {
+    const call = serializeUrgent(messageId, userIds, via)
+    const urlPath = call.url.replace(LARK_API_BASE, "")
+    await doRequest(call.method, urlPath, call.payload)
+  }
+
+  /**
+   * Query who has read a message (feedback). Bot needs `im:message` readonly.
+   * Walks the `page_token` cursor until exhausted (capped at
+   * READ_RECEIPT_MAX_PAGES pages of 50); `hasMore` is true only when the cap
+   * cut the walk short.
+   */
+  const READ_RECEIPT_MAX_PAGES = 10
+  async function getReadReceipt(messageId: string): Promise<ReadReceipt> {
+    const readers: ReadReceipt["readers"] = []
+    let pageToken: string | undefined
+    let hasMore = false
+    for (let page = 0; page < READ_RECEIPT_MAX_PAGES; page++) {
+      const cursor = pageToken ? `&page_token=${encodeURIComponent(pageToken)}` : ""
+      const resp = (await doRequest(
+        "GET",
+        `/im/v1/messages/${encodeURIComponent(messageId)}/read_users?user_id_type=open_id&page_size=50${cursor}`
+      )) as {
+        data?: {
+          items?: Array<{ user_id?: string; timestamp?: string }>
+          has_more?: boolean
+          page_token?: string
+        }
+      } | null
+      const items = resp?.data?.items ?? []
+      for (const it of items) {
+        const userId = String(it.user_id ?? "")
+        if (userId.length === 0) continue
+        readers.push({ userId, ...(it.timestamp ? { readAt: Number(it.timestamp) } : {}) })
+      }
+      hasMore = resp?.data?.has_more === true
+      pageToken = resp?.data?.page_token
+      if (!hasMore || !pageToken) break
+    }
+    return { readers, hasMore: hasMore && !!pageToken }
+  }
+
+  // Chat management (W2 multi-bot): five optional PlatformAdapter methods,
+  // paired with the `chat.create` / `chat.members` / `chat.update` /
+  // `contact.resolve` flags declared in LARK_CAPS.
+  const chatMgmt = createLarkChatManagement(opts.id, resolveCredentials)
 
   const adapter: PlatformAdapter & { addReaction?: typeof addReaction } = {
     get meta() {
@@ -474,6 +1011,9 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
       }
     },
     id: opts.id,
+    runPresentation: createLarkRunPresentationDriver(doRequest),
+    runtimeCapabilities: builtInConnectorRuntimeCapabilities("lark"),
+    historyCursorKind: "timestamp",
     start,
     stop,
     health,
@@ -481,8 +1021,16 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
     edit,
     delete: deleteMessage,
     fetchHistory,
-    setTyping,
+    fetchHistoryPage,
     refreshCredentials,
+    setPresenceStatus: presence.setPresenceStatus,
+    pinMessage: presence.pinMessage,
+    unpinMessage: presence.unpinMessage,
+    createChat: chatMgmt.createChat,
+    addChatMembers: chatMgmt.addChatMembers,
+    removeChatMembers: chatMgmt.removeChatMembers,
+    updateChat: chatMgmt.updateChat,
+    resolveContacts: chatMgmt.resolveContacts,
     a2uiCapability: () => LARK_A2UI_CAPABILITY,
     platformSkillCapabilities: () => {
       // Lazy ESM import via the synchronous bundler entry. The barrel
@@ -497,6 +1045,10 @@ export function createLarkAdapter(opts: LarkAdapterOptions): PlatformAdapter {
       return summariseSkillCapabilities("lark")
     },
     addReaction,
+    removeReaction,
+    forwardMessage,
+    sendUrgent,
+    getReadReceipt,
   }
 
   return adapter

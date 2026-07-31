@@ -16,6 +16,8 @@ import type { CanvasComment, SessionPermissions } from "@/types/canvas/collabora
 export interface CanvasDocumentRow {
   id: string
   sessionId?: string
+  /** Owning workspace id — Workspace isolation column (Dexie v86). See `lib/db/project-scope.ts`. */
+  projectId?: string
   title: string
   content: string
   language: ArtifactLanguage
@@ -30,6 +32,8 @@ export interface CanvasDocumentRow {
 export interface CanvasVersionRow {
   id: string
   documentId: string
+  /** Owning workspace id — Workspace isolation column (Dexie v86); inherits the document's project. */
+  projectId?: string
   content: string
   title: string
   createdAt: number
@@ -46,6 +50,8 @@ export interface CanvasCommentRow extends Omit<
   CanvasComment,
   "createdAt" | "updatedAt" | "resolvedAt"
 > {
+  /** Owning workspace id — Workspace isolation column (Dexie v86); inherits the document's project. */
+  projectId?: string
   createdAt: number
   updatedAt?: number
   resolvedAt?: number
@@ -54,6 +60,8 @@ export interface CanvasCommentRow extends Omit<
 export interface CanvasSessionRow {
   id: string
   documentId: string
+  /** Owning workspace id — Workspace isolation column (Dexie v86); inherits the document's project. */
+  projectId?: string
   ownerId: string
   createdAt: number
   updatedAt: number

@@ -160,6 +160,55 @@ describe("read-state actions", () => {
     const states = useNotificationStore.getState().items.map((r) => r.readState)
     expect(states).toEqual(["read", "read", "read"])
   })
+
+  it("archiveAll moves every active row to done and empties the feed", async () => {
+    useNotificationStore.setState({
+      items: [rec({ id: "a", directed: true }), rec({ id: "b", readState: "read" })],
+      directedUnread: 1,
+      ambientUnseen: 1,
+    })
+    await useNotificationStore.getState().archiveAll()
+    expect(db.patchNotification).toHaveBeenCalledTimes(2)
+    const state = useNotificationStore.getState()
+    expect(state.items).toEqual([])
+    expect(state.directedUnread).toBe(0)
+    expect(state.ambientUnseen).toBe(0)
+  })
+
+  it("archiveAll is a no-op on an already-empty feed", async () => {
+    useNotificationStore.setState({ items: [] })
+    await useNotificationStore.getState().archiveAll()
+    expect(db.patchNotification).not.toHaveBeenCalled()
+    expect(useNotificationStore.getState().items).toEqual([])
+  })
+
+  it("restore moves an archived record back to the active feed as read", async () => {
+    db.getNotification.mockResolvedValueOnce(
+      rec({ id: "archived", readState: "done", doneAt: 123 })
+    )
+
+    await useNotificationStore.getState().restore("archived")
+
+    expect(db.patchNotification).toHaveBeenCalledWith("archived", {
+      readState: "read",
+      doneAt: undefined,
+    })
+    expect(useNotificationStore.getState().items).toEqual([
+      expect.objectContaining({ id: "archived", readState: "read", doneAt: undefined }),
+    ])
+  })
+
+  it("restore ignores a missing or already-active record", async () => {
+    db.getNotification
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(rec({ id: "active", readState: "read" }))
+
+    await useNotificationStore.getState().restore("missing")
+    await useNotificationStore.getState().restore("active")
+
+    expect(db.patchNotification).not.toHaveBeenCalled()
+    expect(useNotificationStore.getState().items).toEqual([])
+  })
 })
 
 describe("snooze", () => {

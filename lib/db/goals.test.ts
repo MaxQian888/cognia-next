@@ -1,4 +1,6 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
+import { liveQuery } from "dexie"
 import type { Goal, GoalConfig } from "@/types/goal"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
 import {
@@ -38,6 +40,14 @@ function buildGoal(overrides: Partial<Goal> = {}): Parameters<typeof createGoal>
     judgeFailureCount: overrides.judgeFailureCount ?? 0,
     config: overrides.config ?? SAMPLE_CONFIG,
     generationId: overrides.generationId ?? crypto.randomUUID(),
+  }
+}
+
+async function waitUntil(predicate: () => boolean, timeoutMs = 3000): Promise<void> {
+  const startedAt = Date.now()
+  while (!predicate()) {
+    if (Date.now() - startedAt > timeoutMs) throw new Error("waitUntil timed out")
+    await new Promise((resolve) => setTimeout(resolve, 20))
   }
 }
 
@@ -118,6 +128,21 @@ describe("chatGoals CRUD", () => {
     expect(top3).toHaveLength(3)
     expect(top3[0]!.id).toBe("g4")
     expect(top3[2]!.id).toBe("g2")
+  })
+
+  it("keeps default-scope resolution read-only inside a liveQuery", async () => {
+    const emissions: Goal[][] = []
+    const errors: unknown[] = []
+    const subscription = liveQuery(() => listAllGoals()).subscribe({
+      next: (rows) => emissions.push(rows),
+      error: (error) => errors.push(error),
+    })
+
+    await waitUntil(() => emissions.length > 0 || errors.length > 0)
+    subscription.unsubscribe()
+
+    expect(errors).toEqual([])
+    expect(emissions).toEqual([[]])
   })
 
   it("updateGoal patches fields and bumps updatedAt", async () => {
@@ -312,5 +337,29 @@ describe("chatGoalEvents", () => {
 
   it("exports EVENTS_PER_GOAL_CAP as 5000", () => {
     expect(__TESTING__.EVENTS_PER_GOAL_CAP).toBe(5000)
+  })
+})
+
+describe("workspace (project) scoping", () => {
+  it("createGoal inherits the session's project; listAllGoals filters by workspace", async () => {
+    // Two sessions in different workspaces.
+    await getDb().sessions.bulkPut([
+      { id: "ses_a", projectId: "proj-A", title: "a", updatedAt: 1, createdAt: 1 },
+      { id: "ses_b", projectId: "proj-B", title: "b", updatedAt: 1, createdAt: 1 },
+    ] as never)
+    const gA = await createGoal(buildGoal({ sessionId: "ses_a" }))
+    const gB = await createGoal(buildGoal({ sessionId: "ses_b" }))
+    expect(gA.projectId).toBe("proj-A")
+    expect(gB.projectId).toBe("proj-B")
+
+    const inA = await listAllGoals(500, "proj-A")
+    expect(inA.map((g) => g.id)).toEqual([gA.id])
+    const inB = await listAllGoals(500, "proj-B")
+    expect(inB.map((g) => g.id)).toEqual([gB.id])
+  })
+
+  it("createGoal honours an explicit projectId override", async () => {
+    const g = await createGoal({ ...buildGoal({ sessionId: "ses_x" }), projectId: "proj-forced" })
+    expect(g.projectId).toBe("proj-forced")
   })
 })

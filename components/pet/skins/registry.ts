@@ -5,10 +5,19 @@
 
 import type { PetSkin } from "@/types/pet"
 import { svgSkin } from "./svg-skin"
+import { live2dSkin } from "./live2d-skin"
+import { spriteV2Skin } from "./sprite-v2-skin"
 
 export const DEFAULT_SKIN_ID = "svg"
 
-const skins = new Map<string, PetSkin>([[svgSkin.id, svgSkin]])
+// Eager registration is cheap: live2d-skin only pulls in the lightweight
+// boundary; the heavy pixi/Cubism canvas is behind a React.lazy import that
+// only resolves when the live2d skin actually renders.
+const skins = new Map<string, PetSkin>([
+  [svgSkin.id, svgSkin],
+  [live2dSkin.id, live2dSkin],
+  [spriteV2Skin.id, spriteV2Skin],
+])
 
 export function registerSkin(skin: PetSkin): void {
   skins.set(skin.id, skin)

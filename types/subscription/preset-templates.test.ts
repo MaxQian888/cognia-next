@@ -8,6 +8,21 @@ describe("buildPresetTemplates", () => {
     }
   })
 
+  it("projects anthropic-native relays (cc-switch presets) with concrete base URLs", () => {
+    const anthropic = buildPresetTemplates("anthropic")
+    const relays = anthropic.filter((t) => t.templateId !== "custom")
+    expect(relays.length).toBeGreaterThan(0)
+    for (const t of relays) {
+      expect(t.baseUrl).toMatch(/^https?:\/\//)
+      expect(t.provider).toBe("anthropic")
+    }
+    // Representative cc-switch relays should surface as one-click templates.
+    expect(relays.some((t) => t.templateId === "deepseek-anthropic")).toBe(true)
+    expect(relays.some((t) => t.templateId === "glm-anthropic")).toBe(true)
+    // The official Anthropic entry has no base URL → never offered as a template.
+    expect(relays.some((t) => t.templateId === "anthropic")).toBe(false)
+  })
+
   it("projects codex (openai-compatible / openrouter) relays with concrete base URLs", () => {
     const codex = buildPresetTemplates("codex")
     const relays = codex.filter((t) => t.templateId !== "custom")
@@ -51,5 +66,27 @@ describe("findPresetTemplate", () => {
 
   it("returns undefined for an unknown id", () => {
     expect(findPresetTemplate("codex", "does-not-exist")).toBeUndefined()
+  })
+})
+
+describe("ADR-0090 Phase 1 — legacy alias stability", () => {
+  it("every relay template id keeps resolving through the profile-migration legacy aliases", async () => {
+    // The Provider Profile Store derivation is identity-preserving for relay
+    // ids (deployment id === legacy provider id), so ccswitch/subscription
+    // templates like glm-anthropic must survive migration unchanged.
+    const { deriveProfiles } = await import("@cognia/provider-types/profile-migration")
+    const { getBuiltInProviderCatalog } =
+      await import("@cognia/provider-types/built-in-provider-catalog")
+    const relays = buildPresetTemplates("anthropic").filter((t) => t.templateId !== "custom")
+    const providerSettings = Object.fromEntries(
+      relays.map((t) => [t.templateId, { providerId: t.templateId, enabled: true }])
+    )
+    const derived = deriveProfiles({
+      catalog: getBuiltInProviderCatalog(),
+      providerSettings,
+    })
+    for (const t of relays) {
+      expect(derived.legacyAliases[t.templateId]).toBe(t.templateId)
+    }
   })
 })

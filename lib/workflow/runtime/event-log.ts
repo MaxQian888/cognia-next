@@ -7,7 +7,14 @@
 
 import { nanoid } from "nanoid"
 import { getDb } from "@/lib/db/schema"
-import type { RunEventLogLevel, RunEventType, WorkflowRunEventRow } from "@/types/workflow/visual"
+import { recordWorkflowStepUsage, swallowUsageWrite } from "@/lib/db/session-usage"
+import { trackEvent } from "@/lib/telemetry/events/track-event"
+import type {
+  RunEventLogLevel,
+  RunEventType,
+  StepUsage,
+  WorkflowRunEventRow,
+} from "@/types/workflow/visual"
 
 export interface AppendEventInput {
   runId: string
@@ -62,6 +69,82 @@ export async function appendEvents(inputs: AppendEventInput[]): Promise<void> {
   await getDb().workflowRunEvents.bulkPut(rows)
 }
 
+// ── Coalescing writer ──────────────────────────────────────────────────────
+// The orchestrator emits many events per step (started + completed + optional
+// stream/usage). Writing each through its own awaited `put` is one IndexedDB
+// transaction per event. This queue assigns each event's `ts` synchronously at
+// enqueue time (so order is fixed regardless of flush timing), then coalesces
+// every event enqueued within the same microtask into ONE `bulkPut`. The
+// returned promise still resolves only after the row is durably written, so
+// awaiting callers keep their durability guarantee.
+interface PendingRunEvent {
+  row: WorkflowRunEventRow
+  resolve: (row: WorkflowRunEventRow) => void
+  reject: (err: unknown) => void
+}
+
+let pendingEvents: PendingRunEvent[] = []
+let flushScheduled = false
+
+async function flushRunEvents(): Promise<void> {
+  flushScheduled = false
+  if (pendingEvents.length === 0) return
+  const batch = pendingEvents
+  pendingEvents = []
+
+  // Group by runId and write one bulkPut per run so a rejection from one run's
+  // rows only fails that run's awaiting callers — concurrent healthy runs that
+  // happened to coalesce into the same microtask are not aborted. Global `ts`
+  // ordering is unaffected (nextTs is a single monotonic watermark, and
+  // listRunEvents queries by [runId+ts]).
+  const byRun = new Map<string, PendingRunEvent[]>()
+  for (const p of batch) {
+    const group = byRun.get(p.row.runId)
+    if (group) group.push(p)
+    else byRun.set(p.row.runId, [p])
+  }
+
+  await Promise.all(
+    Array.from(byRun.values()).map(async (group) => {
+      try {
+        await getDb().workflowRunEvents.bulkPut(group.map((p) => p.row))
+        for (const p of group) p.resolve(p.row)
+      } catch (err) {
+        for (const p of group) p.reject(err)
+      }
+    })
+  )
+}
+
+/**
+ * Enqueue an event into the coalescing writer. `ts` is assigned now (order-
+ * stable); events enqueued in the same microtask flush together in one
+ * `bulkPut`. The promise resolves once the row is durably written.
+ */
+export function enqueueRunEvent(input: AppendEventInput): Promise<WorkflowRunEventRow> {
+  const row: WorkflowRunEventRow = {
+    id: "evt_" + nanoid(10),
+    runId: input.runId,
+    ts: nextTs(),
+    type: input.type,
+    stepId: input.stepId,
+    level: input.level,
+    payload: input.payload,
+  }
+  return new Promise<WorkflowRunEventRow>((resolve, reject) => {
+    pendingEvents.push({ row, resolve, reject })
+    if (!flushScheduled) {
+      flushScheduled = true
+      queueMicrotask(() => void flushRunEvents())
+    }
+  })
+}
+
+/** Test hook — flush the coalescing queue synchronously. */
+export async function __flushRunEvents(): Promise<void> {
+  await flushRunEvents()
+}
+
 /**
  * Return all events for a run, in time order. Used by the run timeline view
  * AND by the orchestrator's resume path to compute "what's already done?".
@@ -99,26 +182,50 @@ export interface StepIterationMeta {
 
 /**
  * Convenience scoped logger — captures runId once so nodes don't re-pass it.
+ * Emits through the coalescing writer (`enqueueRunEvent`), so events emitted in
+ * the same microtask land in a single `bulkPut` instead of N transactions.
  */
 export function createRunLogger(runId: string) {
+  let behaviorStartedAt = Date.now()
+  const durationMs = () => Math.max(0, Date.now() - behaviorStartedAt)
+
   return {
-    runStarted: (payload?: unknown) => appendEvent({ runId, type: "run_started", payload }),
-    runCompleted: (output?: unknown) =>
-      appendEvent({ runId, type: "run_completed", payload: output }),
-    runFailed: (error: { message: string; stack?: string; nodeId?: string }) =>
-      appendEvent({
+    runStarted: (payload?: unknown) => {
+      behaviorStartedAt = Date.now()
+      const trigger =
+        payload && typeof payload === "object" && "trigger" in payload
+          ? (payload as { trigger?: unknown }).trigger
+          : undefined
+      const triggerKind =
+        trigger && typeof trigger === "object" && "kind" in trigger
+          ? String((trigger as { kind?: unknown }).kind ?? "unknown")
+          : "unknown"
+      void trackEvent("workflow.run.started", { runId, trigger: triggerKind })
+      return enqueueRunEvent({ runId, type: "run_started", payload })
+    },
+    runCompleted: (output?: unknown) => {
+      void trackEvent("workflow.run.completed", { runId, durationMs: durationMs() })
+      return enqueueRunEvent({ runId, type: "run_completed", payload: output })
+    },
+    runFailed: (error: { message: string; stack?: string; nodeId?: string; code?: string }) => {
+      void trackEvent("workflow.run.failed", {
+        runId,
+        durationMs: durationMs(),
+        ...(error.code ? { errorCode: error.code } : {}),
+      })
+      return enqueueRunEvent({
         runId,
         type: "run_failed",
         level: "error",
         payload: error,
-      }),
-    runCancelled: () => appendEvent({ runId, type: "run_cancelled" }),
+      })
+    },
     stepStarted: (stepId: string, params?: unknown, meta?: StepIterationMeta) =>
-      appendEvent({ runId, type: "step_started", stepId, payload: { params, ...meta } }),
+      enqueueRunEvent({ runId, type: "step_started", stepId, payload: { params, ...meta } }),
     stepCompleted: (stepId: string, output: unknown, meta?: StepIterationMeta) =>
-      appendEvent({ runId, type: "step_completed", stepId, payload: { output, ...meta } }),
+      enqueueRunEvent({ runId, type: "step_completed", stepId, payload: { output, ...meta } }),
     stepFailed: (stepId: string, error: { message: string; retryable?: boolean }) =>
-      appendEvent({
+      enqueueRunEvent({
         runId,
         type: "step_failed",
         level: "error",
@@ -126,14 +233,72 @@ export function createRunLogger(runId: string) {
         payload: error,
       }),
     stepSkipped: (stepId: string, reason: string) =>
-      appendEvent({
+      enqueueRunEvent({
         runId,
         type: "step_skipped",
         stepId,
         payload: { reason },
       }),
+    /**
+     * One throttled chunk of streaming LLM output. `seq` is the sink's
+     * monotonic flush counter so the UI can order chunks deterministically
+     * even when several land in the same millisecond.
+     */
+    stepStream: (stepId: string, delta: string, seq: number) =>
+      enqueueRunEvent({
+        runId,
+        type: "step_stream",
+        stepId,
+        payload: { delta, seq },
+      }),
+    stepCommentary: (stepId: string, delta: string, seq: number) =>
+      enqueueRunEvent({
+        runId,
+        type: "step_commentary",
+        stepId,
+        payload: { delta, seq },
+      }),
+    /** Token/cost usage snapshot for one step (payload = StepUsage). */
+    stepUsage: (stepId: string, usage: StepUsage) => {
+      // Shadow-write into the unified billing table so workflow spend reaches
+      // the Subscription → Usage tab. Fire-and-forget: never block or fail the
+      // durable event append on the billing mirror.
+      swallowUsageWrite(
+        recordWorkflowStepUsage({
+          runId,
+          stepId,
+          usage: {
+            inputTokens: usage.inputTokens,
+            outputTokens: usage.outputTokens,
+            cacheReadTokens: usage.cacheReadTokens,
+            cacheCreationTokens: usage.cacheCreationTokens,
+            costUsd: usage.costUsd,
+            model: usage.modelId,
+            providerId: usage.providerId,
+          },
+        })
+      )
+      return enqueueRunEvent({
+        runId,
+        type: "step_usage",
+        stepId,
+        payload: usage,
+      })
+    },
+    /** Emitted before each retry backoff wait (attempt = the one that failed). */
+    stepRetrying: (
+      stepId: string,
+      payload: { attempt: number; maxAttempts: number; delayMs: number; error: string }
+    ) =>
+      enqueueRunEvent({
+        runId,
+        type: "step_retrying",
+        level: "warn",
+        stepId,
+        payload,
+      }),
     log: (level: RunEventLogLevel, message: string, payload?: unknown, stepId?: string) =>
-      appendEvent({
+      enqueueRunEvent({
         runId,
         type: "run_log",
         level,

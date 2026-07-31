@@ -33,6 +33,16 @@ jest.mock("@/stores/plugin-runtime/plugin-store", () => ({
     selector({ plugins: mockPluginInMemory ? { alpha: mockPluginInMemory } : {} }),
 }))
 
+// The raw-manifest viewer reuses the chat CodeBlock (async Shiki). Stub it so
+// the dialog test stays synchronous and can assert the props it receives.
+const codeBlockPropsMock = jest.fn()
+jest.mock("@/components/chat/renderers/code-block", () => ({
+  CodeBlock: (props: { code: string; language?: string }) => {
+    codeBlockPropsMock(props)
+    return <pre data-testid="manifest-code">{props.code}</pre>
+  },
+}))
+
 import { usePluginsStore } from "@/stores/plugins"
 import { PluginDetailOverview } from "./plugin-detail-overview"
 
@@ -88,10 +98,16 @@ describe("PluginDetailOverview", () => {
     expect(usePluginsStore.getState().rollbackTarget).toBe("alpha")
   })
 
-  it("renders the View raw manifest dialog when clicked", () => {
+  it("renders the View raw manifest dialog with a highlighted JSON code block", () => {
+    codeBlockPropsMock.mockClear()
     render(<PluginDetailOverview pluginId="alpha" />)
     fireEvent.click(screen.getByText("rawManifest"))
     expect(screen.getByText("rawManifestTitle")).toBeInTheDocument()
+    // The manifest is handed to the CodeBlock as JSON for syntax highlighting.
+    expect(codeBlockPropsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ language: "json", filename: "alpha.json" })
+    )
+    expect(screen.getByTestId("manifest-code").textContent).toContain('"alpha"')
   })
 
   it("hides the Verification card when no snapshot exists in memory", () => {

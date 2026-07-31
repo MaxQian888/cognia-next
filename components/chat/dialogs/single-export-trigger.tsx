@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { DownloadIcon } from "lucide-react"
 import { SingleExportDialog } from "@/components/data/export/single-export-dialog"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 interface Props {
   session: ChatSession | null | undefined

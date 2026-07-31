@@ -23,16 +23,27 @@
  * back through the same `claude.send` path.
  */
 
-import { useCallback, useEffect, useMemo } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
+import { useLiveQuery } from "dexie-react-hooks"
 import { toast } from "sonner"
 import { ChatPane } from "@/components/chat/chat-view"
 import { useClaudeChat } from "@/hooks/chat/use-claude-chat"
-import { useWorkflowEditorSession } from "@/hooks/chat/use-workflow-editor-session"
+import {
+  createWorkflowEditorSession,
+  isWorkflowEditorSessionId,
+  useWorkflowEditorSession,
+} from "@/hooks/chat/use-workflow-editor-session"
+import { useChatStore } from "@/stores/chat"
+import { getDb } from "@/lib/db/schema"
+import { listMessages } from "@/lib/db/messages"
 import { Loader2Icon, MessageSquareIcon } from "lucide-react"
 import { WorkflowSessionBar } from "@/components/workflow/editor/chat/session-bar"
-import type { SendContent } from "@/lib/claude/types"
+import type { ChatSession, SendContent, SendContentBlock } from "@cognia/agent-config-types"
 import type { EditorStore } from "@/lib/workflow/editor/store"
+import { useMentionableWorkflowElements } from "@/lib/workflow/editor/use-mentionable-workflow-elements"
+import type { WorkflowElementRef } from "@/stores/chat/chat-store"
+import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import {
   WorkflowEditorProvider,
   type WorkflowEditorContextValue,
@@ -51,6 +62,7 @@ import {
 } from "@/lib/workflow/editor/mention-expand"
 import { PerfBoundary } from "@/lib/perf"
 import { buildWorkflowChatStarters } from "./workflow-chat-starters"
+import { ChatScopeProvider } from "@/components/chat/chat-scope-provider"
 
 export function WorkflowEditorChatTab({
   useStore,
@@ -68,35 +80,142 @@ export function WorkflowEditorChatTab({
   const t = useTranslations("workflowEditor.chat")
   const { session, loading } = useWorkflowEditorSession(workflowId, workflowName)
   const claude = useClaudeChat()
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
+
+  // Copilot ⇄ canvas selector: the composer's `@` / `@node:` / `@edge:` picker
+  // reads these elements; picking one stages a reference chip. `onHighlight`
+  // pulses the picker's active node on the canvas via the store's transient
+  // highlight channel.
+  const wfElements = useMentionableWorkflowElements(useStore)
+  const workflowMention = useMemo(
+    () => ({
+      elements: wfElements,
+      onHighlight: (ids: string[]) => useStore.getState().setHighlightedNodes(ids),
+    }),
+    [wfElements, useStore]
+  )
+
+  // Keep the canvas reference ring in sync with the staged chips so the user
+  // sees which nodes are attached to the next AI turn (a violet ring).
+  const referencedWfElements = useChatStore((s) => s.referencedWorkflowElements)
+  useEffect(() => {
+    const nodeIds = referencedWfElements.filter((r) => r.type === "node").map((r) => r.id)
+    useStore.getState().setReferencedNodes(nodeIds)
+  }, [referencedWfElements, useStore])
+
+  // Drop staged refs + highlights when the editor unmounts so they never leak
+  // into the next session's composer or leave a stale ring on re-open.
+  useEffect(() => {
+    return () => {
+      useStore.getState().setReferencedNodes([])
+      useStore.getState().setHighlightedNodes([])
+      useChatStore.getState().clearReferencedWorkflowElements()
+    }
+  }, [useStore])
+
+  // The session bar lets the user spin off / switch additional sessions for
+  // this workflow; those mutate the chat store's `activeSessionId`. Track it
+  // live so the pane + bar re-render against the chosen session instead of
+  // staying pinned to the default `useWorkflowEditorSession` row.
+  const showAdditional =
+    !!workflowId &&
+    !!session &&
+    isWorkflowEditorSessionId(selectedSessionId, workflowId) &&
+    selectedSessionId !== session.id
+  // Resolve the additional session's row (the default row is already in hand).
+  const additionalRow = useLiveQuery<ChatSession | undefined>(
+    () =>
+      showAdditional && selectedSessionId ? getDb().sessions.get(selectedSessionId) : undefined,
+    [showAdditional, selectedSessionId]
+  )
+
+  // The session the pane actually reads/streams from.
+  const effectiveSessionId = showAdditional ? selectedSessionId : (session?.id ?? null)
+  // Retry hook: ChatPane's "retry load" bumps this slice nonce.
+  const reloadNonce = useChatStore((s) =>
+    effectiveSessionId ? (s.sessions[effectiveSessionId]?.messagesReloadNonce ?? 0) : 0
+  )
+
+  // Hydrate the active session's history from Dexie on switch / mount. The
+  // standalone `/workflows/editor` route does NOT mount `useSessions` (the
+  // main shell's hydration owner), so without this the pane would show every
+  // session — including freshly-switched additional ones — as blank. The
+  // freshly-focused slice already carries `messagesLoading: true` (seeded by
+  // `setActiveSession`), so no synchronous loading-set is needed here.
+  useEffect(() => {
+    if (!effectiveSessionId) return
+    const id = effectiveSessionId
+    let cancelled = false
+    listMessages(id)
+      .then((msgs) => {
+        if (!cancelled) useChatStore.getState().setSessionMessages(id, msgs)
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          useChatStore
+            .getState()
+            .setSessionMessagesLoadError(id, err instanceof Error ? err.message : String(err))
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [effectiveSessionId, reloadNonce])
+
+  // Mirror the session bar's create path for the welcome-state + composer
+  // "new session" affordances so every entry point behaves identically.
+  const handleCreateSession = useCallback(async () => {
+    if (!workflowId) return
+    try {
+      const title = workflowName
+        ? t("session.newSuffixed", { name: workflowName })
+        : t("session.newDefault")
+      const id = await createWorkflowEditorSession(workflowId, title)
+      setSelectedSessionId(id)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    }
+  }, [workflowId, workflowName, t])
 
   const handleSend = useCallback(
-    async (content: SendContent) => {
+    async (content: SendContent, manifest?: readonly AttachmentManifestEntry[]) => {
       try {
-        // Expand `@node:<id>` / `@edge:<id>` references against the current
-        // graph snapshot BEFORE the agent sees them. Falls through any
-        // unknown ids verbatim so the agent can flag dangling references.
-        const expanded = applyWorkflowMentionExpansion(content, useStore)
-        await claude.send(expanded)
+        // Fold the staged reference chips into the message as `@node:`/`@edge:`
+        // tokens, then expand every `@node:<id>` / `@edge:<id>` (typed or
+        // staged) against the current graph snapshot BEFORE the agent sees
+        // them. Unknown ids fall through verbatim so the agent can flag
+        // dangling references. Chips + ring clear once the turn is sent.
+        const refs = useChatStore.getState().referencedWorkflowElements
+        const withRefs = refs.length > 0 ? prependWorkflowRefs(content, refs) : content
+        const expanded = applyWorkflowMentionExpansion(withRefs, useStore)
+        await claude.send(expanded, undefined, {
+          sessionId: effectiveSessionId ?? undefined,
+          attachmentManifest: manifest,
+        })
+        if (refs.length > 0) {
+          useChatStore.getState().clearReferencedWorkflowElements()
+          useStore.getState().setReferencedNodes([])
+        }
       } catch (err) {
         toast.error(err instanceof Error ? err.message : String(err))
       }
     },
-    [claude, useStore]
+    [claude, effectiveSessionId, useStore]
   )
 
   const handleStop = useCallback(async () => {
-    await claude.stop()
-  }, [claude])
+    await claude.stop(effectiveSessionId ?? undefined)
+  }, [claude, effectiveSessionId])
 
   const handleRegenerate = useCallback(async () => {
-    await claude.regenerate()
-  }, [claude])
+    await claude.regenerate(effectiveSessionId ?? undefined)
+  }, [claude, effectiveSessionId])
 
   const handleEditResend = useCallback(
     async (messageId: string, content: SendContent) => {
-      await claude.editAndResend(messageId, content)
+      await claude.editAndResend(messageId, content, effectiveSessionId ?? undefined)
     },
-    [claude]
+    [claude, effectiveSessionId]
   )
 
   // Build the workflow quick-action prompts from the *current* editor
@@ -171,40 +290,54 @@ export function WorkflowEditorChatTab({
     )
   }
 
+  // The session the pane binds to: the store's active additional session when
+  // one is focused (falling back to a lightweight placeholder while its Dexie
+  // row hydrates so the pane never flashes the default's messages), else the
+  // pinned default row.
+  const activeSession: ChatSession = showAdditional
+    ? (additionalRow ?? {
+        id: selectedSessionId as string,
+        title: "",
+        kind: "workflow-editor",
+        createdAt: 0,
+        updatedAt: 0,
+      })
+    : session
+
   return (
-    <WorkflowEditorProvider value={ctxValue}>
-      <PerfBoundary id="workflow:chat-tab">
-        <div
-          className="flex h-full w-full flex-col bg-card/40"
-          aria-label={t("ariaLabel", { name: workflowName ?? workflowId })}
-          data-testid="workflow-chat-tab"
-        >
-          <WorkflowSessionBar
-            workflowId={workflowId}
-            workflowName={workflowName}
-            activeSessionId={session.id}
-          />
-          <ChatPane
-            activeSession={session}
-            onSend={handleSend}
-            onStop={handleStop}
-            onRegenerate={handleRegenerate}
-            onEditResend={handleEditResend}
-            onCreate={() => {
-              /* New-session button is a no-op here — the workflow-editor session
-               * is fixed per workflow. The button is still visible (so muscle
-               * memory works) but the click is benign. */
-            }}
-            onUseSample={(text) => {
-              void handleSend({ type: "text", text } as never)
-            }}
-            onOpenSettings={(tab) => onOpenWorkflowSettings?.(tab)}
-            showHeader={false}
-            emptyState={emptyState}
-          />
-        </div>
-      </PerfBoundary>
-    </WorkflowEditorProvider>
+    <ChatScopeProvider sessionId={activeSession.id}>
+      <WorkflowEditorProvider value={ctxValue}>
+        <PerfBoundary id="workflow:chat-tab">
+          <div
+            className="flex h-full w-full flex-col bg-card/40"
+            aria-label={t("ariaLabel", { name: workflowName ?? workflowId })}
+            data-testid="workflow-chat-tab"
+          >
+            <WorkflowSessionBar
+              workflowId={workflowId}
+              workflowName={workflowName}
+              activeSessionId={activeSession.id}
+              onSwitchSession={setSelectedSessionId}
+              onCreateSession={setSelectedSessionId}
+            />
+            <ChatPane
+              activeSession={activeSession}
+              sessionId={activeSession.id}
+              onSend={handleSend}
+              onStop={handleStop}
+              onRegenerate={handleRegenerate}
+              onEditResend={handleEditResend}
+              onCreate={() => void handleCreateSession()}
+              onUseSample={(text) => void handleSend(text)}
+              onOpenSettings={(tab) => onOpenWorkflowSettings?.(tab)}
+              showHeader={false}
+              emptyState={emptyState}
+              workflowMention={workflowMention}
+            />
+          </div>
+        </PerfBoundary>
+      </WorkflowEditorProvider>
+    </ChatScopeProvider>
   )
 }
 
@@ -220,6 +353,29 @@ export type { EditorStore }
  *
  * SendContent is `string | SendContentBlock[]` — handles both shapes.
  */
+/**
+ * Prepend the staged workflow-reference chips to the outgoing message as
+ * `@node:<id>` / `@edge:<id>` tokens so {@link applyWorkflowMentionExpansion}
+ * turns them into self-contained citations the agent can ground on. Merges into
+ * the first text block (or the string) so no empty leading block is created.
+ * Exported for unit testing without rendering the component.
+ */
+function prependWorkflowRefs(content: SendContent, refs: WorkflowElementRef[]): SendContent {
+  const tokens = refs.map((r) => `@${r.type}:${r.id}`).join(" ")
+  const prefix = `Referring to these workflow elements: ${tokens}\n\n`
+  if (typeof content === "string") return prefix + content
+  const idx = content.findIndex((b) => b.type === "text")
+  if (idx >= 0) {
+    const next = content.slice()
+    const block = next[idx] as Extract<SendContentBlock, { type: "text" }>
+    next[idx] = { ...block, text: prefix + block.text }
+    return next
+  }
+  return [{ type: "text", text: prefix } as SendContentBlock, ...content]
+}
+
+export { prependWorkflowRefs }
+
 function applyWorkflowMentionExpansion(content: SendContent, useStore: EditorStore): SendContent {
   const snapshot = snapshotFromEditorState(useStore.getState())
   if (typeof content === "string") {

@@ -1,9 +1,13 @@
 import { create } from "zustand"
-import { persist, createJSONStorage } from "zustand/middleware"
+import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 import { initialState } from "./initial-state"
 import { createExternalAgentActionsSlice } from "./slices/actions.slice"
 import type { ExternalAgentStore } from "./types"
-import { getUnsupportedProtocolReason } from "@/lib/ai/agent/external/config-normalizer"
+import {
+  getUnsupportedProtocolReason,
+  isSupportedExternalAgentProtocol,
+} from "@/lib/ai/agent/external/config-normalizer"
 import {
   createExternalAgentBenchmarkBaseline,
   normalizeExternalAgentValiditySnapshot,
@@ -41,7 +45,13 @@ function migratePersistedAgents(
       continue
     }
 
-    if (agent.protocol !== "acp") {
+    // Mirror the canonical predicate (acp + opencode), not a bare "acp"
+    // literal, so a persisted `opencode` agent isn't falsely stamped
+    // unsupported. Registry-backed / plugin protocols are intentionally NOT
+    // consulted here — the registry-aware connect-time gate
+    // (getExternalAgentExecutionBlock) is the single source of executability;
+    // adapters aren't guaranteed registered at store-hydration time.
+    if (!isSupportedExternalAgentProtocol(agent.protocol)) {
       migrated[agentId] = {
         ...agent,
         metadata: {
@@ -89,7 +99,7 @@ export const useExternalAgentStore = create<ExternalAgentStore>()(
     {
       name: "cognia-external-agents",
       version: EXTERNAL_AGENT_STORE_VERSION,
-      storage: createJSONStorage(() => localStorage),
+      storage: persistLocalStorage(),
       migrate: (persistedState) => {
         const state = (persistedState ?? {}) as PersistedExternalAgentState
         const agents = migratePersistedAgents(state.agents) ?? {}

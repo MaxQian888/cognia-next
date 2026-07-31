@@ -82,7 +82,9 @@ impl RuntimeSampler {
     /// and stash the new baseline.
     pub fn sample(&mut self, m: &RuntimeMetrics) -> RuntimeSample {
         let workers = m.num_workers();
-        let cur_busy: Vec<Duration> = (0..workers).map(|i| m.worker_total_busy_duration(i)).collect();
+        let cur_busy: Vec<Duration> = (0..workers)
+            .map(|i| m.worker_total_busy_duration(i))
+            .collect();
 
         // Sum the per-worker cumulative scheduling counters into a single
         // throughput figure each (these are unstable per-worker accessors).

@@ -7,7 +7,7 @@
  * URL — alongside per-adapter webhook URL helpers so operators can copy
  * the right callback for each enabled adapter and paste it into the
  * platform admin console (Slack Event Subscriptions, Lark Open Platform
- * webhook callback URL, Discord Interactions endpoint, etc.).
+ * webhook callback URL, Telegram webhook URL, etc.).
  *
  * The launcher itself is the same Tauri command set the Companion
  * section uses (`companion_tunnel_start` / `companion_tunnel_stop` /
@@ -45,8 +45,13 @@ import {
 } from "@/lib/connectivity/tunnel-resolver"
 import { getDb } from "@/lib/db/schema"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
+import { CONNECTORS_SERVER_PORT } from "@/lib/connectors/server-transport"
 
-const DEFAULT_LOCAL_URL = "https://127.0.0.1:7842"
+// The Rust axum connectors server binds plain HTTP on the loopback interface,
+// so the tunnel origin must be `http://` on the SAME port the provider starts
+// it on (`CONNECTORS_SERVER_PORT`). An `https://` origin against the plain-HTTP
+// server fails the TLS handshake (cloudflared → 502).
+const DEFAULT_LOCAL_URL = `http://127.0.0.1:${CONNECTORS_SERVER_PORT}`
 
 interface InstallHint {
   cmd: string
@@ -82,11 +87,17 @@ function detectPlatform(): "mac" | "win" | "linux" | "unknown" {
   return "unknown"
 }
 
+// Paths MUST match the Rust axum routes (axum_app.rs) and each adapter's own
+// config form (`/webhook/<type>/<id>`). The previous `/connectors/...` prefix
+// 404'd, so every URL this card surfaced was wrong.
 const ADAPTER_WEBHOOK_PATH: Record<string, (id: string) => string | null> = {
-  lark: (id) => `/connectors/lark/${id}`,
-  slack: (id) => `/connectors/slack/${id}`,
-  discord: (id) => `/connectors/discord/interactions/${id}`,
-  telegram: (id) => `/connectors/telegram/${id}`,
+  lark: (id) => `/webhook/lark/${id}`,
+  slack: (id) => `/webhook/slack/${id}`,
+  telegram: (id) => `/webhook/telegram/${id}`,
+  "wechat-oa": (id) => `/webhook/wechat-oa/${id}`,
+  // Discord is gateway-only until the adapter starts an Interactions webhook
+  // transport and handles Discord PING callbacks.
+  discord: () => null,
   // OneBot uses reverse-WS, not webhook — no public URL.
   onebot: () => null,
 }
@@ -285,7 +296,8 @@ export function TunnelTab({ defaultLocalUrl = DEFAULT_LOCAL_URL }: TunnelTabProp
             <ul className="space-y-2">
               {(adapters ?? []).map((adapter) => {
                 const builder = ADAPTER_WEBHOOK_PATH[adapter.type]
-                const path = builder ? builder(adapter.id) : null
+                const path =
+                  adapter.transportMode === "webhook" && builder ? builder(adapter.id) : null
                 const url = path && info?.publicUrl ? `${info.publicUrl}${path}` : null
                 return (
                   <li

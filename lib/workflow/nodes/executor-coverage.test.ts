@@ -21,33 +21,12 @@ import "@/lib/ai/agent/team/patterns"
 import { listRegisteredKinds } from "./registry"
 import { WORKFLOW_NODE_KINDS, type WorkflowNodeKind } from "@/types/workflow/visual"
 
-// Kinds that legitimately have NO host executor:
-//  • externally-fired triggers — started by the Rust router / TS bridges,
-//    never executed as a graph step;
-//  • annotations — pure canvas decoration;
-//  • github actions — contributed by the github-delivery plugin, not the host.
+// Kinds that legitimately have NO host executor: annotations are pure canvas
+// decoration. Marketplace action kinds are dynamic and therefore do not
+// appear in the host's static WORKFLOW_NODE_KINDS list.
 const KINDS_WITHOUT_HOST_EXECUTOR: ReadonlySet<WorkflowNodeKind> = new Set<WorkflowNodeKind>([
-  "trigger.cron",
-  "trigger.connector.inbound",
-  "trigger.chat.message",
-  "trigger.goal.completed",
-  "trigger.webhook",
-  "trigger.github.webhook",
   "annotation.note",
   "annotation.group",
-  "action.github.openPr",
-  "action.github.closePr",
-  "action.github.mergePr",
-  "action.github.reviewPr",
-  "action.github.reviewPrInline",
-  "action.github.commentPr",
-  "action.github.commentIssue",
-  "action.github.labelIssue",
-  "action.github.closeIssue",
-  "action.github.createRelease",
-  "action.github.generateChangelog",
-  "action.github.pushTag",
-  "action.github.runIssueLoop",
 ])
 
 describe("executor coverage parity", () => {
@@ -61,8 +40,7 @@ describe("executor coverage parity", () => {
 
   it("keeps the allowlist honest — no excluded kind actually has a host executor", () => {
     // Guards against weakening the test above by parking a still-executable
-    // kind in the allowlist. The github-delivery plugin is not loaded here, so
-    // its action kinds are correctly absent.
+    // kind in the allowlist.
     const registered = new Set(listRegisteredKinds())
     const wronglyExcluded = [...KINDS_WITHOUT_HOST_EXECUTOR].filter((k) => registered.has(k))
     expect(wronglyExcluded).toEqual([])

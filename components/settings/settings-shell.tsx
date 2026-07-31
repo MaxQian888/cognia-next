@@ -1,32 +1,42 @@
 "use client"
 
-import { Suspense, useState } from "react"
+import { Suspense, useEffect, useState } from "react"
 import dynamic from "next/dynamic"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { ArrowLeftIcon, ChevronRightIcon } from "lucide-react"
+import { ArrowLeftIcon, ChevronRightIcon, MonitorIcon, SearchIcon } from "lucide-react"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { SettingsSidebar } from "./settings-sidebar"
-import { SETTINGS_NAV, type SettingsSectionId } from "./settings-nav-config"
+import { SectionResetButton } from "./common/section-reset-button"
+import { SettingsEmptyState } from "./common/settings-section"
+import { SettingsFinder } from "./finder/settings-finder"
+import { resetKeysForSection } from "@/lib/settings/section-keys"
+import { useDesktopAvailable } from "@/hooks/settings/use-desktop-available"
+import { useSettingFocus } from "@/hooks/settings/use-setting-focus"
+import { DESKTOP_ONLY_SECTIONS, SETTINGS_NAV, type SettingsSectionId } from "./settings-nav-config"
 
-const SectionLoading = () => (
-  <div className="space-y-4" aria-busy="true" aria-label="Loading section">
-    <Skeleton className="h-7 w-1/3" />
-    <Skeleton className="h-4 w-2/3" />
-    <Skeleton className="h-32 w-full" />
-    <Skeleton className="h-24 w-full" />
-  </div>
-)
+const SectionLoading = () => {
+  const t = useTranslations("settings")
+  return (
+    <div className="space-y-4" aria-busy="true" aria-label={t("loadingSection")}>
+      <Skeleton className="h-7 w-1/3" />
+      <Skeleton className="h-4 w-2/3" />
+      <Skeleton className="h-32 w-full" />
+      <Skeleton className="h-24 w-full" />
+    </div>
+  )
+}
 
-const ApiKeySection = dynamic(() => import("./api-key-section").then((m) => m.ApiKeySection), {
-  ssr: false,
-  loading: () => <SectionLoading />,
-})
 const ProvidersSection = dynamic(
   () => import("./provider/provider-settings").then((m) => m.ProviderSettings),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
+const ModelCatalogSection = dynamic(
+  () => import("./provider/model-catalog-section").then((m) => m.ModelCatalogSection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
 const SearchSettings = dynamic(
@@ -44,8 +54,8 @@ const AppearanceSection = dynamic(() => import("./appearance").then((m) => m.App
   ssr: false,
   loading: () => <SectionLoading />,
 })
-const SidebarSection = dynamic(
-  () => import("./sidebar/sidebar-section").then((m) => m.SidebarSection),
+const ShellLayoutSection = dynamic(
+  () => import("./sidebar/shell-layout-section").then((m) => m.ShellLayoutSection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
 const DiscoverSection = dynamic(
@@ -84,20 +94,16 @@ const AboutSection = dynamic(() => import("./about/about-section").then((m) => m
   ssr: false,
   loading: () => <SectionLoading />,
 })
-const GeneralSection = dynamic(() => import("./general-section").then((m) => m.GeneralSection), {
-  ssr: false,
-  loading: () => <SectionLoading />,
-})
+const AccountOverviewSection = dynamic(
+  () => import("./account/account-overview-section").then((m) => m.AccountOverviewSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
 const A2UISection = dynamic(() => import("./a2ui-section").then((m) => m.A2UISection), {
   ssr: false,
   loading: () => <SectionLoading />,
 })
 const PluginsSection = dynamic(
   () => import("./sections/plugins-section").then((m) => m.PluginsSection),
-  { ssr: false, loading: () => <SectionLoading /> }
-)
-const PluginConfigSection = dynamic(
-  () => import("./sections/plugin-config-section").then((m) => m.PluginConfigSection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
 const SkillsSection = dynamic(
@@ -140,6 +146,10 @@ const HooksSection = dynamic(() => import("./hooks/hooks-section").then((m) => m
   ssr: false,
   loading: () => <SectionLoading />,
 })
+const FleetSection = dynamic(() => import("./fleet/fleet-section").then((m) => m.FleetSection), {
+  ssr: false,
+  loading: () => <SectionLoading />,
+})
 const WorkspaceTrustSection = dynamic(
   () => import("./workspace-trust/workspace-trust-section").then((m) => m.WorkspaceTrustSection),
   { ssr: false, loading: () => <SectionLoading /> }
@@ -160,12 +170,20 @@ const CanvasSection = dynamic(() => import("./canvas-section").then((m) => m.Can
   ssr: false,
   loading: () => <SectionLoading />,
 })
+const UnifiedShortcutsSection = dynamic(
+  () => import("./shortcuts/unified-shortcuts-section").then((m) => m.UnifiedShortcutsSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
 const ToolSettingsSection = dynamic(
   () => import("./tools/tool-settings-section").then((m) => m.ToolSettingsSection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
 const RemoteControlSection = dynamic(
   () => import("./remote-control/remote-control-section").then((m) => m.RemoteControlSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
+const GatewaySection = dynamic(
+  () => import("./gateway/gateway-section").then((m) => m.GatewaySection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
 const ExternalBridgeSection = dynamic(
@@ -178,6 +196,10 @@ const AutomationSection = dynamic(
 )
 const CompanionSection = dynamic(
   () => import("./companion/companion-section").then((m) => m.CompanionSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
+const RemoteHostsSection = dynamic(
+  () => import("./remote-hosts/remote-hosts-section").then((m) => m.RemoteHostsSection),
   { ssr: false, loading: () => <SectionLoading /> }
 )
 const CcswitchSection = dynamic(
@@ -204,6 +226,10 @@ const GoalsSection = dynamic(() => import("./goals/goals-section").then((m) => m
   ssr: false,
   loading: () => <SectionLoading />,
 })
+const EvalSettingsSection = dynamic(
+  () => import("./eval/eval-settings-section").then((m) => m.EvalSettingsSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
 const PetSection = dynamic(() => import("./pet/pet-section").then((m) => m.PetSection), {
   ssr: false,
   loading: () => <SectionLoading />,
@@ -224,7 +250,22 @@ const GitSection = dynamic(() => import("./source-control/git-section").then((m)
   ssr: false,
   loading: () => <SectionLoading />,
 })
-
+const LspServersSection = dynamic(
+  () => import("./lsp/lsp-servers-section").then((m) => m.LspServersSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
+const ProIdeSection = dynamic(
+  () => import("./pro-ide/pro-ide-section").then((m) => m.ProIdeSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
+const SandboxSection = dynamic(
+  () => import("./sandbox/sandbox-section").then((m) => m.SandboxSection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
+const SecuritySection = dynamic(
+  () => import("./security/security-section").then((m) => m.SecuritySection),
+  { ssr: false, loading: () => <SectionLoading /> }
+)
 interface Props {
   /** Renders an actions menu (e.g., Reset/Export/Import) in the header. */
   actions?: React.ReactNode
@@ -232,9 +273,42 @@ interface Props {
 
 const VALID_SECTIONS = new Set<SettingsSectionId>(SETTINGS_NAV.map((n) => n.id))
 
+// Deprecated sections folded into others (the standalone "general", "api-key",
+// and "profile" pages were merged into agent-runtime / providers / account).
+// Old deep links (`?section=general`, `?section=api-key`, `?section=profile`)
+// transparently redirect to the new home so bookmarks and finder anchors don't
+// break. (The account section embeds the profile editor.)
+const DEPRECATED_REDIRECT: Record<string, SettingsSectionId> = {
+  general: "agent-runtime",
+  "api-key": "ai-connections",
+  providers: "ai-connections",
+  profile: "account",
+}
+
+/** Default landing section when the URL has no (valid) `?section=`. */
+const DEFAULT_SECTION: SettingsSectionId = "ai-connections"
+
 // Sections that own a list+detail layout and manage their own internal scroll.
 // These bypass the outer ScrollArea so the frame stays fixed while inner panes scroll.
-const FILL_HEIGHT_SECTIONS = new Set<SettingsSectionId>(["providers", "ocr", "diagnostics"])
+const FILL_HEIGHT_SECTIONS = new Set<SettingsSectionId>([
+  "ai-connections",
+  "model-catalog",
+  "ocr",
+  "diagnostics",
+  "connections",
+  "skills",
+  "hooks",
+  "agents",
+  "search",
+  "appearance",
+  "subscription",
+  "subagents",
+  // Both became master/detail panes that own their own scroll; in the capped
+  // ScrollArea branch they would render at max-w-5xl with the nav rail and the
+  // detail pane fighting over 1024px.
+  "gateway",
+  "external-bridge",
+])
 
 function isSection(value: string | null): value is SettingsSectionId {
   return value !== null && VALID_SECTIONS.has(value as SettingsSectionId)
@@ -253,9 +327,38 @@ function SettingsShellInner({ actions }: Props) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [searchQuery, setSearchQuery] = useState("")
+  const [finderOpen, setFinderOpen] = useState(false)
+  const [sectionHeaderActionsTarget, setSectionHeaderActionsTarget] =
+    useState<HTMLDivElement | null>(null)
+
+  useSettingFocus()
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault()
+        setFinderOpen((v) => !v)
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [])
 
   const requested = searchParams.get("section")
-  const activeSection: SettingsSectionId = isSection(requested) ? requested : "general"
+  const redirectTarget = requested ? DEPRECATED_REDIRECT[requested] : undefined
+  const activeSection: SettingsSectionId = isSection(requested)
+    ? requested
+    : (redirectTarget ?? DEFAULT_SECTION)
+
+  // Rewrite deprecated `?section=` deep links to their new home. Done in an
+  // effect (router writes can't happen during render); the body already
+  // renders `redirectTarget` so there's no flash of the wrong section.
+  useEffect(() => {
+    if (!redirectTarget) return
+    const next = new URLSearchParams(searchParams.toString())
+    next.set("section", redirectTarget)
+    router.replace(`/settings?${next.toString()}`, { scroll: false })
+  }, [redirectTarget, router, searchParams])
 
   const handleSectionSelect = (section: SettingsSectionId) => {
     const next = new URLSearchParams(searchParams.toString())
@@ -266,6 +369,7 @@ function SettingsShellInner({ actions }: Props) {
   const goHome = () => router.push("/")
 
   const activeItem = SETTINGS_NAV.find((item) => item.id === activeSection)
+  const hasSectionReset = Boolean(resetKeysForSection(activeSection))
 
   return (
     <SidebarProvider
@@ -282,30 +386,62 @@ function SettingsShellInner({ actions }: Props) {
       />
 
       <SidebarInset data-bg-target="chat" className="flex flex-col min-w-0 h-full overflow-hidden">
-        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3 z-10 sm:h-12">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-9 w-9 shrink-0 sm:h-8 sm:w-8"
-            onClick={goHome}
-            aria-label={t("backToChat")}
-          >
-            <ArrowLeftIcon className="h-4 w-4" />
-          </Button>
-          <SidebarTrigger />
-          <div className="flex items-center gap-1.5 flex-1 min-w-0">
-            <h1 className="text-base font-semibold">{t("title")}</h1>
-            {activeItem && (
-              <>
-                <ChevronRightIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                <span className="text-base text-muted-foreground truncate">
-                  {t(`tabs.${activeItem.labelKey}` as never)}
-                </span>
-              </>
-            )}
-          </div>
-          {actions}
-        </header>
+        <FeaturePageHeader
+          variant="compact"
+          icon={<MonitorIcon />}
+          title={
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span>{t("title")}</span>
+              {activeItem && (
+                <>
+                  <ChevronRightIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                  <span className="truncate font-normal text-muted-foreground">
+                    {t(`tabs.${activeItem.labelKey}` as never)}
+                  </span>
+                </>
+              )}
+            </span>
+          }
+          breadcrumb={
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-8 shrink-0"
+                onClick={goHome}
+                aria-label={t("backToChat")}
+              >
+                <ArrowLeftIcon className="size-4" />
+              </Button>
+              <SidebarTrigger />
+            </div>
+          }
+          actions={
+            <>
+              {activeSection === "ai-connections" && (
+                <div
+                  ref={setSectionHeaderActionsTarget}
+                  className="contents"
+                  data-testid="settings-section-header-actions"
+                />
+              )}
+              {hasSectionReset && <SectionResetButton sectionId={activeSection} />}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-8"
+                onClick={() => setFinderOpen(true)}
+                aria-label={t("finder.triggerAria")}
+                data-testid="settings-finder-trigger"
+              >
+                <SearchIcon className="size-4" />
+              </Button>
+              {actions}
+            </>
+          }
+        />
+
+        <SettingsFinder open={finderOpen} onOpenChange={setFinderOpen} />
 
         {FILL_HEIGHT_SECTIONS.has(activeSection) ? (
           <div
@@ -313,14 +449,22 @@ function SettingsShellInner({ actions }: Props) {
             data-settings-panel
           >
             <div className="mx-auto flex w-full min-h-0 flex-1 flex-col animate-in fade-in slide-in-from-bottom-2 duration-200">
-              <SectionContent section={activeSection} onClose={goHome} />
+              <SectionContent
+                section={activeSection}
+                onClose={goHome}
+                headerActionsTarget={sectionHeaderActionsTarget}
+              />
             </div>
           </div>
         ) : (
           <ScrollArea className="flex-1 min-h-0">
             <div className="p-3 sm:p-4 md:p-5 lg:p-6 safe-area-pb" data-settings-panel>
               <div className="mx-auto w-full max-w-5xl animate-in fade-in slide-in-from-bottom-2 duration-200">
-                <SectionContent section={activeSection} onClose={goHome} />
+                <SectionContent
+                  section={activeSection}
+                  onClose={goHome}
+                  headerActionsTarget={sectionHeaderActionsTarget}
+                />
               </div>
             </div>
           </ScrollArea>
@@ -330,14 +474,41 @@ function SettingsShellInner({ actions }: Props) {
   )
 }
 
-function SectionContent({ section, onClose }: { section: SettingsSectionId; onClose: () => void }) {
+function SectionContent({
+  section,
+  onClose,
+  headerActionsTarget,
+}: {
+  section: SettingsSectionId
+  onClose: () => void
+  headerActionsTarget: HTMLDivElement | null
+}) {
+  const t = useTranslations("settings")
+  const desktopAvailable = useDesktopAvailable()
+
+  // Last line of defence for desktop-only sections. The sidebar and the finder
+  // both hide them in web mode, but `?section=` is a public deep-link contract
+  // (bookmarks, docs, finder anchors), so the dispatch itself has to refuse —
+  // otherwise the panel renders and the user only discovers it can't work when
+  // a Tauri IPC call rejects at the end of a multi-step flow. An explicit
+  // explanation beats a silent redirect: the user asked for this section.
+  if (!desktopAvailable && DESKTOP_ONLY_SECTIONS.has(section)) {
+    return (
+      <SettingsEmptyState
+        icon={<MonitorIcon />}
+        title={t("desktopOnlySectionTitle")}
+        description={t("desktopOnlySectionBody")}
+      />
+    )
+  }
+
   switch (section) {
-    case "general":
-      return <GeneralSection onClose={onClose} />
-    case "api-key":
-      return <ApiKeySection />
-    case "providers":
-      return <ProvidersSection />
+    case "account":
+      return <AccountOverviewSection />
+    case "ai-connections":
+      return <ProvidersSection headerActionsTarget={headerActionsTarget} />
+    case "model-catalog":
+      return <ModelCatalogSection />
     case "subscription":
       return <SubscriptionSection />
     case "ccswitch":
@@ -350,8 +521,12 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <AgentRuntimeSection />
     case "agent-teams":
       return <AgentTeamTemplatesSection />
+    case "eval":
+      return <EvalSettingsSection />
     case "hooks":
       return <HooksSection />
+    case "fleet":
+      return <FleetSection />
     case "workspace-trust":
       return <WorkspaceTrustSection />
     case "slash-commands":
@@ -365,7 +540,7 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
     case "appearance":
       return <AppearanceSection />
     case "sidebar":
-      return <SidebarSection />
+      return <ShellLayoutSection />
     case "discover":
       return <DiscoverSection />
     case "terminal":
@@ -388,6 +563,8 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <ArtifactsSection />
     case "canvas":
       return <CanvasSection />
+    case "shortcuts":
+      return <UnifiedShortcutsSection />
     case "conversation":
       return <ConversationSection />
     case "notifications":
@@ -400,8 +577,6 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <A2UISection />
     case "plugins":
       return <PluginsSection onClose={onClose} />
-    case "plugin-config":
-      return <PluginConfigSection />
     case "connections":
       return <ConnectionsSection />
     case "data":
@@ -416,12 +591,24 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
       return <PetSection />
     case "remote-control":
       return <RemoteControlSection />
+    case "gateway":
+      return <GatewaySection />
     case "external-bridge":
       return <ExternalBridgeSection />
     case "automation":
       return <AutomationSection />
+    case "lsp":
+      return <LspServersSection />
+    case "pro-ide":
+      return <ProIdeSection />
+    case "sandbox":
+      return <SandboxSection />
+    case "security":
+      return <SecuritySection />
     case "companion":
       return <CompanionSection />
+    case "remote-hosts":
+      return <RemoteHostsSection />
     case "network":
       return <NetworkSection />
     case "logs":
@@ -433,14 +620,15 @@ function SectionContent({ section, onClose }: { section: SettingsSectionId; onCl
     case "about":
       return <AboutSection />
     default:
-      return <GeneralSection onClose={onClose} />
+      return <ProvidersSection headerActionsTarget={headerActionsTarget} />
   }
 }
 
 function SettingsShellFallback() {
+  const t = useTranslations("settings")
   return (
     <div className="flex h-full min-h-[400px] items-center justify-center text-sm text-muted-foreground">
-      Loading settings…
+      {t("loadingSettings")}
     </div>
   )
 }

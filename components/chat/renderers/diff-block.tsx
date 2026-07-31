@@ -6,13 +6,62 @@ import { Copy, Check, Columns, Rows, Plus, Minus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { useCopy } from "@/hooks/ui/use-copy"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
+import { computeIntralineDiff, type IntralineSegment } from "@/lib/chat/intraline-diff"
 
 interface DiffLine {
   type: "add" | "remove" | "context" | "info"
   content: string
   oldLineNumber?: number
   newLineNumber?: number
+  /** Word/char-level segments, set on a remove→add modification pair. */
+  segments?: IntralineSegment[]
+}
+
+/** Render a line's intraline segments (changed runs emphasized) or plain text. */
+function IntralineContent({
+  segments,
+  content,
+  emphasis,
+}: {
+  segments: IntralineSegment[] | undefined
+  content: string
+  emphasis: string
+}) {
+  if (!segments) return <>{content}</>
+  return (
+    <>
+      {segments.map((seg, i) =>
+        seg.kind === "equal" ? (
+          <span key={i}>{seg.value}</span>
+        ) : (
+          <span key={i} className={cn("rounded-sm", emphasis)} data-testid="diff-intraline">
+            {seg.value}
+          </span>
+        )
+      )}
+    </>
+  )
+}
+
+/**
+ * Attach intraline segments to each remove line immediately followed by an add
+ * line (a single-line modification). Best-effort: only the adjacent pair is
+ * annotated, so multi-line edits highlight at their boundary and degrade to
+ * whole-line color elsewhere.
+ */
+function annotateIntraline(lines: DiffLine[]): DiffLine[] {
+  const out = lines.map((l) => ({ ...l }))
+  for (let i = 0; i < out.length - 1; i++) {
+    if (out[i].type === "remove" && out[i + 1].type === "add") {
+      const d = computeIntralineDiff(out[i].content, out[i + 1].content)
+      if (d) {
+        out[i].segments = d.removed
+        out[i + 1].segments = d.added
+      }
+    }
+  }
+  return out
 }
 
 interface DiffBlockProps {
@@ -35,7 +84,7 @@ export const DiffBlock = memo(function DiffBlock({
   const [viewMode, setViewMode] = useState<"unified" | "split">("unified")
   const { copied, copy } = useCopy({ logger: loggers.chat, scope: "chat" })
 
-  const parsedDiff = useMemo(() => parseDiff(content), [content])
+  const parsedDiff = useMemo(() => annotateIntraline(parseDiff(content)), [content])
 
   const handleCopy = useCallback(async () => {
     await copy(content)
@@ -149,7 +198,11 @@ const UnifiedDiffView = memo(function UnifiedDiffView({ lines }: { lines: DiffLi
                 line.type === "info" && "text-blue-600 font-semibold"
               )}
             >
-              {line.content}
+              <IntralineContent
+                segments={line.segments}
+                content={line.content}
+                emphasis={line.type === "add" ? "bg-green-500/30" : "bg-red-500/30"}
+              />
             </td>
           </tr>
         ))}
@@ -216,7 +269,11 @@ const SplitDiffView = memo(function SplitDiffView({ lines }: { lines: DiffLine[]
                     pair.left?.type === "info" && "text-blue-600 font-semibold"
                   )}
                 >
-                  {pair.left?.content}
+                  <IntralineContent
+                    segments={pair.left?.segments}
+                    content={pair.left?.content ?? ""}
+                    emphasis="bg-red-500/30"
+                  />
                 </span>
               </div>
             </td>
@@ -243,7 +300,11 @@ const SplitDiffView = memo(function SplitDiffView({ lines }: { lines: DiffLine[]
                     pair.right?.type === "info" && "text-blue-600 font-semibold"
                   )}
                 >
-                  {pair.right?.content}
+                  <IntralineContent
+                    segments={pair.right?.segments}
+                    content={pair.right?.content ?? ""}
+                    emphasis="bg-green-500/30"
+                  />
                 </span>
               </div>
             </td>

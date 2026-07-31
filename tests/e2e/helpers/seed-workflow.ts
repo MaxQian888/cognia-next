@@ -1,7 +1,7 @@
 /**
  * Playwright helper: seed canonical workflow fixtures via the dev-only
  * `window.__cogniaSeedWorkflow` bridge. Returns the seeded workflow's id so
- * the caller can navigate to `/workflows/${id}` directly.
+ * the caller can navigate to `/workflows/editor?id=${id}` directly.
  *
  * The full set of seed kinds lives in `lib/dev/workflow-fixtures.ts` — one
  * fixture per node family so per-family E2E specs can `seedAndOpenWorkflow`
@@ -67,7 +67,7 @@ export async function seedWorkflow(page: Page, kind: SeededWorkflowKind): Promis
  */
 export async function seedAndOpenWorkflow(page: Page, kind: SeededWorkflowKind): Promise<string> {
   const id = await seedWorkflow(page, kind)
-  await page.goto(`/workflows/${id}`, { waitUntil: "domcontentloaded" })
+  await page.goto(`/workflows/editor?id=${id}`, { waitUntil: "domcontentloaded" })
   return id
 }
 

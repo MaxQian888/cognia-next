@@ -9,7 +9,7 @@
 import { useRef } from "react"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import type { WorkflowFolder } from "@/types/workflow/folder"
-import type { WorkflowRow as WorkflowRowType } from "@/types/workflow/visual"
+import type { RunStatus, WorkflowRow as WorkflowRowType } from "@/types/workflow/visual"
 import { WorkflowFolderRow } from "./workflow-folder-row"
 import { WorkflowRow } from "./workflow-row"
 import { WorkflowDraggable } from "./workflow-draggable"
@@ -24,9 +24,16 @@ type ListEntry =
 export interface WorkflowLibraryListProps {
   folders: WorkflowFolder[]
   workflows: WorkflowRowType[]
+  runCounts?: ReadonlyMap<string, number>
+  lastStatuses?: ReadonlyMap<string, RunStatus>
 }
 
-export function WorkflowLibraryList({ folders, workflows }: WorkflowLibraryListProps) {
+export function WorkflowLibraryList({
+  folders,
+  workflows,
+  runCounts,
+  lastStatuses,
+}: WorkflowLibraryListProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const entries: ListEntry[] = [
@@ -38,6 +45,9 @@ export function WorkflowLibraryList({ folders, workflows }: WorkflowLibraryListP
     })),
   ]
 
+  // TanStack Virtual's useVirtualizer returns non-memoizable functions; the
+  // React Compiler correctly skips it. Nothing to fix on our side.
+  // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: entries.length,
     getScrollElement: () => scrollRef.current,
@@ -74,7 +84,11 @@ export function WorkflowLibraryList({ folders, workflows }: WorkflowLibraryListP
                 </WorkflowFolderDroppable>
               ) : (
                 <WorkflowDraggable id={entry.workflow.id}>
-                  <WorkflowRow workflow={entry.workflow} />
+                  <WorkflowRow
+                    workflow={entry.workflow}
+                    runCount={runCounts?.get(entry.workflow.id)}
+                    lastStatus={lastStatuses?.get(entry.workflow.id)}
+                  />
                 </WorkflowDraggable>
               )}
             </div>

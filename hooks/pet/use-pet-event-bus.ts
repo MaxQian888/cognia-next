@@ -6,19 +6,24 @@
 
 import { useEffect } from "react"
 import { getPetEventBus } from "@/lib/pet/events/pet-event-bus"
-import { wirePetSources } from "@/lib/pet/events/wire-sources"
+import { DEFAULT_PET_SOURCES, wirePetSources } from "@/lib/pet/events/wire-sources"
+import { wireTwinActivitySource } from "@/lib/pet/events/sources/twin-activity-source"
 import { handlePetEvent } from "@/lib/pet/runtime/pet-controller"
+import type { PetTwinAwarenessSettings } from "@/types/pet"
 
-export function usePetEventBus(enabled: boolean): void {
+export function usePetEventBus(enabled: boolean, twinAwareness?: PetTwinAwarenessSettings): void {
+  const twinId = twinAwareness?.enabled ? (twinAwareness.twinId ?? null) : null
+
   useEffect(() => {
     if (!enabled) return
     const offController = getPetEventBus().subscribe((event) => {
       void handlePetEvent(event)
     })
-    const offSources = wirePetSources()
+    const sources = twinId ? [...DEFAULT_PET_SOURCES, wireTwinActivitySource(twinId)] : undefined
+    const offSources = wirePetSources(undefined, sources)
     return () => {
       offController()
       offSources()
     }
-  }, [enabled])
+  }, [enabled, twinId])
 }

@@ -4,6 +4,7 @@ import { useEffect } from "react"
 
 import { usePlatform } from "@/hooks/use-platform"
 import { installDesktopSyncSource } from "@/lib/sync/desktop-sync-source"
+import { installAgentTeamProjection } from "@/lib/db/agent-team-projection"
 
 /**
  * Tauri-only provider that installs the desktop-side bridge for
@@ -22,6 +23,10 @@ export function DesktopSyncSourceProvider({ children }: { children: React.ReactN
     if (platform !== "tauri") return
     let teardown: (() => void) | null = null
     let cancelled = false
+    // Desktop-only: the store→Dexie board projection that feeds the
+    // `agentTeamBoard` sync table (v104). Installing this on the mobile
+    // shell would wipe the synced mirror with the phone's empty store.
+    const uninstallProjection = installAgentTeamProjection()
     void installDesktopSyncSource().then((unsub) => {
       if (cancelled) {
         unsub()
@@ -31,6 +36,7 @@ export function DesktopSyncSourceProvider({ children }: { children: React.ReactN
     })
     return () => {
       cancelled = true
+      uninstallProjection()
       teardown?.()
     }
   }, [platform])

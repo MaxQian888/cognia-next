@@ -105,6 +105,16 @@ describe("OutboundStatusPill", () => {
     expect(screen.queryByTestId("outbound-retry-btn-j5")).not.toBeInTheDocument()
   })
 
+  it("renders ambiguous delivery as unknown without offering an unsafe retry", () => {
+    mockJob = makeJob("j-unknown", "delivery_unknown")
+    render(<OutboundStatusPill jobId="j-unknown" />)
+    expect(screen.getByTestId("outbound-status-pill-j-unknown")).toHaveAttribute(
+      "data-status",
+      "delivery_unknown"
+    )
+    expect(screen.queryByTestId("outbound-retry-btn-j-unknown")).not.toBeInTheDocument()
+  })
+
   it("Retry button resets status to pending", async () => {
     mockJob = makeJob("j6", "failed")
     render(<OutboundStatusPill jobId="j6" />)
@@ -152,7 +162,7 @@ describe("OutboundStatusPill", () => {
       const badge = screen.getByTestId("outbound-source-badge-wf")
       expect(badge).toHaveAttribute("data-source", "workflow")
       expect(badge.tagName).toBe("A")
-      expect(badge).toHaveAttribute("href", "/workflows/wf_42/runs/run_7#node-n_send_3")
+      expect(badge).toHaveAttribute("href", "/workflows/run?id=wf_42&runId=run_7#node-n_send_3")
     })
 
     it("renders Manual badge when source=manual", () => {
@@ -167,6 +177,20 @@ describe("OutboundStatusPill", () => {
       render(<OutboundStatusPill jobId="dr" />)
       const badge = screen.getByTestId("outbound-source-badge-dr")
       expect(badge).toHaveAttribute("data-source", "draft-approved")
+    })
+
+    it("renders Skill badge when source=skill (im.* chat-management sends)", () => {
+      mockJob = { ...makeJob("sk", "sent"), source: "skill" }
+      render(<OutboundStatusPill jobId="sk" />)
+      const badge = screen.getByTestId("outbound-source-badge-sk")
+      expect(badge).toHaveAttribute("data-source", "skill")
+    })
+
+    it("renders Plugin badge when source=plugin (ctx.connectors.enqueueSend)", () => {
+      mockJob = { ...makeJob("pl", "sent"), source: "plugin" }
+      render(<OutboundStatusPill jobId="pl" />)
+      const badge = screen.getByTestId("outbound-source-badge-pl")
+      expect(badge).toHaveAttribute("data-source", "plugin")
     })
 
     it("omits the workflow badge when source=workflow but sourceWorkflow is missing", () => {

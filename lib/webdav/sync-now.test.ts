@@ -40,6 +40,7 @@ jest.mock("@/lib/db/settings", () => ({
 jest.mock("./passphrase-cache", () => ({
   setSyncPassphrase: (...a: unknown[]) => setSyncPassphraseMock(...a),
   getSyncPassphrase: () => getSyncPassphraseMock(),
+  persistSyncPassphrase: jest.fn(async () => undefined),
 }))
 
 import { runWebDavSyncNow } from "./sync-now"
@@ -91,5 +92,22 @@ describe("runWebDavSyncNow", () => {
     )
     expect(setSyncPassphraseMock).not.toHaveBeenCalled()
     expect(saveSettingsMock).not.toHaveBeenCalled()
+  })
+
+  it("supports an auto history type and reports coarse progress phases", async () => {
+    const phases: string[] = []
+    const result = await runWebDavSyncNow("p", {
+      historyType: "auto",
+      onProgress: (phase) => phases.push(phase),
+    })
+    expect(result).toEqual({ ok: true })
+    expect(appendMock).toHaveBeenCalledWith(expect.objectContaining({ type: "auto" }))
+    expect(phases).toEqual(["building", "encrypting", "uploading", "done"])
+  })
+
+  it("treats a lastSyncAt stamp failure as non-fatal", async () => {
+    saveSettingsMock.mockRejectedValueOnce(new Error("dexie closed"))
+    const result = await runWebDavSyncNow("p")
+    expect(result).toEqual({ ok: true })
   })
 })

@@ -1,7 +1,9 @@
+/** @jest-environment jsdom */
 // Coverage for the singleton settings module — get/save defaults, partial
 // patches, and the alwaysAllow tool list helpers.
 
 import "fake-indexeddb/auto"
+import { DEFAULT_UPDATE_SETTINGS } from "@cognia/agent-config-types"
 import { addAlwaysAllow, getSettings, removeAlwaysAllow, saveSettings } from "./settings"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
 
@@ -23,6 +25,35 @@ describe("getSettings", () => {
     expect(s.fontScale).toBe("md")
     expect(s.searchEnabled).toBe(false)
     expect(s.searchProviders).toBeDefined()
+    expect(s.updates).toEqual(DEFAULT_UPDATE_SETTINGS)
+    expect(s.browserCookieImportEnabled).toBe(false)
+    expect(s.remoteBrowserEnabled).toBe(false)
+    expect(s.geminiModel).toBe("gemini-3.1-flash-tts-preview")
+    expect(s.mistralModel).toBe("voxtral-mini-tts-2603")
+    expect(s.mistralResponseFormat).toBe("mp3")
+    expect(s.xiaomiModel).toBe("mimo-v2-tts")
+    expect(s.realtimeModel).toBe("gpt-realtime-2.1")
+    expect(s.customLimitsSources).toEqual([])
+    expect(s.limitsQueryEnabledAccounts).toEqual([])
+    expect(s.behaviorTelemetry).toMatchObject({
+      enabled: false,
+      destinations: { local: true, remote: false },
+      categories: { chat: true, workflow: true, connector: true, agentTeam: true, system: true },
+      sampleRate: 1,
+      retentionDays: 30,
+      maxStoredEvents: 10_000,
+    })
+  })
+
+  it("keeps a user's update preference over the default", async () => {
+    await getDb().settings.put({
+      id: "singleton",
+      permissionMode: "default",
+      alwaysAllowTools: [],
+      updates: { autoCheck: false },
+    } as unknown as Awaited<ReturnType<typeof getSettings>>)
+    const s = await getSettings()
+    expect(s.updates).toEqual({ ...DEFAULT_UPDATE_SETTINGS, autoCheck: false })
   })
 
   it("fills appearance defaults when missing", async () => {
@@ -39,6 +70,36 @@ describe("getSettings", () => {
     expect(s.customCss).toBe("")
     expect(s.customCssEnabled).toBe(false)
     expect(s.importedVscodeThemes).toEqual([])
+  })
+
+  it("normalizes legacy auto and difficulty routing into the existing settings block", async () => {
+    await getDb().settings.put({
+      id: "singleton",
+      permissionMode: "default",
+      alwaysAllowTools: [],
+      autoRouting: {
+        enabled: true,
+        thresholds: { balanced: 0.2, powerful: 0.8 },
+        candidateAliases: ["quick", "normal", "deep"],
+      },
+      difficultyRouting: {
+        enabled: true,
+        threshold: 0.6,
+      },
+    } as unknown as Awaited<ReturnType<typeof getSettings>>)
+
+    const first = await getSettings()
+    const second = await getSettings()
+
+    expect(first.autoRouting).toMatchObject({
+      enabled: true,
+      strategy: "difficulty",
+      defaultSelection: "auto",
+      candidateAliases: ["quick", "normal", "deep"],
+      thresholds: { balanced: 0.2, powerful: 0.8 },
+    })
+    expect(first.routingConfig?.strategy).toBe("difficulty")
+    expect(second.autoRouting).toEqual(first.autoRouting)
   })
 
   it("merges background defaults under a partial saved row", async () => {
@@ -116,10 +177,45 @@ describe("getSettings", () => {
     // Missing field is filled from defaults.
     expect(s.theme).toBe("system")
     expect(s.searchProviders).toBeDefined()
+    expect(s.customLimitsSources).toEqual([])
+    expect(s.limitsQueryEnabledAccounts).toEqual([])
     // Newly-introduced nested object is populated from DEFAULT_BUILTIN_TOOLS.
     expect(s.builtinTools).toBeDefined()
     expect(s.builtinTools.fileExtras).toBe(true)
     expect(s.builtinTools.shellAdvanced).toBe(false)
+  })
+
+  it("merges behavior telemetry defaults under partial persisted policy", async () => {
+    await getDb().settings.put({
+      id: "singleton",
+      permissionMode: "default",
+      alwaysAllowTools: [],
+      behaviorTelemetry: {
+        enabled: true,
+        categories: { chat: false },
+        destinations: { remote: true },
+      },
+    } as unknown as Awaited<ReturnType<typeof getSettings>>)
+
+    expect((await getSettings()).behaviorTelemetry).toMatchObject({
+      enabled: true,
+      destinations: { local: true, remote: true },
+      categories: { chat: false, workflow: true, connector: true, agentTeam: true, system: true },
+      sampleRate: 1,
+      retentionDays: 30,
+      maxStoredEvents: 10_000,
+    })
+  })
+
+  it("migrates the legacy telemetry opt-in when no structured policy was persisted", async () => {
+    await getDb().settings.put({
+      id: "singleton",
+      permissionMode: "default",
+      alwaysAllowTools: [],
+      telemetryEnabled: true,
+    } as unknown as Awaited<ReturnType<typeof getSettings>>)
+
+    expect((await getSettings()).behaviorTelemetry?.enabled).toBe(true)
   })
 })
 
@@ -220,5 +316,70 @@ describe("removeAlwaysAllow", () => {
 
   it("does not throw when the tool isn't present", async () => {
     await expect(removeAlwaysAllow("missing")).resolves.toBeUndefined()
+  })
+})
+
+describe("connection closed mid-operation (plugin schema bump)", () => {
+  /**
+   * What Dexie rejects with when `close()` lands on an in-flight request —
+   * the exact pair the boot-time report carried ("settings.load failed
+   * DatabaseClosedError: TransactionInactiveError").
+   */
+  function closedError(): Error {
+    const err = new Error(
+      "Failed to execute 'get' on 'IDBObjectStore': The transaction is inactive or finished."
+    )
+    err.name = "DatabaseClosedError"
+    return err
+  }
+
+  it("re-reads instead of stranding the caller on defaults", async () => {
+    await saveSettings({ theme: "dark" })
+    const table = getDb().settings
+    const get = jest.spyOn(table, "get").mockImplementationOnce(() => {
+      // `SettingsHydrator` and `PluginRuntimeInitializer` mount as siblings, so
+      // this read is regularly in flight when the plugin table bridge does
+      // close() → version(n).stores(patch) → open() on the shared connection.
+      return Promise.reject(closedError()) as ReturnType<typeof table.get>
+    })
+    try {
+      const s = await getSettings()
+      // The persisted row, NOT DEFAULTS — the whole point of the retry.
+      expect(s.theme).toBe("dark")
+      expect(get).toHaveBeenCalledTimes(2)
+    } finally {
+      get.mockRestore()
+    }
+  })
+
+  it("does not drop a settings write that raced the same close", async () => {
+    const table = getDb().settings
+    const put = jest.spyOn(table, "put").mockImplementationOnce(() => {
+      return Promise.reject(closedError()) as ReturnType<typeof table.put>
+    })
+    try {
+      const out = await saveSettings({ theme: "light", fontScale: "lg" })
+      expect(out.theme).toBe("light")
+      expect(out.fontScale).toBe("lg")
+      expect((await getSettings()).theme).toBe("light")
+      expect(put).toHaveBeenCalledTimes(2)
+    } finally {
+      put.mockRestore()
+    }
+  })
+
+  it("still surfaces a genuine failure rather than retrying forever", async () => {
+    const table = getDb().settings
+    const boom = new Error("disk is on fire")
+    boom.name = "UnknownError"
+    const get = jest.spyOn(table, "get").mockImplementation(() => {
+      return Promise.reject(boom) as ReturnType<typeof table.get>
+    })
+    try {
+      await expect(getSettings()).rejects.toThrow("disk is on fire")
+      expect(get).toHaveBeenCalledTimes(1)
+    } finally {
+      get.mockRestore()
+    }
   })
 })

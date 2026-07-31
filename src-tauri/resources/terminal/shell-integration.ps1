@@ -29,14 +29,21 @@ if (-not $env:COGNIA_TERM_NONCE) { return }
 
 $Global:__CogniaTermNonce = $env:COGNIA_TERM_NONCE
 
+# NOTE: the `-f` expression MUST be parenthesized. Inside a .NET method
+# call, PowerShell treats the bare comma as the METHOD argument separator,
+# so `Write("…{0};{1}…" -f $a, $b)` binds the `Write(format, arg0)`
+# overload with a one-element `-f` argument list — and `-f` then throws
+# "Index (zero based) must be greater than…" for the `{1}` placeholder.
+# That broke every prompt render (PowerShell silently falls back to its
+# minimal `PS>` prompt) and with it ALL OSC 633 events on PowerShell.
 function Global:__Cognia-Emit {
     param([string]$Cmd)
-    [Console]::Write("`e]633;{0};{1}`a" -f $Cmd, $Global:__CogniaTermNonce)
+    [Console]::Write(("`e]633;{0};{1}`a" -f $Cmd, $Global:__CogniaTermNonce))
 }
 
 function Global:__Cognia-EmitWith {
     param([string]$Cmd, [string]$Arg)
-    [Console]::Write("`e]633;{0};{1};{2}`a" -f $Cmd, $Global:__CogniaTermNonce, $Arg)
+    [Console]::Write(("`e]633;{0};{1};{2}`a" -f $Cmd, $Global:__CogniaTermNonce, $Arg))
 }
 
 # Capture whatever prompt the user (or $PROFILE) set up so we can compose.
@@ -66,6 +73,13 @@ function Global:prompt {
 # guard checks for the cmdlet rather than `Get-Module` first because
 # PSReadLine 2.0+ may be present but auto-loaded only on Enter — looking
 # up the cmdlet forces the module to load if available.
+# Headless (unattended) sessions skip the PSReadLine hook entirely: there
+# is no human watching the "Running" badge it powers, and writing OSC
+# bytes from inside a key handler can desync PSReadLine's renderer when
+# input is scripted rather than typed. The D/P/A/B prompt events above are
+# enough for headless command tracking.
+if ($env:COGNIA_TERM_HEADLESS) { return }
+
 if (Get-Command Set-PSReadLineKeyHandler -ErrorAction SilentlyContinue) {
     try {
         Set-PSReadLineKeyHandler -Key Enter -ScriptBlock {

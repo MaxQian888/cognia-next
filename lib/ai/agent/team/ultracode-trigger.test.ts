@@ -3,13 +3,22 @@ import type { AgentTeam } from "@/types/agent/agent-team"
 
 function team(
   ultracode?: AgentTeam["config"]["ultracode"],
-  complexity?: "simple" | "moderate" | "complex"
+  complexity?: "simple" | "moderate" | "complex",
+  recommendedPattern?: AgentTeam["routingAssessment"] extends infer R
+    ? R extends { recommendedPattern: infer P }
+      ? P
+      : never
+    : never
 ): Pick<AgentTeam, "config" | "routingAssessment"> {
   return {
     config: { ultracode } as AgentTeam["config"],
-    routingAssessment: complexity
-      ? ({ factors: { taskComplexity: complexity } } as AgentTeam["routingAssessment"])
-      : undefined,
+    routingAssessment:
+      complexity || recommendedPattern
+        ? ({
+            factors: { taskComplexity: complexity ?? "moderate" },
+            recommendedPattern,
+          } as AgentTeam["routingAssessment"])
+        : undefined,
   }
 }
 
@@ -45,5 +54,16 @@ describe("isUltracodeActive", () => {
   it("defaults autoMode to auto when omitted", () => {
     expect(isUltracodeActive(team({ enabled: true }, "complex"))).toBe(true)
     expect(isUltracodeActive(team({ enabled: true }, "simple"))).toBe(false)
+  })
+
+  it("auto mode honors an explicit ultracode recommendedPattern even when not complex", () => {
+    expect(
+      isUltracodeActive(
+        team({ enabled: true, autoMode: "auto" }, "moderate", "ultracode_orchestration")
+      )
+    ).toBe(true)
+    expect(
+      isUltracodeActive(team({ enabled: true, autoMode: "auto" }, "moderate", "manager_worker"))
+    ).toBe(false)
   })
 })

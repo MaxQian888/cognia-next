@@ -3,7 +3,7 @@
 //!
 //! # Why a separate listener?
 //!
-//! The companion_api (port 7890) is designed for paired mobile devices:
+//! The companion_api (default port 27890) is designed for paired mobile devices:
 //! HTTPS, JWT-protected, LAN-accessible. The CLI bridge is for the
 //! developer's own machine: loopback-only, plain HTTP, dev-token gated.
 //! Keeping them on separate ports lets each carry the auth model
@@ -13,10 +13,14 @@
 //! # Endpoints
 //!
 //! - `POST /api/v1/dev/plugins/install`   — install a `.zip` bundle from disk
+//! - `POST /api/v1/dev/plugins/install-directory`
+//!                                          — install an unpacked plugin dir
 //! - `POST /api/v1/dev/plugins/uninstall` — remove a plugin by id
-//! - `POST /api/v1/dev/plugins/reload`    — re-install (if bundle path given)
-//!                                          or emit a hot-reload event
+//! - `POST /api/v1/dev/plugins/reload`    — re-install (if bundle/source dir
+//!                                          path given) or emit a hot-reload event
 //! - `GET  /api/v1/dev/health`            — liveness probe
+//! - `POST /api/v1/dev/acp/token`         — mint a device-scope companion JWT
+//!                                          for the `cognia acp` stdio bridge
 //!
 //! # Discovery
 //!
@@ -42,6 +46,7 @@ pub mod detect;
 pub mod download;
 pub mod handlers;
 pub mod release_key;
+pub mod renderer_bridge;
 pub mod server;
 
 use ::anyhow::{Context, Result};
@@ -66,6 +71,11 @@ pub struct CliBridgeState {
     /// AppHandle so handlers can reach into `PluginRuntimeState` and
     /// emit refresh events to the TS plugin manager.
     pub app_handle: tauri::AppHandle,
+    /// Round-trip bridge for renderer-backed routes (twin context, agent
+    /// teams). Shared with `CliBridgeServerState` so the
+    /// `cli_bridge_renderer_response` Tauri command can resolve pending
+    /// requests without reaching into the axum task.
+    pub renderer: Arc<renderer_bridge::RendererBridge>,
 }
 
 pub type SharedState = Arc<CliBridgeState>;
@@ -74,6 +84,9 @@ pub type SharedState = Arc<CliBridgeState>;
 /// keep it alive for the app's lifetime.
 pub struct CliBridgeServerState {
     inner: Mutex<Option<RunningBridge>>,
+    /// Created eagerly (before `init`) so the `cli_bridge_renderer_response`
+    /// command always has a target, even if the axum spawn failed.
+    renderer: Arc<renderer_bridge::RendererBridge>,
 }
 
 struct RunningBridge {
@@ -85,6 +98,7 @@ impl Default for CliBridgeServerState {
     fn default() -> Self {
         Self {
             inner: Mutex::new(None),
+            renderer: renderer_bridge::RendererBridge::new(),
         }
     }
 }
@@ -106,6 +120,10 @@ impl CliBridgeServerState {
         if let Some(running) = self.inner.lock().take() {
             let _ = running.shutdown.send(());
         }
+    }
+
+    pub fn renderer(&self) -> Arc<renderer_bridge::RendererBridge> {
+        self.renderer.clone()
     }
 }
 
@@ -153,28 +171,38 @@ pub fn write_endpoint_file(path: &Path, base_url: &str, dev_token: &str) -> Resu
 /// Failure to spawn is non-fatal — the rest of cognia continues to
 /// boot. The CLI will simply return "no running cognia detected" until
 /// the next launch.
-pub async fn init(
-    app_handle: tauri::AppHandle,
-    state: &CliBridgeServerState,
-) -> Result<u16> {
+pub async fn init(app_handle: tauri::AppHandle, state: &CliBridgeServerState) -> Result<u16> {
+    // Dev convenience: in debug builds, make a locally-built `cognia`
+    // (dropped into the shared workspace target dir by `cargo build -p
+    // cognia-cli`) detectable without a `cargo install`. No-op in release.
+    detect::register_dev_build_dir();
+
     let dev_token = generate_dev_token();
     let shared = Arc::new(CliBridgeState {
         dev_token: dev_token.clone(),
         app_handle: app_handle.clone(),
+        renderer: state.renderer(),
     });
-    let (bound_port, shutdown) =
-        server::spawn(shared).await.context("spawn cli_bridge axum server")?;
+    let (bound_port, shutdown) = server::spawn(shared)
+        .await
+        .context("spawn cli_bridge axum server")?;
     let base_url = format!("http://127.0.0.1:{bound_port}");
     if let Some(path) = endpoint_file_path() {
         if let Err(e) = write_endpoint_file(&path, &base_url, &dev_token) {
             log::warn!("cli_bridge endpoint file write failed: {e:#}");
         } else {
-            log::info!("cli_bridge ready at {base_url} (token persisted to {})", path.display());
+            log::info!(
+                "cli_bridge ready at {base_url} (token persisted to {})",
+                path.display()
+            );
         }
     }
     {
         let mut guard = state.inner.lock();
-        *guard = Some(RunningBridge { bound_port, shutdown });
+        *guard = Some(RunningBridge {
+            bound_port,
+            shutdown,
+        });
     }
     Ok(bound_port)
 }
@@ -209,6 +237,68 @@ pub fn cli_bridge_status(state: tauri::State<'_, CliBridgeServerState>) -> CliBr
     }
 }
 
+/// IPC surface — resolve a pending renderer-backed CLI bridge request. The
+/// renderer's `cli-bridge://renderer-request` listener calls this with the
+/// request id + result/error; unknown ids are a no-op (the request may have
+/// timed out on the Rust side already).
+#[tauri::command]
+pub fn cli_bridge_renderer_response(
+    state: tauri::State<'_, CliBridgeServerState>,
+    response: renderer_bridge::RendererResponse,
+) {
+    state.renderer.resolve(response);
+}
+
+/// IPC surface — resolve the cognia CLI home (`$COGNIA_HOME` or `~/.cognia`)
+/// as an absolute string so the renderer's desktop→CLI push writers target
+/// the exact directory the standalone CLI reads. `None` when no home dir is
+/// resolvable (and on web/Capacitor, where this command isn't reachable).
+#[tauri::command]
+pub fn resolve_cli_home() -> Option<String> {
+    crate::agents::paths::cognia_home().map(|p| p.to_string_lossy().into_owned())
+}
+
+/// Validate that `file_name` is a bare filename (no separators / `..`) so a
+/// CLI-home write can never escape the home directory.
+fn is_safe_cli_file_name(file_name: &str) -> bool {
+    !file_name.is_empty()
+        && !file_name.contains('/')
+        && !file_name.contains('\\')
+        && !file_name.contains("..")
+}
+
+/// IPC surface — write a file directly into the cognia CLI home
+/// (`<home>/<file_name>`), creating the home dir if absent. Only a bare
+/// filename is accepted, so the write is structurally confined to the home —
+/// no `..` / absolute-path escape is possible. When `secret` is true the file
+/// is given owner-only (0600) perms on unix (the same posture the CLI uses for
+/// `credentials.json`; a no-op on Windows, where the profile ACL already
+/// restricts access). Used by the desktop→CLI config / credentials / history
+/// push.
+#[tauri::command]
+pub fn write_cli_home_file(file_name: String, content: String, secret: bool) -> Result<(), String> {
+    if !is_safe_cli_file_name(&file_name) {
+        return Err(format!("invalid CLI file name: {file_name}"));
+    }
+    let home =
+        crate::agents::paths::cognia_home().ok_or_else(|| "cannot resolve CLI home".to_string())?;
+    std::fs::create_dir_all(&home).map_err(|e| format!("mkdir cli home: {e}"))?;
+    let target = home.join(&file_name);
+    std::fs::write(&target, content.as_bytes())
+        .map_err(|e| format!("write {}: {e}", target.display()))?;
+    #[cfg(unix)]
+    if secret {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = std::fs::metadata(&target) {
+            let mut perms = meta.permissions();
+            perms.set_mode(0o600);
+            let _ = std::fs::set_permissions(&target, perms);
+        }
+    }
+    let _ = secret;
+    Ok(())
+}
+
 /// Receipt returned to the renderer after a successful "Load unpacked"
 /// install. Mirrors the shape of the bridge's HTTP `OkResponse` so the
 /// TS layer can use one envelope across both surfaces.
@@ -231,7 +321,10 @@ pub async fn preview_local_manifest(source_dir: String) -> Result<serde_json::Va
         return Err("source_dir must be absolute".to_string());
     }
     if !source.exists() {
-        return Err(format!("source directory not found at {}", source.display()));
+        return Err(format!(
+            "source directory not found at {}",
+            source.display()
+        ));
     }
     let manifest_path = if source.is_dir() {
         source.join("plugin.json")
@@ -323,14 +416,24 @@ mod tests {
         write_endpoint_file(&path, "http://127.0.0.1:42", "abc123").unwrap();
         let bytes = std::fs::read(&path).unwrap();
         let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(parsed["baseUrl"], serde_json::Value::String("http://127.0.0.1:42".into()));
-        assert_eq!(parsed["devToken"], serde_json::Value::String("abc123".into()));
+        assert_eq!(
+            parsed["baseUrl"],
+            serde_json::Value::String("http://127.0.0.1:42".into())
+        );
+        assert_eq!(
+            parsed["devToken"],
+            serde_json::Value::String("abc123".into())
+        );
     }
 
     #[test]
     fn write_endpoint_file_creates_parent_dir() {
         let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("nested").join("dir").join("cli-endpoint.json");
+        let path = tmp
+            .path()
+            .join("nested")
+            .join("dir")
+            .join("cli-endpoint.json");
         write_endpoint_file(&path, "http://x", "tok").unwrap();
         assert!(path.exists());
     }
@@ -360,6 +463,22 @@ mod tests {
         let st = CliBridgeServerState::new();
         shutdown(&st);
         assert!(!st.is_running());
+    }
+
+    #[test]
+    fn safe_cli_file_name_accepts_bare_names() {
+        assert!(is_safe_cli_file_name("credentials.json"));
+        assert!(is_safe_cli_file_name("config.json"));
+        assert!(is_safe_cli_file_name("history.json"));
+    }
+
+    #[test]
+    fn safe_cli_file_name_rejects_separators_and_traversal() {
+        assert!(!is_safe_cli_file_name(""));
+        assert!(!is_safe_cli_file_name("../escape.json"));
+        assert!(!is_safe_cli_file_name("sub/dir.json"));
+        assert!(!is_safe_cli_file_name("sub\\dir.json"));
+        assert!(!is_safe_cli_file_name(".."));
     }
 
     #[test]

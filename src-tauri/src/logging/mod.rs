@@ -16,9 +16,12 @@
 pub mod commands;
 pub mod native_bootstrap;
 pub mod platform;
+pub mod query;
+pub mod tracing_setup;
 
+use crate::crash::retention::LOG_MAX_FILE_SIZE;
 use tauri::App;
-use tauri_plugin_log::Builder as LogBuilder;
+use tauri_plugin_log::{Builder as LogBuilder, RotationStrategy};
 
 /// Bootstrap native logging. Plans the active targets, installs the
 /// `tauri-plugin-log` plugin with the resolved targets, registers the
@@ -39,8 +42,20 @@ pub fn bootstrap(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         .targets()
         .into_iter()
         .chain(std::iter::once(platform::dispatch_target()));
+    // Cap the live `cognia.log` and let the plugin rotate. KeepAll preserves
+    // every rotated file (the plugin can't "keep N"); the startup
+    // `prune_rotated_logs` sweep supplies the missing count cap so the
+    // rotation set stays bounded.
     let builder = LogBuilder::default()
         .level(log::LevelFilter::Info)
+        // `fontdb::Database::load_system_fonts` (used by `os_list_fonts`) walks
+        // every installed OS font and logs a WARN for each one it can't parse.
+        // Windows ships proprietary/malformed faces like `mstmc.ttf` (Media
+        // Center) that no TrueType parser accepts — the face is simply skipped,
+        // so the warning is pure noise. Silence fontdb below Error.
+        .level_for("fontdb", log::LevelFilter::Error)
+        .max_file_size(LOG_MAX_FILE_SIZE)
+        .rotation_strategy(RotationStrategy::KeepAll)
         .targets(targets);
 
     if let Err(error) = app.handle().plugin(builder.build()) {
@@ -50,5 +65,13 @@ pub fn bootstrap(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     native_bootstrap::apply_native_logging_bootstrap(&plan);
+
+    // Install the structured tracing subscriber alongside the plugin (separate
+    // native subscriber; the plugin keeps ownership of the global `log` logger).
+    // Non-fatal: a failure just means no `cognia-structured.log`.
+    if !tracing_setup::init() {
+        log::warn!("native_logging: structured tracing subscriber not installed");
+    }
+
     Ok(())
 }

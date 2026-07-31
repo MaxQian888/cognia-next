@@ -29,12 +29,7 @@ export {
 } from "./i18n-loader"
 
 export {
-  PLUGIN_TEMPLATES,
-  scaffoldPlugin,
-  getTemplateById,
-  getTemplatesByType,
-  getTemplatesByCapability,
-  searchTemplates,
-  type PluginTemplate,
-  type PluginScaffoldOptions,
-} from "./templates"
+  healthcheckScaffold,
+  type ScaffoldHealthIssue,
+  type ScaffoldHealthReport,
+} from "./scaffold-healthcheck"

@@ -1,0 +1,18 @@
+{
+  "author": "Author",
+  "capabilities": "Capabilities",
+  "declared": "Declared permissions",
+  "dependencies": "Dependencies",
+  "homepage": "Homepage",
+  "install": "Install",
+  "installing": "Installing…",
+  "license": "License",
+  "optional": "Optional permissions",
+  "rawManifest": "View raw manifest",
+  "rawManifestTitle": "Raw manifest",
+  "readme": "README",
+  "repository": "Repository",
+  "uninstall": "Uninstall",
+  "uninstalling": "Uninstalling…",
+  "versionLabel": "Version"
+}

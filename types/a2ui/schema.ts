@@ -16,10 +16,7 @@ import type { ArtifactLanguage } from "@/types/artifact/artifact"
 export type A2UISurfaceType = "inline" | "dialog" | "panel" | "fullscreen"
 
 export type A2UIWidgetHostStrategy =
-  | "native"
-  | "artifact-preview"
-  | "sandboxed-html"
-  | "lazy-runtime"
+  "native" | "artifact-preview" | "sandboxed-html" | "lazy-runtime"
 
 export type A2UIWidgetSizing = "auto" | "content-height" | "fixed-height"
 
@@ -61,6 +58,12 @@ export type A2UIComponentType =
   | "Animation"
   | "InteractiveGuide"
   | "RichOutput"
+  | "Tabs"
+  | "Accordion"
+  | "Toggle"
+  | "FormGroup"
+  | "AcademicAnalysis"
+  | "AcademicSearchResults"
   | string // Allow custom component types
 
 /**
@@ -72,13 +75,7 @@ export type A2UIChartType = "line" | "bar" | "pie" | "area" | "scatter" | "radar
  * Button variants
  */
 export type A2UIButtonVariant =
-  | "default"
-  | "primary"
-  | "secondary"
-  | "destructive"
-  | "outline"
-  | "ghost"
-  | "link"
+  "default" | "primary" | "secondary" | "destructive" | "outline" | "ghost" | "link"
 
 /**
  * Alert variants
@@ -89,14 +86,7 @@ export type A2UIAlertVariant = "default" | "info" | "success" | "warning" | "err
  * Text variants
  */
 export type A2UITextVariant =
-  | "body"
-  | "heading1"
-  | "heading2"
-  | "heading3"
-  | "heading4"
-  | "caption"
-  | "code"
-  | "label"
+  "body" | "heading1" | "heading2" | "heading3" | "heading4" | "caption" | "code" | "label"
 
 // =============================================================================
 // Data Binding Types (JSON Pointer RFC 6901)
@@ -822,13 +812,7 @@ export type A2UIServerMessage =
  * `ConnectorCallbackActionType` in `types/connectors/interaction.ts`.
  */
 export type A2UIConnectorActionType =
-  | "button"
-  | "select"
-  | "checkbox"
-  | "input"
-  | "submit"
-  | "dismiss"
-  | "platform_specific"
+  "button" | "select" | "checkbox" | "input" | "submit" | "dismiss" | "platform_specific"
 
 /**
  * IM platforms that can deliver an interactive callback. Mirrors the

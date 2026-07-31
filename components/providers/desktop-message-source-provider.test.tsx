@@ -21,12 +21,20 @@ jest.mock("@/lib/companion/desktop-write-source", () => ({
   installDesktopWriteSource: () => installWriteMock(),
 }))
 
+// The CLI bridge renderer round-trip source rides the same lifecycle.
+const installCliRendererMock = jest.fn()
+jest.mock("@/lib/cli-bridge/renderer-request-source", () => ({
+  installCliRendererRequestSource: () => installCliRendererMock(),
+}))
+
 beforeEach(() => {
   installMock.mockReset()
   installWriteMock.mockReset()
+  installCliRendererMock.mockReset()
   // The write-source mock returns a no-op teardown by default — tests
   // that care about its teardown override this explicitly.
   installWriteMock.mockResolvedValue(() => {})
+  installCliRendererMock.mockResolvedValue(() => {})
   delete (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__
   delete (window as { Capacitor?: unknown }).Capacitor
 })
@@ -45,6 +53,7 @@ describe("<DesktopMessageSourceProvider />", () => {
 
     await new Promise((r) => setTimeout(r, 0))
     expect(installMock).toHaveBeenCalled()
+    expect(installCliRendererMock).toHaveBeenCalled()
 
     unmount()
     expect(teardown).toHaveBeenCalled()

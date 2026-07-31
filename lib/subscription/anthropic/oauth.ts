@@ -13,7 +13,7 @@
 // The server may rotate the refresh_token on every refresh; callers must
 // always persist the value returned in the latest response.
 
-import { generateCodeChallenge, generateCodeVerifier } from "@/lib/ai/providers/oauth"
+import { generateCodeChallenge, generateCodeVerifier } from "@cognia/provider-core/providers/oauth"
 
 import type { AnthropicAuthMode, AnthropicCredentialData } from "@/types/subscription"
 import { CLAUDE_OAUTH_CLIENT_ID, CLAUDE_OAUTH_TOKEN_URL, OAUTH_ENDPOINTS } from "./constants"

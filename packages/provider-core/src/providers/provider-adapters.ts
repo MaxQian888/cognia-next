@@ -1,0 +1,216 @@
+import type { ApiProtocol, BuiltInApiProtocol } from "@cognia/provider-types"
+import {
+  getBuiltInProviderAdapter,
+  getBuiltInProviderCatalogEntry,
+  getBuiltInProviderFamily,
+  getBuiltInProviderProtocol,
+  type BuiltInProviderAdapterId,
+  type BuiltInProviderFamily,
+  type BuiltInProviderProtocol,
+} from "@cognia/provider-types/built-in-provider-catalog"
+import {
+  resolveEquivalentBuiltInProviderId,
+  type EquivalentCustomProviderLike,
+} from "./built-in-provider-compatibility"
+
+export interface ProviderAdapterRequirements {
+  requiresCredential: boolean
+  requiresBaseUrl: boolean
+  isLocal: boolean
+}
+
+export interface ProviderAdapterDefinition {
+  id: BuiltInProviderAdapterId
+  family: BuiltInProviderFamily
+  protocol: ApiProtocol | BuiltInProviderProtocol
+  builtInDefaults: ProviderAdapterRequirements
+  customDefaults: ProviderAdapterRequirements
+}
+
+const PROVIDER_ADAPTERS: Record<BuiltInProviderAdapterId, ProviderAdapterDefinition> = {
+  "openai-compatible": {
+    id: "openai-compatible",
+    family: "openai-compatible",
+    protocol: "openai",
+    builtInDefaults: {
+      requiresCredential: true,
+      requiresBaseUrl: false,
+      isLocal: false,
+    },
+    customDefaults: {
+      requiresCredential: true,
+      requiresBaseUrl: true,
+      isLocal: false,
+    },
+  },
+  anthropic: {
+    id: "anthropic",
+    family: "anthropic-native",
+    protocol: "anthropic",
+    builtInDefaults: {
+      requiresCredential: true,
+      requiresBaseUrl: false,
+      isLocal: false,
+    },
+    customDefaults: {
+      requiresCredential: true,
+      requiresBaseUrl: true,
+      isLocal: false,
+    },
+  },
+  gemini: {
+    id: "gemini",
+    family: "gemini-native",
+    protocol: "gemini",
+    builtInDefaults: {
+      requiresCredential: true,
+      requiresBaseUrl: false,
+      isLocal: false,
+    },
+    customDefaults: {
+      requiresCredential: true,
+      requiresBaseUrl: true,
+      isLocal: false,
+    },
+  },
+  openrouter: {
+    id: "openrouter",
+    family: "openrouter",
+    protocol: "openai",
+    builtInDefaults: {
+      requiresCredential: true,
+      requiresBaseUrl: false,
+      isLocal: false,
+    },
+    customDefaults: {
+      requiresCredential: true,
+      requiresBaseUrl: true,
+      isLocal: false,
+    },
+  },
+  "local-openai-compatible": {
+    id: "local-openai-compatible",
+    family: "local-openai-compatible",
+    protocol: "openai",
+    builtInDefaults: {
+      requiresCredential: false,
+      requiresBaseUrl: true,
+      isLocal: true,
+    },
+    customDefaults: {
+      requiresCredential: false,
+      requiresBaseUrl: true,
+      isLocal: true,
+    },
+  },
+  cliproxyapi: {
+    id: "cliproxyapi",
+    family: "proxy-openai-compatible",
+    protocol: "openai",
+    builtInDefaults: {
+      requiresCredential: true,
+      requiresBaseUrl: true,
+      isLocal: true,
+    },
+    customDefaults: {
+      requiresCredential: true,
+      requiresBaseUrl: true,
+      isLocal: false,
+    },
+  },
+  bedrock: {
+    id: "bedrock",
+    family: "bedrock-native",
+    protocol: "bedrock",
+    // `requiresCredential` is false because Bedrock's `default-chain` auth mode
+    // takes credentials from the ambient AWS chain (env / profile / instance
+    // role) — there is nothing for the user to paste. Which fields a given mode
+    // actually needs is decided per-mode by `validateBedrockConnectionSettings`,
+    // not by this coarse flag. `requiresBaseUrl` is false for the same reason:
+    // the endpoint is derived from the region, and `baseURL` is an override.
+    builtInDefaults: {
+      requiresCredential: false,
+      requiresBaseUrl: false,
+      isLocal: false,
+    },
+    customDefaults: {
+      requiresCredential: false,
+      requiresBaseUrl: false,
+      isLocal: false,
+    },
+  },
+}
+
+// Exhaustive over the BUILT-IN protocols only — plugin-contributed protocol
+// ids fall back to the openai-compatible adapter for requirement defaults
+// (credentials + baseURL required), which matches the declarative
+// openai-compatible-variant execution model.
+const PROTOCOL_ADAPTER_IDS: Record<BuiltInApiProtocol, BuiltInProviderAdapterId> = {
+  openai: "openai-compatible",
+  anthropic: "anthropic",
+  gemini: "gemini",
+  bedrock: "bedrock",
+}
+
+function isBuiltInApiProtocol(protocol: ApiProtocol): protocol is BuiltInApiProtocol {
+  return protocol in PROTOCOL_ADAPTER_IDS
+}
+
+function inferBuiltInAdapterId(providerId: string): BuiltInProviderAdapterId {
+  const entry = getBuiltInProviderCatalogEntry(providerId)
+  const adapterId = getBuiltInProviderAdapter(providerId)
+
+  if (adapterId) {
+    return adapterId
+  }
+
+  if (providerId === "cliproxyapi") {
+    return "cliproxyapi"
+  }
+
+  if (entry?.type === "local") {
+    return "local-openai-compatible"
+  }
+
+  const protocol = getBuiltInProviderProtocol(providerId)
+  if (protocol === "anthropic") return "anthropic"
+  if (protocol === "gemini") return "gemini"
+  if (getBuiltInProviderFamily(providerId) === "openrouter") return "openrouter"
+  return "openai-compatible"
+}
+
+export function getProviderAdapter(
+  adapterId: BuiltInProviderAdapterId | undefined
+): ProviderAdapterDefinition | undefined {
+  if (!adapterId) return undefined
+  return PROVIDER_ADAPTERS[adapterId]
+}
+
+export function resolveBuiltInProviderAdapter(
+  providerId: string
+): ProviderAdapterDefinition | undefined {
+  return getProviderAdapter(inferBuiltInAdapterId(providerId))
+}
+
+export function resolveCustomProviderAdapter(
+  providerId: string,
+  provider?: EquivalentCustomProviderLike
+): ProviderAdapterDefinition {
+  const equivalentBuiltInProviderId = provider
+    ? resolveEquivalentBuiltInProviderId(provider)
+    : undefined
+
+  if (equivalentBuiltInProviderId) {
+    return (
+      resolveBuiltInProviderAdapter(equivalentBuiltInProviderId) ||
+      PROVIDER_ADAPTERS["openai-compatible"]
+    )
+  }
+
+  const protocol = provider?.apiProtocol || "openai"
+  if (isBuiltInApiProtocol(protocol)) {
+    return PROVIDER_ADAPTERS[PROTOCOL_ADAPTER_IDS[protocol]]
+  }
+  // Plugin protocol-adapter id → openai-compatible requirement defaults.
+  return PROVIDER_ADAPTERS["openai-compatible"]
+}

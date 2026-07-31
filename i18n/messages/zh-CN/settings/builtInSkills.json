@@ -1,0 +1,30 @@
+{
+  "conversation": {
+    "allowedListLabel": "允许的技能 ID",
+    "description": "按会话设置经过代码审查的 lark-cli 技能。",
+    "requireHitlForWritesLabel": "写操作需要确认卡",
+    "title": "内置技能"
+  },
+  "description": "经过代码审查的第一方 MCP 工具，助手可在桌面对话或 IM 渠道中调用。",
+  "lark": {
+    "emptyHint": "尚未注册飞书技能。",
+    "intro": {
+      "body": "这些技能将 lark-cli 子命令包装为强类型 MCP 工具，助手直接调用，执行运行在桌面 sidecar 中。",
+      "gates": "只读技能无需确认。在 IM 渠道中，写操作默认弹出 A2UI 确认卡。删除类操作需在会话设置中显式开启。",
+      "title": "飞书生产力技能 (lark-cli)"
+    }
+  },
+  "mutation": {
+    "destructive": "删除",
+    "read": "只读",
+    "write": "写入"
+  },
+  "surfaceSkills": {
+    "description": "在对应场景的对话轮自动启用内置指引技能——IM 自动回复、计算机操作、工作流编排、智能体团队、数字孪生，以及目标/循环运行。",
+    "title": "场景指引技能"
+  },
+  "tabs": {
+    "lark": "飞书"
+  },
+  "title": "内置技能"
+}

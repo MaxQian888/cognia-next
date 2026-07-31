@@ -1,0 +1,13 @@
+{
+  "capabilityOverflow": "+{count} more",
+  "emptyHint": "Try a different search or section.",
+  "emptyTitle": "Nothing here yet",
+  "errorTitle": "Something went wrong",
+  "install": "Install",
+  "installed": "Installed",
+  "installedDesktopOnly": "Desktop only — install requires the native app",
+  "installing": "Installing…",
+  "retry": "Retry",
+  "uninstall": "Uninstall",
+  "uninstalling": "Uninstalling…"
+}

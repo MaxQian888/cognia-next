@@ -2,7 +2,7 @@
  * E2E: action.team.create — real executor writes a Dexie teams row.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../../../helpers/db-reset"
 import { seedAndOpenWorkflow } from "../../../helpers/seed-workflow"
 import {
@@ -20,12 +20,14 @@ test.describe("workflow node — action.team.create", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded team create renders + name + description persist", async ({ page }) => {
+  test("seeded team create renders + name + description fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "action-team-create")
     await assertNodeOnCanvas(page, { kind: "action.team.create", label: "Create" })
     await openNodeInspector(page, "action.team.create")
-    await expect(page.locator("#ins-name, [name=name]").first()).toBeVisible()
-    await expect(page.locator("#ins-description, [name=description]").first()).toBeVisible()
+    await expect(page.locator("#ins-name, [data-field=name]").first()).toBeVisible()
+    await expect(page.locator("#ins-description, [data-field=description]").first()).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "action.team.create" })
   })

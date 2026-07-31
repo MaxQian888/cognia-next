@@ -7,8 +7,10 @@ import {
   FolderIcon,
   FolderOpenIcon,
   PlusIcon,
+  SearchIcon,
   ShieldAlertIcon,
   SlidersHorizontalIcon,
+  XIcon,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -25,12 +27,22 @@ import { openFolderAsWorkspace } from "@/lib/workspace/open-folder"
 import type { Project } from "@/types"
 import { WorkspaceManageDialog } from "./workspace-manage-dialog"
 
+// Above this count the flat list stops being scannable, so we surface the
+// search field and a "Recent" quick-access group. Below it the whole list fits
+// in view and both would just be clutter.
+const LARGE_THRESHOLD = 8
+// How many most-recently-used workspaces to pin above the full list.
+const RECENT_COUNT = 3
+
 /**
  * Rail entry point for the active workspace. The trigger shows the active
  * workspace's initial (or a folder icon when none is active); the popover lists
  * every non-archived workspace for one-click switching and opens the manage
  * dialog for create / edit / delete. Switching drives `setActiveProject`, which
  * re-binds the Git panel + terminal scope and feeds the cwd chain.
+ *
+ * For large workspace sets the popover adds a live filter (name + folder path)
+ * and a pinned "Recent" group so the list stays navigable at scale.
  */
 export function WorkspaceSwitcher() {
   const t = useTranslations("workspace.switcher")
@@ -39,6 +51,7 @@ export function WorkspaceSwitcher() {
   const setActiveProject = useProjectStore((s) => s.setActiveProject)
 
   const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState("")
   const [manageOpen, setManageOpen] = useState(false)
   const [manageAutoCreate, setManageAutoCreate] = useState(false)
   // project id → has any untrusted root (desktop only).
@@ -52,13 +65,26 @@ export function WorkspaceSwitcher() {
     () =>
       [...visible]
         .sort((a, b) => +new Date(b.lastAccessedAt) - +new Date(a.lastAccessedAt))
-        .slice(0, 3),
+        .slice(0, RECENT_COUNT),
     [visible]
   )
   const active = useMemo(
     () => projects.find((p) => p.id === activeProjectId) ?? null,
     [projects, activeProjectId]
   )
+
+  const isLarge = visible.length >= LARGE_THRESHOLD
+  const trimmed = query.trim().toLowerCase()
+  const filtered = useMemo(() => {
+    if (!trimmed) return visible
+    return visible.filter(
+      (p) =>
+        p.name.toLowerCase().includes(trimmed) ||
+        allRootPaths(p).some((path) => path.toLowerCase().includes(trimmed))
+    )
+  }, [visible, trimmed])
+  // Pin the Recent group only when the list is large and unfiltered.
+  const showRecent = isLarge && !trimmed && recent.length > 0
 
   // Resolve per-workspace trust badges lazily (desktop only).
   useEffect(() => {
@@ -84,23 +110,28 @@ export function WorkspaceSwitcher() {
   const triggerLabel = active ? t("active", { name: active.name }) : t("none")
   const initial = active?.name.trim().charAt(0).toUpperCase()
 
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next)
+    if (!next) setQuery("")
+  }
   const handleSwitch = (id: string) => {
     setActiveProject(id)
-    setOpen(false)
+    handleOpenChange(false)
   }
   const openManage = (autoCreate: boolean) => {
-    setOpen(false)
+    handleOpenChange(false)
     setManageAutoCreate(autoCreate)
     setManageOpen(true)
   }
   const handleOpenFolder = async () => {
-    setOpen(false)
+    handleOpenChange(false)
     await openFolderAsWorkspace()
   }
 
   const renderRow = (p: Project, keyPrefix = "") => {
     const primaryPath = primaryRootOf(p)?.path
     const rootCount = p.roots?.length ?? 0
+    const isActive = activeProjectId === p.id
     return (
       <button
         key={`${keyPrefix}${p.id}`}
@@ -108,14 +139,21 @@ export function WorkspaceSwitcher() {
         onClick={() => handleSwitch(p.id)}
         data-testid={`workspace-switch-${keyPrefix}${p.id}`}
         className={cn(
-          "flex items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent",
-          activeProjectId === p.id && "bg-primary/10 text-foreground"
+          "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
+          isActive && "bg-primary/10"
         )}
       >
-        <FolderIcon className="size-4 shrink-0 text-muted-foreground" />
+        <span
+          className={cn(
+            "flex size-7 shrink-0 items-center justify-center rounded-md bg-muted/60 text-muted-foreground",
+            isActive && "bg-primary/15 text-primary"
+          )}
+        >
+          {isActive ? <FolderOpenIcon className="size-4" /> : <FolderIcon className="size-4" />}
+        </span>
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-1">
-            <span className="truncate">{p.name}</span>
+            <span className={cn("truncate", isActive && "font-medium")}>{p.name}</span>
             {untrustedMap[p.id] && (
               <ShieldAlertIcon
                 aria-label={t("untrustedHint")}
@@ -132,14 +170,14 @@ export function WorkspaceSwitcher() {
             </span>
           )}
         </span>
-        {activeProjectId === p.id && <CheckIcon className="size-4 shrink-0 text-primary" />}
+        {isActive && <CheckIcon className="size-4 shrink-0 text-primary" />}
       </button>
     )
   }
 
   return (
     <>
-      <Popover open={open} onOpenChange={setOpen}>
+      <Popover open={open} onOpenChange={handleOpenChange}>
         <Tooltip delayDuration={300}>
           <TooltipTrigger asChild>
             <PopoverTrigger asChild>
@@ -161,37 +199,78 @@ export function WorkspaceSwitcher() {
           <TooltipContent side="right">{triggerLabel}</TooltipContent>
         </Tooltip>
 
-        <PopoverContent side="right" align="start" className="w-64 p-1">
-          <div className="px-2 py-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            {t("heading")}
+        <PopoverContent side="right" align="start" className="w-72 p-1">
+          <div className="flex items-center justify-between gap-2 px-2 py-1.5">
+            <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+              {t("heading")}
+            </span>
+            {visible.length > 0 && (
+              <span className="rounded-full bg-muted px-1.5 text-[10px] font-medium text-muted-foreground tabular-nums">
+                {visible.length}
+              </span>
+            )}
           </div>
-          <ScrollArea className="max-h-72">
+
+          {isLarge && (
+            <div className="relative px-1 pb-1">
+              <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={t("searchPlaceholder")}
+                aria-label={t("searchPlaceholder")}
+                data-testid="workspace-switcher-search"
+                className="h-8 w-full rounded-md border border-input bg-transparent pr-8 pl-8 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40"
+              />
+              {query && (
+                <button
+                  type="button"
+                  onClick={() => setQuery("")}
+                  aria-label={t("clearSearch")}
+                  data-testid="workspace-switcher-search-clear"
+                  className="absolute top-1/2 right-3 flex size-4 -translate-y-1/2 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
+                >
+                  <XIcon className="size-3.5" />
+                </button>
+              )}
+            </div>
+          )}
+
+          <ScrollArea className="max-h-[min(20rem,50vh)]">
             <div className="flex flex-col">
               {visible.length === 0 ? (
                 <div className="px-2 py-1.5 text-sm text-muted-foreground">{t("empty")}</div>
+              ) : trimmed && filtered.length === 0 ? (
+                <div className="px-2 py-6 text-center text-sm text-muted-foreground">
+                  {t("noMatches")}
+                </div>
               ) : (
                 <>
-                  {recent.length > 0 && (
+                  {showRecent && (
                     <>
-                      <div className="px-2 pt-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                      <div className="px-2 pt-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
                         {t("recentHeading")}
                       </div>
                       {recent.map((p) => renderRow(p, "recent-"))}
-                      <Separator className="my-1" />
+                      <div className="mt-1 px-2 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+                        {t("allHeading")}
+                      </div>
                     </>
                   )}
-                  {visible.map((p) => renderRow(p))}
+                  {(trimmed ? filtered : visible).map((p) => renderRow(p))}
                 </>
               )}
             </div>
           </ScrollArea>
+
           <Separator className="my-1" />
           {isTauri() && (
             <button
               type="button"
               onClick={() => void handleOpenFolder()}
               data-testid="workspace-switcher-open-folder"
-              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent"
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent"
             >
               <FolderOpenIcon className="size-4 text-muted-foreground" />
               {t("openFolder")}
@@ -201,7 +280,7 @@ export function WorkspaceSwitcher() {
             type="button"
             onClick={() => openManage(true)}
             data-testid="workspace-switcher-new"
-            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent"
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent"
           >
             <PlusIcon className="size-4 text-muted-foreground" />
             {t("newWorkspace")}
@@ -210,7 +289,7 @@ export function WorkspaceSwitcher() {
             type="button"
             onClick={() => openManage(false)}
             data-testid="workspace-switcher-manage"
-            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-accent"
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent"
           >
             <SlidersHorizontalIcon className="size-4 text-muted-foreground" />
             {t("manage")}

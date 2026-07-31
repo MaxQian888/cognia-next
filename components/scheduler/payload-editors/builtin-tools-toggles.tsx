@@ -16,7 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import type { BuiltinToolsConfig } from "@/lib/claude/types"
+import type { BuiltinToolsConfig } from "@cognia/agent-config-types"
 
 type ToggleKey = keyof BuiltinToolsConfig
 const KEYS: ToggleKey[] = ["fileExtras", "git", "process", "environment", "shellAdvanced"]

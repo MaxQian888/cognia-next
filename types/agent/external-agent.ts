@@ -15,7 +15,9 @@
  */
 export type ExternalAgentProtocol =
   | "acp" // Agent Client Protocol (Claude Code, etc.)
+  | "codex-app-server" // OpenAI Codex native app-server JSON-RPC (thread/turn/item)
   | "opencode" // OpenCode SDK/server protocol
+  | "opencode-v2" // OpenCode V2 local-service preview protocol
   | "a2a" // Agent-to-Agent Protocol (Google)
   | "http" // HTTP/REST API
   | "websocket" // WebSocket
@@ -57,22 +59,13 @@ export type ExternalAgentBranchReasonCode =
  * Canonical branch outcome for external-agent orchestration.
  */
 export type ExternalAgentBranchOutcome =
-  | "external"
-  | "fallback"
-  | "strict_failure"
-  | "builtin"
-  | "blocked"
+  "external" | "fallback" | "strict_failure" | "builtin" | "blocked"
 
 /**
  * Lifecycle completeness stages used by manager/store/UI diagnostics.
  */
 export type ExternalAgentLifecycleCompletenessStage =
-  | "config"
-  | "connect"
-  | "session_extensions"
-  | "execution"
-  | "fallback"
-  | "recovery"
+  "config" | "connect" | "session_extensions" | "execution" | "fallback" | "recovery"
 
 /**
  * Canonical execution eligibility state.
@@ -93,19 +86,13 @@ export type ExternalAgentEcosystemExecutionMode = "direct" | "guided" | "externa
  * Status of an individual ecosystem prerequisite.
  */
 export type ExternalAgentEcosystemPrerequisiteState =
-  | "satisfied"
-  | "missing"
-  | "unknown"
-  | "not-applicable"
+  "satisfied" | "missing" | "unknown" | "not-applicable"
 
 /**
  * Aggregated prerequisite status projected for UI/runtime consumers.
  */
 export type ExternalAgentEcosystemPrerequisiteStatus =
-  | "ready"
-  | "action-required"
-  | "unknown"
-  | "not-applicable"
+  "ready" | "action-required" | "unknown" | "not-applicable"
 
 export interface ExternalAgentEcosystemPrerequisite {
   id: string
@@ -128,8 +115,29 @@ export interface ExternalAgentEcosystemReadinessSnapshot {
   limitationNote?: string
   prerequisiteStatus?: ExternalAgentEcosystemPrerequisiteStatus
   prerequisites?: ExternalAgentEcosystemPrerequisite[]
-  recommendedActions?: string[]
+  recommendedActions?: ExternalAgentRecommendedAction[]
 }
+
+/**
+ * One line of "what to do about it" under an agent's readiness panel.
+ *
+ * Two shapes, because this array is persisted. Entries this app generates are
+ * `{ id }` references into `externalAgent.manager.diagnostics.recommendedAction.*`
+ * and are rendered in the reader's language; a bare string is either a value
+ * persisted before that existed or prose supplied by a third-party preset,
+ * and is rendered as-is because there is no key to look up.
+ *
+ * Mirrors how `recoveryHints` already carries key ids rather than prose — see
+ * `resolveRecoveryHints` in `canonical-contract.ts`.
+ */
+export type ExternalAgentRecommendedAction =
+  | string
+  | {
+      /** Key under `externalAgent.manager.diagnostics.recommendedAction`. */
+      id: string
+      /** ICU interpolation values for that message. */
+      params?: Record<string, string>
+    }
 
 /**
  * Correlation metadata shared across manager/hook/router diagnostics.
@@ -172,10 +180,7 @@ export type ExternalAgentBenchmarkGapGrade = "blocking" | "major" | "minor"
  * Adaptation status for benchmark capabilities.
  */
 export type ExternalAgentBenchmarkAdaptationStatus =
-  | "not-started"
-  | "in-progress"
-  | "validated"
-  | "intentional-deviation"
+  "not-started" | "in-progress" | "validated" | "intentional-deviation"
 
 /**
  * Evidence kinds accepted for benchmark adaptation validation.
@@ -283,6 +288,11 @@ export interface ExternalAgentValiditySnapshot {
   canonicalReason?: string
   branchOutcome?: ExternalAgentBranchOutcome
   correlation?: ExternalAgentCorrelationMetadata
+  /**
+   * Remediation advice as i18n key ids, resolved by the renderer against
+   * `diagnostics.recoveryHint.*`. NOT display text — these cross into `lib/`,
+   * which must stay locale-free.
+   */
   recoveryHints?: string[]
   lastBranchReasonCode?: ExternalAgentBranchReasonCode
   lastBranchReason?: string
@@ -293,11 +303,7 @@ export interface ExternalAgentValiditySnapshot {
  * Connection status for external agents
  */
 export type ExternalAgentConnectionStatus =
-  | "disconnected"
-  | "connecting"
-  | "connected"
-  | "reconnecting"
-  | "error"
+  "disconnected" | "connecting" | "connected" | "reconnecting" | "error"
 
 /**
  * External agent execution status
@@ -456,6 +462,15 @@ export interface AcpClientCapabilities {
   }
   /** Terminal capability - all terminal/* methods available */
   terminal?: boolean
+  /** Session-level client features. */
+  session?: {
+    configOptions?: {
+      /** Client can render and update boolean config options. */
+      boolean?: Record<string, never>
+    }
+  }
+  /** Client can receive experimental identified plan updates/removals. */
+  plan?: Record<string, never>
   /** Custom capabilities via _meta */
   _meta?: Record<string, unknown>
 }
@@ -485,10 +500,23 @@ export interface AcpAgentCapabilities {
   }
   /** Session capabilities */
   sessionCapabilities?: {
-    /** Fork session support */
+    /** Fork session support (unstable) */
     fork?: Record<string, unknown>
     /** Resume session support */
     resume?: Record<string, unknown>
+    /** Close session support (`session/close`) */
+    close?: Record<string, unknown>
+    /** Delete session support (`session/delete`) */
+    delete?: Record<string, unknown>
+    /** List sessions support (`session/list`) */
+    list?: Record<string, unknown>
+    /** Additional workspace roots on session lifecycle requests. */
+    additionalDirectories?: Record<string, unknown>
+  }
+  /** Authentication capabilities */
+  auth?: {
+    /** Agent supports `logout` */
+    logout?: boolean
   }
 }
 
@@ -560,25 +588,32 @@ export interface AcpCapabilities {
 export type AcpSessionUpdateType =
   | "agent_message_chunk"
   | "user_message_chunk"
+  // Canonical ACP v1 reasoning-chunk discriminator.
+  | "agent_thought_chunk"
+  // Legacy/vendor alias retained for tolerance (some adapters emit this).
   | "thought_message_chunk"
   | "tool_call"
   | "tool_call_update"
   | "plan"
+  | "plan_update"
+  | "plan_removed"
   | "available_commands_update"
   | "mode_change"
   | "current_mode_update"
+  // Canonical ACP v1 config-option discriminator (singular).
+  | "config_option_update"
+  // Legacy/vendor alias retained for tolerance (plural).
   | "config_options_update"
+  // Context-window + cost reporting (ACP v1 UsageUpdate).
+  | "usage_update"
+  // Session metadata (title/updatedAt) update (ACP v1 SessionInfoUpdate).
+  | "session_info_update"
 
 /**
  * ACP Tool call status
  */
 export type AcpToolCallStatus =
-  | "pending"
-  | "in_progress"
-  | "completed"
-  | "failed"
-  | "cancelled"
-  | "error"
+  "pending" | "in_progress" | "completed" | "failed" | "cancelled" | "error"
 
 /**
  * ACP Tool call kind
@@ -640,11 +675,38 @@ export interface AcpUserMessageChunkUpdate {
 }
 
 /**
- * ACP Thought message chunk update
+ * ACP Thought message chunk update.
+ *
+ * The canonical ACP v1 discriminator is `agent_thought_chunk`; the
+ * `thought_message_chunk` value is retained as a tolerated alias so adapters
+ * emitting the older string still surface reasoning.
  */
 export interface AcpThoughtMessageChunkUpdate {
-  sessionUpdate: "thought_message_chunk"
+  sessionUpdate: "agent_thought_chunk" | "thought_message_chunk"
   content: AcpContentBlock
+}
+
+/**
+ * ACP Usage update — context window occupancy + cumulative session cost.
+ * @see https://agentclientprotocol.com/protocol/prompt-turn
+ */
+export interface AcpUsageUpdate {
+  sessionUpdate: "usage_update"
+  /** Tokens currently in context. */
+  used: number
+  /** Total context window size in tokens. */
+  size: number
+  /** Cumulative session cost (optional). */
+  cost?: { amount: number; currency: string } | null
+}
+
+/**
+ * ACP Session info update — session metadata (title / last-activity).
+ */
+export interface AcpSessionInfoUpdate {
+  sessionUpdate: "session_info_update"
+  title?: string | null
+  updatedAt?: string | null
 }
 
 /**
@@ -692,6 +754,24 @@ export interface AcpPlanUpdate {
   entries: AcpPlanEntry[]
 }
 
+/** Identified plan content used by the current ACP SDK extension. */
+export type AcpPlanUpdateContent =
+  | { type: "items"; planId: string; entries: AcpPlanEntry[] }
+  | { type: "file"; planId: string; uri: string }
+  | { type: "markdown"; planId: string; content: string }
+
+/** Current ACP identified-plan update notification. */
+export interface AcpPlanContentUpdate {
+  sessionUpdate: "plan_update"
+  plan: AcpPlanUpdateContent
+}
+
+/** Current ACP identified-plan removal notification. */
+export interface AcpPlanRemovedUpdate {
+  sessionUpdate: "plan_removed"
+  planId: string
+}
+
 /**
  * ACP Available commands update
  */
@@ -715,7 +795,7 @@ export interface AcpModeChangeUpdate {
  */
 export interface AcpCurrentModeUpdate {
   sessionUpdate: "current_mode_update"
-  modeId: string
+  currentModeId: string
 }
 
 // ============================================================================
@@ -727,12 +807,12 @@ export interface AcpCurrentModeUpdate {
  * Config option category for semantic UX hints
  * Categories starting with '_' are for custom use
  */
-export type AcpConfigOptionCategory = "mode" | "model" | "thought_level" | string
+export type AcpConfigOptionCategory = "mode" | "model" | "model_config" | "thought_level" | string
 
 /**
- * Config option type (currently only 'select' is supported by the spec)
+ * Config option type supported by ACP v1.
  */
-export type AcpConfigOptionType = "select"
+export type AcpConfigOptionType = "select" | "boolean"
 
 /**
  * A single value within a config option
@@ -746,11 +826,18 @@ export interface AcpConfigOptionValue {
   description?: string
 }
 
+/** A named group of select values. */
+export interface AcpConfigOptionGroup {
+  group: string
+  name: string
+  options: AcpConfigOptionValue[]
+}
+
 /**
  * A configuration option for a session
  * @see https://agentclientprotocol.com/protocol/session-config-options
  */
-export interface AcpConfigOption {
+interface AcpConfigOptionBase {
   /** Unique identifier for this configuration option */
   id: string
   /** Human-readable label for the option */
@@ -759,20 +846,29 @@ export interface AcpConfigOption {
   description?: string
   /** Semantic category for UX hints */
   category?: AcpConfigOptionCategory
-  /** The type of input control */
-  type: AcpConfigOptionType
-  /** The currently selected value */
-  currentValue: string
-  /** The available values */
-  options: AcpConfigOptionValue[]
 }
+
+export type AcpConfigOption = AcpConfigOptionBase &
+  (
+    | {
+        type: "select"
+        currentValue: string
+        options: AcpConfigOptionValue[] | AcpConfigOptionGroup[]
+      }
+    | {
+        type: "boolean"
+        currentValue: boolean
+      }
+  )
 
 /**
  * ACP Config options update (session notification)
  * @see https://agentclientprotocol.com/protocol/session-config-options
  */
 export interface AcpConfigOptionsUpdate {
-  sessionUpdate: "config_options_update"
+  // Canonical ACP v1 uses the singular `config_option_update`; the plural is a
+  // tolerated alias. Both carry the full `configOptions` set.
+  sessionUpdate: "config_option_update" | "config_options_update"
   configOptions: AcpConfigOption[]
 }
 
@@ -815,9 +911,7 @@ export interface AcpToolCallRegularContent {
  * Union of all tool call content types
  */
 export type AcpToolCallContent =
-  | AcpToolCallRegularContent
-  | AcpToolCallDiffContent
-  | AcpToolCallTerminalContent
+  AcpToolCallRegularContent | AcpToolCallDiffContent | AcpToolCallTerminalContent
 
 /**
  * File location affected by a tool call (for follow-along features)
@@ -834,6 +928,8 @@ export interface AcpToolCallLocation {
  * @see https://agentclientprotocol.com/protocol/file-system
  */
 export interface AcpReadTextFileParams {
+  /** Session whose workspace roots authorize this request */
+  sessionId: string
   /** Absolute file path */
   path: string
   /** 1-based line number to start from */
@@ -841,6 +937,14 @@ export interface AcpReadTextFileParams {
   /** Maximum number of lines to return */
   limit?: number
   /** Optional metadata */
+  _meta?: Record<string, unknown>
+}
+
+/** ACP fs/write_text_file params. */
+export interface AcpWriteTextFileParams {
+  sessionId: string
+  path: string
+  content: string
   _meta?: Record<string, unknown>
 }
 
@@ -853,7 +957,7 @@ export interface AcpTerminalCreateParams {
   command: string
   args?: string[]
   cwd?: string
-  env?: Record<string, string>
+  env?: Array<{ name: string; value: string }>
   outputByteLimit?: number
   _meta?: Record<string, unknown>
 }
@@ -863,6 +967,7 @@ export interface AcpTerminalCreateParams {
  * @see https://agentclientprotocol.com/protocol/terminals
  */
 export interface AcpTerminalOutputParams {
+  sessionId: string
   terminalId: string
   outputByteLimit?: number
   _meta?: Record<string, unknown>
@@ -873,10 +978,7 @@ export interface AcpTerminalOutputParams {
  * @see https://agentclientprotocol.com/protocol/tool-calls
  */
 export type AcpPermissionOptionKind =
-  | "allow_once"
-  | "allow_always"
-  | "reject_once"
-  | "reject_always"
+  "allow_once" | "allow_always" | "reject_once" | "reject_always"
 
 /**
  * Permission option presented to the user
@@ -968,10 +1070,14 @@ export type AcpSessionUpdate =
   | AcpToolCallUpdate
   | AcpToolCallStatusUpdate
   | AcpPlanUpdate
+  | AcpPlanContentUpdate
+  | AcpPlanRemovedUpdate
   | AcpAvailableCommandsUpdate
   | AcpModeChangeUpdate
   | AcpCurrentModeUpdate
   | AcpConfigOptionsUpdate
+  | AcpUsageUpdate
+  | AcpSessionInfoUpdate
 
 /**
  * ACP session/update notification params
@@ -1029,6 +1135,12 @@ export interface AcpPermissionResponse {
   scope?: "once" | "session" | "always"
   /** Option ID selected from ACP permission options */
   optionId?: string
+  /**
+   * Per-question answers for interactive user-input requests (Codex
+   * `item/tool/requestUserInput`): question id → selected/typed answers.
+   * Absent for plain approval decisions.
+   */
+  answers?: Record<string, string[]>
 }
 
 // ============================================================================
@@ -1148,6 +1260,9 @@ export interface ExternalAgentConfig {
   /** Tools requiring manual approval */
   requireApprovalFor?: string[]
 
+  /** Codex app-server specific defaults (sandbox / reasoning options) */
+  codexOptions?: CodexAgentOptions
+
   /** Execution timeout (ms) */
   timeout?: number
   /** Retry configuration */
@@ -1184,6 +1299,7 @@ export interface CreateExternalAgentInput {
   defaultPermissionMode?: AcpPermissionMode
   autoApprovePatterns?: string[]
   requireApprovalFor?: string[]
+  codexOptions?: CodexAgentOptions
   timeout?: number
   retryConfig?: Partial<ExternalAgentRetryConfig>
   tags?: string[]
@@ -1203,11 +1319,37 @@ export interface UpdateExternalAgentInput {
   defaultPermissionMode?: AcpPermissionMode
   autoApprovePatterns?: string[]
   requireApprovalFor?: string[]
+  codexOptions?: CodexAgentOptions
   timeout?: number
   retryConfig?: Partial<ExternalAgentRetryConfig>
   tags?: string[]
   metadata?: Record<string, unknown>
   validitySnapshot?: ExternalAgentValiditySnapshot
+}
+
+/**
+ * Codex app-server per-agent option defaults. Applied at session creation
+ * (thread/start `sandbox`, turn/start `sandboxPolicy` / `effort` / `summary`)
+ * and adjustable per session via synthesized config options.
+ */
+export interface CodexAgentOptions {
+  /** Sandbox mode for command execution (`SandboxPolicy` tag). */
+  sandboxMode?: "readOnly" | "workspaceWrite" | "dangerFullAccess"
+  /** Allow network access inside the sandbox (readOnly/workspaceWrite). */
+  networkAccess?: boolean
+  /** Extra writable roots for workspaceWrite. */
+  writableRoots?: string[]
+  /**
+   * Absolute folder paths registered as extra Codex skill roots via the
+   * `skills/extraRoots/set` app-server RPC. Codex discovers every `SKILL.md`
+   * under these directories in addition to the default `.agents/skills`
+   * locations. Re-applied on every connect (the server never persists them).
+   */
+  extraSkillRoots?: string[]
+  /** Default reasoning effort (model-specific values, e.g. "low"…"xhigh"). */
+  defaultReasoningEffort?: string
+  /** Reasoning summary verbosity: "auto" | "concise" | "detailed" | "none". */
+  reasoningSummary?: "auto" | "concise" | "detailed" | "none"
 }
 
 // ============================================================================
@@ -1218,14 +1360,7 @@ export interface UpdateExternalAgentInput {
  * Session status
  */
 export type ExternalAgentSessionStatus =
-  | "creating"
-  | "active"
-  | "idle"
-  | "executing"
-  | "waiting"
-  | "error"
-  | "closing"
-  | "closed"
+  "creating" | "active" | "idle" | "executing" | "waiting" | "error" | "closing" | "closed"
 
 /**
  * External agent session
@@ -1239,6 +1374,11 @@ export interface ExternalAgentSession {
   status: ExternalAgentSessionStatus
   /** Permission mode for this session */
   permissionMode?: AcpPermissionMode
+  /**
+   * Pre-approved tool allow-list for `dontAsk` mode. A tool matching an entry
+   * is silently approved; everything else is denied without a UI prompt.
+   */
+  allowedTools?: string[]
   /** Discovered capabilities */
   capabilities?: AcpCapabilities
   /** Available tools in this session */
@@ -1299,6 +1439,12 @@ export interface ExternalAgentTokenUsage {
   totalTokens: number
   cacheReadTokens?: number
   cacheWriteTokens?: number
+  /** Reasoning tokens reported separately by the external agent. */
+  reasoningTokens?: number
+  /** Tokens currently occupying the agent's live context, when reported. */
+  contextTokens?: number
+  /** The live model's authoritative context-window size, when reported. */
+  modelContextWindow?: number
 }
 
 // ============================================================================
@@ -1314,13 +1460,7 @@ export type ExternalAgentMessageRole = "user" | "assistant" | "system" | "tool"
  * Content block types
  */
 export type ExternalAgentContentType =
-  | "text"
-  | "image"
-  | "file"
-  | "tool_use"
-  | "tool_result"
-  | "thinking"
-  | "error"
+  "text" | "image" | "file" | "tool_use" | "tool_result" | "thinking" | "commentary" | "error"
 
 /**
  * Text content block
@@ -1384,6 +1524,13 @@ export interface ExternalAgentThinkingContent {
   thinking: string
 }
 
+/** User-visible mid-turn narration retained when hydrating session history. */
+export interface ExternalAgentCommentaryContent {
+  type: "commentary"
+  text: string
+  source?: "codex"
+}
+
 /**
  * Error content block
  */
@@ -1404,6 +1551,7 @@ export type ExternalAgentContent =
   | ExternalAgentToolUseContent
   | ExternalAgentToolResultContent
   | ExternalAgentThinkingContent
+  | ExternalAgentCommentaryContent
   | ExternalAgentErrorContent
 
 /**
@@ -1447,6 +1595,7 @@ export type ExternalAgentEventType =
   | "tool_call_update"
   | "permission_request"
   | "permission_response"
+  | "commentary_delta"
   | "thinking"
   | "plan_update"
   | "commands_update"
@@ -1455,6 +1604,7 @@ export type ExternalAgentEventType =
   | "progress"
   | "error"
   | "done"
+  | "hook_fire"
 
 /**
  * Base event interface
@@ -1584,6 +1734,19 @@ export interface ExternalAgentThinkingEvent extends ExternalAgentEventBase {
 }
 
 /**
+ * User-visible mid-turn narration. This is intentionally separate from
+ * `thinking`: commentary may be rendered as progress, while reasoning remains
+ * governed by the reasoning disclosure policy.
+ */
+export interface ExternalAgentCommentaryDeltaEvent extends ExternalAgentEventBase {
+  type: "commentary_delta"
+  messageId?: string
+  text: string
+  done?: boolean
+  source?: "codex"
+}
+
+/**
  * Plan update event
  */
 export interface ExternalAgentPlanUpdateEvent extends ExternalAgentEventBase {
@@ -1592,6 +1755,24 @@ export interface ExternalAgentPlanUpdateEvent extends ExternalAgentEventBase {
   progress: number
   step: number
   totalSteps: number
+  /** Stable plan identifier for ACP's identified-plan extension. */
+  planId?: string
+  /** Identified plan representation. Legacy `plan` updates use `items`. */
+  kind?: "items" | "file" | "markdown"
+  /** File URI when `kind` is `file`. */
+  uri?: string
+  /** Raw markdown when `kind` is `markdown`. */
+  content?: string
+  /** True when the identified plan was removed. */
+  removed?: boolean
+}
+
+/** Active non-item plan representation exposed by ACP identified plans. */
+export interface ExternalAgentPlanDocument {
+  planId: string
+  kind: "file" | "markdown"
+  uri?: string
+  content?: string
 }
 
 /**
@@ -1668,6 +1849,25 @@ export interface ExternalAgentDoneEvent extends ExternalAgentEventBase {
 }
 
 /**
+ * Hook-fire event — a synthetic event the manager emits when a consequential
+ * settings.json/plugin lifecycle hook fired for this external-agent turn
+ * (blocked a tool, injected context, or warned). Mirrors the built-in agent's
+ * Rust `hook_fire` system event; `event-to-parts` projects it into a
+ * `hook-notice` part rendered inline by the chat. No-op fires are never emitted.
+ */
+export interface ExternalAgentHookFireEvent extends ExternalAgentEventBase {
+  type: "hook_fire"
+  /** Lifecycle event name, e.g. "PreToolUse" / "PostToolUse". */
+  event: string
+  toolName?: string
+  /** Derived status, by precedence block > context > warning. */
+  outcome: "blocked" | "context" | "warning"
+  block?: string
+  additionalContext?: string
+  warnings: string[]
+}
+
+/**
  * Union of all event types
  */
 export type ExternalAgentEvent =
@@ -1683,6 +1883,7 @@ export type ExternalAgentEvent =
   | ExternalAgentToolCallUpdateEvent
   | ExternalAgentPermissionRequestEvent
   | ExternalAgentPermissionResponseEvent
+  | ExternalAgentCommentaryDeltaEvent
   | ExternalAgentThinkingEvent
   | ExternalAgentPlanUpdateEvent
   | ExternalAgentCommandsUpdateEvent
@@ -1691,6 +1892,7 @@ export type ExternalAgentEvent =
   | ExternalAgentProgressEvent
   | ExternalAgentErrorEvent
   | ExternalAgentDoneEvent
+  | ExternalAgentHookFireEvent
 
 // ============================================================================
 // External Agent Execution
@@ -1762,10 +1964,30 @@ export interface ExternalAgentResult {
 export interface ExternalAgentExecutionOptions {
   /** Reuse an existing external agent session */
   sessionId?: string
+  /**
+   * Model id the external agent should run this execution on.
+   *
+   * Bridged to the adapter as `metadata.selectedModel` — the same channel the
+   * interactive model picker writes — so a new session starts on it and a
+   * reused session is switched onto it via `setSessionModel`. Best-effort:
+   * adapters with no model concept ignore it, and the id is passed through
+   * unvalidated (the agent rejects one it doesn't know).
+   *
+   * Omit to inherit whatever the agent's own configuration selects.
+   */
+  model?: string
   /** System prompt override */
   systemPrompt?: string
   /** Permission mode override */
   permissionMode?: AcpPermissionMode
+  /**
+   * Pre-approved tool allow-list. Under the `dontAsk` permission mode the ACP
+   * client silently approves a tool whose name matches an entry here and
+   * rejects everything else (no UI prompt). Ignored by other modes. Entries are
+   * bare tool names or `Tool(specifier)` patterns (the Claude Agent SDK
+   * `allowedTools` format); see `deriveExternalSessionPermission`.
+   */
+  allowedTools?: string[]
   /**
    * Cognia-specific brief-output mode. When true, the ACP client prepends a
    * concise-output snippet to the resolved `systemPrompt` for `session/new`.
@@ -2148,9 +2370,7 @@ export function isStreamingTextEvent(
 export function isToolUseEvent(
   event: ExternalAgentEvent
 ): event is
-  | ExternalAgentToolUseStartEvent
-  | ExternalAgentToolUseDeltaEvent
-  | ExternalAgentToolUseEndEvent {
+  ExternalAgentToolUseStartEvent | ExternalAgentToolUseDeltaEvent | ExternalAgentToolUseEndEvent {
   return (
     event.type === "tool_use_start" ||
     event.type === "tool_use_delta" ||

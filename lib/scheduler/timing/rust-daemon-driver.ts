@@ -22,33 +22,75 @@ export class RustDaemonTimingDriver implements SchedulerTimingDriver {
   private armedAt = new Map<string, number>()
   private dueCb: TaskDueCallback | null = null
   private unlisten: (() => void) | null = null
+  private startPromise: Promise<void> | null = null
+  /** Preserve IPC mutation order per task (arm → re-arm/disarm). */
+  private mutationQueues = new Map<string, Promise<void>>()
+  /** Invalidates callbacks and async subscriptions from an earlier lifecycle. */
+  private lifecycleVersion = 0
 
   async start(): Promise<void> {
     if (this.unlisten) return
-    this.unlisten = await listenTaskDue((event) => {
-      const fireAtMs = this.armedAt.get(event.taskId) ?? event.firedAtMs
-      this.armedAt.delete(event.taskId)
-      this.dueCb?.(event.taskId, fireAtMs)
-    })
+    if (this.startPromise) return this.startPromise
+
+    const version = ++this.lifecycleVersion
+    const startPromise = (async () => {
+      const unlisten = await listenTaskDue((event) => {
+        if (version !== this.lifecycleVersion) return
+        const fireAtMs = this.armedAt.get(event.taskId) ?? event.firedAtMs
+        this.armedAt.delete(event.taskId)
+        this.dueCb?.(event.taskId, fireAtMs)
+      })
+
+      if (version !== this.lifecycleVersion) {
+        unlisten()
+        return
+      }
+      this.unlisten = unlisten
+    })()
+    this.startPromise = startPromise
+    try {
+      await startPromise
+    } finally {
+      if (this.startPromise === startPromise) {
+        this.startPromise = null
+      }
+    }
   }
 
   stop(): void {
+    this.lifecycleVersion += 1
     this.unlisten?.()
     this.unlisten = null
-    this.armedAt.clear()
+    for (const taskId of Array.from(this.armedAt.keys())) {
+      void this.disarm(taskId)
+    }
   }
 
   onDue(cb: TaskDueCallback): void {
     this.dueCb = cb
   }
 
-  arm(taskId: string, fireAtMs: number): void {
+  arm(taskId: string, fireAtMs: number): Promise<void> {
     this.armedAt.set(taskId, fireAtMs)
-    void armTask(taskId, fireAtMs)
+    return this.enqueueMutation(taskId, () => armTask(taskId, fireAtMs))
   }
 
-  disarm(taskId: string): void {
+  disarm(taskId: string): Promise<void> {
     this.armedAt.delete(taskId)
-    void disarmTask(taskId)
+    return this.enqueueMutation(taskId, () => disarmTask(taskId))
+  }
+
+  private enqueueMutation(taskId: string, mutation: () => Promise<void>): Promise<void> {
+    const previous = this.mutationQueues.get(taskId) ?? Promise.resolve()
+    const tracked = previous
+      .catch(() => undefined)
+      .then(mutation)
+      .finally(() => {
+        if (this.mutationQueues.get(taskId) === tracked) {
+          this.mutationQueues.delete(taskId)
+        }
+      })
+    this.mutationQueues.set(taskId, tracked)
+    return tracked
   }
 }

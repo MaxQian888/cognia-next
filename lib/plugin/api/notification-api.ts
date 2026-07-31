@@ -8,7 +8,7 @@ import type {
   PluginNotificationCenterAPI,
   NotificationOptions,
   Notification,
-} from "@/types/plugin/plugin-extended"
+} from "@/types/plugin/plugin"
 import { nanoid } from "nanoid"
 import { createPluginSystemLogger } from "../core/logger"
 

@@ -12,11 +12,12 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
 } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
-import { useTranslations } from "next-intl"
+import { useLocale, useTranslations } from "next-intl"
 import Link from "next/link"
 import {
   ArrowLeft,
@@ -26,13 +27,16 @@ import {
   Download,
   Edit,
   Eye,
+  FilePlus2,
   Grid3X3,
+  Link2,
   List,
   Loader2,
   MoreVertical,
   Search,
   SortAsc,
   Sparkles,
+  Star,
   Trash2,
   Upload,
   X,
@@ -50,7 +54,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import {
   Select,
   SelectContent,
@@ -59,9 +70,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useA2UIAppBuilder } from "@/hooks/a2ui/use-app-builder"
-import { type ViewMode } from "@/hooks/a2ui/use-app-gallery-filter"
-import { generateAppFromDescription } from "@/lib/a2ui/app-generator"
-import { appTemplates, getTemplatesByCategory, searchTemplates } from "@/lib/a2ui/templates"
+import { filterAndSortApps, type ViewMode } from "@/hooks/a2ui/use-app-gallery-filter"
+import { generateA2UIApp } from "@/lib/a2ui/ai-generate"
 import { CATEGORY_KEYS, CATEGORY_I18N_MAP } from "@/lib/a2ui/constants"
 import { A2UIInlineSurface } from "@/components/a2ui/a2ui-surface"
 import { PageLoading } from "@/components/ui/loading-states"
@@ -70,20 +80,21 @@ import { DeleteConfirmDialog } from "@/components/a2ui/delete-confirm-dialog"
 import { TemplateCard } from "@/components/a2ui/quick-app-builder/template-card"
 import { A2UIWorkspace } from "@/components/a2ui/workspace/a2ui-workspace"
 import { cn } from "@/lib/utils"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { toast } from "sonner"
 import type { A2UIAppTemplate } from "@/lib/a2ui/templates"
+import type { A2UIComponent } from "@/types/a2ui/schema"
 
 type SortOption = "newest" | "oldest" | "name" | "mostUsed"
 
-const QUICK_SUGGESTIONS = [
-  "Pomodoro Timer",
-  "Expense Tracker",
-  "BMI Calculator",
-  "Habit Tracker",
-  "Todo List",
-  "Unit Converter",
-]
+const QUICK_SUGGESTION_KEYS = [
+  "quickPromptPomodoro",
+  "quickPromptExpense",
+  "quickPromptBmi",
+  "quickPromptHabit",
+  "quickPromptTodo",
+  "quickPromptConverter",
+] as const
 
 function downloadJson(filename: string, content: string) {
   const blob = new Blob([content], { type: "application/json" })
@@ -101,6 +112,7 @@ function A2UIPageContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const t = useTranslations("a2ui")
+  const locale = useLocale()
   const promptRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -113,6 +125,12 @@ function A2UIPageContent() {
   const [selectedCategory, setSelectedCategory] = useState<A2UIAppTemplate["category"] | null>(null)
   const [heroPrompt, setHeroPrompt] = useState("")
   const [isGenerating, setIsGenerating] = useState(false)
+  const [shareCodeOpen, setShareCodeOpen] = useState(false)
+  const [shareCodeInput, setShareCodeInput] = useState("")
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState(false)
+  // Favoriting mutates the localStorage instance cache (not the A2UI store), so
+  // it does not trigger a store-driven re-render — bump this to refresh.
+  const [, forceRender] = useReducer((n: number) => n + 1, 0)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [appToDelete, setAppToDelete] = useState<string | null>(null)
   const [previewAppId, setPreviewAppId] = useState<string | null>(null)
@@ -120,58 +138,47 @@ function A2UIPageContent() {
   const urlActionHandledRef = useRef(false)
 
   const appBuilder = useA2UIAppBuilder({
+    // Built-in mini-app interactions (calculator/timer/todo/…) are handled
+    // app-wide by <A2UIBuiltInActionsProvider> in the root layout, so this
+    // builder does not opt in — it is used here only for app CRUD/hydration.
     onAppCreated: (appId) => {
       setPreviewAppId(appId)
-      toast.success(t("appCreated") || "App created!")
+      toast.success(t("appCreated"))
     },
   })
+
+  // Rebuild renderable surfaces for saved apps that lost their component tree
+  // across a reload (pre-persistence-fix data, or LRU-evicted surfaces). Runs
+  // once after mount, after the store has rehydrated from localStorage.
+  const hydratedRef = useRef(false)
+  useEffect(() => {
+    if (hydratedRef.current) return
+    hydratedRef.current = true
+    void appBuilder.hydratePersistedApps()
+  }, [appBuilder])
 
   const allApps = useMemo(() => appBuilder.getAllApps(), [appBuilder])
 
   const filteredApps = useMemo(() => {
-    let list = [...allApps]
-
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase()
-      list = list.filter(
-        (app) =>
-          app.name.toLowerCase().includes(q) ||
-          app.description?.toLowerCase().includes(q) ||
-          app.tags?.some((tag) => tag.toLowerCase().includes(q))
-      )
-    }
-
-    if (selectedCategory) {
-      list = list.filter((app) => app.category === selectedCategory)
-    }
-
-    switch (sortBy) {
-      case "newest":
-        list.sort((a, b) => b.lastModified - a.lastModified)
-        break
-      case "oldest":
-        list.sort((a, b) => a.lastModified - b.lastModified)
-        break
-      case "name":
-        list.sort((a, b) => a.name.localeCompare(b.name))
-        break
-      case "mostUsed":
-        list.sort((a, b) => (b.stats?.uses || 0) - (a.stats?.uses || 0))
-        break
-    }
-
-    return list
-  }, [allApps, searchQuery, selectedCategory, sortBy])
+    const sorted = filterAndSortApps(allApps, {
+      searchQuery,
+      categoryFilter: selectedCategory ?? "all",
+      sortField: sortBy === "name" ? "name" : sortBy === "mostUsed" ? "uses" : "lastModified",
+      sortOrder: sortBy === "oldest" ? "asc" : "desc",
+      getTemplate: appBuilder.getTemplate,
+    })
+    return showFavoritesOnly ? sorted.filter((app) => app.isFavorite) : sorted
+  }, [allApps, appBuilder.getTemplate, searchQuery, selectedCategory, sortBy, showFavoritesOnly])
 
   const filteredTemplates = useMemo(() => {
     if (searchQuery.trim()) {
-      return searchTemplates(searchQuery)
+      return appBuilder.searchTemplates(searchQuery)
     }
     if (selectedCategory) {
-      return getTemplatesByCategory(selectedCategory)
+      return appBuilder.getTemplatesByCategory(selectedCategory)
     }
-    return appTemplates
-  }, [searchQuery, selectedCategory])
+    return appBuilder.templates
+  }, [appBuilder, searchQuery, selectedCategory])
 
   const featuredTemplates = useMemo(() => filteredTemplates.slice(0, 3), [filteredTemplates])
   const recentApp = filteredApps[0] ?? null
@@ -206,16 +213,21 @@ function A2UIPageContent() {
     if (!heroPrompt.trim() || isGenerating) return
     setIsGenerating(true)
     try {
-      const result = generateAppFromDescription({ description: heroPrompt })
-      appBuilder.createCustomApp(result.name, result.components, result.dataModel)
+      const result = await generateA2UIApp({
+        instruction: heroPrompt,
+        mode: "create",
+        language: locale === "zh-CN" ? "zh" : "en",
+      })
+      appBuilder.createCustomApp(result.title, result.components, result.dataModel)
       setHeroPrompt("")
+      if (result.usedFallback) toast.info(t("usedTemplateFallback"))
     } catch (err) {
       loggers.a2ui?.error("Flash generation failed", err)
-      toast.error(t("generationFailed") || "Failed to generate app")
+      toast.error(t("generationFailed"))
     } finally {
       setIsGenerating(false)
     }
-  }, [appBuilder, heroPrompt, isGenerating, t])
+  }, [appBuilder, heroPrompt, isGenerating, locale, t])
 
   const handleSuggestionClick = useCallback((suggestion: string) => {
     setHeroPrompt(suggestion)
@@ -230,7 +242,7 @@ function A2UIPageContent() {
         appBuilder.createFromTemplate(template.id)
       } catch (err) {
         loggers.a2ui?.error("Template creation failed", err)
-        toast.error(t("generationFailed") || "Failed to create from template")
+        toast.error(t("generationFailed"))
       }
     },
     [appBuilder, t]
@@ -241,14 +253,24 @@ function A2UIPageContent() {
     setDeleteDialogOpen(true)
   }, [])
 
-  const handleConfirmDelete = useCallback(() => {
+  const handleConfirmDelete = useCallback(async () => {
     if (!appToDelete) return
-    appBuilder.deleteApp(appToDelete)
-    setDeleteDialogOpen(false)
-    setAppToDelete(null)
-    if (previewAppId === appToDelete) setPreviewAppId(null)
-    toast.success(t("appDeleted") || "App deleted")
+    try {
+      await appBuilder.deleteApp(appToDelete)
+      setAppToDelete(null)
+      if (previewAppId === appToDelete) setPreviewAppId(null)
+      toast.success(t("appDeleted"))
+    } catch (error) {
+      loggers.a2ui?.error("App deletion failed", error)
+      toast.error(t("deleteFailed"))
+      throw error
+    }
   }, [appBuilder, appToDelete, previewAppId, t])
+
+  const handleDeleteDialogOpenChange = useCallback((open: boolean) => {
+    setDeleteDialogOpen(open)
+    if (!open) setAppToDelete(null)
+  }, [])
 
   const handleDuplicate = useCallback(
     (appId: string) => {
@@ -256,7 +278,7 @@ function A2UIPageContent() {
         const duplicatedAppId = appBuilder.duplicateApp(appId)
         if (duplicatedAppId) {
           setPreviewAppId(duplicatedAppId)
-          toast.success(t("appDuplicated") || "App duplicated")
+          toast.success(t("appDuplicated"))
         }
       } catch (err) {
         loggers.a2ui?.error("Duplicate failed", err)
@@ -276,7 +298,7 @@ function A2UIPageContent() {
           if (!payload) throw new Error(`Unable to export app: ${appId}`)
           downloadJson(`${appId}-${Date.now()}.json`, payload)
         }
-        toast.success(t("appExported") || "App exported")
+        toast.success(t("appExported"))
       } catch (err) {
         loggers.a2ui?.error("Export failed", err)
       }
@@ -289,7 +311,7 @@ function A2UIPageContent() {
     try {
       const payload = appBuilder.exportAllApps()
       downloadJson(`a2ui-apps-${Date.now()}.json`, payload)
-      toast.success(t("appExported") || "App exported")
+      toast.success(t("appExported"))
     } catch (err) {
       loggers.a2ui?.error("Export all failed", err)
     }
@@ -307,11 +329,11 @@ function A2UIPageContent() {
       try {
         const appId = await appBuilder.importAppFromFile(file)
         if (!appId) {
-          toast.error(t("generationFailed") || "Failed to import app")
+          toast.error(t("generationFailed"))
         }
       } catch (err) {
         loggers.a2ui?.error("Import failed", err)
-        toast.error(t("generationFailed") || "Failed to import app")
+        toast.error(t("generationFailed"))
       } finally {
         event.target.value = ""
       }
@@ -326,14 +348,79 @@ function A2UIPageContent() {
     [router]
   )
 
+  const handleCreateBlank = useCallback(() => {
+    try {
+      const components = [
+        {
+          id: "root",
+          component: "Column",
+          children: ["placeholder"],
+          className: "min-h-40 items-center justify-center gap-3 p-6",
+        },
+        {
+          id: "placeholder",
+          component: "Text",
+          text: t("blankAppPlaceholder"),
+          align: "center",
+          className: "text-sm text-muted-foreground",
+        },
+      ] as A2UIComponent[]
+      const id = appBuilder.createCustomApp(t("blankAppName"), components, {})
+      if (id) handleOpenWorkspace(id)
+      else toast.error(t("generationFailed"))
+    } catch (err) {
+      loggers.a2ui?.error("Blank app creation failed", err)
+      toast.error(t("generationFailed"))
+    }
+  }, [appBuilder, handleOpenWorkspace, t])
+
+  const handleImportShareCode = useCallback(() => {
+    const raw = shareCodeInput.trim()
+    if (!raw) return
+    // Accept a raw share code or a "…/share/app?code=…" URL.
+    let code = raw
+    if (raw.includes("code=")) {
+      try {
+        const url = new URL(
+          raw,
+          typeof window !== "undefined" ? window.location.origin : "http://localhost"
+        )
+        code = url.searchParams.get("code") ?? raw
+      } catch {
+        code = raw
+      }
+    }
+    const id = appBuilder.importFromShareCode(code)
+    if (id) {
+      setShareCodeOpen(false)
+      setShareCodeInput("")
+      toast.success(t("appImported"))
+      handleOpenWorkspace(id)
+    } else {
+      toast.error(t("importFailed"))
+    }
+  }, [appBuilder, handleOpenWorkspace, shareCodeInput, t])
+
+  const handleToggleFavorite = useCallback(
+    async (appId: string) => {
+      try {
+        await appBuilder.toggleFavorite(appId)
+        forceRender()
+      } catch (err) {
+        loggers.a2ui?.error("Toggle favorite failed", err)
+      }
+    },
+    [appBuilder]
+  )
+
   if (appIdFromUrl) {
     return <A2UIWorkspace surfaceId={appIdFromUrl} />
   }
 
   return (
-    <div className="flex h-full flex-col" data-bg-target="chat">
+    <div className="flex min-h-0 flex-1 flex-col" data-bg-target="chat">
       <header className="shrink-0 border-b bg-background/95 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-7xl flex-wrap items-start gap-3 px-4 py-4 sm:px-6">
+        <div className="mx-auto flex w-full max-w-7xl flex-wrap items-start gap-3 px-4 py-3 sm:px-6 sm:py-4">
           <Link href="/" className="shrink-0">
             <Button variant="ghost" size="icon" className="h-9 w-9">
               <ArrowLeft className="h-4 w-4" />
@@ -343,40 +430,91 @@ function A2UIPageContent() {
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <Blocks className="h-5 w-5 shrink-0 text-cyan-500" />
-              <h1 className="truncate text-lg font-semibold sm:text-xl">
-                {t("pageTitle") || "Mini Apps"}
-              </h1>
+              <h1 className="truncate text-lg font-semibold sm:text-xl">{t("pageTitle")}</h1>
               <Badge variant="secondary" className="shrink-0">
                 {allApps.length}
               </Badge>
               <Badge variant="outline" className="shrink-0">
-                {appTemplates.length} {t("templatesTab")}
+                {appBuilder.templates.length} {t("templatesTab")}
               </Badge>
             </div>
             <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{t("hubSummary")}</p>
           </div>
 
-          <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
-            <Button variant="outline" className="gap-1.5" onClick={handleImportClick}>
+          <div className="flex w-full items-center justify-end gap-2 sm:w-auto">
+            <Button
+              variant="outline"
+              size="icon"
+              className="shrink-0 sm:w-auto sm:gap-1.5 sm:px-3"
+              onClick={handleImportClick}
+              aria-label={t("importApp")}
+            >
               <Upload className="h-4 w-4" />
-              {t("importApp")}
+              <span className="hidden sm:inline">{t("importApp")}</span>
             </Button>
             <Button
               variant="outline"
-              className="gap-1.5"
+              size="icon"
+              className="shrink-0 sm:w-auto sm:gap-1.5 sm:px-3"
+              onClick={() => setShareCodeOpen(true)}
+              aria-label={t("importShareCode")}
+            >
+              <Link2 className="h-4 w-4" />
+              <span className="hidden sm:inline">{t("importShareCode")}</span>
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="shrink-0 sm:w-auto sm:gap-1.5 sm:px-3"
               onClick={handleExportAll}
               disabled={allApps.length === 0}
+              aria-label={t("exportAllApps")}
             >
               <Download className="h-4 w-4" />
-              {t("exportAllApps")}
+              <span className="hidden sm:inline">{t("exportAllApps")}</span>
             </Button>
-            <Button className="gap-1.5" onClick={focusCreatePrompt}>
+            <Button
+              variant="outline"
+              size="icon"
+              className="shrink-0 sm:w-auto sm:gap-1.5 sm:px-3"
+              onClick={handleCreateBlank}
+              aria-label={t("newBlankApp")}
+            >
+              <FilePlus2 className="h-4 w-4" />
+              <span className="hidden sm:inline">{t("newBlankApp")}</span>
+            </Button>
+            <Button className="shrink-0 gap-1.5" onClick={focusCreatePrompt}>
               <Sparkles className="h-4 w-4" />
               {t("newApp")}
             </Button>
           </div>
         </div>
       </header>
+
+      <Dialog open={shareCodeOpen} onOpenChange={setShareCodeOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("importShareCodeTitle")}</DialogTitle>
+            <DialogDescription>{t("importShareCodeDescription")}</DialogDescription>
+          </DialogHeader>
+          <Textarea
+            value={shareCodeInput}
+            onChange={(event) => setShareCodeInput(event.target.value)}
+            placeholder={t("importShareCodePlaceholder")}
+            rows={4}
+            className="font-mono text-xs"
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShareCodeOpen(false)}>
+              {t("cancel")}
+            </Button>
+            <Button onClick={handleImportShareCode} disabled={!shareCodeInput.trim()}>
+              <Upload className="h-4 w-4" />
+              {t("importApp")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <main className="flex-1 overflow-hidden">
         <ScrollArea className="h-full">
@@ -394,9 +532,7 @@ function A2UIPageContent() {
                     >
                       {t("continueWorking")}
                     </h2>
-                    <p className="text-sm text-muted-foreground">
-                      {t("manageApps") || "Manage your created apps"}
-                    </p>
+                    <p className="text-sm text-muted-foreground">{t("manageApps")}</p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="secondary">
@@ -414,10 +550,11 @@ function A2UIPageContent() {
                     onClick={() => handleOpenWorkspace(recentApp.id)}
                   >
                     <div className="grid gap-0 md:grid-cols-[minmax(0,1.2fr)_minmax(260px,0.8fr)]">
-                      <div className="min-h-[220px] border-b bg-muted/30 p-4 md:border-b-0 md:border-r">
+                      <div className="min-h-[220px] overflow-hidden border-b bg-muted/30 p-4 md:border-b-0 md:border-r">
+                        {/* w-[125%] compensates scale-[0.8] so the scaled preview fills its layout box */}
                         <A2UIInlineSurface
                           surfaceId={recentApp.id}
-                          className="pointer-events-none min-h-[180px] scale-[0.8] origin-top-left"
+                          className="pointer-events-none min-h-[180px] w-[125%] scale-[0.8] origin-top-left"
                         />
                       </div>
                       <div className="flex flex-col justify-between gap-4 p-5">
@@ -575,6 +712,17 @@ function A2UIPageContent() {
                   >
                     {t("allCategories")}
                   </Button>
+                  <Button
+                    variant={showFavoritesOnly ? "secondary" : "ghost"}
+                    size="sm"
+                    onClick={() => setShowFavoritesOnly((value) => !value)}
+                    aria-pressed={showFavoritesOnly}
+                  >
+                    <Star
+                      className={cn("mr-1.5 h-3.5 w-3.5", showFavoritesOnly && "fill-current")}
+                    />
+                    {t("favoritesFilter")}
+                  </Button>
                   {CATEGORY_KEYS.map((category) => (
                     <Button
                       key={category}
@@ -618,12 +766,29 @@ function A2UIPageContent() {
                       <Card
                         key={app.id}
                         className={cn(
-                          "group relative overflow-hidden border-border/60 bg-background/80 transition-all hover:-translate-y-0.5 hover:shadow-md",
+                          "group relative overflow-hidden border-border/60 bg-background/80 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md motion-reduce:transition-none motion-reduce:hover:translate-y-0",
                           viewMode === "list" && "flex-row"
                         )}
                         onClick={() => handleOpenWorkspace(app.id)}
                       >
-                        <div className="absolute right-2 top-2 z-10">
+                        <div className="absolute right-2 top-2 z-10 flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            aria-label={app.isFavorite ? t("unfavorite") : t("favorite")}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              void handleToggleFavorite(app.id)
+                            }}
+                          >
+                            <Star
+                              className={cn(
+                                "h-4 w-4",
+                                app.isFavorite && "fill-yellow-400 text-yellow-400"
+                              )}
+                            />
+                          </Button>
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <Button
@@ -670,10 +835,11 @@ function A2UIPageContent() {
                         </div>
 
                         {viewMode === "grid" && (
-                          <div className="border-b bg-muted/30 p-3">
+                          <div className="max-h-[180px] overflow-hidden border-b bg-muted/30 p-3">
+                            {/* w-[161%] compensates scale-[0.62] so the scaled preview fills its layout box */}
                             <A2UIInlineSurface
                               surfaceId={app.id}
-                              className="pointer-events-none min-h-[120px] scale-[0.62] origin-top-left"
+                              className="pointer-events-none min-h-[120px] w-[161%] scale-[0.62] origin-top-left"
                             />
                           </div>
                         )}
@@ -739,9 +905,7 @@ function A2UIPageContent() {
                   <h2 id="template-library-heading" className="text-base font-semibold sm:text-lg">
                     {t("templateLibrary")}
                   </h2>
-                  <p className="text-sm text-muted-foreground">
-                    {t("browseTemplates") || "Browse pre-built templates"}
-                  </p>
+                  <p className="text-sm text-muted-foreground">{t("browseTemplates")}</p>
                 </div>
 
                 {filteredTemplates.length === 0 ? (
@@ -775,9 +939,7 @@ function A2UIPageContent() {
                   <h2 id="create-studio-heading" className="text-base font-semibold sm:text-lg">
                     {t("createStudio")}
                   </h2>
-                  <p className="text-sm text-muted-foreground">
-                    {t("flashDescription") || "Describe your app, generated in 30 seconds"}
-                  </p>
+                  <p className="text-sm text-muted-foreground">{t("flashDescription")}</p>
                 </div>
 
                 <div className="space-y-3">
@@ -816,16 +978,19 @@ function A2UIPageContent() {
                       {t("quickTry")}
                     </span>
                     <div className="flex flex-wrap gap-2">
-                      {QUICK_SUGGESTIONS.map((suggestion) => (
-                        <button
-                          key={suggestion}
-                          type="button"
-                          className="rounded-full border border-border/60 px-3 py-1 text-xs transition-colors hover:bg-accent/60"
-                          onClick={() => handleSuggestionClick(suggestion)}
-                        >
-                          {suggestion}
-                        </button>
-                      ))}
+                      {QUICK_SUGGESTION_KEYS.map((key) => {
+                        const suggestion = t(key)
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            className="rounded-full border border-border/60 px-3 py-1 text-xs transition-colors hover:bg-accent/60"
+                            onClick={() => handleSuggestionClick(suggestion)}
+                          >
+                            {suggestion}
+                          </button>
+                        )
+                      })}
                     </div>
                   </div>
                 </div>
@@ -872,7 +1037,7 @@ function A2UIPageContent() {
 
       <DeleteConfirmDialog
         open={deleteDialogOpen}
-        onOpenChange={setDeleteDialogOpen}
+        onOpenChange={handleDeleteDialogOpenChange}
         onConfirm={handleConfirmDelete}
       />
 
@@ -898,6 +1063,9 @@ function A2UIPageContent() {
           template={detailTemplate}
           open={!!detailAppId}
           onOpenChange={(open) => !open && setDetailAppId(null)}
+          onPreparePublish={appBuilder.prepareForPublish}
+          onPublish={appBuilder.publishApp}
+          onUnpublish={appBuilder.unpublishApp}
         />
       )}
     </div>

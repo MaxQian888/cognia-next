@@ -2,14 +2,30 @@
  * Plugin Loader - Handles loading plugin modules dynamically
  */
 
-import { isTauri } from "@/lib/platform/detect"
-import { loggers } from "@/lib/logging"
-import type { Plugin, PluginDefinition, PluginManifest } from "@/types/plugin"
-import { TimeoutError, withTimeout } from "@/lib/utils/with-timeout"
+import { detectPlatform, isTauri } from "@/lib/platform/detect"
+import { loggers } from "@cognia/logging"
+import type {
+  Plugin,
+  PluginContext,
+  PluginDefinition,
+  PluginManifest,
+  PluginPermission,
+} from "@/types/plugin"
+import { TimeoutError, withTimeout } from "@cognia/primitives"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
 import { getBrowserBuiltinRegistryEntry } from "./browser-builtin-registry"
 import { loadWasmDefinition, unloadWasmPlugin } from "./wasm-loader"
 import { loadVscodeDefinition, unloadVscodeExtension } from "./vscode-loader"
+import {
+  deriveScopeFromManifest,
+  launchPluginJs,
+  type LaunchPluginJsResult,
+  type NodePluginActivationSnapshot,
+  type PluginJsHostInvoker,
+} from "../launcher/launchPluginJs"
+import { resolvePluginPath } from "./plugin-path"
+import { createPluginRequire, primeSharedModules } from "./shared-modules"
+import { assertNoHostPrivateImports } from "../security/import-boundary"
 
 const pluginLoaderLogger = loggers.plugin.child("loader")
 
@@ -23,6 +39,23 @@ const pluginLoaderLogger = loggers.plugin.child("loader")
  * via `dirtyTeardowns` so a subsequent `load()` can react.
  */
 export const DEFAULT_TEARDOWN_TIMEOUT_MS = 5_000
+
+/**
+ * The plugin's code was retrieved and then threw while evaluating.
+ *
+ * Distinct from a transport failure so `importModule` can stop walking its
+ * fallback chain: another transport would fetch the same bytes and throw the
+ * same way, and continuing would bury the author's real error.
+ */
+export class PluginEvaluationError extends Error {
+  constructor(
+    message: string,
+    readonly cause?: unknown
+  ) {
+    super(message)
+    this.name = "PluginEvaluationError"
+  }
+}
 
 // =============================================================================
 // Types
@@ -50,6 +83,93 @@ export interface DirtyTeardownRecord {
   message: string
 }
 
+function isNodeTargetFrontend(manifest: PluginManifest): boolean {
+  return Boolean(
+    manifest.engines?.node || manifest.runtimeCompatibility?.tauri?.entrypoint === "node"
+  )
+}
+
+function resolveRuntimeEntry(pluginPath: string, entry: string | undefined): string {
+  if (!entry?.trim()) {
+    throw new Error("Node-target frontend plugin missing 'main' entry point")
+  }
+  return resolvePluginPath(pluginPath, entry)
+}
+
+function selectRuntimeEntry(manifest: PluginManifest): string | undefined {
+  const platform = detectPlatform()
+  if (platform === "headless") return manifest.main
+  const runtime = platform === "web" ? "browser" : platform
+  const override = manifest.runtimeCompatibility?.[runtime]?.entrypoint
+  return override && override !== "node" ? override : manifest.main
+}
+
+function hasPermission(manifest: PluginManifest, permission: PluginPermission): boolean {
+  return (manifest.permissions ?? []).includes(permission)
+}
+
+function deriveNodePermissionScope(manifest: PluginManifest) {
+  const permissions = manifest.permissions ?? []
+  const fileScope = manifest.fileScope ?? {}
+  const hasNetwork =
+    hasPermission(manifest, "network:fetch") || hasPermission(manifest, "network:websocket")
+  const canSpawn =
+    hasPermission(manifest, "shell:execute") || hasPermission(manifest, "process:spawn")
+  return deriveScopeFromManifest(permissions, {
+    readPaths: hasPermission(manifest, "filesystem:read") ? (fileScope.readPaths ?? []) : [],
+    writePaths: hasPermission(manifest, "filesystem:write") ? (fileScope.writePaths ?? []) : [],
+    netHosts: hasNetwork ? (manifest.networkAccess?.allowedDomains ?? []) : [],
+    subprocesses: canSpawn ? (manifest.shellCommands ?? []) : [],
+  })
+}
+
+const UNSAFE_CONTEXT_SEGMENTS = new Set(["__proto__", "prototype", "constructor"])
+
+function reviveNodePluginValue(value: unknown, launch: LaunchPluginJsResult): unknown {
+  if (Array.isArray(value)) return value.map((item) => reviveNodePluginValue(item, launch))
+  if (!value || typeof value !== "object") return value
+  const record = value as Record<string, unknown>
+  if (typeof record.$callback === "string") {
+    return async (...args: unknown[]) =>
+      reviveNodePluginValue(await launch.invokeCallback(record.$callback as string, args), launch)
+  }
+  if (record.$undefined === true) return undefined
+  return Object.fromEntries(
+    Object.entries(record).map(([key, item]) => [key, reviveNodePluginValue(item, launch)])
+  )
+}
+
+function replayNodePluginActivation(
+  context: object,
+  activation: NodePluginActivationSnapshot,
+  launch: LaunchPluginJsResult
+): void {
+  for (const call of activation.calls) {
+    const segments = call.path.split(".")
+    if (
+      segments.length === 0 ||
+      segments.some((segment) => !segment || UNSAFE_CONTEXT_SEGMENTS.has(segment))
+    ) {
+      throw new Error(`Node plugin requested an unsafe context path: ${call.path}`)
+    }
+    const methodName = segments.pop() as string
+    let owner: unknown = context
+    for (const segment of segments) {
+      if (!owner || typeof owner !== "object") break
+      owner = (owner as Record<string, unknown>)[segment]
+    }
+    const method =
+      owner && (typeof owner === "object" || typeof owner === "function")
+        ? (owner as Record<string, unknown>)[methodName]
+        : undefined
+    if (typeof method !== "function") {
+      throw new Error(`Node plugin requested unavailable context method: ${call.path}`)
+    }
+    const args = reviveNodePluginValue(call.args, launch) as unknown[]
+    method.apply(owner, args)
+  }
+}
+
 // =============================================================================
 // Plugin Loader
 // =============================================================================
@@ -61,6 +181,17 @@ export interface PluginLoaderOptions {
    * fake-timer suites fast.
    */
   teardownTimeoutMs?: number
+
+  /**
+   * Inject a frontend-module importer (CLI / Node hosts). When set, non-builtin
+   * `frontend` plugins load through this instead of the Tauri / fetch / eval
+   * strategies in {@link PluginLoader.importModule}, which don't exist under
+   * Node. Receives the absolute `main` path and the plugin id (the id lets the
+   * importer cache-bust per plugin for hot reload).
+   */
+  frontendImporter?: (absPath: string, pluginId: string) => Promise<Record<string, unknown>>
+  /** Host-neutral native lifecycle transport used by Node-target plugins. */
+  nodeHostInvoker?: PluginJsHostInvoker
 }
 
 export class PluginLoader {
@@ -68,9 +199,13 @@ export class PluginLoader {
   private loadingPromises: Map<string, Promise<PluginDefinition>> = new Map()
   private dirtyTeardowns: Map<string, DirtyTeardownRecord> = new Map()
   private readonly teardownTimeoutMs: number
+  private readonly frontendImporter?: PluginLoaderOptions["frontendImporter"]
+  private readonly nodeHostInvoker?: PluginJsHostInvoker
 
   constructor(options: PluginLoaderOptions = {}) {
     this.teardownTimeoutMs = options.teardownTimeoutMs ?? DEFAULT_TEARDOWN_TIMEOUT_MS
+    this.frontendImporter = options.frontendImporter
+    this.nodeHostInvoker = options.nodeHostInvoker
   }
 
   /**
@@ -168,6 +303,10 @@ export class PluginLoader {
       throw new Error(`Frontend plugin ${manifest.id} missing 'main' entry point`)
     }
 
+    if (isNodeTargetFrontend(manifest)) {
+      return this.loadNodeFrontendModule(manifest, pluginPath)
+    }
+
     try {
       const builtinRegistryEntry = pluginPath.startsWith("builtin://")
         ? getBrowserBuiltinRegistryEntry(manifest.id)
@@ -176,19 +315,25 @@ export class PluginLoader {
         const definition = await builtinRegistryEntry.load()
         this.loadedModules.set(manifest.id, {
           definition,
-          exports: { default: definition },
+          // Prefer the entry's full export namespace when provided (built-ins
+          // whose manifest declares connectors[] and expose a named factory);
+          // otherwise the default-only shape is enough for the common case.
+          exports: builtinRegistryEntry.moduleExports ?? { default: definition },
         })
         return definition
       }
 
       // Dynamic import of the plugin module
       // In production, plugins would be bundled and served from a known location
-      const modulePath = `${pluginPath}/${manifest.main}`
+      const runtimeEntry = selectRuntimeEntry(manifest)
+      const modulePath = resolveRuntimeEntry(pluginPath, runtimeEntry)
 
-      // Use dynamic import with error handling
-      // Note: In Tauri, we may need to use a different approach
-      // such as loading via fetch and eval, or using a plugin bundler
-      const moduleExports = await this.importModule(modulePath)
+      // CLI / Node hosts inject a `frontendImporter` (the Tauri / fetch / eval
+      // strategies below don't exist under Node). Otherwise fall back to the
+      // browser / Tauri strategies in `importModule`.
+      const moduleExports = this.frontendImporter
+        ? await this.frontendImporter(modulePath, manifest.id)
+        : await this.importInstalledEntry(manifest.id, pluginPath, runtimeEntry!, modulePath)
 
       // Extract the plugin definition
       const definition = this.extractDefinition(moduleExports, manifest)
@@ -205,6 +350,56 @@ export class PluginLoader {
     }
   }
 
+  private async loadNodeFrontendModule(
+    manifest: PluginManifest,
+    pluginPath: string
+  ): Promise<PluginDefinition> {
+    const entryPath = selectRuntimeEntry(manifest)
+    resolveRuntimeEntry(pluginPath, entryPath)
+    const validatedEntryPath = entryPath as string
+    const scope = deriveNodePermissionScope(manifest)
+    let launch: LaunchPluginJsResult | null = null
+    let activeHooks: unknown
+    const definition: PluginDefinition = {
+      manifest,
+      activate: async (context) => {
+        if (launch && (await launch.process.isRunning())) return activeHooks as never
+        launch = await launchPluginJs({
+          pluginId: manifest.id,
+          entryPath: validatedEntryPath,
+          cwd: pluginPath,
+          scope,
+          hostInvoker: this.nodeHostInvoker,
+        })
+        replayNodePluginActivation(context, launch.activation, launch)
+        activeHooks = reviveNodePluginValue(launch.activation.hooks, launch)
+        const namedExports = reviveNodePluginValue(launch.activation.exports, launch) as Record<
+          string,
+          unknown
+        >
+        this.loadedModules.set(manifest.id, {
+          definition,
+          exports: { default: definition, ...namedExports },
+        })
+        return activeHooks as never
+      },
+      deactivate: async () => {
+        if (!launch) return
+        await launch.deactivate()
+        if (!launch.process.killed) {
+          await launch.process.kill()
+        }
+        launch = null
+        activeHooks = undefined
+      },
+    }
+    this.loadedModules.set(manifest.id, {
+      definition,
+      exports: { default: definition },
+    })
+    return definition
+  }
+
   /**
    * Load a Python plugin via Tauri/PyO3 backend
    *
@@ -216,6 +411,20 @@ export class PluginLoader {
     manifest: PluginManifest,
     pluginPath: string
   ): Promise<PluginDefinition> {
+    // In the supervised headless brain the canonical PluginManager owns the
+    // Python subprocess lifecycle through `plugin_python_*` service RPCs. This
+    // loader still needs a definition so hybrid/frontend activation can run,
+    // but it must neither create a duplicate host nor stamp the web-only
+    // degraded warning. `PluginManager.loadPythonPlugin()` performs the real
+    // load immediately after this definition activates.
+    if (detectPlatform() === "headless") {
+      return {
+        manifest,
+        activate: async () => ({}),
+        deactivate: async () => {},
+      }
+    }
+
     // Check if Tauri is available for native Python execution
     const isTauriAvailable = await this.checkTauriAvailable()
 
@@ -224,6 +433,7 @@ export class PluginLoader {
         // Load the Python plugin via Tauri's Python runtime
         const { invoke } = await import("@tauri-apps/api/core")
 
+        // invoke-parity-exempt: Python plugin runtime not yet shipped in Rust; caught and surfaced as load failure
         await invoke("plugin_load_python", {
           pluginId: manifest.id,
           manifestJson: JSON.stringify(manifest),
@@ -255,6 +465,7 @@ export class PluginLoader {
           },
           deactivate: async () => {
             try {
+              // invoke-parity-exempt: Python plugin runtime not yet shipped in Rust; caught and logged
               await invoke("plugin_deactivate_python", {
                 pluginId: manifest.id,
               })
@@ -344,6 +555,7 @@ export class PluginLoader {
     for (const hookName of hookNames) {
       hooks[hookName] = async (...args: unknown[]) => {
         try {
+          // invoke-parity-exempt: Python plugin runtime not yet shipped in Rust; caught and logged
           await invoke("plugin_dispatch_python_hook", {
             pluginId,
             hookName,
@@ -415,13 +627,16 @@ export class PluginLoader {
 
         return allHooks
       },
-      deactivate: async () => {
-        // Deactivate both parts, Python first to clean up native resources
+      deactivate: async (ctx?: PluginContext) => {
+        // Deactivate both parts, Python first to clean up native resources.
+        // Forward the context: plugin teardown routinely guards on
+        // `ctx?.pluginId` (slash-command unregistration, interval cleanup),
+        // so dropping it here would silently no-op both halves.
         if (pythonDefinition?.deactivate) {
-          await pythonDefinition.deactivate()
+          await pythonDefinition.deactivate(ctx)
         }
         if (frontendDefinition?.deactivate) {
-          await frontendDefinition.deactivate()
+          await frontendDefinition.deactivate(ctx)
         }
       },
     }
@@ -435,6 +650,14 @@ export class PluginLoader {
    * 1. Tauri asset protocol (convertFileSrc) for loading bundled plugins
    * 2. Fetch + eval for loading plugin code from the file system
    * 3. Script tag with blob URL as fallback
+   *
+   * The fallback chain only covers *transport* failures — "this path could not
+   * be reached this way". A `PluginEvaluationError` means the opposite: the
+   * code was fetched and then threw. Retrying that over another transport
+   * fetches the same bytes and fails the same way, so it is rethrown instead.
+   * Swallowing it would replace an author's actionable diagnostic (an
+   * unavailable `require`, a syntax error) with a blob-URL script tag that
+   * never resolves.
    */
   private async importModule(modulePath: string): Promise<unknown> {
     // Strategy 1: Try Tauri asset protocol if available
@@ -442,14 +665,16 @@ export class PluginLoader {
       const { convertFileSrc } = await import("@tauri-apps/api/core")
       const assetUrl = convertFileSrc(modulePath)
       return await this.loadViaFetch(assetUrl, modulePath)
-    } catch {
+    } catch (error) {
+      if (error instanceof PluginEvaluationError) throw error
       // Tauri not available or convertFileSrc failed
     }
 
     // Strategy 2: Try fetch + eval with file:// protocol or direct path
     try {
       return await this.loadViaFetch(modulePath, modulePath)
-    } catch {
+    } catch (error) {
+      if (error instanceof PluginEvaluationError) throw error
       // Fetch failed
     }
 
@@ -467,6 +692,21 @@ export class PluginLoader {
     }
 
     const code = await response.text()
+    await primeSharedModules()
+    return this.evaluatePluginCode(code, originalPath)
+  }
+
+  /**
+   * Evaluate a CJS plugin bundle.
+   *
+   * `require` resolves the host's shared-module whitelist (React and friends)
+   * and throws for everything else — see `shared-modules.ts` for why sharing
+   * React is load-bearing rather than a convenience. Callers must have awaited
+   * `primeSharedModules()` first: `require` is synchronous, so the instances
+   * have to already be in hand by the time the bundle runs.
+   */
+  private evaluatePluginCode(code: string, originalPath: string): unknown {
+    assertNoHostPrivateImports(code, originalPath)
 
     // Create a module-like environment for the plugin
     const pluginExports: Record<string, unknown> = {}
@@ -477,17 +717,42 @@ export class PluginLoader {
 
     try {
       const factory = (0, eval)(wrappedCode)
-      factory(pluginModule, pluginExports, () => {
-        throw new Error(
-          `require() is not supported in plugins. Use ES module imports in your build. Path: ${originalPath}`
-        )
-      })
+      factory(pluginModule, pluginExports, createPluginRequire(originalPath))
 
       // Return either module.exports or the exports object
       return pluginModule.exports !== pluginExports ? pluginModule.exports : pluginExports
     } catch (error) {
-      throw new Error(`Failed to evaluate plugin code from ${originalPath}: ${error}`)
+      throw new PluginEvaluationError(
+        `Failed to evaluate plugin code from ${originalPath}: ${error}`,
+        error
+      )
     }
+  }
+
+  private async importInstalledEntry(
+    pluginId: string,
+    pluginRoot: string,
+    relativeEntry: string,
+    absolutePath: string
+  ): Promise<unknown> {
+    if (pluginRoot.startsWith("builtin://")) {
+      const restoredExports = this.loadedModules.get(pluginId)?.exports
+      if (restoredExports) return restoredExports
+      return this.importModule(absolutePath)
+    }
+    if (!isTauri()) {
+      return this.frontendImporter
+        ? this.frontendImporter(absolutePath, pluginId)
+        : this.importModule(absolutePath)
+    }
+    const { invoke } = await import("@tauri-apps/api/core")
+    const code = await invoke<string>("plugin_read_entry", {
+      pluginId,
+      pluginPath: pluginRoot,
+      entry: relativeEntry,
+    })
+    await primeSharedModules()
+    return this.evaluatePluginCode(code, absolutePath)
   }
 
   /**
@@ -685,8 +950,26 @@ export class PluginLoader {
    * default `importer` so lazy-factory entries resolve identically to the
    * plugin's main bundle. Tests inject their own importer and never hit this.
    */
-  async importEntry(absolutePath: string): Promise<Record<string, unknown>> {
-    return (await this.importModule(absolutePath)) as Record<string, unknown>
+  async importEntry(
+    absolutePath: string,
+    pluginId?: string,
+    pluginRoot?: string
+  ): Promise<Record<string, unknown>> {
+    if (!pluginId || !pluginRoot) {
+      return (await this.importModule(absolutePath)) as Record<string, unknown>
+    }
+    const normalizedRoot = pluginRoot.replace(/[\\/]+$/, "")
+    const prefix = `${normalizedRoot}/`
+    if (!absolutePath.startsWith(prefix)) {
+      throw new Error(`Plugin entry is outside the declared root: ${absolutePath}`)
+    }
+    const relativeEntry = absolutePath.slice(prefix.length)
+    return (await this.importInstalledEntry(
+      pluginId,
+      pluginRoot,
+      relativeEntry,
+      absolutePath
+    )) as Record<string, unknown>
   }
 
   /**

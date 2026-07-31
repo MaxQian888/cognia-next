@@ -15,6 +15,9 @@ import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react"
 import { Repeat as LoopIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
+import { defaultLabelFor } from "@/lib/workflow/editor/store"
+import { nodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
+import { tNode as translateNodeLabel } from "@/lib/workflow/i18n/node-translate"
 import type { WorkflowNodeRenderData } from "./workflow-node"
 
 const MIN_WIDTH = 320
@@ -25,6 +28,16 @@ export const LoopContainerNode = memo(function LoopContainerNode(
 ) {
   const { data, selected, id } = props
   const t = useTranslations("workflows.node.loopContainer")
+  // Localize a still-default label (see workflow-node.tsx for the rationale).
+  const tNodes = useTranslations("workflows.nodes")
+  const displayLabel =
+    data.label === defaultLabelFor(data.kind)
+      ? translateNodeLabel(
+          tNodes as unknown as ((key: string) => string) & { has?: (key: string) => boolean },
+          `${data.kind}.label`,
+          nodeCatalogEntry(data.kind)?.label ?? data.label
+        )
+      : data.label
   const params = (data.params ?? {}) as {
     mode?: string
     source?: string
@@ -66,7 +79,7 @@ export const LoopContainerNode = memo(function LoopContainerNode(
       <div className="flex items-center gap-2 rounded-t-md border-b border-amber-500/30 bg-amber-500/10 px-3 py-2">
         <LoopIcon className="size-4 shrink-0" aria-hidden="true" />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium text-foreground">{data.label}</div>
+          <div className="truncate text-sm font-medium text-foreground">{displayLabel}</div>
           <div
             className="truncate font-mono text-[10px] opacity-70"
             data-testid="loop-container-mode"

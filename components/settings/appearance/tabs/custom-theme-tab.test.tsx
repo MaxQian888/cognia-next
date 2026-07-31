@@ -2,8 +2,10 @@
  * @jest-environment jsdom
  */
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
-import type { AppSettings } from "@/lib/claude/types"
-import type { CustomTheme, ThemeColors } from "@/types/plugin/plugin-extended"
+import type { AppSettings } from "@cognia/agent-config-types"
+import type { CustomTheme, ThemeColors } from "@/types/plugin/plugin"
+import { THEME_COLOR_KEYS } from "@/lib/appearance"
+import { AppearancePreviewDraftProvider, createPreviewDraftStore } from "../preview-draft-context"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => {
@@ -292,6 +294,59 @@ describe("CustomThemeTab", () => {
       target: { value: "#222222" },
     })
     expect(screen.getByTestId("custom-theme-unsaved")).toBeInTheDocument()
+  })
+
+  // The editor owns no preview; it drives the one the section mounts.
+  describe("preview draft publishing", () => {
+    it("publishes a complete palette so the shared preview needs no fallback", () => {
+      const store = createPreviewDraftStore()
+      render(
+        <AppearancePreviewDraftProvider store={store}>
+          <CustomThemeTab />
+        </AppearancePreviewDraftProvider>
+      )
+      const published = store.getSnapshot()
+      // Sparse would let unset vars cascade from <html> and render half-light.
+      expect(Object.keys(published?.colors ?? {}).sort()).toEqual([...THEME_COLOR_KEYS].sort())
+      expect(published?.isDark).toBe(true)
+    })
+
+    it("republishes as tokens change", () => {
+      const store = createPreviewDraftStore()
+      render(
+        <AppearancePreviewDraftProvider store={store}>
+          <CustomThemeTab />
+        </AppearancePreviewDraftProvider>
+      )
+      fireEvent.change(screen.getByTestId("color-token-background-hex"), {
+        target: { value: "#222222" },
+      })
+      expect(store.getSnapshot()?.colors.background).toBe("#222222")
+    })
+
+    it("tracks the dark switch so the preview resolves dark: variants", () => {
+      const store = createPreviewDraftStore()
+      render(
+        <AppearancePreviewDraftProvider store={store}>
+          <CustomThemeTab />
+        </AppearancePreviewDraftProvider>
+      )
+      expect(store.getSnapshot()?.isDark).toBe(true)
+      fireEvent.click(screen.getByLabelText("darkLabel"))
+      expect(store.getSnapshot()?.isDark).toBe(false)
+    })
+
+    it("hands the preview back on unmount", () => {
+      const store = createPreviewDraftStore()
+      const { unmount } = render(
+        <AppearancePreviewDraftProvider store={store}>
+          <CustomThemeTab />
+        </AppearancePreviewDraftProvider>
+      )
+      expect(store.getSnapshot()).not.toBeNull()
+      unmount()
+      expect(store.getSnapshot()).toBeNull()
+    })
   })
 
   it("export falls back to a generic filename when the theme name is empty", () => {

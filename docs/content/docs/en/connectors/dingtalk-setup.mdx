@@ -1,0 +1,121 @@
+---
+title: "DingTalk Setup"
+description: "Create a DingTalk open-platform robot app and connect it to cognia-next through Stream Mode."
+---
+
+# DingTalk Setup Guide
+
+This guide walks through creating a DingTalk open-platform app, collecting the app
+credentials, and configuring cognia-next to receive bot messages through DingTalk
+Stream Mode. Stream Mode is owned by the desktop connector runtime, so it does not
+require a public webhook URL or an IP allowlist.
+
+---
+
+## 1. Create a DingTalk Robot App
+
+1. Sign in to the [DingTalk Open Platform](https://open-dev.dingtalk.com/).
+2. Create an enterprise internal app and enable the robot capability for that app.
+3. Record these credentials from the app credential page:
+   - **App Key** - used as the Stream Mode `clientId`.
+   - **App Secret** - used as the Stream Mode `clientSecret` and to mint app access tokens.
+
+Keep the App Secret private. cognia-next stores both values in the OS keyring.
+
+---
+
+## 2. Enable Stream Mode Events
+
+In the DingTalk developer console, configure the app to receive bot messages through
+Stream Mode:
+
+1. Open the app's event or Stream Mode configuration page.
+2. Enable Stream Mode for the robot.
+3. Subscribe to the bot-message topic:
+   - `/v1.0/im/bot/messages/get`
+4. Release or publish the updated app version if the console requires it.
+
+cognia-next registers the Stream connection by calling:
+
+```text
+POST https://api.dingtalk.com/v1.0/gateway/connections/open
+```
+
+The runtime then opens the returned WebSocket endpoint with the one-time ticket and
+ACKs each callback frame. No webhook URL is used.
+
+---
+
+## 3. Configure cognia-next
+
+1. Open cognia-next and navigate to **Settings -> Platform Connections -> Adapters**.
+2. Click **Add connector**, then choose **DingTalk**.
+3. In the **Identity** section, fill in:
+   - **Display name** - a recognizable name for this connector.
+   - **App Key** - the App Key from DingTalk Open Platform.
+   - **App Secret** - the App Secret from DingTalk Open Platform.
+4. Click **Test** to verify the credentials. The test mints an app access token through
+   `POST /v1.0/oauth2/accessToken`.
+5. Click **Create**.
+
+The adapter is stored with the internal `longpoll` transport bucket, but the UI displays
+it as **Stream Mode WSS** because DingTalk uses a long-lived WebSocket gateway.
+
+---
+
+## 4. Verify the Connection
+
+1. Add the bot to a DingTalk 1:1 conversation or group.
+2. Send the bot a message. In groups, DingTalk only delivers messages that are directed
+   at the bot, such as messages that mention it.
+3. Check **Platform Connections**. The adapter should move to a running state after the
+   Stream registration succeeds.
+
+If no message appears, confirm that the bot is installed in the conversation and that
+`/v1.0/im/bot/messages/get` is subscribed in the DingTalk console.
+
+---
+
+## Outbound Behavior
+
+- **1:1 proactive send** uses `POST /v1.0/robot/oToMessages/batchSend` and requires a
+  `userId` captured from a prior inbound message.
+- **Group proactive send** uses `POST /v1.0/robot/groupMessages/send` and requires an
+  `openConversationId` captured from a prior inbound message.
+- The adapter sends text as `sampleText` and markdown/A2UI projections as `sampleMarkdown`.
+- Mentions are rendered as visible `@name` text. The current adapter does not guarantee a
+  DingTalk notification ping for rendered mentions.
+
+Scheduled workflows and manual test sends should target conversation references learned
+from inbound events, for example `single:<staffId>` for 1:1 or `group:<conversationId>`
+for group conversations.
+
+---
+
+## Notes
+
+- **Inbound scope**: DingTalk Stream Mode delivers bot-directed messages. 1:1 messages are
+  directed at the bot, while group messages normally need to mention the bot.
+- **Media inbound**: picture, audio, video, and file messages are projected as text markers.
+  Audio uses the speech-recognition text when DingTalk provides it.
+- **A2UI projection**: A2UI surfaces are flattened to DingTalk markdown. Links remain links,
+  while callback-only buttons, selects, radio groups, and text inputs are listed as
+  available actions for the user to type back.
+- **Unsupported capabilities**: the DingTalk adapter does not expose generic message edit,
+  message delete, typing indicators, history fetch, reactions, threads, or guaranteed
+  native mention pings.
+- **Credential rotation**: editing App Key or App Secret emits a credential-rotation event.
+  The next Stream reconnect and outbound API call read the latest keyring values.
+
+---
+
+## Troubleshooting
+
+| Symptom | Likely cause |
+| ------- | ------------ |
+| Test fails with an access-token error | App Key or App Secret is incorrect, or the app is not allowed to mint app access tokens. |
+| Adapter stays degraded | Stream registration failed or the WebSocket gateway could not be opened. Check the app credentials and Stream Mode subscription. |
+| No group messages arrive | The bot is not in the group, the bot was not mentioned, or `/v1.0/im/bot/messages/get` is not subscribed. |
+| Proactive 1:1 send fails | The conversation reference is missing `userId`; send a message to the bot first so cognia-next can learn it. |
+| Proactive group send fails | The conversation reference is missing `openConversationId`; use a group conversation that has already produced an inbound event. |
+| A2UI controls appear as text | DingTalk markdown has no callback channel for those controls in this adapter, so cognia-next lists the actions as text. |

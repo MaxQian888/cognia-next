@@ -1,0 +1,43 @@
+// Declarative i18n bundle (merged into the host next-intl tree under
+// `plugin.pet-daily-quests.*` on enable; the tab reads it via use-plugin-t).
+
+export const I18N_MESSAGES = {
+  en: {
+    "plugin.pet-daily-quests.tab.title": "Daily Quests",
+    "plugin.pet-daily-quests.tab.subtitle": "Three fresh care quests every day.",
+    "plugin.pet-daily-quests.tab.empty": "Quests are warming up…",
+    "plugin.pet-daily-quests.quest.feed3": "Feed your pet 3 times",
+    "plugin.pet-daily-quests.quest.play2": "Play together twice",
+    "plugin.pet-daily-quests.quest.pet3": "Pet it 3 times",
+    "plugin.pet-daily-quests.quest.talk2": "Chat with it twice",
+    "plugin.pet-daily-quests.quest.sleep1": "Tuck it in for a nap",
+    "plugin.pet-daily-quests.quest.clean1": "Give it a wash",
+    "plugin.pet-daily-quests.quest.treat1": "Share a treat",
+    "plugin.pet-daily-quests.quest.goal1": "Complete a /goal together",
+    "plugin.pet-daily-quests.progress": "{progress}/{count}",
+    "plugin.pet-daily-quests.claim": "Claim",
+    "plugin.pet-daily-quests.claimed": "Claimed",
+    "plugin.pet-daily-quests.reward": "+{xp} XP · +{coins} coins",
+    "plugin.pet-daily-quests.budgetLeft": "Today's reward budget left: {xp} XP · {coins} coins",
+    "plugin.pet-daily-quests.resetsDaily": "Quests reset at midnight.",
+  },
+  "zh-CN": {
+    "plugin.pet-daily-quests.tab.title": "每日任务",
+    "plugin.pet-daily-quests.tab.subtitle": "每天三个新的照护任务。",
+    "plugin.pet-daily-quests.tab.empty": "任务准备中…",
+    "plugin.pet-daily-quests.quest.feed3": "喂食 3 次",
+    "plugin.pet-daily-quests.quest.play2": "一起玩耍 2 次",
+    "plugin.pet-daily-quests.quest.pet3": "抚摸 3 次",
+    "plugin.pet-daily-quests.quest.talk2": "聊天 2 次",
+    "plugin.pet-daily-quests.quest.sleep1": "哄它睡一觉",
+    "plugin.pet-daily-quests.quest.clean1": "给它洗个澡",
+    "plugin.pet-daily-quests.quest.treat1": "分享一份零食",
+    "plugin.pet-daily-quests.quest.goal1": "一起完成一个 /goal",
+    "plugin.pet-daily-quests.progress": "{progress}/{count}",
+    "plugin.pet-daily-quests.claim": "领取",
+    "plugin.pet-daily-quests.claimed": "已领取",
+    "plugin.pet-daily-quests.reward": "+{xp} 经验 · +{coins} 金币",
+    "plugin.pet-daily-quests.budgetLeft": "今日剩余奖励额度：{xp} 经验 · {coins} 金币",
+    "plugin.pet-daily-quests.resetsDaily": "任务每天零点刷新。",
+  },
+} as const

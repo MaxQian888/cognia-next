@@ -8,11 +8,21 @@
   "main": "src/index.ts",
   "author": "cognia-next",
   "license": "MIT",
+  "minAppVersion": "0.1.0",
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "permissions": ["network:fetch", "secrets:read", "secrets:write"],
-  "activationEvents": ["onStartup"],
+  "runtimeCompatibility": {
+    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "mobile": { "availability": "supported", "entrypoint": "src/index.ts" }
+  },
+  "permissions": ["network:fetch", "secrets:read"],
+  "networkAccess": {
+    "allowedDomains": ["api.exa.ai", "api.tavily.com"],
+    "reasoning": "The research loop queries exactly one of the two configured web-search APIs; the user's provider key is sent only to the provider it belongs to. Fetching a result page goes through the host's own reader, not this allowlist."
+  },
+  "activationEvents": ["startup"],
   "commands": [
     {
       "id": "research",

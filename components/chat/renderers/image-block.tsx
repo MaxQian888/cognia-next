@@ -1,33 +1,29 @@
 "use client"
 
-import { useState, memo, useCallback } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
-  ZoomIn,
-  ZoomOut,
-  Download,
-  Copy,
-  Check,
-  Maximize2,
-  X,
+  CheckIcon,
+  CopyIcon,
+  DownloadIcon,
+  ExternalLinkIcon,
   ImageIcon,
-  ExternalLink,
-  RotateCw,
+  Maximize2Icon,
 } from "lucide-react"
-import { cn } from "@/lib/utils"
+
+import { Image } from "@/components/ai-elements/image"
 import { Button } from "@/components/ui/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
 import { useCopy } from "@/hooks/ui/use-copy"
+import { useMediaUrl } from "@/hooks/chat/use-media-url"
 import { downloadFromUrl } from "@/lib/files/download"
-import { loggers } from "@/lib/logging"
+import { openExternal } from "@/lib/tauri/opener"
+import { cn } from "@/lib/utils"
+import { loggers } from "@cognia/logging"
+
+import { ImageLightbox, type ImageLightboxItem } from "./image-lightbox"
+import { useMessageImageCollection } from "./message-image-collection"
 
 interface ImageBlockProps {
   src: string
@@ -50,255 +46,206 @@ export const ImageBlock = memo(function ImageBlock({
   const [isOpen, setIsOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [hasError, setHasError] = useState(false)
-  const [zoom, setZoom] = useState(1)
-  const [rotation, setRotation] = useState(0)
+  const [activeIndex, setActiveIndex] = useState(0)
+  const returnFocusRef = useRef<HTMLElement | null>(null)
   const { copied, copy } = useCopy({ logger: loggers.chat, scope: "chat" })
 
-  const handleLoad = useCallback(() => {
-    setIsLoading(false)
-    setHasError(false)
-  }, [])
+  // `src` is either a `cognia-media:` reference into the content-addressed
+  // store or a plain URL — a legacy inlined `data:` URL, or a remote one. The
+  // hook stays inactive for the latter, which is what keeps messages written
+  // before the store existed rendering unchanged.
+  const media = useMediaUrl(src)
+  const isRef = media.status !== "inactive"
+  const resolvedSrc = isRef ? media.url : src
+  // A reference the store cannot resolve is a real error (a failed migration,
+  // an edited database); an unresolved plain URL is just a URL.
+  const failed = hasError || media.status === "missing"
+  // Referenced media knows its own dimensions, so the aspect box below is
+  // reserved before a single byte is fetched.
+  const boxWidth = width ?? (media.width || undefined)
+  const boxHeight = height ?? (media.height || undefined)
 
-  const handleError = useCallback(() => {
-    setIsLoading(false)
-    setHasError(true)
-  }, [])
+  const items = useMemo<ImageLightboxItem[]>(
+    () => (resolvedSrc ? [{ id: src, src: resolvedSrc, alt, title }] : []),
+    [alt, resolvedSrc, src, title]
+  )
 
-  const handleZoomIn = useCallback(() => {
-    setZoom((prev) => Math.min(prev + 0.25, 3))
-  }, [])
+  // Inside a chat message every image joins ONE lightbox so the user can page
+  // across the whole turn. Outside one (attachment preview sheet, dialogs,
+  // settings) there is no provider and the local single-item lightbox below
+  // stays in charge.
+  const collection = useMessageImageCollection()
+  useEffect(() => {
+    if (!collection || !resolvedSrc) return
+    // Registered under the original `src`, so the collection's identity is the
+    // stable reference rather than an object URL that changes per resolution.
+    return collection.register({ id: src, src: resolvedSrc, alt, title })
+  }, [collection, src, resolvedSrc, alt, title])
 
-  const handleZoomOut = useCallback(() => {
-    setZoom((prev) => Math.max(prev - 0.25, 0.5))
-  }, [])
-
-  const handleRotate = useCallback(() => {
-    setRotation((prev) => (prev + 90) % 360)
-  }, [])
-
-  const handleResetView = useCallback(() => {
-    setZoom(1)
-    setRotation(0)
-  }, [])
+  const openViewer = useCallback(
+    (trigger: HTMLElement | null) => {
+      if (collection) {
+        collection.open(src, trigger)
+        return
+      }
+      returnFocusRef.current = trigger
+      setIsOpen(true)
+    },
+    [collection, src]
+  )
 
   const handleDownload = useCallback(async () => {
+    if (!resolvedSrc) return
+    // Name from the original `src`: an object URL carries no filename.
     const filename = src.split("/").pop() || t("defaultFilename")
     try {
-      await downloadFromUrl(src, filename, { fetchAsBlob: true })
-    } catch (err) {
-      loggers.chat.warn("image download failed, opening in new tab", {
-        err: err instanceof Error ? err.message : String(err),
+      await downloadFromUrl(resolvedSrc, filename, { fetchAsBlob: true })
+    } catch (error) {
+      loggers.chat.warn("image download failed, opening externally", {
+        err: error instanceof Error ? error.message : String(error),
         src,
       })
-      window.open(src, "_blank")
+      void openExternal(resolvedSrc)
     }
-  }, [src, t])
+  }, [resolvedSrc, src, t])
 
-  const handleCopyUrl = useCallback(async () => {
-    await copy(src)
-  }, [copy, src])
-
-  const handleOpenExternal = useCallback(() => {
-    window.open(src, "_blank")
-  }, [src])
-
-  if (hasError) {
+  if (failed) {
     return (
       <div
         className={cn(
-          "flex flex-col items-center justify-center rounded-lg border border-dashed bg-muted/30 p-8 my-4",
+          "my-4 flex flex-col items-center justify-center rounded-lg border border-dashed bg-muted/30 p-8",
           className
         )}
       >
-        <ImageIcon className="h-12 w-12 text-muted-foreground/50 mb-2" />
+        <ImageIcon className="mb-2 size-12 text-muted-foreground/50" />
         <p className="text-sm text-muted-foreground">{t("failedToLoad")}</p>
-        {alt && <p className="text-xs text-muted-foreground/70 mt-1">{alt}</p>}
-        <Button variant="ghost" size="sm" className="mt-2" onClick={handleOpenExternal}>
-          <ExternalLink className="h-3 w-3 mr-1" />
-          {t("openUrl")}
-        </Button>
+        {alt ? <p className="mt-1 text-xs text-muted-foreground/70">{alt}</p> : null}
+        {/* Only a plain URL can be opened outside the app; a store reference
+            names local bytes and has nowhere to point a browser at. */}
+        {isRef ? null : (
+          <Button variant="ghost" size="sm" className="mt-2" onClick={() => void openExternal(src)}>
+            <ExternalLinkIcon className="mr-1 size-3" />
+            {t("openUrl")}
+          </Button>
+        )}
       </div>
     )
   }
 
+  // A not-yet-loaded <img> without width/height attributes has an intrinsic
+  // size of 0, so the figure collapsed and the `absolute inset-0` Skeleton had
+  // nothing to fill — it was never actually visible, and the image popping in
+  // shifted everything below it. Reserve the box: use the real aspect ratio
+  // when the caller knows it (computer-use screenshots do), otherwise hold a
+  // placeholder box until `onLoad` fires.
+  const hasIntrinsicSize = Boolean(boxWidth && boxHeight)
+  const reserveStyle = hasIntrinsicSize ? { aspectRatio: `${boxWidth} / ${boxHeight}` } : undefined
+  // Still resolving a reference: nothing to point an <img> at yet, but the box
+  // is already reserved from the stored dimensions.
+  const pending = isLoading || resolvedSrc === null
+
   return (
     <>
       <figure
+        style={reserveStyle}
         className={cn(
-          "group relative rounded-lg overflow-hidden my-4 inline-block max-w-full",
+          "group relative my-4 inline-block max-w-full overflow-hidden rounded-lg",
+          pending && !hasIntrinsicSize && "min-h-32 min-w-48",
           className
         )}
       >
-        {isLoading && <Skeleton className="absolute inset-0 h-full w-full" />}
+        {pending ? <Skeleton className="absolute inset-0 size-full" /> : null}
 
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={src}
-          alt={alt}
-          title={title}
-          width={width}
-          height={height}
-          loading="lazy"
-          onLoad={handleLoad}
-          onError={handleError}
-          className={cn(
-            "max-w-full h-auto rounded-lg cursor-zoom-in transition-opacity",
-            isLoading && "opacity-0"
-          )}
-          onClick={() => setIsOpen(true)}
-        />
+        {resolvedSrc === null ? null : (
+          <Image
+            src={resolvedSrc}
+            alt={alt}
+            title={title}
+            width={boxWidth}
+            height={boxHeight}
+            role="button"
+            tabIndex={0}
+            aria-label={t("viewFullscreen")}
+            loading="lazy"
+            decoding="async"
+            onLoad={() => {
+              setIsLoading(false)
+              setHasError(false)
+            }}
+            onError={() => {
+              setIsLoading(false)
+              setHasError(true)
+            }}
+            className={cn(
+              "cursor-zoom-in rounded-lg transition-[opacity,transform] duration-300 group-hover:scale-[1.01]",
+              pending && "opacity-0"
+            )}
+            onClick={(event) => openViewer(event.currentTarget)}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" && event.key !== " ") return
+              event.preventDefault()
+              openViewer(event.currentTarget)
+            }}
+          />
+        )}
 
-        <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="absolute right-2 top-2 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100">
           <TooltipIconButton
             variant="secondary"
             size="icon"
-            className="h-7 w-7 bg-background/80"
-            onClick={() => setIsOpen(true)}
+            className="size-7 bg-background/80 backdrop-blur-sm"
+            onClick={(event) => openViewer(event.currentTarget)}
             aria-label={t("viewFullscreen")}
             tooltip={t("viewFullscreen")}
           >
-            <Maximize2 className="h-3 w-3" />
+            <Maximize2Icon className="size-3" />
           </TooltipIconButton>
-
           <TooltipIconButton
             variant="secondary"
             size="icon"
-            className="h-7 w-7 bg-background/80"
-            onClick={handleDownload}
+            className="size-7 bg-background/80 backdrop-blur-sm"
+            onClick={() => void handleDownload()}
             aria-label={t("download")}
             tooltip={t("download")}
           >
-            <Download className="h-3 w-3" />
+            <DownloadIcon className="size-3" />
           </TooltipIconButton>
-
-          <TooltipIconButton
-            variant="secondary"
-            size="icon"
-            className="h-7 w-7 bg-background/80"
-            onClick={handleCopyUrl}
-            aria-label={t("copyUrl")}
-            tooltip={t("copyUrl")}
-          >
-            {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-          </TooltipIconButton>
+          {/* A store reference is meaningless outside this app, and the object
+              URL behind it dies with the document — neither is worth copying. */}
+          {isRef ? null : (
+            <TooltipIconButton
+              variant="secondary"
+              size="icon"
+              className="size-7 bg-background/80 backdrop-blur-sm"
+              onClick={() => void copy(src)}
+              aria-label={t("copyUrl")}
+              tooltip={t("copyUrl")}
+            >
+              {copied ? <CheckIcon className="size-3" /> : <CopyIcon className="size-3" />}
+            </TooltipIconButton>
+          )}
         </div>
 
-        {(alt || title) && (
-          <figcaption className="text-center text-sm text-muted-foreground mt-2 px-2">
-            {title || alt}
+        {/* Only an explicit `title` is a caption. `alt` is ALTERNATIVE text —
+            printing it under every markdown image turned screen-reader copy
+            into visible chrome. It stays on the <img> for assistive tech. */}
+        {title ? (
+          <figcaption className="mt-2 px-2 text-center text-sm text-muted-foreground">
+            {title}
           </figcaption>
-        )}
+        ) : null}
       </figure>
 
-      <Dialog open={isOpen} onOpenChange={setIsOpen}>
-        <DialogContent
-          className="max-w-[95vw] max-h-[95vh] p-0 overflow-hidden"
-          showCloseButton={false}
-        >
-          <DialogHeader className="absolute top-0 left-0 right-0 z-10 flex flex-row items-center justify-between p-3 bg-gradient-to-b from-black/60 to-transparent">
-            <DialogTitle className="text-white text-sm truncate max-w-[60%]">
-              {title || alt || t("defaultTitle")}
-            </DialogTitle>
-            <DialogDescription className="sr-only">{t("previewDescription")}</DialogDescription>
-            <div className="flex items-center gap-1">
-              <TooltipIconButton
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-white hover:bg-white/20"
-                onClick={handleZoomOut}
-                disabled={zoom <= 0.5}
-                aria-label={t("zoomOut")}
-                tooltip={t("zoomOut")}
-              >
-                <ZoomOut className="h-4 w-4" />
-              </TooltipIconButton>
-
-              <span className="text-white text-xs px-2 min-w-[3rem] text-center">
-                {Math.round(zoom * 100)}%
-              </span>
-
-              <TooltipIconButton
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-white hover:bg-white/20"
-                onClick={handleZoomIn}
-                disabled={zoom >= 3}
-                aria-label={t("zoomIn")}
-                tooltip={t("zoomIn")}
-              >
-                <ZoomIn className="h-4 w-4" />
-              </TooltipIconButton>
-
-              <TooltipIconButton
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-white hover:bg-white/20"
-                onClick={handleRotate}
-                aria-label={t("rotate")}
-                tooltip={t("rotate")}
-              >
-                <RotateCw className="h-4 w-4" />
-              </TooltipIconButton>
-
-              <TooltipIconButton
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-white hover:bg-white/20"
-                onClick={handleDownload}
-                aria-label={t("download")}
-                tooltip={t("download")}
-              >
-                <Download className="h-4 w-4" />
-              </TooltipIconButton>
-
-              <TooltipIconButton
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-white hover:bg-white/20"
-                onClick={handleOpenExternal}
-                aria-label={t("openInNewTab")}
-                tooltip={t("openInNewTab")}
-              >
-                <ExternalLink className="h-4 w-4" />
-              </TooltipIconButton>
-
-              <TooltipIconButton
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-white hover:bg-white/20"
-                onClick={() => setIsOpen(false)}
-                aria-label={t("close")}
-                tooltip={t("close")}
-              >
-                <X className="h-4 w-4" />
-              </TooltipIconButton>
-            </div>
-          </DialogHeader>
-
-          <div
-            className="flex items-center justify-center bg-black/90 overflow-auto"
-            style={{ height: "calc(95vh - 60px)" } as React.CSSProperties}
-            onClick={(e) => {
-              if (e.target === e.currentTarget) {
-                handleResetView()
-              }
-            }}
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={src}
-              alt={alt}
-              className="max-w-none transition-transform duration-200"
-              style={
-                {
-                  transform: `scale(${zoom}) rotate(${rotation}deg)`,
-                } as React.CSSProperties
-              }
-              draggable={false}
-            />
-          </div>
-        </DialogContent>
-      </Dialog>
+      {collection ? null : (
+        <ImageLightbox
+          items={items}
+          open={isOpen}
+          activeIndex={activeIndex}
+          returnFocusRef={returnFocusRef}
+          onActiveIndexChange={setActiveIndex}
+          onOpenChange={setIsOpen}
+        />
+      )}
     </>
   )
 })

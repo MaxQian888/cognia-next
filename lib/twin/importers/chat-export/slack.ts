@@ -17,6 +17,7 @@
  */
 
 import type { RawSource } from "@/lib/twin/ingest/parse"
+import { parseChatExportJson } from "./types"
 
 interface SlackUserProfile {
   real_name?: string
@@ -59,7 +60,7 @@ function parsePayload(text: string): {
 } {
   const trimmed = text.trim()
   if (!trimmed) return { messages: [] }
-  const parsed: unknown = JSON.parse(trimmed)
+  const parsed: unknown = parseChatExportJson(trimmed, "Slack")
   if (Array.isArray(parsed)) {
     return { messages: parsed as SlackMessage[] }
   }

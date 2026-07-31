@@ -15,7 +15,7 @@ import { create } from "zustand"
 import { nanoid } from "nanoid"
 import type { CanvasComment, LineRange } from "@/types/canvas/collaboration"
 import * as canvasCommentsDb from "@/lib/db/canvas-comments"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 interface CommentState {
   comments: Record<string, CanvasComment[]>

@@ -17,13 +17,15 @@ import { memo, useEffect, useMemo, useState } from "react"
 import { BaseEdge, EdgeLabelRenderer, useReactFlow, type EdgeProps } from "@xyflow/react"
 import { useTranslations } from "next-intl"
 import { useShallow } from "zustand/react/shallow"
+import { MessageSquareIcon } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { useEditorStoreOrNull } from "@/lib/workflow/editor/store-context"
+import { useEdgeDiagnostics } from "@/lib/workflow/editor/use-diagnostics"
 import { computeSmartRoute, type HandlePosition } from "@/lib/workflow/editor/edge-routing"
 import { flagsForTier, resolveEffectiveTier } from "@/lib/workflow/editor/performance-tier"
 
-type EdgeKind = "then" | "else" | "true" | "false" | "error" | "default"
+type EdgeKind = "then" | "else" | "true" | "false" | "error" | "default" | "approved" | "rejected"
 
 const KIND_CLASSES: Record<EdgeKind, string> = {
   then: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
@@ -32,6 +34,8 @@ const KIND_CLASSES: Record<EdgeKind, string> = {
   false: "bg-rose-500/15 text-rose-700 dark:text-rose-300",
   error: "bg-rose-500/15 text-rose-700 dark:text-rose-300",
   default: "bg-zinc-500/15 text-zinc-700 dark:text-zinc-300",
+  approved: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+  rejected: "bg-rose-500/15 text-rose-700 dark:text-rose-300",
 }
 
 function isEdgeKind(v: unknown): v is EdgeKind {
@@ -41,7 +45,9 @@ function isEdgeKind(v: unknown): v is EdgeKind {
     v === "true" ||
     v === "false" ||
     v === "error" ||
-    v === "default"
+    v === "default" ||
+    v === "approved" ||
+    v === "rejected"
   )
 }
 
@@ -154,6 +160,23 @@ export const SmartEdge = memo(function SmartEdge(props: EdgeProps) {
     return typeof v === "string" ? v : ""
   }, [data])
 
+  const comment = useMemo(() => {
+    const v = (data as { comment?: unknown } | undefined)?.comment
+    return typeof v === "string" && v.trim() ? v : null
+  }, [data])
+
+  // (A4) Edge diagnostics — dangling endpoints, container-boundary crossings,
+  // duplicate ids — colour the edge so structural problems are visible on the
+  // canvas, not just in the Problems panel.
+  const edgeDiagnostics = useEdgeDiagnostics(id)
+  const edgeSeverity: "error" | "warning" | null = edgeDiagnostics.some(
+    (d) => d.severity === "error"
+  )
+    ? "error"
+    : edgeDiagnostics.some((d) => d.severity === "warning")
+      ? "warning"
+      : null
+
   const isHovered = storeBits?.hoveredEdgeId === id
   const isEditing = storeBits?.editingEdgeIdInline === id
   const animations = storeBits
@@ -189,10 +212,14 @@ export const SmartEdge = memo(function SmartEdge(props: EdgeProps) {
           stroke:
             isHovered || selected
               ? "oklch(var(--primary))"
-              : kind === "error"
+              : edgeSeverity === "error"
                 ? "#f43f5e"
-                : undefined,
-          strokeWidth: isHovered || selected ? 2 : 1.5,
+                : edgeSeverity === "warning"
+                  ? "#f59e0b"
+                  : kind === "error"
+                    ? "#f43f5e"
+                    : undefined,
+          strokeWidth: isHovered || selected || edgeSeverity ? 2 : 1.5,
           strokeDasharray: animations && animated ? "5 5" : undefined,
         }}
         onMouseEnter={() => storeBits?.setHoveredEdge(id)}
@@ -209,6 +236,7 @@ export const SmartEdge = memo(function SmartEdge(props: EdgeProps) {
           }}
           className="flex items-center gap-1"
           data-testid={`smart-edge-label-${id}`}
+          data-edge-severity={edgeSeverity ?? undefined}
         >
           {kind ? (
             <span
@@ -255,6 +283,15 @@ export const SmartEdge = memo(function SmartEdge(props: EdgeProps) {
             >
               {customLabel}
             </button>
+          ) : null}
+          {comment ? (
+            <span
+              title={comment}
+              className="inline-flex items-center rounded bg-muted px-1 py-px text-muted-foreground"
+              data-testid={`smart-edge-comment-${id}`}
+            >
+              <MessageSquareIcon className="size-3" aria-hidden="true" />
+            </span>
           ) : null}
         </div>
       </EdgeLabelRenderer>

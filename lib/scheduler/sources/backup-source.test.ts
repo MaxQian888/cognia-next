@@ -1,5 +1,5 @@
 import { BACKUP_SOURCE_ID, createBackupSource, toUnifiedBackup } from "./backup-source"
-import type { BackupAutoSchedule } from "@/lib/claude/types"
+import type { BackupAutoSchedule } from "@cognia/agent-config-types"
 
 function makeConfig(overrides: Partial<BackupAutoSchedule> = {}): BackupAutoSchedule {
   return {
@@ -67,6 +67,15 @@ describe("createBackupSource", () => {
     const items = await source.list()
     expect(items).toHaveLength(1)
     expect(items[0].unifiedId).toBe(`backup:${BACKUP_SOURCE_ID}`)
+  })
+
+  it("loads recent backup runs through the source contract", async () => {
+    const stubs = makeStubs(makeConfig())
+    const listRuns = jest.fn(async () => [])
+    const source = createBackupSource({ ...stubs, listRuns, pollIntervalMs: 0 })
+
+    await expect(source.listRuns?.(7)).resolves.toEqual([])
+    expect(listRuns).toHaveBeenCalledWith({ limit: 7 })
   })
 
   it("get() returns undefined for non-default ids", async () => {

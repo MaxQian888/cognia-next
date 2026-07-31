@@ -1,12 +1,17 @@
 /**
- * Tests for useA2UIWorkspaceShortcuts — the workspace editor's keyboard map.
+ * @jest-environment jsdom
  *
- * Verifies: keydown listener registers + cleans up; shortcut routing; bypass
- * when typing into form fields; the `enabled: false` short-circuit.
+ * Tests for useA2UIWorkspaceShortcuts — end-to-end through the shared dispatcher.
+ * Verifies: registration lifecycle; shortcut routing; the editable-field bypass;
+ * and the `enabled: false` short-circuit (no runtime slot at all).
  */
 
 import { renderHook } from "@testing-library/react"
 import { useA2UIWorkspaceShortcuts } from "./use-a2ui-workspace-shortcuts"
+import { useAppShortcutDispatcher } from "@/hooks/shortcuts/use-app-shortcut-dispatcher"
+import { getAppRegistration, __resetAppRuntimeForTesting } from "@/lib/shortcuts/app-runtime"
+import { __resetAppKeybindingStoreForTesting } from "@/stores/shortcuts/app-keybinding-store"
+import { __resetContextKeysForTesting } from "@/lib/plugin/context-keys/context-key-store"
 
 const undo = jest.fn()
 const redo = jest.fn()
@@ -14,10 +19,21 @@ const redo = jest.fn()
 jest.mock("@/stores/a2ui", () => ({
   useA2UIStore: (selector: (state: Record<string, unknown>) => unknown) => selector({ undo, redo }),
 }))
+jest.mock("@/lib/plugin", () => ({
+  getPluginEventHooks: () => ({ dispatchShortcut: jest.fn() }),
+}))
+
+type Actions = Parameters<typeof useA2UIWorkspaceShortcuts>[0]
+
+function mount(actions: Actions) {
+  return renderHook(() => {
+    useAppShortcutDispatcher()
+    useA2UIWorkspaceShortcuts(actions)
+  })
+}
 
 function dispatch(opts: Partial<KeyboardEventInit> & { key: string; on?: HTMLElement }) {
   const target = opts.on ?? document.body
-  target.focus?.()
   const ev = new KeyboardEvent("keydown", {
     key: opts.key,
     ctrlKey: opts.ctrlKey,
@@ -26,7 +42,7 @@ function dispatch(opts: Partial<KeyboardEventInit> & { key: string; on?: HTMLEle
     bubbles: true,
     cancelable: true,
   })
-  document.dispatchEvent(ev)
+  target.dispatchEvent(ev)
   return ev
 }
 
@@ -35,28 +51,29 @@ describe("useA2UIWorkspaceShortcuts", () => {
     undo.mockReset()
     redo.mockReset()
     document.body.innerHTML = ""
+    __resetAppRuntimeForTesting()
+    __resetAppKeybindingStoreForTesting()
+    __resetContextKeysForTesting()
+    localStorage.clear()
   })
 
-  it("registers and removes a global keydown listener tied to enabled", () => {
-    const add = jest.spyOn(document, "addEventListener")
-    const remove = jest.spyOn(document, "removeEventListener")
-    const { unmount } = renderHook(() => useA2UIWorkspaceShortcuts({ surfaceId: "sx" }))
-    expect(add).toHaveBeenCalledWith("keydown", expect.any(Function))
+  it("registers its actions while mounted and removes them on unmount", () => {
+    const { unmount } = mount({ surfaceId: "sx" })
+    expect(getAppRegistration("a2ui.undo")).toBeDefined()
+    expect(getAppRegistration("a2ui.save")).toBeDefined()
     unmount()
-    expect(remove).toHaveBeenCalledWith("keydown", expect.any(Function))
-    add.mockRestore()
-    remove.mockRestore()
+    expect(getAppRegistration("a2ui.undo")).toBeUndefined()
+    expect(getAppRegistration("a2ui.save")).toBeUndefined()
   })
 
-  it("does NOT register a listener when enabled is false", () => {
-    const add = jest.spyOn(document, "addEventListener")
-    renderHook(() => useA2UIWorkspaceShortcuts({ surfaceId: "sx", enabled: false }))
-    expect(add).not.toHaveBeenCalledWith("keydown", expect.any(Function))
-    add.mockRestore()
+  it("registers nothing when enabled is false", () => {
+    mount({ surfaceId: "sx", enabled: false })
+    expect(getAppRegistration("a2ui.undo")).toBeUndefined()
+    expect(getAppRegistration("a2ui.save")).toBeUndefined()
   })
 
   it("routes Ctrl+Z to undo and Ctrl+Y to redo", () => {
-    renderHook(() => useA2UIWorkspaceShortcuts({ surfaceId: "sx" }))
+    mount({ surfaceId: "sx" })
     dispatch({ key: "z", ctrlKey: true })
     expect(undo).toHaveBeenCalledWith("sx")
     dispatch({ key: "y", ctrlKey: true })
@@ -64,9 +81,10 @@ describe("useA2UIWorkspaceShortcuts", () => {
   })
 
   it("routes Ctrl+Shift+Z to redo", () => {
-    renderHook(() => useA2UIWorkspaceShortcuts({ surfaceId: "sx" }))
+    mount({ surfaceId: "sx" })
     dispatch({ key: "z", ctrlKey: true, shiftKey: true })
     expect(redo).toHaveBeenCalledWith("sx")
+    expect(undo).not.toHaveBeenCalled()
   })
 
   it("invokes the onSave / onDelete / onDuplicate / onDeselect / onToggleMode handlers", () => {
@@ -75,16 +93,14 @@ describe("useA2UIWorkspaceShortcuts", () => {
     const onDuplicateComponent = jest.fn()
     const onDeselect = jest.fn()
     const onToggleMode = jest.fn()
-    renderHook(() =>
-      useA2UIWorkspaceShortcuts({
-        surfaceId: "sx",
-        onSave,
-        onDeleteComponent,
-        onDuplicateComponent,
-        onDeselect,
-        onToggleMode,
-      })
-    )
+    mount({
+      surfaceId: "sx",
+      onSave,
+      onDeleteComponent,
+      onDuplicateComponent,
+      onDeselect,
+      onToggleMode,
+    })
 
     dispatch({ key: "s", ctrlKey: true })
     expect(onSave).toHaveBeenCalled()
@@ -102,25 +118,23 @@ describe("useA2UIWorkspaceShortcuts", () => {
     expect(onToggleMode).toHaveBeenCalled()
   })
 
-  it("bypasses shortcuts when the user is typing in an input/textarea/select/contentEditable", () => {
+  it("bypasses shortcuts when the event originates from an editable control", () => {
     const onSave = jest.fn()
-    renderHook(() => useA2UIWorkspaceShortcuts({ surfaceId: "sx", onSave }))
+    mount({ surfaceId: "sx", onSave })
 
     const input = document.createElement("input")
     document.body.appendChild(input)
-    input.focus()
-    dispatch({ key: "s", ctrlKey: true })
+    dispatch({ key: "s", ctrlKey: true, on: input })
     expect(onSave).not.toHaveBeenCalled()
 
     const textarea = document.createElement("textarea")
     document.body.appendChild(textarea)
-    textarea.focus()
-    dispatch({ key: "s", ctrlKey: true })
+    dispatch({ key: "s", ctrlKey: true, on: textarea })
     expect(onSave).not.toHaveBeenCalled()
   })
 
   it("ignores unrelated keys", () => {
-    renderHook(() => useA2UIWorkspaceShortcuts({ surfaceId: "sx" }))
+    mount({ surfaceId: "sx" })
     dispatch({ key: "a" })
     expect(undo).not.toHaveBeenCalled()
     expect(redo).not.toHaveBeenCalled()

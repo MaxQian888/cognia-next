@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for performance-tier-prefs.ts — Dexie load/save round-trips.
  */

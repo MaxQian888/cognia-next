@@ -8,11 +8,17 @@
  * `revokePairedDevice` to soft-delete a device.
  */
 
-import type { DevicePlatform, PairedDeviceRow } from "@/types/mobile/paired-device"
+import type {
+  DevicePlatform,
+  PairedDeviceRow,
+  TerminalHostDescriptor,
+} from "@/types/mobile/paired-device"
+import type { RoomDescriptorV2 } from "@/lib/signaling/v2-crypto"
 import { getDb } from "./schema"
 
 export interface AddPairedDeviceInput {
   deviceId: string
+  accountId?: string
   label: string
   platform: DevicePlatform
   pubkey: string
@@ -29,12 +35,8 @@ export interface AddPairedDeviceInput {
    * WebRTC support landed.
    */
   rendezvousId?: string
-  /**
-   * ADR-0021 — 32-byte HMAC key (URL-safe base64, unpadded) shared with the
-   * paired device, used to authenticate signaling envelopes. Absent for
-   * legacy rows.
-   */
-  rendezvousSecret?: string
+  signalingRoomDescriptor?: RoomDescriptorV2
+  signalingKeyRef?: string
   /** Defaults to `Date.now()` — pass an explicit value in tests. */
   nowMs?: number
 }
@@ -49,6 +51,10 @@ export async function addPairedDevice(input: AddPairedDeviceInput): Promise<void
     appVersion: input.appVersion,
     pairedAt: now,
     lastSeenAt: now,
+    allowRemoteTerminal: false,
+  }
+  if (input.accountId) {
+    row.accountId = input.accountId
   }
   if (input.serverFingerprint) {
     row.serverFingerprint = input.serverFingerprint
@@ -56,9 +62,10 @@ export async function addPairedDevice(input: AddPairedDeviceInput): Promise<void
   if (input.rendezvousId) {
     row.rendezvousId = input.rendezvousId
   }
-  if (input.rendezvousSecret) {
-    row.rendezvousSecret = input.rendezvousSecret
+  if (input.signalingRoomDescriptor) {
+    row.signalingRoomDescriptor = input.signalingRoomDescriptor
   }
+  if (input.signalingKeyRef) row.signalingKeyRef = input.signalingKeyRef
   await getDb().pairedDevices.put(row)
 }
 
@@ -147,6 +154,25 @@ export async function touchPairedDevice(
 }
 
 /**
+ * Persist the platform capability manifest a device reported via the
+ * `device_capabilities_report` RPC (ADR-0060). Overwrites the previous
+ * manifest wholesale — the report is a full snapshot, not a delta.
+ *
+ * @returns true if a row was found and updated; false if the deviceId is unknown.
+ */
+export async function recordDeviceCapabilities(
+  deviceId: string,
+  capabilities: string[],
+  nowMs: number = Date.now()
+): Promise<boolean> {
+  const updated = await getDb().pairedDevices.update(deviceId, {
+    capabilities,
+    capabilitiesReportedAt: nowMs,
+  })
+  return updated > 0
+}
+
+/**
  * Return all paired devices, newest-first by `lastSeenAt`. Includes revoked
  * rows so the settings UI can show "Revoked 3d ago" tombstones.
  */
@@ -198,6 +224,59 @@ export async function setRemoteControlAllowed(
 ): Promise<boolean> {
   const updated = await getDb().pairedDevices.update(deviceId, {
     allowRemoteControl: allowed,
+  })
+  return updated > 0
+}
+
+/**
+ * Persist the **agent-control** grant: may this device start and drive external
+ * agents on this desktop.
+ *
+ * Same storage contract as {@link setRemoteControlAllowed} — an explicit
+ * boolean, re-seeded into the Rust mirror on the next boot — but a separate
+ * column, because process execution is a bigger grant than session steering
+ * and the owner should be choosing them independently.
+ *
+ * @returns true if a row was found and updated; false if the deviceId is unknown.
+ */
+export async function setAgentControlAllowed(deviceId: string, allowed: boolean): Promise<boolean> {
+  const updated = await getDb().pairedDevices.update(deviceId, {
+    allowAgentControl: allowed,
+  })
+  return updated > 0
+}
+
+/** Persist or immediately revoke the independent remote-terminal grant. */
+export async function setRemoteTerminalAllowed(
+  deviceId: string,
+  allowed: boolean,
+  descriptor?: TerminalHostDescriptor
+): Promise<boolean> {
+  if (allowed && !descriptor) {
+    throw new Error("terminal host descriptor is required when granting remote terminal access")
+  }
+  let updated = 0
+  await getDb()
+    .pairedDevices.where("deviceId")
+    .equals(deviceId)
+    .modify((row) => {
+      row.allowRemoteTerminal = allowed
+      if (allowed && descriptor) {
+        row.terminalHostDescriptor = descriptor
+      } else {
+        delete row.terminalHostDescriptor
+      }
+      updated += 1
+    })
+  return updated > 0
+}
+
+export async function setLockedComputerUseAllowed(
+  deviceId: string,
+  allowed: boolean
+): Promise<boolean> {
+  const updated = await getDb().pairedDevices.update(deviceId, {
+    allowLockedComputerUse: allowed,
   })
   return updated > 0
 }

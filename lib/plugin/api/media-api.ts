@@ -20,6 +20,14 @@ import {
   type ImageEditProviderId,
 } from "@/lib/ai/media/image-generation-sdk"
 import {
+  generateProviderImage,
+  generateProviderVideo,
+  type ImageGenerationProviderId,
+  type ProviderImageGenerationRequest,
+  type ProviderVideoGenerationRequest,
+} from "@/lib/ai/media/provider-generation"
+import type { VideoProviderId } from "@/lib/ai/media/video-generation-sdk"
+import {
   registerPluginMediaAsset,
   type MediaCatalogWriter,
   type PluginMediaAssetInput,
@@ -28,6 +36,8 @@ import { proxyFetch } from "@/lib/network/proxy-fetch"
 import { useSettingsStore } from "@/stores"
 import { isTauri } from "@/lib/utils"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
+import { createApiGuardedAPI } from "./api-permission-gate"
+import { assertNoLeakingPii } from "./plugin-pii-gate"
 import type { PluginManager } from "../core/manager"
 
 // =============================================================================
@@ -40,6 +50,31 @@ export interface ImageProcessingOptions {
   width?: number
   height?: number
   maintainAspectRatio?: boolean
+}
+
+export interface MediaImageGenerationOptions {
+  providerId?: ImageGenerationProviderId
+  model?: string
+  size?: `${number}x${number}`
+  aspectRatio?: `${number}:${number}`
+  seed?: number
+  referenceImages?: ImageData[]
+  mask?: ImageData
+  providerOptions?: ProviderImageGenerationRequest["providerOptions"]
+  abortSignal?: AbortSignal
+}
+
+export interface MediaVideoGenerationOptions {
+  providerId?: VideoProviderId
+  model?: string
+  aspectRatio?: `${number}:${number}`
+  resolution?: `${number}x${number}`
+  duration?: number
+  fps?: number
+  seed?: number
+  inputImage?: ImageData
+  providerOptions?: ProviderVideoGenerationRequest["providerOptions"]
+  abortSignal?: AbortSignal
 }
 
 export interface ImageFilterDefinition {
@@ -162,6 +197,39 @@ export interface VideoExportOptions {
   onProgress?: (progress: ExportProgress) => void
 }
 
+export type VideoAnalysisMode = "keyframes" | "scene"
+
+export interface VideoAnalysisOptions {
+  mode?: VideoAnalysisMode
+  startTime?: number
+  endTime?: number
+  maxFrames?: number
+  width?: number
+  deduplicate?: boolean
+  duplicateThreshold?: number
+}
+
+export interface VideoAnalysisFrame {
+  path: string
+  timestamp: number
+  reason: "keyframe" | "scene-change" | "uniform-fallback"
+}
+
+export interface VideoAnalysisManifest {
+  sourcePath: string
+  outputDirectory: string
+  mode: VideoAnalysisMode
+  range: {
+    startTime: number
+    endTime: number
+  }
+  metadata: NativeVideoInfo
+  candidateCount: number
+  deduplicatedCount: number
+  frames: VideoAnalysisFrame[]
+  warnings: string[]
+}
+
 export interface ExportProgress {
   phase: "preparing" | "rendering" | "encoding" | "finalizing" | "complete" | "error"
   percent: number
@@ -221,6 +289,11 @@ export interface PluginMediaAPI {
       bitrate: number
       hasAudio: boolean
     }>
+    analyze: (
+      source: string | Blob | File,
+      options?: VideoAnalysisOptions
+    ) => Promise<VideoAnalysisManifest>
+    cleanupAnalysis: (manifest: VideoAnalysisManifest) => Promise<void>
     trim: (clipId: string, startTime: number, endTime: number) => Promise<VideoClip>
     concatenate: (clipIds: string[]) => Promise<VideoClip>
     applyEffect: (
@@ -261,6 +334,8 @@ export interface PluginMediaAPI {
 
   // AI Processing
   ai: {
+    generateImage: (prompt: string, options?: MediaImageGenerationOptions) => Promise<ImageData>
+    generateVideo: (prompt: string, options?: MediaVideoGenerationOptions) => Promise<Blob>
     upscale: (imageData: ImageData, factor: 2 | 4) => Promise<ImageData>
     removeBackground: (imageData: ImageData) => Promise<ImageData>
     enhanceImage: (
@@ -653,7 +728,7 @@ function getHistogram(imageData: ImageData): {
   return { r, g, b, luminance }
 }
 
-interface NativeVideoInfo {
+export interface NativeVideoInfo {
   durationMs: number
   width: number
   height: number
@@ -661,6 +736,7 @@ interface NativeVideoInfo {
   codec: string
   fileSize: number
   hasAudio: boolean
+  sourceToken: string
 }
 
 interface NativeVideoProgressEvent {
@@ -674,6 +750,7 @@ interface NativeVideoProgressEvent {
 
 interface LocalVideoClipEntry {
   sourcePath: string
+  sourceToken?: string
   clip: VideoClip
 }
 
@@ -729,8 +806,8 @@ function buildVideoClip(sourcePath: string, info: NativeVideoInfo): VideoClip {
   }
 }
 
-function persistClip(clip: VideoClip, sourcePath: string): VideoClip {
-  localVideoClipRegistry.set(clip.id, { clip, sourcePath })
+function persistClip(clip: VideoClip, sourcePath: string, sourceToken?: string): VideoClip {
+  localVideoClipRegistry.set(clip.id, { clip, sourcePath, sourceToken })
   return clip
 }
 
@@ -752,13 +829,21 @@ function requireClip(clipId: string): LocalVideoClipEntry {
   return entry
 }
 
-function frameToImageData(frame: {
-  data: number[] | Uint8Array
-  width: number
-  height: number
-}): ImageData {
-  const bytes = frame.data instanceof Uint8Array ? frame.data : new Uint8Array(frame.data)
-  return new ImageData(new Uint8ClampedArray(bytes), frame.width, frame.height)
+function frameResponseToImageData(response: ArrayBuffer | Uint8Array): ImageData {
+  const bytes = response instanceof Uint8Array ? response : new Uint8Array(response)
+  if (bytes.byteLength < 8) {
+    throw new Error("Native video frame response is missing its dimension header")
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const width = view.getUint32(0, true)
+  const height = view.getUint32(4, true)
+  const expectedLength = width * height * 4
+  if (bytes.byteLength !== expectedLength + 8) {
+    throw new Error(
+      `Native video frame response has ${bytes.byteLength - 8} pixels bytes; expected ${expectedLength}`
+    )
+  }
+  return new ImageData(new Uint8ClampedArray(bytes.slice(8)), width, height)
 }
 
 function toBlobPart(bytes: Uint8Array): ArrayBuffer {
@@ -812,13 +897,18 @@ function getMediaAIProviderSuggestion(): string {
   return "在 Settings -> Providers 中配置并启用支持图像的 provider（OpenAI、xAI、Together AI、Fireworks 或 DeepInfra）。"
 }
 
-function resolveConfiguredImageProvider(): ResolvedImageProviderConfig {
+function currentProviderSettingsSnapshot() {
   const settings = useSettingsStore.getState()
-  const snapshot = createProviderSettingsSnapshot({
+  return createProviderSettingsSnapshot({
     defaultProvider: settings.defaultProvider,
     providerSettings: settings.providerSettings,
     customProviders: settings.customProviders,
   })
+}
+
+function resolveConfiguredImageProvider(): ResolvedImageProviderConfig {
+  const settings = useSettingsStore.getState()
+  const snapshot = currentProviderSettingsSnapshot()
 
   const candidateProviderIds = uniqueStrings([
     isImageEditProvider(settings.defaultProvider || "") ? settings.defaultProvider : undefined,
@@ -940,6 +1030,27 @@ async function runImageAi(
       {
         site,
         message: `Image AI call failed: ${site}`,
+        expected: false,
+      },
+      error
+    )
+    throw error
+  }
+}
+
+async function runGeneratedMediaAi<T>(
+  pluginId: string,
+  site: string,
+  runner: () => Promise<T>
+): Promise<T> {
+  try {
+    return await runner()
+  } catch (error) {
+    recordSilentFailure(
+      pluginId,
+      {
+        site,
+        message: `Generated media AI call failed: ${site}`,
         expected: false,
       },
       error
@@ -1144,7 +1255,7 @@ async function withTimelineProgress<T>(
 // =============================================================================
 
 export function createMediaAPI(pluginId: string, _manager: PluginManager): PluginMediaAPI {
-  return {
+  const api: PluginMediaAPI = {
     image: {
       load: loadImage,
 
@@ -1222,19 +1333,19 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
       loadClip: async (source: string | Blob | File): Promise<VideoClip> => {
         const sourcePath = ensurePathSource(source)
         const info = await getNativeVideoInfo(sourcePath)
-        return persistClip(buildVideoClip(sourcePath, info), sourcePath)
+        return persistClip(buildVideoClip(sourcePath, info), sourcePath, info.sourceToken)
       },
 
       getFrame: async (clipId: string, time: number): Promise<ImageData> => {
-        const frame = await invoke<{ data: number[] | Uint8Array; width: number; height: number }>(
-          "plugin_media_get_video_frame",
-          {
-            pluginId,
-            clipId,
-            time,
-          }
-        )
-        return frameToImageData(frame)
+        const entry = requireClip(clipId)
+        if (!entry.sourceToken) {
+          throw new Error(`Video clip is not backed by an authorized local source: ${clipId}`)
+        }
+        const frame = await invoke<ArrayBuffer>("plugin_media_get_video_frame", {
+          sourceToken: entry.sourceToken,
+          time,
+        })
+        return frameResponseToImageData(frame)
       },
 
       getMetadata: async (source: string | Blob | File) => {
@@ -1251,29 +1362,51 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
         }
       },
 
+      analyze: async (
+        source: string | Blob | File,
+        options: VideoAnalysisOptions = {}
+      ): Promise<VideoAnalysisManifest> => {
+        const filePath = ensurePathSource(source)
+        const info = await getNativeVideoInfo(filePath)
+        return invoke<VideoAnalysisManifest>("video_analyze", {
+          options: {
+            sourceToken: info.sourceToken,
+            ...options,
+          },
+        })
+      },
+
+      cleanupAnalysis: async (manifest: VideoAnalysisManifest): Promise<void> => {
+        await invoke<void>("video_cleanup_analysis", {
+          outputDirectory: manifest.outputDirectory,
+        })
+      },
+
       trim: async (clipId: string, startTime: number, endTime: number): Promise<VideoClip> => {
         const entry = requireClip(clipId)
+        if (!entry.sourceToken) {
+          throw new Error(`Video clip is not backed by an authorized local source: ${clipId}`)
+        }
         const safeStart = Math.max(0, startTime)
         const safeEnd = Math.max(safeStart, endTime)
-        const outputPath = `${entry.sourcePath}.trim.${Date.now()}.mp4`
-        const result = await invoke<{ outputPath?: string }>("video_trim", {
+        const result = await invoke<{ outputPath: string }>("video_trim", {
           options: {
-            inputPath: entry.sourcePath,
-            outputPath,
+            sourceToken: entry.sourceToken,
             startTime: safeStart,
             endTime: safeEnd,
             format: "mp4",
           },
         })
-        const trimmedPath = result.outputPath || outputPath
+        const trimmedPath = result.outputPath
         const info = await getNativeVideoInfo(trimmedPath)
-        return persistClip(buildVideoClip(trimmedPath, info), trimmedPath)
+        return persistClip(buildVideoClip(trimmedPath, info), trimmedPath, info.sourceToken)
       },
 
       concatenate: async (clipIds: string[]): Promise<VideoClip> => {
         if (clipIds.length === 0) {
           throw new Error("No clips provided for concatenation")
         }
+        // invoke-parity-exempt: native video pipeline not yet shipped in Rust; rejects at runtime by design
         const merged = await invoke<VideoClip>("plugin_media_concatenate_videos", {
           pluginId,
           clipIds,
@@ -1286,6 +1419,7 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
         effectId: string,
         params?: Record<string, unknown>
       ): Promise<void> => {
+        // invoke-parity-exempt: native video pipeline not yet shipped in Rust; rejects at runtime by design
         await invoke<void>("plugin_media_apply_video_effect", {
           pluginId,
           clipId,
@@ -1311,6 +1445,7 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
         toClipId: string,
         transition: VideoTransition
       ): Promise<void> => {
+        // invoke-parity-exempt: native video pipeline not yet shipped in Rust; rejects at runtime by design
         await invoke<void>("plugin_media_add_transition", {
           pluginId,
           fromClipId,
@@ -1333,6 +1468,7 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
         }
 
         const bytes = await withTimelineProgress(options.onProgress, async () =>
+          // invoke-parity-exempt: native video pipeline not yet shipped in Rust; rejects at runtime by design
           invoke<number[] | Uint8Array>("plugin_media_export_video", {
             pluginId,
             clipIds,
@@ -1408,6 +1544,69 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
     },
 
     ai: {
+      generateImage: async (
+        prompt: string,
+        options?: MediaImageGenerationOptions
+      ): Promise<ImageData> => {
+        assertNoLeakingPii(pluginId, "ctx.media.ai.generateImage", [prompt])
+        return runGeneratedMediaAi(pluginId, "ai.generateImage", async () => {
+          const referenceImages = options?.referenceImages?.map((image) =>
+            imageDataToDataUrl(image)
+          )
+          const generationPrompt =
+            referenceImages?.length || options?.mask
+              ? {
+                  text: prompt,
+                  images: referenceImages ?? [],
+                  ...(options?.mask ? { mask: imageDataToDataUrl(options.mask) } : {}),
+                }
+              : prompt
+          const result = await generateProviderImage({
+            snapshot: currentProviderSettingsSnapshot(),
+            prompt: generationPrompt,
+            ...(options?.providerId ? { providerId: options.providerId } : {}),
+            ...(options?.model ? { model: options.model } : {}),
+            ...(options?.size ? { size: options.size } : {}),
+            ...(options?.aspectRatio ? { aspectRatio: options.aspectRatio } : {}),
+            ...(options?.seed !== undefined ? { seed: options.seed } : {}),
+            ...(options?.providerOptions ? { providerOptions: options.providerOptions } : {}),
+            ...(options?.abortSignal ? { abortSignal: options.abortSignal } : {}),
+          })
+          return dataUrlToImageData(`data:${result.image.mediaType};base64,${result.image.base64}`)
+        })
+      },
+
+      generateVideo: async (
+        prompt: string,
+        options?: MediaVideoGenerationOptions
+      ): Promise<Blob> => {
+        assertNoLeakingPii(pluginId, "ctx.media.ai.generateVideo", [prompt])
+        return runGeneratedMediaAi(pluginId, "ai.generateVideo", async () => {
+          const generationPrompt = options?.inputImage
+            ? {
+                text: prompt,
+                image: imageDataToDataUrl(options.inputImage),
+              }
+            : prompt
+          const result = await generateProviderVideo({
+            snapshot: currentProviderSettingsSnapshot(),
+            prompt: generationPrompt,
+            ...(options?.providerId ? { providerId: options.providerId } : {}),
+            ...(options?.model ? { model: options.model } : {}),
+            ...(options?.aspectRatio ? { aspectRatio: options.aspectRatio } : {}),
+            ...(options?.resolution ? { resolution: options.resolution } : {}),
+            ...(options?.duration !== undefined ? { duration: options.duration } : {}),
+            ...(options?.fps !== undefined ? { fps: options.fps } : {}),
+            ...(options?.seed !== undefined ? { seed: options.seed } : {}),
+            ...(options?.providerOptions ? { providerOptions: options.providerOptions } : {}),
+            ...(options?.abortSignal ? { abortSignal: options.abortSignal } : {}),
+          })
+          return new Blob([toBlobPart(result.video.uint8Array)], {
+            type: result.video.mediaType,
+          })
+        })
+      },
+
       upscale: async (imageData: ImageData, factor: 2 | 4): Promise<ImageData> => {
         return runImageAi(pluginId, "ai.upscale", () =>
           executeProviderImageEdit(
@@ -1439,6 +1638,9 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
       },
 
       generateVariation: async (imageData: ImageData, prompt?: string): Promise<ImageData> => {
+        // PII red-line: the free-form prompt goes verbatim to the image
+        // provider (executeProviderImageEdit → /images/edits).
+        assertNoLeakingPii(pluginId, "ctx.media.ai.generateVariation", [prompt])
         return runImageAi(pluginId, "ai.generateVariation", () =>
           executeProviderImageEdit(
             prompt
@@ -1454,6 +1656,7 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
         mask: ImageData,
         prompt: string
       ): Promise<ImageData> => {
+        assertNoLeakingPii(pluginId, "ctx.media.ai.inpaint", [prompt])
         return runImageAi(pluginId, "ai.inpaint", () =>
           executeProviderImageEdit(
             `Modify only the masked region of this image. ${prompt}`,
@@ -1469,8 +1672,7 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
 
       getImageDataFromCanvas: (canvas: OffscreenCanvas | HTMLCanvasElement): ImageData => {
         const ctx = canvas.getContext("2d") as
-          | CanvasRenderingContext2D
-          | OffscreenCanvasRenderingContext2D
+          CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
         if (!ctx) throw new Error("Failed to get canvas context")
         return ctx.getImageData(0, 0, canvas.width, canvas.height)
       },
@@ -1480,8 +1682,7 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
         canvas: OffscreenCanvas | HTMLCanvasElement
       ): void => {
         const ctx = canvas.getContext("2d") as
-          | CanvasRenderingContext2D
-          | OffscreenCanvasRenderingContext2D
+          CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
         if (!ctx) throw new Error("Failed to get canvas context")
         ctx.putImageData(imageData, 0, 0)
       },
@@ -1526,5 +1727,35 @@ export function createMediaAPI(pluginId: string, _manager: PluginManager): Plugi
         })
       },
     },
+  }
+
+  // `image`/`filters`/`effects`/`transitions`/`utils` are pure in-memory
+  // transforms over caller-supplied data — no host resource to protect. The
+  // `video` pipeline touches decoded media state and disk-weight exports, and
+  // `ai.*` spends the user's provider quota (executeProviderImageEdit), so
+  // both namespaces are permission-gated.
+  return {
+    ...api,
+    video: createApiGuardedAPI(pluginId, api.video, {
+      loadClip: "media:video:read",
+      getFrame: "media:video:read",
+      getMetadata: "media:video:read",
+      analyze: "media:video:read",
+      cleanupAnalysis: "media:video:write",
+      trim: "media:video:write",
+      concatenate: "media:video:write",
+      applyEffect: "media:video:write",
+      addTransition: "media:video:write",
+      export: "media:video:export",
+    }),
+    ai: createApiGuardedAPI(pluginId, api.ai, {
+      generateImage: "ai:chat",
+      generateVideo: "ai:chat",
+      upscale: "ai:chat",
+      removeBackground: "ai:chat",
+      enhanceImage: "ai:chat",
+      generateVariation: "ai:chat",
+      inpaint: "ai:chat",
+    }),
   }
 }

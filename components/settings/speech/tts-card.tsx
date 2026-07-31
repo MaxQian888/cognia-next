@@ -21,11 +21,16 @@ import { Separator } from "@/components/ui/separator"
 import { Textarea } from "@/components/ui/textarea"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { useSettingsStore } from "@/stores/settings"
-import { ORDERED_TTS_PROVIDERS, TTS_PROVIDERS, type TTSProvider } from "@/types/media/tts"
-import { generateSSML } from "@/lib/tts/tts-text-utils"
+import {
+  ORDERED_TTS_PROVIDERS,
+  RETIRED_TTS_PROVIDERS,
+  TTS_PROVIDERS,
+  type TTSProvider,
+} from "@cognia/tts/types"
+import { generateSSML } from "@cognia/tts/tts-text-utils"
 import { TestTtsButton } from "./test-tts-button"
 import { PROVIDER_CONFIG_COMPONENTS } from "./provider-config"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 // -- SSML Preview (Edge / System) --------------------------------------------
 
@@ -190,6 +195,7 @@ export function TtsCard() {
   const ttsVolume = settings?.ttsVolume ?? 1.0
   const ttsCacheEnabled = settings?.ttsCacheEnabled ?? true
   const ttsStreamingEnabled = settings?.ttsStreamingEnabled ?? true
+  const ttsFallbackEnabled = settings?.ttsFallbackEnabled ?? true
 
   const ProviderConfig = PROVIDER_CONFIG_COMPONENTS[provider]
   const info = TTS_PROVIDERS[provider]
@@ -240,14 +246,24 @@ export function TtsCard() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {ORDERED_TTS_PROVIDERS.map((id) => (
+                  {/* Keep a persisted retired provider selectable so the value
+                      isn't blank, but label it and steer the user away. */}
+                  {(ORDERED_TTS_PROVIDERS.includes(provider)
+                    ? ORDERED_TTS_PROVIDERS
+                    : [...ORDERED_TTS_PROVIDERS, provider]
+                  ).map((id) => (
                     <SelectItem key={id} value={id}>
                       {TTS_PROVIDERS[id].name}
+                      {RETIRED_TTS_PROVIDERS.includes(id) ? ` ${t("retiredSuffix")}` : ""}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              <p className="text-xs text-muted-foreground">{info.description}</p>
+              {RETIRED_TTS_PROVIDERS.includes(provider) ? (
+                <p className="text-xs text-destructive">{t("retiredNotice")}</p>
+              ) : (
+                <p className="text-xs text-muted-foreground">{info.description}</p>
+              )}
             </div>
 
             <Separator />
@@ -261,36 +277,44 @@ export function TtsCard() {
 
             {/* Global controls */}
             <div className="space-y-3">
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <Label className="text-xs">{t("rate")}</Label>
-                  <span className="text-xs text-muted-foreground tabular-nums">
-                    {ttsRate.toFixed(2)}x
-                  </span>
-                </div>
-                <Slider
-                  value={[ttsRate]}
-                  min={0.5}
-                  max={2.0}
-                  step={0.05}
-                  onValueChange={(v) => void setTtsRate(v[0])}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <Label className="text-xs">{t("pitch")}</Label>
-                  <span className="text-xs text-muted-foreground tabular-nums">
-                    {ttsPitch.toFixed(2)}
-                  </span>
-                </div>
-                <Slider
-                  value={[ttsPitch]}
-                  min={0}
-                  max={2}
-                  step={0.05}
-                  onValueChange={(v) => void setTtsPitch(v[0])}
-                />
-              </div>
+              {/* Rate + pitch only drive the system (Web Speech) voice; cloud
+                  providers use their own speed field in ProviderConfig, so
+                  showing these here for them was a dead control (W13). Volume is
+                  the only truly universal control. */}
+              {provider === "system" && (
+                <>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs">{t("rate")}</Label>
+                      <span className="text-xs text-muted-foreground tabular-nums">
+                        {ttsRate.toFixed(2)}x
+                      </span>
+                    </div>
+                    <Slider
+                      value={[ttsRate]}
+                      min={0.5}
+                      max={2.0}
+                      step={0.05}
+                      onValueChange={(v) => void setTtsRate(v[0])}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs">{t("pitch")}</Label>
+                      <span className="text-xs text-muted-foreground tabular-nums">
+                        {ttsPitch.toFixed(2)}
+                      </span>
+                    </div>
+                    <Slider
+                      value={[ttsPitch]}
+                      min={0}
+                      max={2}
+                      step={0.05}
+                      onValueChange={(v) => void setTtsPitch(v[0])}
+                    />
+                  </div>
+                </>
+              )}
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <Label className="text-xs">{t("volume")}</Label>
@@ -350,6 +374,20 @@ export function TtsCard() {
                   onCheckedChange={(v) => {
                     loggers.tts.info("settings.ttsStreamingChanged", { enabled: v })
                     void save({ ttsStreamingEnabled: v })
+                  }}
+                />
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label className="text-sm">{t("fallback")}</Label>
+                  <p className="text-xs text-muted-foreground">{t("fallbackHint")}</p>
+                </div>
+                <Switch
+                  checked={ttsFallbackEnabled}
+                  onCheckedChange={(v) => {
+                    loggers.tts.info("settings.ttsFallbackChanged", { enabled: v })
+                    void save({ ttsFallbackEnabled: v })
                   }}
                 />
               </div>

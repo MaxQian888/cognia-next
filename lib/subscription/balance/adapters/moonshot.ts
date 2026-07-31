@@ -6,10 +6,13 @@
 // `available_balance` = combined usable balance (cash + voucher).
 // Docs: https://platform.moonshot.ai/docs/api/balance
 //
-// The configured preset baseUrl is "https://api.moonshot.cn/v1" (the CN
-// console, denominated in CNY), so `${baseUrl}/users/me/balance` is the path.
-// The .ai endpoint reports the same shape in USD; we tag CNY for the catalog
-// default and leave `unit` derivable by the caller from `currency`.
+// The documented path is "{origin}/v1/users/me/balance". We build from the
+// baseUrl ORIGIN + the fixed "/v1/users/me/balance" path so both the CN chat
+// preset ("https://api.moonshot.cn/v1") and the Anthropic relay preset
+// ("https://api.moonshot.cn/anthropic") resolve correctly. The CN console
+// (`.cn`) bills in CNY; the international `.ai` host (`platform.kimi.ai` after
+// the Kimi rebrand) reports the same shape but in USD — currency is derived from
+// the host rather than hard-coded.
 
 import type {
   BalanceAdapter,
@@ -18,7 +21,18 @@ import type {
   BalanceSnapshot,
 } from "@/types/subscription"
 
-import { bearer, errorSnapshot, parseJsonObject, toNum, trimBase } from "./_shared"
+import { apiRootOf, bearer, errorSnapshot, parseJsonObject, toNum } from "./_shared"
+
+/**
+ * Moonshot bills the CN console (`.cn`) in CNY and the international host
+ * (`moonshot.ai` / `kimi.ai`) in USD. Default to CNY for the catalog default
+ * and any unknown relay, which is the safer assumption for the `.cn` preset.
+ */
+function moonshotCurrency(baseUrl?: string): string {
+  const b = baseUrl ?? ""
+  if (b.includes("moonshot.ai") || b.includes("kimi.ai")) return "USD"
+  return "CNY"
+}
 
 export const moonshotBalanceAdapter: BalanceAdapter = {
   key: "moonshot",
@@ -29,7 +43,7 @@ export const moonshotBalanceAdapter: BalanceAdapter = {
   },
 
   request(q: BalanceQuery): BalanceRequestDescriptor {
-    return { url: `${trimBase(q.baseUrl)}/users/me/balance`, headers: bearer(q.token) }
+    return { url: `${apiRootOf(q.baseUrl)}/v1/users/me/balance`, headers: bearer(q.token) }
   },
 
   parse(status: number, body: string, q: BalanceQuery): BalanceSnapshot {
@@ -43,13 +57,14 @@ export const moonshotBalanceAdapter: BalanceAdapter = {
     }
     const d = data as Record<string, unknown>
     const remaining = toNum(d.available_balance)
+    const currency = moonshotCurrency(q.baseUrl)
     return {
       fetchedAt: Date.now(),
       providerKey: q.providerKey,
       accountId: q.accountId,
       kind: "credit",
-      currency: "CNY",
-      unit: "CNY",
+      currency,
+      unit: currency,
       remaining,
       raw: obj,
     }

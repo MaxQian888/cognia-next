@@ -2,7 +2,13 @@
  * @jest-environment jsdom
  */
 import { createEditorStore, EDITOR_HISTORY_LIMIT } from "./store"
-import type { VisualWorkflow } from "@/types/workflow/visual"
+import type { VisualWorkflow, WorkflowNodeKind } from "@/types/workflow/visual"
+import { addPluginCatalogEntry, __resetPluginCatalogForTesting } from "@/lib/workflow/nodes/catalog"
+import { workflowEditorRevision } from "./editor-revision"
+import {
+  TEMPLATE_API_VERSION,
+  type WorkflowNodeGroupDefinition,
+} from "@cognia/plugin-sdk/templates"
 
 function emptyWorkflow(): VisualWorkflow {
   return {
@@ -23,6 +29,46 @@ function emptyWorkflow(): VisualWorkflow {
   }
 }
 
+function nodeGroupDefinition(): WorkflowNodeGroupDefinition {
+  return {
+    apiVersion: TEMPLATE_API_VERSION,
+    id: "demo:review",
+    domain: "workflow",
+    status: "published",
+    revision: 1,
+    version: "1.0.0",
+    metadata: { name: "Review group" },
+    payload: {
+      kind: "cognia.workflow/node-group/v1",
+      nodes: [
+        {
+          id: "prompt",
+          type: "ai.prompt",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "Review", params: { prompt: "Review this" } },
+        },
+        {
+          id: "output",
+          type: "io.output",
+          typeVersion: 1,
+          position: { x: 300, y: 0 },
+          data: { label: "Output", params: {} },
+        },
+      ],
+      edges: [{ id: "edge", source: "prompt", target: "output" }],
+    },
+    inputs: [],
+    dependencies: [],
+    capabilities: [],
+    compatibility: { platforms: ["desktop", "web", "mobile"] },
+    provenance: { source: "plugin", pluginId: "demo" },
+    contentHash: "a".repeat(64),
+    createdAt: 1,
+    updatedAt: 1,
+  }
+}
+
 describe("editor store — graph mutations", () => {
   it("adds, connects, updates, and removes nodes", () => {
     const useStore = createEditorStore(emptyWorkflow())
@@ -30,7 +76,7 @@ describe("editor store — graph mutations", () => {
     const bId = useStore.getState().addNode("ai.prompt", { x: 200, y: 0 })
     expect(useStore.getState().nodes).toHaveLength(2)
 
-    const eId = useStore.getState().connect({ source: aId, target: bId })
+    const eId = useStore.getState().connect({ source: aId, target: bId })!
     expect(useStore.getState().edges).toHaveLength(1)
     expect(useStore.getState().edges[0].id).toBe(eId)
 
@@ -40,6 +86,17 @@ describe("editor store — graph mutations", () => {
     useStore.getState().removeNodes([aId])
     expect(useStore.getState().nodes).toHaveLength(1)
     expect(useStore.getState().edges).toHaveLength(0) // edge removed because endpoint is gone
+  })
+
+  it("rejects invalid connections without mutating the edge list", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const triggerA = useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+    const triggerB = useStore.getState().addNode("trigger.cron", { x: 200, y: 0 })
+
+    const edgeId = useStore.getState().connect({ source: triggerA, target: triggerB })
+
+    expect(edgeId).toBeNull()
+    expect(useStore.getState().edges).toEqual([])
   })
 
   it("tracks the dirty flag", () => {
@@ -60,15 +117,23 @@ describe("editor store — graph mutations", () => {
     expect(useStore.getState().nodes.find((n) => n.id === id2)?.data.label).toBe("data.code")
   })
 
-  it("authors new branch/switch nodes at typeVersion 2, others at 1", () => {
+  it("authors new branch/switch/ai.prompt nodes at typeVersion 2, others at 1", () => {
     const useStore = createEditorStore(emptyWorkflow())
     const branchId = useStore.getState().addNode("flow.branch", { x: 0, y: 0 })
     const switchId = useStore.getState().addNode("flow.switch", { x: 0, y: 0 })
+    // ai.prompt v2 = routed mode + PII gate + streaming (explicit mode stays
+    // wire-compatible with v1).
     const aiId = useStore.getState().addNode("ai.prompt", { x: 0, y: 0 })
+    // flow.loop v1 only produces an index array WITHOUT running its body —
+    // new loops must always be the v2 container.
+    const loopId = useStore.getState().addNode("flow.loop", { x: 0, y: 0 })
+    const setId = useStore.getState().addNode("flow.set", { x: 0, y: 0 })
     const byId = (id: string) => useStore.getState().nodes.find((n) => n.id === id)!
     expect(byId(branchId).data.typeVersion).toBe(2)
     expect(byId(switchId).data.typeVersion).toBe(2)
-    expect(byId(aiId).data.typeVersion).toBe(1)
+    expect(byId(aiId).data.typeVersion).toBe(2)
+    expect(byId(loopId).data.typeVersion).toBe(2)
+    expect(byId(setId).data.typeVersion).toBe(1)
   })
 
   it("setNodeParent re-parents with relative coordinates and clears on null", () => {
@@ -128,6 +193,48 @@ describe("editor store — graph mutations", () => {
     expect(node.data.label).toBe("Custom")
     expect((node.data.params as Record<string, unknown>).temperature).toBe(0.2)
     expect(node.data.notes).toBe("hint")
+  })
+
+  it("uses registered plugin default params when no explicit params override is supplied", () => {
+    __resetPluginCatalogForTesting()
+    addPluginCatalogEntry({
+      kind: "demo.action.format" as never,
+      category: "plugin",
+      label: "Format",
+      description: "Format text",
+      iconName: "Wand",
+      keywords: [],
+      pluginId: "demo",
+      defaultParams: { mode: "markdown", retries: 2 },
+    })
+
+    const useStore = createEditorStore(emptyWorkflow())
+    const id = useStore.getState().addNode("demo.action.format" as never, { x: 0, y: 0 })
+    const node = useStore.getState().nodes.find((n) => n.id === id)!
+
+    expect(node.data.params).toEqual({ mode: "markdown", retries: 2 })
+
+    __resetPluginCatalogForTesting()
+  })
+
+  it("uses the registered plugin typeVersion for newly authored nodes", () => {
+    __resetPluginCatalogForTesting()
+    addPluginCatalogEntry({
+      kind: "demo.action.v7" as never,
+      category: "plugin",
+      label: "Versioned",
+      description: "Versioned plugin node",
+      iconName: "Wand",
+      keywords: [],
+      pluginId: "demo",
+      typeVersion: 7,
+    })
+
+    const useStore = createEditorStore(emptyWorkflow())
+    const id = useStore.getState().addNode("demo.action.v7" as never, { x: 0, y: 0 })
+
+    expect(useStore.getState().nodes.find((node) => node.id === id)?.data.typeVersion).toBe(7)
+    __resetPluginCatalogForTesting()
   })
 })
 
@@ -266,6 +373,21 @@ describe("editor store — loadWorkflow", () => {
     useStore.getState().loadWorkflow(fresh)
 
     expect(useStore.getState().performanceTier).toBe("reduced")
+  })
+
+  it("can mark an imported workflow dirty while still clearing selection and history", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+    useStore.getState().setSelectedNodes(["selected-before-import"])
+
+    const imported = emptyWorkflow()
+    imported.name = "Imported"
+    useStore.getState().loadWorkflow(imported, { dirty: true })
+
+    expect(useStore.getState().baseWorkflow.name).toBe("Imported")
+    expect(useStore.getState().selectedNodeIds).toEqual([])
+    expect(useStore.getState().dirty).toBe(true)
+    expect(useStore.temporal.getState().pastStates).toEqual([])
   })
 })
 
@@ -468,7 +590,7 @@ describe("editor store — edge mutators", () => {
     const useStore = createEditorStore(emptyWorkflow())
     const aId = useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
     const bId = useStore.getState().addNode("ai.prompt", { x: 200, y: 0 })
-    const eId = useStore.getState().connect({ source: aId, target: bId })
+    const eId = useStore.getState().connect({ source: aId, target: bId })!
 
     expect(useStore.getState().updateEdgeData(eId, { kind: "then" })).toBe(true)
     const edge = useStore.getState().edges.find((e) => e.id === eId)
@@ -490,7 +612,7 @@ describe("editor store — edge mutators", () => {
     const useStore = createEditorStore(emptyWorkflow())
     const aId = useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
     const bId = useStore.getState().addNode("ai.prompt", { x: 200, y: 0 })
-    const eId = useStore.getState().connect({ source: aId, target: bId })
+    const eId = useStore.getState().connect({ source: aId, target: bId })!
 
     expect(useStore.getState().replaceEdge(eId, { source: bId, target: aId })).toBe(true)
     const edge = useStore.getState().edges.find((e) => e.id === eId)
@@ -504,7 +626,7 @@ describe("editor store — edge mutators", () => {
     const useStore = createEditorStore(emptyWorkflow())
     const aId = useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
     const bId = useStore.getState().addNode("ai.prompt", { x: 200, y: 0 })
-    const eId = useStore.getState().connect({ source: aId, target: bId })
+    const eId = useStore.getState().connect({ source: aId, target: bId })!
     useStore.getState().setSelectedEdges([eId])
 
     useStore.getState().removeEdges([eId])
@@ -581,6 +703,15 @@ describe("editor store — connectionState (drag silk)", () => {
     useStore.getState().updateConnectionPointer({ x: 1, y: 1 }, null)
     useStore.getState().endConnection()
     expect(useStore.temporal.getState().pastStates.length).toBe(before)
+  })
+
+  it("setTouchConnect toggles the mobile handle-tap entry flag (default off)", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    expect(useStore.getState().touchConnect).toBe(false)
+    useStore.getState().setTouchConnect(true)
+    expect(useStore.getState().touchConnect).toBe(true)
+    useStore.getState().setTouchConnect(false)
+    expect(useStore.getState().touchConnect).toBe(false)
   })
 })
 
@@ -715,6 +846,30 @@ describe("editor store — productivity actions", () => {
       expect(params.height ?? 0).toBeGreaterThan(80)
     })
 
+    it("creates a v2 container and re-parents members with extent:'parent'", () => {
+      const { useStore, aId, bId } = seedTwoConnected()
+      const groupId = useStore.getState().groupSelected([aId, bId])!
+      const group = useStore.getState().nodes.find((n) => n.id === groupId)!
+      expect(group.type).toBe("groupContainer")
+      expect(group.data.typeVersion).toBe(2)
+      for (const id of [aId, bId]) {
+        const child = useStore.getState().nodes.find((n) => n.id === id)!
+        expect(child.parentId).toBe(groupId)
+        expect(child.extent).toBe("parent")
+      }
+    })
+
+    it("setNodeParent accepts an annotation.group v2 container", () => {
+      const useStore = createEditorStore(emptyWorkflow())
+      const groupId = useStore.getState().addNode("annotation.group", { x: 100, y: 100 })
+      useStore.getState().updateNodeData(groupId, { typeVersion: 2 } as never)
+      const childId = useStore.getState().addNode("ai.prompt", { x: 180, y: 160 })
+      useStore.getState().setNodeParent(childId, groupId)
+      const child = useStore.getState().nodes.find((n) => n.id === childId)!
+      expect(child.parentId).toBe(groupId)
+      expect(child.position).toEqual({ x: 80, y: 60 })
+    })
+
     it("returns null on an empty selection", () => {
       const useStore = createEditorStore(emptyWorkflow())
       expect(useStore.getState().groupSelected([])).toBeNull()
@@ -724,6 +879,38 @@ describe("editor store — productivity actions", () => {
     it("returns null when the ids don't match any nodes", () => {
       const { useStore } = seedTwoConnected()
       expect(useStore.getState().groupSelected(["does-not-exist"])).toBeNull()
+    })
+  })
+
+  describe("insertNodeGroup", () => {
+    it("inserts the full group in one undoable store mutation", () => {
+      const useStore = createEditorStore(emptyWorkflow())
+      const existingId = useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+      useStore.temporal.getState().clear()
+
+      const result = useStore.getState().insertNodeGroup(nodeGroupDefinition(), { x: 500, y: 400 })
+
+      expect(result.nodeIds).toHaveLength(2)
+      expect(useStore.getState().nodes).toHaveLength(4)
+      expect(useStore.getState().edges).toHaveLength(1)
+      expect(useStore.getState().selectedNodeIds).toEqual([result.groupId])
+      expect(useStore.temporal.getState().pastStates).toHaveLength(1)
+
+      useStore.temporal.getState().undo()
+      expect(useStore.getState().nodes.map((node) => node.id)).toEqual([existingId])
+      expect(useStore.getState().edges).toEqual([])
+    })
+
+    it("rejects an invalid group without partially mutating the graph", () => {
+      const useStore = createEditorStore(emptyWorkflow())
+      const invalid = nodeGroupDefinition()
+      invalid.payload.edges = [{ id: "dangling", source: "missing", target: "output" }]
+
+      expect(() => useStore.getState().insertNodeGroup(invalid, { x: 0, y: 0 })).toThrow(
+        /outside the group/i
+      )
+      expect(useStore.getState().nodes).toEqual([])
+      expect(useStore.getState().edges).toEqual([])
     })
   })
 
@@ -781,6 +968,26 @@ describe("editor store — validation", () => {
 })
 
 describe("editor store — applyProposalOps", () => {
+  it("rejects a proposal whose expected semantic revision is stale", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const expectedRevision = workflowEditorRevision(useStore.getState())
+    useStore.getState().addNode("annotation.note", { x: 0, y: 0 })
+
+    const result = useStore
+      .getState()
+      .applyProposalOps(
+        [{ type: "add_node", nodeId: "n_ai", kind: "ai.prompt", position: { x: 200, y: 0 } }],
+        expectedRevision
+      )
+
+    expect(result).toEqual({
+      applied: 0,
+      stale: true,
+      currentRevision: workflowEditorRevision(useStore.getState()),
+    })
+    expect(useStore.getState().nodes).toHaveLength(1)
+  })
+
   it("returns applied=0 and is a no-op for an empty batch", () => {
     const useStore = createEditorStore(emptyWorkflow())
     const result = useStore.getState().applyProposalOps([])
@@ -878,7 +1085,7 @@ describe("editor store — applyProposalOps", () => {
     expect(useStore.getState().edges).toHaveLength(0)
   })
 
-  it("rejects duplicate node id but continues with subsequent ops", () => {
+  it("rejects the entire proposal when any op is invalid", () => {
     const useStore = createEditorStore(emptyWorkflow())
     useStore
       .getState()
@@ -888,24 +1095,79 @@ describe("editor store — applyProposalOps", () => {
     const result = useStore.getState().applyProposalOps([
       // Duplicate id — should fail.
       { type: "add_node", nodeId: "n_a", kind: "ai.prompt", position: { x: 200, y: 0 } },
-      // Valid follow-up — should still apply.
+      // This valid follow-up must not partially commit.
       { type: "add_node", nodeId: "n_b", kind: "ai.prompt", position: { x: 400, y: 0 } },
     ])
-    expect(result.applied).toBe(1)
+    expect(result.applied).toBe(0)
     expect(result.firstError).toMatch(/already exists/)
     expect(
       useStore
         .getState()
         .nodes.map((n) => n.id)
         .sort()
-    ).toEqual(["n_a", "n_b"])
+    ).toEqual(["n_a"])
+  })
+
+  it("rejects structurally invalid proposal edges atomically", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+
+    const result = useStore.getState().applyProposalOps([
+      {
+        type: "add_node",
+        nodeId: "n_action",
+        kind: "flow.set",
+        position: { x: 0, y: 0 },
+      },
+      {
+        type: "add_node",
+        nodeId: "n_trigger",
+        kind: "trigger.manual",
+        position: { x: 200, y: 0 },
+      },
+      {
+        type: "connect_edge",
+        edgeId: "e_invalid",
+        source: "n_action",
+        target: "n_trigger",
+      },
+    ])
+
+    expect(result.applied).toBe(0)
+    expect(result.firstError).toMatch(/Triggers are sources only/)
+    expect(useStore.getState().nodes).toEqual([])
+    expect(useStore.getState().edges).toEqual([])
+  })
+
+  it("preserves an explicit proposal typeVersion and otherwise uses the authoring default", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+
+    const result = useStore.getState().applyProposalOps([
+      {
+        type: "add_node",
+        nodeId: "n_legacy_branch",
+        kind: "flow.branch",
+        typeVersion: 1,
+        position: { x: 0, y: 0 },
+      },
+      {
+        type: "add_node",
+        nodeId: "n_current_branch",
+        kind: "flow.branch",
+        position: { x: 200, y: 0 },
+      },
+    ])
+
+    expect(result.applied).toBe(2)
+    const byId = (id: string) => useStore.getState().nodes.find((node) => node.id === id)!
+    expect(byId("n_legacy_branch").data.typeVersion).toBe(1)
+    expect(byId("n_current_branch").data.typeVersion).toBe(2)
   })
 
   it("removing a node also drops incident edges + prunes its selection + validation", () => {
     const useStore = createEditorStore(emptyWorkflow())
     useStore.getState().applyProposalOps([
       { type: "add_node", nodeId: "n_a", kind: "trigger.manual", position: { x: 0, y: 0 } },
-      { type: "add_node", nodeId: "n_b", kind: "trigger.cron", position: { x: 200, y: 0 } },
+      { type: "add_node", nodeId: "n_b", kind: "ai.prompt", position: { x: 200, y: 0 } },
       { type: "connect_edge", edgeId: "e_ab", source: "n_a", target: "n_b" },
     ])
     useStore.getState().setSelectedNodes(["n_a", "n_b"])
@@ -967,6 +1229,76 @@ describe("editor store — pin data", () => {
   })
 })
 
+describe("editor store — persisted publication metadata", () => {
+  it("syncs publish and unpublish results without dirtying or replacing editor state", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const nodeId = useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+    useStore.getState().setSelectedNodes([nodeId])
+    useStore.getState().markSaved()
+    const nodes = useStore.getState().nodes
+    const selectedNodeIds = useStore.getState().selectedNodeIds
+    const historyLength = useStore.temporal.getState().pastStates.length
+    const workflowInterface = {
+      inputSchema: { type: "object" },
+      outputSchema: { type: "string" },
+    }
+
+    useStore.getState().syncPublication({ at: 100, toolName: "wf_empty" }, workflowInterface)
+
+    expect(useStore.getState().baseWorkflow.published).toEqual({
+      at: 100,
+      toolName: "wf_empty",
+    })
+    expect(useStore.getState().baseWorkflow.interface).toEqual(workflowInterface)
+    expect(useStore.getState().dirty).toBe(false)
+    expect(useStore.getState().nodes).toBe(nodes)
+    expect(useStore.getState().selectedNodeIds).toBe(selectedNodeIds)
+    expect(useStore.temporal.getState().pastStates).toHaveLength(historyLength)
+
+    useStore.getState().syncPublication(undefined, undefined)
+
+    expect(useStore.getState().baseWorkflow.published).toBeUndefined()
+    expect(useStore.getState().baseWorkflow.interface).toBeUndefined()
+    expect(useStore.getState().dirty).toBe(false)
+    expect(useStore.getState().nodes).toBe(nodes)
+    expect(useStore.getState().selectedNodeIds).toBe(selectedNodeIds)
+    expect(useStore.temporal.getState().pastStates).toHaveLength(historyLength)
+  })
+
+  it("marks a canonical save without replacing graph, selection, or undo history", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const nodeId = useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+    useStore.getState().setSelectedNodes([nodeId])
+    const nodes = useStore.getState().nodes
+    const selectedNodeIds = useStore.getState().selectedNodeIds
+    const historyLength = useStore.temporal.getState().pastStates.length
+    const persisted: VisualWorkflow = {
+      ...useStore.getState().toWorkflow(),
+      schemaVersion: 2,
+      updatedAt: 200,
+      interface: {
+        inputSchema: { type: "object" },
+        outputSchema: { type: "number" },
+      },
+      published: { at: 100, toolName: "wf_empty" },
+    }
+
+    useStore.getState().markSaved(persisted)
+
+    expect(useStore.getState().baseWorkflow).toMatchObject({
+      schemaVersion: 2,
+      updatedAt: 200,
+      interface: persisted.interface,
+      published: persisted.published,
+    })
+    expect(useStore.getState().savedAt).toBe(200)
+    expect(useStore.getState().dirty).toBe(false)
+    expect(useStore.getState().nodes).toBe(nodes)
+    expect(useStore.getState().selectedNodeIds).toBe(selectedNodeIds)
+    expect(useStore.temporal.getState().pastStates).toHaveLength(historyLength)
+  })
+})
+
 describe("editor store — run-single-step signal", () => {
   it("sets and clears requestedRunSingleStepId without polluting undo history", () => {
     const useStore = createEditorStore(emptyWorkflow())
@@ -977,5 +1309,332 @@ describe("editor store — run-single-step signal", () => {
     useStore.getState().clearRequestedRunSingleStep()
     expect(useStore.getState().requestedRunSingleStepId).toBeNull()
     expect(useStore.temporal.getState().pastStates.length).toBe(before)
+  })
+})
+
+describe("editor store — diagnostics", () => {
+  it("seeds diagnostics on creation and recomputes on demand", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    // Empty workflow: no trigger → a missingTrigger warning is expected.
+    expect(useStore.getState().diagnostics.warningCount).toBeGreaterThanOrEqual(1)
+
+    const aId = useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+    const bId = useStore.getState().addNode("ai.prompt", { x: 200, y: 0 })
+    useStore.getState().connect({ source: aId, target: bId })
+    // Reference an unknown node from b's params.
+    useStore.getState().updateNodeData(bId, {
+      params: { userPrompt: "{{ $node['ghost'].out.x }}" },
+    })
+
+    const result = useStore.getState().recomputeDiagnostics()
+    expect(result.diagnostics.some((d) => d.code === "exprUnknownNode")).toBe(true)
+    expect(useStore.getState().diagnostics).toBe(result)
+  })
+
+  it("returns the same result identity when nothing changed (signature short-circuit)", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const first = useStore.getState().recomputeDiagnostics()
+    const second = useStore.getState().recomputeDiagnostics()
+    expect(second).toBe(first)
+  })
+
+  it("passes a registry-backed availability predicate, so a retired kind is reported", () => {
+    // `isKindAvailable` is optional on the engine input and omitting it skips
+    // the check entirely — this store is its only production caller, so the
+    // check is dead unless the predicate is passed here.
+    const useStore = createEditorStore(emptyWorkflow())
+    const id = useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+    // A saved workflow can hold a kind the build no longer provides; the
+    // editor has no way to author one, so rewrite the node directly. The cast
+    // is the point of the test — a retired kind has left `WorkflowNodeKind`,
+    // so only persisted data can still carry it.
+    const retiredKind = "action.github.runIssueLoop" as WorkflowNodeKind
+    useStore
+      .getState()
+      .setNodes(
+        useStore
+          .getState()
+          .nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, kind: retiredKind } } : n))
+      )
+
+    const result = useStore.getState().recomputeDiagnostics()
+    const retired = result.diagnostics.find((d) => d.code === "kindRetired")
+    expect(retired).toMatchObject({
+      severity: "error",
+      nodeId: id,
+      messageParams: { kind: "action.github.runIssueLoop", removedIn: "0.2.0" },
+    })
+  })
+
+  it("does not report a kind the registry still provides", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+    const result = useStore.getState().recomputeDiagnostics()
+    expect(result.diagnostics.some((d) => d.code === "kindRetired")).toBe(false)
+    expect(result.diagnostics.some((d) => d.code === "pluginUnavailable")).toBe(false)
+  })
+
+  it("debounces recompute via scheduleDiagnostics after a graph mutation", () => {
+    jest.useFakeTimers()
+    try {
+      const useStore = createEditorStore(emptyWorkflow())
+      const before = useStore.getState().diagnostics
+      // Adding a trigger should clear the missingTrigger warning once the
+      // debounced driver fires.
+      useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+      // Not yet recomputed (still within debounce window).
+      expect(useStore.getState().diagnostics).toBe(before)
+      jest.advanceTimersByTime(350)
+      expect(useStore.getState().diagnostics).not.toBe(before)
+      expect(useStore.getState().diagnostics.warningCount).toBe(0)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+})
+
+describe("editor store — problems-panel signal", () => {
+  it("sets and clears the requestedProblemsPanel signal", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    expect(useStore.getState().requestedProblemsPanel).toBe(false)
+    useStore.getState().requestProblemsPanel()
+    expect(useStore.getState().requestedProblemsPanel).toBe(true)
+    useStore.getState().clearRequestedProblemsPanel()
+    expect(useStore.getState().requestedProblemsPanel).toBe(false)
+  })
+})
+
+describe("editor store — inspector-panel signal", () => {
+  it("sets and clears the requestedInspectorPanel signal", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    expect(useStore.getState().requestedInspectorPanel).toBe(false)
+    useStore.getState().requestInspectorPanel()
+    expect(useStore.getState().requestedInspectorPanel).toBe(true)
+    useStore.getState().clearRequestedInspectorPanel()
+    expect(useStore.getState().requestedInspectorPanel).toBe(false)
+  })
+})
+
+describe("editor store — insertNodeOnEdge", () => {
+  it("splits an edge into source → new → target in one undo entry", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const a = useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+    const b = useStore.getState().addNode("ai.prompt", { x: 400, y: 0 })
+    const e = useStore.getState().connect({ source: a, target: b })!
+    expect(useStore.getState().edges).toHaveLength(1)
+
+    const mid = useStore.getState().insertNodeOnEdge(e, "ai.prompt", { x: 200, y: 0 })
+    expect(mid).toBeTruthy()
+    const s = useStore.getState()
+    expect(s.nodes).toHaveLength(3)
+    // Original edge gone; two replacements wiring a → mid → b.
+    expect(s.edges.find((x) => x.id === e)).toBeUndefined()
+    expect(s.edges).toHaveLength(2)
+    expect(s.edges.some((x) => x.source === a && x.target === mid)).toBe(true)
+    expect(s.edges.some((x) => x.source === mid && x.target === b)).toBe(true)
+
+    // Single undo restores the pre-insert graph.
+    useStore.temporal.getState().undo()
+    expect(useStore.getState().nodes).toHaveLength(2)
+    expect(useStore.getState().edges).toHaveLength(1)
+  })
+
+  it("preserves the source handle of a branch edge", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const br = useStore.getState().addNode("flow.branch", { x: 0, y: 0 }) // typeVersion 2
+    const b = useStore.getState().addNode("ai.prompt", { x: 400, y: 0 })
+    const e = useStore.getState().connect({ source: br, target: b, sourceHandle: "true" })!
+    const mid = useStore.getState().insertNodeOnEdge(e, "ai.prompt", { x: 200, y: 0 })
+    const upstream = useStore.getState().edges.find((x) => x.source === br && x.target === mid)
+    expect(upstream?.sourceHandle).toBe("true")
+  })
+
+  it("returns null for an unknown edge id", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    expect(useStore.getState().insertNodeOnEdge("nope", "ai.prompt", { x: 0, y: 0 })).toBeNull()
+  })
+})
+
+describe("editor store — addNodeConnected (C2/C3)", () => {
+  it("creates a node and wires source → it in one undo entry", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const a = useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+    const id = useStore.getState().addNodeConnected(
+      "ai.prompt",
+      { x: 320, y: 0 },
+      {
+        sourceId: a,
+        sourceHandle: null,
+      }
+    )
+    expect(id).toBeTruthy()
+    const s = useStore.getState()
+    expect(s.nodes).toHaveLength(2)
+    expect(s.edges).toHaveLength(1)
+    expect(s.edges[0]).toMatchObject({ source: a, target: id })
+    expect(s.selectedNodeIds).toEqual([id])
+    // One undo entry restores the lone source node.
+    useStore.temporal.getState().undo()
+    expect(useStore.getState().nodes).toHaveLength(1)
+    expect(useStore.getState().edges).toHaveLength(0)
+  })
+
+  it("preserves the source handle of a branch node", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const br = useStore.getState().addNode("flow.branch", { x: 0, y: 0 })
+    const id = useStore.getState().addNodeConnected(
+      "ai.prompt",
+      { x: 320, y: 0 },
+      {
+        sourceId: br,
+        sourceHandle: "true",
+      }
+    )
+    expect(useStore.getState().edges[0].sourceHandle).toBe("true")
+    expect(id).toBeTruthy()
+  })
+
+  it("returns null when the connection would be invalid (target is a trigger source-only rule)", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const a = useStore.getState().addNode("ai.prompt", { x: 0, y: 0 })
+    // Connecting INTO a trigger is illegal — but addNodeConnected always creates
+    // the *target*, so craft an invalid case via a self-targeting source id.
+    const res = useStore.getState().addNodeConnected(
+      "ai.prompt",
+      { x: 1, y: 1 },
+      {
+        sourceId: "ghost_source",
+        sourceHandle: null,
+      }
+    )
+    // ghost source isn't in the graph → endpoint missing → invalid → null.
+    expect(res).toBeNull()
+    expect(useStore.getState().nodes.find((n) => n.id === a)).toBeTruthy()
+  })
+})
+
+describe("editor store — replaceSelectionWithNode (C5)", () => {
+  it("replaces the selection with one node and rewires boundary edges (one undo)", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const trig = useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+    const a = useStore.getState().addNode("ai.prompt", { x: 100, y: 0 })
+    const b = useStore.getState().addNode("ai.prompt", { x: 200, y: 0 })
+    const ext = useStore.getState().addNode("ai.prompt", { x: 300, y: 0 })
+    useStore.getState().connect({ source: trig, target: a })
+    useStore.getState().connect({ source: a, target: b })
+    useStore.getState().connect({ source: b, target: ext })
+
+    const newId = useStore.getState().replaceSelectionWithNode(
+      [a, b],
+      { kind: "flow.subworkflow", params: { workflowId: "wf_child" }, position: { x: 150, y: 0 } },
+      {
+        inbound: [{ source: trig, sourceHandle: undefined }],
+        outbound: [{ target: ext, targetHandle: undefined }],
+      }
+    )
+    const s = useStore.getState()
+    // trig, ext, and the new node remain (a + b removed).
+    expect(s.nodes.map((n) => n.id).sort()).toEqual([ext, newId, trig].sort())
+    // Rewired: trig → new → ext.
+    expect(s.edges.some((e) => e.source === trig && e.target === newId)).toBe(true)
+    expect(s.edges.some((e) => e.source === newId && e.target === ext)).toBe(true)
+    expect(s.edges).toHaveLength(2)
+    expect(s.nodes.find((n) => n.id === newId)?.data.params).toEqual({ workflowId: "wf_child" })
+
+    // One undo restores the original 4 nodes + 3 edges.
+    useStore.temporal.getState().undo()
+    expect(useStore.getState().nodes).toHaveLength(4)
+    expect(useStore.getState().edges).toHaveLength(3)
+  })
+
+  it("dedupes multiple inbound edges from the same source/handle", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const src = useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+    const a = useStore.getState().addNode("ai.prompt", { x: 100, y: 0 })
+    const newId = useStore.getState().replaceSelectionWithNode(
+      [a],
+      { kind: "flow.subworkflow", params: { workflowId: "w" }, position: { x: 0, y: 0 } },
+      {
+        inbound: [
+          { source: src, sourceHandle: undefined },
+          { source: src, sourceHandle: undefined },
+        ],
+        outbound: [],
+      }
+    )
+    expect(useStore.getState().edges.filter((e) => e.target === newId)).toHaveLength(1)
+  })
+})
+
+describe("editor store — setBulkOnError (C6 bulk)", () => {
+  it("sets onError across the selection while preserving each node's retry", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const a = useStore.getState().addNode("ai.prompt", { x: 0, y: 0 })
+    const b = useStore.getState().addNode("action.connector.send", { x: 100, y: 0 })
+    // Give 'a' a retry config that must survive the bulk onError change.
+    useStore.getState().updateNodeData(a, {
+      errorHandling: { retry: { maxRetries: 3, retryIntervalMs: 250, backoff: "fixed" } },
+    })
+    useStore.getState().setBulkOnError([a, b], "continue")
+    const nodeA = useStore.getState().nodes.find((n) => n.id === a)!
+    const nodeB = useStore.getState().nodes.find((n) => n.id === b)!
+    expect(nodeA.data.errorHandling?.onError).toBe("continue")
+    expect(nodeA.data.errorHandling?.retry).toEqual({
+      maxRetries: 3,
+      retryIntervalMs: 250,
+      backoff: "fixed",
+    })
+    expect(nodeB.data.errorHandling?.onError).toBe("continue")
+  })
+
+  it("clears the onError override (and empty errorHandling) when set to 'fail'", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    const a = useStore.getState().addNode("ai.prompt", { x: 0, y: 0 })
+    useStore.getState().setBulkOnError([a], "continue")
+    expect(useStore.getState().nodes.find((n) => n.id === a)!.data.errorHandling?.onError).toBe(
+      "continue"
+    )
+    useStore.getState().setBulkOnError([a], "fail")
+    // No retry → errorHandling collapses to undefined.
+    expect(useStore.getState().nodes.find((n) => n.id === a)!.data.errorHandling).toBeUndefined()
+  })
+})
+
+describe("editor store — copilot reference / highlight channels", () => {
+  it("sets referenced + highlighted node id maps", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().setReferencedNodes(["n_a", "n_b"])
+    expect(useStore.getState().referencedNodeIds).toEqual({ n_a: true, n_b: true })
+    useStore.getState().setHighlightedNodes(["n_c"])
+    expect(useStore.getState().highlightedNodeIds).toEqual({ n_c: true })
+  })
+
+  it("short-circuits redundant sets (stable object identity)", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().setReferencedNodes(["n_a"])
+    const first = useStore.getState().referencedNodeIds
+    // Same id set (any order) must not produce a new object.
+    useStore.getState().setReferencedNodes(["n_a"])
+    expect(useStore.getState().referencedNodeIds).toBe(first)
+    // A different set replaces it.
+    useStore.getState().setReferencedNodes(["n_a", "n_b"])
+    expect(useStore.getState().referencedNodeIds).not.toBe(first)
+  })
+
+  it("clears via an empty id list", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().setReferencedNodes(["n_a"])
+    useStore.getState().setReferencedNodes([])
+    expect(useStore.getState().referencedNodeIds).toEqual({})
+  })
+
+  it("keeps the reference channel out of the undo history", () => {
+    const useStore = createEditorStore(emptyWorkflow())
+    useStore.getState().setReferencedNodes(["n_a"])
+    useStore.getState().addNode("trigger.manual", { x: 0, y: 0 })
+    // Undo reverts the node add but must not touch the reference map.
+    useStore.temporal.getState().undo()
+    expect(useStore.getState().nodes).toHaveLength(0)
+    expect(useStore.getState().referencedNodeIds).toEqual({ n_a: true })
   })
 })

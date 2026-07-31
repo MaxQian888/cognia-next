@@ -53,13 +53,21 @@ describe("serializeOutbound", () => {
     expect(calls[0].payload).not.toHaveProperty("parse_mode")
   })
 
-  it("markdown segment → sendMessage with parse_mode MarkdownV2 and escaped text", () => {
+  it("markdown segment → sendMessage with parse_mode MarkdownV2 and CONVERTED markup", () => {
+    // Audited fix #5: **bold** must become a real *bold* entity, not the
+    // escaped literal source; plain-text specials still get escaped.
     const calls = serializeOutbound(makeReq([{ type: "markdown", md: "**bold** & 1+1" }]))
     expect(calls).toHaveLength(1)
     expect(calls[0].method).toBe("sendMessage")
     expect(calls[0].payload["parse_mode"]).toBe("MarkdownV2")
-    // Special chars escaped
-    expect(calls[0].payload["text"]).toBe(escapeMdV2("**bold** & 1+1"))
+    expect(calls[0].payload["text"]).toBe("*bold* & 1\\+1")
+  })
+
+  it("markdown links keep the URL usable, escaping only ) and \\ in it", () => {
+    const calls = serializeOutbound(
+      makeReq([{ type: "markdown", md: "[docs](https://x.dev/a_(b))" }])
+    )
+    expect(calls[0].payload["text"]).toBe("[docs](https://x.dev/a_(b\\))")
   })
 
   it("image segment → sendPhoto", () => {
@@ -112,11 +120,28 @@ describe("serializeOutbound", () => {
     expect(calls[0].payload["text"]).toContain("```")
   })
 
-  it("sets reply_to_message_id when replyTo is provided", () => {
+  it("code segments escape ONLY ` and \\ inside the fence (audited fix #4a)", () => {
+    // `a.b()` must reach Telegram unescaped inside the pre entity — the old
+    // path escaped all 18 specials, rendering literal backslashes.
+    const calls = serializeOutbound(
+      makeReq([{ type: "code", language: "ts", code: "a.b(1) + `tpl` \\ x_y!" }])
+    )
+    expect(calls[0].payload["text"]).toBe("```ts\na.b(1) + \\`tpl\\` \\\\ x_y!\n```")
+  })
+
+  it("sets reply_parameters (Bot API 7.0) when replyTo is provided (audited fix #6)", () => {
     const calls = serializeOutbound(
       makeReq([{ type: "text", text: "hi" }], { replyTo: { messageId: "999" } })
     )
-    expect(calls[0].payload["reply_to_message_id"]).toBe(999)
+    expect(calls[0].payload["reply_parameters"]).toEqual({ message_id: 999 })
+    expect(calls[0].payload).not.toHaveProperty("reply_to_message_id")
+  })
+
+  it("accepts the composite chatId:messageId shape in replyTo", () => {
+    const calls = serializeOutbound(
+      makeReq([{ type: "text", text: "hi" }], { replyTo: { messageId: "123456789:999" } })
+    )
+    expect(calls[0].payload["reply_parameters"]).toEqual({ message_id: 999 })
   })
 
   it("text + image sequence produces two calls in order", () => {
@@ -136,6 +161,48 @@ describe("serializeOutbound", () => {
       makeReq([{ type: "text", text: "thread msg" }], { threadId: "42" })
     )
     expect(calls[0].payload["message_thread_id"]).toBe(42)
+  })
+
+  it("emoji segment → sendMessage with the emoji as text (send.emoji)", () => {
+    const calls = serializeOutbound(makeReq([{ type: "emoji", code: "🎉" }]))
+    expect(calls).toHaveLength(1)
+    expect(calls[0].method).toBe("sendMessage")
+    expect(calls[0].payload["text"]).toBe("🎉")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 4096-char chunking (audited fix #7)
+// ---------------------------------------------------------------------------
+describe("serializeOutbound — long-message chunking", () => {
+  it("splits sendMessage text over 4096 chars into sequential sends", () => {
+    const long = Array.from({ length: 500 }, (_, i) => `line number ${i}`).join("\n") // > 4096
+    const calls = serializeOutbound(makeReq([{ type: "text", text: long }]))
+    expect(calls.length).toBeGreaterThan(1)
+    for (const call of calls) {
+      expect(call.method).toBe("sendMessage")
+      expect((call.payload["text"] as string).length).toBeLessThanOrEqual(4096)
+      expect(call.payload["chat_id"]).toBe("123456789")
+    }
+    // Newline-preferred boundaries → joining restores the original text.
+    expect(calls.map((c) => c.payload["text"]).join("\n")).toBe(long)
+  })
+
+  it("keeps reply_parameters on the FIRST chunk only", () => {
+    const long = ("x".repeat(100) + "\n").repeat(50) // 5050 chars
+    const calls = serializeOutbound(
+      makeReq([{ type: "text", text: long.trimEnd() }], { replyTo: { messageId: "7" } })
+    )
+    expect(calls.length).toBeGreaterThan(1)
+    expect(calls[0].payload["reply_parameters"]).toEqual({ message_id: 7 })
+    for (const call of calls.slice(1)) {
+      expect(call.payload).not.toHaveProperty("reply_parameters")
+    }
+  })
+
+  it("leaves short messages as a single call", () => {
+    const calls = serializeOutbound(makeReq([{ type: "text", text: "short" }]))
+    expect(calls).toHaveLength(1)
   })
 })
 

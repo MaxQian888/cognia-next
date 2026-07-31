@@ -5,6 +5,11 @@
  * order-independent content hash so runs pin to an exact snapshot and
  * comparison stays apples-to-apples after later case edits. All Dexie access
  * for the table lives here (mirrors `lib/db/eval-datasets.ts`).
+ *
+ * Snapshots store case IDS, not copies. Storing copies meant every
+ * edit-then-run cycle on a thousand-case benchmark wrote about half a megabyte
+ * of duplicated case text into IndexedDB. Rows written before that change keep
+ * their `cases` array and are still readable.
  */
 
 import type { EvalDatasetVersion } from "@/types/eval/version"
@@ -54,7 +59,10 @@ export async function snapshotVersion(datasetId: string): Promise<EvalDatasetVer
     id: versionId(),
     datasetId,
     version: ds.version,
-    cases,
+    // Ids, not full copies — see the type's docblock. The hash still pins the
+    // CONTENT, so an edit that leaves the id set unchanged still yields a new
+    // snapshot.
+    caseIds: cases.map((c) => c.id),
     casesHash,
     createdAt: Date.now(),
   }
@@ -72,6 +80,52 @@ export async function listVersions(datasetId: string): Promise<EvalDatasetVersio
   const rows = await getDb().evalDatasetVersions.where("datasetId").equals(datasetId).toArray()
   rows.sort((a, b) => b.createdAt - a.createdAt)
   return rows
+}
+
+/**
+ * Restore the dataset's case set to a snapshot.
+ *
+ * Deletes cases the snapshot did not contain and re-adds any the snapshot kept
+ * a full copy of (legacy rows only — id-only snapshots cannot resurrect a
+ * deleted case, which `planRestore` reports as `missing`). One transaction,
+ * one version bump, so a restore is a single dataset version like any other
+ * edit rather than N of them.
+ *
+ * Returns what actually happened; callers show it rather than assuming the
+ * snapshot was reproduced exactly.
+ */
+export async function restoreVersion(
+  versionId: string
+): Promise<{ deleted: number; readded: number }> {
+  const version = await getVersion(versionId)
+  if (!version) throw new Error(`restoreVersion: version "${versionId}" not found`)
+  const db = getDb()
+  const snapshotIds = new Set(version.caseIds ?? version.cases?.map((c) => c.id) ?? [])
+  const copies = version.cases ?? []
+
+  let deleted = 0
+  let readded = 0
+  await db.transaction("rw", db.evalCases, async () => {
+    const current = await db.evalCases.where("datasetId").equals(version.datasetId).toArray()
+    const stale = current.filter((c) => !snapshotIds.has(c.id)).map((c) => c.id)
+    if (stale.length > 0) {
+      await db.evalCases.bulkDelete(stale)
+      deleted = stale.length
+    }
+    const present = new Set(current.map((c) => c.id))
+    const missing = copies.filter((c) => !present.has(c.id))
+    if (missing.length > 0) {
+      await db.evalCases.bulkPut(missing)
+      readded = missing.length
+    }
+  })
+  if (deleted > 0 || readded > 0) {
+    const ds = await getDataset(version.datasetId)
+    if (ds) {
+      await db.evalDatasets.put({ ...ds, version: ds.version + 1, updatedAt: Date.now() })
+    }
+  }
+  return { deleted, readded }
 }
 
 /** Set or clear a human tag on a version (e.g. "prod"). */

@@ -19,19 +19,30 @@ import { ExternalLinkIcon, Trash2Icon, XIcon } from "lucide-react"
 
 import { CharacterDetailSheet } from "@/components/mobile/discover/character-detail-sheet"
 import { PluginMarketplaceSheet } from "@/components/discover/plugin-marketplace-sheet"
+import { SkillMarketplaceSheet } from "@/components/discover/skill-marketplace-sheet"
+import { TwinProfileCard } from "@/components/discover/twin-profile-card"
+import { DiscoverShareButton } from "@/components/discover/discover-share-button"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { usePluginMarketplace } from "@/hooks/plugins/use-plugin-marketplace"
 import { usePlatform } from "@/hooks/use-platform"
-import type { DiscoverItem } from "@/hooks/discover/use-discover-query"
-import type { Character, McpServer, Skill, Team } from "@/lib/claude/types"
+import type {
+  DiscoverItem,
+  DiscoverExternalAgentPreset,
+  DiscoverTeamTemplate,
+} from "@/hooks/discover/use-discover-query"
+import type { Character, McpServer, Skill, Team } from "@cognia/agent-config-types"
 import type { PluginRow } from "@/lib/db/plugin-types"
 import type { ConnectorMeta } from "@/lib/connectors/adapter-metadata"
 import type { DiscoverCategoryId, DiscoverView } from "@/lib/discover/categories"
 import type { OcrProvider } from "@/types/ocr"
 import type { TwinDraft, TwinSource } from "@/types/twin"
 import type { WorkflowCopilotTemplate } from "@/lib/workflow/copilot-templates"
+import type { McpPreset } from "@/lib/claude/mcp-presets"
+import type { SlashCommandDefinition } from "@/lib/slash-commands/registry"
+import type { PluginSubagentDef } from "@/types/plugin/plugin-subagent"
+import { getTemplateWarnings } from "@/lib/plugin/registries/agent-team-template-registry"
 import { listAdapterInstancesByType } from "@/lib/db/adapter-instances"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
@@ -73,6 +84,7 @@ export function DiscoverInspector({
         <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center text-xs text-muted-foreground">
           <span>{t("inspector.empty")}</span>
           {category === "plugins" ? <PluginMarketplaceCta /> : null}
+          {category === "skills" ? <SkillMarketplaceSheet /> : null}
         </div>
       </section>
     )
@@ -87,6 +99,7 @@ export function DiscoverInspector({
       <InspectorHeader item={selected} onClose={onClose} />
       <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-4 py-3">
         <InspectorBody item={selected} />
+        <DiscoverShareButton item={selected} />
       </div>
     </section>
   )
@@ -140,6 +153,16 @@ function InspectorBody({ item }: { item: DiscoverItem }) {
       return <TwinSourceInspector source={item.data} />
     case "twinDraft":
       return <TwinDraftInspector draft={item.data} />
+    case "slashCommand":
+      return <SlashCommandInspector command={item.data} />
+    case "mcpPreset":
+      return <McpPresetInspector preset={item.data} />
+    case "teamTemplate":
+      return <TeamTemplateInspector template={item.data} />
+    case "externalAgentPreset":
+      return <ExternalAgentPresetInspector preset={item.data} />
+    case "subagent":
+      return <SubagentInspector subagent={item.data} itemId={item.id} />
     default: {
       // Exhaustiveness — newer kinds must add a branch above.
       const exhaustive: never = item
@@ -189,7 +212,7 @@ function TeamInspector({ team }: { team: Team }) {
         className="self-start"
         data-testid="discover-inspector-open-team"
       >
-        <Link href={`/agent-teams/${encodeURIComponent(team.id)}`}>
+        <Link href={`/agent-teams/workspace?teamId=${encodeURIComponent(team.id)}`}>
           <ExternalLinkIcon className="size-4" />
           {t("inspector.openFull")}
         </Link>
@@ -305,6 +328,7 @@ function TwinSourceInspector({ source }: { source: TwinSource }) {
   const t = useTranslations("discover")
   return (
     <>
+      <TwinProfileCard twinId={source.twinId} />
       <div className="flex flex-wrap gap-2">
         <Badge variant="outline">{source.kind}</Badge>
         <Badge variant="secondary">{source.status}</Badge>
@@ -395,6 +419,16 @@ function displayName(
           : undefined
       return dataName ?? t("inspector.twinDraftFallbackName", { kind: item.data.kind })
     }
+    case "slashCommand":
+      return `/${item.data.name}`
+    case "mcpPreset":
+      return item.data.name
+    case "teamTemplate":
+      return item.data.name
+    case "externalAgentPreset":
+      return item.data.name
+    case "subagent":
+      return item.data.name
     default: {
       const exhaustive: never = item
       return (exhaustive as { id?: string }).id ?? ""
@@ -424,6 +458,16 @@ function categoryOf(item: DiscoverItem): DiscoverCategoryId {
       return "twinIngest"
     case "twinDraft":
       return "twinDrafts"
+    case "slashCommand":
+      return "slashCommands"
+    case "mcpPreset":
+      return "mcpPresets"
+    case "teamTemplate":
+      return "teamTemplates"
+    case "externalAgentPreset":
+      return "agentPresets"
+    case "subagent":
+      return "agentPresets"
     default: {
       const exhaustive: never = item
       return exhaustive
@@ -444,7 +488,7 @@ function McpServerInspector({ server }: { server: McpServer }) {
     <>
       <div className="flex flex-wrap gap-2">
         <Badge variant="outline">{server.transport}</Badge>
-        {server.pluginId ? <Badge variant="secondary">plugin</Badge> : null}
+        {server.pluginId ? <Badge variant="secondary">{t("badgePlugin")}</Badge> : null}
       </div>
       <label className="flex items-center justify-between gap-2 rounded-md border border-border bg-card px-3 py-2">
         <span className="text-sm">
@@ -475,10 +519,11 @@ function McpServerInspector({ server }: { server: McpServer }) {
 function ConnectorInspector({ connector }: { connector: ConnectorMeta }) {
   const t = useTranslations("discover")
   const planned = connector.status === "planned"
+  const settingsHref = `/settings/connections?platform=${connector.type}`
   // Live count of configured adapter instances for this platform — drives
   // the "N configured" badge so the user sees current state without
   // navigating to /settings/connections. Skip the read entirely for
-  // `planned` platforms (no adapter row will ever exist).
+  // `planned` platforms because no adapter row can exist.
   const instances = useLiveQuery<readonly AdapterInstanceRow[]>(
     () =>
       planned
@@ -496,7 +541,9 @@ function ConnectorInspector({ connector }: { connector: ConnectorMeta }) {
         <Badge variant={connector.status === "stable" ? "outline" : "secondary"}>
           {t(`connectorStatus.${connector.status}`)}
         </Badge>
+        {/* i18n-exempt: OAuth is a protocol proper noun */}
         {connector.oauth ? <Badge variant="outline">OAuth</Badge> : null}
+        {/* i18n-exempt: A2UI is a protocol proper noun */}
         {connector.richMessages ? <Badge variant="outline">A2UI</Badge> : null}
       </div>
       {!planned ? (
@@ -516,7 +563,7 @@ function ConnectorInspector({ connector }: { connector: ConnectorMeta }) {
         data-testid="discover-inspector-open-connector"
       >
         <Link
-          href={planned ? "#" : `/settings/connections?platform=${connector.type}`}
+          href={planned ? "#" : settingsHref}
           onClick={planned ? (e) => e.preventDefault() : undefined}
         >
           <ExternalLinkIcon className="size-4" />
@@ -533,9 +580,9 @@ function OcrProviderInspector({ provider }: { provider: OcrProvider }) {
     <>
       <div className="flex flex-wrap gap-2">
         <Badge variant="outline">{t(`ocrCategories.${provider.category}`)}</Badge>
-        {provider.shells.tauri ? <Badge variant="secondary">desktop</Badge> : null}
-        {provider.shells.capacitor ? <Badge variant="secondary">mobile</Badge> : null}
-        {provider.shells.browser ? <Badge variant="secondary">web</Badge> : null}
+        {provider.shells.tauri ? <Badge variant="secondary">{t("shellDesktop")}</Badge> : null}
+        {provider.shells.capacitor ? <Badge variant="secondary">{t("shellMobile")}</Badge> : null}
+        {provider.shells.browser ? <Badge variant="secondary">{t("shellWeb")}</Badge> : null}
       </div>
       {provider.credentialKeys.length > 0 ? (
         <p className="text-xs text-muted-foreground">
@@ -581,6 +628,179 @@ function WorkflowTemplateInspector({ template }: { template: WorkflowCopilotTemp
         data-testid="discover-inspector-open-template"
       >
         <Link href={`/workflows?template=${encodeURIComponent(template.id)}`}>
+          <ExternalLinkIcon className="size-4" />
+          {t("inspector.openFull")}
+        </Link>
+      </Button>
+    </>
+  )
+}
+
+function SlashCommandInspector({ command }: { command: SlashCommandDefinition }) {
+  const t = useTranslations("discover")
+  return (
+    <>
+      {command.description ? (
+        <p className="text-sm text-muted-foreground">{command.description}</p>
+      ) : null}
+      <div className="flex flex-wrap gap-2">
+        <Badge variant="outline">{command.source ?? "chat"}</Badge>
+        {command.category ? <Badge variant="secondary">{command.category}</Badge> : null}
+        {command.shortcut ? <Badge variant="outline">{command.shortcut}</Badge> : null}
+      </div>
+      <p className="rounded-md border border-border bg-muted/40 px-3 py-2 font-mono text-xs">
+        /{command.name}
+      </p>
+      <Button
+        asChild
+        variant="default"
+        className="self-start"
+        data-testid="discover-inspector-open-slash-command"
+      >
+        <Link href="/settings/slash-commands">
+          <ExternalLinkIcon className="size-4" />
+          {t("inspector.manageCommands")}
+        </Link>
+      </Button>
+    </>
+  )
+}
+
+function McpPresetInspector({ preset }: { preset: McpPreset }) {
+  const t = useTranslations("discover")
+  return (
+    <>
+      <p className="text-sm text-muted-foreground">{preset.description}</p>
+      <div className="flex flex-wrap gap-2">
+        <Badge variant="outline">{preset.transport}</Badge>
+        {(preset.tags ?? []).map((tag) => (
+          <Badge key={tag} variant="secondary">
+            {tag}
+          </Badge>
+        ))}
+      </div>
+      {preset.fields.length > 0 ? (
+        <p className="text-xs text-muted-foreground">
+          {t("inspector.mcpPresetFields", { count: preset.fields.length })}
+        </p>
+      ) : null}
+      <div className="flex flex-wrap gap-2">
+        <Button
+          asChild
+          variant="default"
+          className="self-start"
+          data-testid="discover-inspector-add-mcp-preset"
+        >
+          <Link href={`/settings/external-bridge?preset=${encodeURIComponent(preset.id)}`}>
+            <ExternalLinkIcon className="size-4" />
+            {t("inspector.addMcpServer")}
+          </Link>
+        </Button>
+        {preset.docsUrl ? (
+          <Button asChild variant="outline" className="self-start">
+            <a href={preset.docsUrl} target="_blank" rel="noreferrer noopener">
+              {t("inspector.viewDocs")}
+            </a>
+          </Button>
+        ) : null}
+      </div>
+    </>
+  )
+}
+
+function TeamTemplateInspector({ template }: { template: DiscoverTeamTemplate }) {
+  const t = useTranslations("discover")
+  // Plugin-contributed templates may declare cross-capability dependencies; a
+  // missing one surfaces as a non-blocking warning chip.
+  const warnings = template.pluginId ? getTemplateWarnings(template.id) : []
+  return (
+    <>
+      <p className="text-sm text-muted-foreground">{template.description}</p>
+      <div className="flex flex-wrap gap-2">
+        {template.isBuiltIn ? <Badge variant="outline">{t("builtInBadge")}</Badge> : null}
+        {template.category ? <Badge variant="secondary">{template.category}</Badge> : null}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {t("memberCount", { count: template.teammateCount })}
+      </p>
+      {warnings.length > 0 ? (
+        <p className="text-xs text-destructive" data-testid="discover-inspector-template-warnings">
+          {t("inspector.templateMissingDeps", { count: warnings.length })}
+        </p>
+      ) : null}
+      <Button
+        asChild
+        variant="default"
+        className="self-start"
+        data-testid="discover-inspector-use-template"
+      >
+        <Link href="/agent-teams">
+          <ExternalLinkIcon className="size-4" />
+          {t("inspector.useTemplate")}
+        </Link>
+      </Button>
+    </>
+  )
+}
+
+function ExternalAgentPresetInspector({ preset }: { preset: DiscoverExternalAgentPreset }) {
+  const t = useTranslations("discover")
+  return (
+    <>
+      <p className="text-sm text-muted-foreground">{preset.description}</p>
+      {preset.tags.length > 0 ? (
+        <div className="flex flex-wrap gap-2">
+          {preset.tags.map((tag) => (
+            <Badge key={tag} variant="secondary">
+              {tag}
+            </Badge>
+          ))}
+        </div>
+      ) : null}
+      {preset.setupHint ? (
+        <p className="text-xs text-muted-foreground">{preset.setupHint}</p>
+      ) : null}
+      <div className="flex flex-wrap gap-2">
+        <Button
+          asChild
+          variant="default"
+          className="self-start"
+          data-testid="discover-inspector-add-external-agent"
+        >
+          <Link href="/me/external-agents">
+            <ExternalLinkIcon className="size-4" />
+            {t("inspector.addExternalAgent")}
+          </Link>
+        </Button>
+        {preset.docsUrl ? (
+          <Button asChild variant="outline" className="self-start">
+            <a href={preset.docsUrl} target="_blank" rel="noreferrer noopener">
+              {t("inspector.viewDocs")}
+            </a>
+          </Button>
+        ) : null}
+      </div>
+    </>
+  )
+}
+
+function SubagentInspector({ subagent, itemId }: { subagent: PluginSubagentDef; itemId: string }) {
+  const t = useTranslations("discover")
+  const builtIn = !itemId.includes(":")
+  return (
+    <>
+      <p className="text-sm text-muted-foreground">{subagent.description}</p>
+      <div className="flex flex-wrap gap-2">
+        <Badge variant="outline">{builtIn ? t("builtInBadge") : "plugin"}</Badge>
+        {subagent.model ? <Badge variant="secondary">{subagent.model}</Badge> : null}
+      </div>
+      <Button
+        asChild
+        variant="default"
+        className="self-start"
+        data-testid="discover-inspector-open-subagent"
+      >
+        <Link href="/me/subagents">
           <ExternalLinkIcon className="size-4" />
           {t("inspector.openFull")}
         </Link>

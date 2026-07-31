@@ -118,4 +118,55 @@ describe("usePluginMarketplace", () => {
     await waitFor(() => expect(result.current.state.kind).toBe("ready"))
     expect(result.current.state.kind === "ready" && result.current.state.results.length).toBe(2)
   })
+
+  it("normalizes the runtime marketplace result shape and malformed optional collections", async () => {
+    const search = jest.fn(async () => ({ plugins: SAMPLE, total: 2, hasMore: false }))
+    const client = makeClient({
+      search,
+      featured: jest.fn(async () => undefined),
+      popular: jest.fn(async () => null),
+      recent: jest.fn(async () => ({ entries: SAMPLE })),
+    })
+    __resetPluginMarketplaceClientForTests(client as never)
+
+    const { result } = renderHook(() => usePluginMarketplace())
+    await waitFor(() => expect(result.current.state.kind).toBe("ready"))
+
+    expect(result.current.state.kind === "ready" && result.current.state.results).toEqual(SAMPLE)
+    expect(result.current.featured).toEqual([])
+    expect(result.current.popular).toEqual([])
+    expect(result.current.recent).toEqual(SAMPLE)
+  })
+
+  it("does not auto-search on mount when autoLoad is false", async () => {
+    const client = makeClient()
+    __resetPluginMarketplaceClientForTests(client)
+
+    const { result } = renderHook(() => usePluginMarketplace({ autoLoad: false }))
+
+    // Give the (suppressed) mount effect a chance to fire before asserting.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10))
+    })
+
+    expect(client.searchPlugins).not.toHaveBeenCalled()
+    expect(client.getFeaturedPlugins).not.toHaveBeenCalled()
+    expect(result.current.state.kind).toBe("idle")
+
+    // Manual refresh (e.g. the Sync Registry button) still queries on demand.
+    await act(async () => {
+      await result.current.refresh()
+    })
+    expect(client.searchPlugins).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(result.current.state.kind).toBe("ready"))
+  })
+
+  it("auto-searches on mount when autoLoad defaults to true", async () => {
+    const client = makeClient()
+    __resetPluginMarketplaceClientForTests(client)
+
+    const { result } = renderHook(() => usePluginMarketplace({}))
+    await waitFor(() => expect(result.current.state.kind).toBe("ready"))
+    expect(client.searchPlugins).toHaveBeenCalledTimes(1)
+  })
 })

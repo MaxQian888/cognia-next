@@ -1,5 +1,11 @@
+/** @jest-environment jsdom */
 /**
  * Tests for `vscode-loader.ts`.
+ *
+ * This suite toggles `window.__TAURI_INTERNALS__` to exercise the desktop vs
+ * browser branches, so it needs the jsdom environment — the node/jsdom
+ * test-speed split otherwise routes bare `.ts` files to the node project
+ * (no `window`), which silently fails every Tauri-mode assertion.
  *
  * Two scenarios:
  *  1. Browser stub mode (no Tauri internals) — activate() logs a warning
@@ -99,6 +105,24 @@ describe("vscode-loader — browser stub mode", () => {
       /vscodeExtension\.identifier/i
     )
   })
+
+  it("rejects a manifest whose identifier impersonates another extension", async () => {
+    // The adapter derives `id` and `vscodeExtension.identifier` from the same
+    // publisher/name, so they cannot disagree. A mismatch means the block was
+    // not adapter-produced — i.e. an attacker-supplied manifest was persisted.
+    const { loadVscodeDefinition } = await import("./vscode-loader")
+    const impersonating: PluginManifest = {
+      ...baseManifest,
+      id: "evil.x",
+      vscodeExtension: {
+        ...baseManifest.vscodeExtension!,
+        identifier: "microsoft.vscode",
+      },
+    }
+    await expect(loadVscodeDefinition(impersonating, "/tmp/x")).rejects.toThrow(
+      /mismatched vscodeExtension\.identifier/i
+    )
+  })
 })
 
 describe("vscode-loader — Tauri mode", () => {
@@ -111,6 +135,16 @@ describe("vscode-loader — Tauri mode", () => {
     // we don't pull in the real Tauri runtime.
     jest.doMock("@tauri-apps/api/event", () => ({
       listen: jest.fn(async () => () => {}),
+    }))
+    jest.doMock("@/lib/canvas/monaco-loader", () => ({
+      loadConfiguredMonaco: jest.fn().mockResolvedValue({
+        languages: {
+          register: jest.fn(),
+          registerCompletionItemProvider: jest.fn(),
+          setLanguageConfiguration: jest.fn(),
+        },
+        editor: { setModelMarkers: jest.fn() },
+      }),
     }))
   })
 
@@ -261,7 +295,7 @@ describe("vscode-loader — Tauri mode", () => {
     await expect(unloadVscodeExtension("cognia.test-ext")).resolves.toBeUndefined()
   })
 
-  it("bootstraps configureMonacoBridge with monaco-editor + dispatchRpc on first load", async () => {
+  it("bootstraps configureMonacoBridge with the configured Monaco instance", async () => {
     // `Promise<unknown>` widens the return so `mockResolvedValueOnce` can
     // surface the JSON string the rpc dispatch path returns later in the
     // test without re-inferring the activate-response shape.
@@ -280,9 +314,11 @@ describe("vscode-loader — Tauri mode", () => {
 
     const fakeLanguages = { registerCompletionItemProvider: jest.fn() }
     const fakeSetModelMarkers = jest.fn()
-    jest.doMock("monaco-editor", () => ({
-      languages: fakeLanguages,
-      editor: { setModelMarkers: fakeSetModelMarkers },
+    jest.doMock("@/lib/canvas/monaco-loader", () => ({
+      loadConfiguredMonaco: jest.fn().mockResolvedValue({
+        languages: fakeLanguages,
+        editor: { setModelMarkers: fakeSetModelMarkers },
+      }),
     }))
 
     const configureMonacoBridge = jest.fn()
@@ -307,7 +343,7 @@ describe("vscode-loader — Tauri mode", () => {
     expect(out).toEqual({ ok: true })
   })
 
-  it("survives monaco-editor failing to load (logs warn + continues activation)", async () => {
+  it("survives configured Monaco failing to load (logs warn + continues activation)", async () => {
     const invoke = jest.fn(async (cmd: string) => {
       if (cmd === "plugin_load_vscode") return undefined
       if (cmd === "plugin_activate_vscode")
@@ -320,11 +356,10 @@ describe("vscode-loader — Tauri mode", () => {
       return undefined
     })
     jest.doMock("@tauri-apps/api/core", () => ({ invoke }))
-    // Simulate an environment where the lazy import throws (e.g. monaco
-    // assets are missing in CI).
-    jest.doMock("monaco-editor", () => {
-      throw new Error("monaco unavailable")
-    })
+    // Simulate an environment where the configured runtime assets are missing.
+    jest.doMock("@/lib/canvas/monaco-loader", () => ({
+      loadConfiguredMonaco: jest.fn().mockRejectedValue(new Error("monaco unavailable")),
+    }))
 
     const configureMonacoBridge = jest.fn()
     jest.doMock("@/lib/plugin/vscode-shim/monaco-bridge", () => ({
@@ -334,6 +369,109 @@ describe("vscode-loader — Tauri mode", () => {
     const { loadVscodeDefinition } = await import("./vscode-loader")
     await expect(loadVscodeDefinition(baseManifest, "/tmp/plugin")).resolves.toBeDefined()
     expect(configureMonacoBridge).not.toHaveBeenCalled()
+  })
+})
+
+describe("vscode-loader — headless brain mode", () => {
+  beforeEach(() => {
+    removeTauriWindow()
+    jest.resetModules()
+    jest.clearAllMocks()
+    ;(globalThis as Record<string, unknown>).__COGNIA_HEADLESS__ = true
+  })
+
+  afterEach(() => {
+    delete (globalThis as Record<string, unknown>).__COGNIA_HEADLESS__
+    jest.dontMock("@/lib/tauri/transport-instance")
+    jest.dontMock("@/lib/canvas/monaco-loader")
+  })
+
+  it("runs lifecycle and bidirectional sidecar RPC over the service transport", async () => {
+    const unsubscribe = jest.fn()
+    let inbound: ((payload: string) => void) | undefined
+    const call = jest.fn(async (command: string) => {
+      if (command === "plugin_activate_vscode") {
+        return {
+          registeredCommands: ["test.hello"],
+          registeredWebviewViews: [],
+          registeredLanguageProviders: [],
+          sidecarPid: 4321,
+        }
+      }
+      return undefined
+    })
+    const subscribe = jest.fn((_event: string, callback: (payload: string) => void) => {
+      inbound = callback
+      return unsubscribe
+    })
+    jest.doMock("@/lib/tauri/transport-instance", () => ({
+      transport: { call, subscribe },
+    }))
+    jest.doMock("@/lib/canvas/monaco-loader", () => ({
+      loadConfiguredMonaco: jest
+        .fn()
+        .mockRejectedValue(new Error("monaco unavailable in headless runtime")),
+    }))
+
+    const { loadVscodeDefinition } = await import("./vscode-loader")
+    const definition = await loadVscodeDefinition(baseManifest, "/data/.cognia/plugins/demo")
+    expect(call).toHaveBeenCalledWith(
+      "plugin_load_vscode",
+      expect.objectContaining({ pluginId: "cognia.test-ext" })
+    )
+    expect(subscribe).toHaveBeenCalledWith("vscode://rpc/cognia_test-ext", expect.any(Function))
+
+    await definition.activate!(mockContext)
+    expect(call).toHaveBeenCalledWith(
+      "plugin_activate_vscode",
+      expect.objectContaining({ pluginId: "cognia.test-ext" })
+    )
+
+    inbound?.(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 91,
+        method: "workspace:listFolders",
+        params: {},
+      })
+    )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(call).toHaveBeenCalledWith(
+      "plugin_vscode_send_response",
+      expect.objectContaining({
+        pluginId: "cognia.test-ext",
+        responseJson: expect.stringContaining('"id":91'),
+      })
+    )
+
+    await definition.deactivate!(mockContext)
+    expect(call).toHaveBeenCalledWith("plugin_deactivate_vscode", {
+      pluginId: "cognia.test-ext",
+    })
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("vscode-loader — ensureDispatcherConfigured export", () => {
+  beforeEach(() => {
+    removeTauriWindow()
+    jest.resetModules()
+    jest.clearAllMocks()
+  })
+
+  it("is exported so the editor LSP runtime can bootstrap it standalone", async () => {
+    // The export is the contract `ensureEditorLspRuntime` depends on to wire
+    // the dispatcher + monaco-bridge + LSP registry without a .vsix load.
+    const mod = await import("./vscode-loader")
+    expect(typeof mod.ensureDispatcherConfigured).toBe("function")
+  })
+
+  it("no-ops safely and idempotently off the Tauri host", async () => {
+    // Off-host it returns early (isVscodeHostAvailable() === false) without
+    // pulling any Tauri/monaco import — safe to call repeatedly.
+    const { ensureDispatcherConfigured } = await import("./vscode-loader")
+    await expect(ensureDispatcherConfigured()).resolves.toBeUndefined()
+    await expect(ensureDispatcherConfigured()).resolves.toBeUndefined()
   })
 })
 

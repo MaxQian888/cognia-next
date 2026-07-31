@@ -1,0 +1,91 @@
+---
+title: 插件间通信
+description: 插件之间以及与宿主的通信方式——受权限管控的 ctx.ipc RPC/消息面、ctx.events 全局事件总线、按方法的参数 schema、服务发现，以及熔断器安全网。
+---
+
+# 插件间通信
+
+`ctx.events` 上有两个面向插件的通信面：
+
+- **`ctx.events.ipc`**——具名插件之间的定向消息与 RPC（请求/响应、带熔断、受权限管控）。
+- **`ctx.events.bus`**——全局发布/订阅事件总线（命名空间事件、通配符 / 正则订阅、回放）。只读侧不受管控。
+
+两者都由宿主单例承载；当插件被禁用、挂起或卸载时，框架会**自动清理**该插件的订阅与已暴露方法——切换状态时不会泄漏监听器。
+
+## 权限
+
+出站 IPC 受权限管控。在 `plugin.json` 中声明所需权限：
+
+```jsonc
+{
+  "permissions": [
+    "ipc:call", // send / broadcast / call 其他插件
+    "ipc:expose", // 发布其他插件可调用的 RPC 方法
+  ],
+}
+```
+
+接收（`ctx.events.ipc.on`）、服务发现（`getExposedMethods` / `describeExposedMethods`）以及整个事件总线（`ctx.events.bus.*`）**不**受管控——只有出站 IPC 动作需要权限。
+
+> 若 manifest 未声明 `ipc:call` / `ipc:expose`，对应调用会以清晰的“requires the … permission”错误被拒绝。
+
+## 暴露 RPC 方法
+
+可以直接传函数，但更推荐带**参数 schema** 的描述符，让调用方得到快速、类型化的失败，而不是崩溃的处理器：
+
+```ts
+ctx.events.ipc.expose({
+  // 裸处理器——无校验
+  ping: () => "pong",
+
+  // 描述符——可校验、可发现
+  add: {
+    handler: (a, b) => (a as number) + (b as number),
+    description: "两数相加",
+    schema: {
+      args: [{ type: "number" }, { type: "number" }],
+    },
+  },
+})
+```
+
+schema 的 `type` 取值为 `string | number | boolean | object | array | unknown`。把末尾参数标记为 `{ optional: true }` 允许省略。参数校验在熔断器与远端处理器**之前**运行，因此非法调用绝不会打开该端点的熔断器。
+
+## 调用其他插件
+
+```ts
+const sum = await ctx.events.ipc.call<number>("other-plugin", "add", [2, 3], {
+  timeoutMs: 5000, // 可选；默认 30s，传 0 关闭
+  signal: abortController.signal, // 可选取消
+})
+```
+
+每个 `(目标插件, 方法)` 对都有独立的**熔断器**（30s 窗口，≥5 次事件中失败率达 50% 时打开，30s 冷却）。打开的熔断器会同步以 `CircuitOpenError` 拒绝。中止以 `AbortError` 拒绝，且**不**计入熔断器失败。
+
+## 服务发现
+
+```ts
+// 仅名称
+ctx.events.ipc.getExposedMethods("other-plugin") // → ["ping", "add"]
+
+// 名称 + 描述 + 参数 schema（不泄漏处理器）
+ctx.events.ipc.describeExposedMethods("other-plugin")
+// → [{ name: "add", description: "两数相加", schema: { args: [...] } }]
+```
+
+## 广播 + 事件总线
+
+```ts
+// 向某通道的所有订阅者发送，发完即忘
+ctx.events.ipc.broadcast("cache:invalidated", { key: "users" })
+
+// 全局发布/订阅——支持通配符 + 正则订阅
+const off = ctx.events.bus.on("system:plugin:enabled", (event) => {
+  console.log(event.source.id, "was enabled")
+})
+// off() 取消订阅；宿主也会在禁用时自动移除
+```
+
+## 可观测性
+
+**设置 → 可观测性 → 诊断 → 系统**标签页中的**插件通信**卡片会展示已暴露方法、活动通道、订阅计数，以及任何降级（打开 / 半开）的熔断器——用它在运行时调试插件↔插件的接线。

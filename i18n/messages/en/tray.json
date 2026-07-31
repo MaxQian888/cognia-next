@@ -1,0 +1,65 @@
+{
+  "about": {
+    "checkUpdates": "Check for updates…",
+    "copyDiagnostics": "Copy diagnostics",
+    "docs": "Documentation",
+    "openDataFolder": "Open data folder",
+    "reportIssue": "Report an issue",
+    "title": "About"
+  },
+  "allCommands": "All Commands",
+  "automationKill": "🛑 Engage automation kill switch",
+  "autostart": "Launch at login",
+  "categories": {
+    "chat": "Chat",
+    "diagnostics": "Diagnostics",
+    "goal": "Goal",
+    "help": "Help",
+    "other": "Other",
+    "plugins": "Plugins",
+    "system": "System",
+    "template": "Templates"
+  },
+  "iconState": {
+    "busy": "Busy",
+    "error": "Error",
+    "idle": "Idle",
+    "muted": "Muted"
+  },
+  "islandToggle": "Toggle agent island",
+  "newChat": "New Chat",
+  "openLogs": "Open Log Panel",
+  "pet": {
+    "clean": "Clean",
+    "feed": "Feed",
+    "openSettings": "Pet settings…",
+    "pet": "Pet",
+    "play": "Play",
+    "sleep": "Sleep",
+    "title": "Pet",
+    "treat": "Treat"
+  },
+  "petClickThroughOff": "Disable desktop pet click-through",
+  "petToggle": "Toggle desktop pet",
+  "quickGoal": "/goal …",
+  "quit": "Quit",
+  "settings": "Settings",
+  "show": "Show Cognia",
+  "status": {
+    "automationRunning": "Automation running",
+    "goalPaused": "Goal paused",
+    "goalRunning": "Goal running",
+    "idle": "Idle",
+    "petNeedsAttention": "Pet needs attention",
+    "placeholder": "Status",
+    "streaming": "Responding…"
+  },
+  "toggleWindow": "Show / hide window",
+  "usage": {
+    "auto": "Auto (highest usage)",
+    "empty": "No usage data yet",
+    "openSettings": "Subscription settings…",
+    "refresh": "Refresh usage",
+    "title": "Subscription usage"
+  }
+}

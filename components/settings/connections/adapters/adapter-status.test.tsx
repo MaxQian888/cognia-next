@@ -52,6 +52,18 @@ describe("deriveAdapterStatus", () => {
     expect(info.tint).toMatch(/red/)
   })
 
+  it("surfaces the health reason code so the badge can tooltip why it is red", () => {
+    const info = deriveAdapterStatus(
+      true,
+      health({ current: { state: "down", reason: "credentials_missing" } })
+    )
+    expect(info.reason).toBe("credentials_missing")
+  })
+
+  it("carries no reason when connected/nominal", () => {
+    expect(deriveAdapterStatus(true, health()).reason).toBeUndefined()
+  })
+
   it("maps an open breaker → error (red), trumping other signals", () => {
     const info = deriveAdapterStatus(
       true,

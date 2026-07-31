@@ -2,7 +2,8 @@
  * @jest-environment jsdom
  */
 
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 import { ConnectionStateBadge } from "./connection-state-badge"
 import type { ConnectionState } from "@/lib/tauri/transport-companion"
@@ -36,6 +37,7 @@ jest.mock("next-intl", () => ({
       "sync.hoursAgo": `${vars?.n ?? 0}h`,
       "sync.daysAgo": `${vars?.n ?? 0}d`,
       "aria.menu": `${vars?.label ?? ""} — open menu`,
+      "toasts.reconnectBusy": "Reconnect already in progress",
     }
     return map[key] ?? key
   },
@@ -53,6 +55,15 @@ jest.mock("@/lib/sync/companion-sync", () => ({
 
 jest.mock("@/lib/tauri", () => ({
   transport: { reconnectRtc: jest.fn(() => "no-tier" as const) },
+}))
+
+jest.mock("sonner", () => ({
+  toast: {
+    error: jest.fn(),
+    info: jest.fn(),
+    message: jest.fn(),
+    success: jest.fn(),
+  },
 }))
 
 // The two sheet components have their own deep dependencies; stub them so
@@ -99,5 +110,34 @@ describe("ConnectionStateBadge", () => {
     const trigger = screen.getByTestId("connection-state-badge")
     expect(trigger.tagName.toLowerCase()).toBe("button")
     expect(trigger).toHaveAttribute("aria-label")
+  })
+
+  it("reveals the sync-status section once the controlled menu is opened", async () => {
+    // The menu is controlled (open/onOpenChange) so the relative-time clock
+    // only runs while it's open; opening it must still render the sync rows.
+    const user = userEvent.setup()
+    mockedUse.mockReturnValue("connected")
+    render(<ConnectionStateBadge />)
+    await user.click(screen.getByTestId("connection-state-badge"))
+    expect(await screen.findByText("Sync status")).toBeInTheDocument()
+    expect(await screen.findByTestId("connection-sync-row-sessions")).toBeInTheDocument()
+  })
+
+  it("surfaces the busy outcome when a reconnect is already in progress", async () => {
+    const user = userEvent.setup()
+    const { transport } = jest.requireMock("@/lib/tauri") as {
+      transport: { reconnectRtc: jest.Mock }
+    }
+    const { toast } = jest.requireMock("sonner") as { toast: { info: jest.Mock } }
+    transport.reconnectRtc.mockReturnValueOnce("busy")
+    mockedUse.mockReturnValue("connected")
+    render(<ConnectionStateBadge />)
+
+    await user.click(screen.getByTestId("connection-state-badge"))
+    fireEvent.click(await screen.findByText("Reconnect now"))
+
+    await waitFor(() =>
+      expect(toast.info).toHaveBeenCalledWith("Reconnect already in progress")
+    )
   })
 })

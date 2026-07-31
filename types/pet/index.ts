@@ -9,12 +9,21 @@ export type {
   PetPalette,
   PetStats,
   PetBones,
+  PetCosmeticOverride,
 } from "./bones"
 export type { PetSoul } from "./soul"
 export type { PetNeedKind, PetNeeds, NeedDecayRate, NeedDecayConfig } from "./needs"
-export type { PetStage, PetProfile, PetActivityRow } from "./profile"
+export type { PetStatKey, PetStatProgress } from "./stats"
+export { STAT_KEYS, ZERO_STAT_PROGRESS, effectiveStats, normalizeStatProgress } from "./stats"
+export type { PetCondition, PetCareState } from "./care"
+export { DEFAULT_CARE_STATE, normalizeCareState } from "./care"
+export type { PetStage, PetProfile, PetActivityRow, PetEvolutionFlavor } from "./profile"
+export type { PetStreak, PetInventoryRow, PetItemCategory, PetShopItem } from "./economy"
+export { DEFAULT_STREAK, normalizeStreak, normalizeCoins } from "./economy"
 export type { PetVisualState, PetOneShot, PetMood } from "./visual-state"
 export type { PetEventSource, PetEventKind, PetEvent } from "./events"
+export type { PetConversationRow } from "./conversation"
+export type { ProactiveState } from "./proactive"
 export type { PetCharacterBinding } from "./binding"
 export type {
   PetAchievementId,
@@ -22,6 +31,27 @@ export type {
   PetAchievement,
   PetAchievementRecord,
 } from "./achievements"
-export type { PetSkin, PetSkinRenderProps } from "./skin"
-export type { PetAnchor, PetMotionPreference, PetSettings } from "./settings"
-export { DEFAULT_PET_SETTINGS } from "./settings"
+export type { PetSkin, PetSkinRenderProps, PetFacing, PetLocomotion } from "./skin"
+export type {
+  PetAnchor,
+  PetMotionPreference,
+  PetSettings,
+  PetDesktopOverlaySettings,
+  PetWanderFrequency,
+  PetWanderRange,
+  PetWanderSettings,
+  PetProactiveTier,
+  PetProactiveSettings,
+  PetSoundSettings,
+  PetTwinAwarenessSettings,
+} from "./settings"
+export {
+  DEFAULT_PET_SETTINGS,
+  DEFAULT_PET_DESKTOP_OVERLAY,
+  DEFAULT_PET_WANDER,
+  DEFAULT_PET_PROACTIVE,
+  DEFAULT_PET_SOUND,
+  DEFAULT_PET_TWIN_AWARENESS,
+} from "./settings"
+export type { Live2dTransform, Live2dMotionOverride, Live2dMotionOverrides } from "./live2d"
+export { DEFAULT_LIVE2D_TRANSFORM } from "./live2d"

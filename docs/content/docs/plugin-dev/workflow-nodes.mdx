@@ -74,6 +74,83 @@ ctx.api.extension.mount("workflow-inspector", "action.custom.report", () => {
 
 Without a custom inspector, the generic JSON editor is shown.
 
+## Reusable node groups
+
+A node group is an authoring-time graph fragment, not a custom executor. When a
+user inserts one from the workflow editor's **Templates** tab, Cognia rebases
+every node and edge id and adds the fragment under the existing visual
+`annotation.group` container in one undoable operation. Execution continues to
+use the normal node registry and orchestrator.
+
+Define node groups through the unified template SDK and register the collection
+atomically through `ctx.templates`. Do not add them to the deprecated
+`workflowTemplates` manifest field.
+
+```ts
+import {
+  createTemplateDefinition,
+  defineWorkflowNodeGroup,
+  defineWorkflowNodeGroups,
+} from "@cognia/plugin-sdk/templates"
+
+export async function activate(ctx) {
+  const review = defineWorkflowNodeGroup(
+    await createTemplateDefinition({
+      id: `${ctx.pluginId}:review-group`,
+      domain: "workflow",
+      status: "published",
+      revision: 1,
+      version: "1.0.0",
+      metadata: {
+        name: "Review group",
+        description: "Review input and expose the structured result",
+      },
+      payload: {
+        kind: "cognia.workflow/node-group/v1",
+        nodes: [
+          {
+            id: "review",
+            type: "ai.prompt",
+            typeVersion: 2,
+            position: { x: 0, y: 0 },
+            data: {
+              label: "Review",
+              params: { prompt: "Review {{ $trigger.payload }}" },
+            },
+          },
+          {
+            id: "output",
+            type: "io.output",
+            typeVersion: 1,
+            position: { x: 300, y: 0 },
+            data: { label: "Output", params: {} },
+          },
+        ],
+        edges: [{ id: "review-output", source: "review", target: "output" }],
+      },
+      inputs: [],
+      dependencies: [],
+      capabilities: [],
+      compatibility: { platforms: ["desktop", "web", "mobile"] },
+      provenance: {
+        source: "plugin",
+        pluginId: ctx.pluginId,
+        trust: "unsigned",
+      },
+    })
+  )
+
+  const groups = defineWorkflowNodeGroups([review])
+  ctx.templates.registerMany(groups)
+}
+```
+
+Dynamic definitions require the `templates:contribute` permission, must use an
+id prefixed with the active plugin id, and must be immutable published releases.
+A group is limited to 256 nodes and 1,024 internal edges. Batch registration
+validates every definition before publishing any of them and emits one catalog
+revision for the entire collection.
+
 ## Error handling
 
 Throw from `run()` to mark the step as failed. The orchestrator applies the node's `retryPolicy` if configured:

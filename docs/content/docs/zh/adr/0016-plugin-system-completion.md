@@ -77,7 +77,7 @@ ADR 0006 后续 #2 把 12 个 `catch { /* ignore */ }` 站点迁移到了 `recor
 有两个审计维度结果是干净的，无需任何工作：
 
 - **i18n**：36 个 `plugins.*` + 12 个 `settings.plugins.*` 键，在 `i18n/messages/en.json` 与 `i18n/messages/zh-CN.json` 之间完全同步。全部 28 个 `useTranslations()` 调用点在两种语言下都能解析。没有漂移，没有死键（两个「容器」键 `plugins.tabs` 与 `plugins.signature` 是通过动态迭代访问的，并非陈旧键）。
-- **API 表面**：全部 14 个 `lib/plugin/api/*-api.ts` 模块都经由 `lib/plugin/core/context.ts:146-211` 接入 `FullPluginContext`。`PluginContext`（基础，19 个字段）与 `FullPluginContext`（基础 + 14 个扩展 API）和 `types/plugin/plugin.ts` 与 `types/plugin/plugin-extended.ts` 中的类型声明对齐。
+- **API 表面**：全部 14 个 `lib/plugin/api/*-api.ts` 模块都经由 `lib/plugin/core/context.ts:146-211` 接入 `FullPluginContext`。`PluginContext`（基础，19 个字段）与 `FullPluginContext`（基础 + 14 个扩展 API）和 `types/plugin/plugin.ts` 中的类型声明对齐。
 
 ## 决策
 

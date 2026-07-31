@@ -1,0 +1,41 @@
+name: Refresh website evidence
+
+# ============================================================================
+# ADR-0092 §6 — the marketing site resolves every dynamic claim at build time:
+# the latest release, supported platforms, stars, contributors, and the
+# changelog feed. A static export has no request-time runtime, so the only way
+# those figures stay current is to rebuild.
+#
+# This is a thin caller rather than a `schedule:` trigger inside deploy.yml.
+# On a scheduled run `inputs` is empty, and every job in deploy.yml gates on
+# `inputs.target` / `inputs.environment` — adding the trigger there would have
+# meant rewriting each of those expressions to tolerate a null input, on jobs
+# that deploy Workers and Fly apps. A separate caller passes the inputs
+# explicitly and leaves that gating untouched.
+#
+# The same safety model applies: deploy.yml's gate requires DEPLOY_ENABLED and
+# the Cloudflare token, so an unconfigured fork skips it green.
+#
+# Failure matters: this is the only thing keeping the site's figures from
+# quietly ageing behind an "as of" label that makes them look freshly checked.
+# The site does degrade honestly — a failed read renders "last successful read
+# <date>" instead — but a run that fails for weeks should be visible.
+# ============================================================================
+
+on:
+  schedule:
+    # 04:10 UTC daily, off the hour to avoid the top-of-hour Actions surge.
+    - cron: "10 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    name: Rebuild and deploy the website
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: production
+      target: web
+    secrets: inherit

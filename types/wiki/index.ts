@@ -72,6 +72,44 @@ export type BridgeScope =
    * accidentally enabling automated replies.
    */
   | "inbox:connectors:send"
+  /**
+   * Run a built-in / plugin subagent or character headlessly via
+   * `agent_dispatch`. Default OFF — this executes Cognia's own agent runtime
+   * (tool loop, model calls) on behalf of an external agent, and the returned
+   * text is PII-gated on the way out.
+   */
+  | "agent:dispatch"
+  /**
+   * Start an Agent Team headlessly via `team_run`. Default OFF — drives a
+   * multi-agent orchestration the external caller cannot otherwise reach.
+   */
+  | "agent:team"
+  /**
+   * Invoke a plugin-registered tool via `plugin_tool_invoke`. Default OFF —
+   * the plugin's own consent gate + ownership check still apply per call.
+   */
+  | "plugin:tools"
+  /**
+   * Inbound write — `record_lesson` / `save_skill_draft` / `ingest_note` let
+   * an external agent contribute back to Cognia. Default OFF. Nothing mutates
+   * live state: submissions land in the `inboundDrafts` review queue as
+   * pending, untrusted-wrapped drafts for the operator to accept/discard
+   * (ADR-0008 Phase 4).
+   */
+  | "inbound:write"
+  /**
+   * Read the user's long-term memory (`memory_search` / `memory_list`).
+   * Default OFF — mirrors the `rag:twin` sensitivity split: memories are
+   * distilled personal facts about the user.
+   */
+  | "memory:read"
+  /**
+   * Write the user's long-term memory (`memory_store` / `memory_update` /
+   * `memory_forget`). Default OFF. Writes carry `external` provenance, pass
+   * the PII block gate, and can never create `procedural` rules (an external
+   * agent may not rewrite the assistant's working instructions — ADR-0069).
+   */
+  | "memory:write"
 
 export const ALL_BRIDGE_SCOPES: readonly BridgeScope[] = [
   "wiki:cognia",
@@ -87,6 +125,12 @@ export const ALL_BRIDGE_SCOPES: readonly BridgeScope[] = [
   "mcp:computer-use",
   "inbox:connectors:read",
   "inbox:connectors:send",
+  "agent:dispatch",
+  "agent:team",
+  "plugin:tools",
+  "inbound:write",
+  "memory:read",
+  "memory:write",
 ] as const
 
 /** Scopes enabled by default for a fresh install. Public-code wiki + RAG only. */
@@ -127,6 +171,12 @@ export interface ExternalBridgeSettings {
    * `wiki-rebuild` scheduled task. Custom mode takes a raw cron expression.
    */
   wikiSchedule?: WikiScheduleSettings
+  /**
+   * Optional automatic wiki-lint schedule (orphan / broken-link health check).
+   * Same shape + reconciliation as {@link wikiSchedule}; `mode === "off"`
+   * deletes the `wiki-lint::singleton` scheduler row.
+   */
+  wikiLintSchedule?: WikiScheduleSettings
 }
 
 export type WikiScheduleMode = "off" | "daily" | "weekly" | "custom"
@@ -229,6 +279,36 @@ export interface WikiArticle {
    * still matches the current on-disk SHA-256.
    */
   fileHashes: Record<string, string>
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Wiki lint — orphan-page + broken-link health check (no-AI, local).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** One flagged article in a lint run. */
+export interface WikiLintFinding {
+  /** The offending article's slug. */
+  slug: string
+  /** The article title, for display. */
+  title: string
+  /** For broken-link findings: the dangling `[[slug]]` targets that resolve to no article. */
+  deadLinks?: string[]
+}
+
+/**
+ * Result of a wiki lint pass — one singleton row per scope (Dexie table
+ * `wikiLintResults`, keyed by `&scope`, mirroring `wikiManifest`).
+ */
+export interface WikiLintResult {
+  scope: WikiScope
+  /** Epoch ms of the lint run. */
+  lastRunAt: number
+  /** Total articles examined. */
+  articleCount: number
+  /** Articles containing dangling `[[slug]]` links (target article missing). */
+  brokenLinks: WikiLintFinding[]
+  /** Articles with zero inbound `[[slug]]` links from any other article. */
+  orphans: WikiLintFinding[]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

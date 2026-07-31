@@ -14,6 +14,7 @@ import { setWindowBackgroundColor } from "@/lib/tauri/shell-window"
 import { getShellColors } from "@/lib/appearance/shell-sync"
 import { isTauri } from "@/lib/tauri"
 import { useChatStore } from "@/stores/chat"
+import { startNewSession } from "@/lib/chat/start-session"
 import { useSettingsStore } from "@/stores/settings"
 import { useUIStore } from "@/stores/ui"
 import { useTrayStore } from "@/lib/tray/store"
@@ -22,6 +23,7 @@ import { useSyncShortcutsToRust } from "@/lib/shortcuts/sync"
 import { rasterizeAndRegisterTrayIcons } from "@/lib/tray/icon-builder"
 import { pushCrashContext } from "@/lib/native/crash-context"
 import { installNotificationBridges } from "@/lib/notifications/install"
+import { isMainAppWindow } from "@/lib/pet/window-role"
 
 /**
  * Single mount point for desktop-runtime concerns:
@@ -52,13 +54,16 @@ export function TauriProvider({ children }: { children: React.ReactNode }) {
   const appearanceColorTheme = useSettingsStore((s) => s.colorTheme)
   const appearanceActiveCustomThemeId = useSettingsStore((s) => s.activeCustomThemeId)
   const appearanceCustomThemes = useSettingsStore((s) => s.customThemes)
+  // High contrast replaces the whole palette, so without this the window
+  // background stayed on the normal palette while the app repainted.
+  const appearanceA11y = useSettingsStore((s) => s.settings?.a11y)
 
   // Feed the crash-report subsystem a redacted config snapshot so a later Rust
   // panic / native crash report reflects the current app state. Change-driven
   // (theme / locale) — these are the meaningful signals and don't churn. No-op
   // on web; `pushCrashContext` short-circuits when not under Tauri.
   useEffect(() => {
-    if (!isTauri()) return
+    if (!isTauri() || !isMainAppWindow()) return
     void pushCrashContext({
       runtime: "tauri",
       colorTheme: appearanceColorTheme,
@@ -73,21 +78,33 @@ export function TauriProvider({ children }: { children: React.ReactNode }) {
   // with the in-app theme. No-op on web; `setWindowBackgroundColor`
   // short-circuits when not running under Tauri.
   useEffect(() => {
-    if (!isTauri()) return
+    if (!isTauri() || !isMainAppWindow()) return
     if (!resolvedTheme) return
     const shellColors = getShellColors(
       {
         colorTheme: appearanceColorTheme,
         activeCustomThemeId: appearanceActiveCustomThemeId,
         customThemes: appearanceCustomThemes,
+        a11y: appearanceA11y,
       },
       resolvedTheme
     )
     void setWindowBackgroundColor(shellColors.backgroundHex)
-  }, [resolvedTheme, appearanceColorTheme, appearanceActiveCustomThemeId, appearanceCustomThemes])
+  }, [
+    resolvedTheme,
+    appearanceColorTheme,
+    appearanceActiveCustomThemeId,
+    appearanceCustomThemes,
+    appearanceA11y,
+  ])
 
   useEffect(() => {
-    if (!isTauri()) return
+    // The transparent pet overlay/popup windows load this same root layout but
+    // are least-privilege (see `src-tauri/capabilities/pet.json`) — running the
+    // main-window boot sequence there only logs denied-capability warnings for
+    // notification / tray-store / CLI / deep-link. Skip it in pet windows; they
+    // start their own presentation-only view.
+    if (!isTauri() || !isMainAppWindow()) return
     void ensureNotificationPermission()
 
     // Kick off tray-store hydration as soon as the provider mounts. The
@@ -112,7 +129,7 @@ export function TauriProvider({ children }: { children: React.ReactNode }) {
       }
 
       // CLI args from this launch — `cognia <path>` opens that workspace,
-      // `--new-chat` clears the active session.
+      // `--new-chat` starts a fresh conversation.
       try {
         const { workspacePath, newChat } = await getLaunchCli()
         if (workspacePath) {
@@ -122,8 +139,8 @@ export function TauriProvider({ children }: { children: React.ReactNode }) {
           toast.success("Workspace from CLI", { description: workspacePath })
         }
         if (newChat) {
-          useChatStore.getState().clear()
           useUIStore.getState().setSelectedGuild({ kind: "dm" })
+          await startNewSession()
         }
       } catch (err) {
         console.warn("getLaunchCli failed", err)

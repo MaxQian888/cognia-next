@@ -5,7 +5,7 @@ description: Native sqlite-vec on desktop, plus five cloud backends — how Cogn
 
 # Vector store
 
-Cognia needs a vector index for the [Employee Digital Twin](../subsystems/employee-twin) RAG path. The store lives behind a thin abstraction (`lib/vector/store.ts`) so the rest of the app doesn't care which backend is active.
+Cognia needs a vector index for the [Employee Digital Twin](../subsystems/employee-twin) RAG path. The store lives behind a thin abstraction (`packages/vector/src/store.ts`) so the rest of the app doesn't care which backend is active.
 
 The full design rationale is in [ADR-0004](../adr/0004-vector-native-backend).
 
@@ -120,7 +120,7 @@ It returns `(id, score, metadata)` triples sorted by cosine similarity. The scor
 ```mermaid
 flowchart TB
   Caller[Twin runtime / ingest persist]
-  Caller --> Store[lib/vector/store.ts<br/>VectorStore interface]
+  Caller --> Store[packages/vector/src/store.ts<br/>VectorStore interface]
   Store --> Settings{settings.vector.backend}
 
   Settings -->|sqlite-vec| Native[lib/tauri.ts wrapper]
@@ -231,7 +231,7 @@ Switching backends does **not** automatically migrate. The Sources tab in the tw
 | ------------------------- | -------------------------------------------------------------------------- |
 | Add a new cloud backend   | `lib/vector/<provider>-client.ts`, register in `store.ts`, add settings UI |
 | Tweak sqlite-vec schema   | `src-tauri/src/vector/schema.rs` (bump migration version)                  |
-| Add a new metadata filter | `src-tauri/src/vector/filters.rs` and `lib/vector/store.ts` types          |
+| Add a new metadata filter | `src-tauri/src/vector/filters.rs` and `packages/vector/src/store.ts` types          |
 | Improve readiness checks  | `lib/vector/readiness.ts`                                                  |
 
 ## Tests

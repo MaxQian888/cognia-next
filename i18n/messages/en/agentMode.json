@@ -1,0 +1,72 @@
+{
+  "a2uiTemplatePreviewTitle": "A2UI template preview",
+  "agentTeams": "Agent Teams",
+  "builtInModes": "Built-in Modes",
+  "create": "Create",
+  "createCustomMode": "Create Custom Mode",
+  "createCustomModeDesc": "Define a custom agent mode with specific behavior",
+  "createTeam": "Create Team",
+  "customModes": "Custom Modes",
+  "deleteMode": "Delete Mode",
+  "deleteModeConfirm": "Are you sure you want to delete this mode?",
+  "description": "Description",
+  "descriptionPlaceholder": "What does this agent do?",
+  "duplicateMode": "Duplicate Mode",
+  "editMode": "Edit Mode",
+  "livePreview": "Live Preview",
+  "modes": {
+    "academic": {
+      "description": "Search, analyze, and learn from academic papers",
+      "name": "Academic Research"
+    },
+    "build": {
+      "description": "Full access — implement changes, edit files, and run commands",
+      "name": "Build"
+    },
+    "code-gen": {
+      "description": "Generate and explain code in various languages",
+      "name": "Code Generator"
+    },
+    "data-analysis": {
+      "description": "Analyze data and create visualizations",
+      "name": "Data Analyst"
+    },
+    "general": {
+      "description": "General purpose AI assistant for various tasks",
+      "name": "General Assistant"
+    },
+    "plan": {
+      "description": "Investigate and propose a step-by-step plan without editing files or running mutating commands",
+      "name": "Plan (read-only)"
+    },
+    "ppt-generation": {
+      "description": "Create professional presentations and slides",
+      "name": "Presentation Generator"
+    },
+    "research": {
+      "description": "Help with research and information gathering",
+      "name": "Research Assistant"
+    },
+    "web-design": {
+      "description": "Design and build web pages with live preview",
+      "name": "Web Designer"
+    },
+    "workflow": {
+      "description": "Execute multi-step workflows and automations",
+      "name": "Workflow Executor"
+    },
+    "writing": {
+      "description": "Help with writing, editing, and content creation",
+      "name": "Writing Assistant"
+    }
+  },
+  "name": "Name",
+  "namePlaceholder": "My Custom Agent",
+  "noCustomModes": "No custom modes yet",
+  "noTemplateSelected": "No template selected",
+  "pluginModes": "Plugin Modes",
+  "systemPrompt": "System Prompt",
+  "systemPromptPlaceholder": "You are a helpful assistant that...",
+  "teammatesCount": "{count, plural, one {# teammate} other {# teammates}}",
+  "title": "Agent Mode"
+}

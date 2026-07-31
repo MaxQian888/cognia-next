@@ -11,13 +11,19 @@ function getSubtle(): SubtleCrypto {
   return subtle
 }
 
-function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+function toBufferSource(bytes: Uint8Array): BufferSource {
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(bytes) as BufferSource
+  }
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
 }
 
 /** Hex-encoded SHA-256 of a UTF-8 string. */
 export async function sha256Hex(value: string): Promise<string> {
-  const digest = await getSubtle().digest("SHA-256", toArrayBuffer(new TextEncoder().encode(value)))
+  const digest = await getSubtle().digest(
+    "SHA-256",
+    toBufferSource(new TextEncoder().encode(value))
+  )
   return Array.from(new Uint8Array(digest))
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("")

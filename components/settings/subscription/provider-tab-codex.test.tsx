@@ -25,11 +25,40 @@ jest.mock("./add-account-dialog/codex", () => ({
     open ? <div data-testid="codex-add-dialog" /> : null,
 }))
 
+jest.mock("./provider-quota-panel", () => ({
+  ProviderQuotaPanel: ({ provider }: { provider: string }) => (
+    <div data-testid={`quota-panel-${provider}`} />
+  ),
+}))
+
+// `expiresAtMs` is the api-key signal the tab reads (0 = non-expiring).
+type MockAccount = { id: string; variant: string; expiresAtMs: number }
+const mockAccountsState: { accounts: MockAccount[]; activeAccountId: string | null } = {
+  accounts: [],
+  activeAccountId: null,
+}
+
+jest.mock("@/lib/subscription/core/hooks", () => ({
+  useAccounts: () => mockAccountsState,
+}))
+
 const saveMock = jest.fn(async (_: unknown) => undefined)
-const mockSettingsState: {
-  codexSubscriptionSettings: { preferDiscovered: boolean; autoRefreshNearExpiry: boolean }
-} = {
-  codexSubscriptionSettings: { preferDiscovered: false, autoRefreshNearExpiry: true },
+type MockCodexSettings = {
+  autoRefreshNearExpiry: boolean
+  probeEnabled: boolean
+  visibleIntervalMs: number
+  idleIntervalMs: number
+  warnThresholdPct: number
+}
+const defaultMockCodexSettings: MockCodexSettings = {
+  autoRefreshNearExpiry: true,
+  probeEnabled: false,
+  visibleIntervalMs: 5 * 60_000,
+  idleIntervalMs: 30 * 60_000,
+  warnThresholdPct: 90,
+}
+const mockSettingsState: { codexSubscriptionSettings: MockCodexSettings } = {
+  codexSubscriptionSettings: { ...defaultMockCodexSettings },
 }
 
 jest.mock("@/stores/settings/settings-store", () => ({
@@ -47,12 +76,24 @@ jest.mock("@/stores/settings/settings-store", () => ({
 
 import { ProviderTabCodex } from "./provider-tab-codex"
 
+// The tab refuses to render in web mode — every action ends in a keychain-backed
+// Tauri command — so the suite has to declare itself desktop.
+const TAURI_MARKER = "__TAURI_INTERNALS__"
+function setDesktop(on: boolean) {
+  if (on) {
+    ;(window as unknown as Record<string, unknown>)[TAURI_MARKER] = {}
+  } else {
+    delete (window as unknown as Record<string, unknown>)[TAURI_MARKER]
+  }
+}
+beforeAll(() => setDesktop(true))
+afterAll(() => setDesktop(false))
+
 beforeEach(() => {
   saveMock.mockClear()
-  mockSettingsState.codexSubscriptionSettings = {
-    preferDiscovered: false,
-    autoRefreshNearExpiry: true,
-  }
+  mockSettingsState.codexSubscriptionSettings = { ...defaultMockCodexSettings }
+  mockAccountsState.accounts = []
+  mockAccountsState.activeAccountId = null
 })
 
 describe("ProviderTabCodex", () => {
@@ -63,35 +104,107 @@ describe("ProviderTabCodex", () => {
     expect(screen.getByText("cardTitle")).toBeInTheDocument()
   })
 
-  it("shows both connection-settings toggles when the card is expanded", () => {
+  it("shows the connection-settings toggle when the card is expanded", () => {
     render(<ProviderTabCodex />)
     // SettingsCard is collapsible defaultOpen=false; clicking the header opens it.
     fireEvent.click(screen.getByText("cardTitle"))
-    expect(screen.getByText("preferDiscovered.title")).toBeInTheDocument()
     expect(screen.getByText("autoRefresh.title")).toBeInTheDocument()
   })
 
-  it("invokes save with patched settings when preferDiscovered toggles", async () => {
+  it("no longer offers a live-discovery toggle", () => {
+    // Codex env injection now requires an explicitly adopted account, so there
+    // is no setting to opt into reading ~/.codex/auth.json behind the scenes.
     render(<ProviderTabCodex />)
     fireEvent.click(screen.getByText("cardTitle"))
-    const switches = screen.getAllByRole("switch")
-    fireEvent.click(switches[0])
-    await waitFor(() => {
-      expect(saveMock).toHaveBeenCalledWith({
-        codexSubscriptionSettings: { preferDiscovered: true, autoRefreshNearExpiry: true },
-      })
-    })
+    expect(screen.queryByText("preferDiscovered.title")).not.toBeInTheDocument()
   })
 
   it("invokes save with patched settings when autoRefresh toggles", async () => {
     render(<ProviderTabCodex />)
     fireEvent.click(screen.getByText("cardTitle"))
-    const switches = screen.getAllByRole("switch")
-    fireEvent.click(switches[1])
+    // By id, not by position: this indexed `switches[1]` behind the
+    // since-removed discovery toggle, so removing that silently retargeted it.
+    fireEvent.click(document.getElementById("codex-auto-refresh")!)
     await waitFor(() => {
       expect(saveMock).toHaveBeenCalledWith({
-        codexSubscriptionSettings: { preferDiscovered: false, autoRefreshNearExpiry: false },
+        codexSubscriptionSettings: { ...defaultMockCodexSettings, autoRefreshNearExpiry: false },
       })
     })
+  })
+
+  it("toggles background usage probing and persists probeEnabled", async () => {
+    render(<ProviderTabCodex />)
+    fireEvent.click(screen.getByText("probe.cardTitle"))
+    // Collapsed cards unmount their content, so only the probe card's switch
+    // is mounted here.
+    const switches = screen.getAllByRole("switch")
+    fireEvent.click(switches[0])
+    await waitFor(() => {
+      expect(saveMock).toHaveBeenCalledWith({
+        codexSubscriptionSettings: { ...defaultMockCodexSettings, probeEnabled: true },
+      })
+    })
+  })
+
+  // An api-key login has no usage endpoint upstream, so the quota panel is
+  // legitimately empty — say so rather than leaving a gap that reads as a bug.
+  it("explains the empty quota panel for an api-key account", () => {
+    mockAccountsState.accounts = [{ id: "a1", variant: "codex", expiresAtMs: 0 }]
+    mockAccountsState.activeAccountId = "a1"
+    render(<ProviderTabCodex />)
+    expect(screen.getByTestId("codex-quota-api-key-only")).toBeInTheDocument()
+  })
+
+  it("does not show the api-key note for a ChatGPT login", () => {
+    mockAccountsState.accounts = [{ id: "a1", variant: "codex", expiresAtMs: 1_800_000 }]
+    mockAccountsState.activeAccountId = "a1"
+    render(<ProviderTabCodex />)
+    expect(screen.queryByTestId("codex-quota-api-key-only")).not.toBeInTheDocument()
+  })
+
+  it("shows no api-key note when there is no active account", () => {
+    render(<ProviderTabCodex />)
+    expect(screen.queryByTestId("codex-quota-api-key-only")).not.toBeInTheDocument()
+  })
+
+  // Explaining an empty gauge only *after* rendering it reads as a broken fetch.
+  it("puts the api-key explanation before the quota panel, not after", () => {
+    mockAccountsState.accounts = [{ id: "a1", variant: "codex", expiresAtMs: 0 }]
+    mockAccountsState.activeAccountId = "a1"
+    render(<ProviderTabCodex />)
+    const note = screen.getByTestId("codex-quota-api-key-only")
+    const panel = screen.getByTestId("quota-panel-codex")
+    expect(note.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it("clamps a too-fast visible cadence to the floor on save", async () => {
+    mockSettingsState.codexSubscriptionSettings = {
+      ...defaultMockCodexSettings,
+      probeEnabled: true,
+    }
+    render(<ProviderTabCodex />)
+    fireEvent.click(screen.getByText("probe.cardTitle"))
+    const visible = screen.getByLabelText("probe.visibleLabel")
+    fireEvent.change(visible, { target: { value: "5" } }) // 5s → below 60s floor
+    await waitFor(() => {
+      expect(saveMock).toHaveBeenCalledWith({
+        codexSubscriptionSettings: {
+          ...mockSettingsState.codexSubscriptionSettings,
+          visibleIntervalMs: 60_000,
+        },
+      })
+    })
+  })
+})
+
+describe("ProviderTabCodex in web mode", () => {
+  beforeEach(() => setDesktop(false))
+  afterEach(() => setDesktop(true))
+
+  it("refuses to render the account surface instead of dead-ending at the last IPC call", () => {
+    render(<ProviderTabCodex />)
+    expect(screen.queryByTestId("account-list-codex")).not.toBeInTheDocument()
+    expect(screen.queryByText("cardTitle")).not.toBeInTheDocument()
+    expect(screen.getByText("webModeBanner")).toBeInTheDocument()
   })
 })

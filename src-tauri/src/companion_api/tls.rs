@@ -135,14 +135,20 @@ fn generate_new(cert_path: &Path, key_path: &Path) -> Result<TlsMaterial, TlsErr
 /// the user ever rotates only the validity period).
 fn fingerprint_from_pem(cert_pem: &str) -> Result<String, TlsError> {
     let der = pem_to_der(cert_pem)?;
-    let spki = extract_spki(&der)?;
+    spki_fingerprint_from_der(&der)
+}
+
+/// Compute the pairing fingerprint directly from a TLS peer certificate. Used
+/// by the desktop Pro IDE relay before it sends a device JWT upstream.
+pub(crate) fn spki_fingerprint_from_der(der: &[u8]) -> Result<String, TlsError> {
+    let spki = extract_spki(der)?;
     let mut hasher = Sha256::new();
     hasher.update(&spki);
     let digest = hasher.finalize();
     Ok(hex::encode(digest))
 }
 
-fn pem_to_der(pem: &str) -> Result<Vec<u8>, TlsError> {
+pub(crate) fn pem_to_der(pem: &str) -> Result<Vec<u8>, TlsError> {
     let mut iter = pem.lines().filter(|l| !l.starts_with("-----"));
     let body: String = iter.by_ref().collect();
     use base64::{engine::general_purpose::STANDARD, Engine as _};
@@ -179,8 +185,8 @@ fn extract_spki(der: &[u8]) -> Result<Vec<u8>, TlsError> {
     cur = skip_tlv(cur)?; // issuer
     cur = skip_tlv(cur)?; // validity
     cur = skip_tlv(cur)?; // subject
-    // Now cur starts with the SubjectPublicKeyInfo SEQUENCE. We want the
-    // entire TLV (including tag + length + body) for the hash.
+                          // Now cur starts with the SubjectPublicKeyInfo SEQUENCE. We want the
+                          // entire TLV (including tag + length + body) for the hash.
     let spki = take_tlv(cur)?;
     Ok(spki.to_vec())
 }
@@ -284,7 +290,10 @@ mod tests {
         assert!(mat.cert_pem_path.exists());
         assert!(mat.key_pem_path.exists());
         assert_eq!(mat.fingerprint_sha256.len(), 64); // hex sha256
-        assert!(mat.fingerprint_sha256.chars().all(|c| c.is_ascii_hexdigit()));
+        assert!(mat
+            .fingerprint_sha256
+            .chars()
+            .all(|c| c.is_ascii_hexdigit()));
     }
 
     #[test]

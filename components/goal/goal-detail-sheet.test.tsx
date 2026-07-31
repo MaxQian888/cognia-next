@@ -1,12 +1,23 @@
 import "fake-indexeddb/auto"
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import type { Goal } from "@/types/goal"
 
 const isMobileMock = jest.fn(() => false)
+const resolveGoalAcceptanceMock = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/hooks/ui/use-mobile", () => ({
   useIsMobile: () => isMobileMock(),
+}))
+jest.mock("@/lib/goal/acceptance", () => ({
+  resolveGoalAcceptance: (...args: unknown[]) => resolveGoalAcceptanceMock(...args),
+}))
+
+// Completion linkage fires real notification/workflow side effects — stub it
+// so the acceptance-banner tests stay hermetic.
+jest.mock("@/lib/goal/completion-linkage", () => ({
+  onGoalTerminal: jest.fn().mockResolvedValue(undefined),
+  toGoalHookPayload: (g: unknown) => g,
 }))
 
 import { GoalDetailSheet } from "./goal-detail-sheet"
@@ -38,6 +49,7 @@ beforeEach(async () => {
   getDb()
   await whenSeeded()
   isMobileMock.mockReturnValue(false)
+  resolveGoalAcceptanceMock.mockClear()
 })
 
 describe("GoalDetailSheet", () => {
@@ -74,5 +86,37 @@ describe("GoalDetailSheet", () => {
     // Same tab content, different container — title + tabs still present.
     expect(screen.getByText(/Goal · active/)).toBeInTheDocument()
     expect(screen.getByTestId("goal-tab-overview")).toBeInTheDocument()
+  })
+})
+
+describe("GoalDetailSheet — acceptance banner", () => {
+  const awaitingGoal: Goal = {
+    ...goal,
+    status: "paused",
+    awaitingAcceptance: true,
+    config: { ...goal.config, requireAcceptance: true },
+  }
+
+  it("renders the banner only while paused + awaitingAcceptance", () => {
+    const { rerender } = render(
+      <GoalDetailSheet goal={awaitingGoal} open onOpenChange={() => {}} />
+    )
+    expect(screen.getByTestId("goal-acceptance-banner")).toBeInTheDocument()
+    rerender(<GoalDetailSheet goal={goal} open onOpenChange={() => {}} />)
+    expect(screen.queryByTestId("goal-acceptance-banner")).toBeNull()
+  })
+
+  it("accept submits an accepted resolution for the displayed goal", async () => {
+    const user = userEvent.setup()
+    render(<GoalDetailSheet goal={{ ...awaitingGoal, id: "g-acc" }} open onOpenChange={() => {}} />)
+    await user.click(screen.getByTestId("goal-acceptance-accept"))
+    await waitFor(() => expect(resolveGoalAcceptanceMock).toHaveBeenCalledWith("g-acc", true))
+  })
+
+  it("request changes submits a rejected resolution for the displayed goal", async () => {
+    const user = userEvent.setup()
+    render(<GoalDetailSheet goal={{ ...awaitingGoal, id: "g-rej" }} open onOpenChange={() => {}} />)
+    await user.click(screen.getByTestId("goal-acceptance-request-changes"))
+    await waitFor(() => expect(resolveGoalAcceptanceMock).toHaveBeenCalledWith("g-rej", false))
   })
 })

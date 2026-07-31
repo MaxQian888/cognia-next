@@ -12,6 +12,7 @@
  */
 
 import type { PlatformKind } from "@/types/connectors/platform-kind"
+import type { TransportMode } from "@/types/connectors/adapter"
 import { getPlatformIcon, type PlatformIconComponent } from "@/components/connectors/platform-icons"
 
 export interface PlatformMeta {
@@ -40,4 +41,14 @@ export function getPlatformMeta(kind: PlatformKind): PlatformMeta {
     labelKey: LABEL_KEY[kind] ?? "unknown",
     Icon: getPlatformIcon(kind),
   }
+}
+
+export function getAdapterTransportLabelKey(
+  kind: PlatformKind,
+  transportMode: TransportMode
+): string | null {
+  if (kind === "dingtalk" && transportMode === "longpoll") {
+    return "transportLabels.dingtalkStream"
+  }
+  return null
 }

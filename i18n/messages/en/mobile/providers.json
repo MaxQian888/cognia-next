@@ -1,0 +1,20 @@
+{
+  "apiKey": "API key",
+  "apiKeyHelp": "Stored on this device only — never synced to other devices.",
+  "apiKeyPlaceholder": "sk-…",
+  "backAria": "Back to Me",
+  "baseUrl": "Base URL",
+  "baseUrlHelpCustom": "Endpoint for this provider (or an OpenAI-compatible gateway).",
+  "baseUrlHelpOfficial": "Leave empty to use the official endpoint.",
+  "baseUrlPlaceholder": "https://api.example.com/v1",
+  "provider": "Provider",
+  "providerHelp": "Official providers stream directly from the browser; others may need a gateway.",
+  "saveCta": "Save & use on this device",
+  "saveFailed": "Save failed ({message}).",
+  "saveSuccess": "Saved. This device will use this provider.",
+  "savedCta": "Saved",
+  "sectionDescription": "Bring your own API key so this phone can chat without a paired desktop.",
+  "sectionTitle": "Model provider (BYOK)",
+  "streamingBadge": "streams",
+  "title": "Model providers"
+}

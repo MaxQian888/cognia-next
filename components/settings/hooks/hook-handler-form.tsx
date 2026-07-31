@@ -6,11 +6,12 @@
  * Phase 5 of the ClaudeCode 完整化 plan. Renders inside `HookGroupEditor`,
  * which owns the array of handlers in a single `HookGroup`. This form is
  * controlled — the parent passes the current value and gets `onChange` for
- * every keystroke. Validation lives in the parent's "Save" gate.
+ * every keystroke. Validation lives in the parent's "Save" gate via the
+ * exported `validateHandler`, and is echoed inline here for feedback.
  */
 
 import { useTranslations } from "next-intl"
-import { Trash2Icon } from "lucide-react"
+import { InfoIcon, Trash2Icon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -21,7 +22,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Textarea } from "@/components/ui/textarea"
+import { LightCodeEditor } from "@/components/editor/light-code-editor"
+import { cn } from "@/lib/utils"
 import type { HookHandler } from "@/lib/claude/hooks"
 
 interface Props {
@@ -40,6 +42,8 @@ export function HookHandlerForm({ value, onChange, onRemove }: Props) {
       onChange({ type: "webhook", url: "", headers: {}, timeout: undefined })
     }
   }
+
+  const error = validateHandler(value)
 
   return (
     <div
@@ -75,17 +79,46 @@ export function HookHandlerForm({ value, onChange, onRemove }: Props) {
       {value.type === "command" ? (
         <div className="space-y-1">
           <Label className="text-xs">{t("commandLabel")}</Label>
-          <Textarea
-            rows={2}
-            value={value.command}
-            onChange={(e) => onChange({ ...value, command: e.target.value })}
-            placeholder={t("commandPlaceholder")}
-            className="font-mono text-xs"
-            data-testid="handler-command"
-          />
+          {/* Shell command surface: reuse the shared CodeMirror `LightCodeEditor`
+              for syntax highlighting + soft word-wrap. It runs identically across
+              all three shells (browser / Tauri / Capacitor), so no per-platform
+              editor swap is needed here — Monaco would be overkill for a compact
+              inline field. Gutter/search/diagnostics are off to keep it minimal. */}
+          <div
+            className={cn(
+              "max-h-40 min-h-[3.5rem] overflow-hidden rounded-md border bg-muted/30",
+              error === "commandRequired" && "border-destructive"
+            )}
+          >
+            <LightCodeEditor
+              value={value.command}
+              onChange={(next) => onChange({ ...value, command: next })}
+              language="shell"
+              lineNumbers={false}
+              search={false}
+              diagnostics={false}
+              statusBar={false}
+              wordWrap
+              fontSize={12}
+              aria-label={t("commandLabel")}
+              data-testid="handler-command"
+            />
+          </div>
+          {value.command.trim() === "" ? (
+            <p className="text-[0.6875rem] text-muted-foreground">
+              {t("commandHint", { example: t("commandPlaceholder") })}
+            </p>
+          ) : null}
         </div>
       ) : (
         <>
+          <p
+            className="flex items-start gap-1.5 rounded border border-dashed bg-muted/40 p-1.5 text-[0.6875rem] text-muted-foreground"
+            data-testid="handler-webhook-unsupported"
+          >
+            <InfoIcon className="mt-px size-3 shrink-0" aria-hidden />
+            <span>{t("webhookUnsupported")}</span>
+          </p>
           <div className="space-y-1">
             <Label className="text-xs">{t("urlLabel")}</Label>
             <Input
@@ -94,6 +127,7 @@ export function HookHandlerForm({ value, onChange, onRemove }: Props) {
               onChange={(e) => onChange({ ...value, url: e.target.value })}
               placeholder={t("urlPlaceholder")}
               className="text-xs"
+              aria-invalid={error === "urlRequired" || error === "urlInvalid"}
               data-testid="handler-url"
             />
           </div>
@@ -103,6 +137,12 @@ export function HookHandlerForm({ value, onChange, onRemove }: Props) {
           />
         </>
       )}
+
+      {error ? (
+        <p className="text-[0.6875rem] text-destructive" role="alert" data-testid="handler-error">
+          {t(error)}
+        </p>
+      ) : null}
 
       <div className="space-y-1">
         <Label className="text-xs">{t("timeoutLabel")}</Label>
@@ -122,6 +162,28 @@ export function HookHandlerForm({ value, onChange, onRemove }: Props) {
       </div>
     </div>
   )
+}
+
+/**
+ * Returns a stable error code (also the i18n key under `settings.hooks.handler`)
+ * when a handler is not runnable, else `null`. A command needs a non-empty
+ * command; a webhook needs a syntactically valid http(s) URL.
+ */
+export function validateHandler(
+  h: HookHandler
+): "commandRequired" | "urlRequired" | "urlInvalid" | null {
+  if (h.type === "command") {
+    return h.command.trim() === "" ? "commandRequired" : null
+  }
+  const url = h.url.trim()
+  if (url === "") return "urlRequired"
+  try {
+    const parsed = new URL(url)
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "urlInvalid"
+  } catch {
+    return "urlInvalid"
+  }
+  return null
 }
 
 interface HeadersProps {
@@ -161,11 +223,14 @@ function HeadersEditor({ headers, onChange }: HeadersProps) {
         </Button>
       </div>
       {entries.length === 0 ? (
-        <p className="text-[11px] italic text-muted-foreground">{t("headersEmpty")}</p>
+        <p className="text-[0.6875rem] italic text-muted-foreground">{t("headersEmpty")}</p>
       ) : (
         <div className="space-y-1">
-          {entries.map(([k, v]) => (
-            <div key={k} className="flex items-center gap-1">
+          {/* Key rows by position, not by the (mutable) header name — keying by
+              name remounts the row on every keystroke into the key field and
+              steals focus. Index is stable while a key is edited in place. */}
+          {entries.map(([k, v], i) => (
+            <div key={i} className="flex items-center gap-1">
               <Input
                 value={k}
                 onChange={(e) => update(k, e.target.value, v)}

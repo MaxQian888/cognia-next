@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 const saveMock = jest.fn(async (_patch: Record<string, unknown>): Promise<void> => undefined)
 const enqueueMock = jest.fn(async (_arg: unknown): Promise<void> => undefined)
@@ -56,6 +56,30 @@ describe("MobileComputerUsePage", () => {
     fireEvent.click(screen.getByTestId("computer-use-master-switch"))
     await waitFor(() => expect(saveMock).toHaveBeenCalled())
     expect(saveMock).toHaveBeenCalledWith({ mobileComputerUseEnabled: true })
-    expect(enqueueMock).toHaveBeenCalled()
+    // Host mirroring moved out of `useSettingsPatch` and into the persistence
+    // funnel (`lib/settings/mirror-to-host.ts`) so it also covers the mobile
+    // routes that embed a desktop settings section. Enqueuing here as well
+    // would send every edit twice.
+    expect(enqueueMock).not.toHaveBeenCalled()
+  })
+
+  it("disables the switch and shows a spinner while the patch is in flight", async () => {
+    let release: () => void = () => undefined
+    saveMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve
+        })
+    )
+    render(<Page />)
+    const sw = screen.getByTestId("computer-use-master-switch")
+    fireEvent.click(sw)
+
+    await waitFor(() => expect(sw).toBeDisabled())
+    expect(screen.getByTestId("computer-use-saving")).toBeInTheDocument()
+
+    act(() => release())
+    await waitFor(() => expect(sw).not.toBeDisabled())
+    expect(screen.queryByTestId("computer-use-saving")).not.toBeInTheDocument()
   })
 })

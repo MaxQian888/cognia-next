@@ -29,9 +29,13 @@
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
+import { motion, useReducedMotion } from "motion/react"
 import { ScanIcon } from "lucide-react"
 
+import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
+import { cn } from "@/lib/utils"
 import { AccountCard } from "@/components/mobile/me/account-card"
+import { BackupReminderBanner } from "@/components/mobile/me/backup-reminder-banner"
 import { MeRow } from "@/components/mobile/me/me-row"
 import { MeSection } from "@/components/mobile/me/me-section"
 import { QuickActionGrid } from "@/components/mobile/me/quick-action-grid"
@@ -55,14 +59,16 @@ import { usePinnedMeRows } from "@/components/mobile/me/use-pinned-me-rows"
 import { useCompanionConfig } from "@/hooks/companion/use-companion-config"
 import { usePlatform } from "@/hooks/use-platform"
 import { snapshotSyncStates } from "@/lib/sync/companion-sync"
-import { formatRelative } from "@/lib/time/relative"
+import { formatRelative } from "@cognia/time"
 
 export default function MePage() {
   const t = useTranslations("mobile.me")
   const platform = usePlatform()
   const router = useRouter()
   const [mounted, setMounted] = useState(false)
+  const [scrolled, setScrolled] = useState(false)
   const [query, setQuery] = useState("")
+  const reduceMotion = useReducedMotion()
   const [lastSyncedLabel, setLastSyncedLabel] = useState<string | undefined>(undefined)
   const { paired, shortDeviceId } = useCompanionConfig()
   const { pinnedIds, togglePin } = usePinnedMeRows()
@@ -75,7 +81,7 @@ export default function MePage() {
   useEffect(() => {
     if (!mounted) return
     if (platform === "mobile") return
-    router.replace("/settings")
+    router.replace("/settings?section=account")
   }, [mounted, platform, router])
 
   useEffect(() => {
@@ -98,9 +104,12 @@ export default function MePage() {
   if (!mounted || platform !== "mobile") return null
 
   /** Right-aligned dynamic value for certain rows. */
-  const rowValue = (id: string): string | undefined => {
-    if (id === "devices") return paired && shortDeviceId ? shortDeviceId : undefined
-    if (id === "sync") return lastSyncedLabel
+  const rowValue = (entry: MeEntry): string | undefined => {
+    if (entry.id === "devices") return paired && shortDeviceId ? shortDeviceId : undefined
+    if (entry.id === "sync") return lastSyncedLabel
+    // ADR-0056 D2 — agent-class pages are dead UI without a paired desktop;
+    // annotate the row so the user knows before tapping into the placeholder.
+    if (entry.pairedOnly && !paired) return t("requiresDesktop")
     return undefined
   }
 
@@ -110,9 +119,10 @@ export default function MePage() {
       <LongPress key={testid} onLongPress={() => void togglePin(entry.id)} className="block">
         <MeRow
           icon={entry.icon}
+          spotIcon={entry.spotIcon}
           label={t(entry.labelKey)}
           href={entry.href}
-          value={rowValue(entry.id)}
+          value={rowValue(entry)}
           testid={testid}
         />
       </LongPress>
@@ -123,15 +133,24 @@ export default function MePage() {
     <main
       className="flex h-full min-h-0 flex-1 flex-col overflow-y-auto bg-background safe-area-pt"
       data-testid="me-page"
+      onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 0)}
     >
-      <header className="sticky top-0 z-10 border-b bg-background/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/75">
-        <div className="mx-auto flex w-full max-w-2xl items-center gap-2">
+      <header
+        className={cn(
+          "sticky top-0 z-10 border-b bg-background/95 px-4 py-3 backdrop-blur transition-shadow supports-[backdrop-filter]:bg-background/75",
+          scrolled && "shadow-sm"
+        )}
+        data-scrolled={scrolled}
+      >
+        <div className="mx-auto flex w-full max-w-2xl items-center gap-2 lg:max-w-4xl">
           <h1 className="flex-1 text-2xl font-semibold tracking-tight">{t("title")}</h1>
           <ConnectionStateBadge />
         </div>
       </header>
 
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 pb-8 pt-3">
+      {/* Widen on large tablets/landscape so the lg 3-column grid below has
+          room to breathe; phones keep the original max-w-2xl clamp. */}
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 pb-8 pt-3 lg:max-w-4xl">
         <DiscoverSearch
           value={query}
           onChange={setQuery}
@@ -155,13 +174,31 @@ export default function MePage() {
           )
         ) : (
           <>
-            <section className="flex flex-col gap-3">
-              <AccountCard />
-              <TodayStatsCard />
-              <QuickActionGrid />
-              <TransportTierIndicator />
-              <NotificationPermissionCta />
-            </section>
+            <motion.section
+              className="flex flex-col gap-3"
+              initial={reduceMotion ? false : "initial"}
+              animate="animate"
+              variants={STAGGER_CONTAINER}
+            >
+              <motion.div variants={STAGGER_CHILD}>
+                <AccountCard />
+              </motion.div>
+              <motion.div variants={STAGGER_CHILD}>
+                <BackupReminderBanner />
+              </motion.div>
+              <motion.div variants={STAGGER_CHILD}>
+                <TodayStatsCard />
+              </motion.div>
+              <motion.div variants={STAGGER_CHILD}>
+                <QuickActionGrid />
+              </motion.div>
+              <motion.div variants={STAGGER_CHILD}>
+                <TransportTierIndicator />
+              </motion.div>
+              <motion.div variants={STAGGER_CHILD}>
+                <NotificationPermissionCta />
+              </motion.div>
+            </motion.section>
 
             {pinnedEntries.length > 0 ? (
               <MeSection title={t("sectionFavorites")} testid="me-section-favorites">
@@ -169,7 +206,7 @@ export default function MePage() {
               </MeSection>
             ) : null}
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {ME_SECTION_ORDER.map((section) => (
                 <MeSection
                   key={section}

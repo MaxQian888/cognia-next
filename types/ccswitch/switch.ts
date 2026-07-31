@@ -1,6 +1,6 @@
 // CCSwitch interop types — switch planning + active-state projection.
 
-import type { AgentId } from "@/lib/claude/types"
+import type { AgentId } from "@cognia/agent-config-types"
 
 import type { CcswitchProvider } from "./provider"
 
@@ -43,6 +43,14 @@ export interface SwitchPlan {
     activeProviderIdAfter: string
     /** Whether the sidecar will be restarted (always true when key/URL change). */
     restartSidecar: boolean
+    /**
+     * True when the target is an official (OAuth) Claude provider — a
+     * Claude-kind entry with no API key. Instead of leaving cognia keyless,
+     * `applySwitch` activates the Anthropic subscription: the existing vault
+     * account when there is one, otherwise it adopts the local Claude Code
+     * CLI login discovered on this machine.
+     */
+    useSubscription: boolean
   }
   /**
    * What changes per agent. Each entry describes the env block patch we

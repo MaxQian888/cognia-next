@@ -19,8 +19,8 @@ import {
   DEFAULT_SPEECH_LANGUAGE,
   SPEECH_LANGUAGES,
   type SpeechLanguageCode,
-} from "@/lib/tts/speech"
-import { loggers } from "@/lib/logging"
+} from "@cognia/tts/speech"
+import { loggers } from "@cognia/logging"
 
 type MicDevice = { deviceId: string; label: string }
 

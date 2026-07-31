@@ -1,11 +1,14 @@
+/** @jest-environment jsdom */
 // Coverage for the skills CRUD layer + bulk-import + render helpers.
 
 import "fake-indexeddb/auto"
 import {
+  activeEffectiveSkillIds,
   bulkImportSkills,
   createSkill,
   deleteSkill,
   duplicateSkill,
+  resolveEffectiveSkills,
   getSkill,
   inferCategory,
   inferSource,
@@ -13,6 +16,7 @@ import {
   listSkills,
   listSkillsByIds,
   recordSkillUsage,
+  renderSkillsCatalog,
   renderSkillsSection,
   seedBuiltInSkills,
   setSkillStatus,
@@ -158,6 +162,54 @@ describe("recordSkillUsage", () => {
   it("is a no-op for empty input", async () => {
     await expect(recordSkillUsage([])).resolves.toBeUndefined()
   })
+
+  it("accumulates across calls and writes one bulkPut per call", async () => {
+    const a = await createSkill({ name: "A", content: "x" })
+    const b = await createSkill({ name: "B", content: "x" })
+    const db = getDb()
+    const putSpy = jest.spyOn(db.skills, "bulkPut")
+    await recordSkillUsage([a.id, b.id, "missing"])
+    await recordSkillUsage([a.id])
+    expect((await getSkill(a.id))?.usageCount).toBe(2)
+    expect((await getSkill(b.id))?.usageCount).toBe(1)
+    expect(putSpy).toHaveBeenCalledTimes(2)
+    putSpy.mockRestore()
+  })
+})
+
+describe("resolveEffectiveSkills / activeEffectiveSkillIds", () => {
+  it("unions character then ephemeral, deduping with first-source-wins", () => {
+    const refs = resolveEffectiveSkills({
+      characterSkillIds: ["a", "b"],
+      ephemeralSkillIds: ["b", "c"],
+    })
+    expect(refs).toEqual([
+      { id: "a", source: "character", inert: false },
+      { id: "b", source: "character", inert: false },
+      { id: "c", source: "ephemeral", inert: false },
+    ])
+  })
+
+  it("tags session-disabled ids as inert but keeps them in the set", () => {
+    const refs = resolveEffectiveSkills({
+      characterSkillIds: ["a"],
+      ephemeralSkillIds: ["c"],
+      disabledIds: ["c"],
+    })
+    expect(refs.find((r) => r.id === "c")?.inert).toBe(true)
+    expect(
+      activeEffectiveSkillIds({
+        characterSkillIds: ["a"],
+        ephemeralSkillIds: ["c"],
+        disabledIds: ["c"],
+      })
+    ).toEqual(["a"])
+  })
+
+  it("returns an empty set for empty inputs", () => {
+    expect(resolveEffectiveSkills({})).toEqual([])
+    expect(activeEffectiveSkillIds({})).toEqual([])
+  })
 })
 
 describe("listEnabledSkillsByIds", () => {
@@ -213,6 +265,59 @@ describe("renderSkillsSection", () => {
       { name: "Two", content: "body 2" },
     ] as Parameters<typeof renderSkillsSection>[0])
     expect(out).toBe("## One\n\nbody 1\n\n## Two\n\nbody 2")
+  })
+
+  it("re-derives the canonical runner body for kind:workflow skills", () => {
+    // Stored content simulates a stale pre-fix row that still names the
+    // `wf_<slug>` ghost tool — the render must self-heal it.
+    const out = renderSkillsSection([
+      {
+        name: "Summarizer",
+        content: "call the `wf_summarizer` tool",
+        kind: "workflow",
+        workflowId: "wf_1",
+      },
+    ] as Parameters<typeof renderSkillsSection>[0])
+    expect(out).toContain("`wf_run_workflow_typed`")
+    expect(out).toContain('"name": "Summarizer"')
+    expect(out).not.toContain("wf_summarizer")
+  })
+})
+
+describe("renderSkillsCatalog (name-only / progressive disclosure)", () => {
+  it("returns empty string for empty input", () => {
+    expect(renderSkillsCatalog([])).toBe("")
+  })
+
+  it("lists id + name + description, NOT the body, and points at load_skill", () => {
+    const out = renderSkillsCatalog([
+      { id: "research", name: "Research", description: "Deep research", content: "SECRET BODY" },
+      { id: "lint", name: "Lint", content: "another body" },
+    ] as Parameters<typeof renderSkillsCatalog>[0])
+    expect(out).toContain("## Available skills")
+    expect(out).toContain("`load_skill`")
+    expect(out).toContain("- `research` — Research: Deep research")
+    // A description-less skill still lists its name.
+    expect(out).toContain("- `lint` — Lint")
+    // The full body must never leak into the catalog (that's the whole point).
+    expect(out).not.toContain("SECRET BODY")
+    expect(out).not.toContain("another body")
+  })
+
+  it("inlines the runner contract for kind:workflow skills (no load_skill round-trip)", () => {
+    const out = renderSkillsCatalog([
+      {
+        id: "s1",
+        name: "Summarizer",
+        description: "Sums things",
+        content: "ignored",
+        kind: "workflow",
+        workflowId: "wf_1",
+      },
+    ] as Parameters<typeof renderSkillsCatalog>[0])
+    expect(out).toContain("`wf_run_workflow_typed`")
+    expect(out).toContain('{ "name": "Summarizer" }')
+    expect(out).not.toContain("ignored")
   })
 })
 
@@ -288,6 +393,18 @@ describe("bulkImportSkills", () => {
     const refreshed = await getSkill(created.id)
     expect(refreshed?.content).toBe("v2")
     expect(refreshed?.name).toBe("Reviewer 2")
+  })
+
+  it("loads the table once for a batch of canonicalId drafts (no per-draft rescan)", async () => {
+    const db = getDb()
+    const scanSpy = jest.spyOn(db.skills, "toArray")
+    await bulkImportSkills([
+      { name: "C1", content: "a", canonicalId: "bundle:c1" },
+      { name: "C2", content: "b", canonicalId: "bundle:c2" },
+      { name: "C3", content: "c", canonicalId: "bundle:c3" },
+    ])
+    expect(scanSpy).toHaveBeenCalledTimes(1)
+    scanSpy.mockRestore()
   })
 
   it("persists resources alongside the row when the draft carries them", async () => {
@@ -428,20 +545,101 @@ describe("upsertSkillByCanonicalId", () => {
     expect(resources).toHaveLength(1)
     expect(resources[0].path).toBe("references/b.md")
   })
+
+  it("uses a provided canonicalId map and skips the table scan", async () => {
+    const existing = await createSkill({
+      name: "Mapped",
+      content: "v1",
+      canonicalId: "bundle:mapped",
+    })
+    const db = getDb()
+    const scanSpy = jest.spyOn(db.skills, "toArray")
+    const res = await upsertSkillByCanonicalId({
+      draft: { name: "Mapped", content: "v2", canonicalId: "bundle:mapped" },
+      canonicalId: "bundle:mapped",
+      existingByCanonicalId: new Map([["bundle:mapped", existing]]),
+    })
+    expect(res.created).toBe(false)
+    expect(res.skill.id).toBe(existing.id)
+    expect(res.skill.content).toBe("v2")
+    expect(scanSpy).not.toHaveBeenCalled()
+    scanSpy.mockRestore()
+  })
+
+  it("treats a missing map key as a new row without a scan fallback", async () => {
+    const db = getDb()
+    const scanSpy = jest.spyOn(db.skills, "toArray")
+    const res = await upsertSkillByCanonicalId({
+      draft: { name: "Brand", content: "x", canonicalId: "bundle:brand" },
+      canonicalId: "bundle:brand",
+      existingByCanonicalId: new Map(),
+    })
+    expect(res.created).toBe(true)
+    expect(scanSpy).not.toHaveBeenCalled()
+    scanSpy.mockRestore()
+  })
 })
 
 describe("seedBuiltInSkills", () => {
-  it("seeds 5 built-ins idempotently and preserves user-toggled status", async () => {
+  it("seeds the 5 generic + 9 functional built-ins idempotently and preserves status", async () => {
     await seedBuiltInSkills()
     const all = await listSkills()
     const builtIns = all.filter((s) => s.isBuiltIn)
-    expect(builtIns.length).toBe(5)
+    // 5 generic style skills + the functional catalog (9 entries).
+    expect(builtIns.length).toBe(14)
     // Disable one, then reseed; status must be preserved.
     await setSkillStatus(builtIns[0].id, "disabled")
     await seedBuiltInSkills()
     expect((await getSkill(builtIns[0].id))?.status).toBe("disabled")
     // No duplicates introduced.
     const after = await listSkills()
-    expect(after.filter((s) => s.isBuiltIn).length).toBe(5)
+    expect(after.filter((s) => s.isBuiltIn).length).toBe(14)
+  })
+
+  it("seeds functional catalog skills disabled by default, keyed by canonical id", async () => {
+    await seedBuiltInSkills()
+    const im = await getSkill("skill_builtin_im_auto_reply")
+    expect(im).toBeDefined()
+    expect(im?.isBuiltIn).toBe(true)
+    expect(im?.status).toBe("disabled")
+    expect(im?.canonicalId).toBe("builtin:im-auto-reply")
+    expect(im?.content.length).toBeGreaterThan(0)
+    // The generic style skills stay enabled.
+    expect((await getSkill("skill_builtin_concise"))?.status).toBe("enabled")
+  })
+
+  it("persists each functional skill's reference resources, idempotently", async () => {
+    await seedBuiltInSkills()
+    const refs = await listResourcesForSkill("skill_builtin_im_auto_reply")
+    expect(refs.length).toBeGreaterThan(0)
+    expect(refs.every((r) => r.kind === "reference")).toBe(true)
+    expect(refs.some((r) => r.path.startsWith("references/"))).toBe(true)
+    // Reseeding must not duplicate resources (idempotent guard).
+    await seedBuiltInSkills()
+    const after = await listResourcesForSkill("skill_builtin_im_auto_reply")
+    expect(after.length).toBe(refs.length)
+  })
+
+  it("skips redundant row writes on an unchanged reseed", async () => {
+    await seedBuiltInSkills()
+    const db = getDb()
+    const putSpy = jest.spyOn(db.skills, "put")
+    await seedBuiltInSkills()
+    expect(putSpy).not.toHaveBeenCalled()
+    putSpy.mockRestore()
+  })
+
+  it("rewrites a row whose content drifted from the catalog", async () => {
+    await seedBuiltInSkills()
+    const target = (await listSkills()).find((s) => s.isBuiltIn)!
+    const fresh = target.content
+    await updateSkill(target.id, { content: "stale drifted body" })
+    const db = getDb()
+    const putSpy = jest.spyOn(db.skills, "put")
+    await seedBuiltInSkills()
+    expect(putSpy).toHaveBeenCalled()
+    // Reseed restores the catalog content for the drifted row.
+    expect((await getSkill(target.id))?.content).toBe(fresh)
+    putSpy.mockRestore()
   })
 })

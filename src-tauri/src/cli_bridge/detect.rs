@@ -12,7 +12,7 @@
 use parking_lot::Mutex;
 use serde::Serialize;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
@@ -65,11 +65,53 @@ pub fn register_managed_dir(dir: PathBuf) {
     }
 }
 
+/// Directory the running executable lives in. In a `pnpm tauri dev` build the
+/// app binary runs from the shared workspace target dir (`target/debug/`),
+/// which is exactly where `cargo build -p cognia-cli` drops the `cognia`
+/// binary — so registering it makes a locally-built CLI detectable without
+/// `cargo install` polluting the developer's PATH. Returns `None` when the
+/// exe path is unresolvable.
+// Only `register_dev_build_dir` (below, `#[cfg(debug_assertions)]`) and the
+// unit tests call this, so in a release build it has no live caller and trips
+// `dead_code`. Keep the fn present in all profiles (the doc link above and the
+// always-compiled `register_dev_build_dir` reference it) and silence the lint
+// only where it actually fires.
+#[cfg_attr(not(any(debug_assertions, test)), allow(dead_code))]
+pub fn current_exe_dir() -> Option<PathBuf> {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf))
+}
+
+/// Dev-only convenience: in debug builds, treat the running executable's
+/// directory as a managed dir so a co-built `cognia` (see [`current_exe_dir`])
+/// is auto-detected. A no-op in release builds — production must never search
+/// the install directory for an unsigned sibling binary. Also drops any stale
+/// cached `cognia` probe so the DevTools status card refreshes on its next
+/// poll instead of waiting out the TTL.
+pub fn register_dev_build_dir() {
+    #[cfg(debug_assertions)]
+    {
+        if let Some(dir) = current_exe_dir() {
+            register_managed_dir(dir);
+            invalidate("cognia");
+        }
+    }
+}
+
 /// Drop a cached probe so the next call re-spawns. Used right after a
 /// download so the status card reflects the new install immediately
 /// instead of waiting out the TTL.
 pub fn invalidate(name: &str) {
     cache().lock().retain(|(n, _), _| n != name);
+}
+
+/// Renderer-facing invalidation — the "re-probe" action on a plugin's
+/// missing-binary badge calls this so a just-installed CLI shows up
+/// without waiting out the 300s TTL.
+#[tauri::command]
+pub fn detect_binary_invalidate(name: String) {
+    invalidate(&name);
 }
 
 /// Snapshot of the registered app-managed directories (locations of
@@ -219,10 +261,7 @@ pub fn detect(name: &str, version_arg: &str) -> BinaryDetectionResult {
 /// `--version`. Always callable (even on mobile); on a sandboxed mobile
 /// runtime the spawn simply fails and we return `available: false`.
 #[tauri::command]
-pub async fn detect_binary(
-    name: String,
-    version_arg: Option<String>,
-) -> BinaryDetectionResult {
+pub async fn detect_binary(name: String, version_arg: Option<String>) -> BinaryDetectionResult {
     let arg = version_arg.unwrap_or_else(|| "--version".to_string());
     detect(&name, &arg)
 }
@@ -278,5 +317,22 @@ mod tests {
         invalidate("rustc");
         let guard = cache().lock();
         assert!(!guard.keys().any(|(n, _)| n == "rustc"));
+    }
+
+    #[test]
+    fn current_exe_dir_resolves_to_test_binary_dir() {
+        // The test harness is itself an executable, so this must resolve and
+        // point at an existing directory (the dir holding the test binary).
+        let dir = current_exe_dir().expect("current exe dir resolves under test");
+        assert!(dir.is_dir());
+    }
+
+    #[test]
+    fn register_dev_build_dir_registers_the_exe_dir_in_debug() {
+        // Tests compile with debug_assertions on, so the dir must be present
+        // in the managed-dir set afterwards. Idempotent with prior calls.
+        register_dev_build_dir();
+        let dir = current_exe_dir().expect("current exe dir resolves under test");
+        assert!(managed_dirs().lock().iter().any(|d| *d == dir));
     }
 }

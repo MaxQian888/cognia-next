@@ -11,7 +11,12 @@
  */
 
 import type { PluginTool } from "@/types/plugin"
-import { autoLayout, applyAutoLayoutPositions } from "@/lib/workflow/editor/auto-layout"
+import {
+  autoLayout,
+  applyAutoLayoutPositions,
+  ELK_DIRECTIONS,
+  type AutoLayoutDirection,
+} from "@/lib/workflow/editor/auto-layout"
 import { formatToolError, resolveStore } from "../store-bridge"
 
 const PLUGIN_ID = "cognia-workflow-ai"
@@ -51,11 +56,15 @@ export function buildLayoutTools(): PluginTool[] {
             workflowId: args.workflowId as string | undefined,
           })
           const state = store.getState()
-          // `direction` is documented in the schema for forward-compat
-          // with a future elkjs option override; the current autoLayout
-          // helper uses the project-default LR layout internally.
-          void args.direction
-          const layoutResult = await autoLayout(state.nodes, state.edges)
+          // `direction` is part of the schema, i.e. a contract with the model —
+          // it used to be `void`ed, so asking for TB silently produced LR and
+          // still answered `{ ok: true }`. `autoLayout` now maps it onto
+          // `elk.direction`.
+          const direction =
+            typeof args.direction === "string" && args.direction in ELK_DIRECTIONS
+              ? (args.direction as AutoLayoutDirection)
+              : undefined
+          const layoutResult = await autoLayout(state.nodes, state.edges, { direction })
           const next = applyAutoLayoutPositions(state.nodes, layoutResult)
           state.setNodes(next)
           return { ok: true, workflowId, repositioned: next.length }

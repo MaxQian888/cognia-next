@@ -8,7 +8,7 @@
  *   - app / system → `schedulerDb.executions` (TaskExecution)
  *   - workflow     → `getDb().workflowRuns` (WorkflowRunRow)
  *   - backup       → `listBackupHistory()` (BackupHistoryRow)
- *   - plugin       → `getDb().pluginScheduledJobs` (lastRunAt only)
+ *   - plugin       → SchedulerDB `executions` for `type: "plugin"` tasks
  *   - connector    → `getDb().connectorAudit` (AuditEntry)
  */
 
@@ -60,6 +60,8 @@ export interface UnifiedExecutionRun {
   error?: { message: string; stack?: string; code?: string }
   /** Structured logs; sources that don't capture logs leave this empty. */
   logs?: UnifiedRunLog[]
+  /** What initiated the run (app-task executions only; e.g. "backfill"). */
+  triggerSource?: string
   origin: {
     tableName: string
     nativeId: string

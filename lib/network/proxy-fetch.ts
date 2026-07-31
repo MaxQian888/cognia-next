@@ -11,7 +11,7 @@
 import { invoke } from "@tauri-apps/api/core"
 import { isTauri } from "@/lib/native/utils"
 import { useProxyStore, getActiveProxyUrl } from "@/stores/system"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.network
 
@@ -23,6 +23,7 @@ interface ProxiedRequestInput {
   headers?: Record<string, string>
   proxy_url?: string
   timeout_secs?: number
+  blockPrivate?: boolean
 }
 
 /** Output from proxied HTTP request via Tauri */
@@ -88,6 +89,7 @@ async function tauriProxiedFetch(
         headers: Object.keys(headers).length > 0 ? headers : undefined,
         proxy_url: proxyUrl || undefined,
         timeout_secs: timeoutSecs,
+        ...(init?.blockPrivateHosts ? { blockPrivate: true } : {}),
       } as ProxiedRequestInput,
     })
 
@@ -114,6 +116,12 @@ export interface ProxyFetchOptions extends RequestInit {
   skipProxy?: boolean
   /** Custom timeout in milliseconds */
   timeout?: number
+  /**
+   * Defense-in-depth SSRF guard: when true, the Rust backend rejects
+   * private/loopback/link-local targets for this request. Only honored on the
+   * Tauri path (browser fetch can't reach cross-origin private hosts anyway).
+   */
+  blockPrivateHosts?: boolean
 }
 
 /**

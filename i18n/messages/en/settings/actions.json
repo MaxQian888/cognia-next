@@ -1,0 +1,24 @@
+{
+  "cancel": "Cancel",
+  "export": "Export settings…",
+  "exportedToast": "Settings exported.",
+  "import": "Import settings…",
+  "importErrors": {
+    "emptyProfile": "The profile had no importable settings.",
+    "generic": "Could not import that settings file.",
+    "invalidJson": "That file is not valid JSON.",
+    "invalidPayload": "That file is not a settings profile.",
+    "missingSettings": "The profile contains no settings.",
+    "missingVersion": "The profile is missing a version.",
+    "versionTooNew": "This profile was exported by a newer version of Cognia.",
+    "wrongSchema": "That file is not a Cognia settings profile."
+  },
+  "importedToast": "Settings imported.",
+  "resetAll": "Reset all to defaults…",
+  "resetConfirm": "Reset",
+  "resetDescription": "This restores every preference to its default. Your API keys and credentials are kept. This cannot be undone.",
+  "resetTitle": "Reset all settings?",
+  "resetToast": "Settings reset to defaults.",
+  "reviewChanged": "Review changed settings…",
+  "triggerAria": "Settings actions"
+}

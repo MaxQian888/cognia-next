@@ -11,11 +11,15 @@ import { useRouter } from "next/navigation"
 import { ArrowDownIcon, ArrowUpIcon, GitBranchIcon, RefreshCwIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useGitBranchIndicator } from "@/hooks/git/use-git-branch-indicator"
+import { useGitAutoFetch } from "@/hooks/git/use-git-auto-fetch"
 
 export function StatusBarBranch() {
   const t = useTranslations("sourceControl")
   const router = useRouter()
   const { available, branch, ahead, behind, busy } = useGitBranchIndicator()
+  // Runs the opt-in background fetch timer app-wide (this is the always-mounted
+  // watcher owner). No-op unless enabled in prefs.
+  useGitAutoFetch()
 
   // Desktop-only and only when a branch is known.
   if (!available || !branch) return null

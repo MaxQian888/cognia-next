@@ -36,8 +36,16 @@ jest.mock("@tanstack/react-virtual", () => ({
 }))
 
 jest.mock("./log-entry", () => ({
-  MemoizedLogEntry: ({ log }: { log: { id: string; message: string } }) => (
-    <div data-testid={`memoized-log-${log.id}`}>{log.message}</div>
+  MemoizedLogEntry: ({
+    log,
+    isSelected,
+  }: {
+    log: { id: string; message: string }
+    isSelected?: boolean
+  }) => (
+    <div data-testid={`memoized-log-${log.id}`} data-selected={isSelected || undefined}>
+      {log.message}
+    </div>
   ),
   TraceGroup: ({ traceId, logs }: { traceId: string; logs: Array<{ id: string }> }) => (
     <div data-testid={`trace-group-${traceId}`}>{logs.length} logs</div>
@@ -45,7 +53,7 @@ jest.mock("./log-entry", () => ({
 }))
 
 import { VirtualizedLogList } from "./log-virtualized-list"
-import type { StructuredLogEntry } from "@/lib/logging"
+import type { StructuredLogEntry } from "@cognia/logging"
 
 function makeLog(id: string, overrides: Partial<StructuredLogEntry> = {}): StructuredLogEntry {
   return {
@@ -72,6 +80,7 @@ function Harness(props: {
   }
   onRetry?: () => void
   bookmarkedIds?: Set<string>
+  selectedLogId?: string | null
 }) {
   const t = useTranslations("logging")
   const scrollRef = createRef<HTMLDivElement>()
@@ -94,6 +103,7 @@ function Harness(props: {
       handleSelectLog={jest.fn()}
       handleFocusTrace={jest.fn()}
       handleFocusSession={jest.fn()}
+      selectedLogId={props.selectedLogId}
       t={t}
       onRetry={props.onRetry}
       emptyStateContext={props.emptyContext}
@@ -113,10 +123,16 @@ describe("VirtualizedLogList", () => {
       )
     })
 
-    it("uses motion-safe animate-pulse on skeleton bars", () => {
+    it("builds its bars from the shared Skeleton primitive", () => {
+      // Was `motion-safe:animate-pulse`, which SUPPRESSED the pulse under
+      // reduced motion — leaving those users a frozen grey block with no sign
+      // the log stream was still loading. `data-slot="skeleton"` is what the
+      // tiered reduce-motion rule in globals.css keys its exemption off, so
+      // routing through the primitive is what keeps the bars breathing.
       const { container } = render(<Harness isLoading />)
-      const animated = container.querySelectorAll(".motion-safe\\:animate-pulse")
-      expect(animated.length).toBeGreaterThan(0)
+      const bars = container.querySelectorAll('[data-slot="skeleton"]')
+      expect(bars.length).toBeGreaterThan(0)
+      expect(bars[0]).toHaveClass("animate-pulse")
     })
   })
 
@@ -237,5 +253,15 @@ describe("VirtualizedLogList", () => {
       expect(screen.queryByTestId("trace-group-t")).not.toBeInTheDocument()
       expect(screen.getByTestId("memoized-log-only")).toBeInTheDocument()
     })
+  })
+})
+
+describe("VirtualizedLogList — selected row", () => {
+  it("marks only the row matching selectedLogId as selected", () => {
+    const logs = [makeLog("a"), makeLog("b"), makeLog("c")]
+    render(<Harness filteredLogs={logs} selectedLogId="b" />)
+    expect(screen.getByTestId("memoized-log-b")).toHaveAttribute("data-selected", "true")
+    expect(screen.getByTestId("memoized-log-a")).not.toHaveAttribute("data-selected")
+    expect(screen.getByTestId("memoized-log-c")).not.toHaveAttribute("data-selected")
   })
 })

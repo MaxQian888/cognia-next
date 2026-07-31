@@ -1,0 +1,3028 @@
+{
+  "agentTurn": {
+    "allowedTools": {
+      "hint": "Restrict the synthesised persona's tool surface. Empty = host defaults.",
+      "label": "Allowed tools (comma-separated)",
+      "placeholder": "Bash, Read, Edit"
+    },
+    "characterId": {
+      "hint": "Run as an existing persona — its system prompt, model, and tool allowlist apply.",
+      "label": "Character (optional)"
+    },
+    "cwd": {
+      "hint": "Scope for tool calls (desktop only).",
+      "label": "Working directory"
+    },
+    "maxTurns": {
+      "hint": "Upper bound on agent steps.",
+      "label": "Max turns"
+    },
+    "model": {
+      "hint": "Defaults to the provider's configured model.",
+      "label": "Model (optional)"
+    },
+    "prompt": {
+      "label": "Prompt"
+    },
+    "requireTools": {
+      "hint": "Fail instead of degrading to text-only when the sidecar is unavailable (web/mobile).",
+      "label": "Require tools"
+    },
+    "systemPrompt": {
+      "hint": "Used when no character is selected.",
+      "label": "System prompt"
+    },
+    "toolsEnabled": {
+      "hint": "Use the desktop sidecar's tool pipeline. Off = plain completion.",
+      "label": "Enable tools"
+    }
+  },
+  "aggregate": {
+    "keyExpression": {
+      "hint": "Per-item key. $item is the current item, e.g. $item.category",
+      "label": "Key expression"
+    },
+    "numericField": {
+      "hint": "Per-item number. Empty = the item itself.",
+      "label": "Value expression"
+    },
+    "numericOp": {
+      "label": "Function",
+      "options": {
+        "avg": "Average",
+        "count": "Count",
+        "max": "Max",
+        "min": "Min",
+        "sum": "Sum"
+      }
+    },
+    "operation": {
+      "hint": "How to reduce the input list into a single value.",
+      "label": "Operation",
+      "options": {
+        "collect": "Collect (into a list)",
+        "concat": "Concat (flatten one level)",
+        "custom": "Custom reducer",
+        "dedupe": "Deduplicate",
+        "groupBy": "Group by key",
+        "mergeObjects": "Merge objects",
+        "numeric": "Numeric (sum / avg / …)"
+      }
+    },
+    "reducerExpression": {
+      "hint": "JS expression returning the next accumulator. acc, item, index in scope.",
+      "label": "Reducer expression (JS)",
+      "placeholder": "acc + item.value"
+    }
+  },
+  "aiBrowserModel": {
+    "cacheEnabled": {
+      "label": "Cache model"
+    },
+    "candidateLabels": {
+      "label": "Candidate labels",
+      "placeholder": "positive, negative"
+    },
+    "device": {
+      "label": "Device"
+    },
+    "dtype": {
+      "label": "Data type"
+    },
+    "hypothesisTemplate": {
+      "label": "Hypothesis template",
+      "placeholder": "This example is '{}'."
+    },
+    "input": {
+      "label": "Input"
+    },
+    "inputJson": {
+      "label": "Input JSON",
+      "placeholder": "Optional structured model input"
+    },
+    "language": {
+      "label": "Language",
+      "placeholder": "en"
+    },
+    "maxCachedModels": {
+      "label": "Cached models"
+    },
+    "maxLength": {
+      "label": "Maximum length"
+    },
+    "maxNewTokens": {
+      "label": "Maximum new tokens"
+    },
+    "modelId": {
+      "label": "Model ID",
+      "placeholder": "Xenova/model-name"
+    },
+    "operation": {
+      "disposeAll": "Dispose all models",
+      "disposeModel": "Dispose model",
+      "infer": "Run inference",
+      "label": "Operation",
+      "preload": "Preload model",
+      "status": "Runtime status"
+    },
+    "preset": {
+      "label": "Model preset",
+      "placeholder": "Select a curated model"
+    },
+    "returnTimestamps": {
+      "label": "Return timestamps",
+      "none": "None",
+      "segment": "Segments",
+      "word": "Words"
+    },
+    "runtime": {
+      "available": "Runtime available",
+      "unavailable": "Runtime unavailable",
+      "wasm": "WASM",
+      "webgpu": "WebGPU"
+    },
+    "task": {
+      "label": "Task"
+    },
+    "tasks": {
+      "audio-classification": "Audio classification",
+      "automatic-speech-recognition": "Automatic speech recognition",
+      "depth-estimation": "Depth estimation",
+      "feature-extraction": "Feature extraction",
+      "fill-mask": "Fill mask",
+      "image-classification": "Image classification",
+      "image-segmentation": "Image segmentation",
+      "image-to-text": "Image to text",
+      "object-detection": "Object detection",
+      "question-answering": "Question answering",
+      "sentence-similarity": "Sentence similarity",
+      "summarization": "Summarization",
+      "text-classification": "Text classification",
+      "text-generation": "Text generation",
+      "text2text-generation": "Text-to-text generation",
+      "text-to-speech": "Text to speech",
+      "token-classification": "Token classification",
+      "translation": "Translation",
+      "zero-shot-classification": "Zero-shot classification",
+      "zero-shot-image-classification": "Zero-shot image classification"
+    },
+    "temperature": {
+      "label": "Temperature"
+    },
+    "timeoutMs": {
+      "label": "Timeout (ms)"
+    },
+    "topK": {
+      "label": "Top K"
+    }
+  },
+  "aiClassify": {
+    "apiFlavor": {
+      "auto": "Auto",
+      "chat": "Chat Completions",
+      "hint": "Only affects OpenAI-compatible providers. Auto uses the base URL/provider heuristic.",
+      "label": "OpenAI endpoint",
+      "responses": "Responses API"
+    },
+    "apiKey": {
+      "label": "API key"
+    },
+    "baseURL": {
+      "hint": "Override for proxies / custom OpenAI-compatible endpoints.",
+      "label": "Base URL (optional)",
+      "placeholder": "https://api.openai.com/v1"
+    },
+    "headersJson": {
+      "hint": "Static provider headers as a JSON object. Values must be strings.",
+      "label": "Headers JSON (optional)",
+      "placeholder": "'{' \"HTTP-Referer\": \"https://app.example\" '}'"
+    },
+    "hint": {
+      "label": "Guidance (optional)"
+    },
+    "input": {
+      "hint": "Supports '{{ }}' expressions.",
+      "label": "Input"
+    },
+    "labelsRaw": {
+      "hint": "The classifier picks one of these. Order is the deterministic fallback.",
+      "label": "Labels (comma-separated)",
+      "placeholder": "urgent, normal, spam"
+    },
+    "model": {
+      "hint": "Provider-specific model id.",
+      "label": "Model",
+      "placeholder": "claude-haiku-4-5-20251001"
+    },
+    "provider": {
+      "hint": "Provider id, including OpenAI-compatible ids like openrouter, deepseek, groq, codex, or azure.",
+      "label": "Provider",
+      "placeholder": "openrouter"
+    }
+  },
+  "aiCouncil": {
+    "councillorsJson": {
+      "hint": "Array of '{' name, modelAlias, systemPrompt? '}' objects. modelAlias uses Settings -> Routing aliases.",
+      "label": "Councillors JSON",
+      "placeholder": "[\n  '{' \"name\": \"Reviewer\", \"modelAlias\": \"smart\" '}',\n  '{' \"name\": \"Fast pass\", \"modelAlias\": \"fast\" '}'\n]"
+    },
+    "executionMode": {
+      "label": "Execution mode",
+      "options": {
+        "parallel": "Parallel",
+        "serial": "Serial"
+      }
+    },
+    "maxConcurrency": {
+      "hint": "Maximum councillor calls running at once in parallel mode.",
+      "label": "Max concurrency"
+    },
+    "piiGate": {
+      "block": "Block (fail the step)",
+      "hint": "Runs before the prompt egresses to every councillor and the synthesizer.",
+      "label": "PII gate",
+      "off": "Off",
+      "redact": "Redact"
+    },
+    "prompt": {
+      "label": "Prompt"
+    },
+    "synthesisInstructions": {
+      "hint": "Optional guidance for the final synthesis pass.",
+      "label": "Synthesis instructions"
+    },
+    "synthesizerAlias": {
+      "hint": "Routing alias for the model that merges councillor responses.",
+      "label": "Synthesizer alias",
+      "placeholder": "quality"
+    },
+    "timeoutMs": {
+      "hint": "Per-councillor timeout. Valid range: 1000-600000 ms.",
+      "label": "Timeout (ms)"
+    }
+  },
+  "aiEmbed": {
+    "apiKey": {
+      "hint": "Needed for hosted embedding providers. Leave empty for the local / hash fallback.",
+      "label": "API key (optional)"
+    },
+    "dimension": {
+      "hint": "Vector size. Used by the hash fallback and passed to providers that support it.",
+      "label": "Dimension"
+    },
+    "input": {
+      "hint": "Supports '{{ }}' expressions.",
+      "label": "Input"
+    },
+    "model": {
+      "hint": "Required for real semantic embeddings.",
+      "label": "Model (optional)",
+      "placeholder": "text-embedding-3-small"
+    },
+    "provider": {
+      "label": "Provider (optional)",
+      "placeholder": "Hash fallback"
+    }
+  },
+  "aiExtract": {
+    "apiFlavor": {
+      "auto": "Auto",
+      "chat": "Chat Completions",
+      "hint": "Only affects OpenAI-compatible providers. Auto uses the base URL/provider heuristic.",
+      "label": "OpenAI endpoint",
+      "responses": "Responses API"
+    },
+    "apiKey": {
+      "label": "API key"
+    },
+    "baseURL": {
+      "hint": "Override for proxies / custom OpenAI-compatible endpoints.",
+      "label": "Base URL (optional)",
+      "placeholder": "https://api.openai.com/v1"
+    },
+    "headersJson": {
+      "hint": "Static provider headers as a JSON object. Values must be strings.",
+      "label": "Headers JSON (optional)",
+      "placeholder": "'{' \"HTTP-Referer\": \"https://app.example\" '}'"
+    },
+    "hint": {
+      "label": "Guidance (optional)"
+    },
+    "input": {
+      "label": "Input"
+    },
+    "model": {
+      "hint": "Provider-specific model id.",
+      "label": "Model",
+      "placeholder": "claude-haiku-4-5-20251001"
+    },
+    "provider": {
+      "hint": "Provider id, including OpenAI-compatible ids like openrouter, deepseek, groq, codex, or azure.",
+      "label": "Provider",
+      "placeholder": "openrouter"
+    },
+    "required": {
+      "hint": "Comma-separated. output.valid is false if any are missing.",
+      "label": "Required fields (optional)",
+      "placeholder": "name, amount"
+    },
+    "schemaJson": {
+      "hint": "Field → expected type. Example: '{ \"name\": \"string\", \"amount\": \"number\" }'",
+      "label": "Schema (JSON)"
+    }
+  },
+  "aiPrompt": {
+    "apiFlavor": {
+      "auto": "Auto",
+      "chat": "Chat Completions",
+      "hint": "Only affects OpenAI-compatible providers. Auto uses the base URL/provider heuristic.",
+      "label": "OpenAI endpoint",
+      "responses": "Responses API"
+    },
+    "apiKey": {
+      "hint": "Embedded inline. For shared workflows, use a credential ref instead.",
+      "label": "API key"
+    },
+    "baseURL": {
+      "hint": "Override for proxies / custom OpenAI-compatible endpoints.",
+      "label": "Base URL (optional)",
+      "placeholder": "https://api.openai.com/v1"
+    },
+    "headersJson": {
+      "hint": "Static provider headers as a JSON object. Values must be strings.",
+      "label": "Headers JSON (optional)",
+      "placeholder": "'{' \"HTTP-Referer\": \"https://app.example\", \"X-Title\": \"Cognia\" '}'"
+    },
+    "jsonSchema": {
+      "hint": "A sample shape the model should match. Injected into the prompt.",
+      "label": "JSON shape (optional)",
+      "placeholder": "'{'\n  \"title\": \"string\",\n  \"score\": \"number\"\n'}'"
+    },
+    "mode": {
+      "explicit": "Explicit provider",
+      "hint": "Routed picks the provider via your routing mappings (with fallback chains); explicit uses the fields below.",
+      "label": "Provider mode",
+      "routed": "Routed (auto)"
+    },
+    "model": {
+      "hint": "Provider-specific model id.",
+      "label": "Model",
+      "placeholder": "claude-sonnet-4-6"
+    },
+    "modelAlias": {
+      "hint": "Alias from Settings → Routing model mappings (e.g. \"fast\", \"smart\"). Empty uses the default routing strategy.",
+      "label": "Model alias",
+      "placeholder": "fast"
+    },
+    "piiGate": {
+      "block": "Block (fail the step)",
+      "hint": "Checks prompts for emails / phone numbers / ids / keys before anything is sent to the model.",
+      "label": "PII gate",
+      "off": "Off",
+      "redact": "Redact placeholders"
+    },
+    "provider": {
+      "hint": "Provider id, including OpenAI-compatible ids like openrouter, deepseek, groq, codex, or azure.",
+      "label": "Provider",
+      "placeholder": "openrouter"
+    },
+    "responseFormat": {
+      "hint": "JSON parses the reply into structured output for downstream nodes.",
+      "json": "JSON (structured)",
+      "label": "Response format",
+      "text": "Text"
+    },
+    "systemPrompt": {
+      "label": "System prompt"
+    },
+    "temperature": {
+      "hint": "0 = deterministic. Higher values = more variety.",
+      "label": "Temperature"
+    },
+    "userPrompt": {
+      "label": "User prompt"
+    }
+  },
+  "approvalRequest": {
+    "message": {
+      "label": "Message (optional)"
+    },
+    "onTimeout": {
+      "fail": "Fail the step",
+      "label": "On timeout",
+      "reject": "Route as rejected"
+    },
+    "timeoutMs": {
+      "hint": "How long to wait for a decision. Default 1 hour.",
+      "label": "Timeout (ms)"
+    },
+    "title": {
+      "label": "Title"
+    }
+  },
+  "arrayField": {
+    "add": "Add",
+    "removeItem": "Remove item {index}"
+  },
+  "branch": {
+    "condition": {
+      "hint": "Expression that resolves to a truthy value. Supports '{{ }}' expressions.",
+      "label": "Condition",
+      "placeholder": "'{{ $node[''n_classify''].out.label }}' === 'urgent'"
+    },
+    "conditions": {
+      "hint": "Routes to the true handle when the group passes, otherwise false.",
+      "label": "Conditions"
+    },
+    "falsyLabel": {
+      "label": "Falsy label"
+    },
+    "truthyLabel": {
+      "label": "Truthy label"
+    }
+  },
+  "catch": {
+    "intro": "Runs only when the workflow fails terminally. Read the error on '{{' $node[''id''].error '}}' and drive a recovery / notify path downstream.",
+    "scope": {
+      "hint": "Reserved — currently runs on any terminal run failure.",
+      "label": "Scope",
+      "options": {
+        "upstream": "Direct upstream only",
+        "workflow": "Whole workflow"
+      }
+    }
+  },
+  "characterCreate": {
+    "avatarColor": {
+      "label": "Avatar color",
+      "placeholder": "#6d28d9"
+    },
+    "avatarEmoji": {
+      "label": "Avatar emoji",
+      "placeholder": "🤖"
+    },
+    "description": {
+      "label": "Description (optional)"
+    },
+    "model": {
+      "label": "Default model (optional)",
+      "placeholder": "claude-sonnet-4-6"
+    },
+    "name": {
+      "label": "Name",
+      "placeholder": "Research assistant"
+    },
+    "systemPrompt": {
+      "hint": "Supports '{{ }}' expressions for dynamic content.",
+      "label": "System prompt"
+    }
+  },
+  "characterSend": {
+    "character": {
+      "label": "Character"
+    },
+    "content": {
+      "hint": "Supports '{{ $node[''id''].out.field }}' expressions.",
+      "label": "Message content",
+      "placeholder": "Hello, '{{ $trigger.payload.userName }}'"
+    },
+    "sessionId": {
+      "label": "Target session id (optional)"
+    }
+  },
+  "characterUpdate": {
+    "characterId": {
+      "label": "Character"
+    },
+    "patchJson": {
+      "hint": "Fields to update. Example: '{ \"systemPrompt\": \"{{ $node.n_extract.out.text }}\" }'",
+      "label": "Patch (JSON)"
+    }
+  },
+  "chatMessageTrigger": {
+    "character": {
+      "label": "Character"
+    },
+    "sessionId": {
+      "hint": "Limit to a single chat session. Empty fires on any session for the character.",
+      "label": "Session id (optional)"
+    }
+  },
+  "code": {
+    "code": {
+      "hint": "Runs in a sandboxed Function() with a 5 s timeout. Available: upstream, params, trigger.",
+      "label": "JS body"
+    }
+  },
+  "conditionBuilder": {
+    "addCondition": "Add condition",
+    "caseSensitive": "Case sensitive",
+    "coercionHint": "Ordering operators compare numerically when both sides are numbers; otherwise they fall back to text comparison. Text comparisons ignore case unless 'Case sensitive' is on.",
+    "combinator": {
+      "all": "All (AND)",
+      "any": "Any (OR)",
+      "aria": "Combine conditions with"
+    },
+    "left": {
+      "aria": "Left operand",
+      "placeholder": "'{{ $node[''n1''].out.value }}'"
+    },
+    "operator": {
+      "aria": "Operator"
+    },
+    "operators": {
+      "contains": "contains",
+      "endsWith": "ends with",
+      "eq": "equals",
+      "gt": "greater than",
+      "gte": "at least",
+      "inRange": "in range",
+      "isEmpty": "is empty",
+      "isNotEmpty": "is not empty",
+      "lt": "less than",
+      "lte": "at most",
+      "neq": "not equals",
+      "notContains": "does not contain",
+      "regex": "matches regex",
+      "startsWith": "starts with",
+      "truthy": "is truthy"
+    },
+    "removeCondition": "Remove condition",
+    "right": {
+      "aria": "Right operand",
+      "placeholder": "Value or expression"
+    },
+    "rightUpper": {
+      "aria": "Range upper bound",
+      "placeholder": "Upper bound"
+    }
+  },
+  "connectorDelete": {
+    "adapter": {
+      "label": "Adapter"
+    },
+    "messageId": {
+      "label": "Message id",
+      "hint": "Platform message id to recall / delete.",
+      "placeholder": "om_..."
+    }
+  },
+  "connectorDraft": {
+    "content": {
+      "label": "Draft content"
+    },
+    "conversationKey": {
+      "label": "Conversation key"
+    },
+    "sessionId": {
+      "label": "Session id"
+    },
+    "sourceMessageId": {
+      "label": "Source message id (optional)"
+    },
+    "ttlMs": {
+      "hint": "0 = no expiry",
+      "label": "TTL (ms, optional)"
+    }
+  },
+  "connectorInbound": {
+    "adapter": {
+      "hint": "Adapter instance id, e.g., a Telegram bot.",
+      "label": "Adapter",
+      "placeholder": "telegram_main"
+    },
+    "channelKinds": {
+      "hint": "Fires only in the selected channel kinds; none selected means all.",
+      "label": "Channel kinds (optional)",
+      "options": {
+        "channel": "Channel",
+        "group": "Group",
+        "private": "Private chat",
+        "thread": "Thread"
+      }
+    },
+    "characterId": {
+      "label": "Character (optional)"
+    },
+    "conversationKey": {
+      "hint": "Optional. Limit to a specific conversation; empty fires on any.",
+      "label": "Conversation key"
+    },
+    "keywords": {
+      "hint": "Comma-separated, case-insensitive substrings; fires when any matches the message text.",
+      "label": "Keywords (optional)",
+      "placeholder": "deploy, release"
+    },
+    "requireMention": {
+      "hint": "Only fire when the bot itself is mentioned.",
+      "label": "Require @-mention"
+    },
+    "senderIds": {
+      "hint": "Comma-separated platform user ids; fires only for these senders.",
+      "label": "Sender ids (optional)",
+      "placeholder": "ou_abc, ou_def"
+    }
+  },
+  "integrationEventTrigger": {
+    "pluginId": {
+      "label": "Plugin (optional)",
+      "hint": "Limit events to one installed Marketplace plugin.",
+      "placeholder": "example-delivery"
+    },
+    "integrationId": {
+      "label": "Integration (optional)",
+      "hint": "Limit events to one integration definition from the plugin.",
+      "placeholder": "delivery"
+    },
+    "accountId": {
+      "label": "Account (optional)",
+      "hint": "Limit events to one connected account.",
+      "placeholder": "account_..."
+    },
+    "resourceKind": {
+      "label": "Resource kind (optional)",
+      "hint": "Limit events to a normalized resource kind.",
+      "placeholder": "repository"
+    },
+    "resourceId": {
+      "label": "Resource id (optional)",
+      "hint": "Limit events to one repository, workspace, team, or other resource.",
+      "placeholder": "owner/project"
+    },
+    "eventTypes": {
+      "label": "Event types (optional)",
+      "hint": "Comma-separated normalized event types; empty matches every event.",
+      "placeholder": "pull_request.opened, issue.updated"
+    }
+  },
+  "connectorReaction": {
+    "adapter": {
+      "label": "Adapter"
+    },
+    "op": {
+      "label": "Operation",
+      "options": {
+        "add": "Add reaction",
+        "remove": "Remove reaction"
+      }
+    },
+    "messageId": {
+      "label": "Message id",
+      "hint": "Platform message id to react to.",
+      "placeholder": "om_..."
+    },
+    "emoji": {
+      "label": "Emoji",
+      "hint": "Platform reaction code (Lark: THUMBSUP, OK, …) or a unicode emoji.",
+      "placeholder": "THUMBSUP"
+    },
+    "reactionId": {
+      "label": "Reaction id",
+      "hint": "Id of the reaction to remove (from an earlier add node's output).",
+      "placeholder": "ZCaGnix..."
+    }
+  },
+  "connectorForward": {
+    "adapter": {
+      "label": "Adapter"
+    },
+    "messageId": {
+      "label": "Message id",
+      "hint": "Platform message id to forward.",
+      "placeholder": "om_..."
+    },
+    "target": {
+      "label": "Target conversation",
+      "hint": "Destination conversation key (platform:adapterId:chatId) or a raw receive id.",
+      "placeholder": "lark:bot:oc_..."
+    }
+  },
+  "connectorSend": {
+    "adapter": {
+      "label": "Adapter",
+      "placeholder": "telegram_main"
+    },
+    "content": {
+      "label": "Message content"
+    },
+    "conversationKey": {
+      "label": "Conversation key"
+    },
+    "editTarget": {
+      "hint": "Edit this already-sent platform message in place instead of sending a new one. Platforms without edit support fall back to a new message.",
+      "label": "Edit message id (optional)",
+      "placeholder": "om_..."
+    },
+    "idempotencyKey": {
+      "hint": "Deduplication key; defaults to run id + step id.",
+      "label": "Idempotency key (optional)"
+    },
+    "replyTo": {
+      "hint": "Platforms that support replies quote this message.",
+      "label": "Reply to message id (optional)",
+      "placeholder": "om_..."
+    },
+    "threadId": {
+      "hint": "Post into this thread instead of the main channel.",
+      "label": "Thread id (optional)"
+    },
+    "waitForDelivery": {
+      "hint": "Block this step until the message is delivered (or dead-lettered) and expose delivered / status / platformMessageId / errorCode on the node output.",
+      "label": "Wait for delivery"
+    },
+    "waitTimeoutMs": {
+      "hint": "How long to wait for delivery before continuing with the latest status, in milliseconds (default 30000, max 300000).",
+      "label": "Delivery wait timeout (ms)"
+    },
+    "cardJson": {
+      "label": "A2UI card JSON (optional)",
+      "hint": "A2UI surface object ('{'components, dataModel, rootId, …'}'). When set, sends an interactive card with the message content as plain-text fallback.",
+      "placeholder": "'{'\"components\": '{'...'}', \"dataModel\": '{}', \"rootId\": \"root\"'}'"
+    }
+  },
+  "connectorWaitReply": {
+    "conversationKey": {
+      "label": "Conversation key",
+      "hint": "Composite key platform:adapterId:chatId — the conversation to listen on."
+    },
+    "senderIds": {
+      "label": "Sender ids (optional)",
+      "hint": "Comma-separated platform user ids; any sender when empty.",
+      "placeholder": "ou_abc, ou_def"
+    },
+    "keywords": {
+      "label": "Keywords (optional)",
+      "hint": "Comma-separated case-insensitive substrings; any match accepts the reply.",
+      "placeholder": "approve, done"
+    },
+    "requireMention": {
+      "label": "Require @-mention",
+      "hint": "Only accept replies that @-mention the bot."
+    },
+    "timeoutMs": {
+      "label": "Timeout (ms)",
+      "hint": "Wait budget before resolving with replied=false (default 120000, max 3600000)."
+    }
+  },
+  "cron": {
+    "builder": {
+      "invalidExpression": "Invalid cron expression",
+      "nextRunsLabel": "Next runs",
+      "presetLabel": "Preset",
+      "presets": {
+        "custom": "Custom",
+        "daily": "Daily at 9:00",
+        "everyMinute": "Every minute",
+        "hourly": "Hourly",
+        "monthly": "Monthly (1st, 9:00)",
+        "weekdays": "Weekdays at 9:00",
+        "weekly": "Weekly (Mon 9:00)"
+      }
+    },
+    "cronExpression": {
+      "hint": "Five fields: minute hour day month weekday. Use *  for any value.",
+      "label": "Cron expression",
+      "placeholder": "0 9 * * 1-5"
+    },
+    "timezone": {
+      "hint": "Optional. Defaults to the workflow's timezone setting.",
+      "label": "Timezone",
+      "placeholder": "Asia/Shanghai"
+    }
+  },
+  "desktopClick": {
+    "button": {
+      "label": "Button"
+    },
+    "clickCount": {
+      "label": "Click count"
+    },
+    "selector": {
+      "hint": "UIA selector for the target. Required."
+    }
+  },
+  "desktopEventTrigger": {
+    "cooldownMs": {
+      "hint": "Minimum time between fires for this workflow — guards against the workflow's own desktop actions re-triggering it.",
+      "label": "Cooldown (ms)"
+    },
+    "desktopOnly": "Desktop only — fires on native Windows UI Automation focus, structure, and property changes; has no effect in the browser.",
+    "kinds": {
+      "hint": "Fire when any of the selected native UI Automation events occur.",
+      "label": "Event kinds",
+      "options": {
+        "focus-changed": "Focus changed",
+        "property-changed": "Property changed",
+        "structure-changed": "Structure changed"
+      }
+    },
+    "scope": {
+      "hint": "Optional UIA element reference. Events are limited to this element and its descendants.",
+      "label": "UIA element scope",
+      "placeholder": "Paste an element reference"
+    }
+  },
+  "desktopFindElement": {
+    "selector": {
+      "hint": "UIA selector. Required — the node returns the element's bounds + handle for downstream nodes."
+    }
+  },
+  "desktopInvokePattern": {
+    "pattern": {
+      "label": "Pattern",
+      "options": {
+        "expandCollapse": "Expand/collapse",
+        "invoke": "Invoke",
+        "rangeValue": "Range value",
+        "scrollItem": "Scroll item",
+        "selectionItem": "Selection item",
+        "text": "Text",
+        "toggle": "Toggle",
+        "transform": "Transform",
+        "value": "Value",
+        "window": "Window"
+      }
+    },
+    "selector": {
+      "hint": "UIA selector for the element supporting the chosen pattern."
+    },
+    "value": {
+      "hint": "Required for `Value`, `RangeValue`; optional for the rest.",
+      "label": "Value"
+    }
+  },
+  "desktopKeys": {
+    "chord": {
+      "hint": "Use \"+\" between modifiers, e.g. `ctrl+shift+t`. The chord is dispatched against the focused window.",
+      "label": "Key chord",
+      "placeholder": "ctrl+shift+p"
+    }
+  },
+  "desktopLaunchApp": {
+    "action": {
+      "focus": "Focus existing window",
+      "label": "Action",
+      "launch": "Launch"
+    },
+    "app": {
+      "hint": "Executable path or app name. Focus matches by process name.",
+      "label": "Application",
+      "placeholder": "notepad.exe"
+    }
+  },
+  "desktopPaste": {
+    "text": {
+      "hint": "Pasted via the clipboard (the previous clipboard content is restored afterwards). Much faster than typing for long text.",
+      "label": "Text",
+      "placeholder": "Text to paste into the focused element"
+    }
+  },
+  "desktopReadTree": {
+    "maxDepth": {
+      "hint": "How many levels to traverse. Larger values are slow; the default keeps response under a second on a typical desktop.",
+      "label": "Max depth"
+    },
+    "selector": {
+      "hint": "Optional. When set, the tree is rooted at the matched element; otherwise it starts at the foreground window."
+    }
+  },
+  "desktopScreenshot": {
+    "format": {
+      "label": "Format"
+    },
+    "fullScreen": {
+      "label": "Full screen"
+    },
+    "outputPath": {
+      "hint": "Optional. When set, the screenshot is also written to disk at this path.",
+      "label": "Output path",
+      "placeholder": "C:/temp/cap.png"
+    },
+    "selector": {
+      "hint": "Optional. When set, the screenshot is cropped to the element bounds; otherwise the whole window (or whole screen with `fullScreen`) is captured."
+    }
+  },
+  "desktopShared": {
+    "retries": {
+      "label": "Retries"
+    },
+    "selector": {
+      "defaultHint": "UIA selector (role / name / automationId). Leave blank to act on the foreground window.",
+      "defaultPlaceholder": "role=\"Button\" name~=\"Submit\"",
+      "label": "Selector"
+    },
+    "timeout": {
+      "label": "Timeout (ms)"
+    }
+  },
+  "desktopType": {
+    "delayMs": {
+      "hint": "Small delay between keys, useful for apps that miss keystrokes when typed too quickly.",
+      "label": "Per-key delay (ms)"
+    },
+    "selector": {
+      "hint": "UIA selector for the target input. Optional — defaults to the focused element."
+    },
+    "text": {
+      "label": "Text",
+      "placeholder": "Hello, world!"
+    }
+  },
+  "desktopWait": {
+    "eventKind": {
+      "hint": "What state change ends the wait.",
+      "label": "Event",
+      "options": {
+        "elementHidden": "element hidden",
+        "elementVisible": "element visible",
+        "propertyChanged": "property changed",
+        "windowReady": "window ready"
+      }
+    },
+    "selector": {
+      "hint": "UIA selector for the element / pattern to wait on."
+    }
+  },
+  "desktopWindowClose": {
+    "selector": {
+      "hint": "UIA window selector. When omitted, the foreground window is closed."
+    }
+  },
+  "desktopWindowFocus": {
+    "selector": {
+      "hint": "UIA window selector (e.g. `name~='Notepad'`). When omitted, the foreground window is used."
+    }
+  },
+  "desktopWindowResize": {
+    "height": {
+      "label": "Height (px)"
+    },
+    "selector": {
+      "hint": "UIA window selector. Falls back to the foreground window."
+    },
+    "width": {
+      "label": "Width (px)"
+    }
+  },
+  "ensemble": {
+    "aggField": {
+      "hint": "Object field to vote / count on. Empty = the whole result.",
+      "label": "Field"
+    },
+    "aggregation": {
+      "hint": "How to reduce the N samples into one result.",
+      "label": "Aggregation",
+      "options": {
+        "bestOf": "Best of (by score)",
+        "majority": "Majority vote on a field",
+        "synthesize": "Synthesize (final agent)",
+        "threshold": "Threshold count"
+      }
+    },
+    "iterationConcurrency": {
+      "hint": "Max samples running at once.",
+      "label": "Concurrency"
+    },
+    "lens": {
+      "hint": "One steering prompt per line; cycled across samples (e.g. adversarial verify).",
+      "label": "Lenses (optional)",
+      "placeholder": "Argue FOR the claim\nArgue AGAINST the claim"
+    },
+    "n": {
+      "hint": "How many times to run the target.",
+      "label": "Samples (N)"
+    },
+    "outputSchema": {
+      "hint": "Typed output enables field-based voting.",
+      "label": "Sample output schema"
+    },
+    "piiGate": {
+      "block": "Block (fail the step)",
+      "hint": "Runs before the prompt egresses to every sample.",
+      "label": "PII gate",
+      "off": "Off",
+      "redact": "Redact"
+    },
+    "prompt": {
+      "label": "Prompt"
+    },
+    "scoreField": {
+      "hint": "Numeric field to maximize.",
+      "label": "Score field"
+    },
+    "synthesizerAlias": {
+      "hint": "Routing alias for the final merge model.",
+      "label": "Synthesizer alias",
+      "placeholder": "e.g. quality"
+    },
+    "targetKind": {
+      "hint": "What to run N times.",
+      "label": "Target",
+      "options": {
+        "agentTurn": "Agent turn (inline)",
+        "subworkflow": "Sub-workflow"
+      }
+    },
+    "targetModel": {
+      "hint": "Model for each agent sample.",
+      "label": "Model (optional)"
+    },
+    "threshold": {
+      "hint": "Minimum matching samples to pass.",
+      "label": "Threshold"
+    },
+    "workflowId": {
+      "hint": "The workflow to run for each sample.",
+      "label": "Sub-workflow"
+    }
+  },
+  "eval": {
+    "gate": {
+      "maxTotalCostUsd": {
+        "label": "Max total cost (USD)"
+      },
+      "minPassAt1": {
+        "label": "Min pass@1"
+      },
+      "minPassHatK": {
+        "label": "Min pass^k"
+      },
+      "minScorerPassRate": {
+        "label": "Min per-scorer pass rate"
+      },
+      "runId": {
+        "hint": "Eval run to judge. Wire '{{ $node['…'].out.runIds[0] }}' from an upstream Run eval node.",
+        "label": "Run id",
+        "placeholder": "evrun_…"
+      }
+    },
+    "run": {
+      "capabilities": {
+        "label": "Capabilities (comma-separated)"
+      },
+      "characterId": {
+        "label": "Character id (optional)",
+        "placeholder": "char_…"
+      },
+      "datasetId": {
+        "hint": "Eval dataset to run. Supports '{{ }}' expressions.",
+        "label": "Dataset id",
+        "placeholder": "evds_…"
+      },
+      "k": {
+        "hint": "Repetitions per case for pass^k reliability.",
+        "label": "Repetitions (k)"
+      },
+      "label": {
+        "hint": "Shown on the report. Defaults to the target ref.",
+        "label": "Run label"
+      },
+      "model": {
+        "hint": "Chat target model id.",
+        "label": "Model",
+        "placeholder": "claude-opus-4-8"
+      },
+      "scorerIds": {
+        "hint": "Comma-separated scorer ids. Empty = all scorers.",
+        "label": "Scorers",
+        "placeholder": "assertion, cost"
+      },
+      "split": {
+        "label": "Split filter"
+      },
+      "targetKind": {
+        "chat": "Chat model",
+        "label": "Target kind",
+        "team": "Agent team",
+        "workflow": "Workflow"
+      },
+      "teamId": {
+        "label": "Team id",
+        "placeholder": "team_…"
+      },
+      "workflowId": {
+        "label": "Workflow id",
+        "placeholder": "wf_…"
+      }
+    }
+  },
+  "genericJson": {
+    "errorInvalidJson": "Invalid JSON",
+    "errorTopLevelObject": "Top-level must be a JSON object",
+    "params": {
+      "hint": "Edit the raw params object. Invalid JSON is not saved.",
+      "label": "Params (JSON)"
+    }
+  },
+  "git": {
+    "branch": {
+      "checkout": {
+        "hint": "Switch the working tree to the new branch once it is created.",
+        "label": "Check out after create"
+      },
+      "from": {
+        "hint": "Optional start point (branch, tag, or commit). Defaults to HEAD.",
+        "label": "Create from",
+        "placeholder": "main"
+      },
+      "name": {
+        "hint": "Required. Supports '{{ }}' expressions.",
+        "label": "Branch name",
+        "placeholder": "feat/my-feature"
+      }
+    },
+    "commit": {
+      "message": {
+        "hint": "Required. Supports '{{ }}' expressions.",
+        "label": "Commit message",
+        "placeholder": "feat: describe the change"
+      },
+      "signoff": {
+        "hint": "Append a Signed-off-by trailer to the commit message.",
+        "label": "Add Signed-off-by"
+      }
+    },
+    "push": {
+      "branch": {
+        "hint": "Defaults to the current branch. Supports '{{ }}' expressions.",
+        "label": "Branch",
+        "placeholder": "main"
+      },
+      "remote": {
+        "hint": "Defaults to origin. Supports '{{ }}' expressions.",
+        "label": "Remote",
+        "placeholder": "origin"
+      },
+      "setUpstream": {
+        "hint": "Pass -u so the local branch tracks the pushed remote branch.",
+        "label": "Set upstream"
+      }
+    },
+    "repoPath": {
+      "hint": "Optional. Defaults to the active workspace root. Supports '{{ }}' expressions.",
+      "label": "Repository path",
+      "placeholder": "D:/Projects/my-repo"
+    },
+    "stage": {
+      "paths": {
+        "hint": "Comma-separated file paths or globs. Leave empty to stage all changes.",
+        "label": "Paths to stage",
+        "placeholder": "src/index.ts, docs/*.md"
+      }
+    }
+  },
+  "goalAnalytics": {
+    "limit": {
+      "hint": "Maximum rows.",
+      "label": "Limit"
+    },
+    "scope": {
+      "label": "Scope",
+      "options": {
+        "all": "All goals",
+        "session": "Goals by session"
+      }
+    },
+    "sessionId": {
+      "hint": "Required for session scope.",
+      "label": "Session id"
+    },
+    "windowDays": {
+      "hint": "Timeline look-back window.",
+      "label": "Window (days)"
+    }
+  },
+  "goalCommon": {
+    "goalId": {
+      "hint": "Target goal id.",
+      "label": "Goal id",
+      "placeholder": "goal_"
+    }
+  },
+  "goalCompletedTrigger": {
+    "characterId": {
+      "label": "Character (optional)"
+    },
+    "goalId": {
+      "hint": "Limit to a specific goal. Empty fires for every goal that finishes.",
+      "label": "Goal id (optional)"
+    },
+    "sessionId": {
+      "hint": "Limit to goals started in a single chat session.",
+      "label": "Session id (optional)"
+    },
+    "status": {
+      "hint": "Limit to one outcome, e.g. completed, stopped, budget, turn, timeout. Empty fires on any.",
+      "label": "Terminal status (optional)",
+      "placeholder": "completed"
+    }
+  },
+  "goalCreate": {
+    "characterId": {
+      "label": "Character (optional)"
+    },
+    "configJson": {
+      "hint": "Partial GoalConfig override.",
+      "label": "Config JSON"
+    },
+    "rawObjective": {
+      "hint": "Original objective; runtime redacts it before prompting.",
+      "label": "Objective",
+      "placeholder": "Ship the release"
+    },
+    "sessionId": {
+      "hint": "Chat session to drive.",
+      "label": "Session id",
+      "placeholder": "ses_"
+    },
+    "startPaused": {
+      "hint": "Create without auto-driving.",
+      "label": "Start paused"
+    }
+  },
+  "goalEvents": {
+    "limit": {
+      "hint": "Maximum events.",
+      "label": "Limit"
+    }
+  },
+  "goalList": {
+    "limit": {
+      "hint": "Maximum rows.",
+      "label": "Limit"
+    },
+    "mode": {
+      "label": "Read mode",
+      "options": {
+        "activeForSession": "Active for session",
+        "all": "All goals",
+        "openForSession": "Open for session",
+        "session": "Goals by session"
+      }
+    },
+    "sessionId": {
+      "hint": "Required for session modes.",
+      "label": "Session id"
+    }
+  },
+  "goalTemplateCommon": {
+    "templateId": {
+      "hint": "Target goal template id.",
+      "label": "Template id",
+      "placeholder": "gtpl_"
+    }
+  },
+  "goalTemplateCreateGoal": {
+    "characterId": {
+      "label": "Character (optional)"
+    },
+    "sessionId": {
+      "hint": "Chat session to drive.",
+      "label": "Session id",
+      "placeholder": "ses_"
+    }
+  },
+  "goalTemplateFavorite": {
+    "isFavorite": {
+      "hint": "Set the template favorite state.",
+      "label": "Favorite"
+    }
+  },
+  "goalTemplateList": {
+    "favoriteOnly": {
+      "hint": "Only return favorite templates.",
+      "label": "Favorites only"
+    },
+    "includeBuiltIn": {
+      "hint": "Include seeded built-in templates.",
+      "label": "Include built-ins"
+    },
+    "limit": {
+      "hint": "Maximum rows.",
+      "label": "Limit"
+    },
+    "query": {
+      "hint": "Match by id, title, or objective text.",
+      "label": "Search",
+      "placeholder": "release"
+    }
+  },
+  "goalTemplateUpsert": {
+    "configJson": {
+      "hint": "Partial GoalConfig override.",
+      "label": "Config JSON"
+    },
+    "isFavorite": {
+      "hint": "Pin this template near the top of pickers.",
+      "label": "Favorite"
+    },
+    "objectiveText": {
+      "hint": "Objective used when creating a goal from the template.",
+      "label": "Objective",
+      "placeholder": "Review the release"
+    },
+    "sortOrder": {
+      "hint": "Lower values sort earlier.",
+      "label": "Sort order"
+    },
+    "title": {
+      "hint": "Short template title.",
+      "label": "Title",
+      "placeholder": "Release review"
+    }
+  },
+  "goalToggleSubgoal": {
+    "subgoalId": {
+      "hint": "Checklist item id.",
+      "label": "Subgoal id",
+      "placeholder": "sub_"
+    }
+  },
+  "goalUpdateConfig": {
+    "configJson": {
+      "hint": "Partial GoalConfig patch.",
+      "label": "Config JSON"
+    }
+  },
+  "goalUpdateObjective": {
+    "rawObjective": {
+      "hint": "Replacement objective.",
+      "label": "New objective"
+    }
+  },
+  "groupAnnotation": {
+    "color": {
+      "label": "Color token",
+      "options": {
+        "amber": "Amber",
+        "cyan": "Cyan",
+        "emerald": "Emerald",
+        "rose": "Rose",
+        "sky": "Sky",
+        "violet": "Violet",
+        "zinc": "Zinc"
+      }
+    },
+    "height": {
+      "label": "Height (px)"
+    },
+    "title": {
+      "label": "Title",
+      "placeholder": "Validation pipeline"
+    },
+    "width": {
+      "label": "Width (px)"
+    }
+  },
+  "httpRequest": {
+    "body": {
+      "hint": "Sent as application/json.",
+      "label": "Body"
+    },
+    "followRedirects": {
+      "hint": "If off, returns the redirect status without following.",
+      "label": "Follow redirects"
+    },
+    "method": {
+      "label": "Method"
+    },
+    "url": {
+      "hint": "Supports '{{ }}' expressions.",
+      "label": "URL",
+      "placeholder": "https://api.example.com/v1/things"
+    }
+  },
+  "join": {
+    "aggregate": {
+      "hint": "Reduce the joined branch outputs in one step.",
+      "label": "Aggregate gathered results"
+    },
+    "joinPolicy": {
+      "label": "Join policy",
+      "options": {
+        "all": "All — wait for every parent",
+        "any": "Any — proceed when any parent succeeds",
+        "race": "Race — first parent's output wins"
+      }
+    },
+    "timeoutMs": {
+      "hint": "0 = wait forever. Otherwise abort the join after this long.",
+      "label": "Timeout (ms, optional)"
+    }
+  },
+  "loop": {
+    "bodyExpression": {
+      "hint": "Per-iteration value. $item is the current array element (forEach mode).",
+      "label": "Body expression",
+      "placeholder": "$item.name"
+    },
+    "inputExpression": {
+      "hint": "Resolves to the array to iterate. If empty, the first upstream output is used.",
+      "label": "Input expression",
+      "placeholder": "'{{ $node[''n_search''].out.results }}'"
+    },
+    "maxIterations": {
+      "hint": "Hard cap. Loop breaks early at this count.",
+      "label": "Max iterations"
+    },
+    "mode": {
+      "label": "Mode",
+      "options": {
+        "forEach": "For each item in array",
+        "times": "Repeat N times",
+        "while": "While condition is truthy"
+      }
+    },
+    "times": {
+      "label": "Times"
+    },
+    "whileCondition": {
+      "hint": "Re-evaluated each iteration. Loop ends when this is falsy or maxIterations is reached.",
+      "label": "While condition"
+    }
+  },
+  "loopJump": {
+    "breakIntro": "Stops the innermost loop after the current iteration. No configuration needed.",
+    "continueIntro": "Skips the rest of the current iteration. No configuration needed."
+  },
+  "loopV2": {
+    "batchSize": {
+      "hint": "Groups items into sequential batches; items inside a batch run with the parallel-iterations setting. Empty = one batch.",
+      "label": "Batch size",
+      "placeholder": "10"
+    },
+    "conditionTiming": {
+      "hint": "\"Check after\" runs the body once before the first check — a do-while loop. Both timings continue while truthy.",
+      "label": "Condition timing",
+      "post": "Check after (do-while)",
+      "pre": "Check before (while)"
+    },
+    "intro": "Container loop: drag nodes inside to build the body. Each iteration exposes $item and $loop; the output expression decides what gets collected.",
+    "iterationConcurrency": {
+      "hint": "Max iterations in flight (bounded by the global gate of 16).",
+      "label": "Parallel iterations"
+    },
+    "maxIterations": {
+      "hint": "Hard cap; guards against runaway loops.",
+      "label": "Max iterations",
+      "placeholder": "1000"
+    },
+    "mode": {
+      "forEach": "For each item",
+      "label": "Mode",
+      "times": "Fixed count",
+      "while": "While condition"
+    },
+    "onItemError": {
+      "break": "Stop & keep partial output",
+      "fail": "Fail the loop",
+      "hint": "Backstop when an iteration errors out (after the node's own error handling). Skipped failures are collected into errors[].",
+      "label": "On iteration error",
+      "skip": "Skip & collect error"
+    },
+    "output": {
+      "hint": "Evaluated after each iteration; the result is pushed into items[]. Defaults to the iteration index.",
+      "label": "Output mapping",
+      "placeholder": "'{{ $node[''n_body''].value }}'"
+    },
+    "source": {
+      "hint": "Expression resolving to the array to iterate.",
+      "label": "Source",
+      "placeholder": "'{{ $node[''n1''].items }}'"
+    },
+    "times": {
+      "hint": "A number or an expression resolving to one.",
+      "label": "Iterations"
+    },
+    "whileExpression": {
+      "hint": "Re-evaluated before each round; runs while truthy. Combine with $static.",
+      "label": "While condition",
+      "placeholder": "'{{ $static.keepGoing }}'"
+    }
+  },
+  "manualTrigger": {
+    "inputSchema": {
+      "hint": "Declares the run payload ($trigger.payload) for publishing this workflow as a callable unit.",
+      "label": "Input schema (optional)"
+    },
+    "intro": "Fires when you click the Run button in the editor. No additional configuration."
+  },
+  "mcpInvokeTool": {
+    "argsJson": {
+      "hint": "Forwarded as the tool call's arguments. Supports expressions.",
+      "label": "Arguments (JSON)"
+    },
+    "serverId": {
+      "label": "MCP server"
+    },
+    "toolName": {
+      "empty": "No tools discovered — type the tool name.",
+      "label": "Tool name",
+      "loading": "Discovering tools…",
+      "placeholder": "search_repos",
+      "probeError": "Couldn't reach the server — type the tool name."
+    }
+  },
+  "memoryRecall": {
+    "agentId": {
+      "label": "Agent ID"
+    },
+    "branch": {
+      "label": "Branch restriction"
+    },
+    "characterId": {
+      "label": "Character"
+    },
+    "path": {
+      "label": "Workspace-relative path"
+    },
+    "projectId": {
+      "label": "Project ID"
+    },
+    "query": {
+      "label": "Query"
+    },
+    "scope": {
+      "agent": "Agent",
+      "character": "Character",
+      "global": "Global",
+      "label": "Scope",
+      "workspace": "Workspace"
+    },
+    "topK": {
+      "label": "Top K"
+    }
+  },
+  "memoryStore": {
+    "agentId": {
+      "label": "Agent ID"
+    },
+    "branch": {
+      "label": "Branch restriction"
+    },
+    "characterId": {
+      "label": "Character"
+    },
+    "importance": {
+      "hint": "How defining this fact is. /remember uses 7.",
+      "label": "Importance (1–10)"
+    },
+    "piiGate": {
+      "block": "Block (fail the step)",
+      "hint": "Memories persist durably — block (fail on PII) or redact placeholders. Cannot be disabled.",
+      "label": "PII gate",
+      "redact": "Redact placeholders"
+    },
+    "pathPattern": {
+      "label": "Workspace-relative path prefix"
+    },
+    "projectId": {
+      "label": "Project ID"
+    },
+    "scope": {
+      "agent": "Agent",
+      "character": "Character",
+      "global": "Global",
+      "label": "Scope",
+      "workspace": "Workspace"
+    },
+    "text": {
+      "hint": "One self-contained statement. Deduped against existing memories via the consolidator.",
+      "label": "Fact"
+    }
+  },
+  "mobileCamera": {
+    "quality": {
+      "label": "JPEG quality (1–100)"
+    },
+    "width": {
+      "label": "Max width (px)"
+    }
+  },
+  "mobileLocation": {
+    "enableHighAccuracy": {
+      "label": "High accuracy (GPS)"
+    }
+  },
+  "mobileNotify": {
+    "body": {
+      "label": "Body"
+    },
+    "title": {
+      "label": "Title"
+    }
+  },
+  "mobileScanBarcode": {
+    "formats": {
+      "hint": "Comma-separated (e.g. QR_CODE, EAN_13). Empty = QR only.",
+      "label": "Formats"
+    }
+  },
+  "mobileShare": {
+    "text": {
+      "hint": "Text or URL is required.",
+      "label": "Text"
+    },
+    "title": {
+      "label": "Title (optional)"
+    },
+    "url": {
+      "label": "URL (optional)"
+    }
+  },
+  "mobileStep": {
+    "deviceId": {
+      "hint": "Empty = any capable paired device (freshest first).",
+      "label": "Device ID (optional)"
+    },
+    "timeoutMs": {
+      "label": "Timeout (ms)"
+    }
+  },
+  "note": {
+    "color": {
+      "ariaGroup": "Note color",
+      "label": "Color",
+      "options": {
+        "blue": "Blue",
+        "green": "Green",
+        "pink": "Pink",
+        "violet": "Violet",
+        "yellow": "Yellow"
+      }
+    },
+    "text": {
+      "label": "Note text"
+    }
+  },
+  "ocr": {
+    "dataUrl": {
+      "hint": "Inline data: URL of the image. Supports '{{ }}' expressions.",
+      "label": "Data URL",
+      "placeholder": "data:image/png;base64,…"
+    },
+    "format": {
+      "hint": "How the extracted text is returned to the workflow.",
+      "label": "Output format",
+      "options": {
+        "blocks": "Structured blocks",
+        "markdown": "Markdown",
+        "text": "Plain text"
+      }
+    },
+    "imageBase64": {
+      "hint": "Raw base64-encoded image bytes. Supports '{{ }}' expressions.",
+      "label": "Image base64",
+      "placeholder": "iVBORw0KGgo…"
+    },
+    "languages": {
+      "hint": "Comma-separated language hints passed to the OCR engine.",
+      "label": "Languages",
+      "placeholder": "en, zh"
+    },
+    "pageRange": {
+      "hint": "For PDFs. Example: 1-3,5. Leave empty for all pages.",
+      "label": "Page range",
+      "placeholder": "1-3,5"
+    },
+    "provider": {
+      "hint": "Optional OCR provider id. Leave empty to let the auto-router pick.",
+      "label": "Provider",
+      "placeholder": "auto"
+    },
+    "screen": {
+      "hint": "Run OCR on a fresh screenshot instead of a provided image.",
+      "label": "Capture screen"
+    },
+    "url": {
+      "hint": "Remote file to extract text from. Supports '{{ }}' expressions.",
+      "label": "Image / PDF URL",
+      "placeholder": "https://example.com/scan.pdf"
+    }
+  },
+  "output": {
+    "onSchemaViolation": {
+      "fail": "Fail the run",
+      "hint": "What to do if the output value fails the schema.",
+      "label": "On schema violation",
+      "soft": "Pass through with a warning"
+    },
+    "outputSchema": {
+      "hint": "The published interface's output contract.",
+      "label": "Output schema"
+    },
+    "value": {
+      "hint": "Expression for the terminal output. Empty = the upstream value.",
+      "label": "Output value"
+    }
+  },
+  "outputSchema": {
+    "addField": "Add field",
+    "editFields": "Edit as fields",
+    "editRaw": "Edit as JSON",
+    "empty": "No fields yet — add one to enforce typed output.",
+    "fieldDescription": "Description",
+    "fieldDescriptionPlaceholder": "What this field means (helps the model)",
+    "fieldName": "Field name",
+    "fieldNamePlaceholder": "e.g. verdict",
+    "fieldType": "Type",
+    "hint": "Declare a JSON schema the reply must satisfy. Leave empty for free-form text.",
+    "onSchemaViolation": {
+      "fail": "Fail the step",
+      "hint": "What to do if the output still fails the schema after one auto-fix retry.",
+      "label": "On schema violation",
+      "soft": "Keep unvalidated output"
+    },
+    "rawLabel": "JSON Schema",
+    "removeField": "Remove field",
+    "required": "Required",
+    "sectionTitle": "Typed output"
+  },
+  "petEventTrigger": {
+    "cooldownMs": {
+      "hint": "Minimum time between fires for the same workflow. Prevents workflows from retriggering themselves.",
+      "label": "Cooldown (ms)"
+    },
+    "intro": "Fires when the desktop pet reaches a supported lifecycle event.",
+    "kinds": {
+      "hint": "Leave all off to fire on every supported pet lifecycle event.",
+      "label": "Pet events",
+      "options": {
+        "achievementUnlocked": "Achievement unlocked",
+        "evolved": "Evolved",
+        "levelUp": "Level up",
+        "unwell": "Unwell"
+      }
+    }
+  },
+  "petInteract": {
+    "itemId": {
+      "hint": "Optional shop item id consumed by the pet controller.",
+      "label": "Item id",
+      "placeholder": "pet_item_..."
+    },
+    "kind": {
+      "label": "Interaction",
+      "options": {
+        "cleaned": "Clean",
+        "fed": "Feed",
+        "petted": "Pet",
+        "played": "Play",
+        "slept": "Sleep",
+        "talked": "Talk",
+        "treated": "Treat"
+      }
+    }
+  },
+  "pickers": {
+    "adapterInstance": "Select an adapter instance",
+    "character": "Select a character",
+    "mcpServer": "Select an MCP server",
+    "noResults": "No matches",
+    "none": "None",
+    "plugin": "Select a plugin",
+    "skill": "Select a skill",
+    "skillNew": "Create new",
+    "skillNoneItem": "— create new —",
+    "subworkflow": "Select a workflow",
+    "team": "Select a team",
+    "twin": "Select a twin",
+    "useExpression": "Use expression",
+    "usePicker": "Pick from list"
+  },
+  "planCommon": {
+    "planId": {
+      "hint": "Target AgentPlan id.",
+      "label": "Plan id",
+      "placeholder": "plan_"
+    }
+  },
+  "planCreate": {
+    "characterId": {
+      "label": "Character (optional)"
+    },
+    "configJson": {
+      "hint": "Partial PlanConfig override.",
+      "label": "Config JSON"
+    },
+    "description": {
+      "hint": "Optional plan context.",
+      "label": "Description"
+    },
+    "executionMode": {
+      "label": "Execution mode",
+      "options": {
+        "auto": "Auto",
+        "in_session": "In session",
+        "orchestrated": "Orchestrated"
+      }
+    },
+    "metadataJson": {
+      "hint": "Structured plan metadata.",
+      "label": "Metadata JSON"
+    },
+    "sessionId": {
+      "hint": "Chat session that owns the plan.",
+      "label": "Session id",
+      "placeholder": "ses_"
+    },
+    "source": {
+      "label": "Source",
+      "options": {
+        "agent_tool": "Agent tool",
+        "exit_plan_mode": "Exit plan mode",
+        "goal_projection": "Goal projection",
+        "manual": "Manual",
+        "planner_llm": "Planner LLM",
+        "team_projection": "Team projection"
+      }
+    },
+    "stepsJson": {
+      "hint": "Array of CreatePlanStepInput rows.",
+      "label": "Steps JSON"
+    },
+    "title": {
+      "hint": "Plan title shown in trackers.",
+      "label": "Title",
+      "placeholder": "Ship feature"
+    }
+  },
+  "planEvents": {
+    "limit": {
+      "hint": "Maximum events.",
+      "label": "Limit"
+    }
+  },
+  "planList": {
+    "limit": {
+      "hint": "Maximum rows.",
+      "label": "Limit"
+    },
+    "mode": {
+      "label": "Read mode",
+      "options": {
+        "all": "All plans",
+        "executingForSession": "Executing for session",
+        "openForSession": "Open for session",
+        "session": "Plans by session"
+      }
+    },
+    "projectId": {
+      "hint": "Override the active workspace scope.",
+      "label": "Project id (optional)"
+    },
+    "sessionId": {
+      "hint": "Required for session-scoped modes.",
+      "label": "Session id"
+    },
+    "status": {
+      "label": "Status filter",
+      "options": {
+        "any": "Any",
+        "approved": "Approved",
+        "awaiting_approval": "Awaiting approval",
+        "cancelled": "Cancelled",
+        "completed": "Completed",
+        "draft": "Draft",
+        "executing": "Executing",
+        "failed": "Failed",
+        "paused": "Paused"
+      }
+    }
+  },
+  "planRefine": {
+    "customInstructions": {
+      "hint": "Additional instruction passed to the planner.",
+      "label": "Custom instructions"
+    },
+    "failedStepId": {
+      "hint": "Optional failing step id for repair flows.",
+      "label": "Failed step id"
+    },
+    "refinementType": {
+      "label": "Refinement type",
+      "options": {
+        "expand": "Expand",
+        "optimize": "Optimize",
+        "reorder": "Reorder",
+        "repair": "Repair",
+        "simplify": "Simplify"
+      }
+    },
+    "trigger": {
+      "label": "Trigger",
+      "options": {
+        "judge_deviation": "Judge deviation",
+        "manual": "Manual",
+        "step_failure": "Step failure"
+      }
+    }
+  },
+  "planReject": {
+    "feedback": {
+      "hint": "Reason recorded on the rejection event.",
+      "label": "Feedback"
+    }
+  },
+  "planSetStepStatus": {
+    "attempts": {
+      "hint": "Retry counter.",
+      "label": "Attempts"
+    },
+    "error": {
+      "hint": "Failure summary.",
+      "label": "Error"
+    },
+    "outputJson": {
+      "hint": "Structured step output.",
+      "label": "Output JSON"
+    },
+    "result": {
+      "hint": "Short result summary.",
+      "label": "Result"
+    },
+    "status": {
+      "label": "Status",
+      "options": {
+        "blocked": "Blocked",
+        "completed": "Completed",
+        "failed": "Failed",
+        "in_progress": "In progress",
+        "pending": "Pending",
+        "ready": "Ready",
+        "skipped": "Skipped"
+      }
+    },
+    "stepId": {
+      "hint": "Target plan step id.",
+      "label": "Step id",
+      "placeholder": "step_"
+    }
+  },
+  "planUpdateDraft": {
+    "configJson": {
+      "hint": "Partial PlanConfig patch.",
+      "label": "Config JSON"
+    },
+    "description": {
+      "hint": "Replacement description.",
+      "label": "Description"
+    },
+    "executionMode": {
+      "label": "Execution mode",
+      "options": {
+        "auto": "Auto",
+        "in_session": "In session",
+        "orchestrated": "Orchestrated",
+        "unchanged": "Unchanged"
+      }
+    },
+    "metadataJson": {
+      "hint": "Replacement metadata object.",
+      "label": "Metadata JSON"
+    },
+    "stepsJson": {
+      "hint": "Full PlanStep array for draft replacement.",
+      "label": "Steps JSON"
+    },
+    "title": {
+      "hint": "Replacement title.",
+      "label": "Title"
+    }
+  },
+  "pluginInvoke": {
+    "argsJson": {
+      "hint": "Forwarded to the plugin task handler.",
+      "label": "Arguments (JSON)",
+      "toolHint": "Expected fields: {fields}"
+    },
+    "mode": {
+      "label": "Mode",
+      "options": {
+        "task": "Task handler (legacy)",
+        "tool": "Plugin tool"
+      }
+    },
+    "pluginId": {
+      "label": "Plugin",
+      "toolPlaceholder": "Select an enabled plugin"
+    },
+    "taskId": {
+      "label": "Task id",
+      "placeholder": "generate-report"
+    },
+    "toolName": {
+      "empty": "Select a plugin first",
+      "label": "Tool",
+      "placeholder": "Select a tool"
+    }
+  },
+  "schedulerEventTrigger": {
+    "eventSource": {
+      "hint": "Optional scheduler event source.",
+      "label": "Event source"
+    },
+    "eventType": {
+      "hint": "Scheduler event type to fan out.",
+      "label": "Event type"
+    },
+    "payloadJson": {
+      "hint": "Optional event payload object.",
+      "label": "Payload JSON"
+    }
+  },
+  "schedulerExecutionGet": {
+    "executionId": {
+      "hint": "Target scheduler execution id.",
+      "label": "Execution id",
+      "placeholder": "exec_"
+    }
+  },
+  "schedulerExecutionsRecent": {
+    "limit": {
+      "hint": "Maximum recent execution rows.",
+      "label": "Limit"
+    }
+  },
+  "schedulerTaskBackfill": {
+    "end": {
+      "hint": "ISO timestamp where the backfill window ends.",
+      "label": "End"
+    },
+    "start": {
+      "hint": "ISO timestamp where the backfill window starts.",
+      "label": "Start"
+    }
+  },
+  "schedulerTaskCommon": {
+    "taskId": {
+      "hint": "Target scheduled task id.",
+      "label": "Task id",
+      "placeholder": "task_"
+    }
+  },
+  "schedulerTaskCreate": {
+    "configJson": {
+      "hint": "Partial TaskExecutionConfig override.",
+      "label": "Config JSON"
+    },
+    "cronExpression": {
+      "hint": "Standard five-field cron expression.",
+      "label": "Cron"
+    },
+    "dependsOnRaw": {
+      "hint": "Comma-separated task ids that must complete first.",
+      "label": "Dependencies"
+    },
+    "description": {
+      "hint": "Optional task description.",
+      "label": "Description"
+    },
+    "endAt": {
+      "hint": "Optional ISO date after which the task expires.",
+      "label": "End at"
+    },
+    "eventType": {
+      "hint": "Scheduler event type for event-triggered tasks.",
+      "label": "Event type"
+    },
+    "intervalMs": {
+      "hint": "Milliseconds between interval fires.",
+      "label": "Interval (ms)"
+    },
+    "jitterMs": {
+      "hint": "Maximum random delay added to each armed fire.",
+      "label": "Jitter (ms)"
+    },
+    "name": {
+      "hint": "Scheduled task name.",
+      "label": "Name",
+      "placeholder": "Nightly run"
+    },
+    "notificationJson": {
+      "hint": "Partial TaskNotificationConfig override.",
+      "label": "Notification JSON"
+    },
+    "onFailureTaskIdsRaw": {
+      "hint": "Comma-separated task ids fired after failure.",
+      "label": "On failure"
+    },
+    "onSuccessTaskIdsRaw": {
+      "hint": "Comma-separated task ids fired after success.",
+      "label": "On success"
+    },
+    "payloadJson": {
+      "hint": "ScheduledTaskPayload object passed to the task executor.",
+      "label": "Payload JSON"
+    },
+    "runAt": {
+      "hint": "ISO date for a one-time trigger.",
+      "label": "Run at"
+    },
+    "tagsRaw": {
+      "hint": "Comma-separated task tags.",
+      "label": "Tags"
+    },
+    "timezone": {
+      "hint": "Timezone used by cron expressions.",
+      "label": "Timezone"
+    },
+    "triggerType": {
+      "label": "Trigger",
+      "options": {
+        "cron": "Cron",
+        "event": "Event",
+        "interval": "Interval",
+        "once": "Once"
+      }
+    },
+    "type": {
+      "label": "Task type",
+      "options": {
+        "agent": "Agent",
+        "agent-team": "Agent team",
+        "ai-generation": "AI generation",
+        "backup": "Backup",
+        "chat": "Chat",
+        "connection:outbound:send": "Connector outbound send",
+        "connection:scheduled:digest": "Connector digest",
+        "custom": "Custom",
+        "external-agent": "External agent",
+        "goal": "Goal",
+        "im-push": "IM push",
+        "plan": "Plan",
+        "plugin": "Plugin",
+        "script": "Script",
+        "skill": "Skill",
+        "sync": "Sync",
+        "test": "Test",
+        "twin": "Twin",
+        "wiki-rebuild": "Wiki rebuild",
+        "workflow": "Workflow"
+      }
+    }
+  },
+  "schedulerTaskExecutions": {
+    "limit": {
+      "hint": "Maximum execution rows.",
+      "label": "Limit"
+    }
+  },
+  "schedulerTaskExport": {
+    "taskIdsRaw": {
+      "hint": "Comma-separated task ids. Leave empty to export every task.",
+      "label": "Task ids"
+    }
+  },
+  "schedulerTaskImport": {
+    "dataJson": {
+      "hint": "Scheduler task export bundle JSON.",
+      "label": "Import JSON"
+    },
+    "mode": {
+      "label": "Mode",
+      "options": {
+        "merge": "Merge",
+        "replace": "Replace"
+      }
+    }
+  },
+  "schedulerTaskList": {
+    "limit": {
+      "hint": "Maximum tasks.",
+      "label": "Limit"
+    },
+    "search": {
+      "hint": "Match task name or description.",
+      "label": "Search"
+    },
+    "statusesRaw": {
+      "hint": "Comma-separated statuses: active, paused, disabled, expired.",
+      "label": "Statuses"
+    },
+    "tagsRaw": {
+      "hint": "Comma-separated tags.",
+      "label": "Tags"
+    },
+    "typesRaw": {
+      "hint": "Comma-separated task types.",
+      "label": "Types"
+    }
+  },
+  "schedulerTaskUpdate": {
+    "configJson": {
+      "hint": "Partial TaskExecutionConfig patch.",
+      "label": "Config JSON"
+    },
+    "cronExpression": {
+      "hint": "Replacement cron expression.",
+      "label": "Cron"
+    },
+    "dependsOnRaw": {
+      "hint": "Comma-separated dependency task ids.",
+      "label": "Dependencies"
+    },
+    "description": {
+      "hint": "Replacement description.",
+      "label": "Description"
+    },
+    "endAt": {
+      "hint": "Optional ISO date after which the task expires.",
+      "label": "End at"
+    },
+    "eventType": {
+      "hint": "Scheduler event type.",
+      "label": "Event type"
+    },
+    "intervalMs": {
+      "hint": "Replacement interval in milliseconds.",
+      "label": "Interval (ms)"
+    },
+    "jitterMs": {
+      "hint": "Replacement maximum random delay.",
+      "label": "Jitter (ms)"
+    },
+    "name": {
+      "hint": "Replacement task name.",
+      "label": "Name"
+    },
+    "notificationJson": {
+      "hint": "Partial notification patch.",
+      "label": "Notification JSON"
+    },
+    "onFailureTaskIdsRaw": {
+      "hint": "Comma-separated task ids fired after failure.",
+      "label": "On failure"
+    },
+    "onSuccessTaskIdsRaw": {
+      "hint": "Comma-separated task ids fired after success.",
+      "label": "On success"
+    },
+    "payloadJson": {
+      "hint": "Payload patch merged by task type normalization.",
+      "label": "Payload JSON"
+    },
+    "runAt": {
+      "hint": "Replacement ISO run date.",
+      "label": "Run at"
+    },
+    "status": {
+      "label": "Status",
+      "options": {
+        "active": "Active",
+        "disabled": "Disabled",
+        "expired": "Expired",
+        "paused": "Paused",
+        "unchanged": "Unchanged"
+      }
+    },
+    "tagsRaw": {
+      "hint": "Comma-separated replacement tags.",
+      "label": "Tags"
+    },
+    "timezone": {
+      "hint": "Replacement cron timezone.",
+      "label": "Timezone"
+    },
+    "triggerType": {
+      "label": "Trigger",
+      "options": {
+        "cron": "Cron",
+        "event": "Event",
+        "interval": "Interval",
+        "once": "Once",
+        "unchanged": "Unchanged"
+      }
+    }
+  },
+  "schedulerUpcoming": {
+    "limit": {
+      "hint": "Maximum upcoming task fires.",
+      "label": "Limit"
+    }
+  },
+  "setVariable": {
+    "value": {
+      "hint": "Expression. Stored on the run's static data.",
+      "label": "Value"
+    },
+    "variable": {
+      "label": "Variable name",
+      "placeholder": "counter"
+    }
+  },
+  "skillInvoke": {
+    "skillIds": {
+      "hint": "The selected skills are appended to the next downstream AI prompt.",
+      "label": "Skill ids (comma-separated)",
+      "placeholder": "skill_writing, skill_research"
+    }
+  },
+  "skillUpsert": {
+    "content": {
+      "hint": "The skill body. Supports expressions; rendered into AI prompts when invoked.",
+      "label": "Markdown body"
+    },
+    "description": {
+      "label": "Description"
+    },
+    "name": {
+      "label": "Name",
+      "placeholder": "Research framework"
+    },
+    "skillId": {
+      "hint": "If set, updates that skill. Otherwise creates a new one.",
+      "label": "Skill id (optional)"
+    },
+    "tagsRaw": {
+      "hint": "Comma separated",
+      "label": "Tags",
+      "placeholder": "research, planning"
+    }
+  },
+  "split": {
+    "branchLabels": {
+      "addBranch": "Add branch",
+      "branchPlaceholder": "Branch {n}",
+      "hint": "Each label corresponds to one outgoing edge from this split.",
+      "label": "Branch labels",
+      "removeBranch": "Remove branch"
+    }
+  },
+  "subworkflow": {
+    "inputJson": {
+      "hint": "Forwarded as the subworkflow's trigger payload.",
+      "label": "Input (JSON)"
+    },
+    "typedInput": {
+      "hint": "Fields generated from the published target's declared input schema. Values are validated against it at run time.",
+      "label": "Typed input"
+    },
+    "workflowId": {
+      "label": "Sub workflow"
+    }
+  },
+  "switch": {
+    "cases": {
+      "addCase": "Add case",
+      "hint": "First match wins. Strict equality.",
+      "label": "Cases",
+      "labelPlaceholder": "label",
+      "removeCase": "Remove case",
+      "valuePlaceholder": "value"
+    },
+    "defaultLabel": {
+      "label": "Default label"
+    },
+    "subject": {
+      "hint": "Expression evaluated and matched against cases.",
+      "label": "Subject",
+      "placeholder": "'{{ $node[''n_classify''].out.label }}'"
+    }
+  },
+  "switchV2": {
+    "cases": {
+      "addCase": "Add case",
+      "caseLabelPlaceholder": "Case label",
+      "caseTitle": "Case {index}",
+      "hint": "Evaluated top to bottom — the first matching case wins; otherwise the default handle.",
+      "label": "Cases",
+      "removeCase": "Remove case"
+    }
+  },
+  "systemTerminal": {
+    "command": {
+      "hint": "Typed into the active dock tab (or a freshly spawned one). The shell tokenizes the line.",
+      "label": "Command",
+      "placeholder": "pnpm test --filter @cognia/twin"
+    },
+    "cwd": {
+      "hint": "Optional. Defaults to the dock tab's cwd.",
+      "label": "Working directory",
+      "placeholder": "/repo"
+    },
+    "onFailure": {
+      "hint": "How to react when the command exits with a non-zero code.",
+      "label": "On non-zero exit",
+      "options": {
+        "branch": "Route to the failure port",
+        "throw": "Fail the workflow step"
+      }
+    },
+    "shell": {
+      "hint": "Leave empty to inherit settings.terminal.defaultShell.",
+      "label": "Shell (override)",
+      "placeholder": "/bin/bash"
+    },
+    "tabId": {
+      "hint": "When set, types into this tab. Empty spawns a fresh one.",
+      "label": "Tab id (reuse existing)",
+      "placeholder": "Empty to spawn a new tab"
+    },
+    "timeoutSec": {
+      "hint": "5–600. Defaults to the user's runInDockTimeoutSec setting.",
+      "label": "Timeout (seconds)"
+    }
+  },
+  "teamCompose": {
+    "autoStart": {
+      "hint": "Run the team lifecycle immediately after composition and wait for the terminal state.",
+      "label": "Start immediately"
+    },
+    "maxRoster": {
+      "label": "Max roster size (incl. lead)"
+    },
+    "name": {
+      "label": "Team name (optional)"
+    },
+    "objective": {
+      "hint": "One objective sentence. PII is redacted before any model call; composition fails closed if secrets remain.",
+      "label": "Objective"
+    },
+    "preferredPattern": {
+      "label": "Execution pattern",
+      "options": {
+        "auto": "Auto (routing decides)",
+        "background_handoff": "Background handoff",
+        "external_handoff": "External handoff",
+        "manager_worker": "Manager / worker",
+        "parallel_specialists": "Parallel specialists",
+        "single_agent_recommended": "Single agent",
+        "ultracode_orchestration": "Ultracode orchestration"
+      }
+    },
+    "ultracode": {
+      "label": "Ultracode"
+    }
+  },
+  "teamCreate": {
+    "description": {
+      "label": "Description"
+    },
+    "members": {
+      "hint": "['{ \"characterId\": \"...\", \"role\": \"researcher\" }']",
+      "label": "Members (JSON array)"
+    },
+    "name": {
+      "label": "Team name"
+    },
+    "orchestration": {
+      "label": "Orchestration",
+      "options": {
+        "mention_round_robin": "Mention round robin",
+        "round_robin": "Round robin",
+        "supervisor": "Supervisor"
+      }
+    },
+    "supervisor": {
+      "label": "Supervisor character"
+    }
+  },
+  "teamDelegate": {
+    "awaitCompletion": {
+      "hint": "Wait for the delegation to settle and surface its result. Off returns the launched record immediately.",
+      "label": "Await completion"
+    },
+    "force": {
+      "hint": "Launch even inside the team's quiet-hours window.",
+      "label": "Override quiet hours"
+    },
+    "prompt": {
+      "label": "Prompt"
+    },
+    "reason": {
+      "label": "Reason (audit log)"
+    },
+    "systemPrompt": {
+      "label": "System prompt (optional)"
+    },
+    "target": {
+      "label": "Delegate to",
+      "options": {
+        "background": "Background agent",
+        "external": "External agent",
+        "team": "Another team",
+        "twin": "Digital twin"
+      }
+    },
+    "targetAgentId": {
+      "hint": "External runtime id, e.g. claude-code or codex.",
+      "label": "External agent id"
+    },
+    "targetTeamId": {
+      "label": "Target team"
+    },
+    "teamId": {
+      "label": "Source team"
+    },
+    "twinId": {
+      "label": "Digital twin"
+    }
+  },
+  "teamMessage": {
+    "content": {
+      "label": "Message"
+    },
+    "recipientId": {
+      "label": "Recipient teammate id (optional)"
+    },
+    "senderId": {
+      "hint": "Defaults to the team lead.",
+      "label": "Sender teammate id (optional)"
+    },
+    "taskId": {
+      "label": "Attach to task id (optional)"
+    },
+    "teamId": {
+      "label": "Team"
+    }
+  },
+  "teamReconcile": {
+    "inherit": "Inherit from team config",
+    "intro": "Reconciles the per-dispatch agent branches produced so far in this run. Only meaningful inside a workspace-isolated team run.",
+    "mode": {
+      "label": "Mode",
+      "options": {
+        "manual": "Manual",
+        "merge-all": "Merge all",
+        "pipeline": "Pipeline",
+        "select": "Select winner"
+      }
+    },
+    "retain": {
+      "label": "Retain branches",
+      "options": {
+        "all": "Keep all",
+        "keep-winner": "Keep winner",
+        "prune-losers": "Prune losers"
+      }
+    },
+    "selectStrategy": {
+      "label": "Selection strategy",
+      "options": {
+        "first-success": "First success",
+        "judge": "AI judge",
+        "manual": "Manual"
+      }
+    }
+  },
+  "teamRun": {
+    "goal": {
+      "hint": "What you want the team to accomplish. Forwarded to the lead's planning phase.",
+      "label": "Goal / brief"
+    },
+    "teamId": {
+      "label": "Team id",
+      "placeholder": "team_..."
+    }
+  },
+  "teamStatus": {
+    "includeDelegations": {
+      "label": "Include delegations"
+    },
+    "includeTasks": {
+      "label": "Include tasks"
+    },
+    "includeTeammates": {
+      "label": "Include teammates"
+    },
+    "teamId": {
+      "label": "Team"
+    }
+  },
+  "teamTaskDispatch": {
+    "description": {
+      "label": "Description",
+      "placeholder": "Detailed instructions for the assigned teammate."
+    },
+    "expectedOutput": {
+      "hint": "What a successful result looks like — used to validate the teammate's output.",
+      "label": "Expected output (optional)"
+    },
+    "taskId": {
+      "hint": "Stable identifier for the dispatched task.",
+      "label": "Task id",
+      "placeholder": "task_..."
+    },
+    "teamId": {
+      "label": "Team"
+    },
+    "title": {
+      "label": "Title",
+      "placeholder": "Summarize the latest report"
+    }
+  },
+  "teamTrigger": {
+    "intro": "Fires when an agent-team run finishes. Leave the fields empty to fire for every team and every terminal status.",
+    "status": {
+      "hint": "Only fire when the run ends with this status.",
+      "label": "Status",
+      "options": {
+        "any": "Any terminal status",
+        "cancelled": "Cancelled",
+        "completed": "Completed",
+        "failed": "Failed"
+      }
+    },
+    "teamId": {
+      "hint": "Leave empty to fire for every team.",
+      "label": "Team"
+    }
+  },
+  "teamUpdate": {
+    "patchJson": {
+      "hint": "Example: '{ \"orchestration\": \"supervisor\" }'",
+      "label": "Patch (JSON)"
+    },
+    "teamId": {
+      "label": "Team"
+    }
+  },
+  "template": {
+    "template": {
+      "hint": "Mustache-like '{{ }}' expressions are evaluated against upstream / trigger / static data.",
+      "label": "Template"
+    }
+  },
+  "terminalCommandTrigger": {
+    "commandContains": {
+      "hint": "Only fire when the command line contains this substring. Commands that look like secrets are redacted and won't match.",
+      "label": "Command contains (optional)",
+      "placeholder": "pnpm test"
+    },
+    "projectId": {
+      "hint": "Only fire for tabs bound to this project.",
+      "label": "Project id (optional)",
+      "placeholder": "proj-…"
+    },
+    "sessionId": {
+      "hint": "Only fire for this terminal tab. Empty matches any user-spawned tab.",
+      "label": "Tab id (optional)",
+      "placeholder": "term-…"
+    },
+    "status": {
+      "hint": "Fire on any exit, only successes (exit 0), or only failures.",
+      "label": "Exit status",
+      "options": {
+        "any": "Any exit",
+        "failure": "Failure only",
+        "success": "Success only (exit 0)"
+      }
+    }
+  },
+  "terminalReadRecent": {
+    "lineLimit": {
+      "hint": "1–50 most recent command records (default 10).",
+      "label": "Max records"
+    },
+    "tabId": {
+      "hint": "The terminal dock tab to read. Use an expression to reference a session opened earlier.",
+      "label": "Tab id",
+      "placeholder": "'{{ $node[\"open\"].sessionId }}'"
+    }
+  },
+  "terminalScript": {
+    "cwd": {
+      "hint": "Optional. Defaults to the shell's resolved cwd.",
+      "label": "Working directory",
+      "placeholder": "D:\\repo"
+    },
+    "interpreter": {
+      "hint": "Explicit interpreter override — bypasses extension detection.",
+      "label": "Interpreter (optional)",
+      "placeholder": "python3"
+    },
+    "onFailure": {
+      "hint": "Throw fails the run; branch routes down the failure port.",
+      "label": "On failure",
+      "options": {
+        "branch": "Route to failure branch",
+        "throw": "Fail the run"
+      }
+    },
+    "scriptPath": {
+      "hint": "Path to the script file. The interpreter is detected from the extension (.sh, .ps1, .py, .js, …).",
+      "label": "Script path",
+      "placeholder": "scripts/deploy.ps1"
+    },
+    "timeoutSec": {
+      "hint": "5–600. How long to wait for the script to finish.",
+      "label": "Timeout (sec)"
+    }
+  },
+  "terminalSessionClose": {
+    "sessionId": {
+      "hint": "The session to close. Leftovers are closed automatically when the run ends.",
+      "label": "Session id",
+      "placeholder": "'{{ $node[\"open\"].sessionId }}'"
+    }
+  },
+  "terminalSessionOpen": {
+    "cwd": {
+      "hint": "Optional. Defaults to the home directory.",
+      "label": "Working directory",
+      "placeholder": "/repo"
+    },
+    "shell": {
+      "hint": "Leave empty to inherit the default shell.",
+      "label": "Shell (override)",
+      "placeholder": "/bin/bash"
+    },
+    "unattended": {
+      "hint": "Open a private headless shell instead of a visible dock tab. Each command run in it is screened by the safety classifier.",
+      "label": "Unattended (headless)"
+    }
+  },
+  "terminalSessionRun": {
+    "command": {
+      "hint": "One command line; the session's shell tokenizes it.",
+      "label": "Command",
+      "placeholder": "pnpm test"
+    },
+    "onAskVerdict": {
+      "hint": "Unattended sessions only — what to do when the safety classifier is unsure.",
+      "label": "When confirmation is needed",
+      "options": {
+        "consent": "Ask in the terminal dock",
+        "fail": "Fail the step",
+        "run": "Run anyway"
+      }
+    },
+    "onFailure": {
+      "hint": "How to react when the command exits with a non-zero code.",
+      "label": "On non-zero exit",
+      "options": {
+        "branch": "Route to the failure port",
+        "throw": "Fail the workflow step"
+      }
+    },
+    "sessionId": {
+      "hint": "From the 'Open terminal session' node's output, e.g. an expression.",
+      "label": "Session id",
+      "placeholder": "'{{ $node[\"open\"].sessionId }}'"
+    },
+    "timeoutSec": {
+      "hint": "5–600. How long to wait for the command to finish.",
+      "label": "Timeout (seconds)"
+    }
+  },
+  "terminalUnattended": {
+    "onAskVerdict": {
+      "hint": "What to do when the safety classifier is unsure about a command.",
+      "label": "When confirmation is needed",
+      "options": {
+        "consent": "Ask in the terminal dock",
+        "fail": "Fail the step",
+        "run": "Run anyway"
+      }
+    },
+    "unattended": {
+      "hint": "Run without a visible terminal tab or consent prompt. Requires the unattended-execution setting; every command is screened by the safety classifier.",
+      "label": "Unattended (headless)"
+    }
+  },
+  "terminalWaitForExit": {
+    "onFailure": {
+      "hint": "Throw fails the run; branch routes down the failure port.",
+      "label": "On failure",
+      "options": {
+        "branch": "Route to failure branch",
+        "throw": "Fail the run"
+      }
+    },
+    "tabId": {
+      "hint": "The terminal dock tab to watch for the next command to finish.",
+      "label": "Tab id",
+      "placeholder": "'{{ $node[\"open\"].sessionId }}'"
+    },
+    "timeoutSec": {
+      "hint": "5–600. Fails when no command finishes within this window.",
+      "label": "Timeout (sec)"
+    }
+  },
+  "transform": {
+    "expression": {
+      "hint": "Per-operation expression. For map: 'x.field'. For filter: 'x.value > 0'.",
+      "label": "Expression"
+    },
+    "operation": {
+      "label": "Operation",
+      "options": {
+        "filter": "Filter",
+        "flatten": "Flatten",
+        "map": "Map",
+        "reduce": "Reduce",
+        "sort": "Sort"
+      },
+      "reduceHint": "Reduce here is a NUMERIC SUM over the item expression only. For general folds (collect, group-by, dedupe, merge, custom reducer) use the data.aggregate node."
+    }
+  },
+  "twinIngest": {
+    "content": {
+      "hint": "Supports '{{ }}' expressions.",
+      "label": "Content"
+    },
+    "format": {
+      "label": "Format",
+      "options": {
+        "chat": "Chat export",
+        "code": "Code",
+        "markdown": "Markdown",
+        "text": "Plain text"
+      }
+    },
+    "sourceMode": {
+      "label": "Source mode",
+      "options": {
+        "fetch": "Fetch URL",
+        "paste": "Paste content"
+      }
+    },
+    "title": {
+      "label": "Title (optional)"
+    },
+    "twinId": {
+      "label": "Twin id",
+      "placeholder": "twin_alex"
+    },
+    "url": {
+      "hint": "Supports '{{ }}' expressions.",
+      "label": "URL",
+      "placeholder": "https://..."
+    }
+  },
+  "twinRag": {
+    "query": {
+      "hint": "The text used for vector search. Supports expressions.",
+      "label": "Query",
+      "placeholder": "'{{ $trigger.payload.text }}'"
+    },
+    "topK": {
+      "hint": "Number of chunks to return. Default 6.",
+      "label": "Top K"
+    },
+    "twinId": {
+      "label": "Twin id",
+      "placeholder": "twin_alex"
+    }
+  },
+  "wait": {
+    "durationMs": {
+      "hint": "The orchestrator pauses the run for this long before continuing.",
+      "label": "Duration",
+      "units": {
+        "hour": "hours",
+        "min": "minutes",
+        "ms": "ms",
+        "sec": "seconds"
+      }
+    },
+    "eventKey": {
+      "hint": "Wake key an external source fires (e.g. the wf_emit_workflow_event agent tool). Empty = a private key scoped to this run and step.",
+      "label": "Event key (optional)",
+      "placeholder": "deploy-approved"
+    },
+    "mode": {
+      "label": "Wait mode",
+      "options": {
+        "duration": "Fixed duration",
+        "event": "Wait for event (Phase 4+)"
+      }
+    },
+    "timeoutMs": {
+      "hint": "Give up waiting after this long. 0 = wait until the run is cancelled or times out.",
+      "label": "Wait timeout"
+    }
+  },
+  "webClone": {
+    "allowPrivateHosts": {
+      "hint": "Permit private / loopback / link-local targets (SSRF opt-in). Leave off unless you trust the target.",
+      "label": "Allow private hosts"
+    },
+    "concurrency": {
+      "hint": "Number of concurrent downloads (1–32).",
+      "label": "Concurrency"
+    },
+    "extractComponents": {
+      "hint": "Also analyze the page into a component structure (template / style / logic).",
+      "label": "Extract components"
+    },
+    "framework": {
+      "hint": "Generate components in this framework from the extracted structure. Implies component extraction.",
+      "label": "Generate framework code",
+      "options": {
+        "angular": "Angular",
+        "jquery": "jQuery",
+        "none": "None",
+        "react": "React",
+        "svelte": "Svelte",
+        "vue": "Vue"
+      }
+    },
+    "frameworkHint": {
+      "hint": "Hint the extractor about the page's original framework to improve component boundaries.",
+      "label": "Framework hint",
+      "options": {
+        "none": "Auto-detect",
+        "react": "React",
+        "svelte": "Svelte",
+        "vue": "Vue"
+      }
+    },
+    "maxAssets": {
+      "hint": "Maximum number of assets to download (1–5000).",
+      "label": "Max assets"
+    },
+    "maxFileSize": {
+      "hint": "Hard per-file byte cap. Leave empty for the engine default; 0 disables the limit.",
+      "label": "Max file size (bytes)"
+    },
+    "mode": {
+      "hint": "'Bundle' writes a directory with separated assets; 'single' inlines everything into one self-contained HTML file.",
+      "label": "Mode",
+      "options": {
+        "bundle": "Directory bundle",
+        "single": "Single file"
+      }
+    },
+    "output": {
+      "hint": "Where to write the snapshot. Relative paths resolve under the open workspace; 'single' mode writes a .html file, 'bundle' a directory.",
+      "label": "Output path",
+      "placeholder": "./snapshots/site"
+    },
+    "pretty": {
+      "hint": "Format the output HTML for readability.",
+      "label": "Prettify HTML"
+    },
+    "timeout": {
+      "hint": "Per-resource timeout in milliseconds (1000–120000).",
+      "label": "Timeout (ms)"
+    },
+    "url": {
+      "hint": "Page to snapshot. Supports '{{ }}' expressions.",
+      "label": "URL",
+      "placeholder": "https://example.com/"
+    }
+  },
+  "webhookBanner": {
+    "desktopOnly": "Desktop only. The webhook receiver runs inside the Tauri sidecar.",
+    "loading": "Loading webhook URL…",
+    "saveFirst": "Save the workflow to register the webhook and reveal its URL.",
+    "urlLabel": "URL: "
+  },
+  "webhookRespond": {
+    "body": {
+      "hint": "Supports '{{ }}' expressions.",
+      "label": "Body"
+    },
+    "desktopOnly": "Desktop only. Respond is delivered via the Tauri webhook router.",
+    "headersJson": {
+      "hint": "Example: '{ \"Content-Type\": \"application/json\" }'",
+      "label": "Headers (JSON)",
+      "placeholder": "'{ \"Content-Type\": \"application/json\" }'"
+    },
+    "status": {
+      "label": "Status code"
+    }
+  },
+  "webhookTrigger": {
+    "hmacSecret": {
+      "hint": "Verifies the X-Signature-256 header. Leave blank to skip verification.",
+      "label": "HMAC secret (optional)"
+    },
+    "method": {
+      "label": "Method",
+      "options": {
+        "any": "Any"
+      }
+    },
+    "path": {
+      "hint": "Mounted at /webhook/'<path>'",
+      "label": "Path",
+      "placeholder": "incoming-events"
+    },
+    "responseStatus": {
+      "label": "Response status"
+    },
+    "responseTemplate": {
+      "hint": "Optional. Defaults to the workflow run id.",
+      "label": "Response body template",
+      "placeholder": "'{ \"ok\": true, \"runId\": \"{{ $run.id }}\" }'"
+    }
+  },
+  "workflowCompletedTrigger": {
+    "status": {
+      "hint": "Only fire for one outcome. \"Any\" fires on both success and failure.",
+      "label": "Outcome filter",
+      "options": {
+        "any": "Any",
+        "failed": "Failed",
+        "succeeded": "Succeeded"
+      }
+    },
+    "workflowId": {
+      "hint": "The source workflow to watch. Empty fires for every workflow that finishes (this workflow itself is always excluded).",
+      "label": "Source workflow (optional)"
+    }
+  }
+}

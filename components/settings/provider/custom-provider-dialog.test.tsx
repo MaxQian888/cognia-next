@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { CustomProviderDialog } from "./custom-provider-dialog"
 
 // Mock next-intl
@@ -17,7 +17,7 @@ const mockRemoveCustomProvider = jest.fn()
 const mockDiscoverOpenAICompatibleModels = jest.fn()
 const mockCustomProviders: Record<string, unknown>[] = []
 
-jest.mock("@/stores", () => ({
+jest.mock("@/stores/settings", () => ({
   useSettingsStore: (selector: (state: Record<string, unknown>) => unknown) => {
     const state = {
       customProviders: mockCustomProviders,
@@ -29,8 +29,8 @@ jest.mock("@/stores", () => ({
   },
 }))
 
-jest.mock("@/lib/ai/providers/model-discovery", () => {
-  const actual = jest.requireActual("@/lib/ai/providers/model-discovery")
+jest.mock("@cognia/provider-core/providers/model-discovery", () => {
+  const actual = jest.requireActual("@cognia/provider-core/providers/model-discovery")
   return {
     ...actual,
     discoverOpenAICompatibleModels: (...args: unknown[]) =>
@@ -41,6 +41,10 @@ jest.mock("@/lib/ai/providers/model-discovery", () => {
 jest.mock("@/lib/ai/infrastructure/api-test", () => ({
   testCustomProviderConnectionByProtocol: jest.fn().mockResolvedValue({ success: true }),
 }))
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const apiTest = require("@/lib/ai/infrastructure/api-test") as {
+  testCustomProviderConnectionByProtocol: jest.Mock
+}
 
 // Mock UI components
 jest.mock("@/components/ui/button")
@@ -91,6 +95,9 @@ describe("CustomProviderDialog", () => {
 
   beforeEach(() => {
     jest.clearAllMocks()
+    mockAddCustomProvider.mockResolvedValue("custom-provider")
+    mockUpdateCustomProvider.mockResolvedValue(undefined)
+    mockRemoveCustomProvider.mockResolvedValue(undefined)
     mockCustomProviders.length = 0
   })
 
@@ -107,6 +114,31 @@ describe("CustomProviderDialog", () => {
   it("displays add provider title when not editing", () => {
     render(<CustomProviderDialog {...defaultProps} />)
     expect(screen.getByText("addCustomProvider")).toBeInTheDocument()
+  })
+
+  it("lists plugin-contributed protocol adapters in the protocol picker", async () => {
+    const { registerProtocolAdapter, __resetProtocolAdaptersForTesting } =
+      await import("@cognia/provider-core/providers/protocol-adapter-registry")
+    registerProtocolAdapter(
+      {
+        id: "acme-plugin:wire",
+        label: "Acme Wire",
+        spec: {
+          kind: "openai-compatible-variant",
+          urlTemplate: "{baseURL}/chat",
+          responsePaths: { textDelta: "choices[0].delta.content" },
+        },
+      },
+      { pluginId: "acme-plugin" }
+    )
+    try {
+      render(<CustomProviderDialog {...defaultProps} />)
+      expect(screen.getByText("Acme Wire")).toBeInTheDocument()
+      // Built-ins are still present alongside.
+      expect(screen.getByText("OpenAI")).toBeInTheDocument()
+    } finally {
+      __resetProtocolAdaptersForTesting()
+    }
   })
 
   it("displays provider name input", () => {
@@ -144,6 +176,40 @@ describe("CustomProviderDialog", () => {
     expect(screen.getByText("test")).toBeInTheDocument()
   })
 
+  it("shows the OpenAI endpoint-family (apiFlavor) picker for the openai protocol", () => {
+    // Default protocol is openai → the Responses/Chat override is offered.
+    render(<CustomProviderDialog {...defaultProps} />)
+    expect(screen.getByText("apiFlavor")).toBeInTheDocument()
+    expect(screen.getByText("apiFlavorResponses")).toBeInTheDocument()
+    expect(screen.getByText("apiFlavorChat")).toBeInTheDocument()
+  })
+
+  it("loads a saved apiFlavor when editing an openai custom provider", async () => {
+    mockCustomProviders.push({
+      id: "custom-resp",
+      providerId: "custom-resp",
+      customName: "Azure Custom",
+      name: "Azure Custom",
+      isCustom: true,
+      baseURL: "https://x.openai.azure.com",
+      apiKey: "az-key",
+      apiProtocol: "openai",
+      apiFlavor: "responses",
+      customModels: ["gpt-5"],
+      defaultModel: "gpt-5",
+      enabled: true,
+    })
+
+    render(<CustomProviderDialog {...defaultProps} editingProviderId="custom-resp" />)
+
+    // Source seeds via setTimeout(0); the flavor Select wrapper carries the
+    // loaded value once hydrated (both protocol + flavor share the mock testid).
+    await waitFor(() => {
+      const selects = screen.getAllByTestId("api-protocol-select")
+      expect(selects.some((el) => el.getAttribute("data-value") === "responses")).toBe(true)
+    })
+  })
+
   it("loads discovered models for remote-only custom providers when editing", async () => {
     mockCustomProviders.push({
       id: "custom-discovered",
@@ -176,13 +242,67 @@ describe("CustomProviderDialog", () => {
     })
   })
 
-  // TODO(cognia-next): in React 19 + Testing Library 16 the save button stays
-  // disabled after the discovery promise settles even though the underlying
-  // `availableModels` memo recomputes correctly in production. The remaining
-  // 11 dialog tests cover the static surface; this end-to-end discover→save
-  // flow needs a separate look (likely an `act` boundary around the async
-  // setState fan-out from `handleDiscoverModels`).
-  it.skip("persists shared discovered model cache after refreshing openai-compatible models", async () => {
+  it("keeps an edited provider open until the update is persisted", async () => {
+    let resolveUpdate: (() => void) | undefined
+    mockUpdateCustomProvider.mockImplementationOnce(
+      () => new Promise<void>((resolve) => (resolveUpdate = resolve))
+    )
+    mockCustomProviders.push({
+      id: "custom-pending",
+      providerId: "custom-pending",
+      customName: "Pending Provider",
+      name: "Pending Provider",
+      isCustom: true,
+      baseURL: "https://custom.example.com/v1",
+      apiKey: "sk-custom",
+      apiProtocol: "openai",
+      customModels: ["model-1"],
+      defaultModel: "model-1",
+      enabled: true,
+    })
+    const onOpenChange = jest.fn()
+    render(
+      <CustomProviderDialog open onOpenChange={onOpenChange} editingProviderId="custom-pending" />
+    )
+    await waitFor(() => expect(screen.getByDisplayValue("Pending Provider")).toBeInTheDocument())
+
+    fireEvent.click(screen.getByText("save"))
+    expect(screen.getByText("saving")).toBeDisabled()
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+
+    resolveUpdate?.()
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+  })
+
+  it("preserves the editor and reports a failed provider mutation", async () => {
+    mockUpdateCustomProvider.mockRejectedValueOnce(new Error("database unavailable"))
+    mockCustomProviders.push({
+      id: "custom-failed",
+      providerId: "custom-failed",
+      customName: "Failed Provider",
+      name: "Failed Provider",
+      isCustom: true,
+      baseURL: "https://custom.example.com/v1",
+      apiKey: "sk-custom",
+      apiProtocol: "openai",
+      customModels: ["model-1"],
+      defaultModel: "model-1",
+      enabled: true,
+    })
+    const onOpenChange = jest.fn()
+    render(
+      <CustomProviderDialog open onOpenChange={onOpenChange} editingProviderId="custom-failed" />
+    )
+    await waitFor(() => expect(screen.getByDisplayValue("Failed Provider")).toBeInTheDocument())
+
+    fireEvent.click(screen.getByText("save"))
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("customProviderMutationFailed")
+    expect(screen.getByDisplayValue("Failed Provider")).toBeInTheDocument()
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+  })
+
+  it("persists shared discovered model cache after refreshing openai-compatible models", async () => {
     mockDiscoverOpenAICompatibleModels.mockResolvedValue([
       {
         id: "provider/alpha-1",
@@ -194,6 +314,9 @@ describe("CustomProviderDialog", () => {
     ])
 
     render(<CustomProviderDialog {...defaultProps} />)
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    })
 
     fireEvent.change(screen.getByTestId("provider-name"), {
       target: { value: "Remote Custom" },
@@ -241,6 +364,87 @@ describe("CustomProviderDialog", () => {
           enabled: true,
         })
       )
+    })
+  })
+
+  describe("connection test (shared useConnectionTest hook)", () => {
+    // The dialog's mount effect schedules a `setTimeout(...,0)` field reset
+    // (see the "Load data when editing" effect). Flush it before typing so
+    // the reset doesn't race and clobber the values fired below.
+    async function renderAndFlushMountReset() {
+      render(<CustomProviderDialog {...defaultProps} />)
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 10))
+      })
+    }
+
+    it("shows the ConnectionStatusCard success state and forwards latency", async () => {
+      apiTest.testCustomProviderConnectionByProtocol.mockResolvedValueOnce({
+        success: true,
+        message: "Connected successfully.",
+        latency_ms: 88,
+      })
+      await renderAndFlushMountReset()
+      fireEvent.change(screen.getByTestId("base-url"), {
+        target: { value: "https://custom.example.com/v1" },
+      })
+      fireEvent.change(screen.getByTestId("api-key"), { target: { value: "sk-x" } })
+      fireEvent.click(screen.getByText("test"))
+
+      expect(await screen.findByText("configTab.connectionSuccess")).toBeInTheDocument()
+      expect(screen.getByText(/88/)).toBeInTheDocument()
+    })
+
+    it("shows the ConnectionStatusCard error state with the failure message", async () => {
+      apiTest.testCustomProviderConnectionByProtocol.mockResolvedValueOnce({
+        success: false,
+        message: "API error: 401",
+      })
+      await renderAndFlushMountReset()
+      fireEvent.change(screen.getByTestId("base-url"), {
+        target: { value: "https://custom.example.com/v1" },
+      })
+      fireEvent.change(screen.getByTestId("api-key"), { target: { value: "bad-key" } })
+      fireEvent.click(screen.getByText("test"))
+
+      expect(await screen.findByText("configTab.connectionFailed")).toBeInTheDocument()
+      expect(screen.getByText("API error: 401")).toBeInTheDocument()
+    })
+
+    it("shows the amber 'limited' state instead of collapsing it into success", async () => {
+      apiTest.testCustomProviderConnectionByProtocol.mockResolvedValueOnce({
+        success: true,
+        outcome: "limited",
+        message: "Verified with caveats.",
+      })
+      await renderAndFlushMountReset()
+      fireEvent.change(screen.getByTestId("base-url"), {
+        target: { value: "https://custom.example.com/v1" },
+      })
+      fireEvent.change(screen.getByTestId("api-key"), { target: { value: "sk-x" } })
+      fireEvent.click(screen.getByText("test"))
+
+      expect(await screen.findByText("verificationLimited")).toBeInTheDocument()
+      expect(screen.queryByText("configTab.connectionSuccess")).not.toBeInTheDocument()
+    })
+
+    it("clears a stale result when the base URL is edited again", async () => {
+      apiTest.testCustomProviderConnectionByProtocol.mockResolvedValueOnce({
+        success: false,
+        message: "API error: 401",
+      })
+      await renderAndFlushMountReset()
+      fireEvent.change(screen.getByTestId("base-url"), {
+        target: { value: "https://custom.example.com/v1" },
+      })
+      fireEvent.change(screen.getByTestId("api-key"), { target: { value: "bad-key" } })
+      fireEvent.click(screen.getByText("test"))
+      expect(await screen.findByText("configTab.connectionFailed")).toBeInTheDocument()
+
+      fireEvent.change(screen.getByTestId("base-url"), {
+        target: { value: "https://retry.example.com/v1" },
+      })
+      expect(screen.queryByText("configTab.connectionFailed")).not.toBeInTheDocument()
     })
   })
 })

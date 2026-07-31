@@ -7,7 +7,7 @@
  * the node + edge structure.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import fs from "node:fs/promises"
 import { resetCogniaDb } from "../helpers/db-reset"
 import { seedAndOpenWorkflow } from "../helpers/seed-workflow"
@@ -22,8 +22,8 @@ test.describe("workflow editor — JSON import / export", () => {
     await seedAndOpenWorkflow(page, "multi-step")
     await expect(page.getByTestId("workflow-canvas")).toBeVisible()
     const beforeNodeKinds = await page.evaluate(() =>
-      Array.from(document.querySelectorAll("[data-testid^='wf-node-']")).map(
-        (el) => el.getAttribute("data-testid")!
+      Array.from(document.querySelectorAll("[data-testid^='wf-node-']")).map((el) =>
+        el.getAttribute("data-testid")!
       )
     )
     expect(beforeNodeKinds.length).toBeGreaterThanOrEqual(5)

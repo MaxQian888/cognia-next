@@ -14,6 +14,7 @@
  * ai-run reply.
  */
 
+import { liveQuery, type Table } from "dexie"
 import type {
   OutboundJobRow,
   OutboundJobSource,
@@ -22,20 +23,57 @@ import type {
 import type { OutboundRequest } from "@/types/connectors/outbound"
 import { getDb } from "./schema"
 import { append as appendConnectorAudit } from "./connector-audit"
+import { resolveScopeProjectId } from "./project-scope"
 
 /**
- * Soft cap on the `outboundQueue` table. When `enqueueOutbound` brings the
- * total past this watermark we age the oldest still-pending rows to
- * `deadlettered` and emit an audit row per aged job. The cap is
- * intentionally permissive: real-world backlogs rarely exceed a few hundred
- * rows even during a sustained adapter outage, so 5000 only trips on a
- * cascading failure where every adapter is jammed at once. The dead-letter
- * transition preserves the row so the operator can still inspect it via
- * the Outbound tab; it just stops the runner from re-trying.
+ * Soft cap on the ACTIVE (`pending` / `failed` / `sending`) rows in the
+ * `outboundQueue` table. When `enqueueOutbound` brings the active count past
+ * this watermark we age the oldest still-pending rows to `deadlettered` and
+ * emit an audit row per aged job. The cap is intentionally permissive:
+ * real-world backlogs rarely exceed a few hundred rows even during a
+ * sustained adapter outage, so 5000 only trips on a cascading failure where
+ * every adapter is jammed at once. The dead-letter transition preserves the
+ * row so the operator can still inspect it via the Outbound tab; it just
+ * stops the runner from re-trying.
+ *
+ * Terminal rows (`sent` / `deadlettered`) do NOT count against the cap —
+ * they are history, not backlog. Counting them (the pre-fix behavior) meant
+ * that once accumulated terminal rows alone exceeded the cap, every fresh
+ * enqueue was immediately dead-lettered: a guaranteed total outbound outage.
+ * Terminal history is bounded separately by {@link sweepTerminalOutboundRows}
+ * (14-day retention, run from the connector runtime's daily schedule).
  *
  * Exported for the saturation banner threshold derivation + tests.
  */
 export const OUTBOUND_QUEUE_SOFT_CAP = 5000
+
+/**
+ * Retention window for terminal (`sent` / `deadlettered`) rows. Rows whose
+ * `createdAt` is older than this are deleted by the daily retention sweep —
+ * nothing else ever prunes them (a 5-minute presence card alone writes
+ * ~288 terminal rows/day). 14 days keeps plenty of Outbound-tab / DLQ
+ * inspection history while bounding the table.
+ */
+export const OUTBOUND_TERMINAL_RETENTION_MS = 14 * 24 * 60 * 60 * 1000
+
+/** Max terminal rows deleted per sweep run — keeps one tick's IDB work bounded. */
+export const OUTBOUND_RETENTION_SWEEP_BATCH = 1000
+
+/**
+ * Grace period before a `sending` row is considered a stale claim from an
+ * interrupted runner (crash / reload between `markSending` and
+ * `markSent`/`markFailed`). Must comfortably exceed the slowest legitimate
+ * adapter send (large file uploads run tens of seconds).
+ */
+export const STALE_SENDING_GRACE_MS = 5 * 60_000
+
+/**
+ * Claim-timestamp extension written by {@link markSending}. Non-indexed
+ * column — IndexedDB stores extra keys transparently, so no schema bump is
+ * required (same pattern as `platformMessageId`). Declared locally rather
+ * than on the shared row type because only the queue layer reads it.
+ */
+type ClaimStampedOutboundJobRow = OutboundJobRow & { claimedAt?: number }
 
 function newId(): string {
   return "oqj_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -104,9 +142,17 @@ export interface EnqueueInput {
 
 export async function enqueueOutbound(input: EnqueueInput): Promise<OutboundJobRow> {
   const now = Date.now()
+  // Workspace isolation (Dexie v86): attribute the job to the conversation's
+  // workspace (via its override row), falling back to the active project.
+  const override = await getDb()
+    .conversationOverrides.where("conversationKey")
+    .equals(input.conversationKey)
+    .first()
+  const projectId = override?.projectId ?? (await resolveScopeProjectId())
   const row: OutboundJobRow = {
     id: newId(),
     adapterId: input.adapterId,
+    projectId,
     conversationKey: input.conversationKey,
     request: input.request,
     status: "pending",
@@ -127,24 +173,124 @@ export async function enqueueOutbound(input: EnqueueInput): Promise<OutboundJobR
   return row
 }
 
+/** Terminal outbound statuses — the job will never transition again. */
+export function isOutboundTerminal(status: OutboundJobRow["status"]): boolean {
+  return status === "sent" || status === "deadlettered" || status === "delivery_unknown"
+}
+
 /**
- * If the outboundQueue exceeds `OUTBOUND_QUEUE_SOFT_CAP`, transition the
- * oldest still-pending rows to `deadlettered` until the table is back
- * under the cap. Each aged row emits a `outbound.queue_capped` audit row
- * carrying the job id and its age in ms, so the operator can correlate
- * the banner trip with the specific jobs that were dropped. Sending /
- * failed / already-deadlettered rows are NOT aged — they're either in
- * flight or already terminal.
+ * Max reroute hops `waitForOutboundTerminal` will follow before giving up and
+ * returning the last row as-is. The runner's single-hop reroute guard already
+ * bounds real chains to depth 1; this is a defensive loop cap.
+ */
+const MAX_REROUTE_HOPS = 3
+
+/**
+ * Resolve with the job row once it reaches a terminal state (`sent` /
+ * `deadlettered`), or with the LATEST snapshot when `timeoutMs` elapses
+ * first — callers distinguish "still retrying" from "failed terminally" by
+ * inspecting `status`. Resolves `undefined` when the job id is unknown.
+ *
+ * **Reroute-aware:** when a terminal row is `deadlettered` with a
+ * `reroutedToJobId` (the runner moved the delivery to a sibling bot via
+ * failover / load-balance), this FOLLOWS the pointer and waits on the sibling
+ * with the remaining timeout — so a caller awaiting the original job learns
+ * the delivery's TRUE outcome (the sibling's `sent` + real `platformMessageId`)
+ * instead of misreading the reroute as a failure.
+ *
+ * Event-driven via Dexie `liveQuery` (no polling). Shared by the plugin
+ * delivery-feedback API (`ctx.connectors.waitForDelivery`) and the
+ * `action.connector.send` workflow node's `waitForDelivery` param.
+ */
+export async function waitForOutboundTerminal(
+  jobId: string,
+  timeoutMs: number
+): Promise<OutboundJobRow | undefined> {
+  const deadline = Date.now() + timeoutMs
+  let currentId = jobId
+  for (let hop = 0; hop <= MAX_REROUTE_HOPS; hop++) {
+    const remaining = Math.max(0, deadline - Date.now())
+    const row = await waitForTerminalRaw(currentId, remaining)
+    if (!row) return undefined
+    if (
+      row.status === "deadlettered" &&
+      row.reroutedToJobId &&
+      row.reroutedToJobId !== currentId &&
+      hop < MAX_REROUTE_HOPS
+    ) {
+      currentId = row.reroutedToJobId
+      continue
+    }
+    return row
+  }
+  return getDb().outboundQueue.get(currentId)
+}
+
+/**
+ * Single-job terminal wait (no reroute following). The public
+ * {@link waitForOutboundTerminal} wraps this to walk reroute chains.
+ */
+async function waitForTerminalRaw(
+  jobId: string,
+  timeoutMs: number
+): Promise<OutboundJobRow | undefined> {
+  const initial = await getDb().outboundQueue.get(jobId)
+  if (!initial) return undefined
+  if (isOutboundTerminal(initial.status)) return initial
+  return new Promise<OutboundJobRow>((resolve) => {
+    let latest = initial
+    const subscription = liveQuery(() => getDb().outboundQueue.get(jobId)).subscribe({
+      next: (row) => {
+        if (!row) return
+        latest = row
+        if (isOutboundTerminal(row.status)) {
+          cleanup()
+          resolve(row)
+        }
+      },
+      error: () => {
+        cleanup()
+        resolve(latest)
+      },
+    })
+    const timer = setTimeout(() => {
+      cleanup()
+      resolve(latest)
+    }, timeoutMs)
+    const cleanup = () => {
+      clearTimeout(timer)
+      try {
+        subscription.unsubscribe()
+      } catch {
+        // best-effort
+      }
+    }
+  })
+}
+
+/**
+ * If the ACTIVE (`pending` / `failed` / `sending`) row count exceeds
+ * `OUTBOUND_QUEUE_SOFT_CAP`, transition the oldest still-pending rows to
+ * `deadlettered` until the backlog is back under the cap. Each aged row
+ * emits a `outbound.queue_capped` audit row carrying the job id and its age
+ * in ms, so the operator can correlate the banner trip with the specific
+ * jobs that were dropped. Sending / failed / already-deadlettered rows are
+ * NOT aged — they're either in flight or already terminal.
+ *
+ * Terminal (`sent` / `deadlettered`) rows are excluded from the count: they
+ * are bounded by the retention sweep, not the backlog cap, and counting them
+ * here would eventually dead-letter every fresh enqueue once history alone
+ * crossed the watermark.
  *
  * Best-effort: a failure to write the audit row must not block the
  * dead-letter transition.
  */
 async function enforceQueueSoftCap(now: number): Promise<void> {
   const db = getDb()
-  const total = await db.outboundQueue.count()
+  const total = await db.outboundQueue.where("status").anyOf("pending", "failed", "sending").count()
   if (total <= OUTBOUND_QUEUE_SOFT_CAP) return
   const overflow = total - OUTBOUND_QUEUE_SOFT_CAP
-  const oldestPending = await db.outboundQueue.filter((r) => r.status === "pending").toArray()
+  const oldestPending = await db.outboundQueue.where("status").equals("pending").toArray()
   oldestPending.sort((a, b) => a.createdAt - b.createdAt)
   const victims = oldestPending.slice(0, overflow)
   for (const job of victims) {
@@ -172,6 +318,122 @@ async function enforceQueueSoftCap(now: number): Promise<void> {
       // Best-effort — audit failure must not block the dead-letter transition.
     }
   }
+}
+
+/**
+ * Delete terminal (`sent` / `deadlettered`) rows older than the retention
+ * window, up to `batchLimit` per call. Runs from the connector runtime's
+ * daily housekeeping schedule (`lib/connectors/daily-schedule.ts`) — nothing
+ * else prunes terminal history, and without this sweep the table grows
+ * without bound. Uses the indexed `createdAt` range so the scan cost tracks
+ * the number of old rows, not the table size. Returns the deleted count.
+ */
+export async function sweepTerminalOutboundRows(opts?: {
+  now?: number
+  retentionMs?: number
+  batchLimit?: number
+}): Promise<number> {
+  const now = opts?.now ?? Date.now()
+  const retentionMs = opts?.retentionMs ?? OUTBOUND_TERMINAL_RETENTION_MS
+  const batchLimit = opts?.batchLimit ?? OUTBOUND_RETENTION_SWEEP_BATCH
+  const db = getDb()
+  const victims = await db.outboundQueue
+    .where("createdAt")
+    .below(now - retentionMs)
+    .filter((r) => isOutboundTerminal(r.status))
+    .limit(batchLimit)
+    .toArray()
+  if (victims.length === 0) return 0
+  await db.outboundQueue.bulkDelete(victims.map((r) => r.id))
+  return victims.length
+}
+
+/**
+ * Flip `sending` rows whose claim is older than `graceMs` back to `failed`
+ * (retryable now). A row can only be stuck in `sending` when a runner died
+ * between `markSending` and `markSent`/`markFailed` — `listDueNow` scans
+ * only `pending`/`failed`, so without this recovery such rows are lost
+ * forever. Called by the outbound runner on every drain pass (cheap indexed
+ * `status` query; usually empty).
+ *
+ * The age signal is the `claimedAt` stamp written by {@link markSending};
+ * legacy rows claimed before the stamp existed fall back to `createdAt`.
+ * Rows inside the grace window (a legitimately in-flight send) are left
+ * untouched. Returns the recovered rows so the caller can audit each one.
+ */
+export async function recoverStaleSendingJobs(
+  now: number,
+  graceMs: number = STALE_SENDING_GRACE_MS
+): Promise<OutboundJobRow[]> {
+  const db = getDb()
+  const sending = (await db.outboundQueue
+    .where("status")
+    .equals("sending")
+    .toArray()) as ClaimStampedOutboundJobRow[]
+  const cutoff = now - graceMs
+  const recovered: OutboundJobRow[] = []
+  for (const row of sending) {
+    if ((row.claimedAt ?? row.createdAt) > cutoff) continue
+    // Transactional re-check: the in-flight send may have settled between
+    // the scan and this write; only flip rows that are STILL `sending`.
+    const flipped = await db.transaction("rw", db.outboundQueue, async () => {
+      const fresh = await db.outboundQueue.get(row.id)
+      if (!fresh || fresh.status !== "sending") return false
+      await db.outboundQueue.update(row.id, {
+        status: "failed",
+        lastErrorCode: "stale_sending_recovered",
+        lastError: "Recovered from a stale sending claim (runner interrupted mid-send)",
+        nextAttemptAt: now,
+      })
+      return true
+    })
+    if (flipped) {
+      recovered.push({
+        ...row,
+        status: "failed",
+        lastErrorCode: "stale_sending_recovered",
+        nextAttemptAt: now,
+      })
+    }
+  }
+  return recovered
+}
+
+/**
+ * Persistent analog of the runner's in-memory idempotency LRU: find a row
+ * that already DELIVERED this idempotency key (status `sent` with a
+ * platform message id). A rebooted runner's empty LRU consults this before
+ * re-sending a retry row so a delivered-but-differently-tracked payload is
+ * not duplicated. Uses the indexed `idempotencyKey` column.
+ */
+export async function findDeliveredByIdempotencyKey(
+  idempotencyKey: string,
+  excludeJobId?: string
+): Promise<OutboundJobRow | undefined> {
+  const rows = await getDb().outboundQueue.where("idempotencyKey").equals(idempotencyKey).toArray()
+  return rows.find((r) => r.id !== excludeJobId && r.status === "sent" && !!r.platformMessageId)
+}
+
+/**
+ * Return the oldest OLDER non-terminal sibling in the same conversation
+ * lane — `pending`, `failed`, or `sending` with a strictly smaller
+ * `createdAt` — or undefined when none exists. The runner consults this
+ * before delivering a due job so per-conversation FIFO holds ACROSS drain
+ * passes, not just within one: a deferred older retry must resolve
+ * (deliver or dead-letter) before a newer sibling may go out. Bounded
+ * index range on `[conversationKey+createdAt]`.
+ */
+export async function findOlderActiveOutboundSibling(
+  job: Pick<OutboundJobRow, "id" | "conversationKey" | "createdAt">
+): Promise<OutboundJobRow | undefined> {
+  const older = await getDb()
+    .outboundQueue.where("[conversationKey+createdAt]")
+    .between([job.conversationKey, -Infinity], [job.conversationKey, job.createdAt], true, false)
+    .toArray()
+  return older.find(
+    (r) =>
+      r.id !== job.id && (r.status === "pending" || r.status === "failed" || r.status === "sending")
+  )
 }
 
 /**
@@ -253,12 +515,58 @@ export async function listPendingForConversation(
     .toArray()
 }
 
-/** Transition a job to "sending" and increment attempts. */
-export async function markSending(jobId: string): Promise<void> {
-  const row = await getDb().outboundQueue.get(jobId)
-  await getDb().outboundQueue.update(jobId, {
-    status: "sending",
-    attempts: (row?.attempts ?? 0) + 1,
+/**
+ * Atomically claim a job for sending: transition `pending`/`failed` → `sending`
+ * and increment attempts, inside a single Dexie transaction. Returns `true` if
+ * THIS caller won the claim, `false` if the row was already claimed by another
+ * runner (or moved to a terminal status) — the Dexie analog of a `SELECT … FOR
+ * UPDATE` claim. Without the transaction two runners (e.g. a second `main`
+ * webview) could both read `pending` and both send the same message.
+ */
+export async function markSending(jobId: string): Promise<boolean> {
+  const db = getDb()
+  const queue = db.outboundQueue as Table<ClaimStampedOutboundJobRow, string>
+  return db.transaction("rw", db.outboundQueue, async () => {
+    const row = await queue.get(jobId)
+    if (!row || (row.status !== "pending" && row.status !== "failed")) {
+      return false
+    }
+    await queue.update(jobId, {
+      status: "sending",
+      attempts: (row.attempts ?? 0) + 1,
+      // Claim stamp — lets `recoverStaleSendingJobs` distinguish a
+      // legitimately in-flight send from a claim orphaned by a crash.
+      claimedAt: Date.now(),
+    })
+    return true
+  })
+}
+
+/**
+ * Undo a `markSending` claim WITHOUT consuming an attempt: transition the
+ * row back to `failed` (retryable at `nextAttemptAt`) and decrement the
+ * attempt counter that `markSending` incremented. Used by the runner when a
+ * post-claim gate (the token bucket) defers the job — a rate-limit deferral
+ * is not a delivery attempt and must not eat into the max-attempts budget.
+ * Only acts on rows still in `sending`.
+ */
+export async function unclaimSending(
+  jobId: string,
+  errorCode: string,
+  message: string,
+  nextAttemptAt: number
+): Promise<void> {
+  const db = getDb()
+  await db.transaction("rw", db.outboundQueue, async () => {
+    const row = await db.outboundQueue.get(jobId)
+    if (!row || row.status !== "sending") return
+    await db.outboundQueue.update(jobId, {
+      status: "failed",
+      attempts: Math.max(0, (row.attempts ?? 1) - 1),
+      lastErrorCode: errorCode,
+      lastError: message,
+      nextAttemptAt,
+    })
   })
 }
 
@@ -290,15 +598,66 @@ export async function markFailed(
   })
 }
 
-/** Transition a job to "deadlettered" — no more retries. */
-export async function markDeadlettered(
+/** Ambiguous remote outcome: never retry without operator reconciliation. */
+export async function markDeliveryUnknown(
   jobId: string,
   errorCode: string,
   message: string
 ): Promise<void> {
   await getDb().outboundQueue.update(jobId, {
-    status: "deadlettered",
+    status: "delivery_unknown",
     lastErrorCode: errorCode,
     lastError: message,
   })
+}
+
+/**
+ * Transition a job to "deadlettered" — no more retries. When the dead-letter
+ * is a reroute (the runner moved the delivery to a sibling bot), pass
+ * `reroute` so the row points at the sibling job that actually carries the
+ * delivery; `waitForOutboundTerminal` follows that pointer so a caller
+ * awaiting THIS job sees the sibling's real terminal status, not a false
+ * failure.
+ */
+export async function markDeadlettered(
+  jobId: string,
+  errorCode: string,
+  message: string,
+  reroute?: { toJobId: string; mechanism: "failover" | "balanced" }
+): Promise<void> {
+  await getDb().outboundQueue.update(jobId, {
+    status: "deadlettered",
+    lastErrorCode: errorCode,
+    lastError: message,
+    ...(reroute ? { reroutedToJobId: reroute.toJobId, reroutedMechanism: reroute.mechanism } : {}),
+  })
+}
+
+/**
+ * Replay a dead-lettered job: reset its lifecycle so the outbound runner
+ * picks it up again on the next poll. Clears the error state and re-arms the
+ * attempt counter. Only acts on `deadlettered` rows — replaying a row that's
+ * still active would race the runner. Returns the refreshed row, or
+ * `undefined` when the job doesn't exist or isn't dead-lettered. Emits the
+ * enqueue wake event so a dormant runner re-checks `pickNextDue`.
+ *
+ * Audit (`outbound.replayed`) is the caller's responsibility — this fn stays
+ * in the lib/db layer (no audit dep). The Inbox/Settings DLQ panel records
+ * the audit alongside the original error code.
+ */
+export async function replayDeadlettered(jobId: string): Promise<OutboundJobRow | undefined> {
+  const db = getDb()
+  const row = await db.outboundQueue.get(jobId)
+  if (!row || row.status !== "deadlettered") return undefined
+  const now = Date.now()
+  const updated: Partial<OutboundJobRow> = {
+    status: "pending",
+    attempts: 0,
+    lastError: undefined,
+    lastErrorCode: undefined,
+    nextAttemptAt: now,
+  }
+  await db.outboundQueue.update(jobId, updated)
+  emitOutboundEnqueued()
+  return { ...row, ...updated }
 }

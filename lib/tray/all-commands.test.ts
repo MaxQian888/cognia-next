@@ -72,6 +72,23 @@ describe("buildAllCommandsSubmenu", () => {
     }
   })
 
+  it("emits plugin i18n keys for localized tray items", () => {
+    registerTrayItem({
+      id: "shot:capture",
+      pluginId: "shot",
+      label: "Capture Area",
+      labelKey: "tray.capture",
+    })
+
+    const root = buildAllCommandsSubmenu()
+    const plugins = root.items.find(
+      (item) => item.kind === "submenu" && item.label === "tray.categories.plugins"
+    )
+    expect(plugins?.kind === "submenu" ? plugins.items : []).toEqual(
+      expect.arrayContaining([expect.objectContaining({ label: "plugin.shot.tray.capture" })])
+    )
+  })
+
   it("sorts items alphabetically within each bucket", () => {
     for (const name of ["zeta", "alpha", "mid"]) {
       registerSlashCommand({
@@ -103,5 +120,77 @@ describe("buildAllCommandsSubmenu", () => {
       (it) => it.kind === "submenu" && it.label === "tray.categories.other"
     )
     expect(other).toBeDefined()
+  })
+
+  it("picks up tray-surface quick actions and excludes _qa: (tray-excluded) ones", async () => {
+    const { registerQuickAction, __resetQuickActionsForTesting } =
+      await import("@/lib/plugin/registries/quick-action-registry")
+    const { __resetCommandRegistryForTesting } = await import("@/lib/plugin/commands/registry")
+    try {
+      registerQuickAction("plug-a", { id: "sync", title: "Sync now", run: () => {} })
+      registerQuickAction("plug-a", {
+        id: "palette-only",
+        title: "Palette only",
+        run: () => {},
+        surfaces: ["palette"],
+      })
+
+      const root = buildAllCommandsSubmenu()
+      const plugins = root.items.find(
+        (it) => it.kind === "submenu" && it.label === "tray.categories.plugins"
+      )
+      expect(plugins).toBeDefined()
+      if (plugins && plugins.kind === "submenu") {
+        const labels = plugins.items.map((i) => (i.kind === "action" ? i.label : null))
+        expect(labels).toContain("Sync now")
+        expect(labels).not.toContain("Palette only")
+      }
+    } finally {
+      __resetQuickActionsForTesting()
+      __resetCommandRegistryForTesting()
+    }
+  })
+
+  it("evaluates a command's when-clause against the context-key store", async () => {
+    const { registerCommand, __resetCommandRegistryForTesting } =
+      await import("@/lib/plugin/commands/registry")
+    const { setContextKey, __resetContextKeysForTesting } =
+      await import("@/lib/plugin/context-keys/context-key-store")
+    try {
+      registerCommand({
+        id: "demo.always",
+        title: "Always Visible",
+        pluginId: null,
+        handler: () => {},
+      })
+      registerCommand({
+        id: "demo.gated",
+        title: "Gated Command",
+        pluginId: null,
+        when: "chat.active",
+        handler: () => {},
+      })
+
+      const labelsOf = () => {
+        const root = buildAllCommandsSubmenu()
+        return root.items.flatMap((it) =>
+          it.kind === "submenu" ? it.items.map((i) => (i.kind === "action" ? i.label : null)) : []
+        )
+      }
+
+      // Clause unmet → gated command hidden, ungated still present.
+      __resetContextKeysForTesting()
+      expect(labelsOf()).toContain("Always Visible")
+      expect(labelsOf()).not.toContain("Gated Command")
+
+      // Clause met → gated command appears.
+      setContextKey("chat.active", true)
+      expect(labelsOf()).toContain("Gated Command")
+    } finally {
+      __resetCommandRegistryForTesting()
+      const { __resetContextKeysForTesting } =
+        await import("@/lib/plugin/context-keys/context-key-store")
+      __resetContextKeysForTesting()
+    }
   })
 })

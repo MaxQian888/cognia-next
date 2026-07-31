@@ -4,15 +4,23 @@
  * Provides permission management capabilities to plugins.
  */
 
-import type { PluginPermissionAPI, PluginAPIPermission } from "@/types/plugin/plugin-extended"
+import type {
+  PluginPermissionAPI,
+  PluginAPIPermission,
+  IntrospectablePluginPermission,
+} from "@/types/plugin/plugin"
+import type { PluginPermission } from "@/types/plugin"
 import { createPluginSystemLogger } from "@/lib/plugin/core/logger"
+import { getPermissionGuard } from "@/lib/plugin/security/permission-guard"
 import { requestPluginPermission } from "@/lib/plugin/security/permission-requests"
 import {
   grantPluginPermission as grantHostPermission,
+  isPluginGatewayAvailable,
   listPluginPermissions as listHostPermissions,
   revokePluginPermission as revokeHostPermission,
 } from "@/lib/plugin/core/transport"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
+import { contextPanelRegistry } from "@/lib/context-workbench/panel-registry"
 
 // Permission grants by plugin
 const grantedPermissions = new Map<string, Set<PluginAPIPermission>>()
@@ -43,12 +51,27 @@ const permissionMapping: Record<string, PluginAPIPermission[]> = {
   "vector:write": ["vector:write"],
   "canvas:read": ["canvas:read"],
   "canvas:write": ["canvas:write"],
+  "canvas:run": ["canvas:run"],
+  "canvas:collaborate": ["canvas:collaborate"],
   "artifact:read": ["artifact:read"],
   "artifact:write": ["artifact:write"],
+  "workflow:read": ["workflow:read"],
   "ai:chat": ["ai:chat"],
   "ai:embed": ["ai:embed"],
   "agent:control": ["agent:control"],
   "agent:dispatch-external": ["agent:dispatch-external"],
+  // Subagent dispatch + shared-memory/twin introspection. Identity mappings —
+  // without these the manifest declarations are silently dropped and
+  // `ctx.agent.dispatchSubagent`/`runTeam` and
+  // `ctx.agent.context.readSharedMemory`/`queryTwinMemory` (gated by
+  // `pluginHasApiPermission` in `lib/plugin/core/context.ts`) always throw.
+  "agent:dispatch": ["agent:dispatch"],
+  "agent:shared-memory:read": ["agent:shared-memory:read"],
+  "twin:read": ["twin:read"],
+  "templates:read": ["templates:read"],
+  "templates:contribute": ["templates:contribute"],
+  "templates:instantiate": ["templates:instantiate"],
+  "templates:library:write": ["templates:library:write"],
   "export:session": ["export:session"],
   "export:project": ["export:project"],
   "theme:read": ["theme:read"],
@@ -60,6 +83,20 @@ const permissionMapping: Record<string, PluginAPIPermission[]> = {
   "media:video:export": ["media:video:export"],
   "extension:ui": ["extension:ui"],
   "notification:show": ["notification:show"],
+  // Inter-plugin IPC. Identity mappings — without these a plugin that
+  // declares `ipc:call` / `ipc:expose` in its manifest never has the API
+  // permission granted, so every `ctx.ipc.send/call/broadcast/expose` throws
+  // (the gate in `lib/plugin/messaging/ipc.ts:createIPCAPI` checks exactly
+  // these keys). Receiving (`on`) and introspection stay ungated.
+  "ipc:call": ["ipc:call"],
+  "ipc:expose": ["ipc:expose"],
+  // Pub/sub event bus. Identity mappings — same reason as the IPC pair above:
+  // without these a plugin that declares `events:publish` / `events:subscribe`
+  // never has the API permission granted, so `ctx.events.bus.emit` / `.on`
+  // throw (the gate lives in `lib/plugin/messaging/message-bus.ts:createEventAPI`).
+  // Cleanup (`off`/`offAll`) stays ungated.
+  "events:publish": ["events:publish"],
+  "events:subscribe": ["events:subscribe"],
 }
 
 const legacyAliases: Record<string, string[]> = {
@@ -70,10 +107,13 @@ const legacyAliases: Record<string, string[]> = {
   database: ["database:read", "database:write"],
   clipboard: ["clipboard:read", "clipboard:write"],
   notifications: ["notification"],
-  secrets: ["settings:read", "settings:write"],
+  // Legacy `secrets` must expand to the secrets permissions themselves, not
+  // settings — mapping it to settings both under-granted (no secret access)
+  // and over-granted (settings access the plugin never declared).
+  secrets: ["secrets:read", "secrets:write"],
 }
 
-function expandManifestPermission(permission: string): string[] {
+export function expandManifestPermission(permission: string): string[] {
   if (legacyAliases[permission]) {
     return legacyAliases[permission]
   }
@@ -107,6 +147,25 @@ export function initializePluginPermissions(pluginId: string, manifestPermission
 }
 
 /**
+ * Mirror an API-permission change to the native/remote host, but only when that
+ * gateway exists — browser / Capacitor-local plugins use the in-memory set, and
+ * issuing a Tauri-only command there would warn and persist nothing. Failures
+ * are recorded silently: the in-memory grant already succeeded, so the host
+ * mirror is best-effort.
+ */
+function persistToHost(
+  pluginId: string,
+  fn: () => Promise<unknown>,
+  site: string,
+  message: string
+): void {
+  if (!isPluginGatewayAvailable()) return
+  void fn().catch((error) =>
+    recordSilentFailure(pluginId, { site, message, expected: false }, error)
+  )
+}
+
+/**
  * Create the Permission API for a plugin
  */
 export function createPermissionAPI(
@@ -119,24 +178,26 @@ export function createPermissionAPI(
     initializePluginPermissions(pluginId, manifestPermissions)
   }
 
-  // Prime host-side grants list (best effort).
-  void listHostPermissions(pluginId).catch((error) =>
-    recordSilentFailure(
-      pluginId,
-      {
-        site: "permission.listHost",
-        message: "Failed to prime host-side permission grants",
-        expected: false,
-      },
-      error
-    )
+  // Prime native/remote host grants (a no-op without the host gateway).
+  persistToHost(
+    pluginId,
+    () => listHostPermissions(pluginId),
+    "permission.listHost",
+    "Failed to prime host-side permission grants"
   )
 
   const getPermissions = () => grantedPermissions.get(pluginId) || new Set()
 
+  // Introspection must agree with enforcement: `ctx.git.commit()` is gated by
+  // the PermissionGuard (manifest-level perms like `git:write`), which the
+  // API-permission set knows nothing about. Consult both stores.
+  const checkEither = (permission: IntrospectablePluginPermission): boolean =>
+    getPermissions().has(permission as PluginAPIPermission) ||
+    getPermissionGuard().check(pluginId, permission as PluginPermission, "permission-api")
+
   return {
-    hasPermission: (permission: PluginAPIPermission): boolean => {
-      return getPermissions().has(permission)
+    hasPermission: (permission: IntrospectablePluginPermission): boolean => {
+      return checkEither(permission)
     },
 
     requestPermission: async (
@@ -157,16 +218,12 @@ export function createPermissionAPI(
 
       if (granted) {
         existing.add(permission)
-        void grantHostPermission(pluginId, permission).catch((error) =>
-          recordSilentFailure(
-            pluginId,
-            {
-              site: "permission.grantHost",
-              message: `Failed to persist grant for ${permission}`,
-              expected: false,
-            },
-            error
-          )
+        contextPanelRegistry.refresh()
+        persistToHost(
+          pluginId,
+          () => grantHostPermission(pluginId, permission),
+          "permission.grantHost",
+          `Failed to persist grant for ${permission}`
         )
         logger.info(`Granted permission: ${permission}`)
       } else {
@@ -175,18 +232,21 @@ export function createPermissionAPI(
       return granted
     },
 
-    getGrantedPermissions: (): PluginAPIPermission[] => {
-      return Array.from(getPermissions())
+    getGrantedPermissions: (): IntrospectablePluginPermission[] => {
+      return Array.from(
+        new Set<IntrospectablePluginPermission>([
+          ...getPermissions(),
+          ...getPermissionGuard().getPluginPermissions(pluginId),
+        ])
+      )
     },
 
-    hasAllPermissions: (permissions: PluginAPIPermission[]): boolean => {
-      const granted = getPermissions()
-      return permissions.every((p) => granted.has(p))
+    hasAllPermissions: (permissions: IntrospectablePluginPermission[]): boolean => {
+      return permissions.every(checkEither)
     },
 
-    hasAnyPermission: (permissions: PluginAPIPermission[]): boolean => {
-      const granted = getPermissions()
-      return permissions.some((p) => granted.has(p))
+    hasAnyPermission: (permissions: IntrospectablePluginPermission[]): boolean => {
+      return permissions.some(checkEither)
     },
   }
 }
@@ -207,6 +267,7 @@ export function pluginHasApiPermission(pluginId: string, permission: PluginAPIPe
  */
 export function revokePluginPermissions(pluginId: string) {
   grantedPermissions.delete(pluginId)
+  contextPanelRegistry.refresh()
 }
 
 /**
@@ -216,16 +277,12 @@ export function grantPermission(pluginId: string, permission: PluginAPIPermissio
   const permissions = grantedPermissions.get(pluginId) || new Set()
   permissions.add(permission)
   grantedPermissions.set(pluginId, permissions)
-  void grantHostPermission(pluginId, permission).catch((error) =>
-    recordSilentFailure(
-      pluginId,
-      {
-        site: "permission.grantHost",
-        message: `Failed to persist grant for ${permission}`,
-        expected: false,
-      },
-      error
-    )
+  contextPanelRegistry.refresh()
+  persistToHost(
+    pluginId,
+    () => grantHostPermission(pluginId, permission),
+    "permission.grantHost",
+    `Failed to persist grant for ${permission}`
   )
 }
 
@@ -237,15 +294,11 @@ export function revokePermission(pluginId: string, permission: PluginAPIPermissi
   if (permissions) {
     permissions.delete(permission)
   }
-  void revokeHostPermission(pluginId, permission).catch((error) =>
-    recordSilentFailure(
-      pluginId,
-      {
-        site: "permission.revokeHost",
-        message: `Failed to persist revocation for ${permission}`,
-        expected: false,
-      },
-      error
-    )
+  contextPanelRegistry.refresh()
+  persistToHost(
+    pluginId,
+    () => revokeHostPermission(pluginId, permission),
+    "permission.revokeHost",
+    `Failed to persist revocation for ${permission}`
   )
 }

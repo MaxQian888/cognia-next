@@ -81,6 +81,29 @@ describe("SchedulerError", () => {
       expect(err.details).toEqual({ taskName: "Daily Sync", timeoutMs: 30000 })
     })
 
+    it.each([
+      [
+        undefined,
+        "Execution cancelled by a newer start (cancel-previous overlap policy)",
+        "overlap-cancelled",
+      ],
+      [
+        "scheduler-stopped" as const,
+        "Execution cancelled because the scheduler stopped",
+        "scheduler-stopped",
+      ],
+      ["task-deleted" as const, "Execution cancelled because the task was deleted", "task-deleted"],
+    ])("executionCancelled() describes the %s reason", (reason, message, expectedReason) => {
+      const err =
+        reason === undefined
+          ? SchedulerError.executionCancelled("Daily Sync")
+          : SchedulerError.executionCancelled("Daily Sync", reason)
+
+      expect(err.code).toBe("EXECUTION_CANCELLED")
+      expect(err.message).toBe(message)
+      expect(err.details).toEqual({ taskName: "Daily Sync", reason: expectedReason })
+    })
+
     it("initFailed() preserves cause", () => {
       const cause = new Error("inner")
       const err = SchedulerError.initFailed("config bad", cause)

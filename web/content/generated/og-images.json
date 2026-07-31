@@ -1,0 +1,23 @@
+{
+  "capturedAt": "2026-07-26T09:08:30.341Z",
+  "images": {
+    "home-en": "/og/home-en.png",
+    "home-zh": "/og/home-zh.png",
+    "product-en": "/og/product-en.png",
+    "product-zh": "/og/product-zh.png",
+    "workflows-en": "/og/workflows-en.png",
+    "workflows-zh": "/og/workflows-zh.png",
+    "plugins-en": "/og/plugins-en.png",
+    "plugins-zh": "/og/plugins-zh.png",
+    "trust-en": "/og/trust-en.png",
+    "trust-zh": "/og/trust-zh.png",
+    "download-en": "/og/download-en.png",
+    "download-zh": "/og/download-zh.png",
+    "use-cases-development-en": "/og/use-cases-development-en.png",
+    "use-cases-development-zh": "/og/use-cases-development-zh.png",
+    "use-cases-research-en": "/og/use-cases-research-en.png",
+    "use-cases-research-zh": "/og/use-cases-research-zh.png",
+    "changelog-en": "/og/changelog-en.png",
+    "changelog-zh": "/og/changelog-zh.png"
+  }
+}

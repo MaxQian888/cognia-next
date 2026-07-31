@@ -8,20 +8,33 @@
   "main": "src/index.ts",
   "author": "cognia-next",
   "license": "MIT",
+  "minAppVersion": "0.1.0",
   "engines": {
     "cognia": ">=0.1.0"
   },
   "permissions": ["clipboard:write", "media:image:write"],
-  "activationEvents": ["onStartup"],
+  "activationEvents": ["startup", "onCommand:screenshot"],
   "runtimeCompatibility": {
     "browser": {
-      "availability": "partial",
+      "availability": "degraded",
       "entrypoint": "src/index.ts",
-      "hint": "Browser builds prompt for getDisplayMedia permission; some browsers gate this behind HTTPS."
+      "reason": "Browser builds prompt for getDisplayMedia permission; some browsers gate this behind HTTPS."
     },
     "tauri": {
       "availability": "supported",
       "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "blocked",
+      "reason": "No getDisplayMedia / screen capture in the mobile WebView."
     }
-  }
+  },
+  "commands": [
+    {
+      "id": "screenshot",
+      "name": "/screenshot",
+      "description": "Capture a screen image and copy it to the clipboard.",
+      "icon": "Camera"
+    }
+  ]
 }

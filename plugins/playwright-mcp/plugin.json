@@ -2,25 +2,38 @@
   "id": "cognia-playwright-mcp",
   "name": "Playwright Browser",
   "version": "0.1.0",
-  "description": "Browser automation via Microsoft Playwright MCP — 40+ DOM-driven tools for navigation, click, type, screenshot, and accessibility-tree extraction.",
+  "description": "Browser automation via Microsoft Playwright MCP \u2014 40+ DOM-driven tools for navigation, click, type, screenshot, and accessibility-tree extraction.",
   "type": "frontend",
   "capabilities": ["mcp-server-preset", "commands"],
   "main": "src/index.ts",
   "author": "cognia-next",
   "license": "MIT",
+  "minAppVersion": "0.1.0",
   "engines": {
     "cognia": ">=0.1.0"
   },
   "permissions": [],
-  "activationEvents": ["onStartup"],
+  "activationEvents": ["startup", "onCommand:browser"],
   "runtimeCompatibility": {
     "browser": {
       "availability": "blocked",
-      "hint": "Requires npx to spawn @playwright/mcp@latest — desktop only."
+      "reason": "Requires npx to spawn @playwright/mcp@latest \u2014 desktop only."
     },
     "tauri": {
       "availability": "supported",
       "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "blocked",
+      "reason": "Spawns @playwright/mcp via npx \u2014 unavailable on mobile."
     }
-  }
+  },
+  "commands": [
+    {
+      "id": "browser",
+      "name": "/browser",
+      "description": "Attach the Playwright MCP browser to the current character.",
+      "icon": "Globe"
+    }
+  ]
 }

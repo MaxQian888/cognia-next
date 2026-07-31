@@ -7,12 +7,12 @@ import { render, screen, fireEvent } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { TooltipProvider } from "@/components/ui/tooltip"
 
-jest.mock("@/lib/agent-trace/log-adapter", () => ({
+jest.mock("@cognia/agent-trace/log-adapter", () => ({
   AGENT_TRACE_MODULE: "agent.trace",
 }))
 
 import { LogPanelToolbar, type LogPanelToolbarProps } from "./log-panel-toolbar"
-import type { LogLevel } from "@/lib/logging"
+import type { LogLevel } from "@cognia/logging"
 
 function makeProps(overrides: Partial<LogPanelToolbarProps> = {}): LogPanelToolbarProps {
   return {
@@ -218,6 +218,13 @@ describe("LogPanelToolbar — More actions menu", () => {
     await openMore()
     fireEvent.click(screen.getByText("Plain Text"))
     expect(props.onExport).toHaveBeenCalledWith("text")
+  })
+
+  it("invokes onExport('ndjson') from the More menu", async () => {
+    const { props } = renderToolbar()
+    await openMore()
+    fireEvent.click(screen.getByText("NDJSON"))
+    expect(props.onExport).toHaveBeenCalledWith("ndjson")
   })
 
   it("fires clearLogs", async () => {

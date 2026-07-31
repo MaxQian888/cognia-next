@@ -8,7 +8,9 @@ import {
   getComponent,
   hasComponent,
   getRegisteredTypes,
+  getRegisteredCatalogIds,
   createCatalog,
+  registerCatalog,
   unregisterComponent,
   clearRegistry,
   getStandardComponentTypes,
@@ -91,6 +93,34 @@ describe("A2UI Catalog", () => {
     })
   })
 
+  describe("getRegisteredCatalogIds", () => {
+    it("always includes the standard catalog and every component-backed catalog", () => {
+      const MockComponent: React.FC<A2UIComponentProps<A2UIComponent>> = () => null
+      registerComponent("Text", MockComponent, { catalogId: "zeta-catalog" })
+      registerComponent("Button", MockComponent, { catalogId: "alpha-catalog" })
+
+      expect(getRegisteredCatalogIds()).toEqual([
+        DEFAULT_CATALOG_ID,
+        "alpha-catalog",
+        "zeta-catalog",
+      ])
+    })
+
+    it("includes explicitly registered catalogs without duplicating ids", () => {
+      const MockComponent: React.FC<A2UIComponentProps<A2UIComponent>> = () => null
+      registerCatalog({
+        id: "plugin-catalog",
+        name: "Plugin catalog",
+        version: "1.0.0",
+        components: {
+          Text: { type: "Text", component: MockComponent },
+        },
+      })
+
+      expect(getRegisteredCatalogIds()).toEqual([DEFAULT_CATALOG_ID, "plugin-catalog"])
+    })
+  })
+
   describe("getStandardComponentTypes", () => {
     it("should return array of standard component types", () => {
       const types = getStandardComponentTypes()
@@ -109,6 +139,13 @@ describe("A2UI Catalog", () => {
     it("should define component categories", () => {
       expect(componentCategories).toBeDefined()
       expect(typeof componentCategories).toBe("object")
+    })
+
+    it("assigns every standard catalog type to exactly one editor category", () => {
+      const categorizedTypes = Object.values(componentCategories).flat()
+      const standardTypes = getStandardComponentTypes()
+      expect(standardTypes.filter((type) => !categorizedTypes.includes(type))).toEqual([])
+      expect(new Set(categorizedTypes).size).toBe(categorizedTypes.length)
     })
   })
 
@@ -150,6 +187,30 @@ describe("A2UI Catalog", () => {
   })
 
   describe("resolveWidgetMetadata", () => {
+    it("applies configured defaults when component metadata omits the fields", () => {
+      const metadata = resolveWidgetMetadata(
+        { id: "text-1", component: "Text", text: "Hello" },
+        { hostStrategy: "lazy-runtime", theme: "dark" }
+      )
+
+      expect(metadata.hostStrategy).toBe("lazy-runtime")
+      expect(metadata.theme).toBe("dark")
+    })
+
+    it("keeps a rich-output profile's safe host while applying other configured defaults", () => {
+      const metadata = resolveWidgetMetadata(
+        {
+          id: "rich-1",
+          component: "RichOutput",
+          profileId: "how-it-works-physical",
+        },
+        { hostStrategy: "native", theme: "dark" }
+      )
+
+      expect(metadata.hostStrategy).toBe("artifact-preview")
+      expect(metadata.theme).toBe("dark")
+    })
+
     it("returns deterministic defaults for standard native components", () => {
       const metadata = resolveWidgetMetadata({ id: "text-1", component: "Text", text: "Hello" })
 

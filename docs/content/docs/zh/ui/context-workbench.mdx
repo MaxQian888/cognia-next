@@ -1,0 +1,39 @@
+---
+title: 上下文工作台
+description: 面向 Project 文件、Canvas 文档、Artifact、Workflow、评论、资源会话与插件面板的共享右侧工作区。
+---
+
+# 上下文工作台
+
+Context Workbench 是资源专属工具的统一右侧工作区。它统一导航与布局，但**不会替换或删除** Project、Canvas、Artifact、Workflow 各自已有的专用能力。
+
+## 能力完整性
+
+| 资源 | Workbench 中保留的原生面板 |
+| --- | --- |
+| Project 文件 | 资源聊天、评论、元数据/session 控制、outline、diagnostics、Git review、proposal review、preview |
+| Canvas 文档 | AI actions/chat、suggestions、评论、collaboration、properties/formatting、outline、history、proposal review、preview/export、execution |
+| Artifact | 资源聊天、评论、proposal review、preview、history、metadata、filesystem workspace、selection-to-AI |
+| Workflow | 专用聊天、评论、inspector、problems、runs、templates、settings、changelog |
+
+每个 host 根据当前资源与平台计算真实 capabilities。原生面板在 backend 不可用时可继续显示并解释原因；插件面板缺少声明的能力或权限时直接不提供。
+
+## 导航与布局
+
+- Activity 按钮对相关面板分组。方向键、Home、End 可在 activity 与组内 tab 间移动，并遵循标准 tab/tabpanel 语义。
+- `narrow` 使用 host 的常规 360px 宽度；`wide` 约占 host 一半，并限制在 640–960px；`focus` 是可访问的全屏展示，按 Escape 后恢复焦点。
+- 移动端渲染全宽 Sheet，不显示仅桌面有意义的宽度与 focus 控件。
+- Pin 会保护当前面板不被自动 reveal 覆盖。诊断、proposal、selection 与插件请求只更新 pending 指示，直到用户显式导航或取消 pin。
+
+## 评论与资源会话
+
+四类资源共用评论模型。评论可锚定整个资源、文本/行区间，或 Workflow 节点/边。线程保留编辑/删除、回复、reaction、resolve/reopen、未解决徽标、revision 元数据与 stale-anchor 指示。
+
+每个资源同时拥有一个持久化内嵌 AI session。现有 provider-bound 上下文组装、PII 脱敏、proposal-first 编辑与 review bridge 继续由专用面板实现。
+
+## 回滚开关
+
+`canvas`、`project`、`artifact`、`workflow` 四个 host 开关相互独立且默认开启。关闭其中一个只恢复该业务面的完整旧右侧栏，不影响另外三类资源。旧 host 保留一个小版本。
+
+生命周期、持久化、评论与插件决策参见 [ADR-0083](../adr/0083-context-workbench)。
+

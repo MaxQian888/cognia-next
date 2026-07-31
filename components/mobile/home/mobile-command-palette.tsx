@@ -9,6 +9,7 @@
  * Built on the shared cmdk primitives (`components/ui/command.tsx`).
  */
 
+import { useCallback, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import {
@@ -31,14 +32,22 @@ import {
 } from "@/components/ui/command"
 import { AvatarBadge } from "@/components/desktop/avatar-badge"
 import { useSessions } from "@/hooks/chat"
+import { useChatHistorySearch } from "@/hooks/chat/use-chat-history-search"
+import { useDebouncedCallback } from "@/hooks/workflow/use-debounced-callback"
 import { useClientLiveQuery } from "@/hooks/data"
 import { useUIStore } from "@/stores/ui"
+import { useProjectStore } from "@/stores/project/project-store"
 import { listCharacters } from "@/lib/db/characters"
 import { listTeams } from "@/lib/db/teams"
 import { listWorkflows } from "@/lib/db/workflows"
-import { loggers } from "@/lib/logging"
-import type { Character, Team } from "@/lib/claude/types"
+import { loggers } from "@cognia/logging"
+import type { Character, Team } from "@cognia/agent-config-types"
 import type { WorkflowRow } from "@/types/workflow/visual"
+import { guildFromSession } from "@/lib/claude/guild"
+import { jumpToSessionMessage } from "@/lib/chat/cross-session-jump"
+import { ChatHistorySearchResults } from "@/components/chat/search/chat-history-search-results"
+import type { ChatSearchResult } from "@/lib/chat/search/engine"
+import { toast } from "sonner"
 
 const log = loggers.ui
 
@@ -62,13 +71,52 @@ export function MobileCommandPalette({
 }: MobileCommandPaletteProps) {
   const t = useTranslations("mobile.search")
   const router = useRouter()
-  const { sessions, create, select } = useSessions()
+  const [searchInput, setSearchInput] = useState("")
+  const [searchQuery, setSearchQuery] = useState("")
+  const { sessions, create, select } = useSessions({ crossWorkspace: true })
   const setSelectedGuild = useUIStore((s) => s.setSelectedGuild)
   const characters = useClientLiveQuery<Character[]>(() => listCharacters(), [], [])
   const teams = useClientLiveQuery<Team[]>(() => listTeams(), [], [])
   const workflows = useClientLiveQuery<WorkflowRow[]>(() => listWorkflows(), [], [])
+  const { call: debouncedSetSearchQuery, cancel: cancelSearchQuery } = useDebouncedCallback(
+    (next: string) => setSearchQuery(next),
+    150
+  )
+  const historySearch = useChatHistorySearch(searchQuery, {
+    enabled: open,
+    limit: 20,
+  })
+  const visibleSessions = useMemo(() => {
+    const needle = searchInput.trim().toLowerCase()
+    if (!needle) return sessions.slice(0, 12)
+    return sessions
+      .filter((session) => `${session.title} ${session.id}`.toLowerCase().includes(needle))
+      .slice(0, 20)
+  }, [sessions, searchInput])
 
-  const close = () => onOpenChange(false)
+  const resetSearch = useCallback(() => {
+    setSearchInput("")
+    cancelSearchQuery()
+    setSearchQuery("")
+  }, [cancelSearchQuery])
+
+  const handleOpenChange = useCallback(
+    (next: boolean) => {
+      if (!next) resetSearch()
+      onOpenChange(next)
+    },
+    [onOpenChange, resetSearch]
+  )
+
+  const close = useCallback(() => handleOpenChange(false), [handleOpenChange])
+
+  const handleSearchChange = useCallback(
+    (next: string) => {
+      setSearchInput(next)
+      debouncedSetSearchQuery(next)
+    },
+    [debouncedSetSearchQuery]
+  )
 
   const handleNewChat = () => {
     log.info("mobile-search new-chat")
@@ -81,11 +129,34 @@ export function MobileCommandPalette({
     onOpenSettings(tab)
   }
 
-  const handleSession = (id: string) => {
-    log.info("mobile-search select-session", { sessionId: id })
-    close()
-    onSelectSession(id)
-  }
+  const handleSession = useCallback(
+    (id: string) => {
+      log.info("mobile-search select-session", { sessionId: id })
+      close()
+      onSelectSession(id)
+    },
+    [close, onSelectSession]
+  )
+
+  const handleHistoryResult = useCallback(
+    (result: ChatSearchResult) => {
+      const target = sessions.find((session) => session.id === result.sessionId)
+      if (target?.projectId) {
+        const projectState = useProjectStore.getState()
+        if (target.projectId !== projectState.activeProjectId) {
+          projectState.setActiveProject(target.projectId)
+        }
+      }
+      if (target) setSelectedGuild(guildFromSession(target))
+      handleSession(result.sessionId)
+      void jumpToSessionMessage(result.sessionId, result.messageId, { align: "center" }).then(
+        (landed) => {
+          if (!landed) toast.error(t("search.jumpFailed"))
+        }
+      )
+    },
+    [sessions, setSelectedGuild, handleSession, t]
+  )
 
   const handleCharacter = async (c: Character) => {
     log.info("mobile-search new-chat-with-character", { characterId: c.id })
@@ -108,19 +179,38 @@ export function MobileCommandPalette({
   const handleWorkflow = (wf: WorkflowRow) => {
     log.info("mobile-search open-workflow", { workflowId: wf.id })
     close()
-    router.push(`/workflows/${encodeURIComponent(wf.id)}`)
+    router.push(`/workflows/editor?id=${encodeURIComponent(wf.id)}`)
   }
 
   return (
     <CommandDialog
       open={open}
-      onOpenChange={onOpenChange}
+      onOpenChange={handleOpenChange}
       title={t("title")}
       description={t("description")}
     >
-      <CommandInput placeholder={t("placeholder")} />
+      <CommandInput
+        value={searchInput}
+        onValueChange={handleSearchChange}
+        placeholder={t("placeholder")}
+      />
       <CommandList>
         <CommandEmpty>{t("empty")}</CommandEmpty>
+
+        <ChatHistorySearchResults
+          query={searchQuery}
+          results={historySearch.results}
+          loading={historySearch.loading}
+          error={historySearch.error}
+          coverageIncomplete={
+            historySearch.moreOlderHistory || historySearch.indexIncomplete
+          }
+          heading={t("groups.messages")}
+          loadingLabel={t("search.loading")}
+          errorLabel={t("search.error")}
+          coverageLabel={t("search.coverage")}
+          onSelect={handleHistoryResult}
+        />
 
         <CommandGroup heading={t("groups.actions")}>
           <CommandItem onSelect={handleNewChat} value="action new chat">
@@ -187,11 +277,11 @@ export function MobileCommandPalette({
           </>
         ) : null}
 
-        {sessions.length > 0 ? (
+        {visibleSessions.length > 0 ? (
           <>
             <CommandSeparator />
             <CommandGroup heading={t("groups.sessions")}>
-              {sessions.slice(0, 12).map((s) => (
+              {visibleSessions.map((s) => (
                 <CommandItem
                   key={s.id}
                   value={`session ${s.title}`}

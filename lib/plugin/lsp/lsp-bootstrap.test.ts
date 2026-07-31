@@ -1,6 +1,6 @@
 /**
- * Tests for `bootstrapLspRegistry` — verifies the wiring assembles
- * the registry + adapter + settings sync without touching Tauri.
+ * Tests for `bootstrapLspRegistry` — verifies the wiring assembles the
+ * registry + adapter + unified-LSP sync without touching Tauri.
  */
 
 const syncMock = jest.fn(async (_entries: unknown) => ({ added: 0, removed: 0, skipped: 0 }))
@@ -9,6 +9,7 @@ const configureLspRegistryMock = jest.fn((_input: unknown) => registryDisposeMoc
 
 jest.mock("./lsp-user-servers", () => ({
   syncUserLspServers: (entries: unknown) => syncMock(entries),
+  editorEligibleServers: (resolved: unknown[]) => resolved,
 }))
 
 jest.mock("./lsp-registry", () => ({
@@ -34,33 +35,55 @@ jest.mock("@/lib/plugin/vscode-shim/lsp-workspace-manager", () => ({
   listWorkspaceFolders: jest.fn(() => []),
 }))
 
-const settingsState: {
-  settings: { developer?: { userLspServers?: unknown[] } } | null
-} = { settings: { developer: {} } }
+jest.mock("@/lib/lsp/resolve-config", () => ({
+  resolveLspServers: jest.fn(async () => []),
+}))
+jest.mock("@/lib/lsp/project-file-reader", () => ({
+  readProjectLspFile: jest.fn(async () => null),
+}))
+jest.mock("@/lib/workspace/roots", () => ({
+  primaryRootOf: jest.fn(() => undefined),
+}))
 
+const settingsState: { settings: { lsp?: { servers?: unknown[] } } | null } = {
+  settings: { lsp: {} },
+}
 jest.mock("@/stores/settings/settings-store", () => ({
   useSettingsStore: {
     getState: () => settingsState,
-    subscribe: jest.fn(),
+    subscribe: jest.fn(() => () => {}),
+  },
+}))
+
+const projectState: { projects: unknown[]; activeProjectId: string | null } = {
+  projects: [],
+  activeProjectId: null,
+}
+jest.mock("@/stores/project/project-store", () => ({
+  useProjectStore: {
+    getState: () => projectState,
+    subscribe: jest.fn(() => () => {}),
   },
 }))
 
 import { __resetLspBootstrapForTesting, bootstrapLspRegistry } from "./lsp-bootstrap"
-import type { UserLspServerEntry } from "@/lib/claude/types"
+import type { LspServerConfig } from "@/types/lsp/config"
+
+const flush = () => new Promise((r) => setTimeout(r, 0))
 
 beforeEach(() => {
   __resetLspBootstrapForTesting()
   syncMock.mockClear()
   registryDisposeMock.mockClear()
   configureLspRegistryMock.mockClear()
-  settingsState.settings = { developer: {} }
+  settingsState.settings = { lsp: {} }
 })
 
 describe("bootstrapLspRegistry", () => {
   it("configures the registry with a client and a bridge", () => {
     bootstrapLspRegistry({
-      subscribeUserLspServers: () => () => {},
-      getUserLspServers: () => undefined,
+      subscribeChanges: () => () => {},
+      resolveEditorServers: async () => [],
     })
     expect(configureLspRegistryMock).toHaveBeenCalledTimes(1)
     const arg = configureLspRegistryMock.mock.calls[0][0] as {
@@ -73,70 +96,71 @@ describe("bootstrapLspRegistry", () => {
     expect(typeof arg.resolveWorkspaceFolders).toBe("function")
   })
 
-  it("applies the initial user-LSP snapshot on bootstrap", () => {
+  it("applies the initial resolved editor-server list on bootstrap", async () => {
+    const servers: LspServerConfig[] = [
+      { id: "eslint", name: "ESLint", languages: ["typescript"], command: "/x" },
+    ]
     bootstrapLspRegistry({
-      subscribeUserLspServers: () => () => {},
-      getUserLspServers: () => [
-        {
-          id: "eslint",
-          name: "ESLint",
-          languages: ["typescript"],
-          command: "/x",
-          enabled: true,
-        },
-      ],
+      subscribeChanges: () => () => {},
+      resolveEditorServers: async () => servers,
     })
+    await flush()
     expect(syncMock).toHaveBeenCalledTimes(1)
-    expect(syncMock.mock.calls[0][0]).toEqual([
-      expect.objectContaining({ id: "eslint", name: "ESLint" }),
-    ])
+    expect(syncMock.mock.calls[0][0]).toEqual([expect.objectContaining({ id: "eslint" })])
   })
 
-  it("re-syncs whenever the subscription fires", () => {
-    let listener: ((entries: UserLspServerEntry[] | undefined) => void) | null = null
+  it("re-syncs whenever the subscription fires", async () => {
+    let listener: (() => void) | null = null
     const dispose = jest.fn()
     bootstrapLspRegistry({
-      subscribeUserLspServers: (cb) => {
+      subscribeChanges: (cb) => {
         listener = cb
         return dispose
       },
-      getUserLspServers: () => undefined,
+      resolveEditorServers: async () => [],
     })
-    expect(syncMock).toHaveBeenCalledTimes(1) // initial empty
+    await flush()
+    expect(syncMock).toHaveBeenCalledTimes(1) // initial
 
-    // Fire a change.
-    listener!([
-      { id: "pyright", name: "Pyright", languages: ["python"], command: "/p", enabled: true },
-    ])
+    listener!()
+    await flush()
     expect(syncMock).toHaveBeenCalledTimes(2)
 
-    // And another.
-    listener!([])
+    listener!()
+    await flush()
     expect(syncMock).toHaveBeenCalledTimes(3)
+  })
+
+  it("swallows a rejected resolution without throwing", async () => {
+    bootstrapLspRegistry({
+      subscribeChanges: () => () => {},
+      resolveEditorServers: async () => {
+        throw new Error("fs blew up")
+      },
+    })
+    await flush()
+    expect(syncMock).not.toHaveBeenCalled()
   })
 
   it("is idempotent — second call returns a disposer that tears the first install down", () => {
     const dispose1 = bootstrapLspRegistry({
-      subscribeUserLspServers: () => () => {},
-      getUserLspServers: () => undefined,
+      subscribeChanges: () => () => {},
+      resolveEditorServers: async () => [],
     })
     const dispose2 = bootstrapLspRegistry({
-      subscribeUserLspServers: () => () => {},
-      getUserLspServers: () => undefined,
+      subscribeChanges: () => () => {},
+      resolveEditorServers: async () => [],
     })
-    // configureLspRegistry should still only have been called once.
     expect(configureLspRegistryMock).toHaveBeenCalledTimes(1)
-    // Both disposers should clean up the same install.
     dispose2()
-    // Disposer is idempotent — a second dispose call should not throw.
     expect(() => dispose1()).not.toThrow()
   })
 
   it("dispose tears down the subscription + registry", () => {
     const subscriptionDispose = jest.fn()
     const dispose = bootstrapLspRegistry({
-      subscribeUserLspServers: () => subscriptionDispose,
-      getUserLspServers: () => undefined,
+      subscribeChanges: () => subscriptionDispose,
+      resolveEditorServers: async () => [],
     })
     dispose()
     expect(subscriptionDispose).toHaveBeenCalled()
@@ -149,13 +173,10 @@ describe("bootstrapLspRegistry", () => {
     bootstrapLspRegistry({
       client: customClient,
       bridge: customBridge,
-      subscribeUserLspServers: () => () => {},
-      getUserLspServers: () => undefined,
+      subscribeChanges: () => () => {},
+      resolveEditorServers: async () => [],
     })
-    const arg = configureLspRegistryMock.mock.calls[0][0] as {
-      client: unknown
-      bridge: unknown
-    }
+    const arg = configureLspRegistryMock.mock.calls[0][0] as { client: unknown; bridge: unknown }
     expect(arg.client).toBe(customClient)
     expect(arg.bridge).toBe(customBridge)
   })

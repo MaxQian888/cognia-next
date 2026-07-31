@@ -6,7 +6,7 @@
 //! into tokio mpsc channels that the signaling client task consumes.
 //!
 //! Role split (matches `lib/tauri/transport-rtc.ts`):
-//! - **mobile** is the offerer — it calls `pc.createDataChannel("cognia.v1", ...)`
+//! - **mobile** is the offerer — it calls `pc.createDataChannel("cognia.v2", ...)`
 //!   and produces the SDP offer.
 //! - **desktop** (this file) is the answerer — it waits for the offer via
 //!   signaling, calls `set_remote_description` + `create_answer` +
@@ -29,7 +29,11 @@ use webrtc::peer_connection::RTCPeerConnection;
 
 /// DataChannel label both peers agree on. Mirrored in
 /// `lib/signaling/types.ts:DATACHANNEL_LABEL`.
-pub const DATACHANNEL_LABEL: &str = "cognia.v1";
+pub const DATACHANNEL_LABEL: &str = "cognia.v2";
+pub const TERMINAL_DATACHANNEL_LABEL: &str = "cognia.terminal";
+pub const ICE_QUEUE_CAPACITY: usize = 256;
+pub const INBOUND_FRAME_QUEUE_CAPACITY: usize = 128;
+pub const STATE_QUEUE_CAPACITY: usize = 32;
 
 /// Wraps an `RTCPeerConnection` and its (single) data channel, fanning the
 /// callback world out to plain mpsc channels for the signaling client to
@@ -49,12 +53,14 @@ pub struct PeerCallbacks {
     /// Local ICE candidates discovered after `setLocalDescription`. The
     /// signaling client wraps each in a `rtc:ice` envelope and relays it
     /// to the mobile peer.
-    pub outbound_ice: mpsc::UnboundedSender<RTCIceCandidateInit>,
+    pub outbound_ice: mpsc::Sender<RTCIceCandidateInit>,
     /// Inbound DataChannel binary messages (the RPC / event JSON
     /// envelopes from the mobile peer).
-    pub inbound_data: mpsc::UnboundedSender<Vec<u8>>,
+    pub inbound_data: mpsc::Sender<Vec<u8>>,
+    /// Handler for the isolated canonical binary terminal channel.
+    pub terminal_channel: Arc<dyn Fn(Arc<RTCDataChannel>) + Send + Sync>,
     /// `RTCPeerConnectionState` transitions for failure detection.
-    pub state_change: mpsc::UnboundedSender<RTCPeerConnectionState>,
+    pub state_change: mpsc::Sender<RTCPeerConnectionState>,
 }
 
 impl PeerSession {
@@ -89,7 +95,11 @@ impl PeerSession {
                 if let Some(c) = candidate {
                     match c.to_json() {
                         Ok(init) => {
-                            let _ = ice_tx.send(init);
+                            if ice_tx.try_send(init).is_err() {
+                                log::warn!(
+                                    "signaling::peer: ICE queue overflow or receiver closed"
+                                );
+                            }
                         }
                         Err(e) => {
                             log::warn!("signaling::peer: ice candidate to_json failed: {e}");
@@ -104,19 +114,38 @@ impl PeerSession {
         pc.on_peer_connection_state_change(Box::new(move |s: RTCPeerConnectionState| {
             let state_tx = state_tx.clone();
             Box::pin(async move {
-                let _ = state_tx.send(s);
+                if state_tx.try_send(s).is_err() {
+                    log::warn!("signaling::peer: state queue overflow or receiver closed");
+                }
             })
         }));
 
         // ── on_data_channel ────────────────────────────────────────────
         let dc_slot = Arc::clone(&dc);
         let inbound_tx = callbacks.inbound_data.clone();
+        let terminal_channel = Arc::clone(&callbacks.terminal_channel);
         let open_tx_dc = open_tx.clone();
         pc.on_data_channel(Box::new(move |channel: Arc<RTCDataChannel>| {
             let dc_slot = Arc::clone(&dc_slot);
             let inbound_tx = inbound_tx.clone();
+            let terminal_channel = Arc::clone(&terminal_channel);
             let open_tx_dc = open_tx_dc.clone();
             Box::pin(async move {
+                if channel.label() == TERMINAL_DATACHANNEL_LABEL {
+                    if !is_reliable_ordered_channel(
+                        channel.ordered(),
+                        channel.max_packet_lifetime(),
+                        channel.max_retransmits(),
+                    ) {
+                        log::warn!(
+                            "signaling::peer: rejecting unreliable terminal data channel"
+                        );
+                        let _ = channel.close().await;
+                        return;
+                    }
+                    terminal_channel(channel);
+                    return;
+                }
                 if channel.label() != DATACHANNEL_LABEL {
                     log::warn!(
                         "signaling::peer: ignoring data channel with unexpected label \"{}\"",
@@ -142,14 +171,17 @@ impl PeerSession {
 
                 // on_message → forward bytes to the dispatcher.
                 let forward = inbound_tx.clone();
+                let overflow_channel = Arc::clone(&channel);
                 channel.on_message(Box::new(move |msg: DataChannelMessage| {
                     let forward = forward.clone();
+                    let overflow_channel = Arc::clone(&overflow_channel);
                     Box::pin(async move {
                         let bytes = msg.data.to_vec();
-                        if forward.send(bytes).is_err() {
+                        if forward.try_send(bytes).is_err() {
                             log::warn!(
-                                "signaling::peer: inbound channel dropped, dispatcher gone"
+                                "signaling::peer: inbound frame queue overflow; closing peer channel"
                             );
+                            let _ = overflow_channel.close().await;
                         }
                     })
                 }));
@@ -196,25 +228,37 @@ impl PeerSession {
         self.pc.add_ice_candidate(candidate).await
     }
 
-    /// Send a binary payload to the mobile peer over the data channel. The
+    /// Send a JSON envelope to the mobile peer over the data channel. The
     /// dispatcher uses this to deliver RPC responses and event frames.
+    ///
+    /// Sends as a **text** DataChannel message when the payload is valid UTF-8
+    /// (it always is — the dispatcher serializes JSON). This matters: the peer
+    /// (`lib/tauri/transport-rtc.ts:handleDataChannelMessage`) reads inbound
+    /// frames as `String(event.data)`, which cannot decode a binary
+    /// (`ArrayBuffer`/`Blob`) message — so a binary send was silently dropped
+    /// on the receiver, breaking every desktop→peer response and event. The
+    /// mobile→desktop direction already sends text; this makes the two
+    /// symmetric. Non-UTF-8 payloads (should never occur) fall back to binary.
     pub async fn send_bytes(&self, bytes: Vec<u8>) -> Result<(), PeerSendError> {
         let dc = self.dc.read().await;
         let channel = dc.as_ref().ok_or(PeerSendError::ChannelClosed)?;
-        channel
-            .send(&Bytes::from(bytes))
-            .await
-            .map(|_| ())
-            .map_err(|e| PeerSendError::Webrtc(e.to_string()))
+        let message_id = uuid::Uuid::new_v4().to_string();
+        let frames = super::datachannel_framing::encode_message(&bytes, &message_id)
+            .map_err(|error| PeerSendError::Webrtc(error.to_string()))?;
+        for frame in frames {
+            let result = match String::from_utf8(frame) {
+                Ok(text) => channel.send_text(text).await,
+                Err(err) => channel.send(&Bytes::from(err.into_bytes())).await,
+            };
+            result.map_err(|e| PeerSendError::Webrtc(e.to_string()))?;
+        }
+        Ok(())
     }
 
     /// Wait until the data channel transitions to the `open` state. Returns
     /// `Err` if the channel never opens (e.g., negotiation failed and the
     /// peer connection was torn down before the open event fired).
-    pub async fn wait_for_open(
-        &self,
-        timeout: std::time::Duration,
-    ) -> Result<(), PeerSendError> {
+    pub async fn wait_for_open(&self, timeout: std::time::Duration) -> Result<(), PeerSendError> {
         // Watch::Receiver returns the current value on first borrow — if
         // the channel is already open we resolve immediately.
         if *self.open_rx.borrow() {
@@ -245,6 +289,14 @@ impl PeerSession {
     }
 }
 
+fn is_reliable_ordered_channel(
+    ordered: bool,
+    max_packet_lifetime: Option<u16>,
+    max_retransmits: Option<u16>,
+) -> bool {
+    ordered && max_packet_lifetime.is_none() && max_retransmits.is_none()
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum PeerSendError {
     #[error("data channel is not open")]
@@ -262,22 +314,22 @@ pub enum PeerSendError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::sync::mpsc::unbounded_channel;
     use webrtc::peer_connection::offer_answer_options::RTCOfferOptions;
 
     fn callbacks() -> (
         PeerCallbacks,
-        mpsc::UnboundedReceiver<RTCIceCandidateInit>,
-        mpsc::UnboundedReceiver<Vec<u8>>,
-        mpsc::UnboundedReceiver<RTCPeerConnectionState>,
+        mpsc::Receiver<RTCIceCandidateInit>,
+        mpsc::Receiver<Vec<u8>>,
+        mpsc::Receiver<RTCPeerConnectionState>,
     ) {
-        let (ice_tx, ice_rx) = unbounded_channel();
-        let (data_tx, data_rx) = unbounded_channel();
-        let (state_tx, state_rx) = unbounded_channel();
+        let (ice_tx, ice_rx) = mpsc::channel(ICE_QUEUE_CAPACITY);
+        let (data_tx, data_rx) = mpsc::channel(INBOUND_FRAME_QUEUE_CAPACITY);
+        let (state_tx, state_rx) = mpsc::channel(STATE_QUEUE_CAPACITY);
         (
             PeerCallbacks {
                 outbound_ice: ice_tx,
                 inbound_data: data_tx,
+                terminal_channel: Arc::new(|_| {}),
                 state_change: state_tx,
             },
             ice_rx,
@@ -294,6 +346,15 @@ mod tests {
         let err = session.send_bytes(vec![1, 2, 3]).await.unwrap_err();
         assert!(matches!(err, PeerSendError::ChannelClosed));
         session.close().await;
+    }
+
+    #[test]
+    fn terminal_channel_contract_is_unversioned_reliable_and_ordered() {
+        assert_eq!(TERMINAL_DATACHANNEL_LABEL, "cognia.terminal");
+        assert!(is_reliable_ordered_channel(true, None, None));
+        assert!(!is_reliable_ordered_channel(false, None, None));
+        assert!(!is_reliable_ordered_channel(true, Some(1000), None));
+        assert!(!is_reliable_ordered_channel(true, None, Some(3)));
     }
 
     #[tokio::test]
@@ -328,7 +389,10 @@ mod tests {
 
         // Initial negotiation → stable on both ends.
         let offer1 = mobile.create_offer(None).await.expect("offer1");
-        mobile.set_local_description(offer1.clone()).await.expect("ml1");
+        mobile
+            .set_local_description(offer1.clone())
+            .await
+            .expect("ml1");
         let answer1_sdp = desktop.accept_offer(offer1.sdp).await.expect("accept1");
         assert!(!answer1_sdp.is_empty());
         let answer1 = RTCSessionDescription::answer(answer1_sdp).expect("answer1 parse");
@@ -343,7 +407,10 @@ mod tests {
             }))
             .await
             .expect("offer2 restart");
-        mobile.set_local_description(offer2.clone()).await.expect("ml2");
+        mobile
+            .set_local_description(offer2.clone())
+            .await
+            .expect("ml2");
         let answer2_sdp = desktop
             .accept_offer(offer2.sdp)
             .await
@@ -412,19 +479,18 @@ mod tests {
 
         // SDP offer/answer dance.
         let offer = mobile.create_offer(None).await.expect("offer");
-        mobile.set_local_description(offer.clone()).await.expect("ml");
+        mobile
+            .set_local_description(offer.clone())
+            .await
+            .expect("ml");
         let answer_sdp = desktop.accept_offer(offer.sdp).await.expect("accept");
-        let answer =
-            RTCSessionDescription::answer(answer_sdp).expect("answer parse");
+        let answer = RTCSessionDescription::answer(answer_sdp).expect("answer parse");
         mobile.set_remote_description(answer).await.expect("mr");
 
         // Wait for both ends to observe the open transition. Loopback peers
         // converge fast, but we still allow a generous timeout for CI.
         let timeout = std::time::Duration::from_secs(10);
-        desktop
-            .wait_for_open(timeout)
-            .await
-            .expect("desktop open");
+        desktop.wait_for_open(timeout).await.expect("desktop open");
         tokio::time::timeout(timeout, mobile_open_rx.recv())
             .await
             .expect("mobile open timed out")
@@ -443,8 +509,32 @@ mod tests {
             .expect("recv None");
         assert_eq!(received, payload);
 
-        // Reverse direction.
-        desktop.send_bytes(b"hello mobile".to_vec()).await.expect("desktop send");
+        // Reverse direction — and ASSERT the mobile actually receives it, AS
+        // TEXT. This pins the ADR-0021 fix: `send_bytes` must deliver a text
+        // DataChannel message, because the TS/mobile receiver reads frames via
+        // `String(event.data)` and silently drops a binary (ArrayBuffer/Blob)
+        // message. The real-pair harness (`pnpm webrtc:pair`) caught this when
+        // every desktop→peer RPC response timed out; this test locks it down.
+        let (mobile_msg_tx, mut mobile_msg_rx) = tokio::sync::mpsc::channel::<(Vec<u8>, bool)>(1);
+        mobile_dc.on_message(Box::new(move |msg: DataChannelMessage| {
+            let tx = mobile_msg_tx.clone();
+            Box::pin(async move {
+                let _ = tx.send((msg.data.to_vec(), msg.is_string)).await;
+            })
+        }));
+        desktop
+            .send_bytes(b"hello mobile".to_vec())
+            .await
+            .expect("desktop send");
+        let (mobile_received, is_string) = tokio::time::timeout(timeout, mobile_msg_rx.recv())
+            .await
+            .expect("mobile recv timed out — desktop→mobile frame was dropped")
+            .expect("mobile recv None");
+        assert_eq!(mobile_received, b"hello mobile");
+        assert!(
+            is_string,
+            "desktop→mobile frame must be a TEXT message; a binary message is silently dropped by the TS receiver"
+        );
 
         // Teardown
         desktop.close().await;

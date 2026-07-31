@@ -7,12 +7,12 @@ import { NextIntlClientProvider } from "next-intl"
 import { useState } from "react"
 import enMessages from "@/i18n/messages/en.json"
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { ui: { error: jest.fn() } },
 }))
 
 import { InboxErrorBoundary } from "./inbox-error-boundary"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 function wrap(ui: React.ReactElement) {
   return render(

@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "minimumHostVersion",
+    "pluginTypes",
+    "permissions",
+    "capabilities",
+    "manifestContributions",
+    "runtimeEntries",
+    "pathFields"
+  ],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schemaVersion": { "type": "integer", "minimum": 1 },
+    "minimumHostVersion": { "type": "string" },
+    "pluginTypes": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+    "permissions": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "support", "introducedIn", "minimumHostVersion", "manifestFields"],
+        "properties": {
+          "id": { "type": "string" },
+          "support": { "enum": ["supported", "partial", "experimental", "blocked"] },
+          "introducedIn": { "type": "string" },
+          "minimumHostVersion": { "type": "string" },
+          "manifestFields": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+        },
+        "additionalProperties": false
+      }
+    },
+    "manifestContributions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["field", "capabilities", "execution"],
+        "properties": {
+          "field": { "type": "string" },
+          "capabilities": {
+            "type": "array",
+            "items": { "type": "string" },
+            "uniqueItems": true
+          },
+          "execution": {
+            "enum": ["host", "javascript", "conditional", "python", "wasm", "vscode"]
+          },
+          "pythonExecution": {
+            "enum": ["supported", "experimental", "unsupported"],
+            "description": "Whether a pure-Python (or hybrid python-backed) plugin can supply this contribution's runtime executor via the plugin_python_call seam. Only meaningful for javascript/conditional execution fields; host/data fields are language-agnostic and omit it. Defaults to \"unsupported\" (JS/React only)."
+          },
+          "entryPath": { "type": "string" },
+          "javascriptWhen": {
+            "type": "object",
+            "required": ["path"],
+            "properties": {
+              "path": { "type": "string" },
+              "equals": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "runtimeEntries": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["required", "javascriptEntry", "javascriptEntryRequiredForContributions"],
+        "properties": {
+          "required": {
+            "type": "array",
+            "items": { "type": "string" },
+            "uniqueItems": true
+          },
+          "javascriptEntry": { "type": ["string", "null"] },
+          "javascriptEntryRequiredForContributions": { "type": "boolean" },
+          "requiredAnyOf": {
+            "type": "array",
+            "items": { "type": "string" },
+            "uniqueItems": true
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "pathFields": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "runtime", "requiredFor", "executable"],
+        "properties": {
+          "path": { "type": "string" },
+          "runtime": { "enum": ["javascript", "python", "wasm", "vscode", "asset"] },
+          "requiredFor": { "type": "array", "items": { "type": "string" } },
+          "executable": { "type": "boolean" },
+          "sentinels": {
+            "type": "array",
+            "items": { "type": "string" },
+            "uniqueItems": true
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

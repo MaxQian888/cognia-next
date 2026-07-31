@@ -21,6 +21,7 @@ import Image from "next/image"
 import { useState } from "react"
 import { ChevronDownIcon, ChevronRightIcon, ExternalLinkIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { ExternalLink } from "@/components/shared/external-link"
 import { Badge } from "@/components/ui/badge"
 import type {
   InboundA2UIBlock,
@@ -33,6 +34,12 @@ const SOURCE_LABEL: Record<InboundA2UIBlock["source"], string> = {
   discord: "Discord Embed",
   telegram: "Telegram Inline",
   onebot: "OneBot",
+  wecom: "WeCom",
+  "wechat-personal": "WeChat",
+  "wechat-oa": "WeChat OA",
+  matrix: "Matrix",
+  "qq-official": "QQ",
+  dingtalk: "DingTalk",
 }
 
 export interface InboundA2UIRendererProps {
@@ -107,15 +114,13 @@ function NodeRenderer({ node }: { node: InboundA2UINode }) {
       )
     case "link":
       return (
-        <a
+        <ExternalLink
           href={node.href}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-xs text-primary underline-offset-2 hover:underline"
+          className="inline-flex items-center gap-1 rounded-sm text-xs text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
         >
           {node.label}
           <ExternalLinkIcon className="h-3 w-3" aria-hidden />
-        </a>
+        </ExternalLink>
       )
     case "button":
       return (
@@ -217,7 +222,7 @@ function RawJsonDetails({ payload, label }: { payload: unknown; label?: string }
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+        className="inline-flex items-center gap-1 rounded-sm text-[11px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
         data-testid="inbound-a2ui-raw-toggle"
       >
         {open ? (

@@ -2,7 +2,7 @@
  * E2E: flow.wait — duration-based pause.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../../../helpers/db-reset"
 import { seedAndOpenWorkflow } from "../../../helpers/seed-workflow"
 import {
@@ -24,7 +24,7 @@ test.describe("workflow node — flow.wait", () => {
     const wfId = await seedAndOpenWorkflow(page, "flow-wait")
     await assertNodeOnCanvas(page, { kind: "flow.wait", label: "Wait" })
     await openNodeInspector(page, "flow.wait")
-    await expect(page.locator("#ins-durationMs, [name=durationMs]").first()).toBeVisible()
+    await expect(page.locator("#ins-durationMs, [data-field=durationMs]").first()).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "flow.wait" })
   })

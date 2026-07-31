@@ -1,6 +1,11 @@
-jest.mock("next/font/google", () => ({
-  Geist: () => ({ variable: "--font-geist-sans" }),
-  Geist_Mono: () => ({ variable: "--font-geist-mono" }),
+// Geist ships as a self-hosted local font package; its font/* entrypoints call
+// next/font/local, which only works under the Next.js compiler. Stub them so the
+// layout renders under Jest with the same CSS variables production emits.
+jest.mock("geist/font/sans", () => ({
+  GeistSans: { variable: "--font-geist-sans" },
+}))
+jest.mock("geist/font/mono", () => ({
+  GeistMono: { variable: "--font-geist-mono" },
 }))
 
 jest.mock("next-intl/server", () => ({
@@ -13,6 +18,10 @@ jest.mock("next-intl/server", () => ({
 // children render inside the providers, so a passthrough stub is enough.
 jest.mock("@/components/desktop/desktop-app-shell", () => ({
   DesktopAppShell: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}))
+
+jest.mock("@/components/account/account-gate", () => ({
+  AccountGate: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }))
 
 // matchMedia isn't implemented by jsdom — next-themes reads it during SSR.

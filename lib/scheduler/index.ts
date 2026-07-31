@@ -7,9 +7,10 @@
  * present here.
  */
 
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { initTaskScheduler, stopTaskScheduler } from "./task-scheduler"
 import { registerBuiltInExecutors } from "./executors"
+import type { SchedulerTimingDriver } from "@/types/scheduler"
 
 const log = loggers.scheduler
 
@@ -21,6 +22,7 @@ export {
   stopTaskScheduler,
   registerTaskExecutor,
   unregisterTaskExecutor,
+  hasTaskExecutor,
   type ExecutionStatusEvent,
 } from "./task-scheduler"
 
@@ -34,6 +36,18 @@ export {
   formatCronExpression,
   matchesCronExpression,
 } from "./cron-parser"
+
+// Backfill (slot enumeration is reused by the UI preview)
+export { enumerateBackfillSlots, BACKFILL_MAX_SLOTS } from "./backfill"
+
+// Runtime policy helpers
+export {
+  resolveOverlapPolicy,
+  applyJitter,
+  isPastEndAt,
+  isAtMaxRuns,
+  isSlotOutsideCatchupWindow,
+} from "./runtime-policy"
 
 // Trigger normalization and validation
 export { normalizeTaskTrigger, isValidTimezone } from "./trigger-normalizer"
@@ -100,9 +114,9 @@ export {
 } from "./event-integration"
 
 /** Initialize the scheduler — register executors, start the loop. */
-export async function initSchedulerSystem(): Promise<void> {
+export async function initSchedulerSystem(driver?: SchedulerTimingDriver): Promise<void> {
   registerBuiltInExecutors()
-  await initTaskScheduler()
+  await initTaskScheduler(driver)
   log.info("[Scheduler] Scheduler system initialized")
 }
 

@@ -17,6 +17,11 @@
  *      `"opt-in"` in IM unless channel has an explicit allowlist.
  *   3. `ConversationOverrideRow.allowedBuiltInSkillIds` — exact match
  *      or `family.*` wildcard.
+ *   4. `skill.requires` — in an IM session, drop the entry if the channel
+ *      doesn't declare every required capability (e.g. a skill needing
+ *      `rich-card.lark` to render its HITL confirm card is hidden on
+ *      channels that can't show cards). Non-IM (desktop) sessions skip
+ *      this gate — A2UI renders confirm surfaces natively.
  *
  * Mutation tier does NOT filter at the manifest level — write and
  * destructive skills are still exposed to the assistant; the dispatcher
@@ -25,6 +30,7 @@
 
 import { z } from "zod"
 
+import type { Capability } from "@/types/connectors/capability"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
 import type { PlatformSkillCapability } from "@/types/connectors/skill-capability"
 import type { ConversationOverrideRow } from "@/lib/db/connector-types"
@@ -58,6 +64,12 @@ export interface BuildBuiltInSkillManifestInput {
   }
   /** Per-conversation override row (drives allowlist & access tier). */
   imOverrideRow?: ConversationOverrideRow
+  /**
+   * Capabilities the bound channel declares (the adapter's static
+   * `*_CAPS`). Drives the `requires` filter. Omit for non-IM sessions —
+   * the filter only runs when `imBinding` is set.
+   */
+  channelCapabilities?: readonly Capability[]
 }
 
 export function buildBuiltInSkillManifest(
@@ -71,6 +83,7 @@ export function buildBuiltInSkillManifest(
     if (!passPlatformFilter(skill, input.imBinding?.platform, isImSession)) continue
     if (!passImAccessFilter(skill, isImSession, input.imOverrideRow)) continue
     if (!passAllowedListFilter(skill, input.imOverrideRow?.allowedBuiltInSkillIds)) continue
+    if (!passRequiresFilter(skill, isImSession, input.channelCapabilities)) continue
 
     out.push({
       name: skill.mcpToolName,
@@ -170,4 +183,21 @@ function passAllowedListFilter(
     }
   }
   return false
+}
+
+function passRequiresFilter(
+  skill: BuiltInSkill,
+  isImSession: boolean,
+  channelCapabilities: readonly Capability[] | undefined
+): boolean {
+  // Skills declaring no required capabilities always pass.
+  if (!skill.requires || skill.requires.length === 0) return true
+  // Non-IM (desktop in-app) sessions render confirm surfaces via A2UI
+  // natively — channel-capability gating doesn't apply.
+  if (!isImSession) return true
+  // IM session: every required capability must be declared by the channel.
+  // An absent capability set (`undefined`) is treated as "declares none",
+  // conservatively dropping a skill that requires anything.
+  const declared = channelCapabilities ?? []
+  return skill.requires.every((cap) => declared.includes(cap))
 }

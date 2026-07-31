@@ -63,4 +63,23 @@ describe("RootSwitcher", () => {
     await user.click(await screen.findByTestId("root-option-r2"))
     expect(setRootDir).toHaveBeenCalledWith("/repo/b")
   })
+
+  it("uses explicit resource-scoped roots instead of the active workspace", () => {
+    projectRoots = [
+      { id: "active-1", path: "/active/a", isPrimary: true },
+      { id: "active-2", path: "/active/b" },
+    ]
+    gitRootDir = "/resource/b"
+
+    render(
+      <RootSwitcher
+        roots={[
+          { id: "resource-1", path: "/resource/a", isPrimary: true },
+          { id: "resource-2", path: "/resource/b", label: "Resource API" },
+        ]}
+      />
+    )
+
+    expect(screen.getByTestId("root-switcher")).toHaveTextContent("Resource API")
+  })
 })

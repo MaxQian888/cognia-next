@@ -133,6 +133,41 @@ function Tail({ traits, accent }: { traits: PetSpeciesTraits; accent: string }) 
   }
 }
 
+/**
+ * Species face trait — the previously dormant `traits.face` data. A duck gets
+ * its beak, snouted species a muzzle; `round`/`blob` add nothing. Drawn under
+ * the eyes/mouth (which the parent skin layers on top).
+ */
+function Face({ traits }: { traits: PetSpeciesTraits }) {
+  switch (traits.face) {
+    case "beak":
+      return (
+        <path
+          data-pet-part="face"
+          data-face="beak"
+          d={`M ${CX - 6} 59 l 12 0 l -6 7 z`}
+          fill="#ff9f1c"
+        />
+      )
+    case "snout":
+      return (
+        <ellipse
+          data-pet-part="face"
+          data-face="snout"
+          cx={CX}
+          cy={65}
+          rx={10}
+          ry={7}
+          fill="#ffffff"
+          opacity={0.35}
+        />
+      )
+    case "round":
+    case "blob":
+      return null
+  }
+}
+
 function Hat({ hat, accent }: { hat: PetHat; accent: string }) {
   const topY = 26
   switch (hat) {
@@ -238,6 +273,8 @@ export function PetBody({ bones }: { bones: PetBones }) {
         fill={palette.secondary}
         opacity={0.9}
       />
+      {/* Species face trait (beak/snout) — under the eyes/mouth overlay. */}
+      <Face traits={traits} />
       {/* Cheeks. */}
       {traits.cheeks && (
         <g data-pet-part="cheeks" fill="#ff8aa0" opacity={0.55}>

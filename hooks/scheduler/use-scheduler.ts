@@ -154,6 +154,7 @@ export function useScheduler() {
     pauseTask: store.pauseTask,
     resumeTask: store.resumeTask,
     runTaskNow: store.runTaskNow,
+    backfillTask: store.backfillTask,
     selectTask: store.selectTask,
     setFilter: store.setFilter,
     clearFilter: store.clearFilter,

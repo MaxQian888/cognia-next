@@ -1,0 +1,17 @@
+{
+  "policy": {
+    "autoUpdate": "自动更新",
+    "autoUpdateHint": "市场更新可用时自动应用。",
+    "governance": "治理模式",
+    "governanceBlock": "拦截",
+    "governanceHint": "Warn 让未知点带告警通过；Block 直接拒绝。",
+    "governanceWarn": "告警",
+    "rateLimitsNote": "速率限制与沙箱默认值在全局配置；每个插件的实际用量在插件详情中可见。",
+    "securityPosture": "严格沙箱",
+    "securityPostureHint": "拒绝未声明白名单插件的网络出口，并对每一项已声明权限都弹窗确认。关闭（平衡）保持默认：危险权限仍会弹窗，未声明白名单的插件保持不受限出口。",
+    "signatureRequired": "强制签名",
+    "signatureRequiredHint": "拒绝加载未通过发布者签名验证的插件。",
+    "trustedPublishersOnly": "仅信任的发布者",
+    "trustedPublishersOnlyHint": "仅接受来自官方密钥或你信任的发布者的签名；拒绝未知签名者。"
+  }
+}

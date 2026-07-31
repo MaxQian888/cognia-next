@@ -64,6 +64,7 @@ interface ChatPaneProps {
 - **角色 / 预设选择器** —— Popover 内嵌 `<Select>`，与 `usePresets()` + `useCharacter()` data hook 协作。
 - **导出触发器** —— `single-export-trigger.tsx`（`components/chat/dialogs/`），弹 Markdown / JSON / Plain text / Beautiful HTML / Animated HTML 五选一的对话框。详见 [备份 & 数据](../data/backup-and-data#%E5%8D%95%E4%BC%9A%E8%AF%9D%E5%AF%BC%E5%87%BA)。
 - **会话花费徽章** —— `session-cost-badge.tsx`，累加 token 与费用估算。
+- **Agent 流程展示切换** —— `agent-flow-display-toggle.tsx`，3 档 `ToggleGroup`（简化 / 标准 / 详细），驱动全局 Agent 流程展示模式（见 [Agent 流程展示模式](#agent-流程展示模式)）。
 - **Twin 徽章** —— `twin-header-badge.tsx`，会话绑定了员工孪生时显示。
 - **权限模式指示** —— `permission-mode-indicator.tsx`：allow / deny / ask / plan。
 
@@ -148,6 +149,45 @@ flowchart TB
 - **Body**：输入参数（折叠 JSON）。
 - **Content**：工具输出 —— 文本、JSON、图片、Markdown。
 - **Approval inline**：需要用户批准的工具（写文件、执行 shell）在 Body 下方插入"Approve / Deny"按钮组，写到 `pendingApprovals` store。
+
+### Agent 流程展示模式
+
+Agent 调用流程（工具调用、推理、子代理）按三种**展示模式**渲染——这是一个全局外观偏好，区别于 `density`（后者只调间距）：
+
+| 模式 | 工具调用 | 推理 / 子代理 |
+| --- | --- | --- |
+| **简化** | 单行行（`ToolCallRow`）：图标 + 工具名 + 简洁目标 + **结果摘要 chip** + 状态字形，点击展开。 | 默认折叠。 |
+| **标准**（默认） | 完整 `Tool` 卡——运行时展开、完成后折叠。 | 推理自动开合，卡片各自折叠。 |
+| **详细** | 每张卡强制展开，显示完整输入/输出。 | 推理 + 子代理树展开。 |
+
+- **状态** —— `AppSettings.agentFlowMode`（`{ mode }`），通过 `hooks/chat/use-agent-flow-mode.ts`（`useAgentFlowMode`）读写。默认 `standard`，经设置 store 的通用 `save()` 持久化。
+- **两个入口、同一值** —— 聊天头部快捷切换（`components/chat/agent-flow-display-toggle.tsx`，3 档 `ToggleGroup`）与外观设置卡（`components/settings/appearance/components/agent-flow-card.tsx`）驱动同一偏好，从任一处切换即全局生效。
+- **单行摘要** —— `lib/chat/tool-summary.ts`（`summarizeToolCall`）按工具抽取简洁目标（文件名、命令头、模式、URL host、查询…）和图标分类。
+- **结果摘要** —— `lib/chat/tool-result-summary.ts`（`describeToolResult`）把工具**输出**蒸馏成紧凑、i18n 中立的描述符——grep → `matches`、glob → `files`、ls → `entries`、read/bash → `lines`、edit/write → `diff`（从输入算 `+N −M`），任何出错工具 → 首行错误。描述符的 `tone`（`neutral`/`success`/`error`）给 chip 着色；行组件（`ToolResultChip`）把 `kind` 映射成翻译标签（`chat.agentFlow.result.*`）。仍在流式或无自然摘要时返回 `null`，故 chip 不会过早显示"0"。逻辑对齐 CLI `cli/src/tui/format/tools.ts` 的结果助手，适配 Web `ToolUIPart` 形状（字符串 / MCP 内容块数组 / 对象）。注意工具 part **不携带逐工具时间**，故不显示任何捏造的耗时。
+
+#### 活动分组
+
+**≥2 个连续工具调用**会聚合成一个可折叠的**活动组**（`ToolActivityGroup`）——如"5 次工具调用 ✓"——带汇总状态字形、**类型计数预览**（`read ×3 · grep ×1 · edit ×1`，经 `lib/chat/tool-summary.ts:tallyToolNames`——首见序、命名空间折叠）与**全部展开/折叠**控件。该计数让折叠态无需展开也能一眼看清。分段是纯函数（`lib/chat/agent-flow-grouping.ts:groupAgentParts`）：子代理 part 透明（它们作为调度树单独渲染一次），`TodoWrite` 排除（它渲染为计划），单个工具调用保持单卡（无分组装饰）。简化档由组掌管每行开合状态；标准/详细档委托 `renderCard` 并可选 `forceOpen` 覆盖。
+
+#### 子代理调度树
+
+同一套三档模式也驱动**子代理调度树**（`SubagentTree` → `SubagentPart`）——当一个 Agent 派发子 Agent 时，这正是「Agent 调用流程」的核心：
+
+- **简化** —— 每个节点压缩成单行 `SubagentPart`（机器人图标 + 名称 + 状态字形 + 耗时），点击展开看进度 + 日志，沿用 `ToolCallRow` 的视觉语言。
+- **标准** —— 完整卡片，默认折叠。
+- **详细** —— 完整卡片，默认展开（进度 + 日志可见）。
+
+`SubagentTree` 掌管树级的**全部展开/折叠**控件（≥2 个节点时出现）以及逐节点切换，经一个稀疏的 `Map<id, boolean>` 覆盖表：缺省项表示该节点跟随模式默认值（`详细`档开、其余折叠），因此切换模式时无需 state-syncing effect 即可保持响应。每个节点带 `MotionReveal` 入场。团队调度横幅（`AgentTeamDispatchPart`）也感知模式——`简化`档会去掉任务正文以保持紧凑。
+
+#### 动效
+
+`components/chat/motion/motion-reveal.tsx` 是 agent-flow 各界面**统一的动效词汇**（`useFlowMotion` 从外观设置 + 系统 `prefers-reduced-motion` 解析 `reduce` + `speed`）：
+
+- **`MotionReveal`** —— 交错的 **spring** 入场（淡入 + 轻微 translateY），用于新工具卡/行、子代理节点与调度横幅。
+- **`MotionCollapse`** —— *统一*的展开/折叠：高度 + 透明度上的轻柔、低过冲 spring，被工具行、活动组正文、子代理行共用，使一切以同样方式揭示（此前各行是瞬间弹开、只有组做动画）。动效降级时退化为普通显隐。
+- **`MotionStatusSwap`** —— 状态字形变化（如 运行中 → 完成）时做 crossfade，用 `mode="wait"` 避免双字形闪烁；被工具行、活动组汇总字形、子代理行共用。
+
+三者都对 GPU 友好（仅 `opacity` + `transform` / 动画高度，不引 `backdrop-filter`），按 `motion.speed` 缩放节奏，并在 `motion.reduce` / `prefers-reduced-motion` 下退化为普通标记。
 
 ### artifact part
 
@@ -259,7 +299,17 @@ import {
 | `!`  | 在行首         | 技能（skills）列表 | `useSkills()`                        |
 | `#`  | 任意位置       | 知识引用 / 文档    | `lib/search/`                        |
 
-匹配时弹 popover（`components/chat/composer-popover.tsx`），方向键导航 + Enter 选中后 `spliceToken` 替换前缀片段。
+匹配时弹 popover（`components/chat/composer-popover.tsx`），方向键导航 + Enter 选中后 `spliceToken` 替换前缀片段。方向键 / Tab 导航会让高亮项始终滚动到可视区。
+
+候选列表由共享的模糊匹配器排序（`lib/chat/completion/fuzzy-match.ts`）：查询的每个字符须按顺序出现（子序列），并对词边界（`/ - _ . :` 之后）、连续命中、靠前 / 更短的匹配加分。斜杠命令按命令名排序（描述作为降权的次要来源）；`@` 提及复用同一打分器，两个面板体验一致。popover 宽度跟随 composer 自身宽度（`--radix-popper-anchor-width`，上限 480px），因此在窄侧栏中也不会溢出。
+
+### Ghost 文本（行内自动补全）
+
+启用后（`设置 → 对话 → Composer 辅助`），composer 会以暗色单行展示当前草稿的续写（`hooks/chat/use-composer-ghost-text.ts` → `lib/chat/completion/ghost-controller.ts`）。`Tab` 接受、`Esc` 关闭。建议会防抖、缓存，并在调用工具 LLM 前经过 PII 门控；当触发器 popover 打开、正在流式输出、或光标不在输入末尾时会被抑制。
+
+### 自适应 composer（窄侧栏）
+
+composer 外层声明了 `@container/composer`。低于 `@sm` 时文本域独占第一行，附件与发送控件共享第二行；达到 `@sm` 后回流为单行 `[附件 | 文本域 | 发送]`。placeholder 始终保持单行，空间不足时裁切提示，而不会把整个输入控件撑高。**底部工具栏**会测量自身宽度（`hooks/use-element-width.ts`）：模型、权限、上下文用量与 `⋯ 更多` 在 384px 以上保持单行，更窄时拆成两行，并将次级状态控件靠右成组。会话形态控件（沙箱 / Agent 运行时 / 模式 / 外部 Agent / 插件槽）在所有宽度下都保留在「更多」弹层中。每个控件只挂载在一处——把这些 popover 触发器重挂进 `DropdownMenuItem` 会让其开合状态错乱——当溢出控件处于激活状态时「更多」按钮会显示一个圆点。这样工作流编辑器聊天侧栏（可缩到视口 20%）里所有控件依然可达。
 
 ### 附件
 

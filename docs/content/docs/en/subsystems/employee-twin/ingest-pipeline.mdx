@@ -99,7 +99,7 @@ kinds** and replaces each with a `<KIND_NNN>` placeholder (zero-padded, 3 digits
 The reverse map is built by `tokenize` (`redact.ts:209`), which reuses the same placeholder for repeat
 occurrences of the same original (stable within a document):
 
-```ts title="lib/twin/ingest/redact.ts:209-217"
+```ts title="packages/redact/src/index.ts:209-217"
 function tokenize(state: RedactState, kind: PiiKind, original: string): string {
   const cached = state.reuse.get(original)
   if (cached) return cached

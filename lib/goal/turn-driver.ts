@@ -31,15 +31,26 @@
  */
 
 import type { LlmClient } from "@/lib/twin/distill/llm"
+import type { AgentHookContext, LifecycleHookFirer } from "@/lib/claude/hooks/lifecycle-firer"
+import type { UsageInfo } from "@/lib/claude/adapter"
 import type { ExitReason, Goal, GoalStatus } from "@/types/goal"
 import { isTerminalGoalStatus } from "@/types/goal"
 import { appendGoalEvent, getGoal, updateGoal } from "@/lib/db/goals"
+import { recordGoalUsage } from "@/lib/db/session-usage"
 import { evaluateExitConditions } from "./exit-conditions"
 import { evaluateGoal } from "./judge"
 import { markSubgoalsComplete } from "./subgoals"
 import { onGoalTerminal, toGoalHookPayload } from "./completion-linkage"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
-import { renderContinuationMessage, resolveJudgeSystemPrompt } from "./prompts"
+import {
+  detectCompletionPromise,
+  renderContinuationMessage,
+  renderPromiseVerificationMessage,
+  resolveJudgeSystemPrompt,
+} from "./prompts"
+
+/** Default `config.maxPromiseDenials` when the gate is armed without one. */
+const DEFAULT_MAX_PROMISE_DENIALS = 3
 
 export interface TurnCompleteInput {
   goalId: string
@@ -47,6 +58,14 @@ export interface TurnCompleteInput {
   lastResponse: string
   /** Tokens consumed by *this* turn (input + output). 0 when unknown. */
   tokensDelta: number
+  /** Full SDK usage for this turn when the caller has the result payload. */
+  usage?: UsageInfo
+  /**
+   * `true` when this turn ended because the SDK hit the hard USD ceiling
+   * (`SendOptions.maxBudgetUsd` → result subtype `error_max_budget_usd`). Drives
+   * the terminal `cost_limited` exit. Default false.
+   */
+  budgetExceeded?: boolean
   /** Optional assistant message id for the audit payload. */
   modelMessageId?: string
   /** LLM client used to call the judge. */
@@ -60,6 +79,14 @@ export interface TurnCompleteInput {
    * step.
    */
   capturedGenerationId: string
+  /**
+   * Lifecycle-hook firer used to bracket the judge LLM call (ADR-0040
+   * follow-up). Renderer callers pass `defaultLifecycleFirer`; the CLI passes
+   * its runner-backed firer. Omitted ⇒ the judge runs hook-free (no-op).
+   */
+  firer?: LifecycleHookFirer
+  /** Hook context (session/cwd) for the judge firer. */
+  hookContext?: AgentHookContext
 }
 
 export type TurnCompleteOutcome =
@@ -112,6 +139,9 @@ export async function handleTurnComplete(input: TurnCompleteInput): Promise<Turn
       modelMessageId,
     },
   })
+  if (input.usage) {
+    await recordGoalUsage({ goalId, turnId: newTurnsUsed, usage: input.usage }).catch(() => null)
+  }
   void getPluginEventHooks().dispatchGoalProgress({
     ...toGoalHookPayload(goal),
     turnsUsed: newTurnsUsed,
@@ -127,13 +157,67 @@ export async function handleTurnComplete(input: TurnCompleteInput): Promise<Turn
 
   // Step 2 — pre-judge exits (turn / budget / timeout). User-driven
   // exits (stopped / preempted) are handled by the slash command and
-  // chat hook respectively before this function is ever called.
-  const preJudge = evaluateExitConditions(goal)
+  // chat hook respectively before this function is ever called. These run
+  // BEFORE the promise-verification branch, so a goal one turn from its cap
+  // exits `turn_limited` even mid-verification (documented trade-off).
+  const preJudge = evaluateExitConditions(goal, { costLimited: input.budgetExceeded })
   if (preJudge) {
     return commitExit(goalId, preJudge, input.capturedGenerationId)
   }
 
   if (signal?.aborted) return { kind: "aborted" }
+
+  // Step 2.5 — completion-promise verification turn (anti false-completion).
+  // When the previous turn ARMED the gate, this response is graded for the
+  // exact `<promise>` token instead of being re-judged (no judge spend, and
+  // a response that is just the token never gets judged "done" twice).
+  const promiseText = goal.config.completionPromise?.trim() ?? ""
+  if (promiseText && goal.awaitingPromise) {
+    if (detectCompletionPromise(lastResponse, promiseText)) {
+      await updateGoal(goalId, { awaitingPromise: false, promiseDenialCount: 0 })
+      await appendGoalEvent({
+        goalId,
+        kind: "promise_confirmed",
+        payload: { kind: "promise_confirmed", turnNumber: newTurnsUsed },
+      })
+      return commitExit(
+        goalId,
+        {
+          exit: "judge_done",
+          resultingStatus: "completed",
+          reason: "completion promise confirmed",
+        },
+        input.capturedGenerationId
+      )
+    }
+    // Denied — the model would not (or did not) emit the token. Clear the
+    // flag and resume normal work: keeping it armed would pressure the model
+    // to emit the token just to escape (exactly the reward-hack the gate
+    // exists to prevent). The denial count persists across re-armed gates;
+    // at the cap the judge has re-affirmed done that many times, so the
+    // gate is overridden (audited) instead of wedging against maxTurns.
+    const denialCount = (goal.promiseDenialCount ?? 0) + 1
+    const cap = goal.config.maxPromiseDenials ?? DEFAULT_MAX_PROMISE_DENIALS
+    const overridden = denialCount >= cap
+    await updateGoal(goalId, { awaitingPromise: false, promiseDenialCount: denialCount })
+    await appendGoalEvent({
+      goalId,
+      kind: "promise_denied",
+      payload: { kind: "promise_denied", turnNumber: newTurnsUsed, denialCount, overridden },
+    })
+    if (overridden) {
+      return commitExit(
+        goalId,
+        {
+          exit: "judge_done",
+          resultingStatus: "completed",
+          reason: `judge confirmed done; promise gate overridden after ${denialCount} denial(s)`,
+        },
+        input.capturedGenerationId
+      )
+    }
+    return { kind: "continue", userMessage: renderContinuationMessage(goal) }
+  }
 
   // Step 3 — judge LLM call. Per-goal judge customization (ADR-0019 Phase 2)
   // threads through here; absent fields fall back to the judge's built-ins.
@@ -145,6 +229,8 @@ export async function handleTurnComplete(input: TurnCompleteInput): Promise<Turn
     temperature: goal.config.judgeTemperature,
     maxTokens: goal.config.judgeMaxTokens,
     system: resolveJudgeSystemPrompt(goal),
+    firer: input.firer,
+    hookContext: input.hookContext ?? { agentId: "goal-judge", sessionId: goalId },
   })
 
   if (judgement.kind === "aborted") {
@@ -213,6 +299,39 @@ export async function handleTurnComplete(input: TurnCompleteInput): Promise<Turn
     judgeDecision: { done: judgement.done, reason: judgement.reason },
   })
   if (postJudge) {
+    // Completion-promise gate: a judge `done=true` ARMS a verification turn
+    // instead of exiting (when configured). Short-circuit when this very
+    // response already carries the token — no extra turn needed.
+    if (postJudge.exit === "judge_done" && promiseText) {
+      if (detectCompletionPromise(lastResponse, promiseText)) {
+        await updateGoal(goalId, { awaitingPromise: false, promiseDenialCount: 0 })
+        await appendGoalEvent({
+          goalId,
+          kind: "promise_confirmed",
+          payload: { kind: "promise_confirmed", turnNumber: newTurnsUsed },
+        })
+        return commitExit(
+          goalId,
+          {
+            exit: "judge_done",
+            resultingStatus: "completed",
+            reason: "completion promise confirmed",
+          },
+          input.capturedGenerationId
+        )
+      }
+      const fresh = await getGoal(goalId)
+      if (!fresh || fresh.generationId !== input.capturedGenerationId) {
+        return { kind: "stale", reason: "generationId rotated before promise arm" }
+      }
+      await updateGoal(goalId, { awaitingPromise: true })
+      await appendGoalEvent({
+        goalId,
+        kind: "promise_requested",
+        payload: { kind: "promise_requested", turnNumber: newTurnsUsed },
+      })
+      return { kind: "continue", userMessage: renderPromiseVerificationMessage(goal) }
+    }
     return commitExit(goalId, postJudge, input.capturedGenerationId)
   }
   return { kind: "continue", userMessage: renderContinuationMessage(goal) }
@@ -231,6 +350,24 @@ async function commitExit(
   const fresh = await getGoal(goalId)
   if (!fresh || fresh.generationId !== capturedGenerationId) {
     return { kind: "stale", reason: "generationId rotated before exit commit" }
+  }
+  // Acceptance gate (opt-in): a judge-verdict "completed" parks as `paused` +
+  // `awaitingAcceptance` instead of going terminal; `resolveGoalAcceptance`
+  // (lib/goal/acceptance.ts) later commits completed or resumes active. Only
+  // the completed exit is gated — stops/limits/timeouts land directly.
+  if (decision.resultingStatus === "completed" && fresh.config.requireAcceptance === true) {
+    await updateGoal(goalId, { status: "paused", awaitingAcceptance: true })
+    await appendGoalEvent({
+      goalId,
+      kind: "acceptance_requested",
+      payload: { kind: "acceptance_requested", turnNumber: fresh.turnsUsed },
+    })
+    return {
+      kind: "exit",
+      exit: decision.exit,
+      resultingStatus: "paused",
+      reason: `${decision.reason} (awaiting acceptance)`,
+    }
   }
   await updateGoal(goalId, { status: decision.resultingStatus })
   await appendGoalEvent({

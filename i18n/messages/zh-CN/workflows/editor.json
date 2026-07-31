@@ -1,0 +1,191 @@
+{
+  "bookmarks": {
+    "cancel": "取消",
+    "delete": "删除视图",
+    "dialogNameLabel": "名称",
+    "dialogNamePlaceholder": "例如：“引导子图”",
+    "dialogTitle": "保存视图",
+    "empty": "暂无保存的视图。",
+    "label": "视图",
+    "save": "保存",
+    "saveCurrent": "保存当前视图…",
+    "savedToast": "已保存视图",
+    "viewAt": "视图于 {zoom}%"
+  },
+  "breadcrumb": {
+    "fitAll": "适应全部",
+    "untitledGroup": "未命名分组"
+  },
+  "canvasToolbar": {
+    "addGroup": "添加分组",
+    "addNode": "添加节点",
+    "addSticky": "添加便签",
+    "annotation": "批注",
+    "autoLayout": "自动布局",
+    "background": "背景",
+    "bgDots": "圆点",
+    "bgLines": "网格线",
+    "bgNone": "无",
+    "fitView": "适配视图",
+    "lock": "锁定画布",
+    "minimapTierHint": "当前性能档已隐藏小地图",
+    "redo": "重做",
+    "search": "搜索节点（Ctrl+F）",
+    "showMinimap": "显示小地图",
+    "snapToGrid": "对齐网格",
+    "undo": "撤销",
+    "unlock": "解锁画布",
+    "view": "视图选项",
+    "zoomIn": "放大",
+    "zoomOut": "缩小",
+    "zoomReset": "重置为 100%"
+  },
+  "connection": {
+    "annotation": "批注节点不能参与连接",
+    "compatible": "松开以连接",
+    "duplicateEdge": "这两个节点已经连接",
+    "endpointMissing": "图中找不到端点节点",
+    "errorHandleDisabled": "请先在该节点的错误处理中启用「走错误分支」",
+    "handleRequired": "请选择该节点的一个输出端口",
+    "incompatible": "无法连接此端口",
+    "missingEndpoint": "连接必须有两个端点",
+    "notConnecting": "当前不在连线模式",
+    "selfLoop": "不允许自环连接",
+    "snapHint": "已吸附到最近端口",
+    "triggerTarget": "触发器只能作为起点",
+    "unknownHandle": "源节点上不存在该输出端口"
+  },
+  "contextMenu": {
+    "edge": {
+      "delete": "删除连接",
+      "editLabel": "编辑标签",
+      "reverse": "反转方向",
+      "toConditional": "转为条件分支"
+    },
+    "node": {
+      "addStickyAbove": "在上方添加便签",
+      "configure": "配置",
+      "copy": "拷贝",
+      "delete": "删除",
+      "disable": "禁用",
+      "duplicate": "复制副本",
+      "enable": "启用",
+      "rename": "重命名",
+      "runFrom": "从此节点开始运行",
+      "runStep": "仅运行此节点",
+      "toGroup": "转为分组"
+    },
+    "pane": {
+      "addGroup": "在此处添加分组",
+      "addNode": "在此处添加节点…",
+      "addSticky": "在此处添加便签",
+      "paste": "粘贴",
+      "resetView": "重置视图",
+      "toggleSnap": "切换网格对齐"
+    }
+  },
+  "edge": {
+    "edgeKind": {
+      "approved": "已批准",
+      "default": "默认",
+      "else": "否则",
+      "error": "错误时",
+      "false": "假",
+      "rejected": "已拒绝",
+      "then": "然后",
+      "true": "真"
+    },
+    "editLabelHint": "双击编辑标签",
+    "labelPlaceholder": "连接标签…"
+  },
+  "errorHandling": {
+    "circuitBreaker": {
+      "cooldownHint": "在允许试探性重试前快速失败的时长。",
+      "cooldownMs": "冷却时间（毫秒）",
+      "threshold": "失败阈值",
+      "thresholdHint": "触发熔断的连续失败次数。",
+      "toggle": "熔断器",
+      "toggleHint": "连续失败 N 次后，在冷却期内直接快速失败，而非反复重跑一个持续失败的节点。"
+    },
+    "configuredBadge": "已配置",
+    "defaultValue": {
+      "hint": "失败时替代该步骤的输出，下游继续执行。",
+      "invalidJson": "JSON 无效——解析通过前不会保存。",
+      "label": "默认值（JSON）"
+    },
+    "errorBranchHint": "从红色错误连接点拉一条边；失败时跳过成功路径。未画错误边时回退到工作流策略。",
+    "onError": {
+      "continue": "携带错误输出继续",
+      "defaultValue": "使用默认值",
+      "errorBranch": "走错误分支",
+      "fail": "失败（按工作流策略）",
+      "hint": "该步骤最终失败（重试用尽后）的处理方式。",
+      "label": "出错时"
+    },
+    "retry": {
+      "backoff": "退避",
+      "exponential": "指数",
+      "fixed": "固定",
+      "intervalMs": "间隔（毫秒）",
+      "maxHint": "首次失败后的额外尝试次数。",
+      "maxIntervalMs": "最大间隔（毫秒）",
+      "maxRetries": "重试次数",
+      "toggle": "覆盖重试策略",
+      "toggleHint": "节点级重试。关闭 = 工作流默认。非幂等步骤（HTTP POST、git push、终端）请保持 0 次重试。"
+    },
+    "title": "错误处理"
+  },
+  "lasso": {
+    "hint": "按住 Alt 拖动以套索选择",
+    "selected": "已选择 {count} 个节点"
+  },
+  "miniToolbar": {
+    "configure": "配置",
+    "copy": "拷贝节点",
+    "delete": "删除",
+    "more": "更多操作",
+    "run": "从此运行",
+    "runDisabled": "触发器与注释节点不能直接运行"
+  },
+  "performanceTier": {
+    "auto": "自动",
+    "autoHint": "根据系统偏好与节点数量自动选择档位。",
+    "balanced": "均衡",
+    "balancedHint": "拖拽时关闭边动画与检查器实时预览。",
+    "description": "按设备性能或工作流规模调整画布特性。",
+    "effectiveLabel": "当前：{tier}",
+    "high": "高性能",
+    "highHint": "开启所有效果：缩略图、动画、检查器实时预览。",
+    "reduced": "低耗能",
+    "reducedHint": "隐藏缩略图、关闭动画、跳过对齐辅助线。",
+    "title": "性能档位"
+  },
+  "selectionToolbar": {
+    "align": "对齐与分布",
+    "alignBottom": "底部对齐",
+    "alignCenterH": "水平居中对齐",
+    "alignCenterV": "垂直居中对齐",
+    "alignLeft": "左对齐",
+    "alignRight": "右对齐",
+    "alignTop": "顶部对齐",
+    "delete": "删除",
+    "distributeH": "水平均分",
+    "distributeV": "垂直均分",
+    "duplicate": "复制",
+    "extract": "提取为子工作流",
+    "fit": "适配选区",
+    "group": "编组",
+    "lock": "锁定",
+    "runBlock": "运行此区块",
+    "selectChildren": "选中成员",
+    "selected": "{count, plural, one {已选 #} other {已选 #}}",
+    "toggleGroupDisabled": "启用 / 禁用区块",
+    "unlock": "解锁"
+  },
+  "spotlight": {
+    "breadcrumbIn": "位于 {group}",
+    "empty": "未找到匹配的节点。",
+    "openShortcut": "搜索节点（Ctrl+F）",
+    "placeholder": "在画布上搜索节点…"
+  }
+}

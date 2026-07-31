@@ -12,8 +12,9 @@ description: "第三方插件代码如何被约束：渲染端的 PluginSandbox�
   `PluginPermission` 映射到一个具体的被允许的全局对象，包装 `console` / `setTimeout` / `fetch` /
   `localStorage`，并通过带显式参数和超时的 `Function` / `AsyncFunction` 运行插件代码。**T2**
   （`launchPluginJs.ts`）把 manifest 的权限翻译为 Node 24 的 `--permission` 标志，用于重新执行
-  Node 目标插件。**T3**（`wasm-runtime.ts`）在一个运行时下加载 WASM 插件，其 preopen 来自授权账本。
-  T2/T3 已发布其表面（surface）；随着 Node/WASM 目标落地，插件管理器会逐步接入它们。
+  Node 目标插件。**T3**（`wasm-runtime.ts`）在一个运行时下加载 WASM 插件，其 preopen 来自 Dexie
+  授权账本。T2 已经通过 `PluginLoader` / `PluginManager` 触达 Node-target frontend 插件；T3 会在
+  load 前对账 manifest preopens，并在每次 call 前重新验证。
 </TLDR>
 
 ## 渲染端隔离 —— `PluginSandbox`
@@ -92,34 +93,35 @@ execute<T>(code: string, context: Record<string, unknown> = {}): T {
 `lib/plugin/launcher/launchPluginJs.ts` 把一个权限范围（scope）翻译为 Node 24 的 `--allow-*` 标志，用于
 重新执行插件的 JS 入口。空列表会 OMIT 该标志（fail-safe 拒绝），绝不使用 `*`。
 
-```ts title="lib/plugin/launcher/launchPluginJs.ts:55-70"
+```ts title="lib/plugin/launcher/launchPluginJs.ts:91-112"
 export function nodePermissionArgs(scope: NodePermissionScope): string[] {
   const args: string[] = ["--permission"]
-  if (scope.readPaths.length > 0)  args.push(`--allow-fs-read=${scope.readPaths.join(",")}`)
+  // Network and subprocess scopes fail closed via host-broker errors; Node 24
+  // has no scoped host flag and child-process permission is all-or-nothing.
+  if (scope.readPaths.length > 0) args.push(`--allow-fs-read=${scope.readPaths.join(",")}`)
   if (scope.writePaths.length > 0) args.push(`--allow-fs-write=${scope.writePaths.join(",")}`)
-  if (scope.netHosts.length > 0)   args.push(`--allow-net=${scope.netHosts.join(",")}`)
-  if (scope.allowedSubprocesses.length > 0)
-    args.push(`--allow-child-process=${scope.allowedSubprocesses.join(",")}`)
   return args
 }
 ```
 
-`buildLaunchArgv(entryPath, scope, extraArgs)`（`launchPluginJs.ts:107-113`）返回插件管理器传给
-`child_process.spawn("node", argv)` 的完整 argv。`deriveScopeFromManifest`
-（`launchPluginJs.ts:81-97`）很保守：一个声明了但没有具体路径的权限类别会产生空列表，因此该标志会被完全省略。
+`buildLaunchArgv(entryPath, scope, extraArgs)` 返回传给 `child_process.spawn("node", argv)` 的完整
+argv。`deriveScopeFromManifest` 很保守：一个声明了但没有具体路径的权限类别会产生空列表，因此文件系统
+flag 会被完全省略。`PluginLoader.loadFrontendModule()` 会识别 Node-target frontend 插件（`engines.node`
+或 `runtimeCompatibility.tauri.entrypoint === "node"`），从 `permissions` + `fileScope` 推导 scope，
+在 activate 时调用 `launchPluginJs()`，并在 deactivate/unload 时通过正常 `PluginManager` 生命周期杀掉子进程。
 
 <Callout type="info">
-  T2 发布了 **纯标志构造的那一半**；插件管理器负责真正的 spawn（用于 disable 时停用的 pid 跟踪、stdio
-  处理器）。在 Node 目标插件落地之前，本模块只被其测试消费 —— 表面（surface）已锁定且可审阅
-  （`launchPluginJs.ts:10-14`）。
+  Node permission model 只约束入口进程。需要 host allowlist 强制的 shell 类工作与网络访问必须走 brokered
+  host API；Node launcher 绝不发出 `*`，绝不发出 unsupported `--allow-net`，也不会把子进程访问放宽为
+  `--allow-child-process`。
 </Callout>
 
 ## T3 —— Wasmtime / WASI 运行时
 
-`lib/plugin/core/wasm-runtime.ts:loadWasmPlugin` 会 **在** 构建运行时之前从授权账本解析 preopen 集合，因此
-缺失或为空的授权会成为一个硬性的早期失败，随后返回一个可控的 `WasmPluginHandle`。
+`lib/plugin/core/wasm-runtime.ts:loadWasmPlugin` 会 **在** 构建运行时之前从 Dexie-backed 授权账本解析
+preopen 集合，随后返回一个可控的 `WasmPluginHandle`。
 
-```ts title="lib/plugin/core/wasm-runtime.ts:79-91 (load)"
+```ts title="lib/plugin/core/wasm-runtime.ts:82-102 (load + call)"
 export async function loadWasmPlugin(
   pluginId: string,
   source: WasmSource,
@@ -127,11 +129,18 @@ export async function loadWasmPlugin(
 ): Promise<WasmPluginHandle> {
   if (!pluginId.trim()) throw new Error("loadWasmPlugin: pluginId is required")
   const preopensResolver = options.preopensResolver ?? getGrantedPreopens
-  const preopens = [...preopensResolver(pluginId)]
+  const preopens = [...(await preopensResolver(pluginId))]
   const factory = options.runtimeFactory ?? defaultWasmRuntimeFactory
   const instance = await factory({ pluginId, source, preopens })
-  // ... returns a handle with call(method, args) + dispose()
+  return { async call(method, args) {
+    await verifyPreopenAllowedForCall(pluginId, preopens)
+    return instance.call(method, args)
+  } }
 ```
+
+`PluginManager.preloadWasmComponent()` 会在 `plugin_wasm_load` 之前把 `manifest.wasm.fs.preopens` 与
+持久账本对账：过期账本 preopens 带 warning 拒绝，新声明的 manifest preopens 不会自动授权，只有交集会传给
+host。旧 `localStorage` 账本只作为一次性迁移 fallback 写入 `wasmGrantLedger` Dexie 表。
 
 由一个 magic-byte 启发式（`looksLikeComponent`，`wasm-runtime.ts:152-161`）决定两条交付路径：
 

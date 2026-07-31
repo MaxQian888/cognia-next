@@ -1,10 +1,17 @@
+/** @jest-environment jsdom */
 /**
  * Scheduler Database Tests
  */
 
 // Mock IndexedDB for tests
 import "fake-indexeddb/auto"
-import { schedulerDb } from "./scheduler-db"
+import Dexie from "dexie"
+import {
+  schedulerDb,
+  SchedulerDatabase,
+  SCHEDULER_DB_NAME,
+  SCHEDULER_SNAPSHOT_EXCLUDED_TABLES,
+} from "./scheduler-db"
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
 
 describe("SchedulerDatabase", () => {
@@ -86,6 +93,60 @@ describe("SchedulerDatabase", () => {
       expect(retrieved!.name).toBe("Updated Task")
     })
 
+    it("atomically claims a schedule slot only once, reserves runCount, and advances nextRunAt", async () => {
+      const expectedRunAt = new Date("2026-07-25T09:00:00.000Z")
+      const nextRunAt = new Date("2026-07-25T10:00:00.000Z")
+      const task = createMockTask({
+        id: "claim-once",
+        nextRunAt: expectedRunAt,
+      })
+      await schedulerDb.createTask(task)
+
+      const [first, second] = await Promise.all([
+        schedulerDb.claimTaskSlot(task.id, expectedRunAt, nextRunAt),
+        schedulerDb.claimTaskSlot(task.id, expectedRunAt, nextRunAt),
+      ])
+
+      expect([first, second].filter(Boolean)).toHaveLength(1)
+      expect(await schedulerDb.getTask(task.id)).toEqual(
+        expect.objectContaining({ nextRunAt, runCount: 1 })
+      )
+    })
+
+    it("does not expose another slot after atomically reserving the final maxRuns budget", async () => {
+      const expectedRunAt = new Date("2026-07-25T09:00:00.000Z")
+      const nextRunAt = new Date("2026-07-25T09:00:00.100Z")
+      const task = createMockTask({
+        id: "claim-final-budget",
+        nextRunAt: expectedRunAt,
+        config: { ...createMockTask().config, maxRuns: 1, overlapPolicy: "allow" },
+      })
+      await schedulerDb.createTask(task)
+
+      const claimed = await schedulerDb.claimTaskSlot(task.id, expectedRunAt, nextRunAt)
+
+      expect(claimed).toEqual(expect.objectContaining({ runCount: 1, nextRunAt: undefined }))
+      expect(await schedulerDb.getTask(task.id)).toEqual(
+        expect.objectContaining({ runCount: 1, nextRunAt: undefined })
+      )
+    })
+
+    it("does not claim a stale or paused schedule slot", async () => {
+      const expectedRunAt = new Date("2026-07-25T09:00:00.000Z")
+      await schedulerDb.createTask(
+        createMockTask({
+          id: "paused-claim",
+          status: "paused",
+          nextRunAt: expectedRunAt,
+        })
+      )
+
+      await expect(schedulerDb.claimTaskSlot("paused-claim", expectedRunAt)).resolves.toBeNull()
+      await expect(
+        schedulerDb.claimTaskSlot("paused-claim", new Date("2026-07-25T08:00:00.000Z"))
+      ).resolves.toBeNull()
+    })
+
     it("should delete a task and its executions", async () => {
       const task = createMockTask({ id: "test-task-3" })
       await schedulerDb.createTask(task)
@@ -122,6 +183,75 @@ describe("SchedulerDatabase", () => {
 
       const pausedTasks = await schedulerDb.getTasksByStatus("paused")
       expect(pausedTasks.length).toBe(1)
+    })
+
+    it("queries active event tasks through the persisted compound index", async () => {
+      await Promise.all([
+        schedulerDb.createTask(
+          createMockTask({
+            id: "event-alpha",
+            trigger: { type: "event", eventType: "alpha" },
+          })
+        ),
+        schedulerDb.createTask(
+          createMockTask({
+            id: "event-beta",
+            trigger: { type: "event", eventType: "beta" },
+          })
+        ),
+        schedulerDb.createTask(
+          createMockTask({
+            id: "event-paused",
+            status: "paused",
+            trigger: { type: "event", eventType: "alpha" },
+          })
+        ),
+        schedulerDb.createTask(createMockTask({ id: "cron-active" })),
+      ])
+
+      expect(schedulerDb.tasks.schema.idxByName["[status+eventType]"]).toBeDefined()
+      await expect(schedulerDb.getActiveEventTasks("alpha")).resolves.toEqual([
+        expect.objectContaining({ id: "event-alpha" }),
+      ])
+      expect((await schedulerDb.getActiveEventTasks()).map((task) => task.id).sort()).toEqual([
+        "event-alpha",
+        "event-beta",
+      ])
+    })
+
+    it("should get overdue active tasks via the [status+nextRunAt] index", async () => {
+      const now = new Date()
+      await schedulerDb.createTask(
+        createMockTask({
+          id: "task-overdue",
+          status: "active",
+          nextRunAt: new Date(now.getTime() - 60_000),
+        })
+      )
+      await schedulerDb.createTask(
+        createMockTask({
+          id: "task-future",
+          status: "active",
+          nextRunAt: new Date(now.getTime() + 60_000),
+        })
+      )
+      await schedulerDb.createTask(
+        createMockTask({
+          id: "task-no-next-run",
+          status: "active",
+          nextRunAt: undefined,
+        })
+      )
+      await schedulerDb.createTask(
+        createMockTask({
+          id: "task-paused-overdue",
+          status: "paused",
+          nextRunAt: new Date(now.getTime() - 60_000),
+        })
+      )
+
+      const overdue = await schedulerDb.getOverdueActiveTasks(now)
+      expect(overdue.map((t) => t.id)).toEqual(["task-overdue"])
     })
 
     it("should filter tasks by multiple criteria", async () => {
@@ -211,6 +341,31 @@ describe("SchedulerDatabase", () => {
       expect(recent.length).toBe(3)
     })
 
+    it("filters before limiting recent executions for a scheduler source", async () => {
+      for (let i = 0; i < 3; i++) {
+        await schedulerDb.createExecution(
+          createMockExecution("app-task", {
+            id: `app-exec-${i}`,
+            taskType: "chat",
+            startedAt: new Date(2_000 + i),
+          })
+        )
+      }
+      await schedulerDb.createExecution(
+        createMockExecution("plugin-task", {
+          id: "plugin-exec",
+          taskType: "plugin",
+          startedAt: new Date(1_000),
+        })
+      )
+
+      const recent = await schedulerDb.getRecentExecutionsMatching(
+        (taskType) => taskType === "plugin",
+        1
+      )
+      expect(recent.map((execution) => execution.id)).toEqual(["plugin-exec"])
+    })
+
     it("should cleanup old executions", async () => {
       const task = createMockTask({ id: "task-cleanup" })
       await schedulerDb.createTask(task)
@@ -239,6 +394,42 @@ describe("SchedulerDatabase", () => {
       const remaining = await schedulerDb.getTaskExecutions("task-cleanup")
       expect(remaining.length).toBe(1)
       expect(remaining[0].id).toBe("recent-exec")
+    })
+
+    it("interruptStaleExecutions cancels orphaned running/pending rows and leaves terminal ones", async () => {
+      await schedulerDb.createExecution(
+        createMockExecution("task-boot", { id: "run-1", status: "running", completedAt: undefined })
+      )
+      await schedulerDb.createExecution(
+        createMockExecution("task-boot", {
+          id: "pend-1",
+          status: "pending",
+          completedAt: undefined,
+        })
+      )
+      await schedulerDb.createExecution(
+        createMockExecution("task-boot", { id: "done-1", status: "completed" })
+      )
+
+      const reconciled = await schedulerDb.interruptStaleExecutions()
+      expect(reconciled).toBe(2)
+
+      const run = await schedulerDb.getExecution("run-1")
+      const pend = await schedulerDb.getExecution("pend-1")
+      const done = await schedulerDb.getExecution("done-1")
+      expect(run!.status).toBe("cancelled")
+      expect(run!.terminalReason).toBe("interrupted-on-restart")
+      expect(run!.completedAt).toBeInstanceOf(Date)
+      expect(pend!.status).toBe("cancelled")
+      // A terminal row is never touched.
+      expect(done!.status).toBe("completed")
+    })
+
+    it("interruptStaleExecutions is a no-op when nothing is running", async () => {
+      await schedulerDb.createExecution(
+        createMockExecution("task-boot", { id: "done-2", status: "completed" })
+      )
+      expect(await schedulerDb.interruptStaleExecutions()).toBe(0)
     })
   })
 
@@ -287,6 +478,19 @@ describe("SchedulerDatabase", () => {
   })
 
   describe("Serialization", () => {
+    it("round-trips task creator provenance", async () => {
+      await schedulerDb.createTask(
+        createMockTask({
+          id: "agent-created",
+          createdBy: { kind: "agent", sessionId: "session-1" },
+        })
+      )
+      expect((await schedulerDb.getTask("agent-created"))?.createdBy).toEqual({
+        kind: "agent",
+        sessionId: "session-1",
+      })
+    })
+
     it("should correctly serialize and deserialize dates", async () => {
       const now = new Date()
       const task = createMockTask({
@@ -333,6 +537,28 @@ describe("SchedulerDatabase", () => {
       expect(retrieved!.logs[1].data).toEqual({ code: 500 })
     })
 
+    it("round-trips tasks without payload and keeps them queryable", async () => {
+      const nextRunAt = new Date(Date.now() + 60_000)
+      const task = createMockTask({
+        id: "optional-payload-task",
+        payload: undefined,
+        nextRunAt,
+        trigger: { type: "interval", intervalMs: 60_000 },
+      })
+      await schedulerDb.createTask(task)
+
+      const retrieved = await schedulerDb.getTask("optional-payload-task")
+      expect(retrieved).toEqual(
+        expect.objectContaining({
+          id: "optional-payload-task",
+          payload: undefined,
+        })
+      )
+
+      const upcoming = await schedulerDb.getUpcomingTasks(10)
+      expect(upcoming.map((item) => item.id)).toContain("optional-payload-task")
+    })
+
     it("should persist structured terminal metadata for tasks and executions", async () => {
       const task = createMockTask({
         id: "terminal-meta-task",
@@ -359,6 +585,191 @@ describe("SchedulerDatabase", () => {
       expect(retrievedExecution?.terminalReason).toBe("missed-run-skipped")
       expect(retrievedExecution?.scheduledFor instanceof Date).toBe(true)
       expect(retrievedExecution?.retryScheduledAt instanceof Date).toBe(true)
+    })
+
+    it("round-trips lifecycle, chain, and policy fields", async () => {
+      const endAt = new Date(Date.now() + 86_400_000)
+      const task = createMockTask({
+        id: "policy-roundtrip",
+        endAt,
+        onSuccessTaskIds: ["next-1", "next-2"],
+        onFailureTaskIds: ["cleanup-1"],
+        consecutiveFailures: 2,
+        config: {
+          timeout: 1000,
+          maxRetries: 0,
+          retryDelay: 100,
+          runMissedOnStartup: false,
+          overlapPolicy: "queue-all",
+          maxQueueSize: 5,
+          maxRuns: 20,
+          pauseAfterConsecutiveFailures: 3,
+          catchupWindowMs: 3_600_000,
+        },
+        trigger: { type: "interval", intervalMs: 60_000, jitterMs: 2_000 },
+      })
+
+      await schedulerDb.createTask(task)
+      const retrieved = await schedulerDb.getTask("policy-roundtrip")
+
+      expect(retrieved?.endAt?.toISOString()).toBe(endAt.toISOString())
+      expect(retrieved?.onSuccessTaskIds).toEqual(["next-1", "next-2"])
+      expect(retrieved?.onFailureTaskIds).toEqual(["cleanup-1"])
+      expect(retrieved?.consecutiveFailures).toBe(2)
+      expect(retrieved?.config.overlapPolicy).toBe("queue-all")
+      expect(retrieved?.config.maxQueueSize).toBe(5)
+      expect(retrieved?.config.maxRuns).toBe(20)
+      expect(retrieved?.config.pauseAfterConsecutiveFailures).toBe(3)
+      expect(retrieved?.config.catchupWindowMs).toBe(3_600_000)
+      expect(retrieved?.trigger.jitterMs).toBe(2_000)
+    })
+
+    it("leaves optional new fields undefined when unset", async () => {
+      await schedulerDb.createTask(createMockTask({ id: "no-new-fields" }))
+      const retrieved = await schedulerDb.getTask("no-new-fields")
+
+      expect(retrieved?.endAt).toBeUndefined()
+      expect(retrieved?.onSuccessTaskIds).toBeUndefined()
+      expect(retrieved?.onFailureTaskIds).toBeUndefined()
+      expect(retrieved?.consecutiveFailures).toBeUndefined()
+    })
+  })
+
+  describe("overlapPolicy load-time migration", () => {
+    it("derives 'allow' from legacy allowConcurrent: true", async () => {
+      const task = createMockTask({ id: "legacy-allow" })
+      task.config.allowConcurrent = true
+      delete task.config.overlapPolicy
+      await schedulerDb.createTask(task)
+
+      const retrieved = await schedulerDb.getTask("legacy-allow")
+      expect(retrieved?.config.overlapPolicy).toBe("allow")
+    })
+
+    it("derives 'skip' from legacy allowConcurrent: false", async () => {
+      const task = createMockTask({ id: "legacy-skip" })
+      task.config.allowConcurrent = false
+      delete task.config.overlapPolicy
+      await schedulerDb.createTask(task)
+
+      const retrieved = await schedulerDb.getTask("legacy-skip")
+      expect(retrieved?.config.overlapPolicy).toBe("skip")
+    })
+
+    it("never clobbers an explicit overlapPolicy (idempotent)", async () => {
+      const task = createMockTask({ id: "explicit-policy" })
+      task.config.allowConcurrent = true
+      task.config.overlapPolicy = "cancel-previous"
+      await schedulerDb.createTask(task)
+
+      const retrieved = await schedulerDb.getTask("explicit-policy")
+      expect(retrieved?.config.overlapPolicy).toBe("cancel-previous")
+
+      // Re-persist and re-read: still untouched.
+      await schedulerDb.updateTask(retrieved!)
+      const again = await schedulerDb.getTask("explicit-policy")
+      expect(again?.config.overlapPolicy).toBe("cancel-previous")
+    })
+  })
+
+  describe("schema v3 creator migration", () => {
+    it("backfills pre-v3 tasks to user provenance", async () => {
+      const name = `CogniaSchedulerDB-v3-${crypto.randomUUID()}`
+      const legacy = new Dexie(name)
+      legacy.version(2).stores({
+        tasks: "id, name, type, status, nextRunAt, createdAt, [status+nextRunAt], [status+type]",
+        executions: "id, taskId, status, startedAt, [taskId+startedAt]",
+      })
+      await legacy.open()
+      const row = createMockTask({ id: "legacy-user" })
+      await legacy.table("tasks").add({
+        ...row,
+        trigger: JSON.stringify(row.trigger),
+        payload: JSON.stringify(row.payload),
+        config: JSON.stringify(row.config),
+        notification: JSON.stringify(row.notification),
+        createdAt: row.createdAt.toISOString(),
+        updatedAt: row.updatedAt.toISOString(),
+      })
+      legacy.close()
+
+      const upgraded = new SchedulerDatabase(name)
+      await upgraded.open()
+      expect((await upgraded.getTask("legacy-user"))?.createdBy).toEqual({ kind: "user" })
+      upgraded.close()
+      await Dexie.delete(name)
+    })
+  })
+
+  describe("schema v4 event index migration", () => {
+    it("backfills eventType from the serialized trigger and excludes non-events", async () => {
+      const name = `CogniaSchedulerDB-v4-${crypto.randomUUID()}`
+      const legacy = new Dexie(name)
+      legacy.version(3).stores({
+        tasks: "id, name, type, status, nextRunAt, createdAt, [status+nextRunAt], [status+type]",
+        executions: "id, taskId, status, startedAt, [taskId+startedAt]",
+      })
+      await legacy.open()
+      for (const row of [
+        createMockTask({
+          id: "legacy-event",
+          trigger: { type: "event", eventType: "job:exited" },
+        }),
+        createMockTask({ id: "legacy-cron" }),
+      ]) {
+        await legacy.table("tasks").add({
+          ...row,
+          trigger: JSON.stringify(row.trigger),
+          payload: JSON.stringify(row.payload),
+          config: JSON.stringify(row.config),
+          notification: JSON.stringify(row.notification),
+          createdBy: JSON.stringify({ kind: "user" }),
+          createdAt: row.createdAt.toISOString(),
+          updatedAt: row.updatedAt.toISOString(),
+        })
+      }
+      legacy.close()
+
+      const upgraded = new SchedulerDatabase(name)
+      await upgraded.open()
+      expect(upgraded.verno).toBe(4)
+      await expect(upgraded.getActiveEventTasks("job:exited")).resolves.toEqual([
+        expect.objectContaining({ id: "legacy-event" }),
+      ])
+      expect((await upgraded.getActiveEventTasks()).map((task) => task.id)).toEqual([
+        "legacy-event",
+      ])
+      expect(await upgraded.tasks.get("legacy-event")).toEqual(
+        expect.objectContaining({ eventType: "job:exited" })
+      )
+      expect(await upgraded.tasks.get("legacy-cron")).toEqual(
+        expect.objectContaining({ eventType: "" })
+      )
+      upgraded.close()
+      await Dexie.delete(name)
+    })
+  })
+
+  // Third axis of the intentional-dormancy label (Working Rule 7): the type
+  // documents the exemption, the headless snapshot source consumes it, and this
+  // pins it. `tasks` MUST stay persistable — dropping it is what made a
+  // restarted `cognia serve` brain reboot with an empty schedule.
+  describe("headless snapshot exclusions", () => {
+    it("excludes only executions, never tasks", () => {
+      expect(SCHEDULER_SNAPSHOT_EXCLUDED_TABLES).toEqual(["executions"])
+      expect(SCHEDULER_SNAPSHOT_EXCLUDED_TABLES).not.toContain("tasks")
+    })
+
+    it("names every excluded table as a real table on this database", () => {
+      const declared = schedulerDb.tables.map((table) => table.name)
+      for (const excluded of SCHEDULER_SNAPSHOT_EXCLUDED_TABLES) {
+        expect(declared).toContain(excluded)
+      }
+    })
+
+    it("pins the database name the snapshot files it under", () => {
+      expect(SCHEDULER_DB_NAME).toBe("CogniaSchedulerDB")
+      expect(schedulerDb.name).toBe(SCHEDULER_DB_NAME)
     })
   })
 })

@@ -9,6 +9,7 @@ import {
   TERMINAL_HISTORY_RING_SIZE,
   TERMINAL_PROMPT_RING_SIZE,
   displayTitle,
+  type TerminalStoreState,
 } from "./terminal-store"
 import type { SessionInfo } from "@/lib/terminal/types"
 
@@ -41,6 +42,16 @@ describe("dock layout state", () => {
     expect(useTerminalStore.getState().panelOpen).toBe(start)
   })
 
+  it("tracks actionable terminal-host state without persisting it", () => {
+    useTerminalStore.getState().setHostState("unauthorized", "grant revoked")
+    expect(useTerminalStore.getState()).toMatchObject({
+      hostState: "unauthorized",
+      hostStateMessage: "grant revoked",
+    })
+    const { partialize } = useTerminalStore.persist.getOptions()
+    expect(partialize?.(useTerminalStore.getState())).not.toHaveProperty("hostState")
+  })
+
   it("clamps panelHeight within bounds", () => {
     useTerminalStore.getState().setPanelHeight(99)
     expect(useTerminalStore.getState().panelHeightPct).toBe(TERMINAL_LAYOUT_BOUNDS.panelMaxPct)
@@ -48,26 +59,104 @@ describe("dock layout state", () => {
     expect(useTerminalStore.getState().panelHeightPct).toBe(TERMINAL_LAYOUT_BOUNDS.panelMinPct)
   })
 
-  it("does not persist panelOpen — the dock starts closed on every launch", () => {
+  it("persists reload-safe layout but not panelOpen", () => {
+    useTerminalStore.getState().registerSession(baseInfo({ id: "a" }))
+    useTerminalStore.getState().registerSession(baseInfo({ id: "b" }))
+    useTerminalStore.getState().addPaneToGroup("a", "b", "col")
+    useTerminalStore.getState().setFocusedPane("a", "a")
+    useTerminalStore.getState().renameSession("b", "Tests")
+    useTerminalStore.getState().setActiveSession("proj-a", "a")
+
     const { partialize } = useTerminalStore.persist.getOptions()
     const persisted = partialize?.({ ...useTerminalStore.getState(), panelOpen: true })
-    expect(persisted).toEqual({ panelHeightPct: useTerminalStore.getState().panelHeightPct })
+    expect(persisted).toEqual({
+      panelHeightPct: useTerminalStore.getState().panelHeightPct,
+      pendingReloadLayout: {
+        splitPanes: { a: ["b"] },
+        focusedPaneByAnchor: { a: "a" },
+        splitDirection: { a: "col" },
+        activeSessionIdByProject: { "proj-a": "a" },
+        customTitles: { b: "Tests" },
+        stableHostSessionIds: [],
+        controllerBySession: {},
+      },
+    })
+  })
+
+  it("persists stable host-session identity and last controller for reload handoff", () => {
+    useTerminalStore
+      .getState()
+      .registerSession(baseInfo({ id: "durable", hostId: "host-a", currentController: "desktop" }))
+    const { partialize } = useTerminalStore.persist.getOptions()
+    expect(partialize?.(useTerminalStore.getState()).pendingReloadLayout).toMatchObject({
+      stableHostSessionIds: ["durable"],
+      controllerBySession: { durable: "desktop" },
+    })
   })
 
   it("migrate drops a v1 persisted panelOpen but keeps the tuned height", () => {
     const { migrate } = useTerminalStore.persist.getOptions()
     const migrated = migrate?.({ panelOpen: true, panelHeightPct: 40 }, 1) as {
-      panelOpen: boolean
       panelHeightPct: number
+      pendingReloadLayout: unknown
+      panelOpen?: boolean
     }
-    expect(migrated.panelOpen).toBe(false)
+    expect(migrated.panelOpen).toBeUndefined()
     expect(migrated.panelHeightPct).toBe(40)
+    expect(migrated.pendingReloadLayout).toBeNull()
   })
 
   it("migrate falls back to the default height when the old value is invalid", () => {
     const { migrate } = useTerminalStore.persist.getOptions()
     const migrated = migrate?.({ panelHeightPct: "junk" }, 1) as { panelHeightPct: number }
     expect(migrated.panelHeightPct).toBe(TERMINAL_LAYOUT_DEFAULTS.panelHeightPct)
+  })
+})
+
+describe("maximize toggle", () => {
+  it("starts unmaximized", () => {
+    expect(useTerminalStore.getState().maximized).toBe(false)
+  })
+
+  it("toggleMaximized snaps to the max height and remembers the previous size", () => {
+    useTerminalStore.getState().setPanelHeight(40)
+    useTerminalStore.getState().toggleMaximized()
+    const s = useTerminalStore.getState()
+    expect(s.maximized).toBe(true)
+    expect(s.panelHeightPct).toBe(TERMINAL_LAYOUT_BOUNDS.panelMaxPct)
+    expect(s.preMaxHeightPct).toBe(40)
+  })
+
+  it("supports continuous dock resizing through the complete 15–85 percent range", () => {
+    useTerminalStore.getState().setPanelHeight(84.5)
+    expect(useTerminalStore.getState().panelHeightPct).toBe(84.5)
+    expect(TERMINAL_LAYOUT_BOUNDS).toEqual({ panelMinPct: 15, panelMaxPct: 85 })
+  })
+
+  it("toggling again restores the pre-maximize height", () => {
+    useTerminalStore.getState().setPanelHeight(40)
+    useTerminalStore.getState().toggleMaximized()
+    useTerminalStore.getState().toggleMaximized()
+    const s = useTerminalStore.getState()
+    expect(s.maximized).toBe(false)
+    expect(s.panelHeightPct).toBe(40)
+  })
+
+  it("a manual resize exits the maximized state", () => {
+    useTerminalStore.getState().toggleMaximized()
+    expect(useTerminalStore.getState().maximized).toBe(true)
+    useTerminalStore.getState().setPanelHeight(30)
+    expect(useTerminalStore.getState().maximized).toBe(false)
+    expect(useTerminalStore.getState().panelHeightPct).toBe(30)
+  })
+
+  it("reset clears the maximized flag", () => {
+    useTerminalStore.getState().toggleMaximized()
+    useTerminalStore.getState().reset()
+    expect(useTerminalStore.getState().maximized).toBe(false)
+    expect(useTerminalStore.getState().preMaxHeightPct).toBe(
+      TERMINAL_LAYOUT_DEFAULTS.panelHeightPct
+    )
   })
 })
 
@@ -456,5 +545,139 @@ describe("split panes (1A)", () => {
     expect(useTerminalStore.getState().splitPanes).toEqual({})
     expect(useTerminalStore.getState().focusedPaneByAnchor).toEqual({})
     expect(useTerminalStore.getState().splitDirection).toEqual({})
+  })
+
+  it("restores a persisted split layout after surviving sessions register", () => {
+    useTerminalStore.setState({
+      pendingReloadLayout: {
+        splitPanes: { a: ["b"] },
+        focusedPaneByAnchor: { a: "b" },
+        splitDirection: { a: "col" },
+        activeSessionIdByProject: { "proj-a": "a" },
+        customTitles: { a: "Server", b: "Tests" },
+        stableHostSessionIds: [],
+        controllerBySession: {},
+      },
+    })
+    twoSessions()
+
+    useTerminalStore.getState().restorePersistedLayout()
+
+    const state = useTerminalStore.getState()
+    expect(state.pendingReloadLayout).toBeNull()
+    expect(state.panesForGroup("a")).toEqual(["a", "b"])
+    expect(state.focusedPaneByAnchor).toEqual({ a: "b" })
+    expect(state.splitDirection).toEqual({ a: "col" })
+    expect(state.getActiveSession("proj-a")).toBe("a")
+    expect(state.sessions["a"]?.customTitle).toBe("Server")
+    expect(state.sessions["b"]?.customTitle).toBe("Tests")
+  })
+
+  it("drops stale and cross-project pane references during restore", () => {
+    useTerminalStore.setState({
+      pendingReloadLayout: {
+        splitPanes: { a: ["missing", "b", "other"] },
+        focusedPaneByAnchor: { a: "missing" },
+        splitDirection: { a: "row" },
+        activeSessionIdByProject: { "proj-a": "missing", "proj-b": "other" },
+        customTitles: { missing: "Gone", b: "Restored", other: "Other" },
+        stableHostSessionIds: [],
+        controllerBySession: {},
+      },
+    })
+    twoSessions()
+    useTerminalStore.getState().registerSession(baseInfo({ id: "other", projectId: "proj-b" }))
+
+    useTerminalStore.getState().restorePersistedLayout()
+
+    const state = useTerminalStore.getState()
+    expect(state.panesForGroup("a")).toEqual(["a", "b"])
+    expect(state.focusedPaneByAnchor).toEqual({ a: "a" })
+    expect(state.getActiveSession("proj-a")).toBe("a")
+    expect(state.getActiveSession("proj-b")).toBe("other")
+    expect(state.sessions["b"]?.customTitle).toBe("Restored")
+    expect(state.sessions["other"]?.customTitle).toBe("Other")
+  })
+
+  it("clears a persisted layout when no PTY sessions survived", () => {
+    useTerminalStore.setState({
+      pendingReloadLayout: {
+        splitPanes: { gone: ["also-gone"] },
+        focusedPaneByAnchor: { gone: "also-gone" },
+        splitDirection: { gone: "col" },
+        activeSessionIdByProject: { "proj-a": "gone" },
+        customTitles: { gone: "Old" },
+        stableHostSessionIds: [],
+        controllerBySession: {},
+      },
+    })
+
+    useTerminalStore.getState().restorePersistedLayout()
+
+    const state = useTerminalStore.getState()
+    expect(state.pendingReloadLayout).toBeNull()
+    expect(state.splitPanes).toEqual({})
+    expect(state.activeSessionIdByProject).toEqual({})
+  })
+
+  it("normalizes malformed persisted metadata instead of trusting localStorage", () => {
+    useTerminalStore.setState({
+      pendingReloadLayout: {
+        splitPanes: { a: "not-an-array" },
+        focusedPaneByAnchor: [],
+        splitDirection: { a: "diagonal" },
+        activeSessionIdByProject: [],
+        customTitles: null,
+      } as unknown as TerminalStoreState["pendingReloadLayout"],
+    })
+    useTerminalStore.getState().registerSession(baseInfo({ id: "a" }))
+
+    useTerminalStore.getState().restorePersistedLayout()
+
+    const state = useTerminalStore.getState()
+    expect(state.pendingReloadLayout).toBeNull()
+    expect(state.splitPanes).toEqual({})
+    expect(state.focusedPaneByAnchor).toEqual({})
+    expect(state.splitDirection).toEqual({})
+    expect(state.getActiveSession("proj-a")).toBe("a")
+  })
+
+  it("repairs duplicate groups, invalid direction, focus, title, and active tab", () => {
+    useTerminalStore.setState({
+      pendingReloadLayout: {
+        splitPanes: {
+          a: ["a", "b", "b", "cross"],
+          b: ["c"],
+          missing: ["c"],
+        },
+        focusedPaneByAnchor: { a: "a" },
+        splitDirection: { a: "diagonal" },
+        activeSessionIdByProject: {},
+        customTitles: { a: "   " },
+      } as unknown as TerminalStoreState["pendingReloadLayout"],
+    })
+    twoSessions()
+    useTerminalStore.getState().registerSession(baseInfo({ id: "c" }))
+    useTerminalStore.getState().registerSession(baseInfo({ id: "cross", projectId: "proj-b" }))
+    useTerminalStore.getState().setActiveSession("proj-a", "gone")
+
+    useTerminalStore.getState().restorePersistedLayout()
+
+    const state = useTerminalStore.getState()
+    expect(state.splitPanes).toEqual({ a: ["b"] })
+    expect(state.focusedPaneByAnchor).toEqual({ a: "a" })
+    expect(state.splitDirection).toEqual({ a: "row" })
+    expect(state.getActiveSession("proj-a")).toBe("c")
+    expect(state.sessions["a"]?.customTitle).toBeNull()
+  })
+
+  it("discards a non-object persisted snapshot", () => {
+    useTerminalStore.setState({
+      pendingReloadLayout: [] as unknown as TerminalStoreState["pendingReloadLayout"],
+    })
+
+    useTerminalStore.getState().restorePersistedLayout()
+
+    expect(useTerminalStore.getState().pendingReloadLayout).toBeNull()
   })
 })

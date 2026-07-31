@@ -25,7 +25,7 @@ import {
   clearActiveComputerUseSettings,
   setActiveComputerUseSettings,
 } from "@/lib/claude/computer-use-active-settings"
-import type { Character, SendOptions } from "@/lib/claude/types"
+import type { Character, SendOptions } from "@cognia/agent-config-types"
 
 /**
  * ADR-0020 W3 — plugin tool names that the chat-side `canUseTool` modal
@@ -36,13 +36,17 @@ import type { Character, SendOptions } from "@/lib/claude/types"
  * sharing awkward (a third lib file just for one constant would be
  * worse than the duplication, and the names rarely change).
  */
-const COMPUTER_USE_PLUGIN_TOOL_NAMES = [
-  "computer_use",
-  "bash",
-  "text_editor",
-  "mcp__cognia-plugin-tools__computer_use",
-  "mcp__cognia-plugin-tools__bash",
-  "mcp__cognia-plugin-tools__text_editor",
+export const COMPUTER_USE_PLUGIN_TOOL_NAMES = [
+  "list_apps",
+  "get_app_state",
+  "query_elements",
+  "expand_element",
+  "perform_action",
+  "mcp__cognia-plugin-tools__list_apps",
+  "mcp__cognia-plugin-tools__get_app_state",
+  "mcp__cognia-plugin-tools__query_elements",
+  "mcp__cognia-plugin-tools__expand_element",
+  "mcp__cognia-plugin-tools__perform_action",
 ] as const
 
 export interface ApplyComputerUseInput {

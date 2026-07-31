@@ -38,6 +38,17 @@ describe("usePet", () => {
     result.current.play()
     result.current.petStroke()
     result.current.talk()
-    expect(emit.mock.calls.map((c) => c[0].kind)).toEqual(["fed", "played", "petted", "talked"])
+    result.current.sleep()
+    result.current.clean()
+    result.current.treat()
+    expect(emit.mock.calls.map((c) => c[0].kind)).toEqual([
+      "fed",
+      "played",
+      "petted",
+      "talked",
+      "slept",
+      "cleaned",
+      "treated",
+    ])
   })
 })

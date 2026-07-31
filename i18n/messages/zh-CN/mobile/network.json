@@ -1,0 +1,39 @@
+{
+  "backAria": "返回我的",
+  "connectionType": {
+    "cellular": "蜂窝网络",
+    "none": "无连接",
+    "unknown": "未知",
+    "wifi": "Wi-Fi"
+  },
+  "connectivity": {
+    "description": "本设备上报的实时网络状态。",
+    "offline": "离线",
+    "online": "在线",
+    "statusLabel": "连接",
+    "title": "连接状态",
+    "typeLabel": "连接类型"
+  },
+  "intro": "本设备当前的连接状态。代理和连接设置在已配对的桌面端配置。",
+  "manageOnDesktop": "代理模式、主机/端口、认证和绕过规则均在已配对的桌面端。请在桌面端配置和测试。",
+  "proxy": {
+    "description": "用于出站请求的 HTTP/SOCKS 代理在桌面端管理。",
+    "title": "代理"
+  },
+  "rendezvous": {
+    "description": "不在同一网络时，本设备如何连上已配对的主机。这些配置在主机端设置，并镜像到这里。",
+    "provider": {
+      "cloudflare-calls": "由 Cloudflare Calls 按需签发凭证。",
+      "none": "未配置凭证提供方——只能使用上面的静态列表。",
+      "twilio": "由 Twilio 按需签发凭证。"
+    },
+    "serverCount": "{count, plural, =0 {无} other {# 台}}",
+    "signalingLabel": "信令服务器",
+    "sourceBuiltIn": "内置默认",
+    "sourceHost": "来自主机",
+    "stunLabel": "STUN",
+    "title": "直连",
+    "turnLabel": "TURN 中继"
+  },
+  "title": "网络"
+}

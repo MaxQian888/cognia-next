@@ -13,6 +13,8 @@ node_modules
 
 # testing
 /coverage
+# nested coverage output from workspace packages (e.g. packages/*/coverage)
+**/coverage/
 junit.xml
 *.test.js.snap
 *.test.ts.snap
@@ -22,10 +24,18 @@ junit.xml
 /playwright-report/
 /test-results/
 /playwright/.cache/
+/.cache/
 
 # next.js
 /.next/
 /out/
+/web/.next/
+/web/out/
+
+# Live2D Cubism Core — proprietary, fetched at build time by
+# scripts/download-cubism-core.mjs (predev/prebuild). Never committed.
+/public/live2d/
+/src-tauri/resources/plugin-node/
 
 # production
 /build
@@ -33,6 +43,10 @@ junit.xml
 # misc
 .DS_Store
 *.pem
+
+# python bytecode (plugin runtime imports plugins/*/main.py)
+__pycache__/
+*.pyc
 
 # debug
 npm-debug.log*
@@ -58,29 +72,40 @@ next-env.d.ts
 # docs workspace
 /docs/.next/
 /docs/.source/
+# Fumadocs static export output (`pnpm docs:build` → Cloudflare Pages, ADR-0059).
+/docs/out/
 /docs/superpowers/
 
 # Claude Code user-local state (per-user, not committed)
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
 .claude/worktrees/
+/.codex-tmp/
 
 # coverage / build artifact dumps
 coverage_output.txt
+cov.out.txt
+tsc.out.txt
+*.out.txt
 .playwright-mcp
 .VSCodeCounter
 
 # Rust build artifacts. The workspace target/ lives at repo root (members:
-# src-tauri, crates/cognia-cli). signaling-server is its own Cargo workspace
-# (root axum pkg + `core/` member → shared `signaling-server/target/`); the
-# Cloudflare Worker in `signaling-server/worker/` is EXCLUDED from that
-# workspace (it targets wasm32) so it builds into its own target/, and
-# `worker-build` emits the JS shim into `worker/build/`. Each WASM plugin under
-# crates/* or plugins/* builds via `cargo component` into its own target/ too.
+# src-tauri, crates/cognia-cli). services/signaling-server is its own Cargo
+# workspace (root axum pkg + `core/` member → shared
+# `services/signaling-server/target/`); the Cloudflare Worker in
+# `services/signaling-server/worker/` is EXCLUDED from that workspace (it
+# targets wasm32) so it builds into its own target/, and `worker-build` emits
+# the JS shim into `worker/build/`. Each WASM plugin under crates/* or
+# plugins/* builds via `cargo component` into its own target/ too.
 /target/
-/signaling-server/target/
-/signaling-server/worker/target/
-/signaling-server/worker/build/
+/services/signaling-server/target/
+/services/signaling-server/worker/target/
+/services/signaling-server/worker/build/
+# services/share-server mirrors signaling-server: its own Cargo workspace (root
+# axum pkg + `core/` member → shared `services/share-server/target/`); the TS
+# `worker/` is not a Cargo crate but carries its own node build state.
+/services/share-server/target/
 /crates/*/target/
 /plugins/*/target/
 
@@ -90,6 +115,7 @@ coverage_output.txt
 # `/src-tauri/Cargo.lock` and `/crates/cognia-cli/Cargo.lock` paths exist
 # only so a stray file there is caught instead of accidentally committed.
 /src-tauri/Cargo.lock
+/src-tauri/binaries/
 /crates/*/Cargo.lock
 
 # rustfmt backup files (created by `rustfmt --backup`) and rustc ICE dumps.
@@ -114,11 +140,45 @@ rustc-ice-*.txt
 .citest-map.json
 .ci/
 .codegraph/
-batch-final-verify-*.png
-workflows-*.png
+# Per-project code-graph index DB (written by the sidecar code-graph subsystem).
+.cognia/codegraph.db
+.cognia/codegraph.db-*
+# Code-graph tree-sitter grammars are build artifacts copied from
+# tree-sitter-wasms by scripts/build/copy-codegraph-grammars.mjs.
+sidecar/builtin-tools/code/grammars/*.wasm
+# External Bridge stdio MCP sidecar — bundled from
+# lib/external-bridge/mcp-server/standalone-entry.ts by
+# scripts/build/build-mcp-sidecar.mjs (prebuild), not authored here.
+sidecar/cognia-mcp.mjs
+# Root-only scratch screenshots. Anchored: unanchored, these matched at any
+# depth and silently swallowed web/public/og/workflows-{en,zh}.png, whose paths
+# web/lib/metadata.ts still advertises as og:image.
+/batch-final-verify-*.png
+/workflows-*.png
 dist
+
+# Scratch output of the author-facing declaration build; the checked-in artifact
+# is crates/cognia-cli/assets/author-types.json (pnpm author-types:bundle).
+.tsup-author-types
 
 # IDE-local data (Tallycode VSCode extension cache)
 .vscode/.tallycode/
 .wrangler/
 tmp/
+
+# Standalone agent CLI build output
+cli/dist/
+
+# Superpowers brainstorming visual companion
+.superpowers/
+
+# Storybook static build output
+storybook-static/
+
+# Serwist service-worker build output
+public/sw.js
+public/swe-worker-*.js
+
+# Conversation/share export artifacts (produced by /export)
+cognia-export-*.md
+.smoke-workspace-*

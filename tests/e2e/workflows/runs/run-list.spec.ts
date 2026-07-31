@@ -2,7 +2,7 @@
  * E2E: run-list pagination + filtering at /workflows/<id>/runs.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../../helpers/db-reset"
 import { seedAndOpenWorkflow, seedRun } from "../../helpers/seed-workflow"
 
@@ -17,7 +17,7 @@ test.describe("workflow run-list", () => {
     await seedRun(page, wfId, "succeeded")
     await seedRun(page, wfId, "failed")
     await seedRun(page, wfId, "running")
-    await page.goto(`/workflows/${wfId}/runs`)
+    await page.goto(`/workflows/runs?id=${wfId}`)
     await expect(page.getByTestId("run-list")).toBeVisible()
     await expect(page.getByTestId("openRun")).toHaveCount(3)
     await expect(page.getByTestId("run-status-succeeded").first()).toBeVisible()

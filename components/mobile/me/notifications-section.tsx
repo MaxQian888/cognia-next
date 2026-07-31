@@ -14,10 +14,12 @@ import { BellIcon, ChevronRightIcon } from "lucide-react"
 import { NotificationPermissionCta } from "@/components/mobile/notifications/notification-permission-cta"
 import { NotificationsQueueSheet } from "@/components/mobile/notifications/notifications-queue-sheet"
 import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item"
+import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
 
 export function NotificationsSection() {
   const t = useTranslations("mobile.notifications.section")
   const [queueOpen, setQueueOpen] = useState(false)
+  useBackDismiss(queueOpen, () => setQueueOpen(false))
   return (
     <section className="space-y-3 pt-2" data-testid="mobile-settings-notifications">
       <div className="space-y-0.5">

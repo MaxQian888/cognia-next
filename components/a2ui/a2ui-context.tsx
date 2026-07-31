@@ -18,7 +18,7 @@ import {
   getBindingPath,
 } from "@/lib/a2ui/data-model"
 import { getCatalog, DEFAULT_CATALOG_ID } from "@/lib/a2ui/catalog"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { A2UIActionsCtx, A2UIDataCtx } from "@/hooks/a2ui/use-a2ui-context"
 import type { A2UIActionsContextValue, A2UIDataContextValue } from "@/types/a2ui/context"
 import type { A2UIProviderProps } from "@/types/a2ui/context"
@@ -39,7 +39,7 @@ export function A2UIProvider({
 
   const dataModel = useMemo(() => surface?.dataModel ?? {}, [surface])
   const components = useMemo(() => surface?.components ?? {}, [surface])
-  const catalog = getCatalog(catalogId)
+  const catalog = useMemo(() => getCatalog(catalogId), [catalogId])
 
   const emitAction = useCallback(
     (action: string, componentId: string, data?: Record<string, unknown>) => {

@@ -7,8 +7,17 @@
 
 import "fake-indexeddb/auto"
 import React from "react"
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+
+const mockDeleteTwinSource = jest.fn()
+jest.mock("@/lib/db/twin-sources", () => {
+  const actual = jest.requireActual("@/lib/db/twin-sources")
+  return {
+    ...actual,
+    deleteTwinSource: (...args: unknown[]) => mockDeleteTwinSource(...args),
+  }
+})
 
 jest.mock("motion/react", () => {
   const MotionLi = React.forwardRef<HTMLLIElement, React.LiHTMLAttributes<HTMLLIElement>>(
@@ -52,8 +61,17 @@ jest.mock("next/navigation", () => ({
 import { TwinSourcesTab } from "./twin-sources-tab"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { createTwinSource, listTwinSourcesByTwin } from "@/lib/db/twin-sources"
+import { listTwinJobsByTwin } from "@/lib/db/twin-jobs"
+
+const mockToastError = jest.fn()
+jest.mock("sonner", () => ({ toast: { error: (...args: unknown[]) => mockToastError(...args) } }))
 
 beforeEach(async () => {
+  mockToastError.mockClear()
+  const actualTwinSources = jest.requireActual(
+    "@/lib/db/twin-sources"
+  ) as typeof import("@/lib/db/twin-sources")
+  mockDeleteTwinSource.mockReset().mockImplementation(actualTwinSources.deleteTwinSource)
   await getDb().delete()
   __resetDbForTesting()
   getDb()
@@ -87,12 +105,14 @@ describe("TwinSourcesTab", () => {
     expect(statusBadge.getAttribute("data-variant")).toBe("default")
   })
 
-  it("toggles the uploader when 'Add source' is clicked", async () => {
+  it("opens the add-source dialog when 'Add source' is clicked", async () => {
     render(<TwinSourcesTab twinId="twin_alice" />)
-    const trigger = await screen.findByRole("button", { name: /Add source/i })
-    expect(screen.queryByLabelText(/Pick text files/i)).toBeNull()
+    const trigger = await screen.findByTestId("twin-sources-add")
+    expect(screen.queryByTestId("twin-add-source-flow")).toBeNull()
     await userEvent.click(trigger)
-    expect(await screen.findByLabelText(/Pick text files/i)).toBeInTheDocument()
+    expect(await screen.findByTestId("twin-add-source-flow")).toBeInTheDocument()
+    // Guided flow starts at the type picker.
+    expect(screen.getByTestId("twin-add-source-type-file")).toBeInTheDocument()
   })
 
   it("highlights the row matching ?sourceId on mount", async () => {
@@ -119,6 +139,88 @@ describe("TwinSourcesTab", () => {
     expect(scrollSpy).toHaveBeenCalled()
   })
 
+  it("shows no pending-ingest CTA when there are no pending sources", async () => {
+    await createTwinSource({
+      twinId: "twin_alice",
+      kind: "document",
+      format: "markdown",
+      source: "/done.md",
+      title: "Already parsed",
+      bytes: 10,
+      fingerprint: "fp_done",
+      redacted: false,
+      status: "parsed",
+    })
+    render(<TwinSourcesTab twinId="twin_alice" />)
+    await screen.findByText("Already parsed")
+    expect(screen.queryByTestId("twin-sources-queue-ingest")).toBeNull()
+  })
+
+  it("surfaces a pending-ingest CTA and enqueues an ingest job on click", async () => {
+    const a = await createTwinSource({
+      twinId: "twin_alice",
+      kind: "document",
+      format: "markdown",
+      source: "/a.md",
+      title: "Pending A",
+      bytes: 10,
+      fingerprint: "fp_a",
+      redacted: false,
+      status: "pending",
+    })
+    const b = await createTwinSource({
+      twinId: "twin_alice",
+      kind: "document",
+      format: "markdown",
+      source: "/b.md",
+      title: "Pending B",
+      bytes: 10,
+      fingerprint: "fp_b",
+      redacted: false,
+      status: "pending",
+    })
+    render(<TwinSourcesTab twinId="twin_alice" />)
+    const cta = await screen.findByTestId("twin-sources-queue-ingest")
+    await userEvent.click(cta)
+    await waitFor(async () => {
+      const jobs = await listTwinJobsByTwin("twin_alice")
+      const ingest = jobs.find((j) => j.kind === "ingest")
+      expect(ingest).toBeDefined()
+      expect(ingest?.sourceIds.sort()).toEqual([a.id, b.id].sort())
+    })
+  })
+
+  it("formats KB/MB sizes and shows a source error message", async () => {
+    await createTwinSource({
+      twinId: "twin_alice",
+      kind: "document",
+      format: "markdown",
+      source: "/big.md",
+      title: "Big failed source",
+      bytes: 2 * 1024 * 1024,
+      fingerprint: "fp_big",
+      redacted: false,
+      status: "failed",
+      errorMessage: "Slack import: malformed JSON — Unexpected token",
+    })
+    await createTwinSource({
+      twinId: "twin_alice",
+      kind: "document",
+      format: "markdown",
+      source: "/mid.md",
+      title: "Mid source",
+      bytes: 4096,
+      fingerprint: "fp_mid",
+      redacted: false,
+      status: "parsed",
+    })
+    render(<TwinSourcesTab twinId="twin_alice" />)
+    await screen.findByText("Big failed source")
+    expect(screen.getByText("2.0 MB")).toBeInTheDocument()
+    expect(screen.getByText("4.0 KB")).toBeInTheDocument()
+    expect(screen.getByText(/malformed JSON/)).toBeInTheDocument()
+  })
+
   it("deletes a source when its delete button is clicked", async () => {
     await createTwinSource({
       twinId: "twin_alice",
@@ -134,9 +236,110 @@ describe("TwinSourcesTab", () => {
     await screen.findByText("Doomed")
     const deleteBtn = screen.getByRole("button", { name: /^Delete$/i })
     await userEvent.click(deleteBtn)
+    // Deleting now requires confirming in an alert dialog.
+    const dialog = await screen.findByRole("alertdialog")
+    await userEvent.click(within(dialog).getByRole("button", { name: /^Delete$/i }))
     await waitFor(async () => {
       const remaining = await listTwinSourcesByTwin("twin_alice")
       expect(remaining).toEqual([])
     })
+  })
+
+  it("keeps the source when the delete confirmation is cancelled", async () => {
+    await createTwinSource({
+      twinId: "twin_alice",
+      kind: "document",
+      format: "markdown",
+      source: "/keep2.md",
+      title: "Kept",
+      bytes: 10,
+      fingerprint: "fp_kept",
+      redacted: false,
+    })
+    render(<TwinSourcesTab twinId="twin_alice" />)
+    await screen.findByText("Kept")
+    await userEvent.click(screen.getByRole("button", { name: /^Delete$/i }))
+    const dialog = await screen.findByRole("alertdialog")
+    await userEvent.click(within(dialog).getByRole("button", { name: /^Cancel$/i }))
+    await waitFor(() => {
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
+    })
+    expect(await listTwinSourcesByTwin("twin_alice")).toHaveLength(1)
+  })
+
+  it("keeps the dialog open, disables duplicate submits, and reports a failed delete", async () => {
+    await createTwinSource({
+      id: "source_delete_failure",
+      twinId: "twin_alice",
+      kind: "document",
+      format: "markdown",
+      source: "/keep-after-error.md",
+      title: "Keep after error",
+      bytes: 10,
+      fingerprint: "fp_keep_after_error",
+      redacted: false,
+    })
+    let rejectDelete: (error: Error) => void = () => undefined
+    const pendingDelete = new Promise<void>((_resolve, reject) => {
+      rejectDelete = reject
+    })
+    mockDeleteTwinSource.mockReturnValueOnce(pendingDelete)
+    render(<TwinSourcesTab twinId="twin_alice" />)
+    await screen.findByText("Keep after error")
+    await userEvent.click(screen.getByRole("button", { name: /^Delete$/i }))
+    const dialog = await screen.findByRole("alertdialog")
+    const confirm = within(dialog).getByRole("button", { name: /^Delete$/i })
+
+    fireEvent.click(confirm)
+    await waitFor(() => expect(confirm).toBeDisabled())
+    await act(async () => {
+      rejectDelete(new Error("database closed"))
+      await Promise.resolve()
+    })
+
+    await waitFor(() =>
+      expect(mockToastError).toHaveBeenCalledWith("Could not delete the source: database closed")
+    )
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument()
+    expect(confirm).not.toBeDisabled()
+    expect(await listTwinSourcesByTwin("twin_alice")).toHaveLength(1)
+  }, 10_000)
+
+  it("filters sources by status via the filter chips", async () => {
+    await createTwinSource({
+      twinId: "twin_alice",
+      kind: "document",
+      format: "markdown",
+      source: "/p.md",
+      title: "Pending doc",
+      bytes: 10,
+      fingerprint: "fp_p",
+      redacted: false,
+      status: "pending",
+    })
+    await createTwinSource({
+      twinId: "twin_alice",
+      kind: "document",
+      format: "markdown",
+      source: "/q.md",
+      title: "Parsed doc",
+      bytes: 10,
+      fingerprint: "fp_q",
+      redacted: false,
+      status: "parsed",
+    })
+    render(<TwinSourcesTab twinId="twin_alice" />)
+    await screen.findByText("Pending doc")
+    await screen.findByText("Parsed doc")
+
+    await userEvent.click(await screen.findByTestId("twin-sources-filter-parsed"))
+    await waitFor(() => {
+      expect(screen.queryByText("Pending doc")).not.toBeInTheDocument()
+    })
+    expect(screen.getByText("Parsed doc")).toBeInTheDocument()
+
+    // Clicking the active chip again resets back to "all".
+    await userEvent.click(screen.getByTestId("twin-sources-filter-parsed"))
+    await screen.findByText("Pending doc")
   })
 })

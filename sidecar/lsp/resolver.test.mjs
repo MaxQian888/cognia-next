@@ -6,6 +6,23 @@ import path from "node:path"
 import { pathToFileURL } from "node:url"
 import { createLspResolver } from "./resolver.mjs"
 
+// The resolved config list the renderer hands the sidecar via
+// `sendOptions.lsp.servers`. The resolver no longer owns a hard-coded
+// registry, so every test supplies the servers it needs.
+const TS_SERVERS = [
+  {
+    id: "typescript",
+    name: "TypeScript",
+    languages: ["typescript"],
+    extensions: [".ts", ".tsx", ".js"],
+    command: "typescript-language-server",
+    args: ["--stdio"],
+    rootMarkers: ["tsconfig.json", "jsconfig.json", "package.json"],
+    excludeRootMarkers: ["deno.json"],
+    settings: { typescript: { preferences: { importModuleSpecifier: "relative" } } },
+  },
+]
+
 /** Fake LspService that records calls and never spawns a process. */
 function makeFakeService() {
   const calls = { start: [], didOpen: [], didChange: [], request: [], stop: [] }
@@ -43,7 +60,12 @@ function tsProject() {
 test("touchFile starts a server once and didOpens, then didChanges", async () => {
   const { root, file } = tsProject()
   const service = makeFakeService()
-  const resolver = createLspResolver({ service, cwd: root, ensureCommand: (c) => c })
+  const resolver = createLspResolver({
+    service,
+    cwd: root,
+    servers: TS_SERVERS,
+    ensureCommand: (c) => c,
+  })
 
   const first = await resolver.touchFile(file)
   assert.equal(first.length, 1)
@@ -60,7 +82,12 @@ test("touchFile starts a server once and didOpens, then didChanges", async () =>
 test("missing binary → server skipped, no start", async () => {
   const { root, file } = tsProject()
   const service = makeFakeService()
-  const resolver = createLspResolver({ service, cwd: root, ensureCommand: () => null })
+  const resolver = createLspResolver({
+    service,
+    cwd: root,
+    servers: TS_SERVERS,
+    ensureCommand: () => null,
+  })
   const touched = await resolver.touchFile(file)
   assert.deepEqual(touched, [])
   assert.equal(service.calls.start.length, 0)
@@ -71,7 +98,12 @@ test("no matching root → skipped", async () => {
   const file = path.join(root, "a.ts") // no tsconfig/package.json/jsconfig
   fs.writeFileSync(file, "")
   const service = makeFakeService()
-  const resolver = createLspResolver({ service, cwd: root, ensureCommand: (c) => c })
+  const resolver = createLspResolver({
+    service,
+    cwd: root,
+    servers: TS_SERVERS,
+    ensureCommand: (c) => c,
+  })
   assert.deepEqual(await resolver.touchFile(file), [])
 })
 
@@ -81,6 +113,7 @@ test("ingestDiagnostics + getDiagnostics returns cached diagnostics", async () =
   const resolver = createLspResolver({
     service,
     cwd: root,
+    servers: TS_SERVERS,
     ensureCommand: (c) => c,
     diagnosticsWaitMs: 1,
   })
@@ -94,7 +127,12 @@ test("ingestDiagnostics + getDiagnostics returns cached diagnostics", async () =
 test("request routes to service.request with the file uri", async () => {
   const { root, file } = tsProject()
   const service = makeFakeService()
-  const resolver = createLspResolver({ service, cwd: root, ensureCommand: (c) => c })
+  const resolver = createLspResolver({
+    service,
+    cwd: root,
+    servers: TS_SERVERS,
+    ensureCommand: (c) => c,
+  })
   const res = await resolver.request(file, "definition", { position: { line: 0, character: 6 } })
   assert.equal(res.method, "definition")
   assert.equal(service.calls.request.length, 1)
@@ -107,14 +145,56 @@ test("request throws when no server available", async () => {
   const file = path.join(root, "a.ts")
   fs.writeFileSync(file, "")
   const service = makeFakeService()
-  const resolver = createLspResolver({ service, cwd: root, ensureCommand: (c) => c })
+  const resolver = createLspResolver({
+    service,
+    cwd: root,
+    servers: TS_SERVERS,
+    ensureCommand: (c) => c,
+  })
   await assert.rejects(() => resolver.request(file, "hover", {}))
+})
+
+test("per-server settings are forwarded to service.start", async () => {
+  const { root, file } = tsProject()
+  const service = makeFakeService()
+  const resolver = createLspResolver({
+    service,
+    cwd: root,
+    servers: TS_SERVERS,
+    ensureCommand: (c) => c,
+  })
+  await resolver.touchFile(file)
+  assert.equal(service.calls.start.length, 1)
+  assert.deepEqual(service.calls.start[0].settings, {
+    typescript: { preferences: { importModuleSpecifier: "relative" } },
+  })
+})
+
+test("a file with no configured server is a no-op", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cognia-lsp-none-"))
+  fs.writeFileSync(path.join(root, "tsconfig.json"), "{}")
+  const file = path.join(root, "a.go") // no server configured for .go
+  fs.writeFileSync(file, "")
+  const service = makeFakeService()
+  const resolver = createLspResolver({
+    service,
+    cwd: root,
+    servers: TS_SERVERS,
+    ensureCommand: (c) => c,
+  })
+  assert.deepEqual(await resolver.touchFile(file), [])
+  assert.equal(service.calls.start.length, 0)
 })
 
 test("dispose stops every started server", async () => {
   const { root, file } = tsProject()
   const service = makeFakeService()
-  const resolver = createLspResolver({ service, cwd: root, ensureCommand: (c) => c })
+  const resolver = createLspResolver({
+    service,
+    cwd: root,
+    servers: TS_SERVERS,
+    ensureCommand: (c) => c,
+  })
   await resolver.touchFile(file)
   await resolver.dispose()
   assert.equal(service.calls.stop.length, 1)

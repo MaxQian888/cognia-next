@@ -32,6 +32,7 @@ const fakeTable = () => {
     where: jest.fn(() => ({
       equals: jest.fn(() => ({
         delete: jest.fn(async () => 0),
+        toArray: jest.fn(async () => [...records]),
       })),
     })),
   }
@@ -39,13 +40,13 @@ const fakeTable = () => {
 
 let canvasDocumentsTable = fakeTable()
 let canvasVersionsTable = fakeTable()
-let canvasCommentsTable = fakeTable()
+let contextCommentsTable = fakeTable()
 let canvasSessionsTable = fakeTable()
 
 const fakeDb = {
   canvasDocuments: canvasDocumentsTable,
   canvasVersions: canvasVersionsTable,
-  canvasComments: canvasCommentsTable,
+  contextComments: contextCommentsTable,
   canvasSessions: canvasSessionsTable,
   transaction: jest.fn(async (..._args: unknown[]) => {
     const fn = _args[_args.length - 1] as () => Promise<void>
@@ -102,7 +103,7 @@ jest.mock("@/stores/canvas/comment-store", () => ({
   useCommentStore: commentStore,
 }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   __esModule: true,
   loggers: {
     canvas: {
@@ -119,11 +120,11 @@ beforeEach(() => {
   // Recreate fresh tables for each test.
   canvasDocumentsTable = fakeTable()
   canvasVersionsTable = fakeTable()
-  canvasCommentsTable = fakeTable()
+  contextCommentsTable = fakeTable()
   canvasSessionsTable = fakeTable()
   fakeDb.canvasDocuments = canvasDocumentsTable
   fakeDb.canvasVersions = canvasVersionsTable
-  fakeDb.canvasComments = canvasCommentsTable
+  fakeDb.contextComments = contextCommentsTable
   fakeDb.canvasSessions = canvasSessionsTable
   fakeDb.transaction = jest.fn(async (..._args: unknown[]) => {
     const fn = _args[_args.length - 1] as () => Promise<void>
@@ -197,6 +198,7 @@ describe("startCanvasDexieBridge", () => {
         "doc-2": {
           id: "doc-2",
           sessionId: "s2",
+          projectId: "project-1",
           title: "Two",
           content: "data",
           language: "md",
@@ -220,11 +222,14 @@ describe("startCanvasDexieBridge", () => {
     await Promise.resolve()
 
     expect(canvasDocumentsTable.bulkPut).toHaveBeenCalled()
+    expect(canvasDocumentsTable.bulkPut.mock.calls.at(-1)?.[0]).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "doc-2", projectId: "project-1" })])
+    )
     expect(canvasVersionsTable.bulkPut).toHaveBeenCalled()
     dispose()
   })
 
-  it("syncs comment-store changes to canvasComments table", async () => {
+  it("syncs comment-store changes to the generalized contextComments table", async () => {
     const { startCanvasDexieBridge } = await import("./dexie-bridge")
     const dispose = startCanvasDexieBridge()
     await Promise.resolve()
@@ -246,7 +251,7 @@ describe("startCanvasDexieBridge", () => {
     })
     await Promise.resolve()
     await Promise.resolve()
-    expect(canvasCommentsTable.bulkPut).toHaveBeenCalled()
+    expect(contextCommentsTable.bulkPut).toHaveBeenCalled()
     dispose()
   })
 
@@ -280,19 +285,8 @@ describe("startCanvasDexieBridge", () => {
     expect(canvasDocumentsTable.bulkPut).not.toHaveBeenCalled()
   })
 
-  it("returns a noop disposer when called outside the browser", async () => {
-    const originalWindow = global.window
-    // @ts-expect-error -- simulate node runtime
-    delete global.window
-    try {
-      const { startCanvasDexieBridge } = await import("./dexie-bridge")
-      const dispose = startCanvasDexieBridge()
-      expect(typeof dispose).toBe("function")
-      dispose()
-    } finally {
-      global.window = originalWindow
-    }
-  })
+  // The outside-the-browser branch lives in `dexie-bridge.ssr.test.ts` —
+  // jsdom's `window` is non-configurable from Node 26 on.
 
   it("removes documents from Dexie when artifact-store drops them", async () => {
     // Seed memory with one doc, then start bridge.
@@ -343,7 +337,7 @@ describe("startCanvasDexieBridge", () => {
 
     commentStore.setState({ comments: {} })
     await new Promise((r) => setTimeout(r, 30))
-    expect(canvasCommentsTable.bulkDelete).toHaveBeenCalled()
+    expect(contextCommentsTable.bulkDelete).toHaveBeenCalled()
     dispose()
   })
 
@@ -358,10 +352,20 @@ describe("startCanvasDexieBridge", () => {
       createdAt: 1,
       updatedAt: 2,
     })
-    canvasCommentsTable.records.push({
+    contextCommentsTable.records.push({
       id: "c-hyd",
-      documentId: "doc-hyd",
+      resourceKind: "canvas-document",
+      resourceId: "doc-hyd",
+      anchor: {
+        kind: "text-range",
+        start: 0,
+        end: 0,
+        lineRange: { startLine: 1, startColumn: 1, endLine: 1, endColumn: 2 },
+      },
+      authorId: "user-1",
+      authorName: "Maya",
       content: "from-dexie",
+      reactions: [],
       createdAt: 100,
       updatedAt: 200,
       resolvedAt: 300,

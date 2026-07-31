@@ -116,15 +116,64 @@ describe("useGitActions", () => {
     expect(commands.gitCommit).toHaveBeenCalledWith("/repo", "msg", true, true)
   })
 
+  it("returns identityRequired to the commit UI without showing a generic failure toast", async () => {
+    commands.gitCommit.mockRejectedValue({
+      kind: "identityRequired",
+      detail: "Author identity unknown",
+    })
+    const { result } = renderHook(() => useGitActions(refresh))
+
+    let failure: Awaited<ReturnType<typeof result.current.commit>> | undefined
+    await act(async () => {
+      failure = await result.current.commit("feat: identity")
+    })
+
+    expect(failure).toEqual({
+      kind: "identityRequired",
+      detail: "Author identity unknown",
+    })
+    expect(toastErrorMock).not.toHaveBeenCalled()
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
   it("push with setUpstream sends the current branch and lets the backend resolve the remote", async () => {
     const { result } = renderHook(() => useGitActions(refresh))
     await act(async () => {
-      await result.current.push(true)
+      await result.current.push({ setUpstream: true })
     })
     expect(commands.gitPush).toHaveBeenCalledWith("/repo", {
       setUpstream: true,
+      forceWithLease: undefined,
       branch: "main",
     })
+  })
+
+  it("push with forceWithLease threads the flag without setting upstream", async () => {
+    const { result } = renderHook(() => useGitActions(refresh))
+    await act(async () => {
+      await result.current.push({ forceWithLease: true })
+    })
+    expect(commands.gitPush).toHaveBeenCalledWith("/repo", {
+      setUpstream: undefined,
+      forceWithLease: true,
+      branch: undefined,
+    })
+  })
+
+  it("pull threads the rebase option", async () => {
+    const { result } = renderHook(() => useGitActions(refresh))
+    await act(async () => {
+      await result.current.pull({ rebase: true })
+    })
+    expect(commands.gitPull).toHaveBeenCalledWith("/repo", { rebase: true })
+  })
+
+  it("fetch threads the prune option", async () => {
+    const { result } = renderHook(() => useGitActions(refresh))
+    await act(async () => {
+      await result.current.fetch({ prune: true })
+    })
+    expect(commands.gitFetch).toHaveBeenCalledWith("/repo", undefined, true)
   })
 
   it("records error + toasts on failure, still resets the op flag", async () => {
@@ -216,7 +265,7 @@ describe("useGitActions", () => {
     expect(commands.gitCreateBranch).toHaveBeenCalledWith("/repo", "b", true, "abc")
     expect(commands.gitDeleteBranch).toHaveBeenCalledWith("/repo", "b", false)
     expect(commands.gitRenameBranch).toHaveBeenCalledWith("/repo", "b2", "b")
-    expect(commands.gitPull).toHaveBeenCalledWith("/repo")
+    expect(commands.gitPull).toHaveBeenCalledWith("/repo", { rebase: false })
     expect(commands.gitSync).toHaveBeenCalledWith("/repo")
     expect(commands.gitStashPush).toHaveBeenCalledWith("/repo", { message: "wip" })
     expect(commands.gitStashPop).toHaveBeenCalledWith("/repo", 0)

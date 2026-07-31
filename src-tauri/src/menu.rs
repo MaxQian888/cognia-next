@@ -5,6 +5,10 @@ use tauri::{
     App, Emitter, Manager,
 };
 
+const GO_SITES_MENU_ID: &str = "go-sites";
+const TOGGLE_RIGHT_SIDEBAR_MENU_ID: &str = "toggle-right-sidebar";
+const TOGGLE_TERMINAL_MENU_ID: &str = "toggle-terminal";
+
 // `MENU_IDS` lives in `crate::commands` so the `menu_action_ids` Tauri
 // command can be registered on every platform — see
 // `commands::MENU_IDS` and `commands::menu_action_ids`.
@@ -84,15 +88,33 @@ pub fn install(app: &App) -> tauri::Result<()> {
     let toggle_status_bar = MenuItemBuilder::new("Toggle Status Bar")
         .id("toggle-status-bar")
         .build(handle)?;
-    let theme_light = MenuItemBuilder::new("Light").id("theme-light").build(handle)?;
-    let theme_dark = MenuItemBuilder::new("Dark").id("theme-dark").build(handle)?;
-    let theme_system = MenuItemBuilder::new("System").id("theme-system").build(handle)?;
+    // The artifact dock and the terminal used to be reachable only from icon
+    // buttons in the in-window title bar. macOS suppresses that menubar, so
+    // once those buttons folded into the Views dropdown these were the only two
+    // panels with no menu entry at all.
+    let toggle_right_sidebar = MenuItemBuilder::new("Toggle Right Sidebar")
+        .id(TOGGLE_RIGHT_SIDEBAR_MENU_ID)
+        .build(handle)?;
+    let toggle_terminal = MenuItemBuilder::new("Toggle Terminal")
+        .id(TOGGLE_TERMINAL_MENU_ID)
+        .build(handle)?;
+    let theme_light = MenuItemBuilder::new("Light")
+        .id("theme-light")
+        .build(handle)?;
+    let theme_dark = MenuItemBuilder::new("Dark")
+        .id("theme-dark")
+        .build(handle)?;
+    let theme_system = MenuItemBuilder::new("System")
+        .id("theme-system")
+        .build(handle)?;
     let theme_submenu = SubmenuBuilder::new(handle, "Theme")
         .item(&theme_light)
         .item(&theme_dark)
         .item(&theme_system)
         .build()?;
-    let language_en = MenuItemBuilder::new("English").id("language-en").build(handle)?;
+    let language_en = MenuItemBuilder::new("English")
+        .id("language-en")
+        .build(handle)?;
     let language_zh = MenuItemBuilder::new("简体中文")
         .id("language-zh-cn")
         .build(handle)?;
@@ -114,8 +136,10 @@ pub fn install(app: &App) -> tauri::Result<()> {
     let view = SubmenuBuilder::new(handle, "View")
         .item(&command_palette)
         .item(&toggle_sidebar)
+        .item(&toggle_right_sidebar)
         .item(&toggle_guild_rail)
         .item(&toggle_status_bar)
+        .item(&toggle_terminal)
         .separator()
         .item(&theme_submenu)
         .item(&language_submenu)
@@ -134,6 +158,9 @@ pub fn install(app: &App) -> tauri::Result<()> {
     let go_workflows = MenuItemBuilder::new("Workflows")
         .id("go-workflows")
         .accelerator("CmdOrCtrl+2")
+        .build(handle)?;
+    let go_sites = MenuItemBuilder::new("Sites")
+        .id(GO_SITES_MENU_ID)
         .build(handle)?;
     let go_twin = MenuItemBuilder::new("Twin Workbench")
         .id("go-twin")
@@ -159,14 +186,23 @@ pub fn install(app: &App) -> tauri::Result<()> {
         .id("go-discover")
         .accelerator("CmdOrCtrl+8")
         .build(handle)?;
-    let go_a2ui = MenuItemBuilder::new("Mini-Apps").id("go-a2ui").build(handle)?;
-    let go_dms = MenuItemBuilder::new("Direct Messages").id("go-dms").build(handle)?;
-    let go_canvas = MenuItemBuilder::new("Canvas").id("go-canvas").build(handle)?;
+    let go_a2ui = MenuItemBuilder::new("Mini-Apps")
+        .id("go-a2ui")
+        .build(handle)?;
+    let go_dms = MenuItemBuilder::new("Direct Messages")
+        .id("go-dms")
+        .build(handle)?;
+    let go_canvas = MenuItemBuilder::new("Canvas")
+        .id("go-canvas")
+        .build(handle)?;
     let go_logs = MenuItemBuilder::new("Logs").id("go-logs").build(handle)?;
-    let go_settings = MenuItemBuilder::new("Settings").id("go-settings").build(handle)?;
+    let go_settings = MenuItemBuilder::new("Settings")
+        .id("go-settings")
+        .build(handle)?;
     let go = SubmenuBuilder::new(handle, "Go")
         .item(&go_inbox)
         .item(&go_workflows)
+        .item(&go_sites)
         .item(&go_twin)
         .item(&go_skills)
         .item(&go_plugins)
@@ -288,5 +324,19 @@ pub fn install(app: &App) -> tauri::Result<()> {
     Ok(())
 }
 
-// Tests for `MENU_IDS` (uniqueness, kebab-case, canonical-set parity) live
-// in `crate::commands::tests` next to the constant they exercise.
+#[cfg(test)]
+mod tests {
+    use super::{GO_SITES_MENU_ID, TOGGLE_RIGHT_SIDEBAR_MENU_ID, TOGGLE_TERMINAL_MENU_ID};
+
+    #[test]
+    fn sites_item_uses_a_registered_go_menu_id() {
+        assert_eq!(GO_SITES_MENU_ID, "go-sites");
+        assert!(crate::commands::MENU_IDS.contains(&GO_SITES_MENU_ID));
+    }
+
+    #[test]
+    fn new_view_items_use_registered_menu_ids() {
+        assert!(crate::commands::MENU_IDS.contains(&TOGGLE_RIGHT_SIDEBAR_MENU_ID));
+        assert!(crate::commands::MENU_IDS.contains(&TOGGLE_TERMINAL_MENU_ID));
+    }
+}

@@ -18,11 +18,34 @@
 import { randomUUID } from "node:crypto"
 import { z } from "zod"
 import { createSdkMcpServer, tool } from "@anthropic-ai/claude-agent-sdk"
+import { toolText } from "./safety.mjs"
 
 export const SERVER_NAME = "cognia-plugin-tools"
 export const SERVER_VERSION = "0.1.0"
 
 const DEFAULT_PLUGIN_TOOL_TIMEOUT_MS = 120_000
+
+/**
+ * True when a plugin tool returned a ready MCP `CallToolResult` rather than a
+ * plain value. Plugin results otherwise get `JSON.stringify`-ed into a single
+ * text block, which makes it *structurally impossible* for a plugin tool to
+ * return an image / audio / embedded resource — the model would only ever see
+ * base64 text, and the chat would only ever render a wall of it. Built-in tools
+ * already return this shape (see `safety.mjs:toolImage`), so the check is the
+ * same one the built-in path relies on.
+ *
+ * @param {unknown} result
+ * @returns {boolean}
+ */
+export function isCallToolResult(result) {
+  if (!result || typeof result !== "object" || Array.isArray(result)) return false
+  const content = /** @type {{ content?: unknown }} */ (result).content
+  return (
+    Array.isArray(content) &&
+    content.length > 0 &&
+    content.every((b) => !!b && typeof b === "object" && typeof b.type === "string")
+  )
+}
 
 /**
  * Register a resolver for `toolUseId` in `pending` and return a promise that
@@ -32,6 +55,11 @@ const DEFAULT_PLUGIN_TOOL_TIMEOUT_MS = 120_000
  * safety net: a stalled / closed renderer must surface a clean tool error rather
  * than hang the SDK turn forever. The resolver is registered SYNCHRONOUSLY so the
  * caller can `emit` the request immediately after calling this.
+ *
+ * A `timeoutMs <= 0` (or non-finite) disables the timer entirely — for tools
+ * that legitimately block on a human (`ask_user`) or run their own bounded long
+ * task (`dispatch_agent`), where a fixed safety-net timeout would sever a call
+ * that is still perfectly valid.
  *
  * @param {Map<string, { resolve: (r: any) => void }>} pending
  * @param {string} toolUseId
@@ -46,14 +74,17 @@ export function awaitPluginToolResponse(
   timeoutMs = DEFAULT_PLUGIN_TOOL_TIMEOUT_MS
 ) {
   return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      pending.delete(toolUseId)
-      resolve({ error: `plugin tool '${name}' timed out after ${timeoutMs}ms` })
-    }, timeoutMs)
-    if (typeof timer.unref === "function") timer.unref()
+    const noTimeout = !Number.isFinite(timeoutMs) || timeoutMs <= 0
+    const timer = noTimeout
+      ? null
+      : setTimeout(() => {
+          pending.delete(toolUseId)
+          resolve({ error: `plugin tool '${name}' timed out after ${timeoutMs}ms` })
+        }, timeoutMs)
+    if (timer && typeof timer.unref === "function") timer.unref()
     pending.set(toolUseId, {
       resolve: (r) => {
-        clearTimeout(timer)
+        if (timer) clearTimeout(timer)
         pending.delete(toolUseId)
         resolve(r)
       },
@@ -93,6 +124,7 @@ export function buildPluginToolsServer({
   pendingPluginToolCalls,
   alwaysLoad,
   alwaysLoadToolNames,
+  remoteExecutionContext,
 }) {
   if (!Array.isArray(tools) || tools.length === 0) return null
 
@@ -108,28 +140,30 @@ export function buildPluginToolsServer({
       zodShape,
       async (args) => {
         const toolUseId = randomUUID()
-        const pending = awaitPluginToolResponse(pendingPluginToolCalls, toolUseId, t.name)
+        // Honor a per-tool timeout override from the manifest (`t.timeoutMs`);
+        // `0` means "no timeout" for human-blocking / long-running tools.
+        const pending = awaitPluginToolResponse(
+          pendingPluginToolCalls,
+          toolUseId,
+          t.name,
+          typeof t.timeoutMs === "number" ? t.timeoutMs : undefined
+        )
         emit({
           type: "plugin_tool_exec",
           sessionId,
           toolUseId,
           name: t.name,
           args,
+          ...(remoteExecutionContext ? { remoteExecutionContext } : {}),
         })
         const response = await pending
         if (response && response.error) {
-          return {
-            content: [{ type: "text", text: `Error: ${response.error}` }],
-            isError: true,
-          }
+          return toolText(`Error: ${response.error}`, { isError: true })
         }
-        const payload =
-          typeof response?.result === "string"
-            ? response.result
-            : JSON.stringify(response?.result ?? null)
-        return {
-          content: [{ type: "text", text: payload }],
-        }
+        const result = response?.result ?? null
+        // A plugin that already speaks MCP (image / audio / resource blocks)
+        // passes through untouched; everything else keeps the JSON-text shape.
+        return isCallToolResult(result) ? result : toolText(result)
       },
       toolExtras
     )

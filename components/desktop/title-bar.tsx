@@ -25,6 +25,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { filterExposedSessions } from "@/lib/chat/session-exposure"
 import {
   Menubar,
   MenubarCheckboxItem,
@@ -40,9 +41,8 @@ import {
   MenubarSubTrigger,
   MenubarTrigger,
 } from "@/components/ui/menubar"
-import { getCharacter } from "@/lib/db/characters"
-import { getSession, listSessions } from "@/lib/db/sessions"
-import { loggers } from "@/lib/logging"
+import { listSessions } from "@/lib/db/sessions"
+import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/tauri"
 import { applyZoom, clampZoom, DEFAULT_ZOOM, ZOOM_STEP } from "@/lib/tauri/webview-zoom"
 import {
@@ -52,6 +52,7 @@ import {
   manageConnectorsAction,
   manageMcpServerAction,
   newAgentTeamAction,
+  newChatAction,
   newCharacterAction,
   newWorkflowAction,
   pluginDevtoolsAction,
@@ -63,28 +64,20 @@ import {
   toggleStatusBarAction,
   type MenuActionId,
 } from "@/lib/desktop/menu-actions"
+import { openFolderAsWorkspace } from "@/lib/workspace/open-folder"
 import { cn } from "@/lib/utils"
 import { useChatStore } from "@/stores/chat/chat-store"
 import { useSettingsStore } from "@/stores/settings"
 import { useUIStore } from "@/stores/ui/ui-store"
-import { useLiveQuery } from "dexie-react-hooks"
-import {
-  MaximizeIcon,
-  MenuIcon,
-  MinimizeIcon,
-  MinusIcon,
-  SearchIcon,
-  SparklesIcon,
-  XIcon,
-} from "lucide-react"
+import { MaximizeIcon, MenuIcon, MinimizeIcon, MinusIcon, XIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { useTheme } from "next-themes"
 import { usePathname, useRouter } from "next/navigation"
 import { useEffect, useState, useSyncExternalStore } from "react"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
-import { TitleBarNavArrows } from "@/components/desktop/title-bar-nav-arrows"
-import { TitleBarLayoutControls } from "@/components/desktop/title-bar-layout-controls"
-import { TitleBarCommandCenterMenu } from "@/components/desktop/title-bar-command-center-menu"
+import { TitleBarZone, type TitleBarItemContext } from "@/components/desktop/title-bar-zone"
+import { ShellLayoutDialog } from "@/components/shell/shell-layout-dialog"
+import { useBarLayout } from "@/components/shell/use-bar-layout"
 import { recordNavigation } from "@/hooks/desktop/use-nav-history"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 
@@ -143,55 +136,22 @@ function useNarrow(): boolean {
   )
 }
 
-// The chat-store status (changes per token during streaming) and the two
-// dexie-react-hooks live queries (re-fire on any sessions / characters write)
-// used to live on TitleBar itself, which forced the entire menubar tree to
-// re-render whenever the active chat changed. Lifting them into a leaf
-// component scoped to the search pill keeps the menubar render-stable.
-function TitleBarSearchPill({
-  appName,
-  separator,
-  placeholder,
-  kbdHint,
-  onClick,
-}: {
-  appName: string
-  separator: string
-  placeholder: string
-  kbdHint: string
-  onClick: () => void
-}) {
-  const activeSessionId = useChatStore((s) => s.activeSessionId)
-  const status = useChatStore((s) => s.status)
-  const session = useLiveQuery(
-    () => (activeSessionId ? getSession(activeSessionId) : Promise.resolve(undefined)),
-    [activeSessionId]
-  )
-  const character = useLiveQuery(
-    () => (session?.characterId ? getCharacter(session.characterId) : Promise.resolve(undefined)),
-    [session?.characterId]
-  )
-  const doc = character?.name ?? session?.title ?? null
-  const title = doc ? `${appName}${separator}${doc}` : appName
-  const isStreaming = status === "streaming"
-  return (
-    <QuickSearchPill
-      title={title}
-      placeholder={placeholder}
-      kbdHint={kbdHint}
-      isStreaming={isStreaming}
-      onClick={onClick}
-    />
-  )
-}
-
 /**
  * VSCode-style frameless title bar (active when `decorations: false`).
  *
  * Layout per platform:
- *   • macOS:    [traffic-light room] · [QuickSearchPill]
+ *   • macOS:    [traffic-light room] · [centre zone] · [end zone]
  *   • Windows / Linux:
- *     [icon + Menubar (or hamburger when narrow)] · [QuickSearchPill] · [min / max / close]
+ *     [start zone + Menubar (or hamburger when narrow)] · [centre zone] ·
+ *     [end zone] · [min / max / close]
+ *
+ * Which segments occupy those zones, and in what order, is user customization
+ * persisted on `AppSettings.titleBarLayout` and resolved by
+ * `useBarLayout("title")` — the same settings-backed path the nav rail and the
+ * status bar use. Edit it from `/settings?section=sidebar` (Top bar tab), this
+ * bar's right-click menu, or the Views menu. The segments themselves live in
+ * `title-bar-zone.tsx`; the drag regions, the menubar and the window buttons
+ * stay hardcoded here because they are structural.
  *
  * Right-clicking the drag region on Windows/Linux opens a small system menu;
  * double-clicking toggles maximize.
@@ -199,18 +159,25 @@ function TitleBarSearchPill({
 export function TitleBar() {
   const t = useTranslations("desktop.titleBar")
   const tMenu = useTranslations("desktop.menu")
+  const tShellLayout = useTranslations("desktop.shellLayout")
   const router = useRouter()
   const [mounted, setMounted] = useState(false)
   const [maximized, setMaximized] = useState(false)
   const [alwaysOnTop, setAlwaysOnTopState] = useState(false)
   const [platform, setPlatform] = useState<string>("")
   const [systemMenu, setSystemMenu] = useState<{ x: number; y: number } | null>(null)
+  const [customizeOpen, setCustomizeOpen] = useState(false)
 
   const toggleSidebar = useUIStore((s) => s.toggleSidebar)
   const setSelectedGuild = useUIStore((s) => s.setSelectedGuild)
   const sidebarCollapsed = useUIStore((s) => s.sidebarCollapsed)
   const guildRailCollapsed = useUIStore((s) => s.guildRailCollapsed)
   const statusBarCollapsed = useUIStore((s) => s.statusBarCollapsed)
+
+  // Segment order + visibility, per zone. Edited in the customizer, persisted
+  // in settings; see `components/shell/use-bar-layout.ts`.
+  const { resolved: bar } = useBarLayout("title")
+  const openFind = useUIStore((s) => s.openFind)
 
   const persistedZoom = useSettingsStore((s) => s.settings?.webviewZoom)
   const persistedLanguage = useSettingsStore((s) => s.settings?.language)
@@ -279,7 +246,7 @@ export function TitleBar() {
     void (async () => {
       try {
         const rows = await listSessions()
-        if (!cancelled) setRecentSessions(rows.slice(0, 8))
+        if (!cancelled) setRecentSessions(filterExposedSessions(rows, "global-search").slice(0, 8))
       } catch (err) {
         log.warn("title-bar load recent-sessions failed", {
           error: err instanceof Error ? err.message : String(err),
@@ -334,23 +301,19 @@ export function TitleBar() {
 
   // ---- File menu actions --------------------------------------------------
 
+  // Delegates so this File menu and the native menu bar (which fires
+  // `menu://new-chat` → `newChatAction`) cannot drift apart.
   const handleNewChat = () => {
     log.info("title-bar menu new-chat")
-    useChatStore.getState().clear()
-    setSelectedGuild({ kind: "dm" })
+    newChatAction()
   }
   const handleOpenWorkspace = async () => {
     log.info("title-bar menu open-workspace")
     try {
-      const { open: openDialog } = await import("@tauri-apps/plugin-dialog")
-      const picked = await openDialog({
-        directory: true,
-        multiple: false,
-        title: "Select workspace",
-      })
-      if (typeof picked === "string") {
-        await useSettingsStore.getState().save({ defaultWorkingDir: picked })
-      }
+      // Unified flow: pick a folder and create/activate a real workspace Project
+      // (mirrors the File menu / Cmd+O / switcher). The old `defaultWorkingDir`
+      // write was shadowed by the active workspace root.
+      await openFolderAsWorkspace()
     } catch (err) {
       log.warn("title-bar open-workspace failed", {
         error: err instanceof Error ? err.message : String(err),
@@ -393,16 +356,22 @@ export function TitleBar() {
   }
   const handleFind = () => {
     log.info("title-bar menu find")
-    // Browser-native find. Webviews honor this; ChatPane / Canvas can intercept
-    // the chord later if they need an in-app finder.
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", ctrlKey: true }))
+    // Open the in-app find bar (mounted by the desktop shell). It also listens
+    // for Ctrl/Cmd+F globally; this is the Edit → Find menu entry point.
+    openFind()
   }
 
   // ---- View menu ---------------------------------------------------------
 
   const handleCommandPalette = () => {
     log.info("title-bar menu command-palette")
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }))
+    // The command palette's global listener keys off the platform-native
+    // modifier — `metaKey` (⌘) on macOS, `ctrlKey` elsewhere. The synthetic
+    // dispatch must mirror that or clicking the search pill / menu item never
+    // opens the palette on Mac (see command-palette.tsx).
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "k", ctrlKey: !isMac, metaKey: isMac })
+    )
   }
   const handleToggleSidebar = () => {
     log.info("title-bar menu toggle-sidebar")
@@ -541,14 +510,32 @@ export function TitleBar() {
 
   // ---- Right-click system menu (Win/Linux only) --------------------------
 
+  // Opens on every platform now. On Windows/Linux it carries the window
+  // commands plus "Customize layout"; on macOS the window commands live in the
+  // traffic lights, so it carries the customize entry alone — which is where a
+  // user reaches for it after right-clicking the bottom bar.
   const onTitleBarContextMenu = (event: React.MouseEvent) => {
-    if (isMac) return
     // Ignore right-clicks on real interactive content (menu triggers, buttons,
     // the search pill). Only the bare drag region should open the system menu.
     const t = event.target as HTMLElement
     if (t.closest("button, [role='menuitem'], [data-radix-menu-content]")) return
     event.preventDefault()
     setSystemMenu({ x: event.clientX, y: event.clientY })
+  }
+
+  // Everything the customizable segments need from this component. Rebuilt per
+  // render rather than memoized: the handlers below are re-created each render
+  // anyway (they close over `router` / `recentSessions`), and the zones were
+  // already re-rendering with the bar before they became data-driven.
+  const itemCtx: TitleBarItemContext = {
+    appName,
+    separator: t("separator"),
+    searchPlaceholder: t("searchPlaceholder"),
+    kbdHint: t("kbdHint"),
+    recentSessions,
+    onCommandPalette: handleCommandPalette,
+    onOpenRecentSession: (id) => handleOpenRecentSession(id)(),
+    onGo: (id) => goAction(router, id),
   }
 
   return (
@@ -565,12 +552,14 @@ export function TitleBar() {
         }}
         onContextMenu={onTitleBarContextMenu}
         className={cn(
-          "relative flex h-8 shrink-0 items-center border-b bg-muted/40 text-xs select-none",
+          // Tint, no border — see `guild-rail.tsx`. The tone already reads as
+          // "not content"; a border on top of it is a second seam.
+          "relative flex h-8 shrink-0 items-center bg-muted/40 text-xs select-none",
           isMac ? "pl-20" : "pl-2"
         )}
       >
         <div className="flex items-center gap-1">
-          <SparklesIcon aria-hidden className="size-4 shrink-0 text-primary" />
+          <TitleBarZone items={bar.zones.start} ctx={itemCtx} />
           <PluginExtensionSlot
             point="toolbar.left"
             className="flex items-center gap-1 empty:hidden"
@@ -756,6 +745,9 @@ export function TitleBar() {
                   <DropdownMenuItem onSelect={handleGo("go-workflows")}>
                     {tMenu("go.workflows")}
                     <DropdownMenuShortcut>{tMenu("shortcut.cmdOrCtrl2")}</DropdownMenuShortcut>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={handleGo("go-sites")}>
+                    {tMenu("go.sites")}
                   </DropdownMenuItem>
                   <DropdownMenuItem onSelect={handleGo("go-twin")}>
                     {tMenu("go.twin")}
@@ -1067,6 +1059,7 @@ export function TitleBar() {
                       {tMenu("go.workflows")}
                       <MenubarShortcut>{tMenu("shortcut.cmdOrCtrl2")}</MenubarShortcut>
                     </MenubarItem>
+                    <MenubarItem onSelect={handleGo("go-sites")}>{tMenu("go.sites")}</MenubarItem>
                     <MenubarItem onSelect={handleGo("go-twin")}>
                       {tMenu("go.twin")}
                       <MenubarShortcut>{tMenu("shortcut.cmdOrCtrl3")}</MenubarShortcut>
@@ -1225,23 +1218,7 @@ export function TitleBar() {
           data-tauri-drag-region
           className="flex flex-1 items-center justify-center gap-1 px-2 min-w-0"
         >
-          <TitleBarNavArrows className="shrink-0" />
-          <div className="flex min-w-0 max-w-[480px] flex-1 items-center justify-center">
-            <TitleBarSearchPill
-              appName={appName}
-              separator={t("separator")}
-              placeholder={t("searchPlaceholder")}
-              kbdHint={t("kbdHint")}
-              onClick={handleCommandPalette}
-            />
-            <TitleBarCommandCenterMenu
-              className="hidden lg:inline-flex"
-              recentSessions={recentSessions}
-              onCommandPalette={handleCommandPalette}
-              onOpenRecentSession={(id) => handleOpenRecentSession(id)()}
-              onGo={(id) => goAction(router, id)}
-            />
-          </div>
+          <TitleBarZone items={bar.zones.center} ctx={itemCtx} />
           <PluginExtensionSlot
             point="toolbar.center"
             className="ml-2 flex items-center gap-1 empty:hidden"
@@ -1253,7 +1230,7 @@ export function TitleBar() {
           className="flex items-center gap-1 px-1 empty:hidden"
         />
 
-        <TitleBarLayoutControls className="px-1" />
+        <TitleBarZone items={bar.zones.end} ctx={itemCtx} />
 
         {!isMac ? (
           <div className="flex items-center">
@@ -1282,9 +1259,11 @@ export function TitleBar() {
           <div data-tauri-drag-region className="w-2" />
         )}
 
-        {/* Right-click system menu (Win/Linux). Anchored to the click point via
-          a 0x0 invisible trigger; opening it sets the coords. */}
-        {systemMenu && !isMac && (
+        {/* Right-click menu. Anchored to the click point via a 0x0 invisible
+          trigger; opening it sets the coords. The window commands are
+          Win/Linux-only (macOS has the traffic lights); "Customize layout" is
+          on every platform, mirroring the status bar's own context menu. */}
+        {systemMenu && (
           <DropdownMenu open onOpenChange={(open) => !open && setSystemMenu(null)}>
             <DropdownMenuTrigger
               data-testid="title-bar-system-menu-trigger"
@@ -1299,91 +1278,62 @@ export function TitleBar() {
               aria-hidden
             />
             <DropdownMenuContent align="start" sideOffset={0} className={MENU_CONTENT_PERF}>
+              {!isMac && (
+                <>
+                  <DropdownMenuItem
+                    disabled={!maximized}
+                    onSelect={async () => {
+                      setSystemMenu(null)
+                      if (maximized) await handleMax()
+                    }}
+                  >
+                    {tMenu("window.restore")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={async () => {
+                      setSystemMenu(null)
+                      await handleMin()
+                    }}
+                  >
+                    {tMenu("window.minimize")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={async () => {
+                      setSystemMenu(null)
+                      if (!maximized) await handleMax()
+                    }}
+                    disabled={maximized}
+                  >
+                    {tMenu("window.maximize")}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onSelect={async () => {
+                      setSystemMenu(null)
+                      await handleClose()
+                    }}
+                  >
+                    {tMenu("window.close")}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
+              )}
               <DropdownMenuItem
-                disabled={!maximized}
-                onSelect={async () => {
+                data-testid="title-bar-customize"
+                onSelect={() => {
                   setSystemMenu(null)
-                  if (maximized) await handleMax()
+                  setCustomizeOpen(true)
                 }}
               >
-                {tMenu("window.restore")}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onSelect={async () => {
-                  setSystemMenu(null)
-                  await handleMin()
-                }}
-              >
-                {tMenu("window.minimize")}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onSelect={async () => {
-                  setSystemMenu(null)
-                  if (!maximized) await handleMax()
-                }}
-                disabled={maximized}
-              >
-                {tMenu("window.maximize")}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onSelect={async () => {
-                  setSystemMenu(null)
-                  await handleClose()
-                }}
-              >
-                {tMenu("window.close")}
+                {tShellLayout("customizeTitleBar")}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         )}
       </header>
       <KeyboardShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+      <ShellLayoutDialog open={customizeOpen} onOpenChange={setCustomizeOpen} surface="title" />
     </>
-  )
-}
-
-function QuickSearchPill({
-  title,
-  placeholder,
-  kbdHint,
-  isStreaming,
-  onClick,
-}: {
-  title: string
-  placeholder: string
-  kbdHint: string
-  isStreaming: boolean
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      data-testid="title-bar-search-pill"
-      aria-label={placeholder}
-      className={cn(
-        "group flex h-6 min-w-[180px] max-w-[480px] flex-1 items-center gap-2",
-        "rounded-md border border-border bg-background/60 px-2 text-xs",
-        "text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
-      )}
-    >
-      {isStreaming ? (
-        <span
-          aria-hidden
-          data-testid="title-bar-streaming-dot"
-          className="size-1.5 shrink-0 animate-pulse rounded-full bg-primary"
-        />
-      ) : (
-        <SearchIcon aria-hidden className="size-3 shrink-0" />
-      )}
-      <span className="truncate font-medium tracking-tight" data-testid="title-bar-title">
-        {title}
-      </span>
-      <span aria-hidden className="ml-auto hidden text-[10px] opacity-60 sm:inline">
-        {kbdHint}
-      </span>
-    </button>
   )
 }
 

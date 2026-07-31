@@ -16,7 +16,10 @@ import {
   CompassIcon,
   GaugeIcon,
   GitBranchIcon,
+  GlobeIcon,
   InboxIcon,
+  ListChecksIcon,
+  LayoutTemplateIcon,
   PawPrintIcon,
   PlugIcon,
   ScrollTextIcon,
@@ -31,6 +34,8 @@ import { arrayMove } from "@dnd-kit/sortable"
 
 import type { Platform } from "@/hooks/use-platform"
 import { partitionByLayout } from "@/lib/shell/layout-partition"
+import type { RuntimeSnapshot } from "@/lib/runtime/operation-availability"
+import { getSurfaceContract, shouldShowSurface } from "@/lib/runtime/surface-contract"
 import { SIDEBAR_NAV_META, type SidebarLayout, type SidebarNavMeta } from "@/types/shell/sidebar"
 
 /** id → rail icon. Must cover every id in `SIDEBAR_NAV_META`. */
@@ -39,13 +44,16 @@ export const SIDEBAR_NAV_ICONS: Record<string, LucideIcon> = {
   inbox: InboxIcon,
   twin: BotIcon,
   discover: CompassIcon,
+  templates: LayoutTemplateIcon,
   skills: SparklesIcon,
   plugins: PlugIcon,
   "agent-teams": Users2Icon,
   scheduler: CalendarClockIcon,
   goals: TargetIcon,
   pet: PawPrintIcon,
+  browser: GlobeIcon,
   "source-control": GitBranchIcon,
+  "agent-runs": ListChecksIcon,
   memory: BrainIcon,
   observability: GaugeIcon,
   eval: ClipboardCheckIcon,
@@ -61,12 +69,23 @@ export interface SidebarCatalogItem extends SidebarNavMeta {
 
 /**
  * The customizable nav catalog with icons attached, filtered for the platform.
- * On mobile, `desktopOnly` items are dropped so they never surface in the rail
- * or the customizer. Falls back to a question-mark-free no-op icon only if a
- * mapping is missing (shouldn't happen — covered by tests).
+ * Off the desktop shell (mobile AND plain/cloud-companion browsers — ADR-0059
+ * F5), `desktopOnly` items are dropped so they never surface in the rail or
+ * the customizer as dead ends. Falls back to a question-mark-free no-op icon
+ * only if a mapping is missing (shouldn't happen — covered by tests).
  */
-export function getSidebarCatalog(platform: Platform): SidebarCatalogItem[] {
-  return SIDEBAR_NAV_META.filter((m) => !(platform === "mobile" && m.desktopOnly)).map((m) => ({
+export function getSidebarCatalog(
+  platform: Platform,
+  runtimeSnapshot?: RuntimeSnapshot
+): SidebarCatalogItem[] {
+  return SIDEBAR_NAV_META.filter((meta) => {
+    if (platform === "tauri") return true
+    if (runtimeSnapshot) {
+      const contract = getSurfaceContract(meta.id)
+      return contract ? shouldShowSurface(contract, runtimeSnapshot) : false
+    }
+    return !meta.desktopOnly
+  }).map((m) => ({
     ...m,
     Icon: SIDEBAR_NAV_ICONS[m.id] ?? ActivityIcon,
   }))

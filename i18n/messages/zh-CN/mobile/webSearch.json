@@ -1,0 +1,20 @@
+{
+  "backAria": "返回个人",
+  "enableProviderAria": "启用 {name}",
+  "enabled": "启用网络搜索",
+  "enabledHelp": "允许助手从网络获取最新结果。",
+  "fallback": "回退到免费搜索",
+  "fallbackHelp": "首选提供商失败时，改用内置的免费提供商重试。",
+  "maxResults": "每次搜索结果数",
+  "maxResultsHelp": "每次搜索调用拉取的结果数量。",
+  "provider": "首选提供商",
+  "providerHelp": "优先使用哪个搜索引擎。",
+  "providerKeyAria": "{name} API 密钥",
+  "providersDescription": "仅独立模式——密钥保存在本机，用于应用内网络搜索。",
+  "providersTitle": "搜索提供商密钥",
+  "resultsCount": "{count, plural, other {# 条结果}}",
+  "revealKeyAria": "显示或隐藏 {name} API 密钥",
+  "sectionDescription": "提供商 API 密钥在桌面端配置。",
+  "sectionTitle": "网络搜索",
+  "title": "网络搜索"
+}

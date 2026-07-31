@@ -29,6 +29,7 @@ const mockDataCtx = {
   resolveArray: <T,>(value: T[] | { path: string }, d: T[] = []) =>
     Array.isArray(value) ? value : d,
 }
+const mockActionsRenderChild = jest.fn((_id: string): React.ReactNode => null)
 jest.mock("@/hooks/a2ui", () => ({
   useA2UIContext: () => ({ ...mockDataCtx }),
   useA2UIData: () => mockDataCtx,
@@ -39,7 +40,7 @@ jest.mock("@/hooks/a2ui", () => ({
     setDataValue: jest.fn(),
     getBindingPath: jest.fn(),
     getComponent: jest.fn(),
-    renderChild: jest.fn(),
+    renderChild: mockActionsRenderChild,
   }),
 }))
 
@@ -48,6 +49,35 @@ jest.mock("@/lib/a2ui/data-model", () => ({
   resolveArrayOrPath: (value: unknown) => {
     if (Array.isArray(value)) return value
     return []
+  },
+}))
+
+// Deterministic virtualizer window (mirrors the log-virtualized-list test).
+jest.mock("@tanstack/react-virtual", () => ({
+  useVirtualizer: ({
+    count,
+    estimateSize,
+    getScrollElement,
+  }: {
+    count: number
+    estimateSize: () => number
+    getScrollElement: () => HTMLElement | null
+  }) => {
+    estimateSize?.()
+    getScrollElement?.()
+    const windowed = Array.from({ length: Math.min(count, 5) }, (_, i) => ({
+      index: i,
+      start: i * 40,
+      size: 40,
+      end: (i + 1) * 40,
+      key: i,
+      lane: 0,
+    }))
+    return {
+      getVirtualItems: () => windowed,
+      getTotalSize: () => count * 40,
+      measureElement: jest.fn(),
+    }
   },
 }))
 
@@ -176,6 +206,82 @@ describe("A2UIList", () => {
       const { container } = render(<A2UIList {...createProps(component)} />)
       const firstItem = container.querySelector("li")
       expect(firstItem).toHaveClass("bg-accent/50")
+    })
+  })
+
+  describe("virtualization for large lists", () => {
+    const bigItems = Array.from({ length: 150 }, (_, i) => `Row ${i}`)
+
+    it("renders inline (no virtual container) below the threshold", () => {
+      const component: A2UIListComponent = {
+        id: "small",
+        component: "List",
+        items: ["a", "b", "c"],
+      }
+      render(<A2UIList {...createProps(component)} />)
+      expect(screen.queryByTestId("a2ui-list-virtualized")).not.toBeInTheDocument()
+      expect(screen.getByText("a")).toBeInTheDocument()
+    })
+
+    it("switches to a windowed container above the threshold", () => {
+      const component: A2UIListComponent = {
+        id: "big",
+        component: "List",
+        items: bigItems,
+      }
+      render(<A2UIList {...createProps(component)} />)
+
+      // Virtualized container is present and only the windowed subset mounts.
+      expect(screen.getByTestId("a2ui-list-virtualized")).toBeInTheDocument()
+      expect(screen.getByText("Row 0")).toBeInTheDocument()
+      expect(screen.getByText("Row 4")).toBeInTheDocument()
+      // Far-down rows are NOT in the DOM (windowed out).
+      expect(screen.queryByText("Row 100")).not.toBeInTheDocument()
+      expect(screen.queryByText("Row 149")).not.toBeInTheDocument()
+    })
+
+    it("fires itemClickAction from a virtualized row", () => {
+      const onAction = jest.fn()
+      const component: A2UIListComponent = {
+        id: "big-click",
+        component: "List",
+        items: bigItems,
+        itemClickAction: "select",
+      }
+      render(<A2UIList {...createProps(component)} onAction={onAction} />)
+
+      fireEvent.click(screen.getByText("Row 2"))
+      expect(onAction).toHaveBeenCalledWith("select", { item: "Row 2", index: 2 })
+    })
+
+    it("renders the children template per windowed row in children mode", () => {
+      const component: A2UIListComponent = {
+        id: "big-children",
+        component: "List",
+        items: bigItems,
+        children: ["child-1"],
+      }
+      render(<A2UIList {...createProps(component)} />)
+
+      // One A2UIChildRenderer per windowed row (5), not per full dataset (150).
+      expect(screen.getByTestId("a2ui-list-virtualized")).toBeInTheDocument()
+      expect(screen.getAllByTestId("children")).toHaveLength(5)
+    })
+
+    it("uses the item template per windowed row in template mode", () => {
+      const component: A2UIListComponent = {
+        id: "big-template",
+        component: "List",
+        items: bigItems,
+        template: { itemId: "tpl-item", dataPath: "" },
+      }
+      render(<A2UIList {...createProps(component)} />)
+
+      // The template body resolves through the surface renderChild once per
+      // windowed row (5), not once per full dataset (150).
+      expect(screen.getByTestId("a2ui-list-virtualized")).toBeInTheDocument()
+      expect(mockActionsRenderChild).toHaveBeenCalledWith("tpl-item")
+      expect(mockActionsRenderChild).toHaveBeenCalledTimes(5)
     })
   })
 })

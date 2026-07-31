@@ -16,6 +16,8 @@
  * Frontmatter:
  *   description: string        (help shown to the dispatcher)
  *   model:       string?       (sonnet/opus/haiku or full id)
+ *   provider:    string?       (anthropic/openai/deepseek/… — run on a different
+ *                               provider than the session; pairs with `model`)
  *   tools | allowed-tools:     string[] | comma-string  (allowlist)
  *   disallowedTools | disallowed-tools: string[] | comma-string
  * Body = the subagent's system prompt.
@@ -36,6 +38,28 @@ export interface MarkdownAgentFile {
   id: string
   /** Raw file contents (frontmatter + body). */
   content: string
+}
+
+export interface ParsedMarkdownAgent {
+  id: string
+  def: AgentDefinition
+  /** Frontmatter fields understood by Claude Code but not by AgentDefinition. */
+  unsupportedFields: string[]
+}
+
+/** Serialize the portable Claude Code plugin-agent field set. */
+export function serializeMarkdownAgent(id: string, def: AgentDefinition): string {
+  const data: Record<string, unknown> = {
+    name: id,
+    description: def.description,
+  }
+  if (def.model) data.model = def.model
+  if (def.effort) data.effort = def.effort
+  if (def.maxTurns) data.maxTurns = def.maxTurns
+  if (def.tools?.length) data.tools = [...def.tools]
+  if (def.disallowedTools?.length) data.disallowedTools = [...def.disallowedTools]
+  const body = def.prompt.endsWith("\n") ? def.prompt : `${def.prompt}\n`
+  return matter.stringify(body, data)
 }
 
 function normalizeToolList(value: unknown): string[] | undefined {
@@ -60,7 +84,7 @@ function normalizeToolList(value: unknown): string[] | undefined {
 export function parseMarkdownAgent(
   id: string,
   content: string
-): { id: string; def: AgentDefinition } | { id: string; error: string } {
+): ParsedMarkdownAgent | { id: string; error: string } {
   let data: Record<string, unknown>
   let body: string
   try {
@@ -84,13 +108,84 @@ export function parseMarkdownAgent(
 
   if (typeof data.model === "string" && data.model.trim()) def.model = data.model.trim()
 
+  // Provider override — lets a `.cognia/agents/*.md` run on a different provider
+  // than the active session (e.g. `provider: anthropic` + `model: sonnet`).
+  if (typeof data.provider === "string" && data.provider.trim()) {
+    def.provider = data.provider.trim()
+  }
+
   const tools = normalizeToolList(data.tools ?? data["allowed-tools"])
   if (tools) def.tools = tools
 
   const disallowed = normalizeToolList(data.disallowedTools ?? data["disallowed-tools"])
   if (disallowed) def.disallowedTools = disallowed
 
-  return { id, def }
+  const maxTurns = data.maxTurns ?? data["max-turns"]
+  if (typeof maxTurns === "number" && Number.isInteger(maxTurns) && maxTurns > 0) {
+    def.maxTurns = maxTurns
+  } else if (
+    typeof maxTurns === "string" &&
+    /^\d+$/.test(maxTurns.trim()) &&
+    Number(maxTurns) > 0
+  ) {
+    def.maxTurns = Number(maxTurns)
+  }
+
+  const effort = data.effort
+  if (
+    effort === "low" ||
+    effort === "medium" ||
+    effort === "high" ||
+    effort === "xhigh" ||
+    effort === "max"
+  ) {
+    def.effort = effort
+  }
+
+  const externalPreset = data.externalPresetId ?? data["external-preset-id"]
+  if (typeof externalPreset === "string" && externalPreset.trim()) {
+    def.externalPresetId = externalPreset.trim()
+  }
+
+  // MCP servers to forward into an external-preset-backed subagent's ACP session.
+  const mcpServerIds = normalizeToolList(data.mcpServerIds ?? data["mcp-server-ids"])
+  if (mcpServerIds) def.mcpServerIds = mcpServerIds
+
+  // Nested dispatch opt-in (depth-N subagents).
+  const allowNesting = data.allowNesting ?? data["allow-nesting"]
+  if (allowNesting === true || allowNesting === "true") def.allowNesting = true
+
+  const maxDepth = data.maxDepth ?? data["max-depth"]
+  if (typeof maxDepth === "number" && Number.isFinite(maxDepth)) {
+    def.maxDepth = maxDepth
+  } else if (typeof maxDepth === "string" && maxDepth.trim() && !Number.isNaN(Number(maxDepth))) {
+    def.maxDepth = Number(maxDepth)
+  }
+
+  // Visibility flags (OpenCode parity): `hidden` keeps the agent dispatchable
+  // but out of pickers; `disabled` (alias `disable`) turns it fully off.
+  const hidden = data.hidden
+  if (hidden === true || hidden === "true") def.hidden = true
+  const disabled = data.disabled ?? data.disable
+  if (disabled === true || disabled === "true") def.disabled = true
+
+  const unsupportedFields = [
+    "skills",
+    "memory",
+    "background",
+    "isolation",
+    "hooks",
+    "mcpServers",
+    "permissionMode",
+  ].filter((key) => {
+    const value = data[key]
+    if (value === undefined || value === null || value === false) return false
+    if (typeof value === "string") return value.trim().length > 0
+    if (Array.isArray(value)) return value.length > 0
+    return true
+  })
+  const declaredName = typeof data.name === "string" ? data.name.trim() : ""
+  return { id: declaredName || id, def, unsupportedFields }
 }
 
 /**
@@ -106,6 +201,11 @@ export function buildMarkdownAgents(files: MarkdownAgentFile[]): MarkdownAgentRe
     if ("error" in result) {
       warnings.push(`agent "${file.id}": ${result.error}`)
       continue
+    }
+    if (result.unsupportedFields.length > 0) {
+      warnings.push(
+        `agent "${result.id}": unsupported frontmatter fields: ${result.unsupportedFields.join(", ")}`
+      )
     }
     agents[result.id] = result.def
   }

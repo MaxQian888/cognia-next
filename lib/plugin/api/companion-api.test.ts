@@ -52,7 +52,7 @@ describe("createCompanionAPI", () => {
   beforeEach(() => {
     jest.clearAllMocks()
     resetPermissionGuard()
-    guard = getPermissionGuard()
+    guard = getPermissionGuard({ confirmDangerousByDefault: false })
   })
 
   it("gates each method behind its tier permission", () => {

@@ -1,0 +1,39 @@
+{
+  "backAria": "Back to Me",
+  "connectionType": {
+    "cellular": "Cellular",
+    "none": "No connection",
+    "unknown": "Unknown",
+    "wifi": "Wi-Fi"
+  },
+  "connectivity": {
+    "description": "Live network status reported by this device.",
+    "offline": "Offline",
+    "online": "Online",
+    "statusLabel": "Connection",
+    "title": "Connectivity",
+    "typeLabel": "Connection type"
+  },
+  "intro": "This device's current connectivity. Proxy and connection settings are configured on the paired desktop.",
+  "manageOnDesktop": "Proxy mode, host/port, authentication and bypass rules live on the paired desktop. Configure and test them there.",
+  "proxy": {
+    "description": "The HTTP/SOCKS proxy used for outbound requests is managed on the desktop.",
+    "title": "Proxy"
+  },
+  "rendezvous": {
+    "description": "How this device reaches the paired host when it is not on the same network. Configured on the host and mirrored here.",
+    "provider": {
+      "cloudflare-calls": "Credentials issued on demand by Cloudflare Calls.",
+      "none": "No credential provider — the static list above is all that is available.",
+      "twilio": "Credentials issued on demand by Twilio."
+    },
+    "serverCount": "{count, plural, =0 {none} one {# server} other {# servers}}",
+    "signalingLabel": "Signaling server",
+    "sourceBuiltIn": "Built-in",
+    "sourceHost": "From host",
+    "stunLabel": "STUN",
+    "title": "Direct connection",
+    "turnLabel": "TURN relays"
+  },
+  "title": "Network"
+}

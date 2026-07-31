@@ -32,10 +32,8 @@ export async function append(entry: InboxTelemetryDraft): Promise<InboxTelemetry
     conversationKey: entry.conversationKey,
     fields: entry.fields,
   }
-  await db.transaction("rw", db.inboxTelemetryEvents, async () => {
-    await db.inboxTelemetryEvents.add(row)
-    await pruneOldest(TELEMETRY_CAP)
-  })
+  await db.inboxTelemetryEvents.add(row)
+  await pruneOldest(TELEMETRY_CAP, db.inboxTelemetryEvents)
   return row
 }
 
@@ -63,16 +61,16 @@ export async function listRecent(
 
 /**
  * Prune oldest rows so the table holds exactly `keep` entries.
- * Caller must wrap in a `db.transaction("rw", ...)`.
+ * Safe to call after an append; concurrent callers converge on the same cap
+ * because deleting an already-deleted primary key is a no-op.
  */
-async function pruneOldest(keep: number): Promise<void> {
-  const db = getDb()
-  const total = await db.inboxTelemetryEvents.count()
+async function pruneOldest(keep: number, table = getDb().inboxTelemetryEvents): Promise<void> {
+  const total = await table.count()
   if (total <= keep) return
   const overflow = total - keep
-  const oldest = await db.inboxTelemetryEvents.orderBy("at").limit(overflow).primaryKeys()
+  const oldest = await table.orderBy("at").limit(overflow).primaryKeys()
   if (oldest.length > 0) {
-    await db.inboxTelemetryEvents.bulkDelete(oldest as string[])
+    await table.bulkDelete(oldest as string[])
   }
 }
 

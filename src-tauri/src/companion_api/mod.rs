@@ -2,7 +2,7 @@
 //!
 //! This module implements the server-side of the cognia mobile companion
 //! pairing flow (M2.3).  It exposes an axum HTTP server on a configurable
-//! port (default 7890) with two endpoints:
+//! port (default 27890) with two endpoints:
 //!
 //! - `POST /api/v1/auth/pair/issue` — desktop-only (127.0.0.1 listener when
 //!   `bind_loopback_only = true`); issues a short-lived pair JWT that the QR
@@ -28,39 +28,60 @@
 //! layer: the handler emits `companion://device-paired` and the TS side calls
 //! `addPairedDevice` from `lib/db/paired-devices.ts`.
 
+pub mod a2a;
+pub mod acp;
+pub mod admin_lease;
+pub mod audit;
 pub mod auth;
+pub mod bridge_transport;
+pub mod browser_gateway;
+pub mod command_manifest;
 pub mod control_allow_list;
 pub mod data_plane;
 pub mod deny_list;
+pub mod deployment;
 pub mod desktop_messages_bridge;
 pub mod desktop_writes_bridge;
+pub mod device_grants;
+pub mod dispatch_host;
 pub mod dispatchers;
 pub mod event_bus;
+pub mod external_bridge;
 pub mod healthz;
-pub mod push_creds;
-pub mod store;
 pub mod idempotency;
 pub mod jwt;
+pub mod lark_entry;
+pub mod locked_use_allow_list;
+pub mod mdns;
+pub mod metrics;
 pub mod middleware;
+pub mod oidc;
+pub mod pair_code_guard;
 pub mod pair_code_lru;
+pub mod pair_flow_test;
 pub mod push;
+pub mod push_creds;
 pub mod rate_limit;
 pub mod redemption_lru;
+pub mod remote_execution;
 pub mod rpc;
 pub mod secret;
+pub mod security_store;
 pub mod server;
-pub mod pair_flow_test;
+pub mod settings_sync_generated;
+pub mod signaling;
+pub mod skill_transactions;
 pub mod spec_parity;
+pub mod store;
 pub mod sync_bridge;
 pub mod sync_registry;
-pub mod mdns;
-pub mod signaling;
 pub mod tls;
 pub mod tunnel;
 pub mod tunnel_config;
+pub mod v2;
 pub mod ws;
+pub mod ws_bridge;
 pub mod ws_terminal;
-pub mod ws_terminal_test;
 
 pub mod commands;
 
@@ -227,6 +248,23 @@ static PRE_AUTH_RATE_LIMITER: once_cell::sync::Lazy<Arc<rate_limit::RateLimiter>
 
 pub fn pre_auth_rate_limiter() -> Arc<rate_limit::RateLimiter> {
     Arc::clone(&PRE_AUTH_RATE_LIMITER)
+}
+
+/// Process-global OIDC authenticator (ADR-0059 cloud/headless Logto mode).
+///
+/// Built once from the environment: `None` unless BOTH `COGNIA_LOGTO_ISSUER`
+/// and `COGNIA_LOGTO_AUDIENCE` are set, so the offline desktop app never
+/// activates OIDC — the companion gateway keeps using the self-issued HS256
+/// device/service tokens. When present, [`middleware::require_device_jwt`]
+/// tries a Logto access token first and falls back to the HS256 path.
+///
+/// Kept process-global (like [`PRE_AUTH_RATE_LIMITER`] / [`TLS_FINGERPRINT`])
+/// so the many `CompanionState` constructors don't have to thread it through.
+static OIDC_AUTHENTICATOR: once_cell::sync::Lazy<Option<Arc<oidc::OidcAuthenticator>>> =
+    once_cell::sync::Lazy::new(oidc::OidcAuthenticator::from_env);
+
+pub fn oidc_authenticator() -> Option<Arc<oidc::OidcAuthenticator>> {
+    OIDC_AUTHENTICATOR.clone()
 }
 
 // ---------------------------------------------------------------------------
@@ -518,7 +556,10 @@ mod tests {
         let shared = test_shared_state();
         let (_tmp, tls_mat) = test_tls();
 
-        let _ = server_state.start(0, false, tls_mat, shared).await.expect("start");
+        let _ = server_state
+            .start(0, false, tls_mat, shared)
+            .await
+            .expect("start");
         assert_eq!(server_state.bind_mode(), Some(BindMode::Lan));
 
         server_state.stop();
@@ -533,8 +574,14 @@ mod tests {
         let (_tmp1, tls1) = test_tls();
         let (_tmp2, tls2) = test_tls();
 
-        let port1 = server_state.start(0, true, tls1, shared1).await.expect("start");
-        let port2 = server_state.start(0, true, tls2, shared2).await.expect("second start");
+        let port1 = server_state
+            .start(0, true, tls1, shared1)
+            .await
+            .expect("start");
+        let port2 = server_state
+            .start(0, true, tls2, shared2)
+            .await
+            .expect("second start");
         assert_eq!(port1, port2, "second start must return same port");
 
         server_state.stop();

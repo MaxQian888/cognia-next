@@ -1,4 +1,10 @@
-import { breakdownBy, distinctValues } from "./breakdown"
+import {
+  breakdownBy,
+  breakdownValue,
+  distinctValues,
+  topByMetric,
+  type BreakdownRow,
+} from "./breakdown"
 import { makeSpan } from "./fixtures"
 
 describe("breakdown", () => {
@@ -64,6 +70,56 @@ describe("breakdown", () => {
     })
     it("handles empty input", () => {
       expect(distinctValues([], "model")).toEqual([])
+    })
+  })
+
+  describe("breakdownValue / topByMetric", () => {
+    const rows: BreakdownRow[] = [
+      {
+        key: "a",
+        spans: 1,
+        costUsd: 9,
+        inputTokens: 0,
+        outputTokens: 0,
+        errors: 5,
+        avgLatencyMs: 0,
+      },
+      {
+        key: "b",
+        spans: 3,
+        costUsd: 2,
+        inputTokens: 0,
+        outputTokens: 0,
+        errors: 0,
+        avgLatencyMs: 0,
+      },
+      {
+        key: "c",
+        spans: 2,
+        costUsd: 5,
+        inputTokens: 0,
+        outputTokens: 0,
+        errors: 1,
+        avgLatencyMs: 0,
+      },
+    ]
+
+    it("reads the selected measure off a row", () => {
+      expect(breakdownValue(rows[0], "spans")).toBe(1)
+      expect(breakdownValue(rows[0], "cost")).toBe(9)
+      expect(breakdownValue(rows[0], "errors")).toBe(5)
+    })
+
+    it("re-sorts by the chosen measure (desc) and caps to N", () => {
+      expect(topByMetric(rows, "spans", 2).map((r) => r.key)).toEqual(["b", "c"])
+      expect(topByMetric(rows, "cost", 2).map((r) => r.key)).toEqual(["a", "c"])
+      expect(topByMetric(rows, "errors", 1).map((r) => r.key)).toEqual(["a"])
+    })
+
+    it("does not mutate the input array", () => {
+      const before = rows.map((r) => r.key)
+      topByMetric(rows, "cost", 3)
+      expect(rows.map((r) => r.key)).toEqual(before)
     })
   })
 })

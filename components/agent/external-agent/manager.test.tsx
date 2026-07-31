@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import React from "react"
-import { render, screen, fireEvent, act } from "@testing-library/react"
+import { render, screen, fireEvent, act, within } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 
 import en from "@/i18n/messages/en.json"
@@ -10,6 +10,12 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import type { AcpPermissionRequest, ExternalAgentInstance } from "@/types/agent/external-agent"
 
 import { ExternalAgentManager } from "./manager"
+import { registerPreset, __resetDynamicPresetsForTesting } from "@/lib/ai/agent/external/presets"
+import {
+  registerPluginProtocolAdapter,
+  __resetPluginProtocolAdaptersForTesting,
+} from "@/lib/ai/agent/external/protocol-adapter"
+import type { ExternalAgentProtocol } from "@/types/agent/external-agent"
 
 const mockUseExternalAgent = jest.fn()
 
@@ -161,6 +167,80 @@ describe("ExternalAgentManager", () => {
     expect(screen.getByText(/Protocol\/Transport: ACP via stdio/)).toBeInTheDocument()
   })
 
+  it("resolves every runtime-diagnostics label to its value (guards ICU param/placeholder drift)", () => {
+    // Regression guard: each diagnostics message must declare the exact placeholder
+    // the component passes. A drift (e.g. `{value}` vs `{name}`) makes next-intl throw
+    // and fall back to rendering the raw key path — silently breaking this whole panel.
+    const agent = makeAgent()
+    mockUseExternalAgent.mockReturnValue({
+      ...baseHookValue(),
+      agents: [agent],
+      activeAgentId: "agent-1",
+      activeAgentValidity: {
+        executable: true,
+        checkedAt: new Date("2026-05-01T00:00:00Z"),
+        source: "execution",
+        contractVersion: 3,
+        lifecycleStage: "execution",
+        blockedStage: "recovery",
+        branchOutcome: "fallback",
+        canonicalReasonCode: "extension_unsupported",
+        canonicalReason: "Listing unsupported",
+        healthStatus: "healthy",
+        sessionExtensions: {},
+        negotiation: {
+          protocol: "acp",
+          authRequired: true,
+          authMethods: [{ id: "oauth" }],
+        },
+        ecosystem: {
+          adapterName: "ClaudeAdapter",
+          surfaceName: "Cognia Desktop",
+          supportTier: "guided",
+          prerequisiteStatus: "action-required",
+          recommendedActions: [
+            { id: "installCommand", params: { command: "claude" } },
+            "Install the CLI",
+          ],
+        },
+        correlation: { sessionId: "sess-abc", turnId: "turn-9", observedAt: new Date() },
+        recoveryHints: ["Restart the agent", "Re-run health check"],
+      },
+    })
+    render(wrap(<ExternalAgentManager />))
+    expect(screen.getByText(/Adapter: ClaudeAdapter/)).toBeInTheDocument()
+    expect(screen.getByText(/Surface: Cognia Desktop/)).toBeInTheDocument()
+    expect(screen.getByText(/Support tier: guided/)).toBeInTheDocument()
+    expect(screen.getByText(/Prerequisite status: action-required/)).toBeInTheDocument()
+    expect(screen.getByText(/Contract version: 3/)).toBeInTheDocument()
+    expect(screen.getByText(/Lifecycle stage: execution/)).toBeInTheDocument()
+    expect(screen.getByText(/Blocked stage: recovery/)).toBeInTheDocument()
+    expect(screen.getByText(/Branch outcome: fallback/)).toBeInTheDocument()
+    // The reason CODE is a machine identifier; the panel resolves it through the
+    // shared diagnostic vocabulary instead of printing `extension_unsupported`
+    // at the user — this was the only place in the app that leaked a raw
+    // snake_case token into the UI.
+    expect(
+      screen.getByText(/Canonical reason: Not supported by this agent — Listing unsupported/)
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/extension_unsupported/)).not.toBeInTheDocument()
+    // A `{ id }` entry resolves through the message catalogue; a legacy prose
+    // entry is shown as-is, because there is no key to translate it by.
+    expect(screen.getByText(/Install "claude"/)).toBeInTheDocument()
+    expect(screen.getByText(/Install the CLI/)).toBeInTheDocument()
+    expect(screen.queryByText(/installCommand/)).not.toBeInTheDocument()
+    expect(screen.getByText(/Auth methods: oauth/)).toBeInTheDocument()
+    expect(screen.getByText(/Correlation — session sess-abc, turn turn-9/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/Recovery hints: Restart the agent \| Re-run health check/)
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/Recommended actions: Install "claude", .* \| Install the CLI/)
+    ).toBeInTheDocument()
+    // No label may fall back to its raw i18n key path.
+    expect(screen.queryByText(/externalAgent\.manager\.diagnostics\./)).not.toBeInTheDocument()
+  })
+
   it("renders the benchmark adaptation panel when an agent is active", () => {
     const agent = makeAgent()
     mockUseExternalAgent.mockReturnValue({
@@ -179,8 +259,11 @@ describe("ExternalAgentManager", () => {
       ],
     })
     render(wrap(<ExternalAgentManager />))
+    // Benchmark adaptation is a collapsed-by-default section; expand it first.
     expect(screen.getByTestId("external-agent-benchmark-adaptation")).toBeInTheDocument()
+    fireEvent.click(screen.getByText(en.externalAgent.manager.diagnostics.benchmarkAdaptation))
     expect(screen.getByText("ACP validity projection")).toBeInTheDocument()
+    expect(screen.getByText(/Gap: minor/)).toBeInTheDocument()
     expect(screen.getByText(/Evidence: manager\.test\.ts/)).toBeInTheDocument()
   })
 
@@ -381,14 +464,9 @@ describe("ExternalAgentManager", () => {
     expect(disconnect).toHaveBeenCalledWith("agent-1")
   })
 
-  it("removes an agent when the user confirms", async () => {
-    const removeAgent = jest.fn().mockResolvedValue(undefined)
-    const confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(true)
-    const agent = makeAgent()
-    mockUseExternalAgent.mockReturnValue({ ...baseHookValue(), agents: [agent], removeAgent })
-    render(wrap(<ExternalAgentManager />))
-    const buttons = screen.getAllByRole("button")
-    const trashBtn = buttons.find((b) => {
+  /** Click the trash icon on the first agent card. */
+  const clickRemoveIcon = async () => {
+    const trashBtn = screen.getAllByRole("button").find((b) => {
       const svg = b.querySelector("svg")
       return (
         svg !== null &&
@@ -400,30 +478,34 @@ describe("ExternalAgentManager", () => {
     await act(async () => {
       fireEvent.click(trashBtn!)
     })
-    expect(removeAgent).toHaveBeenCalledWith("agent-1")
-    confirmSpy.mockRestore()
-  })
+  }
 
-  it("does not remove an agent when the user cancels the confirm dialog", async () => {
-    const removeAgent = jest.fn()
-    const confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(false)
+  it("removes an agent when the user confirms the alert dialog", async () => {
+    const removeAgent = jest.fn().mockResolvedValue(undefined)
     const agent = makeAgent()
     mockUseExternalAgent.mockReturnValue({ ...baseHookValue(), agents: [agent], removeAgent })
     render(wrap(<ExternalAgentManager />))
-    const buttons = screen.getAllByRole("button")
-    const trashBtn = buttons.find((b) => {
-      const svg = b.querySelector("svg")
-      return (
-        svg !== null &&
-        svg.classList.contains("text-muted-foreground") &&
-        b.classList.contains("h-7")
-      )
-    })
+    await clickRemoveIcon()
+    // Removal now goes through the app's AlertDialog, not `window.confirm`.
+    const dialog = await screen.findByRole("alertdialog")
+    expect(removeAgent).not.toHaveBeenCalled()
     await act(async () => {
-      fireEvent.click(trashBtn!)
+      fireEvent.click(within(dialog).getByRole("button", { name: en.common.remove }))
+    })
+    expect(removeAgent).toHaveBeenCalledWith("agent-1")
+  })
+
+  it("does not remove an agent when the alert dialog is cancelled", async () => {
+    const removeAgent = jest.fn()
+    const agent = makeAgent()
+    mockUseExternalAgent.mockReturnValue({ ...baseHookValue(), agents: [agent], removeAgent })
+    render(wrap(<ExternalAgentManager />))
+    await clickRemoveIcon()
+    const dialog = await screen.findByRole("alertdialog")
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: en.common.cancel }))
     })
     expect(removeAgent).not.toHaveBeenCalled()
-    confirmSpy.mockRestore()
   })
 
   it("denies a permission when the deny button is clicked", async () => {
@@ -504,6 +586,8 @@ describe("ExternalAgentManager", () => {
       ],
     })
     render(wrap(<ExternalAgentManager />))
+    // Expand the collapsed-by-default benchmark section before asserting content.
+    fireEvent.click(screen.getByText(en.externalAgent.manager.diagnostics.benchmarkAdaptation))
     expect(screen.getByText(/We deviate to prevent retry loops/)).toBeInTheDocument()
     expect(screen.getByText(/Review: @security/)).toBeInTheDocument()
   })
@@ -634,6 +718,86 @@ describe("ExternalAgentManager", () => {
     ).toBe(true)
   })
 
+  it("adds an OpenCode auto-spawn agent from the preset (carries metadata)", async () => {
+    const hook = baseHookValue()
+    mockUseExternalAgent.mockReturnValue(hook)
+    render(wrap(<ExternalAgentManager />))
+    fireEvent.click(screen.getAllByRole("button", { name: /add agent/i })[0])
+
+    // Pick the OpenCode (auto-spawn) preset from the quick-start selector.
+    fireEvent.click(screen.getAllByRole("combobox")[0])
+    fireEvent.click(await screen.findByRole("option", { name: /OpenCode \(auto-spawn\)/i }))
+
+    const submit = screen.getByRole("button", { name: en.externalAgent.settings.addAgent })
+    await act(async () => {
+      fireEvent.click(submit)
+    })
+
+    expect(hook.addAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        protocol: "opencode",
+        process: expect.objectContaining({ command: "opencode" }),
+        metadata: expect.objectContaining({ autoSpawnServer: true }),
+      })
+    )
+  })
+
+  it("exposes A2A as a selectable (no longer 'coming soon') protocol and adds it", async () => {
+    const hook = baseHookValue()
+    mockUseExternalAgent.mockReturnValue(hook)
+    render(wrap(<ExternalAgentManager />))
+    fireEvent.click(screen.getAllByRole("button", { name: /add agent/i })[0])
+
+    // The protocol dropdown is the second combobox (after the preset quick-start).
+    fireEvent.click(screen.getAllByRole("combobox")[1])
+    const a2aOption = await screen.findByRole("option", { name: "A2A" })
+    expect(a2aOption).not.toHaveAttribute("aria-disabled", "true")
+    fireEvent.click(a2aOption)
+
+    // A2A is a remote HTTP protocol → an endpoint field is required.
+    fireEvent.change(screen.getByLabelText(en.externalAgent.manager.name), {
+      target: { value: "My A2A Agent" },
+    })
+    const endpoint = screen.getByLabelText(en.externalAgent.settings.endpoint) as HTMLInputElement
+    endpoint.removeAttribute("required")
+    fireEvent.change(endpoint, { target: { value: "https://agent.example/a2a" } })
+
+    const submit = screen.getByRole("button", { name: en.externalAgent.settings.addAgent })
+    await act(async () => {
+      fireEvent.click(submit)
+    })
+
+    expect(hook.addAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ protocol: "a2a", transport: "http" })
+    )
+  })
+
+  it("requires an endpoint for a remote OpenCode agent (no auto-spawn)", async () => {
+    ;(toast.error as jest.Mock).mockClear()
+    const hook = baseHookValue()
+    mockUseExternalAgent.mockReturnValue(hook)
+    render(wrap(<ExternalAgentManager />))
+    fireEvent.click(screen.getAllByRole("button", { name: /add agent/i })[0])
+
+    fireEvent.click(screen.getAllByRole("combobox")[0])
+    fireEvent.click(await screen.findByRole("option", { name: /OpenCode \(remote server\)/i }))
+
+    // Clear the preset's default endpoint so validation fails.
+    const endpoint = screen.getByLabelText(en.externalAgent.settings.endpoint) as HTMLInputElement
+    fireEvent.change(endpoint, { target: { value: "" } })
+    endpoint.removeAttribute("required")
+
+    const submit = screen.getByRole("button", { name: en.externalAgent.settings.addAgent })
+    await act(async () => {
+      fireEvent.click(submit)
+    })
+    expect(
+      (toast.error as jest.Mock).mock.calls.some(
+        (call) => call[0] === en.externalAgent.settings.endpointRequired
+      )
+    ).toBe(true)
+  })
+
   it("toasts a connection-failed message when connect rejects", async () => {
     ;(toast.error as jest.Mock).mockClear()
     const connect = jest.fn().mockRejectedValue(new Error("nope"))
@@ -664,7 +828,14 @@ describe("ExternalAgentManager", () => {
 
   it("invokes resumeSession when the resume button is clicked", async () => {
     const resumeSession = jest.fn().mockResolvedValue(undefined)
-    const listSessions = jest.fn().mockResolvedValue([{ sessionId: "s1", title: "Saved" }])
+    const listSessions = jest.fn().mockResolvedValue([
+      {
+        sessionId: "s1",
+        title: "Saved",
+        cwd: "/work",
+        additionalDirectories: ["/shared"],
+      },
+    ])
     const agent = makeAgent({
       transport: "http",
       process: undefined,
@@ -696,12 +867,22 @@ describe("ExternalAgentManager", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: en.externalAgent.manager.resume }))
     })
-    expect(resumeSession).toHaveBeenCalledWith("s1")
+    expect(resumeSession).toHaveBeenCalledWith("s1", {
+      cwd: "/work",
+      additionalDirectories: ["/shared"],
+    })
   })
 
   it("invokes forkSession when the fork button is clicked", async () => {
     const forkSession = jest.fn().mockResolvedValue(undefined)
-    const listSessions = jest.fn().mockResolvedValue([{ sessionId: "s2", title: "Forked" }])
+    const listSessions = jest.fn().mockResolvedValue([
+      {
+        sessionId: "s2",
+        title: "Forked",
+        cwd: "/work",
+        additionalDirectories: ["/shared"],
+      },
+    ])
     const agent = makeAgent({
       transport: "http",
       process: undefined,
@@ -733,7 +914,10 @@ describe("ExternalAgentManager", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: en.externalAgent.manager.fork }))
     })
-    expect(forkSession).toHaveBeenCalledWith("s2")
+    expect(forkSession).toHaveBeenCalledWith("s2", {
+      cwd: "/work",
+      additionalDirectories: ["/shared"],
+    })
   })
 
   it("toasts a validation error when the endpoint field is empty for HTTP transport", async () => {
@@ -854,6 +1038,8 @@ describe("ExternalAgentManager", () => {
     fireEvent.change(commandInput, { target: { value: "npx" } })
     const argsInput = screen.getByLabelText(en.externalAgent.settings.arguments) as HTMLInputElement
     fireEvent.change(argsInput, { target: { value: "@anthropics/claude-code --stdio" } })
+    // The retry/error fields live under a collapsed-by-default "Advanced" section.
+    fireEvent.click(screen.getByText(en.externalAgent.manager.advancedOptions))
     const errorPatternsInput = screen.getByLabelText(
       en.externalAgent.settings.retryErrorPatterns
     ) as HTMLTextAreaElement
@@ -870,5 +1056,81 @@ describe("ExternalAgentManager", () => {
     expect(passedConfig.process.command).toBe("npx")
     expect(passedConfig.process.args).toEqual(["@anthropics/claude-code", "--stdio"])
     expect(passedConfig.retryConfig.retryOnErrors).toEqual(["timeout", "EPIPE", "ECONN"])
+  })
+})
+
+describe("ExternalAgentManager — plugin-contributed presets in the Add dialog", () => {
+  afterEach(() => {
+    __resetDynamicPresetsForTesting()
+    __resetPluginProtocolAdaptersForTesting()
+  })
+
+  it("populates the form from a plugin-contributed preset and accepts its registered namespaced protocol", async () => {
+    registerPluginProtocolAdapter("myplugin:demo", (() => ({})) as never, { pluginId: "myplugin" })
+    registerPreset(
+      "myplugin:demo-agent",
+      {
+        name: "Demo Plugin Agent",
+        description: "x",
+        protocol: "myplugin:demo" as ExternalAgentProtocol,
+        transport: "sse",
+        network: { endpoint: "https://demo.example" },
+        defaultPermissionMode: "default",
+        tags: ["x"],
+      },
+      { pluginId: "myplugin" }
+    )
+    const hook = baseHookValue()
+    mockUseExternalAgent.mockReturnValue(hook)
+    render(wrap(<ExternalAgentManager />))
+    fireEvent.click(screen.getAllByRole("button", { name: /add agent/i })[0])
+    fireEvent.click(screen.getAllByRole("combobox")[0])
+    fireEvent.click(await screen.findByRole("option", { name: /Demo Plugin Agent/i }))
+
+    const submit = screen.getByRole("button", { name: en.externalAgent.settings.addAgent })
+    await act(async () => {
+      fireEvent.click(submit)
+    })
+
+    // handlePresetChange populated protocol from the dynamic overlay, the protocol
+    // Select preserved the plugin protocol, and the submit gate accepted it.
+    expect(hook.addAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ protocol: "myplugin:demo", name: "Demo Plugin Agent" })
+    )
+  })
+
+  it("blocks a plugin preset whose adapter is not registered (disabled plugin)", async () => {
+    // Preset exists in the overlay, but NO adapter registered → gate rejects.
+    registerPreset(
+      "ghost:demo-agent",
+      {
+        name: "Ghost Plugin Agent",
+        description: "x",
+        protocol: "ghost:demo" as ExternalAgentProtocol,
+        transport: "sse",
+        network: { endpoint: "https://ghost.example" },
+        defaultPermissionMode: "default",
+        tags: ["x"],
+      },
+      { pluginId: "ghost" }
+    )
+    const hook = baseHookValue()
+    mockUseExternalAgent.mockReturnValue(hook)
+    render(wrap(<ExternalAgentManager />))
+    fireEvent.click(screen.getAllByRole("button", { name: /add agent/i })[0])
+    fireEvent.click(screen.getAllByRole("combobox")[0])
+    fireEvent.click(await screen.findByRole("option", { name: /Ghost Plugin Agent/i }))
+
+    const submit = screen.getByRole("button", { name: en.externalAgent.settings.addAgent })
+    await act(async () => {
+      fireEvent.click(submit)
+    })
+
+    expect(hook.addAgent).not.toHaveBeenCalled()
+    expect(
+      (toast.error as jest.Mock).mock.calls.some(
+        (call) => call[0] === en.externalAgent.manager.unsupportedProtocol
+      )
+    ).toBe(true)
   })
 })

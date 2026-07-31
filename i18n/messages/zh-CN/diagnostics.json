@@ -1,0 +1,398 @@
+{
+  "action": {
+    "copyInstallCommand": "复制安装命令",
+    "copyReport": "复制报告",
+    "dismiss": "忽略",
+    "exportCrashLog": "导出崩溃日志",
+    "jumpToNode": "跳转到节点",
+    "locateBinary": "指定可执行文件",
+    "openExternal": "查看文档",
+    "openSettings": "打开设置",
+    "reauth": "重新登录",
+    "reconnectAdapter": "重新连接",
+    "reconnectExternalAgent": "重连智能体",
+    "reloadApp": "重新加载",
+    "reportIssue": "反馈问题",
+    "resetBoundary": "重试",
+    "restartSidecar": "重启后端",
+    "retry": "重试",
+    "retryFallbackProvider": "换一个服务商重试",
+    "retryWhenOnline": "恢复联网后重试",
+    "shortenInput": "缩短输入内容",
+    "switchToBuiltin": "改用内置智能体",
+    "viewLogs": "查看日志",
+    "waitAndRetry": "{seconds} 秒后重试"
+  },
+  "code": {
+    "aborted": {
+      "hint": "你停止了这次运行——准备好后可再次发送。",
+      "label": "已停止"
+    },
+    "agentConfigurationMissing": {
+      "hint": "该智能体尚未配置启动命令或接口地址——请在设置中完成配置。",
+      "label": "智能体未配置"
+    },
+    "agentDisabled": {
+      "hint": "该外部智能体已被禁用——请在设置中启用，或改用内置智能体。",
+      "label": "智能体已禁用"
+    },
+    "agentNotFound": {
+      "hint": "此会话绑定的外部智能体已不存在——请另选一个。",
+      "label": "未找到智能体"
+    },
+    "agentUnavailable": {
+      "hint": "外部智能体没有响应——请重新连接，或回退到内置智能体。",
+      "label": "智能体不可用"
+    },
+    "brokenPipe": {
+      "hint": "连接意外关闭——请重试该请求。",
+      "label": "管道中断"
+    },
+    "budgetExhausted": {
+      "hint": "本次运行已用尽 token 预算——请在设置中提高上限以继续。",
+      "label": "预算已用尽"
+    },
+    "capabilityUnsatisfied": {
+      "hint": "所选运行时不支持本回合需要的能力——请求未发出。",
+      "label": "能力不可用"
+    },
+    "chunkLoad": {
+      "hint": "Cognia 有新版本可用——请重新加载以获取最新文件。",
+      "label": "应用版本过旧"
+    },
+    "connectionRefused": {
+      "hint": "服务器未接受连接——请确认它正在运行且端口正确。",
+      "label": "连接被拒绝"
+    },
+    "connectionReset": {
+      "hint": "连接在请求过程中断开——请重试；若持续出现，请检查网络或服务器。",
+      "label": "连接被重置"
+    },
+    "contentPolicy": {
+      "hint": "服务商的安全过滤拦截了本次请求——原样重试无效，请调整措辞。",
+      "label": "被内容策略拦截"
+    },
+    "contextWindowExceeded": {
+      "hint": "对话长度超出该模型的上下文窗口——请压缩会话、缩短输入，或换用上下文更大的模型。",
+      "label": "超出上下文窗口"
+    },
+    "dbUnavailable": {
+      "hint": "Cognia 无法打开本地数据库——请重新加载；若仍失败，请导出崩溃日志。",
+      "label": "数据库不可用"
+    },
+    "dbUpgradeBlocked": {
+      "hint": "另一个窗口或标签页仍占用着旧版本数据库——请关闭它，然后重新加载。",
+      "label": "数据库升级被阻塞"
+    },
+    "deadlineExceeded": {
+      "hint": "操作超出了截止时间——请重试，或调高上限。",
+      "label": "超出截止时间"
+    },
+    "degradedFallback": {
+      "hint": "本回合走的是回退路径，而非你配置的运行时。",
+      "label": "以降级模式运行"
+    },
+    "desktopOnlyFeature": {
+      "hint": "该功能需要桌面端应用——浏览器中不可用。",
+      "label": "仅桌面端可用"
+    },
+    "dispatchFailed": {
+      "hint": "请求无法调度——请重试；并检查智能体或服务商配置。",
+      "label": "调度失败"
+    },
+    "dispatchRejectedCycle": {
+      "hint": "子智能体试图回调已经调用过它的一方——请在子智能体配置中打断该环路。",
+      "label": "子智能体循环被拒绝"
+    },
+    "dispatchRejectedDepth": {
+      "hint": "子智能体嵌套超过了配置上限——请压平调用链或提高上限。",
+      "label": "达到嵌套上限"
+    },
+    "dispatchRejectedPolicy": {
+      "hint": "当前智能体模式不允许此次调度——请调整该模式的权限。",
+      "label": "被策略拦截"
+    },
+    "dnsFailure": {
+      "hint": "无法解析主机名——请检查 URL 以及你的网络 / DNS。",
+      "label": "DNS 解析失败"
+    },
+    "documentedOnly": {
+      "hint": "Cognia 无法直接驱动该智能体——请按其官方流程使用，或改用内置智能体。",
+      "label": "仅提供文档"
+    },
+    "eventChannelLost": {
+      "hint": "Cognia 已收不到桌面后端的更新，部分界面会像卡住一样——请重新加载以恢复连接。",
+      "label": "实时更新已断开"
+    },
+    "executionFailed": {
+      "hint": "外部智能体在执行本回合时失败——请重试，或改用内置智能体运行。",
+      "label": "智能体运行失败"
+    },
+    "extensionUnknown": {
+      "hint": "Cognia 尚未确定该智能体是否支持此操作——请重新连接以探测。",
+      "label": "支持情况未知"
+    },
+    "extensionUnsupported": {
+      "hint": "该智能体未实现此操作——请新建会话，而不是恢复原会话。",
+      "label": "该智能体不支持"
+    },
+    "externalAgentNotSelected": {
+      "hint": "本会话尚未选择外部智能体——请选择一个，或切回内置智能体。",
+      "label": "未选择智能体"
+    },
+    "fallbackToBuiltin": {
+      "hint": "外部智能体无法承接本回合，已改由内置智能体运行。",
+      "label": "已由内置智能体运行"
+    },
+    "fetchFailed": {
+      "hint": "请求无法发送——请检查网络连接和接口 URL。",
+      "label": "网络请求失败"
+    },
+    "forbidden": {
+      "hint": "你的账户无权访问该资源或模型。",
+      "label": "无权限"
+    },
+    "frozenModelBinding": {
+      "hint": "本会话已锁定可用模型集合，所请求的模型不在其中。",
+      "label": "此处不允许该模型"
+    },
+    "healthCheckFailed": {
+      "hint": "智能体已启动但健康检查未通过——请查看其日志后重新连接。",
+      "label": "健康检查失败"
+    },
+    "healthProbeFailed": {
+      "hint": "Cognia 无法连上已配对的设备——请确认两端处于同一网络。",
+      "label": "设备不可达"
+    },
+    "hostUnavailable": {
+      "hint": "应当执行本回合的远程主机不可达——请重试，或检查其配置。",
+      "label": "远程主机不可用"
+    },
+    "initializationFailed": {
+      "hint": "智能体进程已启动但始终未完成握手——请检查其启动命令和参数。",
+      "label": "智能体启动失败"
+    },
+    "interrupted": {
+      "hint": "运行在完成前被打断——再次发送即可继续。",
+      "label": "已中断"
+    },
+    "invalidRequest": {
+      "hint": "请求格式有误——请检查参数和模型名称。",
+      "label": "请求无效"
+    },
+    "modelOverloaded": {
+      "hint": "服务方当前过载——请稍后重试。",
+      "label": "模型过载"
+    },
+    "modelRequired": {
+      "hint": "发送前请为该服务商选择一个模型。",
+      "label": "未设置模型"
+    },
+    "networkUnreachable": {
+      "hint": "无法访问该主机——请检查网络连接以及代理或 VPN。",
+      "label": "网络不可达"
+    },
+    "noSessionOpen": {
+      "hint": "当前没有可发送的会话——请新建一个。",
+      "label": "没有打开的会话"
+    },
+    "notFound": {
+      "hint": "该资源或接口不存在——请检查 URL 或 id。",
+      "label": "未找到"
+    },
+    "offline": {
+      "hint": "你当前似乎处于离线状态——恢复联网后 Cognia 会自动重试。",
+      "label": "离线"
+    },
+    "payloadTooLarge": {
+      "hint": "请求超出大小限制——请缩减输入内容。",
+      "label": "请求过大"
+    },
+    "permissionDenied": {
+      "hint": "智能体拒绝了一项未获授权的操作——请调整其权限模式。",
+      "label": "权限被拒绝"
+    },
+    "pluginToolMissing": {
+      "hint": "请求的工具不可用——请启用提供该工具的插件。",
+      "label": "工具不可用"
+    },
+    "prerequisiteMissing": {
+      "hint": "该智能体所需的命令未安装，或不在 PATH 中——请安装它，或让 Cognia 指向已有的可执行文件。",
+      "label": "缺少前置依赖"
+    },
+    "promptBlockedByPlugin": {
+      "hint": "有插件在消息发出前将其拦截——请检查该插件的设置。",
+      "label": "被插件拦截"
+    },
+    "protocolUnsupported": {
+      "hint": "Cognia 与该智能体没有共同的协议——请将其切换为 ACP 并重新保存配置。",
+      "label": "协议不支持"
+    },
+    "providerMisconfigured": {
+      "hint": "该服务商需要进一步配置——请在设置中设置协议和凭据。",
+      "label": "服务商配置不完整"
+    },
+    "proxyApplyFailed": {
+      "hint": "Cognia 未能应用你的代理设置，出站请求可能正在绕过代理。",
+      "label": "代理未生效"
+    },
+    "quotaExceeded": {
+      "hint": "你的套餐配额已用完——请检查账单或用量限制。",
+      "label": "配额已用尽"
+    },
+    "rateLimited": {
+      "hint": "你触发了速率限制——请稍候再试。",
+      "label": "触发限流"
+    },
+    "renderCrash": {
+      "hint": "部分界面崩溃了——请重试；若反复出现，请把报告发给我们。",
+      "label": "应用程序错误"
+    },
+    "routingNoCandidates": {
+      "hint": "路由链中没有服务商可以处理该请求——请检查服务商与模型映射配置。",
+      "label": "没有可用服务商"
+    },
+    "seedFailed": {
+      "hint": "Cognia 未能写入内置技能和角色——部分默认内容会缺失。",
+      "label": "内置内容缺失"
+    },
+    "serverError": {
+      "hint": "服务器处理请求失败——请稍后重试。",
+      "label": "服务器错误"
+    },
+    "serviceUnavailable": {
+      "hint": "服务暂时不可用——请稍后重试。",
+      "label": "服务不可用"
+    },
+    "sessionResolutionFailed": {
+      "hint": "智能体无法恢复这段会话——请新建一个会话。",
+      "label": "会话无法恢复"
+    },
+    "sessionTimeout": {
+      "hint": "模型未在规定时间内响应——请重试，或检查 sidecar 与连接。",
+      "label": "会话超时"
+    },
+    "settingsLoadFailed": {
+      "hint": "Cognia 无法读取你已保存的设置，当前以默认配置运行——数据仍然保存着，只是你的配置全都没有生效。",
+      "label": "设置未加载"
+    },
+    "settingsSaveFailed": {
+      "hint": "该修改没有保存成功——请重试；若持续失败，请查看日志。",
+      "label": "设置未保存"
+    },
+    "sidecarExited": {
+      "hint": "Claude sidecar 在运行中退出——请重试；若反复出现，请重启应用。",
+      "label": "后端已停止"
+    },
+    "sidecarUnreachable": {
+      "hint": "本地智能体后端未在运行——请重启后端后再发送消息。",
+      "label": "后端未运行"
+    },
+    "strictFailure": {
+      "hint": "外部智能体失败，且本会话为严格模式，因此没有在别处重试。",
+      "label": "智能体失败（严格模式）"
+    },
+    "supervisorMissing": {
+      "hint": "该团队配置为使用主管，但尚未指定——请在团队设置中选择一位。",
+      "label": "未配置主管"
+    },
+    "supervisorNotMember": {
+      "hint": "配置的主管已不在该团队中——请另选一位。",
+      "label": "主管不在团队中"
+    },
+    "teamMissing": {
+      "hint": "这段会话所属的团队已被删除——请另选团队，或新建会话。",
+      "label": "团队已不存在"
+    },
+    "teamSessionMissing": {
+      "hint": "找不到这段团队会话——它可能已被删除。",
+      "label": "未找到团队会话"
+    },
+    "timeout": {
+      "hint": "请求耗时过长——请重试，或调高超时时间。",
+      "label": "请求超时"
+    },
+    "transportBlocked": {
+      "hint": "运行外部智能体需要桌面端应用——在浏览器中请使用内置智能体。",
+      "label": "需要桌面端应用"
+    },
+    "unauthorized": {
+      "hint": "身份验证失败——请在设置中检查 API 密钥或令牌。",
+      "label": "未授权"
+    },
+    "unknown": {
+      "hint": "发生了 Cognia 无法识别的错误——下方详情有助于我们定位问题。",
+      "label": "意外错误"
+    }
+  },
+  "detail": {
+    "copied": "已复制",
+    "copy": "复制详情",
+    "member": "{name}：{message}",
+    "showParsed": "显示摘要",
+    "showRaw": "显示原始错误"
+  },
+  "recoveryHint": {
+    "adjustPermissionMode": "调整智能体的权限模式，或批准它请求的操作。",
+    "checkCommandAndArgs": "检查智能体的启动命令和参数。",
+    "checkDiagnosticsAndRetry": "查看运行诊断，然后缩小请求范围后重试。",
+    "completeSetupThenRetry": "完成该智能体的配置，然后重试连接。",
+    "createNewSession": "当恢复和分叉不可用时，请新建一个会话。",
+    "inspectHealthEndpoint": "检查智能体的健康检查接口和日志。",
+    "reconnectAndRetry": "重新连接后再试。",
+    "resaveConfiguration": "重新保存该智能体的配置。",
+    "resumeWithSessionIdOrAllowNew": "用已有的 session id 恢复，或允许创建新会话。",
+    "retryAfterReconnect": "重新连接后重试。",
+    "selectLocalSurface": "选择一个可本地执行的入口以直接连接。",
+    "switchToAcp": "将该智能体的协议切换为 ACP。",
+    "useDesktopRuntime": "请以桌面端应用运行 Cognia——stdio 传输需要它。",
+    "useOfficialWorkflow": "请使用该产品自身的官方流程。",
+    "useSupportedOperations": "请仅使用该端点支持的操作。"
+  },
+  "severity": {
+    "error": "错误",
+    "fatal": "严重",
+    "info": "提示",
+    "warning": "警告"
+  },
+  "source": {
+    "agentTeam": "智能体团队",
+    "boundary": "界面",
+    "chat": "聊天",
+    "connector": "连接器",
+    "execution": "智能体运行时",
+    "externalAgent": "外部智能体",
+    "inbox": "收件箱",
+    "plugin": "插件",
+    "provider": "服务商",
+    "scheduler": "定时任务",
+    "settings": "设置",
+    "storage": "本地存储",
+    "tauri": "桌面后端",
+    "unknown": "Cognia",
+    "workflow": "工作流"
+  },
+  "surface": {
+    "cascade": "{count} 个问题",
+    "dbUpgradeBlocked": {
+      "body": "Cognia 需要升级本地数据库，但另一个窗口或浏览器标签页仍打开着旧版本。请关闭其他窗口后重新加载。",
+      "reload": "重新加载",
+      "title": "数据库升级被阻塞"
+    },
+    "settingsLoadFailed": {
+      "body": "Cognia 无法读取你已保存的设置，当前正以默认配置运行。你的服务商、API 密钥和偏好仍然保存着，只是没有被加载。请先重试，再修改任何设置。",
+      "detailsLabel": "技术详情",
+      "retry": "重试",
+      "retrying": "正在重试…",
+      "title": "正在以默认设置运行"
+    }
+  },
+  "recommendedAction": {
+    "installCommand": "请先安装 \"{command}\"，或把该 agent 的命令设为绝对路径，然后再连接。",
+    "installHintCodex": "安装 OpenAI Codex CLI：`npm install -g @openai/codex`（或 `brew install codex`），然后重新连接。",
+    "installHintClaude": "安装 Claude Code CLI：`npm install -g @anthropic-ai/claude-code`，然后重新连接。",
+    "installHintOpencode": "安装 OpenCode CLI：`npm install -g opencode-ai`，然后重新连接。",
+    "installHintGemini": "安装 Gemini CLI：`npm install -g @google/gemini-cli`，然后重新连接。",
+    "codexWsl2": "在 Windows 上，尽量把 Codex ACP 路由放在 WSL2 工作区中运行，体验最佳。"
+  }
+}

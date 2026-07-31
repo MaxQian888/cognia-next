@@ -29,8 +29,10 @@ jest.mock("@/lib/desktop/menu-actions", () => {
     "quit",
     "command-palette",
     "toggle-sidebar",
+    "toggle-right-sidebar",
     "toggle-guild-rail",
     "toggle-status-bar",
+    "toggle-terminal",
     "reload",
     "toggle-fullscreen",
     "zoom-in",
@@ -44,6 +46,7 @@ jest.mock("@/lib/desktop/menu-actions", () => {
     "toggle-reduce-motion",
     "go-inbox",
     "go-workflows",
+    "go-sites",
     "go-twin",
     "go-skills",
     "go-plugins",
@@ -77,8 +80,10 @@ jest.mock("@/lib/desktop/menu-actions", () => {
     quitAction: () => track("quitAction")(),
     commandPaletteAction: () => track("commandPaletteAction")(),
     toggleSidebarAction: () => track("toggleSidebarAction")(),
+    toggleRightSidebarAction: () => track("toggleRightSidebarAction")(),
     toggleGuildRailAction: () => track("toggleGuildRailAction")(),
     toggleStatusBarAction: () => track("toggleStatusBarAction")(),
+    toggleTerminalAction: () => track("toggleTerminalAction")(),
     reloadAction: () => track("reloadAction")(),
     toggleFullscreenAction: () => track("toggleFullscreenAction")(),
     setThemeAction: (...args: unknown[]) => track("setThemeAction")(...args),
@@ -139,7 +144,7 @@ jest.mock("@/stores/settings", () => ({
 }))
 
 const logWarn = jest.fn()
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: {
     ui: { info: jest.fn(), warn: (...a: unknown[]) => logWarn(...a), error: jest.fn() },
   },
@@ -169,9 +174,9 @@ beforeEach(() => {
 test("subscribes to one channel per menu id (minus zoom + reload + fullscreen) plus tray fallback", async () => {
   renderHook(() => useMenuEventRouter())
   await flush()
-  // 45 ids in our mocked list minus 5 skipped (reload, toggle-fullscreen, zoom-in/out/reset)
+  // 48 ids in our mocked list minus 5 skipped (reload, toggle-fullscreen, zoom-in/out/reset)
   // plus 1 tray fallback => exact count.
-  expect(subscribers.size).toBe(45 - 5 + 1)
+  expect(subscribers.size).toBe(48 - 5 + 1)
   // Spot-check both kinds of subscription.
   expect(subscribers.has("menu://new-chat")).toBe(true)
   expect(subscribers.has("tray://open-logs")).toBe(true)
@@ -203,8 +208,10 @@ test("each menu event routes to the right action helper", async () => {
     ["quit", "quitAction"],
     ["command-palette", "commandPaletteAction"],
     ["toggle-sidebar", "toggleSidebarAction"],
+    ["toggle-right-sidebar", "toggleRightSidebarAction"],
     ["toggle-guild-rail", "toggleGuildRailAction"],
     ["toggle-status-bar", "toggleStatusBarAction"],
+    ["toggle-terminal", "toggleTerminalAction"],
     ["theme-light", "setThemeAction"],
     ["theme-dark", "setThemeAction"],
     ["theme-system", "setThemeAction"],
@@ -212,6 +219,7 @@ test("each menu event routes to the right action helper", async () => {
     ["language-zh-cn", "setLanguageAction"],
     ["toggle-reduce-motion", "toggleReduceMotionAction"],
     ["go-inbox", "goAction"],
+    ["go-sites", "goAction"],
     ["go-twin", "goAction"],
     ["go-dms", "goAction"],
     ["go-canvas", "goAction"],

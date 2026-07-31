@@ -3,8 +3,9 @@
  * Types for scheduled tasks, cron expressions, and task execution
  */
 
-import type { BuiltinToolsConfig, SendOptions } from "@/lib/claude/types"
+import type { BuiltinToolsConfig, SendOptions } from "@cognia/agent-config-types"
 import type { AcpPermissionMode } from "@/types/agent/external-agent"
+import type { GoalConfig } from "@/types/goal"
 
 // Task trigger types
 export type TaskTriggerType = "cron" | "interval" | "once" | "event"
@@ -24,12 +25,20 @@ export type ScheduledTaskType =
   | "custom"
   | "plugin"
   | "script"
+  | "background-command"
+  | "monitor"
   | "test"
   | "ai-generation"
   | "chat"
   | "im-push"
   | "skill"
   | "external-agent"
+  // Built-in multi-agent runs (ADR-0022 / 0045). Executors registered in
+  // `lib/scheduler/executors/index.ts` drive a whole Agent Team run, a
+  // self-driving Goal loop, or an AgentPlan execution from a schedule.
+  | "agent-team"
+  | "goal"
+  | "plan"
   // Twin subsystem registers `"twin"` via `registerTaskExecutor` in
   // `lib/scheduler/executors/twin-executor.ts`. Surfaced here so cron-
   // driven Twin ingest/distill rows are typed properly across the codebase.
@@ -39,28 +48,33 @@ export type ScheduledTaskType =
   // in the same `tasks` Dexie store are typed properly across the codebase.
   | "connection:scheduled:digest"
   | "connection:outbound:send"
+  // One persisted daily clock fans out the three connector retention sweeps
+  // through an event trigger. These remain scheduler task types rather than
+  // growing TaskTriggerType with subsystem-specific timer variants.
+  | "connection:housekeeping:clock"
+  | "connection:housekeeping:outbound-retention"
+  | "connection:housekeeping:callback-bindings"
+  | "connection:housekeeping:execution-runs"
+  // Usage-presence refresh (token-usage status on IM platforms) — registered
+  // in `lib/connectors/presence/usage-status-runner.ts`.
+  | "connection:presence:refresh"
   // External Bridge subsystem registers `"wiki-rebuild"` via
   // `registerTaskExecutor` in `lib/scheduler/executors/wiki-rebuild-executor.ts`.
   // Listed here so cron-driven Wiki rebuild rows are typed properly.
   | "wiki-rebuild"
+  // Wiki-lint (orphan / broken-link check) — registered in
+  // `lib/scheduler/executors/wiki-lint-executor.ts`.
+  | "wiki-lint"
+  // Attention Radar report — registered in
+  // `lib/scheduler/executors/radar-report-executor.ts`.
+  | "radar-report"
 
 // Task execution status
 export type TaskExecutionStatus =
-  | "pending"
-  | "running"
-  | "completed"
-  | "failed"
-  | "cancelled"
-  | "skipped"
+  "pending" | "running" | "completed" | "failed" | "cancelled" | "skipped"
 
 export type TaskExecutionTriggerSource =
-  | "schedule"
-  | "run-now"
-  | "retry"
-  | "event"
-  | "dependency"
-  | "catch-up"
-  | "remote"
+  "schedule" | "run-now" | "retry" | "event" | "dependency" | "catch-up" | "remote" | "backfill"
 
 export type TaskExecutionTerminalReason =
   | "completed"
@@ -72,12 +86,57 @@ export type TaskExecutionTerminalReason =
   | "missed-run-skipped"
   | "once-expired"
   | "retry-scheduled"
+  | "overlap-skipped"
+  | "overlap-cancelled"
+  | "catchup-window-expired"
+  | "max-runs-reached"
+  | "ended"
+  | "auto-paused"
+  // The app restarted while this execution was still `running`/`pending`. Its
+  // in-memory controller did not survive, so a boot reconcile cancels the
+  // orphaned row instead of leaving it "running" forever (see
+  // `SchedulerDatabase.interruptStaleExecutions`).
+  | "interrupted-on-restart"
+
+/**
+ * How a due fire interacts with an already-running execution of the same task.
+ * Mirrors Temporal Schedule overlap policies:
+ * - `allow`           start regardless (ALLOW_ALL)
+ * - `skip`            drop the new start (SKIP)
+ * - `queue-one`       keep at most one pending start, newest wins (BUFFER_ONE)
+ * - `queue-all`       FIFO-buffer starts up to `maxQueueSize` (BUFFER_ALL)
+ * - `cancel-previous` abort the running execution, then start (CANCEL_OTHER)
+ */
+export type TaskOverlapPolicy = "allow" | "skip" | "queue-one" | "queue-all" | "cancel-previous"
 
 // Task status
 export type ScheduledTaskStatus = "active" | "paused" | "disabled" | "expired"
 
-// Notification channels
-export type NotificationChannel = "desktop" | "toast" | "webhook" | "none"
+/** Provenance used to scope agent/plugin mutations to tasks they created. */
+export interface ScheduledTaskCreator {
+  kind: "user" | "agent" | "plugin"
+  /** Required for agent-authored tasks; identifies the owning chat session. */
+  sessionId?: string
+  /** Optional plugin id for plugin-authored tasks. */
+  pluginId?: string
+}
+
+/**
+ * Notification channels a task can request.
+ *
+ * `desktop` / `toast` / `im` are all delivered by the Unified Notification
+ * Center (ADR-0042) — this union is the scheduler's own vocabulary and MUST stay
+ * mappable onto `types/notifications`'s `NotificationChannel`. `im` was missing
+ * for a long time even though the center, the delivery implementation
+ * (`lib/notifications/im-deliver.ts`) and the per-conversation opt-in all
+ * existed: the narrower union here was the only thing blocking it, so a task
+ * result could not reach a chat window without authoring a second
+ * `connection:*` task by hand.
+ *
+ * `webhook` is different — a scheduler-owned outbound HTTP integration, not a
+ * user-facing notification, dispatched directly.
+ */
+export type NotificationChannel = "desktop" | "toast" | "webhook" | "im" | "none"
 
 export type BackupTaskType = "full" | "sessions" | "settings" | "plugins" | "all"
 
@@ -112,10 +171,28 @@ export type ScheduledTaskPayload =
   | Record<string, unknown>
   | BackupTaskPayload
   | WikiRebuildTaskPayload
+  | BackgroundCommandTaskPayload
+  | MonitorTaskPayload
   | ChatLikeTaskPayload
   | AgentTaskPayload
   | SkillTaskPayload
   | ExternalAgentTaskPayload
+  | AgentTeamTaskPayload
+  | GoalTaskPayload
+  | PlanTaskPayload
+
+export interface BackgroundCommandTaskPayload extends Record<string, unknown> {
+  command: string
+  cwd: string
+  label?: string
+}
+
+export interface MonitorTaskPayload extends Record<string, unknown> {
+  condition: import("@/lib/jobs/background-jobs").BackgroundMonitorCondition
+  /** ISO date or epoch milliseconds. Omit to keep the watch until it settles. */
+  expiresAt?: string | number
+  label?: string
+}
 
 /**
  * Common payload shape for any task that drives a Claude turn through the
@@ -204,6 +281,50 @@ export interface ExternalAgentTaskPayload extends Record<string, unknown> {
 }
 
 /**
+ * Payload for `agent-team` task type — runs a whole Agent Team to terminal
+ * via `agentTeamManager.start` (ADR-0022). The team must already exist in the
+ * team store (live teams are not persisted across an app restart — schedule a
+ * team only within a running session, or persist its definition first).
+ */
+export interface AgentTeamTaskPayload extends Record<string, unknown> {
+  /** Required. The id of an existing AgentTeam to run. */
+  teamId: string
+  /** Force ultracode orchestration for this run (defaults to the team's autoMode). */
+  ultracode?: boolean
+}
+
+/**
+ * Payload for `goal` task type — creates a self-driving `/goal` in a fresh (or
+ * supplied) background session and drives its turn loop to terminal headlessly
+ * (ADR-0019). Bounded by the goal's own exit conditions (turns / budget /
+ * timeout / judge). The objective is PII-redacted before it reaches the model.
+ */
+export interface GoalTaskPayload extends Record<string, unknown> {
+  /** Required. The objective the goal pursues (redacted before model use). */
+  objective: string
+  /** Character (agent persona) that drives the loop. */
+  characterId?: string
+  /** Append to an existing session instead of creating a fresh background one. */
+  sessionId?: string
+  /** Title used when the executor creates a new session for this run. */
+  sessionTitle?: string
+  /** Per-goal config overrides (maxTurns / maxTokens / timeoutMs / judge…). */
+  config?: Partial<GoalConfig>
+}
+
+/**
+ * Payload for `plan` task type — executes an existing AgentPlan via
+ * `getPlanRuntime().runPlan` (ADR-0045). Plans persist in Dexie, so `planId`
+ * survives an app restart.
+ */
+export interface PlanTaskPayload extends Record<string, unknown> {
+  /** Required. The id of an approved/paused AgentPlan to run. */
+  planId: string
+  /** When true, a step failure triggers a capped auto-replan (needs an LLM client). */
+  replanOnFailure?: boolean
+}
+
+/**
  * Cron expression parts for validation and display.
  *
  * `seconds` is optional and only populated for 6-field expressions (the
@@ -258,6 +379,12 @@ export interface TaskTrigger {
   timezone?: string
   /** Task IDs that must complete successfully before this task runs */
   dependsOn?: string[]
+  /**
+   * Max random delay (ms) added to the *armed* fire time of cron/interval
+   * triggers to avoid thundering herds. The canonical slot (`nextRunAt`,
+   * `scheduledFor`, missed-run math) is never jittered.
+   */
+  jitterMs?: number
 }
 
 /**
@@ -276,6 +403,22 @@ export interface TaskNotificationConfig {
   channels?: NotificationChannel[]
   /** Webhook URL for webhook notifications */
   webhookUrl?: string
+  /**
+   * Where the `im` channel delivers. Layer 1 of two: when unset (or when the
+   * conversation no longer resolves) delivery falls back to the global ops
+   * channel in `AppSettings.schedulerNotifications.fallbackConversationKey`, so
+   * a failing task can still reach someone after its original chat is gone.
+   *
+   * Only the conversation key is stored. The adapter is derived from the bound
+   * session's `platformBinding` at delivery time (`im-deliver.ts`) — persisting
+   * it here too would be a second source of truth that goes stale when a
+   * conversation is re-bound to another bot.
+   *
+   * Tasks authored from IM get this filled in with their originating
+   * conversation. Serialized inside the task's `notification` JSON blob, so
+   * adding it needs no Dexie version.
+   */
+  imTarget?: { conversationKey: string }
 }
 
 /**
@@ -294,8 +437,26 @@ export interface TaskExecutionConfig {
   runMissedOnStartup: boolean
   /** Maximum number of missed executions to run */
   maxMissedRuns?: number
-  /** Whether to allow concurrent executions */
-  allowConcurrent: boolean
+  /**
+   * Whether to allow concurrent executions.
+   * @deprecated Superseded by `overlapPolicy`; kept for persisted-task
+   * back-compat (`true` → "allow", `false` → "skip"). The scheduler reads
+   * `overlapPolicy` first.
+   */
+  allowConcurrent?: boolean
+  /** Overlap policy applied when a fire collides with a running execution. */
+  overlapPolicy?: TaskOverlapPolicy
+  /** Max buffered starts for `queue-all` (overflow is dropped as "overlap-skipped"). */
+  maxQueueSize?: number
+  /** Auto-expire the task after this many total runs (failures count). */
+  maxRuns?: number
+  /** Auto-pause the task after this many consecutive terminal failures. */
+  pauseAfterConsecutiveFailures?: number
+  /**
+   * Time window (ms) for catch-up: missed slots older than this are skipped
+   * with reason "catchup-window-expired" instead of being re-run.
+   */
+  catchupWindowMs?: number
 }
 
 /**
@@ -311,8 +472,21 @@ export interface ScheduledTask {
   config: TaskExecutionConfig
   notification: TaskNotificationConfig
   status: ScheduledTaskStatus
+  /**
+   * Who authored this task. Rows created before scheduler schema v3 are
+   * backfilled to `{ kind: "user" }`.
+   */
+  createdBy?: ScheduledTaskCreator
   /** Tags for categorization */
   tags?: string[]
+  /** Auto-expire the task once this instant passes (checked lazily at arm/fire). */
+  endAt?: Date
+  /** Forward chain: tasks fired (fire-and-forget) after a successful run. */
+  onSuccessTaskIds?: string[]
+  /** Forward chain: tasks fired (fire-and-forget) after a terminal failure. */
+  onFailureTaskIds?: string[]
+  /** Consecutive terminal failures since the last success (drives auto-pause). */
+  consecutiveFailures?: number
   /** Last execution time */
   lastRunAt?: Date
   /** Next scheduled execution time */
@@ -385,7 +559,11 @@ export interface CreateScheduledTaskInput {
   payload?: ScheduledTaskPayload
   config?: Partial<TaskExecutionConfig>
   notification?: Partial<TaskNotificationConfig>
+  createdBy?: ScheduledTaskCreator
   tags?: string[]
+  endAt?: Date
+  onSuccessTaskIds?: string[]
+  onFailureTaskIds?: string[]
 }
 
 /**
@@ -400,6 +578,9 @@ export interface UpdateScheduledTaskInput {
   notification?: Partial<TaskNotificationConfig>
   status?: ScheduledTaskStatus
   tags?: string[]
+  endAt?: Date | null
+  onSuccessTaskIds?: string[]
+  onFailureTaskIds?: string[]
 }
 
 /**
@@ -439,6 +620,8 @@ export const DEFAULT_EXECUTION_CONFIG: TaskExecutionConfig = {
   runMissedOnStartup: false,
   maxMissedRuns: 1,
   allowConcurrent: false,
+  overlapPolicy: "skip",
+  maxQueueSize: 10,
 }
 
 /**
@@ -655,7 +838,7 @@ export interface SchedulerPermissionPolicy {
 
 export const DEFAULT_PERMISSION_POLICY: SchedulerPermissionPolicy = {
   agentAutoCreate: false,
-  confirmationRequired: ["script", "agent"],
+  confirmationRequired: ["script", "agent", "goal", "agent-team"],
   scriptTasksEnabled: true,
   maxTasksPerSource: 50,
   maxConcurrentExecutions: 5,

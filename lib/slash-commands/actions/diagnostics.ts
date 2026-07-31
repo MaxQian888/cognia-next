@@ -3,10 +3,12 @@
 // `../builtin.ts`.
 
 import type { SlashContext } from "../builtin"
-import { getSidecarStatus, hasApiKey, hasOauthBearer } from "@/lib/claude/ipc"
+import { compactSession, getSidecarStatus, hasApiKey, hasOauthBearer } from "@/lib/claude/ipc"
 import { getSession } from "@/lib/db/sessions"
 import { listEnabledMcpServers } from "@/lib/db/mcp-servers"
 import { resolveSendOptions } from "@/lib/claude/build-options"
+import { getCrashLoggingDiagnostics } from "@/lib/native/crash-reports"
+import { getNativeLoggingReadiness } from "@/lib/native/native-logging"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import type { UsageInfo } from "@/lib/claude/adapter"
@@ -15,25 +17,56 @@ import {
   computeContextWindowUsage,
   getLatestUsage,
 } from "@/lib/claude/usage"
+import { resolveModelContextLength } from "@/lib/ai/model-options"
+import { estimateCostFromTotals } from "@/lib/usage/session-analytics"
 import type { UIMessage } from "ai"
 import { isTauri } from "@/lib/tauri"
 
 /**
- * Best-effort resolve of the model id driving the active session: per-session
- * override first, then the app default. Used by `/context` and `/cost` to size
- * the context window. Never throws — falls back to `undefined` (→ 200k window).
+ * Best-effort resolve of the model id + provider driving the active session:
+ * per-session override first, then the app default. Used by `/context` and
+ * `/cost` to size the context window (the provider disambiguates custom /
+ * discovered model metadata) and to price tokens. Never throws — missing values
+ * fall back to `undefined` (→ DEFAULT_CONTEXT_WINDOW, no pricing).
  */
-async function resolveActiveModel(activeSessionId: string | null): Promise<string | undefined> {
+async function resolveActiveModelInfo(
+  activeSessionId: string | null
+): Promise<{ model: string | undefined; providerId: string | undefined }> {
   let model: string | undefined
+  let providerId: string | undefined
   if (activeSessionId) {
     try {
       const session = await getSession(activeSessionId)
       model = session?.model
+      providerId = session?.providerOverride
     } catch {
-      // ignore — fall through to the app default
+      // ignore — fall through to the app defaults
     }
   }
-  return model ?? useSettingsStore.getState().settings?.defaultModel ?? undefined
+  const settings = useSettingsStore.getState().settings
+  return {
+    model: model ?? settings?.defaultModel ?? undefined,
+    providerId: providerId ?? settings?.defaultProvider ?? undefined,
+  }
+}
+
+/**
+ * Per-model context window for `/cost` + `/context`: a model's declared length
+ * from the custom, discovered, or built-in catalog overrides the curated
+ * pattern table, which otherwise forces unrecognised models to
+ * `DEFAULT_CONTEXT_WINDOW`. Mirrors the composer's `ContextUsageIndicator` and the model picker.
+ */
+function resolveWindowOverride(
+  model: string | undefined,
+  providerId: string | undefined
+): number | undefined {
+  const settings = useSettingsStore.getState().settings
+  return resolveModelContextLength(
+    model,
+    providerId,
+    settings?.providerSettings,
+    settings?.customProviders
+  )
 }
 
 /**
@@ -150,31 +183,67 @@ export async function handleCost(ctx: SlashContext): Promise<void> {
     ctx.pushSystemMessage(lines.join("\n"))
     return
   }
-  lines.push(`- **Turns**: ${assistantTurnCount} assistant (${usageHits} with metrics)`)
-  lines.push(`- **Input tokens**: ${inputTokens.toLocaleString()}`)
-  lines.push(`- **Output tokens**: ${outputTokens.toLocaleString()}`)
-  if (cacheCreationTokens > 0 || cacheReadTokens > 0) {
-    lines.push(
-      `- **Cache**: write ${cacheCreationTokens.toLocaleString()} / read ${cacheReadTokens.toLocaleString()}`
-    )
-  }
-  if (totalCostUsd > 0) {
-    lines.push(`- **Cost**: $${totalCostUsd.toFixed(4)} USD`)
-  }
-  if (durationMs > 0) {
-    lines.push(`- **Duration**: ${(durationMs / 1000).toFixed(1)}s`)
-  }
+  const { model, providerId } = await resolveActiveModelInfo(ctx.activeSessionId)
+  // Cost: prefer the SDK's own figure (it bakes in cache tiers); when the
+  // ai-sdk / non-Anthropic path reports nothing, estimate from the pricing
+  // tables so `/cost` isn't blank for those providers.
+  const sessionCostUsd =
+    totalCostUsd > 0
+      ? totalCostUsd
+      : estimateCostFromTotals(
+          {
+            inputTokens,
+            outputTokens,
+            cacheReadInputTokens: cacheReadTokens,
+            cacheCreationInputTokens: cacheCreationTokens,
+          },
+          model,
+          providerId
+        )
 
   // Context-window occupancy of the latest turn (not the cumulative sum).
   const latest = getLatestUsage(messages as UIMessage[])
-  const model = await resolveActiveModel(ctx.activeSessionId)
-  const win = computeContextWindowUsage(latest, model)
-  lines.push(
-    `- **Context window**: ${win.used.toLocaleString()} / ${win.max.toLocaleString()} ` +
-      `(${(win.fraction * 100).toFixed(1)}% used)`
-  )
+  const win = computeContextWindowUsage(latest, model, resolveWindowOverride(model, providerId))
 
-  ctx.pushSystemMessage(lines.join("\n"))
+  ctx.pushSystemMessage({
+    kind: "cost",
+    assistantTurns: assistantTurnCount,
+    metricTurns: usageHits,
+    inputTokens,
+    outputTokens,
+    cacheCreateTokens: cacheCreationTokens,
+    cacheReadTokens,
+    costUsd: sessionCostUsd > 0 ? sessionCostUsd : null,
+    costEstimated: sessionCostUsd > 0 && totalCostUsd <= 0,
+    durationMs,
+    window: {
+      used: win.used,
+      max: win.max,
+      fraction: win.fraction,
+      remaining: win.remaining,
+      level: win.level,
+      compactThresholdTokens: win.compactThresholdTokens,
+      autoCompactFraction: AUTO_COMPACT_FRACTION,
+    },
+  })
+}
+
+/**
+ * `/compact [focus]` — manually compact the active session's context. Routes a
+ * `claude_compact` control message to the sidecar (mirrors {@link handleContext}
+ * reading the active session). Works on BOTH paths: the generic (AI-SDK) path
+ * runs a summary round-trip now, the Anthropic path pushes a `/compact` turn the
+ * Agent SDK intercepts. The resulting `compact_boundary` renders in-transcript,
+ * so we only surface a message on the no-session edge.
+ */
+export async function handleCompact(ctx: SlashContext): Promise<void> {
+  const sessionId = ctx.activeSessionId
+  if (!sessionId) {
+    ctx.pushSystemMessage("No active session to compact.")
+    return
+  }
+  const focus = ctx.args.trim() || undefined
+  await compactSession(sessionId, focus)
 }
 
 /**
@@ -186,12 +255,15 @@ export async function handleCost(ctx: SlashContext): Promise<void> {
 export async function handleDoctor(ctx: SlashContext): Promise<void> {
   const lines: string[] = ["**Doctor**", ""]
 
-  const [sidecarStatus, apiKeySet, oauthSet, mcpServers] = await Promise.all([
-    getSidecarStatus().catch(() => null),
-    hasApiKey().catch(() => false),
-    hasOauthBearer().catch(() => false),
-    listEnabledMcpServers().catch(() => []),
-  ])
+  const [sidecarStatus, apiKeySet, oauthSet, mcpServers, crashDiag, nativeLogging] =
+    await Promise.all([
+      getSidecarStatus().catch(() => null),
+      hasApiKey().catch(() => false),
+      hasOauthBearer().catch(() => false),
+      listEnabledMcpServers().catch(() => []),
+      getCrashLoggingDiagnostics().catch(() => null),
+      getNativeLoggingReadiness().catch(() => null),
+    ])
 
   lines.push("**Runtime**")
   lines.push(`- Mode: ${isTauri() ? "Tauri desktop" : "Web (browser)"}`)
@@ -227,6 +299,24 @@ export async function handleDoctor(ctx: SlashContext): Promise<void> {
     for (const s of mcpServers) {
       lines.push(`- \`${s.name}\` (${s.transport})`)
     }
+  }
+  lines.push("")
+
+  lines.push("**Crash & Logs**")
+  lines.push("- Global error capture: ready (uncaught errors + promise rejections)")
+  if (crashDiag) {
+    lines.push(`- Crash reports: ${crashDiag.crashReportCount}`)
+    if (crashDiag.latestCrashAt) {
+      lines.push(`- Last crash: ${crashDiag.latestCrashAt}`)
+    }
+    lines.push(
+      `- Retention: ${crashDiag.retentionMaxAgeDays}d / ${crashDiag.retentionMaxReports} reports, keep ${crashDiag.rotatedLogKeep} logs`
+    )
+  } else {
+    lines.push("- Crash reports: (desktop only)")
+  }
+  if (nativeLogging) {
+    lines.push(`- Native logging: ${nativeLogging.startupMode} / ${nativeLogging.startupHealth}`)
   }
   lines.push("")
 
@@ -267,36 +357,36 @@ export async function handleContext(ctx: SlashContext): Promise<void> {
     }
   }
 
-  const lines: string[] = ["**Context**", ""]
-  lines.push(`- Messages: ${userTurns} user · ${assistantTurns} assistant`)
+  // Before any assistant turn the window is fresh — emit a card with just the
+  // message counts (no tokens / window section).
   if (assistantTurns === 0) {
-    lines.push("- No usage metrics yet — context window is fresh.")
-    ctx.pushSystemMessage(lines.join("\n"))
+    ctx.pushSystemMessage({ kind: "context", userTurns, assistantTurns })
     return
-  }
-  const totalIn = inputTokens + cacheReadTokens + cacheCreationTokens
-  lines.push(`- Input tokens (incl. cache): ${totalIn.toLocaleString()}`)
-  lines.push(`- Output tokens: ${outputTokens.toLocaleString()}`)
-  if (cacheReadTokens > 0 || cacheCreationTokens > 0) {
-    lines.push(
-      `- Cache hits: write ${cacheCreationTokens.toLocaleString()} / read ${cacheReadTokens.toLocaleString()}`
-    )
   }
 
   // Window occupancy is the *latest* turn against the model's context window
   // (matches the composer indicator) — distinct from the cumulative totals above.
   const latest = getLatestUsage(messages as UIMessage[])
-  const model = await resolveActiveModel(ctx.activeSessionId)
-  const win = computeContextWindowUsage(latest, model)
-  lines.push(
-    `- **Window**: ${win.used.toLocaleString()} / ${win.max.toLocaleString()} ` +
-      `(${(win.fraction * 100).toFixed(1)}% used, ${win.remaining.toLocaleString()} left)`
-  )
-  lines.push(
-    `- **Auto-compact at**: ${(AUTO_COMPACT_FRACTION * 100).toFixed(1)}% ` +
-      `(~${win.compactThresholdTokens.toLocaleString()} tokens)`
-  )
-
-  lines.push("", "Run `/compact` to ask the SDK to summarise older turns and free up the window.")
-  ctx.pushSystemMessage(lines.join("\n"))
+  const { model, providerId } = await resolveActiveModelInfo(ctx.activeSessionId)
+  const win = computeContextWindowUsage(latest, model, resolveWindowOverride(model, providerId))
+  ctx.pushSystemMessage({
+    kind: "context",
+    userTurns,
+    assistantTurns,
+    tokens: {
+      input: inputTokens,
+      output: outputTokens,
+      cacheRead: cacheReadTokens,
+      cacheCreate: cacheCreationTokens,
+    },
+    window: {
+      used: win.used,
+      max: win.max,
+      fraction: win.fraction,
+      remaining: win.remaining,
+      level: win.level,
+      compactThresholdTokens: win.compactThresholdTokens,
+      autoCompactFraction: AUTO_COMPACT_FRACTION,
+    },
+  })
 }

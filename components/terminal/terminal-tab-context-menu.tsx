@@ -41,7 +41,7 @@ export interface TerminalTabContextMenuProps {
   onCloseOthers: (id: string) => void
   onToggleAgentTrust: (id: string, trusted: boolean) => void
   /** Jump to the chat session that spawned this tab. Shown only for agent-spawned tabs. */
-  onLocateInChat?: (chatSessionId: string) => void
+  onLocateInChat?: (chatSessionId: string, messageId?: string | null) => void
   /**
    * Clipboard / edit actions on the focused pane. When provided, an edit
    * group (Copy / Paste / Select all / Clear / Find) renders at the top of
@@ -129,7 +129,7 @@ export function TerminalTabContextMenu({
           <>
             <ContextMenuSeparator />
             <ContextMenuItem
-              onSelect={() => onLocateInChat(row.agentSpawner!)}
+              onSelect={() => onLocateInChat(row.agentSpawner!, row.agentSpawnerMessageId)}
               data-testid="terminal-tab-menu-locate"
             >
               {t("locateInChat")}

@@ -1,0 +1,643 @@
+{
+  "a11y": {
+    "colorblind": {
+      "deuter": "Deuteranopia (red-green)",
+      "hint": "Shifts accent and status colors to a palette distinguishable with the selected color-vision deficiency.",
+      "label": "Colorblind palette",
+      "off": "Off",
+      "protan": "Protanopia (red-weak)",
+      "tritan": "Tritanopia (blue-yellow)"
+    },
+    "highContrast": {
+      "dark": "High-contrast dark",
+      "hint": "Applies a high-contrast color layer on top of the current theme.",
+      "label": "High-contrast preset",
+      "light": "High-contrast light",
+      "off": "Off"
+    },
+    "motion": {
+      "reduceHint": "Minimizes animations and transitions across the app.",
+      "reduceLabel": "Reduce motion",
+      "speed": {
+        "fast": "Fast (1.5×)",
+        "normal": "Normal (1×)",
+        "slow": "Slow (0.5×)"
+      },
+      "speedLabel": "Animation speed"
+    },
+    "wcag": {
+      "enforcement": {
+        "warn": "Warn only",
+        "warnFix": "Warn and auto-fix"
+      },
+      "enforcementHint": "Choose whether audit violations only warn or are also auto-fixed.",
+      "enforcementLabel": "Contrast enforcement",
+      "target": {
+        "AA": "AA (4.5:1)",
+        "AAA": "AAA (7:1)",
+        "off": "Off"
+      },
+      "targetHint": "Contrast level the theme audit checks your colors against.",
+      "targetLabel": "WCAG contrast target"
+    }
+  },
+  "accent": {
+    "label": "Accent color",
+    "description": "Retint buttons and highlights without editing the full theme.",
+    "usingTheme": "Using theme accent",
+    "reset": "Reset"
+  },
+  "advanced": {
+    "description": "Inject your own CSS into the app. Remote @import / url(http) statements are stripped on save. Use carefully — bad CSS can hide UI elements.",
+    "enabledLabel": "Enable custom CSS",
+    "monacoLink": {
+      "description": "Control how the app theme drives both editor engines — the Monaco/Canvas editor and the embedded Pro IDE (code-server).",
+      "enabledLabel": "Match app theme",
+      "lock": {
+        "hcBlack": "High contrast dark",
+        "hcLight": "High contrast light",
+        "none": "No lock (follow setting above)",
+        "vs": "Light (vs)",
+        "vsDark": "Dark (vs-dark)"
+      },
+      "lockHint": "Pin Monaco to a specific base theme and stop the app palette from driving either engine. High contrast still overrides this.",
+      "lockLabel": "Lock editor theme",
+      "title": "Editor theme linking"
+    },
+    "placeholder": "/* your CSS here */\nbody '{' letter-spacing: 0.2px; '}'",
+    "removed": "Removed {count, plural, one {# remote rule} other {# remote rules}} on save.",
+    "saveButton": "Save",
+    "scope": {
+      "app": "App only",
+      "global": "Entire document",
+      "hint": "“App only” wraps your CSS in @scope (#app); “Entire document” applies it page-wide.",
+      "label": "Custom CSS scope"
+    },
+    "title": "Custom CSS"
+  },
+  "agentFlow": {
+    "hint": {
+      "detailed": "Every tool call, reasoning block, and sub-agent expanded with full input and output.",
+      "simplified": "One-line tool summaries you can expand on demand.",
+      "standard": "Cards that open while running and collapse when complete."
+    },
+    "label": "Agent flow display mode",
+    "mode": {
+      "detailed": "Detailed",
+      "simplified": "Simplified",
+      "standard": "Standard"
+    }
+  },
+  "auto": {
+    "description": "Switch between light and dark automatically.",
+    "enabledHint": "Let Cognia pick light or dark for you based on the trigger below.",
+    "enabledLabel": "Automatic light/dark",
+    "schedule": {
+      "darkAt": "Switch to dark at",
+      "lightAt": "Switch to light at"
+    },
+    "snoozeNote": "Changing the theme by hand pauses auto switching for 30 minutes.",
+    "sunset": {
+      "currentLocation": "{lat}, {lng}",
+      "hint": "Coordinates are stored locally and never sent anywhere.",
+      "latitude": "Latitude",
+      "longitude": "Longitude",
+      "noLocation": "No location set",
+      "unavailable": "Geolocation isn't available here — enter coordinates manually.",
+      "useLocation": "Use my location"
+    },
+    "trigger": {
+      "hint": "How the light/dark phase is decided.",
+      "label": "Trigger",
+      "schedule": "Time schedule",
+      "sunset": "Sunrise & sunset",
+      "system": "Follow system"
+    }
+  },
+  "colorPresetLabel": "Color preset",
+  "colorPresets": {
+    "amber": "Amber",
+    "default": "Default",
+    "forest": "Forest",
+    "lavender": "Lavender",
+    "ocean": "Ocean",
+    "rose": "Rose",
+    "slate": "Slate",
+    "sunset": "Sunset"
+  },
+  "componentCustomize": {
+    "axis": {
+      "elevation": "Elevation",
+      "elevationFor": "Elevation for {name}",
+      "radius": "Radius",
+      "radiusFor": "Radius for {name}",
+      "tonality": "Tonality",
+      "tonalityFor": "Tonality for {name}"
+    },
+    "description": "Customize individual surface components. Tonality controls how the surface looks over a wallpaper; elevation and radius always apply.",
+    "elevation": {
+      "default": "Default"
+    },
+    "groups": {
+      "chat": "Chat surfaces",
+      "modals": "Modals & sheets",
+      "overlays": "Overlays",
+      "surfaces": "Surfaces"
+    },
+    "items": {
+      "aiArtifact": "Artifact panel",
+      "aiCodeBlock": "Code block",
+      "aiContext": "Context usage",
+      "aiConversation": "Scroll button",
+      "aiErrorTrace": "Error trace",
+      "aiMessage": "Message bubble",
+      "aiTask": "Task file",
+      "aiTerminal": "Terminal",
+      "aiTool": "Tool call",
+      "alert": "Alert",
+      "alertDialog": "Alert dialog",
+      "card": "Card",
+      "combobox": "Combobox",
+      "command": "Command palette",
+      "contextMenu": "Context menu",
+      "dialog": "Dialog",
+      "drawer": "Drawer",
+      "dropdownMenu": "Dropdown menu",
+      "hoverCard": "Hover card",
+      "menubar": "Menubar",
+      "navigationMenu": "Navigation menu",
+      "popover": "Popover",
+      "select": "Select",
+      "sheet": "Sheet",
+      "sidebar": "Sidebar",
+      "table": "Table",
+      "tabs": "Tabs",
+      "tooltip": "Tooltip"
+    },
+    "radius": {
+      "inherit": "Default"
+    },
+    "resetAll": "Reset all",
+    "tonality": {
+      "default": "Default",
+      "frosted": "Frosted",
+      "glass": "Glass",
+      "solid": "Solid",
+      "translucent": "Translucent"
+    },
+    "tonalityHint": "Tonality only takes effect while a wallpaper is enabled."
+  },
+  "customTheme": {
+    "actions": {
+      "export": "Export",
+      "import": "Import theme JSON"
+    },
+    "activateButton": "Apply",
+    "audit": {
+      "allPass": "Contrast: all pairs pass",
+      "cancel": "Cancel",
+      "failuresCount": "{count} of {total} pairs fail WCAG AA",
+      "lowContrast": "Low contrast",
+      "saveAnyway": "Save anyway",
+      "saveWarningBody": "{count, plural, one {# pair fails} other {# pairs fail}} the WCAG AA contrast check. Save anyway?",
+      "saveWarningTitle": "Low-contrast theme"
+    },
+    "darkLabel": "Dark variant",
+    "deactivateButton": "Use color preset",
+    "deleteButton": "Delete",
+    "deleteDialog": {
+      "body": "Delete \"{name}\"? This cannot be undone.",
+      "cancel": "Cancel",
+      "confirm": "Delete",
+      "title": "Delete theme"
+    },
+    "description": "Edit the cognia color tokens directly. Active custom themes override the color preset.",
+    "discardDialog": {
+      "body": "The current draft has unsaved changes. Switching will discard them.",
+      "cancel": "Keep editing",
+      "discard": "Discard changes",
+      "title": "Discard unsaved changes?"
+    },
+    "groupFailures": "{count, plural, one {# fails} other {# fail}}",
+    "groups": {
+      "brand": "Brand",
+      "sidebar": "Sidebar",
+      "state": "State",
+      "surface": "Surface",
+      "text": "Text"
+    },
+    "import": {
+      "failure": "Import failed: {message}",
+      "success": "Theme imported."
+    },
+    "namePlaceholder": "Theme name",
+    "newButton": "New theme",
+    "noSaved": "No custom themes yet.",
+    "rail": {
+      "activeBadgeAria": "Active theme",
+      "copySuffix": "{name} (copy)",
+      "darkSwatchAria": "Dark variant swatch",
+      "duplicate": "Duplicate",
+      "lightSwatchAria": "Light variant swatch",
+      "more": "More actions"
+    },
+    "saveButton": "Save",
+    "savedLabel": "Saved themes",
+    "title": "Custom theme",
+    "tokens": {
+      "accent": "Accent",
+      "accentForeground": "Accent text",
+      "aria": {
+        "hex": "{label} hex value",
+        "swatch": "{label} swatch"
+      },
+      "background": "Background",
+      "border": "Border",
+      "card": "Card",
+      "cardForeground": "Card text",
+      "destructive": "Destructive",
+      "destructiveForeground": "Destructive text",
+      "foreground": "Foreground",
+      "input": "Input",
+      "muted": "Muted",
+      "mutedForeground": "Muted text",
+      "popover": "Popover",
+      "popoverForeground": "Popover text",
+      "primary": "Primary",
+      "primaryForeground": "Primary text",
+      "ring": "Ring",
+      "secondary": "Secondary",
+      "secondaryForeground": "Secondary text",
+      "sidebar": "Sidebar",
+      "sidebarAccent": "Sidebar accent",
+      "sidebarAccentForeground": "Sidebar accent text",
+      "sidebarBorder": "Sidebar border",
+      "sidebarForeground": "Sidebar text",
+      "sidebarPrimary": "Sidebar primary",
+      "sidebarPrimaryForeground": "Sidebar primary text",
+      "sidebarRing": "Sidebar ring"
+    },
+    "unsavedBadge": "Unsaved changes",
+    "updateButton": "Update"
+  },
+  "description": "Tune the look and feel of the app. Changes are saved instantly.",
+  "fontScaleHint": "Scales the entire UI. Defaults to 16px.",
+  "fontScaleLabel": "Font size",
+  "io": {
+    "confirm": {
+      "body": "This replaces your current theme, fonts, colors, and custom CSS with the imported ones ({count, plural, one {# setting} other {# settings}}). Your uploaded wallpapers are kept.",
+      "cancel": "Cancel",
+      "confirm": "Apply",
+      "title": "Apply imported appearance?"
+    },
+    "export": "Export",
+    "exportSuccess": "Appearance exported.",
+    "import": "Import",
+    "importInvalid": "Couldn't read that file: {message}",
+    "importSuccess": "Applied {count, plural, one {# appearance setting} other {# appearance settings}}."
+  },
+  "languageLabel": "Language",
+  "layoutType": {
+    "agentFlow": {
+      "sectionLabel": "Agent flow"
+    },
+    "density": {
+      "comfortable": "Comfortable",
+      "compact": "Compact",
+      "globalHint": "Controls spacing and component sizing across the app.",
+      "globalLabel": "Global density",
+      "inherit": "Inherit",
+      "overrideHint": "Optionally set a different density for specific surfaces.",
+      "overrideLabel": "Per-surface overrides",
+      "sectionLabel": "Density",
+      "spacious": "Spacious",
+      "surface": {
+        "chat": "Chat",
+        "sidebar": "Sidebar",
+        "table": "Tables"
+      }
+    },
+    "fine": {
+      "letterSpacing": "Letter spacing",
+      "lineHeight": "Line height",
+      "sectionLabel": "Fine-tuning"
+    },
+    "font": {
+      "inherit": "Inherit (default)",
+      "monoLabel": "Monospace font",
+      "sansHint": "Used across the interface. Inherit keeps the cognia default.",
+      "sansLabel": "Interface font",
+      "sectionLabel": "Font families",
+      "serifLabel": "Serif font"
+    },
+    "motion": {
+      "sectionLabel": "Motion speed",
+      "speed": {
+        "fast": "Fast",
+        "normal": "Normal",
+        "slow": "Slow"
+      }
+    },
+    "radius": {
+      "hint": "Adjusts the roundness of cards, buttons, and inputs.",
+      "label": "Radius",
+      "sectionLabel": "Corner radius"
+    },
+    "usageDisplay": {
+      "sectionLabel": "Usage display"
+    }
+  },
+  "library": {
+    "importTitle": "Import from VSCode",
+    "packsTitle": "Theme packs"
+  },
+  "nav": {
+    "groups": {
+      "advancedGroup": "Advanced",
+      "interfaceGroup": "Interface",
+      "themeGroup": "Theme"
+    },
+    "items": {
+      "a11y": {
+        "description": "Contrast, motion, colorblind modes",
+        "label": "Accessibility"
+      },
+      "advanced": {
+        "description": "Inject your own stylesheet",
+        "label": "Custom CSS"
+      },
+      "auto": {
+        "description": "Switch on a schedule or with the system",
+        "label": "Auto light/dark"
+      },
+      "components": {
+        "description": "Per-surface tonality and elevation",
+        "label": "Components"
+      },
+      "custom": {
+        "description": "Edit the color tokens directly",
+        "label": "Custom theme"
+      },
+      "library": {
+        "description": "Theme packs and VSCode import",
+        "label": "Theme library"
+      },
+      "personalization": {
+        "description": "Your name and the welcome page style",
+        "label": "Personalization"
+      },
+      "plugins": {
+        "description": "Appearance panels added by plugins",
+        "label": "Plugins"
+      },
+      "theme": {
+        "description": "Preset palettes and light/dark mode",
+        "label": "Theme & presets"
+      },
+      "typography": {
+        "description": "Fonts, size, spacing, corner radius",
+        "label": "Type & density"
+      },
+      "wallpaper": {
+        "description": "Background image, gradient, or color",
+        "label": "Wallpaper"
+      }
+    },
+    "mobileTrigger": "Sections",
+    "title": "Appearance"
+  },
+  "personalization": {
+    "description": "How the chat welcome page greets you and how much it shows.",
+    "nameLabel": "Your name",
+    "namePlaceholder": "e.g. Max",
+    "restoreSections": "Restore hidden welcome sections",
+    "styleHint": "Rich shows an animated backdrop and capability cards; minimal keeps it compact. Mobile always uses minimal.",
+    "styleLabel": "Welcome layout",
+    "styleMinimal": "Minimal",
+    "styleRich": "Rich",
+    "title": "Personalization"
+  },
+  "preview": {
+    "assistant": "Here's a preview of your theme.",
+    "badge": "Sample",
+    "buttons": {
+      "destructive": "Delete",
+      "ghost": "Ghost",
+      "outline": "Outline",
+      "primary": "Primary",
+      "secondary": "Secondary"
+    },
+    "code": "const theme = \"cognia\"",
+    "hint": "Reflects your current theme, density, spacing, and fonts.",
+    "inputAria": "Sample input",
+    "inputSample": "Sample text",
+    "switchAria": "Sample toggle",
+    "table": {
+      "col1": "Item",
+      "col2": "Value",
+      "row1": "Messages",
+      "row2": "Tokens"
+    },
+    "title": "Live preview",
+    "tokensLabel": "Other tokens",
+    "user": "Looks great!",
+    "windowTitle": "Preview"
+  },
+  "reduceMotionHint": "Disables non-essential animations and transitions.",
+  "reduceMotionLabel": "Reduce motion",
+  "reset": {
+    "body": "This will clear all custom themes, custom CSS, and background settings. Your uploaded wallpaper images will be preserved.",
+    "button": "Reset appearance",
+    "cancel": "Cancel",
+    "confirm": "Reset",
+    "title": "Reset appearance settings?"
+  },
+  "resetToDefault": "Reset {name} to default",
+  "tabs": {
+    "a11y": "Accessibility",
+    "advanced": "Advanced",
+    "auto": "Auto",
+    "components": "Components",
+    "custom": "Custom theme",
+    "import": "Import",
+    "layout": "Layout",
+    "theme": "Theme",
+    "themePack": "Theme packs",
+    "typography": "Typography",
+    "wallpaper": "Wallpaper"
+  },
+  "theme": {
+    "dark": "Dark",
+    "light": "Light",
+    "system": "Follow system"
+  },
+  "themeLabel": "Theme",
+  "themePack": {
+    "apply": "Apply",
+    "description": "One-click bundles contributed by plugins — theme, fonts, wallpaper, density, radius, and motion applied together.",
+    "empty": "No theme packs available. Enable a plugin that contributes themePacks to see them here.",
+    "title": "Theme packs"
+  },
+  "title": "Appearance",
+  "typographyPanel": {
+    "fontsTitle": "Typography",
+    "layoutTitle": "Layout & density"
+  },
+  "usageDisplay": {
+    "hint": {
+      "detailed": "Every section expanded with extra columns, per-session detail, and raw snapshots.",
+      "simplified": "Headline stat tiles and current-window gauges only — charts collapse to a summary.",
+      "standard": "The full dashboard with charts and the model and session tables."
+    },
+    "label": "Usage display mode",
+    "mode": {
+      "detailed": "Detailed",
+      "simplified": "Simplified",
+      "standard": "Standard"
+    }
+  },
+  "vscode": {
+    "activateButton": "Apply",
+    "activeLabel": "Active",
+    "browse": "Browse files",
+    "cancelButton": "Cancel",
+    "deactivateButton": "Use preset",
+    "description": "Drop in a VSCode color theme JSON or a .vsix package. Only color tokens are read — extension code is ignored.",
+    "disablePlugin": {
+      "body": "Disable plugin “{name}”? Themes contributed by this plugin will be removed from the gallery. Any custom themes you've already activated stay in your library.",
+      "cancel": "Cancel",
+      "confirm": "Disable",
+      "title": "Disable plugin?"
+    },
+    "drop": "Drop a .json or .vsix file here",
+    "errorParse": "Could not parse theme file.",
+    "errorTitle": "Import failed",
+    "errorVsix": "Could not read .vsix package.",
+    "filter": {
+      "all": "All",
+      "dark": "Dark",
+      "light": "Light"
+    },
+    "history": "History",
+    "importButton": "Import",
+    "importShort": "Import…",
+    "imported": "Imported {count, plural, one {# theme} other {# themes}}.",
+    "legend": "VSCode-inspired presets",
+    "manifestTitle": "Imported from VSCode",
+    "menu": {
+      "aria": "Theme actions for {name}",
+      "delete": "Delete imported",
+      "disablePlugin": "Disable source plugin",
+      "editCopy": "Edit copy",
+      "setActive": "Set active"
+    },
+    "noResults": "No themes match the current filters.",
+    "noThemes": "No themes found in this package.",
+    "removeButton": "Remove",
+    "search": {
+      "placeholder": "Search VSCode themes…"
+    },
+    "selectThemes": "Select themes to import",
+    "source": {
+      "builtin": "Built-in",
+      "fromPlugin": "From plugin: {name}",
+      "imported": "Imported"
+    },
+    "timeout": "Parsing timed out — the file may be corrupt. Try a smaller .vsix.",
+    "title": "Import VSCode themes",
+    "variant": {
+      "dark": "Dark",
+      "light": "Light"
+    }
+  },
+  "wallpaper": {
+    "addCustom": "Custom",
+    "aria": {
+      "delete": "Delete {name}"
+    },
+    "blurLabel": "Blur",
+    "browse": "Browse files",
+    "deleteLabel": "Delete wallpaper",
+    "description": "Apply an image, gradient, or solid color as the background. Built-in presets are pre-loaded; uploads stay on your device.",
+    "dropHint": "Drop an image here, or click below",
+    "enabledLabel": "Enable background",
+    "formats": "PNG, JPEG, WebP, GIF, AVIF · up to 32 MB",
+    "galleryTitle": "Gallery",
+    "gradient": {
+      "angle": "Angle",
+      "end": "End",
+      "namePlaceholder": "Gradient name",
+      "save": "Add to gallery",
+      "start": "Start",
+      "title": "Build a gradient"
+    },
+    "generator": {
+      "accent": "Generated accent color",
+      "action": "Generate matching theme",
+      "created": "A matching light/dark theme was created and activated.",
+      "description": "Extract a local accent color from this image and build a readable light/dark theme.",
+      "error": "Could not analyze this image. The wallpaper is unchanged.",
+      "themeName": "{name} palette",
+      "title": "Generate theme from wallpaper",
+      "variant": {
+        "dark": "Dark base",
+        "light": "Light base"
+      }
+    },
+    "invalidType": "Unsupported file type. Use PNG, JPEG, WebP, GIF or AVIF.",
+    "noActive": "No wallpaper selected.",
+    "opacity": {
+      "autoFix": "Auto-fix",
+      "contrastLabel": "Estimated text contrast",
+      "fail": "Text nearly unreadable. Lower opacity to restore contrast.",
+      "warn": "Below WCAG AA — text may be hard to read"
+    },
+    "opacityLabel": "Opacity",
+    "pluginBadge": "Plugin",
+    "positionCenter": "Center",
+    "positionContain": "Contain",
+    "positionCover": "Cover",
+    "positionLabel": "Position",
+    "positionTile": "Tile",
+    "scope": {
+      "all": {
+        "desc": "Everything including sidebar",
+        "label": "Whole app"
+      },
+      "canvas": {
+        "desc": "Workbench / canvas only",
+        "label": "Canvas"
+      },
+      "chat": {
+        "desc": "Only the chat panel",
+        "label": "Chat area"
+      },
+      "global": {
+        "desc": "Excludes sidebar",
+        "label": "Main content"
+      },
+      "legend": "Background scope",
+      "sidebar": {
+        "desc": "Navigation rail only",
+        "label": "Sidebar"
+      }
+    },
+    "scopeAll": "Whole app",
+    "scopeCanvas": "Canvas panel",
+    "scopeChat": "Chat panel",
+    "scopeGlobal": "Global",
+    "scopeLabel": "Apply to",
+    "scopeSidebar": "Sidebar",
+    "tiles": {
+      "dropHint": "Drop an image anywhere here",
+      "gradient": "Gradient",
+      "gradientAria": "Create a gradient wallpaper",
+      "upload": "Upload",
+      "uploadAria": "Upload a wallpaper image"
+    },
+    "title": "Wallpaper",
+    "tooLarge": "File is too large (max 32 MB).",
+    "uploadHint": "Drop an image here or browse",
+    "uploading": "Uploading…"
+  }
+}

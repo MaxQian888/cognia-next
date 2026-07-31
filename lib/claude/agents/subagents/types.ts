@@ -21,8 +21,46 @@ export interface AgentDefinition {
   disallowedTools?: string[]
   /** Model alias (`opus` / `sonnet` / `haiku`) or full id; defaults to the parent's model. */
   model?: string
+  /**
+   * Provider id this subagent runs on (`anthropic` / `openai` / `deepseek` / …).
+   * Honored by the renderer dispatch path (`executeAgent` / `runCliSubagent`),
+   * which can route a subagent to a DIFFERENT provider than the parent session.
+   * NOTE: the SDK-native Task tool (Anthropic channel) ignores this — cross-
+   * provider runs flow through the `dispatch_agent` plugin tool, not native Task.
+   */
+  provider?: string
   /** Max round-trips before the SDK stops looping the subagent. */
   maxTurns?: number
   /** Reasoning effort dial. */
   effort?: "low" | "medium" | "high" | "xhigh" | "max"
+  /**
+   * Optional external-agent preset id backing this subagent (Thread A2). When
+   * set, `dispatchSubagent` routes the run to the external CLI agent via the
+   * {@link ExternalAgentManager} instead of the built-in executor; `prompt` /
+   * `tools` remain advisory (the dispatcher still advertises the def by
+   * `description`). Honored at execute-time only.
+   */
+  externalPresetId?: string
+  /**
+   * MCP server ids/names forwarded into the external agent's ACP session when
+   * this subagent runs on an external preset (see {@link PluginSubagentDef}).
+   * Ignored by the built-in executor. Honored at execute-time only.
+   */
+  mcpServerIds?: string[]
+  /**
+   * Opt this subagent into nested dispatch — when it runs, expose the
+   * `dispatch_agent` tool so it can dispatch further subagents (up to the
+   * effective depth cap). Default `false` (leaf). Gated by app-level
+   * `subagentNesting.enabled`.
+   */
+  allowNesting?: boolean
+  /** Per-subagent override of the max nesting level (combined via `min`). */
+  maxDepth?: number
+  /**
+   * Hide from UI pickers / @-mention autocomplete while staying dispatchable
+   * (OpenCode `hidden` semantics). Model-facing discovery is unaffected.
+   */
+  hidden?: boolean
+  /** Fully off: excluded from dispatch, discovery, and every picker. */
+  disabled?: boolean
 }

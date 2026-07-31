@@ -20,14 +20,14 @@
  * fallible node, orthogonal to the kind-specific decision handles.
  */
 
-import type { WorkflowNodeKind } from "@/types/workflow/visual"
+import type { WorkflowNodeErrorHandling, WorkflowNodeKind } from "@/types/workflow/visual"
 
 export interface OutputHandleSpec {
   /** Stable handle id — used as the edge's `sourceHandle` and matched against
    * the executor's `decision`. */
   id: string
   /** Render intent: fixed kinds translate via i18n; `case` uses `label`. */
-  kind: "true" | "false" | "case" | "default"
+  kind: "true" | "false" | "case" | "default" | "approved" | "rejected"
   /** Author-supplied display label (case handles only). */
   label?: string
 }
@@ -49,6 +49,14 @@ interface SwitchCaseShape {
  * single unlabeled output handle (all v1 nodes, and every non-routing kind).
  */
 export function outputHandlesFor(node: NodeShapeForHandles): OutputHandleSpec[] | null {
+  // The approval gate routes via fixed decision handles from v1 — it has no
+  // single-output legacy shape to stay compatible with (ADR 0061 P2).
+  if (node.kind === "action.approval.request") {
+    return [
+      { id: "approved", kind: "approved" },
+      { id: "rejected", kind: "rejected" },
+    ]
+  }
   if (node.typeVersion < 2) return null
   if (node.kind === "flow.branch") {
     return [
@@ -81,10 +89,47 @@ const DEFAULT_TYPE_VERSIONS: Partial<Record<WorkflowNodeKind, number>> = {
   // New loops author as container sub-canvases; legacy flat-transform loops
   // (typeVersion 1) keep running unchanged.
   "flow.loop": 2,
+  // v2 adds routed mode (provider-routing engine), the PII gate, streaming,
+  // and usage reporting; explicit mode stays wire-compatible with v1.
+  "ai.prompt": 2,
+  // New group frames are real containers (host children via parentId); legacy
+  // v1 groups stay visual-only rectangles rendered by the workflow node.
+  "annotation.group": 2,
 }
 
 export function defaultTypeVersionFor(kind: WorkflowNodeKind): number {
   return DEFAULT_TYPE_VERSIONS[kind] ?? 1
+}
+
+/**
+ * Whether a kind may carry per-node error handling (retry / onError). The
+ * fallible families — actions, AI, data, io, ocr, eval. Triggers never
+ * "fail downstream", annotations don't execute, and flow-control nodes are
+ * the routing fabric itself (their failure is a workflow bug, not a
+ * runtime condition to route around).
+ */
+export function supportsErrorHandling(kind: WorkflowNodeKind | string): boolean {
+  return (
+    kind.startsWith("action.") ||
+    kind.includes(".action.") ||
+    kind.startsWith("ai.") ||
+    kind.startsWith("data.") ||
+    kind.startsWith("io.") ||
+    kind.startsWith("ocr.") ||
+    kind.startsWith("eval.")
+  )
+}
+
+/**
+ * Whether the node renders a dedicated "error" output handle — true only
+ * when the author opted into `onError: "errorBranch"` on a kind that
+ * supports error handling.
+ */
+export function hasErrorHandle(node: {
+  kind: WorkflowNodeKind | string
+  errorHandling?: WorkflowNodeErrorHandling
+}): boolean {
+  return supportsErrorHandling(node.kind) && node.errorHandling?.onError === "errorBranch"
 }
 
 /**

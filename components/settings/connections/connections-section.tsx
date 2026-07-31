@@ -26,6 +26,8 @@ import { AuditTab } from "./tabs/audit-tab"
 import { ConversationsTab } from "./tabs/conversations-tab"
 import { InboxTab } from "./tabs/inbox-tab"
 import { CapabilityMatrixTab } from "./tabs/capability-matrix-tab"
+import { LabelsTab } from "./tabs/labels-tab"
+import { CannedResponsesTab } from "./tabs/canned-responses-tab"
 
 const CONNECTIONS_TAB_PARAM = "connectionsTab"
 
@@ -37,6 +39,8 @@ export type ConnectionsTabId =
   | "outbound"
   | "audit"
   | "capability"
+  | "labels"
+  | "canned"
 
 const TAB_IDS: ConnectionsTabId[] = [
   "overview",
@@ -46,6 +50,8 @@ const TAB_IDS: ConnectionsTabId[] = [
   "outbound",
   "audit",
   "capability",
+  "labels",
+  "canned",
 ]
 
 function isConnectionsTab(value: string | null): value is ConnectionsTabId {
@@ -68,9 +74,16 @@ export function ConnectionsSection() {
 
   const desktop = usePlatform() === "tauri"
 
+  // Tab bodies that are plain content scroll as a single block inside the fixed
+  // frame. The Adapters tab owns a master-detail layout that manages its own
+  // internal scroll (mirroring the AI Provider page), so it fills the frame
+  // without an outer scroll region.
+  const scrollBlock = "mt-4 min-h-0 flex-1 overflow-y-auto pr-1"
+  const fillBlock = "mt-4 min-h-0 flex-1 overflow-hidden"
+
   return (
-    <div className="space-y-6">
-      <div className="space-y-1">
+    <div className="flex h-full min-h-0 flex-col gap-4">
+      <div className="shrink-0 space-y-1">
         <Label className="flex items-center gap-2">
           <LinkIcon className="size-4" />
           {t("title")}
@@ -79,42 +92,68 @@ export function ConnectionsSection() {
       </div>
 
       {!desktop && (
-        <Alert role="status" aria-label={t("webModeBanner.ariaLabel")}>
+        <Alert role="status" aria-label={t("webModeBanner.ariaLabel")} className="shrink-0">
           <MonitorIcon className="size-4" />
           <AlertDescription>{t("webModeBanner.body")}</AlertDescription>
         </Alert>
       )}
 
-      <Tabs value={activeTab} onValueChange={onTabChange}>
-        <TabsList>
-          <TabsTrigger value="overview">{t("tabs.overview")}</TabsTrigger>
-          <TabsTrigger value="adapters">{t("tabs.adapters")}</TabsTrigger>
-          <TabsTrigger value="conversations">{t("tabs.conversations")}</TabsTrigger>
-          <TabsTrigger value="inbox">{t("tabs.inbox")}</TabsTrigger>
-          <TabsTrigger value="outbound">{t("tabs.outbound")}</TabsTrigger>
-          <TabsTrigger value="audit">{t("tabs.audit")}</TabsTrigger>
-          <TabsTrigger value="capability">{t("tabs.capability")}</TabsTrigger>
+      <Tabs value={activeTab} onValueChange={onTabChange} className="min-h-0 flex-1">
+        <TabsList className="w-full shrink-0 justify-start overflow-x-auto">
+          <TabsTrigger value="overview" className="shrink-0">
+            {t("tabs.overview")}
+          </TabsTrigger>
+          <TabsTrigger value="adapters" className="shrink-0">
+            {t("tabs.adapters")}
+          </TabsTrigger>
+          <TabsTrigger value="conversations" className="shrink-0">
+            {t("tabs.conversations")}
+          </TabsTrigger>
+          <TabsTrigger value="inbox" className="shrink-0">
+            {t("tabs.inbox")}
+          </TabsTrigger>
+          <TabsTrigger value="outbound" className="shrink-0">
+            {t("tabs.outbound")}
+          </TabsTrigger>
+          <TabsTrigger value="audit" className="shrink-0">
+            {t("tabs.audit")}
+          </TabsTrigger>
+          <TabsTrigger value="capability" className="shrink-0">
+            {t("tabs.capability")}
+          </TabsTrigger>
+          <TabsTrigger value="labels" className="shrink-0">
+            {t("tabs.labels")}
+          </TabsTrigger>
+          <TabsTrigger value="canned" className="shrink-0">
+            {t("tabs.canned")}
+          </TabsTrigger>
         </TabsList>
-        <TabsContent value="overview" className="mt-4">
+        <TabsContent value="overview" className={scrollBlock}>
           <OverviewTab />
         </TabsContent>
-        <TabsContent value="adapters" className="mt-4">
+        <TabsContent value="adapters" className={fillBlock}>
           <AdaptersTab />
         </TabsContent>
-        <TabsContent value="conversations" className="mt-4">
+        <TabsContent value="conversations" className={scrollBlock}>
           <ConversationsTab />
         </TabsContent>
-        <TabsContent value="inbox" className="mt-4">
+        <TabsContent value="inbox" className={scrollBlock}>
           <InboxTab />
         </TabsContent>
-        <TabsContent value="outbound" className="mt-4">
+        <TabsContent value="outbound" className={scrollBlock}>
           <OutboundTab />
         </TabsContent>
-        <TabsContent value="audit" className="mt-4">
+        <TabsContent value="audit" className={scrollBlock}>
           <AuditTab />
         </TabsContent>
-        <TabsContent value="capability" className="mt-4">
+        <TabsContent value="capability" className={scrollBlock}>
           <CapabilityMatrixTab />
+        </TabsContent>
+        <TabsContent value="labels" className={scrollBlock}>
+          <LabelsTab />
+        </TabsContent>
+        <TabsContent value="canned" className={scrollBlock}>
+          <CannedResponsesTab />
         </TabsContent>
       </Tabs>
     </div>

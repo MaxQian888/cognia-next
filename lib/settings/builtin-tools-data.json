@@ -105,11 +105,168 @@
       ]
     },
     {
+      "id": "coreFiles",
+      "nameKey": "coreFiles",
+      "descriptionKey": "coreFilesDesc",
+      "riskLevel": "medium",
+      "requiresApproval": true,
+      "desktopOnly": true,
+      "tools": [
+        {
+          "name": "grep",
+          "descriptionKey": "tools.coreGrep",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
+        },
+        {
+          "name": "glob",
+          "descriptionKey": "tools.coreGlob",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
+        },
+        {
+          "name": "read",
+          "descriptionKey": "tools.coreRead",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
+        },
+        {
+          "name": "ls",
+          "descriptionKey": "tools.coreLs",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
+        },
+        {
+          "name": "edit",
+          "descriptionKey": "tools.coreEdit",
+          "riskLevel": "medium",
+          "requiresApproval": true,
+          "alwaysLoad": false
+        },
+        {
+          "name": "multi_edit",
+          "descriptionKey": "tools.coreMultiEdit",
+          "riskLevel": "medium",
+          "requiresApproval": true,
+          "alwaysLoad": false
+        },
+        {
+          "name": "write",
+          "descriptionKey": "tools.coreWrite",
+          "riskLevel": "medium",
+          "requiresApproval": true,
+          "alwaysLoad": false
+        },
+        {
+          "name": "bash",
+          "descriptionKey": "tools.coreBash",
+          "riskLevel": "high",
+          "requiresApproval": true,
+          "alwaysLoad": false
+        },
+        {
+          "name": "TodoWrite",
+          "descriptionKey": "tools.coreTodoWrite",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
+        },
+        {
+          "name": "bash_output",
+          "descriptionKey": "tools.coreBashOutput",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
+        },
+        {
+          "name": "kill_shell",
+          "descriptionKey": "tools.coreKillShell",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "NotebookEdit",
+          "descriptionKey": "tools.coreNotebookEdit",
+          "riskLevel": "medium",
+          "requiresApproval": true,
+          "alwaysLoad": false
+        },
+        {
+          "name": "apply_patch",
+          "descriptionKey": "tools.coreApplyPatch",
+          "riskLevel": "medium",
+          "requiresApproval": true,
+          "alwaysLoad": false
+        },
+        {
+          "name": "TaskCreate",
+          "descriptionKey": "tools.coreTaskCreate",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
+        },
+        {
+          "name": "TaskGet",
+          "descriptionKey": "tools.coreTaskGet",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
+        },
+        {
+          "name": "TaskList",
+          "descriptionKey": "tools.coreTaskList",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
+        },
+        {
+          "name": "TaskUpdate",
+          "descriptionKey": "tools.coreTaskUpdate",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
+        },
+        {
+          "name": "list_shells",
+          "descriptionKey": "tools.coreListShells",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
+        },
+        {
+          "name": "Monitor",
+          "descriptionKey": "tools.coreMonitor",
+          "riskLevel": "high",
+          "requiresApproval": true,
+          "alwaysLoad": true
+        },
+        {
+          "name": "monitor_cancel",
+          "descriptionKey": "tools.coreMonitorCancel",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
+        },
+        {
+          "name": "monitor_list",
+          "descriptionKey": "tools.coreMonitorList",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
+        }
+      ]
+    },
+    {
       "id": "git",
       "nameKey": "gitOperations",
       "descriptionKey": "gitOperationsDesc",
       "riskLevel": "low",
-      "requiresApproval": false,
+      "requiresApproval": true,
       "desktopOnly": true,
       "tools": [
         {
@@ -173,6 +330,20 @@
           "descriptionKey": "tools.gitHistory",
           "riskLevel": "low",
           "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "git_stage",
+          "descriptionKey": "tools.gitStage",
+          "riskLevel": "medium",
+          "requiresApproval": true,
+          "alwaysLoad": false
+        },
+        {
+          "name": "git_commit",
+          "descriptionKey": "tools.gitCommit",
+          "riskLevel": "medium",
+          "requiresApproval": true,
           "alwaysLoad": false
         }
       ]
@@ -278,6 +449,13 @@
           "riskLevel": "low",
           "requiresApproval": false,
           "alwaysLoad": true
+        },
+        {
+          "name": "current_time",
+          "descriptionKey": "tools.currentTime",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": true
         }
       ]
     },
@@ -377,6 +555,151 @@
           "descriptionKey": "tools.lspDiagnostics",
           "riskLevel": "low",
           "requiresApproval": false,
+          "alwaysLoad": false
+        }
+      ]
+    },
+    {
+      "id": "codeGraph",
+      "nameKey": "codeGraph",
+      "descriptionKey": "codeGraphDesc",
+      "riskLevel": "low",
+      "requiresApproval": false,
+      "desktopOnly": true,
+      "tools": [
+        {
+          "name": "codegraph_status",
+          "descriptionKey": "tools.codegraphStatus",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "codegraph_search",
+          "descriptionKey": "tools.codegraphSearch",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "codegraph_node",
+          "descriptionKey": "tools.codegraphNode",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "codegraph_callers",
+          "descriptionKey": "tools.codegraphCallers",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "codegraph_callees",
+          "descriptionKey": "tools.codegraphCallees",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "codegraph_impact",
+          "descriptionKey": "tools.codegraphImpact",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "codegraph_context",
+          "descriptionKey": "tools.codegraphContext",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "codegraph_explore",
+          "descriptionKey": "tools.codegraphExplore",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "codegraph_files",
+          "descriptionKey": "tools.codegraphFiles",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        }
+      ]
+    },
+    {
+      "id": "astGrep",
+      "nameKey": "astGrep",
+      "descriptionKey": "astGrepDesc",
+      "riskLevel": "high",
+      "requiresApproval": true,
+      "desktopOnly": true,
+      "tools": [
+        {
+          "name": "ast_grep_search",
+          "descriptionKey": "tools.astGrepSearch",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        },
+        {
+          "name": "ast_grep_replace",
+          "descriptionKey": "tools.astGrepReplace",
+          "riskLevel": "high",
+          "requiresApproval": true,
+          "alwaysLoad": false
+        }
+      ]
+    },
+    {
+      "id": "dependencyResearch",
+      "nameKey": "dependencyResearch",
+      "descriptionKey": "dependencyResearchDesc",
+      "riskLevel": "medium",
+      "requiresApproval": true,
+      "desktopOnly": true,
+      "tools": [
+        {
+          "name": "clone_dep_source",
+          "descriptionKey": "tools.cloneDepSource",
+          "riskLevel": "medium",
+          "requiresApproval": true,
+          "alwaysLoad": false
+        },
+        {
+          "name": "list_cloned_deps",
+          "descriptionKey": "tools.listClonedDeps",
+          "riskLevel": "low",
+          "requiresApproval": false,
+          "alwaysLoad": false
+        }
+      ]
+    },
+    {
+      "id": "webclone",
+      "nameKey": "webclone",
+      "descriptionKey": "webcloneDesc",
+      "riskLevel": "medium",
+      "requiresApproval": true,
+      "desktopOnly": true,
+      "tools": [
+        {
+          "name": "web_clone",
+          "descriptionKey": "tools.webClone",
+          "riskLevel": "medium",
+          "requiresApproval": true,
+          "alwaysLoad": false
+        },
+        {
+          "name": "web_clone_convert",
+          "descriptionKey": "tools.webCloneConvert",
+          "riskLevel": "medium",
+          "requiresApproval": true,
           "alwaysLoad": false
         }
       ]

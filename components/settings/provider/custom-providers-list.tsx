@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
-import type { CustomProviderSettings as TypesCustomProviderSettings } from "@/types/provider"
+import type { CustomProviderSettings as TypesCustomProviderSettings } from "@cognia/provider-types"
 import type { CustomProviderSettings as StoreCustomProviderSettings } from "@/stores/settings/settings-store"
 
 type AnyCustomProvider = TypesCustomProviderSettings | StoreCustomProviderSettings

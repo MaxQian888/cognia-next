@@ -8,12 +8,15 @@
 // only ones whose `nativeDirectory` we recorded.
 
 import {
+  skillsCatalogGet,
   skillsInstallMirrored,
   skillsInstallNative,
   skillsScanNative,
   type InstallSkillMirroredRequest,
+  type InstallSkillMirroredResponse,
   type NativeSkill,
   type NativeSkillResource,
+  type SkillBundleUploadHandle,
   type SkillsTarget,
 } from "@/lib/claude/ipc"
 import { bulkImportSkills, getSkill, listSkills, updateSkill } from "@/lib/db/skills"
@@ -24,8 +27,15 @@ import {
 } from "@/lib/db/skill-resources"
 import { parseSkillMarkdown, serializeSkill, skillFilename } from "@/lib/claude/skills-io"
 import { isTauri } from "@/lib/tauri"
+import { getActiveRemoteTransport } from "@/lib/tauri/transport-routing"
+import type { Transport } from "@/lib/tauri/transport-types"
+import {
+  activeHostSupportsFeature,
+  useRemoteHostStore,
+} from "@/stores/remote-host/remote-host-store"
 import { resolveSkillBundleMirrors, useSettingsStore } from "@/stores/settings/settings-store"
-import type { Skill, SkillResource } from "@/lib/claude/types"
+import type { Skill, SkillResource } from "@cognia/agent-config-types"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
 
 export interface SyncResult {
   pushed: number
@@ -35,6 +45,139 @@ export interface SyncResult {
 }
 
 const TIMESTAMP_FUDGE_MS = 1000
+
+function hasActiveRemoteHost(): boolean {
+  return useRemoteHostStore.getState().activeHostId !== null
+}
+
+export function canReadHostSkills(): boolean {
+  if (hasActiveRemoteHost()) {
+    return activeHostSupportsFeature("skills.catalog", "skills_catalog_get")
+  }
+  return isTauri()
+}
+
+export function canWriteHostSkills(): boolean {
+  if (hasActiveRemoteHost()) {
+    return [
+      "skills_bundle_upload_open",
+      "skills_bundle_upload_write",
+      "skills_bundle_upload_commit",
+      "skills_bundle_upload_abort",
+      "skills_install_atomic",
+    ].every((operation) => activeHostSupportsFeature("skills.atomic-install", operation))
+  }
+  return isTauri()
+}
+
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", Uint8Array.from(bytes))
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("")
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = ""
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000))
+  }
+  return btoa(binary)
+}
+
+async function installRemoteAtomic(
+  request: InstallSkillMirroredRequest,
+  target: RemoteSkillTarget
+): Promise<InstallSkillMirroredResponse> {
+  const bytes = new TextEncoder().encode(JSON.stringify(request))
+  const lease = await remoteSkillCall<{ token: string }>(target, "host_admin_lease_issue", {
+    operations: [
+      "skills_bundle_upload_open",
+      "skills_bundle_upload_write",
+      "skills_bundle_upload_commit",
+      "skills_bundle_upload_abort",
+      "skills_install_atomic",
+    ],
+    ttlSeconds: 10 * 60,
+    confirmed: true,
+  })
+  const handle = await remoteSkillCall<SkillBundleUploadHandle>(
+    target,
+    "skills_bundle_upload_open",
+    {
+      request: {
+        expectedSize: bytes.byteLength,
+        expectedHash: await sha256Hex(bytes),
+      },
+      adminLease: lease.token,
+    }
+  )
+  try {
+    let offset = 0
+    while (offset < bytes.byteLength) {
+      const chunk = bytes.subarray(offset, offset + handle.chunkBytes)
+      offset = await remoteSkillCall<number>(target, "skills_bundle_upload_write", {
+        handleId: handle.handleId,
+        offset,
+        dataBase64: bytesToBase64(chunk),
+        chunkHash: await sha256Hex(chunk),
+        adminLease: lease.token,
+      })
+    }
+    await remoteSkillCall<void>(target, "skills_bundle_upload_commit", {
+      handleId: handle.handleId,
+      adminLease: lease.token,
+    })
+    return await remoteSkillCall<InstallSkillMirroredResponse>(target, "skills_install_atomic", {
+      handleId: handle.handleId,
+      adminLease: lease.token,
+    })
+  } catch (error) {
+    await target.transport
+      .call<void>("skills_bundle_upload_abort", {
+        handleId: handle.handleId,
+        adminLease: lease.token,
+      })
+      .catch(() => undefined)
+    throw error
+  }
+}
+
+interface RemoteSkillTarget {
+  hostId: string
+  transport: Transport
+}
+
+function captureRemoteSkillTarget(expectedHostId?: string): RemoteSkillTarget | null {
+  const hostId = useRemoteHostStore.getState().activeHostId
+  if (!hostId) return null
+  if (expectedHostId && hostId !== expectedHostId) {
+    throw new Error("REMOTE_RESPONSE_STALE: active host changed during Skill sync")
+  }
+  const remoteTransport = getActiveRemoteTransport()
+  if (!remoteTransport) {
+    throw new Error("REMOTE_PROXY_DISCONNECTED: active host transport is unavailable")
+  }
+  return { hostId, transport: remoteTransport }
+}
+
+function assertRemoteSkillTarget(target: RemoteSkillTarget): void {
+  const state = useRemoteHostStore.getState()
+  if (state.activeHostId !== target.hostId || getActiveRemoteTransport() !== target.transport) {
+    throw new Error("REMOTE_RESPONSE_STALE: active host changed during Skill sync")
+  }
+}
+
+async function remoteSkillCall<T>(
+  target: RemoteSkillTarget,
+  name: string,
+  args: Record<string, unknown>
+): Promise<T> {
+  assertRemoteSkillTarget(target)
+  const result = await target.transport.call<T>(name, args)
+  assertRemoteSkillTarget(target)
+  return result
+}
 
 function slug(name: string): string {
   return (
@@ -142,11 +285,18 @@ export function activeMirrorTargets(): SkillsTarget[] {
  * idempotency hook the bundle dialog relies on for "re-import same zip ⇒
  * nothing happens" semantics.
  */
-export async function pushOneToNative(skillId: string): Promise<SyncResult> {
+export async function pushOneToNative(
+  skillId: string,
+  expectedRemoteHostId?: string
+): Promise<SyncResult> {
   const result: SyncResult = { pushed: 0, pulled: 0, skipped: 0, errors: [] }
-  if (!isTauri()) {
-    return { ...result, errors: [{ name: "(env)", error: "Desktop only." }] }
+  if (!canWriteHostSkills()) {
+    return {
+      ...result,
+      errors: [{ name: "(env)", error: "The active host does not support atomic Skill writes." }],
+    }
   }
+  const remoteTarget = captureRemoteSkillTarget(expectedRemoteHostId)
   const skill = await getSkill(skillId)
   if (!skill) {
     return { ...result, errors: [{ name: skillId, error: "Skill not found." }] }
@@ -161,7 +311,7 @@ export async function pushOneToNative(skillId: string): Promise<SyncResult> {
     // assumption is "if our recorded value matches and the canonical
     // directory we'd write to is recorded on the row, nothing's drifted".
     // This shortcuts the cost of a clean+write on every "Sync now" click.
-    if (skill.syncFingerprint === fp && skill.nativeDirectory) {
+    if (!remoteTarget && skill.syncFingerprint === fp && skill.nativeDirectory) {
       return { ...result, skipped: 1 }
     }
     const dirName = skill.nativeDirectory
@@ -175,7 +325,15 @@ export async function pushOneToNative(skillId: string): Promise<SyncResult> {
       targets: activeMirrorTargets(),
       trashBeforeClean: !!skill.syncFingerprint && skill.syncFingerprint !== fp,
     }
-    const response = await skillsInstallMirrored(request)
+    if (
+      remoteTarget &&
+      !hasNoLeakingPiiDeep({ content: request.content, resources: request.resources })
+    ) {
+      throw new Error("remote Skill install rejected by the renderer PII gate")
+    }
+    const response = remoteTarget
+      ? await installRemoteAtomic(request, remoteTarget)
+      : await skillsInstallMirrored(request)
     // Prefer the cognia outcome as the row's `nativeDirectory`: the
     // cognia copy is canonical, the others are throwaway projections.
     const cognia = response.targets.find((t) => t.target === "cognia")
@@ -210,12 +368,16 @@ void skillsInstallNative
  */
 export async function pushAllToNative(): Promise<SyncResult> {
   const result: SyncResult = { pushed: 0, pulled: 0, skipped: 0, errors: [] }
-  if (!isTauri()) {
-    return { ...result, errors: [{ name: "(env)", error: "Desktop only." }] }
+  if (!canWriteHostSkills()) {
+    return {
+      ...result,
+      errors: [{ name: "(env)", error: "The active host does not support atomic Skill writes." }],
+    }
   }
+  const remoteHostId = useRemoteHostStore.getState().activeHostId ?? undefined
   const all = await listSkills()
   for (const skill of all) {
-    const one = await pushOneToNative(skill.id)
+    const one = await pushOneToNative(skill.id, remoteHostId)
     result.pushed += one.pushed
     result.skipped += one.skipped
     result.errors.push(...one.errors)
@@ -230,10 +392,17 @@ export async function pushAllToNative(): Promise<SyncResult> {
  */
 export async function pullAllFromNative(): Promise<SyncResult> {
   const result: SyncResult = { pushed: 0, pulled: 0, skipped: 0, errors: [] }
-  if (!isTauri()) {
-    return { ...result, errors: [{ name: "(env)", error: "Desktop only." }] }
+  if (!canReadHostSkills()) {
+    return {
+      ...result,
+      errors: [{ name: "(env)", error: "The active host does not expose its Skills catalog." }],
+    }
   }
-  const native: NativeSkill[] = await skillsScanNative()
+  const native: NativeSkill[] = hasActiveRemoteHost()
+    ? await skillsCatalogGet().then((catalog) =>
+        catalog.cognia.length > 0 ? catalog.cognia : catalog.claude
+      )
+    : await skillsScanNative()
   if (native.length === 0) return result
 
   const local = await listSkills()

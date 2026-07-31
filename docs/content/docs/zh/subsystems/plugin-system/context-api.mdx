@@ -40,7 +40,7 @@ description: 传递给每个插件 activate(ctx) 的唯一运行时对象，由�
 | `ctx.logger` | `context.ts:331` | plugin logger | 否 | `createLogger` |
 | `ctx.storage`（基础） | `context.ts:340` | localStorage | 否 | get/set/delete/keys/clear（`:357-381`） |
 | `ctx.events` | `context.ts:389` | 内存 emitter（合并 ipc、bus `:274-278`） | 否 | on/off/emit/once（`:394-432`） |
-| `ctx.ui` | `context.ts:456` | toasts / dialogs / statusbar | 否 | `showToast:483`、`showDialog:489`、`registerStatusBarItem:519` |
+| `ctx.ui` | `context.ts:456` | toasts / dialogs | 否 | `showToast`（→ sonner）、`showDialog` / `showInputDialog` / `showConfirmDialog`（→ 插件 modal 栈） |
 | `ctx.a2ui` | `context.ts:541` | useA2UIStore | 否 | `createSurface:545`、`updateComponents:553`、`registerComponent:574` |
 | `ctx.agent` | `context.ts:588` | registry + agent-executor | 内联校验 manifest | `registerTool:590`、`executeAgent:615`（toolsEnabled 时需 `agent:control` `:630`）、`runExternalAgent:662`（`agent:dispatch-external` `:668`） |
 | `ctx.settings` | `context.ts:757` | useSettingsStore | 否 | `get:762`、`set:770`、`onChange:781` |

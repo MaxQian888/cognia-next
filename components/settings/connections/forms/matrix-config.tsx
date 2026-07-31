@@ -14,7 +14,7 @@
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { LoaderIcon } from "lucide-react"
+import { CheckCircle2Icon, LoaderIcon, XCircleIcon } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -27,25 +27,40 @@ import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultGroupChatPolicy } from "@/types/connectors/policy"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
 import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
-import { matrixLoginWithPassword } from "@/lib/connectors/adapters/matrix/auth"
+import {
+  matrixLoginWithPassword,
+  probeMatrixAccessToken,
+  type MatrixAccessTokenProbeResult,
+} from "@/lib/connectors/adapters/matrix/auth"
 
 interface MatrixConfigDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Called with the new adapter id after a successful create, so the parent
+   * can auto-select and open the freshly created adapter. */
+  onCreated?: (id: string) => void
   /** null = creating a new instance */
   row: AdapterInstanceRow | null
 }
 
-export function MatrixConfigDialog({ open, onOpenChange, row }: MatrixConfigDialogProps) {
+export function MatrixConfigDialog({
+  open,
+  onOpenChange,
+  row,
+  onCreated,
+}: MatrixConfigDialogProps) {
   const t = useTranslations("settings.connections.matrix")
   const isNew = row === null
-  const settings = (row?.settings ?? {}) as { homeserver?: string }
+  const settings = (row?.settings ?? {}) as { homeserver?: string; deviceId?: string }
 
   const [displayName, setDisplayName] = useState(row?.displayName ?? t("displayNamePlaceholder"))
   const [homeserver, setHomeserver] = useState(settings.homeserver ?? "")
   const [accessToken, setAccessToken] = useState("")
+  const [deviceId, setDeviceId] = useState(settings.deviceId ?? "")
   const [loginUser, setLoginUser] = useState("")
   const [loginPassword, setLoginPassword] = useState("")
+  const [testingToken, setTestingToken] = useState(false)
+  const [tokenTestResult, setTokenTestResult] = useState<MatrixAccessTokenProbeResult | null>(null)
   const [loggingIn, setLoggingIn] = useState(false)
   const [muted, setMuted] = useState<boolean>(row?.muted ?? false)
   const [quietHours, setQuietHours] = useState<QuietHoursValue | null>(row?.quietHours ?? null)
@@ -72,18 +87,53 @@ export function MatrixConfigDialog({ open, onOpenChange, row }: MatrixConfigDial
     }
     setLoggingIn(true)
     try {
-      const { accessToken: token, userId } = await matrixLoginWithPassword(
-        homeserver.trim(),
-        loginUser.trim(),
-        loginPassword
-      )
+      const {
+        accessToken: token,
+        userId,
+        deviceId: loginDeviceId,
+      } = await matrixLoginWithPassword(homeserver.trim(), loginUser.trim(), loginPassword)
       setAccessToken(token)
+      setDeviceId(loginDeviceId ?? "")
       setLoginPassword("")
       toast.success(t("passwordLogin.success", { userId }))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
     } finally {
       setLoggingIn(false)
+    }
+  }
+
+  const handleTestAccessToken = async () => {
+    if (!homeserver.trim()) {
+      toast.error(t("homeserverRequired"))
+      return
+    }
+    if (!accessToken.trim()) {
+      toast.error(t("accessTokenRequired"))
+      return
+    }
+
+    setTestingToken(true)
+    setTokenTestResult(null)
+    try {
+      const result = await probeMatrixAccessToken(homeserver.trim(), accessToken.trim())
+      setTokenTestResult(result)
+      if (result.ok) {
+        // Only adopt the probed device_id when the homeserver actually returns
+        // one — /whoami may omit the spec-optional `device_id` (e.g. appservice
+        // tokens). Blanking it here would drop a deviceId already captured at
+        // password login, so a fresh adapter would save with no device_id.
+        if (result.deviceId) setDeviceId(result.deviceId)
+        toast.success(t("testSucceededToast", { userId: result.userId }))
+      } else {
+        toast.error(t("testFailedToast", { error: result.error }))
+      }
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err)
+      setTokenTestResult({ ok: false, error })
+      toast.error(t("testFailedToast", { error }))
+    } finally {
+      setTestingToken(false)
     }
   }
 
@@ -107,7 +157,11 @@ export function MatrixConfigDialog({ open, onOpenChange, row }: MatrixConfigDial
 
     setSaving(true)
     try {
-      const matrixSettings = { homeserver: homeserver.trim() }
+      const matrixSettings = {
+        ...settings,
+        homeserver: homeserver.trim(),
+        ...(deviceId ? { deviceId } : {}),
+      }
       let adapterId: string
 
       if (isNew) {
@@ -144,6 +198,7 @@ export function MatrixConfigDialog({ open, onOpenChange, row }: MatrixConfigDial
       if (!isNew) emitCredentialsRotated(adapterId)
 
       toast.success(isNew ? t("adapterCreated") : t("adapterUpdated"))
+      if (isNew) onCreated?.(adapterId)
       onOpenChange(false)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
@@ -191,15 +246,60 @@ export function MatrixConfigDialog({ open, onOpenChange, row }: MatrixConfigDial
             {isNew && <span className="ml-1 text-destructive">*</span>}
           </Label>
           <p className="text-xs text-muted-foreground">{t("accessTokenHelp")}</p>
-          <Input
-            id="mx-access-token"
-            type="password"
-            autoComplete="new-password"
-            value={accessToken}
-            onChange={(e) => setAccessToken(e.target.value)}
-            placeholder={isNew ? t("accessTokenPlaceholder") : t("credentialUnchangedPlaceholder")}
-            disabled={saving}
-          />
+          <div className="flex gap-2">
+            <Input
+              id="mx-access-token"
+              type="password"
+              autoComplete="new-password"
+              value={accessToken}
+              onChange={(e) => setAccessToken(e.target.value)}
+              placeholder={
+                isNew ? t("accessTokenPlaceholder") : t("credentialUnchangedPlaceholder")
+              }
+              disabled={saving}
+              className="min-w-0 flex-1"
+            />
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => void handleTestAccessToken()}
+              disabled={saving || testingToken || !desktop}
+              aria-label={t("testAccessTokenAria")}
+              className="shrink-0"
+            >
+              {testingToken ? (
+                <LoaderIcon data-icon="inline-start" className="animate-spin" />
+              ) : (
+                t("testButtonLabel")
+              )}
+            </Button>
+          </div>
+          {tokenTestResult !== null && (
+            <div
+              className={`flex items-start gap-2 rounded-md px-3 py-2 text-xs ${
+                tokenTestResult.ok
+                  ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300"
+                  : "bg-destructive/10 text-destructive"
+              }`}
+              role="status"
+              aria-label={tokenTestResult.ok ? t("testSucceededLabel") : t("testFailedLabel")}
+            >
+              {tokenTestResult.ok ? (
+                <CheckCircle2Icon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              ) : (
+                <XCircleIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              )}
+              <span className="min-w-0 break-words">
+                {tokenTestResult.ok
+                  ? t("testSucceededStatus", { userId: tokenTestResult.userId })
+                  : tokenTestResult.error}
+              </span>
+            </div>
+          )}
+          {!desktop && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">{t("testRequiresDesktop")}</p>
+          )}
         </div>
 
         {/* Inline password-login affordance — fills the token field above. */}

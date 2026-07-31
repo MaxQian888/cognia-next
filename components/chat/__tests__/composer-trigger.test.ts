@@ -21,8 +21,13 @@ describe("detectTrigger — slash mode", () => {
     expect(detectTrigger("see /api/foo", 12)).toBeNull()
   })
 
-  it("does NOT match `/` after a newline (must be at start)", () => {
-    expect(detectTrigger("hi\n/help", 8)).toBeNull()
+  it("matches `/` at the start of a later line", () => {
+    expect(detectTrigger("hi\n/help", 8)).toEqual({
+      kind: "slash",
+      tokenStart: 3,
+      tokenEnd: 8,
+      query: "help",
+    })
   })
 
   it("ends the slash token at whitespace", () => {

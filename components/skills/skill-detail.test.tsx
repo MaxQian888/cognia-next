@@ -20,8 +20,17 @@ jest.mock("@/components/chat/markdown-renderer", () => ({
   ),
 }))
 
+const updateOneMock = jest.fn(async () => undefined)
 jest.mock("@/hooks/skills", () => ({
   useSkillValidation: jest.fn(),
+  useSkillUpdate: () => ({
+    statuses: {},
+    checkAll: jest.fn(),
+    updateOne: updateOneMock,
+    checking: false,
+    updatingId: null,
+    hasUpdate: () => false,
+  }),
 }))
 
 jest.mock("@/lib/tauri", () => ({
@@ -40,9 +49,10 @@ jest.mock("./skill-sync-section", () => ({
   SkillSyncSection: () => <div data-testid="sync-section" />,
 }))
 
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { SkillDetail } from "./skill-detail"
-import type { Skill } from "@/lib/claude/types"
+import { useSkillsStore } from "@/stores/skills"
+import type { Skill } from "@cognia/agent-config-types"
 
 const skill = {
   id: "s1",
@@ -56,6 +66,24 @@ const skill = {
 } as Skill
 
 describe("SkillDetail", () => {
+  it("the single Edit button jumps to the workspace editor (no separate form dialog)", () => {
+    render(<SkillDetail skill={skill} />)
+    const editButton = screen.getByTestId("skill-open-in-editor")
+    // Merged into one entry labeled "Edit" — there is no second "open in editor" button.
+    expect(editButton).toHaveTextContent("card.edit")
+    expect(screen.queryByText("card.openInEditor")).not.toBeInTheDocument()
+    fireEvent.click(editButton)
+    const state = useSkillsStore.getState()
+    expect(state.activeTab).toBe("editor")
+    expect(state.editorWorkspace.activeSkillId).toBe("s1")
+    expect(state.editorWorkspace.openFiles[0]?.draftContent).toBe("...")
+  })
+
+  it("disables the Edit button for built-in skills", () => {
+    render(<SkillDetail skill={{ ...skill, isBuiltIn: true } as Skill} />)
+    expect(screen.getByTestId("skill-open-in-editor")).toBeDisabled()
+  })
+
   it("renders the skill name and description in the header", () => {
     render(<SkillDetail skill={skill} />)
     expect(screen.getByText("Cite sources")).toBeInTheDocument()
@@ -69,5 +97,20 @@ describe("SkillDetail", () => {
     expect(screen.getByText("tabResources")).toBeInTheDocument()
     expect(screen.getByText("tabSecurity")).toBeInTheDocument()
     expect(screen.getByText("tabValidation")).toBeInTheDocument()
+  })
+
+  it("hides the update banner when the skill has no pending update", () => {
+    useSkillsStore.setState({ updateAvailable: {} })
+    render(<SkillDetail skill={skill} />)
+    expect(screen.queryByTestId("skill-update-banner")).not.toBeInTheDocument()
+  })
+
+  it("shows the update banner and runs the one-click update when flagged", async () => {
+    useSkillsStore.setState({ updateAvailable: { s1: true } })
+    render(<SkillDetail skill={skill} />)
+    expect(screen.getByTestId("skill-update-banner")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("skill-update-button"))
+    await waitFor(() => expect(updateOneMock).toHaveBeenCalledWith(skill))
+    useSkillsStore.setState({ updateAvailable: {} })
   })
 })

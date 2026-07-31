@@ -104,6 +104,67 @@ describe("PluginImportDialog", () => {
     expect(upsertPluginMock).not.toHaveBeenCalled()
   })
 
+  // Import is the one install path that skips the marketplace pre-install
+  // chain, so the review list is the only place the user can see what accepting
+  // a hand-written manifest grants. It used to show name/id/version/type only.
+  describe("grant read-out", () => {
+    const stage = (manifest: Record<string, unknown>) =>
+      usePluginsStore.setState({
+        importStaging: {
+          drafts: [
+            {
+              id: "p1",
+              name: "Plugin 1",
+              version: "1.0.0",
+              manifest: { id: "p1", ...manifest },
+              sourceLabel: "manifest.json",
+            },
+          ],
+          sourceLabel: "test bundle",
+          parseErrors: [],
+        },
+      })
+
+    it("lists declared permissions before the user can confirm", () => {
+      stage({ permissions: ["filesystem", "network"] })
+      render(<PluginImportDialog />)
+      expect(screen.getByText("filesystem")).toBeInTheDocument()
+      expect(screen.getByText("network")).toBeInTheDocument()
+      expect(screen.getByText("permissionsDeclared")).toBeInTheDocument()
+    })
+
+    it("separates optional permissions from declared ones", () => {
+      stage({ permissions: ["filesystem"], optionalPermissions: ["clipboard"] })
+      render(<PluginImportDialog />)
+      expect(screen.getByText("permissionsDeclared")).toBeInTheDocument()
+      expect(screen.getByText("permissionsOptional")).toBeInTheDocument()
+      expect(screen.getByText("clipboard")).toBeInTheDocument()
+    })
+
+    it("surfaces the capabilities that get persisted to the plugin row", () => {
+      stage({ capabilities: ["tools", "panels"] })
+      render(<PluginImportDialog />)
+      expect(screen.getByText("tools")).toBeInTheDocument()
+      expect(screen.getByText("panels")).toBeInTheDocument()
+    })
+
+    it("says so explicitly when a manifest declares nothing", () => {
+      stage({ type: "frontend" })
+      render(<PluginImportDialog />)
+      expect(screen.getByText("permissionsNone")).toBeInTheDocument()
+    })
+
+    // The manifest is untrusted JSON — a non-array or mixed-type field must not
+    // throw and must not smuggle a non-string into the permission list.
+    it("ignores malformed permission/capability fields", () => {
+      stage({ permissions: "filesystem", capabilities: [1, "tools", null] })
+      render(<PluginImportDialog />)
+      expect(screen.getByTestId("import-grants-p1")).toBeInTheDocument()
+      expect(screen.getByText("tools")).toBeInTheDocument()
+      expect(screen.queryByText("permissionsDeclared")).not.toBeInTheDocument()
+    })
+  })
+
   it("applies mobile-first w-[95vw] width to DialogContent", () => {
     usePluginsStore.setState({
       importStaging: {

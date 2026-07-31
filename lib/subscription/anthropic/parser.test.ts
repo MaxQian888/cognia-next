@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Real header dump from anthropics/claude-code#12829, verbatim from a 200
 // response on `POST /v1/messages` while a Pro account had ~74% used in the
 // 7-day window and ~2% in the 5-hour window.

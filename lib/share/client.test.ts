@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Coverage for the owner-side share service. Network is mocked; the Dexie
 // mirror uses fake-indexeddb. An explicit endpoint is injected so the tests
 // don't depend on settings/keyring resolution.
@@ -8,7 +9,9 @@ import {
   revokeShareLink,
   getShareStats,
   ShareNotConfiguredError,
+  SharePayloadTooLargeError,
   ShareRequestError,
+  assertShareRequestSize,
 } from "./client"
 import type { ShareEndpoint } from "./config"
 import { decryptShareEnvelope } from "./crypto"
@@ -38,7 +41,8 @@ beforeEach(async () => {
   await getDb().sharedLinks.clear()
   fetchMock = jest.fn()
   ;(globalThis as { fetch: unknown }).fetch = fetchMock
-})
+  // Cold Dexie open walks every schema version and can exceed 5s.
+}, 30_000)
 
 function mockFetchOnce(status: number, json: unknown): void {
   fetchMock.mockResolvedValueOnce({
@@ -50,6 +54,11 @@ function mockFetchOnce(status: number, json: unknown): void {
 }
 
 describe("createShareLink", () => {
+  it("rejects an encrypted request body that exceeds the upload limit", () => {
+    expect(() => assertShareRequestSize("12345678901", 10)).toThrow(SharePayloadTooLargeError)
+    expect(() => assertShareRequestSize("1234567890", 10)).not.toThrow()
+  })
+
   it("encrypts, posts the envelope, and returns a url whose #fragment key decrypts it", async () => {
     let posted: ShareEnvelopeV1 | undefined
     fetchMock.mockImplementation(async (_url: string, init: RequestInit) => {
@@ -99,6 +108,13 @@ describe("createShareLink", () => {
     expect(posted?.burnAfterRead).toBe(true)
   })
 
+  it("persists the per-share ownerToken from the create response", async () => {
+    mockFetchOnce(200, { code: "OwnTok", ownerToken: "owner-secret-abc123", expiresAt: 1 })
+    await createShareLink({ payload: PAYLOAD }, ENDPOINT)
+    const row = await getSharedLinkByCode("OwnTok")
+    expect(row?.ownerToken).toBe("owner-secret-abc123")
+  })
+
   it("throws ShareNotConfiguredError when no upload secret", async () => {
     await expect(
       createShareLink({ payload: PAYLOAD }, { baseUrl: "https://share.test", uploadSecret: "" })
@@ -131,6 +147,19 @@ describe("revokeShareLink", () => {
     await expect(revokeShareLink("G", ENDPOINT)).resolves.toBeUndefined()
     expect((await getSharedLinkByCode("G"))?.revoked).toBe(true)
   })
+
+  it("sends the X-Owner-Token header for an owned share", async () => {
+    mockFetchOnce(200, { code: "OWN", ownerToken: "tok-own-1" })
+    await createShareLink({ payload: PAYLOAD }, ENDPOINT)
+
+    let sentHeaders: Record<string, string> | undefined
+    fetchMock.mockImplementationOnce(async (_url: string, init: RequestInit) => {
+      sentHeaders = init.headers as Record<string, string>
+      return { ok: true, status: 204, statusText: "No Content", json: async () => ({}) } as Response
+    })
+    await revokeShareLink("OWN", ENDPOINT)
+    expect(sentHeaders?.["X-Owner-Token"]).toBe("tok-own-1")
+  })
 })
 
 describe("getShareStats", () => {
@@ -147,6 +176,24 @@ describe("getShareStats", () => {
   it("returns null on 404", async () => {
     mockFetchOnce(404, {})
     expect(await getShareStats("X", ENDPOINT)).toBeNull()
+  })
+
+  it("sends the X-Owner-Token header when the local row has one", async () => {
+    mockFetchOnce(200, { code: "STAT", ownerToken: "tok-stat-1" })
+    await createShareLink({ payload: PAYLOAD }, ENDPOINT)
+
+    let sentHeaders: Record<string, string> | undefined
+    fetchMock.mockImplementationOnce(async (_url: string, init: RequestInit) => {
+      sentHeaders = init.headers as Record<string, string>
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({ viewCount: 0, revoked: false }),
+      } as Response
+    })
+    await getShareStats("STAT", ENDPOINT)
+    expect(sentHeaders?.["X-Owner-Token"]).toBe("tok-stat-1")
   })
 })
 

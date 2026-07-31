@@ -25,7 +25,7 @@ import type {
   PluginCanvasDocument,
   CreateCanvasDocumentOptions,
   CanvasSelection,
-} from "@/types/plugin/plugin-extended"
+} from "@/types/plugin/plugin"
 import type {
   ArtifactLanguage,
   CanvasDocumentVersion,
@@ -35,6 +35,7 @@ import type {
 import type { CanvasComment, CollaborativeSession } from "@/types/canvas/collaboration"
 import type { AddCommentInput, ReplyInput } from "@/lib/db/canvas-comments"
 import { createPluginSystemLogger } from "../core/logger"
+import { createApiGuardedAPI } from "./api-permission-gate"
 
 type LineColumn = {
   lineNumber: number
@@ -251,7 +252,7 @@ function selectionToCanvasSelection(
  */
 export function createCanvasAPI(pluginId: string): PluginCanvasAPI {
   const logger = createPluginSystemLogger(pluginId)
-  return {
+  const api: PluginCanvasAPI = {
     getCurrentDocument: (): PluginCanvasDocument | null => {
       const { doc } = getActiveCanvasDocumentState()
       if (!doc) return null
@@ -305,7 +306,10 @@ export function createCanvasAPI(pluginId: string): PluginCanvasAPI {
 
     closeCanvas: () => {
       const store = useArtifactStore.getState()
-      store.closeCanvas()
+      // `canvasOpen` was a second visibility flag nothing ever read; closing
+      // the canvas means dropping the active document, which every canvas
+      // surface already keys off.
+      store.setActiveCanvas(null)
       logger.info("Closed canvas")
     },
 
@@ -315,9 +319,7 @@ export function createCanvasAPI(pluginId: string): PluginCanvasAPI {
 
       const editor = getActiveCanvasEditor()
       const editorSelection = editor?.getSelection?.() as
-        | CanvasEditorSelectionLike
-        | null
-        | undefined
+        CanvasEditorSelectionLike | null | undefined
       if (editorSelection) {
         return selectionToCanvasSelection(doc.content, editorSelection)
       }
@@ -353,15 +355,43 @@ export function createCanvasAPI(pluginId: string): PluginCanvasAPI {
     },
 
     insertText: (text: string) => {
-      const store = useArtifactStore.getState()
-      const activeId = store.activeCanvasId
-      if (!activeId) return
+      const { store, activeId, doc } = getActiveCanvasDocumentState()
+      if (!activeId || !doc) return
 
-      const doc = store.canvasDocuments[activeId]
-      if (!doc) return
+      // Prefer the live editor: insert at the caret / replace the selection.
+      const editor = getActiveCanvasEditor()
+      if (editor) {
+        const selection = editor.getSelection?.() as CanvasEditorSelectionLike | null | undefined
+        const position = editor.getPosition?.() as LineColumn | null | undefined
+        const range =
+          selection ??
+          (position
+            ? {
+                startLineNumber: position.lineNumber,
+                startColumn: position.column,
+                endLineNumber: position.lineNumber,
+                endColumn: position.column,
+              }
+            : null)
+        if (range) {
+          editor.executeEdits?.("plugin-canvas-api", [{ range, text }])
+          editor.focus?.()
+          const model = editor.getModel?.()
+          const nextContent = (model?.getValue?.() as string | undefined) ?? doc.content + text
+          store.updateCanvasDocument(activeId, { content: nextContent })
+          logger.info("Inserted text at the canvas caret")
+          return
+        }
+      }
 
-      // Insert at end for simplicity
-      const newContent = doc.content + text
+      // No live editor: insert at the store's tracked cursor, else append.
+      const tracked = doc.editorContext?.selection
+      const newContent = tracked
+        ? (() => {
+            const offset = lineColumnToOffset(doc.content, getSelectionStart(tracked))
+            return `${doc.content.slice(0, offset)}${text}${doc.content.slice(offset)}`
+          })()
+        : doc.content + text
       store.updateCanvasDocument(activeId, { content: newContent })
       logger.info("Inserted text into canvas")
     },
@@ -372,9 +402,7 @@ export function createCanvasAPI(pluginId: string): PluginCanvasAPI {
 
       const editor = getActiveCanvasEditor()
       const editorSelection = editor?.getSelection?.() as
-        | CanvasEditorSelectionLike
-        | null
-        | undefined
+        CanvasEditorSelectionLike | null | undefined
       const selection =
         editorSelection && !isSelectionEmpty(editorSelection)
           ? normalizeSelection(editorSelection)
@@ -398,9 +426,7 @@ export function createCanvasAPI(pluginId: string): PluginCanvasAPI {
         const model = editor.getModel?.()
         nextContent = model?.getValue?.() || nextContent
         const resultingSelection = editor.getSelection?.() as
-          | CanvasEditorSelectionLike
-          | null
-          | undefined
+          CanvasEditorSelectionLike | null | undefined
         nextSelection = resultingSelection ? normalizeSelection(resultingSelection) : null
       } else {
         const start = lineColumnToOffset(doc.content, getSelectionStart(selection))
@@ -597,4 +623,41 @@ export function createCanvasAPI(pluginId: string): PluginCanvasAPI {
       crdtStore.closeSession(sessionId)
     },
   }
+
+  // Reads → canvas:read, mutations → canvas:write, code/action execution →
+  // canvas:run, collaboration session lifecycle → canvas:collaborate.
+  return createApiGuardedAPI(pluginId, api, {
+    getCurrentDocument: "canvas:read",
+    getDocument: "canvas:read",
+    createDocument: "canvas:write",
+    updateDocument: "canvas:write",
+    deleteDocument: "canvas:write",
+    openDocument: "canvas:write",
+    closeCanvas: "canvas:write",
+    getSelection: "canvas:read",
+    setSelection: "canvas:write",
+    insertText: "canvas:write",
+    replaceSelection: "canvas:write",
+    getContent: "canvas:read",
+    setContent: "canvas:write",
+    saveVersion: "canvas:write",
+    restoreVersion: "canvas:write",
+    getVersions: "canvas:read",
+    onCanvasChange: "canvas:read",
+    onContentChange: "canvas:read",
+    executePython: "canvas:run",
+    executeAction: "canvas:run",
+    executeActionStreaming: "canvas:run",
+    getComments: "canvas:read",
+    addComment: "canvas:write",
+    updateComment: "canvas:write",
+    resolveComment: "canvas:write",
+    replyToComment: "canvas:write",
+    deleteComment: "canvas:write",
+    createCollaborationSession: "canvas:collaborate",
+    getCollaborationSession: "canvas:read",
+    getActiveCollaborationSession: "canvas:read",
+    listRecentCollaborationSessions: "canvas:read",
+    closeCollaborationSession: "canvas:collaborate",
+  })
 }

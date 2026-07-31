@@ -7,6 +7,7 @@
     "permissions",
     "hooks",
     "subagents",
+    "evaluating",
     "memory",
     "tools-mcp",
     "chat-middleware"

@@ -7,7 +7,7 @@
  * back to a "cleared" placeholder when the store no longer has the row.
  */
 
-import { useCallback, useState } from "react"
+import { memo, useCallback, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   Artifact as ArtifactShell,
@@ -39,7 +39,7 @@ interface ArtifactPartProps {
   className?: string
 }
 
-export function ArtifactPart({ part, className }: ArtifactPartProps) {
+export const ArtifactPart = memo(function ArtifactPart({ part, className }: ArtifactPartProps) {
   const t = useTranslations("chat.artifactPart")
   const artifact = useArtifactStore((s) => s.artifacts[part.artifactId])
   const [open, setOpen] = useState(part.defaultOpen !== false)
@@ -140,6 +140,6 @@ export function ArtifactPart({ part, className }: ArtifactPartProps) {
       )}
     </ArtifactShell>
   )
-}
+})
 
 export default ArtifactPart

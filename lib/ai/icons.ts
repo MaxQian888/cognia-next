@@ -5,7 +5,7 @@
  * and model-to-provider resolution for consistent icon display.
  */
 
-import { resolveModelsDevProviderId } from "@/lib/ai/providers/models-dev-id-map"
+import { resolveModelsDevProviderId } from "@cognia/provider-core/providers/models-dev-id-map"
 
 // ============================================================================
 // Provider Icon Registry
@@ -80,6 +80,20 @@ const PROVIDER_ICON_REGISTRY: Record<string, ProviderIconInfo> = {
     localIcon: "/icons/providers/openrouter.svg",
     brandColor: "#6466f1",
     hasLocalIcon: true,
+  },
+  // OpenCode managed plans — no bundled icon yet; brand color drives the
+  // monogram fallback in <ProviderIcon/>.
+  opencode: {
+    name: "OpenCode Zen",
+    localIcon: "/icons/providers/opencode.svg",
+    brandColor: "#fab283",
+    hasLocalIcon: false,
+  },
+  "opencode-go": {
+    name: "OpenCode Go",
+    localIcon: "/icons/providers/opencode.svg",
+    brandColor: "#fab283",
+    hasLocalIcon: false,
   },
   cohere: {
     name: "Cohere",
@@ -289,6 +303,12 @@ const MODEL_DISPLAY_NAMES: Record<string, string> = {
   "gpt-3.5-turbo": "GPT-3.5 Turbo",
   "o1-preview": "o1 Preview",
   "o1-mini": "o1 Mini",
+  "claude-fable-5": "Claude Fable 5",
+  "claude-opus-4-8": "Claude Opus 4.8",
+  "claude-opus-4-7": "Claude Opus 4.7",
+  "claude-opus-4-6": "Claude Opus 4.6",
+  "claude-sonnet-4-6": "Claude Sonnet 4.6",
+  "claude-haiku-4-5": "Claude Haiku 4.5",
   "claude-sonnet-4-20250514": "Claude Sonnet 4",
   "claude-opus-4-20250514": "Claude Opus 4",
   "claude-haiku-4-20250514": "Claude Haiku 4",

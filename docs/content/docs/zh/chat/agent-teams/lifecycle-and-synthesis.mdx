@@ -259,6 +259,32 @@ const workflow: VisualWorkflow = {
 | `settings.maxConcurrency` | `initialConcurrency` | 由 `team.config.maxConcurrentTeammates` 播种 |
 | 节点 `typeVersion` | `1` | 钉定的执行器契约版本 |
 
+### Lead 阻塞式评审（ADR-0071）
+
+当 `team.config.taskReview.enabled` 开启时，合成器会为每个任务额外产出一个节点 ——
+`action.team.task.review`，id 为 `review:<taskId>` —— 并**把该任务所有下游依赖的边改指向它**：
+
+```
+  taskA ──▶ review:taskA ──▶ taskB ──▶ review:taskB
+```
+
+这一层间接就是全部机制：未通过评审的任务，其下游根本不可运行，因此闸门由就绪集调度器强制执行，
+而不是依赖下游节点自觉去检查某个标志位。默认关闭 → DAG 与此前完全一致。
+
+| 细节 | 行为 |
+| --- | --- |
+| 在本工作流之外已满足的依赖（`satisfiedDependencyIds`） | 不产出评审节点 —— 先前的波次已经运行并评审过它 |
+| `params.dependencies` | 仍然携带**任务** id 而非节点 id，黑板读取逻辑不变 |
+| `params.maxRevisions` | 在合成时冻结，因此运行中途修改配置不会改变 DAG 已据此成形的预算 |
+| 环检测 | 不受影响 —— Kahn 算法跑在任务 id 上，而非节点 id |
+
+执行器会向 Lead 索取结构化的 `{ verdict, feedback }`，并附上成员的产出以及不超过 64 KiB 的确定性
+diff 证据（`review-evidence.ts`）。`changes_requested` 会带着反馈把**同一位**成员重新派发到**同一个**
+worktree；通过后任务标记为 `completed`（若同时开启人工 `requireResultReview` 则为 `review`）。
+评审开启时终态状态由评审节点书写，派发节点不写 —— 否则看板会在任务仍在评审时就宣称其已完成。
+预算耗尽、原成员不可用、评审方失败等任何未决情况都会让该任务与整个运行失败。
+参见 [ADR-0071](../adr/0071-blocking-lead-task-review)。
+
 ## 按运行共享状态 —— `lib/ai/agent/team/team-run-context.ts`
 
 合成器在调用 `runWorkflow` 之前会注册一个以 `runId` 为键的不可变 `TeamRunContext`，使派发执行器能在节点内部恢复出活动的池 / 预算 / 通知器。接口逐字如下：

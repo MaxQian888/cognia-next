@@ -44,6 +44,59 @@ describe("TeammatePool (v1 baseline)", () => {
     expect(pool.claim("t3")?.id).toBe("a")
   })
 
+  it("skill-aware claim prefers the requested teammate when available", () => {
+    const a = tm("a")
+    const b = tm("b")
+    const c = tm("c")
+    const pool = createTeammatePool({ teammates: [a, b, c] })
+    // Round-robin would start at "a"; the preference jumps to "c".
+    expect(pool.claim("t1", { preferTeammateId: "c" })?.id).toBe("c")
+    // The preferred claim does not advance the round-robin cursor.
+    expect(pool.claim("t2")?.id).toBe("a")
+  })
+
+  it("skill-aware claim falls back to round-robin when the preferred teammate is unknown", () => {
+    const a = tm("a")
+    const b = tm("b")
+    const pool = createTeammatePool({ teammates: [a, b] })
+    expect(pool.claim("t1", { preferTeammateId: "missing" })?.id).toBe("a")
+  })
+
+  it("skill-aware claim falls back to round-robin when the preferred teammate is unavailable", () => {
+    const a = tm("a")
+    const b = tm("b")
+    const pool = createTeammatePool({ teammates: [a, b] })
+    // Quarantine "a" via a catastrophic failure (disqualified → unavailable).
+    pool.recordFailure("a", new Error("401 Unauthorized: invalid API key"))
+    expect(pool.claim("t1", { preferTeammateId: "a" })?.id).toBe("b")
+  })
+
+  describe("exact-worker claim (requireTeammateId)", () => {
+    // A lead-review revision (ADR-0071) is addressed to the author of the diff
+    // under review, in that author's worktree — substituting a different
+    // teammate would ask them to revise work they never wrote.
+    it("claims exactly the required teammate", () => {
+      const pool = createTeammatePool({ teammates: [tm("a"), tm("b")] })
+      expect(pool.claim("t1", { requireTeammateId: "b" })?.id).toBe("b")
+    })
+
+    it("returns null rather than substituting when the required teammate is unavailable", () => {
+      const pool = createTeammatePool({ teammates: [tm("a"), tm("b")] })
+      pool.recordFailure("b", new Error("401 Unauthorized: invalid API key"))
+      expect(pool.claim("t1", { requireTeammateId: "b" })).toBeNull()
+    })
+
+    it("returns null rather than substituting when the required teammate is unknown", () => {
+      const pool = createTeammatePool({ teammates: [tm("a")] })
+      expect(pool.claim("t1", { requireTeammateId: "ghost" })).toBeNull()
+    })
+
+    it("wins over preferTeammateId", () => {
+      const pool = createTeammatePool({ teammates: [tm("a"), tm("b")] })
+      expect(pool.claim("t1", { requireTeammateId: "b", preferTeammateId: "a" })?.id).toBe("b")
+    })
+  })
+
   it("recordSuccess and recordFailure update the breaker without throwing", () => {
     const a = tm("a")
     const pool = createTeammatePool({ teammates: [a] })
@@ -211,7 +264,57 @@ describe("TeammatePool — error classification (PR 6)", () => {
   })
 })
 
-describe("TeammatePool — claim/release plugin hooks", () => {
+describe("TeammatePool — mid-run register (twin recruit)", () => {
+  it("makes a newly registered teammate claimable", () => {
+    const a = tm("a")
+    const pool = createTeammatePool({ teammates: [a] })
+    expect(pool.availableCount()).toBe(1)
+    pool.register(tm("b"))
+    expect(pool.availableCount()).toBe(2)
+    // round-robin now reaches "b"
+    expect(pool.claim("t1")?.id).toBe("a")
+    expect(pool.claim("t2")?.id).toBe("b")
+  })
+
+  it("registers into an empty pool and lifts all-unavailable", () => {
+    const pool = createTeammatePool({ teammates: [] })
+    expect(pool.allUnavailable()).toBe(true)
+    pool.register(tm("recruit"))
+    expect(pool.allUnavailable()).toBe(false)
+    expect(pool.claim("t1")?.id).toBe("recruit")
+  })
+
+  it("re-fires onAllUnavailable recovery edge when a member is registered", () => {
+    const a = tm("a")
+    const fn = jest.fn()
+    const pool = createTeammatePool({
+      teammates: [a],
+      breakerOptions: { minEvents: 2, failureThresholdPct: 50, cooldownMs: 60_000 },
+    })
+    pool.onAllUnavailable(fn)
+    pool.recordFailure("a", new Error("e1"))
+    pool.recordFailure("a", new Error("e2"))
+    expect(fn).toHaveBeenCalledTimes(1)
+    // Registering an available member clears the all-unavailable state so a
+    // later re-entry can fire the edge again.
+    pool.register(tm("b"))
+    expect(pool.allUnavailable()).toBe(false)
+  })
+
+  it("is a no-op when the id already exists", () => {
+    const a = tm("a")
+    const pool = createTeammatePool({ teammates: [a] })
+    pool.register(tm("a", "duplicate"))
+    expect(pool.availableCount()).toBe(1)
+    // The original entry is untouched (still claimable by its id).
+    expect(pool.claim("t1")?.name).toBe("a")
+  })
+})
+
+describe("TeammatePool — claim/release plugin hooks (deduped)", () => {
+  // Regression guard: the pool MUST NOT dispatch onTeammateClaim/onTeammateRelease.
+  // `dispatchTeammate` is the single source of those hooks — firing them here too
+  // double-counted every claim/release for plugin consumers.
   beforeEach(() => {
     dispatchOnTeammateClaim.mockClear()
     dispatchOnTeammateRelease.mockClear()
@@ -226,52 +329,14 @@ describe("TeammatePool — claim/release plugin hooks", () => {
     expect(dispatchOnTeammateRelease).not.toHaveBeenCalled()
   })
 
-  it("dispatches onTeammateClaim with team/run context on claim", () => {
-    const a = tm("a")
-    const pool = createTeammatePool({ teammates: [a], teamId: "team-1", runId: "run-1" })
-    pool.claim("task-1")
-    expect(dispatchOnTeammateClaim).toHaveBeenCalledWith({
-      teamId: "team-1",
-      runId: "run-1",
-      teammateId: "a",
-      taskId: "task-1",
-    })
-  })
-
-  it("dispatches onTeammateRelease(success) naming the claimed task", () => {
+  it("does NOT dispatch even when team/run context is present (dispatchTeammate owns the hooks)", () => {
     const a = tm("a")
     const pool = createTeammatePool({ teammates: [a], teamId: "team-1", runId: "run-1" })
     pool.claim("task-1")
     pool.recordSuccess("a")
-    expect(dispatchOnTeammateRelease).toHaveBeenCalledWith({
-      teamId: "team-1",
-      runId: "run-1",
-      teammateId: "a",
-      taskId: "task-1",
-      result: "success",
-      error: undefined,
-    })
-  })
-
-  it("dispatches onTeammateRelease(failure) with the error message", () => {
-    const a = tm("a")
-    const pool = createTeammatePool({ teammates: [a], teamId: "team-1", runId: "run-1" })
-    pool.claim("task-9")
+    pool.claim("task-2")
     pool.recordFailure("a", new Error("boom"))
-    expect(dispatchOnTeammateRelease).toHaveBeenCalledWith({
-      teamId: "team-1",
-      runId: "run-1",
-      teammateId: "a",
-      taskId: "task-9",
-      result: "failure",
-      error: "boom",
-    })
-  })
-
-  it("does not release a teammate that never claimed", () => {
-    const a = tm("a")
-    const pool = createTeammatePool({ teammates: [a], teamId: "team-1", runId: "run-1" })
-    pool.recordSuccess("a")
+    expect(dispatchOnTeammateClaim).not.toHaveBeenCalled()
     expect(dispatchOnTeammateRelease).not.toHaveBeenCalled()
   })
 })

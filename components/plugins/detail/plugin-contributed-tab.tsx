@@ -15,6 +15,7 @@
  *   - MCP server presets / Skills / Native Anthropic tools —
  *     `lib/plugin/registries/*-registry.ts`
  *   - External agent presets — `lib/ai/agent/external/presets.ts`
+ *   - External agent adapters — `lib/ai/agent/external/protocol-adapter.ts`
  *   - Connector adapters — `lib/plugin/connectors-bridge.ts`
  *   - Workflow nodes + triggers — `lib/workflow/nodes/catalog.ts`
  *
@@ -36,7 +37,9 @@ import {
 import { listMcpServerPresetEntries } from "@/lib/plugin/registries/mcp-server-preset-registry"
 import { listSkillEntries } from "@/lib/plugin/registries/skill-registry"
 import { listNativeAnthropicToolEntries } from "@/lib/plugin/registries/native-anthropic-tool-registry"
+import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 import { listDynamicPresetEntries } from "@/lib/ai/agent/external/presets"
+import { listPluginProtocolAdapters } from "@/lib/ai/agent/external/protocol-adapter"
 import { getPluginAdapterIds } from "@/lib/plugin/bridge/connectors-bridge"
 import {
   getPluginCatalogSnapshot,
@@ -59,9 +62,11 @@ type ContributionLabelKey =
   | "skills"
   | "nativeAnthropicTools"
   | "externalAgentPresets"
+  | "externalAgentAdapters"
   | "connectors"
   | "workflowNodes"
   | "workflowTriggers"
+  | "hooks"
 
 interface Section {
   key: ContributionLabelKey
@@ -111,7 +116,11 @@ export function PluginContributedTab({ pluginId }: Props) {
   const sections: Section[] = [
     {
       key: "tools",
-      items: registry.getToolsByPlugin(pluginId).map((tool) => tool.name),
+      items: registry
+        .getToolsByPlugin(pluginId)
+        .map((tool) =>
+          tool.name === "eval_project_v2" ? t("toolLabels.eval_project_v2") : tool.name
+        ),
     },
     {
       key: "modes",
@@ -158,6 +167,14 @@ export function PluginContributedTab({ pluginId }: Props) {
         .map((e) => e.id),
     },
     {
+      key: "externalAgentAdapters",
+      // listPluginProtocolAdapters() returns { protocol, pluginId } where
+      // protocol is the namespaced `${pluginId}:${id}` — render that canonical id.
+      items: listPluginProtocolAdapters()
+        .filter((e) => e.pluginId === pluginId)
+        .map((e) => e.protocol),
+    },
+    {
       key: "connectors",
       items: [...getPluginAdapterIds(pluginId)],
     },
@@ -168,6 +185,13 @@ export function PluginContributedTab({ pluginId }: Props) {
     {
       key: "workflowTriggers",
       items: triggerEntries.map((e) => e.label || e.kind),
+    },
+    {
+      // Lifecycle hooks the plugin registered (onLoad / onEnable / message
+      // pipeline / …). Closes the gap where "hooks" was a filterable
+      // capability but the contributed hooks were never listed.
+      key: "hooks",
+      items: getPluginLifecycleHooks().getHooksByPlugin(pluginId),
     },
   ]
 

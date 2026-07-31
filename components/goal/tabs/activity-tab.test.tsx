@@ -70,6 +70,38 @@ describe("GoalActivityTab", () => {
     )
   })
 
+  // ── ADR-0070 Phase 2 — risk-raised ceremony provenance ──────────────────
+  it("names the risk surfaces, localized, when the ceremony was risk-raised", async () => {
+    await createGoal(goal)
+    await appendGoalEvent({
+      goalId: "g1",
+      kind: "goal_created",
+      payload: {
+        kind: "goal_created",
+        safeObjective: "x",
+        config: goal.config,
+        risk: { tier: "high", surfaces: ["computer-use"], reason: "high — computer-use" },
+      },
+    })
+    render(<GoalActivityTab goal={goal} />)
+    // The label comes from `policy.risk.surfaces.*`, NOT the classifier's
+    // English-only `reason` string.
+    await waitFor(() => expect(screen.getByText(/Computer use/)).toBeInTheDocument())
+    expect(screen.getByText(/High risk/)).toBeInTheDocument()
+  })
+
+  it("omits the risk line entirely for a goal that was never risk-raised", async () => {
+    await createGoal(goal)
+    await appendGoalEvent({
+      goalId: "g1",
+      kind: "goal_created",
+      payload: { kind: "goal_created", safeObjective: "x", config: goal.config },
+    })
+    render(<GoalActivityTab goal={goal} />)
+    await waitFor(() => expect(screen.getByTestId("goal-activity-list")).toBeInTheDocument())
+    expect(screen.queryByText(/approval required/i)).not.toBeInTheDocument()
+  })
+
   it("renders all 11 event kinds with their kind-specific summaries", async () => {
     await createGoal(goal)
     const baseConfig = { maxTurns: 20, maxTokens: 200_000, maxJudgeFailures: 3, timeoutMs: 1 }

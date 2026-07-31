@@ -6,7 +6,9 @@
 //
 //   applySwitch(plan)
 //     Execute the plan. Order:
-//       1. Persist apiKey/apiBaseUrl/activeProviderId to AppSettings (Dexie).
+//       1. Persist apiKey/apiBaseUrl/activeProviderId to AppSettings through
+//          the settings store, so Dexie and the store the UI renders from
+//          land the switch together.
 //       2. Push the new env to the sidecar via setProviderEnv() and restart.
 //       3. For each supported agent, write the env block via the per-agent
 //          IPC and collect any errors.
@@ -24,8 +26,9 @@
 // invariants — `detectActive()` running on focus is what closes the loop.
 
 import { hasApiKey, restartSidecar, setProviderEnv } from "@/lib/claude/ipc"
-import { saveSettings, getSettings } from "@/lib/db/settings"
+import { getSettings } from "@/lib/db/settings"
 import { isTauri } from "@/lib/tauri"
+import { useSettingsStore } from "@/stores/settings/settings-store"
 
 import {
   writeClaudeSettingsEnv,
@@ -33,6 +36,10 @@ import {
   writeGeminiSettingsEnv,
   writeOpencodeAuthEnv,
 } from "./client"
+import type {
+  ProviderModelDiscoveryEntry,
+  UserProviderSettings,
+} from "@cognia/provider-types/provider"
 import type {
   AgentEnvPatch,
   ActiveProviderState,
@@ -170,6 +177,128 @@ function unsupportedReason(agent: CcswitchAgentId): string {
 }
 
 /**
+ * A CCSwitch `kind` is treated as a Claude-relay (native Anthropic dispatch)
+ * when it is `claude` or absent. Only these carry the opus/sonnet/haiku tier
+ * mappings + 1M header we register into cognia's provider catalog; codex /
+ * gemini / opencode go through their own agent-env writes, not the chat model
+ * list.
+ */
+function isClaudeRelayKind(kind: string | undefined): boolean {
+  const k = (kind ?? "").trim().toLowerCase()
+  return k === "" || k === "claude" || k === "anthropic"
+}
+
+/**
+ * An "official" Claude provider is a Claude-kind entry with no API key —
+ * cc-switch models the claude.ai OAuth login this way (its "Claude Official"
+ * rows carry env/permissions but no `ANTHROPIC_API_KEY`). Switching to one
+ * must not leave cognia keyless; it means "use the Anthropic subscription".
+ */
+export function isOfficialClaudeProvider(provider: CcswitchProvider): boolean {
+  return isClaudeRelayKind(provider.kind) && !provider.apiKey?.trim()
+}
+
+/** Human-readable suffix per tier, appended to the provider name for the model
+ *  picker so a relay's three tiers are distinguishable at a glance. */
+const TIER_LABEL: Record<string, string> = {
+  opus: "Opus",
+  sonnet: "Sonnet",
+  haiku: "Haiku",
+  fast: "Fast",
+}
+
+/** True when any forwarded header unlocks the 1M context window. */
+function relayEnablesContext1m(headers: Record<string, string> | undefined): boolean {
+  if (!headers) return false
+  return Object.values(headers).some((v) => v.toLowerCase().includes("context-1m"))
+}
+
+export interface ProviderRegistration {
+  /** The merged `providerSettings` map to persist (anthropic slot updated). */
+  providerSettings: Record<string, UserProviderSettings>
+  defaultProvider: string
+  defaultModel: string
+  /** Headers to forward to the sidecar (may be empty → clears prior relay's). */
+  customHeaders: Record<string, string>
+}
+
+/**
+ * Turn a Claude-relay CCSwitch provider into a cognia provider registration:
+ * surface the relay's opus/sonnet/haiku (+ small-fast + primary) models under
+ * the built-in `anthropic` provider (the native-dispatch path a relay rides on
+ * — see `lib/claude/build-options.ts`), backfill the key, and point the app
+ * default at the primary model. 1M-capable relays stamp a 1M context window on
+ * every tier so the picker + context indicator size them correctly.
+ *
+ * Returns `null` when there is nothing to register — a non-Claude kind, or a
+ * bare relay that declared no models at all (leave existing settings intact).
+ * Pure: the caller supplies the current `providerSettings` and persists.
+ */
+export function buildProviderRegistration(
+  provider: CcswitchProvider,
+  current: { providerSettings?: Record<string, UserProviderSettings> }
+): ProviderRegistration | null {
+  if (!isClaudeRelayKind(provider.kind)) return null
+
+  // Collect (modelId → tier label) preserving priority order; first tier that
+  // names an id wins the label, and duplicate ids collapse to one entry.
+  const tiered: Array<{ id: string; tier: string }> = [
+    { id: provider.opusModel, tier: "opus" },
+    { id: provider.sonnetModel, tier: "sonnet" },
+    { id: provider.haikuModel, tier: "haiku" },
+    { id: provider.smallFastModel, tier: "fast" },
+    { id: provider.model, tier: "primary" },
+  ]
+    .map((e) => ({ id: e.id?.trim(), tier: e.tier }))
+    .filter((e): e is { id: string; tier: string } => Boolean(e.id))
+
+  const seen = new Set<string>()
+  const models = tiered.filter((e) => (seen.has(e.id) ? false : (seen.add(e.id), true)))
+  if (models.length === 0) return null
+
+  const is1m = relayEnablesContext1m(provider.customHeaders)
+  const discoveredModels: ProviderModelDiscoveryEntry[] = models.map((e) => {
+    const label = TIER_LABEL[e.tier]
+    return {
+      id: e.id,
+      name: label ? `${provider.name} · ${label}` : provider.name,
+      provider: "anthropic",
+      contextLength: is1m ? 1_000_000 : undefined,
+      supportsTools: true,
+    }
+  })
+
+  // Primary model = ANTHROPIC_MODEL, else sonnet, else opus, else first known.
+  const primaryModel =
+    provider.model?.trim() ||
+    provider.sonnetModel?.trim() ||
+    provider.opusModel?.trim() ||
+    models[0].id
+
+  const prevAnthropic = current.providerSettings?.anthropic
+  const nextAnthropic: UserProviderSettings = {
+    ...(prevAnthropic ?? {}),
+    providerId: "anthropic",
+    enabled: true,
+    apiKey: provider.apiKey?.trim() || prevAnthropic?.apiKey,
+    defaultModel: primaryModel,
+    enabledModels: models.map((e) => e.id),
+    discoveredModels,
+    discoveredModelsLastFetched: Date.now(),
+  }
+
+  return {
+    providerSettings: {
+      ...(current.providerSettings ?? {}),
+      anthropic: nextAnthropic,
+    },
+    defaultProvider: "anthropic",
+    defaultModel: primaryModel,
+    customHeaders: provider.customHeaders ?? {},
+  }
+}
+
+/**
  * Build a preview of the switch. Pure — no I/O. The caller is responsible
  * for fetching the current `AppSettings` and passing the relevant fields in
  * via `current`. (Keeping this dependency-free makes it trivial to unit-test
@@ -183,8 +312,19 @@ export function planSwitch(
   const nextActiveId = ccswitchProviderRefId(provider)
   const nextApiKey = provider.apiKey?.trim() || undefined
   const nextBaseUrl = provider.baseUrl?.trim() || undefined
+  const useSubscription = isOfficialClaudeProvider(provider)
 
-  const restart = nextApiKey !== current.apiKey || nextBaseUrl !== current.apiBaseUrl
+  // A relay that declares forwarded headers (e.g. the 1M `anthropic-beta`)
+  // needs a sidecar restart to pick them up even when key/URL are unchanged —
+  // the SDK reads env only at spawn. Over-approximate (restart whenever the
+  // target carries headers); a real switch already flips key/URL anyway.
+  // A subscription switch restarts too: the OAuth bearer is read at spawn.
+  const headersNeedRestart = Object.keys(provider.customHeaders ?? {}).length > 0
+  const restart =
+    nextApiKey !== current.apiKey ||
+    nextBaseUrl !== current.apiBaseUrl ||
+    headersNeedRestart ||
+    useSubscription
 
   const agentChanges: AgentEnvPatch[] = scope.agents.map((agentId) => {
     if (!SUPPORTED_AGENTS.has(agentId)) {
@@ -215,6 +355,7 @@ export function planSwitch(
       activeProviderIdBefore: current.activeProviderId,
       activeProviderIdAfter: nextActiveId,
       restartSidecar: restart,
+      useSubscription,
     },
     agentChanges,
   }
@@ -234,6 +375,57 @@ export interface ApplyResult {
     /** Error message when not ok or skipped. */
     error?: string
   }>
+  /**
+   * Outcome of the subscription-activation step. Present only when the plan
+   * targeted an official (OAuth) Claude provider (`useSubscription`).
+   */
+  subscription?: SubscriptionActivationResult
+}
+
+export interface SubscriptionActivationResult {
+  /** True when an Anthropic subscription account ended up active. */
+  activated: boolean
+  /**
+   * How the credential was sourced: an account already in the vault, or a
+   * local Claude Code CLI login adopted on the fly. Absent when activation
+   * failed.
+   */
+  source?: "vault" | "adopted"
+  /** "none-found" when neither the vault nor the local CLI had a login. */
+  error?: string
+}
+
+/**
+ * Make the Anthropic subscription the active credential for an official
+ * (OAuth) Claude switch. Preference order:
+ *   1. The vault's active Anthropic account (re-activated to refresh the
+ *      in-process bearer), else the first vault account.
+ *   2. The local Claude Code CLI login, adopted into the vault on the fly.
+ * Dynamic imports keep the subscription module out of web bundles — this
+ * path only runs under Tauri.
+ */
+async function activateSubscriptionForSwitch(): Promise<SubscriptionActivationResult> {
+  try {
+    const { listAccounts, getActiveAccount, setActiveAccount } =
+      await import("@/lib/subscription/core/transport")
+    const accounts = await listAccounts("anthropic")
+    if (accounts.length > 0) {
+      const active = await getActiveAccount("anthropic")
+      const target = accounts.find((a) => a.id === active.activeAccountId)?.id ?? accounts[0].id
+      await setActiveAccount("anthropic", target)
+      return { activated: true, source: "vault" }
+    }
+    const { discoverAnthropicAuth, adoptAndActivateDiscoveredAuth } =
+      await import("@/lib/subscription/anthropic/discovery")
+    const discovered = await discoverAnthropicAuth()
+    if (discovered) {
+      await adoptAndActivateDiscoveredAuth(discovered)
+      return { activated: true, source: "adopted" }
+    }
+    return { activated: false, error: "none-found" }
+  } catch (err) {
+    return { activated: false, error: err instanceof Error ? err.message : String(err) }
+  }
 }
 
 /**
@@ -247,17 +439,46 @@ export async function applySwitch(plan: SwitchPlan): Promise<ApplyResult> {
     agentResults: [],
   }
 
-  // Cognia-next: persist + push to sidecar.
-  await saveSettings({
+  // Cognia-next: persist + push to sidecar. Registering the relay's models
+  // needs the current provider map to merge the `anthropic` slot without
+  // clobbering other providers, so read settings first.
+  const current = await getSettings()
+  const registration = buildProviderRegistration(plan.provider, {
+    providerSettings: current?.providerSettings,
+  })
+  // Write through the settings store rather than calling `saveSettings`
+  // directly. The store's `save` persists via the same Dexie path and then
+  // re-seeds its in-memory `settings`, which is what every provider surface
+  // renders from (Settings → Providers, the model picker). Persisting behind
+  // the store's back left those latched on the pre-switch provider list until
+  // an app reload, because `load()` early-returns once `loaded` is true.
+  await useSettingsStore.getState().save({
     apiKey: plan.cogniaChanges.apiKeyAfter,
     apiBaseUrl: plan.cogniaChanges.baseUrlAfter,
     activeProviderId: plan.cogniaChanges.activeProviderIdAfter,
+    ...(registration
+      ? {
+          providerSettings: registration.providerSettings,
+          defaultProvider: registration.defaultProvider,
+          defaultModel: registration.defaultModel,
+        }
+      : {}),
   })
   if (isTauri()) {
+    // Always pass an explicit headers object so a switch to a provider without
+    // headers clears a previous relay's (e.g. drops a stale 1M `anthropic-beta`).
     await setProviderEnv(
       plan.cogniaChanges.apiKeyAfter ?? null,
-      plan.cogniaChanges.baseUrlAfter ?? null
+      plan.cogniaChanges.baseUrlAfter ?? null,
+      registration?.customHeaders ?? {}
     )
+    // Official (OAuth) Claude provider: activate the Anthropic subscription so
+    // cognia doesn't end up keyless. `subscription_set_active` pushes the
+    // bearer into the in-process env state and kills the sidecar itself, so
+    // the restart below re-spawns with the bearer either way.
+    if (plan.cogniaChanges.useSubscription) {
+      result.subscription = await activateSubscriptionForSwitch()
+    }
     if (plan.cogniaChanges.restartSidecar) {
       await restartSidecar()
     }
@@ -422,6 +643,11 @@ export const _internals = {
   matchProvider,
   detectDrift,
   envUpdatesForProvider,
+  buildProviderRegistration,
+  isClaudeRelayKind,
+  isOfficialClaudeProvider,
+  activateSubscriptionForSwitch,
+  relayEnablesContext1m,
   SUPPORTED_AGENTS,
   hasApiKey, // re-export so the test harness doesn't have to mock the same module twice
 }

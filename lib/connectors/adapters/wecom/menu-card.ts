@@ -22,6 +22,7 @@ import type { IMQuickCommand } from "@/lib/connectors/quick-commands/types"
 import type { NormalizedInboundEvent } from "@/types/connectors/event"
 import { buildConversationKey } from "@/types/connectors/event"
 import type { WeComInboundEventBody, WeComTemplateCard } from "./protocol"
+import type { WeComConversationRef } from "./parse"
 
 const MAX_MENU_BUTTONS = 6
 export const QC_KEY_PREFIX = "qc:"
@@ -72,12 +73,19 @@ export function parseMenuButtonClick(body: WeComInboundEventBody): { triggerKey:
  * `parseLarkBotMenuEvent` pattern. The resolved command's action value
  * (prompt text or slash line) becomes the synthetic message body so the
  * runtime ai-loop treats it identically to typed input.
+ *
+ * The `conversationRef` is a FULL `WeComConversationRef` — `chatId` /
+ * `chatType` so a proactive send can address the chat, plus the callback's
+ * `reqId` so the assistant's reply rides the live 10-minute reply window
+ * (streaming preview included) instead of dead-ending on "no chatid for
+ * proactive send".
  */
 export function buildMenuClickInboundEvent(
   adapterId: string,
   selfId: string,
   body: WeComInboundEventBody,
   command: IMQuickCommand,
+  reqId?: string,
   now: number = Date.now()
 ): NormalizedInboundEvent | null {
   const chatId = body.chatid
@@ -85,12 +93,21 @@ export function buildMenuClickInboundEvent(
   const userId = body.from?.userid ?? "unknown"
   const conversationKey = buildConversationKey("wecom", adapterId, chatId)
   const text = command.action.value || command.label || command.triggerKey
+  const conversationRef: WeComConversationRef = {
+    platform: "wecom",
+    adapterId,
+    chatId,
+    chatType: body.chattype ?? "single",
+    userId: body.from?.userid,
+    reqId,
+    sourceMsgId: body.msgid,
+  }
   return {
     platform: "wecom",
     adapterId,
     selfId,
     messageId: `wecom.menu:${body.event.template_card?.task_id ?? command.triggerKey}:${now}`,
-    conversationRef: { platform: "wecom", adapterId },
+    conversationRef,
     conversationKey,
     sender: {
       id: userId,

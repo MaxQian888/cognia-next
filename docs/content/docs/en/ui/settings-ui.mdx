@@ -260,11 +260,24 @@ When adding a section, be sure to add keywords at the same time — otherwise a 
 
 The desktop shell uses `<SidebarProvider>` wrapping `<SettingsSidebar>` and `<SidebarInset>`, with a fixed width of `15rem`; it automatically collapses to a hamburger menu button on narrow screens.
 
-The mobile shell (`components/mobile/settings/mobile-settings-panel.tsx`) puts the same `SettingsShell` inside a Sheet drawer:
+The phone does **not** render `/settings` at all. Its settings surface is `/me` — a
+separate, data-driven iOS-style list:
 
-- On entering `/settings`, it checks `usePlatform()`.
-- Mobile = a top-bar hamburger button triggers the Sheet; the section list lives inside the Sheet; the Sheet auto-closes after selection.
-- Mobile chrome (status bar / safe area) is handled by the top-level mobile-shell-wrapper; the settings panel does not repeat that concern.
+- `components/mobile/me/me-entries.ts` is the registry: one typed entry per row
+  (icon, i18n label key, href, group, search keywords), driving ~48 `/me/*`
+  sub-pages plus search and favorites.
+- Per ADR-0056 D3, a desktop section that is purely settings-store-driven is
+  **embedded directly** into a `/me/*` `SubPageShell` rather than rewritten —
+  `/me/appearance`, `/me/canvas`, and `/me/eval` all do this. Sections that need
+  Tauri are marked `desktopOnly` in `SETTINGS_NAV` and filtered out by
+  `settings-sidebar.tsx` off-desktop.
+- Mobile chrome (status bar / safe area / tab bar) is handled by
+  `mobile-shell-wrapper`; the `/me` pages do not repeat that concern.
+
+> `components/mobile/settings/mobile-settings-panel.tsx` is a Wave-2.7 leftover,
+> not the mobile settings shell. Its pieces were extracted into
+> `components/mobile/me/`, leaving the panel with zero consumers — it is tracked
+> in `scripts/gates/unreachable-component-baseline.json`. Do not build on it.
 
 ## SettingsSyncProvider
 

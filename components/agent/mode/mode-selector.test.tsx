@@ -56,7 +56,17 @@ const customModeState = {
   recordModeUsage: jest.fn(),
 }
 jest.mock("@/stores/agent/custom-mode-store", () => ({
-  useCustomModeStore: () => customModeState,
+  useCustomModeStore: <T,>(selector?: (state: typeof customModeState) => T) =>
+    selector ? selector(customModeState) : customModeState,
+}))
+
+const mockPluginModes: Array<Record<string, unknown>> = []
+jest.mock("@/stores/plugin-runtime/plugin-store", () => ({
+  usePluginStore: <T,>(
+    selector: (state: {
+      plugins: Record<string, { status: string; modes: typeof mockPluginModes }>
+    }) => T
+  ) => selector({ plugins: { work: { status: "enabled", modes: mockPluginModes } } }),
 }))
 
 let teamsState: Record<string, unknown> = {}
@@ -70,6 +80,7 @@ beforeEach(() => {
   customModeState.deleteMode.mockClear()
   customModeState.duplicateMode.mockClear()
   customModeState.recordModeUsage.mockClear()
+  mockPluginModes.length = 0
   teamsState = {}
 })
 
@@ -138,6 +149,26 @@ describe("AgentModeSelector — selection", () => {
     clickMenuItemContaining("My Mode")
     expect(onModeChange).toHaveBeenCalled()
     expect(customModeState.recordModeUsage).toHaveBeenCalledWith("my-mode")
+  })
+
+  it("renders and selects a plugin-contributed mode using its own metadata", () => {
+    mockPluginModes.push({
+      id: "cognia-work-mode:work",
+      type: "plugin",
+      name: "Work",
+      description: "Create a reviewed deliverable",
+      icon: "BriefcaseBusiness",
+      tools: ["work_create_deliverable"],
+    })
+    const onModeChange = jest.fn()
+    render(<AgentModeSelector selectedModeId="cognia-work-mode:work" onModeChange={onModeChange} />)
+
+    expect(screen.getAllByText("Work").length).toBeGreaterThan(0)
+    expect(screen.getByText("pluginModes")).toBeInTheDocument()
+    clickMenuItemContaining("Create a reviewed deliverable")
+    expect(onModeChange).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "cognia-work-mode:work", type: "plugin" })
+    )
   })
 })
 

@@ -113,4 +113,100 @@ describe("startLongPoll", () => {
     expect(updates).toHaveLength(0)
     expect(mockInvoke).not.toHaveBeenCalled()
   })
+
+  it("sends allowed_updates including message_reaction (audited fix #3)", async () => {
+    jest.useRealTimers()
+    mockInvoke.mockResolvedValue(makeOkResp([makeUpdate(1)]))
+
+    const ctrl = new AbortController()
+    for await (const u of startLongPoll({
+      botToken: async () => "TOKEN",
+      signal: ctrl.signal,
+    })) {
+      void u
+      ctrl.abort()
+      break
+    }
+
+    const url = mockInvoke.mock.calls[0][1].req.url as string
+    expect(url).toContain("allowed_updates=")
+    const param = new URL(url).searchParams.get("allowed_updates")
+    expect(JSON.parse(param!)).toEqual([
+      "message",
+      "edited_message",
+      "channel_post",
+      "edited_channel_post",
+      "callback_query",
+      "message_reaction",
+    ])
+  })
+
+  it("honours Telegram's 429 retry_after in the backoff (audited fix #13)", async () => {
+    jest.useRealTimers()
+    const start = Date.now()
+    mockInvoke
+      .mockResolvedValueOnce({
+        status: 429,
+        headers: {},
+        body: JSON.stringify({
+          ok: false,
+          error_code: 429,
+          description: "Too Many Requests: retry after 1",
+          parameters: { retry_after: 0.05 }, // 50ms, dwarfs the 1ms test backoff
+        }),
+      })
+      .mockResolvedValue(makeOkResp([makeUpdate(5)]))
+
+    const ctrl = new AbortController()
+    const errors: Array<{ status?: number; retryAfterMs?: number }> = []
+    for await (const u of startLongPoll({
+      botToken: async () => "TOKEN",
+      signal: ctrl.signal,
+      _backoffBaseMs: 1,
+      onPollError: (info) => errors.push(info),
+    })) {
+      void u
+      ctrl.abort()
+      break
+    }
+
+    expect(errors).toHaveLength(1)
+    expect(errors[0].status).toBe(429)
+    expect(errors[0].retryAfterMs).toBe(50)
+    // The retry waited at least the declared cool-down, not just the 1ms base.
+    expect(Date.now() - start).toBeGreaterThanOrEqual(45)
+  })
+
+  it("reports onPollError with the Bot API error_code and onPollSuccess on recovery", async () => {
+    jest.useRealTimers()
+    mockInvoke
+      .mockResolvedValueOnce({
+        status: 401,
+        headers: {},
+        body: JSON.stringify({ ok: false, error_code: 401, description: "Unauthorized" }),
+      })
+      .mockResolvedValue(makeOkResp([makeUpdate(9)]))
+
+    const ctrl = new AbortController()
+    const errors: Array<{ status?: number; message: string }> = []
+    let successes = 0
+    for await (const u of startLongPoll({
+      botToken: async () => "TOKEN",
+      signal: ctrl.signal,
+      _backoffBaseMs: 1,
+      onPollError: (info) => errors.push(info),
+      onPollSuccess: () => {
+        successes += 1
+      },
+    })) {
+      void u
+      ctrl.abort()
+      break
+    }
+
+    expect(errors).toHaveLength(1)
+    expect(errors[0].status).toBe(401)
+    expect(errors[0].message).toContain("Unauthorized")
+    expect(successes).toBe(1)
+  })
 })

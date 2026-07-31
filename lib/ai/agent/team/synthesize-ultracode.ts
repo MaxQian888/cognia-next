@@ -24,8 +24,8 @@ import {
   type UltracodeStage,
   type VerifierLens,
 } from "@/types/agent/ultracode"
-import { DEFAULT_RETRY_POLICY } from "@/types/workflow/visual"
 import type { VisualWorkflow, WorkflowEdge, WorkflowNode } from "@/types/workflow/visual"
+import { resolveRetryPolicy } from "./synthesize-workflow"
 
 export interface SynthesizeUltracodeInput {
   team: AgentTeam
@@ -164,7 +164,7 @@ export function synthesizeUltracodeWorkflow(
       timeoutMs: wallClock,
       concurrency: 1,
       maxConcurrency: Math.max(1, input.initialConcurrency),
-      retryDefaults: DEFAULT_RETRY_POLICY,
+      retryDefaults: resolveRetryPolicy(input.team.config),
     },
   }
 

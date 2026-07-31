@@ -11,6 +11,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useLocale, useTranslations } from "next-intl"
+import { AnimatePresence, motion } from "motion/react"
 import {
   CopyIcon,
   MoreHorizontalIcon,
@@ -57,6 +58,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Switch } from "@/components/ui/switch"
+import { StatusBadge } from "@/components/status-badge"
+import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import {
   Empty,
   EmptyContent,
@@ -67,20 +70,88 @@ import {
 } from "@/components/ui/empty"
 import { toast } from "sonner"
 
+import {
+  MOBILE_SPRING,
+  STAGGER_CHILD,
+  STAGGER_CONTAINER,
+  useReducedMotionTransition,
+  useReducedMotionVariants,
+} from "@/lib/ui/motion"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { useUIStore } from "@/stores/ui/ui-store"
-import { TEAM_STATUS_CONFIG, type AgentTeamTemplate } from "@/types/agent/agent-team"
+import { useTeamLiveStatus } from "@/hooks/agent-runs/use-team-live-status"
+import { usePlatform } from "@/hooks/use-platform"
+import { useTemplateCatalog } from "@/hooks/use-template-catalog"
+import { type AgentTeamTemplate } from "@/types/agent/agent-team"
 import type { AgentTeam } from "@/types/agent/agent-team"
 import { createSampleTeam } from "@/lib/ai/agent/sample-team"
-import { createLogger } from "@/lib/logging"
+import { AutoComposeDialog } from "@/components/agent/workspace/auto-compose-dialog"
+import { createLogger } from "@cognia/logging"
 import {
   getTemplateWarnings,
   listAgentTeamTemplateEntries,
   type PluginAgentTeamTemplateWarning,
 } from "@/lib/plugin/registries/agent-team-template-registry"
 import { projectPluginTemplate } from "@/lib/agent-team/project-plugin-template"
+import { instantiateAgentTeamTemplate } from "@/lib/agent-team/instantiate-template"
+import { getTemplateRuntime } from "@/lib/templates/runtime"
+import type { AgentTeamTemplatePayload } from "@/lib/templates/adapters"
+import type { TemplateDefinitionEnvelope } from "@/lib/templates/contracts"
 
 const log = createLogger("agentTeams.list")
+
+function projectCatalogAgentTeam(
+  definition: TemplateDefinitionEnvelope
+): AgentTeamTemplate | undefined {
+  const payload = definition.payload as Partial<AgentTeamTemplatePayload>
+  if (!payload.team || !Array.isArray(payload.teammates) || !Array.isArray(payload.tasks)) {
+    return undefined
+  }
+  const categories = new Set<AgentTeamTemplate["category"]>([
+    "review",
+    "research",
+    "development",
+    "debugging",
+    "analysis",
+    "general",
+    "documentation",
+    "security",
+  ])
+  const category = categories.has(definition.metadata.category as AgentTeamTemplate["category"])
+    ? (definition.metadata.category as AgentTeamTemplate["category"])
+    : "general"
+  return {
+    id: `catalog:${definition.contentHash}`,
+    name: definition.metadata.name,
+    description: definition.metadata.description ?? payload.team.description,
+    category,
+    teammates: payload.teammates.map((teammate) => ({
+      name: teammate.name,
+      description: teammate.description,
+      specialization: teammate.specialization,
+      config: teammate.config as never,
+      systemPrompt: teammate.spawnPrompt,
+      capabilities: teammate.capabilities as never,
+      governanceHints: teammate.governanceHints as never,
+      tags: teammate.tags,
+      iconKey: teammate.iconKey,
+    })),
+    taskTemplates: payload.tasks.map((task) => {
+      const assignedToIndex = task.assignedToLocalId
+        ? payload.teammates!.findIndex((teammate) => teammate.localId === task.assignedToLocalId)
+        : -1
+      return {
+        title: task.title,
+        description: task.description,
+        priority: task.priority as never,
+        ...(assignedToIndex >= 0 ? { assignedToIndex } : {}),
+      }
+    }),
+    config: payload.team.config as never,
+    icon: definition.metadata.icon,
+    isBuiltIn: definition.provenance.source === "built-in",
+  }
+}
 
 /** Merge built-in / user templates with plugin-overlay templates + warnings. */
 function useMergedTemplates(localTemplates: AgentTeamTemplate[]): {
@@ -138,12 +209,17 @@ export default function AgentTeamsListPage() {
   const router = useRouter()
   const t = useTranslations("agentTeamsWorkspace")
   const tCat = useTranslations("agentTeamsWorkspace.templates.categories")
+  const platform = usePlatform()
+  // Shared motion tokens, same vocabulary as the workspace panels.
+  const cardVariants = useReducedMotionVariants(STAGGER_CHILD)
+  const layoutTransition = useReducedMotionTransition(MOBILE_SPRING)
 
   const teams = useAgentTeamStore((s) => s.teams)
   const teammates = useAgentTeamStore((s) => s.teammates)
   const templates = useAgentTeamStore((s) => s.templates)
   const createTeam = useAgentTeamStore((s) => s.createTeam)
   const addTeammate = useAgentTeamStore((s) => s.addTeammate)
+  const createTask = useAgentTeamStore((s) => s.createTask)
   const deleteTeam = useAgentTeamStore((s) => s.deleteTeam)
   const updateTeam = useAgentTeamStore((s) => s.updateTeam)
 
@@ -151,6 +227,7 @@ export default function AgentTeamsListPage() {
   const [activeTab, setActiveTab] = useState("my-teams")
   const [categoryFilter, setCategoryFilter] = useState("all")
   const [createOpen, setCreateOpen] = useState(false)
+  const [autoComposeOpen, setAutoComposeOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editName, setEditName] = useState("")
   const [deletingTeam, setDeletingTeam] = useState<AgentTeam | null>(null)
@@ -188,8 +265,20 @@ export default function AgentTeamsListPage() {
   }, [teams, teammates])
 
   const localTemplates = useMemo(() => Object.values(templates), [templates])
-  const { merged: allTemplates, warningsById: templateWarnings } =
+  const { merged: legacyTemplates, warningsById: templateWarnings } =
     useMergedTemplates(localTemplates)
+  const { definitions: catalogDefinitions } = useTemplateCatalog({ domain: "agentTeam" })
+  const catalogProjection = useMemo(() => {
+    const byPickerId = new Map<string, TemplateDefinitionEnvelope>()
+    const rows = catalogDefinitions.flatMap((definition) => {
+      const projected = projectCatalogAgentTeam(definition)
+      if (!projected) return []
+      byPickerId.set(projected.id, definition)
+      return [projected]
+    })
+    return { rows, byPickerId }
+  }, [catalogDefinitions])
+  const allTemplates = catalogProjection.rows.length > 0 ? catalogProjection.rows : legacyTemplates
 
   const filteredTemplates = useMemo(() => {
     const all = [...allTemplates].sort((a, b) => {
@@ -203,29 +292,34 @@ export default function AgentTeamsListPage() {
   }, [allTemplates, categoryFilter])
 
   /* ---- actions ---- */
-  const handlePickTemplate = (tpl: AgentTeamTemplate) => {
-    const team = createTeam({
-      name: tpl.name,
-      description: tpl.description,
-      task: tpl.description,
-      config: tpl.config,
-    })
-    for (const tm of tpl.teammates) {
-      addTeammate({
-        teamId: team.id,
-        name: tm.name,
-        description: tm.description,
-        role: "teammate",
-        config: {
-          ...tm.config,
-          systemPrompt: tm.systemPrompt ?? tm.config?.systemPrompt,
-          capabilities: tm.capabilities ?? tm.config?.capabilities,
-          specialization: tm.specialization ?? tm.config?.specialization,
-        },
-      })
+  const instantiatePickedTemplate = async (tpl: AgentTeamTemplate): Promise<string | undefined> => {
+    const definition = catalogProjection.byPickerId.get(tpl.id)
+    if (!definition) {
+      return instantiateAgentTeamTemplate(tpl, { createTeam, addTeammate, createTask }).id
     }
-    log.info("template_used", { templateId: tpl.id, teamId: team.id })
-    router.push(`/agent-teams/workspace?teamId=${team.id}`)
+    const plan = await getTemplateRuntime().service.preflight({
+      definitionId: definition.id,
+      ...(definition.version ? { version: definition.version } : {}),
+      platform: platform === "mobile" ? "mobile" : platform === "web" ? "web" : "desktop",
+      bindings: {},
+    })
+    if (plan.status !== "ready") {
+      toast.info(t("templates.openStudioForBindings"))
+      router.push(`/templates?definition=${encodeURIComponent(definition.id)}`)
+      return undefined
+    }
+    const result = await getTemplateRuntime().service.instantiate({
+      plan,
+      confirmed: false,
+    })
+    return result.resources.find((resource) => resource.domain === "agentTeam")?.id
+  }
+
+  const handlePickTemplate = async (tpl: AgentTeamTemplate) => {
+    const teamId = await instantiatePickedTemplate(tpl)
+    if (!teamId) return
+    log.info("template_used", { templateId: tpl.id, teamId })
+    router.push(`/agent-teams/workspace?teamId=${teamId}`)
   }
 
   const handleDelete = (team: AgentTeam) => {
@@ -236,7 +330,7 @@ export default function AgentTeamsListPage() {
 
   const handleDuplicate = (team: AgentTeam) => {
     const copy = createTeam({
-      name: `${team.name} (copy)`,
+      name: t("duplicatedName", { name: team.name }),
       description: team.description,
       task: team.task,
       config: { ...team.config },
@@ -271,40 +365,51 @@ export default function AgentTeamsListPage() {
   /* ---- render ---- */
   return (
     <div
-      className="mx-auto h-full w-full max-w-6xl space-y-6 overflow-y-auto p-4 sm:p-6"
+      className="flex h-full min-h-0 w-full flex-col space-y-6 overflow-y-auto p-4 sm:p-6"
       data-testid="agent-teams-list-page"
       data-bg-target="chat"
     >
-      {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="space-y-1">
-          <Label className="text-lg font-semibold">{t("listTitle")}</Label>
-          <p className="text-sm text-muted-foreground">{t("listDescription")}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              const { teamId } = createSampleTeam()
-              toast.success(t("sampleTeamCreated"))
-              log.info("sample_team_created", { teamId })
-              router.push(`/agent-teams/workspace?teamId=${teamId}`)
-            }}
-            data-testid="agent-teams-try-sample"
-          >
-            <SparklesIcon className="mr-2 size-4" />
-            {t("trySampleTeam")}
-          </Button>
-          <Button size="sm" onClick={() => setCreateOpen(true)}>
-            <PlusIcon className="mr-2 size-4" />
-            {t("createTeam")}
-          </Button>
-        </div>
-      </div>
+      <FeaturePageHeader
+        icon={<UsersIcon />}
+        title={t("listTitle")}
+        description={t("listDescription")}
+        className="rounded-xl border shadow-sm"
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                const { teamId } = createSampleTeam()
+                toast.success(t("sampleTeamCreated"))
+                log.info("sample_team_created", { teamId })
+                router.push(`/agent-teams/workspace?teamId=${teamId}`)
+              }}
+              data-testid="agent-teams-try-sample"
+            >
+              <SparklesIcon className="mr-2 size-4" />
+              {t("trySampleTeam")}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setAutoComposeOpen(true)}
+              data-testid="agent-teams-auto-compose"
+            >
+              <SparklesIcon className="mr-2 size-4" />
+              {t("autoCompose.openButton")}
+            </Button>
+            <Button size="sm" onClick={() => setCreateOpen(true)}>
+              <PlusIcon className="mr-2 size-4" />
+              {t("createTeam")}
+            </Button>
+          </div>
+        }
+      />
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+      {/* Stats. `grid-cols-3` with no breakpoint crushed three cards into a
+          narrow window; stack them below `sm` instead. */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Card className="space-y-1 p-3 text-center sm:p-4">
           <p className="text-2xl font-semibold tabular-nums">{stats.total}</p>
           <p className="text-xs text-muted-foreground">{t("stats.totalTeams")}</p>
@@ -341,6 +446,7 @@ export default function AgentTeamsListPage() {
                 <button
                   type="button"
                   onClick={() => setSearch("")}
+                  aria-label={t("clearSearch")}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                 >
                   <XIcon className="size-3" />
@@ -377,24 +483,43 @@ export default function AgentTeamsListPage() {
               </Empty>
             )
           ) : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {teamList.map((team) => (
-                <TeamCard
-                  key={team.id}
-                  team={team}
-                  teammates={teammates}
-                  editing={editingId === team.id}
-                  editName={editName}
-                  onEditNameChange={setEditName}
-                  onCommitRename={() => commitRename(team.id)}
-                  onCancelRename={() => setEditingId(null)}
-                  onOpen={() => router.push(`/agent-teams/workspace?teamId=${team.id}`)}
-                  onRename={() => startRename(team)}
-                  onDuplicate={() => handleDuplicate(team)}
-                  onDelete={() => setDeletingTeam(team)}
-                />
-              ))}
-            </div>
+            <motion.div
+              className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+              variants={STAGGER_CONTAINER}
+              initial="initial"
+              animate="animate"
+            >
+              {/* `layout` + AnimatePresence: deleting a team used to blink it out
+                  and snap the rest of the grid up a row; filtering by search was
+                  the same jump. Both now read as movement. */}
+              <AnimatePresence initial={false}>
+                {teamList.map((team) => (
+                  <motion.div
+                    key={team.id}
+                    layout
+                    variants={cardVariants}
+                    initial="initial"
+                    animate="animate"
+                    exit="exit"
+                    transition={layoutTransition}
+                  >
+                    <TeamCard
+                      team={team}
+                      teammates={teammates}
+                      editing={editingId === team.id}
+                      editName={editName}
+                      onEditNameChange={setEditName}
+                      onCommitRename={() => commitRename(team.id)}
+                      onCancelRename={() => setEditingId(null)}
+                      onOpen={() => router.push(`/agent-teams/workspace?teamId=${team.id}`)}
+                      onRename={() => startRename(team)}
+                      onDuplicate={() => handleDuplicate(team)}
+                      onDelete={() => setDeletingTeam(team)}
+                    />
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            </motion.div>
           )}
         </TabsContent>
 
@@ -423,7 +548,7 @@ export default function AgentTeamsListPage() {
               {t("noResults")}
             </p>
           ) : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {filteredTemplates.map((tpl) => (
                 <Card
                   key={tpl.id}
@@ -434,7 +559,7 @@ export default function AgentTeamsListPage() {
                     <p className="text-sm font-medium">{tpl.name}</p>
                     {tpl.isBuiltIn && (
                       <Badge variant="secondary" className="text-[10px] shrink-0">
-                        built-in
+                        {t("builtInBadge")}
                       </Badge>
                     )}
                   </div>
@@ -455,9 +580,13 @@ export default function AgentTeamsListPage() {
                   ) : null}
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[10px] text-muted-foreground">
-                      {tCat(tpl.category)} · {tpl.teammates.length} teammates
+                      {tCat(tpl.category)} · {t("teammatesCount", { count: tpl.teammates.length })}
                     </span>
-                    <Button size="sm" variant="outline" onClick={() => handlePickTemplate(tpl)}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void handlePickTemplate(tpl)}
+                    >
                       <PlayIcon className="mr-1 size-3" />
                       {t("createTeam")}
                     </Button>
@@ -474,8 +603,19 @@ export default function AgentTeamsListPage() {
         open={createOpen}
         onOpenChange={setCreateOpen}
         templates={allTemplates}
+        onPickTemplate={instantiatePickedTemplate}
         onCreated={(teamId) => {
           setCreateOpen(false)
+          router.push(`/agent-teams/workspace?teamId=${teamId}`)
+        }}
+      />
+
+      {/* ---- Auto-compose Dialog ---- */}
+      <AutoComposeDialog
+        open={autoComposeOpen}
+        onOpenChange={setAutoComposeOpen}
+        onComposed={(teamId) => {
+          setAutoComposeOpen(false)
           router.push(`/agent-teams/workspace?teamId=${teamId}`)
         }}
       />
@@ -542,13 +682,18 @@ function TeamCard({
 }: TeamCardProps) {
   const t = useTranslations("agentTeamsWorkspace")
   const locale = useLocale()
-  const statusCfg = TEAM_STATUS_CONFIG[team.status]
+  // Authoritative run status from the workflowRuns subscription — the store's
+  // team.status is only an optimistic in-flight bridge (see agent-team.ts).
+  const liveStatus = useTeamLiveStatus(team)
   const memberNames = team.teammateIds.map((id) => teammates[id]?.name ?? "?").slice(0, 3)
   const overflow = Math.max(0, team.teammateIds.length - 3)
 
+  // `transition-colors` rather than a bare `transition`: the latter animates
+  // every property including layout-affecting ones, which fights the `layout`
+  // animation on the wrapper when the grid reflows.
   return (
     <Card
-      className="group cursor-pointer space-y-2 p-4 transition hover:border-primary"
+      className="group cursor-pointer space-y-2 p-4 transition-colors duration-150 hover:border-primary"
       onClick={onOpen}
       data-testid={`team-card-${team.id}`}
     >
@@ -573,21 +718,33 @@ function TeamCard({
                   }}
                   autoFocus
                 />
-                <Button size="icon" variant="ghost" className="size-6" onClick={onCommitRename}>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="size-6"
+                  onClick={onCommitRename}
+                  aria-label={t("confirmRename")}
+                >
                   ✓
                 </Button>
-                <Button size="icon" variant="ghost" className="size-6" onClick={onCancelRename}>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="size-6"
+                  onClick={onCancelRename}
+                  aria-label={t("cancelRename")}
+                >
                   ✕
                 </Button>
               </span>
             ) : (
               <p className="text-sm font-medium truncate">{team.name}</p>
             )}
-            {statusCfg && (
-              <Badge variant="outline" className="text-[10px] shrink-0">
-                {team.status}
-              </Badge>
-            )}
+            <StatusBadge
+              value={liveStatus}
+              labelNamespace="agentTeam.status"
+              className="text-[10px] shrink-0"
+            />
           </div>
 
           {/* Description */}
@@ -612,14 +769,14 @@ function TeamCard({
                 {overflow > 0 && <span>+{overflow}</span>}
               </span>
             )}
-            <span>{team.teammateIds.length} members</span>
+            <span>{t("membersCount", { count: team.teammateIds.length })}</span>
             {team.startedAt && <span>{timeAgo(team.startedAt, locale)}</span>}
           </div>
         </div>
 
         {/* Actions menu */}
         <div
-          className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+          className="shrink-0 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100"
           onClick={(e) => e.stopPropagation()}
         >
           <DropdownMenu>
@@ -631,7 +788,7 @@ function TeamCard({
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={onOpen}>
                 <PlayIcon className="mr-2 size-3.5" />
-                {team.status === "executing" || team.status === "planning"
+                {liveStatus === "executing" || liveStatus === "planning"
                   ? t("viewWorkspace")
                   : t("openWorkspace")}
               </DropdownMenuItem>
@@ -664,13 +821,19 @@ interface CreateTeamDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   templates: AgentTeamTemplate[]
+  onPickTemplate: (template: AgentTeamTemplate) => Promise<string | undefined>
   onCreated: (teamId: string) => void
 }
 
-function CreateTeamDialog({ open, onOpenChange, templates, onCreated }: CreateTeamDialogProps) {
+function CreateTeamDialog({
+  open,
+  onOpenChange,
+  templates,
+  onPickTemplate,
+  onCreated,
+}: CreateTeamDialogProps) {
   const t = useTranslations("agentTeamsWorkspace")
   const createTeam = useAgentTeamStore((s) => s.createTeam)
-  const addTeammate = useAgentTeamStore((s) => s.addTeammate)
 
   const [mode, setMode] = useState<"template" | "scratch">("template")
   const [name, setName] = useState("")
@@ -680,22 +843,16 @@ function CreateTeamDialog({ open, onOpenChange, templates, onCreated }: CreateTe
 
   const handleCreateFromScratch = () => {
     if (!name.trim()) {
-      toast.error("Team name is required.")
+      toast.error(t("teamNameRequired"))
       return
     }
     setSaving(true)
     try {
       const team = createTeam({
         name: name.trim(),
-        description: description.trim() || "A new agent team",
+        description: description.trim() || t("defaultTeamDescription"),
         task: description.trim() || name.trim(),
         config: { requirePlanApproval },
-      })
-      addTeammate({
-        teamId: team.id,
-        name: "Team Lead",
-        description: "Lead agent",
-        role: "lead",
       })
       toast.success(t("teamCreated", { name: team.name }))
       onCreated(team.id)
@@ -705,31 +862,13 @@ function CreateTeamDialog({ open, onOpenChange, templates, onCreated }: CreateTe
     }
   }
 
-  const handlePickTemplate = (tpl: AgentTeamTemplate) => {
+  const handlePickTemplate = async (tpl: AgentTeamTemplate) => {
     setSaving(true)
     try {
-      const team = createTeam({
-        name: tpl.name,
-        description: tpl.description,
-        task: tpl.description,
-        config: tpl.config,
-      })
-      for (const tm of tpl.teammates) {
-        addTeammate({
-          teamId: team.id,
-          name: tm.name,
-          description: tm.description,
-          role: "teammate",
-          config: {
-            ...tm.config,
-            systemPrompt: tm.systemPrompt ?? tm.config?.systemPrompt,
-            capabilities: tm.capabilities ?? tm.config?.capabilities,
-            specialization: tm.specialization ?? tm.config?.specialization,
-          },
-        })
-      }
-      toast.success(t("teamCreated", { name: team.name }))
-      onCreated(team.id)
+      const teamId = await onPickTemplate(tpl)
+      if (!teamId) return
+      toast.success(t("teamCreated", { name: tpl.name }))
+      onCreated(teamId)
       reset()
     } finally {
       setSaving(false)
@@ -788,7 +927,7 @@ function CreateTeamDialog({ open, onOpenChange, templates, onCreated }: CreateTe
           <div className="grid max-h-64 gap-2 overflow-y-auto">
             {templates.length === 0 ? (
               <p className="text-center text-xs text-muted-foreground py-4">
-                No templates available.
+                {t("noTemplatesAvailable")}
               </p>
             ) : (
               templates.map((tpl) => (
@@ -796,8 +935,8 @@ function CreateTeamDialog({ open, onOpenChange, templates, onCreated }: CreateTe
                   key={tpl.id}
                   type="button"
                   disabled={saving}
-                  onClick={() => handlePickTemplate(tpl)}
-                  className="flex items-start gap-3 rounded-md border p-3 text-left transition hover:border-primary disabled:opacity-50"
+                  onClick={() => void handlePickTemplate(tpl)}
+                  className="flex items-start gap-3 rounded-md border p-3 text-left transition-colors duration-150 hover:border-primary disabled:opacity-50"
                 >
                   <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-medium">
                     {tpl.name.charAt(0)}
@@ -813,25 +952,25 @@ function CreateTeamDialog({ open, onOpenChange, templates, onCreated }: CreateTe
         ) : (
           <div className="space-y-3">
             <div className="space-y-1">
-              <Label className="text-xs">Team name</Label>
+              <Label className="text-xs">{t("teamNameLabel")}</Label>
               <Input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g., Security Audit Team"
+                placeholder={t("teamNamePlaceholder")}
               />
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">Description / Task</Label>
+              <Label className="text-xs">{t("descriptionTaskLabel")}</Label>
               <Textarea
                 rows={3}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="What should this team accomplish?"
+                placeholder={t("descriptionTaskPlaceholder")}
                 className="text-xs"
               />
             </div>
             <div className="flex items-center justify-between">
-              <Label className="text-xs">Require plan approval</Label>
+              <Label className="text-xs">{t("requirePlanApproval")}</Label>
               <Switch checked={requirePlanApproval} onCheckedChange={setRequirePlanApproval} />
             </div>
           </div>
@@ -839,11 +978,11 @@ function CreateTeamDialog({ open, onOpenChange, templates, onCreated }: CreateTe
 
         <DialogFooter>
           <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t("cancel")}
           </Button>
           {mode === "scratch" && (
             <Button size="sm" onClick={handleCreateFromScratch} disabled={saving}>
-              {saving ? "Creating..." : t("createTeam")}
+              {saving ? t("creating") : t("createTeam")}
             </Button>
           )}
         </DialogFooter>

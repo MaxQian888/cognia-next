@@ -21,16 +21,51 @@
  * out so the session never leaks into the main DM/team rail.
  */
 
-import { Activity, lazy, memo, Suspense, useEffect, useRef, useState } from "react"
+import {
+  Activity,
+  createContext,
+  lazy,
+  memo,
+  Suspense,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import { useShallow } from "zustand/react/shallow"
 import { useTranslations } from "next-intl"
-import { Loader2Icon } from "lucide-react"
+import {
+  BlocksIcon,
+  BotIcon,
+  HistoryIcon,
+  ListChecksIcon,
+  MessageSquareIcon,
+  Loader2Icon,
+  PlayIcon,
+  SettingsIcon,
+  WrenchIcon,
+} from "lucide-react"
 import type { ReactFlowInstance } from "@xyflow/react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 import type { EditorState, EditorStore } from "@/lib/workflow/editor/store"
 import { InspectorPanel } from "../inspector-panel"
 import { EdgeInspector } from "../edge-inspector"
+import { ContextWorkbench } from "@/components/context-workbench/context-workbench"
+import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
+import type {
+  ContextPanelDefinition,
+  ContextResource,
+  ContextWorkbenchPlacement,
+} from "@/types/context-workbench"
+import { workflowEditorRevision } from "@/lib/workflow/editor/editor-revision"
+import { useContextWorkbenchSurfaceFlag } from "@/hooks/context-workbench/use-context-workbench-surface-flag"
+import { useContextWorkbenchInstanceId } from "@/hooks/context-workbench/use-context-workbench-instance-id"
+import { ContextCommentsPanel } from "@/components/context-workbench/context-comments-panel"
+import { resolveContextCapabilities } from "@/lib/context-workbench/capabilities"
+import { useContextCommentBadge } from "@/hooks/context-workbench/use-context-comment-badge"
 
 // Lazy-load the chat tab so the canvas bundle stays lean AND so unit
 // tests that mount the canvas don't pay the cost of pulling the entire
@@ -53,19 +88,30 @@ const SettingsTab = lazy(() => import("./settings-tab").then((m) => ({ default: 
 
 const RunsTab = lazy(() => import("./runs-tab").then((m) => ({ default: m.RunsTab })))
 
-type RightSidebarTab = "chat" | "inspector" | "templates" | "changelog" | "settings" | "runs"
+const ProblemsTab = lazy(() => import("./problems-tab").then((m) => ({ default: m.ProblemsTab })))
+
+type RightSidebarTab =
+  "chat" | "inspector" | "problems" | "templates" | "changelog" | "settings" | "runs"
+
+interface RightSidebarProps {
+  useStore: EditorStore
+  className?: string
+  onOpenWorkflowSettings?: (tab?: string) => void
+  reactFlowInstance?: ReactFlowInstance | null
+  onCollapse?: () => void
+  /** Reopen the container this sidebar sits in — the dual of `onCollapse`. */
+  onEnsureVisible?: () => void
+  /** The container has shrunk to the activity rail; drop the panel body. */
+  railOnly?: boolean
+  placement?: ContextWorkbenchPlacement
+}
 
 function RightSidebarInner({
   useStore,
   className,
   onOpenWorkflowSettings,
   reactFlowInstance,
-}: {
-  useStore: EditorStore
-  className?: string
-  onOpenWorkflowSettings?: (tab?: string) => void
-  reactFlowInstance?: ReactFlowInstance | null
-}) {
+}: RightSidebarProps) {
   const t = useTranslations("workflowEditor.rightSidebar")
   const [tab, setTab] = useState<RightSidebarTab>("chat")
   // Pin the user's explicit choice so selecting a node after a manual
@@ -76,12 +122,25 @@ function RightSidebarInner({
   // already-non-empty selection (e.g. 1 → 2 via shift-click).
   const prevSelectionCountRef = useRef(0)
 
-  const { selectionCount, edgeSelectionCount, workflowId, workflowName } = useStore(
+  const {
+    selectionCount,
+    edgeSelectionCount,
+    workflowId,
+    workflowName,
+    errorCount,
+    warningCount,
+    requestedProblemsPanel,
+    requestedInspectorPanel,
+  } = useStore(
     useShallow((s: EditorState) => ({
       selectionCount: s.selectedNodeIds.length,
       edgeSelectionCount: s.selectedEdgeIds.length,
       workflowId: s.baseWorkflow.id,
       workflowName: s.baseWorkflow.name,
+      errorCount: s.diagnostics?.errorCount ?? 0,
+      warningCount: s.diagnostics?.warningCount ?? 0,
+      requestedProblemsPanel: s.requestedProblemsPanel ?? false,
+      requestedInspectorPanel: s.requestedInspectorPanel ?? false,
     }))
   )
   // Inspector shows the node form when nodes are selected, else the edge
@@ -104,19 +163,41 @@ function RightSidebarInner({
     }
   }, [inspectorCount])
 
+  // Run gate → "open Problems panel" signal. An explicit user action (a
+  // blocked run), so it overrides a pinned tab. Clear the signal once consumed.
+  useEffect(() => {
+    if (!requestedProblemsPanel) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional bridge from the Zustand requestedProblemsPanel signal into the local tab state.
+    setTab("problems")
+    useStore.getState().clearRequestedProblemsPanel()
+  }, [requestedProblemsPanel, useStore])
+
+  // Explicit configure gesture (node double-click / context-menu "Configure")
+  // → reveal the Inspector even over a pinned tab, and drop the pin so
+  // subsequent selections resume the normal auto-switch behavior.
+  useEffect(() => {
+    if (!requestedInspectorPanel) return
+    userPinnedTab.current = null
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional bridge from the Zustand requestedInspectorPanel signal into the local tab state.
+    setTab("inspector")
+    useStore.getState().clearRequestedInspectorPanel()
+  }, [requestedInspectorPanel, useStore])
+
   const handleTabChange = (next: string) => {
     const v: RightSidebarTab =
       next === "chat"
         ? "chat"
-        : next === "templates"
-          ? "templates"
-          : next === "changelog"
-            ? "changelog"
-            : next === "settings"
-              ? "settings"
-              : next === "runs"
-                ? "runs"
-                : "inspector"
+        : next === "problems"
+          ? "problems"
+          : next === "templates"
+            ? "templates"
+            : next === "changelog"
+              ? "changelog"
+              : next === "settings"
+                ? "settings"
+                : next === "runs"
+                  ? "runs"
+                  : "inspector"
     userPinnedTab.current = v
     setTab(v)
   }
@@ -134,28 +215,81 @@ function RightSidebarInner({
       value={tab}
       onValueChange={handleTabChange}
       className={cn("flex h-full w-full flex-col border-l bg-card/40", className)}
+      // Keep the legacy workflow rail on the shared sidebar background path;
+      // the ContextWorkbench branch below receives the same marker itself.
+      data-bg-target="sidebar"
       data-testid="workflow-right-sidebar"
     >
-      <TabsList className="m-2 grid w-auto grid-cols-6">
-        <TabsTrigger value="chat" data-testid="workflow-right-sidebar-tab-chat">
+      {/* Single scrollable row: tabs size to their label (flex-none overrides
+          the shadcn flex-1) so longer labels — "运行记录" / "Inspector" — never
+          clip, and the row scrolls horizontally once it outgrows the narrow
+          sidebar instead of squeezing every tab into an unreadable sliver. */}
+      <TabsList className="m-2 flex w-auto justify-start gap-0.5 overflow-x-auto">
+        <TabsTrigger
+          value="chat"
+          className="flex-none"
+          data-testid="workflow-right-sidebar-tab-chat"
+        >
           {t("tabs.chat")}
         </TabsTrigger>
-        <TabsTrigger value="inspector" data-testid="workflow-right-sidebar-tab-inspector">
+        <TabsTrigger
+          value="inspector"
+          className="flex-none"
+          data-testid="workflow-right-sidebar-tab-inspector"
+        >
           {t("tabs.inspector")}
           {inspectorCount > 1 ? (
             <span className="ml-1 text-[10px] opacity-70">×{inspectorCount}</span>
           ) : null}
         </TabsTrigger>
-        <TabsTrigger value="runs" data-testid="workflow-right-sidebar-tab-runs">
+        <TabsTrigger
+          value="problems"
+          className="flex-none"
+          data-testid="workflow-right-sidebar-tab-problems"
+        >
+          {t("tabs.problems")}
+          {errorCount > 0 ? (
+            <span
+              className="ml-1 rounded bg-destructive px-1 text-[10px] font-medium text-destructive-foreground"
+              data-testid="workflow-problems-badge-error"
+            >
+              {errorCount}
+            </span>
+          ) : warningCount > 0 ? (
+            <span
+              className="ml-1 rounded bg-amber-500 px-1 text-[10px] font-medium text-white"
+              data-testid="workflow-problems-badge-warning"
+            >
+              {warningCount}
+            </span>
+          ) : null}
+        </TabsTrigger>
+        <TabsTrigger
+          value="runs"
+          className="flex-none"
+          data-testid="workflow-right-sidebar-tab-runs"
+        >
           {t("tabs.runs")}
         </TabsTrigger>
-        <TabsTrigger value="templates" data-testid="workflow-right-sidebar-tab-templates">
+        <TabsTrigger
+          value="templates"
+          className="flex-none"
+          data-testid="workflow-right-sidebar-tab-templates"
+        >
           {t("tabs.templates")}
         </TabsTrigger>
-        <TabsTrigger value="settings" data-testid="workflow-right-sidebar-tab-settings">
+        <TabsTrigger
+          value="settings"
+          className="flex-none"
+          data-testid="workflow-right-sidebar-tab-settings"
+        >
           {t("tabs.settings")}
         </TabsTrigger>
-        <TabsTrigger value="changelog" data-testid="workflow-right-sidebar-tab-changelog">
+        <TabsTrigger
+          value="changelog"
+          className="flex-none"
+          data-testid="workflow-right-sidebar-tab-changelog"
+        >
           {t("tabs.changelog")}
         </TabsTrigger>
       </TabsList>
@@ -236,6 +370,21 @@ function RightSidebarInner({
           />
         </Suspense>
       </TabsContent>
+      <TabsContent value="problems" className="flex-1 m-0 overflow-hidden">
+        <Suspense
+          fallback={
+            <div
+              className="flex h-full w-full items-center justify-center gap-2 p-6 text-sm text-muted-foreground"
+              data-testid="workflow-problems-tab-suspense"
+            >
+              <Loader2Icon className="size-4 animate-spin" aria-hidden="true" />
+              {t("chatLoading")}
+            </div>
+          }
+        >
+          <ProblemsTab useStore={useStore} reactFlowInstance={reactFlowInstance} />
+        </Suspense>
+      </TabsContent>
       <TabsContent value="settings" className="flex-1 m-0 overflow-hidden">
         <Suspense
           fallback={
@@ -270,6 +419,356 @@ function RightSidebarInner({
   )
 }
 
+function WorkflowPanelLoading() {
+  const t = useTranslations("workflowEditor.rightSidebar")
+  return (
+    <div className="flex h-full w-full items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
+      <Loader2Icon className="size-4 animate-spin" aria-hidden="true" />
+      {t("chatLoading")}
+    </div>
+  )
+}
+
+interface WorkflowPanelRuntime {
+  editorRevision: string
+  handleOpenSettings: (tab?: string) => void
+  reactFlowInstance?: ReactFlowInstance | null
+  selectedEdgeIds: string[]
+  selectedNodeIds: string[]
+  useStore: EditorStore
+  workflowId: string
+  workflowName: string
+}
+
+// ContextWorkbench treats `renderer` as a component type. Keep those types
+// module-scoped so workflow updates do not remount retained panels.
+const WorkflowPanelRuntimeContext = createContext<WorkflowPanelRuntime | null>(null)
+
+function useWorkflowPanelRuntime(): WorkflowPanelRuntime {
+  const runtime = useContext(WorkflowPanelRuntimeContext)
+  if (!runtime) throw new Error("Workflow panel rendered outside its sidebar host")
+  return runtime
+}
+
+function WorkflowChatPanel() {
+  const runtime = useWorkflowPanelRuntime()
+  return (
+    <Suspense fallback={<WorkflowPanelLoading />}>
+      <WorkflowEditorChatTab
+        useStore={runtime.useStore}
+        workflowId={runtime.workflowId}
+        workflowName={runtime.workflowName}
+        onOpenWorkflowSettings={runtime.handleOpenSettings}
+      />
+    </Suspense>
+  )
+}
+
+function WorkflowCommentsPanel() {
+  const runtime = useWorkflowPanelRuntime()
+  return (
+    <ContextCommentsPanel
+      resource={{ kind: "workflow", id: runtime.workflowId }}
+      revision={runtime.editorRevision}
+      anchor={
+        runtime.selectedNodeIds[0]
+          ? {
+              kind: "workflow-node",
+              nodeId: runtime.selectedNodeIds[0],
+              revision: runtime.editorRevision,
+            }
+          : runtime.selectedEdgeIds[0]
+            ? {
+                kind: "workflow-edge",
+                edgeId: runtime.selectedEdgeIds[0],
+                revision: runtime.editorRevision,
+              }
+            : undefined
+      }
+    />
+  )
+}
+
+function WorkflowInspectorPanel() {
+  const runtime = useWorkflowPanelRuntime()
+  return runtime.selectedNodeIds.length === 0 && runtime.selectedEdgeIds.length > 0 ? (
+    <EdgeInspector useStore={runtime.useStore} className="border-l-0" />
+  ) : (
+    <InspectorPanel useStore={runtime.useStore} className="border-l-0" />
+  )
+}
+
+function WorkflowProblemsPanel() {
+  const runtime = useWorkflowPanelRuntime()
+  return (
+    <Suspense fallback={<WorkflowPanelLoading />}>
+      <ProblemsTab useStore={runtime.useStore} reactFlowInstance={runtime.reactFlowInstance} />
+    </Suspense>
+  )
+}
+
+function WorkflowRunsPanel() {
+  const runtime = useWorkflowPanelRuntime()
+  return (
+    <Suspense fallback={<WorkflowPanelLoading />}>
+      <RunsTab
+        useStore={runtime.useStore}
+        workflowId={runtime.workflowId}
+        reactFlowInstance={runtime.reactFlowInstance}
+      />
+    </Suspense>
+  )
+}
+
+function WorkflowTemplatesPanel() {
+  const runtime = useWorkflowPanelRuntime()
+  return (
+    <Suspense fallback={<WorkflowPanelLoading />}>
+      <TemplatesTab useStore={runtime.useStore} workflowId={runtime.workflowId} />
+    </Suspense>
+  )
+}
+
+function WorkflowSettingsPanel() {
+  const runtime = useWorkflowPanelRuntime()
+  return (
+    <Suspense fallback={<WorkflowPanelLoading />}>
+      <SettingsTab useStore={runtime.useStore} />
+    </Suspense>
+  )
+}
+
+function WorkflowChangelogPanel() {
+  const runtime = useWorkflowPanelRuntime()
+  return (
+    <Suspense fallback={<WorkflowPanelLoading />}>
+      <ChangelogTab useStore={runtime.useStore} workflowId={runtime.workflowId} />
+    </Suspense>
+  )
+}
+
+function WorkflowContextWorkbench({
+  useStore,
+  className,
+  onOpenWorkflowSettings,
+  reactFlowInstance,
+  onCollapse,
+  onEnsureVisible,
+  railOnly,
+  placement,
+}: RightSidebarProps) {
+  const workbenchInstanceId = useContextWorkbenchInstanceId("workflow")
+  const {
+    selectedNodeIds,
+    selectedEdgeIds,
+    workflowId,
+    workflowName,
+    editorRevision,
+    errorCount,
+    warningCount,
+    requestedProblemsPanel,
+    requestedInspectorPanel,
+  } = useStore(
+    useShallow((state: EditorState) => ({
+      selectedNodeIds: state.selectedNodeIds,
+      selectedEdgeIds: state.selectedEdgeIds,
+      workflowId: state.baseWorkflow.id,
+      workflowName: state.baseWorkflow.name,
+      editorRevision: workflowEditorRevision(state),
+      errorCount: state.diagnostics?.errorCount ?? 0,
+      warningCount: state.diagnostics?.warningCount ?? 0,
+      requestedProblemsPanel: state.requestedProblemsPanel ?? false,
+      requestedInspectorPanel: state.requestedInspectorPanel ?? false,
+    }))
+  )
+  const scopeKey = `${workbenchInstanceId}::workflow:${workflowId}`
+  const unresolvedCommentCount = useContextCommentBadge("workflow", workflowId)
+  const layout = useContextWorkbenchStore((state) => state.layouts[scopeKey])
+  const navigatePanel = useContextWorkbenchStore((state) => state.navigatePanel)
+  const smartReveal = useContextWorkbenchStore((state) => state.smartReveal)
+  const previousSelectionCount = useRef(0)
+  const inspectorCount = selectedNodeIds.length || selectedEdgeIds.length
+
+  useEffect(() => {
+    if (!layout?.activePanelId) navigatePanel(scopeKey, "chat", "narrow")
+  }, [layout?.activePanelId, navigatePanel, scopeKey])
+
+  useEffect(() => {
+    const previous = previousSelectionCount.current
+    previousSelectionCount.current = inspectorCount
+    if (previous === 0 && inspectorCount > 0) smartReveal(scopeKey, "inspector", "narrow")
+  }, [inspectorCount, scopeKey, smartReveal])
+
+  useEffect(() => {
+    if (!requestedProblemsPanel) return
+    smartReveal(scopeKey, "problems", "wide")
+    useStore.getState().clearRequestedProblemsPanel()
+  }, [requestedProblemsPanel, scopeKey, smartReveal, useStore])
+
+  useEffect(() => {
+    if (!requestedInspectorPanel) return
+    smartReveal(scopeKey, "inspector", "narrow")
+    useStore.getState().clearRequestedInspectorPanel()
+  }, [requestedInspectorPanel, scopeKey, smartReveal, useStore])
+
+  const handleOpenSettings = useCallback(
+    (tab?: string) => {
+      navigatePanel(scopeKey, "settings", "wide")
+      onOpenWorkflowSettings?.(tab)
+    },
+    [navigatePanel, onOpenWorkflowSettings, scopeKey]
+  )
+
+  const panels = useMemo<ContextPanelDefinition[]>(
+    () => [
+      {
+        id: "chat",
+        activity: "ai",
+        labelKey: "workflowEditor.rightSidebar.tabs.chat",
+        icon: BotIcon,
+        order: 10,
+        appliesTo: (resource) => resource.kind === "workflow",
+        retention: "stateful",
+        renderer: WorkflowChatPanel,
+      },
+      {
+        id: "comments",
+        activity: "comments",
+        labelKey: "contextWorkbench.comments",
+        icon: MessageSquareIcon,
+        order: 15,
+        appliesTo: (resource) => resource.kind === "workflow",
+        retention: "stateful",
+        getBadge: () => unresolvedCommentCount,
+        renderer: WorkflowCommentsPanel,
+      },
+      {
+        id: "inspector",
+        activity: "inspect",
+        labelKey: "workflowEditor.rightSidebar.tabs.inspector",
+        icon: WrenchIcon,
+        order: 20,
+        appliesTo: (resource) => resource.kind === "workflow",
+        retention: "stateful",
+        getBadge: () => inspectorCount,
+        renderer: WorkflowInspectorPanel,
+      },
+      {
+        id: "problems",
+        activity: "inspect",
+        labelKey: "workflowEditor.rightSidebar.tabs.problems",
+        icon: ListChecksIcon,
+        order: 30,
+        appliesTo: (resource) => resource.kind === "workflow",
+        retention: "stateful",
+        getBadge: () => errorCount + warningCount,
+        renderer: WorkflowProblemsPanel,
+      },
+      {
+        id: "runs",
+        activity: "preview-run",
+        labelKey: "workflowEditor.rightSidebar.tabs.runs",
+        icon: PlayIcon,
+        order: 40,
+        appliesTo: (resource) => resource.kind === "workflow",
+        retention: "stateful",
+        preferredMode: "wide",
+        renderer: WorkflowRunsPanel,
+      },
+      {
+        id: "templates",
+        activity: "templates",
+        labelKey: "workflowEditor.rightSidebar.tabs.templates",
+        icon: BlocksIcon,
+        order: 50,
+        appliesTo: (resource) => resource.kind === "workflow",
+        retention: "stateful",
+        renderer: WorkflowTemplatesPanel,
+      },
+      {
+        id: "settings",
+        activity: "inspect",
+        labelKey: "workflowEditor.rightSidebar.tabs.settings",
+        icon: SettingsIcon,
+        order: 60,
+        appliesTo: (resource) => resource.kind === "workflow",
+        retention: "stateful",
+        preferredMode: "wide",
+        renderer: WorkflowSettingsPanel,
+      },
+      {
+        id: "changelog",
+        activity: "review",
+        labelKey: "workflowEditor.rightSidebar.tabs.changelog",
+        icon: HistoryIcon,
+        order: 70,
+        appliesTo: (resource) => resource.kind === "workflow",
+        retention: "stateful",
+        preferredMode: "wide",
+        renderer: WorkflowChangelogPanel,
+      },
+    ],
+    [errorCount, inspectorCount, unresolvedCommentCount, warningCount]
+  )
+  const handleExitFocus = useCallback(() => {
+    requestAnimationFrame(() => void reactFlowInstance?.fitView({ padding: 0.2, duration: 0 }))
+  }, [reactFlowInstance])
+
+  const resource = useMemo<ContextResource>(
+    () => ({
+      kind: "workflow",
+      workflowId,
+      editorRevision,
+      selection: {
+        kind: "workflow",
+        nodeIds: selectedNodeIds,
+        edgeIds: selectedEdgeIds,
+      },
+      capabilities: resolveContextCapabilities({ kind: "workflow" }),
+    }),
+    [editorRevision, selectedEdgeIds, selectedNodeIds, workflowId]
+  )
+  const panelRuntime = useMemo<WorkflowPanelRuntime>(
+    () => ({
+      editorRevision,
+      handleOpenSettings,
+      reactFlowInstance,
+      selectedEdgeIds,
+      selectedNodeIds,
+      useStore,
+      workflowId,
+      workflowName,
+    }),
+    [
+      editorRevision,
+      handleOpenSettings,
+      reactFlowInstance,
+      selectedEdgeIds,
+      selectedNodeIds,
+      useStore,
+      workflowId,
+      workflowName,
+    ]
+  )
+
+  return (
+    <WorkflowPanelRuntimeContext.Provider value={panelRuntime}>
+      <ContextWorkbench
+        workbenchInstanceId={workbenchInstanceId}
+        resource={resource}
+        panels={panels}
+        placement={placement}
+        onExitFocus={handleExitFocus}
+        onCollapse={onCollapse}
+        onEnsureVisible={onEnsureVisible}
+        railOnly={railOnly}
+        manageOwnWidth={false}
+        className={cn("w-full", className)}
+      />
+    </WorkflowPanelRuntimeContext.Provider>
+  )
+}
+
 /**
  * Memoized so unrelated editor store mutations (drag positions, runStatus
  * flips, viewport changes) don't re-render the entire 4-tab container.
@@ -278,4 +777,9 @@ function RightSidebarInner({
  * the parent passes a new `useStore` reference (per-workflow store
  * lifecycle), or `onOpenWorkflowSettings` identity changes.
  */
-export const RightSidebar = memo(RightSidebarInner)
+function RightSidebarHost(props: Parameters<typeof RightSidebarInner>[0]) {
+  const enabled = useContextWorkbenchSurfaceFlag("workflow")
+  return enabled ? <WorkflowContextWorkbench {...props} /> : <RightSidebarInner {...props} />
+}
+
+export const RightSidebar = memo(RightSidebarHost)

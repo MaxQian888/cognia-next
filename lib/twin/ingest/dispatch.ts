@@ -32,6 +32,7 @@ const DOCUMENT_FORMATS: ReadonlySet<TwinSourceFormat> = new Set<TwinSourceFormat
   "markdown",
   "pdf",
   "docx",
+  "xlsx",
   "pptx",
   "odt",
   "odp",
@@ -40,6 +41,22 @@ const DOCUMENT_FORMATS: ReadonlySet<TwinSourceFormat> = new Set<TwinSourceFormat
   "epub",
   "rtf",
   "code",
+])
+
+/**
+ * Formats that must be fed to `parseSource` as an `ArrayBuffer` (binary
+ * office/pdf/epub containers). The document processor decodes them; text
+ * formats take the `raw.text` path instead. Single source of truth for the
+ * uploader — it used to keep a duplicate set that drifted (Excel was missing).
+ */
+export const BINARY_TWIN_FORMATS: ReadonlySet<TwinSourceFormat> = new Set<TwinSourceFormat>([
+  "pdf",
+  "docx",
+  "xlsx",
+  "pptx",
+  "odt",
+  "odp",
+  "epub",
 ])
 
 const CHAT_IMPORTER_KEYS: Partial<Record<TwinSourceFormat, string>> = {
@@ -56,6 +73,7 @@ const KIND_BY_FORMAT: Record<TwinSourceFormat, TwinSourceKind> = {
   markdown: "document",
   pdf: "document",
   docx: "document",
+  xlsx: "document",
   pptx: "document",
   odt: "document",
   odp: "document",
@@ -109,20 +127,36 @@ const EXTENSION_FORMAT: Record<string, TwinSourceFormat> = {
   markdown: "markdown",
   txt: "markdown",
   pdf: "pdf",
+  // Word — legacy .doc + macro-enabled .docm both route to the docx parser
+  // family (mammoth emits a "convert to .docx" diagnostic for very old .doc).
   docx: "docx",
   doc: "docx",
+  docm: "docx",
+  // Excel / spreadsheets — .xls/.xlsm parse via the xlsx library, .ods via the
+  // ODF parser (both resolved inside processDocumentAsync by real extension).
+  xlsx: "xlsx",
+  xls: "xlsx",
+  xlsm: "xlsx",
+  ods: "xlsx",
+  // Presentations — legacy .ppt is rejected with a "convert to .pptx"
+  // diagnostic by the processor, but still classifies as pptx here.
   pptx: "pptx",
   ppt: "pptx",
+  pptm: "pptx",
   odt: "odt",
   odp: "odp",
   html: "html",
   htm: "html",
+  xhtml: "html",
   csv: "csv",
   tsv: "csv",
   epub: "epub",
   rtf: "rtf",
   mbox: "mbox",
   eml: "eml",
+  // Code — mirrors the `code` extension set in
+  // `packages/document/src/support-matrix.ts` so nothing the canonical parser
+  // understands falls through to the unknown-file-type gate.
   ts: "code",
   tsx: "code",
   js: "code",
@@ -132,11 +166,32 @@ const EXTENSION_FORMAT: Record<string, TwinSourceFormat> = {
   rs: "code",
   go: "code",
   java: "code",
+  kt: "code",
   cpp: "code",
   c: "code",
   h: "code",
+  php: "code",
+  scala: "code",
+  r: "code",
   swift: "code",
-  kt: "code",
+  sh: "code",
+  bash: "code",
+  zsh: "code",
+  ps1: "code",
+  vue: "code",
+  svelte: "code",
+  sql: "code",
+  css: "code",
+  scss: "code",
+  less: "code",
+  xml: "code",
+  yaml: "code",
+  yml: "code",
+  // Generic .json routes as markdown text; the uploader sniffs chat-export
+  // shapes (ChatGPT/Claude/Slack/…) AFTER this coarse detection and rewrites
+  // the format to the matching importer. Without this key .json files died
+  // at the unknown-file-type gate and the JSON import branch was unreachable.
+  json: "markdown",
 }
 
 /**
@@ -152,4 +207,14 @@ export function detectSourceFormat(filename: string): TwinSourceFormat | undefin
 /** Public-facing list of formats the dispatcher can route. UI uses this. */
 export function listSupportedFormats(): readonly TwinSourceFormat[] {
   return Object.keys(KIND_BY_FORMAT) as TwinSourceFormat[]
+}
+
+/**
+ * Every filename extension `detectSourceFormat` recognises (no leading dot).
+ * The source uploader derives its file-picker `accept` from this so the picker
+ * and the detector never drift — adding an extension here automatically lets
+ * users select that file type.
+ */
+export function listSupportedExtensions(): readonly string[] {
+  return Object.keys(EXTENSION_FORMAT)
 }

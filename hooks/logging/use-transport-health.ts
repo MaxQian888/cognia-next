@@ -5,7 +5,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { getTransportHealthSnapshot } from "@/lib/logging"
+import { getTransportHealthSnapshot } from "@cognia/logging"
 import type {
   TransportHealthSnapshot,
   UseTransportHealthOptions,

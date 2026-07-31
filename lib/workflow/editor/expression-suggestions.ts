@@ -16,6 +16,7 @@
  */
 
 import type { WorkflowNode, WorkflowNodeKind } from "@/types/workflow/visual"
+import { flattenSchema } from "./node-io-data"
 
 export interface SuggestionEntry {
   /** Inserted at the cursor when the user accepts the suggestion. */
@@ -38,8 +39,9 @@ export interface SuggestionEntry {
 export function buildExpressionSuggestions(opts: {
   nodes: WorkflowNode[]
   currentNodeId?: string
-  /** Per-node output schema hints from the latest successful run, keyed by
-   * stepId. Maps to a flat list of `out.X` field names. Optional. */
+  /** Per-node output schema hints, keyed by stepId. Each entry is a list of
+   * dotted/bracketed field paths (`result.text`, `items[0].name`) — nested
+   * paths come from `flattenSchema`. Optional. */
   outputSchemas?: Record<string, string[]>
   /** Static-data variable names declared so far. */
   staticKeys?: string[]
@@ -47,6 +49,10 @@ export function buildExpressionSuggestions(opts: {
   varKeys?: string[]
   /** Trigger payload keys hinted by the trigger kind. */
   triggerHints?: { kind: string; payloadKeys: string[] }
+  /** When provided, only nodes in this set (the current node's transitive
+   * ancestors) are offered as `$node[...]` references — a downstream node's
+   * output isn't available at run time. Omit to list every node. */
+  upstreamNodeIds?: Set<string>
 }): SuggestionEntry[] {
   const out: SuggestionEntry[] = []
 
@@ -80,9 +86,10 @@ export function buildExpressionSuggestions(opts: {
   })
   if (opts.triggerHints) {
     for (const k of opts.triggerHints.payloadKeys) {
+      const insert = k.startsWith("[") ? `$trigger.payload${k}` : `$trigger.payload.${k}`
       out.push({
-        insert: `$trigger.payload.${k}`,
-        label: `$trigger.payload.${k}`,
+        insert,
+        label: insert,
         detail: opts.triggerHints.kind,
         kind: "field",
         boost: 65,
@@ -119,6 +126,9 @@ export function buildExpressionSuggestions(opts: {
   for (const node of opts.nodes) {
     if (opts.currentNodeId && node.id === opts.currentNodeId) continue
     if (node.type.startsWith("annotation.")) continue
+    // Scope to upstream nodes when the caller supplies the ancestor set —
+    // referencing a downstream/sibling node's output is a runtime error.
+    if (opts.upstreamNodeIds && !opts.upstreamNodeIds.has(node.id)) continue
     const fields = opts.outputSchemas?.[node.id]
     const baseInsert = `$node['${node.id}']`
     out.push({
@@ -130,9 +140,11 @@ export function buildExpressionSuggestions(opts: {
     })
     if (fields && fields.length > 0) {
       for (const f of fields) {
+        // Bracket-aware join: `items[0]` appends directly, `result` gets a dot.
+        const insert = f.startsWith("[") ? `${baseInsert}${f}` : `${baseInsert}.${f}`
         out.push({
-          insert: `${baseInsert}.${f}`,
-          label: `${baseInsert}.${f}`,
+          insert,
+          label: insert,
           detail: nodeDetail(node.type, node.data?.label),
           kind: "field",
           boost: 40,
@@ -151,6 +163,75 @@ export function buildExpressionSuggestions(opts: {
   }
 
   return out
+}
+
+export interface DerivedExpressionScopeHints {
+  staticKeys: string[]
+  triggerHints?: { kind: string; payloadKeys: string[] }
+}
+
+/**
+ * Derive workflow-scoped completion hints from persisted workflow data and the
+ * latest run outputs. Schema traversal is deliberately bounded so opening the
+ * completion popup remains cheap even for large trigger payloads.
+ */
+export function deriveExpressionScopeHints(opts: {
+  nodes: WorkflowNode[]
+  upstreamNodeIds?: Set<string>
+  staticData?: Record<string, unknown>
+  outputs?: Record<string, unknown>
+  workflowInputSchema?: Record<string, unknown>
+}): DerivedExpressionScopeHints {
+  const staticKeys = Object.keys(opts.staticData ?? {}).sort()
+  const trigger = opts.nodes.find(
+    (node) =>
+      node.type.startsWith("trigger.") &&
+      (!opts.upstreamNodeIds || opts.upstreamNodeIds.has(node.id))
+  )
+  if (!trigger) return { staticKeys }
+
+  const payloadKeys = new Set<string>()
+  const params = isRecord(trigger.data?.params) ? trigger.data.params : undefined
+  collectJsonSchemaPaths(params?.inputSchema, payloadKeys)
+  collectJsonSchemaPaths(opts.workflowInputSchema, payloadKeys)
+
+  const triggerOutput = opts.outputs?.[trigger.id]
+  const payload =
+    isRecord(triggerOutput) && "payload" in triggerOutput ? triggerOutput.payload : triggerOutput
+  for (const row of flattenSchema(payload, { maxDepth: 4, maxRows: 80 })) {
+    payloadKeys.add(row.path)
+  }
+
+  return {
+    staticKeys,
+    triggerHints: {
+      kind: trigger.type,
+      payloadKeys: [...payloadKeys].sort(),
+    },
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+}
+
+function collectJsonSchemaPaths(schema: unknown, paths: Set<string>, prefix = "", depth = 0): void {
+  if (!isRecord(schema) || depth >= 4 || paths.size >= 80) return
+
+  if (isRecord(schema.properties)) {
+    for (const [key, childSchema] of Object.entries(schema.properties)) {
+      if (paths.size >= 80) return
+      const path = prefix ? `${prefix}.${key}` : key
+      paths.add(path)
+      collectJsonSchemaPaths(childSchema, paths, path, depth + 1)
+    }
+  }
+
+  if (schema.type === "array" && schema.items !== undefined) {
+    const path = `${prefix}[0]`
+    paths.add(path)
+    collectJsonSchemaPaths(schema.items, paths, path, depth + 1)
+  }
 }
 
 function nodeDetail(kind: WorkflowNodeKind, label?: string): string {

@@ -3,7 +3,7 @@
  */
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 
 const logInfo = jest.fn()
 const logWarn = jest.fn()
@@ -18,7 +18,7 @@ jest.mock("next-intl", () => ({
   },
 }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: {
     ui: {
       info: (...args: unknown[]) => logInfo(...args),

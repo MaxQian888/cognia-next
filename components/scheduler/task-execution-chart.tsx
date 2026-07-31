@@ -109,7 +109,13 @@ export function TaskExecutionChart({ executions, taskId, className }: TaskExecut
         </span>
       </div>
 
-      <ResponsiveContainer width="100%" height={160}>
+      <ResponsiveContainer
+        width="100%"
+        height={160}
+        minWidth={1}
+        minHeight={1}
+        initialDimension={{ width: 320, height: 160 }}
+      >
         <BarChart data={chartData} barGap={1}>
           {/* Gradient definitions */}
           <defs>

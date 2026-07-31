@@ -1,0 +1,212 @@
+# Cognia self-host compose suite (ADR-0059 P0.4 / W6 / F2 / D9).
+#
+# Profiles carry the phase ladder — one file, no drift:
+#   (none)         signaling + share            → P0.4 tier-1 smoke
+#   server         + cognia-server (headless, :27890)  → W6 tier-2 smoke
+#   tls            + Caddy ACME front door       → F2 tier-3 smoke
+#   observability  + Prometheus                  → D9
+#   logto          + Logto IdP (core+pg+redis)   → ADR-0059 multi-user OIDC auth
+#
+#   docker compose up -d --wait                          # signaling + share
+#   docker compose --profile server up -d --wait          # + cognia-server
+#   docker compose --profile server --profile tls up -d   # + Caddy
+#   docker compose --profile logto up -d --wait           # + Logto IdP
+#
+# Copy .env.example → .env and fill SHARE_UPLOAD_SECRET (+ COGNIA_MASTER_KEY
+# and provider keys for the server profile; LOGTO_DB_PASSWORD for the logto
+# profile) before starting. See LOGTO.md for the one-time Logto seed steps
+# (API resource + apps) and the COGNIA_LOGTO_* wiring.
+name: cognia
+
+services:
+  signaling:
+    image: ${SIGNALING_IMAGE:-ghcr.io/maxqian888/cognia-signaling:latest}
+    build:
+      context: ../../services/signaling-server
+    environment:
+      PORT: "7892"
+      SIGNALING_ALLOWED_ORIGINS: ${SIGNALING_ALLOWED_ORIGINS:-}
+    ports:
+      - "7892:7892"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:7892/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  share:
+    image: ${SHARE_IMAGE:-ghcr.io/maxqian888/cognia-share:latest}
+    build:
+      context: ../../services/share-server
+    environment:
+      PORT: "8787"
+      SHARE_DB_PATH: /data/shares.sqlite
+      SHARE_UPLOAD_SECRET: ${SHARE_UPLOAD_SECRET:?set SHARE_UPLOAD_SECRET in .env}
+    volumes:
+      - share_data:/data
+    ports:
+      - "8787:8787"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8787/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  cognia-server:
+    profiles: [server]
+    image: ${COGNIA_SERVER_IMAGE:-ghcr.io/maxqian888/cognia-server:latest-full}
+    build:
+      context: ../../
+      dockerfile: Dockerfile.cognia-server
+      target: runtime-full
+    environment:
+      COGNIA_DATA_DIR: /data
+      # W5: no OS keyring in a container — the master key MUST come from env.
+      # A `:?` marker here would abort even `docker compose up` (no profile),
+      # because compose interpolates the whole file before filtering profiles;
+      # cognia-server's own strict init (init_headless) fails fast when it's
+      # missing, so an empty default is safe.
+      COGNIA_MASTER_KEY: ${COGNIA_MASTER_KEY:-}
+      # Public URL stamped into the pair payload; overridden by Caddy domain in the tls profile.
+      COGNIA_PUBLIC_URL: ${COGNIA_PUBLIC_URL:-https://127.0.0.1:27890}
+      # Provider creds for the sidecar chat turn (optional — smoke SKIPs the chat step without them).
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Admit the smoke's stub ACP agent through SpawnPolicy (R11). Leave unset in production.
+      COGNIA_SMOKE_AGENT: ${COGNIA_SMOKE_AGENT:-}
+      # ── OIDC / Logto (ADR-0059 cloud multi-user) — OFF unless BOTH issuer
+      # and audience are set. When present, the companion gateway
+      # (src-tauri/src/companion_api/oidc.rs) accepts Logto-issued JWT access
+      # tokens (validated via JWKS) in addition to the local HS256 device
+      # tokens. CRITICAL: COGNIA_LOGTO_ISSUER must equal the token `iss` claim,
+      # i.e. `${LOGTO_ENDPOINT}/oidc`, and be reachable FROM this container —
+      # see LOGTO.md for the issuer-consistency footgun.
+      COGNIA_LOGTO_ISSUER: ${COGNIA_LOGTO_ISSUER:-}
+      COGNIA_LOGTO_AUDIENCE: ${COGNIA_LOGTO_AUDIENCE:-}
+      COGNIA_LOGTO_REQUIRED_SCOPES: ${COGNIA_LOGTO_REQUIRED_SCOPES:-}
+      COGNIA_LOGTO_JWKS_TTL_SECS: ${COGNIA_LOGTO_JWKS_TTL_SECS:-}
+    volumes:
+      - cognia_data:/data
+    ports:
+      # Published for Capacitor direct-connect (fingerprint-pinned). Browsers go
+      # through Caddy. 27890 tracks the companion DEFAULT_PORT — 7890 is the
+      # Clash mixed-port default and fails to bind on hosts running a proxy.
+      - "27890:27890"
+    security_opt:
+      # Tuned profile lets bwrap (ADR-0028 sandbox) create user namespaces in a
+      # stock container. On AppArmor hosts (Ubuntu) also add: apparmor=unconfined.
+      - seccomp=./seccomp/cognia-userns.json
+    healthcheck:
+      test: ["CMD", "curl", "-kfsS", "https://localhost:27890/api/v1/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  caddy:
+    profiles: [tls]
+    image: caddy:2.10
+    depends_on:
+      cognia-server:
+        condition: service_healthy
+    environment:
+      COGNIA_DOMAIN: ${COGNIA_DOMAIN:-localhost}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - cognia_data:/cognia-data:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+  prometheus:
+    profiles: [observability]
+    image: prom/prometheus:v3.5.0
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prom_data:/prometheus
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+  # ── Logto IdP (ADR-0059 multi-user OIDC) ─────────────────────────────────
+  # Self-hosted identity provider. `logto` core serves both the OIDC issuer
+  # (port 3001) and the Admin Console (port 3002). Postgres + Redis are its
+  # hard requirements. All three are on the `logto` profile so the default and
+  # server smokes never pull them.
+  logto-postgres:
+    profiles: [logto]
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${LOGTO_DB_PASSWORD:?set LOGTO_DB_PASSWORD in .env for the logto profile}
+      POSTGRES_DB: logto
+    volumes:
+      - logto_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d logto"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  logto-redis:
+    profiles: [logto]
+    image: redis:7-alpine
+    volumes:
+      - logto_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  logto:
+    profiles: [logto]
+    image: svhd/logto:${LOGTO_VERSION:-latest}
+    depends_on:
+      logto-postgres:
+        condition: service_healthy
+      logto-redis:
+        condition: service_healthy
+    # First boot seeds the schema idempotently, then starts the server.
+    entrypoint: ["sh", "-c", "npm run cli db seed -- --swe && npm start"]
+    environment:
+      TRUST_PROXY_HEADER: "1"
+      DB_URL: postgres://postgres:${LOGTO_DB_PASSWORD:?set LOGTO_DB_PASSWORD in .env for the logto profile}@logto-postgres:5432/logto
+      REDIS_URL: redis://logto-redis:6379
+      # Public base URLs. The OIDC issuer is `${ENDPOINT}/oidc` — this MUST be
+      # the value used for COGNIA_LOGTO_ISSUER and be reachable from every
+      # token consumer (browser AND cognia-server). For a real deployment put
+      # Logto behind the tls front door and set a domain here. See LOGTO.md.
+      ENDPOINT: ${LOGTO_ENDPOINT:-http://localhost:3001}
+      ADMIN_ENDPOINT: ${LOGTO_ADMIN_ENDPOINT:-http://localhost:3002}
+    ports:
+      - "3001:3001"
+      - "3002:3002"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3001/api/status"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  share_data:
+  cognia_data:
+  caddy_data:
+  caddy_config:
+  prom_data:
+  logto_pg:
+  logto_redis:

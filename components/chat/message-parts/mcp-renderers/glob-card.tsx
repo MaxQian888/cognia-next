@@ -1,5 +1,6 @@
 "use client"
 
+import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { FileSearchIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
@@ -15,14 +16,16 @@ export function GlobCard({ part }: { part: ToolUIPart }) {
   const input = (part.input ?? {}) as { pattern?: string; path?: string }
   const parsed = useParsedOutput<GlobOutput>(part.output)
 
-  const matches: string[] = (() => {
+  // Select (and, on the string fallback, split) the match list only when the
+  // parsed/raw output changes rather than on every streaming re-render.
+  const matches: string[] = useMemo(() => {
     if (parsed?.matches) return parsed.matches
     if (parsed?.files) return parsed.files
     if (typeof part.output === "string") {
       return part.output.split(/\r?\n/).filter(Boolean)
     }
     return []
-  })()
+  }, [parsed, part.output])
 
   if (matches.length === 0 && !input.pattern) return null
 

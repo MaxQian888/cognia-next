@@ -13,42 +13,34 @@
 //   * permissionReviewTarget / conflictDialogTarget are dialog hosts that the
 //     skills panel doesn't need.
 //
-// Section model (post-redesign, ADR-pending plugin-panel-restructure):
-//   * `activeSection` drives the 3-pane shell's left nav. The legacy
-//     `activeTab` field is kept as a back-compat shim so `?tab=...` deep
-//     links and the existing Settings overview keep working through one
-//     release cycle — `setActiveTab` mirrors into `activeSection` and the
-//     library sub-filter.
-//   * `librarySubFilter` is sugar over `filters`: setting it also mutates
-//     `filters.status` and `filters.hasUpdate` so the existing filter
-//     pipeline keeps working without a parallel code path.
-//   * `governanceView` picks between the four cross-plugin aggregate views.
-//   * `detailSubTab` is the active right-pane sub-tab when a plugin is
-//     selected. `openConfigure(pluginId)` now opens the detail pane on the
-//     Configure sub-tab instead of clearing detailPluginId — the legacy
-//     configTarget host is still set for any external surfaces that key off
-//     it.
+// Section model:
+//   * `activeSection` drives the 3-pane shell's left nav. Legacy `?tab=`
+//     deep links are translated to the section vocabulary by a one-time
+//     redirect in `plugin-panel.tsx` — the store has no `activeTab` concept.
+//   * `librarySubFilter` is the single source of truth for the
+//     status/has-update/configurable filter dimensions: setting it mutates
+//     `filters.status` / `filters.hasUpdate` / `filters.configurable` so the
+//     existing filter pipeline keeps working without a parallel code path.
+//     The filter sheet owns the orthogonal dimensions only (capability /
+//     permission / source / signed-only / sort).
+//   * `governanceView` picks between the cross-plugin aggregate views.
+//   * `detailSubTab` is the expanded right-pane section when a plugin is
+//     selected. `openConfigure(pluginId)` opens the detail pane on the
+//     Configure section.
 //   * `listViewMode` is the only persisted field (localStorage).
 
 import { create } from "zustand"
-import { persist, createJSONStorage } from "zustand/middleware"
-
-export type PluginPanelTab =
-  | "installed"
-  | "browse"
-  | "configure"
-  | "permissions"
-  | "scheduled"
-  | "analytics"
-  | "devtools"
+import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 
 export type PluginNavSection = "library" | "discover" | "governance" | "devtools"
 
 export type PluginLibrarySubFilter = "all" | "enabled" | "updates" | "configurable" | "errored"
 
-export type PluginGovernanceView = "permissions" | "scheduled" | "analytics" | "audit"
+export type PluginGovernanceView = "permissions" | "scheduled" | "analytics" | "audit" | "policy"
 
-export type PluginDetailSubTab = "overview" | "capabilities" | "configure" | "permissions" | "data"
+export type PluginDetailSubTab =
+  "overview" | "capabilities" | "configure" | "permissions" | "data" | "logs"
 
 export type PluginListViewMode = "list" | "card"
 
@@ -106,13 +98,7 @@ export interface ConflictSummary {
 }
 
 interface PluginsStoreState {
-  /**
-   * Legacy 7-tab field. Kept as a back-compat shim — `setActiveTab` mirrors
-   * the value into `activeSection` + `governanceView` + `librarySubFilter`
-   * so old `?tab=...` deep links keep working.
-   */
-  activeTab: PluginPanelTab
-  /** Top-level nav section in the new 3-pane shell. */
+  /** Top-level nav section in the 3-pane shell. */
   activeSection: PluginNavSection
   /** Library sub-filter — also mutates `filters.status` / `filters.hasUpdate`. */
   librarySubFilter: PluginLibrarySubFilter
@@ -129,8 +115,6 @@ interface PluginsStoreState {
   detailPluginId: string | null
   /** When true, the right-hand filter sheet is open. */
   filterSheetOpen: boolean
-  /** When non-null, surface the manifest.configSchema form for this plugin. */
-  configTarget: { pluginId: string } | null
   /** When non-null, show the import dialog with these draft entries staged. */
   importStaging: PluginImportStaging | null
   /** When non-null, show the delete confirmation. */
@@ -148,7 +132,6 @@ interface PluginsStoreState {
   /** When non-null, open the rollback dialog scoped to this plugin id. */
   rollbackTarget: string | null
 
-  setActiveTab: (tab: PluginPanelTab) => void
   setActiveSection: (section: PluginNavSection) => void
   setLibrarySubFilter: (sub: PluginLibrarySubFilter) => void
   setGovernanceView: (view: PluginGovernanceView) => void
@@ -163,8 +146,8 @@ interface PluginsStoreState {
   openDetail: (pluginId: string) => void
   closeDetail: () => void
   setFilterSheetOpen: (open: boolean) => void
+  /** Open the detail pane on this plugin's Configure section. */
   openConfigure: (pluginId: string) => void
-  closeConfigure: () => void
   setImportStaging: (staging: PluginImportStaging | null) => void
   setDeleteTarget: (target: { pluginId: string; name: string } | null) => void
   /**
@@ -202,36 +185,9 @@ export const DEFAULT_PLUGIN_FILTERS: PluginFilters = {
 }
 
 /**
- * Translate a legacy `?tab=` value into the equivalent new-shell state.
- * Used by `setActiveTab` and the URL sync effect in `plugin-panel.tsx`.
- */
-export function deriveSectionFromTab(tab: PluginPanelTab): {
-  section: PluginNavSection
-  librarySub?: PluginLibrarySubFilter
-  governance?: PluginGovernanceView
-  detailSub?: PluginDetailSubTab
-} {
-  switch (tab) {
-    case "installed":
-      return { section: "library" }
-    case "browse":
-      return { section: "discover" }
-    case "configure":
-      return { section: "library", librarySub: "configurable", detailSub: "configure" }
-    case "permissions":
-      return { section: "governance", governance: "permissions" }
-    case "scheduled":
-      return { section: "governance", governance: "scheduled" }
-    case "analytics":
-      return { section: "governance", governance: "analytics" }
-    case "devtools":
-      return { section: "devtools" }
-  }
-}
-
-/**
  * Mutate the filters slice so the existing `usePlugins()` filter pipeline
- * keeps interpreting the sub-filter without a parallel code path.
+ * keeps interpreting the sub-filter without a parallel code path. This is the
+ * single writer of the status / has-update / configurable dimensions.
  */
 function applyLibrarySubFilterToFilters(
   sub: PluginLibrarySubFilter,
@@ -258,7 +214,6 @@ function applyLibrarySubFilterToFilters(
 export const usePluginsStore = create<PluginsStoreState>()(
   persist(
     (set) => ({
-      activeTab: "installed",
       activeSection: "library",
       librarySubFilter: "all",
       governanceView: "permissions",
@@ -268,7 +223,6 @@ export const usePluginsStore = create<PluginsStoreState>()(
       selection: new Set<string>(),
       detailPluginId: null,
       filterSheetOpen: false,
-      configTarget: null,
       importStaging: null,
       deleteTarget: null,
       deleteQueue: [],
@@ -276,21 +230,6 @@ export const usePluginsStore = create<PluginsStoreState>()(
       conflictDialogTarget: null,
       rollbackTarget: null,
 
-      setActiveTab: (tab) =>
-        set((s) => {
-          const { section, librarySub, governance, detailSub } = deriveSectionFromTab(tab)
-          const nextLibrarySub = librarySub ?? s.librarySubFilter
-          return {
-            activeTab: tab,
-            activeSection: section,
-            librarySubFilter: librarySub ?? s.librarySubFilter,
-            governanceView: governance ?? s.governanceView,
-            detailSubTab: detailSub ?? s.detailSubTab,
-            filters: librarySub
-              ? applyLibrarySubFilterToFilters(nextLibrarySub, s.filters)
-              : s.filters,
-          }
-        }),
       setActiveSection: (section) => set({ activeSection: section }),
       setLibrarySubFilter: (sub) =>
         set((s) => ({
@@ -315,20 +254,13 @@ export const usePluginsStore = create<PluginsStoreState>()(
       openDetail: (pluginId) => set({ detailPluginId: pluginId }),
       closeDetail: () => set({ detailPluginId: null }),
       setFilterSheetOpen: (open) => set({ filterSheetOpen: open }),
-      // Opening Configure drives the detail pane onto its Configure sub-tab.
-      // `configTarget` stays set so the modal `PluginConfigForm` host (still
-      // mounted at the panel root) keeps surfacing the legacy configure
-      // dialog for any external caller that triggers `openConfigure(...)`
-      // without expecting the detail pane swap. The two paths coexist
-      // cheaply — the modal opens on top of the detail pane, which is fine.
+      // Opening Configure drives the detail pane onto its Configure section.
       openConfigure: (pluginId) =>
         set({
-          configTarget: { pluginId },
           detailPluginId: pluginId,
           detailSubTab: "configure",
           activeSection: "library",
         }),
-      closeConfigure: () => set({ configTarget: null }),
       setImportStaging: (staging) => set({ importStaging: staging }),
       setDeleteTarget: (target) => set({ deleteTarget: target }),
       enqueueDeleteTargets: (targets) =>
@@ -352,7 +284,7 @@ export const usePluginsStore = create<PluginsStoreState>()(
     {
       name: "plugins-ui-prefs",
       version: 1,
-      storage: createJSONStorage(() => localStorage),
+      storage: persistLocalStorage(),
       // Only `listViewMode` survives reloads. Everything else is ephemeral UI
       // state and should reset every session.
       partialize: (s) => ({ listViewMode: s.listViewMode }),

@@ -36,6 +36,13 @@ export interface NetworkProxySettings {
   proxyWebsockets: boolean
   /** Epoch ms — populated whenever auto-detect successfully writes a host. */
   lastDetectedAt?: number
+  /**
+   * Master switch for the IP-info panel (Settings → Network → IP). When
+   * `false`, the app never contacts the public IP lookup endpoint
+   * (`ipinfo.io`). Defaults to `true`; the lookup itself still honours the
+   * active proxy + bypass list, so it reports the egress IP the proxy sees.
+   */
+  ipLookupEnabled: boolean
 }
 
 export const DEFAULT_NETWORK_PROXY_SETTINGS: NetworkProxySettings = {
@@ -45,6 +52,7 @@ export const DEFAULT_NETWORK_PROXY_SETTINGS: NetworkProxySettings = {
   port: 0,
   bypass: ["localhost", "127.0.0.1", "::1"],
   proxyWebsockets: true,
+  ipLookupEnabled: true,
 }
 
 /**

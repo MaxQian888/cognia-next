@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { ArrowRightIcon, QrCodeIcon, RefreshCwIcon, ScanLineIcon, SearchXIcon } from "lucide-react"
 import { motion, useReducedMotion } from "motion/react"
@@ -73,6 +73,14 @@ export function DiscoverStep({
   })
 
   const [precheck, setPrecheck] = useState<Precheck | null>(null)
+  // The linger timer that advances to the pair step after a ✓ precheck. Kept
+  // in a ref so unmount (user backed out mid-linger) cancels the advance.
+  const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    return () => {
+      if (advanceTimerRef.current !== null) clearTimeout(advanceTimerRef.current)
+    }
+  }, [])
 
   const sorted = useMemo(() => sortServers(servers), [servers])
   const recent = useMemo(
@@ -122,7 +130,7 @@ export function DiscoverStep({
         onSelect(enriched)
         return
       }
-      setTimeout(() => onSelect(enriched), precheckDelayMs)
+      advanceTimerRef.current = setTimeout(() => onSelect(enriched), precheckDelayMs)
     },
     [probe, onSelect, precheckDelayMs, t]
   )

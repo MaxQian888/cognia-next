@@ -9,29 +9,33 @@
  */
 
 import type { PluginPermission } from "@/types/plugin"
-import { withTimeout } from "@/lib/utils/with-timeout"
+import { withTimeout } from "@cognia/primitives"
 import { createCircuitBreaker, type CircuitBreaker } from "@/lib/connectors/circuit-breaker"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
 import { loggers } from "../core/logger"
+import { pluginHasApiPermission } from "@/lib/plugin/api/permission-api"
 import { PLUGIN_MESSAGE_HISTORY_MAX } from "./constants"
+import type {
+  PluginIPCAPI,
+  PluginIPCCallOptions,
+  IpcMethodSchema,
+  IpcExposedMethods,
+  IpcExposedMethodDescriptor,
+  IpcExposedMethodInfo,
+} from "@/types/plugin/plugin-messaging"
+
+// Re-export the messaging type contracts (single source of truth in `types/`).
+export type {
+  PluginIPCAPI,
+  PluginIPCCallOptions,
+  IpcMethodSchema,
+  IpcExposedMethods,
+  IpcExposedMethodInfo,
+}
 
 // =============================================================================
 // Types
 // =============================================================================
-
-/**
- * Per-call cancellation / timeout knobs. Both fields are optional:
- *   - `signal` — caller-provided AbortController. When aborted, the
- *     pending call rejects with `AbortError` and the handler is
- *     released into the background (no JS-side cancellation possible).
- *   - `timeoutMs` — per-call deadline. Defaults to `defaultTimeout`
- *     from `IPCConfig` (30 000ms). Pass `0` or a negative number to
- *     opt out of the timer entirely.
- */
-export interface PluginIPCCallOptions {
-  signal?: AbortSignal
-  timeoutMs?: number
-}
 
 /**
  * Thrown when a call hits a breaker in `open` state — distinct from
@@ -60,6 +64,64 @@ export class IPCAbortError extends Error {
   }
 }
 
+/**
+ * Thrown when a `call()` argument list doesn't satisfy the target method's
+ * declared {@link IpcMethodSchema}. A schema violation is a caller bug, so it
+ * is raised BEFORE the breaker / handler — it never charges the endpoint a
+ * failure and the remote handler is never invoked.
+ */
+export class IPCSchemaError extends Error {
+  constructor(
+    public readonly pluginId: string,
+    public readonly methodName: string,
+    public readonly detail: string
+  ) {
+    super(`IPC call to ${pluginId}.${methodName} failed argument validation: ${detail}`)
+    this.name = "IPCSchemaError"
+  }
+}
+
+const IPC_ARG_VALIDATORS: Record<string, (value: unknown) => boolean> = {
+  string: (v) => typeof v === "string",
+  number: (v) => typeof v === "number" && Number.isFinite(v),
+  boolean: (v) => typeof v === "boolean",
+  array: (v) => Array.isArray(v),
+  object: (v) => typeof v === "object" && v !== null && !Array.isArray(v),
+  unknown: () => true,
+}
+
+/**
+ * Validate positional `args` against a method `schema`. Returns a human-readable
+ * error string on the first mismatch, or `null` when the args are valid. Trailing
+ * optional args may be omitted; extra args beyond the schema are rejected so a
+ * typo'd method signature surfaces instead of being silently dropped.
+ */
+export function validateIpcArgs(schema: IpcMethodSchema, args: unknown[]): string | null {
+  const params = schema.args
+  if (!params) return null
+
+  const required = params.filter((p) => !p.optional).length
+  if (args.length < required) {
+    return `expected at least ${required} argument(s), received ${args.length}`
+  }
+  if (args.length > params.length) {
+    return `expected at most ${params.length} argument(s), received ${args.length}`
+  }
+
+  for (let i = 0; i < params.length; i++) {
+    const param = params[i]
+    if (i >= args.length) {
+      // Missing trailing arg — already validated as optional above.
+      continue
+    }
+    const validate = IPC_ARG_VALIDATORS[param.type] ?? IPC_ARG_VALIDATORS.unknown
+    if (!validate(args[i])) {
+      return `argument ${i} expected type "${param.type}"`
+    }
+  }
+  return null
+}
+
 export interface IPCMessage {
   id: string
   type: "request" | "response" | "broadcast" | "event"
@@ -78,13 +140,6 @@ export interface IPCRequest {
   timeout: number
 }
 
-export interface IPCResponse {
-  id: string
-  success: boolean
-  result?: unknown
-  error?: string
-}
-
 export interface IPCSubscription {
   channel: string
   pluginId: string
@@ -97,7 +152,9 @@ export interface ExposedMethod {
   pluginId: string
   handler: (...args: unknown[]) => unknown | Promise<unknown>
   description?: string
-  schema?: Record<string, unknown>
+  schema?: IpcMethodSchema
+  /** Target-side ACL — plugin ids allowed to invoke. Omitted = any caller. */
+  allowedCallers?: string[]
 }
 
 export interface IPCConfig {
@@ -108,7 +165,6 @@ export interface IPCConfig {
 }
 
 type MessageHandler = (data: unknown, senderId: string) => void
-type ResponseHandler = (response: IPCResponse) => void
 
 // =============================================================================
 // Plugin IPC Manager
@@ -126,7 +182,6 @@ export class PluginIPC {
   private config: IPCConfig
   private subscriptions: Map<string, Set<IPCSubscription>> = new Map()
   private exposedMethods: Map<string, Map<string, ExposedMethod>> = new Map()
-  private pendingRequests: Map<string, ResponseHandler> = new Map()
   private messageHistory: IPCMessage[] = []
   private readonly maxHistory: number
   private pluginPermissions: Map<string, Set<PluginPermission>> = new Map()
@@ -181,6 +236,16 @@ export class PluginIPC {
 
     // Remove permissions
     this.pluginPermissions.delete(pluginId)
+
+    // Evict this plugin's endpoint breakers: a stale open breaker would
+    // short-circuit a reloaded plugin's endpoints, and the maps otherwise
+    // grow unboundedly across install/uninstall cycles.
+    for (const key of Array.from(this.breakers.keys())) {
+      if (key.startsWith(`${pluginId}::`)) {
+        this.breakers.delete(key)
+        this.breakerStates.delete(key)
+      }
+    }
   }
 
   // ===========================================================================
@@ -189,6 +254,7 @@ export class PluginIPC {
 
   async send(senderId: string, targetId: string, channel: string, data: unknown): Promise<void> {
     this.validateMessage(data)
+    this.assertChannelPublishAllowed(senderId, channel)
 
     const message: IPCMessage = {
       id: this.generateId(),
@@ -220,113 +286,20 @@ export class PluginIPC {
     }
   }
 
-  /**
-   * Request/response across the bus. PR-C grew this to honour the
-   * same `PluginIPCCallOptions` shape as `call()`: caller-supplied
-   * `AbortSignal` rejects the pending promise with `IPCAbortError`;
-   * `timeoutMs` overrides `config.defaultTimeout`. Aborts also delete
-   * the pending request so a late response can't leak past the
-   * caller.
-   */
-  async sendAndWait<T>(
-    senderId: string,
-    targetId: string,
-    channel: string,
-    data: unknown,
-    options: PluginIPCCallOptions | number = {}
-  ): Promise<T> {
-    // Back-compat: old callers passed `timeout` as a plain number.
-    const opts: PluginIPCCallOptions =
-      typeof options === "number" ? { timeoutMs: options } : options
-    const requestId = this.generateId()
-    const timeoutMs = opts.timeoutMs ?? this.config.defaultTimeout
-
-    if (opts.signal?.aborted) {
-      throw new IPCAbortError("aborted before dispatch")
-    }
-
-    return new Promise<T>((resolve, reject) => {
-      const cleanup = () => {
-        this.pendingRequests.delete(requestId)
-        if (timer !== null) clearTimeout(timer)
-        if (opts.signal && abortListener) {
-          opts.signal.removeEventListener("abort", abortListener)
-        }
-      }
-
-      let timer: ReturnType<typeof setTimeout> | null = null
-      if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
-        timer = setTimeout(() => {
-          cleanup()
-          reject(new Error(`IPC request to ${targetId} timed out`))
-        }, timeoutMs)
-      }
-
-      let abortListener: (() => void) | null = null
-      if (opts.signal) {
-        abortListener = () => {
-          cleanup()
-          reject(new IPCAbortError())
-        }
-        opts.signal.addEventListener("abort", abortListener, { once: true })
-      }
-
-      this.pendingRequests.set(requestId, (response) => {
-        cleanup()
-        if (response.success) {
-          resolve(response.result as T)
-        } else {
-          reject(new Error(response.error || "Unknown error"))
-        }
-      })
-
-      const message: IPCMessage = {
-        id: requestId,
-        type: "request",
-        channel,
-        senderId,
-        targetId,
-        payload: data,
-        timestamp: Date.now(),
-      }
-
-      this.recordMessage(message)
-      this.deliverMessage(message)
-    })
-  }
-
-  respond(pluginId: string, requestId: string, result: unknown, error?: string): void {
-    const response: IPCResponse = {
-      id: requestId,
-      success: !error,
-      result,
-      error,
-    }
-
-    const handler = this.pendingRequests.get(requestId)
-    if (handler) {
-      handler(response)
-    }
-
-    const message: IPCMessage = {
-      id: this.generateId(),
-      type: "response",
-      channel: "__response__",
-      senderId: pluginId,
-      payload: response,
-      timestamp: Date.now(),
-      replyTo: requestId,
-    }
-
-    this.recordMessage(message)
-  }
+  // NOTE: a request/response `sendAndWait` + `respond` pair previously lived
+  // here, but the reply path was structurally dead — `respond` was never on the
+  // plugin-facing `PluginIPCAPI`, the receiver was never handed the `requestId`
+  // to correlate a reply, so every façade-level `sendAndWait` hung to timeout.
+  // It was removed; `call()` + `expose()` is the supported request-response RPC
+  // (with circuit-breaker + schema validation + size cap).
 
   // ===========================================================================
   // Broadcasting
   // ===========================================================================
 
-  broadcast(senderId: string, channel: string, data: unknown): void {
+  broadcast(senderId: string, channel: string, data: unknown, options?: { to?: string[] }): void {
     this.validateMessage(data)
+    this.assertChannelPublishAllowed(senderId, channel)
 
     const message: IPCMessage = {
       id: this.generateId(),
@@ -340,11 +313,17 @@ export class PluginIPC {
     this.recordMessage(message)
     this.log("broadcast", message)
 
-    // Deliver to all subscribers except sender
+    // Deliver to all subscribers except sender. An explicit `options.to`
+    // allowlist (W3.6) restricts delivery — eavesdroppers subscribed to the
+    // channel never see the payload.
+    const allowedReceivers = options?.to ? new Set(options.to) : null
     const subs = this.subscriptions.get(channel)
     if (subs) {
       for (const sub of subs) {
-        if (sub.pluginId !== senderId) {
+        if (
+          sub.pluginId !== senderId &&
+          (!allowedReceivers || allowedReceivers.has(sub.pluginId))
+        ) {
           if (!sub.filter || sub.filter(senderId)) {
             try {
               sub.handler(data, senderId)
@@ -418,17 +397,22 @@ export class PluginIPC {
   // RPC (Remote Procedure Call)
   // ===========================================================================
 
-  expose(
-    pluginId: string,
-    methods: Record<string, (...args: unknown[]) => unknown | Promise<unknown>>
-  ): void {
+  expose(pluginId: string, methods: IpcExposedMethods): void {
     const methodMap = this.exposedMethods.get(pluginId) || new Map()
 
-    for (const [name, handler] of Object.entries(methods)) {
+    for (const [name, value] of Object.entries(methods)) {
+      // Back-compat: a bare function exposes a handler with no schema; a
+      // descriptor `{ handler, schema?, description? }` carries arg validation
+      // + discovery metadata.
+      const descriptor: IpcExposedMethodDescriptor =
+        typeof value === "function" ? { handler: value } : value
       methodMap.set(name, {
         name,
         pluginId,
-        handler,
+        handler: descriptor.handler,
+        description: descriptor.description ?? descriptor.schema?.description,
+        schema: descriptor.schema,
+        allowedCallers: descriptor.allowedCallers ? [...descriptor.allowedCallers] : undefined,
       })
     }
 
@@ -469,15 +453,48 @@ export class PluginIPC {
     args: unknown[] = [],
     options: PluginIPCCallOptions = {}
   ): Promise<T> {
-    const methodMap = this.exposedMethods.get(targetPluginId)
+    let methodMap = this.exposedMethods.get(targetPluginId)
+    let method = methodMap?.get(methodName)
+
+    // Idle-suspend wake: if the target's methods aren't exposed because it was
+    // idle-suspended (deactivatePluginRuntime → unexpose clears exposedMethods),
+    // resume it and retry the lookup once — mirroring how the agent-tool path
+    // wakes a suspended plugin via handleActivationEvent. Without this, the
+    // first cross-plugin RPC after the idle window throws "no exposed methods"
+    // instead of waking the provider plugin.
+    if (!methodMap || !method) {
+      if (this.mayForceWake(callerId) && (await this.tryResumeSuspendedTarget(targetPluginId))) {
+        methodMap = this.exposedMethods.get(targetPluginId)
+        method = methodMap?.get(methodName)
+      }
+    }
+
     if (!methodMap) {
       throw new Error(`Plugin ${targetPluginId} has no exposed methods`)
     }
-
-    const method = methodMap.get(methodName)
     if (!method) {
       throw new Error(`Method ${methodName} not found in plugin ${targetPluginId}`)
     }
+
+    // Target-side ACL (W3.5): the exposing plugin controls who may invoke.
+    if (!this.callerAllowed(method, callerId)) {
+      throw new Error(`RPC ${targetPluginId}.${methodName} does not allow calls from "${callerId}"`)
+    }
+
+    // Arg validation runs before the breaker so a caller's bad arguments never
+    // open the endpoint's breaker and the remote handler is never reached.
+    if (method.schema) {
+      const violation = validateIpcArgs(method.schema, args)
+      if (violation) {
+        throw new IPCSchemaError(targetPluginId, methodName, violation)
+      }
+    }
+
+    // Bound the args with the same `maxMessageSize` cap that send/broadcast
+    // enforce. call() is the primary RPC verb and previously bypassed the cap,
+    // so an oversized payload could flood a remote handler. Runs before the
+    // breaker (a bad-size call never charges the endpoint a failure).
+    this.validateMessage(args)
 
     const breaker = this.getBreaker(targetPluginId, methodName)
     if (!breaker.canPass()) {
@@ -541,6 +558,47 @@ export class PluginIPC {
     }
   }
 
+  /**
+   * Wake an idle-suspended target plugin so its exposed IPC methods are
+   * re-registered before a cross-plugin RPC retries the lookup. Returns true
+   * when a resume was attempted (the target was `suspended`), false otherwise.
+   * Best-effort and lazy-imported: a missing/uninitialized manager or store
+   * (web profile, early boot) resolves false so `call()` throws its normal
+   * "no exposed methods" error. Only the miss path pays this cost — the common
+   * case (method already exposed) never reaches here.
+   */
+  /** ACL check for one exposed method. The owner can always call itself. */
+  private callerAllowed(method: ExposedMethod, callerId: string): boolean {
+    if (!method.allowedCallers) return true
+    if (callerId === method.pluginId) return true
+    return method.allowedCallers.includes(callerId)
+  }
+
+  /**
+   * Force-wake gate (W3.5): host-originated calls (callerId not registered as
+   * a plugin) keep the wake path; a PLUGIN caller must hold `ipc:call` to pull
+   * an idle-suspended target back to life.
+   */
+  private mayForceWake(callerId: string): boolean {
+    const isRegisteredPlugin =
+      this.pluginPermissions.has(callerId) || this.exposedMethods.has(callerId)
+    if (!isRegisteredPlugin) return true
+    return pluginHasApiPermission(callerId, "ipc:call")
+  }
+
+  private async tryResumeSuspendedTarget(targetPluginId: string): Promise<boolean> {
+    try {
+      const { usePluginStore } = await import("@/stores/plugin-runtime")
+      const status = usePluginStore.getState().plugins[targetPluginId]?.status
+      if (status !== "suspended") return false
+      const { getPluginManager } = await import("@/lib/plugin/core/manager")
+      await getPluginManager().resumePlugin(targetPluginId, "ipc-call")
+      return true
+    } catch {
+      return false
+    }
+  }
+
   private getBreaker(targetPluginId: string, methodName: string): CircuitBreaker {
     const key = `${targetPluginId}::${methodName}`
     let breaker = this.breakers.get(key)
@@ -589,10 +647,34 @@ export class PluginIPC {
     return breaker ? breaker.state() : null
   }
 
-  getExposedMethods(pluginId: string): string[] {
+  /**
+   * Snapshot every instantiated breaker's state. Used by the messaging
+   * diagnostics UI to surface degraded endpoints. Keyed by `(pluginId,
+   * methodName)` — only endpoints that have actually been called appear.
+   */
+  getAllBreakerStates(): Array<{
+    pluginId: string
+    methodName: string
+    state: "closed" | "open" | "half_open"
+  }> {
+    const result: Array<{
+      pluginId: string
+      methodName: string
+      state: "closed" | "open" | "half_open"
+    }> = []
+    for (const [key, breaker] of this.breakers.entries()) {
+      const [pluginId, methodName] = key.split("::")
+      result.push({ pluginId, methodName, state: breaker.state() })
+    }
+    return result
+  }
+
+  getExposedMethods(pluginId: string, callerId?: string): string[] {
     const methodMap = this.exposedMethods.get(pluginId)
     if (!methodMap) return []
-    return Array.from(methodMap.keys())
+    return Array.from(methodMap.values())
+      .filter((m) => callerId === undefined || this.callerAllowed(m, callerId))
+      .map((m) => m.name)
   }
 
   getAllExposedMethods(): Map<string, string[]> {
@@ -601,6 +683,23 @@ export class PluginIPC {
       result.set(pluginId, Array.from(methodMap.keys()))
     }
     return result
+  }
+
+  /**
+   * Service discovery: describe a plugin's exposed methods (name + description
+   * + arg schema), without leaking the handler functions. Powers both
+   * `ctx.ipc.describeExposedMethods` and the messaging diagnostics UI.
+   */
+  describeExposedMethods(pluginId: string, callerId?: string): IpcExposedMethodInfo[] {
+    const methodMap = this.exposedMethods.get(pluginId)
+    if (!methodMap) return []
+    return Array.from(methodMap.values())
+      .filter((m) => callerId === undefined || this.callerAllowed(m, callerId))
+      .map((m) => ({
+        name: m.name,
+        description: m.description,
+        schema: m.schema,
+      }))
   }
 
   // ===========================================================================
@@ -643,6 +742,26 @@ export class PluginIPC {
         : new Blob([serialized]).size
     if (size > this.config.maxMessageSize) {
       throw new Error(`Message size ${size} exceeds maximum ${this.config.maxMessageSize}`)
+    }
+  }
+
+  /**
+   * Owned-channel anti-spoof (W3.6): a channel named `<pluginId>:<rest>` is
+   * OWNED by that plugin when the prefix is a registered plugin id — only the
+   * owner may publish on it, so no other plugin can impersonate its events.
+   * Channels whose prefix is not a registered plugin id stay public
+   * (mirrors the `system:*` guard on the event bus).
+   */
+  private assertChannelPublishAllowed(senderId: string, channel: string): void {
+    const sep = channel.indexOf(":")
+    if (sep <= 0) return
+    const prefix = channel.slice(0, sep)
+    if (prefix === senderId) return
+    const prefixIsPlugin = this.pluginPermissions.has(prefix) || this.exposedMethods.has(prefix)
+    if (prefixIsPlugin) {
+      throw new Error(
+        `Channel "${channel}" is owned by plugin "${prefix}" — "${senderId}" may not publish on it`
+      )
     }
   }
 
@@ -706,7 +825,6 @@ export class PluginIPC {
   getStats(): {
     totalSubscriptions: number
     totalExposedMethods: number
-    pendingRequests: number
     messageCount: number
   } {
     let totalSubscriptions = 0
@@ -722,7 +840,6 @@ export class PluginIPC {
     return {
       totalSubscriptions,
       totalExposedMethods,
-      pendingRequests: this.pendingRequests.size,
       messageCount: this.messageHistory.length,
     }
   }
@@ -734,7 +851,6 @@ export class PluginIPC {
   clear(): void {
     this.subscriptions.clear()
     this.exposedMethods.clear()
-    this.pendingRequests.clear()
     this.messageHistory = []
     this.pluginPermissions.clear()
     this.breakers.clear()
@@ -770,46 +886,57 @@ export function resetPluginIPC(): void {
 // Context API Factory
 // =============================================================================
 
-export interface PluginIPCAPI {
-  send: (targetPluginId: string, channel: string, data: unknown) => Promise<void>
-  sendAndWait: <T>(
-    targetPluginId: string,
-    channel: string,
-    data: unknown,
-    options?: PluginIPCCallOptions | number
-  ) => Promise<T>
-  broadcast: (channel: string, data: unknown) => void
-  on: (channel: string, handler: (data: unknown, senderId: string) => void) => () => void
-  expose: (methods: Record<string, (...args: unknown[]) => unknown | Promise<unknown>>) => void
-  call: <T>(
-    targetPluginId: string,
-    method: string,
-    args?: unknown[],
-    options?: PluginIPCCallOptions
-  ) => Promise<T>
-  getExposedMethods: (pluginId: string) => string[]
-}
-
 export function createIPCAPI(pluginId: string): PluginIPCAPI {
   const ipc = getPluginIPC()
 
+  // Cross-plugin reach is permission-gated, mirroring how `agent:dispatch`
+  // gates the agent fan-out surface. Outbound messaging (`send`/`broadcast`/
+  // `call`) AND enumeration (`getExposedMethods`/`describeExposedMethods` —
+  // the prelude to calling, W3.5) require `ipc:call`; publishing callable
+  // methods requires `ipc:expose`. Receiving (`on`) stays ungated.
+  const requirePerm = (permission: "ipc:call" | "ipc:expose", method: string): void => {
+    if (!pluginHasApiPermission(pluginId, permission)) {
+      throw new Error(
+        `ipc.${method} requires the "${permission}" permission — declare it in the plugin manifest.`
+      )
+    }
+  }
+
   return {
-    send: (targetPluginId, channel, data) => ipc.send(pluginId, targetPluginId, channel, data),
-    sendAndWait: <T>(
-      targetPluginId: string,
-      channel: string,
-      data: unknown,
-      options?: PluginIPCCallOptions | number
-    ) => ipc.sendAndWait<T>(pluginId, targetPluginId, channel, data, options),
-    broadcast: (channel, data) => ipc.broadcast(pluginId, channel, data),
+    // Async methods are written `async` so the gate surfaces as a rejected
+    // promise (matching their `Promise` return type) rather than a synchronous
+    // throw; `broadcast`/`expose` return void so they throw synchronously.
+    send: async (targetPluginId, channel, data) => {
+      requirePerm("ipc:call", "send")
+      return ipc.send(pluginId, targetPluginId, channel, data)
+    },
+    broadcast: (channel, data, options) => {
+      requirePerm("ipc:call", "broadcast")
+      ipc.broadcast(pluginId, channel, data, options)
+    },
     on: (channel, handler) => ipc.subscribe(pluginId, channel, handler),
-    expose: (methods) => ipc.expose(pluginId, methods),
-    call: <T>(
+    expose: (methods) => {
+      requirePerm("ipc:expose", "expose")
+      ipc.expose(pluginId, methods)
+    },
+    describeExposedMethods: (targetPluginId) => {
+      // Enumeration is the prelude to calling — same permission (W3.5), and
+      // the listing is filtered to methods THIS plugin may actually invoke.
+      requirePerm("ipc:call", "describeExposedMethods")
+      return ipc.describeExposedMethods(targetPluginId, pluginId)
+    },
+    call: async <T>(
       targetPluginId: string,
       method: string,
       args: unknown[] = [],
       options?: PluginIPCCallOptions
-    ) => ipc.call<T>(pluginId, targetPluginId, method, args, options),
-    getExposedMethods: (targetPluginId) => ipc.getExposedMethods(targetPluginId),
+    ) => {
+      requirePerm("ipc:call", "call")
+      return ipc.call<T>(pluginId, targetPluginId, method, args, options)
+    },
+    getExposedMethods: (targetPluginId) => {
+      requirePerm("ipc:call", "getExposedMethods")
+      return ipc.getExposedMethods(targetPluginId, pluginId)
+    },
   }
 }

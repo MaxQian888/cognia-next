@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for Canvas Layout Store
  */
@@ -35,6 +36,7 @@ describe("useCanvasLayoutStore", () => {
       expect(result.current.leftCollapsed).toBe(false)
       expect(result.current.rightCollapsed).toBe(false)
       expect(result.current.activeRightTab).toBe("suggestions")
+      expect(result.current.previewMode).toBe("split")
       expect(result.current.mobileLeftOpen).toBe(false)
       expect(result.current.mobileRightOpen).toBe(false)
     })
@@ -137,6 +139,7 @@ describe("useCanvasLayoutStore", () => {
         "comments",
         "collaboration",
         "execution",
+        "outline",
       ]
       const { result } = renderHook(() => useCanvasLayoutStore())
       for (const tab of tabs) {
@@ -145,6 +148,52 @@ describe("useCanvasLayoutStore", () => {
         })
         expect(result.current.activeRightTab).toBe(tab)
       }
+    })
+  })
+
+  describe("railViewMode", () => {
+    it("defaults to grouped and toggles to files (and back), persisting the choice", () => {
+      jest.useFakeTimers()
+      const { result } = renderHook(() => useCanvasLayoutStore())
+      expect(result.current.railViewMode).toBe("grouped")
+
+      act(() => {
+        result.current.setRailViewMode("files")
+        // Nudge a persisted write so the snapshot flushes.
+        result.current.setSizes([20, 55, 25])
+        jest.advanceTimersByTime(CANVAS_LAYOUT_PERSIST_DEBOUNCE_MS + 5)
+      })
+      expect(result.current.railViewMode).toBe("files")
+      expect(readPersisted()?.state.railViewMode).toBe("files")
+
+      act(() => {
+        result.current.setRailViewMode("grouped")
+      })
+      expect(result.current.railViewMode).toBe("grouped")
+      jest.useRealTimers()
+    })
+  })
+
+  describe("previewMode", () => {
+    it("defaults to split and can switch to code / preview, persisting the choice", () => {
+      jest.useFakeTimers()
+      const { result } = renderHook(() => useCanvasLayoutStore())
+      expect(result.current.previewMode).toBe("split")
+
+      act(() => {
+        result.current.setPreviewMode("preview")
+        // Nudge a persisted write so the snapshot flushes.
+        result.current.setSizes([20, 55, 25])
+        jest.advanceTimersByTime(CANVAS_LAYOUT_PERSIST_DEBOUNCE_MS + 5)
+      })
+      expect(result.current.previewMode).toBe("preview")
+      expect(readPersisted()?.state.previewMode).toBe("preview")
+
+      act(() => {
+        result.current.setPreviewMode("code")
+      })
+      expect(result.current.previewMode).toBe("code")
+      jest.useRealTimers()
     })
   })
 
@@ -246,6 +295,7 @@ describe("useCanvasLayoutStore", () => {
         result.current.setSizes([10, 50, 40])
         result.current.toggleLeft()
         result.current.setActiveRightTab("execution")
+        result.current.setPreviewMode("preview")
         result.current.setMobileRightOpen(true)
       })
       act(() => {
@@ -256,6 +306,7 @@ describe("useCanvasLayoutStore", () => {
       expect(result.current.rightSize).toBe(CANVAS_LAYOUT_DEFAULTS.rightSize)
       expect(result.current.leftCollapsed).toBe(false)
       expect(result.current.activeRightTab).toBe("suggestions")
+      expect(result.current.previewMode).toBe("split")
       expect(result.current.mobileRightOpen).toBe(false)
     })
   })

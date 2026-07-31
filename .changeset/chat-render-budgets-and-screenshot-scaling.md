@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+Chat rendering no longer stalls on image- and diagram-heavy conversations. Computer Use screenshot down-scaling is now on by default (it was implemented but never enabled, so agent screenshots entered the transcript at full Retina resolution and inlined as megabytes of base64 each) — click accuracy is unaffected because coordinates were already mapped back to physical pixels, and the setting can still be turned off. Very large code fences and markdown tables render the first 2000 lines / 200 rows with a "show all" control instead of laying out every row up front; copying, downloading, searching and exporting are unchanged and still see the whole thing. Diagrams now render one at a time and only once they are near the viewport, a diagram too large to lay out safely offers a render button rather than freezing the tab, and Mermaid output is scrubbed of scripts and event handlers before it is inserted. The virtualized message list also estimates row heights from message content instead of assuming every row is 200px, so scrolling through a conversation full of screenshots no longer lurches under the cursor.

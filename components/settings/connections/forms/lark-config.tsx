@@ -33,7 +33,21 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
-import { connectorsHttpRequest, connectorsKeyringSet } from "@/lib/connectors/tauri/commands"
+import { Switch } from "@/components/ui/switch"
+import { openUrl } from "@/lib/native/opener"
+import {
+  connectorsHttpRequest,
+  connectorsKeyringGet,
+  connectorsKeyringSet,
+} from "@/lib/connectors/tauri/commands"
+import { buildLarkOAuthUrl, LARK_SENDAS_SCOPES } from "@/lib/connectors/adapters/lark/auth"
+import { computeCodeChallenge, generateCodeVerifier } from "@/lib/connectors/adapters/lark/pkce"
+import { setLarkOAuthPending } from "@/lib/connectors/adapters/lark/oauth-pending"
+import {
+  buildLarkOAuthState,
+  type LarkConnectedUser,
+} from "@/lib/connectors/adapters/lark/oauth-handler"
+import { CONNECTOR_OAUTH_STATE_KEY } from "@/lib/connectors/oauth-registry"
 import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
 import { isTauri } from "@/lib/tauri"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
@@ -59,12 +73,30 @@ interface TatTestResult {
 
 type TransportMode = "long-connection" | "webhook"
 
+/**
+ * The relay callback path Feishu redirects to. Served by the connectors axum
+ * server (crates/cognia-connectors/src/axum_app.rs) and exposed via the same
+ * Cloudflared tunnel as the webhook route. It 302s back to
+ * `cognia://connector/oauth/lark`.
+ */
+const LARK_OAUTH_RELAY_PATH = "/oauth/lark/callback"
+
 interface LarkPersistedSettings {
   transport?: TransportMode
   /** Cached at adapter start by `buildLarkAdapter`; refreshed via the UI affordance. */
   selfBotOpenId?: string
   /** Bot-menu (快捷指令) `event_key` → action mappings. */
   quickCommands?: LarkQuickCommand[]
+  /** Opt-in: send replies as the connected user (user_access_token) not the bot. */
+  sendAsUser?: boolean
+  /** Stamped by the OAuth handler after a successful user-token exchange. */
+  connectedUser?: LarkConnectedUser
+  /**
+   * OAuth 2.0 redirect_uri for the send-as-user flow. Blank → derived from the
+   * tunnel (`${tunnel}/oauth/lark/callback`). Must be registered in the Feishu
+   * console Security Settings → Redirect URL.
+   */
+  redirectUri?: string
   /** Index signature so the row's open-ended `Record<string, unknown>` accepts us. */
   [key: string]: unknown
 }
@@ -103,11 +135,14 @@ async function testLarkConnection(appId: string, appSecret: string): Promise<Tat
 interface LarkConfigDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Called with the new adapter id after a successful create, so the parent
+   * can auto-select and open the freshly created adapter. */
+  onCreated?: (id: string) => void
   /** null = creating a new instance */
   row: AdapterInstanceRow | null
 }
 
-export function LarkConfigDialog({ open, onOpenChange, row }: LarkConfigDialogProps) {
+export function LarkConfigDialog({ open, onOpenChange, row, onCreated }: LarkConfigDialogProps) {
   const t = useTranslations("settings.connections.lark")
   const isNew = row === null
   const persistedSettings = (row?.settings ?? {}) as LarkPersistedSettings
@@ -130,9 +165,14 @@ export function LarkConfigDialog({ open, onOpenChange, row }: LarkConfigDialogPr
     persistedSettings.quickCommands ?? []
   )
 
+  const [sendAsUser, setSendAsUser] = useState<boolean>(persistedSettings.sendAsUser === true)
+  const [redirectUri, setRedirectUri] = useState<string>(persistedSettings.redirectUri ?? "")
+  const connectedUser = persistedSettings.connectedUser
+
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<TatTestResult | null>(null)
   const [refreshingOpenId, setRefreshingOpenId] = useState(false)
+  const [authorizing, setAuthorizing] = useState(false)
   const [saving, setSaving] = useState(false)
 
   const desktop = isTauri()
@@ -151,6 +191,8 @@ export function LarkConfigDialog({ open, onOpenChange, row }: LarkConfigDialogPr
     transport !== (persistedSettings.transport ?? "long-connection") ||
     muted !== (row?.muted ?? false) ||
     quietHours !== (row?.quietHours ?? null) ||
+    sendAsUser !== (persistedSettings.sendAsUser === true) ||
+    redirectUri.trim() !== (persistedSettings.redirectUri ?? "") ||
     JSON.stringify(quickCommands) !== JSON.stringify(persistedSettings.quickCommands ?? [])
 
   // ── Handlers ─────────────────────────────────────────────────────────────
@@ -191,10 +233,72 @@ export function LarkConfigDialog({ open, onOpenChange, row }: LarkConfigDialogPr
     }
   }
 
+  const handleAuthorize = async () => {
+    if (!row) {
+      toast.error(t("authorizeNeedsSavedAdapter"))
+      return
+    }
+    setAuthorizing(true)
+    try {
+      const appIdVal = (await connectorsKeyringGet(row.id, "appId")) ?? ""
+      if (!appIdVal) {
+        toast.error(t("authorizeNeedsAppId"))
+        return
+      }
+      // Redirect precedence: an explicit override, else the tunnel-derived
+      // relay URL. Both must be registered in the Feishu console.
+      const effectiveRedirect =
+        redirectUri.trim() ||
+        (tunnel.url ? `${tunnel.url.replace(/\/$/, "")}${LARK_OAUTH_RELAY_PATH}` : "")
+      if (!effectiveRedirect) {
+        toast.error(t("authorizeNeedsRedirect"))
+        return
+      }
+      const nonce = crypto.randomUUID().replace(/-/g, "").slice(0, 16)
+      const state = buildLarkOAuthState(row.id, nonce)
+      // PKCE — the verifier travels via the durable pending store; only the
+      // challenge is sent to Feishu.
+      const codeVerifier = generateCodeVerifier()
+      const codeChallenge = await computeCodeChallenge(codeVerifier)
+      // The deep-link router validates the redirect's `state`. sessionStorage
+      // covers the live path; a localStorage mirror survives a cold restart.
+      sessionStorage.setItem(CONNECTOR_OAUTH_STATE_KEY, state)
+      try {
+        localStorage.setItem(CONNECTOR_OAUTH_STATE_KEY, state)
+      } catch {
+        // localStorage unavailable — the live sessionStorage path still works.
+      }
+      // The completion handler reads the verifier + exact redirect back out.
+      setLarkOAuthPending(row.id, { state, codeVerifier, redirectUri: effectiveRedirect })
+      const url = buildLarkOAuthUrl({
+        appId: appIdVal,
+        redirectUri: effectiveRedirect,
+        state,
+        scope: LARK_SENDAS_SCOPES,
+        codeChallenge,
+      })
+      await openUrl(url)
+      toast.info(t("authorizeOpened"))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      setAuthorizing(false)
+    }
+  }
+
   const handleCopyWebhookUrl = async (url: string) => {
     try {
       await navigator.clipboard.writeText(url)
       toast.success(t("webhookUrlCopied"))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const handleCopyRedirectUri = async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url)
+      toast.success(t("redirectUriCopied"))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
     }
@@ -233,6 +337,11 @@ export function LarkConfigDialog({ open, onOpenChange, row }: LarkConfigDialogPr
         transport,
         ...(selfBotOpenId ? { selfBotOpenId } : {}),
         ...(quickCommands.length > 0 ? { quickCommands } : {}),
+        // Preserve the OAuth-stamped connected-user metadata across saves —
+        // rebuilding nextSettings from scratch would otherwise drop it.
+        ...(connectedUser ? { connectedUser } : {}),
+        ...(sendAsUser ? { sendAsUser: true } : {}),
+        ...(redirectUri.trim() ? { redirectUri: redirectUri.trim() } : {}),
       }
 
       if (isNew) {
@@ -294,6 +403,7 @@ export function LarkConfigDialog({ open, onOpenChange, row }: LarkConfigDialogPr
       }
 
       toast.success(isNew ? t("adapterCreated") : t("adapterUpdated"))
+      if (isNew) onCreated?.(adapterId)
       onOpenChange(false)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
@@ -303,7 +413,11 @@ export function LarkConfigDialog({ open, onOpenChange, row }: LarkConfigDialogPr
   }
 
   // ── Derived Webhook URL ──────────────────────────────────────────────────
-  const webhookPath = isNew ? null : `/connectors/lark/${row?.id ?? ""}`
+  // Must match the Rust axum route `POST /webhook/{adapter_type}/{adapter_id}`
+  // (axum_app.rs) — the same `/webhook/<type>/<id>` shape every other adapter
+  // form uses. The previous `/connectors/lark/...` prefix 404'd, so a Feishu
+  // webhook aimed at the surfaced URL never reached the receiver.
+  const webhookPath = isNew ? null : `/webhook/lark/${row?.id ?? ""}`
   const webhookUrl =
     tunnel.url && webhookPath ? `${tunnel.url.replace(/\/$/, "")}${webhookPath}` : null
 
@@ -311,6 +425,18 @@ export function LarkConfigDialog({ open, onOpenChange, row }: LarkConfigDialogPr
   const openConsoleUrl = appId.trim().startsWith("cli_")
     ? `https://open.feishu.cn/app/${encodeURIComponent(appId.trim())}/event-subscriptions`
     : "https://open.feishu.cn/app"
+
+  // Deep link to the app's Security Settings, where the redirect URL is
+  // registered for the send-as-user OAuth flow.
+  const openSecurityConsoleUrl = appId.trim().startsWith("cli_")
+    ? `https://open.feishu.cn/app/${encodeURIComponent(appId.trim())}/safe`
+    : "https://open.feishu.cn/app"
+
+  // Relay redirect derived from the running tunnel (send-as-user OAuth). The
+  // user can override it via the redirect-URI field.
+  const derivedRelayUrl =
+    !isNew && tunnel.url ? `${tunnel.url.replace(/\/$/, "")}${LARK_OAUTH_RELAY_PATH}` : null
+  const effectiveRedirectUri = redirectUri.trim() || derivedRelayUrl || ""
 
   // ── Sections ─────────────────────────────────────────────────────────────
   const identitySection: FormSection = {
@@ -337,6 +463,7 @@ export function LarkConfigDialog({ open, onOpenChange, row }: LarkConfigDialogPr
         testing={testing}
         testResult={testResult}
         onTest={handleTest}
+        openConsoleUrl={openConsoleUrl}
         desktop={desktop}
         saving={saving}
       />
@@ -404,6 +531,35 @@ export function LarkConfigDialog({ open, onOpenChange, row }: LarkConfigDialogPr
     ),
   }
 
+  // Send-as-user is only meaningful once the adapter exists (authorize needs a
+  // saved adapter id to scope the OAuth state), so it is hidden for new rows.
+  const sendAsUserSection: FormSection | null = row
+    ? {
+        id: "send-as-user",
+        label: t("sectionSendAsUser"),
+        description: t("sectionSendAsUserDesc"),
+        children: (
+          <SendAsUserFields
+            connectedUser={connectedUser}
+            sendAsUser={sendAsUser}
+            onSendAsUserChange={setSendAsUser}
+            onAuthorize={handleAuthorize}
+            authorizing={authorizing}
+            saving={saving}
+            desktop={desktop}
+            redirectUri={redirectUri}
+            onRedirectUriChange={setRedirectUri}
+            derivedRelayUrl={derivedRelayUrl}
+            effectiveRedirectUri={effectiveRedirectUri}
+            onCopyRedirectUri={handleCopyRedirectUri}
+            openSecurityConsoleUrl={openSecurityConsoleUrl}
+            tunnelLoading={tunnel.loading}
+            tunnelRunning={tunnel.running}
+          />
+        ),
+      }
+    : null
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[90vh] flex-col sm:max-w-3xl">
@@ -413,7 +569,13 @@ export function LarkConfigDialog({ open, onOpenChange, row }: LarkConfigDialogPr
 
         <div className="-mx-6 flex-1 overflow-y-auto px-6">
           <AdapterFormSections
-            sections={[identitySection, deliverySection, quickCommandsSection, advancedSection]}
+            sections={[
+              identitySection,
+              deliverySection,
+              ...(sendAsUserSection ? [sendAsUserSection] : []),
+              quickCommandsSection,
+              advancedSection,
+            ]}
             onSubmit={handleSave}
             onCancel={() => onOpenChange(false)}
             submitting={saving}
@@ -423,6 +585,142 @@ export function LarkConfigDialog({ open, onOpenChange, row }: LarkConfigDialogPr
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Send-as-user section — OAuth connect + opt-in identity toggle (ADR-0009 A4)
+// ---------------------------------------------------------------------------
+
+interface SendAsUserFieldsProps {
+  connectedUser?: LarkConnectedUser
+  sendAsUser: boolean
+  onSendAsUserChange: (v: boolean) => void
+  onAuthorize: () => void
+  authorizing: boolean
+  saving: boolean
+  desktop: boolean
+  redirectUri: string
+  onRedirectUriChange: (v: string) => void
+  derivedRelayUrl: string | null
+  effectiveRedirectUri: string
+  onCopyRedirectUri: (url: string) => void
+  openSecurityConsoleUrl: string
+  tunnelLoading: boolean
+  tunnelRunning: boolean
+}
+
+function SendAsUserFields(p: SendAsUserFieldsProps) {
+  const t = useTranslations("settings.connections.lark")
+  const connectedLabel =
+    p.connectedUser?.name ??
+    p.connectedUser?.email ??
+    p.connectedUser?.enterpriseEmail ??
+    p.connectedUser?.openId
+
+  const openSecurityConsole = () => {
+    if (typeof window !== "undefined") {
+      window.open(p.openSecurityConsoleUrl, "_blank", "noopener,noreferrer")
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Redirect URL — register in the Feishu console before connecting. */}
+      <div className="space-y-2 rounded border bg-card px-3 py-3">
+        <Label className="text-xs font-medium">{t("redirectUriLabel")}</Label>
+        <Input
+          value={p.redirectUri}
+          onChange={(e) => p.onRedirectUriChange(e.target.value)}
+          placeholder={p.derivedRelayUrl ?? t("redirectUriPlaceholder")}
+          disabled={p.saving}
+          className="font-mono text-[11px]"
+          data-testid="lark-redirect-uri-input"
+          aria-label={t("redirectUriLabel")}
+        />
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => p.onCopyRedirectUri(p.effectiveRedirectUri)}
+            disabled={!p.effectiveRedirectUri}
+            aria-label={t("redirectUriCopyAria")}
+            data-testid="lark-redirect-uri-copy"
+          >
+            {t("redirectUriCopy")}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={openSecurityConsole}
+            aria-label={t("openConsoleSecurityAria")}
+          >
+            <ExternalLinkIcon className="mr-1 h-3.5 w-3.5" />
+            {t("openConsole")}
+          </Button>
+        </div>
+        <p className="text-[10px] text-muted-foreground">{t("redirectUriRegisterHelp")}</p>
+        {!p.tunnelRunning && !p.tunnelLoading && !p.redirectUri.trim() && (
+          <p
+            className="text-[10px] text-amber-700 dark:text-amber-400"
+            data-testid="lark-redirect-uri-tunnel-off"
+          >
+            {t("redirectUriTunnelOffHelp")}
+          </p>
+        )}
+      </div>
+
+      <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/30 px-3 py-2.5">
+        <div className="min-w-0 space-y-0.5">
+          <Label className="text-xs font-medium">{t("connectedAccountLabel")}</Label>
+          <p className="text-xs text-muted-foreground break-all">
+            {p.connectedUser
+              ? t("connectedAccountValue", { name: connectedLabel ?? "" })
+              : t("connectedAccountNone")}
+          </p>
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={p.onAuthorize}
+          disabled={p.authorizing || p.saving || !p.desktop || !p.effectiveRedirectUri}
+          className="shrink-0"
+        >
+          {p.authorizing ? (
+            <LoaderIcon className="h-3.5 w-3.5 animate-spin" />
+          ) : p.connectedUser ? (
+            t("reauthorizeButton")
+          ) : (
+            t("authorizeButton")
+          )}
+        </Button>
+      </div>
+
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 space-y-0.5">
+          <Label htmlFor="lk-send-as-user" className="text-sm">
+            {t("sendAsUserLabel")}
+          </Label>
+          <p className="text-xs leading-relaxed text-muted-foreground">{t("sendAsUserHelp")}</p>
+        </div>
+        <Switch
+          id="lk-send-as-user"
+          checked={p.sendAsUser}
+          onCheckedChange={p.onSendAsUserChange}
+          disabled={p.saving || !p.connectedUser}
+          aria-label={t("sendAsUserLabel")}
+        />
+      </div>
+
+      {!p.desktop && (
+        <p className="text-xs text-amber-600 dark:text-amber-400">
+          {t("authorizeRequiresDesktop")}
+        </p>
+      )}
+    </div>
   )
 }
 
@@ -448,6 +746,7 @@ interface IdentityFieldsProps {
   testing: boolean
   testResult: TatTestResult | null
   onTest: () => void
+  openConsoleUrl: string
   desktop: boolean
   saving: boolean
 }
@@ -575,6 +874,25 @@ function IdentityFields(p: IdentityFieldsProps) {
       {!p.desktop && (
         <p className="text-xs text-amber-600 dark:text-amber-400">{t("testRequiresDesktop")}</p>
       )}
+
+      {/* Console jump — available on every transport (not just webhook). */}
+      <div className="flex justify-end">
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          onClick={() => {
+            if (typeof window !== "undefined") {
+              window.open(p.openConsoleUrl, "_blank", "noopener,noreferrer")
+            }
+          }}
+          aria-label={t("openConsoleAria")}
+          data-testid="lark-identity-open-console"
+        >
+          <ExternalLinkIcon className="mr-1 h-3.5 w-3.5" />
+          {t("openConsole")}
+        </Button>
+      </div>
 
       {/* selfBotOpenId — read-only display + Refresh, spans full width */}
       <div className="space-y-1.5 rounded-md border bg-muted/30 px-3 py-2.5">

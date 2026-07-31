@@ -15,12 +15,19 @@ import {
   type EffectiveSettings,
 } from "./settings"
 
+jest.mock("@/lib/claude/hooks/lifecycle-firer", () => ({
+  defaultLifecycleFirer: jest.fn(async () => null),
+}))
+import { defaultLifecycleFirer } from "@/lib/claude/hooks/lifecycle-firer"
+const mockedFirer = defaultLifecycleFirer as unknown as jest.Mock
+
 const mockedInvoke = invoke as unknown as jest.Mock
 const mockedListen = listen as unknown as jest.Mock
 
 beforeEach(() => {
   mockedInvoke.mockReset()
   mockedListen?.mockReset()
+  mockedFirer.mockClear()
 })
 
 describe("readClaudeUserSettings", () => {
@@ -103,6 +110,22 @@ describe("writeClaudeUserSettings (Phase 4 writer)", () => {
   it("propagates Rust-side errors", async () => {
     mockedInvoke.mockRejectedValueOnce("not installed")
     await expect(writeClaudeUserSettings({})).rejects.toEqual("not installed")
+  })
+
+  it("fires the ConfigChange lifecycle hook after a successful write", async () => {
+    mockedInvoke.mockResolvedValueOnce({ path: "/p", backupPath: null })
+    await writeClaudeUserSettings({ model: "x" })
+    expect(mockedFirer).toHaveBeenCalledWith(
+      "ConfigChange",
+      expect.objectContaining({ sessionId: "user" }),
+      expect.objectContaining({ payload: { scope: "user" } })
+    )
+  })
+
+  it("does NOT fire ConfigChange when the write fails", async () => {
+    mockedInvoke.mockRejectedValueOnce("boom")
+    await expect(writeClaudeUserSettings({})).rejects.toEqual("boom")
+    expect(mockedFirer).not.toHaveBeenCalled()
   })
 })
 

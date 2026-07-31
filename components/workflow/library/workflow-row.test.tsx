@@ -47,6 +47,12 @@ describe("WorkflowRow", () => {
     expect(screen.getByTestId("workflow-select-wf_a")).toBeInTheDocument()
   })
 
+  it("shows the run-count badge and last-run status when provided", () => {
+    render(<WorkflowRow workflow={makeWorkflow()} runCount={5} lastStatus="succeeded" />)
+    expect(screen.getByTestId("workflow-runcount-wf_a")).toHaveTextContent("5")
+    expect(screen.getByTestId("run-status-succeeded")).toBeInTheDocument()
+  })
+
   it("selects instead of navigating in selection mode", () => {
     useWorkflowLibraryStore.setState({ selectionMode: true })
     render(<WorkflowRow workflow={makeWorkflow()} />)
@@ -66,6 +72,21 @@ describe("WorkflowRow", () => {
     expect(useWorkflowLibraryStore.getState().selection.size).toBe(0)
   })
 
+  it("activates from anywhere on the row, not just the title", () => {
+    useWorkflowLibraryStore.setState({ selectionMode: true })
+    render(<WorkflowRow workflow={makeWorkflow()} />)
+    fireEvent.click(screen.getByTestId("workflow-row-wf_a"))
+    expect(useWorkflowLibraryStore.getState().selection.has("wf_a")).toBe(true)
+  })
+
+  it("does not activate the row when opening the actions menu", async () => {
+    const user = userEvent.setup()
+    useWorkflowLibraryStore.setState({ selectionMode: true })
+    render(<WorkflowRow workflow={makeWorkflow()} />)
+    await user.click(screen.getByTestId("workflow-row-menu-wf_a"))
+    expect(useWorkflowLibraryStore.getState().selection.has("wf_a")).toBe(false)
+  })
+
   it("routes delete through the store from the menu", async () => {
     const user = userEvent.setup()
     render(<WorkflowRow workflow={makeWorkflow()} />)
@@ -80,5 +101,13 @@ describe("WorkflowRow", () => {
     await user.click(screen.getByTestId("workflow-row-menu-wf_a"))
     fireEvent.click(await screen.findByTestId("workflow-action-rename-wf_a"))
     expect(await screen.findByTestId("workflow-rename-input")).toBeInTheDocument()
+  })
+
+  it("opens the run dialog from the menu", async () => {
+    const user = userEvent.setup()
+    render(<WorkflowRow workflow={makeWorkflow()} />)
+    await user.click(screen.getByTestId("workflow-row-menu-wf_a"))
+    fireEvent.click(await screen.findByTestId("workflow-action-run-wf_a"))
+    expect(await screen.findByTestId("workflow-run-dialog")).toBeInTheDocument()
   })
 })

@@ -17,7 +17,7 @@
 //     without placeholders that aren't the a2ui-bridge row pass through with
 //     referential identity).
 
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 import { isA2UIBridgeRow } from "@/lib/a2ui/mcp-tool-schemas"
 
 export const COGNIA_SIDECAR_DIR_TOKEN = "${COGNIA_SIDECAR_DIR}"

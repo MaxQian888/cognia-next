@@ -1,0 +1,146 @@
+{
+  "autoTitle": {
+    "description": "After the first reply, name the chat with a model.",
+    "heading": "Auto-generate titles",
+    "label": "Generate conversation titles"
+  },
+  "composerBehavior": {
+    "autoScroll": {
+      "hint": "Follow the reply as it streams by scrolling to the newest content.",
+      "label": "Auto-scroll while streaming"
+    },
+    "clearAfterSend": {
+      "hint": "Empty the composer once a message is sent.",
+      "label": "Clear input after sending"
+    },
+    "compactLayout": {
+      "hint": "Use a denser composer layout that leaves more room for the conversation.",
+      "label": "Use compact composer layout"
+    },
+    "description": "Control how the message composer handles typing, sending, and drafts.",
+    "inputHistory": {
+      "hint": "Press Up / Down in an empty composer to recall previous messages.",
+      "label": "Recall input history"
+    },
+    "persistDrafts": {
+      "hint": "Keep unsent text in each conversation when you switch away.",
+      "label": "Save unsent drafts"
+    },
+    "sendOnEnter": {
+      "hint": "Press Enter to send; use Shift+Enter for a new line.",
+      "label": "Send on Enter"
+    },
+    "title": "Composer behavior"
+  },
+  "description": "Auto-generate titles and configure the timeline minimap.",
+  "inputSend": {
+    "description": "Keyboard, sending, and AI assistance for the message composer.",
+    "title": "Input & sending"
+  },
+  "labelModel": {
+    "description": "Background model used for timeline labels.",
+    "heading": "Label model"
+  },
+  "labelSummary": {
+    "description": "Use a model to summarize each turn into a short label (one call per turn).",
+    "heading": "Polish timeline labels",
+    "label": "Generate timeline labels"
+  },
+  "messageStream": {
+    "description": "Control how assistant replies appear as they arrive.",
+    "title": "Message stream"
+  },
+  "model": "Model",
+  "provider": "Provider",
+  "runStatusBar": {
+    "contextPct": {
+      "description": "How full the model's context window is after the latest turn.",
+      "heading": "Context usage",
+      "label": "Show context usage"
+    },
+    "cost": {
+      "description": "Estimated session cost so far.",
+      "heading": "Cost",
+      "label": "Show cost"
+    },
+    "description": "Choose which metrics the run-status bar above the composer shows while a turn runs.",
+    "elapsed": {
+      "description": "The active-work clock (pauses during approvals).",
+      "heading": "Elapsed time",
+      "label": "Show elapsed time"
+    },
+    "outputTokens": {
+      "description": "Total output tokens generated this session.",
+      "heading": "Output tokens",
+      "label": "Show output tokens"
+    },
+    "speed": {
+      "description": "Generation throughput in tokens per second.",
+      "heading": "Model speed",
+      "label": "Show model speed"
+    },
+    "title": "Run status bar",
+    "tools": {
+      "description": "Number of tool calls in the running turn.",
+      "heading": "Tool count",
+      "label": "Show tool count"
+    }
+  },
+  "sidebar": {
+    "contentSearch": {
+      "description": "Also match text inside messages, not just conversation titles (slower).",
+      "heading": "Search message content",
+      "label": "Search inside messages"
+    },
+    "density": {
+      "description": "Tighten row spacing to fit more conversations.",
+      "heading": "Compact rows",
+      "label": "Use compact conversation rows"
+    },
+    "description": "Tune how the chat sidebar lists and searches conversations.",
+    "groupBy": {
+      "description": "Choose the primary axis the conversation list groups by. Grouping by workspace lists conversations from every workspace; the other modes stay inside the current one.",
+      "heading": "Group conversations by",
+      "label": "Conversation grouping",
+      "options": {
+        "agent": "Agent",
+        "date": "Date",
+        "none": "No grouping",
+        "team": "Direct messages / Team",
+        "workspace": "Workspace"
+      }
+    },
+    "preview": {
+      "description": "Show a second line with the latest message under each conversation.",
+      "heading": "Message preview",
+      "label": "Show message preview"
+    },
+    "resetWidth": {
+      "button": "Reset width",
+      "description": "Reset the draggable sidebar back to its default width.",
+      "heading": "Sidebar width"
+    },
+    "title": "Conversation sidebar",
+    "unread": {
+      "description": "Show a count badge on conversations with unread messages.",
+      "heading": "Unread badges",
+      "label": "Show unread badges"
+    }
+  },
+  "streaming": {
+    "description": "Stream assistant replies token-by-token as they are generated. Off shows each reply only when complete.",
+    "heading": "Token-level streaming",
+    "label": "Stream replies token-by-token"
+  },
+  "timeline": {
+    "description": "Show a timeline minimap on the right of long chats.",
+    "heading": "Conversation timeline",
+    "label": "Show conversation timeline"
+  },
+  "title": "Conversation",
+  "titleModel": {
+    "description": "Background model used to generate titles. Defaults to the chat model.",
+    "heading": "Title model"
+  },
+  "useDefault": "Use chat default"
+}

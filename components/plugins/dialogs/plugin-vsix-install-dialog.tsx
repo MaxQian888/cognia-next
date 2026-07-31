@@ -34,10 +34,12 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { installVsix, type VsixInstallResult } from "@/lib/plugin/vscode-shim/vsix-installer"
-import { upsertPlugin } from "@/lib/db/plugins"
-import { canUseTauriInvoke } from "@/lib/native/utils"
-import { loggers } from "@/lib/logging"
+import {
+  commitVscodeExtension,
+  prepareVscodeExtension,
+  type PreparedVscodeExtension,
+} from "@/lib/plugin/vscode-shim/install-vscode-extension"
+import { loggers } from "@cognia/logging"
 
 interface Props {
   open: boolean
@@ -47,8 +49,8 @@ interface Props {
 type Stage =
   | { kind: "idle" }
   | { kind: "parsing" }
-  | { kind: "ready"; result: VsixInstallResult; vsixBytes: Uint8Array }
-  | { kind: "installing"; result: VsixInstallResult; vsixBytes: Uint8Array }
+  | { kind: "ready"; prepared: PreparedVscodeExtension }
+  | { kind: "installing"; prepared: PreparedVscodeExtension }
   | { kind: "error"; message: string }
 
 export function PluginVsixInstallDialog({ open, onOpenChange }: Props) {
@@ -73,8 +75,10 @@ export function PluginVsixInstallDialog({ open, onOpenChange }: Props) {
     try {
       const buf = await file.arrayBuffer()
       const bytes = new Uint8Array(buf)
-      const result = await installVsix(bytes)
-      setStage({ kind: "ready", result, vsixBytes: bytes })
+      // Adapt at *parse* time, not install time: the review below renders the
+      // inferred permissions, and the user has to see them before consenting.
+      const prepared = await prepareVscodeExtension(bytes, "vsix-upload")
+      setStage({ kind: "ready", prepared })
     } catch (err) {
       setStage({
         kind: "error",
@@ -85,42 +89,15 @@ export function PluginVsixInstallDialog({ open, onOpenChange }: Props) {
 
   const handleInstall = async () => {
     if (stage.kind !== "ready") return
-    const { result, vsixBytes } = stage
-    setStage({ kind: "installing", result, vsixBytes })
+    const { prepared } = stage
+    setStage({ kind: "installing", prepared })
     try {
-      const tauriAvailable = canUseTauriInvoke()
-      let installPath: string | null = null
-      if (tauriAvailable) {
-        const base64 = bytesToBase64(vsixBytes)
-        const { invoke } = await import("@tauri-apps/api/core")
-        const installResult = await invoke<{
-          extensionId: string
-          installPath: string
-          sha256Hex: string
-          packageJson: unknown
-        }>("plugin_vscode_install_vsix", { vsixBase64: base64 })
-        installPath = installResult.installPath
-      }
-      const publisher = result.pkgJson.publisher
-      const name = result.pkgJson.name
-      const id = `${publisher}.${name}`
-      await upsertPlugin({
-        id,
-        name: result.pkgJson.displayName || result.pkgJson.name,
-        version: result.pkgJson.version,
-        status: "discovered",
-        source: "local",
-        type: "vscode-extension",
-        path: installPath ?? `vsix://${id}@${result.sha256.slice(0, 12)}`,
-        manifest: result.pkgJson as unknown as Record<string, unknown>,
-        enabled: false,
-        capabilities: ["vscode-extension"],
-      })
+      await commitVscodeExtension(prepared)
       onOpenChange(false)
       reset()
     } catch (err) {
       loggers.plugin.error("VSIX install failed", err, {
-        extension: stage.result.pkgJson.publisher + "." + stage.result.pkgJson.name,
+        extension: prepared.adapted.manifest.id,
       })
       setStage({
         kind: "error",
@@ -176,7 +153,7 @@ export function PluginVsixInstallDialog({ open, onOpenChange }: Props) {
         )}
 
         {(stage.kind === "ready" || stage.kind === "installing") && (
-          <VsixReviewBody result={stage.result} installing={stage.kind === "installing"} />
+          <VsixReviewBody prepared={stage.prepared} installing={stage.kind === "installing"} />
         )}
 
         <DialogFooter>
@@ -206,15 +183,21 @@ export function PluginVsixInstallDialog({ open, onOpenChange }: Props) {
 }
 
 function VsixReviewBody({
-  result,
+  prepared,
   installing,
 }: {
-  result: VsixInstallResult
+  prepared: PreparedVscodeExtension
   installing: boolean
 }) {
   const t = useTranslations("plugins.vsixInstall")
-  const { pkgJson, lspBinaryCandidates, themes, bundleFormat } = result
-  const permissions = (pkgJson as { permissions?: string[] }).permissions ?? []
+  const { vsix, adapted } = prepared
+  const { pkgJson, lspBinaryCandidates, themes, bundleFormat } = vsix
+  // Permissions come from static analysis of the bundle, never from the
+  // manifest. This used to read `pkgJson.permissions` — a field VS Code
+  // manifests do not have — so the section below never rendered and every
+  // install looked permission-free.
+  const inference = adapted.permissions
+  const permissions = inference.permissions
 
   return (
     <div aria-busy={installing} className="space-y-3">
@@ -229,10 +212,7 @@ function VsixReviewBody({
           )}
         </div>
         <p className="text-xs text-muted-foreground">
-          {t("publisherLabel")}:{" "}
-          <code className="font-mono">
-            {pkgJson.publisher}.{pkgJson.name}
-          </code>
+          {t("publisherLabel")}: <code className="font-mono">{adapted.manifest.id}</code>
         </p>
         {pkgJson.description && (
           <p className="text-xs text-muted-foreground">{pkgJson.description}</p>
@@ -263,9 +243,14 @@ function VsixReviewBody({
         </Card>
       )}
 
-      {permissions.length > 0 && (
-        <Card className="p-3 text-sm space-y-2">
-          <div className="font-medium">{t("sectionPermissions")}</div>
+      <Card className="p-3 text-sm space-y-2">
+        <div className="flex items-center gap-2">
+          <span className="font-medium">{t("sectionPermissions")}</span>
+          <Badge variant="outline" className="text-xs">
+            {t("permissionsConfidence", { confidence: inference.confidence })}
+          </Badge>
+        </div>
+        {permissions.length > 0 ? (
           <div className="flex flex-wrap gap-1">
             {permissions.map((p) => (
               <Badge key={p} variant="outline" className="text-xs font-mono">
@@ -273,6 +258,23 @@ function VsixReviewBody({
               </Badge>
             ))}
           </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">{t("permissionsNone")}</p>
+        )}
+        <p className="text-xs text-muted-foreground">{t("permissionsInferred")}</p>
+        {inference.unparsedBundle && (
+          <p className="text-xs text-muted-foreground">{t("permissionsUnparsed")}</p>
+        )}
+      </Card>
+
+      {adapted.warnings.length > 0 && (
+        <Card className="p-3 text-sm space-y-2">
+          <div className="font-medium">{t("sectionNotes", { count: adapted.warnings.length })}</div>
+          <ul className="text-xs text-muted-foreground space-y-0.5">
+            {adapted.warnings.map((w) => (
+              <li key={w}>{w}</li>
+            ))}
+          </ul>
         </Card>
       )}
 
@@ -293,19 +295,4 @@ function VsixReviewBody({
       )}
     </div>
   )
-}
-
-function bytesToBase64(bytes: Uint8Array): string {
-  // Browser-safe base64 — chunk to avoid btoa stack overflows on large
-  // payloads (200 MB cap, ~270 MB base64). 32 KB per chunk keeps memory
-  // pressure bounded.
-  const chunk = 32 * 1024
-  let binary = ""
-  for (let i = 0; i < bytes.length; i += chunk) {
-    const slice = bytes.subarray(i, Math.min(i + chunk, bytes.length))
-    binary += String.fromCharCode.apply(null, Array.from(slice) as number[])
-  }
-  return typeof btoa !== "undefined"
-    ? btoa(binary)
-    : Buffer.from(binary, "binary").toString("base64")
 }

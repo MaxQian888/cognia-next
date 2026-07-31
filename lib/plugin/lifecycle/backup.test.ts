@@ -39,12 +39,11 @@ describe("PluginBackupManager", () => {
   describe("Backup Creation", () => {
     it("should create a backup", async () => {
       mockInvoke.mockResolvedValueOnce({
-        id: "backup-1",
+        backupId: "plugin-a-backup-1",
         pluginId: "plugin-a",
-        version: "1.0.0",
         createdAt: new Date().toISOString(),
-        reason: "manual",
-        size: 1024,
+        label: "manual",
+        sizeBytes: 1024,
         path: "/backups/backup-1",
       })
 
@@ -53,18 +52,20 @@ describe("PluginBackupManager", () => {
       expect(backup.backup?.pluginId).toBe("plugin-a")
       expect(backup.backup?.version).toBe("1.0.0")
       expect(backup.backup?.reason).toBe("manual")
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_backup_create", {
+        pluginId: "plugin-a",
+        label: "manual",
+      })
     })
 
     it("should include metadata in backup", async () => {
       mockInvoke.mockResolvedValueOnce({
-        id: "backup-1",
+        backupId: "plugin-a-backup-1",
         pluginId: "plugin-a",
-        version: "1.0.0",
         createdAt: new Date().toISOString(),
-        reason: "update",
-        size: 1024,
+        label: "pre-update",
+        sizeBytes: 1024,
         path: "/backups/backup-1",
-        metadata: { previousVersion: "0.9.0" },
       })
 
       const backup = await manager.createBackup("plugin-a", {
@@ -117,6 +118,28 @@ describe("PluginBackupManager", () => {
       expect(result.success).toBe(false)
       expect(result.error).toBe("No backups found for plugin")
     })
+
+    it("restores a host backup with the current plugin and backup identifiers", async () => {
+      mockInvoke
+        .mockResolvedValueOnce({
+          backupId: "plugin-a-20260728T120000",
+          pluginId: "plugin-a",
+          createdAt: new Date().toISOString(),
+          label: "pre-update",
+          sizeBytes: 1024,
+          path: "/backups/plugin-a-20260728T120000.tar.gz",
+        })
+        .mockResolvedValueOnce(undefined)
+
+      const created = await manager.createBackup("plugin-a", { reason: "pre-update" })
+      const restored = await manager.restore(created.backup!.id)
+
+      expect(restored.success).toBe(true)
+      expect(mockInvoke).toHaveBeenLastCalledWith("plugin_backup_restore", {
+        pluginId: "plugin-a",
+        backupId: "plugin-a-20260728T120000",
+      })
+    })
   })
 
   describe("Backup Deletion", () => {
@@ -126,6 +149,26 @@ describe("PluginBackupManager", () => {
 
       // Returns false when backup not found
       expect(result).toBe(false)
+    })
+
+    it("deletes a host backup with a confined plugin-scoped identifier", async () => {
+      mockInvoke
+        .mockResolvedValueOnce({
+          backupId: "plugin-a-20260728T120000",
+          pluginId: "plugin-a",
+          createdAt: new Date().toISOString(),
+          label: "manual",
+          sizeBytes: 1024,
+          path: "/backups/plugin-a-20260728T120000.tar.gz",
+        })
+        .mockResolvedValueOnce(undefined)
+      const created = await manager.createBackup("plugin-a")
+
+      await expect(manager.deleteBackup(created.backup!.id)).resolves.toBe(true)
+      expect(mockInvoke).toHaveBeenLastCalledWith("plugin_backup_delete", {
+        pluginId: "plugin-a",
+        backupId: "plugin-a-20260728T120000",
+      })
     })
 
     it("should delete all backups for a plugin", async () => {

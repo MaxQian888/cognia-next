@@ -3,7 +3,7 @@
  */
 
 import { createRef } from "react"
-import { render, act } from "@testing-library/react"
+import { render, act, fireEvent, screen, waitFor } from "@testing-library/react"
 
 // Mock the heavy xterm.js modules so the test doesn't need a real GPU /
 // canvas. Each constructor returns a stub with the methods the
@@ -12,18 +12,43 @@ const mockTermInstance: {
   loadAddon: jest.Mock
   open: jest.Mock
   write: jest.Mock
+  writeln: jest.Mock
   onData: jest.Mock
   onSelectionChange: jest.Mock
+  onBell?: jest.Mock
   attachCustomKeyEventHandler: jest.Mock
   getSelection: jest.Mock
   paste: jest.Mock
   clear: jest.Mock
+  focus: jest.Mock
+  blur: jest.Mock
   registerMarker?: jest.Mock
   registerDecoration?: jest.Mock
   registerLinkProvider?: jest.Mock
   scrollToLine?: jest.Mock
+  clearTextureAtlas?: jest.Mock
   buffer?: { active: { viewportY: number; getLine?: (n: number) => unknown } }
-  options: { fontFamily: string; fontSize: number; scrollback: number; theme?: unknown }
+  options: {
+    fontFamily: string
+    fontSize: number
+    scrollback: number
+    theme?: unknown
+    fontWeight?: string
+    fontWeightBold?: string
+    lineHeight?: number
+    letterSpacing?: number
+    scrollSensitivity?: number
+    fastScrollSensitivity?: number
+    minimumContrastRatio?: number
+    cursorStyle?: string
+    cursorBlink?: boolean
+    cursorWidth?: number
+    cursorInactiveStyle?: string
+    customGlyphs?: boolean
+    rescaleOverlappingGlyphs?: boolean
+    drawBoldTextInBrightColors?: boolean
+    smoothScrollDuration?: number
+  }
   unicode: { activeVersion: string }
   rows: number
   cols: number
@@ -32,14 +57,18 @@ const mockTermInstance: {
   loadAddon: jest.fn(),
   open: jest.fn(),
   write: jest.fn(),
+  writeln: jest.fn(),
   onData: jest.fn(() => ({ dispose: jest.fn() })),
   onSelectionChange: jest.fn(() => ({ dispose: jest.fn() })),
   attachCustomKeyEventHandler: jest.fn(),
   getSelection: jest.fn(() => ""),
   paste: jest.fn(),
   clear: jest.fn(),
+  focus: jest.fn(),
+  blur: jest.fn(),
   registerMarker: jest.fn(() => ({})),
   registerDecoration: jest.fn(),
+  clearTextureAtlas: jest.fn(),
   options: { fontFamily: "Menlo", fontSize: 13, scrollback: 10000 },
   unicode: { activeVersion: "6" },
   rows: 24,
@@ -53,6 +82,18 @@ const mockSearchInstance = {
   clearDecorations: jest.fn(),
   dispose: jest.fn(),
 }
+let mockWebglContextLossHandler: (() => void) | null = null
+const mockWebglDispose = jest.fn()
+const mockWebglContextLossDispose = jest.fn()
+const mockCanvasDispose = jest.fn()
+const mockWebglAddon = {
+  dispose: mockWebglDispose,
+  onContextLoss: jest.fn((handler: () => void) => {
+    mockWebglContextLossHandler = handler
+    return { dispose: mockWebglContextLossDispose }
+  }),
+}
+const mockCanvasAddon = { dispose: mockCanvasDispose }
 
 jest.mock("@xterm/xterm", () => ({
   Terminal: jest.fn(() => mockTermInstance),
@@ -70,10 +111,10 @@ jest.mock("@xterm/addon-search", () => ({
   SearchAddon: jest.fn(() => mockSearchInstance),
 }))
 jest.mock("@xterm/addon-webgl", () => ({
-  WebglAddon: jest.fn(() => ({ dispose: jest.fn() })),
+  WebglAddon: jest.fn(() => mockWebglAddon),
 }))
 jest.mock("@xterm/addon-canvas", () => ({
-  CanvasAddon: jest.fn(() => ({ dispose: jest.fn() })),
+  CanvasAddon: jest.fn(() => mockCanvasAddon),
 }))
 const mockLigaturesAddon = jest.fn(() => ({ dispose: jest.fn() }))
 jest.mock("@xterm/addon-ligatures", () => ({
@@ -112,10 +153,13 @@ const sessionRegistry: {
     onData: jest.Mock
     onIntegration: jest.Mock
     onExit: jest.Mock
+    onControlState: jest.Mock
+    onReplayGap: jest.Mock
     write: jest.Mock
     resize: jest.Mock
     kill: jest.Mock
-    info: { id: string }
+    takeControl: jest.Mock
+    info: { id: string; sandboxed?: boolean }
   } | null
 } = { current: null }
 
@@ -129,18 +173,34 @@ jest.mock("@/lib/terminal/session-registry", () => ({
 // prompt-reset).
 const mockAutocomplete: {
   enabled: boolean
+  popupEnabled: boolean
   ghost: string
-  suggestion: { source: "history" | "ai" | "plugin" } | null
+  ghostSuggestion: { source: "history" | "ai" | "plugin" | "path" | "exe" | "spec" } | null
+  listOpen: boolean
+  candidates: unknown[]
+  selectedIndex: number
   feed: jest.Mock
   accept: jest.Mock
+  acceptSelected: jest.Mock
+  openList: jest.Mock
+  closeList: jest.Mock
+  moveSelection: jest.Mock
   dismiss: jest.Mock
   reset: jest.Mock
 } = {
   enabled: false,
+  popupEnabled: false,
   ghost: "",
-  suggestion: null,
+  ghostSuggestion: null,
+  listOpen: false,
+  candidates: [],
+  selectedIndex: 0,
   feed: jest.fn(),
   accept: jest.fn(() => null),
+  acceptSelected: jest.fn(() => null),
+  openList: jest.fn(),
+  closeList: jest.fn(),
+  moveSelection: jest.fn(),
   dismiss: jest.fn(),
   reset: jest.fn(),
 }
@@ -158,9 +218,12 @@ function makeFakeSession() {
     onData: jest.fn(() => () => undefined),
     onIntegration: jest.fn(() => () => undefined),
     onExit: jest.fn(() => () => undefined),
+    onControlState: jest.fn(() => () => undefined),
+    onReplayGap: jest.fn(() => () => undefined),
     write: jest.fn(async () => undefined),
     resize: jest.fn(async () => undefined),
     kill: jest.fn(async () => undefined),
+    takeControl: jest.fn(async () => undefined),
   }
 }
 
@@ -177,8 +240,10 @@ beforeEach(() => {
   mockTermInstance.loadAddon = jest.fn()
   mockTermInstance.open = jest.fn()
   mockTermInstance.write = jest.fn()
+  mockTermInstance.writeln = jest.fn()
   mockTermInstance.onData = jest.fn(() => ({ dispose: jest.fn() }))
   mockTermInstance.onSelectionChange = jest.fn(() => ({ dispose: jest.fn() }))
+  mockTermInstance.onBell = jest.fn(() => ({ dispose: jest.fn() }))
   mockTermInstance.attachCustomKeyEventHandler = jest.fn()
   mockTermInstance.getSelection = jest.fn(() => "")
   mockTermInstance.paste = jest.fn()
@@ -187,6 +252,7 @@ beforeEach(() => {
   mockTermInstance.registerDecoration = jest.fn(() => ({ onRender: jest.fn(), dispose: jest.fn() }))
   mockTermInstance.registerLinkProvider = jest.fn(() => ({ dispose: jest.fn() }))
   mockTermInstance.scrollToLine = jest.fn()
+  mockTermInstance.clearTextureAtlas = jest.fn()
   mockTermInstance.buffer = { active: { viewportY: 0 } }
   mockTermInstance.dispose = jest.fn()
   useFileViewerStore.setState({ open: false, path: null, line: null, column: null })
@@ -194,19 +260,41 @@ beforeEach(() => {
   mockTermInstance.rows = 24
   mockTermInstance.cols = 80
   mockFit.mockReset()
+  // Deterministic CSS Font Loading API stub. A never-resolving load()/ready
+  // keeps the terminal's post-open "rebuild atlas once the font loads" path
+  // (fire-and-forget) from spontaneously firing a refit/clearTextureAtlas
+  // mid-test and polluting the `mockFit`/atlas assertions. The synchronous
+  // live-settings path still exercises clearTextureAtlas on a font change.
+  Object.defineProperty(document, "fonts", {
+    configurable: true,
+    value: { load: jest.fn(() => new Promise(() => {})), ready: new Promise(() => {}) },
+  })
   mockSearchInstance.findNext.mockReset().mockReturnValue(true)
   mockSearchInstance.findPrevious.mockReset().mockReturnValue(true)
   mockSearchInstance.clearDecorations.mockReset()
   mockSearchInstance.dispose.mockReset()
+  mockWebglContextLossHandler = null
+  mockWebglDispose.mockReset()
+  mockWebglContextLossDispose.mockReset()
+  mockCanvasDispose.mockReset()
+  mockWebglAddon.onContextLoss.mockClear()
   mockTerminalSettings = {}
   mockLigaturesAddon.mockClear()
   ;(MockTerminal as unknown as jest.Mock).mockClear()
   sessionRegistry.current = makeFakeSession()
   mockAutocomplete.enabled = false
+  mockAutocomplete.popupEnabled = false
   mockAutocomplete.ghost = ""
-  mockAutocomplete.suggestion = null
+  mockAutocomplete.ghostSuggestion = null
+  mockAutocomplete.listOpen = false
+  mockAutocomplete.candidates = []
+  mockAutocomplete.selectedIndex = 0
   mockAutocomplete.feed.mockReset()
   mockAutocomplete.accept.mockReset().mockReturnValue(null)
+  mockAutocomplete.acceptSelected.mockReset().mockReturnValue(null)
+  mockAutocomplete.openList.mockReset()
+  mockAutocomplete.closeList.mockReset()
+  mockAutocomplete.moveSelection.mockReset()
   mockAutocomplete.dismiss.mockReset()
   mockAutocomplete.reset.mockReset()
 })
@@ -233,6 +321,17 @@ describe("TerminalInstance", () => {
     expect(mockTermInstance.loadAddon).toHaveBeenCalledTimes(5)
   })
 
+  it("falls back to Canvas when the WebGL context is lost", async () => {
+    render(<TerminalInstance sessionId="s-1" />)
+    await flushAsync()
+    expect(mockWebglContextLossHandler).not.toBeNull()
+    act(() => {
+      mockWebglContextLossHandler?.()
+    })
+    expect(mockWebglDispose).toHaveBeenCalled()
+    expect(mockTermInstance.loadAddon).toHaveBeenLastCalledWith(mockCanvasAddon)
+  })
+
   it("wires session.onData to the backpressure→term.write pipeline", async () => {
     render(<TerminalInstance sessionId="s-1" />)
     await flushAsync()
@@ -257,6 +356,49 @@ describe("TerminalInstance", () => {
     await flushAsync()
     captured.cb?.("ls\n")
     expect(sessionRegistry.current!.write).toHaveBeenCalledWith("ls\n")
+  })
+
+  describe("terminal bell", () => {
+    function captureBell() {
+      const captured: { cb: (() => void) | null } = { cb: null }
+      mockTermInstance.onBell = jest.fn((cb: () => void) => {
+        captured.cb = cb
+        return { dispose: jest.fn() }
+      })
+      return captured
+    }
+
+    it("flashes the container on BEL when the style is visual", async () => {
+      mockTerminalSettings = { bell: "visual" }
+      const captured = captureBell()
+      const { container } = render(<TerminalInstance sessionId="s-1" />)
+      await flushAsync()
+      const div = container.querySelector('[data-testid="terminal-instance"]') as HTMLElement
+      expect(div.style.boxShadow).toBe("")
+      act(() => captured.cb?.())
+      expect(div.style.boxShadow).toContain("inset")
+    })
+
+    it("ignores BEL when the style is none (default)", async () => {
+      const captured = captureBell()
+      const { container } = render(<TerminalInstance sessionId="s-1" />)
+      await flushAsync()
+      const div = container.querySelector('[data-testid="terminal-instance"]') as HTMLElement
+      act(() => captured.cb?.())
+      expect(div.style.boxShadow).toBe("")
+    })
+
+    it("does not throw for sound styles when AudioContext is unavailable", async () => {
+      mockTerminalSettings = { bell: "both" }
+      const captured = captureBell()
+      const { container } = render(<TerminalInstance sessionId="s-1" />)
+      await flushAsync()
+      const div = container.querySelector('[data-testid="terminal-instance"]') as HTMLElement
+      // jsdom has no AudioContext — the sound half must degrade silently
+      // while the visual half still fires ("both").
+      expect(() => act(() => captured.cb?.())).not.toThrow()
+      expect(div.style.boxShadow).toContain("inset")
+    })
   })
 
   it("disposes the Terminal on unmount", async () => {
@@ -299,6 +441,40 @@ describe("TerminalInstance", () => {
     await flushAsync()
     ref.current!.clearScreen()
     expect(mockTermInstance.clear).toHaveBeenCalled()
+  })
+
+  it("imperative handle supports touch input and software-keyboard control", async () => {
+    const ref = createRef<import("./terminal-instance").TerminalInstanceHandle | null>()
+    render(<TerminalInstance ref={ref} sessionId="s-1" />)
+    await waitFor(() => expect(ref.current).not.toBeNull())
+
+    await act(async () => ref.current!.sendInput("\u001b[A"))
+    expect(sessionRegistry.current?.write).toHaveBeenCalledWith("\u001b[A")
+    ref.current!.focusKeyboard()
+    ref.current!.hideKeyboard()
+    expect(mockTermInstance.focus).toHaveBeenCalled()
+    expect(mockTermInstance.blur).toHaveBeenCalled()
+  })
+
+  it("surfaces read-only takeover and replay truncation states", async () => {
+    render(<TerminalInstance sessionId="s-1" />)
+    await flushAsync()
+    const session = sessionRegistry.current!
+    const controlListener = session.onControlState.mock.calls[0]?.[0] as (state: unknown) => void
+    const gapListener = session.onReplayGap.mock.calls[0]?.[0] as (gap: unknown) => void
+    act(() => {
+      controlListener({ role: "viewer", controllerId: "phone-2", reason: "takeover" })
+      gapListener({ requestedAfter: 2, firstAvailable: 8, lastAvailable: 20 })
+    })
+    expect(screen.getByTestId("terminal-read-only-state")).toBeInTheDocument()
+    expect(screen.getByTestId("terminal-replay-gap-state")).toBeInTheDocument()
+    expect(mockTermInstance.writeln).toHaveBeenCalledWith(
+      expect.stringContaining("Earlier terminal output is unavailable")
+    )
+    const confirm = jest.spyOn(window, "confirm").mockReturnValueOnce(true)
+    fireEvent.click(screen.getByText("Take control"))
+    expect(session.takeControl).toHaveBeenCalled()
+    confirm.mockRestore()
   })
 
   it("attaches a custom key event handler for clipboard shortcuts", async () => {
@@ -374,6 +550,73 @@ describe("TerminalInstance", () => {
     expect(opts.theme.background).toBe("#282a36")
   })
 
+  it("auto scheme follows the app --background/--foreground CSS tokens", async () => {
+    const realGCS = window.getComputedStyle.bind(window)
+    const spy = jest.spyOn(window, "getComputedStyle").mockImplementation(((
+      el: Element,
+      pseudo?: string | null
+    ) => {
+      // The theme probe carries an inline `color: var(--…)`; the browser would
+      // resolve it to rgb — emulate that here.
+      const inline = (el as HTMLElement).style?.color
+      if (inline === "var(--background)") return { color: "rgb(18, 18, 18)" } as CSSStyleDeclaration
+      if (inline === "var(--foreground)")
+        return { color: "rgb(230, 230, 230)" } as CSSStyleDeclaration
+      return realGCS(el, pseudo ?? undefined)
+    }) as typeof window.getComputedStyle)
+    render(<TerminalInstance sessionId="s-1" />)
+    await flushAsync()
+    const opts = (MockTerminal as unknown as jest.Mock).mock.calls.at(-1)?.[0] as {
+      theme: { background: string; foreground: string; cursor: string }
+    }
+    expect(opts.theme.background).toBe("rgb(18, 18, 18)")
+    expect(opts.theme.foreground).toBe("rgb(230, 230, 230)")
+    expect(opts.theme.cursor).toBe("rgb(230, 230, 230)")
+    spy.mockRestore()
+  })
+
+  it("auto scheme follows the app --accent for the selection highlight", async () => {
+    const realGCS = window.getComputedStyle.bind(window)
+    const spy = jest.spyOn(window, "getComputedStyle").mockImplementation(((
+      el: Element,
+      pseudo?: string | null
+    ) => {
+      const inline = (el as HTMLElement).style?.color
+      if (inline === "var(--background)") return { color: "rgb(18, 18, 18)" } as CSSStyleDeclaration
+      if (inline === "var(--foreground)")
+        return { color: "rgb(230, 230, 230)" } as CSSStyleDeclaration
+      if (inline === "var(--accent)") return { color: "rgb(124, 58, 237)" } as CSSStyleDeclaration
+      return realGCS(el, pseudo ?? undefined)
+    }) as typeof window.getComputedStyle)
+    render(<TerminalInstance sessionId="s-1" />)
+    await flushAsync()
+    const opts = (MockTerminal as unknown as jest.Mock).mock.calls.at(-1)?.[0] as {
+      theme: { selectionBackground: string }
+    }
+    expect(opts.theme.selectionBackground).toBe("rgba(124, 58, 237, 0.35)")
+    spy.mockRestore()
+  })
+
+  it("does not override a named scheme even when app tokens resolve", async () => {
+    mockTerminalSettings = { colorScheme: "dracula" }
+    const realGCS = window.getComputedStyle.bind(window)
+    const spy = jest.spyOn(window, "getComputedStyle").mockImplementation(((
+      el: Element,
+      pseudo?: string | null
+    ) => {
+      const inline = (el as HTMLElement).style?.color
+      if (inline?.startsWith("var(")) return { color: "rgb(18, 18, 18)" } as CSSStyleDeclaration
+      return realGCS(el, pseudo ?? undefined)
+    }) as typeof window.getComputedStyle)
+    render(<TerminalInstance sessionId="s-1" />)
+    await flushAsync()
+    const opts = (MockTerminal as unknown as jest.Mock).mock.calls.at(-1)?.[0] as {
+      theme: { background: string }
+    }
+    expect(opts.theme.background).toBe("#282a36")
+    spy.mockRestore()
+  })
+
   it("applies cursorStyle from settings", async () => {
     mockTerminalSettings = { cursorStyle: "bar", cursorBlink: false }
     render(<TerminalInstance sessionId="s-1" />)
@@ -386,12 +629,248 @@ describe("TerminalInstance", () => {
     expect(opts.cursorBlink).toBe(false)
   })
 
+  it("passes cursor width and inactive style to xterm", async () => {
+    mockTerminalSettings = { cursorWidth: 3, cursorInactiveStyle: "none" }
+    render(<TerminalInstance sessionId="s-1" />)
+    await flushAsync()
+    const opts = (MockTerminal as unknown as jest.Mock).mock.calls.at(-1)?.[0] as {
+      cursorWidth?: number
+      cursorInactiveStyle?: string
+    }
+    expect(opts.cursorWidth).toBe(3)
+    expect(opts.cursorInactiveStyle).toBe("none")
+  })
+
+  it("constructs the Terminal with font-weight, line-height, spacing and contrast", async () => {
+    mockTerminalSettings = {
+      fontWeight: "300",
+      fontWeightBold: "700",
+      lineHeight: 1.4,
+      letterSpacing: 1,
+      scrollSensitivity: 3,
+      minimumContrastRatio: 7,
+    }
+    render(<TerminalInstance sessionId="s-1" />)
+    await flushAsync()
+    const opts = (MockTerminal as unknown as jest.Mock).mock.calls.at(-1)?.[0] as {
+      fontWeight: string
+      fontWeightBold: string
+      lineHeight: number
+      letterSpacing: number
+      scrollSensitivity: number
+      fastScrollSensitivity: number
+      minimumContrastRatio: number
+    }
+    expect(opts.fontWeight).toBe("300")
+    expect(opts.fontWeightBold).toBe("700")
+    expect(opts.lineHeight).toBe(1.4)
+    expect(opts.letterSpacing).toBe(1)
+    expect(opts.scrollSensitivity).toBe(3)
+    expect(opts.fastScrollSensitivity).toBe(15) // 5× the base sensitivity
+    expect(opts.minimumContrastRatio).toBe(7)
+  })
+
+  it("passes the custom glyph preference to xterm", async () => {
+    mockTerminalSettings = { customGlyphs: false }
+    render(<TerminalInstance sessionId="s-1" />)
+    await flushAsync()
+    const opts = (MockTerminal as unknown as jest.Mock).mock.calls.at(-1)?.[0] as {
+      customGlyphs?: boolean
+    }
+    expect(opts.customGlyphs).toBe(false)
+  })
+
+  it("passes the overlapping glyph rescale preference to xterm", async () => {
+    mockTerminalSettings = { rescaleOverlappingGlyphs: false }
+    render(<TerminalInstance sessionId="s-1" />)
+    await flushAsync()
+    const opts = (MockTerminal as unknown as jest.Mock).mock.calls.at(-1)?.[0] as {
+      rescaleOverlappingGlyphs?: boolean
+    }
+    expect(opts.rescaleOverlappingGlyphs).toBe(false)
+  })
+
+  it("passes the bold bright-color preference to xterm", async () => {
+    mockTerminalSettings = { drawBoldTextInBrightColors: false }
+    render(<TerminalInstance sessionId="s-1" />)
+    await flushAsync()
+    const opts = (MockTerminal as unknown as jest.Mock).mock.calls.at(-1)?.[0] as {
+      drawBoldTextInBrightColors?: boolean
+    }
+    expect(opts.drawBoldTextInBrightColors).toBe(false)
+  })
+
+  it("maps smooth scrolling to VS Code's 125 ms xterm duration", async () => {
+    mockTerminalSettings = { smoothScrolling: true }
+    render(<TerminalInstance sessionId="s-1" />)
+    await flushAsync()
+    const opts = (MockTerminal as unknown as jest.Mock).mock.calls.at(-1)?.[0] as {
+      smoothScrollDuration?: number
+    }
+    expect(opts.smoothScrollDuration).toBe(125)
+  })
+
+  it("re-fits when the line height changes (cell metrics shift)", async () => {
+    // Explicit font props match the stub so only the line-height change registers.
+    const { rerender } = render(
+      <TerminalInstance sessionId="s-1" fontFamily="Menlo" fontSize={13} />
+    )
+    await flushAsync()
+    // Mirror the constructor-committed metric defaults onto the stub.
+    Object.assign(mockTermInstance.options, {
+      fontFamily: "Menlo",
+      fontSize: 13,
+      fontWeight: "normal",
+      fontWeightBold: "bold",
+      lineHeight: 1,
+      letterSpacing: 0,
+      scrollSensitivity: 1,
+      minimumContrastRatio: 1,
+    })
+    mockFit.mockClear()
+    mockTerminalSettings = { lineHeight: 1.5 }
+    rerender(<TerminalInstance sessionId="s-1" fontFamily="Menlo" fontSize={13} />)
+    await flushAsync()
+    expect(mockTermInstance.options.lineHeight).toBe(1.5)
+    expect(mockFit).toHaveBeenCalled()
+  })
+
+  it("live-updates minimum contrast without a re-fit", async () => {
+    const { rerender } = render(
+      <TerminalInstance sessionId="s-1" fontFamily="Menlo" fontSize={13} />
+    )
+    await flushAsync()
+    Object.assign(mockTermInstance.options, {
+      fontFamily: "Menlo",
+      fontSize: 13,
+      fontWeight: "normal",
+      fontWeightBold: "bold",
+      lineHeight: 1,
+      letterSpacing: 0,
+      scrollSensitivity: 1,
+      minimumContrastRatio: 1,
+    })
+    mockFit.mockClear()
+    mockTerminalSettings = { minimumContrastRatio: 7 }
+    rerender(<TerminalInstance sessionId="s-1" fontFamily="Menlo" fontSize={13} />)
+    await flushAsync()
+    expect(mockTermInstance.options.minimumContrastRatio).toBe(7)
+    expect(mockFit).not.toHaveBeenCalled()
+  })
+
+  it("live-updates non-metric rendering options without a re-fit", async () => {
+    const { rerender } = render(
+      <TerminalInstance sessionId="s-1" fontFamily="Menlo" fontSize={13} />
+    )
+    await flushAsync()
+    Object.assign(mockTermInstance.options, {
+      fontFamily: "Menlo",
+      fontSize: 13,
+      fontWeight: "normal",
+      fontWeightBold: "bold",
+      lineHeight: 1,
+      letterSpacing: 0,
+      scrollSensitivity: 1,
+      fastScrollSensitivity: 5,
+      minimumContrastRatio: 1,
+      cursorStyle: "block",
+      cursorBlink: true,
+      cursorWidth: 1,
+      cursorInactiveStyle: "outline",
+      customGlyphs: true,
+      rescaleOverlappingGlyphs: true,
+      drawBoldTextInBrightColors: true,
+      smoothScrollDuration: 0,
+    })
+    mockFit.mockClear()
+    mockTerminalSettings = {
+      cursorWidth: 4,
+      cursorInactiveStyle: "none",
+      customGlyphs: false,
+      rescaleOverlappingGlyphs: false,
+      drawBoldTextInBrightColors: false,
+      smoothScrolling: true,
+    }
+    rerender(<TerminalInstance sessionId="s-1" fontFamily="Menlo" fontSize={13} />)
+    await flushAsync()
+    expect(mockTermInstance.options).toEqual(
+      expect.objectContaining({
+        cursorWidth: 4,
+        cursorInactiveStyle: "none",
+        customGlyphs: false,
+        rescaleOverlappingGlyphs: false,
+        drawBoldTextInBrightColors: false,
+        smoothScrollDuration: 125,
+      })
+    )
+    expect(mockFit).not.toHaveBeenCalled()
+  })
+
   it("live-updates term.options.fontSize when prop changes", async () => {
     const { rerender } = render(<TerminalInstance sessionId="s-1" fontSize={13} />)
     await flushAsync()
     rerender(<TerminalInstance sessionId="s-1" fontSize={18} />)
     await flushAsync()
     expect(mockTermInstance.options.fontSize).toBe(18)
+  })
+
+  it("re-fits and resizes the PTY when the font size changes", async () => {
+    mockTermInstance.rows = 30
+    mockTermInstance.cols = 100
+    const { rerender } = render(<TerminalInstance sessionId="s-1" fontSize={13} />)
+    await flushAsync()
+    mockFit.mockClear()
+    sessionRegistry.current!.resize.mockClear()
+    // The larger font yields a coarser cell grid on the next fit.
+    mockFit.mockImplementation(() => {
+      mockTermInstance.rows = 24
+      mockTermInstance.cols = 80
+    })
+    rerender(<TerminalInstance sessionId="s-1" fontSize={18} />)
+    await flushAsync()
+    expect(mockFit).toHaveBeenCalled()
+    expect(sessionRegistry.current!.resize).toHaveBeenCalledWith(24, 80)
+  })
+
+  it("re-fits and rebuilds the glyph atlas when the font family changes", async () => {
+    const { rerender } = render(<TerminalInstance sessionId="s-1" fontFamily="Menlo" />)
+    await flushAsync()
+    mockFit.mockClear()
+    mockTermInstance.clearTextureAtlas!.mockClear()
+    rerender(<TerminalInstance sessionId="s-1" fontFamily="Fira Code" />)
+    await flushAsync()
+    expect(mockTermInstance.options.fontFamily).toBe("Fira Code")
+    expect(mockFit).toHaveBeenCalled()
+    // The accelerated renderer's atlas must be cleared so the new font's cell
+    // metrics take effect — otherwise glyphs render one cell too wide.
+    expect(mockTermInstance.clearTextureAtlas).toHaveBeenCalled()
+  })
+
+  it("does not re-fit when only a non-font setting changes", async () => {
+    const { rerender } = render(
+      <TerminalInstance sessionId="s-1" fontFamily="Menlo" fontSize={13} scrollback={1000} />
+    )
+    await flushAsync()
+    // The mock Terminal ignores its constructor options, so mirror the committed
+    // font + metric options onto the stub the way the real constructor would —
+    // otherwise the next effect run would see a spurious font change.
+    mockTermInstance.options.fontFamily = "Menlo"
+    mockTermInstance.options.fontSize = 13
+    Object.assign(mockTermInstance.options, {
+      fontWeight: "normal",
+      fontWeightBold: "bold",
+      lineHeight: 1,
+      letterSpacing: 0,
+      scrollSensitivity: 1,
+      minimumContrastRatio: 1,
+    })
+    mockFit.mockClear()
+    rerender(
+      <TerminalInstance sessionId="s-1" fontFamily="Menlo" fontSize={13} scrollback={5000} />
+    )
+    await flushAsync()
+    expect(mockTermInstance.options.scrollback).toBe(5000)
+    expect(mockFit).not.toHaveBeenCalled()
   })
 
   type IntegrationCb = (ev: { kind: string; exit_code?: number | null; cwd?: string }) => void
@@ -429,6 +908,46 @@ describe("TerminalInstance", () => {
     })
     expect(created).toHaveLength(2) // muted decoration, then recoloured one
     expect(created[0]!.dispose).toHaveBeenCalled()
+  })
+
+  it("paints a per-row gutter tick, never a full-height bar (1B)", async () => {
+    let cb: IntegrationCb | null = null
+    sessionRegistry.current!.onIntegration = jest.fn((fn: IntegrationCb) => {
+      cb = fn
+      return () => undefined
+    })
+    // Simulate xterm invoking onRender with the decoration element so the
+    // styling runs. Each element starts with the geometry xterm sets inline
+    // (a single cell-row tall); the fix must not stomp `height` to "100%".
+    const painted: Array<Record<string, string>> = []
+    mockTermInstance.registerDecoration = jest.fn(() => ({
+      dispose: jest.fn(),
+      onRender: (fn: (el: { style: Record<string, string> }) => void) => {
+        const el = {
+          style: { top: "34px", height: "17px", width: "8px" } as Record<string, string>,
+        }
+        fn(el)
+        painted.push(el.style)
+      },
+    }))
+    render(<TerminalInstance sessionId="s-1" />)
+    await flushAsync()
+    act(() => {
+      cb!({ kind: "command_start" }) // running → neutral
+      cb!({ kind: "command_end", exit_code: 1 }) // failed → red
+    })
+    expect(painted).toHaveLength(2)
+    // Running marker: neutral colour, and crucially row-height (not 100%).
+    // The "command actions" feature defaults on, so the tick is interactive
+    // (5px, pointer-events auto) — clicking opens the command menu.
+    expect(painted[0]!.backgroundColor).toBe("#a1a1aa")
+    expect(painted[0]!.width).toBe("5px")
+    expect(painted[0]!.pointerEvents).toBe("auto")
+    expect(painted[0]!.height).not.toBe("100%")
+    expect(painted[0]!.height).toBe("17px") // xterm's per-row height is preserved
+    // Recoloured marker after a non-zero exit.
+    expect(painted[1]!.backgroundColor).toBe("#ef4444")
+    expect(painted[1]!.height).not.toBe("100%")
   })
 
   it("jumpToNextCommand scrolls to the next marker below the viewport (1B)", async () => {
@@ -534,7 +1053,7 @@ describe("TerminalInstance", () => {
     it("renders the ghost overlay when there is a suggestion", async () => {
       mockAutocomplete.enabled = true
       mockAutocomplete.ghost = "status"
-      mockAutocomplete.suggestion = { source: "ai" }
+      mockAutocomplete.ghostSuggestion = { source: "ai" }
       const { container } = render(<TerminalInstance sessionId="s-1" />)
       await flushAsync()
       const ghost = container.querySelector('[data-testid="terminal-ghost-text"]')
@@ -564,8 +1083,8 @@ describe("TerminalInstance", () => {
 
     it("accepts on Tab: writes the suffix to the PTY and swallows the key", async () => {
       mockAutocomplete.enabled = true
-      mockAutocomplete.suggestion = { source: "ai" }
-      mockAutocomplete.accept.mockReturnValue("status")
+      mockAutocomplete.ghostSuggestion = { source: "ai" }
+      mockAutocomplete.accept.mockReturnValue({ backspaces: 0, write: "status" })
       const captured = captureKeyHandler()
       render(<TerminalInstance sessionId="s-1" />)
       await flushAsync()
@@ -575,9 +1094,23 @@ describe("TerminalInstance", () => {
       expect(result).toBe(false)
     })
 
+    it("atomically erases a replaced span and writes the insert", async () => {
+      mockAutocomplete.enabled = true
+      mockAutocomplete.ghostSuggestion = { source: "path" }
+      mockAutocomplete.accept.mockReturnValue({ backspaces: 3, write: "Documents/" })
+      const captured = captureKeyHandler()
+      render(<TerminalInstance sessionId="s-1" />)
+      await flushAsync()
+      const result = captured.cb!(key({ key: "Tab" }))
+      const del = String.fromCharCode(0x7f)
+      expect(sessionRegistry.current!.write).toHaveBeenCalledTimes(1)
+      expect(sessionRegistry.current!.write).toHaveBeenCalledWith(`${del.repeat(3)}Documents/`)
+      expect(result).toBe(false)
+    })
+
     it("lets Tab through to the shell when there is no suggestion", async () => {
       mockAutocomplete.enabled = true
-      mockAutocomplete.suggestion = { source: "ai" }
+      mockAutocomplete.ghostSuggestion = { source: "ai" }
       mockAutocomplete.accept.mockReturnValue(null) // not at end / nothing to accept
       const captured = captureKeyHandler()
       render(<TerminalInstance sessionId="s-1" />)
@@ -586,9 +1119,101 @@ describe("TerminalInstance", () => {
       expect(result).toBe(true) // falls through to xterm default
     })
 
+    it("opens the popup on Ctrl+Space when enabled", async () => {
+      mockAutocomplete.enabled = true
+      mockAutocomplete.popupEnabled = true
+      const captured = captureKeyHandler()
+      render(<TerminalInstance sessionId="s-1" />)
+      await flushAsync()
+      const result = captured.cb!(key({ key: " ", code: "Space", ctrlKey: true }))
+      expect(mockAutocomplete.openList).toHaveBeenCalled()
+      expect(result).toBe(false)
+    })
+
+    it("does not open the popup when the popup setting is off", async () => {
+      mockAutocomplete.enabled = true
+      mockAutocomplete.popupEnabled = false
+      const captured = captureKeyHandler()
+      render(<TerminalInstance sessionId="s-1" />)
+      await flushAsync()
+      captured.cb!(key({ key: " ", code: "Space", ctrlKey: true }))
+      expect(mockAutocomplete.openList).not.toHaveBeenCalled()
+    })
+
+    it("routes ArrowUp/ArrowDown/Esc to the popup while open", async () => {
+      mockAutocomplete.enabled = true
+      mockAutocomplete.popupEnabled = true
+      mockAutocomplete.listOpen = true
+      const captured = captureKeyHandler()
+      render(<TerminalInstance sessionId="s-1" />)
+      await flushAsync()
+      expect(captured.cb!(key({ key: "ArrowDown" }))).toBe(false)
+      expect(mockAutocomplete.moveSelection).toHaveBeenCalledWith(1)
+      expect(captured.cb!(key({ key: "ArrowUp" }))).toBe(false)
+      expect(mockAutocomplete.moveSelection).toHaveBeenCalledWith(-1)
+      expect(captured.cb!(key({ key: "Escape" }))).toBe(false)
+      expect(mockAutocomplete.closeList).toHaveBeenCalled()
+    })
+
+    it("accepts the highlighted candidate on Enter while the popup is open", async () => {
+      mockAutocomplete.enabled = true
+      mockAutocomplete.popupEnabled = true
+      mockAutocomplete.listOpen = true
+      mockAutocomplete.acceptSelected.mockReturnValue({ backspaces: 2, write: "src/" })
+      const captured = captureKeyHandler()
+      render(<TerminalInstance sessionId="s-1" />)
+      await flushAsync()
+      const result = captured.cb!(key({ key: "Enter" }))
+      const del = String.fromCharCode(0x7f)
+      expect(sessionRegistry.current!.write).toHaveBeenCalledTimes(1)
+      expect(sessionRegistry.current!.write).toHaveBeenCalledWith(`${del.repeat(2)}src/`)
+      expect(result).toBe(false)
+    })
+
+    it("atomically applies a replacement selected with the pointer", async () => {
+      mockAutocomplete.enabled = true
+      mockAutocomplete.popupEnabled = true
+      mockAutocomplete.listOpen = true
+      mockAutocomplete.candidates = [
+        { text: "cd src/", source: "path", providerId: "builtin:path" },
+      ]
+      mockAutocomplete.acceptSelected.mockReturnValue({ backspaces: 2, write: "src/" })
+      const { getByTestId } = render(<TerminalInstance sessionId="s-1" />)
+      await flushAsync()
+      fireEvent.mouseDown(getByTestId("terminal-completion-candidate-0"))
+      const del = String.fromCharCode(0x7f)
+      expect(sessionRegistry.current!.write).toHaveBeenCalledTimes(1)
+      expect(sessionRegistry.current!.write).toHaveBeenCalledWith(`${del.repeat(2)}src/`)
+    })
+
+    it("opens the popup on a second Tab when candidates exist but no ghost", async () => {
+      mockAutocomplete.enabled = true
+      mockAutocomplete.popupEnabled = true
+      mockAutocomplete.accept.mockReturnValue(null)
+      mockAutocomplete.candidates = [{ text: "cd src/" }]
+      const captured = captureKeyHandler()
+      render(<TerminalInstance sessionId="s-1" />)
+      await flushAsync()
+      const result = captured.cb!(key({ key: "Tab" }))
+      expect(mockAutocomplete.openList).toHaveBeenCalled()
+      expect(result).toBe(false)
+    })
+
+    it("renders the completion popup while the list is open", async () => {
+      mockAutocomplete.enabled = true
+      mockAutocomplete.popupEnabled = true
+      mockAutocomplete.listOpen = true
+      mockAutocomplete.candidates = [
+        { text: "git status", source: "history", providerId: "builtin:history" },
+      ]
+      const { container } = render(<TerminalInstance sessionId="s-1" />)
+      await flushAsync()
+      expect(container.querySelector('[data-testid="terminal-completion-popup"]')).toBeTruthy()
+    })
+
     it("dismisses on Escape when a suggestion is active", async () => {
       mockAutocomplete.enabled = true
-      mockAutocomplete.suggestion = { source: "history" }
+      mockAutocomplete.ghostSuggestion = { source: "history" }
       const captured = captureKeyHandler()
       render(<TerminalInstance sessionId="s-1" />)
       await flushAsync()
@@ -608,5 +1233,20 @@ describe("TerminalInstance", () => {
       captured.cb?.({ kind: "prompt_start" })
       expect(mockAutocomplete.reset).toHaveBeenCalled()
     })
+  })
+})
+
+describe("TerminalInstance stylesheet", () => {
+  // Regression guard: xterm.js relies on its own stylesheet to absolutely
+  // position the viewport, screen, and renderer canvases. If this side-effect
+  // import is dropped, every row collapses into the top-left corner — a layout
+  // bug jsdom can't surface, so we assert the import at the source level.
+  it("imports the xterm stylesheet", () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { readFileSync } = require("node:fs") as typeof import("node:fs")
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { join } = require("node:path") as typeof import("node:path")
+    const source = readFileSync(join(__dirname, "terminal-instance.tsx"), "utf8")
+    expect(source).toMatch(/import\s+["']@xterm\/xterm\/css\/xterm\.css["']/)
   })
 })

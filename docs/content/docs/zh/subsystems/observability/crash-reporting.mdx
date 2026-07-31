@@ -167,7 +167,7 @@ pub fn publish_to_monitor() {
 ```
 
 渲染端（`lib/native/crash-context.ts`）**在跨越边界之前进行脱敏** —— `pushCrashContext` 通过来自
-`lib/twin/ingest/redact.ts` 的 `redactText` 对每个字符串做深度脱敏，这与应用其余部分使用的是同一个 PII 关卡。
+`packages/redact/src/index.ts` 的 `redactText` 对每个字符串做深度脱敏，这与应用其余部分使用的是同一个 PII 关卡。
 
 ## 命令与 UI
 

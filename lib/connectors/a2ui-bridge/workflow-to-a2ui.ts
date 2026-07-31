@@ -179,7 +179,7 @@ export function buildWorkflowRunDeepLink(run: WorkflowRunRow): string {
  * folds `workflowRunEvents` into one of these per stepId and re-renders
  * the card on each update.
  */
-export type CumulativeStepStatus = "running" | "succeeded" | "failed" | "skipped"
+export type CumulativeStepStatus = "pending" | "running" | "succeeded" | "failed" | "skipped"
 
 export interface CumulativeStepEntry {
   stepId: string
@@ -191,6 +191,8 @@ export interface CumulativeStepEntry {
   endedAt?: number
   /** Error message captured from a step_failed event, when present. */
   errorMessage?: string
+  /** User-visible agent narration accumulated for the active step. */
+  commentary?: string
 }
 
 export interface CumulativeStatusState {
@@ -217,8 +219,18 @@ export interface CumulativeStatusState {
 
 const CUMULATIVE_TERMINAL_BODY_MAX = 500
 
+/**
+ * Cap on the *declared* (not-yet-started) tail only — executed steps stay
+ * unbounded, preserving this card's long-standing behavior. Without it a
+ * large workflow would declare every step on the very first dispatch and
+ * blow the platform's per-message block limit (Slack hard-caps 50).
+ */
+const PENDING_DECLARATION_MAX = 20
+
 function statusIcon(status: CumulativeStepStatus): string {
   switch (status) {
+    case "pending":
+      return "◻"
     case "running":
       return "▶"
     case "succeeded":
@@ -242,7 +254,33 @@ function statusLine(entry: CumulativeStepEntry): string {
     entry.status === "failed" && entry.errorMessage
       ? ` — ${truncate(entry.errorMessage, ERROR_MESSAGE_MAX)}`
       : ""
-  return `${icon} ${entry.label}${durationStr}${tail}`
+  const commentary = entry.commentary ? `\n  ↳ ${entry.commentary}` : ""
+  return `${icon} ${entry.label}${durationStr}${tail}${commentary}`
+}
+
+/**
+ * Drop the pending steps past `PENDING_DECLARATION_MAX`, keeping every
+ * non-pending step. Order is preserved, so the surviving pending entries
+ * are the ones due to run soonest and the running step is never hidden.
+ */
+function capPendingTail(steps: CumulativeStepEntry[]): {
+  rendered: CumulativeStepEntry[]
+  hiddenPending: number
+} {
+  const rendered: CumulativeStepEntry[] = []
+  let declaredPending = 0
+  let hiddenPending = 0
+  for (const entry of steps) {
+    if (entry.status === "pending") {
+      declaredPending++
+      if (declaredPending > PENDING_DECLARATION_MAX) {
+        hiddenPending++
+        continue
+      }
+    }
+    rendered.push(entry)
+  }
+  return { rendered, hiddenPending }
 }
 
 /**
@@ -284,12 +322,19 @@ export function buildCumulativeStatusSurface(state: CumulativeStatusState): A2UI
       href: state.deepLink,
     },
   }
+  const { rendered, hiddenPending } = capPendingTail(state.steps)
+  const overflowLine = hiddenPending > 0 ? `… and ${hiddenPending} more pending` : ""
+
   const childIds: string[] = []
-  for (let i = 0; i < state.steps.length; i++) {
-    const entry = state.steps[i]
+  for (let i = 0; i < rendered.length; i++) {
+    const entry = rendered[i]
     const id = `step_${i}`
     components[id] = { component: "Text", text: statusLine(entry) }
     childIds.push(id)
+  }
+  if (overflowLine.length > 0) {
+    components.pendingOverflow = { component: "Text", text: overflowLine }
+    childIds.push("pendingOverflow")
   }
   const truncatedBody =
     state.terminalBody && state.terminalBody.length > 0
@@ -305,7 +350,8 @@ export function buildCumulativeStatusSurface(state: CumulativeStatusState): A2UI
 
   const mirrorLines = [
     `# ${title}`,
-    ...state.steps.map(statusLine),
+    ...rendered.map(statusLine),
+    ...(overflowLine.length > 0 ? [overflowLine] : []),
     ...(truncatedBody.length > 0 ? ["---", truncatedBody] : []),
     `→ ${state.deepLink}`,
   ]

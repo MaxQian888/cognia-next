@@ -1,0 +1,24 @@
+{
+  "cancel": "Cancel",
+  "createSessionFailed": "Couldn't create a new session — please try again.",
+  "derivedTitle": {
+    "fallback": "New chat",
+    "fromUrl": "Share from {hostname}"
+  },
+  "draftSavedToast": "Saved as a draft.",
+  "errorDescription": "We couldn't load your conversations to receive the shared content. Try again, or open Cognia and retry the share.",
+  "errorTitle": "Share failed to open",
+  "inboxDraftCta": "Inbox draft",
+  "intro": "Pick a conversation to send the shared content.",
+  "newSessionCta": "New session",
+  "noConversations": "No conversations available yet.",
+  "noConversationsDescription": "Open a chat first, then come back to share.",
+  "orExistingSession": "or send to an existing chat",
+  "queuedToast": "Queued for delivery.",
+  "receivedText": "Received text",
+  "receivedUrl": "Link",
+  "retry": "Try again",
+  "sendCta": "Send to this chat",
+  "targetSearchPlaceholder": "Search conversations…",
+  "title": "Share via cognia"
+}

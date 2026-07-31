@@ -3,7 +3,12 @@
  */
 
 import { renderHook, act } from "@testing-library/react"
-import { useAppGalleryFilter, CATEGORY_KEYS, CATEGORY_I18N_MAP } from "./use-app-gallery-filter"
+import {
+  filterAndSortApps,
+  useAppGalleryFilter,
+  CATEGORY_KEYS,
+  CATEGORY_I18N_MAP,
+} from "./use-app-gallery-filter"
 import type { A2UIAppInstance } from "@/hooks/a2ui/use-app-builder"
 
 function makeApp(overrides: Partial<A2UIAppInstance>): A2UIAppInstance {
@@ -27,6 +32,7 @@ const apps: A2UIAppInstance[] = [
     description: "fast journaling",
     tags: ["focus"],
     category: "productivity",
+    stats: { uses: 3, views: 0, rating: 0, ratingCount: 0 },
   }),
   makeApp({
     id: "b",
@@ -36,6 +42,7 @@ const apps: A2UIAppInstance[] = [
     lastModified: 200,
     tags: ["habit"],
     category: "productivity",
+    stats: { uses: 9, views: 0, rating: 0, ratingCount: 0 },
   }),
   makeApp({
     id: "c",
@@ -44,6 +51,7 @@ const apps: A2UIAppInstance[] = [
     createdAt: 50,
     lastModified: 500,
     category: "data",
+    stats: { uses: 5, views: 0, rating: 0, ratingCount: 0 },
   }),
 ]
 
@@ -122,6 +130,28 @@ describe("useAppGalleryFilter", () => {
 
     act(() => result.current.setSortField("createdAt"))
     expect(result.current.filteredApps.map((a) => a.id)).toEqual(["c", "a", "b"]) // 50, 100, 200 asc
+  })
+
+  it("shares the pure filter/sort pipeline with hub-specific most-used sorting", () => {
+    expect(
+      filterAndSortApps(apps, {
+        searchQuery: "",
+        categoryFilter: "all",
+        sortField: "uses",
+        sortOrder: "desc",
+        getTemplate,
+      }).map((app) => app.id)
+    ).toEqual(["b", "c", "a"])
+
+    expect(
+      filterAndSortApps(apps, {
+        searchQuery: "journal",
+        categoryFilter: "productivity",
+        sortField: "lastModified",
+        sortOrder: "desc",
+        getTemplate,
+      }).map((app) => app.id)
+    ).toEqual(["a"])
   })
 
   it("toggleSortOrder flips between asc and desc", () => {

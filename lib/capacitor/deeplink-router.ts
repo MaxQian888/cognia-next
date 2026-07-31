@@ -1,7 +1,7 @@
 "use client"
 
 import type { DeeplinkRoute } from "./deeplink"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.shell
 
@@ -70,7 +70,7 @@ export interface NextRouterShape {
 export function makeRouterNavigators(router: NextRouterShape): DeeplinkNavigators {
   return {
     pushSession: (sessionId) => {
-      router.push(`/inbox/c/${encodeURIComponent(sessionId)}`)
+      router.push(`/inbox/c?key=${encodeURIComponent(sessionId)}`)
     },
     openShareTarget: ({ text, url }) => {
       const search = new URLSearchParams()
@@ -83,7 +83,9 @@ export function makeRouterNavigators(router: NextRouterShape): DeeplinkNavigator
       router.push(`/pair?payload=${encodeURIComponent(payload)}`)
     },
     openWorkflowRun: ({ workflowId, runId }) => {
-      router.push(`/workflows/${encodeURIComponent(workflowId)}/runs/${encodeURIComponent(runId)}`)
+      router.push(
+        `/workflows/run?id=${encodeURIComponent(workflowId)}&runId=${encodeURIComponent(runId)}`
+      )
     },
   }
 }

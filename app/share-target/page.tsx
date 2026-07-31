@@ -5,9 +5,10 @@
  *
  * Two paths reach this route:
  *   1. Android `<intent-filter ACTION_SEND>` (`mobile/android/.../AndroidManifest.xml`)
- *      → Capacitor's `App` plugin emits an `appUrlOpen` with a
- *      `cognia://share?text=...&url=...` deeplink that the boot provider
- *      already routes here.
+ *      → `MainActivity.rewriteShareIntent` converts the SEND intent into a
+ *      `cognia://share?text=...&url=...` VIEW deeplink (Capacitor's `App`
+ *      plugin only surfaces data-URI intents), which the boot provider
+ *      already routes here via `appUrlOpen` / `getLaunchUrl`.
  *   2. iOS Share Extension (HITL — see `mobile/IOS_BOOTSTRAP.md`) — same
  *      deeplink shape after the extension hands off.
  *   3. Web Share Target (`navigator.share` reverse) — query params on
@@ -34,7 +35,7 @@ import { useKeyboardInsets } from "@/hooks/ui/use-keyboard-insets"
 import { setDraft } from "@/lib/db/chat-drafts"
 import { createSession, listSessions } from "@/lib/db/sessions"
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 export default function ShareTargetPage() {
   return (

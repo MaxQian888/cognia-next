@@ -71,7 +71,7 @@ import {
   togglePresetFavorite,
   updatePreset,
 } from "@/lib/db/prompt-presets"
-import type { PresetCategory, SystemPromptPreset } from "@/lib/claude/types"
+import type { PresetCategory, SystemPromptPreset } from "@cognia/agent-config-types"
 import { PRESET_CATEGORIES } from "@/lib/presets/categories"
 import {
   applyDomainImport,
@@ -90,7 +90,7 @@ import {
   type PresetEditorOutput,
 } from "./presets/preset-editor"
 import { PresetListToolbar } from "./presets/preset-list-toolbar"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 
 const log = createLogger("settings.presets")
 
@@ -578,7 +578,7 @@ export function PromptPresetsSection({ mobile = false }: PromptPresetsSectionPro
       )}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="outline" size="icon" className="size-8" aria-label="More actions">
+          <Button variant="outline" size="icon" className="size-8" aria-label={t("moreActions")}>
             <MoreVerticalIcon className="size-4" />
           </Button>
         </DropdownMenuTrigger>

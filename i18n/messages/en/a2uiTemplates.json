@@ -1,0 +1,277 @@
+{
+  "runtime": {
+    "ageYears": "{count} years old",
+    "bmiNormal": "Normal",
+    "bmiObese": "Obese",
+    "bmiOverweight": "Overweight",
+    "bmiUnderweight": "Underweight",
+    "habitCompletedToday": "{count} completed today",
+    "habitStreak": "{count} day streak",
+    "itemCount": "{count} items",
+    "nextBirthday": "{count} days until the next birthday",
+    "noteCount": "{count} notes",
+    "taskCompleted": "{count} completed",
+    "taskPending": "{count} pending",
+    "untitledNote": "Untitled"
+  },
+  "templates": {
+    "calculator": {
+      "name": "Calculator",
+      "description": "A basic calculator for arithmetic operations",
+      "tags": ["math", "calculator", "utility"]
+    },
+    "contact-form": {
+      "name": "Contact Form",
+      "description": "A professional contact form with validation",
+      "tags": ["contact", "form", "email", "support"],
+      "components": {
+        "title": { "text": "✉️ Contact Us" },
+        "subtitle": { "text": "We'd love to hear from you!" },
+        "first-name": { "label": "First Name", "placeholder": "John" },
+        "last-name": { "label": "Last Name", "placeholder": "Doe" },
+        "email-input": { "label": "Email Address", "placeholder": "john@example.com" },
+        "subject-select": {
+          "label": "Subject",
+          "placeholder": "Select a topic...",
+          "options": [
+            { "value": "general", "label": "General Inquiry" },
+            { "value": "support", "label": "Technical Support" },
+            { "value": "sales", "label": "Sales Question" },
+            { "value": "feedback", "label": "Feedback" },
+            { "value": "other", "label": "Other" }
+          ]
+        },
+        "message-input": { "label": "Message", "placeholder": "Tell us how we can help..." },
+        "privacy-notice": { "text": "We respect your privacy." },
+        "submit-btn": { "text": "Send Message" }
+      }
+    },
+    "data-dashboard": {
+      "name": "Data Dashboard",
+      "description": "A dashboard displaying charts and statistics",
+      "tags": ["dashboard", "analytics", "charts", "data"],
+      "components": {
+        "title": { "text": "📊 Analytics Dashboard" },
+        "refresh-btn": { "text": "Refresh" },
+        "stat-users": { "title": "Total Users" },
+        "stat-revenue": { "title": "Revenue" },
+        "stat-growth": { "title": "Growth" },
+        "chart-section": { "title": "Monthly Trends" },
+        "table-section": { "title": "Recent Activity" },
+        "activity-table": {
+          "columns": [
+            { "key": "date", "header": "Date", "type": "date" },
+            { "key": "event", "header": "Event" },
+            { "key": "user", "header": "User" },
+            { "key": "value", "header": "Value", "type": "number", "align": "right" }
+          ]
+        }
+      },
+      "dataModel": {
+        "chartData": [
+          { "month": "Jan", "users": 1200, "revenue": 5000 },
+          { "month": "Feb", "users": 1400, "revenue": 6200 },
+          { "month": "Mar", "users": 1800, "revenue": 7800 },
+          { "month": "Apr", "users": 2100, "revenue": 8500 },
+          { "month": "May", "users": 2500, "revenue": 9200 },
+          { "month": "Jun", "users": 2800, "revenue": 10500 }
+        ],
+        "activityData": [
+          { "id": 1, "date": "2024-01-15", "event": "New signup", "user": "John Doe", "value": 1 },
+          { "id": 2, "date": "2024-01-15", "event": "Purchase", "user": "Jane Smith", "value": 99 },
+          { "id": 3, "date": "2024-01-14", "event": "Upgrade", "user": "Bob Wilson", "value": 49 }
+        ]
+      }
+    },
+    "expense-tracker": {
+      "name": "Expense Tracker",
+      "description": "Track your daily expenses and budget",
+      "tags": ["expenses", "money", "budget", "finance", "tracking"],
+      "components": {
+        "header": { "text": "💰 Expense Tracker" },
+        "total-label": { "text": "Total Spent" },
+        "today-label": { "text": "Today" },
+        "desc-input": { "placeholder": "Description...", "label": "What" },
+        "amount-input": { "label": "Amount" },
+        "category-row": {
+          "label": "Category",
+          "options": [
+            { "value": "food", "label": "🍔 Food" },
+            { "value": "transport", "label": "🚗 Transport" },
+            { "value": "shopping", "label": "🛍️ Shopping" },
+            { "value": "entertainment", "label": "🎬 Entertainment" },
+            { "value": "other", "label": "📦 Other" }
+          ]
+        },
+        "add-btn": { "text": "Add Expense" },
+        "expenses-list": { "emptyText": "No expenses recorded" }
+      }
+    },
+    "habit-tracker": {
+      "name": "Habit Tracker",
+      "description": "Track your daily habits and build streaks",
+      "tags": ["habits", "tracking", "daily", "goals", "productivity"],
+      "components": {
+        "header": { "text": "🎯 Habit Tracker" },
+        "habit-input": { "placeholder": "New habit..." },
+        "add-btn": { "text": "Add" },
+        "habits-list": { "emptyText": "No habits yet. Add one above!" }
+      },
+      "dataModel": {
+        "stats": {
+          "streakText": "0 day streak",
+          "todayText": "0 completed today"
+        }
+      }
+    },
+    "notes": {
+      "name": "Quick Notes",
+      "description": "A simple note-taking app with search",
+      "tags": ["notes", "writing", "productivity"],
+      "components": {
+        "header": { "text": "📝 Quick Notes" },
+        "search-row": { "placeholder": "🔍 Search notes..." },
+        "note-title-input": { "placeholder": "Note title", "label": "Title" },
+        "note-content-input": { "placeholder": "Write your note here..." },
+        "save-btn": { "text": "Save Note" }
+      },
+      "dataModel": { "notesCountText": "0 notes" }
+    },
+    "profile-card": {
+      "name": "Profile Card",
+      "description": "Display user profile information",
+      "tags": ["profile", "user", "card", "social"],
+      "components": {
+        "avatar": { "alt": "Avatar" },
+        "followers-label": { "text": "Followers" },
+        "following-label": { "text": "Following" },
+        "posts-label": { "text": "Posts" },
+        "follow-btn": { "text": "Follow" },
+        "message-btn": { "text": "Message" }
+      },
+      "dataModel": {
+        "profile": {
+          "name": "John Doe",
+          "title": "Software Developer",
+          "bio": "Building great products with code.",
+          "location": "San Francisco, CA"
+        }
+      }
+    },
+    "shopping-list": {
+      "name": "Shopping List",
+      "description": "Simple grocery and shopping list manager",
+      "tags": ["shopping", "grocery", "list", "productivity"],
+      "components": {
+        "title": { "text": "🛒 Shopping List" },
+        "clear-btn": { "text": "Clear All" },
+        "item-input": { "placeholder": "Item name..." },
+        "qty-input": { "placeholder": "Qty" },
+        "add-btn": { "text": "Add" },
+        "items-list": { "emptyText": "Your shopping list is empty" }
+      },
+      "dataModel": { "totalText": "0 items" }
+    },
+    "survey-form": {
+      "name": "Survey Form",
+      "description": "A customizable survey or feedback collection form",
+      "tags": ["survey", "feedback", "form", "questionnaire"],
+      "components": {
+        "title": { "text": "📋 Quick Survey" },
+        "description": { "text": "Help us improve by answering a few questions" },
+        "name-field": { "label": "Your Name", "placeholder": "Enter your name" },
+        "email-field": { "label": "Email Address", "placeholder": "your@email.com" },
+        "rating-label": { "text": "How would you rate your experience?" },
+        "feedback-field": {
+          "label": "Additional Feedback",
+          "placeholder": "Tell us more about your experience..."
+        },
+        "clear-btn": { "text": "Clear" },
+        "submit-btn": { "text": "Submit" }
+      },
+      "dataModel": { "form": { "ratingText": "5/10 - Average" } }
+    },
+    "timer": {
+      "name": "Timer",
+      "description": "A countdown timer and stopwatch app",
+      "tags": ["timer", "stopwatch", "countdown", "time"],
+      "components": {
+        "header": { "text": "⏱️ Timer" },
+        "start-btn": { "text": "Start" },
+        "pause-btn": { "text": "Pause" },
+        "reset-btn": { "text": "Reset" },
+        "preset-1": { "text": "1 min" },
+        "preset-5": { "text": "5 min" },
+        "preset-10": { "text": "10 min" },
+        "preset-25": { "text": "25 min" }
+      }
+    },
+    "todo-list": {
+      "name": "Todo List",
+      "description": "A simple task management app with add, complete, and delete functionality",
+      "tags": ["tasks", "productivity", "list"],
+      "components": {
+        "header": { "text": "📝 My Tasks" },
+        "task-input": { "placeholder": "Enter a new task..." },
+        "add-btn": { "text": "Add" },
+        "task-list": { "emptyText": "No tasks yet. Add one above!" }
+      },
+      "dataModel": {
+        "stats": { "completedText": "0 completed", "pendingText": "0 pending" }
+      }
+    },
+    "unit-converter": {
+      "name": "Unit Converter",
+      "description": "Convert between different units of measurement",
+      "tags": ["converter", "units", "utility", "measurement"],
+      "components": {
+        "header": { "text": "🔄 Unit Converter" },
+        "type-select": {
+          "label": "Type",
+          "options": [
+            { "value": "length", "label": "Length" },
+            { "value": "weight", "label": "Weight" },
+            { "value": "temperature", "label": "Temperature" }
+          ]
+        },
+        "input-row": { "label": "Value" },
+        "from-unit": {
+          "label": "From",
+          "options": [
+            { "value": "m", "label": "Meter" },
+            { "value": "cm", "label": "Centimeter" },
+            { "value": "ft", "label": "Feet" }
+          ]
+        },
+        "to-unit": {
+          "label": "To",
+          "options": [
+            { "value": "m", "label": "Meter" },
+            { "value": "cm", "label": "Centimeter" },
+            { "value": "ft", "label": "Feet" }
+          ]
+        },
+        "convert-btn": { "text": "Convert" },
+        "result-label": { "text": "Result" }
+      }
+    },
+    "weather": {
+      "name": "Weather Widget",
+      "description": "Display current weather information",
+      "tags": ["weather", "widget", "utility"],
+      "components": {
+        "humidity-label": { "text": "💧 Humidity" },
+        "wind-label": { "text": "💨 Wind" },
+        "uv-label": { "text": "☀️ UV" }
+      },
+      "dataModel": {
+        "weather": {
+          "location": "San Francisco, CA",
+          "condition": "Partly Cloudy",
+          "wind": "12 mph",
+          "uv": "Moderate"
+        }
+      }
+    }
+  }
+}

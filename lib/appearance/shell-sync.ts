@@ -13,8 +13,9 @@
 
 import { formatHex, parse as parseCulori } from "culori"
 import { parseHex, toHex } from "@/lib/appearance/vscode-theme/color-utils"
-import { resolveActiveThemeColors } from "@/lib/themes"
-import type { ColorThemePreset, CustomTheme } from "@/types/plugin/plugin-extended"
+import { type PluginThemeSnapshot, resolveAppPalette } from "@/lib/appearance/resolve-app-palette"
+import type { A11ySettings } from "@/types/appearance"
+import type { ColorThemePreset, CustomTheme } from "@/types/plugin/plugin"
 
 /** Minimal appearance slice the helper needs. Avoids importing the full
  *  AppSettings shape so the helper stays decoupled from store internals. */
@@ -22,6 +23,15 @@ export interface ShellSyncAppearanceState {
   colorTheme: ColorThemePreset
   activeCustomThemeId: string | null
   customThemes: CustomTheme[]
+  accentColor?: string | null
+  /**
+   * A11y slice. Optional so existing callers keep compiling, but passing it is
+   * what stops a high-contrast or colorblind user from getting a native window
+   * chrome tinted from the *normal* palette while the app itself is repainted.
+   */
+  a11y?: A11ySettings
+  /** Active plugin theme row, when one is painting the app. */
+  pluginTheme?: PluginThemeSnapshot | null
 }
 
 export interface ShellColors {
@@ -76,11 +86,14 @@ export function getShellColors(
   const variant: "light" | "dark" = resolvedTheme === "dark" ? "dark" : "light"
   const fallback = variant === "dark" ? FALLBACK_DARK : FALLBACK_LIGHT
 
-  const resolved = resolveActiveThemeColors({
+  const resolved = resolveAppPalette({
     colorTheme: state.colorTheme,
     resolvedTheme: variant,
     activeCustomThemeId: state.activeCustomThemeId,
     customThemes: state.customThemes,
+    accentColor: state.accentColor,
+    a11y: state.a11y,
+    pluginTheme: state.pluginTheme,
   })
 
   const backgroundHex = toHexOrNull(resolved.colors.background) ?? fallback.backgroundHex

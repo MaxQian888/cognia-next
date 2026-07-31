@@ -11,7 +11,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
+use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 
 /// Role of a process within the app's process tree.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -58,6 +58,23 @@ fn core_count() -> usize {
         .map(|n| n.get())
         .unwrap_or(1)
         .max(1)
+}
+
+/// What each tick asks sysinfo to refresh.
+///
+/// `cmd` is **not** optional here even though it is immutable per PID:
+/// `ProcessRefreshKind::nothing()` leaves it at [`UpdateKind::Never`], which
+/// makes `Process::cmd()` return an empty slice — and [`classify_role`] reads
+/// only the cmdline to spot the sidecar, so with `cmd` off every descendant
+/// silently collapses to [`ProcessRole::Child`] and the `sidecar` role becomes
+/// unreachable in production. `OnlyIfNotSet` fetches argv once per PID, so the
+/// cost is paid on first sight of a process rather than every tick.
+fn refresh_kind() -> ProcessRefreshKind {
+    ProcessRefreshKind::nothing()
+        .with_cpu()
+        .with_memory()
+        .with_disk_usage()
+        .with_cmd(UpdateKind::OnlyIfNotSet)
 }
 
 /// Classify a process given its name/cmdline and whether it is our own PID.
@@ -122,14 +139,8 @@ impl ProcessSampler {
     }
 
     fn refresh(&mut self) {
-        self.sys.refresh_processes_specifics(
-            ProcessesToUpdate::All,
-            true,
-            ProcessRefreshKind::nothing()
-                .with_cpu()
-                .with_memory()
-                .with_disk_usage(),
-        );
+        self.sys
+            .refresh_processes_specifics(ProcessesToUpdate::All, true, refresh_kind());
     }
 
     /// Prime CPU counters before the first real sample so the opening frame
@@ -146,7 +157,11 @@ impl ProcessSampler {
         let Some(current_pid) = self.current_pid else {
             return Vec::new();
         };
-        let secs = if interval_secs > 0.0 { interval_secs } else { 1.0 };
+        let secs = if interval_secs > 0.0 {
+            interval_secs
+        } else {
+            1.0
+        };
         let cores = self.cores.max(1) as f32;
 
         // Build the parent index, then the descendant set of our own PID.
@@ -217,6 +232,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn refresh_kind_requests_the_cmdline() {
+        // Regression guard: with `cmd` left at `Never`, `Process::cmd()` is
+        // always empty and `classify_role` can never return `Sidecar`.
+        assert_ne!(refresh_kind().cmd(), UpdateKind::Never);
+    }
+
+    #[test]
+    fn sampled_processes_expose_a_cmdline() {
+        // End-to-end proof that the refresh kind actually populates `cmd`:
+        // the test process itself must have a non-empty argv.
+        let mut s = ProcessSampler::new();
+        s.prime();
+        let me = sysinfo::get_current_pid().unwrap();
+        let cmd = s.sys.process(me).map(|p| p.cmd().len()).unwrap_or(0);
+        assert!(cmd > 0, "sysinfo must report a cmdline for our own process");
+    }
+
+    #[test]
     fn classify_role_identifies_main() {
         assert_eq!(classify_role(10, 10, "cognia-next", &[]), ProcessRole::Main);
     }
@@ -236,7 +269,10 @@ mod tests {
     #[test]
     fn classify_role_defaults_to_child() {
         let cmd = vec!["cloudflared".to_string(), "tunnel".to_string()];
-        assert_eq!(classify_role(30, 10, "cloudflared", &cmd), ProcessRole::Child);
+        assert_eq!(
+            classify_role(30, 10, "cloudflared", &cmd),
+            ProcessRole::Child
+        );
     }
 
     #[test]

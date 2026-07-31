@@ -18,10 +18,25 @@ import { z } from "zod"
 
 import { registerBuiltInSkill } from "../registry"
 import type { BuiltInSkill } from "../types"
-import { argsToFlags, buildConfirmSurface, runLarkCli } from "./_helpers"
+import { argsToFlags, buildConfirmSurface, larkAdapterIdFromCtx, runLarkCli } from "./_helpers"
 
 const FAMILY = "lark.calendar"
 const PLATFORMS = ["lark"] as const
+
+// Shared, described params (serialized to the model via manifest.ts).
+const calendarIdParam = z
+  .string()
+  .min(1)
+  .describe('Lark calendar id. Use "primary" for the current user\'s own calendar.')
+const eventIdParam = z
+  .string()
+  .min(1)
+  .describe("Event id. Obtain it from lark.calendar.list_events or lark.calendar.agenda_today.")
+const startTimeParam = z.string().describe("Start time in RFC3339, e.g. 2026-07-01T09:00:00+08:00.")
+const endTimeParam = z.string().describe("End time in RFC3339, e.g. 2026-07-01T10:00:00+08:00.")
+const userOpenIdsParam = z
+  .array(z.string())
+  .describe("User open_ids (resolve names → open_id via the lark-contact skill first).")
 
 function mkRead<S extends z.ZodTypeAny>(input: {
   id: string
@@ -49,6 +64,7 @@ function mkRead<S extends z.ZodTypeAny>(input: {
           ...argsToFlags(args as Record<string, unknown>, input.skipFlags),
         ],
         confirmed: ctx.hitlBypass === true,
+        adapterId: larkAdapterIdFromCtx(ctx),
       }),
   }
 }
@@ -86,6 +102,7 @@ function mkWrite<S extends z.ZodTypeAny>(input: {
           ...argsToFlags(args as Record<string, unknown>, input.skipFlags),
         ],
         confirmed: ctx.hitlBypass === true,
+        adapterId: larkAdapterIdFromCtx(ctx),
       }),
     hitlSurface: (args) => {
       const c = input.confirmSummary(args)
@@ -125,10 +142,16 @@ registerBuiltInSkill(
       "zh-CN": "分页列出指定时间范围内的 Lark 日历事件。",
     },
     schema: z.object({
-      calendarId: z.string().min(1).describe("Lark calendar id, e.g. primary"),
-      startTime: z.string().optional().describe("RFC3339 start cutoff"),
-      endTime: z.string().optional().describe("RFC3339 end cutoff"),
-      pageSize: z.number().int().min(1).max(500).optional(),
+      calendarId: calendarIdParam,
+      startTime: z.string().optional().describe("RFC3339 start cutoff (default: now)."),
+      endTime: z.string().optional().describe("RFC3339 end cutoff."),
+      pageSize: z
+        .number()
+        .int()
+        .min(1)
+        .max(500)
+        .optional()
+        .describe("Max events to return (1–500)."),
     }),
     subcommand: ["calendar", "+list-events"],
   })
@@ -144,9 +167,9 @@ registerBuiltInSkill(
       "zh-CN": "查询一组用户在指定时间范围内的忙闲信息。",
     },
     schema: z.object({
-      userIds: z.array(z.string()).min(1),
-      startTime: z.string(),
-      endTime: z.string(),
+      userIds: userOpenIdsParam.min(1),
+      startTime: startTimeParam,
+      endTime: endTimeParam,
     }),
     subcommand: ["calendar", "+freebusy"],
   })
@@ -162,9 +185,14 @@ registerBuiltInSkill(
       "zh-CN": "按名称、容量或位置搜索会议室。",
     },
     schema: z.object({
-      query: z.string().min(1),
-      minCapacity: z.number().int().min(1).optional(),
-      buildingId: z.string().optional(),
+      query: z.string().min(1).describe("Room name or keywords to search for."),
+      minCapacity: z
+        .number()
+        .int()
+        .min(1)
+        .optional()
+        .describe("Only rooms seating at least this many."),
+      buildingId: z.string().optional().describe("Optional building id to scope the search."),
     }),
     subcommand: ["calendar", "+search-rooms"],
   })
@@ -182,13 +210,16 @@ registerBuiltInSkill(
       "zh-CN": "在 Lark 日历中创建新日程，可选邀请参会人和会议室。",
     },
     schema: z.object({
-      calendarId: z.string().min(1),
-      summary: z.string().min(1).describe("Event title"),
-      startTime: z.string().describe("RFC3339 start"),
-      endTime: z.string().describe("RFC3339 end"),
-      attendees: z.array(z.string()).optional(),
-      description: z.string().optional(),
-      roomIds: z.array(z.string()).optional(),
+      calendarId: calendarIdParam,
+      summary: z.string().min(1).describe("Event title."),
+      startTime: startTimeParam,
+      endTime: endTimeParam,
+      attendees: userOpenIdsParam.optional().describe("Optional attendee open_ids to invite."),
+      description: z.string().optional().describe("Optional event description/body."),
+      roomIds: z
+        .array(z.string())
+        .optional()
+        .describe("Optional meeting-room ids (from lark.calendar.search_rooms) to book."),
     }),
     subcommand: ["calendar", "+create-event"],
     confirmTitle: "Create calendar event",
@@ -215,12 +246,12 @@ registerBuiltInSkill(
       "zh-CN": "编辑一个已存在的 Lark 日程。",
     },
     schema: z.object({
-      calendarId: z.string().min(1),
-      eventId: z.string().min(1),
-      summary: z.string().optional(),
-      startTime: z.string().optional(),
-      endTime: z.string().optional(),
-      description: z.string().optional(),
+      calendarId: calendarIdParam,
+      eventId: eventIdParam,
+      summary: z.string().optional().describe("New event title."),
+      startTime: z.string().optional().describe("New start time in RFC3339."),
+      endTime: z.string().optional().describe("New end time in RFC3339."),
+      description: z.string().optional().describe("New event description."),
     }),
     subcommand: ["calendar", "+update-event"],
     confirmTitle: "Update calendar event",
@@ -245,9 +276,9 @@ registerBuiltInSkill(
       "zh-CN": "对 Lark 日程邀请进行接受、拒绝或暂定回复。",
     },
     schema: z.object({
-      calendarId: z.string().min(1),
-      eventId: z.string().min(1),
-      response: z.enum(["accept", "decline", "tentative"]),
+      calendarId: calendarIdParam,
+      eventId: eventIdParam,
+      response: z.enum(["accept", "decline", "tentative"]).describe("Your RSVP response."),
     }),
     subcommand: ["calendar", "+rsvp"],
     confirmTitle: "Respond to invitation",
@@ -267,9 +298,9 @@ registerBuiltInSkill(
       "zh-CN": "为已有日程预定会议室。",
     },
     schema: z.object({
-      calendarId: z.string().min(1),
-      eventId: z.string().min(1),
-      roomId: z.string().min(1),
+      calendarId: calendarIdParam,
+      eventId: eventIdParam,
+      roomId: z.string().min(1).describe("Meeting-room id from lark.calendar.search_rooms."),
     }),
     subcommand: ["calendar", "+book-room"],
     confirmTitle: "Book meeting room",
@@ -291,9 +322,12 @@ registerBuiltInSkill(
       "zh-CN": "永久删除 Lark 日程，无法撤销。",
     },
     schema: z.object({
-      calendarId: z.string().min(1),
-      eventId: z.string().min(1),
-      notifyAttendees: z.boolean().optional(),
+      calendarId: calendarIdParam,
+      eventId: eventIdParam,
+      notifyAttendees: z
+        .boolean()
+        .optional()
+        .describe("Notify attendees of the cancellation (default false)."),
     }),
     subcommand: ["calendar", "+delete-event"],
     confirmTitle: "Delete calendar event",

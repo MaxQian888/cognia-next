@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen, fireEvent } from "@testing-library/react"
+import { act, render, screen, fireEvent } from "@testing-library/react"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -39,18 +39,45 @@ jest.mock("./panel-version-history", () => ({
   PanelVersionHistory: () => <div data-testid="history" />,
 }))
 
-jest.mock("./panel-designer-wrapper", () => ({
-  ArtifactDesignerWrapper: () => <div data-testid="designer" />,
+// Viewport control: drive panelMode (desktop/mobile) through useMediaQuery.
+const mobileViewportRef = { current: false }
+jest.mock("@/hooks/ui", () => {
+  const actual = jest.requireActual("@/hooks/ui")
+  return {
+    ...actual,
+    useMediaQuery: (query: string) =>
+      query.includes("max-width: 639px") ? mobileViewportRef.current : false,
+  }
+})
+
+// CM6 needs DOM-measure shims in jsdom — stub the light editor with the same
+// value/onChange contract.
+jest.mock("@/components/editor/light-code-editor", () => ({
+  LightCodeEditor: ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
+    <textarea
+      data-testid="light-code-editor"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  ),
 }))
 
 import { ArtifactPanel } from "./artifact-panel"
 import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
+import { useChatStore } from "@/stores/chat"
 
 beforeEach(() => {
   localStorage.clear()
+  mobileViewportRef.current = false
+  // Tabs and the active artifact are bucketed per conversation, so the panel
+  // only resolves one once a conversation is on screen.
+  useChatStore.setState({ activeSessionId: "s" })
+  useArtifactDockLayoutStore.getState().resetLayout()
+  useArtifactDockLayoutStore.setState({ mobileSheetOpen: true })
   useArtifactStore.setState({
     artifacts: {},
-    activeArtifactId: null,
+    activeArtifactIdBySession: {},
     artifactVersions: {},
     artifactWorkspace: {
       scope: "session",
@@ -63,8 +90,6 @@ beforeEach(() => {
     },
     canvasDocuments: {},
     activeCanvasId: null,
-    canvasOpen: false,
-    analysisResults: {},
     panelOpen: true,
     panelView: "artifact",
   })
@@ -82,10 +107,57 @@ function makeArtifact(type: "code" | "html" = "code") {
 }
 
 describe("ArtifactPanel", () => {
-  it("renders the recent-artifacts list when no artifact is active", () => {
-    useArtifactStore.setState({ panelOpen: true })
+  it("hosts the session workbench when no artifact is active", () => {
     render(<ArtifactPanel />)
-    expect(screen.getByText("recentArtifacts")).toBeInTheDocument()
+
+    // The empty state used to be a plain Sheet that could only show the
+    // artifact list, leaving the browser/comments/metadata panels unreachable
+    // on a phone. It is the same workbench shell as everything else now.
+    expect(screen.getByTestId("context-workbench-mobile-sheet")).toBeInTheDocument()
+    expect(screen.getByTestId("context-workbench-activity-rail")).toBeInTheDocument()
+    expect(screen.getByTestId("list")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "browser.title" })).toBeInTheDocument()
+  })
+
+  it("takes its visibility from mobileSheetOpen, not from panelOpen", () => {
+    makeArtifact()
+    const { rerender } = render(<ArtifactPanel />)
+    expect(screen.getByTestId("context-workbench-mobile-sheet")).toHaveAttribute(
+      "data-state",
+      "open"
+    )
+
+    // `panelOpen` is an engagement flag for the panel's keyboard shortcuts, not
+    // a visibility flag. It used to gate this Sheet, and because `createArtifact`
+    // and `setActiveArtifact` raise it unconditionally, every new artifact threw
+    // a 92dvh modal over the conversation — `userDismissed` never got a say.
+    useArtifactStore.setState({ panelOpen: false })
+    rerender(<ArtifactPanel />)
+    expect(screen.getByTestId("context-workbench-mobile-sheet")).toHaveAttribute(
+      "data-state",
+      "open"
+    )
+
+    useArtifactDockLayoutStore.setState({ mobileSheetOpen: false })
+    rerender(<ArtifactPanel />)
+    expect(screen.getByTestId("context-workbench-mobile-sheet")).toHaveAttribute(
+      "data-state",
+      "closed"
+    )
+  })
+
+  it("records a dismissal when the Sheet is swiped away", () => {
+    makeArtifact()
+    render(<ArtifactPanel />)
+
+    act(() => {
+      useArtifactDockLayoutStore.getState().setDockCollapsed(true)
+    })
+
+    // The dismissal has to reach `userDismissed`, or the next artifact re-throws
+    // the Sheet over the conversation the user just cleared.
+    expect(useArtifactDockLayoutStore.getState().userDismissed).toBe(true)
+    expect(useArtifactDockLayoutStore.getState().mobileSheetOpen).toBe(false)
   })
 
   it("renders the active artifact's identity row", () => {
@@ -101,6 +173,22 @@ describe("ArtifactPanel", () => {
     expect(screen.getByTestId("monaco")).toBeInTheDocument()
   })
 
+  it("mobile edit mode uses the light editor (no Monaco, no LSP workbench)", () => {
+    mobileViewportRef.current = true
+    makeArtifact()
+    render(<ArtifactPanel />)
+    fireEvent.click(screen.getByTestId("action-edit"))
+    expect(screen.getByTestId("light-code-editor")).toBeInTheDocument()
+    expect(screen.queryByTestId("monaco")).not.toBeInTheDocument()
+    // Edits flow through the same editContent path the Save action persists.
+    fireEvent.change(screen.getByTestId("light-code-editor"), {
+      target: { value: "console.log(2)" },
+    })
+    expect((screen.getByTestId("light-code-editor") as HTMLTextAreaElement).value).toBe(
+      "console.log(2)"
+    )
+  })
+
   it("renders the preview tab for previewable types", () => {
     makeArtifact("html")
     render(<ArtifactPanel />)
@@ -108,6 +196,20 @@ describe("ArtifactPanel", () => {
     // is unreliable in jsdom, so we just verify the tab triggers exist.
     expect(screen.getByTestId("artifact-tab-code")).toBeInTheDocument()
     expect(screen.getByTestId("artifact-tab-preview")).toBeInTheDocument()
+  })
+
+  it("dismissing the Sheet closes the artifact panel", async () => {
+    makeArtifact()
+    render(<ArtifactPanel />)
+    expect(useArtifactStore.getState().panelOpen).toBe(true)
+
+    // The rail's collapse button is the Sheet's dismiss affordance here — a
+    // Sheet has no collapsed strip to shrink into.
+    fireEvent.click(
+      await screen.findByRole("button", { name: "contextWorkbench.actions.collapse" })
+    )
+
+    expect(useArtifactStore.getState().panelOpen).toBe(false)
   })
 
   it("clicking the close action closes the panel", async () => {
@@ -118,5 +220,23 @@ describe("ArtifactPanel", () => {
     const buttons = await screen.findAllByTestId("artifact-close")
     fireEvent.click(buttons[0])
     expect(useArtifactStore.getState().panelOpen).toBe(false)
+  })
+
+  it("overrides the Sheet slide to a snappier pace that honors motion-speed (not the 500/300ms default)", async () => {
+    makeArtifact()
+    render(<ArtifactPanel />)
+    const content = await screen.findByTestId("context-workbench-mobile-sheet")
+    // Overrides via animation-duration (the property that drives the slide),
+    // scaled by --motion-duration-scale so motion-speed applies.
+    expect(content.className).toContain(
+      "data-[state=open]:[animation-duration:calc(300ms*var(--motion-duration-scale,1))]"
+    )
+    expect(content.className).toContain(
+      "data-[state=closed]:[animation-duration:calc(200ms*var(--motion-duration-scale,1))]"
+    )
+    // tailwind-merge must drop the base 500ms enter so the override actually wins.
+    expect(content.className).not.toContain(
+      "data-[state=open]:[animation-duration:calc(500ms*var(--motion-duration-scale,1))]"
+    )
   })
 })

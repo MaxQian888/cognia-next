@@ -1,0 +1,6 @@
+.cognia/
+target/
+__pycache__/
+*.py[cod]
+node_modules/
+*.log

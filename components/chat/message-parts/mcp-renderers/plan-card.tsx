@@ -1,57 +1,33 @@
 "use client"
 
-import { CheckCircle2Icon, CircleIcon, ClockIcon } from "lucide-react"
+// Structured card for the plan-mode signal tools `exit_plan_mode`
+// (cognia, also namespaced `mcp__cognia-tools__exit_plan_mode`) and the
+// native Anthropic `ExitPlanMode`. Both pass the final plan as a single
+// markdown string in `input.plan`; we render it with the shared
+// MarkdownRenderer so headings / lists / code in the plan format properly.
+
+import { useTranslations } from "next-intl"
 import type { ToolUIPart } from "ai"
 import { McpCardShell } from "./common"
-import { cn } from "@/lib/utils"
-
-interface PlanStep {
-  content?: string
-  description?: string
-  status?: "pending" | "in_progress" | "completed"
-}
-
-function statusIcon(status?: string) {
-  if (status === "completed") {
-    return <CheckCircle2Icon className="size-3.5 shrink-0 text-green-600" />
-  }
-  if (status === "in_progress") {
-    return <ClockIcon className="size-3.5 shrink-0 animate-pulse text-yellow-600" />
-  }
-  return <CircleIcon className="size-3.5 shrink-0 text-muted-foreground" />
-}
+import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 
 export function PlanCard({ part }: { part: ToolUIPart }) {
-  // Plan input is shaped as { steps?: [...] } or { plan?: [...] } depending on
-  // which sub-flavor of the tool emits it. The card normalises both.
-  const input = (part.input ?? {}) as { steps?: PlanStep[]; plan?: PlanStep[] }
-  const steps: PlanStep[] = Array.isArray(input.steps)
-    ? input.steps
-    : Array.isArray(input.plan)
-      ? input.plan
-      : []
-  if (steps.length === 0) return null
+  const t = useTranslations("chat.mcp.plan")
+  const input = (part.input ?? {}) as { plan?: unknown }
+  const plan = typeof input.plan === "string" ? input.plan.trim() : ""
+  if (!plan) return null
 
-  const completed = steps.filter((s) => s.status === "completed").length
-
+  // A long plan is capped and scrolls inside its own container instead of
+  // expanding the whole transcript inline. Native overflow (not Radix
+  // ScrollArea): the hover-only Radix scrollbar is ungrabbable mid-text-selection
+  // when nested inside the transcript scroller.
   return (
-    <McpCardShell title="Plan" badge={`${completed} / ${steps.length}`} testId="mcp-plan-card">
-      <ul className="space-y-1">
-        {steps.map((s, i) => (
-          <li
-            key={i}
-            className={cn(
-              "flex items-start gap-2",
-              s.status === "completed" && "text-muted-foreground line-through"
-            )}
-            data-testid="mcp-plan-step"
-            data-status={s.status ?? "pending"}
-          >
-            {statusIcon(s.status)}
-            <span className="min-w-0 flex-1 break-words">{s.content ?? s.description ?? ""}</span>
-          </li>
-        ))}
-      </ul>
+    <McpCardShell title={t("title")} testId="mcp-plan-card">
+      <div className="max-h-80 overflow-y-auto overscroll-contain">
+        <div data-testid="mcp-plan-body" className="pr-3 text-sm">
+          <MarkdownRenderer content={plan} />
+        </div>
+      </div>
     </McpCardShell>
   )
 }

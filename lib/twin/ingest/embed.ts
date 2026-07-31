@@ -10,14 +10,17 @@
  * the un-redacted chunk row in Dexie.
  */
 
-import { generateEmbeddings, type EmbeddingProviderName } from "@/lib/ai/embedding/embedding"
-import { createEmbeddingCache } from "@/lib/ai/rag/embedding-cache"
+import type { RagEmbeddingProvider } from "@cognia/provider-embedding/embedding-catalog"
+import { createEmbeddingCache } from "@cognia/rag/embedding-cache"
+import { generateEmbeddings } from "@cognia/vector/embedding"
+import type { BedrockConnectionSettings } from "@cognia/provider-types"
 
 export interface EmbeddingConfig {
-  provider: EmbeddingProviderName
+  provider: RagEmbeddingProvider
   model: string
   apiKey: string
   baseURL?: string
+  bedrock?: BedrockConnectionSettings
   /** Maximum chunks per upstream batch. Defaults to 64 (OpenAI cap is 2048
    *  but smaller batches give friendlier rate-limit behaviour). */
   batchSize?: number
@@ -75,12 +78,26 @@ export async function embedRedactedChunks(
   let tokensUsed = 0
   for (let i = 0; i < toEmbed.length; i += batchSize) {
     const batch = toEmbed.slice(i, i + batchSize)
-    const result = await generateEmbeddings(batch, {
-      provider: config.provider,
-      model: config.model,
-      apiKey: config.apiKey,
-      baseURL: config.baseURL,
-    })
+    const result = await generateEmbeddings(
+      batch,
+      {
+        provider: config.provider,
+        model: config.model,
+        baseURL: config.baseURL,
+        bedrock: config.bedrock,
+      },
+      config.apiKey
+    )
+    // Guard against a provider returning fewer vectors than inputs: without this
+    // `result.embeddings[j]` is `undefined`, which would be cached and persisted
+    // as a broken vector (and upserted to the remote store). Fail the source
+    // instead — the per-source try/catch in the job runner isolates it.
+    if (result.embeddings.length !== batch.length) {
+      throw new Error(
+        `embedRedactedChunks: provider returned ${result.embeddings.length} vectors ` +
+          `for a batch of ${batch.length} — refusing to persist undefined embeddings.`
+      )
+    }
     for (let j = 0; j < batch.length; j++) {
       const vector = result.embeddings[j]
       resolved.set(batch[j], vector)

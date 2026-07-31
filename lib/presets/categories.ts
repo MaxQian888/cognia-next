@@ -14,7 +14,7 @@ import {
   ZapIcon,
   type LucideIcon,
 } from "lucide-react"
-import type { PresetCategory } from "@/lib/claude/types"
+import type { PresetCategory } from "@cognia/agent-config-types"
 
 export interface PresetCategorySpec {
   id: PresetCategory

@@ -1,0 +1,19 @@
+[package]
+name = "cognia-signaling-core"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+description = "Wasm-safe protocol + rate-limiting primitives shared by the cognia signaling server and Cloudflare Worker (ADR-0021)"
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "cognia_signaling_core"
+path = "src/lib.rs"
+
+[dependencies]
+base64 = "0.22"
+p256 = { version = "0.13", features = ["ecdsa"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"

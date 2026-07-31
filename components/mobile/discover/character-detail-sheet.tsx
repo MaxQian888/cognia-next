@@ -32,7 +32,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { createCharacter, deleteCharacter, updateCharacter } from "@/lib/db/characters"
 import type { CharacterDraft } from "@/lib/db/characters"
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
+import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
 
 export interface CharacterDetailSheetProps {
   open: boolean
@@ -75,6 +76,7 @@ export function CharacterDetailSheet({ open, character, onOpenChange }: Characte
   const t = useTranslations("mobile.characterEdit")
   const [form, setForm] = useState<FormState>(() => fromCharacter(character))
   const [busy, setBusy] = useState(false)
+  useBackDismiss(open, () => onOpenChange(false))
 
   // Adjust form state when the sheet opens for a different character or
   // flips between create / edit. Following React's "you might not need

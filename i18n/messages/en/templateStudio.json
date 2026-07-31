@@ -1,0 +1,151 @@
+{
+  "actions": {
+    "cancel": "Cancel",
+    "confirmImport": "Import package",
+    "create": "Create draft",
+    "export": "Export",
+    "import": "Import",
+    "instantiate": "Create resources",
+    "newDraft": "New draft",
+    "openEditor": "Open editor",
+    "preflight": "Check plan",
+    "publish": "Publish"
+  },
+  "create": {
+    "description": "Start a portable template definition that you can review and publish.",
+    "domain": "Template type",
+    "name": "Name",
+    "templateDescription": "Description",
+    "title": "Create template draft"
+  },
+  "defaults": {
+    "teamLead": "Team lead"
+  },
+  "description": "Search, inspect, publish, import, and instantiate reusable Cognia templates.",
+  "domains": {
+    "a2ui": "Mini App",
+    "agentTeam": "Agent team",
+    "character": "Character",
+    "customMode": "Custom mode",
+    "document": "Document",
+    "goal": "Goal",
+    "prompt": "Prompt preset",
+    "scheduler": "Scheduled task",
+    "skill": "Skill",
+    "subagent": "Subagent",
+    "subscription": "Subscription preset",
+    "workflow": "Workflow"
+  },
+  "empty": {
+    "noDescription": "No description",
+    "noResults": "No templates match these filters."
+  },
+  "filters": {
+    "allDomains": "All types",
+    "allTrust": "All trust levels",
+    "domain": "Template type",
+    "search": "Search templates",
+    "trust": "Trust level"
+  },
+  "import": {
+    "definitionCount": "{count, plural, one {# definition} other {# definitions}}",
+    "description": "Review this package before adding its inert definitions to your library.",
+    "inert": "Importing does not create resources or run template content.",
+    "title": "Import template package"
+  },
+  "inputKinds": {
+    "boolean": "Enter true or false",
+    "character": "Character ID",
+    "enum": "Select a value",
+    "model": "Model ID",
+    "number": "Enter a number",
+    "provider": "Provider ID",
+    "resource": "Resource ID",
+    "secretRef": "Secret reference",
+    "skill": "Skill ID",
+    "string": "Enter a value",
+    "tool": "Tool ID",
+    "twinSlot": "Twin ID",
+    "workflow": "Workflow ID"
+  },
+  "inspector": {
+    "empty": "Select a template to inspect its definition and available actions.",
+    "hash": "Content hash: {hash}",
+    "payload": "Portable payload",
+    "readOnly": "Catalog only",
+    "required": "(required)",
+    "source": "Source: {source}"
+  },
+  "instances": {
+    "detached": "Detached",
+    "resources": "{count, plural, one {# resource} other {# resources}}"
+  },
+  "issues": {
+    "agent-team": {
+      "task-cycle": "The team task graph contains a dependency cycle."
+    },
+    "binding": {
+      "required": "A required binding has not been selected."
+    },
+    "dependency": {
+      "optional-fallback": "An optional dependency will use its fallback.",
+      "required-missing": "A required dependency is unavailable."
+    },
+    "host-version": {
+      "unsupported": "This template is not compatible with the current host version."
+    },
+    "platform": {
+      "unsupported": "This template is not compatible with this platform."
+    },
+    "plugin": {
+      "permission-missing": "The plugin is missing a required domain permission."
+    },
+    "source": {
+      "unavailable": "This template source is unavailable."
+    }
+  },
+  "messages": {
+    "draftCreated": "Template draft created.",
+    "imported": "Template package imported.",
+    "instantiated": "Template resources created.",
+    "published": "Template version {version} published."
+  },
+  "mobile": {
+    "description": "Browse and instantiate compatible templates here. Authoring, publishing, import, and export remain available on desktop.",
+    "title": "Mobile template access"
+  },
+  "operations": {
+    "bind": "Bind an existing resource",
+    "create": "Create a resource",
+    "enable": "Enable a resource",
+    "permission": "Request permission",
+    "update": "Update a resource"
+  },
+  "preflight": {
+    "blocked": "Plan blocked",
+    "needs-confirmation": "Confirmation required",
+    "ready": "Plan ready"
+  },
+  "status": {
+    "conflict": "Conflict",
+    "deprecated": "Deprecated",
+    "draft": "Draft",
+    "published": "Published",
+    "tombstone": "Removed",
+    "yanked": "Withdrawn"
+  },
+  "tabs": {
+    "drafts": "Drafts",
+    "instances": "Instances",
+    "library": "Library",
+    "packages": "Packages",
+    "published": "Published"
+  },
+  "title": "Template Studio",
+  "trust": {
+    "built-in": "Built in",
+    "signed-unknown": "Signed, unknown publisher",
+    "unsigned": "Unsigned",
+    "verified-publisher": "Verified publisher"
+  }
+}

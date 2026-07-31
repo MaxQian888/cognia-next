@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import Link from "next/link"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import {
@@ -9,6 +10,7 @@ import {
   Loader2Icon,
   PencilIcon,
   PlayIcon,
+  ScrollTextIcon,
   StarIcon,
   Trash2Icon,
   XCircleIcon,
@@ -16,14 +18,16 @@ import {
 
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { mcpServerLogsHref } from "@/hooks/mcp/use-mcp-server-logs"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
 import { isTauri } from "@/lib/tauri"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { testMcpServer, type McpTestResult } from "@/lib/claude/ipc"
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 import { McpAgentChipGroup } from "../mcp-agent-chip-group"
+import { McpAuthButton } from "./mcp-auth-button"
 import { serverToTestRequest, summarizeServer } from "./mcp-server-utils"
 
 export interface McpServerCardProps {
@@ -161,6 +165,14 @@ export function McpServerCard({
           <PlayIcon className="size-3.5" />
         )}
       </Button>
+      <Button asChild variant="ghost" size="icon" className="size-7" title={tRow("logsTooltip")}>
+        <Link
+          href={mcpServerLogsHref(server.name)}
+          aria-label={tRow("logs", { name: server.name })}
+        >
+          <ScrollTextIcon className="size-3.5" />
+        </Link>
+      </Button>
       <Button
         variant="ghost"
         size="icon"
@@ -245,7 +257,7 @@ export function McpServerCard({
   return (
     <Card
       className={cn(
-        "group flex flex-col gap-2 p-3 transition-colors",
+        "group flex h-full flex-col gap-2 p-3 transition-colors",
         selected && "border-primary/50 ring-1 ring-primary/30",
         !server.enabled && "opacity-70"
       )}
@@ -263,10 +275,11 @@ export function McpServerCard({
       <p className="line-clamp-1 break-all font-mono text-[11px] text-muted-foreground">
         {summarizeServer(server)}
       </p>
-      <div className="flex items-center justify-between gap-2">
+      <div className="mt-auto flex items-center justify-between gap-2">
         <McpAgentChipGroup server={server} />
         {actions}
       </div>
+      <McpAuthButton server={server} />
     </Card>
   )
 }

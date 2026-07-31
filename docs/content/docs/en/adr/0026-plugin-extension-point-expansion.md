@@ -140,3 +140,34 @@ These plugins keep working via legacy shims today but should migrate in follow-u
 - Plugin marketplace install-from-URL.
 - Lifting the workspace-backend registry out of `lib/github/` into a `lib/workspace/` namespace.
 - Reviving `sidebar.right.*` / `panel.header` / `panel.footer` (no host surfaces exist).
+
+## 2026-07 amendment — Context Workbench
+
+[ADR-0083](./0083-context-workbench) creates the shared right-side host that did not exist when this ADR was accepted. It therefore supersedes the two slot decisions above:
+
+- `sidebar.right.top`, `sidebar.right.bottom`, `panel.header`, and `panel.footer` are implemented in `ContextWorkbench` and receive sanitized resource context.
+- `manifest.contextPanels` adds lazy `{ id, entry, export }` trusted React contributions with resource kinds, canonical activity, plugin-local `labelKey` plus required `label` fallback, safe icon, capabilities, preferred mode, and retention.
+- `ctx.contextPanels` exposes `register`, controlled `reveal`, sanitized `getActiveContext`, and `onDidChangeActiveContext`.
+- Panels require `extension:ui` and the corresponding resource read permission. Permission changes immediately re-resolve availability; disable and uninstall remove contributions.
+- Sandboxed Webview panels remain out of scope.
+
+## 2026-07-26 amendment — `tool-renderer` capability
+
+This ADR shipped `messageRenderers` as *the* plugin rendering seam for chat, on the reading that a plugin's custom output is a custom `part.type`. That reading has a hole: **a tool call is not a custom part type.**
+
+Tool results arrive as `tool-<name>` / `dynamic-tool`, and both are host-owned twice over — `message-part-api.ts` reserves the `tool-` prefix, and `message-renderer.tsx` routes every tool part through `renderToolPart` *before* the plugin part registry is consulted. So a plugin that ships an MCP tool could never render its own result as anything richer than `McpContentBlocksCard` / `ToolBody`, while first-party tools got dedicated cards from a hard-coded table in `mcp-tool-card.tsx`. The gap was in the contract, not in any one implementation.
+
+`tool-renderer` closes it, mirroring `message-renderer` link-for-link:
+
+- `manifest.toolRenderers[]` — lazy `{ toolName, entry, export, label? }`, resolved by `lib/plugin/bridge/tool-renderer-bridge.ts` and dispatched through the `tool-renderer` entry in `module-bridge-map.ts` (so disable-time teardown comes for free).
+- `ctx.toolResult.registerToolResultRenderer(toolName, component)` — the imperative path, required for built-in plugins that cannot fetch a separate entry file.
+- `lib/plugin/api/tool-result-renderers.ts` — the registry, keyed on `bareToolName(...)` so one registration covers both the flat ai-sdk name and the namespaced `mcp__cognia-plugin-tools__*` form.
+- Permission gate `extension:ui`, matching `message-renderer`.
+
+Two decisions worth recording because they are easy to get wrong in the other direction:
+
+**Precedence replaces a reserved-name list.** The host's built-in card table is consulted first, so a plugin registering `Read` is inert rather than rejected. A second copy of the built-in tool names inside the plugin API would be a list guaranteed to drift from the real one — the exact failure this repo keeps paying for. Ordering is the guarantee; the API only warns.
+
+**`isStructuredMcpToolPart` had to learn about the registry.** That predicate decides whether a tool part reaches `MCPToolCard` at all. Registering a card without widening it would have produced a fully-built, fully-tested, permanently unreachable feature — dormancy of exactly the kind the working rules call out. It now returns true for a plugin-claimed tool, and both `MCPToolCard` and `MessageRenderer` subscribe to the registry via `useSyncExternalStore` so enabling a plugin repaints already-rendered messages instead of requiring a reload.
+
+**Rendered as JSX, not invoked as a function.** The built-in `McpCardWithFallback` calls its card directly so it can detect a `null` return and fall back. Plugin cards are rendered as elements instead: `React.ComponentType` permits `memo()` / `forwardRef()`, which are not callable, and supporting every component kind matters more than the fallback. A plugin that cannot render a payload owns its own empty state.

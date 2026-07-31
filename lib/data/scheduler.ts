@@ -1,7 +1,7 @@
 // Pure helpers for the scheduled-backup feature. No React, no Dexie, no
 // `window` — these run inside the provider's interval and inside tests.
 
-import type { BackupAutoSchedule } from "@/lib/claude/types"
+import type { BackupAutoSchedule } from "@cognia/agent-config-types"
 
 /**
  * Decide whether the auto-scheduler should fire a backup right now.

@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Pure tests for the v1 → v2 migration helper.
  *
@@ -11,7 +12,11 @@
 
 import "fake-indexeddb/auto"
 import { DEFAULT_TEAM_CONFIG } from "@/types/agent/agent-team"
-import { migrateAgentTeamPersisted } from "./store"
+import {
+  migrateAgentTeamPersisted,
+  resetStaleTeamStatuses,
+  rehydrateResetStaleTeams,
+} from "./store"
 
 describe("migrateAgentTeamPersisted", () => {
   it("returns non-object input as-is", () => {
@@ -20,13 +25,38 @@ describe("migrateAgentTeamPersisted", () => {
     expect(migrateAgentTeamPersisted(42 as unknown, 1)).toBe(42)
   })
 
-  it("returns v3+ input unchanged (idempotency)", () => {
-    const v3 = {
+  it("returns current-version input unchanged (idempotency)", () => {
+    const current = {
       defaultConfig: { capabilities: { skillIds: ["s"] }, sharedMemoryAdapterId: undefined },
       lastAdapterSyncVersion: {},
+      editorSession: {},
     }
-    const out = migrateAgentTeamPersisted(v3, 3)
-    expect(out).toBe(v3)
+    const out = migrateAgentTeamPersisted(current, 6)
+    expect(out).toBe(current)
+  })
+
+  it("upgrades v5 → v6: backfills an empty editorSession map", () => {
+    const v5 = {
+      defaultConfig: { governancePolicy: DEFAULT_TEAM_CONFIG.governancePolicy },
+      tasks: { t1: { id: "t1", title: "a", comments: [] } },
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const out = migrateAgentTeamPersisted(v5, 5) as any
+    expect(out.editorSession).toEqual({})
+  })
+
+  it("upgrades v4 → v5: backfills an empty comments array on every task", () => {
+    const v4 = {
+      defaultConfig: { governancePolicy: DEFAULT_TEAM_CONFIG.governancePolicy },
+      tasks: {
+        t1: { id: "t1", title: "a" },
+        t2: { id: "t2", title: "b", comments: [{ id: "c1", text: "keep me" }] },
+      },
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const out = migrateAgentTeamPersisted(v4, 4) as any
+    expect(out.tasks.t1.comments).toEqual([])
+    expect(out.tasks.t2.comments).toEqual([{ id: "c1", text: "keep me" }])
   })
 
   it("upgrades v2 → v3: backfills sharedMemoryAdapterId + lastAdapterSyncVersion", () => {
@@ -94,5 +124,39 @@ describe("migrateAgentTeamPersisted", () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const out = migrateAgentTeamPersisted(v1, undefined) as any
     expect(out.defaultConfig.governancePolicy).toEqual(DEFAULT_TEAM_CONFIG.governancePolicy)
+  })
+
+  it("resets a team persisted at the CURRENT version out of a non-terminal status", () => {
+    // A same-version snapshot skips `migrate` entirely, so the reset must not
+    // depend on it — this is what `onRehydrateStorage` calls.
+    const teams = {
+      t1: { id: "t1", status: "executing" },
+      t2: { id: "t2", status: "planning" },
+      t3: { id: "t3", status: "paused" },
+      t4: { id: "t4", status: "completed" },
+      t5: { id: "t5", status: "idle" },
+    }
+    resetStaleTeamStatuses(teams)
+    expect(teams.t1.status).toBe("idle")
+    expect(teams.t2.status).toBe("idle")
+    expect(teams.t3.status).toBe("idle")
+    // Terminal / already-idle statuses are untouched.
+    expect(teams.t4.status).toBe("completed")
+    expect(teams.t5.status).toBe("idle")
+  })
+
+  it("resetStaleTeamStatuses tolerates missing / malformed maps", () => {
+    expect(() => resetStaleTeamStatuses(undefined)).not.toThrow()
+    expect(() => resetStaleTeamStatuses({ x: {} as { status?: string } })).not.toThrow()
+  })
+
+  it("rehydrateResetStaleTeams resets team statuses and no-ops on a missing state", () => {
+    // No-op branch: a rehydrate that restored nothing.
+    expect(() => rehydrateResetStaleTeams(undefined)).not.toThrow()
+    // Reset branch.
+    const state = { teams: { a: { status: "executing" }, b: { status: "completed" } } }
+    rehydrateResetStaleTeams(state)
+    expect(state.teams.a.status).toBe("idle")
+    expect(state.teams.b.status).toBe("completed")
   })
 })

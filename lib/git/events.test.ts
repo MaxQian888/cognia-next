@@ -1,8 +1,11 @@
-const isTauriMock = jest.fn()
+const hasGitBridgeMock = jest.fn()
 const subscribeMock = jest.fn()
 
+jest.mock("./commands", () => ({
+  hasGitBridge: () => hasGitBridgeMock(),
+}))
+
 jest.mock("@/lib/tauri", () => ({
-  isTauri: () => isTauriMock(),
   transport: {
     call: jest.fn(),
     subscribe: (...args: unknown[]) => subscribeMock(...args),
@@ -12,21 +15,21 @@ jest.mock("@/lib/tauri", () => ({
 import { GIT_STATUS_CHANGED_EVENT, subscribeGitStatusChanged } from "./events"
 
 beforeEach(() => {
-  isTauriMock.mockReset()
+  hasGitBridgeMock.mockReset()
   subscribeMock.mockReset()
   jest.useRealTimers()
 })
 
 describe("subscribeGitStatusChanged", () => {
-  it("returns a no-op unsubscribe on web", () => {
-    isTauriMock.mockReturnValue(false)
+  it("returns a no-op unsubscribe on an unpaired browser", () => {
+    hasGitBridgeMock.mockReturnValue(false)
     const unsub = subscribeGitStatusChanged(() => {})
     expect(subscribeMock).not.toHaveBeenCalled()
     expect(() => unsub()).not.toThrow()
   })
 
-  it("subscribes to the status-changed channel on desktop", () => {
-    isTauriMock.mockReturnValue(true)
+  it("subscribes to the status-changed channel whenever a git bridge exists", () => {
+    hasGitBridgeMock.mockReturnValue(true)
     subscribeMock.mockReturnValue(() => {})
     subscribeGitStatusChanged(() => {})
     expect(subscribeMock).toHaveBeenCalledWith(GIT_STATUS_CHANGED_EVENT, expect.any(Function))
@@ -34,7 +37,7 @@ describe("subscribeGitStatusChanged", () => {
 
   it("coalesces a burst into a single handler call with the latest payload", () => {
     jest.useFakeTimers()
-    isTauriMock.mockReturnValue(true)
+    hasGitBridgeMock.mockReturnValue(true)
     let emit: (p: { rootDir: string }) => void = () => {}
     subscribeMock.mockImplementation((_event: string, cb: (p: { rootDir: string }) => void) => {
       emit = cb
@@ -53,7 +56,7 @@ describe("subscribeGitStatusChanged", () => {
 
   it("unsubscribe clears a pending timer", () => {
     jest.useFakeTimers()
-    isTauriMock.mockReturnValue(true)
+    hasGitBridgeMock.mockReturnValue(true)
     let emit: (p: { rootDir: string }) => void = () => {}
     const innerUnsub = jest.fn()
     subscribeMock.mockImplementation((_e: string, cb: (p: { rootDir: string }) => void) => {

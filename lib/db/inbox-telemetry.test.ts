@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for lib/db/inbox-telemetry.ts — capped breadcrumb log (cap 3000).
  *

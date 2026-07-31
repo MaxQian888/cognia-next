@@ -2,7 +2,7 @@
  * E2E: io.http — HTTP request executor against an in-test fetch route.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../../../helpers/db-reset"
 import { seedAndOpenWorkflow } from "../../../helpers/seed-workflow"
 import {
@@ -33,8 +33,8 @@ test.describe("workflow node — io.http", () => {
     const wfId = await seedAndOpenWorkflow(page, "io-http")
     await assertNodeOnCanvas(page, { kind: "io.http", label: "HTTP" })
     await openNodeInspector(page, "io.http")
-    await expect(page.locator("#ins-method, [name=method]").first()).toBeVisible()
-    await expect(page.locator("#ins-url, [name=url]").first()).toBeVisible()
+    await expect(page.locator("#ins-method, [data-field=method]").first()).toBeVisible()
+    await expect(page.locator("#ins-url, [data-field=url]").first()).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "io.http" })
   })

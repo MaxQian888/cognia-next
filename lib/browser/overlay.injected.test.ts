@@ -1,0 +1,1243 @@
+/**
+ * @jest-environment jsdom
+ *
+ * Exercises the real injected overlay file (the same bytes Rust `include_str!`s)
+ * by evaluating it against jsdom globals — no logic is duplicated here.
+ */
+import fs from "node:fs"
+import path from "node:path"
+
+const CODE = fs.readFileSync(path.join(__dirname, "overlay.injected.js"), "utf8")
+
+type SelectionPayload = {
+  selector: string
+  domPath: string
+  tagName: string
+  id: string | null
+  rect: { x: number; y: number; width: number; height: number }
+  outerHTML: string
+  text: string
+  viewport?: { width: number; height: number }
+  contentArea?: { selector: string; left: number; right: number; width: number; centerX: number }
+  parentLayout?: {
+    display: string
+    flexDirection?: string
+    gridTemplateColumns?: string
+    gap?: string
+    selector: string
+  }
+}
+
+type OverlayApi = {
+  cssSelector: (el: Element) => string
+  domPath: (el: Element) => string
+  buildPayload: (el: Element) => SelectionPayload
+  isActive: () => boolean
+  freeze: () => void
+  unfreeze: () => void
+  isFrozen: () => boolean
+  drainSelection: () => string
+  restoreSelection: () => void
+  applySelectionBudget: (payload: Record<string, unknown>, count: number) => Record<string, unknown>
+  intersects: (
+    rect: DOMRect,
+    area: { x: number; y: number; width: number; height: number }
+  ) => boolean
+  marqueeTargets: (area: { x: number; y: number; width: number; height: number }) => Element[]
+  buildTextSelection: () => { element: Element; payload: Record<string, unknown> } | null
+  selectedElements: () => Element[]
+  selectedPayloads: () => Record<string, unknown>[]
+  snapshot: (options: unknown) => string
+  find: (
+    query: string,
+    options?: { forward?: boolean; matchCase?: boolean }
+  ) => { matches: number; index: number }
+  findClear: () => { matches: number; index: number }
+}
+
+function install(): OverlayApi {
+  // Initialization scripts re-run per document load; reset the idempotency flag.
+  delete (window as unknown as Record<string, unknown>).__cogniaOverlayInstalled
+  // Indirect eval runs in global scope so `window`/`document` bind to jsdom.
+  ;(0, eval)(CODE)
+  return (window as unknown as { __cogniaOverlay: OverlayApi }).__cogniaOverlay
+}
+
+beforeEach(() => {
+  document.body.innerHTML = ""
+  sessionStorage.clear()
+  delete (window as unknown as Record<string, unknown>).__cogniaSignal
+  delete (window as unknown as Record<string, unknown>).__cogniaSetSelectMode
+})
+
+describe("overlay.injected find-in-page", () => {
+  // jsdom has no CSS Custom Highlight API, so these exercise the <mark> fallback.
+  it("wraps matches in <mark> and reports the count", () => {
+    document.body.innerHTML = `<p>alpha beta alpha gamma</p>`
+    const api = install()
+    expect(api.find("alpha")).toEqual({ matches: 2, index: 0 })
+    expect(document.querySelectorAll("mark[data-cognia-find]")).toHaveLength(2)
+    expect(document.querySelectorAll("mark[data-cognia-find-current]")).toHaveLength(1)
+  })
+
+  it("is case-insensitive by default and case-sensitive on request", () => {
+    document.body.innerHTML = `<p>Foo foo FOO</p>`
+    const api = install()
+    expect(api.find("foo").matches).toBe(3)
+    expect(api.find("foo", { matchCase: true }).matches).toBe(1)
+  })
+
+  it("advances and rewinds the current match without re-wrapping", () => {
+    document.body.innerHTML = `<p>x x x</p>`
+    const api = install()
+    expect(api.find("x")).toEqual({ matches: 3, index: 0 })
+    expect(api.find("x")).toEqual({ matches: 3, index: 1 })
+    expect(api.find("x")).toEqual({ matches: 3, index: 2 })
+    expect(api.find("x")).toEqual({ matches: 3, index: 0 })
+    expect(api.find("x", { forward: false })).toEqual({ matches: 3, index: 2 })
+    expect(document.querySelectorAll("mark[data-cognia-find]")).toHaveLength(3)
+  })
+
+  it("restores the original DOM text when cleared", () => {
+    document.body.innerHTML = `<p>hello world</p>`
+    const api = install()
+    api.find("world")
+    expect(document.querySelector("mark[data-cognia-find]")).not.toBeNull()
+    expect(api.findClear()).toEqual({ matches: 0, index: 0 })
+    expect(document.querySelector("mark[data-cognia-find]")).toBeNull()
+    expect(document.querySelector("p")!.textContent).toBe("hello world")
+  })
+
+  it("skips script/style text and reports zero for an absent query", () => {
+    document.body.innerHTML = `<style>.a{color:red}</style><p>visible</p>`
+    const api = install()
+    expect(api.find("color").matches).toBe(0)
+    expect(api.find("nope")).toEqual({ matches: 0, index: 0 })
+    expect(api.find("visible").matches).toBe(1)
+  })
+
+  it("clears highlights when the query becomes empty", () => {
+    document.body.innerHTML = `<p>keep keep</p>`
+    const api = install()
+    expect(api.find("keep").matches).toBe(2)
+    expect(api.find("")).toEqual({ matches: 0, index: 0 })
+    expect(document.querySelectorAll("mark[data-cognia-find]")).toHaveLength(0)
+  })
+})
+
+describe("overlay.injected cssSelector", () => {
+  it("anchors on the nearest ancestor id", () => {
+    document.body.innerHTML = `<main id="root"><section><button>go</button></section></main>`
+    const api = install()
+    const btn = document.querySelector("button")!
+    expect(api.cssSelector(btn)).toBe("#root > section > button")
+  })
+
+  it("uses nth-of-type to disambiguate siblings", () => {
+    document.body.innerHTML = `<ul><li>a</li><li>b</li><li>c</li></ul>`
+    const api = install()
+    const third = document.querySelectorAll("li")[2]
+    expect(api.cssSelector(third)).toBe("body > ul > li:nth-of-type(3)")
+  })
+
+  it("returns empty string for non-elements", () => {
+    const api = install()
+    expect(api.cssSelector(document.createTextNode("x") as unknown as Element)).toBe("")
+  })
+})
+
+describe("overlay.injected domPath", () => {
+  it("renders a short readable path with id/class", () => {
+    document.body.innerHTML = `<div class="card"><button id="submit">ok</button></div>`
+    const api = install()
+    const btn = document.querySelector("button")!
+    expect(api.domPath(btn)).toBe("div.card > button#submit")
+  })
+})
+
+describe("overlay.injected buildPayload", () => {
+  it("captures selector, dom path, tag, text and truncates html", () => {
+    document.body.innerHTML = `<div class="card"><button id="submit">Click me</button></div>`
+    const api = install()
+    const btn = document.querySelector("button")!
+    const payload = api.buildPayload(btn)
+    expect(payload.tagName).toBe("button")
+    expect(payload.id).toBe("submit")
+    expect(payload.selector).toBe("#submit")
+    expect(payload.text).toBe("Click me")
+    expect(payload.outerHTML).toContain("<button")
+  })
+
+  it("captures flex parent and main content layout", () => {
+    document.body.innerHTML = `<main style="display:flex;flex-direction:column;gap:24px"><button>Go</button></main>`
+    const main = document.querySelector("main")!
+    Object.defineProperty(main, "getBoundingClientRect", {
+      value: () => ({ left: 220, right: 1420, top: 0, bottom: 900, width: 1200, height: 900 }),
+    })
+    const payload = install().buildPayload(document.querySelector("button")!)
+    expect(payload.parentLayout).toMatchObject({
+      display: "flex",
+      flexDirection: "column",
+      gap: "24px",
+    })
+    expect(payload.contentArea).toEqual({
+      selector: "body > main",
+      left: 220,
+      right: 1420,
+      width: 1200,
+      centerX: 820,
+    })
+    expect(payload.viewport).toEqual({ width: window.innerWidth, height: window.innerHeight })
+  })
+
+  it("captures grid-specific parent fields only", () => {
+    document.body.innerHTML = `<div style="display:grid;grid-template-columns:1fr 2fr;gap:8px"><span>Go</span></div>`
+    const payload = install().buildPayload(document.querySelector("span")!)
+    expect(payload.parentLayout).toMatchObject({
+      display: "grid",
+      gridTemplateColumns: "1fr 2fr",
+      gap: "8px",
+    })
+    expect(payload.parentLayout).not.toHaveProperty("flexDirection")
+  })
+
+  it("omits parent layout when the parent is not flex or grid", () => {
+    document.body.innerHTML = `<div><span>Go</span></div>`
+    expect(install().buildPayload(document.querySelector("span")!).parentLayout).toBeUndefined()
+  })
+})
+
+describe("overlay.injected multi/area/text selection", () => {
+  it("accumulates shift-clicked elements and removes only the requested panel item", () => {
+    document.body.innerHTML = `<button id="a">A</button><button id="b">B</button>`
+    const api = install()
+    ;(window as unknown as { __cogniaSignal: () => void }).__cogniaSignal = () => {}
+    ;(window as unknown as { __cogniaSetSelectMode: (on: boolean) => void }).__cogniaSetSelectMode(
+      true
+    )
+    document
+      .getElementById("a")!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true, shiftKey: true }))
+    document
+      .getElementById("b")!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true, shiftKey: true }))
+    expect(api.selectedElements()).toEqual([
+      document.getElementById("a"),
+      document.getElementById("b"),
+    ])
+    expect(document.querySelectorAll("[data-cognia-select-box]")).toHaveLength(2)
+    ;(document.querySelector('[data-cognia-remove="0"]') as HTMLButtonElement).click()
+    expect(api.selectedElements()).toEqual([document.getElementById("b")])
+    expect(api.selectedPayloads()).toHaveLength(1)
+  })
+
+  it("uses strict rectangle intersection math for marquee candidates", () => {
+    const api = install()
+    const rect = { left: 10, right: 30, top: 10, bottom: 30 } as DOMRect
+    expect(api.intersects(rect, { x: 20, y: 20, width: 20, height: 20 })).toBe(true)
+    expect(api.intersects(rect, { x: 30, y: 10, width: 20, height: 20 })).toBe(false)
+  })
+
+  it("creates an element-less area payload when a drag intersects nothing", () => {
+    const api = install()
+    const signals: unknown[] = []
+    ;(window as unknown as { __cogniaSignal: (value: unknown) => void }).__cogniaSignal = (value) =>
+      signals.push(value)
+    ;(window as unknown as { __cogniaSetSelectMode: (on: boolean) => void }).__cogniaSetSelectMode(
+      true
+    )
+    document.body.dispatchEvent(
+      new MouseEvent("mousedown", { bubbles: true, button: 0, clientX: 10, clientY: 20 })
+    )
+    document.body.dispatchEvent(
+      new MouseEvent("mousemove", { bubbles: true, clientX: 110, clientY: 70 })
+    )
+    document.body.dispatchEvent(
+      new MouseEvent("mouseup", { bubbles: true, clientX: 110, clientY: 70 })
+    )
+    expect(api.selectedPayloads()[0]).toMatchObject({
+      kind: "area",
+      selector: "",
+      rect: { x: 10, y: 20, width: 100, height: 50 },
+    })
+    expect(signals.at(-1)).toMatchObject({ count: 1 })
+  })
+
+  it("extracts selected text from the window Range", () => {
+    document.body.innerHTML = `<p id="copy">alpha beta gamma</p>`
+    const api = install()
+    const text = document.getElementById("copy")!.firstChild!
+    const range = document.createRange()
+    range.setStart(text, 6)
+    range.setEnd(text, 10)
+    window.getSelection()!.removeAllRanges()
+    window.getSelection()!.addRange(range)
+    expect(api.buildTextSelection()!.payload).toMatchObject({ kind: "text", selectedText: "beta" })
+  })
+
+  it("scales outerHTML detail with N and discloses the reduction", () => {
+    const api = install()
+    const payload = api.applySelectionBudget({ outerHTML: "x".repeat(5000) }, 5)
+    expect((payload.outerHTML as string).length).toBe(801)
+    expect(payload.detailReduced).toEqual({
+      selectionCount: 5,
+      outerHTMLLimit: 800,
+      reason: "multi-selection-budget",
+    })
+  })
+
+  it("resolves a current snapshot ref and rejects an unknown ref", () => {
+    document.body.innerHTML = `<button id="go">Go</button>`
+    const api = install()
+    const snapshot = api.snapshot({}) as unknown as { nodes: Array<{ ref: string }> }
+    const ref = snapshot.nodes[0].ref
+    const selectionForRef = (
+      window as unknown as { __cogniaSelectionForRef: (value: string) => string }
+    ).__cogniaSelectionForRef
+    expect(JSON.parse(selectionForRef(ref))).toMatchObject({
+      ok: true,
+      selection: { selector: "#go" },
+    })
+    expect(JSON.parse(selectionForRef("stale"))).toMatchObject({ ok: false, selection: null })
+  })
+})
+
+it("rearms after a normal first pick and then shift-adds a second target", () => {
+  document.body.innerHTML = `<button id="a">A</button><button id="b">B</button>`
+  const api = install()
+  ;(window as unknown as { __cogniaSignal: () => void }).__cogniaSignal = () => {}
+  const setMode = (window as unknown as { __cogniaSetSelectMode: (on: boolean) => void })
+    .__cogniaSetSelectMode
+  setMode(true)
+  document.getElementById("a")!.click()
+  setMode(true)
+  document
+    .getElementById("b")!
+    .dispatchEvent(new MouseEvent("click", { bubbles: true, shiftKey: true }))
+  const drained = JSON.parse(api.drainSelection())
+  expect(drained.selections.map((selection: SelectionPayload) => selection.id)).toEqual(["a", "b"])
+})
+
+it("marquee keeps useful leaf targets without their ancestry or button internals", () => {
+  document.body.innerHTML = `<main><section><button id="go"><span>Go</span></button></section></main>`
+  for (const element of Array.from(document.querySelectorAll("*"))) {
+    Object.defineProperty(element, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ left: 0, top: 0, right: 100, bottom: 40, width: 100, height: 40 }),
+    })
+  }
+  const targets = install().marqueeTargets({ x: 0, y: 0, width: 100, height: 40 })
+  expect(targets.map((target) => target.id || target.tagName.toLowerCase())).toEqual(["go"])
+})
+
+describe("overlay.injected freeze", () => {
+  it("injects/removes pause CSS and exposes frozen state", () => {
+    const api = install()
+    api.freeze()
+    expect(api.isFrozen()).toBe(true)
+    expect(document.querySelector("style[data-cognia-chrome='freeze']")?.textContent).toContain(
+      "animation-play-state:paused"
+    )
+    api.unfreeze()
+    expect(api.isFrozen()).toBe(false)
+    expect(document.querySelector("style[data-cognia-chrome='freeze']")).toBeNull()
+  })
+
+  it("pauses and restores only running WAAPI animations", () => {
+    const running = {
+      playState: "running",
+      effect: { target: document.body },
+      pause: jest.fn(),
+      play: jest.fn(),
+    }
+    const finished = {
+      playState: "finished",
+      effect: { target: document.body },
+      pause: jest.fn(),
+      play: jest.fn(),
+    }
+    Object.defineProperty(document, "getAnimations", {
+      configurable: true,
+      value: () => [running, finished],
+    })
+    const api = install()
+    api.freeze()
+    expect(running.pause).toHaveBeenCalledTimes(1)
+    expect(finished.pause).not.toHaveBeenCalled()
+    api.unfreeze()
+    expect(running.play).toHaveBeenCalledTimes(1)
+    expect(finished.play).not.toHaveBeenCalled()
+    Reflect.deleteProperty(document, "getAnimations")
+  })
+
+  it("watchdog self-heals a stuck freeze", () => {
+    jest.useFakeTimers()
+    const api = install()
+    api.freeze()
+    jest.advanceTimersByTime(3000)
+    expect(api.isFrozen()).toBe(false)
+    jest.useRealTimers()
+  })
+
+  it("preserves string timeout and interval callbacks", () => {
+    jest.useFakeTimers()
+    install()
+    ;(window as unknown as Record<string, unknown>).__timerStringRuns = 0
+    window.setTimeout("window.__timerStringRuns += 1" as unknown as TimerHandler, 10)
+    const interval = window.setInterval(
+      "window.__timerStringRuns += 1" as unknown as TimerHandler,
+      10
+    )
+    jest.advanceTimersByTime(10)
+    window.clearInterval(interval)
+    expect((window as unknown as Record<string, unknown>).__timerStringRuns).toBe(2)
+    jest.useRealTimers()
+  })
+
+  it("replays a string timeout queued while frozen", () => {
+    jest.useFakeTimers()
+    const api = install()
+    ;(window as unknown as Record<string, unknown>).__frozenStringRuns = 0
+    window.setTimeout("window.__frozenStringRuns += 1" as unknown as TimerHandler, 10)
+    api.freeze()
+    jest.advanceTimersByTime(10)
+    expect((window as unknown as Record<string, unknown>).__frozenStringRuns).toBe(0)
+    api.unfreeze()
+    expect((window as unknown as Record<string, unknown>).__frozenStringRuns).toBe(1)
+    jest.useRealTimers()
+  })
+
+  it("acknowledges freeze only after two original frames and a settle timer", async () => {
+    const frames: FrameRequestCallback[] = []
+    const originalRaf = window.requestAnimationFrame
+    jest.useFakeTimers()
+    window.requestAnimationFrame = jest.fn((callback: FrameRequestCallback) => {
+      frames.push(callback)
+      return frames.length
+    })
+    try {
+      install()
+      const pending = (
+        window as unknown as { __cogniaSetFrozen: (on: boolean) => Promise<string> }
+      ).__cogniaSetFrozen(true)
+      let settled = false
+      pending.then(() => {
+        settled = true
+      })
+      expect(frames).toHaveLength(1)
+      frames.shift()!(1)
+      expect(frames).toHaveLength(1)
+      frames.shift()!(2)
+      await Promise.resolve()
+      expect(settled).toBe(false)
+      await jest.advanceTimersByTimeAsync(16)
+      await expect(pending).resolves.toContain('"ok":true')
+      ;(window as unknown as { __cogniaSetFrozen: (on: boolean) => string }).__cogniaSetFrozen(
+        false
+      )
+    } finally {
+      window.requestAnimationFrame = originalRaf
+      jest.useRealTimers()
+    }
+  })
+})
+
+describe("overlay.injected select mode", () => {
+  it("signals then drains a buffered payload and auto-disables", () => {
+    document.body.innerHTML = `<button id="go">go</button>`
+    const api = install()
+    const received: Array<{ count: number; generation: number }> = []
+    ;(
+      window as unknown as { __cogniaSignal: (p: { count: number; generation: number }) => void }
+    ).__cogniaSignal = (p) => received.push(p)
+    ;(window as unknown as { __cogniaSetSelectMode: (on: boolean) => void }).__cogniaSetSelectMode(
+      true
+    )
+    expect(api.isActive()).toBe(true)
+
+    document.getElementById("go")!.click()
+
+    expect(received.at(-1)).toMatchObject({ count: 1, generation: 1 })
+    const drained = JSON.parse(api.drainSelection())
+    expect(drained.ok).toBe(true)
+    expect(drained.selections[0].selector).toBe("#go")
+    expect(JSON.parse(api.drainSelection()).selections).toEqual([])
+    expect(api.isActive()).toBe(false) // disables itself after a pick
+  })
+
+  it("restores, caps, and re-signals a fresh buffered selection", async () => {
+    jest.useFakeTimers()
+    jest.setSystemTime(new Date("2026-07-16T00:00:00Z"))
+    const signal = jest.fn()
+    ;(window as unknown as { __cogniaSignal: typeof signal }).__cogniaSignal = signal
+    sessionStorage.setItem(
+      "__cognia_selection_buffer",
+      JSON.stringify({
+        version: 1,
+        savedAt: Date.now(),
+        generation: 7,
+        selections: Array.from({ length: 25 }, (_, index) => ({
+          selector: `#restored-${index}`,
+          domPath: "button",
+          tagName: "button",
+          id: null,
+          classes: null,
+          rect: { x: 0, y: 0, width: 1, height: 1 },
+          outerHTML: "<button></button>",
+          text: "",
+          pageUrl: "http://localhost/",
+          pageTitle: "",
+        })),
+      })
+    )
+    const api = install()
+    await jest.runOnlyPendingTimersAsync()
+    expect(signal).toHaveBeenCalledWith({ count: 20, generation: 7 })
+    const selections = JSON.parse(api.drainSelection()).selections
+    expect(selections).toHaveLength(20)
+    expect(selections[0].selector).toBe("#restored-5")
+    expect(sessionStorage.getItem("__cognia_selection_buffer")).toBeNull()
+    jest.useRealTimers()
+  })
+
+  it("expires and cleans up a stale buffered selection", () => {
+    sessionStorage.setItem(
+      "__cognia_selection_buffer",
+      JSON.stringify({ version: 1, savedAt: Date.now() - 120001, generation: 2, selections: [{}] })
+    )
+    const api = install()
+    expect(JSON.parse(api.drainSelection()).selections).toEqual([])
+    expect(sessionStorage.getItem("__cognia_selection_buffer")).toBeNull()
+  })
+
+  it("does not emit when inactive", () => {
+    document.body.innerHTML = `<button id="go">go</button>`
+    install()
+    const fn = jest.fn()
+    ;(window as unknown as { __cogniaSignal: typeof fn }).__cogniaSignal = fn
+    document.getElementById("go")!.click()
+    expect(fn).not.toHaveBeenCalled()
+  })
+
+  it("Escape cancels select mode", () => {
+    install()
+    const setMode = (window as unknown as { __cogniaSetSelectMode: (on: boolean) => void })
+      .__cogniaSetSelectMode
+    const api = (window as unknown as { __cogniaOverlay: OverlayApi }).__cogniaOverlay
+    setMode(true)
+    expect(api.isActive()).toBe(true)
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))
+    expect(api.isActive()).toBe(false)
+  })
+})
+
+type Win = Record<string, unknown> & {
+  __cogniaSnapshot: (optsJson?: string) => string
+  __cogniaAct: (ref: string, action: string, argsJson: string) => string
+  __cogniaDrainConsole: () => string
+  __cogniaDrainNetwork: () => string
+  __cogniaHasText: (text: string) => boolean
+  __cogniaHasSelector: (selector: string) => boolean
+  __cogniaOverlay: {
+    resolveRef: (ref: string) => unknown
+    installNetworkHook: () => void
+    hasText: (text: string) => boolean
+    parseKeyChord: (raw: string) => {
+      ctrlKey: boolean
+      shiftKey: boolean
+      altKey: boolean
+      metaKey: boolean
+      key: string
+    }
+    networkState: () => { pending: number; completed: number }
+    absoluteHttpUrl: (u: string) => string | null
+    navTo: (u: string) => boolean
+    makeWindowStub: () => {
+      closed: boolean
+      close: () => void
+      location: { href: string; assign: (u: string) => boolean }
+    }
+    scheduleNavReport: () => void
+    signalLoaded: () => void
+    installLoadHook: () => void
+  }
+}
+
+function win(): Win {
+  return window as unknown as Win
+}
+
+describe("__cogniaSnapshot", () => {
+  beforeEach(() => {
+    document.body.innerHTML = `
+      <button id="go">Go</button>
+      <input type="text" value="hi" />
+      <a href="#">link</a>
+    `
+    install()
+  })
+
+  it("emits a generation + ref'd interactive nodes", () => {
+    const parsed = JSON.parse(win().__cogniaSnapshot())
+    expect(parsed.ok).toBe(true)
+    expect(parsed.snapshot.generation).toBeGreaterThan(0)
+    const roles = parsed.snapshot.nodes.map((n: { role: string }) => n.role)
+    expect(roles).toEqual(expect.arrayContaining(["button", "textbox", "link"]))
+    const button = parsed.snapshot.nodes.find((n: { role: string }) => n.role === "button")
+    expect(button.name).toBe("Go")
+    expect(typeof button.ref).toBe("string")
+  })
+
+  it("resolves a ref back to its element", () => {
+    const parsed = JSON.parse(win().__cogniaSnapshot())
+    const ref = parsed.snapshot.nodes[0].ref
+    expect(win().__cogniaOverlay.resolveRef(ref)).toBeInstanceOf(HTMLElement)
+  })
+})
+
+describe("__cogniaAct", () => {
+  beforeEach(() => {
+    document.body.innerHTML = `<input id="n" type="text" /><button id="b">B</button>`
+    install()
+  })
+  function refFor(role: string) {
+    const snap = JSON.parse(win().__cogniaSnapshot()).snapshot
+    return snap.nodes.find((n: { role: string }) => n.role === role).ref
+  }
+  it("fills an input via the native setter and fires input/change", () => {
+    const fired: string[] = []
+    const input = document.getElementById("n") as HTMLInputElement
+    input.addEventListener("input", () => fired.push("input"))
+    input.addEventListener("change", () => fired.push("change"))
+    const res = JSON.parse(
+      win().__cogniaAct(refFor("textbox"), "fill", JSON.stringify({ text: "abc" }))
+    )
+    expect(res.ok).toBe(true)
+    expect(input.value).toBe("abc")
+    expect(fired).toEqual(["input", "change"])
+  })
+  it("clicks a button", () => {
+    let clicked = false
+    document.getElementById("b")!.addEventListener("click", () => (clicked = true))
+    const res = JSON.parse(win().__cogniaAct(refFor("button"), "click", "{}"))
+    expect(res.ok).toBe(true)
+    expect(clicked).toBe(true)
+  })
+  it("replays the native click-click-dblclick sequence", () => {
+    const button = document.getElementById("b") as HTMLButtonElement
+    const events: string[] = []
+    button.addEventListener("click", () => events.push("click"))
+    button.addEventListener("dblclick", () => events.push("dblclick"))
+
+    const res = JSON.parse(win().__cogniaAct(refFor("button"), "double_click", "{}"))
+
+    expect(res.ok).toBe(true)
+    expect(events).toEqual(["click", "click", "dblclick"])
+  })
+  it("returns an error for an unknown ref", () => {
+    const res = JSON.parse(win().__cogniaAct("e999", "click", "{}"))
+    expect(res.ok).toBe(false)
+    expect(res.error).toMatch(/ref/i)
+  })
+
+  it("applies modifier flags to a click", () => {
+    let mods: { ctrl: boolean; shift: boolean } | null = null
+    document.getElementById("b")!.addEventListener("click", (e) => {
+      mods = { ctrl: (e as MouseEvent).ctrlKey, shift: (e as MouseEvent).shiftKey }
+    })
+    JSON.parse(
+      win().__cogniaAct(refFor("button"), "click", JSON.stringify({ modifiers: ["ctrl", "shift"] }))
+    )
+    expect(mods).toEqual({ ctrl: true, shift: true })
+  })
+})
+
+describe("__cogniaAct key", () => {
+  beforeEach(() => {
+    document.body.innerHTML = `<input id="n" type="text" />`
+    install()
+  })
+  function refFor(role: string) {
+    const snap = JSON.parse(win().__cogniaSnapshot()).snapshot
+    return snap.nodes.find((n: { role: string }) => n.role === role).ref
+  }
+
+  it("dispatches a named key with keydown/keyup on the ref'd element", () => {
+    const seen: Array<{ type: string; key: string }> = []
+    const input = document.getElementById("n")!
+    input.addEventListener("keydown", (e) =>
+      seen.push({ type: "down", key: (e as KeyboardEvent).key })
+    )
+    input.addEventListener("keyup", (e) => seen.push({ type: "up", key: (e as KeyboardEvent).key }))
+    const res = JSON.parse(
+      win().__cogniaAct(refFor("textbox"), "key", JSON.stringify({ key: "Enter" }))
+    )
+    expect(res.ok).toBe(true)
+    expect(seen).toEqual([
+      { type: "down", key: "Enter" },
+      { type: "up", key: "Enter" },
+    ])
+  })
+
+  it("sets modifier flags for a chord", () => {
+    let mod: { ctrl: boolean; key: string } | null = null
+    document.addEventListener("keydown", (e) => {
+      mod = { ctrl: (e as KeyboardEvent).ctrlKey, key: (e as KeyboardEvent).key }
+    })
+    JSON.parse(win().__cogniaAct("", "key", JSON.stringify({ key: "ctrl+a" })))
+    expect(mod).toEqual({ ctrl: true, key: "a" })
+  })
+
+  it("emits keypress for a printable char without modifiers", () => {
+    const types: string[] = []
+    document.addEventListener("keypress", () => types.push("keypress"))
+    JSON.parse(win().__cogniaAct("", "key", JSON.stringify({ key: "x" })))
+    expect(types).toEqual(["keypress"])
+  })
+
+  it("returns an error for an unparseable chord", () => {
+    const res = JSON.parse(win().__cogniaAct("", "key", JSON.stringify({ key: "ctrl+" })))
+    expect(res.ok).toBe(false)
+  })
+})
+
+describe("__cogniaAct scroll", () => {
+  beforeEach(() => {
+    document.body.innerHTML = `<button id="b">B</button>`
+    install()
+  })
+  it("scrolls a ref'd element into view", () => {
+    const snap = JSON.parse(win().__cogniaSnapshot()).snapshot
+    const ref = snap.nodes[0].ref
+    let scrolled = false
+    ;(win().__cogniaOverlay.resolveRef(ref) as HTMLElement).scrollIntoView = () => {
+      scrolled = true
+    }
+    const res = JSON.parse(win().__cogniaAct(ref, "scroll", "{}"))
+    expect(res.ok).toBe(true)
+    expect(scrolled).toBe(true)
+  })
+  it("page-scrolls by direction without a ref", () => {
+    const calls: Array<[number, number]> = []
+    ;(window as unknown as { scrollBy: (x: number, y: number) => void }).scrollBy = (x, y) =>
+      calls.push([x, y])
+    const res = JSON.parse(
+      win().__cogniaAct("", "scroll", JSON.stringify({ direction: "down", amount: 300 }))
+    )
+    expect(res.ok).toBe(true)
+    expect(calls).toEqual([[0, 300]])
+  })
+  it("rejects an unknown direction", () => {
+    const res = JSON.parse(
+      win().__cogniaAct("", "scroll", JSON.stringify({ direction: "sideways" }))
+    )
+    expect(res.ok).toBe(false)
+  })
+})
+
+describe("parseKeyChord", () => {
+  it("canonicalizes modifier aliases and a main key", () => {
+    install()
+    const chord = win().__cogniaOverlay.parseKeyChord("control+shift+t")
+    expect(chord).toMatchObject({ ctrlKey: true, shiftKey: true, key: "t" })
+  })
+  it("maps named keys", () => {
+    install()
+    expect(win().__cogniaOverlay.parseKeyChord("pgdn")).toMatchObject({ key: "PageDown" })
+    expect(win().__cogniaOverlay.parseKeyChord("F5")).toMatchObject({ key: "F5" })
+  })
+  it("throws on two main keys", () => {
+    install()
+    expect(() => win().__cogniaOverlay.parseKeyChord("a+b")).toThrow(/more than one/)
+  })
+})
+
+describe("snapshot richness", () => {
+  it("descends shadow DOM", () => {
+    install()
+    const host = document.createElement("div")
+    document.body.appendChild(host)
+    const root = host.attachShadow({ mode: "open" })
+    root.innerHTML = `<button>Shadow Btn</button>`
+    const snap = JSON.parse(win().__cogniaSnapshot()).snapshot
+    const names = snap.nodes.map((n: { name: string }) => n.name)
+    expect(names).toContain("Shadow Btn")
+  })
+
+  it("includes salient text only when includeText is set", () => {
+    document.body.innerHTML = `<h1>Title Here</h1><button>Go</button>`
+    install()
+    const lean = JSON.parse(win().__cogniaSnapshot()).snapshot
+    expect(lean.nodes.some((n: { role: string }) => n.role === "heading")).toBe(false)
+    const rich = JSON.parse(win().__cogniaSnapshot(JSON.stringify({ includeText: true }))).snapshot
+    const heading = rich.nodes.find((n: { role: string }) => n.role === "heading")
+    expect(heading.name).toBe("Title Here")
+  })
+})
+
+describe("hasSelector + networkState", () => {
+  it("reports selector presence", () => {
+    document.body.innerHTML = `<div class="ready"></div>`
+    install()
+    expect(win().__cogniaHasSelector(".ready")).toBe(true)
+    expect(win().__cogniaHasSelector(".missing")).toBe(false)
+  })
+
+  it("tracks pending and completed fetch counts", async () => {
+    install()
+    let resolveFetch: (v: { status: number; ok: boolean }) => void = () => {}
+    ;(window as unknown as { fetch: unknown }).fetch = () =>
+      new Promise((r) => {
+        resolveFetch = r
+      })
+    win().__cogniaOverlay.installNetworkHook()
+    const p = (window as unknown as { fetch: () => Promise<unknown> }).fetch()
+    expect(win().__cogniaOverlay.networkState().pending).toBe(1)
+    resolveFetch({ status: 200, ok: true })
+    await p
+    const st = win().__cogniaOverlay.networkState()
+    expect(st.pending).toBe(0)
+    expect(st.completed).toBe(1)
+  })
+})
+
+describe("console + network capture", () => {
+  beforeEach(() => {
+    document.body.innerHTML = ""
+    install()
+  })
+  it("buffers console.error and drains it", () => {
+    console.error("boom", 42)
+    const entries = JSON.parse(win().__cogniaDrainConsole())
+    const last = entries[entries.length - 1]
+    expect(last.level).toBe("error")
+    expect(last.text).toContain("boom")
+    expect(JSON.parse(win().__cogniaDrainConsole())).toHaveLength(0)
+  })
+  it("detects visible page text via __cogniaHasText", () => {
+    document.body.innerHTML = `<p>Loading complete</p>`
+    install()
+    expect(win().__cogniaHasText("Loading complete")).toBe(true)
+    expect(win().__cogniaHasText("nope")).toBe(false)
+  })
+
+  it("records a fetch call", async () => {
+    ;(window as unknown as { fetch: unknown }).fetch = () =>
+      Promise.resolve({ status: 200, ok: true })
+    win().__cogniaOverlay.installNetworkHook()
+    await (window as unknown as { fetch: (u: string, i: unknown) => Promise<unknown> }).fetch(
+      "https://x.test/api",
+      { method: "POST" }
+    )
+    const net = JSON.parse(win().__cogniaDrainNetwork())
+    expect(net[net.length - 1]).toMatchObject({
+      url: "https://x.test/api",
+      method: "POST",
+      status: 200,
+      ok: true,
+    })
+  })
+})
+
+describe("navigation plumbing", () => {
+  beforeEach(() => {
+    document.body.innerHTML = ""
+    delete (window as unknown as Record<string, unknown>).__cogniaNavTo
+    delete (window as unknown as Record<string, unknown>).__cogniaSignalNav
+    install()
+  })
+
+  it("absoluteHttpUrl resolves relative urls and rejects non-http schemes", () => {
+    const api = win().__cogniaOverlay
+    expect(api.absoluteHttpUrl("/next")).toBe("http://localhost/next")
+    expect(api.absoluteHttpUrl("https://example.com/a")).toBe("https://example.com/a")
+    expect(api.absoluteHttpUrl("javascript:alert(1)")).toBeNull()
+    expect(api.absoluteHttpUrl("file:///etc/passwd")).toBeNull()
+  })
+
+  it("window.open navigates in-view and returns a live stub", () => {
+    const navTo = jest.fn()
+    ;(window as unknown as Record<string, unknown>).__cogniaNavTo = navTo
+    const stub = window.open("https://example.com/popup") as unknown as {
+      closed: boolean
+      close: () => void
+      location: { href: string }
+    }
+    expect(navTo).toHaveBeenCalledWith("https://example.com/popup")
+    expect(stub).not.toBeNull()
+    // Deferred-popup pattern: writing the stub's location navigates in-view.
+    stub.location.href = "https://example.com/deferred"
+    expect(navTo).toHaveBeenCalledWith("https://example.com/deferred")
+    stub.close()
+    expect(stub.closed).toBe(true)
+  })
+
+  it("window.open without a url only returns the stub", () => {
+    const navTo = jest.fn()
+    ;(window as unknown as Record<string, unknown>).__cogniaNavTo = navTo
+    const stub = window.open()
+    expect(stub).not.toBeNull()
+    expect(navTo).not.toHaveBeenCalled()
+  })
+
+  it("rewrites target=_blank anchor clicks to in-view navigation", () => {
+    const navTo = jest.fn()
+    ;(window as unknown as Record<string, unknown>).__cogniaNavTo = navTo
+    document.body.innerHTML = `<a href="https://example.com/out" target="_blank"><span>out</span></a>`
+    const span = document.querySelector("span")!
+    span.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))
+    expect(navTo).toHaveBeenCalledWith("https://example.com/out")
+  })
+
+  it("leaves _blank clicks alone when the page already handled them", () => {
+    const navTo = jest.fn()
+    ;(window as unknown as Record<string, unknown>).__cogniaNavTo = navTo
+    document.body.innerHTML = `<a href="https://example.com/out" target="_blank">out</a>`
+    const a = document.querySelector("a")!
+    a.addEventListener("click", (e) => e.preventDefault())
+    a.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))
+    expect(navTo).not.toHaveBeenCalled()
+  })
+
+  it("ignores normal (non-_blank) anchor clicks", () => {
+    const navTo = jest.fn()
+    ;(window as unknown as Record<string, unknown>).__cogniaNavTo = navTo
+    document.body.innerHTML = `<a href="https://example.com/self">self</a>`
+    document
+      .querySelector("a")!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))
+    expect(navTo).not.toHaveBeenCalled()
+  })
+
+  it("reports SPA pushState url changes (debounced, deduped)", () => {
+    jest.useFakeTimers()
+    try {
+      const signal = jest.fn()
+      ;(window as unknown as Record<string, unknown>).__cogniaSignalNav = signal
+      window.history.pushState({}, "", "/spa-page")
+      window.history.replaceState({}, "", "/spa-page-2")
+      jest.advanceTimersByTime(200)
+      expect(signal).toHaveBeenCalledTimes(1)
+      expect(signal).toHaveBeenCalledWith({ url: "http://localhost/spa-page-2" })
+      // No further URL change → no further report.
+      jest.advanceTimersByTime(500)
+      expect(signal).toHaveBeenCalledTimes(1)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+})
+
+describe("load-complete signal", () => {
+  beforeEach(() => {
+    document.body.innerHTML = ""
+    delete (window as unknown as Record<string, unknown>).__cogniaLoadHookInstalled
+    delete (window as unknown as Record<string, unknown>).__cogniaSignalLoaded
+  })
+
+  it("reports the page url once the document is already complete", () => {
+    jest.useFakeTimers()
+    try {
+      const signal = jest.fn()
+      ;(window as unknown as Record<string, unknown>).__cogniaSignalLoaded = signal
+      // jsdom documents report readyState "complete" → immediate (deferred) fire.
+      install()
+      expect(signal).not.toHaveBeenCalled() // deferred a tick
+      jest.advanceTimersByTime(1)
+      expect(signal).toHaveBeenCalledWith({ url: window.location.href })
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("waits for the window load event while the document is still loading", () => {
+    jest.useFakeTimers()
+    const readyState = Object.getOwnPropertyDescriptor(Document.prototype, "readyState")
+    try {
+      Object.defineProperty(document, "readyState", { value: "loading", configurable: true })
+      const signal = jest.fn()
+      ;(window as unknown as Record<string, unknown>).__cogniaSignalLoaded = signal
+      install()
+      jest.advanceTimersByTime(1)
+      expect(signal).not.toHaveBeenCalled() // not loaded yet
+      window.dispatchEvent(new Event("load"))
+      jest.advanceTimersByTime(1)
+      expect(signal).toHaveBeenCalledWith({ url: window.location.href })
+    } finally {
+      if (readyState) Object.defineProperty(document, "readyState", readyState)
+      else delete (document as unknown as Record<string, unknown>).readyState
+      jest.useRealTimers()
+    }
+  })
+
+  it("installs the window load listener only once per document", () => {
+    const addSpy = jest.spyOn(window, "addEventListener")
+    try {
+      Object.defineProperty(document, "readyState", { value: "loading", configurable: true })
+      install()
+      install() // second init-script run against the same window
+      const loadListeners = addSpy.mock.calls.filter(([type]) => (type as string) === "load")
+      expect(loadListeners).toHaveLength(1)
+    } finally {
+      addSpy.mockRestore()
+      Object.defineProperty(document, "readyState", { value: "complete", configurable: true })
+    }
+  })
+})
+
+// --- Component-aware enrichment (React fiber) -------------------------------
+
+type Fiber = {
+  type: unknown
+  memoizedProps?: Record<string, unknown>
+  return: Fiber | null
+}
+type RichOverlay = {
+  buildPayload: (el: Element) => Record<string, unknown>
+  componentInfo: (
+    el: Element
+  ) => { name: string | null; stack: string | null; props: Record<string, string> | null } | null
+  shallowProps: (props: unknown) => Record<string, string> | null
+  readSourceHint: (el: Element) => { path: string; line: number; column?: number } | null
+  showSelection: (el: Element, payload: unknown) => void
+  clearSelection: () => void
+  selectedElement: () => Element | null
+}
+const rich = () => install() as unknown as RichOverlay
+
+/** Attach a fake React fiber to a DOM node the way React does (`__reactFiber$…`). */
+function attachFiber(el: Element, fiber: Fiber) {
+  ;(el as unknown as Record<string, unknown>)["__reactFiber$test"] = fiber
+}
+
+function fiberChain(el: Element) {
+  const app: Fiber = { type: function App() {}, memoizedProps: {}, return: null }
+  const form: Fiber = { type: function CheckoutForm() {}, memoizedProps: {}, return: app }
+  const submit: Fiber = {
+    type: function SubmitButton() {},
+    memoizedProps: {
+      variant: "primary",
+      disabled: false,
+      label: "提交订单",
+      onClick: () => {},
+      user: { id: 1 },
+    },
+    return: form,
+  }
+  const host: Fiber = { type: "button", memoizedProps: { className: "btn" }, return: submit }
+  attachFiber(el, host)
+}
+
+describe("overlay.injected componentInfo", () => {
+  it("walks the fiber tree for the owning component name, stack and shallow props", () => {
+    document.body.innerHTML = `<button id="go">go</button>`
+    const api = rich()
+    const btn = document.getElementById("go")!
+    fiberChain(btn)
+    const info = api.componentInfo(btn)!
+    expect(info.name).toBe("SubmitButton")
+    expect(info.stack).toBe("App > CheckoutForm > SubmitButton")
+    // functions + React elements dropped; nested object flattened to a marker.
+    expect(info.props).toEqual({
+      variant: "primary",
+      disabled: "false",
+      label: "提交订单",
+      user: "[Object]",
+    })
+  })
+
+  it("resolves memo / forwardRef display names", () => {
+    document.body.innerHTML = `<span id="x">x</span>`
+    const api = rich()
+    const el = document.getElementById("x")!
+    const inner = { displayName: "Fancy" }
+    attachFiber(el, { type: { $$typeof: Symbol.for("react.memo"), type: inner }, return: null })
+    expect(api.componentInfo(el)!.name).toBe("Fancy")
+  })
+
+  it("returns null when the node has no fiber (non-React page)", () => {
+    document.body.innerHTML = `<button id="go">go</button>`
+    const api = rich()
+    expect(api.componentInfo(document.getElementById("go")!)).toBeNull()
+  })
+})
+
+describe("overlay.injected shallowProps", () => {
+  it("caps the number of keys and truncates long values", () => {
+    const api = rich()
+    const props: Record<string, unknown> = { long: "x".repeat(200) }
+    for (let i = 0; i < 20; i++) props["k" + i] = i
+    const out = api.shallowProps(props)!
+    expect(Object.keys(out).length).toBeLessThanOrEqual(10)
+    expect((out.long as string).length).toBeLessThanOrEqual(81) // 80 + ellipsis
+  })
+
+  it("drops children, functions and React elements", () => {
+    const api = rich()
+    const out = api.shallowProps({
+      children: "ignored",
+      onClick: () => {},
+      node: { $$typeof: Symbol.for("react.element") },
+      keep: 3,
+    })
+    expect(out).toEqual({ keep: "3" })
+  })
+})
+
+describe("overlay.injected readSourceHint", () => {
+  it("reads react-dev-inspector attributes off the node", () => {
+    document.body.innerHTML = `<button id="go" data-inspector-relative-path="src/App.tsx" data-inspector-line="42" data-inspector-column="6">go</button>`
+    const api = rich()
+    expect(api.readSourceHint(document.getElementById("go")!)).toEqual({
+      path: "src/App.tsx",
+      line: 42,
+      column: 6,
+    })
+  })
+
+  it("falls back to a near ancestor and omits a missing column", () => {
+    document.body.innerHTML = `<div data-inspector-relative-path="src/Card.tsx" data-inspector-line="7"><button id="go">go</button></div>`
+    const api = rich()
+    expect(api.readSourceHint(document.getElementById("go")!)).toEqual({
+      path: "src/Card.tsx",
+      line: 7,
+    })
+  })
+
+  it("returns null when no inspector attributes are present", () => {
+    document.body.innerHTML = `<button id="go">go</button>`
+    const api = rich()
+    expect(api.readSourceHint(document.getElementById("go")!)).toBeNull()
+  })
+})
+
+describe("overlay.injected buildPayload enrichment", () => {
+  it("attaches component fields + framework when a fiber is present", () => {
+    document.body.innerHTML = `<button id="go">go</button>`
+    const api = rich()
+    const btn = document.getElementById("go")!
+    fiberChain(btn)
+    const payload = api.buildPayload(btn)
+    expect(payload.componentName).toBe("SubmitButton")
+    expect(payload.componentStack).toBe("App > CheckoutForm > SubmitButton")
+    expect(payload.framework).toBe("react")
+    expect(payload.props).toMatchObject({ variant: "primary" })
+  })
+
+  it("omits component fields on a non-React node", () => {
+    document.body.innerHTML = `<button id="go">go</button>`
+    const api = rich()
+    const payload = api.buildPayload(document.getElementById("go")!)
+    expect(payload.componentName).toBeUndefined()
+    expect(payload.framework).toBeUndefined()
+  })
+})
+
+// --- In-page info panel ----------------------------------------------------
+
+const PANEL = "#__cognia-info-panel"
+const BOX = "#__cognia-select-box"
+
+describe("overlay.injected info panel", () => {
+  it("draws the selection box + basic panel on pick, and clears it", () => {
+    document.body.innerHTML = `<button id="go">go</button>`
+    const api = rich()
+    ;(window as unknown as { __cogniaSignal: () => void }).__cogniaSignal = () => {}
+    const btn = document.getElementById("go")!
+    fiberChain(btn)
+    ;(window as unknown as { __cogniaSetSelectMode: (on: boolean) => void }).__cogniaSetSelectMode(
+      true
+    )
+    btn.click()
+
+    const panel = document.querySelector(PANEL)!
+    expect(panel).toBeTruthy()
+    expect(document.querySelector(BOX)).toBeTruthy()
+    expect(panel.textContent).toContain("<SubmitButton>")
+    // Basic view: no detail lines yet.
+    expect(panel.textContent).not.toContain("selector:")
+
+    ;(window as unknown as { __cogniaClearSelection: () => void }).__cogniaClearSelection()
+    expect(document.querySelector(PANEL)).toBeNull()
+    expect(document.querySelector(BOX)).toBeNull()
+    expect(api.selectedElement()).toBeNull()
+  })
+
+  it("expands to detailed fields when the toggle is clicked", () => {
+    document.body.innerHTML = `<button id="go">go</button>`
+    rich()
+    ;(window as unknown as { __cogniaSignal: () => void }).__cogniaSignal = () => {}
+    const btn = document.getElementById("go")!
+    fiberChain(btn)
+    ;(window as unknown as { __cogniaSetSelectMode: (on: boolean) => void }).__cogniaSetSelectMode(
+      true
+    )
+    btn.click()
+
+    const toggle = document.querySelector("[data-cognia-toggle]") as HTMLButtonElement
+    toggle.click()
+    const panel = document.querySelector(PANEL)!
+    expect(panel.textContent).toContain("selector:")
+    expect(panel.textContent).toContain("stack:")
+    expect(panel.textContent).toContain("props:")
+  })
+
+  it("shows localized toggle labels once React pushes them", () => {
+    document.body.innerHTML = `<button id="go">go</button>`
+    const api = rich()
+    api.showSelection(document.getElementById("go")!, {
+      tagName: "button",
+      selector: "#go",
+      rect: { width: 10, height: 10 },
+    })
+    // Pre-label fallback is the bare chevron.
+    expect(document.querySelector("[data-cognia-toggle]")!.textContent).toBe("▾")
+    ;(window as unknown as { __cogniaSetPanelLabels: (j: string) => void }).__cogniaSetPanelLabels(
+      JSON.stringify({ details: "详情", collapse: "收起" })
+    )
+    expect(document.querySelector("[data-cognia-toggle]")!.textContent).toContain("详情")
+  })
+
+  it("drops the overlay when the tracked element unmounts, on the next scroll", () => {
+    const raf = jest
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((cb: FrameRequestCallback) => {
+        cb(0)
+        return 0
+      })
+    try {
+      document.body.innerHTML = `<button id="go">go</button>`
+      const api = rich()
+      api.showSelection(document.getElementById("go")!, {
+        tagName: "button",
+        selector: "#go",
+        rect: { width: 10, height: 10 },
+      })
+      expect(document.querySelector(BOX)).toBeTruthy()
+      // Element unmounts, then a scroll fires: the stale overlay is torn down.
+      document.body.innerHTML = ""
+      document.dispatchEvent(new Event("scroll", { bubbles: true }))
+      expect(api.selectedElement()).toBeNull()
+      expect(document.querySelector(BOX)).toBeNull()
+    } finally {
+      raf.mockRestore()
+    }
+  })
+
+  it("never selects overlay chrome while picking", () => {
+    document.body.innerHTML = `<div data-cognia-chrome="1"><button id="chrome-btn">x</button></div><button id="go">go</button>`
+    rich()
+    const received: unknown[] = []
+    ;(window as unknown as { __cogniaSignal: (p: unknown) => void }).__cogniaSignal = (p) =>
+      received.push(p)
+    ;(window as unknown as { __cogniaSetSelectMode: (on: boolean) => void }).__cogniaSetSelectMode(
+      true
+    )
+    // A click inside our own chrome is ignored…
+    document.getElementById("chrome-btn")!.click()
+    expect(received).toHaveLength(0)
+    // …a real element still emits.
+    document.getElementById("go")!.click()
+    expect(received).toHaveLength(1)
+  })
+})

@@ -1,0 +1,364 @@
+{
+  "actions": {
+    "abortMerge": "Abort Merge",
+    "addToGitignore": "Add to .gitignore",
+    "cancel": "Cancel",
+    "copyPath": "Copy Path",
+    "discard": "Discard Changes",
+    "discardAll": "Discard All Changes",
+    "discardHunk": "Discard Hunk",
+    "fetch": "Fetch",
+    "fetchPrune": "Fetch (Prune)",
+    "forcePush": "Force Push (with lease)",
+    "more": "More actions",
+    "openChanges": "Open Changes",
+    "publish": "Publish Branch",
+    "pull": "Pull",
+    "pullRebase": "Pull (Rebase)",
+    "push": "Push",
+    "refresh": "Refresh",
+    "restore": "Restore (to HEAD)",
+    "stage": "Stage Changes",
+    "stageAll": "Stage All Changes",
+    "stageHunk": "Stage Hunk",
+    "sync": "Synchronize Changes",
+    "undoLastCommit": "Undo Last Commit",
+    "unstage": "Unstage Changes",
+    "unstageAll": "Unstage All Changes",
+    "unstageHunk": "Unstage Hunk",
+    "viewBlame": "View Blame",
+    "viewHistory": "View File History"
+  },
+  "blame": {
+    "empty": "No blame information",
+    "loading": "Loading blame…",
+    "title": "Blame · {path}",
+    "uncommitted": "Uncommitted"
+  },
+  "clone": {
+    "authHelp": "Sign in with your Git credential manager or SSH agent, then retry.",
+    "authRetry": "Retry after Signing In",
+    "browse": "Choose destination",
+    "browseFailed": "Could not open the folder picker",
+    "cloning": "Cloning…",
+    "description": "Enter a remote URL and choose the directory that should contain the cloned repository.",
+    "destinationLabel": "Destination",
+    "destinationPlaceholder": "/path/to/repository",
+    "failed": "Failed to clone repository",
+    "open": "Clone Repository",
+    "submit": "Clone",
+    "title": "Clone Repository",
+    "urlLabel": "Repository URL",
+    "urlPlaceholder": "https://example.com/team/repository.git"
+  },
+  "branches": {
+    "create": "Create Branch",
+    "delete": "Delete Branch",
+    "detached": "Detached HEAD",
+    "empty": "No branches found",
+    "newName": "New branch name",
+    "remote": "remote",
+    "rename": "Rename Branch",
+    "renameTo": "Rename current branch to…",
+    "search": "Search branches…",
+    "switch": "Switch Branch"
+  },
+  "commit": {
+    "ai": {
+      "failed": "Failed to generate commit message",
+      "generating": "Generating message…",
+      "noStaged": "Stage changes first to generate a message",
+      "redacted": "Sensitive data was redacted before sending to the model"
+    },
+    "amend": "Commit (Amend)",
+    "autoGenerateAI": "Generate message with AI",
+    "commit": "Commit",
+    "commitAndPush": "Commit & Push",
+    "commitAndSync": "Commit & Sync",
+    "more": "More commit actions",
+    "placeholder": "Message (Ctrl+Enter to commit)",
+    "signoff": "Sign Off"
+  },
+  "commitDetail": {
+    "branchNamePlaceholder": "New branch name",
+    "checkoutAction": "Checkout",
+    "checkoutCommit": "Checkout this commit…",
+    "checkoutCommitDescription": "This switches to a detached HEAD at this commit. Create a branch from here if you plan to make changes.",
+    "checkoutCommitTitle": "Checkout commit?",
+    "createBranchAction": "Create & switch",
+    "createBranchHere": "Create branch from here…",
+    "createBranchTitle": "Create branch from this commit"
+  },
+  "compare": {
+    "empty": "No changes between the selected refs",
+    "menuItem": "Compare refs…",
+    "pickBoth": "Pick a base and a target ref to compare",
+    "selectBase": "Base ref",
+    "selectFile": "Select a file to view its diff",
+    "selectTarget": "Target ref",
+    "title": "Compare refs"
+  },
+  "conflicts": {
+    "acceptBoth": "Accept Both",
+    "acceptOurs": "Accept Current",
+    "acceptTheirs": "Accept Incoming"
+  },
+  "desktopOnly": {
+    "description": "Source control runs against the local filesystem and is available only in the desktop app.",
+    "title": "Desktop only"
+  },
+  "diff": {
+    "binary": "Binary file — diff not shown",
+    "hunkCount": "{count, plural, one {# hunk} other {# hunks}}",
+    "jumpToHunk": "Jump to hunk at line {line}",
+    "loading": "Loading diff…",
+    "selectFile": "Select a file to view its changes"
+  },
+  "discard": {
+    "confirmAction": "Discard",
+    "confirmAll": "Discard all changes in the working tree? This permanently throws away every uncommitted edit and cannot be undone.",
+    "confirmFile": "Discard changes to {file}? This permanently throws away the uncommitted edits and cannot be undone.",
+    "confirmTitle": "Discard changes?"
+  },
+  "emptyState": {
+    "initRepo": "Initialize Repository",
+    "noChanges": "No changes",
+    "noFolder": "No folder open",
+    "notARepo": "This folder is not a Git repository",
+    "openFolder": "Open Folder"
+  },
+  "errors": {
+    "checkoutFailed": "Switch branch failed: {message}",
+    "commitFailed": "Commit failed: {message}",
+    "generic": "Git operation failed: {message}",
+    "noRepo": "No repository is bound — open a folder first",
+    "pullFailed": "Pull failed: {message}",
+    "pushFailed": "Push failed: {message}"
+  },
+  "explain": {
+    "button": "Explain",
+    "copied": "Explanation copied",
+    "copy": "Copy explanation",
+    "copyFailed": "Failed to copy",
+    "empty": "No changes to explain",
+    "failed": "Failed to explain the change",
+    "generating": "Explaining change…",
+    "redacted": "Sensitive data was redacted before sending to the model",
+    "retry": "Regenerate",
+    "title": "AI explanation"
+  },
+  "forcePush": {
+    "confirmAction": "Force push",
+    "confirmDescription": "This overwrites the remote branch with your local history using --force-with-lease. It is rejected if someone else has pushed since your last fetch.",
+    "confirmTitle": "Force push with lease?"
+  },
+  "groups": {
+    "changes": "Changes",
+    "merge": "Merge Changes",
+    "staged": "Staged Changes"
+  },
+  "identity": {
+    "description": "Git needs a name and email before it can create this commit. Save them and the commit will be retried automatically.",
+    "emailLabel": "Email",
+    "emailPlaceholder": "developer@example.com",
+    "globalDescription": "Use this identity as the default for repositories on this device.",
+    "globalLabel": "Apply globally",
+    "loadFailed": "Failed to load Git identity",
+    "nameLabel": "Name",
+    "namePlaceholder": "Cognia Developer",
+    "saveAndRetry": "Save and Retry Commit",
+    "saveFailed": "Failed to save Git identity",
+    "saving": "Saving…",
+    "title": "Set Git Identity"
+  },
+  "irebase": {
+    "action": {
+      "drop": "drop",
+      "fixup": "fixup",
+      "pick": "pick",
+      "reword": "reword",
+      "squash": "squash"
+    },
+    "apply": "Start rebase",
+    "cancel": "Cancel",
+    "description": "Reorder, reword, squash, or drop commits, then apply.",
+    "empty": "No commits to rebase",
+    "fromHere": "Interactive rebase from here…",
+    "moveDown": "Move down",
+    "moveUp": "Move up",
+    "rewordPlaceholder": "New commit message",
+    "title": "Interactive rebase"
+  },
+  "remotes": {
+    "add": "Add Remote",
+    "copied": "Remote URL copied",
+    "copyFailed": "Failed to copy URL",
+    "copyUrl": "Copy URL",
+    "description": "Manage the repository's configured remotes.",
+    "empty": "No remotes configured",
+    "namePlaceholder": "Remote name (e.g. origin)",
+    "remove": "Remove Remote",
+    "title": "Remotes",
+    "urlPlaceholder": "Remote URL"
+  },
+  "reset": {
+    "cancel": "Cancel",
+    "confirmAction": "Hard reset",
+    "confirmDescription": "This permanently discards all staged and working-tree changes back to the selected commit. This cannot be undone.",
+    "confirmTitle": "Hard reset?",
+    "hard": "Hard — discard all changes",
+    "label": "Reset",
+    "mixed": "Mixed — unstage changes",
+    "soft": "Soft — keep staged changes"
+  },
+  "restore": {
+    "cancel": "Cancel",
+    "confirm": "Restore",
+    "description": "Restore {path} from a chosen source.",
+    "source": "Source (branch, tag, or commit)",
+    "sourcePlaceholder": "HEAD",
+    "title": "Restore file"
+  },
+  "review": {
+    "accept": "Accept hunk",
+    "acceptedCount": "{accepted}/{total} accepted",
+    "addComment": "Add comment",
+    "ai": {
+      "clear": "Clear AI findings",
+      "failed": "AI review failed",
+      "noFindings": "AI review found no issues",
+      "noHunks": "No changes to review",
+      "redacted": "Sensitive data was redacted before sending to the model",
+      "run": "AI review",
+      "severity": {
+        "critical": "Critical",
+        "info": "Info",
+        "warning": "Warning"
+      }
+    },
+    "applyAccepted": "Apply {count} accepted",
+    "collapse": "Collapse review",
+    "comment": "Hunk comment",
+    "commentPlaceholder": "Leave a note on this hunk…",
+    "expand": "Expand review",
+    "hunkLabel": "Hunk @ line {line}",
+    "reject": "Reject hunk",
+    "remapNotice": "{count} earlier decision(s) no longer match the current diff and were skipped.",
+    "title": "Review hunks",
+    "viewChanges": "View changes"
+  },
+  "roots": {
+    "primary": "primary",
+    "select": "Select root",
+    "switchRoot": "Switch repository root"
+  },
+  "sendDiffToChat": "Add to chat",
+  "sequencer": {
+    "abort": "Abort",
+    "cherryPick": "Cherry-pick this commit",
+    "continue": "Continue",
+    "inProgress": {
+      "cherryPick": "Cherry-pick in progress — resolve conflicts, then continue.",
+      "merge": "Merge in progress — resolve conflicts, then continue.",
+      "rebase": "Rebase in progress — resolve conflicts, then continue.",
+      "revert": "Revert in progress — resolve conflicts, then continue."
+    },
+    "mergeInto": "Merge this branch into the current branch",
+    "rebaseOnto": "Rebase current branch onto this",
+    "revert": "Revert this commit"
+  },
+  "stash": {
+    "apply": "Apply",
+    "description": "Save and restore working-tree changes.",
+    "drop": "Drop",
+    "empty": "No stashes",
+    "includeUntracked": "Include untracked files",
+    "keepIndex": "Keep staged changes",
+    "pop": "Pop",
+    "push": "Stash",
+    "pushMessage": "Stash message (optional)",
+    "title": "Stashes"
+  },
+  "status": {
+    "added": "Added",
+    "conflicted": "Conflicted",
+    "deleted": "Deleted",
+    "modified": "Modified",
+    "renamed": "Renamed",
+    "typeChanged": "Type changed",
+    "untracked": "Untracked"
+  },
+  "statusBar": {
+    "openSourceControl": "Open Source Control"
+  },
+  "tags": {
+    "create": "Create Tag",
+    "delete": "Delete Tag",
+    "description": "Create, list, and delete tags in this repository.",
+    "empty": "No tags",
+    "messagePlaceholder": "Annotation message (optional)",
+    "namePlaceholder": "Tag name (e.g. v1.0.0)",
+    "push": "Push Tag to remote",
+    "title": "Tags"
+  },
+  "timeline": {
+    "empty": "No history",
+    "filterPlaceholder": "Filter loaded commits (message, author, hash)",
+    "loadMore": "Load more",
+    "repository": "Repository",
+    "thisFile": "This File",
+    "title": "Timeline",
+    "viewGraph": "Graph view",
+    "viewList": "List view"
+  },
+  "title": "Source Control",
+  "viewSettings": {
+    "branchSort": "Branch order",
+    "branchSortMode": {
+      "default": "Default",
+      "name": "Name (A–Z)"
+    },
+    "diffMode": {
+      "inline": "Inline",
+      "sideBySide": "Side by side"
+    },
+    "diffView": "Diff view",
+    "ignoreWhitespace": "Ignore whitespace",
+    "label": "View settings",
+    "reset": "Reset to defaults",
+    "timelineMode": {
+      "graph": "Graph",
+      "list": "List"
+    },
+    "timelineView": "Timeline view"
+  },
+  "worktrees": {
+    "baseRefLabel": "Start point (optional)",
+    "baseRefPlaceholder": "HEAD, branch, tag, or commit",
+    "branchLabel": "New branch",
+    "branchPlaceholder": "feature/my-change",
+    "chooseDirectory": "Choose",
+    "count": "{count, plural, one {# worktree} other {# worktrees}}",
+    "create": "Create Worktree",
+    "created": "Worktree created",
+    "deleteBranch": "Also delete the branch",
+    "deleteBranchDescription": "Permanently delete {branch} after removing the worktree.",
+    "description": "Create and manage parallel checkouts of this repository.",
+    "detached": "Detached HEAD",
+    "empty": "No worktrees found",
+    "error": "Worktree operation failed: {message}",
+    "forceRemove": "Force removal",
+    "forceRemoveDescription": "Discard uncommitted changes in this worktree.",
+    "main": "Main",
+    "open": "Open",
+    "pathLabel": "Empty directory",
+    "pathPlaceholder": "Choose an empty directory",
+    "prune": "Prune stale",
+    "pruned": "Stale worktree records pruned",
+    "remove": "Remove Worktree",
+    "removeDescription": "Remove the linked worktree at {path}?",
+    "removed": "Worktree removed",
+    "removeTitle": "Remove worktree?",
+    "title": "Worktrees"
+  }
+}

@@ -4,9 +4,9 @@
 // alongside user-defined templates from the Dexie `a2uiTemplates` table.
 // Provides import / export / delete; editing happens in the Hub Workspace.
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { useTranslations } from "next-intl"
+import { useLocale, useTranslations } from "next-intl"
 import { DownloadIcon, UploadIcon, Trash2Icon, ExternalLinkIcon, FilePlusIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -14,14 +14,21 @@ import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { toast } from "sonner"
 import { listTemplates, upsertTemplate, deleteTemplate } from "@/lib/db/a2ui-templates"
-import { appTemplates } from "@/lib/a2ui/templates"
+import { getLocalizedTemplates } from "@/lib/a2ui/templates"
+import { defaultLocale } from "@/i18n/config"
+import { CATEGORY_I18N_MAP } from "@/lib/a2ui/constants"
 import type { A2UITemplateRow } from "@/lib/db/a2ui-types"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 export function TemplatesTab() {
   const t = useTranslations("settings.a2ui.templates")
+  const ta2ui = useTranslations("a2ui")
+  const providerLocale = useLocale()
   const [userTemplates, setUserTemplates] = useState<A2UITemplateRow[]>([])
-  const builtIns = appTemplates
+  const builtIns = useMemo(
+    () => getLocalizedTemplates(providerLocale === "zh-CN" ? "zh-CN" : defaultLocale),
+    [providerLocale]
+  )
 
   const refresh = async () => {
     const rows = await listTemplates()
@@ -176,7 +183,7 @@ export function TemplatesTab() {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="truncate text-sm font-medium">{tpl.name}</span>
-                      <Badge variant="secondary">{tpl.category}</Badge>
+                      <Badge variant="secondary">{ta2ui(CATEGORY_I18N_MAP[tpl.category]!)}</Badge>
                       <Badge>{t("builtInBadge")}</Badge>
                     </div>
                     {tpl.description ? (

@@ -4,7 +4,7 @@
 // The renderer drives the device-code flow:
 //   1. `requestCodexDeviceCode()` — surfaces user_code + verification_uri.
 //   2. Render those for the user; open a browser to verification_uri.
-//   3. `pollCodexDeviceCode(deviceCode)` on a tick (respect `interval`).
+//   3. `pollCodexDeviceCode(deviceCode, userCode)` on a tick (respect `interval`).
 //   4. On `Granted` → call `tokenResponseToCredential` and persist via
 //      `subscription_save_account` → `subscription_set_active`.
 
@@ -31,8 +31,11 @@ export async function requestCodexDeviceCode(): Promise<DeviceCodeResponse> {
   return await codexOauthRequestDeviceCode()
 }
 
-export async function pollCodexDeviceCode(deviceCode: string): Promise<PollOutcome> {
-  return await codexOauthPollDeviceCode(deviceCode)
+export async function pollCodexDeviceCode(
+  deviceCode: string,
+  userCode: string
+): Promise<PollOutcome> {
+  return await codexOauthPollDeviceCode(deviceCode, userCode)
 }
 
 export async function refreshCodexToken(refreshToken: string): Promise<TokenResponse> {

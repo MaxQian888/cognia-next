@@ -26,6 +26,9 @@ jest.mock("@/lib/connectors/tauri/commands", () => ({
 
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn().mockReturnValue(true) }))
 
+const mockTunnel = { running: false, url: null as string | null, loading: false }
+jest.mock("@/hooks/use-tunnel-status", () => ({ useTunnelStatus: () => mockTunnel }))
+
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
 import { toast } from "sonner"
@@ -52,7 +55,19 @@ function makeMockGetCurrentUserResponse(ok: boolean, username = "testbot", id = 
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockTunnel.running = false
+  mockTunnel.url = null
+  mockTunnel.loading = false
 })
+
+/** Flip the transport Select from Gateway (default) to the webhook mode. */
+async function switchToWebhook() {
+  fireEvent.click(screen.getByRole("combobox"))
+  await waitFor(() =>
+    expect(screen.getByRole("option", { name: /interactions webhook/i })).toBeInTheDocument()
+  )
+  fireEvent.click(screen.getByRole("option", { name: /interactions webhook/i }))
+}
 
 // ---------------------------------------------------------------------------
 // Tests — create new
@@ -74,9 +89,19 @@ describe("DiscordConfigDialog — create new", () => {
     expect(screen.getByRole("button", { name: /test connection/i })).toBeInTheDocument()
   })
 
-  it("renders Public Key field (optional)", () => {
+  it("hides the Public Key field in gateway mode (default) and shows intents", () => {
     render(<DiscordConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    expect(screen.queryByLabelText(/public key/i)).not.toBeInTheDocument()
+    expect(screen.getByLabelText(/gateway intents/i)).toBeInTheDocument()
+  })
+
+  it("reveals the Public Key field + interactions-only note when webhook is selected", async () => {
+    render(<DiscordConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    await switchToWebhook()
     expect(screen.getByLabelText(/public key/i)).toBeInTheDocument()
+    expect(screen.getByTestId("dc-webhook-interactions-only-note")).toBeInTheDocument()
+    // Gateway-only intents field is hidden in webhook mode.
+    expect(screen.queryByLabelText(/gateway intents/i)).not.toBeInTheDocument()
   })
 
   it("shows success status block after successful Test connection", async () => {
@@ -140,20 +165,47 @@ describe("DiscordConfigDialog — create new", () => {
     })
   })
 
-  it("does NOT write publicKey to keyring in Phase 1 (Task 4.4)", async () => {
-    // Discord Phase 1 uses Gateway transport only — the Interactions
-    // webhook path is not consumed, so persisting publicKey would create
-    // a ghost credential. The input is allowed for future-proofing but
-    // discarded on save.
+  it("persists settings.intents when a valid bitmask is entered", async () => {
     render(<DiscordConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
 
     fireEvent.change(screen.getByLabelText(/bot token/i), {
       target: { value: "my-token" },
     })
-    fireEvent.change(screen.getByLabelText(/public key/i), {
-      target: { value: "abcdef1234567890".repeat(4) },
+    fireEvent.change(screen.getByLabelText(/gateway intents/i), {
+      target: { value: "512" },
     })
+    fireEvent.click(screen.getByRole("button", { name: /create/i }))
 
+    await waitFor(() => {
+      expect(mockCreateAdapterInstance).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "discord", settings: { intents: 512 } })
+      )
+    })
+  })
+
+  it("blocks Save when intents is not a non-negative integer", async () => {
+    render(<DiscordConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+
+    fireEvent.change(screen.getByLabelText(/bot token/i), {
+      target: { value: "my-token" },
+    })
+    fireEvent.change(screen.getByLabelText(/gateway intents/i), {
+      target: { value: "-4" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /create/i }))
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalled()
+    })
+    expect(mockCreateAdapterInstance).not.toHaveBeenCalled()
+  })
+
+  it("does NOT write publicKey in gateway mode (no ghost credential)", async () => {
+    render(<DiscordConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+
+    fireEvent.change(screen.getByLabelText(/bot token/i), {
+      target: { value: "my-token" },
+    })
     fireEvent.click(screen.getByRole("button", { name: /create/i }))
 
     await waitFor(() => {
@@ -165,11 +217,81 @@ describe("DiscordConfigDialog — create new", () => {
     })
     const calls = mockConnectorsKeyringSet.mock.calls
     expect(calls.some((args: unknown[]) => args[1] === "publicKey")).toBe(false)
+    expect(mockCreateAdapterInstance).toHaveBeenCalledWith(
+      expect.objectContaining({ transportMode: "gateway" })
+    )
   })
 
-  it("renders a Phase 2 advisory next to the publicKey field", () => {
+  it("creates a webhook adapter: transportMode + publicKey + accounts", async () => {
     render(<DiscordConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
-    expect(screen.getByTestId("dc-public-key-phase2-note")).toBeInTheDocument()
+    await switchToWebhook()
+
+    fireEvent.change(screen.getByLabelText(/bot token/i), { target: { value: "my-token" } })
+    fireEvent.change(screen.getByLabelText(/public key/i), {
+      target: { value: "abcdef1234567890".repeat(4) },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /create/i }))
+
+    await waitFor(() => {
+      expect(mockCreateAdapterInstance).toHaveBeenCalledWith(
+        expect.objectContaining({
+          transportMode: "webhook",
+          credentialsRef: expect.objectContaining({ accounts: ["botToken", "publicKey"] }),
+        })
+      )
+    })
+    expect(mockConnectorsKeyringSet).toHaveBeenCalledWith(
+      "new-discord-id",
+      "publicKey",
+      "abcdef1234567890".repeat(4)
+    )
+  })
+
+  it("blocks a webhook create when the Public Key is missing", async () => {
+    render(<DiscordConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    await switchToWebhook()
+
+    fireEvent.change(screen.getByLabelText(/bot token/i), { target: { value: "my-token" } })
+    fireEvent.click(screen.getByRole("button", { name: /create/i }))
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalled()
+    })
+    expect(mockCreateAdapterInstance).not.toHaveBeenCalled()
+  })
+
+  it("shows the Interactions Endpoint URL card only for an existing webhook adapter with a tunnel", () => {
+    mockTunnel.running = true
+    mockTunnel.url = "https://tunnel.example.com"
+    const webhookRow: AdapterInstanceRow = {
+      id: "dc-wh",
+      type: "discord",
+      displayName: "Webhook Bot",
+      enabled: true,
+      transportMode: "webhook",
+      settings: {},
+      credentialsRef: {
+        keyringService: "com.cognia.platforms",
+        accounts: ["botToken", "publicKey"],
+      },
+      trigger: defaultPrivateChatPolicy(),
+      defaultMode: "auto",
+      createdAt: 1,
+      updatedAt: 2,
+    }
+    render(<DiscordConfigDialog open={true} onOpenChange={jest.fn()} row={webhookRow} />)
+    const urlInput = screen.getByTestId("dc-interactions-url-input") as HTMLInputElement
+    expect(urlInput.value).toBe("https://tunnel.example.com/webhook/discord/dc-wh")
+  })
+
+  it("does not surface the Interactions endpoint URL in gateway mode", () => {
+    render(<DiscordConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    // The URL card only renders in webhook mode; gateway shows neither the
+    // URL field nor its copy control.
+    expect(screen.queryByTestId("dc-interactions-url-input")).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: /copy interactions endpoint url/i })
+    ).not.toBeInTheDocument()
   })
 
   it("shows error toast when bot token is empty on Save", async () => {
@@ -210,6 +332,25 @@ describe("DiscordConfigDialog — edit existing", () => {
     render(<DiscordConfigDialog open={true} onOpenChange={jest.fn()} row={existingRow} />)
     const nameInput = screen.getByDisplayValue("Prod Discord Bot") as HTMLInputElement
     expect(nameInput).toBeInTheDocument()
+  })
+
+  it("pre-fills settings.intents and preserves it on Save", async () => {
+    const rowWithIntents: AdapterInstanceRow = { ...existingRow, settings: { intents: 4096 } }
+    render(<DiscordConfigDialog open={true} onOpenChange={jest.fn()} row={rowWithIntents} />)
+
+    expect(screen.getByDisplayValue("4096")).toBeInTheDocument()
+
+    fireEvent.change(screen.getByDisplayValue("Prod Discord Bot"), {
+      target: { value: "Renamed Bot" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+
+    await waitFor(() => {
+      expect(mockUpdateAdapterInstance).toHaveBeenCalledWith(
+        "dc-existing",
+        expect.objectContaining({ settings: { intents: 4096 } })
+      )
+    })
   })
 
   it("calls updateAdapterInstance on Save (not create)", async () => {

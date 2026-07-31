@@ -20,12 +20,15 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
+import { Switch } from "@/components/ui/switch"
 import type { EditorState, EditorStore } from "@/lib/workflow/editor/store"
+import { DEFAULT_MAX_CONCURRENCY } from "@/types/workflow/visual"
 import { Field, FieldGroup } from "../inspector/forms/shared"
 import { DurationField } from "../inspector/forms/shared/duration-field"
 import { TimezoneSelect } from "@/components/scheduler/timezone-select"
 import { WorkflowVariablesEditor } from "./settings/workflow-variables-editor"
 import { WorkflowCredentialsList } from "./settings/workflow-credentials-list"
+import { WorkflowPublishSection } from "./settings/workflow-publish-section"
 import { PluginCapabilitiesSection } from "./settings/plugin-capabilities-section"
 import { FanoutSubscriptionsPanel } from "@/components/workflow/library/fanout-subscriptions-panel"
 
@@ -41,6 +44,8 @@ export function SettingsTab({ useStore }: { useStore: EditorStore }) {
     variables,
     credentials,
     workflowId,
+    published,
+    syncPublication,
     setSettings,
     setVariables,
     setCredentials,
@@ -50,6 +55,8 @@ export function SettingsTab({ useStore }: { useStore: EditorStore }) {
       variables: s.baseWorkflow.variables,
       credentials: s.baseWorkflow.credentials,
       workflowId: s.baseWorkflow.id,
+      published: s.baseWorkflow.published,
+      syncPublication: s.syncPublication,
       setSettings: s.setSettings,
       setVariables: s.setVariables,
       setCredentials: s.setCredentials,
@@ -57,6 +64,7 @@ export function SettingsTab({ useStore }: { useStore: EditorStore }) {
   )
 
   const retry = settings.retryDefaults
+  const onFailure = settings.onFailure ?? { runCatchNodes: true, notify: false }
 
   return (
     <ScrollArea className="h-full" data-testid="workflow-settings-tab">
@@ -115,9 +123,11 @@ export function SettingsTab({ useStore }: { useStore: EditorStore }) {
                   id="wf-max-concurrency"
                   type="number"
                   min={1}
-                  value={settings.maxConcurrency ?? 1}
+                  value={settings.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY}
                   onChange={(e) =>
-                    setSettings({ maxConcurrency: Math.max(1, num(e.target.value, 1)) })
+                    setSettings({
+                      maxConcurrency: Math.max(1, num(e.target.value, DEFAULT_MAX_CONCURRENCY)),
+                    })
                   }
                 />
               </Field>
@@ -194,6 +204,55 @@ export function SettingsTab({ useStore }: { useStore: EditorStore }) {
 
         <Separator />
 
+        <section className="space-y-3" data-testid="workflow-onfailure-section">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {t("onFailure.title")}
+          </h4>
+          <p className="text-[11px] text-muted-foreground">{t("onFailure.hint")}</p>
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-sm">{t("onFailure.runCatchNodes.label")}</p>
+              <p className="text-[11px] text-muted-foreground">
+                {t("onFailure.runCatchNodes.hint")}
+              </p>
+            </div>
+            <Switch
+              checked={onFailure.runCatchNodes !== false}
+              onCheckedChange={(v) =>
+                setSettings({ onFailure: { ...onFailure, runCatchNodes: v } })
+              }
+              aria-label={t("onFailure.runCatchNodes.label")}
+              data-testid="wf-onfailure-runcatch"
+            />
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-sm">{t("onFailure.notify.label")}</p>
+              <p className="text-[11px] text-muted-foreground">{t("onFailure.notify.hint")}</p>
+            </div>
+            <Switch
+              checked={Boolean(onFailure.notify)}
+              onCheckedChange={(v) => setSettings({ onFailure: { ...onFailure, notify: v } })}
+              aria-label={t("onFailure.notify.label")}
+              data-testid="wf-onfailure-notify"
+            />
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-sm">{t("riskGating.label")}</p>
+              <p className="text-[11px] text-muted-foreground">{t("riskGating.hint")}</p>
+            </div>
+            <Switch
+              checked={Boolean(settings.riskGating)}
+              onCheckedChange={(v) => setSettings({ riskGating: v })}
+              aria-label={t("riskGating.label")}
+              data-testid="wf-risk-gating"
+            />
+          </div>
+        </section>
+
+        <Separator />
+
         <section className="space-y-3">
           <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             {t("timezone.label")}
@@ -224,6 +283,19 @@ export function SettingsTab({ useStore }: { useStore: EditorStore }) {
           </h4>
           <p className="text-[11px] text-muted-foreground">{t("credentials.hint")}</p>
           <WorkflowCredentialsList value={credentials ?? {}} onChange={setCredentials} />
+        </section>
+
+        <Separator />
+
+        <section className="space-y-3">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {t("publish.title")}
+          </h4>
+          <WorkflowPublishSection
+            workflowId={workflowId}
+            published={published}
+            onPublicationChange={syncPublication}
+          />
         </section>
 
         <Separator />

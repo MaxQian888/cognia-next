@@ -35,7 +35,9 @@ import {
   getPluginConsentBroker,
   resetPluginConsentBroker,
 } from "@/lib/plugin/security/consent-broker"
-import { runInDockTab } from "./run-in-dock"
+import { runInDockTab, runInTerminalDock } from "./run-in-dock"
+import { spawnFromDock } from "./spawn-orchestrator"
+import { useProjectStore } from "@/stores/project/project-store"
 import { useTerminalStore } from "@/stores/terminal/terminal-store"
 import { __clearLiveSessionsForTesting, registerLiveSession } from "./session-registry"
 import { agentTrustPluginId } from "./agent-trust"
@@ -171,5 +173,58 @@ describe("runInDockTab", () => {
     fake._fireIntegration({ kind: "command_end", exit_code: 0 })
     await pending
     expect(useTerminalStore.getState().sessions["s-1"]?.agentTrusted).toBe(true)
+  })
+})
+
+describe("runInTerminalDock", () => {
+  it("spawns a fresh tab, reveals + focuses the dock, and pipes the command", async () => {
+    const fake = makeFakeSession("spawned-1")
+    registerLiveSession(fake as unknown as Parameters<typeof registerLiveSession>[0])
+    await runInTerminalDock("ssh example.com", "/work", "chat-1")
+    const store = useTerminalStore.getState()
+    expect(store.panelOpen).toBe(true)
+    expect(store.getActiveSession(null)).toBe("spawned-1")
+    // Carriage return submits the command in the shell (no command_end wait).
+    expect(fake.write).toHaveBeenCalledWith("ssh example.com\r")
+  })
+
+  it("throws when the spawn is denied", async () => {
+    ;(spawnFromDock as jest.Mock).mockResolvedValueOnce({ kind: "denied" })
+    await expect(runInTerminalDock("ssh h", "/w", "c")).rejects.toThrow(/denied/)
+  })
+
+  it("throws with the message when the spawn errors", async () => {
+    ;(spawnFromDock as jest.Mock).mockResolvedValueOnce({ kind: "error", message: "no backend" })
+    await expect(runInTerminalDock("ssh h", "/w", "c")).rejects.toThrow(/no backend/)
+  })
+
+  it("falls back to the active project's cwd + id when none is passed", async () => {
+    const fake = makeFakeSession("spawned-1")
+    registerLiveSession(fake as unknown as Parameters<typeof registerLiveSession>[0])
+    useProjectStore.setState({
+      projects: [{ id: "p1", rootDir: "/proj/root" }],
+      activeProjectId: "p1",
+    } as never)
+    ;(spawnFromDock as jest.Mock).mockClear()
+    try {
+      await runInTerminalDock("ssh h", "   ", "chat-1")
+      const req = (spawnFromDock as jest.Mock).mock.calls[0][0].req
+      expect(req.cwd).toBe("/proj/root")
+      expect(req.projectId).toBe("p1")
+      expect(fake.write).toHaveBeenCalledWith("ssh h\r")
+    } finally {
+      useProjectStore.setState({ projects: [], activeProjectId: null } as never)
+    }
+  })
+
+  it("tolerates a spawned session that is not live (reveals, no write)", async () => {
+    // No registerLiveSession → getLiveSession returns null; must not throw.
+    ;(spawnFromDock as jest.Mock).mockResolvedValueOnce({
+      kind: "spawned",
+      sessionId: "ghost-1",
+      shell: "/bin/bash",
+    })
+    await expect(runInTerminalDock("ssh h", "/w", "c")).resolves.toBeUndefined()
+    expect(useTerminalStore.getState().panelOpen).toBe(true)
   })
 })

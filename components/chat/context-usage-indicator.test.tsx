@@ -2,16 +2,30 @@
  * @jest-environment jsdom
  */
 import React from "react"
-import { act, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import type { UIMessage } from "ai"
-import { ContextUsageIndicator, ContextWindowHeader, UsageRow } from "./context-usage-indicator"
+import {
+  CompactNowButton,
+  ContextUsageIndicator,
+  ContextWindowHeader,
+  SdkBreakdown,
+  UsageRow,
+} from "./context-usage-indicator"
 import { useChatStore } from "@/stores/chat"
+import { useSettingsStore } from "@/stores/settings"
+import { compactSession } from "@/lib/claude/ipc"
 
 // Echo translation keys (with params appended) so assertions stay stable.
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string, params?: Record<string, unknown>) =>
     params ? `${key}:${JSON.stringify(params)}` : key,
 }))
+
+jest.mock("@/lib/claude/ipc", () => ({
+  compactSession: jest.fn().mockResolvedValue(undefined),
+}))
+
+const mockedCompact = compactSession as unknown as jest.Mock
 
 const assistantWithUsage = (id: string, usage: Record<string, number>): UIMessage =>
   ({
@@ -24,6 +38,7 @@ const assistantWithUsage = (id: string, usage: Record<string, number>): UIMessag
 describe("ContextUsageIndicator", () => {
   beforeEach(() => {
     useChatStore.getState().clear()
+    useSettingsStore.setState({ settings: undefined as never })
   })
 
   it("always renders (0 used) for a fresh session with no usage", () => {
@@ -51,6 +66,56 @@ describe("ContextUsageIndicator", () => {
     // 200 + 100 + 20 + 30 = 350
     expect(node).toHaveAttribute("data-used-tokens", "350")
     expect(node).toHaveAttribute("data-max-tokens", "1000000")
+  })
+
+  it("exposes the whole-session billed token total, distinct from window occupancy", () => {
+    act(() => {
+      useChatStore.getState().replaceMessages([
+        assistantWithUsage("a-1", { inputTokens: 100, outputTokens: 50 }),
+        assistantWithUsage("a-2", {
+          inputTokens: 200,
+          outputTokens: 100,
+          cacheReadInputTokens: 20,
+          cacheCreationInputTokens: 30,
+        }),
+      ])
+    })
+    render(<ContextUsageIndicator modelId="claude-sonnet-4-6" />)
+    const node = screen.getByTestId("context-usage-indicator")
+    // Window = latest turn only (350); session = both turns billed (500).
+    expect(node).toHaveAttribute("data-used-tokens", "350")
+    expect(node).toHaveAttribute("data-session-tokens", "500")
+  })
+
+  it("skips re-rendering on message-array swaps that leave the usage signature unchanged", () => {
+    const msgs = [assistantWithUsage("a-1", { inputTokens: 100, outputTokens: 50 })]
+    act(() => {
+      useChatStore.getState().replaceMessages(msgs)
+    })
+    const onRender = jest.fn()
+    render(
+      <React.Profiler id="ctx" onRender={onRender}>
+        <ContextUsageIndicator modelId="claude-sonnet-4-6" />
+      </React.Profiler>
+    )
+    const commitsAfterMount = onRender.mock.calls.length
+    // Simulate streaming text-delta commits: fresh array ref + fresh trailing
+    // message object, but same length and same `metadata.usage` reference —
+    // exactly what `appendDelta` produces per token frame.
+    act(() => {
+      useChatStore.getState().replaceMessages([{ ...msgs[0]! }])
+    })
+    act(() => {
+      useChatStore.getState().replaceMessages([{ ...msgs[0]! }])
+    })
+    expect(onRender.mock.calls.length).toBe(commitsAfterMount)
+    // A real usage change (turn boundary) still refreshes the read-out.
+    act(() => {
+      useChatStore
+        .getState()
+        .replaceMessages([assistantWithUsage("a-1", { inputTokens: 200, outputTokens: 80 })])
+    })
+    expect(screen.getByTestId("context-usage-indicator")).toHaveAttribute("data-used-tokens", "280")
   })
 
   it("respects an explicit maxTokens override", () => {
@@ -81,6 +146,36 @@ describe("ContextUsageIndicator", () => {
     const { container } = render(<ContextUsageIndicator modelId="claude-sonnet-4-5" />)
     const button = container.querySelector("button")
     expect(button?.className).toContain("text-emerald-500")
+  })
+
+  it("backfills an estimated session cost when the SDK reports none (non-Anthropic path)", () => {
+    act(() => {
+      useChatStore
+        .getState()
+        .replaceMessages([assistantWithUsage("a-1", { inputTokens: 10_000, outputTokens: 5_000 })])
+    })
+    // gpt-4o carries no SDK total_cost_usd on the ai-sdk path, but it is priced.
+    render(<ContextUsageIndicator modelId="gpt-4o" providerId="openai" />)
+    const node = screen.getByTestId("context-usage-indicator")
+    expect(Number(node.getAttribute("data-session-cost"))).toBeGreaterThan(0)
+  })
+
+  it("sizes the window from a custom provider's declared context length", () => {
+    useSettingsStore.setState({
+      settings: {
+        customProviders: [
+          { id: "cp", customModelMetadata: { big: { id: "big", contextLength: 500_000 } } },
+        ],
+      } as never,
+    })
+    act(() => {
+      useChatStore.getState().replaceMessages([assistantWithUsage("a-1", { inputTokens: 100 })])
+    })
+    render(<ContextUsageIndicator modelId="big" providerId="cp" />)
+    const node = screen.getByTestId("context-usage-indicator")
+    // Without the override, "big" is unknown → 128k default; the custom
+    // metadata lifts it to 500k.
+    expect(node).toHaveAttribute("data-max-tokens", "500000")
   })
 })
 
@@ -116,5 +211,107 @@ describe("UsageRow", () => {
     render(<UsageRow label="Input" slot={<span>123</span>} />)
     expect(screen.getByText("Input")).toBeInTheDocument()
     expect(screen.getByText("123")).toBeInTheDocument()
+  })
+})
+
+describe("CompactNowButton", () => {
+  beforeEach(() => mockedCompact.mockClear())
+
+  it("requests compaction for the active session on click", () => {
+    render(<CompactNowButton sessionId="s1" usedTokens={5000} />)
+    fireEvent.click(screen.getByTestId("compact-now-button"))
+    expect(mockedCompact).toHaveBeenCalledWith("s1")
+  })
+
+  it("is disabled with no active session", () => {
+    render(<CompactNowButton sessionId={null} usedTokens={5000} />)
+    const btn = screen.getByTestId("compact-now-button")
+    expect(btn).toBeDisabled()
+    fireEvent.click(btn)
+    expect(mockedCompact).not.toHaveBeenCalled()
+  })
+
+  it("is disabled when the window is empty", () => {
+    render(<CompactNowButton sessionId="s1" usedTokens={0} />)
+    expect(screen.getByTestId("compact-now-button")).toBeDisabled()
+  })
+})
+
+describe("ContextUsageIndicator — SDK-authoritative usage", () => {
+  beforeEach(() => {
+    useChatStore.getState().clear()
+    useSettingsStore.setState({ settings: undefined as never })
+  })
+
+  it("prefers the SDK window size + occupancy over the message estimate", () => {
+    // A message estimate that would otherwise size the window to 1M / 350 used.
+    act(() => {
+      useChatStore
+        .getState()
+        .replaceMessages([assistantWithUsage("a-1", { inputTokens: 200, outputTokens: 150 })])
+    })
+    render(
+      <ContextUsageIndicator
+        modelId="claude-sonnet-4-6"
+        sdkUsage={{ totalTokens: 4200, maxTokens: 8000, percentage: 0.525 }}
+      />
+    )
+    const node = screen.getByTestId("context-usage-indicator")
+    // SDK values win — not the catalog 1M window or the 350-token estimate.
+    expect(node).toHaveAttribute("data-used-tokens", "4200")
+    expect(node).toHaveAttribute("data-max-tokens", "8000")
+  })
+
+  it("renders the per-category breakdown from the SDK snapshot", () => {
+    // Rendered directly: the breakdown lives inside the hover-card content which
+    // the vendored <Context> only mounts when open (mirrors how UsageRow /
+    // ContextWindowHeader are unit-tested in isolation).
+    render(
+      <SdkBreakdown
+        usage={{
+          totalTokens: 1000,
+          maxTokens: 10000,
+          percentage: 0.1,
+          systemPromptSections: [{ name: "base", tokens: 300 }],
+          mcpTools: [{ name: "t", serverName: "s", tokens: 200 }],
+          memoryFiles: [],
+        }}
+      />
+    )
+    expect(screen.getByTestId("sdk-breakdown")).toBeInTheDocument()
+    expect(screen.getByText("breakdownTitle")).toBeInTheDocument()
+    // Zero-token groups (memoryFiles) are hidden; populated groups render.
+    expect(screen.getByText("breakdownSystemPrompt")).toBeInTheDocument()
+    expect(screen.getByText("breakdownMcp")).toBeInTheDocument()
+    expect(screen.queryByText("breakdownMemory")).toBeNull()
+  })
+
+  it("renders nothing when every breakdown group is zero/absent", () => {
+    const { container } = render(
+      <SdkBreakdown usage={{ totalTokens: 0, maxTokens: 10000, percentage: 0 }} />
+    )
+    expect(container.firstChild).toBeNull()
+  })
+
+  it("hides the breakdown entirely in simplified usage-display mode", () => {
+    const { container } = render(
+      <SdkBreakdown
+        mode="simplified"
+        usage={{
+          totalTokens: 1000,
+          maxTokens: 10000,
+          percentage: 0.1,
+          systemPromptSections: [{ name: "base", tokens: 300 }],
+        }}
+      />
+    )
+    expect(container.firstChild).toBeNull()
+  })
+
+  it("falls back to the estimate when no SDK snapshot is supplied", () => {
+    render(<ContextUsageIndicator modelId="claude-sonnet-4-6" sdkUsage={null} />)
+    const node = screen.getByTestId("context-usage-indicator")
+    expect(node).toHaveAttribute("data-max-tokens", "1000000")
+    expect(screen.queryByTestId("sdk-breakdown")).toBeNull()
   })
 })

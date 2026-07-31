@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import type { EnqueueInput } from "@/lib/db/outbound-jobs"
@@ -7,6 +8,15 @@ import {
   startWorkflowProgressRunner,
 } from "./workflow-progress-runner"
 import { createFanoutSubscription, listForWorkflow } from "@/lib/db/workflow-fanout-subscriptions"
+
+// The runner fires a proactive completion notification (workflow⇄IM parity) via
+// a dynamic import of conversation-notify in emitFinal. Mock it so we can assert
+// the one-shot call without standing up the Notification Center pipe.
+const mockNotifyConversationOverIM = jest.fn(async (..._args: unknown[]) => "rec_x")
+jest.mock("@/lib/notifications/conversation-notify", () => ({
+  __esModule: true,
+  notifyConversationOverIM: (...args: unknown[]) => mockNotifyConversationOverIM(...(args as [])),
+}))
 
 function makeWorkflowSnapshot(): VisualWorkflow {
   return {
@@ -42,7 +52,7 @@ function makeWorkflowSnapshot(): VisualWorkflow {
 }
 
 async function putRun(partial: Partial<WorkflowRunRow>): Promise<WorkflowRunRow> {
-  const row: WorkflowRunRow = {
+  const base: WorkflowRunRow = {
     id: "run1",
     workflowId: "wf1",
     status: "running",
@@ -55,11 +65,56 @@ async function putRun(partial: Partial<WorkflowRunRow>): Promise<WorkflowRunRow>
       adapterId: "wecom:a",
       conversationKey: "wecom:wecom:a:room1",
       sessionId: "s1",
+      deliveryTarget: {
+        address: {
+          conversationKey: "wecom:wecom:a:room1",
+          platform: "wecom",
+          adapterId: "wecom:a",
+          scopeKind: "group",
+          containerId: "room1",
+        },
+        conversationRef: { platform: "wecom", adapterId: "wecom:a", chatId: "room1" },
+        refreshedAt: 1,
+      },
     },
     ...partial,
   }
+  // Mirror the orchestrator (orchestrator.ts): stamp the denormalised
+  // `triggeredBySource` column the progress-runner's v91 indexed liveQuery
+  // filters on, derived from the final `triggeredBy`.
+  const row: WorkflowRunRow = {
+    ...base,
+    triggeredBySource: base.triggeredBySource ?? base.triggeredBy?.source ?? "ui",
+  }
   await getDb().workflowRuns.put(row)
   return row
+}
+
+async function seedDeliveryTarget(
+  platform: "lark" | "wecom",
+  adapterId: string,
+  conversationKey: string,
+  containerId: string
+): Promise<void> {
+  await getDb().connectorConversationStates.put({
+    conversationKey,
+    adapterId,
+    activationStatus: "inactive",
+    deliveryReadiness: "unknown",
+    deliveryTarget: {
+      address: {
+        conversationKey,
+        platform,
+        adapterId,
+        scopeKind: "group",
+        containerId,
+      },
+      conversationRef: { platform, adapterId, channelId: containerId },
+      refreshedAt: 1,
+    },
+    createdAt: 1,
+    updatedAt: 1,
+  })
 }
 
 async function putEvent(ev: Partial<WorkflowRunEventRow> & { id: string }): Promise<void> {
@@ -166,7 +221,14 @@ beforeEach(async () => {
   __resetDbForTesting()
   getDb()
   await whenSeeded()
+  await Promise.all([
+    seedDeliveryTarget("lark", "lark:ops", "lark:lark:ops:oc_ops", "oc_ops"),
+    seedDeliveryTarget("wecom", "wecom:audit", "wecom:wecom:audit:audit_room", "audit_room"),
+    seedDeliveryTarget("wecom", "wecom:mirror", "wecom:wecom:mirror:c1", "c1"),
+    seedDeliveryTarget("lark", "lark:a", "lark:lark:a:c1", "c1"),
+  ])
   __resetWorkflowProgressRunnerForTesting()
+  mockNotifyConversationOverIM.mockClear()
 })
 
 afterEach(() => {
@@ -245,6 +307,46 @@ describe("workflow-progress-runner", () => {
     )
     expect(a2uiSeg).toBeDefined()
     expect(a2uiSeg!.plainTextMirror).toContain("Succeeded")
+    stop()
+  })
+
+  it("fires a proactive completion notification on terminal success", async () => {
+    await putRun({})
+    const { enqueue, jobs } = makeMockEnqueue()
+    const stop = startWorkflowProgressRunner({ enqueue })
+    await putRun({ status: "succeeded", output: { summary: "done" }, completedAt: 1_002_000 })
+    await waitFor(() => jobs.some((j) => j.idempotencyKey?.startsWith("final:run1:")))
+    await waitFor(() => mockNotifyConversationOverIM.mock.calls.length >= 1)
+    const arg = mockNotifyConversationOverIM.mock.calls[0][0] as unknown as {
+      conversationKey: string
+      level: string
+      dedupeKey: string
+    }
+    expect(arg.conversationKey).toBe("wecom:wecom:a:room1")
+    expect(arg.level).toBe("info")
+    expect(arg.dedupeKey).toBe("wf-complete:run1")
+    stop()
+  })
+
+  it("uses error level for a failed terminal status", async () => {
+    await putRun({})
+    const { enqueue, jobs } = makeMockEnqueue()
+    const stop = startWorkflowProgressRunner({ enqueue })
+    await putRun({ status: "failed", error: { message: "boom" }, completedAt: 1_002_000 })
+    await waitFor(() => jobs.some((j) => j.idempotencyKey?.startsWith("final:run1:")))
+    await waitFor(() => mockNotifyConversationOverIM.mock.calls.length >= 1)
+    const arg = mockNotifyConversationOverIM.mock.calls[0][0] as unknown as { level: string }
+    expect(arg.level).toBe("error")
+    stop()
+  })
+
+  it("does not notify for a non-IM run", async () => {
+    await putRun({ triggeredBy: undefined })
+    const { enqueue } = makeMockEnqueue()
+    const stop = startWorkflowProgressRunner({ enqueue })
+    await putRun({ triggeredBy: undefined, status: "succeeded", completedAt: 1_002_000 })
+    await new Promise((r) => setTimeout(r, 200))
+    expect(mockNotifyConversationOverIM).not.toHaveBeenCalled()
     stop()
   })
 
@@ -327,6 +429,48 @@ describe("workflow-progress-runner — cumulative mode (adapter supports edit)",
     )!
     expect(seg.plainTextMirror).toContain("Search")
     expect(seg.plainTextMirror).toContain("✓ Search")
+    stop()
+  })
+
+  it("edits commentary into the cumulative card without sending append-mode message spam", async () => {
+    await putRun({})
+    await createFanoutSubscription({
+      workflowId: "wf1",
+      adapterId: "wecom:mirror",
+      conversationKey: "wecom:wecom:mirror:c1",
+      createdBy: "settings-ui",
+    })
+    const { enqueue, jobs } = makeMockEnqueue({ entryPlatformMessageId: "status-card-1" })
+    const stop = startWorkflowProgressRunner({
+      enqueue,
+      adapterSupportsEdit: (adapterId) => adapterId === "wecom:a",
+    })
+
+    await putEvent({ id: "ev1", stepId: "step_search", type: "step_started", ts: 1_000_100 })
+    await waitFor(() => jobs.length >= 2)
+    const appendCountBeforeCommentary = jobs.filter(
+      (job) => job.adapterId === "wecom:mirror"
+    ).length
+
+    await putEvent({
+      id: "ev2",
+      stepId: "step_search",
+      type: "step_commentary",
+      ts: 1_000_200,
+      payload: { delta: "Checking the relevant files", seq: 0 },
+    })
+    await waitFor(() =>
+      jobs.some(
+        (job) =>
+          job.adapterId === "wecom:a" &&
+          job.editTargetMessageId === "status-card-1" &&
+          JSON.stringify(job.segments).includes("Checking the relevant files")
+      )
+    )
+
+    expect(jobs.filter((job) => job.adapterId === "wecom:mirror")).toHaveLength(
+      appendCountBeforeCommentary
+    )
     stop()
   })
 
@@ -566,6 +710,189 @@ describe("workflow-progress-runner — concurrency safety", () => {
     await waitFor(() => jobs.length >= 2, 3000)
 
     expect(listSubsCalls).toBe(1)
+    stop()
+  })
+})
+
+describe("workflow-progress-runner — declared checklist (pending seeding)", () => {
+  function node(id: string, type: string, label: string): VisualWorkflow["nodes"][number] {
+    return {
+      id,
+      type,
+      typeVersion: 1,
+      position: { x: 0, y: 0 },
+      data: { label, params: {} },
+    } as VisualWorkflow["nodes"][number]
+  }
+
+  function snapshotWith(
+    nodes: VisualWorkflow["nodes"],
+    edges: VisualWorkflow["edges"] = []
+  ): VisualWorkflow {
+    return { ...makeWorkflowSnapshot(), nodes, edges }
+  }
+
+  /** Mirror text of the most recent cumulative card. */
+  function lastMirror(jobs: CapturedJob[]): string {
+    const seg = jobs[jobs.length - 1].segments.find(
+      (s): s is { type: string; plainTextMirror: string } =>
+        Boolean(s) && (s as { type?: unknown }).type === "a2ui"
+    )!
+    return seg.plainTextMirror
+  }
+
+  function stepLines(mirror: string): string[] {
+    return mirror.split("\n").filter((l) => /^[✓▶◻✗⊘]/.test(l))
+  }
+
+  it("declares not-yet-started steps as pending on the very first card", async () => {
+    await putRun({})
+    const { enqueue, jobs } = makeMockEnqueue({
+      jobIdSequence: ["oqj_entry"],
+      entryPlatformMessageId: "msg-1",
+    })
+    const stop = startWorkflowProgressRunner({ enqueue, adapterSupportsEdit: () => true })
+
+    await putEvent({ id: "ev1", stepId: "step_search", type: "step_started", ts: 1_000_100 })
+    await waitFor(() => jobs.length >= 1)
+
+    const mirror = lastMirror(jobs)
+    expect(mirror).toContain("▶ Search")
+    // Declared up front even though it has emitted no event at all.
+    expect(mirror).toContain("◻ Summarize")
+    stop()
+  })
+
+  it("declares steps in topological order regardless of nodes[] array order", async () => {
+    // nodes[] is deliberately reversed vs the edge direction: a → b.
+    await putRun({
+      workflowSnapshot: snapshotWith(
+        [node("b", "ai.prompt", "Second"), node("a", "ai.prompt", "First")],
+        [{ id: "e1", source: "a", target: "b" } as VisualWorkflow["edges"][number]]
+      ),
+    })
+    const { enqueue, jobs } = makeMockEnqueue({
+      jobIdSequence: ["oqj_entry"],
+      entryPlatformMessageId: "msg-2",
+    })
+    const stop = startWorkflowProgressRunner({ enqueue, adapterSupportsEdit: () => true })
+
+    await putEvent({ id: "ev1", stepId: "a", type: "step_started", ts: 1_000_100 })
+    await waitFor(() => jobs.length >= 1)
+
+    expect(stepLines(lastMirror(jobs))).toEqual(["▶ First (running)", "◻ Second"])
+    stop()
+  })
+
+  it("keeps the declared order stable as steps transition", async () => {
+    await putRun({
+      workflowSnapshot: snapshotWith(
+        [node("b", "ai.prompt", "Second"), node("a", "ai.prompt", "First")],
+        [{ id: "e1", source: "a", target: "b" } as VisualWorkflow["edges"][number]]
+      ),
+    })
+    const { enqueue, jobs } = makeMockEnqueue({
+      jobIdSequence: ["oqj_entry", "oqj_edit"],
+      entryPlatformMessageId: "msg-3",
+    })
+    const stop = startWorkflowProgressRunner({ enqueue, adapterSupportsEdit: () => true })
+
+    // "b" starts BEFORE "a" completes — event order fights declared order.
+    await putEvent({ id: "ev1", stepId: "b", type: "step_started", ts: 1_000_100 })
+    await waitFor(() => jobs.length >= 1)
+    await putEvent({ id: "ev2", stepId: "a", type: "step_started", ts: 1_000_200 })
+    await waitFor(() => jobs.length >= 2)
+
+    // Declared order wins: "First" stays first even though "Second" started first.
+    const lines = stepLines(lastMirror(jobs))
+    expect(lines[0]).toContain("First")
+    expect(lines[1]).toContain("Second")
+    stop()
+  })
+
+  it("never declares annotation nodes — they have no executor and emit nothing", async () => {
+    await putRun({
+      workflowSnapshot: snapshotWith([
+        node("a", "ai.prompt", "Real step"),
+        node("note1", "annotation.note", "A sticky note"),
+      ]),
+    })
+    const { enqueue, jobs } = makeMockEnqueue({
+      jobIdSequence: ["oqj_entry"],
+      entryPlatformMessageId: "msg-4",
+    })
+    const stop = startWorkflowProgressRunner({ enqueue, adapterSupportsEdit: () => true })
+
+    await putEvent({ id: "ev1", stepId: "a", type: "step_started", ts: 1_000_100 })
+    await waitFor(() => jobs.length >= 1)
+
+    const mirror = lastMirror(jobs)
+    expect(mirror).toContain("▶ Real step")
+    expect(mirror).not.toContain("A sticky note")
+    stop()
+  })
+
+  it("declares trigger nodes — they execute and are already on the card today", async () => {
+    await putRun({
+      workflowSnapshot: snapshotWith(
+        [node("t1", "trigger.manual", "Manual"), node("a", "ai.prompt", "Real step")],
+        [{ id: "e1", source: "t1", target: "a" } as VisualWorkflow["edges"][number]]
+      ),
+    })
+    const { enqueue, jobs } = makeMockEnqueue({
+      jobIdSequence: ["oqj_entry"],
+      entryPlatformMessageId: "msg-5",
+    })
+    const stop = startWorkflowProgressRunner({ enqueue, adapterSupportsEdit: () => true })
+
+    await putEvent({ id: "ev1", stepId: "t1", type: "step_started", ts: 1_000_100 })
+    await waitFor(() => jobs.length >= 1)
+
+    // Trigger sorts first (topo order) rather than being appended out of order.
+    expect(stepLines(lastMirror(jobs))[0]).toContain("Manual")
+    stop()
+  })
+
+  it("still renders a card when a hand-written run row carries no workflowSnapshot", async () => {
+    // The runner already treats the snapshot as possibly-absent
+    // (`workflowName: snapshot?.name ?? "workflow"`); seeding must degrade the
+    // same way rather than throwing and costing the conversation its card.
+    await putRun({ workflowSnapshot: undefined as unknown as VisualWorkflow })
+    const { enqueue, jobs } = makeMockEnqueue({
+      jobIdSequence: ["oqj_entry"],
+      entryPlatformMessageId: "msg-7",
+    })
+    const stop = startWorkflowProgressRunner({ enqueue, adapterSupportsEdit: () => true })
+
+    await putEvent({ id: "ev1", stepId: "step_search", type: "step_started", ts: 1_000_100 })
+    await waitFor(() => jobs.length >= 1)
+
+    // Nothing to declare, but the step still folds in and the card ships.
+    expect(stepLines(lastMirror(jobs))).toEqual(["▶ step_search (running)"])
+    stop()
+  })
+
+  it("falls back to nodes[] order when the graph has a cycle instead of killing the card", async () => {
+    await putRun({
+      workflowSnapshot: snapshotWith(
+        [node("a", "ai.prompt", "Alpha"), node("b", "ai.prompt", "Beta")],
+        [
+          { id: "e1", source: "a", target: "b" } as VisualWorkflow["edges"][number],
+          { id: "e2", source: "b", target: "a" } as VisualWorkflow["edges"][number],
+        ]
+      ),
+    })
+    const { enqueue, jobs } = makeMockEnqueue({
+      jobIdSequence: ["oqj_entry"],
+      entryPlatformMessageId: "msg-6",
+    })
+    const stop = startWorkflowProgressRunner({ enqueue, adapterSupportsEdit: () => true })
+
+    await putEvent({ id: "ev1", stepId: "a", type: "step_started", ts: 1_000_100 })
+    await waitFor(() => jobs.length >= 1)
+
+    // topoSort throws on the cycle; the card still renders in nodes[] order.
+    expect(stepLines(lastMirror(jobs))).toEqual(["▶ Alpha (running)", "◻ Beta"])
     stop()
   })
 })

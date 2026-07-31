@@ -13,8 +13,9 @@
  */
 
 import type { PluginDefinition, PluginManifest } from "@/types/plugin"
-import { defineSubagent, defineAgentTeamTemplate } from "@/lib/plugin/sdk"
+import { defineSubagent, defineAgentTeamTemplate } from "@cognia/plugin-sdk"
 import { demoSharedMemoryAdapter } from "./demo-adapter"
+import { demoBalanceAdapter } from "./demo-balance-adapter"
 
 const PLUGIN_ID = "cognia-agent-team-examples"
 
@@ -56,7 +57,7 @@ const researchPair = defineAgentTeamTemplate({
   name: "Research Pair",
   description: "A researcher feeds a coder — investigate, then implement.",
   category: "research",
-  icon: "search",
+  icon: "Search",
   teammates: [
     {
       name: "Researcher",
@@ -99,7 +100,7 @@ const tddTrio = defineAgentTeamTemplate({
   name: "TDD Trio",
   description: "Researcher + coder + tester running a test-driven loop.",
   category: "development",
-  icon: "flask-conical",
+  icon: "FlaskConical",
   config: {
     governancePolicy: {
       approval: { requirePlanApproval: true, requireDelegationApproval: false },
@@ -166,11 +167,12 @@ export const manifest: PluginManifest = {
   name: "Agent Team Examples",
   version: "0.1.0",
   type: "frontend",
-  capabilities: ["subagent", "agent-team-template", "shared-memory-adapter"],
+  capabilities: ["subagent", "agent-team-template", "shared-memory-adapter", "balance-adapter"],
   main: "src/index.ts",
   subagents: [researcher, coder, tester],
   agentTeamTemplates: [researchPair, tddTrio],
   sharedMemoryAdapters: [demoSharedMemoryAdapter],
+  balanceAdapters: [demoBalanceAdapter],
 } as PluginManifest
 
 const definition: PluginDefinition = {

@@ -5,9 +5,9 @@
 import { decryptBackupPackage } from "@/lib/data/crypto"
 import { migrateEnvelope, isEncryptedEnvelope } from "@/lib/data/migrate"
 import { applyBackupPackage } from "@/lib/data/apply-package"
-import type { ImportMergeStrategy, ImportSummary } from "@/lib/data/types"
+import type { BackupManifestV3, ImportMergeStrategy, ImportSummary } from "@/lib/data/types"
 import { makeWebDavClient } from "./config"
-import { setSyncPassphrase } from "./passphrase-cache"
+import { persistSyncPassphrase, setSyncPassphrase } from "./passphrase-cache"
 
 const LATEST_POINTER = "latest.enc.cbk"
 const SNAPSHOT_RE = /^cognia-backup-.*\.enc\.cbk$/
@@ -48,12 +48,21 @@ export interface RestoreOptions {
   includeApiKey?: boolean
 }
 
+export interface RestoreFromWebDavResult {
+  summary: ImportSummary
+  /**
+   * Producing-device provenance from the envelope manifest (cleartext, so
+   * available even for pre-decryption display). Absent on pre-2026-06 files.
+   */
+  sourceDevice?: BackupManifestV3["device"]
+}
+
 /**
  * Fetch, decrypt, migrate, and apply a remote snapshot. Throws on a wrong
  * passphrase (WebCrypto `OperationError`) or a tampered file
  * (`IntegrityCheckFailedError`) — callers surface those to the user.
  */
-export async function restoreFromWebDav(opts: RestoreOptions): Promise<ImportSummary> {
+export async function restoreFromWebDav(opts: RestoreOptions): Promise<RestoreFromWebDavResult> {
   const made = await makeWebDavClient()
   if (!made) throw new Error("WebDAV sync is not configured.")
   const { client, config } = made
@@ -75,7 +84,10 @@ export async function restoreFromWebDav(opts: RestoreOptions): Promise<ImportSum
   })
 
   // The passphrase just proved itself — cache it so auto-uploads can fire this
-  // session without a second prompt.
+  // session without a second prompt; persist to the keyring when opted in.
   setSyncPassphrase(opts.passphrase)
-  return summary
+  await persistSyncPassphrase(opts.passphrase)
+  const envelopeDevice = (parsed as { manifest?: { device?: BackupManifestV3["device"] } }).manifest
+    ?.device
+  return { summary, sourceDevice: envelopeDevice ?? pkg.manifest.device }
 }

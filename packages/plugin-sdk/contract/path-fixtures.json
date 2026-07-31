@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "valid": [
+    { "input": "dist/index.js", "normalized": "dist/index.js" },
+    { "input": "./dist/index.js", "normalized": "dist/index.js" },
+    { "input": "nested\\module.js", "normalized": "nested/module.js" }
+  ],
+  "invalid": [
+    "",
+    "\u0000entry.js",
+    "/etc/passwd",
+    "\\\\server\\share\\entry.js",
+    "\\\\?\\C:\\plugins\\entry.js",
+    "C:\\plugins\\entry.js",
+    "C:entry.js",
+    "../entry.js",
+    "dist/../../entry.js",
+    "dist\\..\\entry.js",
+    "dist/%2e%2e/entry.js",
+    "dist/%2E%2E%5Centry.js",
+    "file:///tmp/entry.js"
+  ]
+}

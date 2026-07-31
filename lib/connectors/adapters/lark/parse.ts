@@ -9,6 +9,8 @@
  *   - im.chat.member.bot.deleted_v1     → kind="system" / member_removed (bot)
  *   - im.chat.member.user.added_v1      → kind="system" / member_added
  *   - im.chat.member.user.deleted_v1    → kind="system" / member_removed
+ *   - im.message.reaction.created_v1    → kind="system" / reaction_added
+ *   - im.message.reaction.deleted_v1    → kind="system" / reaction_removed
  *
  * `im.message.receive_v1` carries the only payload that produces a
  * StoredMessage downstream; the system events feed the audit log.
@@ -38,7 +40,15 @@ export interface LarkMentionId {
 
 export interface LarkMention {
   key: string
-  id: LarkMentionId
+  /**
+   * Live `im.message.receive_v1` events nest the identity
+   * (`{ open_id, user_id }`); the `/im/v1/messages` history list flattens
+   * it to a plain string discriminated by `id_type`. Both shapes reach this
+   * parser because `fetchHistory` reprojects raw list items through it.
+   */
+  id: LarkMentionId | string
+  /** History-list shape only: "open_id" | "union_id" | "user_id". */
+  id_type?: string
   name?: string
 }
 
@@ -48,9 +58,18 @@ export interface LarkSenderId {
 }
 
 export interface LarkSender {
+  /** Live-event shape (`im.message.receive_v1` push): nested ids. */
   sender_id: LarkSenderId
   sender_type?: string
   tenant_key?: string
+  /**
+   * History shape (`GET /im/v1/messages` items, wrapped into synthetic
+   * envelopes by `fetchHistory`): a flat `id` + `id_type` pair instead of
+   * the nested `sender_id`. `id_type` is `open_id` for human senders and
+   * `app_id` for bot/app senders (including our own bot's past messages).
+   */
+  id?: string
+  id_type?: string
 }
 
 export interface LarkMessage {
@@ -70,6 +89,11 @@ export interface LarkEventHeader {
   create_time?: string
   token?: string
   app_id?: string
+  /**
+   * Sender's tenant. Present on every 2.0 envelope header; in an external
+   * (cross-tenant) group this identifies which tenant the message came from.
+   */
+  tenant_key?: string
 }
 
 export interface LarkEventBody {
@@ -89,12 +113,53 @@ export interface LarkEventBody {
   operator_id?: LarkSenderId
   external?: boolean
   users?: Array<{ user_id?: LarkSenderId; name?: string }>
+  // im.message.reaction.{created,deleted}_v1
+  reaction_type?: { emoji_type?: string }
+  operator_type?: string
+  user_id?: LarkSenderId
+  app_id?: string
+  action_time?: string
 }
 
 export interface LarkEventEnvelope {
   schema?: string
   header: LarkEventHeader
   event: LarkEventBody
+}
+
+/**
+ * Pull the sender's `tenant_key` out of an inbound envelope. The 2.0 header
+ * carries it on every event; older/edge payloads only nest it under the
+ * sender (message events) or reader (read indicators), so fall back to those.
+ * Returns undefined when absent (e.g. synthetic history envelopes).
+ *
+ * Used to backfill `lastWhoamiResult.tenantKey` — the `/bot/v3/info` whoami
+ * probe cannot return it, so the first real inbound event supplies it. This
+ * is the only signal that identifies the tenant behind a cross-tenant
+ * (external-group) sender.
+ */
+export function extractTenantKey(envelope: LarkEventEnvelope): string | undefined {
+  return (
+    envelope.header?.tenant_key ||
+    envelope.event?.sender?.tenant_key ||
+    envelope.event?.reader?.tenant_key ||
+    undefined
+  )
+}
+
+/**
+ * Tenancy scope of a verified envelope, stamped onto produced events as
+ * `channelData.identityScope` (inbound) / `identityScope` (callbacks) so the
+ * principal registry can resolve `tenantKey + appId + openId` without
+ * re-touching raw payloads (plan 2026-07-24 Phase 1).
+ */
+export function identityScopeOf(
+  envelope: LarkEventEnvelope
+): { tenantKey?: string; appId?: string } | undefined {
+  const tenantKey = extractTenantKey(envelope)
+  const appId = envelope.header?.app_id
+  if (!tenantKey && !appId) return undefined
+  return { tenantKey, appId }
 }
 
 // ---------------------------------------------------------------------------
@@ -112,17 +177,140 @@ function buildPlatformIdentity(adapterId: string, openId: string): PlatformIdent
   }
 }
 
+/**
+ * Extract the open_id from either mention shape. Flat (history-list) ids
+ * only count when typed as open_id — a union_id/user_id cannot be compared
+ * against the bot's open_id, so it is dropped rather than misclassified.
+ */
+function mentionOpenId(mention: LarkMention): string | undefined {
+  if (typeof mention.id === "string") {
+    return mention.id_type === undefined || mention.id_type === "open_id" ? mention.id : undefined
+  }
+  return mention.id?.open_id
+}
+
 function detectMentions(
   selfBotOpenId: string,
   message: LarkMessage
 ): { selfMentioned: boolean; users: string[] } {
   const acc = new MentionAccumulator(selfBotOpenId)
   for (const mention of message.mentions ?? []) {
-    acc.add(mention.id?.open_id)
+    acc.add(mentionOpenId(mention))
   }
   return acc.finalize()
 }
 
+/** A single node inside a Lark `post` (rich text) paragraph. */
+interface LarkPostNode {
+  tag?: string
+  text?: string
+  href?: string
+  user_id?: string
+  user_name?: string
+  image_key?: string
+  emoji_type?: string
+}
+
+/**
+ * Flatten a Lark `post` (rich text) payload into a plain-text string plus any
+ * embedded image keys. Handles both the already-unwrapped `{title, content}`
+ * shape and the locale-keyed `{zh_cn:{…}, en_us:{…}}` shape (the locale wrapper
+ * Feishu sends on inbound). Unknown node tags contribute their `text` when
+ * present so nothing is silently dropped.
+ */
+function parseLarkPost(parsed: Record<string, unknown>): { text: string; imageKeys: string[] } {
+  let block = parsed as { title?: unknown; content?: unknown }
+  if (!Array.isArray(block.content)) {
+    for (const key of Object.keys(parsed)) {
+      const v = parsed[key] as { content?: unknown } | undefined
+      if (v && typeof v === "object" && Array.isArray(v.content)) {
+        block = v as { title?: unknown; content?: unknown }
+        break
+      }
+    }
+  }
+
+  const title = typeof block.title === "string" ? block.title : ""
+  const paragraphs = Array.isArray(block.content) ? (block.content as LarkPostNode[][]) : []
+  const imageKeys: string[] = []
+  const lines: string[] = []
+  if (title) lines.push(title)
+
+  for (const para of paragraphs) {
+    if (!Array.isArray(para)) continue
+    let line = ""
+    for (const node of para) {
+      switch (node?.tag) {
+        case "text":
+          line += node.text ?? ""
+          break
+        case "a":
+          line += node.href ? `${node.text ?? node.href} (${node.href})` : (node.text ?? "")
+          break
+        case "at":
+          line += `@${node.user_name ?? node.user_id ?? ""}`
+          break
+        case "emotion":
+          line += node.emoji_type ? `[${node.emoji_type}]` : ""
+          break
+        case "img":
+          if (node.image_key) imageKeys.push(node.image_key)
+          break
+        default:
+          if (typeof node?.text === "string") line += node.text
+      }
+    }
+    lines.push(line)
+  }
+
+  return { text: lines.join("\n").trim(), imageKeys }
+}
+
+/** Best-effort MIME guess from a file name so the segment carries a type hint. */
+function guessMimeFromName(name: string): string {
+  const dot = name.lastIndexOf(".")
+  const ext = dot >= 0 ? name.slice(dot + 1).toLowerCase() : ""
+  switch (ext) {
+    case "pdf":
+      return "application/pdf"
+    case "doc":
+      return "application/msword"
+    case "docx":
+      return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    case "xls":
+      return "application/vnd.ms-excel"
+    case "xlsx":
+      return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    case "ppt":
+      return "application/vnd.ms-powerpoint"
+    case "pptx":
+      return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    case "txt":
+      return "text/plain"
+    case "csv":
+      return "text/csv"
+    case "png":
+      return "image/png"
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg"
+    case "gif":
+      return "image/gif"
+    case "zip":
+      return "application/zip"
+    default:
+      return "application/octet-stream"
+  }
+}
+
+/**
+ * Project an inbound Lark message's content JSON into typed `MessageSegment[]`.
+ *
+ * Rich media (image / post / file / audio / media) carries only its platform
+ * media *ref* here (image_key / file_key); `inbound-media.ts:enrichLarkInboundMedia`
+ * is the async second pass that downloads the bytes and attaches
+ * `dataBase64` / `ocrText`. Stickers keep a text marker (no useful bytes).
+ */
 function buildSegments(message: LarkMessage): MessageSegment[] {
   const segments: MessageSegment[] = []
 
@@ -131,7 +319,16 @@ function buildSegments(message: LarkMessage): MessageSegment[] {
 
     switch (message.message_type) {
       case "text": {
-        const text = typeof parsed["text"] === "string" ? parsed["text"] : ""
+        let text = typeof parsed["text"] === "string" ? parsed["text"] : ""
+        // Lark replaces each @-mention in the raw text with an opaque
+        // placeholder key ("@_user_1", "@_user_2", …) and ships the display
+        // names separately in `mentions[]`. Substitute them back so the
+        // model / stored message reads "@Alice" instead of "@_user_1".
+        for (const mention of message.mentions ?? []) {
+          if (mention.key && mention.name) {
+            text = text.split(mention.key).join(`@${mention.name}`)
+          }
+        }
         if (text) {
           segments.push({ type: "text", text })
         }
@@ -141,22 +338,117 @@ function buildSegments(message: LarkMessage): MessageSegment[] {
       case "image": {
         const imageKey = typeof parsed["image_key"] === "string" ? parsed["image_key"] : ""
         if (imageKey) {
+          segments.push({ type: "image", url: imageKey, alt: "image" })
+        }
+        break
+      }
+
+      case "post": {
+        const { text, imageKeys } = parseLarkPost(parsed)
+        if (text) segments.push({ type: "markdown", md: text })
+        for (const key of imageKeys) {
+          segments.push({ type: "image", url: key, alt: "image" })
+        }
+        break
+      }
+
+      case "file": {
+        const fileKey = typeof parsed["file_key"] === "string" ? parsed["file_key"] : ""
+        const fileName = typeof parsed["file_name"] === "string" ? parsed["file_name"] : "file"
+        if (fileKey) {
           segments.push({
-            type: "image",
-            url: imageKey,
-            alt: "image",
+            type: "file",
+            url: fileKey,
+            name: fileName,
+            mimeType: guessMimeFromName(fileName),
+            sizeBytes: 0,
           })
         }
         break
       }
 
-      case "post":
-      case "file":
-      case "audio":
-      case "video":
+      case "audio": {
+        const fileKey = typeof parsed["file_key"] === "string" ? parsed["file_key"] : ""
+        const duration = typeof parsed["duration"] === "number" ? parsed["duration"] : undefined
+        if (fileKey) {
+          segments.push({
+            type: "voice",
+            url: fileKey,
+            ...(duration !== undefined ? { durationSec: Math.round(duration / 1000) } : {}),
+          })
+        }
+        break
+      }
+
+      // Feishu sends video as `media` (file_key + cover image_key); accept the
+      // legacy `video` label too.
+      case "media":
+      case "video": {
+        const fileKey = typeof parsed["file_key"] === "string" ? parsed["file_key"] : ""
+        const cover = typeof parsed["image_key"] === "string" ? parsed["image_key"] : undefined
+        const duration = typeof parsed["duration"] === "number" ? parsed["duration"] : undefined
+        if (fileKey) {
+          segments.push({
+            type: "video",
+            url: fileKey,
+            ...(cover ? { thumbnailUrl: cover } : {}),
+            ...(duration !== undefined ? { durationSec: Math.round(duration / 1000) } : {}),
+          })
+        }
+        break
+      }
+
       case "sticker": {
-        // Phase 1: represent as text with the raw type label
-        segments.push({ type: "text", text: `[${message.message_type}]` })
+        segments.push({ type: "text", text: "[sticker]" })
+        break
+      }
+
+      // ── Marker segments for share/rich types with no segment mapping ──
+      // These previously fell through to the default branch and produced an
+      // event with EMPTY segments/plainText, which in a p2p chat could
+      // trigger an AI turn on literally nothing. Each type keeps a compact
+      // text marker built from whatever the content JSON carries.
+      case "share_chat": {
+        const label = str(parsed["chat_name"]) || str(parsed["chat_id"])
+        segments.push({ type: "text", text: label ? `[shared chat: ${label}]` : "[shared chat]" })
+        break
+      }
+
+      case "share_user": {
+        const label = str(parsed["user_name"]) || str(parsed["user_id"])
+        segments.push({ type: "text", text: label ? `[shared user: ${label}]` : "[shared user]" })
+        break
+      }
+
+      case "location": {
+        // Wire shape: {"name":"...","longitude":"...","latitude":"..."}
+        // (numbers serialized as strings). Project into the typed location
+        // segment so plainText renders "[location:<name>]".
+        const lat = Number(str(parsed["latitude"]))
+        const lon = Number(str(parsed["longitude"]))
+        const name = str(parsed["name"])
+        segments.push({
+          type: "location",
+          lat: Number.isFinite(lat) ? lat : 0,
+          lon: Number.isFinite(lon) ? lon : 0,
+          ...(name ? { name } : {}),
+        })
+        break
+      }
+
+      case "todo": {
+        const label = str(parsed["summary"]) || str(parsed["task_id"])
+        segments.push({ type: "text", text: label ? `[todo: ${label}]` : "[todo]" })
+        break
+      }
+
+      case "calendar":
+      case "share_calendar_event": {
+        const label = str(parsed["summary"]) || str(parsed["title"])
+        segments.push({
+          type: "text",
+          text: label ? `[calendar event: ${label}]` : "[calendar event]",
+        })
         break
       }
 
@@ -168,6 +460,11 @@ function buildSegments(message: LarkMessage): MessageSegment[] {
   }
 
   return segments
+}
+
+/** Coerce an unknown JSON field to a trimmed string ("" when absent). */
+function str(v: unknown): string {
+  return typeof v === "string" ? v.trim() : ""
 }
 
 /**
@@ -279,6 +576,29 @@ export function parseLarkEventEnvelope(
     }
   }
 
+  // ── Message reactions (emoji added / removed) ────────────────────────
+  const reactionKinds: Record<string, "reaction_added" | "reaction_removed"> = {
+    "im.message.reaction.created_v1": "reaction_added",
+    "im.message.reaction.deleted_v1": "reaction_removed",
+  }
+  if (eventType && eventType in reactionKinds) {
+    // The reaction payload carries no chat_id — anchor the audit row to
+    // the reacted message id (same convention as read indicators above).
+    const messageId = envelope.event.message_id
+    if (!messageId) return null
+    const operator = envelope.event.user_id?.open_id
+    const emoji = envelope.event.reaction_type?.emoji_type ?? ""
+    return buildSystemEvent(
+      adapterId,
+      selfBotOpenId,
+      envelope,
+      reactionKinds[eventType],
+      messageId,
+      operator,
+      `lark.reaction:${eventType}:${emoji}:${envelope.header.event_id}`
+    )
+  }
+
   // ── Member changes (user + bot variants) ─────────────────────────────
   const memberAddRemove: Record<string, "member_added" | "member_removed"> = {
     "im.chat.member.bot.added_v1": "member_added",
@@ -308,14 +628,37 @@ export function parseLarkEventEnvelope(
   const message = envelope.event.message
   if (!sender || !message) return null
 
-  const openId = sender.sender_id?.open_id
+  // Live push events nest the sender id (`sender_id.open_id`); history items
+  // flatten it to `{id, id_type}` — `open_id` for humans, `app_id` for bots
+  // (including this bot's own past messages). Accept both so `fetchHistory`
+  // doesn't silently drop every message (proven live: the history API never
+  // returns the nested shape).
+  const openId =
+    sender.sender_id?.open_id ??
+    (typeof sender.id === "string" &&
+    sender.id.length > 0 &&
+    (sender.id_type === "open_id" || sender.id_type === "app_id")
+      ? sender.id
+      : undefined)
   if (!openId) return null
+
+  // System notices ("A invited B", recall banners, …) carry no recoverable
+  // content — dropping them here prevents an empty-plainText event from
+  // triggering an AI turn in p2p chats. (`fetchHistory` already skips
+  // msg_type=system before re-projection; this guards the live push path.)
+  if (message.message_type === "system") return null
 
   const chatId = message.chat_id
   const threadId = message.thread_id ?? undefined
 
   const conversationKey = buildConversationKey("lark", adapterId, chatId, threadId)
-  const senderIdentity = buildPlatformIdentity(adapterId, openId)
+  const senderIdentity = {
+    ...buildPlatformIdentity(adapterId, openId),
+    kind:
+      sender.id_type === "app_id" || sender.sender_type === "app" || sender.sender_type === "bot"
+        ? ("bot" as const)
+        : ("human" as const),
+  }
   const { selfMentioned, users } = detectMentions(selfBotOpenId, message)
   const segments = buildSegments(message)
   const plainText = segmentsToPlainText(segments)
@@ -324,6 +667,7 @@ export function parseLarkEventEnvelope(
     threadId !== undefined ? "thread" : message.chat_type === "p2p" ? "private" : "group"
 
   const createTimeMs = message.create_time ? parseInt(message.create_time, 10) : Date.now()
+  const identityScope = identityScopeOf(envelope)
 
   return {
     platform: "lark",
@@ -335,8 +679,23 @@ export function parseLarkEventEnvelope(
       adapterId,
       channelId: chatId,
       threadTs: threadId,
+      // Reply anchor for thread sends: Lark's create-message endpoint has
+      // no thread parameter, so `serialize.ts` must route thread sends
+      // through POST /im/v1/messages/:id/reply — which needs an om_ message
+      // id, not the thread_id. Any in-thread message is a valid anchor
+      // (`reply_in_thread: true` lands the reply in that message's thread),
+      // so carry the id of the message we just parsed.
+      ...(threadId ? { threadRootMessageId: message.message_id } : {}),
     },
     conversationKey,
+    conversationAddress: {
+      conversationKey,
+      platform: "lark",
+      adapterId,
+      scopeKind: channelKind,
+      containerId: chatId,
+      ...(threadId ? { topicId: threadId } : {}),
+    },
     sender: senderIdentity,
     channel: {
       id: conversationKey,
@@ -349,6 +708,7 @@ export function parseLarkEventEnvelope(
     mentions: { selfMentioned, users },
     timestamp: createTimeMs,
     raw: envelope,
+    ...(identityScope ? { channelData: { identityScope } } : {}),
   }
 }
 
@@ -363,18 +723,50 @@ export interface LarkBotMenuEvent {
 }
 
 /**
+ * Discriminated result of a bot-menu click (plan 2026-07-24 P4.2).
+ *
+ * `mapped` carries a synthetic `create` inbound event for the normal
+ * gate → bus → ai-run pipeline; `link` and `unknown` are terminal at the
+ * adapter (URL reply / fixed bilingual notice + audit) and MUST NOT reach
+ * the model — an unmapped `event_key` used to fall back to a model prompt,
+ * which let anyone with the menu drive arbitrary AI turns.
+ */
+export type LarkBotMenuOutcome =
+  | {
+      kind: "mapped"
+      event: NormalizedInboundEvent
+      /** Resolved from the reserved cognia.* built-ins, not an adapter row. */
+      builtIn: boolean
+      openId: string
+      eventKey: string
+      eventId: string
+      identityScope?: { tenantKey?: string; appId?: string }
+    }
+  | {
+      kind: "link"
+      command: LarkQuickCommand
+      builtIn: boolean
+      openId: string
+      eventKey: string
+      eventId: string
+      identityScope?: { tenantKey?: string; appId?: string }
+    }
+  | {
+      kind: "unknown"
+      openId: string
+      eventKey: string
+      eventId: string
+      identityScope?: { tenantKey?: string; appId?: string }
+    }
+
+/**
  * Project an `application.bot.menu_v6` envelope (a bot-menu / 快捷指令 click)
- * into a synthetic `create` inbound event so it flows through the normal
- * gate → bus → ai-run pipeline.
+ * into a `LarkBotMenuOutcome`.
  *
- * The menu event carries the operator's `open_id` but no `chat_id`, so the
- * reply targets the operator's p2p chat: `conversationRef.channelId` is set to
- * the `ou_…` open_id, which `serialize.ts:serializeOutboundAsync` resolves to
- * `receive_id_type=open_id`.
- *
- * The `event_key` is mapped to an action via `quickCommands`. A configured
- * mapping supplies the prompt / slash-command text; an unmapped key falls back
- * to its label or the raw key so the click is never silently dropped.
+ * The menu event carries the operator's `open_id` but no `chat_id`, so
+ * replies target the operator's p2p chat: `conversationRef.channelId` is set
+ * to the `ou_…` open_id, which `serialize.ts:serializeOutboundAsync` resolves
+ * to `receive_id_type=open_id`.
  *
  * Returns null for non-menu events or when operator / event_key are absent.
  */
@@ -383,41 +775,78 @@ export function parseLarkBotMenuEvent(
   selfBotOpenId: string,
   envelope: LarkEventEnvelope,
   quickCommands: LarkQuickCommand[] | undefined
-): NormalizedInboundEvent | null {
+): LarkBotMenuOutcome | null {
   if (envelope.header?.event_type !== "application.bot.menu_v6") return null
   const event = envelope.event as unknown as LarkBotMenuEvent
   const openId = event.operator?.operator_id?.open_id
   const eventKey = event.event_key
   if (!openId || !eventKey) return null
 
-  const mapped = resolveQuickCommand(quickCommands, eventKey)
-  const text = mapped?.action.value ?? mapped?.label ?? eventKey
+  const eventId = envelope.header.event_id ?? ""
+  const identityScope = identityScopeOf(envelope)
+  // Adapter-configured rows first; the reserved cognia.* built-ins fill in
+  // behind them. Which source matched is part of the outcome — the dispatch
+  // site gates built-ins on the `larkNativeSlash` batch flag, while
+  // configured rows are never gated (pre-epic behavior).
+  const configured = quickCommands?.find((command) => command.triggerKey === eventKey)
+  const mapped = configured ?? resolveQuickCommand(undefined, eventKey)
+  const builtIn = !configured && mapped !== undefined
+  if (!mapped) {
+    return {
+      kind: "unknown",
+      openId,
+      eventKey,
+      eventId,
+      ...(identityScope ? { identityScope } : {}),
+    }
+  }
+  if (mapped.action.type === "link") {
+    return {
+      kind: "link",
+      command: mapped,
+      builtIn,
+      openId,
+      eventKey,
+      eventId,
+      ...(identityScope ? { identityScope } : {}),
+    }
+  }
 
+  const text = mapped.action.value
   const conversationKey = buildConversationKey("lark", adapterId, openId)
 
   return {
-    platform: "lark",
-    adapterId,
-    selfId: selfBotOpenId,
-    messageId: `lark.menu:${envelope.header.event_id}`,
-    conversationRef: {
+    kind: "mapped",
+    builtIn,
+    openId,
+    eventKey,
+    eventId,
+    ...(identityScope ? { identityScope } : {}),
+    event: {
       platform: "lark",
       adapterId,
-      channelId: openId,
+      selfId: selfBotOpenId,
+      messageId: `lark.menu:${eventId}`,
+      conversationRef: {
+        platform: "lark",
+        adapterId,
+        channelId: openId,
+      },
+      conversationKey,
+      sender: buildPlatformIdentity(adapterId, openId),
+      channel: {
+        id: conversationKey,
+        kind: "private",
+        platformChannelId: openId,
+      },
+      segments: [{ type: "text", text }],
+      plainText: text,
+      mentions: { selfMentioned: false, users: [] },
+      timestamp: Date.now(),
+      raw: envelope,
+      kind: "create",
+      ...(identityScope ? { channelData: { identityScope } } : {}),
     },
-    conversationKey,
-    sender: buildPlatformIdentity(adapterId, openId),
-    channel: {
-      id: conversationKey,
-      kind: "private",
-      platformChannelId: openId,
-    },
-    segments: [{ type: "text", text }],
-    plainText: text,
-    mentions: { selfMentioned: false, users: [] },
-    timestamp: Date.now(),
-    raw: envelope,
-    kind: "create",
   }
 }
 
@@ -447,6 +876,10 @@ export interface LarkInteractiveAction {
   input_value?: string
   /** select_static — display label of the chosen option. */
   text?: { content?: string }
+  /** Card 2.0 form container submit — field name → submitted value. */
+  form_value?: Record<string, unknown>
+  /** Card 2.0 native checkbox / checker — checked state. */
+  checked?: boolean
 }
 
 export interface LarkInteractiveEvent {
@@ -454,6 +887,8 @@ export interface LarkInteractiveEvent {
   action?: LarkInteractiveAction
   open_message_id?: string
   open_chat_id?: string
+  /** Card 2.0 (`card.action.trigger`) nests the message/chat ids here. */
+  context?: { open_message_id?: string; open_chat_id?: string }
   tenant_key?: string
   /** Token Lark expects on the response when the bot updates the card. */
   token?: string
@@ -462,8 +897,13 @@ export interface LarkInteractiveEvent {
 }
 
 /**
- * Project an `im.interactive_message.action_triggered_v1` envelope into
- * a `ConnectorCallbackEvent` for the bus callback channel.
+ * Project an interactive-card callback envelope into a
+ * `ConnectorCallbackEvent` for the bus callback channel.
+ *
+ * Accepts both callback generations:
+ *   - `im.interactive_message.action_triggered_v1` (legacy card callback)
+ *   - `card.action.trigger` (Card 2.0 callback — nests the message/chat
+ *     ids under `event.context` and adds `form_value` / `checked`)
  *
  * The `action.value.actionId` we baked at outbound time becomes the
  * `triggerId` so `ConnectorBus.dispatchConnectorCallback` resolves the
@@ -476,7 +916,13 @@ export function parseLarkInteractiveCallback(
   selfBotOpenId: string,
   envelope: LarkEventEnvelope
 ): ConnectorCallbackEvent | null {
-  if (envelope.header?.event_type !== "im.interactive_message.action_triggered_v1") return null
+  const eventType = envelope.header?.event_type
+  if (
+    eventType !== "im.interactive_message.action_triggered_v1" &&
+    eventType !== "card.action.trigger"
+  ) {
+    return null
+  }
   const event = envelope.event as unknown as LarkInteractiveEvent
   const action = event.action
   if (!action) return null
@@ -488,7 +934,12 @@ export function parseLarkInteractiveCallback(
   let actionType: ConnectorCallbackActionType = "button"
   let value = ""
   let payload: Record<string, unknown> | undefined
-  if (action.tag === "select_static") {
+  if (action.form_value && typeof action.form_value === "object") {
+    // Card 2.0 form container submit — the whole form travels in one
+    // callback; the bridge consumes it as `actionType: "submit"`.
+    actionType = "submit"
+    payload = action.form_value
+  } else if (action.tag === "select_static") {
     actionType = "select"
     value = action.option ?? ""
     // B4 — simulated Checkbox (ADR-0009 v41). The mapper marks the wire
@@ -511,9 +962,10 @@ export function parseLarkInteractiveCallback(
   } else if (action.tag === "input") {
     actionType = "input"
     value = action.input_value ?? ""
-  } else if (action.tag === "checkbox") {
+  } else if (action.tag === "checkbox" || typeof action.checked === "boolean") {
+    // Legacy checkbox tag or a Card 2.0 native checker element.
     actionType = "checkbox"
-    value = action.option ?? ""
+    value = typeof action.checked === "boolean" ? String(action.checked) : (action.option ?? "")
   } else if (action.tag === "button") {
     actionType = "button"
     value =
@@ -523,7 +975,8 @@ export function parseLarkInteractiveCallback(
     payload = action.value
   }
 
-  const chatId = event.open_chat_id
+  const chatId = event.open_chat_id ?? event.context?.open_chat_id
+  const originatingMessageId = event.open_message_id ?? event.context?.open_message_id
   const conversationKey = chatId ? buildConversationKey("lark", adapterId, chatId) : undefined
   const user: PlatformIdentity = {
     id: `lark:${operator.open_id}`,
@@ -542,9 +995,18 @@ export function parseLarkInteractiveCallback(
     actionType,
     value,
     payload,
-    originatingMessageId: event.open_message_id,
+    originatingMessageId,
     conversationKey,
     user,
+    // Card callbacks nest tenant_key on the event body rather than the
+    // header on some generations — prefer the body, fall back to the header.
+    identityScope:
+      event.tenant_key || envelope.header?.tenant_key || envelope.header?.app_id
+        ? {
+            tenantKey: event.tenant_key ?? envelope.header?.tenant_key,
+            appId: envelope.header?.app_id,
+          }
+        : undefined,
     timestamp: envelope.header.create_time ? parseInt(envelope.header.create_time, 10) : Date.now(),
     raw: envelope,
   }

@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Coverage for `persistChunks` — the double-write step that lands chunks
  * in Dexie + the remote vector store. The re-parse path (`M1`) added an
@@ -10,7 +11,7 @@ import { persistChunks } from "./persist"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { createTwinChunk, listTwinChunksBySource } from "@/lib/db/twin-chunks"
 import { createTwinSource } from "@/lib/db/twin-sources"
-import type { IVectorStore } from "@/lib/vector/store"
+import type { IVectorStore } from "@cognia/vector/store"
 
 beforeEach(async () => {
   await getDb().delete()
@@ -108,6 +109,41 @@ describe("persistChunks", () => {
     expect(store.addedIds).toHaveLength(2)
     const persisted = await listTwinChunksBySource("src_a")
     expect(persisted).toHaveLength(2)
+  })
+
+  it("assigns deterministic vectorDocIds so a re-ingest overwrites instead of orphaning", async () => {
+    const store = fakeStore()
+    await makeSource("twin_d", "src_d")
+    const chunk = {
+      content: "Hi",
+      contentRedacted: "Hi",
+      charStart: 0,
+      charEnd: 2,
+      strategy: "paragraph" as const,
+      tokenCount: 1,
+      metadata: {},
+    }
+    const first = await persistChunks({
+      twinId: "twin_d",
+      sourceId: "src_d",
+      vectorBackend: "qdrant",
+      store,
+      chunks: [chunk],
+      embeddings: [[0.1, 0.2]],
+    })
+    expect(first.vectorDocIds).toEqual(["twin_d__src_d__0"])
+
+    // A second ingest of the same source mints the SAME id → remote upsert
+    // overwrites the prior vector rather than stranding it under a random id.
+    const second = await persistChunks({
+      twinId: "twin_d",
+      sourceId: "src_d",
+      vectorBackend: "qdrant",
+      store,
+      chunks: [chunk],
+      embeddings: [[0.3, 0.4]],
+    })
+    expect(second.vectorDocIds).toEqual(["twin_d__src_d__0"])
   })
 
   it("idempotently replaces chunks on re-parse + drops remote vectors", async () => {

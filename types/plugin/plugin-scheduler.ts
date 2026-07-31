@@ -40,12 +40,7 @@ export type PluginTaskTrigger = CronTrigger | IntervalTrigger | OnceTrigger | Ev
 export type PluginTaskStatus = "active" | "paused" | "disabled" | "completed" | "error"
 
 export type PluginTaskExecutionStatus =
-  | "pending"
-  | "running"
-  | "completed"
-  | "failed"
-  | "cancelled"
-  | "timeout"
+  "pending" | "running" | "completed" | "failed" | "cancelled" | "timeout"
 
 export interface PluginTaskResult {
   success: boolean

@@ -1,4 +1,10 @@
+/** @jest-environment jsdom */
 import { transport } from "@/lib/tauri"
+
+const mockHasNoLeakingPiiDeep = jest.fn((..._args: unknown[]) => true)
+jest.mock("@cognia/redact", () => ({
+  hasNoLeakingPiiDeep: (...args: unknown[]) => mockHasNoLeakingPiiDeep(...args),
+}))
 
 jest.mock("@tauri-apps/api/event", () => ({
   listen: jest.fn(),
@@ -12,6 +18,7 @@ import {
   defaultExportDir,
   deleteMessage,
   ensureDir,
+  compactSession,
   getSidecarStatus,
   hasApiKey,
   interruptSession,
@@ -21,12 +28,22 @@ import {
   readClaudeUserConfig,
   readTextFile,
   restartSidecar,
+  restoreSession,
   scanClaudeSkills,
   sendPluginToolResponse,
   sendPrompt,
+  sessionControl,
+  steerSession,
   subscribePluginToolExec,
   setApiKey,
+  skillsBundleUploadAbort,
+  skillsBundleUploadCommit,
+  skillsBundleUploadOpen,
+  skillsBundleUploadWrite,
+  skillsCatalogGet,
+  skillsFetchRemoteJson,
   skillsFetchRemoteMd,
+  skillsInstallAtomic,
   skillsInstallNative,
   skillsLoadRegistry,
   skillsScanDir,
@@ -34,10 +51,13 @@ import {
   skillsScanResources,
   skillsScanSecurity,
   skillsUninstallNative,
+  skillsUninstall,
   testMcpServer,
   updateMessage,
   writeAgentConfig,
   writeTextFile,
+  writeTextFileConfined,
+  ensureDirConfined,
 } from "./ipc"
 
 const TAURI_KEY = "__TAURI_INTERNALS__"
@@ -53,6 +73,7 @@ let callSpy: jest.SpiedFunction<typeof transport.call>
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockHasNoLeakingPiiDeep.mockReturnValue(true)
   setTauri(true)
   callSpy = jest.spyOn(transport, "call")
 })
@@ -99,6 +120,77 @@ describe("sendPluginToolResponse", () => {
       error: undefined,
     })
   })
+
+  it("forwards the server-issued remote execution context unchanged", async () => {
+    const context = {
+      hostId: "host-a",
+      originDeviceId: "device-a",
+      sessionId: "s1",
+      generation: 1,
+      requestId: "request-a",
+      issuedAt: 1,
+      expiresAt: 2,
+    }
+    callSpy.mockResolvedValue(undefined)
+    await sendPluginToolResponse(
+      {
+        type: "plugin_tool_response",
+        sessionId: "s1",
+        toolUseId: "t1",
+        result: "ok",
+      },
+      context
+    )
+    expect(callSpy).toHaveBeenCalledWith(
+      "claude_plugin_tool_response",
+      expect.objectContaining({ remoteExecutionContext: context })
+    )
+  })
+})
+
+describe("steerSession", () => {
+  it("uses the correlated session-control channel and requests immediate queued input", async () => {
+    let emit: ((event: unknown) => void) | undefined
+    jest.spyOn(transport, "subscribe").mockImplementation((_channel, handler) => {
+      emit = handler
+      return () => undefined
+    })
+    callSpy.mockImplementation(async (_command, payload) => {
+      const request = payload as { requestId: string }
+      queueMicrotask(() => {
+        emit?.({
+          type: "control_response",
+          sessionId: "session-1",
+          requestId: request.requestId,
+          method: "steer",
+          ok: true,
+          result: { accepted: true },
+        })
+      })
+      return undefined
+    })
+
+    await expect(steerSession("session-1", "change direction", "om-steer")).resolves.toEqual({
+      accepted: true,
+    })
+    expect(callSpy).toHaveBeenCalledWith(
+      "claude_session_control",
+      expect.objectContaining({
+        sessionId: "session-1",
+        method: "steer",
+        params: { prompt: "change direction", priority: "now", sourceMessageId: "om-steer" },
+      })
+    )
+  })
+
+  it("fails closed before transport and cannot be bypassed through generic controls", async () => {
+    mockHasNoLeakingPiiDeep.mockReturnValue(false)
+    await expect(steerSession("session-1", "user@example.com")).rejects.toThrow(/renderer PII gate/)
+    await expect(
+      sessionControl("session-1", "steer" as never, { prompt: "user@example.com" })
+    ).rejects.toThrow(/PII-gated steerSession/)
+    expect(callSpy).not.toHaveBeenCalled()
+  })
 })
 
 describe("web-mode rejection", () => {
@@ -124,6 +216,26 @@ describe("web-mode rejection", () => {
 })
 
 describe("Claude session commands", () => {
+  it("gates the complete provider-visible prompt before any send", async () => {
+    callSpy.mockResolvedValueOnce(undefined)
+    await sendPrompt("sess-1", "hello", {
+      systemPrompt: "system",
+      appendSystemPrompt: "append",
+    })
+
+    expect(mockHasNoLeakingPiiDeep).toHaveBeenCalledWith({
+      prompt: "hello",
+      systemPrompt: "system",
+      appendSystemPrompt: "append",
+    })
+
+    mockHasNoLeakingPiiDeep.mockReturnValue(false)
+    await expect(sendPrompt("sess-1", "secret")).rejects.toThrow(
+      "prompt rejected by the renderer PII gate"
+    )
+    expect(callSpy).toHaveBeenCalledTimes(1)
+  })
+
   it("sendPrompt forwards sessionId / prompt / options", async () => {
     callSpy.mockResolvedValueOnce(undefined)
     await sendPrompt("sess-1", "hello", { model: "claude-opus-4-7" })
@@ -148,6 +260,37 @@ describe("Claude session commands", () => {
     callSpy.mockResolvedValueOnce(undefined)
     await interruptSession("sess-2")
     expect(callSpy).toHaveBeenCalledWith("claude_interrupt", { sessionId: "sess-2" })
+  })
+
+  it("compactSession forwards the session id and optional focus", async () => {
+    callSpy.mockResolvedValue(undefined)
+    await compactSession("sess-3")
+    expect(callSpy).toHaveBeenCalledWith("claude_compact", {
+      sessionId: "sess-3",
+      focus: undefined,
+    })
+    await compactSession("sess-3", "the API changes")
+    expect(callSpy).toHaveBeenCalledWith("claude_compact", {
+      sessionId: "sess-3",
+      focus: "the API changes",
+    })
+  })
+
+  it("gates restored conversation snapshots before transport", async () => {
+    callSpy.mockResolvedValue(undefined)
+    const messages = [{ role: "user", content: "safe context" }]
+    await restoreSession("sess-3", messages)
+    expect(mockHasNoLeakingPiiDeep).toHaveBeenCalledWith(messages)
+    expect(callSpy).toHaveBeenCalledWith("claude_restore", {
+      sessionId: "sess-3",
+      messages,
+    })
+
+    mockHasNoLeakingPiiDeep.mockReturnValue(false)
+    await expect(
+      restoreSession("sess-3", [{ role: "user", content: "user@example.com" }])
+    ).rejects.toThrow(/renderer PII gate/)
+    expect(callSpy).toHaveBeenCalledTimes(1)
   })
 
   it("approveTool packs the decision payload", async () => {
@@ -221,11 +364,43 @@ describe("onClaudeMessage", () => {
     const handler = jest.fn()
     const unlisten = await onClaudeMessage(handler)
 
-    expect(subscribeSpy).toHaveBeenCalledWith("claude://message", handler)
+    expect(subscribeSpy).toHaveBeenCalledWith("claude://message", expect.any(Function))
     expect(captured).toBeDefined()
     captured?.({ type: "ready" })
     expect(handler).toHaveBeenCalledWith({ type: "ready" })
     expect(unlisten).toBe(unlistenSpy)
+  })
+
+  it("binds an approval response to the context carried by its request event", async () => {
+    let captured: ((event: never) => void) | undefined
+    jest.spyOn(transport, "subscribe").mockImplementation((_channel, handler) => {
+      captured = handler
+      return () => undefined
+    })
+    const context = {
+      hostId: "host-a",
+      originDeviceId: "device-a",
+      sessionId: "session-a",
+      generation: 1,
+      requestId: "turn-a",
+      issuedAt: 1,
+      expiresAt: 2,
+    }
+    await onClaudeMessage(jest.fn())
+    captured?.({
+      type: "permission_request",
+      sessionId: "session-a",
+      requestId: "approval-a",
+      remoteExecutionContext: context,
+    } as never)
+    callSpy.mockResolvedValue(undefined)
+
+    await approveTool("session-a", "approval-a", "allow")
+
+    expect(callSpy).toHaveBeenCalledWith(
+      "claude_approve",
+      expect.objectContaining({ remoteExecutionContext: context })
+    )
   })
 })
 
@@ -249,6 +424,25 @@ describe("filesystem commands", () => {
     callSpy.mockResolvedValueOnce(undefined)
     await ensureDir("/p")
     expect(callSpy).toHaveBeenCalledWith("ensure_dir", { path: "/p" })
+  })
+
+  it("writeTextFileConfined forwards path, content, and allowed roots", async () => {
+    callSpy.mockResolvedValueOnce(undefined)
+    await writeTextFileConfined("/w/a.txt", "data", ["/w"])
+    expect(callSpy).toHaveBeenCalledWith("write_text_file_confined", {
+      path: "/w/a.txt",
+      content: "data",
+      allowedRoots: ["/w"],
+    })
+  })
+
+  it("ensureDirConfined forwards path and allowed roots", async () => {
+    callSpy.mockResolvedValueOnce(undefined)
+    await ensureDirConfined("/w/sub", ["/w"])
+    expect(callSpy).toHaveBeenCalledWith("ensure_dir_confined", {
+      path: "/w/sub",
+      allowedRoots: ["/w"],
+    })
   })
 
   it("defaultExportDir returns the resolved path", async () => {
@@ -307,6 +501,58 @@ describe("multi-agent MCP IO", () => {
 })
 
 describe("skills commands", () => {
+  it("uses the host Skills catalog contract", async () => {
+    callSpy.mockResolvedValueOnce({ cognia: [], claude: [], codex: [] })
+    await expect(skillsCatalogGet()).resolves.toEqual({ cognia: [], claude: [], codex: [] })
+    expect(callSpy).toHaveBeenCalledWith("skills_catalog_get")
+  })
+
+  it("forwards every phase of a transactional bundle upload", async () => {
+    callSpy
+      .mockResolvedValueOnce({ handleId: "upload-1", chunkBytes: 32768 })
+      .mockResolvedValueOnce(4)
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce({ targets: [], trashedFrom: null })
+      .mockResolvedValueOnce(undefined)
+
+    await skillsBundleUploadOpen(4, "a".repeat(64))
+    await skillsBundleUploadWrite({
+      handleId: "upload-1",
+      offset: 0,
+      dataBase64: "e30=",
+      chunkHash: "b".repeat(64),
+    })
+    await skillsBundleUploadCommit("upload-1")
+    await skillsInstallAtomic("upload-1", "lease-1")
+    await skillsBundleUploadAbort("upload-2")
+
+    expect(callSpy.mock.calls).toEqual([
+      ["skills_bundle_upload_open", { request: { expectedSize: 4, expectedHash: "a".repeat(64) } }],
+      [
+        "skills_bundle_upload_write",
+        {
+          handleId: "upload-1",
+          offset: 0,
+          dataBase64: "e30=",
+          chunkHash: "b".repeat(64),
+        },
+      ],
+      ["skills_bundle_upload_commit", { handleId: "upload-1" }],
+      ["skills_install_atomic", { handleId: "upload-1", adminLease: "lease-1" }],
+      ["skills_bundle_upload_abort", { handleId: "upload-2" }],
+    ])
+  })
+
+  it("uninstalls only from the explicitly selected host target", async () => {
+    callSpy.mockResolvedValueOnce({ removed: true, directory: "/host/skills/x" })
+    await skillsUninstall("codex", "x", "lease-1")
+    expect(callSpy).toHaveBeenCalledWith("skills_uninstall", {
+      target: "codex",
+      dirName: "x",
+      adminLease: "lease-1",
+    })
+  })
+
   it("skillsScanNative just forwards the response", async () => {
     callSpy.mockResolvedValueOnce([{ dirName: "x", filePath: "/x", content: "", resources: [] }])
     await expect(skillsScanNative()).resolves.toHaveLength(1)
@@ -337,6 +583,16 @@ describe("skills commands", () => {
     await expect(skillsFetchRemoteMd("https://e/x.md")).resolves.toBe("# md")
     expect(callSpy).toHaveBeenCalledWith("skills_fetch_remote_md", {
       url: "https://e/x.md",
+    })
+  })
+
+  it("skillsFetchRemoteJson wraps the request in {req}", async () => {
+    callSpy.mockResolvedValueOnce({ status: 200, body: "{}", retryAfter: null })
+    await expect(
+      skillsFetchRemoteJson({ url: "https://skills.sh/api/search?q=x", bearerToken: "tok" })
+    ).resolves.toEqual({ status: 200, body: "{}", retryAfter: null })
+    expect(callSpy).toHaveBeenCalledWith("skills_fetch_remote_json", {
+      req: { url: "https://skills.sh/api/search?q=x", bearerToken: "tok" },
     })
   })
 
@@ -451,9 +707,23 @@ describe("deleteMessage", () => {
 
 describe("listSessions", () => {
   it("forwards limit/offset/before and returns the SessionListPage", async () => {
-    callSpy.mockResolvedValueOnce({ rows: [], total: 0 })
+    const response = {
+      rows: [
+        {
+          id: "s1",
+          title: "Cloud session",
+          kind: "direct",
+          createdAt: 1,
+          updatedAt: 2,
+        },
+      ],
+      next_offset: 20,
+      has_more: true,
+    }
+    callSpy.mockResolvedValueOnce(response)
     const page = await listSessions({ limit: 20, offset: 0, before: 1700000000000 })
-    expect(page).toEqual({ rows: [], total: 0 })
+    expect(page).toEqual(response)
+    expect(page.total).toBeUndefined()
     expect(callSpy).toHaveBeenCalledWith("session_list", {
       limit: 20,
       offset: 0,
@@ -469,11 +739,27 @@ describe("listSessions", () => {
 })
 
 describe("getMessagesBySession", () => {
-  it("forwards session_id and the optional pagination args", async () => {
-    callSpy.mockResolvedValueOnce({ rows: [], total: 0 })
+  it("forwards session_id and returns raw StoredMessage rows", async () => {
+    const response = {
+      rows: [
+        {
+          id: "m1",
+          sessionId: "s1",
+          role: "user" as const,
+          parts: [{ type: "text" as const, text: "hello" }],
+          createdAt: 1,
+        },
+      ],
+      total: 101,
+      next_offset: 150,
+    }
+    callSpy.mockResolvedValueOnce(response)
     const { getMessagesBySession } = require("./ipc") as typeof import("./ipc")
     const page = await getMessagesBySession("s1", 50, 100)
-    expect(page).toEqual({ rows: [], total: 0 })
+    expect(page).toEqual(response)
+    expect(page.rows[0]).toEqual(
+      expect.objectContaining({ id: "m1", sessionId: "s1", createdAt: 1 })
+    )
     expect(callSpy).toHaveBeenCalledWith("message_get_by_session", {
       session_id: "s1",
       limit: 50,

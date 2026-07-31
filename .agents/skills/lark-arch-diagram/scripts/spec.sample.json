@@ -1,0 +1,52 @@
+{
+  "w": 1600, "h": 900, "bg": "#ffffff", "accent": "teal",
+  "title": "运行时进程与边界拓扑",
+  "subtitle": "代码实际运行在哪个进程 · 静态导出下 app/api 运行时不存在,需 HTTP 的能力全部落在 Rust axum",
+  "legend": { "title": "进程 / 存储", "x": 1378, "y": 92, "w": 208, "items": [
+    { "color": "blue", "label": "渲染进程 Web / WebView" },
+    { "color": "purple", "label": "Sidecar · Node 进程" },
+    { "color": "orange", "label": "Tauri Rust 后端 (crates)" },
+    { "color": "green", "label": "云服务 / 原生存储" },
+    { "color": "slate", "label": "移动壳 Capacitor" }
+  ] },
+  "groups": [
+    { "color": "slate", "x": 40, "y": 250, "w": 190, "h": 120, "title": "移动壳 · Capacitor" },
+    { "color": "green", "x": 40, "y": 430, "w": 200, "h": 205, "title": "云服务 · 非静态导出" },
+    { "color": "blue", "x": 270, "y": 150, "w": 445, "h": 610, "title": "渲染进程 · 静态导出 out/" },
+    { "color": "purple", "x": 775, "y": 150, "w": 600, "h": 150, "title": "Sidecar · Node 进程" },
+    { "color": "orange", "x": 775, "y": 350, "w": 600, "h": 500, "title": "Tauri Rust 后端 · 26 crates" }
+  ],
+  "nodes": [
+    { "id": "MSHELL", "color": "slate", "x": 58, "y": 298, "w": 154, "h": 58, "title": "mobile/", "sub": "over ../out" },
+    { "id": "SIG", "color": "green", "x": 58, "y": 478, "w": 164, "h": 62, "title": "signaling-server", "sub": "WebRTC WAN" },
+    { "id": "SHARE", "color": "green", "x": 58, "y": 552, "w": 164, "h": 62, "title": "share-server", "sub": "Cloudflare Worker" },
+    { "id": "UI", "color": "blue", "x": 300, "y": 214, "w": 232, "h": 74, "title": "Next.js UI", "sub": "React 19 · Zustand" },
+    { "id": "DEXIE", "color": "cyan", "shape": "cyl", "x": 562, "y": 212, "w": 128, "h": 78, "title": "Dexie", "sub": "IndexedDB v108" },
+    { "id": "RPLUG", "color": "blue", "x": 300, "y": 330, "w": 232, "h": 60, "title": "renderer 插件", "sub": "github-delivery 等" },
+    { "id": "APINOTE", "color": "amber", "x": 300, "y": 440, "w": 388, "h": 108, "title": "⚠ app/api 运行时不存在", "tsize": 15, "sub": "需 HTTP 服务的能力\n全部落在 Rust axum" },
+    { "id": "HOST", "color": "purple", "x": 800, "y": 205, "w": 160, "h": 66, "title": "claude-host.mjs" },
+    { "id": "DISP", "color": "purple", "x": 995, "y": 205, "w": 190, "h": 66, "title": "dispatch", "sub": "Claude / AI SDK" },
+    { "id": "TOOLS", "color": "purple", "x": 1220, "y": 205, "w": 130, "h": 66, "title": "builtin-tools" },
+    { "id": "CORE", "color": "orange", "x": 805, "y": 565, "w": 160, "h": 70, "title": "cognia-core", "sub": "Tauri 主 lib" },
+    { "id": "MCP", "color": "orange", "x": 1035, "y": 400, "w": 205, "h": 60, "title": "cognia-mcp-server", "sub": "axum HTTP" },
+    { "id": "CONN", "color": "orange", "x": 1035, "y": 485, "w": 205, "h": 60, "title": "cognia-connectors", "sub": "入站网关" },
+    { "id": "VEC", "color": "green", "shape": "cyl", "x": 1060, "y": 562, "w": 150, "h": 76, "title": "sqlite-vec", "sub": "vectors.sqlite" },
+    { "id": "SEC", "color": "orange", "x": 1035, "y": 665, "w": 205, "h": 60, "title": "cognia-secrets", "sub": "keyring 单主密钥" },
+    { "id": "PRT", "color": "orange", "x": 1035, "y": 750, "w": 205, "h": 60, "title": "cognia-plugin-runtime", "sub": "WASM 沙箱" }
+  ],
+  "edges": [
+    { "from": "MSHELL", "to": "UI", "color": "slate", "label": "首屏静态", "fromSide": "right", "toSide": "left", "toT": 0.72 },
+    { "from": "UI", "to": "HOST", "color": "purple", "label": "IPC", "fromSide": "right", "toSide": "left", "fromT": 0.32 },
+    { "from": "UI", "to": "CORE", "color": "orange", "label": "invoke", "fromSide": "right", "toSide": "left", "fromT": 0.78 },
+    { "from": "UI", "to": "DEXIE", "color": "cyan", "fromSide": "right", "toSide": "left", "fromT": 0.5 },
+    { "from": "UI", "to": "SIG", "color": "green", "label": "WebRTC", "dash": true, "fromSide": "left", "toSide": "right", "fromT": 0.4, "toT": 0.4 },
+    { "from": "UI", "to": "SHARE", "color": "green", "label": "公开分享", "dash": true, "fromSide": "left", "toSide": "right", "fromT": 0.85, "toT": 0.5 },
+    { "from": "HOST", "to": "DISP", "color": "purple", "fromSide": "right", "toSide": "left" },
+    { "from": "DISP", "to": "TOOLS", "color": "purple", "fromSide": "right", "toSide": "left" },
+    { "from": "CORE", "to": "MCP", "color": "orange", "fromSide": "right", "toSide": "left", "fromT": 0.2 },
+    { "from": "CORE", "to": "CONN", "color": "orange", "fromSide": "right", "toSide": "left", "fromT": 0.4 },
+    { "from": "CORE", "to": "VEC", "color": "green", "fromSide": "right", "toSide": "left", "fromT": 0.55 },
+    { "from": "CORE", "to": "SEC", "color": "orange", "fromSide": "right", "toSide": "left", "fromT": 0.72 },
+    { "from": "CORE", "to": "PRT", "color": "orange", "fromSide": "right", "toSide": "left", "fromT": 0.88 }
+  ]
+}

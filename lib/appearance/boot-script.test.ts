@@ -83,6 +83,59 @@ describe("BOOT_SCRIPT", () => {
     expect(document.documentElement.style.getPropertyValue("--accent")).toBe("#cafe22")
   })
 
+  it("applies extended vars (radius / typography) onto documentElement.style", () => {
+    window.localStorage.setItem(
+      BOOT_MIRROR_STORAGE_KEY,
+      JSON.stringify({
+        vars: { "--radius": "1rem", "--line-height-scale": "1.15" },
+      })
+    )
+    runBootScript()
+    const style = document.documentElement.style
+    expect(style.getPropertyValue("--radius")).toBe("1rem")
+    expect(style.getPropertyValue("--line-height-scale")).toBe("1.15")
+  })
+
+  it("applies extended data-* attrs (density) onto documentElement", () => {
+    window.localStorage.setItem(
+      BOOT_MIRROR_STORAGE_KEY,
+      JSON.stringify({ attrs: { "data-density": "spacious" } })
+    )
+    runBootScript()
+    expect(document.documentElement.getAttribute("data-density")).toBe("spacious")
+  })
+
+  it("guards extended vars/attrs to --*/data-* names (no arbitrary injection)", () => {
+    window.localStorage.setItem(
+      BOOT_MIRROR_STORAGE_KEY,
+      JSON.stringify({
+        vars: { color: "red", "--ok": "#fff" },
+        attrs: { onclick: "alert(1)", "data-ok": "yes" },
+      })
+    )
+    runBootScript()
+    expect(document.documentElement.style.getPropertyValue("--ok")).toBe("#fff")
+    // `color` is not a custom property → skipped.
+    expect(document.documentElement.style.getPropertyValue("color")).toBe("")
+    expect(document.documentElement.getAttribute("data-ok")).toBe("yes")
+    expect(document.documentElement.getAttribute("onclick")).toBeNull()
+  })
+
+  it("the serialised BOOT_SCRIPT applies extended vars/attrs the same way", () => {
+    window.localStorage.setItem(
+      BOOT_MIRROR_STORAGE_KEY,
+      JSON.stringify({
+        "--background": "#101014",
+        vars: { "--radius": "0.9rem" },
+        attrs: { "data-density": "compact" },
+      })
+    )
+    eval(BOOT_SCRIPT)
+    expect(document.documentElement.style.getPropertyValue("--background")).toBe("#101014")
+    expect(document.documentElement.style.getPropertyValue("--radius")).toBe("0.9rem")
+    expect(document.documentElement.getAttribute("data-density")).toBe("compact")
+  })
+
   it("does NOT toggle the dark class — next-themes owns that", () => {
     document.documentElement.classList.remove("dark")
     window.localStorage.setItem(

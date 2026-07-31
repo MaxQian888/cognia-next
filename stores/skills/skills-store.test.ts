@@ -1,5 +1,7 @@
+/** @jest-environment jsdom */
 import { act, renderHook } from "@testing-library/react"
 import { useSkillsStore, type ImportStaging, type SkillFilters } from "./skills-store"
+import { DEFAULT_SKILL_PANEL_PREFS } from "@/lib/skills/preferences"
 import * as barrel from "./"
 
 it("barrel re-exports useSkillsStore", () => {
@@ -87,6 +89,55 @@ describe("useSkillsStore", () => {
     })
   })
 
+  describe("hydrateFromPrefs", () => {
+    it("seeds tab, sort, and status from prefs when no lastView is given", () => {
+      const { result } = renderHook(() => useSkillsStore())
+      act(() =>
+        result.current.hydrateFromPrefs({
+          ...DEFAULT_SKILL_PANEL_PREFS,
+          defaultTab: "browse",
+          defaultSort: "updated",
+          defaultStatusFilter: "enabled",
+        })
+      )
+      expect(result.current.activeTab).toBe("browse")
+      expect(result.current.filters.sort).toBe("updated")
+      expect(result.current.filters.status).toBe("enabled")
+      // Category/source are left at defaults without a lastView.
+      expect(result.current.filters.category).toBe("all")
+      expect(result.current.filters.source).toBe("all")
+    })
+
+    it("restores the full last view when provided", () => {
+      const { result } = renderHook(() => useSkillsStore())
+      act(() =>
+        result.current.hydrateFromPrefs(DEFAULT_SKILL_PANEL_PREFS, {
+          tab: "analytics",
+          sort: "usage",
+          category: "development",
+          source: "custom",
+          status: "disabled",
+          tag: "yaml",
+        })
+      )
+      expect(result.current.activeTab).toBe("analytics")
+      expect(result.current.filters).toMatchObject({
+        sort: "usage",
+        category: "development",
+        source: "custom",
+        status: "disabled",
+        tag: "yaml",
+      })
+    })
+
+    it("preserves the ephemeral search query across hydration", () => {
+      const { result } = renderHook(() => useSkillsStore())
+      act(() => result.current.setQuery("keep me"))
+      act(() => result.current.hydrateFromPrefs(DEFAULT_SKILL_PANEL_PREFS))
+      expect(result.current.filters.query).toBe("keep me")
+    })
+  })
+
   describe("selection", () => {
     it("toggleSelection adds and removes the id", () => {
       const { result } = renderHook(() => useSkillsStore())
@@ -139,14 +190,6 @@ describe("useSkillsStore", () => {
       act(() => result.current.openDetail("hide-me"))
       act(() => result.current.openCreate())
       expect(result.current.editorTarget).toEqual({ mode: "create" })
-      expect(result.current.detailSkillId).toBeNull()
-    })
-
-    it("openEdit sets editor target to edit and clears any open detail", () => {
-      const { result } = renderHook(() => useSkillsStore())
-      act(() => result.current.openDetail("other"))
-      act(() => result.current.openEdit("skill-99"))
-      expect(result.current.editorTarget).toEqual({ mode: "edit", skillId: "skill-99" })
       expect(result.current.detailSkillId).toBeNull()
     })
 

@@ -79,10 +79,20 @@ const pluginModes: Array<{
   tools?: string[]
   outputFormat?: string
 }> = []
+let pluginStatus = "enabled"
+let pluginHasModes = true
 
 jest.mock("@/stores/plugin-runtime/plugin-store", () => ({
-  usePluginStore: <T>(selector: (s: { getAllModes: () => typeof pluginModes }) => T): T =>
-    selector({ getAllModes: () => pluginModes }),
+  usePluginStore: <T>(
+    selector: (s: { plugins: Record<string, { status: string; modes?: typeof pluginModes }> }) => T
+  ): T =>
+    selector({
+      plugins: {
+        work: pluginHasModes
+          ? { status: pluginStatus, modes: pluginModes }
+          : { status: pluginStatus },
+      },
+    }),
 }))
 
 import { useAgentMode } from "./use-agent-mode"
@@ -90,6 +100,8 @@ import { useAgentMode } from "./use-agent-mode"
 beforeEach(() => {
   for (const k of Object.keys(customModes)) delete customModes[k]
   pluginModes.length = 0
+  pluginStatus = "enabled"
+  pluginHasModes = true
   createMode.mockReset()
   updateMode.mockReset()
   deleteMode.mockReset()
@@ -120,6 +132,21 @@ describe("useAgentMode", () => {
     expect(result.current.builtInModes).toHaveLength(2)
     expect(result.current.customModes.map((m) => m.id)).toEqual(["c1"])
     expect(result.current.pluginModes.map((m) => m.id)).toEqual(["p1"])
+  })
+
+  it("reacts to plugin activation and ignores disabled or modeless plugins", () => {
+    pluginStatus = "disabled"
+    pluginModes.push({ id: "p1", type: "plugin", name: "Plugin" })
+    const { result, rerender } = renderHook(() => useAgentMode())
+    expect(result.current.pluginModes).toEqual([])
+
+    pluginStatus = "enabled"
+    rerender()
+    expect(result.current.pluginModes.map((mode) => mode.id)).toEqual(["p1"])
+
+    pluginHasModes = false
+    rerender()
+    expect(result.current.pluginModes).toEqual([])
   })
 
   it("respects include* options", () => {

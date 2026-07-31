@@ -12,8 +12,11 @@
  * Reuses existing SubAgent/Orchestrator infrastructure where possible.
  */
 
-import type { ProviderName } from "../provider/provider"
+import type { ProviderName } from "@cognia/provider-types/provider"
 import type { SubAgentTokenUsage, SubAgentPriority } from "./sub-agent"
+import type { TwinSettings } from "@/types/twin"
+import type { ExternalAgentPresetId } from "@/lib/ai/agent/external/presets"
+import type { ProjectEditorSession } from "@/types/editor/project-editor"
 
 // ============================================================================
 // Team Core Types
@@ -28,13 +31,7 @@ export type TeamMemberRole = "lead" | "teammate"
  * Team status
  */
 export type TeamStatus =
-  | "idle"
-  | "planning"
-  | "executing"
-  | "paused"
-  | "completed"
-  | "failed"
-  | "cancelled"
+  "idle" | "planning" | "executing" | "paused" | "completed" | "failed" | "cancelled"
 
 /**
  * Teammate status
@@ -82,15 +79,22 @@ export type TeamExecutionPattern =
   | "ultracode_orchestration"
 
 /**
- * Main workspace tabs for the dedicated Agent Team page
+ * Main workspace tabs for the dedicated Agent Team page. Must stay in sync
+ * with `WORKSPACE_TABS` in `components/agent/workspace/workspace-tab-nav.tsx`
+ * — the nav renders exactly these, in this order. Stale persisted values
+ * (e.g. the removed "graph"/"analytics") are guarded at the workspace page,
+ * which falls back to "overview" for unknown tabs.
  */
 export type AgentTeamWorkspaceTab =
-  | "overview"
-  | "graph"
-  | "tasks"
-  | "chat"
-  | "activity"
-  | "analytics"
+  "overview" | "tasks" | "chat" | "activity" | "worktrees" | "editor" | "members" | "settings"
+
+/**
+ * Persisted per-team state of the project Editor tab. Restores the open file
+ * set, active file, selected project root (main repo vs a worktree), and the
+ * three-pane layout when the tab is reopened. Unsaved draft content is NOT
+ * persisted — the on-disk file is the source of truth.
+ */
+export type AgentTeamEditorSession = ProjectEditorSession
 
 /**
  * Current operator focus inside the Agent Team workspace
@@ -121,13 +125,87 @@ export interface TeamRoutingAssessment {
 }
 
 /**
+ * The concrete executor an auto-orchestration proposal should run through.
+ * Inferred ABOVE {@link TeamExecutionPattern} — council/ensemble are not team
+ * shapes (no roster/DAG/store team) and the pattern union is woven through
+ * exhaustive switches, so it must never be widened to carry these. The
+ * mapping logic lives in `lib/ai/agent/team/auto/dispatch-executor.ts`; the
+ * types live here so `AgentTeam` can persist the decision without `types/`
+ * importing from `lib/`.
+ */
+export type TeamExecutorKind =
+  | "single-send"
+  | "council"
+  | "ensemble"
+  | "team-flat"
+  | "team-ultracode"
+  | "background-handoff"
+  | "external-handoff"
+
+/**
+ * Where a team run was triggered from. Anything not "interactive" is
+ * headless — no operator is watching a modal, so the HITL gates resolve
+ * through `lib/ai/agent/team/gate-policy.ts` instead of blocking.
+ */
+export type TeamRunOrigin =
+  "interactive" | "scheduler" | "remote" | "external" | "plugin" | "im" | "delegation"
+
+/** Executor decision stamped on a team at materialization (provenance). */
+export interface TeamDispatchDecision {
+  kind: TeamExecutorKind
+  /** The team pattern this decision was derived from (provenance). */
+  fromPattern: TeamExecutionPattern
+  /** Echoes the assessment confidence for the preview badge. */
+  confidence: number
+  /** Human-readable rationale for the chosen executor. */
+  reason: string
+}
+
+/**
+ * Structured claimant identity for an external-handoff pickup (ADR 0061
+ * P4). Replaces the bare `claimedBy` string so the claim records WHO
+ * resolved it — an external agent over the bridge, a paired device, or the
+ * desktop itself — instead of a hardcoded constant.
+ */
+export interface TeamPickupClaimant {
+  kind: "external-agent" | "device" | "desktop"
+  id: string
+  label?: string
+}
+
+/**
+ * External-handoff pickup state. Set when a proposal materializes with the
+ * `external-handoff` executor; cleared semantics are additive — an external
+ * agent claims the team through the bridge's `team_run`, which stamps
+ * `claimant`/`claimedAt` (idempotently — a second run never overwrites a
+ * LIVE claim; an expired claim lease re-advertises the pickup).
+ */
+export interface TeamExternalPickup {
+  requestedAt: Date
+  /**
+   * Pickup addressed to one specific executor (paired-device id or a
+   * bridge client name). Absent = any claimant may take it.
+   */
+  targetId?: string
+  /** Legacy string mirror of `claimant.id` — kept for persisted-store and
+   *  bridge-consumer compatibility. Prefer `claimant`. */
+  claimedBy?: string
+  /** Structured claim identity (ADR 0061 P4). */
+  claimant?: TeamPickupClaimant
+  claimedAt?: Date
+  /**
+   * Claim lease. A claim whose lease expired while the team never left its
+   * pre-run status frees the pickup — the claimant died between claim and
+   * dispatch. Absent on legacy claims (treated as non-expiring).
+   */
+  claimLeaseExpiresAt?: Date
+}
+
+/**
  * Budget escalation behavior when usage crosses thresholds
  */
 export type TeamBudgetEscalationAction =
-  | "notify"
-  | "pause_for_review"
-  | "reduce_concurrency"
-  | "handoff_to_background"
+  "notify" | "pause_for_review" | "reduce_concurrency" | "handoff_to_background"
 
 /**
  * Governance policy for approvals and budget escalation
@@ -136,6 +214,15 @@ export interface TeamGovernancePolicy {
   approval: {
     requirePlanApproval: boolean
     requireDelegationApproval: boolean
+    /**
+     * When true, a teammate's successful auto-run routes the board task to
+     * `review` instead of `completed`; a human then makes the existing
+     * `review → completed | failed` move (`task-move-guard.ts`). Governs
+     * FINAL BOARD ACCEPTANCE only — the wave runner's dependency progression
+     * uses its in-memory doneIds, so downstream tasks still consume the
+     * output while the card sits in review. Optional/off by default.
+     */
+    requireResultReview?: boolean
   }
   budget: {
     tokenBudget: number
@@ -292,6 +379,39 @@ export interface AgentTeamConfig {
   defaultTimeout?: number
   /** Whether teammates require plan approval before executing */
   requirePlanApproval?: boolean
+  /**
+   * Auto-raise the plan-approval gate when a run is assessed medium/high risk
+   * (ADR-0070). Default true. Only ever raises: an operator-set
+   * `requirePlanApproval` is never lowered by the assessment. Set false to
+   * restore the pre-ADR-0070 behavior where only `requirePlanApproval` gates —
+   * note that this also lets a *headless* risky run proceed unattended.
+   */
+  riskGating?: boolean
+  /**
+   * Blocking lead review of every task's work before dependents may start
+   * (ADR-0071). When `enabled`, the synthesizer emits an
+   * `action.team.task.review` node after each task's dispatch and repoints that
+   * task's dependents at the review node, so an unapproved task blocks
+   * downstream work instead of being caught after the fact.
+   *
+   * The configured lead judges the worker's output plus a deterministic diff of
+   * what it actually changed, and returns `approved` / `changes_requested`. A
+   * `changes_requested` verdict re-dispatches the SAME worker in the SAME
+   * worktree with the lead's feedback, then reviews again — up to
+   * `maxRevisions` times (default 2). Exhausting the budget, losing the
+   * original worker, or a reviewer/provider failure fails the task and the run:
+   * the point of a blocking gate is that unreviewed work never lands.
+   *
+   * Default OFF — a run with no reviewer configured behaves exactly as before.
+   * Distinct from `governancePolicy.approval.requireResultReview`, which is a
+   * HUMAN board gate; the two compose (automated approval then hands the card
+   * to a human instead of completing it).
+   */
+  taskReview?: {
+    enabled?: boolean
+    /** Worker revision attempts after a `changes_requested`. Default 2. */
+    maxRevisions?: number
+  }
   /** Auto-shutdown teammates when all tasks complete */
   autoShutdown?: boolean
   /** Token budget for the entire team */
@@ -310,6 +430,37 @@ export interface AgentTeamConfig {
   enableDeadlockRecovery?: boolean
   /** Governance policy for approvals, budgets, and escalation */
   governancePolicy?: TeamGovernancePolicy
+  /**
+   * Team-level tool ALLOW ceiling. When set, it is the parent ceiling every
+   * teammate dispatch is clamped against (allow-list intersect) — a teammate
+   * can only further-restrict, never widen beyond it. Undefined = no ceiling.
+   */
+  allowedTools?: string[]
+  /**
+   * Team-level tool DENY list. Always cascades (unioned into every teammate's
+   * disallowed tools). Undefined = none.
+   */
+  disallowedTools?: string[]
+  /**
+   * Team-level permission-mode ceiling clamped onto every teammate dispatch
+   * (the effective mode is the lesser-permissive of team and teammate).
+   * Undefined = no mode ceiling.
+   */
+  defaultPermissionMode?: import("./external-agent").AcpPermissionMode
+  /**
+   * Team-level OS-sandbox default (ADR-0028). When true, every teammate dispatch
+   * runs its Bash/Edit/Write through the per-platform OS sandbox unless the
+   * teammate opts out. A teammate may enable it individually even when this is
+   * unset. See `teammateToCharacter`.
+   */
+  sandboxEnabled?: boolean
+  /**
+   * Team-level OS-sandbox resource/network **ceiling** (ADR-0028). Cascades
+   * monotonically: a teammate's own `TeammateConfig.sandboxPolicy` may only
+   * further-restrict this (writable roots narrow, network tightens, caps lower)
+   * via `clampSandboxPolicy`. Only consulted when the sandbox resolves enabled.
+   */
+  sandboxPolicy?: import("@cognia/agent-config-types").SandboxResourcePolicy
   /** Max result tokens before auto-summarization (context isolation) */
   maxResultTokens?: number
   /** Auto-clean shared memory when team completes */
@@ -334,12 +485,37 @@ export interface AgentTeamConfig {
    */
   capabilities?: TeamCapabilityBundle
   /**
+   * Team-level default execution binding (ADR-0090 Phase 7). Precedence:
+   * member `execution` → run override → THIS team default → app default.
+   * Refs only — never raw credentials or endpoints. No dedicated UI writer
+   * yet: set via team templates / programmatic config (the member-level field
+   * ships first; the team-default editor lands with the coordinator picker).
+   */
+  defaultExecution?: TeammateExecutionBinding
+  /**
+   * Maximum TEAM delegation depth (ADR-0090 Phase 7). Counts orchestrated
+   * teammate→teammate delegations only and is DISTINCT from the native
+   * subagent `dispatchContext.maxDepth` budget. Default 2: depths 0/1/2 may
+   * delegate; a depth-2 child asking to delegate again is refused with a
+   * typed `DelegationDepthExceededError`.
+   */
+  maxTeamDelegationDepth?: number
+  /**
    * Optional id of the plugin-contributed shared-memory adapter this team
    * mirrors its KV into (see `shared-memory-adapter-registry`). Undefined =
    * local-only (Zustand). When set, `publishEntry` / `deleteEntry` mirror to
    * the adapter and `syncSharedMemoryFromAdapter` can pull remote changes.
    */
   sharedMemoryAdapterId?: string
+  /**
+   * Employee Digital Twins (ADR-0003) the WHOLE team may consult on demand via
+   * the `twin_knowledge_search` collaboration tool. This is the team-level
+   * knowledge pool — distinct from a member's own `TeammateConfig.twinId`
+   * (which additionally gives that member the twin's persona + per-task RAG).
+   * A member-bound `twinId` is also implicitly queryable. Undefined / empty =
+   * the tool is not offered. See `lib/claude/team-builtin-tools.ts`.
+   */
+  knowledgeTwinIds?: string[]
   /**
    * Ultracode orchestration settings (ADR-0022 addendum). When `enabled`, the
    * team can run the multi-agent quality-pattern composition instead of a flat
@@ -368,6 +544,112 @@ export interface AgentTeamConfig {
    * path; ignored by the web/mobile text-only fallback.
    */
   workingDir?: string
+  /**
+   * Per-dispatch git-worktree isolation. When `enabled`, each teammate dispatch
+   * runs in its own `git worktree` + branch (`agent/<runId>/<teammate>/<taskId>`)
+   * branched off `workingDir`'s HEAD, so parallel agents never share a working
+   * tree / index / branch. Off by default → identical to today's shared-dir
+   * behavior. Desktop-only (git ops run in Rust/Tauri); a no-op on web/mobile.
+   *
+   * `reconcile` decides how the per-dispatch branches are integrated once the
+   * run (or a fan-out group) settles:
+   *   - `"manual"` (default): leave the branches for the user to review/merge.
+   *   - `"merge-all"`: merge each branch into a fresh integration branch off
+   *     `baseRef`; a conflict aborts and is reported (never touches the user's
+   *     real branch).
+   *   - `"select"`: keep one branch per `selectStrategy`, discard the rest per
+   *     `retain`.
+   *   - `"pipeline"`: sequential dispatches share one worktree/branch.
+   * `retain` controls worktree/branch cleanup after reconcile (default
+   * `"keep-winner"`). `baseRef` overrides the branch-point (default =
+   * `workingDir` HEAD at run start). `backend` is a Phase-2 seam (only `"local"`
+   * today; `"container"` / `"e2b"` reserved for the untrusted-code safety wall).
+   */
+  workspaceIsolation?: {
+    enabled?: boolean
+    reconcile?: "manual" | "merge-all" | "select" | "pipeline"
+    selectStrategy?: "manual" | "first-success" | "judge"
+    retain?: "all" | "keep-winner" | "prune-losers"
+    baseRef?: string
+    backend?: "local"
+  }
+  /**
+   * Stage-checkpoint adaptive re-planning (model-in-the-loop). When `enabled`,
+   * the flat task path runs as Kahn-layer "waves"; between waves a lead model
+   * reviews completed results and may inject / cancel / reorder remaining tasks
+   * or finish early. Disabled (default) runs the legacy single-pass DAG
+   * unchanged. `requireApproval` routes each replan decision through the team
+   * approval gate before it is applied; `maxInjectedTasksPerCheckpoint` caps how
+   * many new tasks a single checkpoint may add. Fail-open: any lead failure
+   * continues as planned.
+   */
+  adaptiveReplan?: {
+    enabled?: boolean
+    requireApproval?: boolean
+    maxInjectedTasksPerCheckpoint?: number
+  }
+  /**
+   * Autonomous progress ledger (Magentic-One style). Layered on the adaptive
+   * wave runner: after each wave a deterministic check detects whether the team
+   * is stalling (no new completed tasks / no net new output). After
+   * `stallThreshold` consecutive stalled waves an LLM judge diagnoses the run and
+   * may escalate beyond a plain re-plan — autonomously opening a consensus round
+   * or delegating — when the matching `allow*` flag is set. Default OFF; the
+   * legacy lead-only re-plan checkpoint is used when disabled.
+   */
+  progressLedger?: {
+    enabled?: boolean
+    /** Consecutive stalled waves before the LLM judge runs. Default 2. */
+    stallThreshold?: number
+    /** Allow the ledger to autonomously open a consensus round on stall. */
+    allowAutonomousConsensus?: boolean
+    /** Allow the ledger to autonomously delegate work on stall. */
+    allowAutonomousDelegation?: boolean
+  }
+  /**
+   * Stream live teammate progress (tool calls + accumulated output) into the
+   * workspace activity panel during a run. Default ON; set false to keep the
+   * panel quiet (only start/done/failed markers are emitted). Cheap — forwards
+   * already-parsed sidecar events, throttled to tool boundaries.
+   */
+  streamProgress?: boolean
+  /**
+   * Guarded nudges (ADR — compaction/nudge). When a teammate turn fails on a
+   * provider rate limit, the runtime parses the cooldown and schedules a single
+   * "continue" nudge once it elapses (instead of aborting the wave). Guards:
+   * max nudges per member per hour, exponential backoff, agenda-fingerprint
+   * de-dup, and a busy-signal skip (recent tool activity). Default ON.
+   */
+  nudges?: {
+    enabled?: boolean
+    /** Max nudges delivered to one member within a rolling hour. Default 2. */
+    maxPerMemberPerHour?: number
+    /** Skip a nudge when the member had tool activity within this window (ms). Default 60000. */
+    busySignalWindowMs?: number
+  }
+  /**
+   * GitHub PR feedback loop (ADR — team PR feedback; ported from
+   * agent-orchestrator). When `enabled` and the run has worktree isolation on a
+   * git repo with resolvable GitHub credentials, each teammate's PR is observed
+   * (CI / review / merge-conflict) and actionable feedback is routed back to the
+   * team as a guarded `review_pickup` nudge; a derived PR status shows in the
+   * workspace. Default OFF; inert (silent) when the gate isn't met.
+   *
+   * The loop is run-scoped: it observes during the run and for `observeWindowMs`
+   * after the task DAG completes, then is disposed. A teammate only gets a PR if
+   * it opens one itself (via its git/gh tools) or `publishPr` is on.
+   */
+  prFeedback?: {
+    enabled?: boolean
+    /** Auto-push each teammate's branch and open a PR (else observe self-opened PRs). */
+    publishPr?: boolean
+    /** PR observation poll interval (ms). Default 30000. */
+    pollIntervalMs?: number
+    /** How long to keep observing after the task DAG completes (ms). Default 0 (one pass). */
+    observeWindowMs?: number
+    /** Run the internal reviewer agent against each PR and route its verdict. */
+    reviewer?: { enabled?: boolean }
+  }
 }
 
 /**
@@ -383,6 +665,7 @@ export const DEFAULT_TEAM_CONFIG: AgentTeamConfig = {
   defaultMaxSteps: 15,
   defaultTimeout: 600000, // 10 minutes
   requirePlanApproval: false,
+  riskGating: true,
   autoShutdown: true,
   enableMessaging: true,
   enableSharedTaskList: true,
@@ -394,6 +677,7 @@ export const DEFAULT_TEAM_CONFIG: AgentTeamConfig = {
     approval: {
       requirePlanApproval: false,
       requireDelegationApproval: false,
+      requireResultReview: false,
     },
     budget: {
       tokenBudget: 0,
@@ -406,6 +690,23 @@ export const DEFAULT_TEAM_CONFIG: AgentTeamConfig = {
       pauseOnHighRisk: false,
     },
   },
+  adaptiveReplan: {
+    enabled: false,
+    requireApproval: false,
+    maxInjectedTasksPerCheckpoint: 5,
+  },
+  progressLedger: {
+    enabled: false,
+    stallThreshold: 2,
+    allowAutonomousConsensus: false,
+    allowAutonomousDelegation: false,
+  },
+  streamProgress: true,
+  nudges: {
+    enabled: true,
+    maxPerMemberPerHour: 2,
+    busySignalWindowMs: 60_000,
+  },
 }
 
 // ============================================================================
@@ -414,10 +715,15 @@ export const DEFAULT_TEAM_CONFIG: AgentTeamConfig = {
 
 /**
  * Runtime that executes a teammate's tasks. `claude` goes through the Tauri
- * Anthropic sidecar; the other values dispatch to an external ACP agent
- * matched by preset id (see `lib/ai/agent/external/presets.ts`).
+ * Anthropic sidecar; every other value is an external-agent preset id and
+ * dispatches to that external ACP/CLI agent (see
+ * `lib/ai/agent/external/presets.ts`; `resolveTeammatePresetId` treats the
+ * runtime string as the preset id directly). Covers the full executable preset
+ * catalog — `custom` and service-discovered preview integrations are excluded
+ * because they have no fixed executable backend.
  */
-export type TeammateRuntime = "claude" | "codex" | "claude-code" | "gemini-cli" | "cursor-cli"
+export type TeammateRuntime =
+  "claude" | Exclude<ExternalAgentPresetId, "custom" | "opencode-v2-preview">
 
 /** Default runtime when a teammate has no explicit runtime configured. */
 export const DEFAULT_TEAMMATE_RUNTIME: TeammateRuntime = "claude"
@@ -442,16 +748,56 @@ export const TEAM_USER_SENDER_ID = "__user__"
 /**
  * Teammate configuration (per-member overrides)
  */
+/**
+ * Per-teammate execution binding (ADR-0090 Phase 7). Everything here is an
+ * id/ref — the resolver freezes the actual spec at dispatch:
+ *  - `inherit`: use the run/team/app default chain;
+ *  - `pinned`: pin runtime/deployment/credential/model-role by REFERENCE;
+ *  - `pool`: the coordinator may pick among candidate deployment ids only —
+ *    it never sees endpoints or credentials.
+ */
+export type TeammateExecutionBinding =
+  | { mode: "inherit" }
+  | {
+      mode: "pinned"
+      /** External runtimes pin via `TeammateConfig.runtime`, not here. */
+      runtimePolicy?: "auto" | "claude-agent-sdk" | "ai-sdk"
+      /** Deployment profile id (ADR-0090 P1 store) — an id, never a URL. */
+      deploymentRef?: string
+      /** Credential PROFILE reference — never key material. */
+      credentialProfileRef?: string
+      /** Frozen model role the teammate runs as. */
+      modelRole?: "primary" | "fast" | "powerful"
+    }
+  | {
+      mode: "pool"
+      /** Deployment/profile candidate ids the coordinator may choose from. */
+      candidateIds: string[]
+    }
+
 export interface TeammateConfig {
   /** Custom system prompt */
   systemPrompt?: string
-  /** Provider override */
+  /**
+   * Provider override.
+   * @deprecated ADR-0090 Phase 7: readable for legacy rows; new configs use
+   * `execution` (pinned `deploymentRef`) instead.
+   */
   provider?: ProviderName
   /** Model override */
   model?: string
-  /** API key override */
+  /**
+   * API key override.
+   * @deprecated ADR-0090 Phase 7: deprecated-READABLE only. New writes are
+   * rejected (`assertNoNewRawTeammateCredentials`); use a credential profile
+   * reference on `execution` instead — raw keys never enter new team configs.
+   */
   apiKey?: string
-  /** Base URL override */
+  /**
+   * Base URL override.
+   * @deprecated ADR-0090 Phase 7: deprecated-READABLE only. New writes are
+   * rejected; endpoints live on the deployment profile (`execution`).
+   */
   baseURL?: string
   /** Temperature override */
   temperature?: number
@@ -478,6 +824,41 @@ export interface TeammateConfig {
    * to inherit the team default unchanged. See `lib/ai/agent/team/capability-resolver.ts`.
    */
   capabilities?: TeammateCapabilityOverlay
+  /**
+   * Bind this teammate to an Employee Digital Twin (ADR-0003). When set, every
+   * dispatch synthesizes a `Character` carrying this `twinId` so the shared
+   * `resolveSendOptions` twin runtime injects the twin's persona (voice /
+   * playbooks / entities) plus per-task RAG knowledge — the teammate acts as
+   * that digital employee. Undefined = a plain teammate with no twin.
+   * See `lib/ai/agent/team/teammate-character.ts` + `dispatch-teammate.ts`.
+   */
+  twinId?: string
+  /**
+   * Per-teammate override of the twin runtime knobs (RAG topK, style few-shot,
+   * hybrid, citations). Undefined = the twin's own `DEFAULT_TWIN_SETTINGS`.
+   * Only meaningful when `twinId` is set.
+   */
+  twinSettings?: TwinSettings
+  /**
+   * Per-teammate OS-sandbox enablement (ADR-0028). Overrides
+   * `AgentTeamConfig.sandboxEnabled`. When resolved true, the synthesized
+   * `Character` carries `sandboxEnabled` so `resolveSendOptions` routes this
+   * teammate's Bash/Edit/Write through the OS sandbox.
+   */
+  sandboxEnabled?: boolean
+  /**
+   * Per-teammate OS-sandbox resource/network policy (ADR-0028). Clamped DOWN to
+   * the team-level `AgentTeamConfig.sandboxPolicy` ceiling via `clampSandboxPolicy`
+   * — a teammate can only narrow, never widen. Only meaningful when the sandbox
+   * resolves enabled.
+   */
+  sandboxPolicy?: import("@cognia/agent-config-types").SandboxResourcePolicy
+  /**
+   * Execution binding for this teammate (ADR-0090 Phase 7): inherit | pinned |
+   * pool. Wins the precedence chain (member → run → team default → app
+   * default). Refs only — raw credentials are rejected at write time.
+   */
+  execution?: TeammateExecutionBinding
 }
 
 /**
@@ -589,8 +970,54 @@ export interface AgentTeamTask {
   retryCount?: number
   /** First-class delegation / handoff lifecycle record */
   delegationRecord?: TeamDelegationRecord
+  /** Traceable discussion thread — findings, decisions, blockers, results. */
+  comments?: AgentTaskComment[]
+  /** Task-level file/artifact/link attachments. */
+  attachments?: TaskCommentAttachment[]
   /** Custom metadata */
   metadata?: Record<string, unknown>
+}
+
+/**
+ * A reference attachment on a task or task comment. We have no server, so nothing is
+ * copied — `ref` points at an existing resource the human opens from the workspace:
+ * an artifact id, a workspace-relative file path, or a URL.
+ */
+export interface TaskCommentAttachment {
+  /** Unique id. */
+  id: string
+  /** Display name (file name / artifact title / link label). */
+  name: string
+  /** What `ref` points at. */
+  kind: "artifact" | "file" | "link"
+  /** Artifact id, workspace-relative path, or URL — per `kind`. */
+  ref: string
+  /** Optional MIME type. */
+  mimeType?: string
+  /** Optional size in bytes. */
+  sizeBytes?: number
+}
+
+/**
+ * A comment on a task — the durable, board-visible delivery channel. Teammates record
+ * findings, decisions, blockers, and results here (via `task_add_comment`); the operator
+ * reads them in the task's expanded thread.
+ */
+export interface AgentTaskComment {
+  /** Unique id. */
+  id: string
+  /** The task this comment belongs to. */
+  taskId: string
+  /** Teammate id of the author (or "user" for the operator). */
+  authorId: string
+  /** Author display name. */
+  authorName: string
+  /** Comment body (markdown). */
+  text: string
+  /** Creation timestamp. */
+  createdAt: Date
+  /** Optional attachments on this comment. */
+  attachments?: TaskCommentAttachment[]
 }
 
 // ============================================================================
@@ -626,6 +1053,11 @@ export type StructuredMessagePayload =
   | { type: "task_assignment"; taskId: string; taskTitle?: string }
   | { type: "consensus_request"; consensusId: string; question: string }
   | { type: "consensus_vote"; consensusId: string; option: string }
+  | {
+      type: "nudge"
+      nudgeType: "agenda_sync" | "review_pickup" | "rate_limit_resume"
+      generation: number
+    }
 
 /**
  * Type guard: check if a message has a structured payload
@@ -806,21 +1238,20 @@ export interface CastVoteInput {
 // ============================================================================
 
 /**
- * Source type for cross-system delegation
+ * Source type for cross-system delegation.
+ *
+ * `twin` (ADR-0003 integration) runs a background agent whose prompt is
+ * pre-injected with an Employee Digital Twin's persona + knowledge — i.e. the
+ * sub-problem is answered "as" that digital employee. See
+ * `lib/ai/agent/team/delegation-orchestrator.ts:delegateToTwin`.
  */
-export type AgentSystemType = "sub_agent" | "team" | "background"
+export type AgentSystemType = "sub_agent" | "team" | "background" | "twin"
 
 /**
  * Lifecycle status for a task handoff / delegation
  */
 export type TeamDelegationStatus =
-  | "pending"
-  | "awaiting_approval"
-  | "active"
-  | "completed"
-  | "failed"
-  | "cancelled"
-  | "timeout"
+  "pending" | "awaiting_approval" | "active" | "completed" | "failed" | "cancelled" | "timeout"
 
 /**
  * First-class delegation record attached to an originating task
@@ -840,6 +1271,12 @@ export interface TeamDelegationRecord {
   error?: string
   result?: string
   metadata?: Record<string, unknown>
+  /**
+   * The parent↔child exchange contract for this delegation (ADR-0090
+   * Phase 7). Refs/ids only — validated secret-free at build time. Additive:
+   * legacy records simply lack it.
+   */
+  envelope?: import("@cognia/agent-config-types/handoff-envelope").HandoffEnvelope
 }
 
 /**
@@ -882,6 +1319,13 @@ export interface AgentDelegation {
 export interface AgentTeam {
   /** Unique identifier */
   id: string
+  /**
+   * Owning workspace id — Workspace isolation (Dexie v86). Live teams are
+   * per-project; reusable team *templates* stay profile-shared. Stamped from
+   * the active project on create. Undefined on pre-isolation teams, which are
+   * grandfathered (visible in every workspace) until re-saved.
+   */
+  projectId?: string
   /** Team name */
   name: string
   /** Team description/purpose */
@@ -896,6 +1340,18 @@ export interface AgentTeam {
   routingAssessment?: TeamRoutingAssessment
   /** Operator-selected execution intent for the team */
   selectedExecutionPattern?: TeamExecutionPattern
+  /**
+   * Executor decision stamped at materialization (auto-orchestration
+   * provenance). Optional and absent on pre-existing teams — consumers must
+   * guard. Additive field, no persist version bump (see store header).
+   */
+  dispatchDecision?: TeamDispatchDecision
+  /**
+   * External-handoff pickup state. Present only on teams materialized with
+   * the `external-handoff` executor. Dates serialize to ISO strings through
+   * the JSON persist layer — consumers tolerate string-or-Date.
+   */
+  externalPickup?: TeamExternalPickup
   /** Lead teammate ID */
   leadId: string
   /** All teammate IDs (including lead) */
@@ -1074,6 +1530,23 @@ export interface CreateTaskInput {
   estimatedDuration?: number
   order?: number
   metadata?: Record<string, unknown>
+}
+
+/**
+ * Input for adding a comment to a task. `authorId` is a teammate id or "user"; the store
+ * resolves `authorName`. Attachments omit their `id` (the store mints it).
+ */
+export interface AddTaskCommentInput {
+  taskId: string
+  authorId: string
+  /**
+   * Display-name override for authors outside the roster (e.g. plugin
+   * actors with `authorId: "plugin:<id>"`). Roster/`"user"`/`"system"`
+   * authors resolve their names automatically when omitted.
+   */
+  authorName?: string
+  text: string
+  attachments?: Array<Omit<TaskCommentAttachment, "id">>
 }
 
 /**
@@ -1499,4 +1972,38 @@ export const TASK_STATUS_CONFIG: Record<
   completed: { labelKey: "completed", color: "text-green-500", icon: "CheckCircle" },
   failed: { labelKey: "failed", color: "text-destructive", icon: "XCircle" },
   cancelled: { labelKey: "cancelled", color: "text-orange-500", icon: "Ban" },
+}
+
+/**
+ * Derived PR status (ADR — team PR feedback). Re-exported from the observation
+ * layer so team UI + this display map share one union. Computed at read time
+ * from durable facts — never stored.
+ */
+export type { PrDerivedStatus } from "@/lib/github/pr-observe/types"
+
+/**
+ * PR status display configuration. `labelKey` is under `agentTeam.prStatus.*`.
+ * Colors follow the agent-orchestrator status palette (ci_failed red,
+ * changes/review amber, mergeable/approved green, merged/pr_open muted).
+ */
+export const PR_STATUS_CONFIG: Record<
+  import("@/lib/github/pr-observe/types").PrDerivedStatus,
+  { labelKey: string; color: string; icon: string }
+> = {
+  none: { labelKey: "none", color: "text-muted-foreground", icon: "Circle" },
+  pr_open: { labelKey: "prOpen", color: "text-muted-foreground", icon: "GitPullRequest" },
+  draft: { labelKey: "draft", color: "text-muted-foreground", icon: "GitPullRequestDraft" },
+  ci_pending: { labelKey: "ciPending", color: "text-yellow-500", icon: "Loader2" },
+  ci_failed: { labelKey: "ciFailed", color: "text-destructive", icon: "XCircle" },
+  changes_requested: {
+    labelKey: "changesRequested",
+    color: "text-yellow-500",
+    icon: "MessageSquareWarning",
+  },
+  merge_conflict: { labelKey: "mergeConflict", color: "text-orange-500", icon: "GitMerge" },
+  review_pending: { labelKey: "reviewPending", color: "text-blue-400", icon: "Eye" },
+  approved: { labelKey: "approved", color: "text-green-500", icon: "Check" },
+  mergeable: { labelKey: "mergeable", color: "text-green-500", icon: "GitPullRequestArrow" },
+  merged: { labelKey: "merged", color: "text-purple-500", icon: "GitMerge" },
+  closed: { labelKey: "closed", color: "text-muted-foreground", icon: "GitPullRequestClosed" },
 }

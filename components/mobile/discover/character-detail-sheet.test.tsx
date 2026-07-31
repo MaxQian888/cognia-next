@@ -4,7 +4,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 import { CharacterDetailSheet } from "./character-detail-sheet"
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
@@ -44,6 +44,13 @@ beforeEach(() => {
 })
 
 describe("CharacterDetailSheet", () => {
+  it("dismisses on Android hardware back (popstate)", () => {
+    const onOpenChange = jest.fn()
+    render(<CharacterDetailSheet open character={null} onOpenChange={onOpenChange} />)
+    fireEvent.popState(window)
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
   it("shows the create title and disables save until name + prompt are set", () => {
     render(<CharacterDetailSheet open character={null} onOpenChange={() => undefined} />)
     expect(screen.getByText("createTitle")).toBeInTheDocument()

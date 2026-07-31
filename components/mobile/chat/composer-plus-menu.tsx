@@ -28,13 +28,14 @@ import { pickMultiplePhotos, pickPhoto } from "@/lib/capacitor/camera"
 import { selectionFeedback } from "@/lib/capacitor/haptics"
 import { showToast } from "@/lib/capacitor/toast"
 import { makeDefaultLoader, withPlugin } from "@/lib/capacitor/_shared"
-import type { SendContent, SendContentBlock } from "@/lib/claude/types"
+import type { SendContent, SendContentBlock } from "@cognia/agent-config-types"
 import { cn } from "@/lib/utils"
 
 export type ComposerAttachment =
   | { kind: "photo"; base64?: string; uri?: string; mime: string }
   | { kind: "photos"; items: Array<{ uri: string; mime: string }> }
   | { kind: "file"; file: File }
+  | { kind: "files"; files: File[] }
   | { kind: "voice"; recordingDataUrl: string; mimeType: string; durationMs?: number }
 
 export interface ComposerPlusMenuProps {
@@ -59,6 +60,18 @@ export interface ComposerPlusMenuProps {
   onSend?: (content: SendContent) => Promise<void> | void
   /** Triggered with the raw error code on failure paths (permission, etc.). */
   onError?: (code: string, message: string) => void
+  /**
+   * Hide the voice-recording branch. The main chat composer sets this to
+   * false because voice input there is the transcription bridge (speech →
+   * text) — an audio *attachment* has no send path to the model. Connector
+   * chat surfaces keep the default (true) since `connector_send` can carry
+   * media payloads.
+   */
+  showVoice?: boolean
+  /** `accept` for the file-branch input; defaults to any file. */
+  fileAccept?: string
+  /** Turn capabilities colocated under the same `+` trigger. */
+  capabilities?: React.ReactNode
   className?: string
 }
 
@@ -76,7 +89,15 @@ const voiceLoader = makeDefaultLoader<VoiceRecorderShape>(
   "VoiceRecorder"
 )
 
-export function ComposerPlusMenu({ onAttach, onSend, onError, className }: ComposerPlusMenuProps) {
+export function ComposerPlusMenu({
+  onAttach,
+  onSend,
+  onError,
+  showVoice = true,
+  fileAccept,
+  capabilities,
+  className,
+}: ComposerPlusMenuProps) {
   const t = useTranslations("mobile.composerPlus")
   const [open, setOpen] = useState(false)
   const [recording, setRecording] = useState(false)
@@ -137,19 +158,23 @@ export function ComposerPlusMenu({ onAttach, onSend, onError, className }: Compo
   }
 
   const onFilePicked = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    onAttach({ kind: "file", file })
-    if (onSend && file.type.startsWith("image/")) {
-      try {
-        const block = await packFileAsImageBlock(file)
-        if (block) await onSend([block])
-      } catch (err) {
-        onError?.("error", err instanceof Error ? err.message : String(err))
+    const files = e.target.files ? Array.from(e.target.files) : []
+    if (files.length === 0) return
+    onAttach({ kind: "files", files })
+    if (onSend) {
+      const images = files.filter((f) => f.type.startsWith("image/"))
+      if (images.length > 0) {
+        try {
+          const blocks = await Promise.all(images.map(packFileAsImageBlock))
+          const valid = blocks.filter((b): b is SendContentBlock => b !== null)
+          if (valid.length > 0) await onSend(valid)
+        } catch (err) {
+          onError?.("error", err instanceof Error ? err.message : String(err))
+        }
       }
     }
     setOpen(false)
-    e.target.value = "" // reset so the same file can be chosen again
+    e.target.value = "" // reset so the same files can be chosen again
   }
 
   const onVoiceStart = async () => {
@@ -243,12 +268,14 @@ export function ComposerPlusMenu({ onAttach, onSend, onError, className }: Compo
             <span>{t("file")}</span>
             <input
               type="file"
+              multiple
+              accept={fileAccept}
               className="sr-only"
               onChange={onFilePicked}
               data-testid="composer-plus-file-input"
             />
           </label>
-          {recording ? (
+          {!showVoice ? null : recording ? (
             <Button
               type="button"
               variant="destructive"
@@ -268,6 +295,11 @@ export function ComposerPlusMenu({ onAttach, onSend, onError, className }: Compo
               testId="composer-plus-voice"
             />
           )}
+          {capabilities ? (
+            <div className="col-span-3 flex flex-wrap items-center gap-2 border-t border-border pt-2">
+              {capabilities}
+            </div>
+          ) : null}
         </PopoverContent>
       </div>
     </Popover>
@@ -337,6 +369,46 @@ async function packFileAsImageBlock(file: File): Promise<SendContentBlock | null
   return {
     type: "image",
     source: { type: "base64", media_type: file.type || "image/jpeg", data },
+  }
+}
+
+/**
+ * Fold a plus-menu attachment into plain `File`s so hosts with a file-based
+ * attachment pipeline (the shared chat composer's `acceptFiles`) can reuse
+ * their existing size/count/type gates instead of growing a parallel path.
+ * Voice payloads become an audio File; hosts that can't send audio should
+ * hide the branch via `showVoice={false}` rather than dropping it here.
+ */
+export async function attachmentToFiles(attachment: ComposerAttachment): Promise<File[]> {
+  switch (attachment.kind) {
+    case "file":
+      return [attachment.file]
+    case "files":
+      return attachment.files
+    case "photo": {
+      const source = attachment.base64
+        ? `data:${attachment.mime};base64,${attachment.base64}`
+        : attachment.uri
+      if (!source) return []
+      const blob = await (await fetch(source)).blob()
+      const ext = attachment.mime.split("/")[1] ?? "jpeg"
+      return [new File([blob], `photo-${Date.now()}.${ext}`, { type: attachment.mime })]
+    }
+    case "photos": {
+      const files = await Promise.all(
+        attachment.items.map(async (item, i) => {
+          const blob = await (await fetch(item.uri)).blob()
+          const ext = item.mime.split("/")[1] ?? "jpeg"
+          return new File([blob], `photo-${Date.now()}-${i}.${ext}`, { type: item.mime })
+        })
+      )
+      return files
+    }
+    case "voice": {
+      const blob = await (await fetch(attachment.recordingDataUrl)).blob()
+      const ext = attachment.mimeType.includes("aac") ? "aac" : "webm"
+      return [new File([blob], `voice-${Date.now()}.${ext}`, { type: attachment.mimeType })]
+    }
   }
 }
 

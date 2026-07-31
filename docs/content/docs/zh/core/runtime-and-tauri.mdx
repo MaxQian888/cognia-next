@@ -177,7 +177,7 @@ export async function greet(name: string): Promise<string> {
 {
   "productName": "Cognia",
   "version": "0.1.0",
-  "identifier": "com.reactquickstarter.desktop",
+  "identifier": "com.cognia.desktop",
   "build": {
     "frontendDist": "../out",
     "devUrl": "http://localhost:3000",
@@ -215,7 +215,7 @@ export async function greet(name: string): Promise<string> {
 ### 关于 bundle identifier
 
 <Callout type="error" title="不要在没有迁移方案的情况下重命名">
-  `identifier` 是 `com.reactquickstarter.desktop` —— 历史遗留值，沿用至今。Tauri 用它推导**每用户应用数据目录**。修改它会让所有已安装用户的设置、向量库、聊天历史变成孤儿数据。
+  `identifier` 是 `com.cognia.desktop` —— 历史遗留值，沿用至今。Tauri 用它推导**每用户应用数据目录**。修改它会让所有已安装用户的设置、向量库、聊天历史变成孤儿数据。
 
 **99 % 的贡献者请让 `identifier` 保持原样。**
 
@@ -225,9 +225,9 @@ export async function greet(name: string): Promise<string> {
 
 | 平台    | 路径                                                           |
 | ------- | -------------------------------------------------------------- |
-| Windows | `%APPDATA%\com.reactquickstarter.desktop\`                     |
-| macOS   | `~/Library/Application Support/com.reactquickstarter.desktop/` |
-| Linux   | `~/.local/share/com.reactquickstarter.desktop/`                |
+| Windows | `%APPDATA%\com.cognia.desktop\`                     |
+| macOS   | `~/Library/Application Support/com.cognia.desktop/` |
+| Linux   | `~/.local/share/com.cognia.desktop/`                |
 
 如果一定要改，请规划迁移：
 

@@ -1,11 +1,12 @@
 /**
  * Built-in completion provider registration + context assembly.
  *
- * Registers the two host providers (history + AI) into the shared registry
- * exactly once. Both are gated by the `terminal.autocomplete.source`
- * setting (read lazily via the injected `getSettings` so changes apply
- * live). Plugin-contributed providers register separately via the
- * terminal-completion bridge and are unaffected by `source`.
+ * Registers the host providers (history, AI, path, exe, spec) into the
+ * shared registry exactly once. Each is gated by its
+ * `terminal.autocomplete` setting (read lazily via the injected
+ * `getSettings` so changes apply live). Plugin-contributed providers
+ * register separately via the terminal-completion bridge and are
+ * unaffected by these settings.
  *
  * `buildAutocompleteContext` turns a terminal store row + the locally
  * tracked input into the `TerminalCompletionContext` the providers consume.
@@ -18,12 +19,18 @@ import {
   AI_PROVIDER_ID,
   createAiCompletionProvider,
 } from "./ai-provider"
+import { createExeCompletionProvider, type ExeProviderDeps } from "./exe-provider"
 import { historyProvider } from "./history-provider"
+import { createPathCompletionProvider, type PathProviderDeps } from "./path-provider"
 import { registerCompletionProvider } from "./registry"
+import { specCompletionProvider } from "./spec-provider"
 import type { TerminalCompletionContext, TerminalCompletionProvider } from "./types"
 
 export interface BuiltinCompletionSettings {
   source?: "history" | "ai" | "both"
+  path?: boolean
+  exe?: boolean
+  spec?: boolean
 }
 
 export interface BuiltinCompletionDeps {
@@ -31,6 +38,9 @@ export interface BuiltinCompletionDeps {
   getSettings: () => BuiltinCompletionSettings | null | undefined
   /** Build the LlmClient for the AI provider, or null when unavailable. */
   buildClient: () => LlmClient | null
+  /** Test seams for the host-backed providers. */
+  pathDeps?: PathProviderDeps
+  exeDeps?: ExeProviderDeps
 }
 
 let registered = false
@@ -44,6 +54,7 @@ export function buildAutocompleteContext(args: {
   recentCommands: string[]
   input: string
   platform: ShellPlatform
+  projectId?: string | null
 }): TerminalCompletionContext {
   return {
     sessionId: args.sessionId,
@@ -54,25 +65,35 @@ export function buildAutocompleteContext(args: {
     cursor: args.input.length,
     recentCommands: args.recentCommands,
     platform: args.platform,
+    projectId: args.projectId ?? null,
   }
 }
 
-/** Register the built-in history + AI providers once (idempotent). */
+/** Wrap a provider so it consults a lazy settings gate per query. */
+function gated(
+  provider: TerminalCompletionProvider,
+  isEnabled: () => boolean
+): TerminalCompletionProvider {
+  return {
+    id: provider.id,
+    label: provider.label,
+    priority: provider.priority,
+    getCompletions: async (context, signal) => {
+      if (!isEnabled()) return []
+      return provider.getCompletions(context, signal)
+    },
+  }
+}
+
+/** Register the built-in providers once (idempotent). */
 export function ensureBuiltinCompletionProviders(deps: BuiltinCompletionDeps): void {
   if (registered) return
   registered = true
 
-  const sourceOf = () => deps.getSettings()?.source ?? "both"
+  const settings = () => deps.getSettings()
+  const sourceOf = () => settings()?.source ?? "both"
 
-  const history: TerminalCompletionProvider = {
-    id: historyProvider.id,
-    label: historyProvider.label,
-    priority: historyProvider.priority,
-    getCompletions: async (context, signal) => {
-      if (sourceOf() === "ai") return []
-      return historyProvider.getCompletions(context, signal)
-    },
-  }
+  const history = gated(historyProvider, () => sourceOf() !== "ai")
 
   const ai = createAiCompletionProvider({
     getClient: () => {
@@ -81,8 +102,15 @@ export function ensureBuiltinCompletionProviders(deps: BuiltinCompletionDeps): v
     },
   })
 
+  const path = gated(createPathCompletionProvider(deps.pathDeps), () => settings()?.path !== false)
+  const exe = gated(createExeCompletionProvider(deps.exeDeps), () => settings()?.exe !== false)
+  const spec = gated(specCompletionProvider, () => settings()?.spec !== false)
+
   disposers.push(registerCompletionProvider(history))
   disposers.push(registerCompletionProvider(ai))
+  disposers.push(registerCompletionProvider(path))
+  disposers.push(registerCompletionProvider(exe))
+  disposers.push(registerCompletionProvider(spec))
 }
 
 /** Whether the AI provider is currently registered (for diagnostics). */

@@ -135,6 +135,51 @@ describe("makeJudgeScorer", () => {
       rubric: RUBRIC,
     })
     const score = await scorer.score(sample("x"), makeCase())
+    expect(score.status).toBe("errored")
     expect(score.error).toBeDefined()
+  })
+
+  it("marks a provider failure as errored, not as a failed verdict", async () => {
+    // `errored` must stay distinct from a real `fail`: a dead judge is not
+    // evidence the agent got it wrong, and the report counts them separately.
+    const scorer = makeJudgeScorer({
+      client: {
+        complete: async () => {
+          throw new Error("upstream 503")
+        },
+      },
+      criterion: "task completion",
+      rubric: RUBRIC,
+    })
+    const score = await scorer.score(sample("x"), makeCase())
+    expect(score.status).toBe("errored")
+    expect(score.error).toBe("upstream 503")
+  })
+
+  it("stringifies a non-Error rejection instead of crashing the run", async () => {
+    const scorer = makeJudgeScorer({
+      client: {
+        complete: async () => {
+          throw "rate limited"
+        },
+      },
+      criterion: "task completion",
+      rubric: RUBRIC,
+    })
+    const score = await scorer.score(sample("x"), makeCase())
+    expect(score.status).toBe("errored")
+    expect(score.error).toBe("rate limited")
+  })
+
+  it("scores without a reasoning field when the judge omits one", async () => {
+    const scorer = makeJudgeScorer({
+      client: clientReturning('{"pass": false}'),
+      criterion: "task completion",
+      rubric: RUBRIC,
+    })
+    const score = await scorer.score(sample("x"), makeCase())
+    expect(score.status).toBe("scored")
+    expect(score.passed).toBe(false)
+    expect(score.reasoning).toBeUndefined()
   })
 })

@@ -5,7 +5,9 @@
 import {
   detectPlatform,
   detectShellKind,
+  filterDetectedShellOptions,
   platformDefaultShell,
+  platformShellOptions,
   resolveDefaultShell,
 } from "./shell-detect"
 
@@ -98,5 +100,60 @@ describe("resolveDefaultShell", () => {
         userAgent: "Mozilla/5.0 (X11; Linux x86_64)",
       })
     ).toBe("/bin/bash")
+  })
+})
+
+describe("platformShellOptions", () => {
+  it("offers only Windows shells on Windows", () => {
+    const bins = platformShellOptions("windows").map((o) => o.bin)
+    expect(bins).toEqual(["pwsh", "powershell", "cmd"])
+  })
+
+  it("offers only POSIX shells on macOS (no PowerShell/cmd)", () => {
+    const bins = platformShellOptions("macos").map((o) => o.bin)
+    expect(bins).toContain("zsh")
+    expect(bins).toContain("bash")
+    expect(bins).not.toContain("pwsh")
+    expect(bins).not.toContain("powershell")
+    expect(bins).not.toContain("cmd")
+    // zsh is the macOS default, so it leads the list.
+    expect(bins[0]).toBe("zsh")
+  })
+
+  it("offers POSIX shells on Linux led by bash", () => {
+    expect(platformShellOptions("linux").map((o) => o.bin)[0]).toBe("bash")
+  })
+
+  it("falls back to sh for unknown platforms", () => {
+    expect(platformShellOptions("other").map((o) => o.value)).toEqual(["/bin/sh"])
+  })
+
+  it("every option carries a shellPicker label key", () => {
+    for (const opt of platformShellOptions("macos")) {
+      expect(opt.labelKey.startsWith("terminal.shellPicker.")).toBe(true)
+    }
+  })
+})
+
+describe("filterDetectedShellOptions", () => {
+  const macos = platformShellOptions("macos")
+
+  it("keeps the full list when nothing is detected (detection unavailable)", () => {
+    expect(filterDetectedShellOptions(macos, new Set())).toHaveLength(macos.length)
+  })
+
+  it("narrows to the detected shells", () => {
+    const kept = filterDetectedShellOptions(macos, new Set(["zsh", "bash"]))
+    expect(kept.map((o) => o.bin)).toEqual(["zsh", "bash"])
+  })
+
+  it("matches case-insensitively", () => {
+    const kept = filterDetectedShellOptions(macos, new Set(["zsh"]))
+    expect(kept.map((o) => o.bin)).toEqual(["zsh"])
+  })
+
+  it("keeps the full list rather than emptying the menu when nothing matches", () => {
+    const kept = filterDetectedShellOptions(macos, new Set(["does-not-exist"]))
+    expect(kept).toHaveLength(macos.length)
   })
 })

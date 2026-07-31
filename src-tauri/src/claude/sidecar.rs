@@ -2,15 +2,17 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::Mutex;
 
-use crate::api_key::ApiKeyState;
+use super::host::SidecarHost;
 use crate::hooks;
+use crate::supervision_backoff::CrashBackoff;
 
 /// Tauri event channel name. The frontend subscribes via
 /// `listen("claude://message", ...)`.
@@ -22,23 +24,72 @@ pub const SIDECAR_EVENT: &str = "claude://message";
 /// every sidecar message.
 pub const A2UI_EVENT: &str = "a2ui://dispatch";
 
+/// Canonical agent-event channel (ADR-0090 Phase 3). Sessions with a frozen
+/// execution spec dual-emit `agent_event` envelopes here; the raw legacy
+/// stream on `SIDECAR_EVENT` is unchanged.
+pub const AGENT_EVENT: &str = "agent://message";
+
+/// How long a freshly spawned sidecar has to announce `{"type":"ready"}`
+/// before the watchdog kills it. Deliberately generous: a tighter bound would
+/// kill a healthy-but-slow cold start (large `node_modules`, cold disk) — the
+/// same false-positive class that ruled out a blanket reader-inactivity timeout.
+const SIDECAR_READY_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Minimum Node.js major version the chat sidecar requires. Matches the repo's
+/// `engines.node` (>= 26): the sidecar's native addons (`better-sqlite3` 13.x,
+/// `node-pty`) declare Node >= 22, and the `@anthropic-ai/claude-agent-sdk` +
+/// undici proxy stack assumes a current runtime. Older runtimes fail late and
+/// opaquely deep inside the SDK, so we probe up front and surface an actionable
+/// error instead.
+const MIN_NODE_MAJOR: u32 = 26;
+
+/// Parse the major version out of `node --version` output (e.g. `"v20.11.0\n"`
+/// → `Some(20)`). Tolerates a missing leading `v`. Pure — unit-tested.
+fn parse_node_major(version_output: &str) -> Option<u32> {
+    let trimmed = version_output.trim();
+    let without_v = trimmed.strip_prefix('v').unwrap_or(trimmed);
+    without_v.split('.').next()?.parse::<u32>().ok()
+}
+
 /// Shared, mutable state. Cloned cheaply via `Arc`.
 #[derive(Clone, Default)]
 pub struct SidecarState {
     inner: Arc<Mutex<Inner>>,
+    /// The live child's stdin, kept behind its own lock — separate from
+    /// `inner` so a slow control-message write never blocks hook-state reads
+    /// (`is_ready`, `session_cwd`, `record_tool_uses`). Mirrors the owned-stdin
+    /// shape in `external_agent/process.rs`.
+    stdin: Arc<Mutex<Option<ChildStdin>>>,
+    /// Held for the entire `spawn` body so concurrent callers serialize: the
+    /// second one blocks, then sees the live child and no-ops. Mirrors the
+    /// `materialize_lock` idiom in `plugin_api/python/mod.rs`.
+    spawn_lock: Arc<Mutex<()>>,
+    /// Monotonic spawn generation, bumped on each `spawn`. The ready watchdog
+    /// captures its generation and refuses to act once a newer spawn supersedes
+    /// it — otherwise a stale watchdog could adopt (and kill) a *healthy*
+    /// successor child after the original crashed and respawned.
+    spawn_epoch: Arc<std::sync::atomic::AtomicU64>,
     /// ADR-0028 Phase 14 — incremented every time `spawn` succeeds after
     /// boot. Surfaced through `sidecar_restart_count` for the Diagnostics
     /// → Sidecar card so users can see how often the sidecar has
     /// recovered without restarting the app. `AtomicU64` keeps the
     /// counter lock-free.
     restart_count: Arc<std::sync::atomic::AtomicU64>,
+    /// Set once a `node --version` probe confirms Node >= [`MIN_NODE_MAJOR`].
+    /// Caches the happy path so we don't fork `node --version` on every spawn;
+    /// a failed probe leaves this `false` so a later spawn (after the user
+    /// installs/upgrades Node) re-checks.
+    node_version_ok: Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[derive(Default)]
 struct Inner {
     child: Option<Child>,
-    stdin: Option<ChildStdin>,
     ready: bool,
+    /// Crash-loop backoff counters (shared shape with the brain supervisor —
+    /// `supervision_backoff.rs`). Reset the moment the sidecar announces
+    /// `ready`, advanced on every reader exit.
+    backoff: CrashBackoff,
     /// Per-session hook context: the send-time cwd (for project/local scope
     /// resolution) and the in-flight tool_use map used to correlate a
     /// `tool_result` back to the tool name/input that produced it (PostToolUse).
@@ -61,7 +112,8 @@ impl SidecarState {
     /// The first boot returns 1; each `kill_sidecar` + subsequent `spawn`
     /// increments the counter.
     pub fn restart_count(&self) -> u64 {
-        self.restart_count.load(std::sync::atomic::Ordering::Relaxed)
+        self.restart_count
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Increment the restart counter — called by `spawn` after the child
@@ -71,12 +123,72 @@ impl SidecarState {
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
-    /// Send one JSON-line command to the running sidecar.
+    /// Probe `node --version` once and verify Node >= [`MIN_NODE_MAJOR`] before
+    /// the first spawn. Without this gate a too-old (or missing) Node fails
+    /// late and opaquely deep inside the Agent SDK; here we surface a clear,
+    /// actionable error. The happy result is cached; a failure re-checks next
+    /// time so the user can recover by installing Node without restarting.
+    async fn ensure_node_version(&self) -> Result<(), String> {
+        use std::sync::atomic::Ordering;
+        if self.node_version_ok.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+        let output = Command::new("node")
+            .arg("--version")
+            .output()
+            .await
+            .map_err(|e| {
+                format!(
+                    "Node.js was not found on PATH — install Node.js >= {MIN_NODE_MAJOR}, \
+                     which the chat sidecar requires ({e})"
+                )
+            })?;
+        if !output.status.success() {
+            return Err(format!(
+                "`node --version` failed (exit {:?}) — install Node.js >= {MIN_NODE_MAJOR}",
+                output.status.code()
+            ));
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let major = parse_node_major(&stdout).ok_or_else(|| {
+            format!(
+                "could not parse Node.js version from {:?} — install Node.js >= {MIN_NODE_MAJOR}",
+                stdout.trim()
+            )
+        })?;
+        if major < MIN_NODE_MAJOR {
+            return Err(format!(
+                "Node.js {} is too old — the chat sidecar requires Node.js >= {MIN_NODE_MAJOR}; \
+                 please upgrade Node.js",
+                stdout.trim()
+            ));
+        }
+        self.node_version_ok.store(true, Ordering::Relaxed);
+        Ok(())
+    }
+
+    /// The current spawn generation. The watchdog compares this against the
+    /// generation it was armed with to detect that a newer spawn superseded it.
+    fn current_epoch(&self) -> u64 {
+        self.spawn_epoch.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Bump and return the new spawn generation. Called once per `spawn`, under
+    /// `spawn_lock`, so generations are assigned serially.
+    fn next_epoch(&self) -> u64 {
+        self.spawn_epoch
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            .wrapping_add(1)
+    }
+
+    /// Send one JSON-line command to the running sidecar. Locks only `stdin`
+    /// (not the shared `inner` state) so a slow write never blocks hook-state
+    /// reads; the `stdin` lock still serializes concurrent writers, preserving
+    /// line ordering.
     pub async fn write_command(&self, msg: &Value) -> Result<(), String> {
         let line = serde_json::to_string(msg).map_err(|e| e.to_string())?;
-        let mut guard = self.inner.lock().await;
+        let mut guard = self.stdin.lock().await;
         let stdin = guard
-            .stdin
             .as_mut()
             .ok_or_else(|| "sidecar not running".to_string())?;
         stdin
@@ -88,15 +200,58 @@ impl SidecarState {
         Ok(())
     }
 
+    /// Mark the sidecar ready and reset the crash-loop counter. Called when the
+    /// reader observes `{"type":"ready"}`.
+    async fn note_ready(&self) {
+        let mut guard = self.inner.lock().await;
+        guard.ready = true;
+        guard.backoff.reset();
+    }
+
+    /// Single sink for everything that must happen when the sidecar exits
+    /// (crash, clean shutdown, or watchdog kill): drop the child + stdin, clear
+    /// per-session hook state (R6 — otherwise orphaned on crash), and record the
+    /// failure for backoff (R4). Locks `stdin` and `inner` sequentially (never
+    /// nested) so there is no lock-ordering hazard.
+    async fn note_exit(&self, now: Instant) {
+        self.stdin.lock().await.take();
+        let mut guard = self.inner.lock().await;
+        guard.child = None;
+        guard.ready = false;
+        guard.sessions.clear();
+        guard.backoff.note_failure(now);
+    }
+
+    /// Remaining crash-backoff window at `now`, or `None` if a respawn may
+    /// proceed immediately. Pure over the stored counters — unit-tested by
+    /// injecting `now`.
+    async fn backoff_remaining(&self, now: Instant) -> Option<Duration> {
+        self.inner.lock().await.backoff.remaining(now)
+    }
+
     pub async fn is_ready(&self) -> bool {
         self.inner.lock().await.ready
+    }
+
+    /// Liveness snapshot for the unified managed-process registry
+    /// (`crate::process_registry`). `Some((pid, ready))` while a child is
+    /// alive (`pid` is `None` only if the OS already reaped it), `None` when
+    /// no sidecar is running. Locks `inner` briefly and returns owned data —
+    /// never held across an `.await`.
+    pub async fn managed_snapshot(&self) -> Option<(Option<u32>, bool)> {
+        let guard = self.inner.lock().await;
+        guard.child.as_ref().map(|c| (c.id(), guard.ready))
     }
 
     /// Record the send-time cwd for a session so the hook observer can resolve
     /// project/local-scope settings (trust-gated). Called from `claude_send`.
     pub async fn register_session_cwd(&self, session_id: &str, cwd: Option<String>) {
         let mut guard = self.inner.lock().await;
-        guard.sessions.entry(session_id.to_string()).or_default().cwd = cwd;
+        guard
+            .sessions
+            .entry(session_id.to_string())
+            .or_default()
+            .cwd = cwd;
     }
 
     /// The send-time cwd for a session, if known.
@@ -115,7 +270,9 @@ impl SidecarState {
     /// always recorded before its tool_result task runs — otherwise concurrent
     /// observer tasks could `take` before the `record` and drop the tool name.
     async fn record_tool_uses_from_message(&self, value: &Value) {
-        let Some(evt) = value.get("event") else { return };
+        let Some(evt) = value.get("event") else {
+            return;
+        };
         let uses = hooks::extract_tool_uses(evt);
         if uses.is_empty() {
             return;
@@ -178,9 +335,15 @@ pub fn sidecar_dir(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 /// Resolve the absolute path to `sidecar/claude-host.mjs`, in both dev and
-/// release builds.
-fn resolve_sidecar_script(app: &AppHandle) -> Result<PathBuf, String> {
+/// release builds. `pub(crate)` so `host::TauriSidecarHost` can delegate.
+pub(crate) fn resolve_sidecar_script(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = sidecar_dir(app)?;
+    // ADR-0090 Phase 3: the host entry is agent-host.mjs; claude-host.mjs
+    // remains as a compatibility shim for stale bundles/spawn paths.
+    let candidate = dir.join("agent-host.mjs");
+    if candidate.exists() {
+        return Ok(candidate);
+    }
     let candidate = dir.join("claude-host.mjs");
     if candidate.exists() {
         return Ok(candidate);
@@ -191,19 +354,37 @@ fn resolve_sidecar_script(app: &AppHandle) -> Result<PathBuf, String> {
     ))
 }
 
-/// Spawn the Node sidecar and start pumping its stdout into Tauri events.
+/// Spawn the Node sidecar and start pumping its stdout into host events
+/// (Tauri events on desktop, the companion EventBus headless — see
+/// [`super::host`]).
 ///
 /// Safe to call multiple times — subsequent calls become no-ops while the
 /// child is alive.
-pub async fn spawn(app: AppHandle, state: SidecarState) -> Result<(), String> {
-    {
-        let guard = state.inner.lock().await;
-        if guard.child.is_some() {
-            return Ok(());
-        }
+pub async fn spawn(host: Arc<dyn SidecarHost>, state: SidecarState) -> Result<(), String> {
+    // Serialize concurrent spawns (mirrors `plugin_api/python` materialize_lock):
+    // a second caller blocks here, then sees the live child below and no-ops,
+    // so we can never start two Node processes for one slot.
+    let _spawn_guard = state.spawn_lock.lock().await;
+
+    if state.inner.lock().await.child.is_some() {
+        return Ok(());
     }
 
-    let script = resolve_sidecar_script(&app)?;
+    // Crash-loop backoff: don't hot-respawn a sidecar that keeps dying before it
+    // can announce ready. A single transient death maps to a zero delay, so this
+    // never penalizes a normal restart.
+    if let Some(remaining) = state.backoff_remaining(Instant::now()).await {
+        return Err(format!(
+            "sidecar in crash-backoff ({} ms remaining); retry shortly",
+            remaining.as_millis()
+        ));
+    }
+
+    // Fail fast with an actionable message if Node is missing or too old,
+    // rather than letting the spawn (or the SDK) blow up later and opaquely.
+    state.ensure_node_version().await?;
+
+    let script = host.resolve_script()?;
     let cwd = script
         .parent()
         .ok_or_else(|| "sidecar script has no parent dir".to_string())?
@@ -218,27 +399,18 @@ pub async fn spawn(app: AppHandle, state: SidecarState) -> Result<(), String> {
         .stderr(Stdio::piped())
         .kill_on_drop(true);
 
-    // Inject the user-supplied Anthropic provider env, if any. Auth precedence:
-    //   1. OAuth bearer (CLAUDE_CODE_OAUTH_TOKEN) — when the user has signed in
-    //      with their Pro/Max subscription. The `@anthropic-ai/claude-agent-sdk`
-    //      reads this var and sends `Authorization: Bearer ...` plus the
-    //      `oauth-2025-04-20` beta header automatically. We deliberately do
-    //      not also send ANTHROPIC_API_KEY in this case — mixing modes is
-    //      undefined behavior on the SDK side.
-    //   2. ANTHROPIC_API_KEY — legacy + CCSwitch flow.
-    // ANTHROPIC_BASE_URL is orthogonal to auth mode and forwarded whenever set.
-    if let Some(api_key_state) = app.try_state::<ApiKeyState>() {
-        if let Some(token) = api_key_state.get_oauth_bearer().await {
-            cmd.env("CLAUDE_CODE_OAUTH_TOKEN", token);
-            // Defensive: ensure no stale API key from the parent process leaks
-            // through to the sidecar when OAuth is the chosen mode.
-            cmd.env_remove("ANTHROPIC_API_KEY");
-        } else if let Some(key) = api_key_state.get().await {
-            cmd.env("ANTHROPIC_API_KEY", key);
+    // Inject the host-resolved provider credentials (OAuth bearer → API key;
+    // base URL orthogonal). See `host::inject_provider_env` for the precedence
+    // rationale.
+    host.inject_env(&mut cmd).await;
+
+    match crate::telemetry::sidecar_env() {
+        Ok(env) => {
+            for (key, value) in env {
+                cmd.env(key, value);
+            }
         }
-        if let Some(url) = api_key_state.get_base_url().await {
-            cmd.env("ANTHROPIC_BASE_URL", url);
-        }
+        Err(error) => log::warn!("sidecar telemetry configuration unavailable: {error}"),
     }
 
     // Inject the user's network proxy config so the Node sidecar's outbound
@@ -292,19 +464,25 @@ pub async fn spawn(app: AppHandle, state: SidecarState) -> Result<(), String> {
         .take()
         .ok_or_else(|| "child has no stdin".to_string())?;
 
+    // Claim this spawn's generation (under `spawn_lock`, so it's serial). The
+    // watchdog below captures it to avoid acting on a superseded child.
+    let my_epoch = state.next_epoch();
+
+    // stdin lives behind its own lock (see `write_command`); child + ready stay
+    // in the shared state.
+    *state.stdin.lock().await = Some(stdin);
     {
         let mut guard = state.inner.lock().await;
         guard.child = Some(child);
-        guard.stdin = Some(stdin);
         guard.ready = false;
     }
     // ADR-0028 Phase 14 — surface the spawn so Diagnostics can show
     // "Sidecar restarted N times this session".
     state.bump_restart_count();
 
-    // Pipe stdout: each line is one JSON event we forward to the frontend.
+    // Pipe stdout: each line is one JSON event we forward through the host.
     {
-        let app = app.clone();
+        let host = Arc::clone(&host);
         let state = state.clone();
         tokio::spawn(async move {
             let mut reader = BufReader::new(stdout).lines();
@@ -318,9 +496,10 @@ pub async fn spawn(app: AppHandle, state: SidecarState) -> Result<(), String> {
                         match serde_json::from_str::<Value>(trimmed) {
                             Ok(value) => {
                                 // Track the sidecar's "ready" announcement so we can short-circuit
-                                // status checks before it has fully booted.
+                                // status checks before it has fully booted (also resets the
+                                // crash-loop counter and disarms the ready watchdog).
                                 if value.get("type").and_then(|t| t.as_str()) == Some("ready") {
-                                    state.inner.lock().await.ready = true;
+                                    state.note_ready().await;
                                 }
                                 // PreToolUse hook: when the sidecar emits a permission_request
                                 // we may need to short-circuit it with an automatic deny.
@@ -330,10 +509,26 @@ pub async fn spawn(app: AppHandle, state: SidecarState) -> Result<(), String> {
                                 if value.get("type").and_then(|t| t.as_str())
                                     == Some("permission_request")
                                 {
-                                    let app = app.clone();
+                                    let host = Arc::clone(&host);
                                     let state = state.clone();
                                     tokio::spawn(async move {
-                                        handle_permission_request(app, state, value).await;
+                                        handle_permission_request(host, state, value).await;
+                                    });
+                                    continue;
+                                }
+                                // `host_rpc` is answered HERE, in Rust, and never
+                                // forwarded to the renderer. That is the whole
+                                // point of the frame: background-job calls have
+                                // to work on a headless host (no renderer at
+                                // all) and must not pay an extra network hop
+                                // when a remote client is driving the desktop.
+                                // Spawned so the reader keeps draining — a
+                                // long-polling `jobs.wait` would otherwise block
+                                // every other event behind it.
+                                if value.get("type").and_then(|t| t.as_str()) == Some("host_rpc") {
+                                    let state = state.clone();
+                                    tokio::spawn(async move {
+                                        answer_host_rpc(state, value).await;
                                     });
                                     continue;
                                 }
@@ -342,9 +537,15 @@ pub async fn spawn(app: AppHandle, state: SidecarState) -> Result<(), String> {
                                 if value.get("type").and_then(|t| t.as_str())
                                     == Some("a2ui_dispatch")
                                 {
-                                    if let Err(e) = app.emit(A2UI_EVENT, &value) {
-                                        log::error!("failed to emit a2ui dispatch: {e}");
-                                    }
+                                    host.emit(A2UI_EVENT, &value);
+                                    continue;
+                                }
+                                // Canonical envelopes (ADR-0090) ride their own
+                                // channel; they are additive alongside the raw
+                                // stream and never re-enter SIDECAR_EVENT.
+                                if value.get("type").and_then(|t| t.as_str()) == Some("agent_event")
+                                {
+                                    host.emit(AGENT_EVENT, &value);
                                     continue;
                                 }
                                 // Lifecycle hooks: observe the SDK event stream
@@ -357,16 +558,14 @@ pub async fn spawn(app: AppHandle, state: SidecarState) -> Result<(), String> {
                                     // later tool_result observer can always
                                     // resolve the tool name despite task concurrency.
                                     state.record_tool_uses_from_message(&value).await;
-                                    let app = app.clone();
+                                    let host = Arc::clone(&host);
                                     let state = state.clone();
                                     let observed = value.clone();
                                     tokio::spawn(async move {
-                                        observe_hooks(app, state, observed).await;
+                                        observe_hooks(host, state, observed).await;
                                     });
                                 }
-                                if let Err(e) = app.emit(SIDECAR_EVENT, &value) {
-                                    log::error!("failed to emit sidecar event: {e}");
-                                }
+                                host.emit(SIDECAR_EVENT, &value);
                             }
                             Err(e) => {
                                 log::warn!("sidecar emitted non-JSON line: {e}: {trimmed}");
@@ -380,15 +579,14 @@ pub async fn spawn(app: AppHandle, state: SidecarState) -> Result<(), String> {
                     }
                 }
             }
-            // The sidecar exited. Clear state so the next command tries to respawn.
-            let mut guard = state.inner.lock().await;
-            guard.child = None;
-            guard.stdin = None;
-            guard.ready = false;
+            // The sidecar exited. Clear state (incl. orphaned per-session hook
+            // state) and record the failure so the next spawn can back off a
+            // crash loop. `note_exit` is the single sink for all of that.
+            state.note_exit(Instant::now()).await;
             log::warn!("sidecar process ended");
-            let _ = app.emit(
+            host.emit(
                 SIDECAR_EVENT,
-                serde_json::json!({ "type": "sidecar_exited" }),
+                &serde_json::json!({ "type": "sidecar_exited" }),
             );
         });
     }
@@ -401,21 +599,115 @@ pub async fn spawn(app: AppHandle, state: SidecarState) -> Result<(), String> {
         }
     });
 
+    // Ready watchdog: a child that never announces `ready` (e.g. Node hung on a
+    // bad install) would otherwise sit forever while sends silently queue. Wait
+    // up to SIDECAR_READY_TIMEOUT (reusing tokio::time::timeout + the existing
+    // kill_sidecar) and kill it if it never boots, so the failure surfaces and
+    // the next spawn can back off.
+    {
+        let host = Arc::clone(&host);
+        let state = state.clone();
+        tokio::spawn(async move {
+            let outcome = tokio::time::timeout(SIDECAR_READY_TIMEOUT, async {
+                loop {
+                    // A newer spawn superseded us — our child is gone; stop
+                    // watching so we never kill a healthy successor.
+                    if state.current_epoch() != my_epoch {
+                        return false;
+                    }
+                    {
+                        let guard = state.inner.lock().await;
+                        if guard.ready {
+                            return true; // became ready
+                        }
+                        if guard.child.is_none() {
+                            return false; // already exited; the reader handled it
+                        }
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            })
+            .await;
+            // Only act on a timeout, and only if we're still the current
+            // generation (the child we armed against is the live one).
+            if outcome.is_err() && state.current_epoch() == my_epoch {
+                // Still pending at the deadline — kill so the reader records the
+                // failure (feeding backoff). The reader's EOF handler emits the
+                // `sidecar_exited` event; we add a `log` line so the user sees
+                // *why* (avoids a duplicate `sidecar_exited`).
+                kill_sidecar(state.clone()).await;
+                host.emit(
+                    SIDECAR_EVENT,
+                    &serde_json::json!({
+                        "type": "log",
+                        "level": "error",
+                        "message": format!(
+                            "sidecar did not become ready within {}s; restarting",
+                            SIDECAR_READY_TIMEOUT.as_secs()
+                        ),
+                    }),
+                );
+            }
+        });
+    }
+
     Ok(())
 }
 
-/// Run PreToolUse hooks against a `permission_request` event from the
-/// sidecar. If any hook blocks, write a `permission_response` (deny) back to
-/// the sidecar without involving the frontend. Otherwise forward the event
-/// onward as usual so the user / approval store handles it.
-async fn handle_permission_request(app: AppHandle, state: SidecarState, value: Value) {
+/// Answer one `host_rpc` frame and write the result back down the sidecar's
+/// stdin.
+///
+/// Deliberately terminal: unlike `plugin_tool_exec`, this frame is never
+/// emitted onward to the renderer. Background jobs are owned by Rust, so the
+/// renderer has nothing to contribute and a headless host has no renderer to
+/// ask.
+///
+/// A failed dispatch still writes a frame — an unanswered `rpcId` would leave
+/// the sidecar's caller hanging until its own timeout, turning a clean error
+/// into a stall.
+async fn answer_host_rpc(state: SidecarState, value: Value) {
+    let Some(rpc_id) = value.get("rpcId").and_then(|v| v.as_str()) else {
+        log::warn!("host_rpc frame without an rpcId; dropping");
+        return;
+    };
+    let method = value.get("method").and_then(|v| v.as_str()).unwrap_or("");
+    let params = value.get("params").cloned().unwrap_or(Value::Null);
+
+    let reply = match crate::jobs::dispatch_host_rpc(method, &params).await {
+        Ok(result) => serde_json::json!({
+            "type": "host_rpc_result",
+            "rpcId": rpc_id,
+            "ok": true,
+            "result": result,
+        }),
+        Err(error) => {
+            log::warn!("host_rpc {method} failed: {error}");
+            serde_json::json!({
+                "type": "host_rpc_result",
+                "rpcId": rpc_id,
+                "ok": false,
+                "error": error,
+            })
+        }
+    };
+    if let Err(e) = state.write_command(&reply).await {
+        // The sidecar is gone; its pending calls are rejected on its own side
+        // when stdin closes, so there is nothing further to do here.
+        log::warn!("could not deliver host_rpc_result for {method}: {e}");
+    }
+}
+
+/// Handle a `permission_request` event from the sidecar. PreToolUse hooks
+/// (blocking + `updatedInput`) now run IN the sidecar as SDK-native hooks, so
+/// this fires only the observational `PermissionRequest` event and forwards the
+/// event onward for the user / approval store to handle.
+///
+/// The forward at the bottom is load-bearing on headless hosts: it MUST reach
+/// the EventBus (→ `/ws/v1/events`) or every gated tool call deadlocks
+/// waiting for an approval nobody saw.
+async fn handle_permission_request(host: Arc<dyn SidecarHost>, state: SidecarState, value: Value) {
     let session_id = value
         .get("sessionId")
-        .and_then(|v| v.as_str())
-        .map(String::from)
-        .unwrap_or_default();
-    let request_id = value
-        .get("requestId")
         .and_then(|v| v.as_str())
         .map(String::from)
         .unwrap_or_default();
@@ -444,74 +736,107 @@ async fn handle_permission_request(app: AppHandle, state: SidecarState, value: V
         json!({ "tool_name": tool_name, "tool_input": input }),
     )
     .await;
-    emit_hook_diagnostics(&app, hooks::HookEvent::PermissionRequest, &pr);
+    emit_hook_diagnostics(
+        host.as_ref(),
+        hooks::HookEvent::PermissionRequest,
+        &session_id,
+        Some(tool_name.as_str()),
+        &pr,
+    );
 
-    let decision =
-        hooks::run_pre_tool_use(&settings, &session_id, cwd.as_deref(), &tool_name, &input).await;
+    // PreToolUse execution — including blocking (`permissionDecision: "deny"`),
+    // `updatedInput` rewrite, and `additionalContext` — now runs IN the sidecar
+    // as an SDK-native hook (`dispatch/agent-hooks.mjs`), which fires BEFORE
+    // `canUseTool`. Running it here as well would double-execute the user's
+    // command hooks, so this path is intentionally observational-only now: it
+    // fires `PermissionRequest` above and forwards the event for the normal
+    // approval flow. A sidecar PreToolUse deny short-circuits before any
+    // `permission_request` is emitted, so we never even reach here for it.
+    let _ = &input;
 
-    for w in &decision.warnings {
-        log::warn!("PreToolUse[{tool_name}]: {w}");
-    }
+    // Forward so the normal approval flow can run (WebView approval store on
+    // desktop; `/ws/v1/events` subscribers headless).
+    host.emit(SIDECAR_EVENT, &value);
+}
 
-    if let Some(reason) = decision.block {
-        let payload = json!({
-          "type": "permission_response",
-          "sessionId": session_id,
-          "requestId": request_id,
-          "decision": "deny",
-          "message": format!("hook denied: {reason}"),
-        });
-        if let Err(e) = state.write_command(&payload).await {
-            log::error!("failed to write hook deny: {e}");
-        }
-        // Emit a compact log to the frontend so the user sees that a tool was
-        // blocked silently — they would otherwise see no UI at all.
-        let _ = app.emit(
-            SIDECAR_EVENT,
-            &json!({
-              "type": "log",
-              "level": "info",
-              "message": format!("PreToolUse hook denied {tool_name}: {reason}"),
-            }),
-        );
-        // PermissionDenied fires after a hook-driven deny.
-        let denied = hooks::run_tool_scoped(
-            &settings,
-            hooks::HookEvent::PermissionDenied,
-            &session_id,
-            cwd.as_deref(),
-            &tool_name,
-            json!({ "tool_name": tool_name, "reason": reason }),
-        )
-        .await;
-        emit_hook_diagnostics(&app, hooks::HookEvent::PermissionDenied, &denied);
-        return;
-    }
-
-    // No block — forward to the frontend so the normal approval flow can run.
-    if let Err(e) = app.emit(SIDECAR_EVENT, &value) {
-        log::error!("failed to emit permission_request: {e}");
+/// Status of a consequential hook fire, by precedence: block > context >
+/// warning. `None` means the fire was a no-op (nothing to show).
+pub(crate) fn hook_fire_outcome(decision: &hooks::HookDecision) -> Option<&'static str> {
+    if decision.block.is_some() {
+        Some("blocked")
+    } else if decision.additional_context.is_some() {
+        Some("context")
+    } else if !decision.warnings.is_empty() {
+        Some("warning")
+    } else {
+        None
     }
 }
 
-/// Log a hook's warnings and surface any `additionalContext` it contributed as
-/// a compact frontend log line. Observational lifecycle hooks can't re-inject
-/// context mid-stream, so this is how the user sees a hook did something.
-fn emit_hook_diagnostics(app: &AppHandle, event: hooks::HookEvent, decision: &hooks::HookDecision) {
+/// Build the synthetic `hook_fire` SDK-system envelope, or `None` for a no-op
+/// fire. Split from [`emit_hook_fire`] so the gate + shape are unit-testable
+/// without a live `AppHandle`.
+pub(crate) fn build_hook_fire_payload(
+    session_id: &str,
+    event_name: &str,
+    tool_name: Option<&str>,
+    decision: &hooks::HookDecision,
+) -> Option<Value> {
+    let outcome = hook_fire_outcome(decision)?;
+    Some(json!({
+      "type": "event",
+      "sessionId": session_id,
+      "event": {
+        "type": "system",
+        "subtype": "hook_fire",
+        "hook_event": event_name,
+        "tool_name": tool_name,
+        "outcome": outcome,
+        "block": decision.block,
+        "additional_context": decision.additional_context,
+        "warnings": decision.warnings,
+      },
+    }))
+}
+
+/// Project a *consequential* hook fire into the chat timeline as a synthetic
+/// SDK `system` event (`subtype:"hook_fire"`). It rides the same
+/// `claude://message` → `applySdkEvent` pipeline the frontend already uses for
+/// `permission_denied` / `compact_boundary`, so the row persists like any other
+/// message. A no-op fire (nothing blocked, no context, no warnings) emits
+/// nothing — hook rows are invisible unless the hook actually did something.
+///
+/// `outcome` is derived by precedence (block > context > warning) so the row can
+/// pick a status colour; the full decision still travels so the expanded row can
+/// show the reason, injected-context summary, and every warning.
+pub(crate) fn emit_hook_fire(
+    host: &dyn SidecarHost,
+    session_id: &str,
+    event_name: &str,
+    tool_name: Option<&str>,
+    decision: &hooks::HookDecision,
+) {
+    if let Some(payload) = build_hook_fire_payload(session_id, event_name, tool_name, decision) {
+        host.emit(SIDECAR_EVENT, &payload);
+    }
+}
+
+/// Log a hook's warnings server-side, then surface a consequential fire to the
+/// chat timeline via [`emit_hook_fire`]. Observational lifecycle hooks can't
+/// re-inject context mid-stream, so this row is how the user sees a hook did
+/// something.
+fn emit_hook_diagnostics(
+    host: &dyn SidecarHost,
+    event: hooks::HookEvent,
+    session_id: &str,
+    tool_name: Option<&str>,
+    decision: &hooks::HookDecision,
+) {
     let name = hooks::hook_event_name(event);
     for w in &decision.warnings {
         log::warn!("{name}: {w}");
     }
-    if let Some(ctx) = &decision.additional_context {
-        let _ = app.emit(
-            SIDECAR_EVENT,
-            &json!({
-              "type": "log",
-              "level": "info",
-              "message": format!("{name} hook context: {ctx}"),
-            }),
-        );
-    }
+    emit_hook_fire(host, session_id, &name, tool_name, decision);
 }
 
 /// Observe one SDK-stream message and fire the matching settings.json lifecycle
@@ -519,7 +844,7 @@ fn emit_hook_diagnostics(app: &AppHandle, event: hooks::HookEvent, decision: &ho
 /// tool_result → PostToolUse(/Failure), then fires the stateless lifecycle
 /// hooks (SessionStart/End, Stop, SubagentStop, Notification, PostCompact,
 /// Task*). All firing is observational — blocking stays on the permission path.
-async fn observe_hooks(app: AppHandle, state: SidecarState, value: Value) {
+async fn observe_hooks(host: Arc<dyn SidecarHost>, state: SidecarState, value: Value) {
     let session_id = value
         .get("sessionId")
         .and_then(|v| v.as_str())
@@ -533,35 +858,14 @@ async fn observe_hooks(app: AppHandle, state: SidecarState, value: Value) {
     let raw_cwd = state.session_cwd(&session_id).await;
     let cwd = hooks::trust::resolve_trusted_cwd(raw_cwd.as_deref());
 
-    // PostToolUse / PostToolUseFailure from tool_result blocks.
+    // PostToolUse / PostToolUseFailure now execute IN the sidecar as SDK-native
+    // hooks (`dispatch/agent-hooks.mjs`), where `updatedToolOutput` can rewrite
+    // the tool result before the model sees it. We still drain the recorded
+    // tool_use map here so it doesn't leak across the turn, but no longer run the
+    // hooks — doing so would double-execute the user's command handlers.
     if let Some(evt) = value.get("event") {
-        let results = hooks::extract_tool_results(evt);
-        for (tool_use_id, is_error, result) in results {
-            let Some((tool_name, input)) = state.take_tool(&session_id, &tool_use_id).await else {
-                continue; // No recorded tool_use (e.g. resumed session) — skip.
-            };
-            let event = if is_error {
-                hooks::HookEvent::PostToolUseFailure
-            } else {
-                hooks::HookEvent::PostToolUse
-            };
-            let settings = hooks::load_effective_settings(cwd.as_deref());
-            let fields = json!({
-                "tool_name": tool_name,
-                "tool_input": input,
-                "tool_response": result,
-                "is_error": is_error,
-            });
-            let decision = hooks::run_tool_scoped(
-                &settings,
-                event,
-                &session_id,
-                cwd.as_deref(),
-                &tool_name,
-                fields,
-            )
-            .await;
-            emit_hook_diagnostics(&app, event, &decision);
+        for (tool_use_id, _is_error, _result) in hooks::extract_tool_results(evt) {
+            let _ = state.take_tool(&session_id, &tool_use_id).await;
         }
     }
 
@@ -578,7 +882,7 @@ async fn observe_hooks(app: AppHandle, state: SidecarState, value: Value) {
                 ch.fields,
             )
             .await;
-            emit_hook_diagnostics(&app, ch.event, &decision);
+            emit_hook_diagnostics(host.as_ref(), ch.event, &session_id, None, &decision);
         }
     }
 
@@ -591,11 +895,12 @@ async fn observe_hooks(app: AppHandle, state: SidecarState, value: Value) {
 /// Stop the running sidecar (drop stdin, kill the child). The next
 /// `claude_send` will respawn it. Safe to call when no sidecar is running.
 pub async fn kill_sidecar(state: SidecarState) {
-    let mut guard = state.inner.lock().await;
     // Closing stdin first lets the sidecar exit cleanly (its stdin EOF handler
     // tears down active sessions). If that doesn't work, kill_on_drop handles
-    // the rest when we drop the Child below.
-    guard.stdin.take();
+    // the rest when we drop the Child below. stdin lives behind its own lock;
+    // take it before touching `inner` (stdin→inner order, never nested).
+    state.stdin.lock().await.take();
+    let mut guard = state.inner.lock().await;
     if let Some(mut child) = guard.child.take() {
         if let Err(e) = child.start_kill() {
             log::warn!("kill sidecar failed: {e}");
@@ -603,4 +908,195 @@ pub async fn kill_sidecar(state: SidecarState) {
         // Don't wait — the stdout reader task will observe EOF and clean up.
     }
     guard.ready = false;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn parse_node_major_handles_all_forms() {
+        // Canonical `node --version` output.
+        assert_eq!(parse_node_major("v20.11.0\n"), Some(20));
+        assert_eq!(parse_node_major("v18.19.0"), Some(18));
+        // Missing leading `v` is tolerated.
+        assert_eq!(parse_node_major("22.1.0"), Some(22));
+        // Surrounding whitespace is trimmed.
+        assert_eq!(parse_node_major("  v24.0.0  "), Some(24));
+        // Garbage / empty input yields None (caller treats as "unknown").
+        assert_eq!(parse_node_major(""), None);
+        assert_eq!(parse_node_major("vX.Y.Z"), None);
+        assert_eq!(parse_node_major("not a version"), None);
+    }
+
+    // The pure backoff-table tests moved to `supervision_backoff.rs` with the
+    // extraction (R6); the state-level tests below still exercise the
+    // SidecarState wiring around `CrashBackoff`.
+
+    #[tokio::test]
+    async fn backoff_remaining_none_before_any_failure() {
+        let s = SidecarState::new();
+        assert!(s.backoff_remaining(Instant::now()).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn backoff_remaining_single_failure_is_immediate() {
+        let s = SidecarState::new();
+        let t0 = Instant::now();
+        s.note_exit(t0).await; // failures = 1 → delay 0 → no backoff
+        assert!(s.backoff_remaining(t0).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn backoff_remaining_inside_and_past_window() {
+        let s = SidecarState::new();
+        let t0 = Instant::now();
+        s.note_exit(t0).await; // failures = 1
+        s.note_exit(t0).await; // failures = 2 → delay 250ms
+        let inside = s.backoff_remaining(t0 + Duration::from_millis(100)).await;
+        assert!(inside.is_some());
+        assert!(inside.unwrap() <= Duration::from_millis(150));
+        assert!(s
+            .backoff_remaining(t0 + Duration::from_millis(300))
+            .await
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn note_ready_resets_crash_loop() {
+        let s = SidecarState::new();
+        let t0 = Instant::now();
+        s.note_exit(t0).await;
+        s.note_exit(t0).await; // failures = 2
+        s.note_ready().await; // a successful boot clears the counter
+        assert!(s
+            .backoff_remaining(t0 + Duration::from_millis(1))
+            .await
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn note_exit_clears_orphaned_session_state() {
+        let s = SidecarState::new();
+        s.register_session_cwd("sess-1", Some("/tmp/x".to_string()))
+            .await;
+        assert_eq!(s.session_cwd("sess-1").await, Some("/tmp/x".to_string()));
+        s.note_exit(Instant::now()).await; // crash → session state must not leak
+        assert_eq!(s.session_cwd("sess-1").await, None);
+    }
+
+    #[test]
+    fn spawn_epoch_advances_monotonically() {
+        let s = SidecarState::new();
+        assert_eq!(s.current_epoch(), 0);
+        let e1 = s.next_epoch();
+        let e2 = s.next_epoch();
+        assert_eq!(e1, 1);
+        assert_eq!(e2, 2);
+        assert_eq!(s.current_epoch(), 2);
+        // A watchdog armed at generation e1 can detect it has been superseded.
+        assert_ne!(e1, s.current_epoch());
+    }
+
+    #[tokio::test]
+    async fn write_command_errors_when_not_running() {
+        let s = SidecarState::new();
+        let err = s
+            .write_command(&serde_json::json!({ "type": "send" }))
+            .await
+            .unwrap_err();
+        assert!(err.contains("not running"), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn managed_snapshot_is_none_when_no_child() {
+        let s = SidecarState::new();
+        assert!(s.managed_snapshot().await.is_none());
+    }
+
+    fn decision(
+        block: Option<&str>,
+        context: Option<&str>,
+        warnings: &[&str],
+    ) -> hooks::HookDecision {
+        hooks::HookDecision {
+            block: block.map(String::from),
+            additional_context: context.map(String::from),
+            warnings: warnings.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn hook_fire_outcome_is_none_for_no_op() {
+        assert_eq!(hook_fire_outcome(&decision(None, None, &[])), None);
+        assert_eq!(hook_fire_outcome(&hooks::HookDecision::default()), None);
+    }
+
+    #[test]
+    fn hook_fire_outcome_follows_block_context_warning_precedence() {
+        // Block wins over everything.
+        assert_eq!(
+            hook_fire_outcome(&decision(Some("nope"), Some("ctx"), &["w"])),
+            Some("blocked")
+        );
+        // Context wins over a warning when there is no block.
+        assert_eq!(
+            hook_fire_outcome(&decision(None, Some("ctx"), &["w"])),
+            Some("context")
+        );
+        // Warning-only.
+        assert_eq!(
+            hook_fire_outcome(&decision(None, None, &["timed out"])),
+            Some("warning")
+        );
+    }
+
+    #[test]
+    fn build_hook_fire_payload_skips_no_op() {
+        assert!(build_hook_fire_payload(
+            "s1",
+            "PreToolUse",
+            Some("Bash"),
+            &decision(None, None, &[])
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn build_hook_fire_payload_shapes_a_blocked_fire() {
+        let payload = build_hook_fire_payload(
+            "s1",
+            "PreToolUse",
+            Some("Bash"),
+            &decision(Some("denylist"), None, &["hook timed out after 5000ms"]),
+        )
+        .expect("consequential fire should build a payload");
+
+        assert_eq!(payload["type"], "event");
+        assert_eq!(payload["sessionId"], "s1");
+        let ev = &payload["event"];
+        assert_eq!(ev["type"], "system");
+        assert_eq!(ev["subtype"], "hook_fire");
+        assert_eq!(ev["hook_event"], "PreToolUse");
+        assert_eq!(ev["tool_name"], "Bash");
+        assert_eq!(ev["outcome"], "blocked");
+        assert_eq!(ev["block"], "denylist");
+        assert_eq!(ev["additional_context"], Value::Null);
+        assert_eq!(ev["warnings"][0], "hook timed out after 5000ms");
+    }
+
+    #[test]
+    fn build_hook_fire_payload_omits_tool_name_as_null() {
+        let payload = build_hook_fire_payload(
+            "s1",
+            "UserPromptSubmit",
+            None,
+            &decision(None, Some("ctx"), &[]),
+        )
+        .expect("context fire should build a payload");
+        assert_eq!(payload["event"]["tool_name"], Value::Null);
+        assert_eq!(payload["event"]["outcome"], "context");
+        assert_eq!(payload["event"]["additional_context"], "ctx");
+    }
 }

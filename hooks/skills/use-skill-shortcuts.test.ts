@@ -2,16 +2,31 @@
  * @jest-environment jsdom
  */
 
-import { renderHook } from "@testing-library/react"
-import { fireEvent } from "@testing-library/react"
+import { renderHook, fireEvent } from "@testing-library/react"
 import { useSkillShortcuts } from "./use-skill-shortcuts"
+import { useAppShortcutDispatcher } from "@/hooks/shortcuts/use-app-shortcut-dispatcher"
 import { useSkillsStore } from "@/stores/skills"
-import type { Skill } from "@/lib/claude/types"
+import { __resetAppRuntimeForTesting } from "@/lib/shortcuts/app-runtime"
+import { __resetAppKeybindingStoreForTesting } from "@/stores/shortcuts/app-keybinding-store"
+import { __resetContextKeysForTesting } from "@/lib/plugin/context-keys/context-key-store"
+import type { Skill } from "@cognia/agent-config-types"
+
+jest.mock("@/lib/plugin", () => ({
+  getPluginEventHooks: () => ({ dispatchShortcut: jest.fn() }),
+}))
 
 const skills: Skill[] = [
   { id: "a", name: "Alpha", content: "", createdAt: 0, updatedAt: 0 } as Skill,
   { id: "b", name: "Bravo", content: "", createdAt: 0, updatedAt: 0 } as Skill,
 ]
+
+// Mount the dispatcher + the feature hook together (no JSX ⇒ .test.ts stays valid).
+function mount() {
+  return renderHook(() => {
+    useAppShortcutDispatcher()
+    useSkillShortcuts(skills)
+  })
+}
 
 function resetStore() {
   useSkillsStore.setState({
@@ -22,24 +37,30 @@ function resetStore() {
   })
 }
 
-beforeEach(resetStore)
+beforeEach(() => {
+  __resetAppRuntimeForTesting()
+  __resetAppKeybindingStoreForTesting()
+  __resetContextKeysForTesting()
+  localStorage.clear()
+  resetStore()
+})
 
 describe("useSkillShortcuts", () => {
   it("Cmd/Ctrl+A selects all filtered skills", () => {
-    renderHook(() => useSkillShortcuts(skills))
+    mount()
     fireEvent.keyDown(window, { key: "a", ctrlKey: true })
     expect(useSkillsStore.getState().selection).toEqual(new Set(["a", "b"]))
   })
 
   it("N opens the create editor", () => {
-    renderHook(() => useSkillShortcuts(skills))
+    mount()
     fireEvent.keyDown(window, { key: "n" })
     expect(useSkillsStore.getState().editorTarget).toEqual({ mode: "create" })
   })
 
   it("Escape clears the selection first, then closes the detail", () => {
     useSkillsStore.setState({ selection: new Set(["a"]), detailSkillId: "a" })
-    renderHook(() => useSkillShortcuts(skills))
+    mount()
     fireEvent.keyDown(window, { key: "Escape" })
     expect(useSkillsStore.getState().selection.size).toBe(0)
     // Detail still open until a second Escape.
@@ -50,14 +71,21 @@ describe("useSkillShortcuts", () => {
 
   it("Delete opens the confirm only when exactly one skill is selected", () => {
     useSkillsStore.setState({ selection: new Set(["b"]) })
-    renderHook(() => useSkillShortcuts(skills))
+    mount()
     fireEvent.keyDown(window, { key: "Delete" })
     expect(useSkillsStore.getState().deleteTarget).toEqual({ skillId: "b", name: "Bravo" })
   })
 
+  it("Backspace also triggers delete for a single selection", () => {
+    useSkillsStore.setState({ selection: new Set(["a"]) })
+    mount()
+    fireEvent.keyDown(window, { key: "Backspace" })
+    expect(useSkillsStore.getState().deleteTarget).toEqual({ skillId: "a", name: "Alpha" })
+  })
+
   it("Delete is a no-op with a multi-selection", () => {
     useSkillsStore.setState({ selection: new Set(["a", "b"]) })
-    renderHook(() => useSkillShortcuts(skills))
+    mount()
     fireEvent.keyDown(window, { key: "Delete" })
     expect(useSkillsStore.getState().deleteTarget).toBeNull()
   })
@@ -66,7 +94,7 @@ describe("useSkillShortcuts", () => {
     const input = document.createElement("input")
     input.setAttribute("data-skill-search", "")
     document.body.appendChild(input)
-    renderHook(() => useSkillShortcuts(skills))
+    mount()
     fireEvent.keyDown(window, { key: "/" })
     expect(document.activeElement).toBe(input)
     document.body.removeChild(input)
@@ -76,7 +104,7 @@ describe("useSkillShortcuts", () => {
     const input = document.createElement("input")
     document.body.appendChild(input)
     input.focus()
-    renderHook(() => useSkillShortcuts(skills))
+    mount()
     fireEvent.keyDown(input, { key: "n" })
     expect(useSkillsStore.getState().editorTarget).toBeNull()
     document.body.removeChild(input)

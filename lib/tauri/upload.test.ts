@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { uploadFile, downloadFile } from "./upload"
 
 jest.mock("@tauri-apps/plugin-upload", () => ({

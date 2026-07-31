@@ -5,7 +5,17 @@ import { Settings } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import { describeCronExpression } from "@/lib/scheduler/cron-parser"
-import type { ScheduledTask } from "@/types/scheduler"
+import { resolveOverlapPolicy } from "@/lib/scheduler/runtime-policy"
+import type { ScheduledTask, TaskOverlapPolicy } from "@/types/scheduler"
+
+/** i18n sub-keys under `scheduler.overlapPolicies.*` per policy value. */
+const OVERLAP_POLICY_KEYS: Record<TaskOverlapPolicy, string> = {
+  skip: "skip",
+  allow: "allow",
+  "queue-one": "queueOne",
+  "queue-all": "queueAll",
+  "cancel-previous": "cancelPrevious",
+}
 
 interface TaskConfigurationProps {
   task: ScheduledTask
@@ -58,12 +68,44 @@ export function TaskConfiguration({ task, className }: TaskConfigurationProps) {
       value: timeoutSeconds,
     },
     {
-      label: t("concurrent") || "Concurrent",
-      value: task.config.allowConcurrent
-        ? t("allowed") || "Allowed"
-        : t("disallowed") || "Disallowed",
+      label: t("overlapPolicies.label") || "Overlap policy",
+      value:
+        t(`overlapPolicies.${OVERLAP_POLICY_KEYS[resolveOverlapPolicy(task.config)]}.title`) ||
+        resolveOverlapPolicy(task.config),
     },
   ]
+
+  // Optional limits — rendered only when configured on the task.
+  if (task.endAt) {
+    items.push({
+      label: t("lifecycle.endDate") || "End date",
+      value: new Date(task.endAt).toLocaleString(),
+    })
+  }
+  if (task.config.maxRuns && task.config.maxRuns > 0) {
+    items.push({
+      label: t("lifecycle.maxRuns") || "Max runs",
+      value: `${task.runCount}/${task.config.maxRuns}`,
+    })
+  }
+  if (task.config.pauseAfterConsecutiveFailures && task.config.pauseAfterConsecutiveFailures > 0) {
+    items.push({
+      label: t("pauseAfterFailures.label") || "Auto-pause after failures",
+      value: String(task.config.pauseAfterConsecutiveFailures),
+    })
+  }
+  if (task.config.catchupWindowMs && task.config.catchupWindowMs > 0) {
+    items.push({
+      label: t("catchupWindow.label") || "Catch-up window",
+      value: `${Math.round(task.config.catchupWindowMs / 60_000)} min`,
+    })
+  }
+  if (task.trigger.jitterMs && task.trigger.jitterMs > 0) {
+    items.push({
+      label: t("jitter.label") || "Jitter",
+      value: `${Math.round(task.trigger.jitterMs / 1_000)}s`,
+    })
+  }
 
   return (
     <Card className={cn("border-border/50 bg-card/80", className)}>

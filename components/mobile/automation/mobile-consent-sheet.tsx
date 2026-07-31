@@ -34,8 +34,13 @@ import {
 } from "@/components/ui/sheet"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
 import { useBiometricGuard } from "@/hooks/use-biometric-guard"
 import { useCanControl } from "@/hooks/data/use-can-control"
+import {
+  CONSENT_GRANT_DURATIONS_MS,
+  grantDurationMinutes,
+} from "@/lib/automation/consent-durations"
 import {
   useAutomationConsent,
   type PendingConsent,
@@ -51,7 +56,7 @@ export function MobileConsentSheet() {
   const current: PendingConsent | undefined = queue[0]
 
   const onAllow = useCallback(
-    async (event: PendingConsent, persist: boolean) => {
+    async (event: PendingConsent, persist: boolean, grantDurationMs?: number) => {
       const result = await guard(
         {
           reason: tm("biometricReason"),
@@ -59,7 +64,7 @@ export function MobileConsentSheet() {
           description: tm("biometricDescription"),
         },
         async () => {
-          await respond(event, true, persist)
+          await respond(event, true, persist, grantDurationMs)
         }
       )
       if (result.kind === "blocked" && result.reason !== "cancelled") {
@@ -68,6 +73,12 @@ export function MobileConsentSheet() {
     },
     [guard, respond, tm]
   )
+
+  // Android hardware back rejects the current prompt (same as swipe-down).
+  // Must be armed before the early return below so the hook order is stable.
+  useBackDismiss(canControl === true && current !== undefined, () => {
+    if (current) void respond(current, false, false)
+  })
 
   if (canControl !== true || !current) return null
 
@@ -99,6 +110,26 @@ export function MobileConsentSheet() {
         </SheetHeader>
 
         <div className="space-y-4 px-1 py-3">
+          {current.thumbnail && (
+            <figure className="space-y-1" data-testid="mobile-consent-thumbnail">
+              {/* eslint-disable-next-line @next/next/no-img-element -- base64 frame
+                  straight off the WS event; there is no URL for next/image to
+                  optimize, and it must never be uploaded anywhere. */}
+              <img
+                src={`data:image/png;base64,${current.thumbnail.bytes}`}
+                width={current.thumbnail.width}
+                height={current.thumbnail.height}
+                alt={tm("thumbnailAlt")}
+                className="w-full rounded border bg-muted object-contain"
+              />
+              {current.thumbnail.redacted && (
+                <figcaption className="text-[10px] text-amber-600 dark:text-amber-500">
+                  {tm("thumbnailRedacted")}
+                </figcaption>
+              )}
+            </figure>
+          )}
+
           <div className="space-y-1.5 text-xs">
             <div className="flex items-center gap-2">
               <span className="text-muted-foreground">{t("fields.action")}</span>
@@ -144,14 +175,25 @@ export function MobileConsentSheet() {
             >
               {t("actions.allowOnce")}
             </Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => void onAllow(current, true)}
-              data-testid="mobile-consent-allow-always"
-            >
-              {t("actions.allowSession")}
-            </Button>
+            <div className="space-y-1">
+              <span className="text-[10px] text-muted-foreground">
+                {t("actions.allowForLabel")}
+              </span>
+              <div className="flex gap-1">
+                {CONSENT_GRANT_DURATIONS_MS.map((ms) => (
+                  <Button
+                    key={ms}
+                    size="sm"
+                    variant="secondary"
+                    className="flex-1 text-[11px]"
+                    onClick={() => void onAllow(current, true, ms)}
+                    data-testid={`mobile-consent-allow-for-${grantDurationMinutes(ms)}`}
+                  >
+                    {t("actions.allowForMinutes", { minutes: grantDurationMinutes(ms) })}
+                  </Button>
+                ))}
+              </div>
+            </div>
             <Button
               size="sm"
               variant="outline"

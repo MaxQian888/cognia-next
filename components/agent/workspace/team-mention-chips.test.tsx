@@ -103,16 +103,39 @@ describe("TeamMentionChips", () => {
         />
       </NextIntlClientProvider>
     )
-    expect(screen.getByTestId("mention-chip-__virtual_claude__")).toHaveAttribute(
-      "data-runtime-status",
-      "missing-key"
+    const claudeChip = screen.getByTestId("mention-chip-__virtual_claude__")
+    expect(claudeChip).toHaveAttribute("data-runtime-status", "missing-key")
+    // Tooltip resolves from the real i18n key (no hard-coded English fallback);
+    // jest.setup mocks next-intl onto the compiled en.json bundle, so a missing
+    // key would surface as the bare key string here.
+    expect(claudeChip.getAttribute("title")).toBe(
+      "Set an Anthropic API key in Settings → Providers to enable @claude."
     )
-    expect(screen.getByTestId("mention-chip-__virtual_codex__")).toHaveAttribute(
-      "data-runtime-status",
-      "no-agent"
-    )
+
+    const codexChip = screen.getByTestId("mention-chip-__virtual_codex__")
+    expect(codexChip).toHaveAttribute("data-runtime-status", "no-agent")
+    // {runtime} interpolation resolves through next-intl.
+    expect(codexChip.getAttribute("title")).toContain("codex")
+
     // Alice runs on claude-code which is ready in this map.
     expect(screen.getByTestId("mention-chip-tm-1")).toHaveAttribute("data-runtime-status", "ready")
+  })
+
+  it("resolves the disconnected tooltip from i18n (with {runtime} interpolation)", () => {
+    render(
+      <NextIntlClientProvider locale="en" messages={messages} timeZone="UTC">
+        <TeamMentionChips
+          targets={targets}
+          onPick={jest.fn()}
+          availability={{ "claude-code": "disconnected" }}
+        />
+      </NextIntlClientProvider>
+    )
+    const aliceChip = screen.getByTestId("mention-chip-tm-1")
+    expect(aliceChip).toHaveAttribute("data-runtime-status", "disconnected")
+    // Localized key resolves (no hard-coded fallback) and interpolates the runtime.
+    expect(aliceChip.getAttribute("title")).toContain("claude-code")
+    expect(aliceChip.getAttribute("title")).toMatch(/not connected/i)
   })
 
   it("defaults to ready when no availability map is provided", () => {

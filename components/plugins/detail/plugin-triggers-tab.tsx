@@ -5,7 +5,7 @@
  *
  * Lists every workflow currently subscribed to one of this plugin's
  * triggers and lets the user toggle a per-(workflow, kind) mute flag.
- * Muted entries skip dispatch in `lib/plugin/bridge/trigger-bridge.ts`.
+ * Muted entries skip dispatch in `lib/plugin/bridge/plugin-trigger-dispatch.ts`.
  */
 
 import { useMemo, useSyncExternalStore } from "react"
@@ -72,8 +72,8 @@ export function PluginTriggersTab({ pluginId }: Props) {
     const out: Subscription[] = []
     for (const reg of listPluginTriggers()) {
       if (reg.pluginId !== pluginId) continue
-      for (const workflowId of reg.instances.keys()) {
-        out.push({ kind: reg.kind, workflowId })
+      for (const instance of reg.instances.values()) {
+        out.push({ kind: reg.kind, workflowId: instance.workflowId })
       }
     }
     return out.sort((a, b) => a.kind.localeCompare(b.kind))

@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Coverage for the per-item CRUD + pin helpers added on top of the existing
  * append/upsert API. The full table-level smoke (cascade delete, multi-twin

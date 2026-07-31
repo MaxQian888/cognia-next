@@ -1,0 +1,23 @@
+{
+  "defaultModel": "默认模型",
+  "fontScale": "字号",
+  "fontScaleLg": "大",
+  "fontScaleMd": "中",
+  "fontScaleSm": "小",
+  "language": "语言",
+  "privacyTitle": "无障碍与隐私",
+  "reconnectButton": "重连 WebRTC",
+  "reconnectFailed": "重连失败（{reason}）。",
+  "reconnectInactive": "WebRTC 通道当前未启用。",
+  "reconnectSuccess": "已发起重连。",
+  "reconnectThrottled": "操作过于频繁，请稍等几秒再试。",
+  "reduceMotion": "减弱动效",
+  "reduceMotionHelp": "在整个应用中减少动画与过渡效果。",
+  "telemetry": "共享使用遥测",
+  "telemetryHelp": "发送匿名诊断数据以帮助改进应用。",
+  "theme": "主题",
+  "themeDark": "深色",
+  "themeLight": "浅色",
+  "themeSystem": "跟随系统",
+  "transportTier": "传输通道"
+}

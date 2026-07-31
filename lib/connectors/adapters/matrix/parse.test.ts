@@ -4,6 +4,7 @@ jest.mock("@/lib/connectors/adapters/_shared/a2ui-mapper", () => ({
 
 import { resolveCallbackBinding } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
 import {
+  matrixMediaDownloadUrl,
   parseMatrixEvent,
   parseMatrixReplyCorrelation,
   stripReplyFallback,
@@ -34,6 +35,9 @@ describe("parseMatrixEvent", () => {
     expect(out).not.toBeNull()
     expect(out!.kind).toBe("create")
     expect(out!.plainText).toBe("hello world")
+    // Adapter-public composite id — matches what send()/edit() return so the
+    // bus stored-message index correlates in both directions.
+    expect(out!.messageId).toBe(`${ROOM}|$evt1`)
     expect(out!.conversationKey).toBe(`matrix:${ADAPTER}:${ROOM}`)
     expect(out!.conversationRef).toMatchObject({
       platform: "matrix",
@@ -61,7 +65,7 @@ describe("parseMatrixEvent", () => {
     })
     const out = parseMatrixEvent(ADAPTER, SELF, ROOM, ev)
     expect(out!.kind).toBe("edit")
-    expect(out!.replacesMessageId).toBe("$orig")
+    expect(out!.replacesMessageId).toBe(`${ROOM}|$orig`)
     expect(out!.plainText).toBe("fixed")
   })
 
@@ -76,7 +80,7 @@ describe("parseMatrixEvent", () => {
     const out = parseMatrixEvent(ADAPTER, SELF, ROOM, ev)
     expect(out!.kind).toBe("system")
     expect(out!.systemKind).toBe("reaction_added")
-    expect(out!.replacesMessageId).toBe("$target")
+    expect(out!.replacesMessageId).toBe(`${ROOM}|$target`)
     expect(out!.segments[0]).toEqual({ type: "emoji", code: "👍" })
   })
 
@@ -91,8 +95,57 @@ describe("parseMatrixEvent", () => {
     }
     const out = parseMatrixEvent(ADAPTER, SELF, ROOM, ev)
     expect(out!.kind).toBe("delete")
-    expect(out!.replacesMessageId).toBe("$gone")
+    expect(out!.replacesMessageId).toBe(`${ROOM}|$gone`)
     expect(out!.segments).toEqual([])
+  })
+
+  it("reads the room-v11 content.redacts fallback", () => {
+    const ev: MatrixTimelineEvent = {
+      type: "m.room.redaction",
+      event_id: "$redact2",
+      sender: "@alice:matrix.org",
+      origin_server_ts: 1700000000000,
+      // Room v11 moved the target into content.redacts.
+      content: { redacts: "$goneV11" },
+    }
+    const out = parseMatrixEvent(ADAPTER, SELF, ROOM, ev)
+    expect(out!.kind).toBe("delete")
+    expect(out!.replacesMessageId).toBe(`${ROOM}|$goneV11`)
+  })
+
+  it("returns null for a redaction without any target", () => {
+    const ev: MatrixTimelineEvent = {
+      type: "m.room.redaction",
+      event_id: "$redact3",
+      sender: "@alice:matrix.org",
+      origin_server_ts: 1700000000000,
+      // m.relates_to is NOT a redaction target carrier.
+      content: { "m.relates_to": { event_id: "$notATarget" } },
+    }
+    expect(parseMatrixEvent(ADAPTER, SELF, ROOM, ev)).toBeNull()
+  })
+
+  it("does not throw on a content-less reaction event (skips it)", () => {
+    // A malformed / non-spec event without `content` must not throw out of the
+    // sync loop — parseMatrixEvent guards the deref and returns null.
+    const ev = {
+      type: "m.reaction",
+      event_id: "$r",
+      sender: "@alice:matrix.org",
+      origin_server_ts: 1700000000000,
+    } as unknown as MatrixTimelineEvent
+    expect(() => parseMatrixEvent(ADAPTER, SELF, ROOM, ev)).not.toThrow()
+    expect(parseMatrixEvent(ADAPTER, SELF, ROOM, ev)).toBeNull()
+  })
+
+  it("does not throw on a content-less room message event", () => {
+    const ev = {
+      type: "m.room.message",
+      event_id: "$m",
+      sender: "@alice:matrix.org",
+      origin_server_ts: 1700000000000,
+    } as unknown as MatrixTimelineEvent
+    expect(() => parseMatrixEvent(ADAPTER, SELF, ROOM, ev)).not.toThrow()
   })
 
   it("maps media msgtypes to segments", () => {
@@ -148,6 +201,29 @@ describe("parseMatrixEvent", () => {
     expect(voice!.segments[0]).toMatchObject({ type: "voice", durationSec: 5 })
   })
 
+  it("projects mxc media urls to authenticated Matrix media download urls", () => {
+    const img = parseMatrixEvent(
+      ADAPTER,
+      SELF,
+      ROOM,
+      msg({
+        content: {
+          msgtype: "m.image",
+          body: "pic.png",
+          url: "mxc://matrix.org/abc/def",
+          info: { mimetype: "image/png" },
+        },
+      }),
+      { homeserver: "matrix.org" }
+    )
+    expect(img!.segments[0]).toMatchObject({
+      type: "image",
+      url: "https://matrix.org/_matrix/client/v1/media/download/matrix.org/abc%2Fdef",
+      mimeType: "image/png",
+      rawUrl: "mxc://matrix.org/abc/def",
+    })
+  })
+
   it("captures reply target and strips the quote fallback", () => {
     const ev = msg({
       content: {
@@ -183,6 +259,56 @@ describe("parseMatrixEvent", () => {
     expect(out!.mentions.users).toContain(SELF)
   })
 
+  it("treats m.mentions.room (@room ping) as a self-mention", () => {
+    const ev = msg({
+      content: { msgtype: "m.text", body: "@room heads up", "m.mentions": { room: true } },
+    })
+    const out = parseMatrixEvent(ADAPTER, SELF, ROOM, ev)
+    expect(out!.mentions.selfMentioned).toBe(true)
+  })
+
+  it("detects a legacy matrix.to permalink pill in formatted_body", () => {
+    const raw = msg({
+      content: {
+        msgtype: "m.text",
+        body: "bot: hi",
+        format: "org.matrix.custom.html",
+        formatted_body: `<a href="https://matrix.to/#/${SELF}">bot</a>: hi`,
+      },
+    })
+    expect(parseMatrixEvent(ADAPTER, SELF, ROOM, raw)!.mentions.selfMentioned).toBe(true)
+
+    const encoded = msg({
+      content: {
+        msgtype: "m.text",
+        body: "bot: hi",
+        format: "org.matrix.custom.html",
+        formatted_body: `<a href="https://matrix.to/#/${encodeURIComponent(SELF)}">bot</a>: hi`,
+      },
+    })
+    expect(parseMatrixEvent(ADAPTER, SELF, ROOM, encoded)!.mentions.selfMentioned).toBe(true)
+  })
+
+  it("flags a reply to one of the bot's own messages as selfMentioned", () => {
+    const ev = msg({
+      content: {
+        msgtype: "m.text",
+        body: "replying to the bot",
+        "m.relates_to": { "m.in_reply_to": { event_id: "$botMsg" } },
+      },
+    })
+    const withOwn = parseMatrixEvent(ADAPTER, SELF, ROOM, ev, {
+      ownEventIds: new Set(["$botMsg"]),
+    })
+    expect(withOwn!.mentions.selfMentioned).toBe(true)
+
+    // Replies to OTHER users' messages stay unflagged.
+    const withoutOwn = parseMatrixEvent(ADAPTER, SELF, ROOM, ev, {
+      ownEventIds: new Set(["$someoneElse"]),
+    })
+    expect(withoutOwn!.mentions.selfMentioned).toBe(false)
+  })
+
   it("ignores already-redacted and unknown event types", () => {
     expect(
       parseMatrixEvent(
@@ -200,6 +326,18 @@ describe("parseMatrixEvent", () => {
       content: {},
     }
     expect(parseMatrixEvent(ADAPTER, SELF, ROOM, member)).toBeNull()
+  })
+})
+
+describe("matrixMediaDownloadUrl", () => {
+  it("returns a Matrix v1 authenticated media download URL", () => {
+    expect(matrixMediaDownloadUrl("matrix.org", "mxc://example.org/media/id")).toBe(
+      "https://matrix.org/_matrix/client/v1/media/download/example.org/media%2Fid"
+    )
+  })
+
+  it("returns null for non-mxc urls", () => {
+    expect(matrixMediaDownloadUrl("matrix.org", "https://example.org/x")).toBeNull()
   })
 })
 

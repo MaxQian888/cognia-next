@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 import type { Project } from "@/types"
 import { __resetDbForTesting, getDb, whenSeeded, backfillRootsForRow } from "./schema"

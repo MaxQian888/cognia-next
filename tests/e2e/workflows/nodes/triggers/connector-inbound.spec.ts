@@ -2,7 +2,7 @@
  * E2E: trigger.connector.inbound — adapter binding + filter pattern.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../../../helpers/db-reset"
 import { seedAndOpenWorkflow } from "../../../helpers/seed-workflow"
 import {
@@ -18,15 +18,19 @@ test.describe("workflow node — trigger.connector.inbound", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded connector inbound trigger renders + adapter + filter persist", async ({ page }) => {
+  test("seeded connector inbound trigger renders + adapter + filter fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "trigger-connector-inbound")
     await assertNodeOnCanvas(page, {
       kind: "trigger.connector.inbound",
       label: "Connector Inbound",
     })
     await openNodeInspector(page, "trigger.connector.inbound")
-    await expect(page.locator("#ins-adapterId, [name=adapterId]").first()).toBeVisible()
-    await expect(page.locator("#ins-filterPattern, [name=filterPattern]").first()).toBeVisible()
+    await expect(page.locator("#ins-adapterId, [data-field=adapterId]").first()).toBeVisible()
+    await expect(
+      page.locator("#ins-conversationKey, [data-field=conversationKey]").first()
+    ).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "trigger.connector.inbound" })
   })

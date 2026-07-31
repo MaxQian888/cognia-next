@@ -1,4 +1,4 @@
-import type { StoredMessage } from "@/lib/claude/types"
+import type { StoredMessage } from "@cognia/agent-config-types"
 import { getDb } from "@/lib/db/schema"
 import type { Transport } from "@/lib/tauri/transport-types"
 

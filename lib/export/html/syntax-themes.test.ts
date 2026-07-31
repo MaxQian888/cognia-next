@@ -4,6 +4,14 @@ import type { ThemeId, ThemeTokens } from "./syntax-themes"
 describe("THEMES", () => {
   it("contains every documented theme id", () => {
     const expected: ThemeId[] = [
+      "arknights",
+      "cyberpunk",
+      "terminal",
+      "sakura",
+      "catppuccin-mocha",
+      "aurora",
+      "genshin",
+      "honkai",
       "light",
       "dark",
       "sepia",

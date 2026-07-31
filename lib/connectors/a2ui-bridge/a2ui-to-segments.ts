@@ -17,6 +17,7 @@ import type {
   MessageSegment,
 } from "@/types/connectors/segment"
 import { generatePlainTextMirror } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
+import { trackInboxEvent } from "@/lib/telemetry/inbox-events"
 
 /**
  * Minimal shape of a captured assistant reply we need to read. Kept
@@ -30,6 +31,7 @@ export interface AssistantReplyForExtraction {
   a2uiSurfaces?: Record<string, A2UISegmentContent>
   /** Surface ids in the order the assistant created/updated them. */
   a2uiSurfaceOrder?: string[]
+  telemetry?: { adapterId: string; platform: string }
 }
 
 /**
@@ -57,7 +59,7 @@ export function assistantReplyToSegments(reply: AssistantReplyForExtraction): Me
   for (const surfaceId of order) {
     const content = surfaces[surfaceId]
     if (!content) continue
-    segments.push(buildA2UISegment(surfaceId, content))
+    segments.push(buildA2UISegment(surfaceId, content, reply.telemetry))
   }
 
   const trimmed = reply.text.trim()
@@ -83,12 +85,20 @@ export function assistantReplyToSegments(reply: AssistantReplyForExtraction): Me
  */
 export function buildA2UISegment(
   surfaceId: string,
-  content: A2UISegmentContent
+  content: A2UISegmentContent,
+  telemetry?: { adapterId: string; platform: string }
 ): A2UIMessageSegment {
   const widget = (content.widget ?? {}) as Record<string, unknown>
   const providedMirror = typeof widget.fallbackText === "string" ? widget.fallbackText.trim() : ""
   const plainTextMirror =
     providedMirror.length > 0 ? providedMirror : generatePlainTextMirror(content)
+  if (providedMirror.length === 0 && telemetry) {
+    void trackInboxEvent("a2ui.downgrade", {
+      adapterId: telemetry.adapterId,
+      fields: { platform: telemetry.platform, reason: "missing_fallback_text", surfaceId },
+      at: Date.now(),
+    })
+  }
   return {
     type: "a2ui",
     surfaceId,

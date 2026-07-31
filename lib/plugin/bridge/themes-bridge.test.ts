@@ -204,6 +204,65 @@ describe("PluginThemesBridge.registerPluginThemes", () => {
     expect(result.errors).toHaveLength(1)
     expect(result.errors[0].message).toMatch(/foreground/)
   })
+
+  it("projects a cssVariables contribution onto a full palette and carries cssVars", async () => {
+    const bridge = new PluginThemesBridge()
+    const result = await bridge.registerPluginThemes(
+      "p",
+      "Plugin P",
+      manifest([
+        {
+          id: "neon",
+          name: "Neon",
+          isDark: true,
+          cssVariables: {
+            "--background": "#101014",
+            "--primary": "#a855f7",
+            "--custom-glow": "#ff00ff",
+          },
+        },
+      ]),
+      "/plugin/p"
+    )
+    expect(result.registered).toBe(1)
+    const stored = getPluginTheme("p.neon")
+    // The declared overrides land on the structured palette...
+    expect(stored?.colors?.background).toBe("#101014")
+    expect(stored?.colors?.primary).toBe("#a855f7")
+    // ...and every other token is filled from the dark fallback (not the old
+    // 2-key `{background, foreground}` fabrication).
+    expect(stored?.colors?.foreground).toBeTruthy()
+    expect(stored?.colors?.card).toBeTruthy()
+    expect(stored?.colors?.sidebar).toBeTruthy()
+    // Raw cssVars (including the non-token custom property) are carried verbatim.
+    expect(stored?.cssVars?.["--custom-glow"]).toBe("#ff00ff")
+    expect(stored?.variables["--custom-glow"]).toBe("#ff00ff")
+    expect(stored?.isDark).toBe(true)
+  })
+
+  it("drops invalid CSS variable names/values but keeps valid overrides", async () => {
+    const bridge = new PluginThemesBridge()
+    await bridge.registerPluginThemes(
+      "p",
+      "Plugin P",
+      manifest([
+        {
+          id: "guard",
+          name: "Guard",
+          cssVariables: {
+            "--background": "#fff",
+            "not-a-var": "#000",
+            "--evil": "red</style>",
+          },
+        },
+      ]),
+      "/plugin/p"
+    )
+    const stored = getPluginTheme("p.guard")
+    expect(stored?.cssVars?.["--background"]).toBe("#fff")
+    expect(stored?.cssVars?.["not-a-var"]).toBeUndefined()
+    expect(stored?.cssVars?.["--evil"]).toBeUndefined()
+  })
 })
 
 describe("PluginThemesBridge.unregisterPluginThemes", () => {

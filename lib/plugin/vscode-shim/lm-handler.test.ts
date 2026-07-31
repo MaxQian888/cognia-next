@@ -16,7 +16,7 @@ jest.mock("ai", () => {
   return { generateText, __generateTextMock: generateText }
 })
 
-jest.mock("@/lib/ai/core/client", () => ({
+jest.mock("@cognia/provider-core/core/client", () => ({
   getProviderModel: jest.fn(() => ({ modelId: "fake-model" })),
 }))
 
@@ -34,7 +34,7 @@ import {
   handleUnregisterTool,
   unregisterAllLmFor,
 } from "./lm-handler"
-import { getProviderModel } from "@/lib/ai/core/client"
+import { getProviderModel } from "@cognia/provider-core/core/client"
 
 // The ai package is hoisted-mocked above; this typed re-import gives access
 // to the spy without TS errors when calling jest.MockedFunction.
@@ -146,6 +146,28 @@ describe("lm-handler — sendChatRequest", () => {
   it("rejects empty message arrays", async () => {
     await expect(handleSendChatRequest({ extensionId: "ext", messages: [] })).rejects.toThrow(
       /at least one message/
+    )
+  })
+
+  it("forwards the explicit maxOutputTokens option to generateText", async () => {
+    await handleSendChatRequest({
+      extensionId: "ext",
+      modelId: "claude-opus-4-7",
+      messages: [{ role: "user", content: "hi" }],
+      options: { maxOutputTokens: 256 },
+    })
+    expect(generateTextMock).toHaveBeenCalledWith(expect.objectContaining({ maxOutputTokens: 256 }))
+  })
+
+  it("falls back to the model's BASE_MODELS output budget when no cap is given", async () => {
+    await handleSendChatRequest({
+      extensionId: "ext",
+      modelId: "claude-opus-4-7",
+      messages: [{ role: "user", content: "hi" }],
+    })
+    // claude-opus-4-7 → maxOutputTokens 32_000 in BASE_MODELS.
+    expect(generateTextMock).toHaveBeenCalledWith(
+      expect.objectContaining({ maxOutputTokens: 32_000 })
     )
   })
 })

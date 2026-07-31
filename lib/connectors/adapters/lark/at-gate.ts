@@ -6,6 +6,7 @@
 
 export {
   DEFAULT_AT_RESPONSE_STRATEGY,
+  DEFAULT_BOT_INTERPLAY_BUDGET,
   shouldRespondToMessage,
   type AtGateDecision,
   type AtGateReason,

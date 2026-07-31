@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react"
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 import { MentionPopover } from "./mention-popover"
 
 const mkCharacter = (overrides: Partial<Character> = {}): Character => ({
@@ -39,6 +39,31 @@ describe("MentionPopover", () => {
     )
     expect(screen.getByTestId("mobile-mention-popover")).toBeInTheDocument()
     expect(screen.getByText(/no members/i)).toBeInTheDocument()
+  })
+
+  it("does not steal focus from the composer when it opens (non-modal)", () => {
+    // The picker opens while the user is typing an @-query — if the Sheet
+    // grabbed focus, the textarea would blur and the virtual keyboard would
+    // dismiss, making type-to-filter impossible.
+    render(
+      <div>
+        <textarea data-testid="fake-composer" />
+        <MentionPopover
+          open={true}
+          query=""
+          members={[mkCharacter()]}
+          onPick={() => undefined}
+          onDismiss={() => undefined}
+        />
+      </div>
+    )
+    const composer = screen.getByTestId("fake-composer")
+    composer.focus()
+    expect(composer).toHaveFocus()
+    // Re-render with the sheet open (simulates the open transition settling).
+    fireEvent.input(composer, { target: { value: "@al" } })
+    expect(screen.getByTestId("mobile-mention-popover")).toBeInTheDocument()
+    expect(composer).toHaveFocus()
   })
 
   it("lists members when open and at least one matches", () => {
@@ -115,6 +140,36 @@ describe("MentionPopover", () => {
     // hand-rolled backdrop button has been replaced by SheetOverlay.
     fireEvent.keyDown(document.body, { key: "Escape", code: "Escape" })
     expect(onDismiss).toHaveBeenCalled()
+  })
+
+  it("floats above the measured composer height when provided", () => {
+    render(
+      <MentionPopover
+        open={true}
+        query=""
+        members={[mkCharacter({ id: "a", name: "Alice" })]}
+        composerHeight={150}
+        onPick={() => undefined}
+        onDismiss={() => undefined}
+      />
+    )
+    const panel = screen.getByTestId("mobile-mention-popover-panel")
+    expect(panel.style.bottom).toContain("150px")
+  })
+
+  it("falls back to ~5rem (80px) clearance when the composer is not yet measured", () => {
+    render(
+      <MentionPopover
+        open={true}
+        query=""
+        members={[mkCharacter({ id: "a", name: "Alice" })]}
+        composerHeight={0}
+        onPick={() => undefined}
+        onDismiss={() => undefined}
+      />
+    )
+    const panel = screen.getByTestId("mobile-mention-popover-panel")
+    expect(panel.style.bottom).toContain("80px")
   })
 
   it("ignores clicks inside the panel (no dismiss bubble-up)", () => {

@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { onDeepLink, getLaunchDeepLink, type DeepLinkHandler } from "./deep-link"
 
 jest.mock("@tauri-apps/plugin-deep-link", () => ({

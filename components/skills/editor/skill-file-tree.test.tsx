@@ -8,7 +8,7 @@ jest.mock("next-intl", () => ({
 
 import { fireEvent, render, screen } from "@testing-library/react"
 import { SkillFileTree } from "./skill-file-tree"
-import type { Skill, SkillResource } from "@/lib/claude/types"
+import type { Skill, SkillResource } from "@cognia/agent-config-types"
 
 const skill = { id: "s1", name: "X" } as Skill
 const resources: SkillResource[] = [

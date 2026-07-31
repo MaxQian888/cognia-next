@@ -71,7 +71,7 @@ describe("MobileActiveRunsCard", () => {
     // Card links to the latest run's runs view.
     expect(screen.getByTestId("mobile-active-runs-card")).toHaveAttribute(
       "href",
-      "/workflows/wf-2/runs"
+      "/workflows/runs?id=wf-2"
     )
   })
 

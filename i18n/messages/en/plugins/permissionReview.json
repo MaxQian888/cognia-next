@@ -1,0 +1,26 @@
+{
+  "auditEmpty": "No audit events for this plugin yet.",
+  "auditLogTitle": "Recent audit events",
+  "close": "Close",
+  "colActions": "",
+  "colDeclared": "Manifest",
+  "colGranted": "Granted",
+  "colOptional": "Optional",
+  "colPermission": "Permission",
+  "colTier": "Tier",
+  "description": "Review what this plugin declared, what's currently granted, and adjust at runtime. Dangerous permissions are highlighted.",
+  "empty": "This plugin doesn't declare or hold any permissions.",
+  "grant": "Grant",
+  "revoke": "Revoke",
+  "revokeAll": "Revoke all",
+  "tierHint": {
+    "confirm": "Show an overlay each time and wait for the user to allow or reject.",
+    "forbid": "Always deny — even if the manifest declares it.",
+    "silent": "Allow the granted permission to run without prompting."
+  },
+  "tierLabel": {
+    "confirm": "Confirm each call",
+    "forbid": "Forbid",
+    "silent": "Silent"
+  }
+}

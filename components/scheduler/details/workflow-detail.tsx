@@ -74,7 +74,7 @@ export function WorkflowDetail({ workflowTriggerId, onSelectRun }: WorkflowDetai
         </div>
         <div className="mt-3">
           <Button size="sm" variant="outline" asChild>
-            <Link href={`/workflows/${encodeURIComponent(trigger.workflowId)}`}>
+            <Link href={`/workflows/editor?id=${encodeURIComponent(trigger.workflowId)}`}>
               <ArrowUpRight className="mr-1.5 h-3.5 w-3.5" />
               {t("openInWorkflowEditor") || "Open in workflow editor"}
             </Link>

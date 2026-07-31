@@ -6,7 +6,6 @@
  * Mocks booted here:
  *   - MockV2Server         (mobile companion API — pair / status / events / sidecar RPC)
  *   - MockAnthropicServer  (AI nodes: /v1/messages, /v1/embeddings)
- *   - MockGithubServer     (action.github.* executors + GitHub Delivery plugin)
  *   - MockLarkServer       (action.connector.send/draft with Lark adapter)
  *   - MockVectorDbServer   (twin RAG, plugin vector ops)
  *
@@ -26,7 +25,6 @@
 import type { FullConfig } from "@playwright/test"
 import { createMockV2Server, type MockV2Server } from "./mobile/mock-v2-server"
 import { createMockAnthropicServer, type MockAnthropicServer } from "./mocks/anthropic/server"
-import { createMockGithubServer, type MockGithubServer } from "./mocks/github/server"
 import { createMockLarkServer, type MockLarkServer } from "./mocks/lark/server"
 import { createMockVectorDbServer, type MockVectorDbServer } from "./mocks/vector-db/server"
 import { launchTauriCdp, type TauriCdpHandle } from "./helpers/tauri-cdp-launch"
@@ -34,7 +32,6 @@ import { launchTauriCdp, type TauriCdpHandle } from "./helpers/tauri-cdp-launch"
 interface Booted {
   v2?: MockV2Server
   anthropic?: MockAnthropicServer
-  github?: MockGithubServer
   lark?: MockLarkServer
   vectorDb?: MockVectorDbServer
   tauri?: TauriCdpHandle
@@ -72,14 +69,6 @@ async function globalSetup(_config: FullConfig): Promise<() => Promise<void>> {
     process.env.E2E_ANTHROPIC_BASE_URL = state.anthropic.baseUrl
     process.env.E2E_ANTHROPIC_PORT_RESOLVED = String(state.anthropic.port)
   }
-  if (!process.env.E2E_DISABLE_GITHUB) {
-    state.github = await startOrFallback(
-      createMockGithubServer(),
-      Number(process.env.E2E_GITHUB_PORT ?? "7893")
-    )
-    process.env.E2E_GITHUB_BASE_URL = state.github.baseUrl
-    process.env.E2E_GITHUB_PORT_RESOLVED = String(state.github.port)
-  }
   if (!process.env.E2E_DISABLE_LARK) {
     state.lark = await startOrFallback(
       createMockLarkServer(),
@@ -100,9 +89,33 @@ async function globalSetup(_config: FullConfig): Promise<() => Promise<void>> {
   // Boot the Tauri debug binary + CDP bridge only when the `tauri` project
   // is opted into via env. PLAYWRIGHT_TAURI is the canonical switch;
   // PLAYWRIGHT_TAURI_DRIVER is honored as a legacy alias for one release cycle.
+  //
+  // Never let this launch abort the run: a throw out of globalSetup kills
+  // EVERY project, not just `tauri` — chromium/mobile must keep running when
+  // the Tauri shell can't boot. On failure the tauri fixtures fail on their
+  // own with a clear "PLAYWRIGHT_TAURI_CDP_WS not set" error. The WebView2
+  // CDP trick is Windows-only by decision (see tauri-cdp-launch.ts header),
+  // so warn-and-skip on other platforms instead of burning the 60s CDP wait.
   if (process.env.PLAYWRIGHT_TAURI === "1" || process.env.PLAYWRIGHT_TAURI_DRIVER === "1") {
-    state.tauri = await launchTauriCdp()
-    process.env.PLAYWRIGHT_TAURI_CDP_WS = state.tauri.cdpWsEndpoint
+    if (process.platform !== "win32") {
+      console.error(
+        "[global-setup] PLAYWRIGHT_TAURI=1 on a non-Windows platform: the tauri " +
+          "project drives WebView2 over CDP, which only exists on Windows " +
+          "(macOS WKWebView / Linux webkit2gtk expose no CDP endpoint). " +
+          "Skipping the Tauri launch — tauri specs will fail individually; " +
+          "chromium/mobile projects are unaffected."
+      )
+    } else {
+      try {
+        state.tauri = await launchTauriCdp()
+        process.env.PLAYWRIGHT_TAURI_CDP_WS = state.tauri.cdpWsEndpoint
+      } catch (err) {
+        console.error(
+          `[global-setup] Tauri CDP launch failed — the tauri project will fail on its own, ` +
+            `other projects continue: ${err instanceof Error ? err.message : String(err)}`
+        )
+      }
+    }
   }
 
   return async () => {
@@ -122,7 +135,6 @@ async function globalSetup(_config: FullConfig): Promise<() => Promise<void>> {
     )
     state.v2 = undefined
     state.anthropic = undefined
-    state.github = undefined
     state.lark = undefined
     state.vectorDb = undefined
     state.tauri = undefined

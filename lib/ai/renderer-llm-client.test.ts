@@ -1,5 +1,11 @@
+const mockCreateLlmClient = jest.fn(() => ({ complete: jest.fn() }))
+
+jest.mock("@/lib/twin/distill/llm", () => ({
+  createLlmClient: (...args: unknown[]) => mockCreateLlmClient(...(args as [])),
+}))
+
 import { buildRendererLlmClient } from "./renderer-llm-client"
-import type { AppSettings, ChatSession } from "@/lib/claude/types"
+import type { AppSettings, ChatSession } from "@cognia/agent-config-types"
 
 /**
  * Exercises the real provider-resolution chain
@@ -21,6 +27,10 @@ function makeSession(over: Record<string, unknown> = {}): ChatSession {
 }
 
 describe("buildRendererLlmClient", () => {
+  beforeEach(() => {
+    mockCreateLlmClient.mockClear()
+  })
+
   it("returns null when appSettings is missing", () => {
     expect(
       buildRendererLlmClient({ session: makeSession(), appSettings: null, featureId: "f" })
@@ -73,6 +83,68 @@ describe("buildRendererLlmClient", () => {
       modelOverride: "gpt-label",
     })
     expect(client).not.toBeNull()
+  })
+
+  it("forwards a resolved provider apiFlavor into createLlmClient", () => {
+    const settings = makeSettings({
+      defaultProvider: "openai",
+      providerSettings: {
+        openai: {
+          apiKey: "sk-o",
+          baseURL: "https://gateway.example/v1",
+          defaultModel: "gpt-proxy",
+          enabled: true,
+          apiFlavor: "responses",
+        },
+      },
+    })
+
+    const client = buildRendererLlmClient({
+      session: makeSession(),
+      appSettings: settings,
+      featureId: "timeline-label",
+    })
+
+    expect(client).not.toBeNull()
+    expect(mockCreateLlmClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "openai",
+        model: "gpt-proxy",
+        baseURL: "https://gateway.example/v1",
+        apiFlavor: "responses",
+      })
+    )
+  })
+
+  it("allows Azure renderer utility clients and forwards apiFlavor", () => {
+    const settings = makeSettings({
+      defaultProvider: "azure",
+      providerSettings: {
+        azure: {
+          apiKey: "sk-azure",
+          baseURL: "https://example.openai.azure.com",
+          defaultModel: "gpt-5",
+          enabled: true,
+          apiFlavor: "responses",
+        },
+      },
+    })
+
+    const client = buildRendererLlmClient({
+      session: makeSession(),
+      appSettings: settings,
+      featureId: "conversation-title",
+    })
+
+    expect(client).not.toBeNull()
+    expect(mockCreateLlmClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "azure",
+        model: "gpt-5",
+        baseURL: "https://example.openai.azure.com",
+        apiFlavor: "responses",
+      })
+    )
   })
 
   it("returns null when the override provider is unconfigured", () => {

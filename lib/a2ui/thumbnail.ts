@@ -3,8 +3,8 @@
  * Provides automatic thumbnail generation for A2UI apps
  */
 
-import html2canvas from "html2canvas"
-import { loggers } from "@/lib/logging"
+import html2canvas from "html2canvas-pro"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.ui
 
@@ -53,7 +53,7 @@ export async function generateThumbnail(
   const opts = { ...DEFAULT_OPTIONS, ...options }
 
   try {
-    // Capture the element using html2canvas
+    // Capture the element using html2canvas-pro
     const canvas = await html2canvas(element, {
       backgroundColor: opts.backgroundColor,
       scale: opts.scale,

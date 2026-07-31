@@ -38,6 +38,8 @@ jest.mock("./inspector/node-config-registry", () => ({
 // Imported after the mock so the InspectorPanel resolves to the stubbed
 // registry above.
 import { InspectorPanel } from "./inspector-panel"
+import { addPluginCatalogEntry, __resetPluginCatalogForTesting } from "@/lib/workflow/nodes/catalog"
+import { registerPluginI18n, __resetPluginI18nForTesting } from "@/lib/i18n/plugin-i18n-registry"
 
 const MESSAGES = {
   workflows: {
@@ -234,5 +236,80 @@ describe("InspectorPanel", () => {
   it("is wrapped in React.memo so identical-prop parent renders are bailed out", () => {
     const memoMarker = Symbol.for("react.memo")
     expect((InspectorPanel as { $$typeof?: symbol }).$$typeof).toBe(memoMarker)
+  })
+
+  describe("plugin node header localization", () => {
+    afterEach(() => {
+      act(() => {
+        __resetPluginCatalogForTesting()
+        __resetPluginI18nForTesting()
+      })
+    })
+
+    function buildPluginWorkflow(): VisualWorkflow {
+      const wf = buildWorkflow()
+      wf.nodes = [
+        {
+          id: "n_p",
+          type: "demo.action.format" as never,
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          // Instance label left at the catalog default (the raw kind) so the
+          // header renders the catalog/translated string, not a user rename.
+          data: { label: "demo.action.format", params: {} },
+        },
+      ]
+      return wf
+    }
+
+    function registerDemoNode() {
+      act(() => {
+        addPluginCatalogEntry({
+          kind: "demo.action.format" as never,
+          category: "plugin",
+          label: "Format Rust",
+          description: "Run rustfmt on a Rust source string",
+          iconName: "Wand",
+          keywords: [],
+          pluginId: "demo",
+        })
+      })
+    }
+
+    it("shows the plugin author's raw label/description when untranslated", () => {
+      registerDemoNode()
+      const store = createEditorStore(buildPluginWorkflow())
+      act(() => {
+        store.getState().setSelectedNodes(["n_p"])
+      })
+      mountInspector(store)
+      const header = screen.getByTestId("workflow-inspector")
+      expect(header).toHaveTextContent("Format Rust")
+      expect(header).toHaveTextContent("Run rustfmt on a Rust source string")
+    })
+
+    it("shows the translated label/description from the plugin overlay", () => {
+      registerDemoNode()
+      act(() => {
+        registerPluginI18n({
+          pluginId: "demo",
+          messages: {
+            en: {
+              "plugin.demo.workflow.nodes.action.format.label": "格式化 Rust",
+              "plugin.demo.workflow.nodes.action.format.description": "运行 rustfmt",
+            },
+          },
+        })
+      })
+      const store = createEditorStore(buildPluginWorkflow())
+      act(() => {
+        store.getState().setSelectedNodes(["n_p"])
+      })
+      mountInspector(store)
+      const header = screen.getByTestId("workflow-inspector")
+      expect(header).toHaveTextContent("格式化 Rust")
+      expect(header).toHaveTextContent("运行 rustfmt")
+      expect(header).not.toHaveTextContent("Format Rust")
+    })
   })
 })

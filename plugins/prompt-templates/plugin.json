@@ -2,17 +2,31 @@
   "id": "cognia-prompt-templates",
   "name": "Prompt Templates",
   "version": "0.1.0",
-  "description": "User-managed prompt templates surfaced as slash commands. /template-add, /template, /template-remove, /template-list.",
+  "description": "User-managed prompt templates, browsable from the chat right rail and surfaced as slash commands.",
   "type": "frontend",
-  "capabilities": ["commands"],
+  "capabilities": ["commands", "context-panel"],
   "main": "src/index.ts",
   "author": "cognia-next",
   "license": "MIT",
+  "minAppVersion": "0.1.0",
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "permissions": ["settings:read", "settings:write"],
-  "activationEvents": ["onStartup"],
+  "permissions": [
+    "settings:read",
+    "settings:write",
+    "extension:ui",
+    "session:read",
+    "clipboard:write"
+  ],
+  "activationEvents": [
+    "startup",
+    "onCommand:template",
+    "onCommand:template-add",
+    "onCommand:template-remove",
+    "onCommand:template-list",
+    "onView:context-workbench:session"
+  ],
   "runtimeCompatibility": {
     "browser": {
       "availability": "supported",
@@ -21,6 +35,36 @@
     "tauri": {
       "availability": "supported",
       "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
     }
-  }
+  },
+  "commands": [
+    {
+      "id": "template",
+      "name": "/template",
+      "description": "Insert a stored prompt template by name.",
+      "icon": "FileText"
+    },
+    {
+      "id": "template-add",
+      "name": "/template-add",
+      "description": "Store a new prompt template.",
+      "icon": "FilePlus"
+    },
+    {
+      "id": "template-remove",
+      "name": "/template-remove",
+      "description": "Delete a stored prompt template.",
+      "icon": "FileMinus"
+    },
+    {
+      "id": "template-list",
+      "name": "/template-list",
+      "description": "List stored prompt templates.",
+      "icon": "List"
+    }
+  ]
 }

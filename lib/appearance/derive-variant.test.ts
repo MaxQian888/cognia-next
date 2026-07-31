@@ -1,5 +1,5 @@
 import { deriveOppositeVariant, deriveTokenColor } from "./derive-variant"
-import type { ThemeColors } from "@/types/plugin/plugin-extended"
+import type { ThemeColors } from "@/types/plugin/plugin"
 import { wcagContrast } from "./contrast"
 
 // Reusable 27-key fixture builder. Phase 1 expanded ThemeColors to 27 keys

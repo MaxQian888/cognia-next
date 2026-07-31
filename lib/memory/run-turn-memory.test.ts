@@ -1,4 +1,10 @@
-import { runTurnMemory } from "./run-turn-memory"
+import { resolveAutomaticMemoryScope, runTurnMemory } from "./run-turn-memory"
+
+const mockCreateEvidence = jest.fn()
+const mockEnqueueJob = jest.fn()
+const mockClaimJob = jest.fn()
+const mockCompleteJob = jest.fn()
+const mockFailJob = jest.fn()
 
 jest.mock("@/lib/db/sessions", () => ({
   getSession: jest.fn(),
@@ -14,6 +20,15 @@ jest.mock("@/lib/memory/write/run-memory-extraction", () => ({
 jest.mock("@/lib/memory/lifecycle/maintenance", () => ({
   scheduleMemoryMaintenance: jest.fn(),
 }))
+jest.mock("@/lib/db/memory-governance", () => ({
+  appendMemoryAuditEvent: jest.fn(async (event) => event),
+  createMemoryEvidence: (...args: unknown[]) => mockCreateEvidence(...args),
+  enqueueMemoryJob: (...args: unknown[]) => mockEnqueueJob(...args),
+  claimMemoryJob: (...args: unknown[]) => mockClaimJob(...args),
+  completeMemoryJob: (...args: unknown[]) => mockCompleteJob(...args),
+  failMemoryJob: (...args: unknown[]) => mockFailJob(...args),
+}))
+jest.mock("@/lib/db/memories", () => ({ updateMemory: jest.fn() }))
 
 import { getSession } from "@/lib/db/sessions"
 import { useSettingsStore } from "@/stores/settings"
@@ -23,6 +38,8 @@ import {
   sessionProvenance,
 } from "@/lib/memory/write/run-memory-extraction"
 import { scheduleMemoryMaintenance } from "@/lib/memory/lifecycle/maintenance"
+import { appendMemoryAuditEvent } from "@/lib/db/memory-governance"
+import { updateMemory } from "@/lib/db/memories"
 
 const mockGetSession = getSession as jest.Mock
 const mockGetState = useSettingsStore.getState as jest.Mock
@@ -30,6 +47,8 @@ const mockBuildDeps = buildAutoExtractionDeps as jest.Mock
 const mockRunExtraction = runMemoryExtraction as jest.Mock
 const mockProvenance = sessionProvenance as jest.Mock
 const mockSchedule = scheduleMemoryMaintenance as jest.Mock
+const mockAppendAudit = appendMemoryAuditEvent as jest.Mock
+const mockUpdateMemory = updateMemory as jest.Mock
 
 const TRANSCRIPT = [
   { role: "user", text: "remember my timezone is UTC+8" },
@@ -48,6 +67,18 @@ const INPUT = {
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockCreateEvidence.mockReset()
+  mockEnqueueJob.mockReset()
+  mockClaimJob.mockReset()
+  mockCompleteJob.mockReset()
+  mockFailJob.mockReset()
+  mockCreateEvidence
+    .mockResolvedValueOnce({ id: "e-user" })
+    .mockResolvedValueOnce({ id: "e-assistant" })
+  mockEnqueueJob.mockResolvedValue({ id: "job-1", status: "queued" })
+  mockClaimJob.mockResolvedValue({ id: "job-1", status: "running" })
+  mockCompleteJob.mockResolvedValue(undefined)
+  mockFailJob.mockResolvedValue("queued")
   setMemory({}) // resolveMemoryConfig → defaults (enabled + autoExtract on)
   mockGetSession.mockResolvedValue({ id: "s1", characterId: "c1" })
   mockProvenance.mockReturnValue("user")
@@ -69,7 +100,7 @@ describe("runTurnMemory", () => {
     expect(extractionInput.scope).toBe("global")
     expect(extractionInput.characterId).toBe("c1")
     expect(extractionInput.provenance).toBe("user")
-    expect(extractionInput.source).toEqual({ sessionId: "s1" })
+    expect(extractionInput.source).toEqual({ sessionId: "s1", messageId: undefined })
     expect(deps).toEqual({ extractor: {}, consolidator: {} })
 
     expect(mockSchedule).toHaveBeenCalledTimes(1)
@@ -77,6 +108,17 @@ describe("runTurnMemory", () => {
     expect(scheduleParams.sessionId).toBe("s1")
     expect(scheduleParams.transcript).toEqual(TRANSCRIPT)
     expect(scheduleParams.provenance).toBe("user")
+    expect(mockEnqueueJob).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "turn-extraction", evidenceIds: ["e-user", "e-assistant"] }),
+      { reuseCompleted: true }
+    )
+    expect(mockCompleteJob).toHaveBeenCalledWith("job-1")
+  })
+
+  it("forwards assistantMessageId as source.messageId for chip attribution", async () => {
+    await runTurnMemory("s1", { ...INPUT, assistantMessageId: "msg-42" })
+    const [extractionInput] = mockRunExtraction.mock.calls[0]
+    expect(extractionInput.source).toEqual({ sessionId: "s1", messageId: "msg-42" })
   })
 
   it("only keeps the last 10 transcript entries as recent context", async () => {
@@ -118,6 +160,79 @@ describe("runTurnMemory", () => {
     expect(mockRunExtraction).not.toHaveBeenCalled()
   })
 
+  it("honors the per-chat learning override", async () => {
+    mockGetSession.mockResolvedValue({ id: "s1", characterId: "c1", memoryLearn: false })
+    await runTurnMemory("s1", INPUT)
+    expect(mockRunExtraction).not.toHaveBeenCalled()
+    expect(mockSchedule).not.toHaveBeenCalled()
+    expect(mockAppendAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "learn-denied", reason: "disabled_for_chat" })
+    )
+  })
+
+  it("lets an explicit chat opt in when global learning and extraction are off", async () => {
+    setMemory({ learnFromChats: false, autoExtract: false })
+    mockGetSession.mockResolvedValue({ id: "s1", characterId: "c1", memoryLearn: true })
+    await runTurnMemory("s1", INPUT)
+    expect(mockRunExtraction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({ learnFromChats: true, autoExtract: true }),
+      }),
+      expect.anything()
+    )
+    expect(mockSchedule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({ learnFromChats: true, autoExtract: true }),
+      })
+    )
+  })
+
+  it("blocks contaminated external context but permits local code tools", async () => {
+    await runTurnMemory("s1", { ...INPUT, externalContext: ["web-search"] })
+    expect(mockRunExtraction).not.toHaveBeenCalled()
+    expect(mockAppendAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "learn-denied", reason: "external_context" })
+    )
+
+    jest.clearAllMocks()
+    setMemory({})
+    mockGetSession.mockResolvedValue({ id: "s1", characterId: "c1" })
+    mockBuildDeps.mockResolvedValue({ extractor: {}, consolidator: {} })
+    await runTurnMemory("s1", { ...INPUT, externalContext: ["local-tool"] })
+    expect(mockRunExtraction).toHaveBeenCalledTimes(1)
+  })
+
+  it("labels allowed external-context learning instead of treating it as clean", async () => {
+    setMemory({ disableLearningOnExternalContext: false })
+    mockRunExtraction.mockResolvedValue({
+      applied: [{ op: "ADD", memory: { id: "mem-external" } }],
+    })
+
+    await runTurnMemory("s1", { ...INPUT, externalContext: ["web-search"] })
+
+    expect(mockCreateEvidence).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ contaminationState: "external-context" })
+    )
+    expect(mockUpdateMemory).toHaveBeenCalledWith(
+      "mem-external",
+      expect.objectContaining({ contaminationState: "external-context" })
+    )
+    expect(mockSchedule).toHaveBeenCalledWith(
+      expect.objectContaining({ contaminationState: "external-context" })
+    )
+  })
+
+  it("passes the workspace namespace to extraction", async () => {
+    setMemory({ scopeDefault: "workspace" })
+    mockGetSession.mockResolvedValue({ id: "s1", projectId: "project-a", characterId: "c1" })
+    await runTurnMemory("s1", INPUT)
+    expect(mockRunExtraction).toHaveBeenCalledWith(
+      expect.objectContaining({ scope: "workspace", projectId: "project-a" }),
+      expect.anything()
+    )
+  })
+
   it("no-ops for a temporary session", async () => {
     setMemory({ temporary: true })
     await runTurnMemory("s1", INPUT)
@@ -145,5 +260,14 @@ describe("runTurnMemory", () => {
     await expect(runTurnMemory("s1", INPUT)).resolves.toBeUndefined()
     expect(warn).toHaveBeenCalled()
     warn.mockRestore()
+  })
+})
+
+describe("resolveAutomaticMemoryScope", () => {
+  it("constrains agent defaults when no automatic agent identity exists", () => {
+    expect(resolveAutomaticMemoryScope("agent", { projectId: "p1" })).toBe("workspace")
+    expect(resolveAutomaticMemoryScope("agent", { characterId: "c1" })).toBe("character")
+    expect(resolveAutomaticMemoryScope("agent", {})).toBe("global")
+    expect(resolveAutomaticMemoryScope("workspace", { projectId: "p1" })).toBe("workspace")
   })
 })

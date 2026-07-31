@@ -3,11 +3,23 @@
 // `PetCharacterBinding`. Bones are NOT stored here — they are recomputed from the
 // account id and merged over the soul-derived view at load time.
 
+import type { PetCosmeticOverride } from "./bones"
+import type { PetCareState } from "./care"
+import type { PetStreak } from "./economy"
 import type { PetNeeds } from "./needs"
+import type { ProactiveState } from "./proactive"
 import type { PetSoul } from "./soul"
+import type { PetStatProgress } from "./stats"
 
 /** Growth stages, unlocked by level thresholds. Drives the evolution morph. */
 export type PetStage = "egg" | "baby" | "juvenile" | "adult" | "elder"
+
+/**
+ * Care-quality tier stamped at the moment of an evolution: sustained neglect
+ * yields a muted "plain" look, devoted care a "radiant" accent. Cosmetic layer
+ * only — bones stay deterministic and untouched.
+ */
+export type PetEvolutionFlavor = "plain" | "normal" | "radiant"
 
 export interface PetProfile {
   /** Singleton primary key. */
@@ -28,6 +40,44 @@ export interface PetProfile {
    * rather than silently swap identities.
    */
   accountFingerprint: string
+  /**
+   * Proactive-speak counters (non-indexed; absent until the engine first
+   * speaks). Advanced via `lib/pet/llm/proactive/scheduler-state.ts`.
+   */
+  proactiveState?: ProactiveState
+  /**
+   * Additive stat growth earned by working alongside the pet (non-indexed;
+   * absent until the first growth). Effective stats = base bones + this.
+   * Advanced via `lib/pet/stats/*`.
+   */
+  statProgress?: PetStatProgress
+  /**
+   * Persistent care condition + rolling care quality (non-indexed; absent until
+   * first derived). Advanced via `lib/pet/care/condition.ts`.
+   */
+  care?: PetCareState
+  /**
+   * User-chosen cosmetic restyle applied over the genetic bones at render time
+   * (non-indexed; absent = pure genetics). Only the non-identity visuals can be
+   * overridden — see `PetCosmeticOverride`.
+   */
+  cosmetic?: PetCosmeticOverride
+  /**
+   * Coin balance earned alongside XP (non-indexed; absent = 0). Advanced by
+   * `applyPetEvent`; spent via `lib/pet/economy/shop.ts`.
+   */
+  coins?: number
+  /**
+   * Daily-care streak cache (non-indexed; absent until the first counted
+   * interaction). Advanced by `applyPetEvent`; backfilled once from the
+   * activity ledger for legacy profiles.
+   */
+  streak?: PetStreak
+  /**
+   * Care-quality flavor stamped at the LAST evolution (non-indexed; absent =
+   * normal). Set by `applyPetEvent` from `flavorForCareQuality`.
+   */
+  evolutionFlavor?: PetEvolutionFlavor
   createdAt: string
   updatedAt: string
 }

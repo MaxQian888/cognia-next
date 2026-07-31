@@ -1,8 +1,10 @@
-import type { ConversationReference } from "./event"
+import type { ConversationDeliveryTarget, ConversationReference } from "./event"
 import type { MessageSegment, SegmentType } from "./segment"
 
 export interface OutboundRequest {
   conversationRef: ConversationReference
+  /** Complete persisted destination; preferred over the legacy loose reference. */
+  deliveryTarget?: ConversationDeliveryTarget
   segments: MessageSegment[]
   replyTo?: { messageId: string }
   threadId?: string
@@ -22,6 +24,22 @@ export interface OutboundRequest {
     sourceMessageId?: string
     /** When this comes from a scheduled task, the task id. */
     scheduledTaskId?: string
+    /**
+     * Set when the outbound runner re-enqueued this job through a failover
+     * sibling because the original adapter's circuit was open. Carries the
+     * ORIGINAL adapter id, both as an audit trail and as the single-hop
+     * guard: a job that already failed over once is dead-lettered (never
+     * re-failed-over) if the sibling's circuit is open too.
+     */
+    failoverFromAdapterId?: string
+    /**
+     * Set when the outbound runner re-enqueued this job through a
+     * load-balancing sibling because the original adapter's token bucket
+     * was exhausted. Carries the ORIGINAL adapter id; together with
+     * `failoverFromAdapterId` it forms the single-hop guard — a job that
+     * was rerouted once (either mechanism) is never rerouted again.
+     */
+    balancedFromAdapterId?: string
   }
 }
 

@@ -54,6 +54,19 @@ describe("TaskExecutionHistory", () => {
     expect(screen.queryByTestId("execution-load-more")).not.toBeInTheDocument()
   })
 
+  it("shows a trigger-source badge for non-default provenance only", () => {
+    render(
+      <TaskExecutionHistory
+        executions={[
+          makeExecution("bf-1", { triggerSource: "backfill" }),
+          makeExecution("sched-1", { triggerSource: "schedule" }),
+        ]}
+      />
+    )
+    const badges = screen.getAllByTestId("execution-trigger-source")
+    expect(badges).toHaveLength(1)
+  })
+
   it("shows the failed execution's error line", () => {
     const executions: TaskExecution[] = [
       makeExecution("fail-1", { status: "failed", error: "boom went wrong", output: undefined }),

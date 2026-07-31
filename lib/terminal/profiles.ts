@@ -52,6 +52,56 @@ export function profileToSpawnFields(
   }
 }
 
+/**
+ * Parse the settings-UI "one argument per line" textarea into a profile
+ * `args` array. Blank lines are dropped; interior whitespace is preserved
+ * verbatim (an argv entry may legitimately contain spaces). Returns
+ * `undefined` for an all-blank input so the profile stores no empty array.
+ */
+export function parseProfileArgs(text: string): string[] | undefined {
+  const args = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+  return args.length > 0 ? args : undefined
+}
+
+/** Inverse of {@link parseProfileArgs} — args back to textarea text. */
+export function formatProfileArgs(args: readonly string[] | undefined): string {
+  return args?.join("\n") ?? ""
+}
+
+/**
+ * Parse the settings-UI "KEY=VALUE per line" textarea into a profile `env`
+ * record. Lines without `=` or with an empty key are skipped (a half-typed
+ * line must not clobber the record with a garbage entry); the value keeps
+ * any further `=` verbatim (`PATH=C:\x=y` → value `C:\x=y`). Returns
+ * `undefined` when no valid pair remains.
+ */
+export function parseProfileEnv(text: string): Record<string, string> | undefined {
+  const env: Record<string, string> = {}
+  let count = 0
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (!line) continue
+    const eq = line.indexOf("=")
+    if (eq <= 0) continue
+    const key = line.slice(0, eq).trim()
+    if (!key) continue
+    env[key] = line.slice(eq + 1)
+    count += 1
+  }
+  return count > 0 ? env : undefined
+}
+
+/** Inverse of {@link parseProfileEnv} — env record back to textarea text. */
+export function formatProfileEnv(env: Record<string, string> | undefined): string {
+  if (!env) return ""
+  return Object.entries(env)
+    .map(([key, value]) => `${key}=${value}`)
+    .join("\n")
+}
+
 /** Generate a reasonably-unique profile id without `Math.random`/`Date.now`. */
 export function nextProfileId(existing: readonly TerminalProfile[] | undefined): string {
   const used = new Set((existing ?? []).map((p) => p.id))

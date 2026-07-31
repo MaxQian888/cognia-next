@@ -27,13 +27,13 @@ jest.mock("@/lib/perf/backend/commands", () => ({
 }))
 
 import { act, renderHook, waitFor } from "@testing-library/react"
-import { DEFAULT_PERF_INTERVAL, usePerfStream } from "./use-perf-stream"
+import { DEFAULT_PERF_INTERVAL, resetPreferredInterval, usePerfStream } from "./use-perf-stream"
 import type { PerfSample } from "@/lib/perf/backend/types"
 
-function sample(ts: number): PerfSample {
+function sample(ts: number, intervalMs = 1000): PerfSample {
   return {
     tsMs: ts,
-    intervalMs: 1000,
+    intervalMs,
     processes: [],
     runtime: {
       workers: 1,
@@ -51,6 +51,7 @@ function sample(ts: number): PerfSample {
     },
     topSpans: [],
     systemMemory: null,
+    managed: [],
   }
 }
 
@@ -64,6 +65,9 @@ beforeEach(() => {
   subscribeMock.mockClear()
   unsubMock.mockClear()
   sampleHandler = null
+  // The cadence preference is module-scoped (it has to survive unmount), so
+  // each test starts from the default.
+  resetPreferredInterval()
 })
 
 describe("usePerfStream — non-desktop", () => {
@@ -117,6 +121,75 @@ describe("usePerfStream — desktop", () => {
     act(() => result.current.setIntervalMs(2000))
     expect(result.current.intervalMs).toBe(2000)
     expect(setIntervalMock).toHaveBeenCalledWith(2000)
+  })
+
+  it("clears the window on a cadence change so the graphs don't mix rates", async () => {
+    // The rolling graphs are index-keyed, so keeping 1 s samples next to 2 s
+    // ones silently distorts every chart with no visual cue.
+    const { result } = renderHook(() => usePerfStream())
+    await waitFor(() => expect(result.current.history).toHaveLength(2))
+    act(() => result.current.setIntervalMs(2000))
+    expect(result.current.history).toHaveLength(0)
+  })
+
+  it("keeps the chosen cadence across a remount", async () => {
+    const { result, unmount } = renderHook(() => usePerfStream())
+    await waitFor(() => expect(subscribeMock).toHaveBeenCalled())
+    act(() => result.current.setIntervalMs(4000))
+    unmount()
+
+    startMock.mockClear()
+    const second = renderHook(() => usePerfStream())
+    await waitFor(() => expect(startMock).toHaveBeenCalledWith(4000))
+    expect(second.result.current.intervalMs).toBe(4000)
+  })
+
+  it("backfills only the trailing run at the current cadence", async () => {
+    // The backend ring spans cadence changes; splicing the older, slower
+    // samples into an index-keyed window would misdraw the whole graph.
+    snapshotMock.mockResolvedValue({
+      samples: [sample(1, 4000), sample(2, 4000), sample(3), sample(4)],
+      running: true,
+      intervalMs: 1000,
+    })
+    const { result } = renderHook(() => usePerfStream())
+    await waitFor(() => expect(result.current.history).toHaveLength(2))
+    expect(result.current.history.map((s) => s.tsMs)).toEqual([3, 4])
+  })
+
+  it("refills from the ring on resume instead of splicing across the gap", async () => {
+    const { result } = renderHook(() => usePerfStream())
+    await waitFor(() => expect(sampleHandler).not.toBeNull())
+    act(() => result.current.setPaused(true))
+
+    snapshotMock.mockResolvedValue({
+      samples: [sample(10), sample(11), sample(12)],
+      running: true,
+      intervalMs: 1000,
+    })
+    act(() => result.current.setPaused(false))
+    await waitFor(() => expect(result.current.history).toHaveLength(3))
+    expect(result.current.latest?.tsMs).toBe(12)
+  })
+
+  it("does not leak the listener when unmounted before the subscribe lands", async () => {
+    // Regression: `unsubscribe` was only assigned after two awaits, so a fast
+    // unmount ran the cleanup against a no-op and the listener lived on.
+    let releaseSnapshot: (v: unknown) => void = () => {}
+    snapshotMock.mockReturnValue(
+      new Promise((resolve) => {
+        releaseSnapshot = resolve
+      })
+    )
+    const { unmount } = renderHook(() => usePerfStream())
+    unmount()
+
+    await act(async () => {
+      releaseSnapshot({ samples: [], running: true, intervalMs: 1000 })
+      await Promise.resolve()
+    })
+    // Either we never subscribed, or we subscribed and immediately released.
+    expect(subscribeMock.mock.calls.length).toBe(unsubMock.mock.calls.length)
   })
 
   it("reset clears backend hotspots", async () => {

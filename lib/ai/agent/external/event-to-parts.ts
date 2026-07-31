@@ -24,6 +24,8 @@
 import type { UIMessage } from "ai"
 import type {
   ExternalAgentEvent,
+  ExternalAgentCommentaryDeltaEvent,
+  ExternalAgentHookFireEvent,
   ExternalAgentMessageDeltaEvent,
   ExternalAgentThinkingEvent,
   ExternalAgentToolResultEvent,
@@ -59,15 +61,36 @@ export function applyExternalAgentEventToParts(
       return applyMessageDelta(parts, event as ExternalAgentMessageDeltaEvent)
     case "thinking":
       return applyThinking(parts, event as ExternalAgentThinkingEvent)
+    case "commentary_delta":
+      return applyCommentaryDelta(parts, event as ExternalAgentCommentaryDeltaEvent)
     case "tool_use_start":
       return applyToolUseStart(parts, event as ExternalAgentToolUseStartEvent)
     case "tool_use_end":
       return applyToolUseEnd(parts, event as ExternalAgentToolUseEndEvent)
     case "tool_result":
       return applyToolResult(parts, event as ExternalAgentToolResultEvent)
+    case "hook_fire":
+      return applyHookFire(parts, event as ExternalAgentHookFireEvent)
     default:
       return parts as Part[]
   }
+}
+
+// Project a consequential hook fire into an inline `hook-notice` part, sitting
+// where it fired among the turn's other parts (e.g. right where a blocked tool
+// would have been). Renders via MessageRenderer's `hook-notice` part case,
+// reusing the same row UI as the built-in agent's hook notices.
+function applyHookFire(parts: readonly Part[], event: ExternalAgentHookFireEvent): Part[] {
+  const part: MutablePart = {
+    type: "hook-notice",
+    event: event.event,
+    toolName: event.toolName,
+    outcome: event.outcome,
+    block: event.block,
+    additionalContext: event.additionalContext,
+    warnings: event.warnings ?? [],
+  }
+  return [...parts, part as unknown as Part]
 }
 
 /**
@@ -95,6 +118,43 @@ function applyMessageDelta(parts: readonly Part[], event: ExternalAgentMessageDe
 function applyThinking(parts: readonly Part[], event: ExternalAgentThinkingEvent): Part[] {
   if (typeof event.thinking !== "string") return parts as Part[]
   return appendToOrCreateLast(parts, "reasoning", event.thinking)
+}
+
+function applyCommentaryDelta(
+  parts: readonly Part[],
+  event: ExternalAgentCommentaryDeltaEvent
+): Part[] {
+  const messageId = event.messageId
+  let index = -1
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const part = parts[i] as MutablePart
+    const data = part.data as Record<string, unknown> | undefined
+    if (
+      part.type === "data-commentary" &&
+      (messageId === undefined || data?.messageId === messageId)
+    ) {
+      index = i
+      break
+    }
+  }
+
+  if (index < 0 && !event.text) return parts as Part[]
+  const previous =
+    index >= 0
+      ? (((parts[index] as MutablePart).data as Record<string, unknown> | undefined) ?? {})
+      : {}
+  const next: MutablePart = {
+    type: "data-commentary",
+    data: {
+      ...previous,
+      ...(messageId ? { messageId } : {}),
+      text: `${typeof previous.text === "string" ? previous.text : ""}${event.text}`,
+      state: event.done ? "done" : "streaming",
+      ...(event.source ? { source: event.source } : {}),
+    },
+  }
+  if (index < 0) return [...parts, next as unknown as Part]
+  return [...parts.slice(0, index), next as unknown as Part, ...parts.slice(index + 1)]
 }
 
 function appendToOrCreateLast(

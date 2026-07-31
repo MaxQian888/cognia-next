@@ -1,0 +1,75 @@
+---
+title: Agent Session Import
+description: Reading other agents' session histories — Claude Code, Codex, OpenCode, Aider, Continue, Gemini CLI — with a two-phase scan that summarizes cheaply and only pays for a full parse on the sessions you actually import.
+---
+
+# Agent Session Import
+
+<Status variant="stable">Stable · ADR-0062 · reuses sessions / messages</Status>
+
+<TLDR>
+  Nine adapters read the on-disk session histories other agent CLIs leave behind and turn them into
+  Cognia sessions. The design point is the **two-phase scan**: `scan.ts` walks the source's roots, reads
+  each matching file exactly once, and produces a `SessionSummary` through the adapter's lightweight
+  `summarizeFile` — no full parse, no `StoredMessage` allocation. The expensive `parseSession` is paid
+  later and only for the sessions the user actually picks. Import writes into the existing `sessions` and
+  `messages` tables, so there is no schema of its own.
+</TLDR>
+
+<StatGrid>
+  <Stat label="Source adapters" value="9" hint="claude-code (+dag, +subagent) · codex · opencode (+db) · aider · continue-dev · gemini-cli" />
+  <Stat label="Codecs" value="3" hint="claude-code · codex · opencode" />
+  <Stat label="Frontend modules" value="19" hint="lib/session-import — non-test .ts" />
+  <Stat label="New Dexie tables" value="0" hint="reuses sessions / messages" />
+</StatGrid>
+
+Design rationale: [ADR-0062](../adr/0062-external-agent-session-import).
+
+## Two phases, because a full parse is expensive
+
+A user scanning for importable history may be looking at thousands of JSONL files. Parsing all of them to
+show a picker would be wasteful, so the adapter contract splits in two:
+
+| Phase | Adapter method | Cost | Produces |
+| --- | --- | --- | --- |
+| **Scan** | `summarizeFile(content, locator)` | one read per file, no allocation of message objects | `SessionSummary`, or `null` when the file holds no session |
+| **Import** | `parseSession` | full parse | the actual messages |
+
+`scan.ts` is the shared driver for every per-file JSONL source, so a new adapter only supplies the two
+methods rather than its own walker.
+
+## Where it lives
+
+```
+lib/session-import/
+  scan.ts          # shared desktop-scan driver for per-file JSONL sources
+  fs.ts            # walkFiles
+  registry.ts      # source registration
+  types.ts  codec-types.ts
+  to-parts.ts      # foreign message shape → Cognia message parts
+  usage.ts         # token/usage reconstruction
+  watch-import.ts  # follow a source as it grows
+  adapters/
+    claude-code.ts  claude-code-dag.ts  claude-code-subagent.ts
+    codex.ts  opencode.ts  opencode-db.ts
+    aider.ts  continue-dev.ts  gemini-cli.ts
+  codecs/
+    claude-code-codec.ts  codex-codec.ts  opencode-codec.ts
+
+src-tauri/src/session_import.rs   # native filesystem access
+hooks/session-import/  components/session-import/
+lib/plugin/api/import-api.ts      # plugins can contribute sources
+```
+
+Claude Code gets three adapters rather than one because its history is not a flat log: `claude-code-dag`
+handles the branching conversation graph and `claude-code-subagent` the nested subagent transcripts.
+OpenCode gets two because it ships both a file format and a database.
+
+## Related
+
+<Cards>
+  <Card title="ADR-0062" href="../adr/0062-external-agent-session-import" description="The session-import decision record" />
+  <Card title="External Agents" href="../chat/external-agents" description="The agents whose histories these adapters read" />
+  <Card title="Storage" href="../data/storage" description="The sessions / messages tables import writes into" />
+  <Card title="Plugin System" href="./plugin-system" description="How a plugin contributes an import source" />
+</Cards>

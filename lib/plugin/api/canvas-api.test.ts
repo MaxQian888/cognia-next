@@ -1,9 +1,15 @@
+/** @jest-environment jsdom */
 /**
  * Tests for Canvas Plugin API
  */
 
 import "fake-indexeddb/auto"
 import { createCanvasAPI } from "./canvas-api"
+import { initializePluginPermissions } from "./permission-api"
+
+// Cold Dexie delete + reseed in beforeEach can exceed the default 5s hook
+// timeout under parallel-worker CPU contention (repo idiom for Dexie suites).
+jest.setTimeout(30_000)
 
 type MockCanvasEditorSelection = {
   startLineNumber: number
@@ -42,7 +48,9 @@ const mockCanvasDocuments: Record<
   }
 > = {}
 let mockActiveCanvasId: string | null = null
-let mockPanelView: string | null = null
+// Written by the store mock's `setPanelView` so `openDocument` exercises the
+// real path; nothing asserts on it directly.
+let _mockPanelView: string | null = null
 const mockSubscribers: Array<(state: unknown) => void> = []
 
 function clampOffset(value: number, content: string): number {
@@ -202,11 +210,7 @@ jest.mock("@/stores/artifact/artifact-store", () => ({
         mockActiveCanvasId = id
       }),
       setPanelView: jest.fn((view) => {
-        mockPanelView = view
-      }),
-      closeCanvas: jest.fn(() => {
-        mockActiveCanvasId = null
-        mockPanelView = null
+        _mockPanelView = view
       }),
       saveCanvasVersion: jest.fn((id, description) => {
         const versionId = `version-${Date.now()}`
@@ -242,7 +246,7 @@ describe("Canvas API", () => {
     // Clear state
     Object.keys(mockCanvasDocuments).forEach((key) => delete mockCanvasDocuments[key])
     mockActiveCanvasId = null
-    mockPanelView = null
+    _mockPanelView = null
     mockActiveEditorContext = null
     mockSubscribers.length = 0
   })
@@ -456,13 +460,13 @@ describe("Canvas API", () => {
 
     it("should close canvas", () => {
       mockActiveCanvasId = "active-doc"
-      mockPanelView = "canvas"
 
       const api = createCanvasAPI(testPluginId)
       api.closeCanvas()
 
+      // `canvasOpen` was a second visibility flag nothing ever read; dropping
+      // the active document is what every canvas surface actually keys off.
       expect(mockActiveCanvasId).toBeNull()
-      expect(mockPanelView).toBeNull()
     })
   })
 
@@ -564,6 +568,55 @@ describe("Canvas API", () => {
 
       // Should not throw
       expect(() => api.insertText("test")).not.toThrow()
+    })
+
+    it("inserts at the live editor caret via executeEdits when an editor is bound", () => {
+      const docId = "insert-live"
+      mockCanvasDocuments[docId] = {
+        id: docId,
+        sessionId: "session-1",
+        title: "Insert Live",
+        content: "Hello World",
+        type: "text",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        aiSuggestions: [],
+        versions: [],
+      }
+      mockActiveCanvasId = docId
+      // Caret after "Hello" (column 6), no selection span.
+      const editor = new MockMonacoEditor("Hello World", createSelection(1, 6, 1, 6))
+      mockActiveEditorContext = { contextId: "canvas", editor }
+
+      const api = createCanvasAPI(testPluginId)
+      api.insertText("XX")
+
+      expect(mockCanvasDocuments[docId].content).toBe("HelloXX World")
+      expect(editor.focus).toHaveBeenCalled()
+    })
+
+    it("inserts at the store's tracked cursor when no live editor is bound", () => {
+      const docId = "insert-tracked"
+      mockCanvasDocuments[docId] = {
+        id: docId,
+        sessionId: "session-1",
+        title: "Insert Tracked",
+        content: "Hello World",
+        type: "text",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        aiSuggestions: [],
+        versions: [],
+        // Cursor tracked at column 6 (after "Hello") from a prior selection sync.
+        editorContext: { selection: createSelection(1, 6, 1, 6) },
+      }
+      mockActiveCanvasId = docId
+      mockActiveEditorContext = null // no live editor
+
+      const api = createCanvasAPI(testPluginId)
+      api.insertText("XX")
+
+      expect(mockCanvasDocuments[docId].content).toBe("HelloXX World")
     })
   })
 
@@ -971,3 +1024,25 @@ describe("PluginCanvasAPI — new surface (commit 4)", () => {
 // Suppress unused warning when canvasCommentsDb import becomes unused in
 // future refactors. It's kept here for parity with the canvas-api module.
 void canvasCommentsDb
+
+// W2.3: the canvas API is permission-gated; grant the suite's plugins.
+beforeAll(() => {
+  for (const id of ["test-plugin", "plugin-x"]) {
+    initializePluginPermissions(id, [
+      "canvas:read",
+      "canvas:write",
+      "canvas:run",
+      "canvas:collaborate",
+    ])
+  }
+})
+
+describe("permission gate", () => {
+  it("throws PermissionError when canvas permissions are not granted", () => {
+    const api = createCanvasAPI("no-perms-plugin")
+    expect(() => api.getContent()).toThrow(/canvas:read/)
+    expect(() =>
+      api.executeAction("improve", "x", { provider: "openai", model: "gpt-4", apiKey: "k" })
+    ).toThrow(/canvas:run/)
+  })
+})

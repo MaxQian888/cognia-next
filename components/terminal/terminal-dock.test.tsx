@@ -25,9 +25,11 @@ const mockSpawnFromDock = jest.fn(async (..._args: unknown[]) => ({
   shell: "/bin/bash",
 }))
 const mockKillFromDock = jest.fn(async (..._args: unknown[]) => undefined)
+const mockDetachFromDock = jest.fn(async (..._args: unknown[]) => undefined)
 jest.mock("@/lib/terminal/spawn-orchestrator", () => ({
   spawnFromDock: (...args: unknown[]) => mockSpawnFromDock(...(args as [])),
   killFromDock: (...args: unknown[]) => mockKillFromDock(...(args as [])),
+  detachFromDock: (...args: unknown[]) => mockDetachFromDock(...(args as [])),
 }))
 
 // xterm and its addons get pulled in transitively through
@@ -79,8 +81,11 @@ jest.mock("@/lib/terminal/session-registry", () => ({
     onData: jest.fn(() => () => undefined),
     onIntegration: jest.fn(() => () => undefined),
     onExit: jest.fn(() => () => undefined),
+    onControlState: jest.fn(() => () => undefined),
+    onReplayGap: jest.fn(() => () => undefined),
     write: jest.fn(async () => undefined),
     resize: jest.fn(async () => undefined),
+    takeControl: jest.fn(async () => undefined),
     kill: jest.fn(async () => undefined),
   }),
 }))
@@ -98,6 +103,7 @@ beforeEach(() => {
   useChatStore.getState().setActiveSession(null)
   mockSpawnFromDock.mockClear()
   mockKillFromDock.mockClear()
+  mockDetachFromDock.mockClear()
   mockPush.mockClear()
   transportKind = "tauri-channel"
 })
@@ -146,6 +152,20 @@ describe("TerminalDock", () => {
     render(<TerminalDock />)
     expect(screen.getByTestId("terminal-dock")).toBeInTheDocument()
     expect(screen.getByTestId("terminal-dock-tabs")).toBeInTheDocument()
+  })
+
+  it("gives the resize separator a large hit target and keeps it keyboard-operable", () => {
+    seedProjectAndSession({ sessionId: "s-1" })
+    render(<TerminalDock />)
+    const handle = screen.getByTestId("terminal-dock-resize-handle")
+    expect(handle.getAttribute("role")).toBe("separator")
+    expect(handle.getAttribute("tabindex")).toBe("0")
+    // 10px transparent hit zone (h-2.5) replaced the old 4px sliver (h-1) so
+    // it can actually be grabbed, including by touch.
+    expect(handle.className).toContain("h-2.5")
+    // Arrow keys still nudge the height.
+    fireEvent.keyDown(handle, { key: "ArrowUp" })
+    fireEvent.keyDown(handle, { key: "ArrowDown" })
   })
 
   it("shows the empty-state desktop variant when there are no sessions", () => {
@@ -225,14 +245,62 @@ describe("TerminalDock", () => {
     expect(useTerminalStore.getState().panelOpen).toBe(false)
   })
 
-  it("calls killFromDock when a tab × is clicked", async () => {
+  it("offers detach and terminate when a live tab × is clicked", async () => {
     seedProjectAndSession({ sessionId: "s-1" })
     render(<TerminalDock />)
     const closeBtn = screen.getAllByLabelText("close")[0]!
     await act(async () => {
       fireEvent.click(closeBtn)
     })
+    expect(screen.getByTestId("terminal-dock-close-confirm")).toBeInTheDocument()
+    expect(mockKillFromDock).not.toHaveBeenCalled()
+    expect(mockDetachFromDock).not.toHaveBeenCalled()
+  })
+
+  it("confirms before closing a tab that is running a command", async () => {
+    seedProjectAndSession({ sessionId: "s-1" })
+    useTerminalStore.getState().setSessionStatus("s-1", "running")
+    render(<TerminalDock />)
+    const closeBtn = screen.getAllByLabelText("close")[0]!
+    await act(async () => {
+      fireEvent.click(closeBtn)
+    })
+    // Dialog shown, termination deferred; the primary action only detaches.
+    expect(screen.getByTestId("terminal-dock-close-confirm")).toBeInTheDocument()
+    expect(mockKillFromDock).not.toHaveBeenCalled()
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("terminal-dock-close-confirm-accept"))
+    })
+    expect(mockDetachFromDock).toHaveBeenCalledWith("s-1", expect.any(Object))
+    expect(mockKillFromDock).not.toHaveBeenCalled()
+  })
+
+  it("requires an explicit destructive action before terminating an idle live tab", async () => {
+    seedProjectAndSession({ sessionId: "s-1" })
+    render(<TerminalDock />)
+    const closeBtn = screen.getAllByLabelText("close")[0]!
+    await act(async () => {
+      fireEvent.click(closeBtn)
+    })
+    expect(screen.getByTestId("terminal-dock-close-confirm")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("terminal-dock-close-terminate"))
     expect(mockKillFromDock).toHaveBeenCalledWith("s-1", expect.any(Object))
+    expect(mockDetachFromDock).not.toHaveBeenCalled()
+  })
+
+  it("toggles the maximized dock state from the toolbar button", () => {
+    seedProjectAndSession({ sessionId: "s-1" })
+    render(<TerminalDock />)
+    expect(useTerminalStore.getState().maximized).toBe(false)
+    fireEvent.click(screen.getByTestId("terminal-dock-maximize"))
+    expect(useTerminalStore.getState().maximized).toBe(true)
+  })
+
+  it("shows split + clear toolbar buttons on desktop with an active session", () => {
+    seedProjectAndSession({ sessionId: "s-1" })
+    render(<TerminalDock />)
+    expect(screen.getByTestId("terminal-dock-split")).toBeInTheDocument()
+    expect(screen.getByTestId("terminal-dock-clear")).toBeInTheDocument()
   })
 
   it("calls setActiveSession when a tab body is clicked", () => {

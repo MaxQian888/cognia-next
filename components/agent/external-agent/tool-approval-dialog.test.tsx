@@ -177,4 +177,202 @@ describe("ToolApprovalDialog (ACP variant)", () => {
     fireEvent.click(screen.getByRole("button", { name: /cancel/i }))
     expect(onDeny).toHaveBeenCalledWith("req-1")
   })
+
+  it("guards against a double-submit: a second approve click is ignored", () => {
+    const onApprove = jest.fn()
+    render(
+      wrap(
+        <ToolApprovalDialog
+          request={baseRequest}
+          open
+          onOpenChange={() => {}}
+          onApprove={onApprove}
+          onDeny={() => {}}
+        />
+      )
+    )
+    const approveBtn = screen.getByRole("button", { name: /approve/i })
+    fireEvent.click(approveBtn)
+    fireEvent.click(approveBtn)
+    expect(onApprove).toHaveBeenCalledTimes(1)
+    expect(approveBtn).toBeDisabled()
+  })
+
+  describe("question mode (Codex requestUserInput)", () => {
+    const questionRequest: ToolApprovalRequest = {
+      ...baseRequest,
+      id: "q-item",
+      userInput: {
+        autoResolutionMs: 30000,
+        questions: [
+          {
+            id: "q1",
+            header: "Region",
+            question: "Which region?",
+            options: [
+              { label: "us-east", description: "Virginia" },
+              { label: "eu-west", description: "Ireland" },
+            ],
+            isOther: true,
+          },
+        ],
+      },
+    }
+
+    it("renders questions with options and submits the selected answer", () => {
+      const onSubmitAnswers = jest.fn()
+      render(
+        wrap(
+          <ToolApprovalDialog
+            request={questionRequest}
+            open
+            onOpenChange={() => {}}
+            onApprove={() => {}}
+            onDeny={() => {}}
+            onSubmitAnswers={onSubmitAnswers}
+          />
+        )
+      )
+      expect(screen.getByTestId("user-input-dialog")).toBeInTheDocument()
+      expect(screen.getByText("Which region?")).toBeInTheDocument()
+      expect(screen.getByTestId("user-input-auto-resolve")).toBeInTheDocument()
+
+      const submit = screen.getByTestId("user-input-submit")
+      expect(submit).toBeDisabled()
+
+      fireEvent.click(screen.getByLabelText(/eu-west/))
+      expect(submit).not.toBeDisabled()
+      fireEvent.click(submit)
+      expect(onSubmitAnswers).toHaveBeenCalledWith("q-item", { q1: ["eu-west"] })
+    })
+
+    it("submits free text via the Other choice", () => {
+      const onSubmitAnswers = jest.fn()
+      render(
+        wrap(
+          <ToolApprovalDialog
+            request={questionRequest}
+            open
+            onOpenChange={() => {}}
+            onApprove={() => {}}
+            onDeny={() => {}}
+            onSubmitAnswers={onSubmitAnswers}
+          />
+        )
+      )
+      fireEvent.click(screen.getByLabelText(/other/i))
+      const input = screen.getByTestId("user-input-other")
+      fireEvent.change(input, { target: { value: "ap-southeast" } })
+      fireEvent.click(screen.getByTestId("user-input-submit"))
+      expect(onSubmitAnswers).toHaveBeenCalledWith("q-item", { q1: ["ap-southeast"] })
+    })
+
+    it("renders a plain input for option-less questions and masks secrets", () => {
+      const onSubmitAnswers = jest.fn()
+      render(
+        wrap(
+          <ToolApprovalDialog
+            request={{
+              ...baseRequest,
+              id: "q-secret",
+              userInput: {
+                questions: [{ id: "q1", question: "API key?", isSecret: true }],
+              },
+            }}
+            open
+            onOpenChange={() => {}}
+            onApprove={() => {}}
+            onDeny={() => {}}
+            onSubmitAnswers={onSubmitAnswers}
+          />
+        )
+      )
+      const input = screen.getByTestId("user-input-other")
+      expect(input).toHaveAttribute("type", "password")
+      fireEvent.change(input, { target: { value: "sk-123" } })
+      fireEvent.click(screen.getByTestId("user-input-submit"))
+      expect(onSubmitAnswers).toHaveBeenCalledWith("q-secret", { q1: ["sk-123"] })
+    })
+
+    it("submits every selected option for a multiple-choice question", () => {
+      const onSubmitAnswers = jest.fn()
+      render(
+        wrap(
+          <ToolApprovalDialog
+            request={{
+              ...baseRequest,
+              id: "q-multiple",
+              userInput: {
+                questions: [
+                  {
+                    id: "regions",
+                    question: "Choose regions",
+                    options: [{ label: "us-east" }, { label: "eu-west" }],
+                    multiple: true,
+                  },
+                ],
+              },
+            }}
+            open
+            onOpenChange={() => {}}
+            onApprove={() => {}}
+            onDeny={() => {}}
+            onSubmitAnswers={onSubmitAnswers}
+          />
+        )
+      )
+
+      fireEvent.click(screen.getByLabelText("us-east"))
+      fireEvent.click(screen.getByLabelText("eu-west"))
+      fireEvent.click(screen.getByTestId("user-input-submit"))
+      expect(onSubmitAnswers).toHaveBeenCalledWith("q-multiple", {
+        regions: ["us-east", "eu-west"],
+      })
+    })
+
+    it("allows optional questions to be submitted without an answer", () => {
+      const onSubmitAnswers = jest.fn()
+      render(
+        wrap(
+          <ToolApprovalDialog
+            request={{
+              ...baseRequest,
+              id: "q-optional",
+              userInput: {
+                questions: [{ id: "note", question: "Optional note", required: false }],
+              },
+            }}
+            open
+            onOpenChange={() => {}}
+            onApprove={() => {}}
+            onDeny={() => {}}
+            onSubmitAnswers={onSubmitAnswers}
+          />
+        )
+      )
+
+      const submit = screen.getByTestId("user-input-submit")
+      expect(submit).not.toBeDisabled()
+      fireEvent.click(submit)
+      expect(onSubmitAnswers).toHaveBeenCalledWith("q-optional", { note: [] })
+    })
+
+    it("skip denies the request", () => {
+      const onDeny = jest.fn()
+      render(
+        wrap(
+          <ToolApprovalDialog
+            request={questionRequest}
+            open
+            onOpenChange={() => {}}
+            onApprove={() => {}}
+            onDeny={onDeny}
+            onSubmitAnswers={() => {}}
+          />
+        )
+      )
+      fireEvent.click(screen.getByRole("button", { name: /skip/i }))
+      expect(onDeny).toHaveBeenCalledWith("q-item")
+    })
+  })
 })

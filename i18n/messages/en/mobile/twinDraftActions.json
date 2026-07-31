@@ -1,0 +1,8 @@
+{
+  "accept": "Accept",
+  "accepted": "Accepted as {kind}",
+  "queueAcceptLabel": "Accept twin draft",
+  "queueRejectLabel": "Reject twin draft",
+  "reject": "Reject",
+  "rejected": "Rejected"
+}

@@ -1,6 +1,6 @@
 import { render } from "@testing-library/react"
 import { useSettingsStore } from "@/stores/settings"
-import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
+import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 import type { ComponentStyles } from "@/types/appearance"
 import {
   ComponentStyleApplier,

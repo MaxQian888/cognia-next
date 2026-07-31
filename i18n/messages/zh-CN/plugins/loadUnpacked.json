@@ -1,0 +1,6 @@
+{
+  "directoryPickerTitle": "选择插件目录",
+  "installSuccess": "{name} 已从本地安装。",
+  "label": "加载本地插件目录",
+  "tauriRequiredError": "本地插件加载需要在桌面应用中使用。"
+}

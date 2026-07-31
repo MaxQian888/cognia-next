@@ -139,14 +139,18 @@ export function parseV12Event(
     return v12DeleteToEvent(adapterId, event)
   }
 
-  // ── Other notices → system event (audit-only) ─────────────────────
+  // ── Member-change notices → system event (audit-only) ──────────────
   if (event.type === "notice") {
-    const systemKind: NonNullable<NormalizedInboundEvent["systemKind"]> =
+    const systemKind: NormalizedInboundEvent["systemKind"] =
       event.detail_type === "group_member_increase" || event.detail_type === "friend_increase"
         ? "member_added"
         : event.detail_type === "group_member_decrease" || event.detail_type === "friend_decrease"
           ? "member_removed"
-          : "member_added"
+          : undefined
+    // Unknown notice types stay unhandled (mirrors the v11 parser) — the old
+    // "member_added" default fabricated join events for every unrecognised
+    // notice.
+    if (systemKind === undefined) return null
     const isGroup = (event.detail_type ?? "").startsWith("group_")
     const userId = event.user_id ?? ""
     const groupId = event.group_id ?? ""

@@ -51,6 +51,41 @@ describe("setSystemFonts", () => {
     setSystemFonts(["A"])
     expect(seen).toHaveLength(1)
   })
+
+  it("carries the monospaced flag from object-form entries", () => {
+    // Use families that don't collide with the web-safe block (which has no
+    // monospaced flag and sorts ahead of system entries).
+    setSystemFonts([
+      { family: "JetBrains Mono", monospaced: true },
+      { family: "Helvetica Neue", monospaced: false },
+    ])
+    const system = listFonts().filter((f) => f.source === "system")
+    expect(system.find((f) => f.family === "JetBrains Mono")?.monospaced).toBe(true)
+    expect(system.find((f) => f.family === "Helvetica Neue")?.monospaced).toBe(false)
+  })
+
+  it("OR-reduces monospaced across duplicate families", () => {
+    setSystemFonts([
+      { family: "Iosevka", monospaced: false },
+      { family: "Iosevka", monospaced: true },
+    ])
+    const iosevka = listFonts().filter((f) => f.family === "Iosevka")
+    expect(iosevka).toHaveLength(1)
+    expect(iosevka[0]!.monospaced).toBe(true)
+  })
+
+  it("plain string entries default to monospaced=false", () => {
+    setSystemFonts(["Plain Family"])
+    expect(listFonts().find((f) => f.family === "Plain Family")?.monospaced).toBe(false)
+  })
+
+  it("re-emits when only the monospaced flag changes", () => {
+    const seen: number[] = []
+    setSystemFonts([{ family: "X", monospaced: false }])
+    subscribeFonts(() => seen.push(listFonts().length))
+    setSystemFonts([{ family: "X", monospaced: true }])
+    expect(seen).toHaveLength(1)
+  })
 })
 
 describe("registerPluginFont", () => {

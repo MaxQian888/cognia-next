@@ -1,24 +1,25 @@
 /**
- * Browser/desktop wiring for the run controller. Assembles the real
- * {@link RunControllerDeps}: Dexie loaders + saver, the chat target driving the
- * sidecar, and the scorer set. When a renderer-side judge client resolves it
- * adds the L3 judge + RAG scorers (cross-model — the judge client is built
- * independently of the target model); otherwise it falls back to the
- * deterministic tier only and flags `deterministicOnly` so the UI can say so.
+ * Browser/desktop wiring for the matrix runner. Assembles the real
+ * {@link RunConfiguredDeps}: Dexie loaders + savers (incl. version snapshot and
+ * per-case results), the three target dep sets, and the scorer set. When a
+ * renderer-side judge client resolves it adds the L3 judge + RAG scorers
+ * (cross-model — the judge client is built independently of the target model);
+ * otherwise it falls back to the deterministic tier only and flags
+ * `deterministicOnly` so the UI can say so.
  */
 
-import type { AppSettings, ChatSession } from "@/lib/claude/types"
+import type { AppSettings, ChatSession } from "@cognia/agent-config-types"
 import { buildRendererLlmClient } from "@/lib/ai/renderer-llm-client"
 import { getDataset, listCases } from "@/lib/db/eval-datasets"
 import { saveRun } from "@/lib/db/eval-runs"
 import { snapshotVersion } from "@/lib/db/eval-dataset-versions"
 import { saveCaseResult } from "@/lib/db/eval-run-cases"
 import { deterministicScorers, llmScorers } from "./scorers"
-import { createChatTarget, defaultChatTargetDeps } from "./targets/chat"
+import { resolveEvalSettings } from "./settings"
+import { defaultChatTargetDeps } from "./targets/chat"
 import { defaultTeamTargetDeps } from "./targets/team-default-deps"
 import { defaultWorkflowTargetDeps } from "./targets/workflow-default-deps"
 import { createTargetFromSpec } from "./targets/create-from-spec"
-import type { RunControllerDeps } from "./run-controller"
 import type { RunConfiguredDeps } from "./run-config"
 
 export interface BrowserRunDepsArgs {
@@ -26,41 +27,12 @@ export interface BrowserRunDepsArgs {
   session?: ChatSession | null
   /** Override the judge model (cross-model). Defaults to the resolver's choice. */
   judgeModel?: string
-}
-
-export interface BrowserRunDepsResult {
-  deps: RunControllerDeps
-  /** True when no judge client resolved — only deterministic scorers run. */
-  deterministicOnly: boolean
-}
-
-export function buildBrowserRunDeps(args: BrowserRunDepsArgs): BrowserRunDepsResult {
-  const model = args.session?.model ?? args.appSettings?.defaultModel ?? "claude-opus-4-8"
-  const target = createChatTarget({ label: model, model }, defaultChatTargetDeps())
-
-  const client = buildRendererLlmClient({
-    session: args.session ?? null,
-    appSettings: args.appSettings,
-    featureId: "eval-judge",
-    ...(args.judgeModel ? { modelOverride: args.judgeModel } : {}),
-  })
-
-  const scorers = client
-    ? [...deterministicScorers(), ...llmScorers({ client })]
-    : deterministicScorers()
-
-  return {
-    deterministicOnly: !client,
-    deps: {
-      loadDataset: getDataset,
-      loadCases: listCases,
-      saveRun,
-      scorers,
-      target,
-      now: () => Date.now(),
-      newRunId: newEvalRunId,
-    },
-  }
+  /**
+   * Skip the LLM judge entirely — run the deterministic tier only, even if a
+   * judge client would otherwise resolve. Surfaces the settings "deterministic
+   * only" toggle down to the scorer wiring.
+   */
+  forceDeterministic?: boolean
 }
 
 function newEvalRunId(): string {
@@ -80,12 +52,14 @@ export interface ConfiguredRunDepsResult {
  * (+ optional cross-model judge) scorer set.
  */
 export function buildConfiguredRunDeps(args: BrowserRunDepsArgs): ConfiguredRunDepsResult {
-  const client = buildRendererLlmClient({
-    session: args.session ?? null,
-    appSettings: args.appSettings,
-    featureId: "eval-judge",
-    ...(args.judgeModel ? { modelOverride: args.judgeModel } : {}),
-  })
+  const client = args.forceDeterministic
+    ? null
+    : buildRendererLlmClient({
+        session: args.session ?? null,
+        appSettings: args.appSettings,
+        featureId: "eval-judge",
+        ...(args.judgeModel ? { modelOverride: args.judgeModel } : {}),
+      })
   const allScorers = client
     ? [...deterministicScorers(), ...llmScorers({ client })]
     : deterministicScorers()
@@ -108,6 +82,7 @@ export function buildConfiguredRunDeps(args: BrowserRunDepsArgs): ConfiguredRunD
       saveCaseResult,
       now: () => Date.now(),
       newRunId: newEvalRunId,
+      maxStoredOutputChars: resolveEvalSettings(args.appSettings).maxStoredOutputChars,
     },
   }
 }

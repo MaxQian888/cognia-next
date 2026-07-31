@@ -40,6 +40,16 @@ export {
   saveImage,
 } from "./wallpaper-storage"
 export type { SaveImageResult } from "./wallpaper-storage"
+export {
+  ACCEPTED_WALLPAPER_MIMES,
+  intakeWallpaperFile,
+  isAcceptedWallpaperType,
+} from "./wallpaper-intake"
+export type {
+  UploadedWallpaper,
+  WallpaperIntakeResult,
+  WallpaperRejection,
+} from "./wallpaper-intake"
 export { applyUserCss, removeUserCss, sanitizeUserCss } from "./custom-css/apply"
 export {
   importVscodeThemeJson,

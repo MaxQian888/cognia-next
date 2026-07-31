@@ -1,0 +1,1249 @@
+{
+  "$schema": "./catalog.schema.json",
+  "schemaVersion": 4,
+  "minimumHostVersion": "0.1.0",
+  "pluginTypes": ["frontend", "python", "hybrid", "wasm", "vscode-extension"],
+  "permissions": [
+    "filesystem:read",
+    "filesystem:write",
+    "network:fetch",
+    "network:websocket",
+    "clipboard:read",
+    "clipboard:write",
+    "notification",
+    "shell:execute",
+    "process:spawn",
+    "database:read",
+    "database:write",
+    "settings:read",
+    "settings:write",
+    "session:read",
+    "session:write",
+    "session:delete",
+    "project:read",
+    "project:write",
+    "project:delete",
+    "canvas:read",
+    "canvas:write",
+    "canvas:run",
+    "canvas:collaborate",
+    "artifact:read",
+    "artifact:write",
+    "workflow:read",
+    "editor:read",
+    "editor:write",
+    "debug:control",
+    "tests:run",
+    "notebook:execute",
+    "vector:read",
+    "vector:write",
+    "ai:chat",
+    "ai:embed",
+    "export:session",
+    "export:project",
+    "theme:read",
+    "theme:write",
+    "extension:ui",
+    "media:image:read",
+    "media:image:write",
+    "media:video:read",
+    "media:video:write",
+    "media:video:export",
+    "agent:control",
+    "agent:dispatch-external",
+    "agent:dispatch",
+    "agent:shared-memory:read",
+    "twin:read",
+    "templates:read",
+    "templates:contribute",
+    "templates:instantiate",
+    "templates:library:write",
+    "ipc:call",
+    "ipc:expose",
+    "events:publish",
+    "events:subscribe",
+    "python:execute",
+    "sandbox:web-execute",
+    "secrets:read",
+    "secrets:write",
+    "auth:provide",
+    "auth:consume",
+    "terminal:spawn",
+    "terminal:write",
+    "terminal:kill",
+    "terminal:completion",
+    "terminal:safety",
+    "git:read",
+    "git:write",
+    "goal:read",
+    "goal:write",
+    "memory:read",
+    "memory:write",
+    "team:read",
+    "team:write",
+    "subscription:read",
+    "perf:read",
+    "connectors:read",
+    "connectors:send",
+    "connectors:manage",
+    "integrations:read",
+    "integrations:events",
+    "integrations:execute",
+    "integrations:manage",
+    "share:read",
+    "share:create",
+    "backup:read",
+    "backup:write",
+    "automation:screenshot",
+    "automation:read",
+    "automation:click",
+    "automation:type",
+    "automation:pointer",
+    "automation:window",
+    "companion:read",
+    "companion:control",
+    "companion:goal-control",
+    "cli:execute",
+    "native:input",
+    "native:screen",
+    "native:filesystem",
+    "native:process",
+    "pet:read",
+    "pet:interact",
+    "hooks:chat-intercept"
+  ],
+  "capabilities": [
+    {
+      "id": "tools",
+      "support": "supported",
+      "manifestFields": ["tools"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "components",
+      "support": "supported",
+      "manifestFields": ["a2uiComponents", "extensions"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "modes",
+      "support": "supported",
+      "manifestFields": ["modes"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "skills",
+      "support": "supported",
+      "manifestFields": ["skills"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "media",
+      "support": "supported",
+      "manifestFields": ["ocrProviders"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "canvas",
+      "support": "supported",
+      "manifestFields": [],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "ai-provider",
+      "support": "supported",
+      "manifestFields": ["aiProviders"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "themes",
+      "support": "supported",
+      "manifestFields": [],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "commands",
+      "support": "supported",
+      "manifestFields": ["commands"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "hooks",
+      "support": "supported",
+      "manifestFields": [],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "processors",
+      "support": "experimental",
+      "manifestFields": [],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "providers",
+      "support": "experimental",
+      "manifestFields": [],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "exporters",
+      "support": "supported",
+      "manifestFields": [],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "importers",
+      "support": "supported",
+      "manifestFields": [],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "configuration",
+      "support": "supported",
+      "manifestFields": [],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "a2ui",
+      "support": "supported",
+      "manifestFields": ["a2uiComponents", "a2uiTemplates"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "python",
+      "support": "supported",
+      "manifestFields": ["pythonMain", "pythonDependencies"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "scheduler",
+      "support": "supported",
+      "manifestFields": ["scheduledTasks"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "workspace-backend",
+      "support": "supported",
+      "manifestFields": ["workspaceBackends"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "message-renderer",
+      "support": "supported",
+      "manifestFields": ["messageRenderers"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "tool-renderer",
+      "support": "supported",
+      "manifestFields": ["toolRenderers"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "density-preset",
+      "support": "supported",
+      "manifestFields": ["densityPresets"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "chat-middleware",
+      "support": "supported",
+      "manifestFields": ["chatMiddlewares"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "modal-mount",
+      "support": "supported",
+      "manifestFields": ["modalMounts"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "terminal-completion",
+      "support": "supported",
+      "manifestFields": ["terminalCompletionProviders"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "routing-strategy",
+      "support": "supported",
+      "manifestFields": ["routingStrategies"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "deployment-filter",
+      "support": "supported",
+      "manifestFields": ["deploymentFilters"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "protocol-adapter",
+      "support": "supported",
+      "manifestFields": ["protocolAdapters"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "tool-route",
+      "support": "supported",
+      "manifestFields": ["toolRoutes"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "context-provider",
+      "support": "supported",
+      "manifestFields": ["contextProviders"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "external-agent-preset",
+      "support": "supported",
+      "manifestFields": ["externalAgentPresets"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "external-agent-adapter",
+      "support": "supported",
+      "manifestFields": ["externalAgentAdapters"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "session-importer",
+      "support": "supported",
+      "manifestFields": ["sessionImporters"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "mcp-server-preset",
+      "support": "supported",
+      "manifestFields": ["mcpServerPresets"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "native-anthropic-tool",
+      "support": "supported",
+      "manifestFields": ["nativeAnthropicTools"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "lsp-server",
+      "support": "supported",
+      "manifestFields": ["lspServers"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "character-pack",
+      "support": "supported",
+      "manifestFields": ["characterPacks"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "subagent",
+      "support": "supported",
+      "manifestFields": ["subagents"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "template-package",
+      "support": "supported",
+      "manifestFields": ["templatePackages"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "agent-team-template",
+      "support": "supported",
+      "manifestFields": ["agentTeamTemplates"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "shared-memory-adapter",
+      "support": "supported",
+      "manifestFields": ["sharedMemoryAdapters"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "balance-adapter",
+      "support": "supported",
+      "manifestFields": ["balanceAdapters"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "limits-source",
+      "support": "supported",
+      "manifestFields": ["limitsSources"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "im-rate-source",
+      "support": "supported",
+      "manifestFields": ["imRateSources"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "compaction-strategy",
+      "support": "supported",
+      "manifestFields": ["compactionStrategies"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "workflow-template",
+      "support": "supported",
+      "manifestFields": ["workflowTemplates"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "connectors",
+      "support": "supported",
+      "manifestFields": ["connectors"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "integrations",
+      "support": "supported",
+      "manifestFields": ["integrations"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "workflow",
+      "support": "supported",
+      "manifestFields": ["workflows"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "workflow-trigger",
+      "support": "supported",
+      "manifestFields": ["workflows"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "theme-pack",
+      "support": "supported",
+      "manifestFields": ["themePacks"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "fonts",
+      "support": "supported",
+      "manifestFields": ["fonts"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "wallpapers",
+      "support": "supported",
+      "manifestFields": ["wallpapers"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "quick-action",
+      "support": "supported",
+      "manifestFields": ["quickActions"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "cli-tools",
+      "support": "supported",
+      "manifestFields": ["cliTools"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "tray",
+      "support": "supported",
+      "manifestFields": ["trayItems"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "automation",
+      "support": "experimental",
+      "manifestFields": [],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "companion",
+      "support": "experimental",
+      "manifestFields": [],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "context-panel",
+      "support": "supported",
+      "manifestFields": ["contextPanels"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "view-container",
+      "support": "supported",
+      "manifestFields": ["viewsContainers"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "tree-view",
+      "support": "supported",
+      "manifestFields": ["views"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "webview",
+      "support": "supported",
+      "manifestFields": ["webviews"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "auth-provider",
+      "support": "supported",
+      "manifestFields": ["authProviders"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "uri-handler",
+      "support": "supported",
+      "manifestFields": [],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "editor",
+      "support": "supported",
+      "manifestFields": [],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "pet",
+      "support": "supported",
+      "manifestFields": [],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "pet-achievement",
+      "support": "supported",
+      "manifestFields": ["petAchievements"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    },
+    {
+      "id": "pet-item",
+      "support": "supported",
+      "manifestFields": ["petItems"],
+      "introducedIn": "0.1.0",
+      "minimumHostVersion": "0.1.0"
+    }
+  ],
+  "pathFields": [
+    {
+      "path": "main",
+      "runtime": "javascript",
+      "requiredFor": ["frontend"],
+      "executable": true
+    },
+    {
+      "path": "pythonMain",
+      "runtime": "python",
+      "requiredFor": ["python"],
+      "executable": true
+    },
+    {
+      "path": "wasmMain",
+      "runtime": "wasm",
+      "requiredFor": ["wasm"],
+      "executable": true
+    },
+    {
+      "path": "vscodeMain",
+      "runtime": "vscode",
+      "requiredFor": [],
+      "executable": true
+    },
+    {
+      "path": "styles",
+      "runtime": "asset",
+      "requiredFor": [],
+      "executable": false
+    },
+    {
+      "path": "themes[].vscodeJsonPath",
+      "runtime": "asset",
+      "requiredFor": [],
+      "executable": false
+    },
+    {
+      "path": "fonts[].files[].src",
+      "runtime": "asset",
+      "requiredFor": [],
+      "executable": false
+    },
+    {
+      "path": "wallpapers[].source.relPath",
+      "runtime": "asset",
+      "requiredFor": [],
+      "executable": false
+    },
+    {
+      "path": "cliTools[].binary.relPath",
+      "runtime": "asset",
+      "requiredFor": [],
+      "executable": true
+    },
+    {
+      "path": "vscodeGrammars[].path",
+      "runtime": "asset",
+      "requiredFor": [],
+      "executable": false
+    },
+    {
+      "path": "vscodeLanguages[].configuration",
+      "runtime": "asset",
+      "requiredFor": [],
+      "executable": false
+    },
+    {
+      "path": "vscodeLanguages[].icon.light",
+      "runtime": "asset",
+      "requiredFor": [],
+      "executable": false
+    },
+    {
+      "path": "vscodeLanguages[].icon.dark",
+      "runtime": "asset",
+      "requiredFor": [],
+      "executable": false
+    },
+    {
+      "path": "vscodeIconThemes[].path",
+      "runtime": "asset",
+      "requiredFor": [],
+      "executable": false
+    },
+    {
+      "path": "vscodeSnippets[].path",
+      "runtime": "asset",
+      "requiredFor": [],
+      "executable": false
+    },
+    {
+      "path": "runtimeCompatibility.browser.entrypoint",
+      "runtime": "javascript",
+      "requiredFor": [],
+      "executable": true,
+      "sentinels": ["node"]
+    },
+    {
+      "path": "runtimeCompatibility.tauri.entrypoint",
+      "runtime": "javascript",
+      "requiredFor": [],
+      "executable": true,
+      "sentinels": ["node"]
+    },
+    {
+      "path": "runtimeCompatibility.mobile.entrypoint",
+      "runtime": "javascript",
+      "requiredFor": [],
+      "executable": true,
+      "sentinels": ["node"]
+    },
+    {
+      "path": "configComponent.entry",
+      "runtime": "javascript",
+      "requiredFor": [],
+      "executable": true
+    },
+    {
+      "path": "ocrProviders[].entry",
+      "runtime": "javascript",
+      "requiredFor": [],
+      "executable": true
+    },
+    {
+      "path": "workspaceBackends[].entry",
+      "runtime": "javascript",
+      "requiredFor": [],
+      "executable": true
+    },
+    {
+      "path": "messageRenderers[].entry",
+      "runtime": "javascript",
+      "requiredFor": [],
+      "executable": true
+    },
+    {
+      "path": "extensions[].entry",
+      "runtime": "javascript",
+      "requiredFor": [],
+      "executable": true
+    },
+    {
+      "path": "toolRenderers[].entry",
+      "runtime": "javascript",
+      "requiredFor": [],
+      "executable": true
+    },
+    {
+      "path": "aiProviders[].entry",
+      "runtime": "javascript",
+      "requiredFor": [],
+      "executable": true
+    },
+    {
+      "path": "modalMounts[].entry",
+      "runtime": "javascript",
+      "requiredFor": [],
+      "executable": true
+    },
+    {
+      "path": "routingStrategies[].entry",
+      "runtime": "javascript",
+      "requiredFor": [],
+      "executable": true
+    },
+    {
+      "path": "chatMiddlewares[].entry",
+      "runtime": "javascript",
+      "requiredFor": [],
+      "executable": true
+    },
+    {
+      "path": "contextPanels[].entry",
+      "runtime": "javascript",
+      "requiredFor": [],
+      "executable": true
+    },
+    {
+      "path": "externalAgentAdapters[].entry",
+      "runtime": "javascript",
+      "requiredFor": [],
+      "executable": true
+    },
+    {
+      "path": "sessionImporters[].entry",
+      "runtime": "javascript",
+      "requiredFor": [],
+      "executable": true
+    },
+    {
+      "path": "contextProviders[].entry",
+      "runtime": "javascript",
+      "requiredFor": [],
+      "executable": true
+    },
+    {
+      "path": "terminalCompletionProviders[].entry",
+      "runtime": "javascript",
+      "requiredFor": [],
+      "executable": true
+    },
+    {
+      "path": "deploymentFilters[].entry",
+      "runtime": "javascript",
+      "requiredFor": [],
+      "executable": true
+    },
+    {
+      "path": "views[].entry",
+      "runtime": "javascript",
+      "requiredFor": [],
+      "executable": true
+    },
+    {
+      "path": "webviews[].entry",
+      "runtime": "javascript",
+      "requiredFor": [],
+      "executable": true
+    },
+    {
+      "path": "protocolAdapters[].entry",
+      "runtime": "javascript",
+      "requiredFor": [],
+      "executable": true
+    },
+    {
+      "path": "vscodeExtension.main",
+      "runtime": "vscode",
+      "requiredFor": ["vscode-extension"],
+      "executable": true
+    },
+    {
+      "path": "vscodeExtension.browser",
+      "runtime": "vscode",
+      "requiredFor": ["vscode-extension"],
+      "executable": true
+    },
+    {
+      "path": "vscodeExtension.l10n",
+      "runtime": "asset",
+      "requiredFor": ["vscode-extension"],
+      "executable": false
+    },
+    {
+      "path": "vscodeExtension.contributes.languages[].configuration",
+      "runtime": "asset",
+      "requiredFor": ["vscode-extension"],
+      "executable": false
+    },
+    {
+      "path": "vscodeExtension.contributes.languages[].icon.light",
+      "runtime": "asset",
+      "requiredFor": ["vscode-extension"],
+      "executable": false
+    },
+    {
+      "path": "vscodeExtension.contributes.languages[].icon.dark",
+      "runtime": "asset",
+      "requiredFor": ["vscode-extension"],
+      "executable": false
+    },
+    {
+      "path": "vscodeExtension.contributes.grammars[].path",
+      "runtime": "asset",
+      "requiredFor": ["vscode-extension"],
+      "executable": false
+    },
+    {
+      "path": "vscodeExtension.contributes.themes[].path",
+      "runtime": "asset",
+      "requiredFor": ["vscode-extension"],
+      "executable": false
+    },
+    {
+      "path": "vscodeExtension.contributes.iconThemes[].path",
+      "runtime": "asset",
+      "requiredFor": ["vscode-extension"],
+      "executable": false
+    },
+    {
+      "path": "vscodeExtension.contributes.productIconThemes[].path",
+      "runtime": "asset",
+      "requiredFor": ["vscode-extension"],
+      "executable": false
+    },
+    {
+      "path": "vscodeExtension.contributes.snippets[].path",
+      "runtime": "asset",
+      "requiredFor": ["vscode-extension"],
+      "executable": false
+    },
+    {
+      "path": "vscodeExtension.contributes.chatInstructions[].path",
+      "runtime": "asset",
+      "requiredFor": ["vscode-extension"],
+      "executable": false
+    },
+    {
+      "path": "vscodeExtension.contributes.chatPromptFiles[].path",
+      "runtime": "asset",
+      "requiredFor": ["vscode-extension"],
+      "executable": false
+    }
+  ],
+  "manifestContributions": [
+    {
+      "field": "tools",
+      "capabilities": ["tools"],
+      "execution": "host"
+    },
+    {
+      "field": "a2uiComponents",
+      "capabilities": ["components", "a2ui"],
+      "execution": "host"
+    },
+    {
+      "field": "modes",
+      "capabilities": ["modes"],
+      "execution": "host"
+    },
+    {
+      "field": "skills",
+      "capabilities": ["skills"],
+      "execution": "host"
+    },
+    {
+      "field": "commands",
+      "capabilities": ["commands"],
+      "execution": "host"
+    },
+    {
+      "field": "a2uiTemplates",
+      "capabilities": ["a2ui"],
+      "execution": "host"
+    },
+    {
+      "field": "scheduledTasks",
+      "capabilities": ["scheduler"],
+      "execution": "host"
+    },
+    {
+      "field": "ocrProviders",
+      "capabilities": ["media"],
+      "execution": "javascript",
+      "pythonExecution": "supported",
+      "entryPath": "ocrProviders[].entry"
+    },
+    {
+      "field": "aiProviders",
+      "capabilities": ["ai-provider"],
+      "execution": "javascript",
+      "pythonExecution": "supported",
+      "entryPath": "aiProviders[].entry"
+    },
+    {
+      "field": "workspaceBackends",
+      "capabilities": ["workspace-backend"],
+      "execution": "javascript",
+      "pythonExecution": "supported",
+      "entryPath": "workspaceBackends[].entry"
+    },
+    {
+      "field": "messageRenderers",
+      "capabilities": ["message-renderer"],
+      "execution": "javascript",
+      "entryPath": "messageRenderers[].entry"
+    },
+    {
+      "field": "extensions",
+      "capabilities": ["components"],
+      "execution": "javascript",
+      "entryPath": "extensions[].entry"
+    },
+    {
+      "field": "toolRenderers",
+      "capabilities": ["tool-renderer"],
+      "execution": "javascript",
+      "entryPath": "toolRenderers[].entry"
+    },
+    {
+      "field": "densityPresets",
+      "capabilities": ["density-preset"],
+      "execution": "host"
+    },
+    {
+      "field": "chatMiddlewares",
+      "capabilities": ["chat-middleware"],
+      "execution": "javascript",
+      "pythonExecution": "experimental",
+      "entryPath": "chatMiddlewares[].entry"
+    },
+    {
+      "field": "modalMounts",
+      "capabilities": ["modal-mount"],
+      "execution": "javascript",
+      "entryPath": "modalMounts[].entry"
+    },
+    {
+      "field": "terminalCompletionProviders",
+      "capabilities": ["terminal-completion"],
+      "execution": "javascript",
+      "pythonExecution": "experimental",
+      "entryPath": "terminalCompletionProviders[].entry"
+    },
+    {
+      "field": "routingStrategies",
+      "capabilities": ["routing-strategy"],
+      "execution": "javascript",
+      "pythonExecution": "supported",
+      "entryPath": "routingStrategies[].entry"
+    },
+    {
+      "field": "deploymentFilters",
+      "capabilities": ["deployment-filter"],
+      "execution": "javascript",
+      "pythonExecution": "supported",
+      "entryPath": "deploymentFilters[].entry"
+    },
+    {
+      "field": "protocolAdapters",
+      "capabilities": ["protocol-adapter"],
+      "execution": "conditional",
+      "pythonExecution": "supported",
+      "javascriptWhen": {
+        "path": "spec.kind",
+        "equals": "code"
+      },
+      "entryPath": "protocolAdapters[].entry"
+    },
+    {
+      "field": "toolRoutes",
+      "capabilities": ["tool-route"],
+      "execution": "host"
+    },
+    {
+      "field": "contextProviders",
+      "capabilities": ["context-provider"],
+      "execution": "javascript",
+      "pythonExecution": "supported",
+      "entryPath": "contextProviders[].entry"
+    },
+    {
+      "field": "externalAgentPresets",
+      "capabilities": ["external-agent-preset"],
+      "execution": "host"
+    },
+    {
+      "field": "externalAgentAdapters",
+      "capabilities": ["external-agent-adapter"],
+      "execution": "javascript",
+      "pythonExecution": "supported",
+      "entryPath": "externalAgentAdapters[].entry"
+    },
+    {
+      "field": "sessionImporters",
+      "capabilities": ["session-importer"],
+      "execution": "javascript",
+      "pythonExecution": "supported",
+      "entryPath": "sessionImporters[].entry"
+    },
+    {
+      "field": "mcpServerPresets",
+      "capabilities": ["mcp-server-preset"],
+      "execution": "host"
+    },
+    {
+      "field": "nativeAnthropicTools",
+      "capabilities": ["native-anthropic-tool"],
+      "execution": "host"
+    },
+    {
+      "field": "lspServers",
+      "capabilities": ["lsp-server"],
+      "execution": "host"
+    },
+    {
+      "field": "characterPacks",
+      "capabilities": ["character-pack"],
+      "execution": "host"
+    },
+    {
+      "field": "subagents",
+      "capabilities": ["subagent"],
+      "execution": "host"
+    },
+    {
+      "field": "agentTeamTemplates",
+      "capabilities": ["agent-team-template"],
+      "execution": "host"
+    },
+    {
+      "field": "templatePackages",
+      "capabilities": ["template-package"],
+      "execution": "host"
+    },
+    {
+      "field": "sharedMemoryAdapters",
+      "capabilities": ["shared-memory-adapter"],
+      "execution": "host"
+    },
+    {
+      "field": "balanceAdapters",
+      "capabilities": ["balance-adapter"],
+      "execution": "host"
+    },
+    {
+      "field": "limitsSources",
+      "capabilities": ["limits-source"],
+      "execution": "host"
+    },
+    {
+      "field": "imRateSources",
+      "capabilities": ["im-rate-source"],
+      "execution": "host"
+    },
+    {
+      "field": "compactionStrategies",
+      "capabilities": ["compaction-strategy"],
+      "execution": "host"
+    },
+    {
+      "field": "workflowTemplates",
+      "capabilities": ["workflow-template"],
+      "execution": "host"
+    },
+    {
+      "field": "connectors",
+      "capabilities": ["connectors"],
+      "execution": "javascript",
+      "pythonExecution": "experimental"
+    },
+    {
+      "field": "integrations",
+      "capabilities": ["integrations"],
+      "execution": "javascript",
+      "pythonExecution": "unsupported"
+    },
+    {
+      "field": "workflows",
+      "capabilities": ["workflow", "workflow-trigger"],
+      "execution": "host"
+    },
+    {
+      "field": "themePacks",
+      "capabilities": ["theme-pack"],
+      "execution": "host"
+    },
+    {
+      "field": "fonts",
+      "capabilities": ["fonts"],
+      "execution": "host"
+    },
+    {
+      "field": "wallpapers",
+      "capabilities": ["wallpapers"],
+      "execution": "host"
+    },
+    {
+      "field": "quickActions",
+      "capabilities": ["quick-action"],
+      "execution": "host"
+    },
+    {
+      "field": "trayItems",
+      "capabilities": ["tray"],
+      "execution": "host"
+    },
+    {
+      "field": "cliTools",
+      "capabilities": ["cli-tools"],
+      "execution": "host"
+    },
+    {
+      "field": "contextPanels",
+      "capabilities": ["context-panel"],
+      "execution": "javascript",
+      "entryPath": "contextPanels[].entry"
+    },
+    {
+      "field": "viewsContainers",
+      "capabilities": ["view-container"],
+      "execution": "host"
+    },
+    {
+      "field": "views",
+      "capabilities": ["tree-view"],
+      "execution": "javascript",
+      "entryPath": "views[].entry"
+    },
+    {
+      "field": "webviews",
+      "capabilities": ["webview"],
+      "execution": "conditional",
+      "javascriptWhen": {
+        "path": "entry"
+      },
+      "entryPath": "webviews[].entry"
+    },
+    {
+      "field": "authProviders",
+      "capabilities": ["auth-provider"],
+      "execution": "host"
+    },
+    {
+      "field": "petAchievements",
+      "capabilities": ["pet-achievement"],
+      "execution": "host"
+    },
+    {
+      "field": "petItems",
+      "capabilities": ["pet-item"],
+      "execution": "host"
+    },
+    {
+      "field": "configComponent",
+      "capabilities": ["configuration"],
+      "execution": "javascript",
+      "entryPath": "configComponent.entry"
+    }
+  ],
+  "runtimeEntries": {
+    "frontend": {
+      "required": ["main"],
+      "javascriptEntry": "main",
+      "javascriptEntryRequiredForContributions": true
+    },
+    "python": {
+      "required": ["pythonMain"],
+      "javascriptEntry": null,
+      "javascriptEntryRequiredForContributions": false
+    },
+    "hybrid": {
+      "required": ["pythonMain"],
+      "javascriptEntry": "main",
+      "javascriptEntryRequiredForContributions": true
+    },
+    "wasm": {
+      "required": ["wasmMain"],
+      "javascriptEntry": null,
+      "javascriptEntryRequiredForContributions": false
+    },
+    "vscode-extension": {
+      "required": [],
+      "requiredAnyOf": [
+        "vscodeMain",
+        "themes",
+        "vscodeGrammars",
+        "vscodeIconThemes",
+        "vscodeSnippets",
+        "vscodeLanguages"
+      ],
+      "javascriptEntry": "vscodeMain",
+      "javascriptEntryRequiredForContributions": false
+    }
+  }
+}

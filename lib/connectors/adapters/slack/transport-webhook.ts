@@ -11,7 +11,7 @@
  * queue → consumer drains → unlisten on abort.
  */
 
-import { listen } from "@tauri-apps/api/event"
+import { connectorListen as listen } from "@/lib/connectors/events"
 import type { SlackEventEnvelope } from "./parse"
 
 export interface SlackWebhookOptions {

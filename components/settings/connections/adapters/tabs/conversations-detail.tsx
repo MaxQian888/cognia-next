@@ -52,7 +52,7 @@ export function ConversationsDetail({ adapterId }: ConversationsDetailProps) {
                     type="button"
                     className="font-mono text-xs truncate hover:underline text-left"
                     onClick={() =>
-                      router.push(`/inbox/c/${encodeURIComponent(row.conversationKey)}`)
+                      router.push(`/inbox/c?key=${encodeURIComponent(row.conversationKey)}`)
                     }
                     data-testid={`conv-detail-open-${row.id}`}
                   >
@@ -132,7 +132,7 @@ export function ConversationsDetail({ adapterId }: ConversationsDetailProps) {
                     size="icon"
                     className="h-7 w-7"
                     onClick={() =>
-                      router.push(`/inbox/c/${encodeURIComponent(row.conversationKey)}`)
+                      router.push(`/inbox/c?key=${encodeURIComponent(row.conversationKey)}`)
                     }
                     aria-label={t("openConversation")}
                   >

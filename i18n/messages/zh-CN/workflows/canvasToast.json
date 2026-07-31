@@ -1,0 +1,16 @@
+{
+  "completed": "工作流执行完成",
+  "exported": "已下载工作流 JSON",
+  "extracted": "已将选中节点提取为新的子工作流",
+  "imageExportFailed": "导出工作流图片失败",
+  "imageExported": "已下载工作流图片",
+  "importFailed": "导入工作流 JSON 失败",
+  "imported": "已导入工作流",
+  "layoutUnavailable": "当前环境不支持自动布局",
+  "publicationInvalidated": "工作流已保存，但因可调用接口发生变化而自动下架。请重新发布以开放新契约。",
+  "runFailed": "运行失败",
+  "running": "运行中…",
+  "saveFailed": "保存工作流失败",
+  "savedOk": "工作流已保存",
+  "startFailed": "启动运行失败"
+}

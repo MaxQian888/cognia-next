@@ -1,27 +1,88 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen } from "@testing-library/react"
+import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import type { Character, ChatSession, Team } from "@/lib/claude/types"
+import type { Character, ChatSession, Team } from "@cognia/agent-config-types"
 import type { SelectedGuild } from "@/stores/ui"
 
 const logInfo = jest.fn()
+const logWarn = jest.fn()
+let mockDragEnd: ((event: unknown) => void) | undefined
+let mockDragOver: ((event: unknown) => void) | undefined
+let mockDragCancel: (() => void) | undefined
+const mockSensorOptions: unknown[] = []
+const mockSortableItems: string[][] = []
+const mockDroppableNodes = new Map<string, HTMLElement | null>()
+
+jest.mock("@dnd-kit/core", () => {
+  const actual = jest.requireActual<typeof import("@dnd-kit/core")>("@dnd-kit/core")
+  return {
+    ...actual,
+    DndContext: ({
+      children,
+      onDragEnd,
+      onDragOver,
+      onDragCancel,
+    }: {
+      children: React.ReactNode
+      onDragEnd: (event: unknown) => void
+      onDragOver?: (event: unknown) => void
+      onDragCancel?: () => void
+    }) => {
+      mockDragEnd = onDragEnd
+      mockDragOver = onDragOver
+      mockDragCancel = onDragCancel
+      return <>{children}</>
+    },
+    useSensor: (sensor: unknown, options: unknown) => {
+      mockSensorOptions.push(options)
+      return actual.useSensor(sensor as never, options as never)
+    },
+    useDroppable: ({ id }: { id: string }) => ({
+      setNodeRef: (node: HTMLElement | null) => mockDroppableNodes.set(id, node),
+      isOver: false,
+    }),
+  }
+})
+
+jest.mock("@dnd-kit/sortable", () => {
+  const actual = jest.requireActual<typeof import("@dnd-kit/sortable")>("@dnd-kit/sortable")
+  return {
+    ...actual,
+    SortableContext: ({ items, ...props }: React.ComponentProps<typeof actual.SortableContext>) => {
+      mockSortableItems.push(items.map((item) => String(typeof item === "object" ? item.id : item)))
+      return <actual.SortableContext items={items} {...props} />
+    },
+  }
+})
 
 jest.mock("next-intl", () => ({
+  useLocale: () => "en",
   useTranslations: () => (key: string, vars?: Record<string, unknown>) =>
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
-jest.mock("@/lib/logging", () => ({
-  loggers: {
-    ui: {
-      info: (...args: unknown[]) => logInfo(...args),
-      warn: jest.fn(),
-      error: jest.fn(),
-    },
-  },
-}))
+// Complete logger mock: the import chain (plugin-view-container-panel →
+// plugin-sdk → lsp-registry) reads `loggers.plugin.child(...)`, so the mock
+// must answer any namespace with a logger that has a `.child` method. A Proxy
+// keeps it exhaustive without enumerating every namespace.
+jest.mock("@cognia/logging", () => {
+  const makeLogger = (): Record<string, unknown> => ({
+    info: (...args: unknown[]) => logInfo(...args),
+    warn: (...args: unknown[]) => logWarn(...args),
+    error: jest.fn(),
+    debug: jest.fn(),
+    trace: jest.fn(),
+    child: () => makeLogger(),
+  })
+  return {
+    loggers: new Proxy({}, { get: () => makeLogger() }),
+    // The plugin-view import chain reaches lib/execution/broker, which calls
+    // createLogger() at module load; provide it so the suite can import.
+    createLogger: () => makeLogger(),
+  }
+})
 
 const callQueue: Array<unknown> = []
 jest.mock("@/hooks/data", () => ({
@@ -30,9 +91,50 @@ jest.mock("@/hooks/data", () => ({
 }))
 
 let selectedGuild: SelectedGuild = { kind: "dm" }
+let sidebarCollapsed = false
+const setGroupCollapsed = jest.fn()
 jest.mock("@/stores/ui", () => ({
-  useUIStore: <T,>(selector: (s: { selectedGuild: SelectedGuild }) => T): T =>
-    selector({ selectedGuild }),
+  useUIStore: <T,>(selector: (s: Record<string, unknown>) => T): T =>
+    selector({
+      selectedGuild,
+      channelListView: "active",
+      setChannelListView: () => {},
+      collapsedFolderIds: [],
+      setCollapsedFolders: () => {},
+      groupCollapseOverrides: {},
+      setGroupCollapsed,
+      sidebarWidth: 256,
+      setSidebarWidth: () => {},
+      sidebarCollapsed,
+    }),
+  SIDEBAR_WIDTH_DEFAULT: 256,
+  SIDEBAR_WIDTH_MIN: 220,
+  SIDEBAR_WIDTH_MAX: 420,
+}))
+
+// Behavior settings default to today's behavior (comfortable, date grouping on,
+// unread badges on, title-only search) so existing assertions hold. Individual
+// tests can override `conversationSidebar` to exercise the settings-driven paths.
+let conversationSidebar: Record<string, unknown> | null = null
+const saveSettings = jest.fn()
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: <T,>(selector: (s: { settings: unknown; save: typeof saveSettings }) => T): T =>
+    selector({
+      settings: conversationSidebar ? { conversationSidebar } : null,
+      save: saveSettings,
+    }),
+}))
+
+const useChatHistorySearch = jest.fn()
+let historySearchState = {
+  results: [] as Array<{ sessionId: string }>,
+  moreOlderHistory: false,
+  indexIncomplete: false,
+  loading: false,
+  error: null as Error | null,
+}
+jest.mock("@/hooks/chat/use-chat-history-search", () => ({
+  useChatHistorySearch: (...args: unknown[]) => useChatHistorySearch(...args),
 }))
 
 let isNarrow = false
@@ -45,6 +147,9 @@ jest.mock("@/hooks/ui", () => {
 })
 
 import { ChannelList } from "./channel-list"
+import { useProjectStore } from "@/stores/project/project-store"
+import type { Project } from "@/types"
+import { sortableKeyboardCoordinates } from "@dnd-kit/sortable"
 
 const characters: Character[] = [
   { id: "c-1", name: "Alice", createdAt: 0, updatedAt: 0 } as unknown as Character,
@@ -75,14 +180,49 @@ const teamSession: ChatSession = {
   updatedAt: 0,
 } as unknown as ChatSession
 
+function baseSession(id: string, overrides: Partial<ChatSession> = {}): ChatSession {
+  return {
+    id,
+    title: id,
+    kind: "direct",
+    createdAt: 0,
+    updatedAt: 0,
+    ...overrides,
+  } as unknown as ChatSession
+}
+
 beforeEach(() => {
   logInfo.mockReset()
+  logWarn.mockReset()
+  mockDragEnd = undefined
+  mockDragOver = undefined
+  mockDragCancel = undefined
+  mockSensorOptions.length = 0
+  mockSortableItems.length = 0
+  mockDroppableNodes.clear()
   callQueue.length = 0
   selectedGuild = { kind: "dm" }
   isNarrow = false
+  sidebarCollapsed = false
+  conversationSidebar = null
+  setGroupCollapsed.mockReset()
+  saveSettings.mockReset()
+  saveSettings.mockResolvedValue(undefined)
+  historySearchState = {
+    results: [],
+    moreOlderHistory: false,
+    indexIncomplete: false,
+    loading: false,
+    error: null,
+  }
+  useChatHistorySearch.mockReset()
+  useChatHistorySearch.mockImplementation(() => historySearchState)
 })
 
-test("DM guild renders only direct sessions grouped by character", () => {
+test("DM guild renders only direct sessions, grouped into date buckets", () => {
+  // The rail's DM/Team split is the `"team"` grouping mode; the default
+  // (`"workspace"`) deliberately stops filtering by guild.
+  conversationSidebar = { groupBy: "team" }
   // queries: characters, sessionStates (none), team (none)
   callQueue.push(characters, [], undefined)
   render(
@@ -99,9 +239,535 @@ test("DM guild renders only direct sessions grouped by character", () => {
   expect(screen.getByText("directMessages")).toBeInTheDocument()
   expect(screen.getByText("Hi Alice")).toBeInTheDocument()
   expect(screen.queryByText("Squad meeting")).toBeNull()
+  // updatedAt: 0 (epoch) → "Older" date-bucket header (no character grouping).
+  expect(screen.getByText("bucketOlder")).toBeInTheDocument()
+})
+
+test("persists a drag-end reorder for the section that contains both conversations", () => {
+  conversationSidebar = { groupBy: "date" }
+  callQueue.push(characters, [], undefined)
+  const onReorderSessions = jest.fn()
+  const now = Date.now()
+
+  render(
+    <ChannelList
+      sessions={[
+        baseSession("first", { updatedAt: now }),
+        baseSession("second", { updatedAt: now - 1 }),
+      ]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+      onReorderSessions={onReorderSessions}
+    />
+  )
+
+  act(() => {
+    mockDragEnd?.({
+      active: { id: "second", data: { current: { type: "session", folderId: null } } },
+      over: { id: "first", data: { current: { type: "session", folderId: null } } },
+    })
+  })
+
+  expect(onReorderSessions).toHaveBeenCalledWith(["second", "first"], "date:today")
+})
+
+test("previews the pending insertion edge and clears it when the drag is cancelled", () => {
+  conversationSidebar = { groupBy: "date" }
+  callQueue.push(characters, [], undefined)
+  const now = Date.now()
+
+  const { container } = render(
+    <ChannelList
+      sessions={[
+        baseSession("first", { updatedAt: now }),
+        baseSession("second", { updatedAt: now - 1 }),
+      ]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+
+  act(() => {
+    mockDragOver?.({
+      active: { id: "second" },
+      over: { id: "first" },
+    })
+  })
+  expect(container.querySelector('[data-drop-position="before"]')).toBeInTheDocument()
+
+  act(() => mockDragCancel?.())
+  expect(container.querySelector("[data-drop-position]")).toBeNull()
+})
+
+test("registers each rendered conversation section as its own sortable list", () => {
+  conversationSidebar = { groupBy: "date" }
+  callQueue.push(characters, [], undefined)
+  const now = Date.now()
+
+  render(
+    <ChannelList
+      sessions={[
+        baseSession("pinned", { pinned: true, updatedAt: now }),
+        baseSession("first", { updatedAt: now - 1 }),
+        baseSession("second", { updatedAt: now - 2 }),
+      ]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+
+  expect(mockSortableItems).toContainEqual(["pinned"])
+  expect(mockSortableItems).toContainEqual(["first", "second"])
+  expect(mockSortableItems).not.toContainEqual(["pinned", "first", "second"])
+})
+
+test("configures the keyboard sensor with sortable coordinates", () => {
+  conversationSidebar = { groupBy: "date" }
+  callQueue.push(characters, [], undefined)
+
+  render(
+    <ChannelList
+      sessions={[dmSession]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+
+  expect(mockSensorOptions).toContainEqual({
+    coordinateGetter: sortableKeyboardCoordinates,
+  })
+})
+
+test("constrains long session titles to the history rail width", () => {
+  conversationSidebar = { groupBy: "team" }
+  callQueue.push(characters, [], undefined)
+  const longTitle =
+    "lark:cai_mrkkmfi6_r07xcp:oc_5a1f_really_long_conversation_identifier_without_breaks"
+
+  const { container } = render(
+    <ChannelList
+      sessions={[{ ...dmSession, title: longTitle }]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+
+  expect(screen.getByText(longTitle)).toHaveClass("truncate")
+  expect(container.querySelector('[data-slot="scroll-area"]')?.className).toContain(
+    "[&_[data-slot=scroll-area-viewport]>div]:!block"
+  )
+  expect(container.querySelector('[data-slot="scroll-area"]')?.className).toContain(
+    "[&_[data-slot=scroll-area-scrollbar]]:hidden"
+  )
+})
+
+test("desktop history rail opts into the chat wallpaper with sidebar tonality", () => {
+  callQueue.push(characters, [], undefined)
+  const { container } = render(
+    <ChannelList
+      sessions={[dmSession]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+
+  const rail = container.querySelector("aside")
+  expect(rail).toHaveAttribute("data-bg-target", "chat")
+  expect(rail).toHaveAttribute("data-slot", "sidebar-inner")
+  expect(container.querySelector("[data-tonality='translucent']")).toBeInTheDocument()
+})
+
+test("narrow history sheet uses the same chat wallpaper surface", async () => {
+  isNarrow = true
+  callQueue.push(characters, [], undefined)
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[dmSession]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+
+  await user.click(screen.getByLabelText("openSessions"))
+  const dialog = await screen.findByRole("dialog", { name: "conversationsTitle" })
+  expect(dialog).toHaveClass("bg-transparent")
+  const surface = dialog.querySelector('[data-slot="sidebar-inner"]')
+  expect(surface).toHaveAttribute("data-bg-target", "chat")
+})
+
+test("embedded resource workbench sessions stay out of the ordinary conversation list", () => {
+  const embedded = baseSession("embedded", {
+    title: "Canvas assistant",
+    kind: "resource-workbench",
+    visibility: "embedded",
+  })
+  callQueue.push(characters, [], undefined)
+
+  render(
+    <ChannelList
+      sessions={[dmSession, embedded]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+
+  expect(screen.getByText("Hi Alice")).toBeInTheDocument()
+  expect(screen.queryByText("Canvas assistant")).toBeNull()
+})
+
+describe("collapse (width animation)", () => {
+  const rail = () => (
+    <ChannelList
+      sessions={[dmSession]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+
+  test("expanded rail keeps the resize handle and is not inert", () => {
+    callQueue.push(characters, [], undefined)
+    const { container } = render(rail())
+    const aside = container.querySelector("aside")
+    expect(aside).not.toHaveAttribute("data-collapsed")
+    expect(aside).not.toHaveAttribute("inert")
+    expect(screen.getByLabelText("resizeHandle")).toBeInTheDocument()
+  })
+
+  test("collapsed rail goes inert and drops the resize handle (no leftover column)", () => {
+    sidebarCollapsed = true
+    callQueue.push(characters, [], undefined)
+    const { container } = render(rail())
+    const aside = container.querySelector("aside")
+    // Fully collapsed: marked, inert (not focusable), aria-hidden, and the
+    // resize handle is gone — the column reclaims its space, no leftover strip.
+    expect(aside).toHaveAttribute("data-collapsed")
+    expect(aside).toHaveAttribute("inert")
+    expect(aside).toHaveAttribute("aria-hidden", "true")
+    expect(screen.queryByLabelText("resizeHandle")).toBeNull()
+  })
+
+  test("toggling collapse turns on the width transition, then clears it", async () => {
+    callQueue.push(characters, [], undefined)
+    const { container, rerender } = render(rail())
+    // Idle (no collapse change yet) → no transition, so drag-resize stays snappy.
+    expect(container.querySelector("aside")).not.toHaveClass("transition-[width]")
+    // Flip collapsed + re-render: the mount-vs-now diff enables the transition
+    // for the collapse/expand animation.
+    sidebarCollapsed = true
+    callQueue.push(characters, [], undefined)
+    rerender(rail())
+    expect(container.querySelector("aside")).toHaveClass("transition-[width]")
+    // The transition is transient — it clears after the animation window so a
+    // subsequent drag-resize isn't animated.
+    await waitFor(() =>
+      expect(container.querySelector("aside")).not.toHaveClass("transition-[width]")
+    )
+  })
+})
+
+test("typing in the search box filters to a flat result list", async () => {
+  const dmMatch = {
+    ...dmSession,
+    id: "s-match",
+    title: "Trip budget",
+  } as ChatSession
+  const dmMiss = {
+    ...dmSession,
+    id: "s-miss",
+    title: "Grocery list",
+  } as ChatSession
+  callQueue.push(characters, [], undefined)
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[dmMatch, dmMiss]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+  await user.type(screen.getByLabelText("searchAria"), "trip")
+  // Matching row stays, non-matching row drops (after the 150ms debounce), and
+  // the date-bucket header is replaced by the flat search list.
+  await waitFor(() => expect(screen.queryByText("Grocery list")).toBeNull())
+  expect(screen.getByText("Trip budget")).toBeInTheDocument()
+  expect(screen.queryByText("bucketOlder")).toBeNull()
+})
+
+test("a search that matches nothing shows the empty-search state", async () => {
+  callQueue.push(characters, [], undefined)
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[dmSession]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+  await user.type(screen.getByLabelText("searchAria"), "zzz")
+  // The mocked translator echoes `key:{vars}` for parameterized messages.
+  expect(await screen.findByText(/emptySearch/)).toBeInTheDocument()
+  expect(screen.queryByText("Hi Alice")).toBeNull()
+})
+
+test("the clear button resets the search and restores the list", async () => {
+  callQueue.push(characters, [], undefined)
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[dmSession]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+  await user.type(screen.getByLabelText("searchAria"), "zzz")
+  expect(await screen.findByText(/emptySearch/)).toBeInTheDocument()
+  await user.click(screen.getByLabelText("clearSearch"))
+  expect(await screen.findByText("Hi Alice")).toBeInTheDocument()
+})
+
+test("Escape clears an active search and restores the grouped list", async () => {
+  callQueue.push(characters, [], undefined)
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[dmSession]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+
+  const search = screen.getByLabelText("searchAria")
+  expect(screen.getByText("/")).toBeInTheDocument()
+  await user.type(search, "zzz")
+  expect(screen.queryByText("/")).toBeNull()
+  expect(await screen.findByText(/emptySearch/)).toBeInTheDocument()
+  await user.keyboard("{Escape}")
+
+  expect(search).toHaveValue("")
+  expect(screen.getByText("/")).toBeInTheDocument()
+  expect(await screen.findByText("Hi Alice")).toBeInTheDocument()
+})
+
+test.each([
+  {
+    label: "compactDensity",
+    initial: { showPreview: true, density: "comfortable" },
+    expected: { showPreview: true, density: "compact" },
+  },
+  {
+    label: "compactDensity",
+    initial: { density: "compact" },
+    expected: { density: "comfortable" },
+  },
+  {
+    label: "showPreview",
+    initial: { showPreview: false },
+    expected: { showPreview: true },
+  },
+  {
+    label: "showUnreadBadges",
+    initial: { showUnreadBadges: true },
+    expected: { showUnreadBadges: false },
+  },
+  {
+    label: "searchMessageContent",
+    initial: { searchScope: "title" },
+    expected: { searchScope: "titleAndContent" },
+  },
+  {
+    label: "searchMessageContent",
+    initial: { searchScope: "titleAndContent" },
+    expected: { searchScope: "title" },
+  },
+])("display option $label persists its preference without dropping siblings", async (testCase) => {
+  conversationSidebar = testCase.initial
+  callQueue.push(characters, [], undefined)
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[dmSession]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+
+  await user.click(screen.getByRole("button", { name: "displayOptions" }))
+  await user.click(await screen.findByRole("menuitemcheckbox", { name: testCase.label }))
+
+  expect(saveSettings).toHaveBeenCalledWith({ conversationSidebar: testCase.expected })
+})
+
+test("rapid display-option changes merge against the latest optimistic settings", async () => {
+  conversationSidebar = { density: "comfortable", showPreview: false }
+  callQueue.push(characters, [], undefined)
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[dmSession]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+
+  await user.click(screen.getByRole("button", { name: "displayOptions" }))
+  await user.click(await screen.findByRole("menuitemcheckbox", { name: "compactDensity" }))
+  await user.click(screen.getByRole("button", { name: "displayOptions" }))
+  await user.click(await screen.findByRole("menuitemcheckbox", { name: "showPreview" }))
+
+  expect(saveSettings).toHaveBeenLastCalledWith({
+    conversationSidebar: { density: "compact", showPreview: true },
+  })
+})
+
+test("an intermediate store write cannot roll back later optimistic display changes", async () => {
+  conversationSidebar = { density: "comfortable", showPreview: false, groupBy: "date" }
+  let resolveFirst!: () => void
+  let resolveSecond!: () => void
+  saveSettings
+    .mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveFirst = resolve
+        })
+    )
+    .mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSecond = resolve
+        })
+    )
+    .mockResolvedValueOnce(undefined)
+  callQueue.push(characters, [], undefined)
+  const user = userEvent.setup()
+  const renderList = () => (
+    <ChannelList
+      sessions={[dmSession]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+  const { rerender } = render(renderList())
+
+  await user.click(screen.getByRole("button", { name: "displayOptions" }))
+  await user.click(await screen.findByRole("menuitemcheckbox", { name: "compactDensity" }))
+  await user.click(screen.getByRole("button", { name: "displayOptions" }))
+  await user.click(await screen.findByRole("menuitemcheckbox", { name: "showPreview" }))
+
+  // Simulate save A reaching the store while save B is still pending.
+  conversationSidebar = { density: "compact", showPreview: false, groupBy: "date" }
+  callQueue.push(characters, [], undefined)
+  rerender(renderList())
+  await user.click(screen.getByRole("button", { name: "displayOptions" }))
+  await user.click(await screen.findByRole("menuitemradio", { name: "groupBy.options.none" }))
+
+  resolveFirst()
+  await waitFor(() => expect(saveSettings.mock.calls.length).toBeGreaterThanOrEqual(2))
+  resolveSecond()
+  await waitFor(() => expect(saveSettings.mock.calls.length).toBeGreaterThanOrEqual(3))
+  expect(saveSettings).toHaveBeenLastCalledWith({
+    conversationSidebar: { density: "compact", showPreview: true, groupBy: "none" },
+  })
+})
+
+test("a failed display-option save does not block the next queued change", async () => {
+  conversationSidebar = { density: "comfortable", showPreview: false }
+  saveSettings.mockRejectedValueOnce(new Error("disk full")).mockResolvedValueOnce(undefined)
+  callQueue.push(characters, [], undefined)
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[dmSession]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+    />
+  )
+
+  await user.click(screen.getByRole("button", { name: "displayOptions" }))
+  await user.click(await screen.findByRole("menuitemcheckbox", { name: "compactDensity" }))
+  await user.click(screen.getByRole("button", { name: "displayOptions" }))
+  await user.click(await screen.findByRole("menuitemcheckbox", { name: "showPreview" }))
+
+  await waitFor(() => expect(saveSettings).toHaveBeenCalledTimes(2))
+  expect(logWarn).toHaveBeenCalledWith(
+    "channel-list display settings save failed",
+    expect.objectContaining({ error: "Error: disk full" })
+  )
+  expect(saveSettings).toHaveBeenLastCalledWith({
+    conversationSidebar: { density: "compact", showPreview: true },
+  })
 })
 
 test("Team guild renders only that team's sessions", () => {
+  conversationSidebar = { groupBy: "team" }
   selectedGuild = { kind: "team", teamId: "t-1" }
   callQueue.push(characters, [], team)
   render(
@@ -118,6 +784,99 @@ test("Team guild renders only that team's sessions", () => {
   expect(screen.getByText("Squad")).toBeInTheDocument()
   expect(screen.getByText("Squad meeting")).toBeInTheDocument()
   expect(screen.queryByText("Hi Alice")).toBeNull()
+})
+
+describe("workspace grouping (the default axis)", () => {
+  // Only `id` and `name` are read by the grouping path.
+  const projects = [
+    { id: "w1", name: "Alpha" },
+    { id: "w2", name: "Beta" },
+  ] as unknown as Project[]
+
+  const workspaceSessions = [
+    baseSession("here", { projectId: "w1", title: "Here" }),
+    baseSession("there", { projectId: "w2", title: "There" }),
+    baseSession("nowhere", { title: "Nowhere" }),
+  ]
+
+  beforeEach(() => {
+    useProjectStore.setState({ projects, activeProjectId: "w1", loaded: true })
+  })
+
+  afterEach(() => {
+    useProjectStore.setState({ projects: [], activeProjectId: null, loaded: false })
+  })
+
+  it("shows the active workspace expanded and the others folded", () => {
+    callQueue.push(characters, [], undefined)
+    render(
+      <ChannelList
+        sessions={workspaceSessions}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    // Headers for both workspaces plus the ungrouped bucket.
+    expect(screen.getByRole("button", { name: "Alpha" })).toHaveAttribute("aria-expanded", "true")
+    expect(screen.getByRole("button", { name: "Beta" })).toHaveAttribute("aria-expanded", "false")
+    expect(screen.getByRole("button", { name: "ungroupedWorkspace" })).toBeInTheDocument()
+    // Only the expanded sections render rows.
+    expect(screen.getByText("Here")).toBeInTheDocument()
+    expect(screen.queryByText("There")).toBeNull()
+    expect(screen.getByText("Nowhere")).toBeInTheDocument()
+    expect(screen.getByText("Here").closest('[data-slot="collapsible-content"]')).toHaveClass(
+      "data-[state=open]:animate-collapsible-down",
+      "motion-reduce:animate-none"
+    )
+  })
+
+  it("toggling a workspace header records an explicit collapse choice", async () => {
+    callQueue.push(characters, [], undefined)
+    const user = userEvent.setup()
+    render(
+      <ChannelList
+        sessions={workspaceSessions}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    await user.click(screen.getByRole("button", { name: "Beta" }))
+    expect(setGroupCollapsed).toHaveBeenCalledWith("workspace:w2", false)
+    await user.click(screen.getByRole("button", { name: "Alpha" }))
+    expect(setGroupCollapsed).toHaveBeenCalledWith("workspace:w1", true)
+  })
+
+  it("labels an agent group by its character and the leftovers generically", () => {
+    conversationSidebar = { groupBy: "agent" }
+    callQueue.push(characters, [], undefined)
+    render(
+      <ChannelList
+        sessions={[
+          baseSession("bound", { characterId: "c-1", title: "Bound" }),
+          baseSession("loose", { title: "Loose" }),
+        ]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    expect(screen.getByRole("button", { name: "Alice" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "ungroupedAgent" })).toBeInTheDocument()
+    // Agent groups have no auto-collapse rule — both render their rows.
+    expect(screen.getByText("Bound")).toBeInTheDocument()
+    expect(screen.getByText("Loose")).toBeInTheDocument()
+  })
 })
 
 test("Empty DM bucket shows the DM empty state", () => {
@@ -348,6 +1107,60 @@ describe("multi-select gestures", () => {
     expect(onBulkSetPinned.mock.calls[0][1]).toBe(true)
   })
 
+  test("bulk Share opens the selected conversations in visible order", async () => {
+    callQueue.push(characters, [], undefined)
+    const user = userEvent.setup()
+    render(
+      <ChannelList
+        sessions={[dmA, dmB, dmC]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    await user.keyboard("{Control>}")
+    await user.click(screen.getByRole("button", { name: /Alpha/ }))
+    await user.click(screen.getByRole("button", { name: /Bravo/ }))
+    await user.keyboard("{/Control}")
+
+    await user.click(screen.getByRole("button", { name: "share" }))
+
+    const dialog = await screen.findByRole("dialog")
+    const summary = within(dialog).getByLabelText('summary:{"count":2}')
+    expect(
+      within(summary)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent)
+    ).toEqual(["Alpha", "Bravo"])
+
+    await user.click(within(dialog).getByRole("button", { name: /close/i }))
+    expect(screen.queryByRole("toolbar")).toBeNull()
+  })
+
+  test("row action menu starts selection without a keyboard modifier", async () => {
+    callQueue.push(characters, [], undefined)
+    const user = userEvent.setup()
+    render(
+      <ChannelList
+        sessions={[dmA, dmB]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+
+    await user.click(screen.getAllByRole("button", { name: "actionsMenu" })[0])
+    await user.click(await screen.findByText("select"))
+
+    expect(await screen.findByRole("toolbar")).toHaveTextContent('selectedCount:{"count":1}')
+  })
+
   test("Escape clears the active multi-selection", async () => {
     callQueue.push(characters, [], undefined)
     const user = userEvent.setup()
@@ -396,6 +1209,278 @@ describe("multi-select gestures", () => {
     expect(buttons[0].textContent).toMatch(/Bravo/)
     expect(buttons[1].textContent).toMatch(/Alpha/)
     expect(buttons[2].textContent).toMatch(/Charlie/)
+  })
+})
+
+test("archive view toggle switches between active and archived sessions", async () => {
+  const activeS = baseSession("act", { title: "Active one", updatedAt: 100 })
+  const archivedS = baseSession("arc", { title: "Archived one", archivedAt: 50, updatedAt: 90 })
+  // characters, sessionStates, team — consumed twice (toggle re-renders reuse memo).
+  callQueue.push(characters, [], undefined)
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[activeS, archivedS]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+      onArchive={jest.fn()}
+      onUnarchive={jest.fn()}
+    />
+  )
+  // Active view: only the non-archived session shows.
+  expect(screen.getByText("Active one")).toBeInTheDocument()
+  expect(screen.queryByText("Archived one")).toBeNull()
+  // Toggle into the archived view.
+  await user.click(screen.getByRole("button", { name: "viewArchived" }))
+  expect(await screen.findByText("Archived one")).toBeInTheDocument()
+  expect(screen.queryByText("Active one")).toBeNull()
+})
+
+test("an empty archived view shows the archived empty state", async () => {
+  callQueue.push(characters, [], undefined)
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[baseSession("act", { title: "Active one" })]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+      onArchive={jest.fn()}
+      onUnarchive={jest.fn()}
+    />
+  )
+  await user.click(screen.getByRole("button", { name: "viewArchived" }))
+  expect(await screen.findByText("emptyArchived")).toBeInTheDocument()
+})
+
+test("per-row Archive action fires onArchive", async () => {
+  callQueue.push(characters, [], undefined)
+  const onArchive = jest.fn()
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[baseSession("act", { title: "Active one" })]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+      onArchive={onArchive}
+      onUnarchive={jest.fn()}
+    />
+  )
+  await user.click(screen.getByRole("button", { name: "actionsMenu" }))
+  await user.click(await screen.findByText("archive"))
+  expect(onArchive).toHaveBeenCalledWith("act")
+})
+
+const workFolder = {
+  id: "f1",
+  name: "Work",
+  projectId: "p",
+  order: 0,
+  createdAt: 0,
+  updatedAt: 0,
+} as never
+
+test("renders a collapsible folder section for foldered sessions", async () => {
+  callQueue.push(characters, [], undefined)
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[baseSession("in-folder", { title: "Inside work", folderId: "f1" })]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+      folders={[workFolder]}
+      onAssignToFolder={jest.fn()}
+    />
+  )
+  // The folder header renders and its member shows under it.
+  expect(screen.getAllByText("Work").length).toBeGreaterThan(0)
+  expect(screen.getByText("Inside work")).toBeInTheDocument()
+  // Collapsing the folder hides its rows.
+  await user.click(screen.getByRole("button", { name: "Work" }))
+  expect(screen.queryByText("Inside work")).toBeNull()
+})
+
+test("limits a folder drop target to its header so child rows remain sortable targets", () => {
+  callQueue.push(characters, [], undefined)
+  render(
+    <ChannelList
+      sessions={[baseSession("in-folder", { title: "Inside work", folderId: "f1" })]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+      folders={[workFolder]}
+      onAssignToFolder={jest.fn()}
+    />
+  )
+
+  const folderDropTarget = mockDroppableNodes.get("folder:f1")
+  expect(folderDropTarget).toBeInstanceOf(HTMLElement)
+  expect(folderDropTarget).not.toContainElement(screen.getByText("Inside work"))
+})
+
+test("New folder button invokes onCreateFolder", async () => {
+  callQueue.push(characters, [], undefined)
+  const onCreateFolder = jest.fn()
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[baseSession("a", { title: "A" })]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+      folders={[]}
+      onCreateFolder={onCreateFolder}
+    />
+  )
+  await user.click(screen.getByRole("button", { name: "newFolder" }))
+  expect(onCreateFolder).toHaveBeenCalledWith("newFolderName")
+})
+
+test("folder header menu deletes the folder after confirmation", async () => {
+  callQueue.push(characters, [], undefined)
+  const onDeleteFolder = jest.fn()
+  const user = userEvent.setup()
+  render(
+    <ChannelList
+      sessions={[baseSession("in-folder", { title: "Inside", folderId: "f1" })]}
+      activeSessionId={null}
+      onSelect={jest.fn()}
+      onNewDirect={jest.fn()}
+      onNewTeamConversation={jest.fn()}
+      onDelete={jest.fn()}
+      onRename={jest.fn()}
+      folders={[workFolder]}
+      onAssignToFolder={jest.fn()}
+      onDeleteFolder={onDeleteFolder}
+    />
+  )
+  await user.click(screen.getByRole("button", { name: "folderActions" }))
+  await user.click(await screen.findByText("deleteFolder"))
+  const dialog = await screen.findByRole("alertdialog")
+  const confirm = Array.from(dialog.querySelectorAll("button")).find(
+    (b) => b.textContent?.trim() === "deleteFolder"
+  )
+  if (!confirm) throw new Error("expected destructive confirm button")
+  await user.click(confirm)
+  expect(onDeleteFolder).toHaveBeenCalledWith("f1")
+})
+
+describe("interaction upgrades", () => {
+  const dmA = baseSession("s-a", { title: "Alpha", updatedAt: 30 })
+  const dmB = baseSession("s-b", { title: "Bravo", updatedAt: 20 })
+
+  test("renders a keyboard-accessible resize separator with width bounds", () => {
+    callQueue.push(characters, [], undefined)
+    render(
+      <ChannelList
+        sessions={[dmA]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    const handle = screen.getByRole("separator", { name: "resizeHandle" })
+    expect(handle).toHaveAttribute("aria-valuenow", "256")
+    expect(handle).toHaveAttribute("aria-valuemin", "220")
+    expect(handle).toHaveAttribute("aria-valuemax", "420")
+  })
+
+  test("arrow-down focuses a row and Enter opens it", async () => {
+    callQueue.push(characters, [], undefined)
+    const onSelect = jest.fn()
+    const user = userEvent.setup()
+    const { container } = render(
+      <ChannelList
+        sessions={[dmA, dmB]}
+        activeSessionId={null}
+        onSelect={onSelect}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    const list = container.querySelector('[tabindex="0"]') as HTMLElement
+    list.focus()
+    await user.keyboard("{ArrowDown}")
+    expect(container.querySelector("li[data-focused]")).toBeInTheDocument()
+    await user.keyboard("{Enter}")
+    expect(onSelect).toHaveBeenCalledWith("s-a")
+  })
+
+  test("the slash key focuses the search box", async () => {
+    callQueue.push(characters, [], undefined)
+    const user = userEvent.setup()
+    const { container } = render(
+      <ChannelList
+        sessions={[dmA]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    const list = container.querySelector('[tabindex="0"]') as HTMLElement
+    list.focus()
+    await user.keyboard("/")
+    expect(screen.getByLabelText("searchAria")).toHaveFocus()
+  })
+
+  test("content-scope search surfaces sessions matched only by message body", async () => {
+    conversationSidebar = { searchScope: "titleAndContent" }
+    historySearchState = {
+      ...historySearchState,
+      results: [{ sessionId: "s-b" }],
+    }
+    callQueue.push(characters, [], undefined)
+    const user = userEvent.setup()
+    render(
+      <ChannelList
+        sessions={[dmA, dmB]}
+        activeSessionId={null}
+        onSelect={jest.fn()}
+        onNewDirect={jest.fn()}
+        onNewTeamConversation={jest.fn()}
+        onDelete={jest.fn()}
+        onRename={jest.fn()}
+      />
+    )
+    // "zzz" matches no title; only the content-search set contains s-b (Bravo).
+    await user.type(screen.getByLabelText("searchAria"), "zzz")
+    await waitFor(() =>
+      expect(useChatHistorySearch).toHaveBeenLastCalledWith(
+        "zzz",
+        expect.objectContaining({ collapseBySession: true })
+      )
+    )
+    expect(await screen.findByText("Bravo")).toBeInTheDocument()
+    expect(screen.queryByText("Alpha")).toBeNull()
   })
 })
 

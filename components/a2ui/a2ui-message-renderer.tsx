@@ -215,7 +215,17 @@ export function useA2UIMessageIntegration(options?: {
     if (typeof payload === "string") {
       return detectA2UIContent(payload)
     }
-    return parseA2UIInput(payload).messages.length > 0
+    // Cheap marker scan over the serialized payload instead of a full
+    // parseA2UIInput run just to answer a boolean
+    if (payload === null || typeof payload !== "object") {
+      return false
+    }
+    try {
+      const serialized = JSON.stringify(payload)
+      return serialized ? detectA2UIContent(serialized) : false
+    } catch {
+      return false
+    }
   }, [])
 
   return {

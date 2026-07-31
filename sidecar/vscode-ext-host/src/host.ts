@@ -20,13 +20,7 @@
  */
 
 import { ErrorCode, RpcConnection, type RpcError } from "./rpc"
-import {
-  installRequireHook,
-  setExtensionResolver,
-  setPermissionGate,
-  type PermissionGate,
-  type PermissionGateDecision,
-} from "./require-hook"
+import { installRequireHook, setExtensionResolver, setGrantedModules } from "./require-hook"
 import {
   activateExtension,
   deactivateExtension,
@@ -42,10 +36,12 @@ interface LoadRequest {
   extensionPath: string
   main: string
   bundleFormat: "cjs" | "esm" | "mixed"
+  grantedModules: string[]
 }
 
 interface ActivateRequest {
   extensionId: string
+  extensionPath: string
   globalStorageUri: string
   storageUri: string
   logUri: string
@@ -95,27 +91,17 @@ function ensureLspService(): import("./lsp-service").LspService {
   return lspService
 }
 
-// Wire the permission gate to the host: every sensitive require triggers
-// an RPC back to the renderer, which surfaces cognia's permission prompt.
-const gate: PermissionGate = {
-  async check(extensionId, moduleName): Promise<PermissionGateDecision> {
-    try {
-      const decision = await connection.sendRequest<"allow" | "deny">("permission:request", {
-        extensionId,
-        moduleName,
-      })
-      return decision
-    } catch (err) {
-      process.stderr.write(
-        `[vscode-ext-host] permission gate RPC failed: ${
-          err instanceof Error ? err.message : String(err)
-        }\n`
-      )
-      return "deny"
-    }
-  },
+let protocolService: import("./protocol-process-service").ProtocolProcessService | null = null
+function ensureProtocolService(): import("./protocol-process-service").ProtocolProcessService {
+  if (protocolService) return protocolService
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { ProtocolProcessService } =
+    require("./protocol-process-service") as typeof import("./protocol-process-service")
+  protocolService = new ProtocolProcessService((method, params) => {
+    connection.sendNotification(method, params)
+  })
+  return protocolService
 }
-setPermissionGate(gate)
 
 // Map a require() call back to an extension by walking `parent.cogniaExtensionId`.
 setExtensionResolver((parent) => {
@@ -154,6 +140,7 @@ function registerProviderCallback(
 
 connection.onRequest("extension:load", async (params) => {
   const req = params as LoadRequest
+  setGrantedModules(req.extensionId, req.grantedModules ?? [])
   await loadExtension({
     extensionId: req.extensionId,
     extensionPath: req.extensionPath,
@@ -250,8 +237,75 @@ connection.onRequest("lsp:request", async (params) => {
   )
 })
 
+connection.onRequest("lsp:cancel", async (params) => {
+  const input = params as { ownerId: string; serverId: string; requestId: string }
+  return { cancelled: ensureLspService().cancel(input.ownerId, input.serverId, input.requestId) }
+})
+
+connection.onRequest("lsp:serverResponse", async (params) => {
+  return ensureLspService().serverResponse(
+    params as Parameters<import("./lsp-service").LspService["serverResponse"]>[0]
+  )
+})
+
+connection.onRequest("lsp:clientNotification", async (params) => {
+  return ensureLspService().clientNotification(
+    params as Parameters<import("./lsp-service").LspService["clientNotification"]>[0]
+  )
+})
+
 connection.onRequest("lsp:list", async () => {
   return ensureLspService().list()
+})
+
+connection.onRequest("lsp:status", async () => {
+  return ensureLspService().status()
+})
+
+connection.onRequest("lsp:logs", async (params) => {
+  return ensureLspService().logs(
+    (params ?? {}) as Parameters<import("./lsp-service").LspService["logs"]>[0]
+  )
+})
+
+connection.onRequest("lsp:detect", async (params) => {
+  return ensureLspService().detect(
+    params as Parameters<import("./lsp-service").LspService["detect"]>[0]
+  )
+})
+
+connection.onRequest("lsp:install", async (params) => {
+  return ensureLspService().install(
+    params as Parameters<import("./lsp-service").LspService["install"]>[0]
+  )
+})
+
+connection.onRequest("protocol:start", async (params) => {
+  return ensureProtocolService().start(
+    params as Parameters<import("./protocol-process-service").ProtocolProcessService["start"]>[0]
+  )
+})
+
+connection.onRequest("protocol:request", async (params) => {
+  return ensureProtocolService().request(
+    params as Parameters<import("./protocol-process-service").ProtocolProcessService["request"]>[0]
+  )
+})
+
+connection.onRequest("protocol:cancel", async (params) => {
+  const input = params as { ownerId: string; serverId: string; requestId: string }
+  return {
+    cancelled: ensureProtocolService().cancel(input.ownerId, input.serverId, input.requestId),
+  }
+})
+
+connection.onRequest("protocol:stop", async (params) => {
+  const input = params as { ownerId: string; serverId: string }
+  return ensureProtocolService().stop(input.ownerId, input.serverId)
+})
+
+connection.onRequest("protocol:status", async () => {
+  return ensureProtocolService().status()
 })
 
 // ────────────────────────────────────────────────────────────────────────
@@ -261,7 +315,7 @@ connection.onRequest("lsp:list", async () => {
 function buildContext(req: ActivateRequest): SidecarExtensionContext {
   const globalState = makeKvStore(req.initialGlobalState)
   const workspaceState = makeKvStore(req.initialWorkspaceState)
-  const extensionPath = req.extensionId
+  const extensionPath = req.extensionPath
   return {
     subscriptions: [] as Disposable[],
     globalState,
@@ -407,6 +461,9 @@ process.on("SIGTERM", () => {
   // processes don't outlive the sidecar.
   if (lspService) {
     void lspService.stopAll()
+  }
+  if (protocolService) {
+    void protocolService.stopAll()
   }
   process.exit(0)
 })

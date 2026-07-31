@@ -1,0 +1,13 @@
+{
+  "emptySection": "此分区暂无内容。",
+  "error": "市场错误：{message}",
+  "install": "安装",
+  "installing": "安装中…",
+  "loading": "正在加载市场…",
+  "searchPlaceholder": "在市场中搜索…",
+  "section": {
+    "featured": "精选",
+    "popular": "热门",
+    "recent": "最近上架"
+  }
+}

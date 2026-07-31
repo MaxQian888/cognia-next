@@ -28,10 +28,7 @@ use dialoguer::{Confirm, Input, MultiSelect, Select};
 ///   stdin closed mid-prompt, EOF, terminal lost).
 #[derive(Debug)]
 pub enum PromptError {
-    Noninteractive {
-        prompt: String,
-        flag_hint: String,
-    },
+    Noninteractive { prompt: String, flag_hint: String },
     Io(std::io::Error),
 }
 
@@ -67,7 +64,10 @@ impl From<dialoguer::Error> for PromptError {
         // dialoguer wraps its own variants but is conceptually an I/O
         // failure (stdin closed, terminal lost, etc.) — collapse it
         // to `Io` so the chain renders one helpful line.
-        PromptError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+        PromptError::Io(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            e.to_string(),
+        ))
     }
 }
 
@@ -172,8 +172,7 @@ impl Prompter for DialoguerPrompter {
         default: Option<&str>,
         _flag_hint: &str,
     ) -> Result<String, PromptError> {
-        let mut builder: Input<String> =
-            Input::with_theme(&self.theme).with_prompt(message);
+        let mut builder: Input<String> = Input::with_theme(&self.theme).with_prompt(message);
         if let Some(d) = default {
             builder = builder.default(d.to_string());
         }
@@ -456,7 +455,10 @@ mod tests {
         ]);
         assert!(p.confirm("ok?", false, "--yes").unwrap());
         assert_eq!(p.input("name?", None, "--name").unwrap(), "hello");
-        assert_eq!(p.select("which?", &["a", "b", "c"], 0, "--kind").unwrap(), 2);
+        assert_eq!(
+            p.select("which?", &["a", "b", "c"], 0, "--kind").unwrap(),
+            2
+        );
     }
 
     #[test]

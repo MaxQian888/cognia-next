@@ -1,0 +1,1481 @@
+//! PTY session — wraps a `portable_pty::PtyPair` plus the reader and waiter
+//! threads that pump bytes back to the renderer via a `tauri::ipc::Channel`.
+//!
+//! This is the first user of `tauri::ipc::Channel<T>` in the repo. The
+//! pattern is:
+//!   * The renderer constructs the Channel (via `@tauri-apps/api/core`),
+//!   * Passes it as a command argument to `terminal_spawn`,
+//!   * `spawn_session` keeps a clone for each background thread,
+//!   * Background threads call `channel.send(event)` — Tauri serialises
+//!     via JSON IPC and delivers to the renderer's `onmessage`.
+//!
+//! Drop semantics mirror `plugin_api::vscode::host::Sidecar`: dropping the
+//! `PtySession` kills the child (via the cloned killer) and removes the
+//! per-spawn ZDOTDIR (if any). Window close → manage()'d store drops →
+//! every session drops → every child dies. No leaks across reload.
+
+use std::collections::HashMap;
+use std::ffi::{OsStr, OsString};
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};
+use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
+use std::thread;
+
+use portable_pty::{native_pty_system, Child, ChildKiller, CommandBuilder, MasterPty, PtySize};
+use serde::{Deserialize, Serialize};
+use tauri::ipc::Channel;
+use uuid::Uuid;
+
+use super::integration::{self, ShellKind};
+use super::osc633::{IntegrationEvent, Osc633Parser};
+use super::replay::ReplayBuffer;
+use cognia_automation::sandbox::launcher::LaunchScope;
+
+/// Where the bytes ultimately came from. `Local` = Tauri Channel
+/// consumer in the same process; `Remote` = LAN WebSocket consumer
+/// against the durable desktop host (ADR-0014/0015).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum SessionOrigin {
+    Local,
+    Remote,
+}
+
+impl Default for SessionOrigin {
+    fn default() -> Self {
+        Self::Local
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SpawnRequest {
+    /// Shell binary — absolute path or PATH-resolvable name. The integration
+    /// builder classifies it by `file_stem`, so `/usr/bin/bash`, `bash`, and
+    /// `C:\Program Files\PowerShell\7\pwsh.exe` all work.
+    pub shell: String,
+    /// Additional argv after the shell binary. Integration argv (e.g.
+    /// `--rcfile`) is appended on top.
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// Initial working directory. Falls through to portable-pty's default
+    /// (`$HOME` / `%USERPROFILE%`) when `None`.
+    pub cwd: Option<String>,
+    /// Extra env to set on the child. Integration env (e.g.
+    /// `COGNIA_TERM_NONCE`, `ZDOTDIR`) overrides anything supplied here.
+    #[serde(default)]
+    pub env: HashMap<String, String>,
+    pub rows: u16,
+    pub cols: u16,
+    /// Project the session belongs to. Filters the dock's tab list and
+    /// flows through to audit events.
+    pub project_id: Option<String>,
+    /// When set, the spawn was driven by a VS Code-style extension
+    /// through `lib/plugin/vscode-shim/terminal-bridge.ts`. The TS hook
+    /// dispatcher has already checked `terminal:spawn` permission for
+    /// this extension; we just persist it for audit.
+    pub extension_id: Option<String>,
+    /// Default true. Setting to false skips OSC 633 env injection
+    /// entirely — useful for users on shells we don't recognise.
+    #[serde(default = "default_true")]
+    pub enable_shell_integration: bool,
+    /// Default true. When true, PowerShell/cmd are launched with their
+    /// console output encoding pinned to UTF-8 so xterm.js (which always
+    /// decodes PTY bytes as UTF-8) renders correctly on non-UTF-8 system
+    /// codepages (e.g. GBK/cp936 on Chinese Windows). Users who depend on
+    /// the legacy codepage can opt out via the terminal settings toggle.
+    #[serde(default = "default_true")]
+    pub force_utf8: bool,
+    #[serde(default)]
+    pub origin: SessionOrigin,
+    /// Headless (unattended) spawns set this so the shell starts WITHOUT
+    /// the user's interactive profile — prompt frameworks and custom
+    /// PSReadLine key handlers routinely break scripted input. Today this
+    /// gates the `$PROFILE` dot-source in the PowerShell integration
+    /// command; POSIX shells additionally receive `--noprofile`-style argv
+    /// from the headless spawner. Default false (dock behavior unchanged).
+    #[serde(default)]
+    pub skip_user_profile: bool,
+    /// ADR-0028 Phase 3 (P4.1) — opt-in OS sandbox for the interactive
+    /// shell. When true (and a backend is available) the shell is launched
+    /// under `bwrap` (Linux) / `sandbox-exec` (macOS): writes are confined to
+    /// `cwd`, the user's home is read-only, network egress stays allowed (dev
+    /// shells need it). Default false keeps the dock byte-identical. Windows
+    /// rejects a sandboxed spawn for now (restricted-token runner pending).
+    #[serde(default)]
+    pub sandboxed: bool,
+    /// Network egress for sandboxed interactive sessions. Defaults to true
+    /// for the terminal dock; Cognia Sites sets false for local preview
+    /// servers so untrusted project code cannot make outbound connections.
+    pub sandbox_network: Option<bool>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// Resolve the shell binary to actually spawn.
+///
+/// * A path containing a separator is trusted verbatim (the user pointed at
+///   an explicit binary).
+/// * A bare name that resolves on `PATH` is kept as-is — `CommandBuilder`
+///   finds it via the OS loader.
+/// * A bare `pwsh` / `pwsh.exe` that does *not* resolve falls back to
+///   `powershell.exe` (Windows PowerShell 5.1) when that is present. This is
+///   the common Windows case: the dock defaults to `pwsh.exe`, but many
+///   machines only ship Windows PowerShell.
+/// * Anything else is returned unchanged so the spawn surfaces a clear
+///   "binary not found" error rather than guessing.
+fn resolve_shell_binary(requested: &str) -> String {
+    if requested.contains('/') || requested.contains('\\') {
+        return requested.to_string();
+    }
+    if find_on_path(requested).is_some() {
+        return requested.to_string();
+    }
+    let stem = Path::new(requested)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if stem == "pwsh"
+        && (find_on_path("powershell.exe").is_some() || find_on_path("powershell").is_some())
+    {
+        return "powershell.exe".to_string();
+    }
+    requested.to_string()
+}
+
+/// `which`-style lookup. Honors `PATHEXT` on Windows when `name` has no
+/// extension so a bare `pwsh` matches `pwsh.exe`. Returns the first hit.
+fn find_on_path(name: &str) -> Option<PathBuf> {
+    let path_var = std::env::var_os("PATH")?;
+    let has_ext = Path::new(name).extension().is_some();
+    let exts: Vec<String> = if cfg!(windows) && !has_ext {
+        std::env::var("PATHEXT")
+            .unwrap_or_else(|_| ".EXE;.CMD;.BAT;.COM".to_string())
+            .split(';')
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect()
+    } else {
+        vec![String::new()]
+    };
+    for dir in std::env::split_paths(&path_var) {
+        for ext in &exts {
+            let candidate = dir.join(format!("{name}{ext}"));
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+/// Tagged event the reader / waiter push back to the renderer through the
+/// Channel. The renderer dispatches on `kind` (Data ⇒ feed xterm,
+/// Integration ⇒ update tab badge, Exit ⇒ tear down tab + audit).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TerminalEvent {
+    /// Raw bytes from the PTY. Serialised as a JSON array of u8 today —
+    /// acceptable for the bounded host throughput target; revisit with a binary
+    /// channel if `yes(1)` floods become a problem.
+    Data { bytes: Vec<u8> },
+    /// Decoded OSC 633 event from `osc633::Osc633Parser`.
+    Integration { event: IntegrationEvent },
+    /// Final exit code. Emitted exactly once per session by the waiter
+    /// thread when `child.wait()` returns.
+    Exit { code: Option<u32> },
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalSessionInfo {
+    pub id: String,
+    pub project_id: Option<String>,
+    pub extension_id: Option<String>,
+    pub origin: SessionOrigin,
+    pub shell: String,
+    /// OS process ID of the PTY child, captured at spawn. `None` for
+    /// test-built sessions with no real child. Consumed by the unified
+    /// managed-process registry so the performance panel can join CPU/memory.
+    pub pid: Option<u32>,
+    /// Whether the PTY child is still running. Flipped to `false` by the
+    /// waiter thread the moment `child.wait()` returns.
+    ///
+    /// Sessions are **not** evicted from the store on natural exit — the
+    /// renderer still reads the replay buffer for scrollback after the shell
+    /// exits — so "present in the map" does not mean "alive", and every
+    /// consumer that reports liveness (the managed-process registry) or acts
+    /// on `pid` must read this instead.
+    pub alive: bool,
+}
+
+/// Wire envelope for the desktop Tauri Channel (1C). Pairs the replay seq
+/// with the event so the renderer can persist the last-seen seq and resume
+/// via `terminal_reattach` after a webview reload — the Rust process (and
+/// thus the live PTY) survives a reload, only the Channel is torn down.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SeqEvent {
+    pub seq: u64,
+    pub event: TerminalEvent,
+}
+
+/// Swappable Channel consumer for the desktop dock. The reader/waiter sink
+/// sends through whatever Channel is currently installed; `terminal_reattach`
+/// swaps in a fresh Channel (new webview) and replays the missed events.
+/// `last_seq` is the highest seq delivered to the *current* channel — it
+/// dedupes replay-vs-live so each event reaches a given channel exactly once.
+/// Opaque to other modules — constructed only via [`detached_desk_channel`]
+/// or the desktop spawn path.
+#[derive(Default)]
+pub struct ChannelSlot {
+    channel: Option<Channel<SeqEvent>>,
+    last_seq: u64,
+}
+
+/// Shared, swappable desktop Channel slot. WS / RTC sessions use a detached
+/// (always-`None`) slot since they fan out through their own mpsc sink.
+pub type DeskChannel = Arc<StdMutex<ChannelSlot>>;
+
+/// Build a detached slot — used by remote (WS/RTC) sessions that don't
+/// stream through a Tauri Channel.
+pub fn detached_desk_channel() -> DeskChannel {
+    Arc::new(StdMutex::new(ChannelSlot::default()))
+}
+
+pub struct PtySession {
+    pub id: String,
+    pub project_id: Option<String>,
+    pub extension_id: Option<String>,
+    pub origin: SessionOrigin,
+    pub shell: String,
+    /// Master held under StdMutex so `resize` can be called while the
+    /// reader thread continues to consume bytes (the reader uses its
+    /// own cloned Reader handle, not the master).
+    ///
+    /// `pub(super)` (and the three siblings below) so the in-module store
+    /// tests in `mod.rs` can build minimal `PtySession` instances without
+    /// reaching for unsafe or duplicating the spawn path. Not part of
+    /// the public crate surface.
+    pub(super) master: StdMutex<Box<dyn MasterPty + Send>>,
+    /// Stdin pump. Bytes are handed to a dedicated per-session writer thread
+    /// (see [`spawn_writer_thread`]) rather than written inline, so the
+    /// synchronous `terminal_write` IPC command never blocks on a stuck
+    /// child. See that function's docs for the full rationale.
+    pub(super) write_tx: SyncSender<Vec<u8>>,
+    pub(super) killer: StdMutex<Box<dyn ChildKiller + Send + Sync>>,
+    /// OS process ID captured from the PTY child at spawn. Immutable — the PTY
+    /// child keeps its PID for its whole life. `None` for store-only test
+    /// sessions built without a real child.
+    pub(super) pid: Option<u32>,
+    pub(super) tempdir: Option<PathBuf>,
+    /// Cleared by the waiter thread when the child is reaped. See
+    /// [`TerminalSessionInfo::alive`] for why the session outlives its child.
+    pub(super) alive: Arc<AtomicBool>,
+    /// Wave 2 — timestamped + monotonic-seq replay buffer. Every event
+    /// the reader / waiter threads emit lands here before fan-out so
+    /// reconnecting WS clients can resume with `?resumeFrom=<seq>`. See
+    /// `super::replay::ReplayBuffer`.
+    pub(super) replay: Arc<ReplayBuffer>,
+    /// 1C — swappable desktop Tauri Channel. `terminal_reattach` installs a
+    /// fresh Channel after a webview reload and replays missed events.
+    /// Detached (`None`) for remote (WS/RTC) sessions.
+    pub(super) channel_slot: DeskChannel,
+}
+
+/// Generic event sink — the reader / waiter threads fan out
+/// `(seq, TerminalEvent)` pairs through this closure. The `seq` is
+/// assigned by the session's [`ReplayBuffer`] before the sink fires so
+/// downstream wire formats (WS control envelopes, RTC datachannel)
+/// can include it for resume on reconnect. Consumers that don't need
+/// seq (e.g. the in-process Tauri Channel for the desktop dock) simply
+/// ignore the value. Two ready-made wrappers exist below:
+///
+///   * [`spawn_session`] wraps a `tauri::ipc::Channel<TerminalEvent>` —
+///     the in-process desktop path. Drops `seq`.
+///   * [`spawn_session_with_sink`] is the general form — used by the
+///     `companion_api::ws_terminal` proxy to pump events into a
+///     `tokio::sync::mpsc::UnboundedSender<(u64, TerminalEvent)>` and
+///     on through a WebSocket frame.
+///
+/// `Arc` so the reader + waiter threads can each clone an owned handle
+/// without `'static + Copy` constraints leaking into the public API.
+pub type EventSink = Arc<dyn Fn(u64, TerminalEvent) + Send + Sync + 'static>;
+
+/// File name of the bundled / downloaded `cognia` plugin-author CLI on this
+/// OS. Used both to probe a candidate directory and (indirectly) to weave
+/// the CLI's directory into a terminal child's PATH.
+pub fn cognia_bin_filename() -> &'static str {
+    if cfg!(windows) {
+        "cognia.exe"
+    } else {
+        "cognia"
+    }
+}
+
+/// Directories to weave into a spawned child's PATH so the integrated
+/// terminal can run tools the app ships or downloaded (today: `cognia`).
+///
+/// `prepend` wins over the inherited PATH (an app-managed / downloaded copy
+/// the user explicitly installed); `append` is a low-priority fallback
+/// (`~/.cargo/bin` for a `cargo install`ed CLI). Both are de-duplicated
+/// against the inherited PATH so we never bloat it with repeats.
+#[derive(Debug, Default, Clone)]
+pub struct PathInjection {
+    pub prepend: Vec<PathBuf>,
+    pub append: Vec<PathBuf>,
+}
+
+impl PathInjection {
+    pub fn is_empty(&self) -> bool {
+        self.prepend.is_empty() && self.append.is_empty()
+    }
+}
+
+/// Build the child's PATH value by prepending `inj.prepend`, then the
+/// inherited `existing` PATH, then appending `inj.append` — skipping any
+/// directory already present so the result stays minimal. Returns `None`
+/// when there's nothing to inject, or when the join fails (a directory
+/// containing the platform separator) — in both cases the caller leaves the
+/// inherited PATH untouched, which is always safe.
+pub(super) fn compute_path(existing: Option<&OsStr>, inj: &PathInjection) -> Option<OsString> {
+    if inj.is_empty() {
+        return None;
+    }
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    let push_unique = |dirs: &mut Vec<PathBuf>, dir: PathBuf| {
+        if !dir.as_os_str().is_empty() && !dirs.contains(&dir) {
+            dirs.push(dir);
+        }
+    };
+    for dir in &inj.prepend {
+        push_unique(&mut dirs, dir.clone());
+    }
+    if let Some(existing) = existing {
+        for dir in std::env::split_paths(existing) {
+            push_unique(&mut dirs, dir);
+        }
+    }
+    for dir in &inj.append {
+        push_unique(&mut dirs, dir.clone());
+    }
+    std::env::join_paths(dirs).ok()
+}
+
+/// Channel-backed convenience wrapper — mirrors the original public
+/// signature so the existing Tauri command (`terminal_spawn`) keeps
+/// compiling unchanged. The Channel wire format doesn't carry seq, so
+/// the wrapper drops it.
+pub fn spawn_session(
+    req: SpawnRequest,
+    script_dir: &Path,
+    path: &PathInjection,
+    event_channel: Channel<SeqEvent>,
+) -> Result<PtySession, String> {
+    // Desktop path: the sink sends through a *swappable* Channel slot so a
+    // reload can reattach (see `PtySession::reattach`). `last_seq` dedupes
+    // replay-vs-live for the current channel; a failed send (dead channel
+    // after reload) leaves `last_seq` untouched so the event is replayed.
+    let slot: DeskChannel = Arc::new(StdMutex::new(ChannelSlot {
+        channel: Some(event_channel),
+        last_seq: 0,
+    }));
+    let slot_for_sink = slot.clone();
+    let sink: EventSink = Arc::new(move |seq, event| {
+        if let Ok(mut s) = slot_for_sink.lock() {
+            if seq > s.last_seq {
+                if let Some(ch) = s.channel.as_ref() {
+                    if ch.send(SeqEvent { seq, event }).is_ok() {
+                        s.last_seq = seq;
+                    }
+                }
+            }
+        }
+    });
+    spawn_session_with_sink(req, script_dir, path, sink, slot)
+}
+
+/// Read-only paths an interactive sandboxed shell needs beyond the system
+/// directories — the user's home so dotfiles (`~/.gitconfig`, `~/.npmrc`,
+/// shell rc) resolve read-only. The shell's `cwd` is separately bound
+/// writable, so a project under `~` stays writable.
+fn sandbox_home_readable() -> Vec<String> {
+    dirs::home_dir()
+        .map(|p| vec![p.to_string_lossy().into_owned()])
+        .unwrap_or_default()
+}
+
+/// Drop code-injection env vars (`LD_PRELOAD`, `NODE_OPTIONS`, `GIT_SSH_COMMAND`,
+/// …) from a sandboxed terminal's caller-supplied env — mirrors the one-shot
+/// backend's `filter_env` so a sandboxed shell can't inject code into every
+/// helper process it spawns (the OS layer still confines the filesystem, but env
+/// injection defeats the protected-path carve-outs). Unsandboxed terminals pass
+/// their env through unchanged.
+fn sandbox_scrub_env(sandboxed: bool, env: &HashMap<String, String>) -> Vec<(&String, &String)> {
+    env.iter()
+        .filter(|(k, _)| !(sandboxed && cognia_automation::sandbox::env::is_dangerous_env_key(k)))
+        .collect()
+}
+
+/// ADR-0028 Phase 3 (P4.1) — resolve the OS-sandbox launch prefix for an
+/// interactive shell, or `Ok(None)` when the spawn is not sandboxed.
+///
+/// Strict mode: a sandboxed spawn on a platform/host without a usable backend
+/// returns `Err` rather than silently dropping to an unsandboxed shell. The
+/// scope confines writes to `cwd`, keeps `$HOME` read-only, and leaves network
+/// egress on (interactive dev shells routinely need `git` / `npm`).
+fn resolve_sandbox_launch_prefix(req: &SpawnRequest) -> Result<Option<Vec<String>>, String> {
+    if !req.sandboxed {
+        return Ok(None);
+    }
+    let cwd = req
+        .cwd
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .or_else(|| dirs::home_dir().map(|p| p.to_string_lossy().into_owned()))
+        .unwrap_or_default();
+    let scope = LaunchScope {
+        cwd: cwd.clone(),
+        writable: vec![cwd],
+        readable: sandbox_home_readable(),
+        network: req.sandbox_network.unwrap_or(true),
+    };
+    #[cfg(target_os = "linux")]
+    {
+        let bwrap = find_on_path("bwrap").ok_or_else(|| {
+            "sandboxed terminal requested but `bwrap` (bubblewrap) is not installed".to_string()
+        })?;
+        // Shared empty read-only dir bound over secret stores (`~/.ssh`,
+        // `~/.aws`, cognia's credential store) so a sandboxed shell can't read
+        // them — mirrors the one-shot Linux backend.
+        let empty_dir = std::env::temp_dir().join("cognia-sandbox-empty");
+        let _ = std::fs::create_dir_all(&empty_dir);
+        Ok(Some(cognia_automation::sandbox::launcher::bwrap_prefix(
+            &bwrap.to_string_lossy(),
+            &scope,
+            &empty_dir,
+        )))
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if !Path::new("/usr/bin/sandbox-exec").exists() {
+            return Err("sandboxed terminal requested but /usr/bin/sandbox-exec is missing".into());
+        }
+        Ok(Some(
+            cognia_automation::sandbox::launcher::sandbox_exec_prefix(&scope),
+        ))
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = scope;
+        Err("sandboxed terminal is not yet supported on this platform \
+             (Windows restricted-token runner pending)"
+            .into())
+    }
+}
+
+/// Construct a PtySession by spawning the requested shell under a fresh
+/// PTY and wiring its byte stream into `sink`. Reader + waiter threads
+/// are spawned eagerly; the caller stores the session and is free to
+/// call `write` / `resize` / `kill` immediately.
+pub fn spawn_session_with_sink(
+    req: SpawnRequest,
+    script_dir: &Path,
+    path: &PathInjection,
+    sink: EventSink,
+    channel_slot: DeskChannel,
+) -> Result<PtySession, String> {
+    spawn_session_with_identity(
+        req,
+        script_dir,
+        path,
+        Uuid::new_v4().to_string(),
+        Arc::new(ReplayBuffer::new()),
+        sink,
+        channel_slot,
+    )
+}
+
+/// Host-owned variant of [`spawn_session_with_sink`]. The caller supplies the
+/// stable session id and durable replay ring before reader threads start, so
+/// every emitted event can be routed through the process-independent host
+/// registry without an initialization race.
+pub fn spawn_session_with_identity(
+    req: SpawnRequest,
+    script_dir: &Path,
+    path: &PathInjection,
+    session_id: String,
+    replay: Arc<ReplayBuffer>,
+    sink: EventSink,
+    channel_slot: DeskChannel,
+) -> Result<PtySession, String> {
+    if Uuid::parse_str(&session_id).is_err() {
+        return Err("terminal session id must be a UUID".to_string());
+    }
+    let mut req = req;
+    // Resolve the shell binary up front so a missing `pwsh.exe` (PowerShell 7
+    // not installed) transparently falls back to Windows PowerShell rather
+    // than surfacing a cryptic `spawn_command failed`.
+    req.shell = resolve_shell_binary(&req.shell);
+
+    let nonce = Uuid::new_v4().simple().to_string();
+    let shell_kind = ShellKind::from_shell_path(&req.shell);
+    // The UTF-8 prelude is applied independently of the integration toggle;
+    // `build` gates the OSC 633 hooks on `enable_shell_integration` itself.
+    let setup = integration::build_with_profile(
+        shell_kind,
+        script_dir,
+        &nonce,
+        req.enable_shell_integration,
+        req.force_utf8,
+        req.skip_user_profile,
+    )
+    .map_err(|e| format!("integration setup failed: {e}"))?;
+
+    let pty_system = native_pty_system();
+    let pair = pty_system
+        .openpty(PtySize {
+            rows: req.rows.max(1),
+            cols: req.cols.max(1),
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| format!("openpty failed: {e}"))?;
+
+    // ADR-0028 Phase 3 (P4.1) — when the session opts into the OS sandbox,
+    // the PTY program becomes the sandbox launcher (`bwrap` / `sandbox-exec`)
+    // and the shell + its argv ride after the launcher's trailing `--`. The
+    // default (unsandboxed) path is byte-identical to before.
+    let sandbox_prefix = resolve_sandbox_launch_prefix(&req)?;
+    let mut cmd = match sandbox_prefix.as_deref() {
+        Some([launcher_bin, launcher_args @ ..]) => {
+            let mut c = CommandBuilder::new(launcher_bin);
+            for a in launcher_args {
+                c.arg(a);
+            }
+            c.arg(&req.shell);
+            c
+        }
+        // Empty prefix can't happen (renderer always emits `launcher … --`),
+        // but fall back to the bare shell rather than panicking on a slice.
+        _ => CommandBuilder::new(&req.shell),
+    };
+    for arg in &req.args {
+        cmd.arg(arg);
+    }
+    for arg in &setup.extra_args {
+        cmd.arg(arg);
+    }
+    if let Some(cwd) = req.cwd.as_deref().filter(|s| !s.is_empty()) {
+        cmd.cwd(cwd);
+    }
+    // Advertise a sane terminal type + truecolor so prompt frameworks
+    // (oh-my-posh, starship) and color-aware tools (git, less, vim) emit
+    // ANSI sequences. ConPTY/xterm.js are xterm-compatible. Set these first
+    // so an explicit user/project `env` entry still wins.
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("COLORTERM", "truecolor");
+    for (k, v) in sandbox_scrub_env(req.sandboxed, &req.env) {
+        cmd.env(k, v);
+    }
+    for (k, v) in &setup.env_overrides {
+        cmd.env(k, v);
+    }
+    // Weave app-shipped / downloaded tool directories into PATH so `cognia`
+    // is runnable from the terminal. Read the builder's *base* PATH (which
+    // portable-pty has already merged from the parent env + Windows
+    // registry) rather than `std::env`, then override. Copy it out first to
+    // release the immutable borrow before the mutable `cmd.env` call.
+    let base_path = cmd.get_env("PATH").map(|p| p.to_os_string());
+    if let Some(new_path) = compute_path(base_path.as_deref(), path) {
+        cmd.env("PATH", new_path);
+    }
+
+    let child = pair
+        .slave
+        .spawn_command(cmd)
+        .map_err(|e| format!("spawn_command failed: {e}"))?;
+    // Slave can be dropped once the child has it — keeping it open
+    // would stop EOF from propagating to the reader when the child exits.
+    drop(pair.slave);
+
+    let reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|e| format!("try_clone_reader: {e}"))?;
+    let writer = pair
+        .master
+        .take_writer()
+        .map_err(|e| format!("take_writer: {e}"))?;
+    let killer = child.clone_killer();
+    // Capture the OS PID before the child is moved into the waiter thread, so
+    // the managed-process registry can attribute + join it in the perf panel.
+    let pid = child.process_id();
+    let id = session_id;
+    let write_tx = spawn_writer_thread(&id, writer);
+
+    let reader_sink = sink.clone();
+    let reader_replay = replay.clone();
+    let nonce_for_reader = nonce.clone();
+    let reader_id = id.clone();
+    thread::Builder::new()
+        .name(format!("pty-reader-{reader_id}"))
+        .spawn(move || pty_reader_loop(reader, reader_sink, reader_replay, nonce_for_reader))
+        .map_err(|e| format!("reader thread spawn: {e}"))?;
+
+    let alive = Arc::new(AtomicBool::new(true));
+    let waiter_sink = sink.clone();
+    let waiter_replay = replay.clone();
+    let waiter_id = id.clone();
+    let waiter_alive = alive.clone();
+    thread::Builder::new()
+        .name(format!("pty-waiter-{waiter_id}"))
+        .spawn(move || pty_waiter_loop(child, waiter_sink, waiter_replay, waiter_alive))
+        .map_err(|e| format!("waiter thread spawn: {e}"))?;
+
+    Ok(PtySession {
+        id,
+        project_id: req.project_id,
+        extension_id: req.extension_id,
+        origin: req.origin,
+        shell: req.shell,
+        master: StdMutex::new(pair.master),
+        write_tx,
+        killer: StdMutex::new(killer),
+        pid,
+        tempdir: setup.tempdir,
+        alive,
+        replay,
+        channel_slot,
+    })
+}
+
+/// Bound on the per-session stdin queue (number of pending write chunks).
+/// A stuck child stops draining its PTY; once this many chunks are queued,
+/// further [`PtySession::write`] calls fail fast with `WouldBlock` instead
+/// of growing memory without limit. 4096 is far above any interactive
+/// burst (paste, bracketed-paste) yet small enough to cap a runaway.
+const WRITE_QUEUE_CAPACITY: usize = 4096;
+
+/// Spawn the per-session stdin pump.
+///
+/// `terminal_write` is a **synchronous** Tauri command, so it runs on the
+/// IPC/main thread. Writing to the PTY master inline (`write_all` + `flush`)
+/// blocks when the child has stopped reading stdin and the kernel buffer is
+/// full — and a blocked synchronous command freezes the IPC thread, so every
+/// later command (including new `terminal_spawn`s) hangs with no error ever
+/// surfaced. That is exactly the "one stuck terminal wedges all new
+/// terminals, silently" failure.
+///
+/// Instead, `write` hands bytes to this bounded channel and returns
+/// immediately; a dedicated thread performs the blocking `write_all`. A
+/// single FIFO consumer preserves stdin byte order. The thread exits when
+/// the session is dropped (sender gone) or the PTY closes (write/flush
+/// errors — e.g. the child was killed), so it never outlives the session.
+pub(super) fn spawn_writer_thread(
+    id: &str,
+    mut writer: Box<dyn Write + Send>,
+) -> SyncSender<Vec<u8>> {
+    let (tx, rx) = sync_channel::<Vec<u8>>(WRITE_QUEUE_CAPACITY);
+    let spawned = thread::Builder::new()
+        .name(format!("pty-writer-{id}"))
+        .spawn(move || {
+            while let Ok(bytes) = rx.recv() {
+                if writer.write_all(&bytes).is_err() || writer.flush().is_err() {
+                    break;
+                }
+            }
+        });
+    if spawned.is_err() {
+        // Extremely rare (OS thread-limit). With no consumer the channel
+        // fills after `WRITE_QUEUE_CAPACITY` chunks and `write` then fails
+        // fast — degraded, but never a hang.
+        debug_assert!(false, "pty-writer thread spawn failed");
+    }
+    tx
+}
+
+fn pty_reader_loop(
+    mut reader: Box<dyn Read + Send>,
+    sink: EventSink,
+    replay: Arc<ReplayBuffer>,
+    nonce: String,
+) {
+    let mut parser = Osc633Parser::new(nonce);
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        match reader.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                let chunk = &buf[..n];
+                for event in parser.feed(chunk) {
+                    let integration = TerminalEvent::Integration { event };
+                    let seq = replay.push(integration.clone());
+                    sink(seq, integration);
+                }
+                let data = TerminalEvent::Data {
+                    bytes: chunk.to_vec(),
+                };
+                let seq = replay.push(data.clone());
+                sink(seq, data);
+            }
+            Err(_) => break,
+        }
+    }
+}
+
+fn pty_waiter_loop(
+    mut child: Box<dyn Child + Send + Sync>,
+    sink: EventSink,
+    replay: Arc<ReplayBuffer>,
+    alive: Arc<AtomicBool>,
+) {
+    let code = match child.wait() {
+        Ok(status) => Some(status.exit_code()),
+        Err(_) => None,
+    };
+    // Publish liveness *before* the event so anything woken by the event
+    // (managed-process registry, kill path) never observes a reaped child as
+    // running — the PID is free for reuse from here on.
+    alive.store(false, Ordering::SeqCst);
+    let exit = TerminalEvent::Exit { code };
+    let seq = replay.push(exit.clone());
+    sink(seq, exit);
+}
+
+impl PtySession {
+    /// Queue bytes for the PTY's stdin. Non-blocking: the bytes are handed
+    /// to the per-session writer thread (preserving order) and the actual
+    /// blocking `write_all` happens there, off the IPC thread. Returns
+    /// `WouldBlock` if the queue is full (a child that has stopped draining
+    /// stdin) and `BrokenPipe` if the writer thread is gone.
+    pub fn write(&self, data: &[u8]) -> std::io::Result<()> {
+        self.write_tx.try_send(data.to_vec()).map_err(|e| match e {
+            TrySendError::Full(_) => std::io::Error::new(
+                std::io::ErrorKind::WouldBlock,
+                "terminal write buffer full (shell not draining stdin)",
+            ),
+            TrySendError::Disconnected(_) => {
+                std::io::Error::new(std::io::ErrorKind::BrokenPipe, "terminal writer closed")
+            }
+        })
+    }
+
+    pub fn resize(&self, rows: u16, cols: u16) -> std::io::Result<()> {
+        let master = self
+            .master
+            .lock()
+            .map_err(|_| std::io::Error::other("master mutex poisoned"))?;
+        master
+            .resize(PtySize {
+                rows: rows.max(1),
+                cols: cols.max(1),
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| std::io::Error::other(format!("resize: {e}")))
+    }
+
+    pub fn kill(&self) -> std::io::Result<()> {
+        // The child has already been reaped by the waiter thread, so its PID
+        // is free for the OS to hand to an unrelated process. `ChildKiller`
+        // signals by PID, so killing here could hit that stranger — the only
+        // safe action on an exited session is nothing.
+        if !self.is_alive() {
+            return Ok(());
+        }
+        let mut killer = self
+            .killer
+            .lock()
+            .map_err(|_| std::io::Error::other("killer mutex poisoned"))?;
+        killer.kill()
+    }
+
+    /// Whether the PTY child is still running. See [`TerminalSessionInfo::alive`].
+    pub fn is_alive(&self) -> bool {
+        self.alive.load(Ordering::SeqCst)
+    }
+
+    pub fn info(&self) -> TerminalSessionInfo {
+        TerminalSessionInfo {
+            id: self.id.clone(),
+            project_id: self.project_id.clone(),
+            extension_id: self.extension_id.clone(),
+            origin: self.origin,
+            shell: self.shell.clone(),
+            pid: self.pid,
+            alive: self.is_alive(),
+        }
+    }
+
+    /// Wave 2 — expose the per-session replay buffer so reconnecting WS
+    /// consumers can drain `since(resume_from)` before resuming live
+    /// emission.
+    pub fn replay(&self) -> Arc<ReplayBuffer> {
+        self.replay.clone()
+    }
+
+    /// 1C — reattach a fresh desktop Channel after a webview reload and
+    /// replay every event the renderer missed (`seq > resume_from`).
+    ///
+    /// Lock ordering note: the reader/waiter threads take the replay lock
+    /// and the channel-slot lock *sequentially* (push → release → sink),
+    /// never nested. So holding the slot lock here while snapshotting
+    /// `replay.since()` cannot deadlock, and it makes the swap atomic w.r.t.
+    /// the sink: a concurrently-pushed event is either in the snapshot
+    /// (replayed) or sent by the (blocked) sink afterwards — `last_seq`
+    /// dedupes the overlap, preserving order with no duplicates.
+    pub fn reattach(&self, channel: Channel<SeqEvent>, resume_from: u64) {
+        let mut slot = match self.channel_slot.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        slot.last_seq = resume_from;
+        slot.channel = Some(channel);
+        for (seq, event) in self.replay.since(resume_from) {
+            if seq > slot.last_seq {
+                if let Some(ch) = slot.channel.as_ref() {
+                    if ch.send(SeqEvent { seq, event }).is_ok() {
+                        slot.last_seq = seq;
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl Drop for PtySession {
+    fn drop(&mut self) {
+        // Best-effort kill. If the child already exited, this is a no-op
+        // (or a benign error swallowed below).
+        if let Ok(mut killer) = self.killer.lock() {
+            let _ = killer.kill();
+        }
+        if let Some(td) = &self.tempdir {
+            let _ = std::fs::remove_dir_all(td);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::sync::Mutex as StdMutex2;
+
+    fn capture_channel() -> (Channel<SeqEvent>, Arc<StdMutex2<Vec<TerminalEvent>>>) {
+        let sink = Arc::new(StdMutex2::new(Vec::<TerminalEvent>::new()));
+        let sink_clone = sink.clone();
+        let channel = Channel::<SeqEvent>::new(move |body| {
+            // The Channel emits InvokeResponseBody::Json(serde_json::Value)
+            // in tests when constructed this way; deserialise the SeqEvent
+            // envelope and keep the inner event so assertions match variants.
+            let value = match body {
+                tauri::ipc::InvokeResponseBody::Json(s) => s,
+                _ => return Ok(()),
+            };
+            if let Ok(seqev) = serde_json::from_str::<SeqEvent>(&value) {
+                sink_clone.lock().unwrap().push(seqev.event);
+            }
+            Ok(())
+        });
+        (channel, sink)
+    }
+
+    fn detect_default_shell() -> Option<String> {
+        if cfg!(target_os = "windows") {
+            // ComSpec is always set in normal Windows environments.
+            std::env::var("COMSPEC")
+                .ok()
+                .or_else(|| Some("C:\\Windows\\System32\\cmd.exe".to_string()))
+        } else {
+            std::env::var("SHELL")
+                .ok()
+                .or_else(|| Some("/bin/sh".to_string()))
+        }
+    }
+
+    fn empty_script_dir() -> PathBuf {
+        let p = std::env::temp_dir().join("cognia-session-test-noscripts");
+        let _ = std::fs::create_dir_all(&p);
+        p
+    }
+
+    #[test]
+    fn compute_path_returns_none_when_nothing_to_inject() {
+        assert!(compute_path(Some(OsStr::new("/usr/bin")), &PathInjection::default()).is_none());
+        assert!(compute_path(None, &PathInjection::default()).is_none());
+    }
+
+    #[test]
+    fn compute_path_prepends_then_existing_then_appends() {
+        let inj = PathInjection {
+            prepend: vec![PathBuf::from("/managed/cli")],
+            append: vec![PathBuf::from("/home/u/.cargo/bin")],
+        };
+        let existing = std::env::join_paths([PathBuf::from("/usr/bin"), PathBuf::from("/bin")])
+            .expect("join existing");
+        let out = compute_path(Some(&existing), &inj).expect("some path");
+        let dirs: Vec<PathBuf> = std::env::split_paths(&out).collect();
+        assert_eq!(
+            dirs,
+            vec![
+                PathBuf::from("/managed/cli"),
+                PathBuf::from("/usr/bin"),
+                PathBuf::from("/bin"),
+                PathBuf::from("/home/u/.cargo/bin"),
+            ]
+        );
+    }
+
+    #[test]
+    fn compute_path_dedupes_against_existing() {
+        // A prepend / append dir already present in PATH must not be repeated.
+        let inj = PathInjection {
+            prepend: vec![PathBuf::from("/usr/bin")],
+            append: vec![PathBuf::from("/bin")],
+        };
+        let existing = std::env::join_paths([PathBuf::from("/usr/bin"), PathBuf::from("/bin")])
+            .expect("join existing");
+        let out = compute_path(Some(&existing), &inj).expect("some path");
+        let dirs: Vec<PathBuf> = std::env::split_paths(&out).collect();
+        assert_eq!(dirs, vec![PathBuf::from("/usr/bin"), PathBuf::from("/bin")]);
+    }
+
+    #[test]
+    fn compute_path_with_no_existing_uses_injected_only() {
+        let inj = PathInjection {
+            prepend: vec![PathBuf::from("/managed/cli")],
+            append: vec![],
+        };
+        let out = compute_path(None, &inj).expect("some path");
+        let dirs: Vec<PathBuf> = std::env::split_paths(&out).collect();
+        assert_eq!(dirs, vec![PathBuf::from("/managed/cli")]);
+    }
+
+    #[test]
+    fn cognia_bin_filename_has_exe_suffix_on_windows() {
+        let name = cognia_bin_filename();
+        if cfg!(windows) {
+            assert_eq!(name, "cognia.exe");
+        } else {
+            assert_eq!(name, "cognia");
+        }
+    }
+
+    #[test]
+    fn spawn_request_defaults_serialize_as_expected() {
+        let json = r#"{
+            "shell": "/bin/sh",
+            "rows": 24,
+            "cols": 80
+        }"#;
+        let req: SpawnRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.shell, "/bin/sh");
+        assert_eq!(req.rows, 24);
+        assert!(req.args.is_empty());
+        assert!(req.enable_shell_integration);
+        assert!(req.force_utf8);
+        assert_eq!(req.origin, SessionOrigin::Local);
+    }
+
+    #[test]
+    fn resolve_shell_binary_passes_through_absolute_paths() {
+        // Paths with a separator are trusted verbatim, even if absent — the
+        // spawn surfaces the real "not found" error rather than guessing.
+        assert_eq!(
+            resolve_shell_binary("/usr/bin/zsh"),
+            "/usr/bin/zsh".to_string()
+        );
+        assert_eq!(
+            resolve_shell_binary("C:\\Windows\\System32\\cmd.exe"),
+            "C:\\Windows\\System32\\cmd.exe".to_string()
+        );
+    }
+
+    #[test]
+    fn resolve_shell_binary_keeps_unknown_bare_names() {
+        // A bare name that isn't pwsh and isn't on PATH is returned as-is.
+        let name = "definitely-not-a-real-shell-binary-xyz";
+        assert_eq!(resolve_shell_binary(name), name.to_string());
+    }
+
+    #[test]
+    fn resolve_shell_binary_pwsh_fallback_is_bounded() {
+        // Resolving bare `pwsh` yields either `pwsh` (PowerShell 7 present),
+        // `powershell.exe` (only Windows PowerShell present), or `pwsh`
+        // (neither — clear error downstream). Never anything else.
+        let resolved = resolve_shell_binary("pwsh");
+        assert!(
+            resolved == "pwsh" || resolved == "powershell.exe",
+            "unexpected resolution: {resolved}"
+        );
+    }
+
+    #[test]
+    fn spawn_session_with_missing_binary_returns_error() {
+        let (channel, _sink) = capture_channel();
+        let req = SpawnRequest {
+            shell: "/nonexistent/binary-that-cannot-exist-xyz".to_string(),
+            args: vec![],
+            cwd: None,
+            env: HashMap::new(),
+            rows: 24,
+            cols: 80,
+            project_id: None,
+            extension_id: None,
+            enable_shell_integration: false,
+            force_utf8: false,
+            origin: SessionOrigin::Local,
+            skip_user_profile: false,
+            sandboxed: false,
+            sandbox_network: None,
+        };
+        let result = spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel);
+        assert!(result.is_err());
+    }
+
+    fn sandbox_req(sandboxed: bool) -> SpawnRequest {
+        SpawnRequest {
+            shell: "/bin/sh".to_string(),
+            args: vec![],
+            cwd: None,
+            env: HashMap::new(),
+            rows: 24,
+            cols: 80,
+            project_id: None,
+            extension_id: None,
+            enable_shell_integration: false,
+            force_utf8: false,
+            origin: SessionOrigin::Local,
+            skip_user_profile: false,
+            sandboxed,
+            sandbox_network: None,
+        }
+    }
+
+    #[test]
+    fn resolve_sandbox_prefix_none_when_not_sandboxed() {
+        assert!(resolve_sandbox_launch_prefix(&sandbox_req(false))
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn sandbox_scrub_env_strips_injection_vars_only_when_sandboxed() {
+        let mut env = HashMap::new();
+        env.insert("PATH".to_string(), "/usr/bin".to_string());
+        env.insert("LD_PRELOAD".to_string(), "/work/evil.so".to_string());
+        env.insert("GIT_SSH_COMMAND".to_string(), "/work/x.sh".to_string());
+
+        let scrubbed: HashMap<_, _> = sandbox_scrub_env(true, &env)
+            .into_iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        assert!(scrubbed.contains_key("PATH"));
+        assert!(!scrubbed.contains_key("LD_PRELOAD"));
+        assert!(!scrubbed.contains_key("GIT_SSH_COMMAND"));
+
+        // Unsandboxed terminals keep their env intact.
+        assert_eq!(sandbox_scrub_env(false, &env).len(), 3);
+    }
+
+    #[test]
+    fn resolve_sandbox_prefix_is_platform_appropriate_when_sandboxed() {
+        let result = resolve_sandbox_launch_prefix(&sandbox_req(true));
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        {
+            // A real launcher prefix (backend present) or a strict error
+            // (bwrap / sandbox-exec missing on the runner) — never a silent
+            // None that would run the shell unsandboxed.
+            match result {
+                Ok(Some(prefix)) => {
+                    assert_eq!(prefix.last().map(String::as_str), Some("--"));
+                    assert!(!prefix[0].is_empty());
+                }
+                Ok(None) => panic!("a sandboxed request must not resolve to None"),
+                Err(_) => {}
+            }
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        {
+            assert!(result.is_err(), "non-unix sandboxed spawn must fail closed");
+        }
+    }
+
+    #[test]
+    fn sandboxed_preview_can_disable_network_egress() {
+        let mut req = sandbox_req(true);
+        req.cwd = Some(std::env::temp_dir().to_string_lossy().into_owned());
+        req.sandbox_network = Some(false);
+        let result = resolve_sandbox_launch_prefix(&req);
+        #[cfg(target_os = "macos")]
+        if let Ok(Some(prefix)) = result {
+            assert!(prefix.join(" ").contains("deny network"));
+        }
+        #[cfg(target_os = "linux")]
+        if let Ok(Some(prefix)) = result {
+            assert!(prefix.iter().any(|part| part == "--unshare-net"));
+        }
+    }
+
+    #[test]
+    fn spawn_real_shell_pipes_output_and_exits() {
+        // Skip on platforms where we can't reliably find a shell binary.
+        let Some(shell) = detect_default_shell() else {
+            eprintln!("skip — no default shell on this platform");
+            return;
+        };
+
+        // Use `echo` as the one-shot command: cmd.exe wants `/C`, POSIX wants `-c`.
+        let (cmd_arg, payload) = if cfg!(target_os = "windows") {
+            ("/C", "echo hello-from-pty")
+        } else {
+            ("-c", "echo hello-from-pty")
+        };
+
+        let (channel, sink) = capture_channel();
+        let req = SpawnRequest {
+            shell,
+            args: vec![cmd_arg.to_string(), payload.to_string()],
+            cwd: None,
+            env: HashMap::new(),
+            rows: 24,
+            cols: 80,
+            project_id: Some("p1".to_string()),
+            extension_id: None,
+            enable_shell_integration: false,
+            force_utf8: false,
+            origin: SessionOrigin::Local,
+            skip_user_profile: false,
+            sandboxed: false,
+            sandbox_network: None,
+        };
+        let session =
+            match spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("skip — spawn failed in this env: {e}");
+                    return;
+                }
+            };
+        assert!(!session.id.is_empty());
+
+        // Wait up to 5 s for the Exit event to land.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if std::time::Instant::now() > deadline {
+                break;
+            }
+            let snapshot = sink.lock().unwrap().clone();
+            if snapshot
+                .iter()
+                .any(|e| matches!(e, TerminalEvent::Exit { .. }))
+            {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+
+        let events = sink.lock().unwrap().clone();
+        let saw_data = events.iter().any(|e| {
+            matches!(e, TerminalEvent::Data { bytes } if String::from_utf8_lossy(bytes).contains("hello-from-pty"))
+        });
+        let saw_exit = events
+            .iter()
+            .any(|e| matches!(e, TerminalEvent::Exit { .. }));
+        assert!(
+            saw_data,
+            "expected to see the echoed payload, got: {events:?}"
+        );
+        assert!(saw_exit, "expected an Exit event, got: {events:?}");
+    }
+
+    #[test]
+    fn natural_exit_clears_alive_and_makes_kill_a_no_op() {
+        // Regression: the session stays in the store after its shell exits, so
+        // "present in the map" was reported as Running and a kill would signal
+        // a PID the OS may already have reused.
+        let Some(shell) = detect_default_shell() else {
+            eprintln!("skip — no default shell on this platform");
+            return;
+        };
+        let (cmd_arg, payload) = if cfg!(target_os = "windows") {
+            ("/C", "exit 0")
+        } else {
+            ("-c", "exit 0")
+        };
+        let (channel, sink) = capture_channel();
+        let req = SpawnRequest {
+            shell,
+            args: vec![cmd_arg.to_string(), payload.to_string()],
+            cwd: None,
+            env: HashMap::new(),
+            rows: 24,
+            cols: 80,
+            project_id: None,
+            extension_id: None,
+            enable_shell_integration: false,
+            force_utf8: false,
+            origin: SessionOrigin::Local,
+            skip_user_profile: false,
+            sandboxed: false,
+            sandbox_network: None,
+        };
+        let session =
+            match spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("skip — spawn failed in this env: {e}");
+                    return;
+                }
+            };
+        assert!(session.is_alive(), "a freshly spawned session is alive");
+        assert!(session.info().alive);
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            if sink
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|e| matches!(e, TerminalEvent::Exit { .. }))
+            {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+
+        assert!(
+            !session.is_alive(),
+            "the waiter thread must clear `alive` when the child is reaped"
+        );
+        assert!(!session.info().alive, "info() must report the reaped child");
+        // Kill on a reaped session must not signal the (possibly reused) PID.
+        assert!(session.kill().is_ok());
+    }
+
+    /// A `Write` that blocks forever on first write — models a child that
+    /// has stopped draining its PTY (the kernel buffer is full).
+    struct StuckWriter;
+    impl Write for StuckWriter {
+        fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+            loop {
+                std::thread::park();
+            }
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn write_never_blocks_when_child_stops_draining() {
+        // Regression: a stuck child used to block `write_all` inline on the
+        // synchronous `terminal_write` IPC thread, wedging every later
+        // command (new spawns included) with no error. The writer thread +
+        // bounded queue must make `write` (via the channel) fail fast
+        // instead of blocking the producer.
+        let tx = spawn_writer_thread("stuck-test", Box::new(StuckWriter));
+        // First chunk is pulled by the writer thread, which then blocks
+        // forever inside `write` — so the queue can no longer drain.
+        tx.send(vec![b'a']).expect("first send");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        // Fill the queue from a watchdog thread. If `try_send` ever blocked
+        // the producer, `recv_timeout` below would fire and fail the test.
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut hit_full = false;
+            for _ in 0..(WRITE_QUEUE_CAPACITY + 16) {
+                if matches!(tx.try_send(vec![b'b']), Err(TrySendError::Full(_))) {
+                    hit_full = true;
+                    break;
+                }
+            }
+            let _ = done_tx.send(hit_full);
+        });
+
+        let hit_full = done_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("producer must not block when the child is stuck");
+        assert!(hit_full, "the bounded queue should report Full once stuck");
+    }
+
+    #[test]
+    fn write_after_drop_is_a_noop_from_outside() {
+        // We can't easily simulate "after drop" without unsafe pointer
+        // games, but we can verify write returns Err when the underlying
+        // PTY is closed. Easiest: spawn `sh -c true` and let it exit,
+        // then attempt to write — the writer will report a closed pipe.
+        let Some(shell) = detect_default_shell() else {
+            return;
+        };
+        let (cmd_arg, payload) = if cfg!(target_os = "windows") {
+            ("/C", "exit 0")
+        } else {
+            ("-c", "exit 0")
+        };
+        let (channel, _sink) = capture_channel();
+        let req = SpawnRequest {
+            shell,
+            args: vec![cmd_arg.to_string(), payload.to_string()],
+            cwd: None,
+            env: HashMap::new(),
+            rows: 24,
+            cols: 80,
+            project_id: None,
+            extension_id: None,
+            enable_shell_integration: false,
+            force_utf8: false,
+            origin: SessionOrigin::Local,
+            skip_user_profile: false,
+            sandboxed: false,
+            sandbox_network: None,
+        };
+        let session =
+            match spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel) {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+        // Give the child a moment to exit.
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        // The write may succeed (PTY buffer absorbs it) or return EPIPE
+        // depending on platform timing. Either way it must not panic.
+        let _ = session.write(b"some data\n");
+    }
+
+    #[test]
+    fn info_reports_session_metadata() {
+        let Some(shell) = detect_default_shell() else {
+            return;
+        };
+        let (cmd_arg, payload) = if cfg!(target_os = "windows") {
+            ("/C", "exit 0")
+        } else {
+            ("-c", "exit 0")
+        };
+        let (channel, _sink) = capture_channel();
+        let req = SpawnRequest {
+            shell: shell.clone(),
+            args: vec![cmd_arg.to_string(), payload.to_string()],
+            cwd: None,
+            env: HashMap::new(),
+            rows: 24,
+            cols: 80,
+            project_id: Some("proj-a".to_string()),
+            extension_id: Some("ext-b".to_string()),
+            enable_shell_integration: false,
+            force_utf8: false,
+            origin: SessionOrigin::Remote,
+            skip_user_profile: false,
+            sandboxed: false,
+            sandbox_network: None,
+        };
+        let session =
+            match spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel) {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+        let info = session.info();
+        assert_eq!(info.project_id.as_deref(), Some("proj-a"));
+        assert_eq!(info.extension_id.as_deref(), Some("ext-b"));
+        assert_eq!(info.origin, SessionOrigin::Remote);
+        assert_eq!(info.shell, shell);
+        // The OS pid is captured at spawn for the managed-process registry.
+        assert!(
+            info.pid.is_some(),
+            "a real PTY child should report an OS pid"
+        );
+    }
+
+    fn spawn_echo(payload: &str) -> Option<PtySession> {
+        let shell = detect_default_shell()?;
+        let (cmd_arg, full) = if cfg!(target_os = "windows") {
+            ("/C", format!("echo {payload}"))
+        } else {
+            ("-c", format!("echo {payload}"))
+        };
+        let (channel, _first) = capture_channel();
+        let req = SpawnRequest {
+            shell,
+            args: vec![cmd_arg.to_string(), full],
+            cwd: None,
+            env: HashMap::new(),
+            rows: 24,
+            cols: 80,
+            project_id: None,
+            extension_id: None,
+            enable_shell_integration: false,
+            force_utf8: false,
+            origin: SessionOrigin::Local,
+            skip_user_profile: false,
+            sandboxed: false,
+            sandbox_network: None,
+        };
+        spawn_session(req, &empty_script_dir(), &PathInjection::default(), channel).ok()
+    }
+
+    fn wait_for_exit(session: &PtySession) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            if session
+                .replay()
+                .since(0)
+                .iter()
+                .any(|(_, e)| matches!(e, TerminalEvent::Exit { .. }))
+            {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+
+    #[test]
+    fn reattach_replays_missed_events_into_a_fresh_channel() {
+        let Some(session) = spawn_echo("replay-me") else {
+            return;
+        };
+        wait_for_exit(&session);
+        // Reattach a fresh channel from seq 0 — it receives the full replay.
+        let (channel2, second) = capture_channel();
+        session.reattach(channel2, 0);
+        let events = second.lock().unwrap().clone();
+        let saw_data = events.iter().any(|e| {
+            matches!(e, TerminalEvent::Data { bytes } if String::from_utf8_lossy(bytes).contains("replay-me"))
+        });
+        let saw_exit = events
+            .iter()
+            .any(|e| matches!(e, TerminalEvent::Exit { .. }));
+        assert!(
+            saw_data,
+            "reattach should replay the echoed payload, got: {events:?}"
+        );
+        assert!(
+            saw_exit,
+            "reattach should replay the exit event, got: {events:?}"
+        );
+    }
+
+    #[test]
+    fn reattach_past_last_seq_replays_nothing() {
+        let Some(session) = spawn_echo("x") else {
+            return;
+        };
+        wait_for_exit(&session);
+        let last = session.replay().last_seq();
+        let (channel2, second) = capture_channel();
+        session.reattach(channel2, last);
+        assert!(
+            second.lock().unwrap().is_empty(),
+            "nothing should replay past the last delivered seq"
+        );
+    }
+}

@@ -4,7 +4,7 @@
  * full webhook round-trip lives in the tauri-driver project.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../../../helpers/db-reset"
 import { seedAndOpenWorkflow } from "../../../helpers/seed-workflow"
 import {
@@ -20,12 +20,14 @@ test.describe("workflow node — io.webhook.respond", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded io.webhook.respond renders + statusCode + body persist", async ({ page }) => {
+  test("seeded io.webhook.respond renders + statusCode + body fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "io-webhook-respond")
     await assertNodeOnCanvas(page, { kind: "io.webhook.respond", label: "Respond" })
     await openNodeInspector(page, "io.webhook.respond")
-    await expect(page.locator("#ins-statusCode, [name=statusCode]").first()).toBeVisible()
-    await expect(page.locator("#ins-body, [name=body]").first()).toBeVisible()
+    await expect(page.locator("#ins-status, [data-field=status]").first()).toBeVisible()
+    await expect(page.locator("#ins-body, [data-field=body]").first()).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "io.webhook.respond" })
   })

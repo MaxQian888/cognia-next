@@ -1,0 +1,101 @@
+{
+  "assessments": {
+    "label": {
+      "cacheEfficiency": "缓存效率",
+      "context": "上下文压力",
+      "costPerCommit": "每次提交成本",
+      "overhead": "开销",
+      "redundancy": "冗余",
+      "thrashing": "反复操作",
+      "toolHealth": "工具健康度"
+    },
+    "level": {
+      "critical": "严重",
+      "healthy": "健康",
+      "info": "提示",
+      "warning": "警告"
+    },
+    "reasoning": {
+      "cacheEfficiency": {
+        "healthy": "缓存复用良好（读/写 {ratio}×）。",
+        "info": "尚未使用提示缓存。",
+        "warning": "缓存复用率偏低（读/写 {ratio}×）——上下文被频繁重建。"
+      },
+      "context": {
+        "critical": "上下文峰值占 {pct}%——已达自动压缩阈值。",
+        "healthy": "上下文峰值占窗口 {pct}%。",
+        "warning": "上下文峰值占 {pct}%——接近压缩阈值。"
+      },
+      "costPerCommit": {
+        "healthy": "{commits} 次提交，每次 ${cost}。",
+        "info": "本次会话没有提交。",
+        "warning": "{commits} 次提交，每次 ${cost}——迭代成本偏高。"
+      },
+      "overhead": {
+        "healthy": "很快进入工作（{turns} 个准备轮次）。",
+        "info": "首次实际操作前有 {turns} 个准备轮次。",
+        "warning": "首次实际操作前有 {turns} 个准备轮次——启动开销偏高。"
+      },
+      "redundancy": {
+        "healthy": "没有冗余的工具调用。",
+        "info": "{duplicates} 次重复的工具调用。",
+        "warning": "{duplicates} 次重复的工具调用——存在重复劳动。"
+      },
+      "thrashing": {
+        "healthy": "没有重复的命令/编辑反复操作。",
+        "info": "{events} 次重复的命令/编辑。",
+        "warning": "{events} 次反复操作——相同的命令/文件被反复重做。"
+      },
+      "toolHealth": {
+        "critical": "{pct}% 的工具调用出错（{errors}）——工具频繁失败。",
+        "healthy": "{pct}% 的工具调用出错（{errors}）。",
+        "info": "尚无工具调用。",
+        "warning": "{pct}% 的工具调用出错（{errors}）——注意不稳定的步骤。"
+      }
+    },
+    "title": "健康评估"
+  },
+  "averages": {
+    "cost": "成本",
+    "duration": "生成耗时",
+    "title": "每轮平均",
+    "tokens": "Token"
+  },
+  "degradedTree": "对话以线性时间线展示（未存储分支数据）。",
+  "empty": "活动还不足以分析。",
+  "idle": {
+    "headline": "轮次之间出现 {count} 处超过 {seconds}s 的空闲间隙"
+  },
+  "kpi": {
+    "cacheHit": "缓存命中",
+    "cost": "成本",
+    "denials": "拒绝",
+    "duration": "生成耗时",
+    "errors": "错误",
+    "idleGaps": "空闲间隙",
+    "modelSwitches": "模型切换",
+    "reasoning": "推理",
+    "speed": "速度",
+    "tokens": "Token",
+    "tools": "工具调用",
+    "turns": "轮次"
+  },
+  "loading": "正在分析会话…",
+  "models": {
+    "title": "各模型用量",
+    "turns": "{count} 轮"
+  },
+  "open": "洞察",
+  "signals": {
+    "empty": "未检测到摩擦或反复操作。",
+    "friction": "你的消息中有 {count} 处摩擦信号",
+    "tests": "{passed} 通过，{failed} 失败",
+    "thinking": "{count} 个思考块",
+    "thrashing": "检测到重复的命令/编辑反复操作",
+    "title": "摩擦与反复操作"
+  },
+  "title": "会话洞察",
+  "units": {
+    "tokPerSec": "{value} tok/s"
+  }
+}

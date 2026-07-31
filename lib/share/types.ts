@@ -12,9 +12,12 @@ export type ShareKind =
   | "chat-md"
   | "chat-json"
   | "chat-text"
+  | "chat-quote"
   | "workflow-png"
+  | "usage-card"
   | "backup"
   | "a2ui"
+  | "discover-item"
 
 /**
  * The decrypted artifact. `data` is the artifact bytes: literal UTF-8 text when
@@ -74,6 +77,12 @@ export interface CreateShareRequest extends ShareLifecycle {
 /** Wire body for the create response. */
 export interface CreateShareResponse {
   code: string
+  /**
+   * Per-share owner secret minted by the worker. Required (via the
+   * `X-Owner-Token` header) to call stats/delete on a multi-tenant deployment.
+   * Stored locally; never embedded in the shareable URL.
+   */
+  ownerToken?: string
   expiresAt?: number
 }
 

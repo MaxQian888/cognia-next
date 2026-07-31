@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useSettingsStore } from "@/stores/settings"
 import { type KeyringProviderId } from "@/lib/tts/keyring"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 interface Props {
   provider: KeyringProviderId

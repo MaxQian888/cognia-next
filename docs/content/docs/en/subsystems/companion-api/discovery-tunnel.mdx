@@ -37,7 +37,7 @@ flowchart LR
     direction TB
     TUN["Cloudflared tunnel<br/>tunnel.rs:87 — public HTTPS"]
     LAN["LAN IP + mDNS<br/>mdns.rs:20 — _cognia._tcp.local."]
-    LOOP["Loopback<br/>127.0.0.1:7890 — same machine"]
+    LOOP["Loopback<br/>127.0.0.1:27890 — same machine"]
   end
   HEALTH["GET /api/v1/healthz<br/>healthz.rs:38 (unauth)"]
   PAIR["pair / reconnect"]

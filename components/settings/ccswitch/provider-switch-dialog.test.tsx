@@ -42,6 +42,7 @@ const samplePlan = {
     activeProviderIdBefore: undefined,
     activeProviderIdAfter: "ccswitch:p1",
     restartSidecar: true,
+    useSubscription: false,
   },
   agentChanges: [],
 }
@@ -105,6 +106,37 @@ describe("ProviderSwitchDialog", () => {
     const lastCall = planMock.mock.calls.at(-1)!
     const scope = lastCall[1]
     expect(scope.agents.length).toBeGreaterThan(0)
+  })
+
+  it("previews the subscription reuse note for an official provider plan", async () => {
+    planMock.mockReturnValue({
+      ...samplePlan,
+      cogniaChanges: { ...samplePlan.cogniaChanges, useSubscription: true },
+    })
+    renderDialog()
+    expect(await screen.findByText("dialog.useSubscription")).toBeInTheDocument()
+  })
+
+  it("hides the subscription note for keyed providers", async () => {
+    renderDialog()
+    await screen.findByText("dialog.cogniaSection")
+    expect(screen.queryByText("dialog.useSubscription")).toBeNull()
+  })
+
+  it.each([
+    [{ activated: true, source: "vault" }, "dialog.subscriptionActivated"],
+    [{ activated: true, source: "adopted" }, "dialog.subscriptionAdopted"],
+    [{ activated: false, error: "none-found" }, "dialog.subscriptionNoneFound"],
+    [
+      { activated: false, error: "vault sealed" },
+      'dialog.subscriptionFailed:{"error":"vault sealed"}',
+    ],
+  ])("renders the subscription apply outcome %j", async (subscription, expected) => {
+    applyMock.mockResolvedValue({ cogniaApplied: true, agentResults: [], subscription })
+    renderDialog()
+    await waitFor(() => expect(planMock).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole("button", { name: "dialog.confirm" }))
+    expect(await screen.findByText(expected)).toBeInTheDocument()
   })
 
   it("renders nothing when the provider is null", () => {

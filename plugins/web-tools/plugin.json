@@ -2,15 +2,25 @@
   "id": "cognia-web-tools",
   "name": "Web Tools",
   "version": "0.1.0",
-  "description": "Browser-safe HTTP fetch and URL helpers for plugin authors.",
+  "description": "Built-in web tools for the agent: multi-provider web_search, web_fetch (with readable text extraction), web_download, and web_research.",
   "type": "frontend",
   "capabilities": ["tools"],
   "main": "src/index.ts",
   "author": "cognia-next",
   "license": "MIT",
+  "minAppVersion": "0.1.0",
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "permissions": ["network:fetch"],
-  "activationEvents": ["onStartup"]
+  "permissions": ["network:fetch", "agent:control"],
+  "networkAccess": {
+    "allowedDomains": ["*"],
+    "reasoning": "web_search, web_fetch, web_download and web_research operate on URLs the user or agent supplies at runtime, so any host may be reached. The user's search-provider keys are only sent to their configured providers."
+  },
+  "activationEvents": ["startup"],
+  "runtimeCompatibility": {
+    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "mobile": { "availability": "supported", "entrypoint": "src/index.ts" }
+  }
 }

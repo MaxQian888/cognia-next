@@ -12,10 +12,16 @@ import type {
   WorkflowRetryPolicy,
 } from "@/types/workflow/visual"
 import { getExecutor } from "@/lib/workflow/nodes/registry"
+import { retiredNodeKind } from "@/lib/workflow/nodes/retired-kinds"
 import { resolveDeep } from "./expression"
 import { IdempotencyCache } from "./idempotency"
 import type { RunLogger } from "./event-log"
 import type { SecretResolver } from "./secret-resolver"
+import { createStreamSink } from "./stream-sink"
+import { assertCircuitClosed, recordCircuitFailure, recordCircuitSuccess } from "./circuit-breaker"
+import { validateNodeParams } from "@/lib/workflow/nodes/validate-params"
+import { nodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
+import { validateAgainstJsonSchema } from "@/lib/workflow/nodes/ai/schema-validate"
 
 export interface RunStepInput {
   workflow: VisualWorkflow
@@ -57,6 +63,13 @@ export interface RunStepInput {
   cacheKey?: string
   /** Iteration provenance stamped onto step start/complete event payloads. */
   iterationMeta?: { loopId: string; iterationIndex: number }
+  /**
+   * Outputs of every node completed so far in this run — the
+   * `{{ $nodes['id'] }}` global expression scope. Direct predecessors remain
+   * the `upstream` map (`$node[...]`); this is the best-effort superset for
+   * non-adjacent reads. Optional so isolated callers stay unchanged.
+   */
+  nodesOutputs?: Record<string, unknown>
 }
 
 export interface StepExecution {
@@ -68,13 +81,45 @@ export interface StepExecution {
   fromCache: boolean
 }
 
+export class InvalidNodeParamsError extends Error {
+  readonly code = "invalid-node-params" as const
+  readonly retryable = false
+
+  constructor(node: WorkflowNode, errors: readonly string[]) {
+    super(
+      `Invalid params for node ${node.id} (${node.type}@${node.typeVersion}): ${errors.join("; ")}`
+    )
+    this.name = "InvalidNodeParamsError"
+  }
+}
+
 /**
  * Run a single step, returning its output. Memoized by `(runId, stepId)`
  * via the IdempotencyCache. Retries respect the per-workflow retry policy
  * unless the executor returned a non-retryable error.
  */
+/**
+ * Effective retry policy for one step: the node's own
+ * `data.errorHandling.retry` (n8n-style per-node setting; maxRetries = extra
+ * attempts after the first) wins over the workflow-level `retryDefaults`.
+ */
+export function resolveStepRetryPolicy(
+  node: WorkflowNode,
+  workflowDefault: WorkflowRetryPolicy
+): WorkflowRetryPolicy {
+  const nodeRetry = node.data.errorHandling?.retry
+  if (!nodeRetry) return workflowDefault
+  return {
+    attempts: Math.max(1, nodeRetry.maxRetries + 1),
+    backoff: nodeRetry.backoff,
+    baseMs: Math.max(0, nodeRetry.retryIntervalMs),
+    ...(typeof nodeRetry.maxIntervalMs === "number" ? { maxMs: nodeRetry.maxIntervalMs } : {}),
+  }
+}
+
 export async function runStep(input: RunStepInput): Promise<StepExecution> {
-  const { node, runId, cache, signal, logger, retryPolicy } = input
+  const { node, runId, cache, signal, logger } = input
+  const retryPolicy = resolveStepRetryPolicy(node, input.retryPolicy)
   const cacheKey = input.cacheKey ?? node.id
 
   if (cache.has(cacheKey)) {
@@ -98,9 +143,18 @@ export async function runStep(input: RunStepInput): Promise<StepExecution> {
 
   const reg = getExecutor(node.type, node.typeVersion)
   if (!reg) {
+    // A retired kind cannot be fixed by installing a plugin from this app, so
+    // it must not be reported as if it could. The editor's `kindRetired`
+    // diagnostic blocks the run before it starts; this covers the paths that
+    // do not go through the editor — scheduled runs, API-triggered runs, and
+    // a workflow whose provider was unregistered mid-run.
+    const retired = retiredNodeKind(node.type)
     const err = new Error(
-      `No executor registered for ${node.type}@${node.typeVersion}. ` +
-        `Install the plugin that provides it, or change the node type.`
+      retired
+        ? `Node kind ${node.type} was removed in ${retired.removedIn} and has no executor. ` +
+            `Re-author this step, or install the compatibility plugin that provides it.`
+        : `No executor registered for ${node.type}@${node.typeVersion}. ` +
+            `Install the plugin that provides it, or change the node type.`
     )
     await logger.stepFailed(node.id, { message: err.message, retryable: false })
     throw err
@@ -118,19 +172,54 @@ export async function runStep(input: RunStepInput): Promise<StepExecution> {
     staticData: input.staticData ?? {},
     params: node.data.params as Record<string, unknown>,
     variables: input.workflow.variables ?? {},
+    ...(input.nodesOutputs ? { nodes: input.nodesOutputs } : {}),
   })
+  const resolvedParamRecord =
+    resolvedParams && typeof resolvedParams === "object" && !Array.isArray(resolvedParams)
+      ? (resolvedParams as Record<string, unknown>)
+      : {}
+  // Built-in Zod schemas describe the authored inspector payload. Validate
+  // that payload before expression substitution: a valid expression string
+  // may resolve to a boolean, number, object, or array that intentionally no
+  // longer matches the editor field's source type. Plugin JSON Schemas, by
+  // contrast, are execution contracts and therefore validate resolved input.
+  const paramErrors = validateNodeParams(node.type, node.data.params).summary
+  const pluginParamsSchema = nodeCatalogEntry(node.type).paramsSchema
+  if (pluginParamsSchema) {
+    const pluginValidation = validateAgainstJsonSchema(pluginParamsSchema, resolvedParamRecord)
+    if (!pluginValidation.ok) paramErrors.push(...pluginValidation.errors)
+  }
+  if (paramErrors.length > 0) {
+    const err = new InvalidNodeParamsError(node, paramErrors)
+    await logger.stepFailed(node.id, { message: err.message, retryable: false })
+    throw err
+  }
 
   const ctx: StepExecutionContext = {
     runId,
     workflowId: input.workflow.id,
     stepId: node.id,
-    params: resolvedParams as Record<string, unknown>,
+    params: resolvedParamRecord,
     upstream,
     trigger: input.trigger,
     signal,
     log: (level, message, payload) => void logger.log(level, message, payload, node.id),
     resolveSecret: (refId) => input.secretResolver.resolve(refId),
     ...(input.traceId ? { traceId: input.traceId } : {}),
+  }
+
+  // Circuit breaker (A4): if this node has tripped its breaker, fail fast
+  // BEFORE consuming an attempt. The CircuitOpenError is non-retryable, so it
+  // flows straight through the orchestrator's onError / error-edge path.
+  const breaker = node.data.errorHandling?.circuitBreaker
+  if (breaker) {
+    try {
+      assertCircuitClosed(input.workflow.id, node.id)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      await logger.stepFailed(node.id, { message, retryable: false })
+      throw err instanceof Error ? err : new Error(message)
+    }
   }
 
   let attempt = 0
@@ -144,12 +233,26 @@ export async function runStep(input: RunStepInput): Promise<StepExecution> {
     }
 
     await logger.stepStarted(node.id, { attempt }, input.iterationMeta)
+    // Fresh sink per attempt so a failed attempt's partial stream never
+    // interleaves with the retry's output. The sink throttles `step_stream`
+    // writes; commentary uses an independent channel so it cannot be folded
+    // into final output. Usage lands as one `step_usage` event.
+    const sink = createStreamSink({ stepId: node.id, logger })
+    const commentarySink = createStreamSink({
+      stepId: node.id,
+      logger: { stepStream: logger.stepCommentary },
+    })
+    ctx.emitStream = (delta) => sink.push(delta)
+    ctx.emitCommentary = (delta) => commentarySink.push(delta)
+    ctx.reportUsage = (usage) => void logger.stepUsage(node.id, usage)
     try {
       const result = await runWithTimeout(
         reg.timeoutMs ?? input.workflow.settings.timeoutMs,
         signal,
-        () => reg.execute(ctx)
+        (attemptSignal) => reg.execute({ ...ctx, signal: attemptSignal })
       )
+      sink.final()
+      commentarySink.final()
       const exec: StepExecution = {
         output: result.output,
         decision: result.decision,
@@ -163,19 +266,31 @@ export async function runStep(input: RunStepInput): Promise<StepExecution> {
         }
       }
       cache.set(cacheKey, result.output)
+      if (breaker) recordCircuitSuccess(input.workflow.id, node.id)
       await logger.stepCompleted(node.id, result.output, input.iterationMeta)
       return exec
     } catch (err) {
+      sink.final()
+      commentarySink.final()
       const message = err instanceof Error ? err.message : String(err)
-      const retryable = isRetryableError(err)
+      const retryable = reg.retryable !== false && isRetryableError(err)
       const lastAttempt = attempt >= retryPolicy.attempts
       await logger.stepFailed(node.id, { message, retryable })
 
       if (!retryable || lastAttempt) {
+        // Terminal failure for this node — feed the breaker so a repeatedly
+        // failing node eventually trips and fail-fasts on the next run.
+        if (breaker) recordCircuitFailure(input.workflow.id, node.id, breaker)
         throw err instanceof Error ? err : new Error(message)
       }
 
       const delay = computeBackoffMs(retryPolicy, attempt)
+      await logger.stepRetrying(node.id, {
+        attempt,
+        maxAttempts: retryPolicy.attempts,
+        delayMs: delay,
+        error: message,
+      })
       await logger.log(
         "warn",
         `step ${node.id} failed (attempt ${attempt}/${retryPolicy.attempts}); retrying in ${delay}ms`,
@@ -212,28 +327,50 @@ function computeBackoffMs(policy: WorkflowRetryPolicy, attempt: number): number 
 async function runWithTimeout<T>(
   timeoutMs: number,
   outer: AbortSignal,
-  fn: () => Promise<T>
+  fn: (signal: AbortSignal) => Promise<T>
 ): Promise<T> {
-  if (timeoutMs <= 0) return fn()
   return new Promise<T>((resolve, reject) => {
     const ac = new AbortController()
-    const onAbort = () => ac.abort(new Error("Workflow run aborted"))
-    if (outer.aborted) return reject(new Error("Workflow run aborted"))
+    let settled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+
+    const cleanup = () => {
+      if (timer) clearTimeout(timer)
+      outer.removeEventListener("abort", onAbort)
+    }
+    const settle = (outcome: { value: T } | { error: unknown }) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      if ("value" in outcome) resolve(outcome.value)
+      else reject(outcome.error instanceof Error ? outcome.error : new Error(String(outcome.error)))
+    }
+    const onAbort = () => {
+      const err = new Error("Workflow run aborted")
+      err.name = "AbortError"
+      ac.abort(err)
+      settle({ error: err })
+    }
+
+    if (outer.aborted) {
+      onAbort()
+      return
+    }
     outer.addEventListener("abort", onAbort, { once: true })
-    const timer = setTimeout(() => {
-      ac.abort(new Error(`Step exceeded timeout (${timeoutMs}ms)`))
-    }, timeoutMs)
-    fn()
-      .then((value) => {
-        clearTimeout(timer)
-        outer.removeEventListener("abort", onAbort)
-        resolve(value)
-      })
-      .catch((err) => {
-        clearTimeout(timer)
-        outer.removeEventListener("abort", onAbort)
-        reject(err instanceof Error ? err : new Error(String(err)))
-      })
+    if (timeoutMs > 0) {
+      timer = setTimeout(() => {
+        const err = new Error(`Step exceeded timeout (${timeoutMs}ms)`)
+        err.name = "TimeoutError"
+        ac.abort(err)
+        settle({ error: err })
+      }, timeoutMs)
+    }
+    Promise.resolve()
+      .then(() => fn(ac.signal))
+      .then(
+        (value) => settle({ value }),
+        (error) => settle({ error })
+      )
   })
 }
 

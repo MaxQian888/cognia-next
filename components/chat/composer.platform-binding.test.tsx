@@ -15,7 +15,7 @@
 
 import "fake-indexeddb/auto"
 import { getDb, __resetDbForTesting } from "@/lib/db/schema"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 
 // ── mock tauri (not available in jsdom) ──────────────────────────────────────

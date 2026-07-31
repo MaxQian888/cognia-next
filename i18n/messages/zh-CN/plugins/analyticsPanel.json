@@ -1,0 +1,11 @@
+{
+  "colEvents": "事件",
+  "colKeys": "类型",
+  "colLastEvent": "最近事件",
+  "colPlugin": "插件",
+  "empty": "尚无统计事件。",
+  "loading": "加载使用统计中…",
+  "summaryErrors": "错误数",
+  "summaryEvents": "事件总数",
+  "summaryKeys": "事件类型"
+}

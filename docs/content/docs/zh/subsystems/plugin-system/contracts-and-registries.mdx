@@ -8,16 +8,16 @@ description: 声明式真相层——声明插件可贡献什么、证明每个�
 <Status variant="experimental" />
 
 <TLDR>
-`lib/plugin/contracts/` 是声明式真相层：`plugin-points.ts:979` 与 `plugin-capabilities.ts:61` 用 binding/docs/requiredTests 证明字段编目每个扩展点与能力，`capability-bridge-map.ts:156` 与 `module-bridge-map.ts:118` 把 manifest 字段接到注册表/桥，`runtime-proof-audit.ts:48` 断言每个"已实现"表面都有证据。`lib/plugin/registries/` 是类型化的覆盖注册表存储（内置 ← 插件覆盖，按 id 去重）；`lib/plugin/sdk/` 是宿主从不消费的纯 `define*()` 类型透传（`sdk/index.ts:8`）。
+`lib/plugin/contracts/` 是声明式真相层：`plugin-points.ts` 与 `plugin-capabilities.ts` 用 binding/docs/requiredTests 证明字段编目每个扩展点与能力，`capability-bridge-map.ts` 与 `module-bridge-map.ts` 把 manifest 字段接到注册表/桥，`runtime-proof-audit.ts` 断言每个"已实现"表面都有证据。`lib/plugin/registries/` 是类型化的覆盖注册表存储（内置 ← 插件覆盖，按 id 去重）；`packages/plugin-sdk/src/define/` 保存纯 `define*()` 类型透传，并通过 `@cognia/plugin-sdk` 包根暴露给插件作者。
 </TLDR>
 
 <StatGrid>
-  <Stat label="能力契约" value="33" />
+  <Stat label="能力契约" value="59" />
   <Stat label="UI 槽 / 钩子 / 激活" value="49 / ~150 / 26" />
   <Stat label="运行时点" value="11" />
-  <Stat label="同步覆盖能力" value="9" />
-  <Stat label="异步模块桥" value="13" />
-  <Stat label="SDK define*() 辅助函数" value="7" />
+  <Stat label="同步覆盖能力" value="16" />
+  <Stat label="异步模块桥" value="20" />
+  <Stat label="SDK define*() 辅助函数" value="44" />
 </StatGrid>
 
 ## 目的
@@ -25,11 +25,11 @@ description: 声明式真相层——声明插件可贡献什么、证明每个�
 `lib/plugin/contracts/` 是**声明式真相层**：它声明插件可以贡献什么，以及每个声明的表面是否真的被接线。两个规范目录是其锚点：
 
 - `plugin-points.ts` —— 每个 UI 槽 / 钩子 / 激活 / 运行时扩展点，各自携带 `binding`、`docs` 与 `requiredTests` 证明字段。
-- `plugin-capabilities.ts` —— 33 个 `PluginCapability` 契约。
+- `plugin-capabilities.ts` —— 59 个 `PluginCapability` 契约。
 
 `capability-contributions.ts:79` 把插件的能力标签映射到具体的 manifest 条目，供 UI 摘要使用。两个接线映射把 manifest 字段连到运行时存储：`capability-bridge-map.ts` 负责同步覆盖注册表分发，`module-bridge-map.ts` 负责异步模块加载桥。可证明性由 `runtime-proof-audit.ts`、`conflict-reporter.ts` 与 `diagnostics-store.ts` 强制执行，它们证明每个"已实现"表面都有证据，并上报冲突与诊断。
 
-`lib/plugin/registries/` 是建在 `createOverlayRegistry` 基底之上的类型化内存存储（内置 ← 插件覆盖，按 id 去重，带插件标签）。`lib/plugin/sdk/` 是面向作者的 `define*()` 辅助函数 —— 纯类型透传（`define-skill.ts:23`、`define-subagent.ts:22`），用于收窄内联 manifest 条目；宿主从不消费它们（`sdk/index.ts:8`）。
+`lib/plugin/registries/` 是建在 `createOverlayRegistry` 基底之上的类型化内存存储（内置 ← 插件覆盖，按 id 去重，带插件标签）。`packages/plugin-sdk/src/define/` 是面向作者的 `define*()` 辅助函数，用于收窄内联 manifest 条目。宿主运行时消费 manifest 与注册表，不消费这些辅助函数；辅助函数通过 `@cognia/plugin-sdk` 包根作为公共作者接口暴露。工具代码可以从 `@cognia/plugin-sdk/contracts` 导入只读契约目录与贡献摘要辅助函数，而不需要直接依赖 `lib/plugin/contracts/*`。
 
 ## 覆盖注册表模式
 
@@ -86,11 +86,11 @@ const RUNTIME_POINT_BINDINGS: Record<CanonicalRuntimePoint, string> = {
 }
 ```
 
-桥映射**不**以 point-id 为键；它们以 manifest 字段 / 能力标签为键，并引用运行时点绑定所命名的同一批注册表单例。`capability-bridge-map.ts`（`OVERLAY_REGISTRY_CAPABILITIES` `:156-303`）持有 9 个同步覆盖能力，统一为 `register(id, def, { pluginId })` / `unregisterByPlugin(pluginId)` 形态；`defineOverlayCapability<E>` 是唯一的型变桥（`:144-148`）。`module-bridge-map.ts`（`MODULE_BRIDGE_CAPABILITIES` `:118-277`）持有 13 个异步桥，各自归一化为 `register(ctx) => Promise<void>` / `unregister(pluginId)`（`:97-110`）。两者都通过 `Object.keys` 暴露各自的 `*_CAPABILITY_KEYS`。
+桥映射**不**以 point-id 为键；它们以 manifest 字段 / 能力标签为键，并引用运行时点绑定所命名的同一批注册表单例。`capability-bridge-map.ts`（`OVERLAY_REGISTRY_CAPABILITIES`）持有 16 个同步覆盖能力，统一为 `register(id, def, { pluginId })` / `unregisterByPlugin(pluginId)` 形态；`defineOverlayCapability<E>` 是唯一的型变桥。`module-bridge-map.ts`（`MODULE_BRIDGE_CAPABILITIES`）持有 20 个异步桥，各自归一化为 `register(ctx) => Promise<void>` / `unregister(pluginId)`。两者都通过 `Object.keys` 暴露各自的 `*_CAPABILITY_KEYS`。
 
 ## 可证明的贡献
 
-`auditPluginPointContracts()` 遍历每个契约；对于 `status === "implemented"`，它断言 `binding`、`docs` 与 `requiredTests` 非空，产出 `"verified" | "missing_proof" | "not_applicable"` 的 `proofStatus`（`plugin-points.ts:990-1025`）。`auditPluginCapabilityContracts()` 对 33 个能力做同样的事，并额外要求工具 / 命令 / 钩子提供 `builtinContributionPaths`（`plugin-capabilities.ts:826-905`）。`runtime-proof-audit.ts:auditPluginRuntimeClaims()` 把两者加上手写的 `RUNTIME_RISK_AUDITS` 组合成一个 `PluginRuntimeClaimsAuditReport`（`runtime-proof-audit.ts:48-54`）。
+`auditPluginPointContracts()` 遍历每个契约；对于 `status === "implemented"`，它断言 `binding`、`docs` 与 `requiredTests` 非空，产出 `"verified" | "missing_proof" | "not_applicable"` 的 `proofStatus`。`auditPluginCapabilityContracts()` 对 59 个能力做同样的事，并额外要求工具 / 命令 / 钩子提供 `builtinContributionPaths`。`runtime-proof-audit.ts:auditPluginRuntimeClaims()` 把两者加上手写的 `RUNTIME_RISK_AUDITS` 组合成一个 `PluginRuntimeClaimsAuditReport`。
 
 `diagnostics-store.ts` 是一个带发布/订阅的模块级 `Map<pluginId, PluginPointDiagnostic[]>` —— `recordPluginPointDiagnostic` / `getAllPluginPointDiagnostics` / `subscribePluginPointDiagnostics`（`diagnostics-store.ts:21-60`）。`recordSilentFailure` 按 `expected` 分支：web 模式无 Tauri 产出 debug 日志，桌面端产出 warning 加一条 `plugin.silent-failure` 诊断（`diagnostics-store.ts:79-98`）。
 
@@ -120,25 +120,35 @@ export function reportRegistryConflict(info: RegistryConflictInfo): void {
 | `character-pack-registry.ts` | `PluginCharacterPackDef`（validating） | `defineCharacterPack` | `registerCharacterPack :51`、`refreshAllPackWarnings :58`、`getPackCharacterByRuntimeId :122`、`buildOverlayCharacterId :162` |
 | `agent-team-template-registry.ts` | `PluginAgentTeamTemplateDef`（validating） | `defineAgentTeamTemplate` | `registerAgentTeamTemplate :132`、`validateTemplateRequires :88`、`getTemplateWarnings :161` |
 | `workflow-template-registry.ts` | `PluginWorkflowTemplateDef`（validating） | `defineWorkflowTemplate` | `registerWorkflowTemplate :111`、`validateWorkflowTemplateRequires :77`、`getWorkflowTemplateWarnings :124` |
-| `shared-memory-adapter-registry.ts` | `PluginSharedMemoryAdapterDef`（plain） | （无） | `registerSharedMemoryAdapter :24`、`unregisterSharedMemoryAdaptersByPlugin :28` |
+| `shared-memory-adapter-registry.ts` | `PluginSharedMemoryAdapterDef`（plain） | `defineSharedMemoryAdapter` | `registerSharedMemoryAdapter :24`、`unregisterSharedMemoryAdaptersByPlugin :28` |
 | `command-safety-registry.ts` | 按 pluginId 的 `ToolRules`（plain，合并） | （无 —— `ctx.terminal` 命令式） | `registerPluginCommandRules :30`、`getPluginCommandRulesets :48` |
+| `pet-achievement-registry.ts` | `PluginPetAchievementDef`（plain，纯数据条件 DSL） | （manifest `petAchievements`） | `registerPetAchievement`、`compilePluginAchievement`、`listCompiledPluginAchievements` |
+| `pet-item-registry.ts` | `PluginPetItemDef`（plain，纯数据） | （manifest `petItems`） | `registerPetItem`、`projectPluginItem`、`listProjectedPluginItems` |
 | `createOverlayRegistry.ts` | 工厂 —— 基底 | — | `createOverlayRegistry :144` |
 | `createValidatingOverlayRegistry.ts` | 工厂 —— requires 警告包装 | — | `createValidatingOverlayRegistry :63` |
 
+## 桌宠集成面
+
+宠物子系统（ADR-0058）向插件暴露四个协同表面：
+
+- **`ctx.pet`**（capability `pet`；权限 `pet:read` / `pet:interact`，`lib/plugin/api/pet-api.ts`）—— 读取去 PII 的宠物摘要、订阅净化后的事件、发起养育互动、发放 XP/金币奖励。奖励受令牌桶限流（`pet:interact` / `pet:emit`）并被每插件每日预算钳制（50 XP / 100 金币，`lib/plugin/api/pet-budget.ts`）；生命周期事件不可由插件发出。
+- **Hooks** —— `onPetInteract`、`onPetLevelUp`、`onPetEvolved`、`onPetAchievementUnlocked`、`onPetUnwell`，由 `lib/pet/runtime/pet-controller.ts` fire-and-forget 分发。载荷不携带任何事件 meta（PII 红线）；雷达/被动事件从不分发。
+- **UI slot** —— `pet.console.tab`（/pet 控制台由宿主持有的「插件」tab，仅在有贡献时出现）与 `pet.panel.actions`（互动面板动作行，上限 4）。context 包：`level` / `stage` / `mood` / `condition`。
+- **工作流节点** —— 内置 `trigger.pet.event`（levelUp / evolved / achievementUnlocked / unwell，runner 在 `lib/workflow/runtime/pet-event-trigger.ts`）与 `action.pet.interact`。
+
+`plugins/pet-daily-quests` 是端到端参考实现（控制台 tab 任务板、经预算 API 发奖、goal hook 联动）。
+
 ## SDK define*() 目录
 
-所有辅助函数都是纯类型透传，**除了** `defineCharacterPack`，它会立即校验。
+所有辅助函数都是纯类型透传，**除了** `defineCharacterPack`，它会立即校验。包根会导出所有受支持的 helper；按源码文件形状拼出的 `define/<name>` 导入不会发布。
 
-| 辅助函数 | 产出 | :line |
+| 辅助函数分组 | 示例 | 产出 |
 | --- | --- | --- |
-| `define-skill.ts` | `PluginSkillDef` | `:23` |
-| `define-subagent.ts` | `PluginSubagentDef` | `:22` |
-| `define-mcp-server-preset.ts` | `PluginMcpServerPresetDef` | `:23` |
-| `define-native-anthropic-tool.ts` | `PluginNativeAnthropicToolDef` | `:28` |
-| `define-agent-team-template.ts` | `PluginAgentTeamTemplateDef`（`requires` 块） | `:27` |
-| `define-workflow-template.ts` | `PluginWorkflowTemplateDef`（`requires` 块） | `:24` |
-| `define-character-pack.ts` | `PluginCharacterPackDef` —— 空 / 超过 50 / 重复 localId 时抛出；未知 TTS / 超大头像时警告 | `:46`（上限 `:35`、`:44`） |
-| `index.ts` | 全部 7 个的桶导出 | `:16-22` |
+| Agent 与工作流 | `defineAgentTool`、`defineGuardrail`、`defineContextProvider`、`defineChatMiddleware`、`defineToolRoute`、`defineSkill`、`defineSubagent`、`defineAgentTeamTemplate`、`defineWorkflowTemplate`、`defineWorkflowNode`、`defineWorkflowTrigger` | Agent SDK 工具、守卫、上下文提供器、聊天中间件、语义工具路由、团队、子代理、工作流节点 / 触发器 / 模板 |
+| 运行时与集成 | `defineConnector`、`defineWorkspaceBackend`、`defineMcpServerPreset`、`defineNativeAnthropicTool`、`defineExternalAgentPreset`、`defineExternalAgentAdapter`、`defineRoutingStrategy`、`defineDeploymentFilter`、`defineProtocolAdapter`、`defineAuthProvider`、`defineUriHandler` | 连接器与工作区适配器、MCP / native-tool 覆盖、外部代理预设 / 适配器、provider-routing 扩展、认证与深链处理器 |
+| UI 与外壳 | `defineViewContainer`、`defineView`、`defineWebview`、`defineMessageRenderer`、`defineModalMount`、`defineTerminalCompletionProvider`、`defineQuickAction`、`defineTrayItem` | 侧栏容器、树 / 自定义视图、沙盒 webview、消息渲染器、模态挂载、终端补全、命令 / composer / tray 快捷动作 |
+| 外观与资源 | `defineTheme`、`defineThemePack`、`defineDensityPreset`、`defineFontContribution`、`defineWallpaper` | 主题颜色、主题包、密度预设、插件字体、插件壁纸 |
+| 策略与用量 | `defineConfiguration`、`defineExporter`、`defineImporter`、`defineSharedMemoryAdapter`、`defineBalanceAdapter`、`defineLimitsSource`、`defineImRateSource`、`defineCompactionStrategy` | 配置 schema、导入 / 导出提供器、共享记忆后端、余额 / 限额 / IM 速率 / 压缩策略来源 |
 
 ## 数据流
 
@@ -147,9 +157,9 @@ graph LR
   PP["plugin-points<br/>contracts/plugin-points.ts:979"]
   PC["plugin-capabilities<br/>contracts/plugin-capabilities.ts:61"]
   CC["capability-contributions<br/>contracts/capability-contributions.ts:79"]
-  CBM["OVERLAY_REGISTRY_CAPABILITIES<br/>contracts/capability-bridge-map.ts:156"]
-  MBM["MODULE_BRIDGE_CAPABILITIES<br/>contracts/module-bridge-map.ts:118"]
-  DEF["define star helpers<br/>sdk/index.ts:16"]
+  CBM["OVERLAY_REGISTRY_CAPABILITIES<br/>contracts/capability-bridge-map.ts:190"]
+  MBM["MODULE_BRIDGE_CAPABILITIES<br/>contracts/module-bridge-map.ts:146"]
+  DEF["define star helpers<br/>packages/plugin-sdk/src/index.ts"]
   COR["createOverlayRegistry<br/>registries/createOverlayRegistry.ts:144"]
   CVOR["createValidatingOverlayRegistry<br/>registries/createValidatingOverlayRegistry.ts:63"]
   REG["specific registries<br/>skill subagent mcp native char-pack"]
@@ -191,7 +201,7 @@ graph LR
 ## 陷阱
 
 - **Validating 与 plain 覆盖。** 只有 `character-pack`、`agent-team-template` 与 `workflow-template` 使用 `createValidatingOverlayRegistry`；其余为 plain。警告是非阻塞的——条目无论如何都会注册——因此兄弟覆盖的变更必须调用 `refreshAll*Warnings()` 以清除陈旧的缺失依赖警告（接线于 `capability-bridge-map.ts:165-176`）。
-- **能力桥与模块桥映射。** `capability-bridge-map.ts` 是同步内联 def 覆盖能力（`:151-156`）；`module-bridge-map.ts` 是异步模块加载能力，归一化在单一 `register(ctx) => Promise` / `unregister` 之后（`:84-110`）。定制接线（modes / commands / themes / lsp / a2ui）两者皆不在（`capability-bridge-map.ts:10-16`）。若干模块桥键是合成的（workspace-backend、message-renderer、chat-middleware）—— 字段驱动分发（`module-bridge-map.ts:113-117`）。
+- **能力桥与模块桥映射。** `capability-bridge-map.ts` 是同步内联 def 覆盖能力（`:151-156`）；`module-bridge-map.ts` 是异步模块加载能力，归一化在单一 `register(ctx) => Promise` / `unregister` 之后（`:84-110`）。定制接线（modes / commands / themes / lsp / a2ui）两者皆不在（`capability-bridge-map.ts:10-16`）。字段驱动模块桥现在都是规范能力标签，并仍依据 `manifest[manifestField]?.length` 做派发门控（`module-bridge-map.ts:113-117`）。
 - **审计的"证明"是字段存在，而非可达性。** 审计检查证明字符串非空；真正的可达性由单独的静态槽审计脚本强制执行，该脚本按 `REGISTRATION_HOST_EXTENSION_POINTS` / `hostKind` 分支（`plugin-points.ts:222-233`）。
 - **first-wins-cross-plugin 是可选的。** 默认是 last-wins；此处的 plain id-键注册表在跨插件 id 冲突时静默 last-wins。
 

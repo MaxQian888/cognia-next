@@ -1,3 +1,5 @@
+/** @jest-environment jsdom */
+
 /**
  * PluginDevTools Tests
  */
@@ -280,3 +282,4 @@ describe("PluginDevTools", () => {
     })
   })
 })
+/** @jest-environment jsdom */

@@ -3,6 +3,10 @@ import { useSettingsStore } from "@/stores/settings"
 import { SettingsHydrator } from "./settings-hydrator"
 import { getSettings } from "@/lib/db/settings"
 import { BOOT_MIRROR_STORAGE_KEY } from "@/lib/appearance/boot-script"
+import {
+  DEFAULT_BEHAVIOR_TELEMETRY_SETTINGS,
+  getBehaviorTelemetrySettings,
+} from "@/lib/telemetry/events/settings"
 
 jest.mock("@/lib/db/settings", () => ({
   getSettings: jest.fn().mockResolvedValue({
@@ -57,7 +61,17 @@ describe("SettingsHydrator", () => {
     expect((getSettings as jest.Mock).mock.calls.length).toBe(0)
   })
 
-  it("writes the appearance mirror to localStorage when resolvedTheme is available", async () => {
+  it("writes the appearance mirror to localStorage for a non-default theme", async () => {
+    // The default preset is governed by globals.css and is intentionally NOT
+    // mirrored (see the default-base test below); a color preset is. Mark the
+    // store loaded so the mount's load() early-returns instead of resetting
+    // colorTheme back to "default".
+    useSettingsStore.setState({
+      settings: { id: "singleton" } as never,
+      loaded: true,
+      colorTheme: "ocean",
+      activeCustomThemeId: null,
+    })
     render(<SettingsHydrator />)
     await waitFor(() => {
       const raw = window.localStorage.getItem(BOOT_MIRROR_STORAGE_KEY)
@@ -71,9 +85,88 @@ describe("SettingsHydrator", () => {
     expect(typeof mirror["--accent"]).toBe("string")
   })
 
+  it("does not write the mirror for the default preset, and clears any stale one", async () => {
+    // Seed a stale mirror as if a custom theme had previously been active.
+    window.localStorage.setItem(
+      BOOT_MIRROR_STORAGE_KEY,
+      JSON.stringify({ "--background": "#0b1220" })
+    )
+    // Default base: colorTheme "default" + no active custom theme. loaded:true
+    // keeps load() from re-deriving the flat fields.
+    useSettingsStore.setState({
+      settings: { id: "singleton" } as never,
+      loaded: true,
+      colorTheme: "default",
+      activeCustomThemeId: null,
+    })
+    render(<SettingsHydrator />)
+    await waitFor(() => {
+      expect(window.localStorage.getItem(BOOT_MIRROR_STORAGE_KEY)).toBeNull()
+    })
+  })
+
+  it("mirrors non-default layout knobs (radius/density) even for the default preset", async () => {
+    useSettingsStore.setState({
+      settings: {
+        id: "singleton",
+        radius: { base: 1 },
+        density: { global: "spacious" },
+      } as never,
+      loaded: true,
+      colorTheme: "default",
+      activeCustomThemeId: null,
+    })
+    render(<SettingsHydrator />)
+    await waitFor(() => {
+      expect(window.localStorage.getItem(BOOT_MIRROR_STORAGE_KEY)).not.toBeNull()
+    })
+    const mirror = JSON.parse(window.localStorage.getItem(BOOT_MIRROR_STORAGE_KEY) ?? "{}")
+    expect(mirror.vars["--radius"]).toBe("1rem")
+    expect(mirror.attrs["data-density"]).toBe("spacious")
+    // Default preset ⇒ no color vars in the mirror.
+    expect(mirror["--background"]).toBeUndefined()
+  })
+
+  it("skips color mirroring while a plugin theme is directly active", async () => {
+    useSettingsStore.setState({
+      settings: { id: "singleton" } as never,
+      loaded: true,
+      colorTheme: "ocean",
+      activeCustomThemeId: null,
+      activePluginThemeId: "demo.neon",
+    })
+    render(<SettingsHydrator />)
+    // A plugin theme paints via <style>, so no inline color mirror; and with
+    // no non-default layout knobs the mirror is cleared entirely.
+    await waitFor(() => {
+      expect(window.localStorage.getItem(BOOT_MIRROR_STORAGE_KEY)).toBeNull()
+    })
+  })
+
   it("does not write the mirror until next-themes has resolved", () => {
     mockResolvedTheme = undefined
     render(<SettingsHydrator />)
     expect(window.localStorage.getItem(BOOT_MIRROR_STORAGE_KEY)).toBeNull()
+  })
+
+  it("installs canonical behavior telemetry updates in the renderer runtime", async () => {
+    const behaviorTelemetry = {
+      ...DEFAULT_BEHAVIOR_TELEMETRY_SETTINGS,
+      enabled: true,
+      sampleRate: 0.25,
+    }
+    useSettingsStore.setState({
+      settings: { id: "singleton", behaviorTelemetry } as never,
+      loaded: true,
+    })
+
+    render(<SettingsHydrator />)
+
+    await waitFor(() => {
+      expect(getBehaviorTelemetrySettings()).toMatchObject({ enabled: true, sampleRate: 0.25 })
+    })
+    expect(
+      JSON.parse(window.localStorage.getItem("cognia-behavior-telemetry-enabled") ?? "{}")
+    ).toMatchObject({ enabled: true, sampleRate: 0.25 })
   })
 })

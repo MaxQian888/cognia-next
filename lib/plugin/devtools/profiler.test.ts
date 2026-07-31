@@ -82,10 +82,14 @@ describe("PluginProfiler", () => {
 
   describe("Asynchronous Profiling", () => {
     it("should profile async functions", async () => {
-      const result = await profiler.profileAsync("plugin-a", "async-op", async () => {
+      jest.useFakeTimers()
+      const pending = profiler.profileAsync("plugin-a", "async-op", async () => {
         await new Promise((resolve) => setTimeout(resolve, 10))
         return "async result"
       })
+      await jest.advanceTimersByTimeAsync(10)
+      const result = await pending
+      jest.useRealTimers()
 
       expect(result).toBe("async result")
 

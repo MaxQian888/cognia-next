@@ -5,28 +5,45 @@
 // scheduler's actual runner lives in `BackupSchedulerProvider`.
 
 import { useState } from "react"
+import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
-import { CalendarClockIcon, FolderIcon } from "lucide-react"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { CalendarClockIcon, ExternalLinkIcon, FolderIcon, SparklesIcon } from "lucide-react"
 import { useSettingsStore } from "@/stores/settings"
 import { isTauri } from "@/lib/tauri"
-import { DEFAULT_BACKUP_AUTO_SCHEDULE } from "@/lib/claude/types"
+import { DEFAULT_BACKUP_AUTO_SCHEDULE } from "@cognia/agent-config-types"
 import { toast } from "sonner"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
+import {
+  getLocalCloudProvider,
+  LOCAL_CLOUD_PROVIDERS,
+  type LocalCloudProviderId,
+} from "@/lib/data/local-cloud-providers"
+import { startNewSession } from "@/lib/chat/start-session"
+import { queuePendingChatPrompt } from "@/lib/chat/pending-prompt"
 
 const log = createLogger("data-backup-schedule")
 
 export function ScheduleCard() {
   const t = useTranslations("settings.data.backup.schedule")
+  const router = useRouter()
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
   const config = settings?.backupAutoSchedule ?? DEFAULT_BACKUP_AUTO_SCHEDULE
   const reminderDays = settings?.backupReminderDays ?? 7
   const [busy, setBusy] = useState(false)
+  const [cloudProviderId, setCloudProviderId] = useState<LocalCloudProviderId>("google-drive")
 
   const update = async (next: Partial<typeof config>) => {
     setBusy(true)
@@ -52,6 +69,30 @@ export function ScheduleCard() {
     } catch (error) {
       log.error("schedule-folder-pick-failed", { error })
       toast.error(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  const configureCloudFolderWithAi = async () => {
+    const provider = getLocalCloudProvider(cloudProviderId)
+    const providerLabel = t(`cloudProviders.${cloudProviderId}`)
+    try {
+      const session = await startNewSession({
+        title: t("cloudAiSessionTitle", { provider: providerLabel }),
+      })
+      queuePendingChatPrompt(
+        session.id,
+        t("cloudAiPrompt", {
+          provider: providerLabel,
+          docsUrl: provider.docsUrl,
+        })
+      )
+      router.push("/")
+    } catch (error) {
+      toast.error(
+        t("cloudAiFailed", {
+          error: error instanceof Error ? error.message : String(error),
+        })
+      )
     }
   }
 
@@ -107,14 +148,52 @@ export function ScheduleCard() {
       </div>
 
       {isTauri() && (
-        <div className="space-y-1">
-          <Label className="text-[11px]">{t("folderLabel")}</Label>
-          <div className="flex gap-2">
-            <Input value={config.dirPath ?? ""} readOnly placeholder={t("folderPlaceholder")} />
-            <Button variant="outline" size="sm" onClick={() => void pickFolder()}>
-              <FolderIcon className="mr-1 size-4" />
-              {t("pickFolder")}
-            </Button>
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <Label className="text-[11px]">{t("folderLabel")}</Label>
+            <div className="flex gap-2">
+              <Input value={config.dirPath ?? ""} readOnly placeholder={t("folderPlaceholder")} />
+              <Button variant="outline" size="sm" onClick={() => void pickFolder()}>
+                <FolderIcon className="mr-1 size-4" />
+                {t("pickFolder")}
+              </Button>
+            </div>
+          </div>
+          <div className="space-y-1 rounded-md border p-3">
+            <Label className="text-[11px]" htmlFor="backup-cloud-provider">
+              {t("cloudProviderLabel")}
+            </Label>
+            <Select
+              value={cloudProviderId}
+              onValueChange={(value) => setCloudProviderId(value as LocalCloudProviderId)}
+            >
+              <SelectTrigger id="backup-cloud-provider">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {LOCAL_CLOUD_PROVIDERS.map((provider) => (
+                  <SelectItem key={provider.id} value={provider.id}>
+                    {t(`cloudProviders.${provider.id}`)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-[11px] text-muted-foreground">{t("cloudFolderHint")}</p>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <a
+                className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
+                href={getLocalCloudProvider(cloudProviderId).docsUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {t("cloudOfficialDocs")}
+                <ExternalLinkIcon className="size-3" aria-hidden />
+              </a>
+              <Button variant="outline" size="sm" onClick={() => void configureCloudFolderWithAi()}>
+                <SparklesIcon className="size-3.5" aria-hidden />
+                {t("cloudAiConfigure")}
+              </Button>
+            </div>
           </div>
         </div>
       )}

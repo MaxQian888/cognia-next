@@ -11,6 +11,14 @@ const diagnosticsByPlugin = new Map<string, PluginPointDiagnostic[]>()
 const listeners = new Set<() => void>()
 let revision = 0
 
+// Cached snapshot for `getAllPluginPointDiagnostics`. `useSyncExternalStore`
+// requires getSnapshot to return a referentially-stable value while the store
+// is unchanged; rebuilding a fresh object every call makes React detect a new
+// snapshot on every render and loop forever ("getSnapshot should be cached").
+// The cache is keyed by `revision` so it invalidates exactly on each notify().
+let snapshotCache: Record<string, PluginPointDiagnostic[]> | null = null
+let snapshotCacheRevision = -1
+
 function notify(): void {
   revision += 1
   for (const listener of listeners) {
@@ -24,19 +32,33 @@ export function recordPluginPointDiagnostic(
 ): void {
   const existing = diagnosticsByPlugin.get(pluginId) || []
   existing.push(diagnostic)
+  // Ring buffer (W6.7): a chatty failure site (retry loop, per-chunk hook)
+  // previously grew this unboundedly across a long session. Mirrors the
+  // 100-entry cap in tools-bridge.ts.
+  if (existing.length > MAX_DIAGNOSTICS_PER_PLUGIN) {
+    existing.splice(0, existing.length - MAX_DIAGNOSTICS_PER_PLUGIN)
+  }
   diagnosticsByPlugin.set(pluginId, existing)
   notify()
 }
+
+/** Per-plugin diagnostics retention (ring buffer, W6.7). */
+export const MAX_DIAGNOSTICS_PER_PLUGIN = 100
 
 export function getPluginPointDiagnostics(pluginId: string): PluginPointDiagnostic[] {
   return [...(diagnosticsByPlugin.get(pluginId) || [])]
 }
 
 export function getAllPluginPointDiagnostics(): Record<string, PluginPointDiagnostic[]> {
+  if (snapshotCache !== null && snapshotCacheRevision === revision) {
+    return snapshotCache
+  }
   const out: Record<string, PluginPointDiagnostic[]> = {}
   for (const [pluginId, diagnostics] of diagnosticsByPlugin.entries()) {
     out[pluginId] = [...diagnostics]
   }
+  snapshotCache = out
+  snapshotCacheRevision = revision
   return out
 }
 
@@ -122,4 +144,6 @@ export function __resetDiagnosticsStoreForTesting(): void {
   diagnosticsByPlugin.clear()
   listeners.clear()
   revision = 0
+  snapshotCache = null
+  snapshotCacheRevision = -1
 }

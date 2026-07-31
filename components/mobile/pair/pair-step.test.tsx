@@ -6,10 +6,30 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { PairStep } from "./pair-step"
+import { encodePairPayload } from "@/lib/qr/pair-payload"
 
 const VALID_JWT = "aaa.bbb.ccc"
 
 jest.mock("@/lib/capacitor/barcode", () => ({ scan: jest.fn() }))
+jest.mock("@/lib/tauri/transport-companion", () => ({
+  saveCompanionConfig: async (config: unknown) => {
+    window.localStorage.setItem("cognia.companion.config.v1", JSON.stringify(config))
+  },
+}))
+jest.mock("@/lib/signaling/v2-crypto", () => ({
+  generatePersistableV2SigningIdentity: async () => ({
+    privateKey: {},
+    publicKey: {},
+    privateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+    encodedPublicKey: "mobile-signing-key",
+  }),
+  buildRoomDescriptorV2: async (input: Record<string, unknown>) => ({
+    v: 2,
+    roomId: "room-1",
+    ...input,
+  }),
+  importV2SigningPrivateKey: async () => ({}),
+}))
 const openSettingsMock = jest.fn(async () => ({ kind: "ok" as const }))
 jest.mock("@/lib/capacitor/app-settings", () => ({
   openAppSettings: () => openSettingsMock(),
@@ -56,6 +76,27 @@ jest.mock("next-intl", () => ({
       "scanError.failed": `QR scan failed: ${(vars?.message as string) ?? ""}`,
       "discover.baseUrlLocked": "Server is locked",
       "discover.backToDiscover": "Back to discover",
+      "web.formCardTitle": "Pair this browser",
+      "web.formCardDescription": "Paste the payload or the 6-digit code.",
+      "web.baseUrlLocked": "Server URL is set by this deployment",
+      "web.codeHint": "Generate a code with cognia-server pair.",
+      "web.pasteHint": "Paste the full cgnp2 payload or the raw pair JWT.",
+      "web.storageNoticeTitle": "Credential stays in this browser",
+      "web.storageNotice": "Stored in localStorage — pair from a trusted device.",
+      "web.httpsRequired":
+        "Browser pairing requires HTTPS so the pair credential is never sent in cleartext.",
+      "networkError.certificate":
+        "The server certificate could not be verified. Check the HTTPS certificate.",
+      "networkError.browserPolicy":
+        "The browser blocked the request because of CORS or Private Network Access policy.",
+      "networkError.browserBlocked":
+        "The browser blocked the connection. Check HTTPS certificate and CORS or Private Network Access settings.",
+      "networkError.offline": "This device is offline. Reconnect to a network and try again.",
+      "networkError.unreachable":
+        "Could not reach the desktop server. Check the URL, server, and same network.",
+      "networkError.unknown": `Pairing request failed: ${(vars?.message as string) ?? ""}`,
+      "payloadError.invalid": "That pairing payload couldn't be decoded.",
+      "payloadError.versionMismatch": `Payload version ${(vars?.got as number) ?? "?"} not understood.`,
     }
     return map[key] ?? key
   },
@@ -63,6 +104,21 @@ jest.mock("next-intl", () => ({
 
 import { scan as scanBarcode } from "@/lib/capacitor/barcode"
 const mockedScanQr = scanBarcode as jest.Mock
+
+function withSignalingV2(body: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...body,
+    rendezvous_id: "room-1",
+    room_descriptor: {
+      v: 2,
+      roomId: "room-1",
+      roomNonce: "room-nonce",
+      desktopSigningKey: "desktop-signing-key",
+      mobileSigningKey: "mobile-signing-key",
+      notAfter: Date.now() + 60_000,
+    },
+  }
+}
 
 beforeEach(() => {
   window.localStorage.clear()
@@ -96,6 +152,26 @@ describe("<PairStep />", () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it("does not send browser pairing credentials over HTTP", async () => {
+    const fetchMock = (globalThis as unknown as { fetch: jest.Mock }).fetch
+    const user = userEvent.setup()
+    render(
+      <PairStep
+        webMode
+        prefilledBaseUrl="http://192.168.1.42:7890"
+        prefilledPairJwt={VALID_JWT}
+        onPaired={() => {}}
+      />
+    )
+
+    await user.click(screen.getByTestId("pair-submit"))
+
+    expect(await screen.findByTestId("pair-error")).toHaveTextContent(
+      /requires HTTPS/i
+    )
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it("rejects malformed JWT shape with a recoverable error", async () => {
     const user = userEvent.setup()
     render(<PairStep onPaired={() => {}} />)
@@ -115,11 +191,11 @@ describe("<PairStep />", () => {
       ok: true,
       status: 200,
       json: () =>
-        Promise.resolve({
+        Promise.resolve(withSignalingV2({
           device_id: "dev-001",
           device_jwt: "jwt.value",
           server_version: "0.1.0",
-        }),
+        })),
       text: () => Promise.resolve(""),
     })
     const user = userEvent.setup()
@@ -211,7 +287,13 @@ describe("<PairStep />", () => {
       ok: true,
       status: 200,
       json: () =>
-        Promise.resolve({ device_id: "dev-rec", device_jwt: "jwt.rec", server_version: "0.2.0" }),
+        Promise.resolve(
+          withSignalingV2({
+            device_id: "dev-rec",
+            device_jwt: "jwt.rec",
+            server_version: "0.2.0",
+          })
+        ),
       text: () => Promise.resolve(""),
     })
     const user = userEvent.setup()
@@ -285,11 +367,11 @@ describe("<PairStep />", () => {
       ok: true,
       status: 200,
       json: () =>
-        Promise.resolve({
+        Promise.resolve(withSignalingV2({
           device_id: "dev-100",
           device_jwt: "jwt.code",
           server_version: "0.1.0",
-        }),
+        })),
       text: () => Promise.resolve(""),
     })
     const onPaired = jest.fn()
@@ -380,5 +462,78 @@ describe("<PairStep />", () => {
     expect(input).toHaveAttribute("readonly")
     fireEvent.click(screen.getByTestId("pair-back-to-discover"))
     expect(onBack).toHaveBeenCalled()
+  })
+})
+
+describe("<PairStep webMode /> — plain-browser pairing (ADR-0059 C2)", () => {
+  it("hides the QR scan affordances and shows the storage notice", async () => {
+    const user = userEvent.setup()
+    render(<PairStep webMode onPaired={() => {}} />)
+    expect(screen.queryByTestId("pair-scan-qr")).not.toBeInTheDocument()
+    expect(screen.queryByText("or paste manually")).not.toBeInTheDocument()
+    expect(screen.getByTestId("pair-web-storage-notice")).toBeInTheDocument()
+    expect(screen.getByText("Pair this browser")).toBeInTheDocument()
+    // The web code hint replaces the desktop PairDeviceCard copy.
+    await user.click(screen.getByTestId("pair-tab-code"))
+    expect(screen.getByText(/cognia-server pair/i)).toBeInTheDocument()
+  })
+
+  it("decodes a pasted cgnp2 payload into baseUrl / JWT / fingerprint", async () => {
+    const user = userEvent.setup()
+    render(<PairStep webMode onPaired={() => {}} />)
+    await user.click(screen.getByTestId("pair-tab-jwt"))
+    const payload = encodePairPayload({
+      baseUrl: "https://cloud.example.com:7890",
+      pairJwt: VALID_JWT,
+      version: "0.4.2",
+      fingerprint: "FEEDBEEF",
+    })
+    fireEvent.change(await screen.findByTestId("pair-jwt"), { target: { value: payload } })
+    expect((screen.getByTestId("pair-baseurl") as HTMLInputElement).value).toBe(
+      "https://cloud.example.com:7890"
+    )
+    expect((screen.getByTestId("pair-jwt") as HTMLTextAreaElement).value).toBe(VALID_JWT)
+    expect(screen.getByTestId("pair-fingerprint-pin")).toBeInTheDocument()
+  })
+
+  it("does not overwrite a locked baseUrl from the pasted payload", async () => {
+    const user = userEvent.setup()
+    render(
+      <PairStep webMode lockBaseUrl prefilledBaseUrl="https://pinned.example.com" onPaired={() => {}} />
+    )
+    await user.click(screen.getByTestId("pair-tab-jwt"))
+    const payload = encodePairPayload({
+      baseUrl: "https://other.example.com",
+      pairJwt: VALID_JWT,
+      version: "0.4.2",
+      fingerprint: "",
+    })
+    fireEvent.change(await screen.findByTestId("pair-jwt"), { target: { value: payload } })
+    expect((screen.getByTestId("pair-baseurl") as HTMLInputElement).value).toBe(
+      "https://pinned.example.com"
+    )
+    expect((screen.getByTestId("pair-jwt") as HTMLTextAreaElement).value).toBe(VALID_JWT)
+  })
+
+  it("reports an undecodable cgnp payload at submit time", async () => {
+    const user = userEvent.setup()
+    render(<PairStep webMode prefilledBaseUrl="http://test:7890" onPaired={() => {}} />)
+    await user.click(screen.getByTestId("pair-tab-jwt"))
+    fireEvent.change(await screen.findByTestId("pair-jwt"), {
+      target: { value: "cgnp2|!!!not-base64url!!!" },
+    })
+    await user.click(screen.getByTestId("pair-submit"))
+    expect(await screen.findByTestId("pair-error")).toHaveTextContent(/couldn't be decoded/i)
+  })
+
+  it("reports a payload version mismatch with the offending version", async () => {
+    const user = userEvent.setup()
+    render(<PairStep webMode prefilledBaseUrl="http://test:7890" onPaired={() => {}} />)
+    await user.click(screen.getByTestId("pair-tab-jwt"))
+    fireEvent.change(await screen.findByTestId("pair-jwt"), {
+      target: { value: "cgnp9|whatever" },
+    })
+    await user.click(screen.getByTestId("pair-submit"))
+    expect(await screen.findByTestId("pair-error")).toHaveTextContent(/version 9/i)
   })
 })

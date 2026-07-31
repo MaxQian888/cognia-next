@@ -43,9 +43,9 @@ import {
 import { cn } from "@/lib/utils"
 import { StatCard } from "@/components/observability/stat-card"
 import { TOOLTIP_STYLE, CHART_MARGINS } from "@/lib/observability/chart-config"
-import { LEVEL_THEME } from "@/lib/logging/level-theme"
+import { LEVEL_THEME } from "@cognia/logging/level-theme"
 import { useThemeColors } from "@/hooks/logging/use-theme-colors"
-import type { StructuredLogEntry, LogLevel } from "@/lib/logging"
+import type { StructuredLogEntry, LogLevel } from "@cognia/logging"
 import type { NativeLoggingReadiness } from "@/lib/native/native-logging-readiness"
 
 export interface LogStatsDashboardProps {
@@ -385,7 +385,11 @@ export function LogStatsDashboard({
               data-testid="dashboard-chart-pie"
               className="w-full h-[180px] sm:h-[200px] md:h-[220px] lg:h-[260px]"
             >
-              <ResponsiveContainer>
+              <ResponsiveContainer
+                minWidth={1}
+                minHeight={1}
+                initialDimension={{ width: 320, height: 180 }}
+              >
                 <PieChart>
                   <Pie
                     data={levelData}
@@ -425,7 +429,11 @@ export function LogStatsDashboard({
               data-testid="dashboard-chart-area"
               className="w-full h-[180px] sm:h-[200px] md:h-[220px] lg:h-[260px]"
             >
-              <ResponsiveContainer>
+              <ResponsiveContainer
+                minWidth={1}
+                minHeight={1}
+                initialDimension={{ width: 320, height: 180 }}
+              >
                 <AreaChart data={volumeData} margin={CHART_MARGINS.default}>
                   <defs>
                     <linearGradient id="logVolumeInfo" x1="0" y1="0" x2="0" y2="1">
@@ -500,7 +508,11 @@ export function LogStatsDashboard({
               data-testid="dashboard-chart-line"
               className="w-full h-[180px] sm:h-[200px] md:h-[220px] lg:h-[260px]"
             >
-              <ResponsiveContainer>
+              <ResponsiveContainer
+                minWidth={1}
+                minHeight={1}
+                initialDimension={{ width: 320, height: 180 }}
+              >
                 <LineChart data={errorTrendData} margin={CHART_MARGINS.default}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                   <XAxis dataKey="time" tick={{ fontSize: 11 }} />
@@ -550,7 +562,11 @@ export function LogStatsDashboard({
                   height: `clamp(180px, ${moduleData.length * 32}px, 480px)`,
                 }}
               >
-                <ResponsiveContainer>
+                <ResponsiveContainer
+                  minWidth={1}
+                  minHeight={1}
+                  initialDimension={{ width: 320, height: 180 }}
+                >
                   <BarChart
                     data={moduleData}
                     layout="vertical"

@@ -1,0 +1,48 @@
+---
+title: 策略、路由与认证
+description: 特性开关、Provider 档案、Gateway 路由 ticket,以及门控 auto 运行时选择的签名兼容性清单流水线。
+---
+
+# 策略、路由与认证
+
+## 特性开关
+
+五个开关（env `NEXT_PUBLIC_*` > `localStorage` > 默认**关**;reader 在
+`lib/ai/agent/execution/feature-flags.ts`,与 canvas flags 同惯例——仅
+env/localStorage、无设置页 writer,属 ops 灰度）:
+
+| 开关 | 门控 |
+| --- | --- |
+| `agentExecutionResolverV2` | resolver 成为执行权威（Phase 6 切换） |
+| `genericAgentHostCommands` | `agent_*` Tauri 命令 + `agent://message` 通道 |
+| `gatewayAgentRouteTickets` | Gateway 路由 ticket 签发与 ticket 作用域请求 |
+| `headlessLlmGateway` | `cognia-server` 承载 gateway |
+| `experimentalAnthropicDeploymentAgentSdk` | 按 deployment 的 Claude-Agent-SDK-over-gateway 实验开关 |
+
+## Provider 档案（Phase 1）
+
+`ProviderProfile → DeploymentProfile → TransportProfile`,只存
+`CredentialReference`（legacy-provider-settings · subscription-vault ·
+secret-store · env 四类）。中继目录项经 `relayOf` 折回厂商;旧 provider id
+**即**deployment id,身份不丢。桌面 Dexie v121（settings 双写、hash 防环）,
+headless 走 `SqliteProfileStore`。共享 header-policy fixture 钉住 TS↔Rust
+字节级一致。
+
+## Gateway 路由 ticket（Phase 2）
+
+ticket（`sk-cognia-rt-…`,secret 仅驻内存,metadata 持久化）在签发时冻结候选
+deployment 集与模型 bindings。ticket 请求完全绕过 alias/decide;未映射模型
+400;凭证按 attempt 在发送时解析;failover 仅限首字节前,sticky 亲和在
+401/403 时绝不换号。snapshot 发布走 CAS（`profileVersion` + authority）——
+桌面与 headless 发布者之间没有 last-writer-wins。
+
+## 认证（Phase 5）
+
+`auto` 运行时采纳只接受三级证据——`native`、`vendor-certified`、
+`cognia-verified`——且必须来自**签名**的 `CompatibilityManifest` bundle
+（Ed25519;CI issuer 或显式 local）。probe 与 opt-in 在类型上就进不了门:
+只有 `evaluateCompatibilityGate` 的输出才能构造 `certifiedPath`。任一版本轴
+漂移（SDK、claude-code、gateway crate、suite）即 stale——由
+`scripts/gates/check-runtime-versions.mjs` 钉住。按能力熔断（连续 3 次失败
+→ 熔断 10 分钟）只能降不能升。厂商认证是需计费确认的本地 CLI
+（`scripts/certify/run-vendor-certification.mjs`）,CI 中拒跑。

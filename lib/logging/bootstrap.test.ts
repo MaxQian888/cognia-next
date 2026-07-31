@@ -24,17 +24,27 @@ jest.mock("@/lib/native/native-logging", () => ({
 }))
 
 describe("bootstrapLogger persistence + transport attach/detach", () => {
+  it("derives the OTLP Logs endpoint from trace and collector base URLs", async () => {
+    const { otlpLogsEndpoint } = await import("./bootstrap")
+    expect(otlpLogsEndpoint("http://localhost:4318/v1/traces")).toBe(
+      "http://localhost:4318/v1/logs"
+    )
+    expect(otlpLogsEndpoint("https://collector.example/otlp/")).toBe(
+      "https://collector.example/otlp/v1/logs"
+    )
+    expect(otlpLogsEndpoint(" ")).toBe("")
+  })
+
   it("registers the default transports on first run", async () => {
     const mod = await import("./bootstrap")
     const state = mod.bootstrapLogger()
     expect(state.transports.console).toBe(true)
     expect(state.transports.indexedDB).toBe(true)
     expect(state.transports.native).toBe(true)
-    // Per Phase-6 decision: remote / langfuse / OTel default-on; they
+    // Remote / Langfuse remain default-on; the dead OtelTransport was removed.
     // short-circuit silently until credentials/endpoints are filled in.
     expect(state.transports.remote).toBe(true)
     expect(state.transports.langfuse).toBe(true)
-    expect(state.transports.opentelemetry).toBe(true)
     const names = mod.listRegisteredTransports()
     expect(names).toEqual(expect.arrayContaining(["console", "indexeddb"]))
     // Remote stays detached without a configured endpoint, even when its
@@ -58,6 +68,27 @@ describe("bootstrapLogger persistence + transport attach/detach", () => {
     expect(transports.langfuse).toBe(false)
     expect(retention).toMatchObject({ maxEntries: 500, maxAgeDays: 1 })
     expect(config.minLevel).toBe("warn")
+  })
+
+  it("preserves legacy plaintext for retry when secure persistence fails", async () => {
+    localStorage.setItem(
+      "cognia-logging-transports",
+      JSON.stringify({
+        langfuseConfig: { publicKey: "pk", secretKey: "sk-legacy" },
+        agentTraceOtlpConfig: {
+          grafanaCloud: { instanceId: "123", apiToken: "glc_legacy" },
+        },
+      })
+    )
+    const mod = await import("./bootstrap")
+    const state = mod.bootstrapLogger()
+    expect(localStorage.getItem(mod.LOGGING_TRANSPORTS_STORAGE_KEY)).toContain("sk-legacy")
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const persisted = localStorage.getItem(mod.LOGGING_TRANSPORTS_STORAGE_KEY) ?? ""
+    expect(persisted).toContain("sk-legacy")
+    expect(persisted).toContain("glc_legacy")
+    expect(state.transports.langfuseConfig.secretKeyConfigured).toBe(true)
+    expect(state.transports.agentTraceOtlpConfig.grafanaCloud.apiTokenConfigured).toBe(true)
   })
 
   it("re-reads persisted toggle state on a fresh module load", async () => {
@@ -110,5 +141,44 @@ describe("bootstrapLogger persistence + transport attach/detach", () => {
     // Sampling configuration is opaque from the bootstrap API; the
     // `samplingRules` payload was accepted (no throw) and the noisy-module
     // entry stayed, while the bogus rate was filtered out.
+  })
+
+  it("persists per-module levels to localStorage and reads them back", async () => {
+    const mod = await import("./bootstrap")
+    mod.bootstrapLogger()
+    mod.applyLoggingSettings({
+      config: { perModuleLevels: { network: "debug", "network:lark": "trace" } },
+      persist: true,
+    })
+    const config = JSON.parse(localStorage.getItem(mod.LOGGING_CONFIG_STORAGE_KEY) || "{}")
+    expect(config.perModuleLevels).toEqual({ network: "debug", "network:lark": "trace" })
+
+    // Re-bootstrap from a fresh module registry: the rule must rehydrate.
+    jest.resetModules()
+    const reloaded = await import("./bootstrap")
+    const state = reloaded.bootstrapLogger()
+    expect(state.config.perModuleLevels).toMatchObject({
+      network: "debug",
+      "network:lark": "trace",
+    })
+  })
+
+  it("drops invalid per-module level entries when reading malformed storage", async () => {
+    localStorage.setItem(
+      "cognia-logging-config",
+      JSON.stringify({
+        minLevel: "info",
+        perModuleLevels: {
+          network: "debug", // valid
+          ai: "verbose", // invalid level -> dropped
+          "": "trace", // empty key -> dropped
+          "  ": "trace", // whitespace key -> dropped
+          other: 5, // non-string -> dropped
+        },
+      })
+    )
+    const mod = await import("./bootstrap")
+    const state = mod.bootstrapLogger()
+    expect(state.config.perModuleLevels).toEqual({ network: "debug" })
   })
 })

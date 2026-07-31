@@ -38,6 +38,10 @@ const mockContextValue = {
 
 jest.mock("@/hooks/a2ui/use-a2ui-context", () => ({
   useA2UIContext: jest.fn(() => mockContextValue),
+  // The renderer now reads via the split hooks; both expose the same mock
+  // fixture so existing assertions keep working.
+  useA2UIActions: jest.fn(() => mockContextValue),
+  useA2UIData: jest.fn(() => mockContextValue),
   useA2UIVisibility: jest.fn((visible) => {
     if (visible === undefined) return true
     if (typeof visible === "boolean") return visible
@@ -454,6 +458,9 @@ describe("getRegisteredComponentTypes", () => {
     expect(types).toContain("StepperShell")
     expect(types).toContain("MockupFrame")
     expect(types).toContain("WidgetStatus")
+    // Academic components are bridged in via withA2UIContext adapters.
+    expect(types).toContain("AcademicAnalysis")
+    expect(types).toContain("AcademicSearchResults")
   })
 
   it("should return an array", () => {

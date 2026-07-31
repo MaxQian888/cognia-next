@@ -1,6 +1,38 @@
 @import "tailwindcss";
+@import "shadcn/tailwind.css";
 @import "tw-animate-css";
 @import "katex/dist/katex.min.css";
+/* After Tailwind so its `@layer components` slot exists — see app/typeset.css. */
+@import "./typeset.css";
+
+/*
+ * Bundled Powerline / Nerd Font for the integrated terminal (see
+ * components/terminal/terminal-instance.tsx). `local(...)` is listed first so a
+ * machine that already has MesloLGS NF installed (e.g. via `p10k configure`)
+ * uses its own copy and never downloads the woff2; only machines without it
+ * fetch the bundled fallback. This is what lets oh-my-posh / powerlevel10k
+ * prompt glyphs render out of the box instead of showing tofu boxes.
+ * License / provenance: public/fonts/meslolgs-nf/LICENSE.md.
+ */
+@font-face {
+  font-family: "MesloLGS NF";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src:
+    local("MesloLGS NF"),
+    local("MesloLGS NF Regular"),
+    url("/fonts/meslolgs-nf/MesloLGS-NF-Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "MesloLGS NF";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src:
+    local("MesloLGS NF Bold"),
+    url("/fonts/meslolgs-nf/MesloLGS-NF-Bold.woff2") format("woff2");
+}
 
 @custom-variant dark (&:is(.dark *));
 
@@ -66,7 +98,8 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
-:root {
+:root,
+.a2ui-widget-theme-light {
   --radius: 0.625rem;
   /* v47 — Density, motion, and typography runtime knobs. Each is written by
      a dedicated applier under `lib/appearance/`; defaults below match the
@@ -141,7 +174,8 @@
   --sidebar-ring: oklch(0.708 0 0);
 }
 
-.dark {
+.dark,
+.a2ui-widget-theme-dark {
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
@@ -206,6 +240,70 @@
    values that shadcn components and surface-aware layouts consume.
 --------------------------------------------------------------------------- */
 
+/* ---------------------------------------------------------------------------
+   Where the typography knobs are actually consumed.
+
+   `--line-height-scale` and `--letter-spacing-em` (written onto `<html>` by
+   `lib/appearance/typography-applier.tsx`) and `--density-line-height` (set by
+   the density blocks below) had no `var()` reader anywhere in the repo, so
+   Settings → Appearance → Fine-tuning and the whole density line-height axis
+   moved their sliders and changed nothing on screen.
+
+   Tailwind v4 compiles EVERY line-height utility down to one of fifteen theme
+   variables — `line-height: var(--tw-leading, var(--text-sm--line-height))`
+   for a size utility, `var(--leading-relaxed)` for an explicit one — so
+   restating those variables here is the single seam that reaches the whole
+   app without touching a component.
+
+   `--leading-multiplier` is 1 in the default state (comfortable density,
+   1x scale), which is what keeps this change invisible until someone actually
+   moves a slider. Density contributes `level / 1.5` because "comfortable" is
+   the neutral rung.
+
+   `--text-5xl--line-height` and up are deliberately left alone: they ship at
+   exactly 1 because display type is set solid, and scaling them down would
+   overlap the lines.
+--------------------------------------------------------------------------- */
+
+/* Declared on the root AND on every per-surface density container, because a
+   custom property is substituted where it is DECLARED, not where it is read.
+   `--leading-multiplier` computed on `:root` bakes in the root's
+   `--density-line-height`, and descendants inherit that already-substituted
+   number — so a surface that sets its own `--density-line-height` (the
+   `[data-density-surface]` blocks below) would have no reader left, and its
+   line-height would silently stay at the global value. Restating the tokens on
+   the surface selector re-resolves the whole chain there. */
+:root,
+[data-surface][data-density-surface] {
+  /* Both fallbacks are the neutral rung. A plugin density preset clears its
+     `--density-*` overrides by removing the inline property, and an undefined
+     var inside `calc()` would poison every line-height in the app down to
+     `normal`, so neither input is left unguarded. */
+  --leading-multiplier: calc(var(--density-line-height, 1.5) / 1.5 * var(--line-height-scale, 1));
+
+  --text-xs--line-height: calc(1 / 0.75 * var(--leading-multiplier));
+  --text-sm--line-height: calc(1.25 / 0.875 * var(--leading-multiplier));
+  --text-base--line-height: calc(1.5 / 1 * var(--leading-multiplier));
+  --text-lg--line-height: calc(1.75 / 1.125 * var(--leading-multiplier));
+  --text-xl--line-height: calc(1.75 / 1.25 * var(--leading-multiplier));
+  --text-2xl--line-height: calc(2 / 1.5 * var(--leading-multiplier));
+  --text-3xl--line-height: calc(2.25 / 1.875 * var(--leading-multiplier));
+  --text-4xl--line-height: calc(2.5 / 2.25 * var(--leading-multiplier));
+
+  --leading-tight: calc(1.25 * var(--leading-multiplier));
+  --leading-snug: calc(1.375 * var(--leading-multiplier));
+  --leading-normal: calc(1.5 * var(--leading-multiplier));
+  --leading-relaxed: calc(1.625 * var(--leading-multiplier));
+  --leading-loose: calc(2 * var(--leading-multiplier));
+}
+
+:root {
+  /* `letter-spacing` inherits, so one declaration on the root reaches every
+     text node. Elements carrying an explicit `tracking-*` utility keep their
+     own value, which is the right precedence — those are deliberate. */
+  letter-spacing: var(--letter-spacing-em);
+}
+
 :root[data-density="compact"] {
   --density-spacing: 0.75;
   --density-input-height: 1.875rem;
@@ -248,18 +346,23 @@
   --density-line-height: 1.65;
 }
 
-/* Reduce-motion guard. The motion applier toggles this class on <html> when
-   the user enables "Reduce motion" in Settings → Appearance → A11y, OR when
-   the OS reports `prefers-reduced-motion: reduce` and the user has not
-   explicitly opted into full motion. Collapses all transitions and
-   animations to ~0.01ms — same approach the W3C accessibility guideline
-   recommends. */
+/* Reduce-motion guards. All three paths collapse motion to ~1ms — 1ms rather
+   than 0 so existing `transitionend` listeners still fire (W3C-recommended).
+   Two root markers drive the *user opt-in* path, written by two different
+   providers (both kept so neither breaks): `.reduce-motion` (motion-applier,
+   Settings → Appearance → A11y) and `[data-reduce-motion="true"]`
+   (SettingsSyncProvider, persisted setting). The OS `prefers-reduced-motion`
+   path is separate below because it carries a `data-motion-respect="off"`
+   opt-out for users who want full motion despite the OS hint. */
 html.reduce-motion *,
 html.reduce-motion *::before,
-html.reduce-motion *::after {
-  animation-duration: 0.01ms !important;
+html.reduce-motion *::after,
+html[data-reduce-motion="true"] *,
+html[data-reduce-motion="true"] *::before,
+html[data-reduce-motion="true"] *::after {
+  animation-duration: 1ms !important;
   animation-iteration-count: 1 !important;
-  transition-duration: 0.01ms !important;
+  transition-duration: 1ms !important;
   scroll-behavior: auto !important;
 }
 
@@ -267,11 +370,146 @@ html.reduce-motion *::after {
   html:not([data-motion-respect="off"]) *,
   html:not([data-motion-respect="off"]) *::before,
   html:not([data-motion-respect="off"]) *::after {
-    animation-duration: 0.01ms !important;
+    animation-duration: 1ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    transition-duration: 1ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* ---------------------------------------------------------------------------
+   Essential-motion exemptions — the second half of the reduce-motion policy.
+
+   The guards above are deliberately blunt: they hit `*`, and they set
+   `animation-iteration-count: 1`. For decoration that is exactly right. For a
+   LOADING INDICATOR it is a bug: a spinner that runs one 1ms iteration and
+   stops is a frozen, broken-looking glyph, and a skeleton that pulses once and
+   stops is an inert grey box. The user is left with no evidence the app is
+   still working — reduced motion removes distraction, it must not remove
+   status. (Same reasoning the `.island-attention-ring` rules further down
+   already apply by hand; this generalises it.)
+
+   Three tiers, applied here:
+
+     1. DECORATIVE     — killed. Anything not listed below keeps the blunt
+                         behaviour: the shimmer sweep on the thinking label,
+                         avatar pulses, entrance reveals.
+     2. STATUS         — kept, because it is the feedback itself. Only
+                         `.animate-spin` (which in this repo is exclusively
+                         loader/refresh glyphs) and `[data-slot="skeleton"]`
+                         (emitted by `components/ui/skeleton.tsx`, so every
+                         call site is covered without touching one of them).
+     3. VESTIBULAR     — kept but stripped to opacity. `.animate-bounce` moves
+                         (translateY) and `.animate-ping` scales; both are the
+                         motion classes actually implicated in vestibular
+                         discomfort, so they keep signalling via fade alone.
+
+   Mechanics that are easy to get wrong here:
+     - Every rule must be repeated for ALL THREE guard paths. Miss the media
+       query and an OS-level reduce still freezes everything, which is the
+       majority case.
+     - Restoring `animation-duration` is not enough on its own — the guard also
+       pinned `animation-iteration-count: 1`, so a looping animation still runs
+       exactly once. Both have to come back.
+     - Specificity, not order, is what wins: `html.reduce-motion *` scores
+       (0,1,1) and `html.reduce-motion .animate-spin` scores (0,2,1). Both are
+       `!important`, so the more specific one takes it.
+     - Durations route through `--motion-duration-scale` so the speed
+       preference keeps applying; Tailwind's own `animate-*` utilities hard-code
+       their timing and would otherwise ignore it entirely.
+--------------------------------------------------------------------------- */
+
+/* Tier 2 — status feedback keeps running. */
+html.reduce-motion .animate-spin,
+html[data-reduce-motion="true"] .animate-spin {
+  animation-duration: calc(1s * var(--motion-duration-scale, 1)) !important;
+  animation-iteration-count: infinite !important;
+}
+
+html.reduce-motion [data-slot="skeleton"],
+html[data-reduce-motion="true"] [data-slot="skeleton"] {
+  animation-duration: calc(2s * var(--motion-duration-scale, 1)) !important;
+  animation-iteration-count: infinite !important;
+}
+
+/* Tier 3 — signal survives, the movement does not. */
+html.reduce-motion .animate-bounce,
+html.reduce-motion .animate-ping,
+html[data-reduce-motion="true"] .animate-bounce,
+html[data-reduce-motion="true"] .animate-ping {
+  animation-name: motion-safe-fade-pulse !important;
+  animation-duration: calc(1.4s * var(--motion-duration-scale, 1)) !important;
+  animation-timing-function: ease-in-out !important;
+  animation-iteration-count: infinite !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:not([data-motion-respect="off"]) .animate-spin {
+    animation-duration: calc(1s * var(--motion-duration-scale, 1)) !important;
+    animation-iteration-count: infinite !important;
+  }
+
+  html:not([data-motion-respect="off"]) [data-slot="skeleton"] {
+    animation-duration: calc(2s * var(--motion-duration-scale, 1)) !important;
+    animation-iteration-count: infinite !important;
+  }
+
+  html:not([data-motion-respect="off"]) .animate-bounce,
+  html:not([data-motion-respect="off"]) .animate-ping {
+    animation-name: motion-safe-fade-pulse !important;
+    animation-duration: calc(1.4s * var(--motion-duration-scale, 1)) !important;
+    animation-timing-function: ease-in-out !important;
+    animation-iteration-count: infinite !important;
+  }
+}
+
+/* Opacity-only stand-in for the tier-3 classes. Never moves or scales the box,
+   so it cannot trigger the discomfort the originals can, and cannot shift
+   layout either. */
+@keyframes motion-safe-fade-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* Pro IDE shell-transition guard. The embedded code-server pane is a NATIVE
+   child webview pinned over a reserved rect: it floats above the DOM, cannot be
+   clipped or tweened by CSS, and its bounds are re-pushed over IPC roughly once
+   per frame. So an animated ancestor does not glide it — it makes VS Code
+   relayout on every frame for the whole transition, which is both janky and
+   expensive. While a surface holds the pane we collapse the shell transitions it
+   sits inside so the layout change lands in one frame instead. Same 1ms (not 0)
+   convention as the reduce-motion guards above, so `transitionend` still fires.
+   The marker is written by `lib/codeserver/pane-manager.ts` (valued with the
+   owning surface's id; the attribute-presence selectors below ignore the value).
+
+   This stylesheet can only reach animations declared in CSS. The artifact dock
+   sets its collapse/expand transition as an INLINE style — no rule can outrank
+   that — so the same policy is enforced in JS there, in `animateDockResize`
+   (`components/artifacts/artifact-workspace-dock.tsx`), which skips the
+   transition (and its frozen content width) outright. Keep the two in sync. */
+html[data-pro-ide-active] [data-slot="sidebar-gap"],
+html[data-pro-ide-active] [data-slot="sidebar-container"] {
+  transition-duration: 1ms !important;
+}
+
+/* Focus mode zooms the workbench in (`zoom-in-95`). A CSS transform changes
+   `getBoundingClientRect()`, which is exactly what positions the native pane —
+   so the webview gets shoved through every intermediate scale before landing.
+   Fade alone is safe (opacity does not move the box), so only the duration is
+   collapsed rather than dropping the animation. */
+html[data-pro-ide-active] [data-testid="context-workbench"][data-mode="focus"] {
+  animation-duration: 1ms !important;
+}
+
+/* The dock's resize handle fades and narrows in lockstep with the panel. Once
+   the panel itself lands in one frame, a 200ms handle is just a straggler. */
+html[data-pro-ide-active] [data-slot="resizable-handle"] {
+  transition-duration: 1ms !important;
 }
 
 @layer base {
@@ -294,6 +532,93 @@ html.reduce-motion *::after {
     overflow: hidden;
   }
 
+  /* Transparent desktop-pet overlay window. PetOverlayView sets
+     `data-pet-overlay` on <html> while mounted so the frameless always-on-top
+     "pet" window paints through to the desktop. `!important` overrides both the
+     `body { @apply bg-background }` base rule and the BOOT_SCRIPT CSS-var
+     background snapshot applied before React hydrates. */
+  html[data-pet-overlay],
+  html[data-pet-overlay] body,
+  html[data-island-overlay],
+  html[data-island-overlay] body,
+  html[data-selection-toolbar],
+  html[data-selection-toolbar] body {
+    background: transparent !important;
+  }
+
+  /* CRITICAL for real window transparency on Windows: next-themes writes an
+     inline `color-scheme: dark` on <html> (its `enableColorScheme` defaults to
+     true). Under a dark color-scheme, Chromium/WebView2 paints an OPAQUE base
+     backdrop *behind* the transparent <body>, so the frameless pet window shows
+     solid black even though the OS window and the webview are both transparent
+     — zeroing `background` alone can't reach that backdrop. `normal` removes the
+     forced scheme backdrop; `!important` beats next-themes' inline style. */
+  html[data-pet-overlay],
+  html[data-island-overlay],
+  html[data-selection-toolbar] {
+    color-scheme: normal !important;
+  }
+
+  /* The island window hugs its measured content (`island_resize`), but the
+     resize round-trips through Rust — for a frame or two the content can be
+     taller/wider than the window, and any overflow paints a scrollbar inside
+     what must look like a floating glass pill. The shell manages its own
+     scrolling (the expanded list is `overflow-y-auto`); the page itself must
+     never scroll. */
+  html[data-island-overlay],
+  html[data-island-overlay] body {
+    overflow: hidden !important;
+  }
+
+  html[data-selection-toolbar],
+  html[data-selection-toolbar] body {
+    overflow: hidden !important;
+  }
+
+  /* The one thing inside the island that IS allowed to scroll: the session
+     list past its height cap. Chromium's default scrollbar is an opaque light
+     bar, which reads as a seam down the right edge of a dark glass pill — the
+     one piece of chrome the island's whole look depends on not having. Scoped
+     to the overlay so the main window keeps the platform scrollbar. */
+  html[data-island-overlay] .island-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(255 255 255 / 0.18) transparent;
+  }
+  html[data-island-overlay] .island-scroll::-webkit-scrollbar {
+    width: 6px;
+  }
+  html[data-island-overlay] .island-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  html[data-island-overlay] .island-scroll::-webkit-scrollbar-thumb {
+    background-color: rgb(255 255 255 / 0.18);
+    border-radius: 9999px;
+  }
+  html[data-island-overlay] .island-scroll:hover::-webkit-scrollbar-thumb {
+    background-color: rgb(255 255 255 / 0.3);
+  }
+
+  /* Kill every wallpaper layer inside the pet windows. `<BackgroundApplier />`
+     mounts in this same root layout, so a user wallpaper is painted through TWO
+     pseudo-element layers — `body[data-bg-enabled]::before` (fixed, full-window)
+     and the `#app[data-bg-target]::before` layer used for global/all scope —
+     plus a legibility scrim `::after`. The base transparency rule above only
+     zeroes the `background` *property*, not these pseudos, so without this the
+     wallpaper fills what must be a transparent paint-through window. `!important`
+     beats the (unlayered, normal) wallpaper declarations regardless of cascade
+     layer. Belt-and-suspenders with the JS role gate in background-applier.tsx. */
+  html[data-pet-overlay] [data-bg-enabled="true"]::before,
+  html[data-pet-overlay] [data-bg-target]::before,
+  html[data-pet-overlay] [data-bg-scrim="true"]::after,
+  html[data-pet-overlay] [data-bg-target][data-bg-scrim="true"]::after,
+  html[data-island-overlay] [data-bg-enabled="true"]::before,
+  html[data-island-overlay] [data-bg-target]::before,
+  html[data-island-overlay] [data-bg-scrim="true"]::after,
+  html[data-island-overlay] [data-bg-target][data-bg-scrim="true"]::after {
+    display: none !important;
+    background: none !important;
+  }
+
   /* Window-blur dim. WindowFocusTracker writes data-window-focused on the
      <html> root; everything tagged [data-app-chrome] (title bar / status bar /
      resize handles) recedes when the user clicks away. */
@@ -305,18 +630,6 @@ html.reduce-motion *::after {
     opacity: 1;
     transition: opacity 120ms ease-out;
   }
-}
-
-/* Honor the user's reduce-motion preference. SettingsSyncProvider toggles
-   the data attribute on the <html> root from the persisted setting. We use
-   `1ms` instead of `0` so existing transitionend listeners still fire. */
-html[data-reduce-motion="true"] *,
-html[data-reduce-motion="true"] *::before,
-html[data-reduce-motion="true"] *::after {
-  animation-duration: 1ms !important;
-  animation-iteration-count: 1 !important;
-  transition-duration: 1ms !important;
-  scroll-behavior: auto !important;
 }
 
 /* -------------------------------------------------------------------------
@@ -371,9 +684,18 @@ body[data-bg-enabled="true"][data-bg-scope="sidebar"]::before {
   display: none;
 }
 
-[data-bg-target] {
-  position: relative;
-  isolation: isolate;
+/* Layered on purpose. An UNLAYERED rule beats every `@layer utilities`
+   declaration no matter the specificity, so leaving this at the top level made
+   `position: relative` win over a Tailwind `fixed` / `absolute` class on the
+   same element — the Context Workbench's focus (full-screen) mode is
+   `fixed inset-0` on the very element that carries `data-bg-target="sidebar"`,
+   and it silently degraded to a 100vw block clipped by the dock. Inside
+   `@layer base` this is only the default for hosts that position themselves. */
+@layer base {
+  [data-bg-target] {
+    position: relative;
+    isolation: isolate;
+  }
 }
 [data-bg-target]::before {
   content: "";
@@ -425,6 +747,114 @@ body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] [data-slot="s
 body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] [data-slot="sidebar-inner"] {
   background-color: color-mix(in oklch, var(--sidebar) 55%, transparent);
   backdrop-filter: blur(8px);
+}
+
+/* ----------------------------------------------------------------------
+   Editor wallpaper pass-through.
+
+   Monaco (desktop canvas) and CodeMirror (mobile canvas) paint an opaque
+   editor background that would completely hide a wallpaper. When one targets
+   the canvas surface (scope canvas / all / global), drop the editor + gutter
+   background to transparent so the image shows through behind the code. The
+   syntax colors, cursor, and selection still come from the active theme, so
+   this composes with the theme fix rather than replacing it.
+
+   Monaco reads its surface color from the `--vscode-*-background` custom
+   properties in recent builds; the concrete `.monaco-editor-background` /
+   `.margin` overrides (with `!important`) cover the generated stylesheet that
+   older builds emit. Minimap is a <canvas> and can't go transparent via CSS —
+   it stays off by default so this is a non-issue in practice.
+---------------------------------------------------------------------- */
+body[data-bg-enabled="true"][data-bg-scope="canvas"] [data-bg-target="canvas"] .monaco-editor,
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] .monaco-editor,
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] .monaco-editor {
+  --vscode-editor-background: transparent;
+  --vscode-editorGutter-background: transparent;
+  --vscode-editorStickyScroll-background: transparent;
+  --vscode-breadcrumb-background: transparent;
+  --vscode-minimap-background: transparent;
+  --vscode-editorOverviewRuler-background: transparent;
+  --vscode-scrollbar-shadow: transparent;
+}
+body[data-bg-enabled="true"][data-bg-scope="canvas"] [data-bg-target="canvas"] .monaco-editor,
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  .monaco-editor
+  .monaco-editor-background,
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  .monaco-editor
+  .margin,
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] .monaco-editor,
+body[data-bg-enabled="true"][data-bg-scope="all"]
+  [data-bg-target]
+  .monaco-editor
+  .monaco-editor-background,
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] .monaco-editor .margin,
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] .monaco-editor,
+body[data-bg-enabled="true"][data-bg-scope="global"]
+  [data-bg-target]
+  .monaco-editor
+  .monaco-editor-background,
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] .monaco-editor .margin,
+body[data-bg-enabled="true"][data-bg-scope="canvas"] [data-bg-target="canvas"] .cm-editor,
+body[data-bg-enabled="true"][data-bg-scope="canvas"] [data-bg-target="canvas"] .cm-gutters,
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] .cm-editor,
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] .cm-gutters,
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] .cm-editor,
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] .cm-gutters {
+  background-color: transparent !important;
+}
+/* Minimap container + scrollbar/overview surfaces. The minimap and overview
+   ruler are <canvas> elements — their pixels clear to `minimap.background` /
+   `editorOverviewRuler.background`, handled by the cognia-active theme above;
+   these rules zero the surrounding DOM boxes so no opaque strip frames them. */
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  .monaco-editor
+  .minimap,
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  .monaco-editor
+  .decorationsOverviewRuler,
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  .monaco-editor
+  .scrollbar,
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] .monaco-editor .minimap,
+body[data-bg-enabled="true"][data-bg-scope="all"]
+  [data-bg-target]
+  .monaco-editor
+  .decorationsOverviewRuler,
+body[data-bg-enabled="true"][data-bg-scope="all"] [data-bg-target] .monaco-editor .scrollbar,
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] .monaco-editor .minimap,
+body[data-bg-enabled="true"][data-bg-scope="global"]
+  [data-bg-target]
+  .monaco-editor
+  .decorationsOverviewRuler,
+body[data-bg-enabled="true"][data-bg-scope="global"] [data-bg-target] .monaco-editor .scrollbar {
+  background-color: transparent !important;
+}
+/* Kill the scroll shadows Monaco paints at the scrolled edges — they read as
+   opaque dark bars over a wallpaper. The translucent scrollbar slider itself
+   (theme `scrollbarSlider.background`, alpha 55) stays, so the handle is still
+   visible against the image. */
+body[data-bg-enabled="true"][data-bg-scope="canvas"]
+  [data-bg-target="canvas"]
+  .monaco-editor
+  .scrollbar
+  .shadow,
+body[data-bg-enabled="true"][data-bg-scope="all"]
+  [data-bg-target]
+  .monaco-editor
+  .scrollbar
+  .shadow,
+body[data-bg-enabled="true"][data-bg-scope="global"]
+  [data-bg-target]
+  .monaco-editor
+  .scrollbar
+  .shadow {
+  box-shadow: none !important;
 }
 
 /* ----------------------------------------------------------------------
@@ -1342,6 +1772,64 @@ body[data-bg-enabled="true"] [data-tonality="frosted"] {
     min-height: 44px;
     min-width: 44px;
   }
+  /* Horizontally-scrollable code blocks: on touch devices a bare
+     `overflow-x-auto` gives no hint that the block scrolls (the scroll happens
+     inside a vertically-scrolling list, an awkward gesture). Add momentum
+     scrolling everywhere and, on coarse pointers, a thin always-visible
+     scrollbar as the affordance. (iOS WebKit still hides overflow scrollbars,
+     but momentum scrolling remains a real improvement there.) Desktop mouse
+     users are untouched — the scrollbar styling is gated behind pointer:coarse. */
+  .code-scroll-x {
+    -webkit-overflow-scrolling: touch;
+  }
+  @media (pointer: coarse) {
+    .code-scroll-x {
+      scrollbar-width: thin;
+    }
+    .code-scroll-x::-webkit-scrollbar {
+      height: 4px;
+    }
+    .code-scroll-x::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 9999px;
+    }
+  }
+  /* Workflow editor — mobile/touch canvas. The mobile editor roots the React
+     Flow surface in `.wf-touch-canvas`; there, source handles drive
+     tap-to-connect, so they must receive pointer events (React Flow sets
+     `pointer-events: none` on non-connectable handles) and need a finger-sized
+     hit area. The visible 12px dot is unchanged — a transparent `::after`
+     pads the tap target to ~40px. Scoped to the class so desktop drag-connect
+     stays exactly as it was. */
+  .wf-touch-canvas .react-flow__handle {
+    pointer-events: all;
+  }
+  .wf-touch-canvas .react-flow__handle::after {
+    content: "";
+    position: absolute;
+    inset: -14px;
+    border-radius: 9999px;
+  }
+  /* Line numbers for Shiki-highlighted code blocks. Shiki wraps every source
+     line in `<span class="line">`, so a CSS counter lets syntax colour and
+     line numbers co-exist — the finalized `CodeBlock` (which defaults to
+     showing line numbers) keeps full highlighting instead of falling back to a
+     colourless table. Gated behind `.code-line-numbers` so the number gutter
+     only appears when the user wants it. Both the light and dark `<pre>` carry
+     their own `<code>`, so the counter resets per element. */
+  .code-line-numbers .shiki code {
+    counter-reset: shiki-line;
+  }
+  .code-line-numbers .shiki .line::before {
+    counter-increment: shiki-line;
+    content: counter(shiki-line);
+    display: inline-block;
+    min-width: 2ch;
+    margin-right: 1.25rem;
+    text-align: right;
+    color: var(--muted-foreground);
+    user-select: none;
+  }
 }
 
 /* Mobile pair-page radar — `<ScanRadar>` renders three concentric rings that
@@ -1505,6 +1993,22 @@ body[data-bg-enabled="true"] [data-tonality="frosted"] {
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.08);
 }
 
+/* In-app browser: indeterminate top progress bar. A short segment sweeps left
+ * to right while the previewed page loads (the native webview can't paint its
+ * own chrome, so this lives in the React toolbar seam). */
+.browser-progress-bar {
+  animation: browser-progress 1.1s ease-in-out infinite;
+}
+
+@keyframes browser-progress {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+
 /* iOS auto-zoom prevention: any text input that's <16px on focus triggers
  * an unwanted zoom-in. Apply to every native form control globally so we
  * don't have to remember per-component. The visual size at the desktop's
@@ -1525,4 +2029,88 @@ input[type="week"],
 textarea,
 select {
   font-size: max(16px, 1rem);
+}
+
+/* Fleet island: a soft amber inset ring that breathes while a monitored agent
+ * needs the user (permission / plan / input). Drawn by a pointer-events-none
+ * overlay so it never blocks the pill; under reduced motion it holds a static
+ * ring instead of animating, so the attention cue survives without movement. */
+@keyframes island-attention-ring {
+  0%,
+  100% {
+    box-shadow: inset 0 0 0 1px rgb(251 191 36 / 0.2);
+  }
+  50% {
+    box-shadow: inset 0 0 0 1.5px rgb(251 191 36 / 0.65);
+  }
+}
+
+.island-attention-ring {
+  animation: island-attention-ring 2.2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .island-attention-ring {
+    animation: none;
+    box-shadow: inset 0 0 0 1px rgb(251 191 36 / 0.45);
+  }
+}
+
+/* Higher-severity variant: a red inset ring that breathes while a permission is
+ * parked (an approval is more urgent than a plan/input wait). Same overlay +
+ * reduced-motion contract as the amber ring. */
+@keyframes island-attention-ring-danger {
+  0%,
+  100% {
+    box-shadow: inset 0 0 0 1px rgb(248 113 113 / 0.28);
+  }
+  50% {
+    box-shadow: inset 0 0 0 2px rgb(248 113 113 / 0.8);
+  }
+}
+
+.island-attention-ring--danger {
+  animation: island-attention-ring-danger 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .island-attention-ring--danger {
+    animation: none;
+    box-shadow: inset 0 0 0 1.5px rgb(248 113 113 / 0.6);
+  }
+}
+
+/* One-shot highlight when a row newly needs the user (a status transition into
+ * an attention state). Applied only under motion-safe from the row, so reduced
+ * motion is inert; the keyframe below is a further backstop. */
+@keyframes island-attention-flash {
+  0% {
+    background-color: rgb(251 191 36 / 0);
+  }
+  35% {
+    background-color: rgb(251 191 36 / 0.22);
+  }
+  100% {
+    background-color: rgb(251 191 36 / 0);
+  }
+}
+
+.island-attention-flash {
+  animation: island-attention-flash 1.1s ease-out;
+}
+
+/* Reduced motion: no colour pulse, but still a real (invisible) animation so
+ * the `animationend` that unmounts the overlay always fires — a bare
+ * `animation: none` would strand the transparent overlay in the DOM. */
+@keyframes island-attention-flash-reduced {
+  from,
+  to {
+    background-color: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .island-attention-flash {
+    animation: island-attention-flash-reduced 0.6s linear;
+  }
 }

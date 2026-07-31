@@ -1,0 +1,30 @@
+{
+  "errors": {
+    "adapter_missing": "页面缺少机器人上下文，请从飞书快捷操作重新打开。",
+    "chat_missing": "此页面没有接收到所属会话——请在飞书会话中通过「+」菜单打开。",
+    "entry_consumed": "该链接已被使用，请在飞书中重新获取。",
+    "entry_expired": "该链接已过期，请在飞书中重新获取。",
+    "entry_missing": "链接不完整，请从飞书重新打开。",
+    "feature_disabled": "当前工作区未启用消息导入。",
+    "forbidden": "你没有访问该会话的权限。",
+    "import_failed": "导入失败，请重试。",
+    "membership_denied": "你不是该群聊的成员。",
+    "no_messages_selected": "没有可导入的消息。",
+    "resolve_failed": "链接校验失败，请重试。",
+    "timeout": "校验超时，请重试。",
+    "trigger_detail_failed": "无法从飞书读取所选消息，请重试快捷操作。",
+    "trigger_missing": "未收到消息选择，请通过飞书消息快捷操作打开本页。",
+    "unbound": "你的飞书账号尚未关联 Cognia，请联系管理员完成绑定。"
+  },
+  "loginRedirect": "正在跳转到飞书登录…",
+  "openWorkbench": "打开工作台",
+  "resolving": "正在校验链接…",
+  "shortcut": {
+    "title": "导入消息",
+    "preparing": "正在准备导入…",
+    "importing": "正在导入所选消息…",
+    "done": "导入完成，正在打开会话…",
+    "creating": "正在为该会话创建任务……"
+  },
+  "title": "Cognia 入口"
+}

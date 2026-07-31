@@ -3,7 +3,7 @@
  */
 import { useExternalAgentStore } from "../store"
 
-jest.mock("@/lib/logging", () => {
+jest.mock("@cognia/logging", () => {
   const child = {
     debug: jest.fn(),
     info: jest.fn(),
@@ -363,9 +363,10 @@ describe("useExternalAgentStore validity / lastRun / benchmarks", () => {
       evidence: [],
       updatedAt: new Date(),
     }
+    const baselineCount = useExternalAgentStore.getState().getBenchmarkCapabilities(id).length
     useExternalAgentStore.getState().upsertBenchmarkCapability(id, entry as never)
     expect(useExternalAgentStore.getState().getBenchmarkCapabilities(id)).toHaveLength(
-      1 + 4 // 1 inserted + 4 baseline (when entry id != baseline id we still keep baseline)
+      baselineCount + 1
     )
     // Replace by same id
     useExternalAgentStore

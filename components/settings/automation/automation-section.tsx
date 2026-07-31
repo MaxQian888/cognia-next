@@ -18,13 +18,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
-import {
-  ActivityIcon,
-  AlertOctagonIcon,
-  CameraIcon,
-  ShieldAlertIcon,
-  ShieldCheckIcon,
-} from "lucide-react"
+import { ActivityIcon, AlertOctagonIcon, ShieldAlertIcon, ShieldCheckIcon } from "lucide-react"
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -52,6 +46,8 @@ import { WhitelistTab } from "./whitelist-tab"
 import { InspectorTab } from "./inspector-tab"
 import { SandboxConnectionsTab } from "./sandbox-connections-tab"
 import { ScreenOffCard } from "./screen-off-card"
+import { BehaviorCard } from "./behavior-card"
+import { PlatformCapabilitiesCard } from "./platform-capabilities-card"
 
 interface BackendInitFailure {
   platform: string
@@ -199,9 +195,11 @@ function OverviewTab() {
     if (!settings) return
     setSavingEnabled(true)
     try {
-      const updated: AutomationSettings = { ...settings, enabled: next }
-      await desktop.settingsSet(updated)
-      setSettings(updated)
+      // Route the explicit enable/disable toggle through the dedicated command:
+      // enabling is the operator's deliberate resume, which releases an engaged
+      // kill switch. A bulk `settingsSet` never resumes automation.
+      await desktop.setEnabled(next)
+      setSettings({ ...settings, enabled: next })
       toast.success(next ? "Automation engine enabled" : "Automation engine disabled")
     } catch (err) {
       toast.error("Update failed", {
@@ -247,10 +245,6 @@ function OverviewTab() {
     )
   }
 
-  const yes = t("yes")
-  const no = t("no")
-  const planned = t("noPlanned")
-
   return (
     <div className="space-y-4">
       {initFailure && (
@@ -274,6 +268,8 @@ function OverviewTab() {
       <OverviewMetricsCard />
 
       <ScreenOffCard platform={caps?.platform} />
+
+      <BehaviorCard />
 
       <Card>
         <CardHeader>
@@ -306,43 +302,8 @@ function OverviewTab() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <CameraIcon className="size-4" />
-            {t("platformCapabilities")}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {caps ? (
-            <div className="flex flex-wrap gap-2">
-              <CapBadge label={t("capabilities.platform")} value={caps.platform} />
-              <CapBadge label={t("capabilities.uia")} value={caps.hasUia ? yes : no} />
-              <CapBadge
-                label={t("capabilities.inputSimulation")}
-                value={caps.hasInputSim ? yes : no}
-              />
-              <CapBadge
-                label={t("capabilities.screenshot")}
-                value={caps.hasScreenshot ? yes : no}
-              />
-              <CapBadge label={t("capabilities.events")} value={caps.hasEvents ? yes : planned} />
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">{t("capabilityProbeFailed")}</p>
-          )}
-        </CardContent>
-      </Card>
+      <PlatformCapabilitiesCard caps={caps} />
     </div>
-  )
-}
-
-function CapBadge({ label, value }: { label: string; value: string }) {
-  return (
-    <Badge variant="secondary" className="gap-1">
-      <span className="text-muted-foreground">{label}</span>
-      <span>{value}</span>
-    </Badge>
   )
 }
 
@@ -441,7 +402,10 @@ function PermissionsTab() {
           {surfaces.map((s) => {
             const policy = settings.perSurface[s.id]
             return (
-              <div key={s.id} className="flex items-start justify-between gap-4">
+              <div
+                key={s.id}
+                className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4"
+              >
                 <div className="space-y-0.5">
                   <Label className="font-medium">{s.label}</Label>
                   <p className="text-xs text-muted-foreground">{s.description}</p>

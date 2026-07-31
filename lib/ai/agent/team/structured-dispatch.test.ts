@@ -98,4 +98,39 @@ describe("dispatchStructured", () => {
     expect(arg.validateOutput).toBe(true)
     expect(arg.recordToStore).toBe(false)
   })
+
+  it("marks a validated result schemaOverridden=false", async () => {
+    dispatchTeammateMock.mockResolvedValue({
+      text: '{ "real": true, "reasoning": "ok" }',
+      teammateId: "tm1",
+    })
+    const res = await dispatchStructured(ctx, { taskId: "t1", prompt: "v" }, schema)
+    expect(res.schemaOverridden).toBe(false)
+  })
+
+  it("honors a custom maxAttempts before throwing", async () => {
+    dispatchTeammateMock.mockResolvedValue({ text: "not json at all", teammateId: "tm1" })
+    await expect(
+      dispatchStructured(ctx, { taskId: "t1", prompt: "v" }, schema, { maxAttempts: 3 })
+    ).rejects.toThrow(/after 3 attempts/)
+    expect(dispatchTeammateMock).toHaveBeenCalledTimes(3)
+  })
+
+  it("acceptOnExhaustion returns the last parseable payload with schemaOverridden", async () => {
+    // Parses as JSON every time but never satisfies the schema (missing reasoning).
+    dispatchTeammateMock.mockResolvedValue({ text: '{ "real": true }', teammateId: "tmX" })
+    const res = await dispatchStructured(ctx, { taskId: "t1", prompt: "v" }, schema, {
+      acceptOnExhaustion: true,
+    })
+    expect(res.schemaOverridden).toBe(true)
+    expect(res.value).toEqual({ real: true })
+    expect(res.teammateId).toBe("tmX")
+  })
+
+  it("acceptOnExhaustion still throws when no attempt produced parseable JSON", async () => {
+    dispatchTeammateMock.mockResolvedValue({ text: "prose only, no json", teammateId: "tm1" })
+    await expect(
+      dispatchStructured(ctx, { taskId: "t1", prompt: "v" }, schema, { acceptOnExhaustion: true })
+    ).rejects.toThrow(/no valid structured output/)
+  })
 })

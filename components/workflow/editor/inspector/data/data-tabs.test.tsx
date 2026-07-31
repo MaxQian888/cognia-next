@@ -88,6 +88,35 @@ describe("DataTabs", () => {
     expect(screen.getByTestId("no-inputs")).toBeInTheDocument()
   })
 
+  it("Output tab shows the live streaming block while the step is running", async () => {
+    await getDb().workflowRuns.put({
+      id: "run_live",
+      workflowId: "wf_x",
+      status: "running",
+      triggerKind: "trigger.manual",
+      triggerPayload: {},
+      startedAt: 10,
+      workflowSnapshot: {} as VisualWorkflow,
+    })
+    await getDb().workflowRunEvents.bulkPut([
+      { id: "evt_s", runId: "run_live", ts: 11, type: "step_started", stepId: "n_b" },
+      {
+        id: "evt_c",
+        runId: "run_live",
+        ts: 12,
+        type: "step_stream",
+        stepId: "n_b",
+        payload: { delta: "stream so far", seq: 0 },
+      },
+    ])
+
+    renderTabs(makeStore(), "n_b")
+    fireEvent.click(screen.getByRole("radio", { name: "Output" }))
+
+    await waitFor(() => expect(screen.getByTestId("ndv-streaming-output")).toBeInTheDocument())
+    expect(screen.getByTestId("ndv-streaming-output").textContent).toContain("stream so far")
+  })
+
   it("Output tab pins and unpins via the store when run data exists", async () => {
     // Seed a succeeded run whose n_b step produced output.
     await getDb().workflowRuns.put({

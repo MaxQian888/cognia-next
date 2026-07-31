@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react"
 
 import { useProjectStore } from "@/stores/project/project-store"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.shell
 

@@ -34,7 +34,11 @@ import {
 import { upsertByConversationKey } from "@/lib/db/conversation-overrides"
 import { getDb } from "@/lib/db/schema"
 import type { ConversationOverrideRow } from "@/lib/db/connector-types"
-import type { ConnectorMode } from "@/types/connectors/policy"
+import type {
+  ActiveRunDispatchMode,
+  ConnectorMode,
+  InboundActivationPolicy,
+} from "@/types/connectors/policy"
 
 type SkillAllowMode = "inherit" | "all" | "whitelist"
 
@@ -49,6 +53,19 @@ function deriveSkillMode(value: ConversationOverrideRow["allowedBuiltInSkillIds"
   if (value === undefined) return "inherit"
   if (value === "all") return "all"
   return "whitelist"
+}
+
+/** Parse the SLA-minutes text buffer into a positive integer, or undefined. */
+function parseSlaMinutes(buffer: string): number | undefined {
+  const trimmed = buffer.trim()
+  if (!trimmed) return undefined
+  const n = Number(trimmed)
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : undefined
+}
+
+function parseActivationTtlMs(buffer: string): number | undefined {
+  const hours = Number(buffer.trim())
+  return Number.isFinite(hours) && hours > 0 ? Math.round(hours * 3_600_000) : undefined
 }
 
 const MODES: ReadonlyArray<{ value: ConnectorMode | "unset"; key: string }> = [
@@ -81,13 +98,42 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
   const [mode, setMode] = useState<ConnectorMode | "unset">(
     (initialRow?.mode as ConnectorMode | undefined) ?? "unset"
   )
+  const [activationPolicy, setActivationPolicy] = useState<InboundActivationPolicy | "inherit">(
+    initialRow?.inboundActivationPolicy ?? "inherit"
+  )
+  const [dispatchMode, setDispatchMode] = useState<ActiveRunDispatchMode | "inherit">(
+    initialRow?.activeRunDispatchMode ?? "inherit"
+  )
+  const [activationTtlHours, setActivationTtlHours] = useState(
+    initialRow?.activationTtlMs ? String(initialRow.activationTtlMs / 3_600_000) : ""
+  )
   const [characterId, setCharacterId] = useState(initialRow?.characterId ?? "")
+  // Agent Team binding (control-plane multi-agent). When set, inbound AI-run
+  // routes to the team runtime instead of the single character.
+  const [teamId, setTeamId] = useState(initialRow?.teamId ?? "")
+  const [workflowId, setWorkflowId] = useState(initialRow?.workflowId ?? "")
   const [allowComputerUse, setAllowComputerUse] = useState(initialRow?.allowComputerUse ?? false)
   const [allowGoalDriving, setAllowGoalDriving] = useState(initialRow?.allowGoalDriving ?? false)
+  const [allowScheduleTools, setAllowScheduleTools] = useState(
+    initialRow?.allowScheduleTools ?? false
+  )
+  // Proactive IM push opt-in (control-plane notifications). Default OFF.
+  const [proactivePush, setProactivePush] = useState(initialRow?.proactivePush ?? false)
+  // Live in-turn activity card (control-plane visibility). DEFAULT ON —
+  // persist `false` only to suppress for noisy channels.
+  const [liveActivity, setLiveActivity] = useState(initialRow?.liveActivity !== false)
+  const [appendActivity, setAppendActivity] = useState(initialRow?.appendActivity !== false)
   const [providerOverride, setProviderOverride] = useState(initialRow?.providerOverride ?? "")
   const [modelOverride, setModelOverride] = useState(initialRow?.modelOverride ?? "")
   const [pinned, setPinned] = useState(initialRow?.pinned ?? false)
   const [archived, setArchived] = useState(initialRow?.archived ?? false)
+  // Per-conversation outbound mute (fine-grained control) — consulted by the
+  // outbound runner with the same defer semantics as the adapter-level mute.
+  const [muted, setMuted] = useState(initialRow?.muted ?? false)
+  // Response-SLA target in minutes (CRM, schema v83). Empty string = no SLA.
+  const [slaMinutes, setSlaMinutes] = useState<string>(
+    initialRow?.slaResponseMinutes != null ? String(initialRow.slaResponseMinutes) : ""
+  )
   const [saving, setSaving] = useState(false)
 
   // Quiet hours — toggle + three inputs. The "enabled" boolean tracks
@@ -161,19 +207,30 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
         conversationKey,
         sessionId,
         mode: mode === "unset" ? undefined : mode,
+        inboundActivationPolicy: activationPolicy === "inherit" ? undefined : activationPolicy,
+        activeRunDispatchMode: dispatchMode === "inherit" ? undefined : dispatchMode,
+        activationTtlMs: parseActivationTtlMs(activationTtlHours),
         characterId: characterId.trim() || undefined,
+        teamId: teamId.trim() || undefined,
+        workflowId: workflowId.trim() || undefined,
+        proactivePush: proactivePush ? true : undefined,
+        liveActivity: liveActivity ? undefined : false,
+        appendActivity: appendActivity ? undefined : false,
         allowComputerUse: allowComputerUse ? true : undefined,
         allowGoalDriving: allowGoalDriving ? true : undefined,
+        allowScheduleTools: allowScheduleTools ? true : undefined,
         providerOverride: providerOverride.trim() || undefined,
         modelOverride: modelOverride.trim() || undefined,
         pinned: pinned ? true : undefined,
         archived: archived ? true : undefined,
+        muted: muted ? true : undefined,
         trigger: initialRow?.trigger,
         allowedBuiltInSkillIds: resolvedAllowed,
         // The HITL flag defaults true at the read site; only persist when
         // explicitly set to false so older rows don't get migration churn.
         requireHitlForWrites: requireHitlForWrites === false ? false : undefined,
         quietHours: resolvedQuietHours,
+        slaResponseMinutes: parseSlaMinutes(slaMinutes),
       })
       onDone?.()
     } finally {
@@ -251,16 +308,23 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
           conversationKey: target.conversationKey,
           sessionId: target.sessionId,
           mode: mode === "unset" ? undefined : mode,
+          inboundActivationPolicy: activationPolicy === "inherit" ? undefined : activationPolicy,
+          activeRunDispatchMode: dispatchMode === "inherit" ? undefined : dispatchMode,
+          activationTtlMs: parseActivationTtlMs(activationTtlHours),
           characterId: characterId.trim() || undefined,
+          teamId: teamId.trim() || undefined,
+          workflowId: workflowId.trim() || undefined,
           allowComputerUse: allowComputerUse ? true : undefined,
           allowGoalDriving: allowGoalDriving ? true : undefined,
           providerOverride: providerOverride.trim() || undefined,
           modelOverride: modelOverride.trim() || undefined,
           pinned: pinned ? true : undefined,
           archived: archived ? true : undefined,
+          muted: muted ? true : undefined,
           allowedBuiltInSkillIds: resolvedAllowed,
           requireHitlForWrites: requireHitlForWrites === false ? false : undefined,
           quietHours: resolvedQuietHours,
+          slaResponseMinutes: parseSlaMinutes(slaMinutes),
         })
       }
       onDone?.()
@@ -291,6 +355,70 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
         </Select>
       </div>
 
+      <div className="grid gap-3 rounded-md border bg-muted/20 p-3 md:grid-cols-3">
+        <div className="space-y-2">
+          <Label htmlFor="conv-override-activation-policy">
+            {t("fields.activationPolicy.label")}
+          </Label>
+          <Select
+            value={activationPolicy}
+            onValueChange={(value) =>
+              setActivationPolicy(value as InboundActivationPolicy | "inherit")
+            }
+          >
+            <SelectTrigger
+              id="conv-override-activation-policy"
+              data-testid="conv-override-activation-policy"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {(
+                ["inherit", "mention_activates", "mention_each", "always", "direct_only"] as const
+              ).map((value) => (
+                <SelectItem key={value} value={value}>
+                  {t(`fields.activationPolicy.options.${value}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="conv-override-dispatch-mode">{t("fields.dispatchMode.label")}</Label>
+          <Select
+            value={dispatchMode}
+            onValueChange={(value) => setDispatchMode(value as ActiveRunDispatchMode | "inherit")}
+          >
+            <SelectTrigger
+              id="conv-override-dispatch-mode"
+              data-testid="conv-override-dispatch-mode"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {(["inherit", "queue", "steer"] as const).map((value) => (
+                <SelectItem key={value} value={value}>
+                  {t(`fields.dispatchMode.options.${value}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="conv-override-activation-ttl">{t("fields.activationTtl.label")}</Label>
+          <Input
+            id="conv-override-activation-ttl"
+            type="number"
+            min="1"
+            step="1"
+            value={activationTtlHours}
+            placeholder={t("fields.activationTtl.placeholder")}
+            onChange={(event) => setActivationTtlHours(event.target.value)}
+            data-testid="conv-override-activation-ttl"
+          />
+        </div>
+      </div>
+
       <div className="space-y-2">
         <Label htmlFor="conv-override-character">{t("fields.character")}</Label>
         <Input
@@ -300,6 +428,30 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
           onChange={(e) => setCharacterId(e.target.value)}
           data-testid="conv-override-character"
         />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="conv-override-team">{t("fields.teamBinding")}</Label>
+        <Input
+          id="conv-override-team"
+          value={teamId}
+          placeholder={t("fields.teamBindingPlaceholder")}
+          onChange={(e) => setTeamId(e.target.value)}
+          data-testid="conv-override-team"
+        />
+        <p className="text-[11px] text-muted-foreground">{t("fields.teamBindingHelp")}</p>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="conv-override-workflow">{t("fields.workflowBinding")}</Label>
+        <Input
+          id="conv-override-workflow"
+          value={workflowId}
+          placeholder={t("fields.workflowBindingPlaceholder")}
+          onChange={(e) => setWorkflowId(e.target.value)}
+          data-testid="conv-override-workflow"
+        />
+        <p className="text-[11px] text-muted-foreground">{t("fields.workflowBindingHelp")}</p>
       </div>
 
       <div className="space-y-2 rounded-md border border-destructive/30 bg-destructive/5 p-3">
@@ -338,6 +490,24 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
               />
             </div>
             <p className="text-xs text-muted-foreground">{t("fields.allowGoalDrivingWarning")}</p>
+            <p className="text-xs text-muted-foreground">{t("fields.allowGoalDrivingPlatform")}</p>
+          </div>
+        </div>
+        <div className="flex items-start gap-3 rounded-md border border-border bg-card p-3">
+          <ShieldAlertIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+          <div className="flex-1 space-y-1">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="conv-override-schedule-tools" className="cursor-pointer">
+                {t("fields.allowScheduleTools")}
+              </Label>
+              <Switch
+                id="conv-override-schedule-tools"
+                checked={allowScheduleTools}
+                onCheckedChange={setAllowScheduleTools}
+                data-testid="conv-override-schedule-tools"
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">{t("fields.allowScheduleToolsWarning")}</p>
           </div>
         </div>
       </div>
@@ -365,6 +535,80 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
         </div>
       </div>
 
+      <div className="space-y-2">
+        <Label htmlFor="conv-override-sla">{t("fields.slaResponseMinutes")}</Label>
+        <Input
+          id="conv-override-sla"
+          type="number"
+          min={1}
+          inputMode="numeric"
+          value={slaMinutes}
+          placeholder={t("fields.slaResponseMinutesPlaceholder")}
+          onChange={(e) => setSlaMinutes(e.target.value)}
+          data-testid="conv-override-sla"
+        />
+        <p className="text-xs text-muted-foreground">{t("fields.slaResponseMinutesHint")}</p>
+      </div>
+
+      {/* Proactive IM push opt-in (control-plane notifications). Off by default
+       * so a customer-facing channel never gets surprise pushes. */}
+      <div className="flex items-start gap-3 rounded-md border bg-muted/20 p-3">
+        <div className="flex-1 space-y-1">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="conv-override-proactive" className="cursor-pointer">
+              {t("fields.proactivePush")}
+            </Label>
+            <Switch
+              id="conv-override-proactive"
+              checked={proactivePush}
+              onCheckedChange={setProactivePush}
+              data-testid="conv-override-proactive"
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">{t("fields.proactivePushHint")}</p>
+        </div>
+      </div>
+
+      {/* Live activity card opt-OUT (control-plane visibility). DEFAULT ON —
+       * the live "the agent is working" card surfaces tool count / elapsed /
+       * file edits during a turn. Flip OFF to suppress on noisy channels. */}
+      <div className="flex items-start gap-3 rounded-md border bg-muted/20 p-3">
+        <div className="flex-1 space-y-1">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="conv-override-live-activity" className="cursor-pointer">
+              {t("fields.liveActivity")}
+            </Label>
+            <Switch
+              id="conv-override-live-activity"
+              checked={liveActivity}
+              onCheckedChange={setLiveActivity}
+              data-testid="conv-override-live-activity"
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">{t("fields.liveActivityHint")}</p>
+        </div>
+      </div>
+
+      {/* Append-mode activity opt-OUT for adapters WITHOUT edit() (workflow⇄IM
+       * visibility parity). DEFAULT ON — such adapters get one compact progress
+       * line per boundary during a turn. Flip OFF to suppress on noisy channels. */}
+      <div className="flex items-start gap-3 rounded-md border bg-muted/20 p-3">
+        <div className="flex-1 space-y-1">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="conv-override-append-activity" className="cursor-pointer">
+              {t("fields.appendActivity")}
+            </Label>
+            <Switch
+              id="conv-override-append-activity"
+              checked={appendActivity}
+              onCheckedChange={setAppendActivity}
+              data-testid="conv-override-append-activity"
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">{t("fields.appendActivityHint")}</p>
+        </div>
+      </div>
+
       <div className="grid grid-cols-2 gap-3">
         <div className="flex items-center justify-between rounded-md border px-3 py-2">
           <Label htmlFor="conv-override-pinned" className="cursor-pointer">
@@ -387,6 +631,25 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
             onCheckedChange={setArchived}
             data-testid="conv-override-archived"
           />
+        </div>
+      </div>
+
+      {/* Per-conversation outbound mute — same defer semantics as the
+       * adapter-level mute, scoped to this conversation only. */}
+      <div className="flex items-start gap-3 rounded-md border bg-muted/20 p-3">
+        <div className="flex-1 space-y-1">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="conv-override-muted" className="cursor-pointer">
+              {t("fields.muted")}
+            </Label>
+            <Switch
+              id="conv-override-muted"
+              checked={muted}
+              onCheckedChange={setMuted}
+              data-testid="conv-override-muted"
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">{t("fields.mutedHint")}</p>
         </div>
       </div>
 
@@ -438,6 +701,7 @@ export function ConversationOverrideForm(props: ConversationOverrideFormProps) {
                 id="conv-override-quiet-tz"
                 value={quietHours.tz}
                 onChange={(e) => setQuietHours((prev) => ({ ...prev, tz: e.target.value }))}
+                // i18n-exempt: example IANA timezone id, not translatable UI copy
                 placeholder="Asia/Shanghai"
                 data-testid="conv-override-quiet-tz"
               />

@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cognia-plugin-sdk"
+version = "0.1.0"
+description = "Author-facing Python SDK for Cognia plugins (typed manifest models, decorators, runtime, and capability-contract helpers)."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Cognia" }]
+keywords = ["cognia", "plugin", "sdk"]
+# Stdlib only — a Cognia Python plugin must load on a bare interpreter.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+# src-layout: expose `cognia` without an editable install.
+pythonpath = ["src"]
+testpaths = ["tests"]

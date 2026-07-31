@@ -1,0 +1,533 @@
+{
+  "activity": {
+    "assignment": {
+      "assigned": "Assigned",
+      "labelAdded": "Label added",
+      "labelRemoved": "Label removed",
+      "reassigned": "Reassigned",
+      "statusOpen": "Reopened",
+      "statusPending": "Marked pending",
+      "statusResolved": "Resolved",
+      "statusSnoozed": "Snoozed",
+      "unassigned": "Unassigned"
+    },
+    "count": "{count, plural, =1 {1 event} other {# events}}",
+    "empty": "No recent activity",
+    "kind": {
+      "broadcastEnqueued": "Broadcast enqueued",
+      "broadcastPartialFailure": "Broadcast partially failed",
+      "conversationCreated": "Conversation created",
+      "deliveryDeadlettered": "Delivery failed — gave up",
+      "deliveryError": "Delivery error",
+      "dispatchRuleMatched": "Routed by dispatch rule",
+      "goalBlockedIm": "Goal blocked",
+      "goalStartedIm": "Goal started",
+      "inboundDeferredManualMode": "Reply held — manual mode",
+      "inboundDeferredMuted": "Reply deferred — muted",
+      "inboundDeferredQuietHours": "Reply deferred — quiet hours",
+      "inboundDeleted": "Message deleted",
+      "inboundEdited": "Message edited",
+      "inboundHelpServed": "Help card sent",
+      "inboundMemberAdded": "Member joined",
+      "inboundMemberRemoved": "Member left",
+      "inboundPolicyBlocked": "Blocked by policy",
+      "inboundReadIndicator": "Message read",
+      "inboundWelcomeSent": "Welcome card sent",
+      "notifyImPiiBlocked": "Notification blocked — PII",
+      "overrideComputerUseChanged": "Computer Use changed",
+      "pluginInboundBlocked": "Blocked by plugin",
+      "pluginRateBlocked": "Rate-limited by plugin",
+      "pluginTransformPiiBlocked": "Plugin transform blocked — PII",
+      "siblingBotBudgetExhausted": "Sibling bot reply budget exhausted",
+      "siblingBotIgnored": "Sibling bot message ignored",
+      "taskDispatched": "Task dispatched",
+      "teamDispatched": "Routed to team",
+      "teamPostedAsBot": "Team posted as bot",
+      "workflowDispatched": "Routed to workflow"
+    },
+    "title": "Activity",
+    "toggle": "Toggle activity log"
+  },
+  "assignee": {
+    "aria": "Assignee: {assignee}",
+    "character": "Character",
+    "me": "Me",
+    "team": "Team",
+    "unassign": "Unassign",
+    "unassigned": "Unassigned",
+    "unknownCharacter": "Character"
+  },
+  "atStrategy": {
+    "always": "All messages",
+    "aria": "Reply strategy: {strategy}",
+    "direct_only": "Direct only",
+    "label": "Reply",
+    "mention_only": "@mention only",
+    "tooltip": "This adapter replies to: {strategy}"
+  },
+  "banner": {
+    "outboundSaturated": {
+      "count": "{count, plural, =1 {1 message capped} other {# messages capped}}",
+      "dismiss": "Dismiss",
+      "headline": "{count, plural, =1 {1 adapter's outbound queue is saturated} other {# adapters' outbound queues are saturated}}",
+      "viewOutbound": "View outbound"
+    }
+  },
+  "bindingsInspector": {
+    "copied": "Copied actionId",
+    "copyAria": "Copy {id}",
+    "copyFailed": "Couldn't copy to clipboard",
+    "deleteAria": "Delete {id}",
+    "deleted": "Binding deleted",
+    "empty": "No bindings yet — bindings appear here when the assistant emits an A2UI surface with interactive components.",
+    "failures": "{count} callback failure(s) in the last 24h",
+    "openInspector": "Open bindings inspector",
+    "subtitle": "{count} recent binding(s) for this conversation",
+    "testAria": "Test {id}",
+    "testQueued": "Synthetic callback dispatched",
+    "title": "Callback bindings"
+  },
+  "cannedResponses": {
+    "empty": "No canned responses match.",
+    "searchPlaceholder": "Search canned responses…",
+    "triggerAria": "Insert a canned response"
+  },
+  "commandPalette": {
+    "conversations": "Conversations",
+    "description": "Jump to any conversation across your connectors.",
+    "empty": "No conversations found",
+    "placeholder": "Search conversations…",
+    "title": "Search conversations"
+  },
+  "connectionLoss": {
+    "dismiss": "Dismiss",
+    "headline": "{count, plural, =1 {1 adapter is offline} other {# adapters are offline}}",
+    "reconnect": "Reconnect",
+    "reconnectAll": "Reconnect all",
+    "reconnectDesktopOnly": "Reconnect is only available in the desktop app",
+    "reconnectQueued": "Reconnect queued",
+    "reconnectUnavailable": "Reconnect unavailable",
+    "state": {
+      "degraded": "degraded",
+      "down": "down"
+    }
+  },
+  "contactProfile": {
+    "empty": "No contact details for this conversation. Group chats and never-seen contacts don't have a directory entry yet.",
+    "lastSeen": "Last seen",
+    "mergedTitle": "Merged identities",
+    "platform": "Platform",
+    "remoteId": "User ID",
+    "subtitle": "Identity directory entry for this conversation.",
+    "title": "Contact",
+    "unmerge": "Unmerge"
+  },
+  "conversation": {
+    "loading": "Loading…"
+  },
+  "conversationHeader": {
+    "backToList": "Back to conversation list",
+    "computerUse": {
+      "aria": "Computer Use is {state}",
+      "cancelled": "No change — Computer Use stays off",
+      "confirmCancel": "Cancel",
+      "confirmEnable": "Enable",
+      "confirmMessage": "When enabled, AI replies in this conversation may fire screenshot, mouse, and keyboard actions on the host. Continue only if you trust the channel.",
+      "confirmTitle": "Enable Computer Use for this conversation?",
+      "disabled": "Computer Use disabled",
+      "enabled": "Computer Use enabled",
+      "off": "Computer Use",
+      "on": "Computer Use",
+      "tooltipOff": "Computer Use is off. Replies cannot drive host automation. Click to enable (confirmation required).",
+      "tooltipOn": "Computer Use is on for this conversation. Replies may drive screenshot / mouse / keyboard actions on the host."
+    },
+    "computerUseChip": {
+      "aria": "Computer Use is on for this conversation",
+      "label": "CU",
+      "tooltip": "Computer Use is enabled — replies may drive screenshot / mouse / keyboard actions on the host."
+    },
+    "degradedBadgeAria": "Adapter health: {state}",
+    "degradedHint": {
+      "degraded": "The adapter is reporting intermittent failures. Reconnecting may clear a transient transport error.",
+      "down": "The adapter has stopped. Reconnect to restart its inbound transport.",
+      "unknown": "No recent heartbeat from this adapter. It may not be running."
+    },
+    "degradedState": {
+      "degraded": "Degraded",
+      "down": "Offline",
+      "unknown": "Unknown"
+    },
+    "degradedTitle": "Adapter is not running",
+    "groupHealth": "Health",
+    "groupRouting": "Routing",
+    "groupStatus": "Status",
+    "groupTools": "Tools",
+    "healthBadge": {
+      "aria": "Adapter health: {state}",
+      "breakerOpen": "Circuit open",
+      "degraded": "Degraded",
+      "down": "Offline",
+      "eta": "Should recover by {date}",
+      "openHealth": "Open full health",
+      "rateLimited": "Rate limited",
+      "reconnect": "Reconnect",
+      "reconnectDesktopOnly": "Reconnect requires the desktop app.",
+      "reconnectQueued": "Reconnect queued.",
+      "reconnectUnavailable": "Adapter not currently registered with the runtime."
+    },
+    "lastInboundDays": "Last message {days}d ago",
+    "lastInboundHours": "Last message {hours}h ago",
+    "lastInboundJustNow": "Last message just now",
+    "lastInboundMinutes": "Last message {minutes}min ago",
+    "lastInboundTooltip": "Newest inbound message at {time}",
+    "modeSwitchDesktopOnly": "Mode switching requires the desktop app",
+    "more": "More",
+    "moreAttention": "More — needs attention",
+    "openContact": "Contact profile",
+    "openOverrides": "Conversation settings",
+    "openOverridesAria": "Open per-conversation settings",
+    "openSidebar": "Open sidebar",
+    "reconnectButton": "Reconnect now",
+    "reconnectDesktopOnly": "Reconnect requires the desktop app.",
+    "reconnectQueued": "Reconnect queued.",
+    "reconnectUnavailable": "Adapter not currently registered with the runtime."
+  },
+  "conversationList": {
+    "empty": "No conversations yet",
+    "emptyDescription": "Conversations from your connected adapters will appear here.",
+    "emptyFiltered": {
+      "description": "Try a different search term or clear the active filter.",
+      "reset": "Clear filters",
+      "title": "No matching conversations"
+    },
+    "filter": {
+      "all": "All",
+      "aria": "Filter conversations",
+      "badgeAria": "{count, plural, =1 {1 filter active} other {# filters active}}",
+      "button": "Filter",
+      "clear": "Clear filters",
+      "pending": "Pending",
+      "pinned": "Pinned",
+      "remove": "Remove {label} filter",
+      "snoozed": "Snoozed",
+      "unread": "Unread"
+    },
+    "header": "Conversations",
+    "hideArchived": "Hide archived",
+    "hideResolved": "Hide resolved",
+    "openSidebar": "Open conversations list",
+    "search": {
+      "aria": "Search conversations",
+      "clear": "Clear search",
+      "placeholder": "Search conversations…"
+    },
+    "showArchived": "Show {count} archived",
+    "showResolved": "Show {count} resolved"
+  },
+  "conversationOverride": {
+    "deleteOverride": "Remove override",
+    "deleteOverrideConfirm": "Remove the override for this conversation? It will fall back to the adapter defaults.",
+    "dialogTitle": "Conversation settings",
+    "fields": {
+      "advancedJson": "Advanced (quiet hours + cooldown + muted)",
+      "advancedJsonHelp": "These fields populate the per-conversation `trigger` partial that overrides the adapter trigger policy.",
+      "allowComputerUse": "Allow Computer Use tools",
+      "allowComputerUseWarning": "When on, replies in this channel may fire screenshot, mouse, and keyboard actions on the host. Off by default for IM channels.",
+      "allowGoalDriving": "Allow self-driving /goal on this conversation",
+      "allowGoalDrivingPlatform": "Runs only where the connector runtime runs — the desktop app (all channels) or `cli serve` (webhook channels). The mobile app can't drive IM goals.",
+      "allowGoalDrivingWarning": "When off, /goal refuses to start on this IM conversation so a self-driving loop cannot auto-reply without operator review. Off by default.",
+      "allowScheduleTools": "Allow this conversation's agent to manage schedules",
+      "allowScheduleToolsWarning": "Exposes create, list, and cancel schedule tools only to this conversation. The agent can mutate only tasks it created. Off by default.",
+      "allowedSkills": {
+        "add": "Add",
+        "all": "Allow all",
+        "help": "Whitelist accepts exact ids (lark.calendar.list_events) or wildcards (lark.calendar.*). Empty whitelist blocks every built-in skill on this conversation.",
+        "inherit": "Inherit",
+        "label": "Built-in skill allowlist",
+        "placeholder": "skill.id or family.* (Enter to add)",
+        "remove": "Remove {id}",
+        "whitelist": "Whitelist"
+      },
+      "appendActivity": "Progress lines (no-edit adapters)",
+      "appendActivityHint": "On adapters that can't edit a message in place, post one compact progress line per step during a turn instead of staying silent. On by default; turn off for noisy channels.",
+      "applyToAdapter": "Apply to all on this adapter",
+      "applyToAdapterConfirm": "Apply these settings to every conversation under this adapter? This overwrites existing per-conversation overrides for the matching fields.",
+      "applyToAdapterTitle": "Re-apply these settings to every conversation under this adapter",
+      "archived": "Archived",
+      "character": "Character (id)",
+      "characterPlaceholder": "(none)",
+      "cooldownMs": "Cooldown after bot reply (ms)",
+      "liveActivity": "Live activity card",
+      "liveActivityHint": "Show a live progress card in chat while the assistant is working (tool count, elapsed time, current action, file edits). On by default; turn off for noisy channels.",
+      "mode": "Mode",
+      "modeOptions": {
+        "auto": "Auto-reply",
+        "draft": "Draft only",
+        "manual": "Manual review",
+        "unset": "Use adapter default"
+      },
+      "modelOverride": "Model override",
+      "modelOverridePlaceholder": "claude-opus-4-7",
+      "muted": "Muted (drops outbound)",
+      "mutedHint": "Defer every outbound delivery on this conversation (re-checked every minute) while the bot keeps replying in its other conversations. Same semantics as the adapter-level mute, scoped to one chat.",
+      "pinned": "Pinned",
+      "proactivePush": "Proactive IM notifications",
+      "proactivePushHint": "Allow the assistant to proactively push task-complete / error / input-required events back to this conversation. Off by default.",
+      "providerOverride": "Provider override",
+      "providerOverridePlaceholder": "anthropic",
+      "quietHours": {
+        "enabled": "Per-conversation quiet hours",
+        "from": "From",
+        "help": "When enabled, outbound traffic on this conversation defers during this window. Overrides the adapter-level quiet hours.",
+        "to": "To",
+        "tz": "Time zone"
+      },
+      "quietHoursFrom": "From",
+      "quietHoursOverride": "Quiet hours (this conversation)",
+      "quietHoursTo": "To",
+      "quietHoursTz": "Time zone",
+      "requireHitlForWrites": {
+        "help": "When off, write-tier skills run without the A2UI confirm card. Destructive skills always require HITL regardless. Defaults on.",
+        "label": "Require HITL for write skills"
+      },
+      "slaResponseMinutes": "Response SLA (minutes)",
+      "slaResponseMinutesHint": "When set, this conversation shows a countdown badge and turns Overdue if no reply is sent within this many minutes (quiet hours excluded). Leave empty for no SLA.",
+      "slaResponseMinutesPlaceholder": "e.g. 30",
+      "suppressGroups": "Suppress in group chats",
+      "teamBinding": "Agent Team (id)",
+      "teamBindingHelp": "When set, inbound messages dispatch to this Agent Team instead of a single character; progress streams back to the conversation.",
+      "teamBindingPlaceholder": "(none — replies use the character)",
+      "workflowBinding": "Visual Workflow (name or id)",
+      "workflowBindingHelp": "When set (and no team is bound — a team wins), inbound messages run this Visual Workflow instead of a single character; the message text is the trigger payload and progress streams back to the conversation.",
+      "workflowBindingPlaceholder": "(none — replies use the character)",
+      "activationPolicy": {
+        "label": "Activation policy"
+      },
+      "dispatchMode": {
+        "label": "Dispatch mode"
+      },
+      "activationTtl": {
+        "label": "Activation TTL (hours)",
+        "placeholder": "e.g. 24"
+      }
+    },
+    "gearAria": "Open per-conversation override settings",
+    "noOverrideYet": "No override yet — defaults are inherited from the adapter.",
+    "reset": "Cancel",
+    "save": "Save",
+    "saving": "Saving…"
+  },
+  "conversationRow": {
+    "draftCount": "{count, plural, =1 {1 draft} other {# drafts}}",
+    "draftCountAria": "{count, plural, =1 {1 pending draft} other {# pending drafts}}",
+    "noPreview": "No messages yet",
+    "openConversation": "Open conversation: {name}",
+    "statusAria": "Status: {status}"
+  },
+  "draftBanner": {
+    "pending": "A draft reply is waiting for your review.",
+    "review": "Review",
+    "reviewAria": "Review draft reply"
+  },
+  "draftCenter": {
+    "collapse": "Collapse",
+    "empty": "No drafts waiting for review",
+    "emptyDescription": "Replies that need your approval before sending will appear here.",
+    "expand": "Edit draft",
+    "group": "{count, plural, =1 {1 draft} other {# drafts}}",
+    "open": "Open conversation",
+    "pendingCount": "{count, plural, =0 {No drafts} =1 {1 draft} other {# drafts}}",
+    "sidebarLabel": "Drafts",
+    "title": "Draft approvals"
+  },
+  "draftEditor": {
+    "a2uiBadge": "A2UI",
+    "a2uiEmptyMirror": "(no text mirror — interactive surface)",
+    "approveAndSend": "Approve & Send",
+    "cancel": "Cancel",
+    "markdownPlaceholder": "Draft markdown…",
+    "reject": "Reject",
+    "textPlaceholder": "Draft text…"
+  },
+  "extensionPoints": {
+    "composerActions": "Inbox composer actions",
+    "conversationActions": "Conversation row actions",
+    "draftActions": "Draft review actions",
+    "sidebarSection": "Inbox sidebar section"
+  },
+  "inboundA2UI": {
+    "rawPayload": "Raw payload"
+  },
+  "labels": {
+    "addAria": "Add or remove labels",
+    "empty": "No labels yet — create them in Settings.",
+    "pickerTitle": "Labels",
+    "removeAria": "Remove label {name}"
+  },
+  "lifecycle": {
+    "aria": "Conversation status: {status}",
+    "snooze": {
+      "1h": "Snooze 1 hour",
+      "24h": "Snooze 1 day",
+      "8h": "Snooze 8 hours"
+    },
+    "status": {
+      "open": "Open",
+      "pending": "Pending",
+      "resolved": "Resolved",
+      "snoozed": "Snoozed"
+    }
+  },
+  "modeSwitcher": {
+    "aria": "Switch mode",
+    "modes": {
+      "auto": "Auto",
+      "draft": "Draft",
+      "manual": "Manual"
+    }
+  },
+  "outboundSource": {
+    "draftApproved": "Approved draft",
+    "manual": "Manual",
+    "plugin": "Plugin",
+    "skill": "Skill",
+    "workflow": "Workflow",
+    "workflowTooltip": "Sent by workflow node {nodeId} — click to open the run"
+  },
+  "outboundStatus": {
+    "retry": "Retry",
+    "status": {
+      "deadlettered": "Dead-lettered",
+      "delivery_unknown": "Delivery unknown",
+      "failed": "Failed",
+      "pending": "Queued",
+      "sending": "Sending",
+      "sent": "Sent"
+    },
+    "unknownError": "Unknown error"
+  },
+  "policyInfo": {
+    "aria": "Policy info",
+    "blockers": {
+      "channel-blocklist": "Blocked channels: {names}",
+      "cooldown-after-bot-reply": "{secs}s cooldown after bot reply",
+      "keyword-blocklist": "Blocked keywords: {names}",
+      "rate-limit": "Rate-limited to {perUserPerMin}/min per user",
+      "unknown": "Unknown blocker",
+      "user-blocklist": "Blocked users: {names}"
+    },
+    "noRules": "No trigger rules configured.",
+    "rules": {
+      "channel-allowlist": "Channels: {names}",
+      "keyword": "Keywords: {names}",
+      "private-default": "All private messages",
+      "reply-to-bot": "Reply-to-bot",
+      "self-mention": "@mention",
+      "slash-command": "Commands: {names}",
+      "unknown": "Unknown rule",
+      "user-allowlist": "Users: {names}"
+    },
+    "title": "Policy"
+  },
+  "providerModelSwitcher": {
+    "aria": "Provider and model override",
+    "clearOverride": "Use default (no override)",
+    "default": "Default",
+    "noProvidersConfigured": "No providers configured",
+    "title": "Provider · model"
+  },
+  "quietHours": {
+    "active": "Quiet until {time}",
+    "ariaActive": "Quiet hours active until {time}",
+    "ariaInactive": "Quiet hours {from} to {to} {tz}",
+    "inactive": "Quiet {from}–{to}",
+    "label": "Quiet hours",
+    "tooltip": "Outbound replies pause during quiet hours ({from}–{to} {tz})."
+  },
+  "shell": {
+    "resize": {
+      "detailHandle": "Resize conversation list",
+      "sidebarHandle": "Resize sidebar"
+    },
+    "selectPrompt": "Select a conversation to start"
+  },
+  "sidebar": {
+    "adapters": "Adapters",
+    "expandTooltip": "Show recent conversations",
+    "noAdapters": "No adapters configured",
+    "noAdaptersTitle": "No adapters yet",
+    "recentEmpty": "No conversations yet",
+    "title": "Inbox",
+    "toggleAdapter": "Toggle recent conversations for {name}",
+    "viewModeAria": "View mode",
+    "viewModes": {
+      "by-adapter": "By adapter",
+      "by-platform": "By platform",
+      "unified": "Unified"
+    }
+  },
+  "sla": {
+    "dueAria": "SLA: reply due in {time}",
+    "dueIn": "Due in {time}",
+    "overdue": "Overdue",
+    "overdueAria": "SLA breached — reply overdue"
+  },
+  "state": {
+    "empty": {
+      "description": "Conversations will appear here once a connector starts receiving messages.",
+      "title": "Nothing here yet"
+    },
+    "error": {
+      "copiedToast": "Copied",
+      "copyStack": "Copy stack",
+      "description": "The Inbox surface failed to render. Try again, or copy the stack trace into an incident ticket.",
+      "retry": "Retry",
+      "title": "Something went wrong"
+    },
+    "syncing": {
+      "label": "Loading from cache…"
+    }
+  },
+  "unreadPill": {
+    "aria": "{count} unread"
+  },
+  "inboundRecovery": {
+    "retryWarning": "Retrying from the start will re-process the message and may repeat external side effects. Continue?",
+    "title": "Inbound recovery",
+    "description": "One or more inbound messages could not be processed and need recovery.",
+    "message": "Message {id}: {reason}",
+    "unknown": "Unknown reason",
+    "continueSafely": "Continue safely",
+    "retryFromStart": "Retry from start",
+    "dismiss": "Dismiss"
+  },
+  "topicRuntime": {
+    "aria": "Topic runtime: {policy} · {dispatch}",
+    "badge": "{policy} · {dispatch}",
+    "requested": "Requested: {value}",
+    "effective": "Effective: {value}",
+    "readiness": "Readiness: {value}",
+    "activation": "Activation: {value}",
+    "active": "Active",
+    "inactive": "Inactive",
+    "queue": "Queue depth: {count}",
+    "activeRun": "Active run: {value}",
+    "none": "None",
+    "recovery": "Recovery required: {count}",
+    "capabilities": "Capabilities: topic={topic}, count={count}",
+    "fallback": {
+      "delivery_unverified": "Fallback to mention-each because delivery is unverified"
+    }
+  },
+  "notices": {
+    "collapse": "Hide notices",
+    "expand": "Show notices",
+    "region": "Inbox notices",
+    "severity": {
+      "info": "Information",
+      "warning": "Warning",
+      "danger": "Error"
+    },
+    "summary": "{count, plural, =1 {1 notice} other {# notices}}"
+  }
+}

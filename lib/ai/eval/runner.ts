@@ -29,7 +29,7 @@ export interface RunEvalOptions {
   k?: number
   signal?: AbortSignal
   /** Progress callback fired after each case completes. */
-  onCaseComplete?: (result: EvalCaseResult, index: number) => void
+  onCaseComplete?: (result: EvalCaseResult, index: number) => void | Promise<void>
 }
 
 function erroredSample(message: string): EvalSample {
@@ -62,9 +62,11 @@ async function safeScore(scorer: Scorer, sample: EvalSample, evalCase: EvalCase)
   try {
     return await scorer.score(sample, evalCase)
   } catch (err) {
+    // The SCORER blew up, not the agent — `errored`, never a failed verdict.
     return {
       scorerId: scorer.id,
       dimension: scorer.dimension,
+      status: "errored",
       value: 0,
       passed: false,
       error: err instanceof Error ? err.message : String(err),
@@ -92,7 +94,7 @@ export async function runEval(options: RunEvalOptions): Promise<EvalCaseResult[]
     if (repetitions.length < k) break
     const result: EvalCaseResult = { caseId: evalCase.id, repetitions }
     results.push(result)
-    onCaseComplete?.(result, i)
+    await onCaseComplete?.(result, i)
   }
 
   return results

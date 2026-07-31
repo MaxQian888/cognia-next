@@ -23,11 +23,12 @@ import type {
   SessionFilter,
   MessageQueryOptions,
   SendMessageOptions,
-} from "@/types/plugin/plugin-extended"
+} from "@/types/plugin/plugin"
 import type { Session, UIMessage } from "@/types"
 import { createPluginSystemLogger } from "../core/logger"
 import { nanoid } from "nanoid"
 import { createGuardedAPI } from "@/lib/plugin/security/permission-guard"
+import { filterExposedSessions } from "@/lib/chat/session-exposure"
 
 /**
  * Create the Session API for a plugin
@@ -86,7 +87,7 @@ export function createSessionAPI(pluginId: string): PluginSessionAPI {
 
     listSessions: async (filter?: SessionFilter) => {
       const store = useSessionStore.getState()
-      let sessions = [...store.sessions]
+      let sessions = filterExposedSessions(store.sessions, "plugin-enumeration")
 
       if (filter) {
         // Apply filters

@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { openFolderAsWorkspace } from "./open-folder"
+import { openFolderAsWorkspace, openPathAsWorkspace } from "./open-folder"
 import { useProjectStore } from "@/stores/project/project-store"
 import { primaryRootOf } from "@/lib/workspace/roots"
 import * as tauri from "@/lib/tauri"
@@ -48,4 +48,46 @@ it("creates + activates a workspace from the picked folder", async () => {
   expect(primaryRootOf(created!)?.path).toBe("/Users/me/proj")
   expect(created!.name).toBe("proj")
   expect(useProjectStore.getState().activeProjectId).toBe(created!.id)
+})
+
+describe("openPathAsWorkspace", () => {
+  it("returns null for a blank path", () => {
+    expect(openPathAsWorkspace("   ")).toBeNull()
+    expect(useProjectStore.getState().projects).toHaveLength(0)
+  })
+
+  it("creates + activates a workspace for a given path", () => {
+    const created = openPathAsWorkspace("/Users/me/proj")
+    expect(created).not.toBeNull()
+    expect(primaryRootOf(created!)?.path).toBe("/Users/me/proj")
+    expect(useProjectStore.getState().activeProjectId).toBe(created!.id)
+    expect(useProjectStore.getState().projects).toHaveLength(1)
+  })
+
+  it("re-activates an existing workspace instead of duplicating it", () => {
+    const first = openPathAsWorkspace("/Users/me/proj")
+    useProjectStore.setState({ activeProjectId: null })
+    const again = openPathAsWorkspace("/Users/me/proj")
+    expect(again!.id).toBe(first!.id)
+    expect(useProjectStore.getState().projects).toHaveLength(1)
+    expect(useProjectStore.getState().activeProjectId).toBe(first!.id)
+  })
+
+  it("dedupes the picker flow too", async () => {
+    pickMock.mockResolvedValue("/Users/me/proj")
+    const first = await openFolderAsWorkspace()
+    const again = await openFolderAsWorkspace()
+    expect(again!.id).toBe(first!.id)
+    expect(useProjectStore.getState().projects).toHaveLength(1)
+  })
+
+  it("skips archived workspaces when deduping", () => {
+    const first = openPathAsWorkspace("/Users/me/proj")
+    useProjectStore.setState((s) => ({
+      projects: s.projects.map((p) => ({ ...p, isArchived: true })),
+    }))
+    const again = openPathAsWorkspace("/Users/me/proj")
+    expect(again!.id).not.toBe(first!.id)
+    expect(useProjectStore.getState().projects).toHaveLength(2)
+  })
 })

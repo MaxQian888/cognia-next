@@ -55,10 +55,10 @@ interface process {
         stderr: list<u8>,
     }
     /// Execute a one-shot subprocess. Requires `process:spawn` or
-    /// `shell:execute` capability. The host enforces an allowlist of
-    /// executables sourced from the manifest's `wasm.process.allow` array
-    /// (added in a later WIT minor revision; v0.1.0 hosts may simply
-    /// allow any program).
+    /// `shell:execute` capability AND that `program` appears in the plugin's
+    /// declared `shellCommands` allowlist. DENY-by-default: a plugin that
+    /// declares no `shellCommands` may spawn nothing, even with the
+    /// capability granted — full parity with the TS `ctx.shell.execute` gate.
     exec: func(program: string, args: list<string>, options: exec-options) -> result<exec-result, string>;
 }
 

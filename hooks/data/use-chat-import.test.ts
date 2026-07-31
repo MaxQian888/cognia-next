@@ -9,7 +9,7 @@ jest.mock("@/lib/files/file-bridge", () => ({
 }))
 
 const logError = jest.fn()
-jest.mock("@/lib/logging", () => {
+jest.mock("@cognia/logging", () => {
   const fn = (...args: unknown[]) => logError(...args)
   return {
     createLogger: () => ({ error: fn, info: jest.fn(), warn: jest.fn() }),

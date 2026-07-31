@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for ConnectorBus.applyMessageEdit / applyMessageDelete after the
  * v49 messages.platformMessageId index landed. These previously used
@@ -21,21 +22,28 @@ import "fake-indexeddb/auto"
 import { getBus, __resetBusForTesting } from "./bus"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import type { NormalizedInboundEvent } from "@/types/connectors"
-import type { StoredMessage } from "@/lib/claude/types"
+import type { StoredMessage } from "@cognia/agent-config-types"
 
+// 30s hook budget: the first cold open of the full schema (100+ Dexie
+// versions) can exceed jest's default 5s under parallel suite load.
 beforeEach(async () => {
   await getDb().delete()
   __resetDbForTesting()
   getDb()
   await whenSeeded()
   __resetBusForTesting()
-})
+}, 30_000)
 
 function makeStoredMessage(
   overrides: Partial<StoredMessage> & {
     id: string
     platformMessageId: string
     platform: import("@/types/connectors/platform-kind").PlatformKind
+    /**
+     * Scoping fields written by post-fix rows. Omit to fabricate a LEGACY
+     * row (platform-only metadata) and exercise the backward-compat match.
+     */
+    scope?: { adapterId: string; conversationKey: string }
   }
 ): StoredMessage {
   const now = Date.now()
@@ -55,6 +63,7 @@ function makeStoredMessage(
           adapterId: "a_test",
           remoteUserId: "u_1",
         },
+        ...(overrides.scope ?? {}),
       },
     },
     createdAt: now,
@@ -164,6 +173,121 @@ describe("ConnectorBus.applyMessageEdit (v49 indexed lookup)", () => {
     await expect(
       bus.dispatchInboundFull(makeEditEvent("telegram", "ghost", "phantom"))
     ).resolves.toBeUndefined()
+  })
+})
+
+describe("ConnectorBus.applyMessageEdit — adapter/conversation scoping", () => {
+  it("does not rewrite another chat's message with the same per-chat id", async () => {
+    const db = getDb()
+    // Telegram message_id is unique per CHAT: two chats on the SAME adapter
+    // can hold the same id. The pre-fix platform-only filter rewrote
+    // whichever row happened to come first.
+    await db.messages.bulkPut([
+      makeStoredMessage({
+        id: "chat42-row",
+        platformMessageId: "555",
+        platform: "telegram",
+        scope: { adapterId: "telegram-test", conversationKey: "telegram:telegram-test:42" },
+      }),
+      makeStoredMessage({
+        id: "chat99-row",
+        platformMessageId: "555",
+        platform: "telegram",
+        scope: { adapterId: "telegram-test", conversationKey: "telegram:telegram-test:99" },
+      }),
+    ])
+
+    const bus = getBus()
+    // makeEditEvent targets conversationKey telegram:telegram-test:42.
+    await bus.dispatchInboundFull(makeEditEvent("telegram", "555", "edited in 42"))
+
+    expect((await db.messages.get("chat42-row"))?.parts).toEqual([
+      { type: "text", text: "edited in 42" },
+    ])
+    expect((await db.messages.get("chat99-row"))?.parts).toEqual([
+      { type: "text", text: "original" },
+    ])
+  })
+
+  it("does not rewrite another adapter instance's message (multi-bot)", async () => {
+    const db = getDb()
+    await db.messages.put(
+      makeStoredMessage({
+        id: "other-bot-row",
+        platformMessageId: "777",
+        platform: "telegram",
+        scope: { adapterId: "other-bot", conversationKey: "telegram:other-bot:42" },
+      })
+    )
+    const bus = getBus()
+    await bus.dispatchInboundFull(makeEditEvent("telegram", "777", "hijack attempt"))
+    expect((await db.messages.get("other-bot-row"))?.parts).toEqual([
+      { type: "text", text: "original" },
+    ])
+  })
+
+  it("legacy row (no scoping fields) still matches on platform (backward compat)", async () => {
+    const db = getDb()
+    await db.messages.put(
+      makeStoredMessage({ id: "legacy-row", platformMessageId: "888", platform: "telegram" })
+    )
+    const bus = getBus()
+    await bus.dispatchInboundFull(makeEditEvent("telegram", "888", "legacy edit"))
+    expect((await db.messages.get("legacy-row"))?.parts).toEqual([
+      { type: "text", text: "legacy edit" },
+    ])
+  })
+
+  it("prefers the fully-scoped row when a legacy row shares the id", async () => {
+    const db = getDb()
+    await db.messages.bulkPut([
+      makeStoredMessage({ id: "legacy-shared", platformMessageId: "999", platform: "telegram" }),
+      makeStoredMessage({
+        id: "scoped-shared",
+        platformMessageId: "999",
+        platform: "telegram",
+        scope: { adapterId: "telegram-test", conversationKey: "telegram:telegram-test:42" },
+      }),
+    ])
+    const bus = getBus()
+    await bus.dispatchInboundFull(makeEditEvent("telegram", "999", "scoped wins"))
+    expect((await db.messages.get("scoped-shared"))?.parts).toEqual([
+      { type: "text", text: "scoped wins" },
+    ])
+    expect((await db.messages.get("legacy-shared"))?.parts).toEqual([
+      { type: "text", text: "original" },
+    ])
+  })
+})
+
+describe("ConnectorBus.applySystemEvent — reaction / poke system kinds", () => {
+  function makeSystemEvent(systemKind: string): NormalizedInboundEvent {
+    return {
+      ...makeEditEvent("telegram", "ignored", ""),
+      kind: "system",
+      replacesMessageId: undefined,
+      systemKind,
+    } as unknown as NormalizedInboundEvent
+  }
+
+  it("reaction_added / reaction_removed / poke are silent no-ops, not adapter.error", async () => {
+    const bus = getBus()
+    for (const sk of ["reaction_added", "reaction_removed", "poke"]) {
+      await bus.dispatchInboundFull(makeSystemEvent(sk))
+    }
+    const audit = await getDb().connectorAudit.toArray()
+    // Pre-fix these audited "adapter.error / unknown_system_kind:…" per
+    // user gesture — pure noise. Now: no audit row at all.
+    expect(audit.filter((r) => r.kind === "adapter.error")).toHaveLength(0)
+  })
+
+  it("a genuinely unknown systemKind still audits adapter.error (schema-gap tripwire)", async () => {
+    const bus = getBus()
+    await bus.dispatchInboundFull(makeSystemEvent("teleport"))
+    const audit = await getDb().connectorAudit.toArray()
+    expect(
+      audit.some((r) => r.kind === "adapter.error" && r.reason === "unknown_system_kind:teleport")
+    ).toBe(true)
   })
 })
 

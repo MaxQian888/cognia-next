@@ -72,7 +72,7 @@ store 已经有 `upsertConsensus` / `writeSharedMemory` / `upsertDelegation` /
   自动解决）/ `resolveConsensus`（lead 强制）/ `cancelConsensus`，纯函数
   `tallyVotes` / `computeWinner` 承担算术。
 - `shared-memory-orchestrator.ts` — `publishEntry`（通过
-  `lib/twin/ingest/redact.ts:hasNoLeakingPii` 把 PII 写入挡在门外）/
+  `packages/redact/src/index.ts:hasNoLeakingPii` 把 PII 写入挡在门外）/
   `deleteEntry` / `autoPublishTaskResult` / `clearTeamMemory`。
 - `delegation-orchestrator.ts` — `delegateToBackground`（驱动
   `background-agent-manager` + `executeAgent`）/ `delegateToExternal` /
@@ -142,7 +142,7 @@ teammate 三个领域的唯一编辑器源头。
 - `BudgetGuard.on(...)` emitter API 未改 — hook dispatch 以 listener 形式
   追加。
 - 复用 `<PresetEditor>`，不重新造 `AgentSubjectEditor`。
-- 沿用 `lib/twin/ingest/redact.ts:hasNoLeakingPii` 作 SharedMemory PII 红线
+- 沿用 `packages/redact/src/index.ts:hasNoLeakingPii` 作 SharedMemory PII 红线
   （ADR-0003 红线）。
 
 ## 参考

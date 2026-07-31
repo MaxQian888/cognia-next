@@ -3,7 +3,8 @@
  */
 
 import { createArtifactAPI, getArtifactRenderers, clearArtifactRenderers } from "./artifact-api"
-import type { ArtifactRenderer } from "@/types/plugin/plugin-extended"
+import { initializePluginPermissions } from "./permission-api"
+import type { ArtifactRenderer } from "@/types/plugin/plugin"
 
 // Mock artifact renderers to prevent heavy dependency chain (react-vega etc.)
 jest.mock("@/components/artifacts/artifact-renderers", () => ({
@@ -37,11 +38,18 @@ let mockPanelView: string | null = null
 let mockPanelOpen = false
 const mockSubscribers: Array<(state: unknown) => void> = []
 
+// The active artifact is bucketed per conversation now, so the API resolves it
+// through the store's selector plus the chat store's active session.
+jest.mock("@/stores/chat", () => ({
+  useChatStore: { getState: jest.fn(() => ({ activeSessionId: "s1" })) },
+}))
+
 jest.mock("@/stores/artifact/artifact-store", () => ({
+  selectActiveArtifactId: jest.fn(() => mockActiveArtifactId),
   useArtifactStore: {
     getState: jest.fn(() => ({
       artifacts: mockArtifacts,
-      activeArtifactId: mockActiveArtifactId,
+      activeArtifactIdBySession: mockActiveArtifactId ? { s1: mockActiveArtifactId } : {},
       createArtifact: jest.fn((options) => {
         const id = `artifact-${Date.now()}`
         mockArtifacts[id] = { id, ...options }
@@ -84,7 +92,7 @@ jest.mock("@/stores", () => ({
   useArtifactStore: {
     getState: jest.fn(() => ({
       artifacts: mockArtifacts,
-      activeArtifactId: mockActiveArtifactId,
+      activeArtifactIdBySession: mockActiveArtifactId ? { s1: mockActiveArtifactId } : {},
       createArtifact: jest.fn((options) => {
         const id = `artifact-${Date.now()}`
         mockArtifacts[id] = { id, ...options }
@@ -494,5 +502,17 @@ describe("Artifact API", () => {
       const renderers = getArtifactRenderers()
       expect(renderers.length).toBe(2)
     })
+  })
+})
+
+// W2.3: the artifact API is permission-gated; grant the suite's plugin.
+beforeAll(() => {
+  initializePluginPermissions("test-plugin", ["artifact:read", "artifact:write"])
+})
+
+describe("permission gate", () => {
+  it("throws PermissionError when artifact permissions are not granted", () => {
+    const api = createArtifactAPI("no-perms-plugin")
+    expect(() => api.listArtifacts()).toThrow(/artifact:read/)
   })
 })

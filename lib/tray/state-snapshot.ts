@@ -17,13 +17,24 @@
 
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { listen } from "@tauri-apps/api/event"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useChatStore } from "@/stores/chat"
+import { useSettingsStore } from "@/stores/settings"
 import { getOpenGoalForSession } from "@/lib/db/goals"
+import { getDb } from "@/lib/db/schema"
+import { computePetView } from "@/lib/pet/runtime/pet-view"
+import { APP_VERSION } from "@/lib/app-version"
+import { isAutostartEnabled } from "@/lib/tauri/autostart"
 import { isTauri } from "@/lib/tauri"
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
+import { isMainAppWindow } from "@/lib/pet/window-role"
+import type { PetProfile } from "@/types/pet"
 
+import { onAutostartChanged } from "./autostart-control"
+import { useTrayStore } from "./store"
+import { useTrayUsage } from "./usage"
 import type { TrayStateSnapshot } from "./types"
 
 const ACTIVITY_WINDOW_MS = 8_000
@@ -35,6 +46,17 @@ function detectOs(): TrayStateSnapshot["platform"]["os"] {
   if (p.includes("mac")) return "macos"
   if (p.includes("linux")) return "linux"
   return "unknown"
+}
+
+/** Lazily decay the profile's needs against the current wall clock. */
+function snapshotPetStats(profile: PetProfile): NonNullable<TrayStateSnapshot["pet"]> {
+  const view = computePetView(profile, null, Date.now())
+  return {
+    enabled: true,
+    energy: view.needs.energy,
+    mood: view.needs.mood,
+    bond: view.needs.bond,
+  }
 }
 
 interface AutomationState {
@@ -58,7 +80,40 @@ export function useTrayStateSnapshot(): TrayStateSnapshot {
   const goal = {
     active: openGoal?.status === "active",
     paused: openGoal?.status === "paused",
+    // Redacted objective only — the tray is an OS surface (screenshot-able),
+    // so the raw objective never leaks here.
+    title: openGoal?.safeObjective,
   }
+
+  // Desktop-pet quick-glance stats, gated on `PetSettings.enabled` the same
+  // way the widget itself is. `computePetView` lazily decays needs — same
+  // values `hooks/pet/use-pet.ts` shows — so the tray never disagrees.
+  const petEnabled = useSettingsStore((s) => s.settings?.petSettings?.enabled ?? false)
+  const petProfile = useLiveQuery(() => getDb().petProfile.get("global"), [])
+  const pet = useMemo(
+    () => (petEnabled && petProfile ? snapshotPetStats(petProfile) : null),
+    [petEnabled, petProfile]
+  )
+
+  // OS launch-at-login state. Read once on mount, then kept fresh by the
+  // `toggle-autostart` tray action's broadcast (`lib/tray/autostart-control`).
+  const [autostart, setAutostart] = useState(false)
+  useEffect(() => {
+    // Least-privilege pet windows are not granted `autostart:allow-is-enabled`
+    // (see `src-tauri/capabilities/pet.json`); reading it there only warns.
+    if (!isTauri() || !isMainAppWindow()) return
+    let cancelled = false
+    void isAutostartEnabled().then((on) => {
+      if (!cancelled) setAutostart(on)
+    })
+    const off = onAutostartChanged((on) => {
+      if (!cancelled) setAutostart(on)
+    })
+    return () => {
+      cancelled = true
+      off()
+    }
+  }, [])
 
   const [automation, setAutomation] = useState<AutomationState>({
     running: false,
@@ -81,33 +136,41 @@ export function useTrayStateSnapshot(): TrayStateSnapshot {
     }
 
     void listen("automation:event", markRunning).then((off) => {
-      if (cancelled) off()
+      if (cancelled) safeUnlisten(off)
       else offHandles.push(off)
     })
     void listen("automation:consent-request", markRunning).then((off) => {
-      if (cancelled) off()
+      if (cancelled) safeUnlisten(off)
       else offHandles.push(off)
     })
     void listen("automation:kill-switch", () => {
       if (cancelled) return
       setAutomation({ running: false, armed: false })
     }).then((off) => {
-      if (cancelled) off()
+      if (cancelled) safeUnlisten(off)
       else offHandles.push(off)
     })
 
     return () => {
       cancelled = true
       if (activityTimer) clearTimeout(activityTimer)
-      for (const off of offHandles) {
-        try {
-          off()
-        } catch {
-          /* unsubscribe failure is non-fatal */
-        }
-      }
+      for (const off of offHandles) safeUnlisten(off)
     }
   }, [])
+
+  // Subscription-quota glance. Fetching is gated on some usage surface being
+  // enabled (menu section / tooltip suffix / taskbar mode) so idle installs
+  // never poll provider usage endpoints; the hook itself no-ops outside Tauri.
+  const display = useTrayStore((s) => s.display)
+  const usageEnabled =
+    isTauri() &&
+    isMainAppWindow() &&
+    (display.showUsageInMenu || display.showUsageInTooltip || display.taskbarUsageMode !== "off")
+  const usageData = useTrayUsage(usageEnabled, display.usageRefreshMinutes)
+  const usage = useMemo(
+    () => (usageData ? { ...usageData, selectedKey: display.usageAccountKey } : null),
+    [usageData, display.usageAccountKey]
+  )
 
   return {
     goal,
@@ -117,5 +180,8 @@ export function useTrayStateSnapshot(): TrayStateSnapshot {
       hasActiveSession: !!activeSessionId,
     },
     platform: { os: detectOs() },
+    app: { autostart, version: APP_VERSION },
+    pet,
+    usage,
   }
 }

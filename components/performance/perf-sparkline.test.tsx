@@ -6,7 +6,26 @@ import React from "react"
 import { render, screen } from "@testing-library/react"
 
 jest.mock("recharts", () => ({
-  ResponsiveContainer: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
+  ResponsiveContainer: ({
+    children,
+    initialDimension,
+    minWidth,
+    minHeight,
+  }: {
+    children?: React.ReactNode
+    initialDimension?: { width: number; height: number }
+    minWidth?: number
+    minHeight?: number
+  }) => (
+    <div
+      data-testid="spark-rc"
+      data-initial-dimension={JSON.stringify(initialDimension)}
+      data-min-width={minWidth}
+      data-min-height={minHeight}
+    >
+      {children}
+    </div>
+  ),
   AreaChart: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
   Area: (props: { stroke?: string; strokeWidth?: number; fillOpacity?: number }) => (
     <div
@@ -49,5 +68,25 @@ describe("PerfSparkline", () => {
     expect(area).toHaveAttribute("data-stroke-width", "1")
     expect(area).toHaveAttribute("data-fill-opacity", "0.15")
     expect(container.querySelector(".h-4.w-14")).toBeTruthy()
+  })
+
+  it("passes a positive initialDimension so recharts never renders at -1×-1", () => {
+    // Without this, ResponsiveContainer's first render (before ResizeObserver
+    // reports) warns "The width(-1) and height(-1) of chart should be greater
+    // than 0" — seen live on the status-bar perf sparkline.
+    render(<PerfSparkline points={[1, 2]} color="#abc" />)
+    const dim = JSON.parse(
+      screen.getByTestId("spark-rc").getAttribute("data-initial-dimension") ?? "null"
+    ) as { width: number; height: number } | null
+    expect(dim).not.toBeNull()
+    expect(dim!.width).toBeGreaterThan(0)
+    expect(dim!.height).toBeGreaterThan(0)
+  })
+
+  it("keeps a non-zero size during transient status-bar layout measurements", () => {
+    render(<PerfSparkline points={[1, 2]} color="#abc" />)
+    const container = screen.getByTestId("spark-rc")
+    expect(container).toHaveAttribute("data-min-width", "1")
+    expect(container).toHaveAttribute("data-min-height", "1")
   })
 })

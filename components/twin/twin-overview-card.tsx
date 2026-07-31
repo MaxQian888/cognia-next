@@ -42,6 +42,7 @@ import {
 import { listTwinChunksByTwin } from "@/lib/db/twin-chunks"
 import { listTwinSourcesByTwin } from "@/lib/db/twin-sources"
 import type { ChunkingStrategyId, TwinChunk, TwinSource } from "@/types/twin"
+import { TwinOverviewPluginSlot } from "./twin-plugin-slots"
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000
 const GROWTH_WINDOW_DAYS = 7
@@ -111,7 +112,7 @@ export function TwinOverviewCard({ twinId }: Props) {
       </div>
 
       {/* Three-column chart strip; collapses to a single column on mobile. */}
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-4 @md/twin:grid-cols-2 @xl/twin:grid-cols-3">
         {/* Chunks growth area chart */}
         <div className="bg-muted/20 space-y-2 rounded-md border p-3">
           <p className="text-muted-foreground text-xs uppercase tracking-wide">
@@ -169,7 +170,7 @@ export function TwinOverviewCard({ twinId }: Props) {
         </div>
 
         {/* Strategy bar chart spans full width on lg */}
-        <div className="bg-muted/20 space-y-2 rounded-md border p-3 lg:col-span-2">
+        <div className="bg-muted/20 space-y-2 rounded-md border p-3 @lg/twin:col-span-2">
           <p className="text-muted-foreground text-xs uppercase tracking-wide">
             {tCharts("strategyHeading")}
           </p>
@@ -196,6 +197,12 @@ export function TwinOverviewCard({ twinId }: Props) {
           </ChartContainer>
         </div>
       </div>
+
+      <TwinOverviewPluginSlot
+        twinId={twinId}
+        sourceCount={sources.length}
+        chunkCount={chunks.length}
+      />
     </Card>
   )
 }

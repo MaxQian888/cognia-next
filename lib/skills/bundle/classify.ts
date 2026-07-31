@@ -15,7 +15,7 @@
 //      lands as `script`, a `.md` doc as `reference`, and a `.png` as
 //      `asset`, instead of all being bucketed under one kind.
 
-import type { SkillResourceKind } from "@/lib/claude/types"
+import type { SkillResourceKind } from "@cognia/agent-config-types"
 
 /** Canonical Anthropic/Claude Code bundle subdirs whose name dictates kind. */
 const KIND_BY_DIR: Record<string, SkillResourceKind> = {

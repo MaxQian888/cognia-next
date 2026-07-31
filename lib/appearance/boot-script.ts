@@ -26,7 +26,22 @@ export type BootMirrorKey = (typeof BOOT_MIRROR_KEYS)[number]
 
 export const BOOT_MIRROR_STORAGE_KEY = "cognia.appearance.mirror"
 
-export type BootMirrorPayload = Partial<Record<BootMirrorKey, string>>
+/**
+ * Mirror payload. The four flat color keys are the original FOUC-critical
+ * shell colors (kept flat for backward compatibility). The nested `vars` /
+ * `attrs` extend anti-flicker coverage to the other `<html>`-level knobs the
+ * appliers own — radius, typography (font families + line-height + letter
+ * spacing), and density — so a cold boot no longer flashes default spacing /
+ * corner radius / font before hydration. Wallpaper is intentionally NOT
+ * mirrored: it is applied to `<body>`, which does not exist yet when this
+ * head-injected script runs, and its image data-URLs can be multi-megabyte.
+ */
+export type BootMirrorPayload = Partial<Record<BootMirrorKey, string>> & {
+  /** Extra CSS custom properties (`--*`) to set on `<html>`. */
+  vars?: Record<string, string>
+  /** data-* attributes to set on `<html>` (e.g. `data-density`). */
+  attrs?: Record<string, string>
+}
 
 /**
  * The boot routine, expressed as a real TypeScript function so unit tests
@@ -48,6 +63,27 @@ export function runBootScript(): void {
       const value = mirror[key]
       if (typeof value === "string" && value.length > 0) {
         root.style.setProperty(key, value)
+      }
+    }
+    // Extended vars (radius / typography). Guard to `--*` names so a corrupt
+    // mirror can't set arbitrary inline styles.
+    const vars = mirror.vars
+    if (vars && typeof vars === "object") {
+      for (const name of Object.keys(vars as Record<string, unknown>)) {
+        const value = (vars as Record<string, unknown>)[name]
+        if (name.indexOf("--") === 0 && typeof value === "string" && value.length > 0) {
+          root.style.setProperty(name, value)
+        }
+      }
+    }
+    // Extended attrs (density). Guard to `data-*` names.
+    const attrs = mirror.attrs
+    if (attrs && typeof attrs === "object") {
+      for (const name of Object.keys(attrs as Record<string, unknown>)) {
+        const value = (attrs as Record<string, unknown>)[name]
+        if (name.indexOf("data-") === 0 && typeof value === "string" && value.length > 0) {
+          root.setAttribute(name, value)
+        }
       }
     }
   } catch {
@@ -77,6 +113,28 @@ export const BOOT_SCRIPT = [
   "        root.style.setProperty(key, value);",
   "      }",
   "    }",
+  "    var vars = mirror.vars;",
+  "    if (vars && typeof vars === 'object') {",
+  "      var vkeys = Object.keys(vars);",
+  "      for (var v = 0; v < vkeys.length; v++) {",
+  "        var vn = vkeys[v];",
+  "        var vv = vars[vn];",
+  "        if (vn.indexOf('--') === 0 && typeof vv === 'string' && vv.length > 0) {",
+  "          root.style.setProperty(vn, vv);",
+  "        }",
+  "      }",
+  "    }",
+  "    var attrs = mirror.attrs;",
+  "    if (attrs && typeof attrs === 'object') {",
+  "      var akeys = Object.keys(attrs);",
+  "      for (var a = 0; a < akeys.length; a++) {",
+  "        var an = akeys[a];",
+  "        var av = attrs[an];",
+  "        if (an.indexOf('data-') === 0 && typeof av === 'string' && av.length > 0) {",
+  "          root.setAttribute(an, av);",
+  "        }",
+  "      }",
+  "    }",
   "  } catch (err) {",
   "    /* swallow */",
   "  }",
@@ -99,7 +157,11 @@ export function writeBootMirror(payload: BootMirrorPayload): void {
   }
 }
 
-/** Test-only — clear the persisted mirror. */
+/**
+ * Clear the persisted mirror. Used by `SettingsHydrator` when the active theme
+ * is the default preset (which globals.css governs, so there is nothing to
+ * pre-paint) and by tests.
+ */
 export function clearBootMirror(): void {
   if (typeof window === "undefined") return
   try {

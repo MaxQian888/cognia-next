@@ -7,6 +7,7 @@
     "api-overview",
     "permissions",
     "surfaces",
+    "integrations",
     "workflow-nodes",
     "connector-adapters",
     "lifecycle-hooks",

@@ -15,6 +15,12 @@ export type MessageSegment =
       alt?: string
       width?: number
       height?: number
+      /** Original platform media reference, e.g. Matrix `mxc://...`, when `url` is a resolved fetch URL. */
+      rawUrl?: string
+      /** Inline bytes for OCR / vision paths when an adapter can safely fetch the image. */
+      dataBase64?: string
+      /** MIME type for inline bytes or remote media. */
+      mimeType?: string
       /**
        * Text extracted from the image by the inbound OCR step (ADR-0024).
        * Populated best-effort when the image carried inline bytes and OCR is
@@ -23,11 +29,26 @@ export type MessageSegment =
        */
       ocrText?: string
     }
-  | { type: "video"; url: string; thumbnailUrl?: string; durationSec?: number }
-  | { type: "voice"; url: string; durationSec?: number; transcript?: string }
+  | {
+      type: "video"
+      url: string
+      rawUrl?: string
+      thumbnailUrl?: string
+      durationSec?: number
+      mimeType?: string
+    }
+  | {
+      type: "voice"
+      url: string
+      rawUrl?: string
+      durationSec?: number
+      transcript?: string
+      mimeType?: string
+    }
   | {
       type: "file"
       url: string
+      rawUrl?: string
       name: string
       mimeType: string
       sizeBytes: number

@@ -17,11 +17,7 @@
 import { useCallback, useMemo } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 
-import {
-  DEFAULT_DISCOVER_CATEGORY,
-  isValidView,
-  type DiscoverView,
-} from "@/lib/discover/categories"
+import { FORYOU_CATEGORY, isValidView, type DiscoverView } from "@/lib/discover/categories"
 
 /** Sort modes exposed by the discover grid. */
 export const DISCOVER_SORTS = ["name", "recent"] as const
@@ -71,7 +67,10 @@ export function useDiscoverRouteState(): DiscoverRouteState {
 
   const category = useMemo<DiscoverView>(() => {
     const raw = searchParams?.get("category") ?? null
-    return isValidView(raw) ? raw : DEFAULT_DISCOVER_CATEGORY
+    // Absent / invalid `?category=` falls back to the aggregated "For You"
+    // landing (the product default); the bodies then honour any saved
+    // `landingCategory` preference via `resolveLandingCategory`.
+    return isValidView(raw) ? raw : FORYOU_CATEGORY
   }, [searchParams])
 
   const categoryExplicit = useMemo<boolean>(

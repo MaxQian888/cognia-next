@@ -11,7 +11,7 @@
  * (`lib/lsp/migrate-settings-initializer.ts`) saves at most once.
  */
 
-import type { AppSettings, DeveloperSettings } from "@/lib/claude/types"
+import type { AppSettings, DeveloperSettings } from "@cognia/agent-config-types"
 import type { LspServerConfig, LspSettings } from "@/types/lsp/config"
 
 export interface LspSettingsMigrationResult {

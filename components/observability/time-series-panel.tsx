@@ -8,12 +8,12 @@
  * SVG attributes can't read CSS vars.
  */
 
+import { useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   Area,
   AreaChart,
   CartesianGrid,
-  Legend,
   Line,
   LineChart,
   ReferenceLine,
@@ -27,8 +27,13 @@ import type { PanelDef } from "./panel-registry"
 import type { ObservabilitySeries } from "@/hooks/observability/use-observability-series"
 import { useThemeColors, type ThemeColors } from "@/hooks/logging/use-theme-colors"
 import { TOOLTIP_STYLE, CHART_MARGINS } from "@/lib/observability/chart-config"
-import { DEFAULT_THRESHOLDS } from "@/lib/observability/thresholds"
+import {
+  DEFAULT_THRESHOLDS,
+  type ThresholdConfig,
+  type ThresholdMetric,
+} from "@/lib/observability/thresholds"
 import { formatMs, formatPercent, formatUsd } from "@/lib/observability/format-utils"
+import { cn } from "@/lib/utils"
 
 type SeriesDef = { key: string; labelKey: string; color: string; stackId?: string }
 
@@ -118,13 +123,28 @@ export interface TimeSeriesPanelProps {
   panel: PanelDef
   series: ObservabilitySeries
   editMode?: boolean
+  /** Resolved thresholds (defaults merged with user overrides). */
+  thresholds?: Record<ThresholdMetric, ThresholdConfig>
 }
 
-export function TimeSeriesPanel({ panel, series, editMode }: TimeSeriesPanelProps) {
+export function TimeSeriesPanel({ panel, series, editMode, thresholds }: TimeSeriesPanelProps) {
   const t = useTranslations("observability")
   const colors = useThemeColors()
   const cfg = buildChartConfig(panel, series, colors)
-  const threshold = panel.threshold ? DEFAULT_THRESHOLDS[panel.threshold] : undefined
+  const table = thresholds ?? DEFAULT_THRESHOLDS
+  const threshold = panel.threshold ? table[panel.threshold] : undefined
+
+  // Clicking a legend entry hides/shows that series. Only shown for multi-series
+  // panels (latency percentiles, token throughput).
+  const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set())
+  const toggle = (key: string) =>
+    setHidden((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  const multi = cfg.series.length > 1
 
   return (
     <PanelFrame
@@ -132,88 +152,126 @@ export function TimeSeriesPanel({ panel, series, editMode }: TimeSeriesPanelProp
       editMode={editMode}
       data-testid={`ts-panel-${panel.id}`}
     >
-      <div className="h-full w-full" data-testid={`ts-chart-${panel.id}`}>
-        <ResponsiveContainer width="100%" height="100%">
-          {cfg.type === "area" ? (
-            <AreaChart data={cfg.data} margin={CHART_MARGINS.default}>
-              <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-              <XAxis dataKey="t" tickFormatter={axisTimeFormatter} tick={{ fontSize: 11 }} />
-              <YAxis
-                tick={{ fontSize: 11 }}
-                width={48}
-                tickFormatter={(v) => cfg.valueFormat(Number(v))}
-              />
-              <Tooltip
-                contentStyle={TOOLTIP_STYLE.contentStyle}
-                labelStyle={TOOLTIP_STYLE.labelStyle}
-                labelFormatter={(l) => axisTimeFormatter(Number(l))}
-                formatter={(value) => cfg.valueFormat(Number(value))}
-              />
-              {cfg.series.length > 1 && <Legend />}
-              {cfg.series.map((s) => (
-                <Area
+      <div className="flex h-full w-full flex-col" data-testid={`ts-chart-${panel.id}`}>
+        {multi && (
+          <div
+            className="mb-1 flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1"
+            data-testid={`ts-legend-${panel.id}`}
+          >
+            {cfg.series.map((s) => {
+              const isHidden = hidden.has(s.key)
+              return (
+                <button
                   key={s.key}
-                  type="monotone"
-                  dataKey={s.key}
-                  name={t(s.labelKey)}
-                  stackId={s.stackId}
-                  stroke={s.color}
-                  fill={s.color}
-                  fillOpacity={0.18}
-                  isAnimationActive={false}
-                  connectNulls
-                />
-              ))}
-            </AreaChart>
-          ) : (
-            <LineChart data={cfg.data} margin={CHART_MARGINS.default}>
-              <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-              <XAxis dataKey="t" tickFormatter={axisTimeFormatter} tick={{ fontSize: 11 }} />
-              <YAxis
-                tick={{ fontSize: 11 }}
-                width={48}
-                domain={cfg.yDomain}
-                tickFormatter={(v) => cfg.valueFormat(Number(v))}
-              />
-              <Tooltip
-                contentStyle={TOOLTIP_STYLE.contentStyle}
-                labelStyle={TOOLTIP_STYLE.labelStyle}
-                labelFormatter={(l) => axisTimeFormatter(Number(l))}
-                formatter={(value) => cfg.valueFormat(Number(value))}
-              />
-              {cfg.series.length > 1 && <Legend />}
-              {threshold && (
-                <>
-                  <ReferenceLine
-                    y={threshold.warn}
-                    stroke={colors.warning}
-                    strokeDasharray="4 4"
-                    strokeOpacity={0.7}
+                  type="button"
+                  onClick={() => toggle(s.key)}
+                  aria-pressed={!isHidden}
+                  data-testid={`ts-legend-${panel.id}-${s.key}`}
+                  className={cn(
+                    "flex items-center gap-1 text-[11px] transition-opacity",
+                    isHidden ? "opacity-40" : "opacity-100"
+                  )}
+                >
+                  <span
+                    className="size-2 rounded-sm"
+                    style={{ backgroundColor: s.color }}
+                    aria-hidden="true"
                   />
-                  <ReferenceLine
-                    y={threshold.crit}
-                    stroke={colors.destructive}
-                    strokeDasharray="4 4"
-                    strokeOpacity={0.7}
-                  />
-                </>
-              )}
-              {cfg.series.map((s) => (
-                <Line
-                  key={s.key}
-                  type="monotone"
-                  dataKey={s.key}
-                  name={t(s.labelKey)}
-                  stroke={s.color}
-                  strokeWidth={2}
-                  dot={false}
-                  isAnimationActive={false}
-                  connectNulls
+                  <span className={cn(isHidden && "line-through")}>{t(s.labelKey)}</span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+        <div className="min-h-0 flex-1">
+          <ResponsiveContainer
+            width="100%"
+            height="100%"
+            minWidth={1}
+            minHeight={1}
+            initialDimension={{ width: 320, height: 180 }}
+          >
+            {cfg.type === "area" ? (
+              <AreaChart data={cfg.data} margin={CHART_MARGINS.default}>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                <XAxis dataKey="t" tickFormatter={axisTimeFormatter} tick={{ fontSize: 11 }} />
+                <YAxis
+                  tick={{ fontSize: 11 }}
+                  width={48}
+                  tickFormatter={(v) => cfg.valueFormat(Number(v))}
                 />
-              ))}
-            </LineChart>
-          )}
-        </ResponsiveContainer>
+                <Tooltip
+                  contentStyle={TOOLTIP_STYLE.contentStyle}
+                  labelStyle={TOOLTIP_STYLE.labelStyle}
+                  labelFormatter={(l) => axisTimeFormatter(Number(l))}
+                  formatter={(value) => cfg.valueFormat(Number(value))}
+                />
+                {cfg.series.map((s) => (
+                  <Area
+                    key={s.key}
+                    type="monotone"
+                    dataKey={s.key}
+                    name={t(s.labelKey)}
+                    stackId={s.stackId}
+                    stroke={s.color}
+                    fill={s.color}
+                    fillOpacity={0.18}
+                    hide={hidden.has(s.key)}
+                    isAnimationActive={false}
+                    connectNulls
+                  />
+                ))}
+              </AreaChart>
+            ) : (
+              <LineChart data={cfg.data} margin={CHART_MARGINS.default}>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                <XAxis dataKey="t" tickFormatter={axisTimeFormatter} tick={{ fontSize: 11 }} />
+                <YAxis
+                  tick={{ fontSize: 11 }}
+                  width={48}
+                  domain={cfg.yDomain}
+                  tickFormatter={(v) => cfg.valueFormat(Number(v))}
+                />
+                <Tooltip
+                  contentStyle={TOOLTIP_STYLE.contentStyle}
+                  labelStyle={TOOLTIP_STYLE.labelStyle}
+                  labelFormatter={(l) => axisTimeFormatter(Number(l))}
+                  formatter={(value) => cfg.valueFormat(Number(value))}
+                />
+                {threshold && (
+                  <>
+                    <ReferenceLine
+                      y={threshold.warn}
+                      stroke={colors.warning}
+                      strokeDasharray="4 4"
+                      strokeOpacity={0.7}
+                    />
+                    <ReferenceLine
+                      y={threshold.crit}
+                      stroke={colors.destructive}
+                      strokeDasharray="4 4"
+                      strokeOpacity={0.7}
+                    />
+                  </>
+                )}
+                {cfg.series.map((s) => (
+                  <Line
+                    key={s.key}
+                    type="monotone"
+                    dataKey={s.key}
+                    name={t(s.labelKey)}
+                    stroke={s.color}
+                    strokeWidth={2}
+                    dot={false}
+                    hide={hidden.has(s.key)}
+                    isAnimationActive={false}
+                    connectNulls
+                  />
+                ))}
+              </LineChart>
+            )}
+          </ResponsiveContainer>
+        </div>
       </div>
     </PanelFrame>
   )

@@ -11,6 +11,30 @@ jest.mock("next-intl", () => ({
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
+// The child HookHandlerForm renders the shared CodeMirror `LightCodeEditor` for
+// the command field; CM6 measures the DOM and crashes under jsdom. Swap it for a
+// plain textarea honouring the same value/onChange(string)/data-testid contract.
+jest.mock("@/components/editor/light-code-editor", () => ({
+  LightCodeEditor: ({
+    value,
+    onChange,
+    "data-testid": testId,
+    "aria-label": ariaLabel,
+  }: {
+    value: string
+    onChange: (next: string) => void
+    "data-testid"?: string
+    "aria-label"?: string
+  }) => (
+    <textarea
+      data-testid={testId}
+      aria-label={ariaLabel}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  ),
+}))
+
 describe("validateMatcher", () => {
   it("returns null for empty / undefined / '*'", () => {
     expect(validateMatcher(undefined)).toBeNull()

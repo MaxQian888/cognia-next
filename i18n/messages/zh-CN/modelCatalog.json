@@ -1,0 +1,48 @@
+{
+  "advanced": "高级目录",
+  "backAria": "返回我的",
+  "capabilities": {
+    "reasoning": "推理",
+    "structuredOutput": "结构化输出",
+    "tools": "工具调用"
+  },
+  "closeDetails": "关闭模型详情",
+  "conflict": "正在激活较新的目录版本，当前版本仍可继续使用。",
+  "deprecated": "此模型不再推荐用于新配置。已有会话会继续使用已冻结的 offering。",
+  "description": "查看规范模型及其全部提供方 offering，并始终显示实际路由的上游 ID。",
+  "emptyDescription": "请尝试更宽泛的关键词、开启高级目录，或调整能力筛选。",
+  "emptyTitle": "没有匹配的模型",
+  "lifecycleLabel": "生命周期",
+  "lifecycles": {
+    "active": "活跃",
+    "deprecated": "已弃用",
+    "preview": "预览",
+    "recommended": "推荐",
+    "retired": "已退役"
+  },
+  "loading": "正在加载最后一个有效的模型目录…",
+  "modalities": {
+    "all": "全部模态",
+    "embedding": "向量嵌入",
+    "image": "图像",
+    "language": "语言",
+    "rerank": "重排序",
+    "speech": "语音"
+  },
+  "modalityLabel": "模态",
+  "offline": "当前离线：正在显示已缓存的最后一个有效版本。",
+  "offerings": "提供方 Offering",
+  "recoveryDescription": "系统会自动恢复内置目录；现有提供商设置不会被修改。",
+  "recoveryTitle": "模型目录正在恢复",
+  "replacement": "建议替代模型",
+  "routedId": "实际路由 ID",
+  "searchLabel": "搜索模型目录",
+  "searchPlaceholder": "搜索名称、规范 ID、上游 ID、别名或提供方…",
+  "selectModel": "选择一个模型以查看其 offering。",
+  "tiers": {
+    "certified": "已认证",
+    "experimental": "实验性",
+    "verified": "已验证"
+  },
+  "title": "模型目录"
+}

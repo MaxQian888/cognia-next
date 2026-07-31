@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Verifies that `dispatchInboundFull` fans out to matching workflows after
  * routing + audit. The trigger dispatch is the M2 addition; the existing
@@ -67,6 +68,8 @@ function privateEvent(adapterId: string, messageId: string): NormalizedInboundEv
   }
 }
 
+// 30s hook budget: the first cold open of the full schema (100+ Dexie
+// versions) can exceed jest's default 5s under parallel suite load.
 beforeEach(async () => {
   await getDb().delete()
   __resetDbForTesting()
@@ -74,7 +77,7 @@ beforeEach(async () => {
   __resetPruneCounterForTesting()
   dispatchTriggerMock.mockReset()
   findMatchingWorkflowsMock.mockReset()
-})
+}, 30_000)
 
 describe("ConnectorBus workflow trigger fan-out", () => {
   async function seedAutoAdapter(): Promise<string> {
@@ -102,10 +105,17 @@ describe("ConnectorBus workflow trigger fan-out", () => {
 
     const evt = privateEvent(adapterId, "msg_1")
     await getBus().dispatchInboundFull(evt)
+    // Fan-out is chained onto a per-conversation FIFO and not awaited by the
+    // pipeline, so the transport loop is never held by a slow workflow.
+    await getBus().flushInboundTurns()
 
     expect(findMatchingWorkflowsMock).toHaveBeenCalledWith("trigger.connector.inbound", {
       adapterId,
       conversationKey: evt.conversationKey,
+      senderId: "u_alice",
+      channelKind: "private",
+      plainText: "hello",
+      selfMentioned: false,
     })
     expect(dispatchTriggerMock).toHaveBeenCalledTimes(2)
     const calls = dispatchTriggerMock.mock.calls.map(
@@ -130,6 +140,30 @@ describe("ConnectorBus workflow trigger fan-out", () => {
     expect(dispatchTriggerMock).not.toHaveBeenCalled()
   })
 
+  it("audits + warns when findMatchingWorkflows throws (fan-out not silently disabled)", async () => {
+    const adapterId = await seedAutoAdapter()
+    findMatchingWorkflowsMock.mockImplementation(() => {
+      throw new Error("subscription index corrupted")
+    })
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      await expect(
+        getBus().dispatchInboundFull(privateEvent(adapterId, "msg_wf_match_err"))
+      ).resolves.toBeUndefined()
+      await getBus().flushInboundTurns()
+      expect(warnSpy).toHaveBeenCalled()
+    } finally {
+      warnSpy.mockRestore()
+    }
+    expect(dispatchTriggerMock).not.toHaveBeenCalled()
+    const audit = await getDb().connectorAudit.toArray()
+    const row = audit.find(
+      (r) => r.kind === "adapter.error" && r.reason === "workflow_match_failed"
+    )
+    expect(row).toBeDefined()
+    expect(row?.message).toContain("subscription index corrupted")
+  })
+
   it("survives a workflow dispatch failure without breaking the bus", async () => {
     const adapterId = await seedAutoAdapter()
     findMatchingWorkflowsMock.mockReturnValue([{ workflowId: "wf_oops", nodeId: "n", params: {} }])
@@ -138,6 +172,61 @@ describe("ConnectorBus workflow trigger fan-out", () => {
     await expect(
       getBus().dispatchInboundFull(privateEvent(adapterId, "msg_2"))
     ).resolves.toBeUndefined()
+    await getBus().flushInboundTurns()
     expect(dispatchTriggerMock).toHaveBeenCalledTimes(1)
+  })
+
+  // The point of B3: a slow inbound-subscribed workflow must not hold the
+  // adapter's transport for-await loop, because the HITL approval click that
+  // would unblock it arrives as another envelope on that same loop.
+  it("returns from the pipeline before a slow workflow finishes", async () => {
+    const adapterId = await seedAutoAdapter()
+    findMatchingWorkflowsMock.mockReturnValue([{ workflowId: "wf_slow", nodeId: "n", params: {} }])
+    let releaseWorkflow: (() => void) | undefined
+    dispatchTriggerMock.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseWorkflow = resolve
+        })
+    )
+
+    await getBus().dispatchInboundFull(privateEvent(adapterId, "msg_slow"))
+    // Pipeline already resolved while the workflow is still suspended.
+    expect(dispatchTriggerMock).toHaveBeenCalledTimes(1)
+    releaseWorkflow?.()
+    await getBus().flushInboundTurns()
+  })
+
+  // Per-conversation ordering still holds: a workflow accumulating conversation
+  // state must see message N before N+1.
+  it("keeps fan-out ordered within a conversation", async () => {
+    const adapterId = await seedAutoAdapter()
+    findMatchingWorkflowsMock.mockReturnValue([{ workflowId: "wf_seq", nodeId: "n", params: {} }])
+    const seen: string[] = []
+    const gates: Array<() => void> = []
+    let signalSecondStarted: (() => void) | undefined
+    const secondStarted = new Promise<void>((resolve) => {
+      signalSecondStarted = resolve
+    })
+    dispatchTriggerMock.mockImplementation((arg: unknown) => {
+      const payload = (arg as { payload: { messageId: string } }).payload
+      return new Promise<void>((resolve) => {
+        gates.push(() => {
+          seen.push(payload.messageId)
+          resolve()
+        })
+        if (gates.length === 2) signalSecondStarted?.()
+      })
+    })
+
+    await getBus().dispatchInboundFull(privateEvent(adapterId, "msg_first"))
+    await getBus().dispatchInboundFull(privateEvent(adapterId, "msg_second"))
+    // Only the first is in flight — the second is still queued behind it.
+    expect(gates).toHaveLength(1)
+    gates[0]()
+    await secondStarted
+    gates[1]()
+    await getBus().flushInboundTurns()
+    expect(seen).toEqual(["msg_first", "msg_second"])
   })
 })

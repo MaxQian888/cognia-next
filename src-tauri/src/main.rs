@@ -32,8 +32,8 @@ fn main() {
 
     let cfg = dial9_tokio_telemetry::Dial9Config::builder()
         .base_path(trace_dir.join("trace.bin"))
-        .max_file_size(20 * 1024 * 1024)      // rotate after 20 MiB
-        .max_total_size(100 * 1024 * 1024)    // keep at most 100 MiB
+        .max_file_size(20 * 1024 * 1024) // rotate after 20 MiB
+        .max_total_size(100 * 1024 * 1024) // keep at most 100 MiB
         .build_or_disabled();
 
     let rt = dial9_tokio_telemetry::TracedRuntime::try_new(cfg)

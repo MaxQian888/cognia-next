@@ -45,6 +45,45 @@ export async function queryRecent(limit = 500): Promise<AgentTraceSpan[]> {
   return rows.slice(0, safeLimit)
 }
 
+/**
+ * Read every span belonging to the most-recent N TRACES, newest-first.
+ *
+ * {@link queryRecent} counts SPANS, which is wrong for anything that groups by
+ * trace afterwards: the eval trace-analysis panel asked for 50 and got however
+ * few traces those 50 spans happened to span — one chatty session with 50 tool
+ * calls collapsed the whole list to a single row, and there was no way to page
+ * further back.
+ *
+ * `offset` skips whole traces, so the caller pages by trace too. Same
+ * full-table-scan rationale as {@link queryRecent}: Dexie has no global
+ * `startTime` index and the cardinality is low thousands.
+ */
+export async function queryRecentTraces(limit = 50, offset = 0): Promise<AgentTraceSpan[]> {
+  const safeLimit = Math.max(0, Math.floor(limit))
+  const safeOffset = Math.max(0, Math.floor(offset))
+  if (safeLimit === 0) return []
+  const rows = await getDb().agentTraces.toArray()
+  rows.sort((a, b) => b.startTime - a.startTime)
+
+  // Traces in order of their most recent span, which is the order the panel
+  // shows them in.
+  const order: string[] = []
+  const seen = new Set<string>()
+  for (const row of rows) {
+    if (seen.has(row.traceId)) continue
+    seen.add(row.traceId)
+    order.push(row.traceId)
+  }
+  const wanted = new Set(order.slice(safeOffset, safeOffset + safeLimit))
+  return wanted.size === 0 ? [] : rows.filter((r) => wanted.has(r.traceId))
+}
+
+/** How many distinct traces exist, for the panel's paging controls. */
+export async function countTraces(): Promise<number> {
+  const rows = await getDb().agentTraces.toArray()
+  return new Set(rows.map((r) => r.traceId)).size
+}
+
 /** Read spans whose `startTime` falls in `[since, until]`, oldest-first. Used
  * by the observability dashboard's windowed reads. `until` defaults to "now
  * and later" (no upper bound). Same full-table-scan + client-filter rationale
@@ -195,6 +234,21 @@ export async function pruneOlderThan(olderThanMs: number): Promise<number> {
   return getDb()
     .agentTraces.filter((row) => row.startTime < olderThanMs)
     .delete()
+}
+
+/** Count all persisted spans — drives the observability settings "N traces
+ * stored" figure and the empty-state decision without materializing rows. */
+export async function countAllSpans(): Promise<number> {
+  return getDb().agentTraces.count()
+}
+
+/** Drop every persisted span. Distinct from `pruneOlderThan` (retention) — this
+ * is the explicit "clear all telemetry" action behind a confirm dialog in the
+ * observability settings. Returns the number of rows removed. */
+export async function clearAllSpans(): Promise<number> {
+  const removed = await getDb().agentTraces.count()
+  await getDb().agentTraces.clear()
+  return removed
 }
 
 /** Test-only: drop every row. Production code should never call this. */

@@ -1,7 +1,10 @@
-import type { Skill, SkillCategory, SkillSource, SkillStatus } from "@/lib/claude/types"
+import type { Skill, SkillCategory, SkillSource, SkillStatus } from "@cognia/agent-config-types"
+import { BUILT_IN_SKILL_CATALOG, builtinSkillId } from "@/lib/skills/built-in-catalog"
+import { WORKFLOW_RUNNER_TOOL_NAME } from "@/lib/workflow/publish/runner-tool"
 import { getDb } from "./schema"
 import {
   deleteResourcesForSkill,
+  listResourcesForSkill,
   replaceResourcesForSkill,
   type SkillResourceDraft,
 } from "./skill-resources"
@@ -39,10 +42,13 @@ export type SkillDraft = Pick<Skill, "name" | "content"> &
       | "license"
       | "canonicalId"
       | "marketplaceSkillId"
+      | "marketplaceHash"
       | "nativeDirectory"
       | "syncOrigin"
       | "syncFingerprint"
       | "validationErrors"
+      | "kind"
+      | "workflowId"
     >
   > & {
     /**
@@ -56,7 +62,7 @@ export type SkillDraft = Pick<Skill, "name" | "content"> &
     resources?: Array<Omit<SkillResourceDraft, "skillId">>
   }
 
-export async function createSkill(draft: SkillDraft): Promise<Skill> {
+export function createSkill(draft: SkillDraft): Promise<Skill> {
   const now = Date.now()
   const skill: Skill = {
     id: newId(),
@@ -73,26 +79,34 @@ export async function createSkill(draft: SkillDraft): Promise<Skill> {
     license: draft.license,
     canonicalId: draft.canonicalId,
     marketplaceSkillId: draft.marketplaceSkillId,
+    marketplaceHash: draft.marketplaceHash,
     nativeDirectory: draft.nativeDirectory,
     syncOrigin: draft.syncOrigin ?? "frontend",
     syncFingerprint: draft.syncFingerprint,
     validationErrors: draft.validationErrors,
+    kind: draft.kind,
+    workflowId: draft.workflowId,
     usageCount: 0,
     createdAt: now,
     updatedAt: now,
   }
-  await getDb().skills.put(skill)
-  if (draft.resources && draft.resources.length > 0) {
-    await replaceResourcesForSkill(skill.id, draft.resources)
-  }
-  return skill
+  return getDb()
+    .skills.put(skill)
+    .then(() =>
+      draft.resources && draft.resources.length > 0
+        ? replaceResourcesForSkill(skill.id, draft.resources)
+        : undefined
+    )
+    .then(() => skill)
 }
 
-export async function updateSkill(
+export function updateSkill(
   id: string,
   patch: Partial<Omit<Skill, "id" | "createdAt" | "isBuiltIn">>
 ): Promise<void> {
-  await getDb().skills.update(id, { ...patch, updatedAt: Date.now() })
+  return getDb()
+    .skills.update(id, { ...patch, updatedAt: Date.now() })
+    .then(() => undefined)
 }
 
 export async function deleteSkill(id: string): Promise<void> {
@@ -149,15 +163,59 @@ export async function recordSkillUsage(ids: string[]): Promise<void> {
   const now = Date.now()
   const db = getDb()
   await db.transaction("rw", db.skills, async () => {
-    for (const id of ids) {
-      const row = await db.skills.get(id)
-      if (!row) continue
-      await db.skills.update(id, {
-        usageCount: (row.usageCount ?? 0) + 1,
-        lastUsedAt: now,
-      })
-    }
+    // Single bulkGet + bulkPut instead of a per-id get/update round-trip.
+    const rows = await db.skills.bulkGet(ids)
+    const updated = rows
+      .filter((row): row is Skill => Boolean(row))
+      .map((row) => ({ ...row, usageCount: (row.usageCount ?? 0) + 1, lastUsedAt: now }))
+    if (updated.length > 0) await db.skills.bulkPut(updated)
   })
+}
+
+/** One resolved entry in the effective skill set for a send. */
+export interface EffectiveSkillRef {
+  id: string
+  /** Where this id came from: the active character vs an ad-hoc attachment. */
+  source: "character" | "ephemeral"
+  /** Switched off for this session — present but will NOT be injected. */
+  inert: boolean
+}
+
+/**
+ * Resolve the effective skill set for a send/UI surface: the character's
+ * skills followed by ad-hoc ephemeral attachments, de-duplicated (first
+ * occurrence wins its source), each tagged with whether the session has it
+ * disabled. This is the single source of truth shared by `build-options`
+ * (send path) and the chat UI (composer chips, per-session badge) so the two
+ * never drift.
+ */
+export function resolveEffectiveSkills(input: {
+  characterSkillIds?: readonly string[]
+  ephemeralSkillIds?: readonly string[]
+  disabledIds?: Iterable<string>
+}): EffectiveSkillRef[] {
+  const disabled = new Set(input.disabledIds ?? [])
+  const seen = new Set<string>()
+  const out: EffectiveSkillRef[] = []
+  const push = (id: string, source: EffectiveSkillRef["source"]) => {
+    if (seen.has(id)) return
+    seen.add(id)
+    out.push({ id, source, inert: disabled.has(id) })
+  }
+  for (const id of input.characterSkillIds ?? []) push(id, "character")
+  for (const id of input.ephemeralSkillIds ?? []) push(id, "ephemeral")
+  return out
+}
+
+/** Just the ids that will actually be injected (active, de-duplicated, ordered). */
+export function activeEffectiveSkillIds(input: {
+  characterSkillIds?: readonly string[]
+  ephemeralSkillIds?: readonly string[]
+  disabledIds?: Iterable<string>
+}): string[] {
+  return resolveEffectiveSkills(input)
+    .filter((r) => !r.inert)
+    .map((r) => r.id)
 }
 
 /**
@@ -199,15 +257,24 @@ export function inferSource(skill: Skill): SkillSource {
  * "find-by-canonicalId, replace, never duplicate" semantics live in one
  * place rather than two slightly-different copies.
  */
-export async function upsertSkillByCanonicalId(input: {
+export function upsertSkillByCanonicalId(input: {
   draft: SkillDraft
   canonicalId: string
+  /**
+   * Optional canonicalId→row map pre-loaded by a bulk caller so each draft
+   * skips its own full-table scan. When supplied it is authoritative: a
+   * missing key means "no existing row" (→ create). When omitted, the
+   * function self-scans (single-call callers like marketplace install).
+   */
+  existingByCanonicalId?: Map<string, Skill>
 }): Promise<{ skill: Skill; created: boolean }> {
-  const { draft, canonicalId } = input
+  const { draft, canonicalId, existingByCanonicalId } = input
   const db = getDb()
-  const existing = (await db.skills.toArray()).find((s) => s.canonicalId === canonicalId)
-  if (existing) {
-    await updateSkill(existing.id, {
+  const persist = (existing: Skill | undefined): Promise<{ skill: Skill; created: boolean }> => {
+    if (!existing) {
+      return createSkill({ ...draft, canonicalId }).then((skill) => ({ skill, created: true }))
+    }
+    return updateSkill(existing.id, {
       name: draft.name,
       description: draft.description,
       content: draft.content,
@@ -221,19 +288,25 @@ export async function upsertSkillByCanonicalId(input: {
       license: draft.license ?? existing.license,
       canonicalId,
       marketplaceSkillId: draft.marketplaceSkillId ?? existing.marketplaceSkillId,
+      marketplaceHash: draft.marketplaceHash ?? existing.marketplaceHash,
       nativeDirectory: draft.nativeDirectory ?? existing.nativeDirectory,
       syncOrigin: draft.syncOrigin ?? existing.syncOrigin,
       syncFingerprint: draft.syncFingerprint ?? existing.syncFingerprint,
       validationErrors: draft.validationErrors,
+      kind: draft.kind ?? existing.kind,
+      workflowId: draft.workflowId ?? existing.workflowId,
     })
-    if (draft.resources) {
-      await replaceResourcesForSkill(existing.id, draft.resources)
-    }
-    const refreshed = await db.skills.get(existing.id)
-    return { skill: refreshed ?? existing, created: false }
+      .then(() =>
+        draft.resources ? replaceResourcesForSkill(existing.id, draft.resources) : undefined
+      )
+      .then(() => db.skills.get(existing.id))
+      .then((refreshed) => ({ skill: refreshed ?? existing, created: false }))
   }
-  const created = await createSkill({ ...draft, canonicalId })
-  return { skill: created, created: true }
+  if (existingByCanonicalId) return persist(existingByCanonicalId.get(canonicalId))
+  return db.skills
+    .toArray()
+    .then((skills) => skills.find((skill) => skill.canonicalId === canonicalId))
+    .then(persist)
 }
 
 /** What to do when a draft's name collides with an existing custom skill. */
@@ -267,6 +340,10 @@ export async function bulkImportSkills(
   }
   const existing = await db.skills.toArray()
   const byName = new Map(existing.map((s) => [s.name.toLowerCase(), s]))
+  // Reuse the single full-table load for canonicalId lookups too, so the
+  // upsert path doesn't re-scan the table once per draft.
+  const byCanonicalId = new Map<string, Skill>()
+  for (const s of existing) if (s.canonicalId) byCanonicalId.set(s.canonicalId, s)
 
   for (const draft of drafts) {
     try {
@@ -281,8 +358,12 @@ export async function bulkImportSkills(
         const { skill, created } = await upsertSkillByCanonicalId({
           draft,
           canonicalId: draft.canonicalId,
+          existingByCanonicalId: byCanonicalId,
         })
         byName.set(skill.name.toLowerCase(), skill)
+        // Keep the map current so a repeated canonicalId in the same batch
+        // updates the just-written row instead of creating a duplicate.
+        if (skill.canonicalId) byCanonicalId.set(skill.canonicalId, skill)
         if (created) result.created += 1
         else result.updated += 1
         continue
@@ -332,13 +413,100 @@ export async function bulkImportSkills(
 }
 
 /**
+ * Canonical body for a graph-bodied skill (`kind:"workflow"`) — instructs the
+ * model to call the shared typed runner with the workflow's name. Derived from
+ * the name alone so it can be RE-derived at render time: rows published before
+ * the runner-tool fix carry stale bodies naming a `wf_<slug>` ghost tool, and
+ * re-deriving here self-heals them without a data migration.
+ * `publishWorkflow` stores this same body on the skill row.
+ */
+export function workflowSkillBody(name: string): string {
+  return [
+    `# ${name}`,
+    "",
+    `This skill runs the **${name}** workflow as a typed tool.`,
+    "",
+    `When this skill is relevant, call the \`${WORKFLOW_RUNNER_TOOL_NAME}\` tool with ` +
+      `\`{ "name": ${JSON.stringify(name)}, "input": { … } }\` where \`input\` matches the ` +
+      `workflow's declared input schema — it executes the workflow graph and returns ` +
+      `its typed output. Do NOT try to perform the steps yourself; the workflow runs ` +
+      `them deterministically.`,
+  ].join("\n")
+}
+
+/**
  * Render a list of skills as a system-prompt suffix. Each skill becomes a
  * `## <name>` section followed by its markdown body, joined by blank lines.
+ * Graph-bodied skills (`kind:"workflow"`) render the canonical runner
+ * instruction instead of their stored content (see {@link workflowSkillBody}).
  * Returns an empty string when there are no skills.
  */
 export function renderSkillsSection(skills: Skill[]): string {
   if (skills.length === 0) return ""
-  return skills.map((s) => `## ${s.name}\n\n${s.content.trim()}`).join("\n\n")
+  return skills
+    .map((s) =>
+      s.kind === "workflow"
+        ? `## ${s.name}\n\n${workflowSkillBody(s.name)}`
+        : `## ${s.name}\n\n${s.content.trim()}`
+    )
+    .join("\n\n")
+}
+
+/**
+ * Render skills as a NAME-ONLY catalog (progressive disclosure) rather than
+ * appending every body. Each skill becomes one `- \`id\` — name: description`
+ * line under an "Available skills" heading that tells the model to call the
+ * `load_skill` tool to pull a skill's full instructions when it's relevant. This
+ * keeps the system prompt small even with many skills enabled — the
+ * OpenCode/Anthropic "discover, then load on demand" model. Returns "" when there
+ * are no skills.
+ */
+export function renderSkillsCatalog(skills: Skill[]): string {
+  if (skills.length === 0) return ""
+  const lines = skills.map((s) => {
+    const desc = s.description?.trim()
+    // Graph-bodied skills need no load_skill round-trip — the callable
+    // contract fits on one line, so surface it directly.
+    if (s.kind === "workflow") {
+      return (
+        `- \`${s.id}\` — ${s.name}${desc ? `: ${desc}` : ""} ` +
+        `(graph-bodied skill: run it by calling the \`${WORKFLOW_RUNNER_TOOL_NAME}\` tool ` +
+        `with \`{ "name": ${JSON.stringify(s.name)} }\`)`
+      )
+    }
+    return `- \`${s.id}\` — ${s.name}${desc ? `: ${desc}` : ""}`
+  })
+  return [
+    "## Available skills",
+    "",
+    "The following skills are available but their full instructions are NOT loaded. " +
+      "When a skill is relevant to the current task, call the `load_skill` tool with its " +
+      "id to load its instructions before you act on it. Do not guess a skill's contents.",
+    "",
+    ...lines,
+  ].join("\n")
+}
+
+/**
+ * Key-order-independent structural equality for two stored rows. Drops
+ * `undefined` fields and sorts object keys recursively so the comparison
+ * matches what Dexie would persist. Used to skip redundant built-in reseed
+ * writes.
+ */
+function sameStoredRow(a: unknown, b: unknown): boolean {
+  const norm = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(norm)
+    if (v && typeof v === "object") {
+      return Object.fromEntries(
+        Object.entries(v as Record<string, unknown>)
+          .filter(([, val]) => val !== undefined)
+          .sort(([x], [y]) => x.localeCompare(y))
+          .map(([k, val]) => [k, norm(val)])
+      )
+    }
+    return v
+  }
+  return JSON.stringify(norm(a)) === JSON.stringify(norm(b))
 }
 
 export async function seedBuiltInSkills(): Promise<void> {
@@ -404,6 +572,25 @@ export async function seedBuiltInSkills(): Promise<void> {
       tags: ["style"],
       category: "communication",
     },
+    // Functional, surface-guidance skills (authored as SKILL.md under
+    // skills/built-in/, codegen'd into BUILT_IN_SKILL_CATALOG). Unlike the five
+    // generic style skills above, these ship *disabled* by default: they're
+    // auto-injected on the matching agent surface (see
+    // lib/skills/surface-activation.ts) rather than added to every plain chat.
+    // Seeding them as rows still lets users see + manually enable them in
+    // Settings, and the read-merge below preserves any such user override.
+    ...BUILT_IN_SKILL_CATALOG.map((entry): Skill => ({
+      ...baseDefaults,
+      status: "disabled" as SkillStatus,
+      id: builtinSkillId(entry),
+      name: entry.name,
+      description: entry.description,
+      content: entry.content,
+      tags: entry.tags,
+      category: entry.category as SkillCategory | undefined,
+      allowedTools: entry.allowedTools,
+      canonicalId: `builtin:${entry.id}`,
+    })),
   ]
   // Use `put` so newly-added defaults are applied to existing rows, but
   // never clobber user-added tags / status overrides on built-ins. Read first,
@@ -415,13 +602,41 @@ export async function seedBuiltInSkills(): Promise<void> {
       continue
     }
     // Preserve user-toggled status & usage telemetry; refresh content/category.
-    await db.skills.put({
+    const merged: Skill = {
       ...seed,
       status: existing.status ?? seed.status,
       usageCount: existing.usageCount ?? 0,
       lastUsedAt: existing.lastUsedAt,
       createdAt: existing.createdAt,
       updatedAt: existing.updatedAt,
-    })
+    }
+    // Skip the write when reseeding would store a byte-identical row, so a
+    // settled built-in catalog is a true no-op on every subsequent boot.
+    if (sameStoredRow(merged, existing)) continue
+    await db.skills.put(merged)
+  }
+
+  // Persist each functional skill's bundled reference resources into the
+  // `skillResources` table so the Skills UI can browse/preview them and they
+  // export with the skill. Idempotent: only rewrite when the on-disk-derived
+  // set differs from what's stored, so reseeding on every boot is a no-op once
+  // settled (and a built-in content update propagates on the next launch).
+  for (const entry of BUILT_IN_SKILL_CATALOG) {
+    if (!entry.resources || entry.resources.length === 0) continue
+    const skillId = builtinSkillId(entry)
+    const desired = entry.resources.map((r) => ({
+      kind: r.kind,
+      name: r.name,
+      path: r.path,
+      content: r.content,
+    }))
+    const existing = await listResourcesForSkill(skillId)
+    const sig = (rs: Array<{ path: string; content: string }>) =>
+      JSON.stringify(
+        [...rs].sort((a, b) => a.path.localeCompare(b.path)).map((r) => [r.path, r.content])
+      )
+    if (sig(existing) !== sig(desired)) {
+      await replaceResourcesForSkill(skillId, desired)
+    }
   }
 }

@@ -5,7 +5,7 @@
 //
 // Read-only adapters (cline, roo-code) only need (1).
 
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 import {
   CLAUDE_CODE_AGENT,
   CLAUDE_DESKTOP_AGENT,
@@ -45,11 +45,15 @@ describe("registry", () => {
         "claude-desktop",
         "cline",
         "codex",
+        "cognia",
         "cursor",
         "gemini",
+        "kiro",
+        "opencode",
         "roo-code",
         "vscode",
         "windsurf",
+        "zed",
       ].sort()
     )
   })

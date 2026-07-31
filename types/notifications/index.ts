@@ -10,22 +10,18 @@
 
 /** Which subsystem emitted the notification. Extensible union. */
 export type NotificationSource =
-  | "scheduler"
-  | "agent-team"
-  | "plugin"
-  | "connector"
-  | "session"
-  | "workflow"
-  | "system"
+  "scheduler" | "agent-team" | "plugin" | "connector" | "session" | "workflow" | "system"
 
 /** Severity / obtrusiveness tier. `critical` bypasses DND + per-source mute. */
 export type NotificationLevel = "info" | "success" | "warning" | "error" | "critical"
 
 /**
  * Delivery target. `center` is always implied (the durable Dexie record);
- * `toast`/`os`/`push` are ephemeral/external fan-out channels.
+ * `toast`/`os`/`push` are ephemeral/external fan-out channels. `im` is the
+ * control-plane proactive-push channel: it routes an agent event back to a
+ * bound IM conversation (opt-in + PII-gated; see `lib/notifications/im-deliver`).
  */
-export type NotificationChannel = "center" | "toast" | "os" | "push"
+export type NotificationChannel = "center" | "toast" | "os" | "push" | "im"
 
 /**
  * Monotonic read lifecycle (GitHub Inbox / Novu MessageEntity model):

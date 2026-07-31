@@ -3,7 +3,7 @@
  */
 import { fireEvent, render, screen } from "@testing-library/react"
 import { PresetGrid, type PresetItem } from "./preset-grid"
-import type { ThemeColors } from "@/types/plugin/plugin-extended"
+import type { ThemeColors } from "@/types/plugin/plugin"
 
 jest.mock("next-intl", () => ({
   useTranslations: (ns: string) => (k: string, params?: Record<string, unknown>) => {

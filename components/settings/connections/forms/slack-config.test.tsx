@@ -88,6 +88,12 @@ describe("SlackConfigDialog — create new", () => {
     expect(screen.getByLabelText(/signing secret/i)).toBeInTheDocument()
   })
 
+  it("does not mark Signing Secret as required while Socket Mode is selected", () => {
+    render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    const label = screen.getByText("Signing Secret").closest("label")
+    expect(label).not.toHaveTextContent("*")
+  })
+
   it("renders App Token field when transport is Socket Mode", () => {
     render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
     expect(screen.getByLabelText(/app token/i)).toBeInTheDocument()
@@ -146,14 +152,11 @@ describe("SlackConfigDialog — create new", () => {
     })
   })
 
-  it("calls createAdapterInstance + connectorsKeyringSet on Create", async () => {
+  it("creates a Socket Mode adapter without a Signing Secret", async () => {
     render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
 
     fireEvent.change(screen.getByLabelText(/bot token/i), {
       target: { value: "xoxb-valid-token" },
-    })
-    fireEvent.change(screen.getByLabelText(/signing secret/i), {
-      target: { value: "my-signing-secret" },
     })
     fireEvent.change(screen.getByLabelText(/app token/i), {
       target: { value: "xapp-valid-app-token" },
@@ -161,9 +164,17 @@ describe("SlackConfigDialog — create new", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /create/i }))
 
+    expect(mockToastError).not.toHaveBeenCalledWith(expect.stringContaining("Signing secret"))
+
     await waitFor(() => {
       expect(mockCreateAdapterInstance).toHaveBeenCalledWith(
-        expect.objectContaining({ type: "slack", transportMode: "gateway" })
+        expect.objectContaining({
+          type: "slack",
+          transportMode: "gateway",
+          credentialsRef: expect.objectContaining({
+            accounts: ["botToken", "appToken"],
+          }),
+        })
       )
       expect(mockConnectorsKeyringSet).toHaveBeenCalledWith(
         "new-slack-id",
@@ -172,14 +183,28 @@ describe("SlackConfigDialog — create new", () => {
       )
       expect(mockConnectorsKeyringSet).toHaveBeenCalledWith(
         "new-slack-id",
-        "signingSecret",
-        "my-signing-secret"
-      )
-      expect(mockConnectorsKeyringSet).toHaveBeenCalledWith(
-        "new-slack-id",
         "appToken",
         "xapp-valid-app-token"
       )
+      expect(mockConnectorsKeyringSet).not.toHaveBeenCalledWith(
+        "new-slack-id",
+        "signingSecret",
+        expect.any(String)
+      )
+    })
+  })
+
+  it("fires onCreated with the new adapter id after a successful create", async () => {
+    const onCreated = jest.fn()
+    render(
+      <SlackConfigDialog open={true} onOpenChange={jest.fn()} row={null} onCreated={onCreated} />
+    )
+    fireEvent.change(screen.getByLabelText(/bot token/i), { target: { value: "xoxb-t" } })
+    fireEvent.change(screen.getByLabelText(/signing secret/i), { target: { value: "s" } })
+    fireEvent.change(screen.getByLabelText(/app token/i), { target: { value: "xapp-t" } })
+    fireEvent.click(screen.getByRole("button", { name: /create/i }))
+    await waitFor(() => {
+      expect(onCreated).toHaveBeenCalledWith("new-slack-id")
     })
   })
 
@@ -192,19 +217,23 @@ describe("SlackConfigDialog — create new", () => {
     expect(mockCreateAdapterInstance).not.toHaveBeenCalled()
   })
 
-  it("shows error toast when signing secret is empty on Save", async () => {
+  it("does not require a signing secret while creating a Socket Mode adapter", async () => {
     render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
 
     fireEvent.change(screen.getByLabelText(/bot token/i), {
       target: { value: "xoxb-token" },
     })
-    // No signing secret
+    fireEvent.change(screen.getByLabelText(/app token/i), {
+      target: { value: "xapp-token" },
+    })
+
     fireEvent.click(screen.getByRole("button", { name: /create/i }))
 
+    expect(mockToastError).not.toHaveBeenCalledWith(expect.stringContaining("Signing secret"))
+
     await waitFor(() => {
-      expect(mockToastError).toHaveBeenCalledWith(expect.stringContaining("required"))
+      expect(mockCreateAdapterInstance).toHaveBeenCalled()
     })
-    expect(mockCreateAdapterInstance).not.toHaveBeenCalled()
   })
 
   it("creates with webhook transport mode when Events API selected", async () => {
@@ -237,6 +266,40 @@ describe("SlackConfigDialog — create new", () => {
         expect.objectContaining({ transportMode: "webhook" })
       )
     })
+  })
+
+  it("requires a signing secret when Events API webhook is selected", async () => {
+    render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+
+    fireEvent.change(screen.getByLabelText(/bot token/i), { target: { value: "xoxb-t" } })
+
+    const transportTrigger = screen.getByRole("combobox")
+    fireEvent.click(transportTrigger)
+
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: /events api webhook/i })).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole("option", { name: /events api webhook/i }))
+
+    fireEvent.click(screen.getByRole("button", { name: /create/i }))
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith(expect.stringContaining("Signing secret"))
+    })
+    expect(mockCreateAdapterInstance).not.toHaveBeenCalled()
+  })
+
+  it("marks Signing Secret as required when Events API webhook is selected", async () => {
+    render(<SlackConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+
+    fireEvent.click(screen.getByRole("combobox"))
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: /events api webhook/i })).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole("option", { name: /events api webhook/i }))
+
+    const label = screen.getByText("Signing Secret").closest("label")
+    expect(label).toHaveTextContent("*")
   })
 })
 
@@ -287,6 +350,27 @@ describe("SlackConfigDialog — edit existing", () => {
       )
       expect(mockCreateAdapterInstance).not.toHaveBeenCalled()
     })
+  })
+
+  it("does not fire onCreated when editing an existing adapter", async () => {
+    const onCreated = jest.fn()
+    render(
+      <SlackConfigDialog
+        open={true}
+        onOpenChange={jest.fn()}
+        row={existingRow}
+        onCreated={onCreated}
+      />
+    )
+    // Dirty the form so the Save button enables.
+    fireEvent.change(screen.getByDisplayValue("Prod Slack Bot"), {
+      target: { value: "Renamed Slack Bot" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+    await waitFor(() => {
+      expect(mockUpdateAdapterInstance).toHaveBeenCalled()
+    })
+    expect(onCreated).not.toHaveBeenCalled()
   })
 })
 

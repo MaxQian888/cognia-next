@@ -20,7 +20,7 @@
 
 import fs from "fs"
 import path from "path"
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 
 const FIXTURE_DIR = path.join(__dirname, "fixtures")
 const FIXTURE_PATTERN = /^dbaeumer\.vscode-eslint-.*\.vsix$/

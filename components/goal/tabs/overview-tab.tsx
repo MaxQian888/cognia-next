@@ -39,6 +39,15 @@ export function GoalOverviewTab({ goal }: Props) {
             {t("overview.endedBadge", { date: new Date(goal.endedAt).toLocaleString() })}
           </Badge>
         )}
+        {goal.awaitingPromise && goal.status === "active" && (
+          <Badge
+            variant="outline"
+            className="border-warning/50 text-warning"
+            data-testid="goal-awaiting-promise"
+          >
+            {t("overview.awaitingPromise")}
+          </Badge>
+        )}
       </div>
       <div className="space-y-1.5">
         <div className="flex justify-between text-xs">
@@ -61,7 +70,7 @@ export function GoalOverviewTab({ goal }: Props) {
       {lastReason && (
         <div>
           <span className="text-xs text-muted-foreground">{t("overview.lastJudgeReason")}</span>
-          <p className="mt-1 italic">&ldquo;{lastReason}&rdquo;</p>
+          <p className="mt-1 italic">{t("overview.reasonQuoted", { reason: lastReason })}</p>
         </div>
       )}
       {exitReason && (
@@ -69,6 +78,14 @@ export function GoalOverviewTab({ goal }: Props) {
           <span className="text-xs text-muted-foreground">{t("overview.exitReason")}</span>
           <p className="mt-1">{exitReason}</p>
         </div>
+      )}
+      {goal.status === "active" && (
+        <p
+          className="border-t pt-3 text-xs text-muted-foreground"
+          data-testid="goal-foreground-dormancy-note"
+        >
+          {t("overview.foregroundDormancy")}
+        </p>
       )}
     </div>
   )

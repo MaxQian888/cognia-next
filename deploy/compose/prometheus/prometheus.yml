@@ -1,0 +1,25 @@
+# Prometheus scrape config for the self-host compose suite (ADR-0059 D9).
+# Mounted by the `observability` profile:
+#   docker compose --profile server --profile observability up -d
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+
+scrape_configs:
+  - job_name: signaling
+    static_configs:
+      - targets: ["signaling:7892"]
+
+  - job_name: share
+    static_configs:
+      - targets: ["share:8787"]
+
+  - job_name: cognia-server
+    scheme: https
+    tls_config:
+      # Self-signed companion cert (SANs: localhost/127.0.0.1) — scraping by
+      # compose DNS name can't verify; the hop never leaves the compose
+      # network.
+      insecure_skip_verify: true
+    static_configs:
+      - targets: ["cognia-server:27890"]

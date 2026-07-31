@@ -17,13 +17,10 @@
  * hide the LAN-scan affordance entirely.
  */
 
-import { detectNativePlatform } from "@/lib/capacitor/_shared"
+import { makeDefaultLoader } from "@/lib/capacitor/_shared"
 
 export type MdnsPermissionOutcome =
-  | { kind: "granted" }
-  | { kind: "denied" }
-  | { kind: "prompt" }
-  | { kind: "unsupported" }
+  { kind: "granted" } | { kind: "denied" } | { kind: "prompt" } | { kind: "unsupported" }
 
 interface ZeroconfPermissionShape {
   requestPermissions?(): Promise<{ localNetwork: "granted" | "denied" | "prompt" }>
@@ -31,16 +28,20 @@ interface ZeroconfPermissionShape {
 
 export type PermissionLoader = () => Promise<ZeroconfPermissionShape>
 
-const defaultLoader: PermissionLoader = async () => {
-  if (detectNativePlatform() !== "mobile") {
-    throw new Error("mDNS permission check only available on mobile")
-  }
-  const moduleId = "capacitor-zeroconf"
-  const mod = (await import(/* webpackIgnore: true */ moduleId)) as {
-    Zeroconf?: ZeroconfPermissionShape
-  }
-  if (!mod.Zeroconf) throw new Error("capacitor-zeroconf did not export Zeroconf")
-  return mod.Zeroconf
+// Resolve through the shared loader: window.Capacitor.Plugins.ZeroConf first
+// (registered at mobile boot from PluginHeaders — note the capital C; the
+// package registers as "ZeroConf", not "Zeroconf"), then the dynamic import.
+const defaultLoader: PermissionLoader = makeDefaultLoader<ZeroconfPermissionShape>(
+  "capacitor-zeroconf",
+  "ZeroConf"
+)
+
+/** Capacitor rejects unimplemented proxy methods with this code/message. */
+function isUnimplemented(err: unknown): boolean {
+  const code = (err as { code?: string } | null)?.code
+  if (code === "UNIMPLEMENTED") return true
+  const message = err instanceof Error ? err.message : String(err)
+  return /not implemented/i.test(message)
 }
 
 export async function requestMdnsPermission(
@@ -52,18 +53,25 @@ export async function requestMdnsPermission(
   } catch {
     return { kind: "unsupported" }
   }
-  // Android builds of capacitor-zeroconf expose `requestPermissions` as a
-  // no-op resolving to `{ localNetwork: "granted" }`; iOS 14+ shows the
-  // system prompt the first time. Treat a missing method as granted.
+  // capacitor-zeroconf ships NO `requestPermissions` (its definitions.ts has
+  // only watch/unwatch/register/etc). A test double may genuinely lack the
+  // property, but the real Capacitor native proxy fabricates a callable for
+  // ANY name — so feature-detection must be "call it and classify the
+  // rejection", not `typeof`.
   if (typeof plugin.requestPermissions !== "function") {
     return { kind: "granted" }
   }
   try {
     const result = await plugin.requestPermissions()
     return { kind: result.localNetwork }
-  } catch {
-    // The plugin throws if the system service is unavailable (rare). Treat
-    // as `denied` so the UI shows the openSettings CTA.
+  } catch (err) {
+    // UNIMPLEMENTED ⇒ the plugin simply has no permission API. Android needs
+    // none for Bonjour; iOS shows its Local Network prompt implicitly on the
+    // first browse. Report granted so the scan proceeds (a real iOS denial
+    // just yields zero results — Apple exposes no query API for this).
+    if (isUnimplemented(err)) return { kind: "granted" }
+    // Anything else (system service unavailable, plugin crash) → denied so
+    // the UI shows the openSettings CTA.
     return { kind: "denied" }
   }
 }

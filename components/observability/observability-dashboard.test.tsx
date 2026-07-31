@@ -4,17 +4,32 @@
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { ObservabilityDashboard } from "./observability-dashboard"
 import { useObservabilityStore } from "@/stores/observability/observability-store"
+import { makeSpan } from "@/lib/observability/fixtures"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
 
+// Mutable so a test can flip the dashboard into its empty state.
+const mockData = {
+  spans: [makeSpan({ traceId: "t1", surface: "chat", responseModel: "opus" })],
+  windowSpans: [makeSpan({ traceId: "t1", surface: "chat", responseModel: "opus" })],
+  loading: false,
+}
+let currentData: { spans: unknown[]; windowSpans: unknown[]; loading: boolean } = mockData
+
 // Avoid Dexie + recharts + RGL in this wrapper test.
 jest.mock("@/hooks/observability/use-observability-data", () => ({
-  useObservabilityData: () => ({ spans: [], windowSpans: [], loading: false }),
+  useObservabilityData: () => currentData,
 }))
 jest.mock("@/hooks/observability/use-refresh-tick", () => ({
-  useRefreshTick: () => 0,
+  useRefreshTick: () => ({ tick: 0, lastUpdated: null, refresh: jest.fn() }),
+}))
+// The settings sheet independently touches Dexie via useClientLiveQuery — stub it.
+jest.mock("./observability-settings-sheet", () => ({
+  ObservabilitySettingsSheet: ({ open }: { open: boolean }) => (
+    <div data-testid="settings-sheet">{open ? "open" : "closed"}</div>
+  ),
 }))
 
 // Stub PanelGrid: render only the recent-traces panel so we can drive the
@@ -64,6 +79,7 @@ jest.mock("./trace-waterfall-drawer", () => ({
 }))
 
 beforeEach(() => {
+  currentData = mockData
   useObservabilityStore.setState({
     layouts: null,
     rangePreset: "1h",
@@ -72,6 +88,8 @@ beforeEach(() => {
     refreshMs: 0,
     filters: {},
     editMode: false,
+    thresholds: {},
+    hiddenPanels: [],
   })
 })
 
@@ -82,6 +100,13 @@ describe("ObservabilityDashboard", () => {
     expect(screen.getByTestId("observability-toolbar")).toBeInTheDocument()
     expect(screen.getByTestId("panel-grid")).toBeInTheDocument()
     expect(screen.getByText("title")).toBeInTheDocument()
+  })
+
+  it("shows the empty state when the window has no spans", () => {
+    currentData = { spans: [], windowSpans: [], loading: false }
+    render(<ObservabilityDashboard />)
+    expect(screen.getByTestId("observability-empty")).toBeInTheDocument()
+    expect(screen.queryByTestId("panel-grid")).not.toBeInTheDocument()
   })
 
   it("opens the waterfall drawer when a trace is selected", () => {
@@ -97,6 +122,13 @@ describe("ObservabilityDashboard", () => {
     render(<ObservabilityDashboard />)
     fireEvent.click(screen.getByTestId("toggle-edit"))
     expect(useObservabilityStore.getState().editMode).toBe(true)
+  })
+
+  it("opens settings when the gear is clicked", () => {
+    render(<ObservabilityDashboard />)
+    expect(screen.getByTestId("settings-sheet")).toHaveTextContent("closed")
+    fireEvent.click(screen.getByTestId("open-settings"))
+    expect(screen.getByTestId("settings-sheet")).toHaveTextContent("open")
   })
 
   it("persists layout changes after the debounce window", () => {

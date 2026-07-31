@@ -6,6 +6,7 @@ jest.mock("next-intl", () => ({
   useTranslations: (ns: string) => (key: string, vals?: Record<string, unknown>) =>
     vals ? `${ns}.${key}:${JSON.stringify(vals)}` : `${ns}.${key}`,
   useFormatter: () => ({ relativeTime: () => "now" }),
+  useNow: () => new Date("2024-01-01T00:00:00Z"),
 }))
 
 const push = jest.fn()
@@ -64,7 +65,7 @@ it("renders items and shows the row menu without hover (touch)", () => {
   hook.items = [rec({ title: "Alpha" })]
   render(<NotificationFeedMobile />)
   expect(screen.getByText("Alpha")).toBeInTheDocument()
-  const menu = screen.getByRole("button", { name: "notificationCenter.center.settings" })
+  const menu = screen.getByRole("button", { name: "notificationCenter.center.itemActions" })
   expect(menu.className).toContain("opacity-100")
   expect(menu.className).not.toContain("opacity-0")
 })
@@ -86,6 +87,8 @@ it("opening a notification navigates and marks read", async () => {
 
 it("refresh button re-pulls", async () => {
   render(<NotificationFeedMobile />)
-  await userEvent.click(screen.getByRole("button", { name: "refresh" }))
+  await userEvent.click(
+    screen.getByRole("button", { name: "notificationCenter.center.refresh" })
+  )
   expect(hook.refresh).toHaveBeenCalledTimes(2) // mount + click
 })

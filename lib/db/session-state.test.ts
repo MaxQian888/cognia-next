@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Coverage for the per-session unread tracker (session-state.ts).
 
 import "fake-indexeddb/auto"

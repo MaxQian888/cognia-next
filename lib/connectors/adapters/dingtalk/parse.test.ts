@@ -43,13 +43,72 @@ describe("parseDingTalkBotMessage", () => {
     expect(ev!.channel.kind).toBe("group")
   })
 
-  it("falls back to senderId when staffId is absent", () => {
+  it("falls back to senderId for the sender identity when staffId is absent", () => {
     const ev = parseDingTalkBotMessage(
       "ad_1",
       "self",
-      baseMsg({ senderStaffId: undefined, senderId: "uid_only" })
+      baseMsg({ senderStaffId: undefined, senderId: "$:LWCP_v1:$abc" })
     )
-    expect(ev!.sender.remoteUserId).toBe("uid_only")
+    expect(ev!.sender.remoteUserId).toBe("$:LWCP_v1:$abc")
+    // The union id is NOT a valid batchSend target — conversationRef.userId
+    // stays empty so send() falls back to the session webhook.
+    expect(ev!.conversationRef.userId).toBe("")
+  })
+
+  it("carries the session webhook + expiry into the conversationRef", () => {
+    const ev = parseDingTalkBotMessage(
+      "ad_1",
+      "self",
+      baseMsg({
+        sessionWebhook: "https://oapi.dingtalk.com/robot/sendBySession?session=s1",
+        sessionWebhookExpiredTime: 1700000090000,
+      })
+    )
+    expect(ev!.conversationRef.sessionWebhook).toBe(
+      "https://oapi.dingtalk.com/robot/sendBySession?session=s1"
+    )
+    expect(ev!.conversationRef.sessionWebhookExpiredTime).toBe(1700000090000)
+    // staffId-present path is unchanged: userId still targets the staff id.
+    expect(ev!.conversationRef.userId).toBe("staff_1")
+  })
+
+  it("defaults sessionWebhook fields when the frame omits them", () => {
+    const ev = parseDingTalkBotMessage("ad_1", "self", baseMsg())
+    expect(ev!.conversationRef.sessionWebhook).toBe("")
+    expect(ev!.conversationRef.sessionWebhookExpiredTime).toBe(0)
+  })
+
+  it("maps atUsers into mentions.users, excluding the bot itself", () => {
+    const ev = parseDingTalkBotMessage(
+      "ad_1",
+      "self_bot",
+      baseMsg({
+        conversationType: "2",
+        chatbotUserId: "bot_ding_id",
+        atUsers: [
+          { dingtalkId: "bot_ding_id" }, // the bot's own entry — excluded
+          { dingtalkId: "$:LWCP_v1:$u1", staffId: "staff_9" }, // staffId preferred
+          { dingtalkId: "$:LWCP_v1:$u2" }, // no staffId — dingtalkId kept
+          {}, // malformed — dropped
+        ],
+      })
+    )
+    expect(ev!.mentions.selfMentioned).toBe(true)
+    expect(ev!.mentions.users).toEqual(["staff_9", "$:LWCP_v1:$u2"])
+  })
+
+  it("excludes the adapter-level selfId from mentions.users too", () => {
+    const ev = parseDingTalkBotMessage(
+      "ad_1",
+      "self_bot",
+      baseMsg({ atUsers: [{ dingtalkId: "self_bot" }, { staffId: "staff_2" }] })
+    )
+    expect(ev!.mentions.users).toEqual(["staff_2"])
+  })
+
+  it("keeps mentions.users empty when atUsers is absent", () => {
+    const ev = parseDingTalkBotMessage("ad_1", "self", baseMsg())
+    expect(ev!.mentions.users).toEqual([])
   })
 
   it("flattens richText to plain text", () => {

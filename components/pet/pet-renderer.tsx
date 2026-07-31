@@ -5,8 +5,17 @@
 
 "use client"
 
+import { memo } from "react"
 import { useReducedMotion } from "motion/react"
-import type { PetBones, PetOneShot, PetStage, PetVisualState } from "@/types/pet"
+import type {
+  PetBones,
+  PetEvolutionFlavor,
+  PetLocomotion,
+  PetMood,
+  PetOneShot,
+  PetStage,
+  PetVisualState,
+} from "@/types/pet"
 import { getSkin } from "./skins/registry"
 
 export interface PetRendererProps {
@@ -18,9 +27,21 @@ export interface PetRendererProps {
   reducedMotion?: boolean
   size?: number
   skinId?: string
+  /** Overlay-only locomotion (walk/fall + facing). Absent = resting. */
+  locomotion?: PetLocomotion | null
+  /** Render a still frame (window hidden / widget minimized). */
+  paused?: boolean
+  /** Care-quality evolution flavor (cosmetic accent). Absent = normal. */
+  flavor?: PetEvolutionFlavor
+  /** Coarse mood — flavors the idle loop. */
+  mood?: PetMood
+  /** A speech bubble is showing — skins may lip-flap. */
+  speaking?: boolean
+  /** The user is holding/dragging the pet — dangle pose. */
+  held?: boolean
 }
 
-export function PetRenderer({
+export const PetRenderer = memo(function PetRenderer({
   bones,
   stage,
   state,
@@ -28,9 +49,32 @@ export function PetRenderer({
   reducedMotion,
   size = 96,
   skinId,
+  locomotion,
+  paused,
+  flavor,
+  mood,
+  speaking,
+  held,
 }: PetRendererProps) {
   const osReduced = useReducedMotion()
-  const reduced = reducedMotion ?? osReduced ?? false
+  const reduced = Boolean(reducedMotion ?? osReduced)
   const skin = getSkin(skinId)
-  return <>{skin.render({ bones, stage, state, oneShot, reducedMotion: reduced, size })}</>
-}
+  return (
+    <>
+      {skin.render({
+        bones,
+        stage,
+        state,
+        oneShot,
+        reducedMotion: reduced,
+        size,
+        locomotion: locomotion ?? undefined,
+        paused,
+        flavor,
+        mood,
+        speaking,
+        held,
+      })}
+    </>
+  )
+})

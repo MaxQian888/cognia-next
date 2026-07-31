@@ -10,6 +10,7 @@ jest.mock("next-intl", () => ({
 jest.mock("@/lib/claude/ipc", () => ({
   skillsScanDir: jest.fn(async () => []),
   skillsScanNative: jest.fn(async () => []),
+  skillsScanCodex: jest.fn(async () => []),
 }))
 
 jest.mock("@/lib/files/file-bridge", () => ({
@@ -17,13 +18,20 @@ jest.mock("@/lib/files/file-bridge", () => ({
 }))
 
 jest.mock("@/lib/tauri", () => ({
-  isTauri: () => false,
+  isTauri: jest.fn(() => false),
 }))
 
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { SkillDiscovery } from "./skill-discovery"
+import { skillsScanCodex } from "@/lib/claude/ipc"
+import { isTauri } from "@/lib/tauri"
 
 describe("SkillDiscovery", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    ;(isTauri as jest.Mock).mockReturnValue(false)
+  })
+
   it("renders the localized path label without a concatenated prefix", () => {
     render(<SkillDiscovery />)
     expect(screen.getByText("pathLabelFull")).toBeInTheDocument()
@@ -39,6 +47,14 @@ describe("SkillDiscovery", () => {
   it("disables scan buttons in non-desktop mode", () => {
     render(<SkillDiscovery />)
     expect(screen.getByText("scanHome").closest("button")).toBeDisabled()
+    expect(screen.getByText("scanCodex").closest("button")).toBeDisabled()
     expect(screen.getByText("scanCustom").closest("button")).toBeDisabled()
+  })
+
+  it("scans the global Codex skills dir (~/.agents/skills) on desktop", async () => {
+    ;(isTauri as jest.Mock).mockReturnValue(true)
+    render(<SkillDiscovery />)
+    fireEvent.click(screen.getByText("scanCodex").closest("button")!)
+    await waitFor(() => expect(skillsScanCodex).toHaveBeenCalledTimes(1))
   })
 })

@@ -1,0 +1,140 @@
+---
+title: Marketplace Integrations
+description: Add external service events and actions without coupling platform code to Cognia Core.
+---
+
+Marketplace Integrations are schema-v4 plugins for services such as GitHub,
+GitLab, Linear, ticket systems, CRMs, and internal APIs. They are separate from
+Connectors: Connectors model instant-messaging conversations, while
+Integrations model external resources, normalized events, and audited actions.
+
+## Contract
+
+Declare one or more `integrations` in `plugin.json` with:
+
+- authentication strategies that point at providers registered through
+  `ctx.auth`;
+- resource and event types;
+- JSON-Schema action inputs, risk (`read`, `write`, or `destructive`),
+  idempotency, and timeout;
+- optional declarative webhook verification and Inbox projections.
+
+The host materializes every action as `<plugin-id>.action.<action-id>` and
+provides the single generic `trigger.integration.event` Workflow trigger.
+Platform-specific Workflow kinds do not belong in Core.
+
+```ts
+import { defineIntegration, definePlugin } from "@cognia/plugin-sdk"
+
+const integration = defineIntegration({
+  id: "example",
+  label: "Example",
+  authStrategies: [
+    {
+      id: "token",
+      type: "api-key",
+      label: "API key",
+      providerId: "example-token",
+      requestAuth: { type: "header", name: "x-api-key" },
+    },
+  ],
+  resourceKinds: ["project"],
+  eventTypes: [
+    {
+      id: "issue.created",
+      label: "Issue created",
+      resourceKinds: ["project"],
+    },
+  ],
+  actions: [
+    {
+      id: "createIssue",
+      label: "Create issue",
+      handler: "createIssue",
+      risk: "write",
+      idempotency: "required",
+      inputSchema: {
+        type: "object",
+        required: ["title"],
+        properties: { title: { type: "string" } },
+        additionalProperties: false,
+      },
+    },
+  ],
+})
+
+export default definePlugin({
+  manifest: {
+    id: "example-delivery",
+    name: "Example Delivery",
+    version: "1.0.0",
+    description: "Example Integration package.",
+    type: "frontend",
+    capabilities: ["integrations"],
+    permissions: [
+      "integrations:read",
+      "integrations:events",
+      "integrations:execute",
+      "integrations:manage",
+    ],
+    main: "dist/index.js",
+    integrations: [integration],
+  },
+  activate() {},
+})
+```
+
+## Security boundary
+
+An Integration account stores an opaque authentication-session ID. Actions use
+`context.authenticatedRequest`; the host resolves and refreshes the credential,
+checks the destination origin, injects authentication, updates health, and
+never returns the token to `ctx.integrations`.
+
+`requestAuth` declares how the host injects the credential: standard OAuth
+uses `{ type: "bearer" }`, while API keys and PATs can select an exact header
+and optional prefix. Plugin-supplied headers cannot override this host-owned
+value.
+
+OAuth providers should use `ctx.auth.createPkceFlow`, persist rotating access
+and refresh tokens only through `ctx.secrets`, refresh before expiry from
+`getSessions`, and revoke on `removeSession`. This keeps refresh behavior
+inside the provider while Integration actions continue to see only an opaque
+account/session handle.
+
+`write` actions follow the user's HITL policy and `destructive` actions always
+require explicit approval. Only idempotent actions retry. Workflow, Inbox, and
+manual execution all enter the same action runner and audit trail.
+
+Marketplace source may depend on `@cognia/plugin-sdk`, `@cognia/plugin-ui`, and
+ordinary third-party packages. Imports from `@/lib/*`, `@/types/*`,
+`@/components/*`, and `@/stores/*` are rejected during author checks, install,
+and runtime loading.
+
+## Webhook lifecycle
+
+Desktop and Headless hosts synchronize enabled routes to the Rust ingress
+router. A verified request is durably spooled before the endpoint responds.
+The plugin normalizer converts the body into `IntegrationEventEnvelope`; the
+host then persists/deduplicates it, projects it to Inbox when configured,
+triggers Workflows, writes audit, and acknowledges the spool row.
+
+Payloads are limited to 1 MiB. Failed normalization retries five times before
+dead-lettering. Normalized events retain for 30 days and audit for 90 days;
+the raw body is deleted when its spool row is acknowledged.
+
+## GitHub compatibility migration
+
+The `github-delivery` package keeps the existing plugin ID and legacy Dexie
+namespace for one major version. On activation it:
+
+1. encrypts a backup of legacy repository configuration;
+2. moves PAT/App credentials into host secret storage;
+3. transactionally creates Integration accounts and repository subscriptions;
+4. rewrites legacy Workflow kinds through `workflowKindAliases`;
+5. verifies the new rows before clearing raw credentials from legacy rows.
+
+Migration is idempotent. `rollbackGithubMigration(ctx)` restores the original
+Workflow kinds, Integration rows, and legacy repository rows from the encrypted
+backup. The signed compatibility bundle is shipped under
+`packages/plugin-sdk/contract/compat/`.

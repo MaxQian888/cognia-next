@@ -18,17 +18,35 @@
 import { useRef, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
-import { CameraIcon, ClipboardPasteIcon, FileIcon, PlusIcon } from "lucide-react"
+import {
+  CameraIcon,
+  ClipboardPasteIcon,
+  FileIcon,
+  PencilIcon,
+  PlusIcon,
+  Trash2Icon,
+} from "lucide-react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
+import { LongPress } from "@/components/interactions/long-press"
+import { RedactReviewSheet } from "@/components/mobile/discover/redact-review-sheet"
 import { pickPhoto } from "@/lib/capacitor/camera"
 import { prompt as nativePrompt } from "@/lib/capacitor/dialog"
 import { enqueue } from "@/lib/db/mobile-outbound-queue"
 import { getDb } from "@/lib/db/schema"
+import { deleteTwinSource, updateTwinSource } from "@/lib/db/twin-sources"
+import { hasNoLeakingPii } from "@cognia/redact"
 import type { TwinSource } from "@/types/twin"
 import { cn } from "@/lib/utils"
 
@@ -50,12 +68,40 @@ export function TwinSourcesPanel({ twinId = "default", className }: TwinSourcesP
   const t = useTranslations("mobile.twinSources")
   const [menuOpen, setMenuOpen] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  /** Text awaiting PII review before it is enqueued. */
+  const [redactPending, setRedactPending] = useState<{ text: string; label: string } | null>(null)
+  /** Source row whose edit action sheet is open (long-press). */
+  const [editingSource, setEditingSource] = useState<TwinSource | null>(null)
 
   const sources =
     useLiveQuery<TwinSource[]>(
       () => getDb().twinSources.orderBy("createdAt").reverse().toArray() as Promise<TwinSource[]>,
       []
     ) ?? []
+
+  /** Enqueue a markdown text ingest for the desktop to parse + embed. */
+  const enqueueText = async (text: string, label: string) => {
+    await enqueue({
+      command: "twin_ingest_source",
+      payload: { twinId, kind: "document", format: "markdown", text },
+      label,
+    })
+    toast.success(t("queuedToast"))
+  }
+
+  /**
+   * Gate any text ingest path through the shared PII detector. Clean text is
+   * enqueued immediately; text carrying detectable PII opens the redact-review
+   * sheet so the user confirms what leaves the device. (The desktop ingest job
+   * redacts again server-side — this is the on-device preview of that gate.)
+   */
+  const gateText = (text: string, label: string) => {
+    if (hasNoLeakingPii(text)) {
+      void enqueueText(text, label)
+    } else {
+      setRedactPending({ text, label })
+    }
+  }
 
   const onPaste = async () => {
     setMenuOpen(false)
@@ -68,12 +114,25 @@ export function TwinSourcesPanel({ twinId = "default", className }: TwinSourcesP
       if (r.kind === "cancelled") toast.info(t("pasteCancelled"))
       return
     }
-    await enqueue({
-      command: "twin_ingest_source",
-      payload: { twinId, kind: "document", format: "markdown", text: r.value },
-      label: t("pickPaste"),
+    gateText(r.value, t("pickPaste"))
+  }
+
+  const onRetitle = async (src: TwinSource) => {
+    setEditingSource(null)
+    const r = await nativePrompt({
+      title: t("retitleTitle"),
+      message: t("retitlePrompt"),
+      placeholder: src.title,
     })
-    toast.success(t("queuedToast"))
+    if (r.kind !== "submitted" || r.value.trim() === "") return
+    await updateTwinSource(src.id, { title: r.value.trim() })
+    toast.success(t("retitleDone"))
+  }
+
+  const onDelete = async (src: TwinSource) => {
+    setEditingSource(null)
+    await deleteTwinSource(src.id)
+    toast.success(t("deleteDone"))
   }
 
   const onCamera = async () => {
@@ -146,7 +205,7 @@ export function TwinSourcesPanel({ twinId = "default", className }: TwinSourcesP
             side="bottom"
             role="menu"
             data-testid="twin-sources-menu"
-            className="grid w-60 grid-cols-3 gap-2 p-3"
+            className="grid w-[min(15rem,calc(100vw-2rem))] grid-cols-3 gap-2 p-3"
           >
             <Button
               type="button"
@@ -191,28 +250,79 @@ export function TwinSourcesPanel({ twinId = "default", className }: TwinSourcesP
       ) : (
         <ItemGroup className="gap-2">
           {sources.map((src) => (
-            <Item
+            <LongPress
               key={src.id}
-              variant="outline"
-              size="sm"
-              className="bg-card"
-              data-testid={`twin-source-${src.id}`}
+              onLongPress={() => setEditingSource(src)}
+              className="block"
             >
-              <ItemContent>
-                <ItemTitle className="flex items-center gap-2 text-sm">
-                  <span className="truncate">{src.title}</span>
-                  <Badge variant="outline" className="text-[10px]">
-                    {t(STATUS_KEY[src.status])}
-                  </Badge>
-                </ItemTitle>
-                <ItemDescription className="text-[11px]">
-                  {src.format} · {(src.bytes / 1024).toFixed(1)} KB
-                </ItemDescription>
-              </ItemContent>
-            </Item>
+              <Item
+                variant="outline"
+                size="sm"
+                className="bg-card"
+                data-testid={`twin-source-${src.id}`}
+              >
+                <ItemContent>
+                  <ItemTitle className="flex items-center gap-2 text-sm">
+                    <span className="truncate">{src.title}</span>
+                    <Badge variant="outline" className="text-[10px]">
+                      {t(STATUS_KEY[src.status])}
+                    </Badge>
+                  </ItemTitle>
+                  <ItemDescription className="text-[11px]">
+                    {src.format} · {(src.bytes / 1024).toFixed(1)} KB
+                  </ItemDescription>
+                </ItemContent>
+              </Item>
+            </LongPress>
           ))}
         </ItemGroup>
       )}
+
+      {/* PII review before any text ingest leaves the device. */}
+      {redactPending ? (
+        <RedactReviewSheet
+          open={redactPending !== null}
+          onOpenChange={(open) => {
+            if (!open) setRedactPending(null)
+          }}
+          text={redactPending.text}
+          onConfirm={(chosen) => enqueueText(chosen, redactPending.label)}
+        />
+      ) : null}
+
+      {/* Long-press source editor: retitle / delete. */}
+      <Sheet
+        open={editingSource !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditingSource(null)
+        }}
+      >
+        <SheetContent side="bottom" data-testid="twin-source-edit-sheet">
+          <SheetHeader>
+            <SheetTitle className="truncate">{editingSource?.title}</SheetTitle>
+            <SheetDescription>{t("editSheetDescription")}</SheetDescription>
+          </SheetHeader>
+          <div className="flex flex-col gap-2 p-4">
+            <Button
+              variant="outline"
+              onClick={() => editingSource && void onRetitle(editingSource)}
+              data-testid="twin-source-retitle"
+            >
+              <PencilIcon className="size-4" />
+              {t("retitleCta")}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => editingSource && void onDelete(editingSource)}
+              className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              data-testid="twin-source-delete"
+            >
+              <Trash2Icon className="size-4" />
+              {t("deleteCta")}
+            </Button>
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   )
 }

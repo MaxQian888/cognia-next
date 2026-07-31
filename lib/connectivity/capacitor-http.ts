@@ -31,6 +31,8 @@ export interface CapacitorHttpRequest {
   data?: unknown
   /** Per-request server trust mode. */
   serverTrustMode?: "default" | "self-signed" | "pinned"
+  /** SHA-256 SPKI fingerprint required when serverTrustMode is `pinned`. */
+  serverFingerprint?: string
   /** Read timeout in ms. */
   readTimeout?: number
   /** Connect timeout in ms. */
@@ -40,6 +42,12 @@ export interface CapacitorHttpRequest {
 
 export interface CapacitorHttpPlugin {
   request(req: CapacitorHttpRequest): Promise<CapacitorHttpResponse>
+  /**
+   * Custom native bridge attestation. Stock CapacitorHttp does not implement
+   * SPKI pinning and must never be treated as if it did merely because it
+   * ignores unknown request fields.
+   */
+  getSecurityCapabilities?(): Promise<{ spkiPinning: boolean }>
 }
 
 export function getCapacitorHttp(): CapacitorHttpPlugin | null {

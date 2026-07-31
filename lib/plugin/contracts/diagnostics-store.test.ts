@@ -6,6 +6,7 @@ import {
   getAllPluginPointDiagnostics,
   getPluginPointDiagnostics,
   getPluginPointDiagnosticsRevision,
+  MAX_DIAGNOSTICS_PER_PLUGIN,
   recordPluginPointDiagnostic,
   recordSilentFailure,
   subscribePluginPointDiagnostics,
@@ -52,6 +53,19 @@ describe("diagnostics-store", () => {
       expect.objectContaining({ message: "hello" }),
     ])
     expect(getPluginPointDiagnostics("plugin-a")).toHaveLength(1)
+  })
+
+  it("getAllPluginPointDiagnostics returns a stable reference until the next notify (useSyncExternalStore contract)", () => {
+    recordPluginPointDiagnostic("plugin-a", sample({ message: "first" }))
+    const first = getAllPluginPointDiagnostics()
+    // Same revision → same object reference, so React's getSnapshot won't loop.
+    expect(getAllPluginPointDiagnostics()).toBe(first)
+    // A new record bumps the revision → a fresh snapshot reference.
+    recordPluginPointDiagnostic("plugin-a", sample({ message: "second" }))
+    const second = getAllPluginPointDiagnostics()
+    expect(second).not.toBe(first)
+    expect(second["plugin-a"]).toHaveLength(2)
+    expect(getAllPluginPointDiagnostics()).toBe(second)
   })
 
   it("clearPluginPointDiagnostics removes the plugin entry and notifies subscribers", () => {
@@ -171,5 +185,25 @@ describe("diagnostics-store", () => {
         ;(process.env as Record<string, string | undefined>).NODE_ENV = original
       }
     })
+  })
+})
+
+// ── W6.7: per-plugin ring buffer ─────────────────────────────────────────────
+describe("diagnostics ring buffer (W6.7)", () => {
+  it("caps per-plugin diagnostics at MAX_DIAGNOSTICS_PER_PLUGIN, dropping oldest", () => {
+    for (let i = 0; i < MAX_DIAGNOSTICS_PER_PLUGIN + 20; i++) {
+      recordPluginPointDiagnostic("chatty", {
+        code: "plugin.silent-failure",
+        severity: "warning",
+        message: `m${i}`,
+        pointKind: "runtime",
+        pointId: "site",
+      })
+    }
+    const entries = getPluginPointDiagnostics("chatty")
+    expect(entries).toHaveLength(MAX_DIAGNOSTICS_PER_PLUGIN)
+    expect(entries[0]?.message).toBe("m20")
+    expect(entries[entries.length - 1]?.message).toBe(`m${MAX_DIAGNOSTICS_PER_PLUGIN + 19}`)
+    clearPluginPointDiagnostics("chatty")
   })
 })

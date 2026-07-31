@@ -11,7 +11,8 @@ import {
   type UnifiedCodeExecutionResult,
 } from "@/lib/native/code-execution-strategy"
 import { useNativeStore } from "@/stores"
-import { loggers } from "@/lib/logging"
+import { useSettingsStore } from "@/stores/settings"
+import { loggers } from "@cognia/logging"
 
 export interface ExecutionOptions {
   timeout?: number
@@ -47,6 +48,11 @@ export function useCodeExecution(): UseCodeExecutionReturn {
   const abortRef = useRef(false)
 
   const isDesktop = useNativeStore((state) => state.isDesktop)
+  // ADR-0028 — Canvas Python executes through the OS sandbox backend rather
+  // than a bare interpreter. Confined by DEFAULT (independent of the chat-tool
+  // `sandboxDefaultEnabled` flag); a user can opt out in Settings → Sandbox.
+  // JS/HTML/CSS are unaffected (already iframe-confined).
+  const sandboxEnabled = useSettingsStore((s) => s.settings?.canvasCodeSandboxEnabled ?? true)
 
   const execute = useCallback(
     async (
@@ -64,6 +70,7 @@ export function useCodeExecution(): UseCodeExecutionReturn {
           language,
           isDesktop,
           stdin: options.stdin,
+          sandboxed: sandboxEnabled,
         })
 
         if (!abortRef.current) {
@@ -98,7 +105,7 @@ export function useCodeExecution(): UseCodeExecutionReturn {
         }
       }
     },
-    [isDesktop]
+    [isDesktop, sandboxEnabled]
   )
 
   const cancel = useCallback(() => {

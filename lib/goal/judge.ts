@@ -23,7 +23,15 @@
 import type { LlmClient } from "@/lib/twin/distill/llm"
 import { extractJson } from "@/lib/twin/distill/llm"
 import type { Goal } from "@/types/goal"
+import {
+  noopLifecycleFirer,
+  firePreCallHooks,
+  firePostCallHooks,
+  type AgentHookContext,
+  type LifecycleHookFirer,
+} from "@/lib/claude/hooks/lifecycle-firer"
 import { JUDGE_SYSTEM_PROMPT, renderJudgeUserPrompt } from "./prompts"
+import { hasNoLeakingPii } from "@cognia/redact"
 
 /** Discriminated outcome of one `evaluateGoal` call. */
 export type JudgeResult =
@@ -58,6 +66,15 @@ export interface EvaluateGoalInput {
   temperature?: number
   /** System prompt override. Default `JUDGE_SYSTEM_PROMPT`. */
   system?: string
+  /**
+   * Lifecycle-hook firer used to bracket the judge LLM call with
+   * SessionStart / UserPromptSubmit (blocking) / Stop / SessionEnd. Defaults
+   * to a no-op, so tests and web stay inert. The renderer passes
+   * `defaultLifecycleFirer`; the CLI passes its own runner-backed firer.
+   */
+  firer?: LifecycleHookFirer
+  /** Hook context (session/cwd) for the firer. Defaults to a goal-scoped id. */
+  hookContext?: AgentHookContext
 }
 
 /**
@@ -91,17 +108,40 @@ function parseCompletedSubgoals(value: unknown): number[] | undefined {
  */
 export async function evaluateGoal(input: EvaluateGoalInput): Promise<JudgeResult> {
   const { goal, lastResponse, client, signal, maxTokens, temperature, system } = input
+  const firer = input.firer ?? noopLifecycleFirer
+  const hookCtx: AgentHookContext = input.hookContext ?? {
+    agentId: "goal-judge",
+    sessionId: goal.id,
+  }
 
   if (signal?.aborted) {
     return { kind: "aborted" }
   }
 
   const userPrompt = renderJudgeUserPrompt(goal, lastResponse)
+  const baseSystem = system ?? JUDGE_SYSTEM_PROMPT
+
+  // Bracket the judge LLM call with lifecycle hooks (ADR-0040 follow-up): a
+  // blocking UserPromptSubmit hook denies the judge call (routed through the
+  // turn driver's fail-open path); observational hooks may inject context.
+  const pre = await firePreCallHooks(firer, hookCtx, userPrompt, { phase: "goal-judge" })
+  if (pre.block) {
+    return { kind: "parse_error", raw: "", error: `judge blocked by hook: ${pre.block}` }
+  }
+  const effectiveSystem = pre.additionalContext
+    ? `${baseSystem}\n\n${pre.additionalContext}`
+    : baseSystem
+
+  if (!hasNoLeakingPii(userPrompt) || !hasNoLeakingPii(effectiveSystem)) {
+    const error = "judge blocked by PII gate"
+    void firePostCallHooks(firer, hookCtx, { success: false, error })
+    return { kind: "parse_error", raw: "", error }
+  }
 
   let raw: string
   try {
     raw = await client.complete(userPrompt, {
-      system: system ?? JUDGE_SYSTEM_PROMPT,
+      system: effectiveSystem,
       maxTokens: maxTokens ?? goal.config.judgeMaxTokens ?? 200,
       // Judge wants determinism — paraphrasing the same agent reply
       // shouldn't flip the verdict, otherwise we'd spuriously continue
@@ -112,6 +152,10 @@ export async function evaluateGoal(input: EvaluateGoalInput): Promise<JudgeResul
     if (signal?.aborted) {
       return { kind: "aborted" }
     }
+    void firePostCallHooks(firer, hookCtx, {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    })
     // Network / provider failure is treated as a parse error from the
     // judge's perspective — the turn driver will count it toward
     // `maxJudgeFailures` and pause if the failures pile up.
@@ -121,6 +165,7 @@ export async function evaluateGoal(input: EvaluateGoalInput): Promise<JudgeResul
       error: err instanceof Error ? err.message : String(err),
     }
   }
+  void firePostCallHooks(firer, hookCtx, { success: true })
 
   if (signal?.aborted) {
     return { kind: "aborted" }

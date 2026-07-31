@@ -37,6 +37,15 @@
  *   turn_limited     → turnsUsed >= maxTurns (terminal)
  *   timed_out        → wall-clock exceeded timeoutMs (terminal)
  *   preempted        → user typed a non-slash message mid-loop (terminal)
+ *
+ * Foreground-goal dormancy contract (ADR-0019, intentional — no boot re-arm):
+ * an `"active"` goal of interactive origin is pumped ONLY by the chat hook
+ * (`hooks/chat/use-claude-chat.ts:scheduleGoalContinuation`) while its session
+ * is open in a running app. Closing the app leaves the row `"active"` but idle;
+ * it resumes when the user reopens the chat — the app does NOT scan and re-arm
+ * active goals on launch. Headless origins (scheduler/remote/plugin/workflow)
+ * keep advancing via their own driver. Surfaced to the user by the Overview
+ * tab's `overview.foregroundDormancy` note and pinned by its test.
  */
 export type GoalStatus =
   | "active"
@@ -101,6 +110,13 @@ export interface GoalConfig {
   /** Hard cap on cumulative tokens (input + output). Default 200_000. */
   maxTokens: number
   /**
+   * Optional hard USD cost ceiling per turn (single SDK invocation). When set
+   * (> 0), `resolveSendOptions` forwards it as `SendOptions.maxBudgetUsd`; the
+   * SDK halts a runaway turn and the driver exits `cost_limited`. Undefined / 0
+   * → no per-turn cost ceiling (turn + token budgets still apply).
+   */
+  maxBudgetUsd?: number
+  /**
    * Consecutive judge JSON parse failures before the goal auto-pauses
    * (fail-OPEN: never wedge on judge flakiness). Default 3 (Hermes default).
    */
@@ -113,6 +129,23 @@ export interface GoalConfig {
    * judgment of "done" feels unreliable for the task.
    */
   inlineStopCondition?: string
+  /**
+   * Optional acceptance gate: when true, a judge-verdict "completed" pauses
+   * the goal with `Goal.awaitingAcceptance` instead of going terminal, and a
+   * human resolves it via `lib/goal/acceptance.ts` (accept → completed /
+   * request changes → active). Only the completed exit is gated — stops,
+   * limits, and timeouts always land directly. Off by default.
+   */
+  requireAcceptance?: boolean
+  /**
+   * Auto-raise the ceremony this goal owes when its objective + session posture
+   * are assessed medium/high risk (ADR-0070 Phase 2). Default true. Only ever
+   * raises: a flag the user set explicitly is never cleared by the assessment.
+   * Medium → `requireAcceptance`; high → also `manualContinue`, but only for an
+   * interactive origin (a headless goal that holds every turn never advances).
+   * Set false to opt this goal out of risk-driven ceremony entirely.
+   */
+  riskGating?: boolean
 
   // ── Judge customization (ADR-0019 Phase 2) ──────────────────────────────
   /**
@@ -139,6 +172,31 @@ export interface GoalConfig {
   continuationIntervalMs?: number
   /** Defer the next continuation while inside this window. */
   quietHours?: GoalQuietHours
+
+  // ── Completion-promise gate + adaptive pacing ────────────────────────────
+  /**
+   * Anti false-completion gate (Ralph-style). When set, a judge `done=true`
+   * verdict does NOT terminate the goal directly: the loop runs one
+   * verification turn asking the model to emit the exact
+   * `<promise>TEXT</promise>` token ONLY if the objective is unequivocally
+   * satisfied (with an explicit no-lying instruction). Empty/undefined →
+   * the judge verdict terminates the goal exactly as before.
+   */
+  completionPromise?: string
+  /**
+   * Consecutive failed verification turns before the gate is overridden —
+   * the judge has re-affirmed done that many times, so the goal completes
+   * with a `promise_denied(overridden)` audit event. Undefined → 3.
+   */
+  maxPromiseDenials?: number
+  /**
+   * Opt-in adaptive pacing: continuation messages instruct the model to
+   * suggest the next delay (`<next-delay minutes=N reason="..."/>`). The
+   * gate honors max(continuationIntervalMs, suggestion) — the model can only
+   * SLOW the loop, never speed it below the configured interval. Bounded
+   * 1–60 minutes.
+   */
+  adaptivePacing?: boolean
 }
 
 export interface Goal {
@@ -146,6 +204,8 @@ export interface Goal {
   id: string
   /** FK → ChatSession.id. Session-scoped: at most one row with status==="active" per sessionId. */
   sessionId: string
+  /** Owning workspace id — Workspace isolation column (Dexie v86); inherits the session's project. */
+  projectId?: string
   /**
    * Snapshot of the character at goal creation time. UI only — used by the
    * Activity tab to render the right avatar even after the user switches
@@ -193,6 +253,13 @@ export interface Goal {
   /** Set when status becomes terminal. Drives History sorting + reset countdown. */
   endedAt?: number
   /**
+   * Acceptance gate marker (`GoalConfig.requireAcceptance`): true while a
+   * judge-verdict "completed" is parked as `paused` waiting for human
+   * accept/request-changes (`lib/goal/acceptance.ts`). Non-indexed — Dexie
+   * persists it without a schema-version bump (same as `subgoals`).
+   */
+  awaitingAcceptance?: boolean
+  /**
    * Decomposed checklist of the objective (subgoal decomposition). Absent
    * until the user generates it from the Subgoals tab. Stored inline as JSON
    * — no Dexie index, so adding it needs no schema migration.
@@ -200,6 +267,27 @@ export interface Goal {
   subgoals?: GoalSubgoal[]
   /** Timestamp (ms) of the last `generateSubgoals` run. Drives "regenerate" UX. */
   subgoalsGeneratedAt?: number
+  /**
+   * True while the completion-promise verification turn is in flight: the
+   * NEXT response is graded for the `<promise>` token instead of being
+   * re-judged. Persisted (inline, no schema bump) so a reload
+   * mid-verification resumes correctly.
+   */
+  awaitingPromise?: boolean
+  /**
+   * Consecutive failed verification turns. Persists across re-armed gates
+   * (only a confirmed promise or an objective update resets it) so repeated
+   * judge-done → denial cycles eventually override at `maxPromiseDenials`.
+   */
+  promiseDenialCount?: number
+  /**
+   * Epoch ms of the next scheduled auto-continuation — set when the pacing
+   * gate defers, cleared on dispatch. Drives the status pill's
+   * "next continuation at…" footnote. Inline, no schema bump.
+   */
+  nextContinuationAt?: number
+  /** Why the continuation was deferred — i18n category for the pill footnote. */
+  nextContinuationSource?: "interval" | "quiet_hours" | "model_suggested"
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -224,14 +312,40 @@ export type GoalEventKind =
   | "user_stopped"
   | "config_updated"
   | "subgoals_generated"
+  | "promise_requested"
+  | "promise_confirmed"
+  | "promise_denied"
+  | "pacing_decided"
+  | "acceptance_requested"
+  | "acceptance_resolved"
 
 /**
  * Per-kind payloads. Keep these structurally typed (TypeScript discriminated
  * union via `kind`) — it lets the Activity tab render kind-specific cards
  * without runtime checks beyond the discriminator.
  */
+/**
+ * Where a goal was created from. Anything not "interactive" is headless — no
+ * human is watching, so `manualContinue` must never be risk-raised there (it
+ * would park the goal forever). Mirrors `TeamRunOrigin` in `types/agent/agent-team.ts`.
+ */
+export type GoalRunOrigin = "interactive" | "scheduler" | "remote" | "plugin" | "workflow"
+
+/** Risk assessment recorded on `goal_created` (ADR-0070 Phase 2). */
+export interface GoalCreatedRisk {
+  tier: "low" | "medium" | "high"
+  surfaces: string[]
+  reason: string
+}
+
 export type GoalEventPayload =
-  | { kind: "goal_created"; safeObjective: string; config: GoalConfig }
+  | {
+      kind: "goal_created"
+      safeObjective: string
+      config: GoalConfig
+      /** Present when risk gating ran; explains any auto-raised ceremony. */
+      risk?: GoalCreatedRisk
+    }
   | { kind: "objective_updated"; oldSafeObjective: string; newSafeObjective: string }
   | { kind: "turn_started"; turnNumber: number }
   | {
@@ -253,6 +367,24 @@ export type GoalEventPayload =
   | { kind: "user_stopped" }
   | { kind: "config_updated"; before: GoalConfig; after: GoalConfig }
   | { kind: "subgoals_generated"; count: number }
+  | { kind: "promise_requested"; turnNumber: number }
+  | { kind: "promise_confirmed"; turnNumber: number }
+  | {
+      kind: "promise_denied"
+      turnNumber: number
+      denialCount: number
+      /** True when the denial cap was reached and the gate completed anyway. */
+      overridden: boolean
+    }
+  | {
+      kind: "pacing_decided"
+      source: "interval" | "quiet_hours" | "model_suggested"
+      untilMs: number
+      /** The model-suggested delay (clamped, ms) when adaptive pacing fed the decision. */
+      suggestedMs?: number
+    }
+  | { kind: "acceptance_requested"; turnNumber: number }
+  | { kind: "acceptance_resolved"; accepted: boolean }
 
 export interface GoalEvent {
   /** UUIDv4 primary key. */
@@ -273,6 +405,7 @@ export type ExitReason =
   | "preempted"
   | "turn_limited"
   | "budget_limited"
+  | "cost_limited"
   | "timed_out"
   | "judge_failed_too_many"
   | "judge_done"
@@ -290,6 +423,10 @@ export function statusForExit(exit: ExitReason): GoalStatus {
     case "turn_limited":
       return "turn_limited"
     case "budget_limited":
+      return "budget_limited"
+    case "cost_limited":
+      // A USD-ceiling stop is a budget exhaustion — reuse the terminal status
+      // (and its UI/i18n) rather than introducing a parallel GoalStatus.
       return "budget_limited"
     case "timed_out":
       return "timed_out"
@@ -312,6 +449,8 @@ export function statusForExit(exit: ExitReason): GoalStatus {
 export interface GoalDefaults {
   maxTurns?: number
   maxTokens?: number
+  /** Optional default per-turn USD cost ceiling for new goals (0 / undefined → off). */
+  maxBudgetUsd?: number
   maxJudgeFailures?: number
   timeoutMs?: number
   /** When true, every new goal is created paused (user must `/goal resume` to start). */
@@ -323,6 +462,11 @@ export interface GoalDefaults {
    * objective. Wired in ADR-0019 Phase 2 via `gateContinuation`.
    */
   manualContinue?: boolean
+  /**
+   * App-level default for `GoalConfig.riskGating` (ADR-0070 Phase 2). Undefined
+   * → true. Set false to opt every new goal out of risk-driven ceremony.
+   */
+  riskGating?: boolean
 
   // ── Mirrors of the new per-goal knobs (defaults for fresh goals) ─────────
   /** Default judge model id for new goals. */
@@ -339,6 +483,10 @@ export interface GoalDefaults {
   continuationIntervalMs?: number
   /** Default quiet-hours window for new goals. */
   quietHours?: GoalQuietHours
+  /** Default denial cap for the completion-promise gate on new goals. */
+  maxPromiseDenials?: number
+  /** Default adaptive-pacing opt-in for new goals. */
+  adaptivePacing?: boolean
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -355,7 +503,7 @@ export interface GoalDefaults {
 export type ContinuationGate =
   | { kind: "send" }
   | { kind: "hold"; reason: "manual" }
-  | { kind: "defer"; untilMs: number; reason: "quiet_hours" | "interval" }
+  | { kind: "defer"; untilMs: number; reason: "quiet_hours" | "interval" | "model_suggested" }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Goal templates (ADR-0019 Phase 2) — preset objectives backed by Dexie v53.

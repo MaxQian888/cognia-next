@@ -6,84 +6,62 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 import enMessages from "@/i18n/messages/en.json"
 
-let mockRecent:
-  | Array<{
-      adapterId: string
-      kind: string
-      at: number
-      reason?: string
-      fields?: Record<string, unknown>
-    }>
-  | undefined = []
-
-jest.mock("dexie-react-hooks", () => ({
-  useLiveQuery: jest.fn().mockImplementation(() => mockRecent),
-}))
-
-jest.mock("@/lib/db/schema", () => ({ getDb: jest.fn() }))
-
+const mockIsTauri = jest.fn(() => true)
 jest.mock("@/lib/tauri", () => ({
-  isTauri: jest.fn(() => true),
+  isTauri: () => mockIsTauri(),
 }))
 
-const mockRequeue = jest.fn().mockResolvedValue(true)
+const mockRequeue = jest.fn<Promise<boolean>, [string]>()
 jest.mock("@/lib/connectors/lifecycle", () => ({
-  requeueAdapter: (...args: unknown[]) => mockRequeue(...args),
+  requeueAdapter: (...args: unknown[]) => mockRequeue(...(args as [string])),
 }))
 
-jest.mock("sonner", () => ({
-  toast: {
-    success: jest.fn(),
-    error: jest.fn(),
-  },
-}))
+// Declared inside the factory — a module-scope object would be in its TDZ when
+// Jest hoists the `jest.mock` call above these lines.
+jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
-import { ConnectionLossBanner } from "./connection-loss-banner"
+import { toast } from "sonner"
+import { ConnectionLossNotice } from "./connection-loss-banner"
+import type { DegradedAdapter } from "@/hooks/connectors/use-degraded-adapters"
 
-function wrap(ui: React.ReactElement) {
+const mockToast = toast as jest.Mocked<typeof toast>
+
+// The Dexie query, the per-set dismiss and its TTL live in
+// `useDegradedAdapters` and are pinned by its own suite. This component is a
+// pure presenter, so every case here is driven by props.
+function wrap(adapters: DegradedAdapter[], onDismiss = jest.fn()) {
   return render(
     <NextIntlClientProvider locale="en" messages={enMessages as unknown as Record<string, unknown>}>
-      {ui}
+      <ConnectionLossNotice adapters={adapters} onDismiss={onDismiss} />
     </NextIntlClientProvider>
   )
 }
 
-function heartbeat(
+function adapter(
   adapterId: string,
-  state: "running" | "degraded" | "down" | "starting",
-  reason?: string,
-  at = Date.now()
-) {
-  return {
-    adapterId,
-    kind: "adapter.heartbeat",
-    at,
-    reason,
-    fields: { state, reason },
-  }
+  state: "degraded" | "down" = "degraded",
+  reason: string | null = null,
+  at = 1_700_000_000_000
+): DegradedAdapter {
+  return { adapterId, state, reason, at }
 }
 
 beforeEach(() => {
-  if (typeof window !== "undefined") {
-    window.localStorage.clear()
-  }
-  mockRequeue.mockClear()
-  mockRecent = []
+  mockIsTauri.mockReturnValue(true)
+  mockRequeue.mockReset()
+  mockRequeue.mockResolvedValue(true)
+  mockToast.success.mockClear()
+  mockToast.error.mockClear()
 })
 
-describe("ConnectionLossBanner", () => {
+describe("ConnectionLossNotice", () => {
   it("renders nothing when no adapters are degraded", () => {
-    mockRecent = [heartbeat("lark-1", "running")]
-    const { container } = wrap(<ConnectionLossBanner />)
+    const { container } = wrap([])
     expect(container.querySelector("[data-testid='connection-loss-banner']")).toBeNull()
   })
 
-  it("surfaces degraded adapters with per-row reconnect buttons", () => {
-    mockRecent = [
-      heartbeat("lark-1", "degraded", "lark_ping_failed"),
-      heartbeat("onebot-1", "down"),
-    ]
-    wrap(<ConnectionLossBanner />)
+  it("surfaces each adapter with a per-row reconnect button", () => {
+    wrap([adapter("lark-1", "degraded", "lark_ping_failed"), adapter("onebot-1", "down")])
     expect(screen.getByTestId("connection-loss-banner")).toBeInTheDocument()
     expect(screen.getByTestId("connection-loss-row-lark-1")).toBeInTheDocument()
     expect(screen.getByTestId("connection-loss-row-onebot-1")).toBeInTheDocument()
@@ -91,61 +69,74 @@ describe("ConnectionLossBanner", () => {
     expect(screen.getByTestId("connection-loss-reconnect-onebot-1")).toBeInTheDocument()
   })
 
-  it("renders 'reconnect all' only when more than one adapter is down", () => {
-    mockRecent = [heartbeat("only-one", "degraded")]
-    wrap(<ConnectionLossBanner />)
-    expect(screen.queryByTestId("connection-loss-reconnect-all")).not.toBeInTheDocument()
+  it("shows the reason only when one is present", () => {
+    wrap([adapter("lark-1", "degraded", "lark_ping_failed"), adapter("onebot-1", "down")])
+    expect(screen.getByTestId("connection-loss-row-lark-1")).toHaveTextContent("lark_ping_failed")
+    expect(screen.getByTestId("connection-loss-row-onebot-1").textContent).not.toContain("—")
+  })
 
-    mockRecent = [heartbeat("a", "degraded"), heartbeat("b", "degraded")]
-    wrap(<ConnectionLossBanner />)
+  it("renders 'reconnect all' only when more than one adapter is down", () => {
+    const { unmount } = wrap([adapter("only-one")])
+    expect(screen.queryByTestId("connection-loss-reconnect-all")).not.toBeInTheDocument()
+    unmount()
+
+    wrap([adapter("a"), adapter("b")])
     expect(screen.getByTestId("connection-loss-reconnect-all")).toBeInTheDocument()
   })
 
-  it("clicking reconnect drives requeueAdapter", async () => {
-    mockRecent = [heartbeat("lark-1", "degraded")]
-    wrap(<ConnectionLossBanner />)
+  it("clicking reconnect drives requeueAdapter and reports success", async () => {
+    wrap([adapter("lark-1")])
     fireEvent.click(screen.getByTestId("connection-loss-reconnect-lark-1"))
     await waitFor(() => expect(mockRequeue).toHaveBeenCalledWith("lark-1"))
+    await waitFor(() => expect(mockToast.success).toHaveBeenCalled())
   })
 
-  it("dismiss persists per-set hash in localStorage", () => {
-    mockRecent = [heartbeat("lark-1", "degraded"), heartbeat("b", "down")]
-    wrap(<ConnectionLossBanner />)
+  it("'reconnect all' kicks every adapter", async () => {
+    wrap([adapter("a"), adapter("b")])
+    fireEvent.click(screen.getByTestId("connection-loss-reconnect-all"))
+    await waitFor(() => expect(mockRequeue).toHaveBeenCalledTimes(2))
+    expect(mockRequeue).toHaveBeenCalledWith("a")
+    expect(mockRequeue).toHaveBeenCalledWith("b")
+  })
+
+  it("reports the unavailable case when requeue resolves false", async () => {
+    mockRequeue.mockResolvedValue(false)
+    wrap([adapter("lark-1")])
+    fireEvent.click(screen.getByTestId("connection-loss-reconnect-lark-1"))
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalled())
+    expect(mockToast.success).not.toHaveBeenCalled()
+  })
+
+  it("surfaces a thrown requeue error and re-enables the button", async () => {
+    mockRequeue.mockRejectedValue(new Error("transport gone"))
+    wrap([adapter("lark-1")])
+    const button = screen.getByTestId("connection-loss-reconnect-lark-1")
+    fireEvent.click(button)
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("transport gone"))
+    // `finally` must clear the in-flight id even on the failure path.
+    await waitFor(() => expect(button).not.toBeDisabled())
+  })
+
+  it("stringifies a non-Error rejection", async () => {
+    mockRequeue.mockRejectedValue("plain string")
+    wrap([adapter("lark-1")])
+    fireEvent.click(screen.getByTestId("connection-loss-reconnect-lark-1"))
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("plain string"))
+  })
+
+  it("disables every reconnect control outside Tauri", () => {
+    mockIsTauri.mockReturnValue(false)
+    wrap([adapter("a"), adapter("b")])
+    expect(screen.getByTestId("connection-loss-reconnect-a")).toBeDisabled()
+    expect(screen.getByTestId("connection-loss-reconnect-b")).toBeDisabled()
+    expect(screen.getByTestId("connection-loss-reconnect-all")).toBeDisabled()
+    expect(mockRequeue).not.toHaveBeenCalled()
+  })
+
+  it("hands the dismiss control straight to the caller", () => {
+    const onDismiss = jest.fn()
+    wrap([adapter("lark-1")], onDismiss)
     fireEvent.click(screen.getByTestId("connection-loss-dismiss"))
-    expect(window.localStorage.getItem("inbox.connectionLossBanner.dismiss")).not.toBeNull()
-  })
-
-  it("dismiss is per-set: a new failing set re-renders the banner", () => {
-    mockRecent = [heartbeat("lark-1", "degraded")]
-    const { rerender } = wrap(<ConnectionLossBanner />)
-    fireEvent.click(screen.getByTestId("connection-loss-dismiss"))
-    // Same set — stays hidden.
-    rerender(
-      <NextIntlClientProvider
-        locale="en"
-        messages={enMessages as unknown as Record<string, unknown>}
-      >
-        <ConnectionLossBanner />
-      </NextIntlClientProvider>
-    )
-    expect(screen.queryByTestId("connection-loss-banner")).not.toBeInTheDocument()
-
-    // Different set — shows up again because the hash changed.
-    mockRecent = [heartbeat("onebot-1", "down")]
-    rerender(
-      <NextIntlClientProvider
-        locale="en"
-        messages={enMessages as unknown as Record<string, unknown>}
-      >
-        <ConnectionLossBanner />
-      </NextIntlClientProvider>
-    )
-    expect(screen.getByTestId("connection-loss-banner")).toBeInTheDocument()
-  })
-
-  it("ignores starting + running states (only degraded/down surface)", () => {
-    mockRecent = [heartbeat("a", "starting"), heartbeat("b", "running")]
-    wrap(<ConnectionLossBanner />)
-    expect(screen.queryByTestId("connection-loss-banner")).not.toBeInTheDocument()
+    expect(onDismiss).toHaveBeenCalledTimes(1)
   })
 })

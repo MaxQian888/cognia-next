@@ -1,0 +1,42 @@
+{
+  "audit": {
+    "diagnostics": {
+      "cancel": "取消",
+      "clearAll": "清除全部",
+      "clearAllConfirm": "确定清除所有诊断？此操作无法撤销。",
+      "clearAllConfirmTitle": "清除所有运行时诊断？",
+      "clearForPlugin": "清除",
+      "confirm": "确认",
+      "countBadge": "{count, plural, other {# 条问题}}",
+      "empty": "暂无运行时问题记录。",
+      "filterAll": "全部",
+      "filterErrors": "错误",
+      "filterWarnings": "警告",
+      "hint": "来自治理、静默失败、运行时检查的实时信号。错误默认展开；仅含警告的分组保持折叠。",
+      "severityFilterAria": "按严重程度筛选诊断",
+      "title": "插件运行诊断"
+    }
+  },
+  "dataManagement": {
+    "deleteButton": "删除数据",
+    "deleteDialog": {
+      "cancel": "取消",
+      "confirm": "删除",
+      "description": "这将永久删除 {pluginId} 的所有 IndexedDB 数据。插件本身不会被卸载，但所有已存储的记录将被擦除，无法恢复。",
+      "title": "删除插件数据？"
+    },
+    "emptyForAll": "尚无插件声明自定义数据表。",
+    "emptyForPlugin": "该插件未声明任何自定义数据表。"
+  },
+  "description": "插件在 /plugins 工作台中管理。此入口一览状态并提供进入工作台的链接。",
+  "overview": {
+    "badgeEnabled": "{count} 已启用",
+    "badgeError": "{count} 异常",
+    "badgeUpdates": "{count} 可更新",
+    "hint": "在工作台中管理、安装、配置并治理插件。",
+    "manageGovernance": "管理治理",
+    "openIntegrations": "进入 Integrations",
+    "openWorkspace": "进入插件工作台"
+  },
+  "title": "插件"
+}

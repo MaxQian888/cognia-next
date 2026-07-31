@@ -15,6 +15,7 @@
  */
 
 import { memo, useCallback } from "react"
+import { useShallow } from "zustand/react/shallow"
 import { useTranslations } from "next-intl"
 import {
   AlignCenterHorizontal,
@@ -27,8 +28,14 @@ import {
   AlignVerticalDistributeCenter,
   Copy,
   Group,
+  Lock,
+  LockOpen,
   Maximize2,
+  MousePointerSquareDashed,
+  Play,
+  Power,
   Trash2,
+  Combine,
 } from "lucide-react"
 import type { ReactFlowInstance } from "@xyflow/react"
 import { Button } from "@/components/ui/button"
@@ -36,6 +43,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { applyAutoLayoutPositions } from "@/lib/workflow/editor/auto-layout"
+import { groupChildIds, groupEntryChildIds } from "@/lib/workflow/editor/group-utils"
 import {
   computeAlign,
   computeDistribute,
@@ -52,6 +60,8 @@ export interface SelectionToolbarProps {
   reactFlowInstance: ReactFlowInstance | null
   /** Drop fit-view transition duration when the perf tier disables motion. */
   motionEnabled: boolean
+  /** Extract the current selection into a new sub-workflow (C5). */
+  onExtractToSubworkflow?: () => void
 }
 
 const ALIGN_ITEMS: ReadonlyArray<{
@@ -182,10 +192,36 @@ export const SelectionToolbar = memo(function SelectionToolbar({
   store,
   reactFlowInstance,
   motionEnabled,
+  onExtractToSubworkflow,
 }: SelectionToolbarProps) {
   const t = useTranslations("workflows.editor.selectionToolbar")
   const selectedNodeIds = store((s: EditorState) => s.selectedNodeIds)
   const count = selectedNodeIds.length
+
+  // Stable-primitive selector: re-renders only when the lock state / group
+  // status actually flips, not on every drag frame that mutates `nodes`.
+  // One `useShallow` subscription with a single early-exit pass over the
+  // node list (instead of two selectors doing filter + find each frame) —
+  // drag frames still invoke the selector, but the scan stops as soon as
+  // every selected node has been seen.
+  const { allLocked, singleGroupId } = store(
+    useShallow((s: EditorState) => {
+      const sel = s.selectedNodeIds
+      if (sel.length === 0) return { allLocked: false, singleGroupId: null as string | null }
+      const wanted = new Set(sel)
+      let seen = 0
+      let locked = 0
+      let groupId: string | null = null
+      for (const n of s.nodes) {
+        if (!wanted.has(n.id)) continue
+        seen++
+        if (n.data.locked) locked++
+        if (sel.length === 1 && n.data.kind === "annotation.group") groupId = n.id
+        if (seen === wanted.size) break
+      }
+      return { allLocked: seen > 0 && locked === seen, singleGroupId: groupId }
+    })
+  )
 
   const gatherRects = useCallback((): NodeRect[] => {
     const selected = new Set(selectedNodeIds)
@@ -226,6 +262,31 @@ export const SelectionToolbar = memo(function SelectionToolbar({
   const handleDelete = useCallback(() => {
     store.getState().removeNodes(selectedNodeIds)
   }, [store, selectedNodeIds])
+  const handleToggleLock = useCallback(() => {
+    store.getState().updateNodeDataBatch(selectedNodeIds, { locked: !allLocked })
+  }, [store, selectedNodeIds, allLocked])
+  const handleSelectChildren = useCallback(() => {
+    if (!singleGroupId) return
+    const childIds = groupChildIds(store.getState().nodes, singleGroupId)
+    if (childIds.length > 0) store.getState().setSelectedNodes(childIds)
+  }, [store, singleGroupId])
+  const handleToggleGroupDisabled = useCallback(() => {
+    if (!singleGroupId) return
+    const nodes = store.getState().nodes
+    const childIds = groupChildIds(nodes, singleGroupId)
+    if (childIds.length === 0) return
+    const childSet = new Set(childIds)
+    const allDisabled = nodes
+      .filter((n) => childSet.has(n.id))
+      .every((n) => Boolean(n.data.disabled))
+    store.getState().updateNodeDataBatch(childIds, { disabled: !allDisabled })
+  }, [store, singleGroupId])
+  const handleRunBlock = useCallback(() => {
+    if (!singleGroupId) return
+    const s = store.getState()
+    const entries = groupEntryChildIds(s.nodes, s.edges, singleGroupId)
+    if (entries.length > 0) s.requestRunFromStep(entries[0])
+  }, [store, singleGroupId])
   const handleFit = useCallback(() => {
     const selected = new Set(selectedNodeIds)
     const nodes = store.getState().nodes.filter((n) => selected.has(n.id))
@@ -274,12 +335,54 @@ export const SelectionToolbar = memo(function SelectionToolbar({
         onDistribute={handleDistribute}
       />
       <ToolbarButton
+        icon={allLocked ? LockOpen : Lock}
+        label={allLocked ? t("unlock") : t("lock")}
+        onClick={handleToggleLock}
+        side="bottom"
+        testid="wf-sel-lock"
+      />
+      <ToolbarButton
         icon={Maximize2}
         label={t("fit")}
         onClick={handleFit}
         side="bottom"
         testid="wf-sel-fit"
       />
+      {singleGroupId ? (
+        <>
+          <VSep />
+          <ToolbarButton
+            icon={MousePointerSquareDashed}
+            label={t("selectChildren")}
+            onClick={handleSelectChildren}
+            side="bottom"
+            testid="wf-sel-group-children"
+          />
+          <ToolbarButton
+            icon={Power}
+            label={t("toggleGroupDisabled")}
+            onClick={handleToggleGroupDisabled}
+            side="bottom"
+            testid="wf-sel-group-disable"
+          />
+          <ToolbarButton
+            icon={Play}
+            label={t("runBlock")}
+            onClick={handleRunBlock}
+            side="bottom"
+            testid="wf-sel-group-run"
+          />
+        </>
+      ) : null}
+      {onExtractToSubworkflow ? (
+        <ToolbarButton
+          icon={Combine}
+          label={t("extract")}
+          onClick={onExtractToSubworkflow}
+          side="bottom"
+          testid="wf-sel-extract"
+        />
+      ) : null}
       <VSep />
       <ToolbarButton
         icon={Trash2}

@@ -4,9 +4,12 @@
  * States:
  *   closed    → normal; tracks recent failures in a rolling window.
  *   open      → tripped; all requests rejected until cooldownMs elapses.
- *   half_open → cooldown elapsed; allows exactly one probe. Consecutive
+ *   half_open → cooldown elapsed; `canPass()` returns true, so probes are
+ *               NOT limited to one — every concurrent caller may attempt
+ *               while half-open (in practice the outbound runner's serial
+ *               per-conversation lanes keep concurrency low). Consecutive
  *               successes (`closeOnSuccessCount`) close the breaker; any
- *               failure re-opens it.
+ *               failure re-opens it immediately.
  *
  * Sliding window:
  *   Within the last `windowMs`, track every recordSuccess / recordFailure

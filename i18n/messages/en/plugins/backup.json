@@ -1,0 +1,10 @@
+{
+  "create": "Create backup",
+  "createFailed": "Backup failed.",
+  "creating": "Creating…",
+  "delete": "Delete",
+  "desktopOnlyHint": "Backups run through the native bridge and are only writable in the desktop build.",
+  "empty": "No backups yet.",
+  "restore": "Restore",
+  "title": "Backups"
+}

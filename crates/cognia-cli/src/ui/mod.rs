@@ -21,7 +21,7 @@ pub mod style;
 
 // Public re-exports — surface for tests + future external consumers.
 // Marked `unused_imports` because not every binary build of cognia-cli
-// references every symbol at the top level (most live inside `cmd_*`
+// references every symbol at the top level (most live inside `commands::*`
 // modules, which import them directly from `ui::prompter` / `ui::runtime`).
 #[allow(unused_imports)]
 pub use prompter::{MockPrompter, NoninteractivePrompter, PromptError, Prompter};

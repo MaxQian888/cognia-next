@@ -4,9 +4,6 @@
  * Provides export capabilities to plugins.
  */
 
-import { useSessionStore } from "@/stores/chat/session-store"
-import { useProjectStore } from "@/stores/project/project-store"
-import { messageRepository } from "@/lib/db"
 import {
   exportToRichMarkdown,
   exportToRichJSON,
@@ -15,8 +12,8 @@ import {
   exportToAnimatedHTML,
   generateFilename as generateExportFilename,
 } from "@/lib/export"
-import { getPluginEventHooks } from "../messaging/hooks-system"
 import { createPluginSystemLogger, loggers } from "../core/logger"
+import { createApiGuardedAPI } from "./api-permission-gate"
 import type {
   PluginExportAPI,
   ExportFormat,
@@ -24,9 +21,9 @@ import type {
   ExportData,
   ExportResult,
   CustomExporter,
-} from "@/types/plugin/plugin-extended"
+} from "@/types/plugin/plugin"
 import type { Session, UIMessage } from "@/types"
-import type { ChatSession, StoredMessage } from "@/lib/claude/types"
+import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 
 /**
  * Normalise a plugin-facing `Session` into the persistence-shaped
@@ -82,8 +79,11 @@ const customExporters = new Map<string, CustomExporter>()
  */
 export function createExportAPI(pluginId: string): PluginExportAPI {
   const logger = createPluginSystemLogger(pluginId)
-  return {
+  const api: PluginExportAPI = {
     exportSession: async (sessionId: string, options: ExportOptions): Promise<ExportResult> => {
+      const { getPluginEventHooks } = await import("../messaging/hooks-system")
+      const { useSessionStore } = await import("@/stores/chat/session-store")
+      const { messageRepository } = await import("@/lib/db")
       const hooks = getPluginEventHooks()
       // Plugin host: announce session export start. The pipeline always emits
       // a matching complete (success/failure) below.
@@ -120,6 +120,8 @@ export function createExportAPI(pluginId: string): PluginExportAPI {
     },
 
     exportProject: async (projectId: string, options: ExportOptions): Promise<ExportResult> => {
+      const { getPluginEventHooks } = await import("../messaging/hooks-system")
+      const { useProjectStore } = await import("@/stores/project/project-store")
       const hooks = getPluginEventHooks()
       // Plugin host: announce project export start, mirror complete on every
       // exit branch (not-found / success / thrown).
@@ -208,6 +210,28 @@ export function createExportAPI(pluginId: string): PluginExportAPI {
       return generateExportFilename(title, extension)
     },
   }
+
+  // `download` writes plugin-supplied bytes to the user's disk on the back of
+  // an export flow — gate it with the session-export permission too.
+  return createApiGuardedAPI(
+    pluginId,
+    api,
+    {
+      exportSession: "export:session",
+      exportMessages: "export:session",
+      exportProject: "export:project",
+      download: "export:session",
+    },
+    {
+      // Pure helpers / contribution registration — no user data access.
+      unguarded: [
+        "registerExporter",
+        "getAvailableFormats",
+        "getCustomExporters",
+        "generateFilename",
+      ],
+    }
+  )
 }
 
 /**
@@ -329,6 +353,7 @@ async function performExport(
   // Plugin host: let plugins rewrite the rendered payload before it lands
   // in the result blob. The pipeline returns the original content unchanged
   // when no plugin transforms it.
+  const { getPluginEventHooks } = await import("../messaging/hooks-system")
   const transformed = await getPluginEventHooks().dispatchExportTransform(content, format)
   const blob = new Blob([transformed], { type: mimeType })
   const filename = generateExportFilename(

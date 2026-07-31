@@ -13,6 +13,7 @@
     "core:window:allow-unmaximize",
     "core:window:allow-toggle-maximize",
     "core:window:allow-close",
+    "core:window:allow-set-title",
     "core:window:allow-set-focus",
     "core:window:allow-start-dragging",
     "core:window:allow-start-resize-dragging",
@@ -33,10 +34,18 @@
     "fs:default",
     "fs:allow-read-text-file",
     "fs:allow-write-text-file",
+    "fs:allow-read-file",
+    "fs:allow-write-file",
+    "fs:allow-remove",
+    "fs:allow-copy-file",
+    "fs:allow-rename",
+    "fs:allow-mkdir",
+    "fs:allow-stat",
     "global-shortcut:default",
-    "process:default",
     "process:allow-restart",
-    "updater:default",
+    "updater:allow-check",
+    "updater:allow-download",
+    "updater:allow-install",
     "deep-link:default",
     "notification:default",
     "clipboard-manager:default",
@@ -79,6 +88,10 @@
     "log:default",
     "log:allow-log",
 
+    "telemetry",
+
+    "allow-all-app-commands",
+
     "upload:default",
     "upload:allow-upload",
     "upload:allow-download",
@@ -95,6 +108,8 @@
           "args": ["tunnel", "--url", { "validator": "^https?://.+" }]
         }
       ]
-    }
+    },
+
+    "shell:allow-open"
   ]
 }

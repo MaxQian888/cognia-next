@@ -29,6 +29,16 @@ jest.mock("../parts/default-model-picker", () => ({
   DefaultModelPicker: () => <div data-testid="default-model-picker" />,
 }))
 
+jest.mock("@/components/settings/instructions/instructions-card", () => ({
+  InstructionsCard: () => <div data-testid="instructions-card" />,
+}))
+
+jest.mock("@/components/plugins/plugin-extension-slot", () => ({
+  PluginExtensionSlot: ({ point }: { point: string }) => (
+    <div data-testid="plugin-slot" data-point={point} />
+  ),
+}))
+
 describe("DefaultsTab", () => {
   beforeEach(() => {
     save.mockClear()
@@ -44,7 +54,8 @@ describe("DefaultsTab", () => {
   it("renders all 4 permission-mode options in the dropdown", async () => {
     const user = userEvent.setup()
     render(<DefaultsTab />)
-    await user.click(screen.getByRole("combobox"))
+    // Permission select is the first combobox (output-style adds a second).
+    await user.click(screen.getAllByRole("combobox")[0])
     // The active label also shows in the trigger, so use getAllByText.
     expect(screen.getAllByText("permDefault").length).toBeGreaterThan(0)
     expect(screen.getByRole("option", { name: "permAcceptEdits" })).toBeInTheDocument()
@@ -88,6 +99,30 @@ describe("DefaultsTab", () => {
     expect(screen.getByTestId("default-model-picker")).toBeInTheDocument()
   })
 
+  it("cache-optimization switch is on by default and persists false when toggled off", async () => {
+    const user = userEvent.setup()
+    render(<DefaultsTab />)
+    const sw = screen.getByTestId("cache-optimization-switch")
+    // Default-ON (opt-out): no explicit `false` in settings → checked.
+    expect(sw).toHaveAttribute("data-state", "checked")
+    await user.click(sw)
+    // Persist the explicit `false` so the OFF choice survives the DEFAULTS merge.
+    expect(save).toHaveBeenCalledWith({ cacheOptimizationEnabled: false })
+  })
+
+  it("toggling cache optimization back on persists true", async () => {
+    stateRef.current = {
+      ...stateRef.current,
+      cacheOptimizationEnabled: false,
+    } as never
+    const user = userEvent.setup()
+    render(<DefaultsTab />)
+    const sw = screen.getByTestId("cache-optimization-switch")
+    expect(sw).toHaveAttribute("data-state", "unchecked")
+    await user.click(sw)
+    expect(save).toHaveBeenCalledWith({ cacheOptimizationEnabled: true })
+  })
+
   it("blur with empty append textarea persists undefined", () => {
     render(<DefaultsTab />)
     const ta = screen.getByLabelText("appendTitle")
@@ -113,8 +148,56 @@ describe("DefaultsTab", () => {
     }
     render(<DefaultsTab />)
     // Should fall back to "default" — the trigger shows the matching label.
-    const combobox = screen.getByRole("combobox")
+    const combobox = screen.getAllByRole("combobox")[0]
     expect(combobox).toBeInTheDocument()
+  })
+
+  it("renders the instructions card and the settings.general plugin slot", () => {
+    render(<DefaultsTab />)
+    expect(screen.getByTestId("instructions-card")).toBeInTheDocument()
+    expect(screen.getByTestId("plugin-slot")).toHaveAttribute("data-point", "settings.general")
+  })
+
+  it("toggling bare mode persists true, then undefined when turned back off", async () => {
+    const user = userEvent.setup()
+    render(<DefaultsTab />)
+    const sw = screen.getByLabelText("bareMode")
+    expect(sw).toHaveAttribute("data-state", "unchecked")
+    await user.click(sw)
+    expect(save).toHaveBeenCalledWith({ bareMode: true })
+  })
+
+  it("toggling brief mode persists true", async () => {
+    const user = userEvent.setup()
+    render(<DefaultsTab />)
+    await user.click(screen.getByLabelText("briefMode"))
+    expect(save).toHaveBeenCalledWith({ briefMode: true })
+  })
+
+  it("selecting a non-default output style persists it and clears custom", async () => {
+    const user = userEvent.setup()
+    render(<DefaultsTab />)
+    await user.click(screen.getByTestId("output-style-select"))
+    await user.click(screen.getByRole("option", { name: "outputStyle.detailed" }))
+    expect(save).toHaveBeenCalledWith({ outputStyle: "detailed", customOutputStyle: undefined })
+  })
+
+  it("selecting custom output style reveals the instruction textarea", async () => {
+    const user = userEvent.setup()
+    render(<DefaultsTab />)
+    await user.click(screen.getByTestId("output-style-select"))
+    await user.click(screen.getByRole("option", { name: "outputStyle.custom" }))
+    expect(save).toHaveBeenCalledWith({ outputStyle: "custom", customOutputStyle: undefined })
+    expect(screen.getByLabelText("outputStyle.customPlaceholder")).toBeInTheDocument()
+  })
+
+  it("default output style persists undefined (use SDK default)", async () => {
+    stateRef.current = { ...stateRef.current, outputStyle: "detailed" } as never
+    const user = userEvent.setup()
+    render(<DefaultsTab />)
+    await user.click(screen.getByTestId("output-style-select"))
+    await user.click(screen.getByRole("option", { name: "outputStyle.default" }))
+    expect(save).toHaveBeenCalledWith({ outputStyle: undefined, customOutputStyle: undefined })
   })
 
   it("blur on thinking-budget input persists clamped, rounded value", () => {
@@ -163,5 +246,71 @@ describe("DefaultsTab", () => {
   it("reset button is disabled when budget is already zero", () => {
     render(<DefaultsTab />)
     expect(screen.getByTestId("thinking-budget-reset")).toBeDisabled()
+  })
+
+  it("interactive plan view switch is off by default and persists true when enabled", async () => {
+    const user = userEvent.setup()
+    render(<DefaultsTab />)
+    const sw = screen.getByTestId("plan-interactive-html-switch")
+    // Opt-in enhanced plan mode: absent setting → unchecked.
+    expect(sw).toHaveAttribute("data-state", "unchecked")
+    await user.click(sw)
+    expect(save).toHaveBeenCalledWith({ planSettings: { interactiveHtmlView: true } })
+  })
+
+  it("interactive plan view switch mirrors the persisted value and keeps sibling plan settings", async () => {
+    stateRef.current = {
+      ...stateRef.current,
+      planSettings: { requireApproval: false, interactiveHtmlView: true },
+    } as never
+    const user = userEvent.setup()
+    render(<DefaultsTab />)
+    const sw = screen.getByTestId("plan-interactive-html-switch")
+    expect(sw).toHaveAttribute("data-state", "checked")
+    await user.click(sw)
+    // Sibling plan settings survive the spread; the explicit false persists.
+    expect(save).toHaveBeenCalledWith({
+      planSettings: { requireApproval: false, interactiveHtmlView: false },
+    })
+  })
+
+  it("interactive style select is disabled until the interactive view is on", () => {
+    render(<DefaultsTab />)
+    expect(screen.getByTestId("plan-interactive-style-select")).toBeDisabled()
+  })
+
+  it("interactive style select persists the preset and keeps sibling plan settings", async () => {
+    stateRef.current = {
+      ...stateRef.current,
+      planSettings: { interactiveHtmlView: true },
+    } as never
+    const user = userEvent.setup()
+    render(<DefaultsTab />)
+    const trigger = screen.getByTestId("plan-interactive-style-select")
+    expect(trigger).not.toBeDisabled()
+    await user.click(trigger)
+    await user.click(screen.getByRole("option", { name: "planStyleTimeline" }))
+    expect(save).toHaveBeenCalledWith({
+      planSettings: { interactiveHtmlView: true, interactiveHtmlStyle: "timeline" },
+    })
+  })
+
+  it("interactive style select mirrors a persisted preset, coercing junk to default", () => {
+    stateRef.current = {
+      ...stateRef.current,
+      planSettings: { interactiveHtmlView: true, interactiveHtmlStyle: "cards" },
+    } as never
+    const { unmount } = render(<DefaultsTab />)
+    expect(screen.getByTestId("plan-interactive-style-select")).toHaveTextContent("planStyleCards")
+    unmount()
+
+    stateRef.current = {
+      ...stateRef.current,
+      planSettings: { interactiveHtmlView: true, interactiveHtmlStyle: "neon" },
+    } as never
+    render(<DefaultsTab />)
+    expect(screen.getByTestId("plan-interactive-style-select")).toHaveTextContent(
+      "planStyleDefault"
+    )
   })
 })

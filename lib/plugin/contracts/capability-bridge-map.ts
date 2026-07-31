@@ -38,10 +38,16 @@ import type {
   PluginExternalAgentPresetDef,
   PluginSubagentDef,
   PluginAgentTeamTemplateDef,
+  PluginManifestTrayItemDef,
 } from "@/types/plugin"
 import type { PluginCharacterPackDef } from "@/types/plugin/plugin-character-pack"
 import type { PluginSharedMemoryAdapterDef } from "@/types/plugin/plugin-shared-memory-adapter"
+import type { PluginBalanceAdapterDef } from "@/types/plugin/plugin-balance-adapter"
+import type { PluginLimitsSourceDef } from "@/types/plugin/plugin-limits-source"
+import type { PluginImRateSourceDef } from "@/types/plugin/plugin-im-rate-source"
+import type { PluginCompactionStrategyDef } from "@/types/plugin/plugin-compaction-strategy"
 import type { PluginWorkflowTemplateDef } from "@/types/plugin/plugin-workflow-template"
+import type { PluginViewContainerDef } from "@/types/plugin/plugin-view-container"
 import {
   registerMcpServerPreset,
   unregisterMcpServerPresetsByPlugin,
@@ -51,6 +57,8 @@ import {
   unregisterNativeAnthropicToolsByPlugin,
 } from "@/lib/plugin/registries/native-anthropic-tool-registry"
 import { registerSkill, unregisterSkillsByPlugin } from "@/lib/plugin/registries/skill-registry"
+import { rebaseSkillSource } from "@/lib/plugin/utils/rebase-skill-source"
+import { replacePluginRootTokens } from "@/lib/plugin/utils/plugin-root-tokens"
 import {
   refreshAllPackWarnings,
   registerCharacterPack,
@@ -74,10 +82,49 @@ import {
   unregisterSharedMemoryAdaptersByPlugin,
 } from "@/lib/plugin/registries/shared-memory-adapter-registry"
 import {
+  registerBalanceAdapter,
+  unregisterBalanceAdaptersByPlugin,
+} from "@/lib/plugin/registries/balance-adapter-registry"
+import {
+  registerLimitsSource,
+  unregisterLimitsSourcesByPlugin,
+} from "@/lib/plugin/registries/limits-source-registry"
+import {
+  registerImRateSource,
+  unregisterImRateSourcesByPlugin,
+} from "@/lib/plugin/registries/im-rate-source-registry"
+import {
+  registerCompactionStrategy,
+  unregisterCompactionStrategiesByPlugin,
+} from "@/lib/plugin/registries/compaction-strategy-registry"
+import {
   refreshAllWorkflowTemplateWarnings,
   registerWorkflowTemplate,
   unregisterWorkflowTemplatesByPlugin,
 } from "@/lib/plugin/registries/workflow-template-registry"
+import {
+  registerQuickAction,
+  unregisterQuickActionsByPlugin,
+} from "@/lib/plugin/registries/quick-action-registry"
+import {
+  registerViewContainer,
+  unregisterViewContainersByPlugin,
+} from "@/lib/plugin/registries/view-container-registry"
+import {
+  registerAuthenticationProvider,
+  unregisterProvidersByPlugin,
+} from "@/lib/plugin/auth/auth-provider-registry"
+import {
+  registerPetAchievement,
+  unregisterPetAchievementsByPlugin,
+} from "@/lib/plugin/registries/pet-achievement-registry"
+import {
+  registerPetItem,
+  unregisterPetItemsByPlugin,
+} from "@/lib/plugin/registries/pet-item-registry"
+import type { PluginQuickActionDef, PluginAuthProviderDef } from "@/types/plugin"
+import { registerTrayItem, unregisterTrayItemsByPlugin } from "@/lib/tray/registry"
+import type { PluginPetAchievementDef, PluginPetItemDef } from "@/types/plugin/plugin-pet"
 
 /**
  * Minimal entry shape every overlay-registry contribution conforms to.
@@ -87,6 +134,18 @@ import {
 export interface OverlayContributionEntry {
   id: string
   [key: string]: unknown
+}
+
+/**
+ * What the dispatch loop knows about the plugin whose contributions it is
+ * registering. `installRoot` is the plugin's on-disk directory (empty for
+ * built-ins, whose contributions never carry filesystem paths); descriptors
+ * that store paths use it to anchor plugin-dir-relative values, mirroring
+ * the `installRoot` the module-bridge dispatch already passes.
+ */
+export interface OverlayRegistrationContext {
+  pluginId: string
+  installRoot?: string
 }
 
 /**
@@ -103,7 +162,7 @@ export interface OverlayCapabilityDescriptor {
    * the entry through verbatim — the uniform contract is just "this
    * adds one entry to its registry under `pluginId`".
    */
-  registerEntry: (entry: OverlayContributionEntry, ctx: { pluginId: string }) => void
+  registerEntry: (entry: OverlayContributionEntry, ctx: OverlayRegistrationContext) => void
   /**
    * Bulk cleanup. Implementations must idempotently drop every entry
    * the named plugin contributed. Returns the count for diagnostics.
@@ -124,7 +183,7 @@ export interface OverlayCapabilityDescriptor {
  */
 interface TypedOverlayCapabilityDescriptor<E extends { id: string }> {
   manifestField: keyof PluginManifest
-  registerEntry: (entry: E, ctx: { pluginId: string }) => void
+  registerEntry: (entry: E, ctx: OverlayRegistrationContext) => void
   unregisterAllByPlugin: (pluginId: string) => number
   virtual?: true
 }
@@ -157,12 +216,21 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
   skills: defineOverlayCapability<PluginSkillDef>({
     manifestField: "skills",
     registerEntry: (def, ctx) => {
-      // Skill defs pass through verbatim — the registry stores the
-      // entire entry under its `id`. After registration we refresh any
-      // character-pack `requires` warnings (ADR-0030): a pack that was
-      // previously missing this skill id now has the dep available.
-      // Also refresh agent-team-template warnings for the same reason.
-      registerSkill(def.id, def, ctx)
+      // `local-folder` / `local-bundle` / `archive` sources carry a
+      // filesystem path that downstream consumers (`resolveSkillMarkdown`)
+      // read with no knowledge of the owning plugin. Anchor it here, once,
+      // so a plugin can ship `"skills/foo"` the way it already ships
+      // `main` / `wasmMain` / `cliTools[].binary.relPath`. Throws on a
+      // path that escapes the plugin dir — the dispatch loop isolates
+      // per-entry failures, so only the offending skill is dropped.
+      const anchored = rebaseSkillSource(def, ctx.installRoot ?? "")
+      const bound = ctx.installRoot ? { ...anchored, runtimePluginRoot: ctx.installRoot } : anchored
+      // The registry stores the entire entry under its `id`. After
+      // registration we refresh any character-pack `requires` warnings
+      // (ADR-0030): a pack that was previously missing this skill id now
+      // has the dep available. Also refresh agent-team-template warnings
+      // for the same reason.
+      registerSkill(bound.id, bound, ctx)
       refreshAllPackWarnings()
       refreshAllTemplateWarnings()
       refreshAllWorkflowTemplateWarnings()
@@ -178,7 +246,8 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
   "mcp-server-preset": defineOverlayCapability<PluginMcpServerPresetDef>({
     manifestField: "mcpServerPresets",
     registerEntry: (def, ctx) => {
-      registerMcpServerPreset(def.id, def, ctx)
+      const bound = replacePluginRootTokens(def, ctx.installRoot ?? "")
+      registerMcpServerPreset(bound.id, bound, ctx)
       refreshAllPackWarnings()
       refreshAllTemplateWarnings()
       refreshAllWorkflowTemplateWarnings()
@@ -252,7 +321,8 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
     // `requires.subagentIds[]` dependencies, so we refresh those warnings.
     manifestField: "subagents",
     registerEntry: (def, ctx) => {
-      registerSubagent(def.id, def, ctx)
+      const bound = replacePluginRootTokens(def, ctx.installRoot ?? "")
+      registerSubagent(bound.id, bound, ctx)
       refreshAllTemplateWarnings()
       refreshAllWorkflowTemplateWarnings()
     },
@@ -288,6 +358,70 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
     },
     unregisterAllByPlugin: unregisterSharedMemoryAdaptersByPlugin,
   }),
+  "balance-adapter": defineOverlayCapability<PluginBalanceAdapterDef>({
+    // Plugin contributes a subscription balance adapter. Registered verbatim
+    // under its `id`; `findBalanceAdapter` lists overlay adapters before the
+    // built-in array so a plugin can extend or override the bundled set.
+    manifestField: "balanceAdapters",
+    registerEntry: (def, ctx) => {
+      registerBalanceAdapter(def.id, def, ctx)
+    },
+    unregisterAllByPlugin: unregisterBalanceAdaptersByPlugin,
+  }),
+  "limits-source": defineOverlayCapability<PluginLimitsSourceDef>({
+    // Plugin contributes a unified subscription limits/usage source. Registered
+    // verbatim under its `id`; `resolveLimitsSources` lists overlay sources
+    // before the built-in array so a plugin can extend or override the bundled
+    // set (Anthropic windows, Codex windows, credit balances).
+    manifestField: "limitsSources",
+    registerEntry: (def, ctx) => {
+      registerLimitsSource(def.id, def, ctx)
+    },
+    unregisterAllByPlugin: unregisterLimitsSourcesByPlugin,
+  }),
+  "im-rate-source": defineOverlayCapability<PluginImRateSourceDef>({
+    // Plugin contributes a per-conversation IM send gate. Registered verbatim
+    // under its `id`; the connector runtime's ai-run branch calls
+    // `evaluateImRate`, which lists this overlay and returns the first block.
+    manifestField: "imRateSources",
+    registerEntry: (def, ctx) => {
+      registerImRateSource(def.id, def, ctx)
+    },
+    unregisterAllByPlugin: unregisterImRateSourcesByPlugin,
+  }),
+  "compaction-strategy": defineOverlayCapability<PluginCompactionStrategyDef>({
+    // Plugin contributes a conversation-compaction strategy (declarative
+    // summary prompt + threshold knobs). Registered verbatim under its `id`;
+    // `resolveSendOptions` looks it up when the compaction settings select it
+    // and threads its config into `SendOptions.compaction`.
+    manifestField: "compactionStrategies",
+    registerEntry: (def, ctx) => {
+      registerCompactionStrategy(def.id, def, ctx)
+    },
+    unregisterAllByPlugin: unregisterCompactionStrategiesByPlugin,
+  }),
+  "quick-action": defineOverlayCapability<PluginQuickActionDef>({
+    // Quick actions surfaced in the command palette / composer menu / tray.
+    // `registerQuickAction` mirrors each entry into the unified command
+    // registry (dispatch handle) and the overlay registry (surface
+    // metadata); `unregisterQuickActionsByPlugin` drops both.
+    manifestField: "quickActions",
+    registerEntry: (def, ctx) => {
+      registerQuickAction(ctx.pluginId, def)
+    },
+    unregisterAllByPlugin: unregisterQuickActionsByPlugin,
+  }),
+  tray: defineOverlayCapability<PluginManifestTrayItemDef>({
+    manifestField: "trayItems",
+    registerEntry: (def, ctx) => {
+      registerTrayItem({
+        ...def,
+        id: `${ctx.pluginId}:${def.id}`,
+        pluginId: ctx.pluginId,
+      })
+    },
+    unregisterAllByPlugin: unregisterTrayItemsByPlugin,
+  }),
   "workflow-template": defineOverlayCapability<PluginWorkflowTemplateDef>({
     // ADR-0017/0032. Plugin contributes complete visual-workflow blueprints —
     // nodes + edges + settings + a `requires` block declaring cross-capability
@@ -299,6 +433,58 @@ export const OVERLAY_REGISTRY_CAPABILITIES = {
       registerWorkflowTemplate(def.id, def, ctx)
     },
     unregisterAllByPlugin: unregisterWorkflowTemplatesByPlugin,
+  }),
+  "view-container": defineOverlayCapability<PluginViewContainerDef>({
+    // B1. Rail-mounted view containers. `registerViewContainer` namespaces the
+    // id to the plugin and notifies the rail; `unregisterViewContainersByPlugin`
+    // drops every container the plugin contributed.
+    manifestField: "viewsContainers",
+    registerEntry: (def, ctx) => {
+      registerViewContainer(def, ctx)
+    },
+    unregisterAllByPlugin: unregisterViewContainersByPlugin,
+  }),
+  "auth-provider": defineOverlayCapability<PluginAuthProviderDef>({
+    // C1. The declarative `authProviders[]` entries are metadata (id + label
+    // for validation / consent UI). On enable we pre-register a PLACEHOLDER
+    // provider keyed by id; the plugin's activation replaces it (same id) with
+    // the live object via `ctx.auth.registerProvider`. The placeholder makes
+    // the declared provider visible immediately and ensures cleanup removes it
+    // even if the plugin never activates the real one.
+    manifestField: "authProviders",
+    registerEntry: (def, ctx) => {
+      registerAuthenticationProvider({
+        id: def.id,
+        label: def.label,
+        pluginId: ctx.pluginId,
+        getSessions: async () => [],
+        createSession: async () => {
+          throw new Error(`Auth provider "${def.id}" is declared but not yet activated.`)
+        },
+        removeSession: async () => {},
+      })
+    },
+    unregisterAllByPlugin: unregisterProvidersByPlugin,
+  }),
+  "pet-achievement": defineOverlayCapability<PluginPetAchievementDef>({
+    // Data-only pet achievements (condition DSL, compiled at check time by
+    // lib/plugin/registries/pet-achievement-registry.ts). Ids namespace as
+    // `plugin:<pluginId>:<id>` inside the compiled view, so unlock records
+    // can't collide with the static PET_ACHIEVEMENTS.
+    manifestField: "petAchievements",
+    registerEntry: (def, ctx) => {
+      registerPetAchievement(def.id, def, ctx)
+    },
+    unregisterAllByPlugin: unregisterPetAchievementsByPlugin,
+  }),
+  "pet-item": defineOverlayCapability<PluginPetItemDef>({
+    // Data-only pet shop items, unioned into the host catalog static-first
+    // (lib/pet/economy/item-catalog.ts listAllPetItems/getPetItem).
+    manifestField: "petItems",
+    registerEntry: (def, ctx) => {
+      registerPetItem(def.id, def, ctx)
+    },
+    unregisterAllByPlugin: unregisterPetItemsByPlugin,
   }),
 } as const satisfies Partial<Record<PluginCapability, OverlayCapabilityDescriptor>>
 

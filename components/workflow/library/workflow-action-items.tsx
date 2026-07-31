@@ -13,6 +13,8 @@ import { useTranslations } from "next-intl"
 import {
   CopyIcon,
   FolderInputIcon,
+  HistoryIcon,
+  LayoutTemplateIcon,
   PencilIcon,
   PinIcon,
   PinOffIcon,
@@ -20,7 +22,7 @@ import {
   TagIcon,
   Trash2Icon,
 } from "lucide-react"
-import { duplicateWorkflow } from "@/lib/db/workflows"
+import { duplicateWorkflow, saveWorkflowAsTemplate } from "@/lib/db/workflows"
 import type { WorkflowRow } from "@/types/workflow/visual"
 import { useWorkflowLibraryStore } from "@/stores/workflow"
 import { usePinnedWorkflows } from "./use-pinned-workflows"
@@ -39,6 +41,7 @@ export interface WorkflowActionItemsProps {
   workflow: WorkflowRow
   Item: MenuItemComponent
   Separator: ComponentType
+  onRun: () => void
   onRename: () => void
   onEditTags: () => void
   onDelete: () => void
@@ -48,6 +51,7 @@ export function WorkflowActionItems({
   workflow,
   Item,
   Separator,
+  onRun,
   onRename,
   onEditTags,
   onDelete,
@@ -62,26 +66,44 @@ export function WorkflowActionItems({
     try {
       const copy = await duplicateWorkflow(workflow.id)
       toast.success(t("duplicated"))
-      router.push(`/workflows/${copy.id}`)
+      router.push(`/workflows/editor?id=${encodeURIComponent(copy.id)}`)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("duplicateFailed"))
     }
   }
 
+  const handleSaveAsTemplate = async () => {
+    try {
+      await saveWorkflowAsTemplate(workflow.id)
+      toast.success(t("savedAsTemplate"))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("saveAsTemplateFailed"))
+    }
+  }
+
   return (
     <>
+      <Item onClick={onRun} data-testid={`workflow-action-run-${workflow.id}`}>
+        <PlayIcon className="size-4 mr-2" /> {t("run")}
+      </Item>
       <Item asChild data-testid={`workflow-action-edit-${workflow.id}`}>
-        <Link href={`/workflows/${workflow.id}`}>
+        <Link href={`/workflows/editor?id=${encodeURIComponent(workflow.id)}`}>
           <PencilIcon className="size-4 mr-2" /> {t("edit")}
         </Link>
       </Item>
       <Item asChild>
-        <Link href={`/workflows/${workflow.id}/runs`}>
-          <PlayIcon className="size-4 mr-2" /> {t("viewRuns")}
+        <Link href={`/workflows/runs?id=${encodeURIComponent(workflow.id)}`}>
+          <HistoryIcon className="size-4 mr-2" /> {t("viewRuns")}
         </Link>
       </Item>
       <Item onClick={handleDuplicate}>
         <CopyIcon className="size-4 mr-2" /> {t("duplicate")}
+      </Item>
+      <Item
+        onClick={handleSaveAsTemplate}
+        data-testid={`workflow-action-save-template-${workflow.id}`}
+      >
+        <LayoutTemplateIcon className="size-4 mr-2" /> {t("saveAsTemplate")}
       </Item>
       <Separator />
       <Item

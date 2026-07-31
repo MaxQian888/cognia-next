@@ -20,15 +20,17 @@
  * substitute one for the other without code-path changes.
  */
 
-import { hasNoLeakingPii } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii } from "@cognia/redact"
 import {
   RunAndCaptureError,
   runAndCaptureAssistantReply,
   type RunAndCaptureOptions,
   type RunAndCaptureResult,
 } from "@/lib/claude/run-and-capture"
-import type { SendContent, SendOptions } from "@/lib/claude/types"
+import type { SendContent, SendOptions } from "@cognia/agent-config-types"
 import { appendAudit } from "@/lib/connectors/audit"
+import { recordProviderOutcome } from "@/lib/claude/provider-telemetry"
+import { recordConnectorUsage, swallowUsageWrite } from "@/lib/db/session-usage"
 
 export interface SafeSendPromptOptions extends RunAndCaptureOptions {
   /**
@@ -41,6 +43,44 @@ export interface SafeSendPromptOptions extends RunAndCaptureOptions {
    * row so the operator can jump straight to the offending thread.
    */
   conversationKey: string
+}
+
+/**
+ * Bounded memo for the *system-prompt* PII scan. The `appendSystemPrompt`
+ * build-options injects (character prompt + twin/memory/skills/capability
+ * sections) is large and largely stable across a conversation's turns, so the
+ * same string is otherwise rescanned (≈12 regex sweeps) every turn. Caching the
+ * boolean by exact content skips the sweep on a repeat.
+ *
+ * This does NOT weaken the gate: `hasNoLeakingPii` is a pure, stateless function
+ * of its text (redact.ts:388), so a cached `true` is permanently valid for that
+ * exact string. A never-seen OR PII-leaking prompt is a cache miss that runs the
+ * real scan and still throws. The inbound user prompt (line ~78) is intentionally
+ * NOT cached — it changes every turn, so a cache would only add overhead.
+ */
+const SYSTEM_PROMPT_PII_CACHE_CAP = 64
+const systemPromptPiiCache = new Map<string, boolean>()
+
+export function hasNoLeakingPiiCached(text: string): boolean {
+  const hit = systemPromptPiiCache.get(text)
+  if (hit !== undefined) {
+    // Refresh LRU recency (delete + re-set moves the key to the newest slot).
+    systemPromptPiiCache.delete(text)
+    systemPromptPiiCache.set(text, hit)
+    return hit
+  }
+  const result = hasNoLeakingPii(text)
+  if (systemPromptPiiCache.size >= SYSTEM_PROMPT_PII_CACHE_CAP) {
+    const oldest = systemPromptPiiCache.keys().next().value
+    if (oldest !== undefined) systemPromptPiiCache.delete(oldest)
+  }
+  systemPromptPiiCache.set(text, result)
+  return result
+}
+
+/** Test-only — clear the system-prompt PII memo between cases. */
+export function _resetSystemPromptPiiCacheForTest(): void {
+  systemPromptPiiCache.clear()
 }
 
 export class PiiGateBlocked extends Error {
@@ -89,7 +129,7 @@ export async function safeSendPrompt(
   //     inject capability context, twin runtime hints, etc.). We don't
   //     redact — we abort, because the auto-mode loop has no human to
   //     decide what to redact.
-  if (options?.appendSystemPrompt && !hasNoLeakingPii(options.appendSystemPrompt)) {
+  if (options?.appendSystemPrompt && !hasNoLeakingPiiCached(options.appendSystemPrompt)) {
     await appendAudit({
       adapterId: opts.adapterId,
       kind: "adapter.error",
@@ -102,11 +142,52 @@ export async function safeSendPrompt(
   }
 
   // ── 3. Delegate to the existing capture wrapper ────────────────────
-  return runAndCaptureAssistantReply(sessionId, prompt, options, {
+  // Forward the FULL capture surface, not just signal/timeout/onPartial:
+  // the primary inbound ai-run wires `onPermissionRequest` (IM tool-approval
+  // HITL) and `onEvent` (live-activity card). Dropping them here would
+  // silently disable both when the inbound turn is routed through this gate.
+  const result = await runAndCaptureAssistantReply(sessionId, prompt, options, {
     signal: opts.signal,
     timeoutMs: opts.timeoutMs,
     onPartial: opts.onPartial,
+    onPermissionRequest: opts.onPermissionRequest,
+    onEvent: opts.onEvent,
+    execution: {
+      kind: "connector",
+      label: `${opts.adapterId} · ${opts.conversationKey}`,
+    },
   })
+  if (result.usage) {
+    const usage = result.usage
+    swallowUsageWrite(
+      recordConnectorUsage({
+        adapterId: opts.adapterId,
+        conversationKey: opts.conversationKey,
+        usage,
+      })
+    )
+    if (options?.provider) {
+      recordProviderOutcome({
+        providerId: options.provider,
+        ok: true,
+        latencyMs: usage.durationMs ?? 0,
+        estimatedCostUsd: usage.totalCostUsd,
+        modelId: options.model,
+        tokensUsed: (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0),
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        cacheReadTokens: usage.cacheReadInputTokens,
+        cacheCreationTokens: usage.cacheCreationInputTokens,
+        sessionId,
+        // Provider child span nests under the connector turn's root span
+        // (minted by resolveSendOptions with traceSurface "connector").
+        traceId: options?.traceId,
+        parentSpanId: options?.spanId,
+        surface: "connector",
+      })
+    }
+  }
+  return result
 }
 
 /**

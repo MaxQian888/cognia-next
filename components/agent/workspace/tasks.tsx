@@ -1,9 +1,23 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
-import { motion, useReducedMotion } from "motion/react"
-import { ListTodoIcon, PlusIcon, Trash2Icon } from "lucide-react"
+import { AnimatePresence, motion } from "motion/react"
+import {
+  MOBILE_SPRING,
+  STAGGER_CHILD,
+  STAGGER_CONTAINER,
+  useReducedMotionTransition,
+  useReducedMotionVariants,
+} from "@/lib/ui/motion"
+import {
+  KanbanIcon,
+  ListIcon,
+  ListTodoIcon,
+  MessageSquareIcon,
+  PlusIcon,
+  Trash2Icon,
+} from "lucide-react"
 
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -33,12 +47,35 @@ import {
 import { Empty, EmptyContent, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { toast } from "sonner"
 
+import { cn } from "@/lib/utils"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { TASK_STATUS_CONFIG } from "@/types/agent/agent-team"
 import type { AgentTeamTask, AgentTeammate } from "@/types/agent/agent-team"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
+import { TaskComments } from "./task-comments"
+import { TaskBoard } from "./board/task-board"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { gatherTeamTwins } from "@/lib/ai/agent/team/twin-context"
+import { rankAssigneesForTask } from "@/lib/ai/agent/team/twin-expertise-hints"
+import type { TeamTwinSummary } from "@/lib/ai/agent/team/team-run-context"
 
 const log = createLogger("agentTeams.tasks")
+
+/** Left-border accent color keyed to task priority. */
+function priorityAccent(priority?: string): string {
+  switch (priority) {
+    case "critical":
+      return "border-l-red-500"
+    case "high":
+      return "border-l-amber-500"
+    case "low":
+      return "border-l-blue-500"
+    case "background":
+      return "border-l-slate-400"
+    default:
+      return "border-l-border"
+  }
+}
 
 const PRIORITIES: ReadonlyArray<{ value: string; labelKey: string }> = [
   { value: "critical", labelKey: "critical" },
@@ -57,15 +94,32 @@ export interface AgentTeamTasksProps {
 export function AgentTeamTasks({ teamId, tasks, teammates }: AgentTeamTasksProps) {
   const t = useTranslations("agentTeamsWorkspace.tasks")
   const tPriority = useTranslations("agentPriority")
-  const prefersReducedMotion = useReducedMotion()
   const createTask = useAgentTeamStore((s) => s.createTask)
   const deleteTask = useAgentTeamStore((s) => s.deleteTask)
+  const tasksView = useAgentTeamStore((s) => s.tasksView)
+  const setTasksView = useAgentTeamStore((s) => s.setTasksView)
+  const team = useAgentTeamStore((s) => s.teams[teamId])
 
   const [showForm, setShowForm] = useState(false)
   const [title, setTitle] = useState("")
+
+  // Twin-expertise assignee hints: resolve the roster's twin bindings once the
+  // form opens (best-effort; empty list = plain alphabetical roster).
+  const [twins, setTwins] = useState<TeamTwinSummary[]>([])
+  useEffect(() => {
+    if (!showForm) return
+    let cancelled = false
+    void gatherTeamTwins().then((list) => {
+      if (!cancelled) setTwins(list)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [showForm])
   const [description, setDescription] = useState("")
   const [priority, setPriority] = useState("normal")
   const [assigneeId, setAssigneeId] = useState("")
+  const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null)
 
   const handleCreate = () => {
     if (!title.trim()) return
@@ -87,7 +141,7 @@ export function AgentTeamTasks({ teamId, tasks, teammates }: AgentTeamTasksProps
 
   if (tasks.length === 0 && !showForm) {
     return (
-      <Empty>
+      <Empty className="mx-auto w-full max-w-lg">
         <EmptyMedia variant="icon">
           <ListTodoIcon />
         </EmptyMedia>
@@ -106,14 +160,41 @@ export function AgentTeamTasks({ teamId, tasks, teammates }: AgentTeamTasksProps
 
   return (
     <div className="space-y-4" data-testid="workspace-tasks">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <p className="text-sm font-medium">{t("tasksCount", { count: tasks.length })}</p>
-        {!showForm && (
-          <Button size="sm" variant="outline" onClick={() => setShowForm(true)}>
-            <PlusIcon className="mr-2 size-3.5" />
-            {t("createTask")}
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          <ToggleGroup
+            type="single"
+            size="sm"
+            variant="outline"
+            value={tasksView}
+            onValueChange={(v) => {
+              if (v === "list" || v === "board") setTasksView(v)
+            }}
+            aria-label={t("board.viewToggle")}
+          >
+            <ToggleGroupItem
+              value="list"
+              aria-label={t("board.viewList")}
+              data-testid="tasks-view-list"
+            >
+              <ListIcon className="size-3.5" />
+            </ToggleGroupItem>
+            <ToggleGroupItem
+              value="board"
+              aria-label={t("board.viewBoard")}
+              data-testid="tasks-view-board"
+            >
+              <KanbanIcon className="size-3.5" />
+            </ToggleGroupItem>
+          </ToggleGroup>
+          {!showForm && (
+            <Button size="sm" variant="outline" onClick={() => setShowForm(true)}>
+              <PlusIcon className="mr-2 size-3.5" />
+              {t("createTask")}
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Create form */}
@@ -162,9 +243,14 @@ export function AgentTeamTasks({ teamId, tasks, teammates }: AgentTeamTasksProps
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="">{t("unassigned")}</SelectItem>
-                  {teammates.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>
-                      {m.name}
+                  {/* Ranked by twin-expertise overlap with the typed title —
+                      pure token matching over data the runtime already has
+                      (see twin-expertise-hints.ts). */}
+                  {rankAssigneesForTask({ title, tags: [] }, teammates, twins).map((hint) => (
+                    <SelectItem key={hint.teammateId} value={hint.teammateId}>
+                      {hint.teammateName}
+                      {hint.twinName ? ` · ${hint.twinName}` : ""}
+                      {hint.score > 0 && hint.expertise ? ` — ${hint.expertise.slice(0, 60)}` : ""}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -182,23 +268,69 @@ export function AgentTeamTasks({ teamId, tasks, teammates }: AgentTeamTasksProps
         </Card>
       )}
 
-      {/* Task list */}
-      <div className="space-y-2">
-        {tasks.map((task, index) => {
+      {/* Board view (kanban) — list stays the default */}
+      {tasksView === "board" && team ? (
+        <TaskBoard team={team} tasks={tasks} teammates={teammates} />
+      ) : (
+        <TaskListGrid
+          tasks={tasks}
+          teammates={teammates}
+          expandedTaskId={expandedTaskId}
+          setExpandedTaskId={setExpandedTaskId}
+          deleteTask={deleteTask}
+        />
+      )}
+    </div>
+  )
+}
+
+/** The original flat card grid, extracted so the view toggle stays readable. */
+function TaskListGrid({
+  tasks,
+  teammates,
+  expandedTaskId,
+  setExpandedTaskId,
+  deleteTask,
+}: {
+  tasks: AgentTeamTask[]
+  teammates: AgentTeammate[]
+  expandedTaskId: string | null
+  setExpandedTaskId: (updater: (prev: string | null) => string | null) => void
+  deleteTask: (taskId: string) => void
+}) {
+  const t = useTranslations("agentTeamsWorkspace.tasks")
+  const tPriority = useTranslations("agentPriority")
+  // `layout` + spring so deleting a card makes the survivors flow into the gap
+  // rather than teleport; the exit variant means the deleted card leaves rather
+  // than blinking out. Both come from the shared tokens, so the reduced-motion
+  // preference collapses them without a second code path here.
+  const childVariants = useReducedMotionVariants(STAGGER_CHILD)
+  const layoutTransition = useReducedMotionTransition(MOBILE_SPRING)
+  return (
+    <motion.div
+      className="grid gap-2 md:grid-cols-2 2xl:grid-cols-3 items-start"
+      variants={STAGGER_CONTAINER}
+      initial="initial"
+      animate="animate"
+    >
+      <AnimatePresence initial={false}>
+        {tasks.map((task) => {
           const cfg = TASK_STATUS_CONFIG[task.status]
           const assignee = task.assignedTo ? teammates.find((m) => m.id === task.assignedTo) : null
           return (
             <motion.div
               key={task.id}
-              initial={prefersReducedMotion ? false : { opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{
-                duration: 0.15,
-                ease: "easeOut",
-                delay: prefersReducedMotion ? 0 : Math.min(index * 0.03, 0.15),
-              }}
+              layout
+              variants={childVariants}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+              transition={layoutTransition}
             >
-              <Card className="space-y-1 p-3" data-testid={`task-${task.id}`}>
+              <Card
+                className={cn("space-y-1 border-l-2 p-3", priorityAccent(task.priority))}
+                data-testid={`task-${task.id}`}
+              >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
@@ -270,11 +402,23 @@ export function AgentTeamTasks({ teamId, tasks, teammates }: AgentTeamTasksProps
                     {task.result}
                   </p>
                 )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+                  onClick={() => setExpandedTaskId((prev) => (prev === task.id ? null : task.id))}
+                  aria-expanded={expandedTaskId === task.id}
+                  data-testid={`task-${task.id}-comments-toggle`}
+                >
+                  <MessageSquareIcon className="mr-1 size-3" />
+                  {t("comments.count", { count: task.comments?.length ?? 0 })}
+                </Button>
+                {expandedTaskId === task.id && <TaskComments taskId={task.id} />}
               </Card>
             </motion.div>
           )
         })}
-      </div>
-    </div>
+      </AnimatePresence>
+    </motion.div>
   )
 }

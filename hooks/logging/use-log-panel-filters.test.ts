@@ -3,7 +3,7 @@
  */
 import { act, renderHook } from "@testing-library/react"
 
-jest.mock("@/lib/logging/filter-presets", () => ({
+jest.mock("@cognia/logging/filter-presets", () => ({
   LOG_FILTER_PRESETS_STORAGE_KEY: "log-filter-presets",
   loadLogFilterPresets: (raw: string | null) => (raw ? JSON.parse(raw) : []),
   serializeLogFilterPresets: (next: unknown) => JSON.stringify(next),
@@ -199,5 +199,31 @@ describe("useLogPanelFilters", () => {
     expect(result.current.traceFocusId).toBe("t-1")
     expect(result.current.focusedIndex).toBe(3)
     expect(result.current.viewMode).toBe("dashboard")
+  })
+})
+
+describe("autoRefresh persistence", () => {
+  it("persists the auto-refresh toggle to localStorage", () => {
+    const { result } = renderHook(() => useLogPanelFilters())
+    act(() => result.current.setAutoRefresh(true))
+    expect(result.current.autoRefresh).toBe(true)
+    expect(localStorage.getItem("cognia-log-auto-refresh")).toBe("1")
+    act(() => result.current.setAutoRefresh(false))
+    expect(localStorage.getItem("cognia-log-auto-refresh")).toBe("0")
+  })
+
+  it("restores the persisted value on a fresh mount, overriding the default", () => {
+    localStorage.setItem("cognia-log-auto-refresh", "1")
+    const { result } = renderHook(() => useLogPanelFilters())
+    expect(result.current.autoRefresh).toBe(true)
+
+    localStorage.setItem("cognia-log-auto-refresh", "0")
+    const { result: second } = renderHook(() => useLogPanelFilters({ defaultAutoRefresh: true }))
+    expect(second.current.autoRefresh).toBe(false)
+  })
+
+  it("falls back to defaultAutoRefresh when nothing is stored", () => {
+    const { result } = renderHook(() => useLogPanelFilters({ defaultAutoRefresh: true }))
+    expect(result.current.autoRefresh).toBe(true)
   })
 })

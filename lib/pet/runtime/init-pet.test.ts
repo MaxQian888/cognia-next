@@ -1,15 +1,18 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 import { ensurePetProfile, hatchPet } from "./init-pet"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { getPetProfile } from "@/lib/db/pet"
 
+// Cold fake-indexeddb open of the full schema can exceed jest's 5s default
+// under parallel suite load — same allowance as the other Dexie-cold suites.
 beforeEach(async () => {
   await getDb().delete()
   __resetDbForTesting()
   getDb()
   await whenSeeded()
   await getDb().petProfile.clear()
-})
+}, 30_000)
 
 describe("ensurePetProfile", () => {
   it("creates a fresh egg the first time", async () => {

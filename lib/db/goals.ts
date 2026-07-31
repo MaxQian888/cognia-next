@@ -13,9 +13,12 @@
  * goal can't starve another goal's audit trail.
  */
 
+import Dexie from "dexie"
 import type { Goal, GoalEvent, GoalEventKind, GoalEventPayload, GoalStatus } from "@/types/goal"
 import { isTerminalGoalStatus } from "@/types/goal"
-import { getDb } from "./schema"
+import { getDb, withDbReopenRetry } from "./schema"
+import { DEFAULT_PROJECT_ID, resolveSessionProjectId } from "./project-scope"
+import { getSettings } from "./settings"
 
 const EVENTS_PER_GOAL_CAP = 5000
 
@@ -32,8 +35,11 @@ export type GoalCreateInput = Omit<Goal, "createdAt" | "updatedAt" | "endedAt">
  */
 export async function createGoal(input: GoalCreateInput): Promise<Goal> {
   const now = Date.now()
+  // Inherit the session's workspace (Workspace isolation, Dexie v86).
+  const projectId = await resolveSessionProjectId(input.sessionId, input.projectId)
   const row: Goal = {
     ...input,
+    projectId,
     createdAt: now,
     updatedAt: now,
   }
@@ -72,9 +78,25 @@ export async function listGoalsBySession(sessionId: string): Promise<Goal[]> {
   return getDb().chatGoals.where("sessionId").equals(sessionId).reverse().sortBy("createdAt")
 }
 
-/** Newest-first list across all sessions. Used by the History tab. */
-export async function listAllGoals(limit = 500): Promise<Goal[]> {
-  return getDb().chatGoals.orderBy("createdAt").reverse().limit(limit).toArray()
+/**
+ * Newest-first list of all goals in one workspace (defaults to the active
+ * project via the central scope helper). Used by the Goal console and the
+ * Settings → Goals → History tab — both working-set surfaces, so they show
+ * only the current workspace's goals. Uses the `[projectId+createdAt]`
+ * compound index (Dexie v86).
+ */
+export async function listAllGoals(limit = 500, projectId?: string): Promise<Goal[]> {
+  // This reader is called from Dexie liveQuery surfaces. Falling back through
+  // resolveScopeProjectId would auto-create Default and write settings inside
+  // the liveQuery's read-only context on first boot. The project initializer
+  // owns that write; until it finishes, an empty Default-scoped read is safe.
+  const pid = projectId ?? (await getSettings()).activeProjectId ?? DEFAULT_PROJECT_ID
+  return getDb()
+    .chatGoals.where("[projectId+createdAt]")
+    .between([pid, Dexie.minKey], [pid, Dexie.maxKey])
+    .reverse()
+    .limit(limit)
+    .toArray()
 }
 
 export interface GoalUpdatePatch {
@@ -90,6 +112,11 @@ export interface GoalUpdatePatch {
   endedAt?: number
   subgoals?: Goal["subgoals"]
   subgoalsGeneratedAt?: number
+  awaitingPromise?: boolean
+  awaitingAcceptance?: boolean
+  promiseDenialCount?: number
+  nextContinuationAt?: number
+  nextContinuationSource?: Goal["nextContinuationSource"]
 }
 
 /**
@@ -111,11 +138,26 @@ export async function updateGoal(id: string, patch: GoalUpdatePatch): Promise<vo
  * single transaction so a crash mid-delete can't leave orphans.
  */
 export async function deleteGoal(id: string): Promise<void> {
-  const db = getDb()
-  await db.transaction("rw", db.chatGoals, db.chatGoalEvents, async () => {
-    await db.chatGoalEvents.where("goalId").equals(id).delete()
-    await db.chatGoals.delete(id)
-  })
+  try {
+    await withDbReopenRetry(async () => {
+      const db = getDb()
+      await db.transaction("rw", db.chatGoals, db.chatGoalEvents, async () => {
+        await Promise.all([
+          db.chatGoalEvents.where("goalId").equals(id).delete(),
+          db.chatGoals.delete(id),
+        ])
+      })
+    })
+  } catch (error) {
+    // A premature-commit report can arrive after both deletes committed. Only
+    // accept that race as success when the complete cascade is durable.
+    const db = getDb()
+    const [goal, eventCount] = await Promise.all([
+      db.chatGoals.get(id),
+      db.chatGoalEvents.where("goalId").equals(id).count(),
+    ])
+    if (goal || eventCount > 0) throw error
+  }
 }
 
 /**
@@ -155,7 +197,6 @@ export interface AppendEventInput {
  * the per-goal cap-prune so the table can't blow up under heavy looping.
  */
 export async function appendGoalEvent(input: AppendEventInput): Promise<GoalEvent> {
-  const db = getDb()
   const row: GoalEvent = {
     id: input.id ?? crypto.randomUUID(),
     goalId: input.goalId,
@@ -163,9 +204,13 @@ export async function appendGoalEvent(input: AppendEventInput): Promise<GoalEven
     ts: input.ts ?? Date.now(),
     payload: input.payload,
   }
-  await db.transaction("rw", db.chatGoalEvents, async () => {
-    await db.chatGoalEvents.add(row)
-    await pruneEventsForGoal(input.goalId, EVENTS_PER_GOAL_CAP)
+  await withDbReopenRetry(() => {
+    const db = getDb()
+    return db.transaction("rw", db.chatGoalEvents, () =>
+      db.chatGoalEvents
+        .put(row)
+        .then(() => pruneEventsForGoal(input.goalId, EVENTS_PER_GOAL_CAP, db))
+    )
   })
   return row
 }
@@ -193,19 +238,29 @@ export async function countGoalEvents(goalId: string): Promise<number> {
  * Prune oldest events for a single goal so it holds at most `keep` entries.
  * Caller wraps in a transaction.
  */
-async function pruneEventsForGoal(goalId: string, keep: number): Promise<void> {
-  const db = getDb()
-  const total = await db.chatGoalEvents.where("goalId").equals(goalId).count()
-  if (total <= keep) return
-  const overflow = total - keep
-  const oldest = await db.chatGoalEvents
-    .where("[goalId+ts]")
-    .between([goalId, -Infinity], [goalId, Infinity])
-    .limit(overflow)
-    .primaryKeys()
-  if (oldest.length > 0) {
-    await db.chatGoalEvents.bulkDelete(oldest as string[])
-  }
+function pruneEventsForGoal(
+  goalId: string,
+  keep: number,
+  db: ReturnType<typeof getDb> = getDb()
+): Promise<void> {
+  return db.chatGoalEvents
+    .where("goalId")
+    .equals(goalId)
+    .count()
+    .then((total) => {
+      if (total <= keep) return
+      const overflow = total - keep
+      return db.chatGoalEvents
+        .where("[goalId+ts]")
+        .between([goalId, -Infinity], [goalId, Infinity])
+        .limit(overflow)
+        .primaryKeys()
+        .then((oldest) =>
+          oldest.length > 0
+            ? db.chatGoalEvents.bulkDelete(oldest as string[]).then(() => undefined)
+            : undefined
+        )
+    })
 }
 
 /** Test-only escape hatch. */

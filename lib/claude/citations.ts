@@ -8,7 +8,7 @@
 // Kept dependency-free so unit tests can run without React, Dexie, or the
 // vector store.
 
-import type { BetaContentBlock } from "./types"
+import type { BetaContentBlock } from "@cognia/agent-config-types"
 import type { SourcesPartItem } from "./parts-extensions"
 
 /**

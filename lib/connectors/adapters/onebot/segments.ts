@@ -69,6 +69,45 @@ function summarizeJsonCard(d: Record<string, unknown>): string {
   return "[卡片消息]"
 }
 
+/**
+ * Extract a human-readable label from a legacy `xml` card segment (older QQ
+ * share cards, structured messages). The payload is an XML string under
+ * `data.data`; prefer the `brief="…"` attribute (QQ's one-line summary),
+ * then a `<title>` element, else the generic marker.
+ */
+function summarizeXmlCard(d: Record<string, unknown>): string {
+  const raw = d.data
+  if (typeof raw === "string") {
+    const brief = raw.match(/brief="([^"]+)"/)?.[1]
+    if (brief) return brief
+    const title = raw.match(/<title[^>]*>([^<]+)<\/title>/)?.[1]
+    if (title && title.trim()) return title.trim()
+  }
+  return "[卡片消息]"
+}
+
+/**
+ * Map a QQ magic-face style segment (`dice` / `rps`) to a readable marker,
+ * surfacing the rolled value when the upstream includes one (`result` on
+ * NapCat, `value`/`id` on go-cqhttp).
+ */
+function summarizeMagicFace(label: string, d: Record<string, unknown>): string {
+  const value = d.result ?? d.value ?? d.id
+  return value !== undefined && value !== "" ? `[${label}:${value}]` : `[${label}]`
+}
+
+/**
+ * Map a NapCat `location` segment to the structured internal `location`
+ * segment (higher fidelity than a text marker; the union supports it
+ * natively). `lat`/`lon`/`title` field names are shared across v11 + v12.
+ */
+function locationSegment(d: Record<string, unknown>): MessageSegment {
+  const lat = Number(d.lat ?? 0)
+  const lon = Number(d.lon ?? d.lng ?? 0)
+  const name = String(d.title ?? d.content ?? "") || undefined
+  return { type: "location", lat, lon, name }
+}
+
 // ---------------------------------------------------------------------------
 // fromOneBotSegments — platform → internal
 // ---------------------------------------------------------------------------
@@ -84,11 +123,23 @@ function fromV11Segment(seg: OneBotSegment): MessageSegment {
 
     case "at": {
       const qq = String(d.qq ?? "")
+      // `[CQ:at,qq=all]` is a mass ping (@全体成员), not a user mention. No
+      // repo-wide mention-all convention exists yet (at-gate / Lark / Telegram
+      // have none), so we record it with the literal userId "all" plus a
+      // displayName marker for renderers — and deliberately do NOT flip
+      // selfMentioned, so a group-wide ping never triggers spammy auto-replies.
+      if (qq === "all") return { type: "mention", userId: "all", displayName: "@all" }
       return { type: "mention", userId: qq }
     }
 
     case "reply":
-      return { type: "reply", messageId: String(d.id ?? ""), snippet: "" }
+      // `snippet` is not on the wire — the inbound-reply enrichment step
+      // (inbound-reply.ts) injects it via a best-effort get_msg round-trip.
+      return {
+        type: "reply",
+        messageId: String(d.id ?? ""),
+        snippet: typeof d.snippet === "string" ? d.snippet : "",
+      }
 
     case "face":
       return { type: "emoji", code: String(d.id ?? "") }
@@ -122,6 +173,24 @@ function fromV11Segment(seg: OneBotSegment): MessageSegment {
 
     case "json":
       return { type: "text", text: summarizeJsonCard(d) }
+
+    case "xml":
+      return { type: "text", text: summarizeXmlCard(d) }
+
+    case "location":
+      return locationSegment(d)
+
+    case "poke":
+      return { type: "text", text: "[戳一戳]" }
+
+    case "dice":
+      return { type: "text", text: summarizeMagicFace("骰子", d) }
+
+    case "rps":
+      return { type: "text", text: summarizeMagicFace("猜拳", d) }
+
+    case "contact":
+      return { type: "text", text: "[推荐名片]" }
 
     default:
       return { type: "text", text: `[unsupported:${seg.type}]` }
@@ -176,6 +245,24 @@ function fromV12Segment(seg: OneBotSegment): MessageSegment {
 
     case "json":
       return { type: "text", text: summarizeJsonCard(d) }
+
+    case "xml":
+      return { type: "text", text: summarizeXmlCard(d) }
+
+    case "location":
+      return locationSegment(d)
+
+    case "poke":
+      return { type: "text", text: "[戳一戳]" }
+
+    case "dice":
+      return { type: "text", text: summarizeMagicFace("骰子", d) }
+
+    case "rps":
+      return { type: "text", text: summarizeMagicFace("猜拳", d) }
+
+    case "contact":
+      return { type: "text", text: "[推荐名片]" }
 
     default:
       return { type: "text", text: `[unsupported:${seg.type}]` }
@@ -285,6 +372,21 @@ export function toOneBotSegments(
 // ---------------------------------------------------------------------------
 
 /**
+ * Unescape CQ-code entities per the OneBot 11 string spec
+ * (message/string.md): `&#91;` → `[`, `&#93;` → `]`, `&#44;` → `,`,
+ * `&amp;` → `&`. `&amp;` MUST be replaced LAST — doing it first
+ * double-unescapes, e.g. a literal "&amp;#91;" (an escaped "&#91;") would
+ * wrongly collapse into "[".
+ */
+function unescapeCq(s: string): string {
+  return s
+    .replace(/&#91;/g, "[")
+    .replace(/&#93;/g, "]")
+    .replace(/&#44;/g, ",")
+    .replace(/&amp;/g, "&")
+}
+
+/**
  * Parse a OneBot v11 CQ-code string into MessageSegment[].
  *
  * A CQ-code string mixes plain text with segments like `[CQ:at,qq=123]`.
@@ -301,23 +403,21 @@ export function parseCqCodeString(raw: string, _variant: "v11"): MessageSegment[
     const cqMatch = token.match(/^\[CQ:([^,\]]+)(,[^\]]*)?\]$/)
     if (!cqMatch) {
       // Plain text — unescape CQ special chars
-      const text = token
-        .replace(/&amp;/g, "&")
-        .replace(/&#91;/g, "[")
-        .replace(/&#93;/g, "]")
-        .replace(/&#44;/g, ",")
+      const text = unescapeCq(token)
       if (text) segments.push({ type: "text", text })
       continue
     }
 
     const cqType = cqMatch[1]
     const paramStr = cqMatch[2] ?? ""
-    // Parse key=value pairs
+    // Parse key=value pairs. Values are CQ-escaped on the wire (an image URL
+    // with query params arrives as "...?a=1&amp;b=2") — unescape them or every
+    // multi-param media URL is a dead link.
     const params: Record<string, string> = {}
     for (const pair of paramStr.slice(1).split(",")) {
       const eqIdx = pair.indexOf("=")
       if (eqIdx > 0) {
-        params[pair.slice(0, eqIdx)] = pair.slice(eqIdx + 1)
+        params[pair.slice(0, eqIdx)] = unescapeCq(pair.slice(eqIdx + 1))
       }
     }
 

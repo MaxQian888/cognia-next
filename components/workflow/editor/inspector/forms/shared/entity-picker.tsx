@@ -15,7 +15,7 @@
  * call, so existing call sites swap in mechanically.
  */
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useTranslations } from "next-intl"
 import { Code2, ListChecks } from "lucide-react"
@@ -32,10 +32,14 @@ import {
 import { listCharacters } from "@/lib/db/characters"
 import { listTeams } from "@/lib/db/teams"
 import { listSkills } from "@/lib/db/skills"
-import { listMcpServers } from "@/lib/db/mcp-servers"
+import { getMcpServer, listMcpServers } from "@/lib/db/mcp-servers"
 import { listPlugins } from "@/lib/db/plugins"
 import { listWorkflows } from "@/lib/db/workflows"
 import { listTwins } from "@/lib/db/twins"
+import { listAdapterInstances } from "@/lib/db/adapter-instances"
+import { testMcpServer, type McpTestRequest } from "@/lib/claude/ipc"
+import { isTauri } from "@/lib/tauri"
+import type { McpServer } from "@cognia/agent-config-types"
 
 export interface EntityOption {
   value: string
@@ -92,7 +96,9 @@ export function EntityPicker({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           aria-label={placeholder}
-          placeholder="{{ $node['id'].out.field }}"
+          placeholder={
+            /* i18n-exempt: example node-output template, not UI prose */ "{{ $node['id'].out.field }}"
+          }
           className="font-mono"
         />
         {allowExpression ? (
@@ -234,6 +240,94 @@ export function McpServerPicker({ allowExpression = true, ...props }: WrapperPro
   )
 }
 
+/** Map a stored MCP server to the Tauri `test_mcp_server` probe request. */
+function toTestRequest(server: McpServer): McpTestRequest {
+  const cfg = server.config
+  if (server.transport === "stdio") {
+    return {
+      transport: "stdio",
+      command: String(cfg.command ?? ""),
+      args: Array.isArray(cfg.args) ? (cfg.args as string[]) : undefined,
+      env: (cfg.env as Record<string, string>) ?? undefined,
+    }
+  }
+  return {
+    transport: server.transport,
+    url: String(cfg.url ?? ""),
+    headers: (cfg.headers as Record<string, string>) ?? undefined,
+  }
+}
+
+/**
+ * Tool selector for the `action.mcp.invokeTool` node. Probes the selected
+ * server's tools via the Tauri `test_mcp_server` command (renderer-safe — the
+ * MCP SDK never enters the static bundle) and offers them as a dropdown. Falls
+ * back to free-text entry (via {@link EntityPicker}'s expression toggle) when
+ * the probe is unavailable (web mode), fails, or returns nothing — so a
+ * misconfigured / un-probeable server (e.g. stdio off-desktop) stays usable.
+ */
+export function McpToolPicker({
+  serverId,
+  allowExpression = true,
+  probe = testMcpServer,
+  ...props
+}: WrapperProps & { serverId: string; probe?: typeof testMcpServer }) {
+  const t = useTranslations("workflows.forms.mcpInvokeTool")
+  const [state, setState] = useState<{ tools: string[]; error?: string; probed: boolean }>({
+    tools: [],
+    probed: false,
+  })
+
+  useEffect(() => {
+    // Set state only inside the promise callbacks (never synchronously in the
+    // effect body) so probing stays a clean external-system subscription.
+    if (!serverId || !isTauri()) return
+    let cancelled = false
+    getMcpServer(serverId)
+      .then((server) => (server ? probe(toTestRequest(server)) : undefined))
+      .then((res) => {
+        if (cancelled) return
+        if (!res) setState({ tools: [], probed: true })
+        else if (res.ok) setState({ tools: res.tools.map((x) => x.name), probed: true })
+        else setState({ tools: [], error: res.error ?? "probe failed", probed: true })
+      })
+      .catch((err) => {
+        if (cancelled) return
+        setState({
+          tools: [],
+          error: err instanceof Error ? err.message : String(err),
+          probed: true,
+        })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [serverId, probe])
+
+  const options = useMemo(() => state.tools.map((n) => ({ value: n, label: n })), [state.tools])
+
+  return (
+    <div className="space-y-1">
+      <EntityPicker
+        {...props}
+        options={options}
+        placeholder={t("toolName.placeholder")}
+        allowExpression={allowExpression}
+      />
+      {state.error ? (
+        <p className="text-xs text-muted-foreground" data-testid="mcp-tool-error">
+          {t("toolName.probeError")}
+        </p>
+      ) : null}
+      {state.probed && !state.error && serverId && options.length === 0 ? (
+        <p className="text-xs text-muted-foreground" data-testid="mcp-tool-empty">
+          {t("toolName.empty")}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
 export function PluginPicker({ allowExpression = true, ...props }: WrapperProps) {
   const t = useTranslations("workflows.forms.pickers")
   const rows = useLiveQuery(() => listPlugins(), [])
@@ -260,6 +354,23 @@ export function SubworkflowPicker({ allowExpression = true, ...props }: WrapperP
       {...props}
       options={options}
       placeholder={t("subworkflow")}
+      allowExpression={allowExpression}
+    />
+  )
+}
+
+export function AdapterInstancePicker({ allowExpression = true, ...props }: WrapperProps) {
+  const t = useTranslations("workflows.forms.pickers")
+  const rows = useLiveQuery(() => listAdapterInstances(), [])
+  const options = useMemo(
+    () => rows?.map((a) => ({ value: a.id, label: `${a.displayName} (${a.type})` })) ?? [],
+    [rows]
+  )
+  return (
+    <EntityPicker
+      {...props}
+      options={options}
+      placeholder={t("adapterInstance")}
       allowExpression={allowExpression}
     />
   )

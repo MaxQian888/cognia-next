@@ -18,6 +18,7 @@ function fakeRow(id: string, type: string, transport?: string): AdapterInstanceR
   return {
     id,
     type,
+    transportMode: transport,
     settings: transport ? { transport } : {},
   } as unknown as AdapterInstanceRow
 }
@@ -95,6 +96,30 @@ describe("startHeartbeatSweep", () => {
     tick()
     await flush()
     expect(recordPassive).toHaveBeenCalledTimes(1)
+  })
+
+  it("re-dials and audits a gateway when its periodic probe fails", async () => {
+    const requeue = jest.fn().mockResolvedValue(true)
+    const auditReconnect = jest.fn().mockResolvedValue(undefined)
+    startHeartbeatSweep({
+      listAdapters: () => [{ adapter: fakeAdapter("discord", "discord") }],
+      recordHeartbeat: jest.fn().mockResolvedValue(undefined),
+      recordPassive: jest.fn().mockResolvedValue({
+        state: "degraded",
+        reason: "gateway_probe_failed",
+        lastInboundAt: null,
+        pingOk: false,
+      }),
+      requeue,
+      auditReconnect,
+      loadRows: async () => [fakeRow("discord", "discord", "gateway")],
+      scheduler: makeScheduler().scheduler,
+      now: () => 1234,
+    })
+    await flush()
+
+    expect(requeue).toHaveBeenCalledWith("discord")
+    expect(auditReconnect).toHaveBeenCalledWith("discord", 1234)
   })
 
   it("does not let a hung passive probe block other adapters' active heartbeats", async () => {

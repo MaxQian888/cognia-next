@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Targeted coverage for the long-term-memory injection branch of
  * `resolveSendOptions`. Mirrors `build-options-twin.test.ts`.
@@ -7,11 +8,13 @@ import "fake-indexeddb/auto"
 
 import { resolveSendOptions } from "./build-options"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
-import type { AppSettings, Character } from "./types"
+import type { AppSettings, Character } from "@cognia/agent-config-types"
 import type { Memory } from "@/types/memory/memory"
 import type { ApplyMemoryContextDeps } from "@/lib/memory/runtime/apply-memory-context"
+import { __resetMemoryBm25Cache } from "@/lib/memory/retrieve/retriever"
 
 beforeEach(async () => {
+  __resetMemoryBm25Cache()
   await getDb().delete()
   __resetDbForTesting()
   getDb()
@@ -91,9 +94,41 @@ describe("resolveSendOptions memory injection", () => {
     expect(opts.systemPrompt).toBe("BASE_SYSTEM_PROMPT")
   })
 
+  it("honors per-chat recall disable independently from learning", async () => {
+    const opts = await resolveSendOptions({
+      character: baseCharacter,
+      session: { id: "s1", memoryUse: false, memoryLearn: true } as never,
+      memoryDeps: deps({ loadCandidates: async () => [mem("pnpm fact")] }),
+      memoryUserMessage: "pnpm",
+    })
+    expect(opts.systemPrompt).toBe("BASE_SYSTEM_PROMPT")
+    expect(opts.memoryContext).toBeUndefined()
+  })
+
+  it("passes workspace, character, agent, branch, and path reader context to retrieval", async () => {
+    const loadCandidates = jest.fn(async () => [mem("pnpm fact")])
+    await resolveSendOptions({
+      character: baseCharacter,
+      session: { id: "s1", projectId: "project-a" } as never,
+      targetAgentId: "agent-a",
+      memoryBranch: "main",
+      memoryPath: "src/memory",
+      memoryDeps: deps({ loadCandidates }),
+      memoryUserMessage: "pnpm",
+    })
+    expect(loadCandidates).toHaveBeenCalledWith({
+      characterId: "char_1",
+      projectId: "project-a",
+      agentId: "agent-a",
+      branch: "main",
+      path: "src/memory",
+    })
+  })
+
   it("appends a recall section and stamps opts.memoryContext", async () => {
     const opts = await resolveSendOptions({
       character: baseCharacter,
+      appSettings: { memory: {}, cacheOptimizationEnabled: false } as unknown as AppSettings,
       memoryDeps: deps({
         loadCandidates: async () => [mem("The user prefers pnpm", { id: "hit" })],
       }),
@@ -109,6 +144,7 @@ describe("resolveSendOptions memory injection", () => {
   it("injects the procedural block", async () => {
     const opts = await resolveSendOptions({
       character: baseCharacter,
+      appSettings: { memory: {}, cacheOptimizationEnabled: false } as unknown as AppSettings,
       memoryDeps: deps({
         loadProcedural: async () => [mem("Reply in Chinese", { type: "procedural" })],
       }),
@@ -121,6 +157,7 @@ describe("resolveSendOptions memory injection", () => {
   it("degrades cleanly (memoryContext.degraded) when the runtime throws", async () => {
     const opts = await resolveSendOptions({
       character: baseCharacter,
+      appSettings: { memory: {}, cacheOptimizationEnabled: false } as unknown as AppSettings,
       memoryDeps: deps({
         loadProcedural: async () => {
           throw new Error("db down")

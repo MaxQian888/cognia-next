@@ -2,25 +2,29 @@
 
 /**
  * PerformanceDashboard — the Task-Manager-style master panel for the Rust
- * backend. Four tabs (Overview graphs · Processes · Hotspots · Async Runtime)
- * driven by the live `usePerfStream` sampler. Desktop-only: on web/mobile it
+ * backend. Six tabs (Overview graphs · Processes · Managed · Hotspots · Async
+ * Runtime · System) driven by the live `usePerfStream` sampler, except System,
+ * whose facts are static and fetched once. Desktop-only: on web/mobile it
  * renders an inert explainer instead of an empty shell.
  */
 
 import { useCallback } from "react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { ActivityIcon, CpuIcon, GaugeIcon, LayersIcon } from "lucide-react"
+import { ActivityIcon, BoxesIcon, CpuIcon, GaugeIcon, LayersIcon, MonitorIcon } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { usePerfStream } from "@/hooks/perf/use-perf-stream"
 import { exportPerfSnapshot, type PerfExportFormat } from "@/lib/perf/backend/export"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
+import { FeaturePageHeader } from "@/components/feature-shell/feature-page-header"
 import { PerfToolbar } from "./perf-toolbar"
 import { PerfOverviewTab } from "./perf-overview-tab"
 import { PerfProcessTable } from "./perf-process-table"
+import { PerfManagedProcesses } from "./perf-managed-processes"
 import { PerfHotspotsTable } from "./perf-hotspots-table"
 import { PerfRuntimeTab } from "./perf-runtime-tab"
+import { PerfSystemTab } from "./perf-system-tab"
 
 export function PerformanceDashboard() {
   const t = useTranslations("performance")
@@ -54,12 +58,10 @@ export function PerformanceDashboard() {
       data-bg-target="chat"
       data-testid="performance-dashboard"
     >
-      <header className="flex h-14 shrink-0 items-center gap-3 border-b px-4">
-        <ActivityIcon className="size-5 text-primary" />
-        <div className="min-w-0">
-          <h1 className="truncate text-sm font-semibold">{t("title")}</h1>
-        </div>
-        <div className="ml-auto">
+      <FeaturePageHeader
+        icon={<ActivityIcon />}
+        title={t("title")}
+        actions={
           <PerfToolbar
             paused={paused}
             intervalMs={intervalMs}
@@ -68,8 +70,8 @@ export function PerformanceDashboard() {
             onReset={reset}
             onExport={handleExport}
           />
-        </div>
-      </header>
+        }
+      />
 
       <Tabs defaultValue="overview" className="flex min-h-0 flex-1 flex-col">
         <TabsList className="mx-4 mt-3 w-fit">
@@ -81,6 +83,10 @@ export function PerformanceDashboard() {
             <LayersIcon className="mr-1 size-4" />
             {t("tabs.processes")}
           </TabsTrigger>
+          <TabsTrigger value="managed" data-testid="perf-tab-managed">
+            <BoxesIcon className="mr-1 size-4" />
+            {t("tabs.managed")}
+          </TabsTrigger>
           <TabsTrigger value="hotspots" data-testid="perf-tab-hotspots">
             <ActivityIcon className="mr-1 size-4" />
             {t("tabs.hotspots")}
@@ -88,6 +94,10 @@ export function PerformanceDashboard() {
           <TabsTrigger value="runtime" data-testid="perf-tab-runtime">
             <GaugeIcon className="mr-1 size-4" />
             {t("tabs.runtime")}
+          </TabsTrigger>
+          <TabsTrigger value="system" data-testid="perf-tab-system">
+            <MonitorIcon className="mr-1 size-4" />
+            {t("tabs.system")}
           </TabsTrigger>
         </TabsList>
 
@@ -101,11 +111,17 @@ export function PerformanceDashboard() {
             <TabsContent value="processes" className="mt-0">
               <PerfProcessTable history={history} />
             </TabsContent>
+            <TabsContent value="managed" className="mt-0">
+              <PerfManagedProcesses latest={latest} />
+            </TabsContent>
             <TabsContent value="hotspots" className="mt-0">
               <PerfHotspotsTable spans={latest?.topSpans ?? []} />
             </TabsContent>
             <TabsContent value="runtime" className="mt-0">
               <PerfRuntimeTab runtime={latest?.runtime ?? null} history={history} />
+            </TabsContent>
+            <TabsContent value="system" className="mt-0">
+              <PerfSystemTab />
             </TabsContent>
           </div>
         </ScrollArea>

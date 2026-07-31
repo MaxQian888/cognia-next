@@ -16,13 +16,16 @@
  * `getSharedOcrRegistry()` this dispatcher reads from.
  */
 
+import type { UIMessage } from "ai"
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/chat/slash-command-registry"
 import { extract, type ExtractDeps } from "@/lib/ocr/index"
 import { getSharedOcrRegistry } from "@/lib/ocr/registry"
+import { isTauri } from "@/lib/tauri"
 import { buildOcrDeps } from "@/lib/ocr/deps"
 import { type OcrInput, type OcrResult, type UserOcrSettings } from "@/types/ocr"
-import { handleOcrSlashCommand } from "@/lib/slash-commands/actions/ocr"
+import { buildOcrResultPart, handleOcrSlashCommand } from "@/lib/slash-commands/actions/ocr"
+import { OcrResultCard } from "./ocr-result-card"
+import manifestJson from "../plugin.json"
 
 export interface OcrToolInput {
   source: { kind: "attachment_id" | "data_url" | "file_path" | "screen"; value?: string }
@@ -42,18 +45,67 @@ interface OcrPluginConfig {
 }
 
 /**
- * Resolve runtime deps lazily so the plugin doesn't import every store at
- * activation time. Delegates to the canonical `buildOcrDeps()` so the plugin
- * tool / `/ocr` get the real keyring-backed credentials resolver, platform
- * detection, and OS-tag routing — not the empty-secrets stub it used before.
- * Returns null when no providers are registered yet (runtime not booted), so
- * callers surface a clear "runtime not ready" message. App code can pass
- * `config.getSettings`; tests pass `buildDeps: () => mockDeps`.
+ * Read a file from disk into the `ResolvedSource` shape `extract` wants.
+ *
+ * Desktop-only: the browser has no path-addressable filesystem. Without this
+ * `buildOcrDeps` left `filePathResolver` undefined, so EVERY `file-path`
+ * extraction — including the documented `/ocr <path>` usage — threw
+ * "file-path source requires a filePathResolver".
  */
-function defaultDepsBuilder(config: OcrPluginConfig = {}): ExtractDeps | null {
+async function readFilePathSource(path: string): Promise<{
+  blob: Blob
+  mimeType: string
+  bytes: Uint8Array
+}> {
+  if (!isTauri()) {
+    throw new Error("file-path OCR requires the desktop app (no filesystem access in the browser).")
+  }
+  const { readFile } = await import("@tauri-apps/plugin-fs")
+  const bytes = await readFile(path)
+  const mimeType = mimeFromPath(path)
+  return { blob: new Blob([bytes as BlobPart], { type: mimeType }), mimeType, bytes }
+}
+
+const EXT_MIME: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+  gif: "image/gif",
+  bmp: "image/bmp",
+  tif: "image/tiff",
+  tiff: "image/tiff",
+  heic: "image/heic",
+  pdf: "application/pdf",
+}
+
+function mimeFromPath(path: string): string {
+  const ext = path.split(".").pop()?.toLowerCase() ?? ""
+  return EXT_MIME[ext] ?? "application/octet-stream"
+}
+
+/** Exported so tests can assert the resolvers the plugin actually supplies. */
+export async function defaultDepsBuilder(
+  config: OcrPluginConfig = {}
+): Promise<ExtractDeps | null> {
   const registry = getSharedOcrRegistry()
   if (registry.list().length === 0) return null
-  return buildOcrDeps({ registry, settings: config.getSettings?.() })
+  // Read the USER's OCR settings. `buildOcrDeps` falls back to
+  // DEFAULT_OCR_SETTINGS, so the tool used to silently ignore the configured
+  // provider, languages and format while its own description promised
+  // "routes … based on settings".
+  const settings = config.getSettings?.() ?? (await loadUserOcrSettings())
+  return buildOcrDeps({ registry, settings, filePathResolver: readFilePathSource })
+}
+
+/** Best-effort read of the persisted OCR settings; falls back to the defaults. */
+async function loadUserOcrSettings(): Promise<UserOcrSettings | undefined> {
+  try {
+    const { getSettings } = await import("@/lib/db/settings")
+    return (await getSettings())?.ocrSettings
+  } catch {
+    return undefined
+  }
 }
 
 export async function runOcrTool(
@@ -75,7 +127,7 @@ export async function runOcrTool(
     }
   }
 
-  const deps = config.buildDeps ? config.buildDeps() : defaultDepsBuilder(config)
+  const deps = config.buildDeps ? config.buildDeps() : await defaultDepsBuilder(config)
   if (!deps) {
     return {
       ok: false,
@@ -140,14 +192,22 @@ async function defaultCaptureScreen(languages?: string[]): Promise<OcrResult> {
 
 const TOOL_NAME = "ocr.extract"
 
-const TOOL_PARAMETERS = {
+/** Exported for the conformance test that pins the advertised source kinds. */
+export const TOOL_PARAMETERS = {
   type: "object",
   properties: {
     source: {
       type: "object",
       description: "Where to read the image or PDF from.",
       properties: {
-        kind: { type: "string", enum: ["attachment_id", "data_url", "file_path", "screen"] },
+        // `attachment_id` is deliberately NOT advertised: nothing in the app
+        // produces an id an `attachmentResolver` could resolve (the
+        // `connectorAttachments` cache is keyed by [adapterId+remoteRef] and
+        // has no reader), so offering it to the model only yields a guaranteed
+        // "attachment-id source requires an attachmentResolver" error. The
+        // mapping below still accepts it for any caller that wires its own
+        // resolver via `config.buildDeps`.
+        kind: { type: "string", enum: ["data_url", "file_path", "screen"] },
         value: {
           type: "string",
           description: "Identifier for the source. Omit for kind=screen.",
@@ -175,13 +235,10 @@ const TOOL_PARAMETERS = {
 } as const
 
 export const ocrPluginDefinition: PluginDefinition = {
+  // Spread plugin.json: `builtinManifest()` merges module-over-JSON, so a
+  // hand-written subset here WINS and would silently drop `commands[]`.
   manifest: {
-    id: "cognia-ocr",
-    name: "OCR",
-    version: "0.1.0",
-    type: "frontend",
-    capabilities: ["tools", "commands"],
-    main: "src/index.ts",
+    ...(manifestJson as object),
   } as never,
   activate: async (ctx: PluginContext) => {
     ctx.logger?.info("ocr plugin activated")
@@ -197,31 +254,64 @@ export const ocrPluginDefinition: PluginDefinition = {
       execute: async (args: Record<string, unknown>) => runOcrTool(args as unknown as OcrToolInput),
     })
 
-    registerSlashCommand({
-      id: "ocr.extract",
-      name: "/ocr",
-      description:
-        "Extract text from an image or PDF. Usage: /ocr <file path or attachment id> [--provider auto|<id>] [--lang en,zh] [--pages 1-3] [--format markdown|text|blocks]",
-      handler: async (args: string) => {
-        const deps = defaultDepsBuilder()
+    // gap4 — render the recognized text as a rich `ocr-result` chat card
+    // instead of a plain markdown bubble. Registered here (startup-activated),
+    // before any `/ocr` can produce a part, so the part always has a renderer.
+    const messagePart = (
+      ctx as {
+        messagePart?: {
+          registerPartRenderer?: (type: string, c: typeof OcrResultCard) => () => void
+        }
+      }
+    ).messagePart
+    disposeOcrRenderer = messagePart?.registerPartRenderer?.("ocr-result", OcrResultCard)
+
+    // The slash command is DECLARED in plugin.json (`commands[]`) and handled
+    // here. `hooks.onCommand` receives whitespace-split argv, so the raw tail
+    // is rejoined for handlers that parse their own argument string.
+    return {
+      onCommand: async (command: string, args: string[]) => {
+        if (command !== "ocr") return false
+        const deps = await defaultDepsBuilder()
         if (!deps) {
-          return { message: "OCR runtime is not ready." }
+          ctx.ui?.showToast?.("OCR runtime is not ready.", "error")
+          return true
         }
-        const out = await handleOcrSlashCommand({ argv: args, deps })
-        return {
-          message: out.system,
-          payload: out.composerText ? { dispatchPrompt: out.composerText } : undefined,
+        const out = await handleOcrSlashCommand({ argv: args.join(" "), deps })
+        // On success emit the rich `ocr-result` card into the active chat
+        // rather than a plain text bubble.
+        if (out.result) {
+          await appendOcrResultMessage(buildOcrResultPart(out.result, out.sourceRef))
+        } else if (out.system) {
+          ctx.ui?.showToast?.(out.system, "info")
         }
+        return true
       },
-      source: "plugin",
-      pluginId: ctx.pluginId,
-    })
-  },
-  deactivate: async (ctx?: PluginContext) => {
-    if (ctx?.pluginId) {
-      unregisterCommandsByPlugin(ctx.pluginId)
     }
   },
+  deactivate: async () => {
+    disposeOcrRenderer?.()
+    disposeOcrRenderer = undefined
+  },
+}
+
+/** Disposer for the `ocr-result` part renderer (set on activate). */
+let disposeOcrRenderer: (() => void) | undefined
+/** Monotonic counter for unique system-message ids (avoids Math.random). */
+let ocrMessageSeq = 0
+
+/** Append an `ocr-result` system message to the active chat session. */
+async function appendOcrResultMessage(part: ReturnType<typeof buildOcrResultPart>): Promise<void> {
+  try {
+    const { useChatStore } = await import("@/stores/chat/chat-store")
+    useChatStore.getState().appendMessage({
+      id: `sys-ocr-${Date.now()}-${(ocrMessageSeq += 1)}`,
+      role: "system",
+      parts: [part],
+    } as unknown as UIMessage)
+  } catch {
+    // best-effort — a store/runtime hiccup must not fail the OCR command.
+  }
 }
 
 export default ocrPluginDefinition

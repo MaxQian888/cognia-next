@@ -28,9 +28,13 @@
 import { setDiagnostics } from "@/lib/plugin/vscode-shim/monaco-bridge"
 import { listWorkspaceFolders } from "@/lib/plugin/vscode-shim/lsp-workspace-manager"
 import { useSettingsStore } from "@/stores/settings/settings-store"
-import type { UserLspServerEntry } from "@/lib/claude/types"
+import { useProjectStore } from "@/stores/project/project-store"
+import { primaryRootOf } from "@/lib/workspace/roots"
+import { resolveLspServers } from "@/lib/lsp/resolve-config"
+import { readProjectLspFile } from "@/lib/lsp/project-file-reader"
+import type { LspServerConfig } from "@/types/lsp/config"
 import { configureLspRegistry, type LspBridgeAdapter, type LspClientAdapter } from "./lsp-registry"
-import { syncUserLspServers } from "./lsp-user-servers"
+import { editorEligibleServers, syncUserLspServers } from "./lsp-user-servers"
 import { TauriLspClientAdapter } from "./lsp-client-adapter-tauri"
 
 interface BootstrapDeps {
@@ -38,10 +42,17 @@ interface BootstrapDeps {
   client?: LspClientAdapter
   /** Override the bridge — used by tests. */
   bridge?: LspBridgeAdapter
-  /** Override the user-server settings list source — used by tests. */
-  getUserLspServers?: () => UserLspServerEntry[] | undefined
-  /** Override the change subscription — used by tests. */
-  subscribeUserLspServers?: (cb: (entries: UserLspServerEntry[] | undefined) => void) => () => void
+  /**
+   * Override the resolved editor-server list source — used by tests. Returns
+   * the already-filtered list the editor should run (see
+   * `editorEligibleServers`).
+   */
+  resolveEditorServers?: () => Promise<LspServerConfig[]>
+  /**
+   * Override the change subscription — used by tests. Fires the callback
+   * whenever `settings.lsp` or the active project changes.
+   */
+  subscribeChanges?: (cb: () => void) => () => void
   /** Override the workspace-folder resolver — used by tests. */
   resolveWorkspaceFolders?: () => Array<{ uri: string; name: string }>
   /** Override `Date.now()` — used by tests. */
@@ -105,19 +116,23 @@ export function bootstrapLspRegistry(deps: BootstrapDeps = {}): () => void {
     void registryDispose()
   })
 
-  // Settings → user LSP sync. We apply the initial snapshot once and
-  // subscribe to subsequent changes.
-  const getUserLspServers =
-    deps.getUserLspServers ??
-    (() => useSettingsStore.getState().settings?.developer?.userLspServers)
+  // Unified LSP → editor sync. Resolve the layered server list (builtin ←
+  // user ← project), keep the editor-eligible ones, and converge the
+  // registry. Re-run whenever settings.lsp or the active project changes.
+  const resolveEditorServers = deps.resolveEditorServers ?? defaultResolveEditorServers
 
-  void syncUserLspServers(getUserLspServers())
+  const applyEditorServers = () => {
+    void resolveEditorServers()
+      .then((servers) => syncUserLspServers(servers))
+      .catch(() => {
+        /* resolution / registration failures are non-fatal */
+      })
+  }
 
-  const subscribeFn = deps.subscribeUserLspServers ?? defaultSubscribeUserLspServers
+  applyEditorServers()
 
-  const unsubscribe = subscribeFn((next) => {
-    void syncUserLspServers(next)
-  })
+  const subscribeFn = deps.subscribeChanges ?? defaultSubscribeChanges
+  const unsubscribe = subscribeFn(applyEditorServers)
   disposers.push(unsubscribe)
 
   installed = true
@@ -134,21 +149,47 @@ export function bootstrapLspRegistry(deps: BootstrapDeps = {}): () => void {
   }
 }
 
-/** Default settings-store subscription — fires the callback whenever
- *  `settings.developer.userLspServers` changes. Equality is checked
- *  by reference because the settings store re-creates the array on
- *  every save, so reference identity tracks "did the user edit". */
-function defaultSubscribeUserLspServers(
-  cb: (entries: UserLspServerEntry[] | undefined) => void
-): () => void {
-  let prev = useSettingsStore.getState().settings?.developer?.userLspServers
-  return useSettingsStore.subscribe((state) => {
-    const next = state.settings?.developer?.userLspServers
-    if (next !== prev) {
-      prev = next
-      cb(next)
+/** Primary root dir of the active project, or undefined when none is active. */
+function activeProjectRootDir(): string | undefined {
+  const { projects, activeProjectId } = useProjectStore.getState()
+  const proj = projects.find((p) => p.id === activeProjectId)
+  return proj ? primaryRootOf(proj)?.path : undefined
+}
+
+/** Production resolver: layer builtin ← settings.lsp ← project `.cognia/lsp.json`. */
+async function defaultResolveEditorServers(): Promise<LspServerConfig[]> {
+  const settings = useSettingsStore.getState().settings
+  const resolved = await resolveLspServers({
+    rootDir: activeProjectRootDir(),
+    userServers: settings?.lsp?.servers,
+    readProjectFile: readProjectLspFile,
+  })
+  return editorEligibleServers(resolved)
+}
+
+/** Default subscription — fires the callback whenever `settings.lsp` or the
+ *  active project changes. Reference equality tracks "did the user edit"
+ *  because the settings store re-creates the object on every save. */
+function defaultSubscribeChanges(cb: () => void): () => void {
+  let prevLsp = useSettingsStore.getState().settings?.lsp
+  let prevProject = useProjectStore.getState().activeProjectId
+  const unsubSettings = useSettingsStore.subscribe((state) => {
+    const nextLsp = state.settings?.lsp
+    if (nextLsp !== prevLsp) {
+      prevLsp = nextLsp
+      cb()
     }
   })
+  const unsubProject = useProjectStore.subscribe((state) => {
+    if (state.activeProjectId !== prevProject) {
+      prevProject = state.activeProjectId
+      cb()
+    }
+  })
+  return () => {
+    unsubSettings()
+    unsubProject()
+  }
 }
 
 /** Test helper — clears `installed`. Production never resets. */

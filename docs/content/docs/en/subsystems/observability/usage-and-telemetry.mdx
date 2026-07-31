@@ -129,6 +129,40 @@ threshold`). The Usage tab (`usage-tab.tsx`, Tauri-only) renders the trend chart
 gauges, model breakdown, cost-over-time, and top sessions — reusing `chart-palette`/`chart-config`
 from `lib/observability/` for **styling only** (not a shared data plane).
 
+## Display Mode, Folding & Motion
+
+The usage surfaces share a global **display-mode** preference, mirroring the chat
+agent-flow pattern: `AppSettings.usageDisplayMode` (`simplified` / `standard` /
+`detailed`, default `standard`), read/written through
+`hooks/usage/use-usage-display-mode.ts`. Two entry points drive the same value —
+the toolbar quick toggle (`components/settings/subscription/usage-display-toggle.tsx`)
+and the appearance settings card
+(`components/settings/appearance/components/usage-display-card.tsx`).
+
+Progressive density on the Usage tab (`defaultOpenForMode` in `usage-tab.tsx`):
+
+| Mode | Open by default | Extra detail |
+| --- | --- | --- |
+| `simplified` | stat tiles + current window | — |
+| `standard` | + trend, model, cost, top-sessions | — |
+| `detailed` | + raw snapshots | cache-write column, per-session in/out split |
+
+Each section folds independently. The open state is a **mode-default + session-local
+override** (a `Map<SectionId, boolean>` scoped to the active mode, reset when the
+mode changes — no effect syncing), the same sparse-map convention as the chat
+`tool-activity-group`. A toolbar **expand-all / collapse-all** steers every section
+at once.
+
+Motion is gated through `useFlowMotion` (`components/chat/motion/motion-reveal.tsx`):
+section bodies reveal via `MotionCollapse`, cards stagger in with `MotionReveal`, the
+current-window severity glyph crossfades via `MotionStatusSwap`, recharts
+`isAnimationActive` is bound to `!reduce`, and the headline tiles count up via
+`hooks/usage/use-count-up.ts`. Every path collapses to instant when `motion.reduce`
+or the OS `prefers-reduced-motion` hint is set. The same preference also tunes the
+composer `ContextUsageIndicator` (simplified hides the SDK per-category breakdown),
+the Agent Team runtime tile (`detailed` adds the prompt/completion split), and the
+mobile today-stats card (token + spend tiles).
+
 ## Inbox Connector Telemetry
 
 `lib/telemetry/inbox-events.ts` is a fire-and-forget breadcrumb writer for the connector pipeline —

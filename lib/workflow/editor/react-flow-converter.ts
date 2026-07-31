@@ -27,7 +27,10 @@ export interface RFWorkflowData extends WorkflowNodeData {
   typeVersion: number
 }
 
-export type RFWorkflowNode = RFNode<RFWorkflowData, "workflowNode" | "loopContainer">
+export type RFWorkflowNode = RFNode<
+  RFWorkflowData,
+  "workflowNode" | "loopContainer" | "groupContainer"
+>
 
 export interface RFWorkflowEdgeData extends Record<string, unknown> {
   workflowKind?: NonNullable<WorkflowEdge["data"]>["kind"]
@@ -67,8 +70,15 @@ export function workflowToReactFlow(wf: VisualWorkflow): ConvertedWorkflow {
   const nodes: RFWorkflowNode[] = ordered.map((n) => {
     const node: RFWorkflowNode = {
       id: n.id,
-      // Loop containers (typeVersion 2) render as a resizable sub-canvas.
-      type: n.type === "flow.loop" && n.typeVersion >= 2 ? "loopContainer" : "workflowNode",
+      // Loop containers (typeVersion 2) render as a resizable sub-canvas;
+      // annotation.group (typeVersion 2) renders as a resizable group frame
+      // that hosts its children. Legacy v1 groups stay plain workflow nodes.
+      type:
+        n.type === "flow.loop" && n.typeVersion >= 2
+          ? "loopContainer"
+          : n.type === "annotation.group" && n.typeVersion >= 2
+            ? "groupContainer"
+            : "workflowNode",
       position: { x: n.position.x, y: n.position.y },
       data: {
         ...n.data,
@@ -78,6 +88,8 @@ export function workflowToReactFlow(wf: VisualWorkflow): ConvertedWorkflow {
       width: n.width,
       height: n.height,
     }
+    // Locked nodes can't be dragged on the canvas (editor affordance).
+    if (n.data.locked) node.draggable = false
     if (n.parentId !== undefined) {
       node.parentId = n.parentId
       node.extent = "parent"
@@ -136,6 +148,12 @@ export function reactFlowToWorkflow(
         credentialRefs: data.credentialRefs,
         disabled: data.disabled,
         authoredBy: data.authoredBy,
+        // Per-node error handling — this reconstruction is field-by-field,
+        // so every persisted data field MUST be carried explicitly or the
+        // editor's save path silently drops it.
+        errorHandling: data.errorHandling,
+        // Canvas lock — likewise carried explicitly through the rebuild.
+        locked: data.locked,
       },
       width: typeof n.width === "number" ? n.width : undefined,
       height: typeof n.height === "number" ? n.height : undefined,

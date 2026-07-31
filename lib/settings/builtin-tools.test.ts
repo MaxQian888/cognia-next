@@ -7,9 +7,31 @@ import {
   listNamespacedToolsInCategory,
   listToolNamesInCategory,
   namespaced,
+  readOnlyBuiltinToolNames,
   type BuiltinToolCategoryId,
   type BuiltinToolRiskLevel,
 } from "./builtin-tools"
+import enAgentRuntime from "@/i18n/messages/en/settings/agentRuntimeSection.json"
+import zhAgentRuntime from "@/i18n/messages/zh-CN/settings/agentRuntimeSection.json"
+import enToolSettings from "@/i18n/messages/en/toolSettings.json"
+import zhToolSettings from "@/i18n/messages/zh-CN/toolSettings.json"
+
+type Json = Record<string, unknown>
+
+/** Resolve a dotted path against a JSON object, returning undefined if absent. */
+function resolvePath(obj: Json, path: string): unknown {
+  return path.split(".").reduce<unknown>((cursor, seg) => {
+    if (cursor && typeof cursor === "object" && seg in (cursor as Json)) {
+      return (cursor as Json)[seg]
+    }
+    return undefined
+  }, obj)
+}
+
+const LOCALE_MESSAGES = [
+  { locale: "en", agentRuntime: enAgentRuntime as Json, toolSettings: enToolSettings as Json },
+  { locale: "zh-CN", agentRuntime: zhAgentRuntime as Json, toolSettings: zhToolSettings as Json },
+] as const
 
 describe("builtin-tools metadata", () => {
   it("exposes a stable server name and version", () => {
@@ -17,10 +39,40 @@ describe("builtin-tools metadata", () => {
     expect(BUILTIN_SERVER_VERSION).toMatch(/^\d+\.\d+\.\d+$/)
   })
 
+  it("derives the read-only tool surface from the approval metadata", () => {
+    const readOnly = readOnlyBuiltinToolNames()
+    const expected = listBuiltinTools()
+      .filter((t) => !t.requiresApproval)
+      .map((t) => namespaced(t.name))
+    expect(readOnly).toEqual(expected)
+    // Every name is SDK-namespaced, and no approval-required tool leaks in.
+    expect(readOnly.every((n) => n.startsWith(`mcp__${BUILTIN_SERVER_NAME}__`))).toBe(true)
+    const approvalRequired = new Set(
+      listBuiltinTools()
+        .filter((t) => t.requiresApproval)
+        .map((t) => namespaced(t.name))
+    )
+    expect(readOnly.some((n) => approvalRequired.has(n))).toBe(false)
+    expect(readOnly.length).toBeGreaterThan(0)
+  })
+
   it("registers all expected categories", () => {
     const ids = BUILTIN_TOOL_CATEGORIES.map((c) => c.id)
     expect(ids.sort()).toEqual(
-      ["environment", "fileExtras", "git", "lsp", "process", "shellAdvanced", "terminalRepl"].sort()
+      [
+        "astGrep",
+        "codeGraph",
+        "coreFiles",
+        "dependencyResearch",
+        "environment",
+        "fileExtras",
+        "git",
+        "lsp",
+        "process",
+        "shellAdvanced",
+        "terminalRepl",
+        "webclone",
+      ].sort()
     )
   })
 
@@ -53,7 +105,14 @@ describe("builtin-tools metadata", () => {
       "file_write",
       "shell_execute",
     ]
-    const ourNames = new Set(listBuiltinTools().map((t) => t.name))
+    // The `coreFiles` suite intentionally mirrors SDK built-in names (TodoWrite,
+    // NotebookEdit, …) — it's namespaced and default-OFF on the Anthropic path,
+    // so no real collision occurs (same carve-out as the sidecar index test).
+    const ourNames = new Set(
+      BUILTIN_TOOL_CATEGORIES.filter((c) => c.id !== "coreFiles").flatMap((c) =>
+        c.tools.map((t) => t.name)
+      )
+    )
     for (const sdkName of sdkBuiltIns) {
       expect(ourNames.has(sdkName)).toBe(false)
     }
@@ -149,4 +208,34 @@ describe("builtin-tools metadata", () => {
     const flatCount = BUILTIN_TOOL_CATEGORIES.reduce((acc, c) => acc + c.tools.length, 0)
     expect(listBuiltinTools()).toHaveLength(flatCount)
   })
+
+  // Regression guard for a recurring drift class: adding a category here
+  // (e.g. codeGraph) without its translations. Both settings tabs render
+  // category labels through DYNAMIC i18n keys, which lint:i18n reports as
+  // "dynamic skipped" and cannot verify — a missing key throws MISSING_MESSAGE
+  // at runtime. The Permissions & Tools tab keys off the category `id`
+  // (settings.agentRuntimeSection.permissions.categories.<id>.{name,desc});
+  // the Tools tab keys off `nameKey`/`descriptionKey` (toolSettings.<key>).
+  describe.each(LOCALE_MESSAGES)(
+    "i18n coverage for every category ($locale)",
+    ({ agentRuntime, toolSettings }) => {
+      it("resolves permission-tab name/desc + risk badge for each category", () => {
+        for (const cat of BUILTIN_TOOL_CATEGORIES) {
+          const base = `permissions.categories.${cat.id}`
+          expect(typeof resolvePath(agentRuntime, `${base}.name`)).toBe("string")
+          expect(typeof resolvePath(agentRuntime, `${base}.desc`)).toBe("string")
+          expect(typeof resolvePath(agentRuntime, `permissions.risk.${cat.riskLevel}`)).toBe(
+            "string"
+          )
+        }
+      })
+
+      it("resolves tools-tab name/description for each category", () => {
+        for (const cat of BUILTIN_TOOL_CATEGORIES) {
+          expect(typeof resolvePath(toolSettings, cat.nameKey)).toBe("string")
+          expect(typeof resolvePath(toolSettings, cat.descriptionKey)).toBe("string")
+        }
+      })
+    }
+  )
 })

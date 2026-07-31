@@ -5,7 +5,7 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-import type { Character, Skill, Team } from "@/lib/claude/types"
+import type { Character, Skill, Team } from "@cognia/agent-config-types"
 import type { PluginRow } from "@/lib/db/plugin-types"
 import type { TwinDraft } from "@/types/twin"
 import type { DiscoverItem } from "@/hooks/discover/use-discover-query"
@@ -363,5 +363,106 @@ describe("<DiscoverItemCard />", () => {
     expect(screen.getByText("Review PRs")).toBeInTheDocument()
     expect(screen.getByText("github")).toBeInTheDocument()
     expect(screen.getByText("builtInBadge")).toBeInTheDocument()
+  })
+
+  // ── WF1 registry-backed kinds ───────────────────────────────────────────
+
+  it("renders a slash command with a plugin badge for plugin-sourced commands", () => {
+    const item: DiscoverItem = {
+      kind: "slashCommand",
+      id: "gitx.status",
+      data: {
+        id: "gitx.status",
+        name: "gitx.status",
+        description: "Show git status",
+        source: "plugin",
+        pluginId: "gitx",
+        handler: jest.fn(),
+      },
+    }
+    render(<DiscoverItemCard item={item} selected={false} onSelect={jest.fn()} />)
+    expect(screen.getByTestId("discover-item-slashCommand-gitx.status")).toBeInTheDocument()
+    expect(screen.getByText("Show git status")).toBeInTheDocument()
+    expect(screen.getByText("plugin")).toBeInTheDocument()
+  })
+
+  it("renders an MCP preset with its emoji glyph + transport badge", () => {
+    const item: DiscoverItem = {
+      kind: "mcpPreset",
+      id: "filesystem",
+      data: {
+        id: "filesystem",
+        name: "Filesystem",
+        description: "Read/write files",
+        icon: "📁",
+        transport: "stdio",
+        config: {},
+        fields: [],
+        tags: ["files"],
+      },
+    }
+    render(<DiscoverItemCard item={item} selected={false} onSelect={jest.fn()} />)
+    expect(screen.getByText("Filesystem")).toBeInTheDocument()
+    expect(screen.getByText("📁")).toBeInTheDocument()
+    expect(screen.getByText("stdio")).toBeInTheDocument()
+    expect(screen.getByText("builtInBadge")).toBeInTheDocument()
+  })
+
+  it("renders a team template with its member count-ready shape + category badge", () => {
+    const item: DiscoverItem = {
+      kind: "teamTemplate",
+      id: "parallel-review",
+      data: {
+        id: "parallel-review",
+        name: "Parallel Review",
+        description: "Split review",
+        teammateCount: 3,
+        category: "review",
+        isBuiltIn: true,
+      },
+    }
+    render(<DiscoverItemCard item={item} selected={false} onSelect={jest.fn()} />)
+    expect(screen.getByText("Parallel Review")).toBeInTheDocument()
+    expect(screen.getByText("review")).toBeInTheDocument()
+    expect(screen.getByText("builtInBadge")).toBeInTheDocument()
+  })
+
+  it("renders an external-agent preset with its first tag", () => {
+    const item: DiscoverItem = {
+      kind: "externalAgentPreset",
+      id: "codex",
+      data: { id: "codex", name: "Codex", description: "OpenAI Codex", tags: ["cli", "openai"] },
+    }
+    render(<DiscoverItemCard item={item} selected={false} onSelect={jest.fn()} />)
+    expect(screen.getByText("Codex")).toBeInTheDocument()
+    expect(screen.getByText("cli")).toBeInTheDocument()
+  })
+
+  it("renders a subagent, marking host built-ins (no ':' in id) as built-in", () => {
+    const builtIn: DiscoverItem = {
+      kind: "subagent",
+      id: "workflow-designer",
+      data: {
+        id: "workflow-designer",
+        name: "Workflow Designer",
+        description: "designs",
+        prompt: "",
+      },
+    }
+    const { rerender } = render(
+      <DiscoverItemCard item={builtIn} selected={false} onSelect={jest.fn()} />
+    )
+    expect(screen.getByText("Workflow Designer")).toBeInTheDocument()
+    expect(screen.getByText("builtInBadge")).toBeInTheDocument()
+    expect(screen.getByText("subagent")).toBeInTheDocument()
+
+    const plugin: DiscoverItem = {
+      kind: "subagent",
+      id: "gitx:reviewer",
+      data: { id: "gitx:reviewer", name: "Reviewer", description: "reviews", prompt: "" },
+    }
+    rerender(<DiscoverItemCard item={plugin} selected={false} onSelect={jest.fn()} />)
+    // Plugin subagents (id has ':') are not built-in.
+    expect(screen.queryByText("builtInBadge")).not.toBeInTheDocument()
   })
 })

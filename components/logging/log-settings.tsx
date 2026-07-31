@@ -42,15 +42,29 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { useTransportHealth } from "@/hooks/logging"
+import { NativeLogLevels } from "@/components/logging/native-log-levels"
 import {
   applyLoggingSettings,
   getLoggingBootstrapState,
+  getRegisteredModules,
   LOGGING_SAMPLING_STORAGE_KEY,
   configureSampling,
   type LogLevel,
   type LoggingTransportSettings,
   type UnifiedLoggerConfig,
 } from "@/lib/logging"
+import { clearTelemetrySecret, persistTelemetrySecret } from "@/lib/logging/telemetry-secrets"
+import { configureTauriSidecarTelemetry } from "@/lib/logging/transports/tauri-fetch-shim"
+import { isTauri } from "@/lib/platform/detect"
+import {
+  BEHAVIOR_TELEMETRY_CATEGORIES,
+  DEFAULT_BEHAVIOR_TELEMETRY_SETTINGS,
+  getBehaviorTelemetrySettings,
+  saveBehaviorTelemetrySettings,
+} from "@/lib/telemetry/events/settings"
+import { trackEvent } from "@/lib/telemetry/events/track-event"
+import { clearBehaviorEvents, exportBehaviorEvents } from "@/lib/db/behavior-events"
+import { useSettingsStore } from "@/stores/settings"
 
 export interface LogSettingsProps {
   className?: string
@@ -75,7 +89,15 @@ function parseHeaders(value: string): Record<string, string> {
     if (colon <= 0) continue
     const k = chunk.slice(0, colon).trim()
     const v = chunk.slice(colon + 1).trim()
-    if (k.length > 0) out[k] = v
+    const normalized = k.toLowerCase()
+    if (
+      k.length > 0 &&
+      !["authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key"].includes(
+        normalized
+      )
+    ) {
+      out[k] = v
+    }
   }
   return out
 }
@@ -142,6 +164,7 @@ function persistSamplingRules(rules: SamplingRule[]): void {
 
 export function LogSettings({ className }: LogSettingsProps) {
   const t = useTranslations("logging")
+  const saveAppSettings = useSettingsStore((state) => state.save)
   const bootstrapState = getLoggingBootstrapState()
   // Cognia mirrors langfuse / OTel keys into a global observability settings
   // store; cognia-next has no such store yet, so the panel relies entirely on
@@ -159,6 +182,7 @@ export function LogSettings({ className }: LogSettingsProps) {
       minLevel: currentConfig.minLevel,
       includeStackTrace: currentConfig.includeStackTrace,
       includeSource: currentConfig.includeSource,
+      perModuleLevels: { ...(currentConfig.perModuleLevels ?? {}) },
       bufferSize: currentConfig.bufferSize,
       flushInterval: currentConfig.flushInterval,
       remoteEndpoint: currentConfig.remoteEndpoint,
@@ -173,6 +197,9 @@ export function LogSettings({ className }: LogSettingsProps) {
 
   const [hasChanges, setHasChanges] = useState(false)
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle")
+  const [langfuseSecretDraft, setLangfuseSecretDraft] = useState("")
+  const [grafanaTokenDraft, setGrafanaTokenDraft] = useState("")
+  const [behaviorTelemetry, setBehaviorTelemetry] = useState(() => getBehaviorTelemetrySettings())
 
   // Transport settings (stored separately)
   const [transports, setTransports] = useState<LoggingTransportSettings>(() => ({
@@ -187,26 +214,12 @@ export function LogSettings({ className }: LogSettingsProps) {
     langfuseConfig: {
       ...bootstrapState.transports.langfuseConfig,
       publicKey: bootstrapState.transports.langfuseConfig.publicKey || "",
-      secretKey: bootstrapState.transports.langfuseConfig.secretKey || "",
       host: bootstrapState.transports.langfuseConfig.host || "https://cloud.langfuse.com",
-    },
-    opentelemetryConfig: {
-      ...bootstrapState.transports.opentelemetryConfig,
-      endpoint:
-        bootstrapState.transports.opentelemetryConfig.endpoint || "http://localhost:4318/v1/traces",
-      serviceName: bootstrapState.transports.opentelemetryConfig.serviceName || "cognia-ai",
     },
   }))
   const [transportExpanded, setTransportExpanded] = useState<
     Record<
-      | "console"
-      | "indexedDB"
-      | "native"
-      | "remote"
-      | "langfuse"
-      | "opentelemetry"
-      | "agentTrace"
-      | "agentTraceOtlp",
+      "console" | "indexedDB" | "native" | "remote" | "langfuse" | "agentTrace" | "agentTraceOtlp",
       boolean
     >
   >({
@@ -215,7 +228,6 @@ export function LogSettings({ className }: LogSettingsProps) {
     native: bootstrapState.transports.native,
     remote: bootstrapState.transports.remote,
     langfuse: bootstrapState.transports.langfuse,
-    opentelemetry: bootstrapState.transports.opentelemetry,
     agentTrace: bootstrapState.transports.agentTrace,
     agentTraceOtlp: bootstrapState.transports.agentTraceOtlp,
   })
@@ -226,6 +238,10 @@ export function LogSettings({ className }: LogSettingsProps) {
   const [newSamplingRule, setNewSamplingRule] = useState<SamplingRule>({
     modulePrefix: "",
     percentage: 100,
+  })
+  const [newModuleLevel, setNewModuleLevel] = useState<{ prefix: string; level: LogLevel }>({
+    prefix: "",
+    level: "debug",
   })
 
   const handleConfigChange = <K extends keyof UnifiedLoggerConfig>(
@@ -253,7 +269,6 @@ export function LogSettings({ className }: LogSettingsProps) {
       | "nativeConfig"
       | "remoteConfig"
       | "langfuseConfig"
-      | "opentelemetryConfig"
       | "agentTraceConfig"
       | "agentTraceOtlpConfig",
     TKey extends keyof LoggingTransportSettings[TTransport],
@@ -277,6 +292,34 @@ export function LogSettings({ className }: LogSettingsProps) {
     setHasChanges(true)
   }
 
+  const handleClearStoredSecret = async (kind: "langfuseSecretKey" | "grafanaCloudApiToken") => {
+    try {
+      await clearTelemetrySecret(kind)
+      if (kind === "langfuseSecretKey") {
+        setLangfuseSecretDraft("")
+        setTransports((prev) => ({
+          ...prev,
+          langfuseConfig: { ...prev.langfuseConfig, secretKeyConfigured: false },
+        }))
+      } else {
+        setGrafanaTokenDraft("")
+        setTransports((prev) => ({
+          ...prev,
+          agentTraceOtlpConfig: {
+            ...prev.agentTraceOtlpConfig,
+            grafanaCloud: {
+              ...prev.agentTraceOtlpConfig.grafanaCloud,
+              apiTokenConfigured: false,
+            },
+          },
+        }))
+      }
+      setHasChanges(true)
+    } catch {
+      setSaveStatus("error")
+    }
+  }
+
   const handleRedactionChange = <K extends keyof NonNullable<UnifiedLoggerConfig["redaction"]>>(
     key: K,
     value: NonNullable<UnifiedLoggerConfig["redaction"]>[K]
@@ -292,17 +335,68 @@ export function LogSettings({ className }: LogSettingsProps) {
     setHasChanges(true)
   }
 
-  const handleSave = () => {
+  const handleSave = async () => {
     setSaveStatus("saving")
 
     try {
+      const previousBehaviorTelemetry = getBehaviorTelemetrySettings()
+      const behaviorPreferenceChanged =
+        behaviorTelemetry.enabled !== previousBehaviorTelemetry.enabled
+      if (behaviorPreferenceChanged && !behaviorTelemetry.enabled) {
+        await trackEvent("telemetry.preference.changed", { enabled: behaviorTelemetry.enabled })
+      }
+      saveBehaviorTelemetrySettings(behaviorTelemetry)
+      void saveAppSettings({
+        telemetryEnabled: behaviorTelemetry.enabled,
+        behaviorTelemetry,
+      })
+      if (behaviorPreferenceChanged && behaviorTelemetry.enabled) {
+        await trackEvent("telemetry.preference.changed", { enabled: behaviorTelemetry.enabled })
+      }
+      if (langfuseSecretDraft) {
+        await persistTelemetrySecret("langfuseSecretKey", langfuseSecretDraft)
+      }
+      if (grafanaTokenDraft) {
+        await persistTelemetrySecret("grafanaCloudApiToken", grafanaTokenDraft)
+      }
+      const securedTransports: LoggingTransportSettings = {
+        ...transports,
+        langfuseConfig: {
+          ...transports.langfuseConfig,
+          secretKeyConfigured:
+            transports.langfuseConfig.secretKeyConfigured || Boolean(langfuseSecretDraft),
+        },
+        agentTraceOtlpConfig: {
+          ...transports.agentTraceOtlpConfig,
+          grafanaCloud: {
+            ...transports.agentTraceOtlpConfig.grafanaCloud,
+            apiTokenConfigured:
+              transports.agentTraceOtlpConfig.grafanaCloud.apiTokenConfigured ||
+              Boolean(grafanaTokenDraft),
+          },
+        },
+      }
       const nextConfig = {
         ...config,
-        remoteEndpoint: transports.remoteConfig.endpoint,
+        remoteEndpoint: securedTransports.remoteConfig.endpoint,
+      }
+      if (isTauri()) {
+        const otlp = securedTransports.agentTraceOtlpConfig
+        await configureTauriSidecarTelemetry({
+          enabled: securedTransports.agentTraceOtlp,
+          endpoint: otlp.endpoint || "http://localhost",
+          headers: otlp.headers,
+          serviceName: "cognia-sidecar",
+          environment: otlp.environment,
+          credential:
+            otlp.preset === "grafana-cloud"
+              ? { kind: "grafanaCloud", instanceId: otlp.grafanaCloud.instanceId }
+              : { kind: "none" },
+        })
       }
       const next = applyLoggingSettings({
         config: nextConfig,
-        transports,
+        transports: securedTransports,
         retention,
         persist: true,
       })
@@ -314,6 +408,7 @@ export function LogSettings({ className }: LogSettingsProps) {
         minLevel: next.config.minLevel,
         includeStackTrace: next.config.includeStackTrace,
         includeSource: next.config.includeSource,
+        perModuleLevels: { ...(next.config.perModuleLevels ?? {}) },
         bufferSize: next.config.bufferSize,
         flushInterval: next.config.flushInterval,
         remoteEndpoint: next.config.remoteEndpoint,
@@ -325,6 +420,8 @@ export function LogSettings({ className }: LogSettingsProps) {
         },
       })
       setTransports(next.transports)
+      setLangfuseSecretDraft("")
+      setGrafanaTokenDraft("")
 
       setHasChanges(false)
       setSaveStatus("saved")
@@ -336,11 +433,24 @@ export function LogSettings({ className }: LogSettingsProps) {
     }
   }
 
+  const handleExportBehaviorEvents = async (format: "json" | "csv") => {
+    const contents = await exportBehaviorEvents(format)
+    const url = URL.createObjectURL(
+      new Blob([contents], { type: format === "json" ? "application/json" : "text/csv" })
+    )
+    const anchor = document.createElement("a")
+    anchor.href = url
+    anchor.download = `cognia-behavior-events-${new Date().toISOString()}.${format}`
+    anchor.click()
+    URL.revokeObjectURL(url)
+  }
+
   const handleReset = () => {
     setConfig({
       minLevel: "info",
       includeStackTrace: true,
       includeSource: false,
+      perModuleLevels: {},
       bufferSize: 50,
       flushInterval: 5000,
       remoteEndpoint: "",
@@ -359,7 +469,6 @@ export function LogSettings({ className }: LogSettingsProps) {
       native: true,
       remote: false,
       langfuse: false,
-      opentelemetry: false,
       agentTrace: true,
       agentTraceOtlp: false,
       nativeConfig: {
@@ -376,14 +485,9 @@ export function LogSettings({ className }: LogSettingsProps) {
       },
       langfuseConfig: {
         publicKey: "",
-        secretKey: "",
+        secretKeyConfigured: false,
         host: "https://cloud.langfuse.com",
         minLevel: "warn",
-      },
-      opentelemetryConfig: {
-        endpoint: "http://localhost:4318/v1/traces",
-        serviceName: "cognia-ai",
-        addAsSpanEvents: true,
       },
       agentTraceConfig: {
         captureContent: false,
@@ -396,7 +500,7 @@ export function LogSettings({ className }: LogSettingsProps) {
         headers: {},
         serviceName: "cognia-ai",
         environment: "",
-        grafanaCloud: { instanceId: "", apiToken: "" },
+        grafanaCloud: { instanceId: "", apiTokenConfigured: false },
       },
     })
     setTransportExpanded({
@@ -405,7 +509,6 @@ export function LogSettings({ className }: LogSettingsProps) {
       native: true,
       remote: false,
       langfuse: false,
-      opentelemetry: false,
       agentTrace: true,
       agentTraceOtlp: false,
     })
@@ -414,6 +517,11 @@ export function LogSettings({ className }: LogSettingsProps) {
     setRetention({
       maxEntries: 10000,
       maxAgeDays: 7,
+    })
+    setBehaviorTelemetry({
+      ...DEFAULT_BEHAVIOR_TELEMETRY_SETTINGS,
+      destinations: { ...DEFAULT_BEHAVIOR_TELEMETRY_SETTINGS.destinations },
+      categories: { ...DEFAULT_BEHAVIOR_TELEMETRY_SETTINGS.categories },
     })
     setHasChanges(true)
   }
@@ -438,6 +546,37 @@ export function LogSettings({ className }: LogSettingsProps) {
       [...samplingRules].sort((left, right) => left.modulePrefix.localeCompare(right.modulePrefix)),
     [samplingRules]
   )
+  const registeredModules = useMemo(() => getRegisteredModules(), [])
+  const sortedModuleLevels = useMemo(
+    () =>
+      Object.entries(config.perModuleLevels ?? {}).sort(([left], [right]) =>
+        left.localeCompare(right)
+      ) as Array<[string, LogLevel]>,
+    [config.perModuleLevels]
+  )
+  const setModuleLevel = (prefix: string, level: LogLevel) => {
+    setConfig((prev) => ({
+      ...prev,
+      perModuleLevels: { ...(prev.perModuleLevels ?? {}), [prefix]: level },
+    }))
+    setHasChanges(true)
+  }
+  const removeModuleLevel = (prefix: string) => {
+    setConfig((prev) => {
+      const next = { ...(prev.perModuleLevels ?? {}) }
+      delete next[prefix]
+      return { ...prev, perModuleLevels: next }
+    })
+    setHasChanges(true)
+  }
+  const addModuleLevel = () => {
+    const prefix = newModuleLevel.prefix.trim()
+    if (!prefix) {
+      return
+    }
+    setModuleLevel(prefix, newModuleLevel.level)
+    setNewModuleLevel({ prefix: "", level: "debug" })
+  }
   const remoteQueueMb = Math.max(
     1,
     Math.round(
@@ -615,6 +754,100 @@ export function LogSettings({ className }: LogSettingsProps) {
               </div>
             </CardContent>
           </Card>
+
+          {/* Per-Module Levels */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Radio className="h-4 w-4" />
+                {t("settings.moduleLevels.title")}
+              </CardTitle>
+              <CardDescription>{t("settings.moduleLevels.description")}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <datalist id="logging-registered-modules">
+                {registeredModules.map((moduleName) => (
+                  <option key={moduleName} value={moduleName} />
+                ))}
+              </datalist>
+
+              {sortedModuleLevels.length === 0 ? (
+                <p className="text-xs text-muted-foreground">{t("settings.moduleLevels.empty")}</p>
+              ) : (
+                sortedModuleLevels.map(([prefix, level]) => (
+                  <div key={prefix} className="flex items-center gap-2">
+                    <span className="flex-1 min-w-0 truncate text-sm font-mono">{prefix}</span>
+                    <Select
+                      value={level}
+                      onValueChange={(value) => setModuleLevel(prefix, value as LogLevel)}
+                    >
+                      <SelectTrigger className="w-[130px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {LOG_LEVELS.map((lvl) => (
+                          <SelectItem key={lvl} value={lvl}>
+                            <span className="capitalize">{t(`settings.logLevel.${lvl}`)}</span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={t("settings.moduleLevels.removeAria", { module: prefix })}
+                      onClick={() => removeModuleLevel(prefix)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))
+              )}
+
+              <Separator />
+
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                <div className="flex-1 space-y-1">
+                  <Label className="text-xs">{t("settings.moduleLevels.moduleLabel")}</Label>
+                  <Input
+                    list="logging-registered-modules"
+                    placeholder={t("settings.moduleLevels.modulePlaceholder")}
+                    value={newModuleLevel.prefix}
+                    onChange={(e) =>
+                      setNewModuleLevel((prev) => ({ ...prev, prefix: e.target.value }))
+                    }
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">{t("settings.moduleLevels.levelLabel")}</Label>
+                  <Select
+                    value={newModuleLevel.level}
+                    onValueChange={(value) =>
+                      setNewModuleLevel((prev) => ({ ...prev, level: value as LogLevel }))
+                    }
+                  >
+                    <SelectTrigger className="w-full sm:w-[130px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {LOG_LEVELS.map((lvl) => (
+                        <SelectItem key={lvl} value={lvl}>
+                          <span className="capitalize">{t(`settings.logLevel.${lvl}`)}</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button onClick={addModuleLevel} className="sm:self-end">
+                  <Plus className="h-4 w-4 mr-1" />
+                  {t("settings.moduleLevels.add")}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Native (Rust) tracing levels — Tauri-only; renders null on web. */}
+          <NativeLogLevels />
         </TabsContent>
 
         {/* Transports */}
@@ -748,12 +981,6 @@ export function LogSettings({ className }: LogSettingsProps) {
                     icon: Cloud,
                     title: t("settings.transports.langfuse"),
                     description: t("settings.transports.langfuseDesc"),
-                  },
-                  {
-                    key: "opentelemetry",
-                    icon: Cloud,
-                    title: t("settings.transports.opentelemetry"),
-                    description: t("settings.transports.opentelemetryDesc"),
                   },
                   {
                     key: "agentTrace",
@@ -1015,16 +1242,27 @@ export function LogSettings({ className }: LogSettingsProps) {
                               </Label>
                               <Input
                                 type="password"
-                                value={transports.langfuseConfig.secretKey}
-                                onChange={(event) =>
-                                  handleTransportDetailChange(
-                                    "langfuseConfig",
-                                    "secretKey",
-                                    event.target.value
-                                  )
-                                }
-                                placeholder={t("settings.transports.langfuseSecretKeyPlaceholder")}
+                                value={langfuseSecretDraft}
+                                onChange={(event) => {
+                                  setLangfuseSecretDraft(event.target.value)
+                                  setHasChanges(true)
+                                }}
+                                placeholder={t(
+                                  transports.langfuseConfig.secretKeyConfigured
+                                    ? "settings.transports.secretConfiguredPlaceholder"
+                                    : "settings.transports.langfuseSecretKeyPlaceholder"
+                                )}
                               />
+                              {transports.langfuseConfig.secretKeyConfigured && (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => void handleClearStoredSecret("langfuseSecretKey")}
+                                >
+                                  {t("settings.transports.clearStoredSecret")}
+                                </Button>
+                              )}
                             </div>
                             <div className="space-y-2 sm:col-span-2">
                               <Label className="text-sm">
@@ -1067,64 +1305,6 @@ export function LogSettings({ className }: LogSettingsProps) {
                                   ))}
                                 </SelectContent>
                               </Select>
-                            </div>
-                          </div>
-                        )}
-                        {transportDef.key === "opentelemetry" && (
-                          <div className="grid gap-4 sm:grid-cols-2">
-                            <div className="space-y-2 sm:col-span-2">
-                              <Label className="text-sm">
-                                {t("settings.transports.otelEndpoint")}
-                              </Label>
-                              <Input
-                                value={transports.opentelemetryConfig.endpoint}
-                                onChange={(event) =>
-                                  handleTransportDetailChange(
-                                    "opentelemetryConfig",
-                                    "endpoint",
-                                    event.target.value
-                                  )
-                                }
-                                placeholder={t("settings.transports.otelEndpointPlaceholder")}
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label className="text-sm">
-                                {t("settings.transports.otelServiceName")}
-                              </Label>
-                              <Input
-                                value={transports.opentelemetryConfig.serviceName}
-                                onChange={(event) =>
-                                  handleTransportDetailChange(
-                                    "opentelemetryConfig",
-                                    "serviceName",
-                                    event.target.value
-                                  )
-                                }
-                                placeholder={t("settings.transports.otelServiceNamePlaceholder")}
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <div className="flex items-start justify-between gap-3 rounded-md border p-3">
-                                <div>
-                                  <Label className="text-sm">
-                                    {t("settings.transports.otelAddAsSpanEvents")}
-                                  </Label>
-                                  <p className="text-xs text-muted-foreground">
-                                    {t("settings.transports.otelAddAsSpanEventsDesc")}
-                                  </p>
-                                </div>
-                                <Switch
-                                  checked={transports.opentelemetryConfig.addAsSpanEvents}
-                                  onCheckedChange={(checked) =>
-                                    handleTransportDetailChange(
-                                      "opentelemetryConfig",
-                                      "addAsSpanEvents",
-                                      checked
-                                    )
-                                  }
-                                />
-                              </div>
                             </div>
                           </div>
                         )}
@@ -1232,7 +1412,7 @@ export function LogSettings({ className }: LogSettingsProps) {
                                     event.target.value
                                   )
                                 }
-                                placeholder="cognia-ai"
+                                placeholder={t("panel.agentTraceOtlp.serviceNamePlaceholder")}
                               />
                             </div>
                             <div className="space-y-2 sm:col-span-2">
@@ -1289,21 +1469,31 @@ export function LogSettings({ className }: LogSettingsProps) {
                                   <Input
                                     data-testid="agent-trace-otlp-grafana-api-token"
                                     type="password"
-                                    value={transports.agentTraceOtlpConfig.grafanaCloud.apiToken}
-                                    onChange={(event) =>
-                                      handleTransportDetailChange(
-                                        "agentTraceOtlpConfig",
-                                        "grafanaCloud",
-                                        {
-                                          ...transports.agentTraceOtlpConfig.grafanaCloud,
-                                          apiToken: event.target.value,
-                                        }
-                                      )
-                                    }
+                                    value={grafanaTokenDraft}
+                                    onChange={(event) => {
+                                      setGrafanaTokenDraft(event.target.value)
+                                      setHasChanges(true)
+                                    }}
                                     placeholder={t(
-                                      "panel.agentTraceOtlp.grafanaApiTokenPlaceholder"
+                                      transports.agentTraceOtlpConfig.grafanaCloud
+                                        .apiTokenConfigured
+                                        ? "settings.transports.secretConfiguredPlaceholder"
+                                        : "panel.agentTraceOtlp.grafanaApiTokenPlaceholder"
                                     )}
                                   />
+                                  {transports.agentTraceOtlpConfig.grafanaCloud
+                                    .apiTokenConfigured && (
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() =>
+                                        void handleClearStoredSecret("grafanaCloudApiToken")
+                                      }
+                                    >
+                                      {t("settings.transports.clearStoredSecret")}
+                                    </Button>
+                                  )}
                                 </div>
                                 <p className="text-xs text-muted-foreground sm:col-span-2">
                                   {t("panel.agentTraceOtlp.grafanaCloudHint")}
@@ -1344,7 +1534,7 @@ export function LogSettings({ className }: LogSettingsProps) {
                                     event.target.value
                                   )
                                 }
-                                placeholder="production"
+                                placeholder={t("panel.agentTraceOtlp.environmentPlaceholder")}
                               />
                             </div>
                           </div>
@@ -1364,6 +1554,185 @@ export function LogSettings({ className }: LogSettingsProps) {
           forceMount
           className="mt-0 space-y-4 data-[state=inactive]:hidden"
         >
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">{t("settings.behaviorTelemetry.title")}</CardTitle>
+              <CardDescription>{t("settings.behaviorTelemetry.disclosure")}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <Label>{t("settings.behaviorTelemetry.optIn")}</Label>
+                  <p className="text-xs text-muted-foreground">
+                    {t("settings.behaviorTelemetry.optInDesc")}
+                  </p>
+                </div>
+                <Switch
+                  data-testid="behavior-telemetry-switch"
+                  checked={behaviorTelemetry.enabled}
+                  onCheckedChange={(checked) => {
+                    setBehaviorTelemetry((prev) => ({ ...prev, enabled: checked }))
+                    setHasChanges(true)
+                  }}
+                />
+              </div>
+              <Separator />
+              <div className="space-y-3">
+                <div>
+                  <Label>{t("settings.behaviorTelemetry.destinations.title")}</Label>
+                  <p className="text-xs text-muted-foreground">
+                    {t("settings.behaviorTelemetry.destinations.description")}
+                  </p>
+                </div>
+                {(["local", "remote"] as const).map((destination) => (
+                  <div key={destination} className="flex items-start justify-between gap-3">
+                    <div>
+                      <Label>
+                        {t(`settings.behaviorTelemetry.destinations.${destination}.label`)}
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        {t(`settings.behaviorTelemetry.destinations.${destination}.description`)}
+                      </p>
+                    </div>
+                    <Switch
+                      data-testid={`behavior-telemetry-${destination}-switch`}
+                      checked={behaviorTelemetry.destinations[destination]}
+                      disabled={!behaviorTelemetry.enabled}
+                      onCheckedChange={(checked) => {
+                        setBehaviorTelemetry((prev) => ({
+                          ...prev,
+                          destinations: { ...prev.destinations, [destination]: checked },
+                        }))
+                        setHasChanges(true)
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+              <Separator />
+              <div className="space-y-3">
+                <div>
+                  <Label>{t("settings.behaviorTelemetry.categories.title")}</Label>
+                  <p className="text-xs text-muted-foreground">
+                    {t("settings.behaviorTelemetry.categories.description")}
+                  </p>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {BEHAVIOR_TELEMETRY_CATEGORIES.map((category) => (
+                    <div
+                      key={category}
+                      className="flex items-center justify-between gap-3 rounded-md border p-3"
+                    >
+                      <Label>{t(`settings.behaviorTelemetry.categories.${category}`)}</Label>
+                      <Switch
+                        data-testid={`behavior-telemetry-category-${category}`}
+                        checked={behaviorTelemetry.categories[category]}
+                        disabled={!behaviorTelemetry.enabled}
+                        onCheckedChange={(checked) => {
+                          setBehaviorTelemetry((prev) => ({
+                            ...prev,
+                            categories: { ...prev.categories, [category]: checked },
+                          }))
+                          setHasChanges(true)
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <Separator />
+              <div className="grid gap-5 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <Label>{t("settings.behaviorTelemetry.sampleRate")}</Label>
+                    <span className="text-xs tabular-nums text-muted-foreground">
+                      {Math.round(behaviorTelemetry.sampleRate * 100)}%
+                    </span>
+                  </div>
+                  <Slider
+                    data-testid="behavior-telemetry-sample-rate"
+                    value={[Math.round(behaviorTelemetry.sampleRate * 100)]}
+                    min={0}
+                    max={100}
+                    step={5}
+                    disabled={!behaviorTelemetry.enabled}
+                    onValueChange={([value]) => {
+                      setBehaviorTelemetry((prev) => ({ ...prev, sampleRate: value / 100 }))
+                      setHasChanges(true)
+                    }}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <Label>{t("settings.behaviorTelemetry.retentionDays")}</Label>
+                    <span className="text-xs tabular-nums text-muted-foreground">
+                      {behaviorTelemetry.retentionDays}
+                    </span>
+                  </div>
+                  <Slider
+                    data-testid="behavior-telemetry-retention-days"
+                    value={[behaviorTelemetry.retentionDays]}
+                    min={1}
+                    max={365}
+                    step={1}
+                    disabled={!behaviorTelemetry.enabled || !behaviorTelemetry.destinations.local}
+                    onValueChange={([value]) => {
+                      setBehaviorTelemetry((prev) => ({ ...prev, retentionDays: value }))
+                      setHasChanges(true)
+                    }}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="behavior-telemetry-max-events">
+                    {t("settings.behaviorTelemetry.maxStoredEvents")}
+                  </Label>
+                  <Input
+                    id="behavior-telemetry-max-events"
+                    type="number"
+                    min={100}
+                    max={100000}
+                    step={100}
+                    value={behaviorTelemetry.maxStoredEvents}
+                    disabled={!behaviorTelemetry.enabled || !behaviorTelemetry.destinations.local}
+                    onChange={(event) => {
+                      setBehaviorTelemetry((prev) => ({
+                        ...prev,
+                        maxStoredEvents: Math.min(
+                          100000,
+                          Math.max(100, Number(event.target.value) || 100)
+                        ),
+                      }))
+                      setHasChanges(true)
+                    }}
+                  />
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void handleExportBehaviorEvents("json")}
+                >
+                  {t("settings.behaviorTelemetry.exportJson")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void handleExportBehaviorEvents("csv")}
+                >
+                  {t("settings.behaviorTelemetry.exportCsv")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={() => void clearBehaviorEvents()}
+                >
+                  {t("settings.behaviorTelemetry.clear")}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">

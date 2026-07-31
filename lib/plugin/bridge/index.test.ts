@@ -5,12 +5,6 @@ describe("lib/plugin/bridge re-exports", () => {
     const expected = [
       "PluginA2UIBridge",
       "PluginToolsBridge",
-      "PluginAgentBridge",
-      "getPluginAgentBridge",
-      "usePluginAgentTools",
-      "usePluginAgentModes",
-      "mergeWithBuiltinTools",
-      "mergeWithBuiltinModes",
       "PluginWorkflowIntegration",
       "getPluginWorkflowIntegration",
       "resetPluginWorkflowIntegration",

@@ -223,3 +223,44 @@ export function __resetGrammarsForTesting(): void {
   grammars.clear()
   listeners.clear()
 }
+
+// ── W5.1: enable-time registration from manifest.vscodeGrammars ─────────────
+// Mirrors themes-bridge.registerPluginThemes: read each contributed grammar
+// file from the plugin dir, register it, and collect per-entry errors so one
+// bad grammar can't block the rest of the plugin's contributions.
+import { isUnsafeRelativePath, readContainedPluginFile } from "./plugin-file-path"
+
+export interface GrammarManifestEntry {
+  scopeName: string
+  language?: string
+  path: string
+}
+
+export async function registerGrammarsForPlugin(
+  pluginId: string,
+  entries: readonly GrammarManifestEntry[],
+  baseDir: string
+): Promise<{ registered: number; errors: string[] }> {
+  const errors: string[] = []
+  let registered = 0
+  for (const entry of entries) {
+    try {
+      if (!entry.scopeName) throw new Error("missing scopeName")
+      if (isUnsafeRelativePath(entry.path)) {
+        throw new Error(`unsafe grammar path "${entry.path}"`)
+      }
+      const payload = await readContainedPluginFile(pluginId, baseDir, entry.path)
+      registerGrammar({
+        pluginId,
+        scopeName: entry.scopeName,
+        language: entry.language,
+        grammarPath: entry.path,
+        payload,
+      })
+      registered += 1
+    } catch (err) {
+      errors.push(`${entry.scopeName || entry.path}: ${(err as Error).message}`)
+    }
+  }
+  return { registered, errors }
+}

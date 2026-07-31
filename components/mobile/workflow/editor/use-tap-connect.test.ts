@@ -28,7 +28,7 @@ function buildWorkflow(): VisualWorkflow {
         type: "ai.prompt",
         typeVersion: 1,
         position: { x: 200, y: 0 },
-        data: { label: "AI A", params: {} },
+        data: { label: "AI A", params: {}, errorHandling: { onError: "errorBranch" } },
       },
       {
         id: "ai_b",
@@ -36,6 +36,13 @@ function buildWorkflow(): VisualWorkflow {
         typeVersion: 1,
         position: { x: 400, y: 0 },
         data: { label: "AI B", params: {} },
+      },
+      {
+        id: "branch",
+        type: "flow.branch",
+        typeVersion: 2,
+        position: { x: 200, y: 200 },
+        data: { label: "Branch", params: {} },
       },
     ],
     edges: [],
@@ -126,5 +133,57 @@ describe("useTapConnect", () => {
     })
     expect(outcome.valid).toBe(false)
     expect(store.getState().edges).toHaveLength(0)
+  })
+
+  it("routes the new edge through the source handle passed to start (branch output)", () => {
+    const { store, result } = setup()
+    act(() => result.current.start("branch", "true"))
+    expect(store.getState().connectionState?.sourceHandle).toBe("true")
+    let outcome: ReturnType<typeof result.current.completeTo> = {
+      valid: false,
+      reason: "",
+      reasonKey: "",
+    }
+    act(() => {
+      outcome = result.current.completeTo("ai_a")
+    })
+    expect(outcome.valid).toBe(true)
+    expect(store.getState().edges[0]).toMatchObject({
+      source: "branch",
+      target: "ai_a",
+      sourceHandle: "true",
+    })
+  })
+
+  it("reflects a connection armed directly on the store (handle-tap entry)", () => {
+    const { store, result } = setup()
+    // Simulate the shared node renderer's `armConnectFromHandle` — it sets
+    // connectionState on the store, not via the hook.
+    act(() => store.getState().beginConnection({ sourceId: "ai_a", sourceHandle: "error" }))
+    expect(result.current.active).toBe(true)
+    expect(result.current.sourceId).toBe("ai_a")
+    act(() => {
+      result.current.completeTo("ai_b")
+    })
+    expect(store.getState().edges[0]).toMatchObject({
+      source: "ai_a",
+      target: "ai_b",
+      sourceHandle: "error",
+    })
+  })
+
+  it("rejects an error-handle connection when error routing is not enabled", () => {
+    const { store, result } = setup()
+    act(() => store.getState().beginConnection({ sourceId: "ai_b", sourceHandle: "error" }))
+    let outcome: ReturnType<typeof result.current.completeTo> = {
+      valid: true,
+    }
+
+    act(() => {
+      outcome = result.current.completeTo("ai_a")
+    })
+
+    expect(outcome.valid).toBe(false)
+    expect(store.getState().edges).toEqual([])
   })
 })

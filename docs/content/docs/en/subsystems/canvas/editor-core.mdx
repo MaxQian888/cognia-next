@@ -60,6 +60,27 @@ Two non-obvious fixes live in the panel:
 - **First-paint theme** — `resolvedMonacoTheme` resolves a concrete `vs` / `vs-dark` id before the
   custom theme registers, preventing an unknown-id flash (`canvas-panel.tsx:122-126`).
 
+
+## Mobile: the light editor
+
+On mobile viewports (and the Capacitor shell) Monaco is never mounted. Every code-editing
+surface swaps in the shared **`LightCodeEditor`** (`components/editor/light-code-editor.tsx`)
+— a CodeMirror 6 editor with syntax highlighting, line numbers, history, and find/replace.
+Grammars lazy-load per language (`components/editor/load-language-support.ts`); the CM core
+is already in the bundle via the workflow expression field, so the incremental cost is the
+grammar of the language being opened. The light editor never calls `mountMonacoWorkbench`,
+so no LSP affordance exists on mobile by construction.
+
+| Surface   | Desktop                               | Mobile                                       |
+| --------- | ------------------------------------- | -------------------------------------------- |
+| Canvas    | Monaco (`canvas-panel.tsx`)           | `LightCodeEditor` (`useIsMobile`)            |
+| Skills    | Monaco + resizable 3-pane (persisted) | `LightCodeEditor` + tree/validation Sheets   |
+| Artifacts | Monaco + LSP workbench (edit mode)    | `LightCodeEditor` (`panelMode === "mobile"`) |
+
+Canvas toolbar actions degrade to whole-document semantics without a Monaco ref: AI actions
+operate on the full document, format actions append their scaffold, and auto-save reads the
+store copy of the active document.
+
 ## Offline Loader (Tauri)
 
 Tauri's strict CSP forbids loading Monaco from a CDN, so `configureMonacoLoader` is idempotent and

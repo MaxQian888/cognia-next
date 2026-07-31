@@ -1,4 +1,4 @@
-import { downstream, topoSort, upstream } from "./topo-sort"
+import { createWorkflowGraphIndex, downstream, topoSort, upstream } from "./topo-sort"
 import type { VisualWorkflow } from "@/types/workflow/visual"
 
 function wf(
@@ -54,10 +54,31 @@ describe("topoSort", () => {
     )
     const a = topoSort(w).order
     const b = topoSort(w).order
+    expect(a).toEqual(["a", "b"])
     expect(a).toEqual(b)
   })
 
-  it("recognizes loop back-edges and excludes them from the order", () => {
+  it("preserves source order when newly-ready nodes enter the heap out of order", () => {
+    const w = wf(
+      [
+        { id: "root-a", type: "trigger.manual" },
+        { id: "middle", type: "flow.set" },
+        { id: "root-b", type: "trigger.manual" },
+        { id: "tail", type: "flow.set" },
+      ],
+      [
+        { id: "e1", source: "root-a", target: "tail" },
+        { id: "e2", source: "root-b", target: "middle" },
+      ]
+    )
+    const graph = createWorkflowGraphIndex(w)
+
+    expect(topoSort(w, graph).order).toEqual(["root-a", "root-b", "middle", "tail"])
+  })
+
+  it("throws on a cycle through a flow.loop node instead of silently dropping the back-edge", () => {
+    // The old "authorized back-edge" tolerance removed e3 and ran the graph
+    // once — a validated-looking loop that never looped. Cycles now throw.
     const w = wf(
       [
         { id: "a", type: "trigger.manual" },
@@ -70,9 +91,24 @@ describe("topoSort", () => {
         { id: "e3", source: "b", target: "loop" }, // back-edge
       ]
     )
+    expect(() => topoSort(w)).toThrow(/flow\.loop container/)
+  })
+
+  it("keeps a linear chain through a flow.wait node sortable (no cycle, no throw)", () => {
+    const w = wf(
+      [
+        { id: "a", type: "trigger.manual" },
+        { id: "wait", type: "flow.wait" },
+        { id: "b", type: "ai.prompt" },
+      ],
+      [
+        { id: "e1", source: "a", target: "wait" },
+        { id: "e2", source: "wait", target: "b" },
+      ]
+    )
     const r = topoSort(w)
-    expect(r.order).toEqual(["a", "loop", "b"])
-    expect(r.backEdges.map((e) => e.id)).toEqual(["e3"])
+    expect(r.order).toEqual(["a", "wait", "b"])
+    expect(r.backEdges).toEqual([])
   })
 
   it("throws when a cycle has no flow.loop / flow.wait on it", () => {
@@ -91,6 +127,27 @@ describe("topoSort", () => {
 })
 
 describe("downstream / upstream", () => {
+  it("indexes nodes and both edge directions without changing edge order", () => {
+    const w = wf(
+      [
+        { id: "a", type: "trigger.manual" },
+        { id: "b", type: "ai.prompt" },
+        { id: "c", type: "flow.set" },
+      ],
+      [
+        { id: "e1", source: "a", target: "c" },
+        { id: "e2", source: "b", target: "c" },
+      ]
+    )
+
+    const graph = createWorkflowGraphIndex(w)
+
+    expect(graph.nodeById.get("b")?.type).toBe("ai.prompt")
+    expect(graph.outgoingEdgesByNode.get("a")?.map((edge) => edge.id)).toEqual(["e1"])
+    expect(graph.incomingEdgesByNode.get("c")?.map((edge) => edge.id)).toEqual(["e1", "e2"])
+    expect(graph.incomingEdgesByNode.get("a")).toEqual([])
+  })
+
   it("returns immediate neighbors", () => {
     const w = wf(
       [

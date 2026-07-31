@@ -13,11 +13,11 @@
 
 import { useEffect, useRef } from "react"
 import { useTranslations } from "next-intl"
-import { CompassIcon, StarIcon } from "lucide-react"
+import { CompassIcon, SparklesIcon, StarIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { useDiscoverLayout } from "@/hooks/discover/use-discover-layout"
-import { FAVORITES_CATEGORY, type DiscoverView } from "@/lib/discover/categories"
+import { FAVORITES_CATEGORY, FORYOU_CATEGORY, type DiscoverView } from "@/lib/discover/categories"
 import { resolveIcon } from "@/lib/a2ui/resolve-icon"
 import { cn } from "@/lib/utils"
 
@@ -43,6 +43,7 @@ export function CategoryChipStrip({ activeCategory, onSelect, className }: Categ
   }, [activeCategory])
 
   const favoritesActive = activeCategory === FAVORITES_CATEGORY
+  const foryouActive = activeCategory === FORYOU_CATEGORY
 
   return (
     <div
@@ -56,6 +57,25 @@ export function CategoryChipStrip({ activeCategory, onSelect, className }: Categ
       )}
       data-testid="discover-chip-strip"
     >
+      <Button
+        ref={foryouActive ? activeRef : undefined}
+        type="button"
+        role="tab"
+        variant={foryouActive ? "default" : "outline"}
+        size="sm"
+        onClick={() => onSelect(FORYOU_CATEGORY)}
+        aria-selected={foryouActive}
+        aria-current={foryouActive ? "page" : undefined}
+        data-testid="chip-strip-foryou"
+        className={cn(
+          "shrink-0 snap-start gap-1.5 whitespace-nowrap",
+          foryouActive ? "font-medium" : "font-normal"
+        )}
+      >
+        <SparklesIcon className="size-4 shrink-0" />
+        {t("categories.foryou")}
+      </Button>
+
       <Button
         ref={favoritesActive ? activeRef : undefined}
         type="button"

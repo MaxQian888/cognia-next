@@ -1,7 +1,8 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { createWorkflow } from "@/lib/db/workflows"
-import { findWorkflowByName, listWorkflowSummaries } from "./lookup"
+import { findWorkflowByName, listWorkflowSummaries, resolveWorkflowByNameOrId } from "./lookup"
 
 beforeEach(async () => {
   await getDb().delete()
@@ -61,6 +62,32 @@ describe("findWorkflowByName", () => {
   it("returns not-found when nothing matches", async () => {
     await createWorkflow({ name: "Alpha" })
     expect(await findWorkflowByName("zeta")).toEqual({ ok: false, reason: "not-found" })
+  })
+})
+
+describe("resolveWorkflowByNameOrId", () => {
+  it("resolves by exact id first", async () => {
+    const created = await createWorkflow({ name: "Nightly Run" })
+    const result = await resolveWorkflowByNameOrId(created.id)
+    expect(result).toEqual({ ok: true, workflowId: created.id, name: "Nightly Run" })
+  })
+
+  it("falls through to name resolution when the id does not exist", async () => {
+    const created = await createWorkflow({ name: "By Name Only" })
+    const result = await resolveWorkflowByNameOrId("by name only")
+    expect(result).toEqual({ ok: true, workflowId: created.id, name: "By Name Only" })
+  })
+
+  it("surfaces ambiguity from the name path", async () => {
+    await createWorkflow({ name: "Dup A" })
+    await createWorkflow({ name: "Dup B" })
+    const result = await resolveWorkflowByNameOrId("dup")
+    if (result.ok) throw new Error("expected not-ok")
+    expect(result.reason).toBe("ambiguous")
+  })
+
+  it("returns not-found for empty input", async () => {
+    expect(await resolveWorkflowByNameOrId("   ")).toEqual({ ok: false, reason: "not-found" })
   })
 })
 

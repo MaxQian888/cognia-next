@@ -1,0 +1,28 @@
+{
+  "backAria": "Back to settings",
+  "copied": "Command copied to clipboard.",
+  "copyAria": "Copy command: {command}",
+  "copyError": "Clipboard unavailable in this shell.",
+  "empty": "No commands have synced from your paired desktop yet.",
+  "intro": "Terminal commands from your paired desktop, mirrored here. Tap a command to copy it, or use the play button to run it again on the desktop.",
+  "noProject": "No project",
+  "noResults": "No commands match your search.",
+  "run": {
+    "cancel": "Cancel",
+    "close": "Close",
+    "confirm": "Run",
+    "confirmBody": "This runs the command on your paired desktop through its shell and shows the captured output here. It requires the remote-control permission for this device.",
+    "confirmTitle": "Run on desktop?",
+    "exitCode": "Exited with code {code}.",
+    "noOutput": "(no output)",
+    "resultTitle": "Command output",
+    "running": "Running on the desktop…",
+    "timedOut": "The command timed out and was killed."
+  },
+  "runAria": "Run on desktop: {command}",
+  "runError": "Could not run the command: {message}",
+  "searchAria": "Search command history",
+  "searchPlaceholder": "Search commands",
+  "title": "Command history",
+  "uses": "{count, plural, =1 {1 run} other {# runs}}"
+}

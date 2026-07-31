@@ -28,6 +28,16 @@ jest.mock("@/lib/db/settings", () => ({
   getSettings: () => getSettingsMock(),
 }))
 
+const saveSettingsMock = jest.fn(async () => {})
+let customLimitsSources: unknown[] = []
+jest.mock("@/stores/settings/settings-store", () => ({
+  useSettingsStore: (selector: (state: unknown) => unknown) =>
+    selector({
+      settings: { customLimitsSources },
+      save: saveSettingsMock,
+    }),
+}))
+
 // Stub the dialog so we can observe whether it opened without dragging in
 // Radix's portal behaviour.
 const dialogProps = jest.fn()
@@ -73,6 +83,7 @@ beforeEach(() => {
     alwaysAllowTools: [],
     builtinTools: {},
   })
+  customLimitsSources = []
 })
 
 describe("CcswitchProvidersTab", () => {
@@ -80,6 +91,40 @@ describe("CcswitchProvidersTab", () => {
     render(<CcswitchProvidersTab />)
     expect(await screen.findByText("Anthropic Official")).toBeInTheDocument()
     expect(screen.getByText("Kimi K2")).toBeInTheDocument()
+  })
+
+  it("imports recognized CCSwitch usage metadata as a disabled custom source", async () => {
+    useProvidersMock.mockReturnValue({
+      data: [
+        {
+          id: "kimi",
+          kind: "claude",
+          name: "Kimi Coding",
+          apiKey: "sk-kimi",
+          baseUrl: "https://api.kimi.com/coding",
+          usageScript: { templateType: "token_plan", codingPlanProvider: "kimi" },
+        },
+      ],
+      loading: false,
+      error: undefined,
+      refresh: jest.fn(),
+    })
+    detectMock.mockResolvedValue({ cognia: undefined, agents: {}, drift: false })
+
+    render(<CcswitchProvidersTab />)
+    fireEvent.click(await screen.findByRole("button", { name: "providers.importQuota" }))
+
+    await waitFor(() =>
+      expect(saveSettingsMock).toHaveBeenCalledWith({
+        customLimitsSources: [
+          expect.objectContaining({
+            id: "ccswitch:claude:kimi",
+            enabled: false,
+            request: expect.objectContaining({ path: "/coding/v1/usages" }),
+          }),
+        ],
+      })
+    )
   })
 
   it("clicking Use here opens the dialog with no agent prefill", async () => {

@@ -71,7 +71,7 @@ Each adapter follows the same decomposition:
 | Telegram      | Long-poll (`getUpdates`) or webhook | X-Telegram-Bot-Api-Secret-Token (HMAC-SHA256)                                        |
 | Discord       | Gateway WS (v10)                    | Ed25519 (X-Signature-Ed25519)                                                        |
 | Slack         | Events API webhook                  | HMAC-SHA256 (X-Slack-Signature v0)                                                   |
-| Lark / Feishu | Event callback webhook              | Verification token (`header.token`) + optional AES-256-CBC body decrypt (schema 2.0) |
+| Lark / Feishu | Long-connection WS (protobuf, **default**) or event-callback webhook | Long-conn: app_id/app_secret WS handshake. Webhook: verification token (`header.token`) + optional AES-256-CBC body decrypt (schema 2.0) |
 | OneBot v11    | Reverse-WS (device connects in)     | Bearer token (optional)                                                              |
 
 ### Outbound runner guarantees
@@ -93,7 +93,7 @@ Three modes governed by a three-layer policy stack:
 
 | Mode     | Behaviour                                                                     |
 | -------- | ----------------------------------------------------------------------------- |
-| `auto`   | Bus calls `sendPrompt` (stubbed Phase 1); final AI text enqueued as outbound. |
+| `auto`   | Bus calls `sendPrompt` through `runConnectorDigestTurn`; final AI text is enqueued as outbound. |
 | `manual` | User types reply in the Composer; `enqueueOutbound` called directly.          |
 | `draft`  | AI generates a `ConnectorDraft`; user approves or rejects via the Inbox UI.   |
 
@@ -129,7 +129,7 @@ Adapters require the Tauri desktop runtime. In web mode:
 Two new `SchedulerEventType` entries:
 
 - `connection:outbound:send` — directly enqueues an outbound job (no AI).
-- `connection:scheduled:digest` — Phase 1 stub; will invoke `sendPrompt` in Phase 1+.
+- `connection:scheduled:digest` — invokes `runConnectorDigestTurn`, which drives `sendPrompt` and enqueues the assistant reply.
 
 Both are registered as `TaskExecutor` via `lib/connectors/scheduled-outbound.ts`.
 
@@ -142,10 +142,10 @@ Both are registered as `TaskExecutor` via `lib/connectors/scheduled-outbound.ts`
 | Database schema version         | v16                    | v18 (v16 added canvas, v17 external bridge, v18 connectors)           |
 | ADR number                      | 0008                   | 0009 (0008 taken by external bridge)                                  |
 | axum version                    | 0.7                    | 0.8 (latest stable at implementation time)                            |
-| AI run in auto mode             | Full `sendPrompt`      | Phase 1 stub — records audit + placeholder job; deferred to Task 40+  |
+| AI run in auto mode             | Full `sendPrompt`      | Implemented through `runConnectorDigestTurn`; output is enqueued as outbound |
 | `segmentsToPlainText` separator | Unspecified            | `" "` (single space join across text/markdown segments)               |
 | Tauri Rust HTTP proxy           | axum                   | cognia-next `connectors_http_request` Tauri command                   |
-| Phase 1 E2E scope               | Full auto/manual/draft | Auto+manual smoke only; draft mode deferred pending real `sendPrompt` |
+| Initial E2E scope               | Full auto/manual/draft | Initial auto+manual smoke; draft and real-AI paths were completed in later runtime gates |
 
 ---
 
@@ -158,16 +158,14 @@ Both are registered as `TaskExecutor` via `lib/connectors/scheduled-outbound.ts`
 - Plugin API enables community connectors without forking.
 - Web users get a clear degradation path rather than silent failures.
 
-**Negative / deferred**
+**Current closure status**
 
-- The `auto` mode AI loop is stubbed; full `sendPrompt` → reply → outbound integration is
-  Phase 1+ work (Task 40+). **Closed in v38** — see `runConnectorDigestTurn` in
-  `lib/connectors/scheduled-outbound.ts`.
-- Attachment caching (`connectorAttachments` table) is schema-only; the fetch pipeline is
-  Phase 2. **Closed in v38** — TS dispatcher in `lib/connectors/attachment-fetcher.ts`
-  (Rust implementation in `src-tauri/src/connectors/attachments.rs` was already complete).
-- OAuth flows for Slack/Lark are partially wired; production tokens require Tauri keyring
-  integration and a hosted redirect URL. Status remains partial; see ADR-0025 follow-up.
+- The `auto` mode AI loop and `connection:scheduled:digest` path now share
+  `runConnectorDigestTurn` in `lib/connectors/scheduled-outbound.ts`.
+- Attachment caching now has the TS dispatcher in `lib/connectors/attachment-fetcher.ts`
+  and the Rust cache/fetch implementation in `src-tauri/src/connectors/attachments.rs`.
+- Slack/Lark OAuth code exchange is wired through `lib/connectors/oauth-registry.ts`
+  and the platform-specific OAuth handlers; deployment still needs a valid redirect URL.
 
 ---
 
@@ -292,6 +290,35 @@ improvements. All shipped behind the same plan file under
   timeout. A dedicated `connectors_onebot_probe` Tauri command that
   surfaces the live `ws_server.connected_clients()` table is a clear
   next step — listed in the plan as Task 3.2's Rust leg.
+
+---
+
+## Revision — 2026-07 (Lark link-completeness pass)
+
+A connector-chain audit found several Lark/pipeline gaps that were built-but-not-wired.
+This pass closes them (TypeScript-only — no Rust changes; the Rust attachment cache and
+OAuth completion handler already existed):
+
+- **Inbound rich-media ingestion (closes the "Phase 2 attachment caching" marker).**
+  `lib/connectors/adapters/lark/inbound-media.ts:enrichLarkInboundMedia` runs as a second
+  pass in the adapter's `dispatchEnvelope`, downloading image/file bytes through the existing
+  encrypted cache (`connectors_attachment_fetch` / `connectors_attachment_read`) and attaching
+  inline `dataBase64` (consumed by the already-wired inbound OCR + model vision paths) and,
+  for document files, extracted text via `processDocumentAsync`. `parse.ts:buildSegments` now
+  projects `post` / `file` / `audio` / `media` into typed segments instead of `[type]` stubs.
+- **Send-as-user (closes the "OAuth partial" marker).** `auth.ts:getUserAccessToken` /
+  `refreshUserToken` resolve + silently refresh the `user_token` the OAuth handler persists;
+  `index.ts:doRequest` uses it (opt-in `settings.sendAsUser`) with refresh-on-401 and a
+  graceful fall-back to the bot identity. `lark-config.tsx` gains an "Send as me" section with
+  an OAuth **Connect account** button (opens the authorize URL; the deep-link router completes
+  it) + the opt-in toggle.
+- **Pipeline fixes:** the `cooldown-after-bot-reply` blocker is now actually fed
+  (`ConnectorBus.recordBotReply`, wired from the outbound runner's `onDelivered` — the default
+  group-chat anti-spam cooldown had never fired); team/workflow IM dispatch now passes the same
+  fail-closed PII gate as the single-character path (`runtime.ts`, closing a confirmed red-line
+  bypass); the async outbound serializer honours explicit open_id/user_id/email routing;
+  `larkInboundToA2UI` unwraps the real event envelope; and the dead `segments-to-a2ui.ts`
+  module + the orphan `connectors_bind_webhook_route` invoke were removed.
 
 ---
 

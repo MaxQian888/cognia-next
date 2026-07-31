@@ -1,0 +1,112 @@
+# Render with envsubst after setting WORKSPACE_ID. The dedicated PVC and
+# Service enforce one workspace per runtime isolation boundary (ADR-0085).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: workspace-${WORKSPACE_ID}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: browser-profiles-${WORKSPACE_ID}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: workspace-runtime-${WORKSPACE_ID}
+spec:
+  serviceName: workspace-runtime-${WORKSPACE_ID}
+  replicas: 1
+  selector:
+    matchLabels:
+      app: workspace-runtime-${WORKSPACE_ID}
+  template:
+    metadata:
+      labels:
+        app: workspace-runtime-${WORKSPACE_ID}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: runtime
+          image: ghcr.io/maxqian888/cognia-workspace-runtime:latest
+          env:
+            - name: COGNIA_WORKSPACE_ID
+              value: ${WORKSPACE_ID}
+            - name: COGNIA_WORKSPACE_RUNTIME_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: workspace-runtime-secrets
+                  key: ${WORKSPACE_ID}
+          ports:
+            - name: private-http
+              containerPort: 27910
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+              add: [CHOWN, SETUID, SETGID]
+          resources:
+            requests:
+              cpu: "1"
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - curl -fsS -H "Authorization: Bearer $COGNIA_WORKSPACE_RUNTIME_SECRET" http://127.0.0.1:27910/v1/health >/dev/null
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - curl -fsS -H "Authorization: Bearer $COGNIA_WORKSPACE_RUNTIME_SECRET" http://127.0.0.1:27910/v1/health >/dev/null
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            - name: profiles
+              mountPath: /profiles
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: workspace
+          persistentVolumeClaim:
+            claimName: workspace-${WORKSPACE_ID}
+        - name: profiles
+          persistentVolumeClaim:
+            claimName: browser-profiles-${WORKSPACE_ID}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: workspace-runtime-${WORKSPACE_ID}
+spec:
+  selector:
+    app: workspace-runtime-${WORKSPACE_ID}
+  ports:
+    - name: private-http
+      port: 27910
+      targetPort: 27910

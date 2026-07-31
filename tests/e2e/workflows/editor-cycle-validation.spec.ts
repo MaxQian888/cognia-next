@@ -8,7 +8,7 @@
  *   3. Save still succeeds (drafts are allowed dirty per canvas handleSave).
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../helpers/db-reset"
 
 test.describe("workflow editor — cycle validation", () => {
@@ -49,7 +49,7 @@ test.describe("workflow editor — cycle validation", () => {
       ;(window as { __seededId?: string }).__seededId = wf.id
     })
     const id = await page.evaluate(() => (window as { __seededId?: string }).__seededId)
-    await page.goto(`/workflows/${id}`)
+    await page.goto(`/workflows/editor?id=${id}`)
     await expect(page.getByTestId("workflow-canvas")).toBeVisible()
 
     // Select node A → inspector shows the error badge.

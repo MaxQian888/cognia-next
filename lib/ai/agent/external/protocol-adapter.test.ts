@@ -2,6 +2,14 @@ import {
   BaseProtocolAdapter,
   ProtocolAdapterRegistry,
   protocolAdapterRegistry,
+  registerPluginProtocolAdapter,
+  unregisterPluginProtocolAdaptersByPlugin,
+  getPluginProtocolAdapterOwner,
+  getPluginProtocolAdapterProtocols,
+  listPluginProtocolAdapters,
+  onProtocolAdapterRegistryChange,
+  __resetPluginProtocolAdaptersForTesting,
+  type ProtocolAdapterRegistryChange,
   type SessionCreateOptions,
 } from "./protocol-adapter"
 import type {
@@ -19,6 +27,7 @@ class TestAdapter extends BaseProtocolAdapter {
   events: ExternalAgentEvent[] = []
   permissionRecords: AcpPermissionResponse[] = []
   cancelled: string[] = []
+  promptRecords: ExternalAgentMessage[] = []
   shouldThrowInPrompt = false
 
   async connect(_config: ExternalAgentConfig): Promise<void> {
@@ -45,9 +54,10 @@ class TestAdapter extends BaseProtocolAdapter {
   }
   async *prompt(
     _sessionId: string,
-    _message: ExternalAgentMessage,
+    message: ExternalAgentMessage,
     _options?: ExternalAgentExecutionOptions
   ): AsyncIterable<ExternalAgentEvent> {
+    this.promptRecords.push(message)
     if (this.shouldThrowInPrompt) {
       throw new Error("stream broken")
     }
@@ -61,6 +71,18 @@ class TestAdapter extends BaseProtocolAdapter {
   async cancel(sessionId: string): Promise<void> {
     this.cancelled.push(sessionId)
   }
+  getCompactionCapability(sessionId: string) {
+    return this.getAdvertisedCommandCompactionCapability(sessionId)
+  }
+  compactSession(sessionId: string, options?: { focus?: string }) {
+    return this.compactWithAdvertisedCommand(sessionId, options)
+  }
+  getProviderUndoCapability(sessionId: string) {
+    return this.getAdvertisedProviderUndoCapability(sessionId)
+  }
+  undoLastProviderChange(sessionId: string) {
+    return this.undoWithAdvertisedCommand(sessionId)
+  }
 
   // Expose protected helpers for testing
   publicUpdateSession(sessionId: string, updates: Partial<ExternalAgentSession>) {
@@ -72,6 +94,13 @@ class TestAdapter extends BaseProtocolAdapter {
 }
 
 describe("BaseProtocolAdapter — basic accessors", () => {
+  it("does not opt every subclass into provider commands implicitly", () => {
+    expect(BaseProtocolAdapter.prototype).not.toHaveProperty("getCompactionCapability")
+    expect(BaseProtocolAdapter.prototype).not.toHaveProperty("compactSession")
+    expect(BaseProtocolAdapter.prototype).not.toHaveProperty("getProviderUndoCapability")
+    expect(BaseProtocolAdapter.prototype).not.toHaveProperty("undoLastProviderChange")
+  })
+
   it("starts in disconnected state and reports it", () => {
     const a = new TestAdapter()
     expect(a.connectionStatus).toBe("disconnected")
@@ -127,6 +156,54 @@ describe("BaseProtocolAdapter — basic accessors", () => {
   it("updateSession returns undefined for a missing session", async () => {
     const a = new TestAdapter()
     expect(a.publicUpdateSession("missing", { permissionMode: "plan" })).toBeUndefined()
+  })
+})
+
+describe("BaseProtocolAdapter session commands", () => {
+  it("executes an advertised compact command and preserves optional focus", async () => {
+    const adapter = new TestAdapter()
+    const session = await adapter.createSession()
+    adapter.publicUpdateSession(session.id, {
+      metadata: {
+        availableCommands: [
+          {
+            name: "/compress",
+            description: "Compress context",
+            input: { hint: "focus" },
+          },
+        ],
+      },
+    })
+    adapter.events = [{ type: "done", success: true, timestamp: new Date() }]
+
+    expect(await adapter.getCompactionCapability(session.id)).toEqual({
+      status: "supported",
+      routes: [{ kind: "command", command: "compress", supportsFocus: true }],
+    })
+    await adapter.compactSession(session.id, { focus: "preserve API decisions" })
+
+    expect(adapter.promptRecords.at(-1)?.content).toEqual([
+      { type: "text", text: "/compress preserve API decisions" },
+    ])
+  })
+
+  it("executes provider undo only when the command is advertised", async () => {
+    const adapter = new TestAdapter()
+    const session = await adapter.createSession()
+    adapter.publicUpdateSession(session.id, {
+      metadata: {
+        availableCommands: [{ name: "undo", description: "Undo last change" }],
+      },
+    })
+    adapter.events = [{ type: "done", success: true, timestamp: new Date() }]
+
+    expect(await adapter.getProviderUndoCapability(session.id)).toEqual({
+      status: "supported",
+      command: "undo",
+    })
+    await adapter.undoLastProviderChange(session.id)
+
+    expect(adapter.promptRecords.at(-1)?.content).toEqual([{ type: "text", text: "/undo" }])
   })
 })
 
@@ -408,5 +485,116 @@ describe("ProtocolAdapterRegistry", () => {
 
   it("exposes a global registry instance", () => {
     expect(protocolAdapterRegistry).toBeInstanceOf(ProtocolAdapterRegistry)
+  })
+})
+
+describe("plugin-contributed protocol adapter overlay", () => {
+  afterEach(() => {
+    __resetPluginProtocolAdaptersForTesting()
+  })
+
+  it("registers a plugin adapter into the global registry and tracks the owner", () => {
+    const ok = registerPluginProtocolAdapter("p1:demo", () => new TestAdapter(), { pluginId: "p1" })
+    expect(ok).toBe(true)
+    expect(protocolAdapterRegistry.has("p1:demo")).toBe(true)
+    expect(protocolAdapterRegistry.create("p1:demo")).toBeInstanceOf(TestAdapter)
+    expect(getPluginProtocolAdapterOwner("p1:demo")).toBe("p1")
+    expect(listPluginProtocolAdapters()).toEqual([{ protocol: "p1:demo", pluginId: "p1" }])
+  })
+
+  it("re-registering the SAME plugin's protocol replaces it (idempotent re-enable)", () => {
+    expect(
+      registerPluginProtocolAdapter("p1:demo", () => new TestAdapter(), { pluginId: "p1" })
+    ).toBe(true)
+    expect(
+      registerPluginProtocolAdapter("p1:demo", () => new TestAdapter(), { pluginId: "p1" })
+    ).toBe(true)
+    expect(listPluginProtocolAdapters()).toHaveLength(1)
+  })
+
+  it("refuses to overwrite a built-in or another plugin's protocol", () => {
+    // Simulate a host built-in occupying the slot.
+    protocolAdapterRegistry.register("acp", () => new TestAdapter())
+    expect(registerPluginProtocolAdapter("acp", () => new TestAdapter(), { pluginId: "p1" })).toBe(
+      false
+    )
+    expect(getPluginProtocolAdapterOwner("acp")).toBeUndefined()
+    protocolAdapterRegistry.unregister("acp")
+
+    // Another plugin already owns it.
+    registerPluginProtocolAdapter("shared:x", () => new TestAdapter(), { pluginId: "p1" })
+    expect(
+      registerPluginProtocolAdapter("shared:x", () => new TestAdapter(), { pluginId: "p2" })
+    ).toBe(false)
+    expect(getPluginProtocolAdapterOwner("shared:x")).toBe("p1")
+  })
+
+  it("unregisterPluginProtocolAdaptersByPlugin drops exactly that plugin's adapters", () => {
+    registerPluginProtocolAdapter("p1:a", () => new TestAdapter(), { pluginId: "p1" })
+    registerPluginProtocolAdapter("p1:b", () => new TestAdapter(), { pluginId: "p1" })
+    registerPluginProtocolAdapter("p2:c", () => new TestAdapter(), { pluginId: "p2" })
+
+    expect(unregisterPluginProtocolAdaptersByPlugin("p1")).toBe(2)
+    expect(protocolAdapterRegistry.has("p1:a")).toBe(false)
+    expect(protocolAdapterRegistry.has("p1:b")).toBe(false)
+    expect(protocolAdapterRegistry.has("p2:c")).toBe(true)
+
+    __resetPluginProtocolAdaptersForTesting()
+    expect(protocolAdapterRegistry.has("p2:c")).toBe(false)
+  })
+})
+
+describe("plugin overlay — per-plugin protocols + change events", () => {
+  afterEach(() => {
+    __resetPluginProtocolAdaptersForTesting()
+  })
+
+  it("getPluginProtocolAdapterProtocols returns only that plugin's protocols", () => {
+    registerPluginProtocolAdapter("p1:a", () => new TestAdapter(), { pluginId: "p1" })
+    registerPluginProtocolAdapter("p1:b", () => new TestAdapter(), { pluginId: "p1" })
+    registerPluginProtocolAdapter("p2:c", () => new TestAdapter(), { pluginId: "p2" })
+
+    expect(getPluginProtocolAdapterProtocols("p1").sort()).toEqual(["p1:a", "p1:b"])
+    expect(getPluginProtocolAdapterProtocols("p2")).toEqual(["p2:c"])
+    expect(getPluginProtocolAdapterProtocols("missing")).toEqual([])
+  })
+
+  it("emits register/unregister change events with protocols + pluginId", () => {
+    const changes: ProtocolAdapterRegistryChange[] = []
+    const unsubscribe = onProtocolAdapterRegistryChange((change) => changes.push(change))
+
+    registerPluginProtocolAdapter("p1:a", () => new TestAdapter(), { pluginId: "p1" })
+    registerPluginProtocolAdapter("p1:b", () => new TestAdapter(), { pluginId: "p1" })
+    expect(changes).toEqual([
+      { kind: "register", protocols: ["p1:a"], pluginId: "p1" },
+      { kind: "register", protocols: ["p1:b"], pluginId: "p1" },
+    ])
+
+    changes.length = 0
+    unregisterPluginProtocolAdaptersByPlugin("p1")
+    expect(changes).toEqual([{ kind: "unregister", protocols: ["p1:a", "p1:b"], pluginId: "p1" }])
+
+    changes.length = 0
+    unsubscribe()
+    registerPluginProtocolAdapter("p2:c", () => new TestAdapter(), { pluginId: "p2" })
+    expect(changes).toHaveLength(0)
+  })
+
+  it("does not emit an empty unregister event when the plugin owns nothing", () => {
+    const changes: ProtocolAdapterRegistryChange[] = []
+    onProtocolAdapterRegistryChange((change) => changes.push(change))
+    expect(unregisterPluginProtocolAdaptersByPlugin("nobody")).toBe(0)
+    expect(changes).toHaveLength(0)
+  })
+
+  it("a throwing listener never breaks the register/unregister flow", () => {
+    const unsubscribe = onProtocolAdapterRegistryChange(() => {
+      throw new Error("boom")
+    })
+    expect(() =>
+      registerPluginProtocolAdapter("p1:a", () => new TestAdapter(), { pluginId: "p1" })
+    ).not.toThrow()
+    expect(protocolAdapterRegistry.has("p1:a")).toBe(true)
+    unsubscribe()
   })
 })

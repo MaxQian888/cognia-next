@@ -7,10 +7,17 @@ import {
   getMessageBus,
   resetMessageBus,
   createEventAPI,
+  emitSystemBusEvent,
   SystemEvents,
+  BusNamespaceError,
+  BusPayloadTooLargeError,
   type BusEvent,
 } from "./message-bus"
-import { PLUGIN_MESSAGE_HISTORY_MAX } from "./constants"
+import { PLUGIN_MESSAGE_HISTORY_MAX, PLUGIN_MESSAGE_MAX_BYTES } from "./constants"
+import {
+  initializePluginPermissions,
+  revokePluginPermissions,
+} from "@/lib/plugin/api/permission-api"
 
 describe("MessageBus", () => {
   let bus: MessageBus
@@ -75,6 +82,28 @@ describe("MessageBus", () => {
       expect(handler).toHaveBeenCalled()
       const event = handler.mock.calls[0][0] as BusEvent
       expect(event.source.type).toBe("system")
+    })
+
+    it("rejects a plugin-sourced emit under the reserved system: namespace", () => {
+      expect(() =>
+        bus.emit(SystemEvents.AGENT_COMPLETED, {}, { type: "plugin", id: "spoofer" })
+      ).toThrow(BusNamespaceError)
+    })
+
+    it("allows the host to emit under the reserved namespace", () => {
+      const handler = jest.fn()
+      bus.on(SystemEvents.AGENT_COMPLETED, handler)
+      expect(() =>
+        bus.emitFromSystem(SystemEvents.AGENT_COMPLETED, { sessionId: "s" })
+      ).not.toThrow()
+      expect(handler).toHaveBeenCalled()
+    })
+
+    it("rejects an oversized payload", () => {
+      const huge = { blob: "x".repeat(PLUGIN_MESSAGE_MAX_BYTES + 1) }
+      expect(() => bus.emit("big", huge, { type: "system", id: "test" })).toThrow(
+        BusPayloadTooLargeError
+      )
     })
   })
 
@@ -275,6 +304,14 @@ describe("MessageBus", () => {
 describe("createEventAPI", () => {
   beforeEach(() => {
     resetMessageBus()
+    // Grant the bus permissions via the manifest-permission flow so the
+    // gated façade methods are reachable.
+    initializePluginPermissions("my-plugin", ["events:publish", "events:subscribe"])
+  })
+
+  afterEach(() => {
+    revokePluginPermissions("my-plugin")
+    revokePluginPermissions("ungated-plugin")
   })
 
   it("should create an event API for a plugin", () => {
@@ -301,6 +338,61 @@ describe("createEventAPI", () => {
     expect(event.source.id).toBe("my-plugin")
     expect(event.source.type).toBe("plugin")
   })
+
+  it("rejects emit without the events:publish permission", () => {
+    // `ungated-plugin` declared no bus permissions.
+    initializePluginPermissions("ungated-plugin", [])
+    const api = createEventAPI("ungated-plugin")
+    expect(() => api.emit("test", {})).toThrow(/events:publish/)
+  })
+
+  it("rejects subscribe / getHistory without the events:subscribe permission", () => {
+    initializePluginPermissions("ungated-plugin", ["events:publish"])
+    const api = createEventAPI("ungated-plugin")
+    // publish is allowed, subscribe is not.
+    expect(() => api.emit("test", {})).not.toThrow()
+    expect(() => api.on("test", jest.fn())).toThrow(/events:subscribe/)
+    expect(() => api.getHistory()).toThrow(/events:subscribe/)
+  })
+
+  it("still rejects a plugin emitting under the reserved namespace even when permitted", () => {
+    const api = createEventAPI("my-plugin")
+    expect(() => api.emit(SystemEvents.SESSION_CREATED, {})).toThrow(BusNamespaceError)
+  })
+})
+
+describe("emitSystemBusEvent (host helper)", () => {
+  beforeEach(() => {
+    resetMessageBus()
+  })
+
+  // Regression guard: the dormant SystemEvents must actually reach a host
+  // subscriber when emitted through the helper that the chat / session / team
+  // seams call. A `system:*` subscriber receives every lifecycle signal.
+  it("delivers system events to a /^system:/ subscriber", () => {
+    const handler = jest.fn()
+    getMessageBus().on(/^system:/, handler)
+
+    emitSystemBusEvent(SystemEvents.SESSION_CREATED, { sessionId: "s1" })
+    emitSystemBusEvent(SystemEvents.AGENT_STARTED, { sessionId: "s1" })
+    emitSystemBusEvent(SystemEvents.AGENT_COMPLETED, { sessionId: "s1" })
+
+    expect(handler).toHaveBeenCalledTimes(3)
+    const types = handler.mock.calls.map((c) => (c[0] as BusEvent).type)
+    expect(types).toEqual([
+      SystemEvents.SESSION_CREATED,
+      SystemEvents.AGENT_STARTED,
+      SystemEvents.AGENT_COMPLETED,
+    ])
+    expect((handler.mock.calls[0][0] as BusEvent).source.type).toBe("system")
+  })
+
+  it("swallows an emit failure so the host action is never blocked", () => {
+    // An oversized payload makes the underlying `emit` throw; the helper must
+    // absorb it (best-effort) rather than break the chat/session seam it rides.
+    const huge = { blob: "x".repeat(PLUGIN_MESSAGE_MAX_BYTES + 1) }
+    expect(() => emitSystemBusEvent(SystemEvents.THEME_CHANGED, huge)).not.toThrow()
+  })
 })
 
 describe("SystemEvents", () => {
@@ -310,5 +402,76 @@ describe("SystemEvents", () => {
     expect(SystemEvents.PLUGIN_DISABLED).toBeDefined()
     expect(SystemEvents.APP_READY).toBeDefined()
     expect(SystemEvents.MESSAGE_SENT).toBeDefined()
+  })
+})
+
+// ── W3.6/W3.7: history redaction, owner-scoped off, reentrancy guard ─────────
+describe("MessageBus hardening (W3.6/W3.7)", () => {
+  beforeEach(() => {
+    resetMessageBus()
+  })
+
+  afterEach(() => {
+    revokePluginPermissions("viewer")
+    revokePluginPermissions("other")
+  })
+
+  it("strips other plugins' payloads from a plugin's getHistory view", () => {
+    const bus = getMessageBus()
+    bus.emitFromPlugin("other", "custom:secret", { token: "s3cr3t" })
+    bus.emitFromPlugin("viewer", "custom:own", { mine: true })
+    bus.emitFromSystem(SystemEvents.AGENT_COMPLETED, { sessionId: "s1" })
+
+    initializePluginPermissions("viewer", ["events:subscribe"])
+    const api = createEventAPI("viewer")
+    const history = api.getHistory()
+
+    const otherEvt = history.find((e) => e.type === "custom:secret")
+    expect(otherEvt?.payload).toBeUndefined()
+    expect(otherEvt?.metadata?.payloadRedacted).toBe(true)
+
+    const ownEvt = history.find((e) => e.type === "custom:own")
+    expect(ownEvt?.payload).toEqual({ mine: true })
+
+    // System events are ids-only by design and stay readable.
+    const sysEvt = history.find((e) => e.type === SystemEvents.AGENT_COMPLETED)
+    expect(sysEvt?.payload).toEqual({ sessionId: "s1" })
+  })
+
+  it("off() through the plugin façade only removes the plugin's own subscription", () => {
+    const bus = getMessageBus()
+    const victimHandler = jest.fn()
+    // Another plugin's subscription, created with a known source.
+    bus.on("custom:evt", victimHandler, { source: { type: "plugin", id: "other" } })
+    const victimId = (
+      bus as unknown as { subscriptions: Map<string, { id: string }> }
+    ).subscriptions
+      .values()
+      .next().value!.id
+
+    initializePluginPermissions("viewer", ["events:subscribe"])
+    const api = createEventAPI("viewer")
+    api.off(victimId) // must be a no-op — viewer doesn't own it
+
+    bus.emitFromSystem("custom:evt", {})
+    expect(victimHandler).toHaveBeenCalledTimes(1)
+
+    // The owner CAN remove it through its own façade.
+    initializePluginPermissions("other", ["events:subscribe"])
+    createEventAPI("other").off(victimId)
+    bus.emitFromSystem("custom:evt", {})
+    expect(victimHandler).toHaveBeenCalledTimes(1)
+  })
+
+  it("bounds re-emitting handlers instead of blowing the stack", () => {
+    const bus = getMessageBus()
+    let count = 0
+    bus.on("custom:ping", () => {
+      count++
+      if (count < 200) bus.emitFromSystem("custom:ping", {})
+    })
+    expect(() => bus.emitFromSystem("custom:ping", {})).not.toThrow()
+    // The first 16 deliveries run synchronously; the rest defer to microtasks.
+    expect(count).toBeGreaterThanOrEqual(16)
   })
 })

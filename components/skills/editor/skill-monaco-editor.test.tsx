@@ -2,16 +2,29 @@
  * @jest-environment jsdom
  */
 
-const fakeEditor = { id: "monaco-1" }
+const fakeEditor = {
+  id: "monaco-1",
+  getModel: () => ({ uri: { toString: () => "skill:///fake/uri" } }),
+  setPosition: jest.fn(),
+  revealLineInCenterIfOutsideViewport: jest.fn(),
+  focus: jest.fn(),
+  getAction: () => ({ run: jest.fn() }),
+}
 const fakeMonaco = {
-  editor: { defineTheme: jest.fn(), setTheme: jest.fn() },
+  editor: {
+    defineTheme: jest.fn(),
+    setTheme: jest.fn(),
+    getModelMarkers: () => [],
+    onDidChangeMarkers: () => ({ dispose: () => {} }),
+  },
   languages: {},
   Uri: {},
 }
 
-jest.mock("@monaco-editor/react", () => ({
-  __esModule: true,
-  default: ({
+jest.mock("@monaco-editor/react", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const React = require("react")
+  const MockEditor = ({
     value,
     onChange,
     language,
@@ -22,10 +35,13 @@ jest.mock("@monaco-editor/react", () => ({
     language: string
     onMount?: (editor: unknown, monaco: unknown) => void
   }) => {
-    // The real Editor fires onMount asynchronously after layout; for unit
-    // tests we invoke it synchronously so consumers can assert workbench
-    // wiring without extra timers.
-    if (onMount) onMount(fakeEditor, fakeMonaco)
+    // The real Editor fires onMount asynchronously after layout. Mirror that
+    // with an effect (RTL's act() flushes it within render) so consumers can
+    // safely setState in onMount without "update during render" errors.
+    React.useEffect(() => {
+      onMount?.(fakeEditor, fakeMonaco)
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
     return (
       <textarea
         data-testid="monaco-mock"
@@ -34,9 +50,9 @@ jest.mock("@monaco-editor/react", () => ({
         onChange={(e) => onChange(e.target.value)}
       />
     )
-  },
-  loader: { config: jest.fn() },
-}))
+  }
+  return { __esModule: true, default: MockEditor, loader: { config: jest.fn() } }
+})
 
 jest.mock("next-themes", () => ({
   useTheme: () => ({ resolvedTheme: "dark" }),
@@ -67,6 +83,12 @@ describe("SkillMonacoEditor", () => {
   it("renders Monaco with the requested language", () => {
     render(<SkillMonacoEditor value="body" language="markdown" onChange={jest.fn()} />)
     expect(screen.getByTestId("monaco-mock")).toHaveAttribute("data-language", "markdown")
+  })
+
+  it("renders the diagnostics bar once the editor mounts", () => {
+    render(<SkillMonacoEditor value="body" language="typescript" onChange={jest.fn()} />)
+    expect(screen.getByTestId("monaco-diagnostics-bar")).toBeInTheDocument()
+    expect(screen.getByText("No problems")).toBeInTheDocument()
   })
 
   it("forwards changes to onChange", () => {

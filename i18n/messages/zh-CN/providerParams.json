@@ -1,0 +1,189 @@
+{
+  "advanced": "高级选项",
+  "anthropic": {
+    "thinking": {
+      "budgetTokens": {
+        "description": "分配给思考的最大令牌数（1024-128000）。",
+        "label": "思考预算"
+      },
+      "enabled": {
+        "description": "启用 Claude 的扩展思考能力以处理复杂推理。",
+        "label": "扩展思考"
+      }
+    }
+  },
+  "cohere": {
+    "connectors": {
+      "description": "启用网络搜索连接器。",
+      "label": "网络搜索"
+    },
+    "k": {
+      "description": "将令牌选择限制为前 K 个候选。",
+      "label": "Top K"
+    }
+  },
+  "connection": {
+    "maxRetries": {
+      "description": "失败时的重试次数。",
+      "label": "最大重试次数"
+    },
+    "retryDelay": {
+      "description": "重试之间的延迟（毫秒）。",
+      "label": "重试延迟"
+    },
+    "timeout": {
+      "description": "等待回复的最大时间（毫秒）。",
+      "label": "请求超时"
+    }
+  },
+  "connectionSection": "连接",
+  "deepseek": {
+    "enableReasoning": {
+      "description": "为复杂任务启用深度思考。",
+      "label": "启用推理"
+    }
+  },
+  "frequencyPenalty": {
+    "description": "通过惩罚高频令牌来减少重复。",
+    "label": "频率惩罚"
+  },
+  "google": {
+    "groundingEnabled": {
+      "description": "启用 Google 搜索基础功能以提供有据可依的回复。",
+      "label": "搜索基础 / 网页搜索"
+    },
+    "safetySettings": {
+      "dangerousContent": {
+        "description": "过滤危险内容。",
+        "label": "危险内容"
+      },
+      "description": "内容安全过滤级别。",
+      "harassment": {
+        "description": "过滤骚扰内容。",
+        "label": "骚扰内容"
+      },
+      "hateSpeech": {
+        "description": "过滤仇恨言论内容。",
+        "label": "仇恨言论"
+      },
+      "high": "高限制",
+      "label": "安全设置",
+      "low": "低限制",
+      "medium": "中等限制",
+      "none": "无限制",
+      "sexuallyExplicit": {
+        "description": "过滤色情内容。",
+        "label": "露骨性内容"
+      }
+    }
+  },
+  "inference": "推理参数",
+  "invalidJson": "JSON 格式不正确",
+  "maxTokens": {
+    "description": "回复中的最大令牌数。",
+    "label": "最大令牌数"
+  },
+  "mistral": {
+    "safePrompt": {
+      "description": "在对话前注入安全提示。",
+      "label": "安全提示"
+    }
+  },
+  "ollama": {
+    "keepAlive": {
+      "description": "保持模型加载的时间（例如 '5m', '1h'）。",
+      "label": "保持活跃"
+    },
+    "mirostat": {
+      "description": "Mirostat 采样模式，用于困惑度控制。",
+      "disabled": "禁用",
+      "label": "Mirostat 采样",
+      "mirostat1": "Mirostat 1",
+      "mirostat2": "Mirostat 2"
+    },
+    "numCtx": {
+      "description": "上下文窗口大小（令牌数）。",
+      "label": "上下文大小"
+    },
+    "numGpu": {
+      "description": "卸载到 GPU 的层数。",
+      "label": "GPU 层数"
+    },
+    "numPredict": {
+      "description": "预测的最大令牌数。",
+      "label": "最大预测"
+    },
+    "numThread": {
+      "description": "用于计算的线程数。",
+      "label": "线程数"
+    },
+    "repeatPenalty": {
+      "description": "重复令牌的惩罚值。",
+      "label": "重复惩罚"
+    }
+  },
+  "openai": {
+    "logprobs": {
+      "description": "在回复中包含令牌对数概率。",
+      "label": "对数概率"
+    },
+    "reasoningEffort": {
+      "description": "模型投入推理的程度（仅限 o 系列模型）。",
+      "high": "高",
+      "label": "推理力度",
+      "low": "低",
+      "medium": "中"
+    },
+    "responseFormat": {
+      "description": "强制模型以特定格式输出。",
+      "jsonObject": "JSON 对象",
+      "label": "回复格式",
+      "text": "文本"
+    },
+    "seed": {
+      "description": "固定种子以获得可重复的输出。",
+      "label": "种子"
+    },
+    "store": {
+      "description": "存储补全结果以供将来参考。",
+      "label": "存储补全"
+    }
+  },
+  "outOfRange": "值须在 {min} 到 {max} 之间",
+  "presencePenalty": {
+    "description": "通过惩罚已出现的令牌来鼓励新话题。",
+    "label": "存在惩罚"
+  },
+  "providerSpecific": "提供商特有",
+  "resetAll": "重置为默认值",
+  "resetConfirm": "将所有参数重置为默认值？",
+  "sourceGlobal": "全局默认",
+  "sourceProvider": "提供商默认",
+  "sourceSession": "会话覆盖",
+  "tabDescription": "配置推理和提供商特定参数",
+  "tabTitle": "参数设置",
+  "temperature": {
+    "description": "控制随机性。值越低越精确，值越高越有创意。",
+    "label": "温度"
+  },
+  "togetherAi": {
+    "repetitionPenalty": {
+      "description": "重复令牌的惩罚值。",
+      "label": "重复惩罚"
+    },
+    "topK": {
+      "description": "将令牌选择限制为前 K 个候选。",
+      "label": "Top K"
+    }
+  },
+  "topP": {
+    "description": "核采样参数。只考虑累积概率达到 top_p 的令牌。",
+    "label": "Top P（核采样）"
+  },
+  "xai": {
+    "searchEnabled": {
+      "description": "允许 Grok 搜索网络。",
+      "label": "网络搜索"
+    }
+  }
+}

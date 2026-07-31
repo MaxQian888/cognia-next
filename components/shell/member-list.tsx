@@ -13,11 +13,11 @@ import { cn } from "@/lib/utils"
 import { listCharactersByIds } from "@/lib/db/characters"
 import { getSession, updateSession } from "@/lib/db/sessions"
 import { getTeam } from "@/lib/db/teams"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { avatarColor } from "@/lib/ui/avatar"
 import { useClientLiveQuery } from "@/hooks/data"
 import { useUIStore, type MemberStatus } from "@/stores/ui"
-import type { Character, Team } from "@/lib/claude/types"
+import type { Character, Team } from "@cognia/agent-config-types"
 import { ChevronDownIcon, ChevronRightIcon, StickyNoteIcon, UsersIcon } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { useEffect, useMemo, useRef, useState } from "react"
@@ -34,6 +34,18 @@ interface Props {
    * composer for the active session.
    */
   onMention: (character: Character) => void
+  /**
+   * Where the list is mounted.
+   *
+   * - `"rail"` (default) — the desktop chat workspace's right column. Hidden
+   *   below `lg` (no room) and collapsible to an icon strip via
+   *   `ui.showMemberList`.
+   * - `"sheet"` — inside the mobile members Sheet, which owns its own width and
+   *   whose close button already *is* the collapse. The `lg` gate must not
+   *   apply: a phone viewport never reaches it, so the sheet opened blank, and
+   *   a persisted `showMemberList: false` blanked it a second way.
+   */
+  variant?: "rail" | "sheet"
 }
 
 /**
@@ -41,7 +53,7 @@ interface Props {
  * avatar, name, and live status dot. Clicking a row inserts the character's
  * `@mention` into the composer.
  */
-export function MemberList({ teamSessionId, teamId, onMention }: Props) {
+export function MemberList({ teamSessionId, teamId, onMention, variant = "rail" }: Props) {
   const t = useTranslations("desktop.memberList")
   const showMemberList = useUIStore((s) => s.showMemberList)
   const setShowMemberList = useUIStore((s) => s.setShowMemberList)
@@ -80,9 +92,15 @@ export function MemberList({ teamSessionId, teamId, onMention }: Props) {
 
   if (!teamId || !teamSessionId) return null
 
-  if (!showMemberList) {
+  // The sheet host has no room for — and no use for — the collapsed icon
+  // strip: dismissing the Sheet is the collapse.
+  if (!showMemberList && variant === "rail") {
     return (
-      <div className="hidden border-l bg-muted/20 lg:flex">
+      // `data-bg-target="chat"` opts this rail into the wallpaper layer so it
+      // matches the ChannelList on the opposite side — without it the right
+      // rail stays opaque while the rest of the chat scope shows the active
+      // background (see app/globals.css "Appearance: wallpaper layer").
+      <div className="hidden border-l bg-muted/20 lg:flex" data-bg-target="chat">
         <Button
           variant="ghost"
           size="icon"
@@ -99,28 +117,38 @@ export function MemberList({ teamSessionId, teamId, onMention }: Props) {
 
   return (
     <aside
-      className="hidden h-full w-56 shrink-0 flex-col border-l bg-muted/20 lg:flex"
+      className={cn(
+        "h-full shrink-0 flex-col bg-muted/20",
+        variant === "sheet" ? "flex w-full" : "hidden w-56 border-l lg:flex"
+      )}
       aria-label={t("label")}
+      data-variant={variant}
+      // Mirror the ChannelList rail: absorb the chat-scope wallpaper so the
+      // background and theme stay unified across both side rails. The shared
+      // form-control rules then make the scratchpad textarea wallpaper-aware.
+      data-bg-target="chat"
     >
       <div className="flex items-center justify-between gap-2 px-3 py-3">
         <span className="truncate text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           {t("heading", { count: orderedMembers.length })}
         </span>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-6"
-          onClick={handleHide}
-          aria-label={t("hide")}
-          title={t("hide")}
-        >
-          <ChevronRightIcon className="size-4" />
-        </Button>
+        {variant === "rail" ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-6"
+            onClick={handleHide}
+            aria-label={t("hide")}
+            title={t("hide")}
+          >
+            <ChevronRightIcon className="size-4" />
+          </Button>
+        ) : null}
       </div>
 
       <ScratchpadPanel teamSessionId={teamSessionId} />
 
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 [&_[data-slot=scroll-area-scrollbar]]:hidden">
         <ul className="flex flex-col gap-0.5 px-2 pb-2">
           {orderedMembers.map((member) => (
             <MemberRow

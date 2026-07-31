@@ -6,7 +6,8 @@
  */
 
 import { create } from "zustand"
-import { persist, createJSONStorage } from "zustand/middleware"
+import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 import type { PluginSource } from "@/types/plugin"
 import type {
   InstallProgressInfo,
@@ -635,7 +636,7 @@ export const usePluginMarketplaceStore = create<PluginMarketplaceState>()(
     {
       name: "cognia-plugin-marketplace",
       version: 3,
-      storage: createJSONStorage(() => localStorage),
+      storage: persistLocalStorage(),
       migrate: (state, version) => {
         const persisted = (state || {}) as Record<string, unknown>
         if (version < 2) {

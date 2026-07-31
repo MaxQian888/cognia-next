@@ -1,0 +1,122 @@
+{
+  "debugger": {
+    "allSurfaces": "所有 surface",
+    "allTypes": "所有类型",
+    "clear": "清空",
+    "confirmClear": "清空全部事件历史？",
+    "description": "所有 surface 的 userAction + dataModelChange 事件。",
+    "empty": "当前筛选下无事件。",
+    "filterSurface": "按 surface 筛选",
+    "refresh": "刷新",
+    "selectHint": "选择一个事件查看 payload。",
+    "title": "实时事件流"
+  },
+  "description": "配置代理如何渲染交互界面，并实时查看事件流。",
+  "mcpBridge": {
+    "notSeeded": "a2ui-bridge 尚未种子化 — 重启应用以升级到 schema v13。",
+    "projection": {
+      "agentHelp": "将 a2ui-bridge 投影到 {agent} 配置文件。",
+      "description": "将桥接镜像到各可写代理的用户级 MCP 配置。",
+      "readOnly": "只读 — 配置路径不可写。",
+      "title": "外部代理投影"
+    },
+    "status": {
+      "description": "与每个 Claude Agent SDK 会话注册的进程内 MCP 服务器。",
+      "liveSurfaces": "活跃面板",
+      "sidecarDir": "Sidecar 目录",
+      "socketPath": "桥接套接字",
+      "testConnection": "测试连接",
+      "title": "桥接状态",
+      "toolsCount": "工具数",
+      "toolsListTitle": "已注册工具",
+      "webModeNotice": "桥接运行时路径仅在桌面端 (Tauri) 可用，Web 模式只读。"
+    },
+    "toast": {
+      "testOk": "自检已派发 ✓"
+    }
+  },
+  "overview": {
+    "recent": {
+      "builtIn": "内置",
+      "empty": "还没有应用 — 在 Hub 创建。",
+      "favorite": "收藏",
+      "noDescription": "无描述",
+      "openHub": "打开 Hub",
+      "title": "最近的应用"
+    },
+    "stats": {
+      "appsHelp": "你库中的小应用数。",
+      "appsTitle": "已保存的应用",
+      "eventsHelp": "保留在调试日志中的事件数。",
+      "eventsTitle": "最近事件",
+      "surfacesHelp": "已就绪 / 全部活跃面板。",
+      "surfacesTitle": "活跃面板"
+    }
+  },
+  "runtime": {
+    "global": {
+      "catalogHelp": "当 surface 未指定 catalogId 时使用。",
+      "catalogLabel": "默认目录",
+      "catalogPlaceholder": "选择目录",
+      "standardCatalog": "Cognia 标准目录",
+      "description": "应用到新角色和面板。",
+      "enabledHelp": "新角色继承此值。",
+      "enabledLabel": "默认启用 A2UI",
+      "title": "全局默认"
+    },
+    "loading": "加载中…",
+    "saveFailed": "保存失败：{error}",
+    "persistence": {
+      "description": "多少个 surface 在重启后保留。",
+      "limitHelp": "更大的值在重启间保留更多状态。",
+      "limitLabel": "LRU 上限",
+      "title": "持久化"
+    },
+    "widget": {
+      "description": "surface widget 未指定字段时的默认值。",
+      "hostStrategies": {
+        "artifact-preview": "Artifact 预览",
+        "lazy-runtime": "按需运行时",
+        "native": "原生",
+        "sandboxed-html": "沙箱 HTML"
+      },
+      "hostStrategyLabel": "宿主策略",
+      "themeLabel": "主题",
+      "themes": {
+        "dark": "深色",
+        "inherit": "跟随应用主题",
+        "light": "浅色"
+      },
+      "title": "Widget 默认值"
+    }
+  },
+  "tabs": {
+    "debugger": "调试器",
+    "mcpBridge": "MCP 桥接",
+    "overview": "概览",
+    "runtime": "运行时",
+    "templates": "模板"
+  },
+  "templates": {
+    "builtIn": {
+      "description": "只读 — 在 Hub 复制后可编辑。",
+      "title": "内置模板 ({count})"
+    },
+    "builtInBadge": "内置",
+    "confirmDelete": "删除 “{name}” 吗？",
+    "imported": "导入",
+    "toast": {
+      "deleted": "已删除 “{name}”",
+      "importFailed": "模板导入失败",
+      "importSuccess": "已导入 “{name}”"
+    },
+    "user": {
+      "description": "你创建或导入的模板。",
+      "empty": "还没有用户模板。",
+      "import": "导入 JSON",
+      "openHub": "打开 Hub",
+      "title": "用户模板"
+    }
+  },
+  "title": "A2UI"
+}

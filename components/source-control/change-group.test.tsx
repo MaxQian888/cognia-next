@@ -48,4 +48,26 @@ describe("ChangeGroup", () => {
     fireEvent.click(screen.getByTestId("group-action-changes-stage-all"))
     expect(onClick).toHaveBeenCalled()
   })
+
+  it("keeps group actions visible and touch-sized in touch density", () => {
+    render(
+      <ChangeGroup
+        group="changes"
+        count={1}
+        expanded
+        density="touch"
+        onToggle={jest.fn()}
+        actions={[
+          { key: "stage-all", label: "Stage All", icon: <span>+</span>, onClick: jest.fn() },
+        ]}
+      >
+        <div />
+      </ChangeGroup>
+    )
+
+    const action = screen.getByTestId("group-action-changes-stage-all")
+    expect(action).toHaveClass("size-11")
+    expect(action.parentElement).toHaveClass("opacity-100")
+    expect(screen.getByTestId("group-toggle-changes")).toHaveClass("min-h-11")
+  })
 })

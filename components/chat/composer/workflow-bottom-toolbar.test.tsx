@@ -3,7 +3,7 @@
  */
 
 import { render, screen, fireEvent } from "@testing-library/react"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import type { EditorState, EditorStore } from "@/lib/workflow/editor/store"
 import {
   WorkflowEditorProvider,
@@ -48,10 +48,17 @@ const chatStoreState = {
   messages: [] as unknown[],
   status: "idle" as string,
   setPermissionMode: jest.fn(),
+  addReferencedWorkflowElement: jest.fn(),
 }
-jest.mock("@/stores/chat", () => ({
-  useChatStore: <T,>(selector: (s: typeof chatStoreState) => T) => selector(chatStoreState),
-}))
+jest.mock("@/stores/chat", () => {
+  const hook = (<T,>(selector: (s: typeof chatStoreState) => T) =>
+    selector(chatStoreState)) as unknown as {
+    <T>(selector: (s: typeof chatStoreState) => T): T
+    getState: () => typeof chatStoreState
+  }
+  hook.getState = () => chatStoreState
+  return { useChatStore: hook }
+})
 
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: <T,>(selector: (s: { settings: { defaultModel: string } | null }) => T) =>
@@ -68,23 +75,48 @@ const session: ChatSession = {
   updatedAt: Date.now(),
 }
 
-function fakeStoreWithSelection(selectedIds: string[]): EditorStore {
-  const fakeState = { selectedNodeIds: selectedIds } as unknown as EditorState
+interface FakeStoreOpts {
+  selectedNodeIds?: string[]
+  selectedEdgeIds?: string[]
+  nodes?: unknown[]
+  edges?: unknown[]
+  pulseNode?: jest.Mock
+}
+
+function fakeStore(opts: FakeStoreOpts): EditorStore {
+  const fakeState = {
+    selectedNodeIds: opts.selectedNodeIds ?? [],
+    selectedEdgeIds: opts.selectedEdgeIds ?? [],
+    nodes: opts.nodes ?? [],
+    edges: opts.edges ?? [],
+    pulseNode: opts.pulseNode ?? jest.fn(),
+  } as unknown as EditorState
   const hook = (<T,>(selector: (s: EditorState) => T): T =>
     selector(fakeState)) as unknown as EditorStore
+  ;(hook as unknown as { getState: () => EditorState }).getState = () => fakeState
   return hook
 }
 
 function renderWithCtx(
   opts: {
     selectedIds?: string[]
+    selectedEdgeIds?: string[]
+    nodes?: unknown[]
+    edges?: unknown[]
+    pulseNode?: jest.Mock
     onQuickAction?: WorkflowEditorContextValue["onQuickAction"]
     noProvider?: boolean
   } = {}
 ) {
   const onQuickAction = opts.onQuickAction ?? jest.fn<void, [WorkflowQuickActionKind]>()
   const value: WorkflowEditorContextValue = {
-    useEditorStore: fakeStoreWithSelection(opts.selectedIds ?? []),
+    useEditorStore: fakeStore({
+      selectedNodeIds: opts.selectedIds ?? [],
+      selectedEdgeIds: opts.selectedEdgeIds,
+      nodes: opts.nodes,
+      edges: opts.edges,
+      pulseNode: opts.pulseNode,
+    }),
     onQuickAction,
   }
   const ui = opts.noProvider ? (
@@ -101,6 +133,7 @@ beforeEach(() => {
   chatStoreState.messages = []
   chatStoreState.status = "idle"
   chatStoreState.setPermissionMode = jest.fn()
+  chatStoreState.addReferencedWorkflowElement = jest.fn()
 })
 
 describe("WorkflowBottomToolbar", () => {
@@ -165,9 +198,40 @@ describe("WorkflowBottomToolbar", () => {
   it("disables all quick actions while streaming", () => {
     chatStoreState.status = "streaming"
     renderWithCtx({ selectedIds: ["n_a"] })
+    expect(screen.getByTestId("workflow-quick-action-reference")).toBeDisabled()
     expect(screen.getByTestId("workflow-quick-action-validate")).toBeDisabled()
     expect(screen.getByTestId("workflow-quick-action-explain")).toBeDisabled()
     expect(screen.getByTestId("workflow-quick-action-suggest")).toBeDisabled()
+  })
+
+  describe("reference selection", () => {
+    it("disables Reference when nothing is selected", () => {
+      renderWithCtx({ selectedIds: [], selectedEdgeIds: [] })
+      expect(screen.getByTestId("workflow-quick-action-reference")).toBeDisabled()
+    })
+
+    it("enables Reference when a node or an edge is selected", () => {
+      renderWithCtx({ selectedIds: [], selectedEdgeIds: ["e_1"] })
+      expect(screen.getByTestId("workflow-quick-action-reference")).not.toBeDisabled()
+    })
+
+    it("stages the selected nodes as reference chips and pulses the first", () => {
+      const pulseNode = jest.fn()
+      const nodes = [
+        { id: "n_a", data: { kind: "ai.prompt", label: "Draft" } },
+        { id: "n_b", data: { kind: "flow.branch", label: "Split" } },
+      ]
+      renderWithCtx({ selectedIds: ["n_a", "n_b"], nodes, pulseNode })
+      fireEvent.click(screen.getByTestId("workflow-quick-action-reference"))
+      expect(chatStoreState.addReferencedWorkflowElement).toHaveBeenCalledTimes(2)
+      expect(chatStoreState.addReferencedWorkflowElement).toHaveBeenCalledWith({
+        type: "node",
+        id: "n_a",
+        label: "Draft",
+        kind: "ai.prompt",
+      })
+      expect(pulseNode).toHaveBeenCalledWith("n_a", 1200)
+    })
   })
 
   it("renders nothing for the quick-action group when context is missing", () => {

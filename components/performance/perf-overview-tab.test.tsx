@@ -63,6 +63,7 @@ function sample(cpu: number, mem: number, busy: number, tasks: number, disk = 0)
     },
     topSpans: [],
     systemMemory: null,
+    managed: [],
   }
 }
 

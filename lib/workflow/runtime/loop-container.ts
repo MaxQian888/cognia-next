@@ -41,13 +41,14 @@ import type {
   WorkflowNode,
   WorkflowRetryPolicy,
 } from "@/types/workflow/visual"
-import type { LoopNodeParams } from "@/types/workflow/visual"
+import type { LoopItemError, LoopNodeParams } from "@/types/workflow/visual"
 import { resolveDeep, resolveExpression } from "./expression"
 import { IdempotencyCache, iterationCacheKey } from "./idempotency"
 import type { RunLogger } from "./event-log"
 import type { SecretResolver } from "./secret-resolver"
 import { runStep } from "./step-executor"
 import { getGlobalRunGate } from "./run-concurrency-gate"
+import { buildErrorOutput, resolveNodeFailure } from "./node-failure"
 
 /** Hard ceiling on iterations regardless of params (runaway-while backstop). */
 const LOOP_HARD_CAP = 100_000
@@ -61,6 +62,13 @@ export interface RunLoopContainerInput {
   trigger: TriggerEvent
   /** Upstream outputs visible to the container (and to its body). */
   upstream: Record<string, unknown>
+  /**
+   * Global `$nodes['id']` scope — every TOP-LEVEL node completed before this
+   * container was scheduled. Passed through to body steps so non-adjacent
+   * reads work inside loops too. Body-internal outputs are NOT merged in
+   * (iteration-local data rides `$node` / `$item` as before).
+   */
+  nodesOutputs?: Record<string, unknown>
   runId: string
   signal: AbortSignal
   cache: IdempotencyCache
@@ -72,7 +80,13 @@ export interface RunLoopContainerInput {
 }
 
 export interface LoopContainerExecution {
-  output: { items: unknown[]; count: number; staticData: Record<string, unknown> }
+  output: {
+    items: unknown[]
+    count: number
+    staticData: Record<string, unknown>
+    /** Present ONLY when `onItemError: "skip" | "break"` collected failures. */
+    errors?: LoopItemError[]
+  }
   fromCache: boolean
 }
 
@@ -81,6 +95,8 @@ interface IterationResult {
   item: unknown
   contributed: boolean
   brokeLoop: boolean
+  /** Set when `onItemError: "break"` absorbed this iteration's error. */
+  brokeByPolicy?: boolean
 }
 
 export async function runLoopContainer(
@@ -127,20 +143,40 @@ export async function runLoopContainer(
         ? DEFAULT_WHILE_MAX
         : LOOP_HARD_CAP
   )
+  // while only: "post" = do-while (body runs before the first check).
+  const conditionTiming = mode === "while" ? (rawParams.conditionTiming ?? "pre") : "pre"
+  // forEach only: sequential batches of N; 0 = single implicit batch.
+  const batchSize =
+    mode === "forEach" && typeof rawParams.batchSize === "number" && rawParams.batchSize > 0
+      ? Math.floor(rawParams.batchSize)
+      : 0
+  // Container-level backstop for errors the child's own handling didn't absorb.
+  const onItemError = rawParams.onItemError ?? "fail"
+  const errorsByIndex = new Map<number, LoopItemError>()
 
   await logger.stepStarted(loopId, { mode, iterationConcurrency })
+
+  /** Batch coordinates injected into `$loop` (single implicit batch unless batching). */
+  interface BatchMeta {
+    batchIndex: number
+    batchCount: number
+  }
 
   /** Run one iteration's body subgraph and evaluate the output mapping. */
   const runIteration = async (
     index: number,
     item: unknown,
-    total: number | null
+    total: number | null,
+    batch: BatchMeta = { batchIndex: 0, batchCount: 1 }
   ): Promise<IterationResult> => {
     const loopMeta = {
       index,
       isFirst: index === 0,
       isLast: total !== null ? index === total - 1 : false,
       total,
+      batchIndex: batch.batchIndex,
+      batchCount: batch.batchCount,
+      ...(batchSize > 0 ? { batchSize } : {}),
     }
     const extraUpstream: Record<string, unknown> = { $loop: loopMeta }
     if (item !== undefined) extraUpstream.$item = item
@@ -176,19 +212,58 @@ export async function runLoopContainer(
     return { item: produced, contributed: true, brokeLoop: false }
   }
 
+  /**
+   * Policy guard around `runIteration`: under `onItemError: "fail"` errors
+   * propagate exactly as before; under skip/break the failure is recorded in
+   * `errorsByIndex` and the iteration RESOLVES with flags, so the sequential
+   * and parallel schedulers keep their existing count/drain machinery.
+   * Only errors that the child's own error handling re-threw reach here.
+   */
+  const runIterationGuarded = async (
+    index: number,
+    item: unknown,
+    total: number | null,
+    batch?: { batchIndex: number; batchCount: number }
+  ): Promise<IterationResult> => {
+    try {
+      return await runIteration(index, item, total, batch)
+    } catch (err) {
+      if (onItemError === "fail") throw err
+      // Abort is a run-level event, never an item failure — always propagate.
+      if (signal.aborted) throw err
+      errorsByIndex.set(index, {
+        index,
+        ...(item !== undefined ? { item } : {}),
+        error: err instanceof Error ? err.message : String(err),
+        ...(err instanceof Error && err.name !== "Error" ? { errorType: err.name } : {}),
+      })
+      return {
+        item: undefined,
+        contributed: false,
+        brokeLoop: false,
+        brokeByPolicy: onItemError === "break",
+      }
+    }
+  }
+
   const items: unknown[] = []
   let count = 0
 
   if (mode === "while") {
     // Sequential by definition — each round's condition depends on the last.
+    // "pre" checks before the body (classic while); "post" checks after it
+    // (do-while: at least one round). Both continue while truthy, so the
+    // author never inverts the predicate when switching timing.
+    const checkCondition = () =>
+      isLoopTruthy(resolveExpression(rawParams.whileExpression ?? "", scopeBase))
     for (let i = 0; i < maxIterations; i++) {
       if (signal.aborted) throw new Error("Workflow run aborted")
-      const cond = resolveExpression(rawParams.whileExpression ?? "", scopeBase)
-      if (!isLoopTruthy(cond)) break
-      const r = await runIteration(i, undefined, null)
+      if (conditionTiming === "pre" && !checkCondition()) break
+      const r = await runIterationGuarded(i, undefined, null)
       count += 1
       if (r.contributed) items.push(r.item)
-      if (r.brokeLoop) break
+      if (r.brokeLoop || r.brokeByPolicy) break
+      if (conditionTiming === "post" && !checkCondition()) break
     }
   } else {
     // forEach / times — bounded collection known up front.
@@ -212,27 +287,44 @@ export async function runLoopContainer(
     if (source.length > maxIterations) source = source.slice(0, maxIterations)
     const total = source.length
 
-    if (iterationConcurrency <= 1) {
-      for (let i = 0; i < total; i++) {
-        if (signal.aborted) throw new Error("Workflow run aborted")
-        const r = await runIteration(i, mode === "forEach" ? source[i] : undefined, total)
-        count += 1
-        if (r.contributed) items[i] = r.item
-        if (r.brokeLoop) break
+    /**
+     * Run iterations `[start, end)` — one batch (or the whole source when
+     * batching is off). `iterationConcurrency` bounds in-window parallelism;
+     * `items[]` stays source-ordered via GLOBAL index assignment, so batching
+     * never changes output ordering or iteration cache keys.
+     */
+    const runWindow = async (
+      start: number,
+      end: number,
+      batch: BatchMeta
+    ): Promise<{ broke: boolean }> => {
+      if (iterationConcurrency <= 1) {
+        for (let i = start; i < end; i++) {
+          if (signal.aborted) throw new Error("Workflow run aborted")
+          const r = await runIterationGuarded(
+            i,
+            mode === "forEach" ? source[i] : undefined,
+            total,
+            batch
+          )
+          count += 1
+          if (r.contributed) items[i] = r.item
+          if (r.brokeLoop || r.brokeByPolicy) return { broke: true }
+        }
+        return { broke: false }
       }
-    } else {
-      // Parallel window: keep launching until break/abort; items[] stays
-      // source-ordered via index assignment.
-      let next = 0
+      // Parallel window: keep launching until break/abort; in-flight
+      // iterations drain before the window reports back.
+      let next = start
       let broke = false
       let firstError: unknown
       const inflight = new Map<number, Promise<void>>()
       const launch = (i: number) => {
-        const p = runIteration(i, mode === "forEach" ? source[i] : undefined, total)
+        const p = runIterationGuarded(i, mode === "forEach" ? source[i] : undefined, total, batch)
           .then((r) => {
             count += 1
             if (r.contributed) items[i] = r.item
-            if (r.brokeLoop) broke = true
+            if (r.brokeLoop || r.brokeByPolicy) broke = true
           })
           .catch((err) => {
             if (!firstError) firstError = err
@@ -242,10 +334,10 @@ export async function runLoopContainer(
           })
         inflight.set(i, p)
       }
-      while ((next < total && !broke && !firstError) || inflight.size > 0) {
+      while ((next < end && !broke && !firstError) || inflight.size > 0) {
         if (signal.aborted && inflight.size === 0) throw new Error("Workflow run aborted")
         while (
-          next < total &&
+          next < end &&
           !broke &&
           !firstError &&
           !signal.aborted &&
@@ -258,13 +350,30 @@ export async function runLoopContainer(
       }
       if (firstError) throw firstError
       if (signal.aborted) throw new Error("Workflow run aborted")
+      return { broke }
+    }
+
+    const batchCount = batchSize > 0 ? Math.ceil(total / batchSize) : 1
+    for (let b = 0; b < batchCount; b++) {
+      const start = batchSize > 0 ? b * batchSize : 0
+      const end = batchSize > 0 ? Math.min(total, start + batchSize) : total
+      const { broke } = await runWindow(start, end, { batchIndex: b, batchCount })
+      if (broke) break
+      if (signal.aborted) throw new Error("Workflow run aborted")
     }
   }
 
   // Sparse-slot cleanup: continue'd / post-break indices never got a value.
   const compact = items.filter((_, i) => i in items)
 
-  const output = { items: compact, count, staticData: { ...staticData } }
+  // Deterministic source-order regardless of parallel completion order.
+  const errors = [...errorsByIndex.entries()].sort((a, b) => a[0] - b[0]).map(([, e]) => e)
+  const output: LoopContainerExecution["output"] = {
+    items: compact,
+    count,
+    staticData: { ...staticData },
+    ...(errors.length > 0 ? { errors } : {}),
+  }
   cache.set(loopId, output)
   await logger.stepCompleted(loopId, output)
   return { output, fromCache: false }
@@ -371,6 +480,7 @@ async function runSubgraph(input: RunSubgraphInput): Promise<SubgraphResult> {
         node: child,
         trigger: input.trigger,
         upstream: upstreamMap,
+        ...(input.nodesOutputs ? { nodesOutputs: input.nodesOutputs } : {}),
         runId: input.runId,
         signal: input.signal,
         cache: input.cache,
@@ -413,6 +523,37 @@ async function runSubgraph(input: RunSubgraphInput): Promise<SubgraphResult> {
         }
       }
     } catch (err) {
+      // Per-node error handling mirrors the top-level orchestrator catch.
+      // "errorBranch" routes within the body subgraph; "continue" /
+      // "defaultValue" substitute an output and let body downstream run.
+      const failure = resolveNodeFailure(child)
+      if (failure.mode === "continue") {
+        outputs[child.id] = buildErrorOutput(err)
+        completed.add(child.id)
+        return
+      }
+      if (failure.mode === "defaultValue") {
+        outputs[child.id] = failure.defaultValue
+        completed.add(child.id)
+        return
+      }
+      if (failure.mode === "errorBranch") {
+        const outgoing = childEdges.filter((e) => e.source === child.id)
+        const errorEdges = outgoing.filter(
+          (e) => e.sourceHandle === "error" || e.data?.kind === "error"
+        )
+        if (errorEdges.length > 0) {
+          outputs[child.id] = buildErrorOutput(err)
+          completed.add(child.id)
+          for (const e of outgoing) {
+            if (!(e.sourceHandle === "error" || e.data?.kind === "error")) {
+              skipDownstream(e.target)
+            }
+          }
+          return
+        }
+        // No error edge inside the body → fall through to fail the iteration.
+      }
       if (!firstError) firstError = err
     } finally {
       release()

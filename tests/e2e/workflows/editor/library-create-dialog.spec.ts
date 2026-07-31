@@ -2,7 +2,7 @@
  * E2E: the workflow library create dialog validates name + lands in editor.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../../helpers/db-reset"
 
 test.describe("workflow editor — create dialog", () => {

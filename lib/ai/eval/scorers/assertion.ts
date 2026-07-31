@@ -13,12 +13,14 @@ export const assertionScorer: Scorer = {
   id: "assertion",
   dimension: "response-quality",
   requiresLlm: false,
+  gating: true,
   score(sample: EvalSample, evalCase: EvalCase): Score {
     const expected = evalCase.reference?.expectedContains
     if (!expected || expected.length === 0) {
       return {
         scorerId: this.id,
         dimension: "response-quality",
+        status: "not-applicable",
         value: 0,
         passed: false,
         error: "not-applicable: no expectedContains reference",
@@ -30,6 +32,7 @@ export const assertionScorer: Scorer = {
     return {
       scorerId: this.id,
       dimension: "response-quality",
+      status: "scored",
       value,
       passed: value >= 1,
       metadata: { missing, total: expected.length },

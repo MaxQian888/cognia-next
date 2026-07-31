@@ -10,10 +10,25 @@
  *    index them. Conversion happens in `toRow` / `fromRow`.
  */
 
-import { nanoid } from "nanoid"
 import type { CanvasComment, CommentReaction, LineRange } from "@/types/canvas/collaboration"
 import type { CanvasCommentRow } from "./canvas-types"
-import { getDb } from "./schema"
+import {
+  addContextComment,
+  addContextCommentReaction,
+  bulkImportContextComments,
+  canvasCommentFromContext,
+  canvasCommentRowFromContext,
+  clearContextCommentsForResource,
+  contextCommentRowFromCanvas,
+  deleteContextComment,
+  listAllContextCommentRows,
+  listContextCommentRowsForResource,
+  removeContextCommentReaction,
+  reopenContextComment,
+  replyToContextComment,
+  resolveContextComment,
+  updateContextComment,
+} from "./context-comments"
 
 export type AddCommentInput = Omit<CanvasComment, "id" | "createdAt" | "updatedAt" | "reactions">
 
@@ -42,9 +57,8 @@ function fromRow(row: CanvasCommentRow): CanvasComment {
 
 /** All comments on a document, oldest-first (matches the [documentId+createdAt] index). */
 export async function listForDocument(documentId: string): Promise<CanvasComment[]> {
-  const db = getDb()
-  const rows = await db.canvasComments.where("documentId").equals(documentId).sortBy("createdAt")
-  return rows.map(fromRow)
+  const rows = await listContextCommentRowsForResource("canvas-document", documentId)
+  return rows.map((row) => fromRow(canvasCommentRowFromContext(row)))
 }
 
 /** All comments anchored to lines that overlap `range`. */
@@ -62,58 +76,37 @@ export async function listUnresolved(documentId: string): Promise<CanvasComment[
 }
 
 export async function addComment(input: AddCommentInput): Promise<CanvasComment> {
-  const comment: CanvasComment = {
-    ...input,
-    id: nanoid(),
-    createdAt: new Date(),
-    reactions: [],
-  }
-  const db = getDb()
-  await db.canvasComments.add(toRow(comment))
-  return comment
+  return canvasCommentFromContext(
+    await addContextComment({
+      resource: { kind: "canvas-document", id: input.documentId },
+      anchor: { kind: "text-range", start: 0, end: 0, lineRange: input.range },
+      authorId: input.authorId,
+      authorName: input.authorName,
+      authorAvatarUrl: input.authorAvatarUrl,
+      content: input.content,
+    })
+  )
 }
 
 export async function updateComment(commentId: string, content: string): Promise<void> {
-  const db = getDb()
-  await db.canvasComments.update(commentId, {
-    content,
-    updatedAt: Date.now(),
-  })
+  await updateContextComment(commentId, content)
 }
 
 /** Delete a comment and any replies anchored to it. */
 export async function deleteComment(commentId: string): Promise<void> {
-  const db = getDb()
-  await db.transaction("rw", db.canvasComments, async () => {
-    const replies = await db.canvasComments.where("parentId").equals(commentId).primaryKeys()
-    await db.canvasComments.bulkDelete([commentId, ...(replies as string[])])
-  })
+  await deleteContextComment(commentId)
 }
 
 export async function resolveComment(commentId: string, resolvedBy?: string): Promise<void> {
-  const db = getDb()
-  await db.canvasComments.update(commentId, {
-    resolvedAt: Date.now(),
-    resolvedBy,
-  })
+  await resolveContextComment(commentId, resolvedBy)
 }
 
 export async function unresolveComment(commentId: string): Promise<void> {
-  const db = getDb()
-  await db.canvasComments.update(commentId, {
-    resolvedAt: undefined,
-    resolvedBy: undefined,
-  })
+  await reopenContextComment(commentId)
 }
 
 export async function addReaction(commentId: string, emoji: string, userId: string): Promise<void> {
-  const db = getDb()
-  await db.transaction("rw", db.canvasComments, async () => {
-    const row = await db.canvasComments.get(commentId)
-    if (!row) return
-    const reactions = nextReactionsAfterAdd(row.reactions ?? [], emoji, userId)
-    await db.canvasComments.update(commentId, { reactions })
-  })
+  await addContextCommentReaction(commentId, emoji, userId)
 }
 
 export async function removeReaction(
@@ -121,38 +114,23 @@ export async function removeReaction(
   emoji: string,
   userId: string
 ): Promise<void> {
-  const db = getDb()
-  await db.transaction("rw", db.canvasComments, async () => {
-    const row = await db.canvasComments.get(commentId)
-    if (!row) return
-    const reactions = nextReactionsAfterRemove(row.reactions ?? [], emoji, userId)
-    await db.canvasComments.update(commentId, { reactions })
-  })
+  await removeContextCommentReaction(commentId, emoji, userId)
 }
 
 export async function replyToComment(parentId: string, reply: ReplyInput): Promise<CanvasComment> {
-  const db = getDb()
-  const parent = await db.canvasComments.get(parentId)
-  if (!parent) {
-    throw new Error(`Parent comment ${parentId} not found`)
-  }
-  const comment: CanvasComment = {
-    ...reply,
-    id: nanoid(),
-    documentId: parent.documentId,
-    range: parent.range,
-    parentId,
-    createdAt: new Date(),
-    reactions: [],
-  }
-  await db.canvasComments.add(toRow(comment))
-  return comment
+  return canvasCommentFromContext(
+    await replyToContextComment(parentId, {
+      authorId: reply.authorId,
+      authorName: reply.authorName,
+      authorAvatarUrl: reply.authorAvatarUrl,
+      content: reply.content,
+    })
+  )
 }
 
 /** Cascade-delete all comments for a document. */
 export async function clearForDocument(documentId: string): Promise<void> {
-  const db = getDb()
-  await db.canvasComments.where("documentId").equals(documentId).delete()
+  await clearContextCommentsForResource("canvas-document", documentId)
 }
 
 /**
@@ -161,24 +139,17 @@ export async function clearForDocument(documentId: string): Promise<void> {
  */
 export async function bulkImport(comments: CanvasComment[]): Promise<number> {
   if (comments.length === 0) return 0
-  const db = getDb()
-  let inserted = 0
-  await db.transaction("rw", db.canvasComments, async () => {
-    for (const c of comments) {
-      const existing = await db.canvasComments.get(c.id)
-      if (existing) continue
-      await db.canvasComments.add(toRow(c))
-      inserted += 1
-    }
-  })
-  return inserted
+  return bulkImportContextComments(
+    comments.map((comment) => contextCommentRowFromCanvas(toRow(comment)))
+  )
 }
 
 /** Read-side helper for the snapshot/backup layer. */
 export async function listAll(): Promise<CanvasComment[]> {
-  const db = getDb()
-  const rows = await db.canvasComments.toArray()
-  return rows.map(fromRow)
+  const rows = (await listAllContextCommentRows()).filter(
+    (row) => row.resourceKind === "canvas-document"
+  )
+  return rows.map((row) => fromRow(canvasCommentRowFromContext(row)))
 }
 
 function nextReactionsAfterAdd(

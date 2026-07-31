@@ -6,13 +6,13 @@
 //! (`goal_pause` / `goal_resume` / `goal_stop`), and resolving host
 //! computer-use consent (`automation_consent_respond`) — is gated behind this
 //! list. Baseline paired chat (`claude_send` / `claude_interrupt` /
-//! `claude_approve`) is intentionally **not** gated: it is the phone's own
-//! chat path and predates this capability, so gating it would break existing
-//! mobile clients.
+//! `claude_compact` / `claude_approve`) is intentionally **not** gated: it is
+//! the phone's own chat path and predates this capability, so gating it would
+//! break existing mobile clients.
 //!
 //! Mirrors [`super::deny_list::DenyList`] in spirit (an O(1) HashSet checked on
 //! the request hot path with no Dexie round-trip), but is a **process-global**
-//! singleton — like [`super::ws_terminal::WS_TERMINAL_REGISTRY`] — rather than
+//! singleton rather than
 //! a field on `CompanionState`. That keeps the per-command gate reachable from
 //! both the HTTP `rpc_handler` and the WebRTC `signaling::dispatch` path
 //! without threading a new field through every `CompanionState` constructor.
@@ -38,6 +38,59 @@ static CONTROL_ALLOW_LIST: Lazy<Arc<ControlAllowList>> =
 /// Accessor for the process-global control allow list.
 pub fn global() -> &'static Arc<ControlAllowList> {
     &CONTROL_ALLOW_LIST
+}
+
+/// Devices permitted to start and drive *external agents* on this host.
+///
+/// Deliberately a second list rather than a flag on the first. Remote control
+/// means steering sessions this host already decided to run; starting an agent
+/// means launching a new process. Both are elevated, but granting someone the
+/// ability to write files should not silently also grant process execution, and
+/// a single toggle labelled "remote control" would do exactly that.
+///
+/// Same shape as the control list, so it inherits its behaviour and tests.
+static AGENT_CONTROL_ALLOW_LIST: Lazy<Arc<ControlAllowList>> =
+    Lazy::new(|| Arc::new(ControlAllowList::new()));
+
+/// Accessor for the process-global agent-control allow list.
+pub fn agent_control_global() -> &'static Arc<ControlAllowList> {
+    &AGENT_CONTROL_ALLOW_LIST
+}
+
+/// Devices permitted to create, attach to, and control terminal sessions.
+///
+/// Terminal access is intentionally independent from remote control and agent
+/// control. It exposes an interactive shell, so neither adjacent capability
+/// may imply it.
+static TERMINAL_ALLOW_LIST: Lazy<Arc<ControlAllowList>> =
+    Lazy::new(|| Arc::new(ControlAllowList::new()));
+
+/// Accessor for the process-global terminal allow list.
+pub fn terminal_global() -> &'static Arc<ControlAllowList> {
+    &TERMINAL_ALLOW_LIST
+}
+
+/// Serializes every test that touches the three allow lists above.
+///
+/// Both are process-global and `reseed` REPLACES, so `cargo test` — one binary,
+/// threads in parallel — will happily run a seeding test that wipes the list
+/// alongside an RPC gate test that just granted itself a device. Whichever
+/// loses the race sees an empty list and passes for the wrong reason: a
+/// permission gate that reports "allowed" because the grant vanished is exactly
+/// the false green this lock exists to prevent.
+///
+/// Hold it for the whole test body, and clear the lists before releasing it.
+#[cfg(test)]
+pub(crate) fn test_guard() -> std::sync::MutexGuard<'static, ()> {
+    static ALLOW_LIST_TEST_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> =
+        std::sync::OnceLock::new();
+    // Poisoning only means an earlier test panicked while holding the guard;
+    // the lists are cleared on entry below, so the state is still usable and
+    // failing every subsequent test on it would bury the original failure.
+    ALLOW_LIST_TEST_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// Thread-safe set of device IDs permitted to issue remote-control RPCs.
@@ -167,11 +220,27 @@ mod tests {
 
     #[test]
     fn global_is_a_shared_singleton() {
+        let _guard = test_guard();
         // Two `global()` calls observe the same underlying set.
         global().clear();
         global().allow("shared-dev".to_string());
         assert!(global().is_allowed("shared-dev"));
         global().clear();
         assert!(!global().is_allowed("shared-dev"));
+    }
+
+    #[test]
+    fn terminal_access_is_independent_from_other_capabilities() {
+        let _guard = test_guard();
+        global().clear();
+        agent_control_global().clear();
+        terminal_global().clear();
+
+        terminal_global().allow("terminal-device".to_string());
+        assert!(terminal_global().is_allowed("terminal-device"));
+        assert!(!global().is_allowed("terminal-device"));
+        assert!(!agent_control_global().is_allowed("terminal-device"));
+
+        terminal_global().clear();
     }
 }

@@ -74,6 +74,28 @@ class CheckCoverageThresholdTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 1)
         self.assertIn("below_threshold: functions=70.00%", completed.stdout)
 
+    def test_cli_defaults_to_cognia_ninety_percent_gate(self) -> None:
+        self.write_summary(
+            {
+                "total": {
+                    "lines": {"pct": 89},
+                    "statements": {"pct": 89},
+                    "functions": {"pct": 89},
+                    "branches": {"pct": 89},
+                }
+            }
+        )
+
+        completed = subprocess.run(
+            [sys.executable, str(SCRIPT_PATH), "--root", str(self.temp_dir)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(completed.returncode, 1)
+        self.assertIn("threshold: 90.00", completed.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

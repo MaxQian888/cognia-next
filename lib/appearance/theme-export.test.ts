@@ -1,5 +1,5 @@
 import { exportThemeToJson, importThemeFromJson } from "./theme-export"
-import type { CustomTheme, ThemeColors } from "@/types/plugin/plugin-extended"
+import type { CustomTheme, ThemeColors } from "@/types/plugin/plugin"
 
 function buildTokens(overrides: Partial<ThemeColors> = {}): ThemeColors {
   return {

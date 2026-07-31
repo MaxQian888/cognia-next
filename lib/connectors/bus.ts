@@ -26,35 +26,107 @@ import type {
   HistoryFetchOpts,
   StreamReplyRequest,
   A2UICapabilityMatrix,
+  ForwardMessageInput,
+  ReadReceipt,
+  UrgentChannel,
 } from "@/types/connectors"
 import type { PlatformSkillCapability } from "@/types/connectors/skill-capability"
-import type { StoredMessage } from "@/lib/claude/types"
+import type { StoredMessage } from "@cognia/agent-config-types"
+import type {
+  ConversationOverrideRow,
+  AdapterInstanceRow,
+  ConnectorInboundJobRow,
+} from "@/lib/db/connector-types"
 import { getAdapterInstance } from "@/lib/db/adapter-instances"
-import { readForResolution } from "@/lib/db/conversation-overrides"
+import { readForResolution, setStatus, setSlaDue } from "@/lib/db/conversation-overrides"
+import { computeDueAt } from "@/lib/connectors/sla"
+import { upsertIdentity } from "@/lib/db/platform-identities"
 import { getCharacter } from "@/lib/db/characters"
 import { getDb } from "@/lib/db/schema"
-import { recordAndCheckInbound } from "./dedup"
+import { recordAndCheckInbound, isRecordedInbound } from "./dedup"
 import { resolveCallbackBinding } from "./adapters/_shared/a2ui-mapper"
 import { appendAudit } from "./audit"
-import { runInboundOcr } from "./inbound-ocr"
-import { evaluatePolicy, type PolicyEvalState } from "./policy-eval"
+import { runInboundOcr, hasOcrableInboundImage } from "./inbound-ocr"
+import { evaluatePolicy, rateBucketKey, type PolicyEvalState } from "./policy-eval"
 import { resolveBinding, type ResolvedBinding } from "./policy-resolve"
 import { routeInbound, type RouteDecision } from "./mode-router"
 import { dispatchTrigger } from "@/lib/workflow/runtime/trigger-bridge"
 import { findMatchingWorkflows } from "@/lib/workflow/runtime/trigger-subscriptions"
 import { trackInboxEvent } from "@/lib/telemetry/inbox-events"
+import { trackEvent } from "@/lib/telemetry/events/track-event"
 import { maybeHandleHelpCommand, maybeSendWelcome } from "./help/help-dispatch"
+import { maybeHandleControlCommand } from "./commands/dispatch"
+import {
+  LarkFollowUpControlDispatchError,
+  maybeHandleLarkFollowUpControl,
+} from "./follow-up-control"
+import { parseControlCommand } from "./commands/parse"
 import { parseConversationKey } from "@/types/connectors/event"
+import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
+import { hasNoLeakingPiiDeep } from "@cognia/redact"
+import { segmentsToPlainText, type MessageSegment } from "@/types/connectors/segment"
+import {
+  claimConnectorInboundJob,
+  bindConnectorInboundJobExecutionRun,
+  completeConnectorInboundJob,
+  ensureConnectorInboundJob,
+  listRecoverableConnectorInboundJobs,
+  markConnectorInboundJobHistoryOnly,
+  markConnectorInboundJobRecoveryRequired,
+  recoverStaleConnectorInboundJobs,
+  stampConnectorInboundJobPrincipal,
+  updateConnectorInboundJobPayload,
+} from "@/lib/db/connector-inbound-jobs"
+import { admitConversationEvent } from "./conversation-admission"
+import { observeUnmentionedDeliveryProbe } from "./at-gate"
+import { deliveryTargetFromEvent } from "@/types/connectors/event"
+import {
+  refreshConnectorConversationDeliveryTarget,
+  stampConnectorConversationPrincipal,
+} from "@/lib/db/connector-conversation-state"
+import {
+  getActiveRuntimeAccountId,
+  readIdentityScope,
+  resolveConnectorPrincipal,
+} from "./principal/resolve"
+import { handleUnresolvedPrincipal } from "./principal/unbound"
+import { bootstrapFeishuRegistry } from "./principal/bootstrap"
+import { recordConnectorMetric } from "./metrics"
+import { authorizeConnectorCallback, notifyCallbackDenied } from "./callback-authorization"
 
 export interface BusInboundHandler {
   (event: NormalizedInboundEvent): Promise<void>
 }
 
-/** Called by the runtime (Task 37) to handle the final routing decision. */
+export interface RouteHandlerContext {
+  inboundJobId: string
+  bindExecutionRun(executionRunId: string): Promise<void>
+}
+
+export interface LiveSteerResult {
+  activeRun: boolean
+  accepted: boolean
+  executionRunId?: string
+}
+
+export type LiveSteerHandler = (event: NormalizedInboundEvent) => Promise<LiveSteerResult>
+
+/**
+ * Called by the runtime (Task 37) to handle the final routing decision.
+ *
+ * `override` and `adapterRow` are the rows the bus already fetched in
+ * `dispatchInboundFull` (Steps 2 & 3). They are passed through so the
+ * runtime's ai-run path doesn't re-read the same immutable rows from Dexie —
+ * `adapterRow` is guaranteed non-null (the bus returns early on a missing
+ * adapter instance), `override` is null when the conversation has none.
+ */
 export type RouteHandler = (
   event: NormalizedInboundEvent,
   decision: RouteDecision,
-  resolved: ResolvedBinding
+  resolved: ResolvedBinding,
+  override: ConversationOverrideRow | null,
+  adapterRow: AdapterInstanceRow,
+  context: RouteHandlerContext
 ) => void | Promise<void>
 
 /**
@@ -75,6 +147,31 @@ export type CallbackHandler = (
   event: ConnectorCallbackEvent,
   boundConversationKey: string | null
 ) => void | Promise<void>
+
+/**
+ * Retention window for the per-conversation last-bot-reply timestamp used by
+ * the `cooldown-after-bot-reply` blocker. Entries older than this are pruned on
+ * write. 10 minutes comfortably exceeds any realistic cooldown (the default is
+ * 3 s) while keeping the map bounded across long-lived sessions.
+ */
+const BOT_REPLY_RETENTION_MS = 10 * 60_000
+
+/**
+ * Sliding window the `rate-limit` blocker evaluates over
+ * (`policy-eval.ts:checkBlocker`). The per-user/channel buckets are pruned to
+ * this window on every write so `policyState.recentByUserAndChannel` stays
+ * bounded across long-lived sessions.
+ */
+const RATE_BUCKET_WINDOW_MS = 60_000
+
+/**
+ * Max queued-or-running route-handler turns per conversation. A conversation
+ * whose turns cannot drain (wedged handler, message flood) drops further
+ * inbound turns with an `adapter.error` / `turn_queue_overflow` audit instead
+ * of queueing unboundedly.
+ */
+const MAX_TURN_QUEUE_DEPTH = 100
+const INBOUND_JOB_LEASE_MS = 20 * 60_000
 
 export class ConnectorBus {
   private adapters = new Map<string, PlatformAdapter>()
@@ -102,6 +199,8 @@ export class ConnectorBus {
   >()
   /** Optional: set by Task 37 runtime. */
   routeHandler: RouteHandler | null = null
+  /** Optional safe live-injection bridge supplied by an active runtime. */
+  liveSteerHandler: LiveSteerHandler | null = null
   /**
    * Optional connector-callback handler. Wired in production to
    * `lib/a2ui/connector-callback-handler.ts`, which forwards the event
@@ -115,6 +214,61 @@ export class ConnectorBus {
   private policyState: PolicyEvalState = {
     recentBotReplyAtByConversation: {},
     recentByUserAndChannel: {},
+  }
+
+  /**
+   * Per-conversation FIFO of route-handler turns. The route handler runs the
+   * ENTIRE model turn (minutes), so it is chained here and NOT awaited by
+   * `dispatchInboundFull` — see `enqueueRouteHandlerTurn`. Entries are removed
+   * when their tail settles, so the map stays bounded by the number of
+   * conversations with in-flight turns.
+   */
+  private turnQueues = new Map<string, { tail: Promise<void>; depth: number }>()
+
+  /**
+   * Per-conversation FIFO of workflow fan-outs — the same shape as
+   * {@link turnQueues} but a SEPARATE map on purpose.
+   *
+   * `dispatchTrigger` runs a whole workflow, which can be as slow as a model
+   * turn (it may contain agent nodes). Awaiting it on the transport's for-await
+   * loop head-of-line-blocked the adapter exactly the way the route handler used
+   * to: one slow inbound-subscribed workflow stalled every other conversation
+   * AND delayed the callback envelopes that a co-triggered HITL approval arrives
+   * on. Sharing `turnQueues` would instead serialise the fan-out behind a
+   * 15-minute model turn for the same conversation, which is the opposite
+   * mistake — the two are independent consumers of the same event, so they get
+   * independent lanes and keep only per-conversation ordering.
+   */
+  private fanOutQueues = new Map<string, { tail: Promise<void>; depth: number }>()
+
+  /**
+   * Trigger ids currently being processed by `dispatchConnectorCallback`.
+   * The persistent ledger is only written on a terminal outcome (so transient
+   * failures stay retryable); this set guards against a double-fire arriving
+   * while the first delivery is still in flight.
+   */
+  private callbackInFlight = new Set<string>()
+
+  /**
+   * Record that the bot delivered a reply on `conversationKey` at `at`.
+   *
+   * This is the sole writer of `policyState.recentBotReplyAtByConversation`,
+   * which the `cooldown-after-bot-reply` trigger blocker reads. That blocker is
+   * part of the default group-chat policy (`defaultGroupChatPolicy`), so without
+   * this write the group anti-spam cooldown never fired. Production wires this
+   * to the outbound runner's `onDelivered` callback so it covers every reply
+   * path (ai-run / team / workflow / digest) at the single delivery choke point.
+   *
+   * Prunes entries older than the largest plausible cooldown window on write so
+   * the map cannot grow without bound across long-lived sessions.
+   */
+  recordBotReply(conversationKey: string, at: number = Date.now()): void {
+    const map = this.policyState.recentBotReplyAtByConversation
+    map[conversationKey] = at
+    const cutoff = at - BOT_REPLY_RETENTION_MS
+    for (const key in map) {
+      if (map[key] < cutoff) delete map[key]
+    }
   }
 
   registerAdapter(adapter: PlatformAdapter): void {
@@ -205,8 +359,94 @@ export class ConnectorBus {
    * carry a fresh user message, so they bypass the full pipeline and get
    * applied to the existing StoredMessage directly. They still write an
    * audit row and (where relevant) fire workflow triggers.
+   *
+   * Error containment: adapters call this from their transport for-await
+   * loop (`ctx.emit`), so an exception escaping here would kill the
+   * transport permanently. Any pipeline failure is audited and swallowed.
+   *
+   * The two slow tail steps — the route-handler model turn and the workflow
+   * fan-out — are each enqueued on their own per-conversation FIFO and NOT
+   * awaited, so callers get control back as soon as the synchronous pipeline
+   * (dedup → policy → mode-route → control-commands → audit) settles. Tests
+   * that assert on turn or fan-out side-effects must
+   * `await flushInboundTurns()` after dispatching.
    */
   async dispatchInboundFull(event: NormalizedInboundEvent): Promise<void> {
+    try {
+      await this.runInboundPipeline(event)
+    } catch (err) {
+      console.error("[connector-bus] inbound pipeline failed", err)
+      await appendAudit({
+        adapterId: event.adapterId,
+        kind: "adapter.error",
+        at: Date.now(),
+        conversationKey: event.conversationKey,
+        reason: "inbound_pipeline_failed",
+        message: err instanceof Error ? err.message : String(err),
+      }).catch(() => undefined)
+    }
+  }
+
+  /** Execute a reconnect catch-up event while evaluating sliding expiry at its wire timestamp. */
+  async dispatchBackfilledInbound(event: NormalizedInboundEvent): Promise<void> {
+    try {
+      await this.runInboundPipeline(event, undefined, { admissionNow: event.timestamp })
+    } catch (err) {
+      await appendAudit({
+        adapterId: event.adapterId,
+        kind: "adapter.error",
+        at: Date.now(),
+        conversationKey: event.conversationKey,
+        reason: "history_catchup_failed",
+        message: err instanceof Error ? err.message : String(err),
+      }).catch(() => undefined)
+    }
+  }
+
+  async recoverActiveConversationHistory(): Promise<{
+    conversations: number
+    executed: number
+    historyOnly: number
+  }> {
+    const { recoverActiveConversationHistory } = await import("./history-recovery")
+    return recoverActiveConversationHistory(this)
+  }
+
+  /**
+   * Reclaim durable work that was inserted but never started before a restart.
+   * Expired running leases are deliberately converted to `recovery_required`
+   * and are not replayed because model/tool side effects may already exist.
+   */
+  async resumeDurableInboundJobs(
+    options: { reclaimRunning?: boolean } = {}
+  ): Promise<{ resumed: number; recoveryRequired: number }> {
+    const recoveryRequired = options.reclaimRunning
+      ? await recoverStaleConnectorInboundJobs({ reclaimAllRunning: true })
+      : 0
+    const jobs = await listRecoverableConnectorInboundJobs()
+    for (const job of jobs) {
+      try {
+        await this.runInboundPipeline(job.event, job)
+      } catch (err) {
+        await appendAudit({
+          adapterId: job.adapterId,
+          kind: "adapter.error",
+          at: Date.now(),
+          conversationKey: job.conversationKey,
+          reason: "inbound_recovery_failed",
+          message: err instanceof Error ? err.message : String(err),
+          fields: { inboundJobId: job.id },
+        }).catch(() => undefined)
+      }
+    }
+    return { resumed: jobs.length, recoveryRequired }
+  }
+
+  private async runInboundPipeline(
+    event: NormalizedInboundEvent,
+    recoveredJob?: ConnectorInboundJobRow,
+    context: { admissionNow?: number } = {}
+  ): Promise<void> {
     const now = Date.now()
 
     // Passive plugin observers see every event up front (read-only tap).
@@ -226,14 +466,41 @@ export class ConnectorBus {
       return
     }
 
-    // ── Step 1: dedup ────────────────────────────────────────────────────────
-    const isNew = await recordAndCheckInbound(event.adapterId, event.messageId)
-    if (!isNew) {
+    // ── Step 1: durable insert, then compatibility ledger ────────────────────
+    // The job is the authoritative dedup record. It is committed before the
+    // legacy inbound ledger so a crash in the old breadcrumb path cannot lose
+    // the message. Its unique identity is conversation-scoped because several
+    // platforms only guarantee message ids within one chat.
+    let inboundJob = recoveredJob
+    if (!inboundJob) {
+      const ensured = await ensureConnectorInboundJob(event, "queue", { now })
+      inboundJob = ensured.job
+      if (!ensured.inserted) {
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: "inbound.deduped",
+          at: now,
+          conversationKey: event.conversationKey,
+        })
+        return
+      }
+      // Preserve the old ledger for edit/delete lookup and observability. Its
+      // boolean is intentionally ignored: a legacy ledger row without a v120
+      // job represents the historical crash window and must be recoverable.
+      await recordAndCheckInbound(
+        event.adapterId,
+        event.messageId,
+        "inbound",
+        event.conversationKey
+      )
+    }
+    if (!inboundJob) {
       await appendAudit({
         adapterId: event.adapterId,
-        kind: "inbound.deduped",
+        kind: "adapter.error",
         at: now,
         conversationKey: event.conversationKey,
+        reason: "inbound_job_missing",
       })
       return
     }
@@ -246,12 +513,19 @@ export class ConnectorBus {
       fields: { platform: event.platform },
       at: now,
     })
-
+    void trackEvent("connector.message.received", {
+      adapterId: event.adapterId,
+      platform: event.platform,
+    })
     // ── Step 1.5: eager OCR of inbound images (ADR-0024) ─────────────────────
     // Attaches `ocrText` to image segments that carry inline bytes, so trigger
     // matching (Step 6), the stored message, the agent prompt, and the digest
-    // all see the image's text. Best-effort — never blocks delivery.
-    await runInboundOcr(event).catch(() => undefined)
+    // all see the image's text. Best-effort — never blocks delivery. Gated on
+    // an OCR-able image so a text-only / URL-only message skips the settings
+    // read + dep build entirely (the common case).
+    if (hasOcrableInboundImage(event.segments)) {
+      await runInboundOcr(event).catch(() => undefined)
+    }
 
     // ── Step 2: adapter instance lookup ──────────────────────────────────────
     const adapterRow = await getAdapterInstance(event.adapterId)
@@ -264,13 +538,212 @@ export class ConnectorBus {
       })
       return
     }
+    await refreshConnectorConversationDeliveryTarget(deliveryTargetFromEvent(event), {
+      deliveryReadiness: adapterRow.deliveryReadiness ?? "unknown",
+      now,
+    })
+    if (await observeUnmentionedDeliveryProbe(event.adapterId, event, adapterRow)) {
+      await markConnectorInboundJobHistoryOnly(inboundJob.id, "delivery_probe_observed", { now })
+      return
+    }
+
+    // ── Step 2.5: principal resolution (Lark unified identity, plan 2026-07-24)
+    // Runs after the durable insert (a rejected event stays auditable) and
+    // before ANY downstream work — admission, session, control commands,
+    // route handler, workflow fan-out. Fail closed: with the registry flag on,
+    // a sender that does not positively resolve to the active account never
+    // creates an agent turn and never falls back to the default local account.
+    // Recovery replays re-enter this pipeline, so recovered jobs re-resolve
+    // against the current registry state (a principal disabled between crash
+    // and replay is rejected here).
+    const resolveInput = {
+      platform: event.platform,
+      adapterRow,
+      remoteUserId: event.sender.remoteUserId,
+      identityScope: readIdentityScope(event.channelData),
+      activeAccountId: getActiveRuntimeAccountId(),
+    }
+    let principalResolution = await resolveConnectorPrincipal(resolveInput)
+    // Self-heal the one ordering hazard in registry seeding: the adapter's
+    // tenant_key is only learnable from inbound traffic, so an adapter that has
+    // never received an event boots with no tenant scope and the start-up
+    // bootstrap can only skip. The first event both reveals the tenant and
+    // arrives BEFORE anything seeded the registry, which would park an entire
+    // existing workspace on the very message that could have seeded it. The
+    // bootstrap is idempotent and no-ops once the tenant row exists.
+    if (principalResolution.status === "unbound") {
+      const seeded = await bootstrapFeishuRegistry({
+        adapterId: event.adapterId,
+        adapterRow,
+      }).catch(() => ({ status: "skipped" as const, reason: "flag_off" as const }))
+      if (seeded.status === "seeded") {
+        principalResolution = await resolveConnectorPrincipal(resolveInput)
+      }
+    }
+    if (principalResolution.status !== "legacy" && principalResolution.status !== "resolved") {
+      await handleUnresolvedPrincipal(event, adapterRow, principalResolution, inboundJob.id)
+      return
+    }
+    if (principalResolution.status === "resolved") {
+      await stampConnectorInboundJobPrincipal(inboundJob.id, {
+        accountId: principalResolution.accountId,
+        principalId: principalResolution.principal.id,
+      })
+      await stampConnectorConversationPrincipal(event.conversationKey, {
+        accountId: principalResolution.accountId,
+        principalId: principalResolution.principal.id,
+      }).catch(() => undefined)
+      // In-memory stamp for downstream run-initiator attribution (recovery
+      // replays re-enter this pipeline and re-stamp, so this never goes stale).
+      event.channelData = {
+        ...event.channelData,
+        resolvedPrincipal: {
+          principalId: principalResolution.principal.id,
+          accountId: principalResolution.accountId,
+        },
+      }
+    }
 
     // ── Step 3: conversation override lookup ──────────────────────────────────
     const override = (await readForResolution(event.conversationKey)) ?? null
+    const dispatchMode =
+      override?.activeRunDispatchMode ?? adapterRow.activeRunDispatchMode ?? "queue"
 
-    // ── Step 4: character lookup ──────────────────────────────────────────────
+    // ── Step 3.1: conversation-aware admission ──────────────────────────────
+    // This runs after the durable insert so ignored messages remain auditable,
+    // and after override resolution so a topic can override adapter defaults.
+    const parsedControl = parseControlCommand(event.plainText)
+    const admission =
+      parsedControl.kind === "known"
+        ? { allowed: true, activated: false }
+        : await admitConversationEvent(event, adapterRow, {
+            now: context.admissionNow ?? now,
+            override,
+          })
+    if (!admission.allowed) {
+      await markConnectorInboundJobHistoryOnly(inboundJob.id, admission.reason ?? "not_admitted", {
+        now,
+      })
+      await appendAudit({
+        adapterId: event.adapterId,
+        kind: "inbound.policy_blocked",
+        at: now,
+        conversationKey: event.conversationKey,
+        reason: admission.reason,
+      })
+      return
+    }
+
+    // ── Step 3.5: lifecycle auto-reopen (CRM, schema v83) ─────────────────────
+    // A fresh inbound on a resolved or snoozed conversation reopens it
+    // (Chatwoot behaviour). Only `create` events reach this point (edit /
+    // delete / system short-circuited above), so this is genuinely a new
+    // message. STRICT no-op for open / pending / absent status, so existing
+    // routing for every adapter is unchanged. Best-effort — a lifecycle write
+    // failure must never break the inbound pipeline.
+    if (override && (override.status === "resolved" || override.status === "snoozed")) {
+      await setStatus(event.conversationKey, "open", { sessionId: override.sessionId }).catch(
+        () => undefined
+      )
+    }
+
+    // ── Steps 3.6 / 3.7 / 4: SLA deadline, identity directory, character ──────
+    // These three touch distinct Dexie tables (conversationOverrides /
+    // platformIdentities / characters) and have no inter-dependency, so they
+    // run concurrently. Step 3.5's lifecycle reopen above stays sequential —
+    // it shares the override row with the SLA write, so it must settle first.
+    //   • 3.6 response-SLA deadline (v83): stamp next-response deadline so the
+    //     inbox SlaBadge can count down; quiet hours excluded (computeDueAt
+    //     reuses the outbound-runner math). No-op when no SLA is configured.
+    //   • 3.7 platform-identity directory (v83): record the sender for the
+    //     contact-profile drawer + cross-platform identity merge.
+    //   • 4 character lookup: only this result feeds downstream binding.
+    // All three are best-effort — a write/read failure must never break the
+    // inbound pipeline.
     const charId = override?.characterId ?? adapterRow.defaultCharacterId
-    const character = charId ? ((await getCharacter(charId)) ?? null) : null
+    const [, , character] = await Promise.all([
+      override?.slaResponseMinutes && override.slaResponseMinutes > 0
+        ? setSlaDue(
+            event.conversationKey,
+            {
+              nextResponseDueAt: computeDueAt(
+                now,
+                override.slaResponseMinutes,
+                override.quietHours ?? null
+              ),
+            },
+            override.sessionId
+          ).catch(() => undefined)
+        : Promise.resolve(undefined),
+      upsertIdentity({
+        platform: event.platform,
+        adapterId: event.adapterId,
+        remoteUserId: event.sender.remoteUserId,
+        displayName: event.sender.displayName,
+        avatarUrl: event.sender.avatarUrl,
+      }).catch(() => undefined),
+      charId ? getCharacter(charId).then((c) => c ?? null) : Promise.resolve(null),
+    ])
+
+    // ── Step 4.5: plugin onConnectorInbound (observe + veto + transform) ──────
+    // A subscribed plugin may block this inbound (stop the turn) or rewrite its
+    // segments before binding / policy / routing see it. A transform is
+    // re-checked through the PII gate (fail-closed): a rewrite that would leak
+    // PII is rejected and the original kept — a plugin can never smuggle PII
+    // past the redaction line. Plugin errors are treated as allow upstream.
+    try {
+      const decision = await getPluginEventHooks().dispatchConnectorDecision("onConnectorInbound", {
+        adapterId: event.adapterId,
+        conversationKey: event.conversationKey,
+        platform: event.platform,
+        segments: event.segments,
+        plainText: event.plainText,
+        messageId: event.messageId,
+      })
+      if (decision.action === "block") {
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: "plugin.inbound_blocked",
+          at: now,
+          conversationKey: event.conversationKey,
+          reason: decision.reason ?? "plugin_blocked",
+        })
+        await markConnectorInboundJobHistoryOnly(inboundJob.id, "plugin_blocked", { now })
+        return
+      }
+      if (decision.action === "transform") {
+        const segments = decision.segments as MessageSegment[]
+        if (hasNoLeakingPiiDeep(segments)) {
+          event = { ...event, segments, plainText: segmentsToPlainText(segments) }
+          await appendAudit({
+            adapterId: event.adapterId,
+            kind: "plugin.inbound_transformed",
+            at: now,
+            conversationKey: event.conversationKey,
+          })
+        } else {
+          await appendAudit({
+            adapterId: event.adapterId,
+            kind: "plugin.transform_pii_blocked",
+            at: now,
+            conversationKey: event.conversationKey,
+            reason: "inbound_transform_pii",
+          })
+        }
+      }
+    } catch (err) {
+      // Hook dispatch must never break the inbound pipeline.
+      console.error("[connector-bus] onConnectorInbound dispatch failed", err)
+    }
+
+    event = {
+      ...event,
+      channelData: {
+        ...event.channelData,
+        activeRunDispatchMode: dispatchMode,
+      },
+    }
+    await updateConnectorInboundJobPayload(inboundJob.id, event, dispatchMode, { now })
 
     // ── Step 5: resolve binding ───────────────────────────────────────────────
     const resolved = resolveBinding({ adapter: adapterRow, character, override })
@@ -289,14 +762,30 @@ export class ConnectorBus {
     if (evalResult.blocked) {
       // No-op for state — blocked events don't reset cooldowns
     } else {
-      // Update rate-limit bucket
-      const bucketKey = `${event.sender.id}:${event.channel.id}`
-      const existing = this.policyState.recentByUserAndChannel[bucketKey] ?? []
-      this.policyState.recentByUserAndChannel[bucketKey] = [...existing, now]
+      // Update the rate-limit bucket, pruning on write to the 60 s window the
+      // `rate-limit` blocker evaluates (mirrors recordBotReply's prune-on-write)
+      // so the map cannot grow without bound across long-lived sessions.
+      const map = this.policyState.recentByUserAndChannel
+      const bucketKey = rateBucketKey(event)
+      const cutoff = now - RATE_BUCKET_WINDOW_MS
+      map[bucketKey] = [...(map[bucketKey] ?? []).filter((t) => t > cutoff), now]
+      for (const key in map) {
+        if (key === bucketKey) continue
+        const kept = map[key].filter((t) => t > cutoff)
+        if (kept.length === 0) delete map[key]
+        else if (kept.length !== map[key].length) map[key] = kept
+      }
     }
 
     // ── Step 9: audit ─────────────────────────────────────────────────────────
     if (evalResult.blocked) {
+      // Rate-limit trips get their own series. Outbound has had
+      // `rate_limit.tripped` since the beginning; inbound only ever wrote an
+      // audit row, so "one tenant is flooding us" was invisible on the
+      // dashboard the runbook points at.
+      if (evalResult.reason?.startsWith("rate-limit")) {
+        recordConnectorMetric("lark_inbound_rate_limited_total")
+      }
       await appendAudit({
         adapterId: event.adapterId,
         kind: "inbound.policy_blocked",
@@ -313,6 +802,14 @@ export class ConnectorBus {
       })
     }
 
+    if (decision === "drop" || evalResult.blocked) {
+      await markConnectorInboundJobHistoryOnly(
+        inboundJob.id,
+        evalResult.blocked ? "policy_blocked" : "routing_dropped",
+        { now }
+      )
+    }
+
     // ── Step 9.5: help / welcome short-circuit (cross-provider) ──────────────
     // A help-trigger message serves a help card and skips the AI turn +
     // workflow fan-out entirely. Otherwise, the first inbound on a fresh
@@ -322,26 +819,74 @@ export class ConnectorBus {
     // inbound pipeline.
     if (decision !== "drop" && !evalResult.blocked) {
       try {
-        if (await maybeHandleHelpCommand(event, adapterRow)) return
+        if (await maybeHandleLarkFollowUpControl(event, adapterRow)) {
+          await appendAudit({
+            adapterId: event.adapterId,
+            kind: "inbound.received",
+            at: Date.now(),
+            conversationKey: event.conversationKey,
+            reason: "lark_follow_up_control",
+            fields: { sourceMessageId: event.messageId },
+          })
+          await completeConnectorInboundJob(inboundJob.id, { now: Date.now() })
+          return
+        }
+        // Control commands (`/model`, `/mode`, `/new`, …) are intercepted
+        // before help so they short-circuit the AI turn + workflow fan-out
+        // and never become a stored user message. More specific than the
+        // generic help trigger, so it runs first.
+        if (await maybeHandleControlCommand(event, adapterRow, override ?? undefined, resolved)) {
+          await completeConnectorInboundJob(inboundJob.id, { now: Date.now() })
+          return
+        }
+        if (await maybeHandleHelpCommand(event, adapterRow)) {
+          await completeConnectorInboundJob(inboundJob.id, { now: Date.now() })
+          return
+        }
       } catch (err) {
+        const followUpFailure = err instanceof LarkFollowUpControlDispatchError
         await appendAudit({
           adapterId: event.adapterId,
           kind: "adapter.error",
           at: Date.now(),
           conversationKey: event.conversationKey,
-          reason: "help_dispatch_failed",
+          reason: followUpFailure ? "lark_follow_up_control_failed" : "help_dispatch_failed",
           message: err instanceof Error ? err.message : String(err),
         })
+        if (followUpFailure) {
+          await completeConnectorInboundJob(inboundJob.id, { now: Date.now() })
+          return
+        }
       }
       await maybeSendWelcome(event, adapterRow).catch(() => undefined)
     }
 
-    // ── Step 10: route handler ────────────────────────────────────────────────
+    // ── Step 10: route handler (enqueued per conversation, NOT awaited) ──────
+    // Thread the already-fetched adapter + override rows so the runtime's
+    // ai-run path reuses them instead of re-reading the same immutable rows.
+    //
+    // The route handler runs the ENTIRE model turn (up to the 15-min connector
+    // turn timeout). Awaiting it here held the adapter's transport for-await
+    // loop hostage: when an ask-tier tool suspended the turn on a HITL
+    // approval, the user's Allow click arrived as another envelope on the SAME
+    // blocked loop, so the approval could only be processed after the TTL
+    // auto-deny — and one slow turn head-of-line-blocked every other
+    // conversation on the adapter. Chaining the turn onto a per-conversation
+    // FIFO preserves same-conversation ordering, lets other conversations run
+    // in parallel, and frees the loop so `dispatchConnectorCallback` (approval
+    // clicks) executes while a turn is suspended.
     if (this.routeHandler && decision !== "drop") {
-      await this.routeHandler(event, decision, resolved)
+      await this.enqueueRouteHandlerTurn(
+        inboundJob.id,
+        event,
+        decision,
+        resolved,
+        override,
+        adapterRow
+      )
     }
 
-    // ── Step 11: workflow fan-out ────────────────────────────────────────────
+    // ── Step 11: workflow fan-out (enqueued per conversation, NOT awaited) ───
     // Workflows subscribed to `trigger.connector.inbound` get the event
     // payload regardless of the routing decision — a workflow may want
     // to react to a draft-mode message just as much as an ai-run one.
@@ -351,9 +896,316 @@ export class ConnectorBus {
     // We DO suppress fan-out for `decision === "drop"` because dropped
     // events leave no StoredMessage for the workflow to act on, and
     // every existing trigger expects a real conversation context.
+    //
+    // When no route handler owns this job, the fan-out is its only consumer, so
+    // the durable completion rides the same chain — a crash mid-workflow must
+    // still leave the job resumable by `resumeDurableInboundJobs`.
     if (!evalResult.blocked && decision !== "drop") {
-      await this.fanOutWorkflowTriggers(event)
+      const fanOutQueued = this.enqueueWorkflowFanOut(
+        event,
+        this.routeHandler ? null : inboundJob.id
+      )
+      if (!fanOutQueued && !this.routeHandler) {
+        await markConnectorInboundJobHistoryOnly(inboundJob.id, "pending_limit_exceeded")
+      }
     }
+  }
+
+  /**
+   * Chain a workflow fan-out onto the conversation's fan-out FIFO and return
+   * immediately. Depth is capped at {@link MAX_TURN_QUEUE_DEPTH} (the same bound
+   * the turn queue uses); beyond it the fan-out is dropped with an audit rather
+   * than growing without limit. Entries are deleted once their tail settles.
+   *
+   * `completeJobId` is the inbound job to mark processed after the fan-out
+   * settles, or `null` when a route-handler turn already owns that lifecycle.
+   */
+  private enqueueWorkflowFanOut(
+    event: NormalizedInboundEvent,
+    completeJobId: string | null
+  ): boolean {
+    const key = event.conversationKey
+    let queue = this.fanOutQueues.get(key)
+    if (!queue) {
+      queue = { tail: Promise.resolve(), depth: 0 }
+      this.fanOutQueues.set(key, queue)
+    }
+    if (queue.depth >= MAX_TURN_QUEUE_DEPTH) {
+      void appendAudit({
+        adapterId: event.adapterId,
+        kind: "adapter.error",
+        at: Date.now(),
+        conversationKey: key,
+        reason: "workflow_fanout_queue_overflow",
+        message: `dropped workflow fan-out for message ${event.messageId} (${queue.depth} fan-outs queued)`,
+      }).catch(() => undefined)
+      return false
+    }
+    queue.depth += 1
+    const step: Promise<void> = queue.tail
+      .then(() => this.fanOutWorkflowTriggers(event))
+      .then(() =>
+        completeJobId ? completeConnectorInboundJob(completeJobId, { now: Date.now() }) : undefined
+      )
+      .catch((err) => {
+        // The chain must never reject, or one failure would poison every later
+        // fan-out on this conversation. `fanOutWorkflowTriggers` already audits
+        // its own failures; this only catches the job-completion write.
+        console.error("[connector-bus] workflow fan-out chain failed", err)
+      })
+      .then(() => {
+        if (this.fanOutQueues.get(key) !== queue) return
+        queue.depth -= 1
+        if (queue.depth === 0 && queue.tail === step) this.fanOutQueues.delete(key)
+      })
+    queue.tail = step
+    return true
+  }
+
+  /**
+   * Chain a route-handler turn onto the conversation's FIFO. Depth is capped
+   * at {@link MAX_TURN_QUEUE_DEPTH}; beyond it the turn is dropped with an
+   * `adapter.error` / `turn_queue_overflow` audit. Queue entries are deleted
+   * once their tail settles so the map stays bounded.
+   */
+  private async enqueueRouteHandlerTurn(
+    inboundJobId: string,
+    event: NormalizedInboundEvent,
+    decision: RouteDecision,
+    resolved: ResolvedBinding,
+    override: ConversationOverrideRow | null,
+    adapterRow: AdapterInstanceRow
+  ): Promise<boolean> {
+    const key = event.conversationKey
+    let queue = this.turnQueues.get(key)
+    if (!queue) {
+      queue = { tail: Promise.resolve(), depth: 0 }
+      this.turnQueues.set(key, queue)
+    }
+    if (queue.depth >= MAX_TURN_QUEUE_DEPTH) {
+      void appendAudit({
+        adapterId: event.adapterId,
+        kind: "adapter.error",
+        at: Date.now(),
+        conversationKey: key,
+        reason: "turn_queue_overflow",
+        message: `retained inbound message ${event.messageId} as history-only (${queue.depth} turns queued)`,
+      }).catch(() => undefined)
+      await markConnectorInboundJobHistoryOnly(inboundJobId, "pending_limit_exceeded")
+      return false
+    }
+    const wantsLiveSteer =
+      queue.depth > 0 &&
+      event.channelData?.activeRunDispatchMode === "steer" &&
+      this.liveSteerHandler !== null
+    const liveSteerPayloadSafe =
+      !wantsLiveSteer ||
+      hasNoLeakingPiiDeep({ plainText: event.plainText, segments: event.segments })
+    if (wantsLiveSteer && liveSteerPayloadSafe && this.liveSteerHandler) {
+      const liveSteer = await this.liveSteerHandler(event)
+      if (liveSteer.accepted) {
+        await completeConnectorInboundJob(inboundJobId, {
+          executionRunId: liveSteer.executionRunId,
+          now: Date.now(),
+        })
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: "inbound.received",
+          at: Date.now(),
+          conversationKey: key,
+          reason: "inbound_live_steered",
+          fields: { inboundJobId, executionRunId: liveSteer.executionRunId },
+        }).catch(() => undefined)
+        return true
+      }
+      if (liveSteer.activeRun) {
+        event = {
+          ...event,
+          channelData: { ...event.channelData, dispatchIntent: "steer-replay" },
+        }
+        await updateConnectorInboundJobPayload(inboundJobId, event, "steer")
+      }
+    } else if (queue.depth > 0 && event.channelData?.activeRunDispatchMode === "steer") {
+      if (wantsLiveSteer && !liveSteerPayloadSafe) {
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: "inbound.policy_blocked",
+          at: Date.now(),
+          conversationKey: key,
+          reason: "live_steer_pii_blocked",
+          fields: { inboundJobId },
+        }).catch(() => undefined)
+      }
+      event = {
+        ...event,
+        channelData: { ...event.channelData, dispatchIntent: "steer-replay" },
+      }
+      await updateConnectorInboundJobPayload(inboundJobId, event, "steer")
+    }
+    const isFirst = queue.depth === 0
+    queue.depth += 1
+    const previousTail = queue.tail
+    const started = isFirst
+      ? this.startRouteHandlerTurn(inboundJobId, event, decision, resolved, override, adapterRow)
+      : undefined
+    const completion = started
+      ? started.then((turn) => turn.completion)
+      : previousTail.then(() =>
+          this.runRouteHandlerTurn(inboundJobId, event, decision, resolved, override, adapterRow)
+        )
+    const step: Promise<void> = completion.then(() => {
+      // `runRouteHandlerTurn` never rejects (it audits internally), so this
+      // cleanup always runs. Delete the entry only when this step is still
+      // the mapped tail — a later enqueue must not lose its queue.
+      if (this.turnQueues.get(key) !== queue) return
+      queue.depth -= 1
+      if (queue.depth === 0 && queue.tail === step) this.turnQueues.delete(key)
+    })
+    queue.tail = step
+    // For the head turn, wait only until the durable claim has completed and
+    // the handler has been invoked. Long model/tool work remains detached so
+    // callback envelopes can still arrive on the adapter transport.
+    if (started) await started
+    return true
+  }
+
+  /** Claim and invoke one turn without waiting for a long-running handler. */
+  private async startRouteHandlerTurn(
+    inboundJobId: string,
+    event: NormalizedInboundEvent,
+    decision: RouteDecision,
+    resolved: ResolvedBinding,
+    override: ConversationOverrideRow | null,
+    adapterRow: AdapterInstanceRow
+  ): Promise<{ completion: Promise<void> }> {
+    const claimed = await claimConnectorInboundJob(inboundJobId, {
+      leaseOwner: `connector-bus:${crypto.randomUUID()}`,
+      leaseMs: INBOUND_JOB_LEASE_MS,
+    })
+    if (!claimed) return { completion: Promise.resolve() }
+    const handler = this.routeHandler
+    try {
+      const context: RouteHandlerContext = {
+        inboundJobId,
+        bindExecutionRun: async (executionRunId) => {
+          const bound = await bindConnectorInboundJobExecutionRun(inboundJobId, executionRunId)
+          if (!bound) throw new Error(`Inbound job ${inboundJobId} is no longer running`)
+        },
+      }
+      const result = handler?.(event, decision, resolved, override, adapterRow, context)
+      if (!result || typeof (result as Promise<void>).then !== "function") {
+        await completeConnectorInboundJob(inboundJobId, { now: Date.now() })
+        return { completion: Promise.resolve() }
+      }
+      return {
+        completion: Promise.resolve(result).then(
+          async () => {
+            await completeConnectorInboundJob(inboundJobId, { now: Date.now() })
+          },
+          async (err: unknown) => {
+            await this.handleRouteHandlerFailure(inboundJobId, event, err)
+          }
+        ),
+      }
+    } catch (err) {
+      await this.handleRouteHandlerFailure(inboundJobId, event, err)
+      return { completion: Promise.resolve() }
+    }
+  }
+
+  /** Run one queued turn; a throwing route handler is audited, never rethrown. */
+  private async runRouteHandlerTurn(
+    inboundJobId: string,
+    event: NormalizedInboundEvent,
+    decision: RouteDecision,
+    resolved: ResolvedBinding,
+    override: ConversationOverrideRow | null,
+    adapterRow: AdapterInstanceRow
+  ): Promise<void> {
+    const { completion } = await this.startRouteHandlerTurn(
+      inboundJobId,
+      event,
+      decision,
+      resolved,
+      override,
+      adapterRow
+    )
+    await completion
+  }
+
+  private async handleRouteHandlerFailure(
+    inboundJobId: string,
+    event: NormalizedInboundEvent,
+    err: unknown
+  ): Promise<void> {
+    console.error("[connector-bus] route handler failed", err)
+    await appendAudit({
+      adapterId: event.adapterId,
+      kind: "adapter.error",
+      at: Date.now(),
+      conversationKey: event.conversationKey,
+      reason: "route_handler_failed",
+      message: err instanceof Error ? err.message : String(err),
+    }).catch(() => undefined)
+    await markConnectorInboundJobRecoveryRequired(inboundJobId, "route_handler_failed", {
+      error: err instanceof Error ? err.message : String(err),
+    }).catch(() => undefined)
+  }
+
+  /**
+   * Resolve once every queued route-handler turn AND workflow fan-out has
+   * settled. Loops until both queue maps quiesce because a running turn may
+   * enqueue another (e.g. the `help_quick_command` synthetic re-entry). Used by
+   * tests that assert on turn or fan-out side-effects after
+   * `dispatchInboundFull`, and safe to call from any shutdown path that wants to
+   * drain in-flight work.
+   */
+  async flushInboundTurns(): Promise<void> {
+    while (this.turnQueues.size > 0 || this.fanOutQueues.size > 0) {
+      await Promise.all([
+        ...Array.from(this.turnQueues.values(), (q) => q.tail),
+        ...Array.from(this.fanOutQueues.values(), (q) => q.tail),
+      ])
+    }
+  }
+
+  /**
+   * Locate the StoredMessage a platform edit/delete event targets, via the
+   * v49 `platformMessageId` index.
+   *
+   * Rows written after the platformMessage scoping fix carry `adapterId` +
+   * `conversationKey` inside `metadata.platformMessage`; both must match the
+   * event, because per-chat message ids (Telegram `message_id`, Slack `ts`)
+   * collide across chats and multi-bot setups collide across adapter
+   * instances — a platform-only match could rewrite the WRONG chat's message.
+   *
+   * Backward compat: legacy rows carry only {messageId, platform, sender},
+   * so requiring the event's adapterId against them is impossible (the row
+   * never stored one) — they keep the historical platform-only match, which
+   * is their strongest available scoping. When both a scoped and a legacy
+   * row match, the fully-scoped row wins.
+   */
+  private async findStoredPlatformMessage(
+    event: NormalizedInboundEvent,
+    replaces: string
+  ): Promise<StoredMessage | undefined> {
+    const candidates = await getDb()
+      .messages.where("platformMessageId")
+      .equals(replaces)
+      .filter((m) => {
+        const pm = m.metadata?.platformMessage
+        if (!pm || pm.platform !== event.platform) return false
+        if (pm.adapterId !== undefined && pm.adapterId !== event.adapterId) return false
+        if (pm.conversationKey !== undefined && pm.conversationKey !== event.conversationKey) {
+          return false
+        }
+        return true
+      })
+      .toArray()
+    return (
+      candidates.find((m) => m.metadata?.platformMessage?.adapterId === event.adapterId) ??
+      candidates[0]
+    )
   }
 
   /**
@@ -375,16 +1227,10 @@ export class ConnectorBus {
       })
       return
     }
-    // Use the v49 `platformMessageId` index for O(log n) lookup. The
-    // platform safety filter scopes by adapter+platform so a Telegram
-    // `12345` edit cannot accidentally match a Discord row with the same
-    // numeric id. Legacy rows were backfilled by the v49 upgrade hook.
+    // Indexed lookup, scoped by adapterId + conversationKey (with a legacy
+    // platform-only fallback) — see `findStoredPlatformMessage`.
     const db = getDb()
-    const target = await db.messages
-      .where("platformMessageId")
-      .equals(replaces)
-      .filter((m) => m.metadata?.platformMessage?.platform === event.platform)
-      .first()
+    const target = await this.findStoredPlatformMessage(event, replaces)
     if (target) {
       // Map the new segments → parts the same way insertInboundMessage does.
       const parts: StoredMessage["parts"] = event.segments
@@ -446,14 +1292,10 @@ export class ConnectorBus {
       })
       return
     }
-    // Indexed lookup via v49 `platformMessageId`. See `applyMessageEdit`
-    // for the rationale on the platform safety filter.
+    // Indexed lookup, scoped by adapterId + conversationKey (with a legacy
+    // platform-only fallback) — see `findStoredPlatformMessage`.
     const db = getDb()
-    const target = await db.messages
-      .where("platformMessageId")
-      .equals(replaces)
-      .filter((m) => m.metadata?.platformMessage?.platform === event.platform)
-      .first()
+    const target = await this.findStoredPlatformMessage(event, replaces)
     if (target) {
       const deletedMetadata: StoredMessage["metadata"] = {
         ...target.metadata,
@@ -486,7 +1328,20 @@ export class ConnectorBus {
     if (sk === "read_indicator") kind = "inbound.read_indicator"
     else if (sk === "member_added") kind = "inbound.member_added"
     else if (sk === "member_removed") kind = "inbound.member_removed"
-    else {
+    else if (
+      sk === "reaction_added" ||
+      sk === "reaction_removed" ||
+      sk === "poke" ||
+      sk === "request" ||
+      sk === "lifecycle"
+    ) {
+      // Declared systemKinds that arrive on every user gesture. They carry no
+      // message body and the closed AuditKind union has no reaction/poke kind;
+      // routing them to `adapter.error` (as the pre-fix code did) flooded the
+      // audit trail with a false error per emoji reaction. Deliberate silent
+      // no-op until a dedicated audit kind ships in types/connectors/audit.ts.
+      return
+    } else {
       // Unknown system variant — surface it as adapter.error so the
       // trail catches the schema gap on next deploy.
       await appendAudit({
@@ -498,6 +1353,12 @@ export class ConnectorBus {
       })
       return
     }
+    // Lark chat-member/bot events carry `external:true` when the chat is a
+    // cross-tenant (external) group. Surface it in the audit so an operator
+    // can tell an external group was joined/left; absent (or non-boolean) on
+    // every other platform, so it is only included when actually present.
+    const rawExternal = (event.raw as { event?: { external?: boolean } } | undefined)?.event
+      ?.external
     await appendAudit({
       adapterId: event.adapterId,
       kind,
@@ -507,6 +1368,7 @@ export class ConnectorBus {
         actorOpenId: event.sender.remoteUserId,
         rawType: (event.raw as { header?: { event_type?: string } } | undefined)?.header
           ?.event_type,
+        ...(typeof rawExternal === "boolean" ? { external: rawExternal } : {}),
       },
     })
 
@@ -535,8 +1397,25 @@ export class ConnectorBus {
       matches = findMatchingWorkflows("trigger.connector.inbound", {
         adapterId: event.adapterId,
         conversationKey: event.conversationKey,
+        // Fine-grained trigger filters (senderIds / channelKinds /
+        // keywords / requireMention on the trigger node) match on these.
+        senderId: event.sender.remoteUserId,
+        channelKind: event.channel.kind,
+        plainText: event.plainText,
+        selfMentioned: event.mentions.selfMentioned,
       })
-    } catch {
+    } catch (err) {
+      // A broken subscription index would otherwise silently disable the
+      // entire workflow fan-out — warn + audit so the operator can see it.
+      console.warn("[connector-bus] findMatchingWorkflows failed", err)
+      await appendAudit({
+        adapterId: event.adapterId,
+        kind: "adapter.error",
+        at: Date.now(),
+        conversationKey: event.conversationKey,
+        reason: "workflow_match_failed",
+        message: err instanceof Error ? err.message : String(err),
+      }).catch(() => undefined)
       return
     }
     if (matches.length === 0) return
@@ -547,6 +1426,7 @@ export class ConnectorBus {
         await dispatchTrigger({
           workflowId: m.workflowId,
           kind: "trigger.connector.inbound",
+          triggerId: m.nodeId,
           payload: event,
           originAt,
           binding: {
@@ -574,12 +1454,36 @@ export class ConnectorBus {
   async sendOutbound(adapterId: string, req: OutboundRequest): Promise<OutboundResult> {
     const a = this.adapters.get(adapterId)
     if (!a) {
-      return {
+      const result: OutboundResult = {
         ok: false,
         error: { code: "adapter_not_found", message: adapterId, retryable: false },
       }
+      void trackEvent("connector.message.sent", {
+        adapterId,
+        platform: "unknown",
+        outcome: "failed",
+        errorCode: result.error?.code ?? "adapter_not_found",
+      })
+      return result
     }
-    return a.send(req)
+    try {
+      const result = await a.send(req)
+      void trackEvent("connector.message.sent", {
+        adapterId,
+        platform: a.meta.type,
+        outcome: result.ok ? "succeeded" : "failed",
+        ...(!result.ok && result.error?.code ? { errorCode: result.error.code } : {}),
+      })
+      return result
+    } catch (error) {
+      void trackEvent("connector.message.sent", {
+        adapterId,
+        platform: a.meta.type,
+        outcome: "failed",
+        errorCode: error instanceof Error ? error.name : "Error",
+      })
+      throw error
+    }
   }
 
   /**
@@ -631,6 +1535,194 @@ export class ConnectorBus {
     }
     await a.delete(messageId)
     return { ok: true }
+  }
+
+  /**
+   * Add an emoji reaction to an already-sent message through an adapter
+   * that supports it (`PlatformAdapter.addReaction`). Mirrors
+   * {@link deleteOutbound}: returns a uniform `{ ok }` result instead of
+   * throwing on a missing adapter / unsupported platform.
+   */
+  async addReactionOutbound(
+    adapterId: string,
+    messageId: string,
+    emojiType: string
+  ): Promise<OutboundResult & { reactionId?: string }> {
+    const a = this.adapters.get(adapterId)
+    if (!a) {
+      return {
+        ok: false,
+        error: { code: "adapter_not_found", message: adapterId, retryable: false },
+      }
+    }
+    if (!a.addReaction) {
+      return {
+        ok: false,
+        error: { code: "unsupported", message: "adapter cannot add reactions", retryable: false },
+      }
+    }
+    const ref = await a.addReaction(messageId, emojiType)
+    // Surface the platform reaction id (when the adapter returns one) so a
+    // caller can later `removeReactionOutbound` exactly this reaction.
+    return { ok: true, ...(ref && ref.reactionId ? { reactionId: ref.reactionId } : {}) }
+  }
+
+  /**
+   * Remove a previously added reaction by its platform reaction id (from the
+   * `reactionId` of a prior {@link addReactionOutbound}). Mirrors
+   * {@link deleteOutbound}'s uniform `{ ok }` result.
+   */
+  async removeReactionOutbound(
+    adapterId: string,
+    messageId: string,
+    reactionId: string
+  ): Promise<OutboundResult> {
+    const a = this.adapters.get(adapterId)
+    if (!a) {
+      return {
+        ok: false,
+        error: { code: "adapter_not_found", message: adapterId, retryable: false },
+      }
+    }
+    if (!a.removeReaction) {
+      return {
+        ok: false,
+        error: {
+          code: "unsupported",
+          message: "adapter cannot remove reactions",
+          retryable: false,
+        },
+      }
+    }
+    await a.removeReaction(messageId, reactionId)
+    return { ok: true }
+  }
+
+  /**
+   * Forward an existing message (or merge-forward several) to another
+   * conversation through an adapter that supports it
+   * (`PlatformAdapter.forwardMessage`). Returns the adapter's own
+   * `{ ok, platformMessageId, error }` result, or a uniform unsupported /
+   * not-found error.
+   */
+  async forwardOutbound(adapterId: string, input: ForwardMessageInput): Promise<OutboundResult> {
+    const a = this.adapters.get(adapterId)
+    if (!a) {
+      return {
+        ok: false,
+        error: { code: "adapter_not_found", message: adapterId, retryable: false },
+      }
+    }
+    if (!a.forwardMessage) {
+      return {
+        ok: false,
+        error: {
+          code: "unsupported",
+          message: "adapter cannot forward messages",
+          retryable: false,
+        },
+      }
+    }
+    return a.forwardMessage(input)
+  }
+
+  /**
+   * Pin a message through an adapter that supports it
+   * (`PlatformAdapter.pinMessage`). Mirrors {@link deleteOutbound}.
+   */
+  async pinOutbound(
+    adapterId: string,
+    conversationKey: string,
+    messageId: string
+  ): Promise<OutboundResult> {
+    const a = this.adapters.get(adapterId)
+    if (!a) {
+      return {
+        ok: false,
+        error: { code: "adapter_not_found", message: adapterId, retryable: false },
+      }
+    }
+    if (!a.pinMessage) {
+      return {
+        ok: false,
+        error: { code: "unsupported", message: "adapter cannot pin messages", retryable: false },
+      }
+    }
+    await a.pinMessage(conversationKey, messageId)
+    return { ok: true }
+  }
+
+  /**
+   * Remove a previously pinned message through an adapter that supports it
+   * (`PlatformAdapter.unpinMessage`). Mirrors {@link deleteOutbound}.
+   */
+  async unpinOutbound(adapterId: string, messageId: string): Promise<OutboundResult> {
+    const a = this.adapters.get(adapterId)
+    if (!a) {
+      return {
+        ok: false,
+        error: { code: "adapter_not_found", message: adapterId, retryable: false },
+      }
+    }
+    if (!a.unpinMessage) {
+      return {
+        ok: false,
+        error: { code: "unsupported", message: "adapter cannot unpin messages", retryable: false },
+      }
+    }
+    await a.unpinMessage(messageId)
+    return { ok: true }
+  }
+
+  /**
+   * Escalate a message to users via an urgent channel (加急) through an
+   * adapter that supports it (`PlatformAdapter.sendUrgent`). Mirrors
+   * {@link deleteOutbound}; a missing platform scope surfaces as a throw the
+   * caller maps to `platform_error`.
+   */
+  async sendUrgentOutbound(
+    adapterId: string,
+    messageId: string,
+    userIds: string[],
+    via?: UrgentChannel
+  ): Promise<OutboundResult> {
+    const a = this.adapters.get(adapterId)
+    if (!a) {
+      return {
+        ok: false,
+        error: { code: "adapter_not_found", message: adapterId, retryable: false },
+      }
+    }
+    if (!a.sendUrgent) {
+      return {
+        ok: false,
+        error: { code: "unsupported", message: "adapter cannot send urgent", retryable: false },
+      }
+    }
+    try {
+      await a.sendUrgent(messageId, userIds, via)
+      return { ok: true }
+    } catch (err) {
+      return {
+        ok: false,
+        error: {
+          code: "platform_error",
+          message: err instanceof Error ? err.message : String(err),
+          retryable: false,
+        },
+      }
+    }
+  }
+
+  /**
+   * Query read receipts for a message through an adapter that supports it
+   * (`PlatformAdapter.getReadReceipt`). Returns `null` when the adapter is
+   * missing or the platform has no read-user surface (feature-detect).
+   */
+  async getReadReceiptOutbound(adapterId: string, messageId: string): Promise<ReadReceipt | null> {
+    const a = this.adapters.get(adapterId)
+    if (!a || !a.getReadReceipt) return null
+    return a.getReadReceipt(messageId)
   }
 
   /**
@@ -723,25 +1815,73 @@ export class ConnectorBus {
    *
    * Errors thrown by the handler are caught and audited as
    * `callback.handler_failed` so a single bad callback doesn't kill the
-   * transport loop.
+   * transport loop; an unexpected pipeline exception is likewise contained
+   * (audited as `adapter.error`) — adapters call this from their transport
+   * for-await loop, so nothing may escape.
+   *
+   * Dedup commit protocol: the triggerId is checked up front but only
+   * COMMITTED to the persistent ledger on a terminal outcome (success or
+   * permanent failure). A transient failure — the binding lookup threw on a
+   * Dexie hiccup — leaves it unrecorded so the platform's redelivery can
+   * retry the click instead of losing it forever. Double-fire while the
+   * first delivery is still processing is guarded by the in-memory
+   * `callbackInFlight` set.
    */
   async dispatchConnectorCallback(event: ConnectorCallbackEvent): Promise<void> {
-    const now = Date.now()
-
-    // ── Step 1: Dedup ───────────────────────────────────────────────
-    const isNew = await recordAndCheckInbound(event.adapterId, event.triggerId, "callback")
-    if (!isNew) {
+    const flightKey = `${event.adapterId}:${event.triggerId}`
+    try {
+      // ── Step 1: Dedup (check now, commit on terminal outcome) ──────
+      const duplicate =
+        this.callbackInFlight.has(flightKey) ||
+        (await isRecordedInbound(event.adapterId, event.triggerId, "callback"))
+      if (duplicate) {
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: "callback.deduped",
+          at: Date.now(),
+          conversationKey: event.conversationKey,
+          reason: "callback:duplicate",
+          message: `triggerId=${event.triggerId}`,
+          fields: { actionType: event.actionType },
+        })
+        return
+      }
+      this.callbackInFlight.add(flightKey)
+      // Terminal by default: an unexpected throw below still commits the
+      // triggerId (re-processing an exploding callback forever helps nobody)
+      // and is audited by the outer catch.
+      let terminal = true
+      try {
+        terminal = await this.runConnectorCallback(event)
+      } finally {
+        if (terminal) {
+          await recordAndCheckInbound(event.adapterId, event.triggerId, "callback").catch(
+            () => undefined
+          )
+        }
+        this.callbackInFlight.delete(flightKey)
+      }
+    } catch (err) {
+      console.error("[connector-bus] callback pipeline failed", err)
       await appendAudit({
         adapterId: event.adapterId,
-        kind: "callback.deduped",
-        at: now,
+        kind: "adapter.error",
+        at: Date.now(),
         conversationKey: event.conversationKey,
-        reason: "callback:duplicate",
-        message: `triggerId=${event.triggerId}`,
-        fields: { actionType: event.actionType },
-      })
-      return
+        reason: "callback_pipeline_failed",
+        message: err instanceof Error ? err.message : String(err),
+        fields: { triggerId: event.triggerId },
+      }).catch(() => undefined)
     }
+  }
+
+  /**
+   * Callback pipeline body (Steps 2-4). Returns whether the outcome is
+   * TERMINAL — `true` commits the triggerId to the dedup ledger, `false`
+   * (transient failure) leaves it retryable for a platform redelivery.
+   */
+  private async runConnectorCallback(event: ConnectorCallbackEvent): Promise<boolean> {
+    const now = Date.now()
 
     // ── Step 2: Binding lookup (optional — event may already carry
     //            inline-derived surfaceId / componentId) ─────────────
@@ -762,9 +1902,131 @@ export class ConnectorBus {
         resolvedComponentId = resolvedBinding.componentId ?? resolvedComponentId
         resolvedConversationKey = resolvedBinding.conversationKey ?? resolvedConversationKey
       }
-    } catch {
-      // Binding lookup is best-effort — Dexie hiccups should not block
-      // the callback. We fall through to whatever the event self-reported.
+    } catch (err) {
+      // TRANSIENT: a Dexie hiccup here says nothing about the click itself.
+      // Falling through on the event's self-reported fields would take a
+      // kind-specific binding (tool_approve, wf_approve, …) down the generic
+      // handler path AND permanently consume the triggerId — so instead we
+      // bail WITHOUT committing the dedup record, letting the platform's
+      // redelivery retry the click.
+      await appendAudit({
+        adapterId: event.adapterId,
+        kind: "adapter.error",
+        at: now,
+        conversationKey: resolvedConversationKey ?? undefined,
+        reason: "callback_binding_lookup_failed",
+        message: err instanceof Error ? err.message : String(err),
+        fields: { triggerId: event.triggerId },
+      }).catch(() => undefined)
+      return false
+    }
+
+    // Durable Execution Run controls are self-describing CardKit/Slack actions.
+    // The actor comes from the signed platform callback envelope; values inside
+    // the card are used only for the run/action target and optimistic revision.
+    const runId = typeof event.payload?.runId === "string" ? event.payload.runId : ""
+    const runAction = typeof event.payload?.action === "string" ? event.payload.action : ""
+    const runRevision = Number(event.payload?.revision)
+    const RUN_CONTROL_ACTIONS = new Set([
+      "stop",
+      "pause",
+      "resume",
+      "approve",
+      "deny",
+      "retry",
+      "open_details",
+    ])
+    const isRunControl =
+      Boolean(runId) && Number.isInteger(runRevision) && RUN_CONTROL_ACTIONS.has(runAction)
+
+    // ── Step 2.6: unified callback authorization (plan 2026-07-24 Phase 2)
+    // One guard in front of EVERY consumer below — run controls, the
+    // kind-specific short-circuits, and the generic bridge hand-off. Denied
+    // callbacks never reach passive observers either (Step 3 comes after).
+    // A strict deny is TERMINAL: the triggerId commits to the dedup ledger so
+    // platform redelivery cannot retry a forbidden click into execution.
+    // Adapter lookup failure degrades to `undefined` (guard falls back to
+    // env/global flag defaults) instead of killing the callback pipeline.
+    const adapterRow = await getAdapterInstance(event.adapterId).catch(() => undefined)
+    const authDecision = await authorizeConnectorCallback({
+      event,
+      binding: resolvedBinding,
+      adapterRow,
+      resolvedConversationKey,
+      kindClass: isRunControl ? "run_control" : (resolvedBinding?.kind ?? "generic"),
+      ...(isRunControl ? { runId } : {}),
+    })
+    if (!authDecision.allowed) {
+      await appendAudit({
+        adapterId: event.adapterId,
+        kind:
+          authDecision.mode === "audit"
+            ? "callback.authorization_would_deny"
+            : "callback.forbidden",
+        at: Date.now(),
+        conversationKey: resolvedConversationKey ?? undefined,
+        idempotencyKey: event.triggerId,
+        reason: authDecision.reason,
+        fields: authDecision.auditFields,
+      }).catch(() => undefined)
+      if (authDecision.mode === "enforce") {
+        recordConnectorMetric("lark_callback_auth_denied_total")
+        if (resolvedConversationKey) {
+          await notifyCallbackDenied(event, resolvedConversationKey, authDecision.reason)
+        }
+        return true
+      }
+      // Audit (shadow) mode: fall through and execute exactly as before, but
+      // COUNT it. Without this series the shadow mode has only individual
+      // audit rows, and the runbook's "flip to enforce once would-deny is
+      // quiet" step has no aggregate to watch.
+      recordConnectorMetric("lark_callback_auth_would_deny_total")
+    }
+    if (authDecision.allowed && authDecision.consume) {
+      await authDecision.consume()
+    }
+
+    if (isRunControl) {
+      // Return to the transport immediately so CardKit can ACK well inside
+      // its three-second deadline. Durable execution and card refresh happen
+      // asynchronously from the journal update.
+      void (async () => {
+        try {
+          const { executeRunControlCommand } = await import("@/lib/execution/run-control")
+          const configuredOperators = adapterRow?.settings.runOperatorUserIds
+          const operatorIds = Array.isArray(configuredOperators)
+            ? configuredOperators.filter((value): value is string => typeof value === "string")
+            : []
+          await executeRunControlCommand(
+            {
+              runId,
+              action: runAction as import("@/types/execution/run").RunControlAction,
+              idempotencyKey: event.triggerId,
+              expectedRevision: runRevision,
+              actor: {
+                platformIdentityId: event.user.id,
+                remoteUserId: event.user.remoteUserId,
+                displayName: event.user.displayName,
+              },
+              ...(typeof event.payload?.interruptId === "string"
+                ? { interruptId: event.payload.interruptId }
+                : {}),
+            },
+            { operatorIds }
+          )
+        } catch (err) {
+          await appendAudit({
+            adapterId: event.adapterId,
+            kind: "callback.handler_failed",
+            at: Date.now(),
+            conversationKey: resolvedConversationKey ?? undefined,
+            reason: err instanceof Error ? err.name : "unknown",
+            message: err instanceof Error ? err.message : String(err),
+            fields: { triggerId: event.triggerId, runId, action: runAction },
+          })
+        }
+      })()
+      return true
     }
 
     if (!resolvedSurfaceId) {
@@ -782,7 +2044,7 @@ export class ConnectorBus {
           bindingFound,
         },
       })
-      return
+      return true
     }
 
     // ── Step 3: Audit reception ─────────────────────────────────────
@@ -840,7 +2102,7 @@ export class ConnectorBus {
           fields: { triggerId: event.triggerId, kind: resolvedBinding.kind },
         })
       }
-      return
+      return true
     }
 
     // ── Step 4-pre-a: wf_approve / wf_cancel short-circuit ───────────
@@ -879,7 +2141,53 @@ export class ConnectorBus {
           fields: { triggerId: event.triggerId, kind: resolvedBinding.kind },
         })
       }
-      return
+      return true
+    }
+
+    // ── Step 4-pre-c: tool_approve short-circuit (control-plane HITL) ──
+    //
+    // A button on an A2UI tool-permission card. Resolve the pending approval
+    // in the in-process registry so the suspended turn continues with the
+    // user's decision. "Allow for session" additionally remembers a per-session
+    // bypass so the same tool won't re-prompt. No digest turn — the model is
+    // already mid-turn waiting on this decision.
+    if (resolvedBinding?.kind === "tool_approve") {
+      const sessionId = String(resolvedBinding.payload?.["sessionId"] ?? "")
+      const requestId = String(resolvedBinding.payload?.["requestId"] ?? "")
+      const toolName = String(resolvedBinding.payload?.["toolName"] ?? "")
+      const decision = String(resolvedBinding.payload?.["decision"] ?? "deny") as
+        "allow" | "deny" | "allow_session"
+      try {
+        const [{ applyToolApprovalCallback }, { resolveApproval }] = await Promise.all([
+          import("@/lib/connectors/hitl/tool-approval"),
+          import("@/lib/connectors/hitl/approval-registry"),
+        ])
+        const { granted, resolved } = applyToolApprovalCallback({
+          sessionId,
+          requestId,
+          toolName,
+          decision,
+          resolve: resolveApproval,
+        })
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: granted ? "tool_approve.granted" : "tool_approve.denied",
+          at: Date.now(),
+          conversationKey: resolvedConversationKey ?? undefined,
+          fields: { toolName, requestId, decision, resolved },
+        })
+      } catch (err) {
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: "callback.handler_failed",
+          at: Date.now(),
+          conversationKey: resolvedConversationKey ?? undefined,
+          reason: err instanceof Error ? err.name : "unknown",
+          message: err instanceof Error ? err.message : String(err),
+          fields: { triggerId: event.triggerId, kind: resolvedBinding.kind },
+        })
+      }
+      return true
     }
 
     // ── Step 4a: skill_invoke short-circuit (ADR-0026) ───────────────
@@ -905,7 +2213,7 @@ export class ConnectorBus {
           message: `Skill HITL rejected for binding ${event.triggerId}`,
           fields: { triggerId: event.triggerId, skillId },
         })
-        return
+        return true
       }
       try {
         // Lazy import to avoid pulling the skill registry into adapter
@@ -931,7 +2239,7 @@ export class ConnectorBus {
           fields: { triggerId: event.triggerId, skillId },
         })
       }
-      return
+      return true
     }
 
     // ── Step 4a-help: help_quick_command short-circuit (cross-provider) ──
@@ -955,13 +2263,25 @@ export class ConnectorBus {
           reason: "help_quick_command:missing_action_or_conversation",
           message: `triggerId=${event.triggerId}`,
         })
-        return
+        return true
       }
       let parsed
       try {
         parsed = parseConversationKey(convKey)
       } catch {
-        return
+        // The bound conversationKey cannot be parsed back into (platform,
+        // adapterId, chat) — the synthetic re-entry event cannot be built.
+        // Terminal, but audited: a silently dead quick-command button was
+        // impossible to diagnose from the trail before this row.
+        await appendAudit({
+          adapterId: event.adapterId,
+          kind: "callback.unbound",
+          at: Date.now(),
+          conversationKey: convKey,
+          reason: "help_quick_command:unparsable_conversation_key",
+          message: `triggerId=${event.triggerId}`,
+        }).catch(() => undefined)
+        return true
       }
       const synthetic: NormalizedInboundEvent = {
         platform: event.platform,
@@ -1001,11 +2321,11 @@ export class ConnectorBus {
           fields: { triggerId: event.triggerId, kind: "help_quick_command" },
         })
       }
-      return
+      return true
     }
 
     // ── Step 4b: Hand off to the bridge ──────────────────────────────
-    if (!this.callbackHandler) return
+    if (!this.callbackHandler) return true
     const projected: ConnectorCallbackEvent = {
       ...event,
       surfaceId: resolvedSurfaceId,
@@ -1025,6 +2345,7 @@ export class ConnectorBus {
         fields: { triggerId: event.triggerId, surfaceId: resolvedSurfaceId },
       })
     }
+    return true
   }
 
   listAdapters(): PlatformAdapter[] {

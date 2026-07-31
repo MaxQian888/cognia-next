@@ -5,11 +5,11 @@
   "description": "Node.js host process for VS Code extensions running inside cognia. Spawned by Tauri; speaks JSON-RPC over stdio to the renderer.",
   "main": "dist/host.js",
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=26.0.0"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "node --test --experimental-vm-modules tests/**/*.test.mjs"
+    "test": "node --test --experimental-vm-modules tests/*.test.mjs"
   },
   "dependencies": {
     "vscode-jsonrpc": "^8.2.0",

@@ -19,34 +19,29 @@
  */
 
 import { getPluginEventHooks, getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
-import type { PluginMessage } from "@/types/plugin"
+import { emitSystemBusEvent, SystemEvents } from "@/lib/plugin/messaging/message-bus"
+import type { PluginHooks, PluginMessage } from "@/types/plugin"
+import type { PluginHooksAll } from "@/types/plugin/plugin-hooks"
 
-interface DispatcherInternals {
-  hooks?: { has: (name: string) => boolean }
-  dispatcher?: { hooks?: { has: (name: string) => boolean } }
+function hasListeners(hookName: keyof PluginHooks): boolean {
+  // Lifecycle-scoped query against the real singleton — true only when some
+  // plugin actually registered this hook, so the dispatch is genuinely skipped
+  // when nothing is wired.
+  return getPluginLifecycleHooks().hasAnyHook(hookName)
 }
 
-function readHookRegistry(dispatcher: unknown): { has: (name: string) => boolean } | undefined {
-  const internals = dispatcher as DispatcherInternals
-  return internals.dispatcher?.hooks ?? internals.hooks
+function hasEventListeners(hookName: keyof PluginHooksAll): boolean {
+  // Event-scoped query (separate singleton from lifecycle hooks).
+  return getPluginEventHooks().hasAnyHook(hookName)
 }
 
-function hasListeners(hookName: string): boolean {
-  // Lifecycle-scoped hook query.
-  const hooks = readHookRegistry(getPluginLifecycleHooks())
-  if (hooks && typeof hooks.has === "function") {
-    return hooks.has(hookName)
-  }
-  return true // when in doubt, dispatch — keep the wrapper safe.
-}
-
-function hasEventListeners(hookName: string): boolean {
-  // Event-scoped hook query (separate singleton from lifecycle hooks).
-  const hooks = readHookRegistry(getPluginEventHooks())
-  if (hooks && typeof hooks.has === "function") {
-    return hooks.has(hookName)
-  }
-  return true
+/**
+ * Whether any plugin registered `onPostToolUse`. The chat send path uses this
+ * to decide if the sidecar's `tool_result_review` round-trip is worth paying
+ * for the turn (`sendOptions.toolResultReviewEnabled`).
+ */
+export function hasPostToolUseListeners(): boolean {
+  return hasEventListeners("onPostToolUse")
 }
 
 export interface PromptSubmitContextLike {
@@ -141,6 +136,20 @@ export async function dispatchOnAssistantMessage(message: PluginMessage): Promis
   }
 }
 
+/**
+ * Fired when a user message is about to be dispatched to the SDK. Pipeline
+ * semantics: each plugin's `onMessageSend` may return a rewritten message;
+ * the final message is what actually leaves. Fail-open on dispatcher errors.
+ */
+export async function dispatchOnMessageSend(message: PluginMessage): Promise<PluginMessage> {
+  if (!hasListeners("onMessageSend")) return message
+  try {
+    return await getPluginLifecycleHooks().dispatchOnMessageSend(message)
+  } catch {
+    return message
+  }
+}
+
 /** Fired when an SDK stream begins. */
 export function dispatchStreamStart(sessionId: string): void {
   if (!hasEventListeners("onStreamStart")) return
@@ -173,6 +182,13 @@ export function dispatchStreamEnd(sessionId: string, finalContent: string): void
 
 /** Fired when the SDK reports a chat-level error. */
 export function dispatchChatError(sessionId: string, error: Error): void {
+  // Plugin bus: the agent run failed. Emitted unconditionally (the bus has its
+  // own subscriber check) — distinct from the `onChatError` hook fan-out below.
+  // PII red-line: the bus reaches any `events:subscribe` plugin, so we publish
+  // only the bounded error CLASS (`error.name`), never `error.message` (which
+  // can echo prompt/tool text). The full message still reaches plugins via the
+  // in-process `onChatError` hook below.
+  emitSystemBusEvent(SystemEvents.AGENT_ERROR, { sessionId, error: error.name })
   if (!hasEventListeners("onChatError")) return
   try {
     getPluginEventHooks().dispatchChatError(sessionId, error)

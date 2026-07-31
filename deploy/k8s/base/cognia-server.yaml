@@ -1,0 +1,182 @@
+# cognia-server — headless brain host (ADR-0059 D9 base).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: cognia-server
+spec:
+  serviceName: cognia-server
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cognia-server
+  template:
+    metadata:
+      labels:
+        app: cognia-server
+    spec:
+      # Production: set `runtimeClassName: gvisor` via the tenant overlay
+      # (cluster/runtimeclass-gvisor.yaml must be applied first).
+      # Grants pods create/attach for the k8s exec backend (runner Pods);
+      # inert while COGNIA_EXEC_BACKEND stays local-process.
+      serviceAccountName: cognia-server
+      containers:
+        - name: cognia-server
+          image: ghcr.io/maxqian888/cognia-server:latest-full
+          # 27890 tracks companion_api::server::DEFAULT_PORT (7890 is the
+          # Clash mixed-port default). Keep args/probe/Service in sync.
+          args: ["serve", "--port", "27890"]
+          ports:
+            - containerPort: 27890
+              name: https
+          env:
+            - name: COGNIA_DATA_DIR
+              value: /data
+            - name: COGNIA_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cognia-secrets
+                  key: COGNIA_MASTER_KEY
+            # REQUIRED (not optional): `cognia-server pair` run via kubectl
+            # exec falls back to https://127.0.0.1:<DEFAULT_PORT> when unset,
+            # which is never reachable from a paired device — every tenant
+            # must provide its public URL in the cognia-config ConfigMap.
+            - name: COGNIA_PUBLIC_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: publicUrl
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cognia-secrets
+                  key: ANTHROPIC_API_KEY
+                  optional: true
+            # ── OIDC / Logto (ADR-0059 multi-user) — optional; OIDC turns on
+            # only when BOTH issuer and audience are set. The k8s topology is
+            # the multi-tenant rung, so wire these per tenant (see
+            # deploy/compose/LOGTO.md for the seed flow + issuer footgun).
+            - name: COGNIA_LOGTO_ISSUER
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: logtoIssuer
+                  optional: true
+            - name: COGNIA_LOGTO_AUDIENCE
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: logtoAudience
+                  optional: true
+            - name: COGNIA_LOGTO_REQUIRED_SCOPES
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: logtoRequiredScopes
+                  optional: true
+            - name: COGNIA_LOGTO_JWKS_TTL_SECS
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: logtoJwksTtlSecs
+                  optional: true
+            # ── k8s exec backend (ADR-0059 R13, runner Pods) — inert unless
+            # the tenant overlay sets execBackend=kubernetes and applies the
+            # runners patch (workspaces PVC + mount). Downward API pins
+            # runner pods to this pod's namespace/node so an RWO workspaces
+            # PVC can be shared.
+            - name: COGNIA_EXEC_BACKEND
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: execBackend
+                  optional: true
+            - name: COGNIA_RUNNER_IMAGE
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: runnerImage
+                  optional: true
+            - name: COGNIA_WORKSPACES_VOLUME
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: workspacesPvc
+                  optional: true
+            - name: COGNIA_RUNNER_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: COGNIA_RUNNER_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            # ADR-0085 shared browser — default-off, and still requires the
+            # user's experiment toggle before capability advertisement.
+            - name: COGNIA_REMOTE_BROWSER_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: remoteBrowserEnabled
+                  optional: true
+            - name: COGNIA_WORKSPACE_RUNTIME_URL_TEMPLATE
+              value: http://workspace-runtime-{workspace_id}:27910
+            - name: COGNIA_WORKSPACE_RUNTIME_SECRET_DIR
+              value: /runtime-secrets
+            - name: COGNIA_WORKSPACE_RUNTIME_WORKSPACES
+              valueFrom:
+                configMapKeyRef:
+                  name: cognia-config
+                  key: remoteBrowserWorkspaces
+                  optional: true
+          readinessProbe:
+            httpGet:
+              path: /api/v1/healthz
+              port: 27890
+              scheme: HTTPS
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /api/v1/healthz
+              port: 27890
+              scheme: HTTPS
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: runtime-secrets
+              mountPath: /runtime-secrets
+              readOnly: true
+      volumes:
+        - name: runtime-secrets
+          secret:
+            secretName: workspace-runtime-secrets
+            optional: true
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cognia-server
+spec:
+  selector:
+    app: cognia-server
+  ports:
+    - port: 27890
+      targetPort: 27890
+      name: https

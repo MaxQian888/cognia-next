@@ -1,0 +1,21 @@
+{
+  "description": "LLM help for writing your messages — enhancement, inline completion, and suggestions.",
+  "enhance": {
+    "hint": "Rewrite or vary your draft with a model from the composer toolbar.",
+    "label": "Prompt enhancement"
+  },
+  "followUps": {
+    "hint": "Suggest follow-up messages after the assistant replies.",
+    "label": "Follow-up suggestions"
+  },
+  "ghostText": {
+    "debounceLabel": "Debounce (ms)",
+    "hint": "Show a dim AI continuation as you type; press Tab to accept. Off by default.",
+    "label": "Inline autocomplete"
+  },
+  "starters": {
+    "hint": "Suggest opening prompts on the empty chat screen.",
+    "label": "AI starter prompts"
+  },
+  "title": "Composer AI assistance"
+}

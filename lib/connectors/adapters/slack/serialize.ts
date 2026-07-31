@@ -7,7 +7,13 @@
  */
 
 import type { OutboundRequest } from "@/types/connectors/outbound"
-import { buildSlackA2UIBlocks, segmentsToBlocks, type SlackAnyBlock } from "./block-kit"
+import { segmentsToPlainText } from "@/types/connectors/segment"
+import {
+  buildSlackA2UIBlocks,
+  clampBlocks,
+  segmentsToBlocks,
+  type SlackAnyBlock,
+} from "./block-kit"
 
 const SLACK_API_BASE = "https://slack.com/api"
 
@@ -15,6 +21,34 @@ export interface SerializedSlackCall {
   method: "POST"
   url: string
   payload: Record<string, unknown>
+}
+
+/**
+ * Thrown when a request serializes to neither blocks nor text — Slack would
+ * reject it with `no_text`. The adapter maps this to a non-retryable
+ * `validation` OutboundError instead of retrying a permanently-empty send.
+ */
+export class SlackEmptyMessageError extends Error {
+  constructor() {
+    super("Slack message serialized to no blocks and no text")
+    this.name = "SlackEmptyMessageError"
+  }
+}
+
+/**
+ * Assemble the blocks/text part of a chat.postMessage / chat.update payload.
+ *
+ * Slack requires a top-level `text` alongside `blocks` as the notification
+ * fallback (and warns / degrades notifications without it), so we always
+ * derive one from the segments' plain text. When every segment was dropped
+ * by the block serializer but plain text exists, send text-only; when both
+ * are empty, throw {@link SlackEmptyMessageError}.
+ */
+function blocksAndTextPayload(blocks: SlackAnyBlock[], req: OutboundRequest) {
+  const text = segmentsToPlainText(req.segments).trim()
+  if (blocks.length === 0 && text.length === 0) throw new SlackEmptyMessageError()
+  if (blocks.length === 0) return { text }
+  return { blocks: clampBlocks(blocks), ...(text ? { text } : {}) }
 }
 
 /** Extract channelId from the conversation reference. */
@@ -40,7 +74,7 @@ export function serializePostMessage(req: OutboundRequest): SerializedSlackCall 
   const threadTs = threadTsFromRef(req)
   const blocks = segmentsToBlocks(req.segments)
 
-  const payload: Record<string, unknown> = { channel, blocks }
+  const payload: Record<string, unknown> = { channel, ...blocksAndTextPayload(blocks, req) }
   if (threadTs) {
     payload["thread_ts"] = threadTs
   }
@@ -88,7 +122,7 @@ export async function serializePostMessageAsync(
     }
   }
 
-  const payload: Record<string, unknown> = { channel, blocks }
+  const payload: Record<string, unknown> = { channel, ...blocksAndTextPayload(blocks, req) }
   if (threadTs) payload["thread_ts"] = threadTs
 
   return {
@@ -120,7 +154,7 @@ export function serializeUpdate(
   return {
     method: "POST",
     url: `${SLACK_API_BASE}/chat.update`,
-    payload: { channel, ts, blocks },
+    payload: { channel, ts, ...blocksAndTextPayload(blocks, req) },
   }
 }
 
@@ -142,6 +176,21 @@ export function serializeReaction(channel: string, ts: string, name: string): Se
   return {
     method: "POST",
     url: `${SLACK_API_BASE}/reactions.add`,
+    payload: { channel, timestamp: ts, name },
+  }
+}
+
+/**
+ * Build a reactions.remove call (retract a previously added reaction).
+ */
+export function serializeReactionRemoval(
+  channel: string,
+  ts: string,
+  name: string
+): SerializedSlackCall {
+  return {
+    method: "POST",
+    url: `${SLACK_API_BASE}/reactions.remove`,
     payload: { channel, timestamp: ts, name },
   }
 }

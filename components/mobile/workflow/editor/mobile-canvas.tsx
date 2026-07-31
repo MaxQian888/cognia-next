@@ -15,7 +15,7 @@
  * Node config / structure mutations all flow through the shared editor store.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Background,
   BackgroundVariant,
@@ -35,6 +35,8 @@ import { useTranslations } from "next-intl"
 
 import { WorkflowNodeComponent } from "@/components/workflow/editor/nodes/workflow-node"
 import { SmartEdge } from "@/components/workflow/editor/edges/smart-edge"
+import { outputHandlesFor } from "@/lib/workflow/editor/node-handles"
+import { lock as lockOrientation, unlock as unlockOrientation } from "@/lib/capacitor/screen-orientation"
 import { useRunStatusBridge } from "@/lib/workflow/runtime/run-status-bridge"
 import { useLastRunSummaryByStep } from "@/lib/workflow/runtime/last-run-summary"
 import { useEffectivePerfTier } from "@/hooks/workflow/use-effective-perf-tier"
@@ -62,6 +64,8 @@ export interface MobileCanvasProps {
   connectActive: boolean
   /** Tapped a node — inspect it, or complete a pending connection. */
   onNodeTap: (id: string) => void
+  /** Tapped an edge (edit mode) — select it so the delete bar can act on it. */
+  onEdgeTap: (id: string) => void
   /** Tapped empty canvas — clear selection / cancel a pending connection. */
   onPaneTap: () => void
   onInit: (rf: WorkflowFlowInstance) => void
@@ -72,10 +76,12 @@ export function MobileCanvas({
   mode,
   connectActive,
   onNodeTap,
+  onEdgeTap,
   onPaneTap,
   onInit,
 }: MobileCanvasProps) {
   const t = useTranslations("mobile.workflow.editor")
+  const tNode = useTranslations("workflows.node")
   const useStore = store
 
   const { nodes, edges, viewport, snapToGrid } = useStore(
@@ -86,6 +92,7 @@ export function MobileCanvas({
       snapToGrid: s.snapToGrid,
     }))
   )
+  const connectionState = useStore((s) => s.connectionState)
   const setNodes = useStore((s) => s.setNodes)
   const setEdges = useStore((s) => s.setEdges)
   const setViewport = useStore((s) => s.setViewport)
@@ -102,6 +109,17 @@ export function MobileCanvas({
   useEffect(() => {
     setLastRunByStepId(lastRunByStepId)
   }, [lastRunByStepId, setLastRunByStepId])
+
+  // The 2D node canvas reads far better on the wide axis than in a 360-px
+  // portrait column, so lock landscape while the editor canvas is mounted and
+  // restore the user's orientation on exit. No-ops on web / Tauri (the wrapper
+  // resolves `unsupported`), so this only takes effect on the Capacitor shell.
+  useEffect(() => {
+    void lockOrientation("landscape")
+    return () => {
+      void unlockOrientation()
+    }
+  }, [])
 
   const editable = mode === "edit"
 
@@ -162,16 +180,44 @@ export function MobileCanvas({
     (_e: React.MouseEvent, node: { id: string }) => onNodeTap(node.id),
     [onNodeTap]
   )
+  const handleEdgeClick = useCallback(
+    (_e: React.MouseEvent, edge: { id: string }) => onEdgeTap(edge.id),
+    [onEdgeTap]
+  )
   const handlePaneClick = useCallback(() => onPaneTap(), [onPaneTap])
 
+  // Connect banner copy. When the connection is rooted at a labeled output
+  // (branch true/false/case, error path) name it so the user knows which path
+  // they're wiring; otherwise the generic "tap a node" prompt.
+  const connectBannerText = useMemo(() => {
+    const handle = connectionState?.sourceHandle
+    if (!connectionState || !handle) return t("connectTarget")
+    if (handle === "error") return t("connectFrom", { label: t("errorOutput") })
+    const src = nodes.find((n) => n.id === connectionState.sourceId)
+    const handles = src
+      ? outputHandlesFor({
+          kind: src.data.kind,
+          typeVersion: src.data.typeVersion,
+          params: (src.data.params as Record<string, unknown>) ?? {},
+        })
+      : null
+    const h = handles?.find((x) => x.id === handle)
+    if (!h) return t("connectTarget")
+    const label = h.kind === "case" ? (h.label ?? h.id) : tNode(`outputHandles.${h.kind}`)
+    return t("connectFrom", { label })
+  }, [connectionState, nodes, t, tNode])
+
   return (
-    <div className="relative h-full w-full overflow-hidden bg-muted/30" data-testid="mobile-canvas">
+    <div
+      className="wf-touch-canvas relative h-full w-full overflow-hidden bg-muted/30"
+      data-testid="mobile-canvas"
+    >
       {connectActive ? (
         <div
           className="pointer-events-none absolute inset-x-0 top-2 z-20 mx-auto w-fit rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground shadow-md"
           data-testid="mobile-connect-banner"
         >
-          {t("connectTarget")}
+          {connectBannerText}
         </div>
       ) : null}
       <ReactFlow
@@ -184,6 +230,7 @@ export function MobileCanvas({
         onNodeDragStart={onNodeDragStart}
         onNodeDragStop={onNodeDragStop}
         onNodeClick={handleNodeClick}
+        onEdgeClick={handleEdgeClick}
         onPaneClick={handlePaneClick}
         onInit={handleInit}
         nodeTypes={nodeTypes}

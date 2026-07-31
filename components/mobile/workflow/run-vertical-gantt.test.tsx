@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 
 afterEach(cleanup)
 
@@ -89,6 +89,30 @@ describe("<RunVerticalGantt />", () => {
     )
     expect(screen.getByText("boom")).toBeInTheDocument()
     expect(screen.getByTestId("run-status-failed")).toBeInTheDocument()
+  })
+
+  it("shows a cancel affordance on active runs and calls back without navigating", () => {
+    const onCancelRun = jest.fn()
+    render(
+      <RunVerticalGantt
+        runs={[
+          makeRun({ id: "r-live", status: "running", completedAt: undefined }),
+          makeRun({ id: "r-done", status: "succeeded" }),
+        ]}
+        onCancelRun={onCancelRun}
+      />
+    )
+    // Terminal run gets no cancel button.
+    expect(screen.queryByTestId("run-cancel-r-done")).toBeNull()
+    fireEvent.click(screen.getByTestId("run-cancel-r-live"))
+    expect(onCancelRun).toHaveBeenCalledWith(expect.objectContaining({ id: "r-live" }))
+  })
+
+  it("renders no cancel affordance when onCancelRun is absent", () => {
+    render(
+      <RunVerticalGantt runs={[makeRun({ id: "r-live", status: "running", completedAt: undefined })]} />
+    )
+    expect(screen.queryByTestId("run-cancel-r-live")).toBeNull()
   })
 
   it("uses custom hrefForRun when provided", () => {

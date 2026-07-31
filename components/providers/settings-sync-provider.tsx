@@ -3,8 +3,9 @@
 import { useEffect } from "react"
 import { useTheme } from "next-themes"
 import { useSettingsStore } from "@/stores/settings"
-import type { AppFontScale } from "@/lib/claude/types"
+import type { AppFontScale } from "@cognia/agent-config-types"
 import { applyZoom, DEFAULT_ZOOM } from "@/lib/tauri/webview-zoom"
+import { getPetWindowRole } from "@/lib/pet/window-role"
 
 const FONT_SIZE_PX: Record<AppFontScale, number> = {
   xs: 14,
@@ -47,7 +48,17 @@ export function SettingsSyncProvider({ children }: { children: React.ReactNode }
       document.documentElement.removeAttribute("data-reduce-motion")
     }
 
-    void applyZoom(settings.webviewZoom ?? DEFAULT_ZOOM)
+    // The webview zoom is the MAIN window's UI-scale preference. The
+    // transparent pet overlay / popup windows load this same root layout, but
+    // they own their own sizing (the sprite scales via `desktopPet.size`, not a
+    // page zoom) and — being least-privilege — aren't granted
+    // `core:webview:allow-set-webview-zoom` (see capabilities/pet.json). Calling
+    // `setZoom` there both mis-scales the sprite and logs a denied-capability
+    // error, so restrict the zoom sync to the main/web context.
+    const role = getPetWindowRole()
+    if (role === "main" || role === "web") {
+      void applyZoom(settings.webviewZoom ?? DEFAULT_ZOOM)
+    }
   }, [
     loaded,
     settings?.theme,

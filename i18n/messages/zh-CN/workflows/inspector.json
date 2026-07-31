@@ -1,0 +1,37 @@
+{
+  "bulk": {
+    "cancel": "取消",
+    "clearSelection": "清除选择",
+    "deleteAll": "{count, plural, other {删除 {count} 个节点}}",
+    "deleteAllConfirm": "永久删除选中的 {count} 个节点及其连线？这是一次可撤销的操作。",
+    "disabled": "禁用",
+    "disabledHint": "切换后会让所有选中节点在运行时跳过。",
+    "disabledMixed": "部分选中节点已禁用 — 切换以统一设置。",
+    "notes": "备注",
+    "notesApply": "应用到全部",
+    "notesClear": "清空全部",
+    "notesHint": "把同一条备注应用到所有选中节点。",
+    "notesPlaceholder": "给选中节点的共享备注…",
+    "title": "已选择 {count} 个节点"
+  },
+  "categoryBadge": {
+    "action": "动作",
+    "ai": "AI",
+    "annotation": "注解",
+    "data": "数据",
+    "flow": "流程",
+    "io": "I/O",
+    "trigger": "触发"
+  },
+  "closeAria": "关闭检查器",
+  "deleteNode": "删除节点",
+  "disabled": "已禁用",
+  "disabledHint": "运行时跳过。便于暂存而不删除。",
+  "empty": "在画布上选择一个节点以配置。",
+  "errorBadge": "{count} 个问题",
+  "jumpToError": "跳到下一个错误",
+  "label": "标签",
+  "noConfigYet": "暂无专属配置表单 — 在上方编辑原始 JSON。",
+  "notes": "备注",
+  "notesHint": "在节点下方显示的便签文本。"
+}

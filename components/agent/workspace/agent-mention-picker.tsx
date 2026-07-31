@@ -7,10 +7,15 @@
  * picker feels native rather than bolted on.
  */
 
+import { useTranslations } from "next-intl"
+
 import { cn } from "@/lib/utils"
+import { fuzzyFilterSort } from "@/lib/chat/completion/fuzzy-match"
+import { Badge } from "@/components/ui/badge"
 import { senderColor } from "./sender-color"
 import { RuntimeBadge } from "./runtime-badge"
 import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
+import type { SubagentMentionTarget } from "@/lib/claude/agents/chat-mention-targets"
 
 export interface AgentMentionRowProps {
   target: MentionTarget
@@ -19,6 +24,7 @@ export interface AgentMentionRowProps {
 }
 
 export function AgentMentionRow({ target, highlighted }: AgentMentionRowProps) {
+  const t = useTranslations("agentTeamsWorkspace.chat")
   const initial = target.name.charAt(0).toUpperCase() || "?"
   const isVirtual = target.kind === "virtual"
 
@@ -44,7 +50,7 @@ export function AgentMentionRow({ target, highlighted }: AgentMentionRowProps) {
           <RuntimeBadge runtime={target.runtime} />
           {isVirtual && (
             <span className="rounded bg-muted px-1 text-[9px] uppercase text-muted-foreground">
-              virtual
+              {t("virtualTag")}
             </span>
           )}
         </span>
@@ -56,28 +62,78 @@ export function AgentMentionRow({ target, highlighted }: AgentMentionRowProps) {
   )
 }
 
+export interface SubagentMentionRowProps {
+  target: SubagentMentionTarget
+  /** Highlight (current arrow-key selection or hover). */
+  highlighted?: boolean
+}
+
 /**
- * Filter mentionables by query string. Matches against the `name` (case-
- * insensitive prefix preferred, substring as fallback) and description.
- * Stable order: virtuals first, then teammates by original order.
+ * Row for a `@`-mentionable SUBAGENT in the general chat composer's combined
+ * popover. Mirrors {@link AgentMentionRow}'s rhythm/visuals (avatar + name +
+ * description) but shows a MODEL badge (the subagent's identity is a model, not
+ * a team runtime) instead of the team `RuntimeBadge`.
+ */
+export function SubagentMentionRow({ target, highlighted }: SubagentMentionRowProps) {
+  const initial = target.name.charAt(0).toUpperCase() || "?"
+  return (
+    <div
+      data-testid={`subagent-mention-row-${target.id}`}
+      className={cn(
+        "flex w-full items-center gap-2 text-sm",
+        highlighted && "bg-accent text-accent-foreground"
+      )}
+    >
+      <span
+        aria-hidden
+        className="flex size-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white"
+        style={{ backgroundColor: senderColor(target.name) }}
+      >
+        {initial}
+      </span>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <span className="flex items-center gap-2 text-xs font-medium">
+          <span className="truncate">@{target.handle}</span>
+          {target.model ? (
+            <Badge variant="secondary" className="px-1 text-[9px]">
+              {target.model}
+            </Badge>
+          ) : null}
+        </span>
+        {target.description ? (
+          <span className="truncate text-[11px] text-muted-foreground">{target.description}</span>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Filter subagent mention targets by query using the shared fuzzy matcher,
+ * matching the picked-handle (primary) + description (secondary) so the search
+ * lines up with what gets inserted (`@<handle>`).
+ */
+export function filterSubagents(
+  targets: readonly SubagentMentionTarget[],
+  query: string
+): SubagentMentionTarget[] {
+  return fuzzyFilterSort(targets, query, (t) => t.handle, {
+    secondaryText: (t) => t.description,
+  })
+}
+
+/**
+ * Filter mentionables by query string using the shared fuzzy matcher — the
+ * same scorer the slash-command picker uses, so `@` and `/` rank candidates
+ * consistently. Matches against the `name` (primary) and `description`
+ * (secondary, demoted below any name match). Stable order on ties / empty
+ * query: virtuals first, then teammates by original order.
  */
 export function filterMentionables(
   mentionables: readonly MentionTarget[],
   query: string
 ): MentionTarget[] {
-  const q = query.trim().toLowerCase()
-  if (!q) return [...mentionables]
-  return mentionables
-    .map((t) => {
-      const name = t.name.toLowerCase()
-      const desc = t.description.toLowerCase()
-      let score = -1
-      if (name.startsWith(q)) score = 1000 - name.length
-      else if (name.includes(q)) score = 800 - name.length
-      else if (desc.includes(q)) score = 100
-      return { target: t, score }
-    })
-    .filter((x) => x.score >= 0)
-    .sort((a, b) => b.score - a.score)
-    .map((x) => x.target)
+  return fuzzyFilterSort(mentionables, query, (t) => t.name, {
+    secondaryText: (t) => t.description,
+  })
 }

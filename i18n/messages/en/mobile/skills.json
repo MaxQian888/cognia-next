@@ -1,0 +1,16 @@
+{
+  "content": "Content",
+  "description": "Description",
+  "metaCategory": "Category",
+  "metaUpdated": "Last updated",
+  "metaUsage": "Usage count",
+  "name": "Name",
+  "openSheet": "Open {name}",
+  "save": "Save",
+  "saved": "Saved.",
+  "tabEdit": "Edit",
+  "tabOverview": "Overview",
+  "tabResources": "Resources",
+  "tabValidation": "Validation",
+  "toggleEnabled": "Enable skill"
+}

@@ -1,0 +1,13 @@
+"NSCameraUsageDescription" = "Cognia needs camera access to scan pairing QR codes, attach photos to chats, and capture documents for your digital twin.";
+
+"NSPhotoLibraryUsageDescription" = "Cognia needs photo library access to attach images from your library to chats and back up albums.";
+
+"NSPhotoLibraryAddUsageDescription" = "Cognia needs write access to save images from chats to your photo library.";
+
+"NSMicrophoneUsageDescription" = "Cognia needs microphone access to record voice messages.";
+
+"NSFaceIDUsageDescription" = "Cognia uses Face ID to unlock the app and confirm sensitive actions (delete pairing, export backups).";
+
+"NSLocationWhenInUseUsageDescription" = "Cognia needs your current position for workflow location triggers (foreground only).";
+
+"NSLocalNetworkUsageDescription" = "Cognia needs to discover your paired desktop on this local network.";

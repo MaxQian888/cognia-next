@@ -1,0 +1,48 @@
+{
+  "panel": {
+    "empty": "还没有报告。运行雷达以分析你近期的信息饮食。",
+    "meta": "已分析 {count} 项 · {days} 天窗口",
+    "run": "立即运行",
+    "runAria": "生成新的雷达报告",
+    "title": "注意力雷达"
+  },
+  "section": {
+    "actions": "行动",
+    "atAGlance": "速览",
+    "blindSpots": "盲区",
+    "graveyard": "墓地",
+    "heatmap": "活跃度",
+    "infoDiet": "信息饮食",
+    "subconscious": "潜意识",
+    "topics": "主题"
+  },
+  "settings": {
+    "enabled": "启用雷达",
+    "enabledDesc": "自动生成报告并通过桌宠提示。",
+    "intervalDays": "最小间隔（天）",
+    "save": "保存",
+    "saved": "已保存雷达设置。",
+    "scheduleAction": {
+      "created": "已创建雷达排期。",
+      "updated": "已更新雷达排期。"
+    },
+    "scheduleCleared": "已清除雷达排期。",
+    "scheduleCustomCronLabel": "Cron 表达式",
+    "scheduleInvalidCron": "无效的 cron 表达式：{expression}",
+    "scheduleMode": {
+      "custom": "自定义",
+      "daily": "每日",
+      "off": "关闭",
+      "weekly": "每周"
+    },
+    "scheduleModeLabel": "排期",
+    "scheduleSaveAria": "保存雷达设置",
+    "windowDays": "窗口（天）"
+  },
+  "toast": {
+    "failed": "雷达运行失败：{message}",
+    "generated": "已生成雷达报告。",
+    "noModel": "未配置 LLM API 密钥。请在 设置 → 提供商 中添加。",
+    "skipped": "近期活动不足，暂无可报告内容。"
+  }
+}

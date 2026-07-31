@@ -3,6 +3,7 @@
 import { renderHook, waitFor } from "@testing-library/react"
 import { getWebhookOutboundConfig, useWebhookSigningState } from "./webhook-outbound-config"
 import { useRemoteControlStore } from "@/stores/remote-control/store"
+import { DEFAULT_WEBHOOK_DELIVERY } from "@/types/remote-control"
 
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => false) }))
 jest.mock("@/lib/tauri/remote-control", () => ({
@@ -30,10 +31,12 @@ beforeEach(() => {
 })
 
 describe("getWebhookOutboundConfig", () => {
-  it("returns no headers and no secret on web", async () => {
+  it("returns no headers and no secret on web (delivery falls back to defaults)", async () => {
     mockedIsTauri.mockReturnValue(false)
     const config = await getWebhookOutboundConfig()
-    expect(config).toEqual({})
+    expect(config.headers).toBeUndefined()
+    expect(config.signingSecret).toBeUndefined()
+    expect(config.delivery).toEqual(DEFAULT_WEBHOOK_DELIVERY)
   })
 
   it("merges store-configured headers into the resolved config", async () => {

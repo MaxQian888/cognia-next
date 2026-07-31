@@ -74,6 +74,34 @@ describe("onebotInboundToA2UI", () => {
     })
   })
 
+  it("maps v12 segment names (mention / voice / file_id)", () => {
+    const out = onebotInboundToA2UI({
+      message: [
+        { type: "mention", data: { user_id: "200001" } },
+        { type: "voice", data: { file_id: "voice-fid" } },
+        { type: "image", data: { file_id: "img-fid" } },
+        { type: "video", data: { file_id: "vid-fid" } },
+      ],
+    })
+    expect(out!.body).toEqual([
+      { kind: "mention", handle: "200001", resolved: undefined },
+      { kind: "link", href: "cq-record:voice-fid", label: "Voice message" },
+      { kind: "image", url: "img-fid", alt: undefined },
+      { kind: "link", href: "cq-video:vid-fid", label: "Video" },
+    ])
+  })
+
+  it("prefers a direct url over file/file_id for v12 voice", () => {
+    const out = onebotInboundToA2UI({
+      message: [{ type: "voice", data: { url: "https://a.com/v.amr", file_id: "fid" } }],
+    })
+    expect(out!.body[0]).toEqual({
+      kind: "link",
+      href: "https://a.com/v.amr",
+      label: "Voice message",
+    })
+  })
+
   it("skips unknown segment types but keeps known ones", () => {
     const out = onebotInboundToA2UI({
       message: [

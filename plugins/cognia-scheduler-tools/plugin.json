@@ -1,0 +1,21 @@
+{
+  "id": "cognia-scheduler-tools",
+  "name": "Scheduler Tools",
+  "version": "0.1.0",
+  "description": "Lets an in-chat agent create, list, cancel, and run scheduled tasks (gated by the scheduler permission policy).",
+  "type": "frontend",
+  "capabilities": ["tools", "scheduler"],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "activationEvents": ["startup"],
+  "runtimeCompatibility": {
+    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "mobile": { "availability": "supported", "entrypoint": "src/index.ts" }
+  }
+}

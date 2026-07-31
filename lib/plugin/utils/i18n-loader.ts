@@ -300,7 +300,7 @@ export class PluginI18nLoader {
 /**
  * The loader-internal i18n surface produced by `PluginI18nLoader.createPluginAPI`.
  * Distinct from the richer context-level `PluginI18nAPI` in
- * `types/plugin/plugin-extended.ts` (which adds `getAvailableLocales`,
+ * `types/plugin/plugin.ts` (which adds `getAvailableLocales`,
  * `getLocaleName`, `registerTranslations`, `hasTranslation`, …). Named
  * `*LoaderAPI` so the two no longer collide under one identifier.
  */

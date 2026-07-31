@@ -5,7 +5,7 @@ import { listTrustedWorkspaces as listTrustedWorkspacesRaw } from "@/lib/db/trus
 jest.mock("@tauri-apps/api/core", () => ({ invoke: jest.fn() }))
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn() }))
 jest.mock("@/lib/db/trusted-workspaces", () => ({ listTrustedWorkspaces: jest.fn() }))
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   createLogger: () => ({ warn: jest.fn(), info: jest.fn(), error: jest.fn(), debug: jest.fn() }),
 }))
 

@@ -1,0 +1,65 @@
+{
+  "about": {
+    "checkUpdates": "检查更新…",
+    "copyDiagnostics": "复制诊断信息",
+    "docs": "文档",
+    "openDataFolder": "打开数据文件夹",
+    "reportIssue": "反馈问题",
+    "title": "关于"
+  },
+  "allCommands": "所有命令",
+  "automationKill": "🛑 触发自动化中止开关",
+  "autostart": "开机自启动",
+  "categories": {
+    "chat": "对话",
+    "diagnostics": "诊断",
+    "goal": "目标",
+    "help": "帮助",
+    "other": "其它",
+    "plugins": "插件",
+    "system": "系统",
+    "template": "模板"
+  },
+  "iconState": {
+    "busy": "忙碌",
+    "error": "错误",
+    "idle": "空闲",
+    "muted": "静音"
+  },
+  "islandToggle": "切换 Agent 灵动岛",
+  "newChat": "新建对话",
+  "openLogs": "打开日志面板",
+  "pet": {
+    "clean": "清洁",
+    "feed": "喂食",
+    "openSettings": "宠物设置…",
+    "pet": "抚摸",
+    "play": "玩耍",
+    "sleep": "哄睡",
+    "title": "宠物",
+    "treat": "零食"
+  },
+  "petClickThroughOff": "关闭桌宠鼠标穿透",
+  "petToggle": "切换桌面宠物",
+  "quickGoal": "/goal …",
+  "quit": "退出",
+  "settings": "设置",
+  "show": "显示 Cognia",
+  "status": {
+    "automationRunning": "自动化运行中",
+    "goalPaused": "目标已暂停",
+    "goalRunning": "目标运行中",
+    "idle": "空闲",
+    "petNeedsAttention": "宠物需要照顾",
+    "placeholder": "状态",
+    "streaming": "回复中…"
+  },
+  "toggleWindow": "显示 / 隐藏窗口",
+  "usage": {
+    "auto": "自动（用量最高）",
+    "empty": "暂无额度数据",
+    "openSettings": "订阅设置…",
+    "refresh": "刷新额度",
+    "title": "订阅额度"
+  }
+}

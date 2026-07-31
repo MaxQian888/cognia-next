@@ -1,6 +1,27 @@
 import { invoke } from "@tauri-apps/api/core"
-import { createTelegramAdapter } from "./index"
 import type { AdapterContext, NormalizedInboundEvent } from "@/types/connectors"
+
+const mockDispatchConnectorCallback = jest.fn().mockResolvedValue(undefined)
+const mockGetAdapterInstance = jest.fn().mockResolvedValue(undefined)
+const mockAppendAudit = jest.fn().mockResolvedValue(undefined)
+
+jest.mock("@/lib/connectors/bus", () => ({
+  getBus: () => ({
+    dispatchConnectorCallback: (...args: unknown[]) => mockDispatchConnectorCallback(...args),
+  }),
+}))
+
+jest.mock("@/lib/db/adapter-instances", () => ({
+  getAdapterInstance: (...args: unknown[]) => mockGetAdapterInstance(...args),
+  // at-gate → sibling-bots pulls this in; keep it inert for these tests.
+  listAdapterInstancesByType: jest.fn().mockResolvedValue([]),
+}))
+
+jest.mock("@/lib/connectors/audit", () => ({
+  appendAudit: (...args: unknown[]) => mockAppendAudit(...args),
+}))
+
+import { createTelegramAdapter } from "./index"
 
 const mockInvoke = invoke as jest.Mock
 
@@ -68,6 +89,10 @@ function makeCtx(): { ctx: AdapterContext; emitted: NormalizedInboundEvent[] } {
 describe("createTelegramAdapter", () => {
   beforeEach(() => {
     mockInvoke.mockReset()
+    mockDispatchConnectorCallback.mockClear()
+    mockAppendAudit.mockClear()
+    mockGetAdapterInstance.mockReset()
+    mockGetAdapterInstance.mockResolvedValue(undefined)
   })
 
   it("exposes correct meta", () => {
@@ -151,7 +176,9 @@ describe("createTelegramAdapter", () => {
     const result = await adapter.send(req)
 
     expect(result.ok).toBe(true)
-    expect(result.platformMessageId).toBe("888")
+    // Composite "chatId:messageId" — message-scoped ops (delete / edit /
+    // reactions) need both halves back (audited fix #1).
+    expect(result.platformMessageId).toBe("111:888")
 
     // Verify the invoke call
     expect(mockInvoke).toHaveBeenCalledWith("connectors_http_request", {
@@ -194,5 +221,229 @@ describe("createTelegramAdapter", () => {
     await adapter.start(ctx)
     await adapter.stop()
     expect(adapter.health().state).toBe("down")
+  })
+
+  it("declares transportMode in the config schema (audited fix #14)", () => {
+    const adapter = createTelegramAdapter({
+      id: "tg-schema",
+      displayName: "Bot",
+      transport: "longpoll",
+      botToken: async () => "TOKEN",
+      selfId: "1",
+    })
+    const schema = adapter.meta.configSchema as {
+      properties: Record<string, { enum?: string[] }>
+    }
+    expect(schema.properties.transportMode).toBeDefined()
+    expect(schema.properties.transportMode.enum).toEqual(["longpoll", "webhook"])
+    expect(schema.properties.secretToken).toBeDefined()
+  })
+})
+
+describe("createTelegramAdapter — health degradation (audited fix #9)", () => {
+  beforeEach(() => {
+    mockInvoke.mockReset()
+    mockGetAdapterInstance.mockReset()
+    mockGetAdapterInstance.mockResolvedValue(undefined)
+  })
+
+  afterEach(() => {
+    jest.useRealTimers()
+  })
+
+  function makeErrBody(code: number, description: string) {
+    return {
+      status: code,
+      headers: {},
+      body: JSON.stringify({ ok: false, error_code: code, description }),
+    }
+  }
+
+  it("degrades with a reason on 401 and recovers to running on the next success", async () => {
+    jest.useFakeTimers()
+    mockInvoke
+      .mockResolvedValueOnce(makeErrBody(401, "Unauthorized"))
+      .mockResolvedValueOnce(makeOkUpdateResp([]))
+      .mockImplementation(() => new Promise(() => {})) // stall further polls
+
+    const adapter = createTelegramAdapter({
+      id: "tg-health-401",
+      displayName: "Bot",
+      transport: "longpoll",
+      botToken: async () => "TOKEN",
+      selfId: "1",
+    })
+    const { ctx } = makeCtx()
+    await adapter.start(ctx)
+
+    // First poll (401) settles on the microtask queue.
+    await jest.advanceTimersByTimeAsync(0)
+    expect(adapter.health().state).toBe("degraded")
+    expect(adapter.health().reason).toContain("401")
+    expect(ctx.logger.warn).toHaveBeenCalledWith(
+      "telegram:longpoll degraded",
+      expect.objectContaining({ status: 401 })
+    )
+
+    // Ride out the reconnect backoff → second poll succeeds → recovered.
+    await jest.advanceTimersByTimeAsync(60_000)
+    expect(adapter.health().state).toBe("running")
+    expect(adapter.health().reason).toBeUndefined()
+
+    await adapter.stop()
+  })
+
+  it("degrades immediately on 409 getUpdates conflict", async () => {
+    jest.useFakeTimers()
+    mockInvoke
+      .mockResolvedValueOnce(makeErrBody(409, "Conflict: terminated by other getUpdates"))
+      .mockImplementation(() => new Promise(() => {}))
+
+    const adapter = createTelegramAdapter({
+      id: "tg-health-409",
+      displayName: "Bot",
+      transport: "longpoll",
+      botToken: async () => "TOKEN",
+      selfId: "1",
+    })
+    const { ctx } = makeCtx()
+    await adapter.start(ctx)
+    await jest.advanceTimersByTimeAsync(0)
+
+    expect(adapter.health().state).toBe("degraded")
+    expect(adapter.health().reason).toContain("409")
+    await adapter.stop()
+  })
+
+  it("stays running on a single transient error, degrades after 3 consecutive", async () => {
+    jest.useFakeTimers()
+    mockInvoke
+      .mockResolvedValueOnce(makeErrBody(500, "boom-1"))
+      .mockResolvedValueOnce(makeErrBody(500, "boom-2"))
+      .mockResolvedValueOnce(makeErrBody(500, "boom-3"))
+      .mockImplementation(() => new Promise(() => {}))
+
+    const adapter = createTelegramAdapter({
+      id: "tg-health-5xx",
+      displayName: "Bot",
+      transport: "longpoll",
+      botToken: async () => "TOKEN",
+      selfId: "1",
+    })
+    const { ctx } = makeCtx()
+    await adapter.start(ctx)
+
+    await jest.advanceTimersByTimeAsync(0)
+    // one failure — still running (transient)
+    expect(adapter.health().state).toBe("running")
+
+    // after the 3rd consecutive failure the adapter degrades
+    await jest.advanceTimersByTimeAsync(300_000)
+    expect(adapter.health().state).toBe("degraded")
+    expect(adapter.health().reason).toContain("3 consecutive")
+    await adapter.stop()
+  })
+})
+
+describe("createTelegramAdapter — callback chat gate (audited fix #12)", () => {
+  beforeEach(() => {
+    mockInvoke.mockReset()
+    mockDispatchConnectorCallback.mockClear()
+    mockAppendAudit.mockClear()
+    mockGetAdapterInstance.mockReset()
+  })
+
+  function makeCallbackUpdate(chatId: number) {
+    return {
+      update_id: 900,
+      callback_query: {
+        id: "cq_1",
+        from: { id: 7, first_name: "Ada" },
+        message: {
+          message_id: 55,
+          chat: { id: chatId, type: "group" as const, title: "Grp" },
+          date: 1,
+          text: "pick one",
+        },
+        data: "a2ui:s1:c1:submit",
+      },
+    }
+  }
+
+  async function startWithUpdate(update: unknown, adapterId: string) {
+    let pollCount = 0
+    mockInvoke.mockImplementation(async (cmd: string, args?: unknown) => {
+      if (cmd !== "connectors_http_request") return undefined
+      const url = (args as { req?: { url?: string } } | undefined)?.req?.url ?? ""
+      // answerCallbackQuery ACK responds immediately; polls after the first stall.
+      if (url.includes("answerCallbackQuery")) return makeSendOkResp(0)
+      pollCount += 1
+      if (pollCount === 1) return makeOkUpdateResp([update])
+      return await new Promise(() => {})
+    })
+    const adapter = createTelegramAdapter({
+      id: adapterId,
+      displayName: "Bot",
+      transport: "longpoll",
+      botToken: async () => "TOKEN",
+      selfId: "1",
+    })
+    const { ctx } = makeCtx()
+    await adapter.start(ctx)
+    await new Promise((r) => setTimeout(r, 30))
+    return adapter
+  }
+
+  it("blocks callback_query from a blocklisted chat and audits the block", async () => {
+    mockGetAdapterInstance.mockResolvedValue({
+      id: "tg-gate-1",
+      type: "telegram",
+      chatBlocklist: ["-500"],
+    })
+
+    const adapter = await startWithUpdate(makeCallbackUpdate(-500), "tg-gate-1")
+    expect(mockDispatchConnectorCallback).not.toHaveBeenCalled()
+    expect(mockAppendAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "inbound.policy_blocked", reason: "chat_blocklist" })
+    )
+    await adapter.stop()
+  })
+
+  it("blocks callback_query outside a non-empty allowlist", async () => {
+    mockGetAdapterInstance.mockResolvedValue({
+      id: "tg-gate-2",
+      type: "telegram",
+      chatAllowlist: ["123"],
+    })
+
+    const adapter = await startWithUpdate(makeCallbackUpdate(-500), "tg-gate-2")
+    expect(mockDispatchConnectorCallback).not.toHaveBeenCalled()
+    expect(mockAppendAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "inbound.policy_blocked", reason: "chat_allowlist" })
+    )
+    await adapter.stop()
+  })
+
+  it("dispatches callback_query from an allowed chat", async () => {
+    mockGetAdapterInstance.mockResolvedValue({
+      id: "tg-gate-3",
+      type: "telegram",
+      chatAllowlist: ["-500"],
+    })
+
+    const adapter = await startWithUpdate(makeCallbackUpdate(-500), "tg-gate-3")
+    expect(mockDispatchConnectorCallback).toHaveBeenCalledTimes(1)
+    expect(mockDispatchConnectorCallback).toHaveBeenCalledWith(
+      expect.objectContaining({ platform: "telegram", value: "a2ui:s1:c1:submit" })
+    )
+    await adapter.stop()
+  })
+
+  it("dispatches callback_query when no row is configured (fail open)", async () => {
+    mockGetAdapterInstance.mockResolvedValue(undefined)
+
+    const adapter = await startWithUpdate(makeCallbackUpdate(-500), "tg-gate-4")
+    expect(mockDispatchConnectorCallback).toHaveBeenCalledTimes(1)
+    await adapter.stop()
   })
 })

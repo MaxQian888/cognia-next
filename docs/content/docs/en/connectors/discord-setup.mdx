@@ -32,7 +32,7 @@ This guide walks you through creating a Discord application, obtaining a bot tok
 1. In your application, go to **General Information**.
 2. Copy the **Public Key** (64-character hex string).
 
-This is used for Ed25519 signature verification when Discord sends interaction payloads to a webhook endpoint. Phase 1 uses Gateway (WebSocket) mode, so this is **optional** for now — but it is good practice to save it for a future webhook migration.
+The public key is used for Ed25519 signature verification of Interactions webhook calls. You only need it if you choose **Interactions webhook** transport (see step 6). In the default **Gateway** transport it is not required.
 
 ---
 
@@ -44,17 +44,21 @@ This is used for Ed25519 signature verification when Discord sends interaction p
    - **Server Members Intent** — allows the bot to see guild members.
    - **Message Content Intent** — **required** for the bot to read message content in guild channels.
 
-> Without **Message Content Intent**, the `content` field of guild messages will be empty. Direct Messages do not require this intent.
+> Without **Message Content Intent**, the `content` field of guild messages will be empty. Direct Messages do not require this intent, but the bot must still subscribe to `DIRECT_MESSAGES` (included in the default below).
 
-cognia-next uses intent bitmask **33281** by default:
+cognia-next uses intent bitmask **46593** by default:
 
-| Intent          | Value     |
-| --------------- | --------- |
-| GUILDS          | 1         |
-| GUILD_MESSAGES  | 512       |
-| MESSAGE_CONTENT | 32768     |
-| DIRECT_MESSAGES | 4096      |
-| **Total**       | **33281** |
+| Intent                  | Value     |
+| ----------------------- | --------- |
+| GUILDS                  | 1         |
+| GUILD_MESSAGES          | 512       |
+| GUILD_MESSAGE_REACTIONS | 1024      |
+| DIRECT_MESSAGES         | 4096      |
+| DIRECT_MESSAGE_REACTIONS| 8192      |
+| MESSAGE_CONTENT         | 32768     |
+| **Total**               | **46593** |
+
+You can override this bitmask via the **Gateway intents** field in the adapter's **Delivery & transport** section (leave blank for the default). `MESSAGE_CONTENT` is a privileged intent and must be enabled in the Developer Portal regardless of the bitmask, or Discord closes the connection with close code 4014.
 
 ---
 
@@ -79,11 +83,13 @@ cognia-next uses intent bitmask **33281** by default:
 3. In the **Discord Configuration** dialog:
    - Enter a **Display Name** for this bot (e.g. "My Server Bot").
    - Paste the **Bot Token** you copied in step 2.
-   - Optionally paste the **Public Key** from step 3.
+   - Under **Delivery & transport**, choose a **Transport**:
+     - **Gateway (WebSocket)** — recommended. Receives both messages and interactions over a persistent connection. No public URL required.
+     - **Interactions webhook (HTTP)** — receives **interactions only** (slash commands, buttons, modal submits) via an HTTPS endpoint. Message events are **not** delivered in this mode. Requires the Cloudflared tunnel (Mobile Companion settings) and the **Public Key**; paste the generated **Interactions Endpoint URL** into the Developer Portal → General Information → Interactions Endpoint URL.
    - Click **Test** to verify the token connects to Discord successfully.
 4. Click **Create**.
 
-cognia-next will connect to the Discord Gateway using WebSocket mode. No public URL is required.
+In Gateway mode cognia-next connects to the Discord Gateway over WebSocket — no public URL is required.
 
 ---
 
@@ -103,5 +109,7 @@ If the adapter shows **Down** or **Degraded**:
 
 - **Rate limits**: Discord rate-limits bots at 50 messages per second per channel. cognia-next's outbound runner respects retryable errors (HTTP 429).
 - **Large servers**: For bots in 100+ servers, you must apply for **Gateway Privileged Intents** through the Developer Portal.
-- **Sharding**: Not supported in Phase 1. Single-shard operation only.
-- **Voice messages**: Not supported in Phase 1. Planned for Phase 2.
+- **Sharding**: Not supported. Single-shard operation only.
+- **Interactive components (A2UI)**: Buttons, select menus, and modals work in Gateway mode — the bot acknowledges each interaction within Discord's 3-second window and replies as a normal channel message. **Modals** (TextField / TextArea / Dialog surfaces) are Gateway-only; in webhook mode a modal-open button degrades to a plain callback.
+- **Media**: Images, files, videos, and voice messages are uploaded as real multipart attachments (not URL embeds). Voice messages carry the `IS_VOICE_MESSAGE` flag plus duration and waveform metadata.
+- **Webhook transport is interaction-only**: The Discord Interactions Endpoint never delivers message events — only interactions. Use Gateway mode for any bot that needs to read chat messages or DMs.

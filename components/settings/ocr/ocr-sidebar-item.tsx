@@ -20,6 +20,7 @@ import {
   Table as TableIcon,
   X,
 } from "lucide-react"
+import { BrandIcon, hasBrandIcon } from "@/components/icons/brand-icon"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { topSidebarCapabilities, type OcrCapabilityFields } from "@/lib/ocr/capabilities"
@@ -139,14 +140,18 @@ export const OcrSidebarItem = React.memo(function OcrSidebarItem({
         disabled && !isSelected && "opacity-60"
       )}
     >
-      <div
-        className={cn(
-          "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-xs font-semibold",
-          isSelected ? "bg-primary-foreground/20" : "bg-muted"
-        )}
-      >
-        {icon ?? ocrProviderInitial(providerId)}
-      </div>
+      {icon != null || !hasBrandIcon(providerId) ? (
+        <div
+          className={cn(
+            "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-xs font-semibold",
+            isSelected ? "bg-primary-foreground/20" : "bg-muted"
+          )}
+        >
+          {icon ?? ocrProviderInitial(providerId)}
+        </div>
+      ) : (
+        <BrandIcon id={providerId} label={name} size={28} />
+      )}
       <div className="min-w-0 flex-1">
         <span className="block truncate text-sm font-medium">{name}</span>
         <span

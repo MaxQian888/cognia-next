@@ -1,0 +1,274 @@
+{
+  "actions": {
+    "applyUpdate": "应用更新",
+    "applyUpdateBatch": "全部应用（{count}）",
+    "applyUpdateBatchTitle": "把更新应用到来自该角色包的每一个克隆",
+    "applyUpdateTitle": "从新版角色包拉取受管字段，同时保留你的修改",
+    "dismissUpdate": "忽略",
+    "dismissUpdateTitle": "不再为此克隆显示更新提示",
+    "exportPack": "导出角色包",
+    "recloneFromPack": "重新克隆",
+    "recloneFromPackTitle": "用新版本的角色包覆盖当前克隆"
+  },
+  "addedToast": "已添加「{name}」。",
+  "applyUpdateDialog": {
+    "cancel": "取消",
+    "confirm": "应用更新",
+    "description": "确认从新版本拉取的字段，以及因你手动修改而保留的字段。",
+    "fieldRow": "{field}",
+    "noBaselineWarning": "这个克隆没有可比对的基线（来自 v50 之前的旧版本）。应用更新会覆盖所有受角色包管理的字段。如需备份，请先复制一份。",
+    "noChanges": "你的角色与新版本没有差异。",
+    "preserved": "保留（你已修改）",
+    "title": "应用角色包更新 — {name}",
+    "willUpdate": "将覆盖"
+  },
+  "applyUpdateNoop": "「{name}」没有可更新的内容。",
+  "applyUpdateToast": "{name}：覆盖 {updated} 个字段，保留 {preserved} 个。",
+  "applyUpdateToastBatch": "已更新「{pack}」的 {count} 个角色。",
+  "badge": {
+    "cloned": "克隆自 {name}",
+    "clonedFromLocalFile": "克隆自本地文件",
+    "fromLocalFile": "来自本地文件",
+    "fromPlugin": "来自 {name}",
+    "missingDep": "{count, plural, =1 {缺依赖} other {缺 # 项依赖}}",
+    "updateAvailable": "有更新"
+  },
+  "builtIn": "内置",
+  "builtInReadOnly": "内置角色为只读——请先复制",
+  "builtInUndeletable": "内置角色无法删除",
+  "bulk": {
+    "deleteSelected": "删除（{count}）",
+    "deletedToast": "已删除 {count} 个角色。",
+    "done": "完成",
+    "exportPackName": "导出的角色",
+    "exportSelected": "导出（{count}）",
+    "exportedToast": "已导出 {count} 个角色。",
+    "select": "多选",
+    "selectRow": "选择 {name}"
+  },
+  "cancel": "取消",
+  "create": "创建",
+  "delete": "删除",
+  "deleteAria": "删除 {name}",
+  "description": "可复用的人设。每个角色携带自己的系统提示词、模型、MCP 子集与技能。新建会话时可以选择一个使用。",
+  "dismissUpdateToast": "已忽略更新提示。",
+  "duplicate": "复制",
+  "duplicateAria": "复制 {name}",
+  "duplicatedToast": "已复制为「{name}」。",
+  "edit": "编辑",
+  "editAria": "编辑 {name}",
+  "editor": {
+    "account": {
+      "description": "为该角色固定使用某个具体账号。选择继承时使用会话 / 设置中的默认账号。",
+      "inherit": "继承",
+      "label": "账号覆盖",
+      "optionLabel": "{provider}：{label}"
+    },
+    "allowedTools": "允许的工具（用逗号分隔）",
+    "allowedToolsPlaceholder": "Bash, Read, WebSearch",
+    "avatarEmoji": "头像 Emoji",
+    "avatarEmojiPlaceholder": "🤖",
+    "avatarImage": {
+      "clear": "移除图片",
+      "large": "头像图片偏大——使用更小的图片可让角色数据更轻量。",
+      "upload": "上传图片"
+    },
+    "browserToolsToggle": {
+      "aria": "切换智能体浏览器工具",
+      "description": "允许该角色操作应用内预览浏览器（导航、快照、点击、输入、读取控制台/网络）。仅桌面端可用。",
+      "label": "智能体浏览器工具"
+    },
+    "computerUseSubSettings": {
+      "allowedToolIds": {
+        "description": "限制该角色可使用的已注册原生 Anthropic 工具。全部取消勾选 = 不限制。",
+        "empty": "尚未注册任何原生 Anthropic 工具 —— 安装 Computer Use 插件即可暴露 computer / bash / text_editor。",
+        "label": "允许的原生工具"
+      },
+      "chatConsentMode": {
+        "description": "聊天内 canUseTool 弹窗的行为。与 Rust 网关相互独立，两端都可能弹。",
+        "label": "聊天侧弹窗策略",
+        "options": {
+          "always-ask": "每次询问",
+          "auto": "自动（交给 Rust 网关）",
+          "session-grant": "本次会话记住"
+        }
+      },
+      "requireConsent": {
+        "description": "无论「设置 → 自动化 → 权限」如何配置，本角色发出的每条 Computer Use 驱动调用都强制走同意浮层。对行为还不熟悉的新角色尤其有用。",
+        "label": "每次调用前都征求同意"
+      },
+      "screenOffMode": {
+        "description": "在显示器关闭或休眠（会话需保持解锁）时，通过捆绑的虚拟显示器路由截图，让 Computer Use 持续可用。需要先在「设置 → 自动化」中安装虚拟显示器驱动。默认关闭。",
+        "label": "熄屏模式（Windows）"
+      }
+    },
+    "computerUseTarget": {
+      "description": "本角色的 computer-use 动作在哪里执行。选择一个已配置的 cua 沙箱即可让动作在隔离的 Docker 桌面里运行，而不是本机。沙箱在「设置 → 自动化 → 沙箱」中管理。",
+      "label": "执行目标",
+      "local": "本机（这台设备）"
+    },
+    "description": "描述",
+    "descriptionPlaceholder": "（可选）一句话说明",
+    "disallowedTools": "禁用的工具（用逗号分隔）",
+    "disallowedToolsPlaceholder": "Bash",
+    "mcpServers": "MCP 服务器",
+    "mcpServersEmptyHint": "（使用所有已启用的 MCP 服务器）",
+    "mcpServersHint": "全部不选表示「使用所有已启用的服务器」。",
+    "model": "模型",
+    "modelIdPlaceholder": "或粘贴模型 id",
+    "name": "名称",
+    "namePlaceholder": "Coding Assistant",
+    "permissionMode": "权限模式",
+    "persona": {
+      "description": "可选的语气与性格，会织入系统提示；另含开场白与起手 prompt。",
+      "exemplarPrompts": "起手 prompt",
+      "exemplarPromptsHint": "每行一条——新会话时作为快捷起手卡片展示。",
+      "exemplarPromptsPlaceholder": "审查我的 PR\n起草发布说明",
+      "openingMessage": "开场白",
+      "openingMessagePlaceholder": "你好！今天我们做点什么？",
+      "personality": "性格",
+      "personalityPlaceholder": "曾任教师，偏好用类比讲解",
+      "title": "人设",
+      "tone": "语气",
+      "tonePlaceholder": "温暖、鼓励"
+    },
+    "pickColor": "选择颜色 {color}",
+    "platforms": {
+      "browser": "Web",
+      "description": "将该角色限定到特定平台。全部不选则在所有平台显示。",
+      "mobile": "移动端",
+      "tauri": "桌面端",
+      "title": "可用平台"
+    },
+    "sandbox": {
+      "enable": {
+        "aria": "启用沙盒",
+        "description": "为该角色用 sandbox_* 替换 SDK 内建工具。",
+        "label": "沙盒化 Bash / Edit / Write"
+      },
+      "tier": {
+        "description": "覆盖应用默认值。选择继承时使用 设置 → 沙盒 中的默认。",
+        "inherit": "继承应用默认",
+        "label": "沙盒层级",
+        "microvm": "microVM（e2b）",
+        "os": "OS 沙盒"
+      }
+    },
+    "skills": "技能",
+    "skillsHint": "顺序很重要——靠前的技能会先附加到系统提示词。",
+    "systemPrompt": "系统提示词",
+    "systemPromptPlaceholder": "你是…",
+    "twinBinding": {
+      "cancel": "取消",
+      "citationStyleLabel": "引用格式",
+      "confirmBind": "绑定",
+      "createNew": "新建孪生",
+      "enableCitations": "来源引用",
+      "enableCitationsHint": "为检索到的片段附上格式化引用（仅展示，不改变提示词）。",
+      "enableCorrectiveFilter": "纠错过滤",
+      "enableCorrectiveFilterHint": "在片段进入提示词前，用启发式评分器剔除相关性低的检索片段。",
+      "enableHybrid": "混合关键词检索",
+      "enableHybridHint": "将 BM25 关键词检索与向量检索融合，避免漏掉精确的名称、ID 和文件引用。",
+      "enableQueryExpansion": "查询扩展",
+      "enableQueryExpansionHint": "用同义词扩展提升召回（在孪生运行时设置中配置后，还可启用 LLM HyDE/回退查询）。",
+      "enableRag": "启用 RAG",
+      "enableRagHint": "发送时检索 top-K 个孪生切片，注入到系统提示词。",
+      "enableStyleFewShot": "风格少样本",
+      "enableStyleFewShotHint": "从孪生档案中挑选代表性写作示例，帮助语气对齐。",
+      "hybridKeywordWeight": "关键词权重",
+      "never": "（暂无）",
+      "newTwinId": "孪生 ID",
+      "newTwinIdHint": "支持字母、数字与下划线。必须在所有角色中唯一。",
+      "newTwinIdPlaceholder": "twin_xxxxxxxx",
+      "openWorkbench": "打开工作台",
+      "pickExisting": "选择已有的孪生",
+      "pickExistingPlaceholder": "请选择…",
+      "ragTopK": "检索 top K",
+      "runtimeTitle": "运行时",
+      "statsChunks": "切片",
+      "statsLastDistilled": "档案更新",
+      "statsPlaybooks": "Playbook",
+      "statsSources": "源数",
+      "statsStyleSamples": "风格样本",
+      "styleSamplesK": "每次发送的样本数",
+      "titleBound": "数字孪生",
+      "titleUnbound": "数字孪生（可选）",
+      "unbind": "解绑孪生",
+      "unbindBody": "孪生的数据会保留，仅断开当前角色与它之间的关联。",
+      "unbindConfirm": "解绑",
+      "unbindTitle": "确认解绑孪生？",
+      "unboundDescription": "把当前角色绑定到一个数字孪生（Digital Twin），系统会在每次发送前注入 RAG 检索到的片段以及写作风格的少样本示例。"
+    },
+    "useDefault": "使用应用默认值",
+    "voice": {
+      "description": "可选的角色专属朗读语音。保持「继承」时使用全局语音设置。",
+      "inherit": "继承全局",
+      "pitch": "音调",
+      "provider": "提供商",
+      "rate": "语速",
+      "title": "语音",
+      "voiceId": "音色",
+      "voiceIdPlaceholder": "音色 id",
+      "volume": "音量"
+    },
+    "workingDir": "工作目录",
+    "workingDirPlaceholder": "/path/to/project（可选）"
+  },
+  "emptyHint": "暂无角色。内置角色应该会自动出现在这里。",
+  "exportPackAria": "导出 {name} 的源角色包",
+  "exportPackUnavailable": "找不到可导出的角色包。",
+  "filter": {
+    "all": "全部来源",
+    "builtin": "内置",
+    "label": "按来源筛选",
+    "plugin": "插件",
+    "user": "自定义"
+  },
+  "multiselect": {
+    "moveDown": "把 {name} 下移",
+    "moveUp": "把 {name} 上移",
+    "noneDefined": "（暂未定义）",
+    "reorder": "重排："
+  },
+  "newCharacter": "新建角色",
+  "noMatches": "没有匹配的角色。",
+  "overlayReadOnly": "插件提供的角色为只读——请先复制",
+  "overlayUndeletable": "插件提供的角色无法删除——请禁用对应插件",
+  "packs": {
+    "characterCount": "{count} 个角色",
+    "collapseAria": "收起角色包 {id} 中的角色",
+    "delete": "删除角色包",
+    "deleteAria": "删除角色包 {id}",
+    "deletedToast": "已删除角色包「{id}」。",
+    "emptyHint": "插件可以贡献角色包。也可以手动导入 .cognia-pack.json 文件。",
+    "expandAria": "展开角色包 {id} 中的角色",
+    "exportedToast": "已导出至 {path}",
+    "exportedToastBrowser": "角色包已下载",
+    "importJsonAction": "导入 .cognia-pack.json",
+    "importUnavailableWeb": "本地角色包导入仅在桌面端可用。",
+    "importedToast": "已导入角色包「{id}」。",
+    "removeBody": "角色包「{id}」将被移除。从该角色包克隆的角色仍保留在你的库中。",
+    "removeTitle": "删除角色包？",
+    "rescan": "重新扫描本地包",
+    "rescanToast": "本地角色包扫描完成（注册 {registered}，跳过 {skipped}）",
+    "skippedToast": "跳过 {count} 个本地角色包文件 — 详见日志",
+    "sourceLocal": "本地文件",
+    "sourcePlugin": "插件：{name}",
+    "title": "角色包"
+  },
+  "recloneFromPackToast": "已重新克隆为「{name}」。",
+  "remove": "删除",
+  "removeBody": "「{name}」将被删除。当前正在使用此角色的会话仍保留历史,但会回退到应用默认值。",
+  "removeTitle": "删除角色?",
+  "removedToast": "已删除「{name}」。",
+  "save": "保存",
+  "saving": "保存中…",
+  "searchPlaceholder": "搜索角色…",
+  "skillsCount": "{count} 项技能",
+  "title": "角色",
+  "updatedToast": "已更新 {name}。",
+  "validation": {
+    "nameRequired": "请填写名称。",
+    "systemPromptRequired": "系统提示词不能为空。"
+  }
+}

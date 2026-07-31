@@ -13,8 +13,8 @@
  */
 
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
-import { defineMcpServerPreset } from "@/lib/plugin/sdk"
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/chat/slash-command-registry"
+import { defineMcpServerPreset } from "@cognia/plugin-sdk"
+import manifestJson from "../plugin.json"
 
 const STAGEHAND_PRESET = defineMcpServerPreset({
   id: "stagehand",
@@ -24,9 +24,13 @@ const STAGEHAND_PRESET = defineMcpServerPreset({
   icon: "🎭",
   transport: "stdio",
   config: {
+    // Upstream moved twice: `@browserbasehq/mcp-stagehand` (what this preset
+    // used to point at) is a hard npm 404, and its successor
+    // `@browserbasehq/mcp-server-browserbase` is deprecated in favour of
+    // `@browserbasehq/mcp`. The old name made `npx` fail at spawn every time.
     command: "npx",
-    args: ["-y", "@browserbasehq/mcp-stagehand"],
-    env: { BROWSERBASE_API_KEY: "", BROWSERBASE_PROJECT_ID: "", OPENAI_API_KEY: "" },
+    args: ["-y", "@browserbasehq/mcp@latest"],
+    env: { BROWSERBASE_API_KEY: "", BROWSERBASE_PROJECT_ID: "", GEMINI_API_KEY: "" },
   },
   fields: [
     {
@@ -42,11 +46,12 @@ const STAGEHAND_PRESET = defineMcpServerPreset({
       placement: "env",
     },
     {
-      key: "OPENAI_API_KEY",
-      label: "OpenAI API key (Stagehand vision)",
+      key: "GEMINI_API_KEY",
+      label: "Gemini API key (Stagehand model)",
       placement: "env",
       secret: true,
-      description: "Stagehand uses GPT-4o for its observe step.",
+      description:
+        "Stagehand v3 defaults to google/gemini-2.5-flash-lite. Pass --modelName to the server to use a different provider.",
     },
   ],
   runtime: "both",
@@ -55,13 +60,10 @@ const STAGEHAND_PRESET = defineMcpServerPreset({
 })
 
 const definition: PluginDefinition = {
+  // Spread plugin.json: `builtinManifest()` merges module-over-JSON, so a
+  // hand-written subset here would WIN and silently drop `commands[]`.
   manifest: {
-    id: "cognia-stagehand-mcp",
-    name: "Stagehand Browser",
-    version: "0.1.0",
-    type: "frontend",
-    capabilities: ["mcp-server-preset", "commands"],
-    main: "src/index.ts",
+    ...(manifestJson as object),
     mcpServerPresets: [STAGEHAND_PRESET],
   } as never,
   activate: async (ctx: PluginContext) => {
@@ -69,21 +71,19 @@ const definition: PluginDefinition = {
 
     ctx.agent?.registerMcpServerPreset?.(STAGEHAND_PRESET)
 
-    registerSlashCommand({
-      id: "stagehand.attach",
-      name: "/stagehand",
-      description: "Attach the Stagehand MCP browser to the current character.",
-      handler: () => ({
-        message:
-          "Open Settings → MCP Servers, click Stagehand in the gallery, fill in the Browserbase + OpenAI keys, then attach it to the current character.",
-      }),
-      source: "plugin",
-      pluginId: ctx.pluginId,
-    })
-  },
-  deactivate: async (ctx?: PluginContext) => {
-    if (ctx?.pluginId) {
-      unregisterCommandsByPlugin(ctx.pluginId)
+    // The slash command is DECLARED in plugin.json (`commands[]`) and handled
+    // here — the supported shape per the author-SDK migration table. The
+    // manager owns registration (namespaced id, conflict detection, aliases,
+    // command-palette entry, idle-clock refresh) and teardown.
+    return {
+      onCommand: async (command: string) => {
+        if (command !== "stagehand") return false
+        ctx.ui?.showToast?.(
+          "Open Settings → MCP Servers, click Stagehand in the gallery, fill in the Browserbase + Gemini keys, then attach it to the current character.",
+          "info"
+        )
+        return true
+      },
     }
   },
 }

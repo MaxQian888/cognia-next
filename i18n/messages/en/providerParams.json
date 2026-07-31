@@ -1,0 +1,189 @@
+{
+  "advanced": "Advanced Options",
+  "anthropic": {
+    "thinking": {
+      "budgetTokens": {
+        "description": "Maximum tokens allocated for thinking (1024-128000).",
+        "label": "Thinking Budget"
+      },
+      "enabled": {
+        "description": "Enable Claude's extended thinking capability for complex reasoning.",
+        "label": "Extended Thinking"
+      }
+    }
+  },
+  "cohere": {
+    "connectors": {
+      "description": "Enable web search connector.",
+      "label": "Web Search"
+    },
+    "k": {
+      "description": "Limit token selection to top K candidates.",
+      "label": "Top K"
+    }
+  },
+  "connection": {
+    "maxRetries": {
+      "description": "Number of retry attempts on failure.",
+      "label": "Max Retries"
+    },
+    "retryDelay": {
+      "description": "Delay between retries (ms).",
+      "label": "Retry Delay"
+    },
+    "timeout": {
+      "description": "Maximum time to wait for a response (ms).",
+      "label": "Request Timeout"
+    }
+  },
+  "connectionSection": "Connection",
+  "deepseek": {
+    "enableReasoning": {
+      "description": "Enable deep thinking for complex tasks.",
+      "label": "Enable Reasoning"
+    }
+  },
+  "frequencyPenalty": {
+    "description": "Reduces repetition by penalizing frequently used tokens.",
+    "label": "Frequency Penalty"
+  },
+  "google": {
+    "groundingEnabled": {
+      "description": "Enable Google Search grounding for responses.",
+      "label": "Grounding / Web Search"
+    },
+    "safetySettings": {
+      "dangerousContent": {
+        "description": "Filter dangerous content.",
+        "label": "Dangerous Content"
+      },
+      "description": "Content safety filtering levels.",
+      "harassment": {
+        "description": "Filter harassment content.",
+        "label": "Harassment"
+      },
+      "hateSpeech": {
+        "description": "Filter hate speech content.",
+        "label": "Hate Speech"
+      },
+      "high": "High restriction",
+      "label": "Safety Settings",
+      "low": "Low restriction",
+      "medium": "Medium restriction",
+      "none": "No restriction",
+      "sexuallyExplicit": {
+        "description": "Filter sexually explicit content.",
+        "label": "Sexually Explicit"
+      }
+    }
+  },
+  "inference": "Inference Parameters",
+  "invalidJson": "Invalid JSON format",
+  "maxTokens": {
+    "description": "Maximum number of tokens in the response.",
+    "label": "Max Tokens"
+  },
+  "mistral": {
+    "safePrompt": {
+      "description": "Inject a safety prompt before the conversation.",
+      "label": "Safe Prompt"
+    }
+  },
+  "ollama": {
+    "keepAlive": {
+      "description": "How long to keep the model loaded (e.g., '5m', '1h').",
+      "label": "Keep Alive"
+    },
+    "mirostat": {
+      "description": "Mirostat sampling mode for perplexity control.",
+      "disabled": "Disabled",
+      "label": "Mirostat Sampling",
+      "mirostat1": "Mirostat 1",
+      "mirostat2": "Mirostat 2"
+    },
+    "numCtx": {
+      "description": "Size of the context window (tokens).",
+      "label": "Context Size"
+    },
+    "numGpu": {
+      "description": "Number of layers to offload to GPU.",
+      "label": "GPU Layers"
+    },
+    "numPredict": {
+      "description": "Maximum tokens to predict.",
+      "label": "Max Predict"
+    },
+    "numThread": {
+      "description": "Number of threads for computation.",
+      "label": "Threads"
+    },
+    "repeatPenalty": {
+      "description": "Penalty for repeating tokens.",
+      "label": "Repeat Penalty"
+    }
+  },
+  "openai": {
+    "logprobs": {
+      "description": "Include token log probabilities in the response.",
+      "label": "Log Probabilities"
+    },
+    "reasoningEffort": {
+      "description": "How much effort the model puts into reasoning (o-series models only).",
+      "high": "High",
+      "label": "Reasoning Effort",
+      "low": "Low",
+      "medium": "Medium"
+    },
+    "responseFormat": {
+      "description": "Force the model to output in a specific format.",
+      "jsonObject": "JSON Object",
+      "label": "Response Format",
+      "text": "Text"
+    },
+    "seed": {
+      "description": "Fixed seed for reproducible outputs.",
+      "label": "Seed"
+    },
+    "store": {
+      "description": "Store completions for future reference.",
+      "label": "Store Completions"
+    }
+  },
+  "outOfRange": "Value must be between {min} and {max}",
+  "presencePenalty": {
+    "description": "Encourages new topics by penalizing tokens that already appeared.",
+    "label": "Presence Penalty"
+  },
+  "providerSpecific": "Provider-Specific",
+  "resetAll": "Reset All to Defaults",
+  "resetConfirm": "Reset all parameters to their default values?",
+  "sourceGlobal": "Global default",
+  "sourceProvider": "Provider default",
+  "sourceSession": "Session override",
+  "tabDescription": "Configure inference and provider-specific parameters",
+  "tabTitle": "Parameters",
+  "temperature": {
+    "description": "Controls randomness. Lower = more focused, higher = more creative.",
+    "label": "Temperature"
+  },
+  "togetherAi": {
+    "repetitionPenalty": {
+      "description": "Penalty for repeating tokens.",
+      "label": "Repetition Penalty"
+    },
+    "topK": {
+      "description": "Limit token selection to top K candidates.",
+      "label": "Top K"
+    }
+  },
+  "topP": {
+    "description": "Nucleus sampling. Consider tokens with top_p probability mass.",
+    "label": "Top P"
+  },
+  "xai": {
+    "searchEnabled": {
+      "description": "Allow Grok to search the web.",
+      "label": "Web Search"
+    }
+  }
+}

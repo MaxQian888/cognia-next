@@ -1,0 +1,180 @@
+{
+  "add": {
+    "cancel": "取消",
+    "agentIdLabel": "Agent ID",
+    "branchLabel": "分支（可选）",
+    "characterIdLabel": "角色 ID",
+    "description": "手动保存一条耐久事实，并以显式来源设置可选的精细作用域。",
+    "importanceLabel": "重要度",
+    "pathPatternLabel": "路径前缀（可选）",
+    "projectIdLabel": "项目 ID",
+    "projectIdOptionalLabel": "项目 ID（可选）",
+    "scopeLabel": "作用域",
+    "submit": "新增记忆",
+    "tagsLabel": "标签",
+    "tagsPlaceholder": "用逗号分隔的标签",
+    "textLabel": "记忆内容",
+    "textPlaceholder": "例如：用户偏好 pnpm 与 TypeScript 严格模式。",
+    "title": "新增记忆",
+    "typeLabel": "类型"
+  },
+  "bulk": {
+    "clear": "清除选择",
+    "delete": "删除",
+    "deleteConfirm": {
+      "cancel": "取消",
+      "confirm": "删除",
+      "description": "这将永久删除 {count} 条记忆，且无法撤销。",
+      "title": "删除所选记忆？"
+    },
+    "pin": "置顶",
+    "selectAll": "全选",
+    "selected": "已选 {count} 条",
+    "unpin": "取消置顶"
+  },
+  "conflicts": {
+    "clearStaleConflict": "标记为已验证",
+    "counterpartMissing": "冲突对端记忆已不存在。清除失效的冲突标记后，这条记忆将重新参与召回。",
+    "description": "这两条记忆互相矛盾，解决之前都不会被召回。",
+    "keepBoth": "两条都保留",
+    "keepThis": "保留这条",
+    "merge": "手写合并…",
+    "mergeAria": "合并后的记忆文本",
+    "mergeCancel": "取消合并",
+    "mergeConfirm": "保存合并",
+    "mergePlaceholder": "写下调和后的事实…",
+    "openResolver": "处置冲突…",
+    "pending": "待处理",
+    "resolvedToast": "冲突已解决",
+    "title": "处置冲突记忆"
+  },
+  "detail": {
+    "auditTitle": "审计历史",
+    "cancel": "取消",
+    "close": "关闭",
+    "conflictGone": "冲突记忆已被删除。",
+    "conflictsWith": "冲突对象",
+    "deleteConfirm": {
+      "cancel": "取消",
+      "confirm": "删除",
+      "description": "这将永久删除该记忆，且无法撤销。",
+      "title": "删除这条记忆？"
+    },
+    "evidenceTitle": "证据记录",
+    "fields": {
+      "accessCount": "召回次数",
+      "archivedAt": "归档于",
+      "created": "创建于",
+      "contamination": "上下文信任",
+      "evidence": "证据",
+      "importance": "重要度",
+      "indexed": "已索引",
+      "key": "键",
+      "lastUsed": "最近使用",
+      "review": "审核",
+      "scope": "作用域",
+      "updated": "更新于",
+      "version": "版本"
+    },
+    "importanceLabel": "重要度",
+    "next": "下一条记忆",
+    "no": "否",
+    "previous": "上一条记忆",
+    "replacedBy": "已被替换为",
+    "replacedByGone": "替换它的记忆已被删除。",
+    "recordCount": "{count} 条",
+    "save": "保存",
+    "source": "来源",
+    "tagsLabel": "标签",
+    "tagsPlaceholder": "用逗号分隔的标签",
+    "textLabel": "内容",
+    "yes": "是"
+  },
+  "errors": {
+    "disabled": "记忆功能已在设置中关闭",
+    "mutation_failed": "记忆操作失败，请重试",
+    "not_found": "这条记忆已不存在",
+    "pii_blocked": "已拦截：文本包含个人隐私信息",
+    "temporary": "记忆当前处于临时模式"
+  },
+  "panel": {
+    "accessedRelative": "{time}使用",
+    "add": "新增",
+    "addFirst": "添加第一条记忆",
+    "cancelEdit": "取消",
+    "clearFilters": "清除筛选",
+    "clearTags": "清除标签",
+    "delete": "删除",
+    "detailTitle": "记忆详情",
+    "edit": "编辑",
+    "editLabel": "编辑记忆内容",
+    "empty": {
+      "description": "随着对话进行，关于你的耐久事实会保存在这里。也可以用 /remember。",
+      "title": "暂无记忆"
+    },
+    "invalidated": "已归档",
+    "noResults": {
+      "description": "没有记忆符合当前筛选条件。",
+      "title": "没有匹配的记忆"
+    },
+    "pin": "置顶",
+    "provenanceLabel": "来源类型",
+    "saveEdit": "保存",
+    "scopeLabel": "作用域",
+    "searchLabel": "搜索记忆",
+    "searchPlaceholder": "搜索记忆…",
+    "selectRow": "选择记忆",
+    "showInvalidated": "显示已归档",
+    "sort": {
+      "accessed": "最近使用",
+      "created": "最近创建",
+      "importance": "重要性",
+      "recent": "最近更新"
+    },
+    "sortLabel": "排序",
+    "stats": {
+      "active": "活跃"
+    },
+    "subtitle": "助手记住的关于你的内容。",
+    "tabs": {
+      "app": "应用记忆",
+      "external": "外部 Agent 记忆"
+    },
+    "tagFilterLabel": "标签：",
+    "title": "记忆",
+    "unpin": "取消置顶",
+    "viewSource": "查看来源"
+  },
+  "provenance": {
+    "all": "所有来源",
+    "explicit": "显式",
+    "external": "外部（API）",
+    "inbound": "入站",
+    "system": "系统",
+    "user": "自动（对话）"
+  },
+  "governance": {
+    "clean": "干净",
+    "conflict": "冲突",
+    "external-context": "外部上下文",
+    "legacy": "旧记忆 / 无证据",
+    "markConflict": "标记冲突",
+    "markVerified": "标记已验证",
+    "supported": "有证据",
+    "unknown": "未知",
+    "unreviewed": "未审核",
+    "verified": "已验证"
+  },
+  "scopes": {
+    "agent": "Agent",
+    "all": "所有作用域",
+    "character": "角色",
+    "global": "全局",
+    "workspace": "工作区"
+  },
+  "types": {
+    "episodic": "事件",
+    "procedural": "偏好",
+    "semantic": "事实"
+  }
+}

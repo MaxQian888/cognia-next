@@ -215,11 +215,9 @@ pub mod sqlite {
                         params![b],
                         |row| row.get::<_, i64>(0).map(|n| n as u32),
                     )?,
-                    None => c.query_row(
-                        "SELECT COUNT(*) FROM sessions",
-                        [],
-                        |row| row.get::<_, i64>(0).map(|n| n as u32),
-                    )?,
+                    None => c.query_row("SELECT COUNT(*) FROM sessions", [], |row| {
+                        row.get::<_, i64>(0).map(|n| n as u32)
+                    })?,
                 };
 
                 let sql = match before {
@@ -238,18 +236,14 @@ pub mod sqlite {
                 let rows: Vec<SessionRow> = match before {
                     Some(b) => {
                         let mut stmt = c.prepare(sql)?;
-                        let iter = stmt.query_map(
-                            params![b, limit as i64, offset as i64],
-                            row_to_session,
-                        )?;
+                        let iter = stmt
+                            .query_map(params![b, limit as i64, offset as i64], row_to_session)?;
                         iter.collect::<Result<Vec<_>, _>>()?
                     }
                     None => {
                         let mut stmt = c.prepare(sql)?;
-                        let iter = stmt.query_map(
-                            params![limit as i64, offset as i64],
-                            row_to_session,
-                        )?;
+                        let iter =
+                            stmt.query_map(params![limit as i64, offset as i64], row_to_session)?;
                         iter.collect::<Result<Vec<_>, _>>()?
                     }
                 };
@@ -377,10 +371,7 @@ pub mod sqlite {
             let message_id = message_id.to_string();
             tokio::task::spawn_blocking(move || {
                 let c = conn.lock();
-                c.execute(
-                    "DELETE FROM messages WHERE id = ?1",
-                    params![message_id],
-                )?;
+                c.execute("DELETE FROM messages WHERE id = ?1", params![message_id])?;
                 Ok(())
             })
             .await

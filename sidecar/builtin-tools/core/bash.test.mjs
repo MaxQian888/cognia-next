@@ -1,0 +1,346 @@
+import { test } from "node:test"
+import assert from "node:assert/strict"
+import os from "node:os"
+import fsp from "node:fs/promises"
+
+import {
+  createBashTool,
+  createBashOutputTool,
+  createKillShellTool,
+  createListShellsTool,
+  resolveShellInvocation,
+  tailTruncate,
+  composeBashBody,
+  DEFAULT_TIMEOUT_MS,
+  MAX_TIMEOUT_MS,
+  MAX_OUTPUT_CHARS,
+} from "./bash.mjs"
+import { createBgShellRegistry } from "./bash-sessions.mjs"
+import { resolveShellDescriptor, activeShellDescriptor } from "../shared/shell-detect.mjs"
+
+// Pin a deterministic shell for command-executing tests: cmd.exe on Windows
+// (lookup returns null → no PowerShell), /bin/sh elsewhere. This keeps the
+// plumbing assertions (spill, workdir, background) independent of whatever shell
+// the runner machine happens to have on PATH. Shell-selection itself is covered
+// by shell-detect.test.mjs.
+const legacyShell = resolveShellDescriptor({ lookup: () => null })
+
+function textOf(result) {
+  return result.content.map((b) => b.text).join("\n")
+}
+
+function extractShellId(text) {
+  const m = text.match(/background shell started: (\S+)/)
+  return m ? m[1] : null
+}
+
+async function pollUntil(outputTool, shellId, predicate, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs
+  let acc = ""
+  while (Date.now() < deadline) {
+    const res = await outputTool.handler({ shellId }, {})
+    acc += textOf(res)
+    if (predicate(textOf(res), acc)) return acc
+    await new Promise((r) => setTimeout(r, 25))
+  }
+  return acc
+}
+
+test("bash runs a command and returns its output", async () => {
+  const tool = createBashTool({ cwd: os.tmpdir(), shell: legacyShell })
+  const res = await tool.handler({ command: "echo core-bash-ok" }, {})
+  assert.ok(!res.isError, textOf(res))
+  assert.match(textOf(res), /core-bash-ok/)
+})
+
+test("bash surfaces non-zero exit codes as errors", async () => {
+  const tool = createBashTool({ cwd: os.tmpdir(), shell: legacyShell })
+  const res = await tool.handler({ command: "exit 3" }, {})
+  assert.equal(res.isError, true)
+  assert.match(textOf(res), /exit code 3/)
+})
+
+test("bash kills on timeout and says so", async () => {
+  const tool = createBashTool({ cwd: os.tmpdir(), shell: legacyShell })
+  const sleepCmd = process.platform === "win32" ? "ping -n 30 127.0.0.1 >nul" : "sleep 30"
+  const res = await tool.handler({ command: sleepCmd, timeout: 500 }, {})
+  assert.equal(res.isError, true)
+  assert.match(textOf(res), /timed out after 500 ms/)
+})
+
+test("bash hard-rejects destructive chaining patterns", async () => {
+  const tool = createBashTool({ cwd: os.tmpdir(), shell: legacyShell })
+  const res = await tool.handler({ command: "echo hi && rm -rf /" }, {})
+  assert.equal(res.isError, true)
+  assert.match(textOf(res), /rejected/)
+})
+
+test("bash redirects an interactive command to a PTY and never spawns it", async () => {
+  // The interactive guard returns before any spawn: assert the PTY-redirect
+  // message (only the early guard can produce it) and that no spill file is
+  // created — a structural proof that execution never reached `spawn`.
+  const tmp = os.tmpdir()
+  const countSpills = async () =>
+    (await fsp.readdir(tmp)).filter((f) => f.startsWith("cognia-bash-")).length
+  const before = await countSpills()
+  const tool = createBashTool({ cwd: tmp, shell: legacyShell })
+  for (const command of ["vim notes.txt", "python", "ssh example.com", "git rebase -i main"]) {
+    const res = await tool.handler({ command }, {})
+    assert.equal(res.isError, true, command)
+    assert.match(textOf(res), /interactive and needs a TTY/, command)
+    assert.match(textOf(res), /terminal_repl_spawn/, command)
+  }
+  assert.equal(await countSpills(), before, "interactive commands must never spawn (no spill)")
+})
+
+test("bash does NOT intercept an interactive command in background mode", async () => {
+  // run_in_background is exempt from the interactive guard. With no background
+  // registry the call falls through to the background branch (not the guard),
+  // proving the guard was bypassed.
+  const tool = createBashTool({ cwd: os.tmpdir(), shell: legacyShell })
+  const res = await tool.handler({ command: "python", run_in_background: true }, {})
+  assert.equal(res.isError, true)
+  assert.match(textOf(res), /background execution is not available/)
+  assert.doesNotMatch(textOf(res), /interactive and needs a TTY/)
+})
+
+test("bash still runs a normal command whose argument merely mentions an editor", async () => {
+  const tool = createBashTool({ cwd: os.tmpdir(), shell: legacyShell })
+  const res = await tool.handler({ command: "echo vim" }, {})
+  assert.ok(!res.isError, textOf(res))
+  assert.match(textOf(res), /vim/)
+})
+
+test("bash respects workdir", async () => {
+  const tool = createBashTool({ cwd: os.homedir(), shell: legacyShell })
+  const printCwd = process.platform === "win32" ? "cd" : "pwd"
+  const res = await tool.handler({ command: printCwd, workdir: os.tmpdir() }, {})
+  const out = textOf(res).toLowerCase()
+  // Compare path tails — Windows `cd` prints the resolved 8.3-free path.
+  assert.ok(out.includes(os.tmpdir().split(/[\\/]/).pop().toLowerCase()))
+})
+
+test("tailTruncate keeps the tail and flags truncation", () => {
+  const { text, truncated } = tailTruncate("a".repeat(100), 10)
+  assert.equal(truncated, true)
+  assert.match(text, /earlier characters dropped/)
+  assert.ok(text.endsWith("a".repeat(10)))
+  assert.deepEqual(tailTruncate("short", 10), { text: "short", truncated: false })
+})
+
+test("composeBashBody inlines small output and previews large spilled output", () => {
+  // Small / no spill → inline.
+  const small = composeBashBody({ head: "", tail: "hello", total: 5, fullPath: null })
+  assert.deepEqual(small, { body: "hello", truncated: false })
+
+  // Large + spilled → head/tail preview that names the file.
+  const head = "H".repeat(12_000)
+  const tail = "T".repeat(18_000)
+  const big = composeBashBody({ head, tail, total: 50_000, fullPath: "/tmp/x.log" })
+  assert.equal(big.truncated, true)
+  assert.match(big.body, /full output saved to \/tmp\/x\.log/)
+  assert.match(big.body, /characters omitted/)
+  assert.ok(big.body.startsWith(head))
+  assert.ok(big.body.endsWith(tail))
+})
+
+test("bash spills oversized output to a temp file and previews it", async () => {
+  const tool = createBashTool({ cwd: os.tmpdir(), shell: legacyShell })
+  // Emit ~80k chars of output, well over MAX_OUTPUT_CHARS.
+  const n = 80_000
+  const cmd = `node -e "process.stdout.write('x'.repeat(${n}))"`
+  const res = await tool.handler({ command: cmd }, {})
+  assert.ok(!res.isError, textOf(res))
+  const text = textOf(res)
+  assert.match(text, /full output saved to .+cognia-bash-.+\.log/)
+  // The named spill file exists and holds the complete output.
+  const m = text.match(/full output saved to (\S+\.log)/)
+  assert.ok(m, "expected a spill path")
+  const full = await fsp.readFile(m[1], "utf-8")
+  assert.equal(full.length, n)
+  await fsp.unlink(m[1]).catch(() => {})
+})
+
+test("bash inlines output under the limit without leaving a spill file", async () => {
+  const tool = createBashTool({ cwd: os.tmpdir(), shell: legacyShell })
+  const res = await tool.handler({ command: "echo small-inline" }, {})
+  assert.ok(!res.isError, textOf(res))
+  assert.match(textOf(res), /small-inline/)
+  assert.doesNotMatch(textOf(res), /full output saved/)
+})
+
+test("bash never creates a temp spill file for small output", async () => {
+  // Lazy-spill: under the inline budget no temp file should be created at all
+  // (not created-then-unlinked). Snapshot the cognia-bash-* temp files before
+  // and after; the count must not grow.
+  const tmp = os.tmpdir()
+  const countSpills = async () =>
+    (await fsp.readdir(tmp)).filter((f) => f.startsWith("cognia-bash-")).length
+  const before = await countSpills()
+  const tool = createBashTool({ cwd: tmp, shell: legacyShell })
+  for (let i = 0; i < 3; i++) {
+    const res = await tool.handler({ command: "echo no-spill-please" }, {})
+    assert.ok(!res.isError, textOf(res))
+  }
+  assert.equal(await countSpills(), before, "small runs must not create spill files")
+})
+
+test("timeout bounds are sane", () => {
+  assert.equal(DEFAULT_TIMEOUT_MS, 120_000)
+  assert.equal(MAX_TIMEOUT_MS, 600_000)
+})
+
+// End-to-end proofs that PowerShell actually DRIVES execution on a PowerShell
+// host (not just that argv is shaped right). Auto-skipped on hosts without
+// PowerShell on PATH (Linux/macOS CI, bare Windows) so the suite stays hermetic.
+const psHost = ["pwsh", "powershell"].includes(activeShellDescriptor().kind)
+
+test(
+  "bash executes native PowerShell syntax when the host shell is PowerShell",
+  { skip: !psHost },
+  async () => {
+    const tool = createBashTool({ cwd: os.tmpdir() }) // real host descriptor
+    // `'ab' * 2` is PowerShell string repetition (→ abab); cmd.exe would error.
+    const res = await tool.handler({ command: "Write-Output ('ab' * 2)" }, {})
+    assert.ok(!res.isError, textOf(res))
+    assert.match(textOf(res), /abab/)
+  }
+)
+
+test("bash scrubs PSModulePath from the PowerShell child env", { skip: !psHost }, async () => {
+  const prev = process.env.PSModulePath
+  process.env.PSModulePath = "D:\\sentinel-evil-modules"
+  try {
+    const tool = createBashTool({ cwd: os.tmpdir() })
+    const res = await tool.handler({ command: "Write-Output $env:PSModulePath" }, {})
+    assert.ok(!res.isError, textOf(res))
+    // The poisoned value must not survive into the child; PowerShell recomputes
+    // its safe default path instead.
+    assert.doesNotMatch(textOf(res), /sentinel-evil-modules/)
+  } finally {
+    if (prev === undefined) delete process.env.PSModulePath
+    else process.env.PSModulePath = prev
+  }
+})
+
+test("resolveShellInvocation returns a platform shell + argv", () => {
+  const { shell, shellArgs, isWin } = resolveShellInvocation("echo hi")
+  assert.equal(typeof shell, "string")
+  assert.ok(shellArgs.includes("echo hi"))
+  assert.equal(isWin, process.platform === "win32")
+})
+
+test("resolveShellInvocation honors an injected descriptor (pwsh argv + scrubbed env)", () => {
+  const descriptor = {
+    isWin: true,
+    bin: "pwsh.exe",
+    buildArgs: (cmd) => ["-NoProfile", "-NonInteractive", "-Command", cmd],
+    sanitizeEnv: (env) => {
+      const { PSModulePath: _drop, ...rest } = env
+      return rest
+    },
+  }
+  const inv = resolveShellInvocation("Get-ChildItem", descriptor)
+  assert.equal(inv.shell, "pwsh.exe")
+  assert.deepEqual(inv.shellArgs, ["-NoProfile", "-NonInteractive", "-Command", "Get-ChildItem"])
+  // env is the scrubbed copy of process.env — PSModulePath removed if present.
+  assert.ok(!("PSModulePath" in inv.env))
+})
+
+test("bash run_in_background returns a shellId and does not block", async () => {
+  const bgShells = createBgShellRegistry()
+  const bash = createBashTool({ cwd: os.tmpdir(), bgShells, shell: legacyShell })
+  const longCmd = process.platform === "win32" ? "ping -n 30 127.0.0.1 >nul" : "sleep 30"
+  const res = await bash.handler({ command: longCmd, run_in_background: true }, {})
+  assert.ok(!res.isError, textOf(res))
+  const id = extractShellId(textOf(res))
+  assert.ok(id, "expected a shellId in the output")
+  // Clean up the long-running shell.
+  bgShells.killAll()
+})
+
+test("bash run_in_background errors without a registry", async () => {
+  const bash = createBashTool({ cwd: os.tmpdir(), shell: legacyShell })
+  const res = await bash.handler({ command: "echo hi", run_in_background: true }, {})
+  assert.equal(res.isError, true)
+  assert.match(textOf(res), /not available/)
+})
+
+test("bash_output follows a background shell to completion", async () => {
+  const bgShells = createBgShellRegistry()
+  const bash = createBashTool({ cwd: os.tmpdir(), bgShells, shell: legacyShell })
+  const output = createBashOutputTool({ bgShells })
+  const start = await bash.handler({ command: "echo follow-me", run_in_background: true }, {})
+  const id = extractShellId(textOf(start))
+  const acc = await pollUntil(output, id, (_t, all) => /exited/.test(all))
+  assert.match(acc, /follow-me/)
+  assert.match(acc, /exited/)
+})
+
+test("bash_output can wait for output and cap each returned chunk", async () => {
+  const bgShells = createBgShellRegistry()
+  const bash = createBashTool({ cwd: os.tmpdir(), bgShells, shell: legacyShell })
+  const output = createBashOutputTool({ bgShells })
+  const command =
+    process.platform === "win32"
+      ? "ping -n 2 127.0.0.1 >nul && echo 1234567890"
+      : "sleep 0.1; printf 1234567890"
+  const start = await bash.handler({ command, run_in_background: true }, {})
+  const id = extractShellId(textOf(start))
+  const first = await output.handler({ shellId: id, wait_ms: 2000, max_chars: 4 }, {})
+  assert.match(textOf(first), /^1234/)
+  const second = await output.handler({ shellId: id, max_chars: 20 }, {})
+  assert.match(textOf(second), /^567890/)
+})
+
+test("list_shells inventories running and completed background commands", async () => {
+  const bgShells = createBgShellRegistry()
+  const bash = createBashTool({ cwd: os.tmpdir(), bgShells, shell: legacyShell })
+  const list = createListShellsTool({ bgShells })
+  const command = process.platform === "win32" ? "ping -n 30 127.0.0.1 >nul" : "sleep 30"
+  const start = await bash.handler({ command, run_in_background: true }, {})
+  const id = extractShellId(textOf(start))
+  const result = await list.handler({}, {})
+  const payload = JSON.parse(textOf(result))
+  assert.equal(payload.shells[0].id, id)
+  assert.equal(payload.shells[0].status, "running")
+  bgShells.killAll()
+})
+
+test("bash_output reports no-new-output and unknown ids", async () => {
+  const bgShells = createBgShellRegistry()
+  const output = createBashOutputTool({ bgShells })
+  const bash = createBashTool({ cwd: os.tmpdir(), bgShells, shell: legacyShell })
+  const start = await bash.handler({ command: "echo once", run_in_background: true }, {})
+  const id = extractShellId(textOf(start))
+  await pollUntil(output, id, (_t, all) => /exited/.test(all))
+  const again = await output.handler({ shellId: id }, {})
+  assert.match(textOf(again), /no new output/)
+  const missing = await output.handler({ shellId: "nope" }, {})
+  assert.equal(missing.isError, true)
+})
+
+test("kill_shell terminates a background shell and is idempotent", async () => {
+  const bgShells = createBgShellRegistry()
+  const bash = createBashTool({ cwd: os.tmpdir(), bgShells, shell: legacyShell })
+  const kill = createKillShellTool({ bgShells })
+  const longCmd = process.platform === "win32" ? "ping -n 30 127.0.0.1 >nul" : "sleep 30"
+  const start = await bash.handler({ command: longCmd, run_in_background: true }, {})
+  const id = extractShellId(textOf(start))
+  const k1 = await kill.handler({ shellId: id }, {})
+  assert.ok(!k1.isError, textOf(k1))
+  assert.match(textOf(k1), /killed background shell/)
+  const k2 = await kill.handler({ shellId: id }, {})
+  assert.ok(!k2.isError)
+  const missing = await kill.handler({ shellId: "nope" }, {})
+  assert.equal(missing.isError, true)
+})
+
+test("bash_output / kill_shell / list_shells error without a registry", async () => {
+  const output = createBashOutputTool({})
+  const kill = createKillShellTool({})
+  const list = createListShellsTool({})
+  assert.equal((await output.handler({ shellId: "x" }, {})).isError, true)
+  assert.equal((await kill.handler({ shellId: "x" }, {})).isError, true)
+  assert.equal((await list.handler({}, {})).isError, true)
+})

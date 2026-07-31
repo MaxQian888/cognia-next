@@ -1,0 +1,9 @@
+{
+  "bannerOffline": "Offline — sends will queue and retry automatically.",
+  "bannerReconnecting": "Reconnecting…",
+  "notifBody": "{count} messages waiting. Will retry when online.",
+  "notifChannel": "cognia",
+  "notifTitle": "cognia outbound queue",
+  "queuePending": "{count} queued",
+  "staleWarning": "{count} messages waiting > 30 min."
+}

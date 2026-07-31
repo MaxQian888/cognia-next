@@ -1,0 +1,273 @@
+{
+  "a2ui": {
+    "description": "Allow the agent to drive A2UI mini-apps via the bridge MCP server.",
+    "hint": "When off, characters never see the mcp__a2ui-bridge__* tools by default. Per-mode overrides remain available in the Custom Mode editor.",
+    "title": "A2UI bridge"
+  },
+  "defaults": {
+    "appendDesc": "Appended to every default character's system prompt. Use sparingly — large appendices inflate token cost.",
+    "appendPlaceholder": "e.g., 'Always reply in concise bullet points.'",
+    "appendTitle": "Append to system prompt",
+    "bareMode": "Bare mode",
+    "bareModeHint": "Skip on-disk auto-discovery (CLAUDE.md, hooks, plugins, MCP). Faster cold starts; the agent won't see your project's settings.",
+    "behaviorDesc": "Lightweight per-send behavior toggles.",
+    "behaviorTitle": "Behavior",
+    "briefMode": "Brief output",
+    "briefModeHint": "Append a concise-output instruction to every send. Useful for chat triage and one-shot questions.",
+    "cacheOptDesc": "Experimental. Re-layers the prompt so per-turn context (memory recall, twin chunks, goal/plan state) lands at the end, keeping the leading prefix stable across turns to maximize provider prompt-cache hits and cut input cost.",
+    "cacheOptTitle": "Cache optimization (experimental)",
+    "modelClear": "Clear default",
+    "modelDesc": "Used when neither the character nor the session pins a model.",
+    "modelEmpty": "No providers configured. Add one in Settings → Providers.",
+    "modelLabel": "Default model picker",
+    "modelSearch": "Search models…",
+    "modelTitle": "Default model",
+    "modelUnset": "No default selected",
+    "outputStyle": {
+      "bullets": "Bullet points",
+      "custom": "Custom…",
+      "customPlaceholder": "Describe the response style you want (e.g. answer in a formal tone).",
+      "default": "Default",
+      "detailed": "Detailed",
+      "hint": "Shape how the agent formats its replies. Composes with brief output.",
+      "label": "Output style",
+      "teacher": "Explanatory"
+    },
+    "permAcceptEdits": "Accept edits — auto-allow file writes",
+    "permAuto": "Auto — run most actions with background safety checks",
+    "permBypass": "Bypass — allow everything (dangerous)",
+    "permDefault": "Default — ask before edits",
+    "permDontAsk": "Don't ask — only pre-approved and read-only tools",
+    "permPlan": "Plan — read-only, propose changes",
+    "permissionDesc": "Default for new sessions — characters and individual sessions can still override.",
+    "permissionMode": "Mode",
+    "permissionTitle": "Permission mode",
+    "planDesc": "Defaults applied when a plan-mode turn proposes a plan (ExitPlanMode).",
+    "planInteractiveHtml": "Interactive plan view",
+    "planInteractiveHtmlHint": "Enhanced plan mode: review proposed plans in an interactive HTML editor — drag to reorder, edit inline, add or remove steps before approving.",
+    "planInteractiveStyle": "Interactive view style",
+    "planInteractiveStyleHint": "Built-in visual preset for the interactive plan editor.",
+    "planMaxAutoRefinements": "Max automatic refinements",
+    "planMaxAutoRefinementsHint": "Cap on automatic repair replans after a step failure (0–10).",
+    "planRequireApproval": "Require plan approval",
+    "planStyleCards": "Cards",
+    "planStyleCompact": "Compact",
+    "planStyleDefault": "Default",
+    "planStyleTimeline": "Timeline",
+    "planRequireApprovalHint": "Show the approval card before implementing. When off, captured plans auto-resume in accept-edits mode.",
+    "planTitle": "Plan mode",
+    "routingDesc": "When a turn fails, retry against the next entry in the alias's fallback chain. Disable to keep the original error visible.",
+    "routingTitle": "Routing fallback",
+    "thinkingActiveHint": "Active: up to {budget} tokens reserved per turn for reasoning before the visible reply.",
+    "thinkingDesc": "Tokens reserved for the SDK's extended-thinking pass. 0 disables thinking. Heads-up: streaming partial events are not emitted while a thinking budget is active.",
+    "thinkingDisabledHint": "Off — Claude replies directly without an extended-thinking pass.",
+    "thinkingNumberLabel": "Thinking budget tokens",
+    "thinkingReset": "Reset",
+    "thinkingTitle": "Thinking budget",
+    "workingDirDesc": "Sent to the sidecar as cwd. Useful when most chats target the same project.",
+    "workingDirPlaceholder": "/path/to/project",
+    "workingDirTitle": "Default working directory"
+  },
+  "description": "Configure defaults for the in-process Claude SDK sidecar — these flow into every new chat unless a character or session overrides them.",
+  "permissions": {
+    "addBtn": "Add",
+    "addToolPlaceholder": "Tool name (e.g. mcp__cognia-tools__file_hash)",
+    "addedToast": "Added {tool} to always-allow.",
+    "alwaysAllowDesc": "Tools listed here skip the per-call approval prompt for every chat.",
+    "alwaysAllowTitle": "Always-allow tools",
+    "approveAllBuiltin": "Approve all built-in tools",
+    "approveAllBuiltinDoneToast": "Approved {count} built-in tools.",
+    "autoMode": {
+      "addRule": "Add rule",
+      "denyHighRisk": "Block high-risk commands automatically",
+      "denyHighRiskHint": "When the model rates a command high-risk, deny it instead of asking.",
+      "desc": "Automatically decide whether the agent's shell commands are safe to run, prompting only when uncertain.",
+      "enable": "Enable Auto-mode",
+      "modeHint": "Rules classify commands offline. Adding the model lets a cheap background model judge the ones the rules are unsure about.",
+      "modeLabel": "Decision engine",
+      "modeRules": "Rules only (offline)",
+      "modeRulesModel": "Rules + small model",
+      "noRules": "No custom command rules yet.",
+      "patternPlaceholder": "Command glob (e.g. git push*)",
+      "privacyNote": "A command is sent to the model only when it contains no detected secrets or personal data.",
+      "removeRule": "Remove rule",
+      "rulesDesc": "Force a verdict for commands matching a glob — these override Auto-mode. Use a trailing * (e.g. git push*).",
+      "rulesTitle": "Command rules",
+      "title": "Command Auto-mode",
+      "verdictAllow": "Allow",
+      "verdictAsk": "Ask",
+      "verdictDeny": "Deny"
+    },
+    "categories": {
+      "astGrep": {
+        "desc": "Structural code search and rewrite via ast-grep patterns (ast_grep_search, ast_grep_replace). High risk — replace edits files.",
+        "name": "AST grep"
+      },
+      "codeGraph": {
+        "desc": "Structural code intelligence over a tree-sitter graph: find symbols, callers / callees, blast radius, and file / context maps.",
+        "name": "Code graph"
+      },
+      "coreFiles": {
+        "desc": "Search, read, patch, shell, waitable background commands, and structured session tasks for non-Anthropic models. Filesystem and shell mutations require approval.",
+        "name": "Core file tools"
+      },
+      "dependencyResearch": {
+        "desc": "Clone a dependency's source locally so the agent can read it (clone_dep_source, list_cloned_deps).",
+        "name": "Dependency research"
+      },
+      "environment": {
+        "desc": "Read environment variables and system information. Secrets are redacted before they reach the agent.",
+        "name": "Environment"
+      },
+      "fileExtras": {
+        "desc": "Hash, structured diff, content search — beyond the SDK's built-in Read / Write / Edit.",
+        "name": "File extras"
+      },
+      "git": {
+        "desc": "Structured wrappers around git_status, git_diff, git_log — easier on the agent than parsing raw shell output.",
+        "name": "Git"
+      },
+      "lsp": {
+        "desc": "Language-server code intelligence: go to definition, references, hover, symbols, diagnostics.",
+        "name": "LSP intelligence"
+      },
+      "process": {
+        "desc": "List, start, and terminate processes. High risk — only enable for trusted workflows.",
+        "name": "Process"
+      },
+      "shellAdvanced": {
+        "desc": "Allowlist-gated single-program shell. Useful for project-specific build commands.",
+        "name": "Shell (advanced)"
+      },
+      "terminalRepl": {
+        "desc": "Persistent interactive PTY sessions private to the agent (python / sql / REPLs).",
+        "name": "Terminal REPL"
+      },
+      "webclone": {
+        "desc": "Fetch and convert a web page's source for offline reading and reference (web_clone, web_clone_convert).",
+        "name": "Web clone"
+      }
+    },
+    "desktopOnlyHint": "Built-in tool categories run inside the desktop sidecar — switch to the desktop app to enable them.",
+    "infoLabel": "Tools in {name}",
+    "infoListTitle": "{count} tools",
+    "risk": {
+      "high": "High risk",
+      "low": "Low risk",
+      "medium": "Medium risk"
+    },
+    "toolRules": {
+      "addRule": "Add rule",
+      "addRuleTitle": "New rule",
+      "bashSegmentHint": "Shell rules match each command segment — author with trailing globs (e.g. git push*). Rules under Bash also govern the core bash tool.",
+      "customTool": "Custom…",
+      "customToolPlaceholder": "Tool name (e.g. my_plugin_tool)",
+      "desc": "Pin allow / ask / deny verdicts per tool and input pattern. Explicit rules skip the approval prompt; the third identical call still asks (loop guard).",
+      "noRules": "No tool rules yet — every gated call prompts for approval.",
+      "patternPlaceholder": "Input glob (path or command, e.g. src/**, git push*)",
+      "previewDefault": "No explicit rule matches — the default approval flow applies.",
+      "previewExplicit": "Matched an explicit rule.",
+      "previewPlaceholder": "Test an input (e.g. git push origin, src/index.ts)",
+      "previewTitle": "Which rule wins?",
+      "removeRule": "Remove rule",
+      "title": "Tool permission rules",
+      "toolLabel": "Tool",
+      "verdictAllow": "Allow",
+      "verdictAsk": "Ask",
+      "verdictDeny": "Deny",
+      "verdictLabel": "Verdict",
+      "wildcardTool": "All tools (*)"
+    }
+  },
+  "sessions": {
+    "ago": {
+      "days": "{n}d ago",
+      "hours": "{n}h ago",
+      "justNow": "just now",
+      "minutes": "{n}m ago"
+    },
+    "cancel": "Cancel",
+    "colActions": "Actions",
+    "colCost": "Cost",
+    "colKind": "Kind",
+    "colTitle": "Session",
+    "colTokens": "Tokens",
+    "colTurns": "Turns",
+    "colUpdated": "Updated",
+    "delete": "Delete",
+    "deleteDesc": "This permanently removes `{title}` and every message + usage row tied to it. The action can't be undone.",
+    "deleteTitle": "Delete session?",
+    "deletedToast": "Session deleted.",
+    "description": "Every chat session, with token + USD totals captured from each turn's SDK result. Resume to switch the active chat; fork to branch off the SDK conversation; rename or delete in place.",
+    "emptyAll": "No sessions yet. Start a chat to fill this list.",
+    "emptyFilter": "No sessions match this filter.",
+    "filterPlaceholder": "Filter by title or id…",
+    "fork": "Fork SDK session",
+    "forkDisabledTip": "Unavailable until this session has an SDK conversation to fork — it needs at least one completed turn, and only providers that issue a session id have one.",
+    "forkFailedToast": "Couldn't fork the SDK session.",
+    "forkedToast": "Forked into `{title}`.",
+    "rename": "Rename",
+    "renameDesc": "Pick a new display title. Changing the title doesn't affect the chat history or SDK conversation.",
+    "renameEmpty": "Title can't be empty.",
+    "renamePlaceholder": "Session title",
+    "renameTitle": "Rename session",
+    "renamedToast": "Renamed.",
+    "resume": "Resume",
+    "resumedToast": "Resumed `{title}`.",
+    "save": "Save",
+    "title": "Sessions",
+    "untitled": "(untitled)"
+  },
+  "sidecar": {
+    "capabilities": {
+      "commandsLabel": "Agent commands ({count})",
+      "description": "What the live SDK session reports it supports. cognia's own model picker and slash menu are unaffected.",
+      "effortFlag": "effort",
+      "modelsLabel": "Account models ({count})",
+      "title": "Live session capabilities"
+    },
+    "checking": "Checking…",
+    "countHooks": "Hooks",
+    "countHooksHint": "Open hooks",
+    "countMcpServers": "MCP servers",
+    "countSessions": "Sessions",
+    "countSlashCommands": "Slash commands",
+    "countsDescription": "Live counts across the related Claude Code settings sections — click a tile to jump.",
+    "countsTitle": "Linked surfaces",
+    "description": "Read-only view of the in-process Claude SDK sidecar.",
+    "desktopOnlyHint": "Restart is only available in the desktop build.",
+    "restartBtn": "Restart sidecar",
+    "restartedToast": "Sidecar restart requested.",
+    "running": "Running",
+    "sdkSessionLabel": "Most recent SDK session id",
+    "sdkVersionLabel": "SDK version",
+    "sidecarVersionLabel": "Sidecar version",
+    "statusLabel": "Status",
+    "stopped": "Stopped",
+    "title": "Sidecar diagnostics",
+    "webOnly": "Desktop only"
+  },
+  "tabs": {
+    "a2ui": "A2UI bridge",
+    "defaults": "Defaults",
+    "permissions": "Permissions & tools",
+    "sessions": "Sessions",
+    "sidecar": "Sidecar"
+  },
+  "title": "Built-in agent runtime",
+  "toolSearch": {
+    "addAria": "Add",
+    "description": "Load tools on demand to keep the system prompt small. Pin servers or tools below to keep them always available.",
+    "enableHelp": "Tools are discovered on demand instead of all being injected up front.",
+    "enableLabel": "Enable deferred tool loading",
+    "removeAria": "Remove {value}",
+    "serversHelp": "These MCP servers stay resident and are never deferred.",
+    "serversLabel": "Always-loaded MCP servers",
+    "serversPlaceholder": "Server name, e.g. cognia-tools",
+    "title": "Deferred tool loading",
+    "toolsHelp": "These bare tool names stay resident and are never deferred.",
+    "toolsLabel": "Always-loaded tools",
+    "toolsPlaceholder": "Tool name, e.g. read_file",
+    "unknownHint": "Not found in the current tool catalog — this pin won't take effect until a matching server or tool exists."
+  }
+}

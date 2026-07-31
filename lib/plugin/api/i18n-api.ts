@@ -6,24 +6,22 @@
 
 import { useSettingsStore } from "@/stores"
 import { locales, localeNames, type Locale } from "@/lib/i18n/config"
-import type { PluginI18nAPI, TranslationParams } from "@/types/plugin/plugin-extended"
-import type { Locale as PluginLocale } from "@/types/plugin/plugin-extended"
+import type { PluginI18nAPI, TranslationParams } from "@/types/plugin/plugin"
+import type { Locale as PluginLocale } from "@/types/plugin/plugin"
+import {
+  getPluginI18nBundle,
+  lookupPluginMessage,
+  registerPluginI18n,
+} from "@/lib/i18n/plugin-i18n-registry"
 import { createPluginSystemLogger } from "../core/logger"
-
-// Plugin translation registrations
-const pluginTranslations = new Map<string, Map<Locale, Record<string, string>>>()
 
 /**
  * Create the I18n API for a plugin
  */
 export function createI18nAPI(pluginId: string): PluginI18nAPI {
   const logger = createPluginSystemLogger(pluginId)
-  // Initialize plugin translation storage
-  if (!pluginTranslations.has(pluginId)) {
-    pluginTranslations.set(pluginId, new Map())
-  }
-
-  const getPluginTranslations = () => pluginTranslations.get(pluginId)!
+  const fullKey = (key: string) =>
+    key.startsWith(`plugin.${pluginId}.`) ? key : `plugin.${pluginId}.${key}`
 
   return {
     getCurrentLocale: (): PluginLocale => {
@@ -40,18 +38,11 @@ export function createI18nAPI(pluginId: string): PluginI18nAPI {
 
     t: (key: string, params?: TranslationParams): string => {
       const currentLocale = useSettingsStore.getState().language as Locale
-      const translations = getPluginTranslations().get(currentLocale)
-
-      if (!translations) {
-        return key
-      }
-
-      let value = translations[key]
-      if (!value) {
-        // Fallback to English
-        const enTranslations = getPluginTranslations().get("en")
-        value = enTranslations?.[key] || key
-      }
+      const resolvedKey = fullKey(key)
+      const value =
+        lookupPluginMessage(currentLocale, resolvedKey) ??
+        lookupPluginMessage("en", resolvedKey) ??
+        key
 
       // Handle parameter interpolation
       if (params && value !== key) {
@@ -65,16 +56,27 @@ export function createI18nAPI(pluginId: string): PluginI18nAPI {
     },
 
     registerTranslations: (locale: PluginLocale, translations: Record<string, string>) => {
-      const pluginTrans = getPluginTranslations()
-      const existing = pluginTrans.get(locale as Locale) || {}
-      pluginTrans.set(locale as Locale, { ...existing, ...translations })
+      const existing = getPluginI18nBundle(pluginId)?.messages ?? {}
+      const localeKey = locale as Locale
+      const prefixed = Object.fromEntries(
+        Object.entries(translations).map(([key, value]) => [fullKey(key), value])
+      )
+      registerPluginI18n({
+        pluginId,
+        messages: {
+          ...existing,
+          [localeKey]: {
+            ...(existing[localeKey] ?? {}),
+            ...prefixed,
+          },
+        },
+      })
       logger.info(`Registered ${Object.keys(translations).length} translations for ${locale}`)
     },
 
     hasTranslation: (key: string): boolean => {
       const currentLocale = useSettingsStore.getState().language as Locale
-      const translations = getPluginTranslations().get(currentLocale)
-      return translations?.[key] !== undefined
+      return lookupPluginMessage(currentLocale, fullKey(key)) !== undefined
     },
 
     onLocaleChange: (handler: (locale: PluginLocale) => void) => {

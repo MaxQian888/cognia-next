@@ -20,20 +20,54 @@ jest.mock("@/stores/settings", () => ({
     selector({ settings: settingsRef.current }),
 }))
 
-jest.mock("@/lib/ai/core/client", () => ({
-  getProviderModel: () => ({ provider: "anthropic" }),
+interface CanvasAiRef {
+  maxSuggestions: number
+  contextLines: number
+  suggestionProvider: "default" | "custom"
+  customProviderUrl?: string
+}
+const aiRef: { current: CanvasAiRef } = {
+  current: { maxSuggestions: 5, contextLines: 50, suggestionProvider: "default" },
+}
+jest.mock("@/stores/canvas/canvas-settings-store", () => ({
+  useCanvasSettingsStore: <T>(selector: (s: { settings: { ai: CanvasAiRef } }) => T): T =>
+    selector({ settings: { ai: aiRef.current } }),
 }))
 
-jest.mock("@/lib/logging", () => ({
+const getProviderModelMock = jest.fn((_opts: unknown) => ({ provider: "anthropic" }))
+jest.mock("@cognia/provider-core/core/client", () => ({
+  getProviderModel: (opts: unknown) => getProviderModelMock(opts),
+}))
+
+jest.mock("@/lib/ai/provider-consumption", () => ({
+  createFeatureProviderModel: () => ({ provider: "feature" }),
+}))
+
+const resolveStandaloneProviderMock = jest.fn(
+  () => ({ kind: "unresolved" }) as { kind: string; protocol?: string }
+)
+jest.mock("@/lib/ai/chat/resolve-standalone-provider", () => ({
+  resolveStandaloneProvider: () => resolveStandaloneProviderMock(),
+}))
+
+jest.mock("@/lib/runtime/streaming-fetch", () => ({
+  getStreamingFetch: () => undefined,
+  browserDirectHeaders: () => ({}),
+}))
+
+jest.mock("@cognia/logging", () => ({
   loggers: { canvas: { error: jest.fn(), warn: jest.fn(), info: jest.fn() } },
 }))
 
-import { useCanvasSuggestions } from "./use-canvas-suggestions"
+import { useCanvasSuggestions, sliceContextWindow } from "./use-canvas-suggestions"
 
 beforeEach(() => {
   generateTextMock.mockReset()
   addSuggestionMock.mockClear()
+  getProviderModelMock.mockClear()
+  resolveStandaloneProviderMock.mockReturnValue({ kind: "unresolved" })
   settingsRef.current = { apiKey: "k" }
+  aiRef.current = { maxSuggestions: 5, contextLines: 50, suggestionProvider: "default" }
 })
 
 describe("useCanvasSuggestions", () => {
@@ -141,6 +175,63 @@ describe("useCanvasSuggestions", () => {
     expect(suggestions).toHaveLength(2)
   })
 
+  it("returns [] and logs when braced content is not valid JSON", async () => {
+    generateTextMock.mockResolvedValueOnce({ text: "{ not: valid, json }" })
+    const { result } = renderHook(() => useCanvasSuggestions())
+    let suggestions: unknown[] = []
+    await act(async () => {
+      suggestions = await result.current.generate({
+        documentId: "doc",
+        language: "ts",
+        content: "x",
+      })
+    })
+    expect(suggestions).toEqual([])
+  })
+
+  it("trims the prompt to a context window around the caret", async () => {
+    generateTextMock.mockResolvedValueOnce({ text: '{"suggestions":[]}' })
+    const content = Array.from({ length: 100 }, (_, i) => `line-${i + 1}`).join("\n")
+    const { result } = renderHook(() => useCanvasSuggestions())
+    await act(async () => {
+      await result.current.generate(
+        { documentId: "doc", language: "ts", content, cursorLine: 50 },
+        { contextLines: 3 }
+      )
+    })
+    const prompt = generateTextMock.mock.calls[0][0].prompt as string
+    expect(prompt).toContain("line-50")
+    expect(prompt).not.toContain("line-1\n") // far-away lines are trimmed out
+  })
+
+  it("routes to the custom OpenAI-compatible endpoint when configured", async () => {
+    aiRef.current = {
+      maxSuggestions: 5,
+      contextLines: 50,
+      suggestionProvider: "custom",
+      customProviderUrl: "https://gateway.example/v1",
+    }
+    generateTextMock.mockResolvedValueOnce({ text: '{"suggestions":[]}' })
+    const { result } = renderHook(() => useCanvasSuggestions())
+    await act(async () => {
+      await result.current.generate({ documentId: "doc", language: "ts", content: "x" })
+    })
+    expect(getProviderModelMock).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "openai", baseURL: "https://gateway.example/v1" })
+    )
+  })
+
+  it("uses the resolved app provider when standalone resolution succeeds", async () => {
+    resolveStandaloneProviderMock.mockReturnValue({ kind: "resolved", protocol: "anthropic" })
+    generateTextMock.mockResolvedValueOnce({ text: '{"suggestions":[]}' })
+    const { result } = renderHook(() => useCanvasSuggestions())
+    await act(async () => {
+      await result.current.generate({ documentId: "doc", language: "ts", content: "x" })
+    })
+    // Resolved path uses createFeatureProviderModel, not the legacy getProviderModel.
+    expect(getProviderModelMock).not.toHaveBeenCalled()
+  })
+
   it("captures errors and returns []", async () => {
     generateTextMock.mockRejectedValueOnce(new Error("api dead"))
     const { result } = renderHook(() => useCanvasSuggestions())
@@ -154,5 +245,44 @@ describe("useCanvasSuggestions", () => {
     })
     expect(suggestions).toEqual([])
     expect(result.current.error).toBe("api dead")
+  })
+
+  it("blocks provider dispatch when the suggestion prompt contains PII", async () => {
+    const { result } = renderHook(() => useCanvasSuggestions())
+    let suggestions: unknown[] = []
+    await act(async () => {
+      suggestions = await result.current.generate({
+        documentId: "doc",
+        language: "ts",
+        content: "Contact jane@example.com",
+      })
+    })
+
+    expect(suggestions).toEqual([])
+    expect(generateTextMock).not.toHaveBeenCalled()
+    expect(result.current.error).toContain("PII gate")
+  })
+})
+
+describe("sliceContextWindow", () => {
+  const doc = Array.from({ length: 20 }, (_, i) => `L${i + 1}`).join("\n")
+
+  it("returns the full document when contextLines is not positive", () => {
+    expect(sliceContextWindow(doc, 5, 0)).toBe(doc)
+    expect(sliceContextWindow(doc, 5, undefined)).toBe(doc)
+  })
+
+  it("returns the full document when it already fits the window", () => {
+    expect(sliceContextWindow("a\nb\nc", 2, 5)).toBe("a\nb\nc")
+  })
+
+  it("windows ±contextLines around the caret line", () => {
+    const out = sliceContextWindow(doc, 10, 2)
+    expect(out).toBe("L8\nL9\nL10\nL11\nL12")
+  })
+
+  it("clamps the window at the document start when the caret is near line 1", () => {
+    const out = sliceContextWindow(doc, 1, 2)
+    expect(out).toBe("L1\nL2\nL3")
   })
 })

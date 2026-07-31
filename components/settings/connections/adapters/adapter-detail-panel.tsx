@@ -21,8 +21,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { useAdapterHealth } from "@/hooks/connectors/use-adapter-health"
-import { getPlatformMeta } from "./platform-meta"
+import { getAdapterTransportLabelKey, getPlatformMeta } from "./platform-meta"
 import { deriveAdapterStatus } from "./adapter-status"
+import { healthReasonLabel } from "./tabs/health-reason-label"
 import { ConfigDetail } from "./tabs/config-detail"
 import { HealthDetail } from "./tabs/health-detail"
 import { ConversationsDetail } from "./tabs/conversations-detail"
@@ -39,6 +40,7 @@ export interface AdapterDetailPanelProps {
 
 export function AdapterDetailPanel({ adapterId }: AdapterDetailPanelProps) {
   const t = useTranslations("settings.connections.adapters")
+  const tHealth = useTranslations("settings.connections.adapters.health")
   const { activeTab, setActiveTab } = useSelectedAdapter()
   const health = useAdapterHealth(adapterId)
   const row = useLiveQuery<AdapterInstanceRow | undefined>(
@@ -59,13 +61,16 @@ export function AdapterDetailPanel({ adapterId }: AdapterDetailPanelProps) {
 
   const { labelKey, Icon } = getPlatformMeta(row.type)
   const platformLabel = t(`platforms.${labelKey}`)
+  const transportLabelKey = getAdapterTransportLabelKey(row.type, row.transportMode)
+  const transportLabel = transportLabelKey ? t(transportLabelKey) : row.transportMode
   const status = deriveAdapterStatus(row.enabled, health)
   const StatusIcon = status.Icon
+  const statusReason = healthReasonLabel(tHealth, status.reason)
 
   return (
-    <div data-testid="adapter-detail-panel">
+    <div className="flex h-full min-h-0 flex-col" data-testid="adapter-detail-panel">
       {/* Header */}
-      <div className="flex items-center gap-3 border-b px-4 py-3">
+      <div className="flex shrink-0 flex-wrap items-center gap-3 border-b px-4 py-3">
         <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
           <Icon className="size-5" aria-hidden />
         </span>
@@ -77,13 +82,14 @@ export function AdapterDetailPanel({ adapterId }: AdapterDetailPanelProps) {
             </Badge>
           </div>
           <p className="truncate text-xs text-muted-foreground">
-            {platformLabel} · {row.transportMode}
+            {platformLabel} · {transportLabel}
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex flex-wrap shrink-0 items-center justify-end gap-2">
           <span
             data-testid="adapter-detail-status"
             data-status={status.status}
+            title={statusReason}
             className={cn(
               "flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px]",
               status.tint
@@ -115,15 +121,25 @@ export function AdapterDetailPanel({ adapterId }: AdapterDetailPanelProps) {
         </div>
       </div>
 
-      {/* Inner tabs */}
-      <div className="p-4">
+      {/* Inner tabs — body scrolls inside the pane, header stays pinned */}
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as AdapterDetailTab)}>
-          <TabsList>
-            <TabsTrigger value="config">{t("detailTabs.config")}</TabsTrigger>
-            <TabsTrigger value="health">{t("detailTabs.health")}</TabsTrigger>
-            <TabsTrigger value="conversations">{t("detailTabs.conversations")}</TabsTrigger>
-            <TabsTrigger value="audit">{t("detailTabs.audit")}</TabsTrigger>
-            <TabsTrigger value="outbound">{t("detailTabs.outbound")}</TabsTrigger>
+          <TabsList className="w-full justify-start overflow-x-auto">
+            <TabsTrigger value="config" className="shrink-0">
+              {t("detailTabs.config")}
+            </TabsTrigger>
+            <TabsTrigger value="health" className="shrink-0">
+              {t("detailTabs.health")}
+            </TabsTrigger>
+            <TabsTrigger value="conversations" className="shrink-0">
+              {t("detailTabs.conversations")}
+            </TabsTrigger>
+            <TabsTrigger value="audit" className="shrink-0">
+              {t("detailTabs.audit")}
+            </TabsTrigger>
+            <TabsTrigger value="outbound" className="shrink-0">
+              {t("detailTabs.outbound")}
+            </TabsTrigger>
           </TabsList>
           <TabsContent value="config" className="mt-4">
             <ConfigDetail row={row} />

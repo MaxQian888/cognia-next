@@ -33,26 +33,68 @@ export interface AgentTeamManager {
   create(config: AgentTeamConfig): AgentTeam
   update(id: string, patch: Partial<AgentTeamConfig>): void
   delete(id: string): void
-  start(id: string, opts?: { ultracode?: boolean }): Promise<void>
+  start(
+    id: string,
+    opts?: {
+      ultracode?: boolean
+      /** Trigger origin; headless origins resolve HITL gates via gate-policy. */
+      origin?: import("./team/gate-policy").TeamRunOrigin
+    }
+  ): Promise<void>
   pause(id: string): Promise<void>
+  /**
+   * Resume a paused team: unstrand the tasks the aborted run left in
+   * `claimed`/`in_progress` (→ `pending`), reset stuck teammates, re-seed the
+   * blackboard from persisted results (a restart empties the in-memory
+   * shared memory), then re-enter the lifecycle over the not-yet-done tasks
+   * only. No-op unless the team is `paused`.
+   */
+  resume(id: string, opts?: Parameters<AgentTeamManager["start"]>[1]): Promise<void>
   shutdown(id: string): Promise<void>
 }
 
 /**
- * Pluggable runtime dependencies. Set at app startup via
- * `configureAgentTeamRuntime`. `null` means start() throws a clear error
- * rather than running with no planning support.
+ * Pluggable runtime dependencies. Normally set at app startup via
+ * `configureAgentTeamRuntime` (the React initializer). When that never ran
+ * (headless / CLI / scheduler-triggered runs, SSR, tests), `start()` lazily
+ * builds the side-effect-free defaults instead of dying — an explicit
+ * `configureAgentTeamRuntime` still wins.
  */
-let configuredDeps: Pick<RunTeamLifecycleDeps, "runLeadPlanning" | "notifierDeps"> | null = null
+type ConfiguredDeps = Pick<
+  RunTeamLifecycleDeps,
+  | "runLeadPlanning"
+  | "runLeadReview"
+  | "notifierDeps"
+  | "resolveTeamRepo"
+  | "resolvePrObserveOctokit"
+  | "runPrReview"
+>
+let configuredDeps: ConfiguredDeps | null = null
 
-export function configureAgentTeamRuntime(
-  deps: Pick<RunTeamLifecycleDeps, "runLeadPlanning" | "notifierDeps">
-): void {
+export function configureAgentTeamRuntime(deps: ConfiguredDeps): void {
   configuredDeps = deps
 }
 
 export function __resetAgentTeamRuntimeForTesting(): void {
   configuredDeps = null
+}
+
+/**
+ * Return the configured runtime deps, or lazily build the default deps when
+ * the startup initializer never ran. `buildAgentTeamRuntimeDeps()` is
+ * side-effect-free and produces safe defaults, so dispatch self-heals instead
+ * of throwing "runtime is not configured". Dynamic import keeps the default
+ * notifier/DB graph out of the SSR/test path unless it's actually needed.
+ */
+async function ensureConfiguredDeps(): Promise<ConfiguredDeps> {
+  if (configuredDeps) return configuredDeps
+  const { buildAgentTeamRuntimeDeps } = await import("./agent-team-runtime-deps")
+  configuredDeps = buildAgentTeamRuntimeDeps()
+  console.warn(
+    "[agent-team] runtime auto-configured with defaults — " +
+      "configureAgentTeamRuntime() was never called (initializer not mounted?)."
+  )
+  return configuredDeps
 }
 
 function bindStoreReader(): RunTeamLifecycleDeps["storeReader"] {
@@ -72,7 +114,67 @@ function bindStoreWriter(): RunTeamLifecycleDeps["storeWriter"] {
       useAgentTeamStore.getState().updateTeammate(teammateId, updates),
     setFinalResult: (teamId: string, result: string) =>
       useAgentTeamStore.getState().updateTeam(teamId, { finalResult: result }),
+    addTask: (input) => useAgentTeamStore.getState().createTask(input),
+    updateTask: (taskId, updates) => useAgentTeamStore.getState().updateTask(taskId, updates),
+    addEvent: (event) => useAgentTeamStore.getState().addEvent(event),
+    // Adaptive re-plan recruit sink — bring a digital employee onto the team
+    // mid-run (see `replan-checkpoint.ts`).
+    addTeammate: (input) => useAgentTeamStore.getState().addTeammate(input),
   }
+}
+
+/**
+ * Task statuses `resume()` does NOT re-dispatch: finished/dropped work stays
+ * finished, and `review` awaits a human verdict on the board (completing it
+ * automatically would bypass the review column).
+ */
+const RESUME_SKIP_STATUSES: ReadonlySet<TeamTaskStatus> = new Set([
+  "completed",
+  "cancelled",
+  "review",
+])
+
+/**
+ * Shared run path for `start` / `resume`: assemble deps, run the lifecycle,
+ * mirror the terminal status, emit the completion scheduler event.
+ */
+async function runManaged(
+  id: string,
+  opts?: Parameters<AgentTeamManager["start"]>[1],
+  taskFilter?: RunTeamLifecycleDeps["taskFilter"]
+): Promise<void> {
+  const deps = await ensureConfiguredDeps()
+  useAgentTeamStore.getState().setTeamStatus(id, "executing")
+  const result = await runTeamLifecycle(id, {
+    storeReader: bindStoreReader(),
+    storeWriter: bindStoreWriter(),
+    runLeadPlanning: deps.runLeadPlanning,
+    ...(deps.runLeadReview ? { runLeadReview: deps.runLeadReview } : {}),
+    notifierDeps: deps.notifierDeps,
+    ...(deps.resolveTeamRepo ? { resolveTeamRepo: deps.resolveTeamRepo } : {}),
+    ...(deps.resolvePrObserveOctokit
+      ? { resolvePrObserveOctokit: deps.resolvePrObserveOctokit }
+      : {}),
+    ...(deps.runPrReview ? { runPrReview: deps.runPrReview } : {}),
+    ...(opts?.origin ? { origin: opts.origin } : {}),
+    ...(taskFilter ? { taskFilter } : {}),
+    // Manual "Run with ultracode" forces orchestration; an explicit normal
+    // run turns it off. Omitted → the team's autoMode decides.
+    ...(opts?.ultracode === true
+      ? { ultracodeOverride: "force" as const }
+      : opts?.ultracode === false
+        ? { ultracodeOverride: "off" as const }
+        : {}),
+  })
+  // Optimistically mirror the terminal result onto store team.status as an
+  // in-flight bridge. The authoritative source is the workflowRuns
+  // subscription (`useTeamLiveStatus`), which the workspace overview and the
+  // teams-list card both consume; `deriveTeamStatus` only lets this
+  // optimistic write win while it's still non-terminal.
+  useAgentTeamStore.getState().setTeamStatus(id, result.status)
+  // Emit a scheduler event so event-triggered tasks / forward chains can
+  // react to a team finishing. Lazy import + best-effort.
+  void emitTeamCompletedSchedulerEvent(id, result.status)
 }
 
 export const agentTeamManager: AgentTeamManager = {
@@ -89,38 +191,88 @@ export const agentTeamManager: AgentTeamManager = {
     useAgentTeamStore.getState().deleteTeam(id)
   },
   start: async (id, opts) => {
-    if (!configuredDeps) {
-      throw new Error(
-        "Agent-team runtime is not configured — call configureAgentTeamRuntime(deps) at app startup."
-      )
-    }
-    useAgentTeamStore.getState().setTeamStatus(id, "executing")
-    const result = await runTeamLifecycle(id, {
-      storeReader: bindStoreReader(),
-      storeWriter: bindStoreWriter(),
-      runLeadPlanning: configuredDeps.runLeadPlanning,
-      notifierDeps: configuredDeps.notifierDeps,
-      // Manual "Run with ultracode" forces orchestration; an explicit normal
-      // run turns it off. Omitted → the team's autoMode decides.
-      ...(opts?.ultracode === true
-        ? { ultracodeOverride: "force" as const }
-        : opts?.ultracode === false
-          ? { ultracodeOverride: "off" as const }
-          : {}),
-    })
-    // Mirror the terminal result onto the store team.status so the workspace
-    // page (which currently reads from the store) sees the new state. Long-term
-    // the UI should subscribe to workflowRuns directly (PR 5).
-    useAgentTeamStore.getState().setTeamStatus(id, result.status)
+    await runManaged(id, opts)
   },
   pause: async (id) => {
     abortTeam(id, new Error("paused"))
     useAgentTeamStore.getState().setTeamStatus(id, "paused")
   },
+  resume: async (id, opts) => {
+    const store = useAgentTeamStore.getState()
+    const team = store.teams[id]
+    if (!team || team.status !== "paused") return
+
+    const teamTasks = Object.values(store.tasks).filter((t) => t.teamId === id)
+
+    // Unstrand: tasks the aborted run left mid-flight belong to no live run
+    // anymore — push them back to pending with their run-owned fields cleared
+    // (same reset moveTask applies on `→ pending`).
+    for (const t of teamTasks) {
+      if (t.status === "claimed" || t.status === "in_progress") {
+        store.updateTask(t.id, {
+          status: "pending",
+          claimedBy: undefined,
+          startedAt: undefined,
+          completedAt: undefined,
+          actualDuration: undefined,
+        })
+      }
+    }
+    // Reset teammates stuck in run-owned statuses.
+    for (const m of Object.values(store.teammates).filter((m) => m.teamId === id)) {
+      if (
+        m.status === "executing" ||
+        m.status === "planning" ||
+        m.status === "paused" ||
+        m.status === "awaiting_approval"
+      ) {
+        store.updateTeammate(m.id, { status: "idle", currentTaskId: undefined })
+      }
+    }
+
+    // Re-seed the blackboard from persisted results: shared memory is
+    // in-memory only, so after an app restart the resumed run's surviving
+    // tasks would read empty upstream results. `autoPublishTaskResult`
+    // re-applies the PII gate; publishing over a live entry is idempotent
+    // (same task → same value).
+    const { autoPublishTaskResult } = await import("./team/shared-memory-orchestrator")
+    for (const t of teamTasks) {
+      if (t.status === "completed" && typeof t.result === "string" && t.result.length > 0) {
+        const writer = t.claimedBy ? useAgentTeamStore.getState().teammates[t.claimedBy] : undefined
+        autoPublishTaskResult({ id }, t, t.result, writer ?? { id: "system", name: "System" })
+      }
+    }
+
+    // Nothing left to run → the team simply is complete.
+    const remaining = Object.values(useAgentTeamStore.getState().tasks).filter(
+      (t) => t.teamId === id && !RESUME_SKIP_STATUSES.has(t.status)
+    )
+    if (remaining.length === 0) {
+      useAgentTeamStore.getState().setTeamStatus(id, "completed")
+      void emitTeamCompletedSchedulerEvent(id, "completed")
+      return
+    }
+
+    await runManaged(id, opts, (t) => !RESUME_SKIP_STATUSES.has(t.status))
+  },
   shutdown: async (id) => {
     abortTeam(id, new Error("shutdown"))
     useAgentTeamStore.getState().setTeamStatus(id, "cancelled")
   },
+}
+
+/**
+ * Emit an `agent-team:completed` scheduler event when a team run reaches a
+ * terminal status, so event-triggered scheduled tasks (and forward chains) can
+ * react. Lazy import + best-effort, mirroring the goal/plan completion linkage.
+ */
+async function emitTeamCompletedSchedulerEvent(teamId: string, status: string): Promise<void> {
+  try {
+    const { emitSchedulerEvent } = await import("@/lib/scheduler/event-integration")
+    await emitSchedulerEvent("agent-team:completed", { teamId, status }, "agent-team")
+  } catch {
+    // Scheduler unavailable (e.g. web-only path) — best-effort.
+  }
 }
 
 // Re-export for callers that want to plug in their own runtime deps

@@ -1,93 +1,71 @@
 "use client"
 
 /**
- * Keyboard shortcuts for the Skills panel, active while the panel is mounted.
+ * Rebindable keyboard shortcuts for the Skills panel, registered while it is
+ * mounted:
  *
- *  - `/`            → focus the search box
- *  - Cmd/Ctrl + A   → select every skill in the current filtered view
- *  - Esc            → clear the selection, else close the open detail panel
- *  - N              → open the "create skill" editor
- *  - Delete         → open the delete confirm when exactly one skill is selected
+ *  - `skills.search`         `/`             → focus the search box
+ *  - `skills.selectAll`      Cmd/Ctrl + A    → select every skill in view
+ *  - `skills.clearSelection` Esc             → clear selection, else close detail
+ *  - `skills.create`         N               → open the "create skill" editor
+ *  - `skills.delete`         Delete / Backspace → delete when exactly one selected
  *
- * Bails whenever focus is inside an input / textarea / contenteditable (so the
- * keys type normally), except Escape which is always honored.
+ * The single dispatcher owns the listener + editable guard, so the keys type
+ * normally inside a field — except Esc, which stays active everywhere
+ * (`allowInEditable`). `preventDefault` is called by each handler exactly where
+ * the pre-migration code did, so a no-op press still types through.
  */
 
-import { useEffect } from "react"
 import { useSkillsStore } from "@/stores/skills"
-import type { Skill } from "@/lib/claude/types"
-
-/** True when focus sits in an editable surface where the keys should type. */
-function isEditableTarget(el: EventTarget | null): boolean {
-  const node = el as (HTMLElement & { isContentEditable?: boolean }) | null
-  if (!node || typeof node.tagName !== "string") return false
-  const tag = node.tagName.toLowerCase()
-  return (
-    tag === "input" || tag === "textarea" || tag === "select" || node.isContentEditable === true
-  )
-}
+import { useAppShortcut } from "@/hooks/shortcuts/use-app-shortcut"
+import type { Skill } from "@cognia/agent-config-types"
 
 export function useSkillShortcuts(skills: Skill[]): void {
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
+  // Escape works everywhere: drop the selection, else close the detail panel.
+  useAppShortcut(
+    "skills.clearSelection",
+    (e) => {
       const store = useSkillsStore.getState()
-      const editable = isEditableTarget(e.target)
-
-      // Escape works everywhere: drop the selection, else close the detail.
-      if (e.key === "Escape") {
-        if (store.selection.size > 0) {
-          e.preventDefault()
-          store.clearSelection()
-        } else if (store.detailSkillId) {
-          e.preventDefault()
-          store.closeDetail()
-        }
-        return
-      }
-
-      if (editable) return
-
-      const mod = e.metaKey || e.ctrlKey
-
-      if (mod && e.key.toLowerCase() === "a") {
+      if (store.selection.size > 0) {
         e.preventDefault()
-        store.selectAll(skills.map((s) => s.id))
-        return
-      }
-
-      if (mod || e.altKey) return
-
-      if (e.key === "/") {
-        const input = document.querySelector<HTMLInputElement>("[data-skill-search]")
-        if (input) {
-          e.preventDefault()
-          input.focus()
-          input.select()
-        }
-        return
-      }
-
-      if (e.key.toLowerCase() === "n") {
+        store.clearSelection()
+      } else if (store.detailSkillId) {
         e.preventDefault()
-        store.openCreate()
-        return
+        store.closeDetail()
       }
+    },
+    { allowInEditable: true }
+  )
 
-      if (e.key === "Delete" || e.key === "Backspace") {
-        if (store.selection.size === 1) {
-          const id = Array.from(store.selection)[0]
-          const skill = skills.find((s) => s.id === id)
-          if (skill) {
-            e.preventDefault()
-            store.setDeleteTarget({ skillId: skill.id, name: skill.name })
-          }
-        }
-      }
+  useAppShortcut("skills.selectAll", (e) => {
+    e.preventDefault()
+    useSkillsStore.getState().selectAll(skills.map((s) => s.id))
+  })
+
+  useAppShortcut("skills.search", (e) => {
+    const input = document.querySelector<HTMLInputElement>("[data-skill-search]")
+    if (input) {
+      e.preventDefault()
+      input.focus()
+      input.select()
     }
+  })
 
-    window.addEventListener("keydown", handler)
-    return () => window.removeEventListener("keydown", handler)
-  }, [skills])
+  useAppShortcut("skills.create", (e) => {
+    e.preventDefault()
+    useSkillsStore.getState().openCreate()
+  })
+
+  useAppShortcut("skills.delete", (e) => {
+    const store = useSkillsStore.getState()
+    if (store.selection.size !== 1) return
+    const id = Array.from(store.selection)[0]
+    const skill = skills.find((s) => s.id === id)
+    if (skill) {
+      e.preventDefault()
+      store.setDeleteTarget({ skillId: skill.id, name: skill.name })
+    }
+  })
 }
 
 export default useSkillShortcuts

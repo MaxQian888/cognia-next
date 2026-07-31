@@ -20,16 +20,27 @@ export const XP_AWARD: Partial<Record<PetEventKind, number>> = {
   workflowRun: 4,
   inboundMessage: 1,
   scheduledRun: 2,
+  scheduledRunStarting: 1,
+  scheduledRunDue: 0, // a reminder cue, not a work milestone — no XP economy impact
+  twinBusy: 0, // purely ambient — no XP economy impact this wave
+  twinMilestone: 0,
   // interactions
   fed: 3,
   played: 4,
   petted: 2,
   talked: 2,
+  slept: 2,
+  cleaned: 2,
+  treated: 3,
   // lifecycle
   hatched: 0,
   greeting: 0,
   levelUp: 0,
   evolved: 0,
+  achievementUnlocked: 0, // celebration only; the unlocking event already paid XP
+  // XP-bearing so the ledger records it — the row IS the once-per-day dedup
+  // marker for the birthday source AND the "first birthday" counter.
+  birthday: 10,
 }
 
 /** Resolve XP for an event: explicit value wins, else the table, else 0. */

@@ -24,7 +24,7 @@ import type {
   UseAgentTraceLogsReturn,
 } from "@/types/logging"
 import { queryRecent } from "@/lib/db/agent-traces"
-import { spanToLogEntry } from "@/lib/agent-trace/span-to-log-entry"
+import { spanToLogEntry } from "@cognia/agent-trace/span-to-log-entry"
 
 export type { UseAgentTraceLogsOptions, UseAgentTraceLogsReturn } from "@/types/logging"
 

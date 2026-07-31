@@ -1,0 +1,34 @@
+{
+  "aiBadge": {
+    "label": "AI 生成的节点",
+    "title": "由工作流 AI 助手生成 — 按 Ctrl+Z 撤销。"
+  },
+  "groupContainer": {
+    "dropHint": "把节点拖进来分组",
+    "locked": "已锁定",
+    "untitled": "分组"
+  },
+  "lastRun": {
+    "failed": "{ago} 失败",
+    "handled": "{ago} 失败（已处理）",
+    "skipped": "{ago} 跳过",
+    "succeeded": "{ago} 运行 · 用时 {duration}",
+    "succeededNoDuration": "{ago} 运行"
+  },
+  "loopContainer": {
+    "dropHint": "把节点拖进来组成循环体",
+    "mode": {
+      "forEach": "遍历",
+      "times": "循环次数",
+      "while": "条件循环"
+    }
+  },
+  "outputHandles": {
+    "approved": "已批准",
+    "default": "默认",
+    "false": "假",
+    "rejected": "已拒绝",
+    "true": "真"
+  },
+  "pinnedTitle": "已固定测试数据"
+}

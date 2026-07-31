@@ -36,7 +36,7 @@ afterEach(() => __setGlobalRunGateForTesting(null))
 const trigger: TriggerEvent = {
   workflowId: "wf",
   kind: "trigger.manual",
-  payload: { items: ["a", "b", "c"], n: 2, pairs: ["x", "y"] },
+  payload: { items: ["a", "b", "c"], n: 2, pairs: ["x", "y"], five: ["a", "b", "c", "d", "e"] },
   originAt: 1,
 }
 
@@ -333,7 +333,62 @@ describe("failure / abort / cache", () => {
       // flow.set with empty variable name throws.
       [node("body", "flow.set", { variable: "  ", value: "x" }, "loop1")]
     )
-    await expect(run(workflow, loopNode)).rejects.toThrow(/non-empty/)
+    await expect(run(workflow, loopNode)).rejects.toThrow(/variableName|non-empty/)
+  })
+
+  it("per-node onError=continue inside the body keeps the iteration alive", async () => {
+    registerNodeExecutor({
+      kind: "data.loopfail" as never,
+      typeVersion: 1,
+      execute: async () => {
+        throw new Error("body boom")
+      },
+    })
+    const failing = node("bad", "data.loopfail" as never, {}, "loop1")
+    failing.data.errorHandling = { onError: "continue" }
+    const { workflow, loopNode } = loopWorkflow(
+      {
+        mode: "forEach",
+        source: "{{ $trigger.payload.items }}",
+        output: "{{ $node['after'].value }}",
+      },
+      [
+        failing,
+        node("after", "flow.set", { variable: "v", value: "{{ $node['bad'].error }}" }, "loop1"),
+      ],
+      [{ id: "be1", source: "bad", target: "after" }]
+    )
+    const result = await run(workflow, loopNode)
+    const out = result.output as { items: unknown[]; count: number }
+    // Every iteration completed; downstream saw the error-shaped output.
+    expect(out.count).toBe(3)
+    expect(out.items).toEqual(["body boom", "body boom", "body boom"])
+  })
+
+  it("per-node onError=defaultValue inside the body substitutes the output", async () => {
+    registerNodeExecutor({
+      kind: "data.loopfail2" as never,
+      typeVersion: 1,
+      execute: async () => {
+        throw new Error("nope")
+      },
+    })
+    const failing = node("bad", "data.loopfail2" as never, {}, "loop1")
+    failing.data.errorHandling = { onError: "defaultValue", defaultValue: { value: "fallback" } }
+    const { workflow, loopNode } = loopWorkflow(
+      {
+        mode: "forEach",
+        source: "{{ $trigger.payload.items }}",
+        output: "{{ $node['bad'].value }}",
+      },
+      [failing]
+    )
+    const result = await run(workflow, loopNode)
+    expect((result.output as { items: unknown[] }).items).toEqual([
+      "fallback",
+      "fallback",
+      "fallback",
+    ])
   })
 
   it("rejects a non-array forEach source with a clear error", async () => {
@@ -436,7 +491,7 @@ describe("edge cases", () => {
       },
       [node("body", "flow.set", { variable: "  ", value: "x" }, "loop1")]
     )
-    await expect(run(workflow, loopNode)).rejects.toThrow(/non-empty/)
+    await expect(run(workflow, loopNode)).rejects.toThrow(/variableName|non-empty/)
   })
 
   it("reports null sources distinctly", async () => {
@@ -595,6 +650,339 @@ describe("edge cases", () => {
     )
     const result = await run(workflow, loopNode)
     expect((result.output as { count: number }).count).toBe(2)
+  })
+})
+
+describe("do-while (conditionTiming: post)", () => {
+  it("runs the body at least once when the condition is initially falsy", async () => {
+    const { workflow, loopNode } = loopWorkflow(
+      {
+        mode: "while",
+        whileExpression: "{{ $static.never }}",
+        conditionTiming: "post",
+        maxIterations: 10,
+      },
+      [node("body", "flow.set", { variable: "v", value: "x" }, "loop1")]
+    )
+    const result = await run(workflow, loopNode)
+    // Pre-timing would run 0 iterations (see the existing while test); post
+    // enters the body once before the first check.
+    expect((result.output as { count: number }).count).toBe(1)
+  })
+
+  it("continues while truthy and honors maxIterations as a hard stop", async () => {
+    const { workflow, loopNode } = loopWorkflow(
+      { mode: "while", whileExpression: "always", conditionTiming: "post", maxIterations: 4 },
+      [node("body", "flow.set", { variable: "v", value: "x" }, "loop1")]
+    )
+    const result = await run(workflow, loopNode)
+    expect((result.output as { count: number }).count).toBe(4)
+  })
+
+  it("stops when the body flips the condition flag (visible to the post-check)", async () => {
+    const { workflow, loopNode } = loopWorkflow(
+      { mode: "while", whileExpression: "{{ $static.go }}", conditionTiming: "post" },
+      [node("body", "flow.set", { variable: "go", value: "" }, "loop1")]
+    )
+    workflow.staticData = { go: "yes" }
+    const result = await run(workflow, loopNode)
+    expect((result.output as { count: number }).count).toBe(1)
+  })
+
+  it("flow.break exits a post-timed loop immediately", async () => {
+    const { workflow, loopNode } = loopWorkflow(
+      { mode: "while", whileExpression: "always", conditionTiming: "post", maxIterations: 50 },
+      [node("stop", "flow.break", {}, "loop1")]
+    )
+    const result = await run(workflow, loopNode)
+    expect((result.output as { count: number }).count).toBe(1)
+  })
+
+  it("pre timing stays the default when conditionTiming is omitted", async () => {
+    const { workflow, loopNode } = loopWorkflow(
+      { mode: "while", whileExpression: "{{ $static.never }}", maxIterations: 10 },
+      [node("body", "flow.set", { variable: "v", value: "x" }, "loop1")]
+    )
+    const result = await run(workflow, loopNode)
+    expect((result.output as { count: number }).count).toBe(0)
+  })
+})
+
+describe("forEach batching (batchSize)", () => {
+  it("exposes $loop.batchIndex per sequential batch", async () => {
+    const { workflow, loopNode } = loopWorkflow(
+      {
+        mode: "forEach",
+        source: "{{ $trigger.payload.five }}",
+        batchSize: 2,
+        output: "{{ $loop.batchIndex }}",
+      },
+      [node("body", "flow.set", { variable: "v", value: "{{ $item }}" }, "loop1")]
+    )
+    const result = await run(workflow, loopNode)
+    const out = result.output as { items: unknown[]; count: number }
+    expect(out.items).toEqual([0, 0, 1, 1, 2])
+    expect(out.count).toBe(5)
+  })
+
+  it("exposes $loop.batchCount across the run", async () => {
+    const { workflow, loopNode } = loopWorkflow(
+      {
+        mode: "forEach",
+        source: "{{ $trigger.payload.five }}",
+        batchSize: 2,
+        output: "{{ $loop.batchCount }}",
+      },
+      [node("body", "flow.set", { variable: "v", value: "x" }, "loop1")]
+    )
+    const result = await run(workflow, loopNode)
+    expect((result.output as { items: unknown[] }).items).toEqual([3, 3, 3, 3, 3])
+  })
+
+  it("keeps $loop.index global (not batch-relative)", async () => {
+    const { workflow, loopNode } = loopWorkflow(
+      {
+        mode: "forEach",
+        source: "{{ $trigger.payload.items }}",
+        batchSize: 2,
+        output: "{{ $loop.index }}",
+      },
+      [node("body", "flow.set", { variable: "v", value: "x" }, "loop1")]
+    )
+    const result = await run(workflow, loopNode)
+    expect((result.output as { items: unknown[] }).items).toEqual([0, 1, 2])
+  })
+
+  it("composes with iterationConcurrency (parallel inside a batch, ordered output)", async () => {
+    const { workflow, loopNode } = loopWorkflow(
+      {
+        mode: "forEach",
+        source: "{{ $trigger.payload.five }}",
+        batchSize: 2,
+        iterationConcurrency: 2,
+        output: "{{ $item }}",
+      },
+      [node("body", "flow.set", { variable: "v", value: "{{ $item }}" }, "loop1")]
+    )
+    const result = await run(workflow, loopNode)
+    expect((result.output as { items: unknown[] }).items).toEqual(["a", "b", "c", "d", "e"])
+  })
+
+  it("a break inside an early batch prevents later batches from starting", async () => {
+    const { workflow, loopNode } = loopWorkflow(
+      {
+        mode: "forEach",
+        source: "{{ $trigger.payload.five }}",
+        batchSize: 2,
+        iterationConcurrency: 2,
+      },
+      [node("stop", "flow.break", {}, "loop1")]
+    )
+    const result = await run(workflow, loopNode)
+    // Batch 0 = iterations 0,1 — both may enter before the break lands;
+    // batch 1 (iterations 2,3) and batch 2 must never start.
+    expect((result.output as { count: number }).count).toBeLessThanOrEqual(2)
+  })
+
+  it("resumes mid-batch: completed iterations replay from the cache", async () => {
+    const cache = new IdempotencyCache()
+    cache.set(iterationCacheKey("loop1", 0, "body"), { variable: "v", value: "seeded" })
+    const { workflow, loopNode } = loopWorkflow(
+      {
+        mode: "forEach",
+        source: "{{ $trigger.payload.items }}",
+        batchSize: 2,
+        output: "{{ $node['body'].value }}",
+      },
+      [node("body", "flow.set", { variable: "v", value: "{{ $item }}" }, "loop1")]
+    )
+    const result = await run(workflow, loopNode, { cache })
+    expect((result.output as { items: unknown[] }).items).toEqual(["seeded", "b", "c"])
+  })
+})
+
+describe("loop-level error handling (onItemError)", () => {
+  beforeAll(() => {
+    registerNodeExecutor({
+      kind: "testplugin.victimfail" as never,
+      typeVersion: 1,
+      execute: async (ctx) => {
+        const victim = (ctx.params as { victim?: unknown }).victim
+        if (victim === "b") throw new Error("victim boom")
+        return { output: { ok: victim } }
+      },
+    })
+    registerNodeExecutor({
+      kind: "testplugin.notbfail" as never,
+      typeVersion: 1,
+      execute: async (ctx) => {
+        const victim = (ctx.params as { victim?: unknown }).victim
+        if (victim !== "b") throw new Error(`boom:${String(victim)}`)
+        return { output: { ok: victim } }
+      },
+    })
+  })
+
+  it("skip: omits the failed item, collects errors[], and finishes the loop", async () => {
+    const { workflow, loopNode } = loopWorkflow(
+      {
+        mode: "forEach",
+        source: "{{ $trigger.payload.items }}",
+        onItemError: "skip",
+        output: "{{ $node['bad'].ok }}",
+      },
+      [node("bad", "testplugin.victimfail" as never, { victim: "{{ $item }}" }, "loop1")]
+    )
+    const result = await run(workflow, loopNode)
+    const out = result.output as {
+      items: unknown[]
+      count: number
+      errors?: Array<{ index: number; item?: unknown; error: string }>
+    }
+    expect(out.items).toEqual(["a", "c"])
+    expect(out.count).toBe(3)
+    expect(out.errors).toHaveLength(1)
+    expect(out.errors?.[0]).toMatchObject({ index: 1, item: "b" })
+    expect(out.errors?.[0]?.error).toMatch(/victim boom/)
+  })
+
+  it("break: stops the loop with partial items and the error recorded", async () => {
+    const { workflow, loopNode } = loopWorkflow(
+      {
+        mode: "forEach",
+        source: "{{ $trigger.payload.items }}",
+        onItemError: "break",
+        output: "{{ $node['bad'].ok }}",
+      },
+      [node("bad", "testplugin.victimfail" as never, { victim: "{{ $item }}" }, "loop1")]
+    )
+    const result = await run(workflow, loopNode)
+    const out = result.output as {
+      items: unknown[]
+      count: number
+      errors?: Array<{ index: number }>
+    }
+    expect(out.items).toEqual(["a"])
+    expect(out.count).toBe(2)
+    expect(out.errors).toHaveLength(1)
+    expect(out.errors?.[0]?.index).toBe(1)
+  })
+
+  it("fail (default): the first error still rejects the container", async () => {
+    const { workflow, loopNode } = loopWorkflow(
+      { mode: "forEach", source: "{{ $trigger.payload.items }}" },
+      [node("bad", "testplugin.victimfail" as never, { victim: "{{ $item }}" }, "loop1")]
+    )
+    await expect(run(workflow, loopNode)).rejects.toThrow(/victim boom/)
+  })
+
+  it("child-level onError=continue handles first — container records no error", async () => {
+    // NB: per-node error handling only applies to supported kinds
+    // (supportsErrorHandling) — use a data.* kind, not testplugin.*.
+    registerNodeExecutor({
+      kind: "data.victimfail" as never,
+      typeVersion: 1,
+      execute: async (ctx) => {
+        const victim = (ctx.params as { victim?: unknown }).victim
+        if (victim === "b") throw new Error("victim boom")
+        return { output: { ok: victim } }
+      },
+    })
+    const failing = node("bad", "data.victimfail" as never, { victim: "{{ $item }}" }, "loop1")
+    failing.data.errorHandling = { onError: "continue" }
+    const { workflow, loopNode } = loopWorkflow(
+      {
+        mode: "forEach",
+        source: "{{ $trigger.payload.items }}",
+        onItemError: "skip",
+        output: "{{ $loop.index }}",
+      },
+      [failing]
+    )
+    const result = await run(workflow, loopNode)
+    const out = result.output as { items: unknown[]; count: number; errors?: unknown[] }
+    expect(out.count).toBe(3)
+    expect(out.items).toEqual([0, 1, 2])
+    expect("errors" in out).toBe(false)
+  })
+
+  it("skip under parallel iterations keeps errors[] ordered by index", async () => {
+    const { workflow, loopNode } = loopWorkflow(
+      {
+        mode: "forEach",
+        source: "{{ $trigger.payload.items }}",
+        onItemError: "skip",
+        iterationConcurrency: 3,
+        output: "{{ $node['bad'].ok }}",
+      },
+      [node("bad", "testplugin.notbfail" as never, { victim: "{{ $item }}" }, "loop1")]
+    )
+    const result = await run(workflow, loopNode)
+    const out = result.output as {
+      items: unknown[]
+      errors?: Array<{ index: number; error: string }>
+    }
+    expect(out.items).toEqual(["b"])
+    expect(out.errors?.map((e) => e.index)).toEqual([0, 2])
+    expect(out.errors?.[0]?.error).toMatch(/boom:a/)
+    expect(out.errors?.[1]?.error).toMatch(/boom:c/)
+  })
+
+  it("break under parallel iterations drains without rejecting", async () => {
+    const { workflow, loopNode } = loopWorkflow(
+      {
+        mode: "forEach",
+        source: "{{ $trigger.payload.five }}",
+        onItemError: "break",
+        iterationConcurrency: 2,
+        output: "{{ $node['bad'].ok }}",
+      },
+      [node("bad", "testplugin.notbfail" as never, { victim: "{{ $item }}" }, "loop1")]
+    )
+    const result = await run(workflow, loopNode)
+    const out = result.output as { count: number; errors?: unknown[] }
+    expect(out.count).toBeLessThanOrEqual(2)
+    expect(out.errors?.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it("skip applies to while mode too (iteration error does not end the loop)", async () => {
+    registerNodeExecutor({
+      kind: "testplugin.idxfail" as never,
+      typeVersion: 1,
+      execute: async (ctx) => {
+        const idx = (ctx.params as { idx?: unknown }).idx
+        if (idx === 1) throw new Error("mid boom")
+        return { output: { ok: idx } }
+      },
+    })
+    const { workflow, loopNode } = loopWorkflow(
+      {
+        mode: "while",
+        whileExpression: "always",
+        maxIterations: 3,
+        onItemError: "skip",
+        output: "{{ $node['bad'].ok }}",
+      },
+      [node("bad", "testplugin.idxfail" as never, { idx: "{{ $loop.index }}" }, "loop1")]
+    )
+    const result = await run(workflow, loopNode)
+    const out = result.output as {
+      items: unknown[]
+      count: number
+      errors?: Array<{ index: number }>
+    }
+    expect(out.count).toBe(3)
+    expect(out.items).toEqual([0, 2])
+    expect(out.errors?.map((e) => e.index)).toEqual([1])
+  })
+
+  it("success path output carries NO errors key (backward compatible shape)", async () => {
+    const { workflow, loopNode } = loopWorkflow(
+      { mode: "forEach", source: "{{ $trigger.payload.items }}", onItemError: "skip" },
+      [node("body", "flow.set", { variable: "v", value: "x" }, "loop1")]
+    )
+    const result = await run(workflow, loopNode)
+    expect("errors" in (result.output as Record<string, unknown>)).toBe(false)
   })
 })
 

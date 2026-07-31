@@ -29,9 +29,11 @@ import {
 } from "@/components/ui/dropdown-menu"
 
 import { useAccounts } from "@/lib/subscription/core/hooks"
+import { accountExpiryState } from "@/lib/subscription/core/account-expiry"
+import { useSubscriptionNow } from "@/lib/subscription/core/now-ticker"
 import type { AccountSummary, ProviderId } from "@/types/subscription"
 
-import { AccountUsageChips } from "./account-usage-chips"
+import { AccountUsageChips, useAccountUsageIndex } from "./account-usage-chips"
 import { AccountPresetSelector, providerSupportsPresets } from "./account-preset-selector"
 
 interface AccountListProps {
@@ -47,6 +49,10 @@ interface AccountListProps {
 export function AccountList({ provider, onAdd, secondaryAction }: AccountListProps) {
   const t = useTranslations("subscription.common.accountList")
   const { accounts, activeAccountId, loading, setActive, rename, remove } = useAccounts(provider)
+  // Queried once for the whole list — see `useAccountUsageIndex`.
+  const usageIndex = useAccountUsageIndex()
+  // Shared ticker, so the expiry read-out doesn't go stale while the pane is open.
+  const now = useSubscriptionNow()
 
   const [renameTarget, setRenameTarget] = useState<AccountSummary | null>(null)
   const [removeTarget, setRemoveTarget] = useState<AccountSummary | null>(null)
@@ -99,7 +105,8 @@ export function AccountList({ provider, onAdd, secondaryAction }: AccountListPro
                   <div className="truncate text-[11px] text-muted-foreground">
                     {[account.email, account.plan].filter(Boolean).join(" · ")}
                   </div>
-                  <AccountUsageChips accountId={account.id} />
+                  <AccountExpiryLine expiresAtMs={account.expiresAtMs} nowMs={now} />
+                  <AccountUsageChips accountId={account.id} usage={usageIndex.get(account.id)} />
                   {providerSupportsPresets(provider) && (
                     <AccountPresetSelector provider={provider} accountId={account.id} />
                   )}
@@ -124,7 +131,7 @@ export function AccountList({ provider, onAdd, secondaryAction }: AccountListPro
                       onSelect={() => setRemoveTarget(account)}
                       className="text-destructive focus:text-destructive"
                     >
-                      {t("remove")}
+                      {account.variant === "opencode-discovered" ? t("unlink") : t("remove")}
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
@@ -155,6 +162,34 @@ export function AccountList({ provider, onAdd, secondaryAction }: AccountListPro
         />
       )}
     </Card>
+  )
+}
+
+/**
+ * Per-row credential expiry. Previously invisible everywhere in the list — only
+ * the *active* account's expiry showed, one panel over in the Account tab — so
+ * a user with several saved accounts had no read-out at all.
+ *
+ * Says "refreshes on next use" rather than "expired": `expiresAtMs` is the
+ * access token's expiry and an elapsed one is routine (see `account-expiry.ts`).
+ * Refresh failures aren't persisted in the vault, so there is nothing here that
+ * could honestly claim an account is broken.
+ */
+function AccountExpiryLine({ expiresAtMs, nowMs }: { expiresAtMs: number; nowMs: number }) {
+  const t = useTranslations("subscription.common.accountList")
+  const state = accountExpiryState(expiresAtMs, nowMs)
+  if (state === "notApplicable") return null
+
+  return (
+    <div
+      className={`truncate text-[11px] ${state === "stale" ? "text-amber-600 dark:text-amber-500" : "text-muted-foreground"}`}
+      data-testid="account-expiry"
+      data-state={state}
+    >
+      {state === "stale"
+        ? t("expiryStale")
+        : t("expiryValid", { at: new Date(expiresAtMs).toLocaleString() })}
+    </div>
   )
 }
 
@@ -223,16 +258,21 @@ function RemoveDialog({
 }) {
   const t = useTranslations("subscription.common.accountList")
   const [busy, setBusy] = useState(false)
+  // A "discovered" OpenCode row is only a pointer to an external auth.json —
+  // removing it unlinks the pointer and never touches that file. Say so.
+  const isDiscovered = account.variant === "opencode-discovered"
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{t("removeDialogTitle")}</DialogTitle>
+          <DialogTitle>{t(isDiscovered ? "unlinkDialogTitle" : "removeDialogTitle")}</DialogTitle>
           <DialogDescription>
             {account.label || account.email || account.id.slice(0, 8)}
           </DialogDescription>
         </DialogHeader>
-        <p className="text-sm text-muted-foreground">{t("removeDialogBody")}</p>
+        <p className="text-sm text-muted-foreground">
+          {t(isDiscovered ? "unlinkDialogBody" : "removeDialogBody")}
+        </p>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={busy}>
             {t("cancel")}
@@ -250,7 +290,7 @@ function RemoveDialog({
             disabled={busy}
           >
             {busy && <Loader2Icon className="mr-2 size-4 animate-spin" />}
-            {t("removeConfirm")}
+            {t(isDiscovered ? "unlinkConfirm" : "removeConfirm")}
           </Button>
         </DialogFooter>
       </DialogContent>

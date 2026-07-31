@@ -1,37 +1,28 @@
 "use client"
 
 /**
- * cognia-next adapter for the Cognia provider hook.
+ * Component-facing provider settings adapter.
  *
- * Cognia's `useProviderSettings` is 838 lines and pulls in the MCP
- * store, coding-package gating, batch verification, and routing
- * presets. cognia-next deferred the reliability/routing infrastructure
- * per the provider port plan, so we expose a slimmer hook that:
- *   - reads the rich `UserProviderSettings` map from `useSettingsStore`
- *   - exposes connection-test state in memory (not persisted)
- *   - exposes selected-provider id as a piece of UI state
- *   - delegates create / update / delete to the existing store actions
- *
- * Component imports that point at this path resolve to this hook.
- * Components that need fields the hook doesn't expose either:
- *   1. Get a sensible default (e.g., empty array, no-op callback), or
- *   2. Are skipped from the new `provider-settings.tsx` root.
+ * Provider configuration, persisted UI preferences, connection-test state,
+ * and store mutations stay behind this single surface so consumers do not
+ * maintain competing copies of provider state.
  */
 
 import { useCallback, useMemo, useState } from "react"
 import { useSettingsStore } from "@/stores/settings"
-import { PROVIDERS } from "@/types/provider/provider"
+import { PROVIDERS } from "@cognia/provider-types/provider"
 import type {
   CustomModelMetadata,
   CustomProviderSettings,
   ProviderUIPreferences,
   UserProviderSettings,
-} from "@/types/provider/provider"
+} from "@cognia/provider-types/provider"
 import {
   testCustomProviderConnectionByProtocol,
   testProviderConnection,
   type ApiTestResult,
-} from "@/lib/ai/providers/api-test"
+} from "@cognia/provider-core/providers/api-test"
+import { testAndDiscoverBedrock } from "@/lib/ai/providers/bedrock-connection"
 
 export interface UseProviderSettingsResult {
   // ---------------------------------------------------------------------------
@@ -51,7 +42,7 @@ export interface UseProviderSettingsResult {
   // ---------------------------------------------------------------------------
   // Mutations (delegate to the settings store)
   // ---------------------------------------------------------------------------
-  setSelectedProviderId: (id: string | null) => void
+  setSelectedProviderId: (id: string | null) => Promise<void>
   updateProviderSettings: (id: string, patch: Partial<UserProviderSettings>) => Promise<void>
   updateCustomProvider: (id: string, patch: Partial<CustomProviderSettings>) => Promise<void>
   removeCustomProvider: (id: string) => Promise<void>
@@ -76,6 +67,7 @@ export function useProviderSettings(): UseProviderSettingsResult {
   const setStoreDefaultProvider = useSettingsStore((s) => s.setDefaultProvider)
   const upsertCustomProviderStore = useSettingsStore((s) => s.upsertCustomProvider)
   const removeCustomProviderStore = useSettingsStore((s) => s.removeCustomProvider)
+  const setProviderUIPreferences = useSettingsStore((s) => s.setProviderUIPreferences)
 
   const providerSettings = useMemo(
     () => settings?.providerSettings ?? {},
@@ -96,7 +88,7 @@ export function useProviderSettings(): UseProviderSettingsResult {
     return out
   }, [customProvidersList])
 
-  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null)
+  const selectedProviderId = uiPreferences.selectedProviderId ?? null
   const [testResults, setTestResults] = useState<Record<string, ApiTestResult | null>>({})
   const [customTestResults, setCustomTestResults] = useState<
     Record<string, "success" | "error" | "limited" | null>
@@ -129,6 +121,13 @@ export function useProviderSettings(): UseProviderSettingsResult {
     [setProviderConfig]
   )
 
+  const setSelectedProviderId = useCallback(
+    async (id: string | null) => {
+      await setProviderUIPreferences({ selectedProviderId: id ?? undefined })
+    },
+    [setProviderUIPreferences]
+  )
+
   const updateCustomProvider = useCallback(
     async (id: string, patch: Partial<CustomProviderSettings>) => {
       const cur = customProviders[id]
@@ -153,7 +152,9 @@ export function useProviderSettings(): UseProviderSettingsResult {
   )
 
   // ---------------------------------------------------------------------------
-  // Connection tests — delegate to the api-test helpers.
+  // Connection tests — delegate to the api-test helpers and persist the
+  // verification lifecycle to `UserProviderSettings` so the sidebar status
+  // survives reloads and isn't stuck on a vague "warning" badge every time.
   // ---------------------------------------------------------------------------
   const testProvider = useCallback(
     async (id: string) => {
@@ -161,22 +162,57 @@ export function useProviderSettings(): UseProviderSettingsResult {
       if (!cfg) return null
       setTestingProviders((s) => ({ ...s, [id]: true }))
       try {
-        const result = await testProviderConnection(id, cfg.apiKey ?? "", cfg.baseURL)
+        let result: ApiTestResult
+        if (id === "bedrock") {
+          const bedrockResult = await testAndDiscoverBedrock(cfg)
+          if (bedrockResult.models) {
+            await setProviderConfig(id, {
+              discoveredModels: bedrockResult.models,
+              discoveredModelsLastFetched: Date.now(),
+            })
+          }
+          result = bedrockResult.test
+        } else {
+          result = await testProviderConnection(id, cfg.apiKey ?? "", cfg.baseURL)
+        }
+
+        const verificationPatch: Partial<UserProviderSettings> = result.success
+          ? {
+              verificationStatus: "verified",
+              lastVerifiedAt: Date.now(),
+              verificationMessage: result.message,
+              healthStatus: "healthy",
+            }
+          : {
+              verificationStatus: "unverified",
+              lastVerifiedAt: Date.now(),
+              verificationMessage: result.message,
+              healthStatus: "error",
+            }
+        await setProviderConfig(id, verificationPatch)
+
         setTestResults((s) => ({ ...s, [id]: result }))
         return result
       } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
         const result: ApiTestResult = {
           success: false,
-          message: err instanceof Error ? err.message : String(err),
+          message,
           outcome: "failed",
         }
+        await setProviderConfig(id, {
+          verificationStatus: "unverified",
+          lastVerifiedAt: Date.now(),
+          verificationMessage: message,
+          healthStatus: "error",
+        })
         setTestResults((s) => ({ ...s, [id]: result }))
         return result
       } finally {
         setTestingProviders((s) => ({ ...s, [id]: false }))
       }
     },
-    [providerSettings]
+    [providerSettings, setProviderConfig]
   )
 
   const testCustomProvider = useCallback(
@@ -191,11 +227,31 @@ export function useProviderSettings(): UseProviderSettingsResult {
           cp.apiProtocol ?? "openai"
         )
         const outcome = result.success ? "success" : "error"
+        const verificationPatch: Partial<CustomProviderSettings> = result.success
+          ? {
+              verificationStatus: "verified",
+              lastVerifiedAt: Date.now(),
+              verificationMessage: result.message,
+              healthStatus: "healthy",
+            }
+          : {
+              verificationStatus: "unverified",
+              lastVerifiedAt: Date.now(),
+              verificationMessage: result.message,
+              healthStatus: "error",
+            }
+        await updateCustomProvider(id, verificationPatch)
         setCustomTestResults((s) => ({ ...s, [id]: outcome }))
         setCustomTestMessages((s) => ({ ...s, [id]: result.message ?? null }))
         return result
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
+        await updateCustomProvider(id, {
+          verificationStatus: "unverified",
+          lastVerifiedAt: Date.now(),
+          verificationMessage: message,
+          healthStatus: "error",
+        })
         setCustomTestResults((s) => ({ ...s, [id]: "error" }))
         setCustomTestMessages((s) => ({ ...s, [id]: message }))
         return { success: false, message, outcome: "failed" } as ApiTestResult
@@ -203,7 +259,7 @@ export function useProviderSettings(): UseProviderSettingsResult {
         setTestingCustomProviders((s) => ({ ...s, [id]: false }))
       }
     },
-    [customProviders]
+    [customProviders, updateCustomProvider]
   )
 
   return {

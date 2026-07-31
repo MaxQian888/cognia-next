@@ -48,14 +48,7 @@ export interface ConflictDetectionResult {
 export interface ConflictResolution {
   conflict: PluginConflict
   action:
-    | "skip"
-    | "upgrade"
-    | "downgrade"
-    | "rename"
-    | "disable"
-    | "rebind"
-    | "prefix"
-    | "prioritize"
+    "skip" | "upgrade" | "downgrade" | "rename" | "disable" | "rebind" | "prefix" | "prioritize"
   targetPlugin?: string
   details: string
 }

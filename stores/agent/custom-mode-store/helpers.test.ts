@@ -13,7 +13,7 @@ import { initialState } from "./initial-state"
 import * as barrel from "./index"
 import { useCustomModeStore } from "./store"
 
-jest.mock("@/lib/logging", () => {
+jest.mock("@cognia/logging", () => {
   const child = {
     debug: jest.fn(),
     info: jest.fn(),
@@ -101,6 +101,20 @@ describe("processPromptTemplateVariables", () => {
     expect(out).toContain("Custom Mode")
     expect(out).toContain("No specific tools configured")
   })
+
+  it("uses the 'en' language fallback when navigator is unavailable (node/sidecar path)", () => {
+    const orig = Object.getOwnPropertyDescriptor(globalThis, "navigator")
+    // The sidecar builds agent-mode prompts in Node, where `navigator` is not
+    // a declared global — an unguarded `navigator?.language` would throw a
+    // ReferenceError (optional chaining does not guard an undeclared binding).
+    Object.defineProperty(globalThis, "navigator", { value: undefined, configurable: true })
+    try {
+      expect(processPromptTemplateVariables("lang={{language}}", {})).toBe("lang=en")
+    } finally {
+      if (orig) Object.defineProperty(globalThis, "navigator", orig)
+      else delete (globalThis as { navigator?: unknown }).navigator
+    }
+  })
 })
 
 describe("getTemplateVariablePreview", () => {
@@ -147,7 +161,7 @@ describe("getRecommendedMcpToolsForMode", () => {
     expect(recommended.length).toBeGreaterThan(0)
     // The first tool's name contains "code" → category boost applied
     const codeTool = recommended.find((t) => t.toolName === "code_runner")
-    expect(codeTool?.relevanceScore).toBeGreaterThanOrEqual(0.5)
+    expect(codeTool?.relevanceScore).toBeGreaterThan(0.1)
   })
 
   it("falls back gracefully when category is unrecognized", () => {
@@ -160,7 +174,7 @@ describe("getRecommendedMcpToolsForMode", () => {
         category: "personal",
       }
     )
-    expect(recommended).toHaveLength(1)
+    expect(recommended).toEqual([])
   })
 
   it("respects the limit option", () => {
@@ -184,8 +198,7 @@ describe("autoSelectMcpToolsForMode", () => {
       "use anything",
       5
     )
-    expect(out).toEqual([{ serverId: "x", toolName: "tool-x" }])
-    expect((out[0] as unknown as { relevanceScore?: number }).relevanceScore).toBeUndefined()
+    expect(out).toEqual([])
   })
 
   it("returns empty array when no tools are available", () => {

@@ -102,13 +102,22 @@ export class PluginA2UIBridge {
   registerComponent(pluginId: string, component: PluginA2UIComponent): void {
     const { type, metadata } = component
 
-    // Check for conflicts
-    if (this.registeredComponents.has(type)) {
-      const existingPluginId = this.registeredComponents.get(type)
+    // First-wins-cross-plugin (W4.1): the render catalog, the plugin
+    // registry, and the conflict panel must agree on ONE owner. Previously
+    // the catalog was overwritten last-wins while the registry stayed
+    // first-wins — the surface rendered B, the registry said A owned it, and
+    // disabling B deleted A's row. A same-plugin re-register (hot reload)
+    // stays allowed.
+    const existingPluginId = this.registeredComponents.get(type)
+    if (existingPluginId && existingPluginId !== pluginId) {
       loggers.manager.warn(
-        `Component type "${type}" already registered by plugin "${existingPluginId}". ` +
-          `Overwriting with plugin "${pluginId}".`
+        `Component type "${type}" already provided by plugin "${existingPluginId}" — ` +
+          `rejecting duplicate registration from "${pluginId}" (first-wins).`
       )
+      // Route the rejection through the registry so the conflict is recorded
+      // on the same `plugin.conflict.rejected` channel the panel reads.
+      this.config.registry.registerComponent(pluginId, component)
+      return
     }
 
     // Create wrapper component that provides plugin context
@@ -128,9 +137,14 @@ export class PluginA2UIBridge {
   /**
    * Unregister a plugin component
    */
-  unregisterComponent(componentType: string): void {
+  unregisterComponent(componentType: string, requestingPluginId?: string): void {
     const ownerPluginId = this.registeredComponents.get(componentType)
     if (!ownerPluginId) {
+      return
+    }
+    // Ownership guard (W4.1): a rejected duplicate registrant disabling
+    // itself must not tear down the winner's catalog entry.
+    if (requestingPluginId && requestingPluginId !== ownerPluginId) {
       return
     }
 
@@ -144,9 +158,9 @@ export class PluginA2UIBridge {
    * Unregister all components from a plugin
    */
   unregisterPluginComponents(pluginId: string): void {
-    for (const [type, ownerPluginId] of this.registeredComponents.entries()) {
+    for (const [type, ownerPluginId] of Array.from(this.registeredComponents.entries())) {
       if (ownerPluginId === pluginId) {
-        this.unregisterComponent(type)
+        this.unregisterComponent(type, pluginId)
       }
     }
   }

@@ -11,14 +11,23 @@ import { useChatStore } from "@/stores/chat"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
-export function ReferenceChips() {
+export interface ReferenceChipsProps {
+  /**
+   * When true, render only the chips (no padded container) so a parent bar can
+   * lay references and attachments out in a single flex flow. Defaults to the
+   * standalone, self-contained row.
+   */
+  bare?: boolean
+}
+
+export function ReferenceChips({ bare = false }: ReferenceChipsProps = {}) {
   const t = useTranslations("chat.composer.references")
   const refs = useChatStore((s) => s.referencedPaths)
   const remove = useChatStore((s) => s.removeReferencedPath)
 
   if (refs.length === 0) return null
-  return (
-    <div className="flex flex-wrap gap-1.5 px-2 pt-2">
+  const chips = (
+    <>
       {refs.map((r) => (
         <div
           key={r.absolute}
@@ -47,6 +56,8 @@ export function ReferenceChips() {
           </Button>
         </div>
       ))}
-    </div>
+    </>
   )
+  if (bare) return chips
+  return <div className="flex flex-wrap gap-1.5 px-2 pt-2">{chips}</div>
 }

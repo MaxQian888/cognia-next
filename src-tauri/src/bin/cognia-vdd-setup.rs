@@ -12,16 +12,23 @@
 // (.inf/.sys/.cat) lives next to the executable under `vdd/` — vendored at
 // packaging time (see `resources/vdd/README.md`).
 
+// The marker/driver-INF helpers and their imports feed only the
+// `#[cfg(target_os = "windows")]` install/uninstall paths; the non-Windows
+// stubs return an error without touching them, so gate the symbols to Windows.
+#[cfg(target_os = "windows")]
 use std::path::PathBuf;
+#[cfg(target_os = "windows")]
 use std::process::Command;
 
 /// Success marker — kept in sync with
 /// `automation::virtual_display::marker_path()` in the library.
+#[cfg(target_os = "windows")]
 fn marker() -> Option<PathBuf> {
     dirs::data_dir().map(|d| d.join("cognia").join("display").join("vdd-setup.ok"))
 }
 
 /// Path of the bundled driver INF, resolved relative to this executable.
+#[cfg(target_os = "windows")]
 fn driver_inf() -> PathBuf {
     std::env::current_exe()
         .ok()
@@ -30,7 +37,9 @@ fn driver_inf() -> PathBuf {
 }
 
 fn main() {
-    let mode = std::env::args().nth(1).unwrap_or_else(|| "--install".into());
+    let mode = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "--install".into());
     let result = match mode.as_str() {
         "--uninstall" => uninstall(),
         _ => install(),

@@ -26,18 +26,22 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import { cn } from "@/lib/utils"
-import type { WorkflowRow as WorkflowRowType } from "@/types/workflow/visual"
+import type { RunStatus, WorkflowRow as WorkflowRowType } from "@/types/workflow/visual"
 import { useWorkflowLibraryStore } from "@/stores/workflow"
 import { WorkflowActionItems } from "./workflow-action-items"
 import { WorkflowRenameDialog } from "./workflow-rename-dialog"
 import { WorkflowEditTagsDialog } from "./workflow-edit-tags-dialog"
+import { WorkflowRunDialog } from "./workflow-run-dialog"
 import { usePinnedWorkflows } from "./use-pinned-workflows"
+import { RunStatusPill } from "@/components/workflow/runs/run-status-pill"
 
 export interface WorkflowRowProps {
   workflow: WorkflowRowType
+  runCount?: number
+  lastStatus?: RunStatus
 }
 
-function WorkflowRowImpl({ workflow }: WorkflowRowProps) {
+function WorkflowRowImpl({ workflow, runCount, lastStatus }: WorkflowRowProps) {
   const t = useTranslations("workflows.card")
   const router = useRouter()
   const selectionMode = useWorkflowLibraryStore((s) => s.selectionMode)
@@ -48,10 +52,11 @@ function WorkflowRowImpl({ workflow }: WorkflowRowProps) {
   const pinned = isPinned(workflow.id)
   const [renameOpen, setRenameOpen] = useState(false)
   const [tagsOpen, setTagsOpen] = useState(false)
+  const [runOpen, setRunOpen] = useState(false)
 
   const activate = () => {
     if (selectionMode) toggleSelection(workflow.id)
-    else router.push(`/workflows/${workflow.id}`)
+    else router.push(`/workflows/editor?id=${encodeURIComponent(workflow.id)}`)
   }
 
   return (
@@ -62,8 +67,9 @@ function WorkflowRowImpl({ workflow }: WorkflowRowProps) {
             data-testid={`workflow-row-${workflow.id}`}
             data-workflow-id={workflow.id}
             data-selected={selected}
+            onClick={activate}
             className={cn(
-              "group flex flex-row items-center gap-3 p-3 shadow-none transition hover:border-primary/50",
+              "group flex cursor-pointer flex-row items-center gap-3 p-3 shadow-none transition hover:border-primary/50",
               selected && "border-primary ring-1 ring-primary"
             )}
           >
@@ -76,7 +82,12 @@ function WorkflowRowImpl({ workflow }: WorkflowRowProps) {
             />
             <button
               type="button"
-              onClick={activate}
+              onClick={(e) => {
+                // The whole row already activates; stop the bubble so the
+                // keyboard-focusable title button doesn't fire activate twice.
+                e.stopPropagation()
+                activate()
+              }}
               className="flex min-w-0 flex-1 items-center gap-3 text-left"
               data-testid={`workflow-open-${workflow.id}`}
             >
@@ -102,6 +113,22 @@ function WorkflowRowImpl({ workflow }: WorkflowRowProps) {
                 {t("builtin")}
               </Badge>
             ) : null}
+            {runCount && runCount > 0 ? (
+              <Badge
+                variant="outline"
+                className="hidden font-normal sm:inline-flex"
+                data-testid={`workflow-runcount-${workflow.id}`}
+              >
+                {t("runCountBadge", { count: runCount })}
+              </Badge>
+            ) : null}
+            {lastStatus ? (
+              <RunStatusPill
+                status={lastStatus}
+                showIcon={false}
+                className="hidden px-1.5 py-0 text-[10px] sm:inline-flex"
+              />
+            ) : null}
             <span className="hidden shrink-0 text-xs text-muted-foreground md:inline">
               {t("updated", { ago: new Date(workflow.updatedAt).toLocaleDateString() })}
             </span>
@@ -110,6 +137,7 @@ function WorkflowRowImpl({ workflow }: WorkflowRowProps) {
                 <Button
                   variant="ghost"
                   size="icon"
+                  onClick={(e) => e.stopPropagation()}
                   className="size-8 shrink-0"
                   aria-label={t("moreActions")}
                   data-testid={`workflow-row-menu-${workflow.id}`}
@@ -122,6 +150,7 @@ function WorkflowRowImpl({ workflow }: WorkflowRowProps) {
                   workflow={workflow}
                   Item={DropdownMenuItem}
                   Separator={DropdownMenuSeparator}
+                  onRun={() => setRunOpen(true)}
                   onRename={() => setRenameOpen(true)}
                   onEditTags={() => setTagsOpen(true)}
                   onDelete={() => openDeleteDialog([workflow.id])}
@@ -135,6 +164,7 @@ function WorkflowRowImpl({ workflow }: WorkflowRowProps) {
             workflow={workflow}
             Item={ContextMenuItem}
             Separator={ContextMenuSeparator}
+            onRun={() => setRunOpen(true)}
             onRename={() => setRenameOpen(true)}
             onEditTags={() => setTagsOpen(true)}
             onDelete={() => openDeleteDialog([workflow.id])}
@@ -143,6 +173,7 @@ function WorkflowRowImpl({ workflow }: WorkflowRowProps) {
       </ContextMenu>
       <WorkflowRenameDialog workflow={workflow} open={renameOpen} onOpenChange={setRenameOpen} />
       <WorkflowEditTagsDialog workflow={workflow} open={tagsOpen} onOpenChange={setTagsOpen} />
+      <WorkflowRunDialog workflow={workflow} open={runOpen} onOpenChange={setRunOpen} />
     </>
   )
 }

@@ -19,7 +19,15 @@
  *   - canvas:///{sessionId}/{documentId}.{ext}
  *   - skill:///{skillId}/{file or documentId}.{ext}
  *   - artifact:///{documentId}.{ext}
+ *   - file → the document's real `file://{absolutePath}` URI (project editor)
  *   - any other surface → {surface}:///{documentId}.{ext}
+ *
+ * The `file` surface is special: its models are backed by real on-disk files
+ * (project editor rooted at a team `workingDir`/worktree), so it addresses
+ * them with genuine `file://` URIs. This lets the LSP `workspaceFolder` point
+ * at the actual project root and makes cross-file navigation / project-wide
+ * diagnostics resolve against real paths — unlike the synthetic per-document
+ * schemes used by canvas/skill/artifact.
  */
 
 import { bindMonacoEditorContext } from "./monaco-context-binding"
@@ -34,6 +42,8 @@ import {
   type MonacoTextModel as BridgeMonacoTextModel,
 } from "@/lib/plugin/vscode-shim/monaco-bridge"
 import { getFileExtension } from "@/lib/canvas/utils"
+import { pathToFileUri } from "@/lib/files/path-uri"
+import { registerAllSnippets, registerEmmetSupport } from "@/lib/monaco/snippets"
 
 // ────────────────────────────────────────────────────────────────────────
 // Minimal real-monaco interface shapes (decoupled from monaco-editor pkg).
@@ -99,7 +109,7 @@ export interface MonacoNamespace {
 // Workbench API
 // ────────────────────────────────────────────────────────────────────────
 
-export type WorkbenchSurface = "canvas" | "skill" | "artifact" | (string & {})
+export type WorkbenchSurface = "canvas" | "skill" | "artifact" | "file" | (string & {})
 
 export interface MonacoWorkbenchSpec {
   /** Surface identifier — keys the URI scheme. */
@@ -112,6 +122,18 @@ export interface MonacoWorkbenchSpec {
   skillId?: string
   /** Optional path segments for skill / artifact / future surfaces. */
   pathSegments?: string[]
+  /**
+   * Absolute on-disk path of the document. REQUIRED for the `file` surface —
+   * it becomes the `file://` model URI so the LSP resolves it against the real
+   * project. Ignored by the synthetic surfaces.
+   */
+  absolutePath?: string
+  /**
+   * Absolute path of the project root this document belongs to (`file`
+   * surface only). Threaded to the LSP workspace manager so the
+   * `workspaceFolder` points at the real project directory.
+   */
+  projectRoot?: string
   /** Monaco language id (e.g. "typescript", "python"). */
   language: string
   /** Content used only when no existing model is found at the URI. */
@@ -146,6 +168,14 @@ export function buildWorkbenchUri(spec: MonacoWorkbenchSpec): string {
     }
     case "artifact": {
       return `artifact:///${spec.documentId}.${ext}`
+    }
+    case "file": {
+      if (!spec.absolutePath) {
+        throw new Error(
+          "monaco-workbench: the `file` surface requires spec.absolutePath (the document's real on-disk path)"
+        )
+      }
+      return pathToFileUri(spec.absolutePath)
     }
     default: {
       return `${spec.surface}:///${spec.documentId}.${ext}`
@@ -209,10 +239,12 @@ function adaptEditorForBridge(editor: IMonacoEditor): BridgeMonacoEditor {
  *      at the URI yet, or reusing the cached one if it does.
  *   2. Binds the editor to the snippets/outline registry via
  *      `bindMonacoEditorContext` (preserves existing behavior).
- *   3. Notifies the vscode-shim bridge so LSP providers can address
+ *   3. Registers global snippet and Emmet completion providers for the
+ *      Monaco namespace (idempotent per Monaco instance).
+ *   4. Notifies the vscode-shim bridge so LSP providers can address
  *      this editor as `vscode.window.activeTextEditor` and bind
  *      providers to its URI.
- *   4. Wires focus / blur / content / selection listeners and forwards
+ *   5. Wires focus / blur / content / selection listeners and forwards
  *      them to the bridge.
  *
  * The returned `dispose()` tears down 2 + 3 + 4. It deliberately does
@@ -239,12 +271,28 @@ export function mountMonacoWorkbench(
     editor.setModel(model)
   }
 
-  // Step 2 — existing light registry binding (snippets / outline).
+  // Completion registration belongs at the shared workbench seam so Skills,
+  // Artifacts, Canvas, and project files behave identically even when a less
+  // common surface is the first Monaco editor mounted in the app.
+  registerAllSnippets(monaco)
+  registerEmmetSupport(monaco)
+
+  // Step 2 — light registry binding. Threads the surface discriminator + live
+  // editor + selection/cursor so the plugin Canvas API (`canvas-api.ts`) can
+  // read the real editor instead of only the store snapshot.
+  const readCursor = () => {
+    const p = editor.getPosition()
+    return p ? { line: p.lineNumber, column: p.column } : undefined
+  }
   const lightBinding: MonacoContextBinding = bindMonacoEditorContext({
     editorId: editor.getId(),
+    contextId: spec.surface,
+    editor,
     documentId: spec.documentId,
     language: spec.language,
     getValue: () => editor.getModel()?.getValue() ?? "",
+    selection: editor.getSelection(),
+    cursor: readCursor(),
   })
 
   // Step 3 — vscode-shim bridge notification.
@@ -263,6 +311,7 @@ export function mountMonacoWorkbench(
   })
   const selectionDisposable = editor.onDidChangeCursorSelection(() => {
     notifySelectionChanged(editor.getId())
+    lightBinding.update({ selection: editor.getSelection(), cursor: readCursor() })
   })
 
   let disposed = false

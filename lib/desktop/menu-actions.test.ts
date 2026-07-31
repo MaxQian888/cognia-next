@@ -34,9 +34,14 @@ jest.mock("@tauri-apps/api/window", () => ({
   }),
 }))
 
-const chatClear = jest.fn()
-jest.mock("@/stores/chat/chat-store", () => ({
-  useChatStore: { getState: () => ({ clear: chatClear }) },
+const startNewSessionMock = jest.fn().mockResolvedValue({ id: "s-new" })
+jest.mock("@/lib/chat/start-session", () => ({
+  startNewSession: (...args: unknown[]) => startNewSessionMock(...args),
+}))
+
+const isMainAppWindowMock = jest.fn(() => true)
+jest.mock("@/lib/pet/window-role", () => ({
+  isMainAppWindow: () => isMainAppWindowMock(),
 }))
 
 const setSelectedGuild = jest.fn()
@@ -61,6 +66,11 @@ jest.mock("@/stores/settings", () => ({
   useSettingsStore: { getState: () => ({ save: settingsSave }) },
 }))
 
+const openFolderAsWorkspace = jest.fn().mockResolvedValue(null)
+jest.mock("@/lib/workspace/open-folder", () => ({
+  openFolderAsWorkspace: (...args: unknown[]) => openFolderAsWorkspace(...args),
+}))
+
 const killSwitch = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/automation/client", () => ({
   desktop: { killSwitch: () => killSwitch() },
@@ -79,7 +89,7 @@ jest.mock("@/lib/db/sessions", () => ({
 const logInfo = jest.fn()
 const logWarn = jest.fn()
 const logError = jest.fn()
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: {
     ui: {
       info: (...a: unknown[]) => logInfo(...a),
@@ -132,13 +142,15 @@ beforeEach(() => {
   winClose.mockClear().mockResolvedValue(undefined)
   winIsFullscreen.mockClear().mockResolvedValue(false)
   winSetFullscreen.mockClear().mockResolvedValue(undefined)
-  chatClear.mockClear()
+  startNewSessionMock.mockClear()
+  isMainAppWindowMock.mockClear().mockReturnValue(true)
   setSelectedGuild.mockClear()
   toggleSidebar.mockClear()
   toggleGuildRail.mockClear()
   toggleStatusBar.mockClear()
   requestCreate.mockClear()
   settingsSave.mockClear().mockResolvedValue(undefined)
+  openFolderAsWorkspace.mockReset().mockResolvedValue(null)
   killSwitch.mockClear().mockResolvedValue(undefined)
   openVsxClear.mockClear().mockResolvedValue(undefined)
   listSessionsMock.mockReset().mockResolvedValue([])
@@ -161,10 +173,20 @@ test("GO_ROUTES covers every non-DM/Canvas go-* id", () => {
   }
 })
 
-test("newChatAction clears chat and resets guild", () => {
+// Rust broadcasts menu:// / tray:// to every window, and the pet overlay /
+// popup / island load the same root layout. Creating a session is not
+// idempotent, so a secondary window acting on it would double-create.
+test("newChatAction is a no-op outside the main window", () => {
+  isMainAppWindowMock.mockReturnValue(false)
   newChatAction()
-  expect(chatClear).toHaveBeenCalled()
+  expect(startNewSessionMock).not.toHaveBeenCalled()
+  expect(setSelectedGuild).not.toHaveBeenCalled()
+})
+
+test("newChatAction starts a conversation and resets guild", () => {
+  newChatAction()
   expect(setSelectedGuild).toHaveBeenCalledWith({ kind: "dm" })
+  expect(startNewSessionMock).toHaveBeenCalled()
 })
 
 test("newWorkflowAction requests workflow creation and routes to /workflows", () => {
@@ -185,14 +207,15 @@ test("newCharacterAction requests character creation and routes to characters ta
   expect(router.push).toHaveBeenCalledWith("/settings?section=characters")
 })
 
-test("openWorkspaceAction persists the picked directory", async () => {
-  openDialog.mockResolvedValueOnce("/picked")
+test("openWorkspaceAction creates/activates a workspace via the unified flow", async () => {
+  openFolderAsWorkspace.mockResolvedValueOnce({ id: "p1" })
   await openWorkspaceAction()
-  expect(settingsSave).toHaveBeenCalledWith({ defaultWorkingDir: "/picked" })
+  expect(openFolderAsWorkspace).toHaveBeenCalledTimes(1)
+  expect(settingsSave).not.toHaveBeenCalled()
 })
 
-test("openWorkspaceAction logs a warning when the dialog throws", async () => {
-  openDialog.mockRejectedValueOnce(new Error("nope"))
+test("openWorkspaceAction logs a warning when the flow throws", async () => {
+  openFolderAsWorkspace.mockRejectedValueOnce(new Error("nope"))
   await openWorkspaceAction()
   expect(logWarn).toHaveBeenCalledWith(
     "menu action open-workspace failed",
@@ -201,7 +224,7 @@ test("openWorkspaceAction logs a warning when the dialog throws", async () => {
 })
 
 test("openWorkspaceAction tolerates non-Error rejection", async () => {
-  openDialog.mockRejectedValueOnce("plain")
+  openFolderAsWorkspace.mockRejectedValueOnce("plain")
   await openWorkspaceAction()
   expect(logWarn).toHaveBeenCalledWith(
     "menu action open-workspace failed",
@@ -209,10 +232,10 @@ test("openWorkspaceAction tolerates non-Error rejection", async () => {
   )
 })
 
-test("openWorkspaceAction skips save when the user cancels", async () => {
-  openDialog.mockResolvedValueOnce(null)
+test("openWorkspaceAction tolerates a cancelled picker (null result)", async () => {
+  openFolderAsWorkspace.mockResolvedValueOnce(null)
   await openWorkspaceAction()
-  expect(settingsSave).not.toHaveBeenCalled()
+  expect(logWarn).not.toHaveBeenCalled()
 })
 
 test("openSettingsAction routes to /settings without a section", () => {
@@ -248,6 +271,15 @@ test("loadRecentSessions caps result count at limit", async () => {
   listSessionsMock.mockResolvedValueOnce([{ id: "1" }, { id: "2" }, { id: "3" }, { id: "4" }])
   const result = await loadRecentSessions(2)
   expect(result.map((s) => s.id)).toEqual(["1", "2"])
+})
+
+test("loadRecentSessions excludes embedded workbench threads", async () => {
+  listSessionsMock.mockResolvedValueOnce([
+    { id: "resource", kind: "resource-workbench", visibility: "embedded" },
+    { id: "ordinary", kind: "direct" },
+  ])
+  const result = await loadRecentSessions(8)
+  expect(result.map((session) => session.id)).toEqual(["ordinary"])
 })
 
 test("loadRecentSessions returns [] when the Dexie call throws", async () => {
@@ -345,6 +377,8 @@ test("toggleReduceMotionAction warns when persistence throws", async () => {
 })
 
 test("goAction routes static destinations", () => {
+  goAction(router, "go-sites")
+  expect(router.push).toHaveBeenCalledWith("/sites")
   goAction(router, "go-twin")
   expect(router.push).toHaveBeenCalledWith("/twin")
   goAction(router, "go-logs")

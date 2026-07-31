@@ -8,9 +8,9 @@
  * back-filled into a session. This hook wires that consumer:
  *
  *   1. Resolve the running adapter from the bus (Tauri-only).
- *   2. Use the oldest stored message's `platformMessageId` as the `before`
- *      cursor so each call walks strictly older messages.
- *   3. Stream `adapter.fetchHistory(...)`, skip events already stored (dedup by
+ *   2. Prefer the durable page contract with the persisted delivery target
+ *      and a typed platform cursor. Legacy adapters retain their stream path.
+ *   3. Skip events already stored (dedup by
  *      platformMessageId), and persist the rest via the same
  *      `insertInboundMessage` projection the live route handler uses — with the
  *      event's original timestamp so back-filled rows sort before live ones.
@@ -24,6 +24,7 @@ import { getBus } from "@/lib/connectors/bus"
 import { findSessionByConversationKey, insertInboundMessage } from "@/lib/connectors/runtime"
 import { getDb } from "@/lib/db/schema"
 import { isTauri } from "@/lib/tauri"
+import type { PlatformHistoryCursor } from "@/types/connectors/adapter"
 
 /** Max events pulled per hydrate() call. Adapters also cap their own pages. */
 export const HISTORY_PAGE_MAX = 50
@@ -61,7 +62,11 @@ export function useHistoryHydration(
       const adapter = getBus()
         .listAdapters()
         .find((a) => a.id === adapterId)
-      if (!adapter || typeof adapter.fetchHistory !== "function") {
+      if (
+        !adapter ||
+        (typeof adapter.fetchHistoryPage !== "function" &&
+          typeof adapter.fetchHistory !== "function")
+      ) {
         setError("unsupported")
         setLastCount(null)
         return 0
@@ -74,6 +79,7 @@ export function useHistoryHydration(
       }
 
       const db = getDb()
+      const conversationState = await db.connectorConversationStates.get(conversationKey)
       const existing = await db.messages.where("sessionId").equals(session.id).toArray()
       const seen = new Set<string>()
       let oldestPlatformId: string | undefined
@@ -89,17 +95,41 @@ export function useHistoryHydration(
       }
 
       let inserted = 0
-      for await (const event of adapter.fetchHistory(conversationKey, {
-        before: oldestPlatformId,
-        max: HISTORY_PAGE_MAX,
-      })) {
+      const persistEvent = async (event: Parameters<typeof insertInboundMessage>[0]) => {
         // Only back-fill plain messages; edit/delete/system events have no
         // standalone history row to create.
-        if (event.kind && event.kind !== "create") continue
-        if (event.messageId && seen.has(event.messageId)) continue
+        if (event.kind && event.kind !== "create") return
+        if (event.conversationKey !== conversationKey) return
+        if (event.messageId && seen.has(event.messageId)) return
         await insertInboundMessage(event, session.id, event.timestamp)
         if (event.messageId) seen.add(event.messageId)
         inserted++
+      }
+
+      if (adapter.fetchHistoryPage) {
+        const target = conversationState?.deliveryTarget
+        if (!target) throw new Error("missing persisted delivery target for history hydration")
+        let cursor: PlatformHistoryCursor | undefined = Number.isFinite(oldestAt)
+          ? { kind: "timestamp" as const, beforeTimestamp: oldestAt }
+          : undefined
+        for (let pageIndex = 0; pageIndex < 20 && inserted < HISTORY_PAGE_MAX; pageIndex++) {
+          const page = await adapter.fetchHistoryPage(target, cursor, {
+            max: HISTORY_PAGE_MAX - inserted,
+          })
+          for (const event of page.events) await persistEvent(event)
+          if (!page.nextCursor) break
+          cursor = page.nextCursor
+        }
+      } else if (adapter.fetchHistory) {
+        for await (const event of adapter.fetchHistory(conversationKey, {
+          before:
+            adapter.historyCursorKind === "timestamp" && Number.isFinite(oldestAt)
+              ? String(oldestAt)
+              : oldestPlatformId,
+          max: HISTORY_PAGE_MAX,
+        })) {
+          await persistEvent(event)
+        }
       }
 
       setLastCount(inserted)

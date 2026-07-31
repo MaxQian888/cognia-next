@@ -26,6 +26,14 @@ const builtIn: AgentTeamTemplate = {
     { name: "Reviewer A", description: "" },
     { name: "Reviewer B", description: "" },
   ],
+  taskTemplates: [
+    {
+      title: "Review",
+      description: "Review the deliverable",
+      priority: "high",
+      assignedToIndex: 1,
+    },
+  ],
   isBuiltIn: true,
 }
 const userTpl: AgentTeamTemplate = {
@@ -39,6 +47,7 @@ const userTpl: AgentTeamTemplate = {
 
 const createTeamMock = jest.fn(() => ({ id: "team-new" }))
 const addTeammateMock = jest.fn()
+const createTaskMock = jest.fn()
 const addTemplateMock = jest.fn()
 const updateTemplateMock = jest.fn()
 const deleteTemplateMock = jest.fn()
@@ -49,6 +58,7 @@ jest.mock("@/stores/agent/agent-team-store", () => ({
       templates: { [builtIn.id]: builtIn, [userTpl.id]: userTpl },
       createTeam: createTeamMock,
       addTeammate: addTeammateMock,
+      createTask: createTaskMock,
       addTemplate: addTemplateMock,
       updateTemplate: updateTemplateMock,
       deleteTemplate: deleteTemplateMock,
@@ -71,7 +81,7 @@ jest.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
 }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: {
     agent: {
       child: () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn() }),
@@ -86,6 +96,8 @@ jest.mock("@/lib/logging", () => ({
 beforeEach(() => {
   createTeamMock.mockClear()
   addTeammateMock.mockClear()
+  addTeammateMock.mockReturnValueOnce({ id: "mate-1" }).mockReturnValueOnce({ id: "mate-2" })
+  createTaskMock.mockClear()
   addTemplateMock.mockClear()
   updateTemplateMock.mockClear()
   deleteTemplateMock.mockClear()
@@ -133,7 +145,7 @@ describe("AgentTeamTemplatesSection", () => {
     expect(cloned.name).toContain("(copy)")
   })
 
-  it("Use button calls createTeam + addTeammate then routes to the workspace", async () => {
+  it("Use button creates the roster and seeded tasks before routing to the workspace", async () => {
     const user = userEvent.setup()
     render(<AgentTeamTemplatesSection />)
     const useBtn = screen.getByTestId(`use-${builtIn.id}`)
@@ -143,6 +155,14 @@ describe("AgentTeamTemplatesSection", () => {
     expect(createTeamMock).toHaveBeenCalledWith(expect.objectContaining({ name: builtIn.name }))
     // Two teammates in the built-in template → addTeammate called twice.
     expect(addTeammateMock).toHaveBeenCalledTimes(2)
+    expect(createTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        teamId: "team-new",
+        title: "Review",
+        assignedTo: "mate-2",
+        order: 0,
+      })
+    )
     expect(routerPushMock).toHaveBeenCalledWith("/agent-teams/workspace?teamId=team-new")
   })
 

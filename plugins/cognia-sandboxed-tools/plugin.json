@@ -1,0 +1,31 @@
+{
+  "id": "cognia-sandboxed-tools",
+  "name": "Sandboxed Tools",
+  "version": "0.1.0",
+  "description": "OS-level sandboxed Bash / Edit / Write / text_editor tools (ADR-0028). When a session enables sandbox mode the SDK builtins are replaced by these, which route through the platform sandbox backend (bwrap / sandbox-exec) via the sandbox_exec command.",
+  "type": "frontend",
+  "capabilities": ["tools"],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "permissions": ["native:filesystem", "native:process"],
+  "activationEvents": ["startup"],
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "blocked",
+      "hint": "OS sandbox backends (bwrap / sandbox-exec) run in the Tauri desktop shell — sandboxed exec is unavailable in the browser."
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "blocked",
+      "reason": "OS sandbox backends (bwrap / sandbox-exec) run in the desktop shell — unavailable on mobile."
+    }
+  }
+}

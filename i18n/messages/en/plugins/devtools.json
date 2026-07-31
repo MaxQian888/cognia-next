@@ -1,0 +1,31 @@
+{
+  "dropzone": {
+    "hint": "Drag a directory that contains plugin.json, or click to pick one. Runs the same conflict, permission, and config review as the marketplace.",
+    "title": "Drop a plugin folder here"
+  },
+  "hotReload": {
+    "clear": "Clear",
+    "empty": "No reloads yet this session. Run `cognia plugin dev` to see live updates.",
+    "kindHotReload": "Hot-reloaded",
+    "kindInstall": "Installed",
+    "kindUninstall": "Uninstalled",
+    "statusFailed": "Failed",
+    "statusInProgress": "In progress",
+    "statusSuccess": "Success",
+    "title": "Hot-reload activity"
+  },
+  "validator": {
+    "description": "Validate a plugin.json against the host schema without installing.",
+    "errorsHeading": "Errors",
+    "invalid": "Manifest has {count, plural, one {# error} other {# errors}}.",
+    "noPermissions": "No permissions declared.",
+    "permissionsHeading": "Declared permissions",
+    "pickButton": "Pick plugin.json or folder",
+    "readError": "Couldn't read the manifest: {message}",
+    "tauriRequiredError": "The manifest validator requires the Cognia desktop app.",
+    "title": "Manifest validator",
+    "valid": "Manifest is valid.",
+    "validating": "Validating…",
+    "warningsHeading": "Warnings"
+  }
+}

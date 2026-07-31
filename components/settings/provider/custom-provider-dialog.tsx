@@ -6,17 +6,10 @@
  */
 
 import { useState, useEffect, useMemo } from "react"
-import {
-  Plus,
-  X,
-  AlertCircle,
-  Check,
-  Eye,
-  EyeOff,
-  Settings2,
-  RefreshCw,
-  Loader2,
-} from "lucide-react"
+
+import { TransportHeadersEditor } from "./transport-headers-editor"
+import { DeploymentAgentSdkCard } from "./deployment-agent-sdk-card"
+import { Plus, X, AlertCircle, Eye, EyeOff, Settings2, RefreshCw, Loader2 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -29,7 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import type { ApiProtocol, ProviderModelDiscoveryEntry } from "@/types/provider"
+import type { ApiFlavor, ApiProtocol, ProviderModelDiscoveryEntry } from "@cognia/provider-types"
 import type { CustomModelMetadata, CustomProviderSettings } from "@/stores/settings/settings-store"
 import {
   Dialog,
@@ -39,17 +32,24 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { useSettingsStore } from "@/stores"
-import { testCustomProviderConnectionByProtocol } from "@/lib/ai/infrastructure/api-test"
+import { useSettingsStore } from "@/stores/settings"
+import { useConnectionTest } from "@/hooks/settings/use-connection-test"
+import { ProtocolSelectContent } from "./protocol-select-content"
 import {
   buildCustomProviderModelDiscoverySnapshot,
   discoverOpenAICompatibleModels,
-} from "@/lib/ai/providers/model-discovery"
+} from "@cognia/provider-core/providers/model-discovery"
+import { ConnectionStatusCard, toConnectionCardResult } from "./provider-config-tab"
 
-const PROTOCOL_DEFAULT_BASE_URLS: Record<ApiProtocol, string> = {
+const PROTOCOL_DEFAULT_BASE_URLS: Record<string, string> = {
   openai: "",
   anthropic: "https://api.anthropic.com/v1",
   gemini: "https://generativelanguage.googleapis.com/v1beta",
+}
+
+/** Default base URL for a protocol; plugin protocols have none. */
+function defaultBaseUrlFor(protocol: ApiProtocol): string {
+  return PROTOCOL_DEFAULT_BASE_URLS[protocol] ?? ""
 }
 
 interface CustomProviderDialogProps {
@@ -88,8 +88,15 @@ export function CustomProviderDialog({
   const [newModel, setNewModel] = useState("")
   const [defaultModel, setDefaultModel] = useState("")
   const [apiProtocol, setApiProtocol] = useState<ApiProtocol>("openai")
-  const [testing, setTesting] = useState(false)
-  const [testResult, setTestResult] = useState<"success" | "error" | null>(null)
+  // OpenAI endpoint family override. "auto" keeps the host heuristic; "responses"
+  // forces the Responses API (unlocks it on Azure / gateways / custom URLs).
+  const [apiFlavor, setApiFlavor] = useState<ApiFlavor>("auto")
+  const {
+    testing,
+    result: testResult,
+    test: runConnectionTest,
+    reset: resetTestResult,
+  } = useConnectionTest()
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [modelMetadata, setModelMetadata] = useState<Record<string, CustomModelMetadata>>({})
   const [expandedModelSettings, setExpandedModelSettings] = useState<string | null>(null)
@@ -99,6 +106,13 @@ export function CustomProviderDialog({
   >()
   const [discoveringModels, setDiscoveringModels] = useState(false)
   const [discoveryError, setDiscoveryError] = useState<string | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
+  const [mutationError, setMutationError] = useState<string | null>(null)
+  // ADR-0090 Phase 1 — static transport headers, validated by the shared
+  // header policy inside the editor (blocked names never reach the store).
+  const [customHeaders, setCustomHeaders] = useState<Record<string, string> | undefined>(undefined)
+  // ADR-0090 Phase 4 — explicit experimental Agent-SDK-via-Gateway opt-in.
+  const [experimentalAgentSdk, setExperimentalAgentSdk] = useState(false)
 
   const availableModels = useMemo(
     () =>
@@ -124,17 +138,21 @@ export function CustomProviderDialog({
         setBaseURL(provider.baseURL || "")
         setApiKey(provider.apiKey || "")
         setApiProtocol(provider.apiProtocol || "openai")
+        setApiFlavor(provider.apiFlavor || "auto")
         setModels(provider.customModels || [])
         setDefaultModel(provider.defaultModel || "")
         setModelMetadata(provider.customModelMetadata || {})
         setDiscoveredModels(provider.discoveredModels || [])
         setDiscoveredModelsLastFetched(provider.discoveredModelsLastFetched)
+        setCustomHeaders(provider.customHeaders)
+        setExperimentalAgentSdk(provider.experimentalAgentSdk === true)
       } else {
         // Reset for new provider
         setName("")
         setBaseURL("")
         setApiKey("")
         setApiProtocol("openai")
+        setApiFlavor("auto")
         setModels([])
         setNewModel("")
         setDefaultModel("")
@@ -142,14 +160,16 @@ export function CustomProviderDialog({
         setExpandedModelSettings(null)
         setDiscoveredModels([])
         setDiscoveredModelsLastFetched(undefined)
+        setCustomHeaders(undefined)
+        setExperimentalAgentSdk(false)
       }
-      setTestResult(null)
+      resetTestResult()
       setShowDeleteConfirm(false)
       setShowKey(false)
       setDiscoveryError(null)
     }, 0)
     return () => clearTimeout(timer)
-  }, [open, editingProviderId, customProviders])
+  }, [open, editingProviderId, customProviders, resetTestResult])
 
   const handleAddModel = () => {
     const trimmedModel = newModel.trim()
@@ -202,18 +222,7 @@ export function CustomProviderDialog({
 
   const handleTestConnection = async () => {
     if (!baseURL || !apiKey) return
-
-    setTesting(true)
-    setTestResult(null)
-
-    try {
-      const result = await testCustomProviderConnectionByProtocol(baseURL, apiKey, apiProtocol)
-      setTestResult(result.success ? "success" : "error")
-    } catch {
-      setTestResult("error")
-    } finally {
-      setTesting(false)
-    }
+    await runConnectionTest(baseURL, apiKey, apiProtocol, defaultModel || models[0])
   }
 
   const handleDiscoverModels = async () => {
@@ -250,8 +259,8 @@ export function CustomProviderDialog({
     }
   }
 
-  const handleSave = () => {
-    if (!name.trim() || !baseURL.trim() || availableModels.length === 0) return
+  const handleSave = async () => {
+    if (!name.trim() || !baseURL.trim() || availableModels.length === 0 || isSaving) return
 
     const providerData = {
       providerId: editingProviderId || "",
@@ -259,27 +268,49 @@ export function CustomProviderDialog({
       baseURL: baseURL.trim(),
       apiKey: apiKey.trim(),
       apiProtocol,
+      // Only the OpenAI family has a Responses/Chat split; force "auto" for the
+      // others so a stale override can't ride along after a protocol switch.
+      apiFlavor: apiProtocol === "openai" ? apiFlavor : "auto",
       customModels: models,
       customModelMetadata: modelMetadata,
       discoveredModels,
       discoveredModelsLastFetched,
+      customHeaders,
+      ...(experimentalAgentSdk && apiProtocol === "anthropic"
+        ? { experimentalAgentSdk: true }
+        : {}),
       defaultModel: defaultModel || availableModels[0]?.id || "",
       enabled: editingProviderId ? (customProviders[editingProviderId]?.enabled ?? true) : true,
     }
 
-    if (editingProviderId) {
-      updateCustomProvider(editingProviderId, providerData)
-    } else {
-      addCustomProvider(providerData)
+    setIsSaving(true)
+    setMutationError(null)
+    try {
+      if (editingProviderId) {
+        await updateCustomProvider(editingProviderId, providerData)
+      } else {
+        await addCustomProvider(providerData)
+      }
+      onOpenChange(false)
+    } catch (error) {
+      setMutationError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setIsSaving(false)
     }
-
-    onOpenChange(false)
   }
 
-  const handleDelete = () => {
-    if (editingProviderId) {
-      removeCustomProvider(editingProviderId)
+  const handleDelete = async () => {
+    if (!editingProviderId || isSaving) return
+
+    setIsSaving(true)
+    setMutationError(null)
+    try {
+      await removeCustomProvider(editingProviderId)
       onOpenChange(false)
+    } catch (error) {
+      setMutationError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setIsSaving(false)
     }
   }
 
@@ -287,7 +318,12 @@ export function CustomProviderDialog({
   const canSave = name.trim() && baseURL.trim() && availableModels.length > 0
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!isSaving || nextOpen) onOpenChange(nextOpen)
+      }}
+    >
       <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isEditing ? t("editCustomProvider") : t("addCustomProvider")}</DialogTitle>
@@ -313,46 +349,64 @@ export function CustomProviderDialog({
               value={apiProtocol}
               onValueChange={(v) => {
                 const nextProtocol = v as ApiProtocol
-                const prevDefault = PROTOCOL_DEFAULT_BASE_URLS[apiProtocol]
+                const prevDefault = defaultBaseUrlFor(apiProtocol)
                 setApiProtocol(nextProtocol)
-                setTestResult(null)
+                resetTestResult()
                 setDiscoveryError(null)
                 setDiscoveredModels([])
                 setDiscoveredModelsLastFetched(undefined)
                 // Auto-fill base URL when switching protocols if it's empty or matched the previous protocol's default
                 if (!baseURL.trim() || baseURL.trim() === prevDefault) {
-                  setBaseURL(PROTOCOL_DEFAULT_BASE_URLS[nextProtocol])
+                  setBaseURL(defaultBaseUrlFor(nextProtocol))
                 }
               }}
             >
               <SelectTrigger id="api-protocol">
                 <SelectValue placeholder={t("selectProtocol")} />
               </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="openai">
-                  <div className="flex flex-col">
-                    <span>OpenAI</span>
-                    <span className="text-xs text-muted-foreground">{t("protocolOpenAIDesc")}</span>
-                  </div>
-                </SelectItem>
-                <SelectItem value="anthropic">
-                  <div className="flex flex-col">
-                    <span>Anthropic</span>
-                    <span className="text-xs text-muted-foreground">
-                      {t("protocolAnthropicDesc")}
-                    </span>
-                  </div>
-                </SelectItem>
-                <SelectItem value="gemini">
-                  <div className="flex flex-col">
-                    <span>Gemini</span>
-                    <span className="text-xs text-muted-foreground">{t("protocolGeminiDesc")}</span>
-                  </div>
-                </SelectItem>
-              </SelectContent>
+              <ProtocolSelectContent />
             </Select>
             <p className="text-xs text-muted-foreground">{t("apiProtocolHint")}</p>
           </div>
+
+          {/* API Flavor (OpenAI family only): Responses vs Chat Completions */}
+          {apiProtocol === "openai" && (
+            <div className="space-y-2">
+              <Label htmlFor="api-flavor">{t("apiFlavor")}</Label>
+              <Select value={apiFlavor} onValueChange={(v) => setApiFlavor(v as ApiFlavor)}>
+                <SelectTrigger id="api-flavor">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">
+                    <div className="flex flex-col">
+                      <span>{t("apiFlavorAuto")}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {t("apiFlavorAutoDesc")}
+                      </span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="responses">
+                    <div className="flex flex-col">
+                      <span>{t("apiFlavorResponses")}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {t("apiFlavorResponsesDesc")}
+                      </span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="chat">
+                    <div className="flex flex-col">
+                      <span>{t("apiFlavorChat")}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {t("apiFlavorChatDesc")}
+                      </span>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">{t("apiFlavorHint")}</p>
+            </div>
+          )}
 
           {/* Base URL */}
           <div className="space-y-2">
@@ -363,7 +417,7 @@ export function CustomProviderDialog({
               onChange={(e) => {
                 const nextBaseURL = e.target.value
                 setBaseURL(nextBaseURL)
-                setTestResult(null)
+                resetTestResult()
                 setDiscoveryError(null)
                 setDiscoveredModels([])
                 setDiscoveredModelsLastFetched(undefined)
@@ -379,6 +433,17 @@ export function CustomProviderDialog({
             <p className="text-xs text-muted-foreground">{t("baseURLHint")}</p>
           </div>
 
+          {/* Custom transport headers (ADR-0090 Phase 1) */}
+          <TransportHeadersEditor value={customHeaders} onChange={setCustomHeaders} />
+
+          {/* Experimental Agent SDK via Gateway opt-in (ADR-0090 Phase 4) */}
+          <DeploymentAgentSdkCard
+            providerId={editingProviderId || "custom-provider-draft"}
+            protocol={apiProtocol}
+            enabled={experimentalAgentSdk}
+            onChange={setExperimentalAgentSdk}
+          />
+
           {/* API Key */}
           <div className="space-y-2">
             <Label htmlFor="api-key">{t("apiKey")}</Label>
@@ -390,7 +455,7 @@ export function CustomProviderDialog({
                   value={apiKey}
                   onChange={(e) => {
                     setApiKey(e.target.value)
-                    setTestResult(null)
+                    resetTestResult()
                   }}
                   placeholder={t("apiKeyPlaceholder")}
                   className="pr-10"
@@ -416,16 +481,7 @@ export function CustomProviderDialog({
                 {testing ? tc("loading") : t("test")}
               </Button>
             </div>
-            {testResult === "success" && (
-              <p className="flex items-center gap-1 text-sm text-green-600">
-                <Check className="h-4 w-4" /> {t("connectionSuccess")}
-              </p>
-            )}
-            {testResult === "error" && (
-              <p className="flex items-center gap-1 text-sm text-destructive">
-                <AlertCircle className="h-4 w-4" /> {t("connectionFailed")}
-              </p>
-            )}
+            {testResult && <ConnectionStatusCard result={toConnectionCardResult(testResult)} />}
           </div>
 
           {/* Models */}
@@ -625,10 +681,20 @@ export function CustomProviderDialog({
               {showDeleteConfirm ? (
                 <div className="flex items-center gap-2 mr-auto">
                   <span className="text-sm text-destructive">{t("confirmDeleteProvider")}</span>
-                  <Button variant="destructive" size="sm" onClick={handleDelete}>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => void handleDelete()}
+                    disabled={isSaving}
+                  >
                     {tc("confirm")}
                   </Button>
-                  <Button variant="outline" size="sm" onClick={() => setShowDeleteConfirm(false)}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowDeleteConfirm(false)}
+                    disabled={isSaving}
+                  >
                     {tc("cancel")}
                   </Button>
                 </div>
@@ -637,17 +703,23 @@ export function CustomProviderDialog({
                   variant="ghost"
                   className="mr-auto text-destructive hover:text-destructive"
                   onClick={() => setShowDeleteConfirm(true)}
+                  disabled={isSaving}
                 >
                   {tc("delete")}
                 </Button>
               )}
             </>
           )}
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          {mutationError && (
+            <p role="alert" className="mr-auto text-sm text-destructive">
+              {t("customProviderMutationFailed", { error: mutationError })}
+            </p>
+          )}
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
             {tc("cancel")}
           </Button>
-          <Button onClick={handleSave} disabled={!canSave}>
-            {tc("save")}
+          <Button onClick={() => void handleSave()} disabled={!canSave || isSaving}>
+            {isSaving ? tc("saving") : tc("save")}
           </Button>
         </DialogFooter>
       </DialogContent>

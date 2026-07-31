@@ -10,7 +10,7 @@
  */
 
 import type { TriggerPolicy } from "@/types/connectors/policy"
-import { resolveBinding } from "./policy-resolve"
+import { resolveBinding, resolveEffectiveTeamBinding } from "./policy-resolve"
 import type { BindingResolutionInput } from "./policy-resolve"
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -245,5 +245,59 @@ describe("resolveBinding — all three layers", () => {
     const r = resolveBinding(input)
     expect(r.trigger.rules).toEqual([{ kind: "self-mention" }])
     expect(r.trigger.blockers).toEqual([{ kind: "user-blocklist", userIds: ["u_bad"] }])
+  })
+})
+
+// ── resolveEffectiveTeamBinding (instance-level defaults, W1) ────────────────
+
+describe("resolveEffectiveTeamBinding", () => {
+  it("explicit conversation teamId wins over the instance default", () => {
+    const r = resolveEffectiveTeamBinding(
+      { defaultTeamId: "team_bot" },
+      { teamId: "team_chat", teamDisabled: undefined }
+    )
+    expect(r).toEqual({ teamId: "team_chat", source: "override" })
+  })
+
+  it("falls back to the instance defaultTeamId when no override", () => {
+    const r = resolveEffectiveTeamBinding({ defaultTeamId: "team_bot" }, null)
+    expect(r).toEqual({ teamId: "team_bot", source: "instance-default" })
+  })
+
+  it("falls back to the instance default when the override row exists but has no teamId", () => {
+    const r = resolveEffectiveTeamBinding(
+      { defaultTeamId: "team_bot" },
+      { teamId: undefined, teamDisabled: undefined }
+    )
+    expect(r).toEqual({ teamId: "team_bot", source: "instance-default" })
+  })
+
+  it("teamDisabled suppresses BOTH the override teamId and the instance default", () => {
+    const r = resolveEffectiveTeamBinding(
+      { defaultTeamId: "team_bot" },
+      { teamId: "team_chat", teamDisabled: true }
+    )
+    expect(r).toEqual({ teamId: undefined, source: "none" })
+  })
+
+  it("returns none when neither layer binds a team", () => {
+    const r = resolveEffectiveTeamBinding({ defaultTeamId: undefined }, null)
+    expect(r).toEqual({ teamId: undefined, source: "none" })
+  })
+
+  it("treats empty / whitespace ids as unset at both layers", () => {
+    expect(resolveEffectiveTeamBinding({ defaultTeamId: "  " }, { teamId: "" })).toEqual({
+      teamId: undefined,
+      source: "none",
+    })
+    expect(resolveEffectiveTeamBinding({ defaultTeamId: "team_bot" }, { teamId: "  " })).toEqual({
+      teamId: "team_bot",
+      source: "instance-default",
+    })
+  })
+
+  it("undefined override behaves like null (no override row)", () => {
+    const r = resolveEffectiveTeamBinding({ defaultTeamId: "team_bot" }, undefined)
+    expect(r).toEqual({ teamId: "team_bot", source: "instance-default" })
   })
 })

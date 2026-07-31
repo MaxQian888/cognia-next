@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // CRUD + tree-helper coverage for workflow library folders: create/list/
 // rename/update/move (with cycle guards) / delete (reparent + cascade) and
 // the getFolderPath / getDescendantFolderIds walkers.

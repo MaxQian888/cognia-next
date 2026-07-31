@@ -2,96 +2,66 @@
 
 import { useEffect, useRef } from "react"
 import { getExternalAgentManager } from "@/lib/ai/agent/external/manager"
-import {
-  getExternalAgentExecutionBlockReason,
-  isExternalAgentExecutable,
-} from "@/lib/ai/agent/external/config-normalizer"
+import { onProtocolAdapterRegistryChange } from "@/lib/ai/agent/external/protocol-adapter"
+import { rehydrateExternalAgent } from "@/lib/ai/agent/external/rehydrate"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 
+/**
+ * Binds external-agent rehydration to the desktop webview lifecycle. The
+ * per-agent orchestration lives in `lib/ai/agent/external/rehydrate` so the
+ * headless brain runs the identical logic (ADR-0059 T-A10); this component only
+ * adds the React StrictMode-safe once-guard and the mount/unmount subscription.
+ */
 export function ExternalAgentInitializer() {
   const hasInitialized = useRef(false)
 
   useEffect(() => {
-    if (hasInitialized.current) {
-      return
-    }
-    hasInitialized.current = true
-
     let isActive = true
+    const shouldContinue = () => isActive
 
-    const initialize = async () => {
-      const store = useExternalAgentStore.getState()
+    // One-time startup rehydration. Runs every persisted agent in PARALLEL so a
+    // single slow/hanging connect cannot block the rest (the old serial loop
+    // stalled the whole subsystem behind the first agent).
+    const runStartup = async () => {
+      if (hasInitialized.current) {
+        return
+      }
+      hasInitialized.current = true
       const manager = getExternalAgentManager()
-      const persistedAgents = store.getAllAgents()
+      const persistedAgents = useExternalAgentStore.getState().getAllAgents()
+      await Promise.all(
+        persistedAgents.map((config) => rehydrateExternalAgent(config, manager, shouldContinue))
+      )
+    }
+    void runStartup()
 
-      for (const config of persistedAgents) {
-        if (!isActive) {
-          return
-        }
-
-        let runtimeInstance = manager.getAgent(config.id)
-        const shouldRegisterViaManager = config.protocol === "acp" || config.protocol === "opencode"
-
-        if (!runtimeInstance && shouldRegisterViaManager) {
-          try {
-            runtimeInstance = await manager.addAgent(config)
-          } catch (error) {
-            const message = error instanceof Error ? error.message : String(error)
-            if (!message.includes("Agent already exists")) {
-              store.setConnectionStatus(config.id, "error")
-              useExternalAgentStore.setState({
-                lastError: message,
-              })
-            }
-          }
-        }
-
-        const runtimeBlockedReason =
-          runtimeInstance?.validity?.executable === false
-            ? runtimeInstance.validity.blockingReason
-            : null
-        if (runtimeBlockedReason) {
-          store.setConnectionStatus(
-            config.id,
-            runtimeInstance?.connectionStatus ??
-              (config.protocol === "acp" ? "disconnected" : "error")
-          )
-          continue
-        }
-
-        const executionBlockedReason = getExternalAgentExecutionBlockReason(config)
-        if (executionBlockedReason) {
-          store.setConnectionStatus(config.id, config.protocol === "acp" ? "disconnected" : "error")
-          continue
-        }
-
-        if (!store.autoConnectOnStartup) {
-          store.setConnectionStatus(config.id, runtimeInstance?.connectionStatus ?? "disconnected")
-          continue
-        }
-
-        if (!isExternalAgentExecutable(config)) {
-          store.setConnectionStatus(config.id, "error")
-          continue
-        }
-
-        try {
-          await manager.connect(config.id)
-          const instance = manager.getAgent(config.id)
-          store.setConnectionStatus(config.id, instance?.connectionStatus ?? "connected")
-        } catch (error) {
-          store.setConnectionStatus(config.id, "error")
-          useExternalAgentStore.setState({
-            lastError: error instanceof Error ? error.message : String(error),
-          })
+    // React to a plugin enabling its external-agent adapter mid-session: any
+    // persisted agent on the newly-available protocol that is not yet in the
+    // manager gets rehydrated (the disable side is handled by the bridge tearing
+    // the agents down). The store check runs first so an unrelated plugin enable
+    // never instantiates the manager.
+    const unsubscribe = onProtocolAdapterRegistryChange((change) => {
+      if (change.kind !== "register" || !isActive) {
+        return
+      }
+      const candidates = useExternalAgentStore
+        .getState()
+        .getAllAgents()
+        .filter((config) => change.protocols.includes(config.protocol))
+      if (candidates.length === 0) {
+        return
+      }
+      const manager = getExternalAgentManager()
+      for (const config of candidates) {
+        if (!manager.getAgent(config.id)) {
+          void rehydrateExternalAgent(config, manager, shouldContinue)
         }
       }
-    }
-
-    void initialize()
+    })
 
     return () => {
       isActive = false
+      unsubscribe()
     }
   }, [])
 

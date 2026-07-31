@@ -28,21 +28,67 @@
  *
  * Session grants are in-memory; cleared on killswitch, plugin
  * disable / unload, and full app reload.
+ *
+ * ## Binary consent (`requestBinary`)
+ *
+ * Spawning a plugin-shipped executable asks a question the plain boolean
+ * protocol above cannot express. "Allow once" and "Always allow this session"
+ * are both session-scoped and evaporate on reload; the `approvedBinaries`
+ * ledger (v109) is durable. Silently promoting the former into the latter is
+ * precisely the bug the ledger replaced, so a durable grant needs its own,
+ * separately-answered question — hence `requestBinary`, which returns
+ * `{ granted, remember }` instead of a bare boolean.
+ *
+ * `remember` is a *decision*, not an effect: this module never touches Dexie.
+ * `lib/plugin/security/binary-consent.ts` owns the write. Anything that fails
+ * to answer — timeout, emit failure, an existing session grant, a responder
+ * that omits the field — yields `remember: false`, so the durable path is
+ * unreachable without an explicit affirmative from the user.
  */
 
 import type { PluginPermission } from "@/types/plugin"
+
+/** The executable a binary-consent prompt is about. */
+export interface BinaryConsentSubject {
+  /** Absolute path of the binary on disk. */
+  path: string
+  /** Manifest-relative path — the form the user recognises from the plugin. */
+  relPath: string
+}
+
+/**
+ * Answer to a binary-consent prompt.
+ *
+ * `remember: true` means the user explicitly asked for a durable, hash-pinned
+ * approval. It is only ever meaningful alongside `granted: true`.
+ */
+export interface BinaryConsentOutcome {
+  granted: boolean
+  remember: boolean
+}
 
 export interface PluginConsentRequest {
   pluginId: string
   permission: PluginPermission
   /** Optional reason string supplied by the calling site. */
   reason?: string
+  /**
+   * Present only for binary-spawn prompts. Its presence is what tells the
+   * overlay to offer the (default-off) "remember this binary" checkbox.
+   */
+  binary?: BinaryConsentSubject
 }
 
 export interface PluginConsentResponse {
   allow: boolean
   /** True when the user chose "Always allow this session". */
   persist: boolean
+  /**
+   * True only when the user ticked "remember this binary" on a binary prompt.
+   * Absent/false — including from every responder written before this field
+   * existed — means session-scoped, exactly as before.
+   */
+  remember?: boolean
 }
 
 export interface PluginConsentRequestEvent extends PluginConsentRequest {
@@ -56,7 +102,10 @@ export const DEFAULT_CONSENT_TIMEOUT_MS = 30_000
 /** Event name used to ferry requests to the renderer-side overlay. */
 export const PLUGIN_CONSENT_REQUEST_EVENT = "plugin:consent-request"
 
-type Resolver = (value: boolean) => void
+type Resolver = (value: BinaryConsentOutcome) => void
+
+/** The fail-safe answer: not granted, and certainly not remembered. */
+const DENIED: BinaryConsentOutcome = { granted: false, remember: false }
 
 interface BrokerOptions {
   timeoutMs?: number
@@ -98,14 +147,36 @@ export class PluginConsentBroker {
    * Never rejects — the caller can rely on the boolean.
    */
   async request(req: PluginConsentRequest): Promise<boolean> {
-    if (this.hasSessionGrant(req.pluginId, req.permission)) return true
+    const outcome = await this.ask(req)
+    return outcome.granted
+  }
+
+  /**
+   * Binary-spawn entry point. Same prompt machinery as `request`, but the
+   * answer keeps the user's `remember` decision instead of discarding it.
+   *
+   * An existing session grant short-circuits to `{ granted: true, remember:
+   * false }`: the user is never shown a prompt, so they cannot have asked for
+   * a durable approval. Inferring one from silence is the whole failure mode
+   * this contract exists to prevent.
+   */
+  async requestBinary(
+    req: PluginConsentRequest & { binary: BinaryConsentSubject }
+  ): Promise<BinaryConsentOutcome> {
+    return this.ask(req)
+  }
+
+  private async ask(req: PluginConsentRequest): Promise<BinaryConsentOutcome> {
+    if (this.hasSessionGrant(req.pluginId, req.permission)) {
+      return { granted: true, remember: false }
+    }
     const requestId = generateRequestId()
-    return new Promise<boolean>((resolve) => {
+    return new Promise<BinaryConsentOutcome>((resolve) => {
       const timeoutHandle = setTimeout(() => {
         const row = this.pending.get(requestId)
         if (row) {
           this.pending.delete(requestId)
-          row.resolve(false)
+          row.resolve(DENIED)
         }
       }, this.timeoutMs)
       this.pending.set(requestId, {
@@ -120,13 +191,14 @@ export class PluginConsentBroker {
           pluginId: req.pluginId,
           permission: req.permission,
           reason: req.reason,
+          binary: req.binary,
           timeoutMs: this.timeoutMs,
         })
       } catch {
         // Emit failed — auto-reject so the caller doesn't hang.
         this.pending.delete(requestId)
         clearTimeout(timeoutHandle)
-        resolve(false)
+        resolve(DENIED)
       }
     })
   }
@@ -144,7 +216,12 @@ export class PluginConsentBroker {
     if (response.allow && response.persist) {
       this.sessionGrants.add(sessionKey(row.pluginId, row.permission))
     }
-    row.resolve(response.allow)
+    row.resolve({
+      granted: response.allow,
+      // A `remember` on a rejection is incoherent; drop it rather than let a
+      // buggy responder turn "no" into a durable "yes".
+      remember: response.allow && response.remember === true,
+    })
     return true
   }
 
@@ -169,7 +246,7 @@ export class PluginConsentBroker {
   rejectAllPending(): void {
     for (const [, row] of this.pending) {
       clearTimeout(row.timeoutHandle)
-      row.resolve(false)
+      row.resolve(DENIED)
     }
     this.pending.clear()
   }

@@ -23,7 +23,7 @@
  * blast radius is "the plugin reads its own grant".
  */
 
-import { getGrantedPreopens } from "@/lib/plugin/security/wasm-grant"
+import { getGrantedPreopens, verifyPreopenAllowedForCall } from "@/lib/plugin/security/wasm-grant"
 
 /** Public handle returned to the plugin host. */
 export interface WasmPluginHandle {
@@ -48,7 +48,7 @@ export interface WasmRuntimeOptions {
    * Override the granted-preopens resolver. Defaults to
    * `getGrantedPreopens(pluginId)` from the persisted ledger.
    */
-  preopensResolver?: (pluginId: string) => readonly string[]
+  preopensResolver?: (pluginId: string) => readonly string[] | Promise<readonly string[]>
 }
 
 /** Factory invoked by `loadWasmPlugin` once per call. */
@@ -66,8 +66,7 @@ export interface WasmRuntimeInstance {
 
 /** Source bytes — either a base64 string or a binary buffer. */
 export type WasmSource =
-  | { kind: "base64"; data: string }
-  | { kind: "bytes"; data: ArrayBuffer | Uint8Array }
+  { kind: "base64"; data: string } | { kind: "bytes"; data: ArrayBuffer | Uint8Array }
 
 const disposedSentinel = "wasm runtime instance disposed"
 
@@ -85,7 +84,7 @@ export async function loadWasmPlugin(
     throw new Error("loadWasmPlugin: pluginId is required")
   }
   const preopensResolver = options.preopensResolver ?? getGrantedPreopens
-  const preopens = [...preopensResolver(pluginId)]
+  const preopens = [...(await preopensResolver(pluginId))]
   const factory = options.runtimeFactory ?? defaultWasmRuntimeFactory
   const instance = await factory({ pluginId, source, preopens })
 
@@ -98,6 +97,7 @@ export async function loadWasmPlugin(
       if (typeof method !== "string" || method.length === 0) {
         throw new Error("call: method name is required")
       }
+      await verifyPreopenAllowedForCall(pluginId, preopens)
       return instance.call(method, args)
     },
     async dispose() {

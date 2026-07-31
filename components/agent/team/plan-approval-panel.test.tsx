@@ -12,11 +12,25 @@ import {
   __resetForTesting,
   pendingCount,
 } from "@/lib/ai/agent/plan-approval-bus"
+import { usePendingGatesStore } from "@/stores/agent/pending-gates-store"
 import type { AgentTeam, AgentTeammate } from "@/types/agent/agent-team"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }))
+
+// The panel renders the proposed plan through the shared MarkdownRenderer;
+// stub it (identity) so these tests don't pull in the heavy markdown pipeline.
+jest.mock("@/components/chat/markdown-renderer", () => ({
+  MarkdownRenderer: ({ content }: { content: string }) => <div data-testid="md">{content}</div>,
+}))
+
+// Drive the reduced-motion branch of the entrance animation deterministically.
+let mockReducedMotion = false
+jest.mock("motion/react", () => {
+  const actual = jest.requireActual("motion/react")
+  return { ...actual, useReducedMotion: () => mockReducedMotion }
+})
 
 const team: AgentTeam = {
   id: "team-x",
@@ -58,6 +72,7 @@ const leadWithoutPlan: AgentTeammate = { ...leadWithPlan, proposedPlan: undefine
 
 beforeEach(() => {
   __resetForTesting()
+  mockReducedMotion = false
 })
 
 describe("PlanApprovalPanel", () => {
@@ -72,6 +87,19 @@ describe("PlanApprovalPanel", () => {
   it("renders the proposed plan when present", () => {
     render(<PlanApprovalPanel team={team} lead={leadWithPlan} />)
     expect(screen.getByText(/steps/)).toBeInTheDocument()
+  })
+
+  it("renders the proposed plan as markdown, not a raw <pre>", () => {
+    const { container } = render(<PlanApprovalPanel team={team} lead={leadWithPlan} />)
+    expect(screen.getByTestId("plan-approval-panel-body")).toBeInTheDocument()
+    expect(screen.getByTestId("md")).toBeInTheDocument()
+    expect(container.querySelector("pre")).toBeNull()
+  })
+
+  it("drops the entrance offset when the user prefers reduced motion", () => {
+    mockReducedMotion = true
+    render(<PlanApprovalPanel team={team} lead={leadWithPlan} />)
+    expect(screen.getByTestId("plan-approval-panel")).toBeInTheDocument()
   })
 
   it("approve resolves the bus waiter for this team", async () => {
@@ -111,6 +139,19 @@ describe("PlanApprovalPanel", () => {
     render(<PlanApprovalPanel team={team} />)
     expect(screen.getByText("noPlan")).toBeInTheDocument()
     expect(screen.getByTestId("plan-approval-approve")).toBeDisabled()
+  })
+
+  it("answering from the panel closes the matching pending-gates modal entry", () => {
+    usePendingGatesStore.getState().open({
+      key: { scope: "agent-team", id: "team-x" },
+      gateType: "plan",
+      title: "Plan awaiting approval",
+      runId: "run-1",
+      teamId: "team-x",
+    })
+    render(<PlanApprovalPanel team={team} lead={leadWithPlan} />)
+    fireEvent.click(screen.getByTestId("plan-approval-approve"))
+    expect(usePendingGatesStore.getState().gates).toHaveLength(0)
   })
 
   it("does not throw when no waiter is registered (just no-ops)", () => {

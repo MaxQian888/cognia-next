@@ -7,6 +7,7 @@
 
 import { invoke } from "@tauri-apps/api/core"
 import { listen, UnlistenFn } from "@tauri-apps/api/event"
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import type { Plugin, PluginDefinition } from "@/types/plugin"
 import { loggers } from "../core/logger"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
@@ -69,8 +70,7 @@ export class PluginHotReload {
   private pluginStates: Map<string, Record<string, unknown>> = new Map()
   private pluginLoader: ((pluginId: string) => Promise<PluginDefinition>) | null = null
   private pluginReloader:
-    | ((pluginId: string, definition: PluginDefinition) => Promise<void>)
-    | null = null
+    ((pluginId: string, definition: PluginDefinition) => Promise<void>) | null = null
 
   constructor(config: Partial<HotReloadConfig> = {}) {
     this.config = {
@@ -182,7 +182,7 @@ export class PluginHotReload {
 
       // Remove event listener
       if (this.unlistenFn) {
-        this.unlistenFn()
+        safeUnlisten(this.unlistenFn)
         this.unlistenFn = null
       }
 
@@ -267,6 +267,11 @@ export class PluginHotReload {
         await invoke("plugin_reload", { pluginId })
       }
 
+      // python/hybrid plugins also carry a subprocess host running the old
+      // module — cycle it so edits to .py files actually land. Re-load
+      // re-reads persisted config + host settings.
+      await this.reloadPythonHost(pluginId)
+
       // Restore state if preserved
       const preservedState = this.pluginStates.get(pluginId)
       if (this.config.preserveState && preservedState) {
@@ -316,6 +321,30 @@ export class PluginHotReload {
 
       return result
     }
+  }
+
+  /**
+   * Cycle a python/hybrid plugin's subprocess host (unload → load) so the
+   * fresh module is imported. No-op for other plugin types or when the
+   * manager isn't initialized (web mode / unit tests).
+   */
+  private async reloadPythonHost(pluginId: string): Promise<void> {
+    let manager: import("@/lib/plugin/core/manager").PluginManager
+    try {
+      const { getPluginManager } = await import("@/lib/plugin/core/manager")
+      manager = getPluginManager()
+    } catch {
+      return // manager not initialized — nothing to cycle
+    }
+    const type = manager.getPlugin(pluginId)?.manifest.type
+    if (type !== "python" && type !== "hybrid") {
+      return
+    }
+    // Failures here are real reload failures (stale code keeps running) —
+    // let them propagate into the ReloadResult error path.
+    await manager.unloadPythonPlugin(pluginId)
+    await manager.loadPythonPlugin(pluginId)
+    loggers.hotReload.info(`Python host cycled for ${pluginId}`)
   }
 
   async reloadAll(): Promise<ReloadResult[]> {

@@ -46,6 +46,20 @@ export interface PluginRow {
   /** Persisted plugin configuration (the user's settings). */
   config?: Record<string, unknown>
   /**
+   * Host-level python runtime settings (python/hybrid plugins only).
+   * Structurally identical to `types/plugin/plugin.ts:PythonHostSettings`
+   * (kept dependency-free here per this file's convention). Non-indexed.
+   */
+  pythonHostSettings?: {
+    interpreterPath?: string
+    env?: Record<string, string>
+    callTimeoutMs?: number
+    useVenv?: boolean
+    idleShutdownMin?: number
+    maxConcurrentCalls?: number
+    sandboxed?: boolean
+  }
+  /**
    * Raw README markdown captured at install time (GitHub installs read the
    * repo's `README.md`). Rendered in the detail view. Non-indexed.
    */
@@ -61,6 +75,16 @@ export interface PluginRow {
   error?: string
   /** Wall-clock ms of the most recent tool/command invocation. */
   lastUsedAt?: number
+  /**
+   * Wall-clock ms the `onInstall` lifecycle hook fired. Set once, on the first
+   * successful load after install, so the host never re-fires it. Non-indexed.
+   */
+  installHookFiredAt?: number
+  /**
+   * The manifest `version` the host last activated. Compared on each load to
+   * decide whether to fire `onUpdate`. Non-indexed.
+   */
+  lastActivatedVersion?: string
   createdAt: number
   updatedAt: number
 }
@@ -79,6 +103,18 @@ export interface PluginMarketplaceSourceRow {
   name: string
   /** Wall-clock ms the source was added. */
   addedAt: number
+  /**
+   * Sync health, written by `recordSourceSync` after every catalog fetch. All
+   * optional and un-indexed, so rows written before these existed keep loading
+   * and no Dexie version bump is needed — a row with none of them has simply
+   * never synced, which is a state the UI renders rather than guesses at.
+   */
+  /** Entry count from the last successful catalog fetch. */
+  pluginCount?: number
+  /** Wall-clock ms of the last **successful** fetch. */
+  lastSyncedAt?: number
+  /** Failure message from the most recent fetch; cleared once one succeeds. */
+  lastError?: string
 }
 
 /**
@@ -121,27 +157,6 @@ export interface PluginAnalyticsRow {
   key: string
   count: number
   lastEventAt: number
-}
-
-/**
- * One row per scheduled task contributed by a plugin. The scheduler executor
- * (`lib/scheduler/executors/plugin-executor.ts`) pulls these rows on tick.
- */
-export interface PluginScheduledJobRow {
-  id: string
-  pluginId: string
-  /** Cron expression or interval description. */
-  cron: string
-  /** Plugin-side handler name to invoke. */
-  handler: string
-  /** Free-form arguments passed to the handler. */
-  args?: Record<string, unknown>
-  /** "active" | "paused" | "error". */
-  status: string
-  lastRunAt?: number
-  nextRunAt?: number
-  createdAt: number
-  updatedAt: number
 }
 
 /**

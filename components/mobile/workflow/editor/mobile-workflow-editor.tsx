@@ -15,14 +15,22 @@
  * node by accident; the Edit toggle unlocks structural editing.
  */
 
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { ReactFlowProvider } from "@xyflow/react"
 import { useTranslations } from "next-intl"
 import { toast } from "sonner"
-import { X as CancelIcon, Maximize2 as FitViewIcon } from "lucide-react"
+import { X as CancelIcon, Maximize2 as FitViewIcon, Trash2 as TrashIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { FloatingActionButton } from "@/components/ui/floating-action-button"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
+import { RightSidebar } from "@/components/workflow/editor/right-sidebar"
 import { createEditorStore, type EditorStore } from "@/lib/workflow/editor/store"
 import { EditorStoreProvider } from "@/lib/workflow/editor/store-context"
 import type { NodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
@@ -32,18 +40,36 @@ import { MobileCanvas, type WorkflowFlowInstance } from "./mobile-canvas"
 import { MobileEditorTopbar } from "./mobile-editor-topbar"
 import { MobileNodePaletteSheet } from "./mobile-node-palette-sheet"
 import { MobileNodeInspectorDrawer } from "./mobile-node-inspector-drawer"
+import { MobileWorkflowCopilotSheet } from "./mobile-workflow-copilot-sheet"
 import { useTapConnect } from "./use-tap-connect"
 
 function MobileEditorInner({ store }: { store: EditorStore }) {
   const t = useTranslations("mobile.workflow.editor")
   const tConnection = useTranslations("workflows.editor.connection")
+  const tWorkbench = useTranslations("contextWorkbench")
   const [mode, setMode] = useState<"read" | "edit">("read")
   const [inspectorOpen, setInspectorOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [copilotOpen, setCopilotOpen] = useState(false)
+  const [workbenchOpen, setWorkbenchOpen] = useState(false)
   const [rf, setRf] = useState<WorkflowFlowInstance | null>(null)
   const canvasAreaRef = useRef<HTMLDivElement | null>(null)
   const tapConnect = useTapConnect(store)
   const selectedId = store((s) => s.selectedNodeIds[0] ?? null)
+  const selectedEdgeId = store((s) => s.selectedEdgeIds[0] ?? null)
+  const workflowId = store((s) => s.baseWorkflow.id)
+  const workflowName = store((s) => s.baseWorkflow.name)
+
+  // `touchConnect` arms the shared node renderer's tap-to-connect entry: tapping
+  // a source handle starts a connection. It's an edit-mode affordance only, and
+  // must clear when the editor unmounts so a desktop store (shared renderer)
+  // never inherits it.
+  useEffect(() => {
+    store.getState().setTouchConnect(mode === "edit")
+    return () => {
+      store.getState().setTouchConnect(false)
+    }
+  }, [mode, store])
 
   const onToggleMode = useCallback(() => {
     const next = mode === "edit" ? "read" : "edit"
@@ -67,6 +93,22 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
     [store, tapConnect, tConnection]
   )
 
+  const onEdgeTap = useCallback(
+    (id: string) => {
+      if (mode !== "edit") return
+      if (tapConnect.active) {
+        tapConnect.cancel()
+        return
+      }
+      // Select just the edge (clears any node selection + closes the inspector)
+      // so the floating delete bar acts on it.
+      store.getState().clearSelection()
+      store.getState().setSelectedEdges([id])
+      setInspectorOpen(false)
+    },
+    [mode, store, tapConnect]
+  )
+
   const onPaneTap = useCallback(() => {
     if (tapConnect.active) {
       tapConnect.cancel()
@@ -75,6 +117,12 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
     store.getState().clearSelection()
     setInspectorOpen(false)
   }, [store, tapConnect])
+
+  const onDeleteEdge = useCallback(() => {
+    if (!selectedEdgeId) return
+    store.getState().removeEdges([selectedEdgeId])
+    store.getState().clearSelection()
+  }, [selectedEdgeId, store])
 
   const addAtCenter = useCallback(
     (entry: NodeCatalogEntry) => {
@@ -118,6 +166,8 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
         reactFlowInstance={rf}
         mode={mode}
         onToggleMode={onToggleMode}
+        onOpenCopilot={() => setCopilotOpen(true)}
+        onOpenWorkbench={() => setWorkbenchOpen(true)}
       />
       <div ref={canvasAreaRef} className="relative min-h-0 flex-1">
         <MobileCanvas
@@ -125,6 +175,7 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
           mode={mode}
           connectActive={tapConnect.active}
           onNodeTap={onNodeTap}
+          onEdgeTap={onEdgeTap}
           onPaneTap={onPaneTap}
           onInit={setRf}
         />
@@ -162,6 +213,19 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
             {t("cancelConnect")}
           </Button>
         ) : null}
+        {mode === "edit" && selectedEdgeId && !tapConnect.active ? (
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            className="absolute bottom-[calc(env(safe-area-inset-bottom,0px)+1.25rem)] left-1/2 z-30 min-h-11 -translate-x-1/2 shadow-lg"
+            onClick={onDeleteEdge}
+            data-testid="mobile-edge-delete"
+          >
+            <TrashIcon className="mr-1 size-4" aria-hidden="true" />
+            {t("deleteConnection")}
+          </Button>
+        ) : null}
       </div>
       <MobileNodePaletteSheet open={paletteOpen} onOpenChange={setPaletteOpen} onAdd={addAtCenter} />
       <MobileNodeInspectorDrawer
@@ -171,6 +235,34 @@ function MobileEditorInner({ store }: { store: EditorStore }) {
         canConnect={mode === "edit"}
         onStartConnect={onStartConnect}
       />
+      <MobileWorkflowCopilotSheet
+        open={copilotOpen}
+        onOpenChange={setCopilotOpen}
+        store={store}
+        workflowId={workflowId}
+        workflowName={workflowName}
+      />
+      <Sheet open={workbenchOpen} onOpenChange={setWorkbenchOpen} modal={workbenchOpen}>
+        <SheetContent
+          forceMount
+          side="right"
+          className="w-full gap-0 p-0 sm:max-w-none"
+          inert={!workbenchOpen}
+          aria-hidden={!workbenchOpen}
+          data-testid="context-workbench-mobile-sheet"
+        >
+          <SheetHeader className="sr-only">
+            <SheetTitle>{tWorkbench("mobileTitle")}</SheetTitle>
+            <SheetDescription>{tWorkbench("mobileDescription")}</SheetDescription>
+          </SheetHeader>
+          <RightSidebar
+            useStore={store}
+            className="h-full w-full border-l-0"
+            onCollapse={() => setWorkbenchOpen(false)}
+            placement="mobile-sheet"
+          />
+        </SheetContent>
+      </Sheet>
     </div>
   )
 }

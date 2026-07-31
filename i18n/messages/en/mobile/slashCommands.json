@@ -1,0 +1,15 @@
+{
+  "backAria": "Back to Me",
+  "builtin": {
+    "description": "Commands you can run from the chat composer with a leading slash.",
+    "title": "Built-in commands"
+  },
+  "intro": "Browse the slash commands the paired desktop can run. Custom commands are authored on the desktop.",
+  "manageOnDesktop": "Custom slash commands are stored as .claude/commands/*.md files on the paired desktop. Create, edit and delete them there.",
+  "plugin": {
+    "description": "Commands contributed by enabled plugins.",
+    "empty": "No plugin commands registered.",
+    "title": "Plugin commands"
+  },
+  "title": "Slash commands"
+}

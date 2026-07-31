@@ -2,14 +2,15 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Cognia",
   "version": "0.1.0",
-  "identifier": "com.reactquickstarter.desktop",
+  "identifier": "com.cognia.desktop",
   "build": {
     "frontendDist": "../out",
     "devUrl": "http://localhost:3000",
-    "beforeDevCommand": "pnpm dev",
-    "beforeBuildCommand": "pnpm build"
+    "beforeDevCommand": "pnpm terminal-host:prepare:dev && pnpm plugin-node:prepare && node scripts/dev/free-port.mjs 3000 && pnpm dev",
+    "beforeBuildCommand": "pnpm terminal-host:prepare && pnpm plugin-node:prepare && pnpm build"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "title": "Cognia",
@@ -22,30 +23,44 @@
         "fullscreen": false,
         "decorations": false,
         "transparent": false,
+        "visible": false,
+        "backgroundColor": "#0a0a0a",
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
-        "trafficLightPosition": { "x": 16, "y": 12 },
+        "trafficLightPosition": { "x": 16, "y": 10 },
         "dragDropEnabled": false
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws: wss:; object-src 'none'; frame-src 'self' blob:; base-uri 'self'; form-action 'self'"
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws: wss: https://huggingface.co https://*.huggingface.co https://*.hf.co https://*.xethub.hf.co; object-src 'none'; frame-src 'self' blob:; base-uri 'self'; form-action 'self'"
     }
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
+    "externalBin": ["binaries/cognia-server"],
     "targets": "all",
     "resources": [
       "../sidecar/claude-host.mjs",
       "../sidecar/a2ui-mcp.mjs",
+      "../sidecar/cognia-mcp.mjs",
+      "../sidecar/mcp-oauth-helper.mjs",
       "../sidecar/package.json",
       "../sidecar/node_modules/**/*",
       "../sidecar/vscode-ext-host/package.json",
       "../sidecar/vscode-ext-host/dist/**/*",
       "../sidecar/vscode-ext-host/node_modules/**/*",
+      "../sidecar/webclone/package.json",
+      "../sidecar/webclone/dist/**/*",
+      "../sidecar/webclone/node_modules/**/*",
+      "../sidecar/codeserver-agent-ext/cognia-agent-bridge.vsix",
       "resources/terminal/shell-integration.bash",
       "resources/terminal/shell-integration.zsh",
-      "resources/terminal/shell-integration.ps1"
+      "resources/terminal/shell-integration.ps1",
+      "resources/plugin-node/**/*",
+      "../hooks/builtin/auto-context-loader.mjs",
+      "../hooks/builtin/cost-quota-guard.mjs",
+      "../hooks/builtin/pii-safety-guard.mjs"
     ],
     "icon": [
       "icons/32x32.png",
@@ -58,13 +73,18 @@
       "certificateThumbprint": null,
       "digestAlgorithm": "sha256",
       "timestampUrl": ""
+    },
+    "macOS": {
+      "hardenedRuntime": true,
+      "minimumSystemVersion": "14.4"
     }
   },
   "plugins": {
     "updater": {
-      "active": false,
-      "endpoints": [],
-      "pubkey": ""
+      "endpoints": [
+        "https://github.com/MaxQian888/cognia-next/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQwQzVDOTEyQTMwODhDMgpSV1RDaURBcWtWd01EY1VhMGpzdFljVTRhV3p2eU40d0VNVk02VDB3M2lmRlVRcytCNFFMQW1BcAo="
     },
     "deep-link": {
       "mobile": [],
@@ -90,7 +110,7 @@
       ]
     },
     "shell": {
-      "open": false
+      "open": true
     }
   }
 }

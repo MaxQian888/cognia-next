@@ -1,0 +1,180 @@
+{
+  "add": {
+    "cancel": "Cancel",
+    "agentIdLabel": "Agent ID",
+    "branchLabel": "Branch (optional)",
+    "characterIdLabel": "Character ID",
+    "description": "Manually save a durable fact with explicit provenance and an optional narrow scope.",
+    "importanceLabel": "Importance",
+    "pathPatternLabel": "Path prefix (optional)",
+    "projectIdLabel": "Project ID",
+    "projectIdOptionalLabel": "Project ID (optional)",
+    "scopeLabel": "Scope",
+    "submit": "Add memory",
+    "tagsLabel": "Tags",
+    "tagsPlaceholder": "comma, separated, tags",
+    "textLabel": "Memory",
+    "textPlaceholder": "e.g. The user prefers pnpm and TypeScript strict mode.",
+    "title": "Add memory",
+    "typeLabel": "Type"
+  },
+  "bulk": {
+    "clear": "Clear selection",
+    "delete": "Delete",
+    "deleteConfirm": {
+      "cancel": "Cancel",
+      "confirm": "Delete",
+      "description": "This permanently removes {count} memories. This can't be undone.",
+      "title": "Delete selected memories?"
+    },
+    "pin": "Pin",
+    "selectAll": "Select all",
+    "selected": "{count} selected",
+    "unpin": "Unpin"
+  },
+  "conflicts": {
+    "clearStaleConflict": "Mark as verified",
+    "counterpartMissing": "The conflicting memory no longer exists. Clear the stale conflict flag so this memory rejoins recall.",
+    "description": "These two memories contradict each other and are both excluded from recall until resolved.",
+    "keepBoth": "Keep both",
+    "keepThis": "Keep this one",
+    "merge": "Merge by hand…",
+    "mergeAria": "Merged memory text",
+    "mergeCancel": "Cancel merge",
+    "mergeConfirm": "Save merge",
+    "mergePlaceholder": "Write the reconciled fact…",
+    "openResolver": "Resolve conflict…",
+    "pending": "Pending review",
+    "resolvedToast": "Conflict resolved",
+    "title": "Resolve conflicting memories"
+  },
+  "detail": {
+    "auditTitle": "Audit history",
+    "cancel": "Cancel",
+    "close": "Close",
+    "conflictGone": "The conflicting memory was deleted.",
+    "conflictsWith": "Conflicts with",
+    "deleteConfirm": {
+      "cancel": "Cancel",
+      "confirm": "Delete",
+      "description": "This permanently removes the memory. This can't be undone.",
+      "title": "Delete this memory?"
+    },
+    "evidenceTitle": "Evidence records",
+    "fields": {
+      "accessCount": "Recalled",
+      "archivedAt": "Archived",
+      "created": "Created",
+      "contamination": "Context trust",
+      "evidence": "Evidence",
+      "importance": "Importance",
+      "indexed": "Indexed",
+      "key": "Key",
+      "lastUsed": "Last used",
+      "review": "Review",
+      "scope": "Scope",
+      "updated": "Updated",
+      "version": "Version"
+    },
+    "importanceLabel": "Importance",
+    "next": "Next memory",
+    "no": "No",
+    "previous": "Previous memory",
+    "replacedBy": "Replaced by",
+    "replacedByGone": "The replacement was deleted.",
+    "recordCount": "{count, plural, one {# record} other {# records}}",
+    "save": "Save",
+    "source": "Source",
+    "tagsLabel": "Tags",
+    "tagsPlaceholder": "comma, separated, tags",
+    "textLabel": "Text",
+    "yes": "Yes"
+  },
+  "errors": {
+    "disabled": "Memory is disabled in settings",
+    "mutation_failed": "The memory operation failed — please try again",
+    "not_found": "This memory no longer exists",
+    "pii_blocked": "Blocked: the text contains personal information",
+    "temporary": "Memory is in temporary mode"
+  },
+  "panel": {
+    "accessedRelative": "used {time}",
+    "add": "Add",
+    "addFirst": "Add your first memory",
+    "cancelEdit": "Cancel",
+    "clearFilters": "Clear filters",
+    "clearTags": "Clear tags",
+    "delete": "Delete",
+    "detailTitle": "Memory details",
+    "edit": "Edit",
+    "editLabel": "Edit memory text",
+    "empty": {
+      "description": "As you chat, durable facts about you are saved here. You can also use /remember.",
+      "title": "No memories yet"
+    },
+    "invalidated": "archived",
+    "noResults": {
+      "description": "No memory matches the current filters.",
+      "title": "No matching memories"
+    },
+    "pin": "Pin",
+    "provenanceLabel": "Source type",
+    "saveEdit": "Save",
+    "scopeLabel": "Scope",
+    "searchLabel": "Search memories",
+    "searchPlaceholder": "Search memories…",
+    "selectRow": "Select memory",
+    "showInvalidated": "Show archived",
+    "sort": {
+      "accessed": "Recently used",
+      "created": "Recently created",
+      "importance": "Importance",
+      "recent": "Recently updated"
+    },
+    "sortLabel": "Sort",
+    "stats": {
+      "active": "Active"
+    },
+    "subtitle": "What the assistant remembers about you.",
+    "tabs": {
+      "app": "App memory",
+      "external": "External agent memory"
+    },
+    "tagFilterLabel": "Tags:",
+    "title": "Memory",
+    "unpin": "Unpin",
+    "viewSource": "View source"
+  },
+  "provenance": {
+    "all": "All sources",
+    "explicit": "Explicit",
+    "external": "External (API)",
+    "inbound": "Inbound",
+    "system": "System",
+    "user": "Auto (chat)"
+  },
+  "governance": {
+    "clean": "Clean",
+    "conflict": "Conflict",
+    "external-context": "External context",
+    "legacy": "Legacy / no evidence",
+    "markConflict": "Mark conflict",
+    "markVerified": "Mark verified",
+    "supported": "Evidence-backed",
+    "unknown": "Unknown",
+    "unreviewed": "Unreviewed",
+    "verified": "Verified"
+  },
+  "scopes": {
+    "agent": "Agent",
+    "all": "All scopes",
+    "character": "Character",
+    "global": "Global",
+    "workspace": "Workspace"
+  },
+  "types": {
+    "episodic": "Event",
+    "procedural": "Preference",
+    "semantic": "Fact"
+  }
+}

@@ -1,6 +1,6 @@
 ---
 title: Ecosystem & Presets
-description: The product catalog and out-of-the-box configs — ecosystem-adapters.ts (413 lines) enumerates 4 product adapters and 10 surfaces tagged by support tier, presets.ts (332 lines) derives the 4 executable presets and supports plugin-contributed ones, and env-builder.ts (85 lines) injects the codex subscription env overlay at spawn time.
+description: The product catalog and out-of-the-box configs — ecosystem-adapters.ts enumerates 9 product adapters and 15 surfaces tagged by support tier, presets.ts derives the 9 executable ACP presets and supports plugin-contributed ones, and env-builder.ts injects the codex subscription env overlay at spawn time.
 ---
 
 # Ecosystem & Presets
@@ -9,20 +9,22 @@ description: The product catalog and out-of-the-box configs — ecosystem-adapte
 
 <TLDR>
   This cluster answers "**which** external agents can a user pick, and how is each launched?"
-  `ecosystem-adapters.ts` is the static product catalog: 4 adapters (**Codex**, **Claude Code**,
-  **Gemini CLI**, **Cursor**) exposing 10 surfaces (`:48`), each tagged `executable`, `guided`, or
-  `documented-only`. Only 4 surfaces are `executable` — those become the 4 built-in **presets** in
-  `presets.ts` (`:105`): `codex`, `claude-code`, `gemini-cli`, `cursor-cli`, all ACP-over-stdio.
-  `createAgentFromPreset` (`:242`) materializes a full `ExternalAgentConfig` from a preset id, and a
+  `ecosystem-adapters.ts` is the static product catalog: 9 adapters (**Codex**, **Claude Code**,
+  **Gemini CLI**, **Copilot CLI**, **Kiro**, **Qwen Code**, **Pi**, **Factory Droid**, **Cursor**)
+  exposing 16 surfaces (`:48`), each tagged `executable`, `guided`, or `documented-only`. The 10
+  `executable` surfaces become the built-in **presets** in `presets.ts`: `codex`, `codex-app-server`,
+  `claude-code`, `gemini-cli`, `cursor-cli`, `copilot-cli`, `kiro`, `qwen-code`, `pi`, `droid` —
+  all ACP-over-stdio except the native codex app-server.
+  `createAgentFromPreset` materializes a full `ExternalAgentConfig` from a preset id, and a
   runtime overlay lets plugins register their own presets without touching the closed type union.
   At spawn time, `env-builder.ts` (`:36`) injects the active Codex subscription account's env vars —
   the one preset that needs credentials beyond a plain API key.
 </TLDR>
 
 <StatGrid>
-  <Stat label="Product adapters" value="4" hint="codex · claude-code · gemini-cli · cursor — ecosystem-adapters.ts:48" />
-  <Stat label="Surfaces" value="10" hint="4 executable · 6 documented-only" />
-  <Stat label="Executable presets" value="4" hint="presets.ts:105 (+ custom:null)" />
+  <Stat label="Product adapters" value="9" hint="codex · claude-code · gemini-cli · copilot-cli · kiro · qwen-code · pi · droid · cursor — ecosystem-adapters.ts:48" />
+  <Stat label="Surfaces" value="16" hint="10 executable · 6 documented-only" />
+  <Stat label="Executable presets" value="10" hint="EXTERNAL_AGENT_PRESETS (+ custom:null)" />
   <Stat label="All ACP / stdio" value="yes" hint="every executable preset is acp + stdio" />
   <Stat label="Default timeout" value="30s" hint="createAgentFromPreset :278 (vs config-normalizer 300s)" />
   <Stat label="Env overlay" value="codex only" hint="env-builder.ts:62 — subscription-backed" />
@@ -45,12 +47,18 @@ a way that product can be reached, tagged with a **support tier**:
 | codex | slack | documented-only | http/http | — | configure Slack app | 116 |
 | codex | cloud | documented-only | http/http | — | ChatGPT/OpenAI cloud | 134 |
 | **claude-code** | acp-stdio (Claude Code) | executable | acp/stdio | `npx -y @anthropics/claude-code --stdio` | `ANTHROPIC_API_KEY` | 160 |
-| **gemini-cli** | acp-stdio (Gemini CLI) | executable | acp/stdio | `npx -y @google/gemini-cli --stdio` | `GOOGLE_API_KEY` | 188 |
-| **cursor** | acp-stdio (Cursor CLI) | executable | acp/stdio | `cursor-agent` (on PATH) | install Cursor CLI | 216 |
-| cursor | mcp-config | documented-only | acp/http | — | Cursor-side MCP config | 236 |
-| cursor | background-agent | documented-only | acp/http | — | hosted background agents | 253 |
+| **gemini-cli** | acp-stdio (Gemini CLI) | executable | acp/stdio | `npx -y @google/gemini-cli --stdio` | `GOOGLE_API_KEY` | 210 |
+| **copilot-cli** | acp-stdio (GitHub Copilot CLI) | executable | acp/stdio | `copilot --acp` | `COPILOT_GITHUB_TOKEN` / `/login` | 238 |
+| **kiro** | acp-stdio (Kiro CLI) | executable | acp/stdio | `kiro-cli acp` | AWS Builder ID login | 269 |
+| **qwen-code** | acp-stdio (Qwen Code) | executable | acp/stdio | `npx -y @qwen-code/qwen-code --acp` | Qwen OAuth / `OPENAI_API_KEY` | 298 |
+| **pi** | acp-stdio (Pi, community adapter) | executable | acp/stdio | `npx -y pi-acp` | Pi settings keys; third-party bridge | 327 |
+| **droid** | acp-stdio (Factory Droid) | executable | acp/stdio | `droid exec --output-format acp` | `FACTORY_API_KEY` / device login | 359 |
+| **cursor** | acp-stdio (Cursor CLI) | executable | acp/stdio | `cursor-agent` (on PATH) | install Cursor CLI | 390 |
+| cursor | mcp-config | documented-only | acp/http | — | Cursor-side MCP config | 410 |
+| cursor | background-agent | documented-only | acp/http | — | hosted background agents | 427 |
 
-The adapter blocks start at: codex `:52`, claude-code `:153`, gemini-cli `:181`, cursor `:209`.
+The adapter blocks start at: codex `:52`, claude-code `:175`, gemini-cli `:203`, copilot-cli `:231`,
+kiro `:262`, qwen-code `:291`, pi `:320`, droid `:352`, cursor `:383`.
 Lookup/resolution helpers: `getExternalAgentEcosystemAdapter` (`:274`),
 `findExternalAgentSurfaceByPresetId` (`:284`), `findExternalAgentSurface` (`:297`),
 `checkSurfaceExecutability` (`:324`, returns a block when `documented-only`), `listAllSurfacesWithTier`
@@ -60,21 +68,29 @@ probe).
 > **OpenCode is not in this catalog.** It is a *protocol* (`config-normalizer.ts:16`), not a packaged
 > product surface — users point it at a running OpenCode server rather than picking a preset.
 
-## The Four Presets
+## The Built-in Presets
 
 `presets.ts` derives the built-in presets *from* the executable surfaces — each preset is built by
-`buildPresetConfig(presetId)` (`:76`), which looks the surface up by `presetId`. The catalog is
-`EXTERNAL_AGENT_PRESETS` (`:105`):
+`buildPresetConfig(presetId)`, which looks the surface up by `presetId`. The catalog is
+`EXTERNAL_AGENT_PRESETS`:
 
-| Preset id | Name | Protocol | Transport | Spawn | Built at |
-| --- | --- | --- | --- | --- | --- |
-| `codex` | Codex CLI | acp | stdio | `npx -y @zed-industries/codex-acp` | 109 |
-| `claude-code` | Claude Code | acp | stdio | `npx -y @anthropics/claude-code --stdio` | 110 |
-| `gemini-cli` | Gemini CLI | acp | stdio | `npx -y @google/gemini-cli --stdio` | 111 |
-| `cursor-cli` | Cursor CLI | acp | stdio | `cursor-agent` | 112 |
-| `custom` | — | — | — | `null` (user-defined) | 113 |
+| Preset id | Name | Protocol | Transport | Spawn |
+| --- | --- | --- | --- | --- |
+| `codex` | Codex CLI | acp | stdio | `npx -y @zed-industries/codex-acp` |
+| `codex-app-server` | Codex (app-server) | codex-app-server | stdio | `codex app-server` |
+| `claude-code` | Claude Code | acp | stdio | `npx -y @anthropics/claude-code --stdio` |
+| `gemini-cli` | Gemini CLI | acp | stdio | `npx -y @google/gemini-cli --stdio` |
+| `cursor-cli` | Cursor CLI | acp | stdio | `cursor-agent` |
+| `copilot-cli` | GitHub Copilot CLI | acp | stdio | `copilot --acp` |
+| `kiro` | Kiro CLI | acp | stdio | `kiro-cli acp` |
+| `qwen-code` | Qwen Code | acp | stdio | `npx -y @qwen-code/qwen-code --acp` |
+| `pi` | Pi (community adapter) | acp | stdio | `npx -y pi-acp` |
+| `droid` | Factory Droid | acp | stdio | `droid exec --output-format acp` |
+| `custom` | — | — | — | `null` (user-defined) |
 
-`ExternalAgentPresetId` (`:25`) is a closed union, but presets are not — see the next section.
+`ExternalAgentPresetId` (`:26`) is a closed union, but presets are not — see the next section.
+The Pi entry is bridged by the community `pi-acp` adapter (Pi has no native ACP support yet), so it
+is tagged `community-adapter` / `experimental` in the catalog.
 
 ### Materializing a config
 
@@ -100,6 +116,12 @@ Plugins extend the gallery without touching the closed union. A runtime overlay 
 
 These are driven by the `externalAgentPresets` manifest field and `ctx.registerExternalAgentPreset`
 — see [Integration seams](./integration).
+
+A preset only configures launch over one of the built-in protocols. To contribute a **new protocol**
+(the adapter behaviour itself), a plugin uses the `external-agent-adapter` capability
+(`externalAgentAdapters` / `ctx.agent.registerExternalAgentAdapter`), which registers a
+`() => ProtocolAdapter` factory under `${pluginId}:${id}` and pairs with a matching preset — see
+[Contributing a new protocol](./integration) and [ADR-0051](../../adr/0051-external-agent-adapter-plugin-type).
 
 ## env-builder.ts — Credentials at Spawn Time
 

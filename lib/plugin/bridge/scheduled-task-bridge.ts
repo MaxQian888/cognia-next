@@ -22,7 +22,12 @@
  */
 
 import type { PluginManifest, PluginScheduledTaskDef } from "@/types/plugin/plugin"
-import type { CreateScheduledTaskInput, ScheduledTask, TaskTrigger } from "@/types/scheduler"
+import type {
+  CreateScheduledTaskInput,
+  ScheduledTask,
+  TaskTrigger,
+  UpdateScheduledTaskInput,
+} from "@/types/scheduler"
 import { loggers } from "@/lib/plugin/core/logger"
 import {
   registerScheduledTaskDefsForPlugin,
@@ -33,6 +38,7 @@ import {
 export interface ScheduledTaskSchedulerPort {
   getAllTasks(): Promise<ScheduledTask[]>
   createTask(input: CreateScheduledTaskInput): Promise<ScheduledTask>
+  updateTask(taskId: string, input: UpdateScheduledTaskInput): Promise<ScheduledTask | null>
   deleteTask(taskId: string): Promise<boolean>
   pauseTask(taskId: string): Promise<boolean>
 }
@@ -46,6 +52,8 @@ export interface ScheduledTaskBridgeResult {
   created: number
   /** Defs skipped because an equivalent task already existed. */
   skipped: number
+  /** Existing tasks whose manifest trigger changed and were re-armed. */
+  updated: number
   errors: Array<{ pluginId: string; taskName: string; message: string }>
 }
 
@@ -94,7 +102,7 @@ export async function registerScheduledTasksForPlugin(
 ): Promise<ScheduledTaskBridgeResult> {
   const pluginId = manifest.id
   const defs = manifest.scheduledTasks ?? []
-  const result: ScheduledTaskBridgeResult = { created: 0, skipped: 0, errors: [] }
+  const result: ScheduledTaskBridgeResult = { created: 0, skipped: 0, updated: 0, errors: [] }
 
   // Always record the defs (count/diagnostics) even if scheduling fails.
   registerScheduledTaskDefsForPlugin(pluginId, defs)
@@ -106,12 +114,18 @@ export async function registerScheduledTasksForPlugin(
 
   for (const def of defs) {
     try {
-      const alreadyExists = ownExisting.some((t) => {
+      const existingTask = ownExisting.find((t) => {
         const payload = t.payload as unknown as Partial<PluginTaskPayload> | undefined
         return t.name === def.name && payload?.handler === def.handler
       })
-      if (alreadyExists) {
-        result.skipped += 1
+      if (existingTask) {
+        const trigger = toTaskTrigger(def)
+        if (JSON.stringify(existingTask.trigger) === JSON.stringify(trigger)) {
+          result.skipped += 1
+        } else {
+          await scheduler.updateTask(existingTask.id, { trigger })
+          result.updated += 1
+        }
         continue
       }
       const input: CreateScheduledTaskInput = {

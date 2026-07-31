@@ -21,6 +21,7 @@
  */
 
 import type { OcrProvider } from "@/types/ocr"
+import type { PluginContributionBackend } from "@/types/plugin/plugin"
 
 /**
  * One OCR provider contribution in `manifest.ocrProviders[]`.
@@ -40,16 +41,25 @@ export interface PluginOcrProviderDef {
    */
   label: string
   /**
+   * Which runtime owns this provider's factory. Omit to inherit the plugin
+   * type (`python` plugins default to `"python"`); declaring `entry` pins it
+   * to `"js"`. See {@link PluginContributionBackend}.
+   */
+  backend?: PluginContributionBackend
+  /**
    * Relative path inside the plugin install root to the module that exports
    * the factory. Validated by `lib/plugin/core/validation.ts` against path
    * traversal (no `..`, no absolute paths, no NUL bytes).
+   *
+   * Required for JS-backed providers; omitted for python-backed ones, which
+   * resolve through the `plugin_python_call` seam instead of a JS module.
    */
-  entry: string
+  entry?: string
   /**
    * Named export on the entry module — must resolve to a
-   * `PluginOcrProviderFactory` at runtime.
+   * `PluginOcrProviderFactory` at runtime. Required for JS-backed providers.
    */
-  export: string
+  export?: string
   /**
    * Free-text description displayed in the provider picker UI.
    */

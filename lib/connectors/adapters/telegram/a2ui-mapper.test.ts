@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for the Telegram A2UI mapper.
  *
@@ -87,6 +88,46 @@ describe("buildTelegramA2UICalls — text + media", () => {
     const calls = await buildTelegramA2UICalls(baseInput(surface))
     expect(calls[0].payload.text).toContain("⚠️")
     expect(calls[0].payload.text).toContain("*Heads up*")
+  })
+
+  it("escapes only ) and \\ inside link hrefs (audited fix #4c)", async () => {
+    const surface: A2UISegmentContent = {
+      components: {
+        root: { id: "root", component: "Link", text: "Wiki", href: "https://x.dev/A_(b)" },
+      },
+      dataModel: {},
+      rootId: "root",
+    }
+    const calls = await buildTelegramA2UICalls(baseInput(surface))
+    // The raw ")" would end the link early; underscores must stay raw.
+    expect(calls[0].payload.text).toBe("[Wiki](https://x.dev/A_(b\\))")
+  })
+
+  it("escapes only ` and \\ inside Text variant=code (audited fix #4a)", async () => {
+    const surface: A2UISegmentContent = {
+      components: {
+        root: { id: "root", component: "Text", text: "a.b(1) + `x`", variant: "code" },
+      },
+      dataModel: {},
+      rootId: "root",
+    }
+    const calls = await buildTelegramA2UICalls(baseInput(surface))
+    expect(calls[0].payload.text).toBe("```\na.b(1) + \\`x\\`\n```")
+  })
+
+  it("moves an over-1024-char caption to a follow-up sendMessage (audited fix #7)", async () => {
+    const longAlt = "a".repeat(1500)
+    const surface: A2UISegmentContent = {
+      components: {
+        root: { id: "root", component: "Image", src: "https://x/y.png", alt: longAlt },
+      },
+      dataModel: {},
+      rootId: "root",
+    }
+    const calls = await buildTelegramA2UICalls(baseInput(surface))
+    expect(calls.map((c) => c.method)).toEqual(["sendPhoto", "sendMessage"])
+    expect(calls[0].payload.caption).toBeUndefined()
+    expect(calls[1].payload.text).toBe(longAlt)
   })
 })
 

@@ -5,7 +5,7 @@
  * This file isolates the catch branch by mocking the helpers module so the
  * action throws without depending on real heuristic input.
  */
-jest.mock("@/lib/logging", () => {
+jest.mock("@cognia/logging", () => {
   const child = {
     debug: jest.fn(),
     info: jest.fn(),

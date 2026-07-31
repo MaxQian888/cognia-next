@@ -3,7 +3,7 @@
  */
 import { renderHook } from "@testing-library/react"
 import { useTeamMembers } from "./use-team-members"
-import type { Character, Team } from "@/lib/claude/types"
+import type { Character, Team } from "@cognia/agent-config-types"
 
 const liveQueryMock = jest.fn<unknown, [() => Promise<unknown>, unknown[], unknown]>()
 

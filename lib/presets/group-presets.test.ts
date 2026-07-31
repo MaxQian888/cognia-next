@@ -1,5 +1,5 @@
 import { groupPresets } from "./group-presets"
-import type { SystemPromptPreset } from "@/lib/claude/types"
+import type { SystemPromptPreset } from "@cognia/agent-config-types"
 
 function preset(overrides: Partial<SystemPromptPreset>): SystemPromptPreset {
   return {

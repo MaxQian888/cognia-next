@@ -1,7 +1,7 @@
 "use client"
 
 import React, { memo } from "react"
-import { useA2UIContext } from "@/hooks/a2ui/use-a2ui-context"
+import { useA2UIActions } from "@/hooks/a2ui/use-a2ui-context"
 
 /**
  * Render a list of child component IDs.
@@ -15,7 +15,9 @@ export const A2UIChildRenderer = memo(function A2UIChildRenderer({
 }: {
   childIds: string[]
 }) {
-  const { renderChild } = useA2UIContext()
+  // Actions-only context: re-renders when the component tree changes, but not
+  // on data-model-only changes (e.g. keystrokes)
+  const { renderChild } = useA2UIActions()
 
   return (
     <>

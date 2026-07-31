@@ -81,6 +81,23 @@ describe("handleSessions", () => {
     expect(md).toContain("Use `/resume <title or id>` to switch.")
   })
 
+  it("does not reveal embedded resource sessions", async () => {
+    mockedList.mockResolvedValue([
+      { id: "ordinary", title: "Ordinary", updatedAt: Date.now() },
+      {
+        id: "resource",
+        title: "Private resource thread",
+        kind: "resource-workbench",
+        visibility: "embedded",
+        updatedAt: Date.now(),
+      },
+    ])
+    const ctx = makeCtx()
+    await handleSessions(ctx)
+    expect(ctx._pushed[0]).toContain("Ordinary")
+    expect(ctx._pushed[0]).not.toContain("Private resource thread")
+  })
+
   it("captures Error from listSessions", async () => {
     mockedList.mockRejectedValue(new Error("nope"))
     const ctx = makeCtx()
@@ -142,7 +159,26 @@ describe("handleResume", () => {
     const ctx = makeCtx({ args: "id-2" })
     await handleResume(ctx)
     expect(setActive).toHaveBeenCalledWith("id-2")
-    expect(ctx._pushed[0]).toContain("Resumed `Second`.")
+    expect(ctx._pushed[0]).toEqual({
+      kind: "slash-result",
+      commandId: "resume",
+      args: "id-2",
+      summary: "Resumed Second",
+    })
+  })
+
+  it("cannot resume an embedded resource session through the global command", async () => {
+    mockedList.mockResolvedValue([
+      {
+        id: "resource",
+        title: "Private resource thread",
+        kind: "resource-workbench",
+        visibility: "embedded",
+      },
+    ])
+    const ctx = makeCtx({ args: "resource" })
+    await handleResume(ctx)
+    expect(ctx._pushed[0]).toContain("No sessions yet")
   })
 
   it("matches by case-insensitive exact title", async () => {
@@ -155,7 +191,12 @@ describe("handleResume", () => {
     const ctx = makeCtx({ args: "first" })
     await handleResume(ctx)
     expect(setActive).toHaveBeenCalledWith("id-1")
-    expect(ctx._pushed[0]).toContain("Resumed `First`.")
+    expect(ctx._pushed[0]).toEqual({
+      kind: "slash-result",
+      commandId: "resume",
+      args: "first",
+      summary: "Resumed First",
+    })
   })
 
   it("matches by substring when there is exactly one partial match", async () => {
@@ -168,7 +209,12 @@ describe("handleResume", () => {
     const ctx = makeCtx({ args: "alpha" })
     await handleResume(ctx)
     expect(setActive).toHaveBeenCalledWith("a")
-    expect(ctx._pushed[0]).toContain("Resumed `Alpha thing`.")
+    expect(ctx._pushed[0]).toEqual({
+      kind: "slash-result",
+      commandId: "resume",
+      args: "alpha",
+      summary: "Resumed Alpha thing",
+    })
   })
 
   it("reports no match when neither title nor id matches", async () => {

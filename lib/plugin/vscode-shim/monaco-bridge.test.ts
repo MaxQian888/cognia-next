@@ -654,7 +654,14 @@ describe("monaco-bridge", () => {
     }
 
     it("registerInlineCompletionProvider routes provideInlineCompletionItems", async () => {
-      const { api, dispatch, model, pos } = setup({ items: [{ insertText: "hi" }] })
+      const { api, dispatch, model, pos } = setup({
+        items: [
+          {
+            insertText: { value: "hi(${1:name})" },
+            range: { start: { line: 2, character: 1 }, end: { line: 2, character: 3 } },
+          },
+        ],
+      })
       registerInlineCompletionProvider({
         extensionId: "ext.continue",
         selector: ["typescript"],
@@ -670,7 +677,19 @@ describe("monaco-bridge", () => {
           position: { line: pos.lineNumber - 1, character: pos.column - 1 },
         })
       )
-      expect(result).toEqual({ items: [{ insertText: "hi" }] })
+      expect(result).toEqual({
+        items: [
+          {
+            insertText: { snippet: "hi(${1:name})" },
+            range: {
+              startLineNumber: 3,
+              startColumn: 2,
+              endLineNumber: 3,
+              endColumn: 4,
+            },
+          },
+        ],
+      })
     })
 
     it("registerSignatureHelpProvider routes provideSignatureHelp and passes trigger chars", async () => {

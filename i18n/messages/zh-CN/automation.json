@@ -1,0 +1,371 @@
+{
+  "audit": {
+    "clear": "清除日志",
+    "columns": {
+      "command": "命令",
+      "decision": "裁决",
+      "duration": "耗时",
+      "surface": "界面",
+      "target": "目标",
+      "time": "时间"
+    },
+    "description": "自动化调用记录，最新在前。",
+    "empty": "当前筛选条件下无审计记录。",
+    "exportCsv": "导出 CSV",
+    "filters": {
+      "allDecisions": "全部裁决",
+      "allSurfaces": "全部界面",
+      "decisionAllow": "allow",
+      "decisionConsent": "consent",
+      "decisionDeny": "deny",
+      "surfaceComputerUse": "桌面自动化",
+      "surfaceMcp": "MCP",
+      "surfacePlugin": "插件",
+      "surfaceWorkflow": "工作流"
+    },
+    "loading": "正在加载审计日志……",
+    "title": "审计日志"
+  },
+  "behavior": {
+    "consentTimeout": {
+      "help": "逐次确认弹窗在自动拒绝前等待多久。窗口越长，手机越有时间收到通知、解锁并作答。上限 115 秒，确保作答不会晚于工具调用本身的放弃时间。",
+      "label": "确认等待时长（秒）"
+    },
+    "dedup": {
+      "help": "连续截图内容相同时，发送一条简短文本说明而不是重复图片。长任务可大幅节省 token。",
+      "label": "跳过未变化的截图"
+    },
+    "description": "控制截图与输入以何种形式呈现给模型。",
+    "pasteThreshold": {
+      "help": "超过该字符数的输入操作改走剪贴板粘贴，而不是逐键输入。0 表示禁用。",
+      "label": "粘贴阈值（字符数）"
+    },
+    "pictureInPicture": {
+      "help": "阻止桌面自动化活动浮层显示在当前对话上方。",
+      "label": "始终隐藏画中画"
+    },
+    "scaling": {
+      "help": "发送给模型前将截图缩放到目标尺寸内。可提升点击精度并降低 token 成本（推荐 1280×800）。",
+      "label": "截图降采样",
+      "maxHeight": "最大高度",
+      "maxWidth": "最大宽度"
+    },
+    "title": "模型行为"
+  },
+  "consent": {
+    "actions": {
+      "allowForLabel": "接下来不再询问：",
+      "allowForMinutes": "{minutes} 分钟",
+      "allowOnce": "本次允许",
+      "close": "关闭",
+      "reject": "拒绝"
+    },
+    "ariaLabel": "自动化操作确认",
+    "commands": {
+      "auditSnapshot": "读取审计快照",
+      "capabilities": "读取能力清单",
+      "click": "点击屏幕",
+      "cursorPosition": "读取光标位置",
+      "drag": "拖拽",
+      "find": "查找元素",
+      "getFocus": "读取焦点元素",
+      "holdKey": "长按按键",
+      "invokePattern": "调用自动化模式",
+      "keys": "发送按键",
+      "killSwitch": "触发紧急停止",
+      "mouseMove": "移动鼠标",
+      "pickAtPoint": "拾取指定坐标元素",
+      "readTree": "读取无障碍树",
+      "screenshot": "截屏",
+      "scroll": "滚动",
+      "settingsGet": "读取自动化设置",
+      "settingsSet": "写入自动化设置",
+      "type": "输入文本",
+      "windowOp": "窗口操作"
+    },
+    "fields": {
+      "action": "操作：",
+      "autoReject": "{seconds} 秒后自动拒绝",
+      "command": "命令：",
+      "morePending": "（还有 {count} 个待处理）",
+      "plugin": "插件：",
+      "process": "进程：",
+      "surface": "界面：",
+      "window": "窗口："
+    },
+    "surfaces": {
+      "computerUse": "桌面自动化",
+      "mcp": "MCP",
+      "plugin": "插件",
+      "workflow": "工作流"
+    },
+    "title": "自动化操作请求授权"
+  },
+  "header": {
+    "description": "配置绑定 revision 的桌面自动化、应用授权、捕获与策略。",
+    "title": "自动化"
+  },
+  "inspector": {
+    "actionFailed": "操作失败",
+    "app": "应用",
+    "appOption": "{name} · PID {pid}",
+    "appsFailed": "列出应用失败",
+    "capabilitiesFailed": "读取自动化能力失败",
+    "captureState": "捕获状态",
+    "clearQuery": "清除",
+    "coordinates": "坐标空间",
+    "coordinatesDescription": "查看逻辑点、源像素、模型像素与已捕获窗口的诊断信息。",
+    "details": {
+      "automationId": "Automation ID",
+      "className": "类",
+      "coordinateSpace": "当前坐标空间",
+      "displayId": "显示器 ID",
+      "fingerprint": "结构指纹",
+      "logicalBounds": "全局逻辑边界",
+      "modelPixels": "模型像素",
+      "name": "名称",
+      "revision": "Handle revision",
+      "role": "角色 / 控件类型",
+      "scaleFactor": "缩放系数",
+      "sourcePixels": "源像素",
+      "windowId": "窗口 ID"
+    },
+    "elementDetails": "元素详情",
+    "elementDetailsDescription": "查看 canonical handle、属性、展开结果与操作验证。",
+    "emptyResult": "未返回任何元素。",
+    "events": {
+      "action": "操作返回 {status}。",
+      "capture": "已捕获 revision {revision}。",
+      "expand": "已展开 {count} 个子元素。",
+      "query": "查询返回 {count} 个元素。"
+    },
+    "expand": "展开子元素",
+    "expandFailed": "展开元素失败",
+    "expandMore": "加载更多子元素",
+    "handleFresh": "Handle 有效",
+    "handleStale": "Handle 已过期",
+    "nextPage": "下一页",
+    "noDiff": "再次捕获 revision 后即可查看确定性差异。",
+    "noEvents": "暂无检查器事件。",
+    "noEvidence": "执行操作后可查看策略决策与证据。",
+    "noScreenshot": "此 revision 没有匹配的截图。",
+    "none": "无",
+    "pageSummary": "第 {page} / {pages} 页",
+    "previousPage": "上一页",
+    "query": "查询元素",
+    "queryFailed": "查询元素失败",
+    "queryPlaceholder": "按元素名称查询",
+    "reading": "捕获中……",
+    "refreshApps": "刷新应用",
+    "requiresTauri": "检查器需要 Tauri 运行时才能与当前无障碍后端通信。",
+    "screenshot": "Revision 截图",
+    "screenshotAlt": "已捕获的应用窗口",
+    "screenshotDescription": "与窗口绑定的截图，并叠加显示所选 AX 元素。",
+    "selectApp": "选择应用",
+    "selectRow": "从树中选择一个元素以查看详情。",
+    "selectedOverlay": "所选元素叠加框",
+    "semanticClick": "测试语义点击",
+    "session": {
+      "description": "每次捕获都会把一个 AX tree revision 与匹配的窗口截图及 turn token 绑定。",
+      "title": "应用 Session"
+    },
+    "stateFailed": "捕获应用状态失败",
+    "tree": "无障碍树",
+    "treeSummary": "Revision {revision}：已投影 {count} / 已采集 {total} 个元素。",
+    "truncation": "树因 {reason} 截断：已物化 {materialized}，省略 {omitted}。",
+    "unavailable": "当前平台后端（{platform}）未暴露无障碍树。",
+    "unnamed": "（未命名）",
+    "views": {
+      "compact": "紧凑树",
+      "diff": "Revision 差异",
+      "events": "事件",
+      "evidence": "操作证据",
+      "raw": "原始树"
+    }
+  },
+  "overview": {
+    "capabilities": {
+      "a11yTree": "无障碍树",
+      "events": "事件",
+      "inputSimulation": "输入模拟",
+      "platform": "平台",
+      "screenshot": "截屏",
+      "uia": "UI 自动化"
+    },
+    "capabilityProbeFailed": "读取平台能力失败。",
+    "engineStatus": "引擎状态",
+    "engineStatusDescription": "开启或关闭自动化引擎。关闭时紧急停止生效，所有调用在网关层被拒绝。",
+    "engineToggle": "启用自动化引擎",
+    "engineToggleHint": "启用后，自动化操作遵循下方配置的权限策略。",
+    "initFailure": {
+      "body": "平台自动化后端（{platform}）启动失败：{error}。在底层问题修复前，Computer Use 调用都会返回 UnsupportedPlatform。请查阅你操作系统的故障排查文档，或在调整权限后重启应用。",
+      "dismiss": "知道了",
+      "title": "后端初始化失败"
+    },
+    "killSwitch": "紧急停止",
+    "killSwitchHint": "立即拒绝所有正在进行的自动化调用。当引擎行为异常时使用。",
+    "metrics": {
+      "allow": "允许",
+      "consent": "同意",
+      "deny": "拒绝",
+      "description": "来自审计日志的活动计数。打开该标签页时刷新，并每 60 秒自动更新。",
+      "lastScreenshotDescription": "最近一次成功截屏的时间。",
+      "lastScreenshotHours": "{hours} 小时前",
+      "lastScreenshotMinutes": "{minutes} 分钟前",
+      "lastScreenshotNever": "最近 24 小时未截屏。",
+      "lastScreenshotRelative": "{seconds} 秒前",
+      "lastScreenshotTitle": "最近一次截屏",
+      "loadFailed": "读取审计日志失败。",
+      "title": "最近 24 小时",
+      "topFailingDescription": "最近 24 小时拒绝 / 同意被否决最多的命令。若集中在某条命令，应当排查原因。",
+      "topFailingEmpty": "最近 24 小时无被拒绝的调用。",
+      "topFailingTitle": "失败率最高的命令",
+      "total": "总数"
+    },
+    "no": "否",
+    "noPlanned": "计划中",
+    "platformCapabilities": "平台能力",
+    "yes": "是"
+  },
+  "permissions": {
+    "defaultTier": "默认等级",
+    "defaultTierDescription": "未设置界面级覆盖时使用的权限等级。",
+    "perPlugin": {
+      "clearOverride": "清除",
+      "description": "声明了 native:input 或 native:screen 权限的插件，可以单独设置一个与 Plugin 界面默认值不同的等级。适合只信任某个具体插件，但不想放宽全部插件策略的场景。",
+      "empty": "当前没有任何已启用的插件声明 native:input。安装或启用一个相关插件（例如 cognia-computer-use）后，即可在此为单个插件设定覆盖等级。",
+      "rowInheriting": "继承上方 Plugin 界面的等级。",
+      "rowOverridden": "已覆盖：{tier}",
+      "title": "按插件覆盖"
+    },
+    "perSurface": "按界面覆盖",
+    "perSurfaceDescription": "每个自动化界面可单独覆盖默认等级。",
+    "surfaces": {
+      "computerUseDescription": "Anthropic 原生 computer-use 工具调用。",
+      "mcpDescription": "来自已连接 MCP 服务器的工具调用。",
+      "pluginDescription": "插件发起的自动化请求。",
+      "workflowDescription": "可视化工作流执行器运行。"
+    },
+    "tier": {
+      "off": "关闭",
+      "perCall": "每次询问",
+      "whitelist": "白名单"
+    }
+  },
+  "pictureInPicture": {
+    "actions": {
+      "clickText": "点击文字",
+      "cursorPosition": "读取光标位置",
+      "doubleClick": "双击",
+      "drag": "拖拽",
+      "findText": "查找文字",
+      "holdKey": "长按按键",
+      "key": "发送按键",
+      "leftClick": "左键单击",
+      "middleClick": "中键单击",
+      "mouseDown": "按下鼠标",
+      "mouseMove": "移动光标",
+      "mouseUp": "松开鼠标",
+      "rightClick": "右键单击",
+      "screenshot": "截取屏幕",
+      "scroll": "滚动",
+      "tripleClick": "三击",
+      "type": "输入文字",
+      "wait": "等待"
+    },
+    "activity": "当前操作：{action}",
+    "close": "关闭",
+    "done": "已完成",
+    "failed": "桌面自动化操作失败",
+    "hide": "隐藏画中画",
+    "justNow": "刚刚",
+    "move": "移动画中画",
+    "resize": "调整画中画大小",
+    "screenAlt": "桌面自动化画面",
+    "secondsAgo": "{seconds} 秒前",
+    "show": "显示画中画",
+    "title": "桌面自动化",
+    "viewLarger": "查看大图",
+    "waitingForFrame": "正在等待第一张截图……"
+  },
+  "sandboxConnections": {
+    "addConnection": "添加连接",
+    "cancel": "取消",
+    "checkHealth": "检查健康",
+    "delete": "删除",
+    "description": "让 computer-use 动作在隔离的 cua Docker 桌面里运行，而不是本机。需要宿主机安装 Docker。",
+    "desktopOnly": "仅在桌面应用中可用",
+    "empty": "尚未配置任何沙箱。",
+    "host": "主机",
+    "image": "Docker 镜像",
+    "name": "名称",
+    "save": "保存",
+    "start": "启动",
+    "statusError": "错误",
+    "statusOk": "运行中",
+    "statusStarting": "启动中",
+    "statusUnknown": "未知",
+    "statusUnreachable": "无法连接",
+    "stop": "停止",
+    "title": "Computer-Use 沙箱"
+  },
+  "screenOff": {
+    "activeMonitor": {
+      "label": "虚拟显示器"
+    },
+    "description": "在显示器关闭或休眠（会话需保持解锁）时让 Computer Use 持续可用。通过捆绑的虚拟显示器保证截图不会黑屏。",
+    "driverVersion": {
+      "label": "驱动"
+    },
+    "enabledHint": "在角色的 Computer Use 设置中按角色开启（熄屏模式）。",
+    "howItWorks": "当启用熄屏模式的角色驱动电脑时，会创建一块虚拟显示器并置为主显示；空闲 5 分钟、触发 kill switch 或会话关闭时自动释放。",
+    "ipcError": {
+      "label": "错误"
+    },
+    "lastError": {
+      "label": "最近错误"
+    },
+    "probeBlack": "截图返回黑帧 —— 请检查驱动。",
+    "probeButton": "测试熄屏截图",
+    "probeOk": "已通过 {monitor} 截取 {width}×{height} —— 非黑屏。",
+    "probeRunning": "测试中…",
+    "setupButton": "安装驱动",
+    "setupNote": "驱动未安装前，熄屏动作会直接报错，而不会拍出黑屏。",
+    "setupRunning": "安装中…",
+    "status": {
+      "down": "不可用",
+      "ok": "就绪",
+      "setup": "需要安装"
+    },
+    "title": "熄屏模式",
+    "windowsOnlyNote": "熄屏模式仅支持 Windows。在当前平台上 Computer Use 使用物理显示器。"
+  },
+  "tabs": {
+    "audit": "审计",
+    "inspector": "检查器",
+    "overview": "概览",
+    "permissions": "权限",
+    "sandboxes": "沙箱",
+    "whitelist": "白名单"
+  },
+  "whitelist": {
+    "add": "添加",
+    "captureFailed": "读取焦点窗口失败",
+    "captureFocused": "捕获当前焦点窗口",
+    "emptyProcess": "尚未添加任何进程名称。请在上方添加。",
+    "emptyWindow": "尚未添加任何窗口标题模式。请在上方添加。",
+    "none": "（无）",
+    "processLabel": "进程：",
+    "processNames": "进程名称",
+    "processNamesHint": "不区分大小写的精确匹配目标进程名（例如 notepad.exe）。",
+    "processPlaceholder": "如 notepad.exe",
+    "quickCapture": "快速捕获",
+    "quickCaptureHint": "读取当前焦点窗口并自动填入下方字段。",
+    "removeEntryAria": "移除 {entry}",
+    "titleLabel": "标题：",
+    "updateFailed": "更新失败",
+    "windowPlaceholder": "如 *Chrome*",
+    "windowTitles": "窗口标题模式",
+    "windowTitlesHint": "使用 * 作为通配符的 Glob 模式（例如 *Excel* 或 *记事本*）。"
+  }
+}

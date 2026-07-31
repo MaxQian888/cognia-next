@@ -1,0 +1,256 @@
+{
+  "backgroundTasks": {
+    "autoResume": "启动时自动恢复被中断的运行",
+    "autoResumeHint": "默认关闭——开启后，被崩溃/退出中断的后台子代理运行会在启动时重新派发（有次数上限）。",
+    "denyList": "派发拒绝列表",
+    "denyListHint": "每行一个作用于子代理 id 的 glob（如 Explore、myplugin:*、template:*）。被拒绝的 id 不会进入 dispatch_agent 工具，并在派发时被拒。",
+    "denyListPlaceholder": "template:*\nmyplugin:reviewer",
+    "description": "后台子代理生命周期与派发权限。",
+    "maxAttempts": "最大自动恢复次数",
+    "maxAttemptsHint": "每条运行血缘链的自动恢复次数上限（防止崩溃循环）。",
+    "surfaceAsks": "上浮子代理权限请求",
+    "surfaceAsksHint": "开启（默认）：被派发子代理的权限请求会显示在本聊天中。关闭：自动拒绝。",
+    "title": "后台任务与权限"
+  },
+  "description": "由父代理派生的子代理模板与实时运行状态。模板会持久化保存，运行时数据为内存级，重启后清空。",
+  "discardBody": "该面板有未保存的修改，现在离开会丢弃它们。",
+  "discardLeave": "放弃并离开",
+  "discardStay": "继续编辑",
+  "discardTitle": "放弃未保存的修改？",
+  "import": {
+    "applyButton": "导入 {count} 个",
+    "applying": "应用中…",
+    "description": "从外部工具读取子代理配置，并转换为 cognia 的模板或角色。",
+    "errors": {
+      "pickFailed": "无法读取所选文件。"
+    },
+    "noDrafts": "没有从所选文件中解析出任何代理。",
+    "pickFiles": "选择文件",
+    "pickFolder": "选择文件夹",
+    "sources": {
+      "auto": "自动识别",
+      "claude-code": "Claude Code（.claude/agents/*.md）",
+      "cline": "Cline（.clinerules/*.md）",
+      "codex-cli": "Codex CLI（~/.codex/agents/*.md）",
+      "cursor": "Cursor（.cursor/rules/*.mdc）",
+      "generic-md": "通用 markdown + frontmatter"
+    },
+    "step1Title": "选择来源",
+    "step2Title": "选择文件",
+    "step3Title": "确认并导入",
+    "strategy": {
+      "duplicate": "两者都保留（副本改名）",
+      "overwrite": "覆盖已有",
+      "skip": "跳过重复项"
+    },
+    "strategyLabel": "当名称已存在时",
+    "summary": "已导入 {imported}，跳过 {skipped}，覆盖 {overwritten}，失败 {failed}。",
+    "target": {
+      "character": "角色",
+      "subagentTemplate": "子代理模板"
+    },
+    "targetLabel": "导入为",
+    "tauriPickFilesHint": "选择单个代理定义文件。",
+    "tauriPickFolderHint": "选择包含代理文件的目录。",
+    "tauriPickHint": "从文件系统中选择一个或多个代理文件。",
+    "title": "导入子代理",
+    "trigger": "导入",
+    "warningsHeader": "{count} 个文件解析失败",
+    "webPickFormats": "支持 .md / .markdown / .mdc / .yaml / .yml。",
+    "webPickHint": "拖放文件到此处，或点击浏览。"
+  },
+  "nav": {
+    "clearSearch": "清除搜索",
+    "emptyFiltered": "没有子代理符合当前筛选条件。",
+    "filterAll": "全部",
+    "groups": {
+      "builtinGroup": "内置",
+      "pluginGroup": "来自插件",
+      "policyGroup": "策略",
+      "runtimeGroup": "运行情况",
+      "userGroup": "我的"
+    },
+    "items": {
+      "background": {
+        "description": "自动恢复与派发权限",
+        "label": "后台任务"
+      },
+      "nesting": {
+        "description": "深度、预算与重试上限",
+        "label": "嵌套派发"
+      },
+      "runtime": {
+        "description": "正在运行的任务及其记录",
+        "label": "正在运行"
+      }
+    },
+    "mobileTrigger": "子代理",
+    "searchPlaceholder": "搜索子代理…",
+    "title": "子代理"
+  },
+  "nesting": {
+    "description": "允许聊天代理派发子代理，并让子代理继续派发下一层，同时受深度、预算、环路与超时的约束。",
+    "dispatchMaxRetries": "瞬时失败重试次数",
+    "dispatchMaxRetriesHint": "针对瞬时派发失败（限流、超时、网络、sidecar 重启）的重试次数。0 表示禁用，默认 1。",
+    "enabled": "启用嵌套派发",
+    "enabledHint": "默认关闭——代理仍使用标准的单层 Task 工具。",
+    "maxDepth": "最大嵌套深度",
+    "maxDepthHint": "子代理最多可以在聊天之下嵌套几层（1–5）。",
+    "timeout": "子树超时（秒）",
+    "timeoutHint": "每棵派发子树的墙钟时间上限。0 表示不限制。",
+    "title": "嵌套子代理",
+    "tokenBudget": "子树 token 预算",
+    "tokenBudgetHint": "当一棵子树消耗超过该 token 数后停止向下派发。0 表示不限制。"
+  },
+  "pluginSection": {
+    "descriptionLabel": "描述",
+    "disabledBadge": "已停用",
+    "disallowedToolsLabel": "禁用的工具",
+    "externalPresetLabel": "外部运行时",
+    "hiddenBadge": "已隐藏",
+    "mcpLabel": "MCP 服务",
+    "missingBody": "声明该子代理的插件已不再注册。",
+    "missingTitle": "子代理不可用",
+    "promptLabel": "系统提示词",
+    "readOnlyBody": "该子代理以插件清单为准，请到插件中修改，而不是在这里。",
+    "readOnlyTitle": "由插件提供",
+    "runtimeId": "派发 id",
+    "toolsLabel": "允许的工具"
+  },
+  "runtime": {
+    "allLogs": "全部日志（{count}）",
+    "backgrounded": "后台",
+    "callout": {
+      "body": "由 Agent Team 或聊天会话派生的子代理在运行时会出现在这里。该列表存在内存中，应用重启即清空。到 Agent Teams 里启动一个队友任务就能看到。",
+      "cta": "打开 Agent Teams",
+      "title": "实时注册表，运行期间才有内容"
+    },
+    "cancelAria": "取消运行 {name}",
+    "cancelRequested": "正在取消「{name}」…",
+    "cancelUnreachable": "该运行不在本窗口执行——可能已经结束，也可能是由 SDK 自带的 Task 工具启动的，那条路径不注册中止句柄。",
+    "clearFinished": "清理已结束（{count}）",
+    "depthBadge": "第 {depth} 层",
+    "description": "正在执行的子代理及其最近活动，随编排器发出的事件实时更新。",
+    "emptyBody": "由活跃聊天派生的子代理会出现在这里。运行时数据存在内存中，应用重启后清空。",
+    "emptyTitle": "当前没有子代理在运行。",
+    "removeAria": "从列表中移除运行 {name}",
+    "title": "正在运行",
+    "tokensSuffix": "tokens",
+    "toolsRunCount": "{n, plural, other {已调用 # 次工具}}"
+  },
+  "templates": {
+    "builtIn": "内置",
+    "categories": {
+      "analysis": "分析",
+      "coding": "编码",
+      "general": "通用",
+      "research": "研究",
+      "writing": "写作"
+    },
+    "configTitle": "高级配置",
+    "copyName": "{name}（副本）",
+    "description": "内置与用户创建的子代理模板。内置模板只读——复制一份即可得到可编辑的副本。",
+    "disabledBadge": "已停用",
+    "dispatchOnlyBody": "钉住 provider 或外部运行时会让该子代理脱离父级运行时，因此它不会出现在普通聊天中，只能经嵌套派发触达。",
+    "dispatchOnlyTitle": "仅可经嵌套派发触达",
+    "duplicate": "复制",
+    "duplicatedToast": "已复制为「{name}」。",
+    "editorAddVariable": "添加变量",
+    "editorAllowNesting": "允许嵌套",
+    "editorAllowNestingHint": "允许该子代理派发自己的子代理（不超过深度上限）。",
+    "editorCategory": "分类",
+    "editorDescription": "描述",
+    "editorExternalRuntime": "外部运行时",
+    "editorExternalRuntimeHint": "让该子代理在外部 CLI 代理（Claude Code、Codex 等）上运行，而非内置引擎。仅桌面端；外部代理使用它自己的模型与鉴权。",
+    "editorIcon": "图标",
+    "editorIconPlaceholder": "Search",
+    "editorMaxNestingDepth": "最大嵌套深度",
+    "editorMaxSteps": "最大步数",
+    "editorModelClear": "清除",
+    "editorName": "名称",
+    "editorNamePlaceholder": "网页研究",
+    "editorPriority": "优先级",
+    "editorProviderModel": "Provider / 模型",
+    "editorProviderModelHint": "让该子代理在指定的 provider + 模型上运行（可跨 provider）。留空则继承会话的设置。",
+    "editorRemoveVariable": "移除变量",
+    "editorSystemPrompt": "系统提示词",
+    "editorSystemPromptPlaceholder": "自定义系统提示词覆盖…",
+    "editorTaskTemplate": "任务模板",
+    "editorTaskTemplatePlaceholder": "研究以下主题：'{{topic}}'",
+    "editorTemperature": "温度",
+    "editorTimeout": "超时（毫秒）",
+    "editorVariableDefaultValue": "默认值",
+    "editorVariableDescription": "描述",
+    "editorVariableDescriptionPlaceholder": "该变量代表什么",
+    "editorVariableName": "名称",
+    "editorVariableNamePlaceholder": "topic",
+    "editorVariableRequired": "必填",
+    "editorVariables": "变量",
+    "enabledHint": "关闭后，该子代理将被排除在派发、发现和所有选择器之外。",
+    "enabledLabel": "启用",
+    "externalRuntimeNone": "内置（Cognia）",
+    "forkOnlyBody": "内置模板是起点，不是可运行的子代理——解析器会跳过它们。复制一份即可得到可编辑、可派发的副本。",
+    "forkOnlyTitle": "只读起点",
+    "hiddenBadge": "已隐藏",
+    "hiddenHint": "仍可被派发，但不出现在选择器和 @ 提及补全中。",
+    "hiddenLabel": "从选择器中隐藏",
+    "mcpHint": "转发到该子代理会话的 MCP 服务。选择继承则沿用父级的配置。",
+    "mcpLabel": "MCP 服务",
+    "missingBody": "它可能已在其他窗口中被删除。",
+    "missingTitle": "找不到该模板",
+    "nameRequired": "模板名称不能为空。",
+    "newTemplate": "新建模板",
+    "promptShadowedBody": "系统提示词的优先级高于任务模板，因此下面的任务模板——以及为它声明的变量——都不会被使用。到「高级配置」中清空系统提示词即可恢复。",
+    "promptShadowedTitle": "任务模板当前未被使用",
+    "railBlockedBody": "该子代理需要嵌套派发通道，而它当前是关闭的。开启嵌套派发（或让会话处于 plan 模式）才能触达它。",
+    "railBlockedTitle": "当前无法触达",
+    "reach": {
+      "direct": "聊天中可用",
+      "disabled": "已停用",
+      "dispatch-only": "仅嵌套派发",
+      "fork-only": "复制后可用"
+    },
+    "removeBody": "「{name}」将被移除。",
+    "removeTitle": "移除该模板？",
+    "removedToast": "已移除「{name}」。",
+    "title": "模板",
+    "toolsHint": "「继承」让该子代理拥有父级的工具；「自定义清单」精确授予所列工具；「全部禁用」则一个都不给。",
+    "toolsLabel": "工具权限",
+    "varsUndeclared": "使用了但未声明：{names}",
+    "varsUnused": "已声明但从未使用：{names}",
+    "variableIndex": "变量 {index}"
+  },
+  "title": "子代理",
+  "toolCatalog": {
+    "cancel": "取消",
+    "confirm": "应用",
+    "description": "选择该子代理可以调用的工具。这里的 id 就是模型看到的带命名空间形式。",
+    "empty": "没有匹配的工具。",
+    "groups": {
+      "builtin": "内置",
+      "mcp": "MCP 服务",
+      "native-anthropic": "原生",
+      "plugin": "插件",
+      "unknown": "已授予但当前不可用"
+    },
+    "loading": "正在加载工具…",
+    "searchPlaceholder": "搜索工具…",
+    "selectedCount": "{count, plural, =0 {未选择} other {已选 # 个工具}}",
+    "title": "选择工具",
+    "unknownHint": "此前已授予，但其来源当前不可用。除非你主动清除，否则会保留。"
+  },
+  "toolScope": {
+    "modeHints": {
+      "custom": "仅限下方列出的工具。",
+      "inherit": "沿用派发方代理所拥有的工具。",
+      "none": "完全不给工具——该子代理只能推理和回复。"
+    },
+    "modes": {
+      "custom": "自定义清单",
+      "inherit": "继承",
+      "none": "全部禁用"
+    },
+    "pickFromCatalog": "从目录选择",
+    "removeTool": "移除 {tool}"
+  }
+}

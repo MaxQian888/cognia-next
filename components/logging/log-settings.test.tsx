@@ -9,16 +9,42 @@ const mockApplyLoggingSettings = jest.fn()
 const mockConfigureSampling = jest.fn()
 const mockGetBootstrap = jest.fn()
 const mockUseTransportHealth = jest.fn()
+const mockGetRegisteredModules = jest.fn<string[], []>()
+const mockPersistTelemetrySecret = jest.fn().mockResolvedValue(undefined)
+const mockClearTelemetrySecret = jest.fn().mockResolvedValue(undefined)
+const mockTrackEvent = jest.fn().mockResolvedValue(true)
+const mockClearBehaviorEvents = jest.fn().mockResolvedValue(undefined)
+const mockExportBehaviorEvents = jest.fn().mockResolvedValue("[]")
+const mockCreateObjectUrl = jest.fn().mockReturnValue("blob:behavior-events")
+const mockRevokeObjectUrl = jest.fn()
+const mockSaveAppSettings = jest.fn().mockResolvedValue(undefined)
 
 jest.mock("@/lib/logging", () => ({
   applyLoggingSettings: (...args: unknown[]) => mockApplyLoggingSettings(...args),
   getLoggingBootstrapState: () => mockGetBootstrap(),
   configureSampling: (...args: unknown[]) => mockConfigureSampling(...args),
+  getRegisteredModules: () => mockGetRegisteredModules(),
   LOGGING_SAMPLING_STORAGE_KEY: "cognia-logging-sampling",
 }))
 
 jest.mock("@/hooks/logging", () => ({
   useTransportHealth: (...args: unknown[]) => mockUseTransportHealth(...args),
+}))
+
+jest.mock("@/lib/logging/telemetry-secrets", () => ({
+  persistTelemetrySecret: (...args: unknown[]) => mockPersistTelemetrySecret(...args),
+  clearTelemetrySecret: (...args: unknown[]) => mockClearTelemetrySecret(...args),
+}))
+jest.mock("@/lib/telemetry/events/track-event", () => ({
+  trackEvent: (...args: unknown[]) => mockTrackEvent(...args),
+}))
+jest.mock("@/lib/db/behavior-events", () => ({
+  clearBehaviorEvents: (...args: unknown[]) => mockClearBehaviorEvents(...args),
+  exportBehaviorEvents: (...args: unknown[]) => mockExportBehaviorEvents(...args),
+}))
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: (selector: (state: { save: typeof mockSaveAppSettings }) => unknown) =>
+    selector({ save: mockSaveAppSettings }),
 }))
 
 import { LogSettings } from "./log-settings"
@@ -43,7 +69,6 @@ function defaultBootstrap() {
       native: true,
       remote: false,
       langfuse: false,
-      opentelemetry: false,
       nativeConfig: { minLevel: "warn", batchSize: 10, flushInterval: 2000 },
       remoteConfig: {
         endpoint: "",
@@ -54,11 +79,10 @@ function defaultBootstrap() {
       },
       langfuseConfig: {
         publicKey: "",
-        secretKey: "",
+        secretKeyConfigured: false,
         host: "https://cloud.langfuse.com",
         minLevel: "warn",
       },
-      opentelemetryConfig: { endpoint: "", serviceName: "cognia-ai", addAsSpanEvents: true },
       agentTrace: true,
       agentTraceOtlp: false,
       agentTraceConfig: { captureContent: false, maxPreviewBytes: 4096, retentionDays: 7 },
@@ -68,7 +92,7 @@ function defaultBootstrap() {
         headers: {},
         serviceName: "cognia-ai",
         environment: "",
-        grafanaCloud: { instanceId: "", apiToken: "" },
+        grafanaCloud: { instanceId: "", apiTokenConfigured: false },
       },
     },
     retention: { maxEntries: 10000, maxAgeDays: 7 },
@@ -94,8 +118,26 @@ beforeEach(() => {
   mockConfigureSampling.mockReset()
   mockGetBootstrap.mockReset()
   mockUseTransportHealth.mockReset()
+  mockGetRegisteredModules.mockReset()
+  mockPersistTelemetrySecret.mockClear()
+  mockClearTelemetrySecret.mockClear()
+  mockTrackEvent.mockClear()
+  mockClearBehaviorEvents.mockClear()
+  mockExportBehaviorEvents.mockClear()
+  mockCreateObjectUrl.mockClear()
+  mockRevokeObjectUrl.mockClear()
+  mockSaveAppSettings.mockClear()
+  Object.defineProperty(URL, "createObjectURL", {
+    configurable: true,
+    value: mockCreateObjectUrl,
+  })
+  Object.defineProperty(URL, "revokeObjectURL", {
+    configurable: true,
+    value: mockRevokeObjectUrl,
+  })
   mockGetBootstrap.mockReturnValue(defaultBootstrap())
   mockUseTransportHealth.mockReturnValue({ nativeLogging: defaultNativeLogging() })
+  mockGetRegisteredModules.mockReturnValue(["ai", "network", "network:lark"])
   mockApplyLoggingSettings.mockImplementation(
     (params: { config: unknown; transports: unknown }) => ({
       config: { ...defaultBootstrap().config, ...(params.config as object) },
@@ -128,6 +170,131 @@ describe("LogSettings — render", () => {
     // First flip a switch to surface the badge — use Reset as a deterministic trigger
     fireEvent.click(screen.getByText("Reset"))
     expect(screen.getAllByText("Unsaved changes").length).toBeGreaterThan(0)
+  })
+})
+
+describe("LogSettings — behavior telemetry", () => {
+  it("persists independent destinations and category consent", async () => {
+    render(<LogSettings />)
+    fireEvent.click(screen.getByRole("tab", { name: /Advanced/ }))
+    fireEvent.click(screen.getByTestId("behavior-telemetry-switch"))
+    fireEvent.click(screen.getByTestId("behavior-telemetry-local-switch"))
+    fireEvent.click(screen.getByTestId("behavior-telemetry-remote-switch"))
+    fireEvent.click(screen.getByTestId("behavior-telemetry-category-workflow"))
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    })
+
+    expect(
+      JSON.parse(localStorage.getItem("cognia-behavior-telemetry-enabled") ?? "{}")
+    ).toMatchObject({
+      enabled: true,
+      destinations: { local: false, remote: true },
+      categories: { workflow: false },
+    })
+    expect(mockSaveAppSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        telemetryEnabled: true,
+        behaviorTelemetry: expect.objectContaining({
+          destinations: { local: false, remote: true },
+          categories: expect.objectContaining({ workflow: false }),
+        }),
+      })
+    )
+  })
+
+  it("configures sampling, local retention, and bounded storage limits", async () => {
+    render(<LogSettings />)
+    fireEvent.click(screen.getByRole("tab", { name: /Advanced/ }))
+
+    const localSwitch = screen.getByTestId("behavior-telemetry-local-switch")
+    const remoteSwitch = screen.getByTestId("behavior-telemetry-remote-switch")
+    const maxEvents = screen.getByLabelText("Maximum local events") as HTMLInputElement
+    expect(localSwitch).toBeDisabled()
+    expect(remoteSwitch).toBeDisabled()
+    expect(maxEvents).toBeDisabled()
+
+    fireEvent.click(screen.getByTestId("behavior-telemetry-switch"))
+    const sampleSlider = screen
+      .getByTestId("behavior-telemetry-sample-rate")
+      .querySelector('[role="slider"]') as HTMLElement
+    const retentionSlider = screen
+      .getByTestId("behavior-telemetry-retention-days")
+      .querySelector('[role="slider"]') as HTMLElement
+    sampleSlider.focus()
+    fireEvent.keyDown(sampleSlider, { key: "ArrowLeft" })
+    retentionSlider.focus()
+    fireEvent.keyDown(retentionSlider, { key: "ArrowRight" })
+    fireEvent.change(maxEvents, { target: { value: "50" } })
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    })
+
+    expect(
+      JSON.parse(localStorage.getItem("cognia-behavior-telemetry-enabled") ?? "{}")
+    ).toMatchObject({
+      enabled: true,
+      sampleRate: 0.95,
+      retentionDays: 31,
+      maxStoredEvents: 100,
+    })
+  })
+
+  it("clamps the local event limit at both boundaries and handles empty input", () => {
+    render(<LogSettings />)
+    fireEvent.click(screen.getByRole("tab", { name: /Advanced/ }))
+    fireEvent.click(screen.getByTestId("behavior-telemetry-switch"))
+    const maxEvents = screen.getByLabelText("Maximum local events") as HTMLInputElement
+
+    fireEvent.change(maxEvents, { target: { value: "200000" } })
+    expect(maxEvents.value).toBe("100000")
+    fireEvent.change(maxEvents, { target: { value: "" } })
+    expect(maxEvents.value).toBe("100")
+  })
+
+  it("exports both supported formats and clears local events", async () => {
+    const click = jest.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
+    render(<LogSettings />)
+    fireEvent.click(screen.getByRole("tab", { name: /Advanced/ }))
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Export JSON" }))
+      fireEvent.click(screen.getByRole("button", { name: "Export CSV" }))
+      fireEvent.click(screen.getByRole("button", { name: /Clear local events/i }))
+    })
+
+    expect(mockExportBehaviorEvents.mock.calls).toEqual([["json"], ["csv"]])
+    expect(mockCreateObjectUrl).toHaveBeenCalledTimes(2)
+    expect(mockRevokeObjectUrl).toHaveBeenCalledTimes(2)
+    expect(mockClearBehaviorEvents).toHaveBeenCalledTimes(1)
+    click.mockRestore()
+  })
+
+  it("reset restores private defaults and disables dependent controls", () => {
+    localStorage.setItem(
+      "cognia-behavior-telemetry-enabled",
+      JSON.stringify({
+        enabled: true,
+        destinations: { local: true, remote: true },
+        sampleRate: 0.25,
+        retentionDays: 90,
+        maxStoredEvents: 500,
+      })
+    )
+    render(<LogSettings />)
+    fireEvent.click(screen.getByRole("tab", { name: /Advanced/ }))
+    expect(screen.getByTestId("behavior-telemetry-remote-switch")).toHaveAttribute(
+      "aria-checked",
+      "true"
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }))
+
+    expect(screen.getByTestId("behavior-telemetry-switch")).toHaveAttribute("aria-checked", "false")
+    expect(screen.getByTestId("behavior-telemetry-remote-switch")).toBeDisabled()
+    expect(screen.getByLabelText("Maximum local events")).toBeDisabled()
   })
 })
 
@@ -322,7 +489,7 @@ describe("LogSettings — Bootstrap loading from localStorage", () => {
 })
 
 describe("LogSettings — Transports tab", () => {
-  it("renders all six transport cards", () => {
+  it("renders all configured transport cards", () => {
     render(<LogSettings />)
     fireEvent.click(screen.getByRole("tab", { name: /Transports/ }))
     expect(screen.getByText("Console Output")).toBeInTheDocument()
@@ -330,7 +497,6 @@ describe("LogSettings — Transports tab", () => {
     expect(screen.getByText("Platform Logging")).toBeInTheDocument()
     expect(screen.getByText("Remote Transport")).toBeInTheDocument()
     expect(screen.getByText("Langfuse Integration")).toBeInTheDocument()
-    expect(screen.getByText("OpenTelemetry")).toBeInTheDocument()
   })
 
   it("renders transports tab content with at least one disabled Switch", () => {
@@ -364,6 +530,31 @@ describe("LogSettings — Retention tab", () => {
 })
 
 describe("LogSettings — Advanced tab redaction & queue", () => {
+  it("keeps behavior telemetry off until explicit opt-in is saved", async () => {
+    render(<LogSettings />)
+    fireEvent.click(screen.getByRole("tab", { name: /Advanced/ }))
+    const toggle = screen.getByTestId("behavior-telemetry-switch")
+    expect(toggle).toHaveAttribute("aria-checked", "false")
+    fireEvent.click(toggle)
+    await act(async () => fireEvent.click(screen.getByText("Save")))
+    expect(
+      JSON.parse(localStorage.getItem("cognia-behavior-telemetry-enabled") ?? "{}")
+    ).toMatchObject({ enabled: true })
+    expect(mockTrackEvent).toHaveBeenCalledWith("telemetry.preference.changed", { enabled: true })
+  })
+
+  it("records opt-out before disabling behavior telemetry", async () => {
+    localStorage.setItem("cognia-behavior-telemetry-enabled", "true")
+    render(<LogSettings />)
+    fireEvent.click(screen.getByRole("tab", { name: /Advanced/ }))
+    fireEvent.click(screen.getByTestId("behavior-telemetry-switch"))
+    await act(async () => fireEvent.click(screen.getByText("Save")))
+    expect(mockTrackEvent).toHaveBeenCalledWith("telemetry.preference.changed", { enabled: false })
+    expect(
+      JSON.parse(localStorage.getItem("cognia-behavior-telemetry-enabled") ?? "{}")
+    ).toMatchObject({ enabled: false })
+  })
+
   it("toggles the redaction switch", () => {
     render(<LogSettings />)
     fireEvent.click(screen.getByRole("tab", { name: /Advanced/ }))
@@ -429,17 +620,6 @@ describe("LogSettings — Transport per-config inputs", () => {
     expect(screen.getByPlaceholderText("sk-live-...")).toBeInTheDocument()
   })
 
-  it("renders OTel endpoint and service name fields when opentelemetry enabled", () => {
-    mockGetBootstrap.mockReturnValue({
-      ...defaultBootstrap(),
-      transports: { ...defaultBootstrap().transports, opentelemetry: true },
-    })
-    render(<LogSettings />)
-    fireEvent.click(screen.getByRole("tab", { name: /Transports/ }))
-    expect(screen.getByPlaceholderText("http://localhost:4318/v1/traces")).toBeInTheDocument()
-    expect(screen.getByPlaceholderText("cognia-ai")).toBeInTheDocument()
-  })
-
   it("changing the Langfuse host input triggers Unsaved", () => {
     mockGetBootstrap.mockReturnValue({
       ...defaultBootstrap(),
@@ -501,7 +681,7 @@ describe("LogSettings — Transport per-config inputs", () => {
     expect(screen.getAllByText("Unsaved changes").length).toBeGreaterThan(0)
   })
 
-  it("typing into the OTLP headers field parses into a key/value record on save", () => {
+  it("drops sensitive OTLP headers and keeps non-sensitive pairs on save", async () => {
     mockGetBootstrap.mockReturnValue({
       ...defaultBootstrap(),
       transports: { ...defaultBootstrap().transports, agentTraceOtlp: true },
@@ -512,13 +692,12 @@ describe("LogSettings — Transport per-config inputs", () => {
     fireEvent.change(headersInput, {
       target: { value: "Authorization: Basic abc==, X-Tenant: prod" },
     })
-    fireEvent.click(screen.getByText("Save"))
+    await act(async () => fireEvent.click(screen.getByText("Save")))
     expect(mockApplyLoggingSettings).toHaveBeenCalled()
     const call = mockApplyLoggingSettings.mock.calls.at(-1) as [
       { transports?: { agentTraceOtlpConfig?: { headers: Record<string, string> } } },
     ]
     expect(call[0].transports?.agentTraceOtlpConfig?.headers).toEqual({
-      Authorization: "Basic abc==",
       "X-Tenant": "prod",
     })
   })
@@ -542,7 +721,7 @@ describe("LogSettings — Transport per-config inputs", () => {
     expect(screen.queryByTestId("agent-trace-otlp-headers")).not.toBeInTheDocument()
   })
 
-  it("persists Grafana credentials separately from headers on save", () => {
+  it("persists Grafana credentials through the write-only secret seam", async () => {
     mockGetBootstrap.mockReturnValue({
       ...defaultBootstrap(),
       transports: {
@@ -562,12 +741,13 @@ describe("LogSettings — Transport per-config inputs", () => {
     fireEvent.change(screen.getByTestId("agent-trace-otlp-grafana-api-token"), {
       target: { value: "glc_secret" },
     })
-    fireEvent.click(screen.getByText("Save"))
+    await act(async () => fireEvent.click(screen.getByText("Save")))
+    expect(mockPersistTelemetrySecret).toHaveBeenCalledWith("grafanaCloudApiToken", "glc_secret")
     const call = mockApplyLoggingSettings.mock.calls.at(-1) as [
       {
         transports?: {
           agentTraceOtlpConfig?: {
-            grafanaCloud?: { instanceId: string; apiToken: string }
+            grafanaCloud?: { instanceId: string; apiTokenConfigured: boolean }
             headers: Record<string, string>
           }
         }
@@ -575,9 +755,67 @@ describe("LogSettings — Transport per-config inputs", () => {
     ]
     expect(call[0].transports?.agentTraceOtlpConfig?.grafanaCloud).toEqual({
       instanceId: "1234567",
-      apiToken: "glc_secret",
+      apiTokenConfigured: true,
     })
-    // Raw `headers` stays empty — bootstrap.ts builds Authorization at apply time.
+    // Raw headers stay empty — Rust reads the token from the secret store.
     expect(call[0].transports?.agentTraceOtlpConfig?.headers).toEqual({})
+  })
+})
+
+describe("LogSettings — Per-module levels", () => {
+  function bootstrapWithModuleLevels(perModuleLevels: Record<string, string>) {
+    const base = defaultBootstrap()
+    return { ...base, config: { ...base.config, perModuleLevels } }
+  }
+
+  it("renders existing per-module level rules from the bootstrap config", () => {
+    mockGetBootstrap.mockReturnValue(bootstrapWithModuleLevels({ network: "debug" }))
+    render(<LogSettings />)
+    expect(screen.getByText("network")).toBeInTheDocument()
+  })
+
+  it("offers registered modules as datalist suggestions", () => {
+    render(<LogSettings />)
+    const options = Array.from(document.querySelectorAll("datalist option")).map(
+      (o) => (o as HTMLOptionElement).value
+    )
+    expect(options).toEqual(expect.arrayContaining(["ai", "network", "network:lark"]))
+  })
+
+  it("Add Module with empty prefix is a no-op", () => {
+    render(<LogSettings />)
+    const addBtn = screen.getByRole("button", { name: /Add Module/i })
+    fireEvent.click(addBtn)
+    expect(screen.queryAllByText("Unsaved changes").length).toBe(0)
+  })
+
+  it("adds a per-module rule and marks unsaved changes", () => {
+    render(<LogSettings />)
+    const input = screen.getByPlaceholderText("network:lark") as HTMLInputElement
+    fireEvent.change(input, { target: { value: "connectors:slack" } })
+    fireEvent.click(screen.getByRole("button", { name: /Add Module/i }))
+    expect(screen.getByText("connectors:slack")).toBeInTheDocument()
+    expect(screen.getAllByText("Unsaved changes").length).toBeGreaterThan(0)
+  })
+
+  it("includes perModuleLevels in the applyLoggingSettings payload on Save", () => {
+    mockGetBootstrap.mockReturnValue(bootstrapWithModuleLevels({ network: "debug" }))
+    render(<LogSettings />)
+    const input = screen.getByPlaceholderText("network:lark") as HTMLInputElement
+    fireEvent.change(input, { target: { value: "ai" } })
+    fireEvent.click(screen.getByRole("button", { name: /Add Module/i }))
+    fireEvent.click(screen.getByText("Save").closest("button") as HTMLButtonElement)
+    const call = mockApplyLoggingSettings.mock.calls[0] as [
+      { config: { perModuleLevels?: unknown } },
+    ]
+    expect(call[0].config.perModuleLevels).toMatchObject({ network: "debug", ai: "debug" })
+  })
+
+  it("removes a per-module rule", () => {
+    mockGetBootstrap.mockReturnValue(bootstrapWithModuleLevels({ network: "debug" }))
+    render(<LogSettings />)
+    expect(screen.getByText("network")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /Remove network override/i }))
+    expect(screen.queryByText("network")).not.toBeInTheDocument()
   })
 })

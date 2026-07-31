@@ -9,16 +9,23 @@
  * the persona as a full tool-enabled Claude turn scoped to the target repo.
  *
  * `workingDir` is intentionally NOT set here — the node injects the target
- * repo path at run time (the same pack can refactor any clone). Editing /
- * command-running roles use `permissionMode: "bypassPermissions"` because the
- * workflow runs headlessly via `runAndCaptureAssistantReply`; an interactive
- * permission prompt would hang a run with no UI to answer it.
+ * repo path at run time (the same pack can refactor any clone).
+ *
+ * `permissionMode` is deliberately NOT set here either. The headless workflow
+ * does need `bypassPermissions` (an interactive prompt would hang a run with
+ * no UI to answer it), but a character's mode is consulted for EVERY chat with
+ * that character — `resolveSendOptions` falls back
+ * `session → mode → character → appSettings` (lib/claude/build-options.ts) —
+ * and top-level chat has no permission ceiling. Setting it on the pack meant
+ * a user picking "Refactorer" in the character list got un-prompted
+ * Edit/Write/Bash. The bypass now lives at the single headless call site that
+ * needs it: src/nodes/agent-turn.ts, applied to the resolved send options.
  *
  * `skillIds` are attached in src/skills/definitions.ts wiring (M3): the role's
  * playbooks live as plugin skills and are referenced by their namespaced ids.
  */
 
-import { defineCharacterPack } from "@/lib/plugin/sdk/define-character-pack"
+import { defineCharacterPack } from "@cognia/plugin-sdk"
 import type { PluginCharacterDef } from "@/types/plugin/plugin-character-pack"
 import { PLUGIN_ID, packSkillId } from "../ids"
 
@@ -47,7 +54,6 @@ const ROLE_CHARACTERS: PluginCharacterDef[] = [
     description: "Scans the repository and produces a prioritized refactor task list.",
     avatarColor: "oklch(0.70 0.15 250)",
     avatarEmoji: "🔬",
-    permissionMode: "bypassPermissions",
     allowedTools: READ_TOOLS,
     pluginSkillIds: [packSkillId("backend-infra")],
     systemPrompt:
@@ -60,7 +66,6 @@ const ROLE_CHARACTERS: PluginCharacterDef[] = [
       "Turns the analysis into a concrete, ordered refactor plan with acceptance criteria.",
     avatarColor: "oklch(0.66 0.16 290)",
     avatarEmoji: "📐",
-    permissionMode: "bypassPermissions",
     allowedTools: ["Read", "Glob", "Grep"],
     pluginSkillIds: [packSkillId("go-clean-architecture"), packSkillId("dependency-upgrade")],
     systemPrompt:
@@ -72,7 +77,6 @@ const ROLE_CHARACTERS: PluginCharacterDef[] = [
     description: "Edits the repository to carry out one module's refactor while keeping it green.",
     avatarColor: "oklch(0.64 0.17 150)",
     avatarEmoji: "🛠️",
-    permissionMode: "bypassPermissions",
     allowedTools: EDIT_TOOLS,
     pluginSkillIds: [packSkillId("go-clean-architecture"), packSkillId("refactor-playbook")],
     systemPrompt:
@@ -84,7 +88,6 @@ const ROLE_CHARACTERS: PluginCharacterDef[] = [
     description: "Raises test coverage for the refactored code with table-driven Go tests.",
     avatarColor: "oklch(0.68 0.15 60)",
     avatarEmoji: "🧪",
-    permissionMode: "bypassPermissions",
     allowedTools: EDIT_TOOLS,
     pluginSkillIds: [packSkillId("go-testing")],
     systemPrompt:
@@ -96,7 +99,6 @@ const ROLE_CHARACTERS: PluginCharacterDef[] = [
     description: "Reviews the diff for regressions, layering violations, and over-engineering.",
     avatarColor: "oklch(0.65 0.18 25)",
     avatarEmoji: "🔍",
-    permissionMode: "bypassPermissions",
     allowedTools: READ_TOOLS,
     pluginSkillIds: [packSkillId("go-clean-architecture"), packSkillId("refactor-playbook")],
     systemPrompt:
@@ -108,7 +110,6 @@ const ROLE_CHARACTERS: PluginCharacterDef[] = [
     description: "Updates README, ADRs, and API docs to match the refactored code.",
     avatarColor: "oklch(0.70 0.13 210)",
     avatarEmoji: "📝",
-    permissionMode: "bypassPermissions",
     allowedTools: ["Read", "Edit", "Write", "Glob", "Grep"],
     pluginSkillIds: [packSkillId("backend-infra")],
     systemPrompt:

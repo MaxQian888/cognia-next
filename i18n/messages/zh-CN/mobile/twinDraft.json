@@ -1,0 +1,11 @@
+{
+  "kindCharacter": "角色",
+  "kindSkill": "技能",
+  "noSummary": "无摘要",
+  "qualityScore": "评分 {percent}%",
+  "statusAccepted": "已接受",
+  "statusEdited": "已编辑",
+  "statusPending": "待审",
+  "statusRejected": "已拒绝",
+  "untitled": "未命名草稿"
+}

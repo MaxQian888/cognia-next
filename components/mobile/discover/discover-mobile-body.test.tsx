@@ -5,7 +5,7 @@
  * and the legacy-card vs. grid-driven category branch.
  */
 
-import { act, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 // ─── next-intl ───────────────────────────────────────────────────────────────
@@ -88,78 +88,84 @@ const mcpItemFixture = {
   enabled: true,
 }
 
+// Controllable so individual tests can force a category to resolve empty
+// (exercising the onboarding-hint branch). beforeEach restores the default.
+const mockUseDiscoverQuery = jest.fn()
 jest.mock("@/hooks/discover/use-discover-query", () => ({
-  useDiscoverQuery: (category: string) => {
-    switch (category) {
-      case "characters":
-        return {
-          items: [{ kind: "character", id: "char-1", data: characterFixture }],
-          loading: false,
-        }
-      case "teams":
-        return {
-          items: [{ kind: "team", id: "team-1", data: teamFixture }],
-          loading: false,
-        }
-      case "skills":
-        return {
-          items: [{ kind: "skill", id: "skill-1", data: skillFixture }],
-          loading: false,
-        }
-      case "mcpTools":
-        return {
-          items: [{ kind: "mcpServer", id: "mcp-1", data: mcpItemFixture }],
-          loading: false,
-        }
-      case "connectors":
-        return {
-          items: [
-            {
-              kind: "connector",
-              id: "telegram",
-              data: { type: "telegram", status: "stable" },
-            },
-          ],
-          loading: false,
-        }
-      case "ocrProviders":
-        return {
-          items: [
-            {
-              kind: "ocrProvider",
-              id: "openai-vision",
-              data: {
-                id: "openai-vision",
-                label: "OpenAI Vision",
-                category: "llm-vision",
-                credentialKeys: [],
-                shells: { tauri: true, capacitor: true, browser: true },
-              },
-            },
-          ],
-          loading: false,
-        }
-      case "workflowTemplates":
-        return {
-          items: [
-            {
-              kind: "workflowTemplate",
-              id: "demo",
-              data: {
-                id: "demo",
-                label: { en: "Demo template", "zh-CN": "示例模板" },
-                description: { en: "", "zh-CN": "" },
-                tags: [],
-              },
-            },
-          ],
-          loading: false,
-        }
-      default:
-        return { items: [], loading: false }
-    }
-  },
+  useDiscoverQuery: (category: string, query?: string, opts?: unknown) =>
+    mockUseDiscoverQuery(category, query, opts),
 }))
+
+function defaultQueryImpl(category: string) {
+  switch (category) {
+    case "characters":
+      return {
+        items: [{ kind: "character", id: "char-1", data: characterFixture }],
+        loading: false,
+      }
+    case "teams":
+      return {
+        items: [{ kind: "team", id: "team-1", data: teamFixture }],
+        loading: false,
+      }
+    case "skills":
+      return {
+        items: [{ kind: "skill", id: "skill-1", data: skillFixture }],
+        loading: false,
+      }
+    case "mcpTools":
+      return {
+        items: [{ kind: "mcpServer", id: "mcp-1", data: mcpItemFixture }],
+        loading: false,
+      }
+    case "connectors":
+      return {
+        items: [
+          {
+            kind: "connector",
+            id: "telegram",
+            data: { type: "telegram", status: "stable" },
+          },
+        ],
+        loading: false,
+      }
+    case "ocrProviders":
+      return {
+        items: [
+          {
+            kind: "ocrProvider",
+            id: "openai-vision",
+            data: {
+              id: "openai-vision",
+              label: "OpenAI Vision",
+              category: "llm-vision",
+              credentialKeys: [],
+              shells: { tauri: true, capacitor: true, browser: true },
+            },
+          },
+        ],
+        loading: false,
+      }
+    case "workflowTemplates":
+      return {
+        items: [
+          {
+            kind: "workflowTemplate",
+            id: "demo",
+            data: {
+              id: "demo",
+              label: { en: "Demo template", "zh-CN": "示例模板" },
+              description: { en: "", "zh-CN": "" },
+              tags: [],
+            },
+          },
+        ],
+        loading: false,
+      }
+    default:
+      return { items: [], loading: false }
+  }
+}
 
 // Companion sync — onRefresh calls runSyncDown(); capture it so we can assert.
 const runSyncDownMock = jest.fn().mockResolvedValue(undefined)
@@ -196,10 +202,28 @@ jest.mock("@/components/mobile/discover/twin-sources-panel", () => ({
 jest.mock("@/components/mobile/discover/twin-drafts-panel", () => ({
   TwinDraftsPanel: () => <div data-testid="stub-twin-drafts-panel" />,
 }))
+jest.mock("@/components/mobile/discover/twin-profile-panel", () => ({
+  TwinProfilePanel: ({ twinId }: { twinId?: string }) => (
+    <div data-testid="stub-twin-profile-panel" data-twin-id={twinId ?? ""} />
+  ),
+}))
+
+// DiscoverViewToggle — exposes its category so visibility tests can assert it.
+jest.mock("@/components/discover/discover-view-toggle", () => ({
+  DiscoverViewToggle: ({ category }: { category: string }) => (
+    <div data-testid="stub-view-toggle" data-category={category} />
+  ),
+}))
 
 // PluginMarketplaceSheet — triggers its own DB reads; irrelevant to these tests.
 jest.mock("@/components/discover/plugin-marketplace-sheet", () => ({
   PluginMarketplaceSheet: () => <div data-testid="stub-plugin-marketplace-sheet" />,
+}))
+
+// Skill marketplace sheet — stubbed so its SkillMarketplace → streamdown (ESM)
+// chain doesn't load in jsdom.
+jest.mock("@/components/discover/skill-marketplace-sheet", () => ({
+  SkillMarketplaceSheet: () => <div data-testid="stub-skill-marketplace-sheet" />,
 }))
 
 // SortFilterSheet — a separate concern; not under test.
@@ -242,7 +266,49 @@ jest.mock("@/components/interactions/pull-to-refresh", () => ({
 // motion/react's useReducedMotion is consumed by the real PullToRefresh
 // (which we mocked), but the mock above doesn't need it. Guard against any
 // transitive import that might still pull it in.
-jest.mock("motion/react", () => ({ useReducedMotion: () => false }))
+// `motion` is proxied to plain host elements with the animation-only props
+// stripped, so the list markup this suite asserts on (ul → li → card) survives
+// the stagger wrappers unchanged. Keep `useReducedMotion` false: the reduced
+// branch renders the same DOM, just without variants.
+jest.mock("motion/react", () => {
+  const MOTION_ONLY_PROPS = new Set([
+    "variants",
+    "initial",
+    "animate",
+    "exit",
+    "transition",
+    "whileTap",
+    "whileHover",
+    "whileInView",
+    "layout",
+    "layoutId",
+  ])
+  const strip = (props: Record<string, unknown>) =>
+    Object.fromEntries(Object.entries(props).filter(([k]) => !MOTION_ONLY_PROPS.has(k)))
+  const motion = new Proxy(
+    {},
+    {
+      get: (_target, tag: string) => {
+        // `jest.requireActual`, not a bare `require` — a jest.mock factory is
+        // hoisted above the imports, so it cannot close over the file's React
+        // binding.
+        const { createElement } = jest.requireActual<typeof import("react")>("react")
+        const Comp = ({ children, ...props }: Record<string, unknown>) =>
+          createElement(
+            tag,
+            // Marker so a test can prove the list is still animated — the
+            // stagger is easy to drop by accident in a refactor and leaves no
+            // other trace in the rendered DOM.
+            { ...strip(props), "data-motion": tag },
+            children as never
+          )
+        Comp.displayName = `motion.${tag}`
+        return Comp
+      },
+    }
+  )
+  return { motion, useReducedMotion: () => false }
+})
 
 // Haptics — not available in jsdom.
 jest.mock("@/lib/capacitor/haptics", () => ({ impact: jest.fn() }))
@@ -321,6 +387,8 @@ function resetNav() {
 beforeEach(() => {
   resetNav()
   runSyncDownMock.mockClear()
+  mockUseDiscoverQuery.mockReset()
+  mockUseDiscoverQuery.mockImplementation(defaultQueryImpl)
 })
 
 describe("<DiscoverMobileBody />", () => {
@@ -346,10 +414,30 @@ describe("<DiscoverMobileBody />", () => {
       expect(screen.getByTestId("chip-strip-twinDrafts")).toBeInTheDocument()
     })
 
-    it("default category is 'characters' — character cards visible initially", () => {
+    it("defaults to the aggregated foryou home (no ?category=)", () => {
+      render(<DiscoverMobileBody />)
+      // Default lands on the home strips, not the characters legacy list.
+      expect(screen.getByTestId("chip-strip-foryou")).toBeInTheDocument()
+      expect(screen.queryByTestId("stub-character-card-char-1")).not.toBeInTheDocument()
+    })
+
+    it("characters category renders character cards", () => {
+      currentSearch = "?category=characters"
       render(<DiscoverMobileBody />)
       // The character fixture renders via our CharacterCard stub.
       expect(screen.getByTestId("stub-character-card-char-1")).toBeInTheDocument()
+    })
+
+    it("deals the legacy card lists in rather than snapping them on", () => {
+      // Discover was the only tab landing page whose lists appeared fully
+      // formed while /workflows, /me and the conversation drawer all
+      // staggered — the main reason this screen read flatter than its
+      // neighbours.
+      currentSearch = "?category=characters"
+      const { container } = render(<DiscoverMobileBody />)
+      const list = container.querySelector("ul")!
+      expect(list).toHaveAttribute("data-motion", "ul")
+      expect(list.querySelector("li")).toHaveAttribute("data-motion", "li")
     })
 
     it("clicking a chip calls router.replace with the matching category query param", async () => {
@@ -478,6 +566,7 @@ describe("<DiscoverMobileBody />", () => {
     )
 
     it("characters category shows character cards list (legacy layout)", () => {
+      currentSearch = "?category=characters"
       render(<DiscoverMobileBody />)
       expect(screen.getByTestId("stub-character-card-char-1")).toBeInTheDocument()
     })
@@ -525,6 +614,7 @@ describe("<DiscoverMobileBody />", () => {
 
   describe("create-character FAB", () => {
     it("renders the create-character button on the characters tab", () => {
+      currentSearch = "?category=characters"
       render(<DiscoverMobileBody />)
       expect(screen.getByTestId("character-create-fab")).toBeInTheDocument()
     })
@@ -536,6 +626,7 @@ describe("<DiscoverMobileBody />", () => {
     })
 
     it("clicking the FAB opens the CharacterDetailSheet with no preselected character", async () => {
+      currentSearch = "?category=characters"
       const user = userEvent.setup()
       render(<DiscoverMobileBody />)
       await user.click(screen.getByTestId("character-create-fab"))
@@ -547,6 +638,7 @@ describe("<DiscoverMobileBody />", () => {
 
   describe("FeaturedCarousel", () => {
     it("renders the featured carousel on the characters tab when query is empty", () => {
+      currentSearch = "?category=characters"
       render(<DiscoverMobileBody />)
       expect(screen.getByTestId("stub-featured-carousel")).toBeInTheDocument()
     })
@@ -555,6 +647,111 @@ describe("<DiscoverMobileBody />", () => {
       currentSearch = "?category=teams"
       render(<DiscoverMobileBody />)
       expect(screen.queryByTestId("stub-featured-carousel")).not.toBeInTheDocument()
+    })
+  })
+
+  // ── View toggle parity + onboarding hints + twin profile panel ────────────
+
+  describe("view toggle parity, onboarding hints, twin profile", () => {
+    it.each(["characters", "teams", "skills"] as const)(
+      "shows the density toggle on legacy category '%s'",
+      (category) => {
+        currentSearch = `?category=${category}`
+        render(<DiscoverMobileBody />)
+        expect(screen.getByTestId("stub-view-toggle")).toHaveAttribute("data-category", category)
+      }
+    )
+
+    it.each(["plugins", "twinDrafts"] as const)(
+      "hides the density toggle on category '%s'",
+      (category) => {
+        currentSearch = `?category=${category}`
+        render(<DiscoverMobileBody />)
+        expect(screen.queryByTestId("stub-view-toggle")).not.toBeInTheDocument()
+      }
+    )
+
+    it("mounts the twin profile panel above the sources panel on twinIngest", () => {
+      currentSearch = "?category=twinIngest"
+      render(<DiscoverMobileBody />)
+      expect(screen.getByTestId("stub-twin-profile-panel")).toHaveAttribute("data-twin-id", "default")
+      expect(screen.getByTestId("stub-twin-sources-panel")).toBeInTheDocument()
+    })
+
+    it("shows an onboarding hint when a legacy category is empty (unfiltered)", () => {
+      mockUseDiscoverQuery.mockReturnValue({ items: [], loading: false })
+      currentSearch = "?category=characters"
+      render(<DiscoverMobileBody />)
+      expect(screen.getByText("emptyCharactersHint")).toBeInTheDocument()
+    })
+
+    it.each([
+      ["characters", "profile"],
+      ["teams", "agent-teams"],
+      ["skills", "skills"],
+    ] as const)("uses the %s companion illustration for its empty state", (category, icon) => {
+      mockUseDiscoverQuery.mockReturnValue({ items: [], loading: false })
+      currentSearch = `?category=${category}`
+      render(<DiscoverMobileBody />)
+      expect(screen.getByTestId(`mobile-spot-icon-${icon}`)).toBeInTheDocument()
+    })
+  })
+
+  // ── Loading skeletons ───────────────────────────────────────────────────────
+
+  describe("legacy list loading state", () => {
+    it.each(["characters", "teams", "skills"])(
+      "shows the skeleton (not the empty state) while %s is loading",
+      (category) => {
+        mockUseDiscoverQuery.mockImplementation((c: string) =>
+          c === category ? { items: [], loading: true } : defaultQueryImpl(c)
+        )
+        currentSearch = `?category=${category}`
+        render(<DiscoverMobileBody />)
+        expect(screen.getByTestId("discover-list-skeleton")).toBeInTheDocument()
+        // The onboarding empty-state hint must NOT show during loading.
+        expect(screen.queryByText("emptyCharactersHint")).not.toBeInTheDocument()
+      }
+    )
+  })
+
+  // ── Long-press card actions (share parity) ───────────────────────────────────
+
+  describe("card action sheet", () => {
+    it("long-pressing a character card opens the action sheet with the share button", () => {
+      jest.useFakeTimers()
+      try {
+        currentSearch = "?category=characters"
+        render(<DiscoverMobileBody />)
+        const card = screen.getByTestId("stub-character-card-char-1")
+        // The real <LongPress> wrapper owns the pointer handlers; a pointerdown
+        // followed by the 500ms hold fires onLongPress.
+        fireEvent.pointerDown(card, { clientX: 0, clientY: 0 })
+        act(() => {
+          jest.advanceTimersByTime(500)
+        })
+        expect(screen.getByTestId("discover-card-actions-sheet")).toBeInTheDocument()
+        expect(screen.getByTestId("discover-share-button")).toBeInTheDocument()
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    it("does not open the action sheet on a short tap", () => {
+      jest.useFakeTimers()
+      try {
+        currentSearch = "?category=characters"
+        render(<DiscoverMobileBody />)
+        const card = screen.getByTestId("stub-character-card-char-1")
+        fireEvent.pointerDown(card, { clientX: 0, clientY: 0 })
+        fireEvent.pointerUp(card)
+        act(() => {
+          jest.advanceTimersByTime(500)
+        })
+        expect(screen.queryByTestId("discover-card-actions-sheet")).not.toBeInTheDocument()
+      } finally {
+        jest.useRealTimers()
+      }
     })
   })
 })

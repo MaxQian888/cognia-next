@@ -24,10 +24,10 @@ import type {
   TaskNotificationConfig,
   TaskTrigger,
 } from "@/types/scheduler"
-import type { SendOptions, BuiltinToolsConfig } from "@/lib/claude/types"
+import type { SendOptions, BuiltinToolsConfig } from "@cognia/agent-config-types"
 import type { AcpPermissionMode } from "@/types/agent/external-agent"
 import { SchedulerError } from "./errors"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.scheduler
 

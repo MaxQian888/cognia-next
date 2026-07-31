@@ -36,6 +36,12 @@ import { executePluginTask } from "./plugin-executor"
 import { executeBackupTask } from "./backup-executor"
 import { executeTwinTask } from "./twin-executor"
 import { executeWikiRebuildTask } from "./wiki-rebuild-executor"
+import { executeWikiLintTask } from "./wiki-lint-executor"
+import { executeRadarReportTask } from "./radar-report-executor"
+import { executeAgentTeamTask } from "./team-executor"
+import { executeGoalTask } from "./goal-executor"
+import { executePlanTask } from "./plan-executor"
+import { executeBackgroundCommandTask, executeMonitorTask } from "./background-job-executor"
 import { executeScript } from "../script-executor"
 import { sendPrompt, onClaudeMessage, interruptSession } from "@/lib/claude/ipc"
 import type {
@@ -44,7 +50,7 @@ import type {
   ChatSession,
   ClaudeEvent,
   SendOptions,
-} from "@/lib/claude/types"
+} from "@cognia/agent-config-types"
 import { createSession, getSession } from "@/lib/db/sessions"
 import { getSettings } from "@/lib/db/settings"
 import { listEnabledMcpServers, buildMcpServerMap } from "@/lib/db/mcp-servers"
@@ -53,7 +59,7 @@ import { BUILT_IN_AGENT_MODES, type AgentModeConfig } from "@/types/agent/agent-
 import { useCustomModeStore } from "@/stores/agent/custom-mode-store"
 import { listEnabledSkillsByIds, renderSkillsSection } from "@/lib/db/skills"
 import { executeOnExternalAgent } from "@/lib/ai/agent/external/manager"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/tauri"
 
 const log = loggers.scheduler
@@ -684,15 +690,22 @@ export function registerBuiltInExecutors(): void {
   registerTaskExecutor("agent", executeAgentTask)
   registerTaskExecutor("skill", executeSkillTask)
   registerTaskExecutor("script", executeScriptTask)
+  registerTaskExecutor("background-command", executeBackgroundCommandTask)
+  registerTaskExecutor("monitor", executeMonitorTask)
   registerTaskExecutor("plugin", executePluginTask)
   registerTaskExecutor("backup", executeBackupTask)
   registerTaskExecutor("custom", executeCustomTask)
   registerTaskExecutor("external-agent", executeExternalAgentTask)
   registerTaskExecutor("twin", executeTwinTask)
   registerTaskExecutor("wiki-rebuild", executeWikiRebuildTask)
+  registerTaskExecutor("wiki-lint", executeWikiLintTask)
+  registerTaskExecutor("radar-report", executeRadarReportTask)
+  registerTaskExecutor("agent-team", executeAgentTeamTask)
+  registerTaskExecutor("goal", executeGoalTask)
+  registerTaskExecutor("plan", executePlanTask)
 
   log.info(
-    "Built-in scheduler executors registered: chat, agent, skill, script, plugin, backup, custom, external-agent, twin, wiki-rebuild"
+    "Built-in scheduler executors registered: chat, agent, skill, script, background-command, monitor, plugin, backup, custom, external-agent, twin, wiki-rebuild, wiki-lint, radar-report, agent-team, goal, plan"
   )
 }
 
@@ -701,11 +714,18 @@ export {
   executeAgentTask,
   executeSkillTask,
   executeScriptTask,
+  executeBackgroundCommandTask,
+  executeMonitorTask,
   executeExternalAgentTask,
   executePluginTask,
   executeBackupTask,
   executeWikiRebuildTask,
+  executeWikiLintTask,
+  executeRadarReportTask,
   executeCustomTask,
+  executeAgentTeamTask,
+  executeGoalTask,
+  executePlanTask,
   // Internal helpers exposed for unit testing.
   reconcileLegacyPromptFields,
   resolveAgentMode,

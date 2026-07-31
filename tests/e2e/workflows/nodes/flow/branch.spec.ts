@@ -2,7 +2,7 @@
  * E2E: flow.branch — condition evaluation + downstream propagation.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../../../helpers/db-reset"
 import { seedAndOpenWorkflow } from "../../../helpers/seed-workflow"
 import {
@@ -20,11 +20,13 @@ test.describe("workflow node — flow.branch", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded flow.branch renders + condition is editable + persists", async ({ page }) => {
+  test("seeded flow.branch renders + condition is editable + fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "branch")
     await assertNodeOnCanvas(page, { kind: "flow.branch", label: "Branch" })
     await openNodeInspector(page, "flow.branch")
-    await expect(page.locator("#ins-condition, [name=condition]").first()).toBeVisible()
+    await expect(page.locator("#ins-condition, [data-field=condition]").first()).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "flow.branch" })
   })

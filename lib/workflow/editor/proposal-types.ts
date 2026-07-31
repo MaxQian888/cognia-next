@@ -33,6 +33,8 @@ export interface ProposalOpAddNode {
   type: "add_node"
   nodeId: string
   kind: WorkflowNodeKind
+  /** Preserve an imported/template node version; omit for the current authoring default. */
+  typeVersion?: number
   position: { x: number; y: number }
   data?: Partial<WorkflowNodeData>
 }

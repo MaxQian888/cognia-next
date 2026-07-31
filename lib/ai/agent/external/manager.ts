@@ -10,6 +10,7 @@ import type {
   ExternalAgentSession,
   ExternalAgentMessage,
   ExternalAgentEvent,
+  ExternalAgentHookFireEvent,
   ExternalAgentResult,
   ExternalAgentExecutionOptions,
   ExternalAgentInstance,
@@ -19,6 +20,7 @@ import type {
   ExternalAgentStatus,
   ExternalAgentBranchReasonCode,
   ExternalAgentBranchOutcome,
+  ExternalAgentLastRunSnapshot,
   ExternalAgentCorrelationMetadata,
   ExternalAgentExecutionEligibility,
   ExternalAgentLifecycleCompletenessStage,
@@ -35,27 +37,34 @@ import type {
   AcpConfigOption,
 } from "@/types/agent/external-agent"
 import type { AgentTool } from "@/lib/ai/agent"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import {
   type ProtocolAdapter,
   protocolAdapterRegistry,
   type SessionCreateOptions,
+  type SessionListOptions,
 } from "./protocol-adapter"
 import { AcpClientAdapter } from "./acp-client"
+import { CodexAppServerAdapter } from "./codex-app-server-client"
 import { OpenCodeClientAdapter } from "./opencode-client"
+import { OpenCodeV2ClientAdapter } from "./opencode-v2-client"
+import { A2aClientAdapter } from "./a2a-client"
 import { acpToolsToAgentTools } from "./translators"
 import { createExternalAgentTraceBridge } from "./agent-trace-bridge"
 import {
   observeExternalAgentEvent,
   gateExternalAgentPermission,
   type AgentHookContext,
+  type EmitHookNotice,
 } from "./agent-hooks"
 import {
   getExternalAgentExecutionBlock,
   getExternalAgentEcosystemReadiness,
+  getUnsupportedProtocolReason,
   probeExternalAgentEcosystemReadiness,
   projectExternalAgentReadinessMetadata,
 } from "./config-normalizer"
+import { adaptPermissionMode } from "./permission-modes"
 import {
   createExternalAgentUnsupportedSessionExtensionError,
   isExternalAgentMethodNotFoundError,
@@ -65,9 +74,30 @@ import {
   createUnknownSessionExtensionSupport,
   normalizeExternalAgentValiditySnapshot,
 } from "./canonical-contract"
-import { checkExternalAgentCommandExists } from "@/lib/native/external-agent"
+import { checkExternalAgentCommandExists, onExternalAgentExit } from "@/lib/native/external-agent"
+import { isTauri } from "@/lib/tauri"
+import type {
+  ExternalAgentCompactionCapability,
+  ExternalAgentCompactionOptions,
+  ExternalAgentProviderUndoCapability,
+} from "./session-capabilities"
 
 const externalAgentManagerLogger = loggers.agent.child("external-manager")
+
+/**
+ * Whether a process-exit event should downgrade the manager's instance to
+ * `disconnected`. Only an *established* `connected` instance whose adapter now
+ * confirms it is gone is reconciled — in-flight connects/reconnects
+ * (`connecting`/`reconnecting`) and adapters that self-healed
+ * (`adapter.isConnected()` still true) are left alone. Pure so the
+ * reconcile decision is unit-tested without constructing the manager.
+ */
+export function shouldReconcileExitToDisconnected(
+  connectionStatus: ExternalAgentConnectionStatus,
+  adapterConnected: boolean
+): boolean {
+  return connectionStatus === "connected" && !adapterConnected
+}
 
 // ============================================================================
 // Capability Result Type
@@ -78,9 +108,7 @@ const externalAgentManagerLogger = loggers.agent.child("external-manager")
  * Distinguishes between "unsupported", "ok with data", and "error".
  */
 export type AgentCapabilityResult<T> =
-  | { status: "ok"; data: T }
-  | { status: "unsupported" }
-  | { status: "error"; error: Error }
+  { status: "ok"; data: T } | { status: "unsupported" } | { status: "error"; error: Error }
 
 // ============================================================================
 // External Agent Manager
@@ -182,6 +210,7 @@ export interface ExternalAgentLifecycleEvent {
   branchReasonCode?: ExternalAgentBranchReasonCode
   branchReason?: string
   branchOutcome?: ExternalAgentBranchOutcome
+  lastRunSnapshot?: ExternalAgentLastRunSnapshot
   lifecycleStage?: ExternalAgentLifecycleCompletenessStage
   blockedStage?: ExternalAgentLifecycleCompletenessStage
   executionEligibility?: ExternalAgentExecutionEligibility
@@ -206,6 +235,8 @@ export class ExternalAgentManager {
   private healthCheckTimer?: ReturnType<typeof setInterval>
   private eventListeners: Map<string, Set<(event: ExternalAgentEvent) => void>> = new Map()
   private lifecycleListeners: Set<(event: ExternalAgentLifecycleEvent) => void> = new Set()
+  private processExitUnlisten?: Promise<() => void>
+  private intentionalProcessStops = new Set<string>()
 
   private constructor(config: ExternalAgentManagerConfig = {}) {
     this.config = { ...DEFAULT_MANAGER_CONFIG, ...config }
@@ -216,6 +247,67 @@ export class ExternalAgentManager {
     // Start health check if interval is set
     if (this.config.healthCheckInterval > 0) {
       this.startHealthCheck()
+    }
+
+    // Reconcile a dead process back to the instance state proactively, instead
+    // of waiting for the next health-check tick (which left the panel showing a
+    // dead agent as "connected"). See `shouldReconcileExitToDisconnected`.
+    this.subscribeToProcessExits()
+  }
+
+  /**
+   * Subscribe once to the native `external-agent://exit` channel so a process
+   * death is mirrored into `instance.connectionStatus`. No-op off desktop.
+   */
+  private subscribeToProcessExits(): void {
+    if (!isTauri()) return
+    this.processExitUnlisten = onExternalAgentExit((event) => {
+      // Adapter listeners receive the same event and synchronously move their
+      // transport to disconnected/reconnecting. Reconcile in the next
+      // microtask so listener registration order cannot produce a false
+      // "still connected" decision.
+      queueMicrotask(() => {
+        void this.handleProcessExit(event.agentId)
+      })
+    })
+  }
+
+  /**
+   * A spawned external-agent process exited. Reconcile an established link to
+   * `disconnected`, then reconnect through the manager's existing retry path.
+   * Guards skip intentional stops, in-flight adapter reconnects, and adapters
+   * that already self-healed.
+   */
+  private async handleProcessExit(agentId: string): Promise<void> {
+    const instance = this.instances.get(agentId)
+    const adapter = this.adapters.get(agentId)
+    if (!instance || !adapter) return
+    if (this.intentionalProcessStops.has(agentId)) return
+    if (adapter.connectionStatus === "connecting" || adapter.connectionStatus === "reconnecting") {
+      return
+    }
+    if (!shouldReconcileExitToDisconnected(instance.connectionStatus, adapter.isConnected())) {
+      return
+    }
+    this.updateInstanceState(agentId, instance, {
+      connectionStatus: "disconnected",
+      status: "idle",
+    })
+    instance.sessions.clear()
+
+    if (!this.config.autoReconnect || !instance.config.enabled) {
+      return
+    }
+
+    externalAgentManagerLogger.warn("External agent process exited, reconnecting", { agentId })
+    try {
+      await this.connect(agentId)
+    } catch (error) {
+      // `connect()` already records the terminal error/validity state after
+      // exhausting the configured retry policy; this log preserves context.
+      externalAgentManagerLogger.error("External agent process reconnect failed", error, {
+        agentId,
+      })
     }
   }
 
@@ -245,6 +337,97 @@ export class ExternalAgentManager {
       throw new Error("Agent does not support session mode changes")
     }
     await adapter.setSessionMode(sessionId, modeId)
+  }
+
+  /**
+   * Append user input to a session's in-flight turn without interrupting it
+   * (Codex `turn/steer`). Throws when the adapter lacks the capability or no
+   * turn is active — callers fall back to their queue-and-replay path.
+   */
+  async steerSession(agentId: string, sessionId: string | undefined, text: string): Promise<void> {
+    const adapter = this.adapters.get(agentId)
+    if (!adapter?.steerTurn) {
+      throw new Error("Agent does not support steering an active turn")
+    }
+    // The chat layer knows its own session id, not the external thread id —
+    // resolve the agent's single executing session when omitted.
+    const targetSessionId =
+      sessionId ?? adapter.getSessions().find((session) => session.status === "executing")?.id
+    if (!targetSessionId) {
+      throw new Error("No executing session to steer")
+    }
+    await adapter.steerTurn(targetSessionId, text)
+  }
+
+  /** Whether the agent's adapter can steer an in-flight turn. */
+  supportsSteering(agentId: string): boolean {
+    return typeof this.adapters.get(agentId)?.steerTurn === "function"
+  }
+
+  async getCompactionCapability(
+    agentId: string,
+    sessionId: string
+  ): Promise<ExternalAgentCompactionCapability> {
+    const adapter = this.adapters.get(agentId)
+    if (!adapter?.getCompactionCapability) {
+      return { status: "unsupported", routes: [], reason: "adapter_unsupported" }
+    }
+    return adapter.getCompactionCapability(sessionId)
+  }
+
+  async compactSession(
+    agentId: string,
+    sessionId: string,
+    options?: ExternalAgentCompactionOptions
+  ): Promise<void> {
+    const adapter = this.adapters.get(agentId)
+    if (!adapter?.compactSession) {
+      throw new Error("Agent does not support context compaction")
+    }
+    await adapter.compactSession(sessionId, options)
+  }
+
+  async getProviderUndoCapability(
+    agentId: string,
+    sessionId: string
+  ): Promise<ExternalAgentProviderUndoCapability> {
+    const adapter = this.adapters.get(agentId)
+    if (!adapter?.getProviderUndoCapability) {
+      return { status: "unsupported", reason: "adapter_unsupported" }
+    }
+    return adapter.getProviderUndoCapability(sessionId)
+  }
+
+  async undoLastProviderChange(agentId: string, sessionId: string): Promise<void> {
+    const adapter = this.adapters.get(agentId)
+    if (!adapter?.undoLastProviderChange) {
+      throw new Error("Agent does not support provider undo")
+    }
+    await adapter.undoLastProviderChange(sessionId)
+  }
+
+  /**
+   * Return the live Codex `app-server` adapter for an agent, or null when the
+   * agent isn't connected through the native app-server protocol. Lets UI
+   * surfaces read MCP-server / skills status (and the native methods) without
+   * widening the generic {@link ProtocolAdapter} contract.
+   */
+  getCodexAppServerAdapter(agentId: string): CodexAppServerAdapter | null {
+    const adapter = this.adapters.get(agentId)
+    return adapter instanceof CodexAppServerAdapter ? adapter : null
+  }
+
+  /**
+   * Return the live OpenCode adapter for an agent, or null when the agent isn't
+   * connected through the `opencode` protocol. The OpenCode-specific surfaces
+   * (share links, session diff/todos, PTY, TUI driving, dynamic MCP, workspace
+   * find/*, VCS/project info) live on the adapter rather than the generic
+   * {@link ProtocolAdapter} contract — this is the sanctioned way for UI code
+   * to reach them (mirrors {@link getCodexAppServerAdapter}).
+   */
+  getOpenCodeAdapter(agentId: string): OpenCodeClientAdapter | null {
+    const adapter = this.adapters.get(agentId)
+    return adapter instanceof OpenCodeClientAdapter ? adapter : null
   }
 
   async setSessionModel(agentId: string, sessionId: string, modelId: string): Promise<void> {
@@ -279,7 +462,7 @@ export class ExternalAgentManager {
     agentId: string,
     sessionId: string,
     configId: string,
-    value: string
+    value: string | boolean
   ): Promise<AcpConfigOption[]> {
     const adapter = this.adapters.get(agentId)
     if (!adapter?.setConfigOption) {
@@ -306,8 +489,18 @@ export class ExternalAgentManager {
   }
 
   async listSessions(
-    agentId: string
-  ): Promise<Array<{ sessionId: string; title?: string; createdAt?: string; updatedAt?: string }>> {
+    agentId: string,
+    options?: SessionListOptions
+  ): Promise<
+    Array<{
+      sessionId: string
+      cwd?: string
+      additionalDirectories?: string[]
+      title?: string
+      createdAt?: string
+      updatedAt?: string
+    }>
+  > {
     const adapter = this.adapters.get(agentId)
     const instance = this.instances.get(agentId)
     if (!adapter || !instance) {
@@ -341,7 +534,7 @@ export class ExternalAgentManager {
     }
 
     try {
-      const sessions = await adapter.listSessions()
+      const sessions = options ? await adapter.listSessions(options) : await adapter.listSessions()
       this.setSessionExtensionSupport(agentId, instance, "session/list", "supported", "ok")
       return sessions
     } catch (error) {
@@ -372,7 +565,11 @@ export class ExternalAgentManager {
     }
   }
 
-  async forkSession(agentId: string, sessionId: string): Promise<ExternalAgentSession> {
+  async forkSession(
+    agentId: string,
+    sessionId: string,
+    options?: SessionCreateOptions
+  ): Promise<ExternalAgentSession> {
     const adapter = this.adapters.get(agentId)
     const instance = this.instances.get(agentId)
     if (!adapter?.forkSession || !instance) {
@@ -405,7 +602,7 @@ export class ExternalAgentManager {
     }
 
     try {
-      const forked = await adapter.forkSession(sessionId)
+      const forked = await adapter.forkSession(sessionId, options)
       instance.sessions.set(forked.id, forked)
       this.setSessionExtensionSupport(agentId, instance, "session/fork", "supported", "ok")
       return forked
@@ -537,6 +734,28 @@ export class ExternalAgentManager {
   }
 
   /**
+   * Log out of an agent's authenticated session (ACP v1 `logout`). The inverse
+   * of {@link authenticate}; no-ops on adapters that don't support it.
+   */
+  async logout(agentId: string): Promise<void> {
+    const adapter = this.adapters.get(agentId)
+    await adapter?.logout?.()
+  }
+
+  /**
+   * Delete a session from the agent's listings (ACP v1 `session/delete`).
+   * Falls back to a local close when the adapter cannot delete.
+   */
+  async deleteSession(agentId: string, sessionId: string): Promise<void> {
+    const adapter = this.adapters.get(agentId)
+    if (adapter?.deleteSession) {
+      await adapter.deleteSession(sessionId)
+    } else {
+      await adapter?.closeSession(sessionId)
+    }
+  }
+
+  /**
    * Get singleton instance
    */
   static getInstance(config?: ExternalAgentManagerConfig): ExternalAgentManager {
@@ -557,13 +776,25 @@ export class ExternalAgentManager {
   }
 
   /**
+   * Return the live singleton WITHOUT creating it. Lifecycle code (e.g. the
+   * plugin-disable path) uses this to tear down agents only when a manager
+   * actually exists, instead of instantiating the heavy manager (and its
+   * health-check timer) as a side effect of disabling an unrelated plugin.
+   */
+  static peekInstance(): ExternalAgentManager | null {
+    return ExternalAgentManager._instance
+  }
+
+  /**
    * Register default protocol adapters
    */
   private registerDefaultAdapters(): void {
     protocolAdapterRegistry.register("acp", () => new AcpClientAdapter())
+    protocolAdapterRegistry.register("codex-app-server", () => new CodexAppServerAdapter())
     protocolAdapterRegistry.register("opencode", () => new OpenCodeClientAdapter())
+    protocolAdapterRegistry.register("opencode-v2", () => new OpenCodeV2ClientAdapter())
+    protocolAdapterRegistry.register("a2a", () => new A2aClientAdapter())
     // Future: Register more adapters
-    // protocolAdapterRegistry.register('a2a', () => new A2aClientAdapter());
     // protocolAdapterRegistry.register('http', () => new HttpClientAdapter());
   }
 
@@ -654,6 +885,7 @@ export class ExternalAgentManager {
       "unavailable",
       "reset by peer",
       "closed",
+      "process exited",
     ]
     return retryablePatterns.some((pattern) => message.includes(pattern))
   }
@@ -794,6 +1026,35 @@ export class ExternalAgentManager {
     })
   }
 
+  /**
+   * Capture the outcome of an execution turn as the agent's "last run" snapshot.
+   * The settings/diagnostics surfaces read it through the lifecycle bridge
+   * (`addLifecycleListener` → store). Set the field before the terminal
+   * `updateInstanceState` call so the emitted event carries the fresh snapshot.
+   */
+  private recordLastRun(
+    instance: ExternalAgentInstance,
+    snapshot: {
+      terminalOutcome: "ok" | "error"
+      branchReasonCode: ExternalAgentBranchReasonCode
+      branchOutcome: ExternalAgentBranchOutcome
+      sessionId?: string
+      traceId?: string
+      diagnosticText?: string
+    }
+  ): void {
+    const next: ExternalAgentLastRunSnapshot = {
+      terminalOutcome: snapshot.terminalOutcome,
+      branchReasonCode: snapshot.branchReasonCode,
+      branchOutcome: snapshot.branchOutcome,
+      timestamp: new Date(),
+      linkedSessionId: snapshot.sessionId,
+      linkedTraceId: snapshot.traceId,
+      diagnosticText: snapshot.diagnosticText,
+    }
+    instance.lastRunSnapshot = next
+  }
+
   private emitLifecycleEvent(agentId: string, instance: ExternalAgentInstance): void {
     if (this.lifecycleListeners.size === 0) {
       return
@@ -808,6 +1069,7 @@ export class ExternalAgentManager {
       branchReasonCode: instance.validity?.lastBranchReasonCode,
       branchReason: instance.validity?.lastBranchReason,
       branchOutcome: instance.validity?.branchOutcome,
+      lastRunSnapshot: instance.lastRunSnapshot,
       lifecycleStage: instance.validity?.lifecycleStage,
       blockedStage: instance.validity?.blockedStage,
       executionEligibility: instance.validity?.executionEligibility,
@@ -977,7 +1239,13 @@ export class ExternalAgentManager {
     // Create adapter for the protocol
     const adapter = protocolAdapterRegistry.create(hydratedConfig.protocol)
     if (!adapter) {
-      throw new Error(`Unsupported protocol: ${hydratedConfig.protocol}`)
+      const isPluginProtocol =
+        typeof hydratedConfig.protocol === "string" && hydratedConfig.protocol.includes(":")
+      throw new Error(
+        isPluginProtocol
+          ? `No protocol adapter registered for "${hydratedConfig.protocol}". This protocol is contributed by a plugin (external-agent-adapter) — enable the plugin that provides it, then reconnect.`
+          : `Unsupported protocol: ${hydratedConfig.protocol}`
+      )
     }
 
     // Create instance
@@ -1056,7 +1324,12 @@ export class ExternalAgentManager {
   async removeAgent(agentId: string): Promise<void> {
     const adapter = this.adapters.get(agentId)
     if (adapter) {
-      await adapter.disconnect()
+      this.intentionalProcessStops.add(agentId)
+      try {
+        await adapter.disconnect()
+      } finally {
+        this.intentionalProcessStops.delete(agentId)
+      }
       this.adapters.delete(agentId)
     }
 
@@ -1064,6 +1337,121 @@ export class ExternalAgentManager {
     this.eventListeners.delete(agentId)
 
     externalAgentManagerLogger.info("Removed external agent", { agentId })
+  }
+
+  /**
+   * Tear down every connected agent whose protocol is in `protocols`: disconnect
+   * (which kills the spawned process through the adapter) and drop the in-memory
+   * adapter so a disabled plugin leaves no resident protocol logic or leaked
+   * child process behind. The agent instance is KEPT but marked non-executable
+   * so the UI can explain why and {@link restoreAgentsForProtocols} can revive it
+   * when the providing plugin is re-enabled. Returns the affected agent ids.
+   *
+   * Called when an `external-agent-adapter` plugin is disabled/uninstalled: its
+   * `${pluginId}:${id}` protocols leave the registry, but a live agent already
+   * created against one would otherwise keep its spawned process running.
+   */
+  async teardownAgentsByProtocols(protocols: Iterable<string>): Promise<string[]> {
+    const target = new Set(protocols)
+    if (target.size === 0) {
+      return []
+    }
+
+    const affected: string[] = []
+    for (const [agentId, instance] of this.instances) {
+      if (target.has(instance.config.protocol)) {
+        affected.push(agentId)
+      }
+    }
+
+    for (const agentId of affected) {
+      try {
+        await this.disconnect(agentId)
+      } catch (error) {
+        externalAgentManagerLogger.warn("Error disconnecting agent during protocol teardown", {
+          agentId,
+          error: this.normalizeErrorMessage(error),
+        })
+      }
+      // Drop the adapter so no resident protocol logic outlives the plugin that
+      // contributed it. The config/instance stays for restore + UI explanation.
+      this.adapters.delete(agentId)
+      const instance = this.instances.get(agentId)
+      if (instance) {
+        this.updateInstanceState(agentId, instance, {
+          connectionStatus: "disconnected",
+          status: "idle",
+          validity: {
+            executable: false,
+            source: "config",
+            checkedAt: new Date(),
+            healthStatus: "unknown",
+            blockingReasonCode: "protocol_unsupported",
+            blockingReason: getUnsupportedProtocolReason(instance.config.protocol),
+          },
+          branchReasonCode: "protocol_unsupported",
+          branchReason: getUnsupportedProtocolReason(instance.config.protocol),
+        })
+      }
+    }
+
+    if (affected.length > 0) {
+      externalAgentManagerLogger.info("Tore down external agents for removed protocols", {
+        protocols: Array.from(target),
+        agentIds: affected,
+      })
+    }
+    return affected
+  }
+
+  /**
+   * Re-create adapter instances for agents whose protocol just became available
+   * again (the providing plugin was re-enabled) but whose adapter was dropped by
+   * {@link teardownAgentsByProtocols}. Re-derives executability and leaves the
+   * agent DISCONNECTED so the user (or auto-connect) decides when to reconnect.
+   * Synchronous — pure re-instantiation, no I/O. Returns the restored agent ids.
+   */
+  restoreAgentsForProtocols(protocols: Iterable<string>): string[] {
+    const target = new Set(protocols)
+    if (target.size === 0) {
+      return []
+    }
+
+    const restored: string[] = []
+    for (const [agentId, instance] of this.instances) {
+      if (!target.has(instance.config.protocol) || this.adapters.has(agentId)) {
+        continue
+      }
+      const adapter = protocolAdapterRegistry.create(instance.config.protocol)
+      if (!adapter) {
+        continue
+      }
+      this.adapters.set(agentId, adapter)
+      const blockAssessment = getExternalAgentExecutionBlock(instance.config)
+      this.updateInstanceState(agentId, instance, {
+        connectionStatus: "disconnected",
+        status: "idle",
+        validity: {
+          executable: !blockAssessment,
+          source: "config",
+          checkedAt: new Date(),
+          healthStatus: "unknown",
+          blockingReasonCode: blockAssessment?.code,
+          blockingReason: blockAssessment?.reason,
+        },
+        branchReasonCode: blockAssessment?.code,
+        branchReason: blockAssessment?.reason,
+      })
+      restored.push(agentId)
+    }
+
+    if (restored.length > 0) {
+      externalAgentManagerLogger.info("Restored external agents for re-registered protocols", {
+        protocols: Array.from(target),
+        agentIds: restored,
+      })
+    }
+    return restored
   }
 
   /**
@@ -1242,7 +1630,12 @@ export class ExternalAgentManager {
     const instance = this.instances.get(agentId)
 
     if (adapter) {
-      await adapter.disconnect()
+      this.intentionalProcessStops.add(agentId)
+      try {
+        await adapter.disconnect()
+      } finally {
+        this.intentionalProcessStops.delete(agentId)
+      }
     }
 
     if (instance) {
@@ -1286,6 +1679,11 @@ export class ExternalAgentManager {
     const mcpServers = Array.isArray(custom?.mcpServers)
       ? (custom?.mcpServers as SessionCreateOptions["mcpServers"])
       : undefined
+    const additionalDirectories = Array.isArray(custom?.additionalDirectories)
+      ? custom.additionalDirectories.filter(
+          (directory): directory is string => typeof directory === "string"
+        )
+      : undefined
     const cwdCandidate =
       options?.workingDirectory ||
       (typeof custom?.workingDirectory === "string" ? custom.workingDirectory : undefined) ||
@@ -1295,6 +1693,14 @@ export class ExternalAgentManager {
     const metadataPayload = {
       ...(options?.traceContext?.metadata || {}),
       instructionEnvelope: options?.instructionEnvelope,
+      // Per-agent Codex defaults (sandbox mode / reasoning effort / summary)
+      // ride to the adapter through metadata — same channel as selectedModel.
+      codexOptions: instance.config.codexOptions,
+      // The requested model rides the same channel the interactive model picker
+      // writes, which is the only one adapters read (e.g. the Codex app-server
+      // client lifts it into `thread/start` params.model). Callers used to pass
+      // a `model` that nothing consumed.
+      selectedModel: options?.model,
     } as Record<string, unknown>
     const metadata =
       Object.entries(metadataPayload).filter(([, value]) => value !== undefined).length > 0
@@ -1306,11 +1712,28 @@ export class ExternalAgentManager {
       systemPrompt: options?.systemPrompt,
       context: options?.context as Record<string, unknown> | undefined,
       instructionEnvelope: options?.instructionEnvelope,
-      permissionMode: options?.permissionMode,
+      permissionMode: this.resolveEffectivePermissionMode(instance, options?.permissionMode),
+      allowedTools: options?.allowedTools,
       timeout: options?.timeout,
       mcpServers,
+      additionalDirectories,
       metadata,
     }
+  }
+
+  /**
+   * Clamp a requested permission mode to what the agent's backend can actually
+   * enforce (e.g. Codex has no `dontAsk`). Returns `undefined` when no mode was
+   * requested so the adapter keeps its own default. Keeping this on the manager
+   * means the mode persisted on the session — and surfaced to the UI — always
+   * matches the mode the backend runs under.
+   */
+  private resolveEffectivePermissionMode(
+    instance: ExternalAgentInstance,
+    requested: AcpPermissionMode | undefined
+  ): AcpPermissionMode | undefined {
+    if (!requested) return undefined
+    return adaptPermissionMode(requested, instance.config.protocol).mode
   }
 
   private async resolveExecutionSession(
@@ -1328,6 +1751,10 @@ export class ExternalAgentManager {
     let session = preferredSessionId
       ? (instance.sessions.get(preferredSessionId) ?? adapter.getSession?.(preferredSessionId))
       : undefined
+    // A cached session was created earlier, with an earlier `selectedModel`;
+    // unlike createSession/resumeSession it never sees `sessionOptions`, so a
+    // model requested now has to be applied to it explicitly (below).
+    const reusedFromCache = Boolean(session)
 
     if (!session && preferredSessionId) {
       const resumeSupport = this.getSessionExtensionSupport(adapter, instance)["session/resume"]
@@ -1433,8 +1860,40 @@ export class ExternalAgentManager {
       }
     }
 
+    if (reusedFromCache && options?.model) {
+      await this.applyModelToReusedSession(adapter, session, options.model)
+    }
+
     instance.sessions.set(session.id, session)
     return session
+  }
+
+  /**
+   * Switch an already-created session onto a newly requested model.
+   *
+   * Best-effort by design: an adapter with no model concept has nothing to
+   * switch, and a rejected model id should not kill an execution that can still
+   * run on the session's current model. Both cases are logged rather than
+   * thrown, matching how the rest of session resolution degrades.
+   */
+  private async applyModelToReusedSession(
+    adapter: ProtocolAdapter,
+    session: ExternalAgentSession,
+    model: string
+  ): Promise<void> {
+    const current = (session.metadata as Record<string, unknown> | undefined)?.selectedModel
+    if (current === model) return
+    if (!adapter.setSessionModel) return
+    try {
+      await adapter.setSessionModel(session.id, model)
+      session.metadata = { ...(session.metadata ?? {}), selectedModel: model }
+    } catch (error) {
+      externalAgentManagerLogger.warn("setSessionModel failed for a reused session", {
+        sessionId: session.id,
+        model,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
   }
 
   private resolveTraceSessionId(
@@ -1566,12 +2025,16 @@ export class ExternalAgentManager {
 
     const session = await this.resolveExecutionSession(adapter, instance, options)
 
+    const effectivePermissionMode = this.resolveEffectivePermissionMode(
+      instance,
+      options?.permissionMode
+    )
     if (
-      options?.permissionMode &&
+      effectivePermissionMode &&
       adapter.setSessionMode &&
-      session.permissionMode !== options.permissionMode
+      session.permissionMode !== effectivePermissionMode
     ) {
-      await adapter.setSessionMode(session.id, options.permissionMode)
+      await adapter.setSessionMode(session.id, effectivePermissionMode)
     }
 
     const traceBridge = this.createTraceBridge(agentId, instance, session, options)
@@ -1633,18 +2096,35 @@ export class ExternalAgentManager {
 
         // Settings.json (System B) + plugin (System A) hooks. A blocking
         // PreToolUse hook denies the permission and suppresses the event so the
-        // user is never prompted for a tool the hook already rejected.
+        // user is never prompted for a tool the hook already rejected. A
+        // consequential fire is forwarded as a synthetic `hook_fire` event so
+        // the chat shows an inline hook-notice row.
+        const emitHookNotice: EmitHookNotice = (notice) => {
+          const hookEvent: ExternalAgentHookFireEvent = {
+            type: "hook_fire",
+            timestamp: new Date(),
+            sessionId: session.id,
+            ...notice,
+          }
+          this.emitEvent(agentId, hookEvent)
+          options?.onEvent?.(hookEvent)
+          void traceBridge.onEvent(hookEvent)
+        }
         if (event.type === "permission_request") {
-          const blocked = await gateExternalAgentPermission(hookCtx, event, (requestId, reason) =>
-            this.respondToPermission(agentId, session.id, {
-              requestId,
-              granted: false,
-              reason: `hook denied: ${reason}`,
-            })
+          const blocked = await gateExternalAgentPermission(
+            hookCtx,
+            event,
+            (requestId, reason) =>
+              this.respondToPermission(agentId, session.id, {
+                requestId,
+                granted: false,
+                reason: `hook denied: ${reason}`,
+              }),
+            emitHookNotice
           )
           if (blocked) continue
         } else {
-          observeExternalAgentEvent(hookCtx, event)
+          void observeExternalAgentEvent(hookCtx, event, emitHookNotice)
         }
 
         // Emit to listeners
@@ -1667,6 +2147,12 @@ export class ExternalAgentManager {
 
       if (streamSuccess) {
         instance.stats.successfulExecutions++
+        this.recordLastRun(instance, {
+          terminalOutcome: "ok",
+          branchReasonCode: "ok",
+          branchOutcome: "external",
+          sessionId: session.id,
+        })
         this.updateInstanceState(agentId, instance, {
           status: "ready",
           lastError: undefined,
@@ -1682,6 +2168,13 @@ export class ExternalAgentManager {
         })
       } else {
         instance.stats.failedExecutions++
+        this.recordLastRun(instance, {
+          terminalOutcome: "error",
+          branchReasonCode: "execution_failed",
+          branchOutcome: "fallback",
+          sessionId: session.id,
+          diagnosticText: streamError ?? "External agent execution failed",
+        })
         this.updateInstanceState(agentId, instance, {
           status: "failed",
           lastError: streamError ?? "External agent execution failed",
@@ -1705,6 +2198,12 @@ export class ExternalAgentManager {
       instance.stats.failedExecutions++
       const errorMessage = this.normalizeErrorMessage(error)
       const timeout = this.isTimeoutErrorMessage(errorMessage)
+      this.recordLastRun(instance, {
+        terminalOutcome: "error",
+        branchReasonCode: timeout ? "external_unavailable" : "execution_failed",
+        branchOutcome: "fallback",
+        diagnosticText: errorMessage,
+      })
       this.updateInstanceState(agentId, instance, {
         status: timeout ? "timeout" : "failed",
         lastError: errorMessage,
@@ -1753,12 +2252,16 @@ export class ExternalAgentManager {
 
     const session = await this.resolveExecutionSession(adapter, instance, options)
 
+    const effectivePermissionMode = this.resolveEffectivePermissionMode(
+      instance,
+      options?.permissionMode
+    )
     if (
-      options?.permissionMode &&
+      effectivePermissionMode &&
       adapter.setSessionMode &&
-      session.permissionMode !== options.permissionMode
+      session.permissionMode !== effectivePermissionMode
     ) {
-      await adapter.setSessionMode(session.id, options.permissionMode)
+      await adapter.setSessionMode(session.id, effectivePermissionMode)
     }
 
     const traceBridge = this.createTraceBridge(agentId, instance, session, options)
@@ -1794,22 +2297,39 @@ export class ExternalAgentManager {
             await this.connect(agentId)
           }
 
+          const emitHookNotice: EmitHookNotice = (notice) => {
+            const hookEvent: ExternalAgentHookFireEvent = {
+              type: "hook_fire",
+              timestamp: new Date(),
+              sessionId: session.id,
+              ...notice,
+            }
+            this.emitEvent(agentId, hookEvent)
+            options?.onEvent?.(hookEvent)
+            void traceBridge.onEvent(hookEvent)
+          }
           const wrappedOptions: ExternalAgentExecutionOptions = {
             ...options,
             onEvent: (event) => {
               // Headless path: hooks fire-and-forget. A blocking PreToolUse hook
               // still denies the tool via respondToPermission; there is no
-              // permission UI to suppress on this path.
+              // permission UI to suppress on this path. A consequential fire is
+              // forwarded as a synthetic `hook_fire` event so the chat shows an
+              // inline hook-notice row.
               if (event.type === "permission_request") {
-                void gateExternalAgentPermission(hookCtx, event, (requestId, reason) =>
-                  this.respondToPermission(agentId, session.id, {
-                    requestId,
-                    granted: false,
-                    reason: `hook denied: ${reason}`,
-                  })
+                void gateExternalAgentPermission(
+                  hookCtx,
+                  event,
+                  (requestId, reason) =>
+                    this.respondToPermission(agentId, session.id, {
+                      requestId,
+                      granted: false,
+                      reason: `hook denied: ${reason}`,
+                    }),
+                  emitHookNotice
                 )
               } else {
-                observeExternalAgentEvent(hookCtx, event)
+                void observeExternalAgentEvent(hookCtx, event, emitHookNotice)
               }
               options?.onEvent?.(event)
               void traceBridge.onEvent(event)
@@ -1909,6 +2429,12 @@ export class ExternalAgentManager {
 
       if (result.success) {
         instance.stats.successfulExecutions++
+        this.recordLastRun(instance, {
+          terminalOutcome: "ok",
+          branchReasonCode: "ok",
+          branchOutcome: "external",
+          sessionId: result.sessionId || session.id,
+        })
         this.updateInstanceState(agentId, instance, {
           status: "ready",
           lastError: undefined,
@@ -1924,6 +2450,13 @@ export class ExternalAgentManager {
         })
       } else {
         instance.stats.failedExecutions++
+        this.recordLastRun(instance, {
+          terminalOutcome: "error",
+          branchReasonCode: "execution_failed",
+          branchOutcome: "fallback",
+          sessionId: result.sessionId || session.id,
+          diagnosticText: result.error ?? "External agent execution failed",
+        })
         this.updateInstanceState(agentId, instance, {
           status: "failed",
           lastError: result.error ?? "External agent execution failed",
@@ -1953,6 +2486,12 @@ export class ExternalAgentManager {
       instance.stats.failedExecutions++
       const errorMessage = this.normalizeErrorMessage(error)
       const timeout = this.isTimeoutErrorMessage(errorMessage)
+      this.recordLastRun(instance, {
+        terminalOutcome: "error",
+        branchReasonCode: timeout ? "external_unavailable" : "execution_failed",
+        branchOutcome: "fallback",
+        diagnosticText: errorMessage,
+      })
       this.updateInstanceState(agentId, instance, {
         status: timeout ? "timeout" : "failed",
         lastError: errorMessage,
@@ -2080,6 +2619,16 @@ export class ExternalAgentManager {
   }
 
   /**
+   * Replace ALL delegation rules in one shot (priority-sorted). Used to sync
+   * the persisted store's `delegationRules` into the manager before a chat
+   * turn calls `checkDelegation`, so the matcher sees the user's live rules
+   * without accumulating duplicates across turns.
+   */
+  setDelegationRules(rules: ExternalAgentDelegationRule[]): void {
+    this.delegationRules = [...rules].sort((a, b) => b.priority - a.priority)
+  }
+
+  /**
    * Remove a delegation rule
    */
   removeDelegationRule(ruleId: string): void {
@@ -2123,9 +2672,7 @@ export class ExternalAgentManager {
           break
 
         case "custom":
-          // Custom matchers would be evaluated differently
-          // For now, treat as a regex
-          matched = new RegExp(rule.matcher, "i").test(task)
+          matched = this.matchCustom(task, rule.matcher)
           break
       }
 
@@ -2145,6 +2692,64 @@ export class ExternalAgentManager {
       reason: "No matching delegation rule",
       reasonCode: "external_unavailable",
     }
+  }
+
+  /**
+   * Evaluate a `custom` delegation matcher. The matcher string is either:
+   *  - a JSON-encoded structured spec — a safe boolean combination of regex /
+   *    substring tests (`{ regex, flags }`, `{ contains }`, `{ all }`,
+   *    `{ any }`, `{ not }`), evaluated without any code execution; or
+   *  - a plain string, treated as a case-insensitive regex (the historical
+   *    behavior — preserved for backward compatibility).
+   *
+   * An invalid regex or malformed spec never throws: it yields `false` so a
+   * broken rule simply does not match rather than crashing the turn.
+   */
+  private matchCustom(task: string, matcher: string): boolean {
+    const trimmed = matcher.trim()
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try {
+        return this.evalCustomSpec(task, JSON.parse(trimmed))
+      } catch {
+        return false
+      }
+    }
+    try {
+      return new RegExp(matcher, "i").test(task)
+    } catch {
+      return false
+    }
+  }
+
+  /** Recursively evaluate a structured custom-matcher spec against the task. */
+  private evalCustomSpec(task: string, spec: unknown): boolean {
+    if (typeof spec !== "object" || spec === null) return false
+    const s = spec as Record<string, unknown>
+
+    if (Array.isArray(s.all)) {
+      return s.all.every((sub) => this.evalCustomSpec(task, sub))
+    }
+    if (Array.isArray(s.any)) {
+      return s.any.some((sub) => this.evalCustomSpec(task, sub))
+    }
+    if ("not" in s) {
+      return !this.evalCustomSpec(task, s.not)
+    }
+    if (typeof s.regex === "string") {
+      try {
+        const flags = typeof s.flags === "string" ? s.flags : "i"
+        return new RegExp(s.regex, flags).test(task)
+      } catch {
+        return false
+      }
+    }
+    if (s.contains !== undefined) {
+      const needles = Array.isArray(s.contains) ? s.contains : [s.contains]
+      const haystack = task.toLowerCase()
+      // Any listed substring present satisfies a `contains` node.
+      return needles.some((n) => typeof n === "string" && haystack.includes(n.toLowerCase()))
+    }
+    return false
   }
 
   /**

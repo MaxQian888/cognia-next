@@ -6,9 +6,10 @@
 #   - crates/cognia-cli/   — plugin-author CLI (`cognia`).
 #
 # Intentionally excluded:
-#   - signaling-server/             standalone deploy artifact built via
-#                                   Dockerfile/Fly.io. Keeping its own
-#                                   Cargo.lock isolates the deploy image.
+#   - services/signaling-server/, services/share-server/
+#                                   standalone deploy artifacts built via
+#                                   Dockerfile/Fly.io. Each keeps its own
+#                                   Cargo.lock to isolate the deploy image.
 #   - crates/cognia-plugin-template, plugins/wasm-example-formatter
 #                                   wasm32-wasip2 components built with
 #                                   `cargo component`; their tighter
@@ -23,9 +24,47 @@ resolver = "2"
 members = [
   "src-tauri",
   "crates/cognia-cli",
+  "crates/cognia-sandbox-runner",
+  # ADR-0067 Tier-A decomposition — subsystem library crates extracted from the
+  # monolithic `app_lib` so an edit recompiles ~2–15k LOC + a relink instead of
+  # the whole 170k-LOC tree.
+  "crates/cognia-core",
+  "crates/cognia-instrument",
+  "crates/cognia-git",
+  "crates/cognia-ocr",
+  "crates/cognia-vector",
+  "crates/cognia-automation",
+  "crates/cognia-scheduling",
+  # ADR-0067 Tier-B — foundation crates unblocking the subscription/
+  # connectors/terminal/plugin_api extractions.
+  "crates/cognia-secrets",
+  "crates/cognia-net",
+  # Native local-video processing (FFmpeg/FFprobe discovery, probing, frame
+  # extraction, analysis, trimming) behind the plugin media API. Not part of the
+  # Tier-B list above — it unblocks none of those extractions.
+  "crates/cognia-media",
+  # ADR-0067 Tier-B subsystem crates.
+  "crates/cognia-terminal",
+  "crates/cognia-subscription",
+  "crates/cognia-connectors",
+  "crates/cognia-plugin-runtime",
+  # ADR-0067 follow-up — remaining subsystem leaves.
+  "crates/cognia-skills",
+  "crates/cognia-tts",
+  "crates/cognia-remote-control",
+  "crates/cognia-gateway",
+  "crates/cognia-ccswitch",
+  "crates/cognia-mcp-server",
+  "crates/cognia-external-agent",
+  "crates/cognia-task-workspace",
+  # Background-job supervisor: process-group-safe spawn/kill for the built-in
+  # agent's `bash(run_in_background)` and for scheduled tasks. Linked by both
+  # src-tauri and the headless `cognia-server` binary.
+  "crates/cognia-jobs",
 ]
 exclude = [
-  "signaling-server",
+  "services/signaling-server",
+  "services/share-server",
   "crates/cognia-plugin-template",
   "crates/cognia-plugin-template-ts",
   "plugins/wasm-example-formatter",
@@ -36,11 +75,24 @@ exclude = [
 # requires opt-level = 3 even in dev profile — without it, smoke tests crawl.
 # Profile overrides live at the workspace root per Cargo's rules; package-
 # level `[profile.*]` blocks in workspace members are ignored.
+[profile.dev]
+# Keep filename/line information for panic backtraces and breakpoints without
+# making every Tauri edit relink the full type/variable-level DWARF graph.
+debug = "line-tables-only"
+split-debuginfo = "unpacked"
+
 [profile.dev.package.rten]
 opt-level = 3
 
 [profile.dev.package.rten-imageproc]
 opt-level = 3
+
+# Opt-in profile for the rare LLDB session that needs locals and full Rust type
+# information. Normal `cargo build` / `tauri dev` stays on the fast dev profile.
+[profile.dev-full]
+inherits = "dev"
+debug = "full"
+split-debuginfo = "unpacked"
 
 # Keep line-table debug info in release so the crash-report subsystem's
 # minidumps (`crash::monitor`) are symbolicable offline via `minidump-stackwalk`
@@ -48,6 +100,15 @@ opt-level = 3
 # root — package-level `[profile.*]` in members is ignored by Cargo.
 [profile.release]
 debug = "line-tables-only"
+# Optimize the shipped desktop binary: thin-LTO + single codegen unit improve
+# runtime across the heavy dep tree (wasmtime JIT, crypto, sqlite), and `strip`
+# drops the symbol table for a much smaller download. `panic = "unwind"` is left
+# at its default — the crash-handler/minidumper path relies on unwinding, so do
+# NOT switch to `panic = "abort"`. `debug = "line-tables-only"` (above) is kept
+# so minidumps stay symbolicable.
+lto = "thin"
+codegen-units = 1
+strip = true
 
 # `cargo test` compiles the whole `app_lib` crate plus every inline
 # `#[cfg(test)]` module into ONE giant test binary (lib + all deps:
@@ -56,7 +117,7 @@ debug = "line-tables-only"
 # Windows (`rustc-LLVM ERROR: out of memory` → STATUS_STACK_BUFFER_OVERRUN).
 # The test profile keeps line tables only — panic backtraces still carry
 # file:line, but the heavy type debuginfo that blows the memory budget is
-# dropped. This is scoped to the `test` profile, so `pnpm tauri dev`
-# (the `dev` profile) keeps full debuginfo and is unaffected.
+# dropped. Keep this explicit even though the fast `dev` profile now makes the
+# same tradeoff; `dev-full` remains available for full LLDB sessions.
 [profile.test]
 debug = "line-tables-only"

@@ -23,6 +23,7 @@ import type {
   PluginPermission,
   PluginActivationEvent,
   PluginManifestCommandDef,
+  PluginManifestDexieBlock,
   PluginTool,
   PluginToolContext,
   PluginRuntimeProfile,
@@ -30,38 +31,104 @@ import type {
   PluginVerificationDiagnostic,
   PluginVerificationSnapshot,
   PluginVerificationStage,
+  PythonHookDeclaration,
+  PythonHostSettings,
+  PythonLoadResult,
 } from "@/types/plugin"
 import { PluginLoader } from "@/lib/plugin/core/loader"
 import { PluginRegistry } from "@/lib/plugin/core/registry"
 import {
   createFullPluginContext,
+  createWorkflowAPI,
   teardownPluginWorkflowRegistrations,
+  type FullPluginContext,
 } from "@/lib/plugin/core/context"
 import { buildExtensionDescriptor } from "@/lib/plugin/core/descriptor"
 import { createPluginA2UIBridge, type PluginA2UIBridge } from "@/lib/plugin/bridge/a2ui-bridge"
 import { PluginThemesBridge } from "@/lib/plugin/bridge/themes-bridge"
 import { PluginLifecycleHooks, getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
+import { isPluginSuspendEligible } from "@/lib/plugin/core/idle-policy"
+import { seedPluginConfigDefaults } from "@/lib/plugin/core/config-defaults"
+import {
+  isInherentlyTrustedFrontendSource,
+  readPolicy,
+  writePolicy,
+} from "@/lib/plugin/core/plugins-policy-storage"
+import { emitPluginConfigChange } from "@/lib/plugin/api/config-api"
+import { clearPluginSecrets } from "@/lib/plugin/api/secrets-api"
+
+/** How often the idle sweep runs (only active when a plugin opts into idleSuspend). */
+const IDLE_SWEEP_INTERVAL_MS = 5 * 60 * 1000
+
+/** Upper bound for a plugin's `activate()` (W6.1). */
+const ACTIVATE_TIMEOUT_MS = 30_000
+
+/**
+ * Upper bound for a lifecycle hook (`onSuspend` / `onResume` / `onDisable` /
+ * `onUnload` / `onUninstall`). Without it a hook that never resolves wedges the
+ * caller: a hung `onSuspend` in particular would stall the sequential idle
+ * sweep and leave the plugin stuck `enabled` with no teardown. Same order as
+ * `ACTIVATE_TIMEOUT_MS` — a lifecycle hook that runs longer is a bug.
+ */
+const LIFECYCLE_HOOK_TIMEOUT_MS = 30_000
+import { getMessageBus, SystemEvents } from "@/lib/plugin/messaging/message-bus"
+import { getPluginIPC } from "@/lib/plugin/messaging/ipc"
 import { validatePluginManifest } from "@/lib/plugin/core/validation"
-import { applyPluginTables, removePluginTables } from "@/lib/plugin/dexie/bridge"
+import {
+  applyPluginTables,
+  removePluginTables,
+  restorePluginTables,
+} from "@/lib/plugin/dexie/bridge"
+import {
+  activationBreakerKey,
+  getOrCreateBreaker,
+  loadBreakerKey,
+  resetPluginBreakers,
+} from "@/lib/plugin/resilience/breaker-registry"
+import { isRetryableLoadError, LOAD_RESILIENCE } from "@/lib/plugin/resilience/config"
+import { runResilient } from "@/lib/plugin/resilience/run-resilient"
+import { runWithConcurrency } from "@/lib/plugin/core/concurrency"
+import {
+  recordActivationFailure,
+  recordLoadAttempt,
+  recordLoadFailure,
+  recordLoadRetry,
+  recordLoadSuccess,
+} from "@/lib/plugin/core/resilience-telemetry"
 import { getDb } from "@/lib/db/schema"
-import { updatePlugin } from "@/lib/db/plugins"
+import {
+  updatePlugin,
+  upsertPlugin,
+  getPlugin,
+  setPluginConfig,
+  getPythonHostSettings,
+  setPythonHostSettings,
+} from "@/lib/db/plugins"
+import { appendPythonEvent, type PythonPluginEvent } from "@/lib/plugin/python/log-buffer"
 import { clearPluginExtensions } from "@/lib/plugin/api/extension-api"
+import { loadPluginStyles, removePluginStyles } from "@/lib/plugin/styles/plugin-stylesheet"
+import { unregisterUriHandlersByPlugin } from "@/lib/plugin/uri/uri-handler-registry"
 import { getPluginExtensions, restorePluginExtensions } from "@/lib/plugin/api/extension-api"
 import {
   evaluatePluginCompatibility,
   type CompatibilityDiagnostic,
   type CompatibilityRuntime,
 } from "@/lib/plugin/core/compatibility"
+import { withTimeout } from "@cognia/primitives"
 import { loggers } from "@/lib/plugin/core/logger"
 import { createPluginVerificationSnapshot } from "@/lib/plugin/core/verification"
 import { getPluginSignatureVerifier } from "@/lib/plugin/security/signature"
 import { getPermissionGuard } from "@/lib/plugin/security/permission-guard"
+import { grantPluginPermission, revokePluginPermission } from "./transport"
+import { getPluginConsentBroker } from "@/lib/plugin/security/consent-broker"
 import {
   applyWasmCapabilityGrant,
   clearWasmCapabilityGrant,
+  reconcileWasmGrantLedgerWithManifest,
   type WasmCapabilityGrantDecision,
 } from "@/lib/plugin/security/wasm-grant"
 import { canUseTauriInvoke } from "@/lib/native/utils"
+import { isHeadlessHost } from "@/lib/platform/detect"
 import {
   validateActivationEvent,
   validateHookPoint,
@@ -76,7 +143,11 @@ import {
   type LoadOrderPluginInput,
   type LoadOrderBlockReason,
 } from "@/lib/plugin/core/load-order"
-import { getBrowserBuiltinRegistry } from "./browser-builtin-registry"
+import {
+  getBrowserBuiltinRegistry,
+  getBrowserBuiltinRegistryEntry,
+} from "./browser-builtin-registry"
+import { buildWasmNodeDefs, buildWasmToolDefinitions, callWasmExport } from "./wasm-loader"
 // PR-D — overlay-registry capabilities (skills / mcp-server-preset /
 // native-anthropic-tool / external-agent-preset) now flow through the
 // codified `CAPABILITY_BRIDGE_MAP`. Bespoke capabilities (modes,
@@ -103,8 +174,26 @@ import { invalidateConfigComponentForPlugin } from "@/lib/plugin/bridge/config-c
 // other three capabilities via the disable loop.
 import { unregisterSkillsByPlugin } from "@/lib/plugin/registries/skill-registry"
 import { registerPluginI18n, unregisterPluginI18n } from "@/lib/i18n/plugin-i18n-registry"
+import { registerExtensionsForPlugin } from "@/lib/plugin/bridge/extension-bridge"
 import { clearCustomThemesForPluginContext } from "@/lib/plugin/api/theme-api"
+import {
+  clearTemplatesForPluginContext,
+  registerLegacyPluginTemplateCompatibility,
+  registerPluginTemplatePackages,
+} from "@/lib/plugin/api/templates-api"
+import { getTemplateRuntime } from "@/lib/templates/runtime"
 import { dispatchPluginError } from "@/lib/plugin/error-bus"
+
+async function invokePluginRuntime<T = unknown>(
+  command: string,
+  args?: Record<string, unknown>
+): Promise<T> {
+  if (!isHeadlessHost()) {
+    return invoke<T>(command, args)
+  }
+  const { transport } = await import("@/lib/tauri/transport-instance")
+  return transport.call<T>(command, args)
+}
 
 // =============================================================================
 // Governance mode resolution
@@ -140,7 +229,25 @@ export interface PluginManagerConfig {
   hostVersion?: string
   compatibilityMode?: "warn" | "block"
   pluginPointGovernanceMode?: PluginPointGovernanceMode
+  /**
+   * Inject a frontend-module importer for Node hosts (the CLI). Forwarded to the
+   * {@link PluginLoader} so non-builtin `frontend` plugins load via dynamic
+   * `import()` instead of the Tauri / fetch / eval strategies that don't exist
+   * under Node. See `cli/src/plugin/node-importer.ts`.
+   */
+  frontendImporter?: (absPath: string, pluginId: string) => Promise<Record<string, unknown>>
+  /** Host-neutral native lifecycle transport for Node-target plugins. */
+  nodeHostInvoker?: import("../launcher/launchPluginJs").PluginJsHostInvoker
+  /**
+   * Max plugins enabled concurrently within a single dependency layer at
+   * startup restore. Bounds the thundering-herd of module loads against the
+   * sidecar. Default 4. Tests pin it to 1 for deterministic ordering.
+   */
+  maxLoadConcurrency?: number
 }
+
+/** Default concurrency for layered startup restore. */
+const DEFAULT_MAX_LOAD_CONCURRENCY = 4
 
 interface DiscoveredPlugin {
   manifest: PluginManifest
@@ -165,10 +272,7 @@ interface RuntimePluginSnapshotEntry {
 }
 
 type PluginActivationRuntimeEvent =
-  | "startup"
-  | `onCommand:${string}`
-  | `onTool:${string}`
-  | `onView:${string}`
+  "startup" | `onCommand:${string}` | `onTool:${string}` | `onView:${string}` | `onUri:${string}`
 
 interface PluginDiscoveryProjection {
   source: PluginSource
@@ -182,12 +286,14 @@ interface ParsedActivationSpec {
   commandEvents: string[]
   toolEvents: string[]
   viewEvents: string[]
+  /** True when the plugin declares `onUri` (it handles its own deep-links). */
+  uriActivation: boolean
   rawEvents: PluginActivationEvent[]
 }
 
 interface PluginRuntimeRollbackSnapshot {
   status: Plugin["status"]
-  context?: PluginContext
+  context?: FullPluginContext
   hooks?: PluginHooks
   tools: PluginTool[]
   components: PluginA2UIComponent[]
@@ -227,6 +333,8 @@ export interface PythonRuntimeInfo {
   available: boolean
   version: string | null
   plugin_count: number
+  /** Loaded plugins currently demoted to a dormant lazy slot. */
+  lazy_hosts: number
   total_calls: number
   total_execution_time_ms: number
   failed_calls: number
@@ -274,6 +382,19 @@ export class PluginEnableError extends Error {
  * callers can show "install/enable the missing dependency" rather than a
  * generic retry. The unmet reasons are carried for messaging.
  */
+/**
+ * Thrown when a python/hybrid plugin is loaded while the manager's
+ * `enablePython` config is off (browser profile, or desktop with the
+ * runtime explicitly disabled). Typed so UI callers can distinguish
+ * "runtime disabled by configuration" from a backend load failure.
+ */
+export class PythonRuntimeDisabledError extends Error {
+  constructor(public readonly pluginId: string) {
+    super(`Cannot load Python plugin "${pluginId}": the Python runtime is disabled in this profile`)
+    this.name = "PythonRuntimeDisabledError"
+  }
+}
+
 export class PluginDependencyError extends Error {
   constructor(
     public readonly pluginId: string,
@@ -289,6 +410,26 @@ export class PluginDependencyError extends Error {
 }
 
 /**
+ * Thrown when a `frontend`/`hybrid` plugin from a source that is not
+ * inherently trusted (`local`/`marketplace`/`git`) is loaded before the user
+ * has explicitly trusted it (ADR 0013 frontend trust boundary). These plugins
+ * execute un-sandboxed JavaScript in the renderer realm, so the load is
+ * refused outright rather than degraded. Typed so UI callers can point the
+ * user at the trust toggle instead of showing a generic load failure.
+ */
+export class PluginFrontendTrustError extends Error {
+  constructor(
+    public readonly pluginId: string,
+    public readonly source: PluginSource
+  ) {
+    super(
+      `Cannot load plugin "${pluginId}": it runs un-sandboxed JavaScript in the renderer and comes from the untrusted source "${source}". Grant it explicit trust in the plugin's Permissions tab to load it.`
+    )
+    this.name = "PluginFrontendTrustError"
+  }
+}
+
+/**
  * Window CustomEvent name fired when `enablePlugin` rolls back after a
  * failure. The detail carries the pluginId + a short error string so a
  * React component near the app root can translate + render a toast
@@ -297,6 +438,20 @@ export class PluginDependencyError extends Error {
  * `plugin:updates-available` / `plugin:hot-reload-notification`.
  */
 export const PLUGIN_ENABLE_FAILED_EVENT = "plugin:enable-failed"
+
+/**
+ * Hooks that intercept the user↔model conversation (prompts, tool calls,
+ * tool results). Declaring ANY of these requires the high-risk
+ * `hooks:chat-intercept` manifest permission — enforced in
+ * `validateHookDeclarations`.
+ */
+export const CHAT_INTERCEPT_HOOKS = [
+  "onUserPromptSubmit",
+  "onPreToolUse",
+  "onPostToolUse",
+  "onMessageSend",
+  "onMessageReceive",
+] as const
 
 export interface PluginEnableFailedEventDetail {
   pluginId: string
@@ -313,6 +468,7 @@ export interface PluginEnableFailedEventDetail {
 // =============================================================================
 
 let pluginManagerInstance: PluginManager | null = null
+let pluginManagerInitialization: Promise<PluginManager> | null = null
 
 export function getPluginManager(): PluginManager {
   if (!pluginManagerInstance) {
@@ -334,13 +490,24 @@ export function createPluginManager(config: PluginManagerConfig): PluginManager 
 }
 
 export async function initializePluginManager(config: PluginManagerConfig): Promise<PluginManager> {
-  if (pluginManagerInstance) {
+  if (pluginManagerInitialization) {
+    return pluginManagerInitialization
+  }
+  if (pluginManagerInstance?.isInitialized()) {
     return pluginManagerInstance
   }
 
-  pluginManagerInstance = createPluginManager(config)
-  await pluginManagerInstance.initialize()
-  return pluginManagerInstance
+  const manager = pluginManagerInstance ?? createPluginManager(config)
+  pluginManagerInstance = manager
+  pluginManagerInitialization = manager.initialize().then(() => manager)
+  try {
+    return await pluginManagerInitialization
+  } catch (error) {
+    if (pluginManagerInstance === manager) pluginManagerInstance = null
+    throw error
+  } finally {
+    pluginManagerInitialization = null
+  }
 }
 
 /**
@@ -354,7 +521,40 @@ export function __resetPluginManagerForTesting(): void {
   if (process.env.NODE_ENV !== "test") {
     throw new Error("__resetPluginManagerForTesting is only callable in NODE_ENV=test")
   }
+  pluginManagerInstance?.stopIdleSweep()
   pluginManagerInstance = null
+  pluginManagerInitialization = null
+}
+
+/**
+ * Tear down the module-level manager (W6.5): stops the periodic idle sweep
+ * (previously never wired into any dispose path, leaking the interval across
+ * app teardown / HMR) and drops the instance so the next
+ * `initializePluginManager()` starts fresh.
+ */
+export function disposePluginManager(): void {
+  pluginManagerInstance?.stopIdleSweep()
+  pluginManagerInstance = null
+  pluginManagerInitialization = null
+}
+
+/**
+ * Produce a structured-clone-safe copy of a plugin manifest for persistence
+ * into the Dexie `plugins` table. Some manifests carry live runtime objects
+ * whose members are functions (e.g. a `sharedMemoryAdapters[]` adapter's
+ * `write`/`read`/`delete`). IndexedDB's structured-clone algorithm throws
+ * `DataCloneError` on functions, which would abort the whole discovery-row
+ * write. A JSON round-trip drops every function-valued (and otherwise
+ * non-serializable) property while preserving the serializable metadata the
+ * discovery UI actually reads. Falls back to the original object only if the
+ * manifest is somehow not JSON-encodable, letting the caller's try/catch log it.
+ */
+export function toClonableManifest(manifest: PluginManifest): PluginManifest {
+  try {
+    return JSON.parse(JSON.stringify(manifest)) as PluginManifest
+  } catch {
+    return manifest
+  }
 }
 
 // =============================================================================
@@ -368,19 +568,61 @@ export class PluginManager {
   private hooksManager: PluginLifecycleHooks
   private a2uiBridge: PluginA2UIBridge | null = null
   private themesBridge: PluginThemesBridge | null = null
-  private contexts: Map<string, PluginContext> = new Map()
+  private contexts: Map<string, FullPluginContext> = new Map()
   private registeredSlashCommandsByPlugin: Map<string, string[]> = new Map()
   private activationInFlight: Set<string> = new Set()
+  /**
+   * In-flight `enablePlugin` promises keyed by plugin id. Dedupes concurrent
+   * enables of the same plugin (e.g. a shared dependency enabled by two
+   * dependents in the same restore layer) so its contributions register and
+   * its `onEnable` hook fire exactly once. Without this, the `status ===
+   * "enabled"` early-return races the late `store.enablePlugin` flip.
+   */
+  private enableInFlight: Map<string, Promise<void>> = new Map()
+
+  /**
+   * Per-plugin lifecycle serialization (W6.4). Enable/disable/unload/
+   * uninstall for the SAME plugin chain onto one queue so transitions can't
+   * interleave (e.g. an enable racing a disable and re-registering half the
+   * contributions the disable just tore down). Different plugins stay fully
+   * concurrent.
+   */
+  private lifecycleQueues: Map<string, Promise<unknown>> = new Map()
+
+  private withLifecycleLock<T>(pluginId: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.lifecycleQueues.get(pluginId) ?? Promise.resolve()
+    const run = prev.then(fn, fn)
+    const tail = run.then(
+      () => undefined,
+      () => undefined
+    )
+    this.lifecycleQueues.set(pluginId, tail)
+    void tail.then(() => {
+      if (this.lifecycleQueues.get(pluginId) === tail) {
+        this.lifecycleQueues.delete(pluginId)
+      }
+    })
+    return run
+  }
   private warnedActivationEvents: Set<string> = new Set()
+  private idleSweepTimer: ReturnType<typeof setInterval> | null = null
+  /** Guards against overlapping idle sweeps — one slow suspend must not let the
+   * next interval tick start a second concurrent sweep on the same plugins. */
+  private idleSweepRunning = false
   private initialized = false
   private compatibilityMode: "warn" | "block"
   private pluginPointGovernanceMode: PluginPointGovernanceMode
   private compatibilityRuntime: CompatibilityRuntime
   private runtimeProfile: PluginRuntimeProfile
+  /** `plugin:python` Tauri event unlisten — set once by subscribePythonEvents. */
+  private pythonEventsUnlisten: (() => void) | null = null
 
   constructor(config: PluginManagerConfig) {
     this.config = config
-    this.loader = new PluginLoader()
+    this.loader = new PluginLoader({
+      frontendImporter: config.frontendImporter,
+      nodeHostInvoker: config.nodeHostInvoker,
+    })
     this.registry = new PluginRegistry()
     this.hooksManager = getPluginLifecycleHooks()
     this.compatibilityMode = config.compatibilityMode || "warn"
@@ -469,18 +711,43 @@ export class PluginManager {
   private collectRuntimeProfileDiagnostics(
     manifest: PluginManifest
   ): ExtensionCompatibilityDiagnostic[] {
-    if (this.runtimeProfile !== "browser") {
+    // The Tauri (desktop) profile trusts every built-in. Other profiles gate
+    // against their declared surface, with compatibility fallbacks for older
+    // manifests that predate mobile/headless metadata.
+    if (this.runtimeProfile === "tauri") {
       return []
     }
+    const surface = this.runtimeProfile
 
-    const compatibility = manifest.runtimeCompatibility?.browser
+    const compat = manifest.runtimeCompatibility
+    let compatibility = compat?.[surface]
+    let fallbackSurface: "browser" | "tauri" | undefined
+
+    // Mobile is a browser-class runtime. Headless frontend modules without a
+    // dedicated target inherit browser compatibility, while native/Node
+    // plugins inherit Tauri compatibility because their existing Rust/Node
+    // host contract is the one cognia-server exposes.
+    if (!compatibility && surface === "mobile") {
+      fallbackSurface = "browser"
+      compatibility = compat?.browser
+    } else if (!compatibility && surface === "headless") {
+      const nativeOrNodeTarget =
+        manifest.type !== "frontend" ||
+        Boolean(
+          manifest.engines?.node || manifest.runtimeCompatibility?.tauri?.entrypoint === "node"
+        )
+      fallbackSurface = nativeOrNodeTarget ? "tauri" : "browser"
+      compatibility = compat?.[fallbackSurface]
+    }
+    const fallbackNote = fallbackSurface ? ` (inherited from ${fallbackSurface} compatibility)` : ""
+
     if (!compatibility) {
       return [
         {
-          code: "runtime.browser.unsupported",
+          code: `runtime.${surface}.unsupported`,
           severity: "error",
-          message: `Plugin ${manifest.id} does not declare browser runtime compatibility.`,
-          hint: "Add browser runtime compatibility metadata before enabling this plugin in browser mode.",
+          message: `Plugin ${manifest.id} does not declare ${surface} runtime compatibility.`,
+          hint: `Add ${surface} runtime compatibility metadata before enabling this plugin in ${surface} mode.`,
         },
       ]
     }
@@ -492,13 +759,13 @@ export class PluginManager {
     if (compatibility.availability === "degraded") {
       return [
         {
-          code: "runtime.browser.degraded",
+          code: `runtime.${surface}.degraded`,
           severity: "warning",
           message:
             compatibility.reason ||
-            `Plugin ${manifest.id} is only partially supported in browser runtime.`,
+            `Plugin ${manifest.id} is only partially supported in ${surface} runtime${fallbackNote}.`,
           hint: compatibility.entrypoint
-            ? `Browser bundle entrypoint: ${compatibility.entrypoint}`
+            ? `${surface} bundle entrypoint: ${compatibility.entrypoint}`
             : undefined,
         },
       ]
@@ -506,14 +773,44 @@ export class PluginManager {
 
     return [
       {
-        code: "runtime.browser.unsupported",
+        code: `runtime.${surface}.unsupported`,
         severity: "error",
-        message: compatibility.reason || `Plugin ${manifest.id} is blocked in browser runtime.`,
+        message:
+          compatibility.reason ||
+          `Plugin ${manifest.id} is blocked in ${surface} runtime${fallbackNote}.`,
         hint: compatibility.entrypoint
-          ? `Declared browser entrypoint: ${compatibility.entrypoint}`
+          ? `Declared ${surface} entrypoint: ${compatibility.entrypoint}`
           : undefined,
       },
     ]
+  }
+
+  /**
+   * True when the active runtime profile *blocks* this plugin (an
+   * error-severity runtime diagnostic), e.g. a desktop-native built-in
+   * (`computer-use`, `playwright-mcp`, …) under the `browser` profile — which
+   * is also what the Capacitor mobile shell boots as (it is non-Tauri).
+   *
+   * Such a plugin stays discovered and visible in `/plugins` (flagged
+   * incompatible), but MUST be excluded from automatic startup enable /
+   * activation: auto-enabling it would throw in `loadPlugin` and fire one
+   * failure toast per plugin, which on mobile/web manifested as a flood of
+   * toasts at boot. A manual, user-initiated `enablePlugin` is unaffected and
+   * still surfaces the diagnostic on demand. Returns `false` on the `tauri`
+   * profile (`collectRuntimeProfileDiagnostics` is browser-only), so desktop
+   * auto-enable behaviour is untouched.
+   */
+  private isBlockedByRuntimeProfile(manifest: PluginManifest): boolean {
+    return this.collectRuntimeProfileDiagnostics(manifest).some(
+      (diagnostic) => diagnostic.severity === "error"
+    )
+  }
+
+  private isRetiredBuiltin(plugin: Plugin): boolean {
+    return (
+      plugin.path?.startsWith("builtin://") === true &&
+      getBrowserBuiltinRegistryEntry(plugin.manifest.id) === undefined
+    )
   }
 
   private recordPluginVerification(
@@ -681,27 +978,85 @@ export class PluginManager {
     // Sync persisted runtime status from backend when available.
     await this.syncRuntimeState()
 
+    // Re-declare persisted plugin Dexie tables into the live schema BEFORE any
+    // activation. `new CogniaDB(...)` resets to the static core schema each
+    // launch, so the namespaced stores recorded in pluginDexieMeta are absent
+    // from db.tables until re-declared — without this, applyPluginTables takes
+    // its idempotent early-return and the plugin's activate() throws
+    // "Table <id>:<name> does not exist" (e.g. demo-delivery:resources).
+    await this.restorePluginDexieTables()
+
     // Restore plugin runtime state from persisted config and activation rules.
     await this.restorePluginStates()
 
     // Trigger startup lazy activation.
     await this.handleActivationEvent("startup")
 
+    // Begin the idle sweep if any enabled plugin opted into idle-suspension.
+    this.startIdleSweep()
+
     this.initialized = true
   }
 
   private async initializePythonRuntime(): Promise<void> {
     try {
-      await invoke("plugin_python_initialize", {
+      await invokePluginRuntime("plugin_python_initialize", {
         pythonPath: this.config.pythonPath,
       })
+      await this.subscribePythonEvents()
       const runtime = await this.getPythonRuntimeInfo().catch(() => null)
+      if (runtime && !runtime.available) {
+        // Supported configuration, not an error: the backend probed and
+        // found no usable interpreter — python plugins stay disabled.
+        loggers.manager.warn(
+          "Python runtime unavailable: no python >= 3.9 interpreter found; python plugins disabled"
+        )
+        return
+      }
       if (runtime?.version) {
         this.compatibilityRuntime.pythonVersion = runtime.version
       }
     } catch (error) {
-      loggers.manager.error("Failed to initialize Python runtime:", error)
+      // Pass a string: a bare Error renders as "{}" in the console
+      // transport's data slot, hiding the actual failure.
+      loggers.manager.error("Failed to initialize Python runtime:", String(error))
       // Continue without Python support
+    }
+  }
+
+  /**
+   * Route `plugin:python` notifications (host logs, pip progress, streaming
+   * chunks, exits) into the per-plugin log ring buffer consumed by the
+   * detail Logs tab. Idempotent — subscribed once per manager lifetime.
+   */
+  private async subscribePythonEvents(): Promise<void> {
+    if (this.pythonEventsUnlisten) {
+      return
+    }
+    try {
+      if (isHeadlessHost()) {
+        const { transport } = await import("@/lib/tauri/transport-instance")
+        this.pythonEventsUnlisten = transport.subscribe<PythonPluginEvent>(
+          "plugin:python",
+          appendPythonEvent
+        )
+        return
+      }
+      const { listen } = await import("@tauri-apps/api/event")
+      this.pythonEventsUnlisten = await listen<PythonPluginEvent>("plugin:python", (event) => {
+        appendPythonEvent(event.payload)
+      })
+    } catch (error) {
+      // Web mode (no Tauri event bridge) — logs surface is desktop-only.
+      recordSilentFailure(
+        "python-runtime",
+        {
+          site: "manager.subscribePythonEvents",
+          message: "Failed to subscribe to plugin:python events",
+          expected: !canUseTauriInvoke(),
+        },
+        error
+      )
     }
   }
 
@@ -809,6 +1164,39 @@ export class PluginManager {
     }
   }
 
+  /**
+   * Re-declare every persisted plugin Dexie table into the live schema before
+   * activation. Delegates to `restorePluginTables`, sourcing the authoritative
+   * schema strings from each scanned plugin's `manifest.dexie` block (the
+   * pluginDexieMeta rows store only table names). Best-effort: a failure here
+   * must not abort manager init — the per-plugin enable path still re-applies
+   * tables (now hardened to detect missing stores) as a fallback.
+   */
+  private async restorePluginDexieTables(): Promise<void> {
+    const store = usePluginStore.getState()
+    const manifestDexie = new Map<string, PluginManifestDexieBlock>()
+    for (const [id, plugin] of Object.entries(store.plugins)) {
+      const dexie = plugin.manifest?.dexie
+      if (dexie) manifestDexie.set(id, dexie)
+    }
+    if (manifestDexie.size === 0) return
+
+    try {
+      const restored = await restorePluginTables(
+        () => getDb() as unknown as import("dexie").default,
+        manifestDexie
+      )
+      if (restored.length > 0) {
+        loggers.manager.info(
+          `[manager] restored ${restored.length} plugin Dexie table(s) at launch:`,
+          restored
+        )
+      }
+    } catch (error) {
+      loggers.manager.warn("[manager] restorePluginDexieTables failed:", String(error))
+    }
+  }
+
   private async restorePluginStates(): Promise<void> {
     const store = usePluginStore.getState()
     const plugins = Object.values(store.plugins)
@@ -818,7 +1206,20 @@ export class PluginManager {
         .filter(
           (plugin) =>
             plugin.status === "installed" &&
-            (this.config.autoEnable || this.shouldActivateOnStartup(plugin.manifest))
+            (this.config.autoEnable || this.shouldActivateOnStartup(plugin.manifest)) &&
+            // Don't auto-enable plugins the active runtime profile blocks
+            // (e.g. desktop-native built-ins on the browser/mobile shell) —
+            // each would throw in loadPlugin and fire a failure toast at boot.
+            !this.isBlockedByRuntimeProfile(plugin.manifest) &&
+            // Removed first-party plugins can survive in the persisted store
+            // across an app upgrade. A builtin:// path is not fetchable, so
+            // only entries still present in the static registry may restore.
+            !this.isRetiredBuiltin(plugin) &&
+            // Same for renderer-JS plugins awaiting the user's frontend trust
+            // grant: enabling would throw PluginFrontendTrustError and toast
+            // on EVERY boot until re-trusted. They stay visible in /plugins
+            // (the detail Permissions tab shows the trust toggle).
+            !this.requiresExplicitFrontendTrust(plugin)
         )
         .map((plugin) => plugin.manifest.id)
     )
@@ -827,7 +1228,7 @@ export class PluginManager {
     // Resolve a dependency-respecting enable order over the whole known set so a
     // candidate's required dependency is enabled before it. Blocked / cyclic
     // candidates are surfaced as diagnostics and skipped.
-    const { order, blocked, cycles, degraded } = resolveLoadOrder(this.buildLoadOrderInputs())
+    const { layers, blocked, cycles, degraded } = resolveLoadOrder(this.buildLoadOrderInputs())
 
     for (const [id, reasons] of blocked) {
       if (candidateIds.has(id)) this.recordDependencyDiagnostics(id, reasons)
@@ -856,13 +1257,20 @@ export class PluginManager {
       }
     }
 
-    for (const id of order) {
-      if (!candidateIds.has(id)) continue
-      try {
-        await this.enablePlugin(id)
-      } catch (error) {
-        loggers.manager.error(`Failed to restore plugin ${id}:`, error)
-      }
+    // Enable layer-by-layer: every plugin in a layer has its required deps in
+    // earlier layers, so a layer's members enable CONCURRENTLY (bounded) while
+    // dependency edges are still respected. A per-plugin failure is logged and
+    // never aborts the layer or the cold start.
+    const limit = this.config.maxLoadConcurrency ?? DEFAULT_MAX_LOAD_CONCURRENCY
+    for (const layer of layers) {
+      const candidates = layer.filter((id) => candidateIds.has(id))
+      await runWithConcurrency(candidates, limit, async (id) => {
+        try {
+          await this.enablePlugin(id)
+        } catch (error) {
+          loggers.manager.error(`Failed to restore plugin ${id}:`, error)
+        }
+      })
     }
   }
 
@@ -871,11 +1279,18 @@ export class PluginManager {
   // ===========================================================================
 
   async scanPlugins(): Promise<DiscoveredPlugin[]> {
-    if (this.runtimeProfile === "browser") {
+    // Browser AND mobile discover built-ins from the static registry; only the
+    // Tauri shell additionally scans the on-disk plugin directory below.
+    if (this.runtimeProfile !== "tauri") {
       return this.scanBrowserBuiltins()
     }
 
-    const discovered: DiscoveredPlugin[] = []
+    // Built-in plugins are statically bundled into the renderer (see
+    // `browser-builtin-registry.ts`) — they are not present in the on-disk
+    // plugin directory, so the desktop shell must discover them through the
+    // same registry walk the browser profile uses. Run it first so a failed
+    // directory scan below still leaves the built-ins discovered.
+    const discovered: DiscoveredPlugin[] = await this.scanBrowserBuiltins()
     const store = usePluginStore.getState()
 
     try {
@@ -939,6 +1354,8 @@ export class PluginManager {
           await store.installPlugin(manifest.id)
         }
 
+        await this.persistDiscoveredPluginRow(manifest, projection.source, path)
+
         this.registerPluginPermissions(manifest.id, manifest.permissions || [])
 
         discovered.push({
@@ -953,6 +1370,55 @@ export class PluginManager {
     }
 
     return discovered
+  }
+
+  /**
+   * Mirror a freshly-discovered plugin into the Dexie `plugins` table — the
+   * single source of truth the /plugins Library (`usePlugins` → `listPlugins`)
+   * and the marketplace "Built-in" section (`useBuiltinPluginEntries` →
+   * `listPluginsBySource("builtin")`) both read.
+   *
+   * `store.discoverPlugin` / `store.installPlugin` only mutate the in-memory
+   * Zustand store (localStorage-persisted); without this write, built-in and
+   * marketplace plugins are discovered into the runtime but never reach the
+   * Dexie-backed UI surfaces, so both render empty.
+   *
+   * `upsertPlugin` preserves the existing row's status / enabled / config when
+   * those aren't supplied, so re-discovery on every launch is idempotent and
+   * never clobbers the user's enable state. Non-fatal: a Dexie hiccup must not
+   * abort discovery, so failures are logged and swallowed.
+   */
+  private async persistDiscoveredPluginRow(
+    manifest: PluginManifest,
+    source: PluginSource,
+    path: string
+  ): Promise<void> {
+    // Some manifests carry LIVE runtime objects with function members — e.g.
+    // agent-team-examples' `sharedMemoryAdapters[].write/read/…`. IndexedDB's
+    // structured-clone algorithm rejects functions with DataCloneError, so the
+    // whole row fails to persist and the plugin never reaches the Dexie-backed
+    // UI. Strip to a clone-safe projection first. The live manifest (functions
+    // intact) is rebuilt fresh from the module on every discovery and is what
+    // enable-time registration reads; the persisted row is metadata-only.
+    const serializableManifest = toClonableManifest(manifest)
+    try {
+      await upsertPlugin({
+        id: serializableManifest.id,
+        name: serializableManifest.name,
+        version: serializableManifest.version,
+        type: (serializableManifest.type as string) || "frontend",
+        source,
+        path,
+        manifest: serializableManifest as unknown as Record<string, unknown>,
+        capabilities: Array.isArray(serializableManifest.capabilities)
+          ? [...serializableManifest.capabilities]
+          : [],
+      })
+    } catch (error) {
+      loggers.manager.warn(`[plugin:${manifest.id}] failed to persist discovery row to Dexie`, {
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
   }
 
   private async scanBrowserBuiltins(): Promise<DiscoveredPlugin[]> {
@@ -1001,6 +1467,8 @@ export class PluginManager {
         await store.installPlugin(manifest.id)
       }
 
+      await this.persistDiscoveredPluginRow(manifest, "builtin", entry.path)
+
       this.registerPluginPermissions(manifest.id, manifest.permissions || [])
 
       discovered.push({
@@ -1012,6 +1480,55 @@ export class PluginManager {
     }
 
     return discovered
+  }
+
+  /**
+   * Register a single on-disk plugin (its full manifest + directory) into the
+   * store, mirroring one iteration of the desktop's `scanPlugins` disk loop.
+   * Used by the CLI host (`cli/src/plugin/host.ts`), which discovers
+   * `~/.cognia/plugins/<id>` in Node — the desktop's Tauri `plugin_scan_directory`
+   * path doesn't run there. Idempotent: re-registering an existing id refreshes
+   * its discovery projection without re-installing. Signature enforcement is left
+   * to `loadPlugin` (the CLI disables it by policy for in-tree-style plugins).
+   */
+  async registerDiskPlugin(manifest: PluginManifest, dir: string): Promise<void> {
+    const store = usePluginStore.getState()
+
+    const validation = validatePluginManifest(manifest, {
+      governanceMode: this.pluginPointGovernanceMode,
+    })
+    if (!validation.valid) {
+      throw new Error(`Invalid plugin manifest: ${(validation.errors || []).join(", ")}`)
+    }
+
+    const compatibility = this.applyCompatibilityPolicy(manifest, `disk:${manifest.id}`)
+    const capabilityContractDiagnostics = this.extractCapabilityContractDiagnostics(
+      validation.diagnostics || []
+    )
+    const runtimeDiagnostics = this.collectRuntimeProfileDiagnostics(manifest)
+
+    const existing = store.plugins[manifest.id]
+    const projection = this.buildDiscoveryProjection(
+      manifest,
+      dir,
+      "local",
+      [...capabilityContractDiagnostics, ...compatibility.diagnostics, ...runtimeDiagnostics],
+      this.collectObservedSources(existing)
+    )
+
+    store.discoverPlugin(manifest, projection.source, dir, {
+      installRootKind: projection.installRootKind,
+      compatibilityDiagnostics: projection.compatibilityDiagnostics,
+      descriptor: projection.descriptor,
+    })
+
+    if (!existing) {
+      await store.installPlugin(manifest.id)
+    }
+
+    await this.persistDiscoveredPluginRow(manifest, projection.source, dir)
+
+    this.registerPluginPermissions(manifest.id, manifest.permissions || [])
   }
 
   // ===========================================================================
@@ -1134,6 +1651,8 @@ export class PluginManager {
     await store.installPlugin(result.manifest.id)
     txn.stepsCompleted.storeInstall = true
 
+    await this.persistDiscoveredPluginRow(result.manifest, projection.source, result.path)
+
     this.recordPluginVerification(result.manifest.id, {
       status: "installed",
       action: "install",
@@ -1171,7 +1690,12 @@ export class PluginManager {
    * Tauri-only — the caller (GitHub install dialog) gates on
    * `canUseTauriInvoke()`.
    */
-  async installPluginFromGithub(repo: string, gitRef?: string, subdir?: string): Promise<Plugin> {
+  async installPluginFromGithub(
+    repo: string,
+    gitRef?: string,
+    subdir?: string,
+    generatedFiles: Record<string, string> = {}
+  ): Promise<Plugin> {
     const txn: InstallTransactionState = {
       pluginId: null,
       pluginPath: null,
@@ -1194,7 +1718,7 @@ export class PluginManager {
         licenseText?: string | null
         repo: string
         gitRef: string
-      }>("plugin_install_from_github", { repo, gitRef, subdir })
+      }>("plugin_install_from_github", { repo, gitRef, subdir, generatedFiles })
 
       const plugin = await this.registerBackendInstall(
         {
@@ -1269,7 +1793,7 @@ export class PluginManager {
 
     if (pluginId && txn.manifest?.type === "wasm") {
       try {
-        clearWasmCapabilityGrant(pluginId)
+        await clearWasmCapabilityGrant(pluginId)
       } catch (err) {
         loggers.manager.warn(`[plugin:${pluginId}] rollback: clear WASM grant failed`, err)
       }
@@ -1370,7 +1894,7 @@ export class PluginManager {
     grantDecision?: WasmCapabilityGrantDecision
   ): Promise<Plugin> {
     if (grantDecision) {
-      applyWasmCapabilityGrant(grantDecision)
+      await applyWasmCapabilityGrant(grantDecision)
     }
     const plugin = await this.installPlugin(bundlePath, { type: "local" })
     if (plugin.manifest.type !== "wasm") {
@@ -1390,9 +1914,25 @@ export class PluginManager {
   private async preloadWasmComponent(manifest: PluginManifest, pluginPath: string): Promise<void> {
     if (!canUseTauriInvoke()) return
     try {
+      const grantReconciliation = await reconcileWasmGrantLedgerWithManifest(
+        manifest.id,
+        manifest.wasm?.fs?.preopens ?? []
+      )
+      const manifestForLoad: PluginManifest = {
+        ...manifest,
+        wasm: manifest.wasm
+          ? {
+              ...manifest.wasm,
+              fs: {
+                ...(manifest.wasm.fs ?? {}),
+                preopens: grantReconciliation.allowedPreopens,
+              },
+            }
+          : manifest.wasm,
+      }
       await invoke("plugin_wasm_load", {
         pluginId: manifest.id,
-        manifestJson: JSON.stringify(manifest),
+        manifestJson: JSON.stringify(manifestForLoad),
         pluginPath,
       })
     } catch (error) {
@@ -1410,6 +1950,25 @@ export class PluginManager {
         severity: "warning",
         recoverable: true,
       })
+    }
+  }
+
+  /**
+   * Publish a plugin-lifecycle event on the global message bus so plugins
+   * subscribed via `ctx.events.bus` actually receive them. The bus was wired
+   * into the plugin context long ago, but the host never emitted any
+   * `SystemEvents` — this closes that gap. Best-effort: a bus failure must
+   * never block a lifecycle transition.
+   */
+  private emitLifecycleEvent(
+    eventType: (typeof SystemEvents)[keyof typeof SystemEvents],
+    pluginId: string,
+    extra?: Record<string, unknown>
+  ): void {
+    try {
+      getMessageBus().emitFromSystem(eventType, { pluginId, ...extra })
+    } catch (error) {
+      loggers.manager.warn(`[manager] failed to emit ${eventType} for ${pluginId}:`, error)
     }
   }
 
@@ -1456,14 +2015,85 @@ export class PluginManager {
         )
       }
 
-      if (!(await this.verifyPluginSignature(plugin.path, pluginId))) {
+      // Built-in plugins are statically bundled into the renderer (path
+      // `builtin://<id>`, no on-disk signature.json) and trusted by
+      // construction. The scan path (`scanBrowserBuiltins`) never verifies
+      // them, so the enable path must exempt them too — otherwise the
+      // default-on `requireSignatures` policy rejects every built-in with
+      // "Signature required but not found".
+      if (
+        plugin.source !== "builtin" &&
+        !(await this.verifyPluginSignature(plugin.path, pluginId))
+      ) {
         throw new Error(`Signature verification failed for plugin ${pluginId}`)
+      }
+
+      // Frontend trust boundary (ADR 0013): renderer-JS plugins from an
+      // untrusted source need an explicit per-plugin user grant before any of
+      // their code is imported or evaluated. Kept outside the retry boundary
+      // below — refusal is a policy decision, not a transient failure.
+      if (this.requiresExplicitFrontendTrust(plugin)) {
+        throw new PluginFrontendTrustError(pluginId, plugin.source)
       }
 
       this.registerPluginPermissions(pluginId, plugin.manifest.permissions || [])
 
-      // Load the plugin module
-      const definition = await this.loader.load(plugin)
+      // Native guests and frontend plugins can call host APIs from activate().
+      // Synchronize their silent-tier grants and declarative capability
+      // allowlists BEFORE loader.load() runs activation; doing this later in
+      // enablePlugin leaves WASM's retained Store permanently permissionless
+      // and races Python/frontend activation against their host gates.
+      await this.mirrorDeclaredPermissionsToLedger(pluginId, plugin.manifest.permissions || [])
+      await this.syncShellAllowlistToHost(pluginId, plugin.manifest.shellCommands || [])
+      if (plugin.manifest.networkAccess?.allowedDomains) {
+        await this.syncNetworkAllowlistToHost(
+          pluginId,
+          plugin.manifest.networkAccess.allowedDomains
+        )
+      }
+
+      // Seed declarative-config defaults into the persisted row BEFORE building
+      // the context, so the plugin's activate() sees `ctx.configuration.get()`
+      // values without waiting for the user to open the settings form. Skipped
+      // (no write) when nothing changes — `seedPluginConfigDefaults` returns the
+      // same reference. Best-effort: a seeding failure must not block the load.
+      try {
+        const seeded = seedPluginConfigDefaults(plugin.manifest, plugin.config)
+        if (seeded !== plugin.config) {
+          plugin.config = seeded
+          store.setPluginConfig?.(pluginId, seeded)
+          void setPluginConfig(pluginId, seeded)
+        }
+      } catch (error) {
+        loggers.manager.warn(`[plugin:${pluginId}] config default seeding failed (ignored):`, error)
+      }
+
+      // Load the plugin module — wrapped in the resilience layer so a transient
+      // load failure (fetch/IPC) retries with backoff, while permanent errors
+      // (bad export / unknown type / signature) fail fast. Validation,
+      // compatibility, and signature checks above are intentionally OUTSIDE the
+      // retry boundary. Wrapping `loader.load` (not the loader internals)
+      // preserves the loader's module cache + in-flight dedupe: a failed attempt
+      // clears `loadingPromises`, so a retry is a genuinely fresh load.
+      const loadBreaker = getOrCreateBreaker(loadBreakerKey(pluginId), {
+        failureThreshold: LOAD_RESILIENCE.breaker.failureThreshold,
+        cooldownMs: LOAD_RESILIENCE.breaker.cooldownMs,
+        successThreshold: LOAD_RESILIENCE.breaker.successThreshold,
+      })
+      recordLoadAttempt(pluginId)
+      const definition = await runResilient(() => this.loader.load(plugin), {
+        timeoutMs: LOAD_RESILIENCE.timeoutMs,
+        maxRetries: LOAD_RESILIENCE.maxRetries,
+        retryable: true,
+        breaker: loadBreaker,
+        label: loadBreakerKey(pluginId),
+        isRetryable: isRetryableLoadError,
+        // attempt 1 is the first try; 2+ are retries.
+        onAttempt: (attempt) => {
+          if (attempt > 1) recordLoadRetry(pluginId)
+        },
+      })
+      recordLoadSuccess(pluginId, Date.now())
       definition.activation = this.parseActivationSpec(plugin.manifest)
 
       // Check if debug mode is enabled for this plugin
@@ -1475,10 +2105,66 @@ export class PluginManager {
       const context = createFullPluginContext(plugin, this, { enableDebug })
       this.contexts.set(pluginId, context)
 
-      // Activate the plugin
+      const i18nLocales = plugin.manifest.i18n?.locales
+      if (i18nLocales) {
+        const prefixed: Partial<Record<string, Record<string, string>>> = {}
+        for (const [locale, dict] of Object.entries(i18nLocales)) {
+          if (!dict) continue
+          prefixed[locale] = Object.fromEntries(
+            Object.entries(dict).map(([key, value]) => [`plugin.${pluginId}.${key}`, value])
+          )
+        }
+        registerPluginI18n({ pluginId, messages: prefixed })
+      }
+
+      // Declarative UI becomes visible before activate(), so its stylesheet
+      // must be present before any bridge publishes a renderable contribution.
+      const stylesRoot = plugin.path?.startsWith("builtin://")
+        ? plugin.path
+        : plugin.descriptor?.installRoot.path
+      if (plugin.manifest.styles && stylesRoot) {
+        await loadPluginStyles({
+          pluginId,
+          pluginRoot: stylesRoot,
+          stylesEntry: plugin.manifest.styles,
+          bundledCss: getBrowserBuiltinRegistryEntry(pluginId)?.bundledStyles,
+        })
+      }
+
+      if (plugin.manifest.extensions?.length) {
+        const result = await registerExtensionsForPlugin(plugin.manifest, plugin.path ?? "", {
+          importer: (entry) => this.loader.importEntry(entry, pluginId, plugin.path),
+          hasPermission: (permission) =>
+            context.permissions.hasPermission(permission as PluginPermission),
+        })
+        if (result.errors.length > 0) {
+          for (const extensionError of result.errors) {
+            recordPluginPointDiagnostic(pluginId, {
+              code: "plugin.silent-failure",
+              severity: "error",
+              pointKind: "ui-slot",
+              pointId: extensionError.point,
+              message: extensionError.message,
+              hint: "Check the declarative extension entry path and named export.",
+            })
+          }
+          loggers.manager.warn(
+            `[plugin:${pluginId}] ${result.errors.length} declarative extension(s) failed; ${result.registered} registered.`
+          )
+        }
+      }
+
+      // Activate the plugin. Bounded (W6.1): a hanging activate() would
+      // otherwise wedge this plugin's lifecycle queue and any dependent
+      // lazy activation forever.
       let hooks: PluginHooks | undefined
       if (typeof definition.activate === "function") {
-        hooks = (await definition.activate(context)) || undefined
+        hooks =
+          (await withTimeout(
+            Promise.resolve(definition.activate(context)),
+            ACTIVATE_TIMEOUT_MS,
+            `plugin.activate:${pluginId}`
+          )) || undefined
       }
 
       // Register hooks
@@ -1488,14 +2174,34 @@ export class PluginManager {
         this.hooksManager.registerHooks(pluginId, hooks)
       }
 
-      if (plugin.manifest.type !== "frontend") {
+      // Only python/hybrid plugins carry a Python module — wasm (and
+      // vscode-extension) types have their own runtimes and must not be
+      // routed through the Python host.
+      if (plugin.manifest.type === "python" || plugin.manifest.type === "hybrid") {
         await this.loadPythonPlugin(pluginId)
+      }
+
+      // WASM plugins declare their agent tools in the manifest (the WIT
+      // contract has no tool-listing export) and implement a single
+      // `tool-execute` dispatcher. Project those declarations into runnable
+      // tools so the agent can actually call them — without this they were
+      // declared but unreachable.
+      if (plugin.manifest.type === "wasm") {
+        this.registerWasmTools(pluginId)
       }
 
       // Update store status
       await store.loadPlugin(pluginId, { viaManager: false })
       await this.syncBackendStatus(pluginId, "loaded")
       await this.hooksManager.dispatchOnLoad(pluginId)
+      // Fire onInstall (first load after install) / onUpdate (version changed)
+      // exactly once per transition. Persisted on the Dexie row so it survives
+      // restarts. Failures here must never fail the load — wrap log-only.
+      await this.fireInstallOrUpdateHooks(pluginId, plugin.manifest.version)
+      // Register the plugin with the inter-plugin IPC manager so its permission
+      // map + method registry exist, then announce the load on the event bus.
+      getPluginIPC().registerPlugin(pluginId, plugin.manifest.permissions ?? [])
+      this.emitLifecycleEvent(SystemEvents.PLUGIN_LOADED, pluginId)
       this.recordPluginVerification(pluginId, {
         status: "loaded",
         action: "load",
@@ -1503,7 +2209,18 @@ export class PluginManager {
         successful: true,
       })
     } catch (error) {
+      clearPluginExtensions(pluginId)
+      unregisterPluginI18n(pluginId)
+      removePluginStyles(pluginId)
+      recordLoadFailure(pluginId, error, Date.now())
       store.setPluginError(pluginId, String(error))
+      // Surface the failure on the plugin message bus alongside the four sibling
+      // lifecycle events (LOADED/ENABLED/DISABLED/UNLOADED). PII red-line: carry
+      // only the bounded error CLASS name (Error / TypeError / …), never
+      // error.message — subscribers get a typed signal, not user/prompt text.
+      this.emitLifecycleEvent(SystemEvents.PLUGIN_ERROR, pluginId, {
+        error: error instanceof Error ? error.name : "Error",
+      })
       this.recordPluginVerification(pluginId, {
         status: "error",
         action: "load",
@@ -1522,6 +2239,20 @@ export class PluginManager {
   }
 
   async enablePlugin(pluginId: string, reason: string = "manual"): Promise<void> {
+    // Dedupe concurrent enables of the same plugin onto one in-flight promise.
+    const inflight = this.enableInFlight.get(pluginId)
+    if (inflight) return inflight
+    // W6.4: the enable also serializes against disable/unload/uninstall.
+    const run = this.withLifecycleLock(pluginId, () => this.enablePluginInner(pluginId, reason))
+    this.enableInFlight.set(pluginId, run)
+    try {
+      await run
+    } finally {
+      this.enableInFlight.delete(pluginId)
+    }
+  }
+
+  private async enablePluginInner(pluginId: string, reason: string): Promise<void> {
     const store = usePluginStore.getState()
     const plugin = store.plugins[pluginId]
 
@@ -1531,6 +2262,28 @@ export class PluginManager {
 
     if (plugin.status === "enabled") {
       return
+    }
+
+    // Reject an incompatible runtime before dependency activation or Dexie
+    // schema registration. `loadPlugin` repeats these guards at its direct-call
+    // boundary, but enablePlugin performs schema work before calling it.
+    const compatibility = this.applyCompatibilityPolicy(plugin.manifest, "enable")
+    if (compatibility.blocked) {
+      const messages = compatibility.diagnostics
+        .filter((item) => item.severity === "error")
+        .map((item) => `${item.code}: ${item.message}`)
+      throw new Error(`Incompatible plugin: ${messages.join("; ")}`)
+    }
+    const runtimeDiagnostics = this.collectRuntimeProfileDiagnostics(plugin.manifest)
+    const blockingRuntimeDiagnostics = runtimeDiagnostics.filter(
+      (item) => item.severity === "error"
+    )
+    if (blockingRuntimeDiagnostics.length > 0) {
+      throw new Error(
+        `Runtime incompatible plugin: ${blockingRuntimeDiagnostics
+          .map((item) => `${item.code}: ${item.message}`)
+          .join("; ")}`
+      )
     }
 
     // Required-dependency gate (load-order, ADR-0017/0032 parity): reject a
@@ -1551,41 +2304,56 @@ export class PluginManager {
     }
 
     try {
-      // Load first when not currently active in runtime.
-      if (
-        plugin.status === "installed" ||
-        plugin.status === "disabled" ||
-        !this.loader.isLoaded(pluginId)
-      ) {
-        await this.loadPlugin(pluginId)
+      // Recover an errored plugin in-session. Left in `error` status it
+      // dead-ends every retry on the store's status guards ("cannot be enabled
+      // from status: error" / "cannot be loaded from status: error"), so the
+      // activation breaker's retry can never actually re-run the plugin and the
+      // failure re-dispatches on every activation event. Heal it back to a
+      // loadable resting state — unloading any partially-loaded runtime first so
+      // the reload starts clean — letting this attempt re-run load + activate
+      // from scratch. Mirrors the v1->v2 persist migration that heals the same
+      // dead-end across restarts (see normalizePersistedPluginStatus).
+      if (plugin.status === "error") {
+        if (this.loader.isLoaded(pluginId)) {
+          await this.loader.unload(pluginId).catch((unloadError) => {
+            loggers.manager.warn(
+              `[plugin:${pluginId}] unload before error recovery failed:`,
+              unloadError
+            )
+          })
+        }
+        store.setPluginError(pluginId, null)
+        store.setPluginStatus?.(pluginId, "installed")
       }
 
-      // Apply any declared Dexie tables before enabling the plugin so that
-      // ctx.dexie is ready when the plugin's activate() runs.
+      // Apply any declared Dexie tables BEFORE loadPlugin. loadPlugin runs the
+      // plugin's activate() (see loadPlugin → definition.activate), and
+      // activate() typically touches ctx.dexie right away (e.g. a delivery
+      // counts its tables to surface mis-declared schemas). If the namespaced
+      // stores aren't in the live schema yet, that first db.table() throws
+      // "Table <id>:<name> does not exist" and enable fails. Worse, it fails
+      // permanently: the pluginDexieMeta row that restorePluginDexieTables
+      // relies on at boot is only written by applyPluginTables, which never runs
+      // if loadPlugin already threw — so the tables are never restored on any
+      // later boot either. Applying tables first breaks that deadlock.
       if (plugin.manifest.dexie) {
         await applyPluginTables(
-          getDb() as unknown as import("dexie").default,
+          () => getDb() as unknown as import("dexie").default,
           pluginId,
           plugin.manifest.dexie
         )
       }
 
-      // Register plugin-provided i18n strings so the next render of any
-      // useTranslations() consumer sees the new `plugin.<id>.<key>` entries.
-      // Done before activate() so plugin code that itself calls into the
-      // host UI (rare but possible via hooks) can resolve its own keys.
-      const i18nLocales = plugin.manifest.i18n?.locales
-      if (i18nLocales) {
-        const prefixed: Partial<Record<string, Record<string, string>>> = {}
-        for (const [locale, dict] of Object.entries(i18nLocales)) {
-          if (!dict) continue
-          const entries: Record<string, string> = {}
-          for (const [key, value] of Object.entries(dict)) {
-            entries[`plugin.${pluginId}.${key}`] = value
-          }
-          prefixed[locale] = entries
-        }
-        registerPluginI18n({ pluginId, messages: prefixed })
+      // Load next when not currently active in runtime. Re-read the live
+      // status so the just-applied error recovery (or any concurrent enable) is
+      // reflected here rather than the stale captured snapshot.
+      const currentStatus = store.plugins[pluginId]?.status ?? plugin.status
+      if (
+        currentStatus === "installed" ||
+        currentStatus === "disabled" ||
+        !this.loader.isLoaded(pluginId)
+      ) {
+        await this.loadPlugin(pluginId)
       }
 
       // Enable the plugin
@@ -1594,7 +2362,21 @@ export class PluginManager {
       // Register plugin contributions
       await this.registerPluginContributions(pluginId)
 
+      // Notify the plugin it is now enabled. A throw here propagates into the
+      // catch below, which rolls back the contributions just registered — the
+      // plugin reports enable failure rather than silently half-enabling.
+      await this.hooksManager.dispatchOnEnable(pluginId)
+
+      // Clear any stale resilience breakers from a prior lifecycle so the
+      // freshly-enabled plugin starts with closed circuits.
+      resetPluginBreakers(pluginId)
       await this.syncBackendStatus(pluginId, "enabled")
+      this.emitLifecycleEvent(SystemEvents.PLUGIN_ENABLED, pluginId)
+      // Start the idle sweep if this plugin opted in and the sweep isn't running
+      // yet (covers plugins enabled after initialize()). Idempotent.
+      if (plugin.manifest.idleSuspend === true) {
+        this.startIdleSweep()
+      }
       this.recordPluginVerification(pluginId, {
         status: "enabled",
         action: "enable",
@@ -1668,6 +2450,10 @@ export class PluginManager {
   }
 
   async disablePlugin(pluginId: string, reason: string = "manual"): Promise<void> {
+    return this.withLifecycleLock(pluginId, () => this.disablePluginInner(pluginId, reason))
+  }
+
+  private async disablePluginInner(pluginId: string, reason: string = "manual"): Promise<void> {
     const store = usePluginStore.getState()
     const plugin = store.plugins[pluginId]
 
@@ -1682,6 +2468,12 @@ export class PluginManager {
     const rollbackSnapshot = this.capturePluginRuntimeRollbackSnapshot(pluginId)
 
     try {
+      // Notify the plugin it is about to be disabled BEFORE we tear anything
+      // down, so its handler can still flush state through its live APIs. A
+      // throw must not abort the teardown — log it and continue (the plugin
+      // doesn't get to veto disable).
+      await this.safeDispatchLifecycleHook(pluginId, "onDisable")
+
       // Fully deactivate runtime resources for deterministic cleanup.
       await this.deactivatePluginRuntime(pluginId, { unloadModule: true })
 
@@ -1699,7 +2491,16 @@ export class PluginManager {
       this.contexts.delete(pluginId)
 
       await this.revokePluginPermissions(pluginId, plugin.manifest.permissions || [])
+      // Drop any "always allow this session" consent grants so disabling a
+      // plugin actually revokes them — otherwise a dangerous-permission grant
+      // (e.g. shell:execute) silently outlives disable and is inherited on
+      // re-enable within the same app session.
+      getPluginConsentBroker().clearSessionGrantsForPlugin(pluginId)
+      // Drop the plugin's resilience circuit breakers so a re-enable starts
+      // from a clean (closed) state rather than inheriting a tripped breaker.
+      resetPluginBreakers(pluginId)
       await this.syncBackendStatus(pluginId, "disabled")
+      this.emitLifecycleEvent(SystemEvents.PLUGIN_DISABLED, pluginId)
       this.recordPluginVerification(pluginId, {
         status: "disabled",
         action: "disable",
@@ -1733,6 +2534,10 @@ export class PluginManager {
   }
 
   async unloadPlugin(pluginId: string): Promise<void> {
+    return this.withLifecycleLock(pluginId, () => this.unloadPluginInner(pluginId))
+  }
+
+  private async unloadPluginInner(pluginId: string): Promise<void> {
     const store = usePluginStore.getState()
     const plugin = store.plugins[pluginId]
 
@@ -1743,9 +2548,16 @@ export class PluginManager {
     const rollbackSnapshot = this.capturePluginRuntimeRollbackSnapshot(pluginId)
 
     try {
+      // Notify the plugin its module is being unloaded. Fired here — before any
+      // teardown — because this is the only point where the plugin's hooks are
+      // still registered on every unload path (the enabled→unload path below
+      // unregisters them inside disablePlugin). Log-only: unload cannot be vetoed.
+      await this.safeDispatchLifecycleHook(pluginId, "onUnload")
+
       // Disable first if enabled
       if (plugin.status === "enabled") {
-        await this.disablePlugin(pluginId, "unload")
+        // Inner variant — we already hold this plugin's lifecycle lock (W6.4).
+        await this.disablePluginInner(pluginId, "unload")
       } else {
         await this.deactivatePluginRuntime(pluginId, { unloadModule: true })
         await this.unregisterPluginContributions(pluginId)
@@ -1759,8 +2571,10 @@ export class PluginManager {
       // paths (and clear guard tiers + denials, which previously only happened
       // on uninstall).
       getPermissionGuard().unregisterPlugin(pluginId)
+      getPluginIPC().unregisterPlugin(pluginId)
       unregisterPluginI18n(pluginId)
-      clearWasmCapabilityGrant(pluginId)
+      await clearWasmCapabilityGrant(pluginId)
+      getPluginConsentBroker().clearSessionGrantsForPlugin(pluginId)
 
       // Unregister hooks
       this.hooksManager.unregisterHooks(pluginId)
@@ -1775,6 +2589,7 @@ export class PluginManager {
       // Update store
       await store.unloadPlugin(pluginId, { viaManager: false })
       await this.syncBackendStatus(pluginId, "installed")
+      this.emitLifecycleEvent(SystemEvents.PLUGIN_UNLOADED, pluginId)
       this.recordPluginVerification(pluginId, {
         status: "installed",
         action: "unload",
@@ -1805,6 +2620,13 @@ export class PluginManager {
   }
 
   async uninstallPlugin(pluginId: string, options?: { purgeData?: boolean }): Promise<void> {
+    return this.withLifecycleLock(pluginId, () => this.uninstallPluginInner(pluginId, options))
+  }
+
+  private async uninstallPluginInner(
+    pluginId: string,
+    options?: { purgeData?: boolean }
+  ): Promise<void> {
     const store = usePluginStore.getState()
     const plugin = store.plugins[pluginId]
 
@@ -1815,9 +2637,16 @@ export class PluginManager {
     const rollbackSnapshot = this.capturePluginRuntimeRollbackSnapshot(pluginId)
 
     try {
+      // Last-chance notification BEFORE teardown + file removal, while the
+      // plugin's hooks are still registered (unloadPlugin below unregisters
+      // them). A never-activated ("installed"-only) plugin has no live handler,
+      // so this is a no-op for it. Log-only: uninstall cannot be vetoed.
+      await this.safeDispatchLifecycleHook(pluginId, "onUninstall")
+
       // Unload first
       if (["loaded", "enabled", "disabled"].includes(plugin.status)) {
-        await this.unloadPlugin(pluginId)
+        // Inner variant — we already hold this plugin's lifecycle lock (W6.4).
+        await this.unloadPluginInner(pluginId)
       }
 
       // Drop plugin-provided i18n bundles in case disable didn't run (e.g.,
@@ -1836,16 +2665,28 @@ export class PluginManager {
       // Remove plugin Dexie tables. Default: keep data (allows reinstall to resume).
       // Pass purgeData: true from the settings "Delete plugin data" action.
       await removePluginTables(
-        getDb() as unknown as import("dexie").default,
+        () => getDb() as unknown as import("dexie").default,
         pluginId,
         options?.purgeData ? "purge" : "keep"
       )
 
+      // Purge the plugin's secrets (uninstall is terminal — unlike disable,
+      // which keeps them for re-enable). Best-effort: never block uninstall.
+      try {
+        await clearPluginSecrets(pluginId)
+      } catch (error) {
+        loggers.manager.warn(
+          `[plugin:${pluginId}] secret purge on uninstall failed (ignored):`,
+          error
+        )
+      }
+
       await this.revokePluginPermissions(pluginId, plugin.manifest.permissions || [])
       getPermissionGuard().unregisterPlugin(pluginId)
       if (plugin.manifest.type === "wasm") {
-        clearWasmCapabilityGrant(pluginId)
+        await clearWasmCapabilityGrant(pluginId)
       }
+      getPluginConsentBroker().clearSessionGrantsForPlugin(pluginId)
       this.registeredSlashCommandsByPlugin.delete(pluginId)
       this.activationInFlight.delete(pluginId)
       this.recordPluginVerification(pluginId, {
@@ -1877,13 +2718,292 @@ export class PluginManager {
     }
   }
 
+  /**
+   * Fire a no-veto lifecycle hook used on teardown / host-driven paths. A
+   * throwing plugin handler must never abort host cleanup, so the error is
+   * logged + recorded as a silent failure and swallowed.
+   */
+  private async safeDispatchLifecycleHook(
+    pluginId: string,
+    hook: "onDisable" | "onUnload" | "onUninstall" | "onSuspend" | "onResume"
+  ): Promise<void> {
+    try {
+      // Bound every hook: a hook that never resolves must not wedge the caller
+      // (a hung `onSuspend` would otherwise stall the sequential idle sweep and
+      // strand the plugin `enabled`). withTimeout rejects → the catch below
+      // records a silent failure and the lifecycle transition continues.
+      const dispatch = (): Promise<void> => {
+        switch (hook) {
+          case "onDisable":
+            return this.hooksManager.dispatchOnDisable(pluginId)
+          case "onUnload":
+            return this.hooksManager.dispatchOnUnload(pluginId)
+          case "onUninstall":
+            return this.hooksManager.dispatchOnUninstall(pluginId)
+          case "onSuspend":
+            return this.hooksManager.dispatchOnSuspend(pluginId)
+          case "onResume":
+            return this.hooksManager.dispatchOnResume(pluginId)
+        }
+      }
+      await withTimeout(dispatch(), LIFECYCLE_HOOK_TIMEOUT_MS, `plugin.${hook}:${pluginId}`)
+    } catch (error) {
+      loggers.manager.warn(`[plugin:${pluginId}] ${hook} hook threw (ignored):`, error)
+      recordSilentFailure(
+        pluginId,
+        { site: `manager.${hook}`, message: `${hook} lifecycle hook threw`, expected: false },
+        error
+      )
+    }
+  }
+
+  /**
+   * After a successful load, fire `onInstall` (first load ever) or `onUpdate`
+   * (manifest version changed since the last activated version) exactly once,
+   * tracking state on the Dexie row so it survives restarts. Plugins without a
+   * persisted row (cannot track) are skipped to avoid re-firing every launch.
+   * Never throws — a misbehaving handler must not fail the load.
+   */
+  private async fireInstallOrUpdateHooks(pluginId: string, currentVersion: string): Promise<void> {
+    try {
+      const row = await getPlugin(pluginId)
+      if (!row) return
+      if (row.installHookFiredAt == null) {
+        await this.hooksManager.dispatchOnInstall(pluginId)
+        await updatePlugin(pluginId, {
+          installHookFiredAt: Date.now(),
+          lastActivatedVersion: currentVersion,
+        })
+        return
+      }
+      const lastVersion = row.lastActivatedVersion
+      if (lastVersion && lastVersion !== currentVersion) {
+        await this.hooksManager.dispatchOnUpdate(pluginId, {
+          fromVersion: lastVersion,
+          toVersion: currentVersion,
+        })
+      }
+      if (lastVersion !== currentVersion) {
+        await updatePlugin(pluginId, { lastActivatedVersion: currentVersion })
+      }
+    } catch (error) {
+      loggers.manager.warn(
+        `[plugin:${pluginId}] install/update hook dispatch failed (ignored):`,
+        error
+      )
+    }
+  }
+
+  /**
+   * Idle-suspend an enabled plugin: tear down its contributions + runtime to
+   * reclaim resources while preserving the user's enabled intent (the store
+   * `enabled` flag stays true; status becomes "suspended"; permissions + i18n
+   * stay registered so resume is cheap). Fires `onSuspend`. No-op unless the
+   * plugin is currently enabled. Resume happens on the next activation event.
+   */
+  async suspendPlugin(pluginId: string, reason: string = "idle"): Promise<void> {
+    // Serialize with every other lifecycle transition (enable/disable/unload
+    // and resume) so the status check-and-act is atomic — otherwise a suspend
+    // can interleave with an in-flight tool call or a concurrent resume.
+    return this.withLifecycleLock(pluginId, () => this.suspendPluginInner(pluginId, reason))
+  }
+
+  private async suspendPluginInner(pluginId: string, reason: string): Promise<void> {
+    const store = usePluginStore.getState()
+    const plugin = store.plugins[pluginId]
+    if (!plugin || plugin.status !== "enabled") {
+      return
+    }
+    try {
+      // Fire while hooks are still registered, before any teardown.
+      await this.safeDispatchLifecycleHook(pluginId, "onSuspend")
+      await this.unregisterPluginContributions(pluginId)
+      await this.deactivatePluginRuntime(pluginId, { unloadModule: true })
+      this.hooksManager.unregisterHooks(pluginId)
+      this.contexts.delete(pluginId)
+      store.setPluginStatus?.(pluginId, "suspended")
+      // The backend ledger has no "suspended" state — treat it as inactive.
+      await this.syncBackendStatus(pluginId, "disabled")
+      this.recordPluginVerification(pluginId, {
+        status: "suspended",
+        action: "suspend",
+        stage: "cleanup",
+        successful: true,
+        metadata: { reason },
+      })
+      loggers.manager.debug(`[plugin:${pluginId}] suspended (${reason})`)
+    } catch (error) {
+      store.setPluginError(pluginId, String(error))
+      loggers.manager.error(`[plugin:${pluginId}] suspend failed (${reason})`, error)
+      throw error
+    }
+  }
+
+  /**
+   * Reactivate a suspended plugin: re-load its module and re-register its
+   * contributions, mirroring the enable activation path, then fire `onResume`.
+   * Permissions + i18n were never torn down on suspend, so they are still live.
+   * No-op unless the plugin is currently suspended.
+   */
+  async resumePlugin(pluginId: string, reason: string = "activation"): Promise<void> {
+    // Serialize with every other lifecycle transition. This is the fix for the
+    // double-wake race: two concurrent activation triggers both used to observe
+    // `status === "suspended"` before either flipped to `enabled`, double-
+    // loading the module. Under the lock the second call sees `enabled` and
+    // no-ops.
+    return this.withLifecycleLock(pluginId, () => this.resumePluginInner(pluginId, reason))
+  }
+
+  private async resumePluginInner(pluginId: string, reason: string): Promise<void> {
+    const store = usePluginStore.getState()
+    const plugin = store.plugins[pluginId]
+    if (!plugin || plugin.status !== "suspended") {
+      return
+    }
+    try {
+      await this.loadPlugin(pluginId)
+      await this.registerPluginContributions(pluginId)
+      store.setPluginStatus?.(pluginId, "enabled")
+      await this.syncBackendStatus(pluginId, "enabled")
+      await this.safeDispatchLifecycleHook(pluginId, "onResume")
+      this.recordPluginVerification(pluginId, {
+        status: "enabled",
+        action: "resume",
+        stage: "activation",
+        successful: true,
+        metadata: { reason },
+      })
+      loggers.manager.debug(`[plugin:${pluginId}] resumed (${reason})`)
+    } catch (error) {
+      try {
+        await this.unregisterPluginContributions(pluginId)
+      } catch {
+        /* idempotent rollback */
+      }
+      store.setPluginError(pluginId, String(error))
+      loggers.manager.error(`[plugin:${pluginId}] resume failed (${reason})`, error)
+      throw error
+    }
+  }
+
+  /**
+   * Suspend every enabled plugin that opted in (`manifest.idleSuspend === true`)
+   * and has been idle past the threshold. Pure-policy decision is delegated to
+   * `lib/plugin/core/idle-policy.ts`; this method performs the suspends. Returns
+   * the ids it suspended. Safe to call on an interval or scheduler tick.
+   */
+  async suspendIdlePlugins(nowMs: number = Date.now()): Promise<string[]> {
+    const store = usePluginStore.getState()
+    const suspended: string[] = []
+    for (const plugin of Object.values(store.plugins)) {
+      if (plugin.status !== "enabled") continue
+      if (plugin.manifest.idleSuspend !== true) continue
+      if (!isPluginSuspendEligible({ lastUsedAt: plugin.lastUsedAt, nowMs })) continue
+      const id = plugin.manifest.id
+      try {
+        await this.suspendPlugin(id, "idle")
+        suspended.push(id)
+      } catch (error) {
+        loggers.manager.warn(`[plugin:${id}] idle suspend failed (ignored):`, error)
+      }
+    }
+    return suspended
+  }
+
+  /**
+   * Start the periodic idle sweep, but only when at least one plugin opted into
+   * `idleSuspend` (no timer otherwise). Idempotent. The timer is `unref`'d so it
+   * never keeps the Node/Tauri process or a test runner alive.
+   */
+  startIdleSweep(): void {
+    if (this.idleSweepTimer) return
+    const anyOptIn = Object.values(usePluginStore.getState().plugins).some(
+      (p) => p.manifest.idleSuspend === true
+    )
+    if (!anyOptIn || typeof setInterval !== "function") return
+    this.idleSweepTimer = setInterval(() => {
+      if (this.idleSweepRunning) return
+      this.idleSweepRunning = true
+      void this.suspendIdlePlugins().finally(() => {
+        this.idleSweepRunning = false
+      })
+    }, IDLE_SWEEP_INTERVAL_MS)
+    ;(this.idleSweepTimer as { unref?: () => void }).unref?.()
+  }
+
+  /**
+   * Refresh the idle-suspend clock for a plugin (records "used now"). Called by
+   * the tool-invocation seam on every dispatch so a plugin driven purely by
+   * agent tools isn't idle-suspended mid-use — the slash-command handler does
+   * the same on command invocation. No-op for an unknown plugin.
+   */
+  recordPluginToolUse(pluginId: string): void {
+    usePluginStore.getState().updateLastUsedAt(pluginId)
+  }
+
+  /** Stop the periodic idle sweep (lifecycle teardown / tests). Idempotent. */
+  stopIdleSweep(): void {
+    if (this.idleSweepTimer) {
+      clearInterval(this.idleSweepTimer)
+      this.idleSweepTimer = null
+    }
+  }
+
+  /**
+   * Whether the user has explicitly trusted this plugin's renderer-JS
+   * execution (frontend trust boundary). Only consulted for
+   * `frontend`/`hybrid` plugins from a non-inherently-trusted source.
+   */
+  isFrontendTrusted(pluginId: string): boolean {
+    return readPolicy().trustedFrontendPlugins.includes(pluginId)
+  }
+
+  /**
+   * Grant or revoke the user's renderer-JS trust for one plugin.
+   *
+   * Revocation takes effect immediately: a plugin whose un-sandboxed JS is
+   * already running in the renderer is disabled (or unloaded when it was
+   * loaded but never enabled) — otherwise flipping the switch off would only
+   * matter on the next load while the untrusted code keeps running.
+   */
+  async setFrontendTrust(pluginId: string, next: boolean): Promise<void> {
+    const policy = readPolicy()
+    const trusted = policy.trustedFrontendPlugins.filter((id) => id !== pluginId)
+    if (next) trusted.push(pluginId)
+    writePolicy({ ...policy, trustedFrontendPlugins: trusted })
+    if (next) return
+
+    const plugin = usePluginStore.getState().plugins[pluginId]
+    if (!plugin || !this.requiresExplicitFrontendTrust(plugin)) return
+    if (plugin.status === "enabled") {
+      await this.disablePlugin(pluginId, "frontend-trust-revoked")
+    } else if (this.loader.isLoaded(pluginId)) {
+      await this.unloadPlugin(pluginId)
+    }
+  }
+
+  /**
+   * Whether the frontend trust boundary (ADR 0013) blocks this plugin from
+   * loading right now: renderer-JS type, non-inherently-trusted source, and
+   * no explicit user grant.
+   */
+  private requiresExplicitFrontendTrust(plugin: Plugin): boolean {
+    return (
+      (plugin.manifest.type === "frontend" || plugin.manifest.type === "hybrid") &&
+      !isInherentlyTrustedFrontendSource(plugin.source) &&
+      !this.isFrontendTrusted(plugin.manifest.id)
+    )
+  }
+
   private async verifyPluginSignature(pluginPath: string, pluginId: string): Promise<boolean> {
     try {
       const verifier = getPluginSignatureVerifier()
       const config = verifier.getConfig()
 
-      // Skip verification entirely if signatures are not required and untrusted plugins are allowed
-      // This is the default configuration - signature backend commands may not be available
+      // Skip verification entirely when the policy neither requires signatures
+      // nor forbids untrusted plugins. NOTE: the default policy is
+      // requireSignatures:true (ADR 0016 P0-3), so this short-circuit only
+      // applies once the user has explicitly relaxed the policy in Settings.
       if (!config.requireSignatures && config.allowUntrusted) {
         return true
       }
@@ -1914,10 +3034,103 @@ export class PluginManager {
     guard.registerPlugin(pluginId, permissions)
   }
 
+  /**
+   * Push silent-tier declared permissions to the Rust ledger via
+   * `plugin_permission_grant`, so the host-side gates (Python exec, WASM caps,
+   * the native API gateway) see them. Called on ENABLE — declared permissions
+   * become host grants only when the plugin is actually active, not at mere
+   * discovery/scan time. Dangerous (confirm-tier) permissions are NOT
+   * pre-granted host-side — they require interactive consent, which writes the
+   * ledger with `grantedBy: "user"` on approval. Idempotent (the Rust command
+   * de-dupes on re-enable). No-op in web mode.
+   */
+  private async mirrorDeclaredPermissionsToLedger(
+    pluginId: string,
+    permissions: PluginPermission[]
+  ): Promise<void> {
+    if (!canUseTauriInvoke() && !isHeadlessHost()) return
+    const guard = getPermissionGuard()
+    for (const permission of permissions) {
+      if (guard.getTier(pluginId, permission) !== "silent") continue
+      try {
+        await grantPluginPermission(pluginId, permission, "manifest")
+      } catch (error) {
+        recordSilentFailure(
+          pluginId,
+          {
+            site: "manager.registerPluginPermissions.mirror",
+            message: `Could not mirror declared permission "${permission}" to the host ledger.`,
+            expected: !canUseTauriInvoke(),
+          },
+          error
+        )
+      }
+    }
+  }
+
+  /**
+   * Push a plugin's declared `manifest.shellCommands` to the Rust host so the
+   * deny-by-default `shell:execute` gate can enforce the allowlist. Called on
+   * ENABLE alongside the permission mirror. Best-effort; no-op in web mode
+   * (where there is no shell backend at all).
+   */
+  private async syncShellAllowlistToHost(pluginId: string, commands: string[]): Promise<void> {
+    if (!canUseTauriInvoke() && !isHeadlessHost()) return
+    try {
+      if (isHeadlessHost()) {
+        const { transport } = await import("@/lib/tauri/transport-instance")
+        await transport.call("plugin_set_shell_allowlist", { pluginId, commands })
+      } else {
+        const { invoke } = await import("@tauri-apps/api/core")
+        await invoke("plugin_set_shell_allowlist", { pluginId, commands })
+      }
+    } catch (error) {
+      recordSilentFailure(
+        pluginId,
+        {
+          site: "manager.syncShellAllowlistToHost",
+          message: "Could not push the shell-command allowlist to the host.",
+          expected: !canUseTauriInvoke(),
+        },
+        error
+      )
+    }
+  }
+
+  /**
+   * Push a plugin's declared `manifest.networkAccess.allowedDomains` to the
+   * Rust host so its `network:*` egress gate clamps to those domains. Called on
+   * ENABLE only when the plugin declared an allowlist (otherwise egress stays
+   * unrestricted). Best-effort; no-op in web mode.
+   */
+  private async syncNetworkAllowlistToHost(pluginId: string, domains: string[]): Promise<void> {
+    if (!canUseTauriInvoke() && !isHeadlessHost()) return
+    try {
+      if (isHeadlessHost()) {
+        const { transport } = await import("@/lib/tauri/transport-instance")
+        await transport.call("plugin_set_network_allowlist", { pluginId, domains })
+      } else {
+        const { invoke } = await import("@tauri-apps/api/core")
+        await invoke("plugin_set_network_allowlist", { pluginId, domains })
+      }
+    } catch (error) {
+      recordSilentFailure(
+        pluginId,
+        {
+          site: "manager.syncNetworkAllowlistToHost",
+          message: "Could not push the network egress allowlist to the host.",
+          expected: !canUseTauriInvoke(),
+        },
+        error
+      )
+    }
+  }
+
   private parseActivationSpec(manifest: PluginManifest): ParsedActivationSpec {
-    const rawEvents = (manifest.activationEvents || []).filter(
-      (event): event is PluginActivationEvent => typeof event === "string"
-    )
+    const rawEvents = [
+      ...(manifest.activationEvents || []),
+      ...(manifest.extensions ?? []).map((extension) => `onView:${extension.point}` as const),
+    ].filter((event): event is PluginActivationEvent => typeof event === "string")
 
     const startup = Boolean(
       manifest.activateOnStartup || rawEvents.includes("startup") || rawEvents.includes("onStartup")
@@ -1941,6 +3154,10 @@ export class PluginManager {
       .filter((event) => event.startsWith("onView:"))
       .map((event) => event.slice("onView:".length))
       .filter(Boolean)
+
+    // VS Code-style `onUri`: the plugin activates when a deep-link addressed to
+    // it arrives. Accept the bare `onUri` and the `onUri:*` wildcard form.
+    const uriActivation = rawEvents.some((event) => event === "onUri" || event.startsWith("onUri:"))
 
     for (const event of rawEvents) {
       const validation = validateActivationEvent(event, {
@@ -1974,6 +3191,7 @@ export class PluginManager {
       commandEvents,
       toolEvents,
       viewEvents,
+      uriActivation,
       rawEvents,
     }
   }
@@ -2025,6 +3243,13 @@ export class PluginManager {
       return spec.viewEvents.some((pattern) => this.matchesActivation(pattern, view))
     }
 
+    if (event.startsWith("onUri:")) {
+      // The router fires `onUri:<pluginId>`; only the addressed plugin that
+      // declared `onUri` activates.
+      const targetPluginId = event.slice("onUri:".length)
+      return spec.uriActivation && targetPluginId === manifest.id
+    }
+
     // Unknown runtime event prefix — never activate (previously this fell
     // through to an `onTool:` slice, mis-matching non-tool events).
     return false
@@ -2039,7 +3264,37 @@ export class PluginManager {
         continue
       }
 
-      if (!this.shouldActivateForEvent(plugin.manifest, event)) {
+      // A suspended plugin is an already-enabled plugin whose runtime was
+      // reclaimed to save memory — ANY activation event should transparently
+      // wake it. The `shouldActivateForEvent` gate governs disabled→enabled
+      // LAZY activation only; applying it to a suspended plugin would leave one
+      // that declared just `startup` permanently unreachable via tools/views
+      // after it idle-suspends.
+      const isSuspended = plugin.status === "suspended"
+      if (!isSuspended && !this.shouldActivateForEvent(plugin.manifest, event)) {
+        continue
+      }
+
+      // Skip plugins the active runtime profile blocks (e.g. desktop-native
+      // built-ins under the browser/mobile shell). Lazy-activating them would
+      // throw in loadPlugin and spam an activation-failure toast on every
+      // matching event. They remain enable-able manually from `/plugins`.
+      if (this.isBlockedByRuntimeProfile(plugin.manifest)) {
+        continue
+      }
+
+      if (this.isRetiredBuiltin(plugin)) {
+        continue
+      }
+
+      // Same rationale for renderer-JS plugins awaiting the user's frontend
+      // trust grant: lazy activation would throw PluginFrontendTrustError and
+      // toast on every matching event. Manual enable from /plugins still
+      // surfaces the error (pointing at the trust toggle).
+      if (this.requiresExplicitFrontendTrust(plugin)) {
+        loggers.manager.debug(
+          `[plugin:${plugin.manifest.id}] activation for "${event}" skipped: awaiting frontend trust grant`
+        )
         continue
       }
 
@@ -2047,16 +3302,63 @@ export class PluginManager {
         continue
       }
 
-      this.activationInFlight.add(plugin.manifest.id)
+      const pluginId = plugin.manifest.id
+      // Activation circuit breaker: a plugin that throws on every matching
+      // event would otherwise be re-attempted (and toast-spammed) on every
+      // tool call / command forever. After repeated failures the breaker opens
+      // and we skip re-running its activation until the cooldown half-opens it
+      // (automatic recovery if the plugin was fixed/reloaded). Gate lives ONLY
+      // here, so a manual user-initiated enablePlugin is never breaker-suppressed.
+      const breaker = getOrCreateBreaker(activationBreakerKey(pluginId), {
+        failureThreshold: LOAD_RESILIENCE.breaker.failureThreshold,
+        cooldownMs: LOAD_RESILIENCE.breaker.cooldownMs,
+        successThreshold: LOAD_RESILIENCE.breaker.successThreshold,
+      })
+      if (!breaker.canPass()) {
+        loggers.manager.debug(
+          `[plugin:${pluginId}] activation suppressed for "${event}" (circuit open)`
+        )
+        continue
+      }
+
+      this.activationInFlight.add(pluginId)
       try {
-        await this.enablePlugin(plugin.manifest.id, `activation:${event}`)
+        // A suspended plugin is resumed (fires onResume, reuses its preserved
+        // permissions/i18n) rather than re-enabled, so it sees a transparent
+        // wake — not a fresh enable.
+        if (plugin.status === "suspended") {
+          await this.resumePlugin(pluginId, `activation:${event}`)
+        } else {
+          await this.enablePlugin(pluginId, `activation:${event}`)
+        }
+        breaker.recordSuccess()
       } catch (error) {
-        loggers.manager.warn(
-          `[plugin:${plugin.manifest.id}] activation failed for event "${event}":`,
+        // No longer swallowed: surface the failure everywhere the user/auditor
+        // can see it, and feed the breaker so chronic failures self-suppress.
+        breaker.recordFailure()
+        const message = error instanceof Error ? error.message : String(error)
+        recordActivationFailure(pluginId, event, error, Date.now())
+        usePluginStore.getState().setPluginError(pluginId, message)
+        dispatchPluginError({
+          pluginId,
+          pluginName: plugin.manifest.name || pluginId,
+          stage: "activation",
+          message,
+          severity: "error",
+          recoverable: true,
+        })
+        recordSilentFailure(
+          pluginId,
+          {
+            site: "manager.handleActivationEvent",
+            message: `activation failed for "${event}"`,
+            expected: false,
+          },
           error
         )
+        loggers.manager.warn(`[plugin:${pluginId}] activation failed for event "${event}":`, error)
       } finally {
-        this.activationInFlight.delete(plugin.manifest.id)
+        this.activationInFlight.delete(pluginId)
       }
     }
   }
@@ -2064,7 +3366,9 @@ export class PluginManager {
   async syncRuntimeState(): Promise<void> {
     const store = usePluginStore.getState()
 
-    if (this.runtimeProfile === "browser" || !canUseTauriInvoke()) {
+    // Only the Tauri shell has a backend status ledger to sync from; browser
+    // and mobile have no native invoke bridge.
+    if (this.runtimeProfile !== "tauri" || !canUseTauriInvoke()) {
       return
     }
 
@@ -2103,6 +3407,8 @@ export class PluginManager {
         if (!existing) {
           await store.installPlugin(runtime.manifest.id)
         }
+
+        await this.persistDiscoveredPluginRow(runtime.manifest, projection.source, runtime.path)
 
         if (runtime.status) {
           store.setPluginStatus(runtime.manifest.id, runtime.status)
@@ -2158,6 +3464,8 @@ export class PluginManager {
           await store.installPlugin(runtime.manifest.id)
         }
 
+        await this.persistDiscoveredPluginRow(runtime.manifest, projection.source, runtime.path)
+
         if (runtime.status) {
           store.setPluginStatus(runtime.manifest.id, runtime.status)
         }
@@ -2179,7 +3487,10 @@ export class PluginManager {
     status: "installed" | "loaded" | "enabled" | "disabled" | "error"
   ): Promise<void> {
     try {
-      await invoke("plugin_set_state", { pluginId, status })
+      // `plugin_set_status` writes the status ledger; `plugin_set_state`
+      // (the previously-invoked command) only persists opaque runtime_state and
+      // ignored the status entirely, so this sync was a silent no-op.
+      await invoke("plugin_set_status", { pluginId, status })
     } catch (error) {
       recordSilentFailure(
         pluginId,
@@ -2207,9 +3518,15 @@ export class PluginManager {
 
     const permissionSet = new Set<string>(permissions)
     try {
-      const granted = await invoke<string[]>("plugin_permission_list", { pluginId })
-      for (const permission of granted) {
-        permissionSet.add(permission)
+      // The Rust command returns PermissionGrant objects; tolerate the legacy
+      // string form too so revoke enumerates every granted permission.
+      const granted = await invoke<Array<string | { permission: string }>>(
+        "plugin_permission_list",
+        { pluginId }
+      )
+      for (const entry of granted) {
+        const permission = typeof entry === "string" ? entry : entry?.permission
+        if (permission) permissionSet.add(permission)
       }
     } catch (error) {
       recordSilentFailure(
@@ -2226,12 +3543,7 @@ export class PluginManager {
     const revokeFailures: Array<{ permission: string; error: unknown }> = []
     for (const permission of permissionSet) {
       try {
-        await invoke("plugin_permission_revoke", {
-          request: {
-            plugin_id: pluginId,
-            permission,
-          },
-        })
+        await revokePluginPermission(pluginId, permission)
       } catch (error) {
         revokeFailures.push({ permission, error })
       }
@@ -2259,10 +3571,34 @@ export class PluginManager {
 
     const definition = this.loader.getDefinition(pluginId)
     if (definition?.deactivate) {
-      await Promise.resolve(definition.deactivate())
+      // Swallow-and-record (W6.2): a throwing deactivate() must not abort the
+      // teardown below, or the plugin leaks permissions/IPC/WASM grants.
+      //
+      // The context MUST be passed: `PluginDefinition.deactivate` takes an
+      // optional `PluginContext`, and every first-party plugin that owns a
+      // resource the host cannot reclaim — a `setInterval` clipboard poller,
+      // an imperatively-registered slash command — guards its teardown with
+      // `if (ctx?.pluginId)`. Calling this with no argument made all of those
+      // guards fail closed, so the resources survived disable/suspend
+      // (a clipboard read loop outliving a revoked `clipboard:read` grant).
+      // `this.contexts.delete(pluginId)` runs AFTER this in every caller, so
+      // the entry is still live here.
+      try {
+        await Promise.resolve(definition.deactivate(this.contexts.get(pluginId)))
+      } catch (error) {
+        recordSilentFailure(
+          pluginId,
+          {
+            site: "manager.deactivatePluginRuntime.deactivate",
+            message: "Plugin deactivate() threw; continuing teardown.",
+            expected: false,
+          },
+          error
+        )
+      }
     }
 
-    if (plugin && plugin.manifest.type !== "frontend") {
+    if (plugin && (plugin.manifest.type === "python" || plugin.manifest.type === "hybrid")) {
       try {
         await this.unloadPythonPlugin(pluginId)
       } catch (error) {
@@ -2277,6 +3613,17 @@ export class PluginManager {
         )
       }
     }
+
+    // Drop the plugin's live inter-plugin messaging so a deactivated plugin
+    // stops receiving IPC/events and a re-enable/resume doesn't accumulate
+    // duplicate subscriptions. This is the non-destructive clear (subscriptions
+    // + exposed methods + event-bus listeners) shared by disable / unload /
+    // suspend — it deliberately leaves the IPC registration + permissions in
+    // place. Full unload additionally calls `getPluginIPC().unregisterPlugin`
+    // to drop registration/permissions/breakers (see `unloadPlugin`).
+    getPluginIPC().unsubscribe(pluginId)
+    getPluginIPC().unexpose(pluginId)
+    getMessageBus().offAll(pluginId)
 
     if (options.unloadModule) {
       await this.loader.unload(pluginId)
@@ -2331,6 +3678,10 @@ export class PluginManager {
       )
 
       const handler = async (args: string) => {
+        // Refresh the idle-suspend clock on command invocation (mirrors the
+        // tool-dispatch refresh) so command-driven plugins aren't suspended
+        // between uses.
+        usePluginStore.getState().updateLastUsedAt(pluginId)
         // Manifest hooks expect `string[]` args; `dispatchSlashCommand` hands
         // us the post-`/cmd ` tail as a single string. Splitting on
         // whitespace mirrors how the chat composer used to forward them.
@@ -2361,7 +3712,14 @@ export class PluginManager {
         }
         registerSlashCommand({
           id: aliasId,
-          name: `${manifestCommand.name} (alias: ${alias})`,
+          // The `name` is the token the user types (see
+          // `lib/slash-commands/plugin-commands.ts:slashCommandToken`), so it
+          // must be the bare alias. It previously read
+          // `"<Name> (alias: <alias>)"`, which contains spaces and therefore
+          // fell back to the `…#alias:<alias>` id — an untypeable string. The
+          // alias feature was dead as shipped. The id keeps the `#alias:`
+          // suffix purely for registry bookkeeping (dedup + unregister).
+          name: alias,
           description: manifestCommand.description || manifestCommand.name,
           source: "plugin",
           pluginId,
@@ -2407,12 +3765,41 @@ export class PluginManager {
     const context = this.contexts.get(pluginId)
 
     if (!plugin || !context) return
+    if (plugin.manifest.ide?.targets.includes("pro-ide")) {
+      const { prepareManagedIdeProxy } = await import("@/lib/plugin/ide/proxy-manager")
+      await prepareManagedIdeProxy(plugin)
+    }
 
     // Note: Tool implementations are provided by the plugin's activate function
     // through the context.agent.registerTool API
 
     // Note: A2UI component implementations are provided by the plugin
     // and registered via context.a2ui.registerComponent API
+
+    if (plugin.manifest.templatePackages?.length) {
+      await registerPluginTemplatePackages(
+        pluginId,
+        plugin.manifest.templatePackages,
+        getTemplateRuntime().catalog
+      )
+    }
+    if (plugin.manifest.agentTeamTemplates?.length || plugin.manifest.workflowTemplates?.length) {
+      await registerLegacyPluginTemplateCompatibility({
+        pluginId,
+        agentTeams: plugin.manifest.agentTeamTemplates,
+        workflows: plugin.manifest.workflowTemplates,
+        catalog: getTemplateRuntime().catalog,
+      })
+      recordPluginPointDiagnostic(pluginId, {
+        code: "plugin.point.deprecated",
+        severity: "warning",
+        pointKind: "runtime",
+        pointId: "template-compatibility",
+        message:
+          "agentTeamTemplates/workflowTemplates are deprecated; use templatePackages or ctx.templates.register().",
+        hint: "Migrate the contribution through @cognia/plugin-sdk/templates.",
+      })
+    }
 
     // Register modes
     if (plugin.manifest.modes) {
@@ -2482,12 +3869,11 @@ export class PluginManager {
     for (const cap of OVERLAY_REGISTRY_CAPABILITY_KEYS) {
       const descriptor = OVERLAY_REGISTRY_CAPABILITIES[cap]
       const entries = plugin.manifest[descriptor.manifestField] as
-        | ReadonlyArray<{ id: string }>
-        | undefined
+        ReadonlyArray<{ id: string }> | undefined
       if (!entries?.length) continue
       for (const entry of entries) {
         try {
-          descriptor.registerEntry(entry, { pluginId })
+          descriptor.registerEntry(entry, { pluginId, installRoot: plugin.path ?? "" })
         } catch (err) {
           loggers.manager.warn(`[plugin:${pluginId}] failed to register ${cap} ${entry.id}:`, err)
         }
@@ -2504,15 +3890,15 @@ export class PluginManager {
       pluginId,
       manifest: plugin.manifest,
       installRoot: plugin.path ?? "",
-      importer: (entry: string) => this.loader.importEntry(entry),
-      resolveAsset: await createPluginAssetResolver(),
+      importer: (entry: string) => this.loader.importEntry(entry, pluginId, plugin.path),
+      resolveAsset: await createPluginAssetResolver(pluginId),
       moduleExports: this.loader.getModuleExports(pluginId) ?? {},
+      hasPermission: (permission: string) => context.permissions.hasPermission(permission as never),
     }
     for (const cap of MODULE_BRIDGE_CAPABILITY_KEYS) {
       const descriptor = MODULE_BRIDGE_CAPABILITIES[cap]
       const entries = plugin.manifest[descriptor.manifestField] as
-        | ReadonlyArray<unknown>
-        | undefined
+        ReadonlyArray<unknown> | undefined
       if (!entries?.length) continue
       try {
         await descriptor.register(moduleBridgeCtx)
@@ -2533,14 +3919,18 @@ export class PluginManager {
           registerPluginLspServers: (input: {
             pluginId: string
             pluginPath: string
-            publisherFingerprint?: string
             servers: NonNullable<typeof plugin.manifest.lspServers>
           }) => Promise<unknown>
         }
+        // NOTE: `manifest.vscodeExtension.publisherKeyFingerprint` is
+        // deliberately NOT forwarded. It is a value the extension asserts
+        // about itself; forwarding it once let a hostile `.vsix` name a
+        // seeded `"placeholder:*"` fingerprint and earn a prompt-free spawn.
+        // The policy resolves consent from its own `approvedBinaries` ledger
+        // (v109) using only pluginId + path + the bytes on disk.
         await registerPluginLspServers({
           pluginId,
           pluginPath: plugin.path ?? "",
-          publisherFingerprint: plugin.manifest.vscodeExtension?.publisherKeyFingerprint,
           servers: plugin.manifest.lspServers,
         })
       } catch (err) {
@@ -2548,6 +3938,116 @@ export class PluginManager {
           `[plugin:${pluginId}] failed to register LSP servers (registry not configured?):`,
           err
         )
+      }
+    }
+
+    // VS Code `contributes.languages[]` projected onto the manifest
+    // (`manifest.vscodeLanguages`). Registered through languages-bridge so the
+    // ids surface in Monaco + cognia's filename → language detection. Bespoke
+    // (not in the overlay/module bridge maps) because it has no capability key
+    // and the renderer-side Monaco sync (vscode-loader) consumes the registry.
+    if (plugin.manifest.vscodeLanguages?.length) {
+      try {
+        const { registerLanguagesForPlugin } = await import("@/lib/plugin/bridge/languages-bridge")
+        registerLanguagesForPlugin(pluginId, plugin.manifest.vscodeLanguages)
+      } catch (err) {
+        loggers.manager.warn(`[plugin:${pluginId}] failed to register VS Code languages:`, err)
+      }
+    }
+
+    // VS Code `contributes.grammars[]` (`manifest.vscodeGrammars`, W5.1) —
+    // TextMate grammars read from the plugin dir and registered through
+    // grammars-bridge; the shiki highlight seam consumes them.
+    if (plugin.manifest.vscodeGrammars?.length) {
+      try {
+        const { registerGrammarsForPlugin } = await import("@/lib/plugin/bridge/grammars-bridge")
+        const result = await registerGrammarsForPlugin(
+          pluginId,
+          plugin.manifest.vscodeGrammars,
+          plugin.path ?? ""
+        )
+        if (result.errors.length > 0) {
+          loggers.manager.warn(
+            `[plugin:${pluginId}] ${result.errors.length} grammar contribution(s) failed: ${result.errors.join("; ")}`
+          )
+        }
+      } catch (err) {
+        loggers.manager.warn(`[plugin:${pluginId}] failed to register VS Code grammars:`, err)
+      }
+    }
+
+    // VS Code `contributes.iconThemes[]` (`manifest.vscodeIconThemes`, W5.1) —
+    // registered through icons-bridge; the project file tree resolves icons.
+    if (plugin.manifest.vscodeIconThemes?.length) {
+      try {
+        const { registerIconThemesForPlugin } = await import("@/lib/plugin/bridge/icons-bridge")
+        const result = await registerIconThemesForPlugin(
+          pluginId,
+          plugin.manifest.vscodeIconThemes,
+          plugin.path ?? ""
+        )
+        if (result.errors.length > 0) {
+          loggers.manager.warn(
+            `[plugin:${pluginId}] ${result.errors.length} icon theme contribution(s) failed: ${result.errors.join("; ")}`
+          )
+        }
+      } catch (err) {
+        loggers.manager.warn(`[plugin:${pluginId}] failed to register VS Code icon themes:`, err)
+      }
+    }
+
+    // VS Code `contributes.snippets[]` (`manifest.vscodeSnippets`, W5.1) —
+    // registered through snippets-bridge; the Monaco completion source
+    // (`lib/monaco/snippets.ts:listSnippetsForLanguage`) already reads it.
+    if (plugin.manifest.vscodeSnippets?.length) {
+      try {
+        const { registerSnippetsForPlugin } = await import("@/lib/plugin/bridge/snippets-bridge")
+        const result = await registerSnippetsForPlugin(
+          pluginId,
+          plugin.manifest.vscodeSnippets,
+          plugin.path ?? ""
+        )
+        if (result.errors.length > 0) {
+          loggers.manager.warn(
+            `[plugin:${pluginId}] ${result.errors.length} snippet contribution(s) failed: ${result.errors.join("; ")}`
+          )
+        }
+      } catch (err) {
+        loggers.manager.warn(`[plugin:${pluginId}] failed to register VS Code snippets:`, err)
+      }
+    }
+
+    // Declarative CLI wrapper tools (`manifest.cliTools`) — materialized
+    // into ordinary registry tools whose execute() runs the safety pipeline
+    // in `lib/plugin/cli-tools/execute-cli-tool.ts` (consent → binary
+    // trust → injection-proof argv → audit). Registered through the same
+    // registry + store as runtime tools, so both the in-process and the
+    // sidecar dispatch paths pick them up, and the disable-side
+    // `plugin.tools` cleanup loop unregisters them for free.
+    if (plugin.manifest.cliTools?.length) {
+      const requiresBinaries = plugin.manifest.requires?.binaries ?? []
+      // NOTE: `manifest.author.publicKey` is deliberately NOT forwarded — see
+      // the LSP registration above. Same self-assertion flaw, same fix: the
+      // CLI binary policy resolves consent from the `approvedBinaries` ledger.
+      for (const def of plugin.manifest.cliTools) {
+        const cliTool: PluginTool = {
+          name: `${pluginId}:${def.name}`,
+          pluginId,
+          definition: {
+            name: def.name,
+            description: def.description,
+            parametersSchema: def.parameters,
+          },
+          execute: async (toolArgs: Record<string, unknown>, _context: PluginToolContext) => {
+            const { executeCliTool } = await import("@/lib/plugin/cli-tools/execute-cli-tool")
+            return executeCliTool(pluginId, def, toolArgs, {
+              pluginPath: plugin.path ?? "",
+              requiresBinaries,
+            })
+          },
+        }
+        this.registry.registerTool(pluginId, cliTool)
+        store.registerPluginTool(pluginId, cliTool)
       }
     }
 
@@ -2642,8 +4142,15 @@ export class PluginManager {
    * the module-bridge loop does, instead of a bare `import()` that mishandles
    * Tauri asset paths.
    */
-  importPluginEntry(entry: string): Promise<Record<string, unknown>> {
-    return this.loader.importEntry(entry)
+  importPluginEntry(entry: string, pluginId?: string): Promise<Record<string, unknown>> {
+    if (!pluginId) return this.loader.importEntry(entry)
+    const plugin = usePluginStore.getState().plugins[pluginId]
+    if (!plugin) throw new Error(`Plugin not found: ${pluginId}`)
+    if (plugin.path?.startsWith("builtin://")) {
+      const moduleExports = this.loader.getModuleExports(pluginId)
+      if (moduleExports) return Promise.resolve(moduleExports)
+    }
+    return this.loader.importEntry(entry, pluginId, plugin.path)
   }
 
   private async unregisterPluginContributions(pluginId: string): Promise<void> {
@@ -2661,7 +4168,25 @@ export class PluginManager {
     // line handles the persistent Dexie-backed rows. Both are required to
     // avoid orphan entries lingering after disable.
     clearCustomThemesForPluginContext(pluginId)
+    const templateRuntime = getTemplateRuntime()
+    try {
+      await templateRuntime.service.tombstoneCatalogSource(`plugin:${pluginId}`)
+    } catch (error) {
+      loggers.manager.warn(
+        `[plugin:${pluginId}] failed to persist template source tombstones during teardown:`,
+        error
+      )
+    }
+    clearTemplatesForPluginContext(pluginId, templateRuntime.catalog)
+    // Drop the `manifest.styles` sheet injected by registerPluginContributions.
+    // Unconditional: cheaper than reading the manifest back, and a disabled
+    // plugin leaving live CSS behind would keep restyling its old subtree.
+    removePluginStyles(pluginId)
     clearPluginExtensions(pluginId)
+    const { contextPanelRegistry } = await import("@/lib/context-workbench/panel-registry")
+    contextPanelRegistry.unregisterPlugin(pluginId)
+    // Drop the plugin's imperatively-registered deep-link handler (C2).
+    unregisterUriHandlersByPlugin(pluginId)
     // Async module-bridge capabilities — drop every contribution. Includes
     // message renderers, which the standalone `purgeMessagePartRenderersForPlugin`
     // call previously handled (the bridge unregister calls the same
@@ -2670,11 +4195,60 @@ export class PluginManager {
     for (const cap of MODULE_BRIDGE_CAPABILITY_KEYS) {
       await MODULE_BRIDGE_CAPABILITIES[cap].unregister(pluginId)
     }
+    // Drop runtime-registered AI providers (ctx.ai.registerProvider). The
+    // module-bridge teardown above only covers the DECLARATIVE
+    // ai-providers path; the imperative registrations were previously
+    // reachable after disable (W4.3).
+    try {
+      const { clearCustomAIProvidersByPlugin } = await import("@/lib/plugin/api/ai-provider-api")
+      clearCustomAIProvidersByPlugin(pluginId)
+    } catch {
+      // best effort — early-teardown import failures must not abort cleanup
+    }
+
     // Drop the cached `manifest.configComponent` module so a re-enable (or a
     // hot-reload during dev) re-imports the component instead of serving a
     // stale closure. The settings host falls back to the schema form until
     // the plugin re-registers.
     invalidateConfigComponentForPlugin(pluginId)
+
+    // Drop VS Code language contributions; the Monaco sync (vscode-loader)
+    // subscribes to the registry and disposes the corresponding monaco
+    // registration when this emits an `unregister` event.
+    if (plugin.manifest.vscodeLanguages?.length) {
+      try {
+        const { unregisterLanguagesByPlugin } = await import("@/lib/plugin/bridge/languages-bridge")
+        unregisterLanguagesByPlugin(pluginId)
+      } catch {
+        // Bridge import can fail in extremely early teardown — best effort.
+      }
+    }
+
+    // Drop VS Code grammar / icon theme / snippet contributions (W5.1).
+    if (plugin.manifest.vscodeGrammars?.length) {
+      try {
+        const { unregisterGrammarsByPlugin } = await import("@/lib/plugin/bridge/grammars-bridge")
+        unregisterGrammarsByPlugin(pluginId)
+      } catch {
+        // best effort
+      }
+    }
+    if (plugin.manifest.vscodeIconThemes?.length) {
+      try {
+        const { unregisterIconThemesByPlugin } = await import("@/lib/plugin/bridge/icons-bridge")
+        unregisterIconThemesByPlugin(pluginId)
+      } catch {
+        // best effort
+      }
+    }
+    if (plugin.manifest.vscodeSnippets?.length) {
+      try {
+        const { unregisterSnippetsByPlugin } = await import("@/lib/plugin/bridge/snippets-bridge")
+        unregisterSnippetsByPlugin(pluginId)
+      } catch {
+        // best effort
+      }
+    }
 
     // Unregister all tools
     if (plugin.tools) {
@@ -2725,6 +4299,16 @@ export class PluginManager {
     // editor + runtime. Previously this was never called from the disable flow,
     // leaking executors (a disabled plugin's code kept running on its kinds).
     await teardownPluginWorkflowRegistrations(pluginId)
+    // Abort any in-flight background agents the plugin fired-and-forgot
+    // (ctx.agent.run/runStreamed). Matches the "bulk cleanup is automatic"
+    // contract in context.ts; previously cancelByPlugin had no caller and a
+    // disabled plugin's agents kept running.
+    try {
+      const { getBackgroundAgentManager } = await import("@/lib/ai/agent/background-agent-manager")
+      getBackgroundAgentManager().cancelByPlugin(pluginId)
+    } catch {
+      // Best-effort — disable must never fail on background-agent cleanup.
+    }
     // Tear down any LSP servers this plugin contributed. The registry's
     // adapter handles the actual sidecar stop; failures are logged but
     // never block the disable flow.
@@ -2783,6 +4367,47 @@ export class PluginManager {
       // optional dep — non-Tauri builds and tests without the modules wired
     }
 
+    // Shortcut cleanup — unbinds every chord the plugin registered via
+    // `ctx.shortcuts.register(...)` or a quick-action `accelerator`. The
+    // bridge unbinds the OS rail + removes wrapper commands in one pass.
+    try {
+      const { unbindAllPluginShortcuts } =
+        await import("@/lib/plugin/shortcuts/plugin-shortcut-bridge")
+      unbindAllPluginShortcuts(pluginId)
+    } catch {
+      // optional dep — tests without the bridge wired
+    }
+
+    // Context-menu cleanup — drops every renderer-side item the plugin
+    // registered via `ctx.contextMenu.register(...)`.
+    try {
+      const { unregisterContextMenuItemsByPlugin } =
+        await import("@/lib/plugin/context-menu/registry")
+      unregisterContextMenuItemsByPlugin(pluginId)
+    } catch {
+      // optional dep — tests without the registry wired
+    }
+
+    // Guardrail cleanup (Package B) — drop every guardrail the plugin
+    // registered via `ctx.agent.guardrails.register(...)`.
+    try {
+      const { unregisterGuardrailsByPlugin } =
+        await import("@/lib/plugin/registries/guardrail-registry")
+      unregisterGuardrailsByPlugin(pluginId)
+    } catch {
+      // optional dep — tests without the registry wired
+    }
+
+    // Context-provider cleanup (Package E) — drop every provider the plugin
+    // registered via `ctx.agent.context.registerProvider(...)`.
+    try {
+      const { unregisterContextProvidersByPlugin } =
+        await import("@/lib/plugin/registries/context-provider-registry")
+      unregisterContextProvidersByPlugin(pluginId)
+    } catch {
+      // optional dep — tests without the registry wired
+    }
+
     // Command-safety cleanup — drop every command rule the plugin contributed
     // via `ctx.terminal.registerCommandSafetyRule(...)`. Idempotent no-op for
     // plugins that never registered any.
@@ -2816,6 +4441,10 @@ export class PluginManager {
   // ===========================================================================
 
   async loadPythonPlugin(pluginId: string): Promise<void> {
+    if (!this.config.enablePython) {
+      throw new PythonRuntimeDisabledError(pluginId)
+    }
+
     const store = usePluginStore.getState()
     const plugin = store.plugins[pluginId]
 
@@ -2824,16 +4453,39 @@ export class PluginManager {
     }
 
     try {
-      // Load Python plugin via Tauri/PyO3
-      await invoke("plugin_python_load", {
+      // Host-level settings are user state on the Dexie row; absent in
+      // tests/web mode is fine (backend defaults apply).
+      const hostSettings = await getPythonHostSettings(pluginId).catch(() => undefined)
+
+      // ADR-0028 Phase 3 — default the OS-sandbox flag from the global toggle
+      // when the plugin hasn't chosen one. Stays `null` (backend defaults) when
+      // neither per-plugin settings nor the global sandbox are set, so the
+      // common no-config path is unchanged.
+      let sandboxDefault = false
+      try {
+        const { useSettingsStore } = await import("@/stores/settings")
+        sandboxDefault = useSettingsStore.getState().settings?.sandboxDefaultEnabled ?? false
+      } catch {
+        // Settings store unavailable (web/test) — leave the backend default.
+      }
+      const effectiveHostSettings: PythonHostSettings | null =
+        hostSettings || sandboxDefault
+          ? { ...(hostSettings ?? {}), sandboxed: hostSettings?.sandboxed ?? sandboxDefault }
+          : null
+
+      // Load Python plugin via the subprocess host. The reply surfaces the
+      // plugin's declared @hook handlers for TS-side dispatch.
+      const loadResult = await invokePluginRuntime<PythonLoadResult | null>("plugin_python_load", {
         pluginId,
         pluginPath: plugin.path,
         mainModule: plugin.manifest.pythonMain,
         dependencies: plugin.manifest.pythonDependencies,
+        config: plugin.config ?? null,
+        hostSettings: effectiveHostSettings,
       })
 
       // Get registered tools from Python
-      const pythonTools = await invoke<
+      const pythonTools = await invokePluginRuntime<
         Array<{
           name: string
           description: string
@@ -2852,7 +4504,7 @@ export class PluginManager {
             parametersSchema: toolDef.parameters,
           },
           execute: async (args: Record<string, unknown>, _context: PluginToolContext) => {
-            return invoke("plugin_python_call_tool", {
+            return invokePluginRuntime("plugin_python_call_tool", {
               pluginId,
               toolName: toolDef.name,
               args,
@@ -2862,14 +4514,167 @@ export class PluginManager {
         this.registry.registerTool(pluginId, tool)
         store.registerPluginTool(pluginId, tool)
       }
+
+      // Register python @hook handlers into the hooks system so host-side
+      // dispatch reaches the interpreter.
+      this.registerPythonHooks(pluginId, loadResult?.hooks ?? [])
     } catch (error) {
       store.setPluginError(pluginId, String(error))
       throw error
     }
   }
 
+  /**
+   * Register a WASM plugin's declared `manifest.tools` as runnable tools whose
+   * `execute` routes through the guest's `tool-execute` export. Mirrors the
+   * Python tool registration but sources the definitions declaratively (the WIT
+   * contract exposes no tool-listing export). Idempotent: the registry de-dupes
+   * on tool name, and the store replaces any same-named entry.
+   */
+  private registerWasmTools(pluginId: string): void {
+    const store = usePluginStore.getState()
+    const plugin = store.plugins[pluginId]
+    if (!plugin) return
+    for (const tool of buildWasmToolDefinitions(plugin.manifest)) {
+      this.registry.registerTool(pluginId, tool)
+      store.registerPluginTool(pluginId, tool)
+    }
+    // Project the manifest's declared workflow nodes into executors that route
+    // through the WASM `workflow-node-execute` export. Registered through the
+    // SAME machinery as frontend plugins (kind-prefix + catalog + per-plugin
+    // teardown via `teardownPluginWorkflowRegistrations`), so a disabled WASM
+    // plugin's nodes disappear cleanly. Without this the Rust dispatch + guest
+    // impl were unreachable (`No executor registered for <kind>`).
+    const nodeDefs = buildWasmNodeDefs(plugin.manifest)
+    if (nodeDefs.length > 0) {
+      const workflowApi = createWorkflowAPI(pluginId)
+      for (const def of nodeDefs) {
+        try {
+          workflowApi.registerNode(def)
+        } catch (error) {
+          loggers.manager.warn("WASM workflow node registration failed", {
+            pluginId,
+            kind: def.kind,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        }
+      }
+    }
+  }
+
+  /**
+   * Bridge python `@hook` declarations into the JS hooks system: each
+   * declared (event, name) pair becomes a `PluginHooks` entry whose
+   * implementation RPCs `plugin_python_call_hook`. For hybrid plugins the
+   * JS-side hooks win on name collision (python fills the gaps) — the JS
+   * module is the richer runtime and already registered at activation.
+   */
+  private registerPythonHooks(pluginId: string, declarations: PythonHookDeclaration[]): void {
+    if (declarations.length === 0) {
+      return
+    }
+    const pythonHooks: Record<string, (...args: unknown[]) => Promise<unknown>> = {}
+    for (const { event, name } of declarations) {
+      if (typeof event !== "string" || event.length === 0 || typeof name !== "string") {
+        continue
+      }
+      pythonHooks[event] = async (...args: unknown[]) =>
+        invokePluginRuntime("plugin_python_call_hook", {
+          pluginId,
+          event,
+          name,
+          // call_hook carries one payload value; multi-arg hook signatures
+          // pack their args as an array.
+          payload: args.length <= 1 ? (args[0] ?? null) : args,
+        })
+    }
+    if (Object.keys(pythonHooks).length === 0) {
+      return
+    }
+    this.validateHookDeclarations(pluginId, pythonHooks as PluginHooks)
+
+    const store = usePluginStore.getState()
+    const existing = (store.plugins[pluginId]?.hooks ?? {}) as PluginHooks
+    const merged = { ...pythonHooks, ...existing } as PluginHooks
+    store.registerPluginHooks(pluginId, merged)
+    this.hooksManager.registerHooks(pluginId, merged)
+  }
+
+  /**
+   * Invoke one python `@hook` handler directly (used by hook dispatch and
+   * tests; regular dispatch flows through the hooks system registration).
+   */
+  async callPythonHook<T>(
+    pluginId: string,
+    event: string,
+    name: string,
+    payload: unknown
+  ): Promise<T> {
+    return invokePluginRuntime<T>("plugin_python_call_hook", {
+      pluginId,
+      event,
+      name,
+      payload: payload ?? null,
+    })
+  }
+
+  /**
+   * Deliver a plugin's persisted config to its live python host
+   * (`on_config_updated`). A demoted host picks it up at respawn.
+   */
+  async pushPythonConfig(pluginId: string, config: Record<string, unknown>): Promise<void> {
+    await invokePluginRuntime("plugin_python_push_config", { pluginId, config })
+  }
+
+  /**
+   * Create the plugin's venv (if missing) and pip-install its declared
+   * dependencies, streaming progress into the log buffer. Callers MUST
+   * obtain explicit user consent first (network + disk side effects).
+   */
+  async installPythonDeps(pluginId: string, dependencies: string[]): Promise<void> {
+    await invokePluginRuntime("plugin_python_install_deps", { pluginId, dependencies })
+  }
+
+  /** Host-level python settings (persisted on the Dexie plugins row). */
+  async getPythonHostSettings(pluginId: string): Promise<PythonHostSettings | undefined> {
+    return getPythonHostSettings(pluginId)
+  }
+
+  /**
+   * Persist host-level python settings. Applied on the next (re)load of the
+   * plugin's host — callers wanting them live immediately reload the plugin.
+   */
+  async setPythonHostSettings(pluginId: string, settings: PythonHostSettings): Promise<void> {
+    await setPythonHostSettings(pluginId, settings)
+  }
+
+  /**
+   * Config-change fan-out: dispatch the JS `onConfigChange` hook and push
+   * the new config into a python/hybrid plugin's host. Call after
+   * persisting via `setPluginConfig`.
+   */
+  async notifyPluginConfigChanged(
+    pluginId: string,
+    config: Record<string, unknown>
+  ): Promise<void> {
+    this.hooksManager.dispatchOnConfigChange(pluginId, config)
+    // Fan out to imperative `ctx.configuration.onChange` subscribers (this is
+    // the single choke for ALL config changes — settings form or ctx.update).
+    emitPluginConfigChange(pluginId, config)
+    const plugin = usePluginStore.getState().plugins[pluginId]
+    const type = plugin?.manifest.type
+    if (type === "python" || type === "hybrid") {
+      try {
+        await this.pushPythonConfig(pluginId, config)
+      } catch (error) {
+        // Not loaded / web mode — config still lands via import at next load.
+        loggers.manager.warn(`[manager] python config push failed for ${pluginId}:`, String(error))
+      }
+    }
+  }
+
   async callPythonFunction<T>(pluginId: string, functionName: string, args: unknown[]): Promise<T> {
-    return invoke<T>("plugin_python_call", {
+    return invokePluginRuntime<T>("plugin_python_call", {
       pluginId,
       functionName,
       args,
@@ -2877,38 +4682,63 @@ export class PluginManager {
   }
 
   /**
+   * Invoke a provider declared by `manifest.ide`.
+   *
+   * The generated VSIX contains no plugin business logic. This is the single
+   * runtime seam used by Monaco and Pro IDE projections, so frontend, Python,
+   * and WASM plugins execute their provider handler exactly once in Cognia.
+   */
+  async invokeIdeProvider<T>(pluginId: string, handler: string, args: unknown[]): Promise<T> {
+    const plugin = usePluginStore.getState().plugins[pluginId]
+    if (!plugin || plugin.status !== "enabled") {
+      throw new Error(`IDE_PLUGIN_NOT_ACTIVE: ${pluginId}`)
+    }
+    if (plugin.manifest.type === "python") {
+      return this.callPythonFunction<T>(pluginId, handler, args)
+    }
+    if (plugin.manifest.type === "wasm") {
+      return callWasmExport<T>(pluginId, handler, { arguments: args })
+    }
+    const exported = this.loader.getModuleExports(pluginId)?.[handler]
+    if (typeof exported !== "function") {
+      throw new Error(`IDE_PROVIDER_HANDLER_MISSING: ${pluginId}.${handler}`)
+    }
+    return (await exported(...args)) as T
+  }
+
+  /**
    * Get Python runtime information
    */
   async getPythonRuntimeInfo(): Promise<PythonRuntimeInfo> {
-    return invoke<PythonRuntimeInfo>("plugin_python_runtime_info")
+    return invokePluginRuntime<PythonRuntimeInfo>("plugin_python_runtime_info")
   }
 
   /**
    * Check if a Python plugin is initialized
    */
   async isPythonPluginInitialized(pluginId: string): Promise<boolean> {
-    return invoke<boolean>("plugin_python_is_initialized", { pluginId })
+    return invokePluginRuntime<boolean>("plugin_python_is_initialized", { pluginId })
   }
 
   /**
    * Get Python plugin info (tool/hook counts)
    */
   async getPythonPluginInfo(pluginId: string): Promise<PythonPluginInfo | null> {
-    return invoke<PythonPluginInfo | null>("plugin_python_get_info", { pluginId })
+    return invokePluginRuntime<PythonPluginInfo | null>("plugin_python_get_info", { pluginId })
   }
 
   /**
    * Unload a Python plugin
    */
   async unloadPythonPlugin(pluginId: string): Promise<void> {
-    return invoke("plugin_python_unload", { pluginId })
+    return invokePluginRuntime("plugin_python_unload", { pluginId })
   }
 
   /**
    * List all loaded Python plugins
    */
   async listPythonPlugins(): Promise<string[]> {
-    return invoke<string[]>("plugin_python_list")
+    return invokePluginRuntime<string[]>("plugin_python_list")
   }
 
   // ===========================================================================
@@ -2957,6 +4787,25 @@ export class PluginManager {
   }
 
   private validateHookDeclarations(pluginId: string, hooks: PluginHooks): void {
+    // Chat-interception hooks see (and can rewrite) every prompt, tool call,
+    // and tool result. Registering any of them requires the high-risk
+    // `hooks:chat-intercept` permission in the manifest (W3.2) — without it
+    // the whole hook registration is refused, so a plugin cannot silently
+    // wiretap the conversation.
+    const declaredIntercepts = CHAT_INTERCEPT_HOOKS.filter(
+      (name) => (hooks as Record<string, unknown>)[name] !== undefined
+    )
+    if (declaredIntercepts.length > 0) {
+      const manifestPermissions =
+        usePluginStore.getState().plugins[pluginId]?.manifest?.permissions ?? []
+      if (!manifestPermissions.includes("hooks:chat-intercept")) {
+        throw new Error(
+          `Plugin "${pluginId}" declares chat-interception hook(s) ` +
+            `${declaredIntercepts.join(", ")} without the "hooks:chat-intercept" permission.`
+        )
+      }
+    }
+
     for (const hookName of Object.keys(hooks)) {
       const validation = validateHookPoint(hookName, {
         governanceMode: this.pluginPointGovernanceMode,

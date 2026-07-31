@@ -1,6 +1,7 @@
 import { defineI18nUI } from "fumadocs-ui/i18n"
 import type { DocsLayoutProps } from "fumadocs-ui/layouts/docs"
 import { i18n } from "@/lib/i18n"
+import { SITE_NAME } from "./site"
 
 export const i18nUI = defineI18nUI(i18n, {
   translations: {
@@ -28,8 +29,9 @@ export function baseOptions(lang: string): Omit<DocsLayoutProps, "tree" | "child
   return {
     i18n,
     nav: {
-      title: "cognia-next",
-      url: lang === i18n.defaultLanguage ? "/docs" : `/${lang}/docs`,
+      title: SITE_NAME,
+      // hideLocale is "never" (D8 static export) — every locale is prefixed.
+      url: `/${lang}/docs`,
     },
   }
 }

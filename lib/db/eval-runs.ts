@@ -10,6 +10,7 @@
 
 import type { EvalReport } from "@/types/eval/eval"
 import { getDb } from "./schema"
+import { deleteCaseResultsForRun } from "./eval-run-cases"
 
 /** The persisted run row is exactly the aggregated report. */
 export type EvalRunRow = EvalReport
@@ -39,12 +40,31 @@ export async function listRecentRuns(limit = 50): Promise<EvalRunRow[]> {
   return rows.slice(0, safe)
 }
 
+/** Delete a run and cascade its compact per-case verdicts (`evalRunCaseResults`),
+ * which are keyed by `runId` and have no other owner. Atomic — a half-delete
+ * would leave orphan case rows the A-vs-B grid can never reach. */
 export async function deleteRun(runId: string): Promise<void> {
   if (!runId) return
-  await getDb().evalRuns.delete(runId)
+  const db = getDb()
+  await db.transaction("rw", db.evalRuns, db.evalRunCaseResults, async () => {
+    await deleteCaseResultsForRun(runId)
+    await db.evalRuns.delete(runId)
+  })
 }
 
+/** Delete every run for a dataset and cascade all their case verdicts. Resolves
+ * the run ids first so a single `anyOf` delete clears the child rows in one pass. */
 export async function deleteRunsForDataset(datasetId: string): Promise<void> {
   if (!datasetId) return
-  await getDb().evalRuns.where("datasetId").equals(datasetId).delete()
+  const db = getDb()
+  await db.transaction("rw", db.evalRuns, db.evalRunCaseResults, async () => {
+    const runIds = (await db.evalRuns
+      .where("datasetId")
+      .equals(datasetId)
+      .primaryKeys()) as string[]
+    if (runIds.length > 0) {
+      await db.evalRunCaseResults.where("runId").anyOf(runIds).delete()
+    }
+    await db.evalRuns.where("datasetId").equals(datasetId).delete()
+  })
 }

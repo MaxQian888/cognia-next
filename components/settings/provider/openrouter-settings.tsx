@@ -48,19 +48,19 @@ import type {
   BYOKProvider,
   OpenRouterProviderSettings,
   ProviderModelDiscoveryEntry,
-} from "@/types/provider"
+} from "@cognia/provider-types"
 import {
   getCredits,
   formatCredits,
   maskApiKey,
   OpenRouterError,
-} from "@/lib/ai/providers/openrouter"
+} from "@cognia/provider-core/providers/openrouter"
 import {
   BYOK_PROVIDERS,
   getConfigPlaceholder,
   getConfigHelp,
-} from "@/lib/ai/providers/openrouter-config"
-import { discoverOpenRouterModels } from "@/lib/ai/providers/model-discovery"
+} from "@cognia/provider-core/providers/openrouter-config"
+import { useOpenRouterCatalog } from "@/hooks/settings/use-openrouter-catalog"
 
 interface OpenRouterSettingsProps {
   className?: string
@@ -73,7 +73,15 @@ export function OpenRouterSettings({ className }: OpenRouterSettingsProps) {
 
   const settings = providerSettings.openrouter
   const apiKey = settings?.apiKey
-  const discoveredModels = settings?.discoveredModels
+  // The OpenRouter model list now lives in the shared, auto-synced catalog
+  // (Dexie v93) rather than per-provider `discoveredModels`, so the GUI and the
+  // CLI render the same real-time `/models` list. See `use-openrouter-catalog`.
+  const {
+    row: catalogRow,
+    isSyncing: isModelsLoading,
+    error: catalogError,
+    sync: syncCatalog,
+  } = useOpenRouterCatalog()
   const openRouterSettings = useMemo(
     () => settings?.openRouterSettings || {},
     [settings?.openRouterSettings]
@@ -85,16 +93,15 @@ export function OpenRouterSettings({ className }: OpenRouterSettingsProps) {
   const [isByokOpen, setIsByokOpen] = useState(false)
   const [isProviderOrderOpen, setIsProviderOrderOpen] = useState(false)
   const [isModelsOpen, setIsModelsOpen] = useState(false)
-  const [isModelsLoading, setIsModelsLoading] = useState(false)
-  const [modelsError, setModelsError] = useState<string | null>(null)
   const [newByokProvider, setNewByokProvider] = useState<BYOKProvider | "">("")
   const [newByokConfig, setNewByokConfig] = useState("")
   const [newByokName, setNewByokName] = useState("")
 
   const availableModels = useMemo<ProviderModelDiscoveryEntry[]>(
-    () => discoveredModels || [],
-    [discoveredModels]
+    () => catalogRow?.models || [],
+    [catalogRow?.models]
   )
+  const modelsError = catalogError
 
   const updateOpenRouterSettings = useCallback(
     (updates: Partial<OpenRouterProviderSettings>) => {
@@ -142,31 +149,13 @@ export function OpenRouterSettings({ className }: OpenRouterSettingsProps) {
     return () => clearTimeout(timer)
   }, [apiKey, creditsLastFetched, fetchCredits])
 
+  // Refresh the shared catalog from the live `/models` endpoint. The configured
+  // key is passed through so an account's extra models surface, but the endpoint
+  // works keyless too (full public catalog). State persists to Dexie, so the CLI
+  // picker reflects the same list.
   const fetchAvailableModels = useCallback(async () => {
-    setIsModelsLoading(true)
-    setModelsError(null)
-
-    try {
-      const models = await discoverOpenRouterModels(apiKey)
-      const fetchedAt = Date.now()
-      updateProviderSettings("openrouter", {
-        discoveredModels: models,
-        discoveredModelsLastFetched: fetchedAt,
-        openRouterSettings: {
-          ...openRouterSettings,
-          modelsLastFetched: fetchedAt,
-        },
-      })
-    } catch (error) {
-      if (error instanceof OpenRouterError) {
-        setModelsError(error.message)
-      } else {
-        setModelsError("Failed to fetch models")
-      }
-    } finally {
-      setIsModelsLoading(false)
-    }
-  }, [openRouterSettings, apiKey, updateProviderSettings])
+    await syncCatalog(apiKey)
+  }, [syncCatalog, apiKey])
 
   const addByokKey = useCallback(() => {
     if (!newByokProvider || !newByokConfig) return

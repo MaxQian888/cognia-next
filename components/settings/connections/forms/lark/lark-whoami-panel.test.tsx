@@ -69,6 +69,28 @@ describe("LarkWhoamiPanel", () => {
     })
   })
 
+  it("renders the missing-scopes warning when chat-management calls recorded gaps", async () => {
+    await getDb().adapterInstances.put(
+      baseRow({ lastMissingScopes: ["im:chat:create", "contact:user.id:readonly"] })
+    )
+    render(<LarkWhoamiPanel adapterId="lark-wh" />)
+    await waitFor(() => {
+      const warning = screen.getByTestId("lark-whoami-missing-scopes")
+      expect(warning).toBeInTheDocument()
+      expect(screen.getByText("im:chat:create")).toBeInTheDocument()
+      expect(screen.getByText("contact:user.id:readonly")).toBeInTheDocument()
+    })
+  })
+
+  it("omits the missing-scopes warning when the list is empty", async () => {
+    await getDb().adapterInstances.put(baseRow({ lastMissingScopes: [] }))
+    render(<LarkWhoamiPanel adapterId="lark-wh" />)
+    await waitFor(() => {
+      expect(screen.getByTestId("lark-whoami-empty")).toBeInTheDocument()
+    })
+    expect(screen.queryByTestId("lark-whoami-missing-scopes")).not.toBeInTheDocument()
+  })
+
   it("disables the Re-probe button on web (non-Tauri) runtime", async () => {
     await getDb().adapterInstances.put(baseRow())
     render(<LarkWhoamiPanel adapterId="lark-wh" />)

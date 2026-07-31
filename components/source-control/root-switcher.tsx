@@ -33,15 +33,25 @@ function rootLabel(root: WorkspaceRoot): string {
   return segments[segments.length - 1] ?? root.path
 }
 
-export function RootSwitcher() {
+interface RootSwitcherProps {
+  /**
+   * Explicit workspace roots for resource-scoped hosts such as the chat
+   * Workbench. The full Source Control route omits this and keeps following the
+   * globally active workspace.
+   */
+  roots?: WorkspaceRoot[]
+}
+
+export function RootSwitcher({ roots: explicitRoots }: RootSwitcherProps = {}) {
   const t = useTranslations("sourceControl")
   const rootDir = useGitStore((s) => s.rootDir)
   const setRootDir = useGitStore((s) => s.setRootDir)
-  const roots = useProjectStore((s) => {
+  const activeProjectRoots = useProjectStore((s) => {
     const id = s.activeProjectId
     const project = id ? s.projects.find((p) => p.id === id) : undefined
     return project?.roots ?? EMPTY_ROOTS
   })
+  const roots = explicitRoots ?? activeProjectRoots
 
   // Only meaningful when the active workspace mounts more than one directory.
   if (roots.length <= 1) return null

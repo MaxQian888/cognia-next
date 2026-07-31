@@ -6,7 +6,7 @@
 // and reversing — the result is the conversation as the user last saw it.
 
 import type { ImportedConversation, ChatImportOptions } from "./types"
-import type { ChatSession, StoredMessage } from "@/lib/claude/types"
+import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 
 interface ChatGPTConversation {
   title?: string

@@ -33,8 +33,9 @@ function constScorer(id: string, value: number, passed: boolean): Scorer {
     id,
     dimension: "response-quality",
     requiresLlm: false,
+    gating: true,
     score(): Score {
-      return { scorerId: id, dimension: "response-quality", value, passed }
+      return { scorerId: id, dimension: "response-quality", status: "scored", value, passed }
     },
   }
 }
@@ -108,6 +109,7 @@ describe("runEval", () => {
       id: "boom",
       dimension: "tool-use",
       requiresLlm: false,
+      gating: true,
       score() {
         throw new Error("scorer bug")
       },
@@ -131,9 +133,42 @@ describe("runEval", () => {
       cases: [makeCase("a"), makeCase("b")],
       scorers: [],
       target,
-      onCaseComplete: (_r, i) => seen.push(i),
+      onCaseComplete: (_r, i) => {
+        seen.push(i)
+      },
     })
     expect(seen).toEqual([0, 1])
+  })
+
+  it("waits for case persistence before dispatching the next case", async () => {
+    let releasePersistence!: () => void
+    let reportFirstCase!: () => void
+    const persistenceBarrier = new Promise<void>((resolve) => {
+      releasePersistence = resolve
+    })
+    const firstCaseReported = new Promise<void>((resolve) => {
+      reportFirstCase = resolve
+    })
+    const run = jest.fn(async () => makeSample())
+
+    const evaluation = runEval({
+      cases: [makeCase("a"), makeCase("b")],
+      scorers: [],
+      target: { label: "t", run },
+      onCaseComplete: async (_result, index) => {
+        if (index === 0) {
+          reportFirstCase()
+          await persistenceBarrier
+        }
+      },
+    })
+
+    await firstCaseReported
+    expect(run).toHaveBeenCalledTimes(1)
+
+    releasePersistence()
+    await evaluation
+    expect(run).toHaveBeenCalledTimes(2)
   })
 
   it("stops early when the abort signal is already aborted", async () => {

@@ -1,0 +1,398 @@
+{
+  "action": {
+    "copyInstallCommand": "Copy install command",
+    "copyReport": "Copy report",
+    "dismiss": "Dismiss",
+    "exportCrashLog": "Export crash log",
+    "jumpToNode": "Go to node",
+    "locateBinary": "Locate binary",
+    "openExternal": "Open docs",
+    "openSettings": "Open settings",
+    "reauth": "Sign in again",
+    "reconnectAdapter": "Reconnect",
+    "reconnectExternalAgent": "Reconnect agent",
+    "reloadApp": "Reload app",
+    "reportIssue": "Report issue",
+    "resetBoundary": "Try again",
+    "restartSidecar": "Restart backend",
+    "retry": "Retry",
+    "retryFallbackProvider": "Try another provider",
+    "retryWhenOnline": "Retry when back online",
+    "shortenInput": "Shorten the input",
+    "switchToBuiltin": "Use built-in agent",
+    "viewLogs": "View logs",
+    "waitAndRetry": "Retry in {seconds, plural, one {# second} other {# seconds}}"
+  },
+  "code": {
+    "aborted": {
+      "hint": "You stopped this run — send again when you're ready.",
+      "label": "Stopped"
+    },
+    "agentConfigurationMissing": {
+      "hint": "This agent has no command or endpoint configured yet — finish its setup in Settings.",
+      "label": "Agent not configured"
+    },
+    "agentDisabled": {
+      "hint": "This external agent is turned off — enable it in Settings, or use the built-in agent.",
+      "label": "Agent disabled"
+    },
+    "agentNotFound": {
+      "hint": "The external agent this session points at no longer exists — pick another one.",
+      "label": "Agent not found"
+    },
+    "agentUnavailable": {
+      "hint": "The external agent isn't responding — reconnect, or fall back to the built-in agent.",
+      "label": "Agent unavailable"
+    },
+    "brokenPipe": {
+      "hint": "The connection closed unexpectedly — retry the request.",
+      "label": "Broken pipe"
+    },
+    "budgetExhausted": {
+      "hint": "This run hit its token budget — raise the limit in Settings to let it continue.",
+      "label": "Budget exhausted"
+    },
+    "capabilityUnsatisfied": {
+      "hint": "The selected runtime doesn't support something this turn needs — nothing was sent.",
+      "label": "Capability not available"
+    },
+    "chunkLoad": {
+      "hint": "A newer version of Cognia is available — reload to fetch the latest files.",
+      "label": "Outdated app version"
+    },
+    "connectionRefused": {
+      "hint": "The server isn't accepting connections — check it's running and the port is right.",
+      "label": "Connection refused"
+    },
+    "connectionReset": {
+      "hint": "The connection dropped mid-request — retry; if it persists, check the network or server.",
+      "label": "Connection reset"
+    },
+    "contentPolicy": {
+      "hint": "The provider's safety filter blocked this — retrying the same text won't help; rephrase it.",
+      "label": "Blocked by content policy"
+    },
+    "contextWindowExceeded": {
+      "hint": "The conversation is longer than this model can read — compact it, shorten the input, or pick a model with a bigger context window.",
+      "label": "Context window exceeded"
+    },
+    "dbUnavailable": {
+      "hint": "Cognia couldn't open its local database — reload; if it keeps failing, export a crash log.",
+      "label": "Database unavailable"
+    },
+    "dbUpgradeBlocked": {
+      "hint": "Another window or tab is holding the old database version open — close it, then reload.",
+      "label": "Database upgrade blocked"
+    },
+    "deadlineExceeded": {
+      "hint": "The operation ran past its deadline — retry, or raise the limit.",
+      "label": "Deadline exceeded"
+    },
+    "degradedFallback": {
+      "hint": "This turn ran on a fallback path instead of the runtime you configured.",
+      "label": "Ran in degraded mode"
+    },
+    "desktopOnlyFeature": {
+      "hint": "This feature needs the desktop app — it isn't available in the browser.",
+      "label": "Desktop only"
+    },
+    "dispatchFailed": {
+      "hint": "The request couldn't be dispatched — retry; check the agent or provider configuration.",
+      "label": "Dispatch failed"
+    },
+    "dispatchRejectedCycle": {
+      "hint": "A subagent tried to call back into one that already called it — break the loop in the subagent setup.",
+      "label": "Subagent loop rejected"
+    },
+    "dispatchRejectedDepth": {
+      "hint": "Subagents nested deeper than the configured limit — flatten the chain or raise the cap.",
+      "label": "Nesting limit reached"
+    },
+    "dispatchRejectedPolicy": {
+      "hint": "The current agent mode forbids this dispatch — adjust the mode's permissions.",
+      "label": "Blocked by policy"
+    },
+    "dnsFailure": {
+      "hint": "The host name couldn't be resolved — check the URL and your network/DNS.",
+      "label": "DNS lookup failed"
+    },
+    "documentedOnly": {
+      "hint": "Cognia can't drive this agent directly — follow its own product workflow, or use the built-in agent.",
+      "label": "Documentation only"
+    },
+    "eventChannelLost": {
+      "hint": "Cognia stopped receiving updates from the desktop backend, so parts of the app will look frozen — reload to reconnect.",
+      "label": "Live updates disconnected"
+    },
+    "executionFailed": {
+      "hint": "The external agent failed while running this turn — retry, or run it on the built-in agent.",
+      "label": "Agent run failed"
+    },
+    "extensionUnknown": {
+      "hint": "Cognia hasn't determined whether this agent supports that operation yet — reconnect to probe it.",
+      "label": "Support not determined"
+    },
+    "extensionUnsupported": {
+      "hint": "This agent doesn't implement that operation — start a new session instead of resuming.",
+      "label": "Not supported by this agent"
+    },
+    "externalAgentNotSelected": {
+      "hint": "No external agent is selected for this session — pick one, or switch back to the built-in agent.",
+      "label": "No agent selected"
+    },
+    "fallbackToBuiltin": {
+      "hint": "The external agent couldn't take this turn, so it ran on the built-in agent instead.",
+      "label": "Ran on the built-in agent"
+    },
+    "fetchFailed": {
+      "hint": "The request couldn't be sent — check your connection and the endpoint URL.",
+      "label": "Network request failed"
+    },
+    "forbidden": {
+      "hint": "Your account lacks access to this resource or model.",
+      "label": "Forbidden"
+    },
+    "frozenModelBinding": {
+      "hint": "This session is pinned to a fixed set of models and the requested one isn't among them.",
+      "label": "Model not allowed here"
+    },
+    "healthCheckFailed": {
+      "hint": "The agent started but failed its health check — check its logs, then reconnect.",
+      "label": "Health check failed"
+    },
+    "healthProbeFailed": {
+      "hint": "Cognia couldn't reach the paired device — check that both are on the same network.",
+      "label": "Device unreachable"
+    },
+    "hostUnavailable": {
+      "hint": "The remote host that should run this turn isn't reachable — retry, or check its configuration.",
+      "label": "Remote host unavailable"
+    },
+    "initializationFailed": {
+      "hint": "The agent process started but never completed its handshake — check its command and arguments.",
+      "label": "Agent failed to start"
+    },
+    "interrupted": {
+      "hint": "The run was interrupted before it finished — send again to continue.",
+      "label": "Interrupted"
+    },
+    "invalidRequest": {
+      "hint": "The request was malformed — check the parameters and model name.",
+      "label": "Invalid request"
+    },
+    "modelOverloaded": {
+      "hint": "The provider is overloaded — retry in a moment.",
+      "label": "Model overloaded"
+    },
+    "modelRequired": {
+      "hint": "Select a model for this provider before sending.",
+      "label": "Model not set"
+    },
+    "networkUnreachable": {
+      "hint": "The host can't be reached — check your connection and any proxy or VPN.",
+      "label": "Network unreachable"
+    },
+    "noSessionOpen": {
+      "hint": "There's no open conversation to send to — start a new one.",
+      "label": "No conversation open"
+    },
+    "notFound": {
+      "hint": "The resource or endpoint doesn't exist — check the URL or id.",
+      "label": "Not found"
+    },
+    "offline": {
+      "hint": "You appear to be offline — Cognia will retry once you're back online.",
+      "label": "Offline"
+    },
+    "payloadTooLarge": {
+      "hint": "The request exceeds the size limit — shorten the input.",
+      "label": "Request too large"
+    },
+    "permissionDenied": {
+      "hint": "The agent refused an action it wasn't allowed to take — adjust its permission mode.",
+      "label": "Permission denied"
+    },
+    "pluginToolMissing": {
+      "hint": "The requested tool isn't available — enable the plugin that provides it.",
+      "label": "Tool unavailable"
+    },
+    "prerequisiteMissing": {
+      "hint": "The command this agent needs isn't installed or isn't on your PATH — install it, or point Cognia at an existing copy.",
+      "label": "Missing prerequisite"
+    },
+    "promptBlockedByPlugin": {
+      "hint": "A plugin stopped this message before it was sent — check the plugin's settings.",
+      "label": "Blocked by a plugin"
+    },
+    "protocolUnsupported": {
+      "hint": "Cognia and this agent don't share a protocol — switch it to ACP and save its configuration again.",
+      "label": "Protocol not supported"
+    },
+    "providerMisconfigured": {
+      "hint": "This provider needs more setup — set the protocol and credentials in Settings.",
+      "label": "Provider misconfigured"
+    },
+    "proxyApplyFailed": {
+      "hint": "Cognia couldn't apply your proxy settings, so outgoing requests may be bypassing it.",
+      "label": "Proxy not applied"
+    },
+    "quotaExceeded": {
+      "hint": "Your plan's quota is used up — check billing or usage limits.",
+      "label": "Quota exceeded"
+    },
+    "rateLimited": {
+      "hint": "You hit a rate limit — wait a moment and retry.",
+      "label": "Rate limited"
+    },
+    "renderCrash": {
+      "hint": "Part of the interface crashed — try again; if it keeps happening, send us the report.",
+      "label": "Application error"
+    },
+    "routingNoCandidates": {
+      "hint": "No provider in the routing chain can serve this request — check your providers and model mappings.",
+      "label": "No provider available"
+    },
+    "seedFailed": {
+      "hint": "Cognia couldn't install its built-in skills and characters — some defaults will be missing.",
+      "label": "Built-in content missing"
+    },
+    "serverError": {
+      "hint": "The server failed to handle the request — retry shortly.",
+      "label": "Server error"
+    },
+    "serviceUnavailable": {
+      "hint": "The service is temporarily unavailable — retry shortly.",
+      "label": "Service unavailable"
+    },
+    "sessionResolutionFailed": {
+      "hint": "The agent couldn't resume this conversation — start a new session.",
+      "label": "Session couldn't be resumed"
+    },
+    "sessionTimeout": {
+      "hint": "The model didn't respond in time — retry, or check the sidecar and connection.",
+      "label": "Session timed out"
+    },
+    "settingsLoadFailed": {
+      "hint": "Cognia couldn't read your saved settings and is running on defaults — your data is still stored, but nothing you configured is active.",
+      "label": "Settings didn't load"
+    },
+    "settingsSaveFailed": {
+      "hint": "That change wasn't saved — retry; if it keeps failing, check the logs.",
+      "label": "Settings didn't save"
+    },
+    "sidecarExited": {
+      "hint": "The Claude sidecar exited mid-run — retry; if it recurs, restart the app.",
+      "label": "Backend stopped"
+    },
+    "sidecarUnreachable": {
+      "hint": "The local agent backend isn't running — restart it to send messages again.",
+      "label": "Backend not running"
+    },
+    "strictFailure": {
+      "hint": "The external agent failed and this session is set to strict mode, so nothing was retried elsewhere.",
+      "label": "Agent failed (strict mode)"
+    },
+    "supervisorMissing": {
+      "hint": "This team is set up to use a supervisor but none is configured — pick one in the team's settings.",
+      "label": "No supervisor configured"
+    },
+    "supervisorNotMember": {
+      "hint": "The configured supervisor isn't a member of this team any more — pick another one.",
+      "label": "Supervisor not on the team"
+    },
+    "teamMissing": {
+      "hint": "The team this conversation belongs to has been deleted — pick another team, or start a new conversation.",
+      "label": "Team no longer exists"
+    },
+    "teamSessionMissing": {
+      "hint": "This team conversation couldn't be found — it may have been deleted.",
+      "label": "Team conversation not found"
+    },
+    "timeout": {
+      "hint": "The request took too long — retry, or raise the timeout.",
+      "label": "Request timed out"
+    },
+    "transportBlocked": {
+      "hint": "Running an external agent needs the desktop app — in the browser, use the built-in agent.",
+      "label": "Needs the desktop app"
+    },
+    "unauthorized": {
+      "hint": "Authentication failed — check your API key or token in Settings.",
+      "label": "Unauthorized"
+    },
+    "unknown": {
+      "hint": "Something went wrong that Cognia doesn't recognise — the details below help us diagnose it.",
+      "label": "Unexpected error"
+    }
+  },
+  "detail": {
+    "copied": "Copied",
+    "copy": "Copy details",
+    "member": "{name}: {message}",
+    "showParsed": "Show summary",
+    "showRaw": "Show raw error"
+  },
+  "recoveryHint": {
+    "adjustPermissionMode": "Adjust the agent's permission mode, or approve the action it asked for.",
+    "checkCommandAndArgs": "Check the agent's command and startup arguments.",
+    "checkDiagnosticsAndRetry": "Check the run diagnostics, then retry with a narrower request.",
+    "completeSetupThenRetry": "Finish this agent's setup, then retry the connection.",
+    "createNewSession": "Start a new session when resume and fork aren't available.",
+    "inspectHealthEndpoint": "Check the agent's health endpoint and logs.",
+    "reconnectAndRetry": "Reconnect, then retry.",
+    "resaveConfiguration": "Save the agent's configuration again.",
+    "resumeWithSessionIdOrAllowNew": "Resume with an existing session id, or allow a new session to be created.",
+    "retryAfterReconnect": "Retry after reconnecting.",
+    "selectLocalSurface": "Pick a locally executable surface to connect to directly.",
+    "switchToAcp": "Switch the agent's protocol to ACP.",
+    "useDesktopRuntime": "Run Cognia as the desktop app — stdio transport needs it.",
+    "useOfficialWorkflow": "Use this product's own official workflow for this surface.",
+    "useSupportedOperations": "Stick to the operations this endpoint supports."
+  },
+  "severity": {
+    "error": "Error",
+    "fatal": "Critical",
+    "info": "Information",
+    "warning": "Warning"
+  },
+  "source": {
+    "agentTeam": "Agent team",
+    "boundary": "Interface",
+    "chat": "Chat",
+    "connector": "Connector",
+    "execution": "Agent runtime",
+    "externalAgent": "External agent",
+    "inbox": "Inbox",
+    "plugin": "Plugin",
+    "provider": "Provider",
+    "scheduler": "Scheduled tasks",
+    "settings": "Settings",
+    "storage": "Local storage",
+    "tauri": "Desktop backend",
+    "unknown": "Cognia",
+    "workflow": "Workflow"
+  },
+  "surface": {
+    "cascade": "{count, plural, one {# problem} other {# problems}}",
+    "dbUpgradeBlocked": {
+      "body": "Cognia needs to upgrade its local database, but another window or browser tab still has the old version open. Close the other windows, then reload.",
+      "reload": "Reload",
+      "title": "Database upgrade blocked"
+    },
+    "settingsLoadFailed": {
+      "body": "Cognia couldn't read your saved settings and is running on defaults for now. Your providers, API keys and preferences are still stored — they just aren't loaded. Retry before changing anything.",
+      "detailsLabel": "Technical details",
+      "retry": "Retry",
+      "retrying": "Retrying…",
+      "title": "Running on default settings"
+    }
+  },
+  "recommendedAction": {
+    "installCommand": "Install \"{command}\", or set an absolute path as this agent's command, before connecting.",
+    "installHintCodex": "Install the OpenAI Codex CLI: `npm install -g @openai/codex` (or `brew install codex`), then reconnect.",
+    "installHintClaude": "Install the Claude Code CLI: `npm install -g @anthropic-ai/claude-code`, then reconnect.",
+    "installHintOpencode": "Install the OpenCode CLI: `npm install -g opencode-ai`, then reconnect.",
+    "installHintGemini": "Install the Gemini CLI: `npm install -g @google/gemini-cli`, then reconnect.",
+    "codexWsl2": "For the best Windows experience, run the Codex ACP route inside a WSL2 workspace when possible."
+  }
+}

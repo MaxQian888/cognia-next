@@ -17,8 +17,8 @@ import { Spinner } from "@/components/ui/spinner"
 import { skillsScanResources, skillsScanSecurity, type SkillScanIssue } from "@/lib/claude/ipc"
 import { listResourcesForSkill } from "@/lib/db/skill-resources"
 import { isTauri } from "@/lib/tauri"
-import type { Skill } from "@/lib/claude/types"
-import { loggers } from "@/lib/logging"
+import type { Skill } from "@cognia/agent-config-types"
+import { loggers } from "@cognia/logging"
 
 interface Props {
   skill: Skill

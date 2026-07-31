@@ -18,16 +18,29 @@ export interface GenerateTitleArgs {
   firstAssistantText?: string
   /** UI locale so the title language matches the user (e.g. "zh-CN"). */
   locale?: string
+  /**
+   * What is being titled. `"chat"` (default) frames it as a conversation and
+   * labels the inputs User / Assistant reply. `"work"` frames it as a task /
+   * unit of work (agent-team run, workflow run) and labels the inputs
+   * Task / Result — the same cheap-model contract, only the framing differs.
+   */
+  kind?: "chat" | "work"
 }
 
 /** Hard ceiling on the returned title length (characters). */
 export const MAX_TITLE_LENGTH = 48
 
-const SYSTEM_PROMPT =
+const SYSTEM_PROMPT_CHAT =
   "You generate a very short title for a chat conversation. Rules: " +
   "summarise the topic in at most 8 words; no surrounding quotes; no trailing " +
   "punctuation; no prefixes like 'Title:'; a single line; write it in the same " +
   "language as the user's message."
+
+const SYSTEM_PROMPT_WORK =
+  "You generate a very short title for a unit of work (an automated task or " +
+  "workflow run). Rules: summarise what the work is about in at most 8 words; " +
+  "no surrounding quotes; no trailing punctuation; no prefixes like 'Title:'; " +
+  "a single line; write it in the same language as the task description."
 
 /**
  * Clean a raw model response into a usable title: take the first line, strip
@@ -64,21 +77,25 @@ export function sanitizeTitle(raw: string): string {
  */
 export async function generateConversationTitle(
   client: LlmClient,
-  { firstUserText, firstAssistantText, locale }: GenerateTitleArgs
+  { firstUserText, firstAssistantText, locale, kind = "chat" }: GenerateTitleArgs
 ): Promise<string> {
   const user = (firstUserText ?? "").trim()
   if (!user) return ""
 
+  const work = kind === "work"
   const localeHint = locale ? `\nUI locale: ${locale}` : ""
-  const assistant = firstAssistantText?.trim()
-    ? `\n\nAssistant reply:\n${firstAssistantText.trim().slice(0, 1000)}`
+  const intro = work ? "Work so far:" : "Conversation so far:"
+  const sourceLabel = work ? "Task" : "User"
+  const resultLabel = work ? "Result" : "Assistant reply"
+  const result = firstAssistantText?.trim()
+    ? `\n\n${resultLabel}:\n${firstAssistantText.trim().slice(0, 1000)}`
     : ""
   const prompt =
-    `Conversation so far:${localeHint}\n\nUser:\n${user.slice(0, 2000)}${assistant}\n\n` + "Title:"
+    `${intro}${localeHint}\n\n${sourceLabel}:\n${user.slice(0, 2000)}${result}\n\n` + "Title:"
 
   try {
     const text = await client.complete(prompt, {
-      system: SYSTEM_PROMPT,
+      system: work ? SYSTEM_PROMPT_WORK : SYSTEM_PROMPT_CHAT,
       temperature: 0.3,
       maxTokens: 32,
     })

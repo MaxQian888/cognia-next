@@ -109,7 +109,10 @@ export function PerfOverviewTab({ history }: PerfOverviewTabProps) {
       className="grid h-full grid-cols-1 gap-4 md:grid-cols-[260px_1fr]"
       data-testid="perf-overview"
     >
-      <div className="flex flex-col gap-3" role="tablist" aria-label={t("overview.selectMetric")}>
+      {/* `group`, not `tablist`: the tiles are `aria-pressed` toggle buttons,
+          and a tablist whose children are neither `role="tab"` nor paired with
+          a `tabpanel` is invalid ARIA that announces nothing useful. */}
+      <div className="flex flex-col gap-3" role="group" aria-label={t("overview.selectMetric")}>
         <PerfMemoryPressure memory={latestMemory} />
         <div className="flex flex-col gap-2">
           {order.map((id) => {
@@ -136,6 +139,7 @@ export function PerfOverviewTab({ history }: PerfOverviewTabProps) {
         color={active.color}
         max={active.max}
         threshold={active.threshold}
+        fill
         height={320}
         data-testid="perf-overview-graph"
       />

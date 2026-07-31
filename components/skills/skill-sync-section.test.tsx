@@ -20,7 +20,7 @@ jest.mock("@/hooks/skills", () => ({
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { SkillSyncSection } from "./skill-sync-section"
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 
 function makeSkill(over: Partial<Skill> = {}): Skill {
   return {

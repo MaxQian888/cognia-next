@@ -5,6 +5,7 @@
 import { detectChatGPT, parseChatGPT } from "./importers/chatgpt-import"
 import { detectClaude, parseClaude } from "./importers/claude-import"
 import { detectGemini, parseGemini } from "./importers/gemini-import"
+import { applyImportedMerged } from "./import-merge"
 import { isEncryptedEnvelope } from "./migrate"
 import type {
   ChatImporter,
@@ -13,8 +14,6 @@ import type {
   ChatImportResult,
   ImportedConversation,
 } from "./importers/types"
-import type { ChatSession, StoredMessage } from "@/lib/claude/types"
-import { getDb } from "@/lib/db/schema"
 
 const REGISTRY: ChatImporter[] = [
   {
@@ -100,6 +99,15 @@ function getImporters(): ChatImporter[] {
   return [...REGISTRY, ...dynamicImporters.map((d) => d.importer)]
 }
 
+/**
+ * The display name a registered importer declared for `format`, if any. Only
+ * plugin importers set one — built-ins are labelled by the import dialog's own
+ * switch, which cannot know about formats registered at runtime.
+ */
+export function getImporterLabel(format: ChatImportFormat): string | undefined {
+  return getImporters().find((i) => i.format === format)?.label
+}
+
 export function detectFormat(data: unknown): ChatImportFormat {
   if (isEncryptedEnvelope(data)) return "unknown"
   if (data && typeof data === "object") {
@@ -131,23 +139,16 @@ export async function importChatExport(
 }
 
 /**
- * Persist parsed conversations to Dexie. Each session and its messages are
- * written in a single transaction. Returns counts for the UI.
+ * Persist parsed conversations to Dexie. Delegates to the guarded
+ * `applyImportedMerged` (ADR-0062) so a RE-import never clobbers a session the
+ * user has already continued in Cognia (preserves `sdkSessionId` + local
+ * decorations; skips frozen rows). The chat-export importers reach this with
+ * fresh random ids, so the merge is a no-op for them. Returns counts written.
  */
 export async function applyImported(
   conversations: ImportedConversation[]
 ): Promise<{ sessions: number; messages: number }> {
-  if (conversations.length === 0) return { sessions: 0, messages: 0 }
-  const db = getDb()
-  const sessionRows: ChatSession[] = conversations.map((c) => c.session)
-  const messageRows: StoredMessage[] = conversations.flatMap((c) => c.messages)
-
-  await db.transaction("rw", [db.sessions, db.messages], async () => {
-    await db.sessions.bulkPut(sessionRows)
-    await db.messages.bulkPut(messageRows)
-  })
-
-  return { sessions: sessionRows.length, messages: messageRows.length }
+  return applyImportedMerged(conversations)
 }
 
 export type { ChatImportFormat, ChatImportResult, ImportedConversation } from "./importers/types"

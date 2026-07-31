@@ -1,0 +1,13 @@
+"NSCameraUsageDescription" = "Cognia 在你扫码配对、附加照片到聊天、给数字孪生录入文档时需要相机访问";
+
+"NSPhotoLibraryUsageDescription" = "Cognia 在你从相册附加图片到聊天或备份图集时需要相册访问";
+
+"NSPhotoLibraryAddUsageDescription" = "Cognia 在你保存聊天里的图片到相册时需要写入权限";
+
+"NSMicrophoneUsageDescription" = "Cognia 在你录制语音消息时需要麦克风访问";
+
+"NSFaceIDUsageDescription" = "Cognia 用 Face ID 解锁应用与确认敏感操作（删除配对、导出备份）";
+
+"NSLocationWhenInUseUsageDescription" = "Cognia 在工作流的位置触发器里需要当前位置（仅在前台使用）";
+
+"NSLocalNetworkUsageDescription" = "Cognia 需要在本地网络中查找已配对的桌面端。";

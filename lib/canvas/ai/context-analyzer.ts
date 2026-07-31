@@ -7,7 +7,7 @@
  * so we keep it local and don't unify the two.
  */
 
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import type { CanvasActionType } from "@/lib/ai/generation/canvas-actions"
 import type { CursorPosition } from "@/types/canvas/collaboration"
 

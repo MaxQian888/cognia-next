@@ -1,0 +1,112 @@
+[
+  {
+    "file": "lib/external-bridge/handlers/computer-use.ts",
+    "module": "node:net",
+    "reason": "External-bridge handler runs in the Tauri/Node host, never in the renderer bundle; net import is lazy."
+  },
+  {
+    "file": "lib/external-bridge/handlers/computer-use.ts",
+    "module": "node:crypto",
+    "reason": "External-bridge handler runs in the Tauri/Node host; crypto reached via guarded require with Web Crypto fallback."
+  },
+  {
+    "file": "lib/external-bridge/mcp-server/server.ts",
+    "module": "@modelcontextprotocol/sdk/server/mcp.js",
+    "reason": "MCP server module is host-only (standalone-entry / Tauri main), never imported by renderer pages."
+  },
+  {
+    "file": "lib/external-bridge/mcp-server/server.ts",
+    "module": "@modelcontextprotocol/sdk/server/completable.js",
+    "reason": "MCP server module is host-only (standalone-entry / Tauri main), never imported by renderer pages."
+  },
+  {
+    "file": "lib/external-bridge/mcp-server/standalone-entry.ts",
+    "module": "node:fs/promises",
+    "reason": "Standalone Node entrypoint (spawned process), not part of the static-export bundle."
+  },
+  {
+    "file": "lib/external-bridge/mcp-server/standalone-entry.ts",
+    "module": "node:path",
+    "reason": "Standalone Node entrypoint (spawned process), not part of the static-export bundle."
+  },
+  {
+    "file": "lib/external-bridge/mcp-server/transport-stdio.ts",
+    "module": "@modelcontextprotocol/sdk/server/stdio.js",
+    "reason": "stdio transport only loads in the standalone Node MCP server process."
+  },
+  {
+    "file": "lib/external-bridge/orchestration-proxy-client.ts",
+    "module": "node:net",
+    "reason": "Orchestration proxy client runs in the Node host process; lazy import behind runtime guard."
+  },
+  {
+    "file": "lib/external-bridge/orchestration-proxy-client.ts",
+    "module": "node:crypto",
+    "reason": "Orchestration proxy client runs in the Node host process; guarded require with fallback."
+  },
+  {
+    "file": "lib/plugin/contracts/contract-path-audit.ts",
+    "module": "node:fs",
+    "reason": "Contract-path audit is a dev/CI tool executed under Node, not bundled into pages."
+  },
+  {
+    "file": "lib/plugin/contracts/contract-path-audit.ts",
+    "module": "node:path",
+    "reason": "Contract-path audit is a dev/CI tool executed under Node, not bundled into pages."
+  },
+  {
+    "file": "lib/plugin/convert/node-io.ts",
+    "module": "node:child_process",
+    "reason": "Only reached from lib/plugin/convert/bin.ts, the esbuild entry for the standalone cognia-cli convert bundle; never imported by renderer pages."
+  },
+  {
+    "file": "lib/plugin/convert/node-io.ts",
+    "module": "node:fs",
+    "reason": "Only reached from lib/plugin/convert/bin.ts, the esbuild entry for the standalone cognia-cli convert bundle; never imported by renderer pages."
+  },
+  {
+    "file": "lib/plugin/convert/node-io.ts",
+    "module": "node:path",
+    "reason": "Only reached from lib/plugin/convert/bin.ts, the esbuild entry for the standalone cognia-cli convert bundle; never imported by renderer pages."
+  },
+  {
+    "file": "lib/plugin/vscode-shim/permission-inference.ts",
+    "module": "fs",
+    "reason": "Not an import: regex/pattern literal that DETECTS require(\"fs\") in scanned extension source."
+  },
+  {
+    "file": "lib/plugin/vscode-shim/vsix-installer.ts",
+    "module": "node:crypto",
+    "reason": "Lazy Node fallback for jest node-env only; browser path uses Web Crypto and never loads it."
+  },
+  {
+    "file": "lib/qr/pair-payload.ts",
+    "module": "buffer",
+    "reason": "Resolves to the npm `buffer` browser polyfill in the bundle (base64url codec); verified in shipped builds."
+  },
+  {
+    "file": "lib/skills/built-in/lark/exec-lark-cli.ts",
+    "module": "node:child_process",
+    "reason": "Built-in skill executor runs in the sidecar/Node host, not the renderer bundle."
+  },
+  {
+    "file": "lib/skills/built-in/lark/exec-lark-cli.ts",
+    "module": "node:util",
+    "reason": "Built-in skill executor runs in the sidecar/Node host, not the renderer bundle."
+  },
+  {
+    "file": "lib/skills/built-in/lark/exec-lark-cli.ts",
+    "module": "node:fs",
+    "reason": "Built-in skill executor runs in the sidecar/Node host, not the renderer bundle."
+  },
+  {
+    "file": "lib/skills/built-in/lark/exec-lark-cli.ts",
+    "module": "node:path",
+    "reason": "Built-in skill executor runs in the sidecar/Node host, not the renderer bundle."
+  },
+  {
+    "file": "lib/skills/built-in/lark/exec-lark-cli.ts",
+    "module": "node:os",
+    "reason": "Built-in skill executor runs in the sidecar/Node host, not the renderer bundle."
+  }
+]

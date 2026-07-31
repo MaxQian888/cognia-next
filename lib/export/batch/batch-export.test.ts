@@ -37,7 +37,7 @@ jest.mock("@/lib/db/schema", () => {
 import { exportBatch } from "./batch-export"
 import { listMessages } from "@/lib/db/messages"
 import { renderSingleExport } from "@/lib/export/single"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import * as schema from "@/lib/db/schema"
 
 const mockedList = listMessages as unknown as jest.Mock

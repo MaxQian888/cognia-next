@@ -4,9 +4,11 @@
 import {
   cancel,
   checkPermission,
+  DEFAULT_CHANNEL_ID,
   ensureChannel,
   ensurePermission,
   listPending,
+  onAction,
   requestPermission,
   schedule,
 } from "./local-notifications"
@@ -19,6 +21,7 @@ function makePlugin(overrides: Record<string, unknown> = {}) {
     requestPermissions: jest.fn().mockResolvedValue({ display: "granted" }),
     checkPermissions: jest.fn().mockResolvedValue({ display: "granted" }),
     createChannel: jest.fn().mockResolvedValue(undefined),
+    addListener: jest.fn().mockResolvedValue({ remove: jest.fn() }),
     ...overrides,
   } as {
     schedule: jest.Mock
@@ -27,6 +30,7 @@ function makePlugin(overrides: Record<string, unknown> = {}) {
     requestPermissions: jest.Mock
     checkPermissions: jest.Mock
     createChannel: jest.Mock
+    addListener: jest.Mock
   }
 }
 
@@ -113,6 +117,22 @@ describe("schedule / cancel / listPending", () => {
     expect(out).toEqual({ kind: "ok", value: [1, 2] })
   })
 
+  it("schedule defaults channelId to the app channel", async () => {
+    const p = makePlugin()
+    await schedule([{ id: 1, title: "x", body: "y" }], async () => p)
+    expect(p.schedule).toHaveBeenCalledWith({
+      notifications: [{ id: 1, title: "x", body: "y", channelId: DEFAULT_CHANNEL_ID }],
+    })
+  })
+
+  it("schedule keeps an explicit channelId", async () => {
+    const p = makePlugin()
+    await schedule([{ id: 1, title: "x", body: "y", channelId: "custom" }], async () => p)
+    expect(p.schedule).toHaveBeenCalledWith({
+      notifications: [{ id: 1, title: "x", body: "y", channelId: "custom" }],
+    })
+  })
+
   it("cancel forwards id list", async () => {
     const p = makePlugin()
     await cancel([3, 4], async () => p)
@@ -153,5 +173,45 @@ describe("ensureChannel", () => {
     const p = { ...makePlugin(), createChannel: undefined }
     const out = await ensureChannel({ id: "x", name: "X" }, async () => p)
     expect(out).toEqual({ kind: "ok" })
+  })
+
+  it("no-ops on iOS even when the proxy fabricates createChannel", async () => {
+    // The real Capacitor proxy exposes a callable for ANY method name and
+    // rejects "not implemented" at call time — the platform gate must win.
+    ;(globalThis as { Capacitor?: { getPlatform: () => string } }).Capacitor = {
+      getPlatform: () => "ios",
+    }
+    try {
+      const p = makePlugin({
+        createChannel: jest.fn().mockRejectedValue(new Error("not implemented")),
+      })
+      const out = await ensureChannel({ id: "x", name: "X" }, async () => p)
+      expect(out).toEqual({ kind: "ok" })
+      expect(p.createChannel).not.toHaveBeenCalled()
+    } finally {
+      delete (globalThis as { Capacitor?: unknown }).Capacitor
+    }
+  })
+})
+
+describe("onAction", () => {
+  it("registers a localNotificationActionPerformed listener and returns an unsubscribe", async () => {
+    const remove = jest.fn()
+    const p = makePlugin({
+      addListener: jest.fn().mockResolvedValue({ remove }),
+    })
+    const handler = jest.fn()
+    const unsub = await onAction(handler, async () => p)
+    expect(p.addListener).toHaveBeenCalledWith("localNotificationActionPerformed", handler)
+    expect(typeof unsub).toBe("function")
+    unsub!()
+    expect(remove).toHaveBeenCalled()
+  })
+
+  it("returns null when the plugin is unavailable", async () => {
+    const unsub = await onAction(jest.fn(), async () => {
+      throw new Error("no plugin")
+    })
+    expect(unsub).toBeNull()
   })
 })

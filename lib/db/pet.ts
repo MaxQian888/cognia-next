@@ -12,6 +12,7 @@ import type {
   PetAchievementRecord,
   PetActivityRow,
   PetCharacterBinding,
+  PetInventoryRow,
   PetProfile,
 } from "@/types/pet"
 
@@ -119,6 +120,48 @@ export async function recordPetAchievement(id: string, now = Date.now()): Promis
   return true
 }
 
+// ── Inventory (v94) ──────────────────────────────────────────────────────────
+
+export async function listPetInventory(): Promise<PetInventoryRow[]> {
+  return getDb().petInventory.toArray()
+}
+
+export async function getPetInventoryItem(id: string): Promise<PetInventoryRow | undefined> {
+  return getDb().petInventory.get(id)
+}
+
+/** Add `qty` of an item (creates the row when first acquired). */
+export async function addPetInventory(
+  id: string,
+  qty: number,
+  now = Date.now()
+): Promise<PetInventoryRow> {
+  const db = getDb()
+  const cur = await db.petInventory.get(id)
+  const next: PetInventoryRow = cur
+    ? { ...cur, qty: cur.qty + qty, updatedAt: now }
+    : { id, qty, acquiredAt: now, updatedAt: now }
+  await db.petInventory.put(next)
+  return next
+}
+
+/** Decrement `qty`; the row is deleted at 0. False when not owned in quantity. */
+export async function decrementPetInventory(
+  id: string,
+  qty = 1,
+  now = Date.now()
+): Promise<boolean> {
+  const db = getDb()
+  const cur = await db.petInventory.get(id)
+  if (!cur || cur.qty < qty) return false
+  if (cur.qty === qty) {
+    await db.petInventory.delete(id)
+  } else {
+    await db.petInventory.put({ ...cur, qty: cur.qty - qty, updatedAt: now })
+  }
+  return true
+}
+
 // ── Reset ────────────────────────────────────────────────────────────────────
 
 /** Wipe all pet data (used by the settings "reset" action). */
@@ -129,5 +172,7 @@ export async function resetPet(): Promise<void> {
     db.petCharacterBindings.clear(),
     db.petActivityLog.clear(),
     db.petAchievements.clear(),
+    db.petConversation.clear(),
+    db.petInventory.clear(),
   ])
 }

@@ -19,7 +19,9 @@ import { Spinner } from "@/components/ui/spinner"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia } from "@/components/ui/empty"
 import { FileQuestionIcon } from "lucide-react"
 import { useMonacoActiveTheme } from "@/hooks/git/use-monaco-active-theme"
+import { useSourceControlPrefs } from "@/hooks/git/use-source-control-prefs"
 import { guardDiffEditorModelDisposal } from "@/lib/canvas/monaco-diff-disposal"
+import { cn } from "@/lib/utils"
 import type { GitDiff, GitHunk } from "@/types/git"
 
 const MonacoDiff = dynamic(() => import("@monaco-editor/react").then((m) => m.DiffEditor), {
@@ -30,7 +32,12 @@ const MonacoDiff = dynamic(() => import("@monaco-editor/react").then((m) => m.Di
 function DiffLoading() {
   const t = useTranslations("sourceControl")
   return (
-    <div className="flex h-full items-center justify-center bg-muted/20 text-sm text-muted-foreground">
+    // The region announces, not the glyph: the label beside it is already the
+    // message, so a second live region on the spinner would say it twice.
+    <div
+      role="status"
+      className="flex h-full items-center justify-center bg-muted/20 text-sm text-muted-foreground"
+    >
       <Spinner className="mr-2 size-4" />
       {t("diff.loading")}
     </div>
@@ -51,6 +58,7 @@ interface DiffViewerProps {
   hunkActions?: HunkAction[]
   /** Read-only original side (always true here — diffs aren't edited inline). */
   readOnly?: boolean
+  density?: "compact" | "touch"
 }
 
 const ICON = {
@@ -59,11 +67,12 @@ const ICON = {
   discard: Undo2Icon,
 } as const
 
-export function DiffViewer({ diff, hunkActions = [] }: DiffViewerProps) {
+export function DiffViewer({ diff, hunkActions = [], density = "compact" }: DiffViewerProps) {
   const t = useTranslations("sourceControl")
   const containerRef = useRef<HTMLDivElement | null>(null)
   const editorRef = useRef<MonacoEditor.IStandaloneDiffEditor | null>(null)
   const { themeId, registerMonaco } = useMonacoActiveTheme()
+  const { prefs } = useSourceControlPrefs()
 
   // Scroll the modified side to a hunk's first line and place the caret there.
   const revealHunk = useCallback((hunk: GitHunk) => {
@@ -96,14 +105,16 @@ export function DiffViewer({ diff, hunkActions = [] }: DiffViewerProps) {
   const options = useMemo<MonacoEditor.IStandaloneDiffEditorConstructionOptions>(
     () => ({
       readOnly: true,
-      renderSideBySide: true,
+      // View mode + whitespace handling are user preferences (gear popover).
+      renderSideBySide: prefs.diffView === "sideBySide",
+      ignoreTrimWhitespace: prefs.ignoreWhitespace,
       automaticLayout: true,
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
       fontSize: 13,
       renderOverviewRuler: false,
     }),
-    []
+    [prefs.diffView, prefs.ignoreWhitespace]
   )
 
   if (!diff) {
@@ -142,12 +153,18 @@ export function DiffViewer({ diff, hunkActions = [] }: DiffViewerProps) {
           {diff.hunks.map((hunk, i) => (
             <div
               key={`${hunk.header}-${i}`}
-              className="flex items-center gap-1 rounded border bg-muted/40 px-1.5 py-0.5"
+              className={cn(
+                "flex items-center gap-1 rounded border bg-muted/40 px-1.5 py-0.5",
+                density === "touch" && "min-h-11"
+              )}
               data-testid={`hunk-row-${i}`}
             >
               <button
                 type="button"
-                className="rounded font-mono text-[10px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className={cn(
+                  "rounded font-mono text-[10px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                  density === "touch" && "min-h-11 px-2"
+                )}
                 onClick={() => revealHunk(hunk)}
                 aria-label={t("diff.jumpToHunk", { line: hunk.newStart })}
                 title={t("diff.jumpToHunk", { line: hunk.newStart })}
@@ -162,7 +179,7 @@ export function DiffViewer({ diff, hunkActions = [] }: DiffViewerProps) {
                     key={action.icon}
                     variant="ghost"
                     size="icon"
-                    className="size-5"
+                    className={cn("size-5", density === "touch" && "size-11")}
                     aria-label={action.label}
                     title={action.label}
                     onClick={() => action.onClick(hunk)}

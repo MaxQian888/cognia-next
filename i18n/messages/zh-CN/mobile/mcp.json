@@ -1,0 +1,11 @@
+{
+  "backAria": "返回设置",
+  "disabled": "已关闭",
+  "empty": "已配对的桌面端尚未配置任何 MCP 服务器。",
+  "enabled": "已启用",
+  "intro": "查看已配对桌面端配置的 MCP 服务器。添加、编辑和认证服务器需在桌面端完成。",
+  "manageOnDesktop": "MCP 服务器在桌面端管理。请在桌面端打开「设置 → MCP」添加、编辑、启用或认证服务器。",
+  "remoteAuthNote": "在桌面端认证",
+  "sectionTitle": "已配置的服务器",
+  "title": "MCP 服务器"
+}

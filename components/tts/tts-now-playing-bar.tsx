@@ -18,7 +18,7 @@ import { PauseIcon, PlayIcon, SquareIcon, Volume2Icon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ttsOrchestrator, type TTSOrchestratorState } from "@/lib/tts/tts-orchestrator"
-import { TTS_PROVIDERS } from "@/types/media/tts"
+import { TTS_PROVIDERS } from "@cognia/tts/types"
 
 export function TtsNowPlayingBar() {
   const t = useTranslations("tts.nowPlaying")

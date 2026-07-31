@@ -4,7 +4,7 @@
 // "respond with only the rewritten markdown body, no commentary" directive
 // so the response can be slotted back into the editor verbatim.
 
-import type { SkillValidationError } from "@/lib/claude/types"
+import type { SkillValidationError } from "@cognia/agent-config-types"
 
 export type AiIntent = "optimize" | "simplify" | "expand" | "fixErrors"
 

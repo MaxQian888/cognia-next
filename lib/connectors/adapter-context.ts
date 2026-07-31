@@ -24,7 +24,6 @@
  *     manually.
  */
 
-import { invoke } from "@tauri-apps/api/core"
 import type {
   AdapterAttachmentRef,
   AdapterContext,
@@ -137,21 +136,15 @@ export function buildAdapterContext(input: BuildAdapterContextInput): AdapterCon
         connectorsHttpRequest(req),
       openWs,
       fetchAttachment: (id, remoteRef) => fetchAttachment(id, remoteRef),
-      // bindWebhookRoute / unbindWebhookRoute do not have typed Tauri
-      // wrappers yet because no adapter in v1 registers a per-adapter
-      // HTTP route — Lark webhooks pass through the Rust HTTP proxy via
-      // event channel instead. Throw so the gap is discovered rather
-      // than silently swallowed if a future adapter relies on it.
-      bindWebhookRoute: async (id: string, path: string) => {
-        // Fall back to a direct invoke so when the command lands in
-        // Rust we don't need a re-deploy here — the wrapper just
-        // delegates. Until the command exists it'll throw "command not
-        // found" with full context, which is exactly what we want.
-        await invoke("connectors_bind_webhook_route", { adapterId: id, path })
-      },
-      unbindWebhookRoute: async (id: string, path: string) => {
-        await invoke("connectors_unbind_webhook_route", { adapterId: id, path })
-      },
+      // bindWebhookRoute / unbindWebhookRoute have no typed Tauri wrapper —
+      // no adapter in v1 registers a per-adapter HTTP route (Lark webhooks
+      // pass through the Rust HTTP proxy via the event channel instead), and
+      // the underlying `connectors_bind_webhook_route` Rust command does not
+      // exist. Route them through `notImplemented` so a future adapter that
+      // relies on this gets a clear, self-documenting error at the call site
+      // rather than an opaque "command not found" from a phantom `invoke`.
+      bindWebhookRoute: notImplemented("bindWebhookRoute"),
+      unbindWebhookRoute: notImplemented("unbindWebhookRoute"),
       publicBaseUrl: async () => publicUrl ?? null,
     },
     secrets: createSecrets(adapterId),

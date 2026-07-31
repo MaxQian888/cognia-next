@@ -51,7 +51,7 @@ export function isA2UIPart(part: unknown): part is A2UIPart {
 
 // ---- Phase 8 chat-render parts -----------------------------------------
 
-import type { SubAgentStatus } from "@/types/agent/sub-agent"
+import type { SubAgentStatus, SubAgentToolCall } from "@/types/agent/sub-agent"
 
 /**
  * SubagentPart — emitted by `lib/claude/subagent-bridge.ts` whenever the
@@ -74,6 +74,44 @@ export interface SubagentPart {
   completedAt?: number
   summary?: string
   toolUseId?: string
+  /**
+   * Imported subagents only (ADR-0062): id of the hidden `kind: "subagent"`
+   * ChatSession holding this run's full inner transcript. When set, the
+   * subagent card renders a "drill-in" affordance that opens that session.
+   * Absent for live/native subagents (their detail lives in the runtime store).
+   */
+  nestedSessionId?: string
+
+  // ── Nested-dispatch tree (depth-N) ─────────────────────────────────────────
+  // These let the chat transcript render a parent→child→grandchild tree that
+  // survives a cold reload (the runtime store is ephemeral, so the tree shape
+  // must live on the persisted part).
+  /** Nesting level this run executes at (1 = dispatched by the top-level chat). */
+  depth?: number
+  /** Id of the spawning subagent RUN — the tree edge. Absent for a root run. */
+  parentSubagentId?: string
+  /** Token usage snapshot for the tree's token column. */
+  tokenUsage?: { promptTokens: number; completionTokens: number; totalTokens: number }
+  /** Set when this dispatch was refused by a nesting guard or dispatch policy. */
+  rejection?: { reason: "max-depth" | "cycle" | "policy"; message: string }
+  /** True while the run is detached (backgrounded) and awaiting a later result. */
+  backgrounded?: boolean
+
+  // ── Terminal snapshot (gap7: survive a cold reload) ────────────────────────
+  // The runtime store (`useSubagentRuntimeStore`) is ephemeral, so a completed
+  // run's tool list / logs / final response would vanish on reload. These are
+  // written ONCE, only on a terminal status transition (see
+  // `subagent-bridge.ts:applySubagentUpdate`), never on every running tick — so
+  // the cheap `subagentSignature` stays cheap. The renderer reads the live
+  // store first and falls back to this snapshot when the run is gone.
+  /** Frozen tool-call list (inherits the store's ~100 cap). */
+  toolCalls?: SubAgentToolCall[]
+  /** Frozen activity log, stripped of the non-serializable `Date timestamp`. */
+  logs?: Array<{ level: string; message: string; data?: unknown }>
+  /** Frozen final response text (also mirrored into `summary`). */
+  finalResponse?: string
+  /** Frozen tool-use count for the glanceable counter. */
+  toolUses?: number
 }
 
 export function isSubagentPart(part: unknown): part is SubagentPart {
@@ -185,6 +223,26 @@ export interface SourcesPartItem {
 export interface SourcesPart {
   type: "sources"
   sources: SourcesPartItem[]
+  /**
+   * Set by the Twin runtime merge when the twin retrieval pass degraded
+   * (embedding/vector store unreachable, or `store-no-search`). The chat
+   * renderer surfaces a "no retrieved context" notice so the user knows the
+   * reply was NOT grounded in the twin's material — even when `sources` is
+   * empty. Absent on healthy turns.
+   */
+  twinDegraded?: boolean
+  /**
+   * Recall token budget of the memory injection pass, stamped by
+   * `mergeMemorySourcesIntoLastAssistant`. Lets the recalled-memory chip show
+   * "used/limit, truncated" without re-running retrieval. Absent when the turn
+   * recalled no memories.
+   */
+  memoryBudget?: { limit: number; used: number; truncated: boolean }
+  /**
+   * True when the memory retrieval pass degraded (vector backend unavailable →
+   * BM25-only, or retrieval failed). Mirrors `twinDegraded` for memory.
+   */
+  memoryDegraded?: boolean
 }
 
 export function isSourcesPart(part: unknown): part is SourcesPart {
@@ -219,4 +277,44 @@ export function isCanvasInlinePart(part: unknown): part is CanvasInlinePart {
     typeof p.canvasId === "string" &&
     typeof p.title === "string"
   )
+}
+
+// ---- MCP structured tool-result content (gap3: spec-driven rendering) ----
+
+/**
+ * A single MCP tool-result content block, preserved verbatim from the Agent
+ * SDK so the chat renderer can show images / embedded resources / audio
+ * instead of a stringified base64 wall. Attached to a `tool-*` part as
+ * `mcpContent` by `lib/claude/adapter.ts` whenever a tool result carries a
+ * non-text block. The flattened string `output` is kept alongside for
+ * back-compat with messages persisted before this field existed.
+ *
+ * Two shapes are tolerated per block kind: the MCP wire shape (`data` +
+ * `mimeType`) and the Anthropic tool-result shape (`source.data` +
+ * `source.media_type`). The renderer normalizes both.
+ */
+export type McpResultBlock =
+  | { type: "text"; text: string }
+  | {
+      type: "image"
+      data?: string
+      mimeType?: string
+      source?: { type?: string; media_type?: string; data?: string }
+    }
+  | { type: "audio"; data?: string; mimeType?: string }
+  | {
+      type: "resource"
+      resource?: { uri?: string; mimeType?: string; text?: string; blob?: string }
+      [k: string]: unknown
+    }
+  | { type: string; [k: string]: unknown }
+
+/** A `tool-*` part that carries preserved MCP content blocks (gap3). */
+export interface ToolPartMcpContent {
+  mcpContent?: McpResultBlock[]
+}
+
+export function hasMcpContent(part: unknown): part is { mcpContent: McpResultBlock[] } {
+  const blocks = (part as { mcpContent?: unknown })?.mcpContent
+  return Array.isArray(blocks) && blocks.length > 0
 }

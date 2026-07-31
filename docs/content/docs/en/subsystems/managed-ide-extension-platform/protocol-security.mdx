@@ -1,0 +1,46 @@
+---
+title: Protocol and security
+description: Broker negotiation, callback authorization, storage, content handles, webviews, and process supervision.
+---
+
+# Protocol and security
+
+Protocol 1.0 is JSON-RPC 2.0 over loopback TCP with `Content-Length` framing.
+Frames, headers, queues, handles, in-flight requests, and deadlines are
+bounded. Challenge/HMAC authentication proves possession of a per-instance
+secret without placing it in the hello. The hello negotiates protocol major,
+Code API version, catalog hash, host, canonical workspace, and capabilities.
+
+Each connection has a monotonic generation. Disconnect fails all pending
+requests. Responses, cancellation, progress, events, content handles, and
+tickets from an old generation are rejected. Reconnect rebuilds registrations,
+subscriptions, and snapshots only; actions are never replayed. Protocol majors
+1 and its predecessor are supported through negotiation. The legacy `0.2.x`
+newline bridge remains compatibility-only for one release and reports new
+capabilities as unsupported.
+
+Large or binary values use one-shot 30-second content handles bound to root,
+generation, plugin, provider, permission, and direction. Bytes move through a
+separate authenticated loopback endpoint; credentials never appear in URLs.
+
+Every callback revalidates the canonical host/root, workspace trust, current
+generation, plugin enabled/version state, declaration, provider handler,
+permission decision, and contextual ticket when required. Shell, debug, test,
+notebook execution, external writes, and agent tools require contextual
+confirmation. File paths and URIs are canonicalized on the IDE host; missing
+descendants resolve through their deepest existing ancestor and symlink escape
+fails closed.
+
+Managed state lives in host-owned SQLite outside plugin-writable directories.
+Global state, workspace state, and secrets are partitioned by user, host,
+plugin, workspace, and area. State partitions have a 5 MiB quota. Secret values
+stay in the OS keyring; SQLite stores only the partitioned key index.
+`secrets:read` and `secrets:write` are rechecked on each operation. Proxy-local
+state is a rebuildable cache, and secrets are never cached.
+
+Webviews use `default-src 'none'`, typed messages, and content-addressed
+resources. File, command, network, and secret operations return through broker
+authorization. Protocol executables must be signed plugin resources, registered
+host tools, or an executable explicitly selected by the user. Supervisors use
+argument arrays, sanitized environments, canonical working directories,
+resource limits, cancellation, and process-tree termination.

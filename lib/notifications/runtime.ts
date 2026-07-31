@@ -12,10 +12,12 @@ import {
   pruneNotifications,
 } from "@/lib/db/notifications"
 import { notify as notifyCore, type NotifyDeps, type NotifyDbPort } from "./notify"
+import { createImDeliver } from "./im-deliver"
 import { resolvePreferences } from "./preferences"
 import { dispatchNotificationCommand } from "./action-registry"
 import { useNotificationStore } from "@/stores/notifications/notification-store"
 import { useSettingsStore } from "@/stores/settings"
+import { resolveUserTimeZone } from "@/lib/profile/timezone"
 import { ensureNotificationPermission, notify as osNotify } from "@/lib/tauri/notification"
 
 const dbPort: NotifyDbPort = {
@@ -69,13 +71,23 @@ function buildDeps(): NotifyDeps {
     now: () => Date.now(),
     loadPrefs: () =>
       resolvePreferences(useSettingsStore.getState().settings?.notificationPreferences),
+    // DND quiet-hours are wall-clock in the user's own zone. Without this,
+    // resolveChannels defaults to the *device* zone — wrong on a companion
+    // phone in another timezone. Resolve from the (cross-device synced) profile.
+    tz: resolveUserTimeZone(useSettingsStore.getState().settings?.profile),
     db: dbPort,
     toast: showToast,
     osNotify,
     isOsPermitted: osPermitted,
+    imDeliver: imDeliverFn,
     onRecord: (rec) => useNotificationStore.getState().ingest(rec),
   }
 }
+
+// IM proactive-push delivery (control-plane notifications). Built once with the
+// default Dexie/PII deps; routes records whose channels include `"im"` to the
+// bound conversation (opt-in + PII gated).
+const imDeliverFn = createImDeliver()
 
 /** The single notification entry point for the whole app. */
 export async function notify(input: NotificationInput): Promise<string> {

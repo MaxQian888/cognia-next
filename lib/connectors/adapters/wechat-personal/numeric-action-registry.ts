@@ -3,19 +3,23 @@
  *
  * iLink has no native callback channel — A2UI surfaces project to a
  * plaintext mirror with "回复 1 同意 / 2 取消" hints. Users reply with a
- * digit; the future inbound parser will look that digit up here and emit
- * a `ConnectorCallbackEvent` against the corresponding binding. This
- * module is write-only in v1 — the outbound mapper records the mapping;
- * the parser hookup lands in the next phase.
+ * digit; the outbound mapper (`a2ui-mapper.ts:buildIlinkA2UISurface`)
+ * records the mapping and the inbound parser
+ * (`parse.ts:tryParseNumericCallback`) consumes it via
+ * `consumeNumericAction`, emitting a `ConnectorCallbackEvent` against the
+ * corresponding binding.
  *
  * Why a per-conversation map: numbers reset when the assistant emits a
  * fresh surface. Carrying the registry across conversations would
  * cross-route a "1" in chat A to chat B's surface. Capacity per
- * conversation is also bounded (10) so a runaway loop can't blow memory.
+ * conversation is bounded to 9 — the numeric menu only ever assigns the
+ * single ASCII digits 1–9 (see `MAX_NUMERIC` in the mapper and the
+ * `[1-9]` reply regex in the parser) — so a runaway loop can't blow
+ * memory.
  */
 
 const TTL_MS = 90_000
-const CAPACITY_PER_CONVERSATION = 10
+const CAPACITY_PER_CONVERSATION = 9
 
 interface Entry {
   numeric: number
@@ -55,9 +59,9 @@ export function setNumericAction(
 }
 
 /**
- * Look up a numeric reply without consuming it. The (future) parser will
- * consume via `consumeNumericAction` once it routes the callback so a
- * double-tap doesn't fire twice.
+ * Look up a numeric reply without consuming it. The parser consumes via
+ * `consumeNumericAction` once it routes the callback so a double-tap
+ * doesn't fire twice.
  */
 export function peekNumericAction(
   conversationKey: string,
@@ -72,7 +76,7 @@ export function peekNumericAction(
 }
 
 /**
- * Consume a numeric binding (lookup + delete). The future parser hookup
+ * Consume a numeric binding (lookup + delete). `tryParseNumericCallback`
  * uses this to route exactly once. Returns undefined when no live binding
  * matches.
  */

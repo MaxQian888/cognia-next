@@ -13,41 +13,26 @@ jest.mock("@/lib/export/batch/batch-export", () => ({
   exportBatch: (args: unknown) => exportBatchMock(args),
 }))
 
-const saveDialogMock = jest.fn()
-jest.mock(
-  "@tauri-apps/plugin-dialog",
-  () => ({
-    save: (args: unknown) => saveDialogMock(args),
-  }),
-  { virtual: true }
-)
-
-const writeFileMock = jest.fn().mockResolvedValue(undefined)
-jest.mock(
-  "@tauri-apps/plugin-fs",
-  () => ({
-    writeFile: (path: string, buf: Uint8Array) => writeFileMock(path, buf),
-  }),
-  { virtual: true }
-)
+// The platform write is delegated to the unified saver; mock it so these tests
+// focus on the hook's orchestration + result shaping.
+const saveExportMock = jest.fn()
+jest.mock("@/lib/files/save-export", () => ({
+  saveExport: (args: unknown) => saveExportMock(args),
+}))
 
 import { useBatchExport } from "./use-batch-export"
+
+const SAVED = {
+  kind: "saved" as const,
+  platform: "web" as const,
+  location: "downloads",
+  filename: "out.zip",
+}
 
 beforeEach(() => {
   isTauriMock.mockReset().mockReturnValue(false)
   exportBatchMock.mockReset()
-  saveDialogMock.mockReset()
-  writeFileMock.mockReset().mockResolvedValue(undefined)
-  Object.defineProperty(URL, "createObjectURL", {
-    configurable: true,
-    writable: true,
-    value: jest.fn(() => "blob:url"),
-  })
-  Object.defineProperty(URL, "revokeObjectURL", {
-    configurable: true,
-    writable: true,
-    value: jest.fn(),
-  })
+  saveExportMock.mockReset().mockResolvedValue(SAVED)
 })
 
 const fakeBlob = (): Blob =>
@@ -55,82 +40,52 @@ const fakeBlob = (): Blob =>
     arrayBuffer: async () => new ArrayBuffer(8),
   }) as unknown as Blob
 
-const baseArgs = (): {
-  sessions: unknown[]
-  format: "markdown"
-} => ({
+const baseArgs = (): { sessions: unknown[]; format: "markdown" } => ({
   sessions: [{ id: "s1" }, { id: "s2" }],
   format: "markdown",
 })
 
 describe("useBatchExport", () => {
-  it("browser path: triggers a download via createObjectURL", async () => {
-    exportBatchMock.mockResolvedValueOnce({
-      filename: "out.zip",
-      blob: fakeBlob(),
-      exportedCount: 2,
-    })
-    const clickSpy = jest
-      .spyOn(HTMLAnchorElement.prototype, "click")
-      .mockImplementation(() => undefined)
+  it("saves the ZIP and returns outcome + count on success", async () => {
+    const blob = fakeBlob()
+    exportBatchMock.mockResolvedValueOnce({ filename: "out.zip", blob, exportedCount: 2 })
     const { result } = renderHook(() => useBatchExport())
     let res: unknown
     await act(async () => {
       res = await result.current.run(baseArgs() as never)
     })
-    expect(res).toEqual({
-      ok: true,
-      canceled: false,
+    expect(saveExportMock).toHaveBeenCalledWith({
       filename: "out.zip",
-      exportedCount: 2,
+      data: blob,
+      mimeType: "application/zip",
+      filters: [{ name: "ZIP", extensions: ["zip"] }],
     })
-    expect(clickSpy).toHaveBeenCalled()
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:url")
-    clickSpy.mockRestore()
+    expect(res).toEqual({ outcome: SAVED, exportedCount: 2 })
   })
 
-  it("Tauri path: writes the file and returns ok", async () => {
-    isTauriMock.mockReturnValue(true)
+  it("reports exportedCount 0 when the save was cancelled", async () => {
     exportBatchMock.mockResolvedValueOnce({
       filename: "out.zip",
       blob: fakeBlob(),
-      exportedCount: 1,
+      exportedCount: 3,
     })
-    saveDialogMock.mockResolvedValueOnce("/picked/out.zip")
+    saveExportMock.mockResolvedValueOnce({ kind: "cancelled" })
     const { result } = renderHook(() => useBatchExport())
     let res: unknown
     await act(async () => {
       res = await result.current.run(baseArgs() as never)
     })
-    expect(writeFileMock).toHaveBeenCalledWith("/picked/out.zip", expect.any(Uint8Array))
-    expect(res).toMatchObject({ ok: true, canceled: false })
+    expect(res).toEqual({ outcome: { kind: "cancelled" }, exportedCount: 0 })
   })
 
-  it("Tauri path: cancellation returns canceled", async () => {
-    isTauriMock.mockReturnValue(true)
-    exportBatchMock.mockResolvedValueOnce({
-      filename: "out.zip",
-      blob: fakeBlob(),
-      exportedCount: 1,
-    })
-    saveDialogMock.mockResolvedValueOnce(null)
-    const { result } = renderHook(() => useBatchExport())
-    let res: unknown
-    await act(async () => {
-      res = await result.current.run(baseArgs() as never)
-    })
-    expect(res).toEqual({ ok: true, canceled: true })
-    expect(writeFileMock).not.toHaveBeenCalled()
-  })
-
-  it("propagates exportBatch errors as { ok: false }", async () => {
+  it("propagates exportBatch errors as an error outcome", async () => {
     exportBatchMock.mockRejectedValueOnce(new Error("kaboom"))
     const { result } = renderHook(() => useBatchExport())
     let res: unknown
     await act(async () => {
       res = await result.current.run(baseArgs() as never)
     })
-    expect(res).toEqual({ ok: false, error: "kaboom" })
+    expect(res).toEqual({ outcome: { kind: "error", message: "kaboom" }, exportedCount: 0 })
   })
 
   it("non-Error throws are stringified", async () => {
@@ -140,7 +95,7 @@ describe("useBatchExport", () => {
     await act(async () => {
       res = await result.current.run(baseArgs() as never)
     })
-    expect(res).toEqual({ ok: false, error: "oops" })
+    expect(res).toEqual({ outcome: { kind: "error", message: "oops" }, exportedCount: 0 })
   })
 
   it("busy/progress lifecycle", async () => {

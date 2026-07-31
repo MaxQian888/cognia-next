@@ -4,13 +4,7 @@
  */
 
 export type GitFileStatus =
-  | "modified"
-  | "added"
-  | "deleted"
-  | "renamed"
-  | "untracked"
-  | "conflicted"
-  | "typeChanged"
+  "modified" | "added" | "deleted" | "renamed" | "untracked" | "conflicted" | "typeChanged"
 
 export type GitStatusGroup = "staged" | "changes" | "merge"
 
@@ -34,6 +28,13 @@ export interface GitStatus {
   merge: GitFileChange[]
   isRebasing: boolean
   isMerging: boolean
+}
+
+export interface GitFileDiffStat {
+  /** Final repo-relative path, forward slashes. */
+  path: string
+  insertions: number
+  deletions: number
 }
 
 export interface GitDiffLine {
@@ -78,6 +79,18 @@ export interface GitStashEntry {
   branch: string | null
 }
 
+/**
+ * One entry from `git worktree list --porcelain`. Used by the agent-team
+ * per-dispatch isolation layer; agent worktrees carry a branch named
+ * `agent/<runId>/<teammate>/<taskId>`.
+ */
+export interface GitWorktree {
+  path: string
+  branch: string | null
+  head: string | null
+  isMain: boolean
+}
+
 export interface GitConflict {
   path: string
   ours: string
@@ -100,6 +113,11 @@ export interface GitRemote {
   name: string
   fetchUrl: string
   pushUrl: string
+}
+
+export interface GitIdentity {
+  name: string | null
+  email: string | null
 }
 
 export interface GitTag {
@@ -197,6 +215,7 @@ export type GitErrorKind =
   | "dirtyWorkingTree"
   | "mergeConflict"
   | "authRequired"
+  | "identityRequired"
   | "networkFailed"
   | "patchFailed"
   | "lockHeld"
@@ -249,9 +268,44 @@ export interface GitCommitAiSettings {
   model?: string
 }
 
+/**
+ * Shared shape for the diff-oriented AI features (per-hunk review, change
+ * explanation). Mirrors {@link GitCommitAiSettings} minus the commit-only
+ * `conventionalCommits` knob.
+ */
+export interface GitAiFeatureSettings {
+  /** Master toggle — when false the feature's entry button is hidden. */
+  enabled: boolean
+  /** Optional extra steering appended to the system prompt. */
+  customInstructions?: string
+  /** Provider/model override (mirrors `UtilityModelConfig`). Empty → chat default. */
+  providerOverride?: string
+  model?: string
+}
+
+/** Severity of an AI review finding on a single hunk. */
+export type HunkFindingSeverity = "info" | "warning" | "critical"
+
+/** An AI review note attached to one hunk (persisted advisory, not a git effect). */
+export interface HunkAiFinding {
+  severity: HunkFindingSeverity
+  note: string
+}
+
 /** Source Control feature preferences persisted on `AppSettings.gitSettings`. */
 export interface GitUiSettings {
   commitMessageAI: GitCommitAiSettings
+  /** AI per-hunk code review of a working-tree file diff. */
+  reviewAI?: GitAiFeatureSettings
+  /** AI natural-language explanation of a file/commit diff. */
+  explainAI?: GitAiFeatureSettings
+  /**
+   * Panel view/workflow preferences. Stored as an all-optional partial and
+   * resolved at read time by `resolveSourceControlPanelPrefs` (leaf module —
+   * imported type-only to avoid a cycle), so older installs pick up new fields
+   * without a Dexie migration.
+   */
+  panel?: import("@/lib/git/panel-prefs").PartialSourceControlPanelPrefs
 }
 
 /** Forward-compat defaults merged by `lib/db/settings.ts:getSettings()`. */
@@ -259,6 +313,12 @@ export const DEFAULT_GIT_SETTINGS: GitUiSettings = {
   commitMessageAI: {
     enabled: false,
     conventionalCommits: true,
+  },
+  reviewAI: {
+    enabled: false,
+  },
+  explainAI: {
+    enabled: false,
   },
 }
 

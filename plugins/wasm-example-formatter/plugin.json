@@ -13,8 +13,7 @@
   },
   "permissions": ["notification", "filesystem:read", "filesystem:write", "process:spawn"],
   "author": {
-    "name": "cognia-next",
-    "publicKey": ""
+    "name": "cognia-next"
   },
   "license": "MIT",
   "tools": [
@@ -24,10 +23,15 @@
       "parametersSchema": {
         "type": "object",
         "properties": {
-          "source": { "type": "string", "description": "Rust source to format" },
+          "source": {
+            "type": "string",
+            "description": "Rust source to format"
+          },
           "args": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "description": "Extra rustfmt args (optional)"
           }
         },
@@ -39,20 +43,43 @@
     "nodes": [
       {
         "kind": "action.wasm-example-formatter.format",
+        "typeVersion": 1,
         "category": "action",
-        "name": "Format Rust",
+        "label": "Format Rust",
         "description": "Run rustfmt on a Rust source string",
-        "inputs": {
+        "iconName": "Braces",
+        "keywords": ["rust", "rustfmt", "format"],
+        "paramsSchema": {
           "type": "object",
           "properties": {
-            "source": { "type": "string" }
+            "source": {
+              "type": "string"
+            }
           },
           "required": ["source"]
-        }
+        },
+        "defaultParams": {
+          "source": ""
+        },
+        "desktopOnly": true
       }
     ]
   },
   "engines": {
-    "cognia": ">=0.4.0"
-  }
+    "cognia": ">=0.1.0"
+  },
+  "runtimeCompatibility": {
+    "tauri": {
+      "availability": "supported"
+    },
+    "browser": {
+      "availability": "blocked",
+      "reason": "Invokes rustfmt via the process:spawn capability \u2014 desktop only."
+    },
+    "mobile": {
+      "availability": "blocked",
+      "reason": "Invokes rustfmt via the process:spawn capability \u2014 unavailable on mobile."
+    }
+  },
+  "minAppVersion": "0.1.0"
 }

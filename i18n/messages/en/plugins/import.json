@@ -1,0 +1,10 @@
+{
+  "cancel": "Cancel",
+  "capabilitiesLabel": "Capabilities:",
+  "confirm": "Install {count}",
+  "description": "Confirm the entries staged from {source} before installing.",
+  "emptyDrafts": "Nothing to import — all files failed to parse.",
+  "errorsTitle": "{count} parse errors",
+  "importing": "Importing…",
+  "title": "Import plugin"
+}

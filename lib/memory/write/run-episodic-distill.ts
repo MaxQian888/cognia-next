@@ -12,7 +12,7 @@ import { extractJson, type LlmClient } from "@/lib/twin/distill/llm"
 import type { MemoryConfig, MemoryProvenance, MemoryScope } from "@/types/memory/memory"
 import type { ConsolidateInput, ConsolidationOp } from "@/lib/memory/consolidate/consolidator"
 import type { MemoryCandidate } from "@/lib/memory/extract/extractor"
-import { hasNoLeakingPii } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii, redactText } from "@cognia/redact"
 
 const DISTILL_SYSTEM =
   "You distill a finished conversation into a few EPISODIC memories — discrete " +
@@ -69,6 +69,10 @@ export interface RunEpisodicDistillInput {
   transcript: { role: string; text: string }[]
   scope: MemoryScope
   characterId?: string
+  projectId?: string
+  agentId?: string
+  branch?: string
+  pathPattern?: string
   provenance: MemoryProvenance
   source?: { sessionId?: string }
   config: MemoryConfig
@@ -77,6 +81,7 @@ export interface RunEpisodicDistillInput {
 export interface RunEpisodicDistillDeps {
   distill: (transcript: { role: string; text: string }[]) => Promise<MemoryCandidate[]>
   consolidate: (input: ConsolidateInput) => Promise<{ applied: ConsolidationOp[] }>
+  redact?: (text: string) => string
   isPiiSafe?: (text: string) => boolean
 }
 
@@ -87,14 +92,21 @@ export async function runEpisodicDistill(
   const empty = { applied: [] as ConsolidationOp[] }
   try {
     const { config } = input
-    if (!config.enabled || !config.autoExtract || config.temporary) return empty
+    if (!config.enabled || !config.learnFromChats || config.temporary) return empty
     if (input.provenance === "inbound") return empty
     if (input.transcript.length === 0) return empty
 
-    const candidates = await deps.distill(input.transcript)
+    const redact = deps.redact ?? ((text: string) => redactText(text).redacted)
+    const isPiiSafe = deps.isPiiSafe ?? hasNoLeakingPii
+    const safeTranscript = input.transcript.map((message) => ({
+      ...message,
+      text: redact(message.text),
+    }))
+    if (safeTranscript.some((message) => !isPiiSafe(message.text))) return empty
+
+    const candidates = await deps.distill(safeTranscript)
     if (candidates.length === 0) return empty
 
-    const isPiiSafe = deps.isPiiSafe ?? hasNoLeakingPii
     const safe = candidates.filter((c) => isPiiSafe(c.text))
     if (safe.length === 0) return empty
 
@@ -102,6 +114,10 @@ export async function runEpisodicDistill(
       candidates: safe,
       scope: input.scope,
       characterId: input.characterId,
+      projectId: input.projectId,
+      agentId: input.agentId,
+      branch: input.branch,
+      pathPattern: input.pathPattern,
       provenance: input.provenance,
       source: input.source,
     })

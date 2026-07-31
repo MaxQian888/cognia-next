@@ -12,7 +12,7 @@
 // commas) — we strip those before `JSON.parse` so authoring with the
 // standard VSCode tooling roundtrips.
 
-import type { CustomTheme, ThemeColors } from "@/types/plugin/plugin-extended"
+import type { CustomTheme, ThemeColors } from "@/types/plugin/plugin"
 import { darken, lighten, parseHex, readableForeground, stripAlpha } from "./color-utils"
 import { DEFAULT_FALLBACKS, THEME_COLOR_KEYS, VSCODE_COLOR_MAP } from "./token-mapping"
 

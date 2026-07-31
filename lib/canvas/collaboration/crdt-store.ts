@@ -11,7 +11,7 @@ import type {
   CollaborationUpdate,
 } from "@/types/canvas/collaboration"
 import * as canvasSessionsDb from "@/lib/db/canvas-sessions"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 function persistSessionMetadata(label: string, session: CollaborativeSession): void {
   canvasSessionsDb.upsertSession(session).catch((err) => {

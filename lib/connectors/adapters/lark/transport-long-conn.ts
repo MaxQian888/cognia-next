@@ -17,8 +17,9 @@
  */
 
 import { listen } from "@tauri-apps/api/event"
+import { reconnectBackoffMs } from "../_shared/reconnect-backoff"
 import { connectorsLarkWsOpen, connectorsLarkWsClose } from "@/lib/connectors/tauri/commands"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import type { LarkEventEnvelope } from "./parse"
 
 export interface LarkLongConnOptions {
@@ -67,7 +68,7 @@ export async function* startLarkLongConn(
     } catch (err) {
       if (opts.signal.aborted) return
       attempts += 1
-      const backoff = backoffBaseMs * Math.min(Math.pow(2, attempts), 32)
+      const backoff = reconnectBackoffMs(backoffBaseMs, attempts)
       // Previously swallowed — surface the open failure so a non-connecting
       // bot is diagnosable instead of silently retrying forever.
       loggers.network.warn("[lark] ws open failed, backing off", {
@@ -148,7 +149,7 @@ export async function* startLarkLongConn(
 
     // Rust reported a terminal close without an abort — re-open after back-off.
     attempts += 1
-    const backoff = backoffBaseMs * Math.min(Math.pow(2, attempts), 32)
+    const backoff = reconnectBackoffMs(backoffBaseMs, attempts)
     try {
       await delay(backoff, opts.signal)
     } catch {

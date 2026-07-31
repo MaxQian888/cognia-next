@@ -6,7 +6,7 @@ import type { ReactNode } from "react"
 import { CharacterMissingBanner } from "./character-missing-banner"
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
 import type { DataAdapter } from "@/lib/data-hooks/types"
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 
 // Same plugin-store stub as character-picker.test.tsx — keeps the suite
 // self-contained without booting the full plugin manager.

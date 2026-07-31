@@ -1,6 +1,6 @@
 ---
 title: 插件系统
-description: Cognia 的一等插件运行时——惰性加载的 PluginManager 负责发现、校验、签名、加载与激活插件；约 48 个权限受控的 context API 命名空间；约 25 个把插件贡献投射进宿主子系统的桥接器；声明式的 contracts/registries/SDK 层；按调用粒度的同意 + Ed25519 签名；WASM 与 VS Code 扩展运行时；以及带备份/回滚生命周期的四来源市场。
+description: Cognia 的一等插件运行时——惰性加载的 PluginManager 负责发现、校验、签名、加载与激活插件；约 48 个权限受控的 context API 命名空间；34 个把插件贡献投射进宿主子系统的桥接器文件；声明式的 contracts/registries/SDK 层；按调用粒度的同意 + Ed25519 签名；WASM 与 VS Code 扩展运行时；以及带备份/回滚生命周期的四来源市场。
 ---
 
 # 插件系统
@@ -12,7 +12,7 @@ description: Cognia 的一等插件运行时——惰性加载的 PluginManager 
   **能力受限的 API**（`ctx`）。中枢编排器是 `PluginManager`（`lib/plugin/core/manager.ts:364`）——一个
   惰性单例，把每个插件走完 `发现 → 校验 → 兼容性闸门 → 验签 → 加载 → 激活 → 启用 → 注册贡献`，每一步都有
   基于快照的回滚。插件以三种方式扩展应用：**调用** `ctx.*` API（约 48 个权限受控命名空间，在
-  `lib/plugin/core/context.ts:233` 组装）；**声明贡献**，由约 25 个*桥接器*（`lib/plugin/bridge/`）投射进
+  `lib/plugin/core/context.ts:233` 组装）；**声明贡献**，由 34 个*桥接器文件*（`lib/plugin/bridge/`）投射进
   宿主子系统（chat、主题、字体、Monaco、连接器、工作流、调度器……）；以及通过 `define*()` SDK 助手把类型化
   条目**注册**进 overlay 注册表。每个触达宿主的调用都经过 `createGuardedAPI`
   （`lib/plugin/security/permission-guard.ts:777`）：显式授权检查、对危险权限的按调用同意、以及令牌桶限流。
@@ -22,7 +22,7 @@ description: Cognia 的一等插件运行时——惰性加载的 PluginManager 
 <StatGrid>
   <Stat label="源文件" value="~150" hint="lib/plugin/ TS，不含测试" />
   <Stat label="ctx.* 命名空间" value="~48" hint="lib/plugin/api 中 32 个 + context.ts 中的基础命名空间" />
-  <Stat label="贡献桥接器" value="~25" hint="lib/plugin/bridge/，由 module-bridge-map 分发" />
+  <Stat label="贡献桥接器" value="34" hint="lib/plugin/bridge/ TS 文件，不含测试" />
   <Stat label="扩展点" value="49 + ~150" hint="UI 槽位 + hooks（另含 26 激活 + 11 运行时），见 plugin-points.ts" />
   <Stat label="权限" value="~55（22 个危险）" hint="PluginPermission 联合类型，types/plugin/plugin.ts:262" />
   <Stat label="核心 Dexie 表" value="8" hint="plugins · permissions · reviews · analytics · jobs · dexieMeta · skillUsage · marketplaceSources（schema v70）" />
@@ -44,7 +44,7 @@ Cognia 提供的是一个真正的插件平台，而非脚本钩子。第三方�
 - **运行计划任务**：经由[调度器](../scheduler)，发出工作流触发器，并监听约 150 个生命周期 hook（chat 收发、
   工具使用、twin 摄取、团队事件……）。
 
-一等插件在仓库内 `plugins/` 目录下（`computer-use`、`github-delivery`、`clipboard-history`、`screenshot`、
+一等插件在仓库内 `plugins/` 目录下（`computer-use`、`clipboard-history`、`screenshot`、
 `web-tools` 等），由与市场插件相同的 manager 加载——唯一区别是安装来源。
 
 ## 代码位置
@@ -54,7 +54,7 @@ lib/plugin/
   core/          # 生命周期编排：manager、loader、registry、context、descriptor、
                  #   compatibility、validation、verification、transport、sandbox、wasm-*、vscode-loader
   api/           # ctx.* 表面——32 个 *-api.ts 命名空间 + index barrel
-  bridge/        # 约 25 个把插件贡献投射进宿主子系统的桥接器
+  bridge/        # 34 个把插件贡献投射进宿主子系统的桥接器文件
   contracts/     # 声明式真相：plugin-points、capabilities、bridge maps、runtime-proof 审计
   registries/    # 类型化 overlay-registry 存储（技能、子智能体、预设、模板……）
   sdk/           # define*() 面向作者的类型化助手
@@ -72,7 +72,7 @@ lib/plugin/
   scheduler/ commands/ operator/ auth/ launcher/   # 计划任务、命令总线、Computer Use、认证
 
 lib/db/  plugins · plugin-permissions · plugin-reviews · plugin-analytics ·
-         plugin-scheduled-jobs · plugin-types   （schema v70）
+         plugin-types                           （schema v113）
 
 components/plugins/   # 设置 UI、市场网格、审计面板、devtools
 src-tauri/src/plugin_api/   # Rust 网关：plugin_api_invoke、wasm 宿主、vscode 宿主、验签
@@ -85,7 +85,7 @@ src-tauri/src/plugin_api/   # Rust 网关：plugin_api_invoke、wasm 宿主、vs
 <Cards>
   <Card title="核心运行时" href="./core-runtime" description="PluginManager 生命周期（发现→校验→验签→加载→激活→启用）、loader、registry、descriptor、兼容性闸门、加载顺序拓扑排序、transport 网关" />
   <Card title="Context API（ctx）" href="./context-api" description="约 48 个 ctx.* 命名空间、context.ts 如何组装它们、createGuardedAPI 模式、凭据剥离投影" />
-  <Card title="贡献桥接器" href="./bridges" description="约 25 个把 manifest/SDK 贡献投射进 chat、主题、字体、Monaco、连接器、工作流的桥接器；module-bridge-map 分发循环；kind-prefix 命名空间化" />
+  <Card title="贡献桥接器" href="./bridges" description="34 个把 manifest/SDK 贡献投射进 chat、主题、字体、Monaco、连接器、工作流的桥接器文件；module-bridge-map 分发循环；kind-prefix 命名空间化" />
   <Card title="契约、注册表与 SDK" href="./contracts-and-registries" description="plugin-points 目录、capability/module bridge maps、overlay-registry 基座、9 个类型化注册表、define*() 助手、runtime-proof 审计" />
   <Card title="安全与权限" href="./security" description="五段链路：声明权限 → 同意 → 守卫 → 限流 → Ed25519 签名；危险默认；可信发布者锚点；权限迁移" />
   <Card title="沙箱、消息与 WASM" href="./messaging-and-sandbox" description="new Function JS 沙箱、Node --permission 启动器、transport 与跨插件 IPC、消息总线、hooks-system 扇出、WASM loader/runtime" />
@@ -123,7 +123,7 @@ flowchart TB
 
   subgraph EXT["Extension surfaces"]
     CTX["ctx.* API · ~48 namespaces<br/>lib/plugin/api/*"]
-    BRIDGES["~25 bridges<br/>lib/plugin/bridge/*"]
+    BRIDGES["34 bridge files<br/>lib/plugin/bridge/*"]
     REGS["overlay registries + define*()<br/>registries/ + sdk/"]
   end
   CTXB --> CTX

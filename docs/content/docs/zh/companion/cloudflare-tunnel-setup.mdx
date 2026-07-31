@@ -71,11 +71,11 @@ LAN 即可；不在同一网络时就需要一条经过公网的通路。Cognia 
     ### 启动 Cognia 的 companion server
 
     在 Cognia（桌面端）：**设置 → Companion → Server**。启动服务并记下
-    端口——默认是 **7890**。这里 **loopback** 绑定模式即可：`cloudflared`
+    端口——默认是 **27890**。这里 **loopback** 绑定模式即可：`cloudflared`
     与 Cognia 在同一台机器上、连的是 `localhost`，**不需要** LAN 模式。
 
     Cognia 用**自签名证书的 HTTPS** 提供服务。在浏览器打开
-    `https://localhost:7890` 确认它在跑——会出现证书警告，这是正常的。
+    `https://localhost:27890` 确认它在跑——会出现证书警告，这是正常的。
     看到警告（而不是连接被拒）就说明服务在监听。
   </Step>
 
@@ -128,7 +128,7 @@ LAN 即可；不在同一网络时就需要一条经过公网的通路。Cognia 
     - **Subdomain**：如 `cognia`
     - **Domain**：选你托管在 Cloudflare 的域名
     - **Service → Type**：`HTTPS`
-    - **Service → URL**：`localhost:7890`
+    - **Service → URL**：`localhost:27890`
     - **Additional application settings → TLS → No TLS Verify**：**开启**
 
     保存。Cloudflare 会自动为 `cognia.你的域名.com` 创建 DNS 记录。
@@ -136,7 +136,7 @@ LAN 即可；不在同一网络时就需要一条经过公网的通路。Cognia 
     <Callout type="warn">
       **No TLS Verify 必须开启。** Cognia 的源站用的是自签名证书；不开
       这个，Cloudflare 会以 `502` 拒绝源站。Service 类型用 `HTTPS`（不是
-      `HTTP`），端口 `7890`。
+      `HTTP`），端口 `27890`。
     </Callout>
   </Step>
 
@@ -203,7 +203,7 @@ LAN 即可；不在同一网络时就需要一条经过公网的通路。Cognia 
   `cloudflared tunnel run --token …` 还在跑、且打印过
   `Registered tunnel connection`。
 - **`502 Bad Gateway`** —— 源站 TLS 被拒。确认路由用的是 Service 类型
-  `HTTPS`、URL `localhost:7890`、且 **No TLS Verify = 开启**。
+  `HTTPS`、URL `localhost:27890`、且 **No TLS Verify = 开启**。
 - **手机连上了但事件流约 100 秒空闲后断开** —— 这是 Free/Pro 套餐的
   WebSocket 空闲超时。Cognia 的 25 秒心跳通常能覆盖；检查主机名路由是否
   指向 companion server 实际绑定的端口。
@@ -219,7 +219,7 @@ LAN 即可；不在同一网络时就需要一条经过公网的通路。Cognia 
 `cloudflared tunnel create cognia` →
 `cloudflared tunnel route dns cognia cognia.你的域名.com` → 写
 `~/.cloudflared/config.yml`，用一条 ingress 规则指向
-`https://localhost:7890`（带 `originRequest.noTLSVerify: true`）→
+`https://localhost:27890`（带 `originRequest.noTLSVerify: true`）→
 `cloudflared tunnel run cognia`。在访问 Cognia 这件事上二者等价；上面的
 token 流程更简单，也是 Cognia 将要在应用内自动化的那条。详见下方
 Cloudflare 文档。

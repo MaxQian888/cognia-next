@@ -1,0 +1,10 @@
+{
+  "failed": "Signature failed",
+  "failedTooltip": "Signature verification failed — review before enabling.",
+  "unknown": "Unknown",
+  "unknownTooltip": "Signature state could not be determined.",
+  "unverified": "Unverified",
+  "unverifiedTooltip": "This plugin does not carry a verified publisher signature.",
+  "verified": "Verified",
+  "verifiedTooltip": "Publisher signature verified."
+}

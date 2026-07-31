@@ -5,6 +5,7 @@
 import { encodeBase64 } from "./encoding"
 import type { SharePayload, ShareKind } from "./types"
 import type { SingleExportFormat } from "@/lib/export/single"
+import { serializeSharedDefinition, type SharedDiscoverDefinition } from "./discover-item"
 
 const FORMAT_KIND: Record<SingleExportFormat, ShareKind> = {
   markdown: "chat-md",
@@ -12,6 +13,10 @@ const FORMAT_KIND: Record<SingleExportFormat, ShareKind> = {
   text: "chat-text",
   html: "chat-html",
   animated: "chat-animated",
+  // JSONL exports share as preformatted text — the viewer renders the raw
+  // newline-delimited JSON without needing a dedicated kind.
+  jsonl: "chat-text",
+  "jsonl-chat": "chat-text",
 }
 
 /** A rendered chat export (`renderSingleExport` output) → payload. */
@@ -41,6 +46,16 @@ export async function workflowImagePayload(blob: Blob, title: string): Promise<S
   }
 }
 
+/** A self-contained usage share-card HTML document → payload. */
+export function usageCardPayload(html: string, title: string): SharePayload {
+  return { kind: "usage-card", mime: "text/html", data: html, encoding: "utf8", title }
+}
+
+/** A self-contained message quote-card HTML document → payload. */
+export function quoteCardPayload(html: string, title: string): SharePayload {
+  return { kind: "chat-quote", mime: "text/html", data: html, encoding: "utf8", title }
+}
+
 /** A serialized backup package (plaintext or already-encrypted JSON) → payload. */
 export function backupPayload(serialized: string, title: string): SharePayload {
   return { kind: "backup", mime: "application/json", data: serialized, encoding: "utf8", title }
@@ -49,4 +64,15 @@ export function backupPayload(serialized: string, title: string): SharePayload {
 /** A serialized A2UI app (exportApp output) → payload. */
 export function a2uiPayload(appJson: string, title: string): SharePayload {
   return { kind: "a2ui", mime: "application/json", data: appJson, encoding: "utf8", title }
+}
+
+/** A sanitized, portable Discover definition → payload. */
+export function discoverItemPayload(def: SharedDiscoverDefinition, title: string): SharePayload {
+  return {
+    kind: "discover-item",
+    mime: "application/json",
+    data: serializeSharedDefinition(def),
+    encoding: "utf8",
+    title,
+  }
 }

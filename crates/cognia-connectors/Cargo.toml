@@ -1,0 +1,70 @@
+# ADR-0067 Tier B — Platform Connectors subsystem (ADR-0009/0025/0036)
+# extracted from app_lib's `connectors/` module. Isolates the Matrix E2EE
+# stack (matrix-sdk-crypto + matrix-sdk-sqlite + ruma). The one upward edge
+# (companion EventBus webhook emitter) is inverted through the crate's own
+# `axum_app::EventEmitter` trait — the `BusEventEmitter` impl lives app-side
+# in `companion_api::server`.
+[package]
+name = "cognia-connectors"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89.0"
+description = "Platform Connectors — inbound webhook/WS server, credential keyring, outbound HTTP/WS clients, Matrix E2EE (ADR-0009)."
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "cognia_connectors"
+path = "src/lib.rs"
+
+[dependencies]
+cognia-secrets = { path = "../cognia-secrets" }
+cognia-net = { path = "../cognia-net" }
+cognia-instrument = { path = "../cognia-instrument" }
+tauri = { version = "=2.11.1" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+axum = { version = "0.8", features = ["macros", "ws"] }
+tower-http = { version = "0.6", features = ["limit", "trace", "cors"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "sync", "time", "io-util"] }
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["rustls-tls-native-roots", "connect"] }
+futures-util = { version = "0.3", default-features = false }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "socks", "http2", "multipart"] }
+bytes = "1"
+base64 = "0.22"
+hex = "0.4"
+url = "2"
+serde_urlencoded = "0.7"
+flate2 = "1"
+dirs = "6"
+uuid = { version = "1", features = ["v4", "v7"] }
+chrono = { version = "0.4", features = ["serde"] }
+once_cell = "1"
+parking_lot = "0.12"
+log = "0.4"
+thiserror = "2"
+rand = "0.8"
+# Signature verification / payload crypto per platform adapter.
+hmac = "0.13"
+sha1 = "0.11"
+sha2 = "0.11"
+ed25519-dalek = "2"
+subtle = "2"
+aes = "0.9"
+# CBC mode + Pkcs7/NoPadding for the Lark/WeChat payload decryptors; pulls
+# cipher's block-padding feature that `aes::cipher::block_padding` needs.
+cbc = { version = "0.2", features = ["alloc"] }
+aes-gcm = { version = "0.10", features = ["aes"] }
+prost = "0.13"
+# Matrix E2EE stack — the heavy dependency this crate isolates.
+matrix-sdk-crypto = { version = "0.18.0", default-features = false }
+matrix-sdk-sqlite = { version = "0.18.0", default-features = false, features = ["crypto-store", "bundled"] }
+ruma = { version = "0.16.0", features = ["client-api-c", "events", "rand"] }
+
+[dev-dependencies]
+cognia-secrets = { path = "../cognia-secrets", features = ["test-inmemory"] }
+# Router unit tests drive the axum app through tower::ServiceExt.
+tower = { version = "0.5", features = ["util", "limit", "timeout"] }
+# HTTP mock server for http_client / attachments / media_upload tests.
+wiremock = "0.6"
+tempfile = "3"

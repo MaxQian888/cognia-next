@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent } from "@testing-library/react"
 import type { PluginRow } from "@/lib/db/plugin-types"
 
 jest.mock("next-intl", () => ({
@@ -69,6 +69,17 @@ describe("PluginDetailData", () => {
       updatedAt: 0,
     }
     render(<PluginDetailData pluginId="alpha" />)
+    // Tables is open by default; the rest are collapsed second-level sections.
+    // Expand each so its (mocked) child mounts, then verify pluginId threading.
+    for (const sub of [
+      "data-sub-schedules",
+      "data-sub-analytics",
+      "data-sub-backup",
+      "data-sub-resources",
+      "data-sub-dependencies",
+    ]) {
+      fireEvent.click(screen.getByTestId(sub))
+    }
     for (const testid of [
       "data-mgmt",
       "scheduled-jobs",
@@ -79,6 +90,29 @@ describe("PluginDetailData", () => {
     ]) {
       expect(screen.getByTestId(testid).getAttribute("data-plugin-id")).toBe("alpha")
     }
+  })
+
+  it("keeps the Tables sub-section open by default and others collapsed", () => {
+    mockPlugin = {
+      id: "alpha",
+      name: "Alpha",
+      version: "1.0.0",
+      status: "enabled",
+      source: "marketplace",
+      type: "frontend",
+      enabled: true,
+      capabilities: [],
+      path: "/plugins/alpha",
+      manifest: { id: "alpha" },
+      createdAt: 0,
+      updatedAt: 0,
+    }
+    render(<PluginDetailData pluginId="alpha" />)
+    expect(screen.getByTestId("data-sub-tables")).toHaveAttribute("data-state", "open")
+    expect(screen.getByTestId("data-sub-analytics")).toHaveAttribute("data-state", "closed")
+    // Tables child mounts immediately; a collapsed child does not.
+    expect(screen.getByTestId("data-mgmt")).toBeInTheDocument()
+    expect(screen.queryByTestId("analytics")).not.toBeInTheDocument()
   })
 
   it("renders the notFound message when the plugin row is missing", () => {

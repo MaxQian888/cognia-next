@@ -50,6 +50,7 @@ type ViewSkill = { id: string; name: string; status?: string }
 const viewRef: { all: ViewSkill[]; filtered: ViewSkill[] } = { all: [], filtered: [] }
 
 const aiRun = jest.fn(async () => null)
+const prefsRef = { current: { autoEnableNew: true } as { autoEnableNew: boolean } }
 jest.mock("@/hooks/skills", () => ({
   useSkills: () => ({
     all: viewRef.all,
@@ -60,6 +61,15 @@ jest.mock("@/hooks/skills", () => ({
   }),
   useSkillAi: () => ({ run: aiRun }),
   useSkillShortcuts: () => {},
+  useSkillPrefsHydration: () => {},
+  useSkillPanelPrefs: () => prefsRef.current,
+  URL_INSTALL_INVALID: "invalid",
+  useUrlInstall: () => ({
+    run: jest.fn(),
+    busy: false,
+    error: null,
+    clearError: jest.fn(),
+  }),
 }))
 
 const mobileRef = { current: false }
@@ -69,7 +79,7 @@ jest.mock("@/hooks/ui/use-mobile", () => ({
 
 const storeState: {
   activeTab: "my-skills" | "browse" | "editor" | "analytics"
-  editorTarget: null | { mode: "create" | "edit"; skillId?: string }
+  editorTarget: null | { mode: "create" }
   importStaging: null | object
   deleteTarget: null | { skillId: string; name: string }
   detailSkillId: string | null
@@ -224,6 +234,7 @@ jest.mock("./editor/skill-editor-workspace", () => ({
 }))
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { useChatStore } from "@/stores/chat"
 import { SkillPanel } from "./skill-panel"
 
 beforeEach(() => {
@@ -233,6 +244,7 @@ beforeEach(() => {
   viewRef.filtered = []
   mobileRef.current = false
   tauriRef.current = false
+  prefsRef.current = { autoEnableNew: true }
   storeState.activeTab = "my-skills"
   storeState.editorTarget = null
   storeState.importStaging = null
@@ -333,15 +345,29 @@ describe("SkillPanel", () => {
     render(<SkillPanel />)
     fireEvent.click(screen.getByTestId("editor-save"))
     await waitFor(() => expect(createSkill).toHaveBeenCalled())
+    // autoEnableNew (default) → the new skill is created enabled.
+    expect(createSkill.mock.calls[0][0]).toMatchObject({ status: "enabled" })
     expect(storeState.closeEditor).toHaveBeenCalled()
+  })
+
+  it("creates the new skill disabled when auto-enable is off", async () => {
+    prefsRef.current = { autoEnableNew: false }
+    storeState.editorTarget = { mode: "create" }
+    render(<SkillPanel />)
+    fireEvent.click(screen.getByTestId("editor-save"))
+    await waitFor(() => expect(createSkill).toHaveBeenCalled())
+    expect(createSkill.mock.calls[0][0]).toMatchObject({ status: "disabled" })
   })
 
   it("calls deleteSkill and clears the target when the delete dialog confirms", async () => {
     storeState.deleteTarget = { skillId: "s1", name: "Doomed" }
+    useChatStore.getState().setEphemeralSkillIds(["s1", "keep"])
     render(<SkillPanel />)
     fireEvent.click(screen.getByTestId("delete-confirm"))
     await waitFor(() => expect(deleteSkill).toHaveBeenCalledWith("s1"))
     expect(storeState.setDeleteTarget).toHaveBeenCalledWith(null)
+    // The deleted skill is pruned from the composer's ad-hoc attachments.
+    await waitFor(() => expect(useChatStore.getState().ephemeralSkillIds).toEqual(["keep"]))
   })
 
   it("still clears the target when deleteSkill fails", async () => {
@@ -352,13 +378,11 @@ describe("SkillPanel", () => {
     await waitFor(() => expect(storeState.setDeleteTarget).toHaveBeenCalledWith(null))
   })
 
-  it("calls updateSkill when the editor host saves in edit mode", async () => {
-    storeState.editorTarget = { mode: "edit", skillId: "s1" }
-    liveQueryRef.current = { id: "s1", name: "Old", description: "d", content: "c" }
+  it("creates a new skill when the editor host saves", async () => {
+    storeState.editorTarget = { mode: "create" }
     render(<SkillPanel />)
     fireEvent.click(screen.getByTestId("editor-save"))
-    await waitFor(() => expect(updateSkill).toHaveBeenCalled())
-    expect(updateSkill.mock.calls[0][0]).toBe("s1")
+    await waitFor(() => expect(createSkill).toHaveBeenCalled())
     expect(storeState.closeEditor).toHaveBeenCalled()
   })
 

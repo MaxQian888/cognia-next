@@ -4,7 +4,7 @@ const SNAPSHOT = {
   nodes: [
     { id: "n_trigger", kind: "trigger.manual", label: "Click run" },
     { id: "n_extract", kind: "ai.extract", label: "Parse issue" },
-    { id: "n_open_pr", kind: "action.github.openPr", label: "" },
+    { id: "n_open_pr", kind: "demo-delivery.action.openPr", label: "" },
   ],
   edges: [
     { id: "e_te", source: "n_trigger", target: "n_extract" },
@@ -26,7 +26,7 @@ describe("expandWorkflowMentions", () => {
 
   it("omits the label segment when the node has no label", () => {
     const out = expandWorkflowMentions("Look at @node:n_open_pr.", SNAPSHOT)
-    expect(out).toBe("Look at `n_open_pr` (`action.github.openPr`).")
+    expect(out).toBe("Look at `n_open_pr` (`demo-delivery.action.openPr`).")
   })
 
   it("expands an edge mention with source → target and handle", () => {

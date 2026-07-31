@@ -1,0 +1,28 @@
+{
+  "backAria": "返回设置",
+  "copied": "命令已复制到剪贴板。",
+  "copyAria": "复制命令：{command}",
+  "copyError": "当前环境无法访问剪贴板。",
+  "empty": "已配对的桌面端尚未同步任何命令。",
+  "intro": "来自已配对桌面端的终端命令。点按命令即可复制，或使用运行按钮在桌面端重新执行。",
+  "noProject": "无项目",
+  "noResults": "没有匹配的命令。",
+  "run": {
+    "cancel": "取消",
+    "close": "关闭",
+    "confirm": "运行",
+    "confirmBody": "将通过已配对桌面端的 shell 运行该命令，并在此显示捕获的输出。需要此设备已获得远程控制权限。",
+    "confirmTitle": "在桌面端运行？",
+    "exitCode": "退出码 {code}。",
+    "noOutput": "（无输出）",
+    "resultTitle": "命令输出",
+    "running": "正在桌面端运行…",
+    "timedOut": "命令超时，已被终止。"
+  },
+  "runAria": "在桌面端运行：{command}",
+  "runError": "命令运行失败：{message}",
+  "searchAria": "搜索命令历史",
+  "searchPlaceholder": "搜索命令",
+  "title": "命令历史",
+  "uses": "{count, plural, other {# 次运行}}"
+}

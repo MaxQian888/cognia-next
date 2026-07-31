@@ -3,10 +3,12 @@
  */
 
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import type { TauriHttpResponse } from "@/lib/connectors/tauri/commands"
 
 const mockCreate = jest.fn().mockResolvedValue({ id: "qq-new" })
 const mockUpdate = jest.fn().mockResolvedValue(undefined)
 const mockKeyringSet = jest.fn().mockResolvedValue(undefined)
+const mockConnectorsHttpRequest = jest.fn()
 const mockRotated = jest.fn()
 
 jest.mock("@/lib/db/adapter-instances", () => ({
@@ -15,17 +17,33 @@ jest.mock("@/lib/db/adapter-instances", () => ({
 }))
 jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsKeyringSet: (...a: unknown[]) => mockKeyringSet(...a),
+  connectorsHttpRequest: (...a: unknown[]) => mockConnectorsHttpRequest(...a),
 }))
 jest.mock("@/lib/connectors/credentials-events", () => ({
   emitCredentialsRotated: (...a: unknown[]) => mockRotated(...a),
 }))
+jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn().mockReturnValue(true) }))
 jest.mock("sonner", () => ({ toast: { success: jest.fn(), error: jest.fn() } }))
 
 import { toast } from "sonner"
+import { clearQQTokenCache } from "@/lib/connectors/adapters/qq-official/auth"
+const mockToastSuccess = toast.success as jest.Mock
 const mockToastError = toast.error as jest.Mock
 import { QQOfficialConfigDialog } from "./qq-official-config"
 
-beforeEach(() => jest.clearAllMocks())
+function httpResp(status: number, body: unknown): TauriHttpResponse {
+  return {
+    status,
+    headers: {},
+    body: typeof body === "string" ? body : JSON.stringify(body),
+  }
+}
+
+beforeEach(() => {
+  jest.clearAllMocks()
+  clearQQTokenCache("102000", "secret")
+  clearQQTokenCache("bad", "secret")
+})
 
 describe("QQOfficialConfigDialog", () => {
   it("renders the create title and credential inputs", () => {
@@ -33,6 +51,44 @@ describe("QQOfficialConfigDialog", () => {
     expect(screen.getByText(/add qq official bot/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/app id/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/client secret/i)).toBeInTheDocument()
+  })
+
+  it("renders the credential test button", () => {
+    render(<QQOfficialConfigDialog open onOpenChange={jest.fn()} row={null} />)
+    expect(screen.getByRole("button", { name: /test credentials/i })).toBeInTheDocument()
+  })
+
+  it("shows a success status after minting an access token and resolving the gateway", async () => {
+    mockConnectorsHttpRequest
+      .mockResolvedValueOnce(httpResp(200, { access_token: "qq-token", expires_in: 7200 }))
+      .mockResolvedValueOnce(httpResp(200, { url: "wss://api.sgroup.qq.com/websocket" }))
+
+    render(<QQOfficialConfigDialog open onOpenChange={jest.fn()} row={null} />)
+    fireEvent.change(screen.getByLabelText(/app id/i), { target: { value: "102000" } })
+    fireEvent.change(screen.getByLabelText(/client secret/i), { target: { value: "secret" } })
+    fireEvent.click(screen.getByRole("button", { name: /test credentials/i }))
+
+    await waitFor(() => {
+      expect(mockConnectorsHttpRequest).toHaveBeenCalledTimes(2)
+      expect(mockToastSuccess).toHaveBeenCalledWith(
+        expect.stringContaining("wss://api.sgroup.qq.com/websocket")
+      )
+    })
+    expect(screen.getByRole("status")).toHaveTextContent("wss://api.sgroup.qq.com/websocket")
+  })
+
+  it("shows an error status when QQ rejects the credentials", async () => {
+    mockConnectorsHttpRequest.mockResolvedValueOnce(httpResp(200, { message: "bad secret" }))
+
+    render(<QQOfficialConfigDialog open onOpenChange={jest.fn()} row={null} />)
+    fireEvent.change(screen.getByLabelText(/app id/i), { target: { value: "bad" } })
+    fireEvent.change(screen.getByLabelText(/client secret/i), { target: { value: "secret" } })
+    fireEvent.click(screen.getByRole("button", { name: /test credentials/i }))
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith(expect.stringContaining("bad secret"))
+      expect(screen.getByRole("status")).toHaveTextContent("bad secret")
+    })
   })
 
   it("blocks save without credentials", async () => {

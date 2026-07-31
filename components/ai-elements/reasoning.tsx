@@ -3,10 +3,7 @@
 import { useControllableState } from "@radix-ui/react-use-controllable-state"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { cn } from "@/lib/utils"
-import { cjk } from "@streamdown/cjk"
-import { code } from "@streamdown/code"
-import { math } from "@streamdown/math"
-import { mermaid } from "@streamdown/mermaid"
+import { streamdownPlugins } from "./streamdown-plugins"
 import { BrainIcon, ChevronDownIcon } from "lucide-react"
 import type { ComponentProps, ReactNode } from "react"
 import {
@@ -46,6 +43,13 @@ export type ReasoningProps = ComponentProps<typeof Collapsible> & {
   defaultOpen?: boolean
   onOpenChange?: (open: boolean) => void
   duration?: number
+  /**
+   * Auto-collapse the block ~1s after streaming ends. Defaults to `true` to
+   * preserve the upstream behavior, but the chat transcript opts out
+   * (`closeOnFinish={false}`) so a completed "thinking" block stays visible
+   * instead of vanishing the moment the answer lands.
+   */
+  closeOnFinish?: boolean
 }
 
 const AUTO_CLOSE_DELAY = 1000
@@ -59,6 +63,7 @@ export const Reasoning = memo(
     defaultOpen,
     onOpenChange,
     duration: durationProp,
+    closeOnFinish = true,
     children,
     ...props
   }: ReasoningProps) => {
@@ -100,8 +105,10 @@ export const Reasoning = memo(
       }
     }, [isStreaming, isOpen, setIsOpen, isExplicitlyClosed])
 
-    // Auto-close when streaming ends (once only, and only if it ever streamed)
+    // Auto-close when streaming ends (once only, and only if it ever streamed).
+    // Opt-out via `closeOnFinish={false}` so finished thinking blocks persist.
     useEffect(() => {
+      if (!closeOnFinish) return
       if (hasEverStreamedRef.current && !isStreaming && isOpen && !hasAutoClosed) {
         const timer = setTimeout(() => {
           setIsOpen(false)
@@ -110,7 +117,7 @@ export const Reasoning = memo(
 
         return () => clearTimeout(timer)
       }
-    }, [isStreaming, isOpen, setIsOpen, hasAutoClosed])
+    }, [isStreaming, isOpen, setIsOpen, hasAutoClosed, closeOnFinish])
 
     const handleOpenChange = useCallback(
       (newOpen: boolean) => {
@@ -187,8 +194,6 @@ export const ReasoningTrigger = memo(
 export type ReasoningContentProps = ComponentProps<typeof CollapsibleContent> & {
   children: string
 }
-
-const streamdownPlugins = { cjk, code, math, mermaid }
 
 export const ReasoningContent = memo(({ className, children, ...props }: ReasoningContentProps) => (
   <CollapsibleContent

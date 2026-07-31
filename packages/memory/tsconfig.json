@@ -1,0 +1,35 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "jest"],
+    // tsup's .d.ts emit runs a standalone tsc that can't share the root's
+    // incremental build-info file, and rollup-plugin-dts injects a baseUrl that
+    // TS 6.x flags as deprecated. Scope both overrides to this package's build.
+    "incremental": false,
+    "ignoreDeprecations": "6.0",
+    // A child tsconfig's `paths` REPLACES the parent's — so every `@cognia/*`
+    // this package imports (and their transitive src deps) must be re-listed
+    // here, pointing at the sibling package src, or the standalone typecheck /
+    // tsup dts can't resolve them. `@/*` stays mapped only so a stray app import
+    // is caught by typecheck rather than silently resolving to `any`.
+    "paths": {
+      "@/*": ["../../*"],
+      "@cognia/rag": ["../rag/src/index.ts"],
+      "@cognia/rag/*": ["../rag/src/*"],
+      "@cognia/redact": ["../redact/src/index.ts"],
+      "@cognia/redact/*": ["../redact/src/*"],
+      "@cognia/provider-embedding": ["../provider-embedding/src/index.ts"],
+      "@cognia/provider-embedding/*": ["../provider-embedding/src/*"],
+      "@cognia/provider-core": ["../provider-core/src/index.ts"],
+      "@cognia/provider-core/*": ["../provider-core/src/*"],
+      "@cognia/provider-types": ["../provider-types/src/index.ts"],
+      "@cognia/provider-types/*": ["../provider-types/src/*"],
+      "@cognia/vector": ["../vector/src/index.ts"],
+      "@cognia/vector/*": ["../vector/src/*"],
+      "@cognia/primitives": ["../primitives/src/index.ts"],
+      "@cognia/primitives/*": ["../primitives/src/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["node_modules", "dist"]
+}

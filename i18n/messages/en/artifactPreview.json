@@ -1,0 +1,14 @@
+{
+  "cdnLoadDescription": "Unable to load React dependencies from CDN. Check your network connection.",
+  "cdnLoadTitle": "CDN Loading Failed",
+  "failedToParseChart": "Failed to parse chart data",
+  "iframeLoadError": "Failed to load preview iframe",
+  "invalidChartFormat": "Invalid chart data format",
+  "loadingPreview": "Loading preview...",
+  "noChartData": "No chart data",
+  "noComponentFound": "No component found. Export an App, Component, or Main function.",
+  "notebookParseError": "Failed to parse notebook",
+  "previewError": "Preview error",
+  "previewFailed": "Preview failed to render",
+  "previewTitle": "Preview: {title}"
+}

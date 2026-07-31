@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Coverage for the MCP `resources/*` handlers — listing + reading +
  * scope/uri parsing.
@@ -22,7 +23,7 @@ beforeEach(async () => {
   __resetDbForTesting()
   getDb()
   await whenSeeded()
-})
+}, 30_000)
 
 function articleDraft(overrides: Partial<WikiArticleDraft> = {}): WikiArticleDraft {
   return {

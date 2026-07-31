@@ -1,10 +1,11 @@
+/** @jest-environment jsdom */
 import { act } from "@testing-library/react"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import {
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
   createDefaultSearchUsageEntry,
   createDefaultSearchUsageStats,
-} from "@/lib/search/types"
+} from "@cognia/web-search/types"
 
 // ---- Mocks ----
 
@@ -13,15 +14,37 @@ jest.mock("@/lib/db/settings", () => ({
   saveSettings: jest.fn(),
   addAlwaysAllow: jest.fn(),
   removeAlwaysAllow: jest.fn(),
+  // Consumed by profile-transfer (dynamically imported by resetSettings).
+  DEFAULTS: {
+    id: "singleton",
+    updatedAt: 0,
+    installUuid: "uuid",
+    apiKey: "secret",
+    apiBaseUrl: "https://x",
+    theme: "system",
+    language: "en",
+  },
 }))
 
 jest.mock("@/lib/claude/ipc", () => ({
   setApiKey: jest.fn(),
   restartSidecar: jest.fn(),
+  setProviderEnv: jest.fn(),
 }))
 
 jest.mock("@/lib/tauri", () => ({
   isTauri: jest.fn(),
+}))
+
+const dispatchDiagnosticMock = jest.fn()
+jest.mock("@/lib/diagnostics/bus", () => ({
+  dispatchDiagnostic: (...args: unknown[]) => dispatchDiagnosticMock(...args),
+}))
+
+const applyProxyToRustMock = jest.fn()
+jest.mock("@/stores/network-proxy", () => ({
+  applyProxyToRust: (...args: unknown[]) => applyProxyToRustMock(...args),
+  maybeAutoDetectProxy: jest.fn(),
 }))
 
 jest.mock("@/lib/tts/keyring", () => ({
@@ -29,6 +52,11 @@ jest.mock("@/lib/tts/keyring", () => ({
   clearProviderKey: jest.fn(),
   loadAllProviderKeys: jest.fn(),
 }))
+
+jest.mock("@/lib/plugin/messaging/message-bus", () => {
+  const actual = jest.requireActual("@/lib/plugin/messaging/message-bus")
+  return { ...actual, emitSystemBusEvent: jest.fn() }
+})
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const dbSettings = require("@/lib/db/settings") as {
@@ -41,6 +69,7 @@ const dbSettings = require("@/lib/db/settings") as {
 const ipc = require("@/lib/claude/ipc") as {
   setApiKey: jest.Mock
   restartSidecar: jest.Mock
+  setProviderEnv: jest.Mock
 }
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const tauri = require("@/lib/tauri") as { isTauri: jest.Mock }
@@ -53,6 +82,12 @@ const keyring = require("@/lib/tts/keyring") as {
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { useSettingsStore } = require("./settings-store") as typeof import("./settings-store")
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const messageBus = require("@/lib/plugin/messaging/message-bus") as {
+  emitSystemBusEvent: jest.Mock
+  SystemEvents: typeof import("@/lib/plugin/messaging/message-bus").SystemEvents
+}
+const mockedEmit = messageBus.emitSystemBusEvent as jest.Mock
 
 const baseSettings = (overrides: Partial<AppSettings> = {}): AppSettings => ({
   id: "singleton",
@@ -68,12 +103,21 @@ const baseSettings = (overrides: Partial<AppSettings> = {}): AppSettings => ({
   ...overrides,
 })
 
-const RESET = { settings: null, loaded: false, providerKeys: {}, providerKeysLoaded: false }
+const RESET = {
+  settings: null,
+  loaded: false,
+  loadFailed: false,
+  loadError: null,
+  providerKeys: {},
+  providerKeysLoaded: false,
+}
 
 beforeEach(() => {
   jest.clearAllMocks()
   jest.spyOn(console, "warn").mockImplementation(() => {})
   jest.spyOn(console, "error").mockImplementation(() => {})
+  dispatchDiagnosticMock.mockClear()
+  applyProxyToRustMock.mockReset().mockResolvedValue(undefined)
   useSettingsStore.setState(RESET)
 })
 
@@ -123,6 +167,7 @@ describe("load", () => {
       permissionMode: "default",
       alwaysAllowTools: [],
       builtinTools: {
+        coreFiles: true,
         fileExtras: true,
         git: true,
         process: false,
@@ -130,8 +175,42 @@ describe("load", () => {
         shellAdvanced: false,
         terminalRepl: false,
         lsp: false,
+        astGrep: false,
+        codeGraph: false,
+        dependencyResearch: false,
+        webclone: false,
       },
+      updates: {
+        autoCheck: true,
+        checkIntervalMinutes: 360,
+        autoDownload: false,
+        relaunchAfterInstall: true,
+        requestTimeoutSeconds: 30,
+        useProxy: true,
+      },
+      canvasCodeSandboxEnabled: true,
     })
+  })
+
+  it("flags the defaults fallback so the session isn't silently degraded", async () => {
+    dbSettings.getSettings.mockRejectedValue(new Error("db down"))
+    await act(async () => {
+      await useSettingsStore.getState().load()
+    })
+    const s = useSettingsStore.getState()
+    expect(s.loadFailed).toBe(true)
+    expect(s.loadError).toBe("db down")
+  })
+
+  it("clears the failure flags on a successful load", async () => {
+    useSettingsStore.setState({ loadFailed: true, loadError: "stale" })
+    dbSettings.getSettings.mockResolvedValue(baseSettings())
+    await act(async () => {
+      await useSettingsStore.getState().load()
+    })
+    const s = useSettingsStore.getState()
+    expect(s.loadFailed).toBe(false)
+    expect(s.loadError).toBeNull()
   })
 
   it("does not push apiKey down to Tauri when not in Tauri", async () => {
@@ -154,6 +233,59 @@ describe("load", () => {
     })
     expect(console.warn).toHaveBeenCalled()
     expect(useSettingsStore.getState().loaded).toBe(true)
+  })
+
+  it("seeds default tier mappings on load for a fresh user and persists them", async () => {
+    dbSettings.getSettings.mockResolvedValue(
+      baseSettings({
+        modelMappings: undefined,
+        providerSettings: {
+          openai: { enabled: true },
+        } as unknown as AppSettings["providerSettings"],
+      })
+    )
+    keyring.loadAllProviderKeys.mockResolvedValue({})
+    tauri.isTauri.mockReturnValue(false)
+    dbSettings.saveSettings.mockImplementation(async (p) => baseSettings(p))
+
+    await act(async () => {
+      await useSettingsStore.getState().load()
+    })
+
+    const saved = dbSettings.saveSettings.mock.calls[0]?.[0]
+    expect(saved?.modelMappings?.length).toBeGreaterThan(0)
+    expect(saved?.modelMappings?.some((m: { alias: string }) => m.alias === "fast")).toBe(true)
+    expect(useSettingsStore.getState().settings?.modelMappings?.length).toBeGreaterThan(0)
+  })
+
+  it("does NOT reseed mappings on load when the user already has some", async () => {
+    dbSettings.getSettings.mockResolvedValue(
+      baseSettings({
+        modelMappings: [
+          {
+            id: "existing",
+            alias: "fast",
+            providers: [{ providerId: "openai", modelId: "gpt-4o" }],
+            distribution: "priority",
+            enabled: true,
+            createdAt: 0,
+            updatedAt: 0,
+          },
+        ],
+      })
+    )
+    keyring.loadAllProviderKeys.mockResolvedValue({})
+    tauri.isTauri.mockReturnValue(false)
+    dbSettings.saveSettings.mockImplementation(async (p) => baseSettings(p))
+
+    await act(async () => {
+      await useSettingsStore.getState().load()
+    })
+
+    // No saveSettings call carries modelMappings (nothing to persist).
+    for (const call of dbSettings.saveSettings.mock.calls) {
+      expect(call[0]?.modelMappings).toBeUndefined()
+    }
   })
 
   it("repairs orphaned importedVscodeThemes on load and persists the cleanup", async () => {
@@ -194,13 +326,77 @@ describe("load", () => {
     expect(cleanedRecords).toHaveLength(1)
     expect(cleanedRecords?.[0].customThemeId).toBe("ct-keep")
     // The cleanup must be persisted so the next load doesn't redo this work.
-    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
-      importedVscodeThemes: [expect.objectContaining({ customThemeId: "ct-keep" })],
-    })
+    // (Fresh-user mapping seeding may ride along in the same patch, so match
+    // on the importedVscodeThemes field specifically.)
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        importedVscodeThemes: [expect.objectContaining({ customThemeId: "ct-keep" })],
+      }),
+      // Opted out of host mirroring: the user did not ask for this cleanup, so
+      // a paired client must not replay it onto its host as an edit — dropping
+      // an orphaned row locally should not delete it on the desktop.
+      { mirrorToHost: false }
+    )
   })
 })
 
 // ---- save ----
+
+describe("silent side-effect failures", () => {
+  it("reports a proxy that never reached the Rust side", async () => {
+    // Outgoing requests are now bypassing a proxy the user configured — a
+    // privacy consequence that used to be a lone console.warn.
+    dbSettings.saveSettings.mockResolvedValue(baseSettings())
+    applyProxyToRustMock.mockRejectedValue(new Error("rust down"))
+    await act(async () => {
+      await useSettingsStore.getState().save({ networkProxy: { mode: "manual" } as never })
+    })
+    expect(dispatchDiagnosticMock).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "proxyApplyFailed", source: "settings" })
+    )
+  })
+
+  it("stays quiet when the proxy applied cleanly", async () => {
+    dbSettings.saveSettings.mockResolvedValue(baseSettings())
+    await act(async () => {
+      await useSettingsStore.getState().save({ networkProxy: { mode: "manual" } as never })
+    })
+    expect(applyProxyToRustMock).toHaveBeenCalled()
+    expect(dispatchDiagnosticMock).not.toHaveBeenCalled()
+  })
+})
+
+describe("retryLoad", () => {
+  it("re-reads settings even though load() already ran", async () => {
+    dbSettings.getSettings.mockRejectedValueOnce(new Error("db down"))
+    await act(async () => {
+      await useSettingsStore.getState().load()
+    })
+    expect(useSettingsStore.getState().loadFailed).toBe(true)
+
+    dbSettings.getSettings.mockResolvedValue(baseSettings({ apiKey: "sk-recovered" }))
+    await act(async () => {
+      await useSettingsStore.getState().retryLoad()
+    })
+
+    const s = useSettingsStore.getState()
+    expect(s.loadFailed).toBe(false)
+    expect(s.loadError).toBeNull()
+    expect(s.settings?.apiKey).toBe("sk-recovered")
+  })
+
+  it("re-flags the failure when the retry also throws", async () => {
+    dbSettings.getSettings.mockRejectedValue(new Error("still down"))
+    await act(async () => {
+      await useSettingsStore.getState().load()
+      await useSettingsStore.getState().retryLoad()
+    })
+    const s = useSettingsStore.getState()
+    expect(s.loadFailed).toBe(true)
+    expect(s.loadError).toBe("still down")
+    expect(s.loaded).toBe(true)
+  })
+})
 
 describe("save", () => {
   it("delegates to saveSettings and writes the result back", async () => {
@@ -211,6 +407,130 @@ describe("save", () => {
     })
     expect(dbSettings.saveSettings).toHaveBeenCalledWith({ defaultModel: "claude-sonnet" })
     expect(useSettingsStore.getState().settings).toEqual(next)
+  })
+
+  it("serializes updater preference patches without losing earlier changes", async () => {
+    dbSettings.saveSettings.mockImplementation(async (patch) => baseSettings(patch))
+    useSettingsStore.setState({ settings: baseSettings() })
+
+    await act(async () => {
+      await Promise.all([
+        useSettingsStore.getState().saveUpdateSettings({ autoDownload: true }),
+        useSettingsStore.getState().saveUpdateSettings({ checkIntervalMinutes: 15 }),
+      ])
+    })
+
+    expect(dbSettings.saveSettings).toHaveBeenLastCalledWith({
+      updates: expect.objectContaining({ autoDownload: true, checkIntervalMinutes: 15 }),
+    })
+  })
+
+  it("serializes partial updater settings without losing rapid changes", async () => {
+    const initialUpdates = {
+      autoCheck: true,
+      checkIntervalMinutes: 360,
+      autoDownload: false,
+      relaunchAfterInstall: true,
+      requestTimeoutSeconds: 30,
+      useProxy: true,
+    }
+    useSettingsStore.setState({ settings: baseSettings({ updates: initialUpdates }) })
+    let releaseFirst!: () => void
+    dbSettings.saveSettings
+      .mockImplementationOnce(
+        (patch) =>
+          new Promise((resolve) => {
+            releaseFirst = () => resolve(baseSettings(patch))
+          })
+      )
+      .mockImplementationOnce(async (patch) => baseSettings(patch))
+
+    const first = useSettingsStore.getState().saveUpdateSettings({ autoDownload: true })
+    const second = useSettingsStore.getState().saveUpdateSettings({ useProxy: false })
+    for (
+      let attempt = 0;
+      attempt < 5 && dbSettings.saveSettings.mock.calls.length === 0;
+      attempt++
+    ) {
+      await Promise.resolve()
+    }
+    expect(dbSettings.saveSettings).toHaveBeenCalledTimes(1)
+
+    releaseFirst()
+    await first
+    await second
+
+    expect(dbSettings.saveSettings).toHaveBeenNthCalledWith(1, {
+      updates: { ...initialUpdates, autoDownload: true },
+    })
+    expect(dbSettings.saveSettings).toHaveBeenNthCalledWith(2, {
+      updates: { ...initialUpdates, autoDownload: true, useProxy: false },
+    })
+  })
+
+  it("continues the updater settings queue after a failed write", async () => {
+    const initialUpdates = {
+      autoCheck: true,
+      checkIntervalMinutes: 360,
+      autoDownload: false,
+      relaunchAfterInstall: true,
+      requestTimeoutSeconds: 30,
+      useProxy: true,
+    }
+    useSettingsStore.setState({ settings: baseSettings({ updates: initialUpdates }) })
+    dbSettings.saveSettings
+      .mockRejectedValueOnce(new Error("db unavailable"))
+      .mockImplementationOnce(async (patch) => baseSettings(patch))
+
+    await expect(
+      useSettingsStore.getState().saveUpdateSettings({ autoDownload: true })
+    ).rejects.toThrow("db unavailable")
+    await expect(
+      useSettingsStore.getState().saveUpdateSettings({ useProxy: false })
+    ).resolves.toBeUndefined()
+
+    expect(dbSettings.saveSettings).toHaveBeenLastCalledWith({
+      updates: { ...initialUpdates, useProxy: false },
+    })
+  })
+})
+
+// ---- resetSettings ----
+
+describe("resetSettings", () => {
+  it("resets all preferences via save, keeping secrets/identity out of the patch", async () => {
+    dbSettings.saveSettings.mockResolvedValue(baseSettings({ theme: "system" }))
+    await act(async () => {
+      await useSettingsStore.getState().resetSettings()
+    })
+    const patch = dbSettings.saveSettings.mock.calls.at(-1)?.[0] as Record<string, unknown>
+    expect(patch).not.toHaveProperty("apiKey")
+    expect(patch).not.toHaveProperty("apiBaseUrl")
+    expect(patch).not.toHaveProperty("id")
+    expect(patch).not.toHaveProperty("installUuid")
+    expect(patch.theme).toBe("system")
+  })
+
+  it("resets just the given keys when scoped", async () => {
+    dbSettings.saveSettings.mockResolvedValue(baseSettings({}))
+    await act(async () => {
+      await useSettingsStore.getState().resetSettings(["theme"])
+    })
+    expect(dbSettings.saveSettings).toHaveBeenLastCalledWith({ theme: "system" })
+  })
+})
+
+// ---- setPluginSecurityPosture ----
+
+describe("setPluginSecurityPosture", () => {
+  it("persists the posture and writes the result back", async () => {
+    const next = baseSettings({ pluginSecurityPosture: "strict" })
+    dbSettings.saveSettings.mockResolvedValue(next)
+    await act(async () => {
+      await useSettingsStore.getState().setPluginSecurityPosture("strict")
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({ pluginSecurityPosture: "strict" })
+    expect(useSettingsStore.getState().settings?.pluginSecurityPosture).toBe("strict")
   })
 })
 
@@ -263,6 +583,7 @@ describe("setBuiltinToolEnabled", () => {
     })
     expect(dbSettings.saveSettings).toHaveBeenCalledWith({
       builtinTools: {
+        coreFiles: true,
         fileExtras: true,
         git: true,
         process: true,
@@ -270,6 +591,10 @@ describe("setBuiltinToolEnabled", () => {
         shellAdvanced: false,
         terminalRepl: false,
         lsp: false,
+        astGrep: false,
+        codeGraph: false,
+        dependencyResearch: false,
+        webclone: false,
       },
     })
     expect(useSettingsStore.getState().settings?.builtinTools.process).toBe(true)
@@ -299,6 +624,7 @@ describe("setBuiltinToolEnabled", () => {
     })
     expect(dbSettings.saveSettings).toHaveBeenCalledWith({
       builtinTools: {
+        coreFiles: true,
         fileExtras: true,
         git: true,
         process: false,
@@ -306,6 +632,10 @@ describe("setBuiltinToolEnabled", () => {
         shellAdvanced: true,
         terminalRepl: false,
         lsp: false,
+        astGrep: false,
+        codeGraph: false,
+        dependencyResearch: false,
+        webclone: false,
       },
     })
   })
@@ -328,6 +658,134 @@ describe("setBuiltinToolEnabled", () => {
     })
     expect(dbSettings.getSettings).toHaveBeenCalled()
     expect(dbSettings.saveSettings).toHaveBeenCalled()
+  })
+})
+
+// ---- setWebToolsEnabled ----
+
+describe("setWebToolsEnabled", () => {
+  beforeEach(() => {
+    useSettingsStore.setState({ settings: baseSettings(), loaded: true })
+  })
+
+  it("persists the web tools flag and writes the result back", async () => {
+    const after = baseSettings({ webTools: { enabled: false } })
+    dbSettings.saveSettings.mockResolvedValue(after)
+    await act(async () => {
+      await useSettingsStore.getState().setWebToolsEnabled(false)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({ webTools: { enabled: false } })
+    expect(useSettingsStore.getState().settings?.webTools?.enabled).toBe(false)
+  })
+
+  it("preserves nativeOnAnthropic when toggling enabled", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({ webTools: { enabled: true, nativeOnAnthropic: true } }),
+      loaded: true,
+    })
+    dbSettings.saveSettings.mockImplementation(async (patch) => baseSettings(patch))
+    await act(async () => {
+      await useSettingsStore.getState().setWebToolsEnabled(false)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      webTools: { enabled: false, nativeOnAnthropic: true },
+    })
+  })
+})
+
+// ---- setWebToolsNativeOnAnthropic ----
+
+describe("setWebToolsNativeOnAnthropic", () => {
+  beforeEach(() => {
+    useSettingsStore.setState({ settings: baseSettings(), loaded: true })
+  })
+
+  it("persists the flag while keeping web tools enabled", async () => {
+    dbSettings.saveSettings.mockImplementation(async (patch) => baseSettings(patch))
+    await act(async () => {
+      await useSettingsStore.getState().setWebToolsNativeOnAnthropic(true)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      webTools: { enabled: true, nativeOnAnthropic: true },
+    })
+    expect(useSettingsStore.getState().settings?.webTools?.nativeOnAnthropic).toBe(true)
+  })
+})
+
+// ---- setWebToolsAllowPrivateHosts / setWebToolsAlwaysDistill ----
+
+describe("setWebToolsAllowPrivateHosts / setWebToolsAlwaysDistill", () => {
+  beforeEach(() => {
+    useSettingsStore.setState({
+      settings: baseSettings({ webTools: { enabled: true, nativeOnAnthropic: true } }),
+      loaded: true,
+    })
+    dbSettings.saveSettings.mockImplementation(async (patch) => baseSettings(patch))
+  })
+
+  it("persists allowPrivateHosts while preserving other web-tools flags", async () => {
+    await act(async () => {
+      await useSettingsStore.getState().setWebToolsAllowPrivateHosts(true)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      webTools: { enabled: true, nativeOnAnthropic: true, allowPrivateHosts: true },
+    })
+    expect(useSettingsStore.getState().settings?.webTools?.allowPrivateHosts).toBe(true)
+  })
+
+  it("persists alwaysDistill while preserving other web-tools flags", async () => {
+    await act(async () => {
+      await useSettingsStore.getState().setWebToolsAlwaysDistill(true)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      webTools: { enabled: true, nativeOnAnthropic: true, alwaysDistill: true },
+    })
+    expect(useSettingsStore.getState().settings?.webTools?.alwaysDistill).toBe(true)
+  })
+})
+
+// ---- setSkillToolEnabled / setSlashCommandToolEnabled ----
+
+describe("self-invocation tool toggles", () => {
+  beforeEach(() => {
+    useSettingsStore.setState({ settings: baseSettings(), loaded: true })
+    dbSettings.saveSettings.mockImplementation(async (patch) => baseSettings(patch))
+  })
+
+  it("persists the Skill tool flag, preserving the other toggle", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({ selfInvokeTools: { slashCommand: true } }),
+      loaded: true,
+    })
+    await act(async () => {
+      await useSettingsStore.getState().setSkillToolEnabled(true)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      selfInvokeTools: { slashCommand: true, skill: true },
+    })
+  })
+
+  it("persists the SlashCommand tool flag", async () => {
+    await act(async () => {
+      await useSettingsStore.getState().setSlashCommandToolEnabled(true)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      selfInvokeTools: { slashCommand: true },
+    })
+    expect(useSettingsStore.getState().settings?.selfInvokeTools?.slashCommand).toBe(true)
+  })
+
+  it("persists the team-collaboration tool flag, preserving other toggles", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({ selfInvokeTools: { skill: true } }),
+      loaded: true,
+    })
+    await act(async () => {
+      await useSettingsStore.getState().setTeamCollaborationToolEnabled(true)
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      selfInvokeTools: { skill: true, teamCollaboration: true },
+    })
   })
 })
 
@@ -400,6 +858,520 @@ describe("setApiKey", () => {
       await useSettingsStore.getState().setApiKey("sk-new")
     })
     expect(console.warn).toHaveBeenCalled()
+  })
+})
+
+// ---- setProviderConfig / setDefaultProvider — Anthropic sidecar restart ----
+//
+// Regression coverage for the bug where editing a built-in provider's
+// baseURL/apiKey persisted to Dexie and pushed to the Rust ApiKeyState but
+// never restarted the sidecar — so the Anthropic native dispatcher (which
+// only reads env at process spawn) kept using the stale value indefinitely.
+
+describe("setProviderConfig — anthropic env push + debounced restart", () => {
+  beforeEach(() => {
+    jest.useFakeTimers()
+  })
+
+  afterEach(() => {
+    jest.clearAllTimers()
+    jest.useRealTimers()
+  })
+
+  it("pushes env and schedules a debounced restart when editing anthropic's baseURL as the default provider", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    ipc.setProviderEnv.mockResolvedValue(undefined)
+    ipc.restartSidecar.mockResolvedValue(undefined)
+    useSettingsStore.setState({ settings: baseSettings({ defaultProvider: "anthropic" }) })
+    dbSettings.saveSettings.mockImplementation(async (patch) =>
+      baseSettings({ defaultProvider: "anthropic", ...patch })
+    )
+
+    await act(async () => {
+      await useSettingsStore
+        .getState()
+        .setProviderConfig("anthropic", { baseURL: "https://restart-1.example.com" })
+    })
+
+    expect(ipc.setProviderEnv).toHaveBeenCalledWith(null, "https://restart-1.example.com")
+    expect(ipc.restartSidecar).not.toHaveBeenCalled()
+
+    jest.advanceTimersByTime(800)
+
+    expect(ipc.restartSidecar).toHaveBeenCalledTimes(1)
+  })
+
+  it("coalesces rapid successive edits into a single restart", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    ipc.setProviderEnv.mockResolvedValue(undefined)
+    ipc.restartSidecar.mockResolvedValue(undefined)
+    useSettingsStore.setState({ settings: baseSettings({ defaultProvider: "anthropic" }) })
+    dbSettings.saveSettings.mockImplementation(async (patch) =>
+      baseSettings({ defaultProvider: "anthropic", ...patch })
+    )
+
+    await act(async () => {
+      await useSettingsStore
+        .getState()
+        .setProviderConfig("anthropic", { baseURL: "https://coalesce-1.example.com" })
+    })
+    jest.advanceTimersByTime(400)
+    await act(async () => {
+      await useSettingsStore
+        .getState()
+        .setProviderConfig("anthropic", { baseURL: "https://coalesce-2.example.com" })
+    })
+    jest.advanceTimersByTime(400)
+    expect(ipc.restartSidecar).not.toHaveBeenCalled()
+
+    jest.advanceTimersByTime(400)
+    expect(ipc.restartSidecar).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not schedule an extra restart when the resolved (apiKey, baseURL) pair is unchanged", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    ipc.setProviderEnv.mockResolvedValue(undefined)
+    ipc.restartSidecar.mockResolvedValue(undefined)
+    useSettingsStore.setState({ settings: baseSettings({ defaultProvider: "anthropic" }) })
+    dbSettings.saveSettings.mockImplementation(async (patch) =>
+      baseSettings({ defaultProvider: "anthropic", ...patch })
+    )
+
+    await act(async () => {
+      await useSettingsStore
+        .getState()
+        .setProviderConfig("anthropic", { baseURL: "https://dedup.example.com" })
+    })
+    jest.advanceTimersByTime(800)
+    expect(ipc.restartSidecar).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      await useSettingsStore
+        .getState()
+        .setProviderConfig("anthropic", { baseURL: "https://dedup.example.com" })
+    })
+    jest.advanceTimersByTime(800)
+    expect(ipc.restartSidecar).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not schedule a redundant debounced restart after switching to anthropic when a following edit is identical", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    ipc.setProviderEnv.mockResolvedValue(undefined)
+    ipc.restartSidecar.mockResolvedValue(undefined)
+    const anthropicCfg = {
+      providerId: "anthropic",
+      enabled: true,
+      defaultModel: "",
+      apiKey: "sk-switch",
+      baseURL: "https://switch.example.com",
+    }
+    dbSettings.saveSettings.mockImplementation(async (patch) =>
+      baseSettings({
+        defaultProvider: "anthropic",
+        providerSettings: { anthropic: anthropicCfg },
+        ...patch,
+      })
+    )
+
+    // Switching the default to anthropic restarts immediately AND records the
+    // applied env via markAnthropicEnvApplied.
+    await act(async () => {
+      await useSettingsStore.getState().setDefaultProvider("anthropic")
+    })
+    expect(ipc.restartSidecar).toHaveBeenCalledTimes(1)
+
+    // A following config edit with the same (apiKey, baseURL) must NOT schedule
+    // a second (debounced) restart — the immediate one already applied it.
+    await act(async () => {
+      await useSettingsStore.getState().setProviderConfig("anthropic", {
+        apiKey: "sk-switch",
+        baseURL: "https://switch.example.com",
+      })
+    })
+    jest.advanceTimersByTime(800)
+    expect(ipc.restartSidecar).toHaveBeenCalledTimes(1)
+  })
+
+  it("does NOT push env or restart for a non-anthropic provider, even as the default", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    useSettingsStore.setState({ settings: baseSettings({ defaultProvider: "openrouter" }) })
+    dbSettings.saveSettings.mockImplementation(async (patch) =>
+      baseSettings({ defaultProvider: "openrouter", ...patch })
+    )
+
+    await act(async () => {
+      await useSettingsStore
+        .getState()
+        .setProviderConfig("openrouter", { baseURL: "https://openrouter-proxy.example.com" })
+    })
+    jest.advanceTimersByTime(800)
+
+    expect(ipc.setProviderEnv).not.toHaveBeenCalled()
+    expect(ipc.restartSidecar).not.toHaveBeenCalled()
+  })
+
+  it("does NOT push env when anthropic is edited but is not the active default provider", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    useSettingsStore.setState({ settings: baseSettings({ defaultProvider: "openrouter" }) })
+    dbSettings.saveSettings.mockImplementation(async (patch) =>
+      baseSettings({ defaultProvider: "openrouter", ...patch })
+    )
+
+    await act(async () => {
+      await useSettingsStore
+        .getState()
+        .setProviderConfig("anthropic", { baseURL: "https://not-default.example.com" })
+    })
+    jest.advanceTimersByTime(800)
+
+    expect(ipc.setProviderEnv).not.toHaveBeenCalled()
+    expect(ipc.restartSidecar).not.toHaveBeenCalled()
+  })
+
+  it("does NOT push env or restart when not in Tauri", async () => {
+    tauri.isTauri.mockReturnValue(false)
+    useSettingsStore.setState({ settings: baseSettings({ defaultProvider: "anthropic" }) })
+    dbSettings.saveSettings.mockImplementation(async (patch) =>
+      baseSettings({ defaultProvider: "anthropic", ...patch })
+    )
+
+    await act(async () => {
+      await useSettingsStore
+        .getState()
+        .setProviderConfig("anthropic", { baseURL: "https://web-mode.example.com" })
+    })
+    jest.advanceTimersByTime(800)
+
+    expect(ipc.setProviderEnv).not.toHaveBeenCalled()
+    expect(ipc.restartSidecar).not.toHaveBeenCalled()
+  })
+
+  it("does NOT push env when the patch touches neither apiKey nor baseURL", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    useSettingsStore.setState({ settings: baseSettings({ defaultProvider: "anthropic" }) })
+    dbSettings.saveSettings.mockImplementation(async (patch) =>
+      baseSettings({ defaultProvider: "anthropic", ...patch })
+    )
+
+    await act(async () => {
+      await useSettingsStore.getState().setProviderConfig("anthropic", { defaultModel: "opus" })
+    })
+    jest.advanceTimersByTime(800)
+
+    expect(ipc.setProviderEnv).not.toHaveBeenCalled()
+    expect(ipc.restartSidecar).not.toHaveBeenCalled()
+  })
+})
+
+describe("provider mutation persistence", () => {
+  it("updates provider UI preferences optimistically while persistence is pending", async () => {
+    const initial = baseSettings({
+      providerUIPreferences: { statusFilter: "all", sortBy: "name" },
+    })
+    useSettingsStore.setState({ settings: initial })
+    let resolveWrite!: () => void
+    dbSettings.saveSettings.mockImplementationOnce(
+      (patch) =>
+        new Promise((resolve) => {
+          resolveWrite = () => resolve(baseSettings({ ...initial, ...patch }))
+        })
+    )
+
+    const pending = useSettingsStore.getState().setProviderUIPreferences({ statusFilter: "error" })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(useSettingsStore.getState().providerUIPreferences.statusFilter).toBe("error")
+
+    resolveWrite()
+    await pending
+  })
+
+  it("rolls back optimistic provider UI preferences when persistence fails", async () => {
+    const initial = baseSettings({
+      providerUIPreferences: { statusFilter: "all", sortBy: "name" },
+    })
+    useSettingsStore.setState({ settings: initial })
+    dbSettings.saveSettings.mockRejectedValueOnce(new Error("db unavailable"))
+
+    await expect(
+      useSettingsStore.getState().setProviderUIPreferences({ statusFilter: "error" })
+    ).rejects.toThrow("db unavailable")
+
+    expect(useSettingsStore.getState().providerUIPreferences.statusFilter).toBe("all")
+    expect(useSettingsStore.getState().settings?.providerUIPreferences?.statusFilter).toBe("all")
+  })
+
+  it("serializes rapid provider patches without losing fields from an earlier write", async () => {
+    tauri.isTauri.mockReturnValue(false)
+    useSettingsStore.setState({
+      settings: baseSettings({
+        providerSettings: {
+          openai: {
+            providerId: "openai",
+            enabled: true,
+            defaultModel: "gpt-4.1",
+          },
+        },
+      }),
+    })
+
+    let releaseFirst!: () => void
+    dbSettings.saveSettings
+      .mockImplementationOnce(
+        (patch) =>
+          new Promise((resolve) => {
+            releaseFirst = () => resolve(baseSettings(patch))
+          })
+      )
+      .mockImplementationOnce(async (patch) => baseSettings(patch))
+
+    const first = useSettingsStore.getState().setProviderConfig("openai", {
+      apiKey: "sk-new",
+    })
+    const second = useSettingsStore.getState().setProviderConfig("openai", {
+      baseURL: "https://proxy.example.com/v1",
+    })
+
+    for (
+      let attempt = 0;
+      attempt < 5 && dbSettings.saveSettings.mock.calls.length === 0;
+      attempt++
+    ) {
+      await Promise.resolve()
+    }
+    expect(dbSettings.saveSettings).toHaveBeenCalledTimes(1)
+
+    releaseFirst()
+    await Promise.all([first, second])
+
+    expect(dbSettings.saveSettings).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        providerSettings: expect.objectContaining({
+          openai: expect.objectContaining({
+            apiKey: "sk-new",
+            baseURL: "https://proxy.example.com/v1",
+          }),
+        }),
+      })
+    )
+  })
+
+  it("continues the provider mutation queue after a failed write", async () => {
+    tauri.isTauri.mockReturnValue(false)
+    useSettingsStore.setState({ settings: baseSettings({ providerSettings: {} }) })
+    dbSettings.saveSettings
+      .mockRejectedValueOnce(new Error("db unavailable"))
+      .mockImplementationOnce(async (patch) => baseSettings(patch))
+
+    await expect(
+      useSettingsStore.getState().setProviderConfig("openai", { apiKey: "lost" })
+    ).rejects.toThrow("db unavailable")
+    await expect(
+      useSettingsStore.getState().setProviderConfig("openai", { apiKey: "saved" })
+    ).resolves.toBeUndefined()
+
+    expect(dbSettings.saveSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        providerSettings: expect.objectContaining({
+          openai: expect.objectContaining({ apiKey: "saved" }),
+        }),
+      })
+    )
+  })
+
+  it("removes dangling default, routing, and UI references with a custom provider", async () => {
+    tauri.isTauri.mockReturnValue(false)
+    useSettingsStore.setState({
+      settings: baseSettings({
+        defaultProvider: "custom-gateway",
+        defaultModel: "custom-model",
+        providerSettings: {
+          openai: {
+            providerId: "openai",
+            enabled: true,
+            defaultModel: "gpt-4.1",
+          },
+        },
+        customProviders: [
+          {
+            id: "custom-gateway",
+            providerId: "custom-gateway",
+            isCustom: true,
+            name: "Custom Gateway",
+            customName: "Custom Gateway",
+            baseURL: "https://gateway.example.com/v1",
+            apiProtocol: "openai",
+            customModels: ["custom-model"],
+            models: ["custom-model"],
+            defaultModel: "custom-model",
+            enabled: true,
+          },
+        ],
+        modelMappings: [
+          {
+            id: "mixed",
+            alias: "balanced",
+            providers: [
+              { providerId: "custom-gateway", modelId: "custom-model" },
+              { providerId: "openai", modelId: "gpt-4.1" },
+            ],
+            distribution: "priority",
+            enabled: true,
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ],
+        providerUIPreferences: {
+          selectedProviderId: "custom-gateway",
+          comparisonProviderIds: ["custom-gateway", "openai"],
+        },
+      }),
+    })
+    dbSettings.saveSettings.mockImplementation(async (patch) =>
+      baseSettings({
+        ...useSettingsStore.getState().settings,
+        ...patch,
+      })
+    )
+
+    await useSettingsStore.getState().removeCustomProvider("custom-gateway")
+
+    expect(dbSettings.saveSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        customProviders: [],
+        defaultProvider: "openai",
+        defaultModel: "gpt-4.1",
+        modelMappings: [
+          expect.objectContaining({
+            providers: [{ providerId: "openai", modelId: "gpt-4.1" }],
+          }),
+        ],
+        providerUIPreferences: expect.objectContaining({
+          selectedProviderId: undefined,
+          comparisonProviderIds: ["openai"],
+        }),
+      })
+    )
+  })
+})
+
+describe("setDefaultProvider — anthropic env push + immediate restart", () => {
+  it("pushes env and restarts immediately when switching the default provider to anthropic", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    ipc.setProviderEnv.mockResolvedValue(undefined)
+    ipc.restartSidecar.mockResolvedValue(undefined)
+    dbSettings.saveSettings.mockImplementation(async (patch) =>
+      baseSettings({
+        providerSettings: {
+          anthropic: {
+            providerId: "anthropic",
+            enabled: true,
+            defaultModel: "",
+            apiKey: "sk-anthropic",
+            baseURL: "https://proxy.example.com",
+          },
+        },
+        ...patch,
+      })
+    )
+
+    await act(async () => {
+      await useSettingsStore.getState().setDefaultProvider("anthropic")
+    })
+
+    expect(ipc.setProviderEnv).toHaveBeenCalledWith("sk-anthropic", "https://proxy.example.com")
+    expect(ipc.restartSidecar).toHaveBeenCalledTimes(1)
+  })
+
+  it("does NOT push env or restart when switching the default provider to a non-anthropic provider", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    dbSettings.saveSettings.mockImplementation(async (patch) => baseSettings({ ...patch }))
+
+    await act(async () => {
+      await useSettingsStore.getState().setDefaultProvider("openrouter")
+    })
+
+    expect(ipc.setProviderEnv).not.toHaveBeenCalled()
+    expect(ipc.restartSidecar).not.toHaveBeenCalled()
+  })
+
+  it("does NOT push env or restart when not in Tauri", async () => {
+    tauri.isTauri.mockReturnValue(false)
+    dbSettings.saveSettings.mockImplementation(async (patch) => baseSettings({ ...patch }))
+
+    await act(async () => {
+      await useSettingsStore.getState().setDefaultProvider("anthropic")
+    })
+
+    expect(ipc.setProviderEnv).not.toHaveBeenCalled()
+    expect(ipc.restartSidecar).not.toHaveBeenCalled()
+  })
+
+  it("warns when setProviderEnv rejects", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    ipc.setProviderEnv.mockRejectedValue(new Error("ipc gone"))
+    dbSettings.saveSettings.mockImplementation(async (patch) => baseSettings({ ...patch }))
+
+    await act(async () => {
+      await useSettingsStore.getState().setDefaultProvider("anthropic")
+    })
+
+    expect(console.warn).toHaveBeenCalled()
+    expect(ipc.restartSidecar).not.toHaveBeenCalled()
+  })
+})
+
+// ---- setDefaultProvider — defaultModel pairing ----
+//
+// Switching the default provider must keep the (defaultModel, defaultProvider)
+// pair coherent: a stale model from the previous provider would otherwise be
+// sent to the new provider's base URL on the next turn.
+
+describe("setDefaultProvider — defaultModel sync", () => {
+  it("rewrites a foreign defaultModel to the new provider's configured default", async () => {
+    tauri.isTauri.mockReturnValue(false)
+    useSettingsStore.setState({
+      settings: baseSettings({
+        defaultProvider: "openai",
+        defaultModel: "gpt-4o",
+        providerSettings: {
+          deepseek: { providerId: "deepseek", enabled: true, defaultModel: "deepseek-reasoner" },
+        },
+      } as never),
+    })
+    dbSettings.saveSettings.mockImplementation(async (patch) => baseSettings({ ...patch }))
+
+    await act(async () => {
+      await useSettingsStore.getState().setDefaultProvider("deepseek")
+    })
+
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ defaultProvider: "deepseek", defaultModel: "deepseek-reasoner" })
+    )
+  })
+
+  it("keeps the current defaultModel when the new provider can serve it", async () => {
+    tauri.isTauri.mockReturnValue(false)
+    useSettingsStore.setState({
+      settings: baseSettings({
+        defaultProvider: "openai",
+        defaultModel: "deepseek-chat",
+        providerSettings: {
+          deepseek: { providerId: "deepseek", enabled: true, enabledModels: ["deepseek-chat"] },
+        },
+      } as never),
+    })
+    dbSettings.saveSettings.mockImplementation(async (patch) => baseSettings({ ...patch }))
+
+    await act(async () => {
+      await useSettingsStore.getState().setDefaultProvider("deepseek")
+    })
+
+    const patch = dbSettings.saveSettings.mock.calls.at(-1)?.[0] as Record<string, unknown>
+    expect(patch.defaultProvider).toBe("deepseek")
+    expect("defaultModel" in patch).toBe(false)
   })
 })
 
@@ -489,6 +1461,70 @@ describe("resolveSkillBundleMirrors", () => {
         baseSettings({ skillBundleMirrors: { claude: false, codex: false } })
       )
     ).toEqual({ claude: false, codex: false })
+  })
+})
+
+// ---- Skill panel prefs ----
+
+describe("setSkillPanelPrefs", () => {
+  it("persists a partial patch when no prior value exists", async () => {
+    useSettingsStore.setState({ settings: baseSettings(), loaded: true })
+    dbSettings.saveSettings.mockResolvedValue(baseSettings())
+    await act(async () => {
+      await useSettingsStore.getState().setSkillPanelPrefs({ density: "compact", viewMode: "grid" })
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      skillPanelPrefs: { density: "compact", viewMode: "grid" },
+    })
+  })
+
+  it("merges over an existing partial rather than replacing it", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({ skillPanelPrefs: { density: "compact", showTags: true } }),
+      loaded: true,
+    })
+    dbSettings.saveSettings.mockResolvedValue(baseSettings())
+    await act(async () => {
+      await useSettingsStore
+        .getState()
+        .setSkillPanelPrefs({ showTags: false, autoEnableNew: false })
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      skillPanelPrefs: { density: "compact", showTags: false, autoEnableNew: false },
+    })
+  })
+})
+
+describe("setLastSkillView", () => {
+  it("merges over the existing last-view snapshot", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({ lastSkillView: { tab: "browse", sort: "name" } }),
+      loaded: true,
+    })
+    dbSettings.saveSettings.mockResolvedValue(baseSettings())
+    await act(async () => {
+      await useSettingsStore.getState().setLastSkillView({ sort: "usage", tag: "yaml" })
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      lastSkillView: { tab: "browse", sort: "usage", tag: "yaml" },
+    })
+  })
+})
+
+describe("resolveSkillPanelPrefs (re-export)", () => {
+  it("applies defaults when settings has no prefs", async () => {
+    const { resolveSkillPanelPrefs } = await import("./settings-store")
+    const resolved = resolveSkillPanelPrefs(baseSettings().skillPanelPrefs)
+    expect(resolved.density).toBe("comfortable")
+    expect(resolved.autoEnableNew).toBe(true)
+    expect(resolved.showDescription).toBe(true)
+  })
+
+  it("honors stored overrides", async () => {
+    const { resolveSkillPanelPrefs } = await import("./settings-store")
+    const resolved = resolveSkillPanelPrefs({ density: "compact", enabledWarnThreshold: 5 })
+    expect(resolved.density).toBe("compact")
+    expect(resolved.enabledWarnThreshold).toBe(5)
   })
 })
 
@@ -954,6 +1990,59 @@ describe("appearance setters", () => {
     })
   })
 
+  it("setActivePluginTheme sets the plugin pointer, nulls the custom one, and emits", () => {
+    useSettingsStore.setState({ settings: baseSettings({ activeCustomThemeId: "ct-1" }) })
+    dbSettings.saveSettings.mockResolvedValue(baseSettings())
+    act(() => {
+      useSettingsStore.getState().setActivePluginTheme("demo.neon")
+    })
+    const s = useSettingsStore.getState()
+    expect(s.settings?.activePluginThemeId).toBe("demo.neon")
+    expect(s.settings?.activeCustomThemeId).toBeNull()
+    // Flat projection kept in sync by the `set` wrapper.
+    expect(s.activePluginThemeId).toBe("demo.neon")
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      activePluginThemeId: "demo.neon",
+      activeCustomThemeId: null,
+    })
+    expect(mockedEmit).toHaveBeenCalledWith(messageBus.SystemEvents.THEME_CHANGED, {
+      activePluginThemeId: "demo.neon",
+    })
+  })
+
+  it("setAccentColor persists the override and emits THEME_CHANGED", async () => {
+    useSettingsStore.setState({ settings: baseSettings() })
+    dbSettings.saveSettings.mockImplementation(async (p) => baseSettings(p))
+    await act(async () => {
+      await useSettingsStore.getState().setAccentColor("#ff0000")
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({ accentColor: "#ff0000" })
+    expect(useSettingsStore.getState().accentColor).toBe("#ff0000")
+    expect(mockedEmit).toHaveBeenCalledWith(messageBus.SystemEvents.THEME_CHANGED, {
+      accentColor: "#ff0000",
+    })
+  })
+
+  it("setAccentColor(null) clears the override", async () => {
+    useSettingsStore.setState({ settings: baseSettings({ accentColor: "#ff0000" }) })
+    dbSettings.saveSettings.mockImplementation(async (p) => baseSettings(p))
+    await act(async () => {
+      await useSettingsStore.getState().setAccentColor(null)
+    })
+    expect(useSettingsStore.getState().accentColor).toBeNull()
+  })
+
+  it("setActiveCustomTheme nulls a live plugin theme pointer (mutual exclusion)", () => {
+    useSettingsStore.setState({ settings: baseSettings({ activePluginThemeId: "demo.neon" }) })
+    dbSettings.saveSettings.mockResolvedValue(baseSettings())
+    act(() => {
+      useSettingsStore.getState().setActiveCustomTheme("ct-1")
+    })
+    const s = useSettingsStore.getState()
+    expect(s.settings?.activeCustomThemeId).toBe("ct-1")
+    expect(s.settings?.activePluginThemeId).toBeNull()
+  })
+
   it("addWallpaper ignores duplicates by id", async () => {
     const existing = wp("a")
     useSettingsStore.setState({ settings: baseSettings({ wallpapers: [existing] }) })
@@ -1245,5 +2334,200 @@ describe("repairImportedVscodeThemes", () => {
     })
     const out = repairImportedVscodeThemes(s)
     expect(out).toBe(s)
+  })
+})
+
+// ---- Alias routing actions ----
+
+describe("routing actions", () => {
+  const mapping = (id: string, alias: string) => ({
+    id,
+    alias,
+    providers: [{ providerId: "openai", modelId: "gpt-4o" }],
+    distribution: "priority" as const,
+    enabled: true,
+    createdAt: 1,
+    updatedAt: 1,
+  })
+
+  beforeEach(() => {
+    dbSettings.saveSettings.mockImplementation(async (p: Partial<AppSettings>) =>
+      baseSettings({ ...(useSettingsStore.getState().settings ?? {}), ...p })
+    )
+  })
+
+  it("setRoutingConfig merges the patch over the current (or default) config", async () => {
+    useSettingsStore.setState({ settings: baseSettings() })
+    await act(async () => {
+      await useSettingsStore.getState().setRoutingConfig({ strategy: "cost" })
+    })
+    expect(dbSettings.saveSettings).toHaveBeenCalledWith({
+      routingConfig: expect.objectContaining({ strategy: "cost", maxFallbackAttempts: 3 }),
+    })
+  })
+
+  it("upsertModelMapping appends a new mapping and stamps updatedAt", async () => {
+    useSettingsStore.setState({ settings: baseSettings() })
+    await act(async () => {
+      await useSettingsStore.getState().upsertModelMapping(mapping("m1", "fast"))
+    })
+    const saved = dbSettings.saveSettings.mock.calls[0][0].modelMappings
+    expect(saved).toHaveLength(1)
+    expect(saved[0].alias).toBe("fast")
+    expect(saved[0].updatedAt).toBeGreaterThan(1)
+  })
+
+  it("upsertModelMapping replaces an existing mapping by id", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({ modelMappings: [mapping("m1", "fast"), mapping("m2", "smart")] }),
+    })
+    await act(async () => {
+      await useSettingsStore.getState().upsertModelMapping({ ...mapping("m1", "faster") })
+    })
+    const saved = dbSettings.saveSettings.mock.calls[0][0].modelMappings
+    expect(saved).toHaveLength(2)
+    expect(saved.find((m: { id: string }) => m.id === "m1")?.alias).toBe("faster")
+  })
+
+  it("removeModelMapping drops by id", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({ modelMappings: [mapping("m1", "fast"), mapping("m2", "smart")] }),
+    })
+    await act(async () => {
+      await useSettingsStore.getState().removeModelMapping("m1")
+    })
+    const saved = dbSettings.saveSettings.mock.calls[0][0].modelMappings
+    expect(saved.map((m: { id: string }) => m.id)).toEqual(["m2"])
+  })
+
+  it("activateRoutingPreset(merge) snapshots, adapts to enabled providers, and merges by alias", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({
+        modelMappings: [mapping("m1", "fast"), mapping("m2", "custom-alias")],
+        providerSettings: {
+          deepseek: { providerId: "deepseek", enabled: true, defaultModel: "" },
+          groq: { providerId: "groq", enabled: false, defaultModel: "" },
+        },
+      }),
+    })
+    await act(async () => {
+      await useSettingsStore.getState().activateRoutingPreset("budget", "merge")
+    })
+    const saved = dbSettings.saveSettings.mock.calls[0][0]
+    // Snapshot captured for revert.
+    expect(saved.routingPresets.activePresetId).toBe("preset-budget")
+    expect(saved.routingPresets.preActivationSnapshot.mappings).toHaveLength(2)
+    // Strategy comes from the preset.
+    expect(saved.routingConfig.strategy).toBe("cost")
+    // The user's non-preset alias survives a merge; the preset's "fast"
+    // replaces the user's "fast".
+    const aliases = saved.modelMappings.map((m: { alias: string }) => m.alias)
+    expect(aliases).toContain("custom-alias")
+    expect(aliases.filter((a: string) => a === "fast")).toHaveLength(1)
+    // groq is disabled -> no groq entries survive adaptation (deepseek +
+    // always-enabled anthropic remain eligible).
+    const providers = saved.modelMappings.flatMap((m: { providers: { providerId: string }[] }) =>
+      m.providers.map((p) => p.providerId)
+    )
+    expect(providers).not.toContain("groq")
+  })
+
+  it("activateRoutingPreset(overwrite) replaces the whole mapping list", async () => {
+    useSettingsStore.setState({
+      settings: baseSettings({
+        modelMappings: [mapping("m2", "custom-alias")],
+        providerSettings: {
+          deepseek: { providerId: "deepseek", enabled: true, defaultModel: "" },
+        },
+      }),
+    })
+    await act(async () => {
+      await useSettingsStore.getState().activateRoutingPreset("budget", "overwrite")
+    })
+    const saved = dbSettings.saveSettings.mock.calls[0][0]
+    expect(saved.modelMappings.map((m: { alias: string }) => m.alias)).not.toContain("custom-alias")
+  })
+
+  it("revertRoutingPreset restores the snapshot and clears activation state", async () => {
+    const original = [mapping("m1", "fast")]
+    useSettingsStore.setState({
+      settings: baseSettings({
+        modelMappings: [mapping("p1", "preset-thing")],
+        routingPresets: {
+          customPresets: [],
+          activePresetId: "preset-budget",
+          preActivationSnapshot: {
+            strategy: "balanced",
+            mappings: original,
+            routingConfig: {
+              strategy: "balanced",
+              allowPerRequestOverride: true,
+              providerConstraints: [],
+              requestTimeoutMs: 30000,
+              maxFallbackAttempts: 3,
+            },
+            timestamp: 1,
+          },
+        },
+      }),
+    })
+    await act(async () => {
+      await useSettingsStore.getState().revertRoutingPreset()
+    })
+    const saved = dbSettings.saveSettings.mock.calls[0][0]
+    expect(saved.modelMappings).toEqual(original)
+    expect(saved.routingPresets.activePresetId).toBeNull()
+    expect(saved.routingPresets.preActivationSnapshot).toBeNull()
+  })
+
+  it("revertRoutingPreset is a no-op without a snapshot", async () => {
+    useSettingsStore.setState({ settings: baseSettings() })
+    await act(async () => {
+      await useSettingsStore.getState().revertRoutingPreset()
+    })
+    expect(dbSettings.saveSettings).not.toHaveBeenCalled()
+  })
+
+  it("activateRoutingPreset is a no-op for an unknown preset id", async () => {
+    useSettingsStore.setState({ settings: baseSettings() })
+    await act(async () => {
+      await useSettingsStore.getState().activateRoutingPreset("nope" as never, "merge")
+    })
+    expect(dbSettings.saveSettings).not.toHaveBeenCalled()
+  })
+})
+
+// ---- plugin bus mirroring ----
+
+describe("plugin-facing setters emit on the message bus", () => {
+  beforeEach(() => {
+    dbSettings.saveSettings.mockResolvedValue(baseSettings())
+  })
+
+  it("setTheme emits THEME_CHANGED", async () => {
+    await act(async () => {
+      await useSettingsStore.getState().setTheme("dark")
+    })
+    expect(mockedEmit).toHaveBeenCalledWith(messageBus.SystemEvents.THEME_CHANGED, {
+      theme: "dark",
+    })
+  })
+
+  it("setColorTheme emits THEME_CHANGED with the preset", async () => {
+    await act(async () => {
+      await useSettingsStore.getState().setColorTheme("ocean" as never)
+    })
+    expect(mockedEmit).toHaveBeenCalledWith(messageBus.SystemEvents.THEME_CHANGED, {
+      colorTheme: "ocean",
+    })
+  })
+
+  it("setLanguage emits SETTINGS_CHANGED", async () => {
+    await act(async () => {
+      await useSettingsStore.getState().setLanguage("zh-CN" as never)
+    })
+    expect(mockedEmit).toHaveBeenCalledWith(messageBus.SystemEvents.SETTINGS_CHANGED, {
+      language: "zh-CN",
+    })
   })
 })

@@ -47,7 +47,15 @@ export function parseKeyEvent(event: KeyboardEvent): Chord {
   if (event.altKey) parts.push("Alt")
   if (event.shiftKey) parts.push("Shift")
 
-  const key = event.key.length === 1 ? event.key.toUpperCase() : event.key
+  // The Space key reports `event.key === " "`, which would normalize to an empty
+  // token; name it so chords like `ctrl+shift+space` round-trip (matching the
+  // Rust chord grammar). `+` and `_` are the Shift-variants of the `=` and `-`
+  // physical keys — fold them to the unshifted key so a chord can never contain
+  // `+` (which is also the token separator) and so e.g. Ctrl+= and Ctrl+Shift+=
+  // address the same binding, the convention VS Code uses for zoom.
+  const raw =
+    event.key === " " ? "Space" : event.key === "+" ? "=" : event.key === "_" ? "-" : event.key
+  const key = raw.length === 1 ? raw.toUpperCase() : raw
   if (!["Control", "Alt", "Shift", "Meta"].includes(key)) {
     parts.push(key)
   }
@@ -56,24 +64,58 @@ export function parseKeyEvent(event: KeyboardEvent): Chord {
 }
 
 /**
+ * `ctrl` and `meta` are folded together when a chord is captured (see
+ * `parseKeyEvent`), so on macOS both render as `⌘` — the stored chord names the
+ * platform's command modifier, not a specific physical key.
+ */
+const MAC_GLYPHS: Record<string, string> = {
+  ctrl: "⌘",
+  control: "⌘",
+  cmd: "⌘",
+  meta: "⌘",
+  super: "⌘",
+  alt: "⌥",
+  option: "⌥",
+  shift: "⇧",
+}
+
+const PC_LABELS: Record<string, string> = {
+  ctrl: "Ctrl",
+  control: "Ctrl",
+  cmd: "Win",
+  meta: "Win",
+  super: "Win",
+  alt: "Alt",
+  option: "Alt",
+  shift: "Shift",
+}
+
+function isMacPlatform(): boolean {
+  return typeof navigator !== "undefined" && navigator.platform.includes("Mac")
+}
+
+/**
  * Renders a stored chord using platform-appropriate glyphs. On macOS the
  * modifiers collapse to symbols (`⌘ ⌥ ⇧`) with no `+` separator, matching
  * the OS menu-bar convention; everywhere else the `+`-separated form is
- * kept.
+ * kept. Single-character keys are upper-cased, as both conventions write them.
+ *
+ * @param isMac Override the platform sniff. The selection-toolbar overlay has
+ *   to pass this: it renders in a window that never hydrates the app stores and
+ *   already resolves the platform itself, and two renderings of one stored
+ *   chord — `⌃` here, `⌘` in Settings — is exactly the drift this shared
+ *   implementation exists to prevent.
  */
-export function formatKeybinding(keyCombo: Chord): string {
-  const isMac = typeof navigator !== "undefined" && navigator.platform.includes("Mac")
+export function formatKeybinding(keyCombo: Chord, isMac: boolean = isMacPlatform()): string {
+  const glyphs = isMac ? MAC_GLYPHS : PC_LABELS
 
   return keyCombo
     .split("+")
     .map((key) => {
-      const lower = key.toLowerCase()
-      if (isMac) {
-        if (lower === "ctrl") return "⌘"
-        if (lower === "alt") return "⌥"
-        if (lower === "shift") return "⇧"
-      }
-      return key
+      const lower = key.trim().toLowerCase()
+      const glyph = glyphs[lower]
+      if (glyph) return glyph
+      return lower.length === 1 ? lower.toUpperCase() : key.trim()
     })
     .join(isMac ? "" : "+")
 }

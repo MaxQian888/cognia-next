@@ -83,7 +83,7 @@ describe("cognia-builtin-characters plugin", () => {
     }
   })
 
-  it("manifest declares character-pack capability + onStartup activation", () => {
+  it("manifest declares character-pack capability + startup activation", () => {
     const m = definition.manifest as unknown as Record<string, unknown>
     expect(m.id).toBe(BUILTIN_PLUGIN_ID)
     expect(m.capabilities).toContain("character-pack")

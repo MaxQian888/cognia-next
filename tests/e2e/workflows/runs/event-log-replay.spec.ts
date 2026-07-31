@@ -2,7 +2,7 @@
  * E2E: durable workflowRunEvents log replays correctly across page reload.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../../helpers/db-reset"
 import { seedAndOpenWorkflow, seedRun } from "../../helpers/seed-workflow"
 
@@ -15,7 +15,7 @@ test.describe("workflow run-detail — event log replay", () => {
   test("timeline rows survive a hard reload", async ({ page }) => {
     const wfId = await seedAndOpenWorkflow(page, "multi-step")
     const runId = await seedRun(page, wfId, "succeeded")
-    await page.goto(`/workflows/${wfId}/runs/${runId}`)
+    await page.goto(`/workflows/run?id=${wfId}&runId=${runId}`)
     const timeline = page.locator("[aria-label='Run timeline']")
     await expect(timeline).toBeVisible({ timeout: 15_000 })
     const beforeCount = await timeline.locator("[data-testid^=timeline-row-]").count()

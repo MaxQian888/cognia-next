@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Coverage for the agent-trace span CRUD + aggregator layer.
 
 import "fake-indexeddb/auto"
@@ -8,6 +9,8 @@ import {
   aggregateStatsAll,
   aggregateStatsBySession,
   bulkInsertSpans,
+  clearAllSpans,
+  countAllSpans,
   deleteSpansForSession,
   insertSpan,
   pruneOlderThan,
@@ -15,6 +18,8 @@ import {
   queryByTrace,
   queryByWindow,
   queryRecent,
+  queryRecentTraces,
+  countTraces,
 } from "./agent-traces"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
@@ -25,7 +30,9 @@ beforeEach(async () => {
   getDb()
   await whenSeeded()
   await __clearAgentTracesForTesting()
-})
+  // Cold-opening the (now high-version) Dexie schema under fake-indexeddb can
+  // exceed the default 5s hook budget on the first test — give it room.
+}, 30_000)
 
 function span(over: Partial<AgentTraceSpan>): AgentTraceSpan {
   const id = over.id ?? over.spanId ?? "span-" + Math.random().toString(36).slice(2, 10)
@@ -406,5 +413,74 @@ describe("pruneOlderThan", () => {
   it("returns 0 for non-finite or non-positive cutoff", async () => {
     expect(await pruneOlderThan(0)).toBe(0)
     expect(await pruneOlderThan(Number.NaN)).toBe(0)
+  })
+})
+
+describe("countAllSpans / clearAllSpans", () => {
+  it("counts every stored span", async () => {
+    expect(await countAllSpans()).toBe(0)
+    await bulkInsertSpans([span({ id: "a" }), span({ id: "b" })])
+    expect(await countAllSpans()).toBe(2)
+  })
+
+  it("clears all spans and returns how many were removed", async () => {
+    await bulkInsertSpans([span({ id: "a" }), span({ id: "b" }), span({ id: "c" })])
+    const removed = await clearAllSpans()
+    expect(removed).toBe(3)
+    expect(await countAllSpans()).toBe(0)
+  })
+
+  it("returns 0 when clearing an empty table", async () => {
+    expect(await clearAllSpans()).toBe(0)
+  })
+})
+
+describe("queryRecentTraces", () => {
+  /** One chatty trace (many spans) plus several quiet ones. */
+  async function seed() {
+    await bulkInsertSpans([
+      // trace-chatty: 5 spans, most recent overall
+      ...Array.from({ length: 5 }, (_, i) =>
+        span({ id: `chatty-${i}`, traceId: "trace-chatty", sessionId: "s1", startTime: 100 + i })
+      ),
+      span({ id: "q1", traceId: "trace-b", sessionId: "s2", startTime: 50 }),
+      span({ id: "q2", traceId: "trace-c", sessionId: "s3", startTime: 30 }),
+      span({ id: "q3", traceId: "trace-d", sessionId: "s4", startTime: 10 }),
+    ])
+  }
+
+  it("counts TRACES, not spans", async () => {
+    // `queryRecent(2)` returns two spans of the chatty trace, so anything that
+    // groups by trace afterwards sees a single row. This is the bug that
+    // collapsed the eval trace-analysis list.
+    await seed()
+    expect(new Set((await queryRecent(2)).map((r) => r.traceId)).size).toBe(1)
+    expect(new Set((await queryRecentTraces(2)).map((r) => r.traceId)).size).toBe(2)
+  })
+
+  it("returns every span of each selected trace, newest trace first", async () => {
+    await seed()
+    const rows = await queryRecentTraces(2)
+    expect(rows.filter((r) => r.traceId === "trace-chatty")).toHaveLength(5)
+    expect(rows.filter((r) => r.traceId === "trace-b")).toHaveLength(1)
+    expect(rows[0].traceId).toBe("trace-chatty")
+  })
+
+  it("pages by trace", async () => {
+    await seed()
+    const page2 = await queryRecentTraces(2, 2)
+    expect(new Set(page2.map((r) => r.traceId))).toEqual(new Set(["trace-c", "trace-d"]))
+  })
+
+  it("returns nothing past the end, or for a zero limit", async () => {
+    await seed()
+    expect(await queryRecentTraces(2, 99)).toEqual([])
+    expect(await queryRecentTraces(0)).toEqual([])
+  })
+
+  it("counts distinct traces", async () => {
+    expect(await countTraces()).toBe(0)
+    await seed()
+    expect(await countTraces()).toBe(4)
   })
 })

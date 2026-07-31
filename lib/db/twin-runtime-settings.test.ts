@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 
 jest.mock("@/lib/tauri", () => ({
@@ -61,6 +62,17 @@ describe("twin-runtime-settings CRUD", () => {
     expect(loaded.embedding.apiKey).toBe("")
     expect(loaded.llm.apiKey).toBe("")
     expect(loaded.storage.vectorBackend).toBe("pinecone")
+    // Older rows never wrote extraNameHints — must backfill to [] not crash.
+    expect(loaded.extraNameHints).toEqual([])
+  })
+
+  it("round-trips extraNameHints incl. CJK names", async () => {
+    await saveTwinRuntimeSettings({
+      ...DEFAULT_TWIN_RUNTIME_SETTINGS,
+      extraNameHints: ["Alice Zhang", "张伟"],
+    })
+    const loaded = await getTwinRuntimeSettings()
+    expect(loaded.extraNameHints).toEqual(["Alice Zhang", "张伟"])
   })
 
   it("ignores rows whose id doesn't match the twin-runtime key", async () => {

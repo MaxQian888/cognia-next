@@ -56,9 +56,7 @@ describe("normalizeExternalAgentValiditySnapshot — reason resolution", () => {
     })
     expect(out.canonicalReasonCode).toBe("ecosystem_documented_only")
     expect(out.canonicalReason).toBe("Use the IDE extension")
-    expect(out.recoveryHints).toEqual(
-      expect.arrayContaining(["Use the linked official product workflow for this surface."])
-    )
+    expect(out.recoveryHints).toEqual(expect.arrayContaining(["useOfficialWorkflow"]))
   })
 
   it("falls back through ecosystem.recommendedActions when limitationNote is absent", () => {
@@ -70,8 +68,40 @@ describe("normalizeExternalAgentValiditySnapshot — reason resolution", () => {
         recommendedActions: ["Click the docs link"],
       },
     })
+    // `canonicalReason` is prose by contract, so falling back to the ecosystem's
+    // first recommended action is right. `recoveryHints` are i18n key ids, so
+    // they stay keyed off the reason code — the two fields are not a pair.
     expect(out.canonicalReason).toBe("Click the docs link")
-    expect(out.recoveryHints).toEqual(["Click the docs link"])
+    expect(out.recoveryHints).toEqual(["useOfficialWorkflow", "selectLocalSurface"])
+  })
+
+  it("skips a message-reference action when reaching for a prose reason", () => {
+    // `canonicalReason` is prose by contract. A `{ id }` entry is a message
+    // key, so taking [0] blindly would put a raw id — or `[object Object]` —
+    // in front of the user.
+    const out = normalizeExternalAgentValiditySnapshot({
+      executable: false,
+      ecosystem: {
+        adapterId: "codex",
+        supportTier: "documented-only",
+        recommendedActions: [{ id: "installHintCodex" }, "Read the runbook first."],
+      },
+    })
+    expect(out.canonicalReason).toBe("Read the runbook first.")
+  })
+
+  it("falls through to the documented-only default when every action is a reference", () => {
+    const out = normalizeExternalAgentValiditySnapshot({
+      executable: false,
+      ecosystem: {
+        adapterId: "codex",
+        supportTier: "documented-only",
+        recommendedActions: [{ id: "installHintCodex" }, { id: "codexWsl2" }],
+      },
+    })
+    expect(out.canonicalReason).toBe(
+      "This official surface is documented but not directly executable in Cognia yet."
+    )
   })
 
   it("uses the documented-only fallback string when no other hint exists", () => {
@@ -99,9 +129,7 @@ describe("normalizeExternalAgentValiditySnapshot — reason resolution", () => {
     })
     expect(out.canonicalReasonCode).toBe("ecosystem_prerequisite_missing")
     expect(out.canonicalReason).toBe("Set the env var")
-    expect(out.recoveryHints).toEqual([
-      "Complete the required external-agent setup, then retry the connection.",
-    ])
+    expect(out.recoveryHints).toEqual(["completeSetupThenRetry"])
   })
 
   it("uses prerequisite.label when detail is missing", () => {
@@ -222,18 +250,18 @@ describe("normalizeExternalAgentValiditySnapshot — lifecycle stage mapping", (
 })
 
 describe("normalizeExternalAgentValiditySnapshot — recovery hints map", () => {
+  // Hints are i18n key ids, not prose: they are produced in `lib/`, which has no
+  // locale, and resolved by the renderer against `diagnostics.recoveryHint.*`.
+  // Asserting on ids is also what keeps a copy edit from breaking this suite.
   const cases: Array<[string, string]> = [
-    ["protocol_unsupported", "Switch agent protocol to ACP."],
-    ["transport_blocked", "Run Cognia in desktop (Tauri) runtime for stdio transport."],
-    ["initialization_failed", "Check ACP process command and startup arguments."],
-    ["health_check_failed", "Inspect external-agent health endpoint/logs."],
-    ["extension_unsupported", "Use operations supported by this endpoint."],
-    [
-      "session_resolution_failed",
-      "Resume with an existing session id or allow new session creation.",
-    ],
-    ["permission_denied", "Adjust permission mode or approve required actions."],
-    ["execution_failed", "Check runtime diagnostics and retry with scoped input."],
+    ["protocol_unsupported", "switchToAcp"],
+    ["transport_blocked", "useDesktopRuntime"],
+    ["initialization_failed", "checkCommandAndArgs"],
+    ["health_check_failed", "inspectHealthEndpoint"],
+    ["extension_unsupported", "useSupportedOperations"],
+    ["session_resolution_failed", "resumeWithSessionIdOrAllowNew"],
+    ["permission_denied", "adjustPermissionMode"],
+    ["execution_failed", "checkDiagnosticsAndRetry"],
   ]
 
   for (const [reason, hint] of cases) {
@@ -245,7 +273,40 @@ describe("normalizeExternalAgentValiditySnapshot — recovery hints map", () => 
     })
   }
 
-  it("prefers ecosystem.recommendedActions when present", () => {
+  it("emits only ids that the diagnostics namespace can resolve", () => {
+    // The gap this closes: a hint id with no translation would render as the
+    // raw id — the same class of leak as the untranslated reason-code badge.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const messages = require("@/i18n/messages/en.json") as {
+      diagnostics: { recoveryHint: Record<string, string> }
+    }
+    const reasons = [
+      "ecosystem_prerequisite_missing",
+      "ecosystem_documented_only",
+      "protocol_unsupported",
+      "transport_blocked",
+      "initialization_failed",
+      "health_check_failed",
+      "extension_unsupported",
+      "session_resolution_failed",
+      "permission_denied",
+      "execution_failed",
+    ]
+    const emitted = reasons.flatMap(
+      (reason) =>
+        normalizeExternalAgentValiditySnapshot({ canonicalReasonCode: reason as never })
+          .recoveryHints ?? []
+    )
+    expect(emitted.length).toBeGreaterThan(0)
+    expect(emitted.filter((id) => !(id in messages.diagnostics.recoveryHint))).toEqual([])
+  })
+
+  it("keeps recovery hints as key ids even when the ecosystem has prose advice", () => {
+    // Substituting `recommendedActions` here is what broke the localized
+    // advice: the panel resolves every hint through
+    // `t(`recoveryHint.${id}`)`, so English prose fell through that lookup and
+    // printed verbatim into a Chinese UI. The two survive as separate fields
+    // and the panel renders them on separate lines.
     const out = normalizeExternalAgentValiditySnapshot({
       canonicalReasonCode: "permission_denied",
       ecosystem: {
@@ -254,7 +315,21 @@ describe("normalizeExternalAgentValiditySnapshot — recovery hints map", () => 
         recommendedActions: ["Click here", "Or there"],
       },
     })
-    expect(out.recoveryHints).toEqual(["Click here", "Or there"])
+    expect(out.recoveryHints).toEqual(["adjustPermissionMode"])
+    expect(out.ecosystem?.recommendedActions).toEqual(["Click here", "Or there"])
+  })
+
+  it("still lets a caller override the hints outright", () => {
+    const out = normalizeExternalAgentValiditySnapshot({
+      canonicalReasonCode: "permission_denied",
+      ecosystem: {
+        adapterId: "codex",
+        supportTier: "executable",
+        recommendedActions: ["Click here"],
+      },
+      recoveryHints: ["custom"],
+    })
+    expect(out.recoveryHints).toEqual(["custom"])
   })
 
   it("respects an explicit recoveryHints override", () => {
@@ -398,15 +473,38 @@ describe("validateExternalAgentBenchmarkCapabilityMap", () => {
 })
 
 describe("createExternalAgentBenchmarkBaseline", () => {
-  it("returns the four canonical baseline entries", () => {
+  it("returns the canonical baseline entries", () => {
     const baseline = createExternalAgentBenchmarkBaseline()
-    expect(baseline.length).toBe(4)
+    expect(baseline.length).toBe(11)
     expect(baseline.map((e) => e.id)).toEqual([
       "acp-validity-canonical-projection",
       "session-extension-operation-gating",
       "routing-fallback-diagnostics-consistency",
       "session-resume-fallback-policy-deviation",
+      "codex-failure-error-event-parity",
+      "codex-session-extension-deterministic-gating",
+      "opencode-session-extension-connection-gated",
+      "a2a-surface-reachability",
+      "a2a-task-protocol-projection-scope",
+      "acp-usage-context-window-only",
+      "codex-agent-auth-env-based",
     ])
+  })
+
+  it("keeps every baseline entry valid (each gap resolved or reviewed)", () => {
+    const baseline = createExternalAgentBenchmarkBaseline()
+    const result = validateExternalAgentBenchmarkCapabilityMap(baseline)
+    expect(result.valid).toBe(true)
+    // Every entry is either a validated capability or a fully-reviewed deviation.
+    for (const entry of baseline) {
+      if (entry.status === "validated") {
+        expect(entry.evidence.length).toBeGreaterThan(0)
+      }
+      if (entry.status === "intentional-deviation") {
+        expect(entry.deviation?.rationale).toBeTruthy()
+        expect(entry.deviation?.review.reviewedBy).toBeTruthy()
+      }
+    }
   })
 
   it("uses the supplied 'now' for timestamps", () => {

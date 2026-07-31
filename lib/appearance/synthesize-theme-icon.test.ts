@@ -1,5 +1,5 @@
 import { synthesizeThemeSwatches, synthesizeThemeGradient } from "./synthesize-theme-icon"
-import type { ThemeColors } from "@/types/plugin/plugin-extended"
+import type { ThemeColors } from "@/types/plugin/plugin"
 
 const FULL: Partial<ThemeColors> = {
   background: "#111111",

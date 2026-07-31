@@ -25,6 +25,9 @@ export const ALL_PROVIDER_IDS: readonly ProviderId[] = ["anthropic", "codex", "o
 /** Which Anthropic OAuth flow the credential came from. */
 export type AnthropicAuthMode = "subscription" | "console"
 
+/** External CLI store that remains authoritative for an adopted login. */
+export type LocalCliCredentialSource = "file" | "keyring"
+
 /**
  * Anthropic PKCE credential. Mirrors `subscription::vault::AnthropicCredentialData`
  * in Rust and the v1 `SubscriptionCredential` shape we migrated from.
@@ -39,6 +42,8 @@ export interface AnthropicCredentialData {
   email?: string
   /** "pro" | "max" | "team" | "console" | other. */
   plan?: string
+  /** Present when this account follows the local Claude Code login. */
+  originalSource?: LocalCliCredentialSource
   storedAtMs: number
 }
 
@@ -54,7 +59,7 @@ export type CodexAuthMode = "chatgpt" | "api_key"
  * Account tab so the user knows whether the bearer came from their existing
  * codex-cli install or from a fresh device-code login.
  */
-export type CodexCredentialSource = "file" | "keyring" | "oauth"
+export type CodexCredentialSource = LocalCliCredentialSource | "oauth"
 
 /** Codex device-code / api-key credential. */
 export interface CodexCredentialData {
@@ -85,7 +90,10 @@ export interface CodexCredentialData {
  * (distinct from explicit paste-key Zen).
  */
 export interface OpencodeDiscoveredData {
-  /** "anthropic" | "openai" | "opencode-zen" — whitelisted sub-providers. */
+  /**
+   * "anthropic" | "openai" | "opencode" | "opencode-go" | "opencode-zen" —
+   * whitelisted sub-providers.
+   */
   subProvider: string
   /** Resolved path to the source `auth.json`. */
   authJsonPath: string
@@ -94,11 +102,20 @@ export interface OpencodeDiscoveredData {
   lastSeenAtMs: number
 }
 
-/** Phase-1 OpenCode-Zen credential — paste-key flow until OAuth lands. */
+/** OpenCode managed-plan plan tag: pay-per-request Zen or flat-rate Go. */
+export type OpencodePlan = "zen" | "go"
+
+/**
+ * OpenCode managed-subscription credential — paste-key flow until OAuth
+ * lands. Covers both the Zen and Go plans; `plan` absent means "zen"
+ * (accounts saved before the Go plan existed).
+ */
 export interface OpencodeZenData {
   accessToken: string
   /** Optional regional endpoint override. */
   baseUrl?: string
+  /** "zen" | "go". Absent = "zen". */
+  plan?: OpencodePlan
   storedAtMs: number
 }
 

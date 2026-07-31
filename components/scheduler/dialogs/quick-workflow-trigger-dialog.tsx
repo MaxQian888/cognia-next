@@ -34,7 +34,7 @@ import {
 import { TimezoneSelect } from "../timezone-select"
 import { getDb } from "@/lib/db/schema"
 import { syncWorkflowTriggers } from "@/lib/workflow/runtime/webhook-bridge"
-import type { VisualWorkflow, WorkflowNode } from "@/types/workflow/visual"
+import type { VisualWorkflow, WorkflowNode, WorkflowTriggerRow } from "@/types/workflow/visual"
 
 // Cron presets that align with the scheduler's BackupScheduleDialog visual
 // pattern — copied (not extracted) per the plan; the two call sites diverge
@@ -57,6 +57,26 @@ export interface QuickWorkflowTriggerDialogProps {
   syncFn?: (workflow: VisualWorkflow) => Promise<void>
   /** Override for the unique id generator — tests inject a deterministic one. */
   newNodeId?: () => string
+}
+
+export function createCronTriggerRow(input: {
+  triggerId: string
+  workflowId: string
+  cron: string
+  timezone: string
+  now?: number
+}): WorkflowTriggerRow {
+  const now = input.now ?? Date.now()
+  return {
+    id: input.triggerId,
+    workflowId: input.workflowId,
+    kind: "trigger.cron",
+    enabled: true,
+    cron: input.cron.trim(),
+    timezone: input.timezone,
+    createdAt: now,
+    updatedAt: now,
+  }
 }
 
 export function QuickWorkflowTriggerDialog({
@@ -142,15 +162,9 @@ export function QuickWorkflowTriggerDialog({
         nodes: [...workflow.nodes, newNode],
       }
       await realDb.workflows.put(updated)
-      await realDb.workflowTriggers.put({
-        id: triggerId,
-        workflowId,
-        kind: "trigger.cron",
-        enabled: true,
-        cron: cron.trim(),
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      })
+      await realDb.workflowTriggers.put(
+        createCronTriggerRow({ triggerId, workflowId, cron, timezone })
+      )
       await sync(updated)
       onCreated?.(workflowId, triggerId)
       onOpenChange(false)

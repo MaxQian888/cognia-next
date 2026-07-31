@@ -1,49 +1,57 @@
 name: CI/CD Pipeline
 
 # ============================================================================
-# CI/CD Pipeline Orchestrator
+# CI/CD Pipeline Orchestrator — the hot path
 # ============================================================================
-# This is the main CI/CD pipeline that orchestrates smaller, modular workflows.
-# Each workflow can also be run independently for better maintainability.
+# Runs on every push to a trunk branch and every PR. Everything here has to
+# stay fast enough that people actually wait for it.
 #
-# Workflow Structure:
-# ├── quality.yml     - Code quality & security checks (ESLint, TypeScript, audit)
-# ├── test.yml        - Test suite with coverage & Next.js build
-# ├── build-tauri.yml - Tauri desktop app builds (Windows, macOS, Linux)
-# ├── deploy.yml      - Deployment workflows (optional, disabled by default)
+# Tier model (see CI_CD.md):
+#
+#   this file (push + PR)  quality gates · jest · e2e (chromium + mobile) ·
+#                          cargo test · Next.js build
+#   nightly.yml            4-platform Tauri bundles · Tauri E2E · iOS E2E
+#   release.yml            tagged release, signed updater artifacts
+#
+# Tauri BUNDLING is deliberately not here: the 4-platform cargo release matrix
+# is the single largest wall-clock item in the repo and it is not what breaks
+# on a normal change. The Tauri crate still gets compiled on every run — the
+# `cargo-test-windows` job in test.yml builds the static export and then runs
+# `cargo test` inside src-tauri, which is a full compile of the desktop app.
+#
+# Workflow structure:
+# ├── quality.yml     - gate groups, derived from scripts/gates/check-all.mjs
+# ├── test.yml        - jest shards, coverage gate, e2e, cargo, build
+# ├── nightly.yml     - the expensive tiers, on a schedule
+# ├── build-tauri.yml - reusable Tauri build (called by nightly + release)
+# ├── deploy.yml      - deployment workflows (optional, disabled by default)
 # └── release.yml     - GitHub release creation (triggered by version tags)
 #
 # This workflow works OUT-OF-THE-BOX without requiring any secrets.
-# See CI_CD.md for detailed setup instructions for optional features.
 # ============================================================================
 
 on:
   push:
     branches:
       - master
-      - develop
+      - dev
   pull_request:
     branches:
       - master
-      - develop
+      - dev
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # Step 1: Code Quality Checks
+  # Deterministic gates, fanned out one job per group. Never blocks `test`:
+  # a lint failure should not hide a broken test.
   quality:
     name: Quality
     uses: ./.github/workflows/quality.yml
 
-  # Step 2: Test Suite & Build
+  # Jest (sharded, coverage-gated), sidecar suites, Playwright, cargo, build.
   test:
     name: Test
     uses: ./.github/workflows/test.yml
-
-  # Step 3: Build Tauri Desktop Apps (after quality & test pass)
-  build-tauri:
-    name: Build Tauri
-    needs: [quality, test]
-    uses: ./.github/workflows/build-tauri.yml

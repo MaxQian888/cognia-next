@@ -8,7 +8,14 @@
 
 "use client"
 
-import { AlertCircle, CheckCircle2, RefreshCw, ShieldOff } from "lucide-react"
+import {
+  AlertCircle,
+  CheckCircle2,
+  RefreshCw,
+  ShieldAlert,
+  ShieldCheck,
+  ShieldOff,
+} from "lucide-react"
 import { useTranslations } from "next-intl"
 
 import { Badge } from "@/components/ui/badge"
@@ -17,11 +24,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useSandboxHealth } from "@/hooks/sandbox/use-sandbox-health"
 
 import { AutomationPolicyCard } from "./automation-policy-card"
+import { CanvasCodeSandboxCard } from "./canvas-code-sandbox-card"
+import { SandboxEnableCard } from "./sandbox-enable-card"
+import { SandboxPolicyCard } from "./sandbox-policy-card"
 import { SandboxTierCard } from "./sandbox-tier-card"
+import { WorkspaceConfinementCard } from "./workspace-confinement-card"
 
 export function SandboxSection() {
   const t = useTranslations("settings.sandbox")
-  const { health, refresh, error } = useSandboxHealth()
+  const { health, refresh, error, probe, verify } = useSandboxHealth()
 
   const variant: "ok" | "setup" | "down" = error ? "down" : health.available ? "ok" : "setup"
 
@@ -67,7 +78,7 @@ export function SandboxSection() {
               </>
             )}
           </dl>
-          <div className="flex items-center gap-2 pt-2">
+          <div className="flex flex-wrap items-center gap-2 pt-2">
             <Button
               variant="outline"
               size="sm"
@@ -77,13 +88,58 @@ export function SandboxSection() {
               <RefreshCw className="size-4" aria-hidden="true" />
               {t("retryButton")}
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void verify()}
+              disabled={probe.status === "running"}
+              data-testid="sandbox-verify-button"
+            >
+              <ShieldCheck className="size-4" aria-hidden="true" />
+              {t("verifyButton")}
+            </Button>
             {variant !== "ok" && (
               <p className="text-xs text-muted-foreground">{t("strictModeNote")}</p>
             )}
           </div>
+          {probe.status !== "idle" && (
+            <div className="flex items-start gap-2 pt-1 text-xs" data-testid="sandbox-probe-result">
+              {probe.status === "ok" ? (
+                <ShieldCheck
+                  className="mt-0.5 size-4 shrink-0 text-emerald-500"
+                  aria-hidden="true"
+                />
+              ) : probe.status === "failed" ? (
+                <ShieldAlert className="mt-0.5 size-4 shrink-0 text-rose-500" aria-hidden="true" />
+              ) : (
+                <RefreshCw
+                  className="mt-0.5 size-4 shrink-0 animate-spin text-muted-foreground"
+                  aria-hidden="true"
+                />
+              )}
+              <span
+                className={
+                  probe.status === "ok"
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : probe.status === "failed"
+                      ? "text-rose-500"
+                      : "text-muted-foreground"
+                }
+              >
+                {t(`probe.${probe.status}`)}
+                {probe.status === "failed" && probe.detail ? (
+                  <span className="ml-1 font-mono text-muted-foreground">— {probe.detail}</span>
+                ) : null}
+              </span>
+            </div>
+          )}
         </CardContent>
       </Card>
+      <SandboxEnableCard />
+      <WorkspaceConfinementCard />
+      <CanvasCodeSandboxCard />
       <SandboxTierCard />
+      <SandboxPolicyCard />
       <AutomationPolicyCard />
     </div>
   )

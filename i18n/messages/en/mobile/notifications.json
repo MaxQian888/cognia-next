@@ -1,0 +1,86 @@
+{
+  "permissionCta": {
+    "description": "Cognia can notify you when a long-running task or scheduled backup needs attention.",
+    "descriptionDenied": "Notifications were denied. Open Settings → Cognia → Notifications to allow them.",
+    "enableButton": "Enable",
+    "enableInProgress": "Requesting…",
+    "settingsButton": "Open Settings",
+    "title": "Enable background reminders"
+  },
+  "preferences": {
+    "badge": "Unread badge",
+    "badgeHelp": "Show a count badge on the app icon and tab.",
+    "behaviourTitle": "Behaviour",
+    "channel": {
+      "os": "System notifications",
+      "push": "Push notifications",
+      "toast": "In-app toasts"
+    },
+    "channelHelp": {
+      "os": "Show native OS notifications.",
+      "push": "Deliver to this device when the app is closed.",
+      "toast": "Briefly pop messages inside the app."
+    },
+    "channelsHelp": "Where new notifications appear by default.",
+    "channelsTitle": "Default channels",
+    "days": "{count, plural, one {# day} other {# days}}",
+    "focusAware": "Focus-aware",
+    "focusAwareHelp": "Suppress OS alerts while you're viewing the related conversation.",
+    "gatesTitle": "Severity gates",
+    "level": {
+      "critical": "Critical",
+      "error": "Error",
+      "info": "Info",
+      "success": "Success",
+      "warning": "Warning"
+    },
+    "minOsLevel": "Minimum OS level",
+    "minOsLevelHelp": "Only fire system notifications at or above this severity.",
+    "minPushLevel": "Minimum push level",
+    "minPushLevelHelp": "Only send push notifications at or above this severity.",
+    "perSourceHelp": "Mute notifications from a specific subsystem.",
+    "perSourceTitle": "By source",
+    "quietHoursEnabled": "Quiet hours",
+    "quietHoursEnabledHelp": "Silence non-critical notifications during a daily window.",
+    "quietHoursEnd": "End time",
+    "quietHoursHelp": "Pause alerts overnight; critical notifications still come through.",
+    "quietHoursStart": "Start time",
+    "quietHoursTitle": "Do not disturb",
+    "resetDefaults": "Reset to defaults",
+    "retentionDays": "Keep for",
+    "retentionItems": "Max stored",
+    "retentionTitle": "Retention",
+    "snoozeAutoWake": "Wake on activity",
+    "snoozeAutoWakeHelp": "Re-surface a snoozed notification when related activity resumes.",
+    "sound": "Sound",
+    "soundHelp": "Play a sound for new notifications.",
+    "source": {
+      "agent-team": "Agent teams",
+      "connector": "Connectors",
+      "plugin": "Plugins",
+      "scheduler": "Scheduler",
+      "session": "Sessions",
+      "system": "System",
+      "workflow": "Workflows"
+    },
+    "sourceHelp": "Allow notifications from this source."
+  },
+  "queue": {
+    "cancel": "Cancel",
+    "cancelFailed": "Cancel failed: {message}",
+    "empty": "No notifications scheduled.",
+    "errorTitle": "Could not load notifications",
+    "loading": "Loading…",
+    "refresh": "Refresh",
+    "scheduledAt": "at {time}",
+    "title": "Scheduled notifications",
+    "unsupportedDescription": "Local notifications run on iOS and Android only.",
+    "unsupportedTitle": "Not supported on this platform"
+  },
+  "section": {
+    "description": "Background reminders for scheduled backups and long-running tasks.",
+    "queueRowDescription": "Review or cancel pending reminders.",
+    "queueRowTitle": "Scheduled notifications",
+    "title": "Notifications"
+  }
+}

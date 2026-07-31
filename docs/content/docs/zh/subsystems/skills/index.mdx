@@ -12,7 +12,7 @@ description: Cognia 中最小的可移植能力单元——在主从式工作台
   `scripts/` / `references/` / `assets/` 资源。浏览器端的事实来源是 Dexie
   （`lib/db/skills.ts`）；其余一切都是流入或流出该表的管道：一个 **bundle 导入器**
   （`lib/skills/bundle/loader.ts:65`），用于 zip / 文件夹 / OpenAI-Codex 布局；一个**双来源
-  市场**（`skills-lock.json` 注册表 + 可选的 SkillsMP API）；一个**三目标原生同步**
+  市场**（`skills-lock.json` 注册表 + skills.sh 目录）；一个**三目标原生同步**
   （`lib/skills/sync.ts:145` → `skills_install_mirrored` 写入 cognia / `~/.claude/skills` /
   `~/.agents/skills`）；以及**发送时注入器**（`lib/claude/build-options.ts:378`），它将
   已启用的技能追加到系统提示，并对它们的 `allowedTools` 取**并集**。一个独立的 ADR-0026 层级——
@@ -25,7 +25,7 @@ description: Cognia 中最小的可移植能力单元——在主从式工作台
   <Stat label="Dexie 表" value="2" hint="skills + skillResources——在 v8 引入，索引字符串直到 v72 保持不变" />
   <Stat label="Tauri 命令" value="13" hint="scan / install_mirrored / trash / registry / 远程拉取 / 安全扫描——lib/claude/ipc.ts:381-440" />
   <Stat label="导入路径" value="5" hint="markdown 文件 · zip bundle · 文件夹 · Claude Code 扫描 · 发现——skill-panel-toolbar.tsx" />
-  <Stat label="市场来源" value="2" hint="注册表（skills-lock.json，6 条目）+ SkillsMP API（通过 skillsMpBaseUrl 选择性启用）" />
+  <Stat label="市场来源" value="2" hint="注册表（skills-lock.json，6 条目）+ skills.sh 目录（匿名搜索/安装；可选的 skillsShToken 解锁排行榜）" />
   <Stat label="内置工具技能" value="40" hint="ADR-0026 层级——6 个 Lark 家族，读取/写入/破坏性，HITL 确认卡片" />
   <Stat label="安全扫描规则" value="9" hint="建议性正则扫描——src-tauri/src/skills/scanner.rs:60" />
 </StatGrid>
@@ -53,7 +53,8 @@ lib/skills/
   export-toast.ts        # 带 toast 反馈的每技能 SKILL.md 导出
   executor.ts            # buildProgressiveSkillsPrompt + executeSkill 桩
   sync.ts                # push / pull 引擎、SHA-256 指纹、3 个镜像目标
-  marketplace-*.ts       # 类型 · 注册表适配器 · SkillsMP 适配器 · 安装 · 预告
+  marketplace-*.ts       # 类型 · 注册表适配器 · skills.sh 适配器 · 安装
+  skillssh-*.ts          # skills.sh：CORS 路由 http · 多文件安装 · 更新检查 · 从 URL 安装
   bundle/                # loader · walk-zip · walk-folder · classify · parse · codex-yaml · limits
   built-in/              # ADR-0026 层级：types · registry · manifest · dispatcher · lark/（40 个技能）
 
@@ -79,7 +80,7 @@ flowchart LR
   subgraph In["流入方式"]
     WB["工作台编辑器<br/>components/skills"]
     BU["Bundle 导入<br/>zip / 文件夹 / Codex"]
-    MP["市场<br/>registry + SkillsMP"]
+    MP["市场<br/>registry + skills.sh"]
     CC["CCSwitch / Claude Code<br/>~/.claude/skills 扫描"]
     PL["插件 registerSkill<br/>叠加层注册表"]
   end
@@ -115,7 +116,7 @@ flowchart LR
 | [编写与工作台](./authoring-and-workbench) | `validate.ts` 规则、8 个类别、4 个模板、AI 辅助、主从式面板、Monaco 多文件编辑器工作区、批量操作、键盘快捷键 |
 | [Bundle 导入](./bundle-import) | 对 zip / 文件夹的 `loadBundle`、资源分类、限制（200 MB zip · 50 个资源 · 16 MB web / 2 MB 磁盘）、OpenAI-Codex `agents/openai.yaml` 附属文件、暂存对话框 |
 | [原生同步与安全](./native-sync-and-security) | SHA-256 指纹 push/pull、冲突规则、三个镜像目标 + 回收站、全部 13 个 Tauri 命令、9 规则的建议性安全扫描器 |
-| [市场](./marketplace) | `skills-lock.json` 注册表 vs SkillsMP API、按 `canonicalId` 的安装/卸载幂等性、Rust 远程拉取代理、预告 |
+| [市场](./marketplace) | `skills-lock.json` 注册表 vs skills.sh 目录、匿名搜索/下载/审计 + 可选的 token 解锁排行榜、CORS 路由传输、多文件安装 + 内容哈希、更新检测、从 URL 安装、Dexie v78 SkillsMP 迁移 |
 | [内置技能（ADR-0026）](./built-in-skills) | 带类型的工具层级：注册表、manifest 过滤链、六道门控分发器、40 个 Lark 技能、lark-cli 执行 + 认证桥、HITL 确认卡片往返 |
 | [加载与注入](./loading-and-injection) | 发送时热路径：id 收集、三重启用过滤、系统提示节区顺序、`allowedTools` **并集**、插件技能桥、容器技能 |
 | [消费面](./consumption-surfaces) | 编写器 chip、会话开关、角色编辑器、工作流节点、调度器、CCSwitch、Discover、插件、团队、移动端同步 |

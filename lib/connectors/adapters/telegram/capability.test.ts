@@ -39,7 +39,11 @@ describe("TELEGRAM_CAPS", () => {
     expect(TELEGRAM_CAPS).toContain("send.reaction")
   })
 
-  it("has exactly 15 entries (13 Phase-1 + send.a2ui + send.reaction)", () => {
-    expect(TELEGRAM_CAPS).toHaveLength(15)
+  it("includes send.emoji (implemented in serialize.ts; audited fix #14)", () => {
+    expect(TELEGRAM_CAPS).toContain("send.emoji")
+  })
+
+  it("has exactly 16 entries (13 Phase-1 + send.a2ui + send.reaction + send.emoji)", () => {
+    expect(TELEGRAM_CAPS).toHaveLength(16)
   })
 })

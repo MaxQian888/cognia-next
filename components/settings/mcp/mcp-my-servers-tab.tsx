@@ -4,9 +4,11 @@ import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { toast } from "sonner"
-import { LayoutGridIcon, ListIcon, PlusIcon } from "lucide-react"
+import { FilterIcon, LayoutGridIcon, ListIcon, PlusIcon, ServerIcon } from "lucide-react"
 
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Select,
   SelectContent,
@@ -18,13 +20,15 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { listMcpServers, updateMcpServer } from "@/lib/db/mcp-servers"
 import { useMcpPanelStore } from "@/stores/mcp/mcp-panel-store"
 import { useMcpPanelView, isMcpPanelView, isMcpPanelGroupBy } from "@/hooks/mcp"
-import { loggers } from "@/lib/logging"
-import type { McpServer } from "@/lib/claude/types"
+import { loggers } from "@cognia/logging"
+import type { McpServer } from "@cognia/agent-config-types"
 import { McpImportDialog } from "../mcp-import-dialog"
 import { refreshAgentAvailability } from "../mcp-agent-chip-group"
+import { McpLiveSessionCard } from "./mcp-live-session-card"
 import { McpServerList } from "./mcp-server-list"
 import { cloneServerDraft } from "./mcp-server-utils"
 import { McpBatchActionsBar } from "./mcp-batch-actions-bar"
+import { McpFilterSheet } from "./mcp-filter-sheet"
 import { blankServerSeed } from "./server-seed"
 
 /**
@@ -42,10 +46,19 @@ export function McpMyServersTab() {
   const statusFilter = useMcpPanelStore((s) => s.statusFilter)
   const selection = useMcpPanelStore((s) => s.selection)
   const toggleSelection = useMcpPanelStore((s) => s.toggleSelection)
+  const selectAll = useMcpPanelStore((s) => s.selectAll)
+  const clearSelection = useMcpPanelStore((s) => s.clearSelection)
   const openCreate = useMcpPanelStore((s) => s.openCreate)
   const openEdit = useMcpPanelStore((s) => s.openEdit)
   const setDeleteTarget = useMcpPanelStore((s) => s.setDeleteTarget)
   const resetFilters = useMcpPanelStore((s) => s.resetFilters)
+  const setFilterSheetOpen = useMcpPanelStore((s) => s.setFilterSheetOpen)
+  const setActiveTab = useMcpPanelStore((s) => s.setActiveTab)
+
+  // Active non-default filter axes — search is intentionally excluded (it has
+  // its own input in the panel header; the badge reflects only the sheet's
+  // transport/status dimensions).
+  const activeFilterCount = (transportFilter !== "all" ? 1 : 0) + (statusFilter !== "all" ? 1 : 0)
 
   const { view, groupBy, isFavorite, setView, setGroupBy, toggleFavorite } = useMcpPanelView()
 
@@ -76,6 +89,16 @@ export function McpMyServersTab() {
   const filtersActive =
     search.trim().length > 0 || transportFilter !== "all" || statusFilter !== "all"
 
+  // "Select all" operates on the *visible* (filtered) subset, matching the
+  // sibling plugin/skill panels. `selectAll` replaces the selection set, so
+  // toggling off clears it entirely.
+  const allVisibleSelected =
+    visibleServers.length > 0 && visibleServers.every((s) => selection.has(s.id))
+  const toggleSelectAll = () => {
+    if (allVisibleSelected) clearSelection()
+    else selectAll(visibleServers.map((s) => s.id))
+  }
+
   const handleToggle = async (server: McpServer, enabled: boolean) => {
     try {
       await updateMcpServer(server.id, { enabled })
@@ -88,6 +111,7 @@ export function McpMyServersTab() {
 
   return (
     <div className="space-y-3" data-testid="mcp-my-servers-tab">
+      <McpLiveSessionCard />
       <div className="flex flex-wrap items-center gap-2">
         <ToggleGroup
           type="single"
@@ -116,6 +140,20 @@ export function McpMyServersTab() {
         </Select>
 
         <div className="ml-auto flex items-center gap-1.5">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setFilterSheetOpen(true)}
+            aria-label={tView("filters")}
+          >
+            <FilterIcon className="size-3.5 sm:mr-1.5" />
+            <span className="hidden sm:inline">{tView("filters")}</span>
+            {activeFilterCount > 0 && (
+              <Badge variant="secondary" className="ml-1.5 h-4 min-w-4 px-1 text-[10px]">
+                {activeFilterCount}
+              </Badge>
+            )}
+          </Button>
           <McpImportDialog onImported={refreshAgentAvailability} />
           <Button
             size="sm"
@@ -129,9 +167,20 @@ export function McpMyServersTab() {
       </div>
 
       {servers.length === 0 ? (
-        <p className="rounded-md border border-dashed p-6 text-center text-xs text-muted-foreground">
-          {tList("empty")}
-        </p>
+        <div className="flex flex-col items-center gap-3 rounded-md border border-dashed p-8 text-center">
+          <ServerIcon className="size-8 text-muted-foreground/40" />
+          <p className="max-w-sm text-xs text-muted-foreground">{tList("empty")}</p>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <Button size="sm" onClick={() => void blankServerSeed().then(openCreate)}>
+              <PlusIcon className="size-3.5 sm:mr-1.5" />
+              {t("addServer")}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setActiveTab("presets")}>
+              <LayoutGridIcon className="size-3.5 sm:mr-1.5" />
+              {tList("emptyBrowsePresets")}
+            </Button>
+          </div>
+        </div>
       ) : visibleServers.length === 0 && filtersActive ? (
         <p className="rounded-md border border-dashed p-6 text-center text-xs text-muted-foreground">
           {tList("noMatch")}{" "}
@@ -140,22 +189,41 @@ export function McpMyServersTab() {
           </button>
         </p>
       ) : (
-        <McpServerList
-          servers={visibleServers}
-          view={view}
-          groupBy={groupBy}
-          selection={selection}
-          isFavorite={isFavorite}
-          onToggleSelect={toggleSelection}
-          onToggleFavorite={(id) => void toggleFavorite(id)}
-          onToggle={handleToggle}
-          onEdit={openEdit}
-          onClone={(server) => openCreate(cloneServerDraft(server))}
-          onDelete={(server) => setDeleteTarget({ serverId: server.id, name: server.name })}
-        />
+        <>
+          <div className="flex items-center gap-2 px-0.5">
+            <Checkbox
+              checked={allVisibleSelected}
+              onCheckedChange={toggleSelectAll}
+              aria-label={tList("selectAllAria")}
+            />
+            <button
+              type="button"
+              onClick={toggleSelectAll}
+              className="text-xs text-muted-foreground transition-colors hover:text-foreground"
+            >
+              {allVisibleSelected
+                ? tList("clearSelection")
+                : tList("selectAll", { count: visibleServers.length })}
+            </button>
+          </div>
+          <McpServerList
+            servers={visibleServers}
+            view={view}
+            groupBy={groupBy}
+            selection={selection}
+            isFavorite={isFavorite}
+            onToggleSelect={toggleSelection}
+            onToggleFavorite={(id) => void toggleFavorite(id)}
+            onToggle={handleToggle}
+            onEdit={openEdit}
+            onClone={(server) => openCreate(cloneServerDraft(server))}
+            onDelete={(server) => setDeleteTarget({ serverId: server.id, name: server.name })}
+          />
+        </>
       )}
 
       <McpBatchActionsBar servers={servers} />
+      <McpFilterSheet />
     </div>
   )
 }

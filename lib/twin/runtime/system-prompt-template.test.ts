@@ -5,7 +5,7 @@
  */
 
 import { applySystemPromptTemplate } from "./system-prompt-template"
-import type { ProfileEntity, StyleSample, TwinChunk } from "@/types/twin"
+import type { Playbook, ProfileEntity, StyleSample, TwinChunk } from "@/types/twin"
 
 function makeChunk(id: string, content = "the chunk body"): TwinChunk {
   return {
@@ -36,6 +36,21 @@ function makeSample(id: string, label: string, original: string, tone: string[] 
     tone,
     addedAt: 1,
     addedBy: "distill",
+  }
+}
+
+function makePlaybook(overrides: Partial<Playbook> = {}): Playbook {
+  return {
+    id: "pb_1",
+    title: "Handle escalation",
+    trigger: "a customer escalates",
+    steps: [
+      { order: 1, action: "acknowledge quickly" },
+      { order: 2, action: "loop in the lead" },
+    ],
+    examples: [],
+    confidence: 0.8,
+    ...overrides,
   }
 }
 
@@ -145,5 +160,117 @@ describe("applySystemPromptTemplate", () => {
     })
     expect(out.systemPrompt).toContain("Voice and tone:")
     expect(out.systemPrompt).not.toMatch(/People, teams[\s\S]*\n\n$/)
+  })
+
+  it("renders playbooks as 'When …: steps' lines in the stable segment", () => {
+    const out = applySystemPromptTemplate({
+      twinName: "Alice",
+      entities: [],
+      retrievedChunks: [],
+      styleSamples: [],
+      playbooks: [makePlaybook()],
+    })
+    expect(out.systemPrompt).toContain("## How you typically handle situations")
+    expect(out.systemPrompt).toContain(
+      "When a customer escalates: acknowledge quickly → loop in the lead"
+    )
+    // Per-profile → stable, never the per-turn dynamic segment.
+    expect(out.cacheSegments.stable).toContain("## How you typically handle situations")
+    expect(out.cacheSegments.dynamic).not.toContain("## How you typically handle situations")
+  })
+
+  it("skips playbooks already promoted into a Skill", () => {
+    const out = applySystemPromptTemplate({
+      twinName: "Alice",
+      entities: [],
+      retrievedChunks: [],
+      styleSamples: [],
+      playbooks: [
+        makePlaybook({ id: "pb_a", trigger: "kept" }),
+        makePlaybook({ id: "pb_b", trigger: "promoted away", promotedToSkillId: "skill_1" }),
+      ],
+    })
+    expect(out.systemPrompt).toContain("When kept:")
+    expect(out.systemPrompt).not.toContain("promoted away")
+  })
+
+  it("orders playbooks by confidence desc and caps to maxPlaybooksShown", () => {
+    const out = applySystemPromptTemplate({
+      twinName: "Alice",
+      entities: [],
+      retrievedChunks: [],
+      styleSamples: [],
+      maxPlaybooksShown: 2,
+      playbooks: [
+        makePlaybook({ id: "p1", trigger: "low", confidence: 0.1 }),
+        makePlaybook({ id: "p2", trigger: "high", confidence: 0.9 }),
+        makePlaybook({ id: "p3", trigger: "mid", confidence: 0.5 }),
+      ],
+    })
+    const high = out.systemPrompt.indexOf("When high:")
+    const mid = out.systemPrompt.indexOf("When mid:")
+    expect(high).toBeGreaterThanOrEqual(0)
+    expect(mid).toBeGreaterThan(high)
+    // Lowest-confidence entry dropped by the cap.
+    expect(out.systemPrompt).not.toContain("When low:")
+  })
+
+  it("emits no playbook heading when all entries are filtered out", () => {
+    const out = applySystemPromptTemplate({
+      twinName: "Alice",
+      entities: [],
+      retrievedChunks: [],
+      styleSamples: [],
+      playbooks: [makePlaybook({ promotedToSkillId: "skill_1" })],
+    })
+    expect(out.systemPrompt).not.toContain("## How you typically handle situations")
+  })
+
+  it("keeps the cacheSegments invariant intact with playbooks present", () => {
+    const out = applySystemPromptTemplate({
+      baseSystemPrompt: "BASE",
+      twinName: "Alice",
+      entities: [],
+      retrievedChunks: [{ chunk: makeChunk("k1"), score: 0.9, sourceTitle: "Doc" }],
+      styleSamples: [],
+      playbooks: [makePlaybook()],
+    })
+    expect([out.cacheSegments.stable, out.cacheSegments.dynamic].join("\n\n---\n\n")).toBe(
+      out.systemPrompt
+    )
+  })
+
+  it("splits cacheSegments at the stable/dynamic boundary", () => {
+    const out = applySystemPromptTemplate({
+      baseSystemPrompt: "BASE",
+      twinName: "Alice",
+      entities: [],
+      retrievedChunks: [{ chunk: makeChunk("k1"), score: 0.9, sourceTitle: "Doc" }],
+      styleSamples: [makeSample("ss_1", "rejection", "No thanks.")],
+    })
+    // Stable: sections 1-2 only.
+    expect(out.cacheSegments.stable).toContain("BASE")
+    expect(out.cacheSegments.stable).toContain("You are Alice.")
+    expect(out.cacheSegments.stable).not.toContain("## Relevant historical material")
+    expect(out.cacheSegments.stable).not.toContain("## Style examples")
+    // Dynamic: sections 3-4 only.
+    expect(out.cacheSegments.dynamic).toContain("## Relevant historical material")
+    expect(out.cacheSegments.dynamic).toContain("## Style examples")
+    expect(out.cacheSegments.dynamic).not.toContain("You are Alice.")
+    // Recombining the segments reproduces the full prompt exactly.
+    expect([out.cacheSegments.stable, out.cacheSegments.dynamic].join("\n\n---\n\n")).toBe(
+      out.systemPrompt
+    )
+  })
+
+  it("leaves cacheSegments.dynamic empty when there is no per-turn material", () => {
+    const out = applySystemPromptTemplate({
+      twinName: "Alice",
+      entities: [],
+      retrievedChunks: [],
+      styleSamples: [],
+    })
+    expect(out.cacheSegments.dynamic).toBe("")
+    expect(out.cacheSegments.stable).toBe(out.systemPrompt)
   })
 })

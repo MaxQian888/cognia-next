@@ -12,14 +12,14 @@
  * re-renders when a usage field actually moves.
  */
 
+import { useMemo } from "react"
 import { useShallow } from "zustand/react/shallow"
 
 import { SessionCostBadge } from "@/components/chat/session-cost-badge"
 import { useChatStore } from "@/stores/chat"
+import { getLatestUsage } from "@/lib/claude/usage"
 import type { UsageInfo } from "@/lib/claude/adapter"
 import type { UIMessage } from "ai"
-
-type ChatStoreState = ReturnType<typeof useChatStore.getState>
 
 interface Props {
   sessionId: string
@@ -28,12 +28,21 @@ interface Props {
   tokensLabel: (input: string, output: string) => string
 }
 
-function selectInMemoryUsage(s: ChatStoreState): UsageInfo | null {
-  return aggregateUsage(s.messages)
-}
-
 export function SessionCostBadgeLive({ sessionId, tokensLabel }: Props) {
-  const usage = useChatStore(useShallow(selectInMemoryUsage))
+  // Cheap usage signature instead of an O(n) aggregate in the selector: the
+  // old selector walked every message on EVERY store set (each streamed
+  // frame), even when `useShallow` then bailed the render. Usage only moves
+  // when a message lands or the latest assistant usage is merged, so subscribe
+  // to [length, latest usage ref] (`getLatestUsage` early-exits from the tail
+  // → O(1) per set) and run the O(n) sum only when that signature changes.
+  const [messageCount, latestUsage] = useChatStore(
+    useShallow((s) => [s.messages.length, getLatestUsage(s.messages as UIMessage[])] as const)
+  )
+  const usage = useMemo(
+    () => aggregateUsage(useChatStore.getState().messages),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- messageCount/latestUsage key the getState() read above
+    [messageCount, latestUsage]
+  )
   if (!usage) return null
   return <SessionCostBadge sessionId={sessionId} inMemoryUsage={usage} tokensLabel={tokensLabel} />
 }

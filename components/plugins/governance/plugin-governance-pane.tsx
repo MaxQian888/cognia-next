@@ -18,6 +18,7 @@ import { PluginPermissionsTab } from "../detail/plugin-permissions-tab"
 import { PluginScheduledJobs } from "../detail/plugin-scheduled-jobs"
 import { PluginAnalytics } from "../detail/plugin-analytics"
 import { PluginAuditLog } from "./plugin-audit-log"
+import { PluginGovernancePolicyTab } from "./plugin-governance-policy-tab"
 
 export function PluginGovernancePane() {
   const t = useTranslations("plugins.sections.governanceSub")
@@ -37,6 +38,7 @@ export function PluginGovernancePane() {
         {view === "scheduled" && <PluginScheduledJobs />}
         {view === "analytics" && <PluginAnalytics />}
         {view === "audit" && <PluginAuditLog />}
+        {view === "policy" && <PluginGovernancePolicyTab />}
       </div>
     </div>
   )

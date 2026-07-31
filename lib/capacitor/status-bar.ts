@@ -94,7 +94,15 @@ export async function syncWithTheme(
 ): Promise<SimpleOutcome> {
   const style: StatusBarStyle = resolvedTheme === "dark" ? "light" : "dark"
   const styleOutcome = await setStyle(style, loader)
-  if (backgroundHex) {
+  // `setBackgroundColor` is Android-only: on iOS the plugin rejects (the
+  // proxy fabricates the method and fails at call time), the rejection is
+  // swallowed inside `withPlugin`, and the caller would believe the colour
+  // applied. Gate on the reported platform (same pattern as
+  // local-notifications.ensureChannel).
+  const platform = (
+    globalThis as { Capacitor?: { getPlatform?: () => string } }
+  ).Capacitor?.getPlatform?.()
+  if (backgroundHex && platform !== "ios") {
     // Fire-and-await so a colour failure surfaces in the caller's logs;
     // the style outcome is what we return because it's the primary signal.
     await setBackgroundColor(backgroundHex, loader)

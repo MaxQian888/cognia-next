@@ -1,0 +1,41 @@
+{
+  "id": "cognia-context-inspector",
+  "name": "Context Inspector",
+  "version": "0.1.0",
+  "description": "Developer panel showing the live Context Workbench state — the reference consumer for declarative webview-backed context panels.",
+  "type": "frontend",
+  "capabilities": ["context-panel", "webview"],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "permissions": ["extension:ui", "session:read"],
+  "activationEvents": ["onView:context-workbench:session"],
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    }
+  },
+  "i18n": {
+    "locales": {
+      "en": {
+        "panel.inspector": "Context Inspector"
+      },
+      "zh-CN": {
+        "panel.inspector": "上下文检查器"
+      }
+    }
+  }
+}

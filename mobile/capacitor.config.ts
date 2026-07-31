@@ -13,7 +13,7 @@ import type { CapacitorConfig } from "@capacitor/cli"
  */
 const config: CapacitorConfig = {
   appId: "com.cognia.mobile",
-  appName: "cognia",
+  appName: "Cognia",
   webDir: "../out",
   server: {
     androidScheme: "https",
@@ -21,9 +21,9 @@ const config: CapacitorConfig = {
     //
     // The Next.js dev server is reached at http://localhost:3000 from inside
     // the emulator by way of `adb reverse tcp:3000 tcp:3000` (run once per
-    // emulator session). Using the same hostname the desktop tauri dev uses
-    // means `next.config.ts`'s assetPrefix (`http://localhost:3000`) resolves
-    // correctly for both targets off a single dev server.
+    // emulator session). Using the same hostname as the page keeps Next.js
+    // lazy chunks on the current origin, so desktop and mobile can share one
+    // dev server.
     //
     // Comment out (or unset COGNIA_MOBILE_DEV) and re-run `cap sync` before
     // building a release / pushing this file.
@@ -61,13 +61,23 @@ const config: CapacitorConfig = {
       overlaysWebView: false,
     },
     Keyboard: {
-      resize: "body",
+      // `native` (not `body`): let the OS resize the WebView frame itself so the
+      // layout viewport / `100dvh` shrinks cleanly when the keyboard opens. The
+      // coarser `body` mode mutates document.body height and is known to cause
+      // layout jump / double-resize artifacts, especially combined with
+      // `100dvh`. Pairs with the `interactiveWidget: "resizes-content"` viewport
+      // hint (Android) for a single, consistent keyboard-avoidance path.
+      // NOTE: requires `cap sync` + on-device verification; revert to `body`
+      // for any device that regresses while keeping the rest of this wave.
+      resize: "native",
       resizeOnFullScreen: true,
     },
     LocalNotifications: {
       smallIcon: "ic_stat_icon",
       iconColor: "#3b82f6",
-      sound: "beep.wav",
+      // No custom `sound`: a `beep.wav` was referenced but never bundled (no
+      // res/raw asset), so Android logged a missing-resource error and fell
+      // back to the default anyway. Use the system default sound explicitly.
     },
     PushNotifications: {
       presentationOptions: ["badge", "sound", "alert"],

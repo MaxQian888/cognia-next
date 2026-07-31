@@ -17,7 +17,7 @@ use super::TrayMenuStateStore;
 #[cfg(desktop)]
 use super::icon_state::{self, TrayIconStateStore};
 #[cfg(desktop)]
-use super::menu_builder::{build_menu, BuiltMenu};
+use super::menu_builder::build_menu;
 #[cfg(desktop)]
 use super::TRAY_ICON_ID;
 #[cfg(desktop)]
@@ -33,17 +33,34 @@ pub async fn tray_set_menu<R: Runtime>(
 ) -> Result<(), String> {
     #[cfg(desktop)]
     {
-        let BuiltMenu { menu, index } =
-            build_menu(&app, &items).map_err(|e| format!("build_menu: {e}"))?;
-
-        state.set_layout(items, index);
-
-        let tray = app
-            .tray_by_id(TRAY_ICON_ID)
-            .ok_or_else(|| format!("{TRAY_ICON_ID} not registered"))?;
-        tray.set_menu(Some(menu))
-            .map_err(|e| format!("set_menu: {e}"))?;
-        Ok(())
+        let _ = &state;
+        // Main-thread dispatch: building an NSMenu and swapping it on the
+        // NSStatusItem (which also drops the OLD menu) are AppKit ops that
+        // trap off-main — and async commands run on tokio workers. The layout
+        // store write moves inside the closure too, so the persisted layout
+        // and the applied menu can't diverge when a build fails.
+        let handle = app.clone();
+        app.run_on_main_thread(move || {
+            let built = match build_menu(&handle, &items) {
+                Ok(b) => b,
+                Err(e) => {
+                    log::warn!("tray: build_menu failed: {e}");
+                    return;
+                }
+            };
+            if let Some(store) = handle.try_state::<Arc<TrayMenuStateStore>>() {
+                store.set_layout(items, built.index);
+            }
+            match handle.tray_by_id(TRAY_ICON_ID) {
+                Some(tray) => {
+                    if let Err(e) = tray.set_menu(Some(built.menu)) {
+                        log::warn!("tray: set_menu failed: {e}");
+                    }
+                }
+                None => log::warn!("tray: {TRAY_ICON_ID} not registered"),
+            }
+        })
+        .map_err(|e| e.to_string())
     }
     #[cfg(not(desktop))]
     {
@@ -61,7 +78,9 @@ pub async fn tray_set_icon_state<R: Runtime>(
     {
         let parsed = TrayIconState::from_str(&state)
             .ok_or_else(|| format!("unknown icon state: {state}"))?;
-        icon_state::apply(&app, parsed)
+        // Main-thread dispatch — applying inline from this async command (a
+        // tokio worker) trapped in AppKit's NSStatusItem teardown.
+        icon_state::apply_on_main(&app, parsed)
     }
     #[cfg(not(desktop))]
     {
@@ -104,7 +123,7 @@ pub async fn tray_register_icon<R: Runtime>(
         // state, re-apply immediately so the new raster takes effect
         // without waiting for the next `tray_set_icon_state` call.
         if store.current() == parsed {
-            let _ = icon_state::apply(&app, parsed);
+            let _ = icon_state::apply_on_main(&app, parsed);
         }
         Ok(())
     }
@@ -128,19 +147,65 @@ pub async fn tray_set_tooltip<R: Runtime>(
 ) -> Result<(), String> {
     #[cfg(desktop)]
     {
-        let tray = app
-            .tray_by_id(TRAY_ICON_ID)
-            .ok_or_else(|| format!("{TRAY_ICON_ID} not registered"))?;
-        tray.set_tooltip(Some(text.as_str()))
-            .map_err(|e| format!("set_tooltip: {e}"))?;
-        state.set_tooltip(Some(text));
-        Ok(())
+        state.set_tooltip(Some(text.clone()));
+        // Main-thread dispatch — same AppKit off-main trap as `tray_set_menu`.
+        let handle = app.clone();
+        app.run_on_main_thread(move || match handle.tray_by_id(TRAY_ICON_ID) {
+            Some(tray) => {
+                if let Err(e) = tray.set_tooltip(Some(text.as_str())) {
+                    log::warn!("tray: set_tooltip failed: {e}");
+                }
+            }
+            None => log::warn!("tray: {TRAY_ICON_ID} not registered"),
+        })
+        .map_err(|e| e.to_string())
     }
     #[cfg(not(desktop))]
     {
         let _ = (app, state, text);
         Err("tray not available on this platform".into())
     }
+}
+
+/// Set (or clear, with `None`) the text rendered next to the tray icon.
+/// macOS shows it in the menu bar and Linux appindicators render it inline;
+/// Windows has no equivalent surface and Tauri no-ops there — the renderer
+/// offers the icon-badge mode instead (`lib/tray/icon-builder.ts`).
+#[tauri::command]
+pub async fn tray_set_title<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, Arc<TrayMenuStateStore>>,
+    text: Option<String>,
+) -> Result<(), String> {
+    #[cfg(desktop)]
+    {
+        state.set_title(text.clone());
+        // Main-thread dispatch — same AppKit off-main trap as `tray_set_menu`.
+        let handle = app.clone();
+        app.run_on_main_thread(move || match handle.tray_by_id(TRAY_ICON_ID) {
+            Some(tray) => {
+                if let Err(e) = tray.set_title(text.as_deref()) {
+                    log::warn!("tray: set_title failed: {e}");
+                }
+            }
+            None => log::warn!("tray: {TRAY_ICON_ID} not registered"),
+        })
+        .map_err(|e| e.to_string())
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = (app, state, text);
+        Err("tray not available on this platform".into())
+    }
+}
+
+/// Snapshot the title Rust currently holds — diagnostics counterpart of
+/// `tray_get_tooltip`.
+#[tauri::command]
+pub async fn tray_get_title(
+    state: State<'_, Arc<TrayMenuStateStore>>,
+) -> Result<Option<String>, String> {
+    Ok(state.title())
 }
 
 /// Snapshot the current items as the Rust side sees them — used by the
@@ -154,9 +219,7 @@ pub async fn tray_get_current_menu(
 }
 
 #[tauri::command]
-pub async fn tray_get_icon_state<R: Runtime>(
-    _app: AppHandle<R>,
-) -> Result<TrayIconState, String> {
+pub async fn tray_get_icon_state<R: Runtime>(_app: AppHandle<R>) -> Result<TrayIconState, String> {
     #[cfg(desktop)]
     {
         if let Some(store) = _app.try_state::<Arc<TrayIconStateStore>>() {
@@ -206,6 +269,7 @@ mod tests {
                 command: "clear".into(),
             },
             disabled: None,
+            checked: None,
         }];
         let mut idx = std::collections::HashMap::new();
         idx.insert(
@@ -226,6 +290,20 @@ mod tests {
     /// covers the command's only behaviour. Avoids spinning up a tauri
     /// mock app (the project doesn't enable Tauri's `test` feature; see
     /// `window_utils.rs:46`).
+    /// Same one-line-wrapper rationale as the tooltip getter below: the
+    /// `tray_set_title` / `tray_get_title` command bodies reduce to these
+    /// store calls plus a main-thread OS mutation we can't exercise without
+    /// Tauri's `test` feature.
+    #[test]
+    fn title_getter_round_trips_through_store() {
+        let store = TrayMenuStateStore::default();
+        assert!(store.title().is_none());
+        store.set_title(Some("42%".into()));
+        assert_eq!(store.title().as_deref(), Some("42%"));
+        store.set_title(None);
+        assert!(store.title().is_none());
+    }
+
     #[test]
     fn tooltip_getter_round_trips_through_store() {
         let store = TrayMenuStateStore::default();

@@ -5,8 +5,9 @@
  *
  * Adds:
  *   - `publishEntry`: builds a `SharedMemoryEntry` (id + version + writtenAt),
- *     **enforces the PII gate** via `lib/twin/ingest/redact.ts:hasNoLeakingPii`
- *     when the value is a string, and only then writes through to the store.
+ *     **enforces the PII gate** via `@cognia/redact` — `hasNoLeakingPii` for
+ *     string values, `hasNoLeakingPiiDeep` for object values (every string
+ *     leaf is scanned) — and only then writes through to the store.
  *     Fires `onSharedMemoryWrite`.
  *   - `deleteEntry`: store delete + fires `onSharedMemoryDelete`.
  *   - `autoPublishTaskResult`: convenience helper the dispatch executor calls
@@ -14,9 +15,9 @@
  *     `task:<taskId>` and tags it with the writer + task title for the
  *     workspace's Shared Memory UI.
  *
- * The PII gate is non-negotiable for string values (per [[feedback_reuse_existing_components]]).
- * Object values bypass the gate today — callers must explicitly serialise
- * to a vetted JSON before publishing if they want the same guarantee.
+ * The PII gate is non-negotiable for every value shape (per
+ * [[feedback_reuse_existing_components]]): strings and object leaves alike are
+ * scanned before the entry is written.
  */
 
 import type {
@@ -27,9 +28,9 @@ import type {
 } from "@/types/agent/agent-team"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
-import { hasNoLeakingPii, hasNoLeakingPiiDeep } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii, hasNoLeakingPiiDeep } from "@cognia/redact"
 import { getSharedMemoryAdapter } from "@/lib/plugin/registries/shared-memory-adapter-registry"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 // Re-exported so build-options and other consumers share one ACL predicate.
 export {
@@ -162,6 +163,46 @@ export function autoPublishTaskResult(
     writer,
     tags: [`task:${task.id}`, `taskTitle:${task.title}`],
   })
+}
+
+/** One upstream dependency's result, read back off the blackboard. */
+export interface DependencyResult {
+  taskId: string
+  /** Recovered from the `taskTitle:<title>` tag stamped by `autoPublishTaskResult`. */
+  taskTitle?: string
+  writerName?: string
+  value: string
+}
+
+/**
+ * Read the blackboard results published by {@link autoPublishTaskResult} for
+ * the given dependency task ids. Keeps the `task:<id>` key convention
+ * co-located with the writer so the format lives in exactly one module.
+ *
+ * Skips ids with no entry or a non-string value, and preserves the input
+ * order. Used by the `action.team.task.dispatch` executor to inject upstream
+ * results into a teammate's prompt so the team builds on prior work instead of
+ * each teammate starting cold.
+ */
+export function readDependencyResults(
+  teamId: string,
+  depTaskIds: readonly string[]
+): DependencyResult[] {
+  if (depTaskIds.length === 0) return []
+  const teamMemory = useAgentTeamStore.getState().sharedMemory[teamId] ?? {}
+  const out: DependencyResult[] = []
+  for (const depId of depTaskIds) {
+    const entry = teamMemory[`task:${depId}`]
+    if (!entry || typeof entry.value !== "string") continue
+    const titleTag = entry.tags?.find((t) => t.startsWith("taskTitle:"))
+    out.push({
+      taskId: depId,
+      ...(titleTag ? { taskTitle: titleTag.slice("taskTitle:".length) } : {}),
+      ...(entry.writerName ? { writerName: entry.writerName } : {}),
+      value: entry.value,
+    })
+  }
+  return out
 }
 
 /** Drop every entry for a team. Convenience wrapper around the store action. */

@@ -27,6 +27,18 @@ class TestableTerminalSession extends BaseTerminalSession {
     /* not used in this test */
   }
 
+  async detach(): Promise<void> {
+    /* not used in this test */
+  }
+
+  async takeControl(): Promise<void> {
+    this.dispatchControlState({ role: "controller", controllerId: "test" })
+  }
+
+  async releaseControl(): Promise<void> {
+    this.dispatchControlState({ role: "viewer", controllerId: null, reason: "released" })
+  }
+
   async kill(): Promise<void> {
     /* not used in this test */
   }
@@ -43,6 +55,10 @@ class TestableTerminalSession extends BaseTerminalSession {
 
   pushExit(code: number | null): void {
     this.handleExit(code)
+  }
+
+  pushReplayGap(): void {
+    this.dispatchReplayGap({ requestedAfter: 1, firstAvailable: 4, lastAvailable: 9 })
   }
 }
 
@@ -93,6 +109,81 @@ describe("BaseTerminalSession.onData", () => {
     expect(seen).toHaveLength(1)
     expect(warn).toHaveBeenCalled()
     warn.mockRestore()
+  })
+
+  it("buffers data that arrives before any listener and replays it on subscribe", () => {
+    const session = makeSession()
+    // Simulates Rust's reattach replay landing before the xterm mounts.
+    session.pushData(new Uint8Array([1, 2]))
+    session.pushData(new Uint8Array([3]))
+    const seen: Uint8Array[] = []
+    session.onData((bytes) => seen.push(bytes))
+    expect(seen.map((c) => Array.from(c))).toEqual([[1, 2], [3]])
+  })
+
+  it("does not replay the buffer to a second subscriber", () => {
+    const session = makeSession()
+    session.pushData(new Uint8Array([9]))
+    const first: Uint8Array[] = []
+    const second: Uint8Array[] = []
+    session.onData((b) => first.push(b))
+    session.onData((b) => second.push(b))
+    expect(first).toHaveLength(1)
+    expect(second).toHaveLength(0)
+  })
+
+  it("re-buffers and replays after all listeners detach (tab switch)", () => {
+    const session = makeSession()
+    const off = session.onData(() => {})
+    off()
+    // Output produced while the tab is backgrounded (no mounted instance).
+    session.pushData(new Uint8Array([7]))
+    const seen: Uint8Array[] = []
+    session.onData((bytes) => seen.push(bytes))
+    expect(seen.map((c) => Array.from(c))).toEqual([[7]])
+  })
+
+  it("caps the early-data buffer, dropping the oldest chunks", () => {
+    const session = makeSession()
+    const big = () => new Uint8Array(400 * 1024) // 400KB; cap is 1MB
+    session.pushData(big()) // oldest — should be evicted (3×400KB > 1MB)
+    session.pushData(big())
+    session.pushData(big())
+    const seen: Uint8Array[] = []
+    session.onData((bytes) => seen.push(bytes))
+    // Oldest chunk dropped so total stays under the 1MB cap.
+    expect(seen.length).toBe(2)
+    expect(seen.reduce((n, c) => n + c.length, 0)).toBeLessThanOrEqual(1024 * 1024)
+  })
+
+  it("ignores empty data chunks in the buffer", () => {
+    const session = makeSession()
+    session.pushData(new Uint8Array([]))
+    const seen: Uint8Array[] = []
+    session.onData((bytes) => seen.push(bytes))
+    expect(seen).toHaveLength(0)
+  })
+})
+
+describe("BaseTerminalSession control state", () => {
+  it("publishes controller acquisition and release", async () => {
+    const session = makeSession()
+    const states: string[] = []
+    session.onControlState((state) => states.push(state.role))
+    await Promise.resolve()
+    await session.releaseControl()
+    await session.takeControl()
+    expect(states).toEqual(["controller", "viewer", "controller"])
+  })
+})
+
+describe("BaseTerminalSession replay gaps", () => {
+  it("surfaces missing output instead of silently presenting partial scrollback", () => {
+    const session = makeSession()
+    const gaps: number[] = []
+    session.onReplayGap((gap) => gaps.push(gap.firstAvailable))
+    session.pushReplayGap()
+    expect(gaps).toEqual([4])
   })
 })
 

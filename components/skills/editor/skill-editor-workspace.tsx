@@ -4,10 +4,16 @@ import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { toast } from "sonner"
-import { FilesIcon, PanelRightCloseIcon, PanelRightOpenIcon, ShieldAlertIcon } from "lucide-react"
+import {
+  FilesIcon,
+  PanelRightCloseIcon,
+  PanelRightOpenIcon,
+  Settings2Icon,
+  ShieldAlertIcon,
+} from "lucide-react"
 import { useSkillsStore } from "@/stores/skills"
 import { listResourcesForSkill } from "@/lib/db/skill-resources"
-import { getSkill } from "@/lib/db/skills"
+import { getSkill, updateSkill } from "@/lib/db/skills"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,12 +32,20 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
+import { useResizableLayout } from "@/hooks/ui/use-resizable-layout"
+import { SkillEditor } from "../skill-editor"
 import { SkillFileTree } from "./skill-file-tree"
 import { SkillTabStrip } from "./skill-tab-strip"
 import { SkillMonacoEditor } from "./skill-monaco-editor"
+import { LightCodeEditor } from "@/components/editor/light-code-editor"
 import { SkillValidationPanel } from "./skill-validation-panel"
 import { useEditorWorkspace } from "./use-editor-workspace"
 import { languageFromPath } from "./language-from-path"
+import { useIsMobile } from "@/hooks/ui/use-mobile"
+
+/** localStorage key for the desktop three-pane split (percent layout, v4). */
+const SKILL_EDITOR_LAYOUT_KEY = "cognia-skill-editor-layout"
 
 export function SkillEditorWorkspace() {
   const t = useTranslations("skills.editor")
@@ -42,9 +56,16 @@ export function SkillEditorWorkspace() {
   const updateDraftContent = useSkillsStore((s) => s.updateDraftContent)
   const toggleRightPane = useSkillsStore((s) => s.toggleRightPane)
   const { saveActive, saveAll, savedAllSignal } = useEditorWorkspace()
+  const isMobile = useIsMobile()
   const [closeTarget, setCloseTarget] = useState<{ fileId: string; path: string } | null>(null)
   const [fileTreeSheetOpen, setFileTreeSheetOpen] = useState(false)
   const [validationSheetOpen, setValidationSheetOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+
+  // Desktop split persistence (react-resizable-panels v4 — PERCENT strings;
+  // bare numbers are pixels). Seeded once at mount, written on change.
+  const { defaultLayout, onLayoutChanged } = useResizableLayout(SKILL_EDITOR_LAYOUT_KEY)
+  const [initialLayout] = useState<Record<string, number> | undefined>(() => defaultLayout)
 
   const skill = useLiveQuery(
     () => (ws.activeSkillId ? getSkill(ws.activeSkillId) : Promise.resolve(undefined)),
@@ -122,6 +143,26 @@ export function SkillEditorWorkspace() {
     />
   )
 
+  // Sidebar header: the skill name plus the "Skill settings" entry that opens
+  // the metadata editor (name / description / category / tags / tools / …).
+  // The body + resources are edited as files; settings covers the frontmatter.
+  const fileTreeHeader = (
+    <div className="flex items-center justify-between gap-1 border-b bg-muted/30 px-2 py-1.5">
+      <span className="truncate text-xs font-medium" title={skill.name}>
+        {skill.name}
+      </span>
+      <Button
+        size="icon"
+        variant="ghost"
+        className="size-6 shrink-0"
+        aria-label={t("openSettings")}
+        onClick={() => setSettingsOpen(true)}
+      >
+        <Settings2Icon className="size-3.5" />
+      </Button>
+    </div>
+  )
+
   const validationBody = activeFile ? (
     <SkillValidationPanel
       draft={{
@@ -133,102 +174,72 @@ export function SkillEditorWorkspace() {
     />
   ) : null
 
-  return (
-    <div className="flex flex-1 overflow-hidden">
-      {/* Desktop: inline file-tree aside */}
-      <aside className="hidden w-60 shrink-0 overflow-y-auto border-r md:block">
-        {fileTreeBody}
-      </aside>
-      <div className="flex flex-1 flex-col">
-        <div className="flex items-center gap-1 border-b bg-muted/30 px-1 md:hidden">
-          <Button
-            size="icon"
-            variant="ghost"
-            className="size-7 shrink-0"
-            aria-label={t("openFileTree")}
-            onClick={() => setFileTreeSheetOpen(true)}
-          >
-            <FilesIcon className="size-3.5" />
-          </Button>
-          <div className="flex-1 min-w-0">
-            <SkillTabStrip
-              files={ws.openFiles}
-              activeFileId={ws.activeFileId}
-              onSelect={setActiveFile}
-              onClose={handleClose}
+  const tabStrip = (
+    <SkillTabStrip
+      files={ws.openFiles}
+      activeFileId={ws.activeFileId}
+      onSelect={setActiveFile}
+      onClose={handleClose}
+    />
+  )
+
+  const statusBar = (
+    <div className="flex items-center justify-between gap-2 border-t bg-muted/30 px-3 py-1 font-mono text-[10px] text-muted-foreground">
+      <span>
+        {activeFile?.language} •{" "}
+        {activeFile && activeFile.draftContent !== activeFile.savedContent
+          ? t("unsaved")
+          : t("saved")}
+      </span>
+      {isMobile ? (
+        <Button
+          size="icon"
+          variant="ghost"
+          className="size-6"
+          aria-label={t("openValidation")}
+          onClick={() => setValidationSheetOpen(true)}
+        >
+          <ShieldAlertIcon className="size-3.5" />
+        </Button>
+      ) : null}
+    </div>
+  )
+
+  const sharedOverlays = (
+    <>
+      {/* Skill settings (frontmatter metadata) — reuses the SkillEditor form in
+          metadata-only mode. Saves only the metadata columns; the body stays
+          owned by the Monaco tab so an in-flight draft is never clobbered. */}
+      <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <SheetContent side="right" className="w-full overflow-y-auto p-0 sm:max-w-lg">
+          <SheetHeader className="border-b px-5 py-3">
+            <SheetTitle>{t("settingsTitle")}</SheetTitle>
+            <SheetDescription>{skill.name}</SheetDescription>
+          </SheetHeader>
+          <div className="px-5 py-4">
+            <SkillEditor
+              mode="edit"
+              hideContent
+              initial={skill}
+              onCancel={() => setSettingsOpen(false)}
+              onSave={async (draft) => {
+                await updateSkill(skill.id, {
+                  name: draft.name,
+                  description: draft.description,
+                  category: draft.category,
+                  tags: draft.tags,
+                  allowedTools: draft.allowedTools,
+                  version: draft.version,
+                  author: draft.author,
+                  license: draft.license,
+                })
+                toast.success(t("settingsSaved"))
+                setSettingsOpen(false)
+              }}
             />
           </div>
-        </div>
-        <div className="hidden md:block">
-          <SkillTabStrip
-            files={ws.openFiles}
-            activeFileId={ws.activeFileId}
-            onSelect={setActiveFile}
-            onClose={handleClose}
-          />
-        </div>
-        <div className="flex flex-1 overflow-hidden">
-          <div className="flex flex-1 flex-col">
-            {activeFile && (
-              <SkillMonacoEditor
-                key={activeFile.id}
-                value={activeFile.draftContent}
-                language={activeFile.language}
-                onChange={(v) => updateDraftContent(activeFile.id, v)}
-                skillId={ws.activeSkillId ?? undefined}
-                documentId={activeFile.id}
-              />
-            )}
-            <div className="flex items-center justify-between gap-2 border-t bg-muted/30 px-3 py-1 font-mono text-[10px] text-muted-foreground">
-              <span>
-                {activeFile?.language} •{" "}
-                {activeFile && activeFile.draftContent !== activeFile.savedContent
-                  ? t("unsaved")
-                  : t("saved")}
-              </span>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="size-6 md:hidden"
-                aria-label={t("openValidation")}
-                onClick={() => setValidationSheetOpen(true)}
-              >
-                <ShieldAlertIcon className="size-3.5" />
-              </Button>
-            </div>
-          </div>
-          {/* Desktop: inline validation aside (toggleable) */}
-          <div className="hidden md:flex md:shrink-0">
-            {ws.rightPaneOpen ? (
-              <aside className="w-80 shrink-0 border-l">
-                <div className="flex items-center justify-between border-b px-2 py-1">
-                  <span className="text-xs font-medium">{t("panelValidation")}</span>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="size-6"
-                    onClick={toggleRightPane}
-                    aria-label={t("panelValidation")}
-                  >
-                    <PanelRightCloseIcon className="size-3.5" />
-                  </Button>
-                </div>
-                {validationBody}
-              </aside>
-            ) : (
-              <Button
-                size="icon"
-                variant="ghost"
-                className="m-1 self-start"
-                onClick={toggleRightPane}
-                aria-label={t("panelValidation")}
-              >
-                <PanelRightOpenIcon className="size-3.5" />
-              </Button>
-            )}
-          </div>
-        </div>
-      </div>
+        </SheetContent>
+      </Sheet>
 
       {/* Mobile: file-tree as Sheet */}
       <Sheet open={fileTreeSheetOpen} onOpenChange={setFileTreeSheetOpen}>
@@ -241,9 +252,9 @@ export function SkillEditorWorkspace() {
         </SheetContent>
       </Sheet>
 
-      {/* Mobile: validation panel as Sheet */}
+      {/* Mobile: validation panel as a thumb-reachable bottom drawer */}
       <Sheet open={validationSheetOpen} onOpenChange={setValidationSheetOpen}>
-        <SheetContent side="right" className="w-80 p-0 sm:w-96">
+        <SheetContent side="bottom" className="h-[60vh] p-0 safe-area-pb">
           <SheetHeader className="border-b px-4 py-3">
             <SheetTitle>{t("panelValidation")}</SheetTitle>
             <SheetDescription>{skill.name}</SheetDescription>
@@ -276,6 +287,137 @@ export function SkillEditorWorkspace() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </>
+  )
+
+  if (isMobile) {
+    // Mobile: full-width editor; tree + validation live in Sheets. Monaco's
+    // virtual-keyboard handling is unusable on touch — the CodeMirror light
+    // editor provides highlighting/line numbers/find at a fraction of the
+    // weight (and structurally no LSP wiring).
+    return (
+      <div className="flex flex-1 overflow-hidden">
+        <div className="flex flex-1 flex-col">
+          <div className="flex items-center gap-1 border-b bg-muted/30 px-1">
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-7 shrink-0"
+              aria-label={t("openFileTree")}
+              onClick={() => setFileTreeSheetOpen(true)}
+            >
+              <FilesIcon className="size-3.5" />
+            </Button>
+            <div className="min-w-0 flex-1">{tabStrip}</div>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-7 shrink-0"
+              aria-label={t("openSettings")}
+              onClick={() => setSettingsOpen(true)}
+            >
+              <Settings2Icon className="size-3.5" />
+            </Button>
+          </div>
+          <div className="flex min-h-0 flex-1 flex-col">
+            {activeFile ? (
+              // key={} remount keeps undo stacks per file.
+              <LightCodeEditor
+                key={activeFile.id}
+                value={activeFile.draftContent}
+                language={activeFile.language}
+                onChange={(v) => updateDraftContent(activeFile.id, v)}
+                aria-label={activeFile.path}
+              />
+            ) : null}
+            {statusBar}
+          </div>
+        </div>
+        {sharedOverlays}
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-1 overflow-hidden">
+      <ResizablePanelGroup
+        orientation="horizontal"
+        className="min-h-0 flex-1"
+        defaultLayout={initialLayout}
+        onLayoutChanged={onLayoutChanged}
+      >
+        <ResizablePanel
+          id="skill-files"
+          defaultSize="18%"
+          minSize="10%"
+          maxSize="35%"
+          className="flex flex-col overflow-hidden border-r"
+        >
+          {fileTreeHeader}
+          <div className="min-h-0 flex-1 overflow-y-auto">{fileTreeBody}</div>
+        </ResizablePanel>
+        <ResizableHandle withHandle aria-label={t("resize.filesHandle")} />
+        <ResizablePanel
+          id="skill-editor"
+          defaultSize={ws.rightPaneOpen ? "57%" : "82%"}
+          minSize="30%"
+          className="flex min-w-0 flex-col overflow-hidden"
+        >
+          {tabStrip}
+          <div className="flex min-h-0 flex-1 flex-col">
+            {activeFile ? (
+              <SkillMonacoEditor
+                key={activeFile.id}
+                value={activeFile.draftContent}
+                language={activeFile.language}
+                onChange={(v) => updateDraftContent(activeFile.id, v)}
+                skillId={ws.activeSkillId ?? undefined}
+                documentId={activeFile.id}
+              />
+            ) : null}
+            {statusBar}
+          </div>
+        </ResizablePanel>
+        {ws.rightPaneOpen ? (
+          <>
+            <ResizableHandle withHandle aria-label={t("resize.validationHandle")} />
+            <ResizablePanel
+              id="skill-validation"
+              defaultSize="25%"
+              minSize="15%"
+              maxSize="40%"
+              className="flex flex-col overflow-hidden border-l"
+              data-testid="skill-validation-pane"
+            >
+              <div className="flex items-center justify-between border-b px-2 py-1">
+                <span className="text-xs font-medium">{t("panelValidation")}</span>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="size-6"
+                  onClick={toggleRightPane}
+                  aria-label={t("panelValidation")}
+                >
+                  <PanelRightCloseIcon className="size-3.5" />
+                </Button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto">{validationBody}</div>
+            </ResizablePanel>
+          </>
+        ) : null}
+      </ResizablePanelGroup>
+      {!ws.rightPaneOpen ? (
+        <Button
+          size="icon"
+          variant="ghost"
+          className="m-1 self-start"
+          onClick={toggleRightPane}
+          aria-label={t("panelValidation")}
+        >
+          <PanelRightOpenIcon className="size-3.5" />
+        </Button>
+      ) : null}
+      {sharedOverlays}
     </div>
   )
 }

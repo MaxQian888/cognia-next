@@ -71,10 +71,10 @@ This is the contract change that lets the replay buffer remain the single source
 
 ### D6 — WebRTC datachannel transport — designed, deferred
 
-ADR-0021's signaling stack (`src-tauri/src/companion_api/signaling/{mod,client,dispatch,peer}.rs`, ~5000 LOC across signaling + dispatch + envelope) shipped a `cognia.v1` JSON-only data channel for the RPC + event plane. Carrying terminal traffic over the same peer requires either:
+ADR-0021's signaling stack (`src-tauri/src/companion_api/signaling/{mod,client,dispatch,peer}.rs`, ~5000 LOC across signaling + dispatch + envelope) shipped a `cognia.v2` JSON-only data channel for the RPC + event plane. Carrying terminal traffic over the same peer requires either:
 
 1. Multiplexing PTY bytes into the existing channel (would force RPC envelope schema changes for binary framing + session id prefix), OR
-2. A second binary-capable data channel labeled `cognia.v1.terminal` on the same peer connection (clean separation, but requires `signaling/client.rs` + `dispatch.rs` integration for the new label).
+2. A second binary-capable data channel labeled `cognia.v2.terminal` on the same peer connection (clean separation, but requires `signaling/client.rs` + `dispatch.rs` integration for the new label).
 
 `lib/terminal/pick-transport.ts:selectTerminalTransportChain` returns `["ws"]` on Capacitor today. Once the Rust desktop peer is wired through (new `rtc_terminal.rs` handler + peer.rs label dispatch + `transport-webrtc.ts` client subclass of `BaseTerminalSession`), the chain extends to `["ws", "webrtc"]` and the orchestrator walks it on connect failure. The `BaseTerminalSession` + reconnect protocol from D4/D5 already factor the bulk of the work — the remaining surface is the signaling routing layer.
 
@@ -167,7 +167,7 @@ Net: **121 + 15 + 8 = 144 new/extended tests, all passing.**
 
 ## Follow-ups explicitly scoped out
 
-1. **WebRTC terminal transport** — `pick-transport.ts` returns `["ws"]` on Capacitor today; the chain will extend to `["ws", "webrtc"]` once the Rust side ships. The TS-side `transport-webrtc.ts` will subclass `BaseTerminalSession`; the Rust side needs a new `rtc_terminal.rs` module + a `cognia.v1.terminal` data channel label in `signaling/peer.rs`. Estimate: ~400 LOC across Rust + TS.
+1. **WebRTC terminal transport** — `pick-transport.ts` returns `["ws"]` on Capacitor today; the chain will extend to `["ws", "webrtc"]` once the Rust side ships. The TS-side `transport-webrtc.ts` will subclass `BaseTerminalSession`; the Rust side needs a new `rtc_terminal.rs` module + a `cognia.v2.terminal` data channel label in `signaling/peer.rs`. Estimate: ~400 LOC across Rust + TS.
 2. **Remote shell-integration script delivery** — mobile WS sessions deliberately disable OSC 633 today (the integration scripts are local file paths the remote shell can't resolve). A future minor version can ship the script bytes over the WS handshake so mobile gets prompt markers + command tracking.
 3. **Server-side workflow execution + consent broker bridge** — `action.system.terminal` is renderer-only. Headless V2 server workflows that want to invoke the dock need a Tauri command bridge for the broker (or restrict to the headless `terminal_repl_*` path).
 4. **More shells** — elvish / tcsh / xonsh would each need a new `shell-integration.<x>` script + `ShellKind` variant. The pattern is established; the work is per-shell.

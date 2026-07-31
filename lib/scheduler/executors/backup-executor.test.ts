@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
 import { listBackupHistory } from "@/lib/db/backup-history"
@@ -224,27 +225,53 @@ describe("payloadToBuildOptions", () => {
     expect(__TESTING__.payloadToBuildOptions(undefined, undefined)).toEqual({
       includeSessions: true,
       includeApiKey: false,
+      includeSettings: true,
+      includeCoreData: true,
+      includePlugins: false,
+      includeLocalStorage: true,
+      includeArtifacts: true,
     })
   })
 
-  it("settings type drops sessions", () => {
+  it("settings type exports only settings-backed state", () => {
     expect(__TESTING__.payloadToBuildOptions("settings", undefined)).toEqual({
       includeSessions: false,
       includeApiKey: false,
+      includeSettings: true,
+      includeCoreData: false,
+      includePlugins: false,
+      includeLocalStorage: true,
+      includeArtifacts: false,
     })
   })
 
-  it("respects payload.options.includeSessions for the `full` type", () => {
-    expect(__TESTING__.payloadToBuildOptions("full", { includeSessions: false })).toEqual({
+  it("respects every selection option for the `full` type", () => {
+    expect(
+      __TESTING__.payloadToBuildOptions("full", {
+        includeSessions: false,
+        includeSettings: false,
+        includeArtifacts: false,
+        includeIndexedDB: false,
+      })
+    ).toEqual({
       includeSessions: false,
       includeApiKey: false,
+      includeSettings: false,
+      includeCoreData: false,
+      includePlugins: false,
+      includeLocalStorage: true,
+      includeArtifacts: false,
     })
   })
 
-  it("falls through `plugins` to default options", () => {
+  it("maps `plugins` to the plugin domain only", () => {
     expect(__TESTING__.payloadToBuildOptions("plugins", { includeSessions: false })).toEqual({
       includeSessions: false,
       includeApiKey: false,
+      includeSettings: false,
+      includeCoreData: false,
+      includePlugins: true,
+      includeLocalStorage: false,
     })
   })
 })

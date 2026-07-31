@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { normalizeKeyCombo, parseKeyEvent, formatKeybinding } from "./utils"
 
 describe("normalizeKeyCombo", () => {
@@ -48,6 +49,22 @@ describe("parseKeyEvent", () => {
     const event = new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true })
     expect(parseKeyEvent(event)).toBe("Ctrl+Enter")
   })
+
+  it("folds the Shift '+' key back to '=' so it never collides with the separator", () => {
+    const event = new KeyboardEvent("keydown", { key: "+", ctrlKey: true, shiftKey: true })
+    expect(parseKeyEvent(event)).toBe("Ctrl+Shift+=")
+  })
+
+  it("folds the Shift '_' key back to '-'", () => {
+    const event = new KeyboardEvent("keydown", { key: "_", ctrlKey: true, shiftKey: true })
+    expect(parseKeyEvent(event)).toBe("Ctrl+Shift+-")
+  })
+
+  it("names the Space key so it survives normalization", () => {
+    const event = new KeyboardEvent("keydown", { key: " ", ctrlKey: true, shiftKey: true })
+    expect(parseKeyEvent(event)).toBe("Ctrl+Shift+Space")
+    expect(normalizeKeyCombo(parseKeyEvent(event))).toBe("ctrl+shift+space")
+  })
 })
 
 describe("formatKeybinding", () => {
@@ -77,5 +94,28 @@ describe("formatKeybinding", () => {
       expect(formatted).toContain("⇧")
       expect(formatted).not.toContain("+")
     })
+  })
+
+  it("takes an explicit platform, for callers that do not sniff navigator", () => {
+    // The selection-toolbar overlay renders in a window with none of the app
+    // stores hydrated and resolves the platform itself. It used to carry its
+    // own formatter, which rendered `ctrl` as `⌃` while Settings rendered the
+    // same stored chord as `⌘`.
+    withPlatform("Win32", () => {
+      expect(formatKeybinding("alt+shift+1", true)).toBe("⌥⇧1")
+      expect(formatKeybinding("ctrl+shift+space", true)).toBe("⌘⇧space")
+    })
+    withPlatform("MacIntel", () => {
+      expect(formatKeybinding("alt+shift+1", false)).toBe("Alt+Shift+1")
+    })
+  })
+
+  it("upper-cases single-character keys and leaves named keys alone", () => {
+    expect(formatKeybinding("alt+c", false)).toBe("Alt+C")
+    expect(formatKeybinding("alt+enter", false)).toBe("Alt+enter")
+  })
+
+  it("tolerates whitespace and odd casing from a user-edited binding", () => {
+    expect(formatKeybinding("Alt + Shift + 5", true)).toBe("⌥⇧5")
   })
 })

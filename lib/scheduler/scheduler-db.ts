@@ -11,7 +11,7 @@ import type {
   TaskFilter,
   TaskStatistics,
 } from "@/types/scheduler"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.app
 
@@ -22,11 +22,18 @@ interface DBScheduledTask {
   description?: string
   type: string
   trigger: string // JSON serialized TaskTrigger
-  payload: string // JSON serialized Record<string, unknown>
+  /** Denormalized event trigger discriminator for the v4 compound index. */
+  eventType: string
+  payload?: string // JSON serialized Record<string, unknown>
   config: string // JSON serialized TaskExecutionConfig
   notification: string // JSON serialized TaskNotificationConfig
+  createdBy?: string // JSON serialized ScheduledTaskCreator (v3)
   status: string
   tags?: string // JSON serialized string[]
+  endAt?: string // ISO date string
+  onSuccessTaskIds?: string // JSON serialized string[]
+  onFailureTaskIds?: string // JSON serialized string[]
+  consecutiveFailures?: number
   lastRunAt?: string // ISO date string
   nextRunAt?: string // ISO date string
   runCount: number
@@ -59,13 +66,35 @@ interface DBTaskExecution {
   logs: string // JSON serialized TaskExecutionLog[]
 }
 
+/**
+ * Tables this database deliberately does NOT persist on a headless host.
+ *
+ * `cli/src/db/bootstrap.ts` snapshots Dexie to a JSON file; every mutation
+ * schedules a re-dump, so a high-churn table makes the snapshot cost grow with
+ * uptime. `tasks` is low-churn configuration and MUST survive a restart —
+ * without it a `cognia serve` brain reboots with an empty schedule and silently
+ * stops firing. `executions` is append-heavy history the brain does not need
+ * across restarts: failures are already durable in `connectorAudit` and the
+ * Notification Center, and `interruptStaleExecutions()` has nothing to reconcile
+ * when the table starts empty.
+ *
+ * This is intentional dormancy, so it is labelled on all three axes: here at
+ * the type, in the snapshot source that consumes it, and pinned by
+ * `scheduler-db.test.ts` / `bootstrap.test.ts`. Do not "fix" it by adding
+ * `executions` to the snapshot — measure the flush cost first (see W3.1).
+ */
+export const SCHEDULER_SNAPSHOT_EXCLUDED_TABLES: readonly string[] = ["executions"]
+
+/** Dexie database name — the key this database occupies in a host snapshot. */
+export const SCHEDULER_DB_NAME = "CogniaSchedulerDB"
+
 // Database class
 class SchedulerDatabase extends Dexie {
   tasks!: EntityTable<DBScheduledTask, "id">
   executions!: EntityTable<DBTaskExecution, "id">
 
-  constructor() {
-    super("CogniaSchedulerDB")
+  constructor(name: string = SCHEDULER_DB_NAME) {
+    super(name)
 
     this.version(1).stores({
       tasks: "id, name, type, status, nextRunAt, createdAt, [status+nextRunAt]",
@@ -76,6 +105,42 @@ class SchedulerDatabase extends Dexie {
       tasks: "id, name, type, status, nextRunAt, createdAt, [status+nextRunAt], [status+type]",
       executions: "id, taskId, status, startedAt, [taskId+startedAt]",
     })
+
+    // v3 — task author provenance. Existing schedules were necessarily
+    // user-authored because no agent/plugin creation surface existed before
+    // this version, so the backfill is deterministic and idempotent.
+    this.version(3)
+      .stores({
+        tasks: "id, name, type, status, nextRunAt, createdAt, [status+nextRunAt], [status+type]",
+        executions: "id, taskId, status, startedAt, [taskId+startedAt]",
+      })
+      .upgrade((tx) =>
+        tx
+          .table<DBScheduledTask, string>("tasks")
+          .toCollection()
+          .modify((task) => {
+            if (!task.createdBy) task.createdBy = JSON.stringify({ kind: "user" })
+          })
+      )
+
+    // v4 — event-trigger lookup. `trigger` is serialized JSON, so the previous
+    // query loaded every active task and filtered it in JavaScript. Persisting
+    // the event discriminator makes both exact-event and all-event lookups use
+    // one compound index. Empty string denotes a non-event trigger.
+    this.version(4)
+      .stores({
+        tasks:
+          "id, name, type, status, nextRunAt, createdAt, [status+nextRunAt], [status+type], [status+eventType]",
+        executions: "id, taskId, status, startedAt, [taskId+startedAt]",
+      })
+      .upgrade((tx) =>
+        tx
+          .table<DBScheduledTask, string>("tasks")
+          .toCollection()
+          .modify((task) => {
+            task.eventType = eventTypeFromSerializedTrigger(task.trigger)
+          })
+      )
   }
 
   // ========== Task Operations ==========
@@ -101,10 +166,12 @@ class SchedulerDatabase extends Dexie {
     const task = await this.tasks.get(taskId)
     if (!task) return false
 
-    await this.transaction("rw", [this.tasks, this.executions], async () => {
-      await this.executions.where("taskId").equals(taskId).delete()
-      await this.tasks.delete(taskId)
-    })
+    await this.transaction("rw", [this.tasks, this.executions], () =>
+      Promise.all([
+        this.executions.where("taskId").equals(taskId).delete(),
+        this.tasks.delete(taskId),
+      ]).then(() => undefined)
+    )
 
     return true
   }
@@ -115,6 +182,48 @@ class SchedulerDatabase extends Dexie {
   async getTask(taskId: string): Promise<ScheduledTask | null> {
     const dbTask = await this.tasks.get(taskId)
     return dbTask ? deserializeTask(dbTask) : null
+  }
+
+  /**
+   * Atomically claim one persisted schedule slot and advance the task to its
+   * next slot. The transaction also reserves one run from `maxRuns` before any
+   * execution starts, so a short interval cannot admit several overlapping
+   * runs against the same remaining budget. Exactly one renderer/process
+   * callback can win for a given `(taskId, expectedRunAt)` pair.
+   */
+  async claimTaskSlot(
+    taskId: string,
+    expectedRunAt: Date,
+    nextRunAt?: Date
+  ): Promise<ScheduledTask | null> {
+    return this.transaction("rw", this.tasks, async () => {
+      const dbTask = await this.tasks.get(taskId)
+      if (
+        !dbTask ||
+        dbTask.status !== "active" ||
+        dbTask.nextRunAt !== expectedRunAt.toISOString()
+      ) {
+        return null
+      }
+
+      const config = JSON.parse(dbTask.config) as ScheduledTask["config"]
+      const maxRuns = config.maxRuns
+      if (typeof maxRuns === "number" && maxRuns > 0 && dbTask.runCount >= maxRuns) {
+        return null
+      }
+      const runCount = dbTask.runCount + 1
+      const exhaustedBudget = typeof maxRuns === "number" && maxRuns > 0 && runCount >= maxRuns
+      const claimed: DBScheduledTask = {
+        ...dbTask,
+        runCount,
+        // Do not expose another slot once this reservation consumes the final
+        // budget. The in-flight run finalizes the task as expired.
+        nextRunAt: exhaustedBudget ? undefined : nextRunAt?.toISOString(),
+        updatedAt: new Date().toISOString(),
+      }
+      await this.tasks.put(claimed)
+      return deserializeTask(claimed)
+    })
   }
 
   /**
@@ -170,20 +279,34 @@ class SchedulerDatabase extends Dexie {
     return tasks
   }
 
-  /**
-   * Get active event-triggered tasks, optionally filtered by eventType
-   */
+  /** Get active event-triggered tasks, optionally filtered by eventType. */
   async getActiveEventTasks(eventType?: string): Promise<ScheduledTask[]> {
-    // Use status index to narrow down, then filter by trigger type in memory
-    // (trigger.type is inside serialized JSON, not a separate indexed column)
-    const activeTasks = await this.tasks.where("status").equals("active").toArray()
+    const collection = eventType
+      ? this.tasks.where("[status+eventType]").equals(["active", eventType])
+      : this.tasks
+          .where("[status+eventType]")
+          // Empty string is the persisted sentinel for non-event triggers.
+          // Excluding the lower bound reads only active event rows.
+          .between(["active", ""], ["active", Dexie.maxKey], false, true)
+    const dbTasks = await collection.toArray()
+    return dbTasks.map(safeDeserializeTask).filter((t): t is ScheduledTask => t !== null)
+  }
 
-    return activeTasks
-      .map(safeDeserializeTask)
-      .filter((t): t is ScheduledTask => t !== null)
-      .filter(
-        (t) => t.trigger.type === "event" && (!eventType || t.trigger.eventType === eventType)
-      )
+  /**
+   * Active tasks whose nextRunAt is already due (<= now) — used by the
+   * missed-task sweep. Uses the `[status+nextRunAt]` compound index instead
+   * of fetching every active task and filtering in JS; safe because
+   * `nextRunAt` is stored as a fixed-width ISO-8601 string, so lexicographic
+   * ordering matches chronological ordering. Tasks with no `nextRunAt` are
+   * naturally excluded — a compound-index entry requires every key part.
+   */
+  async getOverdueActiveTasks(now: Date = new Date()): Promise<ScheduledTask[]> {
+    const nowIso = now.toISOString()
+    const dbTasks = await this.tasks
+      .where("[status+nextRunAt]")
+      .between(["active", ""], ["active", nowIso], true, true)
+      .toArray()
+    return dbTasks.map(safeDeserializeTask).filter((t): t is ScheduledTask => t !== null)
   }
 
   /**
@@ -249,6 +372,22 @@ class SchedulerDatabase extends Dexie {
     return dbExecutions.map(safeDeserializeExecution).filter((e): e is TaskExecution => e !== null)
   }
 
+  /** Get recent executions whose persisted task type belongs to one source. */
+  async getRecentExecutionsMatching(
+    ownsTaskType: (taskType: string) => boolean,
+    limit: number = 50
+  ): Promise<TaskExecution[]> {
+    const dbExecutions = await this.executions
+      .orderBy("startedAt")
+      .reverse()
+      .filter((execution) => ownsTaskType(execution.taskType))
+      .limit(limit)
+      .toArray()
+    return dbExecutions
+      .map(safeDeserializeExecution)
+      .filter((execution): execution is TaskExecution => execution !== null)
+  }
+
   /**
    * Get execution by ID
    */
@@ -273,6 +412,31 @@ class SchedulerDatabase extends Dexie {
     }
 
     return oldIds.length
+  }
+
+  /**
+   * Boot reconciliation: flip orphaned `running` / `pending` executions to
+   * `cancelled`. Their in-memory controllers (`runningByTask`,
+   * `executionControllers`) live only for the process that started them, so a
+   * reload or crash leaves the Dexie row stuck "running" forever — the missed-
+   * task sweep reconciles *tasks*, never *executions*. Mirrors
+   * `interruptBackgroundTasksOnBoot` for the scheduler's execution table.
+   *
+   * Returns the number of rows reconciled. Called once at scheduler startup.
+   */
+  async interruptStaleExecutions(now: Date = new Date()): Promise<number> {
+    const nowIso = now.toISOString()
+    const stale = await this.executions.where("status").anyOf("running", "pending").toArray()
+    if (stale.length === 0) return 0
+    const patched = stale.map((e) => ({
+      ...e,
+      status: "cancelled" as const,
+      terminalReason: "interrupted-on-restart" as const,
+      error: e.error ?? "Interrupted by app restart",
+      completedAt: e.completedAt ?? nowIso,
+    }))
+    await this.executions.bulkPut(patched)
+    return patched.length
   }
 
   // ========== Statistics ==========
@@ -340,10 +504,12 @@ class SchedulerDatabase extends Dexie {
    * Clear all data (for testing/reset)
    */
   async clearAll(): Promise<void> {
-    await this.transaction("rw", [this.tasks, this.executions], async () => {
-      await this.tasks.clear()
-      await this.executions.clear()
-    })
+    await this.transaction("rw", [this.tasks, this.executions], () =>
+      this.tasks
+        .clear()
+        .then(() => this.executions.clear())
+        .then(() => undefined)
+    )
   }
 }
 
@@ -359,11 +525,17 @@ function serializeTask(task: ScheduledTask): DBScheduledTask {
       ...task.trigger,
       runAt: task.trigger.runAt?.toISOString(),
     }),
-    payload: JSON.stringify(task.payload),
+    eventType: task.trigger.type === "event" ? (task.trigger.eventType ?? "") : "",
+    payload: task.payload !== undefined ? JSON.stringify(task.payload) : undefined,
     config: JSON.stringify(task.config),
     notification: JSON.stringify(task.notification),
+    createdBy: JSON.stringify(task.createdBy ?? { kind: "user" }),
     status: task.status,
     tags: task.tags ? JSON.stringify(task.tags) : undefined,
+    endAt: task.endAt?.toISOString(),
+    onSuccessTaskIds: task.onSuccessTaskIds ? JSON.stringify(task.onSuccessTaskIds) : undefined,
+    onFailureTaskIds: task.onFailureTaskIds ? JSON.stringify(task.onFailureTaskIds) : undefined,
+    consecutiveFailures: task.consecutiveFailures,
     lastRunAt: task.lastRunAt?.toISOString(),
     nextRunAt: task.nextRunAt?.toISOString(),
     runCount: task.runCount,
@@ -377,8 +549,26 @@ function serializeTask(task: ScheduledTask): DBScheduledTask {
   }
 }
 
+function eventTypeFromSerializedTrigger(serialized: string): string {
+  try {
+    const trigger = JSON.parse(serialized) as { type?: unknown; eventType?: unknown }
+    return trigger.type === "event" && typeof trigger.eventType === "string"
+      ? trigger.eventType
+      : ""
+  } catch {
+    return ""
+  }
+}
+
 function deserializeTask(dbTask: DBScheduledTask): ScheduledTask {
   const trigger = JSON.parse(dbTask.trigger)
+  const config = JSON.parse(dbTask.config) as ScheduledTask["config"]
+  // Load-time migration: derive overlapPolicy from the legacy boolean for
+  // tasks persisted before the policy field existed. Idempotent — an
+  // explicit policy is never clobbered. Persists on the task's next update.
+  if (config.overlapPolicy === undefined) {
+    config.overlapPolicy = config.allowConcurrent ? "allow" : "skip"
+  }
   return {
     id: dbTask.id,
     name: dbTask.name,
@@ -388,11 +578,16 @@ function deserializeTask(dbTask: DBScheduledTask): ScheduledTask {
       ...trigger,
       runAt: trigger.runAt ? new Date(trigger.runAt) : undefined,
     },
-    payload: JSON.parse(dbTask.payload),
-    config: JSON.parse(dbTask.config),
+    payload: dbTask.payload !== undefined ? JSON.parse(dbTask.payload) : undefined,
+    config,
     notification: JSON.parse(dbTask.notification),
+    createdBy: dbTask.createdBy ? JSON.parse(dbTask.createdBy) : { kind: "user" },
     status: dbTask.status as ScheduledTask["status"],
     tags: dbTask.tags ? JSON.parse(dbTask.tags) : undefined,
+    endAt: dbTask.endAt ? new Date(dbTask.endAt) : undefined,
+    onSuccessTaskIds: dbTask.onSuccessTaskIds ? JSON.parse(dbTask.onSuccessTaskIds) : undefined,
+    onFailureTaskIds: dbTask.onFailureTaskIds ? JSON.parse(dbTask.onFailureTaskIds) : undefined,
+    consecutiveFailures: dbTask.consecutiveFailures,
     lastRunAt: dbTask.lastRunAt ? new Date(dbTask.lastRunAt) : undefined,
     nextRunAt: dbTask.nextRunAt ? new Date(dbTask.nextRunAt) : undefined,
     runCount: dbTask.runCount,

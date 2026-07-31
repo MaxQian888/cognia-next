@@ -1,0 +1,308 @@
+{
+  "autocomplete": {
+    "debounce": {
+      "label": "Debounce (ms)"
+    },
+    "exe": {
+      "label": "Command names"
+    },
+    "helper": "Show GitHub-Copilot-style inline command suggestions as you type. Tab or → accepts; Esc dismisses. Accepting only fills the line — it never runs the command.",
+    "label": "AI command autocomplete",
+    "path": {
+      "label": "File paths"
+    },
+    "persistHistory": {
+      "helper": "Store executed commands locally so suggestions survive restarts. Lines that look like secrets are never stored.",
+      "label": "Persist command history"
+    },
+    "popup": {
+      "helper": "Ctrl+Space or a second Tab opens a keyboard-navigable list of candidates at the cursor.",
+      "label": "Candidate popup"
+    },
+    "privacy": "When AI is enabled, the current command, working directory, and recent history are sent to your configured model to generate a suggestion. Context that looks like a secret (API keys, tokens, credentials) is detected and skipped. Plugin-contributed providers are unaffected by this setting.",
+    "source": {
+      "ai": "AI only",
+      "both": "History + AI",
+      "history": "History only",
+      "label": "Suggestion source"
+    },
+    "spec": {
+      "label": "CLI flags"
+    }
+  },
+  "bell": {
+    "both": "Flash and sound",
+    "helper": "How the terminal reacts to the BEL character (\\a) programs emit — e.g. shell completion failures or long-running commands ringing on finish.",
+    "label": "Terminal bell",
+    "none": "Off",
+    "sound": "Sound",
+    "visual": "Visual flash"
+  },
+  "boldBrightColors": {
+    "helper": "Render bold ANSI text with the bright variant of its color.",
+    "label": "Bright colors for bold text"
+  },
+  "colorScheme": {
+    "auto": "Auto (follow app theme)",
+    "darkGroup": "Dark schemes",
+    "label": "Color scheme",
+    "lightGroup": "Light schemes"
+  },
+  "commandActions": {
+    "helper": "Make the per-command gutter dots interactive: click one to rerun the command or copy the command and its output, with the exit code and duration.",
+    "label": "Command actions"
+  },
+  "confirmOnClose": {
+    "helper": "Ask before closing a tab whose shell is still running a command, so an accidental close doesn't kill an in-flight run. Idle tabs always close immediately.",
+    "label": "Confirm before closing a running terminal"
+  },
+  "copyOnSelect": {
+    "helper": "When on, every text selection in a terminal is auto-copied to the clipboard. Off by default so accidental selection doesn't overwrite your clipboard.",
+    "label": "Copy on selection"
+  },
+  "cursor": {
+    "bar": "Bar",
+    "blink": "Cursor blink",
+    "block": "Block",
+    "inactiveBar": "Bar",
+    "inactiveBlock": "Block",
+    "inactiveLabel": "Inactive cursor",
+    "inactiveNone": "Hidden",
+    "inactiveOutline": "Outline",
+    "inactiveUnderline": "Underline",
+    "label": "Cursor style",
+    "underline": "Underline",
+    "width": "Cursor width",
+    "widthHelper": "Cursor width applies to bar-style cursors and is clamped to 1–10 pixels."
+  },
+  "customGlyphs": {
+    "helper": "Use xterm's built-in box-drawing and block glyphs for crisp terminal UI.",
+    "label": "Custom terminal glyphs"
+  },
+  "exposeDockToAgents": {
+    "helper": "Lets the chat agent drive your visible terminal tabs via the synthetic terminal_dock_* MCP tools. The agent shares the same PTY you see — one shell, one cwd, one history. Each tab requires per-session consent. Off by default.",
+    "label": "Expose dock to agents"
+  },
+  "fontFamily": {
+    "label": "Font family",
+    "nerdFontHelper": "oh-my-posh and powerlevel10k prompts need a Nerd Font for their icons. The app ships MesloLGS NF, so they render out of the box — click below to select it, or type your own installed Nerd Font.",
+    "pickerHint": "Pick from monospace fonts detected on this device.",
+    "pickerLabel": "Detected fonts",
+    "reset": "Reset font to default",
+    "useNerdFont": "Use bundled Nerd Font (MesloLGS NF)"
+  },
+  "fontPreview": {
+    "label": "Preview",
+    "missing": "\"{family}\" isn't installed on this machine — the terminal is falling back to the next font in the stack.",
+    "resolved": "Rendering with \"{family}\" at {size}px."
+  },
+  "fontSize": {
+    "label": "Font size"
+  },
+  "fontWeight": {
+    "bold": "Bold",
+    "label": "Font weight",
+    "normal": "Normal"
+  },
+  "fontWeightBold": {
+    "label": "Bold text weight"
+  },
+  "forceUtf8": {
+    "helper": "Pin PowerShell / cmd console output to UTF-8 so powerline glyphs and CJK text render correctly on non-UTF-8 system codepages (e.g. GBK on Chinese Windows). Leave on unless you depend on the legacy codepage.",
+    "label": "Force UTF-8 output"
+  },
+  "groups": {
+    "agents": "Agents & automation",
+    "ai": "AI autocomplete",
+    "appearance": "Appearance",
+    "behavior": "Behavior",
+    "host": "Durable terminal host",
+    "productivity": "Productivity",
+    "shell": "Shell & session"
+  },
+  "heading": "Integrated terminal",
+  "host": {
+    "diagnostics": {
+      "helper": "Collect bounded transport lifecycle, version, overflow, and error-code diagnostics. Terminal input, output, credentials, and full identifiers are never collected.",
+      "label": "Share terminal diagnostics"
+    },
+    "maxRemoteSessions": {
+      "helper": "Maximum sessions each paired device may create remotely.",
+      "label": "Remote sessions per device"
+    },
+    "maxSessions": {
+      "helper": "Maximum number of live local and SSH sessions owned by this host.",
+      "label": "Live sessions"
+    },
+    "operationFailed": "The terminal host setting could not be saved.",
+    "remoteAccess": {
+      "helper": "Allow independently authorized paired devices to attach over LAN or WAN.",
+      "label": "Remote terminal access"
+    },
+    "replayPerSession": {
+      "helper": "Maximum in-memory replay retained for each live session, in MiB.",
+      "label": "Replay per session (MiB)"
+    },
+    "replayTotal": {
+      "helper": "Maximum in-memory replay retained across all live sessions, in MiB.",
+      "label": "Total replay memory (MiB)"
+    },
+    "startAtLogin": {
+      "helper": "Start the lightweight terminal host when you sign in so remote sessions are reachable before Cognia opens.",
+      "label": "Start host at login"
+    }
+  },
+  "letterSpacing": {
+    "label": "Letter spacing (px)"
+  },
+  "ligatures": {
+    "helper": "Render programming-font ligatures (Cascadia Code, JetBrains Mono, Fira Code). Off by default; toggling reloads the terminal.",
+    "label": "Font ligatures"
+  },
+  "lineHeight": {
+    "helper": "Line height multiplies the font size; letter spacing adds horizontal pixels between glyphs. Both re-fit the terminal.",
+    "label": "Line height"
+  },
+  "minContrast": {
+    "aa": "WCAG AA (4.5)",
+    "aaa": "WCAG AAA (7)",
+    "helper": "Force a minimum contrast ratio between text and background for legibility. Off keeps the raw ANSI colors; AA / AAA meet WCAG; Maximum forces black/white.",
+    "label": "Minimum contrast",
+    "max": "Maximum (21)",
+    "off": "Off"
+  },
+  "profiles": {
+    "add": "Add profile",
+    "argsLabel": "Arguments (one per line)",
+    "argsPlaceholder": "-NoLogo",
+    "cwdLabel": "Working directory",
+    "cwdPlaceholder": "Working directory (optional)",
+    "empty": "No profiles yet.",
+    "envLabel": "Environment (KEY=VALUE per line)",
+    "envPlaceholder": "NODE_ENV=development",
+    "helper": "Named shell presets (shell + working directory) the new-tab menu can launch. Set one as default for the plain \"+ New\" button.",
+    "isDefault": "Default",
+    "nameLabel": "Profile name",
+    "namePlaceholder": "Profile name",
+    "newName": "New profile",
+    "remove": "Remove profile",
+    "setDefault": "Set as default",
+    "shellLabel": "Shell",
+    "syncError": "Could not synchronize terminal profiles with the terminal host",
+    "title": "Launch profiles"
+  },
+  "projectOverride": {
+    "cwdLabel": "Working directory",
+    "cwdPlaceholder": "/path/to/cwd",
+    "emptyProjects": "No projects yet — overrides become available once you create one.",
+    "helper": "Pick a project to override its shell or cwd. Empty fields fall back to the global default.",
+    "selectProject": "Select a project…",
+    "shellLabel": "Shell",
+    "shellPlaceholder": "/usr/local/bin/fish",
+    "title": "Per-project override"
+  },
+  "quickFixes": {
+    "helper": "Show a lightbulb on a failed command offering a fix — git push --set-upstream, “did you mean”, create-PR link, freeing a busy port, pwsh command-not-found, and more.",
+    "label": "Quick fixes"
+  },
+  "rescaleOverlappingGlyphs": {
+    "helper": "Rescale wide glyphs that would otherwise overlap adjacent terminal cells.",
+    "label": "Rescale overlapping glyphs"
+  },
+  "renderer": {
+    "auto": "Auto",
+    "canvas": "Canvas",
+    "dom": "DOM",
+    "helper": "Auto picks GPU-accelerated WebGL, falling back to Canvas then DOM. Switch to Canvas or DOM if the terminal renders blank or garbled.",
+    "label": "Renderer",
+    "webgl": "WebGL"
+  },
+  "runInDockTimeout": {
+    "helper": "How long the chat 'Run in dock' affordance and the agent's terminal_dock_write tool wait for a command_end OSC 633 event before timing out. Per-call overrides win; this is the floor. Range 5–600, default 60.",
+    "label": "Run-in-dock timeout (seconds)"
+  },
+  "sandboxed": {
+    "helper": "Launch dock terminals inside the OS sandbox (bwrap / sandbox-exec): writes are confined to the session working directory, your home stays read-only, network stays on. Experimental; off by default and not yet available on Windows.",
+    "label": "Sandboxed terminal"
+  },
+  "scrollSensitivity": {
+    "helper": "Lines scrolled per mouse-wheel notch. Alt-scroll moves 5× faster.",
+    "label": "Scroll speed (lines)"
+  },
+  "scrollback": {
+    "helper": "Number of lines kept in xterm's history buffer. Range 1000–100000.",
+    "label": "Scrollback lines"
+  },
+  "smoothScrolling": {
+    "helper": "Animate wheel and touchpad scrolling instead of jumping between terminal rows.",
+    "label": "Smooth scrolling"
+  },
+  "shell": {
+    "auto": "Auto-detect (recommended)",
+    "bash": "bash",
+    "cmd": "Command Prompt (cmd.exe)",
+    "custom": "Custom path…",
+    "customLabel": "Custom shell path",
+    "helper": "Auto-detect picks pwsh on Windows, zsh on macOS, bash on Linux. Per-project overrides win when set. cmd.exe spawns without OSC 633 integration.",
+    "label": "Default shell",
+    "powershell": "Windows PowerShell (powershell.exe)",
+    "pwsh": "PowerShell 7 (pwsh.exe)",
+    "zsh": "zsh"
+  },
+  "shellIntegration": {
+    "helper": "Injects OSC 633 prompt markers (bash / zsh / pwsh) so the dock can show command status and cwd badges. Disable for shells that mis-parse the sequences.",
+    "label": "Enable shell integration"
+  },
+  "ssh": {
+    "add": "Add SSH host",
+    "auth": {
+      "password": "Password",
+      "privateKey": "Private key"
+    },
+    "connect": "Connect",
+    "connecting": "Connecting…",
+    "empty": "No SSH hosts saved yet.",
+    "fields": {
+      "authMethod": "Authentication method",
+      "credentialSaved": "Credential saved securely",
+      "host": "Host",
+      "hostPlaceholder": "server.example.com",
+      "name": "Display name",
+      "passphrase": "Key passphrase",
+      "passphraseOptional": "Key passphrase (optional)",
+      "password": "Password",
+      "port": "Port",
+      "privateKeyPath": "Private key path",
+      "privateKeyPathPlaceholder": "~/.ssh/id_ed25519",
+      "username": "Username"
+    },
+    "helper": "Credentials are stored in the system keyring. The first connection trusts and saves the host fingerprint; changed fingerprints are rejected.",
+    "newName": "New SSH host",
+    "remove": "Remove SSH host",
+    "title": "SSH hosts",
+    "toasts": {
+      "connectFailed": "SSH connection failed",
+      "credentialRequired": "Enter a password before connecting.",
+      "learned": "Connected and saved the host fingerprint",
+      "removeFailed": "Could not remove the SSH host",
+      "syncFailed": "Could not synchronize SSH profiles with the terminal host",
+      "verified": "Connected with a verified host fingerprint"
+    }
+  },
+  "stickyScroll": {
+    "helper": "Pin the current command's prompt line at the top of the viewport while you scroll through its output.",
+    "label": "Sticky scroll"
+  },
+  "subheading": "Default shell, font and scrollback for the bottom dock. Per-project overrides take precedence over these defaults.",
+  "unattended": {
+    "askPolicy": {
+      "consent": "Ask in the terminal dock",
+      "fail": "Fail the step",
+      "helper": "Applies to commands the safety classifier is unsure about (verdict \"ask\").",
+      "label": "When a command needs confirmation",
+      "run": "Run anyway"
+    },
+    "helper": "Let workflow terminal steps run shell commands headlessly — no visible terminal tab, no consent prompt. Every command is screened by the safety classifier first; clearly dangerous commands are always blocked.",
+    "label": "Allow unattended execution"
+  }
+}

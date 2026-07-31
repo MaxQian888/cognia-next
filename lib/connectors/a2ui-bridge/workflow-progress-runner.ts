@@ -38,12 +38,14 @@
 import { liveQuery, type Subscription } from "dexie"
 import { getDb } from "@/lib/db/schema"
 import { enqueueOutbound } from "@/lib/db/outbound-jobs"
+import { topoSort } from "@/lib/workflow/runtime/topo-sort"
 import { listForWorkflow as listFanoutForWorkflow } from "@/lib/db/workflow-fanout-subscriptions"
-import { parseConversationKey } from "@/types/connectors/event"
-import type { PlatformKind } from "@/types/connectors/platform-kind"
+import type { ConversationDeliveryTarget } from "@/types/connectors/event"
+import { getConnectorConversationState } from "@/lib/db/connector-conversation-state"
 import { getBus } from "@/lib/connectors/bus"
 import type {
   RunStatus,
+  WorkflowNode,
   WorkflowRunEventRow,
   WorkflowRunRow,
   WorkflowTriggeredFrom,
@@ -59,9 +61,11 @@ import {
 } from "./workflow-to-a2ui"
 import { buildA2UISegment } from "./a2ui-to-segments"
 import type { MessageSegment } from "@/types/connectors/segment"
+import { FlushCoalescer } from "../_shared/flush-coalescer"
 
 const ACTIVE_STATUSES: ReadonlyArray<RunStatus> = ["pending", "running", "waiting", "paused"]
 const TERMINAL_STATUSES: ReadonlyArray<RunStatus> = ["succeeded", "failed", "cancelled"]
+const COMMENTARY_MAX_CHARS = 500
 
 /**
  * Per-channel state. One per (adapterId, conversationKey) pair on a
@@ -75,15 +79,18 @@ interface ChannelState {
   channelKey: string
   adapterId: string
   conversationKey: string
+  deliveryTarget?: ConversationDeliveryTarget
   mode: "cumulative" | "append"
   /** ID of the FIRST enqueue's outbound job (cumulative mode only). */
   entryJobId: string | null
   /** Cached `platformMessageId` for the entry card (cumulative mode only). */
   entryPlatformMessageId: string | null
-  /** True while a cumulative flush is in flight on this channel. */
-  flushing: boolean
-  /** Set when a flush was attempted while another was in flight. */
-  flushQueued: boolean
+  /**
+   * Per-channel in-flight coalescer for cumulative flushes (lazily created on
+   * the first flush so it can bind the runner's `enqueue`). Replaces the
+   * former `flushing`/`flushQueued` pair — shared with the activity dispatcher.
+   */
+  flushCoalescer: FlushCoalescer<void> | null
   /** Per-channel step-start timestamps for the append-mode duration tag. */
   appendStartedAtByStepId: Map<string, number>
   /** True once the terminal final-surface emit fired on this channel. */
@@ -152,7 +159,11 @@ export function startWorkflowProgressRunner(
   const listSubs = opts.listSubscriptions ?? listFanoutForWorkflow
 
   const runsObservable = liveQuery(async () => {
-    return getDb().workflowRuns.toArray()
+    // Only IM-triggered runs need progress fan-out. Query the v91
+    // `triggeredBySource` index so UI/API workflow runs never wake this
+    // watcher (previously this scanned the whole `workflowRuns` table and
+    // filtered `triggeredBy.source === "im"` in JS).
+    return getDb().workflowRuns.where("triggeredBySource").equals("im").toArray()
   })
 
   runsSub = runsObservable.subscribe({
@@ -189,9 +200,12 @@ async function reconcileWatchers(
 ): Promise<void> {
   const seen = new Set<string>()
   for (const row of rows) {
+    // The liveQuery already restricts to `triggeredBySource === "im"`, so a row
+    // here is IM-sourced; we still need its adapterId + conversationKey to fan
+    // out. `triggeredBy` is guaranteed present for IM rows, but null-guard it
+    // defensively in case a hand-written row slips the index.
     const tb = row.triggeredBy
-    if (!tb || tb.source !== "im") continue
-    if (!tb.adapterId || !tb.conversationKey) continue
+    if (!tb || !tb.adapterId || !tb.conversationKey) continue
     seen.add(row.id)
 
     let watcher = watchers.get(row.id)
@@ -242,6 +256,59 @@ async function reconcileWatchers(
   }
 }
 
+/**
+ * Pre-declare every step the run will attempt, so the card reads as a plan
+ * that ticks off rather than a log that grows. Ordered topologically — the
+ * orchestrator's own execution order — so the declaration matches the order
+ * things really happen. A cyclic graph (which the orchestrator itself would
+ * reject before running) falls back to the snapshot's node order rather than
+ * leaving the conversation with no card at all.
+ *
+ * `annotation.*` nodes are excluded: they're canvas-only (sticky notes, group
+ * frames) with no registered executor, so a declared annotation would sit at
+ * ◻ forever. `trigger.*` nodes are deliberately KEPT — they have real
+ * executors, are scheduled, and already emit step events onto this card
+ * today; declaring them keeps the topo order honest, so the trigger renders
+ * where it actually runs (first) instead of being appended last when its
+ * event lands.
+ *
+ * `foldEventIntoState` later overwrites these entries by step id, and
+ * `Map.set` on an existing key keeps its original position — so the declared
+ * order stays stable as steps transition.
+ */
+function seedDeclaredSteps(
+  snapshot: WorkflowRunRow["workflowSnapshot"] | undefined,
+  labelByStepId: Map<string, string>
+): Map<string, CumulativeStepEntry> {
+  const steps = new Map<string, CumulativeStepEntry>()
+  if (!snapshot || !Array.isArray(snapshot.nodes)) return steps
+
+  const byId = new Map<string, WorkflowNode>()
+  for (const node of snapshot.nodes) {
+    if (node && typeof node === "object" && typeof node.id === "string") {
+      byId.set(node.id, node)
+    }
+  }
+
+  let order: string[]
+  try {
+    order = topoSort(snapshot).order
+  } catch {
+    order = [...byId.keys()]
+  }
+
+  for (const stepId of order) {
+    const node = byId.get(stepId)
+    if (!node || node.type.startsWith("annotation.")) continue
+    steps.set(stepId, {
+      stepId,
+      label: labelByStepId.get(stepId) ?? stepId,
+      status: "pending",
+    })
+  }
+  return steps
+}
+
 async function createWatcher(
   row: WorkflowRunRow,
   triggeredBy: WorkflowTriggeredFrom,
@@ -264,25 +331,32 @@ async function createWatcher(
 
   const channels = new Map<string, ChannelState>()
 
-  function addChannel(adapterId: string, conversationKey: string): void {
+  function addChannel(
+    adapterId: string,
+    conversationKey: string,
+    deliveryTarget?: ConversationDeliveryTarget
+  ): void {
     const key = channelKey(adapterId, conversationKey)
     if (channels.has(key)) return
     channels.set(key, {
       channelKey: key,
       adapterId,
       conversationKey,
+      ...(deliveryTarget ? { deliveryTarget } : {}),
       mode: supportsEdit(adapterId) ? "cumulative" : "append",
       entryJobId: null,
       entryPlatformMessageId: null,
-      flushing: false,
-      flushQueued: false,
+      flushCoalescer: null,
       appendStartedAtByStepId: new Map(),
       finalEmitted: false,
     })
   }
 
   // 1. Originator is always a channel. Inferred from triggeredBy.
-  addChannel(triggeredBy.adapterId!, triggeredBy.conversationKey!)
+  const originDeliveryTarget =
+    triggeredBy.deliveryTarget ??
+    (await getConnectorConversationState(triggeredBy.conversationKey!))?.deliveryTarget
+  addChannel(triggeredBy.adapterId!, triggeredBy.conversationKey!, originDeliveryTarget)
 
   // 2. Live fan-out subscriptions for this workflow. The `addChannel`
   // dedup absorbs the case where the operator subscribed the channel
@@ -290,7 +364,11 @@ async function createWatcher(
   try {
     const subs = await listSubs(row.workflowId)
     for (const sub of subs) {
-      addChannel(sub.adapterId, sub.conversationKey)
+      addChannel(
+        sub.adapterId,
+        sub.conversationKey,
+        (await getConnectorConversationState(sub.conversationKey))?.deliveryTarget
+      )
     }
   } catch (err) {
     console.error(`[workflow-progress-runner] listSubs failed for ${row.workflowId}`, err)
@@ -304,7 +382,7 @@ async function createWatcher(
     startedAt: row.startedAt,
     labelByStepId,
     lastEmittedTs: 0,
-    steps: new Map(),
+    steps: seedDeclaredSteps(snapshot, labelByStepId),
     status: "running",
     eventsSub: null,
     finalEmitted: false,
@@ -384,6 +462,23 @@ function foldEventIntoState(watcher: RunWatcher, ev: WorkflowRunEventRow): void 
       }
       entry.status = "skipped"
       entry.endedAt = ev.ts
+      watcher.steps.set(ev.stepId, entry)
+      break
+    }
+    case "step_commentary": {
+      const payload = ev.payload as { delta?: unknown } | undefined
+      if (!payload || typeof payload.delta !== "string" || !payload.delta) break
+      const entry: CumulativeStepEntry = existing ?? {
+        stepId: ev.stepId,
+        label,
+        status: "running",
+      }
+      entry.status = entry.status === "pending" ? "running" : entry.status
+      const commentary = `${entry.commentary ?? ""}${payload.delta}`
+      entry.commentary =
+        commentary.length <= COMMENTARY_MAX_CHARS
+          ? commentary
+          : `…${commentary.slice(-(COMMENTARY_MAX_CHARS - 1))}`
       watcher.steps.set(ev.stepId, entry)
       break
     }
@@ -479,51 +574,51 @@ async function flushCumulativeOnChannel(
   channel: ChannelState,
   enqueue: typeof enqueueOutbound
 ): Promise<void> {
-  if (channel.flushing) {
-    channel.flushQueued = true
-    return
+  if (!channel.flushCoalescer) {
+    channel.flushCoalescer = new FlushCoalescer<void>(() =>
+      flushCumulativeInner(watcher, channel, enqueue)
+    )
   }
-  channel.flushing = true
-  try {
-    const snapshot = buildStateSnapshot(watcher)
-    const surface = buildCumulativeStatusSurface(snapshot)
-    const surfaceId = `wf-status:${watcher.runId}:${channel.channelKey}`
-    const segment = buildA2UISegment(surfaceId, surface)
+  await channel.flushCoalescer.schedule()
+}
 
-    if (!channel.entryJobId) {
-      const job = await dispatch(
-        watcher,
-        channel,
-        [segment],
-        `wf-status-entry:${watcher.runId}:${channel.channelKey}`,
-        "",
-        enqueue,
-        null
-      )
-      if (job) channel.entryJobId = job.id
-    } else {
-      if (!channel.entryPlatformMessageId) {
-        const entryJob = await getDb().outboundQueue.get(channel.entryJobId)
-        if (entryJob?.platformMessageId) {
-          channel.entryPlatformMessageId = entryJob.platformMessageId
-        }
+async function flushCumulativeInner(
+  watcher: RunWatcher,
+  channel: ChannelState,
+  enqueue: typeof enqueueOutbound
+): Promise<void> {
+  const snapshot = buildStateSnapshot(watcher)
+  const surface = buildCumulativeStatusSurface(snapshot)
+  const surfaceId = `wf-status:${watcher.runId}:${channel.channelKey}`
+  const segment = buildA2UISegment(surfaceId, surface)
+
+  if (!channel.entryJobId) {
+    const job = await dispatch(
+      watcher,
+      channel,
+      [segment],
+      `wf-status-entry:${watcher.runId}:${channel.channelKey}`,
+      "",
+      enqueue,
+      null
+    )
+    if (job) channel.entryJobId = job.id
+  } else {
+    if (!channel.entryPlatformMessageId) {
+      const entryJob = await getDb().outboundQueue.get(channel.entryJobId)
+      if (entryJob?.platformMessageId) {
+        channel.entryPlatformMessageId = entryJob.platformMessageId
       }
-      await dispatch(
-        watcher,
-        channel,
-        [segment],
-        `wf-status:${watcher.runId}:${channel.channelKey}:${watcher.lastEmittedTs}`,
-        "",
-        enqueue,
-        channel.entryPlatformMessageId
-      )
     }
-  } finally {
-    channel.flushing = false
-    if (channel.flushQueued) {
-      channel.flushQueued = false
-      void Promise.resolve().then(() => flushCumulativeOnChannel(watcher, channel, enqueue))
-    }
+    await dispatch(
+      watcher,
+      channel,
+      [segment],
+      `wf-status:${watcher.runId}:${channel.channelKey}:${watcher.lastEmittedTs}`,
+      "",
+      enqueue,
+      channel.entryPlatformMessageId
+    )
   }
 }
 
@@ -573,6 +668,35 @@ async function emitFinal(
       )
     }
   }
+
+  // Proactive completion notification (workflow⇄IM parity). `emitFinal` runs
+  // exactly once per terminal IM-triggered run (guarded by `finalEmitted`), so
+  // this fires once. Best-effort + lazy import so the heavy notification graph
+  // never enters the connector bundle eagerly. `proactivePush` opt-in, PII gate,
+  // and dedup are all enforced downstream in `im-deliver.ts`; the durable center
+  // record is always written. Team runs ride this same path (their synthesized
+  // workflow carries `triggeredBy.source === "im"`), so this gives BOTH visual
+  // workflows and Agent Teams a completion event at one choke point.
+  const ck = watcher.triggeredBy.conversationKey
+  if (ck) {
+    const statusLabel =
+      watcher.status === "succeeded"
+        ? "完成 / done"
+        : watcher.status === "failed"
+          ? "失败 / failed"
+          : "已取消 / cancelled"
+    void import("@/lib/notifications/conversation-notify")
+      .then(({ notifyConversationOverIM }) =>
+        notifyConversationOverIM({
+          conversationKey: ck,
+          level: watcher.status === "failed" ? "error" : "info",
+          title: `工作流${statusLabel}: ${watcher.workflowName} / Workflow ${watcher.status}`,
+          body: watcher.terminalBody?.slice(0, 500),
+          dedupeKey: `wf-complete:${row.id}`,
+        })
+      )
+      .catch(() => undefined)
+  }
 }
 
 // ── dispatch (per-channel) ────────────────────────────────────────────────
@@ -586,18 +710,15 @@ async function dispatch(
   enqueue: typeof enqueueOutbound,
   editTargetMessageId: string | null
 ): Promise<OutboundJobRow | null> {
-  let platform: PlatformKind
-  try {
-    platform = parseConversationKey(channel.conversationKey).platform
-  } catch {
-    return null
-  }
+  const deliveryTarget = channel.deliveryTarget
+  if (!deliveryTarget || deliveryTarget.address.adapterId !== channel.adapterId) return null
   try {
     const job = await enqueue({
       adapterId: channel.adapterId,
       conversationKey: channel.conversationKey,
       request: {
-        conversationRef: { platform, adapterId: channel.adapterId },
+        conversationRef: deliveryTarget.conversationRef,
+        deliveryTarget,
         segments,
         metadata: { idempotencyKey },
         ...(editTargetMessageId ? { editTargetMessageId } : {}),

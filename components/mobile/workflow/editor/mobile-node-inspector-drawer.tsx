@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/drawer"
 import { InspectorPanel } from "@/components/workflow/editor/inspector-panel"
 import type { EditorStore } from "@/lib/workflow/editor/store"
+import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
 
 const SNAP_POINTS = [0.45, 0.9] as const
 
@@ -45,6 +46,8 @@ export function MobileNodeInspectorDrawer({
   onStartConnect,
 }: MobileNodeInspectorDrawerProps) {
   const t = useTranslations("mobile.workflow.editor")
+  // Android hardware / browser back closes the sheet instead of navigating.
+  useBackDismiss(open, () => onOpenChange(false))
   const [snap, setSnap] = useState<number | string | null>(SNAP_POINTS[0])
 
   // Re-peek at the smaller snap each time the drawer reopens so a fresh node

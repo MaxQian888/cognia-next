@@ -33,6 +33,13 @@ export interface AdapterStatusInfo {
   Icon: LucideIcon
   /** i18n key suffix under `settings.connections.adapters` for the label. */
   labelKey: string
+  /**
+   * Machine code for a non-nominal health state (e.g. `credentials_missing`),
+   * surfaced from the latest heartbeat. Localized by `healthReasonLabel` for
+   * a badge tooltip so operators see *why* an adapter is red without opening
+   * the Health tab. Undefined when disabled or nominal.
+   */
+  reason?: string
 }
 
 const STATUS_TINT: Record<AdapterStatus, string> = {
@@ -95,5 +102,6 @@ export function deriveAdapterStatus(
     tint: STATUS_TINT[status],
     Icon: STATUS_ICON[status],
     labelKey: HEALTH_LABEL_KEY[decision.state],
+    reason: health.current?.reason,
   }
 }

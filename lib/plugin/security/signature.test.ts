@@ -14,6 +14,24 @@ jest.mock("@tauri-apps/api/core", () => ({
   invoke: jest.fn(),
 }))
 
+const recordSilentFailureMock = jest.fn()
+jest.mock("../contracts/diagnostics-store", () => ({
+  recordSilentFailure: (...args: unknown[]) => recordSilentFailureMock(...args),
+}))
+
+// Control the runtime-detection gate so we can exercise both the host-present
+// (receipt consulted) and host-absent (no receipt) branches of `verify`. Keep
+// the rest of the module real — sibling consumers import isCapacitor etc.
+jest.mock("@/lib/platform/detect", () => ({
+  ...jest.requireActual("@/lib/platform/detect"),
+  isTauri: jest.fn(() => false),
+}))
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const invokeMock = (require("@tauri-apps/api/core") as { invoke: jest.Mock }).invoke
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const isTauriMock = (require("@/lib/platform/detect") as { isTauri: jest.Mock }).isTauri
+
 describe("official publisher anchor (Ed25519 build-time key)", () => {
   // The env var is unset in the test environment, so the official key is the
   // empty placeholder and NO official publisher should be seeded — closing the
@@ -54,6 +72,9 @@ describe("PluginSignatureVerifier", () => {
     resetPluginSignatureVerifier()
     verifier = new PluginSignatureVerifier()
     jest.clearAllMocks()
+    isTauriMock.mockReturnValue(false)
+    invokeMock.mockReset()
+    recordSilentFailureMock.mockReset()
   })
 
   afterEach(() => {
@@ -172,9 +193,97 @@ describe("PluginSignatureVerifier", () => {
     })
   })
 
-  describe("Verification Method", () => {
+  describe("Verification Method (policy gate)", () => {
     it("should have verify method that accepts plugin path", () => {
       expect(typeof verifier.verify).toBe("function")
+    })
+
+    it("rejects an unsigned plugin when signatures are required", async () => {
+      verifier.setConfig({ requireSignatures: true })
+      const result = await verifier.verify("/plugins/demo")
+      expect(result.valid).toBe(false)
+      expect(result.reason).toBe("Signature required but not found")
+    })
+
+    it("allows an unsigned plugin with a warning when signatures are not required", async () => {
+      verifier.setConfig({ requireSignatures: false })
+      const result = await verifier.verify("/plugins/demo")
+      expect(result.valid).toBe(true)
+      expect(result.warnings).toContain("Plugin is not signed")
+    })
+
+    it("does NOT invoke the (removed) file-based crypto command", async () => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { invoke } = require("@tauri-apps/api/core") as { invoke: jest.Mock }
+      verifier.setConfig({ requireSignatures: false })
+      await verifier.verify("/plugins/demo")
+      expect(invoke).not.toHaveBeenCalledWith("plugin_verify_signature", expect.anything())
+    })
+
+    it("caches a rejection so the second call is served from cache", async () => {
+      verifier.setConfig({ requireSignatures: true, cacheVerifications: true })
+      const first = await verifier.verify("/plugins/demo")
+      expect(first.valid).toBe(false)
+      expect(verifier.getCachedVerification("/plugins/demo")).toEqual(first)
+    })
+
+    it("passes under require-signatures when the host receipt attests a signature", async () => {
+      isTauriMock.mockReturnValue(true)
+      invokeMock.mockResolvedValue({
+        verifiedVia: "signature",
+        version: "1.2.3",
+        verifiedAt: "2026-07-10T00:00:00.000Z",
+      })
+      verifier.setConfig({ requireSignatures: true })
+      const result = await verifier.verify("/plugins/demo.market")
+      expect(result.valid).toBe(true)
+      expect(invokeMock).toHaveBeenCalledWith("plugin_read_verification", {
+        pluginId: "demo.market",
+      })
+    })
+
+    it("rejects under require-signatures when the receipt is only a checksum", async () => {
+      isTauriMock.mockReturnValue(true)
+      invokeMock.mockResolvedValue({
+        verifiedVia: "checksum",
+        version: "1.0.0",
+        verifiedAt: "2026-07-10T00:00:00.000Z",
+      })
+      verifier.setConfig({ requireSignatures: true })
+      const result = await verifier.verify("/plugins/demo.market")
+      expect(result.valid).toBe(false)
+      expect(result.reason).toContain("checksum")
+    })
+
+    it("rejects under require-signatures when no receipt exists", async () => {
+      isTauriMock.mockReturnValue(true)
+      invokeMock.mockResolvedValue(null)
+      verifier.setConfig({ requireSignatures: true })
+      const result = await verifier.verify("/plugins/demo.market")
+      expect(result.valid).toBe(false)
+      expect(result.reason).toBe("Signature required but not found")
+    })
+
+    it("does not consult the host receipt off-Tauri (no invoke)", async () => {
+      isTauriMock.mockReturnValue(false)
+      verifier.setConfig({ requireSignatures: true })
+      const result = await verifier.verify("/plugins/demo")
+      expect(result.valid).toBe(false)
+      expect(invokeMock).not.toHaveBeenCalled()
+    })
+
+    it("treats a receipt-read failure as unverified (rejects, no throw)", async () => {
+      isTauriMock.mockReturnValue(true)
+      invokeMock.mockRejectedValue(new Error("command unavailable"))
+      verifier.setConfig({ requireSignatures: true })
+      const result = await verifier.verify("/plugins/demo.market")
+      expect(result.valid).toBe(false)
+      expect(result.reason).toBe("Signature required but not found")
+      expect(recordSilentFailureMock).toHaveBeenCalledWith(
+        "<signature>",
+        expect.objectContaining({ site: "signature.readVerificationReceipt", expected: false }),
+        expect.any(Error)
+      )
     })
   })
 })

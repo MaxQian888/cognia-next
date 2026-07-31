@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Coverage for the redaction-map encryption helpers. We exercise the
  * Web-mode path (Tauri keyring is opaque to jsdom) — both branches
@@ -12,7 +13,7 @@ import {
   getRedactionKey,
   RedactionKeyMismatchError,
 } from "./redaction-key"
-import { redactText } from "./redact"
+import { redactText } from "@cognia/redact"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 
 beforeEach(async () => {

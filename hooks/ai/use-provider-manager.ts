@@ -1,13 +1,8 @@
 "use client"
 
-/**
- * Stub: provider-manager hook.
- *
- * Cognia exposes a hook that reads from the routing engine + circuit
- * breaker + load balancer. cognia-next deferred that infrastructure;
- * this stub returns inert defaults so components that import it render
- * cleanly.
- */
+import { useCallback, useMemo } from "react"
+import type { ProviderHealthMetrics } from "@cognia/provider-types/health-metrics"
+import { useHealthMetricsStore } from "@/stores/settings/health-metrics-store"
 
 export interface ProviderHealth {
   status: "healthy" | "degraded" | "error" | "unknown"
@@ -17,29 +12,66 @@ export interface ProviderHealth {
   totalRequests: number
 }
 
-const DEFAULT: ProviderHealth = {
-  status: "unknown",
-  latencyMs: 0,
-  errorRate: 0,
-  successRate: 0,
-  totalRequests: 0,
+function projectHealth(metrics: ProviderHealthMetrics): ProviderHealth {
+  const status: ProviderHealth["status"] =
+    metrics.totalRequests === 0
+      ? "unknown"
+      : metrics.successRate >= 0.95
+        ? "healthy"
+        : metrics.successRate >= 0.5
+          ? "degraded"
+          : "error"
+
+  return {
+    status,
+    latencyMs: metrics.latencyP95,
+    errorRate: metrics.totalRequests === 0 ? 0 : metrics.totalErrors / metrics.totalRequests,
+    successRate: metrics.totalRequests === 0 ? 0 : metrics.successRate,
+    totalRequests: metrics.totalRequests,
+  }
 }
 
-export function useProviderHealth(_providerId: string): {
+export function useProviderHealth(providerId: string): {
   health: ProviderHealth
   isLoading: boolean
   refresh: () => Promise<void>
 } {
+  const metrics = useHealthMetricsStore((state) => state.metrics[providerId])
+  const getMetrics = useHealthMetricsStore((state) => state.getMetrics)
+  const health = useMemo(
+    () => projectHealth(metrics ?? getMetrics(providerId)),
+    [getMetrics, metrics, providerId]
+  )
+  const refresh = useCallback(async () => {
+    getMetrics(providerId)
+  }, [getMetrics, providerId])
+
   return {
-    health: DEFAULT,
+    health,
     isLoading: false,
-    refresh: async () => undefined,
+    refresh,
   }
 }
 
-export function useProviderManager() {
+export function useProviderManager(): {
+  providers: Record<string, ProviderHealth>
+  isLoading: boolean
+  refresh: () => Promise<void>
+} {
+  const metrics = useHealthMetricsStore((state) => state.metrics)
+  const providers = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(metrics).map(([providerId, providerMetrics]) => [
+          providerId,
+          projectHealth(providerMetrics),
+        ])
+      ),
+    [metrics]
+  )
+
   return {
-    providers: {} as Record<string, ProviderHealth>,
+    providers,
     isLoading: false,
     refresh: async () => undefined,
   }

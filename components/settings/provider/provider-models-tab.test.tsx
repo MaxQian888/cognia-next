@@ -9,8 +9,14 @@ import type { ModelConfig } from "./provider-models-tab"
 // ── i18n mock ─────────────────────────────────────────────────────────────────
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => {
+  useTranslations: () => (key: string, params?: Record<string, unknown>) => {
+    if (key === "modelsTab.sortBy") return `Sort: ${params?.label}`
+    if (key === "modelsTab.countSummary")
+      return `Showing ${params?.shown} of ${params?.total} · ${params?.enabled} enabled`
+    if (key === "modelsTab.modes") return `${params?.count} modes`
     const map: Record<string, string> = {
+      "modelsTab.maxOutput": "max out",
+      "modelsTab.openWeights": "open weights",
       "modelsTab.searchPlaceholder": "Search models...",
       "modelsTab.refreshModels": "Refresh Model List",
       "modelsTab.selectAll": "Select All",
@@ -19,6 +25,15 @@ jest.mock("next-intl", () => ({
       "modelsTab.batchDisable": "Disable Selected",
       "modelsTab.contextWindow": "Context",
       "modelsTab.noModels": "No models found",
+      "modelsTab.knowledgeCutoff": "Cutoff",
+      "modelsTab.updated": "Updated",
+      "modelsTab.capabilities": "Capabilities",
+      "modelsTab.enabledOnly": "Enabled only",
+      "modelsTab.clearFilters": "Clear filters",
+      "modelsTab.sortDefault": "Default",
+      "modelsTab.sortName": "Name",
+      "modelsTab.sortContext": "Context",
+      "modelsTab.sortRelease": "Newest",
     }
     return map[key] ?? key
   },
@@ -72,8 +87,8 @@ const defaultProps = {
   models: mockModels,
   enabledModels: ["gpt-4o"],
   onEnabledModelsChange: jest.fn(),
-  onTestConnection: jest.fn(),
-  isTesting: false,
+  onRefreshModels: jest.fn(),
+  isRefreshing: false,
 }
 
 describe("ProviderModelsTab", () => {
@@ -102,6 +117,29 @@ describe("ProviderModelsTab", () => {
     // 128000 → "128K"
     const contextLabels = screen.getAllByText(/128K/)
     expect(contextLabels.length).toBeGreaterThan(0)
+  })
+
+  it("renders max output, open-weights badge, and reasoning mode count", () => {
+    render(
+      <ProviderModelsTab
+        {...defaultProps}
+        models={[
+          {
+            id: "glm-x",
+            name: "GLM X",
+            capabilities: ["Text"],
+            contextLength: 128000,
+            maxOutputTokens: 64000,
+            openWeights: true,
+            modeCount: 2,
+          },
+        ]}
+        enabledModels={[]}
+      />
+    )
+    expect(screen.getByText(/64K max out/)).toBeInTheDocument()
+    expect(screen.getByText("open weights")).toBeInTheDocument()
+    expect(screen.getByText("2 modes")).toBeInTheDocument()
   })
 
   it("formats large context window size correctly (1M+)", () => {
@@ -197,18 +235,38 @@ describe("ProviderModelsTab", () => {
     expect(screen.queryByTestId("switch")).not.toBeInTheDocument()
   })
 
-  // ── 6. Refresh button calls onTestConnection ───────────────────────────────
+  // ── 6. Refresh button calls onRefreshModels ───────────────────────────────
 
-  it("calls onTestConnection when refresh button is clicked", () => {
+  it("offers a connection test that is distinct from the model refresh", () => {
+    const onRefreshModels = jest.fn()
     const onTestConnection = jest.fn()
-    render(<ProviderModelsTab {...defaultProps} onTestConnection={onTestConnection} />)
+    render(
+      <ProviderModelsTab
+        {...defaultProps}
+        onRefreshModels={onRefreshModels}
+        onTestConnection={onTestConnection}
+      />
+    )
+    fireEvent.click(screen.getByTestId("models-tab-test-connection"))
+    expect(onTestConnection).toHaveBeenCalledTimes(1)
+    expect(onRefreshModels).not.toHaveBeenCalled()
+  })
+
+  it("hides the connection test when no handler is supplied", () => {
+    render(<ProviderModelsTab {...defaultProps} />)
+    expect(screen.queryByTestId("models-tab-test-connection")).not.toBeInTheDocument()
+  })
+
+  it("calls onRefreshModels when refresh button is clicked", () => {
+    const onRefreshModels = jest.fn()
+    render(<ProviderModelsTab {...defaultProps} onRefreshModels={onRefreshModels} />)
     const refreshButton = screen.getByText("Refresh Model List")
     fireEvent.click(refreshButton)
-    expect(onTestConnection).toHaveBeenCalledTimes(1)
+    expect(onRefreshModels).toHaveBeenCalledTimes(1)
   })
 
   it("disables refresh button while refreshing", () => {
-    render(<ProviderModelsTab {...defaultProps} isTesting={true} />)
+    render(<ProviderModelsTab {...defaultProps} isRefreshing={true} />)
     const refreshButton = screen.getByText("Refresh Model List").closest("button")
     expect(refreshButton).toBeDisabled()
   })
@@ -277,5 +335,166 @@ describe("ProviderModelsTab", () => {
     render(<ProviderModelsTab {...defaultProps} />)
     expect(screen.getByText("Enable Selected")).toBeInTheDocument()
     expect(screen.getByText("Disable Selected")).toBeInTheDocument()
+  })
+
+  // ── 8. models.dev metadata: status badge, knowledge cutoff, updated ────────
+
+  const metaModel: ModelConfig = {
+    id: "claude-legacy",
+    name: "Claude Legacy",
+    contextLength: 200000,
+    status: "deprecated",
+    knowledge: "2024-04",
+    lastUpdated: "2025-02-01",
+    family: "claude-3",
+  }
+
+  it("renders a status badge for non-stable models", () => {
+    render(<ProviderModelsTab {...defaultProps} models={[metaModel]} />)
+    expect(screen.getByText("deprecated")).toBeInTheDocument()
+  })
+
+  it("renders an outline status badge for preview states like beta", () => {
+    render(
+      <ProviderModelsTab
+        {...defaultProps}
+        models={[{ ...metaModel, status: "beta" }]}
+        enabledModels={[]}
+      />
+    )
+    expect(screen.getByText("beta")).toBeInTheDocument()
+  })
+
+  it("formats sub-1K context windows verbatim", () => {
+    const { container } = render(
+      <ProviderModelsTab
+        {...defaultProps}
+        models={[{ id: "tiny", name: "Tiny", contextLength: 512 }]}
+        enabledModels={[]}
+      />
+    )
+    expect(container.textContent).toContain("512")
+  })
+
+  it("does not render a status badge for stable/empty status", () => {
+    render(
+      <ProviderModelsTab
+        {...defaultProps}
+        models={[{ ...metaModel, status: "stable" }]}
+        enabledModels={[]}
+      />
+    )
+    expect(screen.queryByText("stable")).not.toBeInTheDocument()
+  })
+
+  it("renders knowledge cutoff and last-updated metadata", () => {
+    const { container } = render(
+      <ProviderModelsTab {...defaultProps} models={[metaModel]} enabledModels={[]} />
+    )
+    expect(container.textContent).toContain("Cutoff 2024-04")
+    expect(container.textContent).toContain("Updated 2025-02-01")
+  })
+
+  it("omits metadata spans when the fields are absent", () => {
+    const { container } = render(
+      <ProviderModelsTab
+        {...defaultProps}
+        models={[{ id: "x", name: "Bare", contextLength: 1000 }]}
+        enabledModels={[]}
+      />
+    )
+    expect(container.textContent).not.toContain("Cutoff")
+    expect(container.textContent).not.toContain("Updated")
+  })
+
+  // ── 9. Filtering: capability chips, enabled-only, sort, clear, count ───────
+
+  it("renders a capability filter chip per distinct capability", () => {
+    render(<ProviderModelsTab {...defaultProps} />)
+    // Union across the mock models is Code / Text / Vision.
+    expect(screen.getByRole("button", { name: "Code" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Text" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Vision" })).toBeInTheDocument()
+  })
+
+  it("does not render capability chips when no models are present", () => {
+    render(<ProviderModelsTab {...defaultProps} models={[]} />)
+    expect(screen.queryByRole("button", { name: "Text" })).not.toBeInTheDocument()
+  })
+
+  it("filtering by a capability narrows the grid (AND semantics)", () => {
+    render(<ProviderModelsTab {...defaultProps} />)
+    fireEvent.click(screen.getByRole("button", { name: "Vision" }))
+    // Only GPT-4o exposes Vision.
+    expect(screen.getByText("GPT-4o")).toBeInTheDocument()
+    expect(screen.queryByText("GPT-4o Mini")).not.toBeInTheDocument()
+    expect(screen.queryByText("O1")).not.toBeInTheDocument()
+  })
+
+  it("enabled-only toggle shows only enabled models", () => {
+    render(<ProviderModelsTab {...defaultProps} />)
+    fireEvent.click(screen.getByRole("button", { name: "Enabled only" }))
+    // Only gpt-4o is in enabledModels.
+    expect(screen.getByText("GPT-4o")).toBeInTheDocument()
+    expect(screen.queryByText("GPT-4o Mini")).not.toBeInTheDocument()
+    expect(screen.queryByText("O1")).not.toBeInTheDocument()
+  })
+
+  it("cycles the sort mode label on click", () => {
+    render(<ProviderModelsTab {...defaultProps} />)
+    expect(screen.getByRole("button", { name: "Sort: Default" })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Sort: Default" }))
+    expect(screen.getByRole("button", { name: "Sort: Name" })).toBeInTheDocument()
+  })
+
+  it("shows a clear-filters button only when a filter is active, and it resets", () => {
+    render(<ProviderModelsTab {...defaultProps} />)
+    expect(screen.queryByRole("button", { name: "Clear filters" })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Vision" }))
+    const clear = screen.getByRole("button", { name: "Clear filters" })
+    fireEvent.click(clear)
+    // All models visible again after reset.
+    expect(screen.getByText("GPT-4o")).toBeInTheDocument()
+    expect(screen.getByText("GPT-4o Mini")).toBeInTheDocument()
+    expect(screen.getByText("O1")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Clear filters" })).not.toBeInTheDocument()
+  })
+
+  it("renders a count summary that reflects shown / total / enabled", () => {
+    render(<ProviderModelsTab {...defaultProps} />)
+    expect(screen.getByText("Showing 3 of 3 · 1 enabled")).toBeInTheDocument()
+    fireEvent.change(screen.getByTestId("search-input"), { target: { value: "gpt" } })
+    expect(screen.getByText("Showing 2 of 3 · 1 enabled")).toBeInTheDocument()
+  })
+})
+
+// The models.dev catalog is a separate Dexie read that lands after the static
+// provider catalog, so cards used to paint bare and then *grow* a capability
+// row, shifting everything below.
+describe("ProviderModelsTab late metadata", () => {
+  const bare = [
+    { id: "m1", name: "M1", contextLength: 1000 },
+    { id: "m2", name: "M2", contextLength: 2000 },
+  ]
+
+  it("reserves the capability row while the catalog read is in flight", () => {
+    render(<ProviderModelsTab {...defaultProps} models={bare} metadataLoading />)
+    expect(screen.getAllByTestId("model-caps-placeholder")).toHaveLength(2)
+  })
+
+  it("drops the placeholder once metadata has landed", () => {
+    render(<ProviderModelsTab {...defaultProps} models={bare} metadataLoading={false} />)
+    expect(screen.queryByTestId("model-caps-placeholder")).not.toBeInTheDocument()
+  })
+
+  it("never placeholders a model that already has capabilities", () => {
+    render(<ProviderModelsTab {...defaultProps} metadataLoading />)
+    expect(screen.queryByTestId("model-caps-placeholder")).not.toBeInTheDocument()
+    expect(screen.getAllByText("Vision").length).toBeGreaterThan(0)
+  })
+
+  it("defaults to no placeholder when the prop is omitted", () => {
+    render(<ProviderModelsTab {...defaultProps} models={bare} />)
+    expect(screen.queryByTestId("model-caps-placeholder")).not.toBeInTheDocument()
   })
 })

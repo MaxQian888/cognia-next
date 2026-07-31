@@ -1,0 +1,23 @@
+# AI-tool evals for cognia-web-tools. Run with `pnpm plugin:eval plugins/web-tools`.
+#
+# Offline cases (default, CI) verify the tool CONTRACT against the deterministic
+# `evals.harness.mjs`. Online cases (`--online`, run inside the app) verify that
+# the model SELECTS the right tool for a prompt.
+evals:
+  - name: "web_fetch returns readable page text"
+    prompt: "Fetch https://example.com and give me the visible text"
+    args:
+      url: "https://example.com"
+    expect:
+      callsTool: web_fetch
+      output:
+        includes: "Example Domain"
+
+  - name: "web_fetch surfaces the page title"
+    prompt: "What is the title of https://example.com ?"
+    args:
+      url: "https://example.com"
+    expect:
+      callsTool: web_fetch
+      output:
+        regex: "Example"

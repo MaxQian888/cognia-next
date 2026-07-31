@@ -67,37 +67,23 @@ fn config_path(data_dir: Option<&Path>) -> PathBuf {
     }
 }
 
-fn keyring_entry() -> Result<keyring::Entry, String> {
-    keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT)
-        .map_err(|e| format!("keyring entry: {e}"))
-}
-
 // ---------------------------------------------------------------------------
-// Token (keyring)
+// Token (secret store)
 // ---------------------------------------------------------------------------
 
-/// Store the connector token in the OS keyring.
+/// Store the connector token.
 pub fn save_token(token: &str) -> Result<(), String> {
-    keyring_entry()?
-        .set_password(token)
-        .map_err(|e| format!("keyring write: {e}"))
+    crate::secret_store::set(KEYRING_SERVICE, KEYRING_ACCOUNT, token)
 }
 
-/// Read the connector token from the OS keyring.
+/// Read the connector token.
 pub fn load_token() -> Result<Option<String>, String> {
-    match keyring_entry()?.get_password() {
-        Ok(s) => Ok(Some(s)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(format!("keyring read: {e}")),
-    }
+    crate::secret_store::get(KEYRING_SERVICE, KEYRING_ACCOUNT)
 }
 
-/// Remove the token from the OS keyring.
+/// Remove the token.
 pub fn clear_token() -> Result<(), String> {
-    match keyring_entry()?.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(format!("keyring delete: {e}")),
-    }
+    crate::secret_store::delete(KEYRING_SERVICE, KEYRING_ACCOUNT)
 }
 
 // ---------------------------------------------------------------------------
@@ -116,8 +102,7 @@ fn load_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<Option<T>, Str
 
 fn store_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
+        std::fs::create_dir_all(parent).map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
     }
     let raw = serde_json::to_string_pretty(value).map_err(|e| format!("serialize: {e}"))?;
     std::fs::write(path, raw).map_err(|e| format!("write {}: {e}", path.display()))?;
@@ -153,8 +138,7 @@ pub fn summarize(data_dir: Option<&Path>) -> TunnelConfigSummary {
     // successful write. If the named config file exists (mode=Named with a
     // hostname), the token was successfully persisted at save time; optimistically
     // treat it as present so the UI doesn't disable the tunnel toggle.
-    let has_token = has_token
-        || (file.mode == TunnelMode::Named && file.named.is_some());
+    let has_token = has_token || (file.mode == TunnelMode::Named && file.named.is_some());
 
     TunnelConfigSummary {
         mode: file.mode,
@@ -208,7 +192,17 @@ pub fn clear_named(data_dir: Option<&Path>) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
     use tempfile::tempdir;
+
+    static KEYRING_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    fn keyring_test_guard() -> std::sync::MutexGuard<'static, ()> {
+        KEYRING_TEST_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("keyring test lock poisoned")
+    }
 
     #[test]
     fn config_file_roundtrip() {
@@ -223,14 +217,12 @@ mod tests {
         save_config(Some(dir), &config).unwrap();
         let loaded = load_config(Some(dir));
         assert_eq!(loaded.mode, TunnelMode::Named);
-        assert_eq!(
-            loaded.named.unwrap().hostname,
-            "https://cognia.example.com"
-        );
+        assert_eq!(loaded.named.unwrap().hostname, "https://cognia.example.com");
     }
 
     #[test]
     fn summarize_default_when_missing() {
+        let _guard = keyring_test_guard();
         // `summarize` reads the connector token from the *process-global* OS
         // keyring (service `com.cognia.companion-tunnel/v1`). A developer who
         // has previously saved a tunnel token would leave a stale entry that
@@ -247,10 +239,10 @@ mod tests {
     }
 
     #[test]
-    fn token_roundtrip_when_keyring_available() {
-        if std::env::var("COGNIA_TEST_KEYRING").ok().as_deref() != Some("1") {
-            return;
-        }
+    fn token_roundtrip() {
+        // Hermetic via the in-memory secret_store global under cfg(test); the
+        // mutex guard serializes against the other token-touching tests.
+        let _guard = keyring_test_guard();
         let _ = clear_token();
         assert!(load_token().unwrap().is_none());
         save_token("eyJtest").unwrap();
@@ -261,11 +253,14 @@ mod tests {
 
     #[test]
     fn named_save_sets_mode_and_hostname() {
+        let _guard = keyring_test_guard();
+        let _ = clear_token();
         let tmp = tempdir().unwrap();
         let dir = tmp.path();
         save_named(Some(dir), "tok", "https://c.example.com").unwrap();
         let cfg = load_config(Some(dir));
         assert_eq!(cfg.mode, TunnelMode::Named);
         assert_eq!(cfg.named.unwrap().hostname, "https://c.example.com");
+        clear_token().unwrap();
     }
 }

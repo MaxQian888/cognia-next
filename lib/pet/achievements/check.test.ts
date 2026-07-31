@@ -1,7 +1,18 @@
 import { checkAchievements } from "./check"
 import { PET_ACHIEVEMENTS, getAchievement } from "./registry"
+import {
+  __resetPetAchievementsForTesting,
+  registerPetAchievement,
+} from "@/lib/plugin/registries/pet-achievement-registry"
 import { createDefaultProfile } from "@/lib/pet/defaults"
-import type { PetAchievementContext, PetBones, PetProfile } from "@/types/pet"
+import { DEFAULT_CARE_STATE, effectiveStats } from "@/types/pet"
+import type {
+  PetAchievementContext,
+  PetBones,
+  PetCareState,
+  PetProfile,
+  PetStats,
+} from "@/types/pet"
 
 function bones(overrides: Partial<PetBones> = {}): PetBones {
   return {
@@ -22,12 +33,17 @@ function ctx(overrides: {
   profile?: Partial<PetProfile>
   bones?: Partial<PetBones>
   counters?: Record<string, number>
+  effectiveStats?: Partial<PetStats>
+  care?: Partial<PetCareState>
 }): PetAchievementContext {
+  const b = bones(overrides.bones)
   return {
     profile: { ...createDefaultProfile("acct", 0), ...overrides.profile },
-    bones: bones(overrides.bones),
+    bones: b,
     activity: [],
     counters: overrides.counters ?? {},
+    effectiveStats: { ...effectiveStats(b.stats), ...overrides.effectiveStats },
+    care: { ...DEFAULT_CARE_STATE, ...overrides.care },
   }
 }
 
@@ -71,5 +87,67 @@ describe("checkAchievements", () => {
 
   it("returns nothing for a brand-new unhatched pet", () => {
     expect(checkAchievements(ctx({}), [])).toEqual([])
+  })
+
+  it("unlocks stat-milestone achievements from effective stats", () => {
+    const debug = ctx({ effectiveStats: { debugging: 100 } })
+    expect(checkAchievements(debug, [])).toContain("master-debugger")
+
+    const zen = ctx({ effectiveStats: { patience: 100 } })
+    expect(checkAchievements(zen, [])).toContain("zen-master")
+
+    const chaos = ctx({ effectiveStats: { chaos: 100 } })
+    expect(checkAchievements(chaos, [])).toContain("chaos-gremlin")
+  })
+
+  it("unlocks nursed-back only after a recovered unwell episode", () => {
+    const neverUnwell = ctx({ care: { condition: "well", everUnwell: false } })
+    expect(checkAchievements(neverUnwell, [])).not.toContain("nursed-back")
+
+    const recovered = ctx({ care: { condition: "well", everUnwell: true } })
+    expect(checkAchievements(recovered, [])).toContain("nursed-back")
+
+    const stillUnwell = ctx({ care: { condition: "unwell", everUnwell: true } })
+    expect(checkAchievements(stillUnwell, [])).not.toContain("nursed-back")
+  })
+
+  it("unlocks devoted-caretaker at high care quality", () => {
+    expect(checkAchievements(ctx({ care: { careQuality: 80 } }), [])).toContain("devoted-caretaker")
+    expect(checkAchievements(ctx({ care: { careQuality: 79 } }), [])).not.toContain(
+      "devoted-caretaker"
+    )
+  })
+
+  it("evaluates plugin-contributed achievements alongside the static registry", () => {
+    try {
+      registerPetAchievement(
+        "feeder",
+        {
+          id: "feeder",
+          labels: { en: "Feeder" },
+          condition: { type: "counter", kind: "fed", gte: 1 },
+        },
+        { pluginId: "p1" }
+      )
+      const newly = checkAchievements(ctx({ counters: { fed: 1 } }), [])
+      expect(newly).toContain("plugin:p1:feeder")
+      // Already-unlocked namespaced ids are excluded like static ones.
+      expect(checkAchievements(ctx({ counters: { fed: 1 } }), ["plugin:p1:feeder"])).not.toContain(
+        "plugin:p1:feeder"
+      )
+    } finally {
+      __resetPetAchievementsForTesting()
+    }
+  })
+
+  it("unlocks streak achievements at their day thresholds", () => {
+    const at = (days: number) =>
+      checkAchievements(ctx({ profile: { streak: { days, lastDay: "2026-07-02" } } }), [])
+    expect(at(6)).not.toContain("streak-week")
+    expect(at(7)).toContain("streak-week")
+    expect(at(29)).not.toContain("streak-month")
+    expect(at(30)).toEqual(expect.arrayContaining(["streak-week", "streak-month"]))
+    // Legacy profile without a streak cache stays locked.
+    expect(checkAchievements(ctx({}), [])).not.toContain("streak-week")
   })
 })

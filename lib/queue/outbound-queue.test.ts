@@ -6,6 +6,12 @@ import "fake-indexeddb/auto"
 import { enqueue, listByStatus, listAll } from "@/lib/db/mobile-outbound-queue"
 import { getDb } from "@/lib/db/schema"
 import { createOutboundRunner } from "./outbound-queue"
+import {
+  clearActiveRuntimeTargetContext,
+  setActiveRuntimeTargetContext,
+} from "@/lib/runtime/runtime-target-context"
+
+const scope = { accountId: "acct_queue", targetId: "desktop-studio" }
 
 // Stub the network subscriber so the runner doesn't try to reach Capacitor.
 jest.mock("@/lib/capacitor/network", () => ({
@@ -19,9 +25,14 @@ jest.mock("@/lib/capacitor/_shared", () => ({
 
 describe("createOutboundRunner", () => {
   beforeEach(async () => {
+    setActiveRuntimeTargetContext(scope.accountId, scope.targetId)
     // fake-indexeddb resets between test files but not test cases — clear by hand.
     const all = await listAll()
     await Promise.all(all.map((r) => getDb().mobileOutboundQueue.delete(r.id)))
+  })
+
+  afterEach(() => {
+    clearActiveRuntimeTargetContext()
   })
 
   it("dispatches a pending row and marks it sent", async () => {
@@ -29,6 +40,7 @@ describe("createOutboundRunner", () => {
     const runner = createOutboundRunner({
       dispatcher: { call },
       enforceMobile: false,
+      scope,
     })
     await enqueue({ command: "connector_send", payload: { x: 1 } })
     await runner.kick()
@@ -48,6 +60,7 @@ describe("createOutboundRunner", () => {
       dispatcher: { call },
       enforceMobile: false,
       now: () => 1_000,
+      scope,
       random: () => 0,
     })
     // Match the runner's mocked now() so claimNext picks the row up.
@@ -60,11 +73,38 @@ describe("createOutboundRunner", () => {
     runner.stop()
   })
 
+  it("never dispatches a row that belongs to another runtime target", async () => {
+    const call = jest.fn().mockResolvedValue(null)
+    const runner = createOutboundRunner({
+      dispatcher: { call },
+      enforceMobile: false,
+      scope,
+    })
+    await enqueue({
+      command: "connector_send",
+      payload: { target: "other" },
+      accountId: scope.accountId,
+      targetId: "desktop-other",
+    })
+
+    await runner.kick()
+
+    expect(call).not.toHaveBeenCalled()
+    expect(
+      await listByStatus("pending", {
+        accountId: scope.accountId,
+        targetId: "desktop-other",
+      })
+    ).toHaveLength(1)
+    runner.stop()
+  })
+
   it("deadletters non-retryable failures immediately", async () => {
     const call = jest.fn().mockRejectedValue(new Error("401 unauthorized"))
     const runner = createOutboundRunner({
       dispatcher: { call },
       enforceMobile: false,
+      scope,
     })
     await enqueue({ command: "connector_send", payload: {} })
     await runner.kick()
@@ -80,6 +120,7 @@ describe("createOutboundRunner", () => {
       dispatcher: { call },
       enforceMobile: false,
       now: () => 1_000,
+      scope,
     })
     await getDb().mobileOutboundQueue.put({
       id: "future",
@@ -90,6 +131,7 @@ describe("createOutboundRunner", () => {
       createdAt: 0,
       nextAttemptAt: 5_000, // in the future
       idempotencyKey: "k",
+      ...scope,
     })
     await runner.kick()
     expect(call).not.toHaveBeenCalled()
@@ -101,6 +143,7 @@ describe("createOutboundRunner", () => {
     const runner = createOutboundRunner({
       dispatcher: { call },
       enforceMobile: false,
+      scope,
     })
     await enqueue({ command: "connector_send", payload: { i: 1 } })
     await enqueue({ command: "connector_send", payload: { i: 2 } })
@@ -120,7 +163,7 @@ describe("createOutboundRunner", () => {
     }))
     const { createOutboundRunner: factory } = await import("./outbound-queue")
     const call = jest.fn()
-    const runner = factory({ dispatcher: { call }, enforceMobile: true })
+    const runner = factory({ dispatcher: { call }, enforceMobile: true, scope })
     await enqueue({ command: "connector_send", payload: {} })
     await runner.kick()
     expect(call).not.toHaveBeenCalled()
@@ -140,6 +183,7 @@ describe("createOutboundRunner", () => {
     const runner = createOutboundRunner({
       dispatcher: { call },
       enforceMobile: false,
+      scope,
     })
     await enqueue({ command: "connector_send", payload: {} })
     const p = runner.kick()

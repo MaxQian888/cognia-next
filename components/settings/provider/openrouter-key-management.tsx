@@ -59,8 +59,8 @@ import {
 } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { useSettingsStore } from "@/stores"
-import type { OpenRouterProviderSettings } from "@/types/provider"
-import type { OpenRouterApiKey, LimitResetPeriod } from "@/types/provider/openrouter"
+import type { OpenRouterProviderSettings } from "@cognia/provider-types"
+import type { OpenRouterApiKey, LimitResetPeriod } from "@cognia/provider-types/openrouter"
 import {
   listApiKeys,
   createApiKey,
@@ -68,7 +68,7 @@ import {
   deleteApiKey,
   formatCredits,
   OpenRouterError,
-} from "@/lib/ai/providers/openrouter"
+} from "@cognia/provider-core/providers/openrouter"
 
 interface OpenRouterKeyManagementProps {
   className?: string

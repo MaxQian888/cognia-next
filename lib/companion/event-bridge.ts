@@ -13,7 +13,9 @@
 
 import { addPairedDevice, touchPairedDevice } from "@/lib/db/paired-devices"
 import { transport } from "@/lib/tauri"
+import { useAccountStore } from "@/stores/account/account-store"
 import type { DevicePlatform } from "@/types/mobile/paired-device"
+import type { RoomDescriptorV2 } from "@/lib/signaling/v2-crypto"
 
 // ---------------------------------------------------------------------------
 // Event payloads — mirror the JSON shape emitted by the Rust handlers.
@@ -21,6 +23,7 @@ import type { DevicePlatform } from "@/types/mobile/paired-device"
 
 interface DevicePairedPayload {
   device_id: string
+  account_id?: string
   label: string
   platform: string
   pubkey: string
@@ -28,12 +31,13 @@ interface DevicePairedPayload {
   app_version: string
   /** ADR-0021: optional for legacy desktop servers that predate WebRTC. */
   rendezvous_id?: string
-  /** ADR-0021: 32-byte HMAC key, URL-safe base64 (unpadded). */
-  rendezvous_secret?: string
+  room_descriptor?: RoomDescriptorV2
+  signaling_key_ref?: string
 }
 
 interface DeviceSeenPayload {
   device_id: string
+  account_id?: string
   seen_at_ms: number
 }
 
@@ -76,14 +80,17 @@ export function installCompanionEventBridge(): () => void {
 
 async function handleDevicePaired(payload: DevicePairedPayload): Promise<void> {
   try {
+    assertPayloadAccountMatchesActiveAccount(payload.account_id)
     await addPairedDevice({
       deviceId: payload.device_id,
+      accountId: payload.account_id,
       label: payload.label,
       platform: normalizePlatform(payload.platform),
       pubkey: payload.pubkey,
       appVersion: payload.app_version,
       rendezvousId: payload.rendezvous_id,
-      rendezvousSecret: payload.rendezvous_secret,
+      signalingRoomDescriptor: payload.room_descriptor,
+      signalingKeyRef: payload.signaling_key_ref,
       nowMs: payload.paired_at_ms,
     })
   } catch (err) {
@@ -94,8 +101,22 @@ async function handleDevicePaired(payload: DevicePairedPayload): Promise<void> {
 
 async function handleDeviceSeen(payload: DeviceSeenPayload): Promise<void> {
   try {
+    assertPayloadAccountMatchesActiveAccount(payload.account_id)
     await touchPairedDevice(payload.device_id, payload.seen_at_ms)
   } catch (err) {
     console.warn("companion event-bridge: touchPairedDevice failed", err)
+  }
+}
+
+function assertPayloadAccountMatchesActiveAccount(payloadAccountId: string | undefined): void {
+  const activeAccountId = useAccountStore.getState().unlockedAccountId
+  if (!activeAccountId) {
+    throw new Error("companion event rejected: no unlocked local account")
+  }
+  if (!payloadAccountId) {
+    throw new Error("companion event rejected: missing local account id")
+  }
+  if (payloadAccountId !== activeAccountId) {
+    throw new Error("companion event rejected: account mismatch")
   }
 }

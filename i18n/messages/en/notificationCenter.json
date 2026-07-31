@@ -1,0 +1,71 @@
+{
+  "bell": {
+    "hasActivity": "New activity",
+    "label": "Notifications",
+    "unreadAria": "{count} unread notifications"
+  },
+  "buckets": {
+    "earlier": "Earlier",
+    "today": "Today",
+    "yesterday": "Yesterday"
+  },
+  "center": {
+    "active": "Inbox",
+    "archiveAll": "Archive all",
+    "archived": "Archived",
+    "clearAll": "Clear all",
+    "clearAllBody": "This permanently removes every notification, including archived ones. This cannot be undone.",
+    "clearAllCancel": "Cancel",
+    "clearAllConfirm": "Clear all",
+    "clearAllTitle": "Clear all notifications?",
+    "empty": "You're all caught up.",
+    "emptyArchived": "No archived notifications.",
+    "filterAll": "All sources",
+    "groupCount": "+{count} more updates",
+    "hideDone": "Hide archived",
+    "itemActions": "Notification actions",
+    "loadMore": "Load more ({count})",
+    "markAllRead": "Mark all as read",
+    "markDone": "Archive",
+    "markRead": "Mark as read",
+    "moreActions": "More actions",
+    "open": "Open",
+    "refresh": "Refresh",
+    "remove": "Remove",
+    "restore": "Restore to inbox",
+    "settings": "Notification settings",
+    "showDone": "Show archived",
+    "snooze": "Snooze",
+    "title": "Notifications",
+    "unreadCount": "{count} unread",
+    "unsnooze": "Unsnooze"
+  },
+  "levels": {
+    "critical": "Critical",
+    "error": "Error",
+    "info": "Info",
+    "success": "Success",
+    "warning": "Warning"
+  },
+  "session": {
+    "errorBody": "The session ended with an error.",
+    "errorTitle": "Cognia · session error",
+    "readyBody": "Claude finished generating.",
+    "readyTitle": "Cognia · response ready"
+  },
+  "snoozePresets": {
+    "15m": "15 minutes",
+    "1d": "1 day",
+    "1h": "1 hour",
+    "3h": "3 hours"
+  },
+  "sources": {
+    "agent-team": "Agent team",
+    "connector": "Messages",
+    "plugin": "Plugins",
+    "scheduler": "Scheduler",
+    "session": "Sessions",
+    "system": "System",
+    "workflow": "Workflows"
+  }
+}

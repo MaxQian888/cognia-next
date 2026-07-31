@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Coverage for the prompt-presets CRUD layer + built-in seeder. Uses
 // fake-indexeddb so the real Dexie indexes / transactions / upgrade hook
 // run against an in-memory IDB.

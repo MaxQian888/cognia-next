@@ -9,8 +9,8 @@ description: How the app finds (or fetches) the cognia binary — the cached det
   `detectCli("cognia")` (`lib/cli-bridge/detect-cli.ts:37-56`) invokes the Tauri command
   `detect_binary`, which checks a 300-second cache, prefers **app-managed directories** (binaries
   the app downloaded itself), then probes `PATH` by running `cognia --version`
-  (`src-tauri/src/cli_bridge/detect.rs:186-216`). The managed download
-  (`download_cognia_cli`, `download.rs:197-310`) resolves the platform triple, fetches
+  (`src-tauri/src/cli_bridge/detect.rs:230-265`). The managed download
+  (`download_cognia_cli`, `download.rs:200-309`) resolves the platform triple, fetches
   `cognia-<triple>.tar.gz` (+ `.sig` + `checksums.txt`) from GitHub Releases, **always enforces
   SHA-256**, verifies Ed25519 against the embedded release key unless it's still the placeholder,
   extracts traversal-safely to `<app_data>/cognia/cli/<version>`, chmods on Unix, registers the
@@ -30,15 +30,15 @@ export interface BinaryDetectionResult {
 }
 ```
 
-The Rust side (`detect.rs:186-216`):
+The Rust side (`detect.rs:230-265`):
 
 1. cache lookup keyed `(name, version_arg)`, TTL 300 s (`detect.rs:21`)
 2. `find_in_managed_dirs(name)` — LIFO over directories registered by past downloads
-   (`register_managed_dir`, `detect.rs:61-66`; the snapshot also feeds PATH injection for
+   (`register_managed_dir`, `detect.rs:61-69`; the snapshot also feeds PATH injection for
    [terminal launches](./devtools-ui))
 3. fallback: spawn `name --version` from `PATH`; version = trimmed first stdout line
    (`:118-122`); path resolved via `which`/`where` (`:168-182`)
-4. cache the result; `invalidate("cognia")` drops it after a download (`download.rs:301`)
+4. cache the result; `invalidate("cognia")` drops it after a download (`download.rs:308`)
 
 `getCliBridgeStatus()` (`lib/cli-bridge/status.ts:26-49`) is the sibling probe for the
 [bridge](./bridge-server): `{running, boundPort, endpointFile}`, returning a safe
@@ -83,6 +83,13 @@ Key mechanics (`src-tauri/src/cli_bridge/download.rs`):
   (`normalize_signature`, `:313-324`); placeholder key ⇒ skip with
   `release signing key is a placeholder; skipping Ed25519 verification (SHA-256 enforced)`;
   real key ⇒ failure aborts the install
+- **offline check** — `cognia release-verify <artifact> --checksums <checksums.txt> [--signature <sig>] [--json]`
+  applies the same checksum and release-key policy without downloading or installing anything.
+  When the release key is real, it reads `<artifact>.sig` by default; `--signature` only overrides
+  that sidecar path. JSON reports both digests, `checksumVerified`, `signatureStatus`, and the
+  release-key fingerprint. Missing local artifact/checksum files are reported through the same JSON
+  payload with `ok: false`, `checksumVerified: false`, `signatureStatus: "not-checked"`, and an
+  actionable `error` string.
 - **install dir** (`:282-291`) — `<app_data>/cognia/cli/<version_label>` (Roaming AppData /
   Application Support / `~/.config`), overridable per call via `targetDir`
 - **extraction** (`extract_tar_gz`, `:154-189`) — gzip + tar walk, **rejects path-traversal

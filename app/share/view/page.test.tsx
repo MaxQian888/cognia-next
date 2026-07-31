@@ -46,6 +46,9 @@ describe("ShareViewPage", () => {
     await waitFor(() =>
       expect(screen.getByText("This link is no longer available")).toBeInTheDocument()
     )
+    expect(screen.getByRole("banner")).toBeInTheDocument()
+    expect(screen.getByRole("main")).toBeInTheDocument()
+    expect(screen.getByRole("contentinfo")).toBeInTheDocument()
   })
 
   it("maps an error reason to a translated message", async () => {

@@ -13,6 +13,11 @@ import type {
 } from "./mobile-outbound-types"
 import { decideNextAttempt } from "@/lib/queue/retry-policy"
 import { getDb } from "./schema"
+import {
+  getActiveRuntimeTargetContext,
+  type RuntimeTargetScope,
+} from "@/lib/runtime/runtime-target-context"
+import { LEGACY_MIXED_TARGET_ID } from "@/lib/runtime/target-registry"
 
 export interface EnqueueInput {
   command: MobileOutboundCommand
@@ -23,12 +28,22 @@ export interface EnqueueInput {
   /** Override the auto-generated idempotency key (mainly for tests). */
   idempotencyKey?: string
   nowMs?: number
+  accountId?: string
+  targetId?: string
 }
 
 export async function enqueue(input: EnqueueInput): Promise<MobileOutboundJobRow> {
   const now = input.nowMs ?? Date.now()
+  const activeScope = getActiveRuntimeTargetContext()
+  const accountId = input.accountId ?? activeScope?.accountId
+  const targetId = input.targetId ?? activeScope?.targetId
+  if (!accountId || !targetId) {
+    throw new Error("Outbound queue requires an active account and runtime target.")
+  }
   const row: MobileOutboundJobRow = {
     id: input.id ?? nanoid(),
+    accountId,
+    targetId,
     command: input.command,
     payload: input.payload,
     status: "pending",
@@ -47,13 +62,21 @@ export async function enqueue(input: EnqueueInput): Promise<MobileOutboundJobRow
  * so concurrent runners don't dispatch the same job twice. Returns null
  * when nothing is ready.
  */
-export async function claimNext(nowMs: number = Date.now()): Promise<MobileOutboundJobRow | null> {
+export async function claimNext(
+  nowMs: number = Date.now(),
+  scope: RuntimeTargetScope
+): Promise<MobileOutboundJobRow | null> {
   const db = getDb()
   return db.transaction("rw", db.mobileOutboundQueue, async () => {
     const ready = await db.mobileOutboundQueue
       .where("status")
       .equals("pending")
-      .filter((row) => row.nextAttemptAt <= nowMs)
+      .filter(
+        (row) =>
+          row.accountId === scope.accountId &&
+          row.targetId === scope.targetId &&
+          row.nextAttemptAt <= nowMs
+      )
       .first()
     if (!ready) return null
     const claimed: MobileOutboundJobRow = { ...ready, status: "sending" }
@@ -93,8 +116,20 @@ export async function recordFailure(opts: {
   })
 }
 
-export async function listByStatus(status: MobileOutboundStatus): Promise<MobileOutboundJobRow[]> {
-  return getDb().mobileOutboundQueue.where("status").equals(status).sortBy("createdAt")
+export async function listByStatus(
+  status: MobileOutboundStatus,
+  scope = getActiveRuntimeTargetContext()
+): Promise<MobileOutboundJobRow[]> {
+  const collection = getDb().mobileOutboundQueue.where("status").equals(status)
+  if (!scope) return collection.sortBy("createdAt")
+  return collection
+    .filter(
+      (row) =>
+        row.accountId === scope.accountId &&
+        (row.targetId === scope.targetId ||
+          (status === "deadlettered" && row.targetId === LEGACY_MIXED_TARGET_ID))
+    )
+    .sortBy("createdAt")
 }
 
 export async function listAll(): Promise<MobileOutboundJobRow[]> {
@@ -127,7 +162,14 @@ export async function vacuumSent(keepMs: number = 24 * 60 * 60 * 1000): Promise<
 
 /** Reset a deadlettered row back to pending so the user can retry manually. */
 export async function retryDeadletter(id: string, nowMs: number = Date.now()): Promise<void> {
-  await getDb().mobileOutboundQueue.update(id, {
+  const queue = getDb().mobileOutboundQueue
+  const row = await queue.get(id)
+  if (row?.targetId === LEGACY_MIXED_TARGET_ID) {
+    throw new Error(
+      "A legacy outbound action without an original runtime target cannot be retried."
+    )
+  }
+  await queue.update(id, {
     status: "pending",
     attempts: 0,
     nextAttemptAt: nowMs,

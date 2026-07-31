@@ -87,7 +87,7 @@ export function RunsTab() {
 function RunRow({ run }: { run: WorkflowRunRow }) {
   return (
     <TableRow>
-      <TableCell className="font-medium">{run.workflowSnapshot.name}</TableCell>
+      <TableCell className="font-medium">{run.title ?? run.workflowSnapshot.name}</TableCell>
       <TableCell>
         <Badge variant="outline" className={cn("font-normal", STATUS_STYLE[run.status])}>
           {run.status}
@@ -99,7 +99,9 @@ function RunRow({ run }: { run: WorkflowRunRow }) {
       </TableCell>
       <TableCell>
         <Button variant="ghost" size="icon" className="size-8" asChild>
-          <Link href={`/workflows/${run.workflowId}/runs/${run.id}`}>
+          <Link
+            href={`/workflows/run?id=${encodeURIComponent(run.workflowId)}&runId=${encodeURIComponent(run.id)}`}
+          >
             <ChevronRightIcon className="size-4" />
           </Link>
         </Button>

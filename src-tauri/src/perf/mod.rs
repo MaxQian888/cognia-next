@@ -23,10 +23,18 @@
 
 pub mod commands;
 pub mod process;
-pub mod registry;
 pub mod runtime;
 pub mod sampler;
-pub mod span;
+
+// ADR-0067 Phase 1 — the span instrumentation API + registry moved into the
+// `cognia-instrument` crate so the Tier-A leaf crates can share it without a
+// dependency on the whole Tauri app. Re-export them under the original
+// `crate::perf::{span,registry,guard,…}` paths so every in-tree call site
+// (`crate::perf::guard`, `super::registry::REGISTRY`, `crate::perf::registry::…`)
+// resolves unchanged.
+// The span API is surfaced via the flattened `guard`/`record`/`timed`/… re-exports
+// below, so only `registry` needs a module-path re-export.
+pub use cognia_instrument::registry;
 
 use std::sync::Arc;
 
@@ -34,7 +42,17 @@ use std::sync::Arc;
 // (`crate::perf::timed(...)` etc.); not every symbol has an in-tree caller yet,
 // so silence the unused-import lint without dropping the API.
 #[allow(unused_imports)]
-pub use span::{guard, record, timed, timed_ok, Guard};
+pub use cognia_instrument::{guard, record, timed, timed_ok, Guard};
+
+/// Convenience macro: `perf_span!("name");` drops a [`Guard`] at scope end.
+/// Kept here (not in `cognia-instrument`) because it hard-codes the
+/// `$crate::perf::guard` path of the app crate.
+#[macro_export]
+macro_rules! perf_span {
+    ($name:expr) => {
+        let _perf_guard = $crate::perf::guard($name);
+    };
+}
 
 /// Milliseconds since the Unix epoch — the timestamp every sample carries.
 pub(crate) fn now_ms() -> i64 {

@@ -15,7 +15,12 @@
  */
 
 import type { RawSource } from "@/lib/twin/ingest/parse"
-import { conversationToRawSource, type ChatImporterOptions, type ChatMessageBlock } from "./types"
+import {
+  conversationToRawSource,
+  parseChatExportJson,
+  type ChatImporterOptions,
+  type ChatMessageBlock,
+} from "./types"
 
 interface RawDetail {
   text?: string
@@ -76,7 +81,7 @@ export function isGeminiExportShape(value: unknown): boolean {
 export function parseGeminiExport(text: string, opts: ChatImporterOptions): RawSource[] {
   const trimmed = text.trim()
   if (!trimmed) return []
-  const parsed = JSON.parse(trimmed) as RawEntry | RawEntry[]
+  const parsed = parseChatExportJson(trimmed, "Gemini") as RawEntry | RawEntry[]
   const entries = Array.isArray(parsed) ? parsed : [parsed]
   const blocks: ChatMessageBlock[] = []
   for (const entry of entries) {

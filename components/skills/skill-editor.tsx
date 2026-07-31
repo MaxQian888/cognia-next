@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { AlertCircleIcon, SparklesIcon } from "lucide-react"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
-import { Streamdown } from "streamdown"
+import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -19,7 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { SKILL_CATEGORIES } from "@/lib/skills/categories"
 import { validateSkill } from "@/lib/skills/validate"
-import type { Skill, SkillCategory, SkillValidationError } from "@/lib/claude/types"
+import type { Skill, SkillCategory, SkillValidationError } from "@cognia/agent-config-types"
 import type { SkillDraft } from "@/lib/db/skills"
 import { SkillEditorAiPopup } from "./skill-editor-ai-popup"
 
@@ -30,6 +30,15 @@ interface Props {
   initial?: Skill | null
   onCancel: () => void
   onSave: (draft: SkillDraft) => Promise<void>
+  /**
+   * Metadata-only mode: hide the markdown-content editor (and AI assist) and
+   * only surface the frontmatter fields (name / description / category / tags /
+   * tools / version / author / license). Used by the editor workspace's "Skill
+   * settings" panel, where the body is edited in Monaco instead. The existing
+   * `initial.content` is still carried through so validation doesn't falsely
+   * flag an (unchanged, non-empty) body as missing.
+   */
+  hideContent?: boolean
   /**
    * When set, the AI assist button is enabled. The popup calls this with the
    * intent ("optimize" / "simplify" / etc.) and resolves to the suggested
@@ -93,7 +102,7 @@ function parseChips(text: string): string[] {
     .filter(Boolean)
 }
 
-export function SkillEditor({ mode, initial, onCancel, onSave, onAiAssist }: Props) {
+export function SkillEditor({ mode, initial, onCancel, onSave, hideContent, onAiAssist }: Props) {
   const t = useTranslations("skills.editor")
   const tCommon = useTranslations("skills")
   const reduce = useReducedMotion()
@@ -202,6 +211,7 @@ export function SkillEditor({ mode, initial, onCancel, onSave, onAiAssist }: Pro
           <Input
             value={form.license}
             onChange={(e) => setForm({ ...form, license: e.target.value })}
+            // i18n-exempt: SPDX license identifier example
             placeholder="MIT"
           />
         </Field>
@@ -215,52 +225,57 @@ export function SkillEditor({ mode, initial, onCancel, onSave, onAiAssist }: Pro
         />
       </Field>
 
-      <Field label={t("content")} error={fieldErrors.get("content")} hint={t("contentHint")}>
-        <Tabs defaultValue="edit">
-          <div className="flex items-center justify-between">
-            <TabsList variant="line" className="h-7">
-              <TabsTrigger value="edit" className="text-xs">
-                {t("tabEdit")}
-              </TabsTrigger>
-              <TabsTrigger value="preview" className="text-xs">
-                {t("tabPreview")}
-              </TabsTrigger>
-            </TabsList>
-            {onAiAssist && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setAiOpen(true)}
-                disabled={!form.content.trim() && !form.name.trim()}
-              >
-                <SparklesIcon className="mr-1.5 size-3.5" />
-                {tCommon("ai.buttonLabel")}
-              </Button>
-            )}
-          </div>
-          <TabsContent value="edit" className="mt-1.5">
-            <Textarea
-              rows={14}
-              value={form.content}
-              onChange={(e) => setForm({ ...form, content: e.target.value })}
-              className="font-mono text-xs"
-              placeholder={t("contentPlaceholder")}
-            />
-          </TabsContent>
-          <TabsContent value="preview" className="mt-1.5">
-            <div className="prose prose-sm dark:prose-invert min-h-[300px] max-w-none rounded-md border bg-muted/30 px-3 py-2 text-sm">
-              {form.content.trim() ? (
-                <Streamdown>{`## ${form.name || t("unnamedPreview")}\n\n${form.content}`}</Streamdown>
-              ) : (
-                <p className="m-0 text-xs italic text-muted-foreground">
-                  {t("contentPlaceholder")}
-                </p>
+      {!hideContent && (
+        <Field label={t("content")} error={fieldErrors.get("content")} hint={t("contentHint")}>
+          <Tabs defaultValue="edit">
+            <div className="flex items-center justify-between">
+              <TabsList variant="line" className="h-7">
+                <TabsTrigger value="edit" className="text-xs">
+                  {t("tabEdit")}
+                </TabsTrigger>
+                <TabsTrigger value="preview" className="text-xs">
+                  {t("tabPreview")}
+                </TabsTrigger>
+              </TabsList>
+              {onAiAssist && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setAiOpen(true)}
+                  disabled={!form.content.trim() && !form.name.trim()}
+                >
+                  <SparklesIcon className="mr-1.5 size-3.5" />
+                  {tCommon("ai.buttonLabel")}
+                </Button>
               )}
             </div>
-          </TabsContent>
-        </Tabs>
-      </Field>
+            <TabsContent value="edit" className="mt-1.5">
+              <Textarea
+                rows={14}
+                value={form.content}
+                onChange={(e) => setForm({ ...form, content: e.target.value })}
+                className="font-mono text-xs"
+                placeholder={t("contentPlaceholder")}
+              />
+            </TabsContent>
+            <TabsContent value="preview" className="mt-1.5">
+              <div className="min-h-[300px] rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                {form.content.trim() ? (
+                  <MarkdownRenderer
+                    content={`## ${form.name || t("unnamedPreview")}\n\n${form.content}`}
+                    rhythm="document"
+                  />
+                ) : (
+                  <p className="m-0 text-xs italic text-muted-foreground">
+                    {t("contentPlaceholder")}
+                  </p>
+                )}
+              </div>
+            </TabsContent>
+          </Tabs>
+        </Field>
+      )}
 
       <Field label={t("allowedTools")} hint={t("allowedToolsHint")}>
         <Input

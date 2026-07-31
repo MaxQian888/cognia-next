@@ -1,0 +1,46 @@
+{
+  "cancelAll": "Cancel all",
+  "cancelLeg": "Cancel {label}",
+  "clearFilters": "Clear filters",
+  "controls": {
+    "filterKinds": "Filter by kind",
+    "groupByKind": "Group by kind",
+    "label": "View settings",
+    "reset": "Reset to defaults",
+    "showElapsed": "Show elapsed time",
+    "sort": "Sort"
+  },
+  "elapsed": {
+    "hoursMinutes": "{hours}h {minutes}m",
+    "minutesSeconds": "{minutes}m {seconds}s",
+    "seconds": "{seconds}s"
+  },
+  "empty": "Nothing is running right now.",
+  "filteredEmpty": "No executions match your filters.",
+  "kind": {
+    "chat": "Chat",
+    "connector": "Connector",
+    "goal": "Goal",
+    "scheduled": "Scheduled",
+    "subagent": "Sub-agent",
+    "team": "Team",
+    "workflow": "Workflow",
+    "workflowStep": "Workflow step"
+  },
+  "runningCount": "{count, plural, =0 {Idle} other {# running}}",
+  "sort": {
+    "kind": "By kind",
+    "recent": "Recent",
+    "status": "By status"
+  },
+  "status": {
+    "cancelled": "Cancelled",
+    "done": "Done",
+    "error": "Error",
+    "queued": "Queued",
+    "running": "Running",
+    "waiting": "Waiting"
+  },
+  "title": "Execution Monitor",
+  "watchLeg": "Watch {label}"
+}

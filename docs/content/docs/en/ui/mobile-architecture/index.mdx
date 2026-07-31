@@ -117,13 +117,13 @@ Read the per-module page for line-accurate internals. Each card is one documenta
   <Card title="Transport layer" href="./transport-layer" description="The Transport interface, the tri-state selector, CompanionTransport (HTTPS _rpc + WSS events with replay), the WebRTC sub-tier, TLS-pinned fetch, the tier classifier, and the SecureStorage credential store." />
   <Card title="Discovery & pairing" href="./discovery-pairing" description="mDNS subscribe, the LAN IP-range scanner, the WebRTC-ICE local-IP trick, the connection-strategy candidate walk, the three-step pairing wizard, the QR payload, and TLS fingerprint pinning." />
   <Card title="Sync & offline" href="./sync-offline" description="The runSyncDown orchestrator, the 10 per-table handlers, paginated deltas, the durable cursor store, the allowlist-merge for settings, the four sync triggers, and the Dexie-first query hook." />
-  <Card title="WebRTC transport" href="./webrtc-transport" description="The TS envelope twin (HMAC + canonical JSON + replay), the SignalingClient, the offerer role, the mobile/desktop controllers, and the Cloudflare-Worker rendezvous server with its Durable-Object rooms (ADR-0021)." />
+  <Card title="WebRTC transport" href="./webrtc-transport" description="The v2-only ECDSA/ECDH/AES-GCM signaling client, bounded DataChannel offerer, recovery controls, and Cloudflare Durable-Object rendezvous (ADR-0021)." />
 </Cards>
 
 ## Why the phone is a client, not a server
 
 Everything stateful and privileged stays on the desktop. The phone holds a device JWT, a pinned TLS
-fingerprint, a `rendezvousSecret`, and a local Dexie cache — nothing more. It cannot run the agent
+fingerprint, a v2 room descriptor, a secure mobile role key, and a local Dexie cache — nothing more. It cannot run the agent
 sidecar, the vector store, MCP, or connector webhooks. This keeps the attack surface small (a lost
 phone is revoked from the desktop's [deny-list](../../subsystems/companion-api/server-and-auth#revocation-deny-list-and-control-allow-list))
 and keeps the bundle identical, which is the whole point of the Capacitor approach.

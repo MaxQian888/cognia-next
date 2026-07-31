@@ -14,7 +14,7 @@
  * this same plugin.
  */
 
-import { defineAgentTeamTemplate } from "@/lib/plugin/sdk/define-agent-team-template"
+import { defineAgentTeamTemplate } from "@cognia/plugin-sdk"
 import type { PluginAgentTeamTemplateDef } from "@/types/plugin/plugin-agent-team-template"
 import { ROLE_PACK_ID, packSkillId } from "../ids"
 
@@ -24,7 +24,7 @@ export const WRITING_CREW_TEMPLATE = defineAgentTeamTemplate({
   description:
     "调研员、知乎写手、润色配图师协作完成一篇高赞回答：调研 → 写作 → 配图 → 终稿。在团队对话里跑，终稿处人工确认。",
   category: "research",
-  icon: "users",
+  icon: "Users",
   teammates: [
     {
       name: "调研员 Researcher",

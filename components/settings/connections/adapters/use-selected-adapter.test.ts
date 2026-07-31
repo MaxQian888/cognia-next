@@ -69,13 +69,15 @@ describe("useSelectedAdapter", () => {
     expect(mockReplace).toHaveBeenCalledWith("?", { scroll: false })
   })
 
-  it("setSelectedAdapterId also drops the inner tab so the new adapter doesn't inherit a non-existent tab", () => {
-    mockUrl("adapter=lark-1&adapterTab=debug")
+  it("setSelectedAdapterId preserves the inner tab when switching adapters (all adapters share the same five tabs)", () => {
+    mockUrl("adapter=lark-1&adapterTab=health")
     const { result } = renderHook(() => useSelectedAdapter())
     act(() => {
       result.current.setSelectedAdapterId("telegram-1")
     })
-    expect(mockReplace).toHaveBeenCalledWith("?adapter=telegram-1", { scroll: false })
+    expect(mockReplace).toHaveBeenCalledWith("?adapter=telegram-1&adapterTab=health", {
+      scroll: false,
+    })
   })
 
   it("setActiveTab updates the URL", () => {

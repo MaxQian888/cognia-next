@@ -2,7 +2,8 @@
 
 // Uninstall (delete) confirmation. Mirrors components/skills/skill-delete-
 // dialog.tsx but adds an opt-in "cascade" toggle that wipes the plugin's
-// stored config / analytics / scheduled jobs. Without cascade, only the
+// stored permissions / analytics. SchedulerDB tasks are always removed by
+// the uninstall lifecycle. Without cascade, only the
 // plugin row is removed.
 
 import { useState } from "react"

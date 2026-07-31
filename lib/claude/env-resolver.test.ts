@@ -2,11 +2,24 @@
 // tests run without a real Tauri host.
 
 import { resolveAccountEnv, resolveAccountId, resolveProxyEnv } from "./env-resolver"
-import type { AppSettings, Character, ChatSession } from "@/lib/claude/types"
+import type { AppSettings, Character, ChatSession } from "@cognia/agent-config-types"
 
 jest.mock("@/lib/tauri", () => ({
   transport: {
     call: jest.fn(),
+  },
+}))
+
+let standaloneRuntime = false
+jest.mock("@/lib/runtime/standalone-mode", () => ({
+  isStandaloneChatMode: () => standaloneRuntime,
+}))
+
+let unlockedAccountId: string | null = "local_acct_a"
+
+jest.mock("@/stores/account/account-store", () => ({
+  useAccountStore: {
+    getState: () => ({ unlockedAccountId }),
   },
 }))
 
@@ -16,6 +29,8 @@ const mockCall = transport.call as jest.MockedFunction<typeof transport.call>
 
 beforeEach(() => {
   mockCall.mockReset()
+  unlockedAccountId = "local_acct_a"
+  standaloneRuntime = false
 })
 
 // Minimal-shape factories — only the fields the resolver reads. The full
@@ -97,6 +112,13 @@ describe("resolveAccountId — precedence chain", () => {
 })
 
 describe("resolveAccountEnv", () => {
+  it("does not call a host-only command in browser standalone mode", async () => {
+    standaloneRuntime = true
+
+    await expect(resolveAccountEnv("anthropic", "abc")).resolves.toEqual({})
+    expect(mockCall).not.toHaveBeenCalled()
+  })
+
   it("returns {} when accountId is null without calling the transport", async () => {
     const env = await resolveAccountEnv("anthropic", null)
     expect(env).toEqual({})
@@ -105,13 +127,14 @@ describe("resolveAccountEnv", () => {
 
   it("forwards provider + accountId via transport.call and returns the merged record", async () => {
     mockCall.mockResolvedValueOnce([
-      ["CLAUDE_CODE_OAUTH_TOKEN", "oat-01"],
-      ["CLAUDE_CONFIG_DIR", "/tmp/configs/abc"],
-      ["ANTHROPIC_BASE_URL", "https://example.com"],
+      { key: "CLAUDE_CODE_OAUTH_TOKEN", value: "oat-01" },
+      { key: "CLAUDE_CONFIG_DIR", value: "/tmp/configs/abc" },
+      { key: "ANTHROPIC_BASE_URL", value: "https://example.com" },
     ])
     const env = await resolveAccountEnv("anthropic", "abc")
     expect(mockCall).toHaveBeenCalledWith("claude_env_for_account", {
       provider: "anthropic",
+      localAccountId: "local_acct_a",
       accountId: "abc",
     })
     expect(env).toEqual({
@@ -119,6 +142,15 @@ describe("resolveAccountEnv", () => {
       CLAUDE_CONFIG_DIR: "/tmp/configs/abc",
       ANTHROPIC_BASE_URL: "https://example.com",
     })
+  })
+
+  it("returns {} without calling Rust when no local account is unlocked", async () => {
+    unlockedAccountId = null
+
+    const env = await resolveAccountEnv("anthropic", "abc")
+
+    expect(env).toEqual({})
+    expect(mockCall).not.toHaveBeenCalled()
   })
 
   it("returns {} when transport returns null (unknown account)", async () => {
@@ -138,10 +170,17 @@ describe("resolveAccountEnv", () => {
 })
 
 describe("resolveProxyEnv", () => {
+  it("does not call a host-only command in browser standalone mode", async () => {
+    standaloneRuntime = true
+
+    await expect(resolveProxyEnv("session-x")).resolves.toEqual({})
+    expect(mockCall).not.toHaveBeenCalled()
+  })
+
   it("returns parsed pairs when proxy is active", async () => {
     mockCall.mockResolvedValueOnce([
-      ["HTTPS_PROXY", "http://proxy:8080"],
-      ["HTTP_PROXY", "http://proxy:8080"],
+      { key: "HTTPS_PROXY", value: "http://proxy:8080" },
+      { key: "HTTP_PROXY", value: "http://proxy:8080" },
     ])
     const env = await resolveProxyEnv("session-x")
     expect(mockCall).toHaveBeenCalledWith("claude_proxy_env_for_session", {

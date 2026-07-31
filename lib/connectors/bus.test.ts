@@ -9,7 +9,16 @@ import type {
   OutboundRequest,
   ConnectorCallbackEvent,
 } from "@/types/connectors"
+
+const mockTrackEvent = jest.fn().mockResolvedValue(true)
+jest.mock("@/lib/telemetry/events/track-event", () => ({
+  trackEvent: (...args: unknown[]) => mockTrackEvent(...args),
+}))
+
 import { getBus, __resetBusForTesting } from "./bus"
+import { appendAudit } from "./audit"
+import { evaluatePolicy } from "./policy-eval"
+import type { TriggerPolicy } from "@/types/connectors/policy"
 
 // The callback dispatch path touches Dexie via dedup / audit / binding lookup.
 // Stub those three out so the observer wiring can be exercised in isolation —
@@ -17,6 +26,9 @@ import { getBus, __resetBusForTesting } from "./bus"
 // reach these modules, so the mocks leave them untouched.
 jest.mock("./dedup", () => ({
   recordAndCheckInbound: jest.fn().mockResolvedValue(true),
+  // Read-only probe used by dispatchConnectorCallback's check-then-commit
+  // dedup — `false` = "not seen yet" so every test callback dispatches.
+  isRecordedInbound: jest.fn().mockResolvedValue(false),
 }))
 jest.mock("./audit", () => ({
   appendAudit: jest.fn().mockResolvedValue(undefined),
@@ -80,6 +92,7 @@ function makeRequest(): OutboundRequest {
 
 beforeEach(() => {
   __resetBusForTesting()
+  mockTrackEvent.mockClear()
 })
 
 describe("ConnectorBus — adapter registry", () => {
@@ -116,6 +129,94 @@ describe("ConnectorBus — adapter registry", () => {
   })
 })
 
+describe("ConnectorBus — outbound behavior telemetry", () => {
+  it("records both successful and rejected sends at the central bus boundary", async () => {
+    const bus = getBus()
+    const adapter = makeAdapter("a1")
+    bus.registerAdapter(adapter)
+
+    await expect(bus.sendOutbound("a1", makeRequest())).resolves.toMatchObject({ ok: true })
+    await expect(bus.sendOutbound("missing", makeRequest())).resolves.toMatchObject({ ok: false })
+
+    expect(mockTrackEvent.mock.calls).toEqual([
+      ["connector.message.sent", { adapterId: "a1", platform: "telegram", outcome: "succeeded" }],
+      [
+        "connector.message.sent",
+        {
+          adapterId: "missing",
+          platform: "unknown",
+          outcome: "failed",
+          errorCode: "adapter_not_found",
+        },
+      ],
+    ])
+  })
+
+  it("records adapter-declared failures with and without an error code", async () => {
+    const bus = getBus()
+    const coded = makeAdapter("coded")
+    const uncoded = makeAdapter("uncoded")
+    jest.mocked(coded.send).mockResolvedValue({
+      ok: false,
+      error: { code: "rate_limited", message: "private", retryable: true },
+    })
+    jest.mocked(uncoded.send).mockResolvedValue({ ok: false })
+    bus.registerAdapter(coded)
+    bus.registerAdapter(uncoded)
+
+    await expect(bus.sendOutbound("coded", makeRequest())).resolves.toMatchObject({ ok: false })
+    await expect(bus.sendOutbound("uncoded", makeRequest())).resolves.toMatchObject({ ok: false })
+
+    expect(mockTrackEvent.mock.calls).toEqual([
+      [
+        "connector.message.sent",
+        {
+          adapterId: "coded",
+          platform: "telegram",
+          outcome: "failed",
+          errorCode: "rate_limited",
+        },
+      ],
+      ["connector.message.sent", { adapterId: "uncoded", platform: "telegram", outcome: "failed" }],
+    ])
+    expect(JSON.stringify(mockTrackEvent.mock.calls)).not.toContain("private")
+  })
+
+  it("records an adapter exception by class and preserves the rejection", async () => {
+    const bus = getBus()
+    const adapter = makeAdapter("throws")
+    jest.mocked(adapter.send).mockRejectedValue(new TypeError("private connector failure"))
+    bus.registerAdapter(adapter)
+
+    await expect(bus.sendOutbound("throws", makeRequest())).rejects.toThrow(
+      "private connector failure"
+    )
+    expect(mockTrackEvent).toHaveBeenCalledWith("connector.message.sent", {
+      adapterId: "throws",
+      platform: "telegram",
+      outcome: "failed",
+      errorCode: "TypeError",
+    })
+    expect(JSON.stringify(mockTrackEvent.mock.calls)).not.toContain("private connector failure")
+  })
+
+  it("uses a stable fallback code for non-Error adapter rejections", async () => {
+    const bus = getBus()
+    const adapter = makeAdapter("rejects-value")
+    jest.mocked(adapter.send).mockRejectedValue("private rejection")
+    bus.registerAdapter(adapter)
+
+    await expect(bus.sendOutbound("rejects-value", makeRequest())).rejects.toBe("private rejection")
+    expect(mockTrackEvent).toHaveBeenCalledWith("connector.message.sent", {
+      adapterId: "rejects-value",
+      platform: "telegram",
+      outcome: "failed",
+      errorCode: "Error",
+    })
+    expect(JSON.stringify(mockTrackEvent.mock.calls)).not.toContain("private rejection")
+  })
+})
+
 describe("ConnectorBus — dispatchInbound", () => {
   it("invokes the registered inbound handler", async () => {
     const bus = getBus()
@@ -131,6 +232,41 @@ describe("ConnectorBus — dispatchInbound", () => {
     await expect(bus.dispatchInbound(makeEvent("a1", "m1"))).rejects.toThrow(
       "inbound handler not set"
     )
+  })
+})
+
+describe("ConnectorBus — system event external flag (Lark external group)", () => {
+  function systemEvent(external?: boolean): NormalizedInboundEvent {
+    return {
+      ...makeEvent("a1", "m_sys"),
+      kind: "system",
+      systemKind: "member_removed",
+      raw: {
+        header: { event_type: "im.chat.member.bot.deleted_v1" },
+        event: external === undefined ? {} : { external },
+      },
+    }
+  }
+
+  it("surfaces external:true in the member audit when the chat is external", async () => {
+    const bus = getBus()
+    await bus.dispatchInboundFull(systemEvent(true))
+    expect(appendAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "inbound.member_removed",
+        fields: expect.objectContaining({ external: true }),
+      })
+    )
+  })
+
+  it("omits external from the audit when the raw envelope has no external flag", async () => {
+    const bus = getBus()
+    await bus.dispatchInboundFull(systemEvent(undefined))
+    const call = (appendAudit as jest.Mock).mock.calls.find(
+      (c) => c[0]?.kind === "inbound.member_removed"
+    )
+    expect(call).toBeDefined()
+    expect(call![0].fields).not.toHaveProperty("external")
   })
 })
 
@@ -236,6 +372,111 @@ describe("ConnectorBus — adapter-operation wrappers", () => {
     expect((await bus.deleteOutbound("nope", "m")).error?.code).toBe("adapter_not_found")
     bus.registerAdapter(makeAdapter("a1"))
     expect((await bus.deleteOutbound("a1", "m")).error?.code).toBe("unsupported")
+  })
+
+  it("addReactionOutbound delegates and reports ok:true", async () => {
+    const bus = getBus()
+    const a = makeAdapter("a1") as PlatformAdapter & { addReaction: jest.Mock }
+    a.addReaction = jest.fn().mockResolvedValue(undefined)
+    bus.registerAdapter(a)
+    const res = await bus.addReactionOutbound("a1", "pm_1", "THUMBSUP")
+    expect(res.ok).toBe(true)
+    expect(a.addReaction).toHaveBeenCalledWith("pm_1", "THUMBSUP")
+  })
+
+  it("addReactionOutbound reports adapter_not_found / unsupported", async () => {
+    const bus = getBus()
+    expect((await bus.addReactionOutbound("nope", "m", "OK")).error?.code).toBe("adapter_not_found")
+    bus.registerAdapter(makeAdapter("a1")) // no addReaction method
+    expect((await bus.addReactionOutbound("a1", "m", "OK")).error?.code).toBe("unsupported")
+  })
+
+  it("addReactionOutbound surfaces the platform reactionId", async () => {
+    const bus = getBus()
+    const a = makeAdapter("a1") as PlatformAdapter & { addReaction: jest.Mock }
+    a.addReaction = jest.fn().mockResolvedValue({ reactionId: "rx_7" })
+    bus.registerAdapter(a)
+    const res = await bus.addReactionOutbound("a1", "pm_1", "OK")
+    expect(res.ok).toBe(true)
+    expect((res as { reactionId?: string }).reactionId).toBe("rx_7")
+  })
+
+  it("removeReactionOutbound delegates and reports adapter_not_found / unsupported", async () => {
+    const bus = getBus()
+    const a = makeAdapter("a1") as PlatformAdapter & { removeReaction: jest.Mock }
+    a.removeReaction = jest.fn().mockResolvedValue(undefined)
+    bus.registerAdapter(a)
+    expect((await bus.removeReactionOutbound("a1", "pm_1", "rx_7")).ok).toBe(true)
+    expect(a.removeReaction).toHaveBeenCalledWith("pm_1", "rx_7")
+    expect((await bus.removeReactionOutbound("nope", "m", "r")).error?.code).toBe(
+      "adapter_not_found"
+    )
+    bus.registerAdapter(makeAdapter("a2"))
+    expect((await bus.removeReactionOutbound("a2", "m", "r")).error?.code).toBe("unsupported")
+  })
+
+  it("forwardOutbound delegates the adapter result and reports not-found / unsupported", async () => {
+    const bus = getBus()
+    const a = makeAdapter("a1") as PlatformAdapter & { forwardMessage: jest.Mock }
+    a.forwardMessage = jest.fn().mockResolvedValue({ ok: true, platformMessageId: "om_fwd" })
+    bus.registerAdapter(a)
+    const res = await bus.forwardOutbound("a1", { messageId: "om_1", target: "oc_dest" })
+    expect(res.ok).toBe(true)
+    expect(res.platformMessageId).toBe("om_fwd")
+    expect(a.forwardMessage).toHaveBeenCalledWith({ messageId: "om_1", target: "oc_dest" })
+    expect((await bus.forwardOutbound("nope", { messageId: "m", target: "t" })).error?.code).toBe(
+      "adapter_not_found"
+    )
+    bus.registerAdapter(makeAdapter("a2"))
+    expect((await bus.forwardOutbound("a2", { messageId: "m", target: "t" })).error?.code).toBe(
+      "unsupported"
+    )
+  })
+
+  it("pinOutbound / unpinOutbound delegate and report not-found / unsupported", async () => {
+    const bus = getBus()
+    const a = makeAdapter("a1") as PlatformAdapter & {
+      pinMessage: jest.Mock
+      unpinMessage: jest.Mock
+    }
+    a.pinMessage = jest.fn().mockResolvedValue(undefined)
+    a.unpinMessage = jest.fn().mockResolvedValue(undefined)
+    bus.registerAdapter(a)
+    expect((await bus.pinOutbound("a1", "k", "pm_1")).ok).toBe(true)
+    expect(a.pinMessage).toHaveBeenCalledWith("k", "pm_1")
+    expect((await bus.unpinOutbound("a1", "pm_1")).ok).toBe(true)
+    expect(a.unpinMessage).toHaveBeenCalledWith("pm_1")
+    expect((await bus.pinOutbound("nope", "k", "m")).error?.code).toBe("adapter_not_found")
+    bus.registerAdapter(makeAdapter("a2"))
+    expect((await bus.pinOutbound("a2", "k", "m")).error?.code).toBe("unsupported")
+    expect((await bus.unpinOutbound("a2", "m")).error?.code).toBe("unsupported")
+  })
+
+  it("sendUrgentOutbound delegates, maps a throw to platform_error, and reports unsupported", async () => {
+    const bus = getBus()
+    const a = makeAdapter("a1") as PlatformAdapter & { sendUrgent: jest.Mock }
+    a.sendUrgent = jest.fn().mockResolvedValue(undefined)
+    bus.registerAdapter(a)
+    expect((await bus.sendUrgentOutbound("a1", "pm_1", ["ou_x"], "app")).ok).toBe(true)
+    expect(a.sendUrgent).toHaveBeenCalledWith("pm_1", ["ou_x"], "app")
+    a.sendUrgent.mockRejectedValueOnce(new Error("no scope"))
+    expect((await bus.sendUrgentOutbound("a1", "pm_1", ["ou_x"])).error?.code).toBe(
+      "platform_error"
+    )
+    bus.registerAdapter(makeAdapter("a2"))
+    expect((await bus.sendUrgentOutbound("a2", "m", ["x"])).error?.code).toBe("unsupported")
+  })
+
+  it("getReadReceiptOutbound delegates and returns null when missing/unsupported", async () => {
+    const bus = getBus()
+    const receipt = { readers: [{ userId: "ou_x", readAt: 1 }], hasMore: false }
+    const a = makeAdapter("a1") as PlatformAdapter & { getReadReceipt: jest.Mock }
+    a.getReadReceipt = jest.fn().mockResolvedValue(receipt)
+    bus.registerAdapter(a)
+    expect(await bus.getReadReceiptOutbound("a1", "pm_1")).toEqual(receipt)
+    expect(await bus.getReadReceiptOutbound("missing", "m")).toBeNull()
+    bus.registerAdapter(makeAdapter("a2"))
+    expect(await bus.getReadReceiptOutbound("a2", "m")).toBeNull()
   })
 
   it("setTypingOutbound delegates (true) and no-ops (false) when missing/unsupported", async () => {
@@ -381,5 +622,55 @@ describe("ConnectorBus — passive callback observers", () => {
       throw new Error("cb observer boom")
     })
     await expect(bus.dispatchConnectorCallback(makeCallback())).resolves.toBeUndefined()
+  })
+})
+
+describe("ConnectorBus — recordBotReply (cooldown bookkeeping)", () => {
+  beforeEach(() => __resetBusForTesting())
+
+  const cooldownEvent = (conversationKey: string) =>
+    ({
+      conversationKey,
+      sender: { id: "u1" },
+      channel: { id: "c1" },
+      mentions: { selfMentioned: false, users: [] },
+      plainText: "hi",
+    }) as unknown as NormalizedInboundEvent
+
+  const cooldownPolicy: TriggerPolicy = {
+    rules: [],
+    blockers: [{ kind: "cooldown-after-bot-reply", secs: 5 }],
+    storeUnmatchedInDraftMode: false,
+  }
+
+  it("writes the last-reply timestamp the cooldown blocker reads (was never written before)", () => {
+    const bus = getBus()
+    const ck = "lark:lark-1:oc_chat"
+    bus.recordBotReply(ck, 10_000)
+
+    const state = bus.__getPolicyStateForTesting()
+    expect(state.recentBotReplyAtByConversation[ck]).toBe(10_000)
+
+    // Within the 5 s window → blocked; after it → allowed.
+    expect(evaluatePolicy(cooldownPolicy, cooldownEvent(ck), state, 12_000).blocked).toBe(true)
+    expect(evaluatePolicy(cooldownPolicy, cooldownEvent(ck), state, 20_000).blocked).toBe(false)
+  })
+
+  it("defaults the timestamp to now when omitted", () => {
+    const bus = getBus()
+    const before = Date.now()
+    bus.recordBotReply("k")
+    const at = bus.__getPolicyStateForTesting().recentBotReplyAtByConversation["k"]
+    expect(at).toBeGreaterThanOrEqual(before)
+  })
+
+  it("prunes entries older than the retention window on write", () => {
+    const bus = getBus()
+    bus.recordBotReply("old", 0)
+    // 20 min later — retention window is 10 min, so `old` is pruned.
+    bus.recordBotReply("fresh", 20 * 60_000)
+    const map = bus.__getPolicyStateForTesting().recentBotReplyAtByConversation
+    expect(map["old"]).toBeUndefined()
+    expect(map["fresh"]).toBe(20 * 60_000)
   })
 })

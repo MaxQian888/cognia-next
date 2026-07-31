@@ -78,8 +78,23 @@ export interface AgentTeamConfig {
     dryRoundsToStop?: number
   }
   workingDir?: string
+  /** Blocking lead review of every task before its dependents run (ADR-0071). */
+  taskReview?: {
+    enabled?: boolean
+    /** Worker revision attempts after a `changes_requested`. Default 2. */
+    maxRevisions?: number
+  }
 }
 ```
+
+`taskReview` is **off by default**; when on, the synthesizer emits an
+`action.team.task.review` node per task and repoints that task's dependents onto
+it, so unapproved work cannot be built on. It is the automated sibling of
+`governancePolicy.approval.requireResultReview` (a **human** board gate) and the
+two compose: an automated approval hands the card to a human when
+`requireResultReview` is also set, and completes it otherwise. Resolution of the
+flag and the budget lives in `lib/ai/agent/team/task-review-policy.ts` so the
+synthesizer and the executor cannot disagree.
 
 `DEFAULT_TEAM_CONFIG` (`:376`) seeds `maxTeammates: 10`, `maxConcurrentTeammates: 5`, `executionMode: "coordinated"`, `preferredExecutionPattern: "manager_worker"`, `displayMode: "expanded"`. `TeamGovernancePolicy` (`:135-166`) groups four sub-policies: **approval** (`requirePlanApproval`, `requireDelegationApproval`), **budget** (`tokenBudget`, warning/critical thresholds, an `onCritical` action), **escalation** (`allowOperatorPatternOverride`, `pauseOnHighRisk`), and **delivery** (quiet-hours window with timezone).
 

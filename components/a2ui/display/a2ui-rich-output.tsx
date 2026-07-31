@@ -11,9 +11,11 @@ import { A2UIComparisonCards } from "./a2ui-comparison-cards"
 import { A2UIStepperShell } from "../layout/a2ui-stepper-shell"
 import { A2UITable } from "../data/a2ui-table"
 import { cn } from "@/lib/utils"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { getValueByPath, resolveArrayOrPath, resolveStringOrPath } from "@/lib/a2ui/data-model"
 import { resolveWidgetMetadata } from "@/lib/a2ui/catalog"
+import { getA2UIWidgetSettingDefaults } from "@/lib/a2ui/runtime-settings"
+import { useSettingsStore } from "@/stores/settings"
 import { routeRichOutputProfile } from "@/lib/a2ui/output-profiles"
 import type {
   A2UIComponentProps,
@@ -130,6 +132,7 @@ export function A2UIRichOutput({
   renderChild,
 }: A2UIComponentProps<A2UIRichOutputComponent>) {
   const t = useTranslations("a2ui.richOutput")
+  const runtimeSettings = useSettingsStore((state) => state.settings)
 
   const requestedProfileId = resolveStringOrPath(
     component.profileId,
@@ -153,8 +156,12 @@ export function A2UIRichOutput({
   const steps = resolveArrayOrPath(component.steps ?? [], dataModel, [])
   const tableRows = resolveArrayOrPath(component.tableRows ?? [], dataModel, [])
   const widgetMetadata = useMemo(
-    () => resolveWidgetMetadata({ ...component, profileId: requestedProfileId }),
-    [component, requestedProfileId]
+    () =>
+      resolveWidgetMetadata(
+        { ...component, profileId: requestedProfileId },
+        getA2UIWidgetSettingDefaults(runtimeSettings)
+      ),
+    [component, requestedProfileId, runtimeSettings]
   )
 
   const previewArtifact = useMemo(() => {
@@ -221,7 +228,7 @@ export function A2UIRichOutput({
   const fallbackText = fallbackContent || t("richOutputFallback")
   const runtimeFallback = (
     <div className="rounded-lg border border-border/60 bg-background/70 p-4 text-sm text-muted-foreground">
-      Loading rich runtime...
+      {t("loadingRuntime")}
     </div>
   )
 
@@ -481,10 +488,13 @@ export function A2UIRichOutput({
       title={title}
       description={description}
       hostStrategy={widgetMetadata.hostStrategy}
+      sizing={widgetMetadata.sizing}
+      theme={widgetMetadata.theme}
       status={routedProfile.usedFallback ? "fallback" : widgetMetadata.status}
       statusLabel={routedProfile.usedFallback ? t("richOutputFallback") : undefined}
       fallbackText={fallbackText}
       showChrome={widgetMetadata.showChrome}
+      minHeight={widgetMetadata.minHeight}
       className={component.className}
     >
       {renderBody()}

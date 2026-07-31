@@ -4,13 +4,10 @@
 import { act, renderHook } from "@testing-library/react"
 
 // `stores/index.ts` calls `isTauri()` at module top-level inside a Zustand
-// `create()` factory; that runs during ES import hoisting, before the test's
-// `const mockIsTauri = …` line can initialise. Declaring the jest.fn inside
-// the factory dodges the TDZ; tests grab the live ref via `requireMock`.
+// `create()` factory during import hoisting — declare the mock inline.
 jest.mock("@/lib/tauri", () => ({
   isTauri: jest.fn().mockReturnValue(false),
 }))
-const mockIsTauri = (jest.requireMock("@/lib/tauri") as { isTauri: jest.Mock }).isTauri
 
 const renderSingleExportMock = jest.fn()
 jest.mock("@/lib/export/single", () => ({
@@ -27,107 +24,55 @@ dbMessagesQuery.equals.mockReturnValue(dbMessagesQuery)
 dbMessagesQuery.sortBy.mockResolvedValue([])
 
 jest.mock("@/lib/db/schema", () => ({
-  getDb: () => ({
-    messages: dbMessagesQuery,
-  }),
+  getDb: () => ({ messages: dbMessagesQuery }),
 }))
 
-const saveDialogMock = jest.fn()
-jest.mock(
-  "@tauri-apps/plugin-dialog",
-  () => ({
-    save: (args: unknown) => saveDialogMock(args),
-  }),
-  { virtual: true }
-)
-
-const writeTextFileMock = jest.fn().mockResolvedValue(undefined)
-jest.mock(
-  "@tauri-apps/plugin-fs",
-  () => ({
-    writeTextFile: (...args: unknown[]) => writeTextFileMock(...args),
-  }),
-  { virtual: true }
-)
+// The hook now delegates the platform write to the unified saver; mock it so
+// these tests focus on the hook's orchestration (render → save → plugin hooks).
+const saveExportMock = jest.fn()
+jest.mock("@/lib/files/save-export", () => ({
+  saveExport: (args: unknown) => saveExportMock(args),
+}))
 
 import { useSingleExport } from "./use-single-export"
 import { getPluginEventHooks } from "@/lib/plugin"
 
+const SAVED = {
+  kind: "saved" as const,
+  platform: "web" as const,
+  location: "downloads",
+  filename: "out.md",
+}
+
 beforeEach(() => {
-  mockIsTauri.mockReset().mockReturnValue(false)
   renderSingleExportMock.mockReset()
-  saveDialogMock.mockReset()
-  writeTextFileMock.mockReset().mockResolvedValue(undefined)
+  saveExportMock.mockReset().mockResolvedValue(SAVED)
   dbMessagesQuery.where.mockClear()
   dbMessagesQuery.equals.mockClear()
   dbMessagesQuery.sortBy.mockReset().mockResolvedValue([])
-  Object.defineProperty(URL, "createObjectURL", {
-    configurable: true,
-    writable: true,
-    value: jest.fn(() => "blob:url"),
-  })
-  Object.defineProperty(URL, "revokeObjectURL", {
-    configurable: true,
-    writable: true,
-    value: jest.fn(),
-  })
 })
 
 const session = { id: "s1", title: "Test" } as never
 const baseArgs = () => ({ format: "markdown" as const, session })
 
 describe("useSingleExport", () => {
-  it("browser path: triggers a download", async () => {
+  it("passes the rendered content to saveExport and returns its outcome", async () => {
     renderSingleExportMock.mockReturnValueOnce({
       filename: "out.md",
       content: "# hello",
       mimeType: "text/markdown",
     })
-    const clickSpy = jest
-      .spyOn(HTMLAnchorElement.prototype, "click")
-      .mockImplementation(() => undefined)
     const { result } = renderHook(() => useSingleExport())
     let res: unknown
     await act(async () => {
       res = await result.current.run({ ...baseArgs(), messages: [] } as never)
     })
-    expect(res).toMatchObject({ ok: true, canceled: false, filename: "out.md" })
-    expect(clickSpy).toHaveBeenCalled()
-    clickSpy.mockRestore()
-  })
-
-  it("Tauri save success", async () => {
-    mockIsTauri.mockReturnValue(true)
-    renderSingleExportMock.mockReturnValueOnce({
-      filename: "out.json",
-      content: "{}",
-      mimeType: "application/json",
+    expect(saveExportMock).toHaveBeenCalledWith({
+      filename: "out.md",
+      data: "# hello",
+      mimeType: "text/markdown",
     })
-    saveDialogMock.mockResolvedValueOnce("/picked/out.json")
-    const { result } = renderHook(() => useSingleExport())
-    let res: unknown
-    await act(async () => {
-      res = await result.current.run({ ...baseArgs(), messages: [] } as never)
-    })
-    expect(writeTextFileMock).toHaveBeenCalledWith("/picked/out.json", "{}")
-    expect(res).toMatchObject({ ok: true, canceled: false })
-  })
-
-  it("Tauri cancellation returns canceled", async () => {
-    mockIsTauri.mockReturnValue(true)
-    renderSingleExportMock.mockReturnValueOnce({
-      filename: "out.txt",
-      content: "x",
-      mimeType: "text/plain",
-    })
-    saveDialogMock.mockResolvedValueOnce(null)
-    const { result } = renderHook(() => useSingleExport())
-    let res: unknown
-    await act(async () => {
-      res = await result.current.run({ ...baseArgs(), messages: [] } as never)
-    })
-    expect(res).toEqual({ ok: true, canceled: true })
-    expect(writeTextFileMock).not.toHaveBeenCalled()
+    expect(res).toEqual(SAVED)
   })
 
   it("falls back to Dexie messages when none are provided", async () => {
@@ -137,7 +82,6 @@ describe("useSingleExport", () => {
       content: "x",
       mimeType: "text/markdown",
     })
-    jest.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined)
     const { result } = renderHook(() => useSingleExport())
     await act(async () => {
       await result.current.run(baseArgs() as never)
@@ -146,7 +90,7 @@ describe("useSingleExport", () => {
     expect(dbMessagesQuery.equals).toHaveBeenCalledWith("s1")
   })
 
-  it("propagates render errors as { ok: false }", async () => {
+  it("propagates render errors as { kind: 'error' }", async () => {
     renderSingleExportMock.mockImplementationOnce(() => {
       throw new Error("render boom")
     })
@@ -155,7 +99,7 @@ describe("useSingleExport", () => {
     await act(async () => {
       res = await result.current.run({ ...baseArgs(), messages: [] } as never)
     })
-    expect(res).toEqual({ ok: false, error: "render boom" })
+    expect(res).toEqual({ kind: "error", message: "render boom" })
   })
 
   it("non-Error throws stringified into the result", async () => {
@@ -167,16 +111,15 @@ describe("useSingleExport", () => {
     await act(async () => {
       res = await result.current.run({ ...baseArgs(), messages: [] } as never)
     })
-    expect(res).toEqual({ ok: false, error: "string-failure" })
+    expect(res).toEqual({ kind: "error", message: "string-failure" })
   })
 
-  it("dispatches onExportStart, onExportTransform, and onExportComplete(true) on success", async () => {
+  it("dispatches start, transform, and complete(true) when the save succeeds", async () => {
     renderSingleExportMock.mockReturnValueOnce({
       filename: "out.md",
       content: "# hello",
       mimeType: "text/markdown",
     })
-    jest.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined)
     const hooks = getPluginEventHooks()
     const startSpy = jest.spyOn(hooks, "dispatchExportStart").mockResolvedValue([] as never)
     const transformSpy = jest
@@ -193,27 +136,28 @@ describe("useSingleExport", () => {
     expect(completeSpy).toHaveBeenCalledWith("s1", "markdown", true)
   })
 
-  it("dispatches onExportComplete(false) when the user cancels the Tauri save dialog", async () => {
-    mockIsTauri.mockReturnValue(true)
+  it("dispatches complete(false) when the user cancels the save dialog", async () => {
     renderSingleExportMock.mockReturnValueOnce({
       filename: "out.txt",
       content: "x",
       mimeType: "text/plain",
     })
-    saveDialogMock.mockResolvedValueOnce(null)
+    saveExportMock.mockResolvedValueOnce({ kind: "cancelled" })
     const hooks = getPluginEventHooks()
     jest.spyOn(hooks, "dispatchExportStart").mockResolvedValue([] as never)
     jest.spyOn(hooks, "dispatchExportTransform").mockImplementation(async (content) => content)
     const completeSpy = jest.spyOn(hooks, "dispatchExportComplete").mockImplementation(() => {})
 
     const { result } = renderHook(() => useSingleExport())
+    let res: unknown
     await act(async () => {
-      await result.current.run({ ...baseArgs(), messages: [] } as never)
+      res = await result.current.run({ ...baseArgs(), messages: [] } as never)
     })
+    expect(res).toEqual({ kind: "cancelled" })
     expect(completeSpy).toHaveBeenCalledWith("s1", "markdown", false)
   })
 
-  it("dispatches onExportComplete(false) when render throws", async () => {
+  it("dispatches complete(false) when render throws", async () => {
     renderSingleExportMock.mockImplementationOnce(() => {
       throw new Error("render boom")
     })
@@ -229,19 +173,23 @@ describe("useSingleExport", () => {
     expect(completeSpy).toHaveBeenCalledWith("s1", "markdown", false)
   })
 
-  it("filename without extension defaults the dialog filter to TXT", async () => {
-    mockIsTauri.mockReturnValue(true)
+  it("forwards includeAllBranches to renderSingleExport", async () => {
     renderSingleExportMock.mockReturnValueOnce({
-      filename: "noext",
-      content: "data",
-      mimeType: "text/plain",
+      filename: "out.jsonl",
+      content: "{}",
+      mimeType: "application/x-ndjson",
     })
-    saveDialogMock.mockResolvedValueOnce("/x/noext")
     const { result } = renderHook(() => useSingleExport())
     await act(async () => {
-      await result.current.run({ ...baseArgs(), messages: [] } as never)
+      await result.current.run({
+        format: "jsonl",
+        session,
+        messages: [],
+        includeAllBranches: true,
+      } as never)
     })
-    const args = saveDialogMock.mock.calls[0][0]
-    expect(args.filters?.[0].extensions[0]).toBe("txt")
+    expect(renderSingleExportMock).toHaveBeenCalledWith(
+      expect.objectContaining({ format: "jsonl", includeAllBranches: true })
+    )
   })
 })

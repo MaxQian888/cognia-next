@@ -13,7 +13,9 @@ import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { cn } from "@/lib/utils"
 import { renderHTML, renderSVG, getReactShellHtml, escapeHtml } from "@/lib/artifacts"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
+import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import type { ArtifactRuntimeHealth } from "@/types/artifact/artifact"
 import type { Artifact, PreviewErrorBoundaryProps, PreviewErrorBoundaryState } from "@/types"
 import {
   ArtifactRenderer,
@@ -71,6 +73,7 @@ class PreviewErrorBoundary extends Component<PreviewErrorBoundaryProps, PreviewE
                 size="sm"
                 variant="ghost"
                 onClick={this.handleRetry}
+                // i18n-exempt: class error boundary cannot use hooks; pre-existing aria label
                 aria-label="Retry preview"
               >
                 <RefreshCw className="h-4 w-4" />
@@ -93,7 +96,7 @@ function PreviewLoading({ message }: { message?: string }) {
   )
 }
 
-function RuntimeHealthBadge({ state }: { state: "ready" | "loading" | "error" }) {
+function RuntimeHealthBadge({ state }: { state: ArtifactRuntimeHealth }) {
   return (
     <div
       data-testid="runtime-health-badge"
@@ -115,7 +118,26 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
   const needsIframe = adapter.transport === "iframe"
   const [isLoading, setIsLoading] = useState(needsIframe)
   const [iframeHeight, setIframeHeight] = useState<string | undefined>(undefined)
-  const runtimeHealth = error ? "error" : isLoading ? "loading" : "ready"
+  // A plugin renderer may report `unsupported`, which is neither an error nor a
+  // successful render; folding it into `ready` (as this used to) made the panel
+  // claim a preview it never produced.
+  const [unsupported, setUnsupported] = useState(false)
+  const runtimeHealth: ArtifactRuntimeHealth = error
+    ? "error"
+    : isLoading
+      ? "loading"
+      : unsupported
+        ? "unsupported"
+        : "ready"
+  const setArtifactRuntimeHealth = useArtifactStore((state) => state.setArtifactRuntimeHealth)
+
+  // Persist only settled outcomes, so "which artifacts are broken?" survives a
+  // reload and the workspace runtime filter has something to match. `loading`
+  // is never written — it is a property of this render, not of the artifact.
+  useEffect(() => {
+    if (runtimeHealth === "loading") return
+    setArtifactRuntimeHealth(artifact.id, runtimeHealth, error ?? undefined)
+  }, [artifact.id, error, runtimeHealth, setArtifactRuntimeHealth])
   const widgetMetadata = artifact.metadata?.widget
   const effectiveIframeHeight =
     widgetMetadata?.sizing === "content-height" ? iframeHeight : undefined
@@ -254,6 +276,7 @@ export function ArtifactPreview({ artifact, className }: ArtifactPreviewProps) {
             fallback={fallbackRenderer}
             onRuntimeStateChange={(state, nextError) => {
               setIsLoading(state === "loading")
+              setUnsupported(state === "unsupported")
               setError(state === "error" ? nextError || t("previewError") : null)
             }}
           />

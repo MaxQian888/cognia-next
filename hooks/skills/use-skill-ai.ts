@@ -9,9 +9,9 @@ import type {
   SDKAssistantMessage,
   SDKEventEnvelope,
   SDKMessage,
-} from "@/lib/claude/types"
+} from "@cognia/agent-config-types"
 
-import type { SkillValidationError } from "@/lib/claude/types"
+import type { SkillValidationError } from "@cognia/agent-config-types"
 
 interface AiCurrent {
   name: string

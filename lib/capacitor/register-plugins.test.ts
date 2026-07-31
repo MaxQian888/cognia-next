@@ -5,7 +5,7 @@ import { registerNativePlugins } from "./register-plugins"
 
 const logInfo = jest.fn()
 const logWarn = jest.fn()
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: {
     shell: {
       info: (...args: unknown[]) => logInfo(...args),

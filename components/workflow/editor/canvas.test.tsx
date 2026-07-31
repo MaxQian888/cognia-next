@@ -3,12 +3,15 @@
  */
 import "fake-indexeddb/auto"
 import "@testing-library/jest-dom"
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { WorkflowEditorCanvas } from "./canvas"
+import { runWorkflow } from "@/lib/workflow/runtime/orchestrator"
+import { toast } from "sonner"
 import type { VisualWorkflow } from "@/types/workflow/visual"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
-import { createWorkflow } from "@/lib/db/workflows"
+import { createWorkflow, getWorkflow } from "@/lib/db/workflows"
+import { publishWorkflow } from "@/lib/workflow/publish/publish-workflow"
 
 function renderWithProviders(ui: React.ReactElement) {
   return render(<TooltipProvider>{ui}</TooltipProvider>)
@@ -28,13 +31,47 @@ const reactFlowPropsRef: { current: Record<string, unknown> | null } = {
   current: null,
 }
 
-// Stub the workflow-editor chat tab so this canvas-focused suite doesn't
-// pay the cost of pulling the chat-ui dependency graph (ai-elements →
-// use-stick-to-bottom is ESM-only). The full chat-tab is covered by its
-// own tests under `hooks/chat/` + `plugins/workflow-ai/`.
-jest.mock("./right-sidebar/chat-tab", () => ({
+// Stub the complete right sidebar so this canvas-focused suite doesn't
+// activate lazy Context Workbench panels while asserting React Flow behavior.
+// The sidebar and chat scope have dedicated tests.
+jest.mock("./right-sidebar", () => ({
   __esModule: true,
-  WorkflowEditorChatTab: () => null,
+  // Renders the collapse contract it is handed so the shell's half of the
+  // persistent-rail wiring is assertable without mounting the real workbench.
+  RightSidebar: ({
+    railOnly,
+    onCollapse,
+    onEnsureVisible,
+  }: {
+    railOnly?: boolean
+    onCollapse?: () => void
+    onEnsureVisible?: () => void
+  }) => (
+    <div
+      data-testid="right-sidebar"
+      data-rail-only={railOnly ? "true" : undefined}
+      data-has-collapse={onCollapse ? "true" : undefined}
+      data-has-ensure-visible={onEnsureVisible ? "true" : undefined}
+    />
+  ),
+}))
+
+// Mock the runtime so the run gate can be asserted without executing a real
+// workflow. Other tests in this suite never trigger a run, so the no-op
+// stand-ins are inert for them.
+jest.mock("@/lib/workflow/runtime/orchestrator", () => ({
+  runWorkflow: jest.fn(async () => ({ status: "succeeded" })),
+}))
+jest.mock("@/lib/workflow/runtime/run-single-node", () => ({
+  runSingleNode: jest.fn(async () => ({ status: "succeeded" })),
+}))
+jest.mock("sonner", () => ({
+  toast: Object.assign(jest.fn(), {
+    error: jest.fn(),
+    success: jest.fn(),
+    warning: jest.fn(),
+    loading: jest.fn(() => "toast-id"),
+  }),
 }))
 
 // Mock @xyflow/react in this test — its rendering pipeline depends on real
@@ -162,6 +199,99 @@ describe("WorkflowEditorCanvas", () => {
     expect(screen.getByText("Saved")).toBeInTheDocument()
   })
 
+  it("marks imported JSON dirty and persists it under the current workflow id", async () => {
+    const wf = await createWorkflow({ name: "Current" })
+    const sample: VisualWorkflow = { ...buildSample(), id: wf.id }
+    renderWithProviders(<WorkflowEditorCanvas workflow={sample} />)
+    const imported = {
+      name: "Imported graph",
+      nodes: [
+        {
+          id: "imported-node",
+          type: "trigger.manual",
+          typeVersion: 1,
+          position: { x: 10, y: 20 },
+          data: { label: "Imported", params: {} },
+        },
+      ],
+      edges: [],
+    }
+
+    fireEvent.change(screen.getByTestId("workflow-import-input"), {
+      target: {
+        files: [
+          new File([JSON.stringify(imported)], "workflow.json", { type: "application/json" }),
+        ],
+      },
+    })
+
+    await waitFor(() => expect(screen.getByTestId("node-imported-node")).toBeInTheDocument())
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("workflow-save"))
+    await waitFor(async () => {
+      expect((await getWorkflow(wf.id))?.name).toBe("Imported graph")
+    })
+  })
+
+  it("warns and refreshes publication state when a saved import changes the contract", async () => {
+    const originalSchema = {
+      type: "object",
+      properties: { topic: { type: "string" } },
+    }
+    const wf = await createWorkflow({
+      name: "Published canvas",
+      nodes: [
+        {
+          ...buildSample().nodes[0],
+          data: { label: "Run", params: { inputSchema: originalSchema } },
+        },
+      ],
+      edges: [],
+    })
+    await publishWorkflow(wf.id, 1)
+    const published = (await getWorkflow(wf.id))!
+    ;(toast.warning as jest.Mock).mockClear()
+    renderWithProviders(<WorkflowEditorCanvas workflow={published} />)
+
+    fireEvent.change(screen.getByTestId("workflow-import-input"), {
+      target: {
+        files: [
+          new File(
+            [
+              JSON.stringify({
+                name: published.name,
+                nodes: [
+                  {
+                    ...buildSample().nodes[0],
+                    data: {
+                      label: "Run",
+                      params: {
+                        inputSchema: {
+                          type: "object",
+                          properties: { url: { type: "string" } },
+                        },
+                      },
+                    },
+                  },
+                ],
+                edges: [],
+              }),
+            ],
+            "workflow.json",
+            { type: "application/json" }
+          ),
+        ],
+      },
+    })
+
+    await waitFor(() => expect(screen.getByText("Unsaved changes")).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId("workflow-save"))
+
+    await waitFor(async () => expect((await getWorkflow(wf.id))?.published).toBeUndefined())
+    expect(toast.warning).toHaveBeenCalled()
+  }, 10_000)
+
   it("renders an empty state when the workflow has no nodes", async () => {
     const wf = await createWorkflow({ name: "x" })
     const sample: VisualWorkflow = { ...buildSample(), id: wf.id, nodes: [], edges: [] }
@@ -189,6 +319,7 @@ describe("WorkflowEditorCanvas", () => {
     const wf = await createWorkflow({ name: "x" })
     const sample: VisualWorkflow = { ...buildSample(), id: wf.id }
     renderWithProviders(<WorkflowEditorCanvas workflow={sample} />)
+    await screen.findByTestId("minimap-mock")
     const props = reactFlowPropsRef.current
     expect(typeof props?.onNodeDragStart).toBe("function")
     expect(typeof props?.onNodeDragStop).toBe("function")
@@ -200,17 +331,19 @@ describe("WorkflowEditorCanvas", () => {
         { id: "n_a", position: { x: 0, y: 0 } }
       )
     })
-    expect(screen.getByTestId("minimap-mock").getAttribute("data-pannable")).toBe("false")
+    expect(await screen.findByTestId("minimap-frozen")).toBeInTheDocument()
+    expect(screen.queryByTestId("minimap-mock")).not.toBeInTheDocument()
     act(() => {
       ;(props!.onNodeDragStop as () => void)()
     })
-    expect(screen.getByTestId("minimap-mock").getAttribute("data-pannable")).toBe("true")
+    expect((await screen.findByTestId("minimap-mock")).getAttribute("data-pannable")).toBe("true")
   })
 
   it("wires selection-drag through the same begin/commit drag lifecycle", async () => {
     const wf = await createWorkflow({ name: "x" })
     const sample: VisualWorkflow = { ...buildSample(), id: wf.id }
     renderWithProviders(<WorkflowEditorCanvas workflow={sample} />)
+    await screen.findByTestId("minimap-mock")
     const props = reactFlowPropsRef.current
     // Multi-selection drags route through these events, so they must be wired
     // or the drag-coalescing fix would miss them.
@@ -221,11 +354,12 @@ describe("WorkflowEditorCanvas", () => {
     act(() => {
       ;(props!.onSelectionDragStart as () => void)()
     })
-    expect(screen.getByTestId("minimap-mock").getAttribute("data-pannable")).toBe("false")
+    expect(await screen.findByTestId("minimap-frozen")).toBeInTheDocument()
+    expect(screen.queryByTestId("minimap-mock")).not.toBeInTheDocument()
     act(() => {
       ;(props!.onSelectionDragStop as () => void)()
     })
-    expect(screen.getByTestId("minimap-mock").getAttribute("data-pannable")).toBe("true")
+    expect((await screen.findByTestId("minimap-mock")).getAttribute("data-pannable")).toBe("true")
   })
 
   it("flips minimap to degraded mode while the viewport is panning/zooming", async () => {
@@ -270,5 +404,134 @@ describe("WorkflowEditorCanvas", () => {
     const second = reactFlowPropsRef.current
     expect(second?.onConnectStart).toBe(firstStart)
     expect(second?.onConnectEnd).toBe(firstEnd)
+  })
+})
+
+describe("WorkflowEditorCanvas — run gate", () => {
+  beforeEach(() => {
+    ;(runWorkflow as jest.Mock).mockClear()
+    ;(toast.error as jest.Mock).mockClear()
+  })
+
+  it("blocks the run and surfaces an error toast when the workflow has error diagnostics", async () => {
+    const wf = await createWorkflow({ name: "blocked" })
+    // n_b (ai.prompt) has empty params → missing userPrompt → nodeParam error.
+    const sample: VisualWorkflow = { ...buildSample(), id: wf.id }
+    renderWithProviders(<WorkflowEditorCanvas workflow={sample} />)
+    fireEvent.click(screen.getByTestId("workflow-run"))
+    expect(runWorkflow).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalled()
+  })
+
+  it("runs when there are no error diagnostics (warnings don't block)", async () => {
+    const wf = await createWorkflow({ name: "clean" })
+    const sample: VisualWorkflow = {
+      ...buildSample(),
+      id: wf.id,
+      nodes: [
+        {
+          id: "n_a",
+          type: "trigger.manual",
+          typeVersion: 1,
+          position: { x: 0, y: 0 },
+          data: { label: "Run", params: {} },
+        },
+        {
+          id: "n_b",
+          type: "ai.prompt",
+          typeVersion: 1,
+          position: { x: 200, y: 0 },
+          data: { label: "Prompt", params: { userPrompt: "hello" } },
+        },
+      ],
+    }
+    renderWithProviders(<WorkflowEditorCanvas workflow={sample} />)
+    fireEvent.click(screen.getByTestId("workflow-run"))
+    await waitFor(() => expect(runWorkflow).toHaveBeenCalled())
+  })
+
+  it("persists a dirty workflow through the shared save path before running", async () => {
+    const { getEditorStore } = await import("@/lib/workflow/editor/store-registry")
+    const wf = await createWorkflow({ name: "dirty run" })
+    const sample: VisualWorkflow = {
+      ...buildSample(),
+      id: wf.id,
+      nodes: [
+        buildSample().nodes[0],
+        {
+          ...buildSample().nodes[1],
+          data: { label: "Prompt", params: { userPrompt: "hello" } },
+        },
+      ],
+    }
+    renderWithProviders(<WorkflowEditorCanvas workflow={sample} />)
+    const store = getEditorStore(wf.id)!
+    act(() => store.getState().setName("Saved before run"))
+
+    fireEvent.click(screen.getByTestId("workflow-run"))
+
+    await waitFor(() => expect(runWorkflow).toHaveBeenCalled())
+    await waitFor(async () => expect((await getWorkflow(wf.id))?.name).toBe("Saved before run"))
+    expect(store.getState().dirty).toBe(false)
+  })
+})
+
+describe("WorkflowEditorCanvas — keyboard create+connect (C3)", () => {
+  it("Tab with one node selected stages a pendingConnectFrom from its output handle", async () => {
+    const { getEditorStore } = await import("@/lib/workflow/editor/store-registry")
+    const wf = await createWorkflow({ name: "kbd" })
+    const sample: VisualWorkflow = { ...buildSample(), id: wf.id }
+    renderWithProviders(<WorkflowEditorCanvas workflow={sample} />)
+    const store = getEditorStore(wf.id)!
+    expect(store).toBeTruthy()
+    act(() => store.getState().setSelectedNodes(["n_a"]))
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }))
+    })
+    const pending = store.getState().pendingConnectFrom
+    expect(pending?.sourceId).toBe("n_a")
+    // Positioned to the right of the source node.
+    expect(pending?.dropPos.x).toBeGreaterThan(0)
+  })
+})
+
+describe("WorkflowEditorCanvas — extract to sub-workflow (C5)", () => {
+  it("extracts the selection into a new workflow row and inserts a subworkflow node", async () => {
+    const { getEditorStore } = await import("@/lib/workflow/editor/store-registry")
+    const wf = await createWorkflow({ name: "parent" })
+    const sample: VisualWorkflow = { ...buildSample(), id: wf.id }
+    renderWithProviders(<WorkflowEditorCanvas workflow={sample} />)
+    const store = getEditorStore(wf.id)!
+    act(() => store.getState().setSelectedNodes(["n_b"]))
+    const before = (await getDb().workflows.toArray()).length
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("wf-sel-extract"))
+    })
+    await waitFor(async () => {
+      expect((await getDb().workflows.toArray()).length).toBe(before + 1)
+    })
+    await waitFor(() => {
+      expect(store.getState().nodes.some((n) => n.data.kind === "flow.subworkflow")).toBe(true)
+    })
+    // n_b was replaced; the rewired edge feeds the subworkflow node from n_a.
+    const sub = store.getState().nodes.find((n) => n.data.kind === "flow.subworkflow")!
+    expect(store.getState().edges.some((e) => e.source === "n_a" && e.target === sub.id)).toBe(true)
+  })
+})
+
+describe("WorkflowEditorCanvas — persistent workbench rail", () => {
+  it("hands the sidebar both halves of the collapse contract", () => {
+    renderWithProviders(<WorkflowEditorCanvas workflow={buildSample()} />)
+    const sidebar = screen.getByTestId("right-sidebar")
+    const rightResizeHandle = screen.getAllByRole("separator").at(-1)
+
+    // The desktop branch used to pass neither, so its collapse fell through to
+    // the per-scope `mode: "collapsed"` while the panel around it had its own
+    // zero-width collapse — two owners for one column.
+    expect(rightResizeHandle).toHaveClass("after:w-5", "z-20")
+    expect(sidebar).toHaveAttribute("data-has-collapse", "true")
+    expect(sidebar).toHaveAttribute("data-has-ensure-visible", "true")
+    // Nothing is collapsed on a fresh editor.
+    expect(sidebar).not.toHaveAttribute("data-rail-only")
   })
 })

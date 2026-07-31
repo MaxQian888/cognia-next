@@ -2,6 +2,20 @@ export type AuditKind =
   | "delivery.success"
   | "delivery.error"
   | "delivery.deadlettered"
+  // Circuit-open failover (multi-bot): the job's own adapter had an open
+  // breaker, so the runner re-enqueued the payload through an enabled
+  // same-platform sibling from `AdapterInstanceRow.failoverAdapterIds`.
+  // Emitted on the ORIGINAL adapter with `fields.failoverToAdapterId` +
+  // `fields.newJobId`; the original job row is dead-lettered with reason
+  // "failover" so the Outbound tab keeps the paper trail.
+  | "delivery.failover"
+  // Rate-limit spillover (multi-bot load balancing): the job's own adapter
+  // had an exhausted token bucket, so the runner re-enqueued the payload
+  // through a same-platform sibling from `AdapterInstanceRow.balanceAdapterIds`.
+  // Emitted on the ORIGINAL adapter with `fields.balancedToAdapterId` +
+  // `fields.newJobId`; the original job row is dead-lettered with reason
+  // "balanced" so the Outbound tab keeps the paper trail.
+  | "delivery.balanced"
   | "delivery.downgraded"
   | "inbound.received"
   | "inbound.deduped"
@@ -21,6 +35,15 @@ export type AuditKind =
   // first-inbound (`inbound.welcome_sent`). Both short-circuit the AI turn.
   | "inbound.help_served"
   | "inbound.welcome_sent"
+  // Sibling-bot inbound guard (W5 multi-bot same-group collaboration).
+  // `sibling_bot_ignored` — the message was authored by another of our own
+  // bot instances and the adapter's `siblingBotPolicy` is "ignore" (default),
+  // so the AI turn was suppressed to prevent cross-instance loops.
+  // `sibling_bot_budget_exhausted` — policy is "respond" but the per-chat
+  // sliding-hour `botInterplayBudget` ran out. Both carry
+  // `fields.siblingAdapterId`; the budget kind also carries `fields.budget`.
+  | "inbound.sibling_bot_ignored"
+  | "inbound.sibling_bot_budget_exhausted"
   | "outbound.enqueued"
   | "outbound.ai_run_enqueued"
   // outboundQueue soft cap (5000) tripped — `enqueueOutbound` aged the
@@ -46,6 +69,12 @@ export type AuditKind =
   | "circuit.closed"
   | "rate_limit.tripped"
   | "credential.refreshed"
+  // A re-authorization granted a different OAuth scope set than the prior
+  // grant. Since OAuth completion is a non-interactive deep-link callback,
+  // this after-the-fact row is how a silent scope change surfaces. Carries
+  // `fields.added`, `fields.removed`, `fields.scopes` (the new full set).
+  // Written by `lib/connectors/oauth-scope-audit.ts:recordGrantedScopes`.
+  | "oauth.scope_changed"
   | "adapter.started"
   | "adapter.stopped"
   | "adapter.error"
@@ -54,6 +83,13 @@ export type AuditKind =
   // ("settings_save" | "manual_requeue") so operators can tell the two
   // apart in the Audit tab.
   | "adapter.credentials_rotated"
+  // The OS / browser resumed from sleep (or the network came back online)
+  // after a long absence, so the resume-reconnect watcher re-queued the
+  // running adapter to heal a socket that may have gone half-open while the
+  // machine slept. Carries `fields.reason` ("online" | "visible") and
+  // `fields.awayMs` so operators can see why and how long. See
+  // `lib/connectors/bootstrap/resume-reconnect.ts`.
+  | "adapter.resumed"
   // Per-conversation Computer Use opt-in toggled from Inbox header
   // (ADR-0020). Fields carry `{ allowComputerUse: boolean, bioVerified:
   // boolean, via: string }` so the audit log shows whether the flip went
@@ -70,6 +106,66 @@ export type AuditKind =
   | "callback.deduped"
   | "callback.unbound"
   | "callback.handler_failed"
+  // ── Callback authorization guard (plan 2026-07-24 Phase 2) ───────────
+  // `callback.forbidden` — strict mode denied the callback; `reason` is the
+  // CallbackDenyReason and `fields` carries {actorHash, kindClass,
+  // bindingId?} — never raw payloads or tokens. `authorization_would_deny`
+  // is the same decision in audit (shadow) mode, where the callback still
+  // executes; its growth curve is the gray-release signal for enforcing.
+  | "callback.forbidden"
+  | "callback.authorization_would_deny"
+  // ── Lark entry surfaces (plan 2026-07-24 Phase 3) ────────────────────
+  // Entry-token lifecycle as observed by the brain: `entry.consumed` mirrors
+  // the companion's single-use redemption into the durable ledger;
+  // `entry.denied` records surface-resolve rejections (membership denied).
+  | "entry.consumed"
+  | "entry.denied"
+  // ── Lark chat surfaces + menus (plan 2026-07-24 Phase 4) ─────────────
+  // `menu.unknown_key` — a bot-menu click whose event_key resolves to no
+  // configured or reserved quick command; the click is answered with a fixed
+  // bilingual notice and NEVER forwarded to the model. `chat_tab.synced` /
+  // `chat_tab.sync_failed` trace the Chat Tab / group-menu reconciler per
+  // chat surface (fields: {chatId, surfaceType, urlVersion?, attempt?}).
+  | "menu.unknown_key"
+  | "chat_tab.synced"
+  | "chat_tab.sync_failed"
+  // A published surface was withdrawn (flag flipped off, or an explicit
+  // remove). `reason: "platform_delete_failed"` means the local row was
+  // retired but the platform-side delete did not land — the tab may still be
+  // visible in the chat and needs a manual sweep.
+  | "chat_tab.removed"
+  // ── Lark message shortcuts + plus menu (plan 2026-07-24 Phase 5) ─────
+  // `shortcut.import` fields carry {chatId, openIdHash, imported, skipped,
+  // sessionId} — message CONTENT never lands in the audit log.
+  // `sso.session_seen` records a verified web-SSO identity driving an
+  // intent (openIdHash + tenantKey only).
+  | "shortcut.import"
+  | "shortcut.import_denied"
+  | "plus.create"
+  // Mirrors `shortcut.import_denied`. Without it a `+`-menu entry that refused
+  // every tap (flag off, unbound principal, non-member) left no operator trace.
+  | "plus.create_denied"
+  | "sso.session_seen"
+  // ── Feishu unified identity (plan 2026-07-24 Phase 1) ────────────────
+  // Principal registry outcomes. `principal.unbound` fields carry
+  // {tenantKey?, appId?, openIdHash, reason} — the raw open_id never lands
+  // in the audit log. `principal.rejected` covers disabled/cross-account
+  // rejections; bind_requested/bound trace the admin bind flow.
+  | "principal.unbound"
+  | "principal.rejected"
+  | "principal.bind_requested"
+  | "principal.bound"
+  // Operator-driven registry mutations (settings card / `cognia lark` CLI).
+  // `bind_rejected` closes a request without minting a principal;
+  // `status_changed` carries {principalId, from, to}; `rebound` carries
+  // {principalId, version, changed} — the field NAMES that moved, never the
+  // values. `tenant.*` mirror the same shape for the tenant row and carry
+  // {tenantKey, appId} (both are configuration identifiers, not user data).
+  | "principal.bind_rejected"
+  | "principal.status_changed"
+  | "principal.rebound"
+  | "tenant.registered"
+  | "tenant.status_changed"
   // ── Built-in skills tier (ADR-0026 / schema v43) ─────────────────────
   // The dispatcher emits one of these on every `runBuiltInSkill` call.
   // `reason` carries the gate that fired (`pii_blocked`,
@@ -92,10 +188,130 @@ export type AuditKind =
   // (binding decode, Dexie write, or sibling-binding cleanup threw).
   // Same shape contract as `workflow_approval_failed`.
   | "workflow_fanout_failed"
+  // In-chat control commands (control-plane completion). `command.applied`
+  // when a `/model` / `/mode` / `/new` / … mutated state and a confirmation
+  // was sent; `command.denied` when the permission gate rejected a
+  // state-changing command; `command.unknown` for an unrecognised `/…`.
+  | "command.applied"
+  | "command.denied"
+  | "command.unknown"
+  // Agent Team dispatch from an inbound IM message (control-plane multi-agent).
+  // Fired when `overrideRow.teamId` routed the turn to `runTeamLifecycle`
+  // instead of the single-character `runAndCapture` path.
+  | "team.dispatched"
+  // Inbound dispatch rule decided the routing (W3 multi-bot 条件规则表).
+  // Fired from the connector runtime's ai-run branch when a matched
+  // `AdapterInstanceRow.dispatchRules` entry actually routed the turn (it
+  // was not shadowed by an explicit conversation override). Carries
+  // `fields.ruleId`, optional `fields.ruleName`, exactly one of
+  // `fields.teamId` / `fields.workflowId` / `fields.characterId` (the axis
+  // the rule decided), and `fields.sourceMessageId`.
+  | "dispatch.rule_matched"
+  // Multi-bot cross-account send: a dispatch rule asked for the reply to be
+  // delivered through another bot instance (`action.respondViaAdapterId`).
+  // Carries `fields.targetAdapterId`, `fields.applied` (false when the
+  // target was missing / disabled / muted / cross-platform and the runtime
+  // fell back to the receiving bot) and, when not applied, `fields.reason`.
+  | "dispatch.respond_via"
+  // Visual Workflow dispatch from an inbound IM message (workflow⇄IM parity).
+  // Fired when `overrideRow.workflowId` routed the turn to `startWorkflowFromIM`
+  // (`lib/workflow/runtime/start-from-im.ts`) instead of the single-character
+  // `runAndCapture` path. Mirrors `team.dispatched`; `teamId` wins when both are
+  // set. Carries `fields.workflowId` + `fields.sourceMessageId`.
+  | "workflow.dispatched"
+  // Draft mode prepared a real AI-generated reply for human review (manual
+  // connector mode / unmatched-in-draft policy). Fired when the `draft-prepare`
+  // route decision ran the character/twin/memory-grounded turn through the PII
+  // gate and persisted a `connectorDrafts` row. Carries `fields.draftId`,
+  // `fields.sourceMessageId`, `fields.assistantMessageId`. A PII block or
+  // capture failure audits `adapter.error` (reason `draft_prepare_capture_failed`)
+  // instead, mirroring the `ai-run` convention.
+  | "draft.prepared"
+  // Tool-permission approval over chat (control-plane HITL). `requested` when
+  // an ask-tier tool projected an Allow/Deny card; `granted` / `denied` on the
+  // user's button press; `expired` when the approval TTL elapsed (auto-deny).
+  | "tool_approve.requested"
+  | "tool_approve.granted"
+  | "tool_approve.denied"
+  | "tool_approve.expired"
+  // Proactive notification over IM (control-plane notifications). `pushed` when
+  // an agent event was enqueued to a conversation; `skipped` when opt-in was
+  // off / no target resolved; `pii_blocked` when the PII gate dropped it.
+  | "notify.im_pushed"
+  | "notify.im_skipped"
+  | "notify.im_pii_blocked"
+  // Live in-turn activity card (control-plane visibility — cc-connect-style
+  // "the agent is working" live card). `card_dispatched` when the cumulative
+  // activity card's first frame is enqueued; `card_finalized` when the card
+  // transitions to its terminal Done/Failed state at turn end; `edit_fallback`
+  // when an edit-frame fell back to a fresh send because the entry card's
+  // platformMessageId hadn't landed yet. Emitted from
+  // the durable execution presentation runner.
+  | "activity.card_dispatched"
+  | "activity.card_finalized"
+  | "activity.edit_fallback"
+  // APPEND-mode live activity (adapters without `edit()` — one compact line per
+  // throttled boundary instead of full suppression). `card_appended` carries
+  // `fields.appendCount` so an operator can see progress lines accruing.
+  | "activity.card_appended"
+  // Dead-lettered outbound job manually replayed from the Inbox/Settings DLQ
+  // panel — resets the row and re-arms the outbound runner. Carries the
+  // original error code in `fields.lastErrorCode`. Emitted from the replay
+  // UI path (`lib/db/outbound-jobs.ts` replayDeadlettered callers).
+  | "outbound.replayed"
+  // Inbound OCR step failed (best-effort, never blocks delivery). Emitted
+  // from `lib/connectors/inbound-ocr.ts` so a silently-dropped image's OCR
+  // failure is traceable instead of invisible. Carries the error in `message`.
+  | "inbound.ocr_failed"
+  // Plugin connector hooks (plugin⇄IM extensibility). A plugin's
+  // `onConnectorInbound` / `onConnectorOutbound` returned a decision:
+  // `*_blocked` when it vetoed the message (turn stopped / job dropped),
+  // `*_transformed` when it rewrote the segments (and the rewrite PASSED the
+  // PII re-gate). `transform_pii_blocked` when a transform was REJECTED because
+  // it would have leaked PII (the original is kept). Carries `fields.pluginId`
+  // when known + `reason`.
+  | "plugin.inbound_blocked"
+  | "plugin.inbound_transformed"
+  | "plugin.outbound_blocked"
+  | "plugin.outbound_transformed"
+  | "plugin.transform_pii_blocked"
+  // A plugin `im-rate-source` (`lib/connectors/im-rate/registry.ts`) returned a
+  // block decision for this conversation, so the connector runtime suppressed
+  // the AI-run turn before building the send. Carries `reason` + `fields.key`
+  // (the source key). Advisory/additive — only further restricts the policy.
+  | "plugin.rate_blocked"
+  // Chat management (W2 multi-bot). `conversation.created` — a conversation
+  // was proactively materialized (agent `im.create_chat` or future UI flow):
+  // the platform chat was created and a platform-bound ChatSession pre-minted
+  // by `lib/connectors/conversation-bootstrap.ts`. Carries
+  // `fields.remoteChatId` + `fields.name` + `fields.source`.
+  | "conversation.created"
+  // `im.broadcast` fan-out: `enqueued` after the per-target enqueue loop
+  // (carries `fields.targetCount` / `fields.enqueued` / `fields.skipped`);
+  // `partial_failure` additionally fired when at least one target was
+  // skipped (bad key / no session) so operators can find silent drops.
+  | "broadcast.enqueued"
+  | "broadcast.partial_failure"
+  // `im.dispatch_task` (W4 任务派发): a lead agent dispatched a sub-task to a
+  // dedicated conversation — chat created (or existing one targeted), a
+  // responder bound on the override row, and the brief posted. Carries
+  // `fields.conversationKey`, exactly one of `fields.teamId` /
+  // `fields.characterId` (the bound responder), `fields.created` (new chat vs
+  // existing conversation), and `fields.runStarted` when a team auto-run was
+  // attempted.
+  | "task.dispatched"
+  // `team_post_to_chat` (W5 多机器人同群协作): a running team turn posted a
+  // message into its own bound conversation or a SIBLING conversation (same
+  // remote group, different bot instance) under that bot's identity. Carries
+  // `fields.fromAdapterId` (the run's origin bot) and `fields.targetAdapterId`
+  // (the identity that posts), plus the team/teammate that issued the call.
+  | "team.posted_as_bot"
 
 export interface AuditEntry {
   id: string
   adapterId: string
+  /** Owning workspace id — Workspace isolation column (Dexie v86). Routing/audit data is per-project. */
+  projectId?: string
   kind: AuditKind
   at: number
   conversationKey?: string

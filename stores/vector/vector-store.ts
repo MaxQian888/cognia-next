@@ -13,11 +13,13 @@
 
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
-import type { VectorStoreProvider } from "@/lib/vector"
+import { persistLocalStorage } from "@/stores/persist-storage"
+import type { VectorStoreProvider } from "@cognia/vector"
+import type { RagEmbeddingProvider } from "@cognia/provider-embedding/embedding-catalog"
 
 export interface VectorSettings {
   provider: VectorStoreProvider
-  embeddingProvider: "openai" | "google" | "cohere" | "mistral"
+  embeddingProvider: RagEmbeddingProvider
   embeddingModel?: string
 
   // ADR-0022: per-provider config_id pointers into the OS keyring.
@@ -49,6 +51,7 @@ export const useVectorStore = create<VectorStoreState>()(
     }),
     {
       name: "cognia-vector-settings",
+      storage: persistLocalStorage(),
       // Bump on every credential-layout migration so the one-shot
       // credential-migration script can detect pre-ADR-0022 state and
       // run exactly once.

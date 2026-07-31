@@ -1,9 +1,16 @@
 import { render, screen, fireEvent } from "@testing-library/react"
 
 import { ToolSettingsSection } from "./tool-settings-section"
-import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
+import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 
 const setBuiltinToolEnabled = jest.fn()
+const setWebToolsEnabled = jest.fn()
+const setWebToolsNativeOnAnthropic = jest.fn()
+const setWebToolsAllowPrivateHosts = jest.fn()
+const setWebToolsAlwaysDistill = jest.fn()
+const setSkillToolEnabled = jest.fn()
+const setSlashCommandToolEnabled = jest.fn()
+const setTeamCollaborationToolEnabled = jest.fn()
 const toggleAlwaysAllow = jest.fn()
 
 jest.mock("next-intl", () => ({
@@ -31,8 +38,16 @@ const settingsState = {
   settings: {
     alwaysAllowTools: ["mcp__cognia-tools__git_status"],
     builtinTools: { ...DEFAULT_BUILTIN_TOOLS },
+    webTools: { enabled: true } as { enabled: boolean; nativeOnAnthropic?: boolean },
   },
   setBuiltinToolEnabled,
+  setWebToolsEnabled,
+  setWebToolsNativeOnAnthropic,
+  setWebToolsAllowPrivateHosts,
+  setWebToolsAlwaysDistill,
+  setSkillToolEnabled,
+  setSlashCommandToolEnabled,
+  setTeamCollaborationToolEnabled,
   toggleAlwaysAllow,
 }
 
@@ -43,8 +58,16 @@ jest.mock("@/stores/settings/settings-store", () => ({
 describe("ToolSettingsSection", () => {
   beforeEach(() => {
     setBuiltinToolEnabled.mockClear()
+    setWebToolsEnabled.mockClear()
+    setWebToolsNativeOnAnthropic.mockClear()
+    setWebToolsAllowPrivateHosts.mockClear()
+    setWebToolsAlwaysDistill.mockClear()
+    setSkillToolEnabled.mockClear()
+    setSlashCommandToolEnabled.mockClear()
+    setTeamCollaborationToolEnabled.mockClear()
     toggleAlwaysAllow.mockClear()
     isTauriMock.mockReturnValue(true)
+    settingsState.settings.webTools = { enabled: true }
   })
 
   it("renders all built-in tool categories", () => {
@@ -58,12 +81,75 @@ describe("ToolSettingsSection", () => {
     expect(screen.getByText("lspIntelligence")).toBeInTheDocument()
   })
 
-  it("calls setBuiltinToolEnabled when a switch is toggled", () => {
+  it("calls setBuiltinToolEnabled when a category switch is toggled", () => {
+    render(<ToolSettingsSection />)
+    // Query by label rather than index so the web-card sub-toggles don't shift it.
+    fireEvent.click(screen.getByLabelText("toggleAriaLabel:fileExtras"))
+    expect(setBuiltinToolEnabled).toHaveBeenCalled()
+  })
+
+  it("toggles the always-distill and allow-private web sub-toggles", () => {
+    render(<ToolSettingsSection />)
+    fireEvent.click(screen.getByLabelText("toggleAriaLabel:webAlwaysDistillTitle"))
+    expect(setWebToolsAlwaysDistill).toHaveBeenCalledWith(true)
+    fireEvent.click(screen.getByLabelText("toggleAriaLabel:webAllowPrivateTitle"))
+    expect(setWebToolsAllowPrivateHosts).toHaveBeenCalledWith(true)
+  })
+
+  it("hides the web sub-toggles when web tools are disabled", () => {
+    settingsState.settings.webTools = { enabled: false }
+    render(<ToolSettingsSection />)
+    expect(screen.queryByText("webAlwaysDistillTitle")).not.toBeInTheDocument()
+    expect(screen.queryByText("webAllowPrivateTitle")).not.toBeInTheDocument()
+  })
+
+  it("toggles the Skill, SlashCommand and team-collaboration self-invocation tools", () => {
+    render(<ToolSettingsSection />)
+    fireEvent.click(screen.getByLabelText("toggleAriaLabel:skillToolTitle"))
+    expect(setSkillToolEnabled).toHaveBeenCalledWith(true)
+    fireEvent.click(screen.getByLabelText("toggleAriaLabel:slashToolTitle"))
+    expect(setSlashCommandToolEnabled).toHaveBeenCalledWith(true)
+    fireEvent.click(screen.getByLabelText("toggleAriaLabel:teamCollabToolTitle"))
+    expect(setTeamCollaborationToolEnabled).toHaveBeenCalledWith(true)
+  })
+
+  it("keeps the self-invocation card available off-desktop (host-routed)", () => {
+    isTauriMock.mockReturnValue(false)
+    render(<ToolSettingsSection />)
+    expect(screen.getByLabelText("toggleAriaLabel:skillToolTitle")).not.toBeDisabled()
+    expect(screen.getByLabelText("toggleAriaLabel:slashToolTitle")).not.toBeDisabled()
+  })
+
+  it("calls setWebToolsNativeOnAnthropic when the native sub-toggle is flipped", () => {
     render(<ToolSettingsSection />)
     const switches = screen.getAllByRole("switch")
-    // Toggle the first switch (fileExtras): default is true → user clicks → false.
-    fireEvent.click(switches[0])
-    expect(setBuiltinToolEnabled).toHaveBeenCalled()
+    fireEvent.click(switches[1])
+    expect(setWebToolsNativeOnAnthropic).toHaveBeenCalledWith(true)
+  })
+
+  it("reflects the native sub-toggle's checked state", () => {
+    settingsState.settings.webTools = { enabled: true, nativeOnAnthropic: true }
+    render(<ToolSettingsSection />)
+    expect(screen.getAllByRole("switch")[1]).toBeChecked()
+  })
+
+  it("hides the native sub-toggle in web mode", () => {
+    isTauriMock.mockReturnValue(false)
+    render(<ToolSettingsSection />)
+    expect(screen.queryByText("webNativeAnthropicTitle")).not.toBeInTheDocument()
+  })
+
+  it("hides the native sub-toggle when web tools are disabled", () => {
+    settingsState.settings.webTools = { enabled: false }
+    render(<ToolSettingsSection />)
+    expect(screen.queryByText("webNativeAnthropicTitle")).not.toBeInTheDocument()
+  })
+
+  it("calls setWebToolsEnabled when the Web card switch is toggled", () => {
+    render(<ToolSettingsSection />)
+    const webSwitch = screen.getAllByRole("switch")[0]
+    fireEvent.click(webSwitch)
+    expect(setWebToolsEnabled).toHaveBeenCalledWith(false)
   })
 
   it("expand/collapse reveals the tool badges", () => {
@@ -82,12 +168,26 @@ describe("ToolSettingsSection", () => {
     expect(screen.getByText("desktopRequired")).toBeInTheDocument()
   })
 
-  it("disables switches in web mode", () => {
+  it("disables sidecar category switches in web mode but keeps the Web card enabled", () => {
     isTauriMock.mockReturnValue(false)
     render(<ToolSettingsSection />)
-    for (const sw of screen.getAllByRole("switch")) {
-      expect(sw).toBeDisabled()
+    // Off-desktop the native sub-toggle is hidden. Host-routed switches (web
+    // card enable + its always-distill/allow-private sub-toggles + the three
+    // self-invoke tools) stay enabled; only the sidecar categories are disabled.
+    const hostRouted = [
+      "toggleAriaLabel:webCardTitle",
+      "toggleAriaLabel:webAlwaysDistillTitle",
+      "toggleAriaLabel:webAllowPrivateTitle",
+      "toggleAriaLabel:skillToolTitle",
+      "toggleAriaLabel:slashToolTitle",
+      "toggleAriaLabel:teamCollabToolTitle",
+    ]
+    for (const label of hostRouted) {
+      expect(screen.getByLabelText(label)).not.toBeDisabled()
     }
+    // Sidecar category switches are disabled off-desktop.
+    expect(screen.getByLabelText("toggleAriaLabel:fileExtras")).toBeDisabled()
+    expect(screen.getByLabelText("toggleAriaLabel:gitOperations")).toBeDisabled()
   })
 
   it("renders the always-allow list", () => {

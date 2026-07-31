@@ -3,7 +3,6 @@
 import { useState } from "react"
 import { useTranslations } from "next-intl"
 import { GitCompare, Loader2, ExternalLink, Clock, FileText } from "lucide-react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -21,9 +20,9 @@ import {
   SEARCH_PROVIDERS,
   isProviderConfigured,
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
-} from "@/lib/search/types"
-import type { SearchResponse } from "@/lib/search/types"
-import { createLogger } from "@/lib/logging"
+} from "@cognia/web-search/types"
+import type { SearchResponse } from "@cognia/web-search/types"
+import { createLogger } from "@cognia/logging"
 
 const log = createLogger("settings.search.compare")
 
@@ -82,85 +81,74 @@ export function SearchProviderCompare() {
   }
 
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <div className="flex items-center gap-2">
-          <GitCompare className="h-4 w-4 text-muted-foreground" />
-          <div>
-            <CardTitle className="text-base">{tc("title")}</CardTitle>
-            <CardDescription className="text-xs">{tc("description")}</CardDescription>
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-3">
+    <div className="space-y-3">
+      <div className="space-y-1.5">
+        <Label className="text-xs">{tc("query")}</Label>
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={tc("queryPlaceholder")}
+          className="h-8 text-sm"
+          onKeyDown={(e) => e.key === "Enter" && handleCompare()}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="space-y-1.5">
-          <Label className="text-xs">{tc("query")}</Label>
-          <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={tc("queryPlaceholder")}
-            className="h-8 text-sm"
-            onKeyDown={(e) => e.key === "Enter" && handleCompare()}
-          />
+          <Label className="text-xs">{tc("providerA")}</Label>
+          <Select value={providerA} onValueChange={(v) => setProviderA(v as SearchProviderType)}>
+            <SelectTrigger className="h-8 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {configuredProviders.map((id) => (
+                <SelectItem key={id} value={id} className="text-xs">
+                  {SEARCH_PROVIDERS[id as SearchProviderType]?.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
-
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <Label className="text-xs">{tc("providerA")}</Label>
-            <Select value={providerA} onValueChange={(v) => setProviderA(v as SearchProviderType)}>
-              <SelectTrigger className="h-8 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {configuredProviders.map((id) => (
-                  <SelectItem key={id} value={id} className="text-xs">
-                    {SEARCH_PROVIDERS[id as SearchProviderType]?.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs">{tc("providerB")}</Label>
-            <Select value={providerB} onValueChange={(v) => setProviderB(v as SearchProviderType)}>
-              <SelectTrigger className="h-8 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {configuredProviders.map((id) => (
-                  <SelectItem key={id} value={id} className="text-xs">
-                    {SEARCH_PROVIDERS[id as SearchProviderType]?.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs">{tc("providerB")}</Label>
+          <Select value={providerB} onValueChange={(v) => setProviderB(v as SearchProviderType)}>
+            <SelectTrigger className="h-8 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {configuredProviders.map((id) => (
+                <SelectItem key={id} value={id} className="text-xs">
+                  {SEARCH_PROVIDERS[id as SearchProviderType]?.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
+      </div>
 
-        <Button
-          onClick={handleCompare}
-          disabled={!query.trim() || loading}
-          size="sm"
-          className="w-full"
-        >
-          {loading ? (
-            <Loader2 className="h-4 w-4 animate-spin mr-1" />
-          ) : (
-            <GitCompare className="h-4 w-4 mr-1" />
-          )}
-          {tc("compare")}
-        </Button>
-
-        {error && <p className="text-xs text-destructive">{error}</p>}
-
-        {(resultA || resultB) && (
-          <div className="grid grid-cols-1 gap-3 pt-2 border-t sm:grid-cols-2">
-            <CompareResultColumn providerId={providerA} result={resultA} t={tc} />
-            <CompareResultColumn providerId={providerB} result={resultB} t={tc} />
-          </div>
+      <Button
+        onClick={handleCompare}
+        disabled={!query.trim() || loading}
+        size="sm"
+        className="w-full"
+      >
+        {loading ? (
+          <Loader2 className="h-4 w-4 animate-spin mr-1" />
+        ) : (
+          <GitCompare className="h-4 w-4 mr-1" />
         )}
-      </CardContent>
-    </Card>
+        {tc("compare")}
+      </Button>
+
+      {error && <p className="text-xs text-destructive">{error}</p>}
+
+      {(resultA || resultB) && (
+        <div className="grid grid-cols-1 gap-3 pt-2 border-t sm:grid-cols-2">
+          <CompareResultColumn providerId={providerA} result={resultA} t={tc} />
+          <CompareResultColumn providerId={providerB} result={resultB} t={tc} />
+        </div>
+      )}
+    </div>
   )
 }
 

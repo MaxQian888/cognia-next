@@ -8,12 +8,13 @@
 // config file should not fail the whole restore.
 
 import { isTauri } from "@/lib/tauri"
-import type { AgentId } from "@/lib/claude/types"
+import type { AgentId } from "@cognia/agent-config-types"
 import { syncToAgent, type SyncResult } from "@/lib/claude/sync"
 import type { SyncProjectionReport } from "./types"
 
 /** Order matters for UI display (matches `MCP_AGENT_ADAPTERS`). */
 export const ALL_WRITABLE_AGENT_IDS: ReadonlyArray<AgentId> = [
+  "cognia",
   "claude-code",
   "claude-desktop",
   "cursor",

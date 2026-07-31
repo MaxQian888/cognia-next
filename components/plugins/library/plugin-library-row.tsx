@@ -7,7 +7,7 @@
 // without scrolling forever. Action set is shared with PluginCard via
 // PluginRowActionsMenu so the two views can't drift.
 
-import { useMemo } from "react"
+import { memo, useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { CircleAlertIcon, ShieldCheckIcon, TriangleAlertIcon } from "lucide-react"
 import type { PluginRow } from "@/lib/db/plugin-types"
@@ -20,6 +20,7 @@ import { PluginRowActionsMenu } from "../plugin-row-actions-menu"
 import { PluginSignatureBadge, type SignatureState } from "../plugin-signature-badge"
 import { PluginStatusPill } from "../plugin-status-badge"
 import { PluginVersionBadge } from "../_shared/plugin-version-badge"
+import { PluginAvatar } from "../plugin-avatar"
 
 interface Props {
   plugin: PluginRow
@@ -34,7 +35,10 @@ interface Props {
   onRollback?: (id: string) => void
 }
 
-export function PluginLibraryRow({
+// Memoized: the list re-renders on every store change (search keystrokes,
+// selection, detail focus) while row objects keep their identity across
+// re-filters — memo limits the work to rows whose own props changed.
+export const PluginLibraryRow = memo(function PluginLibraryRow({
   plugin,
   selected,
   active,
@@ -95,6 +99,12 @@ export function PluginLibraryRow({
         className="flex min-w-0 flex-1 items-center gap-2 text-left focus-visible:outline-2 focus-visible:outline-ring"
         data-testid={`plugin-library-row-${plugin.id}`}
       >
+        <PluginAvatar
+          name={plugin.name}
+          icon={(plugin.manifest as { icon?: string })?.icon}
+          seed={plugin.id}
+          size={24}
+        />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5 min-w-0">
             <span className="font-medium truncate">{plugin.name}</span>
@@ -115,7 +125,7 @@ export function PluginLibraryRow({
             )}
           </div>
         </div>
-        <div className="hidden items-center gap-1 lg:flex">
+        <div className="hidden items-center gap-1 @2xl/plugin-list:flex">
           {contributions.slice(0, 3).map((contribution) => (
             <CapabilityHoverChip
               key={contribution.capability}
@@ -136,7 +146,7 @@ export function PluginLibraryRow({
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           {permissionCount > 0 && (
-            <span className="hidden md:flex items-center gap-1 text-xs text-muted-foreground">
+            <span className="hidden @lg/plugin-list:flex items-center gap-1 text-xs text-muted-foreground">
               <ShieldCheckIcon className="size-3" />
               {permissionCount}
             </span>
@@ -163,7 +173,7 @@ export function PluginLibraryRow({
       />
     </div>
   )
-}
+})
 
 interface CapabilityHoverChipProps {
   capability: string

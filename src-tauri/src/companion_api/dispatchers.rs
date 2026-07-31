@@ -131,11 +131,7 @@ impl FcmDispatcher {
 
 #[async_trait]
 impl PushDispatcher for FcmDispatcher {
-    async fn deliver(
-        &self,
-        record: &PushTokenRecord,
-        payload: &PushPayload,
-    ) -> DeliveryOutcome {
+    async fn deliver(&self, record: &PushTokenRecord, payload: &PushPayload) -> DeliveryOutcome {
         let bearer = match self.bearer().await {
             Ok(b) => b,
             Err(err) => {
@@ -182,7 +178,11 @@ impl PushDispatcher for FcmDispatcher {
         match resp {
             Ok(r) if r.status().is_success() => DeliveryOutcome::Sent,
             Ok(r) => {
-                log::warn!("FCM deliver {}: {}", r.status(), r.text().await.unwrap_or_default());
+                log::warn!(
+                    "FCM deliver {}: {}",
+                    r.status(),
+                    r.text().await.unwrap_or_default()
+                );
                 DeliveryOutcome::Failed
             }
             Err(err) => {
@@ -262,11 +262,7 @@ impl ApnsDispatcher {
 
 #[async_trait]
 impl PushDispatcher for ApnsDispatcher {
-    async fn deliver(
-        &self,
-        record: &PushTokenRecord,
-        payload: &PushPayload,
-    ) -> DeliveryOutcome {
+    async fn deliver(&self, record: &PushTokenRecord, payload: &PushPayload) -> DeliveryOutcome {
         let jwt = match self.sign_jwt() {
             Ok(t) => t,
             Err(err) => {
@@ -308,7 +304,11 @@ impl PushDispatcher for ApnsDispatcher {
         match resp {
             Ok(r) if r.status().is_success() => DeliveryOutcome::Sent,
             Ok(r) => {
-                log::warn!("APNs deliver {}: {}", r.status(), r.text().await.unwrap_or_default());
+                log::warn!(
+                    "APNs deliver {}: {}",
+                    r.status(),
+                    r.text().await.unwrap_or_default()
+                );
                 DeliveryOutcome::Failed
             }
             Err(err) => {

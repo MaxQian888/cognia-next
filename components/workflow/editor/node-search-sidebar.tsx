@@ -27,7 +27,8 @@ import {
   nodeCatalogEntry,
   type NodeCatalogEntry,
 } from "@/lib/workflow/nodes/catalog"
-import { tNode } from "@/lib/workflow/i18n/node-translate"
+import { tNodeField } from "@/lib/workflow/i18n/node-translate"
+import { CapabilityBadge, useMissingNodeCapabilities } from "./capability-badge"
 import { usePalettePreferencesStore } from "@/stores/workflow"
 import type { WorkflowNodeKind } from "@/types/workflow/visual"
 
@@ -60,7 +61,9 @@ export const NodeSearchSidebar = memo(function NodeSearchSidebar({
   embedded?: boolean
 }) {
   const t = useTranslations("workflows.sidebar")
-  const tNodesSearch = useTranslations("workflows.nodes")
+  // Root translator so both built-in (`workflows.nodes.*`) and plugin
+  // (`plugin.<id>.workflow.nodes.*`) node strings resolve via `tNodeField`.
+  const tRootSearch = useTranslations()
   const [query, setQuery] = useState("")
   // Subscribe to the plugin catalog so newly-registered plugin nodes appear
   // in the sidebar without a page reload. The snapshot identity changes on
@@ -81,15 +84,26 @@ export const NodeSearchSidebar = memo(function NodeSearchSidebar({
     void pluginEntries
     if (!query.trim()) return null
     // Search the localized strings too so e.g. zh-CN users can find nodes by
-    // their translated palette names. `tNode` falls back to undefined-ish for
-    // plugin kinds, which searchCatalog tolerates.
+    // their translated palette names — including plugin nodes that ship their
+    // own translations. `tNodeField` falls back to "" for un-localized kinds,
+    // which searchCatalog tolerates.
     return searchCatalog(query, {
-      getText: (kind) => ({
-        label: tNode(tNodesSearch, `${kind}.label`, ""),
-        description: tNode(tNodesSearch, `${kind}.description`, ""),
+      getText: (entry) => ({
+        label: tNodeField(tRootSearch, {
+          kind: entry.kind,
+          pluginId: entry.pluginId,
+          field: "label",
+          fallback: "",
+        }),
+        description: tNodeField(tRootSearch, {
+          kind: entry.kind,
+          pluginId: entry.pluginId,
+          field: "description",
+          fallback: "",
+        }),
       }),
     })
-  }, [query, pluginEntries, tNodesSearch])
+  }, [query, pluginEntries, tRootSearch])
 
   // Favorite + recent kinds (persisted). Resolve each stored kind to a live
   // catalog entry and drop any that no longer exist (e.g. a plugin node whose
@@ -219,7 +233,10 @@ function NodeCategoryGroup({
       </CollapsibleTrigger>
       <CollapsibleContent>
         <p className="px-6 pb-1 text-[11px] text-muted-foreground/70">{hint}</p>
-        <div className="px-2 pb-1 space-y-1">
+        {/* content-visibility skips layout/paint for groups scrolled out of
+            view — the palette renders the full catalog unvirtualized, so this
+            is the cheap 80% of a virtual list for plugin-heavy catalogs. */}
+        <div className="px-2 pb-1 space-y-1 [content-visibility:auto] [contain-intrinsic-size:auto_300px]">
           {entries.map((entry) => (
             <NodeChip key={entry.kind} entry={entry} onAddNodeAtCenter={onAddNodeAtCenter} />
           ))}
@@ -276,7 +293,10 @@ function PinnedNodeGroup({
   )
 }
 
-function NodeChip({
+// Memoized: catalog entries are stable references, so a favorite toggle (or
+// any parent re-render from search/preference churn) only re-renders the
+// chips whose own subscribed slice actually changed.
+const NodeChip = memo(function NodeChip({
   entry,
   onAddNodeAtCenter,
 }: {
@@ -284,11 +304,22 @@ function NodeChip({
   onAddNodeAtCenter?: (entry: NodeCatalogEntry) => void
 }) {
   const t = useTranslations("workflows.sidebar")
-  const tNodes = useTranslations("workflows.nodes")
-  const label = tNode(tNodes, `${entry.kind}.label`, entry.label)
-  const description = tNode(tNodes, `${entry.kind}.description`, entry.description)
+  const tRoot = useTranslations()
+  const label = tNodeField(tRoot, {
+    kind: entry.kind,
+    pluginId: entry.pluginId,
+    field: "label",
+    fallback: entry.label,
+  })
+  const description = tNodeField(tRoot, {
+    kind: entry.kind,
+    pluginId: entry.pluginId,
+    field: "description",
+    fallback: entry.description,
+  })
   const Icon =
     (LucideIcons as unknown as Record<string, LucideIcon>)[entry.iconName] ?? LucideIcons.Box
+  const capabilityInfo = useMissingNodeCapabilities(entry)
   const isFavorite = usePalettePreferencesStore((s) => s.favoriteNodeKinds.includes(entry.kind))
   const toggleFavorite = usePalettePreferencesStore((s) => s.toggleFavorite)
   const handleDragStart = (e: React.DragEvent<HTMLButtonElement>) => {
@@ -315,12 +346,17 @@ function NodeChip({
               <span className="text-[9px] uppercase tracking-wide text-wf-status-running">
                 {t("desktopOnly")}
               </span>
+            ) : capabilityInfo ? (
+              <CapabilityBadge info={capabilityInfo} />
             ) : null}
           </button>
         </TooltipTrigger>
         <TooltipContent side="right" className="max-w-xs">
           <p className="font-medium">{label}</p>
           <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
+          {capabilityInfo ? (
+            <p className="text-xs text-wf-status-running mt-0.5">{capabilityInfo.tooltip}</p>
+          ) : null}
         </TooltipContent>
       </Tooltip>
       <button
@@ -341,4 +377,4 @@ function NodeChip({
       </button>
     </div>
   )
-}
+})

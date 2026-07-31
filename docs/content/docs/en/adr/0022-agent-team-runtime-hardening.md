@@ -131,6 +131,18 @@ Path F was selected because: it eliminates the duplicate orchestrator, fixes the
                                        └─────────────────────────────┘
 ```
 
+> **Implementation note (correction):** the registry is a plain
+> `Map<string, TeamRunContext>`, **not** a `WeakMap`. The diagram above shows the
+> original aspiration, but a WeakMap is not applicable here: the key is a string
+> `runId`, and the dispatch executor looks the context up by that string
+> (`getTeamRunContext(ctx.runId)`) — there is no shared object token between the
+> synthesizer that registers and the executor that reads, so weak keying is
+> impossible. Leak-safety instead rests on the lifecycle's `finally`-block
+> `unregisterTeamRunContext`, hardened with two non-throwing diagnostics
+> (`team-run-context.ts`): a warning on re-registering a still-live `runId`
+> (missing unregister) and a warning when the registry grows past a soft limit
+> (unbalanced register/unregister). See `team-run-context.test.ts`.
+
 ### File inventory
 
 | Path                                                  | Action                                                                                            | Lines (impl + test) |
@@ -711,3 +723,27 @@ Ports Claude Code's **ultracode** mode (effort-driven multi-agent workflow autho
 **3. Plan + trigger.** `ultracode-planner.ts:planUltracodeWorkflow` has a planner teammate author a typed `UltracodePlan` (which patterns, counts, lenses); `synthesize-ultracode.ts:synthesizeUltracodeWorkflow` lowers it to a `pattern.*` DAG (finders → verify → synthesize, with synthesize fanning in from every prior node). `runTeamLifecycle` branches on `ultracode-trigger.ts:isUltracodeActive` (operator override > `ultracode.enabled` + `autoMode`; `auto` keys off `routingAssessment.factors.taskComplexity === "complex"`). The terminal `pattern.synthesize` output becomes `team.finalResult`. Config + manual "Run with ultracode" live in the workspace (`components/agent/workspace/settings/section-ultracode.tsx`, `overview.tsx`).
 
 **Known limitation.** Tool-enabled teammates require the Tauri sidecar; web/mobile fall back to text-only reasoning (surfaced in the UI), inherent to the static-export shell — not a simplification.
+
+## Revision note (2026-07-08) — delivered follow-ups & corrections
+
+Several statements above are superseded (see ADR-0066 for the full design):
+
+- **Manual task retry: delivered** — not via mid-run node injection, but as a guarded
+  `failed → pending` board move (`task-move-guard.ts:canMoveTask`); the next run/resume
+  re-dispatches the task.
+- **Pause / Resume: delivered** — `agentTeamManager.resume()` re-enters
+  `runTeamLifecycle` over not-yet-done tasks (`RunTeamLifecycleDeps.taskFilter`,
+  filtered ids become `satisfiedDependencyIds`), with an unstrand/reset pass and
+  blackboard re-seeding from persisted `task.result`.
+- **Delegation & Consensus "types only"**: outdated — engine code now exists
+  (`team/delegation-orchestrator.ts`, `team/consensus-orchestrator.ts`).
+- **"No new Dexie tables"**: still true for team RUNS (they remain `workflowRuns`
+  rows). Two adjacent tables exist for other concerns: `teamPrObservations` (v103,
+  PR feedback) and `agentTeamBoard` (v104, a one-way board mirror for mobile sync —
+  the store remains the single write source).
+- **Wave-runner fix**: the per-wave path reuses one `runId`, which the later
+  ADR-0061 P4 ownership guard treated as terminal after wave 1 — silently skipping
+  every subsequent wave. The runtime now re-opens the row between waves (companion
+  soft-cancel still honored).
+- **Workspace tabs**: the `AgentTeamWorkspaceTab` union was corrected to the tabs
+  actually rendered (the never-implemented `graph`/`analytics` values were removed).

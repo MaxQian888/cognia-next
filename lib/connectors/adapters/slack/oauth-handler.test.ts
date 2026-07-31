@@ -56,6 +56,7 @@ describe("handleSlackOAuth", () => {
         ok: true,
         access_token: "xoxb-123",
         bot_user_id: "U_BOT",
+        scope: "chat:write,channels:read",
         team: { id: "T1", name: "Acme" },
         authed_user: { id: "U_USER", access_token: "xoxp-456" },
       }),
@@ -66,13 +67,27 @@ describe("handleSlackOAuth", () => {
     expect(team.teamId).toBe("T1")
     expect(team.teamName).toBe("Acme")
     expect(mockKeyringSet).toHaveBeenCalledWith("slack-1", "botToken", "xoxb-123")
-    expect(mockKeyringSet).toHaveBeenCalledWith("slack-1", "user_token", "xoxp-456")
+    // Canonical key is "userToken" — the same one buildSlackAdapter reads.
+    expect(mockKeyringSet).toHaveBeenCalledWith("slack-1", "userToken", "xoxp-456")
+    expect(mockKeyringSet).not.toHaveBeenCalledWith("slack-1", "user_token", expect.anything())
+    expect(mockUpdateAdapter).toHaveBeenCalledWith(
+      "slack-1",
+      expect.objectContaining({
+        credentialsRef: expect.objectContaining({
+          accounts: expect.arrayContaining(["botToken", "userToken"]),
+        }),
+      })
+    )
     // Connected-team metadata stamped on the row.
     expect(mockUpdateAdapter).toHaveBeenCalledWith(
       "slack-1",
       expect.objectContaining({
         settings: expect.objectContaining({
           connectedTeam: expect.objectContaining({ teamId: "T1" }),
+          // Granted scopes are normalized (split, deduped, sorted) and stored.
+          connectedScopes: expect.objectContaining({
+            scopes: ["channels:read", "chat:write"],
+          }),
         }),
       })
     )

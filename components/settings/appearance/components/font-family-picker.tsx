@@ -38,12 +38,21 @@ export interface FontFamilyPickerProps {
   onChange: (next: string | undefined) => void
   /** Optional hint shown under the picker. */
   hintKey?: string
-  /** Pass `true` to filter to monospace-ish families (web-safe + plugin). */
+  /** Pass `true` to show only monospace families (terminal font picker). */
   monoOnly?: boolean
+  /**
+   * i18n namespace for `labelKey` / `hintKey`. Defaults to the appearance
+   * tab's namespace; the terminal card passes its own. The "inherit" option
+   * label is always resolved from the appearance namespace.
+   */
+  namespace?: string
 }
 
 export function FontFamilyPicker(props: FontFamilyPickerProps) {
-  const t = useTranslations("settings.appearance.layoutType")
+  const t = useTranslations(props.namespace ?? "settings.appearance.layoutType")
+  // The "inherit" label lives in the appearance namespace regardless of which
+  // caller's namespace owns labelKey/hintKey.
+  const tShared = useTranslations("settings.appearance.layoutType")
   // useSyncExternalStore lets us read the live registry snapshot without
   // bringing in Zustand for one piece of UI state. The cached snapshot in
   // font-registry keeps re-render churn down.
@@ -56,13 +65,15 @@ export function FontFamilyPicker(props: FontFamilyPickerProps) {
       return a.family.localeCompare(b.family)
     })
     if (!props.monoOnly) return sorted
-    // Monospace filter heuristic: keep web-safe `monospace` / `ui-monospace`
-    // / common known monospace plugin families. We can't reliably tell from
-    // CSS family name alone, so this is a soft filter — system families are
-    // always allowed since user knows what they installed.
-    const monoKeywords = ["mono", "courier", "consolas", "fira"]
+    // System families carry a real fixed-pitch flag from `os_list_fonts`, so
+    // trust it. Web-safe / plugin families (and any system entry missing the
+    // flag — e.g. older data) fall back to a name heuristic, since the CSS
+    // family name is all we have for those.
+    const monoKeywords = ["mono", "courier", "consolas", "fira", "menlo", "consol"]
     return sorted.filter((entry) => {
-      if (entry.source === "system") return true
+      if (entry.source === "system" && typeof entry.monospaced === "boolean") {
+        return entry.monospaced
+      }
       const lower = entry.family.toLowerCase()
       return monoKeywords.some((kw) => lower.includes(kw))
     })
@@ -84,7 +95,7 @@ export function FontFamilyPicker(props: FontFamilyPickerProps) {
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value={INHERIT_VALUE}>{t("font.inherit")}</SelectItem>
+          <SelectItem value={INHERIT_VALUE}>{tShared("font.inherit")}</SelectItem>
           {filtered.map((entry) => (
             <SelectItem
               key={`${entry.source}:${entry.family}:${entry.pluginId ?? ""}`}

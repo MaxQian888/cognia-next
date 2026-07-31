@@ -18,10 +18,32 @@ export interface PolicyEvalState {
   /** Last bot reply timestamp per conversationKey. */
   recentBotReplyAtByConversation: Record<string, number>
   /**
-   * Recent inbound timestamps per `${userId}:${channelId}`.
+   * Recent inbound timestamps per `rateBucketKey(event)`.
    * Used by the `rate-limit` blocker.
    */
   recentByUserAndChannel: Record<string, number[]>
+}
+
+/**
+ * Bucket key for the inbound rate limiter: `${tenant}|${userId}:${channelId}`.
+ *
+ * The tenant prefix is what makes a per-workspace ceiling expressible at all —
+ * the per-user and per-channel buckets bound one person and one room, and
+ * neither bounds a tenant. Exported so the bus writes the same key the
+ * evaluator reads; two spellings of this would silently disable the limiter.
+ */
+export function rateBucketKey(event: NormalizedInboundEvent): string {
+  return `${rateTenantScope(event)}|${event.sender.id}:${event.channel.id}`
+}
+
+/** Tenant discriminator, or `-` when the platform does not report one. */
+export function rateTenantScope(event: NormalizedInboundEvent): string {
+  const scope = event.channelData?.identityScope
+  if (scope && typeof scope === "object") {
+    const tenantKey = (scope as Record<string, unknown>).tenantKey
+    if (typeof tenantKey === "string" && tenantKey) return tenantKey
+  }
+  return "-"
 }
 
 export interface PolicyEvalResult {
@@ -41,9 +63,15 @@ function matchRule(rule: TriggerRule, event: NormalizedInboundEvent): boolean {
       return event.mentions.selfMentioned
 
     case "reply-to-bot":
-      // The adapter resolves whether `replyTo` refers to a bot message before
-      // emitting the event — if `replyTo.messageId` is present, we treat it as
-      // a reply to a bot message by convention.
+      // KNOWN LIMITATION: this fires on a reply to ANY message, not only to
+      // one of the bot's. `ReplyDescriptor` (types/connectors/event.ts) only
+      // carries { messageId, snippet } — the replied-to message's SENDER id is
+      // not on the wire shape, so there is nothing to match against
+      // `event.selfId` here. Adapters that can cheaply resolve the parent
+      // sender are expected to omit `replyTo` for replies to non-bot messages;
+      // where they can't, this rule over-matches (a reply to a human also
+      // counts as "reply-to-bot"). Tightening it requires adding the parent
+      // sender to the shared ReplyDescriptor type + every adapter parser.
       return Boolean(event.replyTo?.messageId)
 
     case "slash-command": {
@@ -91,7 +119,7 @@ function checkBlocker(
     }
 
     case "rate-limit": {
-      const bucketKey = `${event.sender.id}:${event.channel.id}`
+      const bucketKey = rateBucketKey(event)
       const window = now - 60_000
       const recent = (state.recentByUserAndChannel[bucketKey] ?? []).filter((t) => t > window)
       if (recent.length >= blocker.perUserPerMin) return "rate-limit (user bucket)"
@@ -101,6 +129,16 @@ function checkBlocker(
         .flatMap(([, ts]) => ts)
         .filter((t) => t > window).length
       if (channelTotal >= blocker.perChannelPerMin) return "rate-limit (channel bucket)"
+      // Tenant bucket: every sender and chat under one workspace. Opt-in, so
+      // single-tenant installs keep exactly today's behavior.
+      if (blocker.perTenantPerMin !== undefined) {
+        const prefix = `${rateTenantScope(event)}|`
+        const tenantTotal = Object.entries(state.recentByUserAndChannel)
+          .filter(([key]) => key.startsWith(prefix))
+          .flatMap(([, ts]) => ts)
+          .filter((t) => t > window).length
+        if (tenantTotal >= blocker.perTenantPerMin) return "rate-limit (tenant bucket)"
+      }
       return null
     }
 

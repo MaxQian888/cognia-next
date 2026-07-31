@@ -1,20 +1,46 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
+import { useTranslations } from "next-intl"
 import { toast } from "sonner"
 import { listen } from "@tauri-apps/api/event"
-import { TAURI_EVENTS, onTauriEvent } from "@/lib/tauri"
+import { TAURI_EVENTS, onTauriEvent, transport } from "@/lib/tauri"
+import { emitSchedulerEvent } from "@/lib/scheduler/event-integration"
+import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
 import { isTauri } from "@/lib/tauri"
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { useChatStore } from "@/stores/chat"
+import { startNewSession } from "@/lib/chat/start-session"
+import { isMainAppWindow } from "@/lib/pet/window-role"
 import { useUIStore } from "@/stores/ui"
-import { useSettingsStore } from "@/stores/settings"
+import { openPathAsWorkspace } from "@/lib/workspace/open-folder"
 import { dispatchTrayClick, dispatchShortcut } from "@/lib/tray/dispatcher"
+import {
+  checkUpdates,
+  copyDiagnostics,
+  openDataFolder,
+  openDocs,
+  reportIssue,
+  toggleAutostartAction,
+} from "@/lib/tray/tray-actions"
 import type { TrayActionPayload } from "@/lib/tray/types"
 
+function relaySchedulerEvent(
+  eventType: "job:exited" | "monitor:fired",
+  data: Record<string, unknown>
+): Promise<unknown> {
+  if (isRemoteHostActive()) {
+    return transport.call("scheduled_task_emit_event", { eventType, data })
+  }
+  return emitSchedulerEvent(eventType, data)
+}
+
 interface ParsedDeepLink {
-  kind: "chat" | "settings" | "workspace" | "unknown"
+  kind: "chat" | "im" | "scheduler" | "settings" | "workspace" | "unknown"
   chatId?: string
+  conversationKey?: string
+  taskId?: string
   workspacePath?: string
   settingsTab?: string
 }
@@ -23,8 +49,10 @@ interface ParsedDeepLink {
  * Parse a single `cognia://` URL into the action it should drive.
  *
  *   cognia://chat/<id>            → open that session
+ *   cognia://im?conversationKey=… → open the session bound to an IM conversation
+ *   cognia://scheduler/task/<id>   → open a scheduled task and its run history
  *   cognia://settings[?tab=xyz]   → open settings (optionally on a tab)
- *   cognia://workspace?path=…     → set the default working directory
+ *   cognia://workspace?path=…     → create/activate a workspace for that path
  */
 function parseDeepLink(raw: string): ParsedDeepLink {
   let url: URL
@@ -44,6 +72,19 @@ function parseDeepLink(raw: string): ParsedDeepLink {
       ""
     return { kind: "chat", chatId: id || undefined }
   }
+  if (head === "im") {
+    return {
+      kind: "im",
+      conversationKey: url.searchParams.get("conversationKey") ?? undefined,
+    }
+  }
+  if (head === "scheduler") {
+    const segments = url.pathname.replace(/^\/+/, "").split("/").filter(Boolean)
+    return {
+      kind: "scheduler",
+      taskId: segments[0] === "task" ? segments[1] : url.searchParams.get("taskId") || undefined,
+    }
+  }
   if (head === "settings") {
     return { kind: "settings", settingsTab: url.searchParams.get("tab") ?? undefined }
   }
@@ -61,6 +102,14 @@ function parseDeepLink(raw: string): ParsedDeepLink {
  */
 export function useTauriEvents(): void {
   const router = useRouter()
+  // Tray toasts fire from inside the long-lived setup effect (deps: [router]).
+  // Hold the translator in a ref so locale changes don't tear down and rebuild
+  // every Tauri listener, while still resolving against the current locale.
+  const t = useTranslations("settings.about")
+  const tRef = useRef(t)
+  useEffect(() => {
+    tRef.current = t
+  }, [t])
 
   useEffect(() => {
     if (!isTauri()) return
@@ -87,19 +136,38 @@ export function useTauriEvents(): void {
             }
             break
           }
+          case "im": {
+            if (action.conversationKey) {
+              void import("@/lib/connectors/session-bindings")
+                .then(({ findActiveSessionForConversation }) =>
+                  findActiveSessionForConversation(action.conversationKey!)
+                )
+                .then((session) => {
+                  if (!session) return
+                  useChatStore.getState().setActiveSession(session.id)
+                  useUIStore.getState().setSelectedGuild({ kind: "dm" })
+                })
+                .catch(() => undefined)
+            }
+            break
+          }
+          case "scheduler": {
+            if (action.taskId) {
+              void import("@/stores/scheduler/scheduler-store").then(({ useSchedulerStore }) => {
+                useSchedulerStore.getState().selectTask(action.taskId!)
+                router.push("/scheduler")
+              })
+            }
+            break
+          }
           case "settings": {
             useUIStore.getState().requestOpenSettings(action.settingsTab)
             break
           }
           case "workspace": {
-            if (action.workspacePath) {
-              void useSettingsStore.getState().save({
-                defaultWorkingDir: action.workspacePath,
-              })
-              toast.success("Working directory updated", {
-                description: action.workspacePath,
-              })
-            }
+            // Unified flow: create/activate a real workspace Project for the
+            // deep-linked path (consistent with the File menu / switcher).
+            if (action.workspacePath) openPathAsWorkspace(action.workspacePath)
             break
           }
           default: {
@@ -112,9 +180,17 @@ export function useTauriEvents(): void {
 
     const subscribe = async () => {
       // Tray actions
+      // Same semantics as the menu's `newChatAction`, inlined rather than
+      // imported: `lib/desktop/menu-actions` pulls in the whole plugin-API
+      // graph, which this hook must not drag into its module load.
+      // Main-window only — Rust broadcasts `tray://*` to EVERY window, and the
+      // pet overlay / popup / island load this same root layout. Creating a
+      // session is not idempotent, so an unguarded handler would create one
+      // conversation per open window.
       const trayNewChat = await onTauriEvent(TAURI_EVENTS.trayNewChat, () => {
-        useChatStore.getState().clear()
+        if (!isMainAppWindow()) return
         useUIStore.getState().setSelectedGuild({ kind: "dm" })
+        void startNewSession()
       })
       const traySettings = await onTauriEvent(TAURI_EVENTS.traySettings, () => {
         useUIStore.getState().requestOpenSettings()
@@ -124,29 +200,13 @@ export function useTauriEvents(): void {
       })
 
       // Menu items — `menu://<id>` for any item not handled natively in Rust.
-      const unlistenNewChat = await listen<null>("menu://new-chat", () => {
-        useChatStore.getState().clear()
-        useUIStore.getState().setSelectedGuild({ kind: "dm" })
-      })
       const unlistenMenuOpenLogs = await listen<null>(TAURI_EVENTS.menuOpenLogs, () =>
         navigateToLogs()
       )
-      const unlistenOpenWs = await listen<null>("menu://open-workspace", async () => {
-        try {
-          const { open: openDialog } = await import("@tauri-apps/plugin-dialog")
-          const picked = await openDialog({
-            directory: true,
-            multiple: false,
-            title: "Select workspace",
-          })
-          if (typeof picked === "string") {
-            await useSettingsStore.getState().save({ defaultWorkingDir: picked })
-            toast.success("Workspace updated", { description: picked })
-          }
-        } catch (err) {
-          console.warn("open-workspace dialog failed", err)
-        }
-      })
+      // NOTE: `menu://open-workspace` and `menu://new-chat` are intentionally
+      // NOT handled here. Both are owned solely by `use-menu-event-router` →
+      // `openWorkspaceAction` / `newChatAction`. Subscribing here too would fire
+      // two folder pickers — or create two sessions — for one menu click.
       const unlistenDocs = await listen<null>("menu://documentation", async () => {
         const { openExternal } = await import("@/lib/tauri/opener")
         await openExternal("https://v2.tauri.app")
@@ -170,6 +230,22 @@ export function useTauriEvents(): void {
         if (Array.isArray(urls)) handleDeepLinks(urls)
         else handleDeepLinks([String(urls)])
       })
+      const backgroundJobExited = await onTauriEvent<Record<string, unknown>>(
+        TAURI_EVENTS.backgroundJobExited,
+        (payload) => {
+          void relaySchedulerEvent("job:exited", payload).catch((error) =>
+            console.warn("job:exited scheduler event failed", error)
+          )
+        }
+      )
+      const backgroundMonitorFired = await onTauriEvent<Record<string, unknown>>(
+        TAURI_EVENTS.backgroundMonitorFired,
+        (payload) => {
+          void relaySchedulerEvent("monitor:fired", payload).catch((error) =>
+            console.warn("monitor:fired scheduler event failed", error)
+          )
+        }
+      )
 
       // Unified tray-click event — the source-of-truth dispatch channel for
       // both built-in actions (slash + plugin commands) and items pinned by
@@ -190,19 +266,69 @@ export function useTauriEvents(): void {
         if (event.payload?.id) void dispatchShortcut(event.payload.id)
       })
 
+      // Tray About / diagnostics actions. Rust re-emits these from
+      // `apply_native`; the real work (OS opener, clipboard, autostart
+      // plugin) runs renderer-side via `lib/tray/tray-actions.ts`.
+      const trayOpenDataFolder = await listen<null>("tray://open-data-folder", () => {
+        void openDataFolder().catch((err) => console.warn("tray open-data-folder failed", err))
+      })
+      const trayCopyDiagnostics = await listen<null>("tray://copy-diagnostics", () => {
+        void copyDiagnostics()
+          .then(() => toast.success("Diagnostics copied to clipboard"))
+          .catch((err) => console.warn("tray copy-diagnostics failed", err))
+      })
+      const trayOpenDocs = await listen<null>("tray://open-docs", () => {
+        void openDocs().catch((err) => console.warn("tray open-docs failed", err))
+      })
+      const trayReportIssue = await listen<null>("tray://report-issue", () => {
+        void reportIssue().catch((err) => console.warn("tray report-issue failed", err))
+      })
+      const trayCheckUpdates = await listen<null>("tray://check-updates", () => {
+        void checkUpdates()
+          .then((outcome) => {
+            switch (outcome.kind) {
+              case "available":
+                toast.success(
+                  tRef.current("updates.updateAvailableToast", { version: outcome.version })
+                )
+                // Hand off to Settings → About, where the download + relaunch lives.
+                useUIStore.getState().requestOpenSettings("about")
+                break
+              case "upToDate":
+                toast.success(tRef.current("updates.alreadyLatest"))
+                break
+              case "error":
+                console.warn("tray check-updates failed", outcome.message)
+                break
+            }
+          })
+          .catch((err) => console.warn("tray check-updates failed", err))
+      })
+      const trayToggleAutostart = await listen<null>("tray://toggle-autostart", () => {
+        void toggleAutostartAction()
+          .then((on) => toast.success(on ? "Launch at login enabled" : "Launch at login disabled"))
+          .catch((err) => console.warn("tray toggle-autostart failed", err))
+      })
+
       if (cancelled) {
-        trayNewChat()
-        traySettings()
-        trayOpenLogs()
-        unlistenNewChat()
-        unlistenMenuOpenLogs()
-        unlistenOpenWs()
-        unlistenDocs()
-        cliMatches()
-        cliSecondInstance()
-        deepLink()
-        trayItemClicked()
-        shortcutTriggered()
+        safeUnlisten(trayNewChat)
+        safeUnlisten(traySettings)
+        safeUnlisten(trayOpenLogs)
+        safeUnlisten(unlistenMenuOpenLogs)
+        safeUnlisten(unlistenDocs)
+        safeUnlisten(cliMatches)
+        safeUnlisten(cliSecondInstance)
+        safeUnlisten(deepLink)
+        safeUnlisten(backgroundJobExited)
+        safeUnlisten(backgroundMonitorFired)
+        safeUnlisten(trayItemClicked)
+        safeUnlisten(shortcutTriggered)
+        safeUnlisten(trayOpenDataFolder)
+        safeUnlisten(trayCopyDiagnostics)
+        safeUnlisten(trayOpenDocs)
+        safeUnlisten(trayReportIssue)
+        safeUnlisten(trayCheckUpdates)
+        safeUnlisten(trayToggleAutostart)
         return
       }
 
@@ -210,15 +336,21 @@ export function useTauriEvents(): void {
         trayNewChat,
         traySettings,
         trayOpenLogs,
-        unlistenNewChat,
         unlistenMenuOpenLogs,
-        unlistenOpenWs,
         unlistenDocs,
         cliMatches,
         cliSecondInstance,
         deepLink,
+        backgroundJobExited,
+        backgroundMonitorFired,
         trayItemClicked,
-        shortcutTriggered
+        shortcutTriggered,
+        trayOpenDataFolder,
+        trayCopyDiagnostics,
+        trayOpenDocs,
+        trayReportIssue,
+        trayCheckUpdates,
+        trayToggleAutostart
       )
     }
 
@@ -226,13 +358,7 @@ export function useTauriEvents(): void {
 
     return () => {
       cancelled = true
-      for (const fn of unsubscribers) {
-        try {
-          fn()
-        } catch (err) {
-          console.warn("tauri-event unsubscribe failed", err)
-        }
-      }
+      for (const fn of unsubscribers) safeUnlisten(fn)
     }
   }, [router])
 }

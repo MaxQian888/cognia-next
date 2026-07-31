@@ -1,0 +1,60 @@
+---
+title: "QQ Official Bot Setup"
+description: "Create a QQ Official Bot, get the App ID and Client Secret, and connect through the WebSocket gateway."
+---
+
+# QQ Official Bot Setup Guide
+
+This guide walks through creating an officially authorized bot in the **QQ Open Platform**, collecting the **App ID** and **Client Secret**, and connecting cognia-next through the QQ WebSocket gateway. This is the official QQ bot channel and is separate from the unofficial OneBot / NapCat path.
+
+---
+
+## 1. Create a Bot in the QQ Open Platform
+
+1. Open [https://q.qq.com](https://q.qq.com) and sign in to the QQ Open Platform.
+2. Create a bot application, then open **Bot → Development Settings**.
+3. Record these credentials:
+   - **App ID** — the bot application identifier, usually shaped like `102xxxxxx`.
+   - **AppSecret** — the application secret; cognia-next calls this **Client Secret**.
+4. Complete the platform-side setup you need:
+   - Configure event subscription **intents**. cognia-next subscribes to channel messages, group / C2C messages, and direct-message events.
+   - Test in the **sandbox environment** first.
+   - Submit the bot for production review before expecting it to receive and send messages in the live environment.
+
+---
+
+## 2. Configure the Adapter in cognia-next
+
+1. Open cognia-next and navigate to **Settings → Platform Connections → Adapters**.
+2. Click **Add connector**, then choose **QQ Official Bot**.
+3. Fill in:
+   - **Display name** — a recognizable name for this bot, for example "My QQ Bot".
+   - **App ID** — the application identifier from **Bot → Development Settings**.
+   - **Client Secret** — the QQ Open Platform **AppSecret**. cognia-next uses it to mint access tokens.
+4. Click **Create**.
+
+The **App ID** and **Client Secret** are encrypted in the OS keyring. The adapter uses them to call `https://bots.qq.com/app/getAppAccessToken`, caches the short-lived access token, resolves the gateway URL through `GET /gateway`, and then connects over WebSocket. Like Discord Gateway mode, this is a persistent outbound connection and does **not** require a public webhook URL.
+
+---
+
+## 3. Verify the Connection
+
+1. Mention the bot in a channel, or send it a direct / group message if those abilities are enabled for your bot.
+2. The message should appear in cognia-next within a few seconds.
+3. Check **Platform Connections** — the adapter status should show **running**.
+
+If the adapter shows **stopped** or **degraded**:
+
+- Confirm the **App ID** and **Client Secret** are correct.
+- Confirm the bot has passed QQ Open Platform production review and the required event intents are enabled.
+- Open **Settings → Platform Connections → Audit Log** for the detailed error.
+
+---
+
+## Notes
+
+- **Official channel**: this is the official QQ bot integration, separate from the OneBot / NapCat path. If you want to connect a personal QQ account, see [QQ via OneBot — FAQ](./qq-via-onebot-faq).
+- **Automatic access-token refresh**: QQ uses short-lived application access tokens, not a static bot token. The adapter caches them per `(App ID, Client Secret)` and refreshes about one minute before expiry. The gateway IDENTIFY frame and every REST send use the same `Authorization: QQBot <access_token>` scheme.
+- **Conversation coverage depends on QQ platform approval**: channel, group, and C2C availability depend on the abilities granted to your bot in QQ Open Platform. cognia-next subscribes to the supported event families, but a conversation type only works after the platform grants that scope.
+- **Gateway reconnects**: cognia-next connects over the QQ WebSocket gateway using Discord-like HELLO / IDENTIFY / heartbeat / RESUME flow. Disconnects are retried with exponential backoff and resumed when possible.
+- **Message capability scope**: the current adapter receives messages and sends text-only passive replies. QQ Markdown templates and interactive buttons require per-template platform approval, so rich / interactive assistant output falls back to the plain-text mirror.

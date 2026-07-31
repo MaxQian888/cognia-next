@@ -28,6 +28,22 @@ describe("startWorkflowFromRemote", () => {
     )
   })
 
+  it("stamps the caller deviceId into triggeredBy when provided (ADR-0060)", async () => {
+    getWorkflow.mockResolvedValue({ id: "wf_1", nodes: [], edges: [] })
+    await startWorkflowFromRemote({ workflowId: "wf_1", deviceId: "dev-42" })
+    expect(runWorkflow).toHaveBeenCalledWith(
+      expect.objectContaining({ triggeredBy: { source: "api", deviceId: "dev-42" } })
+    )
+  })
+
+  it("omits deviceId from triggeredBy when the dispatch layer doesn't know it", async () => {
+    getWorkflow.mockResolvedValue({ id: "wf_1", nodes: [], edges: [] })
+    await startWorkflowFromRemote({ workflowId: "wf_1" })
+    expect(runWorkflow).toHaveBeenCalledWith(
+      expect.objectContaining({ triggeredBy: { source: "api" } })
+    )
+  })
+
   it("honors a caller-supplied runId so the audit layer can correlate", async () => {
     getWorkflow.mockResolvedValue({ id: "wf_1", nodes: [], edges: [] })
     const r = await startWorkflowFromRemote({ workflowId: "wf_1", runId: "run_fixed" })

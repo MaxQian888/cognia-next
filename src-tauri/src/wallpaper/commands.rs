@@ -83,7 +83,10 @@ fn save_bytes(dir: &Path, rel_name: &str, bytes: &[u8]) -> Result<SavedWallpaper
 /// wallpapers directory. Returns the canonical `rel_path` + `abs_path` so
 /// the frontend can store one and load the other.
 #[tauri::command]
-pub async fn wallpaper_save(file_name: String, base64_data: String) -> Result<SavedWallpaper, String> {
+pub async fn wallpaper_save(
+    file_name: String,
+    base64_data: String,
+) -> Result<SavedWallpaper, String> {
     let bytes = B64
         .decode(base64_data.as_bytes())
         .map_err(|e| format!("invalid base64: {e}"))?;
@@ -261,7 +264,10 @@ mod tests {
                 .unwrap()
                 .flatten()
                 .filter_map(|e| {
-                    e.file_name().into_string().ok().filter(|n| validate_relname(n).is_ok())
+                    e.file_name()
+                        .into_string()
+                        .ok()
+                        .filter(|n| validate_relname(n).is_ok())
                 })
                 .collect();
             v.sort();
@@ -293,6 +299,9 @@ mod tests {
         // Second delete should not error in our command path; emulate by
         // verifying the helper kind.
         let res = std::fs::remove_file(dir.join("x.png"));
-        assert!(matches!(res.unwrap_err().kind(), std::io::ErrorKind::NotFound));
+        assert!(matches!(
+            res.unwrap_err().kind(),
+            std::io::ErrorKind::NotFound
+        ));
     }
 }

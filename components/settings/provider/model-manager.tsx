@@ -1,30 +1,18 @@
 "use client"
 
 /**
- * Model manager — placeholder.
+ * Backward-compatible entry point for local model management.
  *
- * Cognia's `model-manager.tsx` drives the native model-download flow
- * (catalog browsing, download progress, ETA, file size, source/category
- * indexing). cognia-next deferred the Tauri side per the provider port
- * plan; this placeholder keeps callers compiling until the native
- * commands ship.
+ * The provider system now manages local runtimes through the shared Rust HTTP
+ * proxy and `LocalProviderSettings`; keeping a second native-download surface
+ * would split state and reintroduce the renderer/CSP failures fixed by
+ * ADR-0076.
  */
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { LocalProviderSettings } from "./local-provider-settings"
 
 export function ModelManager() {
-  return (
-    <div className="p-4">
-      <Alert>
-        <AlertTitle>Native model downloads deferred</AlertTitle>
-        <AlertDescription className="text-xs">
-          Browsing and downloading model files (gguf etc.) requires the native model-download Tauri
-          commands, which are on the cognia-next roadmap but not in this release. For Ollama and LM
-          Studio you can still pull models from the local provider tab using their own UI.
-        </AlertDescription>
-      </Alert>
-    </div>
-  )
+  return <LocalProviderSettings />
 }
 
 export default ModelManager

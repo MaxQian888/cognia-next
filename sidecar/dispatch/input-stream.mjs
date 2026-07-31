@@ -12,12 +12,13 @@ export function makeInputStream() {
   let closed = false
 
   const push = (item) => {
-    if (closed) return
+    if (closed) return false
     if (waiters.length > 0) {
       waiters.shift().resolve({ value: item, done: false })
     } else {
       queue.push(item)
     }
+    return true
   }
 
   const close = () => {

@@ -2,7 +2,7 @@
  * E2E: flow.switch — multi-case dispatch.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../../../helpers/db-reset"
 import { seedAndOpenWorkflow } from "../../../helpers/seed-workflow"
 import {
@@ -20,11 +20,13 @@ test.describe("workflow node — flow.switch", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded flow.switch renders + cases + defaultLabel persist", async ({ page }) => {
+  test("seeded flow.switch renders + cases + defaultLabel fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "flow-switch")
     await assertNodeOnCanvas(page, { kind: "flow.switch", label: "Switch" })
     await openNodeInspector(page, "flow.switch")
-    await expect(page.locator("#ins-subject, [name=subject]").first()).toBeVisible()
+    await expect(page.locator("#ins-subject, [data-field=subject]").first()).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "flow.switch" })
   })

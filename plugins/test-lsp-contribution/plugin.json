@@ -8,9 +8,10 @@
   "main": "src/index.ts",
   "author": "cognia-next",
   "license": "MIT",
+  "minAppVersion": "0.1.0",
   "engines": { "cognia": ">=0.1.0" },
   "permissions": ["process:spawn", "filesystem:read"],
-  "activationEvents": ["onStartup"],
+  "activationEvents": ["startup"],
   "lspServers": [
     {
       "id": "echo",
@@ -28,12 +29,16 @@
   "runtimeCompatibility": {
     "browser": {
       "availability": "blocked",
-      "hint": "LSP servers spawn through the Node sidecar — desktop only."
+      "reason": "LSP servers spawn through the Node sidecar — desktop only."
     },
     "tauri": {
-      "availability": "experimental",
+      "availability": "degraded",
       "entrypoint": "src/index.ts",
-      "hint": "Plugin manager registers the echo LSP through lib/plugin/lsp/lsp-registry on enable; the sidecar's CogniaLspClient spawns the fixture as a child process."
+      "reason": "Plugin manager registers the echo LSP through lib/plugin/lsp/lsp-registry on enable; the sidecar's CogniaLspClient spawns the fixture as a child process."
+    },
+    "mobile": {
+      "availability": "blocked",
+      "reason": "LSP servers spawn through the Node sidecar — unavailable on mobile."
     }
   }
 }

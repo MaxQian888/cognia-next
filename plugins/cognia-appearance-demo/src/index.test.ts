@@ -5,10 +5,22 @@ describe("cognia-appearance-demo", () => {
   it("declares the appearance contribution fields with matching capabilities", () => {
     expect(manifest.id).toBe("cognia-appearance-demo")
     expect(manifest.type).toBe("frontend")
-    expect(manifest.capabilities).toEqual(expect.arrayContaining(["theme-pack", "wallpapers"]))
+    expect(manifest.capabilities).toEqual(
+      expect.arrayContaining(["themes", "theme-pack", "wallpapers", "density-preset"])
+    )
     expect(manifest.wallpapers).not.toHaveLength(0)
     expect(manifest.densityPresets).not.toHaveLength(0)
     expect(manifest.themePacks).not.toHaveLength(0)
+    expect(manifest.themes).not.toHaveLength(0)
+  })
+
+  it("ships a cssVariables theme whose variables are all valid custom properties", () => {
+    const theme = manifest.themes[0] as { id: string; cssVariables: Record<string, string> }
+    expect(theme.id).toBe("neon-noir")
+    expect(Object.keys(theme.cssVariables).length).toBeGreaterThan(0)
+    for (const name of Object.keys(theme.cssVariables)) {
+      expect(name).toMatch(/^--[a-z][a-z0-9-]*$/)
+    }
   })
 
   it("theme pack 'applies' references resolve to this plugin's own contributions", () => {

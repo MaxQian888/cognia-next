@@ -21,9 +21,15 @@
  */
 
 import { invokeVscodeRpc, isVscodeHostAvailable } from "@/lib/plugin/core/vscode-loader"
+import { transport } from "@/lib/tauri"
+import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
 import { registerMethod } from "@/lib/plugin/vscode-shim/rpc-dispatcher"
 import { lspPublishDiagnosticsToBridgePayload } from "@/lib/plugin/vscode-shim/lsp-protocol-adapter"
-import type { LspClientAdapter } from "./lsp-registry"
+import type {
+  LspClientAdapter,
+  LspServerNotificationEvent,
+  LspServerRequestEvent,
+} from "./lsp-registry"
 import { lspServerKey } from "./lsp-registry"
 
 /**
@@ -38,10 +44,28 @@ export const LSP_TAURI_CHANNEL_ID = "cognia.lsp-service"
 
 type InvokeFn = (pluginId: string, method: string, payload: unknown) => Promise<unknown>
 
+async function invokeActiveLspHost(
+  pluginId: string,
+  method: string,
+  payload: unknown
+): Promise<unknown> {
+  if (!isRemoteHostActive()) return invokeVscodeRpc(pluginId, method, payload)
+  if (pluginId !== LSP_TAURI_CHANNEL_ID) {
+    throw new Error(`remote LSP facade rejects non-system channel ${pluginId}`)
+  }
+  const raw = await transport.call<string>("lsp_host_request", {
+    method,
+    payloadJson: JSON.stringify(payload ?? null),
+  })
+  return raw ? JSON.parse(raw) : null
+}
+
 type DiagnosticsForwarder = (
   uri: string,
   markers: ReturnType<typeof lspPublishDiagnosticsToBridgePayload>["markers"]
 ) => void
+type ServerRequestForwarder = (event: LspServerRequestEvent) => void
+type ServerNotificationForwarder = (event: LspServerNotificationEvent) => void
 
 interface ConstructorDeps {
   /** Override the Tauri `invokeVscodeRpc` for tests. Defaults to the real one. */
@@ -67,12 +91,18 @@ export class TauriLspClientAdapter implements LspClientAdapter {
   private isHostAvailable: () => boolean
   private channelId: string
   private diagnosticsRoutes = new Map<string, DiagnosticsForwarder>()
+  private serverRequestRoutes = new Map<string, ServerRequestForwarder>()
+  private serverNotificationRoutes = new Map<string, ServerNotificationForwarder>()
   private unregisterPublishDiagnostics: (() => void) | null = null
+  private unregisterServerRequest: (() => void) | null = null
+  private unregisterServerNotification: (() => void) | null = null
+  private unregisterHandlers: (() => void) | null = null
 
   constructor(deps: ConstructorDeps = {}) {
-    this.invoke = deps.invoke ?? invokeVscodeRpc
+    this.invoke = deps.invoke ?? invokeActiveLspHost
     this.registerHandler = deps.registerHandler ?? registerMethod
-    this.isHostAvailable = deps.isHostAvailable ?? isVscodeHostAvailable
+    this.isHostAvailable =
+      deps.isHostAvailable ?? (() => isVscodeHostAvailable() || isRemoteHostActive())
     this.channelId = deps.channelId ?? LSP_TAURI_CHANNEL_ID
   }
 
@@ -82,7 +112,7 @@ export class TauriLspClientAdapter implements LspClientAdapter {
    * tests; production code never tears this down.
    */
   install(): () => void {
-    if (this.unregisterPublishDiagnostics) return this.unregisterPublishDiagnostics
+    if (this.unregisterHandlers) return this.unregisterHandlers
     this.unregisterPublishDiagnostics = this.registerHandler(
       "lsp:publishDiagnostics",
       (params: unknown) => {
@@ -101,7 +131,63 @@ export class TauriLspClientAdapter implements LspClientAdapter {
         forwarder(uri, markers)
       }
     )
-    return this.unregisterPublishDiagnostics
+    this.unregisterServerRequest = this.registerHandler("lsp:serverRequest", (params: unknown) => {
+      const p = params as {
+        ownerId: string
+        serverId: string
+        requestId: string
+        method: string
+        payload: unknown
+        preconditions?: Record<string, { exists: boolean; version?: number; contentHash?: string }>
+      }
+      const route = this.serverRequestRoutes.get(lspServerKey(p.ownerId, p.serverId))
+      if (route) {
+        route({
+          requestId: p.requestId,
+          method: p.method,
+          payload: p.payload,
+          preconditions: p.preconditions,
+        })
+        return
+      }
+      void this.serverResponse({
+        ownerId: p.ownerId,
+        serverId: p.serverId,
+        requestId: p.requestId,
+        error: {
+          code: -32601,
+          message: `LSP_CLIENT_METHOD_UNAVAILABLE: ${p.method}`,
+        },
+      })
+    })
+    this.unregisterServerNotification = this.registerHandler(
+      "lsp:serverNotification",
+      (params: unknown) => {
+        const p = params as {
+          ownerId: string
+          serverId: string
+          method: string
+          payload: unknown
+        }
+        this.serverNotificationRoutes.get(lspServerKey(p.ownerId, p.serverId))?.({
+          method: p.method,
+          payload: p.payload,
+        })
+      }
+    )
+    this.unregisterHandlers = () => {
+      this.unregisterPublishDiagnostics?.()
+      this.unregisterServerRequest?.()
+      this.unregisterServerNotification?.()
+      this.unregisterPublishDiagnostics = null
+      this.unregisterServerRequest = null
+      this.unregisterServerNotification = null
+      this.unregisterHandlers = null
+      this.diagnosticsRoutes.clear()
+      this.serverRequestRoutes.clear()
+      this.serverNotificationRoutes.clear()
+    }
+    return this.unregisterHandlers
   }
 
   /**
@@ -111,12 +197,26 @@ export class TauriLspClientAdapter implements LspClientAdapter {
    * the LSP (some servers send before resolving `initialize`) lands
    * on a wired route.
    */
-  async start(input: Parameters<LspClientAdapter["start"]>[0]): Promise<void> {
+  async start(
+    input: Parameters<LspClientAdapter["start"]>[0]
+  ): Promise<{ capabilities?: unknown } | void> {
     if (!this.isHostAvailable()) {
       throw new Error("TauriLspClientAdapter: VS Code host unavailable — sidecar cannot be reached")
     }
     this.install() // guarantee diagnostic handler is up
     this.diagnosticsRoutes.set(lspServerKey(input.ownerId, input.serverId), input.onDiagnostics)
+    if (input.onServerRequest) {
+      this.serverRequestRoutes.set(
+        lspServerKey(input.ownerId, input.serverId),
+        input.onServerRequest
+      )
+    }
+    if (input.onServerNotification) {
+      this.serverNotificationRoutes.set(
+        lspServerKey(input.ownerId, input.serverId),
+        input.onServerNotification
+      )
+    }
 
     const payload = {
       ownerId: input.ownerId,
@@ -125,15 +225,26 @@ export class TauriLspClientAdapter implements LspClientAdapter {
       args: input.config.args,
       env: input.config.env,
       transport: input.config.transport ?? "stdio",
+      endpoint: input.config.endpoint,
       workspaceFolders: input.workspaceFolders,
       initializationOptions: input.config.initializationOptions,
+      // Per-server settings drive workspace/configuration pulls + the
+      // post-init didChangeConfiguration push; startupTimeout bounds the
+      // initialize handshake (sidecar lsp-client).
+      settings: input.config.settings,
+      startupTimeout: input.config.startupTimeout,
+      memoryLimitMb: input.config.memoryLimitMb,
     }
     try {
-      await this.invoke(this.channelId, "lsp:start", payload)
+      return (await this.invoke(this.channelId, "lsp:start", payload)) as {
+        capabilities?: unknown
+      }
     } catch (err) {
       // Route is dead — drop it so a future retry doesn't leak the
       // closure.
       this.diagnosticsRoutes.delete(lspServerKey(input.ownerId, input.serverId))
+      this.serverRequestRoutes.delete(lspServerKey(input.ownerId, input.serverId))
+      this.serverNotificationRoutes.delete(lspServerKey(input.ownerId, input.serverId))
       throw err
     }
   }
@@ -146,6 +257,8 @@ export class TauriLspClientAdapter implements LspClientAdapter {
   async stop(ownerId: string, serverId: string): Promise<void> {
     const key = lspServerKey(ownerId, serverId)
     this.diagnosticsRoutes.delete(key)
+    this.serverRequestRoutes.delete(key)
+    this.serverNotificationRoutes.delete(key)
     if (!this.isHostAvailable()) return
     try {
       await this.invoke(this.channelId, "lsp:stop", { ownerId, serverId })
@@ -194,7 +307,164 @@ export class TauriLspClientAdapter implements LspClientAdapter {
     serverId: string
     method: string
     payload: unknown
+    requestId?: string
   }): Promise<unknown> {
     return this.invoke(this.channelId, "lsp:request", input)
   }
+
+  async serverResponse(input: {
+    ownerId: string
+    serverId: string
+    requestId: string
+    result?: unknown
+    error?: { code: number; message: string; data?: unknown }
+  }): Promise<boolean> {
+    const response = (await this.invoke(this.channelId, "lsp:serverResponse", input)) as {
+      accepted?: unknown
+    }
+    return response?.accepted === true
+  }
+
+  async clientNotification(input: {
+    ownerId: string
+    serverId: string
+    method: string
+    payload: unknown
+  }): Promise<boolean> {
+    const response = (await this.invoke(this.channelId, "lsp:clientNotification", input)) as {
+      accepted?: unknown
+    }
+    return response?.accepted === true
+  }
+
+  // ──────────────────────────────────────────────────────────────────────
+  // Maturity surface — binary detection, one-click install, runtime
+  // health and the sidecar log ring. All degrade to inert values when
+  // the host is unavailable (web / mobile).
+  // ──────────────────────────────────────────────────────────────────────
+
+  /** `lsp:detect` — ladder resolution without installing. */
+  async detect(input: {
+    servers: Array<{ serverId: string; command: string; npmPackage?: string; version?: string }>
+    installDir?: string
+    projectRoot?: string
+  }): Promise<LspDetectResultEntry[]> {
+    if (!this.isHostAvailable()) return []
+    return (await this.invoke(this.channelId, "lsp:detect", input)) as LspDetectResultEntry[]
+  }
+
+  /** `lsp:install` — npm-first install; progress arrives via onInstallProgress. */
+  async installServer(input: {
+    serverId: string
+    command: string
+    npmPackage: string
+    version?: string
+    installDir: string
+  }): Promise<LspDetectResultEntry> {
+    if (!this.isHostAvailable()) {
+      return { serverId: input.serverId, status: "missing", source: null, resolvedPath: null }
+    }
+    return (await this.invoke(this.channelId, "lsp:install", input)) as LspDetectResultEntry
+  }
+
+  /** `lsp:status` — supervisor snapshot of every tracked server. */
+  async status(): Promise<LspRuntimeStatusEntry[]> {
+    if (!this.isHostAvailable()) return []
+    return (await this.invoke(this.channelId, "lsp:status", {})) as LspRuntimeStatusEntry[]
+  }
+
+  /** `lsp:logs` — sidecar ring-buffer query (newest last). */
+  async logs(input: { serverId?: string; limit?: number } = {}): Promise<LspSidecarLogEntry[]> {
+    if (!this.isHostAvailable()) return []
+    return (await this.invoke(this.channelId, "lsp:logs", input)) as LspSidecarLogEntry[]
+  }
+
+  private installProgressListeners = new Set<(p: LspInstallProgressEvent) => void>()
+  private stateListeners = new Set<(p: LspStatePushEvent) => void>()
+  private unregisterInstallProgress: (() => void) | null = null
+  private unregisterState: (() => void) | null = null
+
+  /** Subscribe to `lsp:installProgress` pushes. */
+  onInstallProgress(cb: (p: LspInstallProgressEvent) => void): () => void {
+    if (!this.unregisterInstallProgress) {
+      this.unregisterInstallProgress = this.registerHandler("lsp:installProgress", (params) => {
+        for (const listener of this.installProgressListeners) {
+          try {
+            listener(params as LspInstallProgressEvent)
+          } catch {
+            /* swallow */
+          }
+        }
+      })
+    }
+    this.installProgressListeners.add(cb)
+    return () => {
+      this.installProgressListeners.delete(cb)
+    }
+  }
+
+  /** Subscribe to `lsp:state` health-transition pushes. */
+  onStatePush(cb: (p: LspStatePushEvent) => void): () => void {
+    if (!this.unregisterState) {
+      this.unregisterState = this.registerHandler("lsp:state", (params) => {
+        for (const listener of this.stateListeners) {
+          try {
+            listener(params as LspStatePushEvent)
+          } catch {
+            /* swallow */
+          }
+        }
+      })
+    }
+    this.stateListeners.add(cb)
+    return () => {
+      this.stateListeners.delete(cb)
+    }
+  }
+}
+
+/** `lsp:detect` / `lsp:install` result entry (sidecar lsp-installer). */
+export interface LspDetectResultEntry {
+  serverId: string
+  status: "installed" | "managed" | "missing"
+  source: "explicit" | "project" | "managed" | "path" | null
+  resolvedPath: string | null
+  error?: string
+}
+
+/** `lsp:status` entry (sidecar supervisor snapshot). */
+export interface LspRuntimeStatusEntry {
+  key: string
+  ownerId: string
+  serverId: string
+  state: "stopped" | "starting" | "running" | "crashed" | "broken"
+  restarts: number
+  lastError?: string
+  startedAt?: number
+}
+
+/** `lsp:logs` entry. */
+export interface LspSidecarLogEntry {
+  ts: number
+  level: "info" | "warn" | "error"
+  key: string
+  serverId: string
+  message: string
+}
+
+/** `lsp:installProgress` push. */
+export interface LspInstallProgressEvent {
+  serverId: string
+  phase: "resolving" | "installing" | "done" | "error"
+  message?: string
+}
+
+/** `lsp:state` push. */
+export interface LspStatePushEvent {
+  key: string
+  ownerId: string
+  serverId: string
+  state: LspRuntimeStatusEntry["state"]
+  restarts: number
+  lastError?: string
 }

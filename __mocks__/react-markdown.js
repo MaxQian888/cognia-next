@@ -47,7 +47,10 @@ function parseMarkdown(text, components) {
         codeLines.push(lines[i])
         i++
       }
-      const codeContent = codeLines.join("\n")
+      // react-markdown keeps the terminal newline for block code. Preserve it
+      // here so tests can distinguish a one-line fence without a language from
+      // inline code through the same observable children shape.
+      const codeContent = `${codeLines.join("\n")}\n`
       const codeEl = callComp(
         components,
         "code",
@@ -59,6 +62,39 @@ function parseMarkdown(text, components) {
       )
       elements.push(callComp(components, "pre", { key: key++ }, codeEl))
       i++ // skip closing ```
+      continue
+    }
+
+    // ── math ──────────────────────────────────────────────
+    const displayMathMatch = line.match(/^\$\$(.+)\$\$$/)
+    if (displayMathMatch) {
+      const codeEl = callComp(
+        components,
+        "code",
+        { key: key++, className: "language-math math-display" },
+        `${displayMathMatch[1]}\n`
+      )
+      elements.push(callComp(components, "pre", { key: key++ }, codeEl))
+      i++
+      continue
+    }
+
+    const inlineMathMatch = line.match(/^\$([^$]+)\$$/)
+    if (inlineMathMatch) {
+      elements.push(
+        callComp(
+          components,
+          "p",
+          { key: key++ },
+          callComp(
+            components,
+            "code",
+            { key: key++, className: "language-math math-inline" },
+            inlineMathMatch[1]
+          )
+        )
+      )
+      i++
       continue
     }
 
@@ -133,6 +169,26 @@ function parseMarkdown(text, components) {
       continue
     }
 
+    // ── safe raw HTML elements ────────────────────────────
+    const detailsMatch = line.match(
+      /^<details><summary>(.*?)<\/summary>(.*?)<\/details>$/
+    )
+    if (detailsMatch) {
+      const summary = callComp(components, "summary", { key: key++ }, detailsMatch[1])
+      elements.push(
+        callComp(components, "details", { key: key++ }, summary, detailsMatch[2])
+      )
+      i++
+      continue
+    }
+
+    const kbdMatch = line.match(/^<kbd>(.*?)<\/kbd>$/)
+    if (kbdMatch) {
+      elements.push(callComp(components, "kbd", { key: key++ }, kbdMatch[1]))
+      i++
+      continue
+    }
+
     // ── unordered list ────────────────────────────────────
     if (/^[-*]\s+/.test(line)) {
       const items = []
@@ -145,7 +201,23 @@ function parseMarkdown(text, components) {
           components,
           "ul",
           { key: key++ },
-          items.map((item, idx) => callComp(components, "li", { key: idx }, item))
+          items.map((item, idx) => {
+            const task = item.match(/^\[([ xX])\]\s+(.*)$/)
+            if (!task) return callComp(components, "li", { key: idx }, item)
+            return callComp(
+              components,
+              "li",
+              { key: idx },
+              React.createElement("input", {
+                key: "checkbox",
+                type: "checkbox",
+                disabled: true,
+                checked: task[1].toLowerCase() === "x",
+                readOnly: true,
+              }),
+              ` ${task[2]}`
+            )
+          })
         )
       )
       continue
@@ -166,6 +238,20 @@ function parseMarkdown(text, components) {
           items.map((item, idx) => callComp(components, "li", { key: idx }, item))
         )
       )
+      continue
+    }
+
+    // ── image ![alt](url) ─────────────────────────────────
+    const imageMatch = line.match(/^!\[([^\]]*)\]\(([^)]+)\)$/)
+    if (imageMatch) {
+      elements.push(
+        callComp(components, "img", {
+          key: key++,
+          src: imageMatch[2],
+          alt: imageMatch[1],
+        })
+      )
+      i++
       continue
     }
 
@@ -213,13 +299,29 @@ function parseMarkdown(text, components) {
 function ReactMarkdown({
   children,
   components,
-  // accepted but unused — this mock doesn't process remark/rehype
-  remarkPlugins: _r,
+  // captured for integration-order assertions; this mock does not execute the
+  // remark/rehype pipeline itself.
+  remarkPlugins = [],
   rehypePlugins: _h,
   ..._rest
 }) {
   const els = parseMarkdown(children, components)
-  return React.createElement(React.Fragment, null, ...els)
+  const remarkOrder = remarkPlugins
+    .map((plugin) => {
+      const value = Array.isArray(plugin) ? plugin[0] : plugin
+      return typeof value === "function" ? value.name : "unknown"
+    })
+    .join(",")
+  return React.createElement(
+    React.Fragment,
+    null,
+    React.createElement("span", {
+      hidden: true,
+      "data-testid": "react-markdown-config",
+      "data-remark-order": remarkOrder,
+    }),
+    ...els
+  )
 }
 
 module.exports = ReactMarkdown

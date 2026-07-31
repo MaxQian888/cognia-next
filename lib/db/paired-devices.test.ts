@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 
 import {
@@ -5,10 +6,15 @@ import {
   getPairedDevice,
   listPairedDevices,
   pausePairedDevice,
+  recordDeviceCapabilities,
   resumePairedDevice,
   revokePairedDevice,
+  setServerFingerprint,
+  setLockedComputerUseAllowed,
   setPushToken,
+  setAgentControlAllowed,
   setRemoteControlAllowed,
+  setRemoteTerminalAllowed,
   touchPairedDevice,
 } from "./paired-devices"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
@@ -28,6 +34,7 @@ describe("addPairedDevice", () => {
       platform: "ios",
       pubkey: "spki-base64",
       appVersion: "0.1.0",
+      accountId: "local_acct_a",
       nowMs: 1_700_000_000_000,
     })
     const row = await getPairedDevice("dev-1")
@@ -36,11 +43,27 @@ describe("addPairedDevice", () => {
     expect(row?.label).toBe("iPhone 15")
     expect(row?.platform).toBe("ios")
     expect(row?.pubkey).toBe("spki-base64")
+    expect(row?.accountId).toBe("local_acct_a")
     expect(row?.appVersion).toBe("0.1.0")
     expect(row?.pairedAt).toBe(1_700_000_000_000)
     expect(row?.lastSeenAt).toBe(1_700_000_000_000)
     expect(row?.revokedAt).toBeUndefined()
     expect(row?.pushToken).toBeUndefined()
+    expect(row?.allowRemoteTerminal).toBe(false)
+  })
+
+  it("keeps accountId absent for legacy callers that do not provide it", async () => {
+    await addPairedDevice({
+      deviceId: "dev-legacy",
+      label: "Legacy Phone",
+      platform: "ios",
+      pubkey: "pk",
+      appVersion: "0.1.0",
+      nowMs: 1,
+    })
+
+    const row = await getPairedDevice("dev-legacy")
+    expect(row?.accountId).toBeUndefined()
   })
 
   it("defaults nowMs to Date.now() when omitted", async () => {
@@ -80,6 +103,63 @@ describe("addPairedDevice", () => {
     expect(row?.label).toBe("new")
     expect(row?.pubkey).toBe("pk2")
     expect(row?.pairedAt).toBe(2)
+  })
+
+  it("persists optional TLS and WebRTC pairing metadata", async () => {
+    await addPairedDevice({
+      deviceId: "dev-meta",
+      label: "Phone",
+      platform: "android",
+      pubkey: "pk",
+      appVersion: "0.1.0",
+      serverFingerprint: "sha256:abc",
+      rendezvousId: "room-1",
+      signalingRoomDescriptor: {
+        v: 2,
+        roomId: "room-1",
+        roomNonce: "nonce",
+        desktopSigningKey: "desktop-key",
+        mobileSigningKey: "mobile-key",
+        notAfter: 1_800_000_000_000,
+      },
+      signalingKeyRef: "dev-meta",
+      nowMs: 10,
+    })
+
+    const row = await getPairedDevice("dev-meta")
+    expect(row).toEqual(
+      expect.objectContaining({
+        serverFingerprint: "sha256:abc",
+        rendezvousId: "room-1",
+        signalingKeyRef: "dev-meta",
+        signalingRoomDescriptor: expect.objectContaining({
+          v: 2,
+          roomId: "room-1",
+        }),
+      })
+    )
+  })
+})
+
+describe("setServerFingerprint", () => {
+  it("updates an existing device fingerprint and returns true", async () => {
+    await addPairedDevice({
+      deviceId: "dev-fp",
+      label: "Phone",
+      platform: "ios",
+      pubkey: "pk",
+      appVersion: "0.1.0",
+      nowMs: 1,
+    })
+
+    await expect(setServerFingerprint("dev-fp", "sha256:new")).resolves.toBe(true)
+    await expect(getPairedDevice("dev-fp")).resolves.toEqual(
+      expect.objectContaining({ serverFingerprint: "sha256:new" })
+    )
+  })
+
+  it("returns false for an unknown device fingerprint update", async () => {
+    await expect(setServerFingerprint("missing", "sha256:new")).resolves.toBe(false)
   })
 })
 
@@ -400,5 +480,160 @@ describe("setRemoteControlAllowed", () => {
 
   it("returns false for an unknown deviceId", async () => {
     expect(await setRemoteControlAllowed("does-not-exist", true)).toBe(false)
+  })
+})
+
+describe("setAgentControlAllowed", () => {
+  async function pair(deviceId: string) {
+    await addPairedDevice({
+      deviceId,
+      label: "x",
+      platform: "ios",
+      pubkey: "pk",
+      appVersion: "0.1.0",
+      nowMs: 1,
+    })
+  }
+
+  it("defaults to undefined for a freshly-paired device (deny by default)", async () => {
+    await pair("dev-ac1")
+    expect((await getPairedDevice("dev-ac1"))?.allowAgentControl).toBeUndefined()
+  })
+
+  it("grants the capability and returns true", async () => {
+    await pair("dev-ac2")
+    expect(await setAgentControlAllowed("dev-ac2", true)).toBe(true)
+    expect((await getPairedDevice("dev-ac2"))?.allowAgentControl).toBe(true)
+  })
+
+  it("records an explicit false when revoked (not deleted)", async () => {
+    await pair("dev-ac3")
+    await setAgentControlAllowed("dev-ac3", true)
+    await setAgentControlAllowed("dev-ac3", false)
+    expect((await getPairedDevice("dev-ac3"))?.allowAgentControl).toBe(false)
+  })
+
+  it("returns false for an unknown deviceId", async () => {
+    expect(await setAgentControlAllowed("does-not-exist", true)).toBe(false)
+  })
+
+  it("is independent of the remote-control grant in both directions", async () => {
+    // The whole point of a second column: letting a phone approve prompts must
+    // not also let it start processes, and vice versa.
+    await pair("dev-ac4")
+    await setRemoteControlAllowed("dev-ac4", true)
+    expect((await getPairedDevice("dev-ac4"))?.allowAgentControl).toBeUndefined()
+
+    await setAgentControlAllowed("dev-ac4", true)
+    await setRemoteControlAllowed("dev-ac4", false)
+    const row = await getPairedDevice("dev-ac4")
+    expect(row?.allowRemoteControl).toBe(false)
+    expect(row?.allowAgentControl).toBe(true)
+  })
+})
+
+describe("setRemoteTerminalAllowed", () => {
+  const descriptor = {
+    hostId: "host-1",
+    issuedAt: 10,
+    lanUrl: "wss://host.local/ws/terminal",
+    signingPublicKey: "public-key",
+    credentialKeyId: "device-key-1",
+    signature: "signature",
+  }
+
+  async function pair(deviceId: string) {
+    await addPairedDevice({
+      deviceId,
+      label: "phone",
+      platform: "ios",
+      pubkey: "pk",
+      appVersion: "0.1.0",
+      nowMs: 1,
+    })
+  }
+
+  it("requires a signed host descriptor when granting access", async () => {
+    await pair("dev-terminal-1")
+    await expect(setRemoteTerminalAllowed("dev-terminal-1", true)).rejects.toThrow("descriptor")
+    expect((await getPairedDevice("dev-terminal-1"))?.allowRemoteTerminal).toBe(false)
+  })
+
+  it("stores the independent grant and sanitized descriptor", async () => {
+    await pair("dev-terminal-2")
+    expect(await setRemoteTerminalAllowed("dev-terminal-2", true, descriptor)).toBe(true)
+    const row = await getPairedDevice("dev-terminal-2")
+    expect(row).toEqual(
+      expect.objectContaining({
+        allowRemoteTerminal: true,
+        terminalHostDescriptor: descriptor,
+      })
+    )
+    expect(row?.allowRemoteControl).toBeUndefined()
+    expect(row?.allowAgentControl).toBeUndefined()
+  })
+
+  it("revokes immediately and removes the descriptor", async () => {
+    await pair("dev-terminal-3")
+    await setRemoteTerminalAllowed("dev-terminal-3", true, descriptor)
+    expect(await setRemoteTerminalAllowed("dev-terminal-3", false)).toBe(true)
+    const row = await getPairedDevice("dev-terminal-3")
+    expect(row?.allowRemoteTerminal).toBe(false)
+    expect(row?.terminalHostDescriptor).toBeUndefined()
+  })
+})
+
+describe("setLockedComputerUseAllowed", () => {
+  it("is a separate deny-by-default capability", async () => {
+    await addPairedDevice({
+      deviceId: "dev-locked",
+      label: "x",
+      platform: "ios",
+      pubkey: "pk",
+      appVersion: "0.1.0",
+      nowMs: 1,
+    })
+    expect((await getPairedDevice("dev-locked"))?.allowLockedComputerUse).toBeUndefined()
+    expect(await setLockedComputerUseAllowed("dev-locked", true)).toBe(true)
+    expect((await getPairedDevice("dev-locked"))?.allowLockedComputerUse).toBe(true)
+    expect(await setLockedComputerUseAllowed("missing", true)).toBe(false)
+  })
+})
+
+describe("recordDeviceCapabilities", () => {
+  it("persists the manifest and its report timestamp", async () => {
+    await addPairedDevice({
+      deviceId: "dev-cap1",
+      label: "x",
+      platform: "ios",
+      pubkey: "pk",
+      appVersion: "0.1.0",
+      nowMs: 1,
+    })
+    const ok = await recordDeviceCapabilities("dev-cap1", ["camera", "geolocation"], 42)
+    expect(ok).toBe(true)
+    const row = await getPairedDevice("dev-cap1")
+    expect(row?.capabilities).toEqual(["camera", "geolocation"])
+    expect(row?.capabilitiesReportedAt).toBe(42)
+  })
+
+  it("overwrites the previous manifest wholesale (snapshot, not delta)", async () => {
+    await addPairedDevice({
+      deviceId: "dev-cap2",
+      label: "x",
+      platform: "android",
+      pubkey: "pk",
+      appVersion: "0.1.0",
+      nowMs: 1,
+    })
+    await recordDeviceCapabilities("dev-cap2", ["camera", "voice-record"], 1)
+    await recordDeviceCapabilities("dev-cap2", ["camera"], 2)
+    const row = await getPairedDevice("dev-cap2")
+    expect(row?.capabilities).toEqual(["camera"])
+    expect(row?.capabilitiesReportedAt).toBe(2)
+  })
+
+  it("returns false for an unknown deviceId", async () => {
+    expect(await recordDeviceCapabilities("does-not-exist", ["camera"])).toBe(false)
   })
 })

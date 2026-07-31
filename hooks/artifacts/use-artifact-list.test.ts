@@ -4,14 +4,14 @@
 
 import { renderHook, act } from "@testing-library/react"
 import { useArtifactList } from "./use-artifact-list"
-import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import { selectActiveArtifactId, useArtifactStore } from "@/stores/artifact/artifact-store"
 import { useChatStore } from "@/stores/chat"
 
 beforeEach(() => {
   localStorage.clear()
   useArtifactStore.setState({
     artifacts: {},
-    activeArtifactId: null,
+    activeArtifactIdBySession: {},
     artifactVersions: {},
     artifactWorkspace: {
       scope: "session",
@@ -24,8 +24,6 @@ beforeEach(() => {
     },
     canvasDocuments: {},
     activeCanvasId: null,
-    canvasOpen: false,
-    analysisResults: {},
     panelOpen: false,
     panelView: "artifact",
   })
@@ -76,7 +74,7 @@ describe("useArtifactList", () => {
     )
     act(() => result.current.handleArtifactClick(a))
     expect(onClick).toHaveBeenCalledWith(a)
-    expect(useArtifactStore.getState().activeArtifactId).toBe(a.id)
+    expect(selectActiveArtifactId(useArtifactStore.getState(), "s1")).toBe(a.id)
   })
 
   it("handleArtifactClick toggles selection in batch mode", () => {

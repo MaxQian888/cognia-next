@@ -18,6 +18,9 @@ jest.mock("./sidecar-restart-card", () => ({
 jest.mock("./inbox-telemetry-card", () => ({
   InboxTelemetryCard: () => <div data-testid="inbox-telemetry-stub" />,
 }))
+jest.mock("./developer-flags-card", () => ({
+  DeveloperFlagsCard: () => <div data-testid="developer-flags-stub" />,
+}))
 
 import { DiagnosticsSection } from "./diagnostics-section"
 
@@ -50,9 +53,10 @@ it("switches to the native reports tab", () => {
   expect(screen.queryByTestId("crash-log-settings-stub")).not.toBeInTheDocument()
 })
 
-it("switches to the system tab with the three system cards", () => {
+it("switches to the system tab with the system cards", () => {
   render(<DiagnosticsSection />)
   fireEvent.click(screen.getByRole("tab", { name: "System" }))
+  expect(screen.getByTestId("developer-flags-stub")).toBeInTheDocument()
   expect(screen.getByTestId("sandbox-audit-stub")).toBeInTheDocument()
   expect(screen.getByTestId("sidecar-restart-stub")).toBeInTheDocument()
   expect(screen.getByTestId("inbox-telemetry-stub")).toBeInTheDocument()

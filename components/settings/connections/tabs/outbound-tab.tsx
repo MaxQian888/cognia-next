@@ -35,6 +35,8 @@ import type {
   OutboundJobRow,
   OutboundJobStatus,
 } from "@/lib/db/connector-types"
+import { replayDeadlettered } from "@/lib/db/outbound-jobs"
+import { appendAudit } from "@/lib/connectors/audit"
 import { cn } from "@/lib/utils"
 import {
   deriveJobBadge,
@@ -44,7 +46,14 @@ import {
 import { buildDlqDownload } from "@/lib/connectors/dlq-export"
 import { FileTextIcon, FileJsonIcon, Trash2Icon } from "lucide-react"
 
-const ALL_STATUSES: OutboundJobStatus[] = ["pending", "sending", "sent", "failed", "deadlettered"]
+const ALL_STATUSES: OutboundJobStatus[] = [
+  "pending",
+  "sending",
+  "sent",
+  "failed",
+  "delivery_unknown",
+  "deadlettered",
+]
 
 type StatusFilter = OutboundJobStatus | "all"
 
@@ -56,10 +65,14 @@ const STATUS_VARIANT_MAP: Record<
   sending: "default",
   sent: "outline",
   failed: "destructive",
+  delivery_unknown: "secondary",
   deadlettered: "destructive",
 }
 
 function StatusBadge({ status }: { status: OutboundJobStatus }) {
+  // Reuse the inbox's already-translated outbound status labels
+  // (components/inbox/outbound-status-pill.tsx) instead of the raw enum.
+  const tStatus = useTranslations("inbox.outboundStatus")
   return (
     <Badge
       variant={STATUS_VARIANT_MAP[status]}
@@ -68,15 +81,40 @@ function StatusBadge({ status }: { status: OutboundJobStatus }) {
           status === "sending",
       })}
     >
-      {status}
+      {tStatus(`status.${status}`)}
     </Badge>
   )
 }
 
+/**
+ * Re-arm a failed or dead-lettered job for immediate retry. Dead-lettered
+ * rows go through `replayDeadlettered` (clears the error state, resets
+ * attempts, and emits the enqueue wake so the runner re-checks `pickNextDue`
+ * right away). Failed rows also reset `attempts` (matching
+ * `replayDeadlettered` semantics) — a manual retry is a fresh operator
+ * decision, and a job already at max attempts would otherwise instantly
+ * re-dead-letter without a single new send. Either way an
+ * `outbound.replayed` audit row records the operator action with the
+ * original error code so the replay is traceable.
+ */
 async function retryJob(id: string) {
-  await getDb().outboundQueue.update(id, {
-    status: "pending",
-    nextAttemptAt: Date.now(),
+  const row = await getDb().outboundQueue.get(id)
+  if (!row) return
+  if (row.status === "deadlettered") {
+    await replayDeadlettered(id)
+  } else {
+    await getDb().outboundQueue.update(id, {
+      status: "pending",
+      attempts: 0,
+      nextAttemptAt: Date.now(),
+    })
+  }
+  void appendAudit({
+    adapterId: row.adapterId,
+    kind: "outbound.replayed",
+    at: Date.now(),
+    conversationKey: row.conversationKey,
+    fields: { jobId: id, lastErrorCode: row.lastErrorCode },
   })
 }
 
@@ -86,16 +124,15 @@ async function cancelJob(id: string) {
 
 /**
  * Tier 5.2 — bulk re-enqueue every dead-letter row in the current scope.
- * Reuses the single-job `retryJob` semantics (status → pending,
- * nextAttemptAt → now) so the runner picks them up on its next poll.
+ * Each row goes through `replayDeadlettered` so the error state is cleared,
+ * attempts reset, and the runner is woken — and each is audited as
+ * `outbound.replayed` with its original error code.
  */
 async function retryAllDeadlettered(ids: string[]) {
   if (ids.length === 0) return
-  const now = Date.now()
-  await getDb()
-    .outboundQueue.where("id")
-    .anyOf(ids)
-    .modify({ status: "pending", nextAttemptAt: now })
+  for (const id of ids) {
+    await retryJob(id)
+  }
 }
 
 /** Drop every dead-letter row from the active filter scope. */
@@ -181,6 +218,7 @@ interface OutboundTabProps {
 
 export function OutboundTab({ initialFilter = "all", adapterId }: OutboundTabProps = {}) {
   const t = useTranslations("settings.connections.outbound")
+  const tStatus = useTranslations("inbox.outboundStatus")
   const [filter, setFilter] = useState<StatusFilter>(initialFilter)
   // Capture render time once so we don't call Date.now() during render on every re-render
   // (satisfies react-hooks/purity). Jobs with nextAttemptAt in the future show a retry hint.
@@ -258,17 +296,20 @@ export function OutboundTab({ initialFilter = "all", adapterId }: OutboundTabPro
         >
           {t("filterAll")}
         </Toggle>
-        {ALL_STATUSES.map((s) => (
-          <Toggle
-            key={s}
-            size="sm"
-            pressed={filter === s}
-            onPressedChange={() => setFilter(s)}
-            aria-label={t("filterStatusAria", { status: s })}
-          >
-            {s}
-          </Toggle>
-        ))}
+        {ALL_STATUSES.map((s) => {
+          const statusLabel = tStatus(`status.${s}`)
+          return (
+            <Toggle
+              key={s}
+              size="sm"
+              pressed={filter === s}
+              onPressedChange={() => setFilter(s)}
+              aria-label={t("filterStatusAria", { status: statusLabel })}
+            >
+              {statusLabel}
+            </Toggle>
+          )
+        })}
         {showBulkRetry && (
           <div className="ml-auto flex items-center gap-1.5">
             <Button

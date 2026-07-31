@@ -34,6 +34,10 @@ function numberRange(min?: number, max?: number) {
   return s
 }
 
+function positiveInteger() {
+  return z.number().int().min(1, "minValue")
+}
+
 /**
  * Accepts an http(s) URL or any value containing a `{{ … }}` expression
  * (resolved at run time, so we can't validate the final shape here). Empty
@@ -52,7 +56,10 @@ function isHttpUrlOrExpression(value: string): boolean {
 
 // ── Triggers ────────────────────────────────────────────────────────────────
 
-const ManualTriggerParams = z.object({})
+const ManualTriggerParams = z.object({
+  // Declared input schema for the published interface (D5).
+  inputSchema: z.record(z.string(), z.unknown()).optional(),
+})
 
 const CronParams = z.object({
   cron: requiredString("required").regex(cronExprRegex, "cronExpr"),
@@ -63,6 +70,17 @@ const ConnectorInboundParams = z.object({
   adapterId: requiredString("required"),
   conversationKey: optionalString,
   characterId: optionalString,
+  // Fine-grained event filters (all optional — an unscoped node keeps the
+  // legacy "every inbound on this adapter" behaviour). Matching happens in
+  // `lib/workflow/runtime/trigger-subscriptions.ts:matches`.
+  /** Only fire for these platform sender ids (OR). */
+  senderIds: z.array(z.string()).optional(),
+  /** Only fire for these channel kinds (private / group / channel / thread). */
+  channelKinds: z.array(z.enum(["private", "group", "channel", "thread"])).optional(),
+  /** Case-insensitive substring keywords (OR) against the message plain text. */
+  keywords: z.array(z.string()).optional(),
+  /** Only fire when the bot itself is @-mentioned. */
+  requireMention: z.boolean().optional(),
 })
 
 const ChatMessageTriggerParams = z.object({
@@ -79,12 +97,53 @@ const GoalCompletedTriggerParams = z.object({
   status: optionalString,
 })
 
+const TeamTriggerParams = z.object({
+  // All optional — an unscoped node fires for every team run that reaches a
+  // terminal status. Scope by team and/or terminal status.
+  teamId: optionalString,
+  status: z.enum(["completed", "failed", "cancelled"]).optional(),
+})
+
+const WorkflowCompletedTriggerParams = z.object({
+  // Both optional — an unscoped node fires for EVERY workflow's terminal run
+  // (self-triggering is rejected by the fanout emitter). `workflowId` scopes
+  // to one source workflow; `status` to one outcome. The empty string is the
+  // editor's "any" sentinel (patchParam stores "" rather than deleting), so
+  // the enum must tolerate it alongside absence.
+  workflowId: optionalString,
+  status: z.union([z.enum(["succeeded", "failed"]), z.literal("")]).optional(),
+})
+
+/** Lifecycle kinds `trigger.pet.event` may subscribe to. */
+export const PET_TRIGGER_KINDS = ["levelUp", "evolved", "achievementUnlocked", "unwell"] as const
+
+const PetEventTriggerParams = z.object({
+  // Unscoped = any of the four lifecycle kinds.
+  kinds: z.array(z.enum(PET_TRIGGER_KINDS)).optional(),
+  cooldownMs: z.number().int().nonnegative().optional(),
+})
+
+const PetInteractActionParams = z.object({
+  kind: z.enum(["fed", "played", "petted", "talked", "slept", "cleaned", "treated"]),
+  // Optional shop-item id — the controller applies the item's restore.
+  itemId: optionalString,
+})
+
 const WebhookTriggerParams = z.object({
   path: requiredString("required").regex(/^[a-z0-9][a-z0-9-_/]*$/i, "webhookPath"),
   method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE", "*"]).optional(),
   hmacSecret: optionalString,
   responseStatus: numberRange(100, 599).optional(),
   responseTemplate: optionalString,
+})
+
+const IntegrationEventTriggerParams = z.object({
+  pluginId: optionalString,
+  integrationId: optionalString,
+  accountId: optionalString,
+  eventTypes: z.array(z.string().min(1)).optional(),
+  resourceKind: optionalString,
+  resourceId: optionalString,
 })
 
 // ── Actions: characters / teams / skills ────────────────────────────────────
@@ -110,9 +169,147 @@ const CharacterUpdateParams = z.object({
   patch: z.record(z.string(), z.unknown()).optional(),
 })
 
+const AgentTurnParams = z.object({
+  prompt: requiredString("required"),
+  characterId: optionalString,
+  systemPrompt: optionalString,
+  model: optionalString,
+  allowedTools: z.array(z.string()).optional(),
+  maxTurns: numberRange(1, 100).optional(),
+  temperature: numberRange(0, 2).optional(),
+  timeoutMs: numberRange(1000, 3_600_000).optional(),
+  toolsEnabled: z.boolean().optional(),
+  requireTools: z.boolean().optional(),
+  cwd: optionalString,
+  // Typed output (D3): JSON object schema the reply must satisfy.
+  outputSchema: z.record(z.string(), z.unknown()).optional(),
+  onSchemaViolation: z.enum(["fail", "soft"]).optional(),
+})
+
+// ── Actions: goals ─────────────────────────────────────────────────────────
+
+const GoalCreateParams = z.object({
+  sessionId: requiredString("required"),
+  rawObjective: requiredString("required"),
+  characterId: optionalString,
+  startPaused: z.boolean().optional(),
+  configJson: optionalString,
+  config: z.record(z.string(), z.unknown()).optional(),
+})
+
+const GoalIdParams = z.object({
+  goalId: requiredString("required"),
+})
+
+const GoalListParams = z
+  .object({
+    mode: z.enum(["all", "session", "activeForSession", "openForSession"]).optional(),
+    sessionId: optionalString,
+    limit: numberRange(1, 1000).optional(),
+  })
+  .refine(
+    (v) => {
+      const mode = v.mode ?? "all"
+      return mode === "all" || (typeof v.sessionId === "string" && v.sessionId.length > 0)
+    },
+    { message: "required", path: ["sessionId"] }
+  )
+
+const GoalEventsParams = GoalIdParams.extend({
+  limit: numberRange(1, 5000).optional(),
+})
+
+const GoalUpdateObjectiveParams = GoalIdParams.extend({
+  rawObjective: requiredString("required"),
+})
+
+const GoalUpdateConfigParams = GoalIdParams.extend({
+  configJson: optionalString,
+  config: z.record(z.string(), z.unknown()).optional(),
+}).refine(
+  (v) =>
+    (typeof v.configJson === "string" && v.configJson.trim() !== "") ||
+    (v.config !== undefined && Object.keys(v.config).length > 0),
+  { message: "required", path: ["configJson"] }
+)
+
+const GoalToggleSubgoalParams = GoalIdParams.extend({
+  subgoalId: requiredString("required"),
+})
+
+const GoalAnalyticsParams = z
+  .object({
+    scope: z.enum(["all", "session"]).optional(),
+    sessionId: optionalString,
+    limit: numberRange(1, 1000).optional(),
+    windowDays: numberRange(1, 366).optional(),
+  })
+  .refine(
+    (v) => (v.scope ?? "all") !== "session" || (typeof v.sessionId === "string" && v.sessionId),
+    { message: "required", path: ["sessionId"] }
+  )
+
+const GoalTemplateIdParams = z.object({
+  templateId: requiredString("required"),
+})
+
+const GoalTemplateListParams = z.object({
+  includeBuiltIn: z.boolean().optional(),
+  favoriteOnly: z.boolean().optional(),
+  query: optionalString,
+  limit: numberRange(1, 1000).optional(),
+})
+
+const GoalTemplateCreateGoalParams = GoalTemplateIdParams.extend({
+  sessionId: requiredString("required"),
+  characterId: optionalString,
+})
+
+const GoalTemplateUpsertParams = z.object({
+  templateId: optionalString,
+  title: requiredString("required"),
+  objectiveText: requiredString("required"),
+  configJson: optionalString,
+  configOverrides: z.record(z.string(), z.unknown()).optional(),
+  isFavorite: z.boolean().optional(),
+  sortOrder: z.number().optional(),
+})
+
+const GoalTemplateFavoriteParams = GoalTemplateIdParams.extend({
+  isFavorite: z.boolean(),
+})
+
 const TeamRunParams = z.object({
   teamId: requiredString("required"),
   goal: requiredString("required"),
+})
+
+const MemoryRecallParams = z.object({
+  query: requiredString("required"),
+  topK: numberRange(1, 50).optional(),
+  scope: z.enum(["global", "workspace", "character", "agent"]).optional(),
+  characterId: optionalString,
+  projectId: optionalString,
+  agentId: optionalString,
+  branch: optionalString,
+  path: optionalString,
+  relevanceFloor: numberRange(0, 1).optional(),
+  types: z.array(z.enum(["semantic", "episodic", "procedural"])).optional(),
+})
+
+const MemoryStoreParams = z.object({
+  text: requiredString("required"),
+  scope: z.enum(["global", "workspace", "character", "agent"]).optional(),
+  characterId: optionalString,
+  projectId: optionalString,
+  agentId: optionalString,
+  branch: optionalString,
+  pathPattern: optionalString,
+  type: z.enum(["semantic", "episodic", "procedural"]).optional(),
+  key: optionalString,
+  importance: numberRange(1, 10).optional(),
+  provenance: z.enum(["explicit", "system"]).optional(),
+  piiGate: z.enum(["block", "redact"]).optional(),
 })
 
 const TeamCreateParams = z.object({
@@ -130,6 +327,64 @@ const TeamUpdateParams = z.object({
   patch: z.record(z.string(), z.unknown()).optional(),
 })
 
+// action.team.compose — auto-orchestrate a team from a single objective
+// (planAutoOrchestration → materializeProposal). `autoStart` optionally kicks
+// off the lifecycle immediately after materialization.
+const TeamComposeParams = z.object({
+  objective: requiredString("required"),
+  name: optionalString,
+  maxRoster: numberRange(1, 16).optional(),
+  preferredPattern: z
+    .enum([
+      "manager_worker",
+      "parallel_specialists",
+      "background_handoff",
+      "external_handoff",
+      "single_agent_recommended",
+      "ultracode_orchestration",
+    ])
+    .optional(),
+  autoStart: z.boolean().optional(),
+  ultracode: z.boolean().optional(),
+})
+
+// action.team.status — read-only snapshot of an agent team (status,
+// finalResult, tasks/teammates/delegations on demand).
+const TeamStatusParams = z.object({
+  teamId: requiredString("required"),
+  includeTasks: z.boolean().optional(),
+  includeTeammates: z.boolean().optional(),
+  includeDelegations: z.boolean().optional(),
+})
+
+// action.team.delegate — hand a sub-problem to another agent system on
+// behalf of a team. Target-specific requirements (twinId / targetTeamId /
+// targetAgentId / prompt) are enforced at runtime in the executor because
+// they depend on `target`.
+const TeamDelegateParams = z.object({
+  teamId: requiredString("required"),
+  target: z.enum(["twin", "background", "external", "team"]),
+  taskId: optionalString,
+  prompt: optionalString,
+  systemPrompt: optionalString,
+  reason: optionalString,
+  twinId: optionalString,
+  targetTeamId: optionalString,
+  targetAgentId: optionalString,
+  awaitCompletion: z.boolean().optional(),
+  force: z.boolean().optional(),
+  ultracode: z.boolean().optional(),
+})
+
+// action.team.message — post into the team blackboard / chat.
+const TeamMessageParams = z.object({
+  teamId: requiredString("required"),
+  content: requiredString("required"),
+  senderId: optionalString,
+  recipientId: optionalString,
+  taskId: optionalString,
+})
+
 // Synthesizer-emitted dispatch node. `requiredString` MUST be called — passing
 // the bare function reference made every field validate as a Zod function type
 // instead of a non-empty string, silently disabling validation here.
@@ -139,6 +394,355 @@ const TeamTaskDispatchParams = z.object({
   title: requiredString("required"),
   description: requiredString("required"),
   expectedOutput: optionalString,
+  assignedTo: optionalString,
+  dependencies: z.array(z.string()).optional(),
+})
+
+// Synthesizer-emitted review node (ADR-0071): one per task when
+// `taskReview.enabled`. `dispatchNodeId` is how the executor finds the worker's
+// output + author on `ctx.upstream`; `maxRevisions` is baked in at synthesis so
+// a mid-run config edit cannot change a budget the DAG was already shaped by.
+const TeamTaskReviewParams = z.object({
+  teamId: requiredString("required"),
+  taskId: requiredString("required"),
+  title: requiredString("required"),
+  description: requiredString("required"),
+  expectedOutput: optionalString,
+  dispatchNodeId: requiredString("required"),
+  maxRevisions: z.number().int().min(0),
+})
+
+// action.team.reconcile — all optional; unset fields fall back to the team's
+// workspaceIsolation config. Only meaningful inside a workspace-isolated run.
+const TeamReconcileParams = z.object({
+  mode: z.enum(["manual", "merge-all", "select", "pipeline"]).optional(),
+  selectStrategy: z.enum(["manual", "first-success", "judge"]).optional(),
+  retain: z.enum(["all", "keep-winner", "prune-losers"]).optional(),
+})
+
+const PlanStepKind = z.enum([
+  "agent_turn",
+  "teammate_dispatch",
+  "tool_call",
+  "mcp_tool_call",
+  "sub_workflow",
+  "approval_gate",
+])
+
+const PlanStepStatus = z.enum([
+  "pending",
+  "ready",
+  "in_progress",
+  "completed",
+  "failed",
+  "skipped",
+  "blocked",
+])
+
+const PlanSource = z.enum([
+  "exit_plan_mode",
+  "agent_tool",
+  "planner_llm",
+  "team_projection",
+  "goal_projection",
+  "manual",
+])
+
+const PlanExecutionMode = z.enum(["in_session", "orchestrated", "auto"])
+const PlanRefinementType = z.enum(["optimize", "simplify", "expand", "reorder", "repair"])
+const PlanRefinementTrigger = z.enum(["manual", "step_failure", "judge_deviation"])
+const PlanStatus = z.enum([
+  "draft",
+  "awaiting_approval",
+  "approved",
+  "executing",
+  "paused",
+  "completed",
+  "failed",
+  "cancelled",
+])
+
+const PlanCreateStepInputParams = z.object({
+  title: requiredString("required"),
+  description: optionalString,
+  kind: PlanStepKind,
+  dependsOn: z.array(z.number().int().min(0)).optional(),
+  params: z.record(z.string(), z.unknown()).optional(),
+  estimatedDurationMs: numberRange(0).optional(),
+})
+
+const PlanCreateParams = z
+  .object({
+    sessionId: requiredString("required"),
+    characterId: optionalString,
+    title: requiredString("required"),
+    description: optionalString,
+    source: PlanSource.optional(),
+    executionMode: PlanExecutionMode.optional(),
+    stepsJson: optionalString,
+    steps: z.array(PlanCreateStepInputParams).min(1).optional(),
+    configJson: optionalString,
+    config: z.record(z.string(), z.unknown()).optional(),
+    metadataJson: optionalString,
+    metadata: z.record(z.string(), z.unknown()).optional(),
+  })
+  .refine(
+    (v) =>
+      (typeof v.stepsJson === "string" && v.stepsJson.trim() !== "") ||
+      (Array.isArray(v.steps) && v.steps.length > 0),
+    { message: "required", path: ["stepsJson"] }
+  )
+
+const PlanIdParams = z.object({
+  planId: requiredString("required"),
+})
+
+const PlanListParams = z
+  .object({
+    mode: z.enum(["all", "session", "openForSession", "executingForSession"]).optional(),
+    sessionId: optionalString,
+    status: z.union([PlanStatus, z.literal("")]).optional(),
+    projectId: optionalString,
+    limit: numberRange(1, 1000).optional(),
+  })
+  .refine(
+    (v) => {
+      const mode = v.mode ?? "all"
+      return mode === "all" || (typeof v.sessionId === "string" && v.sessionId.length > 0)
+    },
+    { message: "required", path: ["sessionId"] }
+  )
+
+const PlanEventsParams = PlanIdParams.extend({
+  limit: numberRange(1, 5000).optional(),
+})
+
+const PlanUpdateDraftParams = PlanIdParams.extend({
+  title: optionalString,
+  description: optionalString,
+  executionMode: PlanExecutionMode.optional(),
+  stepsJson: optionalString,
+  steps: z.array(z.unknown()).optional(),
+  configJson: optionalString,
+  config: z.record(z.string(), z.unknown()).optional(),
+  metadataJson: optionalString,
+  metadata: z.record(z.string(), z.unknown()).optional(),
+}).refine(
+  (v) =>
+    [v.title, v.description, v.executionMode, v.stepsJson, v.configJson, v.metadataJson].some(
+      (value) => typeof value === "string" && value.trim() !== ""
+    ) ||
+    v.steps !== undefined ||
+    v.config !== undefined ||
+    v.metadata !== undefined,
+  { message: "required", path: ["title"] }
+)
+
+const PlanRejectParams = PlanIdParams.extend({
+  feedback: optionalString,
+})
+
+const PlanRefineParams = PlanIdParams.extend({
+  refinementType: PlanRefinementType.optional(),
+  trigger: PlanRefinementTrigger.optional(),
+  failedStepId: optionalString,
+  customInstructions: optionalString,
+})
+
+const PlanSetStepStatusParams = PlanIdParams.extend({
+  stepId: requiredString("required"),
+  status: PlanStepStatus,
+  result: optionalString,
+  error: optionalString,
+  outputJson: optionalString,
+  output: z.unknown().optional(),
+  attempts: numberRange(0).optional(),
+})
+
+const SchedulerTaskType = z.enum([
+  "workflow",
+  "agent",
+  "sync",
+  "backup",
+  "custom",
+  "plugin",
+  "script",
+  "test",
+  "ai-generation",
+  "chat",
+  "im-push",
+  "skill",
+  "external-agent",
+  "agent-team",
+  "goal",
+  "plan",
+  "twin",
+  "connection:scheduled:digest",
+  "connection:outbound:send",
+  "wiki-rebuild",
+])
+
+const SchedulerTaskStatus = z.enum(["active", "paused", "disabled", "expired"])
+const SchedulerTaskTriggerType = z.enum(["cron", "interval", "once", "event"])
+const SchedulerStringArray = z.array(z.string()).optional()
+
+const SchedulerTaskIdParams = z.object({
+  taskId: requiredString("required"),
+})
+
+const SchedulerTaskCreateParams = z
+  .object({
+    name: requiredString("required"),
+    description: optionalString,
+    type: SchedulerTaskType,
+    triggerType: SchedulerTaskTriggerType,
+    cronExpression: optionalString,
+    intervalMs: numberRange(1).optional(),
+    runAt: optionalString,
+    eventType: optionalString,
+    eventSource: optionalString,
+    timezone: optionalString,
+    jitterMs: numberRange(0).optional(),
+    dependsOn: SchedulerStringArray,
+    dependsOnRaw: optionalString,
+    payload: z.record(z.string(), z.unknown()).optional(),
+    payloadJson: optionalString,
+    config: z.record(z.string(), z.unknown()).optional(),
+    configJson: optionalString,
+    notification: z.record(z.string(), z.unknown()).optional(),
+    notificationJson: optionalString,
+    tags: SchedulerStringArray,
+    tagsRaw: optionalString,
+    endAt: optionalString,
+    onSuccessTaskIds: SchedulerStringArray,
+    onSuccessTaskIdsRaw: optionalString,
+    onFailureTaskIds: SchedulerStringArray,
+    onFailureTaskIdsRaw: optionalString,
+  })
+  .refine(
+    (v) =>
+      v.triggerType !== "cron" ||
+      (typeof v.cronExpression === "string" && cronExprRegex.test(v.cronExpression)),
+    { message: "cronExpr", path: ["cronExpression"] }
+  )
+  .refine((v) => v.triggerType !== "interval" || typeof v.intervalMs === "number", {
+    message: "required",
+    path: ["intervalMs"],
+  })
+  .refine((v) => v.triggerType !== "once" || Boolean(v.runAt?.trim()), {
+    message: "required",
+    path: ["runAt"],
+  })
+  .refine((v) => v.triggerType !== "event" || Boolean(v.eventType?.trim()), {
+    message: "required",
+    path: ["eventType"],
+  })
+
+const SchedulerTaskListParams = z.object({
+  statuses: z.array(SchedulerTaskStatus).optional(),
+  statusesRaw: optionalString,
+  types: z.array(SchedulerTaskType).optional(),
+  typesRaw: optionalString,
+  tags: SchedulerStringArray,
+  tagsRaw: optionalString,
+  search: optionalString,
+  limit: numberRange(1, 1000).optional(),
+})
+
+const SchedulerTaskUpdateParams = SchedulerTaskIdParams.extend({
+  name: optionalString,
+  description: optionalString,
+  status: SchedulerTaskStatus.optional(),
+  triggerType: SchedulerTaskTriggerType.optional(),
+  cronExpression: optionalString,
+  intervalMs: numberRange(1).optional(),
+  runAt: optionalString,
+  eventType: optionalString,
+  eventSource: optionalString,
+  timezone: optionalString,
+  jitterMs: numberRange(0).optional(),
+  dependsOn: SchedulerStringArray,
+  dependsOnRaw: optionalString,
+  payload: z.record(z.string(), z.unknown()).optional(),
+  payloadJson: optionalString,
+  config: z.record(z.string(), z.unknown()).optional(),
+  configJson: optionalString,
+  notification: z.record(z.string(), z.unknown()).optional(),
+  notificationJson: optionalString,
+  tags: SchedulerStringArray,
+  tagsRaw: optionalString,
+  endAt: optionalString,
+  clearEndAt: z.boolean().optional(),
+  onSuccessTaskIds: SchedulerStringArray,
+  onSuccessTaskIdsRaw: optionalString,
+  onFailureTaskIds: SchedulerStringArray,
+  onFailureTaskIdsRaw: optionalString,
+}).refine(
+  (v) =>
+    [
+      v.name,
+      v.description,
+      v.status,
+      v.triggerType,
+      v.cronExpression,
+      v.runAt,
+      v.eventType,
+      v.eventSource,
+      v.timezone,
+      v.dependsOnRaw,
+      v.payloadJson,
+      v.configJson,
+      v.notificationJson,
+      v.tagsRaw,
+      v.endAt,
+      v.onSuccessTaskIdsRaw,
+      v.onFailureTaskIdsRaw,
+    ].some((value) => (typeof value === "string" ? value.trim() !== "" : value !== undefined)) ||
+    v.intervalMs !== undefined ||
+    v.jitterMs !== undefined ||
+    v.clearEndAt === true ||
+    v.dependsOn !== undefined ||
+    v.payload !== undefined ||
+    v.config !== undefined ||
+    v.notification !== undefined ||
+    v.tags !== undefined ||
+    v.onSuccessTaskIds !== undefined ||
+    v.onFailureTaskIds !== undefined,
+  { message: "required", path: ["name"] }
+)
+
+const SchedulerTaskExecutionsParams = SchedulerTaskIdParams.extend({
+  limit: numberRange(1, 5000).optional(),
+})
+
+const SchedulerTaskBackfillParams = SchedulerTaskIdParams.extend({
+  start: requiredString("required"),
+  end: requiredString("required"),
+})
+
+const SchedulerTaskExportParams = z.object({
+  taskIds: SchedulerStringArray,
+  taskIdsRaw: optionalString,
+})
+
+const SchedulerTaskImportParams = z.object({
+  dataJson: requiredString("required"),
+  mode: z.enum(["merge", "replace"]).optional(),
+})
+
+const SchedulerLimitParams = z.object({
+  limit: numberRange(1, 1000).optional(),
+})
+
+const SchedulerExecutionGetParams = z.object({
+  executionId: requiredString("required"),
+})
+
+const SchedulerEventTriggerParams = z.object({
+  eventType: requiredString("required"),
+  eventSource: optionalString,
+  payload: z.record(z.string(), z.unknown()).optional(),
+  payloadJson: optionalString,
 })
 
 // Synthesizer-emitted plan step node (ADR-0045). Not user-editable; params are
@@ -194,6 +798,35 @@ const ConnectorSendParams = z.object({
   adapterId: requiredString("required"),
   conversationKey: requiredString("required"),
   content: requiredString("required"),
+  /**
+   * Optional A2UI surface JSON (`{components, dataModel, rootId, …}`).
+   * When set, the node sends an interactive card (projected per-platform by
+   * the a2ui-bridge — Lark interactive card, etc.) with `content` as the
+   * plain-text mirror for capability fallback. Must parse as JSON with
+   * `components` + `rootId`; validated at execution.
+   */
+  cardJson: optionalString,
+  /** Reply anchor — platforms that support replies quote this message. */
+  replyToMessageId: optionalString,
+  /** Thread anchor — posts into the thread instead of the main channel. */
+  threadId: optionalString,
+  /** Explicit dedup key; defaults to `${runId}:${stepId}` at execution. */
+  idempotencyKey: optionalString,
+  /**
+   * Edit-in-place: when set, the outbound runner routes to `adapter.edit()`
+   * on this platform message id instead of sending a new message (platforms
+   * without edit support fall back to a plain send, audited).
+   */
+  editTargetMessageId: optionalString,
+  /**
+   * Delivery feedback: block until the queued job reaches a terminal state
+   * (`sent` / `deadlettered`) — or `waitTimeoutMs` elapses — and surface
+   * `status` / `platformMessageId` / `errorCode` on the node output.
+   * Default false: enqueue-and-continue (previous behaviour).
+   */
+  waitForDelivery: z.boolean().optional(),
+  /** Wait budget for `waitForDelivery`, ms (default 30 000, max 5 min). */
+  waitTimeoutMs: numberRange(100, 300_000).optional(),
 })
 
 const ConnectorDraftParams = z.object({
@@ -204,6 +837,104 @@ const ConnectorDraftParams = z.object({
   ttlMs: numberRange(0).optional(),
 })
 
+const ConnectorReactionParams = z.object({
+  adapterId: requiredString("required"),
+  /** Platform message id to react to (e.g. Lark `om_…`). */
+  messageId: requiredString("required"),
+  /** Platform emoji code (Lark reaction type like "THUMBSUP", or a unicode emoji). */
+  emoji: requiredString("required"),
+  /** Operation: add a reaction (default) or remove one by `reactionId`. */
+  op: z.enum(["add", "remove"]).optional(),
+  /**
+   * Platform reaction id — REQUIRED when `op="remove"` (from a prior add
+   * node's `reactionId` output). Ignored for `op="add"`.
+   */
+  reactionId: optionalString,
+})
+
+const ConnectorDeleteParams = z.object({
+  adapterId: requiredString("required"),
+  /** Platform message id to recall/delete. */
+  messageId: requiredString("required"),
+})
+
+const ConnectorForwardParams = z.object({
+  adapterId: requiredString("required"),
+  /** Single message id to forward. Use EITHER this or `messageIds`. */
+  messageId: optionalString,
+  /** Two or more message ids to merge-forward as one combined card. */
+  messageIds: z.array(z.string()).optional(),
+  /**
+   * Destination conversation key (`platform:adapterId:chatId`) or a raw
+   * platform receive id (Lark chat_id / open_id).
+   */
+  targetConversationKey: requiredString("required"),
+})
+
+const ConnectorWaitReplyParams = z.object({
+  /** Conversation to listen on (composite key `platform:adapterId:chatId[:thread]`). */
+  conversationKey: requiredString("required"),
+  /** Only accept replies from these platform user ids (any when empty). */
+  senderIds: z.array(z.string()).optional(),
+  /** Case-insensitive substrings; any match accepts the reply. */
+  keywords: z.array(z.string()).optional(),
+  /** Only accept replies that @-mention the bot. */
+  requireMention: z.boolean().optional(),
+  /** Wait budget in ms (default 120 000, max 1 h). */
+  timeoutMs: numberRange(1_000, 3_600_000).optional(),
+})
+
+const ApprovalRequestParams = z.object({
+  title: requiredString("required"),
+  message: optionalString,
+  /** How long to wait before the onTimeout policy applies. Default 1 h. */
+  timeoutMs: numberRange(1_000).optional(),
+  /** What a timeout means: route down "rejected" (default) or fail the step. */
+  onTimeout: z.enum(["reject", "fail"]).optional(),
+})
+
+/** Shared remote-device fields (ADR 0061 P3): pin a device, bound the wait. */
+const mobileStepBase = {
+  /** Pin to one paired device; empty = any capable device (freshest first). */
+  deviceId: optionalString,
+  /** How long to wait for the device. Default 120 s. */
+  timeoutMs: numberRange(1_000).optional(),
+}
+
+const MobileCameraParams = z.object({
+  ...mobileStepBase,
+  quality: numberRange(1, 100).optional(),
+  width: numberRange(64).optional(),
+})
+
+const MobileScanBarcodeParams = z.object({
+  ...mobileStepBase,
+  formats: z.array(z.string()).optional(),
+})
+
+const MobileLocationParams = z.object({
+  ...mobileStepBase,
+  enableHighAccuracy: z.boolean().optional(),
+})
+
+const MobileShareParams = z
+  .object({
+    ...mobileStepBase,
+    title: optionalString,
+    text: optionalString,
+    url: optionalString,
+  })
+  .refine((v) => Boolean(v.text?.length) || Boolean(v.url?.length), {
+    message: "required",
+    path: ["text"],
+  })
+
+const MobileNotifyParams = z.object({
+  ...mobileStepBase,
+  title: requiredString("required"),
+  body: optionalString,
+})
+
 const McpInvokeToolParams = z.object({
   serverId: requiredString("required"),
   toolName: requiredString("required"),
@@ -211,29 +942,189 @@ const McpInvokeToolParams = z.object({
   args: z.unknown().optional(),
 })
 
+// `taskId` is optional at this layer because tool-mode nodes don't carry
+// one — the executor enforces the per-mode requirement (`toolName` for
+// "tool", `taskId` for "task") with a non-retryable error, and the
+// inspector form provides richer client-side validation.
 const PluginInvokeParams = z.object({
   pluginId: requiredString("required"),
-  taskId: requiredString("required"),
+  mode: z.enum(["task", "tool"]).optional(),
+  toolName: optionalString,
+  taskId: optionalString,
   argsJson: optionalString,
   args: z.unknown().optional(),
 })
 
+// ── Desktop automation ──────────────────────────────────────────────────────
+
+const DesktopElementRef = z.union([requiredString("required"), z.array(z.string()).min(1)])
+const DesktopPoint = z.object({
+  x: z.number(),
+  y: z.number(),
+})
+const DesktopLocatorParams = z.object({
+  name: optionalString,
+  nameContains: optionalString,
+  automationId: optionalString,
+  controlType: optionalString,
+  className: optionalString,
+  processId: positiveInteger().optional(),
+  processName: optionalString,
+  windowTitleContains: optionalString,
+  depth: numberRange(0).optional(),
+})
+const DesktopAppLocator = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("bundleId"), bundleId: requiredString("required") }),
+  z.object({ kind: z.literal("path"), path: requiredString("required") }),
+  z.object({ kind: z.literal("displayName"), displayName: requiredString("required") }),
+])
+const DesktopElementHandle = z.object({
+  sessionId: requiredString("required"),
+  lineageId: requiredString("required"),
+  revision: positiveInteger(),
+  index: numberRange(0),
+  fingerprint: requiredString("required"),
+})
+const DesktopPixelTarget = z.object({
+  sessionId: requiredString("required"),
+  lineageId: requiredString("required"),
+  revision: positiveInteger(),
+  point: DesktopPoint,
+  screenshotWidth: positiveInteger(),
+  screenshotHeight: positiveInteger(),
+})
+const DesktopActionTarget = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("element"), handle: DesktopElementHandle }),
+  z.object({ kind: z.literal("pixel"), target: DesktopPixelTarget }),
+])
+const DesktopUiAction = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("click"),
+    button: z.enum(["left", "right", "middle"]).optional(),
+    count: numberRange(1, 3).optional(),
+  }),
+  z.object({
+    kind: z.literal("drag"),
+    to: DesktopPoint,
+    opts: z
+      .object({
+        button: z.enum(["left", "right", "middle"]).optional(),
+        durationMs: numberRange(0).optional(),
+        steps: numberRange(1).optional(),
+      })
+      .optional(),
+  }),
+  z.object({
+    kind: z.literal("scroll"),
+    opts: z
+      .object({
+        dx: z.number().optional(),
+        dy: z.number().optional(),
+        amount: z.number().optional(),
+      })
+      .optional(),
+  }),
+  z.object({ kind: z.literal("pressKey"), chord: z.array(z.string()).length(1) }),
+  z.object({ kind: z.literal("typeText"), text: z.string() }),
+  z.object({ kind: z.literal("setValue"), value: z.string() }),
+  z.object({
+    kind: z.literal("selectText"),
+    start: numberRange(0),
+    end: numberRange(0),
+  }),
+  z.object({ kind: z.literal("secondaryAction"), name: requiredString("required") }),
+])
+
+const DesktopListAppsParams = z.object({})
+const DesktopGetAppStateParams = z.object({
+  sessionId: optionalString,
+  locator: DesktopAppLocator,
+  options: z
+    .object({
+      disableDiff: z.boolean().optional(),
+      allowLaunch: z.boolean().optional(),
+      maxNodes: numberRange(1, 1000).optional(),
+      maxDepth: numberRange(1, 64).optional(),
+      projection: z.literal("model").optional(),
+    })
+    .optional(),
+})
+const DesktopQueryElementsParams = z.object({
+  sessionId: requiredString("required"),
+  lineageId: requiredString("required"),
+  revision: positiveInteger(),
+  locator: DesktopLocatorParams.optional(),
+  limit: numberRange(1, 1000).optional(),
+})
+const DesktopExpandElementParams = z.object({
+  handle: DesktopElementHandle,
+  continuationToken: z.string().nullable().optional(),
+  limit: numberRange(1, 250).optional(),
+})
+const DesktopPerformActionParams = z.object({
+  request: z.object({
+    turnToken: requiredString("required"),
+    target: DesktopActionTarget,
+    action: DesktopUiAction,
+    strategy: z.enum(["semantic", "pixel", "auto"]),
+  }),
+})
+
+const DesktopEventKind = z.enum([
+  "focus-changed",
+  "structure-changed",
+  "property-changed",
+  "text-selection-changed",
+])
+const DesktopEventTriggerParams = z.object({
+  kinds: z.array(DesktopEventKind).optional(),
+  scope: DesktopElementRef.optional(),
+  /**
+   * Loop guard: minimum ms between fires per workflow (a workflow's own
+   * desktop actions cause focus events). Default 2000.
+   */
+  cooldownMs: numberRange(0).optional(),
+})
+
 // ── AI primitives ──────────────────────────────────────────────────────────
 
+// ai.prompt v2/provider additions, also accepted by the classify/extract delegators.
+// All optional — v1 nodes validate against the same (superset) schema.
+const aiProviderFields = {
+  /** "routed" consults the provider-routing engine instead of explicit creds. */
+  mode: z.enum(["explicit", "routed"]).optional(),
+  /** Routed mode: model alias resolved through the mapping registry. */
+  modelAlias: optionalString,
+  /** Explicit mode: OpenAI endpoint family override for compatible providers. */
+  apiFlavor: z.enum(["auto", "responses", "chat"]).optional(),
+  /** Explicit mode: provider-specific static headers passed to the model factory. */
+  headers: z.record(z.string(), z.string()).optional(),
+  /** PII gate applied before any text egress. */
+  piiGate: z.enum(["off", "block", "redact"]).optional(),
+}
+
 const AiPromptParams = z.object({
+  ...aiProviderFields,
   provider: optionalString,
   model: optionalString,
   apiKey: optionalString,
   baseURL: optionalString,
   systemPrompt: optionalString,
+  // Optional twin-bound character — injects the twin's retrieved context into
+  // the system prompt when the character has a twinId (see ai-prompt-v2.ts).
+  characterId: optionalString,
   userPrompt: requiredString("required"),
   temperature: numberRange(0, 2).optional(),
   // Structured output (B1): "json" parses the completion into output.structured.
   responseFormat: z.enum(["text", "json"]).optional(),
   jsonSchema: optionalString,
+  // Typed output (D3): validated JSON object schema + auto-fix retry.
+  outputSchema: z.record(z.string(), z.unknown()).optional(),
+  onSchemaViolation: z.enum(["fail", "soft"]).optional(),
 })
 
 const AiClassifyParams = z.object({
+  ...aiProviderFields,
   provider: optionalString,
   model: optionalString,
   apiKey: optionalString,
@@ -245,6 +1136,7 @@ const AiClassifyParams = z.object({
 })
 
 const AiExtractParams = z.object({
+  ...aiProviderFields,
   provider: optionalString,
   model: optionalString,
   apiKey: optionalString,
@@ -265,6 +1157,114 @@ const AiEmbedParams = z.object({
   provider: optionalString,
   model: optionalString,
   apiKey: optionalString,
+})
+
+const BrowserModelParams = z
+  .object({
+    operation: z.enum(["infer", "preload", "status", "disposeModel", "disposeAll"]),
+    task: z
+      .enum([
+        "automatic-speech-recognition",
+        "depth-estimation",
+        "feature-extraction",
+        "fill-mask",
+        "image-classification",
+        "image-segmentation",
+        "image-to-text",
+        "object-detection",
+        "question-answering",
+        "sentence-similarity",
+        "summarization",
+        "text-classification",
+        "text-generation",
+        "text-to-speech",
+        "text2text-generation",
+        "token-classification",
+        "translation",
+        "zero-shot-classification",
+      ])
+      .optional(),
+    modelId: optionalString,
+    input: optionalString,
+    inputJson: optionalString,
+    device: z.enum(["wasm", "webgpu"]).optional(),
+    dtype: z.enum(["fp32", "fp16", "q8", "q4"]).optional(),
+    cacheEnabled: z.boolean().optional(),
+    maxCachedModels: numberRange(1, 8).optional(),
+    timeoutMs: numberRange(1_000, 600_000).optional(),
+    topK: numberRange(1, 100).optional(),
+    temperature: z.number().min(0).max(2).optional(),
+    maxNewTokens: numberRange(1, 8_192).optional(),
+    maxLength: numberRange(1, 32_768).optional(),
+    language: optionalString,
+    returnTimestamps: z.union([z.boolean(), z.literal("word")]).optional(),
+    candidateLabels: z.array(z.string().min(1)).optional(),
+    hypothesisTemplate: optionalString,
+  })
+  .superRefine((params, context) => {
+    if (params.operation === "status" || params.operation === "disposeAll") return
+    if (!params.task) context.addIssue({ code: "custom", path: ["task"], message: "required" })
+    if (!params.modelId) {
+      context.addIssue({ code: "custom", path: ["modelId"], message: "required" })
+    }
+    if (params.operation === "infer" && !params.input && !params.inputJson) {
+      context.addIssue({ code: "custom", path: ["input"], message: "required" })
+    }
+  })
+
+// ai.council — multi-model consensus. Councillors + synthesizer are addressed
+// by routing alias; the prompt fans out, then one synthesizer merges them.
+const CouncillorSpecSchema = z.object({
+  name: requiredString("required"),
+  modelAlias: requiredString("required"),
+  systemPrompt: optionalString,
+})
+
+const AiCouncilParams = z.object({
+  prompt: requiredString("required"),
+  councillors: z.array(CouncillorSpecSchema).min(1),
+  synthesizerAlias: requiredString("required"),
+  synthesisInstructions: optionalString,
+  timeoutMs: numberRange(1000, 600000).optional(),
+  executionMode: z.enum(["parallel", "serial"]).optional(),
+  maxConcurrency: numberRange(1, 16).optional(),
+  piiGate: z.enum(["off", "block", "redact"]).optional(),
+})
+
+const AiEnsembleAggregationSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("majority-vote-on-field"), field: optionalString }),
+  z.object({
+    kind: z.literal("threshold-count"),
+    field: optionalString,
+    equals: z.unknown().optional(),
+    threshold: numberRange(1),
+  }),
+  z.object({ kind: z.literal("best-of-by-score"), scoreField: requiredString("required") }),
+  z.object({ kind: z.literal("synthesize-by-final-agent"), instructions: optionalString }),
+])
+
+const AiEnsembleParams = z.object({
+  prompt: optionalString,
+  target: z
+    .object({
+      kind: z.enum(["agent.turn", "subworkflow"]).optional(),
+      systemPrompt: optionalString,
+      model: optionalString,
+      characterId: optionalString,
+      allowedTools: z.array(z.string()).optional(),
+      toolsEnabled: z.boolean().optional(),
+      outputSchema: z.record(z.string(), z.unknown()).optional(),
+      workflowId: optionalString,
+    })
+    .optional(),
+  n: numberRange(1, 50).optional(),
+  iterationConcurrency: numberRange(1, 16).optional(),
+  lens: z.array(z.string()).optional(),
+  aggregation: AiEnsembleAggregationSchema.optional(),
+  synthesizerAlias: optionalString,
+  synthesisInstructions: optionalString,
+  timeoutMs: numberRange(1000, 600000).optional(),
+  piiGate: z.enum(["off", "block", "redact"]).optional(),
 })
 
 // ── Flow ────────────────────────────────────────────────────────────────────
@@ -347,6 +1347,19 @@ const SplitParams = z.object({
 const JoinParams = z.object({
   joinPolicy: z.enum(["all", "any", "race"]).optional(),
   timeoutMs: numberRange(0).optional(),
+  // Optional gather→reduce in one step (D6③); mirrors AggregateParams.
+  aggregate: z
+    .object({
+      operation: z
+        .enum(["collect", "concat", "merge-objects", "group-by", "dedupe", "numeric", "custom"])
+        .optional(),
+      keyExpression: optionalString,
+      numericField: optionalString,
+      numericOp: z.enum(["sum", "avg", "min", "max", "count"]).optional(),
+      reducerExpression: optionalString,
+      initialValue: z.unknown().optional(),
+    })
+    .optional(),
 })
 
 // Legacy (typeVersion 1) flat array-transform loop.
@@ -381,9 +1394,12 @@ const LoopParamsV2 = z
     source: optionalString,
     times: z.union([numberRange(0), z.string()]).optional(),
     whileExpression: optionalString,
+    conditionTiming: z.enum(["pre", "post"]).optional(),
     output: optionalString,
     iterationConcurrency: numberRange(1, 64).optional(),
+    batchSize: numberRange(1, 100_000).optional(),
     maxIterations: numberRange(1, 100_000).optional(),
+    onItemError: z.enum(["fail", "skip", "break"]).optional(),
   })
   .refine(
     (v) => {
@@ -399,6 +1415,23 @@ const LoopParamsV2 = z
       path: ["mode"],
     }
   )
+  .superRefine((v, ctx) => {
+    // Mode-scoped knobs: reject silently-ignored configuration up front.
+    if (v.conditionTiming !== undefined && v.mode !== "while") {
+      ctx.addIssue({
+        code: "custom",
+        message: "loopConditionTimingMode",
+        path: ["conditionTiming"],
+      })
+    }
+    if (v.batchSize !== undefined && v.mode !== "forEach") {
+      ctx.addIssue({
+        code: "custom",
+        message: "loopBatchSizeMode",
+        path: ["batchSize"],
+      })
+    }
+  })
 
 // Schema lookup is keyed by kind only — accept both generations.
 const LoopParams = z.union([LoopParamsV2, LoopParamsV1])
@@ -406,11 +1439,22 @@ const LoopParams = z.union([LoopParamsV2, LoopParamsV1])
 const WaitParams = z.object({
   mode: z.enum(["duration", "event"]).optional(),
   durationMs: numberRange(0).optional(),
+  /**
+   * Event mode: wake key an external source fires (`emitWake`). Empty means
+   * the run-scoped default `${runId}:${stepId}` — private to this run.
+   */
+  eventKey: optionalString,
+  /** Event mode: give up after this long (0 / absent = wait until run abort). */
+  timeoutMs: numberRange(0).optional(),
 })
 
 const SetVariableParams = z.object({
   variable: requiredString("required").regex(/^[a-z_][a-z0-9_]*$/i, "variableName"),
-  value: requiredString("required"),
+  // Expressions are resolved before validation, so a text expression can
+  // legitimately become a number, boolean, object, array, or null. Reject
+  // only an absent/unresolved value; the executor intentionally stores the
+  // resolved value without coercing it back to a string.
+  value: z.unknown().refine((value) => value !== undefined, "required"),
 })
 
 const SubworkflowParams = z.object({
@@ -431,6 +1475,69 @@ const SystemTerminalParams = z.object({
   tabId: optionalString,
   timeoutSec: numberRange(0).optional(),
   onFailure: z.enum(["throw", "branch"]).optional(),
+  // Unattended mode (headless, no consent) — gated by
+  // settings.terminal.allowUnattendedExecution + classifyCommand.
+  unattended: z.boolean().optional(),
+  onAskVerdict: z.enum(["fail", "consent", "run"]).optional(),
+})
+
+// ── Terminal: persistent sessions ───────────────────────────────────────────
+// Executors at `lib/workflow/nodes/terminal-session.ts`.
+const TerminalSessionOpenParams = z.object({
+  cwd: optionalString,
+  shell: optionalString,
+  projectId: optionalString,
+  unattended: z.boolean().optional(),
+})
+
+const TerminalSessionRunParams = z.object({
+  sessionId: requiredString("required"),
+  command: requiredString("required"),
+  args: z.array(z.string()).optional(),
+  timeoutSec: numberRange(0).optional(),
+  onFailure: z.enum(["throw", "branch"]).optional(),
+  onAskVerdict: z.enum(["fail", "consent", "run"]).optional(),
+})
+
+const TerminalSessionCloseParams = z.object({
+  sessionId: requiredString("required"),
+})
+
+// Run a script file under its detected (or overridden) interpreter.
+// Executor at `lib/workflow/nodes/terminal-script.ts`.
+const TerminalScriptParams = z.object({
+  scriptPath: requiredString("required"),
+  interpreter: optionalString,
+  args: z.array(z.string()).optional(),
+  cwd: optionalString,
+  projectId: optionalString,
+  timeoutSec: numberRange(0).optional(),
+  onFailure: z.enum(["throw", "branch"]).optional(),
+  unattended: z.boolean().optional(),
+  onAskVerdict: z.enum(["fail", "consent", "run"]).optional(),
+})
+
+// Dock-parity nodes (read_recent / wait_for_exit) — executors in
+// `lib/workflow/nodes/terminal.ts`, delegating to `runTerminalDockAction`.
+const TerminalReadRecentParams = z.object({
+  tabId: requiredString("required"),
+  lineLimit: numberRange(1, 50).optional(),
+})
+
+const TerminalWaitForExitParams = z.object({
+  tabId: requiredString("required"),
+  timeoutSec: numberRange(0).optional(),
+  onFailure: z.enum(["throw", "branch"]).optional(),
+})
+
+// All optional — an unscoped node fires for every command that ends in a
+// user-spawned dock tab. Scope by session, project, exit status, or a
+// command substring. Empty string = match any (mirrors the goal trigger).
+const TerminalCommandTriggerParams = z.object({
+  sessionId: optionalString,
+  projectId: optionalString,
+  status: z.enum(["success", "failure"]).or(z.literal("")).optional(),
+  commandContains: optionalString,
 })
 
 // ── Data ────────────────────────────────────────────────────────────────────
@@ -438,6 +1545,17 @@ const SystemTerminalParams = z.object({
 const TransformParams = z.object({
   operation: z.enum(["map", "filter", "reduce", "sort", "flatten"]).optional(),
   expression: requiredString("required"),
+})
+
+const AggregateParams = z.object({
+  operation: z
+    .enum(["collect", "concat", "merge-objects", "group-by", "dedupe", "numeric", "custom"])
+    .optional(),
+  keyExpression: optionalString,
+  numericField: optionalString,
+  numericOp: z.enum(["sum", "avg", "min", "max", "count"]).optional(),
+  reducerExpression: optionalString,
+  initialValue: z.unknown().optional(),
 })
 
 const CodeParams = z.object({
@@ -457,11 +1575,44 @@ const HttpRequestParams = z.object({
   followRedirects: z.boolean().optional(),
 })
 
+const WebCloneParams = z.object({
+  url: requiredString("required").refine(isHttpUrlOrExpression, "invalidUrl"),
+  output: requiredString("required"),
+  mode: z.enum(["single", "bundle"]).optional(),
+  extractComponents: z.boolean().optional(),
+  framework: z.enum(["vue", "react", "angular", "svelte", "jquery"]).optional(),
+  frameworkHint: z.enum(["vue", "react", "svelte"]).optional(),
+  maxAssets: numberRange(1, 5000).optional(),
+  concurrency: numberRange(1, 32).optional(),
+  timeout: numberRange(1000, 120000).optional(),
+  maxFileSize: numberRange(0, 1024 * 1024 * 1024).optional(),
+  pretty: z.boolean().optional(),
+  allowPrivateHosts: z.boolean().optional(),
+  codegenGenerateDrafts: z.boolean().optional(),
+  codegenExtractShared: z.boolean().optional(),
+})
+
 const WebhookRespondParams = z.object({
   status: numberRange(100, 599).optional(),
   headersJson: optionalString,
   headers: z.record(z.string(), z.unknown()).optional(),
   body: optionalString,
+})
+
+const OutputParams = z.object({
+  // The terminal value (expression or literal); falls back to the first upstream.
+  value: z.unknown().optional(),
+  outputSchema: z.record(z.string(), z.unknown()).optional(),
+  onSchemaViolation: z.enum(["fail", "soft"]).optional(),
+})
+
+const CatchParams = z.object({
+  /**
+   * Recovery scope. "workflow" (default): runs on ANY terminal run failure.
+   * "upstream": only when a directly-upstream node is the failure origin
+   * (reserved; treated as "workflow" until upstream wiring lands).
+   */
+  scope: z.enum(["workflow", "upstream"]).optional(),
 })
 
 // ── Annotations ────────────────────────────────────────────────────────────
@@ -487,16 +1638,80 @@ export const PARAMS_SCHEMAS = {
   "trigger.connector.inbound": ConnectorInboundParams,
   "trigger.chat.message": ChatMessageTriggerParams,
   "trigger.goal.completed": GoalCompletedTriggerParams,
+  "trigger.workflow.completed": WorkflowCompletedTriggerParams,
+  "trigger.pet.event": PetEventTriggerParams,
+  "action.pet.interact": PetInteractActionParams,
   "trigger.webhook": WebhookTriggerParams,
-  "trigger.github.webhook": WebhookTriggerParams,
-  "trigger.team": z.object({}),
+  "trigger.integration.event": IntegrationEventTriggerParams,
+  "trigger.team": TeamTriggerParams,
   // Actions: characters
   "action.character.send": CharacterSendParams,
   "action.character.create": CharacterCreateParams,
   "action.character.update": CharacterUpdateParams,
+  // Actions: agent
+  "action.agent.turn": AgentTurnParams,
+  // Actions: goals
+  "action.goal.create": GoalCreateParams,
+  "action.goal.get": GoalIdParams,
+  "action.goal.list": GoalListParams,
+  "action.goal.events": GoalEventsParams,
+  "action.goal.updateObjective": GoalUpdateObjectiveParams,
+  "action.goal.pause": GoalIdParams,
+  "action.goal.resume": GoalIdParams,
+  "action.goal.stop": GoalIdParams,
+  "action.goal.preempt": GoalIdParams,
+  "action.goal.updateConfig": GoalUpdateConfigParams,
+  "action.goal.decomposeSubgoals": GoalIdParams,
+  "action.goal.toggleSubgoal": GoalToggleSubgoalParams,
+  "action.goal.clearSubgoals": GoalIdParams,
+  "action.goal.delete": GoalIdParams,
+  "action.goal.analytics": GoalAnalyticsParams,
+  "action.goal.template.list": GoalTemplateListParams,
+  "action.goal.template.createGoal": GoalTemplateCreateGoalParams,
+  "action.goal.template.upsert": GoalTemplateUpsertParams,
+  "action.goal.template.favorite": GoalTemplateFavoriteParams,
+  "action.goal.template.delete": GoalTemplateIdParams,
   // Actions: teams
   "action.team.run": TeamRunParams,
   "action.team.task.dispatch": TeamTaskDispatchParams,
+  "action.team.task.review": TeamTaskReviewParams,
+  "action.team.reconcile": TeamReconcileParams,
+  "action.team.compose": TeamComposeParams,
+  "action.team.status": TeamStatusParams,
+  "action.team.delegate": TeamDelegateParams,
+  "action.team.message": TeamMessageParams,
+  "action.plan.create": PlanCreateParams,
+  "action.plan.get": PlanIdParams,
+  "action.plan.list": PlanListParams,
+  "action.plan.events": PlanEventsParams,
+  "action.plan.updateDraft": PlanUpdateDraftParams,
+  "action.plan.approve": PlanIdParams,
+  "action.plan.reject": PlanRejectParams,
+  "action.plan.refine": PlanRefineParams,
+  "action.plan.pause": PlanIdParams,
+  "action.plan.resume": PlanIdParams,
+  "action.plan.cancel": PlanIdParams,
+  "action.plan.delete": PlanIdParams,
+  "action.plan.run": PlanIdParams,
+  "action.plan.setStepStatus": PlanSetStepStatusParams,
+  "action.scheduler.task.create": SchedulerTaskCreateParams,
+  "action.scheduler.task.get": SchedulerTaskIdParams,
+  "action.scheduler.task.list": SchedulerTaskListParams,
+  "action.scheduler.task.update": SchedulerTaskUpdateParams,
+  "action.scheduler.task.pause": SchedulerTaskIdParams,
+  "action.scheduler.task.resume": SchedulerTaskIdParams,
+  "action.scheduler.task.delete": SchedulerTaskIdParams,
+  "action.scheduler.task.runNow": SchedulerTaskIdParams,
+  "action.scheduler.task.executions": SchedulerTaskExecutionsParams,
+  "action.scheduler.task.backfill": SchedulerTaskBackfillParams,
+  "action.scheduler.task.export": SchedulerTaskExportParams,
+  "action.scheduler.task.import": SchedulerTaskImportParams,
+  "action.scheduler.status": z.object({}),
+  "action.scheduler.statistics": z.object({}),
+  "action.scheduler.upcoming": SchedulerLimitParams,
+  "action.scheduler.executions.recent": SchedulerLimitParams,
+  "action.scheduler.execution.get": SchedulerExecutionGetParams,
+  "action.scheduler.event.trigger": SchedulerEventTriggerParams,
   "action.plan.step.dispatch": PlanStepDispatchParams,
   "action.team.create": TeamCreateParams,
   "action.team.update": TeamUpdateParams,
@@ -506,48 +1721,50 @@ export const PARAMS_SCHEMAS = {
   // Actions: twins
   "action.twin.rag": TwinRagParams,
   "action.twin.ingest": TwinIngestParams,
+  // Actions: memory
+  "action.memory.recall": MemoryRecallParams,
+  "action.memory.store": MemoryStoreParams,
   // Actions: connectors
   "action.connector.send": ConnectorSendParams,
   "action.connector.draft": ConnectorDraftParams,
+  "action.connector.reaction": ConnectorReactionParams,
+  "action.connector.delete": ConnectorDeleteParams,
+  "action.connector.forward": ConnectorForwardParams,
+  "action.connector.waitReply": ConnectorWaitReplyParams,
+  // Actions: human-in-the-loop (ADR 0061 P2)
+  "action.approval.request": ApprovalRequestParams,
+  // Actions: remote device steps (ADR 0061 P3)
+  "action.mobile.camera": MobileCameraParams,
+  "action.mobile.scanBarcode": MobileScanBarcodeParams,
+  "action.mobile.location": MobileLocationParams,
+  "action.mobile.share": MobileShareParams,
+  "action.mobile.notify": MobileNotifyParams,
   // Actions: extensibility
   "action.mcp.invokeTool": McpInvokeToolParams,
   "action.plugin.invoke": PluginInvokeParams,
-  // GitHub Delivery (param shapes are deliberately permissive at this layer —
-  // each node's inspector form provides richer client-side validation.)
-  "action.github.openPr": z.object({}).passthrough(),
-  "action.github.closePr": z.object({}).passthrough(),
-  "action.github.mergePr": z.object({}).passthrough(),
-  "action.github.reviewPr": z.object({}).passthrough(),
-  "action.github.reviewPrInline": z.object({}).passthrough(),
-  "action.github.commentPr": z.object({}).passthrough(),
-  "action.github.commentIssue": z.object({}).passthrough(),
-  "action.github.labelIssue": z.object({}).passthrough(),
-  "action.github.closeIssue": z.object({}).passthrough(),
-  "action.github.createRelease": z.object({}).passthrough(),
-  "action.github.generateChangelog": z.object({}).passthrough(),
-  "action.github.pushTag": z.object({}).passthrough(),
-  "action.github.runIssueLoop": z.object({}).passthrough(),
-  // Desktop UI automation — param shapes are permissive; inspector forms
-  // provide richer validation against the lib/automation/types.ts mirror.
-  "action.desktop.screenshot": z.object({}).passthrough(),
-  "action.desktop.findElement": z.object({}).passthrough(),
-  "action.desktop.readTree": z.object({}).passthrough(),
-  "action.desktop.click": z.object({}).passthrough(),
-  "action.desktop.type": z.object({}).passthrough(),
-  "action.desktop.keys": z.object({}).passthrough(),
-  "action.desktop.invokePattern": z.object({}).passthrough(),
-  "action.desktop.windowFocus": z.object({}).passthrough(),
-  "action.desktop.windowClose": z.object({}).passthrough(),
-  "action.desktop.windowResize": z.object({}).passthrough(),
-  "action.desktop.wait": z.object({}).passthrough(),
-  "trigger.desktop.event": z.object({}).passthrough(),
+  "action.desktop.listApps": DesktopListAppsParams,
+  "action.desktop.getAppState": DesktopGetAppStateParams,
+  "action.desktop.queryElements": DesktopQueryElementsParams,
+  "action.desktop.expandElement": DesktopExpandElementParams,
+  "action.desktop.performAction": DesktopPerformActionParams,
+  "trigger.desktop.event": DesktopEventTriggerParams,
   // System: integrated terminal
   "action.system.terminal": SystemTerminalParams,
+  "action.terminal.session.open": TerminalSessionOpenParams,
+  "action.terminal.session.run": TerminalSessionRunParams,
+  "action.terminal.session.close": TerminalSessionCloseParams,
+  "action.terminal.script": TerminalScriptParams,
+  "action.terminal.readRecent": TerminalReadRecentParams,
+  "action.terminal.waitForExit": TerminalWaitForExitParams,
+  "trigger.terminal.command": TerminalCommandTriggerParams,
   // AI
   "ai.prompt": AiPromptParams,
   "ai.classify": AiClassifyParams,
   "ai.extract": AiExtractParams,
   "ai.embed": AiEmbedParams,
+  "ai.browserModel": BrowserModelParams,
+  "ai.council": AiCouncilParams,
+  "ai.ensemble": AiEnsembleParams,
   // Flow
   "flow.branch": BranchParams,
   "flow.switch": SwitchParams,
@@ -557,17 +1774,21 @@ export const PARAMS_SCHEMAS = {
   "flow.wait": WaitParams,
   "flow.set": SetVariableParams,
   "flow.subworkflow": SubworkflowParams,
+  "flow.catch": CatchParams,
   // Loop-body jump markers (schemaVersion 2) — no params beyond label/notes,
   // which live on node.data, not params.
   "flow.break": z.object({}).passthrough(),
   "flow.continue": z.object({}).passthrough(),
   // Data
   "data.transform": TransformParams,
+  "data.aggregate": AggregateParams,
   "data.code": CodeParams,
   "data.template": TemplateParams,
   // IO
   "io.http": HttpRequestParams,
   "io.webhook.respond": WebhookRespondParams,
+  "io.output": OutputParams,
+  "io.webClone": WebCloneParams,
   // Annotation
   "annotation.note": NoteParams,
   "annotation.group": GroupAnnotationParams,
@@ -584,6 +1805,27 @@ export const PARAMS_SCHEMAS = {
     provider: z.string().optional(),
     format: z.enum(["markdown", "text", "blocks"]).optional(),
     pageRange: z.string().optional(),
+  }),
+  // Eval nodes — single target per node instance (compose nodes for a matrix).
+  "eval.run": z.object({
+    datasetId: z.string(),
+    targetKind: z.enum(["chat", "team", "workflow"]).optional(),
+    model: z.string().optional(),
+    characterId: z.string().optional(),
+    teamId: z.string().optional(),
+    workflowId: z.string().optional(),
+    label: z.string().optional(),
+    scorerIds: z.array(z.string()).optional(),
+    k: z.number().int().min(1).optional(),
+    split: z.string().optional(),
+    capabilities: z.array(z.string()).optional(),
+  }),
+  "eval.gate": z.object({
+    runId: z.string(),
+    minPassAt1: z.number().min(0).max(1).optional(),
+    minPassHatK: z.number().min(0).max(1).optional(),
+    minScorerPassRate: z.number().min(0).max(1).optional(),
+    maxTotalCostUsd: z.number().min(0).optional(),
   }),
   // Local Git (Source Control panel backend — ADR-0038). `repoPath` is
   // optional; it defaults to the active workspace root at run time.

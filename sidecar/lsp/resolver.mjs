@@ -18,7 +18,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import { pathToFileURL } from "node:url"
-import { serversForFile } from "./servers.mjs"
+import { buildServers, serversForFile } from "./servers.mjs"
 
 const OWNER = "agent"
 const DEFAULT_DIAGNOSTICS_WAIT_MS = 800
@@ -62,7 +62,8 @@ function normalizeUri(uri) {
  * @param {object} args
  * @param {object} args.service  An LspService instance (start/didOpen/didChange/request/stop).
  * @param {string} args.cwd      Agent working directory (root boundary).
- * @param {(command: string, ctx: { serverId: string, root: string }) => Promise<string|null>|string|null} [args.ensureCommand]
+ * @param {Array<object>} [args.servers]  Resolved LSP config list (from `sendOptions.lsp.servers`).
+ * @param {(command: string, ctx: { serverId: string, root: string, install?: { npmPackage: string, version?: string } }) => Promise<string|null>|string|null} [args.ensureCommand]
  * @param {{ info?: Function, warn?: Function, error?: Function }} [args.logger]
  * @param {number} [args.diagnosticsWaitMs]
  */
@@ -71,6 +72,10 @@ export function createLspResolver(args) {
   const ensureCommand = args.ensureCommand ?? defaultEnsureCommand
   const logger = args.logger ?? {}
   const diagnosticsWaitMs = args.diagnosticsWaitMs ?? DEFAULT_DIAGNOSTICS_WAIT_MS
+  // The runnable server list is built once from the injected config. The
+  // sidecar no longer owns a hard-coded registry — it consumes whatever the
+  // renderer resolved (builtin ← user ← project).
+  const builtServers = buildServers(args.servers ?? [])
 
   /** uri(normalized) -> diagnostics[] */
   const diagnostics = new Map()
@@ -78,6 +83,12 @@ export function createLspResolver(args) {
   const servers = new Map()
   /** `${serverId}\n${uri}` -> true once didOpen'd */
   const openDocs = new Set()
+  /**
+   * serverIds whose binary resolution or spawn already failed this session.
+   * Without this, every file touch would retry the full ladder — including
+   * a doomed npm install — turning one missing toolchain into per-edit lag.
+   */
+  const failedServers = new Set()
 
   /** Feed a `lsp:publishDiagnostics` notification payload into the cache. */
   function ingestDiagnostics(params) {
@@ -92,9 +103,11 @@ export function createLspResolver(args) {
   async function ensureServer(server, root) {
     const serverId = serverIdFor(server, root)
     if (servers.has(serverId)) return serverId
+    if (failedServers.has(serverId)) return null
     const spawn = server.resolveCommand(root, { cwd })
-    const resolved = await ensureCommand(spawn.command, { serverId, root })
+    const resolved = await ensureCommand(spawn.command, { serverId, root, install: server.install })
     if (!resolved) {
+      failedServers.add(serverId)
       logger.warn?.(`[lsp] binary not found for ${server.id}: ${spawn.command} (skipping)`)
       return null
     }
@@ -110,8 +123,12 @@ export function createLspResolver(args) {
         transport: "stdio",
         workspaceFolders: [{ uri: folderUri, name: path.basename(root) || root }],
         initializationOptions: spawn.initializationOptions,
+        // Per-server `settings` drive the LSP `workspace/configuration` pull
+        // and the post-init `didChangeConfiguration` push (lsp-client).
+        settings: server.settings,
       })
     } catch (err) {
+      failedServers.add(serverId)
       logger.warn?.(`[lsp] failed to start ${server.id}`, {
         err: err instanceof Error ? err.message : String(err),
       })
@@ -131,7 +148,7 @@ export function createLspResolver(args) {
    * @returns {Promise<string[]>}
    */
   async function touchFile(absPath, text) {
-    const candidates = serversForFile(absPath)
+    const candidates = serversForFile(absPath, builtServers)
     if (candidates.length === 0) return []
     let content = text
     if (content == null) {

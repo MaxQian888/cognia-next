@@ -17,12 +17,25 @@ export interface UseModelsDevCatalogResult {
   providerCount: number
   modelCount: number
   isSyncing: boolean
+  /**
+   * True until the Dexie read settles. Distinct from `row === undefined`, which
+   * conflates "still reading" with "no cached catalog" — callers that render
+   * model metadata need the difference, otherwise they paint a bare model list
+   * and then silently grow capability/pricing chips into it once the row lands.
+   */
+  isLoading: boolean
   error: string | null
   sync: () => Promise<void>
 }
 
 export function useModelsDevCatalog(): UseModelsDevCatalogResult {
-  const row = useLiveQuery(() => getDb().modelsDevCatalog.get("singleton"), [])
+  // Wrapped in an object so `undefined` unambiguously means "query pending":
+  // a resolved-but-absent row comes back as `{ row: undefined }`.
+  const resolved = useLiveQuery(
+    async () => ({ row: await getDb().modelsDevCatalog.get("singleton") }),
+    []
+  )
+  const row = resolved?.row
   const [isSyncing, setIsSyncing] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -47,5 +60,13 @@ export function useModelsDevCatalog(): UseModelsDevCatalogResult {
   const providerCount = Object.keys(providers).length
   const modelCount = Object.values(providers).reduce((sum, p) => sum + p.models.length, 0)
 
-  return { row, providerCount, modelCount, isSyncing, error, sync }
+  return {
+    row,
+    providerCount,
+    modelCount,
+    isSyncing,
+    isLoading: resolved === undefined,
+    error,
+    sync,
+  }
 }

@@ -13,11 +13,35 @@
 
 import { dispatchSlashCommand } from "@/lib/slash-commands/registry"
 import { executeCommand, getCommand } from "@/lib/plugin/commands/registry"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
+
+import { useTrayStore } from "./store"
+import { requestTrayUsageRefresh } from "./usage-refresh-bus"
+import { USAGE_REFRESH_COMMAND, USAGE_SELECT_COMMAND_PREFIX } from "./usage-section"
 
 const hasCommand = (id: string) => getCommand(id) !== undefined
 
 import type { TrayActionPayload } from "./types"
+
+/**
+ * Tray-internal command ids (usage refresh / pin-selection) never enter the
+ * unified command registry — the rows are synthesized per menu build with
+ * dynamic account keys, so they are routed here instead. Returns `true` when
+ * the id was one of ours.
+ */
+export function handleTrayUsageCommand(commandId: string): boolean {
+  if (commandId === USAGE_REFRESH_COMMAND) {
+    requestTrayUsageRefresh()
+    return true
+  }
+  if (commandId.startsWith(USAGE_SELECT_COMMAND_PREFIX)) {
+    const key = commandId.slice(USAGE_SELECT_COMMAND_PREFIX.length)
+    // Empty key = the "Auto" row → follow the worst-utilized account.
+    useTrayStore.getState().setDisplay({ usageAccountKey: key.length > 0 ? key : null })
+    return true
+  }
+  return false
+}
 
 export async function dispatchTrayClick(payload: TrayActionPayload | undefined): Promise<void> {
   if (!payload) return
@@ -36,6 +60,7 @@ export async function dispatchTrayClick(payload: TrayActionPayload | undefined):
       return
     }
     case "command":
+      if (handleTrayUsageCommand(payload.commandId)) return
       if (!hasCommand(payload.commandId)) {
         loggers.tray?.warn?.("tray click referenced unregistered command", {
           commandId: payload.commandId,

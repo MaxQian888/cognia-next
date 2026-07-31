@@ -1,0 +1,22 @@
+{
+  "cancel": "Cancel",
+  "clean": "Clean up old versions",
+  "cleanDone": "Freed {size}.",
+  "description": "The optional embedded VS Code used by the project editors. This card manages the install; running instances appear under Performance → Managed Processes.",
+  "diskUsage": "Disk usage",
+  "download": "Download now",
+  "downloadDone": "code-server {version} installed.",
+  "failed": "Failed: {error}",
+  "installed": "Installed",
+  "location": "Location",
+  "notInstalled": "Not installed",
+  "reclaimable": "Reclaimable",
+  "staleVersions": "Old versions: {versions}",
+  "title": "Pro IDE (code-server)",
+  "uninstall": "Uninstall",
+  "uninstallConfirmBody": "This stops every running instance and deletes the install along with its editor state (settings, extensions, open editors). The next switch to Pro IDE downloads it again.",
+  "uninstallConfirmTitle": "Uninstall code-server?",
+  "uninstallDone": "Uninstalled, freed {size}.",
+  "unsupported": "code-server publishes no build for this platform, so Pro IDE is unavailable here.",
+  "version": "Pinned version"
+}

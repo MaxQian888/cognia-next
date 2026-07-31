@@ -5,27 +5,31 @@
   "description": "Capacitor 8 mobile shell wrapping the Tauri-shared Next.js static export at ../out",
   "scripts": {
     "sync": "cap sync",
+    "sync:ios": "node scripts/configure-ios-project.mjs && cap sync ios",
+    "sync:android": "cap sync android",
     "open:ios": "cap open ios",
     "open:android": "cap open android",
-    "add:ios": "cap add ios && node scripts/patch-ios-info-plist.mjs",
+    "add:ios": "node scripts/add-ios.mjs",
     "add:android": "cap add android",
-    "patch:ios": "node scripts/patch-ios-info-plist.mjs"
+    "patch:ios": "node scripts/configure-ios-project.mjs"
   },
   "dependencies": {
     "@capacitor-mlkit/barcode-scanning": "^8.1.0",
-    "@capacitor/android": "^8.3.4",
+    "@capacitor/android": "^8.4.2",
     "@capgo/capacitor-navigation-bar": "^8.1.8",
     "@capacitor/app": "^8.1.0",
     "@capacitor/browser": "^8.0.3",
     "@capacitor/camera": "^8.2.0",
+    "@capacitor/clipboard": "^8.0.1",
+    "@capacitor/device": "^8.0.1",
     "@capacitor/dialog": "^8.0.1",
     "@capacitor/filesystem": "^8.1.2",
     "@capacitor/geolocation": "^8.2.0",
     "@capacitor/haptics": "^8.0.2",
+    "@capacitor/ios": "^8.4.2",
     "@capacitor/keyboard": "^8.0.3",
     "@capacitor/local-notifications": "^8.2.0",
     "@capacitor/network": "^8.0.1",
-    "@capacitor/preferences": "^8.0.1",
     "@capacitor/push-notifications": "^8.1.1",
     "@capacitor/screen-orientation": "^8.0.1",
     "@capacitor/share": "^8.0.1",
@@ -39,7 +43,7 @@
     "capacitor-zeroconf": "^4.0.0"
   },
   "devDependencies": {
-    "@capacitor/cli": "^8.3.4",
-    "@capacitor/core": "^8.3.4"
+    "@capacitor/cli": "^8.4.2",
+    "@capacitor/core": "^8.4.2"
   }
 }

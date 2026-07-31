@@ -102,7 +102,11 @@ fn parse_toml(raw: &str) -> Result<Json, String> {
 /// Strip `//` line comments, `/* ... */` block comments, and trailing commas
 /// from JSONC. Hand-rolled (rather than pulling another crate) because the
 /// rules are short and well-defined for this use.
-fn strip_jsonc(raw: &str) -> String {
+///
+/// `pub(crate)` because VS Code writes JSONC in more than one place the app has
+/// to read — `codeserver`'s `argv.json` parser needs the same rules, and a second
+/// hand-rolled stripper is a second set of escaping bugs.
+pub(crate) fn strip_jsonc(raw: &str) -> String {
     let bytes = raw.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
@@ -344,7 +348,7 @@ fn serialize_toml(value: &Json, existing_raw: Option<&str>) -> Result<String, St
 
     // Drop both the canonical and typo'd MCP keys; we rebuild from `value`.
     doc.remove("mcp_servers");
-    doc.remove("mcp.servers");
+    remove_legacy_dotted_mcp_servers(&mut doc);
 
     // Pull mcp_servers out of the JSON tree we got from the adapter.
     if let Json::Object(root) = value {
@@ -383,6 +387,20 @@ fn serialize_toml(value: &Json, existing_raw: Option<&str>) -> Result<String, St
     Ok(doc.to_string())
 }
 
+fn remove_legacy_dotted_mcp_servers(doc: &mut DocumentMut) {
+    let remove_mcp = match doc.get_mut("mcp").and_then(|item| item.as_table_mut()) {
+        Some(table) => {
+            table.remove("servers");
+            table.is_empty()
+        }
+        None => false,
+    };
+
+    if remove_mcp {
+        doc.remove("mcp");
+    }
+}
+
 fn json_to_toml(v: &Json) -> Option<toml_edit::Item> {
     use toml_edit::Item;
     match v {
@@ -415,5 +433,59 @@ fn json_to_toml(v: &Json) -> Option<toml_edit::Item> {
             }
             Some(Item::Value(toml_edit::Value::InlineTable(t)))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn serialize_toml_removes_legacy_dotted_mcp_servers_table() {
+        let existing = r#"
+model = "gpt-5"
+
+[mcp.servers.old]
+command = "old"
+"#;
+        let value = json!({
+            "mcp_servers": {
+                "new": {
+                    "command": "new"
+                }
+            }
+        });
+
+        let serialized = serialize_toml(&value, Some(existing)).unwrap();
+
+        assert!(!serialized.contains("[mcp.servers."));
+        assert!(serialized.contains("[mcp_servers.new]"));
+        assert!(serialized.contains(r#"command = "new""#));
+    }
+
+    #[test]
+    fn serialize_toml_preserves_unrelated_mcp_table_fields() {
+        let existing = r#"
+[mcp]
+enabled = true
+
+[mcp.servers.old]
+command = "old"
+"#;
+        let value = json!({
+            "mcp_servers": {
+                "new": {
+                    "command": "new"
+                }
+            }
+        });
+
+        let serialized = serialize_toml(&value, Some(existing)).unwrap();
+
+        assert!(serialized.contains("[mcp]"));
+        assert!(serialized.contains("enabled = true"));
+        assert!(!serialized.contains("[mcp.servers."));
+        assert!(serialized.contains("[mcp_servers.new]"));
     }
 }

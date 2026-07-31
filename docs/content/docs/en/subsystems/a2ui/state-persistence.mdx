@@ -1,6 +1,6 @@
 ---
 title: State & Persistence
-description: The Zustand store is A2UI's single message entry point — it persists surface metadata to localStorage (LRU 20, stripped), while a separate Dexie layer (apps · surfaces · templates · event-history) holds the durable rows.
+description: The Zustand runtime store keeps the 20 most recent complete surfaces in localStorage, while Dexie stores saved apps and restores missing surfaces through the app-builder boundary.
 ---
 
 # State & Persistence
@@ -10,15 +10,17 @@ description: The Zustand store is A2UI's single message entry point — it persi
 <TLDR>
   A2UI keeps state in **two independent layers**, and they do not call each other. The Zustand store
   (`stores/a2ui/a2ui-store.ts`) is the single ingest point for every server message and the source of
-  truth at runtime — but it persists **metadata only** to `localStorage` (key `cognia-a2ui-surfaces`,
-  LRU-capped at 20 surfaces, with `components` + `dataModel` stripped). The four Dexie tables
+  truth at runtime. It persists the **complete 20 most recent ready surfaces** to `localStorage`
+  (key `cognia-a2ui-surfaces`). The four Dexie tables
   (`a2uiApps`, `a2uiSurfaces`, `a2uiTemplates`, `a2uiEventHistory`) are a **separate durable layer**
-  invoked from the renderer/hook layer, never from the store. Undo/redo lives in-memory only
-  (50-entry stacks, 300 ms debounce).
+  invoked from the renderer/hook layer, never from the store. On the Mini Apps route,
+  `hydratePersistedApps()` restores missing runtime trees from saved `a2uiApps` rows through
+  `restoreSurface`; legacy template-only instances retain deterministic regeneration as a fallback.
+  Undo/redo lives in-memory only (50-entry stacks, 300 ms debounce).
 </TLDR>
 
 <StatGrid>
-  <Stat label="Persistence layers" value="2" hint="zustand→localStorage (metadata) · Dexie (durable rows)" />
+  <Stat label="Persistence layers" value="2" hint="zustand→localStorage (20 complete runtime surfaces) · Dexie (durable saved rows)" />
   <Stat label="localStorage LRU cap" value="20" hint="MAX_PERSISTED_SURFACES, ready surfaces only" />
   <Stat label="Undo history" value="50" hint="MAX_HISTORY_ENTRIES, 300 ms debounce" />
   <Stat label="Event-history cap" value="1000" hint="Dexie a2uiEventHistory, trims 100 oldest" />
@@ -27,19 +29,19 @@ description: The Zustand store is A2UI's single message entry point — it persi
 ## Two Persistence Layers (read this first)
 
 <Callout type="warn">
-  The Zustand store and the Dexie `a2ui-*` tables are **two separate persistence layers**. The store
-  persists **metadata only** to `localStorage` (`partialize` at `a2ui-store.ts:680` LRU-caps to 20
-  ready surfaces and **strips `components` + `dataModel`** at line 692 — they are "regenerated from
-  templates"). The Dexie tables (`lib/db/a2ui-*.ts`) are a **distinct durable layer** that is **never
-  imported by the store**; surface/app/template persistence into Dexie is invoked from the
-  renderer/hook layer. Do not assume writing the store persists rows to Dexie, or vice-versa.
+  The Zustand store and the Dexie `a2ui-*` tables are **two separate persistence layers**. Store
+  `partialize` LRU-caps localStorage to the 20 most recent ready surfaces but preserves each complete
+  component tree and data model. Dexie is **never imported by the store**; Save, hydration, metadata
+  patches, and deletion cross the durable boundary in hooks. Writing the store does not write Dexie,
+  but `useA2UIAppBuilder.hydratePersistedApps()` deliberately reads Dexie and calls the store's
+  validated `restoreSurface()` action when a runtime surface is absent.
 </Callout>
 
 | Concern | Zustand store (`a2ui-store.ts`) | Dexie tables (`lib/db/a2ui-*.ts`) |
 | --- | --- | --- |
 | Medium | `localStorage` (zustand `persist`) | IndexedDB (Dexie) |
 | Key / name | `cognia-a2ui-surfaces` (version 3) | tables `a2uiApps` / `a2uiSurfaces` / `a2uiTemplates` / `a2uiEventHistory` |
-| Stores | surface **metadata only** (no components/dataModel) | full rows: components, dataModel, rootId, audit |
+| Stores | 20 complete ready runtime surfaces, including components/dataModel | full saved rows: components, dataModel, rootId, audit |
 | Scope | runtime truth + last-session restore | user-saved apps, panel/fullscreen surfaces, templates, audit trail |
 | Cap / eviction | LRU 20 ready surfaces, sorted `updatedAt` desc | event-history trims to 1000 rows |
 | Called from | every server message + UI action | renderer/hook layer (NOT the store) |
@@ -49,8 +51,10 @@ description: The Zustand store is A2UI's single message entry point — it persi
 flowchart LR
   MSG["A2UIServerMessage"] --> STORE["a2ui-store.ts:351<br/>processMessage"]
   STORE --> MEM["in-memory surfaces<br/>+ undo/redo stacks"]
-  STORE -.->|"partialize 680<br/>strip components+dataModel"| LS["localStorage<br/>cognia-a2ui-surfaces (v3)"]
-  REND["renderer / hook layer"] -->|"upsertSurface · upsertApp<br/>upsertTemplate · appendEvent"| DEXIE[("Dexie a2ui-* tables")]
+  STORE -.->|"partialize<br/>LRU 20 complete surfaces"| LS["localStorage<br/>cognia-a2ui-surfaces (v3)"]
+  REND["renderer / hook layer"] -->|"Save · metadata patch · delete"| DEXIE[("Dexie a2ui-* tables")]
+  DEXIE -->|"listApps"| HYDRATE["hydratePersistedApps"]
+  HYDRATE -->|"restoreSurface (missing only)"| STORE
   STORE -. "NO import of lib/db/a2ui-*" .- DEXIE
 
   classDef store fill:#1e293b,stroke:#a78bfa,color:#ede9fe
@@ -198,28 +202,29 @@ The zustand `persist` config (`641-702`):
 
 | Aspect | Line | Behavior |
 | --- | --- | --- |
-| `name` | 642 | `cognia-a2ui-surfaces` — **localStorage**, not Dexie |
-| `version` | 643 | `3` |
-| `migrate` | 644 | → `normalizePersistedSurfaces` (653) |
-| `onRehydrateStorage` | 666 | re-normalize surfaces, re-derive `activeSurfaceId` |
-| `partialize` | 680 | LRU cap + strip (below) |
+| `name` | persist config | `cognia-a2ui-surfaces` — **localStorage**, not Dexie |
+| `version` | persist config | `3` |
+| `migrate` | persist config | → `normalizePersistedSurfaces` |
+| `onRehydrateStorage` | persist config | re-normalize surfaces, re-derive `activeSurfaceId` |
+| `partialize` | current store persist block | LRU cap with complete surfaces (below) |
 
-`partialize` (`680`) is the load-bearing part:
+`partialize` is the load-bearing part:
 
-1. LRU-cap to `MAX_PERSISTED_SURFACES = 20` (`682`).
-2. Keep **only `ready` surfaces** (`685`), sorted by `updatedAt` descending.
-3. **Strip `components` + `dataModel`** (`692`) — the comment notes they are "regenerated from
-   templates".
-4. Persist `{ surfaces: metadataOnly, activeSurfaceId }`; undo/redo stacks are excluded.
+1. LRU-cap to `MAX_PERSISTED_SURFACES = 20`.
+2. Keep **only `ready` surfaces**, sorted by `updatedAt` descending.
+3. Preserve each selected surface **in full**, including `components`, `dataModel`, and `rootId`.
+4. Persist `{ surfaces: persistedSurfaces, activeSurfaceId }`; undo/redo stacks are excluded.
 
-This is why the store layer alone cannot rehydrate a full surface — the heavy payload is intentionally
-dropped and must be regenerated (from templates) or re-fetched from the Dexie layer.
+The LRU means the store can rehydrate recent surfaces directly. Saved surfaces outside that window are
+restored from `a2uiApps` by `hydratePersistedApps()`; only legacy template instances without a durable
+row use deterministic template regeneration. A renderable local surface wins over a durable row so
+hydration cannot overwrite unsaved runtime edits.
 
 ## The Four Dexie Tables
 
 The durable layer lives in `lib/db/`. These tables were first introduced in Dexie `version(13)`
-(`schema.ts:553` block, defs `573-576`); the **current** schema version is `version(65)`
-(`schema.ts:1692`). Table classes are declared at `schema.ts:114-117`.
+(`schema.ts` version-13 block); the **current** schema version is `version(118)`. Table classes are
+declared in `lib/db/schema.ts`.
 
 ### Row types (`lib/db/a2ui-types.ts`)
 
@@ -256,13 +261,12 @@ row and backfills `a2uiEnabled = false` (`schema.ts:550`, `583`).
 
 | Module | Function | Line | Notes |
 | --- | --- | --- | --- |
-| `a2ui-apps.ts` | `listApps` | 7 | |
-| | `getApp` | 11 | |
-| | `upsertApp` | 15 | |
-| | `bulkUpsertApps` | 19 | empty guard |
-| | `deleteApp` | 24 | **THROWS** `"Cannot delete built-in app"` if `isBuiltIn` (26-28) |
-| | `deleteAllUserApps` | 32 | built-ins survive (filters `!isBuiltIn`, 35) |
-| | `touchApp` | 41 | bumps `lastUsedAt` + `usageCount` |
+| `a2ui-apps.ts` | `listApps` / `getApp` | — | durable saved-app reads |
+| | `upsertApp` / `bulkUpsertApps` | — | transactional; existing built-ins reject the whole write |
+| | `patchAppMetadata` | — | mutable metadata only; returns `false` for unsaved ids; preserves the component tree |
+| | `deleteApp` | — | **THROWS** `"Cannot delete built-in app"` if `isBuiltIn` |
+| | `deleteAllUserApps` | — | built-ins survive |
+| | `touchApp` | — | bumps `lastUsedAt` + `usageCount` |
 | `a2ui-surfaces.ts` | `listSurfaces` | 8 | |
 | | `getSurface` | 12 | |
 | | `listSurfacesForSession` | 16 | |
@@ -282,9 +286,9 @@ row and backfills `a2uiEnabled = false` (`schema.ts:550`, `583`).
 
 ### Durable-layer invariants
 
-- **Built-in protection** — `deleteApp` (`a2ui-apps.ts:24`) throws `"Cannot delete built-in app"`
-  when `isBuiltIn` is set (26-28); `deleteAllUserApps` (32) and `deleteAllUserTemplates`
-  (`a2ui-templates.ts:33`) filter built-ins out so they survive a bulk clear.
+- **Built-in protection** — single upsert, bulk upsert, metadata patch, and delete all reject attempts
+  to modify an existing `isBuiltIn` app. Bulk upsert is transactional, so an accompanying user row is
+  not partially inserted. `deleteAllUserApps` and `deleteAllUserTemplates` retain built-ins.
 - **Inline exclusion** — `upsertSurface` (`a2ui-surfaces.ts:20`) early-returns for
   `type === "inline"` (22): inline surfaces are runtime-only and never written to Dexie. Only
   `panel` / `fullscreen` (and `dialog`) surfaces are durable.
@@ -295,11 +299,10 @@ row and backfills `a2uiEnabled = false` (`schema.ts:550`, `583`).
 ## Schema Version Reality
 
 <Callout type="info">
-  The a2ui tables were **introduced in Dexie `version(13)`** (`lib/db/schema.ts:553` block, defs
-  `573-576`) and have not changed their index strings since. The **current/latest** schema version is
-  `version(65)` (`schema.ts:1692`). The old documentation's "Dexie v13" conflated the
-  *introduction* version (13) with the *current* version (65) — they are different numbers. Cite v13
-  for "when a2ui tables appeared", v65 for "the live schema".
+  The A2UI tables were **introduced in Dexie `version(13)`**, whose schema block contains the four
+  A2UI table definitions. Their index strings have not changed since. The **current/latest** schema
+  version is `version(118)`. "Dexie v13" therefore means the introduction version, not the live
+  database version: cite v13 for "when the tables appeared" and v118 for the current schema.
 </Callout>
 
 ## Files
@@ -311,9 +314,9 @@ stores/a2ui/
   index.ts               # barrel: useA2UIStore + 9 selectors
 
 lib/db/
-  schema.ts              # table decls 114-117; v13 block 553 (defs 573-576); current v65 @1692
+  schema.ts              # A2UI tables introduced in v13; current schema v118
   a2ui-types.ts          # A2UIAppRow 35 · A2UISurfaceRow 65 · A2UITemplateRow 86 · A2UIEventHistoryRow 105
-  a2ui-apps.ts           # listApps 7 … deleteApp 24 (throws on built-in) … touchApp 41
+  a2ui-apps.ts           # reads · protected transactional upserts · metadata patch · delete · touch
   a2ui-surfaces.ts       # listSurfaces 8 … upsertSurface 20 (excludes inline) … deleteAllSurfaces 30
   a2ui-templates.ts      # listTemplates 8 … upsertTemplate 20 … deleteAllUserTemplates 33
   a2ui-event-history.ts  # MAX_ROWS 1000 (9), TRIM_BATCH 100 (11), appendEvent 13, listEvents 33

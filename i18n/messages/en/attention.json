@@ -1,0 +1,24 @@
+{
+  "badgeAria": "Attention items: {count}",
+  "description": "Pending approvals, gates, and agents waiting across every surface.",
+  "dismiss": "Dismiss",
+  "emptyDescription": "No approvals, gates, or waiting agents right now.",
+  "emptyTitle": "Nothing needs you",
+  "focusTerminal": "Focus terminal",
+  "interrupted": "Interrupted — the request was already denied.",
+  "interruptedOnBoot": "{count, plural, one {# approval was interrupted} other {# approvals were interrupted}}",
+  "kind": {
+    "fleet-permission": "Agent waiting for permission",
+    "fleet-waiting": "Agent waiting for input",
+    "hitl-gate": "Team gate awaiting decision",
+    "tool-approval": "Tool call awaiting approval"
+  },
+  "openOwner": "Open",
+  "revealTranscript": "Reveal transcript",
+  "source": {
+    "chat": "Chat",
+    "fleet": "Fleet",
+    "team": "Team"
+  },
+  "title": "Attention"
+}

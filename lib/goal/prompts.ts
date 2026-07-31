@@ -37,6 +37,7 @@
  */
 
 import type { Goal } from "@/types/goal"
+import { MAX_SUGGESTED_DELAY_MS, MIN_SUGGESTED_DELAY_MS } from "./pacing"
 
 /**
  * Build the system-prompt section appended to `opts.appendSystemPrompt`
@@ -77,13 +78,99 @@ Continuation rules:
  * (so a fresh goal's first continuation says "turn 1 of N").
  */
 export function renderContinuationMessage(goal: Goal): string {
+  // Adaptive pacing (opt-in): instruct the model to end its reply with a
+  // machine-readable delay suggestion. Appended ONLY when enabled so the
+  // default continuation message stays byte-identical.
+  const pacingDirective = goal.config.adaptivePacing
+    ? `
+
+Pacing: end your reply with one line suggesting when the loop should continue, based on what you observe (waiting on something slow → longer):
+<next-delay minutes=N reason="why"/>
+N must be a whole number between 1 and 60. Omit the line to continue at the default pace.`
+    : ""
   return `[Goal continuation — turn ${goal.turnsUsed + 1} of ${goal.config.maxTurns}]
 
 Continue working toward the active goal in <objective>. Take the next concrete step.
 
 If complete, state the deliverable explicitly and stop.
 If blocked and needing user input, say so clearly and stop.
-Otherwise, do the next thing.`
+Otherwise, do the next thing.${pacingDirective}`
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Completion-promise gate (anti false-completion, Ralph-style)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Verification-turn message sent after the judge said `done=true` while
+ * `config.completionPromise` is set. The model must emit the EXACT
+ * `<promise>` token — with an explicit no-lying clause — or report what
+ * remains. Deliberately doesn't re-print the objective (it's in the system
+ * section), mirroring `renderContinuationMessage`.
+ */
+export function renderPromiseVerificationMessage(goal: Goal): string {
+  const promise = goal.config.completionPromise?.trim() ?? ""
+  return `[Goal verification — the judge believes the objective is complete]
+
+Verify the objective in <objective> yourself before the goal is closed.
+
+If — and ONLY if — every part of the objective is unequivocally satisfied, output this exact token on its own line:
+
+<promise>${promise}</promise>
+
+Do NOT output the token unless the statement is literally and completely true. Never output a false promise to end the loop. If anything remains, list precisely what is missing and continue working on it instead.`
+}
+
+/**
+ * Detect the completion-promise token in a model response. Whitespace inside
+ * the tag is normalized before comparison so a line-wrapped token still
+ * counts; the promise text itself must match exactly otherwise. Empty/blank
+ * promises never match (a gate with no token would auto-confirm). Never
+ * throws.
+ */
+export function detectCompletionPromise(text: string, promise: string): boolean {
+  const want = normalizeWhitespace(promise)
+  if (!want) return false
+  const re = /<promise>([\s\S]*?)<\/promise>/gi
+  let match: RegExpExecArray | null
+  while ((match = re.exec(text)) !== null) {
+    if (normalizeWhitespace(match[1]) === want) return true
+  }
+  return false
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Adaptive pacing — model-suggested next delay
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface SuggestedDelay {
+  /** Clamped to [MIN_SUGGESTED_DELAY_MS, MAX_SUGGESTED_DELAY_MS]. */
+  ms: number
+  reason?: string
+}
+
+/**
+ * Parse the `<next-delay minutes=N reason="..."/>` trailer from a model
+ * response. Fail-OPEN: anything missing or malformed → `null` (the caller
+ * falls back to the configured interval). Minutes are clamped to 1–60;
+ * attribute order and quote style are tolerated. Never throws.
+ */
+export function parseSuggestedDelay(text: string): SuggestedDelay | null {
+  const tag = /<next-delay\b([^>]*?)\/?>/i.exec(text)
+  if (!tag) return null
+  const attrs = tag[1]
+  const minutesMatch = /minutes\s*=\s*"?(\d+)"?/i.exec(attrs)
+  if (!minutesMatch) return null
+  const minutes = Number(minutesMatch[1])
+  if (!Number.isFinite(minutes)) return null
+  const ms = Math.min(MAX_SUGGESTED_DELAY_MS, Math.max(MIN_SUGGESTED_DELAY_MS, minutes * 60_000))
+  const reasonMatch = /reason\s*=\s*"([^"]*)"/i.exec(attrs) ?? /reason\s*=\s*'([^']*)'/i.exec(attrs)
+  const reason = reasonMatch?.[1]?.trim()
+  return reason ? { ms, reason } : { ms }
+}
+
+function normalizeWhitespace(s: string): string {
+  return s.replace(/\s+/g, " ").trim()
 }
 
 /**

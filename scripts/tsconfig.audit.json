@@ -10,5 +10,5 @@
     "jsx": "preserve",
     "moduleResolution": "node"
   },
-  "include": ["./*.ts"]
+  "include": ["./**/*.ts"]
 }

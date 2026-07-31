@@ -15,7 +15,7 @@
 
 import type { RegisteredThemePack } from "@/lib/theme/theme-pack-registry"
 import type { PluginTheme } from "@/lib/theme/theme-registry"
-import type { CustomTheme, ThemeColors } from "@/types/plugin/plugin-extended"
+import type { CustomTheme, ThemeColors } from "@/types/plugin/plugin"
 import {
   DEFAULT_DENSITY,
   DEFAULT_MOTION,

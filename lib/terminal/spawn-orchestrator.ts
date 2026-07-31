@@ -21,11 +21,13 @@
 
 import { getPluginEventHooks } from "@/lib/plugin"
 
-import { selectTerminalTransport } from "./pick-transport"
+import type { BaseTerminalSession } from "./base-session"
+import { selectTerminalTransportChain } from "./pick-transport"
 import { TerminalSession } from "./session"
-import { registerLiveSession, unregisterLiveSession } from "./session-registry"
+import { getLiveSession, registerLiveSession, unregisterLiveSession } from "./session-registry"
 import { RemoteTerminalSession } from "./transport-ws"
 import type { SpawnRequest } from "./types"
+import { classifyTerminalHostError, type TerminalHostState } from "./host-state"
 
 export type SpawnOutcome =
   | { kind: "spawned"; sessionId: string; shell: string }
@@ -41,7 +43,7 @@ export interface TerminalStoreLike {
       origin: "local" | "remote"
       shell: string
     },
-    opts?: { title?: string; agentSpawner?: string }
+    opts?: { title?: string; agentSpawner?: string; agentSpawnerMessageId?: string }
   ): void
   removeSession(id: string): void
   setSessionStatus(id: string, status: "idle" | "running" | "exited"): void
@@ -50,6 +52,7 @@ export interface TerminalStoreLike {
   pushPrompt(id: string, startMs: number): void
   closePrompt(id: string, endMs: number): void
   pushCommand(id: string, record: { cmd: string; exitCode: number | null; endedAt: number }): void
+  setHostState?(state: TerminalHostState, message?: string | null): void
   /** Used by `restartFromDock` to read the previous row's shell/cwd for respawn. */
   sessions: Record<
     string,
@@ -71,6 +74,8 @@ export interface SpawnFromDockInput {
   store: TerminalStoreLike
   /** Test seam — swap the spawn function in unit tests. */
   spawn?: typeof TerminalSession.spawn
+  /** Test seam for exercising ordered transport fallback. */
+  transportSpawns?: Array<(req: SpawnRequest) => Promise<BaseTerminalSession>>
   /** Test seam — swap the plugin hook bus. */
   hooks?: ReturnType<typeof getPluginEventHooks>
   /**
@@ -80,6 +85,13 @@ export interface SpawnFromDockInput {
    * agent visibility by this key so the agent only sees its own tabs.
    */
   agentSpawner?: string
+  /**
+   * The assistant message the spawning tool call belongs to, so the tab's
+   * "Locate in conversation" can land on that turn rather than at the end of
+   * the session. Ignored without `agentSpawner` — a user-spawned tab has no
+   * originating message.
+   */
+  agentSpawnerMessageId?: string
 }
 
 /**
@@ -88,33 +100,73 @@ export interface SpawnFromDockInput {
  * `RemoteTerminalSession`. Plain browser → null (caller should not
  * have invoked the orchestrator).
  */
-function pickSpawnForTransport(): typeof TerminalSession.spawn | null {
-  switch (selectTerminalTransport()) {
-    case "tauri-channel":
-      return TerminalSession.spawn.bind(TerminalSession)
-    case "ws":
-      // The two classes are structurally compatible from the orchestrator's
-      // POV (`info`, `onIntegration`, `onExit`). A `bind` returns the same
-      // signature; the cast is safe because `RemoteTerminalSession` shares
-      // the public surface `spawn-orchestrator` consumes.
-      return RemoteTerminalSession.spawn.bind(
-        RemoteTerminalSession
-      ) as unknown as typeof TerminalSession.spawn
-    default:
-      return null
+function pickSpawnChain(): Array<(req: SpawnRequest) => Promise<BaseTerminalSession>> {
+  const chain: Array<(req: SpawnRequest) => Promise<BaseTerminalSession>> = []
+  for (const transport of selectTerminalTransportChain()) {
+    switch (transport) {
+      case "tauri-channel":
+        chain.push(TerminalSession.spawn.bind(TerminalSession))
+        break
+      case "ws":
+        chain.push(RemoteTerminalSession.spawn.bind(RemoteTerminalSession))
+        break
+      case "webrtc":
+        chain.push(RemoteTerminalSession.spawnWan.bind(RemoteTerminalSession))
+        break
+    }
   }
+  return chain
+}
+
+/**
+ * Hard ceiling on how long the underlying `terminal_spawn` may take before
+ * we give up and surface an error. The Rust spawn is near-instant; a stall
+ * means something is wedged (the historical "stuck terminal blocks all new
+ * terminals" bug). Resolving to an `error` outcome lets the caller show a
+ * toast instead of hanging forever with no feedback.
+ */
+const SPAWN_TIMEOUT_MS = 15_000
+
+/** Reject if `p` hasn't settled within `ms`, cleaning up a late success. */
+function withTimeout<T>(
+  p: Promise<T>,
+  ms: number,
+  label: string,
+  onLateSuccess: (value: T) => void
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let timedOut = false
+    const timer = setTimeout(() => {
+      timedOut = true
+      reject(new Error(`${label} timed out after ${ms}ms`))
+    }, ms)
+    p.then(
+      (value) => {
+        clearTimeout(timer)
+        if (timedOut) {
+          onLateSuccess(value)
+          return
+        }
+        resolve(value)
+      },
+      (err) => {
+        clearTimeout(timer)
+        reject(err)
+      }
+    )
+  })
 }
 
 /**
  * Spawn a terminal end-to-end. Returns:
  *   * `spawned` with the new session id on success,
  *   * `denied` when a plugin's `onTerminalWillSpawn` returned "deny",
- *   * `error` for any other failure (Tauri command threw, etc.).
+ *   * `error` for any other failure (Tauri command threw, timed out, etc.).
  */
 export async function spawnFromDock(input: SpawnFromDockInput): Promise<SpawnOutcome> {
   const hooks = input.hooks ?? getPluginEventHooks()
-  const spawnFn = input.spawn ?? pickSpawnForTransport()
-  if (!spawnFn) {
+  const spawnChain = input.spawn ? [input.spawn] : (input.transportSpawns ?? pickSpawnChain())
+  if (spawnChain.length === 0) {
     return { kind: "error", message: "terminal transport unavailable" }
   }
 
@@ -124,17 +176,39 @@ export async function spawnFromDock(input: SpawnFromDockInput): Promise<SpawnOut
     return { kind: "denied" }
   }
 
-  // 2. Spawn.
-  let session: TerminalSession
+  // 2. Spawn. Bounded by a timeout so a wedged backend surfaces as an
+  // error the dock can toast, never an indefinite silent hang.
+  let session: BaseTerminalSession | null = null
+  let lastError: unknown = new Error("terminal transport unavailable")
   try {
-    session = await spawnFn(req as SpawnRequest)
+    const attemptTimeout = Math.max(1, Math.floor(SPAWN_TIMEOUT_MS / spawnChain.length))
+    for (const spawn of spawnChain) {
+      try {
+        session = await withTimeout(
+          spawn(req as SpawnRequest),
+          attemptTimeout,
+          "terminal spawn",
+          (lateSession) => {
+            void lateSession.kill().catch((error) => {
+              console.warn("terminal spawn cleanup failed:", error)
+            })
+          }
+        )
+        break
+      } catch (error) {
+        lastError = error
+      }
+    }
+    if (!session) throw lastError
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
+    input.store.setHostState?.(classifyTerminalHostError(err), message)
     return { kind: "error", message }
   }
 
   // 3. Register.
   registerLiveSession(session)
+  input.store.setHostState?.("online")
   input.store.registerSession(
     {
       id: session.info.id,
@@ -143,7 +217,14 @@ export async function spawnFromDock(input: SpawnFromDockInput): Promise<SpawnOut
       origin: session.info.origin,
       shell: session.info.shell,
     },
-    input.agentSpawner ? { agentSpawner: input.agentSpawner } : undefined
+    input.agentSpawner
+      ? {
+          agentSpawner: input.agentSpawner,
+          ...(input.agentSpawnerMessageId
+            ? { agentSpawnerMessageId: input.agentSpawnerMessageId }
+            : {}),
+        }
+      : undefined
   )
 
   // 4-5. Command capture + integration/exit → store wiring. Shared with
@@ -169,7 +250,7 @@ export async function spawnFromDock(input: SpawnFromDockInput): Promise<SpawnOut
  * path so a reattached session behaves identically to a fresh one.
  */
 export function wireSessionToStore(
-  session: TerminalSession,
+  session: BaseTerminalSession,
   store: TerminalStoreLike,
   hooks: ReturnType<typeof getPluginEventHooks> = getPluginEventHooks()
 ): void {
@@ -187,16 +268,23 @@ export function wireSessionToStore(
         store.setSessionStatus(session.info.id, "running")
         capture.markCommandStart()
         break
-      case "command_end":
+      case "command_end": {
         store.setSessionStatus(session.info.id, "idle")
+        // `takeCapturedCommand()` is consume-once — capture exactly once and
+        // share between the in-memory ring and the durable history write.
+        const cmd = capture.takeCapturedCommand()
+        const endedAt = Date.now()
         store.pushCommand(session.info.id, {
-          cmd: capture.takeCapturedCommand(),
+          cmd,
           exitCode: event.exit_code,
-          endedAt: Date.now(),
+          endedAt,
         })
         // exit_code here is the LAST command's exit, not the shell
         // process's exit; the row's exitCode is only set on session exit.
+        persistCommandHistory(session, store, cmd, event.exit_code)
+        fanOutCommandTrigger(session, store, cmd, event.exit_code, endedAt)
         break
+      }
       case "cwd_changed":
         store.setSessionCwd(session.info.id, event.cwd)
         break
@@ -218,6 +306,77 @@ export function wireSessionToStore(
       extensionId: session.info.extensionId,
       exitCode: code,
     })
+  })
+}
+
+/**
+ * Persist one executed command to the durable history table (ADR-0039
+ * phase 2). Fire-and-forget: history must never break the terminal, so
+ * every failure path degrades to "not recorded".
+ *
+ * Gates, in order:
+ *   1. non-blank command,
+ *   2. `terminal.autocomplete.persistHistory` setting (default on),
+ *   3. PII check — lines that look like secrets are never persisted.
+ */
+function persistCommandHistory(
+  session: BaseTerminalSession,
+  store: TerminalStoreLike,
+  cmd: string,
+  exitCode: number | null
+): void {
+  if (!cmd || cmd.trim().length === 0) return
+  void (async () => {
+    const [{ useSettingsStore }, { hasNoLeakingPii }, { recordTerminalHistory }] =
+      await Promise.all([
+        import("@/stores/settings/settings-store"),
+        import("@cognia/redact"),
+        import("@/lib/db/terminal-history"),
+      ])
+    const persist =
+      useSettingsStore.getState().settings?.terminal?.autocomplete?.persistHistory !== false
+    if (!persist) return
+    if (!hasNoLeakingPii(cmd)) return
+    await recordTerminalHistory({
+      command: cmd,
+      shell: session.info.shell,
+      cwd: store.sessions[session.info.id]?.cwd ?? null,
+      exitCode,
+      sessionId: session.info.id,
+      projectId: session.info.projectId,
+    })
+  })().catch(() => {
+    // Best-effort — history persistence must never surface as a terminal error.
+  })
+}
+
+/**
+ * Fan a finished command out to `trigger.terminal.command` workflow
+ * subscriptions. Fire-and-forget — the dispatcher itself applies the
+ * user-spawned-only, blank-command, and PII gates
+ * (`lib/terminal/command-trigger.ts`), and a workflow failure must never
+ * surface as a terminal error.
+ */
+function fanOutCommandTrigger(
+  session: BaseTerminalSession,
+  store: TerminalStoreLike,
+  cmd: string,
+  exitCode: number | null,
+  endedAt: number
+): void {
+  const row = store.sessions[session.info.id]
+  void (async () => {
+    const { dispatchTerminalCommandTriggers } = await import("./command-trigger")
+    await dispatchTerminalCommandTriggers({
+      sessionId: session.info.id,
+      projectId: session.info.projectId,
+      agentSpawner: row?.agentSpawner ?? null,
+      command: cmd,
+      exitCode,
+      endedAt,
+    })
+  })().catch(() => {
+    // Best-effort — trigger fan-out must never break the terminal.
   })
 }
 
@@ -245,6 +404,28 @@ export async function killFromDock(
       projectId: session.info.projectId,
       extensionId: session.info.extensionId,
     })
+  }
+  unregisterLiveSession(sessionId)
+  store.removeSession(sessionId)
+}
+
+/**
+ * Close this device's attachment while leaving the host-owned process alive.
+ * The session remains available to other viewers and can be listed and
+ * reattached after a renderer or application restart.
+ */
+export async function detachFromDock(
+  sessionId: string,
+  store: Pick<TerminalStoreLike, "removeSession">
+): Promise<void> {
+  const session = getLiveSession(sessionId)
+  if (session) {
+    try {
+      await session.detach()
+    } catch (err) {
+      console.warn(`spawn-orchestrator: detach threw for ${sessionId}:`, err)
+      throw err
+    }
   }
   unregisterLiveSession(sessionId)
   store.removeSession(sessionId)
@@ -295,7 +476,7 @@ export async function restartFromDock(input: {
  * pre-OSC 633 `E`. Handles BS/DEL for in-line edits; arrow-key edits
  * remain approximate.
  */
-function installCommandCapture(session: TerminalSession): {
+function installCommandCapture(session: BaseTerminalSession): {
   markCommandStart: () => void
   takeCapturedCommand: () => string
 } {
@@ -304,7 +485,7 @@ function installCommandCapture(session: TerminalSession): {
   let armed = false
 
   const originalWrite = session.write.bind(session)
-  ;(session as unknown as { write: TerminalSession["write"] }).write = async (data) => {
+  ;(session as unknown as { write: BaseTerminalSession["write"] }).write = async (data) => {
     const str = typeof data === "string" ? data : new TextDecoder().decode(data)
     for (let i = 0; i < str.length; i++) {
       const c = str.charCodeAt(i)

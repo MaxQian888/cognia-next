@@ -1,10 +1,15 @@
 /**
  * Slack adapter factory — Task 76.
  *
- * Assembles parse + serialize + capability + socket-mode transport into a
- * PlatformAdapter. Supports two transports:
- *   - socket-mode  (default): uses apps.connections.open + WSS
- *   - events-api-webhook: stub in Phase 1
+ * Assembles parse + serialize + capability + transport into a PlatformAdapter.
+ * Supports two transports:
+ *   - socket-mode  (default): uses apps.connections.open + WSS (dials out).
+ *   - events-api-webhook: Rust (axum + `verify_slack`) terminates the HMAC
+ *     signature check and emits the parsed body on `connectors://webhook/<id>`;
+ *     `start()` subscribes via `startSlackWebhookTransport` and routes each
+ *     envelope through the same `parseSlackEventCallback` the socket-mode path
+ *     uses. Requires the adapter to be registered with the Rust server — done
+ *     centrally by `ConnectorBusProvider` for every inbound-server transport.
  */
 
 import type {
@@ -12,19 +17,33 @@ import type {
   AdapterContext,
   AdapterHealth,
   AdapterHealthState,
+  AdapterLogger,
+  AdapterAttachmentRef,
+  AttachmentDescriptor,
+  ReactionRef,
 } from "@/types/connectors/adapter"
-import type { OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
-import { connectorsHttpRequest } from "@/lib/connectors/tauri/commands"
+import { createSlackRunPresentationDriver } from "@/lib/connectors/run-presentation/slack-driver"
+import type { OutboundError, OutboundRequest, OutboundResult } from "@/types/connectors/outbound"
+import { builtInConnectorRuntimeCapabilities } from "@/types/connectors/runtime-capability"
+import type { MessageSegment } from "@/types/connectors/segment"
+import { connectorsHttpRequest, connectorsMediaUpload } from "@/lib/connectors/tauri/commands"
+import { statFile } from "@/lib/file/file-operations"
 import { SLACK_A2UI_CAPABILITY, SLACK_CAPS } from "./capability"
-import { parseSlackEventCallback, parseSlackInteractivePayload } from "./parse"
+import {
+  parseSlackEventCallback,
+  parseSlackInteractivePayload,
+  parseSlackSlashCommand,
+} from "./parse"
 import type { SlackEventEnvelope, SlackInteractivePayload } from "./parse"
 import {
   serializeOutboundAsync,
   serializeUpdate,
   serializeDeleteMessage,
   serializeReaction,
+  serializeReactionRemoval,
   serializeAssistantStatus,
   serializeAssistantSuggestedPrompts,
+  SlackEmptyMessageError,
 } from "./serialize"
 import { startSocketMode } from "./transport-socket-mode"
 import { startSlackWebhookTransport } from "./transport-webhook"
@@ -42,6 +61,13 @@ export interface SlackAdapterOptions {
   appToken?: () => Promise<string>
   /** Used to verify webhook signatures from Slack. */
   signingSecret: () => Promise<string>
+  /**
+   * Optional xoxp-... user token with `users.profile:write`. Bots cannot set
+   * a *user's* status — `setPresenceStatus` requires this token and throws a
+   * clear error when it is absent so the presence runner can surface the
+   * misconfiguration instead of failing silently.
+   */
+  userToken?: () => Promise<string>
   /** Bot's own user id (from auth.test). */
   selfId: string
   transport: "socket-mode" | "events-api-webhook"
@@ -71,6 +97,7 @@ const SLACK_CONFIG_SCHEMA = {
   properties: {
     botToken: { type: "string", title: "Bot Token (xoxb-...)" },
     appToken: { type: "string", title: "App Token (xapp-...)" },
+    userToken: { type: "string", title: "User Token (xoxp-..., status updates)" },
     signingSecret: { type: "string", title: "Signing Secret" },
     transport: {
       type: "string",
@@ -78,15 +105,222 @@ const SLACK_CONFIG_SCHEMA = {
       title: "Transport",
       default: "socket-mode",
     },
+    assistantAppEnabled: {
+      type: "boolean",
+      title: "Assistant app (typing status + suggested prompts)",
+      default: false,
+    },
+    historyMaxPages: {
+      type: "number",
+      title: "History pages per fetch (200 msgs each)",
+      default: 10,
+      minimum: 1,
+    },
   },
   additionalProperties: false,
+}
+
+// ---------------------------------------------------------------------------
+// Error classification (Slack Web API `error` strings → OutboundError codes)
+// ---------------------------------------------------------------------------
+
+/** Credential-shaped errors — retrying without operator action is pointless. */
+const SLACK_AUTH_ERRORS: ReadonlySet<string> = new Set([
+  "invalid_auth",
+  "not_authed",
+  "account_inactive",
+  "token_revoked",
+  "token_expired",
+  "no_permission",
+  "missing_scope",
+  "ekm_access_denied",
+])
+
+/** Transient server-side errors that a retry can plausibly fix. */
+const SLACK_TRANSIENT_ERRORS: ReadonlySet<string> = new Set([
+  "ratelimited",
+  "rate_limited",
+  "internal_error",
+  "service_unavailable",
+  "request_timeout",
+  "fatal_error",
+])
+
+/**
+ * Error thrown by `doRequest` for any HTTP >= 400 or `ok: false` response,
+ * carrying enough context to classify retryability.
+ */
+class SlackApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly slackError: string | undefined,
+    readonly retryAfterMs: number | undefined
+  ) {
+    super(message)
+    this.name = "SlackApiError"
+  }
+}
+
+/** Parse a Retry-After header (seconds) into ms; key lookup is case-insensitive. */
+function extractRetryAfterMs(headers: Record<string, string>): number | undefined {
+  for (const [k, v] of Object.entries(headers)) {
+    if (k.toLowerCase() === "retry-after") {
+      const secs = Number(v)
+      if (Number.isFinite(secs) && secs > 0) return secs * 1000
+    }
+  }
+  return undefined
+}
+
+/**
+ * Map a thrown error to an OutboundError:
+ *   - empty serialization           → validation      (non-retryable)
+ *   - 429 / ratelimited             → rate_limited    (retryable, honors Retry-After)
+ *   - invalid_auth / missing_scope… → auth_failed     (non-retryable)
+ *   - transient Slack errors / 5xx  → platform_5xx    (retryable)
+ *   - every other `ok:false` string → platform_4xx    (non-retryable — Slack's
+ *     channel_not_found / msg_too_long / is_archived / restricted_action etc.
+ *     are permanent for this payload and must not retry forever)
+ *   - anything else (IPC/network)   → network         (retryable)
+ */
+function toOutboundError(err: unknown): OutboundError {
+  if (err instanceof SlackEmptyMessageError || err instanceof SlackValidationError) {
+    return { code: "validation", message: err.message, retryable: false }
+  }
+  if (err instanceof SlackApiError) {
+    if (
+      err.status === 429 ||
+      err.slackError === "ratelimited" ||
+      err.slackError === "rate_limited"
+    ) {
+      return {
+        code: "rate_limited",
+        message: err.message,
+        retryable: true,
+        retryAfterMs: err.retryAfterMs,
+      }
+    }
+    // Payload permanently too large — HTTP 413 from the upload_url byte POST
+    // or Slack's `file_upload_size_restricted` from files.getUploadURLExternal.
+    // Retrying the same bytes can never succeed.
+    if (err.status === 413 || err.slackError === "file_upload_size_restricted") {
+      return { code: "validation", message: err.message, retryable: false }
+    }
+    if (err.slackError && SLACK_AUTH_ERRORS.has(err.slackError)) {
+      return { code: "auth_failed", message: err.message, retryable: false }
+    }
+    if ((err.slackError && SLACK_TRANSIENT_ERRORS.has(err.slackError)) || err.status >= 500) {
+      return { code: "platform_5xx", message: err.message, retryable: true }
+    }
+    return { code: "platform_4xx", message: err.message, retryable: false }
+  }
+  return {
+    code: "network",
+    message: err instanceof Error ? err.message : String(err),
+    retryable: true,
+  }
+}
+
+/**
+ * Non-retryable local validation failure (missing byte size, oversized
+ * payload rejected by the Rust byte cap, …). Maps to the `validation`
+ * OutboundError code — dead-lettered immediately, never retried.
+ */
+class SlackValidationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "SlackValidationError"
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Composite platform message id — "<channelId>:<ts>"
+// ---------------------------------------------------------------------------
+
+/**
+ * Slack message ops (chat.update / chat.delete / reactions.* / pins.*) are
+ * channel-scoped, but the PlatformAdapter contract passes a single
+ * `messageId`. `send()` therefore returns the composite "<channelId>:<ts>"
+ * (same convention as the Discord adapter) and every message-scoped method
+ * parses it back. A bare ts (no ":") is accepted for backward compatibility
+ * when the method has another channel source (edit's conversationRef, pin's
+ * conversationKey); methods with no such context throw a clear error.
+ */
+function splitChannelTs(composite: string): { channel?: string; ts: string } {
+  const idx = composite.indexOf(":")
+  if (idx === -1) return { ts: composite }
+  return { channel: composite.slice(0, idx), ts: composite.slice(idx + 1) }
+}
+
+/**
+ * Strip surrounding colons from an emoji shortcode (":thumbsup:" →
+ * "thumbsup") — Slack's reactions API wants the bare name. Unicode emoji
+ * pass through unchanged: Slack resolves standard-emoji aliases itself and
+ * mapping unicode → shortcode is the platform's job, not ours.
+ */
+function normalizeEmojiName(emoji: string): string {
+  return emoji.replace(/^:+/, "").replace(/:+$/, "")
+}
+
+// ---------------------------------------------------------------------------
+// File upload sources — external upload flow vs link passthrough
+// ---------------------------------------------------------------------------
+
+/**
+ * True for a genuinely remote http(s) URL that Slack's clients can fetch on
+ * their own — those keep the link / image-block projection. Everything else
+ * (file://, asset://, Tauri's `https://asset.localhost/...` webview scheme,
+ * bare filesystem paths) is local-only and must go through the external
+ * upload flow to be visible to anyone else.
+ */
+function isRemoteHttpSource(url: string): boolean {
+  if (/^(?:asset:\/\/|https?:\/\/asset\.localhost\/)/i.test(url)) return false
+  return /^https?:\/\//i.test(url)
+}
+
+/**
+ * Resolve a local source (file:// URL, Tauri asset:// / asset.localhost
+ * convertFileSrc URL, or a bare filesystem path) into the absolute path the
+ * Rust `connectors_media_upload` command reads via `localPath`.
+ */
+function localPathFromSource(source: string): string {
+  const assetMatch = source.match(/^(?:asset:\/\/localhost|https?:\/\/asset\.localhost)\/(.+)$/i)
+  if (assetMatch) {
+    const decoded = decodeURIComponent(assetMatch[1])
+    // Windows drive paths decode without a leading slash; POSIX paths need one.
+    return /^[A-Za-z]:[\\/]/.test(decoded) ? decoded : `/${decoded.replace(/^\/+/, "")}`
+  }
+  if (/^file:\/\//i.test(source)) {
+    try {
+      return decodeURIComponent(new URL(source).pathname)
+    } catch {
+      return source.replace(/^file:\/\//i, "")
+    }
+  }
+  return source
+}
+
+/** Derive a filename (with extension when present) from a URL or path. */
+function fileNameFromSource(source: string, fallback: string): string {
+  try {
+    const base = new URL(source).pathname.split("/").pop()
+    if (base) return decodeURIComponent(base)
+  } catch {
+    const tail = source.split(/[\\/]/).pop()
+    if (tail) return tail
+  }
+  return fallback
 }
 
 export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
   let abortController: AbortController | null = null
   let healthState: AdapterHealthState = "starting"
+  let healthReason: string | undefined = undefined
   let lastActivityAt: number | undefined = undefined
   let stopCalled = false
+  /** Captured from `start(ctx)` so non-lifecycle methods can log too. */
+  let logger: AdapterLogger | null = null
 
   async function doRequest(
     method: "GET" | "POST" | "PATCH" | "DELETE",
@@ -103,12 +337,27 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
     })
-    if (resp.status >= 400) {
-      throw new Error(`Slack API ${method} ${path} → ${resp.status}: ${resp.body}`)
+    let parsed: { ok?: boolean; error?: string } | null = null
+    if (resp.body) {
+      try {
+        parsed = JSON.parse(resp.body) as { ok?: boolean; error?: string }
+      } catch {
+        parsed = null
+      }
     }
-    const parsed = resp.body ? (JSON.parse(resp.body) as { ok?: boolean; error?: string }) : null
-    if (parsed && parsed.ok === false) {
-      throw new Error(`Slack API error: ${parsed.error ?? "unknown"}`)
+    // Slack signals most errors as HTTP 200 + `ok: false` with a stable
+    // `error` string; real HTTP failures (429, 5xx) also occur. Both throw a
+    // SlackApiError so `toOutboundError` can classify retryability instead
+    // of treating everything as a retryable platform_5xx.
+    if (resp.status >= 400 || parsed?.ok === false) {
+      throw new SlackApiError(
+        `Slack API ${method} ${path} failed (HTTP ${resp.status}): ${
+          parsed?.error ?? resp.body.slice(0, 200)
+        }`,
+        resp.status,
+        parsed?.error,
+        resp.status === 429 ? extractRetryAfterMs(resp.headers) : undefined
+      )
     }
     return parsed
   }
@@ -118,27 +367,50 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
     stopCalled = false
     abortController = new AbortController()
     const signal = abortController.signal
-
-    healthState = "running"
+    logger = ctx.logger
 
     if (opts.transport === "socket-mode") {
+      // Stay "starting" until the first Socket Mode `hello` frame confirms a
+      // live connection — reporting "running" before any connection attempt
+      // hid every startup failure from the health panel.
+      healthState = "starting"
+      healthReason = undefined
+
       const appToken = opts.appToken
       if (!appToken) {
         healthState = "degraded"
+        healthReason = "socket-mode transport requires an app-level token (xapp-…)"
+        ctx.logger.warn("slack: missing app token for socket-mode transport", {
+          adapterId: opts.id,
+        })
         return
       }
 
       // Drive the socket-mode generator in the background
       ;(async () => {
         try {
-          const generator = startSocketMode({ appToken, signal })
-          for await (const envelope of generator) {
+          const generator = startSocketMode({
+            appToken,
+            signal,
+            onHello: () => {
+              healthState = "running"
+              healthReason = undefined
+            },
+          })
+          for await (const delivery of generator) {
             if (signal.aborted) break
-            const event = parseSlackEventCallback(
-              opts.id,
-              opts.selfId,
-              envelope as SlackEventEnvelope
-            )
+
+            // A2UI round-trip: block_actions / view_submission / view_closed
+            // route to the bus callback channel, not the message stream.
+            if (delivery.kind === "interactive") {
+              await handleInteractivePayload(delivery.payload)
+              continue
+            }
+
+            const event =
+              delivery.kind === "slash_command"
+                ? parseSlackSlashCommand(opts.id, opts.selfId, delivery.payload)
+                : parseSlackEventCallback(opts.id, opts.selfId, delivery.envelope)
             if (event) {
               // im-refactored-crayon — at-strategy + chat allow/blocklist gate.
               if (!(await gateInboundEvent(opts.id, event))) continue
@@ -148,10 +420,16 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
           }
           if (!stopCalled) {
             healthState = "down"
+            healthReason = "socket-mode stream ended unexpectedly"
           }
-        } catch {
+        } catch (err) {
           if (!stopCalled) {
             healthState = "degraded"
+            healthReason = err instanceof Error ? err.message : String(err)
+            ctx.logger.warn("slack: socket-mode transport failed", {
+              adapterId: opts.id,
+              reason: healthReason,
+            })
           }
         }
       })()
@@ -159,12 +437,33 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
       // events-api-webhook: Rust (axum + verify_slack) terminates the HMAC
       // signature check and emits the parsed body on
       // `connectors://webhook/<adapterId>`. We subscribe here and route each
-      // envelope through the same parser the socket-mode path uses.
+      // envelope through the same parser the socket-mode path uses. The
+      // transport is passive (no handshake to await), so a successful
+      // subscription IS the running state.
+      healthState = "running"
+      healthReason = undefined
       ;(async () => {
         try {
           const generator = startSlackWebhookTransport({ adapterId: opts.id, signal })
           for await (const envelope of generator) {
             if (signal.aborted) break
+
+            // The Rust side also emits decoded interactive payloads (the
+            // inner JSON of the form-encoded `payload=` field) on the same
+            // channel — route those to the callback channel instead of the
+            // event parser.
+            const kind = (envelope as { type?: string }).type
+            if (
+              kind === "block_actions" ||
+              kind === "view_submission" ||
+              kind === "view_closed" ||
+              kind === "shortcut" ||
+              kind === "message_action"
+            ) {
+              await handleInteractivePayload(envelope as unknown as SlackInteractivePayload)
+              continue
+            }
+
             const event = parseSlackEventCallback(opts.id, opts.selfId, envelope)
             if (event) {
               // im-refactored-crayon — at-strategy + chat allow/blocklist gate.
@@ -175,10 +474,16 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
           }
           if (!stopCalled) {
             healthState = "down"
+            healthReason = "webhook subscription ended unexpectedly"
           }
-        } catch {
+        } catch (err) {
           if (!stopCalled) {
             healthState = "degraded"
+            healthReason = err instanceof Error ? err.message : String(err)
+            ctx.logger.warn("slack: webhook transport failed", {
+              adapterId: opts.id,
+              reason: healthReason,
+            })
           }
         }
       })()
@@ -190,28 +495,191 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
     abortController?.abort()
     abortController = null
     healthState = "down"
+    healthReason = undefined
   }
 
   function health(): AdapterHealth {
-    return { state: healthState, lastActivityAt }
+    return { state: healthState, reason: healthReason, lastActivityAt }
+  }
+
+  /**
+   * External file upload — Slack's documented 3-step flow
+   * (docs.slack.dev/messaging/working-with-files):
+   *
+   *   1. `files.getUploadURLExternal` — required args `filename` + `length`
+   *      ("Size in bytes of the file being uploaded"); returns
+   *      `{ ok, upload_url, file_id }`. Scope: files:write.
+   *   2. POST the raw bytes to `upload_url` with
+   *      `Content-Type: application/octet-stream` (the docs' curl example
+   *      uses `--data-binary`); "success is confirmed by checking the HTTP
+   *      status code", the body is plain text like "OK - 12".
+   *   3. `files.completeUploadExternal` — required `files` = "Array of file
+   *      ids and their corresponding (optional) titles" (`[{id, title}]`);
+   *      optional `channel_id` ("Channel ID where the file will be shared.
+   *      If not specified the file will be private.") and `thread_ts`
+   *      ("Provide another message's ts value to upload this file as a
+   *      reply."). With `channel_id` the file is posted into the
+   *      conversation by Slack itself — callers must not double-post.
+   *
+   * Returns the Slack `file_id`.
+   */
+  async function uploadToSlack(
+    file: { url: string; name: string; mimeType?: string; sizeBytes?: number },
+    share?: { channelId?: string; threadTs?: string }
+  ): Promise<string> {
+    // `length` is a required argument of files.getUploadURLExternal. File
+    // segments always carry sizeBytes; for image segments / descriptors
+    // without one, stat local sources to recover it.
+    let length =
+      typeof file.sizeBytes === "number" && Number.isFinite(file.sizeBytes) && file.sizeBytes > 0
+        ? Math.floor(file.sizeBytes)
+        : undefined
+    if (length === undefined && !isRemoteHttpSource(file.url)) {
+      try {
+        const stat = await statFile(localPathFromSource(file.url))
+        if (stat.size > 0) length = stat.size
+      } catch {
+        // fall through to the validation error below
+      }
+    }
+    if (!length) {
+      throw new SlackValidationError(
+        `Slack upload requires the byte size of "${file.name}" — files.getUploadURLExternal's required \`length\` argument could not be determined`
+      )
+    }
+
+    // Step 1 — filename + length ride as query args (Slack accepts Web API
+    // args via querystring for form-encoded methods).
+    const search = new URLSearchParams({ filename: file.name, length: String(length) })
+    const opened = (await doRequest("POST", `files.getUploadURLExternal?${search}`)) as {
+      upload_url?: string
+      file_id?: string
+    } | null
+    if (!opened?.upload_url || !opened.file_id) {
+      throw new SlackApiError(
+        "files.getUploadURLExternal returned ok but no upload_url/file_id",
+        200,
+        undefined,
+        undefined
+      )
+    }
+
+    // Step 2 — raw-byte POST via the shared Rust media-upload command
+    // (fetches http(s) sources / reads local paths in Rust, 100 MiB cap).
+    try {
+      await connectorsMediaUpload({
+        uploadUrl: opened.upload_url,
+        contentType: file.mimeType || "application/octet-stream",
+        ...(isRemoteHttpSource(file.url)
+          ? { sourceUrl: file.url }
+          : { localPath: localPathFromSource(file.url) }),
+      })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      // The shared command verifies HTTP status (<400) BEFORE parsing the
+      // response body for Matrix's `content_uri`. Slack's upload_url answers
+      // with plain text ("OK - 12" per the docs), so exactly these two parse
+      // errors mean the byte POST itself already succeeded.
+      if (!/response is not JSON|missing content_uri/.test(msg)) {
+        // Rust-side byte cap ("… exceeding the N-byte upload cap") — the
+        // payload can never fit; dead-letter instead of retrying.
+        if (/byte upload cap/.test(msg)) throw new SlackValidationError(msg)
+        // HTTP failure from the upload_url POST ("media upload HTTP <status>: …")
+        // — recover the status so 413 → validation, 5xx → retryable, etc.
+        const httpStatus = msg.match(/media upload HTTP (\d+)/)
+        if (httpStatus) throw new SlackApiError(msg, Number(httpStatus[1]), undefined, undefined)
+        throw err
+      }
+    }
+
+    // Step 3 — finalize; with channel_id Slack shares the file into the
+    // conversation itself.
+    await doRequest("POST", "files.completeUploadExternal", {
+      files: [{ id: opened.file_id, title: file.name }],
+      ...(share?.channelId ? { channel_id: share.channelId } : {}),
+      ...(share?.threadTs ? { thread_ts: share.threadTs } : {}),
+    })
+
+    return opened.file_id
+  }
+
+  /**
+   * `PlatformAdapter.uploadFile` — uploads the descriptor's bytes as a
+   * PRIVATE workspace file (no `channel_id` share) and returns the Slack
+   * `file_id` as `remoteRef`. Conversation-scoped sharing happens in
+   * `send()`, which passes `channel_id`/`thread_ts` to the same flow.
+   */
+  async function uploadFile(file: AttachmentDescriptor): Promise<AdapterAttachmentRef> {
+    const fileId = await uploadToSlack({
+      url: file.url,
+      name: file.name || fileNameFromSource(file.url, "file"),
+      mimeType: file.mimeType,
+      sizeBytes: file.sizeBytes,
+    })
+    return { localUrl: file.url, remoteRef: fileId }
   }
 
   async function send(req: OutboundRequest): Promise<OutboundResult> {
     try {
-      const call = await serializeOutboundAsync(req, opts.id)
-      const result = (await doRequest("POST", "chat.postMessage", call.payload)) as {
-        ts?: string
-      } | null
-      return { ok: true, platformMessageId: result?.ts }
-    } catch (err) {
-      return {
-        ok: false,
-        error: {
-          code: "platform_5xx",
-          message: err instanceof Error ? err.message : String(err),
-          retryable: true,
-        },
+      // Partition: file/image segments whose source is NOT a remote http(s)
+      // URL (file://, asset://, bare paths) go through the external upload
+      // flow — a link block pointing at a local path is invisible to every
+      // other Slack user. Public http(s) sources keep the existing link /
+      // image-block projection.
+      const uploads: Array<Extract<MessageSegment, { type: "file" | "image" }>> = []
+      const rest: MessageSegment[] = []
+      for (const seg of req.segments) {
+        if ((seg.type === "file" || seg.type === "image") && !isRemoteHttpSource(seg.url)) {
+          uploads.push(seg)
+        } else {
+          rest.push(seg)
+        }
       }
+
+      const ref = req.conversationRef as Record<string, unknown>
+      const refChannel = String(ref["channelId"] ?? "")
+      const refThreadTs = typeof ref["threadTs"] === "string" ? ref["threadTs"] : undefined
+
+      let platformMessageId: string | undefined
+      // Post the block/text message first (when there is one) so the reply
+      // text lands above its attachments. When ALL segments are uploads,
+      // skip chat.postMessage entirely — completeUploadExternal with
+      // channel_id already shares the files into the conversation.
+      if (rest.length > 0 || uploads.length === 0) {
+        const call = await serializeOutboundAsync({ ...req, segments: rest }, opts.id)
+        const result = (await doRequest("POST", "chat.postMessage", call.payload)) as {
+          ts?: string
+          channel?: string
+        } | null
+        // Composite "<channelId>:<ts>" — message-scoped follow-ups (edit /
+        // delete / reactions / pins) are channel-scoped on Slack, so the
+        // channel must ride in the platform message id.
+        const channel = result?.channel ?? String(call.payload["channel"] ?? "")
+        platformMessageId = result?.ts
+          ? channel
+            ? `${channel}:${result.ts}`
+            : result.ts
+          : undefined
+      }
+
+      for (const seg of uploads) {
+        await uploadToSlack(
+          {
+            url: seg.url,
+            name:
+              seg.type === "file"
+                ? seg.name || fileNameFromSource(seg.url, "file")
+                : seg.alt || fileNameFromSource(seg.url, "image"),
+            mimeType: seg.type === "file" ? seg.mimeType : undefined,
+            sizeBytes: seg.type === "file" ? seg.sizeBytes : undefined,
+          },
+          { channelId: refChannel || undefined, threadTs: refThreadTs }
+        )
+      }
+
+      return { ok: true, platformMessageId }
+    } catch (err) {
+      return { ok: false, error: toOutboundError(err) }
     }
   }
 
@@ -229,33 +697,40 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
   }
 
   async function edit(messageId: string, patch: OutboundRequest): Promise<OutboundResult> {
+    // messageId is the "<channelId>:<ts>" composite from send(); a bare ts
+    // (legacy rows) falls back to the channel on the patch's conversationRef.
+    const { channel: idChannel, ts } = splitChannelTs(messageId)
     const ref = patch.conversationRef as Record<string, unknown>
-    const channel = String(ref["channelId"] ?? "")
-    // messageId in Slack is the ts
-    try {
-      const call = serializeUpdate(channel, messageId, patch)
-      await doRequest("POST", "chat.update", call.payload)
-      return { ok: true }
-    } catch (err) {
+    const channel = idChannel || String(ref["channelId"] ?? "")
+    if (!channel || !ts) {
       return {
         ok: false,
         error: {
-          code: "platform_5xx",
-          message: err instanceof Error ? err.message : String(err),
-          retryable: true,
+          code: "validation",
+          message: `Slack edit needs a "<channelId>:<ts>" message id or a conversationRef.channelId, got "${messageId}"`,
+          retryable: false,
         },
       }
+    }
+    try {
+      const call = serializeUpdate(channel, ts, patch)
+      await doRequest("POST", "chat.update", call.payload)
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: toOutboundError(err) }
     }
   }
 
   async function deleteMessage(messageId: string): Promise<void> {
-    // messageId format: "channelId:ts"
-    const parts = messageId.split(":")
-    if (parts.length === 2) {
-      const [channel, ts] = parts
-      const call = serializeDeleteMessage(channel, ts)
-      await doRequest("POST", "chat.delete", call.payload)
+    // messageId is the "<channelId>:<ts>" composite from send(). A bare ts
+    // carries no channel and chat.delete is channel-scoped — fail loudly
+    // instead of silently skipping the delete.
+    const { channel, ts } = splitChannelTs(messageId)
+    if (!channel || !ts) {
+      throw new Error(`Slack delete requires a "<channelId>:<ts>" message id, got "${messageId}"`)
     }
+    const call = serializeDeleteMessage(channel, ts)
+    await doRequest("POST", "chat.delete", call.payload)
   }
 
   /**
@@ -330,15 +805,27 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
   }
 
   /**
-   * Typing indicator. When `assistantAppEnabled` is false, this stays a
-   * no-op (matches Phase 1 behaviour for regular bot installs). When
-   * enabled and the conversationKey carries a thread, we issue
+   * Typing indicator. When `assistantAppEnabled` is false, this is a
+   * documented no-op: Slack has NO typing API for regular bots — only
+   * Assistant Apps get `assistant.threads.setStatus`. The `typing`
+   * capability stays statically advertised (AdapterMeta.capabilities is a
+   * static list; there is no per-instance capability projection), so the
+   * honest minimal option is this logged fallback rather than a phantom
+   * API call that would 403 for every non-assistant install. When enabled
+   * and the conversationKey carries a thread, we issue
    * `assistant.threads.setStatus` with "is typing…" / "" depending on
    * `on`. Conversations without a thread_ts can't set assistant status —
    * Slack returns `not_supported` — so we silently skip those.
    */
   async function setTyping(conversationKey: string, on: boolean): Promise<void> {
-    if (!opts.assistantAppEnabled) return
+    if (!opts.assistantAppEnabled) {
+      logger?.debug("slack: setTyping skipped — assistantAppEnabled is false", {
+        adapterId: opts.id,
+        conversationKey,
+        on,
+      })
+      return
+    }
     const parsed = parseConversationKey(conversationKey)
     if (!parsed.threadId) return
     const call = serializeAssistantStatus(
@@ -377,14 +864,100 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
     // No-op: all token resolvers call fresh on each request.
   }
 
-  async function addReaction(channel: string, ts: string, name: string): Promise<void> {
+  /**
+   * Set the connected user's profile status via `users.profile.set`
+   * (status_text ≤ 100 chars). Requires the optional user token — Slack has
+   * no API for a bot to set someone else's status. `targetUserIds` is
+   * ignored: the token itself identifies the user.
+   */
+  async function setPresenceStatus(input: { text: string; expiresAt?: number }): Promise<void> {
+    const token = await opts.userToken?.().catch(() => "")
+    if (!token) {
+      throw new Error("Slack presence requires a user token (xoxp-…) with users.profile:write")
+    }
+    const resp = await connectorsHttpRequest({
+      url: `${SLACK_API_BASE}/users.profile.set`,
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json; charset=utf-8",
+      },
+      body: JSON.stringify({
+        profile: {
+          status_text: input.text.slice(0, 100),
+          // PresenceStatusInput (types/connectors/presence.ts) carries no
+          // emoji/icon field — the contract is text + expiry only — so the
+          // robot-face badge is a deliberate fixed marker for bot-driven
+          // statuses. Revisit if the shared input type ever grows an icon.
+          status_emoji: ":robot_face:",
+          status_expiration: input.expiresAt ? Math.floor(input.expiresAt / 1000) : 0,
+        },
+      }),
+    })
+    const parsed = resp.body ? (JSON.parse(resp.body) as { ok?: boolean; error?: string }) : null
+    if (resp.status >= 400 || parsed?.ok === false) {
+      throw new Error(`Slack users.profile.set failed: ${parsed?.error ?? resp.status}`)
+    }
+  }
+
+  /** Pin a message in its channel via `pins.add` (bot token). */
+  async function pinMessage(conversationKey: string, messageId: string): Promise<void> {
+    // messageId may be the "<channelId>:<ts>" composite (from send()) or a
+    // bare ts — the channel then comes from the conversationKey.
+    const { channel: idChannel, ts } = splitChannelTs(messageId)
+    const channel = idChannel || parseConversationKey(conversationKey).remoteChatId
+    if (!channel || !ts) {
+      throw new Error(`Slack pin requires a channel and ts, got "${messageId}"`)
+    }
+    await doRequest("POST", "pins.add", { channel, timestamp: ts })
+  }
+
+  /** Remove a previously pinned message via `pins.remove` (bot token). */
+  async function unpinMessage(messageId: string): Promise<void> {
+    const { channel, ts } = splitChannelTs(messageId)
+    if (!channel || !ts) {
+      throw new Error(`Slack unpin requires a "<channelId>:<ts>" message id, got "${messageId}"`)
+    }
+    await doRequest("POST", "pins.remove", { channel, timestamp: ts })
+  }
+
+  /**
+   * Add an emoji reaction, conforming to the {@link PlatformAdapter} 2-arg
+   * contract `addReaction(messageId, emojiType)` the connector bus calls.
+   * `messageId` is the "<channelId>:<ts>" composite; `emojiType` is a Slack
+   * emoji name with or without surrounding colons (":thumbsup:" or
+   * "thumbsup"). Slack reactions have no addressable id (they're keyed by
+   * emoji name), so the returned {@link ReactionRef} carries the normalized
+   * name back as `reactionId` for a later {@link removeReaction}.
+   */
+  async function addReaction(messageId: string, emojiType: string): Promise<ReactionRef> {
+    const { channel, ts } = splitChannelTs(messageId)
+    if (!channel || !ts) {
+      throw new Error(`Slack reaction requires a "<channelId>:<ts>" message id, got "${messageId}"`)
+    }
+    const name = normalizeEmojiName(emojiType)
     const call = serializeReaction(channel, ts, name)
     await doRequest("POST", "reactions.add", call.payload)
+    return { reactionId: name }
+  }
+
+  /**
+   * Retract a reaction previously added with {@link addReaction}. Per the
+   * contract, `reactionId` is what `addReaction` returned — for Slack that
+   * is the emoji name itself.
+   */
+  async function removeReaction(messageId: string, reactionId: string): Promise<void> {
+    const { channel, ts } = splitChannelTs(messageId)
+    if (!channel || !ts) {
+      throw new Error(`Slack reaction requires a "<channelId>:<ts>" message id, got "${messageId}"`)
+    }
+    const call = serializeReactionRemoval(channel, ts, normalizeEmojiName(reactionId))
+    await doRequest("POST", "reactions.remove", call.payload)
   }
 
   const adapter: PlatformAdapter & {
-    addReaction?: typeof addReaction
     setSuggestedPrompts?: typeof setSuggestedPrompts
+    handleInteractivePayload?: typeof handleInteractivePayload
   } = {
     get meta() {
       return {
@@ -397,23 +970,33 @@ export function createSlackAdapter(opts: SlackAdapterOptions): PlatformAdapter {
       }
     },
     id: opts.id,
+    runPresentation: opts.assistantAppEnabled
+      ? createSlackRunPresentationDriver(doRequest)
+      : undefined,
+    runtimeCapabilities: {
+      ...builtInConnectorRuntimeCapabilities("slack"),
+      textStreaming: opts.assistantAppEnabled === true,
+      componentMutation: opts.assistantAppEnabled === true,
+      suggestedPrompts: opts.assistantAppEnabled === true,
+    },
     start,
     stop,
     health,
     send,
     edit,
     delete: deleteMessage,
+    uploadFile,
     fetchHistory,
     setTyping,
     refreshCredentials,
+    setPresenceStatus,
+    pinMessage,
+    unpinMessage,
     a2uiCapability: () => SLACK_A2UI_CAPABILITY,
     addReaction,
+    removeReaction,
     setSuggestedPrompts,
     handleInteractivePayload,
-  } as PlatformAdapter & {
-    addReaction?: typeof addReaction
-    setSuggestedPrompts?: typeof setSuggestedPrompts
-    handleInteractivePayload?: typeof handleInteractivePayload
   }
 
   return adapter

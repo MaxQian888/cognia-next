@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for the TS-side attachment fetcher.
  *
@@ -36,7 +37,12 @@ describe("fetchAttachment", () => {
     })
     expect(result.cached).toBe(false)
     expect(result.ref.localUrl).toBe("file:///cache/abc")
-    expect(mockFetch).toHaveBeenCalledWith("adp_1", "tg_file_xyz", "https://t.me/files/xyz")
+    expect(mockFetch).toHaveBeenCalledWith(
+      "adp_1",
+      "tg_file_xyz",
+      "https://t.me/files/xyz",
+      undefined
+    )
 
     const row = await getDb().connectorAttachments.get("adp_1:tg_file_xyz")
     expect(row).toBeDefined()
@@ -44,6 +50,21 @@ describe("fetchAttachment", () => {
     expect(row?.sizeBytes).toBe(1234)
     expect(row?.localPath).toBe("file:///cache/abc")
     expect(row?.expiresAt).toBeGreaterThan(Date.now())
+  })
+
+  it("passes optional headers to Rust on cache miss", async () => {
+    await fetchAttachment({
+      adapterId: "mx-1",
+      remoteRef: "mxc://matrix.org/abc",
+      sourceUrl: "https://matrix.org/_matrix/client/v1/media/download/matrix.org/abc",
+      headers: { Authorization: "Bearer tok" },
+    })
+    expect(mockFetch).toHaveBeenCalledWith(
+      "mx-1",
+      "mxc://matrix.org/abc",
+      "https://matrix.org/_matrix/client/v1/media/download/matrix.org/abc",
+      { Authorization: "Bearer tok" }
+    )
   })
 
   it("returns cached row on second fetch within TTL (skips Rust)", async () => {

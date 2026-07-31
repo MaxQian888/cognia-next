@@ -22,7 +22,42 @@ jest.mock("./shared/expression-field", () => ({
   }) => <textarea id={id} value={value} onChange={(e) => onChange(e.target.value)} />,
 }))
 
-import { AiPromptConfig, AiExtractConfig, AiEmbedConfig } from "./index"
+// Entity pickers hit Dexie live queries — swap for plain inputs.
+jest.mock("./shared/entity-picker", () => ({
+  ...Object.fromEntries(
+    [
+      "CharacterPicker",
+      "TeamPicker",
+      "SkillPicker",
+      "McpServerPicker",
+      "PluginPicker",
+      "SubworkflowPicker",
+      "TwinPicker",
+      "EntityPicker",
+    ].map((name) => [
+      name,
+      ({
+        value,
+        onChange,
+        id,
+      }: {
+        value?: string
+        onChange?: (v: string) => void
+        id?: string
+      }) => <input id={id} value={value ?? ""} onChange={(e) => onChange?.(e.target.value)} />,
+    ])
+  ),
+}))
+
+import {
+  AgentTurnConfig,
+  AiPromptConfig,
+  AiExtractConfig,
+  AiEmbedConfig,
+  BrowserModelConfig,
+  MemoryRecallConfig,
+  MemoryStoreConfig,
+} from "./index"
 
 function wrap(ui: React.ReactElement) {
   return render(
@@ -49,6 +84,79 @@ describe("AiPromptConfig — structured output (B1)", () => {
   })
 })
 
+describe("BrowserModelConfig", () => {
+  it("offers curated tasks and model presets without starting inference", () => {
+    Object.defineProperty(globalThis, "Worker", { configurable: true, value: class {} })
+    const onChange = jest.fn()
+    wrap(
+      <BrowserModelConfig
+        params={{ operation: "infer", task: "summarization" }}
+        onChange={onChange}
+      />
+    )
+
+    expect(screen.getByText("Operation")).toBeInTheDocument()
+    expect(screen.getByText("Task")).toBeInTheDocument()
+    expect(screen.getByLabelText(/^Model ID/)).toBeInTheDocument()
+    expect(screen.getByText(/Runtime available/)).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText("Candidate labels"), {
+      target: { value: "positive, negative" },
+    })
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ candidateLabels: ["positive", "negative"] })
+    )
+  })
+
+  it("hides model controls for status and clamps cache settings", () => {
+    wrap(<BrowserModelConfig params={{ operation: "status" }} onChange={jest.fn()} />)
+    expect(screen.queryByLabelText(/^Model ID/)).toBeNull()
+
+    const onChange = jest.fn()
+    const { unmount } = wrap(
+      <BrowserModelConfig
+        params={{ operation: "preload", task: "summarization" }}
+        onChange={onChange}
+      />
+    )
+    fireEvent.change(screen.getByLabelText("Cached models"), { target: { value: "99" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ maxCachedModels: 8 }))
+    unmount()
+  })
+})
+
+describe("AiPromptConfig — v2 routed mode + PII gate", () => {
+  it("hides v2 controls for typeVersion 1 nodes", () => {
+    wrap(<AiPromptConfig params={{ userPrompt: "x" }} onChange={jest.fn()} typeVersion={1} />)
+    expect(screen.queryByLabelText("Provider mode")).toBeNull()
+    expect(screen.queryByLabelText("PII gate")).toBeNull()
+  })
+
+  it("shows mode + PII gate selects for typeVersion 2 and keeps explicit fields", () => {
+    wrap(<AiPromptConfig params={{ userPrompt: "x" }} onChange={jest.fn()} typeVersion={2} />)
+    expect(screen.getByLabelText("Provider mode")).toBeInTheDocument()
+    expect(screen.getByLabelText("PII gate")).toBeInTheDocument()
+    // Default mode = explicit → provider/model/key fields stay visible.
+    expect(screen.getByLabelText("Provider")).toBeInTheDocument()
+    expect(screen.queryByLabelText("Model alias")).toBeNull()
+  })
+
+  it("swaps explicit credential fields for the model alias in routed mode", () => {
+    const onChange = jest.fn()
+    wrap(
+      <AiPromptConfig
+        params={{ userPrompt: "x", mode: "routed" }}
+        onChange={onChange}
+        typeVersion={2}
+      />
+    )
+    expect(screen.queryByLabelText("Provider")).toBeNull()
+    expect(screen.queryByLabelText("API key")).toBeNull()
+    const alias = screen.getByLabelText("Model alias")
+    fireEvent.change(alias, { target: { value: "fast" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ modelAlias: "fast" }))
+  })
+})
+
 describe("AiExtractConfig — required fields (B4)", () => {
   it("parses a comma-separated required list into an array", () => {
     const onChange = jest.fn()
@@ -63,6 +171,111 @@ describe("AiExtractConfig — required fields (B4)", () => {
     expect((screen.getByLabelText("Required fields (optional)") as HTMLInputElement).value).toBe(
       "a, b"
     )
+  })
+})
+
+describe("AgentTurnConfig", () => {
+  it("edits the prompt and parses the allowed-tools list", () => {
+    const onChange = jest.fn()
+    wrap(<AgentTurnConfig params={{}} onChange={onChange} />)
+
+    // The required marker (*) is part of the label's text content.
+    fireEvent.change(screen.getByLabelText(/^Prompt/), { target: { value: "do the thing" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ prompt: "do the thing" }))
+
+    fireEvent.change(screen.getByLabelText("Allowed tools (comma-separated)"), {
+      target: { value: "Bash, Read ," },
+    })
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ allowedTools: ["Bash", "Read"] })
+    )
+  })
+
+  it("hides persona fields when a character is selected", () => {
+    wrap(<AgentTurnConfig params={{ characterId: "char_1" }} onChange={jest.fn()} />)
+    expect(screen.queryByLabelText("System prompt")).toBeNull()
+    expect(screen.queryByLabelText("Allowed tools (comma-separated)")).toBeNull()
+  })
+
+  it("shows requireTools only while tools are enabled", () => {
+    const onChange = jest.fn()
+    const { rerender } = wrap(<AgentTurnConfig params={{}} onChange={onChange} />)
+    expect(screen.getByLabelText("Require tools")).toBeInTheDocument()
+
+    rerender(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <AgentTurnConfig params={{ toolsEnabled: false }} onChange={onChange} />
+      </NextIntlClientProvider>
+    )
+    expect(screen.queryByLabelText("Require tools")).toBeNull()
+  })
+})
+
+describe("MemoryRecallConfig", () => {
+  it("edits the query and shows the character picker only for character scope", () => {
+    const onChange = jest.fn()
+    const { rerender } = wrap(<MemoryRecallConfig params={{}} onChange={onChange} />)
+
+    fireEvent.change(screen.getByLabelText(/^Query/), { target: { value: "ship day" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ query: "ship day" }))
+    expect(screen.queryByLabelText(/^Character\b/)).toBeNull()
+
+    rerender(
+      <NextIntlClientProvider locale="en" messages={enMessages}>
+        <MemoryRecallConfig params={{ scope: "character" }} onChange={onChange} />
+      </NextIntlClientProvider>
+    )
+    expect(screen.getByLabelText(/^Character\b/)).toBeInTheDocument()
+  })
+
+  it("exposes workspace, agent, branch, and path namespace fields", () => {
+    wrap(
+      <MemoryRecallConfig
+        params={{ scope: "agent", projectId: "p1", agentId: "a1", branch: "main", path: "src" }}
+        onChange={jest.fn()}
+      />
+    )
+    expect(screen.getByLabelText(/^Project ID/)).toHaveValue("p1")
+    expect(screen.getByLabelText(/^Agent ID/)).toHaveValue("a1")
+    expect(screen.getByLabelText(/^Branch restriction/)).toHaveValue("main")
+    expect(screen.getByLabelText(/^Workspace-relative path/)).toHaveValue("src")
+  })
+})
+
+describe("MemoryStoreConfig", () => {
+  it("edits the fact text and importance", () => {
+    const onChange = jest.fn()
+    wrap(<MemoryStoreConfig params={{}} onChange={onChange} />)
+
+    fireEvent.change(screen.getByLabelText(/^Fact/), { target: { value: "User ships Fridays" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ text: "User ships Fridays" }))
+
+    fireEvent.change(screen.getByLabelText("Importance (1–10)"), { target: { value: "9" } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ importance: 9 }))
+  })
+
+  it("defaults the PII gate select to block", () => {
+    wrap(<MemoryStoreConfig params={{}} onChange={jest.fn()} />)
+    expect(screen.getByLabelText("PII gate")).toHaveTextContent("Block (fail the step)")
+  })
+
+  it("exposes the complete storage namespace", () => {
+    wrap(
+      <MemoryStoreConfig
+        params={{
+          scope: "workspace",
+          projectId: "p1",
+          agentId: "a1",
+          branch: "main",
+          pathPattern: "src/memory",
+        }}
+        onChange={jest.fn()}
+      />
+    )
+    expect(screen.getByLabelText(/^Project ID/)).toHaveValue("p1")
+    expect(screen.getByLabelText(/^Agent ID/)).toHaveValue("a1")
+    expect(screen.getByLabelText(/^Branch restriction/)).toHaveValue("main")
+    expect(screen.getByLabelText(/^Workspace-relative path prefix/)).toHaveValue("src/memory")
   })
 })
 

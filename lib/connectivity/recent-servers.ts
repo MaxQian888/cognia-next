@@ -29,6 +29,8 @@ export interface RecentServer {
   fingerprint?: string
   /** Short human label (e.g. first 8 chars of the device id). */
   label?: string
+  /** Companion device id issued at pair time — used to resolve `?switchTo=`. */
+  deviceId?: string
   /** Server semver reported at pair time, if known. */
   serverVersion?: string
   /** Epoch ms of the most recent successful pair / connect. */
@@ -92,6 +94,7 @@ export function recordRecentServer(
     baseUrl,
     fingerprint: entry.fingerprint || undefined,
     label: entry.label || undefined,
+    deviceId: entry.deviceId || undefined,
     serverVersion: entry.serverVersion || undefined,
     lastSeenAt: entry.lastSeenAt ?? Date.now(),
   }

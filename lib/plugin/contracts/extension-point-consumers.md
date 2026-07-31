@@ -19,44 +19,59 @@ Source-of-truth registry: `lib/plugin/contracts/plugin-points.ts`.
 
 ---
 
-## UI Extension Points (30)
+## UI Extension Points
+
+> `CANONICAL_EXTENSION_POINTS` in `plugin-points.ts` is the authoritative list
+> (it also includes the goal / perf / inbox / chat.input.menu / vscode.\* slots
+> not re-tabulated here). The table below covers the core surfaces.
 
 UI slots are rendered by `<PluginExtensionSlot point="..."/>`
 (see `components/plugins/plugin-extension-slot.tsx`) which internally
 calls `getExtensionsForPoint()` from `lib/plugin/api/extension-api.ts`.
 
-| Point                  | Status         | Host Consumer                                                       | Notes                                                                      |
-| ---------------------- | -------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `sidebar.left.top`     | implemented    | `components/sidebar/app-sidebar.tsx` (top region)                   | Always-mounted.                                                            |
-| `sidebar.left.bottom`  | implemented    | `components/sidebar/app-sidebar.tsx` (footer region)                | Always-mounted.                                                            |
-| `sidebar.right.top`    | **deprecated** | none                                                                | Retired in 0.2.0. Use `sidebar.left.top`.                                  |
-| `sidebar.right.bottom` | **deprecated** | none                                                                | Retired in 0.2.0. Use `sidebar.left.bottom`.                               |
-| `toolbar.left`         | implemented    | top toolbar (left aligned section)                                  |                                                                            |
-| `toolbar.center`       | implemented    | top toolbar (center aligned section)                                |                                                                            |
-| `toolbar.right`        | implemented    | top toolbar (right aligned section)                                 |                                                                            |
-| `statusbar.left`       | implemented    | bottom status bar (left)                                            |                                                                            |
-| `statusbar.center`     | implemented    | bottom status bar (center)                                          |                                                                            |
-| `statusbar.right`      | implemented    | bottom status bar (right)                                           |                                                                            |
-| `chat.header`          | implemented    | `components/chat/header/*`                                          | Above messages list.                                                       |
-| `chat.footer`          | implemented    | `components/chat/*` (below messages list, above composer)           |                                                                            |
-| `chat.input.above`     | implemented    | `components/chat/composer.tsx` (above input box)                    | Wired in M4.                                                               |
-| `chat.input.below`     | implemented    | `components/chat/composer.tsx` (below input box)                    | Wired in M4.                                                               |
-| `chat.input.actions`   | implemented    | `components/chat/composer/bottom-toolbar.tsx` (next to send button) | Wired in M4 via `plugin-toolbar-slot.tsx` (limit 3 + overflow).            |
-| `chat.message.before`  | implemented    | `components/chat/message.tsx` (before message body)                 | Wired in M4.                                                               |
-| `chat.message.after`   | implemented    | `components/chat/message.tsx` (after message body)                  | Wired in M4.                                                               |
-| `chat.message.actions` | **deprecated** | none                                                                | Retired in 0.2.0. Use `chat.message.footer`.                               |
-| `chat.message.footer`  | implemented    | `components/chat/message.tsx` (per-message action row)              | Use this for action buttons.                                               |
-| `artifact.toolbar`     | implemented    | `components/ai-elements/artifact*`                                  |                                                                            |
-| `artifact.actions`     | implemented    | `components/ai-elements/artifact*`                                  |                                                                            |
-| `canvas.toolbar`       | implemented    | `components/canvas/*`                                               |                                                                            |
-| `canvas.sidebar`       | implemented    | `components/canvas/*`                                               |                                                                            |
-| `panel.header`         | implemented    | generic panel shell                                                 |                                                                            |
-| `panel.footer`         | implemented    | generic panel shell                                                 |                                                                            |
-| `settings.general`     | implemented    | `components/settings/general-section.tsx`                           |                                                                            |
-| `settings.appearance`  | implemented    | `components/settings/appearance-section.tsx`                        |                                                                            |
-| `settings.ai`          | implemented    | `components/settings/ai-section.tsx`                                |                                                                            |
-| `settings.plugins`     | implemented    | `components/settings/sections/plugins-section.tsx`                  | Wired in M5A. Lets plugins contribute to the plugin settings panel itself. |
-| `command-palette`      | implemented    | command palette overlay                                             |                                                                            |
+| Point                            | Status         | Host Consumer                                                                                      | Notes                                                                                                                                                                                                |
+| -------------------------------- | -------------- | -------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sidebar.left.top`               | implemented    | `components/sidebar/app-sidebar.tsx` (top region)                                                  | Always-mounted.                                                                                                                                                                                      |
+| `sidebar.left.bottom`            | implemented    | `components/sidebar/app-sidebar.tsx` (footer region)                                               | Always-mounted.                                                                                                                                                                                      |
+| `sidebar.right.top`              | implemented    | `components/context-workbench/context-workbench.tsx` (above active panel)                          | Context: sanitized `{ resource, activePanelId }`.                                                                                                                                                    |
+| `sidebar.right.bottom`           | implemented    | `components/context-workbench/context-workbench.tsx` (below active panel)                          | Context: sanitized `{ resource, activePanelId }`.                                                                                                                                                    |
+| `toolbar.left`                   | implemented    | top toolbar (left aligned section)                                                                 |                                                                                                                                                                                                      |
+| `toolbar.center`                 | implemented    | top toolbar (center aligned section)                                                               |                                                                                                                                                                                                      |
+| `toolbar.right`                  | implemented    | top toolbar (right aligned section)                                                                |                                                                                                                                                                                                      |
+| `statusbar.left`                 | implemented    | bottom status bar (left)                                                                           |                                                                                                                                                                                                      |
+| `statusbar.center`               | implemented    | bottom status bar (center)                                                                         |                                                                                                                                                                                                      |
+| `statusbar.right`                | implemented    | bottom status bar (right)                                                                          |                                                                                                                                                                                                      |
+| `chat.header`                    | implemented    | `components/chat/header/*`                                                                         | Above messages list.                                                                                                                                                                                 |
+| `chat.footer`                    | implemented    | `components/chat/*` (below messages list, above composer)                                          |                                                                                                                                                                                                      |
+| `chat.input.above`               | implemented    | `components/chat/composer.tsx` (above input box)                                                   | Wired in M4.                                                                                                                                                                                         |
+| `chat.input.below`               | implemented    | `components/chat/composer.tsx` (below input box)                                                   | Wired in M4.                                                                                                                                                                                         |
+| `chat.input.actions`             | implemented    | `components/chat/composer/bottom-toolbar.tsx` (next to send button)                                | Wired in M4 via `plugin-toolbar-slot.tsx` (limit 3 + overflow).                                                                                                                                      |
+| `chat.message.before`            | implemented    | `components/chat/message.tsx` (before message body)                                                | Wired in M4.                                                                                                                                                                                         |
+| `chat.message.after`             | implemented    | `components/chat/message.tsx` (after message body)                                                 | Wired in M4.                                                                                                                                                                                         |
+| `chat.message.actions`           | **deprecated** | none                                                                                               | Retired in 0.2.0. Use `chat.message.footer`.                                                                                                                                                         |
+| `chat.message.footer`            | implemented    | `components/chat/message.tsx` (per-message action row)                                             | Use this for action buttons.                                                                                                                                                                         |
+| `artifact.toolbar`               | implemented    | `components/ai-elements/artifact*`                                                                 |                                                                                                                                                                                                      |
+| `artifact.actions`               | implemented    | `components/ai-elements/artifact*`                                                                 |                                                                                                                                                                                                      |
+| `canvas.toolbar`                 | implemented    | `components/canvas/*`                                                                              |                                                                                                                                                                                                      |
+| `canvas.sidebar`                 | implemented    | `components/canvas/*`                                                                              |                                                                                                                                                                                                      |
+| `panel.header`                   | implemented    | `components/context-workbench/context-workbench.tsx` (active panel header)                         | Context: sanitized `{ resource, activePanelId }`.                                                                                                                                                    |
+| `panel.footer`                   | implemented    | `components/context-workbench/context-workbench.tsx` (active panel footer)                         | Context: sanitized `{ resource, activePanelId }`.                                                                                                                                                    |
+| `settings.general`               | implemented    | `components/settings/general-section.tsx`                                                          |                                                                                                                                                                                                      |
+| `settings.appearance`            | implemented    | `components/settings/appearance-section.tsx`                                                       |                                                                                                                                                                                                      |
+| `settings.ai`                    | implemented    | `components/settings/ai-section.tsx`                                                               |                                                                                                                                                                                                      |
+| `settings.plugins`               | implemented    | `components/settings/sections/plugins-section.tsx`                                                 | Wired in M5A. Lets plugins contribute to the plugin settings panel itself.                                                                                                                           |
+| `command-palette`                | implemented    | command palette overlay                                                                            |                                                                                                                                                                                                      |
+| `terminal.toolbar`               | implemented    | `components/terminal/terminal-dock.tsx` (tab-strip trailing)                                       | Context: `{ sessionId, transport }`.                                                                                                                                                                 |
+| `agent.team.panel`               | implemented    | `components/agent/workspace/overview.tsx` (team overview tab)                                      | Context: `{ teamId, status }`.                                                                                                                                                                       |
+| `agent.team.report`              | implemented    | `components/agent/workspace/activity-report/report-plugin-slot.tsx`                                | Custom analytics beneath the native report cards. Context: `{ teamId, reportId, status, traceSessionId, completedTasks, totalTokens }` (ids + redacted aggregates). Placeholder fallback when empty. |
+| `agent.teammate.actions`         | implemented    | `components/agent/workspace/members.tsx` (per-teammate dropdown)                                   | Teammate-scoped actions inside each member's `…` menu. Context: `{ teamId, teammateId, role, status, runtime, specialization }` (ids/enums only).                                                    |
+| `agent.external-session.toolbar` | implemented    | `components/agent/external-agent/session-panel.tsx` (live run header)                              | Controls in the ACP/OpenCode/Codex live-session toolbar. Context: `{ sessionId, isExecuting, hasPlan, hasCommands }`. Panel relaxes its empty-state early-return when a plugin contributes.          |
+| `chat.tool-call.actions`         | implemented    | `components/chat/message-renderer.tsx` (beneath each tool call)                                    | Context: `{ toolName, toolState, toolInput, messageId, sessionId }`. `toolInput` is raw/unredacted — don't re-emit it to an untrusted sink. Per-call inspect/debug/export/rerun.                     |
+| `chat.message-part.actions`      | implemented    | `components/chat/message-renderer.tsx` (beneath a plugin part)                                     | UI companion to `provider.message-renderer`. Context: `{ partType, messageId, sessionId, isStreaming }`.                                                                                             |
+| `twin.panel.header`              | implemented    | `components/twin/twin-plugin-slots.tsx` → `components/twin/twin-panel.tsx` (header)                | Digital Twin workbench header toolbar actions. Context: `{ twinId, tab }`. Renders nothing when empty.                                                                                               |
+| `twin.persona.panel`             | implemented    | `components/twin/twin-plugin-slots.tsx` → `components/twin/twin-persona-tab.tsx` (below sub-tabs)  | Persona insight panel. Context: `{ twinId, entityCount, playbookCount, styleCount }` (ids + aggregates only). Renders nothing when empty.                                                            |
+| `twin.settings.cards`            | implemented    | `components/twin/twin-plugin-slots.tsx` → `components/twin/twin-settings-tab.tsx` (foot of column) | Extra card at the foot of the Settings column. Context: `{ twinId }`. Renders nothing when empty.                                                                                                    |
+| `twin.overview.panel`            | implemented    | `components/twin/twin-plugin-slots.tsx` → `components/twin/twin-overview-card.tsx` (below charts)  | Metric tile alongside the overview charts. Context: `{ twinId, sourceCount, chunkCount }` (ids + aggregates only). Renders nothing when empty.                                                       |
 
 ### Deprecated aliases
 
@@ -109,7 +124,7 @@ For payload schemas, see `types/plugin/plugin.ts:PluginHooks`.
 | ------------------------- | ------------------------------------------------------------------------------ |
 | `onAgentStart`            | `lib/claude/sync.ts` (or SDK pump in `hooks/use-claude-chat.ts`) — wired in M3 |
 | `onAgentStep`             | same as above                                                                  |
-| `onAgentToolCall`         | same as above                                                                  |
+| `onAgentToolCall`         | **deprecated** (`DEPRECATED_HOOK_POINTS`) — use `onPreToolUse`/`onPostToolUse` |
 | `onAgentComplete`         | same as above                                                                  |
 | `onAgentError`            | same as above                                                                  |
 | `onAgentPlanCreate`       | **deprecated** (ADR 0016 P1-5, 2026-05-17) — moved to `DEPRECATED_HOOK_POINTS` |
@@ -117,13 +132,13 @@ For payload schemas, see `types/plugin/plugin.ts:PluginHooks`.
 
 ### Messages (5)
 
-| Hook               | Dispatched by                                                               |
-| ------------------ | --------------------------------------------------------------------------- |
-| `onMessageSend`    | `components/chat/composer.tsx` (`buildSendContent` send path) — wired in M4 |
-| `onMessageReceive` | `lib/claude/sync.ts` SDK message receipt — wired in M3                      |
-| `onMessageRender`  | `components/chat/message.tsx`                                               |
-| `onMessageDelete`  | session ops                                                                 |
-| `onMessageEdit`    | session ops                                                                 |
+| Hook               | Dispatched by                                                                                                                                                                                                                         |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `onMessageSend`    | `hooks/chat/use-claude-chat.ts` `send()` via `lib/claude/adapter-hooks.ts:dispatchOnMessageSend` — pipeline rewrite of the outgoing user message's text (runs after `onUserPromptSubmit`; text blocks only, attachments untouched).   |
+| `onMessageReceive` | `hooks/chat/use-claude-chat.ts` turn-seal via `lib/claude/adapter-hooks.ts:dispatchOnAssistantMessage` — pipeline rewrite of the sealed assistant message (applied post-seal to store + Dexie; streaming deltas are not intercepted). |
+| `onMessageRender`  | **deprecated** (`DEPRECATED_HOOK_POINTS`, plugin-points.ts) — never dispatched; use `ctx.messagePart` renderers instead.                                                                                                              |
+| `onMessageDelete`  | session ops                                                                                                                                                                                                                           |
+| `onMessageEdit`    | session ops                                                                                                                                                                                                                           |
 
 ### Sessions (5)
 
@@ -234,13 +249,13 @@ under the synthetic owner `__host:canvas__` (cap 30/sec, refill 30/sec).
 
 ### Tool use (3)
 
-| Hook                 | Dispatched by                           |
-| -------------------- | --------------------------------------- |
-| `onUserPromptSubmit` | composer send path — wired in M4        |
-| `onPreToolUse`       | SDK tool-use intercept — wired in M3    |
-| `onPostToolUse`      | SDK tool-result intercept — wired in M3 |
-| `onPreCompact`       | compaction step (if any)                |
-| `onPostChatReceive`  | post-receive pipeline — wired in M3     |
+| Hook                 | Dispatched by                                                                                                                                                                                                                                                                                                                |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `onUserPromptSubmit` | composer send path — wired in M4                                                                                                                                                                                                                                                                                             |
+| `onPreToolUse`       | `hooks/chat/use-claude-chat.ts` `permission_request` case (chat) via `lib/claude/adapter-hooks.ts:dispatchPreToolUse`; a plugin deny/modify resolves the sidecar's `canUseTool` round-trip before any user-facing approval flow. Also `lib/ai/agent/agent-executor.ts` for plugin-dispatched agent turns.                    |
+| `onPostToolUse`      | `hooks/chat/use-claude-chat.ts` `tool_result_review` case (chat; engaged via `sendOptions.toolResultReviewEnabled` when listeners exist) via `lib/claude/adapter-hooks.ts:dispatchPostToolUse`; a returned `modifiedResult` is the model-visible output. Also `lib/ai/agent/agent-executor.ts:toolResultReviewResponderFor`. |
+| `onPreCompact`       | compaction step (if any)                                                                                                                                                                                                                                                                                                     |
+| `onPostChatReceive`  | `hooks/chat/use-claude-chat.ts` — fired once the assistant turn seals (no pending approvals); carries the sealed assistant `PluginMessage`. The canonical post-turn observation seam.                                                                                                                                        |
 
 ### RAG (3)
 

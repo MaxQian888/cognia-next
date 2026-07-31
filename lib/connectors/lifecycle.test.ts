@@ -9,7 +9,9 @@ import {
   listRunningAdapters,
   registerRunningAdapter,
   requeueAdapter,
+  resumeSuspendedAdaptersByOwner,
   subscribeCredentialsRotatedToLifecycle,
+  suspendRunningAdaptersByOwner,
   unregisterRunningAdapter,
   type AdapterRuntimeEntry,
 } from "./lifecycle"
@@ -87,6 +89,60 @@ describe("unregisterRunningAdapter", () => {
   })
 })
 
+describe("owner suspension", () => {
+  it("stops plugin transports and resumes them through the retained restart closure", async () => {
+    const resumed = makeEntry("plugin:chat", { owner: "plugin" })
+    const restart = jest.fn().mockImplementation(async () => {
+      registerRunningAdapter("plugin:chat", resumed)
+    })
+    const running = makeEntry("plugin:chat", { owner: "plugin", restart })
+    registerRunningAdapter("plugin:chat", running)
+
+    suspendRunningAdaptersByOwner("plugin")
+
+    expect(getRunningAdapter("plugin:chat")).toBeUndefined()
+    expect(running.abortController.signal.aborted).toBe(true)
+    await resumeSuspendedAdaptersByOwner("plugin")
+    expect(running.adapter.stop).toHaveBeenCalledTimes(1)
+    expect(restart).toHaveBeenCalledTimes(1)
+    expect(getRunningAdapter("plugin:chat")).toBe(resumed)
+  })
+
+  it("does not resume a suspended adapter after plugin teardown unregisters it", async () => {
+    const entry = makeEntry("plugin:gone", { owner: "plugin" })
+    registerRunningAdapter("plugin:gone", entry)
+    suspendRunningAdaptersByOwner("plugin")
+
+    unregisterRunningAdapter("plugin:gone")
+    await resumeSuspendedAdaptersByOwner("plugin")
+
+    expect(entry.restart).not.toHaveBeenCalled()
+    expect(getRunningAdapter("plugin:gone")).toBeUndefined()
+  })
+
+  it("keeps a failed resume retryable for the next local-runtime acquisition", async () => {
+    const restarted = makeEntry("plugin:retry", { owner: "plugin" })
+    const restart = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockImplementationOnce(async () => {
+        registerRunningAdapter("plugin:retry", restarted)
+      })
+    const entry = makeEntry("plugin:retry", { owner: "plugin", restart })
+    registerRunningAdapter("plugin:retry", entry)
+    const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {})
+    suspendRunningAdaptersByOwner("plugin")
+
+    await resumeSuspendedAdaptersByOwner("plugin")
+    expect(getRunningAdapter("plugin:retry")).toBeUndefined()
+    await resumeSuspendedAdaptersByOwner("plugin")
+
+    expect(restart).toHaveBeenCalledTimes(2)
+    expect(getRunningAdapter("plugin:retry")).toBe(restarted)
+    consoleSpy.mockRestore()
+  })
+})
+
 describe("requeueAdapter", () => {
   it("returns false when the adapter is not registered", async () => {
     expect(await requeueAdapter("ghost")).toBe(false)
@@ -105,12 +161,14 @@ describe("requeueAdapter", () => {
     expect(getRunningAdapter("r1")).toBeUndefined()
   })
 
-  it("propagates restart() rejections to the caller", async () => {
+  it("retries once and preserves a reconnect placeholder after repeated failure", async () => {
     const restart = jest.fn().mockRejectedValue(new Error("restart bombed"))
     const entry = makeEntry("r2", { restart })
     registerRunningAdapter("r2", entry)
-    await expect(requeueAdapter("r2")).rejects.toThrow(/restart bombed/)
+    await expect(requeueAdapter("r2")).resolves.toBe(false)
     expect(entry.abortController.signal.aborted).toBe(true)
+    expect(restart).toHaveBeenCalledTimes(2)
+    expect(getRunningAdapter("r2")).toBe(entry)
   })
 })
 
@@ -173,7 +231,7 @@ describe("subscribeCredentialsRotatedToLifecycle", () => {
     emitCredentialsRotated("slack-1")
     await new Promise((r) => setTimeout(r, 0))
     await new Promise((r) => setTimeout(r, 0))
-    expect(restart).toHaveBeenCalledTimes(1)
+    expect(restart).toHaveBeenCalledTimes(2)
     expect(consoleSpy).toHaveBeenCalled()
     consoleSpy.mockRestore()
     unsubscribe()

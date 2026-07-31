@@ -20,6 +20,9 @@ export const TELEGRAM_CAPS: readonly Capability[] = [
   "edit",
   "rich-markdown.telegram",
   "send.a2ui",
+  // Emoji segments are serialised as sendMessage text (see serialize.ts) —
+  // the capability was implemented but never declared (audited fix #14).
+  "send.emoji",
   "send.file",
   "send.image",
   "send.markdown",

@@ -113,10 +113,6 @@ export async function killAllExternalAgents(): Promise<void> {
   return invoke<void>("kill_all_external_agents")
 }
 
-export async function receiveExternalAgentStderr(agentId: string): Promise<string[]> {
-  return invoke<string[]>("receive_external_agent_stderr", { agentId })
-}
-
 export async function isExternalAgentRunning(agentId: string): Promise<boolean> {
   return invoke<boolean>("is_external_agent_running", { agentId })
 }

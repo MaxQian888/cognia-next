@@ -1,6 +1,4 @@
-/**
- * @jest-environment jsdom
- */
+/** @jest-environment jsdom */
 
 jest.mock("@/lib/tauri", () => ({
   isTauri: () => false,
@@ -8,365 +6,434 @@ jest.mock("@/lib/tauri", () => ({
 }))
 
 import {
-  RemoteTerminalSession,
+  decodeTerminalFrame,
+  decodeTerminalJson,
+  encodeTerminalFrame,
+  makeTerminalFrame,
+  TerminalFrameKind,
+} from "./protocol"
+import {
+  __setSocketTicketIssuerForTesting,
+  __setTerminalDataChannelResolverForTesting,
+  __setWebSocketFactoryForTesting,
   configureCompanionEndpointResolver,
   pickRemoteSpawn,
-  __setWebSocketFactoryForTesting,
+  RemoteTerminalSession,
 } from "./transport-ws"
 
-interface MockWS {
+const SESSION_ID = "11111111-1111-4111-8111-111111111111"
+
+interface MockSocket {
   url: string
   readyState: number
   binaryType: string
-  sent: Array<string | Uint8Array>
-  listeners: Record<string, Array<(e: MessageEvent | CloseEvent | Event) => void>>
+  sent: Uint8Array[]
   send: jest.Mock
   close: jest.Mock
   addEventListener: jest.Mock
   removeEventListener: jest.Mock
-  fireOpen: () => void
-  fireMessage: (data: string | ArrayBuffer) => void
-  fireClose: (code?: number) => void
-  fireError: () => void
+  fireOpen(): void
+  fireFrame(kind: TerminalFrameKind, payload?: unknown, sequence?: bigint): void
+  fireBytes(kind: TerminalFrameKind, payload: Uint8Array, sequence?: bigint): void
+  fireClose(): void
+  fireError(): void
 }
 
-let createdSockets: MockWS[] = []
-function lastWs(): MockWS {
-  const ws = createdSockets[createdSockets.length - 1]
-  if (!ws) throw new Error("no socket created")
-  return ws
+const sockets: MockSocket[] = []
+let ticketCounter = 0
+
+class MockTerminalDataChannel extends EventTarget {
+  readonly label = "cognia.terminal"
+  readonly ordered = true
+  readyState: RTCDataChannelState = "connecting"
+  binaryType: BinaryType = "blob"
+  sent: Uint8Array[] = []
+
+  send(value: ArrayBuffer | ArrayBufferView): void {
+    const bytes =
+      value instanceof ArrayBuffer
+        ? new Uint8Array(value)
+        : new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
+    this.sent.push(new Uint8Array(bytes))
+  }
+
+  open(): void {
+    this.readyState = "open"
+    this.dispatchEvent(new Event("open"))
+  }
+
+  fireFrame(kind: TerminalFrameKind, payload: unknown, sequence: bigint): void {
+    const bytes = encodeTerminalFrame(
+      makeTerminalFrame(kind, {
+        sessionId: SESSION_ID,
+        sequence,
+        payload: new TextEncoder().encode(JSON.stringify(payload)),
+      })
+    )
+    this.dispatchEvent(new MessageEvent("message", { data: bytes.slice().buffer }))
+  }
+
+  close(): void {
+    this.readyState = "closed"
+    this.dispatchEvent(new Event("close"))
+  }
+}
+
+function latestSocket(): MockSocket {
+  const socket = sockets.at(-1)
+  if (!socket) throw new Error("no WebSocket created")
+  return socket
+}
+
+function sessionInfo() {
+  return {
+    id: SESSION_ID,
+    hostId: "host-a",
+    kind: "localPty" as const,
+    profileId: "profile-a",
+    projectId: "project-a",
+    extensionId: null,
+    origin: "remote" as const,
+    shell: "/bin/zsh",
+    createdAt: 1,
+    lastActivityAt: 2,
+    currentController: "companion:device-a",
+    attachedClients: 1,
+    alive: true,
+    sandboxed: true,
+    integrationCapabilities: {
+      osc633: true,
+      commandStatus: true,
+      cwdTracking: true,
+      degradedReason: null,
+    },
+    replay: { firstSequence: 0, lastSequence: 0, retainedBytes: 0, truncated: false },
+  }
+}
+
+async function flush(): Promise<void> {
+  await Promise.resolve()
+  await Promise.resolve()
+}
+
+async function completeSpawn(
+  request: Parameters<typeof RemoteTerminalSession.spawn>[0] = {
+    profileId: "profile-a",
+    shell: "/bin/zsh",
+    rows: 24,
+    cols: 80,
+  }
+): Promise<RemoteTerminalSession> {
+  const promise = RemoteTerminalSession.spawn(request)
+  await flush()
+  const socket = latestSocket()
+  socket.fireOpen()
+  await flush()
+  const spawn = decodeTerminalFrame(socket.sent.at(-1)!)
+  socket.fireFrame(TerminalFrameKind.SessionSnapshot, sessionInfo(), spawn.sequence)
+  return promise
 }
 
 beforeAll(() => {
-  ;(global as unknown as { WebSocket: unknown }).WebSocket = class {
+  ;(globalThis as unknown as { WebSocket: unknown }).WebSocket = class {
+    static CONNECTING = 0
     static OPEN = 1
     static CLOSED = 3
     url: string
-    readyState: number = 1
+    readyState = 0
     binaryType = "blob"
-    private listeners: Record<string, Array<(e: MessageEvent | CloseEvent | Event) => void>> = {}
-    sent: Array<string | Uint8Array> = []
-    send = jest.fn((data: string | Uint8Array) => {
-      this.sent.push(data)
-    })
+    sent: Uint8Array[] = []
+    private listeners = new Map<string, Set<(event: Event | MessageEvent) => void>>()
+
+    constructor(url: string) {
+      this.url = url
+      sockets.push(this as unknown as MockSocket)
+    }
+
+    send = jest.fn((value: Uint8Array) => this.sent.push(new Uint8Array(value)))
     close = jest.fn(() => {
       this.readyState = 3
     })
     addEventListener = jest.fn(
-      (event: string, cb: (e: MessageEvent | CloseEvent | Event) => void) => {
-        if (!this.listeners[event]) this.listeners[event] = []
-        this.listeners[event].push(cb)
+      (
+        name: string,
+        listener: (event: Event | MessageEvent) => void,
+        options?: AddEventListenerOptions
+      ) => {
+        const wrapped = options?.once
+          ? (event: Event | MessageEvent) => {
+              this.listeners.get(name)?.delete(wrapped)
+              listener(event)
+            }
+          : listener
+        const listeners = this.listeners.get(name) ?? new Set()
+        listeners.add(wrapped)
+        this.listeners.set(name, listeners)
       }
     )
-    removeEventListener = jest.fn(
-      (event: string, cb: (e: MessageEvent | CloseEvent | Event) => void) => {
-        const list = this.listeners[event]
-        if (!list) return
-        const i = list.indexOf(cb)
-        if (i >= 0) list.splice(i, 1)
-      }
-    )
-    fireOpen() {
-      const ev = new Event("open")
-      for (const l of this.listeners["open"] ?? []) l(ev)
+    removeEventListener = jest.fn((name: string, listener: (event: Event) => void) => {
+      this.listeners.get(name)?.delete(listener)
+    })
+    private fire(name: string, event: Event | MessageEvent): void {
+      for (const listener of [...(this.listeners.get(name) ?? [])]) listener(event)
     }
-    fireMessage(data: string | ArrayBuffer) {
-      const ev = new MessageEvent("message", { data })
-      for (const l of this.listeners["message"] ?? []) l(ev)
+    fireOpen(): void {
+      this.readyState = 1
+      this.fire("open", new Event("open"))
     }
-    fireClose(code = 1000) {
+    fireFrame(kind: TerminalFrameKind, payload: unknown = {}, sequence = BigInt(0)): void {
+      const bytes = new TextEncoder().encode(JSON.stringify(payload))
+      this.fireBytes(kind, bytes, sequence)
+    }
+    fireBytes(kind: TerminalFrameKind, payload: Uint8Array, sequence = BigInt(0)): void {
+      const encoded = encodeTerminalFrame(
+        makeTerminalFrame(kind, { sessionId: SESSION_ID, sequence, payload })
+      )
+      this.fire("message", new MessageEvent("message", { data: encoded.slice().buffer }))
+    }
+    fireClose(): void {
       this.readyState = 3
-      const ev = { code } as CloseEvent
-      for (const l of this.listeners["close"] ?? []) l(ev)
+      this.fire("close", new Event("close"))
     }
-    fireError() {
-      const ev = new Event("error")
-      for (const l of this.listeners["error"] ?? []) l(ev)
-    }
-    constructor(url: string) {
-      this.url = url
-      createdSockets.push(this as unknown as MockWS)
+    fireError(): void {
+      this.fire("error", new Event("error"))
     }
   }
 })
 
 beforeEach(() => {
-  createdSockets = []
+  sockets.splice(0)
+  ticketCounter = 0
   configureCompanionEndpointResolver(async () => ({
-    baseUrl: "wss://desktop.local:7654",
-    token: "test-jwt",
+    baseUrl: "https://desktop.local:27890",
+    token: "device-jwt",
+  }))
+  __setSocketTicketIssuerForTesting(async () => ({
+    ticket: `ticket-${++ticketCounter}`,
+    expiresAt: Date.now() + 60_000,
   }))
   __setWebSocketFactoryForTesting()
+  __setTerminalDataChannelResolverForTesting()
 })
 
 afterEach(() => {
-  configureCompanionEndpointResolver(async () => null)
   jest.useRealTimers()
 })
 
-describe("RemoteTerminalSession.spawn", () => {
-  it("rejects when no companion endpoint is configured", async () => {
-    configureCompanionEndpointResolver(async () => null)
-    await expect(
-      RemoteTerminalSession.spawn({ shell: "/bin/bash", rows: 24, cols: 80 })
-    ).rejects.toThrow(/not configured/)
-  })
-
-  it("opens a WS with the spawn querystring set", async () => {
-    const spawnPromise = RemoteTerminalSession.spawn({
-      shell: "/bin/bash",
-      rows: 24,
-      cols: 80,
-      projectId: "proj-a",
-    })
-    await Promise.resolve()
-    const ws = lastWs()
-    expect(ws.url).toContain("/ws/v1/terminal")
-    expect(ws.url).toContain("token=test-jwt")
-    expect(ws.url).toContain("spawn=1")
-    expect(ws.url).toContain("shell=%2Fbin%2Fbash")
-    expect(ws.url).toContain("projectId=proj-a")
-    ws.fireMessage(JSON.stringify({ kind: "ready", sessionId: "s-1", shell: "/bin/bash" }))
-    const session = await spawnPromise
-    expect(session.id).toBe("s-1")
-    expect(session.info.origin).toBe("remote")
-  })
-
-  it("rejects when the server responds with `error` instead of `ready`", async () => {
-    const spawnPromise = RemoteTerminalSession.spawn({
-      shell: "/bin/missing",
-      rows: 24,
-      cols: 80,
-    })
-    await Promise.resolve()
-    lastWs().fireMessage(JSON.stringify({ kind: "error", message: "no such shell" }))
-    await expect(spawnPromise).rejects.toThrow(/no such shell/)
-  })
-
-  it("rejects when WS closes before ready", async () => {
-    const spawnPromise = RemoteTerminalSession.spawn({
-      shell: "/bin/sh",
-      rows: 24,
-      cols: 80,
-    })
-    await Promise.resolve()
-    lastWs().fireClose(1006)
-    await expect(spawnPromise).rejects.toThrow(/closed before ready/)
-  })
-})
-
-describe("RemoteTerminalSession runtime", () => {
-  async function spawn() {
-    const p = RemoteTerminalSession.spawn({ shell: "/bin/bash", rows: 24, cols: 80 })
-    await Promise.resolve()
-    lastWs().fireMessage(JSON.stringify({ kind: "ready", sessionId: "s-1", shell: "/bin/bash" }))
-    return p
-  }
-
-  it("forwards binary frames to onData listeners as Uint8Array", async () => {
-    const session = await spawn()
-    const seen: Uint8Array[] = []
-    session.onData((b) => seen.push(b))
-    const buf = new Uint8Array([72, 105]).buffer
-    lastWs().fireMessage(buf)
-    expect(seen).toHaveLength(1)
-    expect(Array.from(seen[0]!)).toEqual([72, 105])
-  })
-
-  it("forwards integration text frames to onIntegration listeners", async () => {
-    const session = await spawn()
-    const events: unknown[] = []
-    session.onIntegration((e) => events.push(e))
-    lastWs().fireMessage(JSON.stringify({ kind: "integration", event: { kind: "prompt_start" } }))
-    expect(events).toEqual([{ kind: "prompt_start" }])
-  })
-
-  it("tracks the highest seq across control frames", async () => {
-    const session = await spawn()
-    session.onIntegration(() => {})
-    lastWs().fireMessage(
-      JSON.stringify({ kind: "integration", event: { kind: "prompt_start" }, seq: 7 })
+describe("RemoteTerminalSession canonical LAN transport", () => {
+  it("lists and reattaches existing host-owned sessions", async () => {
+    const listPromise = RemoteTerminalSession.listLan()
+    await flush()
+    latestSocket().fireOpen()
+    await flush()
+    const list = decodeTerminalFrame(latestSocket().sent[0])
+    expect(list.kind).toBe(TerminalFrameKind.List)
+    latestSocket().fireFrame(
+      TerminalFrameKind.HostSnapshot,
+      { hostId: "host-a", sessions: [sessionInfo()] },
+      list.sequence
     )
-    // seq goes backwards — should be ignored (stale frame).
-    lastWs().fireMessage(
-      JSON.stringify({ kind: "integration", event: { kind: "prompt_end" }, seq: 3 })
-    )
-    // Forced into a reconnect to inspect the resume URL.
-    lastWs().fireClose(1006)
-    // The reconnect timer schedules with setTimeout — advance fake timers.
-    jest.useFakeTimers()
-    // re-spawn flow: replay after the first attempt fires
-    void session
-    expect(true).toBe(true) // sanity — actual seq verification below in reconnect test
+    await expect(listPromise).resolves.toEqual([sessionInfo()])
+
+    const attachPromise = RemoteTerminalSession.reattachLan(SESSION_ID, 9)
+    await flush()
+    latestSocket().fireOpen()
+    await flush()
+    const attach = decodeTerminalFrame(latestSocket().sent[0])
+    expect(attach.kind).toBe(TerminalFrameKind.Attach)
+    expect(decodeTerminalJson(attach)).toEqual({ resumeAfter: 9 })
+    latestSocket().fireFrame(TerminalFrameKind.SessionSnapshot, sessionInfo(), attach.sequence)
+    await expect(attachPromise).resolves.toMatchObject({ info: { id: SESSION_ID } })
   })
 
-  it("converts string writes to bytes via TextEncoder", async () => {
-    const session = await spawn()
+  it("uses a single-use ticket URL and sends only a synchronized profile identifier", async () => {
+    const promise = RemoteTerminalSession.spawn({
+      profileId: "profile-a",
+      shell: "/bin/zsh",
+      cwd: "/secret/project",
+      env: { SECRET: "must-not-cross-the-wire" },
+      rows: 24,
+      cols: 80,
+    })
+    await flush()
+    const socket = latestSocket()
+    expect(socket.url).toContain("/ws/terminal?ticket=ticket-1")
+    expect(socket.url).not.toContain("device-jwt")
+    expect(socket.url).not.toContain("shell")
+    socket.fireOpen()
+    await flush()
+    const frame = decodeTerminalFrame(socket.sent[0]!)
+    expect(frame.kind).toBe(TerminalFrameKind.Spawn)
+    expect(decodeTerminalJson(frame)).toEqual({ profileId: "profile-a" })
+    socket.fireFrame(TerminalFrameKind.SessionSnapshot, sessionInfo(), frame.sequence)
+    await expect(promise).resolves.toMatchObject({ id: SESSION_ID })
+  })
+
+  it("surfaces typed spawn errors", async () => {
+    const promise = RemoteTerminalSession.spawn({ shell: "ignored", rows: 24, cols: 80 })
+    await flush()
+    latestSocket().fireOpen()
+    await flush()
+    const request = decodeTerminalFrame(latestSocket().sent[0]!)
+    latestSocket().fireFrame(
+      TerminalFrameKind.Error,
+      { code: "resource_limit", message: "host session limit" },
+      request.sequence
+    )
+    await expect(promise).rejects.toMatchObject({ code: "resource_limit" })
+  })
+
+  it("dispatches output, integration, replay gaps, controller changes, and exit", async () => {
+    const session = await completeSpawn()
+    const output: number[][] = []
+    const integrations: unknown[] = []
+    const gaps: unknown[] = []
+    const controls: unknown[] = []
+    let exit: number | null | undefined
+    session.onData((bytes) => output.push([...bytes]))
+    session.onIntegration((event) => integrations.push(event))
+    session.onReplayGap((gap) => gaps.push(gap))
+    session.onControlState((state) => controls.push(state))
+    session.onExit((code) => {
+      exit = code
+    })
+    latestSocket().fireBytes(TerminalFrameKind.Stdout, new Uint8Array([72, 105]), BigInt(4))
+    latestSocket().fireFrame(TerminalFrameKind.Integration, { kind: "prompt_start" }, BigInt(5))
+    latestSocket().fireFrame(TerminalFrameKind.ReplayGap, {
+      requestedAfter: 1,
+      firstAvailable: 3,
+      lastAvailable: 5,
+    })
+    latestSocket().fireFrame(TerminalFrameKind.ControllerChanged, {
+      controller: "another-device",
+    })
+    latestSocket().fireFrame(TerminalFrameKind.Exit, { code: 7 }, BigInt(6))
+    await flush()
+    expect(output).toEqual([[72, 105]])
+    expect(integrations).toEqual([{ kind: "prompt_start" }])
+    expect(gaps).toEqual([{ requestedAfter: 1, firstAvailable: 3, lastAvailable: 5 }])
+    expect(controls).toContainEqual({
+      role: "viewer",
+      controllerId: "another-device",
+      reason: "takeover",
+    })
+    expect(exit).toBe(7)
+  })
+
+  it("encodes stdin, resize, control, detach, and kill as binary commands", async () => {
+    const session = await completeSpawn()
     await session.write("ls\n")
-    const ws = lastWs()
-    const lastSent = ws.sent[ws.sent.length - 1]
-    expect(typeof lastSent).toBe("object")
-    expect(Array.from(lastSent as Uint8Array)).toEqual([108, 115, 10])
-  })
+    const stdin = decodeTerminalFrame(latestSocket().sent.at(-1)!)
+    expect(stdin.kind).toBe(TerminalFrameKind.Stdin)
+    expect([...stdin.payload]).toEqual([108, 115, 10])
 
-  it("emits a resize control frame", async () => {
-    const session = await spawn()
-    await session.resize(32, 120)
-    const ws = lastWs()
-    expect(ws.sent[ws.sent.length - 1]).toBe(
-      JSON.stringify({ kind: "resize", rows: 32, cols: 120 })
-    )
-  })
+    const resize = session.resize(32, 120)
+    await flush()
+    let request = decodeTerminalFrame(latestSocket().sent.at(-1)!)
+    expect(request.kind).toBe(TerminalFrameKind.Resize)
+    latestSocket().fireFrame(TerminalFrameKind.Ack, { ok: true }, request.sequence)
+    await resize
 
-  it("emits a kill control frame + closes the socket + marks exited", async () => {
-    const session = await spawn()
-    await session.kill()
-    const ws = lastWs()
-    expect(ws.sent.some((s) => s === JSON.stringify({ kind: "kill" }))).toBe(true)
-    expect(ws.close).toHaveBeenCalled()
-    expect(session.isExited).toBe(true)
-  })
+    const take = session.takeControl()
+    await flush()
+    request = decodeTerminalFrame(latestSocket().sent.at(-1)!)
+    expect(request.kind).toBe(TerminalFrameKind.TakeControl)
+    latestSocket().fireFrame(TerminalFrameKind.Ack, { ok: true }, request.sequence)
+    await take
 
-  it("fires onExit when the server sends an exit control frame", async () => {
-    const session = await spawn()
-    let code: number | null | undefined
-    session.onExit((c) => {
-      code = c
-    })
-    lastWs().fireMessage(JSON.stringify({ kind: "exit", code: 1 }))
-    expect(code).toBe(1)
-    expect(session.isExited).toBe(true)
-    expect(session.lastExitCode).toBe(1)
-  })
-
-  it("invokes onExit immediately for late subscribers", async () => {
-    const session = await spawn()
-    lastWs().fireMessage(JSON.stringify({ kind: "exit", code: 0 }))
-    let code: number | null | undefined
-    session.onExit((c) => {
-      code = c
-    })
-    await Promise.resolve()
-    expect(code).toBe(0)
-  })
-})
-
-describe("RemoteTerminalSession Wave 2 — reconnect", () => {
-  async function spawn() {
-    const p = RemoteTerminalSession.spawn({ shell: "/bin/bash", rows: 24, cols: 80 })
-    await Promise.resolve()
-    lastWs().fireMessage(JSON.stringify({ kind: "ready", sessionId: "s-1", shell: "/bin/bash" }))
-    return p
-  }
-
-  it("WS close does NOT exit the session — instead schedules a reconnect", async () => {
-    jest.useFakeTimers()
-    const session = await spawn()
-    const exitListener = jest.fn()
-    session.onExit(exitListener)
-    lastWs().fireClose(1006)
-    // Reconnect scheduling is sync; the exit must NOT have fired.
-    expect(exitListener).not.toHaveBeenCalled()
+    const detach = session.detach()
+    await flush()
+    request = decodeTerminalFrame(latestSocket().sent.at(-1)!)
+    expect(request.kind).toBe(TerminalFrameKind.Detach)
+    latestSocket().fireFrame(TerminalFrameKind.Ack, { ok: true }, request.sequence)
+    await detach
     expect(session.isExited).toBe(false)
   })
 
-  it("emits transport-state=reconnecting on first drop", async () => {
+  it("reattaches with replay sequence and flushes bounded pending input", async () => {
     jest.useFakeTimers()
-    const session = await spawn()
-    const states: string[] = []
-    session.onTransportState((s) => states.push(s))
-    lastWs().fireClose(1006)
-    expect(states).toEqual(["reconnecting"])
-  })
-
-  it("uses ?sessionId&resumeFrom on the reconnect URL with the highest seen seq", async () => {
-    jest.useFakeTimers()
-    const session = await spawn()
-    session.onIntegration(() => {})
-    lastWs().fireMessage(
-      JSON.stringify({ kind: "integration", event: { kind: "prompt_start" }, seq: 9 })
-    )
-    lastWs().fireClose(1006)
-    // First backoff is 1s.
-    jest.advanceTimersByTime(1_000)
-    const reconnectSocket = lastWs()
-    expect(reconnectSocket.url).toContain("sessionId=s-1")
-    expect(reconnectSocket.url).toContain("resumeFrom=9")
-    expect(reconnectSocket.url).not.toContain("spawn=1")
-    void session
-  })
-
-  it("flushes pending writes on successful reconnect", async () => {
-    jest.useFakeTimers()
-    const session = await spawn()
-    lastWs().fireClose(1006)
-    // Write while disconnected — should be queued.
+    const session = await completeSpawn()
+    latestSocket().fireBytes(TerminalFrameKind.Stdout, new Uint8Array([1]), BigInt(9))
+    latestSocket().fireClose()
     await session.write("queued\n")
     jest.advanceTimersByTime(1_000)
-    const ws2 = lastWs()
-    // Reconnect socket is currently in "connecting" state; flush happens on open.
-    ws2.readyState = 1
-    ws2.fireOpen()
-    expect(ws2.sent.length).toBeGreaterThan(0)
-    const flushed = ws2.sent[ws2.sent.length - 1]
-    expect(Array.from(flushed as Uint8Array)).toEqual([113, 117, 101, 117, 101, 100, 10])
-  })
-
-  it("after a successful reconnect, transport-state=connected fires", async () => {
-    jest.useFakeTimers()
-    const session = await spawn()
-    const states: string[] = []
-    session.onTransportState((s) => states.push(s))
-    lastWs().fireClose(1006)
-    jest.advanceTimersByTime(1_000)
-    const ws2 = lastWs()
-    ws2.readyState = 1
-    ws2.fireOpen()
-    expect(states).toEqual(["reconnecting", "connected"])
-  })
-
-  it("after the 5-minute budget, transport-state=gone + onExit(null) fires", async () => {
-    jest.useFakeTimers()
-    const session = await spawn()
-    const states: string[] = []
-    let exitCode: number | null | undefined
-    session.onTransportState((s) => states.push(s))
-    session.onExit((c) => {
-      exitCode = c
-    })
-    // Drop the socket.
-    lastWs().fireClose(1006)
-    // Walk the backoff until budget expires. Each attempt fires error → schedule again.
-    // To avoid actually doing the math, just keep advancing time and erroring.
-    for (let i = 0; i < 20; i++) {
-      jest.advanceTimersByTime(60_000)
-      // The freshest socket — if attempt produced one, simulate immediate error.
-      const ws = createdSockets[createdSockets.length - 1]
-      if (ws && ws.url.includes("resumeFrom")) {
-        ws.fireError()
-      }
+    await flush()
+    expect(ticketCounter).toBe(2)
+    const reconnect = latestSocket()
+    expect(reconnect.url).toContain("ticket=ticket-2")
+    reconnect.fireOpen()
+    await flush()
+    const attach = decodeTerminalFrame(reconnect.sent[0]!)
+    expect(attach.kind).toBe(TerminalFrameKind.Attach)
+    expect(decodeTerminalJson(attach)).toEqual({ resumeAfter: 9 })
+    reconnect.fireFrame(TerminalFrameKind.SessionSnapshot, sessionInfo(), attach.sequence)
+    for (let index = 0; index < 5 && reconnect.sent.length < 2; index += 1) {
+      await flush()
     }
-    expect(states[states.length - 1]).toBe("gone")
-    expect(exitCode).toBeNull()
-    expect(session.isExited).toBe(true)
+    expect(reconnect.sent).toHaveLength(2)
+    const queued = decodeTerminalFrame(reconnect.sent[1]!)
+    expect(queued.kind).toBe(TerminalFrameKind.Stdin)
+    expect(new TextDecoder().decode(queued.payload)).toBe("queued\n")
   })
 
-  it("kill() during reconnect cancels the backoff and exits cleanly", async () => {
-    jest.useFakeTimers()
-    const session = await spawn()
-    lastWs().fireClose(1006)
-    await session.kill()
-    expect(session.isExited).toBe(true)
-    // Advance well past any scheduled backoff — should NOT open a new socket.
-    const before = createdSockets.length
-    jest.advanceTimersByTime(120_000)
-    expect(createdSockets.length).toBe(before)
+  it("rejects missing pairing and expired tickets before opening a socket", async () => {
+    configureCompanionEndpointResolver(async () => null)
+    await expect(
+      RemoteTerminalSession.spawn({ shell: "ignored", rows: 24, cols: 80 })
+    ).rejects.toMatchObject({ code: "unpaired" })
+    configureCompanionEndpointResolver(async () => ({ baseUrl: "https://host", token: "jwt" }))
+    __setSocketTicketIssuerForTesting(async () => ({ ticket: "expired", expiresAt: 1 }))
+    await expect(
+      RemoteTerminalSession.spawn({ shell: "ignored", rows: 24, cols: 80 })
+    ).rejects.toMatchObject({ code: "unauthorized" })
   })
 })
 
-describe("pickRemoteSpawn", () => {
-  it("returns the spawn fn on Capacitor", () => {
-    const fn = pickRemoteSpawn()
-    expect(fn).toBeTruthy()
+describe("RemoteTerminalSession canonical WAN transport", () => {
+  it("spawns over the ordered cognia.terminal channel without a socket ticket", async () => {
+    const channel = new MockTerminalDataChannel()
+    __setTerminalDataChannelResolverForTesting(() => channel as unknown as RTCDataChannel)
+
+    const promise = RemoteTerminalSession.spawnWan({
+      profileId: "profile-a",
+      shell: "/bin/zsh",
+      rows: 24,
+      cols: 80,
+    })
+    await flush()
+    channel.open()
+    await flush()
+
+    const request = decodeTerminalFrame(channel.sent[0])
+    expect(request.kind).toBe(TerminalFrameKind.Spawn)
+    expect(sockets).toHaveLength(0)
+    channel.fireFrame(TerminalFrameKind.SessionSnapshot, sessionInfo(), request.sequence)
+
+    await expect(promise).resolves.toMatchObject({ info: { id: SESSION_ID } })
   })
+
+  it("shares one multiplexed channel and allocates unique request sequences", async () => {
+    const channel = new MockTerminalDataChannel()
+    __setTerminalDataChannelResolverForTesting(() => channel as unknown as RTCDataChannel)
+
+    const first = RemoteTerminalSession.spawnWan({ shell: "ignored", rows: 24, cols: 80 })
+    await flush()
+    channel.open()
+    await flush()
+    const firstRequest = decodeTerminalFrame(channel.sent[0])
+    channel.fireFrame(TerminalFrameKind.SessionSnapshot, sessionInfo(), firstRequest.sequence)
+    await first
+
+    const second = RemoteTerminalSession.spawnWan({ shell: "ignored", rows: 24, cols: 80 })
+    for (let index = 0; index < 5 && channel.sent.length < 2; index += 1) await flush()
+    expect(channel.sent).toHaveLength(2)
+    const secondRequest = decodeTerminalFrame(channel.sent[1])
+    expect(secondRequest.sequence).toBeGreaterThan(firstRequest.sequence)
+    channel.fireFrame(TerminalFrameKind.SessionSnapshot, sessionInfo(), secondRequest.sequence)
+    await second
+  })
+})
+
+it("selects the remote session adapter on Capacitor", () => {
+  expect(pickRemoteSpawn()).toBeTruthy()
 })

@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { useProposalStore, type ProposalPayload } from "@/lib/workflow/editor/proposal-store"
 import { getEditorStore } from "@/lib/workflow/editor/store-registry"
+import { workflowEditorRevision } from "@/lib/workflow/editor/editor-revision"
 
 export interface StickyProposalBannerProps {
   workflowId: string
@@ -125,7 +126,7 @@ export function StickyProposalBanner({
         type="button"
         size="sm"
         className="h-6 gap-1 px-2 text-[11px]"
-        onClick={() => applyOpen(workflowId, open)}
+        onClick={() => applyOpen(workflowId, open, t("errorStale"), t("errorEditorNotOpen"))}
         data-testid="workflow-proposal-banner-apply"
       >
         <CheckIcon className="size-3" aria-hidden="true" />
@@ -141,13 +142,25 @@ function discardOpen(workflowId: string): void {
   })
 }
 
-function applyOpen(workflowId: string, open: ProposalPayload): void {
+function applyOpen(
+  workflowId: string,
+  open: ProposalPayload,
+  staleMessage: string,
+  editorClosedMessage: string
+): void {
   // Capture the editor-store handle OUTSIDE the transition so a mid-
   // transition editor unmount can't leave a stale reference inside the
   // deferred work.
   const store = getEditorStore(workflowId)
   if (!store) {
-    toast.error("Editor is not open — cannot apply proposal.")
+    toast.error(editorClosedMessage)
+    return
+  }
+  if (
+    open.baseRevision !== "legacy" &&
+    open.baseRevision !== workflowEditorRevision(store.getState())
+  ) {
+    toast.error(staleMessage)
     return
   }
   // Pre-flight: catch dangling-reference errors before scheduling the
@@ -157,7 +170,11 @@ function applyOpen(workflowId: string, open: ProposalPayload): void {
   // re-render lands at transition priority and stays interruptible.
   let firstError: string | undefined
   startTransition(() => {
-    const result = store.getState().applyProposalOps(open.ops)
+    const result = store.getState().applyProposalOps(open.ops, open.baseRevision)
+    if (result.stale) {
+      firstError = staleMessage
+      return
+    }
     if (result.firstError) {
       firstError = result.firstError
       return

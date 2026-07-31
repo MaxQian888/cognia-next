@@ -1,10 +1,34 @@
 jest.mock("@/lib/tauri", () => ({
   isTauri: jest.fn(),
 }))
+const mockHasNoLeakingPiiDeep = jest.fn((_value?: unknown) => true)
+jest.mock("@cognia/redact", () => ({
+  hasNoLeakingPiiDeep: (value: unknown) => mockHasNoLeakingPiiDeep(value),
+}))
+const mockRemoteCall = jest.fn()
+const mockRemoteTransport = {
+  call: (...args: unknown[]) => mockRemoteCall(...args),
+  subscribe: jest.fn(() => jest.fn()),
+}
+jest.mock("@/lib/tauri/transport-routing", () => ({
+  getActiveRemoteTransport: () => mockRemoteTransport,
+}))
 jest.mock("@/lib/claude/ipc", () => ({
+  skillsBundleUploadAbort: jest.fn(),
+  skillsBundleUploadCommit: jest.fn(),
+  skillsBundleUploadOpen: jest.fn(),
+  skillsBundleUploadWrite: jest.fn(),
+  skillsCatalogGet: jest.fn(),
+  skillsInstallAtomic: jest.fn(),
   skillsInstallNative: jest.fn(),
   skillsInstallMirrored: jest.fn(),
   skillsScanNative: jest.fn(),
+}))
+const mockRemoteState = { activeHostId: null as string | null }
+const mockActiveHostSupportsFeature = jest.fn()
+jest.mock("@/stores/remote-host/remote-host-store", () => ({
+  activeHostSupportsFeature: (...args: unknown[]) => mockActiveHostSupportsFeature(...args),
+  useRemoteHostStore: { getState: () => mockRemoteState },
 }))
 jest.mock("@/stores/settings/settings-store", () => ({
   useSettingsStore: { getState: () => ({ settings: null }) },
@@ -28,14 +52,15 @@ jest.mock("@/lib/claude/skills-io", () => ({
 
 import { pushAllToNative, pullAllFromNative, pushOneToNative, suggestedFilename } from "./sync"
 import { isTauri } from "@/lib/tauri"
-import { skillsInstallMirrored, skillsScanNative } from "@/lib/claude/ipc"
+import { skillsCatalogGet, skillsInstallMirrored, skillsScanNative } from "@/lib/claude/ipc"
 import { bulkImportSkills, getSkill, listSkills, updateSkill } from "@/lib/db/skills"
 import { listResourcesForSkill, replaceResourcesForSkill } from "@/lib/db/skill-resources"
 import { parseSkillMarkdown } from "@/lib/claude/skills-io"
-import type { Skill, SkillResource } from "@/lib/claude/types"
+import type { Skill, SkillResource } from "@cognia/agent-config-types"
 
 const mockedIsTauri = isTauri as unknown as jest.Mock
 const mockedInstall = skillsInstallMirrored as unknown as jest.Mock
+const mockedCatalogGet = skillsCatalogGet as unknown as jest.Mock
 const mockedScan = skillsScanNative as unknown as jest.Mock
 const mockedListSkills = listSkills as unknown as jest.Mock
 const mockedUpdateSkill = updateSkill as unknown as jest.Mock
@@ -47,6 +72,10 @@ const mockedParse = parseSkillMarkdown as unknown as jest.Mock
 
 beforeEach(() => {
   jest.clearAllMocks()
+  mockRemoteCall.mockReset()
+  mockHasNoLeakingPiiDeep.mockReset().mockReturnValue(true)
+  mockRemoteState.activeHostId = null
+  mockActiveHostSupportsFeature.mockReturnValue(false)
   // Default `getSkill` resolution: look up the row by id from whatever
   // `listSkills` was mocked to return for the current test. This keeps the
   // pre-existing `pushAllToNative` tests working after the loop body was
@@ -65,10 +94,103 @@ describe("suggestedFilename", () => {
 })
 
 describe("pushAllToNative", () => {
-  it("returns desktop-only error when not Tauri", async () => {
+  it("rejects writes when neither a desktop nor a capable remote host is active", async () => {
     mockedIsTauri.mockReturnValue(false)
     const r = await pushAllToNative()
-    expect(r.errors[0].error).toMatch(/Desktop only/)
+    expect(r.errors[0].error).toMatch(/does not support atomic Skill writes/)
+  })
+
+  it("uploads and atomically installs a Skill on the active remote host", async () => {
+    mockedIsTauri.mockReturnValue(false)
+    mockRemoteState.activeHostId = "remote-1"
+    mockActiveHostSupportsFeature.mockReturnValue(true)
+    mockedGetSkill.mockResolvedValue({ id: "c", name: "Custom", source: "custom" })
+    mockedListRes.mockResolvedValue([])
+    mockRemoteCall.mockImplementation(async (name: string, args: Record<string, unknown>) => {
+      if (name === "skills_bundle_upload_open") {
+        return { handleId: "upload-1", chunkBytes: 32768 }
+      }
+      if (name === "skills_bundle_upload_write") {
+        return (args.offset as number) + atob(args.dataBase64 as string).length
+      }
+      if (name === "host_admin_lease_issue") return { token: "lease-1" }
+      if (name === "skills_install_atomic") {
+        return {
+          targets: [{ target: "cognia", directory: "/remote/skills/custom", writtenFiles: [] }],
+        }
+      }
+      return undefined
+    })
+
+    const result = await pushOneToNative("c")
+
+    expect(result.pushed).toBe(1)
+    expect(mockRemoteCall).toHaveBeenCalledWith(
+      "skills_bundle_upload_open",
+      expect.objectContaining({ request: expect.any(Object) })
+    )
+    expect(mockRemoteCall).toHaveBeenCalledWith(
+      "skills_bundle_upload_write",
+      expect.objectContaining({ handleId: "upload-1", offset: 0 })
+    )
+    expect(mockRemoteCall).toHaveBeenCalledWith("skills_bundle_upload_commit", {
+      handleId: "upload-1",
+      adminLease: "lease-1",
+    })
+    expect(mockRemoteCall).toHaveBeenCalledWith(
+      "skills_install_atomic",
+      expect.objectContaining({ handleId: "upload-1", adminLease: "lease-1" })
+    )
+  })
+
+  it("blocks remote Skill content that fails the renderer PII gate", async () => {
+    mockedIsTauri.mockReturnValue(false)
+    mockRemoteState.activeHostId = "remote-1"
+    mockActiveHostSupportsFeature.mockReturnValue(true)
+    mockedGetSkill.mockResolvedValue({ id: "c", name: "Custom", source: "custom" })
+    mockedListRes.mockResolvedValue([
+      {
+        skillId: "c",
+        kind: "reference",
+        path: "contacts.md",
+        name: "contacts",
+        content: "user@example.com",
+        encoding: "utf8",
+        size: 16,
+      },
+    ])
+    mockHasNoLeakingPiiDeep.mockReturnValue(false)
+
+    const result = await pushOneToNative("c")
+
+    expect(result.pushed).toBe(0)
+    expect(result.errors[0]?.error).toMatch(/renderer PII gate/)
+    expect(mockRemoteCall).not.toHaveBeenCalled()
+  })
+
+  it("stops a remote transaction if the active host changes between chunks", async () => {
+    mockedIsTauri.mockReturnValue(false)
+    mockRemoteState.activeHostId = "remote-1"
+    mockActiveHostSupportsFeature.mockReturnValue(true)
+    mockedGetSkill.mockResolvedValue({ id: "c", name: "Custom", source: "custom" })
+    mockedListRes.mockResolvedValue([])
+    mockRemoteCall.mockImplementation(async (name: string) => {
+      if (name === "host_admin_lease_issue") return { token: "lease-1" }
+      if (name === "skills_bundle_upload_open") {
+        mockRemoteState.activeHostId = "remote-2"
+        return { handleId: "upload-1", chunkBytes: 32768 }
+      }
+      return undefined
+    })
+
+    const result = await pushOneToNative("c")
+
+    expect(result.errors[0]?.error).toContain("REMOTE_RESPONSE_STALE")
+    expect(mockRemoteCall).toHaveBeenCalledWith("skills_bundle_upload_open", expect.any(Object))
+    expect(mockRemoteCall).not.toHaveBeenCalledWith(
+      "skills_bundle_upload_write",
+      expect.any(Object)
+    )
   })
 
   it("skips builtins and pushes user skills, recording fingerprint", async () => {
@@ -183,45 +305,72 @@ describe("pushAllToNative", () => {
   })
 
   it("uses crypto.subtle digest when available", async () => {
-    // jsdom may delete or replace `globalThis.crypto` between tests; make
-    // sure we have something to attach `.subtle` to before mutating it.
-    if (!(globalThis as { crypto?: unknown }).crypto) {
-      ;(globalThis as unknown as { crypto: { subtle?: SubtleCrypto } }).crypto = {}
-    }
-    // jsdom's `crypto` global lacks `.subtle`; patch a stub that returns a
-    // deterministic ArrayBuffer so the fingerprint() function exercises the
-    // hex-encoding branch.
-    const cryptoLike = globalThis.crypto as unknown as { subtle?: SubtleCrypto }
-    const origSubtle = cryptoLike.subtle
-    cryptoLike.subtle = {
-      digest: async () => new Uint8Array([0xab, 0xcd, 0x01, 0x02]).buffer,
-    } as unknown as SubtleCrypto
-    mockedIsTauri.mockReturnValue(true)
-    mockedListSkills.mockResolvedValue([{ id: "c", name: "C", source: "custom" }])
-    mockedListRes.mockResolvedValue([])
-    mockedInstall.mockResolvedValue({
-      targets: [{ target: "cognia", directory: "/x", writtenFiles: [] }],
-      trashedFrom: null,
+    const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto")
+    Object.defineProperty(globalThis, "crypto", {
+      configurable: true,
+      value: {
+        subtle: {
+          digest: async () => new Uint8Array([0xab, 0xcd, 0x01, 0x02]).buffer,
+        },
+      } as unknown as Crypto,
     })
-    mockedUpdateSkill.mockResolvedValue(undefined)
-    const r = await pushAllToNative()
-    expect(r.pushed).toBe(1)
-    expect(mockedUpdateSkill).toHaveBeenCalledWith(
-      "c",
-      expect.objectContaining({
-        // Hex-encoded SHA-256 from our stubbed digest; first byte 0xab → "ab".
-        syncFingerprint: "abcd0102",
+    try {
+      mockedIsTauri.mockReturnValue(true)
+      mockedListSkills.mockResolvedValue([{ id: "c", name: "C", source: "custom" }])
+      mockedListRes.mockResolvedValue([])
+      mockedInstall.mockResolvedValue({
+        targets: [{ target: "cognia", directory: "/x", writtenFiles: [] }],
+        trashedFrom: null,
       })
-    )
-    cryptoLike.subtle = origSubtle as SubtleCrypto
+      mockedUpdateSkill.mockResolvedValue(undefined)
+      const r = await pushAllToNative()
+      expect(r.pushed).toBe(1)
+      expect(mockedUpdateSkill).toHaveBeenCalledWith(
+        "c",
+        expect.objectContaining({
+          // Hex-encoded SHA-256 from our stubbed digest; first byte 0xab → "ab".
+          syncFingerprint: "abcd0102",
+        })
+      )
+    } finally {
+      if (originalDescriptor) {
+        Object.defineProperty(globalThis, "crypto", originalDescriptor)
+      } else {
+        delete (globalThis as { crypto?: Crypto }).crypto
+      }
+    }
   })
 })
 
 describe("pullAllFromNative", () => {
-  it("returns desktop-only error when not Tauri", async () => {
+  it("rejects reads when neither a desktop nor a capable remote host is active", async () => {
     mockedIsTauri.mockReturnValue(false)
     const r = await pullAllFromNative()
-    expect(r.errors[0].error).toMatch(/Desktop only/)
+    expect(r.errors[0].error).toMatch(/does not expose its Skills catalog/)
+  })
+
+  it("prefers the active remote host's canonical Cognia catalog", async () => {
+    mockedIsTauri.mockReturnValue(false)
+    mockRemoteState.activeHostId = "remote-1"
+    mockActiveHostSupportsFeature.mockReturnValue(true)
+    mockedCatalogGet.mockResolvedValue({
+      cognia: [{ dirName: "remote", filePath: "/remote", content: "MD", resources: [] }],
+      claude: [{ dirName: "claude-only", filePath: "/claude", content: "MD", resources: [] }],
+      codex: [],
+    })
+    mockedListSkills
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: "remote-row", name: "Remote" }])
+    mockedParse.mockReturnValue({
+      draft: { name: "Remote", description: "", content: "MD" },
+    })
+    mockedBulk.mockResolvedValue({ created: 1 })
+    mockedReplaceRes.mockResolvedValue(undefined)
+
+    const result = await pullAllFromNative()
+
+    expect(result.pulled).toBe(1)
+    expect(mockedCatalogGet).toHaveBeenCalled()
   })
 
   it("returns empty result when no native skills", async () => {

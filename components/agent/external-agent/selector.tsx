@@ -5,7 +5,7 @@
  * Integrates with the external agent store for configuration and connection management
  */
 
-import { useState, useMemo, useCallback } from "react"
+import { useState, useMemo, useCallback, useEffect, useReducer } from "react"
 import { useTranslations } from "next-intl"
 import {
   ExternalLink,
@@ -32,12 +32,15 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { BrandIcon } from "@/components/icons/brand-icon"
 import { cn } from "@/lib/utils"
 import { ExternalAgentManager } from "./manager"
 import { ConnectionStatusBadge } from "./connection-status-badge"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import type { ExternalAgentConnectionStatus } from "@/types/agent/external-agent"
 import { getExternalAgentExecutionBlockReason } from "@/lib/ai/agent/external/config-normalizer"
+import { onProtocolAdapterRegistryChange } from "@/lib/ai/agent/external/protocol-adapter"
+import { isFromPreset } from "@/lib/ai/agent/external/presets"
 
 // =============================================================================
 // Types
@@ -95,6 +98,13 @@ export function ExternalAgentSelector({
     enabled: externalAgentsEnabled,
   } = useExternalAgentStore()
 
+  // Re-render when a plugin enables/disables its external-agent adapter so a
+  // plugin-provided agent's blocked reason updates live — the registry is not
+  // reactive, so without this the row would stay stale until the next store
+  // change.
+  const [, refreshOnRegistryChange] = useReducer((tick: number) => tick + 1, 0)
+  useEffect(() => onProtocolAdapterRegistryChange(() => refreshOnRegistryChange()), [])
+
   // Get all configured agents
   const agents = useMemo(() => getAllAgents(), [getAllAgents])
 
@@ -145,8 +155,13 @@ export function ExternalAgentSelector({
         >
           {selectedAgent ? (
             <>
+              <BrandIcon
+                id={isFromPreset(selectedAgent) ?? selectedAgent.name}
+                label={selectedAgent.name}
+                size={18}
+              />
               <ConnectionStatusIcon status={getConnectionStatus(selectedAgent.id)} />
-              <span className="hidden sm:inline max-w-[100px] truncate">{selectedAgent.name}</span>
+              <span className="hidden sm:inline max-w-[140px] truncate">{selectedAgent.name}</span>
             </>
           ) : (
             <>
@@ -157,7 +172,7 @@ export function ExternalAgentSelector({
           <ChevronDown className="h-3 w-3 opacity-50" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="center" className="w-[calc(100vw-2rem)] max-w-72">
+      <DropdownMenuContent align="center" className="w-[calc(100vw-2rem)] max-w-80">
         <DropdownMenuLabel className="text-xs text-muted-foreground">
           {t("selectAgent")}
         </DropdownMenuLabel>
@@ -166,22 +181,22 @@ export function ExternalAgentSelector({
         {/* Built-in Agent Option */}
         <DropdownMenuItem
           onClick={() => handleAgentSelect(null)}
-          className="flex items-center gap-3 p-3"
+          className="flex items-center gap-2 p-2"
         >
           <div
             className={cn(
-              "flex h-8 w-8 shrink-0 items-center justify-center rounded-md",
+              "flex h-6 w-6 shrink-0 items-center justify-center rounded-md",
               !selectedAgentId ? "bg-primary text-primary-foreground" : "bg-muted"
             )}
           >
-            <Power className="h-4 w-4" />
+            <Power className="h-3.5 w-3.5" />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <span className="font-medium text-sm">{t("builtInAgent")}</span>
-              {!selectedAgentId && <Check className="h-3 w-3 text-primary" />}
+              <span className="truncate font-medium text-sm">{t("builtInAgent")}</span>
+              {!selectedAgentId && <Check className="h-3 w-3 shrink-0 text-primary" />}
             </div>
-            <p className="text-xs text-muted-foreground">{t("builtInAgentDesc")}</p>
+            <p className="truncate text-xs text-muted-foreground">{t("builtInAgentDesc")}</p>
           </div>
         </DropdownMenuItem>
 
@@ -202,29 +217,28 @@ export function ExternalAgentSelector({
                     <DropdownMenuItem
                       key={agent.id}
                       onClick={() => handleAgentSelect(agent.id)}
-                      className="flex items-center gap-3 p-3"
+                      className="flex items-center gap-2 p-2"
                       disabled={!!executionBlockedReason}
                     >
-                      <div
-                        className={cn(
-                          "flex h-8 w-8 shrink-0 items-center justify-center rounded-md",
-                          isSelected ? "bg-primary text-primary-foreground" : "bg-muted"
-                        )}
-                      >
-                        <ConnectionStatusIcon status={status} />
-                      </div>
+                      <BrandIcon
+                        id={isFromPreset(agent) ?? agent.name}
+                        label={agent.name}
+                        size={24}
+                      />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="font-medium text-sm">{agent.name}</span>
-                          {isSelected && <Check className="h-3 w-3 text-primary" />}
+                          <span className="truncate font-medium text-sm">{agent.name}</span>
+                          {isSelected && <Check className="h-3 w-3 shrink-0 text-primary" />}
                         </div>
-                        <div className="flex items-center gap-2 mt-0.5">
+                        <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
                           <Badge variant="outline" className="text-[10px] h-4 px-1">
                             {agent.protocol.toUpperCase()}
                           </Badge>
                           {executionBlockedReason && (
                             <Badge variant="destructive" className="text-[10px] h-4 px-1">
-                              {t("selectorComingSoon")}
+                              {agent.protocol.includes(":")
+                                ? t("selectorPluginUnavailable")
+                                : t("selectorComingSoon")}
                             </Badge>
                           )}
                           <ConnectionStatusBadge
@@ -233,7 +247,7 @@ export function ExternalAgentSelector({
                           />
                         </div>
                         {executionBlockedReason && (
-                          <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1">
+                          <p className="mt-1 line-clamp-2 text-[10px] text-amber-600 dark:text-amber-400">
                             {executionBlockedReason}
                           </p>
                         )}
@@ -262,11 +276,11 @@ export function ExternalAgentSelector({
 
       {/* External Agent Manager Dialog */}
       <Dialog open={manageDialogOpen} onOpenChange={setManageDialogOpen}>
-        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
+        <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-3xl">
+          <DialogHeader className="shrink-0">
             <DialogTitle>{t("manageAgents")}</DialogTitle>
           </DialogHeader>
-          <ExternalAgentManager />
+          <ExternalAgentManager className="min-h-0 flex-1" />
         </DialogContent>
       </Dialog>
     </DropdownMenu>

@@ -39,6 +39,33 @@ export interface DiscordOutboundPayload {
   components?: Record<string, unknown>[]
 }
 
+/** One TextInput inside a Discord modal (component type 4). */
+export interface DiscordModalInput {
+  customId: string
+  label: string
+  /** 1 = short (single-line), 2 = paragraph (multi-line). */
+  style: 1 | 2
+  required?: boolean
+  placeholder?: string
+  value?: string
+  minLength?: number
+  maxLength?: number
+}
+
+/**
+ * The modal definition persisted in a `modal_open` callback binding's
+ * `payload`. On click the adapter reconstitutes the InteractionResponse
+ * (type 9) from it via {@link buildDiscordModalData}.
+ */
+export interface DiscordModalPayload {
+  title: string
+  inputs: DiscordModalInput[]
+}
+
+const MAX_MODAL_INPUTS = 5 // Discord modal cap
+const DISCORD_LABEL_MAX = 45
+const DISCORD_MODAL_TITLE_MAX = 45
+
 export interface DiscordMapperInput {
   adapterId: string
   surfaceId: string
@@ -164,15 +191,19 @@ export async function buildDiscordA2UIPayload(
         const label = stringValue(node.raw.text) || stringValue(node.raw.action) || "Button"
         const action = stringValue(node.raw.action) || node.id
         const fullId = buildActionId(input.surfaceId, node.id, action)
+        // The binding key MUST be the wire custom_id: the interaction echoes
+        // the (possibly truncated) wire id back and `resolveCallbackBinding`
+        // does an exact match — recording the untruncated fullId would break
+        // every >100-char binding (mirrors the modal path below).
+        const wireId = fullId.length > CUSTOM_ID_MAX ? `a2ui:${fullId.slice(-90)}` : fullId
         await recordCallbackBinding({
           adapterId: input.adapterId,
-          actionId: fullId,
+          actionId: wireId,
           surfaceId: input.surfaceId,
           componentId: node.id,
           conversationKey: input.conversationKey,
         })
         const href = stringValue(node.raw.href) || stringValue(node.raw.url)
-        const wireId = fullId.length > CUSTOM_ID_MAX ? `a2ui:${fullId.slice(-90)}` : fullId
         const row = ensureRow(false)
         if (row.components.length >= MAX_BUTTONS_PER_ROW) break
         if (href) {
@@ -196,14 +227,15 @@ export async function buildDiscordA2UIPayload(
       case "RadioGroup": {
         const action = stringValue(node.raw.action) || node.id
         const fullId = buildActionId(input.surfaceId, node.id, action)
+        // Same rule as Button: bind by the wire custom_id (exact-match lookup).
+        const wireId = fullId.length > CUSTOM_ID_MAX ? `a2ui:${fullId.slice(-90)}` : fullId
         await recordCallbackBinding({
           adapterId: input.adapterId,
-          actionId: fullId,
+          actionId: wireId,
           surfaceId: input.surfaceId,
           componentId: node.id,
           conversationKey: input.conversationKey,
         })
-        const wireId = fullId.length > CUSTOM_ID_MAX ? `a2ui:${fullId.slice(-90)}` : fullId
         const options = Array.isArray(node.raw.options)
           ? (node.raw.options as Array<Record<string, unknown>>)
               .filter((o) => o && (typeof o.value === "string" || typeof o.value === "number"))
@@ -232,12 +264,57 @@ export async function buildDiscordA2UIPayload(
       case "List":
       case "ButtonGroup":
         break
+      // TextField / TextArea / Dialog are consumed by the modal two-hop below.
+      case "TextField":
+      case "TextArea":
+      case "Dialog":
+        break
       default:
         // Unsupported components — caller's plainTextMirror covers it.
         break
     }
   }
   flushCardEmbed()
+
+  // Modal two-hop (ADR-0026 Track B). Discord text inputs live ONLY inside
+  // modals, never inline in a message. So a surface that carries text inputs
+  // is projected as a single trigger Button bound (kind: "modal_open") to a
+  // modal definition; on click the adapter answers InteractionResponse type 9
+  // (see `buildDiscordModalData`). The modal submit then arrives as a
+  // MODAL_SUBMIT interaction and round-trips through the normal binding lookup.
+  const modalInputs = collectModalInputs(nodes)
+  if (modalInputs.length > 0) {
+    const dialogNode = nodes.find((n) => n.node.component === "Dialog")?.node
+    const modalComponentId = dialogNode?.id ?? "modal"
+    const title =
+      stringValue(dialogNode?.raw.title) ||
+      stringValue(dialogNode?.raw.text) ||
+      modalInputs[0].label ||
+      "Form"
+    const fullId = buildActionId(input.surfaceId, modalComponentId, "submit")
+    const wireId = fullId.length > CUSTOM_ID_MAX ? `a2ui:${fullId.slice(-90)}` : fullId
+    // One binding serves both hops: the trigger click (kind → modal_open) and
+    // the modal submit (same custom_id echoed back on MODAL_SUBMIT).
+    await recordCallbackBinding({
+      adapterId: input.adapterId,
+      actionId: wireId,
+      surfaceId: input.surfaceId,
+      componentId: modalComponentId,
+      conversationKey: input.conversationKey,
+      kind: "modal_open",
+      payload: { title, inputs: modalInputs } satisfies DiscordModalPayload,
+    })
+    const row = ensureRow(false)
+    if (row.components.length < MAX_BUTTONS_PER_ROW) {
+      row.components.push({
+        type: 2, // Button
+        style: 1, // Primary
+        label:
+          stringValue(dialogNode?.raw.trigger) || stringValue(dialogNode?.raw.title) || "Open form",
+        custom_id: wireId,
+      })
+    }
+  }
 
   return {
     content: bodyLines.join("\n").trim() || undefined,
@@ -251,6 +328,68 @@ function stringValue(v: unknown): string {
   if (typeof v === "string") return v
   if (typeof v === "number" || typeof v === "boolean") return String(v)
   return ""
+}
+
+/**
+ * Collect the surface's text inputs (TextField / TextArea) into modal-input
+ * descriptors, capped at Discord's 5-per-modal limit. Order follows the
+ * render-order walk so the modal fields match the surface's layout.
+ */
+function collectModalInputs(
+  nodes: Array<{ node: A2UIWalkNode; depth: number }>
+): DiscordModalInput[] {
+  const inputs: DiscordModalInput[] = []
+  for (const { node } of nodes) {
+    if (node.component !== "TextField" && node.component !== "TextArea") continue
+    if (inputs.length >= MAX_MODAL_INPUTS) break
+    const label = stringValue(node.raw.label) || stringValue(node.raw.placeholder) || node.id
+    const required = node.raw.required === true || stringValue(node.raw.required) === "true"
+    inputs.push({
+      customId: node.id,
+      label: label.slice(0, DISCORD_LABEL_MAX),
+      style: node.component === "TextArea" ? 2 : 1,
+      required,
+      placeholder: stringValue(node.raw.placeholder) || undefined,
+      value: stringValue(node.raw.value) || stringValue(node.raw.defaultValue) || undefined,
+      minLength: typeof node.raw.minLength === "number" ? node.raw.minLength : undefined,
+      maxLength: typeof node.raw.maxLength === "number" ? node.raw.maxLength : undefined,
+    })
+  }
+  return inputs
+}
+
+/**
+ * Build the `data` object for an InteractionResponse type 9 (MODAL) from a
+ * persisted {@link DiscordModalPayload}. Each TextInput must sit alone in its
+ * own ActionRow per Discord's modal rules.
+ */
+// GAP: modal Label (component type 18) migration — Discord is moving modal
+// TextInputs from ActionRow wrappers to Label components; the ActionRow form
+// still works and the migration is a separate follow-up.
+export function buildDiscordModalData(
+  customId: string,
+  payload: DiscordModalPayload
+): Record<string, unknown> {
+  return {
+    custom_id: customId,
+    title: (payload.title || "Form").slice(0, DISCORD_MODAL_TITLE_MAX),
+    components: payload.inputs.slice(0, MAX_MODAL_INPUTS).map((inp) => ({
+      type: 1, // ActionRow
+      components: [
+        {
+          type: 4, // TextInput
+          custom_id: inp.customId,
+          label: (inp.label || inp.customId).slice(0, DISCORD_LABEL_MAX),
+          style: inp.style,
+          required: inp.required ?? false,
+          ...(inp.placeholder ? { placeholder: inp.placeholder.slice(0, 100) } : {}),
+          ...(inp.value ? { value: inp.value } : {}),
+          ...(inp.minLength !== undefined ? { min_length: inp.minLength } : {}),
+          ...(inp.maxLength !== undefined ? { max_length: inp.maxLength } : {}),
+        },
+      ],
+    })),
+  }
 }
 
 /**

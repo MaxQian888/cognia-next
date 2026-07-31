@@ -1,10 +1,9 @@
 import { projectInboundToA2UI } from "./inbound-a2ui-dispatch"
 
 describe("projectInboundToA2UI", () => {
-  it("returns null for missing payload", () => {
+  it("returns null for nullish payload", () => {
     expect(projectInboundToA2UI("slack", undefined)).toBeNull()
     expect(projectInboundToA2UI("slack", null)).toBeNull()
-    expect(projectInboundToA2UI("slack", "not-an-object")).toBeNull()
   })
 
   it("routes slack payloads to the slack mapper", () => {
@@ -37,8 +36,36 @@ describe("projectInboundToA2UI", () => {
     expect(out!.source).toBe("onebot")
   })
 
-  it("returns null for unknown platforms", () => {
-    expect(projectInboundToA2UI("matrix" as never, { x: 1 })).toBeNull()
+  it("routes the Phase-2 adapters to their mappers", () => {
+    expect(
+      projectInboundToA2UI("wecom", { msgtype: "text", text: { content: "hi" } })!.source
+    ).toBe("wecom")
+    expect(
+      projectInboundToA2UI("wechat-personal", {
+        item_list: [{ type: 1, text_item: { text: "hi" } }],
+      })!.source
+    ).toBe("wechat-personal")
+    expect(
+      projectInboundToA2UI("matrix", { content: { msgtype: "m.text", body: "hi" } })!.source
+    ).toBe("matrix")
+    expect(projectInboundToA2UI("qq-official", { d: { id: "1", content: "hi" } })!.source).toBe(
+      "qq-official"
+    )
+    expect(
+      projectInboundToA2UI("dingtalk", { msgtype: "text", text: { content: "hi" } })!.source
+    ).toBe("dingtalk")
+  })
+
+  it("routes the wechat-oa XML string payload (not rejected as a non-object)", () => {
+    const out = projectInboundToA2UI(
+      "wechat-oa",
+      "<xml><MsgType>text</MsgType><Content>hi</Content></xml>"
+    )
+    expect(out!.source).toBe("wechat-oa")
+  })
+
+  it("returns null for unhandled platforms", () => {
+    expect(projectInboundToA2UI("email" as never, { x: 1 })).toBeNull()
   })
 
   it("swallows mapper exceptions and returns null", () => {

@@ -1,0 +1,28 @@
+{
+  "name": "@cognia/latex",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Cognia KaTeX rendering layer: shared macro config, trusted/untrusted options, and an LRU-cached render with safe error fallback.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "cognia-source": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "cognia-source": "./src/*.ts",
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "katex": "*"
+  },
+  "engines": {
+    "node": ">=26.0.0"
+  }
+}

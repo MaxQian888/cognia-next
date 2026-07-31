@@ -3,7 +3,7 @@ import {
   buildPresetApplicationPlan,
   detectPresetConflicts,
 } from "./apply-to-session"
-import type { ChatSession, SystemPromptPreset } from "@/lib/claude/types"
+import type { ChatSession, SystemPromptPreset } from "@cognia/agent-config-types"
 
 function makePreset(over: Partial<SystemPromptPreset> = {}): SystemPromptPreset {
   return {

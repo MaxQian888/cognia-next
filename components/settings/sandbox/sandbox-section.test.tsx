@@ -16,6 +16,21 @@ jest.mock("./automation-policy-card", () => ({
   AutomationPolicyCard: () => <div data-testid="automation-policy-card-stub" />,
 }))
 
+// The enable + tier cards have their own tests and depend on the settings
+// store; stub them so this suite stays focused on the health card + IPC.
+jest.mock("./sandbox-enable-card", () => ({
+  SandboxEnableCard: () => <div data-testid="sandbox-enable-card-stub" />,
+}))
+jest.mock("./canvas-code-sandbox-card", () => ({
+  CanvasCodeSandboxCard: () => <div data-testid="canvas-code-sandbox-card-stub" />,
+}))
+jest.mock("./sandbox-tier-card", () => ({
+  SandboxTierCard: () => <div data-testid="sandbox-tier-card-stub" />,
+}))
+jest.mock("./sandbox-policy-card", () => ({
+  SandboxPolicyCard: () => <div data-testid="sandbox-policy-card-stub" />,
+}))
+
 import { transport } from "@/lib/tauri"
 
 const mockCall = transport.call as jest.MockedFunction<typeof transport.call>
@@ -26,6 +41,7 @@ const MESSAGES = {
       title: "Sandbox",
       description: "Per-platform OS sandbox.",
       retryButton: "Run health probe",
+      verifyButton: "Verify confinement",
       strictModeNote: "When unavailable, Bash/Edit/Write are refused.",
       backend: { label: "Backend" },
       version: { label: "Version" },
@@ -35,6 +51,12 @@ const MESSAGES = {
         ok: "Active",
         setup: "Setup required",
         down: "Unavailable",
+      },
+      probe: {
+        running: "Verifying…",
+        ok: "Confinement verified",
+        failed: "Confinement check failed",
+        label: "Probe",
       },
     },
   },
@@ -112,6 +134,42 @@ describe("SandboxSection", () => {
     await waitFor(() => expect(mockCall.mock.calls.length).toBeGreaterThan(callsBefore))
     await waitFor(() => {
       expect(screen.getByText("macos-sandbox-exec")).toBeInTheDocument()
+    })
+  })
+
+  it("runs the active confinement probe and shows the verified result", async () => {
+    mockCall.mockImplementation(async (cmd: string) => {
+      if (cmd === "sandbox_health_check") {
+        return { backend: "macos-sandbox-exec", confined: true, detail: "ok" }
+      }
+      return { available: true, backend: "macos-sandbox-exec", version: "system", last_error: "" }
+    })
+    renderWithIntl(<SandboxSection />)
+    await waitFor(() => {
+      expect(screen.getByTestId("sandbox-status-badge")).toHaveTextContent("Active")
+    })
+    await userEvent.click(screen.getByTestId("sandbox-verify-button"))
+    await waitFor(() => {
+      expect(screen.getByTestId("sandbox-probe-result")).toHaveTextContent("Confinement verified")
+    })
+  })
+
+  it("surfaces a failed confinement probe with its detail", async () => {
+    mockCall.mockImplementation(async (cmd: string) => {
+      if (cmd === "sandbox_health_check") {
+        return { backend: "linux-bwrap", confined: false, detail: "write not blocked" }
+      }
+      return { available: true, backend: "linux-bwrap", version: "system", last_error: "" }
+    })
+    renderWithIntl(<SandboxSection />)
+    await waitFor(() => {
+      expect(screen.getByTestId("sandbox-status-badge")).toHaveTextContent("Active")
+    })
+    await userEvent.click(screen.getByTestId("sandbox-verify-button"))
+    await waitFor(() => {
+      const result = screen.getByTestId("sandbox-probe-result")
+      expect(result).toHaveTextContent("Confinement check failed")
+      expect(result).toHaveTextContent("write not blocked")
     })
   })
 

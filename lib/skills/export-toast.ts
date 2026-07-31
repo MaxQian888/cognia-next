@@ -1,10 +1,10 @@
 "use client"
 
 import { toast } from "sonner"
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 import { serializeSkill, skillFilename } from "@/lib/claude/skills-io"
 import { pickDirectory, saveFilesToDir } from "@/lib/files/file-bridge"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 type TranslatorValues = Record<string, string | number | Date>
 type Translator = (key: string, vars?: TranslatorValues) => string

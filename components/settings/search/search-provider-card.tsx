@@ -14,6 +14,7 @@ import {
   ArrowDown,
 } from "lucide-react"
 import { useTranslations } from "next-intl"
+import { BrandIcon } from "@/components/icons/brand-icon"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -28,9 +29,10 @@ import {
   isProviderConfigured,
   validateApiKey,
   DEFAULT_SEARCH_PROVIDER_SETTINGS,
-} from "@/lib/search/types"
+} from "@cognia/web-search/types"
 import { cn } from "@/lib/utils"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
+import { ApiKeyPoolInput } from "./_shared/api-key-pool-input"
 
 const log = createLogger("settings.search.provider")
 
@@ -96,6 +98,7 @@ export function SearchProviderCard({
         <CollapsibleTrigger asChild>
           <div className="flex items-center justify-between p-3 cursor-pointer hover:bg-muted/50 transition-colors">
             <div className="flex items-center gap-2 min-w-0">
+              <BrandIcon id={providerId} label={config.name} size={28} />
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <span className="text-sm font-medium">{config.name}</span>
@@ -211,6 +214,35 @@ export function SearchProviderCard({
               </p>
             </div>
 
+            {/* Multi-key rotation pool — only meaningful once a primary key exists */}
+            {settings?.apiKey ? (
+              <ApiKeyPoolInput
+                keys={settings.apiKeys ?? []}
+                onChange={(apiKeys) => {
+                  log.info("provider_backup_keys_changed", { providerId, count: apiKeys.length })
+                  void setSearchProviderSettings(providerId, { apiKeys })
+                }}
+                rotationEnabled={settings.apiKeyRotationEnabled ?? false}
+                onRotationEnabledChange={(apiKeyRotationEnabled) => {
+                  log.info("provider_rotation_toggled", {
+                    providerId,
+                    enabled: apiKeyRotationEnabled,
+                  })
+                  void setSearchProviderSettings(providerId, { apiKeyRotationEnabled })
+                }}
+                strategy={settings.apiKeyRotationStrategy ?? "round-robin"}
+                onStrategyChange={(apiKeyRotationStrategy) => {
+                  log.info("provider_rotation_strategy_changed", {
+                    providerId,
+                    apiKeyRotationStrategy,
+                  })
+                  void setSearchProviderSettings(providerId, { apiKeyRotationStrategy })
+                }}
+                placeholder={config.apiKeyPlaceholder}
+                idPrefix={`${providerId}-backup-key`}
+              />
+            ) : null}
+
             {/* Google cx */}
             {providerId === "google" && (
               <div className="space-y-1.5">
@@ -320,8 +352,12 @@ export function SearchProviderCard({
               </div>
               {config.pricing && (
                 <span className="text-[10px] text-muted-foreground whitespace-nowrap">
-                  {config.pricing.freeCredits && <>{config.pricing.freeCredits} free • </>}
-                  {config.pricing.pricePerSearch && <>${config.pricing.pricePerSearch}/search</>}
+                  {config.pricing.freeCredits && (
+                    <>{t("pricingFreeCredits", { credits: config.pricing.freeCredits })} </>
+                  )}
+                  {config.pricing.pricePerSearch && (
+                    <>{t("pricingPerSearch", { price: config.pricing.pricePerSearch })}</>
+                  )}
                 </span>
               )}
             </div>

@@ -6,7 +6,7 @@
 // shape of `components/skills/skill-card.tsx` so future shared treatments
 // (drag/drop, multi-select) port cleanly.
 
-import { useMemo } from "react"
+import { memo, useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { ShieldCheckIcon, AlertTriangleIcon, CircleAlertIcon } from "lucide-react"
 import type { PluginRow } from "@/lib/db/plugin-types"
@@ -21,6 +21,7 @@ import { PluginRowActionsMenu } from "./plugin-row-actions-menu"
 import { PluginSignatureBadge, type SignatureState } from "./plugin-signature-badge"
 import { PluginRuntimeWarnings, PluginStatusPill } from "./plugin-status-badge"
 import { PluginVersionBadge } from "./_shared/plugin-version-badge"
+import { PluginAvatar } from "./plugin-avatar"
 
 interface Props {
   plugin: PluginRow
@@ -34,7 +35,9 @@ interface Props {
   onRollback?: (id: string) => void
 }
 
-export function PluginCard({
+// Memoized for the same reason as PluginLibraryRow: grid re-renders track
+// store changes, while row objects stay identity-stable across re-filters.
+export const PluginCard = memo(function PluginCard({
   plugin,
   selected,
   onToggleSelect,
@@ -93,6 +96,13 @@ export function PluginCard({
           className="mt-0.5"
           aria-label={t("selectAria", { name: plugin.name })}
         />
+        <PluginAvatar
+          name={plugin.name}
+          icon={(plugin.manifest as { icon?: string })?.icon}
+          seed={plugin.id}
+          size={28}
+          className="mt-0.5"
+        />
         <Button
           asChild
           variant="ghost"
@@ -100,7 +110,10 @@ export function PluginCard({
         >
           <button type="button" onClick={() => onOpen(plugin.id)}>
             <div className="block w-full min-w-0">
-              <div className="flex items-center gap-1.5 min-w-0">
+              {/* flex-wrap lets the version / "update available" badges drop to
+               *  a second line in narrow grid columns instead of overflowing
+               *  the card; the name still truncates on its own line. */}
+              <div className="flex flex-wrap items-center gap-1.5 min-w-0">
                 <span className="font-medium truncate">{plugin.name}</span>
                 <PluginVersionBadge version={plugin.version} className="shrink-0" />
                 {updateAvailable && (
@@ -146,18 +159,21 @@ export function PluginCard({
         )}
       </div>
 
-      <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-        <div className="flex items-center gap-2">
+      {/* flex-wrap + min-w-0 keep the source / signature / permission group and
+       *  the status pill from overflowing the card in narrow grid columns —
+       *  the pill drops below the metadata instead of spilling past the edge. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-xs text-muted-foreground">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <Badge variant="outline" className="text-xs">
             {plugin.source}
           </Badge>
           <PluginSignatureBadge state={signatureState} compact />
           {permissionCount > 0 && (
-            <span className="flex items-center gap-1">
-              <ShieldCheckIcon className="size-3" />
+            <span className="flex items-center gap-1 whitespace-nowrap">
+              <ShieldCheckIcon className="size-3 shrink-0" />
               {t("permissionCount", { count: permissionCount })}
               {dangerousPermissions.length > 0 && (
-                <AlertTriangleIcon className="size-3 text-destructive" />
+                <AlertTriangleIcon className="size-3 shrink-0 text-destructive" />
               )}
             </span>
           )}
@@ -175,7 +191,7 @@ export function PluginCard({
       )}
     </Card>
   )
-}
+})
 
 interface CardCapabilityChipProps {
   capability: string

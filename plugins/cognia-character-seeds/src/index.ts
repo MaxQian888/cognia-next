@@ -21,7 +21,7 @@
  */
 
 import type { PluginContext, PluginDefinition } from "@/types/plugin"
-import { defineCharacterPack } from "@/lib/plugin/sdk/define-character-pack"
+import { defineCharacterPack } from "@cognia/plugin-sdk"
 import {
   registerCharacterPack,
   unregisterCharacterPacksByPlugin,

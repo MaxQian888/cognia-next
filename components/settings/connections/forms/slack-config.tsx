@@ -82,11 +82,14 @@ interface SlackPersistedSettings {
 interface SlackConfigDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Called with the new adapter id after a successful create, so the parent
+   * can auto-select and open the freshly created adapter. */
+  onCreated?: (id: string) => void
   /** null = creating a new instance */
   row: AdapterInstanceRow | null
 }
 
-export function SlackConfigDialog({ open, onOpenChange, row }: SlackConfigDialogProps) {
+export function SlackConfigDialog({ open, onOpenChange, row, onCreated }: SlackConfigDialogProps) {
   const t = useTranslations("settings.connections.slack")
   const isNew = row === null
   const persisted = (row?.settings ?? {}) as SlackPersistedSettings
@@ -175,7 +178,7 @@ export function SlackConfigDialog({ open, onOpenChange, row }: SlackConfigDialog
       toast.error(t("botTokenRequired"))
       return
     }
-    if (isNew && !signingSecret.trim()) {
+    if (isNew && transport === "events-api-webhook" && !signingSecret.trim()) {
       toast.error(t("signingSecretRequired"))
       return
     }
@@ -203,7 +206,11 @@ export function SlackConfigDialog({ open, onOpenChange, row }: SlackConfigDialog
           settings: nextSettings,
           credentialsRef: {
             keyringService: "com.cognia.platforms",
-            accounts: ["botToken", "signingSecret", "appToken"],
+            accounts: [
+              "botToken",
+              ...(transport === "events-api-webhook" ? ["signingSecret"] : []),
+              ...(transport === "socket-mode" ? ["appToken"] : []),
+            ],
           },
           trigger: defaultPrivateChatPolicy(),
           defaultMode: "auto",
@@ -240,6 +247,7 @@ export function SlackConfigDialog({ open, onOpenChange, row }: SlackConfigDialog
       }
 
       toast.success(isNew ? t("adapterCreated") : t("adapterUpdated"))
+      if (isNew) onCreated?.(adapterId)
       onOpenChange(false)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
@@ -312,7 +320,9 @@ export function SlackConfigDialog({ open, onOpenChange, row }: SlackConfigDialog
           <div className="space-y-1.5">
             <Label htmlFor="sl-signing-secret">
               {t("signingSecretLabel")}
-              <span className="ml-1 text-destructive">*</span>
+              {transport === "events-api-webhook" && (
+                <span className="ml-1 text-destructive">*</span>
+              )}
             </Label>
             <p className="text-xs text-muted-foreground">{t("signingSecretHelp")}</p>
             <Input

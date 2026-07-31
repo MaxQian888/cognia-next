@@ -30,10 +30,14 @@ export function useDiscoverView(): UseDiscoverView {
   const save = useSettingsStore((s) => s.save)
 
   const byCategory = settings?.discoverViewByCategory
+  // Global fallback from `discoverDefaults.view` (Settings → Discover), applied
+  // to categories that carry no explicit per-category override. Absent → the
+  // registry default ("grid").
+  const defaultView = settings?.discoverDefaults?.view ?? DEFAULT_DISCOVER_VIEW
 
   const view = useCallback(
-    (category: DiscoverView): DiscoverViewMode => byCategory?.[category] ?? DEFAULT_DISCOVER_VIEW,
-    [byCategory]
+    (category: DiscoverView): DiscoverViewMode => byCategory?.[category] ?? defaultView,
+    [byCategory, defaultView]
   )
 
   const setView = useCallback(

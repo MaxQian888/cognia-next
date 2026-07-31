@@ -22,7 +22,9 @@ import { BuiltinToolsToggles } from "./builtin-tools-toggles"
 import { AdditionalDirectoriesList } from "./additional-directories-list"
 import { ToolPicker } from "./tool-picker"
 import { McpPicker } from "./mcp-picker"
-import type { BuiltinToolsConfig, McpServer } from "@/lib/claude/types"
+import { ExternalAgentPayloadEditor } from "./external-agent-payload-editor"
+import type { ExternalAgentDraft } from "./types"
+import type { BuiltinToolsConfig, McpServer } from "@cognia/agent-config-types"
 
 jest.mock("@/lib/tauri", () => ({
   isTauri: () => false,
@@ -123,6 +125,57 @@ describe("PermissionModeSelect", () => {
     // than the local `messages` fixture: the canonical English label is
     // "Don't ask (deny if not pre-approved)".
     expect(screen.getByText(/don't ask/i)).toBeInTheDocument()
+  })
+
+  it("narrows options to the backend's supported modes when a protocol is given", () => {
+    function ProtocolHarness() {
+      const [v, setV] = useState<string | undefined>(undefined)
+      return (
+        <PermissionModeSelect
+          protocol="codex-app-server"
+          value={v}
+          onChange={setV}
+          testId="pm-select"
+        />
+      )
+    }
+    render(withIntl(<ProtocolHarness />))
+    fireEvent.click(screen.getByTestId("pm-select"))
+    // Codex has no `dontAsk`, so it must not appear, while `bypassPermissions` does.
+    expect(screen.queryByText(/don't ask/i)).not.toBeInTheDocument()
+    expect(screen.getByText(/bypass/i)).toBeInTheDocument()
+  })
+})
+
+// ===========================================================================
+// ExternalAgentPayloadEditor — protocol-aware permission clamping
+// ===========================================================================
+
+describe("ExternalAgentPayloadEditor permission adaptation", () => {
+  function Harness() {
+    const [draft, setDraft] = useState<ExternalAgentDraft>({
+      prompt: "do it",
+      agentId: "",
+      permissionMode: "dontAsk",
+    })
+    return (
+      <>
+        <ExternalAgentPayloadEditor
+          draft={draft}
+          onDraftChange={setDraft}
+          agentsForTesting={[{ id: "cdx", name: "Codex", protocol: "codex-app-server" }]}
+        />
+        <span data-testid="effective-mode">{draft.permissionMode ?? "none"}</span>
+      </>
+    )
+  }
+
+  it("clamps an unsupported mode to the nearest supported one when the agent is selected", () => {
+    render(withIntl(<Harness />))
+    // Selecting the Codex agent (no `dontAsk`) clamps the draft down to `plan`.
+    fireEvent.click(screen.getByTestId("external-agent-payload-editor-agent-select"))
+    fireEvent.click(screen.getByText(/Codex/))
+    expect(screen.getByTestId("effective-mode")).toHaveTextContent("plan")
   })
 })
 

@@ -1,0 +1,113 @@
+---
+title: Computer Use
+description: Letting an agent drive the host desktop — the five-layer defence stack that gates every action, the HITL consent broker with time-boxed in-memory grants, coordinate rescaling for downscaled screenshots, and the sandbox crate underneath.
+---
+
+# Computer Use
+
+<Status variant="beta">Beta · ADR-0020 · policy layer from ADR-0028 Phase 5</Status>
+
+<TLDR>
+  The `computer_use` tool cannot be process-sandboxed — driving the host UI is the entire point — so the
+  defence is layered instead of walled. **Five gates** sit between a model's intent and a real click: a
+  three-tier permission (`Off` / `Whitelist` / `PerCall`) keyed by surface, a HITL consent broker, an
+  append-only audit log, a per-character tool-id filter, and a per-action policy. The consent grants a
+  user hands out are **in-memory only** — they die on app shutdown and on the kill switch, and they are
+  never written to disk. That is deliberate: a time-boxed grant lets a remote operator open a working
+  window without leaving a standing authorization behind.
+</TLDR>
+
+<StatGrid>
+  <Stat label="Defence layers" value="5" hint="permission · consent · audit · character filter · policy" />
+  <Stat label="Rust modules" value="37" hint="crates/cognia-automation/src — automation + sandbox + cua_sandbox" />
+  <Stat label="Frontend modules" value="15" hint="lib/automation — non-test .ts" />
+  <Stat label="Grant durations" value="15 / 30 / 60" hint="minutes; default 30, max 60" />
+  <Stat label="Consent timeout" value="90s" hint="default; clamped to 5s–115s" />
+  <Stat label="Audit cap" value="5000" hint="AUTOMATION_AUDIT_CAP" />
+</StatGrid>
+
+Design rationale: [ADR-0020](../adr/0020-computer-use-completeness). The per-action policy layer arrived
+later, with ADR-0028 Phase 5.
+
+## The five gates
+
+| # | Layer | Lives in | What it decides |
+| --- | --- | --- | --- |
+| 1 | **Permission tier** | `automation/permission.rs` | `Off` / `Whitelist` / `PerCall`, keyed by `Surface` |
+| 2 | **Consent broker** | `automation/consent.rs` | human-in-the-loop approval for the `PerCall` tier |
+| 3 | **Audit log** | `automation/audit.rs` | append-only record of what actually ran |
+| 4 | **Character filter** | `Character.computerUseSettings.allowedToolIds` | which tools this character may use at all |
+| 5 | **Per-action policy** | `automation/policy.rs` | constraints on the action itself |
+
+Layer 5 runs immediately **after** consent resolves, and returns Allow / Deny. A policy is a set of
+constraints — "only operate on Chrome", "never click in the password-manager screen region", "the target
+URL must match `^https://`" — stored on `AppSettings.automationPolicy` so power users can edit it from
+Settings → Sandbox → Per-action policy. An empty policy means no extra constraints.
+
+## Consent is time-boxed, not remembered
+
+The `PerCall` flow is a oneshot round-trip between Rust and the renderer:
+
+1. A Tauri command resolves to `Decision::RequireConsent { prompt }`.
+2. `ConsentBroker::request` first checks `session_grants` for an unexpired "always-allow" matching the
+   `(session_key, surface, command, plugin_id, process_name)` tuple — a hit resolves to `Allow` immediately.
+3. Otherwise it generates a UUID, registers a oneshot sender, emits `automation:consent-request` with
+   `{ id, prompt, timeoutMs }`, and awaits the response until the timeout elapses.
+4. `components/automation/consent-overlay.tsx` (desktop) and
+   `components/mobile/automation/mobile-consent-sheet.tsx` (mobile) render **Allow once / Don't ask again
+   for N minutes / Reject**, then invoke
+   `automation_consent_respond(id, allow, persist, grantDurationMs)`.
+5. `ConsentBroker::resolve` fulfils the oneshot. With `persist === true` it records a `session_grants`
+   entry with an expiry, so matching calls skip the UI until it lapses.
+
+Durations are a closed set — 15, 30 or 60 minutes (`CONSENT_GRANT_DURATIONS_MS`), defaulting to 30 and
+capped at 60. The request timeout defaults to 90s and is clamped to 5s–115s. Grants never reach disk;
+that is what the `Whitelist` tier is for.
+
+## Coordinates have to be scaled back
+
+When screenshot downscaling is on (Settings → Automation → Behavior), the model only ever sees the scaled
+frame, so every coordinate it emits is in scaled space and must be multiplied back up before dispatch.
+`lib/automation/coordinate-scaler.ts` mirrors the bidirectional scaling in Anthropic's
+`computer-use-demo` (`scaling.py`). State is keyed by capture target — `sessionKey`, cua connection id,
+or `"local"` — and refreshed on every screenshot flowing through `anthropic-action-mapper.ts`. With
+scaling disabled the source dims equal the scaled dims and the math degenerates to identity, so the path
+is the same either way.
+
+## Where it lives
+
+```
+crates/cognia-automation/src/
+  automation/
+    permission.rs  consent.rs  policy.rs  audit.rs     # the gates
+    backend.rs  dispatcher.rs  worker.rs  tool_exec.rs # execution
+    cua_route.rs  model_view.rs  events.rs  persist.rs
+    platform/  record/  virtual_display/
+  sandbox/
+    seccomp.rs  net_proxy.rs  protected.rs  limits.rs  # confinement primitives
+    macos.rs  linux.rs  windows.rs  launcher.rs  env.rs
+  cua_sandbox/
+    lifecycle.rs  protocol.rs  registry.rs  remote_client.rs
+
+lib/automation/
+  types.ts                  # Platform · Capabilities · ElementRef · Locator · Screenshot · ClickTarget
+  client.ts  plugin-tauri.ts
+  anthropic-action-mapper.ts  coordinate-scaler.ts
+  ocr-screen.ts  ocr-click.ts        # click by on-screen text
+  audit.ts  audit-retention.ts       # mirror + retention
+  consent-durations.ts
+  sandbox-client.ts  sandbox-target.ts
+  computer-use-pip.ts  picture-in-picture-layout.ts
+
+components/automation/consent-overlay.tsx
+plugins/computer-use/src/index.ts     # the tool registration
+```
+
+## Related
+
+<Cards>
+  <Card title="ADR-0020" href="../adr/0020-computer-use-completeness" description="The Computer Use decision record" />
+  <Card title="Sandbox" href="./sandbox" description="The confinement primitives this crate shares" />
+  <Card title="OCR" href="./ocr" description="What ocr-click uses to click by on-screen text" />
+  <Card title="Plugin System" href="./plugin-system" description="How the computer-use tool is registered" />
+</Cards>

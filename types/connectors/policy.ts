@@ -11,7 +11,19 @@ export type TriggerBlocker =
   | { kind: "user-blocklist"; userIds: string[] }
   | { kind: "channel-blocklist"; channelIds: string[] }
   | { kind: "keyword-blocklist"; words: string[] }
-  | { kind: "rate-limit"; perUserPerMin: number; perChannelPerMin: number }
+  | {
+      kind: "rate-limit"
+      perUserPerMin: number
+      perChannelPerMin: number
+      /**
+       * Ceiling across every sender and chat sharing one platform tenant.
+       * The per-user and per-channel buckets bound one PERSON and one ROOM;
+       * neither bounds a whole workspace, so a multi-tenant deployment had no
+       * limit that a single tenant could hit. Omitted ⇒ no tenant ceiling
+       * (single-tenant installs keep today's behavior exactly).
+       */
+      perTenantPerMin?: number
+    }
   | { kind: "cooldown-after-bot-reply"; secs: number }
 
 export interface TriggerPolicy {
@@ -21,6 +33,16 @@ export interface TriggerPolicy {
 }
 
 export type ConnectorMode = "auto" | "manual" | "draft"
+
+/** Group-message admission policy resolved at adapter then conversation scope. */
+export type InboundActivationPolicy =
+  "mention_each" | "mention_activates" | "always" | "direct_only"
+
+/** How a message received while a run is active should be interpreted. */
+export type ActiveRunDispatchMode = "queue" | "steer"
+
+/** Observed ability of a platform adapter to receive unmentioned messages. */
+export type DeliveryReadiness = "unknown" | "mentions_only" | "all_messages_verified"
 
 export const ALL_MODES = ["auto", "manual", "draft"] as const
 

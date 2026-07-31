@@ -30,16 +30,18 @@ describe("setNumericAction", () => {
     expect(peekNumericAction("b", 1)).toBe("wc:b1")
   })
 
-  it("trims to capacity 10 per conversation, evicting the oldest", () => {
+  it("trims to capacity 9 per conversation (digits 1-9), evicting the oldest", () => {
     const conv = "conv-capacity"
     for (let i = 1; i <= 12; i++) {
       setNumericAction(conv, i, `wc:${i}`, 1000 + i)
     }
-    // Numerics 1 and 2 should have been evicted to fit the cap.
+    // Numerics 1-3 should have been evicted to fit the cap.
     expect(peekNumericAction(conv, 1, 2000)).toBeUndefined()
     expect(peekNumericAction(conv, 2, 2000)).toBeUndefined()
+    expect(peekNumericAction(conv, 3, 2000)).toBeUndefined()
+    expect(peekNumericAction(conv, 4, 2000)).toBe("wc:4")
     expect(peekNumericAction(conv, 12, 2000)).toBe("wc:12")
-    expect(__countNumericActionsForTesting(conv)).toBe(10)
+    expect(__countNumericActionsForTesting(conv)).toBe(9)
   })
 })
 

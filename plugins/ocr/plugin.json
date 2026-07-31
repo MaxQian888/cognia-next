@@ -8,11 +8,12 @@
   "main": "src/index.ts",
   "author": "cognia-next",
   "license": "MIT",
+  "minAppVersion": "0.1.0",
   "engines": {
     "cognia": ">=0.1.0"
   },
   "permissions": [],
-  "activationEvents": ["onStartup"],
+  "activationEvents": ["startup", "onCommand:ocr"],
   "runtimeCompatibility": {
     "browser": {
       "availability": "supported",
@@ -21,6 +22,18 @@
     "tauri": {
       "availability": "supported",
       "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
     }
-  }
+  },
+  "commands": [
+    {
+      "id": "ocr",
+      "name": "/ocr",
+      "description": "Extract text from an image or PDF.",
+      "icon": "ScanText"
+    }
+  ]
 }

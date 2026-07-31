@@ -56,4 +56,5 @@ export const PLUGIN_GOVERNANCE_VIEWS: ReadonlyArray<PluginGovernanceSubItem> = [
   { value: "scheduled", labelKey: "scheduled" },
   { value: "analytics", labelKey: "analytics" },
   { value: "audit", labelKey: "audit" },
+  { value: "policy", labelKey: "policy" },
 ]

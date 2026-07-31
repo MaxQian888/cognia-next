@@ -1,4 +1,4 @@
-import { resolveEffectiveBones } from "./resolve-bones"
+import { applyCosmeticOverlay, resolveEffectiveBones } from "./resolve-bones"
 import type { PetBones, PetCharacterBinding } from "@/types/pet"
 
 function bones(): PetBones {
@@ -39,5 +39,34 @@ describe("resolveEffectiveBones", () => {
     expect(out.stars).toBe(5)
     // untouched cosmetic falls back to global
     expect(out.eyes).toBe("dot")
+  })
+})
+
+describe("applyCosmeticOverlay", () => {
+  it("returns bones unchanged for an absent or empty override", () => {
+    const g = bones()
+    expect(applyCosmeticOverlay(g, null)).toBe(g)
+    expect(applyCosmeticOverlay(g, undefined)).toBe(g)
+    const out = applyCosmeticOverlay(g, {})
+    expect(out).toEqual(g)
+  })
+
+  it("overrides only the cosmetic fields and never identity", () => {
+    const out = applyCosmeticOverlay(bones(), {
+      palette: { primary: "#x", secondary: "#y", accent: "#z" },
+      hat: "beanie",
+      eyes: "star",
+      bodyType: "tall",
+    })
+    expect(out.palette.primary).toBe("#x")
+    expect(out.hat).toBe("beanie")
+    expect(out.eyes).toBe("star")
+    expect(out.bodyType).toBe("tall")
+    // identity untouched
+    expect(out.species).toBe("cat")
+    expect(out.rarity).toBe("legendary")
+    expect(out.stars).toBe(5)
+    expect(out.shiny).toBe(true)
+    expect(out.stats).toEqual(bones().stats)
   })
 })

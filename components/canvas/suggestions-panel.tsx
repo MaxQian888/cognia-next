@@ -15,16 +15,38 @@ interface SuggestionsPanelProps {
   documentId: string
   suggestions: CanvasSuggestion[]
   isGenerating?: boolean
+  proposalFirst?: boolean
 }
 
 export function SuggestionsPanel({
   documentId,
   suggestions,
   isGenerating = false,
+  proposalFirst = false,
 }: SuggestionsPanelProps) {
   const t = useTranslations("canvas")
   const applySuggestion = useArtifactStore((state) => state.applySuggestion)
   const updateSuggestionStatus = useArtifactStore((state) => state.updateSuggestionStatus)
+  const proposeCanvasReview = useArtifactStore((state) => state.proposeCanvasReview)
+  const document = useArtifactStore((state) => state.canvasDocuments[documentId])
+
+  const apply = (suggestion: CanvasSuggestion) => {
+    if (!proposalFirst || !document) {
+      applySuggestion(documentId, suggestion.id)
+      return
+    }
+    const lines = document.content.split("\n")
+    const proposedContent = [
+      ...lines.slice(0, suggestion.range.startLine),
+      suggestion.suggestedText,
+      ...lines.slice(suggestion.range.endLine + 1),
+    ].join("\n")
+    const review = proposeCanvasReview(documentId, proposedContent, {
+      requestId: suggestion.id,
+      actionType: "improve",
+    })
+    if (review) updateSuggestionStatus(documentId, suggestion.id, "accepted")
+  }
 
   const pendingSuggestions = suggestions.filter((s) => s.status === "pending")
 
@@ -50,7 +72,7 @@ export function SuggestionsPanel({
             <SuggestionItem
               key={suggestion.id}
               suggestion={suggestion}
-              onApply={(id) => applySuggestion(documentId, id)}
+              onApply={() => apply(suggestion)}
               onReject={(id) => updateSuggestionStatus(documentId, id, "rejected")}
             />
           ))}

@@ -17,7 +17,7 @@ jest.mock("./mcp-server-card", () => ({
 
 import { render, screen } from "@testing-library/react"
 import { McpServerList } from "./mcp-server-list"
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 
 const servers: McpServer[] = [
   {

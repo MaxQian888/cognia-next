@@ -23,6 +23,7 @@ import {
   useEffect,
   useCallback,
   useMemo,
+  useState,
   useDeferredValue,
 } from "react"
 import { useTranslations } from "next-intl"
@@ -57,10 +58,20 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { useMediaQuery, useResizableLayout, type UseResizableLayoutResult } from "@/hooks/ui"
-import { AGENT_TRACE_MODULE } from "@/lib/agent-trace/log-adapter"
+import { AGENT_TRACE_MODULE } from "@cognia/agent-trace/log-adapter"
 import type { LogFilterPreset } from "@/types/logging"
-import type { StructuredLogEntry } from "@/lib/logging"
+import type { StructuredLogEntry } from "@cognia/logging"
 
 // Time range options in milliseconds
 const TIME_RANGES = {
@@ -153,6 +164,29 @@ export function LogPanel({
   const t = useTranslations("logging")
   const filters = useLogPanelFilters({ defaultAutoRefresh, sources })
   useLogPanelUrlSync(filters)
+  // Destructure the identity-stable setters once. Handlers below depend on
+  // these instead of the whole `filters` object — otherwise ANY of its ~30
+  // state fields changing (selected log, expanded row, arrow-key focus, every
+  // poll) would recreate every callback and defeat the toolbar/row memoization.
+  const {
+    setCurrentPage,
+    setFocusedIndex,
+    setSearchQuery,
+    setUseRegex,
+    setLevelFilter,
+    setModuleFilter,
+    setSourceFilter,
+    setSessionFilter,
+    setTimeRange,
+    setTraceFocusId,
+    setDiagnosticTransportFilter,
+    setCustomTimeRange,
+    setHighSeverityOnly,
+    setBookmarkFilterActive,
+    setShowShortcutsDialog,
+    setPageSize,
+    setSelectedLog,
+  } = filters
   // Above `lg` (1024px) use the side panel; below it, fall back to the bottom sheet.
   const isDesktopViewport = useMediaQuery("(min-width: 1024px)")
   const deferredSearchQuery = useDeferredValue(filters.searchQuery)
@@ -342,35 +376,56 @@ export function LogPanel({
   }, [groupByTraceId, groupedLogs, paginatedLogs])
 
   useEffect(() => {
-    filters.setFocusedIndex((prev) => {
+    setFocusedIndex((prev) => {
       if (prev < 0 || paginatedLogs.length === 0) return -1
       return Math.min(prev, paginatedLogs.length - 1)
     })
-  }, [filters, paginatedLogs.length])
+  }, [setFocusedIndex, paginatedLogs.length])
 
-  // Export
-  const incidentExportBundle = useMemo(
-    () => ({
+  // Export state lives in a ref so the bundle is built lazily on demand —
+  // previously it was rebuilt (with a fresh Date) on every render/poll, and
+  // its dependency on `filters` churned the export handler identity.
+  const exportStateRef = useRef({
+    filters,
+    effectiveSourceFilter,
+    allowedSources,
+    healthByTransport,
+    nativeLogging,
+    filteredLogs,
+  })
+  useEffect(() => {
+    exportStateRef.current = {
+      filters,
+      effectiveSourceFilter,
+      allowedSources,
+      healthByTransport,
+      nativeLogging,
+      filteredLogs,
+    }
+  })
+
+  const buildExportBundle = useCallback(() => {
+    const state = exportStateRef.current
+    return {
       exportedAt: new Date().toISOString(),
       filters: {
-        levelFilter: filters.levelFilter,
-        moduleFilter: filters.moduleFilter,
-        sourceFilter: effectiveSourceFilter,
-        sessionFilter: filters.sessionFilter.trim() || null,
-        timeRange: filters.timeRange,
-        searchQuery: filters.searchQuery,
-        useRegex: filters.useRegex,
-        highSeverityOnly: filters.highSeverityOnly,
-        traceFocusId: filters.traceFocusId,
-        diagnosticTransportFilter: filters.diagnosticTransportFilter,
-        allowedSources,
+        levelFilter: state.filters.levelFilter,
+        moduleFilter: state.filters.moduleFilter,
+        sourceFilter: state.effectiveSourceFilter,
+        sessionFilter: state.filters.sessionFilter.trim() || null,
+        timeRange: state.filters.timeRange,
+        searchQuery: state.filters.searchQuery,
+        useRegex: state.filters.useRegex,
+        highSeverityOnly: state.filters.highSeverityOnly,
+        traceFocusId: state.filters.traceFocusId,
+        diagnosticTransportFilter: state.filters.diagnosticTransportFilter,
+        allowedSources: state.allowedSources,
       },
-      transportHealth: healthByTransport,
-      nativeLogging,
-      logs: filteredLogs,
-    }),
-    [filters, effectiveSourceFilter, allowedSources, healthByTransport, nativeLogging, filteredLogs]
-  )
+      transportHealth: state.healthByTransport,
+      nativeLogging: state.nativeLogging,
+      logs: state.filteredLogs,
+    }
+  }, [])
 
   const downloadBlob = useCallback((blob: Blob, extension: string) => {
     const url = URL.createObjectURL(blob)
@@ -396,30 +451,47 @@ export function LogPanel({
 
   const handleExport = useCallback(
     (format: ExportFormat = "json") => {
+      const bundle = buildExportBundle()
       if (format === "json") {
-        downloadBlob(
-          createExportBlob(JSON.stringify(incidentExportBundle, null, 2), "application/json"),
-          "json"
-        )
+        downloadBlob(createExportBlob(JSON.stringify(bundle, null, 2), "application/json"), "json")
         return
       }
       if (format === "csv") {
-        const csvHeader = '"Timestamp","Level","Module","Message"\n'
-        const csvContent = filteredLogs
-          .map(
-            (log) =>
-              `"${new Date(log.timestamp).toISOString()}","${log.level}","${log.module}","${log.message.replace(/"/g, '""').replace(/[\r\n]+/g, " ")}"`
+        // Full-fidelity columns: trace/session/source/data used to be dropped,
+        // which made CSV exports useless for correlating incidents.
+        const esc = (value: string) => `"${value.replace(/"/g, '""').replace(/[\r\n]+/g, " ")}"`
+        const csvHeader =
+          '"Timestamp","Level","Module","Message","TraceId","SessionId","Source","Data"\n'
+        const csvContent = bundle.logs
+          .map((log) =>
+            [
+              esc(new Date(log.timestamp).toISOString()),
+              esc(log.level),
+              esc(log.module),
+              esc(log.message),
+              esc(log.traceId ?? ""),
+              esc(log.sessionId ?? ""),
+              esc(log.source ? JSON.stringify(log.source) : ""),
+              esc(log.data ? JSON.stringify(log.data) : ""),
+            ].join(",")
           )
           .join("\n")
         downloadBlob(createExportBlob(csvHeader + csvContent, "text/csv"), "csv")
         return
       }
+      if (format === "ndjson") {
+        // One JSON entry per line — streams into jq / Loki / Grafana without
+        // loading the whole export as a single document.
+        const ndjson = bundle.logs.map((log) => JSON.stringify(log)).join("\n")
+        downloadBlob(createExportBlob(ndjson, "application/x-ndjson"), "ndjson")
+        return
+      }
       const content = [
         "# Cognia Incident Export",
-        `# Filters: ${JSON.stringify(incidentExportBundle.filters)}`,
-        `# TransportHealth: ${JSON.stringify(incidentExportBundle.transportHealth)}`,
+        `# Filters: ${JSON.stringify(bundle.filters)}`,
+        `# TransportHealth: ${JSON.stringify(bundle.transportHealth)}`,
         "",
-        filteredLogs
+        bundle.logs
           .map((log) => {
             const level = log.level.toUpperCase().padEnd(5)
             const moduleName = log.module.padEnd(15)
@@ -430,8 +502,18 @@ export function LogPanel({
       ].join("\n")
       downloadBlob(createExportBlob(content, "text/plain"), "txt")
     },
-    [incidentExportBundle, filteredLogs, createExportBlob, downloadBlob]
+    [buildExportBundle, createExportBlob, downloadBlob]
   )
+
+  // Clearing is destructive and irreversible — gate it behind a confirmation
+  // dialog instead of firing straight from the More menu.
+  const [confirmClearOpen, setConfirmClearOpen] = useState(false)
+  const handleClearRequest = useCallback(() => setConfirmClearOpen(true), [])
+  const handleClearConfirm = useCallback(() => {
+    setConfirmClearOpen(false)
+    void clearLogs()
+    toast.success(t("panel.clearedToast"))
+  }, [clearLogs, t])
 
   const relatedLogs = useMemo(() => {
     if (!filters.selectedLog?.traceId) return []
@@ -439,79 +521,79 @@ export function LogPanel({
   }, [logs, filters.selectedLog])
 
   const resetPagination = useCallback(() => {
-    filters.setCurrentPage(1)
-    filters.setFocusedIndex(-1)
+    setCurrentPage(1)
+    setFocusedIndex(-1)
     if (scrollRef.current) {
       scrollRef.current.scrollTop = 0
     }
-  }, [filters])
+  }, [setCurrentPage, setFocusedIndex])
 
   const handlePageChange = useCallback(
     (page: number) => {
       const nextPage = Math.max(1, Math.min(page, totalPages))
-      filters.setCurrentPage(nextPage)
-      filters.setFocusedIndex(-1)
+      setCurrentPage(nextPage)
+      setFocusedIndex(-1)
       if (scrollRef.current) {
         scrollRef.current.scrollTop = 0
       }
     },
-    [filters, totalPages]
+    [setCurrentPage, setFocusedIndex, totalPages]
   )
 
   const handlePageSizeChange = useCallback(
     (nextPageSize: number) => {
-      filters.setPageSize(nextPageSize)
+      setPageSize(nextPageSize)
       resetPagination()
     },
-    [filters, resetPagination]
+    [setPageSize, resetPagination]
   )
 
   const handleSearchQueryChange = useCallback(
     (value: string) => {
       resetPagination()
-      filters.setSearchQuery(value)
+      setSearchQuery(value)
     },
-    [filters, resetPagination]
+    [setSearchQuery, resetPagination]
   )
 
   const handleUseRegexChange = useCallback(
     (value: boolean) => {
       resetPagination()
-      filters.setUseRegex(value)
+      setUseRegex(value)
     },
-    [filters, resetPagination]
+    [setUseRegex, resetPagination]
   )
 
   const handleLevelFilterChange = useCallback(
-    (value: typeof filters.levelFilter) => {
+    (value: LogPanelFilterState["levelFilter"]) => {
       resetPagination()
-      filters.setLevelFilter(value)
+      setLevelFilter(value)
     },
-    [filters, resetPagination]
+    [setLevelFilter, resetPagination]
   )
 
   const handleModuleFilterChange = useCallback(
     (value: string) => {
       resetPagination()
-      filters.setModuleFilter(value)
+      setModuleFilter(value)
     },
-    [filters, resetPagination]
+    [setModuleFilter, resetPagination]
   )
 
   const handleSourceFilterChange = useCallback(
     (value: PanelSource | "all") => {
       resetPagination()
-      filters.setSourceFilter(value)
+      setSourceFilter(value)
     },
-    [filters, resetPagination]
+    [setSourceFilter, resetPagination]
   )
 
   const handleSessionFilterChange = useCallback(
     (value: string) => {
       resetPagination()
-      filters.setSessionFilter(value)
+      setSessionFilter(value)
     },
-    [filters, resetPagination]
+    [setSessionFilter, resetPagination]
   )
 
   // Stable wrapper so the toolbar's `clearSessionFocus` prop keeps its identity.
@@ -520,11 +602,11 @@ export function LogPanel({
   }, [handleSessionFilterChange])
 
   const handleTimeRangeChange = useCallback(
-    (value: typeof filters.timeRange) => {
+    (value: LogPanelFilterState["timeRange"]) => {
       resetPagination()
-      filters.setTimeRange(value)
+      setTimeRange(value)
     },
-    [filters, resetPagination]
+    [setTimeRange, resetPagination]
   )
 
   // Active filter labels for the empty-state — referenced by VirtualizedLogList.
@@ -555,71 +637,85 @@ export function LogPanel({
 
   const handleClearAllFilters = useCallback(() => {
     resetPagination()
-    filters.setLevelFilter("all")
-    filters.setModuleFilter("all")
-    filters.setSourceFilter("all")
-    filters.setSessionFilter("")
-    filters.setTimeRange("all")
-    filters.setSearchQuery("")
-    filters.setTraceFocusId(null)
-    filters.setDiagnosticTransportFilter(null)
-    filters.setBookmarkFilterActive(false)
-  }, [filters, resetPagination])
+    setLevelFilter("all")
+    setModuleFilter("all")
+    setSourceFilter("all")
+    setSessionFilter("")
+    setTimeRange("all")
+    setSearchQuery("")
+    setTraceFocusId(null)
+    setDiagnosticTransportFilter(null)
+    setBookmarkFilterActive(false)
+  }, [
+    resetPagination,
+    setLevelFilter,
+    setModuleFilter,
+    setSourceFilter,
+    setSessionFilter,
+    setTimeRange,
+    setSearchQuery,
+    setTraceFocusId,
+    setDiagnosticTransportFilter,
+    setBookmarkFilterActive,
+  ])
 
   const handleTraceFocusChange = useCallback(
     (value: string | null) => {
       resetPagination()
-      filters.setTraceFocusId(value)
+      setTraceFocusId(value)
     },
-    [filters, resetPagination]
+    [setTraceFocusId, resetPagination]
   )
 
   const handleHighSeverityOnlyChange = useCallback(
     (value: boolean | ((prev: boolean) => boolean)) => {
       resetPagination()
-      filters.setHighSeverityOnly(value)
+      setHighSeverityOnly(value)
     },
-    [filters, resetPagination]
+    [setHighSeverityOnly, resetPagination]
   )
 
+  const applyPresetById = filters.handlePresetChange
   const handlePresetChange = useCallback(
     (presetId: string) => {
       resetPagination()
-      filters.handlePresetChange(presetId)
+      applyPresetById(presetId)
     },
-    [filters, resetPagination]
+    [applyPresetById, resetPagination]
   )
 
+  const focusTrace = filters.handleFocusTrace
   const handleFocusTrace = useCallback(
     (traceId: string, log: StructuredLogEntry) => {
       resetPagination()
-      filters.handleFocusTrace(traceId, log)
+      focusTrace(traceId, log)
     },
-    [filters, resetPagination]
+    [focusTrace, resetPagination]
   )
 
+  const focusSession = filters.handleFocusSession
   const handleFocusSession = useCallback(
     (sessionId: string, log: StructuredLogEntry) => {
       resetPagination()
-      filters.handleFocusSession(sessionId, log)
+      focusSession(sessionId, log)
     },
-    [filters, resetPagination]
+    [focusSession, resetPagination]
   )
 
   const handleDiagnosticTransportFilterChange = useCallback(
     (value: string | null) => {
       resetPagination()
-      filters.setDiagnosticTransportFilter(value)
+      setDiagnosticTransportFilter(value)
     },
-    [filters, resetPagination]
+    [setDiagnosticTransportFilter, resetPagination]
   )
 
   const handleCustomTimeRangeChange = useCallback(
     (range: { start: Date; end: Date } | null) => {
       resetPagination()
-      filters.setCustomTimeRange(range)
+      setCustomTimeRange(range)
     },
-    [filters, resetPagination]
+    [setCustomTimeRange, resetPagination]
   )
 
   // Scroll controls
@@ -759,7 +855,7 @@ export function LogPanel({
       action: {
         label: t("panel.jumpToLatest"),
         onClick: () => {
-          filters.setCurrentPage(1)
+          setCurrentPage(1)
           requestAnimationFrame(() => {
             if (scrollRef.current) {
               scrollRef.current.scrollTop = scrollRef.current.scrollHeight
@@ -768,11 +864,29 @@ export function LogPanel({
         },
       },
     })
-  }, [logs.length, safeCurrentPage, filters, t])
+  }, [logs.length, safeCurrentPage, filters.autoRefresh, filters.autoScroll, setCurrentPage, t])
 
   const onOpenShortcuts = useCallback(() => {
-    filters.setShowShortcutsDialog(true)
-  }, [filters])
+    setShowShortcutsDialog(true)
+  }, [setShowShortcutsDialog])
+
+  // Detail-panel navigation — step the selection through the current page
+  // without leaving the detail view.
+  const selectedLogId = filters.selectedLog?.id ?? null
+  const selectedIndex = useMemo(() => {
+    if (!selectedLogId) return -1
+    return paginatedLogs.findIndex((log) => log.id === selectedLogId)
+  }, [paginatedLogs, selectedLogId])
+
+  const handleNavigateDetail = useCallback(
+    (delta: -1 | 1) => {
+      if (selectedIndex < 0) return
+      const next = paginatedLogs[selectedIndex + delta]
+      if (next) setSelectedLog(next)
+    },
+    [paginatedLogs, selectedIndex, setSelectedLog]
+  )
+
   const resizableLayout = useResizableLayout("cognia-logs-panel-split")
   const headerContextValue = useMemo<LogPanelHeaderApi>(
     () => ({
@@ -838,7 +952,7 @@ export function LogPanel({
           setAutoRefresh={filters.setAutoRefresh}
           refresh={refresh}
           onExport={handleExport}
-          clearLogs={clearLogs}
+          clearLogs={handleClearRequest}
           showDetailPanel={filters.showDetailPanel}
           setShowDetailPanel={filters.setShowDetailPanel}
           autoScroll={filters.autoScroll}
@@ -866,6 +980,21 @@ export function LogPanel({
           density={filters.density}
           setDensity={filters.setDensity}
         />
+
+        <AlertDialog open={confirmClearOpen} onOpenChange={setConfirmClearOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t("panel.clearConfirmTitle")}</AlertDialogTitle>
+              <AlertDialogDescription>{t("panel.clearConfirmDescription")}</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>{t("panel.clearConfirmCancel")}</AlertDialogCancel>
+              <AlertDialogAction onClick={handleClearConfirm}>
+                {t("panel.clearConfirmConfirm")}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         {/* Stats bar */}
         {showStats && (
@@ -953,6 +1082,8 @@ export function LogPanel({
           relatedLogs={relatedLogs}
           resizableLayout={resizableLayout}
           density={filters.density}
+          selectedIndex={selectedIndex}
+          onNavigateDetail={handleNavigateDetail}
           t={t}
         />
       </div>
@@ -987,6 +1118,8 @@ interface MainContentProps {
   relatedLogs: StructuredLogEntry[]
   resizableLayout: UseResizableLayoutResult
   density: LogPanelFilterState["density"]
+  selectedIndex: number
+  onNavigateDetail: (delta: -1 | 1) => void
   t: ReturnType<typeof useTranslations>
 }
 
@@ -1017,9 +1150,13 @@ function MainContent({
   relatedLogs,
   resizableLayout,
   density,
+  selectedIndex,
+  onNavigateDetail,
   t,
 }: MainContentProps) {
   const detailOpen = filters.showDetailPanel && Boolean(filters.selectedLog) && isDesktopViewport
+  const selectedLogId =
+    filters.showDetailPanel && filters.selectedLog ? filters.selectedLog.id : null
 
   const renderMain = () => (
     <div className="flex flex-1 flex-col overflow-hidden" data-testid="log-panel-main-pane">
@@ -1066,6 +1203,7 @@ function MainContent({
           handleSelectLog={filters.handleSelectLog}
           handleFocusTrace={handleFocusTrace}
           handleFocusSession={handleFocusSession}
+          selectedLogId={selectedLogId}
           density={density}
           t={t}
           onRetry={refresh}
@@ -1090,32 +1228,47 @@ function MainContent({
         onClose={() => filters.setShowDetailPanel(false)}
         onToggleBookmark={filters.toggleBookmark}
         onSelectRelated={(log) => filters.setSelectedLog(log)}
+        onNavigate={selectedIndex >= 0 ? onNavigateDetail : undefined}
+        navPosition={
+          selectedIndex >= 0 ? { index: selectedIndex + 1, total: paginatedLogs.length } : undefined
+        }
         className={className}
       />
     ) : null
 
+  // Only persist splits that actually contain both panels — when the detail
+  // panel is closed the group reports a single 100% pane, which would
+  // clobber the user's saved 70/30 split.
+  const handleLayoutChanged = (layout: Record<string, number>) => {
+    if (Object.keys(layout).length > 1) resizableLayout.onLayoutChanged(layout)
+  }
+
   return (
     <div className="flex flex-1 overflow-hidden">
-      {detailOpen ? (
-        <div className="flex-1" data-testid="log-panel-resizable-group">
-          <ResizablePanelGroup
-            orientation="horizontal"
-            className="flex-1"
-            defaultLayout={resizableLayout.defaultLayout}
-            onLayoutChanged={resizableLayout.onLayoutChanged}
-          >
-            <ResizablePanel id="log-panel-main" defaultSize="70%" minSize="50%">
-              {renderMain()}
-            </ResizablePanel>
-            <ResizableHandle withHandle />
-            <ResizablePanel id="log-panel-detail" defaultSize="30%" minSize="20%" maxSize="50%">
-              {renderDetailPanel("h-full border-0")}
-            </ResizablePanel>
-          </ResizablePanelGroup>
-        </div>
-      ) : (
-        renderMain()
-      )}
+      {/* The panel group stays mounted whether or not the detail panel is
+          open, so toggling the detail view never remounts the timeline or the
+          virtualized list (a full remount re-created every row and dropped
+          the scroll position — the source of the open-detail jank). */}
+      <div className="flex-1" data-testid="log-panel-resizable-group">
+        <ResizablePanelGroup
+          orientation="horizontal"
+          className="flex-1"
+          defaultLayout={resizableLayout.defaultLayout}
+          onLayoutChanged={handleLayoutChanged}
+        >
+          <ResizablePanel id="log-panel-main" defaultSize="70%" minSize="50%">
+            {renderMain()}
+          </ResizablePanel>
+          {detailOpen && (
+            <>
+              <ResizableHandle withHandle />
+              <ResizablePanel id="log-panel-detail" defaultSize="30%" minSize="20%" maxSize="50%">
+                {renderDetailPanel("h-full border-0")}
+              </ResizablePanel>
+            </>
+          )}
+        </ResizablePanelGroup>
+      </div>
 
       {/* Responsive sheet for narrow viewports */}
       {!isDesktopViewport && (

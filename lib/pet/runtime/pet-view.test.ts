@@ -23,4 +23,34 @@ describe("computePetView", () => {
     expect(view.effectiveBones.species).toBe("dragon")
     expect(view.bones.species).not.toBe("dragon") // global bones untouched
   })
+
+  it("exposes effective stats (base bones + earned growth)", () => {
+    const base = generateBones("acct-1").stats
+    const view = computePetView(
+      profile({ statProgress: { debugging: 5, patience: 0, chaos: 0, wisdom: 0, snark: 0 } }),
+      null,
+      0
+    )
+    expect(view.effectiveStats.debugging).toBe(Math.min(100, base.debugging + 5))
+  })
+
+  it("reads as unwell when needs have decayed low for long enough", () => {
+    const start = 1_000_000
+    const p = profile({
+      needs: { energy: 5, mood: 5, bond: 50, lastTickAt: new Date(start).toISOString() },
+      care: {
+        lowSince: start,
+        condition: "unwell",
+        notifiedAt: start,
+        everUnwell: true,
+        careQuality: 30,
+      },
+    })
+    const view = computePetView(p, null, start + 1000)
+    expect(view.condition).toBe("unwell")
+  })
+
+  it("reads as well for a healthy pet", () => {
+    expect(computePetView(profile(), null, 0).condition).toBe("well")
+  })
 })

@@ -16,7 +16,8 @@ import {
   listTwinChunksBySource,
 } from "@/lib/db/twin-chunks"
 import { updateTwinSource } from "@/lib/db/twin-sources"
-import type { IVectorStore } from "@/lib/vector/store"
+import type { IVectorStore } from "@cognia/vector/store"
+import { ensureCollectionDimensionCompatible } from "@cognia/vector/dimension-guard"
 import type { ChunkingStrategyId, TwinChunk, TwinChunkMetadata, VectorBackend } from "@/types/twin"
 
 const COLLECTION_PREFIX = "cognia_twin_"
@@ -51,7 +52,12 @@ export interface PersistResult {
 }
 
 function newVectorDocId(twinId: string, sourceId: string, idx: number): string {
-  return `${twinId}__${sourceId}__${idx.toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+  // Deterministic: a re-ingest of the same source reuses the same ids so the
+  // remote upsert OVERWRITES the prior vectors instead of minting fresh random
+  // ids and orphaning the old ones. Random ids stranded vectors whenever a
+  // Dexie write failed after the remote upsert — the next run could no longer
+  // find them (cleanup keys off the now-missing Dexie rows) to delete them.
+  return `${twinId}__${sourceId}__${idx.toString(36)}`
 }
 
 /**
@@ -73,6 +79,12 @@ export async function persistChunks(input: PersistInput): Promise<PersistResult>
 
   const collection = input.vectorCollection ?? vectorCollectionName(input.twinId)
   const now = Date.now()
+
+  // 0. Dimension guard. If this collection already exists with a different
+  //    dimension (e.g. the embedding model was changed after the first
+  //    ingest), block before writing mismatched vectors instead of silently
+  //    corrupting the index.
+  await ensureCollectionDimensionCompatible(input.store, collection, input.embeddings[0]?.length)
 
   // 0a. Ensure the collection exists. Most vector backends raise on
   //     addDocuments-before-create; calling this once per persist call is

@@ -1,0 +1,21 @@
+{
+  "delete": "删除",
+  "deleteConfirmBatchDesc": "确定删除 {count} 个 Artifact？操作无法撤销。",
+  "deleteConfirmDesc": "此 Artifact 将被永久删除，操作无法撤销。",
+  "deleteConfirmTitle": "删除 Artifact",
+  "noArtifacts": "暂无 Artifact",
+  "noArtifactsDesc": "代码片段与生成内容会显示在这里",
+  "noMatches": "没有符合当前筛选的产物",
+  "open": "打开",
+  "types": {
+    "chart": "图表",
+    "code": "代码",
+    "document": "文档",
+    "html": "HTML",
+    "jupyter": "Jupyter",
+    "math": "数学",
+    "mermaid": "图表",
+    "react": "React",
+    "svg": "SVG"
+  }
+}

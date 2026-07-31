@@ -4,7 +4,7 @@
  */
 
 import type { AgentTool, ToolCall } from "@/lib/ai/agent"
-import type { ProviderName } from "../provider/provider"
+import type { ProviderName } from "@cognia/provider-types/provider"
 
 /**
  * SubAgent token usage statistics
@@ -13,6 +13,26 @@ export interface SubAgentTokenUsage {
   promptTokens: number
   completionTokens: number
   totalTokens: number
+}
+
+/**
+ * A single live tool call made by a running sub-agent. Surfaced inline in the
+ * chat `SubagentPart` (the tool list under an expanded card) — distinct from the
+ * glanceable {@link SubAgent.toolUses} counter, which is just the count.
+ */
+export interface SubAgentToolCall {
+  /** Stable id (the tool-call id when the engine provides one). */
+  id: string
+  /** Tool name (e.g. "read", "grep", "bash"). */
+  name: string
+  /** Tool input arguments, when known. */
+  input?: Record<string, unknown>
+  /** Tool output, set once the call resolves. */
+  output?: unknown
+  /** True when the call ended in an error. */
+  isError?: boolean
+  /** Lifecycle state of this call. */
+  state: "running" | "done" | "error"
 }
 
 /**
@@ -77,6 +97,7 @@ export type SubAgentStatus =
   | "failed" // Execution failed
   | "cancelled" // Cancelled by user or parent
   | "timeout" // Execution timed out
+  | "rejected" // Dispatch refused by a nesting guard (max-depth / cycle)
 
 /**
  * SubAgent priority levels
@@ -147,6 +168,27 @@ export interface SubAgentConfig {
   externalAgentId?: string
   /** Permission mode for external agent execution */
   externalAgentPermissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan"
+  /**
+   * Back this sub-agent with an external CLI agent (Claude Code / Codex / …) by
+   * preset id. Projected onto `AgentDefinition.externalPresetId` so `dispatch_agent`
+   * routes the run to the external CLI instead of the built-in executor. The
+   * `systemPrompt`/`tools` remain advisory on the external path. See
+   * `lib/plugin/agent-sdk/dispatch.ts` + `lib/ai/agent/external/presets.ts`.
+   */
+  externalPresetId?: string
+  /**
+   * MCP server ids/names forwarded into the external agent's ACP session
+   * (`session/new` `mcpServers`) when this sub-agent runs on an external preset.
+   * Projected onto `AgentDefinition.mcpServerIds`, resolved via
+   * `resolveAcpMcpServers`. Ignored by the built-in executor.
+   */
+  mcpServerIds?: string[]
+
+  // === Nested Dispatch (depth-N subagents) ===
+  /** Opt this sub-agent into dispatching its own sub-agents when it runs. */
+  allowNesting?: boolean
+  /** Per-sub-agent override of the max nesting level (combined with the app cap via `min`). */
+  maxNestingDepth?: number
 }
 
 /**
@@ -277,6 +319,18 @@ export interface SubAgent {
   logs: SubAgentLog[]
   /** Progress percentage (0-100) */
   progress: number
+  /**
+   * Number of tool calls the run has made so far — an honest, monotonic
+   * activity counter surfaced in the chat `SubagentPart` ("N tools"). Unlike
+   * {@link progress} (a derived pseudo-percentage), this is the raw count.
+   */
+  toolUses?: number
+  /**
+   * Ordered live tool calls (start → resolve), capped to the most recent ~100.
+   * Powers the inline tool list under an expanded `SubagentPart` card. Distinct
+   * from {@link toolUses} (the glanceable count).
+   */
+  toolCalls?: SubAgentToolCall[]
   /** Creation timestamp */
   createdAt: Date
   /** Last activity timestamp for sorting/selecting live threads */
@@ -293,6 +347,34 @@ export interface SubAgent {
   order: number
   /** Tags for categorization */
   tags?: string[]
+
+  // === Nested Dispatch tree (depth-N subagents) ===
+  /** Nesting level this run executes at. Top-level (dispatched by chat) = 1. */
+  depth?: number
+  /**
+   * Id of the spawning sub-agent RUN (the tree edge) — distinct from
+   * {@link parentAgentId} which is the parent agent identity. Undefined for a
+   * run dispatched directly by the top-level chat.
+   */
+  parentSubagentId?: string
+  /** Set when this dispatch was refused by a nesting guard. */
+  rejection?: {
+    reason: "max-depth" | "cycle" | "policy"
+    message: string
+    attemptedDepth?: number
+  }
+  /** True while the run is detached (backgrounded) and awaiting a later result. */
+  backgrounded?: boolean
+  /**
+   * Live cumulative token usage while the run streams (fed by the dispatch run
+   * tracker). The final authoritative figure lives in `result.tokenUsage`.
+   */
+  tokenUsage?: SubAgentTokenUsage
+  /**
+   * Structured failure detail mirroring the dispatch result envelope. String
+   * `code` keeps `types/` a leaf layer.
+   */
+  errorEnvelope?: { code: string; retryable: boolean; partialText?: string }
 }
 
 /**
@@ -415,6 +497,7 @@ export const SUB_AGENT_STATUS_CONFIG: Record<
   failed: { labelKey: "failed", color: "text-destructive", icon: "XCircle" },
   cancelled: { labelKey: "cancelled", color: "text-orange-500", icon: "Ban" },
   timeout: { labelKey: "timeout", color: "text-red-500", icon: "AlertTriangle" },
+  rejected: { labelKey: "rejected", color: "text-destructive", icon: "ShieldAlert" },
 }
 
 /**
@@ -464,6 +547,13 @@ export interface SubAgentTemplate {
   icon?: string
   /** Whether this is a built-in template */
   isBuiltIn?: boolean
+  /**
+   * Hide from UI pickers / @-mention autocomplete while staying dispatchable
+   * (OpenCode `hidden` semantics).
+   */
+  hidden?: boolean
+  /** Fully off: excluded from dispatch, discovery, and every picker. */
+  disabled?: boolean
   /** Creation timestamp */
   createdAt?: Date
 }

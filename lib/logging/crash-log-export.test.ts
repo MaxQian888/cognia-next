@@ -7,7 +7,7 @@ import {
   getRecentErrorLogs,
   recordRecentErrorLog,
   resetRecentErrorLogsForTest,
-} from "./recent-errors"
+} from "@cognia/logging/recent-errors"
 
 jest.mock("./bootstrap", () => ({
   getIndexedDBTransport: jest.fn(),

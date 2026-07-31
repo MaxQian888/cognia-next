@@ -1,0 +1,35 @@
+{
+  "bubbleAria": "Confirm capture",
+  "close": "Close",
+  "countdown": "{seconds}s",
+  "dismiss": "Dismiss",
+  "kind": {
+    "image": "Image",
+    "text": "Text",
+    "url": "Link"
+  },
+  "save": "Save",
+  "settings": {
+    "confirmTimeout": "Confirm timeout (s)",
+    "description": "Watch the clipboard and save items to your knowledge base (feeds the radar).",
+    "enabled": "Enable capture",
+    "enabledDesc": "Watch the clipboard on desktop.",
+    "mode": {
+      "confirm": "Confirm bubble",
+      "manual": "Manual only",
+      "silent": "Silent + toast"
+    },
+    "modeLabel": "Mode",
+    "pollInterval": "Poll interval (ms)",
+    "privacy": "Privacy pause",
+    "privacyDesc": "Temporarily stop reading the clipboard.",
+    "save": "Save",
+    "saved": "Capture settings saved.",
+    "title": "Content capture"
+  },
+  "toast": {
+    "duplicate": "Already captured — skipped.",
+    "failed": "Capture failed: {message}",
+    "saved": "Captured."
+  }
+}

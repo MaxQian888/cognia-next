@@ -10,10 +10,11 @@
  * the table, the run ends, and the review panel surfaces them for the 选题 gate.
  */
 
+import { defineWorkflowNode } from "@cognia/plugin-sdk"
 import type { PluginNodeDef } from "@/types/plugin/plugin-workflow"
 import type { PluginDexieAPI } from "@/types/plugin"
 import type { StepExecutionContext, StepExecutionResult } from "@/types/workflow/visual"
-import { createPipelineDb, parseCandidates } from "../db/tables"
+import { createPipelineDb, parseCandidatesStrict } from "../db/tables"
 
 /** Unprefixed kind — the host prefixes the pluginId. */
 export const SAVE_TOPICS_KIND = "save-topics"
@@ -33,9 +34,19 @@ export function makeSaveTopicsNode(dexie: PluginDexieAPI): PluginNodeDef {
     const params = (ctx.params ?? {}) as SaveTopicsParams
     const source =
       typeof params.source === "string" && params.source.trim() ? params.source.trim() : "pipeline"
-    const candidates = parseCandidates(params.candidates)
+    const { candidates, unparseable } = parseCandidatesStrict(params.candidates)
+    if (unparseable) {
+      // Upstream produced output we could not read. Reporting `saved: 0` as a
+      // SUCCESS is what let the daily cron run green while writing nothing —
+      // most often because `ai.prompt` fell back to its stub echo. Fail the
+      // step so the run surfaces it.
+      throw new Error(
+        "save-topics: upstream produced output that is not candidate JSON — " +
+          'check that the ranking node ran a real model (mode: "routed") and returned a JSON array.'
+      )
+    }
     if (candidates.length === 0) {
-      ctx.log("warn", "save-topics: no candidates parsed from upstream output — nothing saved")
+      ctx.log("warn", "save-topics: upstream returned no candidates — nothing saved")
       return { output: { saved: 0, topicIds: [] } }
     }
     const rows = await db.saveTopics(candidates, source)
@@ -43,14 +54,14 @@ export function makeSaveTopicsNode(dexie: PluginDexieAPI): PluginNodeDef {
     return { output: { saved: rows.length, topicIds: rows.map((r) => r.id) } }
   }
 
-  return {
+  return defineWorkflowNode({
     kind: SAVE_TOPICS_KIND,
     typeVersion: 1,
     category: "plugin",
     label: "Save Zhihu Topics",
     description:
       "Persist the ranking step's candidate topics into the pipeline's topics table for the 选题 review gate.",
-    iconName: "list-checks",
+    iconName: "ListChecks",
     keywords: ["zhihu", "topics", "candidates", "save"],
     retryable: false,
     paramsSchema: {
@@ -68,9 +79,10 @@ export function makeSaveTopicsNode(dexie: PluginDexieAPI): PluginNodeDef {
       additionalProperties: false,
     },
     defaultParams: {
-      candidates: "{{ $node['rank'].out.completion }}",
+      // No `.out` wrapper — `upstream[id]` is the raw executor output.
+      candidates: "{{ $node['rank'].completion }}",
       source: "zhihu-hot",
     },
     execute,
-  }
+  })
 }

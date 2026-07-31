@@ -26,12 +26,29 @@ jest.mock("sonner", () => ({
   toast: { success: jest.fn(), error: jest.fn(), warning: jest.fn() },
 }))
 
-jest.mock("@/lib/logging", () => ({
-  loggers: { skills: { info: jest.fn(), error: jest.fn(), warn: jest.fn() } },
+jest.mock("@cognia/logging", () => ({
+  createLogger: () => ({
+    debug: jest.fn(),
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    child: jest.fn(),
+  }),
+  loggers: {
+    skills: { debug: jest.fn(), info: jest.fn(), error: jest.fn(), warn: jest.fn() },
+    agent: {
+      debug: jest.fn(),
+      info: jest.fn(),
+      error: jest.fn(),
+      warn: jest.fn(),
+      child: () => ({ debug: jest.fn(), info: jest.fn(), error: jest.fn(), warn: jest.fn() }),
+    },
+  },
 }))
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { useSkillsStore } from "@/stores/skills"
+import { useChatStore } from "@/stores/chat"
 import { deleteSkill, setSkillStatus } from "@/lib/db/skills"
 import { exportSkillsToDirWithFeedback } from "@/lib/skills/export-toast"
 import { SkillBatchActionsBar } from "./skill-batch-actions-bar"
@@ -101,11 +118,13 @@ describe("SkillBatchActionsBar", () => {
     await waitFor(() => expect(exportSkillsToDirWithFeedback).toHaveBeenCalled())
   })
 
-  it("batch-deletes the selection", async () => {
+  it("batch-deletes the selection and prunes those ids from ephemeral attachments", async () => {
     useSkillsStore.setState({ selection: new Set(["s1"]) } as never)
+    useChatStore.getState().setEphemeralSkillIds(["s1", "keep"])
     render(<SkillBatchActionsBar />)
     fireEvent.click(screen.getByText("delete"))
     await waitFor(() => expect(deleteSkill).toHaveBeenCalledWith("s1"))
+    await waitFor(() => expect(useChatStore.getState().ephemeralSkillIds).toEqual(["keep"]))
   })
 
   it("removes an existing tag chip from the selection", async () => {

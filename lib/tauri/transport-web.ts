@@ -1,6 +1,6 @@
 "use client"
 
-import type { Transport } from "./transport-types"
+import type { Transport, TransportCallOptions } from "./transport-types"
 
 /**
  * Transport used in plain-browser mode (no Tauri, no Capacitor).
@@ -14,7 +14,11 @@ import type { Transport } from "./transport-types"
  * multiple times.
  */
 export class WebStubTransport implements Transport {
-  call<T = unknown>(name: string, _args?: Record<string, unknown>): Promise<T> {
+  call<T = unknown>(
+    name: string,
+    _args?: Record<string, unknown>,
+    _options?: TransportCallOptions
+  ): Promise<T> {
     return Promise.reject<T>(new Error(`tauri-only command from web mode: ${name}`))
   }
 

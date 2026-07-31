@@ -1,5 +1,6 @@
 "use client"
 
+import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { SearchIcon } from "lucide-react"
 import type { ToolUIPart } from "ai"
@@ -30,13 +31,16 @@ export function GrepCard({ part }: { part: ToolUIPart }) {
   const input = (part.input ?? {}) as GrepInput
   const parsed = useParsedOutput<GrepOutput>(part.output)
 
-  const lines: string[] = (() => {
+  // Selecting (and, on the string fallback, splitting) the match list is the
+  // only non-trivial work here; recompute it only when the parsed output or the
+  // raw payload changes rather than on every streaming re-render.
+  const lines: string[] = useMemo(() => {
     if (parsed?.matches) return parsed.matches
     if (parsed?.lines) return parsed.lines
     if (parsed?.files) return parsed.files
     if (typeof part.output === "string") return part.output.split(/\r?\n/).filter(Boolean)
     return []
-  })()
+  }, [parsed, part.output])
 
   if (lines.length === 0 && !input.pattern) return null
 

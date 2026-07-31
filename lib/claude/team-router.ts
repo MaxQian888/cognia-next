@@ -2,7 +2,7 @@
 // user turn. Kept dependency-free so they can be unit-tested without React,
 // IndexedDB, or Tauri.
 
-import type { Character, Team, TeamMember } from "@/lib/claude/types"
+import type { Character, Team, TeamMember } from "@cognia/agent-config-types"
 
 /**
  * Parse `@Name` mentions out of `text`, matched against `members` by name.
@@ -12,18 +12,31 @@ import type { Character, Team, TeamMember } from "@/lib/claude/types"
  * - The matched name must be followed by whitespace, common punctuation, or
  *   end-of-string — so "@Coder!" matches but "@Coderbot" does not.
  * - Returns each member at most once, in the order they were first mentioned.
+ *
+ * Generic over any `{ id, name }` shape so the same scanner backs both team
+ * member routing (`Character`) and the chat composer's `@agent` subagent
+ * resolution (`SubagentMentionTarget` projected to `{ id, name: handle }`).
  */
-export function parseMentions(text: string, members: readonly Character[]): Character[] {
+export function parseMentions<T extends { id: string; name: string }>(
+  text: string,
+  members: readonly T[]
+): T[] {
   if (!text || members.length === 0) return []
 
   // Pre-sort by descending name length so we always try the longest match first.
   const sorted = [...members].sort((a, b) => b.name.length - a.name.length)
   const lower = text.toLowerCase()
   const seen = new Set<string>()
-  const result: Character[] = []
+  const result: T[] = []
 
   for (let i = 0; i < text.length; i++) {
     if (text[i] !== "@") continue
+    // The `@` must sit at the start or follow whitespace — otherwise it's an
+    // email (`me@host`) or a `path/@thing`, not a mention. Mirrors the
+    // composer's `detectTrigger` boundary so the popover and the send-time
+    // scanner agree on what counts as a mention.
+    const before = i === 0 ? "" : text[i - 1]
+    if (before !== "" && !/\s/.test(before)) continue
     const start = i + 1
     if (start >= text.length) continue
 

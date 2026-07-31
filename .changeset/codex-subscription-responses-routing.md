@@ -1,0 +1,12 @@
+---
+"cognia-next": patch
+---
+
+Make a reused Codex subscription work correctly as a chat provider. Five defects on the Codex path are fixed:
+
+- **A reused ChatGPT login stopped working in chat once its token expired.** Launching an external agent renewed a near-expiry bearer, but chat never did — even though the vault held a usable refresh token — so a reused subscription started failing to authenticate after a while while external agents kept working. Chat now renews the same way; a refresh outage falls back to the stored token instead of dropping the credential.
+- **Compaction and optical transcription still went to the wrong endpoint.** The endpoint fix below reached the main turn but not the summary calls, so on a Codex account bound to a relay preset the conversation worked while compacting it failed. A summary that runs on a different provider than the turn keeps that provider's own identity.
+
+- **Relay and preset base URLs were sent to the wrong endpoint.** Codex speaks the OpenAI Responses API only, but the sidecar decided between `/responses` and `/chat/completions` from the base URL's host alone. A Codex account pointed at a preset or third-party relay (whose host is neither `*.openai.com` nor `chatgpt.com`) fell through to `/chat/completions`, which those endpoints don't serve. The provider id now reaches that decision — as it already did in the renderer, which had been silently disagreeing with the sidecar about the same turn.
+- **Reasoning was off and invisible on the whole subscription path.** The reasoning options (`reasoning_effort` and the `reasoning summary` that makes reasoning visible at all) were only sent to `*.openai.com`, so they were dropped for both the ChatGPT backend and relay presets — even though every Codex model is a reasoning model. They are now sent to any OpenAI-native surface; OpenAI-compatible gateways (DeepSeek, Groq, Ollama, …) still opt out, since they may reject the fields.
+- **Codex turns were being stored server-side and lost their reasoning between turns.** Codex itself sends `store: false` and asks for encrypted reasoning content; the app sent neither, so responses were persisted against the account against the client's intent, and the model lost its chain of thought across the steps of an agentic loop. Both fields are now sent for Codex, matching the Codex client. Other OpenAI providers keep the server's storage default.

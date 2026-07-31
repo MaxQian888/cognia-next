@@ -5,6 +5,7 @@ import { InboundTab } from "./inbound-tab"
 import { isTauri } from "@/lib/tauri"
 import { remoteControlGetToken, remoteControlRotateToken } from "@/lib/tauri/remote-control"
 import { useRemoteControlStore } from "@/stores/remote-control/store"
+import { REMOTE_COMMAND_TARGETS } from "@/types/remote-control"
 
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn() }))
 jest.mock("@/lib/tauri/remote-control", () => ({
@@ -134,7 +135,65 @@ describe("InboundTab — desktop", () => {
     )
   })
 
+  const withToken = () =>
+    useRemoteControlStore.setState({
+      status: {
+        inboundRunning: false,
+        boundPort: null,
+        lastCallAt: null,
+        inboundCallsTotal: 0,
+        hasInboundToken: true,
+      },
+    })
+
   it("lists every command target route", () => {
+    withToken()
+    render(<InboundTab />)
+    expect(screen.getByText(/commands\/workflow\.run/)).toBeInTheDocument()
+    expect(screen.getByText(/commands\/plan\.run/)).toBeInTheDocument()
+    // Sensitive targets carry a badge in the list.
+    expect(screen.getByText(/commands\/chat\.send/)).toBeInTheDocument()
+  })
+
+  it("disables a command target through its permission switch", async () => {
+    withToken()
+    render(<InboundTab />)
+    const sw = screen.getByLabelText(/allow workflow\.run/i)
+    expect(sw).toBeChecked()
+    fireEvent.click(sw)
+    await waitFor(() =>
+      expect(useRemoteControlStore.getState().config.inbound.disabledTargets).toContain(
+        "workflow.run"
+      )
+    )
+  })
+
+  it("disables and re-enables every target via the bulk actions", async () => {
+    withToken()
+    render(<InboundTab />)
+    fireEvent.click(screen.getByRole("button", { name: /disable all/i }))
+    await waitFor(() =>
+      expect(useRemoteControlStore.getState().config.inbound.disabledTargets).toHaveLength(
+        REMOTE_COMMAND_TARGETS.length
+      )
+    )
+    fireEvent.click(screen.getByRole("button", { name: /enable all/i }))
+    await waitFor(() =>
+      expect(useRemoteControlStore.getState().config.inbound.disabledTargets).toEqual([])
+    )
+  })
+
+  it("copies a quickstart cURL snippet to the clipboard", async () => {
+    withToken()
+    render(<InboundTab />)
+    fireEvent.click(screen.getAllByRole("button", { name: /copy snippet/i })[0])
+    await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalled())
+    expect((navigator.clipboard.writeText as jest.Mock).mock.calls[0][0]).toContain(
+      "/api/v1/health"
+    )
+  })
+
+  it("toggles allowSensitiveTargets through updateInbound", async () => {
     useRemoteControlStore.setState({
       status: {
         inboundRunning: false,
@@ -145,8 +204,11 @@ describe("InboundTab — desktop", () => {
       },
     })
     render(<InboundTab />)
-    expect(screen.getByText(/commands\/workflow\.run/)).toBeInTheDocument()
-    expect(screen.getByText(/commands\/plan\.run/)).toBeInTheDocument()
+    expect(useRemoteControlStore.getState().config.inbound.allowSensitiveTargets).toBe(false)
+    fireEvent.click(screen.getByLabelText(/allow sensitive targets/i))
+    await waitFor(() =>
+      expect(useRemoteControlStore.getState().config.inbound.allowSensitiveTargets).toBe(true)
+    )
   })
 
   it("calls fetch with bearer header when testing the listener", async () => {

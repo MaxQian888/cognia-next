@@ -7,7 +7,7 @@ import {
   groupServers,
   MCP_TRANSPORT_VALUES,
 } from "./mcp-server-utils"
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 
 function srv(patch: Partial<McpServer>): McpServer {
   return {
@@ -57,8 +57,16 @@ describe("summarizeServer", () => {
       "https://x/mcp"
     )
   })
-  it("falls back when no url", () => {
-    expect(summarizeServer(srv({ transport: "sse", config: {} }))).toBe("(no url)")
+  it("returns empty string when a remote server has no url (caller supplies fallback)", () => {
+    expect(summarizeServer(srv({ transport: "sse", config: {} }))).toBe("")
+  })
+  it("returns empty string when a stdio server has no command", () => {
+    expect(summarizeServer(srv({ transport: "stdio", config: {} }))).toBe("")
+  })
+  it("accepts the minimal transport/config shape (e.g. an import draft)", () => {
+    expect(summarizeServer({ transport: "http", config: { url: "https://d/mcp" } })).toBe(
+      "https://d/mcp"
+    )
   })
 })
 

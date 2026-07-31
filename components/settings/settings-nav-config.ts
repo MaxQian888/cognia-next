@@ -5,9 +5,7 @@
 
 import type { ComponentType } from "react"
 import {
-  CpuIcon,
   PaletteIcon,
-  KeyRoundIcon,
   UsersIcon,
   SparklesIcon,
   Layers3Icon,
@@ -15,8 +13,10 @@ import {
   BookmarkIcon,
   DatabaseIcon,
   MonitorIcon,
+  SquareCodeIcon,
   InfoIcon,
   ServerCogIcon,
+  ServerIcon,
   GlobeIcon,
   Volume2Icon,
   ScrollTextIcon,
@@ -32,7 +32,6 @@ import {
   ZapIcon,
   RadioTowerIcon,
   BoxesIcon,
-  SlidersHorizontalIcon,
   WebhookIcon,
   NetworkIcon,
   TerminalSquareIcon,
@@ -44,18 +43,28 @@ import {
   PawPrintIcon,
   MessagesSquareIcon,
   BellIcon,
-  PanelLeftIcon,
+  PanelsTopLeftIcon,
   CompassIcon,
   BrainIcon,
   GitBranchIcon,
+  BracesIcon,
+  BoxIcon,
+  CircleUserIcon,
+  ClipboardCheckIcon,
+  KeyboardIcon,
+  RadarIcon,
 } from "lucide-react"
 
 export type SettingsGroup = "ai" | "extensions" | "interface" | "data" | "observability" | "system"
 
 export type SettingsSectionId =
   | "general"
+  | "account"
+  | "profile"
   | "api-key"
   | "providers"
+  | "ai-connections"
+  | "model-catalog"
   | "ocr"
   | "subscription"
   | "ccswitch"
@@ -63,7 +72,9 @@ export type SettingsSectionId =
   | "agent-modes"
   | "agent-runtime"
   | "agent-teams"
+  | "eval"
   | "hooks"
+  | "fleet"
   | "workspace-trust"
   | "slash-commands"
   | "tools"
@@ -81,13 +92,13 @@ export type SettingsSectionId =
   | "presets"
   | "artifacts"
   | "canvas"
+  | "shortcuts"
   | "conversation"
   | "notifications"
   | "memory"
   | "mcp"
   | "a2ui"
   | "plugins"
-  | "plugin-config"
   | "connections"
   | "data"
   | "workflows"
@@ -95,13 +106,19 @@ export type SettingsSectionId =
   | "goals"
   | "pet"
   | "remote-control"
+  | "gateway"
   | "external-bridge"
   | "companion"
+  | "remote-hosts"
   | "network"
   | "logs"
   | "diagnostics"
   | "desktop"
   | "automation"
+  | "lsp"
+  | "pro-ide"
+  | "sandbox"
+  | "security"
   | "about"
 
 export interface NavItem {
@@ -118,26 +135,27 @@ export interface NavItem {
 
 export const SETTINGS_NAV: NavItem[] = [
   // === AI ===
+  // NOTE: the standalone "general", "api-key", and "profile" sections were
+  // merged — general → agent-runtime (defaults/behavior), api-key/providers →
+  // ai-connections
+  // (Anthropic key + official subscription reuse), and profile → account (the
+  // account section already embeds the profile editor). Their ids stay in
+  // `SettingsSectionId` + the redirect map in `settings-shell.tsx` (and their
+  // keywords are folded into the target section's bucket), but they no longer
+  // appear as navigable entries.
   {
-    id: "general",
-    labelKey: "general",
-    descriptionKey: "general",
-    group: "ai",
-    icon: CpuIcon,
-  },
-  {
-    id: "api-key",
-    labelKey: "apiKey",
-    descriptionKey: "apiKey",
-    group: "ai",
-    icon: KeyRoundIcon,
-  },
-  {
-    id: "providers",
-    labelKey: "providers",
-    descriptionKey: "providers",
+    id: "ai-connections",
+    labelKey: "aiConnections",
+    descriptionKey: "aiConnections",
     group: "ai",
     icon: ServerCogIcon,
+  },
+  {
+    id: "model-catalog",
+    labelKey: "modelCatalog",
+    descriptionKey: "modelCatalog",
+    group: "ai",
+    icon: DatabaseIcon,
   },
   {
     id: "ocr",
@@ -145,6 +163,13 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "ocr",
     group: "ai",
     icon: ScrollTextIcon,
+  },
+  {
+    id: "account",
+    labelKey: "account",
+    descriptionKey: "account",
+    group: "ai",
+    icon: CircleUserIcon,
   },
   {
     id: "subscription",
@@ -191,11 +216,26 @@ export const SETTINGS_NAV: NavItem[] = [
     icon: Layers3Icon,
   },
   {
+    id: "eval",
+    labelKey: "eval",
+    descriptionKey: "eval",
+    group: "ai",
+    icon: ClipboardCheckIcon,
+  },
+  {
     id: "hooks",
     labelKey: "hooks",
     descriptionKey: "hooks",
     group: "ai",
     icon: WebhookIcon,
+    desktopOnly: true,
+  },
+  {
+    id: "fleet",
+    labelKey: "fleet",
+    descriptionKey: "fleet",
+    group: "ai",
+    icon: RadarIcon,
     desktopOnly: true,
   },
   {
@@ -227,6 +267,22 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "search",
     group: "ai",
     icon: GlobeIcon,
+  },
+  {
+    id: "lsp",
+    labelKey: "lsp",
+    descriptionKey: "lsp",
+    group: "ai",
+    icon: BracesIcon,
+    desktopOnly: true,
+  },
+  {
+    id: "sandbox",
+    labelKey: "sandbox",
+    descriptionKey: "sandbox",
+    group: "ai",
+    icon: BoxIcon,
+    desktopOnly: true,
   },
 
   // === Extensions ===
@@ -280,13 +336,6 @@ export const SETTINGS_NAV: NavItem[] = [
     icon: BoxesIcon,
   },
   {
-    id: "plugin-config",
-    labelKey: "pluginConfig",
-    descriptionKey: "pluginConfig",
-    group: "extensions",
-    icon: SlidersHorizontalIcon,
-  },
-  {
     id: "connections",
     labelKey: "connections",
     descriptionKey: "connections",
@@ -294,7 +343,6 @@ export const SETTINGS_NAV: NavItem[] = [
     icon: LinkIcon,
     desktopOnly: true,
   },
-
   // === Interface ===
   {
     id: "appearance",
@@ -304,11 +352,13 @@ export const SETTINGS_NAV: NavItem[] = [
     icon: PaletteIcon,
   },
   {
+    // Id kept as `sidebar` so `/settings?section=sidebar` deep links survive;
+    // the section now covers the nav rail plus both window bars.
     id: "sidebar",
-    labelKey: "sidebar",
-    descriptionKey: "sidebar",
+    labelKey: "shellLayout",
+    descriptionKey: "shellLayout",
     group: "interface",
-    icon: PanelLeftIcon,
+    icon: PanelsTopLeftIcon,
     desktopOnly: true,
   },
   {
@@ -356,11 +406,26 @@ export const SETTINGS_NAV: NavItem[] = [
     icon: PencilRulerIcon,
   },
   {
+    id: "shortcuts",
+    labelKey: "shortcuts",
+    descriptionKey: "shortcuts",
+    group: "interface",
+    icon: KeyboardIcon,
+  },
+  {
     id: "source-control",
     labelKey: "sourceControl",
     descriptionKey: "sourceControl",
     group: "interface",
     icon: GitBranchIcon,
+    desktopOnly: true,
+  },
+  {
+    id: "pro-ide",
+    labelKey: "proIde",
+    descriptionKey: "proIde",
+    group: "interface",
+    icon: SquareCodeIcon,
     desktopOnly: true,
   },
   {
@@ -448,6 +513,14 @@ export const SETTINGS_NAV: NavItem[] = [
     desktopOnly: true,
   },
   {
+    id: "gateway",
+    labelKey: "gateway",
+    descriptionKey: "gateway",
+    group: "system",
+    icon: NetworkIcon,
+    desktopOnly: true,
+  },
+  {
     id: "external-bridge",
     labelKey: "externalBridge",
     descriptionKey: "externalBridge",
@@ -471,6 +544,14 @@ export const SETTINGS_NAV: NavItem[] = [
     desktopOnly: true,
   },
   {
+    id: "remote-hosts",
+    labelKey: "remoteHosts",
+    descriptionKey: "remoteHosts",
+    group: "system",
+    icon: ServerIcon,
+    desktopOnly: true,
+  },
+  {
     id: "network",
     labelKey: "network",
     descriptionKey: "network",
@@ -483,6 +564,14 @@ export const SETTINGS_NAV: NavItem[] = [
     descriptionKey: "desktop",
     group: "system",
     icon: MonitorIcon,
+    desktopOnly: true,
+  },
+  {
+    id: "security",
+    labelKey: "security",
+    descriptionKey: "security",
+    group: "system",
+    icon: ShieldCheckIcon,
     desktopOnly: true,
   },
   {
@@ -504,14 +593,46 @@ export const SETTINGS_GROUP_ORDER: SettingsGroup[] = [
 ]
 
 /**
+ * Sections that only work inside the Tauri desktop shell, derived from the nav
+ * so the two can't drift.
+ *
+ * The sidebar filters on `item.desktopOnly` directly, but the ⌘K finder and the
+ * shell's section dispatch both need the same answer keyed by id — without it a
+ * web user can still reach these panels via the finder or a `?section=` deep
+ * link and walk a flow that can only fail at the last IPC call.
+ */
+export const DESKTOP_ONLY_SECTIONS: ReadonlySet<SettingsSectionId> = new Set(
+  SETTINGS_NAV.filter((item) => item.desktopOnly).map((item) => item.id)
+)
+
+/**
  * Lightweight keyword index for the sidebar search. Each entry can attach
  * extra keywords beyond the label/description (e.g., "anthropic" for the
  * api-key section). Mirrors Cognia's SETTINGS_SEARCH_INDEX shape.
  */
-export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
-  general: ["defaults", "model", "system prompt", "permission"],
-  "api-key": ["anthropic", "key", "secret", "claude"],
-  providers: [
+export const SETTINGS_SEARCH_KEYWORDS: Partial<Record<SettingsSectionId, string[]>> = {
+  account: [
+    "account",
+    "overview",
+    "identity",
+    "profile",
+    "subscription",
+    "devices",
+    // folded from the merged "profile" section (see SETTINGS_NAV note)
+    "name",
+    "avatar",
+    "bio",
+    "timezone",
+    "账户",
+    "账号",
+    "概览",
+    "身份",
+    "资料",
+    "昵称",
+    "头像",
+    "时区",
+  ],
+  "ai-connections": [
     "providers",
     "openai",
     "anthropic",
@@ -527,6 +648,27 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "base url",
     "custom provider",
     "model list",
+    // Absorbed from the former standalone "api-key" section.
+    "key",
+    "secret",
+    "claude",
+  ],
+  "model-catalog": [
+    "models",
+    "canonical id",
+    "upstream id",
+    "alias",
+    "offering",
+    "capabilities",
+    "lifecycle",
+    "deprecated",
+    "embedding",
+    "rerank",
+    "image",
+    "speech",
+    "模型目录",
+    "能力",
+    "生命周期",
   ],
   ccswitch: [
     "cc-switch",
@@ -635,6 +777,15 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "始终允许",
     "权限模式",
     "默认模型",
+    // Absorbed from the former standalone "general" section.
+    "defaults",
+    "system prompt",
+    "output style",
+    "bare mode",
+    "brief mode",
+    "输出风格",
+    "极简模式",
+    "简短输出",
   ],
   tools: [
     "tools",
@@ -706,12 +857,23 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "hide",
     "more",
     "overflow",
+    "title bar",
+    "top bar",
+    "status bar",
+    "bottom bar",
+    "layout",
+    "chrome",
     "侧边栏",
     "导航",
     "固定",
     "自定义",
     "排序",
     "隐藏",
+    "顶部栏",
+    "标题栏",
+    "底部栏",
+    "状态栏",
+    "布局",
   ],
   discover: [
     "discover",
@@ -793,6 +955,25 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "静音",
     "角标",
     "保留",
+  ],
+  shortcuts: [
+    "shortcut",
+    "shortcuts",
+    "hotkey",
+    "hotkeys",
+    "keybinding",
+    "keybindings",
+    "keyboard",
+    "accelerator",
+    "global shortcut",
+    "rebind",
+    "conflict",
+    "快捷键",
+    "热键",
+    "键位",
+    "键盘",
+    "组合键",
+    "冲突",
   ],
   canvas: [
     "canvas",
@@ -975,6 +1156,12 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "崩溃",
     "诊断",
     "故障",
+    // Developer flags relocated from the former "general" section.
+    "debug",
+    "debug mode",
+    "chat middleware",
+    "调试",
+    "中间件",
   ],
   hooks: [
     "hook",
@@ -990,6 +1177,24 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "回调",
     "触发",
     "生命周期",
+  ],
+  fleet: [
+    "fleet",
+    "agent fleet",
+    "monitor",
+    "island",
+    "overlay",
+    "claude code",
+    "codex",
+    "opencode",
+    "external agent",
+    "session history",
+    "舰队",
+    "监控",
+    "灵动岛",
+    "悬浮层",
+    "外部 Agent",
+    "会话历史",
   ],
   "workspace-trust": [
     "trust",
@@ -1041,6 +1246,32 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "团队",
     "多代理",
   ],
+  eval: [
+    "eval",
+    "evals",
+    "evaluation",
+    "agent eval",
+    "judge",
+    "judge model",
+    "scorer",
+    "scorers",
+    "pass@1",
+    "pass^k",
+    "gate",
+    "threshold",
+    "calibration",
+    "dataset",
+    "benchmark",
+    "deterministic",
+    "评估",
+    "评测",
+    "评委",
+    "评分器",
+    "门限",
+    "校准",
+    "数据集",
+    "基准",
+  ],
   plugins: [
     "plugin",
     "plugins",
@@ -1050,15 +1281,13 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "scheduled",
     "audit",
     "diagnostics",
-    "插件",
-    "扩展",
-    "市场",
-  ],
-  "plugin-config": [
     "plugin config",
     "plugin settings",
     "configure plugin",
     "plugin configuration",
+    "插件",
+    "扩展",
+    "市场",
     "插件配置",
     "插件设置",
   ],
@@ -1095,6 +1324,19 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "trigger",
     "远程控制",
     "外部触发",
+  ],
+  gateway: [
+    "gateway",
+    "openai",
+    "anthropic",
+    "base url",
+    "proxy",
+    "claude code",
+    "/v1/chat/completions",
+    "/v1/messages",
+    "网关",
+    "入站",
+    "代理",
   ],
   "external-bridge": [
     "external-bridge",
@@ -1137,6 +1379,21 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "扫码",
     "移动端",
   ],
+  "remote-hosts": [
+    "remote",
+    "remote host",
+    "remote development",
+    "remote dev",
+    "ssh",
+    "dev box",
+    "cognia-server",
+    "terminal",
+    "pair",
+    "远程",
+    "远程主机",
+    "远程开发",
+    "配对",
+  ],
   network: [
     "network",
     "proxy",
@@ -1171,6 +1428,60 @@ export const SETTINGS_SEARCH_KEYWORDS: Record<SettingsSectionId, string[]> = {
     "提交",
     "提交信息",
     "分支",
+  ],
+  "pro-ide": [
+    "pro ide",
+    "code-server",
+    "codeserver",
+    "vs code",
+    "vscode",
+    "editor engine",
+    "embedded editor",
+    "编辑器引擎",
+    "内嵌编辑器",
+  ],
+  lsp: [
+    "lsp",
+    "language server",
+    "language server protocol",
+    "typescript",
+    "pyright",
+    "rust-analyzer",
+    "gopls",
+    "intellisense",
+    "diagnostics",
+    "语言服务器",
+    "代码补全",
+    "诊断",
+  ],
+  sandbox: [
+    "sandbox",
+    "isolation",
+    "microvm",
+    "os sandbox",
+    "tool safety",
+    "strict mode",
+    "execution policy",
+    "沙箱",
+    "隔离",
+    "执行策略",
+    "安全",
+  ],
+  security: [
+    "security",
+    "privacy",
+    "biometric",
+    "touch id",
+    "face id",
+    "windows hello",
+    "guard",
+    "reveal secrets",
+    "sign out",
+    "安全",
+    "隐私",
+    "生物识别",
+    "指纹",
+    "面容",
   ],
 }
 

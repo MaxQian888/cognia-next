@@ -1,0 +1,274 @@
+{
+  "actions": {
+    "applyUpdate": "Apply update",
+    "applyUpdateBatch": "Apply to all ({count})",
+    "applyUpdateBatchTitle": "Apply the pack update to every clone you have from this pack",
+    "applyUpdateTitle": "Pull pack-managed fields from the new version while keeping your edits",
+    "dismissUpdate": "Dismiss",
+    "dismissUpdateTitle": "Stop showing the update-available indicator for this clone",
+    "exportPack": "Export pack",
+    "recloneFromPack": "Re-clone",
+    "recloneFromPackTitle": "Replace this clone with a fresh copy from the updated pack"
+  },
+  "addedToast": "Added \"{name}\".",
+  "applyUpdateDialog": {
+    "cancel": "Cancel",
+    "confirm": "Apply update",
+    "description": "Review which fields will be pulled from the new pack version and which were left alone.",
+    "fieldRow": "{field}",
+    "noBaselineWarning": "This clone has no recorded baseline (it predates the v50 schema bump). Applying the update will overwrite every pack-managed field. Duplicate first if you want to keep a backup.",
+    "noChanges": "No pack-managed fields differ from your row.",
+    "preserved": "Preserved (you edited it)",
+    "title": "Apply pack update — {name}",
+    "willUpdate": "Will overwrite"
+  },
+  "applyUpdateNoop": "Nothing to update for \"{name}\".",
+  "applyUpdateToast": "{name}: updated {updated} field(s), preserved {preserved}.",
+  "applyUpdateToastBatch": "Updated {count} character(s) from \"{pack}\".",
+  "badge": {
+    "cloned": "Cloned from {name}",
+    "clonedFromLocalFile": "Cloned from local file",
+    "fromLocalFile": "From local file",
+    "fromPlugin": "From {name}",
+    "missingDep": "{count, plural, =1 {Missing dep} other {Missing deps (#)}}",
+    "updateAvailable": "Update available"
+  },
+  "builtIn": "Built-in",
+  "builtInReadOnly": "Built-in characters are read-only — duplicate first",
+  "builtInUndeletable": "Built-in characters can't be deleted",
+  "bulk": {
+    "deleteSelected": "Delete ({count})",
+    "deletedToast": "Deleted {count} character(s).",
+    "done": "Done",
+    "exportPackName": "Exported characters",
+    "exportSelected": "Export ({count})",
+    "exportedToast": "Exported {count} character(s).",
+    "select": "Select",
+    "selectRow": "Select {name}"
+  },
+  "cancel": "Cancel",
+  "create": "Create",
+  "delete": "Delete",
+  "deleteAria": "Delete {name}",
+  "description": "Reusable personas. Each character carries its own system prompt, model, MCP subset, and skills. Pick one when you start a new chat.",
+  "dismissUpdateToast": "Update indicator dismissed.",
+  "duplicate": "Duplicate",
+  "duplicateAria": "Duplicate {name}",
+  "duplicatedToast": "Duplicated as \"{name}\".",
+  "edit": "Edit",
+  "editAria": "Edit {name}",
+  "editor": {
+    "account": {
+      "description": "Pin sends from this character to a specific provider account. Inherit uses the session / settings default.",
+      "inherit": "Inherit",
+      "label": "Account override",
+      "optionLabel": "{provider}: {label}"
+    },
+    "allowedTools": "Allowed tools (comma-sep)",
+    "allowedToolsPlaceholder": "Bash, Read, WebSearch",
+    "avatarEmoji": "Avatar emoji",
+    "avatarEmojiPlaceholder": "🤖",
+    "avatarImage": {
+      "clear": "Remove image",
+      "large": "Avatar image is large — a smaller image keeps the character data lean.",
+      "upload": "Upload image"
+    },
+    "browserToolsToggle": {
+      "aria": "Toggle agent browser tools",
+      "description": "Let this character drive the in-app preview browser (navigate, snapshot, click, type, read console/network). Desktop only.",
+      "label": "Agent browser tools"
+    },
+    "computerUseSubSettings": {
+      "allowedToolIds": {
+        "description": "Restrict which registered native Anthropic tools this character can use. Uncheck all to let every registered tool through.",
+        "empty": "No native Anthropic tools registered yet — install the Computer Use plugin to expose computer / bash / text_editor.",
+        "label": "Allowed native tools"
+      },
+      "chatConsentMode": {
+        "description": "How the in-chat canUseTool modal behaves. Independent of the Rust gate — both can prompt.",
+        "label": "Chat-side prompt behaviour",
+        "options": {
+          "always-ask": "Always ask",
+          "auto": "Auto (Rust gate decides)",
+          "session-grant": "Remember for session"
+        }
+      },
+      "requireConsent": {
+        "description": "Force every driving Computer Use call to the consent overlay for this character, regardless of Settings → Automation → Permissions. Useful for new characters whose behaviour you're still learning.",
+        "label": "Always ask before each call"
+      },
+      "screenOffMode": {
+        "description": "Keep Computer Use working when the monitor is off or asleep (the session must stay unlocked) by routing capture through a bundled virtual display. Requires the virtual-display driver — set it up under Settings → Automation. Off by default.",
+        "label": "Screen-off mode (Windows)"
+      }
+    },
+    "computerUseTarget": {
+      "description": "Where this character's computer-use actions run. Pick a configured cua sandbox to run them in an isolated Docker desktop instead of this machine. Manage sandboxes under Settings → Automation → Sandboxes.",
+      "label": "Execution target",
+      "local": "Local (this machine)"
+    },
+    "description": "Description",
+    "descriptionPlaceholder": "(optional) one-line summary",
+    "disallowedTools": "Disallowed tools (comma-sep)",
+    "disallowedToolsPlaceholder": "Bash",
+    "mcpServers": "MCP servers",
+    "mcpServersEmptyHint": "(uses all enabled MCP servers)",
+    "mcpServersHint": "Leave all unselected to mean \"use every enabled server\".",
+    "model": "Model",
+    "modelIdPlaceholder": "Or paste a model id",
+    "name": "Name",
+    "namePlaceholder": "Coding Assistant",
+    "permissionMode": "Permission mode",
+    "persona": {
+      "description": "Optional tone and personality woven into the system prompt, plus a greeting and starter prompts.",
+      "exemplarPrompts": "Starter prompts",
+      "exemplarPromptsHint": "One prompt per line — shown as quick-start chips on a new chat.",
+      "exemplarPromptsPlaceholder": "Review my pull request\nDraft release notes",
+      "openingMessage": "Opening message",
+      "openingMessagePlaceholder": "Hi! What are we working on today?",
+      "personality": "Personality",
+      "personalityPlaceholder": "Former teacher who prefers analogies",
+      "title": "Persona",
+      "tone": "Tone",
+      "tonePlaceholder": "warm, encouraging"
+    },
+    "pickColor": "Pick color {color}",
+    "platforms": {
+      "browser": "Web",
+      "description": "Restrict this character to specific platforms. Leave all off to show it everywhere.",
+      "mobile": "Mobile",
+      "tauri": "Desktop",
+      "title": "Available on"
+    },
+    "sandbox": {
+      "enable": {
+        "aria": "Enable sandbox",
+        "description": "Replace SDK builtins with sandbox_* equivalents for this character.",
+        "label": "Sandbox Bash / Edit / Write"
+      },
+      "tier": {
+        "description": "Beats the app-wide default. Inherit defers to Settings → Sandbox.",
+        "inherit": "Inherit app default",
+        "label": "Sandbox tier",
+        "microvm": "microVM (e2b)",
+        "os": "OS sandbox"
+      }
+    },
+    "skills": "Skills",
+    "skillsHint": "Order matters — earlier skills are appended first to the system prompt.",
+    "systemPrompt": "System prompt",
+    "systemPromptPlaceholder": "You are…",
+    "twinBinding": {
+      "cancel": "Cancel",
+      "citationStyleLabel": "Citation style",
+      "confirmBind": "Bind",
+      "createNew": "Create new twin",
+      "enableCitations": "Source citations",
+      "enableCitationsHint": "Attach formatted citations for the retrieved chunks to the Twin-RAG sources (display only — never changes the prompt).",
+      "enableCorrectiveFilter": "Corrective filtering",
+      "enableCorrectiveFilterHint": "Drop low-relevance retrieved chunks with a heuristic grader before they reach the prompt.",
+      "enableHybrid": "Hybrid keyword search",
+      "enableHybridHint": "Blend BM25 keyword retrieval with the vector search so verbatim names, ids, and file references aren't missed.",
+      "enableQueryExpansion": "Query expansion",
+      "enableQueryExpansionHint": "Widen recall with synonym expansion (and optional LLM HyDE/step-back when configured in twin runtime settings).",
+      "enableRag": "Enable RAG",
+      "enableRagHint": "Retrieve top-K twin chunks at send time and inject them into the system prompt.",
+      "enableStyleFewShot": "Style few-shot",
+      "enableStyleFewShotHint": "Pick representative writing samples from the twin profile for tone matching.",
+      "hybridKeywordWeight": "Keyword weight",
+      "never": "(never)",
+      "newTwinId": "Twin id",
+      "newTwinIdHint": "Letters, digits, and underscores. Must be unique across your characters.",
+      "newTwinIdPlaceholder": "twin_xxxxxxxx",
+      "openWorkbench": "Open workbench",
+      "pickExisting": "Use an existing twin",
+      "pickExistingPlaceholder": "Choose…",
+      "ragTopK": "Retrieve top K",
+      "runtimeTitle": "Runtime",
+      "statsChunks": "Chunks",
+      "statsLastDistilled": "Profile updated",
+      "statsPlaybooks": "Playbooks",
+      "statsSources": "Sources",
+      "statsStyleSamples": "Style samples",
+      "styleSamplesK": "Samples per send",
+      "titleBound": "Digital twin",
+      "titleUnbound": "Digital twin (optional)",
+      "unbind": "Unbind twin",
+      "unbindBody": "The twin's data is preserved — only this character's link to it is removed.",
+      "unbindConfirm": "Unbind",
+      "unbindTitle": "Unbind twin?",
+      "unboundDescription": "Link this character to a Digital Twin to inject RAG-retrieved chunks and writing-style few-shots into every send."
+    },
+    "useDefault": "Use app default",
+    "voice": {
+      "description": "Optional per-character voice for read-aloud. Inherits the global speech settings when left on Inherit.",
+      "inherit": "Inherit global",
+      "pitch": "Pitch",
+      "provider": "Provider",
+      "rate": "Rate",
+      "title": "Voice",
+      "voiceId": "Voice",
+      "voiceIdPlaceholder": "Voice id",
+      "volume": "Volume"
+    },
+    "workingDir": "Working directory",
+    "workingDirPlaceholder": "/path/to/project (optional)"
+  },
+  "emptyHint": "No characters yet. The built-ins should appear here automatically.",
+  "exportPackAria": "Export source pack for {name}",
+  "exportPackUnavailable": "Could not resolve a pack to export.",
+  "filter": {
+    "all": "All sources",
+    "builtin": "Built-in",
+    "label": "Filter by source",
+    "plugin": "Plugin",
+    "user": "Custom"
+  },
+  "multiselect": {
+    "moveDown": "Move {name} down",
+    "moveUp": "Move {name} up",
+    "noneDefined": "(none defined yet)",
+    "reorder": "Reorder:"
+  },
+  "newCharacter": "New character",
+  "noMatches": "No characters match your search.",
+  "overlayReadOnly": "Plugin-provided characters are read-only — duplicate first",
+  "overlayUndeletable": "Plugin-provided characters cannot be deleted — disable the plugin instead",
+  "packs": {
+    "characterCount": "{count, plural, =1 {# character} other {# characters}}",
+    "collapseAria": "Hide characters in pack {id}",
+    "delete": "Remove pack",
+    "deleteAria": "Remove pack {id}",
+    "deletedToast": "Removed pack \"{id}\".",
+    "emptyHint": "Plugins can contribute character packs. Import a .cognia-pack.json to add one manually.",
+    "expandAria": "Show characters in pack {id}",
+    "exportedToast": "Exported to {path}",
+    "exportedToastBrowser": "Pack downloaded",
+    "importJsonAction": "Import .cognia-pack.json",
+    "importUnavailableWeb": "Local pack import requires the desktop app.",
+    "importedToast": "Imported pack \"{id}\".",
+    "removeBody": "Pack \"{id}\" will be removed. User-cloned characters from this pack stay in your library.",
+    "removeTitle": "Remove pack?",
+    "rescan": "Re-scan local packs",
+    "rescanToast": "Local packs re-scanned ({registered} registered, {skipped} skipped)",
+    "skippedToast": "Skipped {count} local pack file(s) — see logs",
+    "sourceLocal": "Local file",
+    "sourcePlugin": "Plugin: {name}",
+    "title": "Character Packs"
+  },
+  "recloneFromPackToast": "Re-cloned as \"{name}\".",
+  "remove": "Remove",
+  "removeBody": "\"{name}\" will be removed. Existing conversations using this character keep their history but fall back to app defaults.",
+  "removeTitle": "Remove character?",
+  "removedToast": "Removed \"{name}\".",
+  "save": "Save",
+  "saving": "Saving…",
+  "searchPlaceholder": "Search characters…",
+  "skillsCount": "{count, plural, =1 {# skill} other {# skills}}",
+  "title": "Characters",
+  "updatedToast": "Updated {name}.",
+  "validation": {
+    "nameRequired": "Name is required.",
+    "systemPromptRequired": "System prompt cannot be empty."
+  }
+}

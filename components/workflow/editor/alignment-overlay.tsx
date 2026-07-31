@@ -10,7 +10,7 @@
  * so guides pan / zoom with the canvas instead of floating in screen space.
  */
 
-import { memo } from "react"
+import { forwardRef, memo, useImperativeHandle, useState } from "react"
 import { ViewportPortal } from "@xyflow/react"
 import type {
   GuidesResult,
@@ -88,3 +88,27 @@ export const AlignmentOverlay = memo(function AlignmentOverlay({ guides }: Align
     </ViewportPortal>
   )
 })
+
+export interface AlignmentGuidesHandle {
+  /** Replace the current guides, or clear them with `null`. */
+  setGuides: (guides: GuidesResult | null) => void
+}
+
+/**
+ * Self-contained guides layer that owns the guide state and exposes an
+ * imperative `setGuides` setter via ref.
+ *
+ * WHY THE IMPERATIVE HANDLE — the drag handler recomputes alignment guides on
+ * every rAF frame while a node moves. If that state lived in `FlowCanvas`, each
+ * frame would re-render `FlowCanvas` and re-pass `nodes`/`edges` to
+ * `<ReactFlow>` — a SECOND React render per frame stacked on top of the
+ * position update. Holding the state here means a guide update re-renders ONLY
+ * this layer; `FlowCanvas` (and the `<ReactFlow>` element tree) stays put.
+ */
+export const AlignmentGuidesLayer = forwardRef<AlignmentGuidesHandle>(
+  function AlignmentGuidesLayer(_props, ref) {
+    const [guides, setGuides] = useState<GuidesResult | null>(null)
+    useImperativeHandle(ref, () => ({ setGuides }), [])
+    return <AlignmentOverlay guides={guides} />
+  }
+)

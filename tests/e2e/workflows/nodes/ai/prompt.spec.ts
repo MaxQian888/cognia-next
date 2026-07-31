@@ -2,7 +2,7 @@
  * E2E: ai.prompt — editor + runtime through mock Anthropic.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../../../helpers/db-reset"
 import { configureMockBaseUrls, seedAndOpenWorkflow } from "../../../helpers/seed-workflow"
 import {
@@ -27,8 +27,8 @@ test.describe("workflow node — ai.prompt", () => {
     const wfId = await seedAndOpenWorkflow(page, "ai-prompt")
     await assertNodeOnCanvas(page, { kind: "ai.prompt", label: "Prompt" })
     await openNodeInspector(page, "ai.prompt")
-    await expect(page.locator("#ins-userPrompt, [name=userPrompt]").first()).toBeVisible()
-    await expect(page.locator("#ins-model, [name=model]").first()).toBeVisible()
+    await expect(page.locator("#ins-userPrompt, [data-field=userPrompt]").first()).toBeVisible()
+    await expect(page.locator("#ins-model, [data-field=model]").first()).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "ai.prompt" })
   })

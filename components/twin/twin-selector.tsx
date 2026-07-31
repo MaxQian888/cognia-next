@@ -69,10 +69,17 @@ export interface TwinSelectorProps {
   twins: Twin[]
   activeTwinId: string | null
   onSelect: (twinId: string) => void
-  /** Called after a destructive cascade with the row counts, so parent can show a toast. */
-  onAfterDelete?: (id: string, result: DeleteTwinResult) => void
+  /** Called after a destructive cascade with the row counts + the deleted
+   *  twin's name, so the parent can show a toast. */
+  onAfterDelete?: (id: string, result: DeleteTwinResult, name: string) => void
   /** Called after a create / clone so parent can switch to the new id. */
   onAfterCreate?: (twin: Twin) => void
+  /**
+   * When provided, the "New twin" menu item calls this (e.g. to open a guided
+   * wizard) instead of the built-in quick-create name dialog. Falls back to the
+   * inline dialog when omitted.
+   */
+  onGuidedCreate?: () => void
   /** Optional: show archived rows under a divider. Default false. */
   includeArchived?: boolean
 }
@@ -97,6 +104,7 @@ export const TwinSelector = memo(function TwinSelector({
   onSelect,
   onAfterDelete,
   onAfterCreate,
+  onGuidedCreate,
   includeArchived = false,
 }: TwinSelectorProps) {
   const t = useTranslations("twin.selector")
@@ -188,8 +196,9 @@ export const TwinSelector = memo(function TwinSelector({
     if (!modal.target) return
     setModal((prev) => ({ ...prev, busy: true, error: null }))
     try {
+      const deletedName = modal.target.name
       const result = await deleteTwin(modal.target.id)
-      onAfterDelete?.(modal.target.id, result)
+      onAfterDelete?.(modal.target.id, result, deletedName)
       // If we deleted the active one, fall back to the next visible twin.
       if (modal.target.id === activeTwinId) {
         const next = twins.find((tw) => tw.id !== modal.target!.id && !tw.archived)
@@ -272,8 +281,9 @@ export const TwinSelector = memo(function TwinSelector({
             </>
           ) : null}
           <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={openCreate} data-testid="twin-selector-new">
-            <Plus className="size-3.5 opacity-60" /> {t("newTwin")}
+          <DropdownMenuItem onSelect={onGuidedCreate ?? openCreate} data-testid="twin-selector-new">
+            <Plus className="size-3.5 opacity-60" />{" "}
+            {onGuidedCreate ? t("guidedCreate") : t("newTwin")}
           </DropdownMenuItem>
           {activeTwin ? (
             <>

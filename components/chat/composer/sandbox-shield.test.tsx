@@ -4,7 +4,7 @@ import { render, screen } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
 
 import { resolveShieldState, SandboxShield } from "./sandbox-shield"
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: jest.fn(),

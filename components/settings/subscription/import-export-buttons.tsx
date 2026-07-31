@@ -24,6 +24,8 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Progress } from "@/components/ui/progress"
+import { SettingsAlert } from "@/components/settings/common/settings-section"
+import { isTauri } from "@/lib/tauri"
 import { toast } from "sonner"
 
 import {
@@ -34,19 +36,8 @@ import {
   type SubscriptionEncryptedEnvelope,
   type SubscriptionPackageBody,
 } from "@/lib/subscription/core/encrypted-package"
-import {
-  getActiveAccount,
-  getProviderPreset,
-  listAccounts,
-  getAccount,
-  saveAccount,
-  setActiveAccount,
-  setProviderPreset,
-  listPresets,
-  saveProviderPreset,
-  setDefaultPreset,
-} from "@/lib/subscription/core/transport"
-import type { Account, ProviderId, ProviderVault } from "@/types/subscription"
+import { applyVaults, snapshotVaults } from "@/lib/subscription/core/vault-snapshot"
+import type { ProviderId } from "@/types/subscription"
 import { ALL_PROVIDER_IDS } from "@/types/subscription"
 
 type ExportMode = "idle" | "exporting"
@@ -54,8 +45,15 @@ type ImportMode = "idle" | "decrypting" | "preview" | "applying"
 
 export function ImportExportButtons() {
   const t = useTranslations("subscription.common.importExport")
+  const tRoot = useTranslations("subscription")
   const [exportOpen, setExportOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
+
+  // Both directions go through `snapshotVaults`/`applyVaults`, i.e. the OS
+  // keychain — there is nothing to export and nowhere to import to in a browser.
+  if (!isTauri()) {
+    return <SettingsAlert title={t("title")}>{tRoot("webModeBanner")}</SettingsAlert>
+  }
 
   return (
     <Card>
@@ -77,76 +75,6 @@ export function ImportExportButtons() {
       <ImportDialog open={importOpen} onClose={() => setImportOpen(false)} />
     </Card>
   )
-}
-
-async function snapshotVaults(): Promise<Partial<Record<ProviderId, ProviderVault>>> {
-  const result: Partial<Record<ProviderId, ProviderVault>> = {}
-  for (const provider of ALL_PROVIDER_IDS) {
-    const summaries = await listAccounts(provider)
-    // `getProviderPreset` returns the resolved default preset, so its id is the
-    // vault's `defaultPresetId`.
-    const [activeSnapshot, presets, defaultPreset] = await Promise.all([
-      getActiveAccount(provider),
-      listPresets(provider),
-      getProviderPreset(provider),
-    ])
-    if (summaries.length === 0) {
-      // Still record the empty vault when there's an active pointer / presets.
-      if (activeSnapshot.activeAccountId || presets.length > 0) {
-        result[provider] = {
-          schemaVersion: 3,
-          accounts: [],
-          activeAccountId: activeSnapshot.activeAccountId,
-          presets,
-          defaultPresetId: defaultPreset?.id,
-        }
-      }
-      continue
-    }
-    const fullAccounts: Account[] = []
-    for (const summary of summaries) {
-      const account = await getAccount(provider, summary.id)
-      if (account) fullAccounts.push(account)
-    }
-    result[provider] = {
-      schemaVersion: 3,
-      accounts: fullAccounts,
-      activeAccountId: activeSnapshot.activeAccountId,
-      presets,
-      defaultPresetId: defaultPreset?.id,
-    }
-  }
-  return result
-}
-
-async function applyVaults(
-  vaults: Partial<Record<ProviderId, ProviderVault>>
-): Promise<{ accountCount: number }> {
-  let accountCount = 0
-  for (const provider of Object.keys(vaults) as ProviderId[]) {
-    const vault = vaults[provider]
-    if (!vault) continue
-    for (const account of vault.accounts) {
-      await saveAccount(provider, account)
-      accountCount += 1
-    }
-    // v3 preset library + default pointer.
-    for (const preset of vault.presets ?? []) {
-      await saveProviderPreset(provider, preset)
-    }
-    if (vault.defaultPresetId !== undefined) {
-      await setDefaultPreset(provider, vault.defaultPresetId ?? null)
-    }
-    // Legacy v2 backups carried a single `preset`; fold it in via the shim so
-    // older exports still restore.
-    if ((vault.presets === undefined || vault.presets.length === 0) && vault.preset !== undefined) {
-      await setProviderPreset(provider, vault.preset ?? null)
-    }
-    if (vault.activeAccountId !== undefined) {
-      await setActiveAccount(provider, vault.activeAccountId ?? null)
-    }
-  }
-  return { accountCount }
 }
 
 /**

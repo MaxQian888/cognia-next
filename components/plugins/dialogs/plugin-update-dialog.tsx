@@ -22,10 +22,14 @@ import { Progress } from "@/components/ui/progress"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 
+// Mirrors the `UpdateInfo` shape returned by `PluginUpdater.checkForUpdates`
+// (`lib/plugin/lifecycle/updater.ts`). The fields are `currentVersion` /
+// `latestVersion` — an earlier `fromVersion` / `toVersion` guess never matched,
+// so the dialog rendered "v undefined → v undefined" and installed `undefined`.
 interface UpdateInfo {
   pluginId: string
-  fromVersion: string
-  toVersion: string
+  currentVersion: string
+  latestVersion: string
   changelog?: string
 }
 
@@ -106,7 +110,7 @@ export function PluginUpdateDialog({ open, onClose }: Props) {
     setBusyId(info.pluginId)
     try {
       const client = await loadUpdaterClient()
-      await client.installUpdate(info.pluginId, info.toVersion)
+      await client.installUpdate(info.pluginId, info.latestVersion)
       setUpdates((prev) => prev.filter((u) => u.pluginId !== info.pluginId))
     } finally {
       setBusyId(null)
@@ -118,7 +122,7 @@ export function PluginUpdateDialog({ open, onClose }: Props) {
     for (const info of updates) {
       setBusyId(info.pluginId)
       try {
-        await client.installUpdate(info.pluginId, info.toVersion)
+        await client.installUpdate(info.pluginId, info.latestVersion)
       } finally {
         setBusyId(null)
       }
@@ -161,7 +165,7 @@ export function PluginUpdateDialog({ open, onClose }: Props) {
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium truncate">{info.pluginId}</div>
                       <div className="text-xs text-muted-foreground">
-                        v{info.fromVersion} → v{info.toVersion}
+                        v{info.currentVersion} → v{info.latestVersion}
                       </div>
                       {busyId === info.pluginId && (
                         <Progress value={progress[info.pluginId] ?? 0} className="mt-2 h-1.5" />

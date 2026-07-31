@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useMemo } from "react"
-import { useTranslations } from "next-intl"
+import { useFormatter, useNow, useTranslations } from "next-intl"
 import { useLiveQuery } from "dexie-react-hooks"
 import { motion, useReducedMotion } from "motion/react"
 
@@ -27,16 +27,12 @@ const STATUS_COLOR: Record<string, string> = {
   waiting: "bg-amber-500",
 }
 
-function relative(ms: number, now: number = Date.now()): string {
-  const diff = now - ms
-  if (diff < 60_000) return "now"
-  if (diff < 3_600_000) return `${Math.round(diff / 60_000)}m`
-  if (diff < 86_400_000) return `${Math.round(diff / 3_600_000)}h`
-  return `${Math.round(diff / 86_400_000)}d`
-}
-
 export function RecentRunsFeed({ limit = 10, className }: RecentRunsFeedProps) {
   const t = useTranslations("mobile.workflow")
+  // Localized "3 minutes ago" via next-intl — the old hand-rolled "3m"/"2d"
+  // helper rendered raw English abbreviations for zh-CN users.
+  const format = useFormatter()
+  const now = useNow()
   const runsRaw = useLiveQuery<WorkflowRunRow[]>(
     () => getDb().workflowRuns.orderBy("startedAt").reverse().limit(limit).toArray(),
     [limit]
@@ -76,7 +72,7 @@ export function RecentRunsFeed({ limit = 10, className }: RecentRunsFeedProps) {
             return (
               <motion.li key={r.id} variants={STAGGER_CHILD}>
                 <Link
-                  href={`/workflows/${encodeURIComponent(r.workflowId)}/runs/${encodeURIComponent(r.id)}`}
+                  href={`/workflows/run?id=${encodeURIComponent(r.workflowId)}&runId=${encodeURIComponent(r.id)}`}
                   data-testid={`recent-run-${r.id}`}
                   className="flex items-center gap-3 px-3 py-2 active:bg-muted/50"
                 >
@@ -89,7 +85,7 @@ export function RecentRunsFeed({ limit = 10, className }: RecentRunsFeedProps) {
                     <span className="truncate text-sm font-medium">{wf?.name ?? r.workflowId}</span>
                   </span>
                   <span className="shrink-0 text-[11px] text-muted-foreground">
-                    {relative(r.startedAt)}
+                    {format.relativeTime(new Date(r.startedAt), now)}
                   </span>
                 </Link>
               </motion.li>

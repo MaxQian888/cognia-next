@@ -1,0 +1,276 @@
+@import "tailwindcss";
+/* Supplies the `animate-in` / `data-[state=open]:…` utility vocabulary that
+ * shadcn's generated markup assumes. Utilities are emitted only for classes
+ * actually used, and everything it emits is time-driven `animation`, so the
+ * reduced-motion belt below already governs it. */
+@import "tw-animate-css";
+
+/* ADR-0092 §10 — one semantic token set, two modes. `dark:` utilities key off a
+ * class on <html> so next-themes can drive it without a flash. */
+@custom-variant dark (&:is(.dark *));
+
+/* --------------------------------------------------------------------------
+ * Semantic tokens
+ *
+ * Names come verbatim from the V2 spec §3.1 so a value can be traced back to
+ * the design decision. Two additions the spec does not have:
+ *
+ *   --muted          The spec assigns `stone` (#8E959B) to secondary text, but
+ *                    on `paper` that is 2.69:1 — below the WCAG AA 4.5:1 the
+ *                    same spec demands in §8. `stone` is kept for decorative
+ *                    marks, disabled states and secondary text on the dark
+ *                    substrate (5.9:1 there, which does pass); `--muted` is the
+ *                    AA-safe secondary text colour for the light reading layer
+ *                    (5.15:1).
+ *   --hairline-strong Borders of interactive controls need 3:1 non-text
+ *                    contrast (WCAG 1.4.11); `hairline` is tuned for decorative
+ *                    rules and is deliberately fainter than that.
+ *
+ * `action` (cyan) and `approval` (amber) are 1.69:1 and 2.15:1 on paper. They
+ * are connection lines, state dots and fills — never text, never a text
+ * colour. Their labels render in `ink`/`muted`, which is also what §8's
+ * "state must not rely on colour alone" requires.
+ * -------------------------------------------------------------------------- */
+
+:root {
+  --paper: #f3f1ec;
+  --surface: #faf9f6;
+  --ink: #0c1115;
+  --graphite: #151b20;
+  --stage: #0c1115;
+  --stone: #8e959b;
+  --muted: #5f666e;
+  --hairline: #d7d8d5;
+  --hairline-strong: #b9bcb8;
+  --action: #35cedd;
+  --approval: #d99a3d;
+  --success: #2a6f49;
+  --destructive: #b3261e;
+
+  /* Text that sits ON the dark execution stage, in either mode. */
+  --on-stage: #f3f1ec;
+  --on-stage-muted: #8e959b;
+  --on-stage-hairline: #2a333a;
+
+  /* The site's entrance curve. Kept in lockstep with `EASE_ENTRANCE` in
+     `web/lib/motion.ts`, which the motion components use and whose suite
+     asserts this declaration still matches. */
+  --ease-entrance: cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.dark {
+  --paper: #0c1115;
+  --surface: #151b20;
+  --ink: #f3f1ec;
+  --graphite: #1c242b;
+  --stage: #06090b;
+  --stone: #8e959b;
+  --muted: #8e959b;
+  --hairline: #2a333a;
+  --hairline-strong: #3c464e;
+  --action: #4fdcea;
+  --approval: #e5ac57;
+  --success: #57c08a;
+  --destructive: #f2837c;
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-graphite: var(--graphite);
+  --color-stage: var(--stage);
+  --color-stone: var(--stone);
+  --color-muted: var(--muted);
+  --color-hairline: var(--hairline);
+  --color-hairline-strong: var(--hairline-strong);
+  --color-action: var(--action);
+  --color-approval: var(--approval);
+  --color-success: var(--success);
+  --color-destructive: var(--destructive);
+  --color-on-stage: var(--on-stage);
+  --color-on-stage-muted: var(--on-stage-muted);
+  --color-on-stage-hairline: var(--on-stage-hairline);
+
+  /* §3.3 — controls 8, product panels 12, large stages 14. No oversized pills. */
+  --radius-control: 8px;
+  --radius-panel: 12px;
+  --radius-stage: 14px;
+
+  /* §3.2 — Geist Sans for display and body, Geist Mono for status, paths,
+   * commands and provenance only. */
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
+
+  /* §7 — desktop content width 1440–1520. */
+  --spacing-shell: 1480px;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--paper);
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* §8 — every animation must be optional. Components additionally branch on
+   * `useReducedMotion()` so a pinned rail becomes a static stepper rather than
+   * an instantly-jumping one; this rule is the belt to that suspenders. */
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  ::selection {
+    background-color: color-mix(in oklab, var(--action) 28%, transparent);
+    color: var(--ink);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--action);
+    outline-offset: 2px;
+  }
+}
+
+/* Cinematic fade-through (spec §6.1): the outgoing state does not slide, it
+ * dissolves while the incoming content settles. 250–400ms, transform and
+ * opacity only. The global reduced-motion rule above collapses it to nothing,
+ * and the signature demo additionally renders a static stepper in that mode. */
+@keyframes fade-through {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@layer utilities {
+  /* §2.4 — the "tool / precision instrument" language: hairline rules that
+   * read as measurement marks rather than decoration. */
+  .rule-hairline {
+    border-color: var(--hairline);
+  }
+
+  /* Footer columns collapse to an accordion on mobile (spec §7) and are always
+   * open from `md` up. `<details>` is used rather than a JS disclosure so the
+   * markup stays keyboard- and screen-reader-correct with no hydration; the
+   * rules below neutralise the control at wide widths, where a summary that
+   * could collapse a permanently-open column would just be confusing. */
+  .footer-accordion > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .footer-accordion > summary::marker {
+    content: "";
+  }
+
+  @media (min-width: 768px) {
+    .footer-accordion > summary {
+      pointer-events: none;
+    }
+
+    /* Beats the UA's `details:not([open]) > *:not(summary) { display: none }`
+     * in engines that still hide the closed state that way. */
+    .footer-accordion > .footer-accordion-panel {
+      display: block !important;
+    }
+
+    /* Chrome 131+, Safari 18.4+ and Firefox 139+ no longer use that rule: the
+     * closed state is enforced by `details::details-content {
+     * content-visibility: hidden }`. The panel above therefore computed
+     * `display: block` and still measured 0px tall, which is how all fifteen
+     * footer links ended up present in the DOM and invisible on desktop.
+     *
+     * This is a SEPARATE rule block on purpose. An unknown pseudo-element
+     * invalidates the entire selector list it appears in, so merging the two
+     * would take the legacy fallback down with it in any engine that does not
+     * know `::details-content`. */
+    .footer-accordion::details-content {
+      content-visibility: visible;
+    }
+  }
+
+  /* --------------------------------------------------------------------
+   * Trace — the card interaction (ADR-0092 §6).
+   *
+   * A 1px accent rule sweeps across the top of a cell on hover or keyboard
+   * focus. Three rules make this safe rather than decorative noise:
+   *
+   *   1. `@media (hover: hover)` is mandatory. On a touch screen `:hover`
+   *      latches after a tap, so without it the accent sticks to whichever
+   *      cell was last touched and never clears.
+   *   2. `:focus-within` is mandatory. These cells contain `learn more`
+   *      links; a keyboard user must get the same affordance a mouse user
+   *      does, or the interaction is sighted-pointer-only.
+   *   3. Cyan appears only as the rule. It is 1.69:1 on paper — a line, a
+   *      dot or a fill, never text and never the sole carrier of meaning.
+   *      Nothing in a cell is hidden until hover.
+   *
+   * Reduced motion is handled by the belt above, which collapses the
+   * transition to 0.01ms: the rule snaps to full width instead of sweeping,
+   * which is the correct end state rather than a suppressed one.
+   * -------------------------------------------------------------------- */
+  @media (hover: hover) {
+    .trace {
+      position: relative;
+      transition:
+        background-color 200ms ease,
+        border-color 200ms ease;
+    }
+
+    .trace::after {
+      content: "";
+      position: absolute;
+      inset-inline: 0;
+      top: 0;
+      height: 1px;
+      background: var(--action);
+      transform: scaleX(0);
+      transform-origin: left;
+      transition: transform 260ms var(--ease-entrance);
+      pointer-events: none;
+    }
+
+    .trace:hover::after,
+    .trace:focus-within::after {
+      transform: scaleX(1);
+    }
+
+    .trace:hover,
+    .trace:focus-within {
+      background-color: var(--surface);
+    }
+  }
+
+  /* Windows high-contrast replaces `background` with a system colour; without
+   * this the rule disappears entirely in forced-colors mode. */
+  @media (forced-colors: active) {
+    .trace::after {
+      background: CanvasText;
+    }
+  }
+
+  /* Vertical rhythm lines (spec §2.3 component pick). */
+  .rhythm-lines {
+    background-image: linear-gradient(to right, var(--hairline) 1px, transparent 1px);
+    background-size: calc(100% / 12) 100%;
+  }
+}

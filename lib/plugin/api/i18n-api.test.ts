@@ -3,6 +3,11 @@
  */
 
 import { createI18nAPI } from "./i18n-api"
+import {
+  __resetPluginI18nForTesting,
+  lookupPluginMessage,
+  registerPluginI18n,
+} from "@/lib/i18n/plugin-i18n-registry"
 
 // Mock stores and i18n config
 jest.mock("@/stores", () => ({
@@ -28,6 +33,10 @@ jest.mock("@/lib/i18n/config", () => ({
 
 describe("I18n API", () => {
   const testPluginId = "test-plugin"
+
+  beforeEach(() => {
+    __resetPluginI18nForTesting()
+  })
 
   describe("createI18nAPI", () => {
     it("should create an API object with all expected methods", () => {
@@ -109,6 +118,17 @@ describe("I18n API", () => {
   })
 
   describe("t (translate)", () => {
+    it("reads manifest translations registered in the next-intl overlay", () => {
+      registerPluginI18n({
+        pluginId: testPluginId,
+        messages: {
+          en: { [`plugin.${testPluginId}.panel.title`]: "Manifest panel" },
+        },
+      })
+
+      expect(createI18nAPI(testPluginId).t("panel.title")).toBe("Manifest panel")
+    })
+
     it("should return key when no translation registered", () => {
       const api = createI18nAPI(testPluginId)
 
@@ -182,6 +202,13 @@ describe("I18n API", () => {
 
       expect(api.hasTranslation("not.exists.key")).toBe(false)
     })
+  })
+
+  it("makes runtime translations visible to host next-intl consumers", () => {
+    const api = createI18nAPI(testPluginId)
+    api.registerTranslations("en", { "runtime.label": "Runtime label" })
+
+    expect(lookupPluginMessage("en", `plugin.${testPluginId}.runtime.label`)).toBe("Runtime label")
   })
 
   describe("onLocaleChange", () => {

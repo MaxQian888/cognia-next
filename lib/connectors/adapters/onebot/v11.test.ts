@@ -68,6 +68,24 @@ describe("parseV11Event", () => {
     expect(result!.mentions.users).toContain("100000")
   })
 
+  it("records a mass ping ([CQ:at,qq=all]) as a mention WITHOUT flipping selfMentioned", () => {
+    const event: OneBotV11Event = {
+      ...makeBase(),
+      message_type: "group",
+      group_id: 300001,
+      self_id: 100000,
+      message: [
+        { type: "at", data: { qq: "all" } },
+        { type: "text", data: { text: " everyone look" } },
+      ],
+    }
+    const result = parseV11Event(ADAPTER_ID, event)
+    expect(result).not.toBeNull()
+    expect(result!.mentions.users).toContain("all")
+    // A group-wide ping must not trigger the bot's self-mention auto-reply.
+    expect(result!.mentions.selfMentioned).toBe(false)
+  })
+
   it("sets replyTo when a reply segment is present", () => {
     const event: OneBotV11Event = {
       ...makeBase(),

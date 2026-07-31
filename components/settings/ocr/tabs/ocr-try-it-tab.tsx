@@ -222,7 +222,9 @@ export function OcrTryItTab({
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent data-testid="ocr-try-it-confirm">
           <AlertDialogHeader>
-            <AlertDialogTitle>{t("ocr.tryIt.confirm.title")}</AlertDialogTitle>
+            <AlertDialogTitle data-testid="ocr-try-it-confirm-title">
+              {t("ocr.tryIt.confirm.title", { provider: providerId })}
+            </AlertDialogTitle>
             <AlertDialogDescription>
               {t("ocr.tryIt.confirm.estimatedCost", {
                 cost:

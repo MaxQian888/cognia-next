@@ -11,7 +11,7 @@ jest.mock("@/lib/export/html/animated-html", () => ({
 }))
 
 import { renderSingleExport } from "./index"
-import type { ChatSession, StoredMessage } from "@/lib/claude/types"
+import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 import * as md from "@/lib/export/text/rich-markdown"
 import * as bh from "@/lib/export/html/beautiful-html"
 import * as ah from "@/lib/export/html/animated-html"
@@ -114,6 +114,44 @@ describe("renderSingleExport", () => {
       messages,
     })
     expect(out.content).toBe("MD")
+  })
+
+  it("renders per-message JSONL", () => {
+    const msgs: StoredMessage[] = [
+      {
+        id: "1",
+        sessionId: "s",
+        role: "user",
+        parts: [{ type: "text", text: "hi" }],
+        createdAt: 1,
+      },
+    ]
+    const out = renderSingleExport({ format: "jsonl", session, messages: msgs, exportedAt: date })
+    expect(out.filename.endsWith(".jsonl")).toBe(true)
+    expect(out.mimeType).toBe("application/x-ndjson")
+    expect(JSON.parse(out.content).role).toBe("user")
+  })
+
+  it("renders per-conversation JSONL with .chat.jsonl suffix", () => {
+    const msgs: StoredMessage[] = [
+      {
+        id: "1",
+        sessionId: "s",
+        role: "user",
+        parts: [{ type: "text", text: "hi" }],
+        createdAt: 1,
+      },
+    ]
+    const out = renderSingleExport({
+      format: "jsonl-chat",
+      session,
+      messages: msgs,
+      exportedAt: date,
+      includeAllBranches: true,
+    })
+    expect(out.filename.endsWith(".chat.jsonl")).toBe(true)
+    expect(out.mimeType).toBe("application/x-ndjson")
+    expect(JSON.parse(out.content).messages[0]).toEqual({ role: "user", content: "hi" })
   })
 
   it("trims slugs longer than 60 chars", () => {

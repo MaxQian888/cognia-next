@@ -15,22 +15,13 @@ import { InfoIcon } from "lucide-react"
 
 import { MeRow } from "./me-row"
 import { APP_VERSION } from "@/lib/app-version"
-
-interface CapacitorAppShape {
-  getInfo(): Promise<{ name: string; version: string; build: string; id: string }>
-}
+import { getAppInfo } from "@/lib/capacitor/app"
 
 async function loadNativeBuild(): Promise<string | null> {
-  try {
-    const moduleId = "@capacitor/app"
-    const mod = (await import(/* webpackIgnore: true */ moduleId)) as {
-      App: CapacitorAppShape
-    }
-    const info = await mod.App.getInfo()
-    return info.build
-  } catch {
-    return null
-  }
+  // getAppInfo resolves through window.Capacitor.Plugins.App — a bare
+  // dynamic import never resolves inside the static-export WebView.
+  const out = await getAppInfo()
+  return out.kind === "ok" ? out.value.build : null
 }
 
 export interface VersionRowProps {
@@ -39,7 +30,7 @@ export interface VersionRowProps {
 }
 
 export function VersionRow({ loader }: VersionRowProps = {}) {
-  const t = useTranslations("mobile.me.about")
+  const t = useTranslations("mobile.me")
   const [nativeBuild, setNativeBuild] = useState<string | null>(null)
 
   useEffect(() => {

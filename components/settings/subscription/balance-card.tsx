@@ -26,6 +26,8 @@ import type { ProviderId, SubscriptionBalanceRow } from "@/types/subscription"
 export interface BalanceCardProps {
   provider: ProviderId
   accountId: string
+  /** Whether this exact account has opted into outbound quota queries. */
+  queryEnabled: boolean
   /** Display label for the account (falls back to the id). */
   label?: string
 }
@@ -38,9 +40,13 @@ function formatAmount(value: number | undefined, snapshot: SubscriptionBalanceRo
   return unit ? `${rounded} ${unit}` : rounded
 }
 
-export function BalanceCard({ provider, accountId, label }: BalanceCardProps) {
+export function BalanceCard({ provider, accountId, queryEnabled, label }: BalanceCardProps) {
   const t = useTranslations("subscription.balance")
-  const { snapshot, refreshing, unavailable, refresh } = useAccountBalance(provider, accountId)
+  const { snapshot, refreshing, unavailable, refresh } = useAccountBalance(
+    provider,
+    accountId,
+    queryEnabled
+  )
 
   const remaining = snapshot ? formatAmount(snapshot.remaining, snapshot) : null
   const total = snapshot ? formatAmount(snapshot.total, snapshot) : null
@@ -56,7 +62,7 @@ export function BalanceCard({ provider, accountId, label }: BalanceCardProps) {
           variant="outline"
           size="sm"
           onClick={() => void refresh()}
-          disabled={refreshing}
+          disabled={!queryEnabled || refreshing}
           data-testid={`balance-refresh-${accountId}`}
           aria-label={t("refresh")}
         >

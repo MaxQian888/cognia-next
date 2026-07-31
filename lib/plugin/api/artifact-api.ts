@@ -4,7 +4,8 @@
  * Provides artifact management capabilities to plugins.
  */
 
-import { useArtifactStore } from "@/stores/artifact/artifact-store"
+import { selectActiveArtifactId, useArtifactStore } from "@/stores/artifact/artifact-store"
+import { useChatStore } from "@/stores/chat"
 import {
   buildArtifactSourceMetadata,
   clearRegisteredArtifactRenderers,
@@ -17,9 +18,10 @@ import type {
   CreateArtifactOptions,
   ArtifactFilter,
   ArtifactRenderer,
-} from "@/types/plugin/plugin-extended"
+} from "@/types/plugin/plugin"
 import type { Artifact } from "@/types/artifact"
 import { createPluginSystemLogger } from "../core/logger"
+import { createApiGuardedAPI } from "./api-permission-gate"
 import {
   MermaidRenderer,
   ChartRenderer,
@@ -35,11 +37,12 @@ import { ArtifactPreview } from "@/components/artifacts/artifact-preview"
  */
 export function createArtifactAPI(pluginId: string): PluginArtifactAPI {
   const logger = createPluginSystemLogger(pluginId)
-  return {
+  const api: PluginArtifactAPI = {
     getActiveArtifact: (): Artifact | null => {
       const store = useArtifactStore.getState()
-      if (!store.activeArtifactId) return null
-      return store.artifacts[store.activeArtifactId] || null
+      const activeId = selectActiveArtifactId(store, useChatStore.getState().activeSessionId)
+      if (!activeId) return null
+      return store.artifacts[activeId] || null
     },
 
     getArtifact: (id: string): Artifact | null => {
@@ -145,7 +148,9 @@ export function createArtifactAPI(pluginId: string): PluginArtifactAPI {
       let lastArtifactId: string | null = null
 
       const unsubscribe = useArtifactStore.subscribe((state) => {
-        const currentId = state.activeArtifactId || null
+        // The active artifact is per-conversation now, so "the" active one is
+        // whichever the on-screen conversation is parked on.
+        const currentId = selectActiveArtifactId(state, useChatStore.getState().activeSessionId)
         if (currentId !== lastArtifactId) {
           lastArtifactId = currentId
           const artifact = currentId ? state.artifacts[currentId] : null
@@ -173,6 +178,27 @@ export function createArtifactAPI(pluginId: string): PluginArtifactAPI {
       }
     },
   }
+
+  return createApiGuardedAPI(
+    pluginId,
+    api,
+    {
+      getActiveArtifact: "artifact:read",
+      getArtifact: "artifact:read",
+      createArtifact: "artifact:write",
+      updateArtifact: "artifact:write",
+      deleteArtifact: "artifact:write",
+      listArtifacts: "artifact:read",
+      openArtifact: "artifact:write",
+      closeArtifact: "artifact:write",
+      onArtifactChange: "artifact:read",
+    },
+    {
+      // Contribution registration: exposes the plugin's own renderer, reads no
+      // user artifact data.
+      unguarded: ["registerRenderer"],
+    }
+  )
 }
 
 /**

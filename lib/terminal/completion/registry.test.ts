@@ -148,3 +148,43 @@ describe("getCompletions", () => {
     expect(out).toHaveLength(2)
   })
 })
+
+describe("rankSuggestions — extended sources", () => {
+  it("orders plugin > spec > ai > path > exe > history", () => {
+    const ranked = rankSuggestions([
+      sug("h", "history"),
+      sug("e", "exe"),
+      sug("p", "path"),
+      sug("a", "ai"),
+      sug("s", "spec"),
+      sug("g", "plugin"),
+    ])
+    expect(ranked.map((r) => r.source)).toEqual(["plugin", "spec", "ai", "path", "exe", "history"])
+  })
+
+  it("keeps same-text suggestions with different replace spans distinct", () => {
+    const a: TerminalCompletionSuggestion = {
+      ...sug("cd src/", "path", 0.9),
+      replace: { from: 3, insert: "src/" },
+    }
+    const b: TerminalCompletionSuggestion = {
+      ...sug("cd src/", "path", 0.8),
+      replace: { from: 0, insert: "cd src/" },
+    }
+    expect(rankSuggestions([a, b])).toHaveLength(2)
+  })
+
+  it("dedupes same text + same replace span keeping the highest-ranked", () => {
+    const a: TerminalCompletionSuggestion = {
+      ...sug("cd src/", "spec", 0.9),
+      replace: { from: 3, insert: "src/" },
+    }
+    const b: TerminalCompletionSuggestion = {
+      ...sug("cd src/", "path", 0.8),
+      replace: { from: 3, insert: "src/" },
+    }
+    const ranked = rankSuggestions([b, a])
+    expect(ranked).toHaveLength(1)
+    expect(ranked[0]?.source).toBe("spec")
+  })
+})

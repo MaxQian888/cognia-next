@@ -19,28 +19,36 @@
 // Frontend code never deals with file paths; that's resolved per-OS in Rust
 // (see src-tauri/src/agents/paths.rs).
 
-import type { AgentId, McpServer } from "@/lib/claude/types"
+import type { AgentId, McpServer } from "@cognia/agent-config-types"
 import type { McpImportDraft } from "@/lib/db/mcp-servers"
 import { CLAUDE_CODE_AGENT } from "./claude-code"
 import { CLAUDE_DESKTOP_AGENT } from "./claude-desktop"
 import { CLINE_AGENT } from "./cline"
 import { CODEX_AGENT } from "./codex"
+import { COGNIA_AGENT } from "./cognia"
 import { CURSOR_AGENT } from "./cursor"
 import { GEMINI_AGENT } from "./gemini"
+import { KIRO_AGENT } from "./kiro"
+import { OPENCODE_AGENT } from "./opencode"
 import { ROO_CODE_AGENT } from "./roo-code"
 import { VSCODE_AGENT } from "./vscode"
 import { WINDSURF_AGENT } from "./windsurf"
+import { ZED_AGENT } from "./zed"
 
 export {
   CLAUDE_CODE_AGENT,
   CLAUDE_DESKTOP_AGENT,
   CLINE_AGENT,
   CODEX_AGENT,
+  COGNIA_AGENT,
   CURSOR_AGENT,
   GEMINI_AGENT,
+  KIRO_AGENT,
+  OPENCODE_AGENT,
   ROO_CODE_AGENT,
   VSCODE_AGENT,
   WINDSURF_AGENT,
+  ZED_AGENT,
 }
 
 export type AgentFileFormat = "json" | "jsonc" | "toml"
@@ -92,6 +100,7 @@ export interface McpAgentAdapter {
  * (chips, import dialog). Read-only agents (cline, roo-code) come last.
  */
 export const MCP_AGENT_ADAPTERS: McpAgentAdapter[] = [
+  COGNIA_AGENT,
   CLAUDE_CODE_AGENT,
   CLAUDE_DESKTOP_AGENT,
   CURSOR_AGENT,
@@ -99,6 +108,9 @@ export const MCP_AGENT_ADAPTERS: McpAgentAdapter[] = [
   CODEX_AGENT,
   GEMINI_AGENT,
   WINDSURF_AGENT,
+  ZED_AGENT,
+  KIRO_AGENT,
+  OPENCODE_AGENT,
   CLINE_AGENT,
   ROO_CODE_AGENT,
 ]

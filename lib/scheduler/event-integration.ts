@@ -6,7 +6,7 @@
  */
 
 import { getTaskScheduler } from "./task-scheduler"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.scheduler
 
@@ -24,10 +24,25 @@ export type SchedulerEventType =
   | "backup:completed"
   | "workflow:completed"
   | "agent:completed"
+  // A single chat turn finished. Emitted by the ExecutionBroker event bridge
+  // (`lib/execution/event-bridge.ts`) when a `chat` leg settles, so an
+  // event-triggered task / forward chain can react to "any chat turn finished".
+  // No subsystem emitted a per-turn chat event before the broker existed.
+  | "chat:completed"
+  // Built-in multi-agent terminal events (ADR-0019 / 0022 / 0045). Emitted
+  // when a Goal / Agent Team / Plan reaches a terminal status — from either a
+  // direct (chat-driven) run or a scheduled run — so an event-triggered task
+  // or a forward chain can react ("when goal X finishes → run task Y").
+  | "goal:completed"
+  | "agent-team:completed"
+  | "plan:completed"
   | "custom"
   // Platform Connectors — proactive outbound events (Task 108)
   | "connection:outbound:send"
   | "connection:scheduled:digest"
+  | "connection:housekeeping:daily"
+  | "job:exited"
+  | "monitor:fired"
 
 /**
  * Event data that can be passed to event-triggered tasks
@@ -102,9 +117,16 @@ export function isValidEventType(eventType: string): eventType is SchedulerEvent
     "backup:completed",
     "workflow:completed",
     "agent:completed",
+    "chat:completed",
+    "goal:completed",
+    "agent-team:completed",
+    "plan:completed",
     "custom",
     "connection:outbound:send",
     "connection:scheduled:digest",
+    "connection:housekeeping:daily",
+    "job:exited",
+    "monitor:fired",
   ]
   return validTypes.includes(eventType as SchedulerEventType)
 }

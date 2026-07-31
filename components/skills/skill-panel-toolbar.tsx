@@ -3,9 +3,11 @@
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
+  ArrowUpCircleIcon,
   FolderDownIcon,
   FolderIcon,
   LayoutTemplateIcon,
+  LinkIcon,
   MoreHorizontalIcon,
   PackageIcon,
   PlusIcon,
@@ -44,9 +46,9 @@ import { nameFromFilename, parseSkillMarkdown } from "@/lib/claude/skills-io"
 import { scanClaudeSkills, skillsEmptyTrash, skillsListTrash } from "@/lib/claude/ipc"
 import { useSkillsStore } from "@/stores/skills"
 import type { ImportStaging } from "@/stores/skills"
-import { useSkillSync } from "@/hooks/skills"
+import { useSkillSync, useSkillUpdate } from "@/hooks/skills"
 import { exportSkillsToDirWithFeedback } from "@/lib/skills/export-toast"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const SKILL_FILE_FILTERS = [{ name: "Markdown", extensions: ["md", "markdown"] }]
 const BUNDLE_FILE_FILTERS = [{ name: "Skill bundle", extensions: ["zip"] }]
@@ -72,7 +74,9 @@ export function SkillPanelToolbar() {
   const [templateOpen, setTemplateOpen] = useState(false)
   const openCreate = useSkillsStore((s) => s.openCreate)
   const setImportStaging = useSkillsStore((s) => s.setImportStaging)
+  const setUrlInstallOpen = useSkillsStore((s) => s.setUrlInstallOpen)
   const sync = useSkillSync()
+  const updates = useSkillUpdate()
   // Select the raw field so Zustand's referential equality holds across
   // renders — wrapping `resolveSkillBundleMirrors` in the selector creates
   // a fresh object every read and triggers an update loop in React 19.
@@ -330,6 +334,20 @@ export function SkillPanelToolbar() {
     }
   }
 
+  const handleCheckUpdates = async () => {
+    try {
+      const count = await updates.checkAll()
+      if (count > 0) toast.success(tToasts("updatesFound", { count }))
+      else toast.info(tToasts("updatesNone"))
+      loggers.skills.info("update check done", { updates: count })
+    } catch (err) {
+      toast.error(
+        tToasts("updatesError", { error: err instanceof Error ? err.message : String(err) })
+      )
+      loggers.skills.error("update check failed", err)
+    }
+  }
+
   const handleExportAll = async () => {
     setBusy(true)
     try {
@@ -429,10 +447,24 @@ export function SkillPanelToolbar() {
               <span className="text-[10px] text-muted-foreground">{tDiscovery("scanCustom")}</span>
             </div>
           </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onSelect={() => setUrlInstallOpen(true)}
+            className="text-xs"
+            data-testid="skill-panel-toolbar-install-from-url"
+          >
+            <LinkIcon className="mr-2 size-3.5" />
+            <div className="flex flex-col gap-0.5">
+              <span>{t("installFromUrl")}</span>
+              <span className="text-[10px] text-muted-foreground">
+                {tCommon("marketplace.urlInstall.description")}
+              </span>
+            </div>
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
-      {/* Export + Sync visible inline at md+ */}
+      {/* Export + Updates + Sync visible inline at md+ */}
       <Button
         size="sm"
         variant="outline"
@@ -442,6 +474,17 @@ export function SkillPanelToolbar() {
       >
         <FolderDownIcon className="mr-1.5 size-3.5" />
         {t("exportAll")}
+      </Button>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => void handleCheckUpdates()}
+        disabled={busy || updates.checking}
+        className="hidden md:inline-flex"
+        data-testid="skill-panel-toolbar-check-updates"
+      >
+        <ArrowUpCircleIcon className="mr-1.5 size-3.5" />
+        {updates.checking ? t("checkingUpdates") : t("checkUpdates")}
       </Button>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -519,6 +562,14 @@ export function SkillPanelToolbar() {
           >
             <FolderDownIcon className="mr-2 size-3.5" />
             {t("exportAll")}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() => void handleCheckUpdates()}
+            disabled={busy || updates.checking}
+            className="text-xs"
+          >
+            <ArrowUpCircleIcon className="mr-2 size-3.5" />
+            {updates.checking ? t("checkingUpdates") : t("checkUpdates")}
           </DropdownMenuItem>
           <DropdownMenuItem
             onSelect={() => void sync.push()}

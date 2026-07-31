@@ -16,7 +16,7 @@ import type {
   StoredMessage,
   SystemPromptPreset,
   Team,
-} from "@/lib/claude/types"
+} from "@cognia/agent-config-types"
 import type { TrustedWorkspace } from "@/lib/db/trusted-workspaces"
 import type { SessionStateRow, TtsProviderKeyRow } from "@/lib/db/schema"
 import type {
@@ -27,7 +27,12 @@ import type {
 } from "@/lib/db/canvas-types"
 import type { A2UIAppRow, A2UITemplateRow, A2UIEventHistoryRow } from "@/lib/db/a2ui-types"
 import type { TwinChunk, TwinDraft, TwinJob, TwinProfile, TwinSource } from "@/types/twin"
+import type { Memory } from "@/types/memory/memory"
+import type { MemoryAuditEvent, MemoryEvidence, MemoryJob } from "@/types/memory/governance"
 import type { LocalStorageSnapshot } from "./snapshots/types"
+import type { TemplateDefinitionRow, TemplatePackageRow } from "@/lib/db/template-platform"
+import type { TemplateInstanceRecord } from "@/lib/templates/repository"
+import type { ProfilesExport } from "@cognia/provider-types/profile-migration"
 
 /** Schema version currently emitted by `buildBackupPackage`. */
 export const EXPORT_SCHEMA_VERSION = 3 as const
@@ -52,6 +57,14 @@ export interface BackupManifestV3 {
   integrity: { algorithm: "SHA-256"; checksum: string }
   /** Present only when the file is wrapped in `EncryptedEnvelopeV1`. */
   encryption?: { enabled: true; format: "encrypted-envelope-v1" }
+  /**
+   * Provenance of the device that produced the snapshot (added 2026-06,
+   * OPTIONAL — older files restore unchanged, no `schemaVersion` bump). The
+   * label is a generic platform string ("Windows desktop"), never the raw
+   * user agent: the manifest rides cleartext in the encrypted envelope.
+   * See `lib/device/device-identity.ts`.
+   */
+  device?: { id: string; label?: string; platform?: string }
 }
 
 /**
@@ -87,6 +100,16 @@ export interface BackupPayloadV3 {
   a2uiApps?: A2UIAppRow[]
   a2uiTemplates?: A2UITemplateRow[]
   a2uiEventHistory?: A2UIEventHistoryRow[]
+  /** Unified portable template data. Device bindings and migration rollback snapshots stay local. */
+  templateDefinitions?: TemplateDefinitionRow[]
+  templatePackages?: TemplatePackageRow[]
+  templateInstances?: TemplateInstanceRecord[]
+  /**
+   * Secret-free Provider Profile Store documents. Catalog revisions and live
+   * connection inventory are host caches and are intentionally rehydrated
+   * instead of being carried between devices.
+   */
+  providerProfileStore?: ProfilesExport
   /**
    * Zustand-persist faces that live in `localStorage` (external agents,
    * custom modes, agent teams, custom themes, artifacts, canvas prefs, …).
@@ -107,7 +130,6 @@ export interface BackupPayloadV3 {
   pluginPermissions?: unknown[]
   pluginReviews?: unknown[]
   pluginAnalytics?: unknown[]
-  pluginScheduledJobs?: unknown[]
   /**
    * Digital-twin tables (schema v14). Always-additive: legacy v3 envelopes
    * that pre-date the twin subsystem omit these fields, and the importer
@@ -128,6 +150,15 @@ export interface BackupPayloadV3 {
   twinProfile?: TwinProfile[]
   twinDrafts?: TwinDraft[]
   twinJobs?: TwinJob[]
+  /**
+   * Learned-memory control-plane tables (schema v118). The canonical memory,
+   * its evidence identities, durable jobs, and content-free audit trail are
+   * exported together so restore never severs provenance links.
+   */
+  memories?: Memory[]
+  memoryEvidence?: MemoryEvidence[]
+  memoryJobs?: MemoryJob[]
+  memoryAuditEvents?: MemoryAuditEvent[]
 }
 
 /** The on-disk plaintext shape. JSON-serialized verbatim. */
@@ -235,6 +266,18 @@ export interface ExportOptions {
   includeApiKey: boolean
   /** Include built-in characters/skills/teams. Off by default — they re-seed locally. */
   includeBuiltIns?: boolean
+  /** Include learned memories and their governance graph. Defaults to true. */
+  includeMemories?: boolean
+  /** Include the singleton AppSettings row. Defaults to true. */
+  includeSettings?: boolean
+  /** Include non-session, non-plugin Dexie user content. Defaults to true. */
+  includeCoreData?: boolean
+  /** Include plugin catalog, permissions, reviews, and analytics. Defaults to true. */
+  includePlugins?: boolean
+  /** Include localStorage-backed persisted state. Defaults to true. */
+  includeLocalStorage?: boolean
+  /** Include the artifact store within localStorage snapshots. Defaults to true. */
+  includeArtifacts?: boolean
 }
 
 // ---- Errors ---------------------------------------------------------------

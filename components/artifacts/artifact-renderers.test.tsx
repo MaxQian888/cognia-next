@@ -5,7 +5,11 @@
 import { render, screen } from "@testing-library/react"
 
 jest.mock("@/components/chat/renderers/code-block", () => ({
-  CodeBlock: ({ code }: { code: string }) => <pre data-testid="code">{code}</pre>,
+  CodeBlock: ({ code, language }: { code: string; language?: string }) => (
+    <pre data-testid="code" data-language={language ?? ""}>
+      {code}
+    </pre>
+  ),
 }))
 jest.mock("@/components/chat/renderers/math-block", () => ({
   MathBlock: ({ content }: { content: string }) => <div data-testid="math">{content}</div>,
@@ -97,6 +101,26 @@ describe("ArtifactRenderer", () => {
   it("dispatches to CodeBlock for unknown types", () => {
     render(<ArtifactRenderer type="weird" content="x" />)
     expect(screen.getByTestId("code")).toBeInTheDocument()
+  })
+
+  it("forwards the artifact language to CodeBlock so syntax highlighting can run", () => {
+    // Regression: the code/default cases rendered <CodeBlock> with no language,
+    // so the highlighter never ran and the artifact code view fell back to
+    // colourless plain text. The language must reach CodeBlock (mapped to its
+    // Shiki id) for syntax colour to render.
+    render(
+      <ArtifactRenderer
+        type="code"
+        content="const x = 1"
+        artifact={dummy({ language: "typescript" })}
+      />
+    )
+    expect(screen.getByTestId("code")).toHaveAttribute("data-language", "typescript")
+  })
+
+  it("forwards the artifact language for unknown types too", () => {
+    render(<ArtifactRenderer type="weird" content="x" artifact={dummy({ language: "python" })} />)
+    expect(screen.getByTestId("code")).toHaveAttribute("data-language", "python")
   })
 
   it("dispatches to ChartRenderer for charts", async () => {

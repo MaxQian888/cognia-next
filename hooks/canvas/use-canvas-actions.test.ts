@@ -19,7 +19,7 @@ jest.mock("@/lib/ai/generation/canvas-actions", () => ({
 }))
 
 const getProviderModelMock = jest.fn((..._a: unknown[]) => ({ provider: "anthropic" }))
-jest.mock("@/lib/ai/core/client", () => ({
+jest.mock("@cognia/provider-core/core/client", () => ({
   getProviderModel: (...a: unknown[]) => getProviderModelMock(...a),
 }))
 
@@ -29,7 +29,7 @@ jest.mock("@/stores/settings", () => ({
     selector({ settings: settingsRef.current }),
 }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: { canvas: { error: jest.fn(), warn: jest.fn(), info: jest.fn() } },
 }))
 
@@ -65,6 +65,21 @@ describe("useCanvasActions", () => {
     expect(result.current.output).toBe("improved")
   })
 
+  it("uses the configured BYOK provider (not the legacy Anthropic path) when a key is set", async () => {
+    settingsRef.current = {
+      defaultProvider: "anthropic",
+      providerSettings: { anthropic: { enabled: true, apiKey: "sk-ant" } },
+    } as never
+    generateTextMock.mockResolvedValueOnce({ text: "ok" })
+    const { result } = renderHook(() => useCanvasActions())
+    await act(async () => {
+      await result.current.run({ actionType: "improve" as never, content: "x" })
+    })
+    // Resolved via provider-consumption — the legacy single-key path is skipped.
+    expect(getProviderModelMock).not.toHaveBeenCalled()
+    expect(generateTextMock).toHaveBeenCalled()
+  })
+
   it("run() falls back to ACTION_PROMPTS.custom for unknown action types", async () => {
     generateTextMock.mockResolvedValueOnce({ text: "custom-out" })
     const { result } = renderHook(() => useCanvasActions())
@@ -89,6 +104,19 @@ describe("useCanvasActions", () => {
       }
     })
     expect(result.current.error).toBe("boom")
+  })
+
+  it("blocks provider dispatch when the assembled action prompt contains PII", async () => {
+    const { result } = renderHook(() => useCanvasActions())
+
+    await act(async () => {
+      await expect(
+        result.current.run({ actionType: "improve" as never, content: "jane@example.com" })
+      ).rejects.toThrow("PII gate")
+    })
+
+    expect(generateTextMock).not.toHaveBeenCalled()
+    expect(result.current.error).toContain("PII gate")
   })
 
   it("stream() accumulates deltas and resolves with full text", async () => {
@@ -125,6 +153,21 @@ describe("useCanvasActions", () => {
     })
     expect(result.current.error).toBe("net")
     expect(result.current.output).toBe("p")
+  })
+
+  it("blocks streaming dispatch when the assembled action prompt contains PII", async () => {
+    const { result } = renderHook(() => useCanvasActions())
+
+    await act(async () => {
+      await expect(
+        result.current.stream(
+          { actionType: "improve" as never, content: "jane@example.com" },
+          jest.fn()
+        )
+      ).rejects.toThrow("PII gate")
+    })
+
+    expect(streamTextMock).not.toHaveBeenCalled()
   })
 
   it("reset() returns to the initial state", () => {

@@ -6,6 +6,8 @@
   "type": "frontend",
   "capabilities": ["tools", "commands"],
   "main": "dist/index.js",
+  "styles": "src/panel.css",
+  "bundle_include": ["src/panel.css"],
   "author": {
     "name": "Your Name"
   },
@@ -13,7 +15,7 @@
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "permissions": [],
+  "permissions": ["extension:ui", "theme:read"],
   "activationEvents": ["onStartup"],
   "runtimeCompatibility": {
     "browser": {

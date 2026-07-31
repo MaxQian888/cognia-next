@@ -8,6 +8,8 @@ import { createEditorStore, type EditorStore } from "@/lib/workflow/editor/store
 import { EditorStoreProvider } from "@/lib/workflow/editor/store-context"
 import type { VisualWorkflow, WorkflowNodeKind } from "@/types/workflow/visual"
 import { WorkflowNodeComponent } from "./workflow-node"
+import { addPluginCatalogEntry, __resetPluginCatalogForTesting } from "@/lib/workflow/nodes/catalog"
+import { registerPluginI18n, __resetPluginI18nForTesting } from "@/lib/i18n/plugin-i18n-registry"
 
 // React Flow's Handle pulls in DOM measurements that jsdom can't provide.
 // Stub the surface used by `WorkflowNodeComponent`. The Handle is rendered
@@ -106,6 +108,74 @@ describe("WorkflowNodeComponent", () => {
     expect(screen.getByText("ai.prompt")).toBeInTheDocument()
   })
 
+  it("translates the catalog label for a freshly-dropped (default-labelled) node", () => {
+    const { store } = withStore()
+    // `addNode` bakes the raw kind into `data.label` for kinds without an
+    // entry in `labelByKind`; the renderer must substitute the localized
+    // `workflows.nodes.<kind>.label` so the canvas isn't stuck on raw kinds.
+    renderNode({ store, label: "action.goal.create", kind: "action.goal.create" })
+    expect(screen.getByText("Create goal")).toBeInTheDocument()
+    // The raw kind still shows in the lowercase subtitle line.
+    expect(screen.getByText("action.goal.create")).toBeInTheDocument()
+  })
+
+  it("keeps a user-customized label verbatim (no translation override)", () => {
+    const { store } = withStore()
+    renderNode({ store, label: "My goal step", kind: "action.goal.create" })
+    expect(screen.getByText("My goal step")).toBeInTheDocument()
+    expect(screen.queryByText("Create goal")).not.toBeInTheDocument()
+  })
+
+  describe("plugin node label localization", () => {
+    afterEach(() => {
+      __resetPluginCatalogForTesting()
+      __resetPluginI18nForTesting()
+    })
+
+    function registerDemoNode() {
+      addPluginCatalogEntry({
+        kind: "demo.action.format" as never,
+        category: "plugin",
+        label: "Format Rust",
+        description: "Run rustfmt on a Rust source string",
+        iconName: "Wand",
+        keywords: [],
+        pluginId: "demo",
+      })
+    }
+
+    it("falls back to the plugin author's catalog label when untranslated", () => {
+      registerDemoNode()
+      const { store } = withStore()
+      // Instance label equals the raw kind (what `addNode` bakes for plugin
+      // kinds), so the renderer substitutes the catalog label.
+      renderNode({
+        store,
+        label: "demo.action.format",
+        kind: "demo.action.format" as WorkflowNodeKind,
+      })
+      expect(screen.getByText("Format Rust")).toBeInTheDocument()
+    })
+
+    it("renders the translated label from the plugin overlay namespace", () => {
+      registerDemoNode()
+      registerPluginI18n({
+        pluginId: "demo",
+        messages: {
+          en: { "plugin.demo.workflow.nodes.action.format.label": "格式化 Rust" },
+        },
+      })
+      const { store } = withStore()
+      renderNode({
+        store,
+        label: "demo.action.format",
+        kind: "demo.action.format" as WorkflowNodeKind,
+      })
+      expect(screen.getByText("格式化 Rust")).toBeInTheDocument()
+      expect(screen.queryByText("Format Rust")).not.toBeInTheDocument()
+    })
+  })
+
   it("does not render the floating toolbar without a store provider", () => {
     renderNode({ withProvider: false })
     expect(screen.queryByTestId("wf-node-toolbar-n_a")).toBeNull()
@@ -180,6 +250,29 @@ describe("WorkflowNodeComponent", () => {
     const card = screen.getByTestId("wf-node-ai.prompt")
     expect(card.className).toContain("ring-4")
     expect(card.className).not.toContain("animate-pulse-ring")
+  })
+
+  it("rings the node when it is copilot-referenced (referencedNodeIds)", () => {
+    const { store } = withStore()
+    store.getState().setReferencedNodes(["n_a"])
+    renderNode({ store })
+    const card = screen.getByTestId("wf-node-ai.prompt")
+    expect(card).toHaveAttribute("data-referenced", "true")
+    expect(card.className).toContain("ring-violet-400")
+  })
+
+  it("rings the node when it is transiently highlighted (highlightedNodeIds)", () => {
+    const { store } = withStore()
+    store.getState().setHighlightedNodes(["n_a"])
+    renderNode({ store })
+    expect(screen.getByTestId("wf-node-ai.prompt")).toHaveAttribute("data-referenced", "true")
+  })
+
+  it("does not ring an unreferenced node", () => {
+    const { store } = withStore()
+    store.getState().setReferencedNodes(["n_other"])
+    renderNode({ store })
+    expect(screen.getByTestId("wf-node-ai.prompt")).not.toHaveAttribute("data-referenced")
   })
 
   it("toolbar Delete invokes store.removeNodes for the active id", () => {
@@ -322,5 +415,110 @@ describe("WorkflowNodeComponent", () => {
     const { store } = withStore()
     renderNode({ store, id: "n_b", kind: "flow.branch", typeVersion: 1 })
     expect(screen.queryByTestId("wf-node-handle-out-n_b-true")).toBeNull()
+  })
+
+  // ── mobile tap-to-connect (handle-tap entry, gated on store.touchConnect) ──
+  describe("mobile handle-tap to connect", () => {
+    it("does nothing on a source-handle tap when touchConnect is off (desktop)", () => {
+      const { store } = withStore()
+      renderNode({ store, id: "n_a", kind: "ai.prompt" })
+      fireEvent.click(screen.getByTestId("wf-node-handle-source-n_a"))
+      expect(store.getState().connectionState).toBeNull()
+    })
+
+    it("arms a connection from the tapped source handle when touchConnect is on", () => {
+      const { store } = withStore()
+      store.getState().setTouchConnect(true)
+      renderNode({ store, id: "n_a", kind: "ai.prompt" })
+      fireEvent.click(screen.getByTestId("wf-node-handle-source-n_a"))
+      expect(store.getState().connectionState).toMatchObject({
+        sourceId: "n_a",
+        sourceHandle: null,
+      })
+    })
+
+    it("carries the specific decision handle id (branch true output)", () => {
+      const { store } = withStore()
+      store.getState().setTouchConnect(true)
+      renderNode({ store, id: "n_b", kind: "flow.branch", typeVersion: 2 })
+      fireEvent.click(screen.getByTestId("wf-node-handle-out-n_b-true"))
+      expect(store.getState().connectionState).toMatchObject({
+        sourceId: "n_b",
+        sourceHandle: "true",
+      })
+    })
+
+    it("arms the error path from the error handle (branch policy)", () => {
+      const store = branchStore()
+      store.getState().setTouchConnect(true)
+      renderNode({ store, id: "n_a", kind: "ai.prompt" })
+      fireEvent.click(screen.getByTestId("wf-node-handle-error-n_a"))
+      expect(store.getState().connectionState).toMatchObject({
+        sourceId: "n_a",
+        sourceHandle: "error",
+      })
+    })
+  })
+
+  describe("diagnostics badge (A4)", () => {
+    function storeWith(
+      nodes: VisualWorkflow["nodes"],
+      edges: VisualWorkflow["edges"]
+    ): EditorStore {
+      const wf = makeWorkflow()
+      wf.nodes = nodes
+      wf.edges = edges
+      return createEditorStore(wf)
+    }
+
+    it("shows an amber warning badge for a warning-only node (orphan)", () => {
+      const store = storeWith(
+        [
+          {
+            id: "t",
+            type: "trigger.manual",
+            typeVersion: 1,
+            position: { x: 0, y: 0 },
+            data: { label: "T", params: {} },
+          },
+          {
+            id: "island",
+            type: "ai.prompt",
+            typeVersion: 1,
+            position: { x: 200, y: 0 },
+            data: { label: "Island", params: { userPrompt: "hi" } },
+          },
+        ],
+        []
+      )
+      renderNode({ store, id: "island", kind: "ai.prompt" })
+      expect(screen.getByTestId("wf-node-warning-badge")).toBeInTheDocument()
+      expect(screen.queryByTestId("wf-node-error-badge")).toBeNull()
+    })
+
+    it("shows a red error badge for a node with an error diagnostic (unknown ref)", () => {
+      const store = storeWith(
+        [
+          {
+            id: "t",
+            type: "trigger.manual",
+            typeVersion: 1,
+            position: { x: 0, y: 0 },
+            data: { label: "T", params: {} },
+          },
+          {
+            id: "p",
+            type: "ai.prompt",
+            typeVersion: 1,
+            position: { x: 200, y: 0 },
+            data: { label: "P", params: { userPrompt: "{{ $node['ghost'].out.x }}" } },
+          },
+        ],
+        [{ id: "e1", source: "t", target: "p" }]
+      )
+      renderNode({ store, id: "p", kind: "ai.prompt" })
+      expect(screen.getByTestId("wf-node-error-badge")).toBeInTheDocument()
+      expect(screen.queryByTestId("wf-node-warning-badge")).toBeNull()
+    })
   })
 })

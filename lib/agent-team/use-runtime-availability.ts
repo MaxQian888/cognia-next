@@ -21,19 +21,17 @@
 import { useMemo } from "react"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import { useSettingsStore } from "@/stores/settings"
+import { BUILTIN_EXECUTABLE_PRESET_IDS } from "@/lib/ai/agent/external/presets"
 import type { TeammateRuntime } from "@/types/agent/agent-team"
 
 export type RuntimeAvailabilityStatus = "ready" | "missing-key" | "no-agent" | "disconnected"
 
 export type RuntimeAvailabilityMap = Record<TeammateRuntime, RuntimeAvailabilityStatus>
 
-const ALL_RUNTIMES: TeammateRuntime[] = [
-  "claude",
-  "codex",
-  "claude-code",
-  "gemini-cli",
-  "cursor-cli",
-]
+// Every external runtime is a preset id; derive the list from the catalog so it
+// stays in lockstep with `TeammateRuntime` and the members dropdown.
+const EXTERNAL_RUNTIMES: TeammateRuntime[] = [...BUILTIN_EXECUTABLE_PRESET_IDS]
+const ALL_RUNTIMES: TeammateRuntime[] = ["claude", ...EXTERNAL_RUNTIMES]
 
 export function useRuntimeAvailability(): RuntimeAvailabilityMap {
   const apiKey = useSettingsStore((s) => s.settings?.apiKey ?? "")
@@ -45,8 +43,7 @@ export function useRuntimeAvailability(): RuntimeAvailabilityMap {
 
     map.claude = apiKey && apiKey.length > 0 ? "ready" : "missing-key"
 
-    const externals: TeammateRuntime[] = ["codex", "claude-code", "gemini-cli", "cursor-cli"]
-    for (const runtime of externals) {
+    for (const runtime of EXTERNAL_RUNTIMES) {
       const match = Object.values(agents).find((a) => {
         if (!a.enabled) return false
         const preset = (a.metadata as Record<string, unknown> | undefined)?.preset
@@ -84,8 +81,7 @@ export function computeRuntimeAvailability(input: {
   const apiKey = input.apiKey ?? ""
   const map = {} as RuntimeAvailabilityMap
   map.claude = apiKey.length > 0 ? "ready" : "missing-key"
-  const externals: TeammateRuntime[] = ["codex", "claude-code", "gemini-cli", "cursor-cli"]
-  for (const runtime of externals) {
+  for (const runtime of EXTERNAL_RUNTIMES) {
     const match = input.agents.find((a) => {
       if (!a.enabled) return false
       const preset = a.metadata?.preset

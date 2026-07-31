@@ -29,6 +29,7 @@ jest.mock("@/lib/data/apply-package", () => ({
 }))
 jest.mock("./passphrase-cache", () => ({
   setSyncPassphrase: (...a: unknown[]) => setSyncPassphraseMock(...a),
+  persistSyncPassphrase: jest.fn(async () => undefined),
 }))
 
 import { listRemoteSnapshots, restoreFromWebDav } from "./restore"
@@ -84,7 +85,7 @@ describe("restoreFromWebDav", () => {
       getFile: jest.fn(async () => '{"version":"enc-v1"}'),
       propfindList: jest.fn(),
     }
-    const summary = await restoreFromWebDav({ passphrase: "p", mergeStrategy: "overwrite" })
+    const result = await restoreFromWebDav({ passphrase: "p", mergeStrategy: "overwrite" })
     expect(fakeClient.getFile).toHaveBeenCalledWith("/cognia-backups/latest.enc.cbk")
     expect(decryptMock).toHaveBeenCalled()
     expect(applyMock).toHaveBeenCalledWith(
@@ -92,7 +93,21 @@ describe("restoreFromWebDav", () => {
       expect.objectContaining({ mergeStrategy: "overwrite", includeSessions: true })
     )
     expect(setSyncPassphraseMock).toHaveBeenCalledWith("p")
-    expect(summary).toBeDefined()
+    expect(result.summary).toBeDefined()
+    // No device on the envelope or the decrypted manifest in this fixture.
+    expect(result.sourceDevice).toBeUndefined()
+  })
+
+  it("surfaces the producing device from the cleartext envelope manifest", async () => {
+    fakeClient = {
+      getFile: jest.fn(
+        async () =>
+          '{"version":"enc-v1","manifest":{"device":{"id":"dev-9","label":"iOS device","platform":"ios"}}}'
+      ),
+      propfindList: jest.fn(),
+    }
+    const result = await restoreFromWebDav({ passphrase: "p", mergeStrategy: "skip" })
+    expect(result.sourceDevice).toEqual({ id: "dev-9", label: "iOS device", platform: "ios" })
   })
 
   it("rejects a non-encrypted remote file", async () => {

@@ -19,15 +19,19 @@
  *   - WeCom / WeChat OA → share the WeChat brand mark (same family; the
  *     per-platform colour distinguishes them in the badge).
  *   - OneBot (QQ via NapCat/Lagrange) → shares the QQ brand mark.
- *   - Email / KOOK / LINE / Mattermost / GitHub / unknown → lucide fallbacks
+ *   - Email / KOOK / LINE / Mattermost / unknown → lucide fallbacks
  *     so every kind still renders a distinct glyph.
  */
 
 import { createElement } from "react"
 import type { LucideIcon } from "lucide-react"
-import { BirdIcon, GitBranchIcon, HashIcon, MailIcon, MessageCircleIcon } from "lucide-react"
+import { BirdIcon, HashIcon, MailIcon, MessageCircleIcon } from "lucide-react"
 
-import type { PlatformKind } from "@/types/connectors/platform-kind"
+import {
+  isPlatformKind,
+  type BuiltInPlatformKind,
+  type PlatformKind,
+} from "@/types/connectors/platform-kind"
 
 export type PlatformIconComponent = React.ComponentType<{ className?: string }>
 
@@ -82,7 +86,7 @@ const DingTalkIcon = brandIcon(DINGTALK_PATH, "DingTalk")
 /**
  * Per-platform glyph. Brand SVGs where available; lucide fallbacks otherwise.
  */
-const PLATFORM_ICON: Record<PlatformKind, PlatformIconComponent> = {
+const PLATFORM_ICON: Record<BuiltInPlatformKind, PlatformIconComponent> = {
   telegram: TelegramIcon,
   discord: DiscordIcon,
   slack: SlackIcon,
@@ -98,14 +102,13 @@ const PLATFORM_ICON: Record<PlatformKind, PlatformIconComponent> = {
   kook: MessageCircleIcon,
   line: MessageCircleIcon,
   mattermost: HashIcon,
-  github: GitBranchIcon,
 }
 
 const FALLBACK_ICON: PlatformIconComponent = MessageCircleIcon as unknown as PlatformIconComponent
 
 /** Resolve the glyph component for a platform kind (never returns undefined). */
 export function getPlatformIcon(kind: PlatformKind): PlatformIconComponent {
-  return PLATFORM_ICON[kind] ?? FALLBACK_ICON
+  return isPlatformKind(kind) ? PLATFORM_ICON[kind] : FALLBACK_ICON
 }
 
 /**

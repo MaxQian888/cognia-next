@@ -6,13 +6,14 @@ description: main.rs — the clap-derive command tree, dispatch_plugin() router,
 # CLI core & terminal UI
 
 <TLDR>
-  `main.rs` (`crates/cognia-cli/src/main.rs`, 465 lines) parses one nested clap-derive tree —
-  `Cli` → `TopCommand::Plugin` → an 11-variant `PluginCommand` enum — resolves a `ColorMode`,
-  builds a `RuntimeUi` (`ui/runtime.rs:60`), and routes through `dispatch_plugin()`
-  (`main.rs:288`). Every interactive touchpoint goes through the **`Prompter` trait**
-  (`ui/prompter.rs:82`) with three implementations: `DialoguerPrompter` on a TTY,
+  `main.rs` (`crates/cognia-cli/src/main.rs`) parses one clap-derive tree —
+  `Cli` → `TopCommand` (`plugin`, `acp`, `release-key`, `release-verify`) with a 14-variant
+  `PluginCommand` enum under `plugin` — resolves a `ColorMode`, builds a `RuntimeUi`
+  (`ui/runtime.rs`), and routes plugin commands through `dispatch_plugin()`.
+  Every interactive touchpoint goes through the **`Prompter` trait**
+  (`ui/prompter.rs`) with three implementations: `DialoguerPrompter` on a TTY,
   `NoninteractivePrompter` that refuses with an actionable flag hint, and `MockPrompter` for
-  deterministic tests. Errors flow `anyhow` → `eyre` (`anyhow_to_eyre`, `main.rs:277`) so
+  deterministic tests. Errors flow `anyhow` → `eyre` (`anyhow_to_eyre`) so
   color-eyre renders the full cause chain; exit codes are 0 / 1 / 2 (clap) / 101 (panic).
 </TLDR>
 
@@ -38,42 +39,47 @@ description: main.rs — the clap-derive command tree, dispatch_plugin() router,
 ## The command tree
 
 ```rust
-// crates/cognia-cli/src/main.rs:83-115
+// crates/cognia-cli/src/main.rs (abridged)
 struct Cli {
-    --color <auto|always|never>   // default auto          (main.rs:88)
-    --no-color                    // wins over --color     (main.rs:91)
-    -q, --quiet                   // suppress non-error    (main.rs:94)
-    -v, --verbose                 // repeatable, max -vv   (main.rs:97)
-    -y, --yes                     // pre-confirm; CI mode  (main.rs:101)
+    --color <auto|always|never>   // default auto
+    --no-color                    // wins over --color
+    -q, --quiet                   // suppress non-error
+    -v, --verbose                 // repeatable, max -vv
+    -y, --yes                     // pre-confirm; CI mode
     command: TopCommand,
 }
 
 enum TopCommand {
-    Plugin { #[command(subcommand)] command: PluginCommand },   // main.rs:108-115
+    Plugin { #[command(subcommand)] command: PluginCommand },
+    Acp,
+    ReleaseKey { json: bool },
+    ReleaseVerify { artifact, checksums, artifact_name, signature, json },
 }
 ```
 
-The 11 `PluginCommand` variants (`main.rs:117-241`) and their dispatch sites in
-`dispatch_plugin()` (`main.rs:288-346`):
+The 14 `PluginCommand` variants and their dispatch sites in `dispatch_plugin()`:
 
 | Variant | Flags | Dispatch |
 | --- | --- | --- |
-| `New` | `--dir` `--kind` `--author` `--author-email` `--description` `--with-keygen` | `main.rs:298` |
-| `Lint` | `--path .` `--json` | `main.rs:310` (sets `ui.flags.json` first) |
-| `Build` | `--path .` `--out` `--skip-build` | `main.rs:316` |
-| `Info` | `--json` `--detailed` | `main.rs:323` |
-| `Sign` | `--key` (required) `--out` | `main.rs:325` |
-| `Verify` | `--public-key` `--signature` `--json` | `main.rs:333` |
-| `Keygen` | `--out-dir .cognia` | `main.rs:335` |
-| `Install` | — | `main.rs:336` |
-| `Uninstall` | `--purge-data` | `main.rs:340` |
-| `Dev` | `--path .` `--reload-url` | `main.rs:341` |
-| `EmbedVersion` | `--out` | `main.rs:343` → `cmd_embed_version` (`main.rs:348`) |
+| `New` | `--dir` `--kind` `--author` `--author-email` `--description` `--with-keygen` `--json` | `dispatch_plugin()` sets `ui.flags.json`, logs verbose context, then calls `cmd_new::run` |
+| `Lint` | `--path .` `--json` | `dispatch_plugin()` sets `ui.flags.json` first |
+| `Build` | `--path .` `--out` `--skip-build` `--json` | `dispatch_plugin()` |
+| `Info` | `--json` `--detailed` | `dispatch_plugin()` |
+| `Sign` | `--key` (required) `--out` `--json` | `dispatch_plugin()` |
+| `Verify` | `--public-key` `--signature` `--json` | `dispatch_plugin()` |
+| `Keygen` | `--out-dir .cognia` `--json` | `dispatch_plugin()` |
+| `Install` | `<path>` bundle or directory `--json` | `dispatch_plugin()` |
+| `Uninstall` | `--purge-data` `--json` | `dispatch_plugin()` |
+| `List` | `--json` | `dispatch_plugin()` |
+| `Reload` | `--path` (visible alias for `--bundle`) `--plugin-id` `--json` | `dispatch_plugin()` |
+| `Status` | `--json` | `dispatch_plugin()` sets `ui.flags.json` first |
+| `Dev` | `--path .` `--reload-url` `--once` `--json` | `dispatch_plugin()` |
+| `EmbedVersion` | `--out` `--json` | `dispatch_plugin()` → `cmd_embed_version` |
 
 ### main() in nine lines
 
 ```rust
-// crates/cognia-cli/src/main.rs:243-272 (abridged)
+// crates/cognia-cli/src/main.rs (abridged)
 let cli = Cli::parse();
 let color_mode = if cli.no_color { ColorMode::Never }
                  else { ColorMode::parse(&cli.color)? };
@@ -84,12 +90,23 @@ ui.apply_color_override();          // owo_colors::set_override
 ui::error::install()?;              // idempotent color-eyre hook
 let result = match cli.command {
     TopCommand::Plugin { command } => dispatch_plugin(command, &mut ui),
+    TopCommand::Acp => { ui.verbose("running acp"); cmd_acp::run(&ui) },
+    TopCommand::ReleaseKey { json } => cmd_release_key::run(json, &mut ui),
+    TopCommand::ReleaseVerify { .. } => cmd_release_verify::run(...),
 };
-result.map_err(anyhow_to_eyre)?;
+if let Err(err) = result {
+    if err.is::<cmd_lint::LintError>() || err.is::<JsonFailureExit>() {
+        std::process::exit(1);
+    }
+    return Err(anyhow_to_eyre(err));
+}
 ```
 
-Commands return `anyhow::Result`; `anyhow_to_eyre()` (`main.rs:277-286`) re-wraps the chain in
-reverse so color-eyre prints innermost-first with full context.
+Commands return `anyhow::Result`; bounded `--json` failures print a schema-versioned payload on
+stdout and return `JsonFailureExit`, so `main()` exits 1 without color-eyre stderr noise. Lint
+errors similarly keep their report in the command output and exit 1 through `LintError`. Other
+errors go through `anyhow_to_eyre()`, which re-wraps the chain in reverse so
+color-eyre prints innermost-first with full context.
 
 ## RuntimeUi — per-invocation state
 
@@ -119,9 +136,12 @@ flowchart LR
 ```
 
 Helper methods commands rely on: `prompter()` (`runtime.rs:124`), `show_progress()` =
-`!quiet` (`runtime.rs:129`), and `confirm_overwrite(path, flag_hint)` (`runtime.rs:155-168`) —
-returns `true` immediately when the path doesn't exist or `--yes` is set, otherwise prompts with
-default **No**. `keygen`, `sign`, and `new` all gate destructive writes through it.
+`!quiet` (`runtime.rs:129`), `show_verbose()` / `verbose(...)` for human-only stderr diagnostics,
+and `confirm_overwrite(path, flag_hint)` (`runtime.rs:155-168`) — returns `true` immediately when
+the path doesn't exist or `--yes` is set, otherwise prompts with default **No**. `verbose(...)`
+prints only when `-v/--verbose` is set and both `--quiet` and per-command `--json` are off, so JSON
+stdout stays parseable and quiet success output stays silent. `keygen`, `sign`, and `new` all gate
+destructive writes through `confirm_overwrite`.
 
 ## The Prompter trait — three implementations
 
@@ -175,13 +195,18 @@ runs are non-TTY, so any prompt that would block instead fails fast with the exa
 | 101 | panic (color-eyre panic hook) |
 
 `lint` is the one command that exits 1 by explicit `std::process::exit(1)` when the report
-contains errors (`cmd_lint.rs:226-230`) — warnings alone keep exit 0.
+contains errors (`cmd_lint::run`) — warnings alone keep exit 0.
 
 ## Integration tests
 
 `crates/cognia-cli/tests/integration.rs` spawns the compiled binary via `CARGO_BIN_EXE_cognia`
-with `NO_COLOR=1`, `CI=true`, and stdin nulled. The 10 tests pin the public contract: `--help` /
-`--version` shape, lint exit codes on clean vs broken manifests, `lint --json` carrying
-`schemaVersion: 1`, `info --json` round-tripping with `signature.status = "no-sidecar"`,
-`new` failing on non-TTY without a name (with an actionable hint) and succeeding with explicit
-args, unknown-subcommand errors, and `NO_COLOR` stripping every ANSI escape from output.
+with `NO_COLOR=1`, `CI=true`, and stdin nulled. The suite pins the public contract: `--help` /
+`--version` shape, lint exit codes on clean vs broken manifests, JSON payloads for every bounded
+plugin command including `dev --once --json`, `info --json` round-tripping with bundle and
+directory inputs, scaffold creation for every template kind, release-key and release-verify
+reports, unknown-subcommand errors, `--quiet` suppressing non-error human output while preserving
+side effects and ACP protocol stdout, and `NO_COLOR` stripping every ANSI escape from output.
+Bridge-client smoke checks keep
+`plugin install --help`, `plugin info --help`, `plugin list --help`, `plugin reload --help`, and
+`plugin status --help` wired through clap so these non-TUI bridge surfaces cannot silently
+disappear.

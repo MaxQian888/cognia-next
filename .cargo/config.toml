@@ -1,2 +1,19 @@
 [build]
 rustflags = ["--cfg", "tokio_unstable"]
+
+# macOS local dev: sign the freshly-built `cognia-next` with a stable
+# self-signed identity so the login keychain (service com.cognia.platforms)
+# recognizes it across rebuilds and stops re-prompting for the password.
+# See src-tauri/scripts/dev-codesign.sh; one-time setup: `pnpm dev:sign:setup`.
+#
+# Cargo is Tauri's default development runner, so this covers both direct
+# `cargo run` and `pnpm tauri dev` without inserting an intermediate process
+# that could outlive Tauri and orphan the app.
+[target.aarch64-apple-darwin]
+# Target-specific rustflags replace `[build].rustflags`, so keep
+# `tokio_unstable` here. The config-relative linker driver selects the Mach-O
+# LLD bundled with the pinned Rust toolchain; other host targets retain their
+# existing linker.
+rustflags = ["--cfg", "tokio_unstable"]
+linker = "src-tauri/scripts/macos-lld-linker.sh"
+runner = ["/bin/sh", "-c", 'for s in src-tauri/scripts/dev-codesign.sh scripts/dev-codesign.sh; do [ -x "$s" ] && exec "$s" "$@"; done; exec "$@"', "dev-codesign-shim"]

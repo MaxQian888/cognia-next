@@ -10,7 +10,7 @@ jest.mock("next-intl", () => ({
 
 import { ToolsSection } from "./tools-section"
 import { emptyEditorState } from "../preset-editor-state"
-import type { McpServer, Skill } from "@/lib/claude/types"
+import type { McpServer, Skill } from "@cognia/agent-config-types"
 
 const SKILLS: Skill[] = [
   {

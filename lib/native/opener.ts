@@ -8,6 +8,7 @@
  */
 
 import { isTauri } from "@/lib/tauri"
+import { isCapacitor } from "@/lib/platform/detect"
 
 export interface OpenUrlOptions {
   /** Optional explicit application id (Tauri-only). */
@@ -41,6 +42,19 @@ export async function openUrl(url: string, options: OpenUrlOptions = {}): Promis
     }
   }
 
+  // Capacitor shell: `window.open` is unreliable inside the WebView (Android
+  // blocks new windows). Route through the in-app browser sheet instead —
+  // this is what makes the mobile OAuth "open authorize page" step work.
+  if (!options.forceWebFallback && isCapacitor()) {
+    try {
+      const { open } = await import("@/lib/capacitor/browser")
+      const out = await open({ url })
+      if (out.kind === "ok") return
+    } catch (err) {
+      console.warn("openUrl: capacitor browser failed, falling back to window.open", err)
+    }
+  }
+
   if (typeof window !== "undefined") {
     window.open(url, "_blank", "noopener,noreferrer")
   }
@@ -61,5 +75,24 @@ export async function openPath(path: string, options: OpenUrlOptions = {}): Prom
     // In a browser there's no good "open this file with the OS handler"
     // — we treat the path as a relative URL so the browser handles it.
     window.open(path, "_blank", "noopener,noreferrer")
+  }
+}
+
+/**
+ * Reveal a file in the OS file manager (Explorer / Finder), selecting it.
+ * Tauri-only — `@tauri-apps/plugin-opener.revealItemInDir` is the native
+ * "Show in folder" affordance. Returns `true` when the OS reveal ran,
+ * `false` in web/Capacitor (no such concept) or when the plugin is absent,
+ * so callers can decide whether to surface the action at all.
+ */
+export async function revealItemInDir(path: string): Promise<boolean> {
+  if (!isTauri()) return false
+  try {
+    const mod = await import("@tauri-apps/plugin-opener")
+    await mod.revealItemInDir(path)
+    return true
+  } catch (err) {
+    console.warn("revealItemInDir: tauri opener failed", err)
+    return false
   }
 }

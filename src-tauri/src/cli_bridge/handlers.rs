@@ -39,6 +39,12 @@ pub struct InstallRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct InstallDirectoryRequest {
+    #[serde(alias = "sourceDir")]
+    pub source_dir: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct UninstallRequest {
     pub plugin_id: String,
     #[serde(default)]
@@ -50,7 +56,33 @@ pub struct ReloadRequest {
     #[serde(default)]
     pub bundle_path: Option<String>,
     #[serde(default)]
+    pub source_dir: Option<String>,
+    #[serde(default)]
     pub plugin_id: Option<String>,
+}
+
+/// One transcript turn handed off from the standalone CLI.
+#[derive(Debug, Deserialize, Serialize)]
+pub struct HandoffMessage {
+    pub role: String,
+    pub content: String,
+}
+
+/// Wire shape for `POST /api/v1/dev/sessions/handoff` — a CLI session
+/// transcript the desktop should materialise + open. The handler never
+/// touches Dexie itself (that's a renderer concern); it emits the payload
+/// on `cli-bridge:session-handoff` and the TS listener imports + opens it.
+#[derive(Debug, Deserialize)]
+pub struct SessionHandoffRequest {
+    #[serde(rename = "sessionId")]
+    pub session_id: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub messages: Vec<HandoffMessage>,
+    /// Opaque run context (provider/model/cwd) forwarded verbatim.
+    #[serde(default)]
+    pub meta: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -74,6 +106,75 @@ struct ErrResponse {
 
 pub async fn health(State(_state): State<SharedState>) -> Response {
     Json(json!({ "ok": true })).into_response()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Renderer-backed routes — twin context / agent teams
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Round-trip one renderer-backed command through the WebView and wrap the
+/// result in the bridge's `{ ok, result | error }` envelope. Renderer-side
+/// handler failures come back as 502 (the desktop is up but the renderer
+/// declined / errored); timeouts read the same way.
+async fn renderer_roundtrip(
+    state: &SharedState,
+    command: &str,
+    payload: serde_json::Value,
+) -> Response {
+    match state
+        .renderer
+        .clone()
+        .dispatch(
+            &state.app_handle,
+            command,
+            payload,
+            super::renderer_bridge::DEFAULT_TIMEOUT,
+        )
+        .await
+    {
+        Ok(result) => Json(json!({ "ok": true, "result": result })).into_response(),
+        Err(err) => (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({ "ok": false, "error": err })),
+        )
+            .into_response(),
+    }
+}
+
+/// `POST /api/v1/dev/twin/context` — build the twin runtime context for a
+/// message (renderer runs `tryBuildTwinDeps` → `applyTwinContext`). The
+/// renderer handler returns REDACTED prompt segments only — raw chunk
+/// content never crosses this boundary.
+pub async fn twin_context(
+    State(state): State<SharedState>,
+    Json(payload): Json<serde_json::Value>,
+) -> Response {
+    renderer_roundtrip(&state, "twin_context_get", payload).await
+}
+
+/// `POST /api/v1/dev/teams/list` — project the renderer's AgentTeam store.
+pub async fn teams_list(
+    State(state): State<SharedState>,
+    Json(payload): Json<serde_json::Value>,
+) -> Response {
+    renderer_roundtrip(&state, "agent_team_list", payload).await
+}
+
+/// `POST /api/v1/dev/teams/run` — fire-and-forget start of a team run.
+pub async fn teams_run(
+    State(state): State<SharedState>,
+    Json(payload): Json<serde_json::Value>,
+) -> Response {
+    renderer_roundtrip(&state, "agent_team_run", payload).await
+}
+
+/// `POST /api/v1/dev/teams/run-status` — newest run row + events since a
+/// cursor, projected without step payloads (PII posture).
+pub async fn teams_run_status(
+    State(state): State<SharedState>,
+    Json(payload): Json<serde_json::Value>,
+) -> Response {
+    renderer_roundtrip(&state, "agent_team_run_status", payload).await
 }
 
 /// Wire shape for `GET /api/v1/dev/plugins/installed` — a privacy-safe
@@ -157,6 +258,37 @@ pub async fn install(
     }
 }
 
+pub async fn install_directory(
+    State(state): State<SharedState>,
+    Json(req): Json<InstallDirectoryRequest>,
+) -> Response {
+    match install_from_directory_inner(&state.app_handle, &req.source_dir).await {
+        Ok((plugin_id, warnings)) => {
+            let _ = state.app_handle.emit(
+                "cli-bridge:plugin-installed",
+                json!({ "plugin_id": plugin_id, "source": "install-directory" }),
+            );
+            Json(OkResponse {
+                ok: true,
+                plugin_id: Some(plugin_id),
+                warnings,
+            })
+            .into_response()
+        }
+        Err(e) => {
+            log::warn!("cli_bridge install-directory failed: {e:#}");
+            (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(ErrResponse {
+                    ok: false,
+                    error: e.to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
 pub async fn uninstall(
     State(state): State<SharedState>,
     Json(req): Json<UninstallRequest>,
@@ -188,13 +320,53 @@ pub async fn uninstall(
     }
 }
 
-pub async fn reload(
-    State(state): State<SharedState>,
-    Json(req): Json<ReloadRequest>,
-) -> Response {
+pub async fn reload(State(state): State<SharedState>, Json(req): Json<ReloadRequest>) -> Response {
     // If a bundle is provided, treat reload as "re-install in place".
+    // If an unpacked source directory is provided, use the same install-directory
+    // path first, then fire the hot-reload event for the installed plugin id.
     // Otherwise, just fire the host's existing hot-reload event so the
     // TS PluginManager unloads + reloads the existing on-disk artifact.
+    if req.bundle_path.is_some() && req.source_dir.is_some() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ErrResponse {
+                ok: false,
+                error: "reload accepts only one of bundle_path or source_dir".into(),
+            }),
+        )
+            .into_response();
+    }
+    if let Some(source_dir) = req.source_dir.as_deref() {
+        match install_from_directory_inner(&state.app_handle, source_dir).await {
+            Ok((plugin_id, warnings)) => {
+                let _ = state.app_handle.emit(
+                    &format!("plugin-hot-reload:{plugin_id}"),
+                    json!({ "source": "cli-bridge" }),
+                );
+                let _ = state.app_handle.emit(
+                    "plugin-hot-reload",
+                    json!({ "plugin_id": plugin_id, "source": "cli-bridge", "via": "install-directory" }),
+                );
+                return Json(OkResponse {
+                    ok: true,
+                    plugin_id: Some(plugin_id),
+                    warnings,
+                })
+                .into_response();
+            }
+            Err(e) => {
+                log::warn!("cli_bridge reload-via-install-directory failed: {e:#}");
+                return (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    Json(ErrResponse {
+                        ok: false,
+                        error: e.to_string(),
+                    }),
+                )
+                    .into_response();
+            }
+        }
+    }
     if let Some(bundle_path) = req.bundle_path.as_deref() {
         match install_inner(&state, bundle_path).await {
             Ok((plugin_id, _)) => {
@@ -238,7 +410,7 @@ pub async fn reload(
                 StatusCode::BAD_REQUEST,
                 Json(ErrResponse {
                     ok: false,
-                    error: "reload requires either bundle_path or plugin_id".into(),
+                    error: "reload requires bundle_path, source_dir, or plugin_id".into(),
                 }),
             )
                 .into_response();
@@ -258,6 +430,39 @@ pub async fn reload(
         warnings: vec![],
     })
     .into_response()
+}
+
+/// Build the `cli-bridge:session-handoff` event payload. Pure so the wire
+/// shape is unit-testable without a running Tauri app.
+fn build_handoff_event(req: &SessionHandoffRequest) -> serde_json::Value {
+    json!({
+        "sessionId": req.session_id,
+        "title": req.title,
+        "messages": req.messages,
+        "meta": req.meta,
+    })
+}
+
+/// `POST /api/v1/dev/sessions/handoff` — receive a CLI session transcript and
+/// emit it for the renderer to import + open. Synchronous + best-effort: the
+/// renderer owns the Dexie write (`importHandoffSession`) and navigation.
+pub async fn handoff(
+    State(state): State<SharedState>,
+    Json(req): Json<SessionHandoffRequest>,
+) -> Response {
+    if req.session_id.trim().is_empty() {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(ErrResponse {
+                ok: false,
+                error: "sessionId is required".into(),
+            }),
+        )
+            .into_response();
+    }
+    let event = build_handoff_event(&req);
+    let _ = state.app_handle.emit("cli-bridge:session-handoff", &event);
+    Json(json!({ "ok": true, "sessionId": req.session_id })).into_response()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -280,12 +485,7 @@ pub async fn install_inner(
     let plugin_state = state.app_handle.state::<PluginRuntimeState>();
     let (manifest, plugin_id) = read_manifest_from_zip(&bytes)?;
     let target_dir = plugin_state.plugin_dir(&plugin_id);
-    if target_dir.exists() {
-        // Replace any prior contents — install is idempotent.
-        std::fs::remove_dir_all(&target_dir)?;
-    }
-    std::fs::create_dir_all(&target_dir)?;
-    extract_zip_into(&bytes, &target_dir)?;
+    replace_directory_atomically(&target_dir, |staging| extract_zip_into(&bytes, staging))?;
 
     register_installed_plugin(&plugin_state, &plugin_id, &manifest, &target_dir);
     log::info!("cli_bridge installed {plugin_id} from {}", bundle.display());
@@ -326,11 +526,10 @@ pub async fn install_from_directory_inner<P: tauri::Runtime>(
 
     let plugin_state = app_handle.state::<PluginRuntimeState>();
     let target_dir = plugin_state.plugin_dir(&plugin_id);
-    if target_dir.exists() {
-        std::fs::remove_dir_all(&target_dir)?;
-    }
-    std::fs::create_dir_all(&target_dir)?;
-    copy_dir_recursive(&source, &target_dir)?;
+    replace_directory_atomically(&target_dir, |staging| {
+        copy_dir_recursive(&source, staging)?;
+        Ok(())
+    })?;
 
     register_installed_plugin(&plugin_state, &plugin_id, &manifest, &target_dir);
     log::info!(
@@ -338,6 +537,40 @@ pub async fn install_from_directory_inner<P: tauri::Runtime>(
         source.display()
     );
     Ok((plugin_id, vec![]))
+}
+
+/// Populate a sibling staging directory, then replace the live install with
+/// same-filesystem renames. A failed extraction/copy never mutates the prior
+/// installation, and a failed final rename restores it before returning.
+fn replace_directory_atomically(
+    target: &Path,
+    populate: impl FnOnce(&Path) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    let parent = target
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("plugin install target has no parent"))?;
+    std::fs::create_dir_all(parent)?;
+    let staging = tempfile::Builder::new()
+        .prefix(".cognia-plugin-staging-")
+        .tempdir_in(parent)?;
+    populate(staging.path())?;
+    let staging_path = staging.keep();
+    let backup = parent.join(format!(".cognia-plugin-backup-{}", uuid::Uuid::now_v7()));
+    let had_existing = target.exists();
+    if had_existing {
+        std::fs::rename(target, &backup)?;
+    }
+    if let Err(error) = std::fs::rename(&staging_path, target) {
+        if had_existing {
+            let _ = std::fs::rename(&backup, target);
+        }
+        let _ = std::fs::remove_dir_all(&staging_path);
+        return Err(error.into());
+    }
+    if had_existing {
+        std::fs::remove_dir_all(backup)?;
+    }
+    Ok(())
 }
 
 /// Shared between the zip and directory install paths. Builds the runtime
@@ -390,9 +623,7 @@ pub async fn uninstall_inner(
     // Dexie-side wipe happens in the TS layer once the
     // `cli-bridge:plugin-uninstalled` event lands. Surfaced via the
     // event payload so the renderer can branch.
-    log::info!(
-        "cli_bridge uninstalled {plugin_id} (purge_data={purge_data})"
-    );
+    log::info!("cli_bridge uninstalled {plugin_id} (purge_data={purge_data})");
     Ok(())
 }
 
@@ -453,17 +684,26 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Extract all entries of `bytes` into `target_dir`. Skips entries
-/// whose names contain `..` or absolute paths (zip-slip defense).
+/// Extract all regular entries of `bytes` into `target_dir`.
+/// Unsafe names and symbolic-link entries reject the whole archive.
 fn extract_zip_into(bytes: &[u8], target_dir: &Path) -> anyhow::Result<()> {
     let reader = std::io::Cursor::new(bytes);
     let mut archive = zip::ZipArchive::new(reader)?;
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i)?;
-        let entry_path = match entry.enclosed_name() {
-            Some(p) => p.to_path_buf(),
-            None => continue, // zip-slip / absolute path; skip.
-        };
+        let entry_path = entry
+            .enclosed_name()
+            .ok_or_else(|| anyhow::anyhow!("unsafe zip entry path: {}", entry.name()))?
+            .to_path_buf();
+        if entry
+            .unix_mode()
+            .is_some_and(|mode| mode & 0o170000 == 0o120000)
+        {
+            anyhow::bail!(
+                "symbolic-link zip entries are not allowed: {}",
+                entry.name()
+            );
+        }
         let dest = target_dir.join(&entry_path);
         if entry.is_dir() {
             std::fs::create_dir_all(&dest)?;
@@ -478,10 +718,127 @@ fn extract_zip_into(bytes: &[u8], target_dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ACP token broker
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Synthetic device identity minted for the `cognia acp` stdio bridge. One
+/// fixed id (rather than one per connection) keeps the paired-devices view
+/// clean and lets the deny list revoke the whole surface in one entry.
+const ACP_DEVICE_ID: &str = "acp-cli";
+
+/// Account id stamped into ACP bridge tokens. Purely local (the companion
+/// JWT layer only validates the format), but stable so audit lines and
+/// `whoami` output are recognizable.
+const ACP_ACCOUNT_ID: &str = "local_acct_acp";
+
+/// Build the broker response payload from resolved inputs. Split from the
+/// axum handler so the token/URL contract is unit-testable without a Tauri
+/// app handle.
+fn build_acp_token_payload(
+    port: u16,
+    secret: &[u8],
+    tls_fingerprint: &str,
+) -> anyhow::Result<serde_json::Value> {
+    let token = crate::companion_api::jwt::issue_device_jwt(secret, ACP_DEVICE_ID, ACP_ACCOUNT_ID)
+        .map_err(|e| anyhow::anyhow!("issue ACP device JWT: {e}"))?;
+    Ok(json!({
+        "ok": true,
+        "wsUrl": format!("wss://127.0.0.1:{port}/ws/v1/acp"),
+        "token": token,
+        "tlsFingerprint": tls_fingerprint,
+    }))
+}
+
+/// `POST /api/v1/dev/acp/token` — mint a device-scope JWT for the
+/// `cognia acp` stdio↔WS bridge and point it at the companion API's
+/// `/ws/v1/acp` endpoint.
+///
+/// Trust model: identical to plugin install — loopback origin + per-launch
+/// dev token (enforced by the router middleware). The minted JWT carries the
+/// baseline device scope only; the elevated control/service RPC arms stay
+/// out of reach of an ACP client.
+pub async fn acp_token(State(state): State<SharedState>) -> Response {
+    let Some(server_state) = state
+        .app_handle
+        .try_state::<crate::companion_api::CompanionServerState>()
+    else {
+        return err_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "companion server state unavailable",
+        );
+    };
+    let Some(port) = server_state.bound_port() else {
+        return err_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "companion API server is not running — start it from Settings → Companion",
+        );
+    };
+    let secret = match crate::companion_api::secret::load_or_generate() {
+        Ok(secret) => secret,
+        Err(e) => {
+            return err_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &format!("load companion signing secret: {e}"),
+            );
+        }
+    };
+    match build_acp_token_payload(port, &secret, &crate::companion_api::tls_fingerprint()) {
+        Ok(payload) => Json(payload).into_response(),
+        Err(e) => err_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    }
+}
+
+fn err_response(status: StatusCode, message: &str) -> Response {
+    (
+        status,
+        Json(ErrResponse {
+            ok: false,
+            error: message.to_string(),
+        }),
+    )
+        .into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Write;
+
+    const TEST_SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
+
+    #[test]
+    fn acp_token_payload_mints_verifiable_device_jwt() {
+        let payload = build_acp_token_payload(7890, TEST_SECRET, "AA:BB").unwrap();
+        assert_eq!(payload["ok"], true);
+        assert_eq!(payload["wsUrl"], "wss://127.0.0.1:7890/ws/v1/acp");
+        assert_eq!(payload["tlsFingerprint"], "AA:BB");
+
+        let token = payload["token"].as_str().unwrap();
+        let claims =
+            crate::companion_api::jwt::verify(TEST_SECRET, token, "device").expect("verify");
+        assert_eq!(claims.scope, "device");
+        assert_eq!(claims.device_id.as_deref(), Some(ACP_DEVICE_ID));
+        assert_eq!(claims.account_id.as_deref(), Some(ACP_ACCOUNT_ID));
+    }
+
+    #[test]
+    fn acp_token_payload_rejects_wrong_secret() {
+        let payload = build_acp_token_payload(7890, TEST_SECRET, "").unwrap();
+        let token = payload["token"].as_str().unwrap();
+        assert!(crate::companion_api::jwt::verify(
+            b"another-secret-32-bytes-exactly_",
+            token,
+            "device"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn acp_token_payload_uses_bound_port() {
+        let payload = build_acp_token_payload(43210, TEST_SECRET, "").unwrap();
+        assert_eq!(payload["wsUrl"], "wss://127.0.0.1:43210/ws/v1/acp");
+    }
 
     fn make_test_bundle(manifest: &str, files: &[(&str, &[u8])]) -> Vec<u8> {
         let mut buf = Vec::new();
@@ -551,6 +908,26 @@ mod tests {
     }
 
     #[test]
+    fn atomic_directory_replace_preserves_existing_install_on_population_failure() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("demo");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(target.join("old.txt"), "old").unwrap();
+
+        let result = replace_directory_atomically(&target, |staging| {
+            std::fs::write(staging.join("partial.txt"), "partial")?;
+            anyhow::bail!("rejected archive")
+        });
+
+        assert!(result.is_err());
+        assert_eq!(
+            std::fs::read_to_string(target.join("old.txt")).unwrap(),
+            "old"
+        );
+        assert!(!target.join("partial.txt").exists());
+    }
+
+    #[test]
     fn read_manifest_from_bytes_round_trips_a_plain_plugin_json() {
         let bytes = br#"{"id":"loose","name":"Loose","version":"0.2.0","type":"frontend"}"#;
         let (m, id) = read_manifest_from_bytes(bytes).unwrap();
@@ -560,8 +937,25 @@ mod tests {
 
     #[test]
     fn read_manifest_from_bytes_rejects_empty_id() {
-        let err = read_manifest_from_bytes(br#"{"id":"","name":"X","version":"0.1.0"}"#).unwrap_err();
+        let err =
+            read_manifest_from_bytes(br#"{"id":"","name":"X","version":"0.1.0"}"#).unwrap_err();
         assert!(err.to_string().contains("empty"));
+    }
+
+    #[test]
+    fn install_directory_request_deserializes_source_dir() {
+        let request: InstallDirectoryRequest =
+            serde_json::from_value(json!({"source_dir":"C:/plugins/demo"})).unwrap();
+        assert_eq!(request.source_dir, "C:/plugins/demo");
+    }
+
+    #[test]
+    fn reload_request_deserializes_source_dir() {
+        let request: ReloadRequest =
+            serde_json::from_value(json!({"source_dir":"C:/plugins/demo"})).unwrap();
+        assert_eq!(request.source_dir.as_deref(), Some("C:/plugins/demo"));
+        assert!(request.bundle_path.is_none());
+        assert!(request.plugin_id.is_none());
     }
 
     #[test]
@@ -587,7 +981,7 @@ mod tests {
     }
 
     #[test]
-    fn extract_zip_into_skips_path_traversal_entries() {
+    fn extract_zip_into_rejects_path_traversal_entries() {
         // Build a zip whose entry name is "../../etc/passwd" — enclosed_name
         // returns None for these, so extract_zip_into should silently skip.
         let mut buf = Vec::new();
@@ -602,9 +996,8 @@ mod tests {
             w.finish().unwrap();
         }
         let tmp = tempfile::tempdir().unwrap();
-        extract_zip_into(&buf, tmp.path()).unwrap();
-        // legit.txt should be there; ../escape.txt should NOT have escaped.
-        assert!(tmp.path().join("legit.txt").exists());
+        let error = extract_zip_into(&buf, tmp.path()).unwrap_err();
+        assert!(error.to_string().contains("unsafe zip entry path"));
         // ../escape.txt would have ended up at the parent of tmp.path() —
         // confirm it didn't.
         let parent_escape = tmp.path().parent().unwrap().join("escape.txt");
@@ -613,5 +1006,65 @@ mod tests {
             "zip-slip should be blocked but {} exists",
             parent_escape.display()
         );
+    }
+
+    #[test]
+    fn extract_zip_into_rejects_symlink_entries() {
+        let mut buf = Vec::new();
+        {
+            let cursor = std::io::Cursor::new(&mut buf);
+            let mut writer = zip::ZipWriter::new(cursor);
+            writer
+                .add_symlink(
+                    "link.js",
+                    "../../outside.js",
+                    zip::write::SimpleFileOptions::default(),
+                )
+                .unwrap();
+            writer.finish().unwrap();
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let error = extract_zip_into(&buf, tmp.path()).unwrap_err();
+        assert!(error.to_string().contains("symbolic-link"));
+        assert!(!tmp.path().join("link.js").exists());
+    }
+
+    #[test]
+    fn build_handoff_event_shapes_payload() {
+        let req = SessionHandoffRequest {
+            session_id: "s_cli_1".into(),
+            title: Some("Fix the bug".into()),
+            messages: vec![
+                HandoffMessage {
+                    role: "user".into(),
+                    content: "fix it".into(),
+                },
+                HandoffMessage {
+                    role: "assistant".into(),
+                    content: "done".into(),
+                },
+            ],
+            meta: Some(json!({ "provider": "anthropic", "model": "claude-x" })),
+        };
+        let ev = build_handoff_event(&req);
+        assert_eq!(ev["sessionId"], "s_cli_1");
+        assert_eq!(ev["title"], "Fix the bug");
+        assert_eq!(ev["messages"][0]["role"], "user");
+        assert_eq!(ev["messages"][1]["content"], "done");
+        assert_eq!(ev["meta"]["provider"], "anthropic");
+    }
+
+    #[test]
+    fn build_handoff_event_tolerates_minimal_request() {
+        let req = SessionHandoffRequest {
+            session_id: "s1".into(),
+            title: None,
+            messages: vec![],
+            meta: None,
+        };
+        let ev = build_handoff_event(&req);
+        assert_eq!(ev["sessionId"], "s1");
+        assert!(ev["title"].is_null());
+        assert_eq!(ev["messages"].as_array().unwrap().len(), 0);
     }
 }

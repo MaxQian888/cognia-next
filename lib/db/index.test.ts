@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // Barrel re-export check. Verifies every namespace export is wired up so a
 // silent omission (e.g., dropping `messages` from the barrel) is caught at
 // test time.

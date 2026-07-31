@@ -11,6 +11,11 @@ jest.mock("@/lib/terminal/dock-tool-handler", () => ({
   runTerminalDockAction: (...args: unknown[]) => mockRun(...args),
 }))
 
+const mockHeadless = jest.fn()
+jest.mock("@/lib/terminal/headless-exec", () => ({
+  runHeadlessExec: (...args: unknown[]) => mockHeadless(...args),
+}))
+
 // Force the executor to register on import.
 import "./terminal"
 
@@ -36,6 +41,7 @@ function makeCtx(
 
 beforeEach(() => {
   mockRun.mockReset()
+  mockHeadless.mockReset()
 })
 
 describe("action.system.terminal executor", () => {
@@ -139,5 +145,186 @@ describe("action.system.terminal executor", () => {
     await expect(reg.execute(makeCtx({ params: { command: "ls" } }))).rejects.toThrow(
       /agent terminal access is disabled/
     )
+  })
+
+  it("passes a records-shaped result through defensively", async () => {
+    mockRun.mockResolvedValue({ ok: true, records: [{ cmd: "ls", exitCode: 0, endedAt: 1 }] })
+    const reg = getExecutor("action.system.terminal", 1)!
+    const result = await reg.execute(makeCtx({ params: { command: "ls" } }))
+    expect(result.decision).toBe("success")
+    expect(result.output).toEqual({ records: [{ cmd: "ls", exitCode: 0, endedAt: 1 }] })
+  })
+
+  it("reports 'null' when the dock returns no exit code", async () => {
+    mockRun.mockResolvedValue({ ok: true, sessionId: "t", exitCode: null, output: "" })
+    const reg = getExecutor("action.system.terminal", 1)!
+    await expect(reg.execute(makeCtx({ params: { command: "ls" } }))).rejects.toThrow(
+      /exited with code null/
+    )
+  })
+
+  describe("unattended mode", () => {
+    it("routes through runHeadlessExec with run context, never the dock", async () => {
+      mockHeadless.mockResolvedValue({
+        ok: true,
+        exitCode: 0,
+        output: "done",
+        durationMs: 30,
+        timedOut: false,
+        verdict: "allow",
+      })
+      const reg = getExecutor("action.system.terminal", 1)!
+      const result = await reg.execute(
+        makeCtx({
+          params: {
+            command: "pnpm test",
+            unattended: true,
+            onAskVerdict: "run",
+            timeoutSec: 30,
+            cwd: "/repo",
+          },
+        })
+      )
+      expect(mockRun).not.toHaveBeenCalled()
+      expect(mockHeadless).toHaveBeenCalledWith(
+        expect.objectContaining({
+          command: "pnpm test",
+          cwd: "/repo",
+          timeoutMs: 30_000,
+          onAskVerdict: "run",
+          runId: "run-1",
+          source: "workflow",
+        })
+      )
+      expect(result.decision).toBe("success")
+      expect(result.output).toMatchObject({ exitCode: 0, output: "done" })
+    })
+
+    it("surfaces policy blocks as workflow failures", async () => {
+      mockHeadless.mockResolvedValue({ ok: false, reason: "blocked by the classifier" })
+      const reg = getExecutor("action.system.terminal", 1)!
+      await expect(
+        reg.execute(makeCtx({ params: { command: "rm -rf /", unattended: true } }))
+      ).rejects.toThrow(/blocked by the classifier/)
+    })
+
+    it("throws on a timeout by default and branches with onFailure=branch", async () => {
+      mockHeadless.mockResolvedValue({
+        ok: true,
+        exitCode: null,
+        output: "partial",
+        durationMs: 9000,
+        timedOut: true,
+        verdict: "allow",
+      })
+      const reg = getExecutor("action.system.terminal", 1)!
+      await expect(
+        reg.execute(makeCtx({ params: { command: "sleep 99", unattended: true } }))
+      ).rejects.toThrow(/timed out/)
+      const result = await reg.execute(
+        makeCtx({ params: { command: "sleep 99", unattended: true, onFailure: "branch" } })
+      )
+      expect(result.decision).toBe("failure")
+      expect(result.output).toMatchObject({ timedOut: true })
+    })
+  })
+})
+
+describe("action.terminal.readRecent executor", () => {
+  it("rejects when tabId is missing", async () => {
+    const reg = getExecutor("action.terminal.readRecent", 1)!
+    await expect(reg.execute(makeCtx({ params: {} }))).rejects.toThrow(/non-empty 'tabId'/)
+  })
+
+  it("delegates to runTerminalDockAction read_recent and surfaces the records", async () => {
+    const records = [{ cmd: "pnpm test", exitCode: 0, endedAt: 123 }]
+    mockRun.mockResolvedValue({ ok: true, records })
+    const reg = getExecutor("action.terminal.readRecent", 1)!
+    const result = await reg.execute(makeCtx({ params: { tabId: "tab-1", lineLimit: 5 } }))
+    const arg = mockRun.mock.calls[0][0]
+    expect(arg.action).toBe("read_recent")
+    expect(arg.chatSessionId).toBe("run-1")
+    expect(arg.args).toEqual({ tabId: "tab-1", lineLimit: 5 })
+    expect(result.decision).toBe("success")
+    expect(result.output).toEqual({ tabId: "tab-1", records, count: 1 })
+  })
+
+  it("surfaces dock errors as workflow failures", async () => {
+    mockRun.mockResolvedValue({ ok: false, reason: "unknown session: tab-x" })
+    const reg = getExecutor("action.terminal.readRecent", 1)!
+    await expect(reg.execute(makeCtx({ params: { tabId: "tab-x" } }))).rejects.toThrow(
+      /unknown session/
+    )
+  })
+
+  it("rejects an unexpected session-shaped result defensively", async () => {
+    mockRun.mockResolvedValue({ ok: true, sessionId: "tab-1" })
+    const reg = getExecutor("action.terminal.readRecent", 1)!
+    await expect(reg.execute(makeCtx({ params: { tabId: "tab-1" } }))).rejects.toThrow(
+      /unexpected dock result shape/
+    )
+  })
+})
+
+describe("action.terminal.waitForExit executor", () => {
+  it("rejects when tabId is missing", async () => {
+    const reg = getExecutor("action.terminal.waitForExit", 1)!
+    await expect(reg.execute(makeCtx({ params: {} }))).rejects.toThrow(/non-empty 'tabId'/)
+  })
+
+  it("delegates to wait_for_exit and routes success on exit 0", async () => {
+    mockRun.mockResolvedValue({ ok: true, sessionId: "tab-1", exitCode: 0, output: "pnpm build" })
+    const reg = getExecutor("action.terminal.waitForExit", 1)!
+    const result = await reg.execute(makeCtx({ params: { tabId: "tab-1", timeoutSec: 120 } }))
+    const arg = mockRun.mock.calls[0][0]
+    expect(arg.action).toBe("wait_for_exit")
+    expect(arg.args).toEqual({ tabId: "tab-1", timeoutSec: 120 })
+    expect(result.decision).toBe("success")
+    expect(result.output).toEqual({ exitCode: 0, sessionId: "tab-1", command: "pnpm build" })
+  })
+
+  it("throws by default on non-zero exit and branches with onFailure=branch", async () => {
+    mockRun.mockResolvedValue({ ok: true, sessionId: "tab-1", exitCode: 1, output: "" })
+    const reg = getExecutor("action.terminal.waitForExit", 1)!
+    await expect(reg.execute(makeCtx({ params: { tabId: "tab-1" } }))).rejects.toThrow(
+      /exited with code 1/
+    )
+    const result = await reg.execute(makeCtx({ params: { tabId: "tab-1", onFailure: "branch" } }))
+    expect(result.decision).toBe("failure")
+    expect(result.output).toMatchObject({ exitCode: 1 })
+  })
+
+  it("surfaces a wait timeout as a workflow failure", async () => {
+    mockRun.mockResolvedValue({ ok: false, reason: "timeout" })
+    const reg = getExecutor("action.terminal.waitForExit", 1)!
+    await expect(reg.execute(makeCtx({ params: { tabId: "tab-1" } }))).rejects.toThrow(/timeout/)
+  })
+
+  it("rejects an unexpected records-shaped result defensively", async () => {
+    mockRun.mockResolvedValue({ ok: true, records: [] })
+    const reg = getExecutor("action.terminal.waitForExit", 1)!
+    await expect(reg.execute(makeCtx({ params: { tabId: "tab-1" } }))).rejects.toThrow(
+      /unexpected dock result shape/
+    )
+  })
+
+  it("treats a missing exit code as failure and branches when asked", async () => {
+    mockRun.mockResolvedValue({ ok: true, sessionId: "tab-1", exitCode: null, output: "" })
+    const reg = getExecutor("action.terminal.waitForExit", 1)!
+    const result = await reg.execute(makeCtx({ params: { tabId: "tab-1", onFailure: "branch" } }))
+    expect(result.decision).toBe("failure")
+    expect(result.output).toMatchObject({ exitCode: null })
+  })
+})
+
+describe("trigger.terminal.command pass-through executor", () => {
+  it("passes the trigger payload through (manual round-trip)", async () => {
+    const reg = getExecutor("trigger.terminal.command", 1)!
+    const payload = { sessionId: "tab-1", command: "pnpm test", exitCode: 0, status: "success" }
+    const ctx = makeCtx({ params: {} })
+    ;(ctx.trigger as { payload: unknown; originAt: number }).payload = payload
+    ;(ctx.trigger as { payload: unknown; originAt: number }).originAt = 42
+    const result = await reg.execute(ctx)
+    expect(result.output).toEqual({ firedAt: 42, payload })
   })
 })

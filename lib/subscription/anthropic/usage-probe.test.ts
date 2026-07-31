@@ -45,7 +45,7 @@ describe("probeOnce", () => {
     expect(init.headers["anthropic-beta"]).toMatch(/oauth-2025-04-20/)
     expect(init.headers["anthropic-beta"]).toMatch(/claude-code-20250219/)
     expect(init.headers["x-app"]).toBe("cli")
-    expect(init.headers["User-Agent"]).toMatch(/claude-cli/)
+    expect(init.headers).not.toHaveProperty("User-Agent")
 
     const body = JSON.parse(init.body as string)
     expect(body.max_tokens).toBe(1)

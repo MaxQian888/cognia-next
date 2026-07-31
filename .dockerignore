@@ -1,0 +1,60 @@
+# Build context filter for Dockerfile.cognia-server (ADR-0059 P0.2/W6).
+# The context is the repo root; without this file it would ship multi-GB
+# node_modules / target / out trees to the daemon on every build.
+# services/* have their own Dockerfiles with their own directories as context —
+# this file does not apply to them.
+
+# Dependency trees (reinstalled inside the image)
+node_modules
+**/node_modules
+
+# Build outputs
+out
+.next
+**/.next
+docs/.source
+# docs static export (hundreds of MB) — `out` above only matches the root.
+# Keep this a precise path: **/out would swallow the vscode-extension
+# template's out/extension.js, an include_str! target.
+docs/out
+target
+**/target
+cli/dist
+dist
+build
+coverage
+**/coverage
+playwright-report
+test-results
+storybook-static
+
+# Mobile native shells (never part of the container build)
+mobile/ios
+mobile/android
+
+# VCS / editor / local state
+.git
+.github
+.husky
+.vscode
+.idea
+.claude
+.codegraph
+*.log
+.env
+.env.*
+!.env.example
+
+# Tauri bundle artifacts
+src-tauri/gen
+src-tauri/binaries
+
+# Docs site (not needed by the image; manifest whitelisted below)
+docs/content
+docs/public
+
+# Re-include the workspace manifests the brain-builder stage COPYs explicitly
+# (.dockerignore applies to every COPY, so excluded parents need whitelists).
+!docs/package.json
+!mobile/package.json
+!packages/*/package.json

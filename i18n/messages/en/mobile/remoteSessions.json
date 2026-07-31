@@ -1,0 +1,35 @@
+{
+  "approval": {
+    "allow": "Allow once",
+    "allowAlways": "Always this session",
+    "blocked": "Approval not completed ({reason}).",
+    "deny": "Deny",
+    "description": "The host agent wants to run a tool. Allowing lets it execute on the connected desktop.",
+    "heading": "Allow {tool}?",
+    "reason": "Confirm allowing the {tool} tool on the desktop",
+    "title": "Approve tool use"
+  },
+  "back": "Back to sessions",
+  "detail": {
+    "composerAria": "Follow-up message",
+    "composerPlaceholder": "Send a follow-up…",
+    "empty": "No messages yet.",
+    "ended": "This session has ended.",
+    "endedBadge": "Ended",
+    "interruptAria": "Interrupt the current turn",
+    "notFound": "Session not found or no longer available.",
+    "observeOnly": "Observe only",
+    "offlineHint": "Desktop is offline — reconnect to resume following this session.",
+    "sendAria": "Send",
+    "streaming": "Streaming",
+    "title": "Live session"
+  },
+  "list": {
+    "empty": "No sessions on the connected desktop yet.",
+    "error": "Couldn't load sessions ({reason}).",
+    "loading": "Loading sessions…",
+    "openAria": "Open {title}",
+    "untitled": "Untitled session"
+  },
+  "title": "Remote sessions"
+}

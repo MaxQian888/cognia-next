@@ -14,6 +14,41 @@ const manifest = (overrides: Partial<PluginManifest>): PluginManifest =>
     ...overrides,
   }) as PluginManifest
 
+describe("ai-providers-bridge python backend", () => {
+  beforeEach(() => {
+    clearCustomAIProviders()
+  })
+
+  it("registers a python-backed LLM provider without importing any JS", async () => {
+    const importer = jest.fn()
+    const result = await registerAiProvidersForPlugin(
+      manifest({
+        type: "python",
+        pythonMain: "main.py",
+        aiProviders: [{ id: "pyllm", label: "Py LLM", kind: "llm", models: ["m"] }],
+      }),
+      "/plugins/p",
+      { importer }
+    )
+
+    expect(result).toEqual({ registered: 1, errors: [] })
+    expect(importer).not.toHaveBeenCalled()
+    expect(getCustomAIProviders().some((p) => p.id === "p:pyllm")).toBe(true)
+    unregisterAiProvidersForPlugin("p")
+  })
+
+  it("reports a JS-backed provider that omits entry/export", async () => {
+    const result = await registerAiProvidersForPlugin(
+      manifest({ aiProviders: [{ id: "broken", label: "Broken", kind: "llm" }] }),
+      "/plugins/p",
+      { importer: jest.fn() }
+    )
+
+    expect(result.registered).toBe(0)
+    expect(result.errors[0]!.message).toMatch(/must declare both "entry" and "export"/)
+  })
+})
+
 describe("ai-providers-bridge", () => {
   beforeEach(() => {
     clearCustomAIProviders()
@@ -94,6 +129,66 @@ describe("ai-providers-bridge", () => {
       [0.1, 0.2, 0.3, 0.4],
       [0.1, 0.2, 0.3, 0.4],
     ])
+  })
+
+  it("registers and unregisters a namespaced declarative catalog contribution", async () => {
+    const unregisterCatalog = jest.fn()
+    const registerContribution = jest.fn(() => unregisterCatalog)
+    const result = await registerAiProvidersForPlugin(
+      manifest({
+        id: "weather",
+        aiProviders: [
+          {
+            id: "models",
+            label: "Weather Models",
+            kind: "llm",
+            catalog: {
+              tier: "experimental",
+              modalities: ["language"],
+              adapterFamily: "openai-compatible",
+              models: [
+                {
+                  id: "forecast-small",
+                  name: "Forecast Small",
+                  modalities: { input: ["text"], output: ["text"] },
+                },
+              ],
+              offerings: [
+                {
+                  id: "forecast",
+                  modelRef: "forecast-small",
+                  upstreamId: "forecast-v1",
+                  endpointType: "chat-completions",
+                },
+              ],
+            },
+          },
+        ],
+      }),
+      "/plugins/weather",
+      {
+        importer: jest.fn(),
+        catalogRepository: { registerContribution } as never,
+      }
+    )
+
+    expect(result).toEqual({ registered: 1, errors: [] })
+    expect(registerContribution).toHaveBeenCalledWith(
+      "weather",
+      expect.objectContaining({
+        providers: [expect.objectContaining({ id: "weather:models" })],
+        models: [expect.objectContaining({ id: "weather:forecast-small" })],
+        offerings: [
+          expect.objectContaining({
+            id: "weather:models:forecast",
+            providerRef: "weather:models",
+            modelRef: "weather:forecast-small",
+          }),
+        ],
+      })
+    )
+    unregisterAiProvidersForPlugin("weather")
+    expect(unregisterCatalog).toHaveBeenCalledTimes(1)
   })
 
   it("collects errors per failing entry", async () => {

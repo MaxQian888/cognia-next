@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 jest.mock("@/lib/tauri", () => ({
   isTauri: jest.fn(),
 }))
@@ -17,6 +18,7 @@ jest.mock("@/lib/claude/ipc", () => ({
   defaultExportDir: jest.fn(),
   readTextFile: jest.fn(),
   writeTextFile: jest.fn(),
+  writeTextFileConfined: jest.fn(),
 }))
 
 const mockReadBinary = jest.fn()
@@ -29,7 +31,12 @@ jest.mock(
 )
 
 import { isTauri } from "@/lib/tauri"
-import { defaultExportDir, readTextFile, writeTextFile } from "@/lib/claude/ipc"
+import {
+  defaultExportDir,
+  readTextFile,
+  writeTextFile,
+  writeTextFileConfined,
+} from "@/lib/claude/ipc"
 import {
   pickAndReadFiles,
   pickAndReadBinaryFiles,
@@ -42,12 +49,14 @@ const mockedIsTauri = isTauri as unknown as jest.Mock
 const mockedDefaultExportDir = defaultExportDir as unknown as jest.Mock
 const mockedRead = readTextFile as unknown as jest.Mock
 const mockedWrite = writeTextFile as unknown as jest.Mock
+const mockedWriteConfined = writeTextFileConfined as unknown as jest.Mock
 
 beforeEach(() => {
   mockedIsTauri.mockReset()
   mockedDefaultExportDir.mockReset()
   mockedRead.mockReset()
   mockedWrite.mockReset()
+  mockedWriteConfined.mockReset()
   mockOpen.mockReset()
   mockSave.mockReset()
   mockReadBinary.mockReset()
@@ -401,22 +410,23 @@ describe("pickDirectory", () => {
 })
 
 describe("saveFilesToDir", () => {
-  it("writes each file via writeTextFile in Tauri with provided dir", async () => {
+  it("writes each file via the confined command in Tauri, scoped to the picked dir", async () => {
     mockedIsTauri.mockReturnValue(true)
-    mockedWrite.mockResolvedValue(undefined)
+    mockedWriteConfined.mockResolvedValue(undefined)
     const result = await saveFilesToDir("/dst", [
       { name: "a.txt", content: "A" },
       { name: "b.txt", content: "B" },
     ])
     expect(result.writtenCount).toBe(2)
     expect(result.errored).toEqual([])
-    expect(mockedWrite).toHaveBeenNthCalledWith(1, "/dst/a.txt", "A")
-    expect(mockedWrite).toHaveBeenNthCalledWith(2, "/dst/b.txt", "B")
+    expect(mockedWriteConfined).toHaveBeenNthCalledWith(1, "/dst/a.txt", "A", ["/dst"])
+    expect(mockedWriteConfined).toHaveBeenNthCalledWith(2, "/dst/b.txt", "B", ["/dst"])
+    expect(mockedWrite).not.toHaveBeenCalled()
   })
 
   it("captures per-file write errors in Tauri", async () => {
     mockedIsTauri.mockReturnValue(true)
-    mockedWrite.mockRejectedValueOnce(new Error("boom")).mockResolvedValueOnce(undefined)
+    mockedWriteConfined.mockRejectedValueOnce(new Error("boom")).mockResolvedValueOnce(undefined)
     const result = await saveFilesToDir("/dst", [
       { name: "a.txt", content: "A" },
       { name: "b.txt", content: "B" },
@@ -427,7 +437,7 @@ describe("saveFilesToDir", () => {
 
   it("stringifies non-Error rejections", async () => {
     mockedIsTauri.mockReturnValue(true)
-    mockedWrite.mockRejectedValueOnce("plain")
+    mockedWriteConfined.mockRejectedValueOnce("plain")
     const result = await saveFilesToDir("/dst", [{ name: "a.txt", content: "A" }])
     expect(result.errored).toEqual([{ name: "a.txt", error: "plain" }])
   })

@@ -1,0 +1,92 @@
+{
+  "approvalGate": {
+    "approve": "Approve",
+    "budget": {
+      "body": "This run has reached the configured token budget. Approve to continue with extra budget.",
+      "extraTokensLabel": "Additional tokens",
+      "extraTokensPlaceholder": "e.g., 50000",
+      "title": "Token budget critical"
+    },
+    "cancel": "Cancel",
+    "capabilityAudit": {
+      "approveLabel": "Run anyway",
+      "body": "Some team capability references no longer resolve (a contributing plugin may be disabled or removed). You can run anyway with the remaining capabilities, or cancel to fix the configuration first.",
+      "rejectLabel": "Cancel run",
+      "title": "Stale capabilities detected"
+    },
+    "deadlock": {
+      "body": "Every teammate has been quarantined by repeated failures. Choose recovery action.",
+      "resetAll": "Reset all teammates",
+      "resetSelected": "Reset selected teammates",
+      "title": "All teammates unavailable"
+    },
+    "dismissStale": "Dismiss",
+    "interruptedNotice": "This gate was interrupted by a reload — the run may be stalled. Reopen or rerun the task to trigger it again.",
+    "plan": {
+      "body": "Review the lead's proposed plan.",
+      "title": "Plan awaiting approval"
+    },
+    "reject": "Reject",
+    "replan": {
+      "body": "The lead proposes adjusting the remaining plan based on results so far. Approve to apply, or reject to continue as planned.",
+      "title": "Re-plan checkpoint"
+    },
+    "teammateFix": {
+      "body": "A teammate failed catastrophically. Fix the configuration and rejoin, or skip.",
+      "rejoin": "Rejoin",
+      "skip": "Skip permanently",
+      "title": "Teammate disqualified"
+    }
+  },
+  "defaultTeamLeadName": "Team Lead",
+  "prStatus": {
+    "approved": "Approved",
+    "changesRequested": "Changes Requested",
+    "ciFailed": "CI Failed",
+    "ciPending": "CI Running",
+    "closed": "Closed",
+    "draft": "Draft",
+    "mergeConflict": "Merge Conflict",
+    "mergeable": "Ready to Merge",
+    "merged": "Merged",
+    "none": "No PR",
+    "openPr": "Open pull request",
+    "prOpen": "PR Open",
+    "reviewPending": "Review Pending"
+  },
+  "runs": {
+    "completedAt": "Completed",
+    "empty": "No runs yet",
+    "startedAt": "Started"
+  },
+  "status": {
+    "cancelled": "Cancelled",
+    "completed": "Completed",
+    "executing": "Executing",
+    "failed": "Failed",
+    "idle": "Idle",
+    "paused": "Paused",
+    "planning": "Planning"
+  },
+  "taskStatus": {
+    "blocked": "Blocked",
+    "cancelled": "Cancelled",
+    "claimed": "Claimed",
+    "completed": "Completed",
+    "failed": "Failed",
+    "inProgress": "In Progress",
+    "pending": "Pending",
+    "review": "In Review"
+  },
+  "teammateStatus": {
+    "awaitingApproval": "Awaiting Approval",
+    "cancelled": "Cancelled",
+    "completed": "Completed",
+    "executing": "Executing",
+    "failed": "Failed",
+    "idle": "Idle",
+    "paused": "Paused",
+    "planning": "Planning",
+    "shutdown": "Shutdown"
+  }
+}

@@ -1,5 +1,6 @@
 "use client"
 
+import { useMemo } from "react"
 import { useTranslations } from "next-intl"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { useLiveQuery } from "dexie-react-hooks"
@@ -27,12 +28,13 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { cn } from "@/lib/utils"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { MOBILE_DURATION, MOBILE_EASE } from "@/lib/ui/motion"
 import {
   createMcpServer,
   deleteMcpServer,
   getMcpServer,
+  listMcpServers,
   updateMcpServer,
 } from "@/lib/db/mcp-servers"
 import { applyPresetFields, type McpPreset } from "@/lib/claude/mcp-presets"
@@ -78,6 +80,16 @@ export function McpPanel({ className }: { className?: string }) {
   const setSearch = useMcpPanelStore((s) => s.setSearch)
   const openCreate = useMcpPanelStore((s) => s.openCreate)
   const reduce = useReducedMotion()
+
+  // Lowercased names of the servers already configured, so the Preset Market can
+  // flag / disable presets that are already added and warn on duplicates. The
+  // preset id becomes the server name on add (see `onPresetSelected`), so a
+  // case-insensitive name match is the right membership test.
+  const liveServers = useLiveQuery(() => listMcpServers(), [])
+  const existingNames = useMemo(
+    () => (liveServers ?? []).map((s) => s.name.toLowerCase()),
+    [liveServers]
+  )
 
   const fade = reduce ? { duration: 0 } : { duration: MOBILE_DURATION.fast, ease: MOBILE_EASE }
 
@@ -128,31 +140,33 @@ export function McpPanel({ className }: { className?: string }) {
             />
           </div>
         )}
-        <div
-          role="tablist"
-          aria-label={t("title")}
-          className="inline-flex items-center gap-0.5 rounded-lg bg-muted p-[3px]"
-        >
-          {TAB_ORDER.map((tab) => {
-            const active = activeTab === tab
-            return (
-              <button
-                key={tab}
-                type="button"
-                role="tab"
-                aria-selected={active}
-                onClick={() => setActiveTab(tab)}
-                className={cn(
-                  "rounded-md px-2.5 py-1 text-xs font-medium whitespace-nowrap transition-colors",
-                  active
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                {tTabs(TAB_LABEL_KEY[tab])}
-              </button>
-            )
-          })}
+        <div className="min-w-0 max-w-full overflow-x-auto">
+          <div
+            role="tablist"
+            aria-label={t("title")}
+            className="inline-flex items-center gap-0.5 rounded-lg bg-muted p-[3px]"
+          >
+            {TAB_ORDER.map((tab) => {
+              const active = activeTab === tab
+              return (
+                <button
+                  key={tab}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setActiveTab(tab)}
+                  className={cn(
+                    "rounded-md px-2.5 py-1 text-xs font-medium whitespace-nowrap transition-colors",
+                    active
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {tTabs(TAB_LABEL_KEY[tab])}
+                </button>
+              )
+            })}
+          </div>
         </div>
       </div>
 
@@ -168,7 +182,7 @@ export function McpPanel({ className }: { className?: string }) {
             >
               {activeTab === "my-servers" && <McpMyServersTab />}
               {activeTab === "presets" && (
-                <McpPresetGrid existingNames={[]} onPresetSelected={onPresetSelected} />
+                <McpPresetGrid existingNames={existingNames} onPresetSelected={onPresetSelected} />
               )}
               {activeTab === "agents" && (
                 <div className="space-y-4">

@@ -14,6 +14,9 @@ import {
   resolveBooleanOrPath,
   resolveArrayOrPath,
   getBindingPath,
+  collectComponentDataPaths,
+  isA2UIDataModel,
+  isSafeDataModelKey,
 } from "./data-model"
 
 describe("A2UI Data Model", () => {
@@ -37,6 +40,11 @@ describe("A2UI Data Model", () => {
     it("should handle escaped characters", () => {
       expect(parseJsonPointer("/a~1b")).toEqual(["a/b"])
       expect(parseJsonPointer("/a~0b")).toEqual(["a~b"])
+    })
+
+    it("rejects malformed escape sequences", () => {
+      expect(() => parseJsonPointer("/a~2b")).toThrow(/invalid json pointer/i)
+      expect(() => parseJsonPointer("/trailing~")).toThrow(/invalid json pointer/i)
     })
   })
 
@@ -73,6 +81,11 @@ describe("A2UI Data Model", () => {
       expect(getValueByPath(data, "/nonexistent")).toBeUndefined()
       expect(getValueByPath(data, "/address/country")).toBeUndefined()
     })
+
+    it("does not traverse inherited properties or malformed array indices", () => {
+      expect(getValueByPath({}, "/toString")).toBeUndefined()
+      expect(getValueByPath({ items: ["a", "b"] }, "/items/1x")).toBeUndefined()
+    })
   })
 
   describe("setValueByPath", () => {
@@ -100,6 +113,14 @@ describe("A2UI Data Model", () => {
       expect(data.name).toBe("John")
       expect(result.name).toBe("Jane")
     })
+
+    it("rejects unsafe object segments and malformed array indices", () => {
+      const data = { items: ["a", "b"] }
+      expect(setValueByPath(data, "/__proto__/polluted", true)).toBe(data)
+      expect(setValueByPath(data, "/constructor/prototype/polluted", true)).toBe(data)
+      expect(setValueByPath(data, "/items/1x", "x")).toBe(data)
+      expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+    })
   })
 
   describe("deleteValueByPath", () => {
@@ -119,6 +140,35 @@ describe("A2UI Data Model", () => {
       const data = { name: "John", age: 30 }
       deleteValueByPath(data, "/age")
       expect(data).toEqual({ name: "John", age: 30 })
+    })
+
+    it("rejects unsafe object segments and malformed array indices", () => {
+      const data = { items: ["a", "b"] }
+      expect(deleteValueByPath(data, "/__proto__/polluted")).toBe(data)
+      expect(deleteValueByPath(data, "/items/1x")).toBe(data)
+    })
+  })
+
+  describe("data-model validation", () => {
+    it("accepts only safe, finite, acyclic JSON object models", () => {
+      expect(isA2UIDataModel({ text: "ok", count: 1, nested: [true, null] })).toBe(true)
+      expect(isA2UIDataModel([])).toBe(false)
+      expect(isA2UIDataModel({ count: Number.NaN })).toBe(false)
+      expect(isA2UIDataModel({ fn: () => undefined })).toBe(false)
+
+      const cyclic: Record<string, unknown> = {}
+      cyclic.self = cyclic
+      expect(isA2UIDataModel(cyclic)).toBe(false)
+    })
+
+    it("rejects keys that cannot be represented safely by the editor pointer contract", () => {
+      expect(isSafeDataModelKey("profile/name")).toBe(true)
+      expect(isSafeDataModelKey("~state")).toBe(true)
+      expect(isSafeDataModelKey("")).toBe(false)
+      expect(isSafeDataModelKey("__proto__")).toBe(false)
+      expect(isSafeDataModelKey("constructor")).toBe(false)
+      expect(isSafeDataModelKey("prototype")).toBe(false)
+      expect(isA2UIDataModel(JSON.parse('{"__proto__":{"polluted":true}}'))).toBe(false)
     })
   })
 
@@ -242,6 +292,139 @@ describe("A2UI Data Model", () => {
       expect(getBindingPath("Hello")).toBeNull()
       expect(getBindingPath(42)).toBeNull()
       expect(getBindingPath(null)).toBeNull()
+    })
+  })
+
+  describe("structural sharing", () => {
+    describe("setValueByPath", () => {
+      it("shares untouched sibling subtrees by reference", () => {
+        const model = {
+          form: { name: "Ann", age: 30 },
+          settings: { theme: "dark", nested: { a: 1 } },
+        }
+        const next = setValueByPath(model, "/form/name", "Bob")
+
+        // The mutated value is updated...
+        expect(getValueByPath(next, "/form/name")).toBe("Bob")
+        // ...but the sibling subtree keeps its identity.
+        expect(next.settings).toBe(model.settings)
+        expect((next.settings as { nested: unknown }).nested).toBe(model.settings.nested)
+        // The original is never mutated.
+        expect(model.form.name).toBe("Ann")
+      })
+
+      it("copies only the spine to the mutated node", () => {
+        const model = { a: { b: { c: 1 } }, other: { x: 1 } }
+        const next = setValueByPath(model, "/a/b/c", 2)
+
+        expect(next).not.toBe(model)
+        expect(next.a).not.toBe(model.a)
+        expect((next.a as { b: unknown }).b).not.toBe(model.a.b)
+        expect(next.other).toBe(model.other) // untouched branch shared
+      })
+
+      it("returns the same object when setting an Object.is-equal value", () => {
+        const shared = { id: 1 }
+        const model = { item: shared, list: [1, 2] }
+        const next = setValueByPath(model, "/item", shared)
+        expect(next).toBe(model)
+      })
+
+      it("shares untouched array elements when updating one index", () => {
+        const a = { v: 1 }
+        const b = { v: 2 }
+        const model = { rows: [a, b] }
+        const next = setValueByPath(model, "/rows/1/v", 99)
+
+        expect(getValueByPath(next, "/rows/1/v")).toBe(99)
+        expect((next.rows as unknown[])[0]).toBe(a) // sibling element shared
+        expect(model.rows[1].v).toBe(2) // original untouched
+      })
+
+      it("creates intermediate containers for missing paths", () => {
+        const model: Record<string, unknown> = {}
+        const next = setValueByPath(model, "/a/0/b", "x")
+        expect(getValueByPath(next, "/a/0/b")).toBe("x")
+        expect(Array.isArray((next.a as Record<string, unknown>) ? next.a : null)).toBe(true)
+      })
+    })
+
+    describe("deleteValueByPath", () => {
+      it("shares untouched siblings and preserves the original", () => {
+        const model = { a: { keep: 1, drop: 2 }, other: { x: 1 } }
+        const next = deleteValueByPath(model, "/a/drop")
+
+        expect(getValueByPath(next, "/a/drop")).toBeUndefined()
+        expect(getValueByPath(next, "/a/keep")).toBe(1)
+        expect(next.other).toBe(model.other)
+        expect(model.a.drop).toBe(2)
+      })
+
+      it("returns the same object when the path does not exist", () => {
+        const model = { a: { b: 1 } }
+        expect(deleteValueByPath(model, "/a/missing")).toBe(model)
+        expect(deleteValueByPath(model, "/x/y/z")).toBe(model)
+      })
+    })
+
+    describe("deepMerge", () => {
+      it("keeps untouched branches by reference", () => {
+        const target = { a: { x: 1 }, b: { y: 2 } }
+        const merged = deepMerge(target, { a: { x: 9 } })
+
+        expect(merged.a).toEqual({ x: 9 })
+        expect(merged.b).toBe(target.b) // untouched branch shared
+      })
+
+      it("returns the original target when the source changes nothing", () => {
+        const target = { a: { x: 1 }, b: 2 }
+        expect(deepMerge(target, { a: { x: 1 }, b: 2 })).toBe(target)
+        expect(deepMerge(target, {})).toBe(target)
+      })
+    })
+  })
+
+  describe("collectComponentDataPaths", () => {
+    it("collects {path} PathValue references", () => {
+      const component = {
+        component: "Text",
+        text: { path: "/user/name" },
+        visible: { path: "/flags/show" },
+      }
+      const paths = collectComponentDataPaths(component)
+      expect(paths).toEqual(expect.arrayContaining(["/user/name", "/flags/show"]))
+    })
+
+    it("collects plain-string pointer fields invisible to extractReferencedPaths", () => {
+      const list = {
+        component: "List",
+        template: { itemId: "tpl", dataPath: "/rows" },
+      }
+      expect(collectComponentDataPaths(list)).toContain("/rows")
+
+      const table = {
+        component: "Table",
+        data: { path: "/data/rows" },
+        sortKeyPath: "/ui/sortKey",
+        sortDirectionPath: "/ui/sortDir",
+      }
+      const tablePaths = collectComponentDataPaths(table)
+      expect(tablePaths).toEqual(
+        expect.arrayContaining(["/data/rows", "/ui/sortKey", "/ui/sortDir"])
+      )
+    })
+
+    it("returns an empty list for a static component with no bindings", () => {
+      expect(collectComponentDataPaths({ component: "Divider" })).toEqual([])
+    })
+
+    it("de-duplicates repeated paths", () => {
+      const component = {
+        component: "Row",
+        a: { path: "/x" },
+        b: { path: "/x" },
+      }
+      expect(collectComponentDataPaths(component)).toEqual(["/x"])
     })
   })
 })

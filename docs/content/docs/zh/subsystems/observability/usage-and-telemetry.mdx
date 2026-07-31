@@ -124,6 +124,35 @@ threshold`）。Usage 标签页（`usage-tab.tsx`，仅 Tauri）渲染趋势图�
 以及顶级会话 —— 复用来自 `lib/observability/` 的 `chart-palette`/`chart-config`，**仅用于样式**
 （并非共享数据面）。
 
+## 展示模式、折叠与动效
+
+各用量界面共享一个全局**展示模式**偏好，与聊天 agent-flow 模式同构：
+`AppSettings.usageDisplayMode`（`simplified` / `standard` / `detailed`，默认
+`standard`），经 `hooks/usage/use-usage-display-mode.ts` 读写。两个入口驱动同一值
+—— 工具栏快捷切换（`components/settings/subscription/usage-display-toggle.tsx`）
+与外观设置卡（`components/settings/appearance/components/usage-display-card.tsx`）。
+
+Usage 标签页的渐进式信息密度（`usage-tab.tsx` 的 `defaultOpenForMode`）：
+
+| 模式 | 默认展开 | 额外细节 |
+| --- | --- | --- |
+| `simplified` | 统计卡片 + 当前窗口 | —— |
+| `standard` | + 趋势、模型、成本、顶级会话 | —— |
+| `detailed` | + 原始快照 | 缓存写入列、每会话输入/输出拆分 |
+
+每个区块独立折叠。展开状态为**按模式默认 + 会话内本地覆盖**（按当前模式作用域的
+`Map<SectionId, boolean>`，模式切换时重置 —— 不使用 effect 同步），与聊天
+`tool-activity-group` 的稀疏 Map 约定一致。工具栏的**全部展开 / 全部收起**可一次性
+驱动所有区块。
+
+动效经 `useFlowMotion`（`components/chat/motion/motion-reveal.tsx`）门控：区块主体经
+`MotionCollapse` 展开，卡片经 `MotionReveal` 交错入场，当前窗口的严重度字形经
+`MotionStatusSwap` 交叉淡入，recharts `isAnimationActive` 绑定到 `!reduce`，头部统计
+卡通过 `hooks/usage/use-count-up.ts` 数字递增。当 `motion.reduce` 或操作系统的
+`prefers-reduced-motion` 提示开启时，所有路径都退化为瞬时。该偏好同样作用于输入框的
+`ContextUsageIndicator`（简化模式隐藏 SDK 分类细分）、Agent Team 运行时卡片
+（`detailed` 增加 prompt/completion 拆分）以及移动端今日统计卡（Token + 花费卡片）。
+
 ## Inbox 连接器遥测
 
 `lib/telemetry/inbox-events.ts` 是面向连接器流水线的发后即忘式面包屑写入器 ——

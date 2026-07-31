@@ -6,7 +6,7 @@ import { render, screen, waitFor, act } from "@testing-library/react"
 const logWarn = jest.fn()
 const logError = jest.fn()
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: {
     ui: {
       warn: (...args: unknown[]) => logWarn(...args),

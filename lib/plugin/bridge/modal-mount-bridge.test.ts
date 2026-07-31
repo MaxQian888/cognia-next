@@ -24,12 +24,21 @@ beforeEach(() => {
 describe("modal-mount-bridge", () => {
   it("registers declared modals from the manifest", async () => {
     await registerModalMountsForPlugin(
-      manifest([{ id: "wizard", label: "Wizard", entry: "dist/m.js", export: "Modal" }]),
+      manifest([
+        {
+          id: "wizard",
+          label: "Wizard",
+          labelKey: "modals.wizard",
+          entry: "dist/m.js",
+          export: "Modal",
+        },
+      ]),
       "/p/demo",
       { importer: async () => ({ Modal }) }
     )
     expect(listDeclaredModals()).toHaveLength(1)
     expect(getDeclaredModal("demo", "wizard")?.label).toBe("Wizard")
+    expect(getDeclaredModal("demo", "wizard")?.labelKey).toBe("modals.wizard")
   })
 
   it("skips malformed entries (missing id/entry/export)", async () => {
@@ -93,5 +102,47 @@ describe("modal-mount-bridge", () => {
     expect(usePluginModalStore.getState().stack).toHaveLength(0)
 
     expect(await api.openById("missing")).toBeNull()
+  })
+
+  it("carries manifest-declared presentation options into the declarative registry", async () => {
+    await registerModalMountsForPlugin(
+      manifest([
+        {
+          id: "wizard",
+          label: "Wizard",
+          entry: "dist/m.js",
+          export: "Modal",
+          options: { size: "lg", variant: "sheet-right" },
+        },
+      ]),
+      "/p/demo",
+      { importer: async () => ({ Modal }) }
+    )
+    expect(getDeclaredModal("demo", "wizard")?.options).toEqual({
+      size: "lg",
+      variant: "sheet-right",
+    })
+  })
+
+  it("ctx.modal.openById layers its own options over the declared ones", async () => {
+    await registerModalMountsForPlugin(
+      manifest([
+        {
+          id: "wizard",
+          label: "Wizard",
+          entry: "dist/m.js",
+          export: "Modal",
+          options: { variant: "sheet-bottom" },
+        },
+      ]),
+      "/p/demo",
+      { importer: async () => ({ Modal }) }
+    )
+    const api = createModalAPI("demo")
+    await api.openById("wizard", undefined, { size: "full" })
+    expect(usePluginModalStore.getState().stack[0]!.options).toEqual({
+      size: "full",
+      variant: "sheet-bottom",
+    })
   })
 })

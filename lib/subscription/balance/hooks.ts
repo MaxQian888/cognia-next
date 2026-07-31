@@ -36,7 +36,8 @@ export interface UseAccountBalanceResult {
  */
 export function useAccountBalance(
   provider: ProviderId,
-  accountId: string
+  accountId: string,
+  queryEnabled: boolean
 ): UseAccountBalanceResult {
   const [refreshing, setRefreshing] = useState(false)
   const [unavailable, setUnavailable] = useState(false)
@@ -49,7 +50,7 @@ export function useAccountBalance(
     }, [accountId]) ?? null
 
   const refresh = useCallback(async () => {
-    if (!isTauri()) return
+    if (!queryEnabled || !isTauri()) return
     setRefreshing(true)
     try {
       const result = await queryAccountBalance(provider, accountId)
@@ -62,7 +63,7 @@ export function useAccountBalance(
     } finally {
       setRefreshing(false)
     }
-  }, [provider, accountId])
+  }, [provider, accountId, queryEnabled])
 
   return { snapshot, refreshing, unavailable, refresh }
 }

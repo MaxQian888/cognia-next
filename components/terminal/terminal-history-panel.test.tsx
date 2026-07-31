@@ -116,11 +116,25 @@ describe("TerminalHistoryPanel", () => {
   })
 
   it("shows the locate button for agent sessions and fires onLocateInChat", () => {
+    useTerminalStore.getState().registerSession(info(), {
+      agentSpawner: "chat-9",
+      agentSpawnerMessageId: "msg-4",
+    })
+    useTerminalStore.getState().setHistoryOpen("s-1", true)
+    const onLocateInChat = jest.fn()
+    render(<TerminalHistoryPanel sessionId="s-1" onLocateInChat={onLocateInChat} />)
+    fireEvent.click(screen.getByTestId("terminal-history-locate"))
+    // The spawning message travels with the session id, so the chat can land on
+    // the turn that opened this tab rather than at the end of the thread.
+    expect(onLocateInChat).toHaveBeenCalledWith("chat-9", "msg-4")
+  })
+
+  it("still locates a tab spawned before the message id was recorded", () => {
     useTerminalStore.getState().registerSession(info(), { agentSpawner: "chat-9" })
     useTerminalStore.getState().setHistoryOpen("s-1", true)
     const onLocateInChat = jest.fn()
     render(<TerminalHistoryPanel sessionId="s-1" onLocateInChat={onLocateInChat} />)
     fireEvent.click(screen.getByTestId("terminal-history-locate"))
-    expect(onLocateInChat).toHaveBeenCalledWith("chat-9")
+    expect(onLocateInChat).toHaveBeenCalledWith("chat-9", null)
   })
 })

@@ -17,19 +17,33 @@
   "main": "src/index.ts",
   "author": "cognia-next",
   "license": "MIT",
+  "minAppVersion": "0.1.0",
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "activationEvents": ["onStartup"],
+  "activationEvents": ["startup", "onCommand:zhihu"],
   "runtimeCompatibility": {
     "browser": {
       "availability": "supported",
       "entrypoint": "src/index.ts",
-      "hint": "Characters, skills, and MCP presets load in the browser; spawning the MCP servers (zget / browser) requires the Tauri sidecar."
+      "reason": "Characters, skills, and MCP presets load in the browser; spawning the MCP servers (zget / browser) requires the Tauri sidecar."
     },
     "tauri": {
       "availability": "supported",
       "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "degraded",
+      "entrypoint": "src/index.ts",
+      "reason": "Characters and skills load on mobile; spawning the MCP servers (zget / browser) needs the desktop sidecar."
     }
-  }
+  },
+  "commands": [
+    {
+      "id": "zhihu",
+      "name": "/zhihu",
+      "description": "Open the Zhihu content pipeline panel.",
+      "icon": "PenLine"
+    }
+  ]
 }

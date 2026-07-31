@@ -6,7 +6,7 @@ const warnMock = jest.fn()
 jest.mock("@/lib/ocr/runtime", () => ({
   installOcrRuntime: () => installOcrRuntime(),
 }))
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: {
     shell: { warn: (...a: unknown[]) => warnMock(...a), info: jest.fn(), error: jest.fn() },
   },

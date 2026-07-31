@@ -3,9 +3,8 @@
  *
  * Tests for `useOllama` — the minimal hook that backs the Ollama model
  * manager. Covers the happy /api/tags path, the optional /api/version
- * and /api/ps probes, network failure handling, autoRefresh polling,
- * and the four "native binding deferred" mutation stubs (pull, cancelPull,
- * deleteModel, stopModel).
+ * and /api/ps probes, network failure handling, autoRefresh polling, and the
+ * real pull / cancel / delete / stop lifecycle.
  */
 
 import { act, renderHook, waitFor } from "@testing-library/react"
@@ -19,6 +18,23 @@ function jsonResponse(body: unknown, init: ResponseInit = { status: 200 }): Resp
     ok: (init.status ?? 200) < 400,
     status: init.status ?? 200,
     json: async () => body,
+  } as unknown as Response
+}
+
+function pullResponse(progress: unknown[]): Response {
+  let index = 0
+  return {
+    ok: true,
+    status: 200,
+    body: {
+      getReader: () => ({
+        read: async () => {
+          if (index >= progress.length) return { done: true, value: undefined }
+          const value = new TextEncoder().encode(`${JSON.stringify(progress[index++])}\n`)
+          return { done: false, value }
+        },
+      }),
+    },
   } as unknown as Response
 }
 
@@ -147,26 +163,33 @@ describe("useOllama — autoRefresh interval", () => {
   })
 })
 
-describe("useOllama — native-binding-deferred mutations", () => {
+describe("useOllama — model lifecycle", () => {
+  let fetchMock: FetchMock
+
   beforeEach(() => {
-    setupFetch({
+    fetchMock = setupFetch({
       "/api/tags": async () => jsonResponse({ models: [] }),
       "/api/version": async () => jsonResponse({}),
       "/api/ps": async () => jsonResponse({ models: [] }),
+      "/api/pull": async () =>
+        pullResponse([{ status: "downloading", completed: 1, total: 2 }, { status: "success" }]),
+      "/api/delete": async () => jsonResponse({}),
+      "/api/generate": async () => jsonResponse({}),
     })
   })
 
-  it("pullModel records a `pulling`-failed state and writes a 'native deferred' error", async () => {
+  it("pullModel streams through provider-core and completes the pull state", async () => {
     const { result } = renderHook(() => useOllama({ baseUrl: "http://127.0.0.1:11434" }))
     await waitFor(() => expect(result.current.status?.state).toBe("connected"))
     await act(async () => {
       await result.current.pullModel("llama3")
     })
-    expect(result.current.pullStates.get("llama3")?.status).toBe("error")
-    expect(result.current.pullStates.get("llama3")?.error).toBe("Native pull deferred")
+    expect(result.current.pullStates.get("llama3")?.status).toBe("completed")
+    expect(result.current.pullStates.get("llama3")?.percentage).toBe(100)
     expect(result.current.pullStates.get("llama3")?.isActive).toBe(false)
     expect(result.current.isPulling).toBe(false)
-    expect(result.current.error).toMatch(/pullModel/)
+    expect(result.current.error).toBeNull()
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/api/pull"))).toBe(true)
   })
 
   it("cancelPull seeds a 'cancelled' entry when no prior pull existed", async () => {
@@ -190,18 +213,19 @@ describe("useOllama — native-binding-deferred mutations", () => {
     expect(result.current.pullStates.get("llama3")?.isActive).toBe(false)
   })
 
-  it("deleteModel + stopModel surface the deferred-binding error message", async () => {
+  it("deleteModel + stopModel call their real Ollama endpoints and refresh", async () => {
     const { result } = renderHook(() => useOllama({ baseUrl: "http://127.0.0.1:11434" }))
-    // Let the initial useEffect-driven refresh finish so its
-    // `setError(null)` happy-path doesn't race the assertions below.
     await waitFor(() => expect(result.current.status?.state).toBe("connected"))
     await act(async () => {
       await result.current.deleteModel("llama3")
     })
-    expect(result.current.error).toMatch(/deleteModel/)
     await act(async () => {
       await result.current.stopModel("qwen2.5")
     })
-    expect(result.current.error).toMatch(/stopModel/)
+    expect(result.current.error).toBeNull()
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/api/delete"))).toBe(true)
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).endsWith("/api/generate"))).toBe(
+      true
+    )
   })
 })

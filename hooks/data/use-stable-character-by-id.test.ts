@@ -1,6 +1,6 @@
 import { renderHook } from "@testing-library/react"
 import { useStableCharacterById } from "./use-stable-character-by-id"
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 
 describe("useStableCharacterById", () => {
   const alice: Character = { id: "a", name: "Alice" } as Character

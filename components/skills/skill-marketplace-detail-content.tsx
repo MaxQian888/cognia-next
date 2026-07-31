@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
-import { Streamdown } from "streamdown"
+import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { CheckIcon, DownloadIcon, ExternalLinkIcon } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
@@ -11,7 +11,10 @@ import { Spinner } from "@/components/ui/spinner"
 import { fetchMarketplaceContent } from "@/lib/skills/marketplace-install"
 import { getCategoryMeta } from "@/lib/skills/categories"
 import type { MarketplaceItem } from "@/lib/skills/marketplace-types"
-import { loggers } from "@/lib/logging"
+import type { AuditEntry, FileTreeEntry } from "@/hooks/skills"
+import { SkillAuditBadges } from "./skill-audit-badges"
+import { SkillFilePreview } from "./skill-file-preview"
+import { loggers } from "@cognia/logging"
 
 interface Props {
   item: MarketplaceItem
@@ -19,6 +22,11 @@ interface Props {
   installing: boolean
   onInstall: (item: MarketplaceItem) => void
   onUninstall: (item: MarketplaceItem) => void
+  /** Lazily-fetched skills.sh extras; undefined until the parent fetches. */
+  audit?: AuditEntry
+  fileTree?: FileTreeEntry
+  onNeedAudit?: (item: MarketplaceItem) => void
+  onNeedFileTree?: (item: MarketplaceItem) => void
 }
 
 /**
@@ -33,6 +41,10 @@ export function SkillMarketplaceDetailContent({
   installing,
   onInstall,
   onUninstall,
+  audit,
+  fileTree,
+  onNeedAudit,
+  onNeedFileTree,
 }: Props) {
   const t = useTranslations("skills")
   const tMp = useTranslations("skills.marketplace")
@@ -41,6 +53,16 @@ export function SkillMarketplaceDetailContent({
   const [readme, setReadme] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  const isSkillsSh = item.source === "skillssh"
+
+  // Lazily trigger the audit + file-manifest fetches when a skills.sh item
+  // is shown; the hook caches per item id so repeat selections are free.
+  useEffect(() => {
+    if (!isSkillsSh) return
+    onNeedAudit?.(item)
+    onNeedFileTree?.(item)
+  }, [isSkillsSh, item, onNeedAudit, onNeedFileTree])
 
   useEffect(() => {
     let cancelled = false
@@ -101,8 +123,13 @@ export function SkillMarketplaceDetailContent({
       <div className="shrink-0 border-b bg-muted/20 px-5 py-3">
         <div className="flex flex-wrap items-center gap-1.5">
           <Badge variant="secondary" className="h-5 text-[10px]">
-            {item.source === "registry" ? tMp("sourceRegistry") : tMp("sourceSkillsmp")}
+            {item.source === "registry" ? tMp("sourceRegistry") : tMp("sourceSkillssh")}
           </Badge>
+          {typeof item.downloads === "number" && (
+            <Badge variant="outline" className="h-5 text-[10px] tabular-nums">
+              {tMp("installs", { count: item.downloads.toLocaleString() })}
+            </Badge>
+          )}
           <Badge variant="outline" className="h-5 text-[10px]">
             {t(`category.${cat.labelKey}` as never)}
           </Badge>
@@ -120,11 +147,18 @@ export function SkillMarketplaceDetailContent({
         {item.description && (
           <p className="mt-2 text-xs text-muted-foreground">{item.description}</p>
         )}
+        {isSkillsSh && (
+          <div className="mt-3 space-y-3">
+            <SkillAuditBadges audit={audit} />
+            <SkillFilePreview files={fileTree} />
+          </div>
+        )}
         <div className="mt-3 flex items-center gap-2">
           {installed ? (
             <Button
               size="sm"
               variant="outline"
+              className="min-h-11 md:min-h-8"
               onClick={() => onUninstall(item)}
               disabled={installing}
             >
@@ -136,7 +170,12 @@ export function SkillMarketplaceDetailContent({
               {tMp("uninstall")}
             </Button>
           ) : (
-            <Button size="sm" onClick={() => onInstall(item)} disabled={installing}>
+            <Button
+              size="sm"
+              className="min-h-11 md:min-h-8"
+              onClick={() => onInstall(item)}
+              disabled={installing}
+            >
               {installing ? (
                 <Spinner className="mr-1.5 size-3" />
               ) : (
@@ -149,7 +188,7 @@ export function SkillMarketplaceDetailContent({
       </div>
 
       <ScrollArea className="min-h-0 flex-1">
-        <div className="prose prose-sm dark:prose-invert max-w-none px-5 py-4">
+        <div className="px-5 py-4">
           {loading ? (
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Spinner className="size-3" /> {tMp("loading")}
@@ -157,7 +196,7 @@ export function SkillMarketplaceDetailContent({
           ) : error ? (
             <p className="text-xs text-destructive">{error}</p>
           ) : readme ? (
-            <Streamdown>{readme}</Streamdown>
+            <MarkdownRenderer content={readme} rhythm="document" />
           ) : null}
         </div>
       </ScrollArea>

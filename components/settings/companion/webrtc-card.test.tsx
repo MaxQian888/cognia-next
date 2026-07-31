@@ -21,10 +21,14 @@ import en from "@/i18n/messages/en.json"
 import {
   WebRtcCard,
   parseServers,
+  parseTtl,
+  persistTurnProvider,
   stringifyServers,
   TierDot,
   type DeviceTierEntry,
+  type FormState,
 } from "./webrtc-card"
+import { __setProviderSecretStore } from "@/lib/credentials/turn-provisioning"
 import { __resetDbForTesting, getDb } from "@/lib/db/schema"
 import {
   KEYRING_CREDENTIAL_PREFIX,
@@ -137,6 +141,31 @@ describe("parseServers", () => {
       invalid: ["http://nope"],
     })
   })
+
+  it("rejects malformed ports, unsupported query parameters, and TURN-TLS over UDP", () => {
+    const text = [
+      "turn:turn.example.com:70000?transport=udp|u|p",
+      "turn:turn.example.com:3478?foo=bar|u|p",
+      "turns:turn.example.com:5349?transport=udp|u|p",
+    ].join("\n")
+    expect(parseServers(text)).toEqual({
+      servers: [],
+      invalid: text.split("\n"),
+    })
+  })
+
+  it("accepts bracketed IPv6 and TURN-TLS over TCP", () => {
+    expect(parseServers("turns:[2001:db8::1]:5349?transport=tcp|alice|secret")).toEqual({
+      servers: [
+        {
+          urls: "turns:[2001:db8::1]:5349?transport=tcp",
+          username: "alice",
+          credential: "secret",
+        },
+      ],
+      invalid: [],
+    })
+  })
 })
 
 describe("stringifyServers", () => {
@@ -196,7 +225,7 @@ describe("WebRtcCard — form & i18n", () => {
   it("populates the default signaling URL on first paint", async () => {
     renderCard()
     const input = await screen.findByLabelText(/Signaling server/i)
-    await waitFor(() => expect(input).toHaveValue("wss://signaling.cognia.cn/v1/signaling"))
+    await waitFor(() => expect(input).toHaveValue("wss://signaling.cognia.cn/v2/signaling"))
   })
 
   it("places the TURN textarea placeholder via the translation key, not a literal", async () => {
@@ -241,7 +270,7 @@ describe("WebRtcCard — status block", () => {
       if (name === "companion_signaling_status") {
         return Promise.resolve({
           enabled: false,
-          signalingUrl: "wss://signaling.cognia.cn/v1/signaling",
+          signalingUrl: "wss://signaling.cognia.cn/v2/signaling",
           registeredDevices: [],
         })
       }
@@ -259,7 +288,7 @@ describe("WebRtcCard — status block", () => {
       if (name === "companion_signaling_status") {
         return Promise.resolve({
           enabled: true,
-          signalingUrl: "wss://signaling.cognia.cn/v1/signaling",
+          signalingUrl: "wss://signaling.cognia.cn/v2/signaling",
           registeredDevices: [],
         })
       }
@@ -299,7 +328,7 @@ describe("WebRtcCard — status block", () => {
       if (name === "companion_signaling_status") {
         return Promise.resolve({
           enabled: true,
-          signalingUrl: "wss://signaling.cognia.cn/v1/signaling",
+          signalingUrl: "wss://signaling.cognia.cn/v2/signaling",
           registeredDevices: devices.map((d) => d.rendezvousId),
         })
       }
@@ -312,6 +341,9 @@ describe("WebRtcCard — status block", () => {
     await screen.findByTestId("webrtc-device-tier-list")
     expect(screen.getByTestId("webrtc-device-row-device-apple-123456")).toHaveTextContent(
       en.mobile.companion.webrtc.deviceTier.connected
+    )
+    expect(screen.getByTestId("webrtc-device-row-device-apple-123456")).toHaveTextContent(
+      en.mobile.companion.webrtc.protocolMode
     )
     expect(screen.getByTestId("webrtc-device-row-device-banana-7890")).toHaveTextContent(
       en.mobile.companion.webrtc.deviceTier.negotiating
@@ -345,7 +377,7 @@ describe("WebRtcCard — poll-failure banner", () => {
       if (name === "companion_signaling_status") {
         return Promise.resolve({
           enabled: true,
-          signalingUrl: "wss://signaling.cognia.cn/v1/signaling",
+          signalingUrl: "wss://signaling.cognia.cn/v2/signaling",
           registeredDevices: [],
         })
       }
@@ -523,7 +555,7 @@ describe("WebRtcCard — per-device reconnect button", () => {
       if (name === "companion_signaling_status") {
         return Promise.resolve({
           enabled: true,
-          signalingUrl: "wss://signaling.cognia.cn/v1/signaling",
+          signalingUrl: "wss://signaling.cognia.cn/v2/signaling",
           registeredDevices: devices.map((d) => d.rendezvousId),
         })
       }
@@ -588,7 +620,7 @@ describe("WebRtcCard — per-device reconnect button", () => {
       if (name === "companion_signaling_status") {
         return Promise.resolve({
           enabled: true,
-          signalingUrl: "wss://signaling.cognia.cn/v1/signaling",
+          signalingUrl: "wss://signaling.cognia.cn/v2/signaling",
           registeredDevices: ["r1"],
         })
       }
@@ -614,4 +646,176 @@ describe("WebRtcCard — per-device reconnect button", () => {
       expect(toast.error).toHaveBeenCalled()
     })
   })
+})
+
+// ---------------------------------------------------------------------------
+// ADR-0021 — ephemeral-TURN provider section
+// ---------------------------------------------------------------------------
+
+class FakeProviderStore {
+  readonly map = new Map<string, string>()
+  async save(keyId: string, value: string): Promise<void> {
+    this.map.set(keyId, value)
+  }
+  async load(keyId: string): Promise<string | null> {
+    return this.map.has(keyId) ? this.map.get(keyId)! : null
+  }
+  async delete(keyId: string): Promise<void> {
+    this.map.delete(keyId)
+  }
+}
+
+const BASE_FORM: FormState = {
+  enabled: true,
+  signalingUrl: "wss://x/v2/signaling",
+  iceServersText: "",
+  turnServersText: "",
+  turnProviderKind: "none",
+  turnProviderKeyId: "",
+  turnProviderSid: "",
+  turnProviderToken: "",
+  turnProviderTtl: "",
+  turnProviderSecretRef: "",
+}
+
+describe("parseTtl", () => {
+  it("returns undefined for blank / invalid and clamps numeric TTLs", () => {
+    expect(parseTtl("")).toBeUndefined()
+    expect(parseTtl("  ")).toBeUndefined()
+    expect(parseTtl("abc")).toBeUndefined()
+    expect(parseTtl("-1")).toBeUndefined()
+    expect(parseTtl("30")).toBe(600)
+    expect(parseTtl("3600")).toBe(3600)
+    expect(parseTtl("999999")).toBe(86_400)
+  })
+})
+
+describe("persistTurnProvider", () => {
+  let ps: FakeProviderStore
+  beforeEach(() => {
+    ps = new FakeProviderStore()
+    __setProviderSecretStore(ps as never)
+  })
+  afterAll(() => __setProviderSecretStore(null))
+
+  it("kind 'none' deletes any stored secret and returns an empty ref", async () => {
+    await ps.save("old", JSON.stringify({ apiToken: "x" }))
+    const { turnProvider, nextSecretRef } = await persistTurnProvider({
+      ...BASE_FORM,
+      turnProviderKind: "none",
+      turnProviderSecretRef: "kr:old",
+    })
+    expect(turnProvider).toEqual({ kind: "none" })
+    expect(nextSecretRef).toBe("")
+    expect(await ps.load("old")).toBeNull()
+  })
+
+  it("Cloudflare with a token writes the apiToken to the keyring + a sentinel ref", async () => {
+    const { turnProvider, nextSecretRef } = await persistTurnProvider({
+      ...BASE_FORM,
+      turnProviderKind: "cloudflare-calls",
+      turnProviderKeyId: "key-1",
+      turnProviderToken: "tok",
+      turnProviderTtl: "7200",
+    })
+    expect(turnProvider.kind).toBe("cloudflare-calls")
+    expect(turnProvider.cloudflareKeyId).toBe("key-1")
+    expect(turnProvider.ttlSeconds).toBe(7200)
+    expect(nextSecretRef).toMatch(/^kr:/)
+    expect(turnProvider.secretRef).toBe(nextSecretRef)
+    const kid = keyIdOfSentinel(nextSecretRef)!
+    expect(JSON.parse((await ps.load(kid))!)).toEqual({ apiToken: "tok" })
+  })
+
+  it("Twilio with a token stores the authToken + the SID", async () => {
+    const { turnProvider, nextSecretRef } = await persistTurnProvider({
+      ...BASE_FORM,
+      turnProviderKind: "twilio",
+      turnProviderSid: "ACxxxx",
+      turnProviderToken: "auth",
+    })
+    expect(turnProvider.twilioAccountSid).toBe("ACxxxx")
+    const kid = keyIdOfSentinel(nextSecretRef)!
+    expect(JSON.parse((await ps.load(kid))!)).toEqual({ authToken: "auth" })
+  })
+
+  it("keeps the existing secret ref when no new token is entered", async () => {
+    const { turnProvider, nextSecretRef } = await persistTurnProvider({
+      ...BASE_FORM,
+      turnProviderKind: "cloudflare-calls",
+      turnProviderKeyId: "key-1",
+      turnProviderSecretRef: "kr:keep",
+    })
+    expect(nextSecretRef).toBe("kr:keep")
+    expect(turnProvider.secretRef).toBe("kr:keep")
+    // No new secret written.
+    expect(ps.map.size).toBe(0)
+  })
+})
+
+describe("WebRtcCard — TURN provider UI", () => {
+  const MARKER_URL = "wss://hydrated.example/v2/signaling"
+  beforeEach(async () => {
+    __setProviderSecretStore(new FakeProviderStore() as never)
+    // Keep the status poll quiet.
+    mockTransportCall.mockResolvedValue([])
+    try {
+      await getDb().delete()
+    } catch {
+      // db not yet created — fine
+    }
+    __resetDbForTesting()
+    // Seed a distinct signaling URL so `waitForHydrate` proves the async
+    // hydrate actually ran (the INITIAL state already carries the *default*
+    // URL, so waiting on that would pass before hydrate completes and a late
+    // hydrate would then clobber the provider selection mid-test).
+    await saveSettings({ signalingUrl: MARKER_URL })
+  })
+  afterAll(() => __setProviderSecretStore(null))
+
+  const waitForHydrate = async () => {
+    const url = await screen.findByLabelText(/Signaling server/i)
+    await waitFor(() => expect(url).toHaveValue(MARKER_URL))
+  }
+
+  it("reveals Cloudflare inputs when the Cloudflare provider is selected", async () => {
+    renderCard()
+    await waitForHydrate()
+    const select = await screen.findByTestId("webrtc-turn-provider-kind")
+    await userEvent.selectOptions(select, "cloudflare-calls")
+    expect(screen.getByTestId("webrtc-turn-cf-keyid")).toBeInTheDocument()
+    expect(screen.getByTestId("webrtc-turn-token")).toBeInTheDocument()
+    expect(screen.getByTestId("webrtc-turn-test")).toBeInTheDocument()
+    // The Twilio-only SID field stays hidden.
+    expect(screen.queryByTestId("webrtc-turn-twilio-sid")).not.toBeInTheDocument()
+  })
+
+  it("Test button provisions and toasts success when the provider responds", async () => {
+    const { toast } = await import("sonner")
+    mockTransportCall.mockResolvedValue({
+      iceServers: [{ urls: ["turn:a"] }],
+      expiresAtMs: Date.now() + 60_000,
+    })
+    const user = userEvent.setup({ delay: null })
+    renderCard()
+    await waitForHydrate()
+    const select = await screen.findByTestId("webrtc-turn-provider-kind")
+    await user.selectOptions(select, "cloudflare-calls")
+    await user.type(screen.getByTestId("webrtc-turn-cf-keyid"), "key-1")
+    await user.type(screen.getByTestId("webrtc-turn-token"), "tok")
+    await user.click(screen.getByTestId("webrtc-turn-test"))
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalled()
+    })
+    expect(mockTransportCall).toHaveBeenCalledWith("turn_provision", {
+      input: {
+        kind: "cloudflare-calls",
+        cloudflareKeyId: "key-1",
+        twilioAccountSid: undefined,
+        ttlSeconds: undefined,
+        secretKeyId: undefined,
+        inlineToken: "tok",
+      },
+    })
+  }, 20000)
 })

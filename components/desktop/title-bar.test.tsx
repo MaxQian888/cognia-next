@@ -12,12 +12,22 @@ jest.mock("next-intl", () => ({
   useTranslations: (ns: string) => (key: string) => `${ns}.${key}`,
 }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: {
     ui: {
       info: (...args: unknown[]) => logInfo(...args),
       warn: (...args: unknown[]) => logWarn(...args),
       error: (...args: unknown[]) => logError(...args),
+    },
+    // Pulled in transitively by the plugin extension slot → agent-team-store,
+    // which calls `loggers.agent.child(...)` at module load.
+    agent: {
+      info: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn(),
+      child: function () {
+        return this
+      },
     },
   },
   // Pulled in transitively by the plugin extension slot → extension-api → core/logger.
@@ -109,21 +119,34 @@ const settingsRef = {
   reduceMotion: false as boolean,
 }
 const settingsSave = jest.fn().mockResolvedValue(undefined)
-jest.mock("@/stores/settings", () => {
-  const buildSettings = () => ({
+// Function declarations, not consts: `jest.mock` factories are hoisted above
+// every `const` in the module, so an arrow here would hit the TDZ the moment
+// the mocked module is first required.
+function buildSettings() {
+  return {
     webviewZoom: settingsRef.webviewZoom,
     language: settingsRef.language,
     reduceMotion: settingsRef.reduceMotion,
-  })
-  const useSettingsStore: ((s: (state: unknown) => unknown) => unknown) & {
-    getState: () => unknown
-  } = Object.assign(
+    titleBarLayout: {
+      order: barOrder ?? TITLE_BAR_ITEMS.map((m) => m.id),
+      hidden: [...barHidden],
+    },
+  }
+}
+function buildSettingsStore() {
+  return Object.assign(
     (selector: (s: unknown) => unknown) =>
       selector({ settings: buildSettings(), save: settingsSave }),
     { getState: () => ({ save: settingsSave, settings: buildSettings() }) }
   )
-  return { useSettingsStore }
-})
+}
+jest.mock("@/stores/settings", () => ({ useSettingsStore: buildSettingsStore() }))
+jest.mock("@/stores/settings/settings-store", () => ({ useSettingsStore: buildSettingsStore() }))
+
+const openFolderAsWorkspace = jest.fn().mockResolvedValue(null)
+jest.mock("@/lib/workspace/open-folder", () => ({
+  openFolderAsWorkspace: (...args: unknown[]) => openFolderAsWorkspace(...args),
+}))
 
 const openExternal = jest.fn().mockResolvedValue(undefined)
 jest.mock("@/lib/tauri/opener", () => ({
@@ -147,16 +170,38 @@ jest.mock("@/stores/chat/chat-store", () => ({
   ),
 }))
 
+const startNewSessionMock = jest.fn().mockResolvedValue({ id: "s-new" })
+jest.mock("@/lib/chat/start-session", () => ({
+  startNewSession: (...args: unknown[]) => startNewSessionMock(...args),
+}))
+
 const setSelectedGuild = jest.fn()
 const toggleSidebar = jest.fn()
 const toggleGuildRail = jest.fn()
 const toggleStatusBar = jest.fn()
 const requestCreate = jest.fn()
+const openFind = jest.fn()
 const uiStateRef = {
   sidebarCollapsed: false,
   guildRailCollapsed: false,
   statusBarCollapsed: false,
 }
+// Segment order + visibility come from `settings.titleBarLayout` now, resolved
+// by `useBarLayout` (covered by `components/shell/use-bar-layout.test.ts`).
+// This suite drives the real hook through the settings mock below.
+const barHidden = new Set<string>()
+let barOrder: string[] | null = null
+
+let mockPlatform: "tauri" | "web" = "tauri"
+jest.mock("@/hooks/use-platform", () => ({ usePlatform: () => mockPlatform }))
+
+// The customizer dialog reached from the bar's context menu / Views menu has
+// its own suite.
+jest.mock("@/components/shell/shell-layout-dialog", () => ({
+  ShellLayoutDialog: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="shell-layout-dialog" /> : null,
+}))
+
 jest.mock("@/stores/ui/ui-store", () => {
   const buildState = () => ({
     setSelectedGuild,
@@ -164,6 +209,8 @@ jest.mock("@/stores/ui/ui-store", () => {
     toggleGuildRail,
     toggleStatusBar,
     requestCreate,
+    openFind,
+    barItems: {},
     sidebarCollapsed: uiStateRef.sidebarCollapsed,
     guildRailCollapsed: uiStateRef.guildRailCollapsed,
     statusBarCollapsed: uiStateRef.statusBarCollapsed,
@@ -175,6 +222,18 @@ jest.mock("@/stores/ui/ui-store", () => {
     ),
   }
 })
+
+// New title-bar segments — covered by their own suites; stub to keep this test
+// focused on the title-bar shell + gating.
+jest.mock("@/components/desktop/title-bar-workspace", () => ({
+  TitleBarWorkspace: () => <div data-testid="title-bar-workspace-seg" />,
+}))
+jest.mock("@/components/desktop/title-bar-quick-actions", () => ({
+  TitleBarQuickActions: () => <div data-testid="title-bar-quick-actions" />,
+}))
+jest.mock("@/components/account/account-bar-button", () => ({
+  AccountBarButton: () => <div data-testid="account-bar-button" />,
+}))
 
 const sessionRef = {
   value: undefined as undefined | { id: string; title: string; characterId?: string },
@@ -252,7 +311,9 @@ beforeAll(() => {
 })
 
 import { TitleBar } from "./title-bar"
+import { CHROME_BUDGET, countControls } from "@/lib/ui/chrome-budget"
 import { resetNavHistory } from "@/hooks/desktop/use-nav-history"
+import { DEFAULT_TITLE_BAR_LAYOUT, TITLE_BAR_ITEMS } from "@/types/shell/bars"
 
 beforeEach(() => {
   resetNavHistory()
@@ -272,6 +333,7 @@ beforeEach(() => {
   isAlwaysOnTop.mockClear().mockResolvedValue(false)
   onResized.mockClear().mockResolvedValue(() => {})
   openDialog.mockClear().mockResolvedValue(null)
+  openFolderAsWorkspace.mockReset().mockResolvedValue(null)
   settingsSave.mockClear().mockResolvedValue(undefined)
   applyZoom.mockReset().mockImplementation(async (n: number) => Math.round(n * 20) / 20)
   openExternal.mockClear().mockResolvedValue(undefined)
@@ -299,6 +361,10 @@ beforeEach(() => {
   uiStateRef.sidebarCollapsed = false
   uiStateRef.guildRailCollapsed = false
   uiStateRef.statusBarCollapsed = false
+  mockPlatform = "tauri"
+  barHidden.clear()
+  barOrder = null
+  openFind.mockClear()
   narrowState.matches = false
 })
 
@@ -378,7 +444,7 @@ test("setup-failed warning falls back to String(err) for non-Error", async () =>
 test("Open Workspace warning falls back to String(err) for non-Error", async () => {
   isTauriMock.mockReturnValue(true)
   setPlatform("Win32")
-  openDialog.mockRejectedValueOnce("not-an-error")
+  openFolderAsWorkspace.mockRejectedValueOnce("not-an-error")
   const user = userEvent.setup()
   render(<TitleBar />)
   await waitFor(() => expect(screen.getByText("desktop.menu.file.label")).toBeInTheDocument())
@@ -476,6 +542,26 @@ test("renders the nav arrows and layout controls", async () => {
   expect(screen.getByTestId("title-bar-nav-back")).toBeDisabled()
 })
 
+test("mounts the optional workspace / quick-actions / account segments by default", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  render(<TitleBar />)
+  await waitFor(() => expect(screen.getByTestId("title-bar-workspace-seg")).toBeInTheDocument())
+  expect(screen.getByTestId("title-bar-quick-actions")).toBeInTheDocument()
+  expect(screen.getByTestId("account-bar-button")).toBeInTheDocument()
+})
+
+test("drops the segments the stored layout hides", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  for (const id of ["workspace", "quickActions", "accountTop"]) barHidden.add(id)
+  render(<TitleBar />)
+  await waitFor(() => expect(screen.getByTestId("title-bar-nav-arrows")).toBeInTheDocument())
+  expect(screen.queryByTestId("title-bar-workspace-seg")).toBeNull()
+  expect(screen.queryByTestId("title-bar-quick-actions")).toBeNull()
+  expect(screen.queryByTestId("account-bar-button")).toBeNull()
+})
+
 test("command-center caret menu surfaces quick targets", async () => {
   isTauriMock.mockReturnValue(true)
   setPlatform("Win32")
@@ -488,7 +574,33 @@ test("command-center caret menu surfaces quick targets", async () => {
   expect(await screen.findByTestId("cc-command-palette")).toBeInTheDocument()
 })
 
-test("File > New Chat clears chat and resets guild", async () => {
+// The command centre is a customizable segment now, so its handlers arrive via
+// the zone's item context rather than as inline JSX props. These two pin that
+// the wiring survived the move.
+test("command-center Go item routes through the shared menu action", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await user.click(await screen.findByTestId("title-bar-command-center-menu"))
+  await user.click(await screen.findByTestId("cc-go-go-inbox"))
+  expect(routerPush).toHaveBeenCalledWith("/inbox/all")
+})
+
+test("command-center recent session opens that conversation", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  listSessionsMock.mockResolvedValue([{ id: "s-1", title: "Refactor the parser" }])
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await user.click(await screen.findByTestId("title-bar-command-center-menu"))
+  await user.click(await screen.findByTestId("cc-recent-s-1"))
+  expect(setActiveSession).toHaveBeenCalledWith("s-1")
+})
+
+// Delegates to newChatAction so this menu and the native menu bar stay in
+// lockstep — it starts a real conversation rather than clearing to the welcome.
+test("File > New Chat starts a conversation and resets guild", async () => {
   isTauriMock.mockReturnValue(true)
   setPlatform("Win32")
   const user = userEvent.setup()
@@ -496,21 +608,24 @@ test("File > New Chat clears chat and resets guild", async () => {
   await waitFor(() => expect(screen.getByText("desktop.menu.file.label")).toBeInTheDocument())
   await user.click(screen.getByText("desktop.menu.file.label"))
   await user.click(await screen.findByText("desktop.menu.file.newChat"))
-  await waitFor(() => expect(chatClear).toHaveBeenCalled())
+  await waitFor(() => expect(startNewSessionMock).toHaveBeenCalled())
   expect(setSelectedGuild).toHaveBeenCalledWith({ kind: "dm" })
+  // The old behavior nuked every open pane; it must not come back.
+  expect(chatClear).not.toHaveBeenCalled()
 })
 
-test("File > Open Workspace persists picked path", async () => {
+test("File > Open Workspace creates/activates a workspace via the unified flow", async () => {
   isTauriMock.mockReturnValue(true)
   setPlatform("Win32")
-  openDialog.mockResolvedValueOnce("/picked/path")
+  openFolderAsWorkspace.mockResolvedValueOnce({ id: "p1" })
   const user = userEvent.setup()
   render(<TitleBar />)
   await waitFor(() => expect(screen.getByText("desktop.menu.file.label")).toBeInTheDocument())
   await user.click(screen.getByText("desktop.menu.file.label"))
   await user.click(await screen.findByText("desktop.menu.file.openWorkspace"))
-  await waitFor(() =>
-    expect(settingsSave).toHaveBeenCalledWith({ defaultWorkingDir: "/picked/path" })
+  await waitFor(() => expect(openFolderAsWorkspace).toHaveBeenCalledTimes(1))
+  expect(settingsSave).not.toHaveBeenCalledWith(
+    expect.objectContaining({ defaultWorkingDir: expect.anything() })
   )
 })
 
@@ -547,22 +662,15 @@ test("File > Quit closes the window", async () => {
   await waitFor(() => expect(close).toHaveBeenCalled())
 })
 
-test("Edit > Find dispatches Ctrl+F", async () => {
+test("Edit > Find opens the in-app find bar", async () => {
   isTauriMock.mockReturnValue(true)
   setPlatform("Win32")
   const user = userEvent.setup()
-  const seen: KeyboardEvent[] = []
-  const listener = (e: Event) => seen.push(e as KeyboardEvent)
-  window.addEventListener("keydown", listener)
-  try {
-    render(<TitleBar />)
-    await waitFor(() => expect(screen.getByText("desktop.menu.edit.label")).toBeInTheDocument())
-    await user.click(screen.getByText("desktop.menu.edit.label"))
-    await user.click(await screen.findByText("desktop.menu.edit.find"))
-    expect(seen.some((e) => e.key === "f" && e.ctrlKey)).toBe(true)
-  } finally {
-    window.removeEventListener("keydown", listener)
-  }
+  render(<TitleBar />)
+  await waitFor(() => expect(screen.getByText("desktop.menu.edit.label")).toBeInTheDocument())
+  await user.click(screen.getByText("desktop.menu.edit.label"))
+  await user.click(await screen.findByText("desktop.menu.edit.find"))
+  expect(openFind).toHaveBeenCalled()
 })
 
 test("Edit > Copy delegates to document.execCommand", async () => {
@@ -794,6 +902,26 @@ test("clicking the search pill dispatches Ctrl+K", async () => {
   }
 })
 
+test("clicking the search pill on Mac dispatches Cmd+K (metaKey, not ctrlKey)", async () => {
+  // The command palette's global listener keys off `metaKey` on macOS and
+  // `ctrlKey` elsewhere. A synthetic dispatch must therefore carry the
+  // platform-correct modifier or the palette never opens from the title bar.
+  isTauriMock.mockReturnValue(true)
+  setPlatform("MacIntel")
+  const user = userEvent.setup()
+  const seen: KeyboardEvent[] = []
+  const listener = (e: Event) => seen.push(e as KeyboardEvent)
+  window.addEventListener("keydown", listener)
+  try {
+    render(<TitleBar />)
+    await waitFor(() => expect(screen.getByTestId("title-bar-search-pill")).toBeInTheDocument())
+    await user.click(screen.getByTestId("title-bar-search-pill"))
+    expect(seen.some((e) => e.key === "k" && e.metaKey && !e.ctrlKey)).toBe(true)
+  } finally {
+    window.removeEventListener("keydown", listener)
+  }
+})
+
 test("streaming dot replaces the search icon when chat is streaming", async () => {
   isTauriMock.mockReturnValue(true)
   setPlatform("Win32")
@@ -831,13 +959,21 @@ test("right-click opens the system menu on Win/Linux", async () => {
   )
 })
 
-test("right-click is suppressed on Mac", async () => {
+test("right-click on Mac opens the menu without the window commands", async () => {
+  // The menu is no longer Win/Linux-only: it carries "Customize layout" on
+  // every platform (see the customizer test below). What stays platform-gated
+  // is the restore/minimize/maximize/close block, which macOS gets from the
+  // traffic lights instead.
   isTauriMock.mockReturnValue(true)
   setPlatform("MacIntel")
   render(<TitleBar />)
   await waitFor(() => expect(screen.getByTestId("title-bar")).toBeInTheDocument())
   fireEvent.contextMenu(screen.getByTestId("title-bar"))
-  expect(screen.queryByTestId("title-bar-system-menu-trigger")).toBeNull()
+  await waitFor(() =>
+    expect(screen.getByTestId("title-bar-system-menu-trigger")).toBeInTheDocument()
+  )
+  expect(screen.queryByText("desktop.menu.window.close")).toBeNull()
+  expect(screen.queryByText("desktop.menu.window.maximize")).toBeNull()
 })
 
 test("hamburger menu replaces Menubar at narrow widths", async () => {
@@ -859,6 +995,48 @@ test("hamburger menu lists items from every section", async () => {
   // File and Help labels are now MenubarLabel-style headers inside the dropdown.
   await waitFor(() => expect(screen.getByText("desktop.menu.go.label")).toBeInTheDocument())
   expect(screen.getByText("desktop.menu.window.label")).toBeInTheDocument()
+})
+
+// The hamburger is the entire menu on a narrow window, so its items must
+// dispatch the same actions the wide menubar does rather than only render.
+test.each([
+  ["desktop.menu.tools.manageConnectors", "/settings?section=connections"],
+  ["desktop.menu.tools.manageMcpServer", "/settings?section=external-bridge"],
+  ["desktop.menu.tools.pluginDevtools", "/settings?section=plugins"],
+])("hamburger > %s routes to %s", async (label, route) => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  narrowState.matches = true
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await user.click(await screen.findByTestId("title-bar-hamburger"))
+  await user.click(await screen.findByText(label))
+  await waitFor(() => expect(routerPush).toHaveBeenCalledWith(route))
+})
+
+test("hamburger > Command Palette dispatches the shortcut", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  narrowState.matches = true
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await user.click(await screen.findByTestId("title-bar-hamburger"))
+  await user.click(await screen.findByText("desktop.menu.tools.commandPalette"))
+  await waitFor(() => expect(logInfo).toHaveBeenCalledWith("title-bar menu command-palette"))
+})
+
+test("a viewport crossing the narrow breakpoint swaps the menubar for the hamburger", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  narrowState.matches = false
+  render(<TitleBar />)
+  await waitFor(() => expect(screen.getByText("desktop.menu.file.label")).toBeInTheDocument())
+  // Drive the matchMedia listener the width hook subscribes to.
+  act(() => {
+    narrowState.matches = true
+    narrowState.listeners.forEach((cb) => cb())
+  })
+  await waitFor(() => expect(screen.getByTestId("title-bar-hamburger")).toBeInTheDocument())
 })
 
 test("act-friendly Edit > Undo path", async () => {
@@ -968,6 +1146,39 @@ test.each([
     )
   )
   await waitFor(() => expect(applyZoom).toHaveBeenCalledWith(expect.closeTo(expected, 4)))
+})
+
+test("View > Zoom logs instead of throwing when the new zoom fails to persist", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  settingsSave.mockRejectedValueOnce(new Error("disk full"))
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  await user.click(await screen.findByText("desktop.menu.view.label"))
+  await user.click(await screen.findByText("desktop.menu.view.zoomIn"))
+  await waitFor(() =>
+    expect(logWarn).toHaveBeenCalledWith("title-bar zoom persist failed", {
+      error: "disk full",
+    })
+  )
+})
+
+test("a resize event refreshes the maximized state", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("Win32")
+  let onResizedCb: (() => Promise<void>) | undefined
+  onResized.mockImplementation(async (cb: () => Promise<void>) => {
+    onResizedCb = cb
+    return () => {}
+  })
+  render(<TitleBar />)
+  await waitFor(() => expect(onResizedCb).toBeDefined())
+  isMaximized.mockResolvedValueOnce(true)
+  await act(async () => {
+    await onResizedCb?.()
+  })
+  // Maximized → the button offers Restore rather than Maximize.
+  await waitFor(() => expect(screen.getByLabelText("desktop.titleBar.restore")).toBeInTheDocument())
 })
 
 test.each([["dms"], ["logs"], ["settings"]])(
@@ -1183,6 +1394,14 @@ test("File > Recent Sessions submenu lists loaded sessions and routes on click",
   listSessionsMock.mockResolvedValueOnce([
     { id: "s1", title: "Latest chat", kind: "direct", createdAt: 1, updatedAt: 1 },
     { id: "s2", title: "Older chat", kind: "direct", createdAt: 1, updatedAt: 0 },
+    {
+      id: "embedded",
+      title: "Canvas assistant",
+      kind: "resource-workbench",
+      visibility: "embedded",
+      createdAt: 1,
+      updatedAt: 2,
+    },
   ])
   const user = userEvent.setup()
   render(<TitleBar />)
@@ -1192,6 +1411,7 @@ test("File > Recent Sessions submenu lists loaded sessions and routes on click",
   const subTrigger = await screen.findByText("desktop.menu.file.recentSessions")
   subTrigger.focus()
   await user.keyboard("{ArrowRight}")
+  expect(screen.queryByText("Canvas assistant")).toBeNull()
   await user.click(await screen.findByText("Latest chat"))
   expect(setActiveSession).toHaveBeenCalledWith("s1")
   expect(setSelectedGuild).toHaveBeenCalledWith({ kind: "dm" })
@@ -1298,6 +1518,7 @@ test("View > Reduce Motion flips the persisted boolean", async () => {
 test.each([
   ["go.inbox", "/inbox/all"],
   ["go.workflows", "/workflows"],
+  ["go.sites", "/sites"],
   ["go.skills", "/skills"],
   ["go.plugins", "/plugins"],
   ["go.agentTeams", "/agent-teams"],
@@ -1468,4 +1689,81 @@ test("wide menubar exposes Tools as a top-level trigger", async () => {
   setPlatform("Win32")
   render(<TitleBar />)
   await waitFor(() => expect(screen.getByText("desktop.menu.tools.label")).toBeInTheDocument())
+})
+
+test("stays within the title-bar chrome control budget on macOS", async () => {
+  // macOS is the tightest case worth guarding: `!isMac` suppresses the whole
+  // in-window Menubar, so what remains IS the permanent control surface.
+  // Ratchet, not a target — see lib/ui/chrome-budget.ts.
+  //
+  // `beforeEach` clears the hidden set so the other tests can assert every
+  // segment; the budget must measure what users actually get, so restore the
+  // shipped hidden set here.
+  isTauriMock.mockReturnValue(true)
+  setPlatform("MacIntel")
+  for (const id of DEFAULT_TITLE_BAR_LAYOUT.hidden) barHidden.add(id)
+  render(<TitleBar />)
+  const header = await screen.findByTestId("title-bar")
+  expect(countControls(header)).toBeLessThanOrEqual(CHROME_BUDGET.titleBar)
+})
+
+test("offers a right-click route into the customizer on macOS too", async () => {
+  isTauriMock.mockReturnValue(true)
+  setPlatform("MacIntel")
+  const user = userEvent.setup()
+  render(<TitleBar />)
+  const header = await screen.findByTestId("title-bar")
+  fireEvent.contextMenu(header)
+  const customize = await screen.findByTestId("title-bar-customize")
+  // The window commands stay Win/Linux-only — macOS has the traffic lights.
+  expect(screen.queryByText("desktop.menu.window.minimize")).toBeNull()
+  await user.click(customize)
+  expect(await screen.findByTestId("shell-layout-dialog")).toBeInTheDocument()
+})
+
+describe("the Win/Linux right-click system menu", () => {
+  const openSystemMenu = async () => {
+    isTauriMock.mockReturnValue(true)
+    setPlatform("Win32")
+    render(<TitleBar />)
+    fireEvent.contextMenu(await screen.findByTestId("title-bar"))
+    await waitFor(() =>
+      expect(screen.getByTestId("title-bar-system-menu-trigger")).toBeInTheDocument()
+    )
+  }
+
+  it("minimizes the window", async () => {
+    const user = userEvent.setup()
+    await openSystemMenu()
+    await user.click(screen.getByText("desktop.menu.window.minimize"))
+    await waitFor(() => expect(minimize).toHaveBeenCalled())
+  })
+
+  it("maximizes the window when it is not already maximized", async () => {
+    const user = userEvent.setup()
+    await openSystemMenu()
+    await user.click(screen.getByText("desktop.menu.window.maximize"))
+    await waitFor(() => expect(toggleMaximize).toHaveBeenCalled())
+  })
+
+  it("closes the window", async () => {
+    const user = userEvent.setup()
+    await openSystemMenu()
+    await user.click(screen.getByText("desktop.menu.window.close"))
+    await waitFor(() => expect(close).toHaveBeenCalled())
+  })
+
+  it("disables Restore while the window is not maximized", async () => {
+    await openSystemMenu()
+    expect(
+      screen.getByText("desktop.menu.window.restore").closest("[role='menuitem']")
+    ).toHaveAttribute("aria-disabled", "true")
+  })
+
+  it("also reaches the customizer, below the window commands", async () => {
+    const user = userEvent.setup()
+    await openSystemMenu()
+    await user.click(screen.getByTestId("title-bar-customize"))
+    expect(await screen.findByTestId("shell-layout-dialog")).toBeInTheDocument()
+  })
 })

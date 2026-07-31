@@ -38,8 +38,9 @@ import {
   Workflow as WorkflowIcon,
 } from "lucide-react"
 import { listWorkflows } from "@/lib/db/workflows"
-import { groupedCatalog } from "@/lib/workflow/nodes/catalog"
+import { groupedCatalog, type NodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
 import { tNode } from "@/lib/workflow/i18n/node-translate"
+import { CapabilityBadge, useMissingNodeCapabilities } from "./capability-badge"
 import type { WorkflowNodeKind } from "@/types/workflow/visual"
 
 export interface CommandPaletteProps {
@@ -204,20 +205,15 @@ export function CommandPalette({
             {g.entries.map((e) => {
               const label = tNode(tNodes, `${e.kind}.label`, e.label)
               return (
-                <CommandItem
+                <AddNodeItem
                   key={e.kind}
-                  value={`add-${e.kind}-${label}-${e.keywords.join(" ")}`}
+                  entry={e}
+                  label={label}
                   onSelect={() => {
                     onAddNode(e.kind)
                     close()
                   }}
-                >
-                  <AddIcon className="size-4 mr-2 shrink-0" />
-                  <span className="flex-1">{label}</span>
-                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                    {e.kind}
-                  </span>
-                </CommandItem>
+                />
               )
             })}
           </CommandGroup>
@@ -232,7 +228,7 @@ export function CommandPalette({
                   key={wf.id}
                   value={`switch-${wf.id}-${wf.name}`}
                   onSelect={() => {
-                    router.push(`/workflows/${wf.id}`)
+                    router.push(`/workflows/editor?id=${encodeURIComponent(wf.id)}`)
                     close()
                   }}
                 >
@@ -245,5 +241,34 @@ export function CommandPalette({
         ) : null}
       </CommandList>
     </CommandDialog>
+  )
+}
+
+/**
+ * One "Add node" row. Split out of the map so the per-entry capability check
+ * (a hook — `useTranslations` inside) has a legal call site.
+ */
+function AddNodeItem({
+  entry,
+  label,
+  onSelect,
+}: {
+  entry: NodeCatalogEntry
+  label: string
+  onSelect: () => void
+}) {
+  const capabilityInfo = useMissingNodeCapabilities(entry)
+  return (
+    <CommandItem
+      value={`add-${entry.kind}-${label}-${entry.keywords.join(" ")}`}
+      onSelect={onSelect}
+    >
+      <AddIcon className="size-4 mr-2 shrink-0" />
+      <span className="flex-1">{label}</span>
+      {capabilityInfo ? <CapabilityBadge info={capabilityInfo} className="mr-2" /> : null}
+      <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+        {entry.kind}
+      </span>
+    </CommandItem>
   )
 }

@@ -2,6 +2,14 @@ import { transport } from "@/lib/tauri"
 
 import { discoverOpencodeAuth, saveOpencodeZenKey } from "./discovery"
 
+let unlockedAccountId: string | null = "local_acct_a"
+
+jest.mock("@/stores/account/account-store", () => ({
+  useAccountStore: {
+    getState: () => ({ unlockedAccountId }),
+  },
+}))
+
 const sampleEntries = [
   {
     subProvider: "anthropic",
@@ -21,6 +29,7 @@ const sampleEntries = [
 ]
 
 beforeEach(() => {
+  unlockedAccountId = "local_acct_a"
   jest.spyOn(transport, "call")
 })
 
@@ -83,10 +92,26 @@ describe("saveOpencodeZenKey", () => {
       label: "Personal Zen",
     })
     expect(transport.call).toHaveBeenCalledWith("opencode_save_zen_key", {
+      localAccountId: "local_acct_a",
       accessToken: "ozk",
       baseUrl: "https://zen.example",
       label: "Personal Zen",
+      plan: null,
     })
+  })
+
+  it("forwards the go plan tag", async () => {
+    ;(transport.call as jest.Mock).mockResolvedValueOnce({
+      id: "a",
+      credential: { provider: "opencode-zen", accessToken: "sk-go", plan: "go", storedAtMs: 0 },
+      createdAtMs: 0,
+      lastUsedAtMs: 0,
+    })
+    await saveOpencodeZenKey({ accessToken: "sk-go", plan: "go" })
+    expect(transport.call).toHaveBeenLastCalledWith(
+      "opencode_save_zen_key",
+      expect.objectContaining({ plan: "go" })
+    )
   })
 
   it("trims a blank base URL to null", async () => {

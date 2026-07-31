@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { createWorkflow } from "@/lib/db/workflows"
@@ -155,6 +156,57 @@ describe("wf_run_workflow_by_name", () => {
       },
     })
     expect(result.instruction).toContain("Attach the returned `surface`")
+    // No running inbound job in this harness → operators-only actor scope
+    // (plan 2026-07-24 Phase 2).
+    expect(approveBinding?.actorScope).toEqual({ mode: "operators" })
+    expect(approveBinding?.allowedActions).toEqual(["approve", "cancel"])
+    expect(cancelBinding?.actorScope).toEqual({ mode: "operators" })
+  })
+
+  it("scopes the approval to the current turn's sender when a job is running", async () => {
+    await seedSession({ sessionId: "s1", bindToIM: true })
+    await createWorkflow({ name: "Scoped Flow" })
+    const { enqueueConnectorInboundJob, claimConnectorInboundJob } =
+      await import("@/lib/db/connector-inbound-jobs")
+    const job = await enqueueConnectorInboundJob(
+      {
+        platform: "wecom",
+        adapterId: "wecom:a",
+        selfId: "bot",
+        messageId: "m_turn",
+        conversationRef: { platform: "wecom", adapterId: "wecom:a" },
+        conversationKey: "wecom:wecom:a:room",
+        sender: {
+          id: "wecom:u_requester",
+          platform: "wecom",
+          adapterId: "wecom:a",
+          remoteUserId: "u_requester",
+        },
+        channel: { id: "wecom:wecom:a:room", kind: "group" },
+        segments: [{ type: "text", text: "run it" }],
+        plainText: "run it",
+        mentions: { selfMentioned: false, users: [] },
+        timestamp: Date.now(),
+        raw: {},
+      },
+      "queue"
+    )
+    await claimConnectorInboundJob(job.id, { leaseOwner: "test", leaseMs: 60_000 })
+
+    const result = (await runByNameTool.execute({ name: "Scoped Flow" }, ctx("s1"))) as {
+      ok: boolean
+    }
+    expect(result.ok).toBe(true)
+    const bindings = await getDb().connectorCallbackBindings.toArray()
+    const approveBinding = bindings.find((b) => b.kind === "wf_approve")
+    expect(approveBinding?.actorScope).toEqual({
+      mode: "initiator",
+      allowedUserIds: ["u_requester"],
+    })
+    expect(
+      (approveBinding?.payload?.triggeredFrom as { initiator?: { remoteUserId?: string } })
+        ?.initiator?.remoteUserId
+    ).toBe("u_requester")
   })
 })
 

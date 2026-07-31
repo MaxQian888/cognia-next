@@ -35,7 +35,17 @@ export function SkillUsageTrend() {
         </ToggleGroup>
       </div>
       <div className="h-48">
-        <ResponsiveContainer width="100%" height="100%">
+        {/* Seed a positive initial size (height matches the h-48 = 192px box)
+            so the chart never renders at recharts' default {-1,-1} on mount —
+            which logs "width(-1)/height(-1)" and flashes empty for a frame on
+            every skills-tab remount, the source of the tab-switch jitter. */}
+        <ResponsiveContainer
+          width="100%"
+          height="100%"
+          minWidth={1}
+          minHeight={1}
+          initialDimension={{ width: 320, height: 192 }}
+        >
           <LineChart data={data}>
             <XAxis dataKey="name" tick={{ fontSize: 10 }} />
             <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />

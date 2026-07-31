@@ -44,6 +44,21 @@ const DEFAULT_LAYOUT_OPTIONS = {
 const DEFAULT_NODE_WIDTH = 220
 const DEFAULT_NODE_HEIGHT = 80
 
+/** Editor-facing flow directions mapped onto elkjs' `elk.direction` values. */
+export const ELK_DIRECTIONS = {
+  LR: "RIGHT",
+  RL: "LEFT",
+  TB: "DOWN",
+  BT: "UP",
+} as const
+
+export type AutoLayoutDirection = keyof typeof ELK_DIRECTIONS
+
+export interface AutoLayoutOptions {
+  /** Flow direction. Omit for the project default (LR / `RIGHT`). */
+  direction?: AutoLayoutDirection
+}
+
 let cachedElk: ElkInstance | null = null
 
 async function loadElk(): Promise<ElkInstance | null> {
@@ -67,14 +82,17 @@ async function loadElk(): Promise<ElkInstance | null> {
  */
 export async function autoLayout(
   nodes: RFWorkflowNode[],
-  edges: RFWorkflowEdge[]
+  edges: RFWorkflowEdge[],
+  options: AutoLayoutOptions = {}
 ): Promise<Record<string, { x: number; y: number }>> {
   const elk = await loadElk()
   if (!elk || nodes.length === 0) return {}
 
   const graph: ElkNodeShape = {
     id: "root",
-    layoutOptions: DEFAULT_LAYOUT_OPTIONS,
+    layoutOptions: options.direction
+      ? { ...DEFAULT_LAYOUT_OPTIONS, "elk.direction": ELK_DIRECTIONS[options.direction] }
+      : DEFAULT_LAYOUT_OPTIONS,
     children: nodes.map((n) => ({
       id: n.id,
       width: typeof n.width === "number" ? n.width : DEFAULT_NODE_WIDTH,

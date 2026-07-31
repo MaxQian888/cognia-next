@@ -52,6 +52,54 @@ describe("applyExternalAgentEventToParts — reasoning", () => {
   })
 })
 
+describe("applyExternalAgentEventToParts — commentary", () => {
+  it("keeps commentary distinct from reasoning and seals it on completion", () => {
+    let parts = applyExternalAgentEventToParts(
+      [],
+      ev({
+        type: "commentary_delta",
+        messageId: "commentary-1",
+        text: "Checking ",
+        done: false,
+        source: "codex",
+      })
+    )
+    parts = applyExternalAgentEventToParts(
+      parts,
+      ev({
+        type: "commentary_delta",
+        messageId: "commentary-1",
+        text: "the tests",
+        done: false,
+        source: "codex",
+      })
+    )
+    parts = applyExternalAgentEventToParts(
+      parts,
+      ev({
+        type: "commentary_delta",
+        messageId: "commentary-1",
+        text: "",
+        done: true,
+        source: "codex",
+      })
+    )
+
+    expect(parts).toEqual([
+      {
+        type: "data-commentary",
+        data: {
+          messageId: "commentary-1",
+          text: "Checking the tests",
+          state: "done",
+          source: "codex",
+        },
+      },
+    ])
+    expect(parts.some((part) => (part as { type: string }).type === "reasoning")).toBe(false)
+  })
+})
+
 describe("applyExternalAgentEventToParts — tool calls", () => {
   it("creates a tool-<name> part on tool_use_start in `input-available` state", () => {
     const parts = applyExternalAgentEventToParts(
@@ -201,5 +249,45 @@ describe("buildPartsFromExternalAgentEvents — integration", () => {
       ev({ type: "progress" } as unknown as ExternalAgentEvent),
     ]
     expect(buildPartsFromExternalAgentEvents(events)).toEqual([])
+  })
+})
+
+describe("applyExternalAgentEventToParts — hook_fire", () => {
+  it("appends an inline hook-notice part carrying the decision", () => {
+    const parts = applyExternalAgentEventToParts(
+      [],
+      ev({
+        type: "hook_fire",
+        event: "PreToolUse",
+        toolName: "Bash",
+        outcome: "blocked",
+        block: "command matches denylist",
+        warnings: ["hook timed out after 5000ms"],
+      } as unknown as ExternalAgentEvent)
+    )
+    expect(parts).toHaveLength(1)
+    expect(parts[0]).toMatchObject({
+      type: "hook-notice",
+      event: "PreToolUse",
+      toolName: "Bash",
+      outcome: "blocked",
+      block: "command matches denylist",
+      warnings: ["hook timed out after 5000ms"],
+    })
+  })
+
+  it("defaults warnings to [] and sits after the preceding tool part", () => {
+    const events: ExternalAgentEvent[] = [
+      ev({ type: "tool_use_start", toolUseId: "t1", toolName: "Bash", rawInput: {} }),
+      ev({
+        type: "hook_fire",
+        event: "PostToolUse",
+        outcome: "context",
+        additionalContext: "loaded ctx",
+      } as unknown as ExternalAgentEvent),
+    ]
+    const parts = buildPartsFromExternalAgentEvents(events)
+    expect(parts.map((p) => (p as { type: string }).type)).toEqual(["tool-Bash", "hook-notice"])
+    expect(parts[1]).toMatchObject({ outcome: "context", warnings: [] })
   })
 })

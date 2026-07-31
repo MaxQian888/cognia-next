@@ -1,4 +1,4 @@
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import { shouldShowOnboarding } from "./should-show"
 
 jest.mock("@/lib/subscription/core/transport", () => ({

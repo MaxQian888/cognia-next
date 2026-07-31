@@ -28,6 +28,54 @@ describe("me-entries registry", () => {
     expect(new Set(ids).size).toBe(ids.length)
   })
 
+  it("routes the two newly-reachable settings sections", () => {
+    // The registry IS the reachability: a `/me/*` route with no entry here is a
+    // page nothing links to. Cloud sign-in and the Eval defaults both shipped
+    // their route before their row.
+    const byId = Object.fromEntries(ME_ENTRIES.map((entry) => [entry.id, entry]))
+    expect(byId["cloud-account"]?.href).toBe("/me/cloud-account")
+    expect(byId["cloud-account"]?.labelKey).toBe("cloudAccountRow")
+    expect(byId.eval?.href).toBe("/me/eval")
+    expect(byId.eval?.labelKey).toBe("evalRow")
+  })
+
+  it("makes the new rows findable by what a user would actually type", () => {
+    const cloud = ME_ENTRIES.find((entry) => entry.id === "cloud-account") as MeEntry
+    const evalRow = ME_ENTRIES.find((entry) => entry.id === "eval") as MeEntry
+    // Both locales: the search box is the only way to reach a row the user
+    // cannot see, and a Chinese-only user typing "登录" must find it.
+    expect(matchMeEntry(cloud, "logto", echo)).toBe(true)
+    expect(matchMeEntry(cloud, "登录", echo)).toBe(true)
+    expect(matchMeEntry(evalRow, "judge", echo)).toBe(true)
+    expect(matchMeEntry(evalRow, "评估", echo)).toBe(true)
+  })
+
+  it("assigns each companion illustration to one matching core feature entry", () => {
+    const spots = Object.fromEntries(
+      ME_ENTRIES.filter((entry) => entry.spotIcon).map((entry) => [entry.id, entry.spotIcon])
+    )
+
+    expect(spots).toEqual({
+      profile: "profile",
+      sync: "device-sync",
+      conversation: "chat",
+      canvas: "canvas",
+      agent: "digital-twin",
+      connectors: "connectors",
+      "web-search": "browser",
+      search: "discover",
+      terminal: "terminal",
+      "agent-teams-settings": "agent-teams",
+      skills: "skills",
+      scheduler: "scheduler",
+      goals: "goals",
+      "workflows-settings": "workflows",
+      backup: "secure-backup",
+      memory: "memory",
+    })
+    expect(new Set(Object.values(spots)).size).toBe(16)
+  })
+
   it("routes every entry to an absolute path", () => {
     for (const entry of ME_ENTRIES) {
       expect(entry.href.startsWith("/")).toBe(true)
@@ -38,6 +86,83 @@ describe("me-entries registry", () => {
     const byId = (id: string) => ME_ENTRIES.find((e) => e.id === id)
     expect(byId("terminal")?.href).toBe("/me/terminal")
     expect(byId("remote-sessions")?.href).toBe("/remote-sessions")
+  })
+
+  it("surfaces the synced command-history viewer entry (ADR-0039)", () => {
+    const byId = (id: string) => ME_ENTRIES.find((e) => e.id === id)
+    expect(byId("command-history")).toMatchObject({
+      href: "/me/command-history",
+      section: "connection",
+    })
+  })
+
+  it("surfaces the dormant-field preference pages (speech, web-search, conversation)", () => {
+    const byId = (id: string) => ME_ENTRIES.find((e) => e.id === id)
+    expect(byId("speech")).toMatchObject({ href: "/me/speech", section: "appearance" })
+    expect(byId("web-search")).toMatchObject({ href: "/me/web-search", section: "connection" })
+    expect(byId("conversation")).toMatchObject({ href: "/me/conversation", section: "appearance" })
+  })
+
+  it("includes the standalone search surface entry", () => {
+    const byId = (id: string) => ME_ENTRIES.find((e) => e.id === id)
+    expect(byId("search")).toMatchObject({ href: "/search", section: "connection" })
+  })
+
+  it("surfaces the shared model catalog on mobile", () => {
+    const entry = ME_ENTRIES.find((item) => item.id === "model-catalog")
+    expect(entry).toMatchObject({
+      href: "/me/model-catalog",
+      labelKey: "modelCatalogRow",
+      section: "connection",
+    })
+    expect(matchMeEntry(entry as MeEntry, "offering", echo)).toBe(true)
+  })
+
+  it("surfaces the ADR-0056 plugins, subagents, and workflow-settings entries", () => {
+    const byId = (id: string) => ME_ENTRIES.find((e) => e.id === id)
+    expect(byId("plugins")).toMatchObject({ href: "/me/plugins", section: "connection" })
+    expect(byId("subagents")).toMatchObject({ href: "/me/subagents", section: "connection" })
+    expect(byId("workflows-settings")).toMatchObject({
+      href: "/me/workflows-settings",
+      section: "automation",
+    })
+  })
+
+  it("surfaces the ADR-0056 Wave 4 MCP entry without platform-specific integrations", () => {
+    const byId = (id: string) => ME_ENTRIES.find((e) => e.id === id)
+    expect(byId("mcp")).toMatchObject({ href: "/me/mcp", section: "connection" })
+    expect(byId("github-delivery")).toBeUndefined()
+  })
+
+  it("surfaces the ADR-0056 Wave 4 read-only desktop-bound sections", () => {
+    const byId = (id: string) => ME_ENTRIES.find((e) => e.id === id)
+    expect(byId("slash-commands")).toMatchObject({
+      href: "/me/slash-commands",
+      section: "connection",
+    })
+    expect(byId("network")).toMatchObject({ href: "/me/network", section: "connection" })
+    expect(byId("hooks")).toMatchObject({ href: "/me/hooks", section: "connection" })
+    expect(byId("agent-teams-settings")).toMatchObject({
+      href: "/me/agent-teams-settings",
+      section: "connection",
+    })
+  })
+
+  it("surfaces the platform-agnostic desktop-parity sections", () => {
+    const byId = (id: string) => ME_ENTRIES.find((e) => e.id === id)
+    expect(byId("characters")).toMatchObject({ href: "/me/characters", section: "connection" })
+    expect(byId("skills")).toMatchObject({ href: "/me/skills", section: "connection" })
+    expect(byId("teams")).toMatchObject({ href: "/me/teams", section: "connection" })
+    expect(byId("agent-modes")).toMatchObject({ href: "/me/agent-modes", section: "connection" })
+    expect(byId("a2ui")).toMatchObject({ href: "/me/a2ui", section: "connection" })
+    expect(byId("artifacts")).toMatchObject({ href: "/me/artifacts", section: "appearance" })
+    expect(byId("canvas")).toMatchObject({ href: "/me/canvas", section: "appearance" })
+    expect(byId("memory-settings")).toMatchObject({
+      href: "/me/memory-settings",
+      section: "data",
+    })
+    expect(byId("logs")).toMatchObject({ href: "/me/logs", section: "about" })
+    expect(byId("diagnostics")).toMatchObject({ href: "/me/diagnostics", section: "about" })
   })
 })
 
@@ -70,5 +195,12 @@ describe("matchMeEntry", () => {
   it("returns false when nothing matches", () => {
     const t = (k: string) => (k === "backupRow" ? "Backup" : k)
     expect(matchMeEntry(entry, "zzzzz", t)).toBe(false)
+  })
+
+  it("handles entries without keywords (label-only match)", () => {
+    const noKeywords: MeEntry = { ...entry, keywords: undefined }
+    const t = (k: string) => (k === "backupRow" ? "Backup" : k)
+    expect(matchMeEntry(noKeywords, "backup", t)).toBe(true)
+    expect(matchMeEntry(noKeywords, "restore", t)).toBe(false)
   })
 })

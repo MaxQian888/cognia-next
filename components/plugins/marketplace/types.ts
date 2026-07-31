@@ -19,13 +19,7 @@ export type CategoryFilter =
   | "components"
 
 export type QuickFilter =
-  | "all"
-  | "trending"
-  | "featured"
-  | "new"
-  | "verified"
-  | "free"
-  | "installed"
+  "all" | "trending" | "featured" | "new" | "verified" | "free" | "installed"
 
 export type InstallStage =
   | "idle"

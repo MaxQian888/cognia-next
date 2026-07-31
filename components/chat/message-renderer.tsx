@@ -7,31 +7,74 @@ import {
   MessageContent,
 } from "@/components/ai-elements/message"
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning"
-import { Task, TaskContent, TaskItem, TaskTrigger } from "@/components/ai-elements/task"
-import { Tool, ToolBody, ToolHeader, ToolContent, ToolInput } from "@/components/ai-elements/tool"
+import { Tool, ToolHeader, ToolContent, ToolInput } from "@/components/ai-elements/tool"
 import { ErrorTraceDetails } from "@/components/ai-elements/error-trace"
-import { ErrorParsedView } from "@/components/chat/error-parsed-view"
-import { normalizeErrorText } from "@/lib/error-parsers"
+import { ErrorParsedView } from "@/components/error/error-parsed-view"
+import { normalizeErrorText } from "@cognia/error-parsers"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import { StreamingTextPart } from "@/components/chat/streaming-text-part"
 import { A2UIPart } from "@/components/chat/message-parts/a2ui-part"
+import { A2UIToolOutput, hasA2UIToolOutput } from "@/components/a2ui/a2ui-tool-output"
 import { InboundA2UIRenderer } from "@/components/chat/message-parts/inbound-a2ui-renderer"
-import { SubagentPart } from "@/components/chat/message-parts/subagent-part"
+import { SubagentTree } from "@/components/chat/message-parts/subagent-tree"
 import { AgentTeamDispatchPart } from "@/components/chat/message-parts/agent-team-dispatch-part"
 import { ArtifactPart } from "@/components/chat/message-parts/artifact-part"
 import { SourcesPart } from "@/components/chat/message-parts/sources-part"
 import { TerminalToolPart } from "@/components/chat/message-parts/terminal-tool-part"
-import { MCPToolCard, isStructuredMcpToolType } from "@/components/chat/message-parts/mcp-tool-card"
+import {
+  MCPToolCard,
+  McpToolBodyOrContent,
+  isStructuredMcpToolPart,
+  toolNameOf,
+} from "@/components/chat/message-parts/mcp-tool-card"
 import { CanvasInlinePart } from "@/components/chat/message-parts/canvas-inline-part"
+import { FilePartPreview } from "@/components/chat/message-parts/file-part-preview"
+import { AttachmentTextCard } from "@/components/chat/message-parts/attachment-text-card"
+import {
+  MessageImageGallery,
+  type MessageImageGalleryProps,
+} from "@/components/chat/renderers/message-image-gallery"
+import { MessageImageCollectionProvider } from "@/components/chat/renderers/message-image-collection"
+import { PluginSurface } from "@/components/plugins/plugin-surface"
+import { UnknownPartCard } from "@/components/chat/message-parts/unknown-part-card"
+import {
+  HookNoticeRow,
+  type HookNoticePartData,
+} from "@/components/chat/message-parts/hook-notice-part"
+import { DiagnosticsCard } from "@/components/chat/message-parts/diagnostics-card"
+import { SlashCommandResultChip } from "@/components/chat/message-parts/slash-command-result-chip"
+import {
+  DIAGNOSTICS_PART_TYPE,
+  isSystemMessageBlock,
+  isSlashCommandResultBlock,
+  type SystemMessageBlock,
+} from "@/lib/slash-commands/system-blocks"
+import { ToolCallRow } from "@/components/chat/message-parts/tool-call-row"
+import {
+  ToolActivityGroup,
+  type ToolActivityGroupEntry,
+} from "@/components/chat/message-parts/tool-activity-group"
+import { MotionReveal } from "@/components/chat/motion/motion-reveal"
+import { useAgentFlowMode } from "@/hooks/chat/use-agent-flow-mode"
+import {
+  groupAgentParts,
+  isToolOnlyFlow,
+  isToolPartType,
+  SILENT_CONTROL_PART_TYPES,
+} from "@/lib/chat/agent-flow-grouping"
+import { parseTodoInput } from "@/lib/chat/todos"
+import type { AgentFlowMode } from "@/types/appearance"
 import { BranchNavigator } from "@/components/chat/branch-navigator"
+import { BranchPointMarker } from "@/components/chat/branch-children-chip"
 import { TriggerBadge } from "@/components/chat/trigger-badge"
+import { MemoryLearnedChip, MemoryRecalledChip } from "@/components/chat/memory-chips"
+import { isSourcesPart } from "@/lib/claude/parts-extensions"
 import type {
   A2UIPart as A2UIPartType,
   AgentTeamDispatchPart as AgentTeamDispatchPartType,
   ArtifactPart as ArtifactPartType,
   CanvasInlinePart as CanvasInlinePartType,
   SourcesPart as SourcesPartType,
-  SubagentPart as SubagentPartType,
 } from "@/lib/claude/parts-extensions"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
@@ -39,35 +82,56 @@ import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   BookmarkIcon,
-  CheckCircle2Icon,
   CheckIcon,
-  CircleIcon,
-  ClockIcon,
   CopyIcon,
+  LinkIcon,
+  CornerUpLeftIcon,
+  GitBranchIcon,
+  ScissorsIcon,
+  ImageIcon,
   PencilIcon,
   RefreshCcwIcon,
   Share2Icon,
 } from "lucide-react"
+import { QuoteCardDialog } from "@/components/share/quote-card-dialog"
+import { toast } from "sonner"
 import type { ToolUIPart, UIMessage } from "ai"
 import type { UsageInfo } from "@/lib/claude/adapter"
-import type { Character } from "@/lib/claude/types"
+import { UsageBreakdown } from "@/components/chat/usage-breakdown"
+import type { Character } from "@cognia/agent-config-types"
 import React, { memo, useCallback, useMemo, useState, type KeyboardEvent } from "react"
 import { useTranslations } from "next-intl"
+import { buildMessagePermalink } from "@/lib/chat/message-permalink"
 import { cn } from "@/lib/utils"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { ReadAloudButton } from "./read-aloud-button"
+import { TodoList } from "./todo-list"
 import { useCopy } from "@/hooks/ui/use-copy"
-import { loggers } from "@/lib/logging"
+import { buildMessageShareContent, writeMessageToClipboard } from "@/lib/chat/message-share"
+import { loggers } from "@cognia/logging"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
+import { MessagePluginMenu } from "@/components/chat/message-plugin-menu"
+import { BranchDialog } from "@/components/chat/branch-dialog"
+import { TruncateFromDialog } from "@/components/chat/truncate-from-dialog"
+import { SteerStatusBadge } from "@/components/chat/message-parts/steer-status-badge"
+import { dispatchComposerAppend } from "@/components/chat/composer"
+import { useAsideTarget } from "@/components/context-workbench/aside-target"
+import { useLiveQuery } from "dexie-react-hooks"
+import { getSession } from "@/lib/db/sessions"
 import {
   getMessagePartRenderer,
   subscribeMessagePartRenderers,
   getMessagePartRenderersRevision,
 } from "@/lib/plugin/api/message-part-renderers"
+import {
+  subscribeToolResultRenderers,
+  getToolResultRenderersRevision,
+} from "@/lib/plugin/api/tool-result-renderers"
 import { useSyncExternalStore } from "react"
 import { PerfBoundary } from "@/lib/perf"
+import { useAgentFileAutoFollow } from "@/hooks/agent/use-agent-file-auto-follow"
 
 interface Props {
   message: UIMessage
@@ -85,6 +149,8 @@ interface Props {
   onCopy?: () => void
   onRegenerate?: () => void | Promise<void>
   onEditResend?: (messageId: string, newText: string) => void | Promise<void>
+  /** Root used to resolve project-relative links in assistant Markdown. */
+  projectRoot?: string | null
 }
 
 function usePluginPartRegistryRevision(): number {
@@ -95,41 +161,19 @@ function usePluginPartRegistryRevision(): number {
   )
 }
 
-class PluginPartErrorBoundary extends React.Component<
-  {
-    type: string
-    pluginId: string
-    children: React.ReactNode
-  },
-  { error: Error | null }
-> {
-  state = { error: null as Error | null }
-  static getDerivedStateFromError(error: Error) {
-    return { error }
-  }
-  componentDidCatch(error: Error): void {
-    loggers.chat.warn("plugin message-part renderer threw", {
-      pluginId: this.props.pluginId,
-      partType: this.props.type,
-      err: error.message,
-    })
-  }
-  render() {
-    if (this.state.error) {
-      return (
-        <div
-          data-testid="plugin-part-error"
-          data-plugin-id={this.props.pluginId}
-          data-part-type={this.props.type}
-          className="my-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
-          role="alert"
-        >
-          Plugin renderer for &quot;{this.props.type}&quot; crashed: {this.state.error.message}
-        </div>
-      )
-    }
-    return this.props.children
-  }
+/**
+ * Re-render the message when a plugin registers / unregisters a TOOL-RESULT
+ * renderer. Separate from the part registry above because the tool branch is
+ * chosen by `isStructuredMcpToolPart` during render — without this, enabling a
+ * plugin mid-session would leave already-rendered tool calls on the generic
+ * card forever.
+ */
+function usePluginToolRendererRevision(): number {
+  return useSyncExternalStore(
+    subscribeToolResultRenderers,
+    getToolResultRenderersRevision,
+    getToolResultRenderersRevision
+  )
 }
 
 function MessageRendererInner({
@@ -141,16 +185,46 @@ function MessageRendererInner({
   onCopy,
   onRegenerate,
   onEditResend,
+  projectRoot,
 }: Props) {
+  useAgentFileAutoFollow({ parts: message.parts, isStreaming, projectRoot })
   // Re-render when a plugin registers / unregisters a message-part renderer.
   usePluginPartRegistryRevision()
+  // ...and likewise for tool-result cards.
+  usePluginToolRendererRevision()
   const t = useTranslations("chat.message")
+  // Agent invocation-flow display mode (simplified / standard / detailed).
+  const { mode: agentFlowMode } = useAgentFlowMode()
   // Read-aloud is gated on the global TTS toggle; the selector keeps this
   // re-render rare (settings change), not on every playback progress tick.
   const ttsEnabled = useSettingsStore((s) => s.settings?.ttsEnabled ?? false)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState("")
   const [shared, setShared] = useState(false)
+  const [richCopied, setRichCopied] = useState(false)
+  const [branchOpen, setBranchOpen] = useState(false)
+  const [truncateOpen, setTruncateOpen] = useState(false)
+  const [cardOpen, setCardOpen] = useState(false)
+  // Stable "now" for messages that carry no createdAt (impure Date read kept
+  // out of render via a lazy state initializer).
+  const [nowFallback] = useState(() => new Date())
+  const activeSessionId = useChatStore((s) => s.activeSessionId)
+  // Non-null only inside a workbench sidechat — see `AsideTargetProvider`.
+  const asideTargetSessionId = useAsideTarget()
+  const branchSessionId =
+    (typeof (message as { metadata?: { sessionId?: unknown } }).metadata?.sessionId === "string"
+      ? ((message as { metadata?: { sessionId?: string } }).metadata!.sessionId as string)
+      : undefined) ?? activeSessionId
+  // Where "hand this back" should land. An aside hands back to the main
+  // conversation; a branch hands back to the one it was cut from. Both are
+  // "up one level", so one action covers both rather than two that differ only
+  // in how they resolve the target. Null in an ordinary top-level conversation.
+  const branchParentId = useLiveQuery(
+    async () =>
+      branchSessionId ? ((await getSession(branchSessionId))?.parentSessionId ?? null) : null,
+    [branchSessionId]
+  )
+  const handBackTargetId = asideTargetSessionId ?? branchParentId ?? null
   const { copied, copy } = useCopy({ logger: loggers.chat, scope: "chat" })
 
   const isBookmarked = useChatStore(
@@ -164,6 +238,51 @@ function MessageRendererInner({
     if (!senderId || !characterById) return null
     return characterById.get(senderId) ?? null
   }, [senderId, characterById])
+
+  // Segment the parts into tool-activity groups + standalone parts. Memoized on
+  // `message.parts` so it doesn't re-run on every token or on unrelated local
+  // state (editing/draft/shared/branchOpen) before the memoized children skip.
+  const segments = useMemo(
+    () => groupAgentParts(message.parts, agentFlowMode),
+    [message.parts, agentFlowMode]
+  )
+
+  // Image file parts belong to one visual attachment group even when a text or
+  // document part sits between them. Render the group at the first image's
+  // transcript position and suppress the remaining individual image parts.
+  const messageImageGallery = useMemo(() => {
+    const items: MessageImageGalleryProps["items"] = []
+    const partIndexes = new Set<number>()
+    message.parts.forEach((part, index) => {
+      const file = part as { type?: string; url?: string; mediaType?: string; filename?: string }
+      if (file.type !== "file" || !file.url || !file.mediaType?.startsWith("image/")) return
+      partIndexes.add(index)
+      items.push({
+        id: `${message.id}-${index}`,
+        src: file.url,
+        alt: file.filename ?? t("attachmentAlt"),
+        filename: file.filename,
+      })
+    })
+    return {
+      items,
+      partIndexes,
+      firstPartIndex: partIndexes.values().next().value as number | undefined,
+    }
+  }, [message.id, message.parts, t])
+
+  // Plain text of the message, for the "share as card" action + gate.
+  const messageText = useMemo(() => extractText(message), [message])
+  const messageShareContent = useMemo(() => buildMessageShareContent(message), [message])
+
+  // A turn that is nothing but tool calls has no prose to copy, quote, read
+  // aloud or card, so it renders no action bar. The bar is `opacity-0` until
+  // hover but still reserves a ~40px row (icon buttons) plus a `gap-2`, which
+  // is what put a strip of chrome between every pair of consecutive tool calls.
+  const isToolOnlyTurn = useMemo(
+    () => message.role === "assistant" && isToolOnlyFlow(message.parts),
+    [message.role, message.parts]
+  )
 
   // Mention highlighting pattern over known character names. Honor longest
   // match first so e.g. `@Alice Smith` wins over `@Alice`.
@@ -206,20 +325,51 @@ function MessageRendererInner({
   }
 
   const handleCopy = useCallback(async () => {
-    const text = extractText(message)
-    if (!text) return
-    const ok = await copy(text)
+    if (!messageShareContent.hasContent) return
+    const needsRichClipboard = messageShareContent.plainText !== messageText
+    const ok = needsRichClipboard
+      ? await writeMessageToClipboard(messageShareContent)
+      : await copy(messageShareContent.plainText)
+    if (ok && needsRichClipboard) {
+      setRichCopied(true)
+      window.setTimeout(() => setRichCopied(false), 1500)
+    }
     if (ok) onCopy?.()
-  }, [message, copy, onCopy])
+  }, [messageShareContent, messageText, copy, onCopy])
+
+  // A permalink back into THIS app (`?session=…&message=…`), not a published
+  // share link — see `lib/chat/message-permalink.ts`.
+  const [linkCopied, setLinkCopied] = useState(false)
+  const handleCopyLink = useCallback(async () => {
+    if (!branchSessionId) return
+    const ok = await copy(
+      buildMessagePermalink({ sessionId: branchSessionId, messageId: message.id })
+    )
+    if (!ok) return
+    setLinkCopied(true)
+    window.setTimeout(() => setLinkCopied(false), 1500)
+  }, [branchSessionId, message.id, copy])
 
   const handleShare = useCallback(async () => {
-    const text = extractText(message)
-    if (!text) return
+    if (!messageShareContent.hasContent) return
     try {
       if (typeof navigator.share === "function") {
-        await navigator.share({ text })
+        const files = messageShareContent.shareFiles
+        if (files.length > 0 && navigator.canShare?.({ files })) {
+          await navigator.share({
+            ...(messageShareContent.nativeShareText.trim()
+              ? { text: messageShareContent.nativeShareText }
+              : {}),
+            files,
+          })
+        } else if (files.length === 0) {
+          await navigator.share({ text: messageShareContent.plainText })
+        } else if (!(await writeMessageToClipboard(messageShareContent))) {
+          throw new Error("No compatible native share or clipboard target")
+        }
       } else {
-        await navigator.clipboard.writeText(text)
+        const ok = await writeMessageToClipboard(messageShareContent)
+        if (!ok) throw new Error("Clipboard unavailable")
       }
       setShared(true)
       window.setTimeout(() => setShared(false), 1500)
@@ -232,13 +382,19 @@ function MessageRendererInner({
         })
       }
     }
-  }, [message])
+  }, [messageShareContent])
 
   const usage = (message as { metadata?: { usage?: UsageInfo } }).metadata?.usage
 
   return (
     <PerfBoundary id="chat:message">
-      <Message from={message.role}>
+      <Message
+        from={message.role}
+        className={cn(
+          "py-2 sm:py-3",
+          message.role === "user" ? "max-w-[min(82%,42rem)]" : "max-w-full"
+        )}
+      >
         {speaker &&
           message.role === "assistant" &&
           (() => {
@@ -288,32 +444,126 @@ function MessageRendererInner({
             </div>
           </div>
         ) : (
-          <MessageContent>
-            {(() => {
-              const inboundA2UI = (
-                message as {
-                  metadata?: {
-                    inboundA2UI?: import("@/lib/connectors/adapters/_shared/inbound-a2ui-types").InboundA2UIBlock
+          // `MessageContent` is `w-fit` so a user bubble hugs its text. For the
+          // assistant that makes the column width follow the widest mounted
+          // child — collapsing a tool card unmounts its body and the whole
+          // column snaps narrow. Pin the assistant side to the full row so
+          // expand/collapse never moves the width.
+          // Every image in this turn — markdown `![]()`, attachment gallery,
+          // tool-result screenshots — registers with one collection so the
+          // lightbox pages across the whole message instead of dead-ending on
+          // whichever image was clicked.
+          <MessageImageCollectionProvider>
+            <MessageContent
+              className={cn(
+                "leading-relaxed",
+                "group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-md group-[.is-user]:bg-muted/70 group-[.is-user]:px-4 group-[.is-user]:py-2.5",
+                "group-[.is-assistant]:w-full"
+              )}
+            >
+              {(() => {
+                const inboundA2UI = (
+                  message as {
+                    metadata?: {
+                      inboundA2UI?: import("@/lib/connectors/adapters/_shared/inbound-a2ui-types").InboundA2UIBlock
+                    }
                   }
+                ).metadata?.inboundA2UI
+                if (!inboundA2UI) return null
+                return <InboundA2UIRenderer block={inboundA2UI} className="mb-2" />
+              })()}
+              {/* Segment the parts so runs of ≥2 consecutive tool calls collapse */}
+              {/* into one activity group. Subagent parts are transparent here and */}
+              {/* render once below as a dispatch tree. */}
+              {segments.map((segment, si) => {
+                if (segment.kind === "group") {
+                  const entries: ToolActivityGroupEntry[] = segment.entries.map((e) => ({
+                    part: e.part as ToolUIPart,
+                    key: `${message.id}-${e.index}`,
+                  }))
+                  return (
+                    <MotionReveal key={`${message.id}-group-${si}`} index={si}>
+                      {/* Key the group on the display mode: the tool cards it wraps
+                        own their open state in uncontrolled Collapsibles
+                        (`defaultOpen`, read once at mount), so a live
+                        standard⇄detailed switch only takes effect if the group
+                        remounts and re-applies the per-mode default. */}
+                      <ToolActivityGroup
+                        key={agentFlowMode}
+                        entries={entries}
+                        mode={agentFlowMode}
+                        renderCard={(part, key, opts) =>
+                          renderToolPart(
+                            part,
+                            key,
+                            agentFlowMode,
+                            opts.forceOpen,
+                            message.id,
+                            branchSessionId ?? undefined,
+                            t
+                          )
+                        }
+                      />
+                    </MotionReveal>
+                  )
                 }
-              ).metadata?.inboundA2UI
-              if (!inboundA2UI) return null
-              return <InboundA2UIRenderer block={inboundA2UI} className="mb-2" />
-            })()}
-            {message.parts.map((part, i) => (
-              <MessagePart
-                key={`${message.id}-${i}`}
-                part={part}
-                partKey={`${message.id}-${i}`}
-                isStreaming={isStreaming}
-                mentionPattern={message.role === "user" ? mentionPattern : null}
-                characterById={characterById}
-                messageId={message.id}
-                t={t}
-              />
-            ))}
-          </MessageContent>
+
+                const { part, index } = segment.entry
+                const partKey = `${message.id}-${index}`
+                const partType = (part as { type?: string }).type
+                if (messageImageGallery.partIndexes.has(index)) {
+                  if (index !== messageImageGallery.firstPartIndex) return null
+                  return (
+                    <MessageImageGallery
+                      key={`${message.id}-image-gallery`}
+                      items={messageImageGallery.items}
+                    />
+                  )
+                }
+                // Tool cards and reasoning read the display mode only through their
+                // Collapsible's uncontrolled `defaultOpen`, snapshotted at mount —
+                // a live standard⇄detailed switch changes the prop but never
+                // re-opens or re-collapses an already-mounted card. Fold the mode
+                // into just those parts' key so switching the display mode remounts
+                // them and re-applies the per-mode default. Prose keeps a
+                // mode-agnostic key (no reflow), and the outer MotionReveal key
+                // stays stable so the entrance animation isn't replayed on a toggle.
+                const modeSensitive = isToolPartType(partType) || partType === "reasoning"
+                const nodeKey = modeSensitive ? `${partKey}-${agentFlowMode}` : partKey
+                const node = (
+                  <MessagePart
+                    key={nodeKey}
+                    part={part}
+                    partKey={partKey}
+                    isStreaming={isStreaming}
+                    mentionPattern={message.role === "user" ? mentionPattern : null}
+                    characterById={characterById}
+                    messageId={message.id}
+                    sessionId={branchSessionId ?? undefined}
+                    mode={agentFlowMode}
+                    t={t}
+                    projectRoot={projectRoot}
+                  />
+                )
+                // Give tool cards/rows and dispatch banners a one-shot entrance;
+                // leave text/markdown untouched to avoid wrapping prose in extra
+                // block boxes.
+                return isToolPartType(partType) || partType === "agent-team-dispatch" ? (
+                  <MotionReveal key={partKey} index={si}>
+                    {node}
+                  </MotionReveal>
+                ) : (
+                  node
+                )
+              })}
+              <SubagentTree parts={message.parts} mode={agentFlowMode} />
+            </MessageContent>
+          </MessageImageCollectionProvider>
         )}
+
+        {/* Delivery state of a mid-run follow-up. Self-hides for every message
+            that is not a pending steer. */}
+        <SteerStatusBadge message={message} sessionId={branchSessionId} />
 
         <PluginExtensionSlot point="chat.message.after" className="mt-1 empty:hidden" />
 
@@ -329,6 +579,19 @@ function MessageRendererInner({
           return <TriggerBadge sessionId={sessionId} messageId={message.id} />
         })()}
 
+        {/* Memory transparency chips — "learned N" + "recalled N" for completed */}
+        {/* assistant turns. Mounted only when not streaming so the liveQuery */}
+        {/* inside the chips never runs in the token-delta hot path. */}
+        {message.role === "assistant" && !isStreaming && (
+          <div className="mt-1 flex flex-wrap items-center gap-1 empty:hidden">
+            <MemoryLearnedChip messageId={message.id} />
+            {(() => {
+              const sourcesPart = (message.parts as unknown[]).find(isSourcesPart)
+              return sourcesPart ? <MemoryRecalledChip part={sourcesPart} /> : null
+            })()}
+          </div>
+        )}
+
         {/* ADR-0026 §5 §A — revived hover-action slot. Distinct from the */}
         {/* footer below: this slot is visible above the message body on hover, */}
         {/* the footer holds host copy/regenerate controls. */}
@@ -340,7 +603,27 @@ function MessageRendererInner({
           )}
         />
 
-        {!editing && (
+        {/* Plugin context-menu items targeting the `chat:message` zone
+            (ctx.contextMenu.register) — hover ellipsis dropdown. Renders
+            nothing when no plugin contributed items. */}
+        <div
+          className={cn(
+            "opacity-0 transition-opacity group-hover:opacity-100 empty:hidden",
+            message.role === "user" ? "ml-auto" : ""
+          )}
+        >
+          <MessagePluginMenu
+            messageId={message.id}
+            sessionId={
+              typeof (message as { metadata?: { sessionId?: unknown } }).metadata?.sessionId ===
+              "string"
+                ? ((message as { metadata?: { sessionId?: string } }).metadata!.sessionId as string)
+                : undefined
+            }
+          />
+        </div>
+
+        {!editing && !isToolOnlyTurn && (
           <MessageActions
             className={cn(
               "text-xs text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100",
@@ -362,11 +645,15 @@ function MessageRendererInner({
             )}
 
             <MessageAction
-              tooltip={copied ? t("copyDone") : t("copyTooltip")}
+              tooltip={copied || richCopied ? t("copyDone") : t("copyTooltip")}
               label={t("copyLabel")}
               onClick={handleCopy}
             >
-              {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
+              {copied || richCopied ? (
+                <CheckIcon className="size-3.5" />
+              ) : (
+                <CopyIcon className="size-3.5" />
+              )}
             </MessageAction>
 
             <MessageAction
@@ -376,6 +663,34 @@ function MessageRendererInner({
             >
               <Share2Icon className="size-3.5" />
             </MessageAction>
+
+            {branchSessionId && (
+              <MessageAction
+                // Deliberately worded as a *link to this message*, never as
+                // "share": the neighbouring share action publishes content,
+                // this one only navigates, and confusing the two is either a
+                // privacy accident or a dead link.
+                tooltip={linkCopied ? t("copyLinkDone") : t("copyLinkTooltip")}
+                label={t("copyLinkLabel")}
+                onClick={handleCopyLink}
+              >
+                {linkCopied ? (
+                  <CheckIcon className="size-3.5" />
+                ) : (
+                  <LinkIcon className="size-3.5" />
+                )}
+              </MessageAction>
+            )}
+
+            {messageShareContent.hasContent && (
+              <MessageAction
+                tooltip={t("shareCardTooltip")}
+                label={t("shareCardLabel")}
+                onClick={() => setCardOpen(true)}
+              >
+                <ImageIcon className="size-3.5" />
+              </MessageAction>
+            )}
 
             <MessageAction
               tooltip={isBookmarked ? t("bookmarkRemoveTooltip") : t("bookmarkTooltip")}
@@ -392,6 +707,63 @@ function MessageRendererInner({
               </MessageAction>
             )}
 
+            {branchSessionId && (
+              <MessageAction
+                tooltip={isStreaming ? t("branchStreamingTooltip") : t("branchTooltip")}
+                label={t("branchLabel")}
+                onClick={() => setBranchOpen(true)}
+                // A branch snapshots the visible thread, so taking one mid-turn
+                // would copy a half-written reply and seed the child with an
+                // unfinished exchange. Matches the regenerate action below.
+                disabled={isStreaming}
+              >
+                <GitBranchIcon className="size-3.5" />
+              </MessageAction>
+            )}
+
+            {/* The only remaining destructive path. Editing a user message used
+                to delete its whole tail as a side effect; now that it branches
+                instead, removing messages has to be asked for explicitly. */}
+            {branchSessionId && (
+              <MessageAction
+                tooltip={t("truncateFromTooltip")}
+                label={t("truncateFromLabel")}
+                onClick={() => setTruncateOpen(true)}
+                disabled={isStreaming}
+              >
+                <ScissorsIcon className="size-3.5" />
+              </MessageAction>
+            )}
+
+            {/* Hand a conclusion back up.
+                Two shapes of the same gesture, so they share one action and one
+                mechanism: a sidechat hands back to the MAIN conversation, a
+                branch hands back to the conversation it was cut from. Lineage
+                used to be one-way for branches — the chip could carry you to
+                the parent to look, but nothing brought a finding with you.
+                Deliberately not auto-sent — a conclusion reached elsewhere is
+                usually worth rewording before it costs a turn up there. */}
+            {handBackTargetId && (
+              <MessageAction
+                tooltip={t("bringBackTooltip")}
+                label={t("bringBackLabel")}
+                onClick={() => {
+                  const text = extractText(message).trim()
+                  if (!text) return
+                  dispatchComposerAppend({
+                    text: `${text
+                      .split("\n")
+                      .map((line) => `> ${line}`)
+                      .join("\n")}\n\n`,
+                    sessionId: handBackTargetId,
+                  })
+                  toast.success(t("bringBackDone"))
+                }}
+              >
+                <CornerUpLeftIcon className="size-3.5" />
+              </MessageAction>
+            )}
+
             {message.role === "assistant" && ttsEnabled && (
               <ReadAloudButton
                 messageId={message.id}
@@ -400,7 +772,18 @@ function MessageRendererInner({
               />
             )}
 
-            {message.role === "assistant" && <BranchNavigator message={message} className="mx-1" />}
+            {/* Both roles: assistant siblings come from regenerating, user
+                siblings from editing (which keeps the original rather than
+                deleting its tail). The navigator no-ops when the message has
+                no branch group, so no role gate is needed. */}
+            <BranchNavigator message={message} className="mx-1" />
+
+            {/* Self-hides unless a cross-session branch was cut here. Shows the
+                fork where the decision was made, rather than only in the
+                header — scrolling a long thread reveals where it diverged. */}
+            {branchSessionId && (
+              <BranchPointMarker sessionId={branchSessionId} messageId={message.id} />
+            )}
 
             {message.role === "assistant" && isLastAssistant && onRegenerate && (
               <MessageAction
@@ -419,6 +802,45 @@ function MessageRendererInner({
             />
           </MessageActions>
         )}
+
+        {branchSessionId && (
+          <BranchDialog
+            sessionId={branchSessionId}
+            messageId={message.id}
+            open={branchOpen}
+            onOpenChange={setBranchOpen}
+          />
+        )}
+
+        {/* Mounted only while open, unlike BranchDialog above. Every message row
+            renders one of these, and a Radix AlertDialog Root per row is enough
+            overhead to disturb the message list's scroll bookkeeping (it broke
+            the jump-pill's scroll-fencing tests). Same pattern as
+            QuoteCardDialog below. */}
+        {truncateOpen && branchSessionId && (
+          <TruncateFromDialog
+            sessionId={branchSessionId}
+            messageId={message.id}
+            open
+            onOpenChange={setTruncateOpen}
+          />
+        )}
+
+        {cardOpen && (
+          <QuoteCardDialog
+            open={cardOpen}
+            onOpenChange={setCardOpen}
+            role={message.role}
+            authorName={speaker?.name}
+            text={messageShareContent.plainText}
+            model={(message as { metadata?: { model?: string } }).metadata?.model}
+            timestamp={((): Date => {
+              const createdAt = (message as { metadata?: { createdAt?: number } }).metadata
+                ?.createdAt
+              return createdAt != null ? new Date(createdAt) : nowFallback
+            })()}
+          />
+        )}
       </Message>
     </PerfBoundary>
   )
@@ -434,29 +856,11 @@ export const MessageRenderer = memo(
     prev.directCharacter === next.directCharacter &&
     prev.onCopy === next.onCopy &&
     prev.onRegenerate === next.onRegenerate &&
-    prev.onEditResend === next.onEditResend
+    prev.onEditResend === next.onEditResend &&
+    prev.projectRoot === next.projectRoot
 )
 
 MessageRenderer.displayName = "MessageRenderer"
-
-function UsageBreakdown({ usage }: { usage: UsageInfo }) {
-  const t = useTranslations("chat.message")
-  return (
-    <div className="space-y-0.5 font-mono text-xs">
-      <div>{t("usageInput", { n: usage.inputTokens ?? 0 })}</div>
-      <div>{t("usageOutput", { n: usage.outputTokens ?? 0 })}</div>
-      {usage.cacheReadInputTokens !== undefined && usage.cacheReadInputTokens > 0 && (
-        <div>{t("usageCacheHit", { n: usage.cacheReadInputTokens })}</div>
-      )}
-      {usage.cacheCreationInputTokens !== undefined && usage.cacheCreationInputTokens > 0 && (
-        <div>{t("usageCacheWrite", { n: usage.cacheCreationInputTokens })}</div>
-      )}
-      {usage.totalCostUsd !== undefined && (
-        <div>{t("usageCost", { cost: usage.totalCostUsd.toFixed(4) })}</div>
-      )}
-    </div>
-  )
-}
 
 function highlightMentions(
   text: string,
@@ -499,43 +903,6 @@ function extractText(message: UIMessage): string {
     .join("\n\n")
 }
 
-interface TodoEntry {
-  content: string
-  status: "pending" | "in_progress" | "completed"
-  activeForm?: string
-}
-
-function parseTodoInput(input: unknown): TodoEntry[] | null {
-  if (!input || typeof input !== "object") return null
-  const todos = (input as { todos?: unknown }).todos
-  if (!Array.isArray(todos) || todos.length === 0) return null
-  const out: TodoEntry[] = []
-  for (const t of todos) {
-    if (!t || typeof t !== "object") return null
-    const content = (t as { content?: unknown }).content
-    const status = (t as { status?: unknown }).status
-    const activeForm = (t as { activeForm?: unknown }).activeForm
-    if (typeof content !== "string") return null
-    if (status !== "pending" && status !== "in_progress" && status !== "completed") return null
-    out.push({
-      content,
-      status,
-      activeForm: typeof activeForm === "string" ? activeForm : undefined,
-    })
-  }
-  return out
-}
-
-function TodoStatusGlyph({ status }: { status: TodoEntry["status"] }) {
-  if (status === "completed") {
-    return <CheckCircle2Icon className="size-3.5 shrink-0 text-green-600" />
-  }
-  if (status === "in_progress") {
-    return <ClockIcon className="size-3.5 shrink-0 animate-pulse text-yellow-600" />
-  }
-  return <CircleIcon className="size-3.5 shrink-0 text-muted-foreground" />
-}
-
 /**
  * Memoized boundary around a single message part. Parts inside a finalized
  * message keep stable references (the adapter only replaces the changed
@@ -554,7 +921,10 @@ const MessagePart = memo(function MessagePart({
   mentionPattern,
   characterById,
   messageId,
+  sessionId,
+  mode,
   t,
+  projectRoot,
 }: {
   part: UIMessage["parts"][number]
   partKey: string
@@ -562,11 +932,141 @@ const MessagePart = memo(function MessagePart({
   mentionPattern: RegExp | null
   characterById: Map<string, Character> | undefined
   messageId: string | undefined
+  sessionId: string | undefined
+  mode: AgentFlowMode
   t: ReturnType<typeof useTranslations>
+  projectRoot?: string | null
 }) {
-  return renderPart(part, partKey, isStreaming, mentionPattern, characterById, messageId, t)
+  return renderPart(
+    part,
+    partKey,
+    isStreaming,
+    mentionPattern,
+    characterById,
+    messageId,
+    sessionId,
+    mode,
+    t,
+    projectRoot
+  )
 })
 MessagePart.displayName = "MessagePart"
+
+/**
+ * Build a single tool-call element for standard/detailed modes (or a compact
+ * row for simplified), plus the per-call plugin action slot. Shared by the
+ * inline single-tool path and the activity group's `renderCard`.
+ *
+ * `forceOpen` (from the group's expand-all/collapse-all) overrides the
+ * per-state default-open heuristic when provided.
+ */
+function renderToolPart(
+  tp: ToolUIPart,
+  key: string,
+  mode: AgentFlowMode,
+  forceOpen: boolean | undefined,
+  messageId: string | undefined,
+  sessionId: string | undefined,
+  t: ReturnType<typeof useTranslations>
+): React.ReactNode {
+  const type = tp.type
+
+  const slot = (
+    <PluginExtensionSlot
+      point="chat.tool-call.actions"
+      className="mt-1 flex items-center gap-1 empty:hidden"
+      context={{
+        toolName: tp.type,
+        toolState: tp.state,
+        toolInput: tp.input,
+        messageId,
+        sessionId,
+      }}
+    />
+  )
+
+  // Simplified mode: every tool collapses to a one-line, expandable row.
+  if (mode === "simplified") {
+    return (
+      <React.Fragment key={key}>
+        <ToolCallRow part={tp} />
+        {slot}
+      </React.Fragment>
+    )
+  }
+
+  const cardOpen = (fallback: boolean) => forceOpen ?? (mode === "detailed" ? true : fallback)
+
+  let toolEl: React.ReactNode
+  if (
+    (type === "tool-Bash" || type === "tool-bash" || type === "tool-mcp__cognia-tools__bash") &&
+    tp.state !== "output-error"
+  ) {
+    toolEl = <TerminalToolPart part={tp} />
+  } else if (isStructuredMcpToolPart(tp) && tp.state !== "output-error") {
+    toolEl = (
+      <Tool defaultOpen={cardOpen(tp.state === "input-available")}>
+        <ToolHeader type={tp.type} state={tp.state} />
+        <ToolContent>
+          <MCPToolCard part={tp} sessionId={sessionId} />
+        </ToolContent>
+      </Tool>
+    )
+  } else if (tp.state !== "output-error" && hasA2UIToolOutput(tp.output)) {
+    // A tool whose result embeds an A2UI payload (surface + components) renders
+    // as an interactive surface instead of the generic tool body.
+    toolEl = (
+      <Tool defaultOpen={cardOpen(tp.state === "input-available")}>
+        <ToolHeader type={tp.type} state={tp.state} />
+        <ToolContent>
+          <A2UIToolOutput
+            toolId={tp.toolCallId}
+            toolName={toolNameOf(tp) ?? type}
+            output={tp.output}
+          />
+        </ToolContent>
+      </Tool>
+    )
+  } else if (tp.state === "output-error") {
+    const rawError = (tp as { errorText?: unknown }).errorText
+    toolEl = (
+      <Tool defaultOpen={forceOpen ?? true}>
+        <ToolHeader type={tp.type} state={tp.state} />
+        <ToolContent>
+          {tp.input !== undefined && tp.input !== null && <ToolInput input={tp.input} />}
+          <ErrorTraceDetails
+            error={{ message: normalizeErrorText(rawError, t("toolCallFailed")) }}
+            title={t("toolCallFailed")}
+            className="mt-2"
+            body={
+              <ErrorParsedView
+                rawError={rawError}
+                toolType={tp.type}
+                fallback={t("toolCallFailed")}
+              />
+            }
+          />
+        </ToolContent>
+      </Tool>
+    )
+  } else {
+    toolEl = (
+      <Tool defaultOpen={cardOpen(tp.state === "input-available")}>
+        <ToolHeader type={tp.type} state={tp.state} />
+        <ToolContent>
+          <McpToolBodyOrContent part={tp} />
+        </ToolContent>
+      </Tool>
+    )
+  }
+
+  return (
+    <React.Fragment key={key}>
+      {toolEl}
+      {slot}
+    </React.Fragment>
+  )
+}
 
 function renderPart(
   part: UIMessage["parts"][number],
@@ -575,7 +1075,10 @@ function renderPart(
   mentionPattern: RegExp | null,
   characterById: Map<string, Character> | undefined,
   messageId: string | undefined,
-  t: ReturnType<typeof useTranslations>
+  sessionId: string | undefined,
+  mode: AgentFlowMode,
+  t: ReturnType<typeof useTranslations>,
+  projectRoot?: string | null
 ) {
   const type = (part as { type?: string }).type
   if (!type) return null
@@ -592,22 +1095,46 @@ function renderPart(
     return <CanvasInlinePart key={key} part={part as unknown as CanvasInlinePartType} />
   }
 
+  if (type === "hook-notice") {
+    // Inline hook-notice part — emitted by external agents (event-to-parts).
+    // The built-in agent's hook notices are whole system messages routed by
+    // message-list, so they never reach renderPart.
+    return <HookNoticeRow key={key} data={part as unknown as HookNoticePartData} />
+  }
+
   if (type === "a2ui") {
     return <A2UIPart key={key} part={part as unknown as A2UIPartType} _messageId={messageId} />
   }
 
+  if (type === DIAGNOSTICS_PART_TYPE) {
+    const data = (part as { data?: unknown }).data
+    if (isSlashCommandResultBlock(data)) {
+      return <SlashCommandResultChip key={key} block={data} />
+    }
+    if (isSystemMessageBlock(data)) {
+      return <DiagnosticsCard key={key} block={data as SystemMessageBlock} />
+    }
+    return null
+  }
+
   if (type === "subagent") {
-    return <SubagentPart key={key} part={part as unknown as SubagentPartType} />
+    // Subagent parts are rendered together as a dispatch tree at the message
+    // level (see the parts map), never individually here.
+    return null
   }
 
   if (type === "agent-team-dispatch") {
     const dp = part as unknown as AgentTeamDispatchPartType
     const fromName = characterById?.get(dp.from)?.name
-    return <AgentTeamDispatchPart key={key} part={dp} fromName={fromName} />
+    return <AgentTeamDispatchPart key={key} part={dp} fromName={fromName} mode={mode} />
   }
 
   if (type === "text") {
     const text = (part as { text?: string }).text ?? ""
+    // An empty text part carries no prose — the model emitted none between two
+    // tool calls. Rendering it would add a zero-height box that still eats a
+    // `gap-2` from `MessageContent`'s flex column.
+    if (!text.trim()) return null
     if (mentionPattern && characterById) {
       const segments = highlightMentions(text, mentionPattern, characterById)
       return (
@@ -618,7 +1145,14 @@ function renderPart(
     }
 
     if (isStreaming) {
-      return <StreamingTextPart key={key} text={text} isStreaming={isStreaming} />
+      return (
+        <StreamingTextPart
+          key={key}
+          text={text}
+          isStreaming={isStreaming}
+          projectRoot={projectRoot}
+        />
+      )
     }
 
     return (
@@ -627,6 +1161,7 @@ function renderPart(
         content={text}
         messageId={messageId}
         isStreaming={isStreaming}
+        projectRoot={projectRoot}
         className="size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
       />
     )
@@ -635,11 +1170,45 @@ function renderPart(
   if (type === "reasoning") {
     const text = (part as { text?: string }).text ?? ""
     const stillStreaming = isStreaming && (part as { state?: string }).state !== "done"
+    // Detailed mode keeps the reasoning expanded; simplified keeps it collapsed;
+    // standard defers to the component's stream-aware auto open/close.
+    const reasoningDefaultOpen =
+      mode === "detailed" ? true : mode === "simplified" ? false : undefined
     return (
-      <Reasoning key={key} isStreaming={stillStreaming}>
+      <Reasoning
+        key={key}
+        isStreaming={stillStreaming}
+        defaultOpen={reasoningDefaultOpen}
+        // Keep a finished thinking block in place instead of auto-collapsing it
+        // the instant the answer streams in — the reasoning is part of the
+        // transcript and should stay readable.
+        closeOnFinish={false}
+      >
         <ReasoningTrigger />
         <ReasoningContent>{text}</ReasoningContent>
       </Reasoning>
+    )
+  }
+
+  if (type === "data-commentary") {
+    const data = (part as { data?: { text?: string } }).data
+    const text = data?.text ?? ""
+    if (!text.trim()) return null
+    return (
+      <div
+        key={key}
+        role="status"
+        aria-live="polite"
+        className="border-muted-foreground/30 text-muted-foreground border-l-2 pl-3 text-sm"
+      >
+        <MarkdownRenderer
+          content={text}
+          messageId={messageId}
+          isStreaming={isStreaming}
+          projectRoot={projectRoot}
+          className="[&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+        />
+      </div>
     )
   }
 
@@ -650,65 +1219,51 @@ function renderPart(
 
     if (url && mediaType?.startsWith("image/")) {
       return (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
+        <MessageImageGallery
           key={key}
-          src={url}
-          alt={filename ?? t("attachmentAlt")}
-          className="max-h-64 max-w-xs rounded-md border"
+          items={[
+            {
+              id: key,
+              src: url,
+              alt: filename ?? t("attachmentAlt"),
+              filename,
+            },
+          ]}
+        />
+      )
+    }
+
+    // A document the user attached: the model got its extracted text, and that
+    // text rides along on the part (there is no `url` — the original binary is
+    // deliberately not persisted). Render it as a collapsed file card instead
+    // of spilling the whole document into the bubble.
+    const attachedText = (part as { text?: string }).text
+    if (!url && attachedText) {
+      return (
+        <AttachmentTextCard
+          key={key}
+          filename={filename ?? t("attachmentAlt")}
+          mediaType={mediaType}
+          text={attachedText}
         />
       )
     }
 
     if (!url) return null
 
-    // Non-image file: render as a downloadable link
-    const displayName = filename ?? url
-    return (
-      <a
-        key={key}
-        href={url}
-        download={displayName}
-        className="inline-flex items-center gap-1.5 rounded border px-2 py-1 text-sm hover:bg-muted"
-        target="_blank"
-        rel="noopener noreferrer"
-      >
-        <span aria-hidden>📎</span>
-        {displayName}
-      </a>
-    )
+    // Non-image file: inline preview for text/code/pdf, download link otherwise.
+    return <FilePartPreview key={key} url={url} mediaType={mediaType} filename={filename} />
   }
 
   // Special-case Claude's TodoWrite tool: render as a structured task list.
-  if (type === "tool-TodoWrite") {
+  // The sidecar coreFiles suite names its tool exactly "TodoWrite" so the
+  // ai-sdk path lands here too; the namespaced form covers the Anthropic
+  // escape-hatch registration.
+  if (type === "tool-TodoWrite" || type === "tool-mcp__cognia-tools__TodoWrite") {
     const tp = part as ToolUIPart
     const todos = parseTodoInput(tp.input)
     if (todos) {
-      const completed = todos.filter((todo) => todo.status === "completed").length
-      return (
-        <Task key={key} defaultOpen className="not-prose mb-2 w-full">
-          <TaskTrigger title={t("todoPlanTitle", { done: completed, total: todos.length })} />
-          <TaskContent>
-            {todos.map((todo, i) => (
-              <TaskItem
-                key={i}
-                className={cn(
-                  "flex items-start gap-2",
-                  todo.status === "completed" && "text-muted-foreground line-through",
-                  todo.status === "in_progress" && "text-foreground"
-                )}
-              >
-                <TodoStatusGlyph status={todo.status} />
-                <span className="min-w-0 flex-1 break-words">
-                  {todo.status === "in_progress" && todo.activeForm
-                    ? todo.activeForm
-                    : todo.content}
-                </span>
-              </TaskItem>
-            ))}
-          </TaskContent>
-        </Task>
-      )
+      return <TodoList key={key} todos={todos} />
     }
     // Falls through to generic Tool rendering below.
   }
@@ -717,71 +1272,46 @@ function renderPart(
   // so a plugin can override custom types it owns, but AFTER the host's own
   // hard-coded parts so plugins cannot shadow `artifact` / `a2ui` / etc.
   const pluginEntry =
-    typeof type === "string" && !type.startsWith("tool-") ? getMessagePartRenderer(type) : undefined
+    typeof type === "string" && !isToolPartType(type) ? getMessagePartRenderer(type) : undefined
   if (pluginEntry) {
     const PluginRenderer = pluginEntry.component
     return (
-      <PluginPartErrorBoundary key={key} type={pluginEntry.type} pluginId={pluginEntry.pluginId}>
-        <PluginRenderer part={part} messageId={messageId} isStreaming={isStreaming} />
-      </PluginPartErrorBoundary>
+      <React.Fragment key={key}>
+        <PluginSurface
+          pluginId={pluginEntry.pluginId}
+          surfaceId={`message-renderer:${pluginEntry.type}`}
+          formFactor="block"
+        >
+          <PluginRenderer part={part} messageId={messageId} isStreaming={isStreaming} />
+        </PluginSurface>
+        {/* UI companion to the `provider.message-renderer` runtime point: */}
+        {/* plugins can mount per-part actions beneath any rendered part. */}
+        <PluginExtensionSlot
+          point="chat.message-part.actions"
+          className="mt-1 flex items-center gap-1 empty:hidden"
+          context={{ partType: pluginEntry.type, messageId, sessionId, isStreaming }}
+        />
+      </React.Fragment>
     )
   }
 
-  if (typeof type === "string" && type.startsWith("tool-")) {
+  // `dynamic-tool` is the AI SDK shape for a tool the client never declared
+  // statically — imported transcripts and CLI handoff carry it, and every
+  // other consumer (grouping, summaries, exports, ToolHeader/ToolBody) already
+  // treats it as a tool call. Route it through the same renderer instead of
+  // dropping it into the unknown-part card.
+  if (isToolPartType(type)) {
     const tp = part as ToolUIPart
-    // Route tool-Bash to the Terminal-style renderer (which falls back to the
-    // generic ToolBody once the call completes).
-    if (type === "tool-Bash" && tp.state !== "output-error") {
-      return <TerminalToolPart key={key} part={tp} />
-    }
-    // Structured cognia MCP / Claude-builtin tools — display the call shell
-    // (header + status) plus the structured card body. MCPToolCard internally
-    // falls back to ToolBody when the payload can't be parsed.
-    if (isStructuredMcpToolType(type) && tp.state !== "output-error") {
-      return (
-        <Tool key={key} defaultOpen={tp.state === "input-available"}>
-          <ToolHeader type={tp.type} state={tp.state} />
-          <ToolContent>
-            <MCPToolCard part={tp} />
-          </ToolContent>
-        </Tool>
-      )
-    }
-    // Error path: surface a structured ErrorTraceDetails alert instead of the
-    // plain `<pre>` ToolOutput renders for `errorText`. We keep the input
-    // section so the user can still see what was called.
-    if (tp.state === "output-error") {
-      const rawError = (tp as { errorText?: unknown }).errorText
-      return (
-        <Tool key={key} defaultOpen>
-          <ToolHeader type={tp.type} state={tp.state} />
-          <ToolContent>
-            {tp.input !== undefined && tp.input !== null && <ToolInput input={tp.input} />}
-            <ErrorTraceDetails
-              error={{ message: normalizeErrorText(rawError, t("toolCallFailed")) }}
-              title={t("toolCallFailed")}
-              className="mt-2"
-              body={
-                <ErrorParsedView
-                  rawError={rawError}
-                  toolType={tp.type}
-                  fallback={t("toolCallFailed")}
-                />
-              }
-            />
-          </ToolContent>
-        </Tool>
-      )
-    }
-    return (
-      <Tool key={key} defaultOpen={tp.state === "input-available"}>
-        <ToolHeader type={tp.type} state={tp.state} />
-        <ToolContent>
-          <ToolBody part={tp} />
-        </ToolContent>
-      </Tool>
-    )
+    // Delegate to the shared tool renderer (mode-aware: simplified row vs.
+    // standard/detailed card), which also appends the per-call plugin slot.
+    return renderToolPart(tp, key, mode, undefined, messageId, sessionId, t)
   }
 
-  return null
+  // AI SDK structural/control parts carry no visible content — render nothing
+  // (don't fall through to the unknown-part card and spam a box per step).
+  if (typeof type === "string" && SILENT_CONTROL_PART_TYPES.has(type)) return null
+
+  // gap1 — unknown non-tool part: surface a debuggable fallback card instead
+  // of silently dropping it (mirrors the always-visible unknown-`tool-` card).
+  return <UnknownPartCard key={key} part={part} />
 }

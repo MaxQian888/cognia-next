@@ -14,13 +14,12 @@ use tauri::{Manager, State};
 
 use super::{
     auth::{generate_pair_code, now_ms},
-    desktop_messages_bridge,
-    desktop_writes_bridge,
+    desktop_messages_bridge, desktop_writes_bridge,
     event_bus::{register_tauri_event, EventBus},
     jwt::issue_pair_jwt,
     mdns::AutoStartConfig,
     pair_code_lru::PairCodeEntry,
-    secret,
+    secret, security_store,
     server::{CompanionServerError, DEFAULT_PORT},
     tls,
     tunnel::{self, TunnelInfo},
@@ -61,10 +60,7 @@ pub async fn companion_server_start(
     }
 
     let signing_secret = secret::load_or_generate().map_err(|e| CompanionServerError::Bind {
-        addr: std::net::SocketAddr::new(
-            std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
-            port,
-        ),
+        addr: std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), port),
         source: std::io::Error::other(e),
     })?;
 
@@ -72,6 +68,10 @@ pub async fn companion_server_start(
     // starting the server so no events are missed.
     let event_bus = EventBus::new();
     register_default_event_channels(&app_handle, Arc::clone(&event_bus));
+    let dir = data_dir(&app_handle).map_err(CompanionServerError::Tls)?;
+    let idempotency =
+        super::idempotency::IdempotencyCache::open(dir.join("companion-idempotency.sqlite"))
+            .map_err(|error| CompanionServerError::Security(error.to_string()))?;
 
     // Clone the deny_list Arc so both the Tauri command layer and the axum
     // server share the same live deny list.
@@ -80,7 +80,7 @@ pub async fn companion_server_start(
         redemption_lru: super::redemption_lru::RedemptionLru::new(),
         deny_list: Arc::clone(&state.deny_list),
         app_handle: Some(app_handle),
-        idempotency: Arc::new(super::idempotency::IdempotencyCache::new()),
+        idempotency: Arc::new(idempotency),
         event_bus,
         // Same Arc as the long-lived CompanionServerState — keeps the
         // `companion_sync_pull_response` Tauri command and the in-flight
@@ -113,10 +113,16 @@ pub async fn companion_server_start(
     });
 
     // Load TLS material (M2.9 — every companion-server bind terminates HTTPS).
-    let dir = data_dir(shared.app_handle.as_ref().expect("app_handle present"))
-        .map_err(CompanionServerError::Tls)?;
-    let tls_material = tls::ensure_certificate(&dir)
-        .map_err(|e| CompanionServerError::Tls(e.to_string()))?;
+    let tls_material =
+        tls::ensure_certificate(&dir).map_err(|e| CompanionServerError::Tls(e.to_string()))?;
+    let security = security_store::SecurityStore::open(dir.join("companion-security.sqlite"))
+        .map_err(|error| CompanionServerError::Security(error.to_string()))?;
+    security_store::install_security_store(Some(security));
+    let signaling_store = super::signaling::registration_store::SignalingRegistrationStore::open(
+        dir.join("companion-signaling.sqlite"),
+    )
+    .map_err(|error| CompanionServerError::Security(error.to_string()))?;
+    super::signaling::registration_store::install(Some(Arc::clone(&signaling_store)));
 
     // Publish the fingerprint so `whoami` (P0.3) can include it in responses
     // for app-layer attestation against the QR-pinned value.
@@ -128,18 +134,28 @@ pub async fn companion_server_start(
     // their next reconnect.
     {
         use tauri::Manager as _;
-        let app = shared
-            .app_handle
-            .as_ref()
-            .expect("app_handle present");
-        if let Some(hub) =
-            app.try_state::<std::sync::Arc<super::signaling::SignalingHub>>()
-        {
-            hub.bind(Arc::clone(&shared), app.clone());
+        let app = shared.app_handle.as_ref().expect("app_handle present");
+        if let Some(hub) = app.try_state::<std::sync::Arc<super::signaling::SignalingHub>>() {
+            let hub_arc = Arc::clone(hub.inner());
+            super::signaling::install_hub(Some(&hub_arc));
+            let pending = hub.registrations_snapshot();
+            hub.bind(Arc::clone(&shared));
+            if pending.is_empty() {
+                let persisted = signaling_store
+                    .load_all()
+                    .map_err(|error| CompanionServerError::Security(error.to_string()))?;
+                hub.sync_devices(persisted);
+            } else {
+                signaling_store
+                    .replace_all(&pending, super::auth::now_ms())
+                    .map_err(|error| CompanionServerError::Security(error.to_string()))?;
+            }
         }
     }
 
-    state.start(port, bind_loopback_only, tls_material, shared).await
+    state
+        .start(port, bind_loopback_only, tls_material, shared)
+        .await
 }
 
 // ---------------------------------------------------------------------------
@@ -283,7 +299,19 @@ pub async fn companion_revoke_device(
     device_id: String,
     state: State<'_, CompanionServerState>,
 ) -> Result<(), String> {
-    state.revoke_device(device_id);
+    state.revoke_device(device_id.clone());
+    if let Some(store) = super::signaling::registration_store::installed() {
+        if let Some(key_ref) = store
+            .remove_device(&device_id)
+            .map_err(|error| error.to_string())?
+        {
+            cognia_secrets::keyring_secrets::clear(
+                super::signaling::envelope_v2::SIGNALING_KEY_NAMESPACE,
+                &key_ref,
+            )?;
+        }
+        super::signaling::refresh_installed_hub()?;
+    }
     Ok(())
 }
 
@@ -325,6 +353,90 @@ pub async fn companion_seed_remote_control(device_ids: Vec<String>) -> Result<()
     Ok(())
 }
 
+/// Grant or revoke a device's **agent-control** capability: starting and
+/// driving external agents on this desktop.
+///
+/// A separate grant from remote control on purpose. Remote control steers work
+/// this host already chose to run; this launches new processes. Folding them
+/// into one switch would mean a user enabling remote control so their phone can
+/// approve a prompt had also handed out process execution.
+#[tauri::command]
+pub async fn companion_set_agent_control(device_id: String, allowed: bool) -> Result<(), String> {
+    // An empty id is what an unauthenticated or malformed RPC context carries,
+    // so storing one would hand agent control to every such caller. The CLI
+    // path (`device_grants::grant`) already refuses it; this is the same
+    // refusal on the desktop path.
+    if device_id.trim().is_empty() {
+        return Err("device_id is required".into());
+    }
+    let acl = super::control_allow_list::agent_control_global();
+    if allowed {
+        acl.allow(device_id);
+    } else {
+        acl.disallow(&device_id);
+    }
+    Ok(())
+}
+
+/// Re-seed the agent-control allow list at desktop boot from the persisted
+/// Dexie rows where `allowAgentControl === true`. Replace semantics, matching
+/// [`companion_seed_remote_control`].
+#[tauri::command]
+pub async fn companion_seed_agent_control(device_ids: Vec<String>) -> Result<(), String> {
+    super::control_allow_list::agent_control_global().reseed(device_ids);
+    Ok(())
+}
+
+/// Grant or revoke interactive terminal access for a paired device.
+///
+/// This is deliberately separate from remote-control and agent-control. The
+/// settings UI performs system confirmation before invoking this command.
+#[tauri::command]
+pub async fn companion_set_remote_terminal(device_id: String, allowed: bool) -> Result<(), String> {
+    if device_id.trim().is_empty() {
+        return Err("device_id is required".into());
+    }
+    let acl = super::control_allow_list::terminal_global();
+    if allowed {
+        acl.allow(device_id);
+    } else {
+        acl.disallow(&device_id);
+    }
+    Ok(())
+}
+
+/// Re-seed terminal grants from persisted paired-device rows at desktop boot.
+#[tauri::command]
+pub async fn companion_seed_remote_terminal(device_ids: Vec<String>) -> Result<(), String> {
+    super::control_allow_list::terminal_global().reseed(
+        device_ids
+            .into_iter()
+            .filter(|device_id| !device_id.trim().is_empty())
+            .collect(),
+    );
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn companion_set_locked_computer_use(
+    device_id: String,
+    allowed: bool,
+) -> Result<(), String> {
+    let acl = super::locked_use_allow_list::global();
+    if allowed {
+        acl.allow(device_id);
+    } else {
+        acl.disallow(&device_id);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn companion_seed_locked_computer_use(device_ids: Vec<String>) -> Result<(), String> {
+    super::locked_use_allow_list::global().reseed(device_ids);
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Event-channel registration (M2.6)
 // ---------------------------------------------------------------------------
@@ -349,9 +461,44 @@ pub fn register_default_event_channels(app: &tauri::AppHandle, bus: Arc<EventBus
     register_tauri_event(app, Arc::clone(&bus), "goal://status");
     // Remote Session Control — host computer-use HITL consent prompts so a
     // remote watcher can render and resolve them via `automation_consent_respond`.
-    register_tauri_event(app, Arc::clone(&bus), "automation:consent-request");
+    register_tauri_event(app, Arc::clone(&bus), AUTOMATION_CONSENT_CHANNEL);
     // Pairing-lifecycle events — useful for multi-device observation.
     register_tauri_event(app, Arc::clone(&bus), "companion://device-paired");
+    // ADR-0061 P2 — live workflow run-status frames (every transition incl.
+    // per-step lastStepId advances). Emitted by the TS
+    // `lib/workflow/runtime/companion-run-events.ts` funnel.
+    register_tauri_event(app, Arc::clone(&bus), "workflow://run-status");
+    // ADR-0061 P2 — HITL approval gate lifecycle: full request frames for
+    // foreground devices (title/message ride the authenticated WS only) and
+    // resolution frames so pending lists clear immediately. Emitted by
+    // `lib/workflow/runtime/approval-notify.ts`.
+    register_tauri_event(app, Arc::clone(&bus), "workflow://approval-request");
+    register_tauri_event(app, Arc::clone(&bus), "workflow://approval-resolved");
+    // ADR-0061 P3 — desktop-issued remote step requests. Full params ride
+    // the authenticated WS only; the device answers via the
+    // `workflow_step_result` RPC. Emitted by
+    // `lib/workflow/runtime/remote-step-broker.ts`.
+    register_tauri_event(app, Arc::clone(&bus), "workflow://step-execute");
+    // ADR-0061 P2 — sync invalidation. The mobile `installEventDrivenSync`
+    // has subscribed to this channel since ADR-0027; the desktop now emits
+    // it (terminal workflow runs → { table: "workflowRuns" }) so the phone
+    // re-pulls exactly when data changed instead of waiting for the next
+    // foreground/resume/network trigger.
+    register_tauri_event(app, Arc::clone(&bus), "sync://invalidate");
+    // ADR-0038 — repo change signal from the native git watcher
+    // (`git/watcher.rs`). Remote source-control clients can't run
+    // `git_watch_start` (it needs the Tauri watcher state), so this forwarded
+    // frame is their only push-based refresh trigger; the desktop StatusBar
+    // owns the watcher lifecycle.
+    register_tauri_event(app, Arc::clone(&bus), "git://status-changed");
+    // Task-scoped resource invalidations carry only ids, paths, and summaries;
+    // clients fetch file bodies through the bounded resource RPCs.
+    register_tauri_event(app, Arc::clone(&bus), crate::task_workspace::RESOURCE_EVENT);
+    // ADR-0009 — live agent-fleet snapshot. A phone / companion browser watching
+    // the fleet subscribes to this to mirror the desktop island in real time
+    // (backfill via the `fleet_get_snapshot` RPC). Full-snapshot semantics, so
+    // no push trigger — it fires on every tool call and would spam notifications.
+    register_tauri_event(app, Arc::clone(&bus), crate::fleet::UPDATE_EVENT);
     // Heartbeat / presence signal emitted by the JWT middleware on each request.
     register_tauri_event(app, bus, "companion://device-seen");
     // Phase B4 — push fan-out for events worth notifying about while the
@@ -362,6 +509,93 @@ pub fn register_default_event_channels(app: &tauri::AppHandle, bus: Arc<EventBus
     // out the renderer-side backstop. Emitted by
     // `lib/companion/needs-input-notifier.ts`.
     register_push_trigger(app, "companion://needs-input");
+    // ADR-0061 P2 — terminal workflow runs (failed always; succeeded /
+    // cancelled only when a paired device triggered the run — policy lives
+    // in `companion-run-events.ts`). Payload carries ids + status only.
+    register_push_trigger(app, "workflow://run-terminal");
+    // ADR-0061 P2 — a workflow is blocked on a human approval; wake
+    // backgrounded devices. Ids only (transits APNs/FCM) — the phone
+    // fetches the request text via `workflow_approval_list` on open.
+    register_push_trigger(app, "workflow://approval-pending");
+    // ADR-0061 P3 — a remote step is waiting on a device. Ids only; the
+    // request params ride the WS frame the device receives on open.
+    register_push_trigger(app, "workflow://step-pending");
+    // Host computer-use is blocked on a HITL consent decision. Without this
+    // the prompt reached foreground devices only, so a backgrounded phone
+    // never saw it and the broker fail-closed on timeout — i.e. remote
+    // supervision silently didn't work whenever the screen was off.
+    // The payload is sanitized down to ids by `push_data_for_channel`.
+    register_push_trigger(app, AUTOMATION_CONSENT_CHANNEL);
+}
+
+/// Channel carrying host computer-use consent prompts. Named because both the
+/// event-bus registration and the push trigger reference it, and because its
+/// payload needs channel-specific sanitizing before it can transit a push.
+pub(crate) const AUTOMATION_CONSENT_CHANNEL: &str = "automation:consent-request";
+
+/// Human-ish push body for a channel: strip any `scheme://` prefix so e.g.
+/// `workflow://run-terminal` renders as `run-terminal`. The phone resolves
+/// real display text from its synced mirror via `data`.
+///
+/// The consent channel gets a real sentence instead, because there is nothing
+/// for the phone to resolve it against until the user opens the app — and the
+/// whole point is to let them triage from the lock screen. It names the action
+/// and the process but **never** the window title: notification text is
+/// readable by anyone holding the phone, and the title is the field most
+/// likely to carry something private ("Re: severance package.xlsx").
+fn push_body_for_channel(
+    channel: &str,
+    data: &serde_json::Map<String, serde_json::Value>,
+) -> String {
+    if channel == AUTOMATION_CONSENT_CHANNEL {
+        let command = data
+            .get("command")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or("a desktop action");
+        return match data
+            .get("processName")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(process) => format!("Confirm {command} in {process}"),
+            None => format!("Confirm {command}"),
+        };
+    }
+    match channel.split_once("://") {
+        Some((_, rest)) => rest.to_string(),
+        None => channel.to_string(),
+    }
+}
+
+/// Project an event payload into the `data` map that rides the push.
+///
+/// Most channels pass through: they already carry ids only. The consent
+/// channel does not — its frame holds a screen thumbnail (tens of KB, far past
+/// the ~4 KB APNs/FCM payload ceiling, so passing it through would break the
+/// push outright) plus the window title and the full command detail, which are
+/// exactly the fields decided to stay off the lock screen. Allowlist down to
+/// what the phone needs to deep-link; it reads the rest off the authenticated
+/// WS frame once opened.
+fn push_data_for_channel(
+    channel: &str,
+    raw: &serde_json::Map<String, serde_json::Value>,
+) -> serde_json::Map<String, serde_json::Value> {
+    if channel != AUTOMATION_CONSENT_CHANNEL {
+        return raw.clone();
+    }
+    let mut out = serde_json::Map::new();
+    if let Some(id) = raw.get("id").and_then(|v| v.as_str()) {
+        out.insert("id".into(), serde_json::Value::String(id.to_string()));
+    }
+    out.insert(
+        "source".into(),
+        serde_json::Value::String("automation".into()),
+    );
+    // The consent sheet is mounted app-wide (`mobile-shell-wrapper.tsx`), so
+    // any route brings it up; the deep link only has to foreground the app.
+    out.insert("href".into(), serde_json::Value::String("/".into()));
+    out
 }
 
 /// Subscribe to `channel` and, on each emit, broadcast a push payload to
@@ -382,19 +616,17 @@ fn register_push_trigger(app: &tauri::AppHandle, channel: &'static str) {
             let registry = std::sync::Arc::clone(&state.push_tokens);
             let dispatchers = super::push_dispatchers();
 
-            let data: serde_json::Map<String, serde_json::Value> =
-                serde_json::from_str(&raw)
-                    .ok()
-                    .and_then(|v: serde_json::Value| v.as_object().cloned())
-                    .unwrap_or_default();
+            let raw_data: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&raw)
+                .ok()
+                .and_then(|v: serde_json::Value| v.as_object().cloned())
+                .unwrap_or_default();
+            // Body is derived from the *raw* payload (it needs the action and
+            // process name); `data` is the sanitized projection that actually
+            // transits the push provider.
             let payload = super::push::PushPayload {
                 title: Some("cognia".into()),
-                body: Some(
-                    channel_name
-                        .replace("claude://", "")
-                        .replace("companion://", ""),
-                ),
-                data,
+                body: Some(push_body_for_channel(&channel_name, &raw_data)),
+                data: push_data_for_channel(&channel_name, &raw_data),
             };
 
             for provider in [
@@ -496,11 +728,13 @@ pub struct PairJwtIssue {
 /// The token is a copy of what `POST /api/v1/auth/pair/issue` would return.
 #[tauri::command]
 pub async fn companion_issue_pair_jwt(
+    local_account_id: String,
     state: State<'_, CompanionServerState>,
     app_handle: tauri::AppHandle,
 ) -> Result<PairJwtIssue, String> {
     let signing_secret = secret::load_or_generate().map_err(|e| e.to_string())?;
-    let (pair_jwt, exp_secs) = issue_pair_jwt(&signing_secret).map_err(|e| e.to_string())?;
+    let (pair_jwt, exp_secs) =
+        issue_pair_jwt(&signing_secret, &local_account_id).map_err(|e| e.to_string())?;
     let port = state.bound_port().unwrap_or(DEFAULT_PORT);
 
     // URL priority: active tunnel (quick or named) > persisted named hostname
@@ -663,22 +897,18 @@ pub async fn companion_tunnel_start(
             let token = super::tunnel_config::load_token()
                 .map_err(|e: String| e)?
                 .ok_or("named tunnel token not found — save config first")?;
-            let named = config
-                .named
-                .ok_or("named tunnel hostname not configured")?;
+            let named = config.named.ok_or("named tunnel hostname not configured")?;
             state
                 .tunnel
                 .start_named(&token, &named)
                 .await
                 .map_err(map_tunnel_error)
         }
-        super::tunnel_config::TunnelMode::Quick => {
-            state
-                .tunnel
-                .start(&local_url)
-                .await
-                .map_err(map_tunnel_error)
-        }
+        super::tunnel_config::TunnelMode::Quick => state
+            .tunnel
+            .start(&local_url)
+            .await
+            .map_err(map_tunnel_error),
     }
 }
 
@@ -711,8 +941,7 @@ pub fn companion_tunnel_save_named_config(
     token: String,
     hostname: String,
 ) -> Result<(), String> {
-    super::tunnel_config::save_named(state.data_dir(), &token, &hostname)
-        .map_err(|e: String| e)?;
+    super::tunnel_config::save_named(state.data_dir(), &token, &hostname).map_err(|e: String| e)?;
     state
         .tunnel
         .set_named_config(super::tunnel_config::NamedTunnelConfig { hostname });
@@ -774,9 +1003,7 @@ pub fn companion_tunnel_clear_named(state: State<'_, CompanionServerState>) -> R
 /// are persisted via the active `PushCredStore` (keyring on desktop, JSON
 /// file in headless mode) so they survive restarts.
 #[tauri::command]
-pub fn companion_push_configure_fcm(
-    service_account_json: String,
-) -> Result<(), String> {
+pub fn companion_push_configure_fcm(service_account_json: String) -> Result<(), String> {
     let creds: super::dispatchers::FcmServiceAccount = serde_json::from_str(&service_account_json)
         .map_err(|e| format!("invalid FCM service-account JSON: {e}"))?;
     if let Some(store) = super::push_creds::active() {
@@ -844,10 +1071,7 @@ pub struct PushConfigStatus {
 pub fn companion_push_status() -> Result<PushConfigStatus, String> {
     let store = super::push_creds::active();
     let (fcm, apns) = match store {
-        Some(s) => (
-            s.load_fcm()?.is_some(),
-            s.load_apns()?.is_some(),
-        ),
+        Some(s) => (s.load_fcm()?.is_some(), s.load_apns()?.is_some()),
         None => (false, false),
     };
     Ok(PushConfigStatus {
@@ -880,7 +1104,9 @@ pub async fn companion_test_local_reachability(
     state: State<'_, CompanionServerState>,
     app_handle: tauri::AppHandle,
 ) -> Result<Vec<CompanionReachability>, String> {
-    let port = state.bound_port().ok_or_else(|| "server not running".to_string())?;
+    let port = state
+        .bound_port()
+        .ok_or_else(|| "server not running".to_string())?;
     let mut candidates: Vec<String> = vec![format!("https://127.0.0.1:{port}")];
     if let Some(lan) = detect_lan_ip() {
         candidates.push(format!("https://{lan}:{port}"));
@@ -933,7 +1159,11 @@ pub async fn companion_test_local_reachability(
 
 /// Best-effort detect a routable LAN IPv4 address.  Returns `None` when the
 /// host has no non-loopback interface (e.g., container without a network).
-fn detect_lan_ip() -> Option<String> {
+///
+/// `pub(crate)` so the `companion_endpoints` RPC arm can report the same LAN
+/// address the QR pair payload would have carried — a phone that paired over a
+/// tunnel needs it to discover that the desktop is also reachable on the LAN.
+pub(crate) fn detect_lan_ip() -> Option<String> {
     match local_ip_address::local_ip() {
         Ok(IpAddr::V4(v4)) if !v4.is_loopback() && !v4.is_unspecified() => Some(v4.to_string()),
         Ok(IpAddr::V6(v6)) if !v6.is_loopback() && !v6.is_unspecified() => Some(v6.to_string()),
@@ -957,8 +1187,149 @@ mod tests {
 
     use super::*;
 
+    #[tokio::test]
+    async fn remote_terminal_grants_reject_empty_ids_and_support_revoke_and_reseed() {
+        let acl = super::super::control_allow_list::terminal_global();
+        acl.clear();
+
+        assert!(companion_set_remote_terminal("   ".into(), true)
+            .await
+            .is_err());
+        companion_set_remote_terminal("terminal-device".into(), true)
+            .await
+            .unwrap();
+        assert!(acl.is_allowed("terminal-device"));
+        companion_set_remote_terminal("terminal-device".into(), false)
+            .await
+            .unwrap();
+        assert!(!acl.is_allowed("terminal-device"));
+
+        companion_seed_remote_terminal(vec!["seeded-terminal".into(), "".into(), "   ".into()])
+            .await
+            .unwrap();
+        assert!(acl.is_allowed("seeded-terminal"));
+        assert!(!acl.is_allowed(""));
+        assert!(!acl.is_allowed("   "));
+
+        acl.clear();
+    }
+
     #[test]
     fn commands_module_compiles() {}
+
+    fn empty_data() -> serde_json::Map<String, serde_json::Value> {
+        serde_json::Map::new()
+    }
+
+    /// A consent frame as it actually arrives: flattened prompt fields, a
+    /// window title, a command detail, and a fat base64 thumbnail.
+    fn consent_payload() -> serde_json::Map<String, serde_json::Value> {
+        let mut m = serde_json::Map::new();
+        m.insert("id".into(), serde_json::json!("consent-123"));
+        m.insert("command".into(), serde_json::json!("click"));
+        m.insert("surface".into(), serde_json::json!("computerUse"));
+        m.insert("processName".into(), serde_json::json!("Xcode"));
+        m.insert(
+            "windowTitle".into(),
+            serde_json::json!("Re: severance package.xlsx"),
+        );
+        m.insert(
+            "commandDetail".into(),
+            serde_json::json!("rm -rf ~/Documents/secret"),
+        );
+        m.insert("sessionKey".into(), serde_json::json!("session-a"));
+        m.insert(
+            "thumbnail".into(),
+            serde_json::json!({ "bytes": "A".repeat(40_000), "width": 640, "height": 400, "redacted": false }),
+        );
+        m
+    }
+
+    #[test]
+    fn push_body_strips_any_scheme_prefix() {
+        assert_eq!(
+            push_body_for_channel("claude://message-added", &empty_data()),
+            "message-added"
+        );
+        assert_eq!(
+            push_body_for_channel("companion://needs-input", &empty_data()),
+            "needs-input"
+        );
+        assert_eq!(
+            push_body_for_channel("workflow://run-terminal", &empty_data()),
+            "run-terminal"
+        );
+        assert_eq!(
+            push_body_for_channel("no-scheme", &empty_data()),
+            "no-scheme"
+        );
+    }
+
+    #[test]
+    fn consent_push_body_names_action_and_process() {
+        assert_eq!(
+            push_body_for_channel(AUTOMATION_CONSENT_CHANNEL, &consent_payload()),
+            "Confirm click in Xcode"
+        );
+    }
+
+    #[test]
+    fn consent_push_body_never_leaks_the_window_title() {
+        let body = push_body_for_channel(AUTOMATION_CONSENT_CHANNEL, &consent_payload());
+        assert!(
+            !body.contains("severance"),
+            "lock-screen text must not carry the window title, got {body:?}"
+        );
+        assert!(
+            !body.contains("rm -rf"),
+            "lock-screen text must not carry the command detail, got {body:?}"
+        );
+    }
+
+    #[test]
+    fn consent_push_body_degrades_without_a_process_name() {
+        let mut payload = consent_payload();
+        payload.remove("processName");
+        assert_eq!(
+            push_body_for_channel(AUTOMATION_CONSENT_CHANNEL, &payload),
+            "Confirm click"
+        );
+    }
+
+    #[test]
+    fn consent_push_data_is_allowlisted_to_ids() {
+        let data = push_data_for_channel(AUTOMATION_CONSENT_CHANNEL, &consent_payload());
+        assert_eq!(data.get("id").and_then(|v| v.as_str()), Some("consent-123"));
+        assert_eq!(data.get("href").and_then(|v| v.as_str()), Some("/"));
+        for leaked in ["thumbnail", "windowTitle", "commandDetail", "sessionKey"] {
+            assert!(
+                !data.contains_key(leaked),
+                "{leaked} must never transit a push provider"
+            );
+        }
+    }
+
+    #[test]
+    fn consent_push_data_stays_under_the_provider_payload_ceiling() {
+        // APNs and FCM both cap a notification payload at ~4 KB. The raw frame
+        // is far past that because of the thumbnail; the sanitized projection
+        // must not be.
+        let data = push_data_for_channel(AUTOMATION_CONSENT_CHANNEL, &consent_payload());
+        let encoded = serde_json::to_string(&data).expect("data serializes");
+        assert!(
+            encoded.len() < 4096,
+            "sanitized push data is {} bytes, over the ~4 KB provider ceiling",
+            encoded.len()
+        );
+    }
+
+    #[test]
+    fn other_channels_pass_their_payload_through_untouched() {
+        let mut m = serde_json::Map::new();
+        m.insert("runId".into(), serde_json::json!("run-1"));
+        let data = push_data_for_channel("workflow://run-terminal", &m);
+        assert_eq!(data.get("runId").and_then(|v| v.as_str()), Some("run-1"));
+    }
 
     #[test]
     fn detect_lan_ip_returns_string_or_none() {

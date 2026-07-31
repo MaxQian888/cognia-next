@@ -30,6 +30,7 @@ function setCapacitor(state: "native" | "web" | "absent" | "broken") {
 }
 
 afterEach(() => {
+  delete (globalThis as Record<string, unknown>).__COGNIA_HEADLESS__
   setTauri(false)
   setCapacitor("absent")
   Object.defineProperty(window, "matchMedia", {
@@ -40,6 +41,14 @@ afterEach(() => {
 })
 
 describe("detectPlatform", () => {
+  it("returns 'headless' before inspecting the window shim", () => {
+    ;(globalThis as Record<string, unknown>).__COGNIA_HEADLESS__ = true
+    setTauri(true)
+    setCapacitor("native")
+
+    expect(detectPlatform()).toBe("headless")
+  })
+
   it("returns 'web' when window is undefined (SSR)", () => {
     const real = globalThis.window
     // @ts-expect-error simulate SSR

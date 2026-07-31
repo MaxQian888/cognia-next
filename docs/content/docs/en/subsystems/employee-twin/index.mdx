@@ -115,7 +115,7 @@ removes both cron tasks, and drops the remote vector collection.
 ## The privacy red-line
 
 <Callout type="warn" title="Redact before anything leaves the renderer">
-  Stage 3 of ingest (`redact`, `lib/twin/ingest/redact.ts:227`) replaces 11 kinds of PII with
+  Stage 3 of ingest (`redact`, `packages/redact/src/index.ts:227`) replaces 11 kinds of PII with
   `<KIND_NNN>` placeholders **before** the chunk is embedded or sent to any LLM. Only `contentRedacted`
   ever reaches the embedder (`lib/twin/ingest/embed.ts:48`) or the remote vector payload
   (`lib/twin/ingest/persist.ts:137`). The reverse map is AES-GCM-256 encrypted on disk and the raw text is

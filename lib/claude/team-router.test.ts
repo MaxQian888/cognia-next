@@ -5,7 +5,7 @@ import {
   routeTurn,
   stripDispatches,
 } from "./team-router"
-import type { Character, Team, TeamMember } from "./types"
+import type { Character, Team, TeamMember } from "@cognia/agent-config-types"
 
 function makeCharacter(overrides: Partial<Character> & { id: string; name: string }): Character {
   return {
@@ -86,6 +86,23 @@ describe("parseMentions", () => {
 
   it("ignores @-tokens that don't match any member", () => {
     expect(parseMentions("@Nobody here", members)).toEqual([])
+  })
+
+  it("ignores an @ that follows a non-whitespace char (email / path)", () => {
+    expect(parseMentions("write to coder@Coder.io", members)).toEqual([])
+    expect(parseMentions("see path/@Coder", members)).toEqual([])
+  })
+
+  it("is generic over any {id,name} shape (chat @agent reuse)", () => {
+    // The chat composer projects subagent targets to `{ id, name: handle }`
+    // and reuses this exact scanner — no Character coupling.
+    const agents = [
+      { id: "template:reviewer", name: "reviewer" },
+      { id: "workflow-designer", name: "workflow-designer" },
+    ]
+    const result = parseMentions("please @reviewer then @workflow-designer", agents)
+    expect(result).toEqual([agents[0], agents[1]])
+    expect(result[0]?.id).toBe("template:reviewer")
   })
 
   it("handles members whose names contain spaces", () => {

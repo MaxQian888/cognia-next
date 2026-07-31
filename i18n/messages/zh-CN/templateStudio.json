@@ -1,0 +1,151 @@
+{
+  "actions": {
+    "cancel": "取消",
+    "confirmImport": "导入包",
+    "create": "创建草稿",
+    "export": "导出",
+    "import": "导入",
+    "instantiate": "创建资源",
+    "newDraft": "新建草稿",
+    "openEditor": "打开编辑器",
+    "preflight": "检查计划",
+    "publish": "发布"
+  },
+  "create": {
+    "description": "创建一份可审查、可发布的便携模板定义。",
+    "domain": "模板类型",
+    "name": "名称",
+    "templateDescription": "描述",
+    "title": "创建模板草稿"
+  },
+  "defaults": {
+    "teamLead": "团队负责人"
+  },
+  "description": "搜索、检查、发布、导入并实例化可复用的 Cognia 模板。",
+  "domains": {
+    "a2ui": "Mini App",
+    "agentTeam": "Agent 团队",
+    "character": "角色",
+    "customMode": "自定义模式",
+    "document": "文档",
+    "goal": "目标",
+    "prompt": "提示词预设",
+    "scheduler": "定时任务",
+    "skill": "技能",
+    "subagent": "子 Agent",
+    "subscription": "订阅预设",
+    "workflow": "工作流"
+  },
+  "empty": {
+    "noDescription": "暂无描述",
+    "noResults": "没有符合当前筛选条件的模板。"
+  },
+  "filters": {
+    "allDomains": "全部类型",
+    "allTrust": "全部信任级别",
+    "domain": "模板类型",
+    "search": "搜索模板",
+    "trust": "信任级别"
+  },
+  "import": {
+    "definitionCount": "{count} 个定义",
+    "description": "将惰性定义加入模板库前，请先检查该模板包。",
+    "inert": "导入不会创建资源，也不会运行模板内容。",
+    "title": "导入模板包"
+  },
+  "inputKinds": {
+    "boolean": "输入 true 或 false",
+    "character": "角色 ID",
+    "enum": "选择一个值",
+    "model": "模型 ID",
+    "number": "输入数字",
+    "provider": "提供商 ID",
+    "resource": "资源 ID",
+    "secretRef": "密钥引用",
+    "skill": "技能 ID",
+    "string": "输入内容",
+    "tool": "工具 ID",
+    "twinSlot": "Twin ID",
+    "workflow": "工作流 ID"
+  },
+  "inspector": {
+    "empty": "请选择一个模板，以检查其定义和可用操作。",
+    "hash": "内容哈希：{hash}",
+    "payload": "便携载荷",
+    "readOnly": "仅目录",
+    "required": "（必填）",
+    "source": "来源：{source}"
+  },
+  "instances": {
+    "detached": "已分离",
+    "resources": "{count} 个资源"
+  },
+  "issues": {
+    "agent-team": {
+      "task-cycle": "团队任务图中存在依赖循环。"
+    },
+    "binding": {
+      "required": "尚未选择必需的绑定。"
+    },
+    "dependency": {
+      "optional-fallback": "可选依赖将使用回退方案。",
+      "required-missing": "缺少必需的依赖。"
+    },
+    "host-version": {
+      "unsupported": "该模板与当前主机版本不兼容。"
+    },
+    "platform": {
+      "unsupported": "该模板与当前平台不兼容。"
+    },
+    "plugin": {
+      "permission-missing": "插件缺少所需的领域权限。"
+    },
+    "source": {
+      "unavailable": "该模板来源当前不可用。"
+    }
+  },
+  "messages": {
+    "draftCreated": "模板草稿已创建。",
+    "imported": "模板包已导入。",
+    "instantiated": "模板资源已创建。",
+    "published": "模板版本 {version} 已发布。"
+  },
+  "mobile": {
+    "description": "可在此浏览并实例化兼容模板。创作、发布、导入和导出仍需在桌面端完成。",
+    "title": "移动端模板访问"
+  },
+  "operations": {
+    "bind": "绑定现有资源",
+    "create": "创建资源",
+    "enable": "启用资源",
+    "permission": "请求权限",
+    "update": "更新资源"
+  },
+  "preflight": {
+    "blocked": "计划已阻止",
+    "needs-confirmation": "需要确认",
+    "ready": "计划已就绪"
+  },
+  "status": {
+    "conflict": "冲突",
+    "deprecated": "已弃用",
+    "draft": "草稿",
+    "published": "已发布",
+    "tombstone": "已移除",
+    "yanked": "已撤回"
+  },
+  "tabs": {
+    "drafts": "草稿",
+    "instances": "实例",
+    "library": "模板库",
+    "packages": "模板包",
+    "published": "已发布"
+  },
+  "title": "模板工作室",
+  "trust": {
+    "built-in": "内置",
+    "signed-unknown": "已签名，发布者未知",
+    "unsigned": "未签名",
+    "verified-publisher": "已验证发布者"
+  }
+}

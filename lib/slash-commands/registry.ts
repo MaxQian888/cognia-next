@@ -65,6 +65,34 @@ export interface SlashCommandDefinition {
 
 const registry = new Map<string, SlashCommandDefinition>()
 
+// --- Change notification ------------------------------------------------
+// The registry is a bare Map with no built-in reactivity. The chat composer's
+// `/` picker subscribes (via `useSyncExternalStore` in
+// `hooks/chat/use-plugin-slash-commands.ts`) so newly-registered plugin
+// commands appear without a reload. We expose a monotonic version counter as
+// the snapshot — cheap to compare, and consumers re-derive their projection
+// when it changes.
+let version = 0
+const listeners = new Set<() => void>()
+
+function notifySlashCommandsChanged(): void {
+  version += 1
+  for (const cb of listeners) cb()
+}
+
+/** Subscribe to registry mutations; returns an unsubscribe fn. */
+export function subscribeSlashCommands(cb: () => void): () => void {
+  listeners.add(cb)
+  return () => {
+    listeners.delete(cb)
+  }
+}
+
+/** Monotonic version, bumped on every register/unregister/seed. */
+export function getSlashCommandsVersion(): number {
+  return version
+}
+
 export interface RegisterSlashCommandResult {
   /** True when the registration replaced an existing entry with the same id. */
   replaced: boolean
@@ -100,11 +128,14 @@ export function registerSlashCommand(def: SlashCommandDefinition): RegisterSlash
 
   const replaced = existing !== undefined
   registry.set(def.id, def)
+  notifySlashCommandsChanged()
   return { replaced }
 }
 
 export function unregisterSlashCommand(id: string): boolean {
-  return registry.delete(id)
+  const removed = registry.delete(id)
+  if (removed) notifySlashCommandsChanged()
+  return removed
 }
 
 /**
@@ -119,6 +150,7 @@ export function unregisterCommandsByPlugin(pluginId: string): number {
       removed += 1
     }
   }
+  if (removed > 0) notifySlashCommandsChanged()
   return removed
 }
 
@@ -170,6 +202,7 @@ export async function dispatchSlashCommand(
 /** Test-only escape hatch. */
 export function __resetSlashCommandsForTesting(): void {
   registry.clear()
+  notifySlashCommandsChanged()
 }
 
 /**

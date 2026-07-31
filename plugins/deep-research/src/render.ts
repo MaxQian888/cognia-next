@@ -58,6 +58,14 @@ export function renderErrorCard(built: Extract<BuildDepsResult, { ok: false }>):
       "（深度研究需要先在设置中配置一个 AI 模型提供方。）"
     )
   }
+  if (built.error === "NO_AI_PERMISSION") {
+    return (
+      "⚠️ **Deep Research** needs permission to use the AI model.\n\n" +
+      "The research loop calls the model to rewrite queries, judge sources, and draft the answer. " +
+      "Grant the model access when prompted, then try again.\n\n" +
+      "（深度研究需要「使用 AI 模型」的权限，请在弹出的授权提示中允许后重试。）"
+    )
+  }
   const provider = built.provider ?? "exa"
   return (
     `⚠️ **Deep Research** needs a \`${provider}\` API key.\n\n` +
@@ -68,7 +76,11 @@ export function renderErrorCard(built: Extract<BuildDepsResult, { ok: false }>):
 
 /** One-line text summary for the agent-tool return value. */
 export function errorText(built: Extract<BuildDepsResult, { ok: false }>): string {
-  return built.error === "NO_PROVIDER"
-    ? "No AI model provider is configured for the deep-research plugin."
-    : `Missing ${built.provider ?? "search"} API key — configure it in the Deep Research plugin settings.`
+  if (built.error === "NO_PROVIDER") {
+    return "No AI model provider is configured for the deep-research plugin."
+  }
+  if (built.error === "NO_AI_PERMISSION") {
+    return "The deep-research plugin was not granted permission to use the AI model (ai:chat / ai:embed)."
+  }
+  return `Missing ${built.provider ?? "search"} API key — configure it in the Deep Research plugin settings.`
 }

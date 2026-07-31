@@ -1,0 +1,155 @@
+{
+  "baseUrlLabel": "服务器地址",
+  "biometricFailed": "生物识别失败（{reason}），未退出登录。",
+  "checkingTitle": "正在重新检查链路",
+  "codeError": {
+    "invalid_pair_code": "配对码必须是 6 位数字。",
+    "malformed": "请输入桌面上的 6 位数字配对码。",
+    "malformed_request": "服务器无法解析请求，请升级 App 后重试。",
+    "pair_code_expired": "该配对码已过期（5 分钟有效），请在桌面 设置 → Companion 重新生成。",
+    "pair_code_not_found": "该配对码不存在或已使用，请在桌面重新生成。"
+  },
+  "codeHint": "在桌面 PairDeviceCard 上、QR 旁边可以看到这组数字。当相机无法对焦（例如 Android 仿真器）时使用。",
+  "codeLabel": "6 位数字配对码",
+  "connectedSubtitle": "链路已就绪——桌面会接受本机发出的请求。",
+  "connectedTitle": "已连接到桌面",
+  "diagnostics": {
+    "collapse": "收起诊断",
+    "expand": "展开诊断",
+    "rpcResultLabel": "RPC 响应",
+    "rpcWaiting": "点击「测试 RPC」即可发起一次状态 RPC。",
+    "subtitle": "对 RPC 调用与事件订阅做一次端到端探测。",
+    "testRpc": "测试 RPC 连接",
+    "testWs": "测试事件订阅",
+    "title": "诊断",
+    "wsResultLabel": "事件载荷",
+    "wsWaiting": "点击「测试事件」会订阅 5 秒事件流。"
+  },
+  "discover": {
+    "backToDiscover": "返回扫描列表",
+    "baseUrlLocked": "地址已从扫描结果锁定",
+    "emptyDescription": "请确认桌面与手机连在同一网络，且桌面端已开启 Companion 服务。",
+    "emptyTitle": "未发现服务器",
+    "foundCount": "{count, plural, =0 {未发现服务器} other {发现 # 台}}",
+    "help": {
+      "docsCta": "查看配置指南",
+      "openSettings": "打开系统设置",
+      "tipEnableServer": "在桌面端 设置 → Companion 中开启 Companion 服务。",
+      "tipFirewall": "请在桌面防火墙中允许 Cognia 通过。",
+      "tipSameNetwork": "两台设备需连接到同一 Wi-Fi 网络。",
+      "trigger": "找不到桌面？"
+    },
+    "latencyMs": "{ms} 毫秒",
+    "nearbyTitle": "本网络内",
+    "precheckOk": "可连接 · v{version} · {ms} 毫秒",
+    "precheckUnreachable": "无法连接该服务器，请确认它已在线。",
+    "recentTitle": "最近连接",
+    "rescanCta": "重新扫描",
+    "scanQrCta": "扫描二维码",
+    "scanning": "正在扫描局域网…",
+    "skipToManual": "手动输入",
+    "subtitle": "选择下方的服务器，或跳过手动输入。",
+    "title": "查找你的桌面",
+    "tlsMismatch": "身份已变更",
+    "tlsPinned": "身份已验证",
+    "tlsUnverified": "未验证",
+    "viaHistory": "历史",
+    "viaMdns": "mDNS",
+    "viaPaired": "已配对",
+    "viaProbe": "局域网探测"
+  },
+  "errorTitle": "配对失败",
+  "fingerprintHint": "今后重连时如果桌面签名密钥不一致，本机将自动拒绝。",
+  "fingerprintMismatch": "服务器身份不匹配（期望 {expected}…，实际 {reported}…）。该配对码已被使用——请在桌面端重新生成二维码/配对码后再试。",
+  "fingerprintPinned": "桌面身份已锁定",
+  "formCardDescription": "扫码或手动粘贴均可——两条路径共用同一份 5 分钟令牌。",
+  "formCardTitle": "配对手机",
+  "health": {
+    "checking": "检查中",
+    "continueToChat": "进入聊天",
+    "device": "设备",
+    "lastHeartbeat": "最近心跳",
+    "latency": "延迟",
+    "live": "在线",
+    "noHeartbeat": "—",
+    "offline": "离线",
+    "refresh": "刷新状态",
+    "server": "服务器"
+  },
+  "httpError": {
+    "401": "配对被拒——令牌可能已过期（5 分钟有效）或被使用过。请在桌面 设置 → Companion 重新生成。",
+    "403": "服务器拒绝了配对请求，请检查桌面 Companion 的允许列表。",
+    "404": "服务器未暴露配对接口，请确认桌面运行的是开启 Companion 的 cognia v0.2+。",
+    "5xx": "服务器错误（HTTP {status}），请查看桌面日志后重试。",
+    "generic": "配对失败（HTTP {status}）。"
+  },
+  "intro": "扫一下桌面端的二维码即可完成配对。也可以手动粘贴桌面 Settings → Companion 卡片里的 5 分钟令牌。",
+  "loadingManualCta": "手动配对",
+  "loadingSlow": "比平常久——可能是设备解锁安全存储较慢。你可以改为手动完成配对。",
+  "loadingTitle": "正在检查既有配对…",
+  "manualDivider": "或手动粘贴",
+  "networkError": {
+    "browserBlocked": "浏览器阻止了连接。请检查服务器的 HTTPS 证书，以及 CORS 或私有网络访问（PNA）设置。",
+    "browserPolicy": "浏览器因 CORS 或私有网络访问（PNA）策略阻止了请求。请在服务器上允许当前网页来源后重试。",
+    "certificate": "无法验证服务器的 HTTPS 证书。请检查主机名、信任链和有效期后重试。",
+    "offline": "当前设备处于离线状态，请恢复网络后重试。",
+    "unknown": "配对请求失败：{message}",
+    "unreachable": "无法连接桌面服务器。请检查地址、Companion 是否已启用，以及当前网络能否访问该服务器。"
+  },
+  "offlineSubtitle": "暂时无法联系到桌面，请确认桌面已唤醒且与手机处于同一网络。",
+  "offlineTitle": "连接已断开",
+  "payloadError": {
+    "invalid": "无法解析该配对载荷——请从服务器完整复制 cgnp2|… 字符串后重新粘贴。",
+    "versionMismatch": "该配对载荷版本为 {got}，当前应用无法识别。请升级应用或服务器，使两端载荷版本一致。"
+  },
+  "permissions": {
+    "localNetwork": {
+      "description": "请授予本地网络访问权限，本机才能在 Wi-Fi 上发现桌面端。",
+      "title": "需要本地网络权限"
+    }
+  },
+  "scanCta": "扫码配对",
+  "scanError": {
+    "failed": "扫码失败：{message}",
+    "notPairCode": "这个二维码不是 Cognia 配对码。",
+    "openSettings": "前往设置",
+    "permissionDenied": "未授予相机权限。请在系统设置里开启后再扫码。",
+    "unsupported": "本设备不支持扫码，请在下方手动粘贴配对令牌。"
+  },
+  "scanning": "扫描中…",
+  "signOut": {
+    "cardDescription": "退出登录并清除设备 JWT，需要重新扫码才能再次连接。",
+    "cardTitle": "断开连接",
+    "cta": "退出 / 重新配对"
+  },
+  "signOutDescription": "退出后需重新扫码配对才能再次连接。",
+  "signOutReason": "确认退出当前配对",
+  "signOutTitle": "退出登录",
+  "step": {
+    "ariaLabel": "配对进度",
+    "discover": "发现",
+    "pair": "配对",
+    "paired": "已连接"
+  },
+  "submit": "完成配对",
+  "submitInProgress": "正在配对…",
+  "tabs": {
+    "code": "6 位数字码",
+    "jwt": "配对 JWT"
+  },
+  "title": "连接桌面",
+  "tokenLabel": "配对令牌",
+  "transportLabel": "传输层",
+  "web": {
+    "baseUrlLocked": "服务器地址由部署方预设",
+    "codeHint": "在服务器上运行 “cognia-server pair” 生成配对码，或从桌面端 设置 → 伴侣 中复制。",
+    "formCardDescription": "粘贴配对载荷，或输入服务器签发的 6 位配对码——两者共用同一枚 5 分钟有效的配对令牌。",
+    "formCardTitle": "配对此浏览器",
+    "httpsRequired": "浏览器配对必须使用 HTTPS，避免配对凭据以明文发送。请输入 HTTPS Companion 地址。",
+    "intro": "将此浏览器连接到你的 cognia 服务器。粘贴配对载荷或输入 6 位配对码即可登录。",
+    "pasteHint": "粘贴完整的 cgnp2|… 载荷（服务器地址会自动填入），或直接粘贴配对 JWT。",
+    "storageNotice": "设备凭据保存在此浏览器的 localStorage 中：能访问此浏览器配置文件、或向此源注入脚本的人都可以使用它。请在可信设备上配对，用完及时退出登录。",
+    "storageNoticeTitle": "凭据保存在此浏览器中",
+    "title": "连接到服务器"
+  }
+}

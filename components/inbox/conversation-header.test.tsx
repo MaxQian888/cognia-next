@@ -34,15 +34,33 @@ jest.mock("@tauri-apps/api/core", () => ({ invoke: jest.fn() }))
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => false) }))
 jest.mock("@/lib/db/conversation-overrides", () => ({
   upsertByConversationKey: jest.fn().mockResolvedValue({}),
+  effectiveStatus: jest.fn().mockReturnValue("open"),
+  setStatus: jest.fn().mockResolvedValue(undefined),
+  setAssignee: jest.fn().mockResolvedValue(undefined),
 }))
 
 jest.mock("@/components/ui/dropdown-menu")
+// Everything that is not identity / mode lives behind the header's `⋯`
+// popover now. The shared manual mock renders `PopoverContent`
+// unconditionally, so these tests keep reaching the controls directly.
+// (The chrome-budget assertion needs the opposite and lives in
+// `conversation-header.budget.test.tsx`.)
+jest.mock("@/components/ui/popover")
 
 jest.mock("@/components/ui/tooltip")
 
 const mockUseCharacter = jest.fn()
 jest.mock("@/lib/data-hooks/context", () => ({
   useCharacter: (id: string | null | undefined) => mockUseCharacter(id),
+  useCharacters: () => [],
+}))
+
+jest.mock("@/hooks/connectors/use-conversation-labels", () => ({
+  useConversationLabels: () => [],
+}))
+
+jest.mock("./contact-profile-drawer", () => ({
+  ContactProfileDrawer: () => null,
 }))
 
 // Typed loose so per-test `mockReturnValue` calls can vary the `current.state`
@@ -128,6 +146,27 @@ describe("ConversationHeader", () => {
       />
     )
     expect(screen.getByText("My Telegram Chat")).toBeInTheDocument()
+  })
+
+  it("renders the artifact dock toggle without a breakpoint gate", () => {
+    // This header is the ONLY standing opener for the dock on `/inbox/c` — the
+    // chat pane below mounts with `showHeader={false}`, and the AppShellMobile
+    // top bar (the other opener) isn't mounted on this route. A `hidden
+    // md:inline-flex` class therefore left phones with no way to open the dock
+    // at all.
+    render(
+      <ConversationHeader
+        conversationKey="ck-dock"
+        sessionId="s-dock"
+        title="Dock"
+        platform="telegram"
+        currentMode="auto"
+        policy={EMPTY_POLICY}
+      />
+    )
+    const toggle = screen.getByTestId("chat-artifact-dock-toggle")
+    expect(toggle).toBeInTheDocument()
+    expect(toggle.className).not.toContain("hidden")
   })
 
   it("renders the live mode switcher chip in desktop mode", () => {

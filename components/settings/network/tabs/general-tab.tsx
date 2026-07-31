@@ -5,9 +5,17 @@
  * (Off / Manual / Auto), pick a protocol, fill in host/port, optionally
  * supply credentials, and curate the bypass list.
  *
- * Every change writes a partial `networkProxy` patch via `useSettingsStore`
- * and mirrors the result into the Rust process via `applyProxyToRust`
- * (no-op on web).
+ * Text fields (host / port / credentials) are edited against **local draft
+ * state** and only persisted on blur / Enter — not on every keystroke.
+ * Persisting each keystroke round-trips through Dexie asynchronously; binding
+ * the controlled `value` straight to that lagging store value dropped
+ * characters and reverted the field mid-typing. Discrete controls (mode,
+ * protocol, WebSocket toggle, bypass list) persist immediately since they
+ * don't suffer the same lag.
+ *
+ * Every committed change writes a partial `networkProxy` patch via
+ * `useSettingsStore` and mirrors the result into the Rust process via
+ * `applyProxyToRust` (no-op on web).
  */
 
 import { useTranslations } from "next-intl"
@@ -48,10 +56,47 @@ export function NetworkGeneralTab() {
 
   const [bypassDraft, setBypassDraft] = useState("")
 
+  // Local drafts for the free-text fields. Kept out of the store while typing
+  // so the controlled inputs don't lag behind the async Dexie write.
+  const [hostDraft, setHostDraft] = useState(cfg.host)
+  const [portDraft, setPortDraft] = useState(cfg.port ? String(cfg.port) : "")
+  const [usernameDraft, setUsernameDraft] = useState(cfg.username ?? "")
+  const [passwordDraft, setPasswordDraft] = useState(cfg.password ?? "")
+
+  // Re-sync drafts whenever the persisted values change from *outside* this
+  // tab (Detection-tab Apply, startup auto-detect). Firing on the concrete
+  // field values — not object identity — avoids clobbering an in-progress edit
+  // on unrelated re-renders while still catching external updates.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: sync drafts from external store changes
+    setHostDraft(cfg.host)
+    setPortDraft(cfg.port ? String(cfg.port) : "")
+    setUsernameDraft(cfg.username ?? "")
+    setPasswordDraft(cfg.password ?? "")
+  }, [cfg.host, cfg.port, cfg.username, cfg.password])
+
   const persist = async (patch: Partial<NetworkProxySettings>) => {
     const next: NetworkProxySettings = { ...cfg, ...patch }
     await save({ networkProxy: next })
     void applyProxyToRust(next)
+  }
+
+  // Commit helpers — only persist when the draft actually differs from the
+  // stored value so a plain focus/blur doesn't churn the store.
+  const commitHost = () => {
+    if (hostDraft !== cfg.host) void persist({ host: hostDraft })
+  }
+  const commitPort = () => {
+    const clamped = Math.max(0, Math.min(65535, Number(portDraft) || 0))
+    if (clamped !== cfg.port) void persist({ port: clamped })
+  }
+  const commitUsername = () => {
+    const next = usernameDraft || undefined
+    if (next !== (cfg.username || undefined)) void persist({ username: next })
+  }
+  const commitPassword = () => {
+    const next = passwordDraft || undefined
+    if (next !== (cfg.password || undefined)) void persist({ password: next })
   }
 
   // Push the *current* config to Rust on first mount so a freshly-launched
@@ -124,8 +169,12 @@ export function NetworkGeneralTab() {
         <div className="space-y-2 sm:col-span-2">
           <Label className="text-sm">{t("form.host")}</Label>
           <Input
-            value={cfg.host}
-            onChange={(e) => persist({ host: e.target.value })}
+            value={hostDraft}
+            onChange={(e) => setHostDraft(e.target.value)}
+            onBlur={commitHost}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur()
+            }}
             placeholder="127.0.0.1"
             disabled={disabled}
             aria-label={t("form.host")}
@@ -137,10 +186,12 @@ export function NetworkGeneralTab() {
             type="number"
             min={0}
             max={65535}
-            value={cfg.port || ""}
-            onChange={(e) =>
-              persist({ port: Math.max(0, Math.min(65535, Number(e.target.value) || 0)) })
-            }
+            value={portDraft}
+            onChange={(e) => setPortDraft(e.target.value)}
+            onBlur={commitPort}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur()
+            }}
             placeholder="7890"
             disabled={disabled}
             aria-label={t("form.port")}
@@ -153,8 +204,12 @@ export function NetworkGeneralTab() {
         <div className="space-y-2">
           <Label className="text-sm">{t("form.username")}</Label>
           <Input
-            value={cfg.username ?? ""}
-            onChange={(e) => persist({ username: e.target.value || undefined })}
+            value={usernameDraft}
+            onChange={(e) => setUsernameDraft(e.target.value)}
+            onBlur={commitUsername}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur()
+            }}
             placeholder={t("form.optionalPlaceholder")}
             disabled={disabled}
             aria-label={t("form.username")}
@@ -165,8 +220,12 @@ export function NetworkGeneralTab() {
           <Label className="text-sm">{t("form.password")}</Label>
           <Input
             type="password"
-            value={cfg.password ?? ""}
-            onChange={(e) => persist({ password: e.target.value || undefined })}
+            value={passwordDraft}
+            onChange={(e) => setPasswordDraft(e.target.value)}
+            onBlur={commitPassword}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur()
+            }}
             placeholder={t("form.optionalPlaceholder")}
             disabled={disabled}
             aria-label={t("form.password")}

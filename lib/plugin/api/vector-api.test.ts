@@ -3,6 +3,7 @@
  */
 
 import { createVectorAPI } from "./vector-api"
+import { initializePluginPermissions } from "./permission-api"
 
 // Mock stores and vector utilities
 const mockCollections = new Map<string, { name: string; documents: Map<string, unknown> }>()
@@ -28,7 +29,7 @@ jest.mock("@/stores", () => ({
   },
 }))
 
-jest.mock("@/lib/vector", () => ({
+jest.mock("@cognia/vector", () => ({
   createVectorStore: jest.fn(() => ({
     createCollection: jest.fn(async (name) => {
       mockCollections.set(name, { name, documents: new Map() })
@@ -93,7 +94,7 @@ jest.mock("@/lib/vector", () => ({
   })),
 }))
 
-jest.mock("@/lib/vector/embedding", () => ({
+jest.mock("@cognia/vector/embedding", () => ({
   DEFAULT_EMBEDDING_MODELS: {
     openai: { provider: "openai", model: "text-embedding-3-small", dimensions: 1536 },
     google: { provider: "google", model: "text-embedding-004", dimensions: 768 },
@@ -104,6 +105,11 @@ jest.mock("@/lib/vector/embedding", () => ({
       model: "Xenova/all-MiniLM-L6-v2",
       dimensions: 384,
     },
+    "amazon-bedrock": {
+      provider: "amazon-bedrock",
+      model: "amazon.titan-embed-text-v2:0",
+      dimensions: 1024,
+    },
   },
   generateEmbedding: jest.fn(async (_text, _config, _apiKey) => ({
     embedding: [0.1, 0.2, 0.3, 0.4, 0.5],
@@ -112,8 +118,8 @@ jest.mock("@/lib/vector/embedding", () => ({
     embeddings: texts.map(() => [0.1, 0.2, 0.3, 0.4, 0.5]),
   })),
   resolveEmbeddingApiKey: jest.fn(
-    (_provider: string, providerSettings: Record<string, { apiKey?: string }>) => {
-      return providerSettings?.openai?.apiKey || ""
+    (provider: string, providerSettings: Record<string, { apiKey?: string }>) => {
+      return provider === "openai" ? providerSettings?.openai?.apiKey || "" : ""
     }
   ),
 }))
@@ -325,6 +331,36 @@ describe("Vector API", () => {
       expect(embeddings.length).toBe(3)
       expect(embeddings[0].length).toBeGreaterThan(0)
     })
+
+    it("threads default-chain Bedrock settings into plugin embeddings", async () => {
+      const { useVectorStore, useSettingsStore } = jest.requireMock("@/stores")
+      const { generateEmbedding } = jest.requireMock("@cognia/vector/embedding")
+      useVectorStore.getState.mockReturnValueOnce({
+        settings: {
+          provider: "native",
+          embeddingProvider: "amazon-bedrock",
+          embeddingModel: "amazon.titan-embed-text-v2:0",
+        },
+      })
+      useSettingsStore.getState.mockReturnValueOnce({
+        providerSettings: {
+          bedrock: {
+            bedrock: { authMode: "default-chain", region: "us-west-2", profile: "dev" },
+          },
+        },
+      })
+
+      await createVectorAPI(testPluginId).embed("Hello Bedrock")
+
+      expect(generateEmbedding).toHaveBeenCalledWith(
+        "Hello Bedrock",
+        expect.objectContaining({
+          provider: "amazon-bedrock",
+          bedrock: { authMode: "default-chain", region: "us-west-2", profile: "dev" },
+        }),
+        ""
+      )
+    })
   })
 
   describe("Collection utilities", () => {
@@ -361,5 +397,55 @@ describe("Vector API", () => {
       expect(mockCollections.has("plugin_plugin-a_shared-name")).toBe(true)
       expect(mockCollections.has("plugin_plugin-b_shared-name")).toBe(true)
     })
+  })
+})
+
+// W2.3: the vector API is permission-gated; grant the suite's plugins.
+beforeAll(() => {
+  for (const id of ["test-plugin", "plugin-1", "plugin-2", "plugin-a", "plugin-b"]) {
+    initializePluginPermissions(id, ["vector:read", "vector:write", "ai:embed"])
+  }
+})
+
+describe("permission gate", () => {
+  it("throws PermissionError when vector:read is not granted", () => {
+    const api = createVectorAPI("no-perms-plugin")
+    expect(() => api.search("c", "q")).toThrow(/vector:read/)
+  })
+})
+
+describe("PII gate (W2.4)", () => {
+  it("blocks embed / embedBatch / search on leaking text", async () => {
+    const api = createVectorAPI("test-plugin")
+    await expect(api.embed("mail leak@example.com")).rejects.toThrow(/PII/)
+    await expect(api.embedBatch(["ok", "mail leak@example.com"])).rejects.toThrow(/PII/)
+    await expect(api.search("c", "mail leak@example.com")).rejects.toThrow(/PII/)
+  })
+
+  it("blocks addDocuments on leaking content or metadata (with or without embedding)", async () => {
+    const api = createVectorAPI("test-plugin")
+    await expect(
+      api.addDocuments("c", [{ id: "1", content: "mail leak@example.com", metadata: {} }])
+    ).rejects.toThrow(/PII/)
+    // A precomputed embedding does NOT bypass the gate: on cloud vector
+    // providers the stored content/metadata still leave the device.
+    await expect(
+      api.addDocuments("c", [
+        { id: "2", content: "mail leak@example.com", metadata: {}, embedding: [0.1] },
+      ])
+    ).rejects.toThrow(/PII/)
+    await expect(
+      api.addDocuments("c", [
+        {
+          id: "3",
+          content: "clean",
+          metadata: { note: "mail leak@example.com" },
+          embedding: [0.1],
+        },
+      ])
+    ).rejects.toThrow(/PII/)
+    await expect(
+      api.addDocuments("c", [{ id: "4", content: "clean", metadata: {}, embedding: [0.1] }])
+    ).resolves.toEqual(["4"])
   })
 })

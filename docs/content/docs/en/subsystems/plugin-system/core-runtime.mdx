@@ -282,11 +282,10 @@ update.
   Signatures go through `verifyPluginSignature` (`manager.ts:1880`); WASM capability grants through
   `applyWasmCapabilityGrant` (`manager.ts:1373`); rate limits through `getPluginRateLimiter().check`
   inside `context.ts`.
-- **Bridges.** `registerPluginContributions` (`manager.ts:2404`) registers modes/commands
-  (`manager.ts:2418`, `:2437`), slash commands (`manager.ts:2302`), themes via `PluginThemesBridge`
-  (`manager.ts:2450`), the four `OVERLAY_REGISTRY_CAPABILITIES` (`manager.ts:2482`), the seven
-  `MODULE_BRIDGE_CAPABILITIES` (`manager.ts:2511`), LSP servers (`manager.ts:2540`), and
-  skill→character attach (`manager.ts:2560`).
+- **Bridges.** `registerPluginContributions` (`manager.ts:3144`) registers modes/commands,
+  slash commands, themes via `PluginThemesBridge`, the 16 `OVERLAY_REGISTRY_CAPABILITIES`
+  (`manager.ts:3223`), the 20 `MODULE_BRIDGE_CAPABILITIES` (`manager.ts:3252`), LSP servers
+  (`manager.ts:3269`), and skill→character attach (`manager.ts:3347`).
 - **Dexie.** `applyPluginTables` / `removePluginTables` (`manager.ts:1566` / `:1838`) add and drop a
   plugin's namespaced tables; `ctx.dexie` is exposed only when the manifest declares it
   (`context.ts:215`).

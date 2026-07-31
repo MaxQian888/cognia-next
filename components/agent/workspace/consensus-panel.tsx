@@ -18,6 +18,8 @@ import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import { useShallow } from "zustand/react/shallow"
 
+import { VoteIcon } from "lucide-react"
+
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
@@ -86,7 +88,10 @@ export function ConsensusPanel() {
 
   return (
     <Card className="space-y-3 p-4" data-testid="consensus-panel">
-      <p className="text-sm font-medium">{t("title")}</p>
+      <p className="flex items-center gap-2 text-sm font-medium">
+        <VoteIcon className="size-4 text-muted-foreground" aria-hidden />
+        {t("title")}
+      </p>
       <p className="text-xs text-muted-foreground">{t("description")}</p>
       {ordered.length === 0 ? (
         <p className="text-xs text-muted-foreground">{t("empty")}</p>

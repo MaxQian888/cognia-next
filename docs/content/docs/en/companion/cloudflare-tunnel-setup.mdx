@@ -73,12 +73,12 @@ once keeps reconnecting — no re-pairing.
     ### Start Cognia's companion server
 
     In Cognia (desktop): **Settings → Companion → Server**. Start the
-    server and note the port — the default is **7890**. The **loopback**
+    server and note the port — the default is **27890**. The **loopback**
     bind mode is fine here: `cloudflared` runs on the same machine and
     connects to `localhost`, so you do **not** need LAN mode.
 
     Cognia serves **HTTPS with a self-signed certificate**. Confirm it's
-    up locally by opening `https://localhost:7890` in a browser — you'll
+    up locally by opening `https://localhost:27890` in a browser — you'll
     get a certificate warning, which is expected. Seeing the warning (not
     a connection refused) means the server is listening.
   </Step>
@@ -133,7 +133,7 @@ once keeps reconnecting — no re-pairing.
     - **Subdomain**: e.g. `cognia`
     - **Domain**: pick your Cloudflare-managed domain
     - **Service → Type**: `HTTPS`
-    - **Service → URL**: `localhost:7890`
+    - **Service → URL**: `localhost:27890`
     - **Additional application settings → TLS → No TLS Verify**: **On**
 
     Save. Cloudflare auto-creates the DNS record for
@@ -142,7 +142,7 @@ once keeps reconnecting — no re-pairing.
     <Callout type="warn">
       **No TLS Verify must be On.** Cognia's origin uses a self-signed
       certificate; without this, Cloudflare rejects the origin with a
-      `502`. Use service type `HTTPS` (not `HTTP`) and port `7890`.
+      `502`. Use service type `HTTPS` (not `HTTP`) and port `27890`.
     </Callout>
   </Step>
 
@@ -218,7 +218,7 @@ time — that's what makes the URL persistent.
   Make sure `cloudflared tunnel run --token …` is still running and
   printed `Registered tunnel connection`.
 - **`502 Bad Gateway`** — origin TLS rejection. Confirm the route uses
-  service type `HTTPS`, URL `localhost:7890`, and **No TLS Verify = On**.
+  service type `HTTPS`, URL `localhost:27890`, and **No TLS Verify = On**.
 - **Phone connects but the event stream drops after ~100 s idle** —
   you're on a Free/Pro plan's WebSocket idle timeout. Cognia's 25 s
   heartbeat normally covers this; verify the hostname route points at the
@@ -236,7 +236,7 @@ the Cloudflare dashboard, you can run a **locally-managed** tunnel:
 `cloudflared tunnel login` → `cloudflared tunnel create cognia` →
 `cloudflared tunnel route dns cognia cognia.your-domain.com` → write
 `~/.cloudflared/config.yml` with an ingress rule pointing at
-`https://localhost:7890` (with `originRequest.noTLSVerify: true`) →
+`https://localhost:27890` (with `originRequest.noTLSVerify: true`) →
 `cloudflared tunnel run cognia`. This is functionally equivalent for
 reaching Cognia; the token flow above is simpler and is what Cognia will
 automate in-app. See the Cloudflare docs linked below.

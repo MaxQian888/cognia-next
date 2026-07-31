@@ -11,11 +11,13 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 const mockCreateAdapterInstance = jest.fn().mockResolvedValue({ id: "ob-new-id" })
 const mockUpdateAdapterInstance = jest.fn().mockResolvedValue(undefined)
 const mockConnectorsKeyringSet = jest.fn().mockResolvedValue(undefined)
+const mockConnectorsKeyringDelete = jest.fn().mockResolvedValue(undefined)
 const mockConnectorsHealth = jest.fn().mockResolvedValue({
   serverRunning: true,
   boundAddr: "127.0.0.1:9090",
   registeredAdapterCount: 0,
 })
+const mockConnectorsOnebotProbe = jest.fn().mockResolvedValue([])
 
 jest.mock("@/lib/db/adapter-instances", () => ({
   createAdapterInstance: (...args: unknown[]) => mockCreateAdapterInstance(...args),
@@ -24,7 +26,9 @@ jest.mock("@/lib/db/adapter-instances", () => ({
 
 jest.mock("@/lib/connectors/tauri/commands", () => ({
   connectorsKeyringSet: (...args: unknown[]) => mockConnectorsKeyringSet(...args),
+  connectorsKeyringDelete: (...args: unknown[]) => mockConnectorsKeyringDelete(...args),
   connectorsHealth: () => mockConnectorsHealth(),
+  connectorsOnebotProbe: () => mockConnectorsOnebotProbe(),
 }))
 
 jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn().mockReturnValue(true) }))
@@ -133,6 +137,49 @@ describe("OneBotConfigDialog — create new", () => {
       expect(mockConnectorsHealth).toHaveBeenCalled()
     })
   })
+
+  it("renders the allow-unauthenticated toggle in reverse-ws mode", () => {
+    render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    expect(screen.getByLabelText(/allow unauthenticated/i)).toBeInTheDocument()
+  })
+
+  it("writes the unauthenticated opt-in flag when toggled on with no bearer", async () => {
+    render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    fireEvent.change(screen.getByLabelText(/bot uin/i), { target: { value: "222" } })
+    fireEvent.click(screen.getByLabelText(/allow unauthenticated/i))
+    fireEvent.click(screen.getByRole("button", { name: /create/i }))
+
+    await waitFor(() => {
+      expect(mockConnectorsKeyringSet).toHaveBeenCalledWith(
+        "ob-new-id",
+        "onebotAllowUnauthenticated",
+        "true"
+      )
+      // The opt-in is recorded in credentialsRef.accounts so the keyring
+      // probe knows about it.
+      expect(mockCreateAdapterInstance).toHaveBeenCalledWith(
+        expect.objectContaining({
+          credentialsRef: expect.objectContaining({
+            accounts: expect.arrayContaining(["onebotAllowUnauthenticated"]),
+          }),
+        })
+      )
+    })
+  })
+
+  it("clears the opt-in flag (fail-closed) when neither bearer nor toggle is set", async () => {
+    render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+    fireEvent.change(screen.getByLabelText(/bot uin/i), { target: { value: "333" } })
+    fireEvent.click(screen.getByRole("button", { name: /create/i }))
+
+    await waitFor(() => {
+      expect(mockConnectorsKeyringDelete).toHaveBeenCalledWith(
+        "ob-new-id",
+        "onebotAllowUnauthenticated"
+      )
+    })
+    expect(mockConnectorsKeyringSet).not.toHaveBeenCalled()
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -164,6 +211,30 @@ describe("OneBotConfigDialog — edit existing", () => {
     expect(screen.getByDisplayValue("Prod QQ Bot")).toBeInTheDocument()
   })
 
+  it("falls back to the shared connectors port when health has no bound address", async () => {
+    mockConnectorsHealth.mockResolvedValueOnce({
+      serverRunning: false,
+      boundAddr: null,
+      registeredAdapterCount: 0,
+    })
+
+    render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={existingRow} />)
+
+    expect(await screen.findByTestId("onebot-endpoint-display")).toHaveTextContent(
+      "ws://127.0.0.1:7842/ws/onebot/ob-existing"
+    )
+  })
+
+  it("falls back to the shared connectors port when health lookup fails", async () => {
+    mockConnectorsHealth.mockRejectedValueOnce(new Error("health unavailable"))
+
+    render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={existingRow} />)
+
+    expect(await screen.findByTestId("onebot-endpoint-display")).toHaveTextContent(
+      "ws://127.0.0.1:7842/ws/onebot/ob-existing"
+    )
+  })
+
   it("calls updateAdapterInstance on Save", async () => {
     render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={existingRow} />)
     fireEvent.change(screen.getByDisplayValue("Prod QQ Bot"), { target: { value: "Updated Bot" } })
@@ -175,6 +246,52 @@ describe("OneBotConfigDialog — edit existing", () => {
         expect.objectContaining({ displayName: "Updated Bot" })
       )
       expect(mockCreateAdapterInstance).not.toHaveBeenCalled()
+    })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Tests — live-status probe (reverse-WS)
+// ---------------------------------------------------------------------------
+
+describe("OneBotConfigDialog — live-status probe", () => {
+  const reverseRow: AdapterInstanceRow = {
+    id: "ob-existing",
+    type: "onebot",
+    displayName: "Prod QQ Bot",
+    enabled: true,
+    transportMode: "reverse-ws",
+    settings: { selfBotUin: "111222333", expectedClient: "napcat" },
+    credentialsRef: { keyringService: "com.cognia.platforms", accounts: ["onebotBearer"] },
+    trigger: defaultGroupChatPolicy(),
+    defaultMode: "auto",
+    createdAt: 1000,
+    updatedAt: 2000,
+  }
+
+  it("shows a connected badge when the probe reports the adapter is live", async () => {
+    mockConnectorsOnebotProbe.mockResolvedValueOnce([
+      { adapterId: "ob-existing", connectedAtMs: 1_700_000_000_000 },
+    ])
+    render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={reverseRow} />)
+    // Endpoint resolves async (via connectorsHealth) → the probe button appears.
+    const btn = await screen.findByRole("button", { name: /currently connected/i })
+    fireEvent.click(btn)
+    await waitFor(() => {
+      expect(screen.getByTestId("onebot-live-connected")).toBeInTheDocument()
+    })
+    expect(mockConnectorsOnebotProbe).toHaveBeenCalled()
+  })
+
+  it("shows a not-connected badge when the probe returns no matching client", async () => {
+    mockConnectorsOnebotProbe.mockResolvedValueOnce([
+      { adapterId: "someone-else", connectedAtMs: 1 },
+    ])
+    render(<OneBotConfigDialog open={true} onOpenChange={jest.fn()} row={reverseRow} />)
+    const btn = await screen.findByRole("button", { name: /currently connected/i })
+    fireEvent.click(btn)
+    await waitFor(() => {
+      expect(screen.getByTestId("onebot-live-disconnected")).toBeInTheDocument()
     })
   })
 })

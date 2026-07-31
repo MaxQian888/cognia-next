@@ -14,7 +14,14 @@ jest.mock("@/stores", () => ({
     selector({ isDesktop: isDesktopRef.current }),
 }))
 
-jest.mock("@/lib/logging", () => ({
+const canvasSandboxRef: { current: boolean | undefined } = { current: true }
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: <T>(
+    selector: (s: { settings: { canvasCodeSandboxEnabled: boolean | undefined } }) => T
+  ): T => selector({ settings: { canvasCodeSandboxEnabled: canvasSandboxRef.current } }),
+}))
+
+jest.mock("@cognia/logging", () => ({
   loggers: { canvas: { error: jest.fn(), warn: jest.fn(), info: jest.fn() } },
 }))
 
@@ -23,6 +30,8 @@ import { useCodeExecution } from "./use-code-execution"
 beforeEach(() => {
   executeMock.mockReset()
   isDesktopRef.current = false
+  // Canvas code is confined by DEFAULT (ADR-0028).
+  canvasSandboxRef.current = true
 })
 
 describe("useCodeExecution", () => {
@@ -127,8 +136,10 @@ describe("useCodeExecution", () => {
     expect(result.current.result).toBeNull()
   })
 
-  it("forwards isDesktop to the strategy", async () => {
+  it("forwards isDesktop and the opt-out to the strategy", async () => {
     isDesktopRef.current = true
+    // Explicit opt-out → Canvas code runs unconfined.
+    canvasSandboxRef.current = false
     executeMock.mockResolvedValueOnce({
       success: true,
       sandbox: "desktop",
@@ -148,6 +159,48 @@ describe("useCodeExecution", () => {
       language: "ts",
       isDesktop: true,
       stdin: "in",
+      sandboxed: false,
     })
+  })
+
+  it("confines Canvas code by default (ADR-0028)", async () => {
+    // canvasSandboxRef defaults to true in beforeEach — no opt-in needed.
+    executeMock.mockResolvedValueOnce({
+      success: true,
+      sandbox: "tauri-python",
+      stdout: "",
+      stderr: "",
+      exitCode: 0,
+      durationMs: 0,
+      executionTime: 0,
+      language: "python",
+    })
+    const { result } = renderHook(() => useCodeExecution())
+    await act(async () => {
+      await result.current.execute("print(1)", "python")
+    })
+    expect(executeMock).toHaveBeenCalledWith(
+      expect.objectContaining({ language: "python", sandboxed: true })
+    )
+  })
+
+  it("defaults to confined when the setting is unset", async () => {
+    // Setting absent → `?? true` fallback ⇒ confined.
+    canvasSandboxRef.current = undefined
+    executeMock.mockResolvedValueOnce({
+      success: true,
+      sandbox: "tauri-python",
+      stdout: "",
+      stderr: "",
+      exitCode: 0,
+      durationMs: 0,
+      executionTime: 0,
+      language: "python",
+    })
+    const { result } = renderHook(() => useCodeExecution())
+    await act(async () => {
+      await result.current.execute("print(1)", "python")
+    })
+    expect(executeMock).toHaveBeenCalledWith(expect.objectContaining({ sandboxed: true }))
   })
 })

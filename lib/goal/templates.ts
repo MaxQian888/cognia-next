@@ -6,7 +6,7 @@
  * apply uniformly.
  */
 
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import type { Goal } from "@/types/goal"
 import { getGoalTemplate } from "@/lib/db/goal-templates"
 import { getGoalRuntime } from "./runtime"

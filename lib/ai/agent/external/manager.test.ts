@@ -1,5 +1,7 @@
 // Mock heavyweight adapter modules so requiring manager.ts does not pull in
 // the real ACP/OpenCode adapters.
+let mockProcessExitCb: ((event: { agentId: string; code: number }) => void) | undefined
+
 jest.mock("./acp-client", () => ({
   AcpClientAdapter: class {
     readonly protocol = "acp"
@@ -10,8 +12,19 @@ jest.mock("./opencode-client", () => ({
     readonly protocol = "opencode"
   },
 }))
+jest.mock("./opencode-v2-client", () => ({
+  OpenCodeV2ClientAdapter: class {
+    readonly protocol = "opencode-v2"
+  },
+}))
 jest.mock("@/lib/native/external-agent", () => ({
   checkExternalAgentCommandExists: jest.fn().mockResolvedValue(true),
+  onExternalAgentExit: jest.fn(async (cb: (event: { agentId: string; code: number }) => void) => {
+    mockProcessExitCb = cb
+    return () => {
+      mockProcessExitCb = undefined
+    }
+  }),
   acpTerminalCreate: jest.fn(),
   acpTerminalKill: jest.fn(),
   acpTerminalOutput: jest.fn(),
@@ -22,14 +35,19 @@ jest.mock("@/lib/utils", () => ({
   ...jest.requireActual("@/lib/utils"),
   isTauri: jest.fn(() => true),
 }))
+jest.mock("@/lib/tauri", () => ({
+  isTauri: jest.fn(() => true),
+}))
 
 import {
   ExternalAgentManager,
   getExternalAgentManager,
   checkExternalAgentDelegation,
   executeOnExternalAgent,
+  shouldReconcileExitToDisconnected,
+  type ExternalAgentLifecycleEvent,
 } from "./manager"
-import { protocolAdapterRegistry } from "./protocol-adapter"
+import { protocolAdapterRegistry, type SessionCreateOptions } from "./protocol-adapter"
 import type {
   ExternalAgentConfig,
   ExternalAgentEvent,
@@ -56,8 +74,8 @@ class MockAdapter {
   })
   failConnect = false
   cancelImpl: jest.Mock<Promise<void>, [string]> = jest.fn(async (_id: string) => {})
-  listSessionsImpl?: jest.Mock<Promise<unknown>, []>
-  forkSessionImpl?: jest.Mock<Promise<ExternalAgentSession>, [string]>
+  listSessionsImpl?: jest.Mock<Promise<unknown>, [unknown?]>
+  forkSessionImpl?: jest.Mock<Promise<ExternalAgentSession>, [string, SessionCreateOptions?]>
   resumeSessionImpl?: jest.Mock<Promise<ExternalAgentSession>, [string]>
   setSessionModeImpl: jest.Mock = jest.fn(async () => {})
   setSessionModelImpl: jest.Mock = jest.fn(async () => {})
@@ -68,6 +86,8 @@ class MockAdapter {
   authRequired = false
   acpInit?: () => Record<string, unknown>
   extensionSupport?: () => Record<string, unknown>
+  logoutImpl?: jest.Mock<Promise<void>, []>
+  deleteSessionImpl?: jest.Mock<Promise<void>, [string]>
 
   get connectionStatus() {
     return this._connectionStatus
@@ -88,8 +108,11 @@ class MockAdapter {
   async healthCheck() {
     return this._connectionStatus === "connected"
   }
+  /** The SessionCreateOptions of the most recent createSession call. */
+  lastSessionOptions?: Record<string, unknown>
   async createSession(opts?: unknown): Promise<ExternalAgentSession> {
     const id = `s_${this.sessions.size + 1}`
+    this.lastSessionOptions = opts as Record<string, unknown> | undefined
     const session: ExternalAgentSession = {
       id,
       agentId: "mock-agent",
@@ -98,13 +121,25 @@ class MockAdapter {
       lastActivityAt: new Date(),
       messages: [],
       permissionMode: "default",
-      metadata: opts as Record<string, unknown> | undefined,
+      // Mirror the real adapters: a session carries the metadata BAG it was
+      // created with (see the Codex client's buildSessionMetadata), not the
+      // whole SessionCreateOptions. Recording the options as metadata made
+      // `session.metadata.selectedModel` permanently undefined, which would
+      // hide a model that failed to reach the session. Options are captured
+      // separately above.
+      metadata: (opts as { metadata?: Record<string, unknown> } | undefined)?.metadata,
     }
     this.sessions.set(id, session)
     return session
   }
   async closeSession(id: string) {
     this.sessions.delete(id)
+  }
+  get logout() {
+    return this.logoutImpl
+  }
+  get deleteSession() {
+    return this.deleteSessionImpl
   }
   getSession(id: string) {
     return this.sessions.get(id)
@@ -148,7 +183,7 @@ class MockAdapter {
   setSessionModel(_sid: string, _mid: string) {
     return this.setSessionModelImpl(_sid, _mid)
   }
-  setConfigOption(_sid: string, _id: string, _v: string) {
+  setConfigOption(_sid: string, _id: string, _v: string | boolean) {
     return this.setConfigOptionImpl(_sid, _id, _v)
   }
   getConfigOptions(sid: string) {
@@ -157,13 +192,13 @@ class MockAdapter {
   getSessionModels(sid: string) {
     return this.getSessionModelsImpl?.(sid)
   }
-  listSessions() {
+  listSessions(options?: unknown) {
     if (!this.listSessionsImpl) return undefined
-    return this.listSessionsImpl()
+    return this.listSessionsImpl(options)
   }
-  forkSession(sid: string) {
+  forkSession(sid: string, options?: SessionCreateOptions) {
     if (!this.forkSessionImpl) return undefined
-    return this.forkSessionImpl(sid)
+    return this.forkSessionImpl(sid, options)
   }
   resumeSession(sid: string, _opts?: unknown) {
     if (!this.resumeSessionImpl) return undefined
@@ -227,12 +262,30 @@ function freshManager(): ExternalAgentManager {
 
 beforeEach(() => {
   ExternalAgentManager.resetInstance()
+  mockProcessExitCb = undefined
   currentMock = new MockAdapter()
 })
 
 afterEach(async () => {
   await ExternalAgentManager.getInstance({ healthCheckInterval: 0 }).dispose()
   ExternalAgentManager.resetInstance()
+})
+
+describe("shouldReconcileExitToDisconnected (process-exit → instance sync)", () => {
+  it("reconciles only an established connection whose adapter is gone", () => {
+    expect(shouldReconcileExitToDisconnected("connected", false)).toBe(true)
+  })
+
+  it("leaves a still-connected adapter (self-healed / reconnected) alone", () => {
+    expect(shouldReconcileExitToDisconnected("connected", true)).toBe(false)
+  })
+
+  it("ignores in-flight connects and non-live states (no reconnect flicker)", () => {
+    for (const status of ["connecting", "reconnecting", "disconnected", "error"] as const) {
+      expect(shouldReconcileExitToDisconnected(status, false)).toBe(false)
+      expect(shouldReconcileExitToDisconnected(status, true)).toBe(false)
+    }
+  })
 })
 
 describe("ExternalAgentManager — singleton + getInstance", () => {
@@ -253,6 +306,57 @@ describe("addAgent / removeAgent / connect", () => {
     expect(m.getAgent("agent-1")).toBeDefined()
     expect(m.getConnectedAgents().length).toBe(1)
     expect(m.hasConnectedAgents()).toBe(true)
+  })
+
+  it("retries a connection when the managed process exits during startup", async () => {
+    const m = freshManager()
+    currentMock.connectImpl
+      .mockRejectedValueOnce(new Error("Codex app-server process exited with code 9"))
+      .mockResolvedValueOnce(undefined)
+
+    const instance = await m.addAgent(
+      buildBaseConfig({
+        retryConfig: {
+          maxRetries: 1,
+          retryDelay: 0,
+          exponentialBackoff: false,
+          maxRetryDelay: 0,
+          retryOnErrors: [],
+        },
+      })
+    )
+
+    expect(currentMock.connectImpl).toHaveBeenCalledTimes(2)
+    expect(instance.connectionStatus).toBe("connected")
+  })
+
+  it("auto-reconnects an established agent after an unexpected managed-process exit", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    ;(currentMock as unknown as { _connectionStatus: string })._connectionStatus = "disconnected"
+
+    expect(mockProcessExitCb).toBeDefined()
+    mockProcessExitCb?.({ agentId: "agent-1", code: 9 })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(currentMock.connectImpl).toHaveBeenCalledTimes(2)
+    expect(m.getAgent("agent-1")?.connectionStatus).toBe("connected")
+  })
+
+  it("does not auto-reconnect an exit emitted by an intentional disconnect", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    currentMock.disconnect = jest.fn(async () => {
+      ;(currentMock as unknown as { _connectionStatus: string })._connectionStatus = "disconnected"
+      mockProcessExitCb?.({ agentId: "agent-1", code: 0 })
+      await Promise.resolve()
+    })
+
+    await m.disconnect("agent-1")
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(currentMock.connectImpl).toHaveBeenCalledTimes(1)
+    expect(m.getAgent("agent-1")?.connectionStatus).toBe("disconnected")
   })
 
   it("rejects adding the same agent twice", async () => {
@@ -368,6 +472,30 @@ describe("Capability helpers (unsupported / ok / error)", () => {
       m.respondToPermission("ghost", "s_1", { requestId: "r", outcome: "cancelled" } as never)
     ).rejects.toThrow(/not found/)
   })
+
+  it("logout delegates to the adapter when supported and no-ops otherwise", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    currentMock.logoutImpl = jest.fn(async () => {})
+    await m.logout("agent-1")
+    expect(currentMock.logoutImpl).toHaveBeenCalledTimes(1)
+    // Unknown agent / unsupported adapter: no throw.
+    await expect(m.logout("ghost")).resolves.toBeUndefined()
+  })
+
+  it("deleteSession uses adapter.deleteSession when present, else falls back to closeSession", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    currentMock.deleteSessionImpl = jest.fn(async (_id: string) => {})
+    await m.deleteSession("agent-1", "s_1")
+    expect(currentMock.deleteSessionImpl).toHaveBeenCalledWith("s_1")
+
+    // Without deleteSession the manager falls back to closeSession.
+    currentMock.deleteSessionImpl = undefined
+    const closeSpy = jest.spyOn(currentMock, "closeSession")
+    await m.deleteSession("agent-1", "s_2")
+    expect(closeSpy).toHaveBeenCalledWith("s_2")
+  })
 })
 
 describe("Session extensions: list/fork/resume", () => {
@@ -384,6 +512,19 @@ describe("Session extensions: list/fork/resume", () => {
     currentMock.listSessionsImpl = jest.fn(async () => [{ sessionId: "s_1", title: "t" }])
     const out = await m.listSessions("agent-1")
     expect(out).toHaveLength(1)
+  })
+
+  it("listSessions forwards an ACP cwd filter and preserves workspace roots", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    currentMock.listSessionsImpl = jest.fn(async () => [
+      { sessionId: "s_1", cwd: "/work", additionalDirectories: ["/shared"] },
+    ])
+
+    const out = await m.listSessions("agent-1", { cwd: "/work" })
+
+    expect(currentMock.listSessionsImpl).toHaveBeenCalledWith({ cwd: "/work" })
+    expect(out).toEqual([{ sessionId: "s_1", cwd: "/work", additionalDirectories: ["/shared"] }])
   })
 
   it("forkSession throws unsupported when adapter lacks forkSession", async () => {
@@ -410,6 +551,33 @@ describe("Session extensions: list/fork/resume", () => {
     expect(out.id).toBe("s_forked")
   })
 
+  it("forkSession forwards workspace options to the adapter", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    const forked = {
+      id: "s_forked",
+      agentId: "agent-1",
+      status: "active" as const,
+      createdAt: new Date(),
+      lastActivityAt: new Date(),
+      messages: [],
+      permissionMode: "default" as const,
+    }
+    currentMock.forkSessionImpl = jest.fn(
+      async (_sessionId: string, _options?: SessionCreateOptions) => forked
+    )
+
+    await m.forkSession("agent-1", "s_1", {
+      cwd: "/work",
+      additionalDirectories: ["/shared"],
+    })
+
+    expect(currentMock.forkSessionImpl).toHaveBeenCalledWith("s_1", {
+      cwd: "/work",
+      additionalDirectories: ["/shared"],
+    })
+  })
+
   it("resumeSession throws unsupported when adapter lacks resumeSession", async () => {
     const m = freshManager()
     await m.addAgent(buildBaseConfig())
@@ -432,6 +600,89 @@ describe("Session extensions: list/fork/resume", () => {
     currentMock.resumeSessionImpl = jest.fn(async (_id: string) => resumed)
     const out = await m.resumeSession("agent-1", "s_1")
     expect(out.id).toBe("s_resumed")
+  })
+})
+
+describe("execute — model selection", () => {
+  // Regression: `ExternalAgentExecutionOptions` had no `model`, so callers that
+  // passed one (the plugin subagent dispatcher did) were silently dropped —
+  // spread properties bypass TypeScript's excess-property check, so it type-
+  // checked while doing nothing. The only channel adapters actually read is
+  // `metadata.selectedModel`, which `buildSessionOptions` never populated; its
+  // sole writer was the interactive picker, which nothing called.
+  async function connectedManager() {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    await m.connect("agent-1")
+    return m
+  }
+
+  it("bridges the requested model to the adapter as metadata.selectedModel", async () => {
+    const m = await connectedManager()
+    const createSession = jest.spyOn(currentMock, "createSession")
+
+    await m.execute("agent-1", "hi", { model: "gpt-5.6-sol" })
+
+    const opts = createSession.mock.calls[0]?.[0] as { metadata?: Record<string, unknown> }
+    expect(opts.metadata?.selectedModel).toBe("gpt-5.6-sol")
+  })
+
+  it("omits selectedModel entirely when no model is requested", async () => {
+    // So the agent keeps whatever its own configuration selects.
+    const m = await connectedManager()
+    const createSession = jest.spyOn(currentMock, "createSession")
+
+    await m.execute("agent-1", "hi")
+
+    const opts = createSession.mock.calls[0]?.[0] as { metadata?: Record<string, unknown> }
+    expect(opts.metadata?.selectedModel).toBeUndefined()
+  })
+
+  it("switches a reused session onto a newly requested model", async () => {
+    // A cached session never sees sessionOptions, so its model can only change
+    // through setSessionModel.
+    const m = await connectedManager()
+    const first = await m.execute("agent-1", "one", { model: "gpt-5.6-sol" })
+    currentMock.setSessionModelImpl.mockClear()
+
+    await m.execute("agent-1", "two", { sessionId: first.sessionId, model: "gpt-5.6-codex" })
+
+    expect(currentMock.setSessionModelImpl).toHaveBeenCalledWith(first.sessionId, "gpt-5.6-codex")
+  })
+
+  it("does not re-set the model when a reused session already runs it", async () => {
+    const m = await connectedManager()
+    const first = await m.execute("agent-1", "one", { model: "gpt-5.6-sol" })
+    currentMock.setSessionModelImpl.mockClear()
+
+    await m.execute("agent-1", "two", { sessionId: first.sessionId, model: "gpt-5.6-sol" })
+
+    expect(currentMock.setSessionModelImpl).not.toHaveBeenCalled()
+  })
+
+  it("leaves a reused session alone when no model is requested", async () => {
+    const m = await connectedManager()
+    const first = await m.execute("agent-1", "one", { model: "gpt-5.6-sol" })
+    currentMock.setSessionModelImpl.mockClear()
+
+    await m.execute("agent-1", "two", { sessionId: first.sessionId })
+
+    expect(currentMock.setSessionModelImpl).not.toHaveBeenCalled()
+  })
+
+  it("still executes when the adapter rejects the model switch", async () => {
+    // Best-effort: a rejected model id must not kill a run that can proceed on
+    // the session's current model.
+    const m = await connectedManager()
+    const first = await m.execute("agent-1", "one", { model: "gpt-5.6-sol" })
+    currentMock.setSessionModelImpl.mockRejectedValueOnce(new Error("unknown model"))
+
+    const result = await m.execute("agent-1", "two", {
+      sessionId: first.sessionId,
+      model: "bogus-model",
+    })
+
+    expect(result.success).toBe(true)
   })
 })
 
@@ -463,6 +714,110 @@ describe("Session lifecycle (createSession / closeSession / getSession)", () => 
     await m.closeSession("agent-1", s.id)
     expect(m.getSession("agent-1", s.id)).toBeUndefined()
   })
+
+  it("plumbs per-agent codexOptions into the execution session options metadata", async () => {
+    const m = freshManager()
+    await m.addAgent(
+      buildBaseConfig({
+        codexOptions: { sandboxMode: "readOnly", defaultReasoningEffort: "high" },
+      })
+    )
+    await m.execute("agent-1", "hello")
+    const session = currentMock.getSessions()[0]
+    const metadata = session.metadata as { codexOptions?: Record<string, unknown> }
+    expect(metadata.codexOptions).toEqual({
+      sandboxMode: "readOnly",
+      defaultReasoningEffort: "high",
+    })
+  })
+})
+
+describe("steerSession / supportsSteering", () => {
+  it("reports no steering support and throws when the adapter lacks steerTurn", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    expect(m.supportsSteering("agent-1")).toBe(false)
+    await expect(m.steerSession("agent-1", "s_1", "hint")).rejects.toThrow(
+      /does not support steering/i
+    )
+  })
+
+  it("delegates to the adapter's steerTurn with an explicit session id", async () => {
+    const steerTurn = jest.fn(async () => {})
+    ;(currentMock as unknown as { steerTurn: unknown }).steerTurn = steerTurn
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    expect(m.supportsSteering("agent-1")).toBe(true)
+    await m.steerSession("agent-1", "s_explicit", "focus on tests")
+    expect(steerTurn).toHaveBeenCalledWith("s_explicit", "focus on tests")
+  })
+
+  it("resolves the executing session when no session id is given", async () => {
+    const steerTurn = jest.fn(async () => {})
+    ;(currentMock as unknown as { steerTurn: unknown }).steerTurn = steerTurn
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    const session = await m.createSession("agent-1")
+    currentMock.getSession(session.id)!.status = "executing"
+    await m.steerSession("agent-1", undefined, "look here")
+    expect(steerTurn).toHaveBeenCalledWith(session.id, "look here")
+  })
+
+  it("throws when no session is executing and none was specified", async () => {
+    const steerTurn = jest.fn(async () => {})
+    ;(currentMock as unknown as { steerTurn: unknown }).steerTurn = steerTurn
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    await m.createSession("agent-1")
+    await expect(m.steerSession("agent-1", undefined, "hint")).rejects.toThrow(
+      /no executing session/i
+    )
+  })
+})
+
+describe("session compaction and provider undo routing", () => {
+  it("reports unsupported when the adapter does not implement the capability contract", async () => {
+    const manager = freshManager()
+    await manager.addAgent(buildBaseConfig())
+    await expect(manager.getCompactionCapability("agent-1", "s_1")).resolves.toEqual({
+      status: "unsupported",
+      routes: [],
+      reason: "adapter_unsupported",
+    })
+    await expect(manager.getProviderUndoCapability("agent-1", "s_1")).resolves.toEqual({
+      status: "unsupported",
+      reason: "adapter_unsupported",
+    })
+  })
+
+  it("delegates compaction options and provider undo to the live adapter", async () => {
+    const getCompactionCapability = jest.fn(async () => ({
+      status: "supported" as const,
+      routes: [{ kind: "native" as const, supportsFocus: false as const }],
+    }))
+    const compactSession = jest.fn(async () => {})
+    const getProviderUndoCapability = jest.fn(async () => ({
+      status: "supported" as const,
+      command: "undo" as const,
+    }))
+    const undoLastProviderChange = jest.fn(async () => {})
+    Object.assign(currentMock, {
+      getCompactionCapability,
+      compactSession,
+      getProviderUndoCapability,
+      undoLastProviderChange,
+    })
+
+    const manager = freshManager()
+    await manager.addAgent(buildBaseConfig())
+    await expect(manager.getCompactionCapability("agent-1", "s_1")).resolves.toMatchObject({
+      status: "supported",
+    })
+    await manager.compactSession("agent-1", "s_1", { focus: "Keep decisions" })
+    await manager.undoLastProviderChange("agent-1", "s_1")
+    expect(compactSession).toHaveBeenCalledWith("s_1", { focus: "Keep decisions" })
+    expect(undoLastProviderChange).toHaveBeenCalledWith("s_1")
+  })
 })
 
 describe("execute / cancel", () => {
@@ -472,6 +827,23 @@ describe("execute / cancel", () => {
     const result = await m.execute("agent-1", "hi")
     expect(result.success).toBe(true)
     expect(m.getAgent("agent-1")?.stats.successfulExecutions).toBe(1)
+  })
+
+  it("adapts the requested permission mode to what the backend can enforce", async () => {
+    const m = freshManager()
+    protocolAdapterRegistry.register("codex-app-server", () => currentMock as never)
+    await m.addAgent(buildBaseConfig({ protocol: "codex-app-server" }))
+    // Codex has no `dontAsk`; the manager clamps it down to `plan` before
+    // forwarding to the adapter so the session runs under an enforceable mode.
+    await m.execute("agent-1", "hi", { permissionMode: "dontAsk" })
+    expect(currentMock.setSessionModeImpl).toHaveBeenCalledWith("s_1", "plan")
+  })
+
+  it("passes a backend-supported permission mode through unchanged", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig({ protocol: "acp" }))
+    await m.execute("agent-1", "hi", { permissionMode: "bypassPermissions" })
+    expect(currentMock.setSessionModeImpl).toHaveBeenCalledWith("s_1", "bypassPermissions")
   })
 
   it("execute records failure and last error when result.success is false", async () => {
@@ -638,6 +1010,54 @@ describe("Delegation rules", () => {
     expect(m.checkDelegation("anything").shouldDelegate).toBe(true)
   })
 
+  it("matches a 'custom' rule via a plain-regex matcher (backward compatible)", async () => {
+    const m = await setup()
+    m.addDelegationRule({
+      id: "rc1",
+      name: "custom-regex",
+      enabled: true,
+      priority: 1,
+      condition: "custom",
+      matcher: "deploy|release",
+      targetAgentId: "agent-1",
+    } as never)
+    expect(m.checkDelegation("time to deploy").shouldDelegate).toBe(true)
+    expect(m.checkDelegation("just chatting").shouldDelegate).toBe(false)
+  })
+
+  it("matches a 'custom' rule via a structured all/any/not spec", async () => {
+    const m = await setup()
+    m.addDelegationRule({
+      id: "rc2",
+      name: "custom-structured",
+      enabled: true,
+      priority: 1,
+      condition: "custom",
+      matcher: JSON.stringify({
+        all: [{ contains: ["migrate", "migration"] }, { not: { regex: "rollback" } }],
+      }),
+      targetAgentId: "agent-1",
+    } as never)
+    expect(m.checkDelegation("please migrate the schema").shouldDelegate).toBe(true)
+    expect(m.checkDelegation("migrate then rollback").shouldDelegate).toBe(false)
+    expect(m.checkDelegation("unrelated task").shouldDelegate).toBe(false)
+  })
+
+  it("a malformed 'custom' spec never matches (no throw)", async () => {
+    const m = await setup()
+    m.addDelegationRule({
+      id: "rc3",
+      name: "custom-bad",
+      enabled: true,
+      priority: 1,
+      condition: "custom",
+      matcher: "{ not valid json",
+      targetAgentId: "agent-1",
+    } as never)
+    expect(() => m.checkDelegation("anything")).not.toThrow()
+    expect(m.checkDelegation("anything").shouldDelegate).toBe(false)
+  })
+
   it("matches a tool-needed rule", async () => {
     const m = await setup()
     m.addDelegationRule({
@@ -800,5 +1220,162 @@ describe("Convenience functions", () => {
     } as never)
     const result = await executeOnExternalAgent("hi")
     expect(result?.success).toBe(true)
+  })
+})
+
+describe("lastRunSnapshot recording (Workstream D)", () => {
+  it("records an ok/external snapshot after a successful execute", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    await m.execute("agent-1", "hi")
+    const snap = m.getAgent("agent-1")?.lastRunSnapshot
+    expect(snap?.terminalOutcome).toBe("ok")
+    expect(snap?.branchOutcome).toBe("external")
+    expect(snap?.branchReasonCode).toBe("ok")
+    expect(snap?.timestamp).toBeInstanceOf(Date)
+  })
+
+  it("records an error/fallback snapshot when execute returns success:false", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    currentMock.executeImpl = jest.fn(async () => ({
+      success: false,
+      sessionId: "s_1",
+      finalResponse: "",
+      messages: [],
+      steps: [],
+      toolCalls: [],
+      duration: 5,
+      error: "execution rejected",
+    }))
+    await m.execute("agent-1", "hi")
+    const snap = m.getAgent("agent-1")?.lastRunSnapshot
+    expect(snap?.terminalOutcome).toBe("error")
+    expect(snap?.branchOutcome).toBe("fallback")
+    expect(snap?.diagnosticText).toMatch(/execution rejected/)
+  })
+
+  it("records an error/fallback snapshot when execute throws (execution_failed arm)", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    currentMock.executeImpl = jest.fn(async () => {
+      throw new Error("adapter exploded")
+    })
+    await expect(m.execute("agent-1", "hi")).rejects.toThrow(/adapter exploded/)
+    const snap = m.getAgent("agent-1")?.lastRunSnapshot
+    expect(snap?.terminalOutcome).toBe("error")
+    expect(snap?.branchReasonCode).toBe("execution_failed")
+    expect(snap?.branchOutcome).toBe("fallback")
+    expect(snap?.diagnosticText).toMatch(/adapter exploded/)
+  })
+
+  it("records external_unavailable on the timeout arm of the execute catch", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    currentMock.executeImpl = jest.fn(async () => {
+      throw new Error("operation timed out")
+    })
+    await expect(m.execute("agent-1", "hi")).rejects.toThrow(/timed out/)
+    const snap = m.getAgent("agent-1")?.lastRunSnapshot
+    expect(snap?.terminalOutcome).toBe("error")
+    expect(snap?.branchReasonCode).toBe("external_unavailable")
+  })
+
+  it("records an ok snapshot after a successful streaming run", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    currentMock.events = [
+      { type: "done", success: true, timestamp: new Date() },
+    ] as ExternalAgentEvent[]
+    for await (const _ev of m.executeStreaming("agent-1", "hi")) {
+      void _ev
+    }
+    expect(m.getAgent("agent-1")?.lastRunSnapshot?.terminalOutcome).toBe("ok")
+  })
+
+  it("emits the snapshot on the lifecycle event so the store bridge can persist it", async () => {
+    const m = freshManager()
+    await m.addAgent(buildBaseConfig())
+    const withSnapshot: ExternalAgentLifecycleEvent[] = []
+    const unsubscribe = m.addLifecycleListener((event) => {
+      if (event.lastRunSnapshot) withSnapshot.push(event)
+    })
+    await m.execute("agent-1", "hi")
+    unsubscribe()
+    expect(withSnapshot.length).toBeGreaterThan(0)
+    expect(withSnapshot.at(-1)?.lastRunSnapshot?.terminalOutcome).toBe("ok")
+  })
+})
+
+describe("plugin lifecycle — teardown / restore / peekInstance", () => {
+  const PLUGIN_PROTOCOL = "plug:demo"
+
+  async function addPluginAgent(m: ExternalAgentManager) {
+    protocolAdapterRegistry.register(PLUGIN_PROTOCOL, () => currentMock as never)
+    await m.addAgent(buildBaseConfig({ id: "p-agent", protocol: PLUGIN_PROTOCOL as never }))
+  }
+
+  it("teardownAgentsByProtocols disconnects, drops the adapter, keeps a blocked instance", async () => {
+    const m = freshManager()
+    await addPluginAgent(m)
+    expect(m.getAgent("p-agent")?.connectionStatus).toBe("connected")
+
+    const affected = await m.teardownAgentsByProtocols([PLUGIN_PROTOCOL])
+    expect(affected).toEqual(["p-agent"])
+
+    const inst = m.getAgent("p-agent")
+    expect(inst).toBeDefined() // instance kept for restore + UI explanation
+    expect(inst?.connectionStatus).toBe("disconnected")
+    expect(inst?.validity?.executable).toBe(false)
+    // Adapter dropped → ACP helpers that resolve by agent now report "not found".
+    await expect(
+      m.respondToPermission("p-agent", "s", {} as AcpPermissionResponse)
+    ).rejects.toThrow(/not found/i)
+  })
+
+  it("ignores agents on other protocols", async () => {
+    const m = freshManager()
+    await addPluginAgent(m)
+    const affected = await m.teardownAgentsByProtocols(["other:thing"])
+    expect(affected).toEqual([])
+    expect(m.getAgent("p-agent")?.connectionStatus).toBe("connected")
+  })
+
+  it("restoreAgentsForProtocols recreates the adapter and clears the block", async () => {
+    const m = freshManager()
+    await addPluginAgent(m)
+    await m.teardownAgentsByProtocols([PLUGIN_PROTOCOL])
+
+    const restored = m.restoreAgentsForProtocols([PLUGIN_PROTOCOL])
+    expect(restored).toEqual(["p-agent"])
+
+    const inst = m.getAgent("p-agent")
+    expect(inst?.validity?.executable).toBe(true)
+    expect(inst?.connectionStatus).toBe("disconnected")
+    // Adapter present again → the helper resolves instead of throwing not-found.
+    await expect(
+      m.respondToPermission("p-agent", "s", {} as AcpPermissionResponse)
+    ).resolves.toBeUndefined()
+  })
+
+  it("restore skips agents whose adapter is still present", async () => {
+    const m = freshManager()
+    await addPluginAgent(m)
+    expect(m.restoreAgentsForProtocols([PLUGIN_PROTOCOL])).toEqual([])
+  })
+
+  it("teardown and restore are no-ops for an empty protocol set", async () => {
+    const m = freshManager()
+    await addPluginAgent(m)
+    expect(await m.teardownAgentsByProtocols([])).toEqual([])
+    expect(m.restoreAgentsForProtocols([])).toEqual([])
+    expect(m.getAgent("p-agent")?.connectionStatus).toBe("connected")
+  })
+
+  it("peekInstance returns null with no manager and the live instance otherwise", () => {
+    ExternalAgentManager.resetInstance()
+    expect(ExternalAgentManager.peekInstance()).toBeNull()
+    const m = freshManager()
+    expect(ExternalAgentManager.peekInstance()).toBe(m)
   })
 })

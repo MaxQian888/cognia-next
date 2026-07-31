@@ -1,0 +1,87 @@
+{
+  "id": "ripgrep-tools",
+  "name": "Ripgrep Tools",
+  "version": "0.1.0",
+  "description": "First-party reference plugin for declarative CLI wrapper tools: exposes ripgrep as an agent tool with zero plugin code.",
+  "type": "frontend",
+  "capabilities": ["cli-tools"],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "permissions": ["cli:execute"],
+  "activationEvents": ["startup"],
+  "requires": {
+    "binaries": [
+      {
+        "name": "rg",
+        "minVersion": "13.0.0",
+        "documentation": "https://github.com/BurntSushi/ripgrep#installation"
+      }
+    ]
+  },
+  "cliTools": [
+    {
+      "name": "ripgrep_search",
+      "description": "Search file contents in a directory with ripgrep. Returns matching lines as ripgrep --json events. Exit code 1 (no matches) is a successful empty result.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Regular expression to search for"
+          },
+          "path": {
+            "type": "string",
+            "description": "Directory or file to search, relative to the workspace root"
+          },
+          "globs": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Optional file glob filters, e.g. \"*.ts\""
+          },
+          "ignoreCase": {
+            "type": "boolean",
+            "description": "Case-insensitive search"
+          },
+          "maxCount": {
+            "type": "number",
+            "description": "Stop after this many matches per file"
+          }
+        },
+        "required": ["pattern"]
+      },
+      "binary": { "kind": "requires", "name": "rg" },
+      "argv": [
+        { "literal": "--json" },
+        { "param": "ignoreCase", "eachPrefixedBy": "-i", "omitWhenEmpty": true },
+        { "param": "maxCount", "eachPrefixedBy": "--max-count", "omitWhenEmpty": true },
+        { "param": "globs", "eachPrefixedBy": "--glob", "omitWhenEmpty": true },
+        { "param": "pattern", "eachPrefixedBy": "-e" },
+        { "literal": "--" },
+        { "param": "path", "omitWhenEmpty": true }
+      ],
+      "cwd": { "kind": "workspace" },
+      "outputParse": "lines",
+      "successExitCodes": [0, 1],
+      "timeoutMs": 60000,
+      "maxOutputBytes": 500000
+    }
+  ],
+  "runtimeCompatibility": {
+    "tauri": {
+      "availability": "supported"
+    },
+    "browser": {
+      "availability": "blocked",
+      "reason": "CLI tools spawn host processes; desktop only."
+    },
+    "mobile": {
+      "availability": "blocked",
+      "reason": "CLI tools spawn host processes — unavailable on mobile."
+    }
+  }
+}

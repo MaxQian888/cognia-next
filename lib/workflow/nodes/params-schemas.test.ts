@@ -100,6 +100,21 @@ describe("trigger schemas", () => {
     ).toBe(true)
   })
 
+  it("trigger.integration.event accepts generic platform filters", () => {
+    const schema = PARAMS_SCHEMAS["trigger.integration.event"]
+    expect(schema.safeParse({}).success).toBe(true)
+    expect(
+      schema.safeParse({
+        pluginId: "github-delivery",
+        accountId: "account-1",
+        eventTypes: ["pull_request.opened"],
+        resourceKind: "repository",
+        resourceId: "cognia/cognia-next",
+      }).success
+    ).toBe(true)
+    expect(schema.safeParse({ eventTypes: [""] }).success).toBe(false)
+  })
+
   it("trigger.manual is unconditionally happy", () => {
     expect(PARAMS_SCHEMAS["trigger.manual"].safeParse({}).success).toBe(true)
   })
@@ -144,6 +159,220 @@ describe("action: character/team/skill schemas", () => {
     expect(PARAMS_SCHEMAS["action.team.update"].safeParse({ teamId: "t" }).success).toBe(true)
   })
 
+  it("action.plan.create requires a session, title, and explicit steps", () => {
+    const schema = PARAMS_SCHEMAS["action.plan.create" as keyof typeof PARAMS_SCHEMAS]
+    expect(schema?.safeParse({}).success).toBe(false)
+    expect(
+      schema?.safeParse({
+        sessionId: "ses_1",
+        title: "Ship the plan",
+        stepsJson: '[{"title":"Do it","kind":"agent_turn"}]',
+      }).success
+    ).toBe(true)
+    expect(
+      schema?.safeParse({
+        sessionId: "ses_1",
+        title: "Ship the plan",
+        steps: [{ title: "Do it", kind: "agent_turn" }],
+      }).success
+    ).toBe(true)
+  })
+
+  it("action.plan list/events/lifecycle schemas enforce required targeting fields", () => {
+    expect(
+      PARAMS_SCHEMAS["action.plan.list" as keyof typeof PARAMS_SCHEMAS]?.safeParse({
+        mode: "session",
+      }).success
+    ).toBe(false)
+    expect(
+      PARAMS_SCHEMAS["action.plan.list" as keyof typeof PARAMS_SCHEMAS]?.safeParse({
+        mode: "session",
+        sessionId: "ses_1",
+      }).success
+    ).toBe(true)
+    expect(
+      PARAMS_SCHEMAS["action.plan.events" as keyof typeof PARAMS_SCHEMAS]?.safeParse({
+        limit: 10,
+      }).success
+    ).toBe(false)
+    expect(
+      PARAMS_SCHEMAS["action.plan.approve" as keyof typeof PARAMS_SCHEMAS]?.safeParse({
+        planId: "plan_1",
+      }).success
+    ).toBe(true)
+    expect(
+      PARAMS_SCHEMAS["action.plan.reject" as keyof typeof PARAMS_SCHEMAS]?.safeParse({
+        planId: "plan_1",
+        feedback: "Needs a smaller scope",
+      }).success
+    ).toBe(true)
+    expect(
+      PARAMS_SCHEMAS["action.plan.refine" as keyof typeof PARAMS_SCHEMAS]?.safeParse({
+        planId: "plan_1",
+        refinementType: "repair",
+        trigger: "step_failure",
+        failedStepId: "step_1",
+      }).success
+    ).toBe(true)
+  })
+
+  it("action.plan.updateDraft and setStepStatus validate patch intent", () => {
+    expect(
+      PARAMS_SCHEMAS["action.plan.updateDraft" as keyof typeof PARAMS_SCHEMAS]?.safeParse({
+        planId: "plan_1",
+      }).success
+    ).toBe(false)
+    expect(
+      PARAMS_SCHEMAS["action.plan.updateDraft" as keyof typeof PARAMS_SCHEMAS]?.safeParse({
+        planId: "plan_1",
+        title: "Updated plan",
+      }).success
+    ).toBe(true)
+    expect(
+      PARAMS_SCHEMAS["action.plan.setStepStatus" as keyof typeof PARAMS_SCHEMAS]?.safeParse({
+        planId: "plan_1",
+        stepId: "step_1",
+        status: "completed",
+      }).success
+    ).toBe(true)
+    expect(
+      PARAMS_SCHEMAS["action.plan.setStepStatus" as keyof typeof PARAMS_SCHEMAS]?.safeParse({
+        planId: "plan_1",
+        stepId: "step_1",
+        status: "unknown",
+      }).success
+    ).toBe(false)
+  })
+
+  it("scheduler task schemas validate task lifecycle fields", () => {
+    expect(
+      PARAMS_SCHEMAS["action.scheduler.task.create" as WorkflowNodeKind].safeParse({
+        name: "Nightly agent",
+        type: "agent",
+        triggerType: "cron",
+        cronExpression: "0 1 * * *",
+        payloadJson: '{"prompt":"check status","characterId":"char_1"}',
+      }).success
+    ).toBe(true)
+    expect(
+      PARAMS_SCHEMAS["action.scheduler.task.create" as WorkflowNodeKind].safeParse({
+        name: "Missing trigger",
+        type: "custom",
+        triggerType: "cron",
+      }).success
+    ).toBe(false)
+    expect(
+      PARAMS_SCHEMAS["action.scheduler.task.create" as WorkflowNodeKind].safeParse({
+        name: "Once",
+        type: "custom",
+        triggerType: "once",
+        runAt: "2026-12-31T00:00:00Z",
+      }).success
+    ).toBe(true)
+
+    for (const kind of [
+      "action.scheduler.task.get",
+      "action.scheduler.task.pause",
+      "action.scheduler.task.resume",
+      "action.scheduler.task.delete",
+      "action.scheduler.task.runNow",
+      "action.scheduler.task.executions",
+    ] as WorkflowNodeKind[]) {
+      expect(PARAMS_SCHEMAS[kind].safeParse({}).success).toBe(false)
+      expect(PARAMS_SCHEMAS[kind].safeParse({ taskId: "task_1" }).success).toBe(true)
+    }
+
+    expect(
+      PARAMS_SCHEMAS["action.scheduler.task.list" as WorkflowNodeKind].safeParse({
+        statuses: ["active", "paused"],
+        types: ["agent", "script"],
+        tags: ["nightly"],
+        limit: 25,
+      }).success
+    ).toBe(true)
+    expect(
+      PARAMS_SCHEMAS["action.scheduler.task.update" as WorkflowNodeKind].safeParse({
+        taskId: "task_1",
+      }).success
+    ).toBe(false)
+    expect(
+      PARAMS_SCHEMAS["action.scheduler.task.update" as WorkflowNodeKind].safeParse({
+        taskId: "task_1",
+        status: "paused",
+      }).success
+    ).toBe(true)
+  })
+
+  it("advanced scheduler schemas validate import/export, backfill, status, and event fields", () => {
+    expect(
+      PARAMS_SCHEMAS["action.scheduler.task.backfill" as WorkflowNodeKind].safeParse({
+        taskId: "task_1",
+        start: "2026-06-01T00:00:00Z",
+        end: "2026-06-02T00:00:00Z",
+      }).success
+    ).toBe(true)
+    expect(
+      PARAMS_SCHEMAS["action.scheduler.task.backfill" as WorkflowNodeKind].safeParse({
+        taskId: "task_1",
+        start: "2026-06-01T00:00:00Z",
+      }).success
+    ).toBe(false)
+
+    expect(
+      PARAMS_SCHEMAS["action.scheduler.task.export" as WorkflowNodeKind].safeParse({
+        taskIdsRaw: "task_1, task_2",
+      }).success
+    ).toBe(true)
+    expect(
+      PARAMS_SCHEMAS["action.scheduler.task.import" as WorkflowNodeKind].safeParse({
+        dataJson: '{"version":1,"tasks":[]}',
+        mode: "replace",
+      }).success
+    ).toBe(true)
+    expect(
+      PARAMS_SCHEMAS["action.scheduler.task.import" as WorkflowNodeKind].safeParse({
+        mode: "replace",
+      }).success
+    ).toBe(false)
+
+    for (const kind of [
+      "action.scheduler.status",
+      "action.scheduler.statistics",
+    ] as WorkflowNodeKind[]) {
+      expect(PARAMS_SCHEMAS[kind].safeParse({}).success).toBe(true)
+    }
+    expect(
+      PARAMS_SCHEMAS["action.scheduler.upcoming" as WorkflowNodeKind].safeParse({
+        limit: 25,
+      }).success
+    ).toBe(true)
+    expect(
+      PARAMS_SCHEMAS["action.scheduler.executions.recent" as WorkflowNodeKind].safeParse({
+        limit: 25,
+      }).success
+    ).toBe(true)
+    expect(
+      PARAMS_SCHEMAS["action.scheduler.execution.get" as WorkflowNodeKind].safeParse({}).success
+    ).toBe(false)
+    expect(
+      PARAMS_SCHEMAS["action.scheduler.execution.get" as WorkflowNodeKind].safeParse({
+        executionId: "exec_1",
+      }).success
+    ).toBe(true)
+    expect(
+      PARAMS_SCHEMAS["action.scheduler.event.trigger" as WorkflowNodeKind].safeParse({
+        eventType: "goal:completed",
+        eventSource: "goal",
+        payloadJson: '{"goalId":"goal_1"}',
+      }).success
+    ).toBe(true)
+    expect(
+      PARAMS_SCHEMAS["action.scheduler.event.trigger" as WorkflowNodeKind].safeParse({
+        eventSource: "goal",
+      }).success
+    ).toBe(false)
+  })
+
   it("action.skill.invoke requires skillIds string", () => {
     expect(PARAMS_SCHEMAS["action.skill.invoke"].safeParse({}).success).toBe(false)
     expect(PARAMS_SCHEMAS["action.skill.invoke"].safeParse({ skillIds: "skill_a" }).success).toBe(
@@ -156,6 +385,148 @@ describe("action: character/team/skill schemas", () => {
     expect(
       PARAMS_SCHEMAS["action.skill.upsert"].safeParse({ name: "x", content: "body" }).success
     ).toBe(true)
+  })
+})
+
+describe("memory action schemas", () => {
+  it("accepts all four scopes and the complete namespace fields", () => {
+    for (const scope of ["global", "workspace", "character", "agent"]) {
+      expect(
+        PARAMS_SCHEMAS["action.memory.recall"].safeParse({
+          query: "tooling",
+          scope,
+          projectId: "p1",
+          characterId: "c1",
+          agentId: "a1",
+          branch: "main",
+          path: "src",
+        }).success
+      ).toBe(true)
+      expect(
+        PARAMS_SCHEMAS["action.memory.store"].safeParse({
+          text: "The project uses pnpm",
+          scope,
+          projectId: "p1",
+          characterId: "c1",
+          agentId: "a1",
+          branch: "main",
+          pathPattern: "src",
+        }).success
+      ).toBe(true)
+    }
+  })
+
+  it("rejects unknown scopes and invalid namespace value types", () => {
+    expect(
+      PARAMS_SCHEMAS["action.memory.recall"].safeParse({ query: "x", scope: "team" }).success
+    ).toBe(false)
+    expect(
+      PARAMS_SCHEMAS["action.memory.store"].safeParse({ text: "x", projectId: 42 }).success
+    ).toBe(false)
+  })
+})
+
+describe("action: goal schemas", () => {
+  it("action.goal.create requires sessionId + rawObjective and accepts configJson", () => {
+    const s = PARAMS_SCHEMAS["action.goal.create" as WorkflowNodeKind]
+    expect(s.safeParse({}).success).toBe(false)
+    expect(s.safeParse({ sessionId: "ses_1", rawObjective: "ship it" }).success).toBe(true)
+    expect(
+      s.safeParse({
+        sessionId: "ses_1",
+        rawObjective: "ship it",
+        startPaused: true,
+        configJson: '{"maxTurns":5}',
+      }).success
+    ).toBe(true)
+  })
+
+  it("goal id actions require goalId", () => {
+    for (const kind of [
+      "action.goal.get",
+      "action.goal.events",
+      "action.goal.pause",
+      "action.goal.resume",
+      "action.goal.stop",
+      "action.goal.preempt",
+      "action.goal.decomposeSubgoals",
+      "action.goal.clearSubgoals",
+      "action.goal.delete",
+    ] as WorkflowNodeKind[]) {
+      expect(PARAMS_SCHEMAS[kind].safeParse({}).success).toBe(false)
+      expect(PARAMS_SCHEMAS[kind].safeParse({ goalId: "goal_1" }).success).toBe(true)
+    }
+  })
+
+  it("action.goal.updateObjective and toggleSubgoal require their editable fields", () => {
+    expect(
+      PARAMS_SCHEMAS["action.goal.updateObjective" as WorkflowNodeKind].safeParse({
+        goalId: "goal_1",
+      }).success
+    ).toBe(false)
+    expect(
+      PARAMS_SCHEMAS["action.goal.updateObjective" as WorkflowNodeKind].safeParse({
+        goalId: "goal_1",
+        rawObjective: "new objective",
+      }).success
+    ).toBe(true)
+    expect(
+      PARAMS_SCHEMAS["action.goal.toggleSubgoal" as WorkflowNodeKind].safeParse({
+        goalId: "goal_1",
+      }).success
+    ).toBe(false)
+    expect(
+      PARAMS_SCHEMAS["action.goal.toggleSubgoal" as WorkflowNodeKind].safeParse({
+        goalId: "goal_1",
+        subgoalId: "sub_1",
+      }).success
+    ).toBe(true)
+  })
+
+  it("action.goal.list and action.goal.analytics require sessionId only in session scope", () => {
+    const list = PARAMS_SCHEMAS["action.goal.list" as WorkflowNodeKind]
+    expect(list.safeParse({ mode: "all" }).success).toBe(true)
+    expect(list.safeParse({ mode: "session" }).success).toBe(false)
+    expect(list.safeParse({ mode: "session", sessionId: "ses_1", limit: 10 }).success).toBe(true)
+    const analytics = PARAMS_SCHEMAS["action.goal.analytics" as WorkflowNodeKind]
+    expect(analytics.safeParse({ scope: "all", windowDays: 30 }).success).toBe(true)
+    expect(analytics.safeParse({ scope: "session" }).success).toBe(false)
+    expect(analytics.safeParse({ scope: "session", sessionId: "ses_1" }).success).toBe(true)
+  })
+
+  it("action.goal.template nodes validate template ids and editable template fields", () => {
+    expect(
+      PARAMS_SCHEMAS["action.goal.template.createGoal" as WorkflowNodeKind].safeParse({
+        templateId: "gtpl_1",
+        sessionId: "ses_1",
+      }).success
+    ).toBe(true)
+    expect(
+      PARAMS_SCHEMAS["action.goal.template.createGoal" as WorkflowNodeKind].safeParse({
+        templateId: "gtpl_1",
+      }).success
+    ).toBe(false)
+
+    const upsert = PARAMS_SCHEMAS["action.goal.template.upsert" as WorkflowNodeKind]
+    expect(upsert.safeParse({ title: "x" }).success).toBe(false)
+    expect(
+      upsert.safeParse({
+        title: "x",
+        objectiveText: "do the work",
+        configJson: '{"maxTurns":4}',
+        sortOrder: 1,
+      }).success
+    ).toBe(true)
+
+    expect(
+      PARAMS_SCHEMAS["action.goal.template.favorite" as WorkflowNodeKind].safeParse({
+        templateId: "gtpl_1",
+        isFavorite: true,
+      }).success
+    ).toBe(true)
+    expect(
+      PARAMS_SCHEMAS["action.goal.template.delete" as WorkflowNodeKind].safeParse({}).success
+    ).toBe(false)
   })
 })
 
@@ -194,6 +565,23 @@ describe("action: twin / connector / mcp / plugin", () => {
     expect(s.safeParse({ adapterId: "tg", conversationKey: "k", content: "hi" }).success).toBe(true)
   })
 
+  it("action.connector.send fine-grain: edit target + delivery-wait bounds", () => {
+    const s = PARAMS_SCHEMAS["action.connector.send"]
+    const base = { adapterId: "tg", conversationKey: "k", content: "hi" }
+    expect(
+      s.safeParse({
+        ...base,
+        editTargetMessageId: "om_1",
+        waitForDelivery: true,
+        waitTimeoutMs: 5_000,
+      }).success
+    ).toBe(true)
+    // Wait budget is bounded to [100, 300000] at the schema layer.
+    expect(s.safeParse({ ...base, waitTimeoutMs: 50 }).success).toBe(false)
+    expect(s.safeParse({ ...base, waitTimeoutMs: 600_000 }).success).toBe(false)
+    expect(s.safeParse({ ...base, waitForDelivery: "yes" }).success).toBe(false)
+  })
+
   it("action.connector.draft requires conversationKey, sessionId, content", () => {
     const s = PARAMS_SCHEMAS["action.connector.draft"]
     expect(s.safeParse({}).success).toBe(false)
@@ -206,10 +594,136 @@ describe("action: twin / connector / mcp / plugin", () => {
     expect(s.safeParse({ serverId: "s", toolName: "t" }).success).toBe(true)
   })
 
-  it("action.plugin.invoke requires pluginId + taskId", () => {
+  it("action.plugin.invoke requires pluginId; taskId/toolName are per-mode optional", () => {
     const s = PARAMS_SCHEMAS["action.plugin.invoke"]
     expect(s.safeParse({}).success).toBe(false)
+    // Legacy task-mode nodes (no mode discriminator).
     expect(s.safeParse({ pluginId: "p", taskId: "t" }).success).toBe(true)
+    // Tool-mode nodes carry toolName instead of taskId.
+    expect(s.safeParse({ pluginId: "p", mode: "tool", toolName: "demo" }).success).toBe(true)
+    // Mode is constrained to the known discriminators.
+    expect(s.safeParse({ pluginId: "p", mode: "bogus" }).success).toBe(false)
+  })
+})
+
+describe("action: Desktop automation schemas", () => {
+  const handle = {
+    sessionId: "session-1",
+    lineageId: "lineage-1",
+    revision: 1,
+    index: 0,
+    fingerprint: "button:Save",
+  }
+
+  it("validates app resolution and state-read bounds", () => {
+    expect(PARAMS_SCHEMAS["action.desktop.listApps"].safeParse({}).success).toBe(true)
+    expect(PARAMS_SCHEMAS["action.desktop.getAppState"].safeParse({}).success).toBe(false)
+    expect(
+      PARAMS_SCHEMAS["action.desktop.getAppState"].safeParse({
+        locator: { kind: "bundleId", bundleId: "com.apple.TextEdit" },
+        options: { maxNodes: 1000, maxDepth: 64, projection: "model" },
+      }).success
+    ).toBe(true)
+    expect(
+      PARAMS_SCHEMAS["action.desktop.getAppState"].safeParse({
+        locator: { bundleId: "com.apple.TextEdit" },
+      }).success
+    ).toBe(false)
+    expect(
+      PARAMS_SCHEMAS["action.desktop.getAppState"].safeParse({
+        locator: { kind: "bundleId", bundleId: "com.apple.TextEdit" },
+        options: { projection: "inspector" },
+      }).success
+    ).toBe(false)
+    expect(
+      PARAMS_SCHEMAS["action.desktop.getAppState"].safeParse({
+        locator: { kind: "bundleId", bundleId: "com.apple.TextEdit" },
+        options: { maxNodes: 1001 },
+      }).success
+    ).toBe(false)
+  })
+
+  it("requires an exact revision identity for query and expansion", () => {
+    expect(
+      PARAMS_SCHEMAS["action.desktop.queryElements"].safeParse({
+        sessionId: "session-1",
+        lineageId: "lineage-1",
+        revision: 1,
+        locator: { controlType: "AXButton" },
+        limit: 100,
+      }).success
+    ).toBe(true)
+    expect(
+      PARAMS_SCHEMAS["action.desktop.queryElements"].safeParse({
+        sessionId: "session-1",
+        revision: 1,
+      }).success
+    ).toBe(false)
+    expect(
+      PARAMS_SCHEMAS["action.desktop.expandElement"].safeParse({
+        handle,
+        continuationToken: null,
+        limit: 250,
+      }).success
+    ).toBe(true)
+    expect(
+      PARAMS_SCHEMAS["action.desktop.expandElement"].safeParse({
+        handle,
+        limit: 251,
+      }).success
+    ).toBe(false)
+  })
+
+  it("validates semantic and pixel action envelopes without legacy aliases", () => {
+    expect(
+      PARAMS_SCHEMAS["action.desktop.performAction"].safeParse({
+        request: {
+          turnToken: "turn-1",
+          target: { kind: "element", handle },
+          action: { kind: "pressKey", chord: ["cmd+s"] },
+          strategy: "semantic",
+        },
+      }).success
+    ).toBe(true)
+    expect(
+      PARAMS_SCHEMAS["action.desktop.performAction"].safeParse({
+        request: {
+          turnToken: "turn-1",
+          target: {
+            kind: "pixel",
+            target: {
+              sessionId: "session-1",
+              lineageId: "lineage-1",
+              revision: 1,
+              point: { x: 10, y: 20 },
+              screenshotWidth: 1440,
+              screenshotHeight: 900,
+            },
+          },
+          action: { kind: "click", button: "left", count: 2 },
+          strategy: "pixel",
+        },
+      }).success
+    ).toBe(true)
+    expect(
+      PARAMS_SCHEMAS["action.desktop.performAction"].safeParse({
+        request: {
+          turnToken: "turn-1",
+          target: { kind: "element", elementRef: "legacy-ref" },
+          action: { kind: "click" },
+          strategy: "auto",
+        },
+      }).success
+    ).toBe(false)
+  })
+
+  it("validates desktop event fields", () => {
+    expect(
+      PARAMS_SCHEMAS["trigger.desktop.event"].safeParse({ kinds: ["focus-changed"] }).success
+    ).toBe(true)
+    expect(PARAMS_SCHEMAS["trigger.desktop.event"].safeParse({ kinds: ["focus"] }).success).toBe(
+      false
+    )
   })
 })
 
@@ -228,10 +742,52 @@ describe("ai schemas", () => {
     ).toBe(false)
   })
 
+  it("ai.prompt accepts explicit provider protocol metadata", () => {
+    expect(
+      PARAMS_SCHEMAS["ai.prompt"].safeParse({
+        provider: "openrouter",
+        model: "openai/gpt-4.1-mini",
+        apiKey: "k",
+        baseURL: "https://openrouter.ai/api/v1",
+        apiFlavor: "chat",
+        headers: { "HTTP-Referer": "https://cognia.local", "X-Title": "Cognia" },
+        userPrompt: "x",
+      }).success
+    ).toBe(true)
+    expect(
+      PARAMS_SCHEMAS["ai.prompt"].safeParse({
+        userPrompt: "x",
+        apiFlavor: "legacy-completions",
+      }).success
+    ).toBe(false)
+    expect(
+      PARAMS_SCHEMAS["ai.prompt"].safeParse({
+        userPrompt: "x",
+        headers: { "X-Title": 123 },
+      }).success
+    ).toBe(false)
+  })
+
   it("ai.classify requires input + labelsRaw", () => {
     const s = PARAMS_SCHEMAS["ai.classify"]
     expect(s.safeParse({}).success).toBe(false)
     expect(s.safeParse({ input: "x", labelsRaw: "a,b" }).success).toBe(true)
+  })
+
+  it("ai.classify accepts explicit provider protocol metadata", () => {
+    const s = PARAMS_SCHEMAS["ai.classify"]
+    expect(
+      s.safeParse({
+        provider: "openrouter",
+        model: "openai/gpt-4.1-mini",
+        apiKey: "k",
+        baseURL: "https://openrouter.ai/api/v1",
+        apiFlavor: "chat",
+        headers: { "HTTP-Referer": "https://cognia.local", "X-Title": "Cognia" },
+        input: "x",
+        labelsRaw: "a,b",
+      }).success
+    ).toBe(true)
   })
 
   it("ai.extract requires input", () => {
@@ -239,11 +795,39 @@ describe("ai schemas", () => {
     expect(PARAMS_SCHEMAS["ai.extract"].safeParse({ input: "x" }).success).toBe(true)
   })
 
+  it("ai.extract accepts explicit provider protocol metadata", () => {
+    expect(
+      PARAMS_SCHEMAS["ai.extract"].safeParse({
+        provider: "openrouter",
+        model: "openai/gpt-4.1-mini",
+        apiKey: "k",
+        baseURL: "https://openrouter.ai/api/v1",
+        apiFlavor: "chat",
+        headers: { "HTTP-Referer": "https://cognia.local", "X-Title": "Cognia" },
+        input: "x",
+      }).success
+    ).toBe(true)
+  })
+
   it("ai.embed requires input + dimension range", () => {
     const s = PARAMS_SCHEMAS["ai.embed"]
     expect(s.safeParse({}).success).toBe(false)
     expect(s.safeParse({ input: "x", dimension: 16 }).success).toBe(false)
     expect(s.safeParse({ input: "x", dimension: 384 }).success).toBe(true)
+  })
+
+  it("ai.browserModel validates operation-specific requirements", () => {
+    const schema = PARAMS_SCHEMAS["ai.browserModel"]
+    expect(schema.safeParse({ operation: "status" }).success).toBe(true)
+    expect(schema.safeParse({ operation: "infer" }).success).toBe(false)
+    expect(
+      schema.safeParse({
+        operation: "infer",
+        task: "summarization",
+        modelId: "Xenova/summary",
+        input: "long text",
+      }).success
+    ).toBe(true)
   })
 })
 
@@ -279,6 +863,50 @@ describe("flow schemas", () => {
     expect(s.safeParse({ mode: "times", times: "{{ $trigger.payload.n }}" }).success).toBe(true)
     expect(s.safeParse({ mode: "while", whileExpression: "{{ $static.go }}" }).success).toBe(true)
     expect(s.safeParse({ mode: "while" }).success).toBe(false)
+  })
+
+  it("flow.loop v2 scopes conditionTiming to while mode", () => {
+    const s = PARAMS_SCHEMAS["flow.loop"]
+    expect(
+      s.safeParse({ mode: "while", whileExpression: "{{ $static.go }}", conditionTiming: "post" })
+        .success
+    ).toBe(true)
+    expect(
+      s.safeParse({ mode: "while", whileExpression: "{{ $static.go }}", conditionTiming: "pre" })
+        .success
+    ).toBe(true)
+    expect(
+      s.safeParse({ mode: "forEach", source: "{{ $x }}", conditionTiming: "post" }).success
+    ).toBe(false)
+    expect(s.safeParse({ mode: "times", times: 2, conditionTiming: "post" }).success).toBe(false)
+    expect(
+      s.safeParse({ mode: "while", whileExpression: "x", conditionTiming: "after" }).success
+    ).toBe(false)
+  })
+
+  it("flow.loop v2 scopes batchSize to forEach mode and requires >= 1", () => {
+    const s = PARAMS_SCHEMAS["flow.loop"]
+    expect(s.safeParse({ mode: "forEach", source: "{{ $x }}", batchSize: 5 }).success).toBe(true)
+    expect(s.safeParse({ mode: "forEach", source: "{{ $x }}", batchSize: 0 }).success).toBe(false)
+    expect(s.safeParse({ mode: "forEach", source: "{{ $x }}", batchSize: -2 }).success).toBe(false)
+    expect(s.safeParse({ mode: "times", times: 3, batchSize: 2 }).success).toBe(false)
+    expect(s.safeParse({ mode: "while", whileExpression: "x", batchSize: 2 }).success).toBe(false)
+  })
+
+  it("flow.loop v2 accepts onItemError on every mode and rejects unknown values", () => {
+    const s = PARAMS_SCHEMAS["flow.loop"]
+    for (const policy of ["fail", "skip", "break"]) {
+      expect(
+        s.safeParse({ mode: "forEach", source: "{{ $x }}", onItemError: policy }).success
+      ).toBe(true)
+      expect(s.safeParse({ mode: "times", times: 3, onItemError: policy }).success).toBe(true)
+      expect(
+        s.safeParse({ mode: "while", whileExpression: "x", onItemError: policy }).success
+      ).toBe(true)
+    }
+    expect(s.safeParse({ mode: "forEach", source: "{{ $x }}", onItemError: "retry" }).success).toBe(
+      false
+    )
   })
 
   it("flow.break / flow.continue accept empty params", () => {
@@ -349,6 +977,10 @@ describe("flow schemas", () => {
     const s = PARAMS_SCHEMAS["flow.set"]
     expect(s.safeParse({ variable: "1bad", value: "x" }).success).toBe(false)
     expect(s.safeParse({ variable: "ok_name", value: "x" }).success).toBe(true)
+    expect(s.safeParse({ variable: "ok_name", value: 1 }).success).toBe(true)
+    expect(s.safeParse({ variable: "ok_name", value: false }).success).toBe(true)
+    expect(s.safeParse({ variable: "ok_name", value: { nested: [1, null] } }).success).toBe(true)
+    expect(s.safeParse({ variable: "ok_name" }).success).toBe(false)
   })
 
   it("flow.subworkflow requires workflowId", () => {
@@ -404,5 +1036,38 @@ describe("annotation schemas", () => {
     expect(s.safeParse({ height: 50 }).success).toBe(false)
     expect(s.safeParse({}).success).toBe(true)
     expect(s.safeParse({ width: 480, height: 320 }).success).toBe(true)
+  })
+})
+
+describe("trigger.workflow.completed schema", () => {
+  const s = PARAMS_SCHEMAS["trigger.workflow.completed"]
+
+  it("accepts an unscoped node (both params absent)", () => {
+    expect(s.safeParse({}).success).toBe(true)
+  })
+
+  it("accepts the succeeded/failed outcomes AND the editor's empty-string any sentinel", () => {
+    expect(s.safeParse({ status: "succeeded" }).success).toBe(true)
+    expect(s.safeParse({ status: "failed" }).success).toBe(true)
+    // patchParam stores "" rather than deleting — the enum must tolerate it.
+    expect(s.safeParse({ status: "" }).success).toBe(true)
+  })
+
+  it("rejects unknown outcomes", () => {
+    expect(s.safeParse({ status: "cancelled" }).success).toBe(false)
+  })
+})
+
+describe("flow.wait event-mode schema", () => {
+  const s = PARAMS_SCHEMAS["flow.wait"]
+
+  it("accepts eventKey + timeoutMs alongside event mode", () => {
+    expect(
+      s.safeParse({ mode: "event", eventKey: "deploy-approved", timeoutMs: 60_000 }).success
+    ).toBe(true)
+  })
+
+  it("rejects a negative timeout", () => {
+    expect(s.safeParse({ mode: "event", timeoutMs: -1 }).success).toBe(false)
   })
 })

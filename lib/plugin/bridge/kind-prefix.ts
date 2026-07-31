@@ -14,3 +14,23 @@ export function prefixPluginKind(pluginId: string, rawKind: string): string {
   }
   return `${pluginId}.${rawKind}`
 }
+
+/**
+ * Inverse of `prefixPluginKind`: recover the raw kind a plugin originally
+ * registered from its namespaced catalog kind. Used to derive the plugin's
+ * own i18n key convention (`workflow.nodes.<rawKind>.*`) at render time.
+ *
+ * Returns the kind unchanged when it carries no matching prefix (e.g. a
+ * built-in kind), so callers can pass any kind safely.
+ */
+export function unprefixPluginKind(pluginId: string, prefixedKind: string): string {
+  const triggerPrefix = `trigger.${pluginId}.`
+  if (prefixedKind.startsWith(triggerPrefix)) {
+    return `trigger.${prefixedKind.slice(triggerPrefix.length)}`
+  }
+  const flatPrefix = `${pluginId}.`
+  if (prefixedKind.startsWith(flatPrefix)) {
+    return prefixedKind.slice(flatPrefix.length)
+  }
+  return prefixedKind
+}

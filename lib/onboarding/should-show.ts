@@ -1,7 +1,7 @@
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 import { ALL_PROVIDER_IDS } from "@/types/subscription"
 import { getActiveAccount } from "@/lib/subscription/core/transport"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 const log = loggers.ui
 

@@ -3,8 +3,15 @@
   "pages": [
     "slack-setup",
     "discord-setup",
+    "telegram-setup",
+    "matrix-setup",
     "lark-setup",
+    "dingtalk-setup",
+    "wecom-setup",
+    "wechat-oa-setup",
+    "wechat-personal-setup",
     "onebot-setup",
+    "qq-official-setup",
     "qq-via-onebot-faq",
     "extending-with-plugins",
     "phase-1-ship-gate"

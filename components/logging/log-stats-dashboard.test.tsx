@@ -64,7 +64,7 @@ jest.mock("@/lib/observability/chart-config", () => ({
 }))
 
 import { LogStatsDashboard } from "./log-stats-dashboard"
-import type { StructuredLogEntry, LogLevel } from "@/lib/logging"
+import type { StructuredLogEntry, LogLevel } from "@cognia/logging"
 import type { NativeLoggingReadiness } from "@/lib/native/native-logging-readiness"
 
 function makeLog(

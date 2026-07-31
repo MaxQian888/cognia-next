@@ -67,11 +67,30 @@ async function testTelegramToken(token: string): Promise<GetMeResult> {
 interface TelegramConfigDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Called with the new adapter id after a successful create, so the parent
+   * can auto-select and open the freshly created adapter. */
+  onCreated?: (id: string) => void
   /** null = creating a new instance */
   row: AdapterInstanceRow | null
 }
 
-export function TelegramConfigDialog({ open, onOpenChange, row }: TelegramConfigDialogProps) {
+function telegramCredentialAccounts(transport: TransportMode): string[] {
+  // "secretToken" is the keyring key the Rust webhook verifier reads
+  // (crates/cognia-connectors/src/axum_app.rs — X-Telegram-Bot-Api-Secret-Token
+  // check); "webhookSecret" is the legacy key kept for backward compat.
+  return transport === "webhook" ? ["botToken", "secretToken", "webhookSecret"] : ["botToken"]
+}
+
+function sameCredentialAccounts(actual: readonly string[], expected: readonly string[]): boolean {
+  return actual.length === expected.length && expected.every((account) => actual.includes(account))
+}
+
+export function TelegramConfigDialog({
+  open,
+  onOpenChange,
+  row,
+  onCreated,
+}: TelegramConfigDialogProps) {
   const t = useTranslations("settings.connections.telegram")
   const isNew = row === null
 
@@ -142,6 +161,7 @@ export function TelegramConfigDialog({ open, onOpenChange, row }: TelegramConfig
     setSaving(true)
     try {
       let adapterId: string
+      const credentialAccounts = telegramCredentialAccounts(transport)
 
       if (isNew) {
         const newRow = await createAdapterInstance({
@@ -152,7 +172,7 @@ export function TelegramConfigDialog({ open, onOpenChange, row }: TelegramConfig
           settings: {},
           credentialsRef: {
             keyringService: "com.cognia.platforms",
-            accounts: ["botToken", "webhookSecret"],
+            accounts: credentialAccounts,
           },
           trigger: defaultPrivateChatPolicy(),
           defaultMode: "auto",
@@ -163,7 +183,7 @@ export function TelegramConfigDialog({ open, onOpenChange, row }: TelegramConfig
       } else {
         adapterId = row.id
         const existingAccounts = row.credentialsRef?.accounts ?? []
-        const needsMigration = !existingAccounts.includes("webhookSecret")
+        const needsMigration = !sameCredentialAccounts(existingAccounts, credentialAccounts)
         await updateAdapterInstance(adapterId, {
           displayName: displayName.trim(),
           transportMode: transport,
@@ -172,7 +192,7 @@ export function TelegramConfigDialog({ open, onOpenChange, row }: TelegramConfig
           ...(needsMigration && {
             credentialsRef: {
               keyringService: row.credentialsRef?.keyringService ?? "com.cognia.platforms",
-              accounts: ["botToken", "webhookSecret"],
+              accounts: credentialAccounts,
             },
           }),
         })
@@ -182,6 +202,11 @@ export function TelegramConfigDialog({ open, onOpenChange, row }: TelegramConfig
         await connectorsKeyringSet(adapterId, "botToken", botToken.trim())
       }
       if (webhookSecret.trim()) {
+        // The Rust webhook 401-gate reads "secretToken" — saving only the old
+        // "webhookSecret" key meant every webhook delivery failed verification.
+        // Keep writing "webhookSecret" too for backward compatibility with
+        // anything still reading the legacy key.
+        await connectorsKeyringSet(adapterId, "secretToken", webhookSecret.trim())
         await connectorsKeyringSet(adapterId, "webhookSecret", webhookSecret.trim())
       }
 
@@ -192,6 +217,7 @@ export function TelegramConfigDialog({ open, onOpenChange, row }: TelegramConfig
       }
 
       toast.success(isNew ? t("adapterCreated") : t("adapterUpdated"))
+      if (isNew) onCreated?.(adapterId)
       onOpenChange(false)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))

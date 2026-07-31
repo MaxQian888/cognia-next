@@ -18,8 +18,13 @@ const bridge = jest.requireMock("@/lib/plugin/vscode-shim/monaco-bridge") as {
 }
 
 const lightBindingDispose = jest.fn()
+const lightBindingUpdate = jest.fn()
 const bindingMock = jest.requireMock("./monaco-context-binding") as {
   bindMonacoEditorContext: jest.Mock
+}
+const snippetMock = jest.requireMock("@/lib/monaco/snippets") as {
+  registerAllSnippets: jest.Mock
+  registerEmmetSupport: jest.Mock
 }
 
 jest.mock("@/lib/plugin/vscode-shim/monaco-bridge", () => ({
@@ -31,7 +36,15 @@ jest.mock("@/lib/plugin/vscode-shim/monaco-bridge", () => ({
 }))
 
 jest.mock("./monaco-context-binding", () => ({
-  bindMonacoEditorContext: jest.fn(() => ({ dispose: lightBindingDispose })),
+  bindMonacoEditorContext: jest.fn(() => ({
+    dispose: lightBindingDispose,
+    update: lightBindingUpdate,
+  })),
+}))
+
+jest.mock("@/lib/monaco/snippets", () => ({
+  registerAllSnippets: jest.fn(() => []),
+  registerEmmetSupport: jest.fn(() => []),
 }))
 
 function makeFakeMonaco(): {
@@ -161,6 +174,7 @@ beforeEach(() => {
   bridge.notifySelectionChanged.mockClear()
   bindingMock.bindMonacoEditorContext.mockClear()
   lightBindingDispose.mockClear()
+  lightBindingUpdate.mockClear()
 })
 
 describe("buildWorkbenchUri", () => {
@@ -233,6 +247,30 @@ describe("buildWorkbenchUri", () => {
       })
     ).toBe("experiment:///node-9.json")
   })
+
+  it("builds a real file:// URI for the `file` surface from absolutePath", () => {
+    expect(
+      buildWorkbenchUri({
+        surface: "file",
+        documentId: "src/index.ts",
+        absolutePath: "/home/me/project/src/index.ts",
+        projectRoot: "/home/me/project",
+        language: "typescript",
+        initialContent: "",
+      })
+    ).toBe("file:///home/me/project/src/index.ts")
+  })
+
+  it("throws when the `file` surface has no absolutePath", () => {
+    expect(() =>
+      buildWorkbenchUri({
+        surface: "file",
+        documentId: "src/index.ts",
+        language: "typescript",
+        initialContent: "",
+      })
+    ).toThrow(/absolutePath/)
+  })
 })
 
 describe("mountMonacoWorkbench", () => {
@@ -243,6 +281,20 @@ describe("mountMonacoWorkbench", () => {
     language: "typescript",
     initialContent: "const x = 1\n",
   }
+
+  beforeEach(() => {
+    snippetMock.registerAllSnippets.mockClear()
+    snippetMock.registerEmmetSupport.mockClear()
+  })
+
+  it("registers shared snippet and Emmet completions for every workbench surface", () => {
+    const { monaco } = makeFakeMonaco()
+    const { editor } = makeFakeEditor()
+    mountMonacoWorkbench(editor, monaco, { ...baseSpec, surface: "skill" })
+
+    expect(snippetMock.registerAllSnippets).toHaveBeenCalledWith(monaco)
+    expect(snippetMock.registerEmmetSupport).toHaveBeenCalledWith(monaco)
+  })
 
   it("creates a new model with the workbench URI when none exists", () => {
     const { monaco, createCalls, modelByUri } = makeFakeMonaco()
@@ -283,6 +335,10 @@ describe("mountMonacoWorkbench", () => {
         editorId: "ed-42",
         documentId: "doc-1",
         language: "typescript",
+        contextId: "canvas",
+        editor,
+        selection: { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 },
+        cursor: { line: 1, column: 1 },
       })
     )
   })
@@ -305,6 +361,36 @@ describe("mountMonacoWorkbench", () => {
       })
     )
     expect(adapted.getPosition()).toEqual({ lineNumber: 1, column: 1 })
+  })
+
+  it("exposes an adapter that delegates selection / edits / decorations to the editor", () => {
+    const { monaco } = makeFakeMonaco()
+    const { editor } = makeFakeEditor("ed-adapt")
+    mountMonacoWorkbench(editor, monaco, baseSpec)
+    const adapted = bridge.notifyEditorMounted.mock.calls[0]?.[0] as {
+      getSelection(): unknown
+      applyEdits(edits: unknown[]): void
+      setDecorations(typeId: string, decorations: unknown[]): void
+    }
+    expect(adapted.getSelection()).toEqual({
+      startLineNumber: 1,
+      startColumn: 1,
+      endLineNumber: 1,
+      endColumn: 1,
+    })
+    adapted.applyEdits([{ range: {}, text: "x" }])
+    expect(editor.executeEdits).toHaveBeenCalledWith("workbench", [{ range: {}, text: "x" }])
+    adapted.setDecorations("type-1", [{ range: {} }])
+    expect(editor.deltaDecorations).toHaveBeenCalledWith([], [{ range: {} }])
+  })
+
+  it("adapter getSelection returns null when the editor has no selection", () => {
+    const { monaco } = makeFakeMonaco()
+    const { editor } = makeFakeEditor("ed-nosel")
+    ;(editor as unknown as { getSelection: () => null }).getSelection = () => null
+    mountMonacoWorkbench(editor, monaco, baseSpec)
+    const adapted = bridge.notifyEditorMounted.mock.calls[0]?.[0] as { getSelection(): unknown }
+    expect(adapted.getSelection()).toBeNull()
   })
 
   it("forwards focus → notifyActiveEditorChanged(editorId)", () => {
@@ -337,6 +423,13 @@ describe("mountMonacoWorkbench", () => {
     mountMonacoWorkbench(editor, monaco, baseSpec)
     triggers.selection()
     expect(bridge.notifySelectionChanged).toHaveBeenLastCalledWith("ed-7")
+    // The registry binding is patched with the fresh selection/cursor too.
+    expect(lightBindingUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        selection: { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 },
+        cursor: { line: 1, column: 1 },
+      })
+    )
   })
 
   it("dispose() tears down all listeners, unmounts the bridge, releases the light binding", () => {
@@ -359,5 +452,24 @@ describe("mountMonacoWorkbench", () => {
     handle.dispose()
     expect(bridge.notifyEditorUnmounted).toHaveBeenCalledTimes(1)
     expect(lightBindingDispose).toHaveBeenCalledTimes(1)
+  })
+
+  it("mounts the `file` surface with a real file:// model URI and file context", () => {
+    const { monaco, createCalls } = makeFakeMonaco()
+    const { editor } = makeFakeEditor("ed-file")
+    const handle = mountMonacoWorkbench(editor, monaco, {
+      surface: "file",
+      documentId: "src/a.ts",
+      absolutePath: "/proj/src/a.ts",
+      projectRoot: "/proj",
+      language: "typescript",
+      initialContent: "export const a = 1\n",
+    })
+    expect(handle.uri).toBe("file:///proj/src/a.ts")
+    expect(createCalls[0]?.uri).toBe("file:///proj/src/a.ts")
+    expect(bindingMock.bindMonacoEditorContext).toHaveBeenCalledWith(
+      expect.objectContaining({ contextId: "file", documentId: "src/a.ts" })
+    )
+    handle.dispose()
   })
 })

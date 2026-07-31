@@ -1,0 +1,145 @@
+{
+  "channel": {
+    "alpha": "Alpha",
+    "beta": "Beta",
+    "dev": "Dev",
+    "rc": "Release candidate",
+    "stable": "Stable"
+  },
+  "crashLogs": {
+    "crashReports": "Crash reports",
+    "globalErrorHandlers": "Global error capture",
+    "lastCrash": "Last crash",
+    "logFootprint": "Log footprint",
+    "nativeLogging": "Native logging",
+    "ready": "Ready",
+    "retention": "Retention",
+    "retentionValue": "{days}d / {reports} reports, keep {logs} logs",
+    "title": "Crash & logs"
+  },
+  "description": "App version, build details, diagnostics, updates, and credits.",
+  "iconAlt": "{name} app icon",
+  "legal": {
+    "acknowledgements": "Built with open source",
+    "copyright": "© {year} {holder}. All rights reserved.",
+    "license": "License",
+    "privacy": "Privacy",
+    "title": "Legal & credits",
+    "viewLicense": "View license",
+    "viewPrivacy": "Privacy policy"
+  },
+  "metadataLoadFailed": "Failed to load app metadata.",
+  "resources": {
+    "community": {
+      "description": "Ask questions and share ideas",
+      "label": "Community"
+    },
+    "docs": {
+      "description": "Guides, references, and tutorials",
+      "label": "Documentation"
+    },
+    "issues": {
+      "description": "File a bug or request a feature",
+      "label": "Report an issue"
+    },
+    "releases": {
+      "description": "Version history and downloads",
+      "label": "Releases"
+    },
+    "repo": {
+      "description": "Browse the project on GitHub",
+      "label": "Source code"
+    },
+    "title": "Resources"
+  },
+  "system": {
+    "arch": "Architecture",
+    "copy": "Copy diagnostics",
+    "copyFailed": "Copy failed: {error}",
+    "copySuccess": "Diagnostics copied to clipboard.",
+    "dataDir": "Data directory",
+    "locale": "Locale",
+    "os": "Operating system",
+    "reveal": "Open data folder",
+    "revealFailed": "Could not open the data folder: {error}",
+    "title": "System",
+    "unavailable": "Unavailable"
+  },
+  "tagline": "AI desktop companion for Claude Code",
+  "title": "About",
+  "updates": {
+    "alreadyLatest": "You're on the latest version.",
+    "autoCheckDescription": "Check for a new version on launch and periodically while the app is running.",
+    "autoCheckLabel": "Check for updates automatically",
+    "autoDownloadDescription": "Download the signed package in the background. Installation still requires confirmation.",
+    "autoDownloadLabel": "Download updates automatically",
+    "checkIntervalDescription": "How often a running desktop app contacts the update endpoint.",
+    "checkIntervalLabel": "Check frequency",
+    "checkUpdates": "Check for updates",
+    "checking": "Checking…",
+    "desktopOnly": "Updates are delivered through the desktop app.",
+    "download": "Download",
+    "downloadedReady": "The signed update package is downloaded and ready to install.",
+    "downloading": "Downloading…",
+    "downloadingBackground": "Downloading version {version}…",
+    "downloadingPercent": "Downloading… {percent}%",
+    "goInstallAction": "Install",
+    "install": "Install {version}",
+    "installedRestartRequired": "Update installed. Restart Cognia to finish.",
+    "installing": "Installing…",
+    "intervals": {
+      "15": "Every 15 minutes",
+      "60": "Every hour",
+      "360": "Every 6 hours",
+      "720": "Every 12 hours",
+      "1440": "Daily",
+      "10080": "Weekly"
+    },
+    "lastChecked": "Last checked",
+    "relaunchAfterInstallDescription": "Restart immediately after installation. On Windows, the installer may close the app regardless.",
+    "relaunchAfterInstallLabel": "Restart after installing",
+    "requestTimeoutDescription": "Maximum time allowed for the manifest and package requests.",
+    "requestTimeoutLabel": "Request timeout",
+    "restartNow": "Restart now",
+    "settingsSaveFailed": "Could not save update settings: {error}",
+    "timeoutSeconds": "{seconds} seconds",
+    "title": "Updates",
+    "updateDownloadedBackground": "Version {version} is downloaded and ready to install.",
+    "updateDownloadedToast": "Update downloaded and verified.",
+    "updateAvailable": "Update {version} available",
+    "updateAvailableBackground": "Version {version} is available.",
+    "updateAvailableToast": "Update available: {version}",
+    "updateCheckFailed": "Update check failed: {error}",
+    "updateDownloadFailed": "Update download failed: {error}",
+    "updateInstallFailed": "Update install failed: {error}",
+    "updateNoLongerAvailable": "Update no longer available.",
+    "updateRelaunchFailed": "Could not restart the app: {error}",
+    "useProxyDescription": "Route update checks and downloads through the active global network proxy.",
+    "useProxyLabel": "Use network proxy"
+  },
+  "versionCard": {
+    "build": "Build number",
+    "builtAt": "Built",
+    "commit": "Commit",
+    "engine": "Web engine",
+    "hideAdvanced": "Hide runtime details",
+    "react": "React",
+    "showAdvanced": "Show runtime details",
+    "tauri": "Tauri",
+    "title": "Version & build",
+    "version": "Version"
+  },
+  "versionLine": "version",
+  "versionUnknown": "—",
+  "webBadge": "Web preview",
+  "whatsNew": {
+    "highlights": {
+      "claudeCodeClient": "Full Claude Code desktop client with chat, agents, and workflows",
+      "crossPlatform": "One codebase across desktop (Tauri), web, and mobile (Capacitor)",
+      "foundation": "Initial public foundation release",
+      "pluginSystem": "Extensible plugin system with an in-app marketplace"
+    },
+    "title": "What's new",
+    "viewAll": "View all releases"
+  }
+}

@@ -3,10 +3,31 @@
  */
 
 import React from "react"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { AppDetailDialog, type AppDetailDialogProps } from "./app-detail-dialog"
 import type { A2UIAppInstance } from "@/hooks/a2ui/use-app-builder"
 import type { A2UIAppTemplate } from "@/lib/a2ui/templates"
+
+const mockToastError = jest.fn()
+const mockToastSuccess = jest.fn()
+const mockToastInfo = jest.fn()
+const mockLoggerError = jest.fn()
+
+jest.mock("sonner", () => ({
+  toast: {
+    error: (...args: unknown[]) => mockToastError(...args),
+    success: (...args: unknown[]) => mockToastSuccess(...args),
+    info: (...args: unknown[]) => mockToastInfo(...args),
+  },
+}))
+
+jest.mock("@cognia/logging", () => ({
+  loggers: {
+    ui: {
+      error: (...args: unknown[]) => mockLoggerError(...args),
+    },
+  },
+}))
 
 // Mock ResizeObserver
 global.ResizeObserver = jest.fn().mockImplementation(() => ({
@@ -347,6 +368,64 @@ describe("AppDetailDialog", () => {
     })
   })
 
+  describe("publish action", () => {
+    it("publishes and shows the hosted link", async () => {
+      const onPublish = jest.fn(async () => ({
+        ok: true as const,
+        url: "https://share.test/v/C#k=K",
+      }))
+      renderDialog({ onPublish })
+
+      fireEvent.click(screen.getByText("Publish Prep"))
+      fireEvent.click(await screen.findByRole("button", { name: "Publish" }))
+
+      await waitFor(() => expect(onPublish).toHaveBeenCalledWith("test-app-1"))
+      expect(await screen.findByDisplayValue("https://share.test/v/C#k=K")).toBeInTheDocument()
+      expect(mockToastSuccess).toHaveBeenCalled()
+    })
+
+    it("shows the missing fields when publish validation fails", async () => {
+      const onPublish = jest.fn(async () => ({
+        ok: false as const,
+        reason: "invalid" as const,
+        missing: ["thumbnail"],
+      }))
+      renderDialog({ onPublish })
+
+      fireEvent.click(screen.getByText("Publish Prep"))
+      fireEvent.click(await screen.findByRole("button", { name: "Publish" }))
+
+      await waitFor(() => expect(screen.getByText("thumbnail")).toBeInTheDocument())
+    })
+
+    it("toasts an error when sharing is not configured", async () => {
+      const onPublish = jest.fn(async () => ({
+        ok: false as const,
+        reason: "not-configured" as const,
+      }))
+      renderDialog({ onPublish })
+
+      fireEvent.click(screen.getByText("Publish Prep"))
+      fireEvent.click(await screen.findByRole("button", { name: "Publish" }))
+
+      await waitFor(() => expect(mockToastError).toHaveBeenCalled())
+    })
+
+    it("shows Unpublish for a published app and calls onUnpublish", async () => {
+      const onUnpublish = jest.fn(async () => true)
+      renderDialog({
+        app: createMockApp({ isPublished: true, publishedAt: Date.now(), storeId: "s1" }),
+        onUnpublish,
+      })
+
+      fireEvent.click(screen.getByText("Publish Prep"))
+      fireEvent.click(await screen.findByRole("button", { name: "Unpublish" }))
+
+      await waitFor(() => expect(onUnpublish).toHaveBeenCalledWith("test-app-1"))
+      expect(mockToastSuccess).toHaveBeenCalled()
+    })
+  })
+
   describe("editing", () => {
     it("should enter edit mode when edit button clicked", async () => {
       renderDialog()
@@ -404,6 +483,30 @@ describe("AppDetailDialog", () => {
           name: "Updated Name",
         })
       )
+      await waitFor(() => expect(screen.getByText("Edit Info")).toBeInTheDocument())
+    })
+
+    it("waits for durable metadata save and keeps edit mode open when it fails", async () => {
+      let rejectSave: ((error: Error) => void) | undefined
+      const onSave = jest.fn(
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            rejectSave = reject
+          })
+      )
+      renderDialog({ onSave })
+
+      fireEvent.click(screen.getByText("Edit Info"))
+      fireEvent.click(screen.getByRole("button", { name: "Save" }))
+
+      expect(screen.getByRole("button", { name: "Saving" })).toBeDisabled()
+      await act(async () => {
+        rejectSave?.(new Error("IndexedDB unavailable"))
+      })
+
+      await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("Failed to save app changes"))
+      expect(screen.getByRole("button", { name: "Save" })).toBeEnabled()
+      expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument()
     })
   })
 

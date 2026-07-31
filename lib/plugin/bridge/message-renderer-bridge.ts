@@ -20,6 +20,7 @@ import type {
   MessagePartRendererProps,
 } from "@/types/plugin/plugin-message-renderer"
 import { loggers } from "@/lib/plugin/core/logger"
+import { resolvePluginPath } from "@/lib/plugin/core/plugin-path"
 import {
   registerMessagePartRenderer,
   clearMessagePartRenderersForPlugin,
@@ -108,7 +109,7 @@ async function resolveRenderer(
   installRoot: string,
   importer: NonNullable<MessageRendererBridgeOptions["importer"]>
 ): Promise<React.ComponentType<MessagePartRendererProps>> {
-  const resolved = `${installRoot.replace(/[\\/]+$/, "")}/${def.entry.replace(/^[\\/]+/, "")}`
+  const resolved = resolvePluginPath(installRoot, def.entry)
   const mod = await importer(resolved)
   const exported = mod[def.export]
   if (typeof exported !== "function") {

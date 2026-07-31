@@ -1,0 +1,421 @@
+/**
+ * @jest-environment jsdom
+ */
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { NextIntlClientProvider } from "next-intl"
+
+import { TooltipProvider } from "@/components/ui/tooltip"
+import { downloadFromUrl } from "@/lib/files/download"
+import { openExternal } from "@/lib/tauri/opener"
+
+import { ImageBlock } from "./image-block"
+import { getMessageMedia, mediaRef } from "@/lib/db/message-media"
+import { __TESTING__ as resolveTesting } from "@/lib/chat/media/resolve-media"
+
+const mockCopy = jest.fn(async () => undefined)
+let mockCopied = false
+
+jest.mock("@/hooks/ui/use-copy", () => ({
+  useCopy: () => ({ copied: mockCopied, copy: mockCopy }),
+}))
+
+jest.mock("@/lib/files/download", () => ({
+  downloadFromUrl: jest.fn(async () => undefined),
+}))
+
+jest.mock("@/lib/tauri/opener", () => ({
+  openExternal: jest.fn(async () => undefined),
+}))
+
+// Only the Dexie read is mocked; the object-URL registry underneath
+// `useMediaUrl` is the real one, so refcounting runs for real here too.
+jest.mock("@/lib/db/message-media", () => {
+  const actual = jest.requireActual("@/lib/db/message-media")
+  return { ...actual, getMessageMedia: jest.fn() }
+})
+
+const mockDownloadFromUrl = jest.mocked(downloadFromUrl)
+const mockOpenExternal = jest.mocked(openExternal)
+const mockGetMessageMedia = jest.mocked(getMessageMedia)
+
+const messages = {
+  chat: {
+    renderers: {
+      image: {
+        failedToLoad: "Failed to load image",
+        openUrl: "Open URL",
+        viewFullscreen: "View fullscreen",
+        download: "Download",
+        copyUrl: "Copy URL",
+        counter: "{current} of {total}",
+        defaultTitle: "Image",
+        defaultFilename: "image",
+        previewDescription: "Image preview",
+        zoomIn: "Zoom in",
+        zoomOut: "Zoom out",
+        rotate: "Rotate",
+        selectImage: "View {name}",
+        openInNewTab: "Open in new tab",
+        close: "Close",
+      },
+    },
+  },
+}
+
+function renderBlock({
+  src = "https://example.com/pic.png",
+  alt = "a picture",
+  title,
+}: {
+  src?: string
+  alt?: string
+  title?: string
+} = {}) {
+  return render(
+    <NextIntlClientProvider locale="en" messages={messages}>
+      <TooltipProvider>
+        <ImageBlock src={src} alt={alt} title={title} />
+      </TooltipProvider>
+    </NextIntlClientProvider>
+  )
+}
+
+function openFullscreen() {
+  fireEvent.click(screen.getByAltText("a picture"))
+  return screen.getByTestId("image-lightbox-stage")
+}
+
+// jsdom has no PointerEvent constructor — fireEvent.pointerDown falls back to
+// a MouseEvent and silently drops `pointerId`, which the pinch tracker keys
+// on. Dispatch a MouseEvent of the pointer type with pointerId grafted on.
+function firePointer(
+  el: Element,
+  type: "pointerdown" | "pointermove" | "pointerup",
+  opts: { pointerId: number; clientX?: number; clientY?: number }
+) {
+  const event = new MouseEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    clientX: opts.clientX ?? 0,
+    clientY: opts.clientY ?? 0,
+  })
+  Object.defineProperty(event, "pointerId", { value: opts.pointerId })
+  fireEvent(el, event)
+}
+
+describe("ImageBlock", () => {
+  beforeEach(() => {
+    mockDownloadFromUrl.mockClear()
+    mockDownloadFromUrl.mockResolvedValue(undefined)
+    mockOpenExternal.mockClear()
+    mockCopy.mockClear()
+    mockCopied = false
+  })
+
+  it("renders the inline image", () => {
+    const { container } = renderBlock()
+    const image = screen.getByAltText("a picture")
+    expect(image).toBeInTheDocument()
+    expect(container.querySelector(".animate-pulse")).toBeInTheDocument()
+
+    fireEvent.load(image)
+
+    expect(container.querySelector(".animate-pulse")).not.toBeInTheDocument()
+  })
+
+  it("opens the fullscreen viewer on image click", () => {
+    renderBlock()
+    openFullscreen()
+    expect(screen.getByTestId("image-lightbox-stage")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "View a picture" })).toBeInTheDocument()
+    expect(screen.getByText("100%")).toBeInTheDocument()
+  })
+
+  it("zooms with the toolbar buttons", () => {
+    renderBlock()
+    openFullscreen()
+    fireEvent.click(screen.getByLabelText("Zoom in"))
+    expect(screen.getByText("125%")).toBeInTheDocument()
+  })
+
+  it("opens from the keyboard and restores focus after closing", async () => {
+    renderBlock()
+    const image = screen.getByAltText("a picture")
+    image.focus()
+
+    fireEvent.keyDown(image, { key: "x" })
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    fireEvent.keyDown(image, { key: " " })
+    fireEvent.click(screen.getByRole("button", { name: "Close" }))
+
+    await waitFor(() => expect(image).toHaveFocus())
+  })
+
+  it("opens from the fullscreen toolbar button and restores focus", async () => {
+    renderBlock()
+    const trigger = screen
+      .getAllByRole("button", { name: "View fullscreen" })
+      .find((element) => element.tagName === "BUTTON")!
+
+    fireEvent.click(trigger)
+    fireEvent.click(screen.getByRole("button", { name: "Close" }))
+
+    await waitFor(() => expect(trigger).toHaveFocus())
+  })
+
+  it("downloads and copies the inline image", async () => {
+    renderBlock()
+
+    fireEvent.click(screen.getByRole("button", { name: "Download" }))
+    fireEvent.click(screen.getByRole("button", { name: "Copy URL" }))
+
+    await waitFor(() =>
+      expect(mockDownloadFromUrl).toHaveBeenCalledWith("https://example.com/pic.png", "pic.png", {
+        fetchAsBlob: true,
+      })
+    )
+    expect(mockCopy).toHaveBeenCalledWith("https://example.com/pic.png")
+  })
+
+  it("shows copied feedback and title-based captions", () => {
+    mockCopied = true
+    renderBlock({ alt: "", title: "Generated chart" })
+
+    expect(screen.getByText("Generated chart")).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Copy URL" }).querySelector(".lucide-check")
+    ).toBeInTheDocument()
+  })
+
+  it("keeps alt as alternative text instead of printing it as a caption", () => {
+    // `alt` is for assistive tech. Rendering it under every markdown image
+    // turned screen-reader copy into visible chrome; only `title` is a caption.
+    const { container } = renderBlock({ alt: "a picture" })
+
+    expect(container.querySelector("figcaption")).not.toBeInTheDocument()
+    expect(screen.getByAltText("a picture")).toBeInTheDocument()
+  })
+
+  it("reserves layout space while loading so the skeleton is visible and nothing shifts", () => {
+    // A not-yet-loaded <img> has an intrinsic size of 0, so the figure used to
+    // collapse and the `absolute inset-0` skeleton had nothing to fill.
+    const { container } = renderBlock()
+    const figure = container.querySelector("figure")
+
+    expect(figure).toHaveClass("min-h-32")
+    expect(container.querySelector('[data-slot="skeleton"]')).toBeInTheDocument()
+
+    fireEvent.load(screen.getByAltText("a picture"))
+
+    expect(figure).not.toHaveClass("min-h-32")
+    expect(container.querySelector('[data-slot="skeleton"]')).not.toBeInTheDocument()
+  })
+
+  it("holds the real aspect ratio when the caller knows the dimensions", () => {
+    const { container } = render(
+      <NextIntlClientProvider locale="en" messages={messages}>
+        <TooltipProvider>
+          <ImageBlock src="https://example.com/shot.png" alt="shot" width={800} height={600} />
+        </TooltipProvider>
+      </NextIntlClientProvider>
+    )
+    const figure = container.querySelector("figure")
+
+    expect(figure).toHaveStyle({ aspectRatio: "800 / 600" })
+    // A known ratio already reserves the box, so no placeholder min-box.
+    expect(figure).not.toHaveClass("min-h-32")
+  })
+
+  it("decodes asynchronously so a large image never blocks the main thread", () => {
+    renderBlock()
+    expect(screen.getByAltText("a picture")).toHaveAttribute("decoding", "async")
+  })
+
+  it("uses the default download name and omits an empty caption", async () => {
+    const { container } = renderBlock({ src: "https://example.com/", alt: "" })
+
+    expect(container.querySelector("figcaption")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Download" }))
+
+    await waitFor(() =>
+      expect(mockDownloadFromUrl).toHaveBeenCalledWith("https://example.com/", "image", {
+        fetchAsBlob: true,
+      })
+    )
+  })
+
+  it("falls back to the external viewer when download fails", async () => {
+    mockDownloadFromUrl.mockRejectedValueOnce("save failed")
+    renderBlock()
+
+    fireEvent.click(screen.getByRole("button", { name: "Download" }))
+
+    await waitFor(() =>
+      expect(mockOpenExternal).toHaveBeenCalledWith("https://example.com/pic.png")
+    )
+  })
+
+  it("handles Error download failures before opening externally", async () => {
+    mockDownloadFromUrl.mockRejectedValueOnce(new Error("save failed"))
+    renderBlock()
+
+    fireEvent.click(screen.getByRole("button", { name: "Download" }))
+
+    await waitFor(() =>
+      expect(mockOpenExternal).toHaveBeenCalledWith("https://example.com/pic.png")
+    )
+  })
+
+  it("shows the inline error state and lets the user open the source", () => {
+    renderBlock()
+
+    fireEvent.error(screen.getByAltText("a picture"))
+    expect(screen.getByText("Failed to load image")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Open URL" }))
+
+    expect(mockOpenExternal).toHaveBeenCalledWith("https://example.com/pic.png")
+  })
+
+  it("omits absent alt text from the inline error state", () => {
+    renderBlock({ alt: "" })
+
+    const image = screen
+      .getAllByRole("button", { name: "View fullscreen" })
+      .find((element) => element.tagName === "IMG")!
+    fireEvent.error(image)
+
+    expect(screen.getByText("Failed to load image")).toBeInTheDocument()
+    expect(screen.queryByText("a picture")).not.toBeInTheDocument()
+  })
+
+  describe("touch gestures", () => {
+    it("pinch-out on the stage zooms in", () => {
+      renderBlock()
+      const stage = openFullscreen()
+
+      // Two pointers 100px apart → spread to 200px = 2× zoom.
+      firePointer(stage, "pointerdown", { pointerId: 1, clientX: 100, clientY: 100 })
+      firePointer(stage, "pointerdown", { pointerId: 2, clientX: 200, clientY: 100 })
+      firePointer(stage, "pointermove", { pointerId: 2, clientX: 300, clientY: 100 })
+      expect(screen.getByText("200%")).toBeInTheDocument()
+
+      // Lifting a finger ends the pinch; further single-pointer moves no-op.
+      firePointer(stage, "pointerup", { pointerId: 2 })
+      firePointer(stage, "pointermove", { pointerId: 1, clientX: 500, clientY: 100 })
+      expect(screen.getByText("200%")).toBeInTheDocument()
+    })
+
+    it("clamps pinch zoom to the 50%–300% range", () => {
+      renderBlock()
+      const stage = openFullscreen()
+
+      firePointer(stage, "pointerdown", { pointerId: 1, clientX: 100, clientY: 100 })
+      firePointer(stage, "pointerdown", { pointerId: 2, clientX: 200, clientY: 100 })
+      // 10× spread would be 1000% — clamped to 300%.
+      firePointer(stage, "pointermove", { pointerId: 2, clientX: 1100, clientY: 100 })
+      expect(screen.getByText("300%")).toBeInTheDocument()
+    })
+
+    it("double-tap toggles between 100% and 200%", () => {
+      renderBlock()
+      openFullscreen()
+      const imgs = screen.getAllByAltText("a picture")
+      const fullscreenImg = imgs[imgs.length - 1]
+
+      fireEvent.doubleClick(fullscreenImg)
+      expect(screen.getByText("200%")).toBeInTheDocument()
+      fireEvent.doubleClick(fullscreenImg)
+      expect(screen.getByText("100%")).toBeInTheDocument()
+    })
+  })
+})
+
+describe("ImageBlock — content-addressed references", () => {
+  const storedRow = {
+    hash: "h",
+    mediaType: "image/jpeg",
+    width: 1600,
+    height: 1000,
+    blob: { size: 1_000 } as unknown as Blob,
+    byteSize: 1_000,
+    createdAt: 1,
+    lastUsedAt: 1,
+  }
+
+  beforeEach(() => {
+    resolveTesting.reset()
+    mockGetMessageMedia.mockReset()
+    URL.createObjectURL = jest.fn(() => "blob:mock/0")
+    URL.revokeObjectURL = jest.fn()
+  })
+
+  it("renders the resolved object URL, never the reference itself", async () => {
+    mockGetMessageMedia.mockResolvedValue(storedRow as never)
+
+    renderBlock({ src: mediaRef("h") })
+
+    await waitFor(() => {
+      expect(screen.getByAltText("a picture")).toHaveAttribute("src", "blob:mock/0")
+    })
+  })
+
+  it("reserves the box from the stored dimensions before any byte is fetched", async () => {
+    mockGetMessageMedia.mockResolvedValue(storedRow as never)
+
+    const { container } = renderBlock({ src: mediaRef("h") })
+
+    await waitFor(() => {
+      expect(container.querySelector("figure")).toHaveStyle({ aspectRatio: "1600 / 1000" })
+    })
+  })
+
+  it("shows the failure affordance for a reference that resolves to nothing", async () => {
+    mockGetMessageMedia.mockResolvedValue(undefined as never)
+
+    renderBlock({ src: mediaRef("gone") })
+
+    await waitFor(() => {
+      expect(screen.getByText("Failed to load image")).toBeInTheDocument()
+    })
+    // Local bytes have nowhere to open externally.
+    expect(screen.queryByText("Open URL")).toBeNull()
+  })
+
+  it("hides copy-URL for a reference, whose URL means nothing elsewhere", async () => {
+    mockGetMessageMedia.mockResolvedValue(storedRow as never)
+
+    renderBlock({ src: mediaRef("h") })
+
+    await waitFor(() => expect(screen.getByAltText("a picture")).toBeInTheDocument())
+    expect(screen.queryByLabelText("Copy URL")).toBeNull()
+  })
+
+  it("keeps copy-URL for a plain URL", () => {
+    renderBlock({ src: "https://example.com/pic.png" })
+
+    expect(screen.getByLabelText("Copy URL")).toBeInTheDocument()
+    expect(mockGetMessageMedia).not.toHaveBeenCalled()
+  })
+
+  it("downloads through the resolved URL but names the file from the reference", async () => {
+    mockGetMessageMedia.mockResolvedValue(storedRow as never)
+
+    renderBlock({ src: mediaRef("h") })
+    await waitFor(() => expect(screen.getByAltText("a picture")).toBeInTheDocument())
+    fireEvent.click(screen.getByLabelText("Download"))
+
+    await waitFor(() => expect(mockDownloadFromUrl).toHaveBeenCalled())
+    expect(mockDownloadFromUrl.mock.calls[0][0]).toBe("blob:mock/0")
+  })
+
+  it("releases its holder when the row unmounts", async () => {
+    mockGetMessageMedia.mockResolvedValue(storedRow as never)
+
+    const { unmount } = renderBlock({ src: mediaRef("h") })
+    await waitFor(() => expect(screen.getByAltText("a picture")).toBeInTheDocument())
+    expect(resolveTesting.stats().holders).toBe(1)
+
+    unmount()
+    expect(resolveTesting.stats().holders).toBe(0)
+  })
+})

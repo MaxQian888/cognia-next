@@ -3,7 +3,7 @@
  */
 import { act, renderHook, waitFor } from "@testing-library/react"
 
-import { DEFAULT_BIOMETRIC_GUARD } from "@/lib/claude/types"
+import { DEFAULT_BIOMETRIC_GUARD } from "@cognia/agent-config-types"
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -23,13 +23,14 @@ jest.mock("@/lib/capacitor/biometric", () => ({
   verify: (opts: unknown) => verifyMock(opts),
 }))
 
+// The hook clears the pairing through `clearCompanionConfig()` (transport
+// layer) so the in-memory config cache is wiped alongside SecureStorage —
+// mock that, not the raw storage backend.
 const clearMock: jest.Mock<Promise<void>, []> = jest.fn(async () => undefined)
-jest.mock("@/lib/tauri/companion-storage", () => ({
-  companionStorage: () => ({
-    load: jest.fn(async () => null),
-    save: jest.fn(async () => undefined),
-    clear: clearMock,
-  }),
+jest.mock("@/lib/tauri/transport-companion", () => ({
+  // Lazy wrapper: the factory is hoisted above `clearMock`, so reference it
+  // through a closure that resolves at call time rather than at module init.
+  clearCompanionConfig: () => clearMock(),
 }))
 
 const anthropicSignOutMock: jest.Mock<Promise<void>, []> = jest.fn(async () => undefined)

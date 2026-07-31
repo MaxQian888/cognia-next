@@ -1,6 +1,12 @@
 import type { IMQuickCommand } from "@/lib/connectors/quick-commands/types"
 import type { WeComInboundEventBody } from "./protocol"
-import { QC_KEY_PREFIX, buildWeComMenuCard, parseMenuButtonClick } from "./menu-card"
+import type { WeComConversationRef } from "./parse"
+import {
+  QC_KEY_PREFIX,
+  buildMenuClickInboundEvent,
+  buildWeComMenuCard,
+  parseMenuButtonClick,
+} from "./menu-card"
 
 const sampleCommands: IMQuickCommand[] = [
   { triggerKey: "help", label: "Help", action: { type: "prompt", value: "show help" } },
@@ -84,5 +90,59 @@ describe("parseMenuButtonClick", () => {
       event: { eventtype: "enter_chat" },
     } as unknown as WeComInboundEventBody
     expect(parseMenuButtonClick(body)).toBeNull()
+  })
+})
+
+describe("buildMenuClickInboundEvent", () => {
+  const command: IMQuickCommand = {
+    triggerKey: "help",
+    label: "Help",
+    action: { type: "prompt", value: "show help" },
+  }
+
+  function makeBody(): WeComInboundEventBody {
+    return {
+      msgid: "msg-1",
+      aibotid: "ab1",
+      chatid: "chat-9",
+      chattype: "group",
+      from: { userid: "u1", name: "Alice" },
+      msgtype: "event",
+      event: {
+        eventtype: "template_card_event",
+        template_card: { event_key: "qc:help", task_id: "t1" },
+      },
+    }
+  }
+
+  it("builds a FULL WeCom conversationRef (chatId / chatType / userId / reqId)", () => {
+    const event = buildMenuClickInboundEvent("adp1", "self1", makeBody(), command, "req-77", 123)
+    expect(event).not.toBeNull()
+    const ref = event!.conversationRef as WeComConversationRef
+    expect(ref).toEqual({
+      platform: "wecom",
+      adapterId: "adp1",
+      chatId: "chat-9",
+      chatType: "group",
+      userId: "u1",
+      reqId: "req-77",
+      sourceMsgId: "msg-1",
+    })
+    expect(event!.plainText).toBe("show help")
+  })
+
+  it("defaults chatType to single when the event omits chattype", () => {
+    const body = makeBody()
+    delete body.chattype
+    const event = buildMenuClickInboundEvent("adp1", "self1", body, command)
+    const ref = event!.conversationRef as WeComConversationRef
+    expect(ref.chatType).toBe("single")
+    expect(ref.reqId).toBeUndefined()
+  })
+
+  it("returns null when the event carries no chatid", () => {
+    const body = makeBody()
+    delete body.chatid
+    expect(buildMenuClickInboundEvent("adp1", "self1", body, command, "r")).toBeNull()
   })
 })

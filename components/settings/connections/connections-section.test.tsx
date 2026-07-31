@@ -48,4 +48,15 @@ describe("ConnectionsSection", () => {
     render(<ConnectionsSection />)
     expect(screen.queryByRole("status", { name: /web mode banner/i })).not.toBeInTheDocument()
   })
+
+  it("renders all nine tab triggers", () => {
+    render(<ConnectionsSection />)
+    expect(screen.getAllByRole("tab")).toHaveLength(9)
+  })
+
+  it("makes the tab list horizontally scrollable on narrow viewports", () => {
+    const { container } = render(<ConnectionsSection />)
+    const list = container.querySelector('[role="tablist"]')
+    expect(list?.className).toContain("overflow-x-auto")
+  })
 })

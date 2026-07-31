@@ -1,0 +1,15 @@
+{
+  "agentRuntime": "Agent runtime",
+  "ariaLabel": "Related Claude Code settings",
+  "ccswitch": "CCSwitch",
+  "fleet": "Agent Fleet",
+  "hooks": "Hooks",
+  "mcp": "MCP servers",
+  "sessions": "Sessions",
+  "slashCommands": "Slash commands",
+  "subagents": "Sub-agents",
+  "subscription": "Subscription",
+  "title": "Related",
+  "tools": "Tools",
+  "workspaceTrust": "Workspace Trust"
+}

@@ -1,7 +1,7 @@
 /**
  * CRUD for the `memories` table (schema v65) — the autonomous long-term memory
- * store. See `@/types/memory/memory` and
- * `docs/superpowers/specs/2026-06-01-agent-long-term-memory-design.md`.
+ * store. See `@/types/memory/memory` and ADR-0069
+ * (`docs/content/docs/en/adr/0069-long-term-memory-external-api-surfaces.md`).
  *
  * The consolidation path NEVER hard-deletes on contradiction: it calls
  * `invalidateMemory` (status → `invalidated`, history preserved). Only the
@@ -13,7 +13,13 @@
  * invariants.
  */
 
-import type { Memory, MemoryScope, MemoryStatus, MemoryType } from "@/types/memory/memory"
+import type {
+  Memory,
+  MemoryReaderContext,
+  MemoryScope,
+  MemoryStatus,
+  MemoryType,
+} from "@/types/memory/memory"
 import { getDb } from "./schema"
 
 function newMemoryId(): string {
@@ -72,6 +78,17 @@ export async function getMemoriesByVectorDocIds(ids: string[]): Promise<Memory[]
   return getDb().memories.where("vectorDocId").anyOf(ids).toArray()
 }
 
+/**
+ * Memories learned from one assistant message (v122 index), newest first.
+ * Backs the per-message "learned" chip; includes invalidated rows so the chip
+ * can render an undone state after 撤销.
+ */
+export async function listMemoriesBySourceMessageId(messageId: string): Promise<Memory[]> {
+  if (!messageId) return []
+  const rows = await getDb().memories.where("sourceMessageId").equals(messageId).toArray()
+  return rows.sort((a, b) => b.createdAt - a.createdAt)
+}
+
 export interface MemoryUpdatePatch {
   text?: string
   key?: string
@@ -79,6 +96,11 @@ export interface MemoryUpdatePatch {
   importance?: number
   vectorDocId?: string
   pinned?: boolean
+  evidenceState?: Memory["evidenceState"]
+  reviewStatus?: Memory["reviewStatus"]
+  conflictWithIds?: string[]
+  contaminationState?: Memory["contaminationState"]
+  sensitivity?: Memory["sensitivity"]
   /** When true, also bumps `version` (used by the consolidation UPDATE op). */
   bumpVersion?: boolean
 }
@@ -129,6 +151,12 @@ export async function setMemoryPinned(id: string, pinned: boolean): Promise<void
 export interface ListMemoriesQuery {
   scope?: MemoryScope
   characterId?: string
+  projectId?: string
+  agentId?: string
+  branch?: string
+  pathPattern?: string
+  /** Match the complete scope namespace, including absent optional fields. */
+  exactNamespace?: boolean
   type?: MemoryType
   status?: MemoryStatus
 }
@@ -140,8 +168,26 @@ export interface ListMemoriesQuery {
 export async function listMemories(query: ListMemoriesQuery = {}): Promise<Memory[]> {
   let collection = getDb().memories.toCollection()
   if (query.scope !== undefined) collection = collection.filter((m) => m.scope === query.scope)
-  if (query.characterId !== undefined)
-    collection = collection.filter((m) => m.characterId === query.characterId)
+  if (query.exactNamespace) {
+    collection = collection.filter(
+      (m) =>
+        m.characterId === query.characterId &&
+        m.projectId === query.projectId &&
+        m.agentId === query.agentId &&
+        m.branch === query.branch &&
+        m.pathPattern === query.pathPattern
+    )
+  } else {
+    if (query.characterId !== undefined)
+      collection = collection.filter((m) => m.characterId === query.characterId)
+    if (query.projectId !== undefined)
+      collection = collection.filter((m) => m.projectId === query.projectId)
+    if (query.agentId !== undefined)
+      collection = collection.filter((m) => m.agentId === query.agentId)
+    if (query.branch !== undefined) collection = collection.filter((m) => m.branch === query.branch)
+    if (query.pathPattern !== undefined)
+      collection = collection.filter((m) => m.pathPattern === query.pathPattern)
+  }
   if (query.type !== undefined) collection = collection.filter((m) => m.type === query.type)
   if (query.status !== undefined) collection = collection.filter((m) => m.status === query.status)
   const rows = await collection.toArray()
@@ -152,33 +198,101 @@ export async function listMemories(query: ListMemoriesQuery = {}): Promise<Memor
  * Active memories visible to a reader: the `global` base unioned with the
  * given character's override layer. This is the retriever's candidate pool.
  */
-export async function listActiveForReader(characterId?: string): Promise<Memory[]> {
-  const db = getDb()
-  const global = await db.memories.where("[scope+status]").equals(["global", "active"]).toArray()
-  if (!characterId) return global
-  const scoped = await db.memories.where("[scope+status]").equals(["character", "active"]).toArray()
-  return [...global, ...scoped.filter((m) => m.characterId === characterId)]
+function matchesPath(pattern: string | undefined, path: string | undefined): boolean {
+  if (!pattern) return true
+  if (!path) return false
+  const normalizedPattern = pattern.replace(/^\.\//, "").replace(/\/\*\*?$/, "")
+  const normalizedPath = path.replace(/^\.\//, "")
+  return normalizedPath === normalizedPattern || normalizedPath.startsWith(`${normalizedPattern}/`)
+}
+
+function isVisibleToReader(memory: Memory, reader: MemoryReaderContext): boolean {
+  if (memory.reviewStatus === "conflict") return false
+  if (memory.branch && memory.branch !== reader.branch) return false
+  if (!matchesPath(memory.pathPattern, reader.path)) return false
+  if (memory.projectId && memory.projectId !== reader.projectId) return false
+
+  switch (memory.scope) {
+    case "global":
+      return true
+    case "workspace":
+      return Boolean(reader.projectId && memory.projectId === reader.projectId)
+    case "character":
+      return Boolean(reader.characterId && memory.characterId === reader.characterId)
+    case "agent":
+      return Boolean(reader.agentId && memory.agentId === reader.agentId)
+  }
+}
+
+function scopeSpecificity(memory: Memory): number {
+  const base = { global: 0, workspace: 10, character: 20, agent: 30 }[memory.scope]
+  return base + (memory.pathPattern ? 5 : 0) + (memory.branch ? 1 : 0)
+}
+
+/**
+ * Resolve visible active rows from broadest storage into a narrow-wins view.
+ * The string overload preserves the pre-workspace character-only API.
+ */
+export async function listActiveForReader(
+  readerOrCharacterId: MemoryReaderContext | string = {}
+): Promise<Memory[]> {
+  const reader: MemoryReaderContext =
+    typeof readerOrCharacterId === "string"
+      ? { characterId: readerOrCharacterId }
+      : readerOrCharacterId
+  const active = await getDb().memories.where("status").equals("active").toArray()
+  const visible = active
+    .filter((memory) => isVisibleToReader(memory, reader))
+    .sort((a, b) => scopeSpecificity(b) - scopeSpecificity(a) || b.updatedAt - a.updatedAt)
+
+  const stableKeys = new Set<string>()
+  return visible.filter((memory) => {
+    if (memory.key) {
+      const key = memory.key.trim().toLocaleLowerCase()
+      if (stableKeys.has(key)) return false
+      stableKeys.add(key)
+    }
+    return true
+  })
 }
 
 /** Active procedural memories for a reader (global + character override). */
-export async function listActiveProcedural(characterId?: string): Promise<Memory[]> {
-  const all = await listActiveForReader(characterId)
+export async function listActiveProcedural(
+  readerOrCharacterId?: MemoryReaderContext | string
+): Promise<Memory[]> {
+  const all = await listActiveForReader(readerOrCharacterId)
   return all.filter((m) => m.type === "procedural")
 }
 
 /** Count of active memories in a scope — used by the eviction cap. */
 export async function countActive(scope: MemoryScope, characterId?: string): Promise<number> {
   const db = getDb()
-  if (scope === "global") {
-    return db.memories.where("[scope+status]").equals(["global", "active"]).count()
-  }
-  const scoped = await db.memories.where("[scope+status]").equals(["character", "active"]).toArray()
+  const scoped = await db.memories.where("[scope+status]").equals([scope, "active"]).toArray()
   return characterId ? scoped.filter((m) => m.characterId === characterId).length : scoped.length
 }
 
 /** Hard-delete a single memory (user-initiated only). */
 export async function hardDeleteMemory(id: string): Promise<void> {
   await getDb().memories.delete(id)
+}
+
+/** Hard-delete a specific set of memories (bulk panel action). Returns the count. */
+export async function hardDeleteMemories(ids: string[]): Promise<number> {
+  if (ids.length === 0) return 0
+  await getDb().memories.bulkDelete(ids)
+  return ids.length
+}
+
+/** Pin / unpin a specific set of memories in one transaction (bulk panel action). */
+export async function setMemoriesPinned(ids: string[], pinned: boolean): Promise<void> {
+  if (ids.length === 0) return
+  const db = getDb()
+  const now = Date.now()
+  await db.transaction("rw", db.memories, async () => {
+    for (const id of ids) {
+      await db.memories.update(id, { pinned, updatedAt: now })
+    }
+  })
 }
 
 /**

@@ -1,6 +1,26 @@
 "use client"
 
+import type { CustomCssScope } from "@/types/appearance"
+
 const STYLE_ELEMENT_ID = "cognia-user-css"
+
+/**
+ * Scope root for "app"-scoped user CSS. Matches the `id="app"` wrapper mounted
+ * in `app/layout.tsx`. `@scope (#app) { … }` limits the user's rules to the
+ * application shell so they don't bleed into surfaces rendered outside it
+ * (e.g. portalled overlays appended to <body>). Requires Chromium 118+
+ * (Tauri WebView2 / WKWebView and recent Android System WebView all qualify).
+ */
+const APP_SCOPE_SELECTOR = "#app"
+
+/**
+ * Wrap sanitized CSS in `@scope` when the user picked the "app" scope. The
+ * "global" scope returns the CSS untouched so it applies document-wide.
+ */
+function scopeCss(css: string, scope: CustomCssScope): string {
+  if (scope === "global" || css.trim().length === 0) return css
+  return `@scope (${APP_SCOPE_SELECTOR}) {\n${css}\n}`
+}
 
 /**
  * Patterns we strip from user CSS before injection. Goal: keep "valid CSS
@@ -45,9 +65,18 @@ export function sanitizeUserCss(input: string): SanitizationResult {
  * call) and updates its content. Pass `enabled: false` to remove the tag
  * entirely so the user's CSS stops affecting the document immediately.
  *
+ * `scope` controls whether the sanitized CSS is wrapped in `@scope (#app)`
+ * (default "app" — limited to the application shell) or injected document-wide
+ * ("global"). The returned `css`/`removedCount` always reflect the sanitized
+ * (unwrapped) rules so callers can show an accurate "X rule(s) removed" count.
+ *
  * Safe to call from a React effect on every settings change.
  */
-export function applyUserCss(rawCss: string, enabled: boolean): SanitizationResult {
+export function applyUserCss(
+  rawCss: string,
+  enabled: boolean,
+  scope: CustomCssScope = "app"
+): SanitizationResult {
   if (typeof document === "undefined") {
     return { css: rawCss, removedCount: 0 }
   }
@@ -57,6 +86,7 @@ export function applyUserCss(rawCss: string, enabled: boolean): SanitizationResu
     return { css: "", removedCount: 0 }
   }
   const sanitized = sanitizeUserCss(rawCss)
+  const injected = scopeCss(sanitized.css, scope)
   let tag = existing
   if (!tag) {
     tag = document.createElement("style")
@@ -66,8 +96,8 @@ export function applyUserCss(rawCss: string, enabled: boolean): SanitizationResu
     // feature (VSCode, Obsidian, etc.) uses.
     document.head.appendChild(tag)
   }
-  if (tag.textContent !== sanitized.css) {
-    tag.textContent = sanitized.css
+  if (tag.textContent !== injected) {
+    tag.textContent = injected
   }
   return sanitized
 }

@@ -22,16 +22,23 @@ import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
-import { workflowNodeCategory, type WorkflowNodeKind } from "@/types/workflow/visual"
+import {
+  workflowNodeCategory,
+  type WorkflowNodeErrorHandling,
+  type WorkflowNodeKind,
+} from "@/types/workflow/visual"
 import { nodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
-import { tNode } from "@/lib/workflow/i18n/node-translate"
+import { tNodeField } from "@/lib/workflow/i18n/node-translate"
 import { getNodeIndex } from "@/lib/workflow/editor/node-index"
+import { supportsErrorHandling } from "@/lib/workflow/editor/node-handles"
 import type { EditorState, EditorStore } from "@/lib/workflow/editor/store"
 import { useDebouncedCallback } from "@/hooks/workflow/use-debounced-callback"
 import { Field, FieldErrorProvider } from "./inspector/forms/shared"
+import { ErrorHandlingSection } from "./inspector/forms/shared/error-handling-section"
 import { InspectorExpressionProvider } from "./inspector/forms/shared/inspector-context"
 import { DataTabs } from "./inspector/data/data-tabs"
 import { BulkNodeInspector } from "./bulk-node-inspector"
+import { useMissingNodeCapabilities } from "./capability-badge"
 import {
   getNodeConfigComponentForEntry,
   hasDedicatedConfigForEntry,
@@ -105,7 +112,9 @@ function InspectorPanelInner({
   embedded?: boolean
 }) {
   const t = useTranslations("workflows.inspector")
-  const tNodes = useTranslations("workflows.nodes")
+  // Root translator resolves both built-in (`workflows.nodes.*`) and plugin
+  // (`plugin.<id>.workflow.nodes.*`) node strings through `tNodeField`.
+  const tRoot = useTranslations()
 
   // Selector split (perf A4-style): subscribe in three narrow slices so a
   // mutation that doesn't change *the selected node* never reaches the
@@ -144,6 +153,7 @@ function InspectorPanelInner({
     () => (node ? nodeCatalogEntry(node.data.kind as WorkflowNodeKind) : null),
     [node]
   )
+  const capabilityInfo = useMissingNodeCapabilities(entry ?? {})
 
   // Debounce the zod re-validation so keystroke storms don't reparse the
   // whole schema on every character. `shallowEqualValidation` in the
@@ -240,6 +250,16 @@ function InspectorPanelInner({
             <Badge variant="outline" className={cn("font-normal", CATEGORY_BADGE[category])}>
               {t(`categoryBadge.${category}`)}
             </Badge>
+            {capabilityInfo ? (
+              <Badge
+                variant="outline"
+                title={capabilityInfo.tooltip}
+                className="gap-1 font-normal border-wf-status-running/40 text-wf-status-running"
+                data-testid="inspector-capability-badge"
+              >
+                {capabilityInfo.badgeLabel}
+              </Badge>
+            ) : null}
             {errorCount > 0 ? (
               <button
                 type="button"
@@ -256,10 +276,20 @@ function InspectorPanelInner({
             ) : null}
           </div>
           <h3 className="mt-1.5 text-sm font-semibold leading-tight">
-            {tNode(tNodes, `${node.data.kind}.label`, entry.label)}
+            {tNodeField(tRoot, {
+              kind: node.data.kind,
+              pluginId: entry.pluginId,
+              field: "label",
+              fallback: entry.label,
+            })}
           </h3>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            {tNode(tNodes, `${node.data.kind}.description`, entry.description)}
+            {tNodeField(tRoot, {
+              kind: node.data.kind,
+              pluginId: entry.pluginId,
+              field: "description",
+              fallback: entry.description,
+            })}
           </p>
         </div>
         {embedded ? null : (
@@ -305,6 +335,15 @@ function InspectorPanelInner({
                   aria-label={t("disabled")}
                 />
               </div>
+              {supportsErrorHandling(node.data.kind as string) ? (
+                <ErrorHandlingSection
+                  // Remount when switching nodes so the section's local draft
+                  // state (collapsed flag, JSON text) never leaks across nodes.
+                  key={node.id}
+                  errorHandling={node.data.errorHandling as WorkflowNodeErrorHandling | undefined}
+                  onChange={(next) => updateNodeData(node.id, { errorHandling: next })}
+                />
+              ) : null}
               <Separator />
               <FieldErrorProvider errors={validation?.fields ?? null}>
                 <InspectorExpressionProvider store={useStore} currentNodeId={node.id}>

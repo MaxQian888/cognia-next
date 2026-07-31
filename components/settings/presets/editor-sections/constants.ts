@@ -2,7 +2,7 @@
 // pre-split `components/settings/presets/preset-editor.tsx` so each section
 // can import without pulling in the whole editor module.
 
-import type { SendOptions } from "@/lib/claude/types"
+import type { SendOptions } from "@cognia/agent-config-types"
 
 export const COLOR_PALETTE = [
   "oklch(0.65 0.18 245)",

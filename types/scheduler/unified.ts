@@ -6,7 +6,7 @@
  *   1. App scheduler   — Dexie `tasks` table  (lib/scheduler/scheduler-db.ts)
  *   2. Workflow runtime — Dexie `workflowTriggers` + Rust cron_daemon
  *   3. Backup scheduler — `appSettings.backupSchedule`
- *   4. Plugin scheduler — Dexie `pluginScheduledJobs`
+ *   4. Plugin scheduler — `type: "plugin"` rows in SchedulerDB `tasks`
  *   5. System scheduler — OS-level (Windows Task Scheduler / launchd / cron)
  *
  * Each source keeps its own storage and CRUD path; the scheduler page renders
@@ -17,7 +17,17 @@
 
 import type { TaskTriggerType } from "@/types/scheduler"
 
-export type ScheduledItemKind = "app" | "workflow" | "backup" | "plugin" | "system" | "connector"
+/** Single exhaustive runtime/type authority for every unified scheduler kind. */
+export const SCHEDULED_ITEM_KINDS = [
+  "app",
+  "workflow",
+  "backup",
+  "plugin",
+  "system",
+  "connector",
+] as const
+
+export type ScheduledItemKind = (typeof SCHEDULED_ITEM_KINDS)[number]
 
 export type UnifiedItemStatus = "active" | "paused" | "disabled" | "expired" | "unknown"
 

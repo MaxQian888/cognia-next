@@ -11,6 +11,7 @@
  */
 
 import { listen } from "@tauri-apps/api/event"
+import { reconnectBackoffMs } from "../_shared/reconnect-backoff"
 import {
   connectorsWsOpen,
   connectorsWsSend,
@@ -82,7 +83,7 @@ export function startQQGateway(opts: QQGatewayOptions): QQGatewayClient {
         if (opts.signal.aborted) return
         attempts += 1
         try {
-          await delay(backoffBaseMs * Math.min(2 ** attempts, 32), opts.signal)
+          await delay(reconnectBackoffMs(backoffBaseMs, attempts), opts.signal)
         } catch {
           return
         }
@@ -96,7 +97,7 @@ export function startQQGateway(opts: QQGatewayOptions): QQGatewayClient {
         if (opts.signal.aborted) return
         attempts += 1
         try {
-          await delay(backoffBaseMs * Math.min(2 ** attempts, 32), opts.signal)
+          await delay(reconnectBackoffMs(backoffBaseMs, attempts), opts.signal)
         } catch {
           return
         }
@@ -128,6 +129,10 @@ export function startQQGateway(opts: QQGatewayOptions): QQGatewayClient {
       opts.signal.addEventListener("abort", abortHandler)
 
       let heartbeatTimer: ReturnType<typeof setTimeout> | null = null
+      // Heartbeats sent since the last HEARTBEAT_ACK — 2 consecutive
+      // unacknowledged beats means the socket is half-open (zombie); close
+      // it so the reconnect loop takes over instead of "running" forever.
+      let unackedHeartbeats = 0
 
       try {
         while (!wsEnded && !opts.signal.aborted) {
@@ -151,6 +156,15 @@ export function startQQGateway(opts: QQGatewayOptions): QQGatewayClient {
                 const { heartbeat_interval } = msg.d as { heartbeat_interval: number }
                 const sendHeartbeat = () => {
                   if (opts.signal.aborted || wsEnded) return
+                  if (unackedHeartbeats >= 2) {
+                    // Zombie socket: two heartbeats in a row got no ACK.
+                    wsEnded = true
+                    wakeResolve?.()
+                    wakeResolve = null
+                    void connectorsWsClose(handleId).catch(() => {})
+                    return
+                  }
+                  unackedHeartbeats += 1
                   void connectorsWsSend(
                     handleId,
                     JSON.stringify({ op: OP_HEARTBEAT, d: session.sequence })
@@ -162,32 +176,41 @@ export function startQQGateway(opts: QQGatewayOptions): QQGatewayClient {
                   Math.floor(Math.random() * heartbeat_interval)
                 )
 
-                const token = await opts.accessToken()
-                if (session.sessionId) {
-                  await connectorsWsSend(
-                    handleId,
-                    JSON.stringify({
-                      op: OP_RESUME,
-                      d: {
-                        token: `QQBot ${token}`,
-                        session_id: session.sessionId,
-                        seq: session.sequence,
-                      },
-                    })
-                  )
-                } else {
-                  await connectorsWsSend(
-                    handleId,
-                    JSON.stringify({
-                      op: OP_IDENTIFY,
-                      d: {
-                        token: `QQBot ${token}`,
-                        intents,
-                        shard: [0, 1],
-                        properties: {},
-                      },
-                    })
-                  )
+                try {
+                  const token = await opts.accessToken()
+                  if (session.sessionId) {
+                    await connectorsWsSend(
+                      handleId,
+                      JSON.stringify({
+                        op: OP_RESUME,
+                        d: {
+                          token: `QQBot ${token}`,
+                          session_id: session.sessionId,
+                          seq: session.sequence,
+                        },
+                      })
+                    )
+                  } else {
+                    await connectorsWsSend(
+                      handleId,
+                      JSON.stringify({
+                        op: OP_IDENTIFY,
+                        d: {
+                          token: `QQBot ${token}`,
+                          intents,
+                          shard: [0, 1],
+                          properties: {},
+                        },
+                      })
+                    )
+                  }
+                } catch {
+                  // A transient token-mint / ws-send failure must not unwind
+                  // the async generator — index.ts consumes it in a single
+                  // for-await with no restart loop, so a throw here would
+                  // permanently kill the adapter. Treat it as a connection
+                  // end and let the outer backoff loop reconnect.
+                  wsEnded = true
                 }
                 break
               }
@@ -196,6 +219,11 @@ export function startQQGateway(opts: QQGatewayOptions): QQGatewayClient {
                   const ready = msg.d as { user?: { id?: string }; session_id?: string }
                   selfId = ready.user?.id ?? selfId
                   session.sessionId = ready.session_id ?? null
+                  attempts = 0
+                } else if (msg.t === "RESUMED") {
+                  // A successful RESUME is just as healthy as READY — reset
+                  // the backoff counter so a later disconnect doesn't start
+                  // from an inflated attempt count.
                   attempts = 0
                 } else if (msg.t && QQ_MESSAGE_EVENTS.includes(msg.t)) {
                   yield { t: msg.t, s: msg.s, op: OP_DISPATCH, d: msg.d as QQDispatch["d"] }
@@ -211,6 +239,8 @@ export function startQQGateway(opts: QQGatewayOptions): QQGatewayClient {
                 wsEnded = true
                 break
               case OP_HEARTBEAT_ACK:
+                unackedHeartbeats = 0
+                break
               case OP_HEARTBEAT:
                 break
             }
@@ -227,7 +257,7 @@ export function startQQGateway(opts: QQGatewayOptions): QQGatewayClient {
       if (opts.signal.aborted) return
       attempts += 1
       try {
-        await delay(backoffBaseMs * Math.min(2 ** attempts, 32), opts.signal)
+        await delay(reconnectBackoffMs(backoffBaseMs, attempts), opts.signal)
       } catch {
         return
       }

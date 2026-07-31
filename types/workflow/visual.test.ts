@@ -43,6 +43,14 @@ describe("WORKFLOW_NODE_KINDS", () => {
     }
   })
 
+  it("includes the generic integration trigger without platform-specific aliases", () => {
+    const webhookIndex = WORKFLOW_NODE_KINDS.indexOf("trigger.webhook")
+    const integrationIndex = WORKFLOW_NODE_KINDS.indexOf("trigger.integration.event")
+    expect(webhookIndex).toBeGreaterThanOrEqual(0)
+    expect(integrationIndex).toBe(webhookIndex + 1)
+    expect(WORKFLOW_NODE_KINDS).not.toContain("trigger.github.webhook")
+  })
+
   it("covers all known categories", () => {
     const cats = new Set(WORKFLOW_NODE_KINDS.map(workflowNodeCategory))
     for (const required of ["trigger", "action", "ai", "flow", "data", "io", "annotation"]) {
@@ -57,6 +65,13 @@ describe("default constants", () => {
     expect(DEFAULT_WORKFLOW_SETTINGS.timeoutMs).toBeGreaterThan(0)
     expect(DEFAULT_WORKFLOW_SETTINGS.concurrency).toBeGreaterThanOrEqual(1)
     expect(DEFAULT_WORKFLOW_SETTINGS.retryDefaults.attempts).toBeGreaterThanOrEqual(1)
+  })
+
+  it("defaults new workflows to parallel ready-set scheduling", () => {
+    // New workflows get in-run parallelism; persisted workflows WITHOUT the
+    // field stay sequential via the orchestrator's `?? 1` fallback (covered
+    // by orchestrator.test.ts "maxConcurrency=1 default serializes").
+    expect(DEFAULT_WORKFLOW_SETTINGS.maxConcurrency).toBe(4)
   })
 
   it("retry policy default uses exponential backoff with a cap", () => {

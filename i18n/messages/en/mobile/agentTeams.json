@@ -1,0 +1,24 @@
+{
+  "backToTeams": "Teams",
+  "board": {
+    "applied": "Applied on the desktop.",
+    "commandFailed": "Rejected: {reason}",
+    "commentPlaceholder": "Add a comment…",
+    "comments": "{count, plural, =0 {No comments} =1 {# comment} other {# comments}}",
+    "empty": "No synced board yet — pair with the desktop and run a sync.",
+    "moveTo": "Move to",
+    "offline": "Desktop unreachable — showing the last synced board.",
+    "run": {
+      "pause": "Pause",
+      "resume": "Resume",
+      "stop": "Stop"
+    },
+    "twinBound": "Twin-bound teammate"
+  },
+  "tabs": {
+    "activity": "Activity",
+    "board": "Board",
+    "members": "Members",
+    "overview": "Overview"
+  }
+}

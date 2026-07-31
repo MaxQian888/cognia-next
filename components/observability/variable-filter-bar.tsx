@@ -16,24 +16,15 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { distinctValues, type Dimension } from "@/lib/observability/breakdown"
-import { isFilterEmpty, type TraceFilters } from "@/lib/observability/filters"
+import { isFilterEmpty, toggleFilterValue, type TraceFilters } from "@/lib/observability/filters"
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
 
-const DIMENSIONS: readonly Dimension[] = ["model", "surface", "operation", "tool", "session"]
+// Re-exported for backward compatibility — the pure toggle now lives in
+// `lib/observability/filters.ts` so the click-to-filter breakdown panels can
+// share it without importing from a component.
+export { toggleFilterValue }
 
-/** Pure toggle: add/remove `value` from the given dimension's selection. */
-export function toggleFilterValue(
-  filters: TraceFilters,
-  dim: Dimension,
-  value: string
-): TraceFilters {
-  const current = (filters[dim] as string[] | undefined) ?? []
-  const next = current.includes(value) ? current.filter((v) => v !== value) : [...current, value]
-  const out: TraceFilters = { ...filters }
-  if (next.length === 0) delete out[dim]
-  else (out[dim] as string[]) = next
-  return out
-}
+const DIMENSIONS: readonly Dimension[] = ["model", "surface", "operation", "tool", "session"]
 
 export interface VariableFilterBarProps {
   windowSpans: AgentTraceSpan[]

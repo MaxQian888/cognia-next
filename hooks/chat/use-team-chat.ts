@@ -1,30 +1,46 @@
 "use client"
 
-import { useCallback, useEffect, useRef } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { useTranslations } from "next-intl"
 import type { UnlistenFn } from "@tauri-apps/api/event"
 import type { UIMessage } from "ai"
-import { applySdkEvent, contentPreview, makeUserMessage } from "@/lib/claude/adapter"
+import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
+import { createDiagnostic } from "@cognia/diagnostics"
+import { toDiagnostic } from "@/lib/diagnostics/to-diagnostic"
+import {
+  applySdkEvent,
+  contentPreview,
+  makeUserMessage,
+  mergeMemorySourcesIntoLastAssistant,
+  type MemorySourcesContext,
+} from "@/lib/claude/adapter"
+import {
+  runTitleTask,
+  shouldGenerateTitle,
+  isPlaceholderTitle,
+} from "@/lib/ai/generation/run-title-task"
 import {
   approveTool,
   closeSession,
-  deleteMessage,
   interruptSession,
   onClaudeMessage,
   sendPrompt,
 } from "@/lib/claude/ipc"
-import { detectPlatform } from "@/hooks/use-platform"
-import { getDb } from "@/lib/db/schema"
 import { resolveSendOptions } from "@/lib/claude/build-options"
+import { pendingRecoveryPhase } from "@/lib/usage/compaction-metrics"
 import { runTurnMemory } from "@/lib/memory/run-turn-memory"
+import { tryBuildMemoryDeps } from "@/lib/memory/runtime/build-deps"
+import type { ApplyMemoryContextDeps } from "@/lib/memory/runtime/apply-memory-context"
+import { resolveMemoryConfig } from "@/types/memory/memory"
 import { tryBuildTwinDeps, type TwinDepsForBuild } from "@/lib/twin/runtime/build-deps"
-import { generateEmbedding } from "@/lib/ai/embedding/embedding"
+import { generateEmbedding } from "@cognia/provider-embedding/embedding"
 import {
   buildSupervisorRoster,
   parseDispatches,
   routeTurn,
   stripDispatches,
 } from "@/lib/claude/team-router"
-import { listMessages, persistMessages, truncateAfter } from "@/lib/db/messages"
+import { listMessages, persistMessages } from "@/lib/db/messages"
 import { getSession, touchSession, updateSession } from "@/lib/db/sessions"
 import { listCharactersByIds } from "@/lib/db/characters"
 import { recordResultUsage } from "@/lib/db/session-usage"
@@ -38,36 +54,82 @@ import type {
   SendContent,
   Team,
   TeamMember,
-} from "@/lib/claude/types"
+} from "@cognia/agent-config-types"
+import { subSessionId, decodeSubSession } from "@/lib/claude/team-session-id"
+import { steerBlocksOf, steerTextOf, type SteerMessageMeta } from "@/lib/claude/steer"
+import {
+  senderIdOf,
+  tagBranchSiblings,
+  tagEditSibling,
+  teamBranchGroupId,
+} from "@/lib/chat/branch-regen"
+import {
+  appendSteerMessage,
+  isSessionOpen,
+  maybeDrainSteer,
+  sessionStatusOf,
+  steerArmed,
+} from "./steer-runtime"
+import { SessionCoalescingRegistry } from "./stream-coalescing"
+import { getExecutionBroker } from "@/lib/execution/broker"
+import { acquireChatLease } from "@/lib/execution/chat-lease"
 import { useChatStore } from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { useUIStore } from "@/stores/ui"
 import { isTauri } from "@/lib/tauri"
+import { isCapacitor } from "@/lib/platform/detect"
+import { hasWebCompanionTarget } from "@/lib/platform/web-companion"
+import { RoutingAttemptController } from "@cognia/provider-routing"
+import { DEFAULT_ROUTING_CONFIG } from "@cognia/provider-types/model-mapping"
 
-const SUB_SEPARATOR = "::char::"
 const MAX_SUPERVISOR_ROUNDS = 2
 
-/**
- * Build a sub-session id from the team session and character. A turnId suffix
- * keeps successive turns (e.g. regenerates) from colliding with stale resolver
- * entries inside the in-flight orchestrator loop.
- */
-function subSessionId(teamSessionId: string, characterId: string, turnId: string): string {
-  return `${teamSessionId}${SUB_SEPARATOR}${characterId}::${turnId}`
+/** Options for a team send. `sessionId` targets a background pane (defaults
+ * to the active session); `skipPersistUserTurn` marks an internal re-issue
+ * (regenerate) whose user message is already on disk. */
+export interface TeamSendOptions {
+  /** Attachment provenance for the optimistic user message. */
+  attachmentManifest?: readonly AttachmentManifestEntry[]
+  sessionId?: string
+  skipPersistUserTurn?: boolean
+  /**
+   * This turn is the steer queue replaying itself.
+   *
+   * Like `skipPersistUserTurn` it must not write a second user message — each
+   * queued entry is already in the transcript from its optimistic append — but
+   * unlike it, this IS a genuine user turn rather than an internal re-issue.
+   * `maybeDrainSteer` documents that the replay MUST pass this; direct chat
+   * keeps the same distinction as its own flag (`use-claude-chat.ts`) rather
+   * than folding it into `skipUserAppend`, precisely so the behaviours that
+   * belong to a real user turn cannot vanish the next time one is added here.
+   */
+  steerDrain?: boolean
+  /** Stamp an edited replacement into the original user message's branch group. */
+  branchTag?: { groupId: string; index: number }
 }
 
+/** Neither a drain nor a regenerate writes the user turn a second time. */
+function skipsUserTurn(opts?: TeamSendOptions): boolean {
+  return Boolean(opts?.skipPersistUserTurn || opts?.steerDrain)
+}
+
+type TeamSendFn = (content: SendContent, opts?: TeamSendOptions) => Promise<void>
+
 /**
- * Decode a sub-session id into its team-session + character pair, or null if
- * the id isn't a team sub-session. The optional `::turnId` suffix is stripped.
+ * Interrupt every in-flight sub-session of `teamSessionId` and reject its
+ * resolvers so the orchestration loop unwinds. Shared by `stop` and the
+ * broker lease's cancel bridge.
  */
-function decodeSubSession(id: string): { teamSessionId: string; characterId: string } | null {
-  const idx = id.indexOf(SUB_SEPARATOR)
-  if (idx < 0) return null
-  const tail = id.slice(idx + SUB_SEPARATOR.length)
-  const sep = tail.indexOf("::")
-  return {
-    teamSessionId: id.slice(0, idx),
-    characterId: sep < 0 ? tail : tail.slice(0, sep),
+async function interruptTeamTurn(teamSessionId: string, resolvers: ResolverMap): Promise<void> {
+  for (const [sub, r] of resolvers.entries()) {
+    const decoded = decodeSubSession(sub)
+    if (decoded?.teamSessionId !== teamSessionId) continue
+    try {
+      await interruptSession(sub)
+    } catch {
+      /* best effort */
+    }
+    r.reject(new Error("Interrupted"))
   }
 }
 
@@ -94,19 +156,18 @@ type ResolverMap = Map<string, SubResolver>
  * works without protocol changes.
  *
  * Mount this hook once at the shell level alongside `useClaudeChat`. The two
- * partition the event stream by `sessionId.includes("::char::")` so they
- * never both react to the same event.
+ * partition the event stream with `decodeSubSession` (`::char::` sub-session
+ * ids) so they never both react to the same event.
+ *
+ * Behavioral parity with `useClaudeChat`: sends are session-parameterized
+ * (background panes), gated by the execution broker (one "team" lease per
+ * turn), and steer-queued while streaming. Principled exclusions — no
+ * standalone/BYOK or external-agent branch (`TeamMember` has no runtime
+ * field; members are sidecar-only by data model) and no plan-approval dock
+ * (plan mode is a direct-chat surface).
  */
 export function useTeamChat() {
-  const activeRef = useRef<string | null>(null)
-  useEffect(() => {
-    const unsub = useChatStore.subscribe((s) => {
-      activeRef.current = s.activeSessionId
-    })
-    activeRef.current = useChatStore.getState().activeSessionId
-    return unsub
-  }, [])
-
+  const tInlineErr = useTranslations("chat.inlineError")
   const allowListRef = useRef<string[]>([])
   useEffect(() => {
     const unsub = useSettingsStore.subscribe((s) => {
@@ -117,23 +178,88 @@ export function useTeamChat() {
   }, [])
 
   const resolvers = useRef<ResolverMap>(new Map())
-  const interruptedRef = useRef(false)
+  const eventQueuesRef = useRef<Map<string, Promise<void>>>(new Map())
+  // Team sessions whose in-flight turn was interrupted (stop / broker cancel).
+  // Per-session so stopping one team pane never aborts a sibling team turn.
+  const interruptedRef = useRef<Set<string>>(new Set())
+
+  // Streaming coalescing — parity with direct chat's per-session registry.
+  // Mid-turn team events commit to the store at most once per animation frame
+  // and write to Dexie on a trailing debounce, instead of one full
+  // `persistMessages` transaction + React commit per token batch. The mirror
+  // holds the authoritative latest list per team session so the next event
+  // never reads a coalesced-stale base. Sealed on each member's `result`
+  // event (in `handleTeamEvent`) and in `send`'s finally (interrupt / error
+  // settles). 0ms persist in tests degrades to synchronous so existing
+  // persist-ordering assertions hold.
+  const TEAM_PERSIST_DEBOUNCE_MS = process.env.NODE_ENV === "test" ? 0 : 250
+  const streamMirrorRef = useRef<Map<string, UIMessage[]>>(new Map())
+  const [coalescing] = useState(
+    () =>
+      new SessionCoalescingRegistry({
+        onCommit: (sid, msgs) => useChatStore.getState().replaceSessionMessages(sid, msgs),
+        onPersist: (sid, msgs) =>
+          void persistMessages(sid, msgs).catch((err) =>
+            console.error("team debounced persistMessages failed", err)
+          ),
+        persistDelayMs: TEAM_PERSIST_DEBOUNCE_MS,
+      })
+  )
+
+  // Best-effort flush of every pending streaming write on unmount so the last
+  // partial isn't lost when the hook tears down mid-turn.
+  useEffect(() => {
+    const mirror = streamMirrorRef.current
+    return () => {
+      coalescing.flushAllPersist()
+      coalescing.clear()
+      mirror.clear()
+    }
+  }, [coalescing])
 
   // Cache the original SendContent per team session so regenerate can resend
   // it without losing attachments to the text-only round-trip.
   const lastUserContentRef = useRef<Map<string, SendContent>>(new Map())
 
+  // Serialize events per member sub-session. A result event performs async
+  // persistence before `session_ended` resolves the member turn; without this
+  // queue the orchestration could start final memory extraction while the
+  // sealed assistant reply was still absent from the team transcript.
+  const enqueueTeamEvent = useCallback(
+    (evt: ClaudeEvent) => {
+      const key =
+        typeof (evt as { sessionId?: unknown }).sessionId === "string"
+          ? (evt as { sessionId: string }).sessionId
+          : "__nosession__"
+      const queues = eventQueuesRef.current
+      const tail = (queues.get(key) ?? Promise.resolve())
+        .catch(() => {})
+        .then(() =>
+          handleTeamEvent(evt, allowListRef, resolvers.current, {
+            mirror: streamMirrorRef.current,
+            registry: coalescing,
+          })
+        )
+        .catch((err) => {
+          console.error("team handleEvent failed", err)
+        })
+      queues.set(key, tail)
+      void tail.finally(() => {
+        if (queues.get(key) === tail) queues.delete(key)
+      })
+    },
+    [coalescing]
+  )
+
   // Subscribe to sidecar events; only react to sub-session-tagged ones.
+  // Same event sources as direct chat: Tauri events on desktop, the mirrored
+  // companion WebSocket on Capacitor / web-companion. Plain web has none.
   useEffect(() => {
-    if (!isTauri()) return
+    if (!isTauri() && !isCapacitor() && !hasWebCompanionTarget()) return
     let unlisten: UnlistenFn | null = null
     let cancelled = false
 
-    onClaudeMessage((evt) => {
-      void handleTeamEvent(evt, activeRef, allowListRef, resolvers.current).catch((err) => {
-        console.error("team handleEvent failed", err)
-      })
-    })
+    onClaudeMessage((evt) => enqueueTeamEvent(evt))
       .then((u) => {
         if (cancelled) u()
         else unlisten = u
@@ -146,233 +272,482 @@ export function useTeamChat() {
       cancelled = true
       unlisten?.()
     }
+  }, [enqueueTeamEvent])
+
+  // Self-reference for the steer drain in `send`'s finally (replay = fresh send).
+  const sendRef = useRef<TeamSendFn | null>(null)
+
+  /**
+   * Replay this session's queued follow-ups as one fresh team turn.
+   *
+   * Both drain sites (the settle in `send`'s finally, and `flushSteer` after an
+   * errored settle) go through here so they cannot disagree about the flags the
+   * replay carries — `steerDrain`, which `maybeDrainSteer` requires and which
+   * marks the replay a genuine user turn rather than an internal re-issue.
+   */
+  const drainSteerInto = useCallback((sessionId: string) => {
+    maybeDrainSteer(
+      sessionId,
+      (payload) => void sendRef.current?.(payload, { sessionId, steerDrain: true })
+    )
   }, [])
 
   /**
-   * Send a user prompt to every member of the active team session, sequenced
-   * by `routeTurn`. Returns once every member has either replied or errored.
+   * Send a user prompt to every member of a team session (the active one by
+   * default, or `opts.sessionId` for a background pane), sequenced by
+   * `routeTurn`. Returns once every member has either replied or errored.
    *
-   * If the active session isn't a team session, this is a no-op — the caller
-   * should fall back to `useClaudeChat.send`.
+   * If the session isn't a team session, this is a no-op — the caller should
+   * fall back to `useClaudeChat.send`.
    *
-   * `skipPersistUserTurn` is set internally by `regenerate` so we don't double
-   * up the user message after `truncateAfter` has already left it on disk.
+   * `opts.skipPersistUserTurn` is set by internal re-issues (regenerate) and
+   * `opts.steerDrain` by the queue's own replay, so neither doubles up the user
+   * message already left on disk.
    */
-  const send = useCallback(async (content: SendContent, skipPersistUserTurn = false) => {
-    const sessionId = useChatStore.getState().activeSessionId
-    if (!sessionId) {
-      useChatStore.getState().setError("No session selected")
-      return
-    }
-    const session = await getSession(sessionId)
-    if (!session || session.kind !== "team" || !session.teamId) {
-      useChatStore.getState().setError("Team session not found")
-      return
-    }
-    const team = await getTeam(session.teamId)
-    if (!team) {
-      useChatStore.getState().setError(`Team ${session.teamId} no longer exists`)
-      return
-    }
-
-    interruptedRef.current = false
-    useUIStore.getState().clearStopRequestsFor(sessionId)
-
-    const memberIds = team.members.map((m) => m.characterId)
-    const members = await listCharactersByIds(memberIds)
-    const memberByCharId = new Map<string, TeamMember>(team.members.map((m) => [m.characterId, m]))
-    const userText = asPlainText(content)
-    lastUserContentRef.current.set(sessionId, content)
-
-    // Embed the user message ONCE per turn so twin-bound members can share the
-    // same query vector rather than each paying an individual embed call.
-    let turnTwinDeps: TwinDepsForBuild | undefined
-    let turnEmbedding: number[] | undefined
-    if (userText.trim()) {
-      turnTwinDeps = await tryBuildTwinDeps()
-      if (turnTwinDeps) {
-        try {
-          const result = await generateEmbedding(userText, turnTwinDeps.embedding)
-          turnEmbedding = result.embedding
-        } catch {
-          turnEmbedding = undefined // resolver falls back to per-member embed
-        }
-      }
-    }
-
-    // 1. Persist the user turn first, tagging it as a "user" sender.
-    if (!skipPersistUserTurn) {
-      const userMsg = withMetadata(makeUserMessage(content), {
-        senderKind: "user",
-      })
-      const before = useChatStore.getState().messages
-      const after = [...before, userMsg]
-      useChatStore.getState().replaceMessages(after)
-      useChatStore.getState().setStatus("streaming")
-      useChatStore.getState().setError(null)
-      try {
-        await persistMessages(sessionId, after)
-        await touchSession(sessionId)
-        if (session.title === "New conversation" || !session.title) {
-          const title = contentPreview(content, 40)
-          if (title) await updateSession(sessionId, { title })
-        }
-      } catch (err) {
-        useChatStore.getState().setError(err instanceof Error ? err.message : String(err))
+  const send = useCallback(
+    async (content: SendContent, opts?: TeamSendOptions) => {
+      const sessionId = opts?.sessionId ?? useChatStore.getState().activeSessionId
+      if (!sessionId) {
+        useChatStore.getState().setError(tInlineErr("noSession"))
         return
       }
-    } else {
-      useChatStore.getState().setStatus("streaming")
-      useChatStore.getState().setError(null)
-    }
 
-    const turnId = newTurnId()
+      // Concurrency cap backstop — parity with direct chat. A session that is
+      // already streaming is a continuation (its own lease exempts it).
+      if (getExecutionBroker().isAtCapacity("ai-turn", sessionId)) {
+        console.warn("team send blocked: concurrent stream cap reached", { sessionId })
+        return
+      }
 
-    // 2. Branch on orchestration. Supervisor has its own multi-round loop.
-    try {
-      if (team.orchestration === "supervisor") {
-        await runSupervisorTurn({
-          session,
-          sessionId,
-          team,
-          members,
-          memberByCharId,
-          turnId,
-          interruptedRef,
-          resolvers: resolvers.current,
-          turnTwinDeps,
-          turnEmbedding,
-          turnUserMessage: userText,
-        })
-      } else {
-        const targets = routeTurn(team, members, userText)
-        if (targets.length === 0) {
-          // `manual` mode → user picks a member explicitly. Stop here.
-          useChatStore.getState().setStatus("idle")
+      // Steer instead of a concurrent orchestration loop: a fresh user turn
+      // while THIS team session is still streaming / awaiting approval would
+      // start a second orchestrator over half-written state. Queue it and
+      // replay once the turn settles. The replayed steer addresses the *team*
+      // (it re-routes through routeTurn / the supervisor); members later in the
+      // current turn's sequence do NOT see it mid-turn — same "no mid-turn
+      // injection" constraint as direct chat. Internal re-issues bypass this.
+      if (!skipsUserTurn(opts)) {
+        const st = sessionStatusOf(sessionId)
+        if (st === "streaming" || st === "awaiting_approval") {
+          const text = steerTextOf(content)
+          const blocks = steerBlocksOf(content)
+          if (!text && blocks.length === 0) return
+          // Show the follow-up straight away, exactly as direct chat does — the
+          // run panel only carries a count now, so without this the message
+          // would vanish until the turn settles. A team turn has no live-input
+          // lane (the orchestrator is mid-sequence), so it opens as `queued` and
+          // only ever advances on drain.
+          const entryId = crypto.randomUUID()
+          const steerMeta: SteerMessageMeta = { entryId, state: "queued" }
+          const optimistic = withMetadata(
+            makeUserMessage(content, undefined, opts?.attachmentManifest),
+            { senderKind: "user", steer: steerMeta }
+          )
+          appendSteerMessage(sessionId, optimistic)
+          useChatStore.getState().enqueueSteer(sessionId, {
+            id: entryId,
+            text,
+            blocks: blocks.length > 0 ? blocks : undefined,
+          })
           return
         }
-        await runLinearTurn({
-          session,
+      }
+
+      const session = await getSession(sessionId)
+      if (!session || session.kind !== "team" || !session.teamId) {
+        useChatStore
+          .getState()
+          .setSessionDiagnostic(
+            sessionId,
+            createDiagnostic("teamSessionMissing", { source: "agent-team", meta: { sessionId } })
+          )
+        return
+      }
+      const team = await getTeam(session.teamId)
+      if (!team) {
+        useChatStore.getState().setSessionDiagnostic(
           sessionId,
-          team,
-          content,
-          members,
-          targets,
-          memberByCharId,
-          turnId,
-          interruptedRef,
-          resolvers: resolvers.current,
-          turnTwinDeps,
-          turnEmbedding,
-          turnUserMessage: userText,
-        })
+          createDiagnostic("teamMissing", {
+            source: "agent-team",
+            meta: { sessionId, extra: { teamId: session.teamId } },
+          })
+        )
+        return
       }
 
-      // Long-term memory write parity with direct chat (team↔direct): the team
-      // runtime previously only *read* memory (via resolveSendOptions per member)
-      // and never wrote it back. Extract from the completed team turn — the user
-      // prompt plus the final team reply (last assistant message; for supervisor
-      // mode that is the synthesis). Only runs on clean completion: interrupt and
-      // error throw past this point, and the manual no-target case returns above.
-      const finalMessages = useChatStore.getState().messages
-      const lastAssistant = [...finalMessages].reverse().find((m) => m.role === "assistant")
-      void runTurnMemory(sessionId, {
-        userText,
-        assistantText: lastAssistant ? textFromParts(lastAssistant.parts) : "",
-        transcript: finalMessages.map((m) => ({ role: m.role, text: textFromParts(m.parts) })),
-      })
-    } finally {
-      useChatStore.getState().setStatus("idle")
-      useUIStore.getState().clearMemberStatusFor(sessionId)
+      interruptedRef.current.delete(sessionId)
       useUIStore.getState().clearStopRequestsFor(sessionId)
-    }
-  }, [])
 
-  /** Cancel an in-flight team turn. Aborts the current sub-session and
-   * stops issuing new ones. */
-  const stop = useCallback(async () => {
-    interruptedRef.current = true
-    const teamSessionId = useChatStore.getState().activeSessionId
-    if (!teamSessionId) return
-    // Interrupt anything currently sending.
-    for (const [sub, r] of resolvers.current.entries()) {
-      const decoded = decodeSubSession(sub)
-      if (decoded?.teamSessionId !== teamSessionId) continue
+      const memberIds = team.members.map((m) => m.characterId)
+      const members = await listCharactersByIds(memberIds)
+      const memberByCharId = new Map<string, TeamMember>(
+        team.members.map((m) => [m.characterId, m])
+      )
+      const userText = asPlainText(content)
+      lastUserContentRef.current.set(sessionId, content)
+
+      // Embed the user message ONCE per turn so twin-bound members can share the
+      // same query vector rather than each paying an individual embed call.
+      let turnTwinDeps: TwinDepsForBuild | undefined
+      let turnEmbedding: number[] | undefined
+      let turnMemoryDeps: ApplyMemoryContextDeps | undefined
+      if (userText.trim()) {
+        turnTwinDeps = await tryBuildTwinDeps()
+        if (turnTwinDeps) {
+          try {
+            const result = await generateEmbedding(userText, turnTwinDeps.embedding)
+            turnEmbedding = result.embedding
+          } catch {
+            turnEmbedding = undefined // resolver falls back to per-member embed
+          }
+        }
+        // Long-term memory recall parity with direct chat: build the read-runtime
+        // deps once per turn so every member injects the shared memory store (the
+        // team runtime previously read twin RAG but never recalled memory).
+        turnMemoryDeps = await tryBuildMemoryDeps(
+          resolveMemoryConfig(useSettingsStore.getState().settings?.memory),
+          turnTwinDeps
+        )
+      }
+
+      // 1. Persist the user turn first, tagging it as a "user" sender.
+      // Captures the instant title preview (if written) so the later LLM-title
+      // smoothing can compare against what the user actually sees.
+      // Base off this session's own slice — never the focused projection — and
+      // fall back to Dexie when no pane has materialised the slice yet.
+      let instantPreviewTitle: string | undefined
+      if (!skipsUserTurn(opts)) {
+        const userMsg = withMetadata(
+          makeUserMessage(content, undefined, opts?.attachmentManifest),
+          {
+            senderKind: "user",
+          }
+        )
+        if (opts?.branchTag) {
+          ;(userMsg as { metadata?: Record<string, unknown> }).metadata = {
+            ...((userMsg as { metadata?: Record<string, unknown> }).metadata ?? {}),
+            branchGroupId: opts.branchTag.groupId,
+            branchIndex: opts.branchTag.index,
+          }
+          useChatStore
+            .getState()
+            .setSessionActiveBranch(sessionId, opts.branchTag.groupId, userMsg.id)
+        }
+        const before =
+          useChatStore.getState().sessions[sessionId]?.messages ?? (await listMessages(sessionId))
+        const after = [...before, userMsg]
+        useChatStore.getState().replaceSessionMessages(sessionId, after)
+        try {
+          await persistMessages(sessionId, after)
+          await touchSession(sessionId)
+          // Instant first-message preview — parity with direct chat. Only claims
+          // a still-placeholder title and marks it machine-set (`titleAuto`) so
+          // the turn-complete path may later upgrade it to an LLM title.
+          if (isPlaceholderTitle(session.title)) {
+            const title = contentPreview(content, 40)
+            if (title) {
+              instantPreviewTitle = title
+              await updateSession(sessionId, { title, titleAuto: true })
+            }
+          }
+        } catch (err) {
+          useChatStore
+            .getState()
+            .setSessionDiagnostic(
+              sessionId,
+              toDiagnostic(err, { source: "agent-team", meta: { sessionId } })
+            )
+          return
+        }
+      }
+
+      // Register the team turn with the global execution broker (one lease for
+      // the whole sequential fan-out). Acquired before the `streaming` flip so
+      // the status watcher releases it on settle; the broker's cancel bridge
+      // interrupts the live sub-sessions (their ids differ from `sessionId`).
+      // Best-effort: a broker hiccup never blocks the committed turn.
       try {
-        await interruptSession(sub)
-      } catch {
-        /* best effort */
-      }
-      r.reject(new Error("Interrupted"))
-    }
-    useChatStore.getState().setStatus("idle")
-    useUIStore.getState().clearMemberStatusFor(teamSessionId)
-  }, [])
-
-  /**
-   * Re-issue the most recent user turn for the active team session. Drops
-   * every assistant message after the last user turn (covers linear and
-   * supervisor modes uniformly) then re-routes the same content.
-   */
-  const regenerate = useCallback(async () => {
-    const sessionId = useChatStore.getState().activeSessionId
-    if (!sessionId) return
-
-    const messages = useChatStore.getState().messages
-    let lastUserIdx = -1
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role === "user") {
-        lastUserIdx = i
-        break
-      }
-    }
-    if (lastUserIdx < 0) return
-
-    const anchor = messages[lastUserIdx]
-    if (detectPlatform() === "mobile") {
-      await mirrorTeamTruncateToDesktop(sessionId, anchor.id)
-    }
-    // Drop the user message AND everything after it. We then re-call send()
-    // with the original content; the user message will be re-persisted via the
-    // normal optimistic-append path so attachments survive the round-trip.
-    await truncateAfter(sessionId, anchor.id, { inclusive: true })
-    const remaining = await listMessages(sessionId)
-    useChatStore.getState().replaceMessages(remaining)
-
-    const cached = lastUserContentRef.current.get(sessionId)
-    const content: SendContent =
-      cached ??
-      anchor.parts
-        .filter((p): p is { type: "text"; text: string } => {
-          const t = (p as { type?: string }).type
-          return t === "text"
+        await acquireChatLease({
+          sessionId,
+          projectId: session.projectId,
+          label: session.title || team.name || `#${sessionId.slice(0, 8)}`,
+          kind: "team",
+          onCancel: () => {
+            interruptedRef.current.add(sessionId)
+            void interruptTeamTurn(sessionId, resolvers.current)
+          },
         })
-        .map((p) => p.text)
-        .join("")
-    await send(content)
+      } catch (leaseErr) {
+        console.warn("team chat lease acquire failed; sending without admission", leaseErr)
+      }
+      // Clear any stale error BEFORE flipping to streaming — setSessionError(null)
+      // resets status to idle, so the reverse order would strand the run status
+      // (and release the broker lease) the moment the turn started.
+      useChatStore.getState().setSessionError(sessionId, null)
+      useChatStore.getState().setSessionStatus(sessionId, "streaming")
+
+      const turnId = newTurnId()
+
+      // 2. Branch on orchestration. Supervisor has its own multi-round loop.
+      try {
+        if (team.orchestration === "supervisor") {
+          await runSupervisorTurn({
+            session,
+            sessionId,
+            team,
+            members,
+            memberByCharId,
+            turnId,
+            interruptedRef,
+            resolvers: resolvers.current,
+            turnTwinDeps,
+            turnEmbedding,
+            turnMemoryDeps,
+            turnUserMessage: userText,
+          })
+        } else {
+          const targets = routeTurn(team, members, userText)
+          if (targets.length === 0) {
+            // `manual` mode → user picks a member explicitly. Stop here.
+            useChatStore.getState().setSessionStatus(sessionId, "idle")
+            return
+          }
+          await runLinearTurn({
+            session,
+            sessionId,
+            team,
+            content,
+            members,
+            targets,
+            memberByCharId,
+            turnId,
+            interruptedRef,
+            resolvers: resolvers.current,
+            turnTwinDeps,
+            turnEmbedding,
+            turnMemoryDeps,
+            turnUserMessage: userText,
+          })
+        }
+
+        // Long-term memory write parity with direct chat (team↔direct): the team
+        // runtime previously only *read* memory (via resolveSendOptions per member)
+        // and never wrote it back. Extract from the completed team turn — the user
+        // prompt plus the final team reply (last assistant message; for supervisor
+        // mode that is the synthesis). Only runs on clean completion: interrupt and
+        // error throw past this point, and the manual no-target case returns above.
+        const finalMessages =
+          useChatStore.getState().sessions[sessionId]?.messages ?? (await listMessages(sessionId))
+        const lastAssistant = [...finalMessages].reverse().find((m) => m.role === "assistant")
+        void runTurnMemory(sessionId, {
+          userText,
+          assistantText: lastAssistant ? textFromParts(lastAssistant.parts) : "",
+          assistantMessageId: lastAssistant?.id,
+          transcript: finalMessages.map((m) => ({
+            role: m.role,
+            text: textFromParts(m.parts),
+            parts: m.parts,
+          })),
+        })
+
+        // Conversation-title upgrade — parity with direct chat. On the first team
+        // turn (and while still machine-set), ask the cheap model for a short
+        // title built from the first user prompt + first teammate reply. Reuse the
+        // send-start `session` snapshot for the gate (no extra DB round-trip); the
+        // freshness re-check happens inside `runTitleTask` before it persists.
+        const settings = useSettingsStore.getState().settings
+        const titleCfg = settings?.conversationTitle
+        const assistantCount = finalMessages.filter((m) => m.role === "assistant").length
+        if (
+          shouldGenerateTitle({
+            titleEnabled: titleCfg?.enabled,
+            assistantCount,
+            titleAuto: session.titleAuto,
+          })
+        ) {
+          const firstUser = finalMessages.find((m) => m.role === "user")
+          const firstAssistant = finalMessages.find((m) => m.role === "assistant")
+          void runTitleTask({
+            session,
+            appSettings: settings,
+            override: titleCfg,
+            featureId: "conversation-title",
+            sourceText: firstUser ? textFromParts(firstUser.parts) : userText,
+            resultText: firstAssistant ? textFromParts(firstAssistant.parts) : undefined,
+            locale: settings?.language,
+            currentTitle: instantPreviewTitle ?? session.title,
+            isStillAuto: async () => {
+              const fresh = await getSession(sessionId).catch(() => undefined)
+              return !fresh || fresh.titleAuto !== false
+            },
+            persist: (title) => updateSession(sessionId, { title, titleAuto: true }),
+          })
+        }
+      } finally {
+        // Seal any coalesced streaming state left by this turn: a clean member
+        // settle already flushed on its `result` event, but interrupt / error
+        // paths can end mid-stream with a pending rAF commit + debounced
+        // persist. Flush them (latest snapshot wins) and drop the mirror so the
+        // next turn re-reads a fresh base.
+        const pair = coalescing.get(sessionId)
+        pair.commit.flush()
+        pair.persist.flush()
+        coalescing.release(sessionId)
+        streamMirrorRef.current.delete(sessionId)
+        // Capture the settle shape before flipping to idle: a clean end always
+        // drains the steer queue; an interrupted / errored end only drains when
+        // `interruptAndSteer` armed it (parity with direct chat's settle).
+        const hadError = useChatStore.getState().sessions[sessionId]?.status === "error"
+        const wasInterrupted = interruptedRef.current.has(sessionId)
+        pendingTeamBranchTags.delete(sessionId)
+        useChatStore.getState().setSessionStatus(sessionId, "idle")
+        useUIStore.getState().clearMemberStatusFor(sessionId)
+        useUIStore.getState().clearStopRequestsFor(sessionId)
+        if ((!hadError && !wasInterrupted) || steerArmed.has(sessionId)) {
+          drainSteerInto(sessionId)
+        }
+      }
+    },
+    [coalescing, drainSteerInto, tInlineErr]
+  )
+
+  // Keep the steer drain pointed at the latest `send` without closing over it.
+  useEffect(() => {
+    sendRef.current = send
+    return () => {
+      if (sendRef.current === send) sendRef.current = null
+    }
   }, [send])
 
+  /** Cancel an in-flight team turn (the active session's by default, or a
+   * background pane's via `targetSessionId`). Aborts the current sub-session
+   * and stops issuing new ones. */
+  const stop = useCallback(async (targetSessionId?: string) => {
+    const teamSessionId = targetSessionId ?? useChatStore.getState().activeSessionId
+    if (!teamSessionId) return
+    interruptedRef.current.add(teamSessionId)
+    // Plain stop discards any queued steer — the user is taking over, not
+    // steering — and disarms the drain so the settle doesn't replay it.
+    useChatStore.getState().clearSteerQueue(teamSessionId)
+    steerArmed.delete(teamSessionId)
+    // Release the visible team state before waiting for every sub-session's
+    // interrupt acknowledgement. A slow sidecar must not strand the composer
+    // in its streaming state or leave member spinners running.
+    useChatStore.getState().setSessionStatus(teamSessionId, "idle")
+    useUIStore.getState().clearMemberStatusFor(teamSessionId)
+    useUIStore.getState().clearStopRequestsFor(teamSessionId)
+    await interruptTeamTurn(teamSessionId, resolvers.current)
+  }, [])
+
+  // "Interrupt & steer now": cut the running team turn short so its settle
+  // replays the queued steer immediately. Arming covers interrupted settles
+  // (the finally drains armed sessions). No-op when nothing is queued.
+  const interruptAndSteer = useCallback(async (targetSessionId?: string) => {
+    const sessionId = targetSessionId ?? useChatStore.getState().activeSessionId
+    if (!sessionId) return
+    const queued = useChatStore.getState().sessions[sessionId]?.steerQueue ?? []
+    if (queued.length === 0) return
+    steerArmed.add(sessionId)
+    interruptedRef.current.add(sessionId)
+    await interruptTeamTurn(sessionId, resolvers.current)
+  }, [])
+
+  // Replay a session's queued steer NOW, without a turn boundary — used after
+  // an errored settle where the queue is preserved but no settle is coming.
+  const flushSteer = useCallback(
+    (targetSessionId?: string) => {
+      const sessionId = targetSessionId ?? useChatStore.getState().activeSessionId
+      if (!sessionId) return
+      drainSteerInto(sessionId)
+    },
+    [drainSteerInto]
+  )
+
   /**
-   * Edit a previously-sent user message in the active team session and resend
-   * the whole turn. Mirrors `useClaudeChat.editAndResend` but routes through
-   * the team orchestration loop so every member re-replies under the new
-   * content.
-   *
-   * Drops `messageId` and everything after it (inclusive), then re-runs the
-   * normal team `send` path with `newContent`. Member statuses, dispatches,
-   * and supervisor rounds are reconstructed from a clean slate.
+   * Re-issue the most recent user turn for a team session (active by default).
+   * Non-destructive — parity with direct chat: the user anchor stays put and
+   * every existing reply after it is kept as a *branch* (tagged with a
+   * per-member `branchGroupId`), so the BranchNavigator can flip back to the
+   * previous team turn. The re-run replies are stamped as the next branch as
+   * they land in `handleTeamEvent`.
+   */
+  const regenerate = useCallback(
+    async (targetSessionId?: string) => {
+      const sessionId = targetSessionId ?? useChatStore.getState().activeSessionId
+      if (!sessionId) return
+
+      const messages =
+        useChatStore.getState().sessions[sessionId]?.messages ?? (await listMessages(sessionId))
+      let lastUserIdx = -1
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].role === "user") {
+          lastUserIdx = i
+          break
+        }
+      }
+      if (lastUserIdx < 0) return
+
+      const anchor = messages[lastUserIdx]
+      // Per-member branch groups: a team turn holds one reply per member (plus
+      // supervisor rounds), and the branch model shows one message per group —
+      // so each (member, occurrence) position gets its own group.
+      const seen = new Map<string, number>()
+      const { merged, nextIndexByGroup } = tagBranchSiblings(messages, lastUserIdx, (m) => {
+        const senderId = senderIdOf(m)
+        const ord = seen.get(senderId) ?? 0
+        seen.set(senderId, ord + 1)
+        return teamBranchGroupId(anchor.id, senderId, ord)
+      })
+      useChatStore.getState().replaceSessionMessages(sessionId, merged)
+      await persistMessages(sessionId, merged)
+
+      // Arm the per-member stamping for the re-run replies (consumed in
+      // handleTeamEvent as each member's new message lands; cleared in send's
+      // finally so later turns are untouched).
+      pendingTeamBranchTags.set(sessionId, {
+        anchorId: anchor.id,
+        nextIndexByGroup,
+        seenByMember: new Map(),
+      })
+
+      const cached = lastUserContentRef.current.get(sessionId)
+      const content: SendContent =
+        cached ??
+        anchor.parts
+          .filter((p): p is { type: "text"; text: string } => {
+            const t = (p as { type?: string }).type
+            return t === "text"
+          })
+          .map((p) => p.text)
+          .join("")
+      // The anchor is still on disk — never re-persist the user message.
+      await send(content, { sessionId, skipPersistUserTurn: true })
+    },
+    [send]
+  )
+
+  /**
+   * Edit a previously-sent user message without destroying the team turn below
+   * it. The original question and its replies become one branch; the edited
+   * question is appended as the selected sibling and routes through the normal
+   * team orchestration loop so every member can reply to the replacement.
    */
   const editAndResend = useCallback(
-    async (messageId: string, newContent: SendContent) => {
-      const sessionId = useChatStore.getState().activeSessionId
+    async (messageId: string, newContent: SendContent, targetSessionId?: string) => {
+      const sessionId = targetSessionId ?? useChatStore.getState().activeSessionId
       if (!sessionId) return
-      if (detectPlatform() === "mobile") {
-        await mirrorTeamTruncateToDesktop(sessionId, messageId)
-      }
-      await truncateAfter(sessionId, messageId, { inclusive: true })
-      const remaining = await listMessages(sessionId)
-      useChatStore.getState().replaceMessages(remaining)
-      await send(newContent)
+      const messages =
+        useChatStore.getState().sessions[sessionId]?.messages ?? (await listMessages(sessionId))
+      const editedIdx = messages.findIndex((message) => message.id === messageId)
+      if (editedIdx < 0) return
+
+      const { merged, groupId, nextIndex } = tagEditSibling(messages, editedIdx)
+      useChatStore.getState().replaceSessionMessages(sessionId, merged)
+      await persistMessages(sessionId, merged)
+      await send(newContent, {
+        sessionId,
+        branchTag: { groupId, index: nextIndex },
+      })
     },
     [send]
   )
@@ -397,39 +772,7 @@ export function useTeamChat() {
     []
   )
 
-  return { send, stop, regenerate, editAndResend, respondToApproval }
-}
-
-/**
- * Mobile-only mirror for the team-chat truncate path (mobile completeness
- * Phase 2). Identical contract to `useClaudeChat`'s `mirrorTruncateToDesktop`
- * — fans out a per-message `deleteMessage` RPC to the desktop's Dexie so a
- * mobile-driven edit/regenerate doesn't desync. Errors are best-effort
- * (sync will reconcile later).
- */
-async function mirrorTeamTruncateToDesktop(
-  sessionId: string,
-  anchorMessageId: string
-): Promise<void> {
-  try {
-    const db = getDb()
-    const anchor = await db.messages.get(anchorMessageId)
-    if (!anchor || anchor.sessionId !== sessionId) return
-    const ids = await db.messages
-      .where("[sessionId+createdAt]")
-      .between([sessionId, anchor.createdAt], [sessionId, Number.MAX_SAFE_INTEGER])
-      .primaryKeys()
-    for (const rawId of ids) {
-      const id = rawId as string
-      try {
-        await deleteMessage(sessionId, id)
-      } catch (err) {
-        console.warn("mirrorTeamTruncateToDesktop: deleteMessage failed", { id, err })
-      }
-    }
-  } catch (err) {
-    console.warn("mirrorTeamTruncateToDesktop failed", err)
-  }
+  return { send, stop, regenerate, editAndResend, respondToApproval, interruptAndSteer, flushSteer }
 }
 
 // ---- Linear orchestration (round_robin / mention / manual-targeted) ------
@@ -441,12 +784,15 @@ interface RunCommonArgs {
   members: Character[]
   memberByCharId: Map<string, TeamMember>
   turnId: string
-  interruptedRef: React.MutableRefObject<boolean>
+  /** Team-session ids whose in-flight turn was interrupted (per-session). */
+  interruptedRef: React.MutableRefObject<Set<string>>
   resolvers: ResolverMap
   /** Pre-built twin runtime deps shared across all members for this turn. */
   turnTwinDeps?: TwinDepsForBuild
   /** Pre-computed query embedding for the user message; avoids N×embed cost. */
   turnEmbedding?: number[]
+  /** Pre-built long-term-memory read deps shared across all members this turn. */
+  turnMemoryDeps?: ApplyMemoryContextDeps
   /** Plain-text user message forwarded to resolveSendOptions for twin RAG. */
   turnUserMessage?: string
 }
@@ -469,11 +815,12 @@ async function runLinearTurn(args: RunLinearArgs): Promise<void> {
     resolvers,
     turnTwinDeps,
     turnEmbedding,
+    turnMemoryDeps,
     turnUserMessage,
   } = args
 
   for (const character of targets) {
-    if (interruptedRef.current) break
+    if (interruptedRef.current.has(sessionId)) break
 
     // Per-member stop check — skip this one but keep going.
     if (useUIStore.getState().isStopRequested(sessionId, character.id)) {
@@ -498,13 +845,19 @@ async function runLinearTurn(args: RunLinearArgs): Promise<void> {
         resolvers,
         turnTwinDeps,
         turnEmbedding,
+        turnMemoryDeps,
         turnUserMessage,
       })
       useUIStore.getState().setMemberStatus(sessionId, character.id, "idle")
     } catch (err) {
       useUIStore.getState().setMemberStatus(sessionId, character.id, "errored")
-      const msg = err instanceof Error ? err.message : String(err)
-      useChatStore.getState().setError(`${character.name}: ${msg}`)
+      useChatStore.getState().setSessionDiagnostic(
+        sessionId,
+        toDiagnostic(err, {
+          source: "agent-team",
+          meta: { sessionId, extra: { memberName: character.name, characterId: character.id } },
+        })
+      )
     }
   }
 }
@@ -523,23 +876,34 @@ async function runSupervisorTurn(args: RunCommonArgs): Promise<void> {
     resolvers,
     turnTwinDeps,
     turnEmbedding,
+    turnMemoryDeps,
     turnUserMessage,
   } = args
 
   if (!team.supervisorCharacterId) {
-    useChatStore.getState().setError("Supervisor team has no supervisor configured")
+    useChatStore
+      .getState()
+      .setSessionDiagnostic(
+        sessionId,
+        createDiagnostic("supervisorMissing", { source: "agent-team", meta: { sessionId } })
+      )
     return
   }
   const supervisor = members.find((m) => m.id === team.supervisorCharacterId)
   if (!supervisor) {
-    useChatStore.getState().setError("Configured supervisor is not a member")
+    useChatStore
+      .getState()
+      .setSessionDiagnostic(
+        sessionId,
+        createDiagnostic("supervisorNotMember", { source: "agent-team", meta: { sessionId } })
+      )
     return
   }
 
   const dispatchedReplies: { name: string; reply: string }[] = []
 
   for (let round = 1; round <= MAX_SUPERVISOR_ROUNDS; round++) {
-    if (interruptedRef.current) return
+    if (interruptedRef.current.has(sessionId)) return
 
     const sub = subSessionId(sessionId, supervisor.id, `${turnId}r${round}`)
     useUIStore.getState().setMemberStatus(sessionId, supervisor.id, "thinking")
@@ -585,14 +949,20 @@ async function runSupervisorTurn(args: RunCommonArgs): Promise<void> {
         resolvers,
         turnTwinDeps,
         turnEmbedding,
+        turnMemoryDeps,
         turnUserMessage,
       })
 
       useUIStore.getState().setMemberStatus(sessionId, supervisor.id, "idle")
     } catch (err) {
       useUIStore.getState().setMemberStatus(sessionId, supervisor.id, "errored")
-      const msg = err instanceof Error ? err.message : String(err)
-      useChatStore.getState().setError(`${supervisor.name}: ${msg}`)
+      useChatStore.getState().setSessionDiagnostic(
+        sessionId,
+        toDiagnostic(err, {
+          source: "agent-team",
+          meta: { sessionId, extra: { memberName: supervisor.name, characterId: supervisor.id } },
+        })
+      )
       return
     }
 
@@ -604,7 +974,7 @@ async function runSupervisorTurn(args: RunCommonArgs): Promise<void> {
     if (dispatches.length === 0) return
 
     for (const d of dispatches) {
-      if (interruptedRef.current) return
+      if (interruptedRef.current.has(sessionId)) return
       const target = members.find((m) => m.id === d.characterId)
       if (!target) continue
 
@@ -628,6 +998,7 @@ async function runSupervisorTurn(args: RunCommonArgs): Promise<void> {
           resolvers,
           turnTwinDeps,
           turnEmbedding,
+          turnMemoryDeps,
           turnUserMessage,
         })
         useUIStore.getState().setMemberStatus(sessionId, target.id, "idle")
@@ -635,8 +1006,13 @@ async function runSupervisorTurn(args: RunCommonArgs): Promise<void> {
         if (reply.trim()) dispatchedReplies.push({ name: target.name, reply })
       } catch (err) {
         useUIStore.getState().setMemberStatus(sessionId, target.id, "errored")
-        const msg = err instanceof Error ? err.message : String(err)
-        useChatStore.getState().setError(`${target.name}: ${msg}`)
+        useChatStore.getState().setSessionDiagnostic(
+          sessionId,
+          toDiagnostic(err, {
+            source: "agent-team",
+            meta: { sessionId, extra: { memberName: target.name, characterId: target.id } },
+          })
+        )
       }
     }
     if (dispatchedReplies.length === 0) return
@@ -681,6 +1057,8 @@ interface RunMemberArgs {
   turnTwinDeps?: TwinDepsForBuild
   /** Pre-computed query embedding for the user message; avoids N×embed cost. */
   turnEmbedding?: number[]
+  /** Pre-built long-term-memory read deps shared across all members this turn. */
+  turnMemoryDeps?: ApplyMemoryContextDeps
   /** Plain-text user message forwarded to resolveSendOptions for twin RAG. */
   turnUserMessage?: string
 }
@@ -700,16 +1078,23 @@ async function runMemberSubSession(args: RunMemberArgs): Promise<void> {
     resolvers,
     turnTwinDeps,
     turnEmbedding,
+    turnMemoryDeps,
     turnUserMessage,
   } = args
 
   const referencedPaths = useChatStore
     .getState()
     .referencedPaths.map((r) => ({ absolute: r.absolute, isDir: r.isDir }))
-  // NOTE: long-term memory injection is wired for direct chat only. Team chat
-  // builds twin deps + the shared query embedding exactly once per turn; reusing
-  // that for memory recall (without a second `tryBuildTwinDeps`) needs a small
-  // deps-reuse refactor, deferred to keep the per-turn embed invariant intact.
+  // Long-term memory recall now runs for team members too: `send` builds the
+  // read deps once per turn (`turnMemoryDeps`) and threads them here so every
+  // member injects the shared memory store, matching direct chat.
+  // One-shot post-compaction recovery: when a compaction boundary just landed in
+  // the team transcript with no assistant turn after it, re-inject the recovery
+  // preamble so the member treats the new summary as authoritative and keeps
+  // team-coordination directives in force across the boundary. Stateless.
+  const teamRecoveryPhase = pendingRecoveryPhase(
+    useChatStore.getState().sessions[sessionId]?.messages ?? useChatStore.getState().messages
+  )
   const baseOpts = await resolveSendOptions({
     session: session as never,
     character,
@@ -719,15 +1104,30 @@ async function runMemberSubSession(args: RunMemberArgs): Promise<void> {
     twinDeps: turnTwinDeps,
     twinUserMessage: turnUserMessage,
     precomputedQueryEmbedding: turnEmbedding,
+    memoryDeps: turnMemoryDeps,
+    memoryUserMessage: turnMemoryDeps ? turnUserMessage : undefined,
+    twinInjectSource: "team",
+    postCompaction: teamRecoveryPhase !== null ? { phaseNumber: teamRecoveryPhase } : undefined,
+    routingSurface: "chat",
+    routingContextHint: { promptText: turnUserMessage },
   })
   const transcript = await buildTranscript(sessionId, character.id, members, session.scratchpad)
   const finalSystemPrompt = [baseOpts.systemPrompt, promptAddendum, transcript]
     .filter((p) => p && p.trim())
     .join("\n\n---\n\n")
-  const opts = {
+  let opts = {
     ...baseOpts,
     ...(finalSystemPrompt ? { systemPrompt: finalSystemPrompt } : {}),
   }
+  const plan = baseOpts.routingPlan
+  const settings = useSettingsStore.getState().settings
+  const controller = plan
+    ? new RoutingAttemptController(
+        plan,
+        settings?.routingConfig?.maxFallbackAttempts ?? DEFAULT_ROUTING_CONFIG.maxFallbackAttempts
+      )
+    : undefined
+  let candidate = controller?.begin()
 
   // Stash extras on the resolver so the event handler can apply them.
   const ctx: SubResolverCtx = {
@@ -735,15 +1135,58 @@ async function runMemberSubSession(args: RunMemberArgs): Promise<void> {
     model: opts.model,
     extraMetadata: messageMetadata,
     postProcessText,
+    // Recalled-memory transparency: direct chat folds this into the assistant
+    // message's SourcesPart at turnComplete; the team path seals per member in
+    // `handleTeamEvent`, so thread the context through the resolver ctx.
+    memoryContext: baseOpts.memoryContext,
+    onRoutingCommit: () => controller?.commit(),
   }
   subResolverCtx.set(sub, ctx)
 
-  const done = new Promise<void>((resolve, reject) => {
-    resolvers.set(sub, { resolve, reject })
-  })
+  let lastError: unknown
   try {
-    await sendPrompt(sub, sendContent, opts)
-    await done
+    do {
+      const done = new Promise<void>((resolve, reject) => {
+        resolvers.set(sub, { resolve, reject })
+      })
+      try {
+        await sendPrompt(sub, sendContent, opts)
+        await done
+        controller?.complete()
+        return
+      } catch (error) {
+        lastError = error
+        if (error instanceof Error && error.message === "Interrupted") {
+          controller?.cancel()
+          throw error
+        }
+        const next = controller?.failAndAdvance() ?? null
+        if (!next || !settings) throw error
+        candidate = next
+        const { resolveProviderAttemptOptions } =
+          await import("@/lib/claude/provider-attempt-options")
+        const attempt = await resolveProviderAttemptOptions(next.providerId, settings)
+        opts = {
+          ...opts,
+          provider: next.providerId,
+          model: next.modelId,
+          providerCredentials: attempt.providerCredentials,
+          protocolAdapterSpec: attempt.protocolAdapterSpec,
+          modelParams: attempt.modelParams,
+          fallbackModel: undefined,
+          aliasResolution: opts.aliasResolution
+            ? {
+                ...opts.aliasResolution,
+                resolvedTo: { providerId: next.providerId, modelId: next.modelId },
+              }
+            : undefined,
+        }
+        ctx.model = next.modelId
+      } finally {
+        resolvers.delete(sub)
+      }
+    } while (candidate)
+    throw lastError instanceof Error ? lastError : new Error("Team chat has no routing candidate")
   } finally {
     resolvers.delete(sub)
     subResolverCtx.delete(sub)
@@ -763,16 +1206,42 @@ interface SubResolverCtx {
   model?: string
   extraMetadata?: Record<string, unknown>
   postProcessText?: (text: string) => string
+  /** Recalled long-term memories for this member's turn (SourcesPart merge). */
+  memoryContext?: MemorySourcesContext
+  /** Marks the first visible assistant frame/tool dispatch as replay-unsafe. */
+  onRoutingCommit?: () => void
 }
 const subResolverCtx = new Map<string, SubResolverCtx>()
 
+/**
+ * Armed by `regenerate` for one team turn: as each member's fresh reply lands
+ * in `handleTeamEvent`, it is stamped with the next `branchIndex` of its
+ * per-member branch group (see lib/chat/branch-regen.ts). Cleared in `send`'s
+ * finally.
+ */
+interface PendingTeamBranchTag {
+  anchorId: string
+  nextIndexByGroup: Map<string, number>
+  /** How many new replies each member has produced this turn (occurrence). */
+  seenByMember: Map<string, number>
+}
+const pendingTeamBranchTags = new Map<string, PendingTeamBranchTag>()
+
 // ---- Event handler -------------------------------------------------------
+
+/** Hook-scoped streaming coalescing state threaded into the event handler. */
+interface TeamStreamingDeps {
+  /** Latest in-flight message list per team session (see `streamMirrorRef`). */
+  mirror: Map<string, UIMessage[]>
+  /** Per-session rAF commit + debounced persist pairs. */
+  registry: SessionCoalescingRegistry
+}
 
 async function handleTeamEvent(
   evt: ClaudeEvent,
-  activeRef: React.MutableRefObject<string | null>,
   allowListRef: React.MutableRefObject<string[]>,
-  resolvers: ResolverMap
+  resolvers: ResolverMap,
+  streaming: TeamStreamingDeps
 ): Promise<void> {
   if (evt.type !== "event" && evt.type !== "session_ended" && evt.type !== "permission_request") {
     return
@@ -781,7 +1250,9 @@ async function handleTeamEvent(
   const decoded = decodeSubSession(evt.sessionId)
   if (!decoded) return
   const { teamSessionId, characterId } = decoded
-  const isActive = teamSessionId === activeRef.current
+  // Any open pane (tab / split) streams live into its own slice; only closed
+  // (no-pane) sessions stay Dexie-only. `isOpen ⊇ isActive`.
+  const isOpen = isSessionOpen(teamSessionId)
 
   switch (evt.type) {
     case "session_ended": {
@@ -801,11 +1272,11 @@ async function handleTeamEvent(
         }
         return
       }
-      if (!isActive) {
+      if (!isOpen) {
         try {
-          await approveTool(evt.sessionId, evt.requestId, "deny", "auto-denied: session not active")
+          await approveTool(evt.sessionId, evt.requestId, "deny", "auto-denied: session not open")
         } catch (err) {
-          console.error("non-active deny failed", err)
+          console.error("non-open deny failed", err)
         }
         return
       }
@@ -830,12 +1301,29 @@ async function handleTeamEvent(
       const ctx = subResolverCtx.get(evt.sessionId)
       const senderId = ctx?.senderId ?? characterId
 
-      const teamMsgs = isActive
-        ? useChatStore.getState().messages
-        : await listMessages(teamSessionId)
+      // Mirror-first base read: the store commit may be a frame behind (rAF
+      // coalesced) and the Dexie copy a debounce behind, so the mirror holds
+      // the only authoritative mid-turn base. Falls back to the store slice /
+      // Dexie between turns (mirror entries live only while a turn streams).
+      const teamMsgs =
+        streaming.mirror.get(teamSessionId) ??
+        (isOpen
+          ? (useChatStore.getState().sessions[teamSessionId]?.messages ??
+            (await listMessages(teamSessionId)))
+          : await listMessages(teamSessionId))
 
       const existingIds = new Set(teamMsgs.map((m) => m.id))
       const { messages: nextMessages, result: sdkResult } = applySdkEvent(teamMsgs, evt.event)
+
+      // Bridge SDK-native subagents (the `opts.agents` / Task-tool path used by
+      // team sessions) into the runtime store so they render in the chat
+      // subagent tree. Guarded — a bridge throw must never break the team loop.
+      try {
+        const { applySdkSubagentBridge } = await import("@/lib/claude/sdk-subagent-bridge")
+        applySdkSubagentBridge(evt.event, teamSessionId)
+      } catch (err) {
+        console.warn("sdkSubagentBridge (team) failed", err)
+      }
 
       // Persist per-turn usage + cost for the speaking member. The team
       // assistant message id is the same id we're tagging with senderId
@@ -858,13 +1346,31 @@ async function handleTeamEvent(
       }
 
       if (nextMessages !== teamMsgs) {
+        if (
+          nextMessages.some(
+            (message) => message.role === "assistant" && !existingIds.has(message.id)
+          )
+        ) {
+          ctx?.onRoutingCommit?.()
+        }
+        const pendingBranch = pendingTeamBranchTags.get(teamSessionId)
         let tagged = nextMessages.map((m) => {
           if (existingIds.has(m.id)) return m
           if (m.role !== "assistant") return m
-          return withMetadata(m, {
-            senderId,
-            ...(ctx?.extraMetadata ?? {}),
-          })
+          let extra: Record<string, unknown> = { senderId, ...(ctx?.extraMetadata ?? {}) }
+          // Regenerated turn: stamp the fresh reply as the next branch of its
+          // per-member group so the old reply survives as a sibling.
+          if (pendingBranch) {
+            const ord = pendingBranch.seenByMember.get(senderId) ?? 0
+            pendingBranch.seenByMember.set(senderId, ord + 1)
+            const group = teamBranchGroupId(pendingBranch.anchorId, senderId, ord)
+            extra = {
+              ...extra,
+              branchGroupId: group,
+              branchIndex: pendingBranch.nextIndexByGroup.get(group) ?? 0,
+            }
+          }
+          return withMetadata(m, extra)
         })
 
         // Optional post-processor: rewrite the text part of any *new* assistant
@@ -887,10 +1393,31 @@ async function handleTeamEvent(
           })
         }
 
-        await persistMessages(teamSessionId, tagged)
-        if (isActive) {
-          useChatStore.getState().replaceMessages(tagged)
-        } else if (
+        streaming.mirror.set(teamSessionId, tagged)
+        const coalesce = streaming.registry.get(teamSessionId)
+        if (sdkResult) {
+          // Member turn boundary: drop pending coalesced work and write the
+          // final tagged list synchronously (parity with direct chat's
+          // turnComplete seal — flush would replay pre-tag args). Fold the
+          // member's recalled memories onto its reply first (team↔direct
+          // transparency parity — previously dropped on the team path).
+          coalesce.commit.cancel()
+          coalesce.persist.cancel()
+          tagged = mergeMemorySourcesIntoLastAssistant(tagged, ctx?.memoryContext)
+          await persistMessages(teamSessionId, tagged)
+          if (isOpen) {
+            useChatStore.getState().replaceSessionMessages(teamSessionId, tagged)
+          }
+          streaming.mirror.delete(teamSessionId)
+          streaming.registry.release(teamSessionId)
+        } else {
+          // Mid-stream: coalesce the React commit to ≤1/frame and debounce the
+          // Dexie write; the mirror above keeps the next event's base correct.
+          if (isOpen) coalesce.commit.call(tagged)
+          coalesce.persist.call(tagged)
+        }
+        if (
+          !isOpen &&
           tagged.length > teamMsgs.length &&
           tagged[tagged.length - 1]?.role === "assistant"
         ) {

@@ -32,10 +32,10 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
-import { AGENT_TRACE_MODULE } from "@/lib/agent-trace/log-adapter"
+import { AGENT_TRACE_MODULE } from "@cognia/agent-trace/log-adapter"
 import { LIVE_TRACE_EVENT_ICONS, LIVE_TRACE_EVENT_COLORS } from "@/lib/agent"
-import { LEVEL_THEME, ALL_LEVELS } from "@/lib/logging/level-theme"
-import type { StructuredLogEntry } from "@/lib/logging"
+import { LEVEL_THEME, ALL_LEVELS } from "@cognia/logging/level-theme"
+import type { StructuredLogEntry } from "@cognia/logging"
 import type { AgentTraceEventType } from "@/types/agent/agent-trace"
 
 export { LEVEL_THEME, ALL_LEVELS }
@@ -106,6 +106,8 @@ export interface LogEntryProps {
   useRegex: boolean
   isBookmarked: boolean
   onToggleBookmark?: (id: string) => void
+  /** Whether this row's detail panel is currently open. */
+  isSelected?: boolean
   /** Visual density — controls row padding. Default `"comfortable"`. */
   density?: LogEntryDensity
   t: ReturnType<typeof useTranslations>
@@ -128,6 +130,7 @@ export function LogEntry({
   useRegex,
   isBookmarked,
   onToggleBookmark,
+  isSelected = false,
   density = "comfortable",
   t,
 }: LogEntryProps) {
@@ -182,6 +185,7 @@ export function LogEntry({
         <div
           data-testid="log-entry-row"
           data-level={log.level}
+          data-selected={isSelected || undefined}
           tabIndex={0}
           role="button"
           aria-expanded={hasDetails ? isExpanded : undefined}
@@ -195,7 +199,8 @@ export function LogEntry({
             "group border-b border-border/50 border-l-[3px] transition-colors outline-none",
             "hover:bg-muted/50 focus-visible:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/40",
             isExpanded && theme.bgClass,
-            theme.gutterClass
+            theme.gutterClass,
+            isSelected && "border-l-primary bg-primary/5 hover:bg-primary/10"
           )}
         >
           <div
@@ -437,6 +442,7 @@ export interface TraceGroupProps {
   useRegex: boolean
   bookmarkedIds: Set<string>
   onToggleBookmark?: (id: string) => void
+  selectedLogId?: string | null
   density?: LogEntryDensity
   t: ReturnType<typeof useTranslations>
 }
@@ -452,6 +458,7 @@ export function TraceGroup({
   useRegex,
   bookmarkedIds,
   onToggleBookmark,
+  selectedLogId = null,
   density = "comfortable",
   t,
 }: TraceGroupProps) {
@@ -490,6 +497,7 @@ export function TraceGroup({
             useRegex={useRegex}
             isBookmarked={bookmarkedIds.has(log.id)}
             onToggleBookmark={onToggleBookmark}
+            isSelected={log.id === selectedLogId}
             density={density}
             t={t}
           />

@@ -58,7 +58,8 @@ jest.mock("@/components/ui/collapsible", () => ({
       {children}
     </div>
   ),
-  CollapsibleTrigger: ({ children }: { children: React.ReactNode }) => <button>{children}</button>,
+  CollapsibleTrigger: ({ children, asChild }: { children: React.ReactNode; asChild?: boolean }) =>
+    asChild ? <>{children}</> : <button>{children}</button>,
 }))
 
 jest.mock("@/components/ui/tooltip", () => ({

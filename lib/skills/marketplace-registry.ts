@@ -6,7 +6,7 @@
 import { isTauri } from "@/lib/tauri"
 import { skillsFetchRemoteMd, skillsLoadRegistry, type RegistrySkillEntry } from "@/lib/claude/ipc"
 import type { FetchSkillContent, MarketplaceItem } from "./marketplace-types"
-import type { SkillCategory } from "@/lib/claude/types"
+import type { SkillCategory } from "@cognia/agent-config-types"
 
 import staticLockfile from "@/skills-lock.json"
 

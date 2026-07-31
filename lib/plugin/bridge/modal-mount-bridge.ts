@@ -17,6 +17,7 @@ import {
   registerDeclaredModal,
   unregisterDeclaredModalsForPlugin,
 } from "@/stores/plugin-runtime/plugin-modal-store"
+import { resolvePluginPath } from "@/lib/plugin/core/plugin-path"
 
 export interface RegisterModalMountsOptions {
   importer: (entry: string) => Promise<Record<string, unknown>>
@@ -28,14 +29,19 @@ export async function registerModalMountsForPlugin(
   options: RegisterModalMountsOptions
 ): Promise<void> {
   const defs = manifest.modalMounts ?? []
-  const root = installRoot.replace(/[\\/]+$/, "")
   for (const def of defs) {
     if (!def?.id || !def.entry || !def.export) continue
-    const resolved = `${root}/${def.entry.replace(/^[\\/]+/, "")}`
+    const resolved = resolvePluginPath(installRoot, def.entry)
     registerDeclaredModal({
       pluginId: manifest.id,
       id: def.id,
       label: def.label ?? def.id,
+      labelKey: def.labelKey,
+      // Carried verbatim; the renderer's resolver is what decides whether a
+      // value is meaningful, so a manifest that slipped past validation (an
+      // older install, a hand-edited file) degrades to the default presentation
+      // rather than blocking registration of an otherwise working modal.
+      options: def.options,
       load: async () => {
         const mod = await options.importer(resolved)
         const exported = mod[def.export]

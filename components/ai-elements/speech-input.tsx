@@ -55,7 +55,7 @@ declare global {
 
 type SpeechInputMode = "speech-recognition" | "media-recorder" | "none"
 
-export type SpeechInputProps = ComponentProps<typeof Button> & {
+export type SpeechInputProps = Omit<ComponentProps<typeof Button>, "onError"> & {
   onTranscriptionChange?: (text: string) => void
   /**
    * Callback for when audio is recorded using MediaRecorder fallback.
@@ -64,6 +64,14 @@ export type SpeechInputProps = ComponentProps<typeof Button> & {
    * Return the transcribed text, which will be passed to onTranscriptionChange.
    */
   onAudioRecorded?: (audioBlob: Blob) => Promise<string>
+  /** Fires whenever recording starts/stops so consumers can surface state. */
+  onListeningChange?: (listening: boolean) => void
+  /**
+   * Fires with the SpeechRecognition error code ("not-allowed", "no-speech",
+   * "audio-capture", …) or the getUserMedia DOMException name, so consumers
+   * can show a localized message.
+   */
+  onError?: (error: string) => void
   lang?: string
 }
 
@@ -87,10 +95,12 @@ export const SpeechInput = ({
   className,
   onTranscriptionChange,
   onAudioRecorded,
+  onListeningChange,
+  onError,
   lang = "en-US",
   ...props
 }: SpeechInputProps) => {
-  const [isListening, setIsListening] = useState(false)
+  const [isListening, setIsListeningState] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [mode] = useState<SpeechInputMode>(detectSpeechInputMode)
   const [isRecognitionReady, setIsRecognitionReady] = useState(false)
@@ -101,10 +111,23 @@ export const SpeechInput = ({
   const onTranscriptionChangeRef =
     useRef<SpeechInputProps["onTranscriptionChange"]>(onTranscriptionChange)
   const onAudioRecordedRef = useRef<SpeechInputProps["onAudioRecorded"]>(onAudioRecorded)
+  const onListeningChangeRef = useRef<SpeechInputProps["onListeningChange"]>(onListeningChange)
+  const onErrorRef = useRef<SpeechInputProps["onError"]>(onError)
+  const isListeningRef = useRef(false)
 
   // Keep refs in sync
   onTranscriptionChangeRef.current = onTranscriptionChange
   onAudioRecordedRef.current = onAudioRecorded
+  onListeningChangeRef.current = onListeningChange
+  onErrorRef.current = onError
+
+  const setIsListening = useCallback((next: boolean) => {
+    setIsListeningState(next)
+    if (isListeningRef.current !== next) {
+      isListeningRef.current = next
+      onListeningChangeRef.current?.(next)
+    }
+  }, [])
 
   // Initialize Speech Recognition when mode is speech-recognition
   useEffect(() => {
@@ -143,8 +166,13 @@ export const SpeechInput = ({
       }
     }
 
-    const handleError = () => {
+    const handleError = (event: Event) => {
       setIsListening(false)
+      const errorCode = (event as SpeechRecognitionErrorEvent).error
+      // "aborted" is the normal outcome of stop()/unmount — not an error.
+      if (errorCode && errorCode !== "aborted") {
+        onErrorRef.current?.(errorCode)
+      }
     }
 
     speechRecognition.addEventListener("start", handleStart)
@@ -164,7 +192,7 @@ export const SpeechInput = ({
       recognitionRef.current = null
       setIsRecognitionReady(false)
     }
-  }, [mode, lang])
+  }, [mode, lang, setIsListening])
 
   // Cleanup MediaRecorder and stream on unmount
   useEffect(
@@ -230,6 +258,7 @@ export const SpeechInput = ({
           track.stop()
         }
         streamRef.current = null
+        onErrorRef.current?.("audio-capture")
       }
 
       mediaRecorder.addEventListener("dataavailable", handleDataAvailable)
@@ -239,10 +268,14 @@ export const SpeechInput = ({
       mediaRecorderRef.current = mediaRecorder
       mediaRecorder.start()
       setIsListening(true)
-    } catch {
+    } catch (caughtError) {
       setIsListening(false)
+      const name = caughtError instanceof Error ? caughtError.name : ""
+      onErrorRef.current?.(
+        name === "NotAllowedError" || name === "SecurityError" ? "not-allowed" : "audio-capture"
+      )
     }
-  }, [])
+  }, [setIsListening])
 
   // Stop MediaRecorder recording
   const stopMediaRecorder = useCallback(() => {
@@ -250,7 +283,7 @@ export const SpeechInput = ({
       mediaRecorderRef.current.stop()
     }
     setIsListening(false)
-  }, [])
+  }, [setIsListening])
 
   const toggleListening = useCallback(() => {
     if (mode === "speech-recognition" && recognitionRef.current) {
@@ -299,6 +332,7 @@ export const SpeechInput = ({
             : "bg-primary text-primary-foreground hover:bg-primary/80 hover:text-primary-foreground",
           className
         )}
+        data-listening={isListening || undefined}
         disabled={isDisabled}
         onClick={toggleListening}
         {...props}

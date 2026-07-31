@@ -1,4 +1,4 @@
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 
 import { buildOpeningMessage } from "./opening-message"
 

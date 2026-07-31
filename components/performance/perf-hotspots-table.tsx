@@ -84,12 +84,19 @@ export function PerfHotspotsTable({ spans }: PerfHotspotsTableProps) {
 
   const header = (key: SortKey, label: string, numeric = true) => (
     <TableHead
-      className={cn("cursor-pointer select-none", numeric && "text-right")}
-      onClick={() => toggleSort(key)}
+      className={cn("select-none", numeric && "text-right")}
       data-testid={`perf-hot-th-${key}`}
       aria-sort={sortKey === key ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
     >
-      <span className={cn("inline-flex items-center gap-1", numeric && "flex-row-reverse")}>
+      {/* A real button, not an onClick on the <th> — see perf-process-table. */}
+      <button
+        type="button"
+        onClick={() => toggleSort(key)}
+        className={cn(
+          "inline-flex items-center gap-1 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          numeric && "flex-row-reverse"
+        )}
+      >
         {label}
         {sortKey === key ? (
           sortDir === "asc" ? (
@@ -98,7 +105,7 @@ export function PerfHotspotsTable({ spans }: PerfHotspotsTableProps) {
             <ArrowDownIcon className="size-3" />
           )
         ) : null}
-      </span>
+      </button>
     </TableHead>
   )
 

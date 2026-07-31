@@ -1,21 +1,23 @@
 /**
- * Tests for the unified recent-runs mappers. The hook itself is thin glue
- * around `useLiveQuery` and Dexie; the value of these tests is in the
- * normalisation logic from five different row shapes into one.
+ * Tests for unified recent-run mapping and registry aggregation.
  */
 
 import {
   toUnifiedFromTaskExecution,
   toUnifiedFromWorkflowRun,
   toUnifiedFromBackupHistory,
-  toUnifiedFromPluginJob,
   toUnifiedFromAudit,
+  loadUnifiedRecentRuns,
+  RECENT_RUN_REFRESH_INTERVAL_MS,
+  useUnifiedRecentRuns,
 } from "./use-unified-recent-runs"
+import { act, renderHook } from "@testing-library/react"
 import type { TaskExecution } from "@/types/scheduler"
 import type { WorkflowRunRow } from "@/types/workflow/visual"
 import type { BackupHistoryRow } from "@/lib/db/backup-history"
-import type { PluginScheduledJobRow } from "@/lib/db/plugin-types"
 import type { ConnectorAuditRow } from "@/lib/db/connector-types"
+import { createSchedulerSourceRegistry } from "@/lib/scheduler/sources/registry"
+import type { ScheduledItemSource } from "@/lib/scheduler/sources/types"
 
 describe("toUnifiedFromTaskExecution", () => {
   const baseExec: TaskExecution = {
@@ -51,6 +53,13 @@ describe("toUnifiedFromTaskExecution", () => {
     expect(run.durationMs).toBe(5_000)
     expect(run.logs).toHaveLength(1)
     expect(run.logs![0]).toMatchObject({ level: "info", message: "started" })
+  })
+
+  it("carries the execution's trigger provenance through", () => {
+    expect(
+      toUnifiedFromTaskExecution({ ...baseExec, triggerSource: "backfill" }).triggerSource
+    ).toBe("backfill")
+    expect(toUnifiedFromTaskExecution(baseExec).triggerSource).toBeUndefined()
   })
 
   it("routes connection:* task types to the connector kind", () => {
@@ -176,34 +185,69 @@ describe("toUnifiedFromBackupHistory", () => {
   })
 })
 
-describe("toUnifiedFromPluginJob", () => {
-  const baseJob: PluginScheduledJobRow = {
-    id: "pj-1",
-    pluginId: "vendor.plugin",
-    cron: "0 9 * * *",
-    handler: "dailyDigest",
-    args: { topic: "ops" },
-    status: "active",
-    lastRunAt: 1_700_000_000_000,
-    nextRunAt: 1_700_000_086_400,
-    createdAt: 1_699_000_000_000,
-    updatedAt: 1_700_000_000_000,
-  }
+describe("loadUnifiedRecentRuns", () => {
+  it("includes runs from a registered source without changing the hook", async () => {
+    const registry = createSchedulerSourceRegistry()
+    const run = {
+      unifiedId: "app:fake-run",
+      kind: "app",
+      itemUnifiedId: "app:fake-item",
+      itemName: "Fake item",
+      status: "succeeded",
+      startedAt: 100,
+      origin: { nativeId: "fake-run" },
+    } as const
+    const source = {
+      kind: "app",
+      listRuns: jest.fn().mockResolvedValue([run]),
+    } as unknown as ScheduledItemSource
+    registry.register(source)
 
-  it("emits a single synthetic run keyed by lastRunAt", () => {
-    const runs = toUnifiedFromPluginJob(baseJob)
-    expect(runs).toHaveLength(1)
-    expect(runs[0].unifiedId).toBe("plugin:pj-1:1700000000000")
-    expect(runs[0].itemUnifiedId).toBe("plugin:pj-1")
-    expect(runs[0].status).toBe("succeeded")
+    await expect(loadUnifiedRecentRuns(registry)).resolves.toEqual([run])
+    expect(source.listRuns).toHaveBeenCalledWith(20)
   })
 
-  it("flags error status when the plugin job is in 'error' state", () => {
-    expect(toUnifiedFromPluginJob({ ...baseJob, status: "error" })[0].status).toBe("failed")
+  it("keeps healthy source results when another source fails", async () => {
+    const registry = createSchedulerSourceRegistry()
+    const run = {
+      unifiedId: "app:healthy",
+      kind: "app",
+      itemUnifiedId: "app:item",
+      itemName: "Healthy",
+      status: "succeeded",
+      startedAt: 100,
+      origin: { nativeId: "healthy" },
+    } as const
+    registry.register({
+      kind: "app",
+      listRuns: async () => [run],
+    } as unknown as ScheduledItemSource)
+    registry.register({
+      kind: "plugin",
+      listRuns: async () => Promise.reject(new Error("unavailable")),
+    } as unknown as ScheduledItemSource)
+
+    await expect(loadUnifiedRecentRuns(registry)).resolves.toEqual([run])
   })
 
-  it("emits no runs when the job has never executed", () => {
-    expect(toUnifiedFromPluginJob({ ...baseJob, lastRunAt: undefined })).toEqual([])
+  it("refreshes registered run sources while the scheduler page remains mounted", async () => {
+    jest.useFakeTimers()
+    const registry = createSchedulerSourceRegistry()
+    const listRuns = jest.fn(async () => [])
+    registry.register({ kind: "app", listRuns } as unknown as ScheduledItemSource)
+    const { unmount } = renderHook(() => useUnifiedRecentRuns({ registry }))
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(listRuns).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      jest.advanceTimersByTime(RECENT_RUN_REFRESH_INTERVAL_MS)
+      await Promise.resolve()
+    })
+    expect(listRuns).toHaveBeenCalledTimes(2)
+    unmount()
+    jest.useRealTimers()
   })
 })
 

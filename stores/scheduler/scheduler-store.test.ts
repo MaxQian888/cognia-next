@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Scheduler Store Tests
  */
@@ -32,6 +33,7 @@ jest.mock("@/lib/scheduler/task-scheduler", () => {
     pauseTask: jest.fn(),
     resumeTask: jest.fn(),
     runTaskNow: jest.fn(),
+    backfillTask: jest.fn(),
     getTask: jest.fn(),
     getAllTasks: jest.fn(),
     start: jest.fn(),
@@ -53,6 +55,7 @@ const taskSchedulerMock = jest.requireMock("@/lib/scheduler/task-scheduler") as 
     pauseTask: jest.Mock
     resumeTask: jest.Mock
     runTaskNow: jest.Mock
+    backfillTask: jest.Mock
     getTask: jest.Mock
     getAllTasks: jest.Mock
     start: jest.Mock
@@ -87,6 +90,51 @@ jest.mock("@/lib/scheduler/scheduler-db", () => ({
   },
 }))
 
+jest.mock("@/lib/scheduler/scheduler-data-source", () => ({
+  getSchedulerDataSource: () => {
+    const schedulerModule = jest.requireMock("@/lib/scheduler/task-scheduler") as {
+      __mockScheduler: Record<string, jest.Mock>
+    }
+    const dbModule = jest.requireMock("@/lib/scheduler/scheduler-db") as {
+      schedulerDb: Record<string, jest.Mock>
+    }
+    const scheduler = schedulerModule.__mockScheduler
+    const db = dbModule.schedulerDb
+    return {
+      host: "local",
+      createTask: scheduler.createTask,
+      updateTask: (taskId: string, input: unknown) => scheduler.updateTask(taskId, input),
+      deleteTask: (taskId: string) => scheduler.deleteTask(taskId),
+      getTask: scheduler.getTask,
+      pauseTask: (taskId: string) => scheduler.pauseTask(taskId),
+      resumeTask: (taskId: string) => scheduler.resumeTask(taskId),
+      runTaskNow: (taskId: string, options?: { triggerSource?: string; taskType?: string }) =>
+        scheduler.runTaskNow(
+          taskId,
+          options?.triggerSource ? { triggerSource: options.triggerSource } : undefined
+        ),
+      backfillTask: scheduler.backfillTask,
+      listTasks: (filter?: Record<string, unknown>) =>
+        filter && Object.keys(filter).length > 0 ? db.getFilteredTasks(filter) : db.getAllTasks(),
+      getTaskExecutions: (taskId: string, limit?: number, beforeStartedAt?: string) =>
+        beforeStartedAt === undefined
+          ? db.getTaskExecutions(taskId, limit)
+          : db.getTaskExecutions(taskId, limit, beforeStartedAt),
+      getStatistics: db.getStatistics,
+      getRecentExecutions: db.getRecentExecutions,
+      getUpcomingTasks: db.getUpcomingTasks,
+      exportTasks: scheduler.exportTasks,
+      importTasks: scheduler.importTasks,
+      cleanupOldExecutions: db.cleanupOldExecutions,
+    }
+  },
+}))
+
+jest.mock("@/lib/tauri/transport-routing", () => ({
+  isRemoteHostActive: () => false,
+  subscribeActiveRemoteTransport: () => jest.fn(),
+}))
+
 jest.mock("@/lib/scheduler/executors/plugin-executor", () => ({
   cancelPluginTaskExecution: jest.fn().mockReturnValue(true),
   getActivePluginTaskCount: jest.fn().mockReturnValue(2),
@@ -95,6 +143,7 @@ jest.mock("@/lib/scheduler/executors/plugin-executor", () => ({
 
 jest.mock("@/lib/scheduler", () => ({
   initSchedulerSystem: jest.fn().mockResolvedValue(undefined),
+  stopSchedulerSystem: jest.fn().mockResolvedValue(undefined),
 }))
 
 const { schedulerDb: mockedDb } = jest.requireMock("@/lib/scheduler/scheduler-db") as {
@@ -117,6 +166,7 @@ const pluginExecutorMock = jest.requireMock("@/lib/scheduler/executors/plugin-ex
 
 const schedulerLibMock = jest.requireMock("@/lib/scheduler") as {
   initSchedulerSystem: jest.Mock
+  stopSchedulerSystem: jest.Mock
 }
 
 const sampleTask = (overrides: Partial<ScheduledTask> = {}): ScheduledTask => ({
@@ -163,6 +213,7 @@ beforeEach(() => {
     status: "running",
     startedAt: new Date(),
   })
+  mockScheduler.backfillTask.mockResolvedValue([])
   mockScheduler.getTask.mockResolvedValue(null)
   mockScheduler.getAllTasks.mockResolvedValue([])
   mockScheduler.exportTasks.mockResolvedValue({ tasks: [] })
@@ -765,6 +816,36 @@ describe("useSchedulerStore", () => {
         await result.current.resumeTask("task-1")
       })
       expect(mockedDb.getAllTasks).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("backfillTask", () => {
+    it("returns the run count and refreshes when slots ran", async () => {
+      mockScheduler.backfillTask.mockResolvedValueOnce([{ id: "e1" }, { id: "e2" }])
+      const { result } = renderHook(() => useSchedulerStore())
+      let count = 0
+      await act(async () => {
+        count = await result.current.backfillTask("task-1", {
+          start: new Date(0),
+          end: new Date(1000),
+        })
+      })
+      expect(count).toBe(2)
+      expect(mockScheduler.backfillTask).toHaveBeenCalledWith("task-1", {
+        start: new Date(0),
+        end: new Date(1000),
+      })
+    })
+
+    it("rethrows and stores the error message when the engine fails", async () => {
+      mockScheduler.backfillTask.mockRejectedValueOnce(new Error("bf-fail"))
+      const { result } = renderHook(() => useSchedulerStore())
+      await act(async () => {
+        await expect(
+          result.current.backfillTask("task-1", { start: new Date(0), end: new Date(1000) })
+        ).rejects.toThrow("bf-fail")
+      })
+      expect(result.current.error).toBe("bf-fail")
     })
   })
 
@@ -1517,10 +1598,38 @@ describe("useSchedulerStore", () => {
       schedulerLibMock.initSchedulerSystem.mockRejectedValueOnce(new Error("init-fail"))
       const { result } = renderHook(() => useSchedulerStore())
       await act(async () => {
-        await result.current.initialize()
+        await expect(result.current.initialize()).rejects.toThrow("init-fail")
       })
       expect(result.current.error).toBe("Failed to initialize scheduler")
       expect(result.current.isInitialized).toBe(false)
+    })
+
+    it("does not commit a stale initialization after the scheduler is stopped", async () => {
+      let resolveInitialization!: () => void
+      schedulerLibMock.initSchedulerSystem.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveInitialization = resolve
+          })
+      )
+      const { result } = renderHook(() => useSchedulerStore())
+
+      let initialization!: Promise<void>
+      await act(async () => {
+        initialization = result.current.initialize()
+        await Promise.resolve()
+      })
+      act(() => {
+        result.current.setSchedulerStatus("stopped")
+      })
+      await act(async () => {
+        resolveInitialization()
+        await initialization
+      })
+
+      expect(result.current.isInitialized).toBe(false)
+      expect(result.current.schedulerStatus).toBe("stopped")
+      expect(result.current.isLoading).toBe(false)
     })
 
     it("deduplicates concurrent invocations via the in-flight promise guard", async () => {

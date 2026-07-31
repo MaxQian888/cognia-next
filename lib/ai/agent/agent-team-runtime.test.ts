@@ -47,6 +47,21 @@ jest.mock("@/lib/ai/agent/agent-executor", () => ({
 }))
 import { executeAgent } from "@/lib/ai/agent/agent-executor"
 
+// Stub the twin runtime so the per-run twin block is observable without the
+// vector store / Dexie. Returning no twinDeps keeps every non-twin test's
+// behavior identical to before this feature existed.
+jest.mock("./team/twin-context", () => ({
+  resolveTeamTwinRuntime: jest.fn(async () => ({ availableTwins: [] })),
+  applyTeammateTwinContext: jest.fn(async (i: { baseSystemPrompt: string }) => ({
+    systemPrompt: i.baseSystemPrompt,
+    applied: false,
+  })),
+  searchTwinKnowledge: jest.fn(async () => ({ hits: [], degraded: false })),
+  gatherTeamTwins: jest.fn(async () => []),
+}))
+import { resolveTeamTwinRuntime } from "./team/twin-context"
+const resolveTeamTwinRuntimeMock = resolveTeamTwinRuntime as jest.Mock
+
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import {
   runTeamLifecycle,
@@ -233,6 +248,7 @@ describe("runTeamLifecycle (F-path synthesizer)", () => {
     })
     const deps = {
       ...buildDeps(baseTeam, [task("t1")], [lead, worker("w1")]),
+      runId: "run_team_connector_bound",
       triggeredFrom: {
         source: "im" as const,
         adapterId: "lark:a1",
@@ -242,6 +258,7 @@ describe("runTeamLifecycle (F-path synthesizer)", () => {
     }
     const result = await runTeamLifecycle("team-1", deps)
     expect(result.status).toBe("completed")
+    expect(result.runId).toBe("run_team_connector_bound")
     const row = await getDb().workflowRuns.get(result.runId)
     expect(row?.triggeredBy).toEqual({
       source: "im",
@@ -284,6 +301,70 @@ describe("runTeamLifecycle (F-path synthesizer)", () => {
     const deps = buildDeps(baseTeam, [task("t1")], [lead, worker("w1")])
     const result = await runTeamLifecycle("team-1", deps, ac.signal)
     expect(result.status).toBe("cancelled")
+  })
+
+  it("runs the adaptive wave path when adaptiveReplan is enabled", async () => {
+    // The single mock serves both task dispatches AND the between-wave replan
+    // checkpoint: a fenced continue-JSON is non-empty (valid task output) and
+    // parses to a valid ReplanDecision (continue → plan unchanged).
+    ;(executeAgent as jest.Mock).mockResolvedValue({
+      text: '```json\n{"action":"continue","reasoning":"steady"}\n```',
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    })
+    const adaptiveTeam = {
+      ...baseTeam,
+      config: { ...baseTeam.config, adaptiveReplan: { enabled: true } },
+    } as AgentTeam
+    const deps = buildDeps(
+      adaptiveTeam,
+      [task("t1"), task("t2", ["t1"])],
+      [lead, worker("w1"), worker("w2")]
+    )
+    const result = await runTeamLifecycle("team-1", deps)
+    expect(result.status).toBe("completed")
+    // Both waves executed: t1 then t2 (the dependent task in a later wave).
+    expect(deps._taskStatuses).toMatchObject({ t1: "completed", t2: "completed" })
+  })
+
+  it("engages the wave path when only the progress ledger is enabled (no adaptiveReplan)", async () => {
+    // Progress is made each wave, so the ledger never reaches its stall judge;
+    // the continue-JSON mock serves dispatch + the ledger's wrapped re-plan.
+    ;(executeAgent as jest.Mock).mockResolvedValue({
+      text: '```json\n{"action":"continue","reasoning":"steady"}\n```',
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    })
+    const ledgerTeam = {
+      ...baseTeam,
+      config: { ...baseTeam.config, progressLedger: { enabled: true } },
+    } as AgentTeam
+    const deps = buildDeps(
+      ledgerTeam,
+      [task("t1"), task("t2", ["t1"])],
+      [lead, worker("w1"), worker("w2")]
+    )
+    const result = await runTeamLifecycle("team-1", deps)
+    expect(result.status).toBe("completed")
+    expect(deps._taskStatuses).toMatchObject({ t1: "completed", t2: "completed" })
+  })
+
+  it("taskFilter skips done tasks and treats them as satisfied dependencies", async () => {
+    ;(executeAgent as jest.Mock).mockResolvedValue({
+      text: "ok",
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    })
+    // t1 already completed in a previous run; t2 depends on it. The filter
+    // (resume semantics) drops t1 — synthesis must treat the dependency as
+    // externally satisfied instead of throwing invalid_dep, and t1 must not
+    // be re-dispatched.
+    const done = { ...task("t1"), status: "completed" as const, result: "prior result" }
+    const deps = buildDeps(baseTeam, [done, task("t2", ["t1"])], [lead, worker("w1")])
+    const result = await runTeamLifecycle("team-1", {
+      ...deps,
+      taskFilter: (t) => t.status !== "completed",
+    })
+    expect(result.status).toBe("completed")
+    expect(deps._taskStatuses).toMatchObject({ t2: "completed" })
+    expect(deps._taskStatuses.t1).toBeUndefined()
   })
 
   it("prevents double-start of the same team", async () => {
@@ -338,12 +419,191 @@ describe("runTeamLifecycle — plan-approval gate", () => {
     expect(result.reason).toMatch(/rejected/)
   })
 
+  it("publishes the plan to the board lead and opens the plan gate before waiting", async () => {
+    ;(executeAgent as jest.Mock).mockResolvedValue({
+      text: "ok",
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    })
+    const deps = buildDeps(teamWithApproval(), [task("t1")], [lead, worker("w1")])
+    const updateTeammate = jest.fn()
+    deps.storeWriter.updateTeammate = updateTeammate
+    const openGate = jest.fn()
+    deps.notifierDeps = { ...deps.notifierDeps, openGate }
+
+    const runPromise = runTeamLifecycle("team-1", deps)
+    await new Promise((r) => setTimeout(r, 30))
+
+    // While the gate is waiting: the lead carries the proposed plan and the
+    // awaiting_approval status the PlanApprovalPanel renders on, and the
+    // pending-gates modal has been opened for the same approval-bus key.
+    expect(updateTeammate).toHaveBeenCalledWith("lead-1", {
+      status: "awaiting_approval",
+      proposedPlan: expect.stringContaining("summary"),
+    })
+    expect(openGate).toHaveBeenCalledWith(
+      expect.objectContaining({ key: { scope: "agent-team", id: "team-1" } })
+    )
+
+    approve({ scope: "agent-team", id: "team-1" })
+    const result = await runPromise
+    expect(result.status).toBe("completed")
+    // Decision received → the lead must leave awaiting_approval.
+    expect(updateTeammate).toHaveBeenCalledWith("lead-1", { status: "idle" })
+  })
+
+  it("resets the lead out of awaiting_approval when the plan is rejected", async () => {
+    const deps = buildDeps(teamWithApproval(1), [task("t1")], [lead, worker("w1")])
+    const updateTeammate = jest.fn()
+    deps.storeWriter.updateTeammate = updateTeammate
+
+    const runPromise = runTeamLifecycle("team-1", deps)
+    await new Promise((r) => setTimeout(r, 30))
+    reject({ scope: "agent-team", id: "team-1" }, "no good")
+    const result = await runPromise
+    expect(result.status).toBe("failed")
+    expect(updateTeammate).toHaveBeenCalledWith("lead-1", { status: "idle" })
+  })
+
   it("fails fast when runLeadPlanning dep is missing", async () => {
     const deps = buildDeps(teamWithApproval(), [task("t1")], [lead, worker("w1")])
     delete (deps as { runLeadPlanning?: unknown }).runLeadPlanning
     const result = await runTeamLifecycle("team-1", deps)
     expect(result.status).toBe("failed")
     expect(result.reason).toMatch(/runLeadPlanning/)
+  })
+
+  it("fails the run (not the process) when lead planning throws", async () => {
+    // Regression: this await was bare, so a lead that could not resolve a
+    // provider — the default state before the provider fix — rejected straight
+    // out of runTeamLifecycle instead of returning a failed run the operator
+    // can see. Every neighbouring failure in this block returns a result.
+    const deps = buildDeps(teamWithApproval(), [task("t1")], [lead, worker("w1")])
+    deps.runLeadPlanning = jest.fn(async () => {
+      throw new Error("The team lead has no AI provider to run on: …Settings → Providers…")
+    })
+
+    const result = await runTeamLifecycle("team-1", deps)
+
+    expect(result.status).toBe("failed")
+    expect(result.reason).toMatch(/Settings → Providers/)
+  })
+
+  it("headless origin fails fast BEFORE running lead planning (no token burn)", async () => {
+    const deps = buildDeps(teamWithApproval(), [task("t1")], [lead, worker("w1")])
+    const result = await runTeamLifecycle("team-1", { ...deps, origin: "scheduler" })
+    expect(result.status).toBe("failed")
+    expect(result.reason).toMatch(/headless \(origin=scheduler\)/)
+    // The whole point: planning must never have been invoked.
+    expect(deps.runLeadPlanning).not.toHaveBeenCalled()
+  })
+
+  it("an IM triggeredFrom implies the headless policy without an explicit origin", async () => {
+    const deps = buildDeps(teamWithApproval(), [task("t1")], [lead, worker("w1")])
+    const result = await runTeamLifecycle("team-1", {
+      ...deps,
+      triggeredFrom: { source: "im", adapterId: "a1", conversationKey: "c1" },
+    })
+    expect(result.status).toBe("failed")
+    expect(result.reason).toMatch(/headless \(origin=im\)/)
+    expect(deps.runLeadPlanning).not.toHaveBeenCalled()
+  })
+})
+
+describe("runTeamLifecycle — risk-raised plan approval (ADR-0070)", () => {
+  /** A roster that can drive the machine: computer-use → high risk. */
+  const riskyWorker = () =>
+    ({ ...worker("w1"), config: { tools: ["computer_use"] } }) as AgentTeammate
+
+  it("raises the plan-approval gate for a high-risk roster even with requirePlanApproval=false", async () => {
+    expect(baseTeam.config.requirePlanApproval).toBeFalsy()
+    const deps = buildDeps(baseTeam, [task("t1")], [lead, riskyWorker()])
+    const updateTeammate = jest.fn()
+    deps.storeWriter.updateTeammate = updateTeammate
+
+    const runPromise = runTeamLifecycle("team-1", deps)
+    await new Promise((r) => setTimeout(r, 30))
+    // The gate is live: the lead is parked awaiting approval with a plan.
+    expect(deps.runLeadPlanning).toHaveBeenCalled()
+    expect(updateTeammate).toHaveBeenCalledWith(
+      "lead-1",
+      expect.objectContaining({ status: "awaiting_approval" })
+    )
+    reject({ scope: "agent-team", id: "team-1" }, "not today")
+    const result = await runPromise
+    expect(result.status).toBe("failed")
+  })
+
+  it("names the risk surfaces when the same run is headless", async () => {
+    const deps = buildDeps(baseTeam, [task("t1")], [lead, riskyWorker()])
+    const result = await runTeamLifecycle("team-1", { ...deps, origin: "scheduler" })
+    expect(result.status).toBe("failed")
+    expect(result.reason).toMatch(/computer-use/)
+    expect(result.reason).toMatch(/cannot proceed unattended \(origin=scheduler\)/)
+    // Fail-fast means fail BEFORE burning planning tokens.
+    expect(deps.runLeadPlanning).not.toHaveBeenCalled()
+  })
+
+  it("riskGating=false restores the old unattended behavior", async () => {
+    ;(executeAgent as jest.Mock).mockResolvedValue({
+      text: "result",
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    })
+    const optedOut = { ...baseTeam, config: { ...baseTeam.config, riskGating: false } }
+    const deps = buildDeps(optedOut, [task("t1")], [lead, riskyWorker()])
+    const result = await runTeamLifecycle("team-1", { ...deps, origin: "scheduler" })
+    expect(result.status).toBe("completed")
+    expect(deps.runLeadPlanning).not.toHaveBeenCalled()
+  })
+
+  it("leaves a low-risk roster completely alone", async () => {
+    ;(executeAgent as jest.Mock).mockResolvedValue({
+      text: "result",
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    })
+    const deps = buildDeps(baseTeam, [task("t1")], [lead, worker("w1")])
+    const result = await runTeamLifecycle("team-1", deps)
+    expect(result.status).toBe("completed")
+    // No plan, no gate, no new friction — the Quick lane is untouched.
+    expect(deps.runLeadPlanning).not.toHaveBeenCalled()
+  })
+
+  it("does not gate a plain IM-bound run — being connector-bound is not itself a risk", async () => {
+    // Regression guard for the `startTeamRunFromIM` production flow: judging a
+    // run by its origin (rather than by what its roster can reach) would make
+    // every headless IM-bound team run fail-fast. See ADR-0070 §Rejected.
+    ;(executeAgent as jest.Mock).mockResolvedValue({
+      text: "result",
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    })
+    const deps = buildDeps(baseTeam, [task("t1")], [lead, worker("w1")])
+    const result = await runTeamLifecycle("team-1", {
+      ...deps,
+      origin: "im",
+      triggeredFrom: { source: "im", adapterId: "a1", conversationKey: "c1" },
+    })
+    expect(result.status).toBe("completed")
+  })
+
+  it("DOES gate an IM-bound run whose roster can drive the machine", async () => {
+    const deps = buildDeps(baseTeam, [task("t1")], [lead, riskyWorker()])
+    const result = await runTeamLifecycle("team-1", {
+      ...deps,
+      origin: "im",
+      triggeredFrom: { source: "im", adapterId: "a1", conversationKey: "c1" },
+    })
+    expect(result.status).toBe("failed")
+    expect(result.reason).toMatch(/computer-use/)
+  })
+
+  it("still explains an operator-set gate by the operator's choice, not by risk", async () => {
+    const operatorGated = {
+      ...baseTeam,
+      config: { ...baseTeam.config, requirePlanApproval: true },
+    }
+    const deps = buildDeps(operatorGated, [task("t1")], [lead, riskyWorker()])
+    const result = await runTeamLifecycle("team-1", { ...deps, origin: "scheduler" })
+    expect(result.status).toBe("failed")
+    expect(result.reason).toMatch(/requirePlanApproval is enabled/)
   })
 })
 
@@ -412,5 +672,49 @@ describe("runTeamLifecycle — ultracode orchestration", () => {
     const result = await runTeamLifecycle("team-1", { ...deps, ultracodeOverride: "off" })
     expect(result.status).toBe("failed")
     expect(result.reason).toMatch(/No tasks/)
+  })
+})
+
+describe("runTeamLifecycle — Employee Digital Twin runtime gating", () => {
+  beforeEach(() => {
+    resolveTeamTwinRuntimeMock.mockClear()
+    ;(executeAgent as jest.Mock).mockResolvedValue({
+      text: "result",
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    })
+  })
+
+  it("builds twin deps (no recruit list) when a worker is twin-bound", async () => {
+    const twinWorker = worker("w1")
+    twinWorker.config = { twinId: "tw1" }
+    await runTeamLifecycle("team-1", buildDeps(baseTeam, [task("t1")], [lead, twinWorker]))
+    expect(resolveTeamTwinRuntimeMock).toHaveBeenCalledWith({
+      buildDeps: true,
+      listAvailable: false,
+    })
+  })
+
+  it("builds deps + lists recruitable twins when knowledgeTwinIds + adaptiveReplan are set", async () => {
+    const team = {
+      ...baseTeam,
+      config: {
+        ...baseTeam.config,
+        knowledgeTwinIds: ["tw1"],
+        adaptiveReplan: { enabled: true },
+      },
+    } as AgentTeam
+    await runTeamLifecycle("team-1", buildDeps(team, [task("t1")], [lead, worker("w1")]))
+    expect(resolveTeamTwinRuntimeMock).toHaveBeenCalledWith({
+      buildDeps: true,
+      listAvailable: true,
+    })
+  })
+
+  it("skips twin deps entirely for a plain team", async () => {
+    await runTeamLifecycle("team-1", buildDeps(baseTeam, [task("t1")], [lead, worker("w1")]))
+    expect(resolveTeamTwinRuntimeMock).toHaveBeenCalledWith({
+      buildDeps: false,
+      listAvailable: false,
+    })
   })
 })

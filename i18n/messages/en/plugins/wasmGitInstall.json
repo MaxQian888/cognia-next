@@ -1,0 +1,14 @@
+{
+  "branchLabel": "Branch / tag / commit (optional)",
+  "branchPlaceholder": "main",
+  "cancel": "Cancel",
+  "description": "Clone a Git repository and build its WASM plugin locally with cargo-component. Requires the desktop runtime, git, and cargo-component.",
+  "emptyError": "Please enter a repository URL.",
+  "install": "Install",
+  "installing": "Cloning and building…",
+  "repoUrlLabel": "Repository URL",
+  "repoUrlPlaceholder": "https://github.com/owner/repo",
+  "title": "Install WASM from Git",
+  "toolchainMissingHint": "Install Rust and run `cargo install cargo-component`, and make sure git is on your PATH, then try again.",
+  "toolchainMissingTitle": "Build toolchain not found"
+}

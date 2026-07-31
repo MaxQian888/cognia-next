@@ -17,6 +17,37 @@ use tokio::time::timeout;
 const HANDSHAKE_TIMEOUT_SECS: u64 = 10;
 const PROTOCOL_VERSION: &str = "2024-11-05";
 
+/// Total probe attempts for the settings "Test" button. A cold server (npx
+/// still downloading its package, a remote endpoint waking from idle) routinely
+/// fails its FIRST handshake; one automatic retry turns that into a pass
+/// instead of a false "broken config" toast.
+const PROBE_ATTEMPTS: u32 = 2;
+const PROBE_RETRY_DELAY_MS: u64 = 500;
+
+/// Run `probe` up to `attempts` times, sleeping `delay_ms` before each retry.
+/// Returns the first `Ok`, or the LAST error once the budget is spent.
+async fn retry_probe<F, Fut>(
+    attempts: u32,
+    delay_ms: u64,
+    mut probe: F,
+) -> Result<Vec<McpToolInfo>, String>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<Vec<McpToolInfo>, String>>,
+{
+    let mut last_err = String::from("no probe attempts");
+    for attempt in 0..attempts.max(1) {
+        if attempt > 0 {
+            tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+        }
+        match probe().await {
+            Ok(tools) => return Ok(tools),
+            Err(e) => last_err = e,
+        }
+    }
+    Err(last_err)
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct McpTestResult {
     pub ok: bool,
@@ -45,18 +76,33 @@ pub async fn test_mcp_server(
     headers: Option<HashMap<String, String>>,
 ) -> Result<McpTestResult, String> {
     let start = std::time::Instant::now();
+    // Config errors (missing command/url, unknown transport) keep rejecting the
+    // invoke immediately — only the runtime handshake is retried.
     let result = match transport.as_str() {
         "stdio" => {
             let cmd = command.ok_or_else(|| "stdio transport requires `command`".to_string())?;
-            test_stdio(&cmd, args.unwrap_or_default(), env.unwrap_or_default()).await
+            let args = args.unwrap_or_default();
+            let env = env.unwrap_or_default();
+            retry_probe(PROBE_ATTEMPTS, PROBE_RETRY_DELAY_MS, || {
+                test_stdio(&cmd, args.clone(), env.clone())
+            })
+            .await
         }
         "http" => {
             let endpoint = url.ok_or_else(|| "http transport requires `url`".to_string())?;
-            test_streamable_http(&endpoint, headers.unwrap_or_default()).await
+            let headers = headers.unwrap_or_default();
+            retry_probe(PROBE_ATTEMPTS, PROBE_RETRY_DELAY_MS, || {
+                test_streamable_http(&endpoint, headers.clone())
+            })
+            .await
         }
         "sse" => {
             let endpoint = url.ok_or_else(|| "sse transport requires `url`".to_string())?;
-            test_sse(&endpoint, headers.unwrap_or_default()).await
+            let headers = headers.unwrap_or_default();
+            retry_probe(PROBE_ATTEMPTS, PROBE_RETRY_DELAY_MS, || {
+                test_sse(&endpoint, headers.clone())
+            })
+            .await
         }
         other => Err(format!("unknown transport: {}", other)),
     };
@@ -590,4 +636,67 @@ fn absolute_url(base: &str, target: &str) -> Result<String, String> {
         .join(target)
         .map_err(|e| format!("join url: {}", e))?;
     Ok(joined.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    #[tokio::test]
+    async fn retry_probe_returns_first_ok_without_retrying() {
+        let calls = AtomicU32::new(0);
+        let res = retry_probe(2, 0, || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            async { Ok(vec![]) }
+        })
+        .await;
+        assert!(res.is_ok());
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn retry_probe_recovers_after_a_cold_first_attempt() {
+        let calls = AtomicU32::new(0);
+        let res = retry_probe(2, 0, || {
+            let n = calls.fetch_add(1, Ordering::SeqCst);
+            async move {
+                if n == 0 {
+                    Err("cold start".to_string())
+                } else {
+                    Ok(vec![McpToolInfo {
+                        name: "t".into(),
+                        description: None,
+                    }])
+                }
+            }
+        })
+        .await;
+        assert_eq!(res.unwrap().len(), 1);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn retry_probe_surfaces_the_last_error_when_exhausted() {
+        let calls = AtomicU32::new(0);
+        let res = retry_probe(2, 0, || {
+            let n = calls.fetch_add(1, Ordering::SeqCst);
+            async move { Err(format!("attempt {}", n)) }
+        })
+        .await;
+        assert_eq!(res.unwrap_err(), "attempt 1");
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn retry_probe_clamps_zero_attempts_to_one() {
+        let calls = AtomicU32::new(0);
+        let res = retry_probe(0, 0, || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            async { Err("down".to_string()) }
+        })
+        .await;
+        assert!(res.is_err());
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
 }

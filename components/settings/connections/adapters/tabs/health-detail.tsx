@@ -30,6 +30,7 @@ import { isTauri } from "@/lib/tauri"
 import { useAdapterHealth } from "@/hooks/connectors/use-adapter-health"
 import { requeueAdapter } from "@/lib/connectors/lifecycle"
 import type { HealthCellState } from "@/lib/connectors/health/derive-history"
+import { healthReasonLabel } from "./health-reason-label"
 
 const STATE_TINT: Record<HealthCellState, string> = {
   running: "bg-emerald-500",
@@ -142,11 +143,13 @@ export function HealthDetail({ adapterId }: HealthDetailProps) {
               {t(`state.${current.state}`)}
             </Badge>
             {current.reason && (
-              <span className="text-xs text-muted-foreground truncate">{current.reason}</span>
+              <span className="text-xs text-muted-foreground truncate">
+                {healthReasonLabel(t, current.reason)}
+              </span>
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-3 text-xs">
+          <div className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-2">
             <div className="flex items-center gap-1.5">
               <CheckCircle2Icon className="h-3.5 w-3.5 text-emerald-500" />
               <span className="text-muted-foreground">{t("lastOk")}:</span>

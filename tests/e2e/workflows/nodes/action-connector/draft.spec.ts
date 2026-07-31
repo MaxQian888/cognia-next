@@ -2,7 +2,7 @@
  * E2E: action.connector.draft — creates a draft row visible in the Inbox.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../../../helpers/db-reset"
 import { seedAndOpenWorkflow } from "../../../helpers/seed-workflow"
 import {
@@ -20,12 +20,14 @@ test.describe("workflow node — action.connector.draft", () => {
     await resetCogniaDb(page)
   })
 
-  test("seeded connector draft renders + sessionId + content persist", async ({ page }) => {
+  test("seeded connector draft renders + sessionId + content fields render; node survives reload", async ({
+    page,
+  }) => {
     const wfId = await seedAndOpenWorkflow(page, "action-connector-draft")
     await assertNodeOnCanvas(page, { kind: "action.connector.draft", label: "Draft" })
     await openNodeInspector(page, "action.connector.draft")
-    await expect(page.locator("#ins-sessionId, [name=sessionId]").first()).toBeVisible()
-    await expect(page.locator("#ins-content, [name=content]").first()).toBeVisible()
+    await expect(page.locator("#ins-sessionId, [data-field=sessionId]").first()).toBeVisible()
+    await expect(page.locator("#ins-content, [data-field=content]").first()).toBeVisible()
     await saveWorkflow(page)
     await reopenAndAssertNode(page, wfId, { kind: "action.connector.draft" })
   })

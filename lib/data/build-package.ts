@@ -5,6 +5,7 @@
 
 import { getDb } from "@/lib/db/schema"
 import { getSettings } from "@/lib/db/settings"
+import { getDeviceMetadata } from "@/lib/device/device-identity"
 import { isTauri } from "@/lib/tauri"
 import { canonicalStringify } from "./migrate"
 import { sha256Hex } from "./crypto"
@@ -16,8 +17,13 @@ import {
   type ExportOptions,
 } from "./types"
 import { browserSnapshotStorage, SNAPSHOT_MODULES } from "./snapshots/registry"
+import { artifactsSnapshot } from "./snapshots/artifacts"
 import { readAllSnapshots } from "./snapshots/helpers"
 import type { SnapshotEnv, SnapshotStorage } from "./snapshots/types"
+import { filterExposedSessions } from "@/lib/chat/session-exposure"
+import { listAllCanvasCommentRows } from "@/lib/db/context-comments"
+import { exportStoredProfilesRedacted } from "@/lib/db/provider-profiles"
+import { deepStripSecrets } from "@/lib/settings/profile-transfer"
 
 const APP_VERSION = "0.1.0"
 
@@ -49,6 +55,11 @@ export async function buildBackupPackage(
 ): Promise<BackupPackageV3> {
   const db = getDb()
   const includeBuiltIns = opts.includeBuiltIns ?? false
+  const includeMemories = opts.includeMemories ?? true
+  const includeSettings = opts.includeSettings ?? true
+  const includeCoreData = opts.includeCoreData ?? true
+  const includePlugins = opts.includePlugins ?? true
+  const includeLocalStorage = opts.includeLocalStorage ?? true
 
   const [
     settingsRow,
@@ -75,6 +86,18 @@ export async function buildBackupPackage(
     twinProfile,
     twinDrafts,
     twinJobs,
+    memories,
+    memoryEvidence,
+    memoryJobs,
+    memoryAuditEvents,
+    plugins,
+    pluginPermissions,
+    pluginReviews,
+    pluginAnalytics,
+    templateDefinitions,
+    templatePackages,
+    templateInstances,
+    providerProfileStore,
   ] = await Promise.all([
     getSettings(),
     db.characters.toArray(),
@@ -90,7 +113,7 @@ export async function buildBackupPackage(
     db.tts_provider_keys.toArray(),
     db.canvasDocuments.toArray(),
     db.canvasVersions.toArray(),
-    db.canvasComments.toArray(),
+    listAllCanvasCommentRows(),
     db.canvasSessions.toArray(),
     db.a2uiApps.toArray(),
     db.a2uiTemplates.toArray(),
@@ -100,13 +123,25 @@ export async function buildBackupPackage(
     db.twinProfile.toArray(),
     db.twinDrafts.toArray(),
     db.twinJobs.toArray(),
+    includeMemories ? db.memories.toArray() : Promise.resolve([]),
+    includeMemories ? db.memoryEvidence.toArray() : Promise.resolve([]),
+    includeMemories ? db.memoryJobs.toArray() : Promise.resolve([]),
+    includeMemories ? db.memoryAuditEvents.toArray() : Promise.resolve([]),
+    db.plugins.toArray(),
+    db.pluginPermissions.toArray(),
+    db.pluginReviews.toArray(),
+    db.pluginAnalytics.toArray(),
+    db.templateDefinitions.toArray(),
+    db.templatePackages.toArray(),
+    db.templateInstances.toArray(),
+    exportStoredProfilesRedacted(),
   ])
 
-  // Strip the API key unless the user opted in.
-  const settings = { ...settingsRow }
-  if (!opts.includeApiKey) {
-    delete settings.apiKey
-  }
+  // The setting face contains nested provider credentials. Reuse the settings
+  // transfer scrubber so `includeApiKey: false` covers every nested key.
+  const settings = (
+    opts.includeApiKey ? { ...settingsRow } : deepStripSecrets(settingsRow)
+  ) as typeof settingsRow
 
   const filteredCharacters = includeBuiltIns ? characters : characters.filter((c) => !c.isBuiltIn)
   const filteredSkills = includeBuiltIns ? skills : skills.filter((s) => !s.isBuiltIn)
@@ -117,6 +152,10 @@ export async function buildBackupPackage(
   const filteredSkillResources = includeBuiltIns
     ? skillResources
     : skillResources.filter((r) => keptSkillIds.has(r.skillId))
+  const filteredPlugins = includeBuiltIns
+    ? plugins
+    : plugins.filter((plugin) => plugin.source !== "builtin")
+  const keptPluginIds = new Set(filteredPlugins.map((plugin) => plugin.id))
 
   const payload: BackupPayloadV3 = {
     settings,
@@ -144,27 +183,91 @@ export async function buildBackupPackage(
     twinProfile,
     twinDrafts,
     twinJobs,
+    ...(includeMemories ? { memories, memoryEvidence, memoryJobs, memoryAuditEvents } : {}),
+    plugins: filteredPlugins,
+    pluginPermissions: pluginPermissions.filter((row) => keptPluginIds.has(row.pluginId)),
+    pluginReviews: pluginReviews.filter((row) => keptPluginIds.has(row.pluginId)),
+    pluginAnalytics: pluginAnalytics.filter((row) => keptPluginIds.has(row.pluginId)),
+    templateDefinitions,
+    templatePackages,
+    templateInstances,
+    providerProfileStore,
   }
   if (opts.includeSessions) {
-    payload.sessions = sessions
-    payload.messages = messages
-    payload.sessionState = sessionState
+    const exportedSessions = filterExposedSessions(sessions, "standard-export")
+    const exportedSessionIds = new Set(exportedSessions.map((session) => session.id))
+    payload.sessions = exportedSessions
+    payload.messages = messages.filter((message) => exportedSessionIds.has(message.sessionId))
+    payload.sessionState = sessionState.filter((state) => exportedSessionIds.has(state.sessionId))
+  }
+
+  if (!includeSettings) delete payload.settings
+  if (!includeSettings) delete payload.providerProfileStore
+  if (!includeCoreData) {
+    for (const key of [
+      "characters",
+      "skills",
+      "skillResources",
+      "teams",
+      "promptPresets",
+      "mcpServers",
+      "trustedWorkspaces",
+      "ttsProviderKeys",
+      "canvasDocuments",
+      "canvasVersions",
+      "canvasComments",
+      "canvasSessions",
+      "a2uiApps",
+      "a2uiTemplates",
+      "a2uiEventHistory",
+      "twinSources",
+      "twinChunks",
+      "twinProfile",
+      "twinDrafts",
+      "twinJobs",
+      "memories",
+      "memoryEvidence",
+      "memoryJobs",
+      "memoryAuditEvents",
+      "templateDefinitions",
+      "templatePackages",
+      "templateInstances",
+    ] satisfies (keyof BackupPayloadV3)[]) {
+      delete payload[key]
+    }
+  }
+  if (!includePlugins) {
+    delete payload.plugins
+    delete payload.pluginPermissions
+    delete payload.pluginReviews
+    delete payload.pluginAnalytics
   }
 
   // localStorage-backed Zustand persist faces (external agents, custom
   // modes, agent teams, custom themes, artifacts, canvas prefs, …). Each
   // module's `read` is non-throwing — a single corrupt persist key cannot
   // brick the build.
-  const storage = extras.storage === undefined ? browserSnapshotStorage() : extras.storage
+  const storage =
+    includeLocalStorage && extras.storage === undefined
+      ? browserSnapshotStorage()
+      : includeLocalStorage
+        ? extras.storage
+        : null
   if (storage) {
     const env: SnapshotEnv = { storage, warn: extras.warn }
-    const { snapshots } = readAllSnapshots(SNAPSHOT_MODULES, env)
+    const snapshotModules =
+      opts.includeArtifacts === false
+        ? SNAPSHOT_MODULES.filter((module) => module.key !== artifactsSnapshot.key)
+        : SNAPSHOT_MODULES
+    const { snapshots } = readAllSnapshots(snapshotModules, env)
     if (Object.keys(snapshots).length > 0) {
       payload.localStorageSnapshots = snapshots
     }
   }
 
   const checksum = await sha256Hex(canonicalStringify(payload))
+  // Optional provenance — restore + history surface "which device wrote this".
+  const device = (await getDeviceMetadata()) ?? undefined
   const manifest: BackupManifestV3 = {
     version: "3.0",
     schemaVersion: EXPORT_SCHEMA_VERSION,
@@ -173,6 +276,7 @@ export async function buildBackupPackage(
     appVersion: APP_VERSION,
     backend: isTauri() ? "tauri-dexie" : "web-dexie",
     integrity: { algorithm: "SHA-256", checksum },
+    ...(device ? { device } : {}),
   }
 
   return { version: "3.0", manifest, payload }

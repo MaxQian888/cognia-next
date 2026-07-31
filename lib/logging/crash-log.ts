@@ -11,6 +11,10 @@ import {
   type CrashLogSummary,
 } from "@/types/logging"
 import { downloadFile } from "@/lib/files/download"
+import {
+  CRASH_LOG_KEY_HINTS,
+  CRASH_LOG_TEXT_REDACTION_PATTERNS,
+} from "@cognia/logging/redaction-patterns"
 
 export type {
   WindowDiagnosticsSnapshot,
@@ -27,22 +31,7 @@ export type {
 
 const SOURCE_ORDER: CrashLogSource[] = ["recent", "persisted", "diagnostic"]
 const SAFE_REPLACEMENT = DEFAULT_UNIFIED_CONFIG.redaction.replacement
-const SAFE_PATH_PATTERNS = [
-  ...DEFAULT_UNIFIED_CONFIG.redaction.redactPatterns,
-  "[A-Za-z]:\\\\(?:[^\\\\\\s]+\\\\)*[^\\\\\\s]+",
-  "(?:/Users|/home|/var|/tmp|/private|/opt|/etc)(?:/[^\\s\"']+)+",
-  "https?:\\/\\/[^\\s\"']+",
-]
-const SAFE_KEY_HINTS = new Set(
-  [
-    ...DEFAULT_UNIFIED_CONFIG.redaction.redactKeys,
-    "path",
-    "file",
-    "directory",
-    "url",
-    "endpoint",
-  ].map((key) => key.toLowerCase())
-)
+const SAFE_KEY_HINTS = new Set(CRASH_LOG_KEY_HINTS.map((key) => key.toLowerCase()))
 
 function mergeSources(current: CrashLogSource[], incoming: CrashLogSource): CrashLogSource[] {
   if (current.includes(incoming)) {
@@ -123,7 +112,7 @@ function shouldAddDiagnosticsItem(
 }
 
 function sanitizeText(value: string): string {
-  return SAFE_PATH_PATTERNS.reduce((current, pattern) => {
+  return CRASH_LOG_TEXT_REDACTION_PATTERNS.reduce((current, pattern) => {
     try {
       return current.replace(new RegExp(pattern, "gi"), SAFE_REPLACEMENT)
     } catch {
@@ -391,7 +380,7 @@ export async function exportCrashLogBundleNow(
     { getLocalRuntimeDiagnostics },
     { getWindowDiagnostics },
   ] = await Promise.all([
-    import("./recent-errors"),
+    import("@cognia/logging/recent-errors"),
     import("./bootstrap"),
     import("@/lib/native/native-logging"),
     import("@/lib/native/local-runtime"),

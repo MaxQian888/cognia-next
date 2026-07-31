@@ -21,7 +21,7 @@ import type {
   WorkflowNodeKind,
 } from "@/types/workflow/visual"
 import { createOverlayRegistry } from "@/lib/plugin/registries/createOverlayRegistry"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 /**
  * Sentinel owner id for host-bundled executors. Built-ins register under this

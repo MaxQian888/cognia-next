@@ -27,12 +27,13 @@ import {
   defaultExportFileName,
   serializePackage,
 } from "@/lib/data/build-package"
+import type { ExportOptions } from "@/lib/data/types"
 import { getDefaultBackupPassphrase } from "@/lib/data/backup-key"
 import { appendBackupHistory, type BackupHistoryEncryption } from "@/lib/db/backup-history"
-import { DEFAULT_BACKUP_AUTO_SCHEDULE, type BackupAutoSchedule } from "@/lib/claude/types"
+import { DEFAULT_BACKUP_AUTO_SCHEDULE, type BackupAutoSchedule } from "@cognia/agent-config-types"
 import { getSettings, saveSettings } from "@/lib/db/settings"
 import { isTauri } from "@/lib/tauri"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { dispatchBackupDestination } from "@/lib/data/destinations"
 import { encryptSnapshotBody, webdavSnapshotName } from "@/lib/data/destinations/webdav"
 import { getSyncPassphrase } from "@/lib/webdav/passphrase-cache"
@@ -46,27 +47,66 @@ interface ExecutorResult {
 }
 
 /**
- * Map a high-level `BackupTaskType` to the package-build options. cognia-next
- * doesn't support every Cognia backup-type variant — `plugins` has no
- * backing system, so we fall through to `full` for safety.
+ * Map the schedule's user-facing selection to an exact payload contract.
  */
 function payloadToBuildOptions(
   type: BackupTaskType | undefined,
   options: BackupSelectionOptions | undefined
-): { includeSessions: boolean; includeApiKey: boolean } {
-  // Default: include everything.
-  const includeSessions = options?.includeSessions ?? true
+): ExportOptions {
   // The cron path always omits the API key — it's a long-lived encrypted-file
   // sitting on disk; baking the API key in would be a leak.
-  const includeApiKey = false
-  if (!type || type === "full") {
-    return { includeSessions, includeApiKey }
+  const base = { includeApiKey: false } as const
+  if (type === "sessions") {
+    return {
+      ...base,
+      includeSessions: true,
+      includeSettings: false,
+      includeCoreData: false,
+      includePlugins: false,
+      includeLocalStorage: false,
+    }
   }
-  if (type === "sessions") return { includeSessions: true, includeApiKey: false }
-  if (type === "settings") return { includeSessions: false, includeApiKey: false }
-  if (type === "all") return { includeSessions: true, includeApiKey: false }
-  // `plugins` not supported here — fall through.
-  return { includeSessions, includeApiKey }
+  if (type === "settings") {
+    return {
+      ...base,
+      includeSessions: false,
+      includeSettings: true,
+      includeCoreData: false,
+      includePlugins: false,
+      includeLocalStorage: true,
+      includeArtifacts: false,
+    }
+  }
+  if (type === "plugins") {
+    return {
+      ...base,
+      includeSessions: false,
+      includeSettings: false,
+      includeCoreData: false,
+      includePlugins: true,
+      includeLocalStorage: false,
+    }
+  }
+  if (type === "all") {
+    return {
+      ...base,
+      includeSessions: true,
+      includeSettings: true,
+      includeCoreData: true,
+      includePlugins: true,
+      includeLocalStorage: true,
+      includeArtifacts: true,
+    }
+  }
+  return {
+    ...base,
+    includeSessions: options?.includeSessions ?? true,
+    includeSettings: options?.includeSettings ?? true,
+    includeCoreData: options?.includeIndexedDB ?? true,
+    includePlugins: false,
+    includeLocalStorage: true,
+    includeArtifacts: options?.includeArtifacts ?? true,
+  }
 }
 
 // Destinations the executor actually fires. `local`/`undefined` → disk;

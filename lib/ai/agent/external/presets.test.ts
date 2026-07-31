@@ -1,5 +1,6 @@
 import {
   EXTERNAL_AGENT_PRESETS,
+  BUILTIN_EXECUTABLE_PRESET_IDS,
   getAvailablePresets,
   getPresetConfig,
   createAgentFromPreset,
@@ -20,11 +21,16 @@ afterEach(() => {
 })
 
 describe("EXTERNAL_AGENT_PRESETS", () => {
-  it("contains the four executable presets and a null custom slot", () => {
+  it("contains the executable presets and a null custom slot", () => {
     expect(EXTERNAL_AGENT_PRESETS.codex).not.toBeNull()
     expect(EXTERNAL_AGENT_PRESETS["claude-code"]).not.toBeNull()
     expect(EXTERNAL_AGENT_PRESETS["gemini-cli"]).not.toBeNull()
     expect(EXTERNAL_AGENT_PRESETS["cursor-cli"]).not.toBeNull()
+    expect(EXTERNAL_AGENT_PRESETS["copilot-cli"]).not.toBeNull()
+    expect(EXTERNAL_AGENT_PRESETS.kiro).not.toBeNull()
+    expect(EXTERNAL_AGENT_PRESETS["qwen-code"]).not.toBeNull()
+    expect(EXTERNAL_AGENT_PRESETS.pi).not.toBeNull()
+    expect(EXTERNAL_AGENT_PRESETS.droid).not.toBeNull()
     expect(EXTERNAL_AGENT_PRESETS.custom).toBeNull()
   })
 
@@ -40,14 +46,82 @@ describe("EXTERNAL_AGENT_PRESETS", () => {
   })
 })
 
+describe("BUILTIN_EXECUTABLE_PRESET_IDS", () => {
+  it("excludes custom and service-discovered preview integrations", () => {
+    const expected = (
+      Object.keys(EXTERNAL_AGENT_PRESETS) as Array<keyof typeof EXTERNAL_AGENT_PRESETS>
+    ).filter(
+      (id) => id !== "custom" && id !== "opencode-v2-preview" && EXTERNAL_AGENT_PRESETS[id] !== null
+    )
+    expect(BUILTIN_EXECUTABLE_PRESET_IDS).toEqual(expected)
+    expect(BUILTIN_EXECUTABLE_PRESET_IDS).not.toContain("custom")
+    expect(BUILTIN_EXECUTABLE_PRESET_IDS).not.toContain("opencode-v2-preview")
+  })
+
+  it("includes both Claude Code and Codex (the named external agents)", () => {
+    expect(BUILTIN_EXECUTABLE_PRESET_IDS).toEqual(
+      expect.arrayContaining(["claude-code", "codex", "codex-app-server"])
+    )
+  })
+
+  it("only lists ids that resolve to a real preset config", () => {
+    for (const id of BUILTIN_EXECUTABLE_PRESET_IDS) {
+      expect(getPresetConfig(id)).not.toBeNull()
+    }
+  })
+})
+
 describe("getAvailablePresets", () => {
-  it("excludes 'custom' and includes the four executable preset ids", () => {
+  it("excludes 'custom' and includes the executable preset ids", () => {
     const ids = getAvailablePresets()
     expect(ids).toContain("codex")
     expect(ids).toContain("claude-code")
     expect(ids).toContain("gemini-cli")
     expect(ids).toContain("cursor-cli")
+    expect(ids).toContain("copilot-cli")
+    expect(ids).toContain("kiro")
+    expect(ids).toContain("qwen-code")
+    expect(ids).toContain("pi")
+    expect(ids).toContain("droid")
     expect(ids).not.toContain("custom")
+  })
+})
+
+describe("OpenCode presets", () => {
+  it("exposes auto-spawn and remote OpenCode presets", () => {
+    const server = EXTERNAL_AGENT_PRESETS["opencode-server"]!
+    expect(server.protocol).toBe("opencode")
+    expect(server.transport).toBe("sse")
+    expect(server.process?.command).toBe("opencode")
+    // spawnServer prepends "serve" itself — a preset-provided "serve" would
+    // produce `opencode serve ... serve` and the CLI rejects the extra arg.
+    expect(server.process?.args).toEqual([])
+    expect(server.metadata?.autoSpawnServer).toBe(true)
+
+    const remote = EXTERNAL_AGENT_PRESETS["opencode-remote"]!
+    expect(remote.protocol).toBe("opencode")
+    expect(remote.network?.endpoint).toBeTruthy()
+    expect(remote.metadata?.autoSpawnServer).toBeUndefined()
+
+    const ids = getAvailablePresets()
+    expect(ids).toContain("opencode-server")
+    expect(ids).toContain("opencode-remote")
+  })
+
+  it("materializes the auto-spawn flag into agent metadata", () => {
+    const cfg = createAgentFromPreset("opencode-server")!
+    expect(cfg.protocol).toBe("opencode")
+    expect(cfg.process?.command).toBe("opencode")
+    expect(cfg.metadata?.autoSpawnServer).toBe(true)
+    expect(cfg.metadata?.preset).toBe("opencode-server")
+  })
+
+  it("lets overrides win over preset metadata", () => {
+    const cfg = createAgentFromPreset("opencode-server", {
+      metadata: { autoSpawnServer: false, serverPassword: "x" },
+    })!
+    expect(cfg.metadata?.autoSpawnServer).toBe(false)
+    expect(cfg.metadata?.serverPassword).toBe("x")
   })
 })
 
@@ -109,7 +183,7 @@ describe("createAgentFromPreset", () => {
   it("falls back to preset defaults when overrides are missing", () => {
     const cfg = createAgentFromPreset("gemini-cli")!
     expect(cfg.name).toBeDefined()
-    expect(cfg.process?.args).toEqual(["-y", "@google/gemini-cli", "--stdio"])
+    expect(cfg.process?.args).toEqual(["-y", "@google/gemini-cli", "--acp"])
   })
 
   it("preserves network field when preset has one (synthetic)", () => {
@@ -120,6 +194,25 @@ describe("createAgentFromPreset", () => {
     })
     expect(cfg!.network?.endpoint).toBe("http://example.test")
   })
+})
+
+describe("new ACP presets", () => {
+  it.each(["copilot-cli", "kiro", "qwen-code", "pi", "droid"])(
+    "materializes an executable ACP stdio agent from %s",
+    (presetId) => {
+      const preset = getPresetConfig(presetId)!
+      expect(preset.protocol).toBe("acp")
+      expect(preset.transport).toBe("stdio")
+      expect(preset.supportTier).toBe("executable")
+      expect(preset.process?.command).toBeTruthy()
+
+      const cfg = createAgentFromPreset(presetId)!
+      expect(cfg.protocol).toBe("acp")
+      expect(cfg.metadata?.preset).toBe(presetId)
+      expect(cfg.metadata?.ecosystemSurfaceId).toBe("acp-stdio")
+      expect(isFromPreset(cfg)).toBe(presetId)
+    }
+  )
 })
 
 describe("isFromPreset", () => {
@@ -172,16 +265,22 @@ describe("runtime preset overlay", () => {
     expect(getDynamicPresetEntry("plugin-x")?.pluginId).toBe("plug")
   })
 
-  it("registerPreset returns the previous entry when an id is re-registered", () => {
+  it("rejects a cross-plugin re-registration (first-wins) but allows same-plugin refresh", () => {
     registerPreset("plugin-x", fakeConfig, { pluginId: "plug-1" })
+
+    // W4.2: a DIFFERENT plugin may not hijack the id — the incumbent wins.
     const prev = registerPreset(
       "plugin-x",
-      { ...fakeConfig, name: "Updated" },
+      { ...fakeConfig, name: "Hijacked" },
       { pluginId: "plug-2" }
     )
     expect(prev?.pluginId).toBe("plug-1")
+    expect(getPresetConfig("plugin-x")?.name).toBe("Fake Plugin Agent")
+    expect(getDynamicPresetEntry("plugin-x")?.pluginId).toBe("plug-1")
+
+    // The SAME plugin still refreshes its own entry (hot reload).
+    registerPreset("plugin-x", { ...fakeConfig, name: "Updated" }, { pluginId: "plug-1" })
     expect(getPresetConfig("plugin-x")?.name).toBe("Updated")
-    expect(getDynamicPresetEntry("plugin-x")?.pluginId).toBe("plug-2")
   })
 
   it("unregisterPreset removes a single entry; idempotent second call returns false", () => {

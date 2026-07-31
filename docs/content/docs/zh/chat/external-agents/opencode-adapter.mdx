@@ -8,22 +8,23 @@ description: OpenCodeClientAdapter（opencode-client.ts，1659 行）走官方 @
 <Status variant="stable" />
 
 <TLDR>
-  第二种协议。`OpenCodeClientAdapter`（`opencode-client.ts:122`）经官方 `@opencode-ai/sdk/client` 驱动
+  第二种协议。`OpenCodeClientAdapter` 经官方 `@opencode-ai/sdk/client` 驱动
   一个 [OpenCode](https://opencode.ai) 服务端——带类型的 HTTP 调用外加一条 **Server-Sent Events** 流——
-  而非 ACP 的 JSON-RPC-走-stdio。它默认连到 `http://127.0.0.1:4096`（`:154`），以 `session.promptAsync`
-  非阻塞提交一个 prompt（`:447`），消费 `client.event.subscribe()` SSE（`streamSessionEvents` `:1197`），
-  把每个 SDK 事件翻译成与 ACP 相同的规范 `ExternalAgentEvent` 流。两个客户端都继承 `BaseProtocolAdapter`
-  （`protocol-adapter.ts:258`），并按协议 id 从 `protocolAdapterRegistry`（`:523`）查找——所以
-  [Manager](./manager) 用单次 `registry.create()` 调用选择 ACP vs OpenCode，再不分叉。
+  而非 ACP 的 JSON-RPC-走-stdio。它默认连到 `http://127.0.0.1:4096`（也可在**桌面端自动拉起
+  `opencode serve`**、或连到配置的端点并附带鉴权）。它在用 `session.promptAsync` 提交之前**先打开
+  `client.event.subscribe()` SSE 流**（避免漏掉早到的流式 parts），再把每个 SDK 事件翻译成与 ACP 相同的
+  规范 `ExternalAgentEvent` 流。两个客户端都继承 `BaseProtocolAdapter`，并按协议 id 从
+  `protocolAdapterRegistry` 查找——所以 [Manager](./manager) 用单次 `registry.create()` 调用选择
+  ACP vs OpenCode，再不分叉。
 </TLDR>
 
 <StatGrid>
   <Stat label="opencode-client.ts" value="1659 行" hint="OpenCodeClientAdapter —— 唯一导出" />
   <Stat label="protocol-adapter.ts" value="523 行" hint="ProtocolAdapter + BaseProtocolAdapter + 注册表" />
-  <Stat label="默认端点" value="127.0.0.1:4096" hint="opencode-client.ts:154" />
+  <Stat label="服务端" value="端点 / 自动拉起 / 4096" hint="resolveBaseUrl —— 桌面端自动拉起 opencode serve" />
   <Stat label="传输" value="HTTP + SSE" hint="对比 ACP 的 JSON-RPC / stdio" />
-  <Stat label="提交模型" value="promptAsync" hint="非阻塞，随后 SSE 流 :447" />
-  <Stat label="注册表选择" value="create(protocol)" hint="protocol-adapter.ts:499" />
+  <Stat label="提交模型" value="subscribe → promptAsync" hint="先开 SSE，再非阻塞提交" />
+  <Stat label="鉴权" value="Basic / Bearer / headers" hint="buildAuthFetch —— 自定义 fetch" />
 </StatGrid>
 
 ## ProtocolAdapter 契约
@@ -74,28 +75,63 @@ sequenceDiagram
   participant C as OpenCodeClientAdapter
   participant S as OpenCode 服务端 (SSE)
 
-  M->>C: connect(config) :148
-  C->>S: createOpencodeClient({ baseUrl }) :164
-  C->>S: global.event() 健康探测（abort）:168
-  C->>S: discoverCapabilities (providers/agents/commands/tools) :235
-  M->>C: createSession() :299
-  C->>S: session.create :308
-  M->>C: prompt(session, message) :384
-  C-->>M: yield session_start :395
-  C->>S: session.promptAsync（非阻塞）:447
-  C->>S: event.subscribe() —— SSE 流 :1201
+  M->>C: connect(config)
+  C->>C: resolveBaseUrl（端点 / 自动拉起 / 默认）
+  C->>S: createOpencodeClient({ baseUrl, fetch: authFetch })
+  C->>S: config.get() —— 廉价的非 SSE 就绪探测（自动拉起后重试）
+  C->>S: discoverCapabilities (providers/agents/commands/tools)
+  M->>C: createSession()
+  C->>S: session.create
+  M->>C: prompt(session, message)
+  C-->>M: yield session_start
+  C->>S: event.subscribe({ signal }) —— 先打开 SSE
+  C->>S: session.promptAsync（非阻塞）
   loop 流式
-    S-->>C: OcGlobalEvent (message.part.updated, …) :1208
-    C->>C: translateSdkEvent :1257
+    S-->>C: Event (message.part.updated, …) —— 无 .payload 包装
+    C->>C: translateSdkEvent
     C-->>M: yield message_delta / tool_* / plan_update
   end
-  Note over C,S: 检测到会话 idle → return :1228
-  C-->>M: finally → yield done :483
+  Note over C,S: 检测到会话 idle → return
+  C-->>M: finally → abort signal（关闭 SSE）+ yield done
 ```
 
-`prompt`（`:384`）解析 system/model/agent 覆盖（`:418`）、把一个 `AbortController` 接到 `options.signal`
-（`:434`）、以 `session.promptAsync` 提交（`:447`），然后流式。若异步提交抛错且本轮未被 abort，它**回退到
-同步 `session.prompt`**（`:463`），并经 `emitEventsFromMessage`（`:1446`）从返回的消息发射事件。
+`prompt` 解析 system/model/agent 覆盖、把一个 `AbortController` 接到 `options.signal`，然后在调用
+`session.promptAsync` **之前先打开 `event.subscribe({ signal })`**。先订阅是关键：SSE 流没有回放，若在提交
+之后才打开就会漏掉早到的 `message.part.updated` parts。若异步提交抛错且本轮未被 abort，它**回退到同步
+`session.prompt`**，并经 `emitEventsFromMessage` 从返回的消息发射事件。`finally` 会 abort 控制器，从而拆掉
+SSE fetch。
+
+> **为什么 `event.subscribe()` 没有 `.payload`。** `client.event.subscribe()` 直接产出 `Event` 对象
+> （`{ type, properties }` 判别联合）。只有 `client.global.event()` 才把每个事件包进 `{ directory, payload }`
+> 的 `GlobalEvent`。适配器消费 `subscribe()`，所以直接从流上读 `event.type` / `event.properties`。
+
+## 服务端生命周期：连接 vs. 自动拉起
+
+`resolveBaseUrl` 按优先级挑选服务端：
+
+1. **显式端点** —— `network.endpoint` 永远优先（连到已运行的服务端）。
+2. **自动拉起（桌面）** —— 当设置了 `metadata.autoSpawnServer`（或配置了 `process.command`）时，
+   `spawnServer` 经现成的 external-agent 进程桥（`lib/native/external-agent.ts` →
+   `src-tauri/.../external_agent`）拉起 `opencode serve --hostname=127.0.0.1 --port=0`，解析 stdout 的
+   **`opencode server listening on <url>`** 行以发现真实端口，再连接。`disconnect()` 会杀掉拉起的进程。
+   需要 Tauri 运行时；Web 端会抛出清晰错误。
+3. **默认** —— `http://127.0.0.1:4096`（或 `metadata.hostname`/`metadata.port`）。
+
+解析完后，`connect` 用一次廉价的 **`config.get()`** 探测就绪（而非旧代码泄漏的持久 `global.event()` SSE）。
+当服务端是刚自动拉起的，探测会短暂重试，以覆盖「listening 日志行」与「HTTP 服务端开始接受请求」之间的间隙。
+
+## 鉴权
+
+`buildAuthFetch` 返回一个自定义 `fetch`（传给 `createOpencodeClient`），在每个请求（含 SSE 流）上注入
+`Authorization` 头：
+
+| 来源 | 头 |
+| --- | --- |
+| `metadata.serverPassword`（+ 可选 `metadata.serverUsername`，默认 `opencode`） | `Basic base64(user:pass)` —— 匹配 `OPENCODE_SERVER_PASSWORD` |
+| `network.bearerToken` / `network.apiKey` | `Bearer <token>` |
+| `network.headers` | 原样合并 |
+
+未配置鉴权 → `fetch` 为 `undefined`，SDK 用默认值。
 
 ## SDK 事件翻译
 
@@ -114,15 +150,16 @@ sequenceDiagram
 | `session.error` | `error`（recoverable:true） | 1407 |
 | `server.connected` / `session.*` 生命周期 | 空操作（parts 另行到达） | 1262 |
 
-流循环（`:1197`）以 `session.status.type === "idle"`（`:1224`）或一个 `session.idle` 事件（`:1234`）检测
-完成，并**遇 `done` 早返回**（`:1218`）；`finally` abort SSE 控制器（`:1243`）。
+流循环以 `session.status.type === "idle"` 或一个 `session.idle` 事件检测完成，并**遇 `done` 早返回**。
+SSE 流的拆除靠 abort 传给 `event.subscribe({ signal })` 的 `AbortSignal`（适配器在 `prompt` 的 `finally`
+里 abort 它）。
 
 ## ACP vs OpenCode 一览
 
 | 维度 | ACP（`acp-client.ts`） | OpenCode（`opencode-client.ts`） |
 | --- | --- | --- |
 | 线缆 | JSON-RPC 2.0，换行分隔 stdio | 带类型 SDK 走 HTTP + SSE |
-| 进程 | Cognia 拉起 CLI（Rust 桥） | 连到一个运行中的服务端 |
+| 进程 | Cognia 拉起 CLI（Rust 桥） | 连到运行中的服务端**或在桌面端自动拉起 `opencode serve`** |
 | 角色 | **反转**——Agent 反调 fs/terminal/permission | 常规客户端 → 服务端 |
 | 能力发现 | `initialize` 握手，真协商 | `discoverCapabilities` 扇出；初始化元数据合成 |
 | 会话扩展 | 经探测，可能 `unsupported` | 声明支持，不探测 |

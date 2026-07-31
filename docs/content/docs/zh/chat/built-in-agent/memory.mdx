@@ -110,7 +110,7 @@ build-options 在 `:595-633` 调用 `applyMemoryContext`（受守卫，`catch` �
 
 `scoreMemories`（`scoring.ts:69`）是 Generative-Agents 三因子公式——`score = recency + importance + relevance`，各自 min-max 归一化，权重皆 1。recency 为 `decay^daysSinceLastAccess`（`:64`）。纯（仅注入的 `now`）。
 
-整个记忆子系统**复用共享 RAG 工具箱**：`BM25Index` / `normalizeScores` / `reciprocalRankFusion` 来自 `@/lib/ai/rag/hybrid-search`，context manager 来自 `@/lib/ai/rag/context-manager`，LLM 契约来自 `@/lib/twin/distill/llm`。
+整个记忆子系统**复用共享 RAG 工具箱**：`BM25Index` / `normalizeScores` / `reciprocalRankFusion` 来自 `@cognia/rag/hybrid-search`，context manager 来自 `@cognia/rag/context-manager`，LLM 契约来自 `@/lib/twin/distill/llm`。
 
 ## Procedural 记忆
 

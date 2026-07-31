@@ -81,8 +81,26 @@ impl Guest for Plugin {
         if node_kind != FORMAT_NODE {
             return Err(format!("unknown node kind: {node_kind}"));
         }
-        format_via_rustfmt(inputs)
+        // The workflow envelope differs from the tool envelope. `tool-execute`
+        // gets the arguments spread FLAT (`{ name, ...args }`), so parsing a
+        // `FormatRequest` straight off the payload works there. The node path
+        // gets `{ kind, params, upstream }` (see `buildWasmNodeDefs` in
+        // lib/plugin/core/wasm-loader.ts), so the request lives under `params`
+        // — reading the payload directly failed every invocation with
+        // "parse FormatRequest: missing field `source`".
+        let envelope: NodeEnvelope =
+            serde_json::from_slice(&inputs).map_err(|e| format!("parse node envelope: {e}"))?;
+        let params = serde_json::to_vec(&envelope.params)
+            .map_err(|e| format!("re-encode node params: {e}"))?;
+        format_via_rustfmt(params)
     }
+}
+
+/// Workflow-node invocation envelope produced by the host.
+#[derive(Debug, Deserialize)]
+struct NodeEnvelope {
+    #[serde(default)]
+    params: serde_json::Value,
 }
 
 fn format_via_rustfmt(payload: Vec<u8>) -> Result<Vec<u8>, String> {

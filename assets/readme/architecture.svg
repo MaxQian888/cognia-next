@@ -1,0 +1,136 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="496" viewBox="0 0 1200 496"
+     role="img" aria-labelledby="archTitle archDesc" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif">
+  <title id="archTitle">How Cognia is built</title>
+  <desc id="archDesc">One Next.js 16 static export feeds three shells — browser, Tauri desktop, and Capacitor mobile. The desktop shell embeds a Rust core (axum HTTP, scheduler, vector store, automation, OCR, MCP server) and a Node agent sidecar; the mobile shell is a LAN/WAN client of that core. Two standalone services under services/ deploy independently.</desc>
+
+  <defs>
+    <linearGradient id="barGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#13233F"/>
+      <stop offset="1" stop-color="#0F1B31"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="496" rx="24" fill="#0A0E1A"/>
+  <rect x="1" y="1" width="1198" height="494" rx="23" fill="none" stroke="#1B2740"/>
+
+  <!-- header -->
+  <g font-family="ui-monospace,SFMono-Regular,Menlo,monospace">
+    <rect x="56" y="30" width="8" height="8" rx="2" fill="#37E0F5"/>
+    <text x="76" y="38" font-size="14" letter-spacing="3" fill="#7FD9E8">HOW&#160;IT&#160;WORKS</text>
+    <text x="1144" y="38" text-anchor="end" font-size="12.5" fill="#4E5F80">one export &#8594; three shells</text>
+  </g>
+
+  <!-- ============ codebase bar ============ -->
+  <g transform="translate(56 54)">
+    <rect width="1088" height="86" rx="14" fill="url(#barGrad)" stroke="#2C4372"/>
+    <circle cx="1072" cy="16" r="2.5" fill="#37E0F5"/>
+    <text x="24" y="34" font-size="16.5" font-weight="700" fill="#EAF1FD">Next.js 16 <tspan fill="#6E82A6" font-weight="400">— App Router, static export</tspan> <tspan fill="#8FD0FF" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14">&#8594; out/</tspan></text>
+    <g font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="12.5" fill="#9FB2D4">
+      <g><rect x="24" y="50" width="70" height="24" rx="7" fill="#0C1526" stroke="#274067"/><text x="38" y="66">app/</text></g>
+      <g><rect x="104" y="50" width="120" height="24" rx="7" fill="#0C1526" stroke="#274067"/><text x="118" y="66">components/</text></g>
+      <g><rect x="234" y="50" width="76" height="24" rx="7" fill="#0C1526" stroke="#274067"/><text x="248" y="66">hooks/</text></g>
+      <g><rect x="320" y="50" width="58" height="24" rx="7" fill="#0C1526" stroke="#274067"/><text x="334" y="66">lib/</text></g>
+      <g><rect x="388" y="50" width="88" height="24" rx="7" fill="#0C1526" stroke="#274067"/><text x="402" y="66">plugins/</text></g>
+      <g><rect x="486" y="50" width="66" height="24" rx="7" fill="#0C1526" stroke="#274067"/><text x="500" y="66">i18n/</text></g>
+      <g><rect x="562" y="50" width="70" height="24" rx="7" fill="#0C1526" stroke="#274067"/><text x="576" y="66">types/</text></g>
+      <text x="1064" y="66" text-anchor="end" fill="#5E7096">one UI · one i18n</text>
+    </g>
+  </g>
+
+  <!-- fan-out connectors from bar to shells -->
+  <g stroke="#2C4372" stroke-width="1.5" fill="none">
+    <path d="M286 140 V158 a8 8 0 0 1 -8 8 H240 a8 8 0 0 0 -8 8 V186"/>
+    <path d="M600 140 V186"/>
+    <path d="M914 140 V158 a8 8 0 0 0 8 8 H960 a8 8 0 0 1 8 8 V186"/>
+  </g>
+  <g fill="#2C4372"><path d="M232 192 l-4 -8 h8 z"/><path d="M600 192 l-4 -8 h8 z"/><path d="M968 192 l-4 -8 h8 z"/></g>
+
+  <!-- ============ three shells ============ -->
+  <!-- browser -->
+  <g transform="translate(82 192)">
+    <rect width="300" height="66" rx="13" fill="#0E1729" stroke="#22314F"/>
+    <g transform="translate(20 22)" stroke="#37E0F5" stroke-width="1.7" fill="none">
+      <circle cx="11" cy="11" r="11"/>
+      <path d="M0 11 H22 M11 0 a17 17 0 0 1 0 22 M11 0 a17 17 0 0 0 0 22" stroke-width="1.3"/>
+    </g>
+    <text x="56" y="30" font-size="15.5" font-weight="700" fill="#EAF1FD">Browser dev</text>
+    <text x="56" y="49" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#7C8FB2">pnpm dev · :3000</text>
+  </g>
+  <!-- desktop -->
+  <g transform="translate(450 192)">
+    <rect width="300" height="66" rx="13" fill="#0E1729" stroke="#2C4372"/>
+    <g transform="translate(20 20)" stroke="#5B9BFF" stroke-width="1.7" fill="none">
+      <rect x="0" y="2" width="24" height="17" rx="2.5"/>
+      <path d="M6 24 H18" stroke-width="1.5"/>
+    </g>
+    <text x="56" y="30" font-size="15.5" font-weight="700" fill="#EAF1FD">Tauri 2 desktop</text>
+    <text x="56" y="49" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#7C8FB2">src-tauri/ · Rust</text>
+  </g>
+  <!-- mobile -->
+  <g transform="translate(818 192)">
+    <rect width="300" height="66" rx="13" fill="#0E1729" stroke="#22314F"/>
+    <g transform="translate(22 18)" stroke="#5B9BFF" stroke-width="1.7" fill="none">
+      <rect x="0" y="0" width="17" height="28" rx="3.5"/>
+      <circle cx="8.5" cy="23" r="1.5" fill="#5B9BFF" stroke="none"/>
+    </g>
+    <text x="56" y="30" font-size="15.5" font-weight="700" fill="#EAF1FD">Capacitor 8 mobile</text>
+    <text x="56" y="49" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#7C8FB2">mobile/ · wraps ../out</text>
+  </g>
+
+  <!-- desktop -> rust core -->
+  <path d="M600 258 V286" stroke="#2C4372" stroke-width="1.5" fill="none"/>
+  <path d="M600 292 l-4 -8 h8 z" fill="#2C4372"/>
+
+  <!-- mobile -> core (LAN/WAN, dashed) -->
+  <path d="M900 258 V276 a10 10 0 0 1 -10 10 H772" stroke="#2A5FA0" stroke-width="1.4" fill="none" stroke-dasharray="3 4"/>
+  <path d="M766 286 l8 -4 v8 z" fill="#2A5FA0"/>
+  <text x="812" y="280" font-size="11" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#5E82B4">LAN / WAN</text>
+
+  <!-- ============ Rust core ============ -->
+  <g transform="translate(150 292)">
+    <rect width="616" height="82" rx="14" fill="#0D1830" stroke="#2C4372"/>
+    <circle cx="600" cy="16" r="2.5" fill="#37E0F5"/>
+    <text x="22" y="30" font-size="15.5" font-weight="700" fill="#EAF1FD">Rust core <tspan fill="#6E82A6" font-weight="400" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="12.5">src-tauri/</tspan></text>
+    <g font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="11.5" fill="#9FB2D4">
+      <g><rect x="22" y="44" width="86" height="22" rx="6" fill="#0A1224" stroke="#243b60"/><text x="34" y="59">axum HTTP</text></g>
+      <g><rect x="116" y="44" width="86" height="22" rx="6" fill="#0A1224" stroke="#243b60"/><text x="128" y="59">scheduler</text></g>
+      <g><rect x="210" y="44" width="118" height="22" rx="6" fill="#0A1224" stroke="#243b60"/><text x="222" y="59">vector store</text></g>
+      <g><rect x="336" y="44" width="102" height="22" rx="6" fill="#0A1224" stroke="#243b60"/><text x="348" y="59">automation</text></g>
+      <g><rect x="446" y="44" width="58" height="22" rx="6" fill="#0A1224" stroke="#243b60"/><text x="458" y="59">OCR</text></g>
+      <g><rect x="512" y="44" width="92" height="22" rx="6" fill="#0A1224" stroke="#243b60"/><text x="524" y="59">MCP server</text></g>
+    </g>
+  </g>
+
+  <!-- core -> sidecar -->
+  <path d="M458 374 V400" stroke="#2C4372" stroke-width="1.5" fill="none"/>
+  <path d="M458 406 l-4 -8 h8 z" fill="#2C4372"/>
+
+  <!-- ============ Node sidecar ============ -->
+  <g transform="translate(150 406)">
+    <rect width="616" height="62" rx="14" fill="#0E1729" stroke="#22314F"/>
+    <g transform="translate(22 20)" stroke="#33E1F2" stroke-width="1.7" fill="none">
+      <path d="M11 0 l11 6 v11 l-11 6 -11 -6 v-11 z"/>
+      <path d="M11 12 l11 -6 M11 12 v11 M11 12 l-11 -6" stroke-width="1.2"/>
+    </g>
+    <text x="58" y="28" font-size="15.5" font-weight="700" fill="#EAF1FD">Node sidecar <tspan fill="#6E82A6" font-weight="400" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="12.5">sidecar/</tspan></text>
+    <text x="58" y="48" font-size="12" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#7C8FB2">Claude Agent SDK · A2UI MCP · reads keyring token</text>
+  </g>
+
+  <!-- ============ services column ============ -->
+  <g transform="translate(818 292)">
+    <text x="0" y="8" font-size="11.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" letter-spacing="1.5" fill="#5E7096">services/ — STANDALONE DEPLOYS</text>
+    <g transform="translate(0 20)">
+      <rect width="326" height="72" rx="13" fill="#0E1729" stroke="#22314F"/>
+      <circle cx="14" cy="24" r="4" fill="none" stroke="#33E1F2" stroke-width="1.6"/>
+      <path d="M14 20 v-6 M14 28 v6 M10 24 h-6 M18 24 h6" stroke="#33E1F2" stroke-width="1.4"/>
+      <text x="36" y="30" font-size="14" font-weight="700" fill="#EAF1FD">signaling-server</text>
+      <text x="36" y="49" font-size="11.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#7C8FB2">WebRTC rendezvous · axum</text>
+    </g>
+    <g transform="translate(0 104)">
+      <rect width="326" height="72" rx="13" fill="#0E1729" stroke="#22314F"/>
+      <path d="M8 30 a8 8 0 0 1 4 -15 a9 9 0 0 1 17 3 a6 6 0 0 1 -1 12 z" fill="none" stroke="#33E1F2" stroke-width="1.5"/>
+      <text x="36" y="30" font-size="14" font-weight="700" fill="#EAF1FD">share-server</text>
+      <text x="36" y="49" font-size="11.5" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" fill="#7C8FB2">Cloudflare Worker + viewer</text>
+    </g>
+  </g>
+</svg>

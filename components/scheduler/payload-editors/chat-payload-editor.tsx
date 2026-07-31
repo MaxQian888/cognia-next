@@ -17,6 +17,7 @@
 
 import { useEffect, useState } from "react"
 import { useTranslations } from "next-intl"
+import { useShallow } from "zustand/react/shallow"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -34,7 +35,7 @@ import { listSkills } from "@/lib/db/skills"
 import { listTeams } from "@/lib/db/teams"
 import { BUILT_IN_AGENT_MODES } from "@/types/agent/agent-mode"
 import { useCustomModeStore } from "@/stores/agent/custom-mode-store"
-import type { Character, Skill, Team, SendOptions } from "@/lib/claude/types"
+import type { Character, Skill, Team, SendOptions } from "@cognia/agent-config-types"
 import type { ScheduledTaskType } from "@/types/scheduler"
 import { cn } from "@/lib/utils"
 import { ToolPicker } from "./tool-picker"
@@ -52,6 +53,7 @@ const EFFORTS: NonNullable<SendOptions["effort"]>[] = ["low", "medium", "high", 
 
 export interface ChatPayloadEditorProps {
   taskType: ScheduledTaskType
+  taskName?: string
   draft: ChatLikeDraft
   onDraftChange: (next: ChatLikeDraft) => void
   errors?: Record<string, string>
@@ -66,6 +68,7 @@ export interface ChatPayloadEditorProps {
 
 export function ChatPayloadEditor({
   taskType,
+  taskName,
   draft,
   onDraftChange,
   errors,
@@ -79,7 +82,7 @@ export function ChatPayloadEditor({
   const [characters, setCharacters] = useState<Character[] | null>(charactersForTesting ?? null)
   const [skills, setSkills] = useState<Skill[] | null>(skillsForTesting ?? null)
   const [teams, setTeams] = useState<Team[] | null>(teamsForTesting ?? null)
-  const customModes = useCustomModeStore((s) => Object.values(s.customModes))
+  const customModes = useCustomModeStore(useShallow((s) => Object.values(s.customModes)))
 
   useEffect(() => {
     if (charactersForTesting) return
@@ -359,7 +362,9 @@ export function ChatPayloadEditor({
           <Input
             value={draft.sessionTitle ?? ""}
             onChange={(e) => update("sessionTitle", e.target.value || undefined)}
-            placeholder={t("payload.sessionTitlePlaceholder")}
+            placeholder={t("payload.sessionTitlePlaceholder", {
+              name: taskName?.trim() || t("taskName"),
+            })}
             disabled={disabled}
             className="h-10"
             data-testid={`${testId}-session-title-input`}

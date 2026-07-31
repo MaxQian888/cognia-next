@@ -12,10 +12,11 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { toast } from "sonner"
 import { deleteSkill, listSkillsByIds, setSkillStatus, updateSkill } from "@/lib/db/skills"
 import { useSkillsStore } from "@/stores/skills"
+import { useChatStore } from "@/stores/chat"
 import { exportSkillsToDirWithFeedback } from "@/lib/skills/export-toast"
 import { tagsAcrossSkills, unionTag, withoutTag } from "@/lib/skills/batch-tags"
 import { MOBILE_DURATION, MOBILE_EASE } from "@/lib/ui/motion"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 /**
  * Floating action bar shown when the user has selected one or more skills.
@@ -96,14 +97,18 @@ export function SkillBatchActionsBar() {
 
   const handleDelete = async () => {
     let failed = 0
+    const deleted: string[] = []
     for (const id of ids) {
       try {
         await deleteSkill(id)
+        deleted.push(id)
       } catch (err) {
         failed += 1
         loggers.skills.warn("batch delete skipped", { id, error: String(err) })
       }
     }
+    // Drop any deleted skills still attached ad-hoc in the composer.
+    if (deleted.length > 0) useChatStore.getState().removeEphemeralSkillIds(deleted)
     if (failed > 0) {
       toast.warning(tToasts("deletedPartial", { ok: count - failed, total: count }))
       loggers.skills.info("batch delete partial", { ok: count - failed, total: count, failed })

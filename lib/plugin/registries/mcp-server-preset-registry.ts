@@ -20,9 +20,22 @@
 
 import type { PluginMcpServerPresetDef } from "@/types/plugin/plugin-mcp-preset"
 import { createOverlayRegistry } from "./createOverlayRegistry"
+import { reportRegistryConflict } from "@/lib/plugin/contracts/conflict-reporter"
 
 const registry = createOverlayRegistry<PluginMcpServerPresetDef>({
   name: "mcp-server-preset",
+  // W4.2: without a conflict policy the default last-wins let plugin B hijack
+  // plugin A's mcp-server-preset id (and unregistering B then dropped A's entry). Mirror
+  // the pet registries: the incumbent plugin wins, the rejection is reported.
+  conflictPolicy: "first-wins-cross-plugin",
+  onConflict: (info) => {
+    reportRegistryConflict({
+      pluginId: info.incomingPluginId ?? "unknown",
+      attemptedId: info.key,
+      registry: "mcp-server-preset",
+      winnerPluginId: info.existingPluginId,
+    })
+  },
 })
 
 /** Register a plugin-contributed MCP server preset. */

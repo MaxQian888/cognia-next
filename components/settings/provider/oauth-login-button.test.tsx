@@ -11,7 +11,7 @@ jest.mock("next-intl", () => ({
 }))
 
 // Mock OAuth utilities
-jest.mock("@/lib/ai/providers/oauth", () => ({
+jest.mock("@cognia/provider-core/providers/oauth", () => ({
   buildOAuthUrl: jest.fn(),
   exchangeCodeForApiKey: jest.fn(),
   getOAuthState: jest.fn(),
@@ -55,7 +55,7 @@ jest.mock("@/stores", () => ({
 }))
 
 // Mock providers
-jest.mock("@/types/provider", () => ({
+jest.mock("@cognia/provider-types", () => ({
   PROVIDERS: {
     openrouter: {
       id: "openrouter",

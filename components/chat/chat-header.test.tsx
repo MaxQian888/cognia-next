@@ -9,14 +9,23 @@ jest.mock("@tauri-apps/plugin-dialog", () => ({
   open: jest.fn(async () => null),
 }))
 
-// hasApiKey()/hasOauthBearer() are Tauri IPC calls — also conditional on
-// isTauri(). Controllable so the No-API-key badge cases can flip them.
-// jest.fn defined INSIDE the factory: modules call isTauri() at init time,
-// so an outer `const mock...` hits the TDZ before initialization.
+// The header reads credential status (api key OR subscription bearer) + the
+// active subscription tier through `useCredentialStatus`. Mock it so the
+// No-API-key / tier badge cases are driven directly; the hook's own probe
+// logic is covered in use-credential-status.test.ts.
+jest.mock("@/hooks/chat/use-credential-status", () => ({
+  useCredentialStatus: jest.fn(() => ({ keyOk: true, plan: null })),
+}))
+
+// closeSession is a Tauri IPC call the header imports for its close button.
 jest.mock("@/lib/claude/ipc", () => ({
-  hasApiKey: jest.fn(async () => true),
-  hasOauthBearer: jest.fn(async () => false),
   closeSession: jest.fn(async () => undefined),
+}))
+
+// The clear-conversation trigger pulls in the chat store + data adapter; the
+// header's logic tests don't need its internals (it has its own suite).
+jest.mock("@/components/chat/dialogs/clear-conversation-trigger", () => ({
+  ClearConversationTrigger: () => null,
 }))
 
 // isTauri() gates the key probe (and the working-dir picker). Default false
@@ -45,18 +54,32 @@ jest.mock("@/components/chat/session-cost-badge-live", () => ({
   SessionCostBadgeLive: () => null,
 }))
 
+// The header now hosts the conversation-list (ChannelList) collapse toggle.
+// Mock the ui-store so the collapsed state + toggle are driven directly (the
+// header's children don't touch this store, so a minimal mock is safe). Read
+// lazily inside the selector so the module init order stays TDZ-safe.
+let sidebarCollapsed = false
+const toggleSidebar = jest.fn(() => {
+  sidebarCollapsed = !sidebarCollapsed
+})
+jest.mock("@/stores/ui", () => ({
+  useUIStore: <T,>(selector: (s: Record<string, unknown>) => T): T =>
+    selector({ sidebarCollapsed, toggleSidebar }),
+}))
+
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { ChatHeader } from "./chat-header"
-import { hasApiKey, hasOauthBearer } from "@/lib/claude/ipc"
+import { useArtifactDockLayoutStore } from "@/stores/artifact/artifact-dock-layout-store"
+import { useCredentialStatus } from "@/hooks/chat/use-credential-status"
 import { isTauri } from "@/lib/tauri"
 
-const mockHasApiKey = hasApiKey as unknown as jest.Mock
-const mockHasOauthBearer = hasOauthBearer as unknown as jest.Mock
+const mockCredentialStatus = useCredentialStatus as unknown as jest.Mock
 const mockIsTauri = isTauri as unknown as jest.Mock
 import { DataAdapterProvider } from "@/lib/data-hooks/context"
+import { CHROME_BUDGET, countControls } from "@/lib/ui/chrome-budget"
 import type { DataAdapter } from "@/lib/data-hooks/types"
-import type { ChatSession, Character, SystemPromptPreset, Skill } from "@/lib/claude/types"
+import type { ChatSession, Character, SystemPromptPreset, Skill } from "@cognia/agent-config-types"
 
 // Stable empty references — chat-header has `useMemo(() => presetsRaw ?? [],
 // [presetsRaw])` and similar memoised derivations that infinite-loop if the
@@ -111,14 +134,127 @@ const mkCharacter = (overrides: Partial<Character> = {}): Character => ({
 describe("ChatHeader", () => {
   beforeEach(() => {
     mockIsTauri.mockReturnValue(false)
-    mockHasApiKey.mockResolvedValue(true)
-    mockHasOauthBearer.mockResolvedValue(false)
+    mockCredentialStatus.mockReturnValue({ keyOk: true, plan: null })
+    sidebarCollapsed = false
+    toggleSidebar.mockClear()
+  })
+
+  // `sidebarCollapsed` used to have four entry points on one screen — this
+  // header, two inside the title bar's layout controls, and the status bar.
+  // The header is not one of them any more; Views / the native View menu / ⌘B
+  // are.
+  it("no longer carries a conversation-list toggle", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <ChatHeader session={mkSession()} />
+      </Wrapper>
+    )
+    expect(screen.queryByTestId("chat-sidebar-toggle")).not.toBeInTheDocument()
+    expect(toggleSidebar).not.toHaveBeenCalled()
+  })
+
+  it("keeps the right artifacts-dock toggle", () => {
+    act(() => useArtifactDockLayoutStore.setState({ dockCollapsed: true }))
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <ChatHeader session={mkSession()} />
+      </Wrapper>
+    )
+    const toggle = screen.getByTestId("chat-artifact-dock-toggle")
+    expect(toggle).toHaveAttribute("aria-label", "Show artifacts panel")
+    expect(toggle).toHaveAttribute("aria-pressed", "false")
+  })
+
+  it("clicking the artifacts-dock toggle drives the dock collapse action", () => {
+    act(() => useArtifactDockLayoutStore.setState({ dockCollapsed: true }))
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <ChatHeader session={mkSession()} />
+      </Wrapper>
+    )
+    fireEvent.click(screen.getByTestId("chat-artifact-dock-toggle"))
+    expect(useArtifactDockLayoutStore.getState().dockCollapsed).toBe(false)
+  })
+
+  it("shows a compact exit action only for the secondary split pane", () => {
+    const onExitSplit = jest.fn()
+    const Wrapper = withAdapter(makeAdapter())
+    const { rerender } = render(
+      <Wrapper>
+        <ChatHeader session={mkSession()} />
+      </Wrapper>
+    )
+    expect(screen.queryByRole("button", { name: /exit split view/i })).not.toBeInTheDocument()
+
+    rerender(
+      <Wrapper>
+        <ChatHeader session={mkSession()} onExitSplit={onExitSplit} />
+      </Wrapper>
+    )
+    fireEvent.click(screen.getByRole("button", { name: /exit split view/i }))
+    expect(onExitSplit).toHaveBeenCalledTimes(1)
+  })
+
+  it("shows a compact split action when another conversation is open", () => {
+    const onSplitView = jest.fn()
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <ChatHeader session={mkSession()} onSplitView={onSplitView} />
+      </Wrapper>
+    )
+    fireEvent.click(screen.getByRole("button", { name: /^split view$/i }))
+    expect(onSplitView).toHaveBeenCalledTimes(1)
+  })
+
+  it("shows an unread dot + hint when an artifact arrived while the dock is dismissed", () => {
+    act(() => useArtifactDockLayoutStore.setState({ dockCollapsed: true, unreadArtifact: true }))
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <ChatHeader session={mkSession()} />
+      </Wrapper>
+    )
+    expect(screen.getByTestId("chat-artifact-dock-unread")).toBeInTheDocument()
+    expect(screen.getByTestId("chat-artifact-dock-toggle")).toHaveAttribute(
+      "aria-label",
+      "New artifacts — open panel"
+    )
+  })
+
+  it("hides the unread dot once the dock is open", () => {
+    act(() => useArtifactDockLayoutStore.setState({ dockCollapsed: false, unreadArtifact: true }))
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <ChatHeader session={mkSession()} />
+      </Wrapper>
+    )
+    expect(screen.queryByTestId("chat-artifact-dock-unread")).not.toBeInTheDocument()
+  })
+
+  // Three buttons left the header for surfaces that already owned their
+  // concern. Their behaviour is covered where they landed:
+  //   browser opener  → title-bar-layout-controls.test.tsx (Views menu)
+  //   agent-flow      → session-settings-sheet.test.tsx (already had a copy)
+  //   insights        → session-settings-sheet.test.tsx (new row)
+  it("no longer carries the browser, agent-flow or insights buttons", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <ChatHeader session={mkSession()} />
+      </Wrapper>
+    )
+    expect(screen.queryByTestId("chat-browser-dock-open")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("agent-flow-display-toggle")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /insights/i })).not.toBeInTheDocument()
   })
 
   it("shows the No-API-key badge when neither api key nor subscription bearer exists", async () => {
-    mockIsTauri.mockReturnValue(true)
-    mockHasApiKey.mockResolvedValue(false)
-    mockHasOauthBearer.mockResolvedValue(false)
+    mockCredentialStatus.mockReturnValue({ keyOk: false, plan: null })
     const Wrapper = withAdapter(makeAdapter())
     render(
       <Wrapper>
@@ -128,24 +264,23 @@ describe("ChatHeader", () => {
     expect(await screen.findByText(/no api key/i)).toBeInTheDocument()
   })
 
-  it("hides the No-API-key badge when a subscription OAuth bearer is active", async () => {
+  it("hides the No-API-key badge when a subscription OAuth bearer is active", () => {
     // Subscription-reuse users have no ANTHROPIC_API_KEY — auth flows through
     // the OAuth bearer pushed by `subscription_set_active`. The badge must
     // treat that as configured.
-    mockIsTauri.mockReturnValue(true)
-    mockHasApiKey.mockResolvedValue(false)
-    mockHasOauthBearer.mockResolvedValue(true)
+    mockCredentialStatus.mockReturnValue({ keyOk: true, plan: null })
     const Wrapper = withAdapter(makeAdapter())
     render(
       <Wrapper>
         <ChatHeader session={mkSession()} />
       </Wrapper>
     )
-    // Let the key probe resolve, then assert the badge stayed hidden.
-    await waitFor(() => expect(mockHasOauthBearer).toHaveBeenCalled())
-    await act(async () => {})
     expect(screen.queryByText(/no api key/i)).not.toBeInTheDocument()
   })
+
+  // The subscription tier badge and the skills badge moved into
+  // SessionSettingsSheet (control-surface consolidation); their coverage now
+  // lives in session-settings-sheet.test.tsx.
 
   it("renders the session title (no character)", () => {
     const Wrapper = withAdapter(makeAdapter())
@@ -157,7 +292,9 @@ describe("ChatHeader", () => {
     expect(screen.getByText("My Chat")).toBeInTheDocument()
   })
 
-  it("renders the character avatar + name when session.characterId resolves", () => {
+  it("keeps the character on one line, as the title's tooltip", () => {
+    // The name + description used to be a permanent second row. The avatar
+    // already signals which character is bound; the words are on hover now.
     const c = mkCharacter({ id: "c-zed", name: "Zed", description: "the helper" })
     const adapter = makeAdapter({ useCharacter: () => c })
     render(
@@ -165,8 +302,32 @@ describe("ChatHeader", () => {
         <ChatHeader session={mkSession({ characterId: "c-zed", title: "T" })} />
       </DataAdapterProvider>
     )
-    expect(screen.getByText("T")).toBeInTheDocument()
-    expect(screen.getByText(/Zed/)).toBeInTheDocument()
+    const title = screen.getByText("T")
+    expect(title).toBeInTheDocument()
+    expect(title).toHaveAttribute("title", "T — Zed · the helper")
+    // No second text row.
+    expect(screen.queryByText(/the helper/)).not.toBeInTheDocument()
+  })
+
+  it("falls back to the character name alone when it has no description", () => {
+    const c = mkCharacter({ id: "c-zed", name: "Zed", description: undefined })
+    const adapter = makeAdapter({ useCharacter: () => c })
+    render(
+      <DataAdapterProvider adapter={adapter}>
+        <ChatHeader session={mkSession({ characterId: "c-zed", title: "T" })} />
+      </DataAdapterProvider>
+    )
+    expect(screen.getByText("T")).toHaveAttribute("title", "T — Zed")
+  })
+
+  it("uses the bare session title when no character is bound", () => {
+    const Wrapper = withAdapter(makeAdapter())
+    render(
+      <Wrapper>
+        <ChatHeader session={mkSession({ title: "T" })} />
+      </Wrapper>
+    )
+    expect(screen.getByText("T")).toHaveAttribute("title", "T")
   })
 
   it("Save button calls adapter.updateSession with form values", async () => {
@@ -191,28 +352,6 @@ describe("ChatHeader", () => {
       throw new Error("updateSession was not called")
     }
     expect(firstCall[0]).toBe("ses_42")
-  })
-
-  it("renders the skills badge when character has skills + adapter returns them", () => {
-    const c = mkCharacter({ id: "c1", skillIds: ["s1"] })
-    const skill: Skill = {
-      id: "s1",
-      name: "skill-x",
-      content: "...",
-      createdAt: 0,
-      updatedAt: 0,
-    }
-    const adapter = makeAdapter({
-      useCharacter: () => c,
-      useSkillsByIds: () => [skill],
-    })
-    render(
-      <DataAdapterProvider adapter={adapter}>
-        <ChatHeader session={mkSession({ characterId: "c1" })} />
-      </DataAdapterProvider>
-    )
-    // The badge label has the form "Skills 1/1" via i18n; just confirm a 1 is shown.
-    expect(screen.getByLabelText(/skills/i)).toBeInTheDocument()
   })
 
   it("typed working dir survives a background session refresh (touchSession bumping updatedAt while popover open)", async () => {
@@ -278,5 +417,19 @@ describe("ChatHeader", () => {
     await waitFor(() => {
       expect(document.getElementById("session-preset")).not.toBeNull()
     })
+  })
+
+  it("stays within the chat-header chrome control budget", () => {
+    // Plain direct session, no character, credentials fine — the header a user
+    // sees for most of the day. Ratchet, not a target (lib/ui/chrome-budget.ts).
+    const Wrapper = withAdapter(makeAdapter())
+    const { container } = render(
+      <Wrapper>
+        <ChatHeader session={mkSession()} />
+      </Wrapper>
+    )
+    expect(countControls(container.querySelector("header"))).toBeLessThanOrEqual(
+      CHROME_BUDGET.chatHeader
+    )
   })
 })

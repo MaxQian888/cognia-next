@@ -14,7 +14,7 @@ import type { SlashContext } from "../builtin"
 import { useSettingsStore } from "@/stores/settings"
 import { getSession } from "@/lib/db/sessions"
 import { resolveMemoryConfig } from "@/types/memory/memory"
-import { hasNoLeakingPii } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii } from "@cognia/redact"
 
 export interface RememberCommandResult {
   system?: string

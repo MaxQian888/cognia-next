@@ -19,4 +19,4 @@ export {
   type ProviderReadinessState,
   type ProviderSetupChecklist,
   type ProviderVerificationStatus,
-} from "@/lib/ai/providers/readiness"
+} from "@cognia/provider-core/providers/readiness"

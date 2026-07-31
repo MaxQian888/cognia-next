@@ -1,6 +1,7 @@
 /**
  * @jest-environment jsdom
  */
+import { createRef } from "react"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
@@ -44,5 +45,11 @@ describe("<DiscoverSearch />", () => {
     render(<DiscoverSearch value="hello" onChange={onChange} />)
     await user.click(screen.getByTestId("discover-search-clear"))
     expect(onChange).toHaveBeenCalledWith("")
+  })
+
+  it("forwards inputRef to the underlying input (for the '/' hotkey)", () => {
+    const ref = createRef<HTMLInputElement>()
+    render(<DiscoverSearch value="" onChange={jest.fn()} inputRef={ref} />)
+    expect(ref.current).toBe(screen.getByTestId("discover-search-input"))
   })
 })

@@ -1,5 +1,5 @@
 import { isValidSkill, validateSkill } from "./validate"
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 
 describe("validateSkill", () => {
   it("flags an empty name", () => {

@@ -1,4 +1,4 @@
-import { buildLucideSvg, __STATE_NODES_FOR_TESTING } from "./icon-builder"
+import { buildLucideSvg, drawBadge, __STATE_NODES_FOR_TESTING } from "./icon-builder"
 
 describe("buildLucideSvg", () => {
   const stubNode: Array<[string, Record<string, string | number>]> = [
@@ -54,6 +54,55 @@ describe("buildLucideSvg", () => {
     const svg = buildLucideSvg(stubNode, "#000")
     expect(svg).toMatch(/<path [^>]*\/>/)
     expect(svg).toMatch(/<circle [^>]*\/>/)
+  })
+})
+
+describe("drawBadge", () => {
+  // Minimal recording stand-in for CanvasRenderingContext2D — drawBadge only
+  // touches the listed members, and running in the node env means no real
+  // canvas exists anyway.
+  function stubCtx() {
+    const calls: Record<string, unknown[][]> = {}
+    const record =
+      (name: string) =>
+      (...args: unknown[]) => {
+        ;(calls[name] ??= []).push(args)
+      }
+    const ctx = {
+      save: record("save"),
+      restore: record("restore"),
+      beginPath: record("beginPath"),
+      roundRect: record("roundRect"),
+      fill: record("fill"),
+      fillText: record("fillText"),
+      fillStyle: "",
+      textAlign: "",
+      textBaseline: "",
+      font: "",
+    }
+    return { ctx: ctx as unknown as CanvasRenderingContext2D, calls }
+  }
+
+  it("draws a pill and the badge text, stripping the % suffix", () => {
+    const { ctx, calls } = stubCtx()
+    drawBadge(ctx, 32, { text: "42%", color: "#f59e0b" })
+    expect(calls.roundRect).toHaveLength(1)
+    expect(calls.fill).toHaveLength(1)
+    expect(calls.fillText?.[0]?.[0]).toBe("42")
+    expect(calls.restore).toHaveLength(1)
+  })
+
+  it("clamps the rendered text to 3 glyphs for tray-icon legibility", () => {
+    const { ctx, calls } = stubCtx()
+    drawBadge(ctx, 32, { text: "$8.505", color: "#10b981" })
+    expect(calls.fillText?.[0]?.[0]).toBe("$8.")
+  })
+
+  it("no-ops when the text strips to nothing", () => {
+    const { ctx, calls } = stubCtx()
+    drawBadge(ctx, 32, { text: "%", color: "#10b981" })
+    expect(calls.roundRect).toBeUndefined()
+    expect(calls.fillText).toBeUndefined()
   })
 })
 

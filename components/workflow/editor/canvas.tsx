@@ -18,11 +18,14 @@ import { useShallow } from "zustand/react/shallow"
 import { toast } from "sonner"
 import { useTranslations } from "next-intl"
 import type { VisualWorkflow, WorkflowNodeKind } from "@/types/workflow/visual"
-import { replaceWorkflow } from "@/lib/db/workflows"
+import { createWorkflow, getWorkflow, regenerateNodeIds } from "@/lib/db/workflows"
+import { reactFlowToWorkflow } from "@/lib/workflow/editor/react-flow-converter"
+import { planExtraction } from "@/lib/workflow/editor/extract-subworkflow"
 import { autoLayout, applyAutoLayoutPositions } from "@/lib/workflow/editor/auto-layout"
 import { createEditorStore, type EditorStore, type EditorState } from "@/lib/workflow/editor/store"
 import { persistEditorWorkflow } from "@/lib/workflow/editor/persist-workflow"
 import { downloadWorkflowJson, parseWorkflowImport } from "@/lib/workflow/editor/workflow-json"
+import { defaultTypeVersionFor, outputHandlesFor } from "@/lib/workflow/editor/node-handles"
 import { runWorkflow } from "@/lib/workflow/runtime/orchestrator"
 import { runSingleNode } from "@/lib/workflow/runtime/run-single-node"
 import { useRunStatusBridge } from "@/lib/workflow/runtime/run-status-bridge"
@@ -33,6 +36,7 @@ import {
   serializeClipboard,
 } from "@/lib/workflow/editor/clipboard"
 import { EditorStoreProvider } from "@/lib/workflow/editor/store-context"
+import { paneCenterScreenPoint } from "@/lib/workflow/editor/pane-center"
 import { useEffectivePerfTier } from "@/hooks/workflow/use-effective-perf-tier"
 import { CanvasContextMenu, type ContextTarget } from "./canvas-context-menu"
 import { SpotlightSearch } from "./spotlight-search"
@@ -52,8 +56,24 @@ import { RightSidebar } from "./right-sidebar"
 import { CommandPalette } from "./command-palette"
 import { ShortcutsCheatsheet } from "./shortcuts-cheatsheet"
 import * as ResizablePrimitive from "react-resizable-panels"
+import type { PanelImperativeHandle } from "react-resizable-panels"
 import { GripVerticalIcon } from "lucide-react"
+import { magnetAsPercent, snapPanelSize } from "@/lib/ui/panel-snap"
+import { WORKBENCH_RAIL_WIDTH_PX } from "@/types/shell/workbench-rail"
+import { useWorkbenchRailPersistent } from "@/components/shell/use-workbench-rail-layout"
 import type { NodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
+import { useIsMobile } from "@/hooks/ui/use-mobile"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
+
+/** The right rail's shipped width and floor, as percentages of the editor. */
+const WORKFLOW_RIGHT_DEFAULT_PERCENT = 28
+const WORKFLOW_RIGHT_MIN_PERCENT = 20
 
 interface CanvasInnerProps {
   store: EditorStore
@@ -64,6 +84,11 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
   const useStore = store
   const t = useTranslations("workflows.canvasToast")
   const tValidation = useTranslations("workflows.validation")
+  const tDiag = useTranslations("workflows.diagnostics")
+  const tToolbar = useTranslations("workflows.toolbar")
+  const tWorkbench = useTranslations("contextWorkbench")
+  const isMobile = useIsMobile()
+  const [mobileToolsOpen, setMobileToolsOpen] = useState(false)
 
   // (A8) Chrome slice — everything the editor *frame* needs that does NOT
   // change on every drag frame. Crucially this NO LONGER subscribes to
@@ -81,9 +106,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     nodeCount,
     setSelectedNodes,
     setName,
-    markSaved,
     toWorkflow,
-    revalidateAll,
   } = useStore(
     useShallow((s: EditorState) => ({
       dirty: s.dirty,
@@ -93,9 +116,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
       nodeCount: s.nodes.length,
       setSelectedNodes: s.setSelectedNodes,
       setName: s.setName,
-      markSaved: s.markSaved,
       toWorkflow: s.toWorkflow,
-      revalidateAll: s.revalidateAll,
     }))
   )
 
@@ -130,6 +151,89 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
 
   const [saving, setSaving] = useState(false)
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null)
+
+  // Collapsible side panels (palette / right sidebar). Imperative collapse —
+  // never a key-remount, which would tear down React Flow. `onResize` keeps
+  // the flags in sync when the user drags a divider past the min size (the
+  // panels snap collapsed) so the toolbar toggles always reflect reality.
+  const leftPanelRef = useRef<PanelImperativeHandle | null>(null)
+  const rightPanelRef = useRef<PanelImperativeHandle | null>(null)
+  const rightPanelElementRef = useRef<HTMLDivElement | null>(null)
+  const latestRightPercentRef = useRef(WORKFLOW_RIGHT_DEFAULT_PERCENT)
+  // The width to come back to. Distinct from `latestRightPercentRef`, which
+  // follows the pointer and reads back the rail's own width once the panel has
+  // collapsed — reopening at that is reopening at nothing.
+  const lastExpandedRightPercentRef = useRef(WORKFLOW_RIGHT_DEFAULT_PERCENT)
+  const rightDragStartCollapsedRef = useRef(false)
+  const [leftCollapsed, setLeftCollapsed] = useState(false)
+  const [rightCollapsed, setRightCollapsed] = useState(false)
+  const railPersistent = useWorkbenchRailPersistent()
+  // Collapsed means "shrunk to the activity rail" unless the user switched the
+  // persistent rail off — the same contract as the chat dock and Canvas.
+  const rightCollapsedSize = railPersistent ? `${WORKBENCH_RAIL_WIDTH_PX}px` : "0%"
+  const handleLeftPanelResize = useCallback(
+    (size: { asPercentage: number }) => setLeftCollapsed(size.asPercentage === 0),
+    []
+  )
+  // Asked of the panel rather than compared against 0: a collapse now settles
+  // at the activity rail's width, not at nothing, so the old `=== 0` test went
+  // permanently false and the toolbar toggle lost track of the real state.
+  const handleRightPanelResize = useCallback((size: { asPercentage: number }) => {
+    latestRightPercentRef.current = size.asPercentage
+    const collapsed = rightPanelRef.current?.isCollapsed() ?? false
+    if (!collapsed && size.asPercentage >= WORKFLOW_RIGHT_MIN_PERCENT) {
+      lastExpandedRightPercentRef.current = size.asPercentage
+    }
+    setRightCollapsed(collapsed)
+  }, [])
+  const toggleLeftPanel = useCallback(() => {
+    const panel = leftPanelRef.current
+    if (!panel) return
+    if (panel.isCollapsed()) panel.expand()
+    else panel.collapse()
+  }, [])
+  const toggleRightPanel = useCallback(() => {
+    if (isMobile) {
+      setMobileToolsOpen((open) => !open)
+      return
+    }
+    const panel = rightPanelRef.current
+    if (!panel) return
+    if (panel.isCollapsed()) panel.expand()
+    else panel.collapse()
+  }, [isMobile])
+  const collapseRightWorkbench = useCallback(() => {
+    if (isMobile) setMobileToolsOpen(false)
+    else rightPanelRef.current?.collapse()
+  }, [isMobile])
+  const revealRightWorkbench = useCallback(() => {
+    if (isMobile) setMobileToolsOpen(true)
+    else rightPanelRef.current?.expand()
+  }, [isMobile])
+
+  /** Release-snap for the right rail — see `lib/ui/panel-snap.ts`. */
+  const handleRightResizeRelease = useCallback(() => {
+    const panel = rightPanelRef.current
+    if (!panel) return
+    const groupWidthPx = rightPanelElementRef.current?.parentElement?.offsetWidth ?? 0
+    const wasCollapsed = rightDragStartCollapsedRef.current
+    const snapped = snapPanelSize(latestRightPercentRef.current, {
+      presets: [WORKFLOW_RIGHT_DEFAULT_PERCENT],
+      floor: WORKFLOW_RIGHT_MIN_PERCENT,
+      // Dragging a collapsed rail back open reopens it at the width it was
+      // left at, per ADR-0098 — not at the shipped default, which threw away
+      // whatever the user had chosen.
+      expandTo: lastExpandedRightPercentRef.current,
+      wasCollapsed,
+      magnet: magnetAsPercent(groupWidthPx),
+    })
+    if (snapped.kind === "collapsed") {
+      panel.collapse()
+      return
+    }
+    if (wasCollapsed) panel.expand()
+    panel.resize(`${snapped.size}%`)
+  }, [])
   // Canvas-toolbar view state. Local to this editor instance (the store is
   // recreated per workflow, so these reset on navigation) — see canvas-toolbar.
   // `interactive` mirrors React Flow's native lock; `minimapVisible` and
@@ -229,6 +333,23 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [spotlightOpen, setSpotlightOpen] = useState(false)
 
+  // Add-node-from-handle (C2): a connection released on the empty pane stages a
+  // pendingConnectFrom; opening the palette lets the user pick the kind, then
+  // `handleAddFromPalette` creates + connects it. Closing the palette clears it.
+  const pendingConnectFrom = useStore((s) => s.pendingConnectFrom)
+  useEffect(() => {
+    if (!pendingConnectFrom) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- bridge from the Zustand pendingConnectFrom signal into the local palette state.
+    setPaletteOpen(true)
+  }, [pendingConnectFrom])
+  const handlePaletteOpenChange = useCallback(
+    (open: boolean) => {
+      setPaletteOpen(open)
+      if (!open) useStore.getState().setPendingConnectFrom(null)
+    },
+    [useStore]
+  )
+
   // Context-menu action thunks.
   const ctxAddNodeAtPosition = useCallback(
     (flowPos: { x: number; y: number }) => {
@@ -244,8 +365,22 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     })
   }, [perfTier.flags.edgeAnimations, reactFlowInstance])
   const ctxConfigureNode = useCallback(
-    (nodeId: string) => setSelectedNodes([nodeId]),
-    [setSelectedNodes]
+    (nodeId: string) => {
+      setSelectedNodes([nodeId])
+      // Explicit configure gesture — reveal the inspector even over a pinned
+      // right-sidebar tab (the plain click auto-switch respects pins), and
+      // pop the sidebar back open if the user had collapsed it.
+      if (rightPanelRef.current?.isCollapsed()) rightPanelRef.current.expand()
+      useStore.getState().requestInspectorPanel()
+    },
+    [setSelectedNodes, useStore]
+  )
+  // Node double-click = the same explicit configure gesture as the context
+  // menu's "Configure" — surfaces the form when a pinned Chat/Runs tab would
+  // otherwise swallow the selection silently.
+  const handleNodeDoubleClick = useCallback(
+    (_e: React.MouseEvent, node: { id: string }) => ctxConfigureNode(node.id),
+    [ctxConfigureNode]
   )
   // Forward-declared via ref so the call sites below can reach the
   // post-declaration `handleRun`. The ref is wired by a `useEffect` after
@@ -298,8 +433,10 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     try {
       // Shared persist path (toWorkflow → replaceWorkflow → trigger sync →
       // markSaved → revalidate); the mobile editor uses the same helper.
-      const issueCount = await persistEditorWorkflow(useStore)
-      if (issueCount > 0) {
+      const { issueCount, publicationInvalidated } = await persistEditorWorkflow(useStore)
+      if (publicationInvalidated) {
+        toast.warning(t("publicationInvalidated"))
+      } else if (issueCount > 0) {
         toast.warning(tValidation("blockedSaveTitle", { count: issueCount }))
       } else {
         toast.success(t("savedOk"))
@@ -315,23 +452,28 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
   const handleRun = useCallback(
     async (options?: { startStepId?: string }) => {
       if (running) return
-      // Block runs when validation issues exist. The toast surfaces the count;
-      // the inspector + node corner badges show the actual fields.
-      const issues = revalidateAll()
-      const issueCount = Object.keys(issues).length
-      if (issueCount > 0) {
-        toast.error(tValidation("blockedRunTitle"), {
-          description: tValidation("summary", { count: issueCount }),
+      // Block runs on blocking (error-severity) diagnostics — the superset of
+      // param errors PLUS expression-ref / orphan / credential / structural
+      // problems. Warnings are surfaced but don't block (n8n / Dify parity).
+      // The Problems panel + node/edge badges show the actual issues.
+      const diagnostics = useStore.getState().recomputeDiagnostics()
+      if (diagnostics.errorCount > 0) {
+        toast.error(tDiag("blockedRunTitle"), {
+          description: tDiag("blockedRunSummary", { count: diagnostics.errorCount }),
         })
+        if (rightPanelRef.current?.isCollapsed()) rightPanelRef.current.expand()
+        useStore.getState().requestProblemsPanel()
         return
+      }
+      if (diagnostics.warningCount > 0) {
+        toast.warning(tDiag("runWithWarnings", { count: diagnostics.warningCount }))
       }
       setRunning(true)
       let toastId: string | number | undefined
       try {
         // Save dirty changes first so the run executes against what the user sees.
         if (dirty) {
-          await replaceWorkflow(toWorkflow())
-          markSaved()
+          await persistEditorWorkflow(useStore)
         }
         const wf = toWorkflow()
         toastId = toast.loading(`${t("running")} ${wf.name}`)
@@ -366,8 +508,129 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         setRunning(false)
       }
     },
-    [running, dirty, toWorkflow, markSaved, onRequestRun, t, tValidation, revalidateAll]
+    [running, dirty, toWorkflow, onRequestRun, t, tDiag, useStore]
   )
+
+  const handleRevert = useCallback(async () => {
+    const row = await getWorkflow(workflowId)
+    // Never persisted (brand-new workflow) — nothing to revert to.
+    if (!row) return
+    useStore.getState().loadWorkflow(row)
+    toast.success(tToolbar("reverted"))
+  }, [workflowId, useStore, tToolbar])
+
+  // Extract the current node selection into a new sub-workflow (C5): build a
+  // child workflow from the selected subset + their internal edges, persist it,
+  // and replace the selection on this canvas with one flow.subworkflow node
+  // that rewires the boundary edges.
+  const handleExtractToSubworkflow = useCallback(async () => {
+    const state = useStore.getState()
+    const selectedIds = state.selectedNodeIds
+    const hasExecutable = selectedIds.some((id) => {
+      const kind = (state.nodes.find((n) => n.id === id)?.data.kind as string) ?? ""
+      return kind && !kind.startsWith("annotation.")
+    })
+    if (!hasExecutable) return
+    const plan = planExtraction(
+      selectedIds,
+      state.nodes.map((n) => ({ id: n.id, position: n.position })),
+      state.edges.map((e) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        sourceHandle: e.sourceHandle,
+        targetHandle: e.targetHandle,
+      }))
+    )
+    if (!plan) return
+    const selectedSet = new Set(plan.selectedIds)
+    // Selected nodes → child, flattened: drop parentId/extent so the child has
+    // no dangling container references (regenerateNodeIds doesn't remap
+    // parentId). Container nesting isn't preserved across extraction.
+    const childNodes = state.nodes
+      .filter((n) => selectedSet.has(n.id))
+      .map((n) => {
+        const { parentId: _p, extent: _e, ...rest } = n
+        return { ...rest, selected: false }
+      })
+    const internalSet = new Set(plan.internalEdgeIds)
+    const childEdges = state.edges
+      .filter((e) => internalSet.has(e.id))
+      .map((e) => ({ ...e, selected: false }))
+    const parent = state.toWorkflow()
+    const base: VisualWorkflow = {
+      ...parent,
+      id: "",
+      name: "",
+      nodes: [],
+      edges: [],
+      pinData: undefined,
+      staticData: undefined,
+      viewport: undefined,
+      createdAt: 0,
+      updatedAt: 0,
+    }
+    let child = reactFlowToWorkflow(base, childNodes, childEdges, { x: 0, y: 0, zoom: 1 })
+    // Inject a manual trigger wired to the child's root nodes if it has none,
+    // BEFORE regenerating ids so the trigger + its edges get fresh ids too.
+    if (!child.nodes.some((n) => n.type.startsWith("trigger."))) {
+      const targets = new Set(child.edges.map((e) => e.target))
+      const roots = child.nodes.filter(
+        (n) => !targets.has(n.id) && !n.type.startsWith("annotation.")
+      )
+      const trigId = "__extract_trigger__"
+      child = {
+        ...child,
+        nodes: [
+          {
+            id: trigId,
+            type: "trigger.manual",
+            // Latest-version metadata — never hardcode 1; a future
+            // trigger.manual@2 must not regress bootstrap nodes.
+            typeVersion: defaultTypeVersionFor("trigger.manual"),
+            position: { x: -200, y: 0 },
+            data: { label: "Manual trigger", params: {} },
+          },
+          ...child.nodes,
+        ],
+        edges: [
+          ...child.edges,
+          ...roots.map((r, i) => ({ id: `__extract_e${i}__`, source: trigId, target: r.id })),
+        ],
+      }
+    }
+    child = regenerateNodeIds(child)
+    try {
+      const childRow = await createWorkflow({
+        name: `${workflowName} (extracted)`,
+        nodes: child.nodes,
+        edges: child.edges,
+        settings: child.settings,
+      })
+      useStore.getState().replaceSelectionWithNode(
+        selectedIds,
+        {
+          kind: "flow.subworkflow",
+          params: { workflowId: childRow.id },
+          position: plan.center,
+          label: `${workflowName} (sub)`,
+        },
+        {
+          inbound: plan.inbound.map((i) => ({
+            source: i.externalSource,
+            sourceHandle: i.sourceHandle,
+          })),
+          outbound: plan.outbound.map((o) => ({
+            target: o.externalTarget,
+            targetHandle: o.targetHandle,
+          })),
+        }
+      )
+      toast.success(t("extracted"))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("saveFailed"))
+    }
+  }, [useStore, workflowName, t])
 
   const handleUndo = useCallback(() => useStore.temporal.getState().undo(), [useStore])
   const handleRedo = useCallback(() => useStore.temporal.getState().redo(), [useStore])
@@ -401,19 +664,23 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
   const handleRunSingleStep = useCallback(
     async (nodeId: string) => {
       if (running) return
-      const issues = revalidateAll()
-      if (Object.keys(issues).length > 0) {
-        toast.error(tValidation("blockedRunTitle"), {
-          description: tValidation("summary", { count: Object.keys(issues).length }),
+      const diagnostics = useStore.getState().recomputeDiagnostics()
+      if (diagnostics.errorCount > 0) {
+        toast.error(tDiag("blockedRunTitle"), {
+          description: tDiag("blockedRunSummary", { count: diagnostics.errorCount }),
         })
+        if (rightPanelRef.current?.isCollapsed()) rightPanelRef.current.expand()
+        useStore.getState().requestProblemsPanel()
         return
+      }
+      if (diagnostics.warningCount > 0) {
+        toast.warning(tDiag("runWithWarnings", { count: diagnostics.warningCount }))
       }
       setRunning(true)
       let toastId: string | number | undefined
       try {
         if (dirty) {
-          await replaceWorkflow(toWorkflow())
-          markSaved()
+          await persistEditorWorkflow(useStore)
         }
         const wf = toWorkflow()
         toastId = toast.loading(`${t("running")} ${wf.name}`)
@@ -432,7 +699,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         setRunning(false)
       }
     },
-    [running, dirty, toWorkflow, markSaved, onRequestRun, t, tValidation, revalidateAll]
+    [running, dirty, toWorkflow, onRequestRun, t, tDiag, useStore]
   )
 
   const requestedRunSingleStepId = useStore((s) => s.requestedRunSingleStepId)
@@ -494,14 +761,17 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     (jsonText: string) => {
       try {
         const parsed = parseWorkflowImport(jsonText)
-        useStore.getState().loadWorkflow({
-          ...useStore.getState().toWorkflow(),
-          ...parsed,
-          // Preserve current id so we don't accidentally overwrite a different
-          // workflow on save. If the user wants a fresh row, they should
-          // duplicate from the library afterwards.
-          id: useStore.getState().baseWorkflow.id,
-        } as VisualWorkflow)
+        useStore.getState().loadWorkflow(
+          {
+            ...useStore.getState().toWorkflow(),
+            ...parsed,
+            // Preserve current id so we don't accidentally overwrite a different
+            // workflow on save. If the user wants a fresh row, they should
+            // duplicate from the library afterwards.
+            id: useStore.getState().baseWorkflow.id,
+          } as VisualWorkflow,
+          { dirty: true }
+        )
         toast.success(t("imported"))
       } catch (err) {
         toast.error(
@@ -514,10 +784,22 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
 
   const handleAddFromPalette = useCallback(
     (kind: WorkflowNodeKind) => {
-      const center = reactFlowInstance?.screenToFlowPosition({
-        x: window.innerWidth / 2,
-        y: window.innerHeight / 2,
-      })
+      // From a dragged handle (C2): create the node at the drop point and wire
+      // the source → it. Falls back to a free node if the connection is illegal.
+      const pending = useStore.getState().pendingConnectFrom
+      if (pending) {
+        const connectedId =
+          useStore.getState().addNodeConnected(kind, pending.dropPos, {
+            sourceId: pending.sourceId,
+            sourceHandle: pending.sourceHandle,
+          }) ?? useStore.getState().addNode(kind, pending.dropPos)
+        useStore.getState().setPendingConnectFrom(null)
+        setSelectedNodes([connectedId])
+        return
+      }
+      const center = reactFlowInstance?.screenToFlowPosition(
+        paneCenterScreenPoint(canvasWrapperRef.current?.getBoundingClientRect())
+      )
       const id = useStore.getState().addNode(kind, center ?? { x: 80, y: 80 })
       setSelectedNodes([id])
     },
@@ -568,6 +850,28 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         setShortcutsOpen((v) => !v)
         return
       }
+      // Tab → keyboard create+connect (C3): with exactly one node selected,
+      // stage a node to its right wired from its default output handle. The
+      // pendingConnectFrom effect then opens the palette to pick the kind.
+      if (e.key === "Tab" && !mod && !e.shiftKey) {
+        if (isEditableTarget(e.target)) return
+        const state = useStore.getState()
+        if (state.selectedNodeIds.length !== 1) return
+        const node = state.nodes.find((n) => n.id === state.selectedNodeIds[0])
+        if (!node) return
+        e.preventDefault()
+        const handles = outputHandlesFor({
+          kind: node.data.kind as WorkflowNodeKind,
+          typeVersion: node.data.typeVersion ?? 1,
+          params: (node.data.params as Record<string, unknown>) ?? {},
+        })
+        state.setPendingConnectFrom({
+          sourceId: node.id,
+          sourceHandle: handles && handles.length > 0 ? handles[0].id : null,
+          dropPos: { x: node.position.x + 320, y: node.position.y },
+        })
+        return
+      }
       if (!mod) return
       const key = e.key.toLowerCase()
       // Save / undo / redo / palette — never blocked even when the inspector
@@ -590,6 +894,19 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
       if (key === "k") {
         e.preventDefault()
         setPaletteOpen((v) => !v)
+        return
+      }
+      // Ctrl/Cmd+B / Ctrl/Cmd+J — toggle the node palette / right sidebar.
+      // Mirrors the Canvas-guild (VS Code) bindings so muscle memory carries
+      // over; reclaims ~34% width on laptop screens.
+      if (key === "b" && !e.shiftKey) {
+        e.preventDefault()
+        toggleLeftPanel()
+        return
+      }
+      if (key === "j" && !e.shiftKey) {
+        e.preventDefault()
+        toggleRightPanel()
         return
       }
       // Ctrl/Cmd+F → in-canvas Spotlight search. Skipped when typing into
@@ -657,7 +974,7 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [handleSave, handleUndo, handleRedo, useStore])
+  }, [handleSave, handleUndo, handleRedo, useStore, toggleLeftPanel, toggleRightPanel])
 
   const addManualTrigger = useCallback(() => {
     const id = useStore.getState().addNode("trigger.manual", { x: 80, y: 80 })
@@ -675,7 +992,22 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         x: event.clientX,
         y: event.clientY,
       })
-      const id = useStore.getState().addNode(kind as WorkflowNodeKind, position)
+      // Hit-test: did the drop land on an edge? If so, split it
+      // (source → new → target) instead of dropping a free node.
+      let id: string | null = null
+      const el =
+        typeof document !== "undefined"
+          ? document.elementFromPoint(event.clientX, event.clientY)
+          : null
+      const edgeId = (el?.closest?.(".react-flow__edge") as HTMLElement | null)?.getAttribute(
+        "data-id"
+      )
+      if (edgeId) {
+        id = useStore.getState().insertNodeOnEdge(edgeId, kind as WorkflowNodeKind, position)
+      }
+      if (!id) {
+        id = useStore.getState().addNode(kind as WorkflowNodeKind, position)
+      }
       usePalettePreferencesStore.getState().recordUsed(kind)
       setSelectedNodes([id])
     },
@@ -691,10 +1023,9 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
   const handleAddAtCenter = useCallback(
     (entry: NodeCatalogEntry) => {
       if (!reactFlowInstance) return
-      const center = reactFlowInstance.screenToFlowPosition({
-        x: window.innerWidth / 2,
-        y: window.innerHeight / 2,
-      })
+      const center = reactFlowInstance.screenToFlowPosition(
+        paneCenterScreenPoint(canvasWrapperRef.current?.getBoundingClientRect())
+      )
       const id = useStore.getState().addNode(entry.kind, center)
       usePalettePreferencesStore.getState().recordUsed(entry.kind)
       setSelectedNodes([id])
@@ -745,12 +1076,17 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
         saving={saving || running}
         onSave={handleSave}
         onRun={handleRun}
+        onRevert={handleRevert}
         onExportJson={handleExportJson}
         onExportImage={handleExportImage}
         onShareImage={() => setShareImageOpen(true)}
         onImportJson={handleImportJson}
         onOpenCommandPalette={handleOpenPalette}
         onOpenShortcuts={handleOpenShortcuts}
+        onToggleLeftPanel={toggleLeftPanel}
+        leftPanelCollapsed={leftCollapsed}
+        onToggleRightPanel={toggleRightPanel}
+        rightPanelCollapsed={isMobile ? !mobileToolsOpen : rightCollapsed}
       />
       <ShareLinkDialog
         open={shareImageOpen}
@@ -766,13 +1102,25 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
       />
       <ResizablePrimitive.Group
         orientation="horizontal"
+        resizeTargetMinimumSize={{ coarse: 28, fine: 20 }}
         className="flex flex-1 overflow-hidden"
         id="cognia-workflow-editor-layout"
       >
-        <ResizablePrimitive.Panel defaultSize="20%" minSize="14%" maxSize="32%">
+        <ResizablePrimitive.Panel
+          panelRef={leftPanelRef}
+          defaultSize="20%"
+          minSize="14%"
+          maxSize="32%"
+          collapsible
+          collapsedSize="0%"
+          onResize={handleLeftPanelResize}
+          className="overflow-hidden"
+        >
           <NodeSearchSidebar onAddNodeAtCenter={handleAddAtCenter} />
         </ResizablePrimitive.Panel>
-        <ResizablePrimitive.Separator className="relative flex w-px items-center justify-center bg-border after:absolute after:inset-y-0 after:left-1/2 after:w-1 after:-translate-x-1/2 focus-visible:outline-none">
+        <ResizablePrimitive.Separator
+          className={`relative flex w-px items-center justify-center bg-border after:absolute after:inset-y-0 after:left-1/2 after:w-1 after:-translate-x-1/2 focus-visible:outline-none ${leftCollapsed ? "hidden" : ""}`}
+        >
           <div className="z-10 flex h-4 w-3 items-center justify-center rounded border bg-border">
             <GripVerticalIcon className="size-2.5" />
           </div>
@@ -794,12 +1142,14 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
             onPaneContextMenu={handlePaneContextMenu}
             onNodeContextMenu={handleNodeContextMenu}
             onEdgeContextMenu={handleEdgeContextMenu}
+            onNodeDoubleClick={handleNodeDoubleClick}
             overlays={
               <>
                 <SelectionToolbar
                   store={useStore}
                   reactFlowInstance={reactFlowInstance}
                   motionEnabled={perfTier.flags.edgeAnimations}
+                  onExtractToSubworkflow={handleExtractToSubworkflow}
                 />
                 <CanvasToolbar
                   onAddNode={handleOpenPalette}
@@ -833,22 +1183,75 @@ function CanvasInner({ store, onRequestRun }: CanvasInnerProps) {
             }
           />
         </ResizablePrimitive.Panel>
-        <ResizablePrimitive.Separator className="relative flex w-px items-center justify-center bg-border after:absolute after:inset-y-0 after:left-1/2 after:w-1 after:-translate-x-1/2 focus-visible:outline-none">
-          <div className="z-10 flex h-4 w-3 items-center justify-center rounded border bg-border">
-            <GripVerticalIcon className="size-2.5" />
-          </div>
-        </ResizablePrimitive.Separator>
-        <ResizablePrimitive.Panel defaultSize="24%" minSize="18%" maxSize="40%">
-          <RightSidebar
-            useStore={store}
-            className="h-full w-full"
-            reactFlowInstance={reactFlowInstance}
-          />
-        </ResizablePrimitive.Panel>
+        {!isMobile ? (
+          <>
+            {/* Stays grabbable over a persistent rail — dragging this edge
+                outward is how the collapsed workbench is reopened. */}
+            <ResizablePrimitive.Separator
+              className={`relative z-20 flex w-px items-center justify-center bg-border after:absolute after:inset-y-0 after:left-1/2 after:w-5 after:-translate-x-1/2 focus-visible:outline-none ${rightCollapsed && !railPersistent ? "hidden" : ""}`}
+              onPointerDown={() => {
+                rightDragStartCollapsedRef.current = rightCollapsed
+              }}
+              onPointerUp={handleRightResizeRelease}
+            >
+              <div className="z-10 flex h-4 w-3 items-center justify-center rounded border bg-border">
+                <GripVerticalIcon className="size-2.5" />
+              </div>
+            </ResizablePrimitive.Separator>
+            <ResizablePrimitive.Panel
+              panelRef={rightPanelRef}
+              elementRef={rightPanelElementRef}
+              defaultSize={`${WORKFLOW_RIGHT_DEFAULT_PERCENT}%`}
+              minSize={`${WORKFLOW_RIGHT_MIN_PERCENT}%`}
+              maxSize="42%"
+              collapsible
+              collapsedSize={rightCollapsedSize}
+              onResize={handleRightPanelResize}
+              className="overflow-hidden"
+            >
+              <RightSidebar
+                useStore={store}
+                className="h-full w-full"
+                reactFlowInstance={reactFlowInstance}
+                // Desktop used to pass neither, so its collapse fell through to
+                // the per-scope `mode: "collapsed"` while the panel around it
+                // had its own zero-width collapse — two notions of "shut" for
+                // one column. The host owns it now, like every other surface.
+                onCollapse={collapseRightWorkbench}
+                onEnsureVisible={revealRightWorkbench}
+                railOnly={rightCollapsed && railPersistent}
+              />
+            </ResizablePrimitive.Panel>
+          </>
+        ) : null}
       </ResizablePrimitive.Group>
+      {isMobile ? (
+        <Sheet open={mobileToolsOpen} onOpenChange={setMobileToolsOpen} modal={mobileToolsOpen}>
+          <SheetContent
+            forceMount
+            side="right"
+            className="w-full gap-0 p-0 sm:max-w-none"
+            inert={!mobileToolsOpen}
+            aria-hidden={!mobileToolsOpen}
+            data-testid="context-workbench-mobile-sheet"
+          >
+            <SheetHeader className="sr-only">
+              <SheetTitle>{tWorkbench("mobileTitle")}</SheetTitle>
+              <SheetDescription>{tWorkbench("mobileDescription")}</SheetDescription>
+            </SheetHeader>
+            <RightSidebar
+              useStore={store}
+              className="h-full w-full border-l-0"
+              reactFlowInstance={reactFlowInstance}
+              onCollapse={collapseRightWorkbench}
+              placement="mobile-sheet"
+            />
+          </SheetContent>
+        </Sheet>
+      ) : null}
       <CommandPalette
         open={paletteOpen}
-        onOpenChange={setPaletteOpen}
+        onOpenChange={handlePaletteOpenChange}
         currentWorkflowId={workflowId}
         onAddNode={handleAddFromPalette}
         onSave={handleSave}

@@ -28,6 +28,9 @@ mod tests {
     use tower::ServiceExt as _;
 
     const SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
+    const ACCOUNT_ID: &str = "local_acct_a";
+    const MOBILE_SIGNING_KEY: &str =
+        "BFUPRxAD89-Xw99QaseX9nIfsaH7e49vg9IkSYplyI4kE2CT1wEuUJpzcVy9CwCjzA_0tcAbP_oZarH7MnA2uOY";
 
     fn test_state() -> SharedState {
         use crate::companion_api::{
@@ -47,18 +50,18 @@ mod tests {
                 crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
             desktop_writes_bridge:
                 crate::companion_api::desktop_writes_bridge::DesktopWritesBridge::new(),
-            sync_registry:
-                crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
-            rate_limiter:
-                crate::companion_api::rate_limit::RateLimiter::with_defaults(),
-            push_tokens:
-                crate::companion_api::push::PushTokenRegistry::new(),
+            sync_registry: crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
+            rate_limiter: crate::companion_api::rate_limit::RateLimiter::with_defaults(),
+            push_tokens: crate::companion_api::push::PushTokenRegistry::new(),
         })
     }
 
     fn build_router(state: SharedState) -> Router {
         Router::new()
-            .route("/api/v1/auth/pair/issue", axum::routing::post(issue_handler))
+            .route(
+                "/api/v1/auth/pair/issue",
+                axum::routing::post(issue_handler),
+            )
             .route("/api/v1/auth/pair", axum::routing::post(pair_handler))
             .with_state(state)
     }
@@ -79,17 +82,21 @@ mod tests {
         let router = build_router(Arc::clone(&state));
 
         // Step 1 — issue pair JWT.
-        let issue_resp = router
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/v1/auth/pair/issue")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
+        let mut issue_request = Request::builder()
+            .method("POST")
+            .uri("/api/v1/auth/pair/issue")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&json!({ "accountId": ACCOUNT_ID })).unwrap(),
+            ))
             .unwrap();
+        issue_request
+            .extensions_mut()
+            .insert(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+                [127, 0, 0, 1],
+                43123,
+            ))));
+        let issue_resp = router.clone().oneshot(issue_request).await.unwrap();
         assert_eq!(issue_resp.status().as_u16(), 200);
         let issue_body = body_json(issue_resp).await;
         let pair_jwt = issue_body["pairJwt"]
@@ -113,6 +120,7 @@ mod tests {
                             "devicePlatform": "android",
                             "devicePubkey": "",
                             "appVersion": "0.1.0",
+                            "mobileSigningKey": MOBILE_SIGNING_KEY,
                         })
                         .to_string(),
                     ))
@@ -140,7 +148,7 @@ mod tests {
     async fn double_redeem_returns_flat_envelope_with_pair_jwt_redeemed() {
         let state = test_state();
         let router = build_router(Arc::clone(&state));
-        let (pair_jwt, _) = issue_pair_jwt(SECRET).expect("issue pair jwt");
+        let (pair_jwt, _) = issue_pair_jwt(SECRET, ACCOUNT_ID).expect("issue pair jwt");
 
         // PairRequest is `#[serde(rename_all = "camelCase")]`, so the wire
         // body uses camelCase keys.
@@ -150,6 +158,7 @@ mod tests {
             "devicePlatform": "android",
             "devicePubkey": "",
             "appVersion": "0.1.0",
+            "mobileSigningKey": MOBILE_SIGNING_KEY,
         })
         .to_string();
 
@@ -189,7 +198,10 @@ mod tests {
         assert_eq!(envelope["code"], "pair_jwt_redeemed");
         assert!(envelope["message"].is_string());
         // Wave 3.1 — no nested `error.code` shape.
-        assert!(envelope.get("error").is_none(), "auth must use flat envelope");
+        assert!(
+            envelope.get("error").is_none(),
+            "auth must use flat envelope"
+        );
     }
 
     #[tokio::test]

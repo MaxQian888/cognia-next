@@ -19,18 +19,32 @@
 // step (tracked in ADR-0028 Open follow-ups).
 
 use std::env;
+// These helpers are exercised only by the `#[cfg(target_os = "windows")]`
+// install/uninstall paths below; on other targets `main()` returns a
+// "Windows only" error before touching them, so gate the symbols to keep the
+// non-Windows binary free of dead code.
+#[cfg(target_os = "windows")]
 use std::path::PathBuf;
+#[cfg(target_os = "windows")]
 use std::process::Command;
 
+#[cfg(target_os = "windows")]
 const OFFLINE_USER: &str = "CogniaSandboxOffline";
+#[cfg(target_os = "windows")]
 const ONLINE_USER: &str = "CogniaSandboxOnline";
+#[cfg(target_os = "windows")]
 const FIREWALL_OFFLINE_RULE: &str = "Cognia Sandbox Offline (block-all)";
+#[cfg(target_os = "windows")]
 const FIREWALL_ONLINE_RULE: &str = "Cognia Sandbox Online (HTTPS-only)";
 
 fn main() {
     let args: Vec<String> = env::args().collect();
     let uninstall = args.iter().any(|a| a == "--uninstall");
-    let result = if uninstall { uninstall_all() } else { install_all() };
+    let result = if uninstall {
+        uninstall_all()
+    } else {
+        install_all()
+    };
     match result {
         Ok(()) => std::process::exit(0),
         Err(err) => {
@@ -174,10 +188,7 @@ fn install_firewall_block(rule: &str, user: &str) -> Result<(), SetupError> {
 #[cfg(target_os = "windows")]
 fn install_firewall_https_only(rule: &str, user: &str) -> Result<(), SetupError> {
     // Deny all outbound except HTTPS (443) and DNS (53).
-    for (direction, ports) in [
-        ("out", Some(vec!["443", "53"])),
-        ("in", None),
-    ] {
+    for (direction, ports) in [("out", Some(vec!["443", "53"])), ("in", None)] {
         let mut args = vec![
             "advfirewall".to_string(),
             "firewall".to_string(),
@@ -224,6 +235,7 @@ fn remove_firewall_rule(rule: &str) -> Result<(), SetupError> {
     Ok(())
 }
 
+#[cfg(target_os = "windows")]
 fn marker_path() -> Option<PathBuf> {
     dirs::data_dir().map(|d| d.join("cognia").join("sandbox").join("setup.ok"))
 }
@@ -235,11 +247,8 @@ fn write_marker() -> Result<(), SetupError> {
         std::fs::create_dir_all(parent)
             .map_err(|e| SetupError(format!("mkdir {parent:?} failed: {e}")))?;
     }
-    std::fs::write(
-        &path,
-        chrono::Utc::now().to_rfc3339().as_bytes(),
-    )
-    .map_err(|e| SetupError(format!("write marker {path:?} failed: {e}")))?;
+    std::fs::write(&path, chrono::Utc::now().to_rfc3339().as_bytes())
+        .map_err(|e| SetupError(format!("write marker {path:?} failed: {e}")))?;
     Ok(())
 }
 

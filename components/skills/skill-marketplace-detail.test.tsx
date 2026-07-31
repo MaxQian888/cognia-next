@@ -7,16 +7,11 @@ jest.mock("next-intl", () => ({
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
-jest.mock(
-  "streamdown",
-  () => ({
-    __esModule: true,
-    Streamdown: ({ children }: { children: React.ReactNode }) => (
-      <div data-testid="streamdown">{children}</div>
-    ),
-  }),
-  { virtual: true }
-)
+jest.mock("@/components/chat/markdown-renderer", () => ({
+  MarkdownRenderer: ({ content }: { content: string }) => (
+    <div data-testid="markdown-renderer">{content}</div>
+  ),
+}))
 
 jest.mock("@/lib/skills/marketplace-install", () => ({
   fetchMarketplaceContent: jest.fn(async () => ({ content: "# Readme" })),
@@ -47,7 +42,7 @@ describe("SkillMarketplaceDetail", () => {
       />
     )
     expect(screen.getByText("install")).toBeInTheDocument()
-    await screen.findByTestId("streamdown")
+    await screen.findByTestId("markdown-renderer")
   })
 
   it("renders the uninstall button when installed", async () => {
@@ -62,7 +57,7 @@ describe("SkillMarketplaceDetail", () => {
       />
     )
     expect(screen.getByText("uninstall")).toBeInTheDocument()
-    await screen.findByTestId("streamdown")
+    await screen.findByTestId("markdown-renderer")
   })
 
   it("invokes onClose when the sheet is dismissed", async () => {
@@ -77,7 +72,7 @@ describe("SkillMarketplaceDetail", () => {
         onUninstall={jest.fn()}
       />
     )
-    await screen.findByTestId("streamdown")
+    await screen.findByTestId("markdown-renderer")
     fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
     expect(onClose).toHaveBeenCalled()
   })

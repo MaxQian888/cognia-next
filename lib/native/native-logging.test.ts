@@ -10,8 +10,10 @@ import { invoke } from "@tauri-apps/api/core"
 let isTauriValue = false
 jest.mock("@/lib/tauri", () => ({
   isTauri: () => isTauriValue,
+  transport: { call: jest.fn(), subscribe: jest.fn() },
 }))
 
+import { transport } from "@/lib/tauri"
 import {
   getNativeLoggingReadiness,
   getNativeLoggingReadinessSnapshot,
@@ -20,6 +22,10 @@ import {
   forwardPlatformLoggingEntries,
   getNativeLogDirectory,
   openNativeLogDirectory,
+  getTracingLevels,
+  setTracingLevels,
+  queryNativeLogs,
+  listNativeLogFiles,
 } from "./native-logging"
 import {
   resetNativeLoggingReadinessForTest,
@@ -232,5 +238,114 @@ describe("getNativeLogDirectory / openNativeLogDirectory", () => {
     isTauriValue = true
     mockedInvoke.mockRejectedValueOnce(new Error("boom"))
     expect(await openNativeLogDirectory()).toBe(false)
+  })
+})
+
+describe("tracing level controls", () => {
+  it("getTracingLevels returns null when not running under Tauri", async () => {
+    expect(await getTracingLevels()).toBeNull()
+  })
+
+  it("getTracingLevels invokes the command and returns the status", async () => {
+    isTauriValue = true
+    const status = {
+      active: true,
+      defaultLevel: "info",
+      rules: [{ target: "network", level: "debug" }],
+    }
+    mockedInvoke.mockResolvedValueOnce(status)
+    expect(await getTracingLevels()).toEqual(status)
+    expect(mockedInvoke).toHaveBeenCalledWith("tracing_logging_get_levels")
+  })
+
+  it("getTracingLevels returns null on invoke rejection", async () => {
+    isTauriValue = true
+    mockedInvoke.mockRejectedValueOnce(new Error("boom"))
+    expect(await getTracingLevels()).toBeNull()
+  })
+
+  it("setTracingLevels returns null when not running under Tauri", async () => {
+    expect(await setTracingLevels([{ target: "network", level: "debug" }])).toBeNull()
+  })
+
+  it("setTracingLevels invokes with rules and default level", async () => {
+    isTauriValue = true
+    const status = { active: true, defaultLevel: "warn", rules: [{ target: "ai", level: "trace" }] }
+    mockedInvoke.mockResolvedValueOnce(status)
+    const result = await setTracingLevels([{ target: "ai", level: "trace" }], "warn")
+    expect(result).toEqual(status)
+    expect(mockedInvoke).toHaveBeenCalledWith("tracing_logging_set_levels", {
+      rules: [{ target: "ai", level: "trace" }],
+      defaultLevel: "warn",
+    })
+  })
+
+  it("setTracingLevels returns null on invoke rejection", async () => {
+    isTauriValue = true
+    mockedInvoke.mockRejectedValueOnce(new Error("boom"))
+    expect(await setTracingLevels([])).toBeNull()
+  })
+})
+
+describe("native log read-back (transport-based)", () => {
+  const mockedCall = transport.call as jest.Mock
+
+  beforeEach(() => {
+    mockedCall.mockReset()
+  })
+
+  it("queryNativeLogs sends the query through the unified transport", async () => {
+    const result = {
+      entries: [
+        {
+          timestamp: "2026-07-11T01:00:00Z",
+          epochMs: 1,
+          level: "warn",
+          target: "network",
+          message: "slow",
+        },
+      ],
+      fileSize: 10,
+      scannedBytes: 10,
+      truncated: false,
+      path: "C:/logs/cognia-structured.log",
+    }
+    mockedCall.mockResolvedValueOnce(result)
+
+    const out = await queryNativeLogs({ file: "structured", minLevel: "warn", limit: 50 })
+
+    expect(out).toEqual(result)
+    expect(mockedCall).toHaveBeenCalledWith("logs_query", {
+      query: { file: "structured", minLevel: "warn", limit: 50 },
+    })
+  })
+
+  it("queryNativeLogs defaults to an empty query object", async () => {
+    mockedCall.mockResolvedValueOnce({
+      entries: [],
+      fileSize: 0,
+      scannedBytes: 0,
+      truncated: false,
+      path: "",
+    })
+    await queryNativeLogs()
+    expect(mockedCall).toHaveBeenCalledWith("logs_query", { query: {} })
+  })
+
+  it("queryNativeLogs returns null when the transport rejects", async () => {
+    mockedCall.mockRejectedValueOnce(new Error("unpaired"))
+    expect(await queryNativeLogs()).toBeNull()
+  })
+
+  it("listNativeLogFiles returns the file listing", async () => {
+    const files = [{ name: "cognia.log", size: 123, modifiedMs: 5 }]
+    mockedCall.mockResolvedValueOnce(files)
+    expect(await listNativeLogFiles()).toEqual(files)
+    expect(mockedCall).toHaveBeenCalledWith("logs_list_files", {})
+  })
+
+  it("listNativeLogFiles returns null when the transport rejects", async () => {
+    mockedCall.mockRejectedValueOnce(new Error("web stub"))
+    expect(await listNativeLogFiles()).toBeNull()
   })
 })

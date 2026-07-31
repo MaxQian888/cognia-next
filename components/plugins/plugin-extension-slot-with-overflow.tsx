@@ -1,7 +1,8 @@
 "use client"
 
-import { Component, useSyncExternalStore, type ReactNode } from "react"
+import { useSyncExternalStore, type ReactNode } from "react"
 import { MoreHorizontalIcon } from "lucide-react"
+import { PluginSurface } from "@/components/plugins/plugin-surface"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -13,7 +14,10 @@ import {
   getExtensionsForPoint,
   subscribeExtensionChanges,
 } from "@/lib/plugin/api"
-import type { CanonicalExtensionPoint } from "@/lib/plugin/contracts/plugin-points"
+import {
+  getExtensionPointFormFactor,
+  type CanonicalExtensionPoint,
+} from "@/lib/plugin/contracts/plugin-points"
 
 interface Props {
   point: CanonicalExtensionPoint
@@ -52,6 +56,7 @@ export function PluginExtensionSlotWithOverflow({
 
   const inline = ordered.slice(0, limit)
   const overflow = ordered.slice(limit)
+  const formFactor = getExtensionPointFormFactor(point)
 
   return (
     <div
@@ -59,11 +64,19 @@ export function PluginExtensionSlotWithOverflow({
       data-plugin-extension-slot={point}
       data-extension-count={ordered.length}
       data-extension-overflow={overflow.length}
+      data-form-factor={formFactor}
     >
       {inline.map((ext) => (
-        <PluginExtensionBoundary key={ext.id} pluginId={ext.pluginId} extensionId={ext.id}>
-          <ext.component pluginId={ext.pluginId} extensionId={ext.id} />
-        </PluginExtensionBoundary>
+        <PluginSurface
+          key={ext.id}
+          pluginId={ext.pluginId}
+          surfaceId={ext.id}
+          formFactor={formFactor}
+          minWidth={ext.options.minWidth}
+          maxWidth={ext.options.maxWidth}
+        >
+          <ext.component pluginId={ext.pluginId} extensionId={ext.id} formFactor={formFactor} />
+        </PluginSurface>
       ))}
       {overflow.length > 0 && (
         <DropdownMenu>
@@ -80,54 +93,24 @@ export function PluginExtensionSlotWithOverflow({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" sideOffset={4} className={overflowClassName}>
             {overflow.map((ext) => (
-              <PluginExtensionBoundary key={ext.id} pluginId={ext.pluginId} extensionId={ext.id}>
-                <ext.component pluginId={ext.pluginId} extensionId={ext.id} />
-              </PluginExtensionBoundary>
+              <PluginSurface
+                key={ext.id}
+                pluginId={ext.pluginId}
+                surfaceId={ext.id}
+                formFactor={formFactor}
+                minWidth={ext.options.minWidth}
+                maxWidth={ext.options.maxWidth}
+              >
+                <ext.component
+                  pluginId={ext.pluginId}
+                  extensionId={ext.id}
+                  formFactor={formFactor}
+                />
+              </PluginSurface>
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
       )}
     </div>
   )
-}
-
-interface BoundaryProps {
-  pluginId: string
-  extensionId: string
-  children: ReactNode
-}
-
-interface BoundaryState {
-  hasError: boolean
-}
-
-class PluginExtensionBoundary extends Component<BoundaryProps, BoundaryState> {
-  constructor(props: BoundaryProps) {
-    super(props)
-    this.state = { hasError: false }
-  }
-
-  static getDerivedStateFromError(): BoundaryState {
-    return { hasError: true }
-  }
-
-  componentDidCatch(error: unknown) {
-    void import("@/lib/plugin/utils/analytics").then((mod) => {
-      mod.trackPluginEvent?.({
-        pluginId: this.props.pluginId,
-        eventType: "error",
-        success: false,
-        errorMessage: error instanceof Error ? error.message : String(error),
-        metadata: {
-          extensionId: this.props.extensionId,
-          scope: "extension.render_error",
-        },
-      })
-    })
-  }
-
-  render() {
-    if (this.state.hasError) return null
-    return this.props.children
-  }
 }

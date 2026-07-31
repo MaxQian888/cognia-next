@@ -1,0 +1,22 @@
+{
+  "backAria": "返回设置",
+  "disabled": "关闭",
+  "empty": "已配对的桌面端尚未配置任何外部 Agent。",
+  "enabled": "开启",
+  "enabledAria": "启用 {name}",
+  "intro": "管理已配对桌面端上配置的外部 Agent。可逐个开启或关闭，并选择桌面端运行时所用的权限模式。",
+  "loadFailed": "无法加载外部 Agent：{message}",
+  "loading": "正在加载外部 Agent……",
+  "manageOnDesktop": "新增、删除以及编辑外部 Agent（命令、端点、重试）需在桌面端完成。请在桌面端打开 设置 → 外部 Agent。",
+  "permissionAcceptEdits": "自动接受编辑",
+  "permissionBypass": "跳过权限检查",
+  "permissionDefault": "默认",
+  "permissionDontAsk": "不再询问",
+  "permissionLabel": "权限模式",
+  "permissionModeAria": "{name} 的权限模式",
+  "permissionPlan": "计划模式",
+  "sectionTitle": "已配置的 Agent",
+  "title": "外部 Agent",
+  "toggleFailed": "无法将更改加入队列：{message}",
+  "updateQueued": "更改已加入桌面端队列。"
+}

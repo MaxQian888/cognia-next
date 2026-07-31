@@ -28,11 +28,17 @@ import {
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
-import { createShareLink, revokeShareLink, ShareNotConfiguredError } from "@/lib/share/client"
+import {
+  createShareLink,
+  revokeShareLink,
+  ShareNotConfiguredError,
+  SharePayloadTooLargeError,
+  ShareRequestError,
+} from "@/lib/share/client"
 import type { SharePayload } from "@/lib/share/types"
 import type { CreatedShare } from "@/lib/share/client"
 import { PayloadView } from "@/components/share/payload-view"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 
 const log = createLogger("share-link")
 
@@ -47,6 +53,8 @@ type LimitMode = "unlimited" | "count" | "burn"
 
 interface Props {
   buildPayload: () => SharePayload | Promise<SharePayload>
+  /** Optional product-owned summary shown before publishing (for example, selected chats). */
+  artifactSummary?: React.ReactNode
   trigger?: React.ReactNode
   open?: boolean
   onOpenChange?: (open: boolean) => void
@@ -54,7 +62,14 @@ interface Props {
   onConfigure?: () => void
 }
 
-export function ShareLinkDialog({ buildPayload, trigger, open, onOpenChange, onConfigure }: Props) {
+export function ShareLinkDialog({
+  buildPayload,
+  artifactSummary,
+  trigger,
+  open,
+  onOpenChange,
+  onConfigure,
+}: Props) {
   const t = useTranslations("share")
   const [ttl, setTtl] = useState<TtlOption>("7d")
   const [limitMode, setLimitMode] = useState<LimitMode>("unlimited")
@@ -115,6 +130,11 @@ export function ShareLinkDialog({ buildPayload, trigger, open, onOpenChange, onC
     } catch (err) {
       if (err instanceof ShareNotConfiguredError) {
         setNotConfigured(true)
+      } else if (
+        err instanceof SharePayloadTooLargeError ||
+        (err instanceof ShareRequestError && err.status === 413)
+      ) {
+        setError(t("errorTooLarge"))
       } else {
         log.error("share-create-failed", {
           error: err instanceof Error ? err.message : String(err),
@@ -210,6 +230,7 @@ export function ShareLinkDialog({ buildPayload, trigger, open, onOpenChange, onC
           </div>
         ) : (
           <div className="space-y-4 py-2">
+            {artifactSummary}
             <div className="space-y-1">
               <Label className="text-xs">{t("ttlLabel")}</Label>
               <Select value={ttl} onValueChange={(v) => setTtl(v as TtlOption)}>

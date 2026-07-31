@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // CRUD coverage for the characters table — list/get/create/update/delete
 // plus the duplicate path and idempotent built-in seeder. ADR-0030 added
 // overlay-aware paths exercised below.
@@ -24,6 +25,11 @@ import type {
   PluginCharacterDef,
   PluginCharacterPackDef,
 } from "@/types/plugin/plugin-character-pack"
+import {
+  BUILTIN_PACK,
+  BUILTIN_PLUGIN_ID,
+  BUILTIN_LEGACY_ID_TO_LOCAL_ID,
+} from "@/plugins/cognia-builtin-characters/src/index"
 
 function makeOverlayChar(
   localId: string,
@@ -366,5 +372,66 @@ describe("duplicateCharacter with overlay source", () => {
     expect(copy.sourcePackId).toBeUndefined()
     expect(copy.clonedFromPackCharacterId).toBeUndefined()
     expect(copy.packVersionAtClone).toBeUndefined()
+  })
+})
+
+// ============================================================================
+// v49 built-in-characters coexistence — the cognia-builtin-characters plugin
+// overlay (registered when the plugin is wired into the browser builtin
+// registry) must dovetail with the legacy Dexie seed rows: no duplicate
+// personas in the picker, and the Apply-Update baseline resolves a LIVE
+// overlay character rather than falling back to the static def.
+// ============================================================================
+
+describe("cognia-builtin-characters overlay/Dexie coexistence", () => {
+  function registerBuiltinOverlay() {
+    registerCharacterPack(BUILTIN_PACK.id, BUILTIN_PACK, { pluginId: BUILTIN_PLUGIN_ID })
+  }
+
+  function runtimeIdFor(localId: string): string {
+    return `cognia-pack:${BUILTIN_PLUGIN_ID}:${BUILTIN_PACK.id}:${localId}`
+  }
+
+  it("shows exactly 6 built-ins with no duplicates when the overlay is active", async () => {
+    registerBuiltinOverlay()
+    await seedBuiltInCharacters()
+
+    const rows = await listCharacters()
+    // The 6 seeded Dexie rows hide the 6 overlay copies (clone-hides-overlay).
+    const builtins = rows.filter((c) => c.sourcePluginId === BUILTIN_PLUGIN_ID)
+    expect(builtins.length).toBe(6)
+    // No synthetic overlay id leaks into the picker — every built-in is a
+    // persisted Dexie row keyed by its legacy id.
+    const legacyIds = new Set(Object.keys(BUILTIN_LEGACY_ID_TO_LOCAL_ID))
+    expect(builtins.every((c) => legacyIds.has(c.id))).toBe(true)
+    // Names are unique — the dedupe didn't double-list any persona.
+    const names = builtins.map((c) => c.name)
+    expect(new Set(names).size).toBe(names.length)
+  })
+
+  it("resolves a built-in by both its legacy id and its synthetic overlay id", async () => {
+    registerBuiltinOverlay()
+    await seedBuiltInCharacters()
+
+    const byLegacy = await resolveCharacterById("char_builtin_coding")
+    expect(byLegacy?.name).toBe("Coding Assistant")
+    expect(byLegacy?.sourcePluginId).toBe(BUILTIN_PLUGIN_ID)
+
+    const bySynthetic = await resolveCharacterById(runtimeIdFor("coding"))
+    expect(bySynthetic?.name).toBe("Coding Assistant")
+    expect(bySynthetic?.sourcePluginId).toBe(BUILTIN_PLUGIN_ID)
+  })
+
+  it("seeds the Apply-Update baseline from the live overlay character", async () => {
+    // Overlay registered BEFORE the seed runs — seedBuiltInCharacters prefers
+    // the live overlay snapshot for pristineSnapshot so Apply-Update has a
+    // real baseline to diff against (not the dormant-plugin fallback).
+    registerBuiltinOverlay()
+    await seedBuiltInCharacters()
+
+    const row = await getCharacter("char_builtin_goal_tracker")
+    expect(row?.pristineSnapshot).toBeDefined()
+    expect(row?.clonedFromPackCharacterId).toBe(runtimeIdFor("goal-tracker"))
+    expect(row?.packVersionAtClone).toBe(BUILTIN_PACK.version)
   })
 })

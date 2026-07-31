@@ -1,0 +1,241 @@
+{
+  "activeFilters": {
+    "clearFilter": "Clear filter",
+    "clearSort": "Clear sort",
+    "filterChip": "Filter: {value}",
+    "sortChip": "Sort: {value}"
+  },
+  "builtInBadge": "Built-in",
+  "card": {
+    "twinDraftFallbackName": "{kind} draft",
+    "twinSourceDescription": "{kind} · {chunks, plural, =0 {no chunks} =1 {1 chunk} other {# chunks}}"
+  },
+  "cardActions": {
+    "description": "Choose what to do with this item.",
+    "title": "Actions"
+  },
+  "categories": {
+    "agentPresets": "Agents & subagents",
+    "characters": "Characters",
+    "connectors": "Connectors",
+    "favorites": "Favorites",
+    "foryou": "For You",
+    "mcpPresets": "MCP presets",
+    "mcpTools": "MCP tools",
+    "ocrProviders": "OCR providers",
+    "plugins": "Plugins",
+    "skills": "Skills",
+    "slashCommands": "Slash commands",
+    "teamTemplates": "Team templates",
+    "teams": "Teams",
+    "twinDrafts": "Twin drafts",
+    "twinIngest": "Twin ingest",
+    "workflowTemplates": "Workflow templates"
+  },
+  "chipStripAria": "Discover categories",
+  "connectorDescriptions": {
+    "dingtalk": "DingTalk workspace bot (planned).",
+    "discord": "Bot integration for servers and DMs.",
+    "email": "Inbound + outbound mail bridge (planned).",
+    "github": "PR / Issue / Release events routed to the inbox.",
+    "kook": "KOOK voice / text bot (planned).",
+    "lark": "Interactive cards + bot for Feishu / Lark.",
+    "line": "LINE messaging bot (planned).",
+    "matrix": "Federated Matrix bridge (planned).",
+    "mattermost": "Mattermost workspace bot (planned).",
+    "onebot": "Reverse-WebSocket bridge for QQ via OneBot.",
+    "qq-official": "QQ Official Robot platform (planned).",
+    "slack": "Block Kit integration for workspaces.",
+    "telegram": "Bot API for chats, channels, and groups.",
+    "wechat-oa": "WeChat Official Account integration (planned).",
+    "wechat-personal": "Personal WeChat via the iLink gateway (QR login, reply-only). Unofficial — account-ban risk.",
+    "wecom": "WeCom 智能机器人 long connection — streaming replies + proactive push."
+  },
+  "connectorInstanceCount": "{count, plural, =0 {No instances} =1 {1 configured} other {# configured}}",
+  "connectorLabels": {
+    "dingtalk": "DingTalk",
+    "discord": "Discord",
+    "email": "Email",
+    "github": "GitHub Delivery",
+    "kook": "KOOK",
+    "lark": "Lark",
+    "line": "LINE",
+    "matrix": "Matrix",
+    "mattermost": "Mattermost",
+    "onebot": "QQ (OneBot)",
+    "qq-official": "QQ Official",
+    "slack": "Slack",
+    "telegram": "Telegram",
+    "wechat-oa": "WeChat OA",
+    "wechat-personal": "WeChat (Personal)",
+    "wecom": "WeCom"
+  },
+  "connectorStatus": {
+    "beta": "Beta",
+    "planned": "Planned",
+    "stable": "Stable"
+  },
+  "createCharacter": "Create character",
+  "customize": {
+    "description": "Pin the categories you use most; the rest stay in More. Drag to reorder, or hide categories you never use.",
+    "dragHint": "Drag to reorder",
+    "hidden": "Hidden",
+    "hiddenEmpty": "Nothing hidden.",
+    "hideItem": "Hide",
+    "more": "More",
+    "moreEmpty": "Nothing in More — every category is pinned or hidden.",
+    "moveToMore": "Move to More",
+    "pin": "Pin",
+    "pinned": "Pinned",
+    "pinnedEmpty": "No pinned categories — everything is in More.",
+    "restoreDefaults": "Restore defaults",
+    "showItem": "Show",
+    "title": "Customize categories",
+    "trigger": "Customize categories"
+  },
+  "empty": {
+    "noQuery": "Nothing here yet."
+  },
+  "emptyAgentPresets": "No agent presets available.",
+  "emptyCharacters": "No characters yet — create one on the desktop.",
+  "emptyCharactersHint": "Create characters in the desktop app and they'll sync here.",
+  "emptyConnectors": "No connectors available.",
+  "emptyFavorites": "No favorites yet — tap the star on any item to pin it here.",
+  "emptyFiltered": "No matches for \"{query}\".",
+  "emptyMcpPresets": "No MCP presets available.",
+  "emptyMcpTools": "No MCP servers configured.",
+  "emptyOcrProviders": "No OCR providers registered.",
+  "emptyPlugins": "No plugins installed.",
+  "emptySkills": "No skills yet.",
+  "emptySkillsHint": "Skills you enable in the desktop app appear here.",
+  "emptySlashCommands": "No slash commands registered.",
+  "emptyTeamTemplates": "No team templates available.",
+  "emptyTeams": "No teams yet.",
+  "emptyTeamsHint": "Create agent teams in the desktop app and they'll sync here.",
+  "emptyTwinDrafts": "No pending twin drafts.",
+  "emptyTwinIngest": "No twin sources yet — add one from the Twin runtime.",
+  "emptyWorkflowTemplates": "No workflow templates available.",
+  "favorite": {
+    "add": "Add to favorites",
+    "remove": "Remove from favorites"
+  },
+  "featured": "Featured",
+  "grid": {
+    "aria": "{category} list",
+    "loading": "Loading…"
+  },
+  "groups": {
+    "agents": "Agents",
+    "aria": "Discover categories",
+    "extensions": "Extensions",
+    "templates": "Templates",
+    "twin": "Twin"
+  },
+  "home": {
+    "empty": "Nothing to discover yet.",
+    "emptyHint": "Add characters, skills, plugins, and more — they'll show up here.",
+    "featured": "Featured",
+    "recent": "Recently updated",
+    "viewAll": "View all ({count})"
+  },
+  "inspector": {
+    "addExternalAgent": "Add agent",
+    "addMcpServer": "Add server",
+    "aria": "Details panel",
+    "close": "Close",
+    "disable": "Disabled",
+    "empty": "Select an item to see its details.",
+    "enable": "Enabled",
+    "itemCount": "{count, plural, =0 {No items} =1 {1 item} other {# items}}",
+    "manageCommands": "Manage commands",
+    "mcpPresetFields": "{count, plural, =1 {1 field to fill in} other {# fields to fill in}}",
+    "openFull": "Open full page",
+    "templateMissingDeps": "{count, plural, =1 {1 missing dependency} other {# missing dependencies}}",
+    "title": "Details",
+    "twinDraftFallbackName": "{kind} draft",
+    "twinSourceMeta": "{bytes} bytes · {chunks, plural, =0 {no chunks} =1 {1 chunk} other {# chunks}}",
+    "useTemplate": "Use template",
+    "viewDocs": "View docs"
+  },
+  "marketplace": {
+    "browse": "Browse marketplace",
+    "desktopOnly": "Install from the desktop app.",
+    "empty": "No plugins match this search.",
+    "install": "Install",
+    "installSuccess": "{name} installed.",
+    "installed": "Installed",
+    "loading": "Loading marketplace…",
+    "searchPlaceholder": "Search plugins…",
+    "title": "Plugin marketplace",
+    "uninstall": "Uninstall",
+    "uninstallSuccess": "{name} uninstalled.",
+    "verified": "Verified"
+  },
+  "memberCount": "{count} agents",
+  "ocrBadge": {
+    "needsCredentials": "Needs credentials"
+  },
+  "ocrCategories": {
+    "document-cloud": "Document cloud",
+    "lark": "Lark",
+    "llm-vision": "LLM vision",
+    "local": "Local engine",
+    "specialist": "Specialist"
+  },
+  "pluginBadge": "Plugin",
+  "preferences": {
+    "description": "Set where Discover opens and how it looks by default.",
+    "landingAuto": "Auto (For You)",
+    "landingHint": "The category Discover opens on when no link specifies one. Auto opens the For You landing.",
+    "landingLabel": "Default category",
+    "reset": "Reset",
+    "title": "Preferences",
+    "viewHint": "Fallback layout for categories that don't have their own view choice.",
+    "viewLabel": "Default view"
+  },
+  "resultCount": "{count, plural, =0 {No results} =1 {1 result} other {# results}}",
+  "search": "Search discover…",
+  "searchAria": "Search discover",
+  "searchScope": "Search {category}…",
+  "share": {
+    "action": "Share via link",
+    "cancel": "Cancel",
+    "piiBody": "This item may contain personal info (emails, phone numbers, keys). Remove it before sharing publicly, or share the original anyway.",
+    "piiTitle": "Possible personal info detected",
+    "shareOriginal": "Share anyway",
+    "shareRedacted": "Remove and continue"
+  },
+  "skillMarketplace": {
+    "browse": "Browse skills",
+    "title": "Skill marketplace"
+  },
+  "sortFilter": {
+    "filter": {
+      "all": "All",
+      "builtin": "Built-in",
+      "enabled": "Enabled",
+      "favorites": "Favorites",
+      "installed": "Installed"
+    },
+    "filterLabel": "Filter",
+    "reset": "Reset",
+    "sort": {
+      "name": "Name",
+      "recent": "Most recent"
+    },
+    "sortLabel": "Sort by",
+    "title": "Sort & filter",
+    "trigger": "Sort & filter"
+  },
+  "title": "Discover",
+  "view": {
+    "aria": "View mode",
+    "compact": "Compact",
+    "grid": "Grid",
+    "list": "List"
+  },
+  "badgePlugin": "plugin",
+  "shellDesktop": "desktop",
+  "shellMobile": "mobile",
+  "shellWeb": "web"
+}

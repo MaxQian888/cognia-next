@@ -10,18 +10,22 @@
 // for users who set `disallowedTools: ["Bash"]` on a character but still
 // want certain shell-y operations available behind explicit approval.
 
-import { execFile } from "node:child_process"
-import { promisify } from "node:util"
 import fs from "node:fs"
 import { z } from "zod"
 import { tool } from "@anthropic-ai/claude-agent-sdk"
 
 import { toolError, toolText, validateShellCommand } from "./safety.mjs"
-
-const execFileAsync = promisify(execFile)
+import { execFileAsync } from "./shared/exec.mjs"
+import { headTruncate } from "./shared/truncate.mjs"
 
 // Mirror src-tauri/src/shell.rs:17-19 caps so the two paths feel consistent.
-const MAX_OUTPUT_BYTES = 64 * 1024
+const MAX_OUTPUT_BYTES = 64 * 1024 // model-facing display cap (headTruncate)
+// Capture ceiling kept ABOVE the display cap: when the two were equal, a
+// SUCCESSFUL but verbose command (> 64 KB) tripped execFile's maxBuffer, which
+// rejects — so it was mislabelled as exitCode 1 instead of exit 0 + truncated.
+// Capturing up to 4 MB lets the command finish; headTruncate then trims the
+// displayed slice and flags it.
+const MAX_CAPTURE_BYTES = 4 * 1024 * 1024
 const DEFAULT_TIMEOUT_MS = 30 * 1000
 const MAX_TIMEOUT_MS = 5 * 60 * 1000
 
@@ -70,7 +74,7 @@ async function execShellExecuteAdvanced(args) {
       const result = await execFileAsync(args.command, args.args, {
         cwd: args.cwd,
         timeout: timeoutMs,
-        maxBuffer: MAX_OUTPUT_BYTES,
+        maxBuffer: MAX_CAPTURE_BYTES,
         windowsHide: true,
       })
       stdout = String(result.stdout)
@@ -84,10 +88,13 @@ async function execShellExecuteAdvanced(args) {
       error = err?.message ?? null
     }
 
-    const stdoutTruncated = stdout.length >= MAX_OUTPUT_BYTES
-    const stderrTruncated = stderr.length >= MAX_OUTPUT_BYTES
-    if (stdoutTruncated) stdout = stdout.slice(0, MAX_OUTPUT_BYTES) + "\n... (truncated)"
-    if (stderrTruncated) stderr = stderr.slice(0, MAX_OUTPUT_BYTES) + "\n... (truncated)"
+    // inclusive: preserve the original `length >= MAX` boundary semantics.
+    const outT = headTruncate(stdout, MAX_OUTPUT_BYTES, { inclusive: true })
+    const errT = headTruncate(stderr, MAX_OUTPUT_BYTES, { inclusive: true })
+    stdout = outT.text
+    stderr = errT.text
+    const stdoutTruncated = outT.truncated
+    const stderrTruncated = errT.truncated
 
     return toolText({
       command: args.command,

@@ -1,0 +1,47 @@
+# ADR-0067 Tier-B prep — centralized outbound proxy configuration extracted
+# from app_lib's `proxy_config/` module: the live `ProxyConfig` slot every
+# reqwest builder consults, local proxy-client detection (Clash/Mihomo/…), and
+# the WSS CONNECT/SOCKS dialer. Kept separate from `cognia-core` on purpose:
+# this crate pulls reqwest + tokio-net, and folding those into core would put
+# the whole hyper stack on the critical path of every extracted crate's check
+# loop. The `proxy_*` `#[tauri::command]` shells stay app-side.
+[package]
+name = "cognia-net"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89.0"
+description = "Outbound proxy configuration, detection and WSS proxy dialer shared across cognia subsystem crates."
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "cognia_net"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+url = "2"
+base64 = "0.22"
+# Same feature set as src-tauri so the unified build behaves identically
+# (socks is needed for socks5:// proxy URLs, json for the Clash controller
+# probe, stream for http_download's bytes_stream()).
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "socks", "stream"] }
+# `macros` for the detect-stage tokio::join!; `fs` for http_download's
+# streamed writes.
+tokio = { version = "1", features = ["net", "time", "io-util", "rt", "macros", "fs"] }
+# http_download hashes each chunk as it lands rather than buffering the body.
+sha2 = "0.11"
+hex = "0.4"
+thiserror = "2"
+# SOCKS5 CONNECT dialing for the WSS proxy path.
+tokio-socks = "0.5"
+# join_all over the detect-stage probe futures.
+futures-util = { version = "0.3", default-features = false }
+# Proxy-client detection: process snapshot + per-client config-file discovery.
+sysinfo = { version = "0.33", default-features = false, features = ["system"] }
+dirs = "6"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tempfile = "3"

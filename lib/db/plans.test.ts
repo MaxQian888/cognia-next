@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 import type { AgentPlan, PlanConfig } from "@/types/agent/plan"
 import { DEFAULT_PLAN_CONFIG } from "@/types/agent/plan"
@@ -166,5 +167,21 @@ describe("agentPlanEvents log", () => {
       await appendPlanEvent({ planId: "p1", kind: "resumed", payload: { kind: "resumed" }, ts: i })
     }
     expect(await listPlanEvents("p1", 2)).toHaveLength(2)
+  })
+})
+
+describe("workspace (project) scoping", () => {
+  it("createPlan inherits the session's project; listAllPlans filters by workspace", async () => {
+    await getDb().sessions.bulkPut([
+      { id: "ses_a", projectId: "proj-A", title: "a", updatedAt: 1, createdAt: 1 },
+      { id: "ses_b", projectId: "proj-B", title: "b", updatedAt: 1, createdAt: 1 },
+    ] as never)
+    const pA = await createPlan(buildPlan({ id: "pa", sessionId: "ses_a" }))
+    const pB = await createPlan(buildPlan({ id: "pb", sessionId: "ses_b" }))
+    expect(pA.projectId).toBe("proj-A")
+    expect(pB.projectId).toBe("proj-B")
+
+    expect((await listAllPlans(500, "proj-A")).map((p) => p.id)).toEqual(["pa"])
+    expect((await listAllPlans(500, "proj-B")).map((p) => p.id)).toEqual(["pb"])
   })
 })

@@ -1,0 +1,90 @@
+---
+title: "Telegram Bot Setup"
+description: "Create a bot with @BotFather, get the Bot Token, and connect it to cognia-next through long polling or webhook delivery."
+---
+
+# Telegram Bot Setup Guide
+
+This guide walks through creating a Telegram bot with [@BotFather](https://t.me/botfather), collecting its `Bot Token`, and connecting it to cognia-next through either **long polling** or **webhook** delivery.
+
+---
+
+## 1. Create a Bot with @BotFather
+
+1. Open [@BotFather](https://t.me/botfather) in Telegram and start a chat.
+2. Send `/newbot`, then follow the prompts:
+   - **Name** — the display name shown in chats, for example "Cognia Bot".
+   - **Username** — globally unique and ending in `bot`, for example `cognia_workspace_bot`.
+3. After creation, @BotFather returns a `Bot Token` shaped like `1234567890:ABCDEF...`. Store it securely; anyone with this token can control the bot.
+
+Optional @BotFather settings:
+
+| Command | Purpose |
+| --- | --- |
+| `/setprivacy` | Group privacy mode. When enabled, the bot only receives messages that mention it or reply to it. When disabled, it can receive all group messages. |
+| `/setcommands` | Registers slash commands so users see command hints in the Telegram composer. |
+
+> If you want the bot to passively receive all group messages, disable privacy mode with `/setprivacy` and re-add the bot to the group if needed.
+
+---
+
+## 2. Configure cognia-next
+
+1. Open cognia-next and navigate to **Settings → Platform Connections**.
+2. Open the **Adapters** tab, click **Add connector**, then choose **Telegram**.
+3. In the **Telegram configuration** dialog, fill in:
+
+   | Field | Description |
+   | --- | --- |
+   | **Display name** | Internal name for this bot, for example "My Workspace Bot". |
+   | **Bot Token** | The token from @BotFather. It is encrypted in the OS keyring and never written to logs. |
+   | **Transport** | **Long polling** (default): cognia-next polls Telegram and needs no public URL. **Webhook**: Telegram pushes updates to your public URL. |
+
+4. In the desktop app, click **Test** after entering the token. It calls Telegram `getMe` and shows the bot username and id on success.
+
+   > The **Test** button requires the Tauri desktop runtime. It is disabled in browser-only mode.
+
+5. Click **Create**.
+
+---
+
+## 3. Configure Public Ingress (Webhook Only)
+
+If you selected **Webhook**, Telegram needs a public **HTTPS** endpoint.
+
+1. Start **Cloudflared Tunnel** under **Settings → Mobile Companion** to expose a public HTTPS URL.
+2. Reopen the saved Telegram adapter. Once the tunnel is ready, the **Delivery** section shows the bot's **Webhook URL**; click **Copy**.
+3. Save the adapter. cognia-next registers the URL with Telegram through `setWebhook`.
+4. Optionally enter a **Webhook Secret**. Telegram sends it in the `X-Telegram-Bot-Api-Secret-Token` request header, and cognia-next verifies it before accepting webhook updates.
+
+When the tunnel is not running, the form directs you back to **Mobile Companion**. A new unsaved webhook adapter cannot show its final URL until the adapter id exists.
+
+---
+
+## 4. Verify the Connection
+
+1. Send the bot a direct message in Telegram, or mention it in a group where it has been invited.
+2. The message should appear in cognia-next within a few seconds.
+3. Check **Platform Connections** — the adapter status should show **running**.
+
+If the adapter shows **stopped** or **degraded**:
+
+- Confirm the `Bot Token` is correct; it should look like `1234567890:ABCDEF...`.
+- For webhook mode, confirm the Cloudflared Tunnel is running and the saved webhook URL is the one registered with Telegram.
+- If group messages do not arrive, check whether group privacy mode needs to be disabled through `/setprivacy`.
+- Open **Settings → Platform Connections → Audit Log** for details.
+
+---
+
+## Notes
+
+- **Long polling vs webhook**: long polling is the default and recommended path for most local desktop setups because it needs no public URL. Webhook delivery has lower push latency but requires a stable public HTTPS endpoint.
+- **Group privacy mode**: Telegram enables privacy mode by default. In groups, the bot only sees mentions, replies, and commands unless you disable privacy mode in @BotFather.
+- **Credential security**: `Bot Token` and webhook secret are encrypted in the OS keyring and never written to logs. Do not paste a bot token in public channels.
+- **History**: Telegram Bot API does not expose arbitrary chat-history fetching. The adapter only processes live updates it receives.
+- **Rate limits**: when Telegram returns 429, cognia-next reads the `retry_after` cooldown and backs off before retrying outbound sends.
+
+Reference links:
+
+- [@BotFather](https://t.me/botfather)
+- [Telegram Bot API](https://core.telegram.org/bots/api)

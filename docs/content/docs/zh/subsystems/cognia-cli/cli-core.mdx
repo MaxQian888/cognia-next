@@ -6,13 +6,14 @@ description: main.rs —— clap-derive 命令树、dispatch_plugin() 路由器�
 # CLI core & terminal UI
 
 <TLDR>
-  `main.rs`（`crates/cognia-cli/src/main.rs`，465 行）解析一棵嵌套的 clap-derive 树 ——
-  `Cli` → `TopCommand::Plugin` → 一个 11 变体的 `PluginCommand` enum —— 解析出一个 `ColorMode`，
-  构建一个 `RuntimeUi`（`ui/runtime.rs:60`），并通过 `dispatch_plugin()`
-  （`main.rs:288`）路由。每个交互触点都经过 **`Prompter` trait**
-  （`ui/prompter.rs:82`），它有三个实现：TTY 上的 `DialoguerPrompter`、以可执行的 flag 提示
+  `main.rs`（`crates/cognia-cli/src/main.rs`）解析一棵 clap-derive 树 ——
+  `Cli` → `TopCommand`（`plugin`、`acp`、`release-key`、`release-verify`），其中 `plugin`
+  下挂一个 14 变体的 `PluginCommand` enum —— 解析出一个 `ColorMode`，构建一个 `RuntimeUi`
+  （`ui/runtime.rs`），并通过 `dispatch_plugin()` 路由插件命令。
+  每个交互触点都经过 **`Prompter` trait**
+  （`ui/prompter.rs`），它有三个实现：TTY 上的 `DialoguerPrompter`、以可执行的 flag 提示
   拒绝的 `NoninteractivePrompter`，以及用于确定性测试的 `MockPrompter`。错误从 `anyhow` 流向
-  `eyre`（`anyhow_to_eyre`，`main.rs:277`），让 color-eyre 渲染完整的成因链；exit code 为
+  `eyre`（`anyhow_to_eyre`），让 color-eyre 渲染完整的成因链；exit code 为
   0 / 1 / 2（clap）/ 101（panic）。
 </TLDR>
 
@@ -38,42 +39,47 @@ description: main.rs —— clap-derive 命令树、dispatch_plugin() 路由器�
 ## 命令树
 
 ```rust
-// crates/cognia-cli/src/main.rs:83-115
+// crates/cognia-cli/src/main.rs (abridged)
 struct Cli {
-    --color <auto|always|never>   // default auto          (main.rs:88)
-    --no-color                    // wins over --color     (main.rs:91)
-    -q, --quiet                   // suppress non-error    (main.rs:94)
-    -v, --verbose                 // repeatable, max -vv   (main.rs:97)
-    -y, --yes                     // pre-confirm; CI mode  (main.rs:101)
+    --color <auto|always|never>   // default auto
+    --no-color                    // wins over --color
+    -q, --quiet                   // suppress non-error
+    -v, --verbose                 // repeatable, max -vv
+    -y, --yes                     // pre-confirm; CI mode
     command: TopCommand,
 }
 
 enum TopCommand {
-    Plugin { #[command(subcommand)] command: PluginCommand },   // main.rs:108-115
+    Plugin { #[command(subcommand)] command: PluginCommand },
+    Acp,
+    ReleaseKey { json: bool },
+    ReleaseVerify { artifact, checksums, artifact_name, signature, json },
 }
 ```
 
-11 个 `PluginCommand` 变体（`main.rs:117-241`）及其在
-`dispatch_plugin()`（`main.rs:288-346`）中的分发点：
+14 个 `PluginCommand` 变体及其在 `dispatch_plugin()` 中的分发点：
 
 | 变体 | Flags | 分发 |
 | --- | --- | --- |
-| `New` | `--dir` `--kind` `--author` `--author-email` `--description` `--with-keygen` | `main.rs:298` |
-| `Lint` | `--path .` `--json` | `main.rs:310`（先设置 `ui.flags.json`） |
-| `Build` | `--path .` `--out` `--skip-build` | `main.rs:316` |
-| `Info` | `--json` `--detailed` | `main.rs:323` |
-| `Sign` | `--key`（必需） `--out` | `main.rs:325` |
-| `Verify` | `--public-key` `--signature` `--json` | `main.rs:333` |
-| `Keygen` | `--out-dir .cognia` | `main.rs:335` |
-| `Install` | — | `main.rs:336` |
-| `Uninstall` | `--purge-data` | `main.rs:340` |
-| `Dev` | `--path .` `--reload-url` | `main.rs:341` |
-| `EmbedVersion` | `--out` | `main.rs:343` → `cmd_embed_version`（`main.rs:348`） |
+| `New` | `--dir` `--kind` `--author` `--author-email` `--description` `--with-keygen` `--json` | `dispatch_plugin()` 先设置 `ui.flags.json` 并记录 verbose 上下文，再调用 `cmd_new::run` |
+| `Lint` | `--path .` `--json` | `dispatch_plugin()` 先设置 `ui.flags.json` |
+| `Build` | `--path .` `--out` `--skip-build` `--json` | `dispatch_plugin()` |
+| `Info` | `--json` `--detailed` | `dispatch_plugin()` |
+| `Sign` | `--key`（必需） `--out` `--json` | `dispatch_plugin()` |
+| `Verify` | `--public-key` `--signature` `--json` | `dispatch_plugin()` |
+| `Keygen` | `--out-dir .cognia` `--json` | `dispatch_plugin()` |
+| `Install` | `<path>` bundle 或目录 `--json` | `dispatch_plugin()` |
+| `Uninstall` | `--purge-data` `--json` | `dispatch_plugin()` |
+| `List` | `--json` | `dispatch_plugin()` |
+| `Reload` | `--path`（`--bundle` 的可见 alias）`--plugin-id` `--json` | `dispatch_plugin()` |
+| `Status` | `--json` | `dispatch_plugin()` 先设置 `ui.flags.json` |
+| `Dev` | `--path .` `--reload-url` `--once` `--json` | `dispatch_plugin()` |
+| `EmbedVersion` | `--out` `--json` | `dispatch_plugin()` → `cmd_embed_version` |
 
 ### 九行看懂 main()
 
 ```rust
-// crates/cognia-cli/src/main.rs:243-272 (abridged)
+// crates/cognia-cli/src/main.rs (abridged)
 let cli = Cli::parse();
 let color_mode = if cli.no_color { ColorMode::Never }
                  else { ColorMode::parse(&cli.color)? };
@@ -84,12 +90,23 @@ ui.apply_color_override();          // owo_colors::set_override
 ui::error::install()?;              // idempotent color-eyre hook
 let result = match cli.command {
     TopCommand::Plugin { command } => dispatch_plugin(command, &mut ui),
+    TopCommand::Acp => { ui.verbose("running acp"); cmd_acp::run(&ui) },
+    TopCommand::ReleaseKey { json } => cmd_release_key::run(json, &mut ui),
+    TopCommand::ReleaseVerify { .. } => cmd_release_verify::run(...),
 };
-result.map_err(anyhow_to_eyre)?;
+if let Err(err) = result {
+    if err.is::<cmd_lint::LintError>() || err.is::<JsonFailureExit>() {
+        std::process::exit(1);
+    }
+    return Err(anyhow_to_eyre(err));
+}
 ```
 
-命令返回 `anyhow::Result`；`anyhow_to_eyre()`（`main.rs:277-286`）将链反向重新包装，
-使 color-eyre 带完整上下文按 innermost-first 顺序打印。
+命令返回 `anyhow::Result`；有界 `--json` 失败会先在 stdout 打印带 `schemaVersion` 的 payload，
+再返回 `JsonFailureExit`，所以 `main()` 直接 exit 1，不让 color-eyre 往 stderr 追加人类诊断。
+Lint 错误同理通过 `LintError` 保留命令自己的报告并 exit 1。其他错误才进入
+`anyhow_to_eyre()`，它会反向重新包装错误链，使 color-eyre 带完整上下文按
+innermost-first 顺序打印。
 
 ## RuntimeUi —— 每次调用的状态
 
@@ -119,9 +136,12 @@ flowchart LR
 ```
 
 命令依赖的 helper 方法：`prompter()`（`runtime.rs:124`）、`show_progress()` =
-`!quiet`（`runtime.rs:129`），以及 `confirm_overwrite(path, flag_hint)`（`runtime.rs:155-168`）——
-当路径不存在或设置了 `--yes` 时立即返回 `true`，否则以默认 **No** 提示。`keygen`、`sign` 和 `new`
-都通过它来门控破坏性写入。
+`!quiet`（`runtime.rs:129`）、用于 human-only stderr 诊断的 `show_verbose()` / `verbose(...)`，
+以及 `confirm_overwrite(path, flag_hint)`（`runtime.rs:155-168`）——当路径不存在或设置了
+`--yes` 时立即返回 `true`，否则以默认 **No** 提示。`verbose(...)` 只会在设置
+`-v/--verbose` 且没有 `--quiet`、没有该命令的 `--json` 时打印，所以 JSON stdout 仍可解析，
+quiet 成功输出仍保持静默。`keygen`、`sign` 和 `new` 都通过 `confirm_overwrite`
+来门控破坏性写入。
 
 ## Prompter trait —— 三个实现
 
@@ -175,13 +195,16 @@ non-interactive shell: prompt `<prompt>` requires input — pass `<flag_hint>` t
 | 101 | panic（color-eyre panic hook） |
 
 `lint` 是唯一一个在报告含有错误时通过显式 `std::process::exit(1)` 退出 1 的命令
-（`cmd_lint.rs:226-230`）—— 仅有 warning 则保持 exit 0。
+（`cmd_lint::run`）—— 仅有 warning 则保持 exit 0。
 
 ## 集成测试
 
 `crates/cognia-cli/tests/integration.rs` 以 `NO_COLOR=1`、`CI=true` 并清空 stdin，通过
-`CARGO_BIN_EXE_cognia` 启动已编译的二进制。这 10 个测试钉住公开契约：`--help` /
-`--version` 的形态、对干净 vs 损坏 manifest 的 lint exit code、`lint --json` 携带
-`schemaVersion: 1`、`info --json` 以 `signature.status = "no-sidecar"` 往返、
-`new` 在非 TTY 且无名称时失败（带可执行提示）并在有显式参数时成功、未知子命令错误，以及
-`NO_COLOR` 从输出中剥离每一个 ANSI 转义。
+`CARGO_BIN_EXE_cognia` 启动已编译的二进制。该套件钉住公开契约：`--help` /
+`--version` 的形态、对干净 vs 损坏 manifest 的 lint exit code、每个有界插件命令的
+JSON payload（包括 `dev --once --json`）、`info --json` 以 bundle 与目录输入往返、每一种
+模板的 scaffold 创建、release-key 与 release-verify 报告、未知子命令错误、`--quiet`
+在保留副作用和 ACP 协议 stdout 的同时压制非错误 human 输出，以及 `NO_COLOR`
+从输出中剥离每一个 ANSI 转义。bridge-client smoke 检查会确保 `plugin install --help`、
+`plugin info --help`、`plugin list --help`、`plugin reload --help` 和 `plugin status --help`
+持续通过 clap 暴露，避免这些非 TUI bridge 表面静默消失。

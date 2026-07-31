@@ -1,4 +1,19 @@
-import { invoke } from "@tauri-apps/api/core"
+import { isTauri } from "@/lib/native/utils"
+import { isHeadlessHost } from "@/lib/platform/detect"
+import { isRemoteHostActive } from "@/lib/tauri/transport-routing"
+
+async function invokePluginHost<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  // Always use the shared transport: it resolves to Tauri locally and to the
+  // active Companion route for a separated remote UI. Direct `invoke` here
+  // would mutate the viewer's local permission ledger instead of the brain's.
+  const { transport } = await import("@/lib/tauri/transport-instance")
+  return transport.call<T>(command, args)
+}
+
+/** True when the canonical Rust plugin gateway is reachable on this host. */
+export function isPluginGatewayAvailable(): boolean {
+  return isTauri() || isHeadlessHost() || isRemoteHostActive()
+}
 
 export type PluginApiErrorCode =
   | "INVALID_REQUEST"
@@ -8,6 +23,7 @@ export type PluginApiErrorCode =
   | "NOT_FOUND"
   | "CONFLICT"
   | "TIMEOUT"
+  | "INCOMPATIBLE_SDK"
   | "INTERNAL"
 
 export interface PluginApiError {
@@ -45,8 +61,16 @@ export interface InvokePluginApiOptions {
   timeoutMs?: number
   context?: unknown
   sdkVersion?: string
+  /**
+   * Retry attempts after the first failure. Defaults to 1 for idempotent
+   * (read-shaped) APIs and 0 otherwise (W6.3) — a TIMEOUT on a
+   * side-effecting call may have executed host-side, so blind retry could
+   * double-execute. Pass explicitly to override either way.
+   */
   retries?: number
   retryDelayMs?: number
+  /** Force the idempotency classification instead of deriving it from `api`. */
+  idempotent?: boolean
 }
 
 export class PluginGatewayError extends Error {
@@ -85,6 +109,17 @@ function shouldRetry(code: PluginApiErrorCode): boolean {
   return code === "TIMEOUT" || code === "INTERNAL"
 }
 
+/**
+ * Read-shaped APIs are safe to retry; anything else (set/write/delete/run/…)
+ * may have executed host-side before the failure surfaced (W6.3).
+ */
+const IDEMPOTENT_API_PATTERN =
+  /:(get|list|read|stat|exists|has|describe|query|watch|status|info|count|peek)([:.]|$)/
+
+export function isIdempotentPluginApi(api: string): boolean {
+  return IDEMPOTENT_API_PATTERN.test(api)
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -96,7 +131,8 @@ export async function invokePluginApi<T = unknown>(
   options: InvokePluginApiOptions = {}
 ): Promise<T> {
   const requestId = createRequestId()
-  const retries = options.retries ?? 1
+  const idempotent = options.idempotent ?? isIdempotentPluginApi(api)
+  const retries = options.retries ?? (idempotent ? 1 : 0)
   const retryDelayMs = options.retryDelayMs ?? 150
   const request: PluginApiInvokeRequest = {
     sdkVersion: options.sdkVersion ?? "2.0.0",
@@ -111,7 +147,7 @@ export async function invokePluginApi<T = unknown>(
   let attempt = 0
   while (true) {
     attempt += 1
-    const response = await invoke<PluginApiInvokeResponse<T>>("plugin_api_invoke", {
+    const response = await invokePluginHost<PluginApiInvokeResponse<T>>("plugin_api_invoke", {
       request,
     })
 
@@ -165,7 +201,7 @@ export async function invokePluginApiBatch(
     })),
   }
 
-  const response = await invoke<{
+  const response = await invokePluginHost<{
     success: boolean
     results: PluginApiInvokeResponse[]
   }>("plugin_api_batch_invoke", { request: payload })
@@ -174,7 +210,7 @@ export async function invokePluginApiBatch(
 }
 
 export async function getPluginCapabilities() {
-  return invoke<
+  return invokePluginHost<
     Array<{
       api: string
       supported: boolean
@@ -185,14 +221,35 @@ export async function getPluginCapabilities() {
   >("plugin_get_capabilities")
 }
 
-export async function grantPluginPermission(pluginId: string, permission: string): Promise<void> {
-  await invoke("plugin_permission_grant", { request: { pluginId, permission } })
+export async function grantPluginPermission(
+  pluginId: string,
+  permission: string,
+  grantedBy = "user",
+  expiresAt?: string
+): Promise<void> {
+  // Flat args matching the Rust command signature
+  // `plugin_permission_grant(plugin_id, permission, granted_by, expires_at)`.
+  // The old `{ request: { … } }` wrapper never deserialized, so grants
+  // silently failed to persist. Tauri maps camelCase JS keys to snake_case.
+  await invokePluginHost("plugin_permission_grant", {
+    pluginId,
+    permission,
+    grantedBy,
+    expiresAt: expiresAt ?? null,
+  })
 }
 
 export async function revokePluginPermission(pluginId: string, permission: string): Promise<void> {
-  await invoke("plugin_permission_revoke", { request: { pluginId, permission } })
+  await invokePluginHost("plugin_permission_revoke", { pluginId, permission })
 }
 
 export async function listPluginPermissions(pluginId: string): Promise<string[]> {
-  return invoke<string[]>("plugin_permission_list", { pluginId })
+  const grants = await invokePluginHost<Array<string | { permission?: unknown }>>(
+    "plugin_permission_list",
+    { pluginId }
+  )
+  return grants.flatMap((grant) => {
+    if (typeof grant === "string") return [grant]
+    return typeof grant?.permission === "string" ? [grant.permission] : []
+  })
 }

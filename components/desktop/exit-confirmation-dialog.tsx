@@ -22,7 +22,7 @@ import {
   setCloseBehavior,
   type CloseBehavior,
 } from "@/lib/tauri/close-behavior"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 /**
  * Global overlay (mounted once in `app/layout.tsx`, like `<ConsentOverlay/>`)

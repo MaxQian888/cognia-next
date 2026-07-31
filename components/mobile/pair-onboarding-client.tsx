@@ -23,16 +23,23 @@
  * working for the existing test suite.
  */
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 
+import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { usePlatform } from "@/hooks/use-platform"
 import { mobileTransition } from "@/lib/ui/motion"
+import { buildTimeServerUrl } from "@/lib/platform/web-companion"
 import { hydrateCompanionConfig, type CompanionConfig } from "@/lib/tauri/transport-companion"
 import type { DiscoveredServer } from "@/lib/connectivity/lan-scanner"
-import { loadRecentServers, recentServersToDiscovered } from "@/lib/connectivity/recent-servers"
+import {
+  loadRecentServers,
+  recentServersToDiscovered,
+  type RecentServer,
+} from "@/lib/connectivity/recent-servers"
 
 import { DiscoverStep } from "./pair/discover-step"
 import { PairStep } from "./pair/pair-step"
@@ -56,7 +63,7 @@ type PhasePaired = {
 }
 type Phase = PhaseLoading | PhaseUnpaired | PhasePaired
 
-interface Selection {
+export interface Selection {
   baseUrl: string
   pairJwt: string
   fingerprint: string
@@ -72,13 +79,106 @@ const EMPTY_SELECTION: Selection = {
   autoScan: false,
 }
 
+/** Stepper steps shown on a plain browser — there is no LAN discovery. */
+const WEB_STEPS: readonly PairStepName[] = ["pair", "paired"] as const
+
+/**
+ * Query params other surfaces navigate here with:
+ *   - `?baseUrl=…&fingerprint=…` — the connection-state scan sheet's
+ *     "tap a discovered server" path: pre-fill and lock the pair form.
+ *   - `?switchTo=<deviceId>`     — the paired-servers sheet's switch path:
+ *     resolve the device to a recent-server entry (recorded at pair time
+ *     with `label = deviceId.slice(0, 8)`) and pre-fill its baseUrl so the
+ *     user re-validates against that server without typing anything.
+ */
+export interface PairPageParams {
+  switchTo: string | null
+  baseUrl: string | null
+  fingerprint: string | null
+}
+
+export function readPairParams(search?: string): PairPageParams {
+  if (typeof window === "undefined" && search === undefined) {
+    return { switchTo: null, baseUrl: null, fingerprint: null }
+  }
+  const p = new URLSearchParams(search ?? window.location.search)
+  return {
+    switchTo: p.get("switchTo"),
+    baseUrl: p.get("baseUrl"),
+    fingerprint: p.get("fingerprint"),
+  }
+}
+
+/**
+ * Turn the incoming query params into a pair-step selection, or `null` when
+ * the params don't identify a target server (plain `/pair` visit, or a
+ * `switchTo` for a device we have no recent-server record of).
+ */
+export function resolveParamSelection(
+  params: PairPageParams,
+  recents: RecentServer[]
+): Selection | null {
+  if (params.baseUrl) {
+    return {
+      baseUrl: params.baseUrl,
+      pairJwt: "",
+      fingerprint: params.fingerprint ?? "",
+      locked: true,
+      autoScan: false,
+    }
+  }
+  if (params.switchTo) {
+    // Prefer the exact deviceId recorded at pair time; fall back to the
+    // legacy label match (`deviceId.slice(0, 8)`) for entries persisted
+    // before `deviceId` was added to the recent-server record.
+    const label = params.switchTo.slice(0, 8)
+    const match =
+      recents.find((r) => r.deviceId === params.switchTo) ??
+      recents.find((r) => r.label === label)
+    if (match) {
+      return {
+        baseUrl: match.baseUrl,
+        pairJwt: "",
+        fingerprint: match.fingerprint ?? "",
+        locked: true,
+        autoScan: false,
+      }
+    }
+  }
+  return null
+}
+
+/** Reveal the manual-entry escape on the loading screen after this long. */
+const SLOW_HINT_MS = 2500
+/** Hard ceiling: stop waiting on hydration and show the discover step. */
+const CEILING_MS = 8000
+
 export function PairOnboardingClient() {
   const router = useRouter()
   const t = useTranslations("mobile.pair")
+  // ADR-0059 C2 — a plain browser has no camera plugin and no LAN to scan:
+  // skip the Discover step, land straight on the manual pair form, and
+  // pre-fill (and lock) the server URL when the deployment baked one in via
+  // NEXT_PUBLIC_COGNIA_SERVER_URL.
+  const platform = usePlatform()
+  const isWebHost = platform === "web"
+  const unpairedStep: PairStepName = isWebHost ? "pair" : "discover"
+  const unpairedSelection = useMemo<Selection>(() => {
+    if (!isWebHost) return EMPTY_SELECTION
+    const envUrl = buildTimeServerUrl()
+    return { ...EMPTY_SELECTION, baseUrl: envUrl ?? "", locked: envUrl !== null }
+  }, [isWebHost])
 
   const [phase, setPhase] = useState<Phase>({ kind: "loading" })
   const [step, setStep] = useState<PairStepName>("discover")
   const [selection, setSelection] = useState<Selection>(EMPTY_SELECTION)
+  // `true` once hydration has been slow enough to warrant a manual escape on
+  // the loading screen. The full-page spinner used to be a dead end: if the
+  // SecureStorage round-trip stalled on device (observed after sign-out),
+  // there was no way out and the user was stuck on "checking for an existing
+  // pairing" forever. We now reveal a "set up manually" affordance early and
+  // hard-fall-through to the discover step as a backstop.
+  const [hydrateSlow, setHydrateSlow] = useState(false)
   const reduce = useReducedMotion()
   // Recently-paired servers (localStorage) — surfaced as the Discover step's
   // "Recent" group so the user can one-tap reconnect even after sign-out.
@@ -86,14 +186,49 @@ export function PairOnboardingClient() {
   const [recentServers] = useState<DiscoveredServer[]>(() =>
     recentServersToDiscovered(loadRecentServers())
   )
+  // Incoming `?baseUrl=…` / `?switchTo=…` navigation (scan sheet / switch
+  // sheet). Read once on mount; resolved against the recent-server log.
+  const [paramSelection] = useState<Selection | null>(() =>
+    resolveParamSelection(readPairParams(), loadRecentServers())
+  )
+  const [switchToParam] = useState<string | null>(() => readPairParams().switchTo)
 
   // Hydrate cache from storage on mount; if a config exists, jump to the
   // paired step and let the user verify before continuing to chat.
+  //
+  // The hydrate is wrapped in two timers so the loading screen can never
+  // become a dead end:
+  //   • SLOW_HINT_MS — surface a manual-entry button + reassurance copy.
+  //   • CEILING_MS   — give up waiting and drop the user on the discover
+  //     step. Re-pairing from there still works even if the storage read
+  //     never settled (a fresh pair overwrites whatever was stuck).
   useEffect(() => {
     let cancelled = false
+    let settled = false
+
+    const fallThrough = () => {
+      if (cancelled || settled) return
+      settled = true
+      setPhase({ kind: "unpaired" })
+      setSelection(unpairedSelection)
+      setStep(unpairedStep)
+    }
+
+    const slowTimer = setTimeout(() => {
+      if (!cancelled && !settled) setHydrateSlow(true)
+    }, SLOW_HINT_MS)
+    const ceilingTimer = setTimeout(fallThrough, CEILING_MS)
+
+    const finish = () => {
+      clearTimeout(slowTimer)
+      clearTimeout(ceilingTimer)
+    }
+
     void hydrateCompanionConfig()
       .then((cfg) => {
-        if (cancelled) return
+        if (cancelled || settled) return
+        settled = true
+        finish()
         if (cfg) {
           setPhase({
             kind: "paired",
@@ -101,21 +236,57 @@ export function PairOnboardingClient() {
             deviceId: cfg.deviceId,
             serverVersion: cfg.serverVersion,
           })
-          setStep("paired")
+          // Already paired to the requested target (or no target at all) →
+          // the usual paired step. A switch/prefill request for a DIFFERENT
+          // server drops onto the pair step with that server pre-filled so
+          // the user re-validates against it without re-typing.
+          const alreadyOnTarget =
+            switchToParam !== null
+              ? cfg.deviceId === switchToParam
+              : paramSelection === null || paramSelection.baseUrl === cfg.baseUrl
+          if (alreadyOnTarget) {
+            setStep("paired")
+          } else if (paramSelection) {
+            setSelection(paramSelection)
+            setStep("pair")
+          } else {
+            // switchTo for a device with no recent-server record — the
+            // Discover step (with its Recent group) is the best landing.
+            setSelection(unpairedSelection)
+            setStep(unpairedStep)
+          }
+        } else if (paramSelection) {
+          setPhase({ kind: "unpaired" })
+          setSelection(paramSelection)
+          setStep("pair")
         } else {
           setPhase({ kind: "unpaired" })
-          setStep("discover")
+          setSelection(unpairedSelection)
+          setStep(unpairedStep)
         }
       })
       .catch(() => {
-        if (cancelled) return
+        if (cancelled || settled) return
+        settled = true
+        finish()
         setPhase({ kind: "unpaired" })
-        setStep("discover")
+        setSelection(unpairedSelection)
+        setStep(unpairedStep)
       })
+
     return () => {
       cancelled = true
+      finish()
     }
-  }, [])
+    // unpairedStep/-Selection are platform-derived and stable after mount;
+    // paramSelection/switchToParam are read-once mount state.
+  }, [unpairedStep, unpairedSelection, paramSelection, switchToParam])
+
+  const onSkipLoading = useCallback(() => {
+    setPhase({ kind: "unpaired" })
+    setSelection(unpairedSelection)
+    setStep(unpairedStep)
+  }, [unpairedStep, unpairedSelection])
 
   const onSelectServer = useCallback((server: DiscoveredServer) => {
     setSelection({
@@ -161,19 +332,36 @@ export function PairOnboardingClient() {
 
   const onAfterSignOut = useCallback(() => {
     setPhase({ kind: "unpaired" })
-    setSelection(EMPTY_SELECTION)
-    setStep("discover")
-  }, [])
+    setSelection(unpairedSelection)
+    setStep(unpairedStep)
+  }, [unpairedStep, unpairedSelection])
 
   if (phase.kind === "loading") {
     return (
       <main
         className="mx-auto flex min-h-[100dvh] max-w-md items-center justify-center safe-area-py safe-area-px"
         data-testid="pair-onboarding"
+        data-step="loading"
       >
         <div className="flex flex-col items-center gap-3" role="status" aria-live="polite">
           <Spinner className="size-6" />
           <p className="text-sm text-muted-foreground">{t("loadingTitle")}</p>
+          {hydrateSlow ? (
+            <div className="flex flex-col items-center gap-2 pt-1">
+              <p className="max-w-xs text-center text-xs text-muted-foreground">
+                {t("loadingSlow")}
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onSkipLoading}
+                data-testid="pair-loading-skip"
+              >
+                {t("loadingManualCta")}
+              </Button>
+            </div>
+          ) : null}
         </div>
       </main>
     )
@@ -187,10 +375,14 @@ export function PairOnboardingClient() {
     >
       <header className="flex flex-col gap-3">
         <div className="flex flex-col gap-1.5">
-          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">{t("title")}</h1>
-          <p className="text-sm text-muted-foreground">{t("intro")}</p>
+          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
+            {isWebHost ? t("web.title") : t("title")}
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            {isWebHost ? t("web.intro") : t("intro")}
+          </p>
         </div>
-        <PairStepper current={step} />
+        <PairStepper current={step} steps={isWebHost ? WEB_STEPS : undefined} />
       </header>
 
       <AnimatePresence mode="wait" initial={false}>
@@ -201,7 +393,7 @@ export function PairOnboardingClient() {
           exit={reduce ? undefined : { opacity: 0, y: -8 }}
           transition={mobileTransition("fast")}
         >
-          {step === "discover" ? (
+          {step === "discover" && !isWebHost ? (
             <DiscoverStep
               history={recentServers}
               onSelect={onSelectServer}
@@ -218,8 +410,9 @@ export function PairOnboardingClient() {
               prefilledFingerprint={selection.fingerprint}
               lockBaseUrl={selection.locked}
               autoScan={selection.autoScan}
+              webMode={isWebHost}
               onPaired={onPaired}
-              onBack={onBackToDiscover}
+              onBack={isWebHost ? undefined : onBackToDiscover}
             />
           ) : null}
 

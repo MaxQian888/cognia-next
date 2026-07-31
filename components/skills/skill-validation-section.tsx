@@ -3,7 +3,7 @@
 import { useTranslations } from "next-intl"
 import { AlertTriangleIcon, CheckCircle2Icon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import type { SkillValidationError } from "@/lib/claude/types"
+import type { SkillValidationError } from "@cognia/agent-config-types"
 
 interface Props {
   errors: SkillValidationError[]

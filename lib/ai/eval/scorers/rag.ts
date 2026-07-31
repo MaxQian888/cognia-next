@@ -10,10 +10,12 @@
  *                                retrieved (deterministic lexical overlap; no LLM).
  *
  * The three LLM-backed metrics approximate Ragas via a single statement/verdict
- * extraction call and fail open (a parse/provider error yields an errored Score
- * the report treats as not-applicable, never crashing the run). The LLM ones
- * are not-applicable when no retrieval happened; context-recall is
- * not-applicable without a `reference.expectedContext`.
+ * extraction call and fail open (a parse/provider error yields an `errored`
+ * Score that decides nothing, never crashing the run). The LLM ones report
+ * `not-applicable` when no retrieval happened; context-recall is
+ * `not-applicable` without a `reference.expectedContext`. The two statuses are
+ * distinct on purpose: "this dataset has no RAG references" and "the provider
+ * is down" must not look alike in the report.
  */
 
 import type { LlmClient } from "@/lib/twin/distill/llm"
@@ -38,6 +40,7 @@ function naScore(id: string, reason: string): Score {
   return {
     scorerId: id,
     dimension: "rag",
+    status: "not-applicable",
     value: 0,
     passed: false,
     error: `not-applicable: ${reason}`,
@@ -45,7 +48,14 @@ function naScore(id: string, reason: string): Score {
 }
 
 function errScore(id: string, message: string): Score {
-  return { scorerId: id, dimension: "rag", value: 0, passed: false, error: message }
+  return {
+    scorerId: id,
+    dimension: "rag",
+    status: "errored",
+    value: 0,
+    passed: false,
+    error: message,
+  }
 }
 
 function contextText(sample: EvalSample): string {
@@ -84,6 +94,7 @@ export function makeRagScorer(options: RagScorerOptions): Scorer {
     id,
     dimension: "rag",
     requiresLlm,
+    gating: true,
     async score(sample: EvalSample, evalCase: EvalCase): Promise<Score> {
       if (metric === "context-recall") {
         const expected = evalCase.reference?.expectedContext
@@ -94,6 +105,7 @@ export function makeRagScorer(options: RagScorerOptions): Scorer {
         return {
           scorerId: id,
           dimension: "rag",
+          status: "scored",
           value,
           passed: value >= 1,
           metadata: { recalled, total: expected.length },
@@ -118,13 +130,21 @@ export function makeRagScorer(options: RagScorerOptions): Scorer {
         if (!res.ok) return errScore(id, res.error)
         const statements = Array.isArray(res.value.statements) ? res.value.statements : []
         if (statements.length === 0) {
-          return { scorerId: id, dimension: "rag", value: 1, passed: true, metadata: { total: 0 } }
+          return {
+            scorerId: id,
+            dimension: "rag",
+            status: "scored",
+            value: 1,
+            passed: true,
+            metadata: { total: 0 },
+          }
         }
         const supported = statements.filter((s) => s.supported === true).length
         const value = supported / statements.length
         return {
           scorerId: id,
           dimension: "rag",
+          status: "scored",
           value,
           passed: value >= 1,
           metadata: { supported, total: statements.length },
@@ -147,6 +167,7 @@ export function makeRagScorer(options: RagScorerOptions): Scorer {
         return {
           scorerId: id,
           dimension: "rag",
+          status: "scored",
           value,
           passed: value >= threshold,
           metadata: { relevant, total: verdicts.length },
@@ -164,7 +185,7 @@ export function makeRagScorer(options: RagScorerOptions): Scorer {
       if (!Number.isFinite(relevancy))
         return errScore(id, "answer-relevancy: missing relevancy number")
       const value = Math.max(0, Math.min(1, relevancy))
-      return { scorerId: id, dimension: "rag", value, passed: value >= threshold }
+      return { scorerId: id, dimension: "rag", status: "scored", value, passed: value >= threshold }
     },
   }
 }

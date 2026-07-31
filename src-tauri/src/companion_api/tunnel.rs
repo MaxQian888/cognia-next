@@ -44,9 +44,22 @@ pub struct TunnelHandle {
     info_rx: watch::Receiver<Option<TunnelInfo>>,
 }
 
+/// What the managed-process registry needs to show (and stop) a live tunnel.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TunnelManagedInfo {
+    pub pid: Option<u32>,
+    /// Public hostname the tunnel is serving, for the row's detail column.
+    pub public_url: Option<String>,
+}
+
 impl TunnelHandle {
     pub fn info(&self) -> Option<TunnelInfo> {
         self.info.lock().clone()
+    }
+
+    /// OS pid of the `cloudflared` child, if it is still held.
+    pub fn pid(&self) -> Option<u32> {
+        self.child.lock().as_ref().and_then(|c| c.id())
     }
 
     pub async fn wait_for_url(&self, timeout_secs: u64) -> Result<TunnelInfo, TunnelError> {
@@ -254,6 +267,18 @@ impl TunnelState {
         self.inner.lock().as_ref().and_then(|h| h.info())
     }
 
+    /// Snapshot for the managed-process registry. `None` when no tunnel is
+    /// running — a handle with no live child does not count.
+    pub fn managed_snapshot(&self) -> Option<TunnelManagedInfo> {
+        let guard = self.inner.lock();
+        let handle = guard.as_ref()?;
+        let pid = handle.pid()?;
+        Some(TunnelManagedInfo {
+            pid: Some(pid),
+            public_url: handle.info().map(|i| i.public_url),
+        })
+    }
+
     /// Set the cached named config (used when loading persisted config at
     /// boot so `current()` reports the hostname without re-starting).
     pub fn set_named_config(&self, config: super::tunnel_config::NamedTunnelConfig) {
@@ -262,7 +287,10 @@ impl TunnelState {
 
     /// Public URL from the named config cache, if any.
     pub fn named_public_url(&self) -> Option<String> {
-        self.named_config.lock().as_ref().map(|c| c.hostname.clone())
+        self.named_config
+            .lock()
+            .as_ref()
+            .map(|c| c.hostname.clone())
     }
 
     /// Whether a tunnel is currently being managed by this state.
@@ -281,6 +309,17 @@ impl Default for TunnelState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn managed_snapshot_is_none_without_a_running_tunnel() {
+        // The registry must not show a tunnel row (and offer a Kill button)
+        // when no cloudflared child exists.
+        let s = TunnelState::new();
+        assert_eq!(s.managed_snapshot(), None);
+        // Stopping an idle tunnel stays a no-op.
+        s.stop();
+        assert_eq!(s.managed_snapshot(), None);
+    }
 
     #[test]
     fn state_starts_idle() {

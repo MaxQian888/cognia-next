@@ -15,7 +15,12 @@
  */
 
 import type { RawSource } from "@/lib/twin/ingest/parse"
-import { conversationToRawSource, type ChatImporterOptions, type ChatMessageBlock } from "./types"
+import {
+  conversationToRawSource,
+  parseChatExportJson,
+  type ChatImporterOptions,
+  type ChatMessageBlock,
+} from "./types"
 
 interface RawNode {
   id: string
@@ -128,7 +133,7 @@ export function isChatgptExportShape(value: unknown): boolean {
 export function parseChatgptExport(text: string, opts: ChatImporterOptions): RawSource[] {
   const trimmed = text.trim()
   if (!trimmed) return []
-  const parsed = JSON.parse(trimmed) as RawConversation | RawConversation[]
+  const parsed = parseChatExportJson(trimmed, "ChatGPT") as RawConversation | RawConversation[]
   const conversations = Array.isArray(parsed) ? parsed : [parsed]
   const sources: RawSource[] = []
   for (const conv of conversations) {

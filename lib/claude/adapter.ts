@@ -4,17 +4,29 @@
 import type { UIMessage } from "ai"
 import type {
   BetaContentBlock,
+  BetaFileBlock,
   BetaMessage,
   BetaToolResultBlock,
   BetaToolUseBlock,
   SDKAssistantMessage,
   SDKMessage,
+  SDKPartialAssistantMessage,
   SDKResultMessage,
   SDKUserMessage,
   SendContent,
   SendContentBlock,
-} from "./types"
-import type { A2UIPart, ArtifactPart, SourcesPart, SourcesPartItem } from "./parts-extensions"
+} from "@cognia/agent-config-types"
+import type {
+  A2UIPart,
+  ArtifactPart,
+  McpResultBlock,
+  SourcesPart,
+  SourcesPartItem,
+} from "./parts-extensions"
+import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
+import type { HookNoticePartData } from "./hooks"
+import { registerUndoSnapshot } from "./compaction-undo"
+import { persistOpticalArchive, type OpticalBoundaryMeta } from "./optical-archive-persist"
 import { extractA2UIFromResponse } from "@/lib/a2ui/parser"
 import {
   extractAnthropicCitations,
@@ -58,8 +70,32 @@ type Part = Parts[number]
 export interface UsageInfo {
   inputTokens?: number
   outputTokens?: number
+  /**
+   * Authoritative tokens currently occupying the live context. External agents
+   * such as Codex report this independently from per-turn billable usage.
+   */
+  contextTokens?: number
+  /** Authoritative live model context-window size, when the provider reports it. */
+  contextWindow?: number
+  /**
+   * Prompt tokens occupying the *current* context window after the turn, when
+   * that differs from `inputTokens`. On the ai-sdk channel a turn runs a manual
+   * agent loop of several legs, and `inputTokens` SUMS every leg's prompt (the
+   * correct cumulative-billing figure, since the API re-charges each leg). The
+   * window, however, holds only the LAST leg's prompt — so window math must use
+   * this field when present. `undefined` on single-result channels (native
+   * Anthropic), where `inputTokens` already equals the window prompt.
+   */
+  contextInputTokens?: number
   cacheCreationInputTokens?: number
   cacheReadInputTokens?: number
+  /**
+   * Reasoning / "thinking" tokens reported separately by the provider (a subset
+   * of output tokens, already billed at the output rate). Surfaced for
+   * observability; `undefined` when the provider bundles thinking into output
+   * (native Anthropic) or the model doesn't reason.
+   */
+  reasoningTokens?: number
   totalCostUsd?: number
   durationMs?: number
 }
@@ -73,6 +109,15 @@ function buildAssistantParts(message: BetaMessage): Parts {
   const sources = collectSourcesFromMessage(message)
   if (sources) parts.push(sources as unknown as Part)
   return parts
+}
+
+function preserveStepStartParts(preview: UIMessage | undefined, finalParts: Parts): Parts {
+  if (!preview) return finalParts
+  const stepStarts = preview.parts.filter(
+    (part) => (part as { type?: string }).type === "step-start"
+  )
+  if (stepStarts.length === 0) return finalParts
+  return [...stepStarts, ...finalParts]
 }
 
 /**
@@ -117,22 +162,25 @@ function blockToParts(block: BetaContentBlock): Part[] {
     // consumers expect every text block to map to at least one Part — fall
     // back to an empty-string text Part to preserve that 1:1 contract.
     if (!text) {
-      return [{ type: "text", text: "", state: "done" } as unknown as Part]
+      return [textPart("", b.providerMetadata)]
     }
-    return splitTextForA2UI(text)
+    return splitTextForA2UI(text, b.providerMetadata)
   }
   const single = blockToPart(block)
   return single ? [single] : []
 }
 
-function splitTextForA2UI(text: string): Part[] {
+function splitTextForA2UI(
+  text: string,
+  providerMetadata?: Record<string, Record<string, unknown>>
+): Part[] {
   if (!text) return []
   // Fast-path: skip the regex if no a2ui marker in sight.
   if (!/```a2ui|"createSurface"|"updateComponents"|"surface"\s*:/i.test(text)) {
-    return [textPart(text)]
+    return [textPart(text, providerMetadata)]
   }
   const extracted = extractA2UIFromResponse(text)
-  if (!extracted) return [textPart(text)]
+  if (!extracted) return [textPart(text, providerMetadata)]
   // We don't get back the exact span the parser consumed, so we strip the
   // first ```a2ui|json fence (if any) to expose surrounding prose. When the
   // payload is raw JSON without a fence we keep the plain text part empty.
@@ -147,14 +195,25 @@ function splitTextForA2UI(text: string): Part[] {
     source: "codeblock",
   }
   const out: Part[] = []
-  if (before.trim()) out.push(textPart(before))
+  if (before.trim()) out.push(textPart(before, providerMetadata))
   out.push(a2ui as unknown as Part)
-  if (after.trim()) out.push(textPart(after))
+  if (after.trim()) out.push(textPart(after, providerMetadata))
   return out
 }
 
-function textPart(text: string): Part {
-  return { type: "text", text, state: "done" } as unknown as Part
+function textPart(text: string, providerMetadata?: Record<string, Record<string, unknown>>): Part {
+  return {
+    type: "text",
+    text,
+    state: "done",
+    ...providerMetadataPart({ providerMetadata }),
+  } as unknown as Part
+}
+
+function providerMetadataPart(block: {
+  providerMetadata?: Record<string, Record<string, unknown>>
+}): { providerMetadata?: Record<string, Record<string, unknown>> } {
+  return block.providerMetadata ? { providerMetadata: block.providerMetadata } : {}
 }
 
 function blockToPart(block: BetaContentBlock): Part | null {
@@ -165,14 +224,42 @@ function blockToPart(block: BetaContentBlock): Part | null {
         type: "text",
         text: b.text ?? "",
         state: "done",
+        ...providerMetadataPart(b),
       } as unknown as Part
     }
     case "thinking": {
-      const b = block as { type: "thinking"; thinking?: string }
+      const b = block as Extract<BetaContentBlock, { type: "thinking" }>
       return {
         type: "reasoning",
         text: b.thinking ?? "",
         state: "done",
+        ...providerMetadataPart(b),
+      } as unknown as Part
+    }
+    case "file": {
+      const b = block as BetaFileBlock
+      const source = b.source
+      if (typeof b.url === "string" && typeof b.media_type === "string") {
+        return {
+          type: "file",
+          url: b.url,
+          mediaType: b.media_type,
+          ...(b.filename ? { filename: b.filename } : {}),
+        } as unknown as Part
+      }
+      if (
+        !source ||
+        source.type !== "base64" ||
+        typeof source.media_type !== "string" ||
+        typeof source.data !== "string"
+      ) {
+        return null
+      }
+      return {
+        type: "file",
+        url: `data:${source.media_type};base64,${source.data}`,
+        mediaType: source.media_type,
+        ...(b.filename ? { filename: b.filename } : {}),
       } as unknown as Part
     }
     case "tool_use": {
@@ -181,16 +268,71 @@ function blockToPart(block: BetaContentBlock): Part | null {
       if (artifactPart) {
         return artifactPart as unknown as Part
       }
+      const state =
+        b.state === "input-streaming" || b.state === "approval-requested"
+          ? b.state
+          : "input-available"
       return {
         type: `tool-${b.name}`,
         toolCallId: b.id,
-        state: "input-available",
+        state,
         input: b.input,
+        ...(b.providerExecuted !== undefined ? { providerExecuted: b.providerExecuted } : {}),
+        ...(b.providerMetadata ? { providerMetadata: b.providerMetadata } : {}),
+        ...(b.toolMetadata ? { toolMetadata: b.toolMetadata } : {}),
+        ...(b.dynamic !== undefined ? { dynamic: b.dynamic } : {}),
+        ...(b.title ? { title: b.title } : {}),
+        ...(b.invalid !== undefined ? { invalid: b.invalid } : {}),
+        ...(b.error !== undefined ? { error: b.error } : {}),
+        ...(b.approval ? { approval: b.approval } : {}),
       } as unknown as Part
     }
     default:
       return null
   }
+}
+
+/** Human-scale byte size for the media placeholders below. */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/**
+ * Compact stand-in for a media/resource block in the flattened `output` string.
+ *
+ * The real payload is preserved structurally on `part.mcpContent`
+ * (`extractMcpContentBlocks`) and rendered by the cards. `output` is only ever
+ * printed — by the tool cards, the activity-row summaries, the markdown/HTML
+ * exporters, share, and the CLI handoff — so inlining base64 there produced an
+ * unreadable wall AND a second full copy of every image in the `messages`
+ * table. Returns null for blocks we can't summarise, which keep the JSON dump.
+ */
+function describeNonTextBlock(block: Record<string, unknown>): string | null {
+  const type = block.type
+  if (type === "image" || type === "audio") {
+    const source = block.source as { data?: unknown; media_type?: unknown } | undefined
+    const data = typeof block.data === "string" ? block.data : source?.data
+    const mime =
+      (typeof block.mimeType === "string" ? block.mimeType : undefined) ??
+      (typeof source?.media_type === "string" ? source.media_type : undefined)
+    // base64 → decoded bytes: 4 chars carry 3 bytes, minus any `=` padding.
+    const size =
+      typeof data === "string" && !data.startsWith("data:")
+        ? Math.floor((data.length * 3) / 4) - (data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0)
+        : undefined
+    const head = mime ? `${type} ${mime}` : String(type)
+    return size !== undefined ? `[${head} · ${formatBytes(size)}]` : `[${head}]`
+  }
+  if (type === "resource") {
+    const resource = block.resource as { uri?: unknown; mimeType?: unknown } | undefined
+    const label =
+      (typeof resource?.uri === "string" ? resource.uri : undefined) ??
+      (typeof resource?.mimeType === "string" ? resource.mimeType : undefined)
+    return label ? `[resource ${label}]` : "[resource]"
+  }
+  return null
 }
 
 function flattenToolResultContent(content: BetaToolResultBlock["content"]): string {
@@ -203,13 +345,31 @@ function flattenToolResultContent(content: BetaToolResultBlock["content"]): stri
           if ((c as { type?: string }).type === "text") {
             return (c as { type: "text"; text: string }).text
           }
-          return JSON.stringify(c)
+          return describeNonTextBlock(c as Record<string, unknown>) ?? JSON.stringify(c)
         }
         return ""
       })
       .join("")
   }
   return JSON.stringify(content)
+}
+
+/**
+ * Preserve the structured MCP content blocks off a tool-result, but ONLY when
+ * at least one block is not plain text (image / resource / audio). Pure-text
+ * results stay on the flattened-string path — no behavior change, no
+ * persistence bloat. Returns undefined when there's nothing richer than text.
+ * (gap3 — see `parts-extensions.ts:McpResultBlock`.)
+ */
+function extractMcpContentBlocks(
+  content: BetaToolResultBlock["content"]
+): McpResultBlock[] | undefined {
+  if (!Array.isArray(content)) return undefined
+  const blocks = content.filter(
+    (c) => typeof c === "object" && c !== null && typeof (c as { type?: unknown }).type === "string"
+  ) as McpResultBlock[]
+  if (blocks.length === 0) return undefined
+  return blocks.some((b) => b.type !== "text") ? blocks : undefined
 }
 
 /**
@@ -231,6 +391,17 @@ export function applySdkEvent(
         messages: applyToolResults(messages, evt as SDKUserMessage),
         turnComplete: false,
       }
+    case "stream_event":
+      // Token-level streaming (opts.includePartialMessages). Accumulate text /
+      // thinking deltas into an in-progress assistant message keyed by the
+      // `message_start` id. The authoritative full `assistant` message arrives
+      // later and replaces this preview via appendAssistantMessage's
+      // replace-by-id (same Anthropic message id). Tool_use blocks are left to
+      // the final message — only text + reasoning drive the live preview.
+      return {
+        messages: applyStreamEvent(messages, evt as unknown as SDKPartialAssistantMessage),
+        turnComplete: false,
+      }
     case "result": {
       const result = evt as SDKResultMessage
       return {
@@ -239,21 +410,256 @@ export function applySdkEvent(
         result,
       }
     }
+    case "system": {
+      // System subtypes: `compact_boundary` (context compaction) and
+      // `permission_denied` (a tool auto-denied without an interactive prompt —
+      // classifier / dontAsk / deny rule). `init` and the rest are metadata the
+      // UI ignores.
+      const sys = evt as unknown as {
+        subtype?: string
+        uuid?: string
+        compact_metadata?: { trigger?: string; pre_tokens?: number; post_tokens?: number }
+        tool_name?: string
+        decision_reason?: string
+        message?: string
+        // hook_fire fields (synthetic event emitted by the Rust hook runtime —
+        // see src-tauri/src/claude/sidecar.rs:emit_hook_fire)
+        hook_event?: string
+        outcome?: "blocked" | "context" | "warning"
+        block?: string
+        additional_context?: string
+        warnings?: string[]
+      }
+      if (sys.subtype === "compact_boundary") {
+        return { messages: appendCompactBoundary(messages, sys), turnComplete: false }
+      }
+      if (sys.subtype === "hook_fire") {
+        return {
+          messages: appendHookNotice(messages, {
+            type: "hook-notice",
+            event: sys.hook_event ?? "",
+            toolName: sys.tool_name,
+            outcome: sys.outcome ?? "warning",
+            block: sys.block,
+            additionalContext: sys.additional_context,
+            warnings: sys.warnings ?? [],
+          }),
+          turnComplete: false,
+        }
+      }
+      if (sys.subtype === "permission_denied") {
+        // A hook-caused denial already renders as a `hook_fire` row; the deny
+        // payload Rust writes is prefixed `"hook denied:"`. Suppress the generic
+        // permission-denied notice so the same block isn't shown twice.
+        const reason = sys.decision_reason || sys.message
+        if (reason?.startsWith("hook denied:")) {
+          return { messages, turnComplete: false }
+        }
+        return {
+          messages: appendSessionNotice(messages, {
+            type: "session-notice",
+            variant: "permission-denied",
+            uuid: sys.uuid,
+            toolName: sys.tool_name,
+            reason,
+          }),
+          turnComplete: false,
+        }
+      }
+      return { messages, turnComplete: false }
+    }
+    case "rate_limit_event": {
+      // A rate-limit notice describes a *live* condition, not something that
+      // happened at a point in the transcript, so every event first drops any
+      // previous marker and then re-posts one only if the limit is still
+      // restrictive (`allowed_warning` / `rejected`).
+      //
+      // Dropping unconditionally is what makes the notice self-clearing. The
+      // SDK emits this event whenever the info changes — including back to
+      // `allowed` — so recovery reliably removes the marker. Previously
+      // `allowed` was a no-op rather than a clear, which left a single past
+      // warning pinned in the persisted transcript forever: it survived
+      // reloads and still read "limit reached", with a `resetsAt` in the past.
+      //
+      // It also subsumes the old `collapsePrev` de-spam, which only fired when
+      // the notice was the *last* message — never true once an assistant turn
+      // followed it, so warnings accumulated one marker per turn.
+      const info = (evt as unknown as { rate_limit_info?: RateLimitInfo }).rate_limit_info
+      const cleared = dropSessionNotices(messages, "rate-limit")
+      if (!info || info.status === "allowed") {
+        return { messages: cleared, turnComplete: false }
+      }
+      return {
+        messages: appendSessionNotice(cleared, {
+          type: "session-notice",
+          variant: "rate-limit",
+          uuid: (evt as unknown as { uuid?: string }).uuid,
+          status: info.status,
+          rateLimitType: info.rateLimitType,
+          resetsAt: info.resetsAt,
+        }),
+        turnComplete: false,
+      }
+    }
     default:
       return { messages, turnComplete: false }
   }
 }
 
+/** Subscription rate-limit info subset surfaced from `rate_limit_event`. */
+interface RateLimitInfo {
+  status: "allowed" | "allowed_warning" | "rejected"
+  rateLimitType?: string
+  resetsAt?: number
+}
+
+/** Structured payload for the synthetic `session-notice` system message. */
+export interface SessionNoticePartData {
+  type: "session-notice"
+  variant: "permission-denied" | "rate-limit"
+  uuid?: string
+  // permission-denied
+  toolName?: string
+  reason?: string
+  // rate-limit
+  status?: string
+  rateLimitType?: string
+  resetsAt?: number
+}
+
+/** True when a message is a session-notice marker of the given variant. */
+function isSessionNoticeOf(message: UIMessage, variant: SessionNoticePartData["variant"]): boolean {
+  if (message.role !== "system") return false
+  const part = message.parts?.[0] as { type?: string; variant?: string } | undefined
+  return part?.type === "session-notice" && part.variant === variant
+}
+
+/**
+ * Drop every session-notice marker of one variant, wherever it sits in the
+ * transcript. Used for notices that project a live condition rather than a past
+ * event, so the transcript holds at most the latest one — and none once the
+ * condition clears.
+ *
+ * `persistMessages` diffs by id and deletes what disappeared, so removing a
+ * marker here also deletes its row. Returns the original array when nothing
+ * matched, since the persist layer and the chat store both key off identity.
+ */
+function dropSessionNotices(
+  messages: UIMessage[],
+  variant: SessionNoticePartData["variant"]
+): UIMessage[] {
+  if (!messages.some((m) => isSessionNoticeOf(m, variant))) return messages
+  return messages.filter((m) => !isSessionNoticeOf(m, variant))
+}
+
+/**
+ * Append a non-conversational "session notice" marker (auto-deny / rate-limit)
+ * to the transcript, mirroring the compact-boundary projection.
+ */
+function appendSessionNotice(messages: UIMessage[], data: SessionNoticePartData): UIMessage[] {
+  const id = `notice-${data.variant}-${data.uuid ?? crypto.randomUUID()}`
+  const marker: UIMessage = {
+    id,
+    role: "system",
+    parts: [data as unknown as UIMessage["parts"][number]],
+  }
+  return [...messages, marker]
+}
+
+/**
+ * Append a non-conversational "hook notice" marker projecting a consequential
+ * hook fire into the transcript, mirroring `appendSessionNotice`. Only fired by
+ * the adapter's `system`/`hook_fire` branch, which the Rust runtime emits solely
+ * when a hook blocked, injected context, or warned.
+ */
+function appendHookNotice(messages: UIMessage[], data: HookNoticePartData): UIMessage[] {
+  const marker: UIMessage = {
+    id: `hook-${data.event}-${crypto.randomUUID()}`,
+    role: "system",
+    parts: [data as unknown as UIMessage["parts"][number]],
+  }
+  return [...messages, marker]
+}
+
+/**
+ * Append a non-conversational divider marking where the SDK compacted the
+ * context. Rendered by `MessageRenderer` as a centered "context compacted"
+ * rule (it carries no usage / text so it skips all message chrome).
+ */
+function appendCompactBoundary(
+  messages: UIMessage[],
+  sys: {
+    uuid?: string
+    compact_metadata?: {
+      trigger?: string
+      pre_tokens?: number
+      post_tokens?: number
+      strategy?: string
+      frozenSummaryDecision?: string
+      // Generic-path undo snapshot (sidecar-format), present only when the
+      // `captureUndoSnapshot` setting is on. Kept OUT of the persisted part —
+      // it is moved into the in-memory undo registry instead.
+      pre_messages?: unknown[]
+      // Optical-strategy archive (ADR-0063): rendered frames + token stats.
+      // Persisted to Dexie (durable, survives reload) rather than embedded in
+      // the transcript part; the part only carries a reference id + frame count.
+      optical?: OpticalBoundaryMeta
+      // True when the optical strategy fell back to a text summary this boundary.
+      opticalFallback?: boolean
+    }
+  }
+): UIMessage[] {
+  const meta = sys.compact_metadata
+  const id = `compact-${sys.uuid ?? crypto.randomUUID()}`
+
+  // Record the pre-compaction snapshot for undo (live-session-only, in-memory).
+  let undoToken: string | undefined
+  if (Array.isArray(meta?.pre_messages) && meta.pre_messages.length > 0) {
+    undoToken = id
+    registerUndoSnapshot({
+      token: id,
+      strategy: meta.strategy,
+      tokensBefore: meta.pre_tokens,
+      tokensAfter: meta.post_tokens,
+      createdAt: Date.now(),
+      snapshot: meta.pre_messages,
+    })
+  }
+
+  // Persist the optical archive (durable) and reference it from the part.
+  const opticalArchiveId = meta?.optical ? persistOpticalArchive(id, meta) : undefined
+
+  const marker: UIMessage = {
+    id,
+    role: "system",
+    parts: [
+      {
+        type: "compact-boundary",
+        trigger: meta?.trigger,
+        preTokens: meta?.pre_tokens,
+        postTokens: meta?.post_tokens,
+        strategy: meta?.strategy,
+        ...(undoToken ? { undoToken } : {}),
+        ...(opticalArchiveId ? { opticalArchiveId } : {}),
+        ...(meta?.optical?.frameCount ? { opticalFrameCount: meta.optical.frameCount } : {}),
+        ...(meta?.opticalFallback ? { opticalFallback: true } : {}),
+      } as unknown as UIMessage["parts"][number],
+    ],
+  }
+  return [...messages, marker]
+}
+
 function appendAssistantMessage(messages: UIMessage[], evt: SDKAssistantMessage): UIMessage[] {
-  const parts = buildAssistantParts(evt.message)
   // We key UI messages by the Anthropic message id. If a prior partial-stream
   // version is in the list, replace it with the canonical full version.
   const id = evt.message.id ?? evt.uuid
   const idx = messages.findIndex((m) => m.id === id)
+  const parts = preserveStepStartParts(messages[idx], buildAssistantParts(evt.message))
   const next: UIMessage = {
     id,
     role: "assistant",
     parts,
+    ...(evt.message.metadata !== undefined ? { metadata: evt.message.metadata } : {}),
   }
   if (idx >= 0) {
     const copy = messages.slice()
@@ -261,6 +667,189 @@ function appendAssistantMessage(messages: UIMessage[], evt: SDKAssistantMessage)
     return copy
   }
   return [...messages, next]
+}
+
+/** Index of the most recent assistant message (the active streaming target). */
+function findLastAssistantIndex(messages: UIMessage[]): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "assistant") return i
+  }
+  return -1
+}
+
+/**
+ * Index of the most recent real user turn — the boundary the live streaming
+ * target must sit after. Tool-result `user` payloads never reach the message
+ * list as their own rows (they patch existing assistant parts), so this only
+ * matches genuine user prompts, i.e. true turn boundaries.
+ */
+function findLastUserIndex(messages: UIMessage[]): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "user") return i
+  }
+  return -1
+}
+
+/** Append a text / reasoning delta to the last like-typed part, or start one. */
+function appendDelta(
+  messages: UIMessage[],
+  idx: number,
+  partType: "text" | "reasoning",
+  chunk: string
+): UIMessage[] {
+  const msg = messages[idx]
+  const parts = (msg.parts ?? []).slice()
+  let pIdx = -1
+  for (let i = parts.length - 1; i >= 0; i--) {
+    if ((parts[i] as { type?: string }).type === partType) {
+      pIdx = i
+      break
+    }
+  }
+  if (pIdx >= 0) {
+    const prev = parts[pIdx] as unknown as { text?: string }
+    parts[pIdx] = {
+      type: partType,
+      text: (prev.text ?? "") + chunk,
+      state: "streaming",
+    } as unknown as Part
+  } else {
+    parts.push({ type: partType, text: chunk, state: "streaming" } as unknown as Part)
+  }
+  const next = messages.slice()
+  next[idx] = { ...msg, parts } as UIMessage
+  return next
+}
+
+/**
+ * Extract a partial live {@link UsageInfo} from a raw Anthropic streaming
+ * event's `usage` block: `message_start` carries `input_tokens` + cache counts,
+ * `message_delta` carries the running `output_tokens`. Snake_case per the SDK.
+ * Returns null when no numeric usage is present (e.g. ai-sdk `message_start`
+ * frames, which carry only an id).
+ */
+function liveUsageFromStreamEvent(raw: {
+  type?: string
+  message?: { usage?: Record<string, unknown> }
+  usage?: Record<string, unknown>
+}): Partial<UsageInfo> | null {
+  const u = raw.type === "message_start" ? raw.message?.usage : raw.usage
+  if (!u || typeof u !== "object") return null
+  const num = (k: string) => (typeof u[k] === "number" ? (u[k] as number) : undefined)
+  const info: Partial<UsageInfo> = {
+    inputTokens: num("input_tokens"),
+    outputTokens: num("output_tokens"),
+    cacheCreationInputTokens: num("cache_creation_input_tokens"),
+    cacheReadInputTokens: num("cache_read_input_tokens"),
+  }
+  if (Object.values(info).every((v) => v === undefined)) return null
+  return info
+}
+
+/**
+ * Merge a partial live usage into the last assistant message's `metadata.usage`,
+ * only ADDING fields the frame carries — a later frame (or the trailing `result`)
+ * never gets a known value downgraded to undefined. Powers mid-turn ctx%.
+ */
+function mergeLiveUsage(messages: UIMessage[], partial: Partial<UsageInfo>): UIMessage[] {
+  const idx = findLastAssistantIndex(messages)
+  if (idx < 0) return messages
+  const msg = messages[idx]
+  const prior = ((msg as { metadata?: Record<string, unknown> }).metadata ?? {}) as Record<
+    string,
+    unknown
+  >
+  const usage: Record<string, unknown> = { ...((prior.usage as Record<string, unknown>) ?? {}) }
+  for (const [k, v] of Object.entries(partial)) {
+    if (v !== undefined) usage[k] = v
+  }
+  const out = messages.slice()
+  out[idx] = {
+    ...msg,
+    ...({ metadata: { ...prior, usage } } as { metadata: Record<string, unknown> }),
+  }
+  return out
+}
+
+/**
+ * Apply a `stream_event` (SDKPartialAssistantMessage) to the in-progress
+ * assistant message. `message_start` seeds an empty assistant message keyed by
+ * the Anthropic message id (and attaches live input/cache usage); each
+ * `content_block_delta` (text_delta / thinking_delta) grows it; `message_delta`
+ * merges the running output-token usage. Other raw events (content_block
+ * start/stop, message_stop) are ignored — the final `assistant` message carries
+ * the canonical content and the `result` message the authoritative usage.
+ */
+function applyStreamEvent(messages: UIMessage[], evt: SDKPartialAssistantMessage): UIMessage[] {
+  const raw = evt.event as unknown as {
+    type?: string
+    message?: { id?: string; usage?: Record<string, unknown> }
+    usage?: Record<string, unknown>
+    delta?: { type?: string; text?: string; thinking?: string }
+  }
+  if (!raw || typeof raw !== "object") return messages
+
+  if (raw.type === "message_start") {
+    const id = raw.message?.id
+    if (!id) return messages
+    let next = messages
+    if (!messages.some((m) => m.id === id)) {
+      next = [...messages, { id, role: "assistant", parts: [] } as UIMessage]
+    }
+    // Live context-usage refresh: the native Anthropic `message_start` carries the
+    // turn's real input + cache token counts. Attaching them to the in-progress
+    // assistant lets the ctx% indicator update mid-turn (the trailing `result`
+    // usage replaces them authoritatively at turn end). ai-sdk `message_start`
+    // frames carry no usage → this is a no-op there.
+    const live = liveUsageFromStreamEvent(raw)
+    return live ? mergeLiveUsage(next, live) : next
+  }
+
+  if (raw.type === "message_delta") {
+    // Anthropic emits the running `output_tokens` on each `message_delta`; merge
+    // it into the live usage so the ctx% window figure grows as the reply streams.
+    const live = liveUsageFromStreamEvent(raw)
+    return live ? mergeLiveUsage(messages, live) : messages
+  }
+
+  if (raw.type === "step_start") {
+    const idx = findLastAssistantIndex(messages)
+    if (idx < 0 || idx < findLastUserIndex(messages)) return messages
+    const msg = messages[idx]
+    const out = messages.slice()
+    out[idx] = {
+      ...msg,
+      parts: [...msg.parts, { type: "step-start" } as unknown as Part],
+    }
+    return out
+  }
+
+  if (raw.type === "content_block_delta") {
+    const delta = raw.delta
+    let chunk = ""
+    let partType: "text" | "reasoning" | null = null
+    if (delta?.type === "text_delta") {
+      chunk = delta.text ?? ""
+      partType = "text"
+    } else if (delta?.type === "thinking_delta") {
+      chunk = delta.thinking ?? ""
+      partType = "reasoning"
+    }
+    if (!partType || !chunk) return messages
+    const idx = findLastAssistantIndex(messages)
+    if (idx < 0) return messages
+    // Turn guard: never grow an assistant message that predates the latest
+    // user turn. When this turn's `message_start` was dropped or suppressed
+    // (an aborted / resent send that "didn't go out"), the only assistant in
+    // the list is the PRIOR turn's finished reply — appending here merges the
+    // new turn's tokens into it ("greeting two" + the old greeting's tail).
+    // Drop the orphaned delta instead; the canonical `assistant` message
+    // (carrying the real id) seeds this turn's reply correctly when it lands.
+    if (idx < findLastUserIndex(messages)) return messages
+    return appendDelta(messages, idx, partType, chunk)
+  }
+
+  return messages
 }
 
 function applyToolResults(messages: UIMessage[], evt: SDKUserMessage): UIMessage[] {
@@ -308,10 +897,12 @@ function updateToolPart(messages: UIMessage[], tr: BetaToolResultBlock): UIMessa
       input?: unknown
     }
     const outputText = flattenToolResultContent(tr.content)
+    const mcpContent = tr.is_error ? undefined : extractMcpContentBlocks(tr.content)
     const newPart = {
       ...oldPart,
       state: tr.is_error ? "output-error" : "output-available",
       ...(tr.is_error ? { errorText: outputText } : { output: outputText }),
+      ...(mcpContent ? { mcpContent } : {}),
     } as unknown as Part
 
     const newParts = msg.parts.slice()
@@ -369,11 +960,22 @@ export function extractUsage(result: SDKResultMessage): UsageInfo | null {
     return typeof v === "number" ? v : undefined
   }
 
+  const reasoning = num("reasoning_tokens")
+  const contextInput = num("context_input_tokens")
   const info: UsageInfo = {
     inputTokens: num("input_tokens"),
     outputTokens: num("output_tokens"),
+    // Only attach when the channel reported a window-prompt size that differs
+    // from the (cumulative) input — i.e. the ai-sdk agent-loop path.
+    contextInputTokens:
+      typeof contextInput === "number" && contextInput !== num("input_tokens")
+        ? contextInput
+        : undefined,
     cacheCreationInputTokens: num("cache_creation_input_tokens"),
     cacheReadInputTokens: num("cache_read_input_tokens"),
+    // Only attach when the provider actually reported reasoning tokens (> 0) so
+    // non-reasoning turns don't carry a noisy `reasoningTokens: 0`.
+    reasoningTokens: typeof reasoning === "number" && reasoning > 0 ? reasoning : undefined,
     totalCostUsd: typeof top.total_cost_usd === "number" ? top.total_cost_usd : undefined,
     durationMs: typeof top.duration_ms === "number" ? top.duration_ms : undefined,
   }
@@ -386,10 +988,26 @@ export function extractUsage(result: SDKResultMessage): UsageInfo | null {
  * Helper for pushing a freshly-typed user prompt into the UI history.
  *
  * Accepts either plain text (the common case) or an array of multimodal
- * content blocks (text + image). Image blocks become `file` parts in the
- * UIMessage so AI SDK Elements render thumbnails.
+ * content blocks. Image blocks become `file` parts so the transcript renders
+ * thumbnails.
+ *
+ * `manifest` (from `buildSendContent`) describes `content[i]` for the leading
+ * attachment blocks. With it, two long-standing transcript defects go away:
+ *
+ *  - Images kept no `filename`, so the gallery and lightbox showed a generic
+ *    "attachment" label for every picture the user sent.
+ *  - A document was flattened to a `text` block for the model, and that same
+ *    block was rendered verbatim in the USER'S OWN bubble — attaching a 50-page
+ *    PDF dumped its entire extracted text into the conversation. Those blocks
+ *    now become url-less `file` parts carrying the text, which the renderer
+ *    shows as a collapsed "📎 report.pdf" card. Nothing extra is persisted: the
+ *    text was already being stored, just without its provenance.
  */
-export function makeUserMessage(content: SendContent, id?: string): UIMessage {
+export function makeUserMessage(
+  content: SendContent,
+  id?: string,
+  manifest?: readonly AttachmentManifestEntry[]
+): UIMessage {
   const messageId = id ?? `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
   if (typeof content === "string") {
@@ -401,8 +1019,23 @@ export function makeUserMessage(content: SendContent, id?: string): UIMessage {
   }
 
   const parts: Parts = []
-  for (const block of content) {
+  content.forEach((block, index) => {
+    const entry = manifest?.[index]
     if (block.type === "text") {
+      // Only a block the manifest claims is an attachment becomes a file card;
+      // the user's own prose (and merged link context) stays a text part.
+      if (entry?.kind === "document") {
+        parts.push({
+          type: "file",
+          mediaType: entry.mediaType || "text/plain",
+          filename: entry.filename,
+          // No `url`: the original binary is deliberately NOT persisted (it
+          // would balloon every message row). The extracted text is what the
+          // model saw and what the card shows.
+          text: block.text,
+        } as unknown as Part)
+        return
+      }
       parts.push({
         type: "text",
         text: block.text,
@@ -414,9 +1047,10 @@ export function makeUserMessage(content: SendContent, id?: string): UIMessage {
         type: "file",
         url: dataUrl,
         mediaType: block.source.media_type,
+        ...(entry?.filename ? { filename: entry.filename } : {}),
       } as unknown as Part)
     }
-  }
+  })
   return {
     id: messageId,
     role: "user",
@@ -451,6 +1085,13 @@ export interface TwinSourcesContext {
     summary: string
     tone: string[]
   }>
+  /**
+   * True when the twin runtime degraded to a no-context send (embedding or
+   * vector store unreachable). Surfaced on the assistant message's SourcesPart
+   * (`twinDegraded`) so the chat user is warned the reply skipped retrieval —
+   * otherwise a silent degrade looks identical to a grounded answer.
+   */
+  degraded?: boolean
 }
 
 /**
@@ -491,7 +1132,9 @@ export function mergeTwinSourcesIntoLastAssistant(
       sample.summary.length > 200 ? sample.summary.slice(0, 199).trimEnd() + "…" : sample.summary,
     origin: "twin-style",
   }))
-  return appendSourcesToLastAssistant(messages, [...chunkSources, ...styleSources])
+  return appendSourcesToLastAssistant(messages, [...chunkSources, ...styleSources], {
+    twinDegraded: twinContext.degraded,
+  })
 }
 
 /**
@@ -503,9 +1146,21 @@ export function mergeTwinSourcesIntoLastAssistant(
  */
 function appendSourcesToLastAssistant(
   messages: UIMessage[],
-  additions: SourcesPartItem[]
+  additions: SourcesPartItem[],
+  opts?: {
+    twinDegraded?: boolean
+    memoryBudget?: SourcesPart["memoryBudget"]
+    memoryDegraded?: boolean
+  }
 ): UIMessage[] {
-  if (additions.length === 0) return messages
+  const wantDegraded = opts?.twinDegraded
+  const wantMemoryDegraded = opts?.memoryDegraded
+  // A degraded twin/memory turn must still annotate the message even with zero
+  // additions — that's the whole point of the warning. Only short-circuit when
+  // there is genuinely nothing to do.
+  if (additions.length === 0 && !wantDegraded && !wantMemoryDegraded && !opts?.memoryBudget) {
+    return messages
+  }
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]
     if (msg.role !== "assistant") continue
@@ -514,14 +1169,44 @@ function appendSourcesToLastAssistant(
     const existingPart = sourcesIdx >= 0 ? (parts[sourcesIdx] as unknown as SourcesPart) : null
     const existingSources = existingPart?.sources ?? []
     const merged = mergeSources(existingSources, additions)
-    // Idempotent guard — same length + same ids means we already injected.
-    if (
+    // The `twinDegraded` flag is sticky: only the twin merge writes it (memory
+    // passes no opts → preserve whatever's there), and a degraded turn is never
+    // un-flagged by a later non-degraded merge.
+    const nextDegraded =
+      wantDegraded === undefined
+        ? existingPart?.twinDegraded
+        : wantDegraded || existingPart?.twinDegraded
+    // Memory annotations mirror the twin flag's stickiness: only the memory
+    // merge writes them (twin passes no memory opts → preserve what's there).
+    const nextMemoryDegraded =
+      wantMemoryDegraded === undefined
+        ? existingPart?.memoryDegraded
+        : wantMemoryDegraded || existingPart?.memoryDegraded
+    const nextMemoryBudget = opts?.memoryBudget ?? existingPart?.memoryBudget
+    const sourcesUnchanged =
       merged.length === existingSources.length &&
       merged.every((s, idx) => s.id === existingSources[idx]?.id)
-    ) {
+    const degradedUnchanged = Boolean(existingPart?.twinDegraded) === Boolean(nextDegraded)
+    const budgetUnchanged =
+      existingPart?.memoryBudget === nextMemoryBudget ||
+      (existingPart?.memoryBudget !== undefined &&
+        nextMemoryBudget !== undefined &&
+        existingPart.memoryBudget.limit === nextMemoryBudget.limit &&
+        existingPart.memoryBudget.used === nextMemoryBudget.used &&
+        existingPart.memoryBudget.truncated === nextMemoryBudget.truncated)
+    const memoryAnnotationsUnchanged =
+      Boolean(existingPart?.memoryDegraded) === Boolean(nextMemoryDegraded) && budgetUnchanged
+    // Idempotent guard — nothing to change in sources or any annotation.
+    if (sourcesUnchanged && degradedUnchanged && memoryAnnotationsUnchanged) {
       return messages
     }
-    const nextPart: SourcesPart = { type: "sources", sources: merged }
+    const nextPart: SourcesPart = {
+      type: "sources",
+      sources: merged,
+      ...(nextDegraded ? { twinDegraded: true } : {}),
+      ...(nextMemoryDegraded ? { memoryDegraded: true } : {}),
+      ...(nextMemoryBudget ? { memoryBudget: nextMemoryBudget } : {}),
+    }
     const nextParts =
       sourcesIdx >= 0
         ? [
@@ -541,18 +1226,24 @@ function appendSourcesToLastAssistant(
 /** Recalled-memory context stashed on `SendOptions.memoryContext`. */
 export interface MemorySourcesContext {
   retrievedMemories: Array<{ id: string; type: string; text: string; score: number }>
+  /** Recall token budget of the injection pass (shown by the recalled chip). */
+  budget?: { limit: number; used: number; truncated: boolean }
+  /** True when retrieval degraded (BM25-only fallback or retrieval failure). */
+  degraded?: boolean
 }
 
 /**
  * Merge recalled long-term memories onto the last assistant message's
- * SourcesPart as `origin: "memory"` items. Mirrors
- * `mergeTwinSourcesIntoLastAssistant`; shares the idempotent fold helper.
+ * SourcesPart as `origin: "memory"` items, plus the pass's budget/degraded
+ * annotations. Mirrors `mergeTwinSourcesIntoLastAssistant`; shares the
+ * idempotent fold helper.
  */
 export function mergeMemorySourcesIntoLastAssistant(
   messages: UIMessage[],
   memoryContext: MemorySourcesContext | undefined | null
 ): UIMessage[] {
-  if (!memoryContext || memoryContext.retrievedMemories.length === 0) return messages
+  if (!memoryContext) return messages
+  if (memoryContext.retrievedMemories.length === 0 && !memoryContext.degraded) return messages
   const memorySources: SourcesPartItem[] = memoryContext.retrievedMemories.map((m) => ({
     id: `memory-${m.id}`,
     title: m.text.length > 80 ? m.text.slice(0, 79).trimEnd() + "…" : m.text,
@@ -560,5 +1251,8 @@ export function mergeMemorySourcesIntoLastAssistant(
     origin: "memory",
     score: m.score,
   }))
-  return appendSourcesToLastAssistant(messages, memorySources)
+  return appendSourcesToLastAssistant(messages, memorySources, {
+    memoryBudget: memorySources.length > 0 ? memoryContext.budget : undefined,
+    memoryDegraded: memoryContext.degraded,
+  })
 }

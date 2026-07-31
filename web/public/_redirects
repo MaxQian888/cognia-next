@@ -1,0 +1,9 @@
+# Cloudflare Pages redirects (ADR-0092 §4).
+#
+# English is served unprefixed, so `/en/*` must never become a second canonical
+# form of the same page. There is no middleware in a static export, which is why
+# this lives here rather than in the application.
+/en/* /:splat 301
+
+# `www` is a redirect to the apex, configured on the Pages project's custom
+# domains rather than here — a redirects file cannot match on hostname.

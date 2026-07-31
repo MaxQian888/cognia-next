@@ -1,0 +1,5 @@
+{
+  "answeredVia": "Answered via {provider} ({model})",
+  "fallbackExhausted": "All fallback providers failed: {error}",
+  "retryingWithFallback": "Provider failed — retrying with {provider}…"
+}

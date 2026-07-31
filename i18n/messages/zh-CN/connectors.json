@@ -1,0 +1,55 @@
+{
+  "audit": {
+    "kind": {
+      "adapter": {
+        "error": "适配器错误",
+        "started": "适配器已启动",
+        "stopped": "适配器已停止"
+      },
+      "circuit": {
+        "closed": "熔断器已关闭",
+        "half_opened": "熔断器半开",
+        "opened": "熔断器已打开"
+      },
+      "credential": {
+        "refreshed": "凭据已刷新"
+      },
+      "delivery": {
+        "deadlettered": "投递失败（死信）",
+        "downgraded": "投递降级",
+        "error": "投递错误",
+        "success": "投递成功"
+      },
+      "inbound": {
+        "deduped": "重复消息已忽略",
+        "deferred_manual_mode": "已延后（手动模式）",
+        "deferred_muted": "已延后（已静音）",
+        "deferred_quiet_hours": "已延后（勿扰时段）",
+        "deleted": "消息已撤回",
+        "edited": "消息已编辑",
+        "member_added": "成员加入",
+        "member_removed": "成员退出",
+        "policy_blocked": "策略已拦截",
+        "read_indicator": "已读回执",
+        "received": "已接收消息",
+        "signature_failed": "签名校验失败"
+      },
+      "outbound": {
+        "ai_run_enqueued": "AI 回复已加入队列",
+        "enqueued": "已加入发送队列"
+      },
+      "rate_limit": {
+        "tripped": "已触发限流"
+      }
+    }
+  },
+  "identityMerge": {
+    "cancel": "取消",
+    "description": "选择保留哪一个作为主身份。次身份的 ID 会被记录在主身份的合并历史中。",
+    "merge": "合并",
+    "primary": "主身份：",
+    "primaryBadge": "主",
+    "secondary": "次身份：",
+    "title": "合并平台身份"
+  }
+}

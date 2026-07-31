@@ -1,7 +1,9 @@
+/** @jest-environment jsdom */
 jest.mock("@/lib/claude/ipc", () => ({
   getSidecarStatus: jest.fn(),
   hasApiKey: jest.fn(),
   hasOauthBearer: jest.fn(),
+  compactSession: jest.fn(),
 }))
 jest.mock("@/lib/tauri", () => ({
   isTauri: jest.fn(() => false),
@@ -21,9 +23,17 @@ jest.mock("@/stores/chat", () => ({
 jest.mock("@/stores/settings", () => ({
   useSettingsStore: { getState: jest.fn() },
 }))
+jest.mock("@/lib/native/crash-reports", () => ({
+  getCrashLoggingDiagnostics: jest.fn(async () => null),
+}))
+jest.mock("@/lib/native/native-logging", () => ({
+  getNativeLoggingReadiness: jest.fn(async () => null),
+}))
 
-import { handleStatus, handleCost, handleContext, handleDoctor } from "./diagnostics"
-import { getSidecarStatus, hasApiKey, hasOauthBearer } from "@/lib/claude/ipc"
+import { handleStatus, handleCost, handleContext, handleDoctor, handleCompact } from "./diagnostics"
+import { getCrashLoggingDiagnostics } from "@/lib/native/crash-reports"
+import { getNativeLoggingReadiness } from "@/lib/native/native-logging"
+import { getSidecarStatus, hasApiKey, hasOauthBearer, compactSession } from "@/lib/claude/ipc"
 import { isTauri } from "@/lib/tauri"
 import { getSession } from "@/lib/db/sessions"
 import { listEnabledMcpServers } from "@/lib/db/mcp-servers"
@@ -41,9 +51,12 @@ const mockedMcp = listEnabledMcpServers as unknown as jest.Mock
 const mockedResolve = resolveSendOptions as unknown as jest.Mock
 const mockedChatGetState = useChatStore.getState as unknown as jest.Mock
 const mockedSettingsGetState = useSettingsStore.getState as unknown as jest.Mock
+const mockedCompact = compactSession as unknown as jest.Mock
 
-function makeCtx(overrides: Partial<SlashContext> = {}): SlashContext & { _pushed: string[] } {
-  const pushed: string[] = []
+type Pushed = Parameters<SlashContext["pushSystemMessage"]>[0]
+
+function makeCtx(overrides: Partial<SlashContext> = {}): SlashContext & { _pushed: Pushed[] } {
+  const pushed: Pushed[] = []
   return {
     args: "",
     activeSessionId: null,
@@ -52,12 +65,12 @@ function makeCtx(overrides: Partial<SlashContext> = {}): SlashContext & { _pushe
     startNewSession: () => undefined,
     openSettings: () => undefined,
     setPermissionMode: () => undefined,
-    pushSystemMessage: (md: string) => {
-      pushed.push(md)
+    pushSystemMessage: (payload: Pushed) => {
+      pushed.push(payload)
     },
     _pushed: pushed,
     ...overrides,
-  } as SlashContext & { _pushed: string[] }
+  } as SlashContext & { _pushed: Pushed[] }
 }
 
 beforeEach(() => {
@@ -215,15 +228,21 @@ describe("handleCost", () => {
     })
     const ctx = makeCtx({ activeSessionId: "s" })
     await handleCost(ctx)
-    const md = ctx._pushed[0]
-    expect(md).toContain("Turns**: 2 assistant (2 with metrics)")
-    expect(md).toContain("Input tokens**: 1,500")
-    expect(md).toContain("Output tokens**: 2,000")
-    expect(md).toContain("Cache**: write 300 / read 100")
-    expect(md).toContain("Cost**: $0.0500 USD")
-    expect(md).toContain("Duration**: 1.5s")
+    const block = ctx._pushed[0] as Extract<Pushed, { kind: "cost" }>
+    expect(block.kind).toBe("cost")
+    expect(block.assistantTurns).toBe(2)
+    expect(block.metricTurns).toBe(2)
+    expect(block.inputTokens).toBe(1500)
+    expect(block.outputTokens).toBe(2000)
+    expect(block.cacheCreateTokens).toBe(300)
+    expect(block.cacheReadTokens).toBe(100)
+    expect(block.costUsd).toBeCloseTo(0.05)
+    expect(block.costEstimated).toBe(false)
+    expect(block.durationMs).toBe(1500)
     // Window occupancy is the LATEST turn (inputTokens 500), not the sum.
-    expect(md).toContain("Context window**: 500 / 200,000 (0.3% used)")
+    expect(block.window?.used).toBe(500)
+    // No session model and no default in settings → DEFAULT_CONTEXT_WINDOW (128k).
+    expect(block.window?.max).toBe(128_000)
   })
 
   it("omits cache/cost/duration when zero", async () => {
@@ -237,11 +256,47 @@ describe("handleCost", () => {
     })
     const ctx = makeCtx({ activeSessionId: "s" })
     await handleCost(ctx)
-    const md = ctx._pushed[0]
-    expect(md).toContain("Input tokens**: 1")
-    expect(md).not.toContain("Cache**")
-    expect(md).not.toContain("Cost**")
-    expect(md).not.toContain("Duration**")
+    const block = ctx._pushed[0] as Extract<Pushed, { kind: "cost" }>
+    expect(block.inputTokens).toBe(1)
+    expect(block.cacheCreateTokens).toBe(0)
+    expect(block.cacheReadTokens).toBe(0)
+    expect(block.costUsd).toBeNull()
+    expect(block.durationMs).toBe(0)
+  })
+
+  it("estimates cost from pricing when the SDK reported none (non-Anthropic)", async () => {
+    // gpt-4o is priced; the ai-sdk path carries no totalCostUsd, so /cost would
+    // otherwise be blank. The estimate is surfaced and flagged "(estimated)".
+    mockedGetSession.mockResolvedValue({ id: "s", model: "gpt-4o", providerOverride: "openai" })
+    mockedChatGetState.mockReturnValue({
+      messages: [
+        { role: "assistant", metadata: { usage: { inputTokens: 10_000, outputTokens: 5_000 } } },
+      ],
+    })
+    const ctx = makeCtx({ activeSessionId: "s" })
+    await handleCost(ctx)
+    const block = ctx._pushed[0] as Extract<Pushed, { kind: "cost" }>
+    expect(block.costUsd).toBeGreaterThan(0)
+    expect(block.costEstimated).toBe(true)
+  })
+
+  it("sizes the window from a custom model's declared context length", async () => {
+    mockedGetSession.mockResolvedValue({ id: "s", model: "big", providerOverride: "cp" })
+    mockedSettingsGetState.mockReturnValue({
+      settings: {
+        customProviders: [
+          { id: "cp", customModelMetadata: { big: { id: "big", contextLength: 500_000 } } },
+        ],
+      },
+    })
+    mockedChatGetState.mockReturnValue({
+      messages: [{ role: "assistant", metadata: { usage: { inputTokens: 100 } } }],
+    })
+    const ctx = makeCtx({ activeSessionId: "s" })
+    await handleCost(ctx)
+    const block = ctx._pushed[0] as Extract<Pushed, { kind: "cost" }>
+    expect(block.window?.used).toBe(100)
+    expect(block.window?.max).toBe(500_000)
   })
 })
 
@@ -273,6 +328,34 @@ describe("handleDoctor", () => {
     expect(md).toContain("Thinking budget: 8000 tokens")
     expect(md).toContain("`fs` (stdio)")
     expect(md).toContain("Settings → Agent runtime → Sidecar")
+    expect(md).toContain("**Crash & Logs**")
+    expect(md).toContain("Global error capture: ready")
+  })
+
+  it("surfaces crash + native-logging diagnostics when available", async () => {
+    mockedSidecar.mockResolvedValue({ ready: true })
+    mockedHasOauthBearer.mockResolvedValue(true)
+    mockedMcp.mockResolvedValue([])
+    mockedSettingsGetState.mockReturnValue({ settings: null })
+    mockedIsTauri.mockReturnValue(true)
+    ;(getCrashLoggingDiagnostics as jest.Mock).mockResolvedValueOnce({
+      crashReportCount: 3,
+      latestCrashAt: "2026-06-10T00:00:00Z",
+      retentionMaxAgeDays: 30,
+      retentionMaxReports: 50,
+      rotatedLogKeep: 5,
+    })
+    ;(getNativeLoggingReadiness as jest.Mock).mockResolvedValueOnce({
+      startupMode: "full",
+      startupHealth: "healthy",
+    })
+    const ctx = makeCtx()
+    await handleDoctor(ctx)
+    const md = ctx._pushed[0]
+    expect(md).toContain("Crash reports: 3")
+    expect(md).toContain("Last crash: 2026-06-10T00:00:00Z")
+    expect(md).toContain("Retention: 30d / 50 reports, keep 5 logs")
+    expect(md).toContain("Native logging: full / healthy")
   })
 
   it("reports API key path + web mode when no OAuth", async () => {
@@ -323,10 +406,12 @@ describe("handleContext", () => {
     mockedChatGetState.mockReturnValue({ messages: [{ role: "user" }] })
     const ctx = makeCtx()
     await handleContext(ctx)
-    const md = ctx._pushed[0]
-    expect(md).toContain("**Context**")
-    expect(md).toContain("Messages: 1 user · 0 assistant")
-    expect(md).toContain("context window is fresh")
+    const block = ctx._pushed[0] as Extract<Pushed, { kind: "context" }>
+    expect(block.kind).toBe("context")
+    expect(block.userTurns).toBe(1)
+    expect(block.assistantTurns).toBe(0)
+    expect(block.window).toBeUndefined()
+    expect(block.tokens).toBeUndefined()
   })
 
   it("aggregates input/output/cache totals across assistant turns", async () => {
@@ -352,16 +437,17 @@ describe("handleContext", () => {
     })
     const ctx = makeCtx()
     await handleContext(ctx)
-    const md = ctx._pushed[0]
-    expect(md).toContain("Messages: 1 user · 2 assistant")
-    // input + cache reads + cache creation = 1200 + 100 + 200 = 1500
-    expect(md).toContain("Input tokens (incl. cache): 1,500")
-    expect(md).toContain("Output tokens: 800")
-    expect(md).toContain("write 200 / read 100")
-    // Window line uses the latest turn (200 in + 300 out = 500) vs the 200k default.
-    expect(md).toContain("**Window**: 500 / 200,000 (0.3% used, 199,500 left)")
-    expect(md).toContain("Auto-compact at**: 83.5%")
-    expect(md).toContain("/compact")
+    const block = ctx._pushed[0] as Extract<Pushed, { kind: "context" }>
+    expect(block.userTurns).toBe(1)
+    expect(block.assistantTurns).toBe(2)
+    // Raw tallies; the card sums input + cache for the "incl. cache" display.
+    expect(block.tokens).toEqual({ input: 1200, output: 800, cacheRead: 100, cacheCreate: 200 })
+    // Window line uses the latest turn (200 in + 300 out = 500) vs the 128k
+    // DEFAULT_CONTEXT_WINDOW (unknown model → conservative floor).
+    expect(block.window?.used).toBe(500)
+    expect(block.window?.max).toBe(128_000)
+    expect(block.window?.remaining).toBe(127_500)
+    expect(block.window?.autoCompactFraction).toBeCloseTo(0.835)
   })
 
   it("sizes the window from the active session's model", async () => {
@@ -371,10 +457,10 @@ describe("handleContext", () => {
     mockedGetSession.mockResolvedValue({ id: "s", model: "claude-opus-4-8" })
     const ctx = makeCtx({ activeSessionId: "s" })
     await handleContext(ctx)
-    const md = ctx._pushed[0]
+    const block = ctx._pushed[0] as Extract<Pushed, { kind: "context" }>
     // Opus 4.8 is the 1M tier → 500k / 1M = 50%.
-    expect(md).toContain("/ 1,000,000")
-    expect(md).toContain("50.0% used")
+    expect(block.window?.max).toBe(1_000_000)
+    expect(block.window?.fraction).toBeCloseTo(0.5)
   })
 
   it("falls back to the app default model when the session lookup fails", async () => {
@@ -385,7 +471,8 @@ describe("handleContext", () => {
     mockedSettingsGetState.mockReturnValue({ settings: { defaultModel: "claude-sonnet-4-5" } })
     const ctx = makeCtx({ activeSessionId: "s" })
     await handleContext(ctx)
-    expect(ctx._pushed[0]).toContain("/ 200,000")
+    const block = ctx._pushed[0] as Extract<Pushed, { kind: "context" }>
+    expect(block.window?.max).toBe(200_000)
   })
 
   it("omits the cache line when no cache hits", async () => {
@@ -399,8 +486,49 @@ describe("handleContext", () => {
     })
     const ctx = makeCtx()
     await handleContext(ctx)
-    const md = ctx._pushed[0]
-    expect(md).toContain("Input tokens (incl. cache): 10")
-    expect(md).not.toContain("Cache hits")
+    const block = ctx._pushed[0] as Extract<Pushed, { kind: "context" }>
+    expect(block.tokens?.input).toBe(10)
+    expect(block.tokens?.cacheRead).toBe(0)
+    expect(block.tokens?.cacheCreate).toBe(0)
+  })
+
+  it("honors a discovered model's declared context length over the 200k default", async () => {
+    mockedGetSession.mockResolvedValue({ id: "s", model: "acme-xl", providerOverride: "openai" })
+    mockedSettingsGetState.mockReturnValue({
+      settings: {
+        providerSettings: {
+          openai: { discoveredModels: [{ id: "acme-xl", contextLength: 400_000 }] },
+        },
+      },
+    })
+    mockedChatGetState.mockReturnValue({
+      messages: [{ role: "assistant", metadata: { usage: { inputTokens: 1_000 } } }],
+    })
+    const ctx = makeCtx({ activeSessionId: "s" })
+    await handleContext(ctx)
+    const block = ctx._pushed[0] as Extract<Pushed, { kind: "context" }>
+    expect(block.window?.used).toBe(1_000)
+    expect(block.window?.max).toBe(400_000)
+  })
+})
+
+describe("handleCompact", () => {
+  it("warns and does not call the sidecar when there is no active session", async () => {
+    const ctx = makeCtx({ activeSessionId: null })
+    await handleCompact(ctx)
+    expect(ctx._pushed[0]).toContain("No active session")
+    expect(mockedCompact).not.toHaveBeenCalled()
+  })
+
+  it("routes a compaction request for the active session", async () => {
+    const ctx = makeCtx({ activeSessionId: "s1" })
+    await handleCompact(ctx)
+    expect(mockedCompact).toHaveBeenCalledWith("s1", undefined)
+  })
+
+  it("passes the focus argument through", async () => {
+    const ctx = makeCtx({ activeSessionId: "s1", args: "  the API changes  " })
+    await handleCompact(ctx)
+    expect(mockedCompact).toHaveBeenCalledWith("s1", "the API changes")
   })
 })

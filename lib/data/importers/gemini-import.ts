@@ -6,7 +6,7 @@
 // (or "Gemini answered") as an assistant turn, pairing them in time order.
 
 import type { ImportedConversation, ChatImportOptions } from "./types"
-import type { ChatSession, StoredMessage } from "@/lib/claude/types"
+import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 
 interface GeminiActivity {
   header?: string

@@ -9,12 +9,15 @@
 
 import type {
   AgentTaskPayload,
+  AgentTeamTaskPayload,
   ChatLikeTaskPayload,
   ExternalAgentTaskPayload,
+  GoalTaskPayload,
+  PlanTaskPayload,
   ScheduledTaskType,
   SkillTaskPayload,
 } from "@/types/scheduler"
-import type { BuiltinToolsConfig, SendOptions } from "@/lib/claude/types"
+import type { BuiltinToolsConfig, SendOptions } from "@cognia/agent-config-types"
 import type { AcpPermissionMode } from "@/types/agent/external-agent"
 
 /**
@@ -75,6 +78,31 @@ export const EMPTY_EXTERNAL_AGENT_DRAFT: ExternalAgentDraft = {
   prompt: "",
   agentId: "",
 }
+
+/** Draft for `agent-team` tasks — runs a whole AgentTeam to terminal. */
+export interface AgentTeamDraft {
+  teamId: string
+  ultracode: boolean
+}
+
+/** Draft for `goal` tasks — creates + drives a self-driving goal headlessly. */
+export interface GoalDraft {
+  objective: string
+  characterId?: string
+  maxTurns?: number
+  maxTokens?: number
+  timeoutMinutes?: number
+}
+
+/** Draft for `plan` tasks — executes an existing AgentPlan. */
+export interface PlanDraft {
+  planId: string
+  replanOnFailure: boolean
+}
+
+export const EMPTY_AGENT_TEAM_DRAFT: AgentTeamDraft = { teamId: "", ultracode: false }
+export const EMPTY_GOAL_DRAFT: GoalDraft = { objective: "" }
+export const EMPTY_PLAN_DRAFT: PlanDraft = { planId: "", replanOnFailure: false }
 
 /**
  * Convert an existing JSON-shaped payload back into a `ChatLikeDraft` so an
@@ -273,11 +301,84 @@ export function externalAgentDraftToPayload(draft: ExternalAgentDraft): External
   return out
 }
 
+// ── Built-in multi-agent drafts (agent-team / goal / plan) ──────────────────
+
+export function payloadToAgentTeamDraft(raw: unknown): AgentTeamDraft {
+  const draft: AgentTeamDraft = { ...EMPTY_AGENT_TEAM_DRAFT }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return draft
+  const p = raw as Record<string, unknown>
+  if (typeof p.teamId === "string") draft.teamId = p.teamId
+  if (typeof p.ultracode === "boolean") draft.ultracode = p.ultracode
+  return draft
+}
+
+export function payloadToGoalDraft(raw: unknown): GoalDraft {
+  const draft: GoalDraft = { ...EMPTY_GOAL_DRAFT }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return draft
+  const p = raw as Record<string, unknown>
+  if (typeof p.objective === "string") draft.objective = p.objective
+  if (typeof p.characterId === "string") draft.characterId = p.characterId
+  const cfg = p.config && typeof p.config === "object" ? (p.config as Record<string, unknown>) : {}
+  if (typeof cfg.maxTurns === "number" && cfg.maxTurns > 0)
+    draft.maxTurns = Math.floor(cfg.maxTurns)
+  if (typeof cfg.maxTokens === "number" && cfg.maxTokens > 0)
+    draft.maxTokens = Math.floor(cfg.maxTokens)
+  if (typeof cfg.timeoutMs === "number" && cfg.timeoutMs > 0)
+    draft.timeoutMinutes = Math.round(cfg.timeoutMs / 60_000)
+  return draft
+}
+
+export function payloadToPlanDraft(raw: unknown): PlanDraft {
+  const draft: PlanDraft = { ...EMPTY_PLAN_DRAFT }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return draft
+  const p = raw as Record<string, unknown>
+  if (typeof p.planId === "string") draft.planId = p.planId
+  if (typeof p.replanOnFailure === "boolean") draft.replanOnFailure = p.replanOnFailure
+  return draft
+}
+
+export function agentTeamDraftToPayload(draft: AgentTeamDraft): AgentTeamTaskPayload {
+  const teamId = trimOrUndef(draft.teamId)
+  if (!teamId) throw new DraftValidationError({ teamId: "teamIdRequired" })
+  const out: AgentTeamTaskPayload = { teamId }
+  if (draft.ultracode) out.ultracode = true
+  return out
+}
+
+export function goalDraftToPayload(draft: GoalDraft): GoalTaskPayload {
+  const objective = trimOrUndef(draft.objective)
+  if (!objective) throw new DraftValidationError({ objective: "objectiveRequired" })
+  const out: GoalTaskPayload = { objective }
+  const characterId = trimOrUndef(draft.characterId)
+  if (characterId) out.characterId = characterId
+  const config: NonNullable<GoalTaskPayload["config"]> = {}
+  if (typeof draft.maxTurns === "number" && draft.maxTurns > 0) config.maxTurns = draft.maxTurns
+  if (typeof draft.maxTokens === "number" && draft.maxTokens > 0) config.maxTokens = draft.maxTokens
+  if (typeof draft.timeoutMinutes === "number" && draft.timeoutMinutes > 0)
+    config.timeoutMs = draft.timeoutMinutes * 60_000
+  if (Object.keys(config).length > 0) out.config = config
+  return out
+}
+
+export function planDraftToPayload(draft: PlanDraft): PlanTaskPayload {
+  const planId = trimOrUndef(draft.planId)
+  if (!planId) throw new DraftValidationError({ planId: "planIdRequired" })
+  const out: PlanTaskPayload = { planId }
+  if (draft.replanOnFailure) out.replanOnFailure = true
+  return out
+}
+
 /** Whether a task type uses the chat-like structured editor. */
 export function isChatLikeTaskType(t: ScheduledTaskType): boolean {
   return t === "chat" || t === "agent" || t === "skill"
 }
 
 export function isStructuredEditableTaskType(t: ScheduledTaskType): boolean {
-  return isChatLikeTaskType(t) || t === "external-agent"
+  return (
+    isChatLikeTaskType(t) ||
+    t === "external-agent" ||
+    t === "agent-team" ||
+    t === "goal" ||
+    t === "plan"
+  )
 }

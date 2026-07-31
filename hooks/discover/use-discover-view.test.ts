@@ -52,4 +52,18 @@ describe("useDiscoverView", () => {
     })
     expect(lastSaved()).toEqual({ teams: "grid" })
   })
+
+  it("uses discoverDefaults.view as the fallback for categories without an override", () => {
+    useSettingsStore.setState({
+      settings: {
+        discoverViewByCategory: { characters: "list" },
+        discoverDefaults: { view: "compact" },
+      } as never,
+    })
+    const { result } = renderHook(() => useDiscoverView())
+    // Explicit per-category override still wins.
+    expect(result.current.view("characters")).toBe("list")
+    // Everything else falls back to the global default, not the registry one.
+    expect(result.current.view("plugins")).toBe("compact")
+  })
 })

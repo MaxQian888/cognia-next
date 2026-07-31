@@ -15,20 +15,42 @@ import {
   type CircuitBreaker,
   type CircuitBreakerOptions,
 } from "@/lib/connectors/circuit-breaker"
-import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
 import type { AgentTeammate } from "@/types/agent/agent-team"
 
 export type TeammateFailureKind =
-  | "ordinary"
-  | "rate_limited"
-  | "catastrophic"
-  | "empty_output"
-  | "refusal"
+  "ordinary" | "rate_limited" | "catastrophic" | "empty_output" | "refusal"
+
+/** Options for a single claim. */
+export interface ClaimOptions {
+  /**
+   * Skill-aware assignment: when set and that teammate is currently available,
+   * claim it directly (matching a task's `assignedTo`); otherwise fall back to
+   * round-robin. Circuit-breaker availability is always respected.
+   */
+  preferTeammateId?: string
+  /**
+   * Exact-worker claim: return ONLY this teammate, or `null` if it is
+   * unavailable — never round-robin onto someone else.
+   *
+   * Used by the lead-review revision loop (ADR-0071): a "please fix this"
+   * revision is addressed to the author of the work under review, in that
+   * author's worktree. Handing it to a different teammate would ask them to
+   * revise a diff they did not write, so an unavailable author is a failure,
+   * not a cue to substitute. Wins over `preferTeammateId` when both are set.
+   */
+  requireTeammateId?: string
+}
 
 export interface TeammatePool {
-  claim(taskId: string): AgentTeammate | null
+  claim(taskId: string, options?: ClaimOptions): AgentTeammate | null
   recordSuccess(teammateId: string): void
   recordFailure(teammateId: string, error: unknown): void
+  /**
+   * Add a teammate to the pool mid-run (used by adaptive re-planning to RECRUIT
+   * an Employee Digital Twin as a fresh member). No-op if the id already exists.
+   * The new member is immediately claimable on the next wave.
+   */
+  register(teammate: AgentTeammate): void
   availableCount(): number
   isDisqualified(teammateId: string): boolean
   allUnavailable(): boolean
@@ -44,9 +66,12 @@ export interface TeammatePoolOptions {
   strategy?: "round-robin"
   now?: () => number
   /**
-   * Team + run context. When both are present the pool dispatches the
-   * `onTeammateClaim` / `onTeammateRelease` plugin hooks; when absent (e.g.
-   * a unit-test fixture) hook dispatch is skipped so the pool stays pure.
+   * Team + run context, accepted for call-site symmetry. The pool no longer
+   * dispatches the `onTeammateClaim` / `onTeammateRelease` plugin hooks itself —
+   * `dispatchTeammate` (the sole production caller of `claim` / `record*`) is
+   * the single source of those hooks, so firing them here too double-counted
+   * every claim/release for plugin consumers. Kept optional + unused so existing
+   * construction sites compile unchanged.
    */
   teamId?: string
   runId?: string
@@ -111,26 +136,6 @@ export function createTeammatePool(opts: TeammatePoolOptions): TeammatePool {
   let lastAllUnavailable = entries.size === 0
   let rotationIndex = 0
 
-  // Tracks the task each teammate is currently working so the release hook
-  // can name it. Keyed by teammateId → taskId.
-  const claimedTasks = new Map<string, string>()
-  const canDispatch = Boolean(opts.teamId && opts.runId)
-
-  const dispatchRelease = (teammateId: string, result: "success" | "failure", error?: string) => {
-    if (!canDispatch) return
-    const taskId = claimedTasks.get(teammateId)
-    if (taskId === undefined) return
-    claimedTasks.delete(teammateId)
-    getPluginLifecycleHooks().dispatchOnTeammateRelease({
-      teamId: opts.teamId!,
-      runId: opts.runId!,
-      teammateId,
-      taskId,
-      result,
-      error,
-    })
-  }
-
   const isAvailable = (e: Entry): boolean => !e.disqualified && e.breaker.canPass()
 
   const computeAllUnavailable = (): boolean => {
@@ -157,35 +162,59 @@ export function createTeammatePool(opts: TeammatePoolOptions): TeammatePool {
     }
   }
 
+  // Claim/release lifecycle hooks are dispatched by `dispatchTeammate`, not the
+  // pool — see TeammatePoolOptions. `taskId` is still threaded through claim for
+  // the skill-aware preference path and call-site symmetry.
+  const finalizeClaim = (entry: Entry, _taskId: string): AgentTeammate => entry.teammate
+
   return {
-    claim: (taskId) => {
+    claim: (taskId, options) => {
       const ids = [...entries.keys()]
       if (ids.length === 0) return null
+
+      // Exact-worker claim: this teammate or nobody. No round-robin fallback —
+      // see ClaimOptions.requireTeammateId.
+      const requireId = options?.requireTeammateId
+      if (requireId) {
+        const required = entries.get(requireId)
+        if (!required || !isAvailable(required)) return null
+        return finalizeClaim(required, taskId)
+      }
+
+      // Skill-aware fast path: honor the preferred teammate when available.
+      const preferId = options?.preferTeammateId
+      if (preferId) {
+        const preferred = entries.get(preferId)
+        if (preferred && isAvailable(preferred)) return finalizeClaim(preferred, taskId)
+      }
+
+      // Round-robin fallback.
       for (let i = 0; i < ids.length; i++) {
         const id = ids[(rotationIndex + i) % ids.length]
         const entry = entries.get(id)
         if (!entry) continue
         if (isAvailable(entry)) {
           rotationIndex = (rotationIndex + i + 1) % ids.length
-          if (canDispatch) {
-            claimedTasks.set(entry.teammate.id, taskId)
-            getPluginLifecycleHooks().dispatchOnTeammateClaim({
-              teamId: opts.teamId!,
-              runId: opts.runId!,
-              teammateId: entry.teammate.id,
-              taskId,
-            })
-          }
-          return entry.teammate
+          return finalizeClaim(entry, taskId)
         }
       }
       return null
+    },
+    register: (teammate) => {
+      if (entries.has(teammate.id)) return
+      entries.set(teammate.id, {
+        teammate,
+        breaker: buildBreaker(),
+        disqualified: false,
+      })
+      // A fresh available member may lift an all-unavailable state — re-evaluate
+      // the edge so a parked deadlock gate can recover.
+      checkAllUnavailableEdge()
     },
     recordSuccess: (teammateId) => {
       const e = entries.get(teammateId)
       if (!e) return
       e.breaker.recordSuccess()
-      dispatchRelease(teammateId, "success")
       checkAllUnavailableEdge()
     },
     recordFailure: (teammateId, error) => {
@@ -215,7 +244,6 @@ export function createTeammatePool(opts: TeammatePoolOptions): TeammatePool {
         default:
           e.breaker.recordFailure()
       }
-      dispatchRelease(teammateId, "failure", error instanceof Error ? error.message : String(error))
       checkAllUnavailableEdge()
     },
     availableCount: () => {

@@ -67,8 +67,8 @@ Namespace: `mcp__cognia-tools__<tool>`. Toggles live in **Settings → System �
 | `file_diff` | read | unified diff, max 5 MB/side, context 0–20 |
 | `file_info` | read | size · mtime · mode · mime |
 | `file_exists` | read | path test |
-| `file_search` | read | glob/list, maxResults 200 |
-| `content_search` | read | substring/regex, maxResults 100 |
+| `file_search` | read | glob/list, maxResults 200, respects `.gitignore` (root + nested; `respectGitignore:false` to opt out) |
+| `content_search` | read | substring/regex, maxResults 100, respects `.gitignore` (root + nested; `respectGitignore:false` to opt out) |
 | `file_append` | write | approval + path guard |
 | `file_binary_write` | write | base64 payload |
 | `file_copy` | write | overwrite opt-in |

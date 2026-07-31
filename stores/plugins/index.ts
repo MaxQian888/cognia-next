@@ -1,8 +1,6 @@
 export {
   usePluginsStore,
   DEFAULT_PLUGIN_FILTERS,
-  deriveSectionFromTab,
-  type PluginPanelTab,
   type PluginSortMode,
   type PluginFilters,
   type PluginImportStaging,

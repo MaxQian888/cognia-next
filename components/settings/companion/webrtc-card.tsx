@@ -46,10 +46,23 @@ import { isTauri, transport } from "@/lib/tauri"
 import {
   KEYRING_CREDENTIAL_PREFIX,
   freshCredentialKeyId,
+  keyIdOfSentinel,
   migrateTurnServersToKeyring,
   resolveTurnServerCredentials,
   saveTurnCredential,
 } from "@/lib/credentials/turn-credentials"
+import {
+  deleteProviderSecret,
+  clampTtl,
+  provisionIceServers,
+  saveProviderSecret,
+  type TurnProviderSecret,
+} from "@/lib/credentials/turn-provisioning"
+import {
+  DEFAULT_TURN_PROVIDER,
+  type TurnProviderConfig,
+  type TurnProviderKind,
+} from "@cognia/agent-config-types"
 
 const DEFAULT_STUN_SERVERS: RTCIceServer[] = [
   { urls: "stun:stun.l.google.com:19302" },
@@ -58,11 +71,23 @@ const DEFAULT_STUN_SERVERS: RTCIceServer[] = [
 const POLL_INTERVAL_MS = 3000
 const POLL_FAILURE_BANNER_THRESHOLD = 3
 
-interface FormState {
+export interface FormState {
   enabled: boolean
   signalingUrl: string
   iceServersText: string
   turnServersText: string
+  // ADR-0021 — automatic ephemeral-TURN provider.
+  turnProviderKind: TurnProviderKind
+  /** Cloudflare Calls TURN Key ID. */
+  turnProviderKeyId: string
+  /** Twilio Account SID. */
+  turnProviderSid: string
+  /** Provider API secret entered this session; never re-read from keyring. */
+  turnProviderToken: string
+  /** Requested TTL (seconds) as raw text; blank = provider default. */
+  turnProviderTtl: string
+  /** Existing keyring sentinel (`kr:<keyId>`) for the stored secret, or "". */
+  turnProviderSecretRef: string
 }
 
 const INITIAL: FormState = {
@@ -70,6 +95,17 @@ const INITIAL: FormState = {
   signalingUrl: DEFAULT_SIGNALING_URL,
   iceServersText: DEFAULT_STUN_SERVERS.map((s) => urlsOf(s)).join("\n"),
   turnServersText: "",
+  turnProviderKind: "none",
+  turnProviderKeyId: "",
+  turnProviderSid: "",
+  turnProviderToken: "",
+  turnProviderTtl: "",
+  turnProviderSecretRef: "",
+}
+
+/** Build the keyring secret blob for the given provider kind. */
+function secretFor(kind: TurnProviderKind, token: string): TurnProviderSecret {
+  return kind === "twilio" ? { authToken: token } : { apiToken: token }
 }
 
 interface SignalingStatusSnapshot {
@@ -124,11 +160,19 @@ export function WebRtcCard() {
         // regression.
         const displayTurn = await resolveTurnServerCredentials(migratedTurn)
         if (cancelled) return
+        const tp = s.turnProvider ?? DEFAULT_TURN_PROVIDER
         setForm({
           enabled: s.webrtcEnabled ?? true,
           signalingUrl: s.signalingUrl ?? DEFAULT_SIGNALING_URL,
           iceServersText: stringifyServers(s.iceServers ?? DEFAULT_STUN_SERVERS),
           turnServersText: stringifyServers(displayTurn),
+          turnProviderKind: tp.kind,
+          turnProviderKeyId: tp.cloudflareKeyId ?? "",
+          turnProviderSid: tp.twilioAccountSid ?? "",
+          // The secret is one-way (write-only); never resolved back into the form.
+          turnProviderToken: "",
+          turnProviderTtl: tp.ttlSeconds ? String(tp.ttlSeconds) : "",
+          turnProviderSecretRef: tp.secretRef ?? "",
         })
       } catch {
         // Dexie unavailable (SSR / first load) — keep INITIAL.
@@ -218,12 +262,25 @@ export function WebRtcCard() {
           credential: `${KEYRING_CREDENTIAL_PREFIX}${keyId}`,
         })
       }
+      // ADR-0021 — persist the ephemeral-TURN provider. The API secret goes
+      // to the OS keyring (one-way); Dexie keeps only the kind + non-secret
+      // ids + a `kr:<keyId>` sentinel.
+      const { turnProvider, nextSecretRef } = await persistTurnProvider(form)
+
       await saveSettings({
         webrtcEnabled: form.enabled,
         signalingUrl: url,
         iceServers: ice.length > 0 ? ice : undefined,
         turnServers: turnPersisted.length > 0 ? turnPersisted : undefined,
+        turnProvider,
       })
+      // Clear the just-saved token from form state and reflect the stored
+      // sentinel so the input shows the "token stored" placeholder.
+      setForm((prev) => ({
+        ...prev,
+        turnProviderToken: "",
+        turnProviderSecretRef: nextSecretRef,
+      }))
       toast.success(t("saved"))
     } catch (err) {
       toast.error(
@@ -231,6 +288,39 @@ export function WebRtcCard() {
           reason: err instanceof Error ? err.message : String(err),
         })
       )
+    } finally {
+      setBusy(false)
+    }
+  }, [form, t])
+
+  const onTestProvider = useCallback(async () => {
+    const kind = form.turnProviderKind
+    if (kind === "none") return
+    const token = form.turnProviderToken.trim()
+    const provider: TurnProviderConfig = {
+      kind,
+      ttlSeconds: parseTtl(form.turnProviderTtl),
+      cloudflareKeyId:
+        kind === "cloudflare-calls" ? form.turnProviderKeyId.trim() || undefined : undefined,
+      twilioAccountSid: kind === "twilio" ? form.turnProviderSid.trim() || undefined : undefined,
+      // Use the freshly-entered token if present (test before save); else
+      // fall back to the already-stored keyring secret.
+      secretRef: token ? undefined : form.turnProviderSecretRef || undefined,
+    }
+    setBusy(true)
+    try {
+      const res = await provisionIceServers(
+        provider,
+        token ? { loadSecret: async () => secretFor(kind, token) } : undefined
+      )
+      toast.success(
+        t("turnTestSuccess", {
+          count: res.iceServers.length,
+          expiresAt: new Date(res.expiresAt).toLocaleTimeString(),
+        })
+      )
+    } catch (err) {
+      toast.error(t("turnTestFailed", { reason: err instanceof Error ? err.message : String(err) }))
     } finally {
       setBusy(false)
     }
@@ -300,6 +390,98 @@ export function WebRtcCard() {
             placeholder={t("turnServersPlaceholder")}
           />
           <p className="text-[10px] text-muted-foreground">{t("turnServersHelp")}</p>
+        </div>
+
+        <div className="flex flex-col gap-1.5 rounded border border-dashed p-2">
+          <Label htmlFor="webrtc-turn-provider" className="text-xs font-medium">
+            {t("turnProviderLabel")}
+          </Label>
+          <select
+            id="webrtc-turn-provider"
+            value={form.turnProviderKind}
+            onChange={(e) =>
+              setForm((prev) => ({
+                ...prev,
+                turnProviderKind: e.target.value as TurnProviderKind,
+              }))
+            }
+            disabled={busy}
+            className="h-9 rounded-md border border-input bg-transparent px-2 text-xs"
+            data-testid="webrtc-turn-provider-kind"
+          >
+            <option value="none">{t("turnProviderNone")}</option>
+            <option value="cloudflare-calls">{t("turnProviderCloudflare")}</option>
+            <option value="twilio">{t("turnProviderTwilio")}</option>
+          </select>
+          <p className="text-[10px] text-muted-foreground">{t("turnProviderHelp")}</p>
+
+          {form.turnProviderKind === "cloudflare-calls" ? (
+            <Input
+              aria-label={t("turnProviderKeyIdLabel")}
+              value={form.turnProviderKeyId}
+              onChange={(e) => setForm((prev) => ({ ...prev, turnProviderKeyId: e.target.value }))}
+              placeholder={t("turnProviderKeyIdLabel")}
+              disabled={busy}
+              className="font-mono text-xs"
+              data-testid="webrtc-turn-cf-keyid"
+            />
+          ) : null}
+          {form.turnProviderKind === "twilio" ? (
+            <Input
+              aria-label={t("turnProviderSidLabel")}
+              value={form.turnProviderSid}
+              onChange={(e) => setForm((prev) => ({ ...prev, turnProviderSid: e.target.value }))}
+              placeholder={t("turnProviderSidLabel")}
+              disabled={busy}
+              className="font-mono text-xs"
+              data-testid="webrtc-turn-twilio-sid"
+            />
+          ) : null}
+          {form.turnProviderKind !== "none" ? (
+            <>
+              <Input
+                type="password"
+                aria-label={
+                  form.turnProviderKind === "twilio"
+                    ? t("turnProviderAuthTokenLabel")
+                    : t("turnProviderTokenLabel")
+                }
+                value={form.turnProviderToken}
+                onChange={(e) =>
+                  setForm((prev) => ({ ...prev, turnProviderToken: e.target.value }))
+                }
+                placeholder={
+                  form.turnProviderSecretRef
+                    ? t("turnProviderTokenStored")
+                    : form.turnProviderKind === "twilio"
+                      ? t("turnProviderAuthTokenLabel")
+                      : t("turnProviderTokenLabel")
+                }
+                disabled={busy}
+                className="font-mono text-xs"
+                data-testid="webrtc-turn-token"
+              />
+              <Input
+                aria-label={t("turnProviderTtlLabel")}
+                value={form.turnProviderTtl}
+                onChange={(e) => setForm((prev) => ({ ...prev, turnProviderTtl: e.target.value }))}
+                placeholder={t("turnProviderTtlLabel")}
+                disabled={busy}
+                inputMode="numeric"
+                className="font-mono text-xs"
+                data-testid="webrtc-turn-ttl"
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onTestProvider}
+                disabled={busy}
+                data-testid="webrtc-turn-test"
+              >
+                {t("turnTestButton")}
+              </Button>
+            </>
+          ) : null}
         </div>
 
         <Button size="sm" onClick={onSave} disabled={busy} data-testid="webrtc-save">
@@ -413,6 +595,7 @@ function StatusBlock({ status, devices }: StatusBlockProps): React.JSX.Element {
             {truncateId(d.deviceId)}
           </span>
           <span className="font-medium">{t(`deviceTier.${d.tier}`)}</span>
+          <span className="text-[10px] text-muted-foreground">{t("protocolMode")}</span>
           {d.lastError && d.tier === "failed" ? (
             <span className="text-[10px] text-destructive sm:ml-2" title={d.lastError}>
               {truncateError(d.lastError)}
@@ -466,6 +649,54 @@ export function TierDot({ tier, className }: TierDotProps): React.JSX.Element {
 // Helpers — exported for unit testing.
 // ---------------------------------------------------------------------------
 
+/** Parse the raw TTL textbox into seconds, or `undefined` for the default. */
+export function parseTtl(text: string): number | undefined {
+  const trimmed = text.trim()
+  if (!trimmed) return undefined
+  const n = Number(trimmed)
+  return Number.isFinite(n) && n > 0 ? clampTtl(n) : undefined
+}
+
+/**
+ * Persist the TURN-provider section of the form: write the API secret to the
+ * OS keyring (one-way) and return the Dexie-safe `TurnProviderConfig` (kind +
+ * non-secret ids + `kr:<keyId>` sentinel). Switching to `"none"` deletes any
+ * stored secret. Exported for unit testing.
+ */
+export async function persistTurnProvider(
+  form: FormState
+): Promise<{ turnProvider: TurnProviderConfig; nextSecretRef: string }> {
+  const kind = form.turnProviderKind
+  if (kind === "none") {
+    if (form.turnProviderSecretRef) {
+      const kid = keyIdOfSentinel(form.turnProviderSecretRef)
+      if (kid) await deleteProviderSecret(kid)
+    }
+    return { turnProvider: { kind: "none" }, nextSecretRef: "" }
+  }
+  let secretRef = form.turnProviderSecretRef
+  const token = form.turnProviderToken.trim()
+  if (token) {
+    const keyId = freshCredentialKeyId()
+    await saveProviderSecret(keyId, secretFor(kind, token))
+    // Drop the previous secret if we just minted a replacement.
+    if (form.turnProviderSecretRef) {
+      const oldKid = keyIdOfSentinel(form.turnProviderSecretRef)
+      if (oldKid && oldKid !== keyId) await deleteProviderSecret(oldKid)
+    }
+    secretRef = `${KEYRING_CREDENTIAL_PREFIX}${keyId}`
+  }
+  const turnProvider: TurnProviderConfig = {
+    kind,
+    ttlSeconds: parseTtl(form.turnProviderTtl),
+    cloudflareKeyId:
+      kind === "cloudflare-calls" ? form.turnProviderKeyId.trim() || undefined : undefined,
+    twilioAccountSid: kind === "twilio" ? form.turnProviderSid.trim() || undefined : undefined,
+    secretRef: secretRef || undefined,
+  }
+  return { turnProvider, nextSecretRef: secretRef }
+}
+
 /** Renders a `RTCIceServer.urls` (string | string[]) back as one URL per line. */
 function urlsOf(server: RTCIceServer): string {
   const list = Array.isArray(server.urls) ? server.urls : [server.urls]
@@ -507,13 +738,13 @@ export function parseServers(text: string): ParseServersResult {
     if (!line || line.startsWith("#")) continue
     const parts = line.split("|")
     const url = parts[0]?.trim() ?? ""
-    if (!/^(stun|turn|turns):/i.test(url)) {
+    if (!isValidIceUrl(url)) {
       invalid.push(line)
       continue
     }
     const isTurn = /^turns?:/i.test(url)
     if (isTurn) {
-      if (parts.length < 3 || !parts[1] || !parts[2]) {
+      if (parts.length !== 3 || !parts[1]?.trim() || !parts[2]?.trim()) {
         invalid.push(line)
         continue
       }
@@ -522,11 +753,43 @@ export function parseServers(text: string): ParseServersResult {
         username: parts[1].trim(),
         credential: parts[2].trim(),
       })
-    } else {
+    } else if (parts.length === 1) {
       servers.push({ urls: url })
+    } else {
+      invalid.push(line)
     }
   }
   return { servers, invalid }
+}
+
+function isValidIceUrl(raw: string): boolean {
+  if (/[\s#]/.test(raw)) return false
+  let parsed: URL
+  try {
+    parsed = new URL(raw)
+  } catch {
+    return false
+  }
+  const scheme = parsed.protocol.toLowerCase()
+  if (scheme !== "stun:" && scheme !== "turn:" && scheme !== "turns:") return false
+
+  const address = parsed.pathname
+  const bracketed = address.match(/^\[[0-9a-f:.]+\](?::(\d{1,5}))?$/i)
+  const hostname = address.match(/^[a-z0-9.-]+(?::(\d{1,5}))?$/i)
+  const portText = bracketed?.[1] ?? hostname?.[1]
+  if (!bracketed && !hostname) return false
+  if (portText && (Number(portText) < 1 || Number(portText) > 65_535)) return false
+
+  const query = [...parsed.searchParams.entries()]
+  if (query.length === 0) return true
+  if (
+    query.length !== 1 ||
+    query[0][0] !== "transport" ||
+    !["udp", "tcp"].includes(query[0][1].toLowerCase())
+  ) {
+    return false
+  }
+  return scheme !== "turns:" || query[0][1].toLowerCase() === "tcp"
 }
 
 function truncateId(deviceId: string): string {

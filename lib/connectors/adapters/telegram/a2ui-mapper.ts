@@ -32,7 +32,7 @@ import {
   walkA2UISurface,
   type A2UIWalkNode,
 } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
-import { escapeMdV2 } from "./markdown-v2"
+import { escapeMdV2, escapeMdV2Code, escapeMdV2Url, TELEGRAM_CAPTION_LIMIT } from "./markdown-v2"
 import type { SerializedTelegramCall } from "./serialize"
 
 export interface TelegramMapperInput {
@@ -97,7 +97,8 @@ export async function buildTelegramA2UICalls(
         } else if (variant === "label") {
           lines.push(`_${escapeMdV2(text)}_`)
         } else if (variant === "code") {
-          lines.push("```\n" + escapeMdV2(text) + "\n```")
+          // Pre-entity context: only ` and \ are escaped (audited fix #4a).
+          lines.push("```\n" + escapeMdV2Code(text) + "\n```")
         } else {
           lines.push(escapeMdV2(text))
         }
@@ -109,7 +110,9 @@ export async function buildTelegramA2UICalls(
         const text = stringValue(node.raw.text) || stringValue(node.raw.href)
         const href = stringValue(node.raw.href) || stringValue(node.raw.text)
         if (!href) return
-        lines.push(`[${escapeMdV2(text || href)}](${href})`)
+        // Inside the (...) of an inline link only ) and \ must be escaped
+        // (audited fix #4c) — a raw ")" in the href would end the link early.
+        lines.push(`[${escapeMdV2(text || href)}](${escapeMdV2Url(href)})`)
         break
       }
       case "Divider": {
@@ -129,11 +132,25 @@ export async function buildTelegramA2UICalls(
           photo: url,
           ...input.routing,
         }
-        if (altRaw) {
-          payload.caption = escapeMdV2(altRaw)
+        const caption = altRaw ? escapeMdV2(altRaw) : ""
+        if (caption && caption.length <= TELEGRAM_CAPTION_LIMIT) {
+          payload.caption = caption
           payload.parse_mode = "MarkdownV2"
         }
         calls.push({ method: "sendPhoto", payload })
+        if (caption.length > TELEGRAM_CAPTION_LIMIT) {
+          // Telegram caps captions at 1024 chars (audited fix #7) — overflow
+          // text rides in a follow-up sendMessage instead of a 400.
+          calls.push({
+            method: "sendMessage",
+            payload: {
+              chat_id: input.chatId,
+              text: caption,
+              parse_mode: "MarkdownV2",
+              ...input.routing,
+            },
+          })
+        }
         break
       }
       case "Button": {

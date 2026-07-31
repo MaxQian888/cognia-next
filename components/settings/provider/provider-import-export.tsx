@@ -24,11 +24,12 @@ import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { useSettingsStore } from "@/stores"
-import type { CustomProviderSettings } from "@/types/provider/provider"
-import { PROVIDERS } from "@/types/provider"
+import type { CustomProviderSettings } from "@cognia/provider-types/provider"
+import { PROVIDERS } from "@cognia/provider-types"
 
 interface ProviderImportExportProps {
   onClose?: () => void
+  compact?: boolean
 }
 
 interface ExportData {
@@ -177,7 +178,7 @@ function validateImportData(raw: unknown): ImportValidationResult {
   }
 }
 
-export function ProviderImportExport({ onClose }: ProviderImportExportProps) {
+export function ProviderImportExport({ onClose, compact = false }: ProviderImportExportProps) {
   const t = useTranslations("providers")
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dropZoneRef = useRef<HTMLDivElement>(null)
@@ -204,6 +205,7 @@ export function ProviderImportExport({ onClose }: ProviderImportExportProps) {
   const [importData, setImportData] = useState<ExportData | null>(null)
   const [importError, setImportError] = useState<string | null>(null)
   const [importSuccess, setImportSuccess] = useState(false)
+  const [isImporting, setIsImporting] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const [importFileName, setImportFileName] = useState<string | null>(null)
   const [importConflicts, setImportConflicts] = useState<ImportConflict[]>([])
@@ -485,13 +487,15 @@ export function ProviderImportExport({ onClose }: ProviderImportExportProps) {
     }
   }
 
-  const handleImport = () => {
+  const handleImport = async () => {
     if (!importData) return
 
     // Build set of conflicting IDs to check resolution strategy
     const conflictIds = new Set(importConflicts.map((c) => c.id))
 
     try {
+      setIsImporting(true)
+      setImportError(null)
       const validation = validateImportData(importData)
       if (!validation.valid || !validation.data) {
         setImportError(translateImportError(validation.errorKey, validation.errorValues))
@@ -499,6 +503,7 @@ export function ProviderImportExport({ onClose }: ProviderImportExportProps) {
       }
 
       const safeData = validation.data
+      const mutations: Promise<unknown>[] = []
 
       // Import provider settings based on resolution strategy
       if (safeData.providerSettings) {
@@ -518,14 +523,20 @@ export function ProviderImportExport({ onClose }: ProviderImportExportProps) {
               string | string[] | boolean | undefined
             >
             // Keep current API key, merge other settings
-            setProviderSettings(id, {
-              ...importSettings,
-              apiKey: currentSettings?.apiKey || (importSettings.apiKey as string),
-              apiKeys: currentSettings?.apiKeys || (importSettings.apiKeys as string[]),
-            })
+            mutations.push(
+              Promise.resolve(
+                setProviderSettings(id, {
+                  ...importSettings,
+                  apiKey: currentSettings?.apiKey || (importSettings.apiKey as string),
+                  apiKeys: currentSettings?.apiKeys || (importSettings.apiKeys as string[]),
+                })
+              )
+            )
           } else {
             // Overwrite or no conflict
-            setProviderSettings(id, settings as Record<string, unknown>)
+            mutations.push(
+              Promise.resolve(setProviderSettings(id, settings as Record<string, unknown>))
+            )
           }
         })
       }
@@ -557,41 +568,54 @@ export function ProviderImportExport({ onClose }: ProviderImportExportProps) {
           // For existing providers, use update to avoid accidental duplication.
           if (hasConflict && importResolution === "merge") {
             const currentProvider = customProviders[id]
-            updateCustomProvider(id, {
-              customName: normalized.customName,
-              baseURL: normalized.baseURL,
-              apiKey: currentProvider?.apiKey || normalized.apiKey,
-              customModels: normalized.customModels,
-              defaultModel: normalized.defaultModel,
-              apiProtocol: normalized.apiProtocol,
-              enabled: normalized.enabled,
-            })
+            mutations.push(
+              Promise.resolve(
+                updateCustomProvider(id, {
+                  customName: normalized.customName,
+                  baseURL: normalized.baseURL,
+                  apiKey: currentProvider?.apiKey || normalized.apiKey,
+                  customModels: normalized.customModels,
+                  defaultModel: normalized.defaultModel,
+                  apiProtocol: normalized.apiProtocol,
+                  enabled: normalized.enabled,
+                })
+              )
+            )
           } else if (hasConflict) {
-            updateCustomProvider(id, {
-              customName: normalized.customName,
-              baseURL: normalized.baseURL,
-              apiKey: normalized.apiKey,
-              customModels: normalized.customModels,
-              defaultModel: normalized.defaultModel,
-              apiProtocol: normalized.apiProtocol,
-              enabled: normalized.enabled,
-            })
+            mutations.push(
+              Promise.resolve(
+                updateCustomProvider(id, {
+                  customName: normalized.customName,
+                  baseURL: normalized.baseURL,
+                  apiKey: normalized.apiKey,
+                  customModels: normalized.customModels,
+                  defaultModel: normalized.defaultModel,
+                  apiProtocol: normalized.apiProtocol,
+                  enabled: normalized.enabled,
+                })
+              )
+            )
           } else {
             // New custom provider path
-            addCustomProvider({
-              id,
-              customName: normalized.customName,
-              baseURL: normalized.baseURL,
-              apiKey: normalized.apiKey,
-              customModels: normalized.customModels,
-              defaultModel: normalized.defaultModel,
-              apiProtocol: normalized.apiProtocol,
-              enabled: normalized.enabled,
-            })
+            mutations.push(
+              Promise.resolve(
+                addCustomProvider({
+                  id,
+                  customName: normalized.customName,
+                  baseURL: normalized.baseURL,
+                  apiKey: normalized.apiKey,
+                  customModels: normalized.customModels,
+                  defaultModel: normalized.defaultModel,
+                  apiProtocol: normalized.apiProtocol,
+                  enabled: normalized.enabled,
+                })
+              )
+            )
           }
         })
       }
 
+      await Promise.all(mutations)
       setImportSuccess(true)
       setTimeout(() => {
         setImportDialogOpen(false)
@@ -602,6 +626,8 @@ export function ProviderImportExport({ onClose }: ProviderImportExportProps) {
       }, 1500)
     } catch {
       setImportError(t("importErrors.importFailedRetry"))
+    } finally {
+      setIsImporting(false)
     }
   }
 
@@ -613,11 +639,17 @@ export function ProviderImportExport({ onClose }: ProviderImportExportProps) {
   }, [selectedProviders, availableProviders])
 
   return (
-    <div className="flex items-center gap-2">
+    <div className={cn("flex items-center", compact ? "gap-1" : "gap-2")}>
       {/* Export Button */}
-      <Button variant="outline" size="sm" onClick={() => handleExportDialogOpen(true)}>
-        <Download className="h-4 w-4 mr-2" />
-        {t("export")}
+      <Button
+        variant="outline"
+        size="sm"
+        className={cn(compact && "px-2")}
+        aria-label={t("export")}
+        onClick={() => handleExportDialogOpen(true)}
+      >
+        <Download className={cn("h-4 w-4", !compact && "mr-2")} />
+        <span className={cn(compact && "sr-only")}>{t("export")}</span>
       </Button>
 
       {/* Import Button with drag-drop zone */}
@@ -631,10 +663,11 @@ export function ProviderImportExport({ onClose }: ProviderImportExportProps) {
           variant="outline"
           size="sm"
           onClick={() => fileInputRef.current?.click()}
-          className={cn(isDragging && "ring-2 ring-primary")}
+          className={cn(compact && "px-2", isDragging && "ring-2 ring-primary")}
+          aria-label={t("import")}
         >
-          <Upload className="h-4 w-4 mr-2" />
-          {t("import")}
+          <Upload className={cn("h-4 w-4", !compact && "mr-2")} />
+          <span className={cn(compact && "sr-only")}>{t("import")}</span>
         </Button>
       </div>
       <input
@@ -708,7 +741,7 @@ export function ProviderImportExport({ onClose }: ProviderImportExportProps) {
                         <span className="text-sm font-medium">{provider.name}</span>
                       </div>
                       <Badge variant="secondary" className="text-[10px]">
-                        {provider.modelsCount} models
+                        {t("modelsCountBadge", { count: provider.modelsCount })}
                       </Badge>
                     </div>
                   ))}
@@ -740,6 +773,7 @@ export function ProviderImportExport({ onClose }: ProviderImportExportProps) {
                   )}
                 >
                   <FileJson className="h-4 w-4" />
+                  {/* i18n-exempt: file format name, identical in every locale */}
                   JSON
                 </button>
                 <button
@@ -752,6 +786,7 @@ export function ProviderImportExport({ onClose }: ProviderImportExportProps) {
                   )}
                 >
                   <File className="h-4 w-4" />
+                  {/* i18n-exempt: literal filename, identical in every locale */}
                   .env
                 </button>
               </div>
@@ -832,6 +867,7 @@ export function ProviderImportExport({ onClose }: ProviderImportExportProps) {
                 <p className="text-sm font-medium">
                   {t("dropFileHere") || "Drop JSON file here or click to browse"}
                 </p>
+                {/* i18n-exempt: literal filename glob, identical in every locale */}
                 <p className="text-xs text-muted-foreground mt-1">cognia-providers-*.json</p>
               </div>
             )}
@@ -992,9 +1028,12 @@ export function ProviderImportExport({ onClose }: ProviderImportExportProps) {
             >
               {t("cancel") || "Cancel"}
             </Button>
-            <Button onClick={handleImport} disabled={!importData || importSuccess}>
+            <Button
+              onClick={() => void handleImport()}
+              disabled={!importData || importSuccess || isImporting}
+            >
               <Upload className="h-4 w-4 mr-2" />
-              {t("importNow") || "Import"}
+              {isImporting ? t("importing") : t("importNow") || "Import"}
             </Button>
           </DialogFooter>
         </DialogContent>

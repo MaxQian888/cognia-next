@@ -9,7 +9,7 @@
 import { act, renderHook } from "@testing-library/react"
 
 const logError = jest.fn()
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: {
     agent: {
       child: () => ({
@@ -67,7 +67,10 @@ jest.mock("@/lib/ai/agent/external/canonical-contract", () => ({
 }))
 
 interface StoreState {
-  agents: Record<string, { id: string; name: string; protocol: string }>
+  agents: Record<
+    string,
+    { id: string; name: string; protocol: string; metadata?: Record<string, unknown> }
+  >
   connectionStatus: Record<string, string>
   agentValidity: Record<string, unknown>
   lastRunSnapshots: Record<string, unknown>
@@ -102,11 +105,22 @@ const storeSetAgentValidity = jest.fn((id: string, snap: unknown) => {
 })
 const storeGetAgentValidity = jest.fn((id: string) => storeStateRef.current.agentValidity[id])
 const storeGetLastRunSnapshot = jest.fn((id: string) => storeStateRef.current.lastRunSnapshots[id])
+const storeSetLastRunSnapshot = jest.fn((id: string, snap: unknown) => {
+  storeStateRef.current.lastRunSnapshots[id] = snap
+})
 const storeGetBenchmarkCapabilities = jest.fn(
   (id: string) => storeStateRef.current.benchmarkCapabilities[id] ?? []
 )
 const storeSetActiveAgent = jest.fn((id: string | null) => {
   storeStateRef.current.activeAgentId = id
+})
+const storeUpdateAgent = jest.fn((id: string, updates: { metadata?: Record<string, unknown> }) => {
+  const agent = storeStateRef.current.agents[id]
+  if (!agent) return
+  storeStateRef.current.agents[id] = {
+    ...agent,
+    metadata: updates.metadata ? { ...agent.metadata, ...updates.metadata } : agent.metadata,
+  }
 })
 
 const stableGetAgent = (id: string) => storeStateRef.current.agents[id]
@@ -126,8 +140,10 @@ function getStoreState() {
     getConnectionStatus: stableGetConnectionStatus,
     getAgentValidity: storeGetAgentValidity,
     getLastRunSnapshot: storeGetLastRunSnapshot,
+    setLastRunSnapshot: storeSetLastRunSnapshot,
     getBenchmarkCapabilities: storeGetBenchmarkCapabilities,
     setActiveAgent: storeSetActiveAgent,
+    updateAgent: storeUpdateAgent,
     activeAgentId: storeStateRef.current.activeAgentId,
     defaultPermissionMode: storeStateRef.current.defaultPermissionMode,
   }
@@ -177,6 +193,10 @@ interface FakeManager {
   getConfigOptions: jest.Mock
   getAgentTools: jest.Mock
   checkAgentHealth: jest.Mock
+  getCompactionCapability: jest.Mock
+  compactSession: jest.Mock
+  getProviderUndoCapability: jest.Mock
+  undoLastProviderChange: jest.Mock
   addLifecycleListener: jest.Mock
   addEventListener: jest.Mock
 }
@@ -218,6 +238,10 @@ function makeManager(): FakeManager {
     getConfigOptions: jest.fn(() => ({ status: "ok", data: [] })),
     getAgentTools: jest.fn(() => ({})),
     checkAgentHealth: jest.fn(async () => true),
+    getCompactionCapability: jest.fn(async () => ({ status: "unsupported", routes: [] })),
+    compactSession: jest.fn(async () => undefined),
+    getProviderUndoCapability: jest.fn(async () => ({ status: "unsupported" })),
+    undoLastProviderChange: jest.fn(async () => undefined),
     addLifecycleListener: jest.fn(() => () => undefined),
     addEventListener: jest.fn(() => () => undefined),
   }
@@ -247,6 +271,7 @@ beforeEach(() => {
   storeGetLastRunSnapshot.mockClear()
   storeGetBenchmarkCapabilities.mockClear()
   storeSetActiveAgent.mockClear()
+  storeUpdateAgent.mockClear()
   normalizeMock.mockClear()
   isExecutableMock.mockReset().mockReturnValue(true)
   getBlockReasonMock.mockReset().mockReturnValue(null)
@@ -275,6 +300,65 @@ function seedAgent(id = "a1") {
 function _chatStateClearActive() {
   storeStateRef.current.activeAgentId = null
 }
+
+// Placed first so no earlier test's lingering async (a known React-19 race in
+// later pure-unit hook tests) can leak an unhandled rejection into the
+// setTimeout-based `flush()` used here to await the dynamic-import listener bind.
+describe("useExternalAgent lifecycle bridge — lastRunSnapshot (Workstream D)", () => {
+  async function boundListener(): Promise<((event: unknown) => void) | undefined> {
+    for (let i = 0; i < 8; i++) {
+      const call = fakeManager.addLifecycleListener.mock.calls.at(-1)
+      if (call) return call[0] as (event: unknown) => void
+      await flush()
+    }
+    return undefined
+  }
+
+  it("persists a lastRunSnapshot from a lifecycle event into the store", async () => {
+    seedAgent("a1")
+    renderHook(() => useExternalAgent())
+    const listener = await boundListener()
+    expect(listener).toBeDefined()
+
+    const snapshot = {
+      terminalOutcome: "ok",
+      branchReasonCode: "ok",
+      branchOutcome: "external",
+      timestamp: new Date(),
+      linkedSessionId: "sess-1",
+    }
+    act(() => {
+      listener!({
+        agentId: "a1",
+        connectionStatus: "connected",
+        status: "ready",
+        lastRunSnapshot: snapshot,
+        timestamp: new Date(),
+      })
+    })
+
+    expect(storeSetLastRunSnapshot).toHaveBeenCalledWith("a1", snapshot)
+    expect(storeStateRef.current.lastRunSnapshots.a1).toBe(snapshot)
+  })
+
+  it("ignores a lifecycle event without a lastRunSnapshot", async () => {
+    seedAgent("a1")
+    renderHook(() => useExternalAgent())
+    const listener = await boundListener()
+    storeSetLastRunSnapshot.mockClear()
+
+    act(() => {
+      listener!({
+        agentId: "a1",
+        connectionStatus: "connected",
+        status: "ready",
+        timestamp: new Date(),
+      })
+    })
+
+    expect(storeSetLastRunSnapshot).not.toHaveBeenCalled()
+  })
+})
 
 describe("useExternalAgent core actions", () => {
   it("initializes with empty state and clearError is a no-op", async () => {
@@ -449,9 +533,12 @@ describe("useExternalAgent core actions", () => {
     const { result } = renderHook(() => useExternalAgent())
     await flush()
     await act(async () => {
-      await result.current.createSession({ systemPrompt: "x" })
+      await result.current.createSession({ systemPrompt: "x", additionalDirectories: ["/shared"] })
     })
-    expect(fakeManager.createSession).toHaveBeenCalledWith("a1", { systemPrompt: "x" })
+    expect(fakeManager.createSession).toHaveBeenCalledWith("a1", {
+      systemPrompt: "x",
+      additionalDirectories: ["/shared"],
+    })
     await act(async () => {
       await result.current.closeSession("sess-1")
     })
@@ -497,9 +584,9 @@ describe("useExternalAgent core actions", () => {
     const { result } = renderHook(() => useExternalAgent())
     await flush()
     await act(async () => {
-      await result.current.forkSession("s1")
+      await result.current.forkSession("s1", { cwd: "/work" })
     })
-    expect(fakeManager.forkSession).toHaveBeenCalledWith("a1", "s1")
+    expect(fakeManager.forkSession).toHaveBeenCalledWith("a1", "s1", { cwd: "/work" })
   })
 
   it("resumeSession forwards options", async () => {
@@ -510,6 +597,194 @@ describe("useExternalAgent core actions", () => {
       await result.current.resumeSession("s1", { systemPrompt: "p" })
     })
     expect(fakeManager.resumeSession).toHaveBeenCalledWith("a1", "s1", { systemPrompt: "p" })
+  })
+
+  it("locks session mutations until provider-confirmed compaction completes", async () => {
+    seedAgent("a1")
+    fakeManager.getCompactionCapability.mockResolvedValue({
+      status: "supported",
+      routes: [{ kind: "native", supportsFocus: false }],
+    })
+    let finishCompaction!: () => void
+    fakeManager.compactSession.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishCompaction = resolve
+        })
+    )
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+
+    let compactPromise!: Promise<void>
+    act(() => {
+      compactPromise = result.current.compactSession("s1")
+    })
+    await expect(result.current.createSession()).rejects.toThrow(
+      "Cannot create a session while context compaction is in progress"
+    )
+    await expect(result.current.compactSession("s1")).rejects.toThrow(
+      "Another session operation is already in progress"
+    )
+    await flush()
+    expect(result.current.isCompacting).toBe(true)
+    expect(result.current.progress).toBe(0)
+    await expect(result.current.createSession()).rejects.toThrow(
+      "Cannot create a session while context compaction is in progress"
+    )
+    await expect(result.current.compactSession("s1")).rejects.toThrow(
+      "Another session operation is already in progress"
+    )
+
+    await act(async () => {
+      finishCompaction()
+      await compactPromise
+    })
+    expect(result.current.isCompacting).toBe(false)
+    expect(result.current.progress).toBe(100)
+  })
+
+  it("does not start compaction while sending or mutating a session", async () => {
+    seedAgent("a1")
+    let finishExecution!: () => void
+    fakeManager.execute.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishExecution = () =>
+            resolve({
+              success: true,
+              sessionId: "sess-1",
+              finalResponse: "ok",
+            })
+        })
+    )
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+
+    let executionPromise!: ReturnType<typeof result.current.execute>
+    act(() => {
+      executionPromise = result.current.execute("hello")
+    })
+    await expect(result.current.compactSession("s1")).rejects.toThrow(
+      "Another session operation is already in progress"
+    )
+    await act(async () => {
+      finishExecution()
+      await executionPromise
+    })
+
+    let finishCreate!: () => void
+    fakeManager.createSession.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishCreate = () => resolve({ id: "sess-2" })
+        })
+    )
+    let createPromise!: ReturnType<typeof result.current.createSession>
+    act(() => {
+      createPromise = result.current.createSession()
+    })
+    await expect(result.current.compactSession("s1")).rejects.toThrow(
+      "Another session operation is already in progress"
+    )
+    await act(async () => {
+      finishCreate()
+      await createPromise
+    })
+  })
+
+  it("unlocks compaction after a provider failure", async () => {
+    seedAgent("a1")
+    fakeManager.getCompactionCapability.mockResolvedValue({
+      status: "supported",
+      routes: [{ kind: "native", supportsFocus: false }],
+    })
+    fakeManager.compactSession
+      .mockRejectedValueOnce(new Error("provider failed"))
+      .mockResolvedValueOnce(undefined)
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+
+    let compactError: unknown
+    await act(async () => {
+      try {
+        await result.current.compactSession("s1")
+      } catch (error) {
+        compactError = error
+      }
+    })
+    expect(compactError).toEqual(new Error("provider failed"))
+    expect(result.current.isCompacting).toBe(false)
+
+    await act(async () => {
+      await result.current.compactSession("s1")
+    })
+    expect(fakeManager.compactSession).toHaveBeenCalledTimes(2)
+  })
+
+  it("persists and resets the per-agent provider undo acknowledgement", async () => {
+    seedAgent("a1")
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+
+    await expect(result.current.undoLastProviderChange("s1")).rejects.toThrow(
+      "Provider undo warning must be acknowledged"
+    )
+    act(() => result.current.acknowledgeProviderUndoWarning())
+    expect(storeUpdateAgent).toHaveBeenLastCalledWith("a1", {
+      metadata: { providerUndoWarningAcknowledged: true },
+    })
+    await act(async () => {
+      await result.current.undoLastProviderChange("s1")
+    })
+    expect(fakeManager.undoLastProviderChange).toHaveBeenCalledWith("a1", "s1")
+
+    act(() => result.current.resetProviderUndoWarning())
+    expect(storeUpdateAgent).toHaveBeenLastCalledWith("a1", {
+      metadata: { providerUndoWarningAcknowledged: false },
+    })
+    await expect(result.current.undoLastProviderChange("s1")).rejects.toThrow(
+      "Provider undo warning must be acknowledged"
+    )
+  })
+
+  it("retains identified file plans emitted by the active session", async () => {
+    seedAgent("a1")
+    let listener: ((event: Record<string, unknown>) => void) | undefined
+    fakeManager.addEventListener.mockImplementation(
+      (_agentId: string, callback: (event: Record<string, unknown>) => void) => {
+        listener = callback
+        return () => undefined
+      }
+    )
+    const { result } = renderHook(() => useExternalAgent())
+    await flush()
+
+    act(() => {
+      listener?.({
+        type: "plan_update",
+        sessionId: "s1",
+        timestamp: new Date(),
+        planId: "file-plan",
+        kind: "file",
+        uri: "file:///work/PLAN.md",
+        entries: [],
+        progress: 0,
+        step: -1,
+        totalSteps: 0,
+      })
+    })
+
+    expect(result.current.planDocument).toEqual({
+      planId: "file-plan",
+      kind: "file",
+      uri: "file:///work/PLAN.md",
+    })
+
+    await act(async () => {
+      await result.current.createSession()
+    })
+    await flush()
+    expect(result.current.planDocument).toBeNull()
   })
 
   it("execute requires an active agent", async () => {

@@ -33,6 +33,29 @@ describe("biometric.isAvailable", () => {
       value: { available: false, biometryType: "NONE" },
     })
   })
+
+  it("maps the plugin's numeric biometry enum onto the string union", async () => {
+    // Real devices report a number (FACE_ID = 2), not the string.
+    const bio = makeBio({
+      isAvailable: jest.fn().mockResolvedValue({ isAvailable: true, biometryType: 2 }),
+    })
+    const out = await isAvailable(async () => bio)
+    expect(out).toEqual({
+      kind: "ok",
+      value: { available: true, biometryType: "FACE_ID" },
+    })
+  })
+
+  it("maps an unknown numeric enum value to NONE", async () => {
+    const bio = makeBio({
+      isAvailable: jest.fn().mockResolvedValue({ isAvailable: true, biometryType: 42 }),
+    })
+    const out = await isAvailable(async () => bio)
+    expect(out).toEqual({
+      kind: "ok",
+      value: { available: true, biometryType: "NONE" },
+    })
+  })
 })
 
 describe("biometric.verify", () => {
@@ -59,6 +82,23 @@ describe("biometric.verify", () => {
     })
     const out = await verify({ reason: "x", loader: async () => bio })
     expect(out).toEqual({ kind: "cancelled" })
+  })
+
+  it("classifies by the plugin's numeric error code before the message text", async () => {
+    // Localized message that no regex matches, but code 16 = user cancel.
+    const cancelErr = Object.assign(new Error("用户已取消认证"), { code: "16" })
+    const bio = makeBio({ verifyIdentity: jest.fn().mockRejectedValue(cancelErr) })
+    expect(await verify({ reason: "x", loader: async () => bio })).toEqual({ kind: "cancelled" })
+
+    const lockoutErr = Object.assign(new Error("尝试次数过多"), { code: 4 })
+    const bio2 = makeBio({ verifyIdentity: jest.fn().mockRejectedValue(lockoutErr) })
+    expect(await verify({ reason: "x", loader: async () => bio2 })).toEqual({ kind: "lockout" })
+
+    const notEnrolledErr = Object.assign(new Error("未注册生物识别"), { code: 3 })
+    const bio3 = makeBio({ verifyIdentity: jest.fn().mockRejectedValue(notEnrolledErr) })
+    expect(await verify({ reason: "x", loader: async () => bio3 })).toEqual({
+      kind: "unavailable",
+    })
   })
 
   it("returns lockout for too-many-attempts", async () => {

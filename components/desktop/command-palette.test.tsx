@@ -3,7 +3,7 @@
  */
 import { render, screen, waitFor, act } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import type { Character, ChatSession, Team } from "@/lib/claude/types"
+import type { Character, ChatSession, Team } from "@cognia/agent-config-types"
 
 const logInfo = jest.fn()
 const logError = jest.fn()
@@ -16,12 +16,19 @@ jest.mock("next-intl", () => ({
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: {
     ui: {
       info: (...args: unknown[]) => logInfo(...args),
       warn: jest.fn(),
       error: (...args: unknown[]) => logError(...args),
+    },
+    agent: {
+      debug: jest.fn(),
+      info: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn(),
+      child: () => ({ debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() }),
     },
   },
   // Pulled in transitively by @/lib/plugin → hooks-system → core/logger.
@@ -60,6 +67,24 @@ jest.mock("@/hooks/chat", () => ({
     select,
     create,
   }),
+}))
+
+const historySearchRef = {
+  current: {
+    results: [] as Array<Record<string, unknown>>,
+    moreOlderHistory: false,
+    indexIncomplete: false,
+    loading: false,
+    error: null as Error | null,
+  },
+}
+jest.mock("@/hooks/chat/use-chat-history-search", () => ({
+  useChatHistorySearch: () => historySearchRef.current,
+}))
+
+const jumpToSessionMessage = jest.fn(async (..._args: unknown[]) => true)
+jest.mock("@/lib/chat/cross-session-jump", () => ({
+  jumpToSessionMessage: (...args: unknown[]) => jumpToSessionMessage(...args),
 }))
 
 const messagesRef: { current: unknown[] } = { current: [] }
@@ -116,7 +141,26 @@ jest.mock("@/lib/tauri", () => ({
   isTauri: () => false,
 }))
 
+const routerPush = jest.fn()
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push: routerPush, replace: jest.fn(), back: jest.fn() }),
+  usePathname: () => "/",
+  useSearchParams: () => new URLSearchParams(),
+}))
+
+let platformValue: "tauri" | "mobile" | "web" = "tauri"
+jest.mock("@/hooks/use-platform", () => ({
+  usePlatform: () => platformValue,
+}))
+
 import { CommandPalette } from "./command-palette"
+import {
+  publishActiveContextPanels,
+  resetActiveContextForTesting,
+  setActiveContextForHost,
+} from "@/lib/context-workbench/active-context"
+import { useContextWorkbenchStore } from "@/stores/context-workbench/context-workbench-store"
+import { SIDEBAR_NAV_META } from "@/types/shell/sidebar"
 
 beforeEach(() => {
   logInfo.mockReset()
@@ -130,12 +174,23 @@ beforeEach(() => {
   setTheme.mockReset()
   replaceMessages.mockReset()
   sessionsRef.current = []
+  historySearchRef.current = {
+    results: [],
+    moreOlderHistory: false,
+    indexIncomplete: false,
+    loading: false,
+    error: null,
+  }
+  jumpToSessionMessage.mockReset().mockResolvedValue(true)
   messagesRef.current = []
   activeSessionIdRef.current = null
   settingsRef.current = { apiKey: "k" }
   charactersRef.current = []
   teamsRef.current = []
   theme = "light"
+  routerPush.mockReset()
+  platformValue = "tauri"
+  resetActiveContextForTesting()
 })
 
 function queueChars(c: Character[], t: Team[]) {
@@ -268,6 +323,153 @@ test("Cleanup removes the keydown listener on unmount", () => {
   removeSpy.mockRestore()
 })
 
+test("searches message history and jumps to the selected message hit", async () => {
+  sessionsRef.current = [
+    {
+      id: "s-search",
+      title: "Other title",
+      kind: "direct",
+      createdAt: 1,
+      updatedAt: 1,
+    } as ChatSession,
+  ]
+  historySearchRef.current = {
+    ...historySearchRef.current,
+    results: [
+      {
+        messageId: "m-search",
+        sessionId: "s-search",
+        sessionTitle: "Planning",
+        projectId: "p1",
+        role: "user",
+        createdAt: 1,
+        count: 1,
+        at: 0,
+        snippet: { text: "needle in the plan", positions: [0, 1, 2, 3, 4, 5] },
+        score: 1,
+        archived: false,
+        otherBranchCount: 0,
+      },
+    ],
+  }
+
+  render(<CommandPalette onOpenSettings={jest.fn()} />)
+  const user = await openWithShortcut()
+  await user.type(screen.getByPlaceholderText("placeholder"), "needle")
+  await user.click(await screen.findByText("Planning"))
+
+  expect(select).toHaveBeenCalledWith("s-search")
+  expect(jumpToSessionMessage).toHaveBeenCalledWith("s-search", "m-search", {
+    align: "center",
+  })
+})
+
 // React 19 doesn't expose `act` directly from imports for our use, but we keep
 // this here in case the rule changes.
 void act
+
+describe("navigation", () => {
+  test("lists every rail destination and routes to it", async () => {
+    queueChars([], [])
+    render(<CommandPalette onOpenSettings={jest.fn()} />)
+    await openWithShortcut()
+
+    // The whole catalog, not just the pinned three — the palette is the
+    // fallback route to anything the user took off the rail.
+    for (const meta of SIDEBAR_NAV_META) {
+      expect(screen.getByText(meta.i18nKey)).toBeInTheDocument()
+    }
+
+    const user = userEvent.setup()
+    await user.click(screen.getByText("workflows"))
+    expect(routerPush).toHaveBeenCalledWith("/workflows")
+    expect(logInfo).toHaveBeenCalledWith("command-palette navigate", { route: "/workflows" })
+  })
+
+  test("drops desktop-only destinations off the desktop shell", async () => {
+    platformValue = "web"
+    queueChars([], [])
+    render(<CommandPalette onOpenSettings={jest.fn()} />)
+    await openWithShortcut()
+    // `browser` is desktopOnly — listing it in a browser is a dead end.
+    expect(screen.queryByText("browser")).not.toBeInTheDocument()
+    expect(screen.getByText("workflows")).toBeInTheDocument()
+  })
+
+  test("switches to the DM and Canvas guilds and returns home", async () => {
+    queueChars([], [])
+    render(<CommandPalette onOpenSettings={jest.fn()} />)
+    await openWithShortcut()
+    const user = userEvent.setup()
+    await user.click(screen.getByText("directMessages"))
+    expect(setSelectedGuild).toHaveBeenCalledWith({ kind: "dm" })
+    expect(routerPush).toHaveBeenCalledWith("/")
+  })
+})
+
+describe("workbench panels", () => {
+  const SCOPE = "dock::session:s-1"
+  const mountWorkbench = () => {
+    setActiveContextForHost(SCOPE, {
+      kind: "session",
+      id: "s-1",
+      title: "S",
+      capabilities: [],
+    } as never)
+    publishActiveContextPanels(SCOPE, [
+      { id: "artifacts", activity: "review", labelKey: "artifacts.dock.artifacts" },
+      { id: "workspace", activity: "workspace", labelKey: "artifacts.dock.workspace" },
+    ])
+  }
+
+  test("omits the group entirely when no workbench is mounted", async () => {
+    queueChars([], [])
+    render(<CommandPalette onOpenSettings={jest.fn()} />)
+    await openWithShortcut()
+    expect(screen.queryByText("desktop.commandPalette.groups.workbenchPanels")).toBeNull()
+  })
+
+  test("lists the mounted workbench's panels and reveals the chosen one", async () => {
+    queueChars([], [])
+    act(() => mountWorkbench())
+    render(<CommandPalette onOpenSettings={jest.fn()} />)
+    await openWithShortcut()
+
+    expect(screen.getByText("artifacts.dock.workspace")).toBeInTheDocument()
+    const user = userEvent.setup()
+    await user.click(screen.getByText("artifacts.dock.workspace"))
+    expect(logInfo).toHaveBeenCalledWith("command-palette reveal-panel", { panelId: "workspace" })
+    // Reaching a panel is the point — assert it actually landed in front.
+    expect(useContextWorkbenchStore.getState().layouts[SCOPE]?.activePanelId).toBe("workspace")
+  })
+})
+
+test("labels a plugin panel from its own namespace, falling back to its literal", async () => {
+  // Plugin panels namespace their label key. The mocked `useTranslations` has no
+  // `has()`, which is exactly the "no translation shipped" case — the panel's
+  // own `label` is the fallback, and its raw key the last resort.
+  queueChars([], [])
+  const SCOPE = "dock::session:s-2"
+  act(() => {
+    setActiveContextForHost(SCOPE, {
+      kind: "session",
+      id: "s-2",
+      title: "S",
+      capabilities: [],
+    } as never)
+    publishActiveContextPanels(SCOPE, [
+      {
+        id: "acme:board",
+        activity: "templates",
+        labelKey: "board",
+        label: "Acme board",
+        pluginId: "acme",
+      },
+      { id: "acme:bare", activity: "review", labelKey: "bare", pluginId: "acme" },
+    ])
+  })
+  render(<CommandPalette onOpenSettings={jest.fn()} />)
+  await openWithShortcut()
+  expect(screen.getByText("Acme board")).toBeInTheDocument()
+  expect(screen.getByText("bare")).toBeInTheDocument()
+})

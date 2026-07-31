@@ -3,7 +3,9 @@
 // round-trips through any standard renderer (GitHub, Obsidian, etc).
 
 import type { UIMessage } from "ai"
-import type { ChatSession, StoredMessage } from "@/lib/claude/types"
+import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
+
+import { isImageFile } from "../file-utils"
 
 export interface RichExportData {
   session: ChatSession
@@ -193,7 +195,8 @@ function renderPart(part: UIMessage["parts"][number]): string {
   if (part.type === "file") {
     const fp = part as { url?: string; mediaType?: string; filename?: string }
     const name = fp.filename ?? fp.mediaType ?? "file"
-    return fp.url ? `📎 [${name}](${fp.url})` : `📎 ${name}`
+    if (!fp.url) return `📎 ${name}`
+    return isImageFile(fp) ? `![${name}](${fp.url})` : `📎 [${name}](${fp.url})`
   }
   if (part.type === "source-url") {
     const sp = part as { url: string; title?: string }

@@ -57,16 +57,25 @@ describe("discoverCodexAuth", () => {
   })
 })
 
+/** Build a `header.payload.sig` JWT whose payload carries the given claims. */
+function fakeJwt(claims: Record<string, unknown>): string {
+  const payload = Buffer.from(JSON.stringify(claims)).toString("base64url")
+  return `hdr.${payload}.sig`
+}
+
 describe("discoveredToCredential", () => {
   const now = 1_700_000_000_000
 
-  it("maps ChatGPT discovery onto a chatgpt credential", () => {
+  it("maps ChatGPT discovery onto a chatgpt credential (undecodable token → refresh on first use)", () => {
+    // `oat-discovered` isn't a JWT, so the expiry can't be read — it falls back
+    // to storedAtMs, which `isCodexCredentialFresh` treats as stale so the first
+    // use refreshes via the refresh_token.
     const got = discoveredToCredential(chatgptDiscovered, now)
     expect(got).toEqual({
       accessToken: "oat-discovered",
       refreshToken: "rt-discovered",
       idTokenRaw: "eyJ.fake.jwt",
-      expiresAtMs: 0,
+      expiresAtMs: now,
       authMode: "chatgpt",
       email: "user@example.com",
       chatgptPlanType: "Plus",
@@ -75,6 +84,44 @@ describe("discoveredToCredential", () => {
       originalSource: "file",
       storedAtMs: now,
     })
+  })
+
+  it("reads expiresAtMs from the access-token JWT `exp` claim", () => {
+    const expSeconds = 1_700_003_600 // one hour after `now`
+    const got = discoveredToCredential(
+      {
+        ...chatgptDiscovered,
+        tokens: { ...chatgptDiscovered.tokens!, accessToken: fakeJwt({ exp: expSeconds }) },
+      },
+      now
+    )
+    // NOT 0 — a real future expiry, so the credential is refreshed near expiry
+    // instead of being frozen "fresh forever" (the reuse-subscription bug).
+    expect(got?.expiresAtMs).toBe(expSeconds * 1000)
+  })
+
+  it("falls back to storedAtMs when the JWT carries no numeric exp", () => {
+    const got = discoveredToCredential(
+      {
+        ...chatgptDiscovered,
+        tokens: { ...chatgptDiscovered.tokens!, accessToken: fakeJwt({ sub: "u1" }) },
+      },
+      now
+    )
+    expect(got?.expiresAtMs).toBe(now)
+  })
+
+  it("falls back to storedAtMs when the token has JWT shape but an undecodable payload", () => {
+    const got = discoveredToCredential(
+      {
+        ...chatgptDiscovered,
+        // Three segments (so it isn't rejected outright) but the payload isn't
+        // valid base64/JSON → the decode throws and we treat it as expired.
+        tokens: { ...chatgptDiscovered.tokens!, accessToken: "aaa.@@not-json@@.sig" },
+      },
+      now
+    )
+    expect(got?.expiresAtMs).toBe(now)
   })
 
   it("prefers account_id over chatgpt_account_id when both are present", () => {

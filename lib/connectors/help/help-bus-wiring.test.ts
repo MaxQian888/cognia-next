@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Integration test for the bus-level help / welcome wiring + the
  * `help_quick_command` callback short-circuit. Drives the real
@@ -12,6 +13,11 @@ import { createAdapterInstance } from "@/lib/db/adapter-instances"
 import { getBus, __resetBusForTesting } from "@/lib/connectors/bus"
 import { __resetPruneCounterForTesting } from "@/lib/connectors/dedup"
 import { recordCallbackBinding } from "@/lib/connectors/adapters/_shared/a2ui-mapper"
+import {
+  awaitApproval,
+  pendingApprovalCount,
+  __resetApprovalRegistryForTesting,
+} from "@/lib/connectors/hitl/approval-registry"
 import type { NormalizedInboundEvent, PlatformAdapter } from "@/types/connectors"
 import type { ConnectorCallbackEvent } from "@/types/connectors/interaction"
 import type { TriggerPolicy } from "@/types/connectors/policy"
@@ -87,6 +93,9 @@ async function seedAdapter(over: Record<string, unknown> = {}): Promise<string> 
     transportMode: "gateway",
     settings: {
       quickCommands: [{ triggerKey: "agenda", action: { type: "prompt", value: "列出待办" } }],
+      // This suite covers help/welcome routing, not identity: without opting
+      // out, the on-by-default registry parks every event as unbound.
+      larkPrincipalRegistry: false,
     },
     credentialsRef: { keyringService: "test", accounts: [] },
     trigger: AUTO_TRIGGER,
@@ -100,12 +109,14 @@ async function outboundCount(): Promise<number> {
   return getDb().outboundQueue.count()
 }
 
+// 30s hook budget: the first cold open of the full schema (100+ Dexie
+// versions) can exceed jest's default 5s under parallel suite load.
 beforeEach(async () => {
   await getDb().delete()
   __resetDbForTesting()
   __resetBusForTesting()
   __resetPruneCounterForTesting()
-})
+}, 30_000)
 
 describe("bus help/welcome wiring", () => {
   it("serves a help card and skips the route handler on a help trigger", async () => {
@@ -116,6 +127,7 @@ describe("bus help/welcome wiring", () => {
     bus.routeHandler = routeHandler
 
     await bus.dispatchInboundFull(privateEvent(adapterId, "m_help", "/help"))
+    await bus.flushInboundTurns()
 
     expect(routeHandler).not.toHaveBeenCalled()
     const jobs = await getDb().outboundQueue.toArray()
@@ -146,6 +158,98 @@ describe("bus help/welcome wiring", () => {
     bus.registerAdapter(makeAdapter(adapterId))
     await bus.dispatchInboundFull(memberAddedEvent(adapterId, "e1"))
     expect(await outboundCount()).toBe(0)
+  })
+
+  it("serves a control-command reply and skips the route handler on /status", async () => {
+    const adapterId = await seedAdapter()
+    const bus = getBus()
+    bus.registerAdapter(makeAdapter(adapterId))
+    const routeHandler = jest.fn()
+    bus.routeHandler = routeHandler
+
+    await bus.dispatchInboundFull(privateEvent(adapterId, "m_status", "/status"))
+    await bus.flushInboundTurns()
+
+    expect(routeHandler).not.toHaveBeenCalled()
+    const jobs = await getDb().outboundQueue.toArray()
+    expect(jobs).toHaveLength(1)
+    expect(jobs[0].request.segments[0].type).toBe("text")
+    const audit = await getDb().connectorAudit.toArray()
+    expect(audit.some((r) => r.kind === "command.applied")).toBe(true)
+  })
+
+  it("/model persists the modelOverride and skips the route handler", async () => {
+    const adapterId = await seedAdapter()
+    const bus = getBus()
+    bus.registerAdapter(makeAdapter(adapterId))
+    const routeHandler = jest.fn()
+    bus.routeHandler = routeHandler
+
+    await bus.dispatchInboundFull(privateEvent(adapterId, "m_model", "/model gpt-5"))
+    await bus.flushInboundTurns()
+
+    expect(routeHandler).not.toHaveBeenCalled()
+    const override = await getDb()
+      .conversationOverrides.where("conversationKey")
+      .equals(`lark:${adapterId}:oc_1`)
+      .first()
+    expect(override?.modelOverride).toBe("gpt-5")
+  })
+
+  it("/help still serves the rich help card (control dispatcher defers)", async () => {
+    const adapterId = await seedAdapter()
+    const bus = getBus()
+    bus.registerAdapter(makeAdapter(adapterId))
+    bus.routeHandler = jest.fn()
+
+    await bus.dispatchInboundFull(privateEvent(adapterId, "m_help2", "/help"))
+
+    const jobs = await getDb().outboundQueue.toArray()
+    expect(jobs).toHaveLength(1)
+    // Rich A2UI card, NOT the plain-text control reply.
+    expect(jobs[0].request.segments[0].type).toBe("a2ui")
+  })
+
+  it("resolves a pending tool approval when a tool_approve button callback fires", async () => {
+    __resetApprovalRegistryForTesting()
+    const adapterId = await seedAdapter()
+    const bus = getBus()
+    bus.registerAdapter(makeAdapter(adapterId))
+
+    const actionId = "tapa:abcd1234"
+    await recordCallbackBinding({
+      adapterId,
+      actionId,
+      surfaceId: "tool_approve:sfc",
+      componentId: "allow",
+      conversationKey: `lark:${adapterId}:oc_1`,
+      kind: "tool_approve",
+      payload: { sessionId: "sess_x", requestId: "req_x", toolName: "Bash", decision: "allow" },
+    })
+
+    // A suspended turn is awaiting this approval.
+    const pending = awaitApproval("sess_x", "req_x", { ttlMs: 0 })
+    expect(pendingApprovalCount()).toBe(1)
+
+    const callback: ConnectorCallbackEvent = {
+      platform: "lark",
+      adapterId,
+      selfId: "bot_1",
+      triggerId: actionId,
+      surfaceId: "tool_approve:sfc",
+      componentId: "allow",
+      actionType: "button",
+      value: "allow",
+      conversationKey: `lark:${adapterId}:oc_1`,
+      user: { id: "lark:u1", platform: "lark", adapterId, remoteUserId: "u1" },
+      timestamp: Date.now(),
+      raw: {},
+    }
+    await bus.dispatchConnectorCallback(callback)
+
+    await expect(pending).resolves.toEqual({ decision: "allow" })
+    const audit = await getDb().connectorAudit.toArray()
+    expect(audit.some((r) => r.kind === "tool_approve.granted")).toBe(true)
   })
 
   it("runs a quick command when its help-card button callback fires", async () => {
@@ -181,6 +285,8 @@ describe("bus help/welcome wiring", () => {
       raw: {},
     }
     await bus.dispatchConnectorCallback(callback)
+    // The synthetic re-entry enqueues the turn on the conversation queue.
+    await bus.flushInboundTurns()
 
     expect(routeHandler).toHaveBeenCalledTimes(1)
     const [event, decision] = routeHandler.mock.calls[0] as [NormalizedInboundEvent, string]

@@ -13,6 +13,8 @@ import {
   ToolRegistry,
   getDefaultToolRegistry,
   CommonSchemas,
+  withRateLimit,
+  withCache,
   type ToolApprovalRequest,
 } from "./tool-utils"
 
@@ -37,6 +39,20 @@ describe("Tool Utilities", () => {
       expect((result as { description: string }).description).toBe("Test tool")
     })
 
+    it("passes the schema as v6 `inputSchema`, not the deprecated `parameters`", () => {
+      const schema = z.object({ query: z.string() })
+      const result = createTool({
+        description: "Test tool",
+        inputSchema: schema,
+        execute: async ({ query }) => ({ result: query }),
+      }) as unknown as { inputSchema?: unknown; parameters?: unknown }
+
+      // v6 `tool()` reads the schema off `inputSchema`. If it lands on
+      // `parameters` instead, the model gets a tool with no argument schema.
+      expect(result.inputSchema).toBe(schema)
+      expect(result.parameters).toBeUndefined()
+    })
+
     it("should include strict mode when specified", () => {
       const result = createTool({
         description: "Strict tool",
@@ -58,6 +74,19 @@ describe("Tool Utilities", () => {
 
       expect((result as unknown as { needsApproval: boolean }).needsApproval).toBe(true)
     })
+
+    it("should include inputExamples when specified", () => {
+      const result = createTool({
+        description: "Example tool",
+        inputSchema: z.object({ q: z.string() }),
+        execute: async () => ({}),
+        inputExamples: [{ input: { q: "hello" } }],
+      })
+
+      expect((result as unknown as { inputExamples: unknown[] }).inputExamples).toEqual([
+        { input: { q: "hello" } },
+      ])
+    })
   })
 
   describe("simpleTool", () => {
@@ -71,6 +100,15 @@ describe("Tool Utilities", () => {
 
       expect(tools).toHaveProperty("search")
       expect((tools.search as { description: string }).description).toBe("Search for items")
+    })
+
+    it("passes the schema as v6 `inputSchema`, not `parameters`", () => {
+      const schema = z.object({ query: z.string() })
+      const tools = simpleTool("search", "Search for items", schema, async ({ query }) => [query])
+      const t = tools.search as unknown as { inputSchema?: unknown; parameters?: unknown }
+
+      expect(t.inputSchema).toBe(schema)
+      expect(t.parameters).toBeUndefined()
     })
   })
 
@@ -331,6 +369,41 @@ describe("Tool Utilities", () => {
       expect(registry.getNames()).toEqual(["a", "b"])
     })
 
+    it("requiresApproval reflects the isDangerous metadata flag", () => {
+      registry.register(
+        "danger",
+        { description: "d", inputSchema: z.object({}), execute: async () => ({}) },
+        { category: "system", isDangerous: true }
+      )
+      registry.register(
+        "safe",
+        { description: "s", inputSchema: z.object({}), execute: async () => ({}) },
+        { category: "custom" }
+      )
+
+      expect(registry.requiresApproval("danger")).toBe(true)
+      expect(registry.requiresApproval("safe")).toBe(false)
+      // Unknown tools default to not requiring approval.
+      expect(registry.requiresApproval("missing")).toBe(false)
+    })
+
+    it("getAllMetadata returns metadata for every registered tool", () => {
+      registry.register(
+        "a",
+        { description: "A", inputSchema: z.object({}), execute: async () => ({}) },
+        { category: "custom" }
+      )
+      registry.register(
+        "b",
+        { description: "B", inputSchema: z.object({}), execute: async () => ({}) },
+        { category: "search" }
+      )
+
+      const all = registry.getAllMetadata()
+      expect(all.map((m) => m.name)).toEqual(["a", "b"])
+      expect(all.map((m) => m.category)).toEqual(["custom", "search"])
+    })
+
     it("should support chained registration", () => {
       const result = registry
         .register(
@@ -471,6 +544,97 @@ describe("Tool Utilities", () => {
       const result = CommonSchemas.location.safeParse({ location: "San Francisco" })
 
       expect(result.success).toBe(true)
+    })
+  })
+
+  describe("withRateLimit", () => {
+    it("allows calls under the limit and throws once exceeded", async () => {
+      const tool = withRateLimit(
+        {
+          description: "rl",
+          inputSchema: z.object({ n: z.number() }),
+          execute: async ({ n }) => n * 2,
+        },
+        { maxCalls: 2, windowMs: 10_000 }
+      ) as unknown as { execute: (input: { n: number }) => Promise<number> }
+
+      await expect(tool.execute({ n: 1 })).resolves.toBe(2)
+      await expect(tool.execute({ n: 2 })).resolves.toBe(4)
+      await expect(tool.execute({ n: 3 })).rejects.toThrow(/Rate limit exceeded/)
+    })
+
+    it("evicts calls outside the window so new calls succeed", async () => {
+      jest.useFakeTimers().setSystemTime(0)
+      try {
+        const tool = withRateLimit(
+          {
+            description: "rl",
+            inputSchema: z.object({}),
+            execute: async () => "ok",
+          },
+          { maxCalls: 1, windowMs: 1000 }
+        ) as unknown as { execute: (input: Record<string, never>) => Promise<string> }
+
+        await expect(tool.execute({})).resolves.toBe("ok")
+        await expect(tool.execute({})).rejects.toThrow(/Rate limit exceeded/)
+        // Advance past the window — the earlier call falls out of it.
+        jest.setSystemTime(2000)
+        await expect(tool.execute({})).resolves.toBe("ok")
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+  })
+
+  describe("withCache", () => {
+    it("returns the cached result on repeated identical input", async () => {
+      const execute = jest.fn(async ({ q }: { q: string }) => `result:${q}`)
+      const tool = withCache({
+        description: "c",
+        inputSchema: z.object({ q: z.string() }),
+        execute,
+      }) as unknown as { execute: (input: { q: string }) => Promise<string> }
+
+      await expect(tool.execute({ q: "x" })).resolves.toBe("result:x")
+      await expect(tool.execute({ q: "x" })).resolves.toBe("result:x")
+      // Second identical call hits the cache — execute runs only once.
+      expect(execute).toHaveBeenCalledTimes(1)
+    })
+
+    it("re-executes after the TTL expires", async () => {
+      jest.useFakeTimers().setSystemTime(0)
+      try {
+        const execute = jest.fn(async () => "v")
+        const tool = withCache(
+          { description: "c", inputSchema: z.object({}), execute },
+          { ttlMs: 1000 }
+        ) as unknown as { execute: (input: Record<string, never>) => Promise<string> }
+
+        await tool.execute({})
+        jest.setSystemTime(2000)
+        await tool.execute({})
+        expect(execute).toHaveBeenCalledTimes(2)
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    it("evicts the oldest entry when capacity is reached", async () => {
+      const execute = jest.fn(async ({ q }: { q: string }) => `r:${q}`)
+      const tool = withCache(
+        {
+          description: "c",
+          inputSchema: z.object({ q: z.string() }),
+          execute,
+        },
+        { maxSize: 1 }
+      ) as unknown as { execute: (input: { q: string }) => Promise<string> }
+
+      await tool.execute({ q: "a" }) // cache: a
+      await tool.execute({ q: "b" }) // evicts a, cache: b
+      await tool.execute({ q: "a" }) // a was evicted → re-executes
+      // a ran twice (initial + after eviction), b ran once.
+      expect(execute).toHaveBeenCalledTimes(3)
     })
   })
 

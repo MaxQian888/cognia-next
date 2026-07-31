@@ -1,10 +1,12 @@
+/** @jest-environment jsdom */
 /**
  * Tests for Export Plugin API
  */
 
 import { createExportAPI, clearCustomExporters } from "./export-api"
+import { initializePluginPermissions } from "./permission-api"
 import { getPluginEventHooks } from "../messaging/hooks-system"
-import type { CustomExporter, ExportData } from "@/types/plugin/plugin-extended"
+import type { CustomExporter, ExportData } from "@/types/plugin/plugin"
 
 // Mock stores and dependencies
 const mockSessions = [
@@ -435,5 +437,17 @@ describe("Export API", () => {
       const exporters = api.getCustomExporters()
       expect(exporters.find((e) => e.format === "custom-format")).toBeDefined()
     })
+  })
+})
+
+// W2.3: the export API is permission-gated; grant the suite's plugin.
+beforeAll(() => {
+  initializePluginPermissions("test-plugin", ["export:session", "export:project"])
+})
+
+describe("permission gate", () => {
+  it("throws PermissionError when export permissions are not granted", () => {
+    const api = createExportAPI("no-perms-plugin")
+    expect(() => api.exportSession("s", { format: "json" })).toThrow(/export:session/)
   })
 })

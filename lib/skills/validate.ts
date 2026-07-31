@@ -3,7 +3,7 @@
 // highlight individual fields. Mirrors Cognia's validate flow but keeps the
 // implementation library-free (no zod) so it tree-shakes nicely.
 
-import type { Skill, SkillResource, SkillValidationError } from "@/lib/claude/types"
+import type { Skill, SkillResource, SkillValidationError } from "@cognia/agent-config-types"
 
 const MAX_NAME_LEN = 64
 const MAX_DESC_LEN = 1024

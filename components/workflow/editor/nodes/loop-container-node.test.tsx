@@ -43,11 +43,13 @@ function renderContainer({
   id = "loop1",
   selected = false,
   params = { mode: "forEach", source: "{{ $trigger.payload.items }}" } as Record<string, unknown>,
+  label = "My Loop",
   store,
 }: {
   id?: string
   selected?: boolean
   params?: Record<string, unknown>
+  label?: string
   store?: EditorStore
 } = {}) {
   const ui = (
@@ -55,7 +57,7 @@ function renderContainer({
       id={id}
       type="loopContainer"
       selected={selected}
-      data={{ label: "My Loop", params, kind: "flow.loop", typeVersion: 2 }}
+      data={{ label, params, kind: "flow.loop", typeVersion: 2 }}
       positionAbsoluteX={0}
       positionAbsoluteY={0}
       dragging={false}
@@ -75,6 +77,13 @@ describe("LoopContainerNode", () => {
     expect(screen.getByText("My Loop")).toBeInTheDocument()
     expect(screen.getByTestId("loop-container-mode")).toHaveTextContent(/for each/i)
     expect(screen.getByTestId("loop-container-dropzone")).toBeInTheDocument()
+  })
+
+  it("translates the catalog label when the loop carries its default label", () => {
+    // `defaultLabelFor("flow.loop")` bakes the raw kind into a fresh node; the
+    // container must show the localized `workflows.nodes.flow.loop.label`.
+    renderContainer({ label: "flow.loop" })
+    expect(screen.getByText("Loop")).toBeInTheDocument()
   })
 
   it("renders input and output handles", () => {

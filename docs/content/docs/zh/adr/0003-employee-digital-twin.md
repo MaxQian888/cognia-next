@@ -46,7 +46,7 @@ cognia-next 是 Tauri 渲染器 + sidecar。把向量索引放进 sidecar 会强
 ### 3. 任何云端调用之前先做 PII 脱敏
 
 每个 chunk 在我们 embed 它或喂给蒸馏 LLM 之前，都先经过
-`lib/twin/ingest/redact.ts`。脱敏是对称的：我们在 `twinChunks.content`
+`packages/redact/src/index.ts`。脱敏是对称的：我们在 `twinChunks.content`
 中保留原文（用于 workbench 显示），在 `twinChunks.contentRedacted`
 中保留占位版本（用于网络传输）。映射表在磁盘上加密。
 
@@ -184,7 +184,7 @@ Runtime:  user msg → embed (1×) → RAG topK + style topK → 4-segment syste
     `rag:twin` **不**在 `DEFAULT_ENABLED_SCOPES` 中——用户必须显式选择
     加入。
 - **隐私**
-  - `lib/twin/ingest/redact.ts` —— PII 覆盖扩展到 IPv4（仅公网段）、
+  - `packages/redact/src/index.ts` —— PII 覆盖扩展到 IPv4（仅公网段）、
     未压缩 IPv6、命名 API key 前缀（sk-、ghp\_、AIza… 等）、提示驱动的
     secret、CN 护照前缀（E/G/EH/EJ），以及 CN 驾照卡号（需要提示，
     以免 12 位哈希误报）。

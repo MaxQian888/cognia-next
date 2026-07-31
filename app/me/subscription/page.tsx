@@ -11,6 +11,7 @@ export default function MobileSubscriptionPage() {
     <SubPageShell
       title={t("subscriptionRow")}
       backAria={t("appearanceBackAria")}
+      width="wide"
       testid="mobile-subscription-page"
     >
       <SubscriptionSection />

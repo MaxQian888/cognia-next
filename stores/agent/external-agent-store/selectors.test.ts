@@ -24,6 +24,10 @@ import {
   selectIsLoading,
   selectLastError,
 } from "./selectors"
+import { act, renderHook } from "@testing-library/react"
+import { shallow } from "zustand/shallow"
+import { useShallow } from "zustand/react/shallow"
+import { useExternalAgentStore } from "./index"
 import type {
   ExternalAgentStore,
   StoredExternalAgentConfig,
@@ -95,6 +99,97 @@ describe("external-agent-store selectors with empty state", () => {
     expect(selectSessionTerminals("any")(state)).toEqual([])
     expect(selectIsLoading(state)).toBe(false)
     expect(selectLastError(state)).toBeNull()
+  })
+})
+
+describe("external-agent-store config-hydrating selectors are referentially stable", () => {
+  // Regression: these selectors re-hydrated `createdAt`/`updatedAt` into fresh
+  // `Date` objects on every call, so each call produced a new config object.
+  // `useSyncExternalStore` (zustand) re-reads the snapshot after every render
+  // and force-re-renders when it changed — with a never-equal snapshot that is
+  // an infinite render loop that hard-freezes the renderer. It only bit once at
+  // least one agent existed (an empty result shallow-compares equal), which is
+  // why adding a single external agent froze the whole app.
+  const state = baseState({
+    agents: { a: buildAgent("a", { enabled: true }) },
+    connectionStatus: { a: "connected" },
+    activeAgentId: "a",
+  })
+
+  it("selectAgentById returns the same reference for an unchanged agent", () => {
+    expect(selectAgentById("a")(state)).toBe(selectAgentById("a")(state))
+  })
+
+  it("selectActiveAgent returns the same reference for an unchanged agent", () => {
+    expect(selectActiveAgent(state)).toBe(selectActiveAgent(state))
+  })
+
+  it("selectEnabledAgents yields shallow-equal results across calls", () => {
+    // useShallow compares element references — new element objects defeat it.
+    expect(shallow(selectEnabledAgents(state), selectEnabledAgents(state))).toBe(true)
+  })
+
+  it("selectConnectedAgents yields shallow-equal results across calls", () => {
+    expect(shallow(selectConnectedAgents(state), selectConnectedAgents(state))).toBe(true)
+  })
+
+  it("still exposes hydrated Date instances", () => {
+    const agent = selectAgentById("a")(state)
+    expect(agent).toBeDefined()
+    expect(agent?.createdAt).toBeInstanceOf(Date)
+    expect(agent?.createdAt?.toISOString()).toBe("2024-01-01T00:00:00.000Z")
+    expect(agent?.updatedAt).toBeInstanceOf(Date)
+  })
+
+  it("re-hydrates when the stored agent object actually changes", () => {
+    const before = selectAgentById("a")(state)
+    const next = baseState({
+      agents: { a: buildAgent("a", { enabled: true, updatedAt: "2024-06-01T00:00:00.000Z" }) },
+    })
+    const after = selectAgentById("a")(next)
+    expect(after).not.toBe(before)
+    expect(after?.updatedAt?.toISOString()).toBe("2024-06-01T00:00:00.000Z")
+  })
+})
+
+describe("subscribing to selectEnabledAgents through the real store settles", () => {
+  // End-to-end guard for the freeze: the co-located DelegationRulesSection test
+  // stubs the store (`selectEnabledAgents: () => mockAgents` — a stable
+  // reference), so it can never exercise the real selector's identity. Drive the
+  // real zustand hook instead: with an uncached snapshot, useSyncExternalStore
+  // re-renders forever and the renderer hard-freezes.
+  afterEach(() => {
+    // Wrapped: this notifies the still-mounted hook's store subscription.
+    act(() => {
+      useExternalAgentStore.setState({ agents: {} })
+    })
+  })
+
+  it("renders a bounded number of times with one enabled agent", () => {
+    useExternalAgentStore.setState({ agents: { a: buildAgent("a", { enabled: true }) } })
+
+    let renders = 0
+    const { result } = renderHook(() => {
+      renders++
+      return useExternalAgentStore(useShallow(selectEnabledAgents))
+    })
+
+    expect(result.current).toHaveLength(1)
+    // An unstable snapshot drives this unbounded; a cached one settles immediately.
+    expect(renders).toBeLessThanOrEqual(2)
+  })
+
+  it("does not warn that getSnapshot should be cached", () => {
+    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => {})
+    useExternalAgentStore.setState({ agents: { a: buildAgent("a", { enabled: true }) } })
+
+    renderHook(() => useExternalAgentStore(useShallow(selectEnabledAgents)))
+
+    expect(errorSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining("getSnapshot should be cached"),
+      ...([] as unknown[])
+    )
+    errorSpy.mockRestore()
   })
 })
 

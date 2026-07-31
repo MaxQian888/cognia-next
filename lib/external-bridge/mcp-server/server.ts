@@ -15,6 +15,7 @@
  */
 
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js"
+import { completable } from "@modelcontextprotocol/sdk/server/completable.js"
 import { z } from "zod"
 import type { BridgeScope, ExternalBridgeSettings } from "@/types/wiki"
 import { ALL_BRIDGE_SCOPES } from "@/types/wiki"
@@ -22,10 +23,19 @@ import { listAllWikiArticles, getWikiArticleBySlug } from "@/lib/db/wiki-article
 import { listSkills, getSkill } from "@/lib/db/skills"
 import { listCharacters, getCharacter } from "@/lib/db/characters"
 import { recordCall } from "../audit-log"
-import { checkRagCall, checkRuntimeCall, checkScope, checkToolCall } from "../permission-gate"
+import {
+  bridgeScopeForRagScope,
+  checkRagCall,
+  checkRuntimeCall,
+  checkScope,
+  checkToolCall,
+} from "../permission-gate"
+import { wrapUntrusted } from "../untrusted"
 import { computerUse } from "../handlers/computer-use"
+import { agentDispatch, teamRun, teamList, pluginToolInvoke } from "../handlers/orchestration"
+import { scheduleTask, listScheduledTasks, cancelScheduledTask } from "../handlers/scheduling"
 import { ragSearch } from "../handlers/rag"
-import { parseResourceUri } from "../handlers/resources"
+import { parseResourceUri } from "./resource-uri"
 import { runtimeQuery, type RuntimeEntityType } from "../handlers/runtime"
 import { wikiRead, wikiSearch } from "../handlers/wiki"
 import {
@@ -36,9 +46,42 @@ import {
   connectorsListDrafts,
   connectorsSendMessage,
 } from "../handlers/connectors"
+import { recordLesson, saveSkillDraft, ingestNote } from "../handlers/inbound"
+import {
+  memorySearch,
+  memoryList,
+  memoryStore,
+  memoryUpdate,
+  memoryForget,
+} from "../handlers/memory"
 
 /** Function the caller injects so the server always sees fresh settings. */
 export type SettingsGetter = () => Promise<ExternalBridgeSettings | undefined>
+
+type BridgeRequestExtra = {
+  _meta?: Record<string, unknown>
+}
+
+async function scopedSettings(
+  settingsGetter: SettingsGetter,
+  extra: BridgeRequestExtra
+): Promise<ExternalBridgeSettings | undefined> {
+  const settings = await settingsGetter()
+  const advertisedScopes = extra._meta?.cogniaBridgeScopes
+  if (advertisedScopes === undefined) return settings
+  if (!Array.isArray(advertisedScopes)) {
+    return settings ? { ...settings, enabledScopes: [] } : settings
+  }
+  const allowed = new Set(
+    advertisedScopes.filter(
+      (scope): scope is BridgeScope =>
+        typeof scope === "string" && ALL_BRIDGE_SCOPES.includes(scope as BridgeScope)
+    )
+  )
+  return settings
+    ? { ...settings, enabledScopes: settings.enabledScopes.filter((scope) => allowed.has(scope)) }
+    : settings
+}
 
 export interface BuildServerOptions {
   serverInfo?: { name: string; version: string }
@@ -64,9 +107,12 @@ export function buildMcpServer(opts: BuildServerOptions): McpServer {
   registerRagTool(server, opts.settingsGetter)
   registerRuntimeTool(server, opts.settingsGetter)
   registerComputerUseTool(server, opts.settingsGetter)
+  registerOrchestrationTools(server, opts.settingsGetter)
   registerConnectorTools(server, opts.settingsGetter)
+  registerInboundTools(server, opts.settingsGetter)
+  registerMemoryTools(server, opts.settingsGetter)
   registerResources(server, opts.settingsGetter)
-  registerPrompts(server)
+  registerPrompts(server, opts.settingsGetter)
 
   return server
 }
@@ -81,7 +127,7 @@ function registerWikiTools(server: McpServer, settingsGetter: SettingsGetter) {
     {
       title: "Search Cognia wiki",
       description:
-        "Semantic search over Cognia's generated code wiki articles. " +
+        "Keyword (BM25) search over Cognia's generated code wiki articles. " +
         "Returns top-K article summaries with slugs you can pass to wiki_read.",
       annotations: {
         readOnlyHint: true,
@@ -98,11 +144,11 @@ function registerWikiTools(server: McpServer, settingsGetter: SettingsGetter) {
         k: z.number().int().min(1).max(20).optional().describe("Result count (default 5)"),
       },
     },
-    async (args) =>
+    async (args, extra) =>
       runWithGate({
         tool: "wiki_search",
         scope: "wiki:cognia",
-        check: checkToolCall(await settingsGetter(), "wiki_search"),
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "wiki_search"),
         body: () => wikiSearch({ query: args.query, scope: args.scope, k: args.k }),
       })
   )
@@ -120,11 +166,11 @@ function registerWikiTools(server: McpServer, settingsGetter: SettingsGetter) {
       },
       inputSchema: { slug: z.string().describe("Article slug (from wiki_search results)") },
     },
-    async (args) =>
+    async (args, extra) =>
       runWithGate({
         tool: "wiki_read",
         scope: "wiki:cognia",
-        check: checkToolCall(await settingsGetter(), "wiki_read"),
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "wiki_read"),
         body: async () => {
           const article = await wikiRead({ slug: args.slug })
           if (!article) return { error: `wiki article '${args.slug}' not found` }
@@ -144,9 +190,10 @@ function registerRagTool(server: McpServer, settingsGetter: SettingsGetter) {
     {
       title: "Search Cognia code (RAG)",
       description:
-        "Chunk-level retrieval over Cognia's wiki sections OR over a digital " +
-        "twin's chunks (when scope='twin' and rag:twin is enabled). For " +
-        "module-level overviews use wiki_search.",
+        "Chunk-level keyword (BM25) retrieval over Cognia's wiki sections OR over " +
+        "a digital twin's chunks (when scope='twin' and rag:twin is enabled). " +
+        "Optional heuristic rerank, corrective-RAG grading, and citations; no " +
+        "vector/semantic backend. For module-level overviews use wiki_search.",
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -158,17 +205,33 @@ function registerRagTool(server: McpServer, settingsGetter: SettingsGetter) {
         scope: z.enum(["cognia-self", "user-repo", "runtime", "all", "twin"]).optional(),
         twinId: z.string().optional(),
         k: z.number().int().min(1).max(30).optional(),
-        rerank: z.boolean().optional(),
+        rerank: z
+          .boolean()
+          .optional()
+          .describe("Apply the key-free lexical reranker over the fused pool (default off)."),
+        expand: z
+          .boolean()
+          .optional()
+          .describe("Heuristic synonym query expansion for recall (default on)."),
+        grade: z
+          .boolean()
+          .optional()
+          .describe("Corrective-RAG relevance grading; drops low-relevance hits (default on)."),
+        trim: z
+          .boolean()
+          .optional()
+          .describe("Dynamic context-budget trimming; may shorten chunk content (default off)."),
       },
     },
-    async (args) => {
+    async (args, extra) => {
       const ragScope = args.scope ?? "all"
-      const settings = await settingsGetter()
-      // Per-call gate: rag:cognia for everything except twin (rag:twin),
-      // which the user must opt into separately.
+      const settings = await scopedSettings(settingsGetter, extra)
+      // Per-call gate + audit label share one mapping (bridgeScopeForRagScope):
+      // rag:twin for twin, rag:user-repo for user-repo, rag:cognia for
+      // cognia-self/runtime/all — so a user-repo call is never mislabeled.
       return runWithGate({
         tool: "rag_search",
-        scope: ragScope === "twin" ? "rag:twin" : "rag:cognia",
+        scope: bridgeScopeForRagScope(ragScope) ?? "rag:cognia",
         check: checkRagCall(settings, ragScope),
         body: () =>
           ragSearch({
@@ -177,6 +240,9 @@ function registerRagTool(server: McpServer, settingsGetter: SettingsGetter) {
             twinId: args.twinId,
             k: args.k,
             rerank: args.rerank,
+            expand: args.expand,
+            grade: args.grade,
+            trim: args.trim,
           }),
       })
     }
@@ -210,8 +276,8 @@ function registerRuntimeTool(server: McpServer, settingsGetter: SettingsGetter) 
         filter: z.record(z.string(), z.unknown()).optional(),
       },
     },
-    async (args) => {
-      const settings = await settingsGetter()
+    async (args, extra) => {
+      const settings = await scopedSettings(settingsGetter, extra)
       const check = checkRuntimeCall(settings, args.entityType)
       // The audit-log scope reflects what was actually checked even on
       // unknown entity types — the gate already mapped it to a scope or
@@ -243,11 +309,9 @@ function registerComputerUseTool(server: McpServer, settingsGetter: SettingsGett
     {
       title: "Drive the host computer",
       description:
-        "Take a screenshot, move the cursor, click, scroll, type, send keyboard " +
-        "chords, drag, or release mouse buttons on the user's desktop. Routes " +
-        "through Cognia's automation permission gate (`Surface::Mcp`) — denied " +
-        "by default until the user enables this scope in Settings → External " +
-        "Bridge.",
+        "Read and act on a revision-bound native application session. Call getAppState " +
+        "before each performAction; the state always includes a matching screenshot. " +
+        "Routes through Cognia's automation permission gate (`Surface::Mcp`).",
       annotations: {
         readOnlyHint: false,
         destructiveHint: true,
@@ -255,41 +319,246 @@ function registerComputerUseTool(server: McpServer, settingsGetter: SettingsGett
         openWorldHint: true,
       },
       inputSchema: {
-        action: z.enum([
-          "screenshot",
-          "click",
-          "type",
-          "keys",
-          "mouse_move",
-          "drag",
-          "scroll",
-          "hold_key",
-          "mouse_button",
+        operation: z.enum([
+          "listApps",
+          "getAppState",
+          "queryElements",
+          "expandElement",
+          "performAction",
         ]),
-        coordinate: z
-          .tuple([z.number().int(), z.number().int()])
-          .optional()
-          .describe("Target [x, y]. Required for click / mouse_move / drag / scroll."),
-        startCoordinate: z
-          .tuple([z.number().int(), z.number().int()])
-          .optional()
-          .describe("Drag origin [x, y]."),
-        button: z.enum(["left", "right", "middle"]).optional(),
-        double: z.boolean().optional(),
-        text: z.string().optional().describe("Text to type."),
-        chord: z.string().optional().describe('Keyboard chord, e.g. "ctrl+shift+t" or "{F4}".'),
-        dx: z.number().int().optional(),
-        dy: z.number().int().optional(),
-        durationMs: z.number().int().min(0).optional(),
-        transition: z.enum(["down", "up"]).optional(),
+        turnKey: z.string().min(1).optional(),
+        sessionId: z.string().min(1).optional(),
+        lineageId: z.string().min(1).optional(),
+        revision: z.number().int().min(1).optional(),
+        locator: z.object({}).passthrough().optional(),
+        options: z.object({}).passthrough().optional(),
+        limit: z.number().int().min(1).max(1000).optional(),
+        handle: z.object({}).passthrough().optional(),
+        continuationToken: z.string().nullable().optional(),
+        request: z.object({}).passthrough().optional(),
       },
     },
-    async (args) =>
+    async (args, extra) =>
       runWithGate({
         tool: "computer_use",
         scope: "mcp:computer-use",
-        check: checkToolCall(await settingsGetter(), "computer_use"),
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "computer_use"),
         body: () => computerUse(args as Parameters<typeof computerUse>[0]),
+      })
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Orchestration tools (Thread D) — let an external agent drive Cognia's own
+// agent runtime / teams / plugin tools. All default OFF; gated + audited via
+// runWithGate. Outward text from agent_dispatch / team_run is PII-redacted in
+// the handler.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function registerOrchestrationTools(server: McpServer, settingsGetter: SettingsGetter) {
+  server.registerTool(
+    "agent_dispatch",
+    {
+      title: "Dispatch a Cognia agent",
+      description:
+        "Run a Cognia built-in/plugin subagent (by `subagentId`) or a character " +
+        "(by `characterId`, full persona pipeline) headlessly on a prompt and " +
+        "return its final text. Denied by default until the `agent:dispatch` scope " +
+        "is enabled in Settings → External Bridge. Returned text is PII-redacted.",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+      inputSchema: {
+        subagentId: z.string().optional().describe("Registered subagent id to run."),
+        characterId: z.string().optional().describe("Character id to run (full pipeline)."),
+        prompt: z.string().describe("The prompt for the dispatched run."),
+        toolsEnabled: z.boolean().optional().describe("Tool-enabled sidecar loop (default true)."),
+        cwd: z.string().optional().describe("Working directory for the run."),
+      },
+    },
+    async (args, extra) =>
+      runWithGate({
+        tool: "agent_dispatch",
+        scope: "agent:dispatch",
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "agent_dispatch"),
+        body: () => agentDispatch(args as Parameters<typeof agentDispatch>[0]),
+      })
+  )
+
+  server.registerTool(
+    "schedule_task",
+    {
+      title: "Create a scheduled task",
+      description:
+        "Create a cron or interval task owned by the calling Cognia chat session. " +
+        "The tool is absent from chat sessions until that conversation explicitly enables " +
+        "scheduler tools, and the agent may later mutate only tasks it created.",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+      inputSchema: {
+        sessionId: z.string().describe("Owning Cognia chat session id."),
+        prompt: z.string().describe("Prompt to run when the task fires."),
+        name: z.string().optional().describe("Optional display name."),
+        intervalMs: z.number().int().min(60_000).optional(),
+        cronExpression: z.string().optional().describe("Five-field cron expression."),
+        timezone: z.string().optional().describe("IANA timezone for cron schedules."),
+      },
+    },
+    async (args, extra) =>
+      runWithGate({
+        tool: "schedule_task",
+        scope: "agent:dispatch",
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "schedule_task"),
+        body: () => scheduleTask(args as Parameters<typeof scheduleTask>[0]),
+      })
+  )
+
+  server.registerTool(
+    "list_scheduled_tasks",
+    {
+      title: "List agent-created scheduled tasks",
+      description:
+        "List only scheduled tasks owned by the supplied Cognia chat session. " +
+        "User-, plugin-, and other-session tasks are never returned.",
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        sessionId: z.string().describe("Owning Cognia chat session id."),
+      },
+    },
+    async (args, extra) =>
+      runWithGate({
+        tool: "list_scheduled_tasks",
+        scope: "agent:dispatch",
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "list_scheduled_tasks"),
+        body: () => listScheduledTasks(args as Parameters<typeof listScheduledTasks>[0]),
+      })
+  )
+
+  server.registerTool(
+    "cancel_scheduled_task",
+    {
+      title: "Cancel an agent-created scheduled task",
+      description:
+        "Delete one scheduled task only when it is owned by the supplied Cognia chat session.",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        sessionId: z.string().describe("Owning Cognia chat session id."),
+        taskId: z.string().describe("Exact scheduled-task id."),
+      },
+    },
+    async (args, extra) =>
+      runWithGate({
+        tool: "cancel_scheduled_task",
+        scope: "agent:dispatch",
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "cancel_scheduled_task"),
+        body: () => cancelScheduledTask(args as Parameters<typeof cancelScheduledTask>[0]),
+      })
+  )
+
+  server.registerTool(
+    "team_run",
+    {
+      title: "Run a Cognia agent team",
+      description:
+        "Start a configured Agent Team headlessly and return its terminal status. " +
+        "Denied by default until the `agent:team` scope is enabled in Settings → " +
+        "External Bridge.",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+      inputSchema: {
+        teamId: z.string().describe("Id of an existing agent team."),
+        ultracode: z.boolean().optional().describe("Run with the ultracode orchestration."),
+      },
+    },
+    async (args, extra) =>
+      runWithGate({
+        tool: "team_run",
+        scope: "agent:team",
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "team_run"),
+        body: () => teamRun(args as Parameters<typeof teamRun>[0]),
+      })
+  )
+
+  server.registerTool(
+    "team_list",
+    {
+      title: "List Cognia agent teams",
+      description:
+        "List configured Agent Teams (id, status, redacted objective), including " +
+        "teams marked 'awaiting external pickup' by an external-handoff dispatch — " +
+        "claim one by starting it with `team_run`. Read-only. Denied by default " +
+        "until the `agent:team` scope is enabled in Settings → External Bridge.",
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        awaitingExternalOnly: z
+          .boolean()
+          .optional()
+          .describe("Only unclaimed external-pickup teams."),
+      },
+    },
+    async (args, extra) =>
+      runWithGate({
+        tool: "team_list",
+        scope: "agent:team",
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "team_list"),
+        body: () => teamList(args as Parameters<typeof teamList>[0]),
+      })
+  )
+
+  server.registerTool(
+    "plugin_tool_invoke",
+    {
+      title: "Invoke a Cognia plugin tool",
+      description:
+        "Invoke a plugin-registered tool by `pluginId` + `toolName`. The plugin's " +
+        "own permission-consent gate and ownership check still apply per call. " +
+        "Denied by default until the `plugin:tools` scope is enabled in Settings → " +
+        "External Bridge.",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+      inputSchema: {
+        pluginId: z.string().describe("Owning plugin id."),
+        toolName: z.string().describe("Registered tool name."),
+        args: z.record(z.string(), z.unknown()).optional().describe("Tool arguments."),
+        reason: z.string().optional().describe("Reason shown in the consent prompt / audit."),
+      },
+    },
+    async (args, extra) =>
+      runWithGate({
+        tool: "plugin_tool_invoke",
+        scope: "plugin:tools",
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "plugin_tool_invoke"),
+        body: () => pluginToolInvoke(args as Parameters<typeof pluginToolInvoke>[0]),
       })
   )
 }
@@ -314,11 +583,14 @@ function registerConnectorTools(server: McpServer, settingsGetter: SettingsGette
       },
       inputSchema: {},
     },
-    async () =>
+    async (extra) =>
       runWithGate({
         tool: "connectors_list_adapters",
         scope: "inbox:connectors:read",
-        check: checkToolCall(await settingsGetter(), "connectors_list_adapters"),
+        check: checkToolCall(
+          await scopedSettings(settingsGetter, extra),
+          "connectors_list_adapters"
+        ),
         body: () => connectorsListAdapters(),
       })
   )
@@ -344,11 +616,14 @@ function registerConnectorTools(server: McpServer, settingsGetter: SettingsGette
         limit: z.number().int().min(1).max(200).optional(),
       },
     },
-    async (args) =>
+    async (args, extra) =>
       runWithGate({
         tool: "connectors_list_conversations",
         scope: "inbox:connectors:read",
-        check: checkToolCall(await settingsGetter(), "connectors_list_conversations"),
+        check: checkToolCall(
+          await scopedSettings(settingsGetter, extra),
+          "connectors_list_conversations"
+        ),
         body: () => connectorsListConversations(args),
       })
   )
@@ -372,11 +647,11 @@ function registerConnectorTools(server: McpServer, settingsGetter: SettingsGette
         limit: z.number().int().min(1).max(500).optional(),
       },
     },
-    async (args) =>
+    async (args, extra) =>
       runWithGate({
         tool: "connectors_get_audit",
         scope: "inbox:connectors:read",
-        check: checkToolCall(await settingsGetter(), "connectors_get_audit"),
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "connectors_get_audit"),
         body: () => connectorsGetAudit(args),
       })
   )
@@ -401,11 +676,14 @@ function registerConnectorTools(server: McpServer, settingsGetter: SettingsGette
         limit: z.number().int().min(1).max(5000).optional(),
       },
     },
-    async (args) =>
+    async (args, extra) =>
       runWithGate({
         tool: "connectors_export_audit",
         scope: "inbox:connectors:read",
-        check: checkToolCall(await settingsGetter(), "connectors_export_audit"),
+        check: checkToolCall(
+          await scopedSettings(settingsGetter, extra),
+          "connectors_export_audit"
+        ),
         body: () => connectorsExportAudit(args),
       })
   )
@@ -425,11 +703,11 @@ function registerConnectorTools(server: McpServer, settingsGetter: SettingsGette
       },
       inputSchema: {},
     },
-    async () =>
+    async (extra) =>
       runWithGate({
         tool: "connectors_list_drafts",
         scope: "inbox:connectors:read",
-        check: checkToolCall(await settingsGetter(), "connectors_list_drafts"),
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "connectors_list_drafts"),
         body: () => connectorsListDrafts(),
       })
   )
@@ -455,11 +733,14 @@ function registerConnectorTools(server: McpServer, settingsGetter: SettingsGette
         sourceTaskId: z.string().optional(),
       },
     },
-    async (args) =>
+    async (args, extra) =>
       runWithGate({
         tool: "connectors_send_message",
         scope: "inbox:connectors:send",
-        check: checkToolCall(await settingsGetter(), "connectors_send_message"),
+        check: checkToolCall(
+          await scopedSettings(settingsGetter, extra),
+          "connectors_send_message"
+        ),
         body: () =>
           connectorsSendMessage({
             adapterId: args.adapterId,
@@ -468,6 +749,330 @@ function registerConnectorTools(server: McpServer, settingsGetter: SettingsGette
             characterId: args.characterId,
             sourceTaskId: args.sourceTaskId,
           }),
+      })
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// record_lesson / save_skill_draft / ingest_note (inbound write, ADR-0008 P4)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function registerInboundTools(server: McpServer, settingsGetter: SettingsGetter) {
+  const inboundAnnotations = {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: false,
+    openWorldHint: false,
+  }
+
+  // record_lesson
+  server.registerTool(
+    "record_lesson",
+    {
+      title: "Record a lesson for Cognia to review",
+      description:
+        "Submit a lesson learned / correction worth remembering. Lands in Cognia's inbound review queue as a pending draft (nothing is applied to live memory); the operator accepts or discards it. Content is stored as untrusted. Default OFF; gate via Settings → External Bridge → inbound:write.",
+      annotations: inboundAnnotations,
+      inputSchema: {
+        title: z.string(),
+        lesson: z.string(),
+        tags: z.array(z.string()).optional(),
+        source: z.string().optional(),
+      },
+    },
+    async (args, extra) =>
+      runWithGate({
+        tool: "record_lesson",
+        scope: "inbound:write",
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "record_lesson"),
+        body: () =>
+          recordLesson({
+            title: args.title,
+            lesson: args.lesson,
+            tags: args.tags,
+            source: args.source,
+          }),
+      })
+  )
+
+  // save_skill_draft
+  server.registerTool(
+    "save_skill_draft",
+    {
+      title: "Propose a skill draft for Cognia to review",
+      description:
+        "Submit a proposed skill (name + instructions). Lands in Cognia's inbound review queue as a pending draft (no skill is installed); the operator accepts or discards it. Content is stored as untrusted. Default OFF; gate via Settings → External Bridge → inbound:write.",
+      annotations: inboundAnnotations,
+      inputSchema: {
+        name: z.string(),
+        instructions: z.string(),
+        description: z.string().optional(),
+        trigger: z.string().optional(),
+        source: z.string().optional(),
+      },
+    },
+    async (args, extra) =>
+      runWithGate({
+        tool: "save_skill_draft",
+        scope: "inbound:write",
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "save_skill_draft"),
+        body: () =>
+          saveSkillDraft({
+            name: args.name,
+            instructions: args.instructions,
+            description: args.description,
+            trigger: args.trigger,
+            source: args.source,
+          }),
+      })
+  )
+
+  // ingest_note
+  server.registerTool(
+    "ingest_note",
+    {
+      title: "File a note with Cognia for later review",
+      description:
+        "Submit a free-form note / snippet to file for later. Lands in Cognia's inbound review queue as a pending draft; the operator accepts or discards it. Content is stored as untrusted. Default OFF; gate via Settings → External Bridge → inbound:write.",
+      annotations: inboundAnnotations,
+      inputSchema: {
+        title: z.string(),
+        note: z.string(),
+        url: z.string().optional(),
+        source: z.string().optional(),
+      },
+    },
+    async (args, extra) =>
+      runWithGate({
+        tool: "ingest_note",
+        scope: "inbound:write",
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "ingest_note"),
+        body: () =>
+          ingestNote({
+            title: args.title,
+            note: args.note,
+            url: args.url,
+            source: args.source,
+          }),
+      })
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// memory_search / memory_list / memory_store / memory_update / memory_forget
+// (long-term memory, ADR-0069)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function registerMemoryTools(server: McpServer, settingsGetter: SettingsGetter) {
+  const memoryTypeSchema = z.enum(["semantic", "episodic", "procedural"])
+  const memoryScopeSchema = z.enum(["global", "workspace", "character", "agent"])
+
+  // memory_search
+  server.registerTool(
+    "memory_search",
+    {
+      title: "Search Cognia's long-term memory",
+      description:
+        "Hybrid (BM25 + vector) relevance search over what Cognia remembers about the user. Returns scored memory rows. Default OFF; gate via Settings → External Bridge → memory:read.",
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: false, // bumps lastAccessedAt/accessCount (recency signal)
+        openWorldHint: false,
+      },
+      inputSchema: {
+        query: z.string().describe("Natural language query"),
+        k: z
+          .number()
+          .int()
+          .min(1)
+          .max(20)
+          .optional()
+          .describe("Result count (default: configured topK)"),
+        types: z.array(memoryTypeSchema).optional().describe("Restrict to memory types"),
+        characterId: z.string().optional().describe("Include this character's override layer"),
+        projectId: z.string().optional().describe("Include this project's workspace layer"),
+        agentId: z.string().optional().describe("Include this private agent layer"),
+        branch: z.string().optional().describe("Exact branch context"),
+        path: z.string().optional().describe("Workspace-relative path context"),
+      },
+    },
+    async (args, extra) =>
+      runWithGate({
+        tool: "memory_search",
+        scope: "memory:read",
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "memory_search"),
+        body: () =>
+          memorySearch({
+            query: args.query,
+            k: args.k,
+            types: args.types,
+            characterId: args.characterId,
+            projectId: args.projectId,
+            agentId: args.agentId,
+            branch: args.branch,
+            path: args.path,
+          }),
+      })
+  )
+
+  // memory_list
+  server.registerTool(
+    "memory_list",
+    {
+      title: "List Cognia's long-term memories",
+      description:
+        "Newest-first listing of active long-term memories (no relevance ranking). Default OFF; gate via Settings → External Bridge → memory:read.",
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        type: memoryTypeSchema.optional().describe("Restrict to one memory type"),
+        scope: memoryScopeSchema.optional().describe("Restrict to one scope"),
+        characterId: z.string().optional(),
+        projectId: z.string().optional(),
+        agentId: z.string().optional(),
+        branch: z.string().optional(),
+        pathPattern: z.string().optional(),
+        limit: z.number().int().min(1).max(200).optional().describe("Row cap (default 50)"),
+      },
+    },
+    async (args, extra) =>
+      runWithGate({
+        tool: "memory_list",
+        scope: "memory:read",
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "memory_list"),
+        body: () =>
+          memoryList({
+            type: args.type,
+            scope: args.scope,
+            characterId: args.characterId,
+            projectId: args.projectId,
+            agentId: args.agentId,
+            branch: args.branch,
+            pathPattern: args.pathPattern,
+            limit: args.limit,
+          }),
+      })
+  )
+
+  // memory_store
+  server.registerTool(
+    "memory_store",
+    {
+      title: "Store a long-term memory",
+      description:
+        "Store one durable fact about the user (semantic/episodic only — never working instructions). PII-screened; consolidated against existing memories when possible. Provenance is recorded as external/mcp. Default OFF; gate via Settings → External Bridge → memory:write.",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        text: z.string().max(2000).describe("The fact to remember (one self-contained statement)"),
+        type: z
+          .enum(["semantic", "episodic"])
+          .optional()
+          .describe("Memory type (default semantic)"),
+        scope: memoryScopeSchema.optional().describe("Scope (default global)"),
+        characterId: z.string().optional().describe("Required when scope is character"),
+        projectId: z.string().optional().describe("Required when scope is workspace"),
+        agentId: z.string().optional().describe("Required when scope is agent"),
+        branch: z.string().optional().describe("Optional exact branch restriction"),
+        pathPattern: z.string().optional().describe("Optional workspace-relative path prefix"),
+        key: z.string().optional().describe("Stable dedupe key"),
+        importance: z.number().int().min(1).max(10).optional().describe("1..10 (default 7)"),
+        tags: z.array(z.string()).optional(),
+      },
+    },
+    async (args, extra) =>
+      runWithGate({
+        tool: "memory_store",
+        scope: "memory:write",
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "memory_store"),
+        body: () =>
+          memoryStore({
+            text: args.text,
+            type: args.type,
+            scope: args.scope,
+            characterId: args.characterId,
+            projectId: args.projectId,
+            agentId: args.agentId,
+            branch: args.branch,
+            pathPattern: args.pathPattern,
+            key: args.key,
+            importance: args.importance,
+            tags: args.tags,
+          }),
+      })
+  )
+
+  // memory_update
+  server.registerTool(
+    "memory_update",
+    {
+      title: "Update a long-term memory",
+      description:
+        "Patch an existing memory's text / importance / tags / key. Text changes are PII-screened and bump the row version. Default OFF; gate via Settings → External Bridge → memory:write.",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        id: z.string().describe("Memory id (from memory_search / memory_list)"),
+        text: z.string().max(2000).optional(),
+        importance: z.number().int().min(1).max(10).optional(),
+        tags: z.array(z.string()).optional(),
+        key: z.string().optional(),
+        pinned: z.boolean().optional(),
+      },
+    },
+    async (args, extra) =>
+      runWithGate({
+        tool: "memory_update",
+        scope: "memory:write",
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "memory_update"),
+        body: () =>
+          memoryUpdate({
+            id: args.id,
+            text: args.text,
+            importance: args.importance,
+            tags: args.tags,
+            key: args.key,
+            pinned: args.pinned,
+          }),
+      })
+  )
+
+  // memory_forget
+  server.registerTool(
+    "memory_forget",
+    {
+      title: "Forget a long-term memory",
+      description:
+        "Soft-invalidate a memory (kept in history, excluded from recall; never a hard delete). Default OFF; gate via Settings → External Bridge → memory:write.",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+      inputSchema: {
+        id: z.string().describe("Memory id (from memory_search / memory_list)"),
+      },
+    },
+    async (args, extra) =>
+      runWithGate({
+        tool: "memory_forget",
+        scope: "memory:write",
+        check: checkToolCall(await scopedSettings(settingsGetter, extra), "memory_forget"),
+        body: () => memoryForget({ id: args.id }),
       })
   )
 }
@@ -501,9 +1106,9 @@ function registerResources(server: McpServer, settingsGetter: SettingsGetter) {
 
 function registerWikiResource(server: McpServer, settingsGetter: SettingsGetter) {
   const template = new ResourceTemplate("cognia://wiki/{slug}", {
-    list: async () => {
+    list: async (extra) => {
       const start = Date.now()
-      const s = await settingsGetter()
+      const s = await scopedSettings(settingsGetter, extra)
       const enabled = new Set(s?.enabledScopes ?? [])
       if (!enabled.has("wiki:cognia") && !enabled.has("wiki:user-repo")) {
         await recordCall({
@@ -544,9 +1149,9 @@ function registerWikiResource(server: McpServer, settingsGetter: SettingsGetter)
       description: "A generated code wiki article for a module in the Cognia codebase.",
       mimeType: "text/markdown",
     },
-    async (uri) => {
+    async (uri, _variables, extra) => {
       const start = Date.now()
-      const s = await settingsGetter()
+      const s = await scopedSettings(settingsGetter, extra)
       const parts = parseResourceUri(uri.href)
       if (!parts) {
         await recordCall({
@@ -585,16 +1190,22 @@ function registerWikiResource(server: McpServer, settingsGetter: SettingsGetter)
         check: { allowed: true },
         latencyMs: Date.now() - start,
       })
-      return { contents: [{ uri: uri.href, mimeType: "text/markdown", text: article.contentMd }] }
+      // ADR-0008 R7: fence generated wiki prose as untrusted so a coding agent
+      // that feeds the body back into a model never treats it as instructions.
+      return {
+        contents: [
+          { uri: uri.href, mimeType: "text/markdown", text: wrapUntrusted(article.contentMd) },
+        ],
+      }
     }
   )
 }
 
 function registerSkillResource(server: McpServer, settingsGetter: SettingsGetter) {
   const template = new ResourceTemplate("cognia://skill/{id}", {
-    list: async () => {
+    list: async (extra) => {
       const start = Date.now()
-      const s = await settingsGetter()
+      const s = await scopedSettings(settingsGetter, extra)
       const enabled = new Set(s?.enabledScopes ?? [])
       if (!enabled.has("runtime:skills")) {
         await recordCall({
@@ -631,9 +1242,9 @@ function registerSkillResource(server: McpServer, settingsGetter: SettingsGetter
       description: "A Cognia skill definition exported as SKILL.md.",
       mimeType: "text/markdown",
     },
-    async (uri) => {
+    async (uri, _variables, extra) => {
       const start = Date.now()
-      const s = await settingsGetter()
+      const s = await scopedSettings(settingsGetter, extra)
       const check = checkScope(s, "runtime:skills")
       if (!check.allowed) {
         await recordCall({
@@ -689,9 +1300,9 @@ function registerSkillResource(server: McpServer, settingsGetter: SettingsGetter
 
 function registerCharacterResource(server: McpServer, settingsGetter: SettingsGetter) {
   const template = new ResourceTemplate("cognia://character/{id}", {
-    list: async () => {
+    list: async (extra) => {
       const start = Date.now()
-      const s = await settingsGetter()
+      const s = await scopedSettings(settingsGetter, extra)
       const enabled = new Set(s?.enabledScopes ?? [])
       if (!enabled.has("runtime:characters")) {
         await recordCall({
@@ -728,9 +1339,9 @@ function registerCharacterResource(server: McpServer, settingsGetter: SettingsGe
       description: "A Cognia character definition as JSON.",
       mimeType: "application/json",
     },
-    async (uri) => {
+    async (uri, _variables, extra) => {
       const start = Date.now()
-      const s = await settingsGetter()
+      const s = await scopedSettings(settingsGetter, extra)
       const check = checkScope(s, "runtime:characters")
       if (!check.allowed) {
         await recordCall({
@@ -780,7 +1391,7 @@ function registerCharacterResource(server: McpServer, settingsGetter: SettingsGe
 // Prompts — help external agents discover and use Cognia's tools.
 // ─────────────────────────────────────────────────────────────────────────────
 
-function registerPrompts(server: McpServer) {
+function registerPrompts(server: McpServer, settingsGetter: SettingsGetter) {
   server.registerPrompt(
     "cognia-howto",
     {
@@ -845,6 +1456,82 @@ function registerPrompts(server: McpServer) {
         },
       ],
     })
+  )
+
+  // Parameterized persona prompt. `prompts/list` only ever enumerates the three
+  // static prompt names (names carry nothing sensitive); persona *content* is
+  // hard-gated by `runtime:characters` and audited at `prompts/get` time — the
+  // same soft-list / hard-read split the character resource uses. The
+  // `completable` argument suggests character ids, also scope-gated so ids
+  // don't leak when the scope is off.
+  server.registerPrompt(
+    "cognia-character",
+    {
+      title: "Adopt a Cognia character persona",
+      description:
+        "Load a Cognia character's system prompt so the agent role-plays that " +
+        "persona. Gated by the runtime:characters scope.",
+      argsSchema: {
+        characterId: completable(
+          z
+            .string()
+            .describe("Character id (discover via runtime_query entityType=character, op=list)"),
+          // The SDK v1 completion callback has no RequestHandlerExtra, so it
+          // cannot observe the server-stamped per-client scopes. Returning no
+          // ids prevents cross-client metadata disclosure; authorized clients
+          // can discover ids through runtime_query.
+          async () => []
+        ),
+      },
+    },
+    async ({ characterId }, extra) => {
+      const start = Date.now()
+      const s = await scopedSettings(settingsGetter, extra)
+      const check = checkScope(s, "runtime:characters")
+      if (!check.allowed) {
+        await recordCall({
+          tool: "prompts/get:character",
+          scope: "runtime:characters",
+          check,
+          latencyMs: Date.now() - start,
+        })
+        throw new Error(check.reason)
+      }
+      const character = await getCharacter(characterId)
+      if (!character) {
+        await recordCall({
+          tool: "prompts/get:character",
+          scope: "runtime:characters",
+          check: { allowed: true },
+          latencyMs: Date.now() - start,
+        })
+        throw new Error(`character '${characterId}' not found`)
+      }
+      await recordCall({
+        tool: "prompts/get:character",
+        scope: "runtime:characters",
+        check: { allowed: true },
+        latencyMs: Date.now() - start,
+      })
+      const header = character.description
+        ? `# ${character.name}\n${character.description}\n\n`
+        : `# ${character.name}\n\n`
+      return {
+        description: `Persona: ${character.name}`,
+        messages: [
+          {
+            role: "user",
+            content: {
+              type: "text",
+              text:
+                "Adopt the following persona for this conversation.\n\n" +
+                header +
+                `## System prompt\n${character.systemPrompt}`,
+            },
+          },
+        ],
+      }
+    }
   )
 }
 

@@ -26,26 +26,35 @@ describe("joinPluginPath", () => {
 describe("createPluginAssetResolver", () => {
   afterEach(() => {
     jest.resetModules()
-    jest.dontMock("@tauri-apps/api/core")
+    jest.dontMock("@/lib/plugin/bridge/plugin-file-path")
   })
 
-  it("uses Tauri convertFileSrc when available", async () => {
-    jest.doMock("@tauri-apps/api/core", () => ({
-      convertFileSrc: (p: string) => `asset://localhost/${p}`,
+  it("binds the plugin id to the contained native asset reader", async () => {
+    const readContainedPluginAsset = jest.fn(async () => "data:font/woff2;base64,AAAA")
+    jest.doMock("@/lib/plugin/bridge/plugin-file-path", () => ({
+      readContainedPluginAsset,
     }))
     const { createPluginAssetResolver } = await import("./plugin-asset-resolver")
-    const resolve = await createPluginAssetResolver()
-    expect(resolve("/plugins/p", "fonts/a.woff2")).toBe(
-      "asset://localhost//plugins/p/fonts/a.woff2"
+    const resolve = await createPluginAssetResolver("demo")
+    await expect(resolve("/plugins/p", "fonts/a.woff2", "font/woff2")).resolves.toBe(
+      "data:font/woff2;base64,AAAA"
+    )
+    expect(readContainedPluginAsset).toHaveBeenCalledWith(
+      "demo",
+      "/plugins/p",
+      "fonts/a.woff2",
+      "font/woff2"
     )
   })
 
-  it("falls back to the joined path when Tauri is unavailable", async () => {
-    jest.doMock("@tauri-apps/api/core", () => {
-      throw new Error("not running under Tauri")
-    })
+  it("propagates containment failures", async () => {
+    jest.doMock("@/lib/plugin/bridge/plugin-file-path", () => ({
+      readContainedPluginAsset: async () => {
+        throw new Error("unsafe plugin path")
+      },
+    }))
     const { createPluginAssetResolver } = await import("./plugin-asset-resolver")
-    const resolve = await createPluginAssetResolver()
-    expect(resolve("/plugins/p/", "/fonts/a.woff2")).toBe("/plugins/p/fonts/a.woff2")
+    const resolve = await createPluginAssetResolver("demo")
+    await expect(resolve("/plugins/p", "../outside.woff2")).rejects.toThrow("unsafe plugin path")
   })
 })

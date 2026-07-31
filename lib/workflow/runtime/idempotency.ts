@@ -45,8 +45,7 @@ export class IdempotencyCache {
     for (const e of events) {
       if (e.type === "step_completed" && e.stepId) {
         const payload = e.payload as
-          | { output?: unknown; loopId?: string; iterationIndex?: number }
-          | undefined
+          { output?: unknown; loopId?: string; iterationIndex?: number } | undefined
         // Loop-body completions hydrate under their per-iteration key ONLY —
         // a child id must never cache-hit at the top level.
         if (

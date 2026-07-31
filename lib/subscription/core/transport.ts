@@ -9,6 +9,9 @@
 //   - 2 OpenCode (discover + save zen key)
 
 import { transport } from "@/lib/tauri"
+import { markSubscriptionVaultChanged } from "@/lib/subscription/sync/change-tracker"
+import { notifySubscriptionChanged } from "@/lib/subscription/core/subscription-events"
+import { useAccountStore } from "@/stores/account/account-store"
 
 import type {
   Account,
@@ -19,6 +22,26 @@ import type {
   ProviderId,
   ProviderPreset,
 } from "@/types/subscription"
+
+/**
+ * Stamp the vault dirty-marker after a successful mutating command so the
+ * WebDAV cloud sync (when enabled) schedules a debounced unattended upload.
+ */
+function vaultMutated(): void {
+  markSubscriptionVaultChanged()
+}
+
+function requireLocalAccountId(): string {
+  const localAccountId = useAccountStore.getState().unlockedAccountId
+  if (!localAccountId) {
+    throw new Error("A local account must be unlocked before subscription credentials can be used.")
+  }
+  return localAccountId
+}
+
+function subscriptionScope(): { localAccountId: string } {
+  return { localAccountId: requireLocalAccountId() }
+}
 
 // ---------------------------------------------------------------------------
 // Bootstrap
@@ -31,7 +54,7 @@ import type {
  * `SubscriptionInitializer` in `app/layout.tsx`.
  */
 export async function subscriptionInit(): Promise<MigrationOutcome[]> {
-  return await transport.call<MigrationOutcome[]>("subscription_init")
+  return await transport.call<MigrationOutcome[]>("subscription_init", subscriptionScope())
 }
 
 // ---------------------------------------------------------------------------
@@ -39,23 +62,33 @@ export async function subscriptionInit(): Promise<MigrationOutcome[]> {
 // ---------------------------------------------------------------------------
 
 export async function listAccounts(provider: ProviderId): Promise<AccountSummary[]> {
-  return await transport.call<AccountSummary[]>("subscription_list_accounts", { provider })
+  return await transport.call<AccountSummary[]>("subscription_list_accounts", {
+    provider,
+    ...subscriptionScope(),
+  })
 }
 
 export async function getAccount(provider: ProviderId, accountId: string): Promise<Account | null> {
   const got = await transport.call<Account | null>("subscription_get_account", {
     provider,
+    ...subscriptionScope(),
     accountId,
   })
   return got ?? null
 }
 
 export async function saveAccount(provider: ProviderId, account: Account): Promise<void> {
-  await transport.call("subscription_save_account", { provider, account })
+  await transport.call("subscription_save_account", { provider, ...subscriptionScope(), account })
+  vaultMutated()
 }
 
 export async function deleteAccount(provider: ProviderId, accountId: string): Promise<void> {
-  await transport.call("subscription_delete_account", { provider, accountId })
+  await transport.call("subscription_delete_account", {
+    provider,
+    ...subscriptionScope(),
+    accountId,
+  })
+  vaultMutated()
 }
 
 export async function renameAccount(
@@ -65,9 +98,11 @@ export async function renameAccount(
 ): Promise<void> {
   await transport.call("subscription_rename_account", {
     provider,
+    ...subscriptionScope(),
     accountId,
     label,
   })
+  vaultMutated()
 }
 
 // ---------------------------------------------------------------------------
@@ -86,11 +121,20 @@ export async function setActiveAccount(
   provider: ProviderId,
   accountId: string | null
 ): Promise<void> {
-  await transport.call("subscription_set_active", { provider, accountId })
+  await transport.call("subscription_set_active", { provider, ...subscriptionScope(), accountId })
+  vaultMutated()
+  // The active credential (and, for Anthropic, the in-process OAuth bearer) just
+  // changed. Wake any UI mirroring auth state (e.g. the chat header's
+  // No-API-key / subscription-tier badge) so it re-reads immediately instead of
+  // latching the pre-activation value.
+  notifySubscriptionChanged()
 }
 
 export async function getActiveAccount(provider: ProviderId): Promise<ActiveSnapshot> {
-  return await transport.call<ActiveSnapshot>("subscription_get_active", { provider })
+  return await transport.call<ActiveSnapshot>("subscription_get_active", {
+    provider,
+    ...subscriptionScope(),
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -98,7 +142,10 @@ export async function getActiveAccount(provider: ProviderId): Promise<ActiveSnap
 // ---------------------------------------------------------------------------
 
 export async function getProviderPreset(provider: ProviderId): Promise<ProviderPreset | null> {
-  const got = await transport.call<ProviderPreset | null>("subscription_get_preset", { provider })
+  const got = await transport.call<ProviderPreset | null>("subscription_get_preset", {
+    provider,
+    ...subscriptionScope(),
+  })
   return got ?? null
 }
 
@@ -106,7 +153,8 @@ export async function setProviderPreset(
   provider: ProviderId,
   preset: ProviderPreset | null
 ): Promise<void> {
-  await transport.call("subscription_set_preset", { provider, preset })
+  await transport.call("subscription_set_preset", { provider, ...subscriptionScope(), preset })
+  vaultMutated()
 }
 
 // ---------------------------------------------------------------------------
@@ -115,7 +163,10 @@ export async function setProviderPreset(
 
 /** Enumerate every preset in the provider's vault. */
 export async function listPresets(provider: ProviderId): Promise<ProviderPreset[]> {
-  return await transport.call<ProviderPreset[]>("subscription_list_presets", { provider })
+  return await transport.call<ProviderPreset[]>("subscription_list_presets", {
+    provider,
+    ...subscriptionScope(),
+  })
 }
 
 /** Upsert a preset by id into the provider's library. */
@@ -123,12 +174,18 @@ export async function saveProviderPreset(
   provider: ProviderId,
   preset: ProviderPreset
 ): Promise<void> {
-  await transport.call("subscription_save_preset", { provider, preset })
+  await transport.call("subscription_save_preset", { provider, ...subscriptionScope(), preset })
+  vaultMutated()
 }
 
 /** Remove a preset by id; also clears the default + any account bindings to it. */
 export async function deleteProviderPreset(provider: ProviderId, presetId: string): Promise<void> {
-  await transport.call("subscription_delete_preset", { provider, presetId })
+  await transport.call("subscription_delete_preset", {
+    provider,
+    ...subscriptionScope(),
+    presetId,
+  })
+  vaultMutated()
 }
 
 /** Set or clear the provider-level default preset id. */
@@ -136,7 +193,12 @@ export async function setDefaultPreset(
   provider: ProviderId,
   presetId: string | null
 ): Promise<void> {
-  await transport.call("subscription_set_default_preset", { provider, presetId })
+  await transport.call("subscription_set_default_preset", {
+    provider,
+    ...subscriptionScope(),
+    presetId,
+  })
+  vaultMutated()
 }
 
 // ---------------------------------------------------------------------------
@@ -149,8 +211,45 @@ export async function authedGet(
   url: string,
   headers: Record<string, string> = {}
 ): Promise<string> {
-  const pairs = Object.entries(headers)
-  return await transport.call<string>("subscription_authed_get", { url, headers: pairs })
+  const entries = Object.entries(headers).map(([name, value]) => ({ name, value }))
+  return await transport.call<string>("subscription_authed_get", { url, headers: entries })
+}
+
+/** One usage window returned by `subscription_volcengine_usage`. */
+export interface VolcengineUsageTier {
+  /** cognia meter id: "session" | "weekly" | "monthly". */
+  name: string
+  /** Used percent (0-100). */
+  utilization: number
+  /** ISO-8601 reset time, when known. */
+  resets_at?: string | null
+}
+
+/** Result of the Volcengine (火山方舟) Agent/Coding Plan usage query. */
+export interface VolcengineUsageResult {
+  ok: boolean
+  plan?: string | null
+  tiers: VolcengineUsageTier[]
+  error?: string | null
+  /** `true` when the AK/SK were rejected (prompt the user to re-enter). */
+  auth_error: boolean
+}
+
+/**
+ * Query Volcengine Agent/Coding Plan usage via the Rust SigV4-signed OpenAPI
+ * command. AK/SK are the Volcengine account AccessKey pair (distinct from the
+ * inference bearer). Rejects only on transient transport errors.
+ */
+export async function volcengineUsage(
+  accessKeyId: string,
+  secretAccessKey: string,
+  baseUrl: string
+): Promise<VolcengineUsageResult> {
+  return await transport.call<VolcengineUsageResult>("subscription_volcengine_usage", {
+    accessKeyId,
+    secretAccessKey,
+    baseUrl,
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -169,10 +268,41 @@ export async function anthropicOauthSavePkceResult(
   payload: AnthropicCredentialData,
   label: string | null = null
 ): Promise<Account> {
-  return await transport.call<Account>("anthropic_oauth_save_pkce_result", {
+  const account = await transport.call<Account>("anthropic_oauth_save_pkce_result", {
+    ...subscriptionScope(),
     payload,
     label,
   })
+  vaultMutated()
+  return account
+}
+
+// ---------------------------------------------------------------------------
+// Anthropic (discovery of an existing Claude Code CLI login)
+// ---------------------------------------------------------------------------
+
+/**
+ * Outcome of probing for an existing Claude Code CLI subscription login
+ * (`~/.claude/.credentials.json` or the `"Claude Code-credentials"` OS
+ * keyring entry). Mirrors `subscription::anthropic::discovery::
+ * DiscoveredAnthropicAuth` field-for-field.
+ */
+export interface DiscoveredAnthropicAuth {
+  source: "file" | "keyring"
+  credentialsPath: string
+  accessToken: string
+  refreshToken: string
+  /** Absolute expiry of the access token, ms epoch. 0 when absent. */
+  expiresAtMs: number
+  scopes: string[]
+  /** "max" | "pro" | "team" | … as Claude Code serialises it. */
+  subscriptionType?: string
+  rateLimitTier?: string
+}
+
+export async function anthropicOauthDiscover(): Promise<DiscoveredAnthropicAuth | null> {
+  const got = await transport.call<DiscoveredAnthropicAuth | null>("anthropic_oauth_discover")
+  return got ?? null
 }
 
 // ---------------------------------------------------------------------------
@@ -234,8 +364,18 @@ export async function codexOauthRequestDeviceCode(): Promise<DeviceCodeResponse>
   return await transport.call<DeviceCodeResponse>("codex_oauth_request_device_code")
 }
 
-export async function codexOauthPollDeviceCode(deviceCode: string): Promise<PollOutcome> {
-  return await transport.call<PollOutcome>("codex_oauth_poll_device_code", { deviceCode })
+export async function codexOauthPollDeviceCode(
+  deviceCode: string,
+  userCode: string
+): Promise<PollOutcome> {
+  const outcome = await transport.call<PollOutcome>("codex_oauth_poll_device_code", {
+    ...subscriptionScope(),
+    deviceCode,
+    userCode,
+  })
+  // A granted poll persists the new account Rust-side — that's a mutation.
+  if (outcome && "Granted" in outcome) vaultMutated()
+  return outcome
 }
 
 export async function codexOauthRefresh(refreshToken: string): Promise<TokenResponse> {
@@ -251,7 +391,10 @@ export async function codexOauthRevoke(token: string): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export interface DiscoveredOpencodeEntry {
-  /** Whitelist value: "anthropic" | "openai" | "opencode-zen". */
+  /**
+   * Whitelist value: "anthropic" | "openai" | "opencode" | "opencode-go" |
+   * "opencode-zen" (must stay in sync with `OPENCODE_WHITELIST`).
+   */
   subProvider: string
   /** "api-key" | "oauth" | "unknown". */
   kind: string
@@ -271,14 +414,35 @@ export async function opencodeOauthDiscover(): Promise<DiscoveredOpencodeAuth | 
   return got ?? null
 }
 
+/**
+ * Adopt one discovered auth.json entry into the vault. Managed-plan keys
+ * (opencode / opencode-go / opencode-zen) become usable Zen/Go accounts;
+ * anthropic/openai (and OAuth-shaped) entries are snapshotted as
+ * `opencode-discovered` accounts. The key is re-read host-side, so the secret
+ * never crosses the renderer.
+ */
+export async function opencodeAdoptDiscovered(subProvider: string): Promise<Account> {
+  const account = await transport.call<Account>("opencode_adopt_discovered", {
+    ...subscriptionScope(),
+    subProvider,
+  })
+  vaultMutated()
+  return account
+}
+
 export async function opencodeSaveZenKey(
   accessToken: string,
   baseUrl: string | null,
-  label: string | null = null
+  label: string | null = null,
+  plan: string | null = null
 ): Promise<Account> {
-  return await transport.call<Account>("opencode_save_zen_key", {
+  const account = await transport.call<Account>("opencode_save_zen_key", {
+    ...subscriptionScope(),
     accessToken,
     baseUrl,
     label,
+    plan,
   })
+  vaultMutated()
+  return account
 }

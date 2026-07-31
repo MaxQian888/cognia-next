@@ -148,9 +148,17 @@ export function TaskExecutionHistory({
 
             {/* Info column */}
             <div className="flex-1 min-w-0">
-              {/* Timestamp */}
+              {/* Timestamp + non-default trigger provenance */}
               <p className="text-xs text-muted-foreground truncate">
                 {formatTimestamp(execution.startedAt, format)}
+                {execution.triggerSource && execution.triggerSource !== "schedule" && (
+                  <span
+                    className="ml-1.5 inline-flex items-center rounded-full border border-border/50 px-1.5 text-[10px]"
+                    data-testid="execution-trigger-source"
+                  >
+                    {t(`triggerSources.${execution.triggerSource}`) || execution.triggerSource}
+                  </span>
+                )}
               </p>
 
               {/* Detail line: error for failed, result for completed */}

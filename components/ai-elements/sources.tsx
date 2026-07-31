@@ -1,5 +1,14 @@
 "use client"
 
+/**
+ * DORMANT — vendored from the AI Elements registry, currently zero call sites.
+ * cognia renders retrieval sources through `components/chat/message-parts/
+ * sources-part.tsx`, which is built on `ai-elements/inline-citation` instead
+ * (it needs per-item provenance badges and scope filtering this component has
+ * no slot for). Kept as part of the registry mirror so a future `shadcn`-style
+ * re-sync doesn't diff; delete only alongside that decision.
+ */
+
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { cn } from "@/lib/utils"
 import { BookIcon, ChevronDownIcon } from "lucide-react"

@@ -14,12 +14,12 @@
  *   * `panelOpen` / `panelHeightPct` — dock visibility + size.
  *
  * Persistence (via `zustand/middleware/persist`):
- *   * Only `panelHeightPct` survives reloads — the dock always starts
+ *   * `panelHeightPct` and reload-safe layout metadata survive — the dock always starts
  *     closed (`panelOpen` is deliberately NOT persisted, so a dock left
  *     open by the user or an agent tool doesn't reappear on next launch).
- *   * Sessions do NOT — every session is killed on window close
- *     (`PtySession::Drop` on the Rust side), and replay across reload
- *     is explicitly out of v1 scope (see plan §Out of scope).
+ *   * Session rows do NOT persist. Instead, split groups, focus, active tabs,
+ *     and custom titles are held as a pending snapshot until Rust reports which
+ *     PTYs survived a webview reload; stale ids are then discarded.
  *
  * Shape mirrors `stores/inbox/inbox-layout-store.ts` deliberately —
  * see plan §Reuse map row #6. Debounced flush, DEFAULTS + BOUNDS
@@ -30,6 +30,7 @@ import { create } from "zustand"
 import { persist } from "zustand/middleware"
 
 import type { SessionInfo } from "@/lib/terminal/types"
+import type { TerminalHostState } from "@/lib/terminal/host-state"
 
 /**
  * Status the tab badge surfaces. Driven by OSC 633 events (`command_*`)
@@ -59,6 +60,10 @@ export interface TerminalPromptBoundary {
 
 export interface TerminalSessionRow {
   id: string
+  /** Stable durable-host identity used to reject cross-host layout collisions. */
+  hostId: string | null
+  /** Last host snapshot controller; live control events remain authoritative. */
+  controllerId: string | null
   projectId: string | null
   extensionId: string | null
   /** Auto-derived title from shell + extension. Use `displayTitle()` to apply `customTitle` override. */
@@ -75,12 +80,41 @@ export interface TerminalSessionRow {
   agentTrusted: boolean
   /** Identity of the agent (chat session) that spawned this tab. `null` when user-spawned. Set by `lib/terminal/dock-tool-handler.ts` when the agent calls `terminal_dock_spawn`; reads filter the agent-only dock view. */
   agentSpawner: string | null
+  /**
+   * The assistant message the spawning tool call was streaming into, so
+   * "Locate in conversation" can land on the exact turn rather than merely
+   * opening the session at its end. ADR-0033 deferred this for want of a
+   * scroll-to-message seam; that seam now exists (`chatViewportStore`).
+   *
+   * Inferred renderer-side at spawn time — the plugin-tool wire carries only a
+   * session id — so it can be a message out in pathological cases (a replay, or
+   * a second turn racing the first). That degrades to landing near the right
+   * place, never to failing. Optional: rows persisted before this field existed
+   * simply lack it.
+   */
+  agentSpawnerMessageId?: string | null
   /** OSC 633 prompt boundaries — newest last, capped to last 32. */
   promptBoundaries: TerminalPromptBoundary[]
   /** Recent commands ring, newest last, capped to {@link TERMINAL_HISTORY_RING_SIZE}. */
   lastCommands: TerminalCommandRecord[]
   /** Whether the history rail is shown for this tab. */
   historyOpen: boolean
+}
+
+/** UI metadata that can be safely reapplied after Rust PTYs reattach. */
+export interface TerminalReloadLayout {
+  splitPanes: Record<string, string[]>
+  focusedPaneByAnchor: Record<string, string>
+  splitDirection: Record<string, "row" | "col">
+  activeSessionIdByProject: Record<string, string | null>
+  customTitles: Record<string, string>
+  stableHostSessionIds: string[]
+  controllerBySession: Record<string, string>
+}
+
+interface TerminalPersistedState {
+  panelHeightPct: number
+  pendingReloadLayout: TerminalReloadLayout | null
 }
 
 export const TERMINAL_LAYOUT_DEFAULTS = {
@@ -90,7 +124,7 @@ export const TERMINAL_LAYOUT_DEFAULTS = {
 
 export const TERMINAL_LAYOUT_BOUNDS = {
   panelMinPct: 15,
-  panelMaxPct: 75,
+  panelMaxPct: 85,
 } as const
 
 export const TERMINAL_LAYOUT_PERSIST_DEBOUNCE_MS = 150
@@ -114,6 +148,17 @@ export interface TerminalStoreState {
   panelOpen: boolean
   panelHeightPct: number
 
+  // Transient durable-host health. The authoritative value comes from the
+  // live connection and must not survive an app restart.
+  hostState: TerminalHostState
+  hostStateMessage: string | null
+
+  // Maximize toggle (in-memory only). When `maximized` the dock snaps to
+  // `panelMaxPct`; toggling off restores `preMaxHeightPct` (the height the
+  // user last dragged to). A manual drag-resize exits maximize.
+  maximized: boolean
+  preMaxHeightPct: number
+
   // In-memory tab state
   sessions: Record<string, TerminalSessionRow>
   activeSessionIdByProject: Record<string, string | null>
@@ -129,12 +174,25 @@ export interface TerminalStoreState {
   /** Split orientation per group. Defaults to "row". */
   splitDirection: Record<string, "row" | "col">
 
+  /**
+   * Snapshot hydrated from storage but not yet applied. Keeping it separate
+   * prevents incremental PTY registration from overwriting the complete saved
+   * layout before reattachment finishes.
+   */
+  pendingReloadLayout: TerminalReloadLayout | null
+
   // Mutations
   setPanelOpen: (open: boolean) => void
   togglePanel: () => void
   setPanelHeight: (pct: number) => void
+  setHostState: (state: TerminalHostState, message?: string | null) => void
+  /** Snap to full height (or restore the pre-maximize height). No-op semantics live in the impl. */
+  toggleMaximized: () => void
 
-  registerSession: (info: SessionInfo, opts?: { title?: string; agentSpawner?: string }) => void
+  registerSession: (
+    info: SessionInfo,
+    opts?: { title?: string; agentSpawner?: string; agentSpawnerMessageId?: string }
+  ) => void
   removeSession: (id: string) => void
   setSessionStatus: (id: string, status: TerminalTabStatus) => void
   setSessionExit: (id: string, exitCode: number | null) => void
@@ -170,6 +228,9 @@ export interface TerminalStoreState {
   panesForGroup: (anchorOrPaneId: string) => string[]
   /** Tab list for `projectId` — group anchors only (split members hidden), sorted by createdAt asc. */
   tabsForProject: (projectId: string | null) => TerminalSessionRow[]
+
+  /** Apply the pending reload snapshot to currently registered PTYs and discard stale ids. */
+  restorePersistedLayout: () => void
 
   reset: () => void
 }
@@ -209,24 +270,118 @@ function isGroupMember(sessionId: string, splitPanes: Record<string, string[]>):
   return false
 }
 
+function captureReloadLayout(
+  state: Pick<
+    TerminalStoreState,
+    | "sessions"
+    | "splitPanes"
+    | "focusedPaneByAnchor"
+    | "splitDirection"
+    | "activeSessionIdByProject"
+  >
+): TerminalReloadLayout {
+  const customTitles: Record<string, string> = {}
+  const controllerBySession: Record<string, string> = {}
+  for (const row of Object.values(state.sessions)) {
+    if (row.customTitle) customTitles[row.id] = row.customTitle
+    if (row.controllerId) controllerBySession[row.id] = row.controllerId
+  }
+  return {
+    splitPanes: Object.fromEntries(
+      Object.entries(state.splitPanes).map(([anchor, members]) => [anchor, [...members]])
+    ),
+    focusedPaneByAnchor: { ...state.focusedPaneByAnchor },
+    splitDirection: { ...state.splitDirection },
+    activeSessionIdByProject: { ...state.activeSessionIdByProject },
+    customTitles,
+    stableHostSessionIds: Object.values(state.sessions)
+      .filter((row) => !!row.hostId)
+      .map((row) => row.id),
+    controllerBySession,
+  }
+}
+
+function normalizeStringMap(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {}
+  const result: Record<string, string> = {}
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry === "string") result[key] = entry
+  }
+  return result
+}
+
+/** Treat localStorage as an untrusted boundary: malformed entries degrade to an empty snapshot. */
+function normalizeReloadLayout(value: unknown): TerminalReloadLayout | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null
+  const raw = value as Record<string, unknown>
+  const rawSplit = raw.splitPanes
+  const splitPanes: Record<string, string[]> = {}
+  if (rawSplit && typeof rawSplit === "object" && !Array.isArray(rawSplit)) {
+    for (const [anchor, members] of Object.entries(rawSplit)) {
+      if (Array.isArray(members)) {
+        splitPanes[anchor] = members.filter(
+          (member): member is string => typeof member === "string"
+        )
+      }
+    }
+  }
+
+  const rawDirections = normalizeStringMap(raw.splitDirection)
+  const splitDirection: Record<string, "row" | "col"> = {}
+  for (const [anchor, direction] of Object.entries(rawDirections)) {
+    if (direction === "row" || direction === "col") splitDirection[anchor] = direction
+  }
+
+  const rawActive = raw.activeSessionIdByProject
+  const activeSessionIdByProject: Record<string, string | null> = {}
+  if (rawActive && typeof rawActive === "object" && !Array.isArray(rawActive)) {
+    for (const [projectId, sessionId] of Object.entries(rawActive)) {
+      if (typeof sessionId === "string" || sessionId === null) {
+        activeSessionIdByProject[projectId] = sessionId
+      }
+    }
+  }
+
+  return {
+    splitPanes,
+    focusedPaneByAnchor: normalizeStringMap(raw.focusedPaneByAnchor),
+    splitDirection,
+    activeSessionIdByProject,
+    customTitles: normalizeStringMap(raw.customTitles),
+    stableHostSessionIds: Array.isArray(raw.stableHostSessionIds)
+      ? raw.stableHostSessionIds.filter((id): id is string => typeof id === "string")
+      : [],
+    controllerBySession: normalizeStringMap(raw.controllerBySession),
+  }
+}
+
 export const useTerminalStore = create<TerminalStoreState>()(
-  persist(
+  persist<TerminalStoreState, [], [], TerminalPersistedState>(
     (set, get) => ({
       ...TERMINAL_LAYOUT_DEFAULTS,
+      hostState: "online",
+      hostStateMessage: null,
+      maximized: false,
+      preMaxHeightPct: TERMINAL_LAYOUT_DEFAULTS.panelHeightPct,
       sessions: {},
       activeSessionIdByProject: {},
       splitPanes: {},
       focusedPaneByAnchor: {},
       splitDirection: {},
+      pendingReloadLayout: null,
 
       setPanelOpen: (open) => set({ panelOpen: open }),
 
       togglePanel: () => set((s) => ({ panelOpen: !s.panelOpen })),
 
+      setHostState: (hostState, hostStateMessage = null) => set({ hostState, hostStateMessage }),
+
       setPanelHeight: (pct) => {
         const { panelMinPct, panelMaxPct } = TERMINAL_LAYOUT_BOUNDS
         const clamped = clamp(pct, panelMinPct, panelMaxPct)
-        set({ panelHeightPct: clamped })
+        // A manual resize (drag / arrow keys) exits the maximized state so the
+        // toggle button reads "maximize" again and won't clobber the new size.
+        set({ panelHeightPct: clamped, maximized: false })
         if (pendingFlush) clearTimeout(pendingFlush)
         pendingFlush = setTimeout(() => {
           pendingFlush = null
@@ -234,9 +389,23 @@ export const useTerminalStore = create<TerminalStoreState>()(
         }, TERMINAL_LAYOUT_PERSIST_DEBOUNCE_MS)
       },
 
+      toggleMaximized: () => {
+        const { panelMaxPct } = TERMINAL_LAYOUT_BOUNDS
+        const s = get()
+        if (s.maximized) {
+          // Restore the height the user last dragged to (clamped defensively).
+          const restore = clamp(s.preMaxHeightPct, TERMINAL_LAYOUT_BOUNDS.panelMinPct, panelMaxPct)
+          set({ panelHeightPct: restore, maximized: false })
+        } else {
+          set({ preMaxHeightPct: s.panelHeightPct, panelHeightPct: panelMaxPct, maximized: true })
+        }
+      },
+
       registerSession: (info, opts = {}) => {
         const row: TerminalSessionRow = {
           id: info.id,
+          hostId: info.hostId ?? null,
+          controllerId: info.currentController ?? null,
           projectId: info.projectId,
           extensionId: info.extensionId,
           title: opts.title ?? makeTitle(info),
@@ -249,6 +418,7 @@ export const useTerminalStore = create<TerminalStoreState>()(
           createdAt: Date.now(),
           agentTrusted: false,
           agentSpawner: opts.agentSpawner ?? null,
+          agentSpawnerMessageId: opts.agentSpawnerMessageId ?? null,
           promptBoundaries: [],
           lastCommands: [],
           historyOpen: false,
@@ -515,28 +685,127 @@ export const useTerminalStore = create<TerminalStoreState>()(
           .sort((a, b) => a.createdAt - b.createdAt)
       },
 
+      restorePersistedLayout: () => {
+        set((s) => {
+          const saved = normalizeReloadLayout(s.pendingReloadLayout)
+          if (!saved) return { pendingReloadLayout: null }
+
+          const splitPanes: Record<string, string[]> = {}
+          const focusedPaneByAnchor: Record<string, string> = {}
+          const splitDirection: Record<string, "row" | "col"> = {}
+          const claimed = new Set<string>()
+
+          for (const [anchor, candidates] of Object.entries(saved.splitPanes)) {
+            const anchorRow = s.sessions[anchor]
+            if (!anchorRow || claimed.has(anchor)) continue
+            const members: string[] = []
+            for (const paneId of candidates) {
+              const pane = s.sessions[paneId]
+              if (
+                paneId !== anchor &&
+                pane &&
+                pane.projectId === anchorRow.projectId &&
+                !claimed.has(paneId) &&
+                !members.includes(paneId)
+              ) {
+                members.push(paneId)
+              }
+            }
+            if (members.length === 0) continue
+
+            claimed.add(anchor)
+            for (const paneId of members) claimed.add(paneId)
+            splitPanes[anchor] = members
+            splitDirection[anchor] = saved.splitDirection[anchor] ?? "row"
+            const savedFocus = saved.focusedPaneByAnchor[anchor]
+            focusedPaneByAnchor[anchor] =
+              savedFocus === anchor || members.includes(savedFocus) ? savedFocus : anchor
+          }
+
+          const sessions = { ...s.sessions }
+          for (const [id, row] of Object.entries(sessions)) {
+            const title = saved.customTitles[id]?.trim()
+            const savedController = saved.controllerBySession[id]
+            sessions[id] = {
+              ...row,
+              customTitle: title ? title : null,
+              controllerId:
+                row.controllerId ??
+                (row.hostId && saved.stableHostSessionIds.includes(id)
+                  ? (savedController ?? null)
+                  : null),
+            }
+          }
+
+          const activeSessionIdByProject: Record<string, string | null> = {}
+          const projectIds = new Set(Object.values(sessions).map((row) => row.projectId ?? ""))
+          for (const projectId of projectIds) {
+            const savedActive = saved.activeSessionIdByProject[projectId]
+            const savedRow = savedActive ? sessions[savedActive] : undefined
+            if (
+              savedActive &&
+              savedRow &&
+              (savedRow.projectId ?? "") === projectId &&
+              !isGroupMember(savedActive, splitPanes)
+            ) {
+              activeSessionIdByProject[projectId] = savedActive
+              continue
+            }
+
+            const current = s.activeSessionIdByProject[projectId]
+            const currentAnchor = current ? resolveAnchor(current, splitPanes) : null
+            const currentRow = currentAnchor ? sessions[currentAnchor] : undefined
+            if (currentAnchor && currentRow && (currentRow.projectId ?? "") === projectId) {
+              activeSessionIdByProject[projectId] = currentAnchor
+              continue
+            }
+
+            const fallback = Object.values(sessions)
+              .filter((row) => (row.projectId ?? "") === projectId)
+              .filter((row) => !isGroupMember(row.id, splitPanes))
+              .sort((a, b) => a.createdAt - b.createdAt)
+              .at(-1)
+            activeSessionIdByProject[projectId] = fallback?.id ?? null
+          }
+
+          return {
+            sessions,
+            splitPanes,
+            focusedPaneByAnchor,
+            splitDirection,
+            activeSessionIdByProject,
+            pendingReloadLayout: null,
+          }
+        })
+      },
+
       reset: () => {
         if (pendingFlush) clearTimeout(pendingFlush)
         pendingFlush = null
         set({
           ...TERMINAL_LAYOUT_DEFAULTS,
+          hostState: "online",
+          hostStateMessage: null,
+          maximized: false,
+          preMaxHeightPct: TERMINAL_LAYOUT_DEFAULTS.panelHeightPct,
           sessions: {},
           activeSessionIdByProject: {},
           splitPanes: {},
           focusedPaneByAnchor: {},
           splitDirection: {},
+          pendingReloadLayout: null,
         })
       },
     }),
     {
       name: "cognia-terminal-layout",
-      // v2 drops `panelOpen` from the persisted shell so the dock always
-      // starts closed; only the user-tuned height carries across launches.
-      version: 2,
-      migrate: (oldState: unknown, _oldVersion: number) => {
-        const prev = oldState as { panelHeightPct?: unknown } | null | undefined
+      // v4 records stable host-session/controller layout metadata. Live host
+      // snapshots remain authoritative; this only bridges the reload window.
+      version: 4,
+      migrate: (oldState: unknown, oldVersion: number) => {
+        const prev = oldState as
+          { panelHeightPct?: unknown; pendingReloadLayout?: unknown } | null | undefined
         return {
-          ...TERMINAL_LAYOUT_DEFAULTS,
           panelHeightPct:
             typeof prev?.panelHeightPct === "number"
               ? clamp(
@@ -545,14 +814,15 @@ export const useTerminalStore = create<TerminalStoreState>()(
                   TERMINAL_LAYOUT_BOUNDS.panelMaxPct
                 )
               : TERMINAL_LAYOUT_DEFAULTS.panelHeightPct,
-          sessions: {},
-          activeSessionIdByProject: {},
+          pendingReloadLayout:
+            oldVersion >= 3 ? normalizeReloadLayout(prev?.pendingReloadLayout) : null,
         }
       },
-      // Only persist the dock height — `panelOpen` intentionally resets to
-      // closed on every launch, and session state is in-memory only.
+      // `panelOpen` intentionally resets to closed. While reattaching, retain
+      // the complete pending snapshot; otherwise capture the current live layout.
       partialize: (state) => ({
         panelHeightPct: state.panelHeightPct,
+        pendingReloadLayout: state.pendingReloadLayout ?? captureReloadLayout(state),
       }),
     }
   )

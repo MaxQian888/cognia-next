@@ -9,7 +9,7 @@ import {
   exportToPlainText,
   type RichExportData,
 } from "./rich-markdown"
-import type { ChatSession, StoredMessage } from "@/lib/claude/types"
+import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 
 const session: ChatSession = {
   id: "s1",
@@ -228,7 +228,7 @@ describe("exportToRichMarkdown — additional rendering branches", () => {
       ],
       exportedAt: data.exportedAt,
     })
-    expect(md).toContain("📎 [a.png](https://files/a.png)")
+    expect(md).toContain("![a.png](https://files/a.png)")
     expect(md).toContain("📎 noLink.txt")
     expect(md).toContain("📎 image/png")
   })

@@ -14,6 +14,7 @@ import type {
 } from "@/types/agent/external-agent"
 import { nanoid } from "nanoid"
 import { findExternalAgentSurfaceByPresetId } from "./ecosystem-adapters"
+import { checkExternalAgentCommandExists } from "@/lib/native/external-agent"
 
 // ============================================================================
 // Preset Types
@@ -22,7 +23,21 @@ import { findExternalAgentSurfaceByPresetId } from "./ecosystem-adapters"
 /**
  * Available external agent presets
  */
-export type ExternalAgentPresetId = "codex" | "claude-code" | "gemini-cli" | "cursor-cli" | "custom"
+export type ExternalAgentPresetId =
+  | "codex"
+  | "codex-app-server"
+  | "claude-code"
+  | "gemini-cli"
+  | "cursor-cli"
+  | "copilot-cli"
+  | "kiro"
+  | "qwen-code"
+  | "pi"
+  | "droid"
+  | "opencode-server"
+  | "opencode-remote"
+  | "opencode-v2-preview"
+  | "custom"
 
 /**
  * Preset configuration definition
@@ -46,6 +61,12 @@ export interface ExternalAgentPresetConfig {
   network?: {
     endpoint: string
   }
+  /**
+   * Extra metadata merged into the materialized agent config. Used by the
+   * OpenCode presets to carry `autoSpawnServer` / `port` so a single preset
+   * pick produces a runnable auto-spawn config.
+   */
+  metadata?: Record<string, unknown>
   /** Hint for required environment variables */
   envVarHint?: string
   /** Setup hint for non-env based prerequisites */
@@ -102,14 +123,74 @@ function buildPresetConfig(
   }
 }
 
+/**
+ * OpenCode is a protocol (HTTP + SSE via `@opencode-ai/sdk`), not an ecosystem
+ * product surface, so these presets are authored as literals rather than
+ * derived from `buildPresetConfig`. The "server" preset auto-spawns
+ * `opencode serve` on desktop; the "remote" preset connects to an
+ * already-running server endpoint.
+ */
+const OPENCODE_SERVER_PRESET: ExternalAgentPresetConfig = {
+  name: "OpenCode (auto-spawn)",
+  description: "Launch a local `opencode serve` process and connect to it (desktop only).",
+  protocol: "opencode",
+  transport: "sse",
+  // `spawnServer` in opencode-client.ts already prepends "serve" (plus
+  // --hostname/--port); keep args empty so the CLI doesn't receive a duplicate
+  // positional "serve" argument.
+  process: { command: "opencode", args: [] },
+  metadata: { autoSpawnServer: true },
+  setupHint: "Requires the OpenCode CLI on PATH and the Cognia desktop app.",
+  docsUrl: "https://opencode.ai/docs/server/",
+  supportTier: "executable",
+  defaultPermissionMode: "default",
+  tags: ["opencode", "sdk", "local"],
+}
+
+const OPENCODE_REMOTE_PRESET: ExternalAgentPresetConfig = {
+  name: "OpenCode (remote server)",
+  description: "Connect to an already-running OpenCode server over HTTP + SSE.",
+  protocol: "opencode",
+  transport: "sse",
+  network: { endpoint: "http://127.0.0.1:4096" },
+  setupHint: "Start a server with `opencode serve` (optionally OPENCODE_SERVER_PASSWORD).",
+  docsUrl: "https://opencode.ai/docs/server/",
+  supportTier: "executable",
+  defaultPermissionMode: "default",
+  tags: ["opencode", "sdk", "remote"],
+}
+
+const OPENCODE_V2_PREVIEW_PRESET: ExternalAgentPresetConfig = {
+  name: "OpenCode V2 local service (Preview)",
+  description:
+    "Connect to a compatible, already-running OpenCode V2 local service. Cognia never starts or stops it.",
+  protocol: "opencode-v2",
+  transport: "sse",
+  metadata: { preview: true, localServiceDiscovery: true },
+  setupHint: "Beta preview. Start the compatible service yourself with `opencode2 service start`.",
+  docsUrl: "https://opencode.ai/v2/docs/build/client",
+  supportTier: "executable",
+  defaultPermissionMode: "default",
+  tags: ["opencode", "v2", "beta", "preview", "local-service"],
+}
+
 export const EXTERNAL_AGENT_PRESETS: Record<
   ExternalAgentPresetId,
   ExternalAgentPresetConfig | null
 > = {
   codex: buildPresetConfig("codex"),
+  "codex-app-server": buildPresetConfig("codex-app-server"),
   "claude-code": buildPresetConfig("claude-code"),
   "gemini-cli": buildPresetConfig("gemini-cli"),
   "cursor-cli": buildPresetConfig("cursor-cli"),
+  "copilot-cli": buildPresetConfig("copilot-cli"),
+  kiro: buildPresetConfig("kiro"),
+  "qwen-code": buildPresetConfig("qwen-code"),
+  pi: buildPresetConfig("pi"),
+  droid: buildPresetConfig("droid"),
+  "opencode-server": OPENCODE_SERVER_PRESET,
+  "opencode-remote": OPENCODE_REMOTE_PRESET,
+  "opencode-v2-preview": OPENCODE_V2_PREVIEW_PRESET,
   custom: null,
 }
 
@@ -130,6 +211,8 @@ export const EXTERNAL_AGENT_PRESETS: Record<
 // fallback when the plugin is disabled.
 // ============================================================================
 
+import { reportRegistryConflict } from "@/lib/plugin/contracts/conflict-reporter"
+
 interface RegisteredPreset {
   config: ExternalAgentPresetConfig
   pluginId?: string
@@ -148,6 +231,20 @@ export function registerPreset(
   opts?: { pluginId?: string }
 ): RegisteredPreset | undefined {
   const previous = dynamicPresets.get(id)
+  // W4.2 first-wins-cross-plugin: a DIFFERENT plugin re-using a dynamic id is
+  // rejected (the incumbent wins) so plugin B can't hijack plugin A's preset
+  // and B's disable can't drop A's entry. Same-plugin refresh (hot reload)
+  // and static-id shadowing (dynamic-over-static, documented above) keep
+  // their existing semantics.
+  if (previous && previous.pluginId !== opts?.pluginId) {
+    reportRegistryConflict({
+      pluginId: opts?.pluginId ?? "unknown",
+      attemptedId: id,
+      registry: "external-agent-preset",
+      winnerPluginId: previous.pluginId,
+    })
+    return previous
+  }
   dynamicPresets.set(id, { config, pluginId: opts?.pluginId })
   return previous
 }
@@ -207,6 +304,21 @@ export function listDynamicPresetEntries(): Array<{
 // ============================================================================
 // Preset Utilities
 // ============================================================================
+
+/**
+ * The builtin *executable* external-agent preset ids — every static preset
+ * except the `custom` sentinel and service-discovered preview integrations.
+ * These are exactly the ids a teammate `runtime` or a subagent `externalPresetId`
+ * may name; plugin-contributed presets stay outside this closed set and are
+ * reached through the capability overlay instead. Derived from the record so it
+ * can never drift from `EXTERNAL_AGENT_PRESETS`.
+ */
+export const BUILTIN_EXECUTABLE_PRESET_IDS = (
+  Object.keys(EXTERNAL_AGENT_PRESETS) as ExternalAgentPresetId[]
+).filter(
+  (id): id is Exclude<ExternalAgentPresetId, "custom" | "opencode-v2-preview"> =>
+    id !== "custom" && id !== "opencode-v2-preview" && EXTERNAL_AGENT_PRESETS[id] !== null
+)
 
 /**
  * Get all available preset IDs (excluding `custom`). The result merges the
@@ -282,6 +394,7 @@ export function createAgentFromPreset(
       ecosystemSurfaceId: preset.surfaceId,
       ecosystemSupportTier: preset.supportTier,
       ecosystemDocsUrl: preset.docsUrl,
+      ...preset.metadata,
       ...overrides?.metadata,
     },
     createdAt: now,
@@ -304,6 +417,26 @@ export function isFromPreset(config: ExternalAgentConfig): string | null {
     return preset
   }
   return null
+}
+
+/**
+ * Pick the preferred *executable* Codex preset. The native `codex app-server`
+ * runtime is preferred when the official `codex` CLI is on PATH; otherwise we
+ * fall back to the ACP shim (`codex`, run via `npx` — no local install needed).
+ *
+ * Drives the gallery's "Recommended" hint so adding Codex automatically prefers
+ * the first-party protocol when it is available, and degrades gracefully when
+ * it isn't. Returns `"codex"` on any detection failure (the safe default).
+ */
+export async function resolvePreferredCodexExecutablePresetId(): Promise<
+  "codex" | "codex-app-server"
+> {
+  try {
+    const hasCodexCli = await checkExternalAgentCommandExists("codex")
+    return hasCodexCli ? "codex-app-server" : "codex"
+  } catch {
+    return "codex"
+  }
 }
 
 /**

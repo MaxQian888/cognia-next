@@ -1,0 +1,5 @@
+{
+  "answeredVia": "已通过 {provider}（{model}）回应",
+  "fallbackExhausted": "所有回退提供商都失败：{error}",
+  "retryingWithFallback": "提供商失败 — 正在改用 {provider} 重试…"
+}

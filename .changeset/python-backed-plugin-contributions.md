@@ -1,0 +1,5 @@
+---
+"cognia-next": minor
+---
+
+Python plugins can now own runtime contributions, not just tools and hooks. Previously a pure-Python plugin could _declare_ an OCR provider, AI provider, connector or workspace backend in its manifest, but the host only ever loaded a JavaScript factory for those — so the declaration silently did nothing (and `cognia plugin lint` rejected the plugin outright). A Python plugin now implements these with a decorated class and the host routes every call into its Python subprocess: OCR providers, AI providers, workspace backends, routing strategies, deployment filters, context providers, session importers, protocol adapters and external-agent adapters are fully supported, while connectors, chat middleware and terminal completion are available behind an experimental flag that ships off. Streaming results and connector inbound events flow both directions. The capability contract now records, per capability, whether Python can actually execute it, so the plugin linter errors on genuinely impossible combinations (a React tree view can never be Python) and warns on the experimental ones instead of failing late at runtime.

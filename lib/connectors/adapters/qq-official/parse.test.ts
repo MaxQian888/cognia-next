@@ -89,6 +89,111 @@ describe("parseQQDispatch", () => {
     expect(out!.channel.kind).toBe("private")
   })
 
+  it("stamps the local receipt time on the conversationRef for the passive window", () => {
+    const before = Date.now()
+    const out = parseQQDispatch(
+      ADAPTER,
+      SELF,
+      dispatch("C2C_MESSAGE_CREATE", {
+        id: "m-ts",
+        content: "hi",
+        author: { user_openid: "USER_OPENID" },
+      })
+    )
+    const after = Date.now()
+    const receivedAt = out!.conversationRef.receivedAt as number
+    expect(receivedAt).toBeGreaterThanOrEqual(before)
+    expect(receivedAt).toBeLessThanOrEqual(after)
+  })
+
+  it("maps image attachments to image segments with a plainText placeholder", () => {
+    const out = parseQQDispatch(
+      ADAPTER,
+      SELF,
+      dispatch("GROUP_AT_MESSAGE_CREATE", {
+        id: "m-img",
+        content: "",
+        group_openid: "GO",
+        author: { member_openid: "MO" },
+        attachments: [
+          {
+            url: "gchat.qpic.cn/gchatpic/pic.jpg",
+            content_type: "image/jpeg",
+            filename: "pic.jpg",
+            size: 1234,
+            width: 640,
+            height: 480,
+          },
+        ],
+      })
+    )
+    expect(out!.segments).toEqual([
+      {
+        type: "image",
+        url: "https://gchat.qpic.cn/gchatpic/pic.jpg",
+        alt: "pic.jpg",
+        mimeType: "image/jpeg",
+        width: 640,
+        height: 480,
+      },
+    ])
+    // An image-only message no longer reaches the AI loop as empty text.
+    expect(out!.plainText).toContain("[image]")
+  })
+
+  it("maps non-image attachments to file segments and keeps the text segment first", () => {
+    const out = parseQQDispatch(
+      ADAPTER,
+      SELF,
+      dispatch("C2C_MESSAGE_CREATE", {
+        id: "m-file",
+        content: "see attached",
+        author: { user_openid: "UO" },
+        attachments: [
+          {
+            url: "https://files.example/doc.pdf",
+            content_type: "application/pdf",
+            filename: "doc.pdf",
+            size: 999,
+          },
+        ],
+      })
+    )
+    expect(out!.segments).toEqual([
+      { type: "text", text: "see attached" },
+      {
+        type: "file",
+        url: "https://files.example/doc.pdf",
+        name: "doc.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 999,
+      },
+    ])
+    expect(out!.plainText).toContain("[file:doc.pdf]")
+  })
+
+  it("skips attachments without a url and defaults missing file metadata", () => {
+    const out = parseQQDispatch(
+      ADAPTER,
+      SELF,
+      dispatch("GROUP_AT_MESSAGE_CREATE", {
+        id: "m-att",
+        content: "",
+        group_openid: "GO",
+        attachments: [{ content_type: "image/png" }, { url: "cdn.example/blob" }],
+      })
+    )
+    expect(out!.segments).toEqual([
+      {
+        type: "file",
+        url: "https://cdn.example/blob",
+        name: "attachment",
+        mimeType: "application/octet-stream",
+        sizeBytes: 0,
+      },
+    ])
+  })
+
   it("returns null for unknown events or missing ids", () => {
     expect(parseQQDispatch(ADAPTER, SELF, dispatch("READY", { id: "x" }))).toBeNull()
     expect(

@@ -28,11 +28,35 @@ jest.mock("@/lib/subscription/anthropic/hooks", () => ({
   }),
 }))
 
+// Mirror the real hook's precedence (custom profile > credential email
+// prefix) against the same mocked credential ref, plus a profile ref the
+// tests can flip. The full precedence matrix is covered by the hook's own
+// suite (`lib/profile/use-user-profile.test.ts`).
+const profileRef: { current: { displayName?: string; avatarDataUrl?: string } } = { current: {} }
+
+jest.mock("@/lib/profile/use-user-profile", () => ({
+  useUserProfile: () => {
+    const custom = profileRef.current.displayName?.trim()
+    const email = credentialRef.current?.email
+    const derived = email && email.includes("@") ? email.split("@")[0] : null
+    return {
+      profile: profileRef.current,
+      loaded: true,
+      resolvedDisplayName: custom || derived || null,
+      resolvedAvatarUrl: profileRef.current.avatarDataUrl || null,
+      email: email ?? "",
+      credentialLoading: false,
+      save: jest.fn(async () => undefined),
+    }
+  },
+}))
+
 import { AccountCard } from "./account-card"
 
 beforeEach(() => {
   credentialRef.current = null
   usageRef.current = null
+  profileRef.current = {}
 })
 
 const PRO_CRED: AnthropicCredentialData = {
@@ -62,6 +86,30 @@ describe("<AccountCard />", () => {
     expect(screen.getByTestId("account-card-name")).toHaveTextContent("ada")
     expect(screen.getByTestId("account-card-plan")).toHaveTextContent("PRO")
     expect(screen.getByTestId("account-card-email")).toHaveTextContent("ada@example.com")
+  })
+
+  it("prefers the custom profile name over the credential email prefix", () => {
+    credentialRef.current = PRO_CRED
+    profileRef.current = { displayName: "Custom Max" }
+    render(<AccountCard />)
+    expect(screen.getByTestId("account-card-name")).toHaveTextContent("Custom Max")
+    // Plan + email stay credential-driven.
+    expect(screen.getByTestId("account-card-plan")).toHaveTextContent("PRO")
+    expect(screen.getByTestId("account-card-email")).toHaveTextContent("ada@example.com")
+  })
+
+  it("renders the custom avatar image when set, initials otherwise", () => {
+    credentialRef.current = PRO_CRED
+    profileRef.current = { avatarDataUrl: "data:image/webp;base64,AA" }
+    const { rerender } = render(<AccountCard />)
+    expect(screen.getByTestId("account-card-avatar-img")).toHaveAttribute(
+      "src",
+      "data:image/webp;base64,AA"
+    )
+
+    profileRef.current = {}
+    rerender(<AccountCard />)
+    expect(screen.queryByTestId("account-card-avatar-img")).toBeNull()
   })
 
   it("links to /me/subscription", () => {

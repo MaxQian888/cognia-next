@@ -9,7 +9,11 @@
 
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
-import type { PlatformKind } from "@/types/connectors/platform-kind"
+import {
+  isPlatformKind,
+  type BuiltInPlatformKind,
+  type PlatformKind,
+} from "@/types/connectors/platform-kind"
 import { PlatformIcon } from "@/components/connectors/platform-icons"
 
 interface PlatformConfig {
@@ -17,7 +21,7 @@ interface PlatformConfig {
   colorClass: string
 }
 
-const PLATFORM_CONFIG: Record<PlatformKind, PlatformConfig> = {
+const PLATFORM_CONFIG: Record<BuiltInPlatformKind, PlatformConfig> = {
   telegram: { label: "TG", colorClass: "text-sky-500" },
   discord: { label: "DC", colorClass: "text-indigo-500" },
   slack: { label: "SL", colorClass: "text-purple-500" },
@@ -33,7 +37,6 @@ const PLATFORM_CONFIG: Record<PlatformKind, PlatformConfig> = {
   kook: { label: "KK", colorClass: "text-violet-500" },
   line: { label: "LN", colorClass: "text-green-400" },
   mattermost: { label: "MM", colorClass: "text-blue-700" },
-  github: { label: "GH", colorClass: "text-slate-700" },
 }
 
 interface PlatformBadgeProps {
@@ -44,10 +47,12 @@ interface PlatformBadgeProps {
 }
 
 export function PlatformBadge({ platform, className, iconOnly = false }: PlatformBadgeProps) {
-  const config = PLATFORM_CONFIG[platform] ?? {
-    label: platform.slice(0, 2).toUpperCase(),
-    colorClass: "text-muted-foreground",
-  }
+  const config = isPlatformKind(platform)
+    ? PLATFORM_CONFIG[platform]
+    : {
+        label: platform.slice(0, 2).toUpperCase(),
+        colorClass: "text-muted-foreground",
+      }
 
   return (
     <Badge

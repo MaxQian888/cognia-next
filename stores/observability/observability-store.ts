@@ -14,9 +14,12 @@
  */
 
 import { create } from "zustand"
-import { persist, createJSONStorage } from "zustand/middleware"
+import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 import type { RangePreset } from "@/lib/observability/time-range"
 import type { TraceFilters } from "@/lib/observability/filters"
+import type { ThresholdMetric, ThresholdOverrides } from "@/lib/observability/thresholds"
+import type { DashboardConfig } from "@/lib/observability/dashboard-config"
 
 export type Breakpoint = "lg" | "md" | "sm"
 
@@ -48,6 +51,10 @@ interface ObservabilityState {
   refreshMs: RefreshMs
   filters: TraceFilters
   editMode: boolean
+  /** User overrides for the shipped threshold defaults. */
+  thresholds: ThresholdOverrides
+  /** Panel ids the user has hidden from the grid. */
+  hiddenPanels: string[]
 
   setLayouts: (layouts: PanelLayouts) => void
   resetLayouts: () => void
@@ -56,6 +63,12 @@ interface ObservabilityState {
   setRefreshMs: (ms: RefreshMs) => void
   setFilters: (filters: TraceFilters) => void
   setEditMode: (editMode: boolean) => void
+  setThreshold: (metric: ThresholdMetric, value: { warn: number; crit: number }) => void
+  resetThresholds: () => void
+  setHiddenPanels: (ids: string[]) => void
+  togglePanelVisibility: (id: string) => void
+  /** Apply an imported/portable config, replacing the persisted view state. */
+  importConfig: (cfg: DashboardConfig) => void
 }
 
 export const useObservabilityStore = create<ObservabilityState>()(
@@ -68,6 +81,8 @@ export const useObservabilityStore = create<ObservabilityState>()(
       refreshMs: 10_000,
       filters: {},
       editMode: false,
+      thresholds: {},
+      hiddenPanels: [],
 
       setLayouts: (layouts) => set({ layouts }),
       resetLayouts: () => set({ layouts: null }),
@@ -77,10 +92,31 @@ export const useObservabilityStore = create<ObservabilityState>()(
       setRefreshMs: (ms) => set({ refreshMs: ms }),
       setFilters: (filters) => set({ filters }),
       setEditMode: (editMode) => set({ editMode }),
+      setThreshold: (metric, value) =>
+        set((s) => ({ thresholds: { ...s.thresholds, [metric]: value } })),
+      resetThresholds: () => set({ thresholds: {} }),
+      setHiddenPanels: (ids) => set({ hiddenPanels: ids }),
+      togglePanelVisibility: (id) =>
+        set((s) => ({
+          hiddenPanels: s.hiddenPanels.includes(id)
+            ? s.hiddenPanels.filter((p) => p !== id)
+            : [...s.hiddenPanels, id],
+        })),
+      importConfig: (cfg) =>
+        set({
+          layouts: cfg.layouts,
+          hiddenPanels: cfg.hiddenPanels,
+          thresholds: cfg.thresholds,
+          rangePreset: cfg.rangePreset,
+          refreshMs: cfg.refreshMs,
+          filters: cfg.filters,
+          customSince: cfg.rangePreset === "custom" ? (cfg.customSince ?? null) : null,
+          customUntil: cfg.rangePreset === "custom" ? (cfg.customUntil ?? null) : null,
+        }),
     }),
     {
       name: "cognia-observability",
-      storage: createJSONStorage(() => localStorage),
+      storage: persistLocalStorage(),
       // editMode stays transient — see file header.
       partialize: (s) => ({
         layouts: s.layouts,
@@ -89,6 +125,8 @@ export const useObservabilityStore = create<ObservabilityState>()(
         customUntil: s.customUntil,
         refreshMs: s.refreshMs,
         filters: s.filters,
+        thresholds: s.thresholds,
+        hiddenPanels: s.hiddenPanels,
       }),
     }
   )

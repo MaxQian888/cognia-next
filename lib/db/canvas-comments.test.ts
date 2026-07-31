@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for lib/db/canvas-comments.ts (schema v11+ canvasComments table).
  */
@@ -50,8 +51,8 @@ describe("canvas-comments CRUD", () => {
     expect(c.id).toBeDefined()
     expect(c.createdAt).toBeInstanceOf(Date)
     expect(c.reactions).toEqual([])
-    const persisted = await getDb().canvasComments.get(c.id)
-    expect(persisted?.documentId).toBe("doc_1")
+    const persisted = await getDb().contextComments.get(c.id)
+    expect(persisted?.resourceId).toBe("doc_1")
   })
 
   it("listForDocument returns oldest-first", async () => {
@@ -152,12 +153,12 @@ describe("canvas-comments CRUD", () => {
 
   it("addReaction is a no-op when the comment is missing", async () => {
     await addReaction("missing_id", "+1", "user_a")
-    expect(await getDb().canvasComments.count()).toBe(0)
+    expect(await getDb().contextComments.count()).toBe(0)
   })
 
   it("removeReaction is a no-op when the comment is missing", async () => {
     await removeReaction("missing_id", "+1", "user_a")
-    expect(await getDb().canvasComments.count()).toBe(0)
+    expect(await getDb().contextComments.count()).toBe(0)
   })
 
   it("replyToComment inherits range, sets parentId, throws if parent missing", async () => {

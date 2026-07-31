@@ -2,7 +2,7 @@
  * E2E: workflow library filters by name when the search box is used.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../../helpers/db-reset"
 import { seedWorkflow } from "../../helpers/seed-workflow"
 
@@ -18,6 +18,10 @@ test.describe("workflow editor — library search", () => {
     await seedWorkflow(page, "ai-prompt")
 
     await page.goto("/workflows")
+    await expect(page.locator('[data-slot="feature-page-header"]')).toHaveAttribute(
+      "data-variant",
+      "management"
+    )
     const search = page.getByPlaceholder(/search/i).first()
     await expect(search).toBeVisible()
     await search.fill("Branch")

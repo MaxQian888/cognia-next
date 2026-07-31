@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import Editor, { type OnMount } from "@monaco-editor/react"
 import { useTheme } from "next-themes"
 import { configureMonacoLoader } from "@/lib/canvas/monaco-loader"
@@ -17,6 +17,9 @@ import {
   type MonacoWorkbenchHandle,
 } from "@/lib/editor-workbench/monaco-workbench"
 import type { MonacoLanguage } from "./language-from-path"
+import { LspServerHint } from "@/components/editor/lsp-server-hint"
+import { MonacoDiagnosticsBar } from "@/components/editor/monaco-diagnostics-bar"
+import type { MonacoLike, EditorLike } from "@/hooks/use-monaco-markers"
 
 interface Props {
   value: string
@@ -49,6 +52,8 @@ export function SkillMonacoEditor({
   const { resolvedTheme } = useTheme()
   const handleRef = useRef<MonacoWorkbenchHandle | null>(null)
   const monacoRef = useRef<MonacoNamespace | null>(null)
+  // Captured on mount so the diagnostics bar can read this editor's markers.
+  const [diag, setDiag] = useState<{ monaco: MonacoLike; editor: EditorLike } | null>(null)
 
   const appearanceColorTheme = useSettingsStore((s) => s.colorTheme)
   const appearanceActiveCustomThemeId = useSettingsStore((s) => s.activeCustomThemeId)
@@ -91,6 +96,10 @@ export function SkillMonacoEditor({
 
   const handleMount: OnMount = (editor, monaco) => {
     monacoRef.current = monaco as unknown as MonacoNamespace
+    setDiag({
+      monaco: monaco as unknown as MonacoLike,
+      editor: editor as unknown as EditorLike,
+    })
     if (!resolvedTheme) {
       // Defer; the effect above will register once next-themes settles.
     } else {
@@ -122,21 +131,27 @@ export function SkillMonacoEditor({
   }
 
   return (
-    <Editor
-      value={value}
-      language={language}
-      theme={COGNIA_ACTIVE_THEME_ID}
-      options={{
-        readOnly,
-        minimap: { enabled: false },
-        fontSize: 13,
-        scrollBeyondLastLine: false,
-        wordWrap: "on",
-        renderWhitespace: "selection",
-      }}
-      onChange={(v) => onChange(v ?? "")}
-      onMount={handleMount}
-      height="100%"
-    />
+    <div className="flex h-full flex-col">
+      <LspServerHint language={language} />
+      <div className="min-h-0 flex-1">
+        <Editor
+          value={value}
+          language={language}
+          theme={COGNIA_ACTIVE_THEME_ID}
+          options={{
+            readOnly,
+            minimap: { enabled: false },
+            fontSize: 13,
+            scrollBeyondLastLine: false,
+            wordWrap: "on",
+            renderWhitespace: "selection",
+          }}
+          onChange={(v) => onChange(v ?? "")}
+          onMount={handleMount}
+          height="100%"
+        />
+      </div>
+      <MonacoDiagnosticsBar monaco={diag?.monaco ?? null} editor={diag?.editor ?? null} />
+    </div>
   )
 }

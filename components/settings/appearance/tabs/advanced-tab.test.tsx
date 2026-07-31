@@ -8,8 +8,13 @@ jest.mock("next-intl", () => ({
     params?.count != null ? `${k}:${params.count}` : k,
 }))
 
+// MonacoLinkCard (rendered at the bottom of the tab) has its own test; stub it
+// so this suite stays focused on the custom-CSS editor.
+jest.mock("../components/monaco-link-card", () => ({ MonacoLinkCard: () => null }))
+
 const setCustomCss = jest.fn()
 const setCustomCssEnabled = jest.fn()
+const save = jest.fn()
 const storeState: { customCss: string; customCssEnabled: boolean } = {
   customCss: "",
   customCssEnabled: false,
@@ -20,8 +25,10 @@ jest.mock("@/stores/settings", () => ({
     selector({
       customCss: storeState.customCss,
       customCssEnabled: storeState.customCssEnabled,
+      customCssScope: "app",
       setCustomCss,
       setCustomCssEnabled,
+      save,
     })
   ),
 }))

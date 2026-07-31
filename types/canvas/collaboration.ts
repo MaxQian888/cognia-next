@@ -124,10 +124,7 @@ export type CollaborationConnectionState =
   | "ended"
 
 export type CanvasCollaborationRecoveryState =
-  | "live"
-  | "local-copy"
-  | "snapshot-only"
-  | "degraded-local"
+  "live" | "local-copy" | "snapshot-only" | "degraded-local"
 
 /**
  * Snapshot of a collaboration session attached to a CanvasDocument.

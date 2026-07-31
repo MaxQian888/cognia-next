@@ -1,0 +1,11 @@
+{
+  "workflow": {
+    "debug": "Diagnose a failing run via the workflow-debugger subagent",
+    "delegate": "Hand off explicitly to one of the four workflow specialists",
+    "explain": "Explain the selected or @-mentioned nodes",
+    "refactor": "Restructure a subgraph via the workflow-refactorer subagent",
+    "run": "Run the workflow (or from a specific step). Requires approval.",
+    "suggest": "Propose one next node to add (no auto-apply)",
+    "validate": "Run local validation and ask the agent to fix any issues"
+  }
+}

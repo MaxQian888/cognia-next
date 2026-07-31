@@ -16,7 +16,7 @@
  * or when no model is determinable. Callers treat `null` as "silently skip".
  */
 
-import type { AppSettings, ChatSession } from "@/lib/claude/types"
+import type { AppSettings, ChatSession } from "@cognia/agent-config-types"
 import { createLlmClient, type LlmClient } from "@/lib/twin/distill/llm"
 import {
   createProviderSettingsSnapshot,
@@ -57,8 +57,7 @@ export function buildRendererLlmClient({
   const snapshot = createProviderSettingsSnapshot({
     defaultProvider: appSettings.defaultProvider,
     providerSettings: appSettings.providerSettings as
-      | Record<string, ProviderSettingsEntry>
-      | undefined,
+      Record<string, ProviderSettingsEntry> | undefined,
     customProviders: appSettings.customProviders as RichCustomProviderEntry[] | undefined,
   })
 
@@ -81,6 +80,11 @@ export function buildRendererLlmClient({
   const model = modelOverride ?? session?.model ?? resolution.model ?? appSettings.defaultModel
   if (!model) return null
 
+  // Plugin-contributed protocol ids (`${pluginId}:${id}`) execute only in the
+  // sidecar's declarative variant adapter — the renderer client has no
+  // executor for them, so utility features degrade gracefully to null.
+  if (!isRendererExecutableProtocol(resolution.protocol)) return null
+
   return createLlmClient({
     // `protocol` (openai | anthropic | google | mistral | cohere) maps 1:1 to
     // createLlmClient's provider family; a custom OpenAI-compatible provider
@@ -89,5 +93,23 @@ export function buildRendererLlmClient({
     model,
     apiKey: resolution.apiKey,
     baseURL: resolution.baseURL,
+    apiFlavor: resolution.apiFlavor,
   })
+}
+
+const RENDERER_EXECUTABLE_PROTOCOLS = new Set([
+  "anthropic",
+  "openai",
+  "azure",
+  "google",
+  "mistral",
+  "cohere",
+] as const)
+
+function isRendererExecutableProtocol(
+  protocol: string
+): protocol is "anthropic" | "openai" | "azure" | "google" | "mistral" | "cohere" {
+  return RENDERER_EXECUTABLE_PROTOCOLS.has(
+    protocol as "anthropic" | "openai" | "azure" | "google" | "mistral" | "cohere"
+  )
 }

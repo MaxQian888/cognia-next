@@ -9,7 +9,11 @@ const Q: BalanceQuery = {
   token: "sk-or-test",
 }
 
-const FIXTURE = JSON.stringify({ data: { total_credits: 50, total_usage: 12.5 } })
+// /api/v1/key shape — works with the ordinary inference key (unlike /credits,
+// which needs a management key).
+const FIXTURE = JSON.stringify({
+  data: { usage: 12.5, limit: 50, limit_remaining: 37.5, is_free_tier: false },
+})
 
 describe("openrouterBalanceAdapter", () => {
   it("matches by providerKey and host", () => {
@@ -19,13 +23,17 @@ describe("openrouterBalanceAdapter", () => {
     expect(a.matches({})).toBe(false)
   })
 
-  it("builds the /credits request", () => {
+  it("builds the /key request (works with the inference key, not /credits)", () => {
     const req = a.request(Q)
-    expect(req.url).toBe("https://openrouter.ai/api/v1/credits")
+    expect(req.url).toBe("https://openrouter.ai/api/v1/key")
+    // The Anthropic relay preset baseUrl ("…/api", no "/v1") resolves the same.
+    expect(a.request({ ...Q, baseUrl: "https://openrouter.ai/api" }).url).toBe(
+      "https://openrouter.ai/api/v1/key"
+    )
     expect(req.headers.Authorization).toBe("Bearer sk-or-test")
   })
 
-  it("parses credits with derived remaining", () => {
+  it("parses usage / limit / limit_remaining", () => {
     const snap = a.parse(200, FIXTURE, Q)
     expect(snap.kind).toBe("credit")
     expect(snap.total).toBe(50)
@@ -35,9 +43,14 @@ describe("openrouterBalanceAdapter", () => {
     expect(snap.currency).toBe("USD")
   })
 
-  it("leaves remaining undefined when a field is missing", () => {
-    const snap = a.parse(200, JSON.stringify({ data: { total_credits: 50 } }), Q)
-    expect(snap.total).toBe(50)
+  it("leaves total/remaining undefined for an uncapped (null limit) key", () => {
+    const snap = a.parse(
+      200,
+      JSON.stringify({ data: { usage: 12.5, limit: null, limit_remaining: null } }),
+      Q
+    )
+    expect(snap.used).toBe(12.5)
+    expect(snap.total).toBeUndefined()
     expect(snap.remaining).toBeUndefined()
   })
 

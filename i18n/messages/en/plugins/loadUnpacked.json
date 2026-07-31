@@ -1,0 +1,6 @@
+{
+  "directoryPickerTitle": "Pick a plugin directory",
+  "installSuccess": "{name} installed from disk.",
+  "label": "Load unpacked",
+  "tauriRequiredError": "Loading local plugins requires the Cognia desktop app."
+}

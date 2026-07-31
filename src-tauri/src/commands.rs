@@ -1,6 +1,6 @@
 use serde::Serialize;
-use tauri::WebviewWindow;
 use tauri::window::Color;
+use tauri::Webview;
 
 #[derive(Debug, thiserror::Error, Serialize)]
 pub enum AppError {
@@ -21,7 +21,7 @@ pub fn greet(name: &str) -> Result<String, AppError> {
 /// Parse a `#RRGGBB` or `#RRGGBBAA` (or unprefixed) hex string into a
 /// `tauri::window::Color` tuple. Used by `set_window_background_color`; kept
 /// pub(crate) so the unit tests in this module can drive it directly without
-/// instantiating a WebviewWindow.
+/// instantiating a Webview.
 pub(crate) fn parse_hex_color(hex: &str) -> Result<Color, AppError> {
     let cleaned = hex.trim().trim_start_matches('#');
     if cleaned.len() != 6 && cleaned.len() != 8 {
@@ -34,8 +34,7 @@ pub(crate) fn parse_hex_color(hex: &str) -> Result<Color, AppError> {
     let b = u8::from_str_radix(&cleaned[4..6], 16)
         .map_err(|_| AppError::InvalidHex(hex.to_string()))?;
     let a = if cleaned.len() == 8 {
-        u8::from_str_radix(&cleaned[6..8], 16)
-            .map_err(|_| AppError::InvalidHex(hex.to_string()))?
+        u8::from_str_radix(&cleaned[6..8], 16).map_err(|_| AppError::InvalidHex(hex.to_string()))?
     } else {
         255
     };
@@ -44,16 +43,23 @@ pub(crate) fn parse_hex_color(hex: &str) -> Result<Color, AppError> {
 
 /// Drive the desktop window background color from the renderer side so a
 /// theme switch repaints the custom titlebar / chrome area without a full
-/// reload. Tauri 2.9 doesn't expose a runtime `setTitleBarStyle`, so on
+/// reload. Tauri doesn't expose a runtime `setTitleBarStyle`, so on
 /// Windows with `decorations=false` the window background is what the
 /// titlebar surface inherits.
+///
+/// Accept the infallible `Webview` command extractor rather than
+/// `WebviewWindow`. The main window can own embedded browser/code-server child
+/// webviews, at which point Tauri intentionally stops classifying it as a
+/// `WebviewWindow` even though the invoking app webview and parent window are
+/// both valid targets.
 #[tauri::command]
-pub fn set_window_background_color(
-    window: WebviewWindow,
-    hex: String,
-) -> Result<(), String> {
+pub fn set_window_background_color(webview: Webview, hex: String) -> Result<(), String> {
     let color = parse_hex_color(&hex).map_err(|e| e.to_string())?;
-    window
+    webview
+        .window()
+        .set_background_color(Some(color))
+        .map_err(|e| e.to_string())?;
+    webview
         .set_background_color(Some(color))
         .map_err(|e| e.to_string())?;
     Ok(())
@@ -81,8 +87,10 @@ pub const MENU_IDS: &[&str] = &[
     // View
     "command-palette",
     "toggle-sidebar",
+    "toggle-right-sidebar",
     "toggle-guild-rail",
     "toggle-status-bar",
+    "toggle-terminal",
     "reload",
     "toggle-devtools",
     "toggle-reduce-motion",
@@ -94,6 +102,7 @@ pub const MENU_IDS: &[&str] = &[
     // Go
     "go-inbox",
     "go-workflows",
+    "go-sites",
     "go-twin",
     "go-skills",
     "go-plugins",
@@ -192,12 +201,18 @@ mod tests {
 
     #[test]
     fn parse_hex_color_rejects_short_form() {
-        assert!(matches!(parse_hex_color("#abc"), Err(AppError::InvalidHex(_))));
+        assert!(matches!(
+            parse_hex_color("#abc"),
+            Err(AppError::InvalidHex(_))
+        ));
     }
 
     #[test]
     fn parse_hex_color_rejects_garbage_chars() {
-        assert!(matches!(parse_hex_color("#zzzzzz"), Err(AppError::InvalidHex(_))));
+        assert!(matches!(
+            parse_hex_color("#zzzzzz"),
+            Err(AppError::InvalidHex(_))
+        ));
     }
 
     /// Sanity: the renderer-side `MENU_ACTION_IDS` list in
@@ -213,6 +228,8 @@ mod tests {
             "open-logs",
             "command-palette",
             "toggle-sidebar",
+            "toggle-right-sidebar",
+            "toggle-terminal",
             "go-inbox",
             "go-twin",
             "go-settings",

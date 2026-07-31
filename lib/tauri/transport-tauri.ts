@@ -2,7 +2,10 @@
 
 import { invoke } from "@tauri-apps/api/core"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
-import type { Transport } from "./transport-types"
+import { createDiagnostic } from "@cognia/diagnostics"
+import type { Transport, TransportCallOptions } from "./transport-types"
+import { safeUnlisten } from "./safe-unlisten"
+import { dispatchDiagnostic } from "@/lib/diagnostics/bus"
 
 /**
  * Production transport for desktop Tauri mode.
@@ -14,12 +17,21 @@ import type { Transport } from "./transport-types"
  * resolves in the background; if the caller unsubscribes before it does,
  * `cancelled` flips and the unlisten fires the moment listen completes.
  *
- * A listen() rejection is swallowed silently — in practice it means the Tauri
- * APIs are unavailable, and surfacing the error inside an effect would crash
- * the React tree without giving the caller a useful signal.
+ * A listen() rejection still cannot be thrown — surfacing it inside an effect
+ * would crash the React tree, and the caller has no useful way to react. But it
+ * used to be swallowed *entirely*, which is worse than it sounds: every
+ * subscription on that channel simply stops updating, so the surfaces fed by it
+ * freeze with no error, no log line, and no hint that a reload would fix it.
+ * The rejection now raises an `eventChannelLost` diagnostic — logged
+ * unconditionally, and filed to the notification center where it is at least
+ * discoverable.
  */
 export class TauriTransport implements Transport {
-  call<T = unknown>(name: string, args?: Record<string, unknown>): Promise<T> {
+  call<T = unknown>(
+    name: string,
+    args?: Record<string, unknown>,
+    _options?: TransportCallOptions
+  ): Promise<T> {
     return invoke<T>(name, args)
   }
 
@@ -30,15 +42,24 @@ export class TauriTransport implements Transport {
     listen<T>(event, (e) => handler(e.payload)).then(
       (fn) => {
         if (cancelled) {
-          fn()
+          safeUnlisten(fn)
         } else {
           unlisten = fn
         }
       },
-      () => {
+      (err: unknown) => {
         // listen rejected — Tauri unavailable. Mark cancelled so a subsequent
         // unsubscribe call is a no-op rather than calling a null unlisten.
         cancelled = true
+        // Deduped per event name by the notifier, so a boot that registers
+        // twenty dead subscriptions produces one counted row, not twenty.
+        dispatchDiagnostic(
+          createDiagnostic("eventChannelLost", {
+            source: "tauri",
+            message: err instanceof Error ? err.message : String(err),
+            meta: { extra: { event } },
+          })
+        )
       }
     )
 
@@ -47,7 +68,7 @@ export class TauriTransport implements Transport {
       if (unlisten) {
         const fn = unlisten
         unlisten = null
-        fn()
+        safeUnlisten(fn)
       }
     }
   }

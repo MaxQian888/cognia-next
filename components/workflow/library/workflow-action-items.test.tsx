@@ -42,6 +42,7 @@ function makeWorkflow(overrides: Partial<WorkflowRow> = {}): WorkflowRow {
 }
 
 function renderItems(workflow: WorkflowRow) {
+  const onRun = jest.fn()
   const onRename = jest.fn()
   const onEditTags = jest.fn()
   const onDelete = jest.fn()
@@ -53,6 +54,7 @@ function renderItems(workflow: WorkflowRow) {
           workflow={workflow}
           Item={DropdownMenuItem}
           Separator={DropdownMenuSeparator}
+          onRun={onRun}
           onRename={onRename}
           onEditTags={onEditTags}
           onDelete={onDelete}
@@ -60,7 +62,7 @@ function renderItems(workflow: WorkflowRow) {
       </DropdownMenuContent>
     </DropdownMenu>
   )
-  return { onRename, onEditTags, onDelete }
+  return { onRun, onRename, onEditTags, onDelete }
 }
 
 beforeEach(async () => {
@@ -114,6 +116,16 @@ describe("WorkflowActionItems", () => {
     fireEvent.click(await screen.findByText("Duplicate"))
     await waitFor(async () => {
       expect((await listWorkflows()).length).toBe(2)
+    })
+  })
+
+  it("saves the workflow as a template", async () => {
+    const wf = await createWorkflow({ name: "Original" })
+    renderItems(wf as WorkflowRow)
+    fireEvent.click(await screen.findByTestId(`workflow-action-save-template-${wf.id}`))
+    await waitFor(async () => {
+      const all = await listWorkflows()
+      expect(all.some((w) => w.isTemplate && w.name === "Original (template)")).toBe(true)
     })
   })
 

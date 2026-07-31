@@ -19,6 +19,12 @@ import { ROOT_FOLDER_ID } from "@/types/workflow/folder"
 import { getDb } from "./schema"
 import { recordTombstones } from "@/lib/sync/tombstones"
 import { migrateWorkflow } from "@/lib/workflow/definition/migrate"
+import {
+  deleteWorkflowWithPublication,
+  replaceWorkflowWithPublication,
+  updateWorkflowWithPublication,
+  type WorkflowMutationResult,
+} from "@/lib/workflow/publish/publication-lifecycle"
 
 function newWorkflowId(): string {
   return "wf_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8)
@@ -26,6 +32,20 @@ function newWorkflowId(): string {
 
 function nowMs(): number {
   return Date.now()
+}
+
+/**
+ * Project a committed workflow row into the trigger runtime. Persistence is
+ * authoritative: a temporarily unavailable runtime must not roll back the
+ * Dexie write, and startup reconciliation will retry the projection.
+ */
+async function projectPersistedWorkflowTriggers(workflow: VisualWorkflow): Promise<void> {
+  try {
+    const { syncWorkflowTriggers } = await import("@/lib/workflow/runtime/webhook-bridge")
+    await syncWorkflowTriggers(workflow)
+  } catch (error) {
+    console.warn(`Workflow ${workflow.id} trigger projection failed:`, error)
+  }
 }
 
 export async function listWorkflows(): Promise<WorkflowRow[]> {
@@ -65,6 +85,11 @@ export type WorkflowDraft = Pick<VisualWorkflow, "name"> &
       | "viewport"
       | "isTemplate"
       | "folderId"
+      | "complexity"
+      | "variables"
+      | "pinData"
+      | "staticData"
+      | "interface"
     >
   >
 
@@ -79,21 +104,37 @@ export async function createWorkflow(draft: WorkflowDraft): Promise<WorkflowRow>
     tags: draft.tags ?? [],
     isTemplate: draft.isTemplate ?? false,
     isBuiltIn: false,
+    complexity: draft.complexity,
     folderId: draft.folderId ?? ROOT_FOLDER_ID,
     createdAt: now,
     updatedAt: now,
     nodes: draft.nodes ?? [],
     edges: draft.edges ?? [],
-    settings: draft.settings ?? cloneSettings(DEFAULT_WORKFLOW_SETTINGS),
+    // ADR-0070 Phase 3: newly-authored workflows default to risk-gated. A
+    // complete imported/template draft may explicitly carry true OR false;
+    // preserve that authored posture instead of silently turning gating on.
+    settings: {
+      ...cloneSettings(draft.settings ?? DEFAULT_WORKFLOW_SETTINGS),
+      riskGating: draft.settings?.riskGating ?? true,
+    },
     credentials: draft.credentials,
+    variables: draft.variables,
+    pinData: draft.pinData,
+    staticData: draft.staticData,
     viewport: draft.viewport ?? { x: 0, y: 0, zoom: 1 },
+    interface: draft.interface,
+    published: undefined,
   }
   await getDb().workflows.put(workflow)
+  await projectPersistedWorkflowTriggers(workflow)
   return workflow
 }
 
 export type WorkflowPatch = Partial<
-  Omit<VisualWorkflow, "id" | "createdAt" | "isBuiltIn" | "schemaVersion">
+  Omit<
+    VisualWorkflow,
+    "id" | "createdAt" | "updatedAt" | "isBuiltIn" | "schemaVersion" | "interface" | "published"
+  >
 >
 
 /**
@@ -101,8 +142,14 @@ export type WorkflowPatch = Partial<
  * automatically; callers must not pass it manually (otherwise concurrent
  * editors with stale clocks could rewind it).
  */
-export async function updateWorkflow(id: string, patch: WorkflowPatch): Promise<void> {
-  await getDb().workflows.update(id, { ...patch, updatedAt: nowMs() })
+export async function updateWorkflow(
+  id: string,
+  patch: WorkflowPatch
+): Promise<WorkflowRow | undefined> {
+  const result = await updateWorkflowWithPublication(id, patch, nowMs())
+  if (!result) return undefined
+  await projectPersistedWorkflowTriggers(result.workflow)
+  return result.workflow
 }
 
 /**
@@ -110,12 +157,13 @@ export async function updateWorkflow(id: string, patch: WorkflowPatch): Promise<
  * whole graph round-trips. Refuses to write if the id doesn't already exist
  * (use `createWorkflow` for new rows). Bumps `updatedAt`.
  */
-export async function replaceWorkflow(workflow: VisualWorkflow): Promise<void> {
-  const existing = await getDb().workflows.get(workflow.id)
-  if (!existing) {
+export async function replaceWorkflow(workflow: VisualWorkflow): Promise<WorkflowMutationResult> {
+  const result = await replaceWorkflowWithPublication(workflow, nowMs())
+  if (!result) {
     throw new Error(`Workflow ${workflow.id} not found`)
   }
-  await getDb().workflows.put({ ...workflow, schemaVersion: 2, updatedAt: nowMs() })
+  await projectPersistedWorkflowTriggers(result.workflow)
+  return result
 }
 
 /** Query options for {@link listWorkflowRuns}. */
@@ -150,7 +198,11 @@ export async function deleteWorkflow(id: string): Promise<void> {
   if (existing?.isBuiltIn) {
     throw new Error("Built-in workflows cannot be deleted. Duplicate first.")
   }
-  await getDb().workflows.delete(id)
+  await deleteWorkflowWithPublication(id)
+  if (existing) {
+    const { unsyncWorkflowTriggers } = await import("@/lib/workflow/runtime/webhook-bridge")
+    await unsyncWorkflowTriggers(existing)
+  }
   // Mirror the deletion to paired phones via the companion sync (v61).
   await recordTombstones("workflows", [id])
   // Cascade-drop orphan fan-out subscriptions so they don't accumulate
@@ -165,6 +217,16 @@ export async function deleteWorkflow(id: string): Promise<void> {
     // Swallow — orphan rows are harmless at runtime (the
     // progress-runner only queries by live workflows that have IM-
     // triggered runs).
+  }
+  // Cascade-drop the run history + per-step event log so deleting a workflow
+  // doesn't leave its `workflowRuns` / `workflowRunEvents` rows orphaned
+  // forever (they were previously never cleaned up). Best-effort — a failure
+  // here must not block the workflow delete.
+  try {
+    await deleteAllRunsForWorkflow(id)
+  } catch {
+    // Swallow — orphan run/event rows are inert (every reader scopes by a
+    // live workflow id), so a cleanup failure is non-fatal.
   }
 }
 
@@ -183,10 +245,12 @@ export async function duplicateWorkflow(id: string): Promise<WorkflowRow> {
     name: `${source.name} (copy)`,
     isBuiltIn: false,
     isTemplate: false,
+    published: undefined,
     createdAt: now,
     updatedAt: now,
   }
   await getDb().workflows.put(copy)
+  await projectPersistedWorkflowTriggers(copy)
   return copy
 }
 
@@ -220,16 +284,14 @@ export async function seedBuiltInWorkflows(builtIns: VisualWorkflow[]): Promise<
 }
 
 /**
- * Helper for `replaceWorkflow` callers: deep-clones a settings object so the
- * caller can mutate without touching the constant.
+ * Clone nested settings values so a new workflow never aliases the shared
+ * default object.
  */
 function cloneSettings(s: WorkflowSettings): WorkflowSettings {
   return {
-    errorPolicy: s.errorPolicy,
-    timeoutMs: s.timeoutMs,
-    concurrency: s.concurrency,
+    ...s,
     retryDefaults: { ...s.retryDefaults },
-    timezone: s.timezone,
+    onFailure: s.onFailure ? { ...s.onFailure } : undefined,
   }
 }
 
@@ -341,5 +403,129 @@ export async function getRecentlyFailedWorkflowIds(sinceMs: number): Promise<Set
   for (const r of rows) {
     if (r.startedAt >= sinceMs) out.add(r.workflowId)
   }
+  return out
+}
+
+/**
+ * Dead-letter queue (A3): terminally-failed runs the user hasn't yet
+ * acknowledged. Queries the existing `status` index (no schema change) and
+ * filters out acknowledged rows in memory. Optionally scoped to one workflow.
+ * Newest first.
+ */
+export async function listDeadLetters(workflowId?: string): Promise<WorkflowRunRow[]> {
+  const db = getDb()
+  const rows = await db.workflowRuns.where("status").equals("failed").toArray()
+  return rows
+    .filter((r) => r.acknowledgedAt === undefined && (!workflowId || r.workflowId === workflowId))
+    .sort((a, b) => b.startedAt - a.startedAt)
+}
+
+/** Dismiss a failed run from the dead-letter list (stamps `acknowledgedAt`). */
+export async function acknowledgeRun(runId: string): Promise<void> {
+  await getDb().workflowRuns.update(runId, { acknowledgedAt: nowMs() })
+}
+
+/** Fetch a single run row by id (for the TUI run-replay/inspect path). */
+export async function getWorkflowRun(id: string): Promise<WorkflowRunRow | undefined> {
+  return getDb().workflowRuns.get(id)
+}
+
+/**
+ * Record that a failed run was replayed: links the new run id and bumps the
+ * replay counter so the panel can show "replayed ×N". Does not acknowledge —
+ * the user may want to keep watching until the replay succeeds.
+ */
+export async function markReplayed(runId: string, replayRunId: string): Promise<void> {
+  const db = getDb()
+  const row = await db.workflowRuns.get(runId)
+  if (!row) return
+  await db.workflowRuns.update(runId, {
+    replayedByRunId: replayRunId,
+    replayCount: (row.replayCount ?? 0) + 1,
+  })
+}
+
+/**
+ * Delete a single run plus its per-step event log. Empty/unknown ids are a
+ * silent no-op (matches `acknowledgeRun`'s tolerant style). The run + event
+ * deletes run in one transaction so a crash can't leave dangling events.
+ */
+export async function deleteWorkflowRun(runId: string): Promise<void> {
+  if (!runId) return
+  const db = getDb()
+  await db.transaction("rw", db.workflowRuns, db.workflowRunEvents, async () => {
+    await db.workflowRunEvents.where("runId").equals(runId).delete()
+    await db.workflowRuns.delete(runId)
+  })
+}
+
+/** Bulk variant of {@link deleteWorkflowRun}. Skips empty ids. */
+export async function deleteWorkflowRuns(runIds: string[]): Promise<void> {
+  const ids = runIds.filter(Boolean)
+  if (ids.length === 0) return
+  const db = getDb()
+  await db.transaction("rw", db.workflowRuns, db.workflowRunEvents, async () => {
+    await db.workflowRunEvents.where("runId").anyOf(ids).delete()
+    await db.workflowRuns.bulkDelete(ids)
+  })
+}
+
+/**
+ * Clear all runs (and their events) for one workflow. Returns how many run
+ * rows were removed. Empty/unknown workflow ids resolve to 0.
+ */
+export async function deleteAllRunsForWorkflow(workflowId: string): Promise<number> {
+  if (!workflowId) return 0
+  const db = getDb()
+  return db.transaction("rw", db.workflowRuns, db.workflowRunEvents, async () => {
+    const runIds = (await db.workflowRuns
+      .where("workflowId")
+      .equals(workflowId)
+      .primaryKeys()) as string[]
+    if (runIds.length === 0) return 0
+    await db.workflowRunEvents.where("runId").anyOf(runIds).delete()
+    await db.workflowRuns.bulkDelete(runIds)
+    return runIds.length
+  })
+}
+
+/**
+ * Clone a workflow into a reusable template copy (`isTemplate: true`). Reuses
+ * {@link createWorkflow}, which mints a fresh workflow id; node ids are scoped
+ * per-workflow so they need no regeneration. Throws if the source is missing.
+ */
+export async function saveWorkflowAsTemplate(id: string): Promise<WorkflowRow> {
+  const source = await getDb().workflows.get(id)
+  if (!source) throw new Error(`Workflow ${id} not found`)
+  return createWorkflow({
+    ...source,
+    name: `${source.name} (template)`,
+    isTemplate: true,
+    // Publication is identity-bearing state tied to the source workflow id
+    // and stable tool name. The reusable interface is copied; the template
+    // must be explicitly published after instantiation.
+  })
+}
+
+/**
+ * Map each workflow id → the status of its most-recent run (by `startedAt`).
+ * Ids with no runs are omitted. Powers the library card "last run" badge. Uses
+ * the `[workflowId+startedAt]` compound index to read just the newest row.
+ */
+export async function getLastRunStatuses(
+  ids: string[]
+): Promise<Map<string, WorkflowRunRow["status"]>> {
+  const out = new Map<string, WorkflowRunRow["status"]>()
+  if (ids.length === 0) return out
+  const db = getDb()
+  await Promise.all(
+    ids.map(async (id) => {
+      const latest = await db.workflowRuns
+        .where("[workflowId+startedAt]")
+        .between([id, 0], [id, Number.MAX_SAFE_INTEGER])
+        .last()
+      if (latest) out.set(id, latest.status)
+    })
+  )
   return out
 }

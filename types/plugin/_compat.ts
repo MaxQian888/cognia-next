@@ -11,7 +11,7 @@
 // these subsystems for real, this file is the single point that needs to
 // change — the plugin types stay frozen.
 
-import type { ChatSession, StoredMessage, Skill } from "@/lib/claude/types"
+import type { ChatSession, StoredMessage, Skill } from "@cognia/agent-config-types"
 import type { WorkspaceRoot } from "@/types/workspace"
 
 // Workspace roots are owned by `types/workspace`; re-export so the plugin
@@ -85,7 +85,7 @@ export interface UpdateSessionInput {
 
 /**
  * Plugin-facing message attachment shape. Mirrors the `MessageAttachment`
- * defined in `plugin-extended.ts`; we declare it here for use inside
+ * defined in `plugin.ts`; we declare it here for use inside
  * the `UIMessage` extension below without creating a cyclic import.
  */
 export interface PluginMessageAttachment {
@@ -206,6 +206,17 @@ export interface Project {
     shell?: string
     cwd?: string
     env?: Record<string, string>
+  }
+  /**
+   * Per-project knowledge-base / RAG settings (project-scoped RAG, ADR project
+   * knowledge). Structural mirror of `ProjectKnowledgeSettings` in
+   * `@/types/project-knowledge` — kept inline here to avoid a types import cycle
+   * (`@/types/project-knowledge` → `@/types/twin` → barrel). All fields optional;
+   * read via `resolveProjectKnowledgeSettings`.
+   */
+  knowledgeSettings?: {
+    enableProjectRag?: boolean
+    ragTopK?: number
   }
 }
 

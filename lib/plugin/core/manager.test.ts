@@ -7,11 +7,14 @@ import {
   PluginManager,
   PluginEnableError,
   PluginDependencyError,
+  PluginFrontendTrustError,
+  PythonRuntimeDisabledError,
   resolveGovernanceMode,
   createPluginManager,
   getPluginManager,
   initializePluginManager,
   __resetPluginManagerForTesting,
+  toClonableManifest,
 } from "./manager"
 import {
   getPluginPointDiagnostics,
@@ -20,6 +23,8 @@ import {
 import type { Plugin, PluginManifest } from "@/types/plugin"
 import { getPluginSignatureVerifier } from "@/lib/plugin/security/signature"
 import { getPermissionGuard } from "@/lib/plugin/security/permission-guard"
+import { getMessageBus, SystemEvents, resetMessageBus } from "@/lib/plugin/messaging/message-bus"
+import { getPluginIPC, resetPluginIPC } from "@/lib/plugin/messaging/ipc"
 import {
   createExtensionAPI,
   getPluginExtensionRegistrationCount,
@@ -32,8 +37,18 @@ import {
 } from "@/lib/plugin/bridge/wallpaper-bridge"
 import { listThemePacks, __resetThemePackRegistryForTesting } from "@/lib/theme/theme-pack-registry"
 
+const mockTransportCall = jest.fn()
+const mockTransportSubscribe = jest.fn()
+
 jest.mock("@tauri-apps/api/core", () => ({
   invoke: jest.fn(),
+}))
+
+jest.mock("@/lib/tauri/transport-instance", () => ({
+  transport: {
+    call: (...args: unknown[]) => mockTransportCall(...args),
+    subscribe: (...args: unknown[]) => mockTransportSubscribe(...args),
+  },
 }))
 
 jest.mock("@/stores/plugin-runtime", () => ({
@@ -46,10 +61,31 @@ jest.mock("@/lib/plugin/security/signature", () => ({
   getPluginSignatureVerifier: jest.fn(),
 }))
 
+// Partial mock: keep the pure `isInherentlyTrustedFrontendSource` real, but
+// stub the localStorage-backed read/write (this suite runs in the node env
+// where `window` is undefined, so the real readPolicy always returns
+// DEFAULT_POLICY and per-test trust grants would be impossible).
+jest.mock("@/lib/plugin/core/plugins-policy-storage", () => {
+  const actual = jest.requireActual("@/lib/plugin/core/plugins-policy-storage")
+  return {
+    ...actual,
+    readPolicy: jest.fn(() => actual.DEFAULT_POLICY),
+    writePolicy: jest.fn(),
+  }
+})
+
 jest.mock("@/lib/plugin/security/permission-guard", () => ({
   getPermissionGuard: jest.fn(),
   createGuardedAPI: jest.fn((_pluginId, api) => api),
 }))
+
+// Inline-factory mock (avoids the outer-const TDZ trap): the broker singleton
+// is closed over so `getPluginConsentBroker()` always returns the same stub,
+// and `clearSessionGrantsForPlugin` is a stable spy across the suite.
+jest.mock("@/lib/plugin/security/consent-broker", () => {
+  const broker = { clearSessionGrantsForPlugin: jest.fn() }
+  return { getPluginConsentBroker: () => broker }
+})
 
 jest.mock("@/lib/native/utils", () => ({
   canUseTauriInvoke: jest.fn(() => true),
@@ -66,20 +102,67 @@ jest.mock("@/lib/chat/slash-command-registry", () => ({
   unregisterSlashCommand: jest.fn(),
 }))
 
+jest.mock("@/lib/context-workbench/panel-registry", () => ({
+  contextPanelRegistry: { unregisterPlugin: jest.fn() },
+}))
+
 // IndexedDB isn't available in this unit-test environment; the bridge would
 // throw DatabaseClosedError on `applyPluginTables` / `removePluginTables`,
 // blowing up uninstallPlugin's cleanup path before the assertions run.
 jest.mock("@/lib/plugin/dexie/bridge", () => ({
   applyPluginTables: jest.fn(async () => undefined),
   removePluginTables: jest.fn(async () => undefined),
+  restorePluginTables: jest.fn(async () => [] as string[]),
+}))
+
+// The Dexie-backed plugin row CRUD has no IndexedDB in this unit env; stub it so
+// the install/update lifecycle tracking (getPlugin/updatePlugin) is observable
+// without a real database.
+jest.mock("@/lib/db/plugins", () => ({
+  getPlugin: jest.fn(async () => undefined),
+  updatePlugin: jest.fn(async () => undefined),
+  upsertPlugin: jest.fn(async () => undefined),
+  getPythonHostSettings: jest.fn(async () => undefined),
+  setPythonHostSettings: jest.fn(async () => undefined),
+}))
+
+jest.mock("@/lib/plugin/security/wasm-grant", () => ({
+  applyWasmCapabilityGrant: jest.fn(
+    async (decision: { grantedPermissions?: string[]; grantedPreopens?: string[] }) => ({
+      permissions: decision.grantedPermissions ?? [],
+      preopens: decision.grantedPreopens ?? [],
+    })
+  ),
+  clearWasmCapabilityGrant: jest.fn(async () => undefined),
+  reconcileWasmGrantLedgerWithManifest: jest.fn(async (_pluginId: string, preopens: string[]) => ({
+    allowedPreopens: [...preopens],
+    deniedLedgerPreopens: [],
+    ungrantedManifestPreopens: [],
+  })),
 }))
 
 import { usePluginStore } from "@/stores/plugin-runtime"
+import { contextPanelRegistry } from "@/lib/context-workbench/panel-registry"
+import { DEFAULT_POLICY, readPolicy, writePolicy } from "@/lib/plugin/core/plugins-policy-storage"
+import { getPlugin, updatePlugin, upsertPlugin } from "@/lib/db/plugins"
+import { getPluginLifecycleHooks } from "@/lib/plugin/messaging/hooks-system"
+import { getPluginConsentBroker } from "@/lib/plugin/security/consent-broker"
+import {
+  applyWasmCapabilityGrant,
+  clearWasmCapabilityGrant,
+  reconcileWasmGrantLedgerWithManifest,
+} from "@/lib/plugin/security/wasm-grant"
 import {
   getSlashCommand,
   registerSlashCommand,
   unregisterSlashCommand,
 } from "@/lib/chat/slash-command-registry"
+import { __resetRegistryForTesting } from "@/lib/plugin/resilience/breaker-registry"
+import { MODULE_BRIDGE_CAPABILITIES } from "@/lib/plugin/contracts/module-bridge-map"
+import {
+  __resetResilienceTelemetryForTesting,
+  getRecentActivationFailures,
+} from "@/lib/plugin/core/resilience-telemetry"
 
 describe("PluginManager", () => {
   const mockInvoke = invoke as jest.MockedFunction<typeof invoke>
@@ -98,6 +181,8 @@ describe("PluginManager", () => {
     grant: jest.fn(),
     revoke: jest.fn(),
     getPluginPermissions: jest.fn(() => [] as string[]),
+    // Used by the manifest→ledger mirror to decide silent vs confirm tier.
+    getTier: jest.fn((_id: string, _perm: string) => "silent" as string),
   }
   const mockGetSlashCommand = getSlashCommand as jest.MockedFunction<typeof getSlashCommand>
   const mockRegisterSlashCommand = registerSlashCommand as jest.MockedFunction<
@@ -107,6 +192,16 @@ describe("PluginManager", () => {
     typeof unregisterSlashCommand
   >
   const mockCanUseTauriInvoke = canUseTauriInvoke as jest.MockedFunction<typeof canUseTauriInvoke>
+  const mockApplyWasmCapabilityGrant = applyWasmCapabilityGrant as jest.MockedFunction<
+    typeof applyWasmCapabilityGrant
+  >
+  const mockClearWasmCapabilityGrant = clearWasmCapabilityGrant as jest.MockedFunction<
+    typeof clearWasmCapabilityGrant
+  >
+  const mockReconcileWasmGrantLedgerWithManifest =
+    reconcileWasmGrantLedgerWithManifest as jest.MockedFunction<
+      typeof reconcileWasmGrantLedgerWithManifest
+    >
 
   const createManifest = (id: string): PluginManifest => ({
     id,
@@ -120,21 +215,53 @@ describe("PluginManager", () => {
 
   beforeEach(() => {
     mockInvoke.mockReset()
+    mockTransportCall.mockReset()
+    mockTransportSubscribe.mockReset()
+    delete (globalThis as Record<string, unknown>).__COGNIA_HEADLESS__
     mockGetState.mockReset()
     mockVerifier.verify.mockReset()
     mockVerifier.verify.mockResolvedValue({ valid: true })
     mockGuard.registerPlugin.mockReset()
     mockGuard.unregisterPlugin.mockReset()
     mockGuard.revokeAll.mockReset()
+    mockGuard.getTier.mockReset()
+    mockGuard.getTier.mockReturnValue("silent")
     mockGetSlashCommand.mockReset()
     mockGetSlashCommand.mockReturnValue(undefined)
     mockRegisterSlashCommand.mockReset()
     mockUnregisterSlashCommand.mockReset()
     mockCanUseTauriInvoke.mockReset()
     mockCanUseTauriInvoke.mockReturnValue(true)
+    mockApplyWasmCapabilityGrant.mockClear()
+    mockClearWasmCapabilityGrant.mockClear()
+    mockReconcileWasmGrantLedgerWithManifest.mockClear()
+    ;(getPluginConsentBroker().clearSessionGrantsForPlugin as jest.Mock).mockClear()
     ;(getPluginSignatureVerifier as jest.Mock).mockReturnValue(mockVerifier)
     ;(getPermissionGuard as jest.Mock).mockReturnValue(mockGuard)
     clearPluginExtensions("rollback-plugin")
+  })
+
+  describe("syncBackendStatus", () => {
+    type WithSync = { syncBackendStatus: (id: string, status: string) => Promise<void> }
+
+    it("dispatches the plugin_set_status status-ledger command (not plugin_set_state)", async () => {
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      mockInvoke.mockResolvedValue(undefined)
+      await (manager as unknown as WithSync).syncBackendStatus("p1", "enabled")
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_set_status", {
+        pluginId: "p1",
+        status: "enabled",
+      })
+      expect(mockInvoke).not.toHaveBeenCalledWith("plugin_set_state", expect.anything())
+    })
+
+    it("does not throw when the backend invoke rejects (records a silent failure)", async () => {
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      mockInvoke.mockRejectedValue(new Error("backend down"))
+      await expect(
+        (manager as unknown as WithSync).syncBackendStatus("p1", "disabled")
+      ).resolves.toBeUndefined()
+    })
   })
 
   describe("installPluginFromGithub", () => {
@@ -176,12 +303,17 @@ describe("PluginManager", () => {
       })
 
       const manager = new PluginManager({ pluginDirectory: "/plugins" })
-      const plugin = await manager.installPluginFromGithub("acme/gh", "main", "sub")
+      const generatedFiles = {
+        "plugin.json": JSON.stringify(manifest),
+        "dist/index.js": "module.exports = {}",
+      }
+      const plugin = await manager.installPluginFromGithub("acme/gh", "main", "sub", generatedFiles)
 
       expect(mockInvoke).toHaveBeenCalledWith("plugin_install_from_github", {
         repo: "acme/gh",
         gitRef: "main",
         subdir: "sub",
+        generatedFiles,
       })
       expect(store.discoverPlugin).toHaveBeenCalledWith(
         manifest,
@@ -209,6 +341,225 @@ describe("PluginManager", () => {
       await expect(manager.installPluginFromGithub("acme/missing")).rejects.toThrow(
         /Failed to install plugin/i
       )
+    })
+
+    it("mirrors silent declared permissions to the Rust ledger, skipping confirm-tier ones", async () => {
+      // clipboard:read is silent → mirrored; filesystem:write is confirm → not.
+      mockGuard.getTier.mockImplementation((_id: string, perm: string) =>
+        perm === "filesystem:write" ? "confirm" : "silent"
+      )
+      mockInvoke.mockResolvedValue(undefined)
+      mockCanUseTauriInvoke.mockReturnValue(true)
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      await (
+        manager as unknown as {
+          mirrorDeclaredPermissionsToLedger: (id: string, perms: string[]) => Promise<void>
+        }
+      ).mirrorDeclaredPermissionsToLedger("perm-plugin", ["clipboard:read", "filesystem:write"])
+
+      // The grant rides the shared transport, never a direct `invoke`: on a
+      // separated remote UI a direct call would write the viewer's local
+      // ledger instead of the brain's (`lib/plugin/core/transport.ts`).
+      expect(mockTransportCall).toHaveBeenCalledWith("plugin_permission_grant", {
+        pluginId: "perm-plugin",
+        permission: "clipboard:read",
+        grantedBy: "manifest",
+        expiresAt: null,
+      })
+      expect(mockTransportCall).not.toHaveBeenCalledWith(
+        "plugin_permission_grant",
+        expect.objectContaining({ permission: "filesystem:write" })
+      )
+    })
+
+    it("does not mirror to the ledger in web mode (no Tauri invoke)", async () => {
+      mockCanUseTauriInvoke.mockReturnValue(false)
+      mockInvoke.mockResolvedValue(undefined)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      await (
+        manager as unknown as {
+          mirrorDeclaredPermissionsToLedger: (id: string, perms: string[]) => Promise<void>
+        }
+      ).mirrorDeclaredPermissionsToLedger("perm-plugin", ["clipboard:read"])
+      expect(mockTransportCall).not.toHaveBeenCalledWith(
+        "plugin_permission_grant",
+        expect.anything()
+      )
+    })
+
+    it("pushes the declared shell-command allowlist to the host on desktop", async () => {
+      mockInvoke.mockResolvedValue(undefined)
+      mockCanUseTauriInvoke.mockReturnValue(true)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      await (
+        manager as unknown as {
+          syncShellAllowlistToHost: (id: string, commands: string[]) => Promise<void>
+        }
+      ).syncShellAllowlistToHost("sh-plugin", ["git", "node"])
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_set_shell_allowlist", {
+        pluginId: "sh-plugin",
+        commands: ["git", "node"],
+      })
+    })
+
+    it("does not push the shell allowlist in web mode (no Tauri invoke)", async () => {
+      mockCanUseTauriInvoke.mockReturnValue(false)
+      mockInvoke.mockResolvedValue(undefined)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      await (
+        manager as unknown as {
+          syncShellAllowlistToHost: (id: string, commands: string[]) => Promise<void>
+        }
+      ).syncShellAllowlistToHost("sh-plugin", ["git"])
+      expect(mockInvoke).not.toHaveBeenCalledWith("plugin_set_shell_allowlist", expect.anything())
+    })
+
+    it("pushes the declared network egress allowlist to the host on desktop", async () => {
+      mockInvoke.mockResolvedValue(undefined)
+      mockCanUseTauriInvoke.mockReturnValue(true)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      await (
+        manager as unknown as {
+          syncNetworkAllowlistToHost: (id: string, domains: string[]) => Promise<void>
+        }
+      ).syncNetworkAllowlistToHost("net-plugin", ["api.example.com", "*.cdn.test"])
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_set_network_allowlist", {
+        pluginId: "net-plugin",
+        domains: ["api.example.com", "*.cdn.test"],
+      })
+    })
+  })
+
+  describe("registerDiskPlugin", () => {
+    it("discovers + installs a disk plugin into the store as a local source", async () => {
+      const store: {
+        plugins: Record<string, Plugin>
+        discoverPlugin: jest.Mock
+        installPlugin: jest.Mock
+      } = {
+        plugins: {},
+        discoverPlugin: jest.fn((manifest: PluginManifest, source: string, path: string) => {
+          store.plugins[manifest.id] = {
+            manifest,
+            status: "discovered",
+            source: source as never,
+            path,
+            config: {},
+          }
+        }),
+        installPlugin: jest.fn(async (pluginId: string) => {
+          const p = store.plugins[pluginId]
+          if (p) store.plugins[pluginId] = { ...p, status: "installed", installedAt: new Date() }
+        }),
+      }
+      mockGetState.mockReturnValue(store)
+
+      const manifest = createManifest("disk-plugin")
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      await manager.registerDiskPlugin(manifest, "/home/u/.cognia/plugins/disk-plugin")
+
+      expect(store.discoverPlugin).toHaveBeenCalledWith(
+        manifest,
+        "local",
+        "/home/u/.cognia/plugins/disk-plugin",
+        expect.objectContaining({ descriptor: expect.objectContaining({ source: "local" }) })
+      )
+      expect(store.installPlugin).toHaveBeenCalledWith("disk-plugin")
+    })
+
+    it("does not re-install an already-known plugin (idempotent refresh)", async () => {
+      const manifest = createManifest("known-plugin")
+      const store = {
+        plugins: {
+          "known-plugin": { manifest, status: "enabled", source: "local", path: "/d", config: {} },
+        },
+        discoverPlugin: jest.fn(),
+        installPlugin: jest.fn(async () => undefined),
+      }
+      mockGetState.mockReturnValue(store)
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      await manager.registerDiskPlugin(manifest, "/d")
+
+      expect(store.discoverPlugin).toHaveBeenCalled()
+      expect(store.installPlugin).not.toHaveBeenCalled()
+    })
+
+    it("throws on an invalid manifest", async () => {
+      mockGetState.mockReturnValue({
+        plugins: {},
+        discoverPlugin: jest.fn(),
+        installPlugin: jest.fn(),
+      })
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      // Missing required fields → validation fails.
+      await expect(
+        manager.registerDiskPlugin({ id: "", name: "" } as unknown as PluginManifest, "/d")
+      ).rejects.toThrow(/Invalid plugin manifest/i)
+    })
+  })
+
+  describe("scanBrowserBuiltins persistence", () => {
+    it("persists every discovered built-in to the Dexie plugins table with source 'builtin'", async () => {
+      const store: {
+        plugins: Record<string, Plugin>
+        discoverPlugin: jest.Mock
+        installPlugin: jest.Mock
+      } = {
+        plugins: {},
+        discoverPlugin: jest.fn((manifest: PluginManifest, source: string, path: string) => {
+          store.plugins[manifest.id] = {
+            manifest,
+            status: "discovered",
+            source: source as never,
+            path,
+            config: {},
+          }
+        }),
+        installPlugin: jest.fn(async (pluginId: string) => {
+          const p = store.plugins[pluginId]
+          if (p) store.plugins[pluginId] = { ...p, status: "installed", installedAt: new Date() }
+        }),
+      }
+      mockGetState.mockReturnValue(store)
+      ;(upsertPlugin as jest.Mock).mockClear()
+
+      const manager = new PluginManager({
+        pluginDirectory: "/plugins",
+        runtimeProfile: "browser",
+      })
+      const discovered = await manager.scanPlugins()
+
+      // Every built-in surfaced by the registry walk must land in Dexie, or the
+      // Dexie-backed Library + marketplace "Built-in" section render nothing.
+      expect(discovered.length).toBeGreaterThan(0)
+      expect(upsertPlugin).toHaveBeenCalledTimes(discovered.length)
+      expect(upsertPlugin).toHaveBeenCalledWith(
+        expect.objectContaining({ source: "builtin", type: expect.any(String) })
+      )
+    })
+
+    it("swallows a Dexie persistence failure so discovery still completes", async () => {
+      const store = {
+        plugins: {} as Record<string, Plugin>,
+        discoverPlugin: jest.fn(),
+        installPlugin: jest.fn(async () => undefined),
+      }
+      mockGetState.mockReturnValue(store)
+      ;(upsertPlugin as jest.Mock).mockClear()
+      ;(upsertPlugin as jest.Mock).mockRejectedValue(new Error("IndexedDB closed"))
+
+      const manager = new PluginManager({
+        pluginDirectory: "/plugins",
+        runtimeProfile: "browser",
+      })
+      const discovered = await manager.scanPlugins()
+
+      // A persistence hiccup must not abort the in-memory discovery walk.
+      expect(discovered.length).toBeGreaterThan(0)
+      expect(upsertPlugin).toHaveBeenCalled()
+      ;(upsertPlugin as jest.Mock).mockResolvedValue(undefined)
     })
   })
 
@@ -556,6 +907,16 @@ describe("PluginManager", () => {
           pluginPath: "/plugins/demo.wasm",
         })
       )
+      expect(mockApplyWasmCapabilityGrant).toHaveBeenCalledWith({
+        pluginId: "demo.wasm",
+        grantedPermissions: ["notification"],
+        grantedPreopens: [],
+      })
+      expect(mockReconcileWasmGrantLedgerWithManifest).toHaveBeenCalledWith("demo.wasm", [])
+
+      await manager.uninstallPlugin("demo.wasm")
+
+      expect(mockClearWasmCapabilityGrant).toHaveBeenCalledWith("demo.wasm")
     })
 
     it("installWasmPluginFromLocalFile rejects non-wasm bundles", async () => {
@@ -834,7 +1195,7 @@ describe("PluginManager", () => {
       )
     })
 
-    it("marks desktop-only built-ins as blocked in browser runtime compatibility metadata", async () => {
+    it("every scanned browser builtin declares a valid browser runtime availability", async () => {
       const store: {
         plugins: Record<string, Plugin>
         discoverPlugin: jest.Mock
@@ -877,19 +1238,21 @@ describe("PluginManager", () => {
 
       await manager.scanPlugins()
 
-      expect(store.discoverPlugin).toHaveBeenCalledWith(
-        expect.objectContaining({ id: "cognia-workspace-tools" }),
-        "builtin",
-        "builtin://cognia-workspace-tools",
-        expect.objectContaining({
-          compatibilityDiagnostics: expect.arrayContaining([
-            expect.objectContaining({
-              code: "runtime.browser.unsupported",
-              severity: "error",
-            }),
-          ]),
-        })
-      )
+      // Every plugin in the browser builtin registry must DECLARE its browser
+      // runtime compatibility with a valid availability value. An explicit
+      // `blocked` (e.g. cognia-sandboxed-tools, desktop-only by design) is
+      // fine — what must never recur is a missing block (workspace-tools /
+      // web-tools) or an out-of-enum value (workflow-ai's "available",
+      // screenshot's "partial"), both of which silently blocked the plugin
+      // in browser mode before the manifest conformance sweep.
+      expect(store.discoverPlugin).toHaveBeenCalled()
+      for (const call of store.discoverPlugin.mock.calls) {
+        const [manifest] = call as [PluginManifest]
+        const browser = manifest.runtimeCompatibility?.browser
+        expect(`${manifest.id}: ${browser?.availability}`).toMatch(
+          new RegExp(`^${manifest.id}: (supported|degraded|blocked)$`)
+        )
+      }
     })
 
     it("should mark newly scanned plugins as installed in store", async () => {
@@ -1061,7 +1424,9 @@ describe("PluginManager", () => {
           }),
         })
       )
-      expect(store.installPlugin).not.toHaveBeenCalled()
+      // Built-ins discovered by the same scan may install themselves; the
+      // assertion under test is that the *existing* plugin isn't reinstalled.
+      expect(store.installPlugin).not.toHaveBeenCalledWith("source-shift-plugin")
     })
 
     it("should skip invalid manifests", async () => {
@@ -1097,7 +1462,12 @@ describe("PluginManager", () => {
 
       await manager.scanPlugins()
 
-      expect(store.discoverPlugin).not.toHaveBeenCalled()
+      // Built-ins are still discovered on the tauri profile; the invalid
+      // directory entry itself must be skipped.
+      const discoveredIds = (store.discoverPlugin as jest.Mock).mock.calls.map(
+        (c) => (c[0] as PluginManifest).id
+      )
+      expect(discoveredIds).not.toContain("invalid-plugin")
       expect(store.plugins["invalid-plugin"]).toBeUndefined()
     })
 
@@ -1131,15 +1501,19 @@ describe("PluginManager", () => {
 
       mockGetState.mockReturnValue(store)
 
+      // `processors` is still an `experimental` capability in the host
+      // contract, so it emits a `plugin.capability.experimental` warning.
+      // (The previously-used `themes` capability was promoted
+      // partial→supported and no longer produces a diagnostic.)
       const manifest: PluginManifest = {
-        ...createManifest("themes-plugin"),
-        capabilities: ["themes"],
+        ...createManifest("processors-plugin"),
+        capabilities: ["processors"],
       }
 
       mockInvoke.mockResolvedValueOnce([
         {
           manifest,
-          path: "/plugins/themes-plugin",
+          path: "/plugins/processors-plugin",
         },
       ])
 
@@ -1150,11 +1524,11 @@ describe("PluginManager", () => {
       expect(store.discoverPlugin).toHaveBeenCalledWith(
         manifest,
         "local",
-        "/plugins/themes-plugin",
+        "/plugins/processors-plugin",
         expect.objectContaining({
           compatibilityDiagnostics: expect.arrayContaining([
             expect.objectContaining({
-              code: "manifest.capabilities.plugin.capability.partial",
+              code: "manifest.capabilities.plugin.capability.experimental",
               severity: "warning",
             }),
           ]),
@@ -1162,7 +1536,7 @@ describe("PluginManager", () => {
             compatibility: expect.objectContaining({
               diagnostics: expect.arrayContaining([
                 expect.objectContaining({
-                  code: "manifest.capabilities.plugin.capability.partial",
+                  code: "manifest.capabilities.plugin.capability.experimental",
                   severity: "warning",
                 }),
               ]),
@@ -1174,6 +1548,34 @@ describe("PluginManager", () => {
   })
 
   describe("browser runtime activation", () => {
+    it("passes a lazy active-database provider to startup schema restoration", async () => {
+      const { restorePluginTables } = jest.requireMock("@/lib/plugin/dexie/bridge") as {
+        restorePluginTables: jest.Mock
+      }
+      restorePluginTables.mockClear().mockResolvedValueOnce([])
+      mockGetState.mockReturnValue({
+        plugins: {
+          "db-plugin": {
+            manifest: {
+              ...createManifest("db-plugin"),
+              dexie: { tables: [{ name: "items", schema: "++id" }] },
+            },
+            status: "installed",
+            source: "builtin",
+            path: "db-plugin",
+            config: {},
+          },
+        },
+      })
+      const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "browser" })
+
+      await (
+        manager as unknown as { restorePluginDexieTables: () => Promise<void> }
+      ).restorePluginDexieTables()
+
+      expect(restorePluginTables.mock.calls[0][0]).toEqual(expect.any(Function))
+    })
+
     it("loads a browser-compatible builtin plugin and registers its tools", async () => {
       Object.defineProperty(global.navigator, "clipboard", {
         configurable: true,
@@ -1250,6 +1652,17 @@ describe("PluginManager", () => {
       })
 
       await manager.scanPlugins()
+
+      // Regression guard for the dormant-messaging activation: a plugin
+      // subscribed to the global bus must actually receive the host's
+      // lifecycle events, and the IPC manager must learn about the plugin.
+      resetMessageBus()
+      resetPluginIPC()
+      const enabledEvents: string[] = []
+      getMessageBus().on(SystemEvents.PLUGIN_ENABLED, (event) => {
+        enabledEvents.push((event.payload as { pluginId: string }).pluginId)
+      })
+
       await manager.enablePlugin("cognia-clipboard-tools")
 
       expect(store.registerPluginTool).toHaveBeenCalledWith(
@@ -1258,6 +1671,377 @@ describe("PluginManager", () => {
       )
       expect(manager.getRegistry().getTool("clipboard_status")).toBeDefined()
       expect(store.plugins["cognia-clipboard-tools"].status).toBe("enabled")
+      // Host emitted PLUGIN_ENABLED on the bus, and load registered the plugin
+      // with the IPC manager (so its exposed-method registry exists).
+      expect(enabledEvents).toContain("cognia-clipboard-tools")
+      expect(getPluginIPC().getAllExposedMethods().has("cognia-clipboard-tools")).toBe(true)
+    })
+
+    it("recovers a plugin stuck in error status instead of dead-ending on the status guard", async () => {
+      // Regression: a plugin left in `status: "error"` dead-ends every
+      // activation retry on the store guards ("cannot be enabled from status:
+      // error"), so the failure re-dispatches on every activation event and the
+      // activation breaker can never observe a real recovery. enablePlugin must
+      // heal the errored plugin back to a loadable resting state and re-run
+      // load + activate.
+      Object.defineProperty(global.navigator, "clipboard", {
+        configurable: true,
+        value: {
+          readText: jest.fn().mockResolvedValue("browser clipboard"),
+          writeText: jest.fn().mockResolvedValue(undefined),
+        },
+      })
+
+      const store = {
+        plugins: {} as Record<string, Plugin>,
+        discoverPlugin: jest.fn((manifest: PluginManifest, source: string, path: string) => {
+          store.plugins[manifest.id] = {
+            manifest,
+            status: "discovered",
+            source: source as never,
+            path,
+            config: {},
+          }
+        }),
+        installPlugin: jest.fn(async (pluginId: string) => {
+          store.plugins[pluginId] = {
+            ...store.plugins[pluginId],
+            status: "installed",
+            installedAt: new Date(),
+          }
+        }),
+        loadPlugin: jest.fn(async (pluginId: string) => {
+          store.plugins[pluginId] = { ...store.plugins[pluginId], status: "loaded" }
+        }),
+        enablePlugin: jest.fn(async (pluginId: string) => {
+          store.plugins[pluginId] = { ...store.plugins[pluginId], status: "enabled" }
+        }),
+        registerPluginHooks: jest.fn(),
+        registerPluginTool: jest.fn(),
+        registerPluginCommand: jest.fn(),
+        setPluginStatus: jest.fn((pluginId: string, status: Plugin["status"]) => {
+          store.plugins[pluginId] = { ...store.plugins[pluginId], status }
+        }),
+        setPluginError: jest.fn((pluginId: string, error: string | null) => {
+          store.plugins[pluginId] = {
+            ...store.plugins[pluginId],
+            error: error ?? undefined,
+            ...(error === null ? {} : { status: "error" as const }),
+          }
+        }),
+        setPluginVerificationSnapshot: jest.fn(),
+      }
+
+      mockGetState.mockReturnValue(store)
+      mockInvoke.mockResolvedValue(undefined)
+
+      const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "browser" })
+      await manager.scanPlugins()
+
+      // First enable succeeds and leaves the runtime loaded.
+      await manager.enablePlugin("cognia-clipboard-tools")
+      expect(store.plugins["cognia-clipboard-tools"].status).toBe("enabled")
+
+      // Simulate the plugin having been driven into the dead-end error status
+      // (as a failed activation would leave it).
+      store.setPluginError("cognia-clipboard-tools", "boom")
+      expect(store.plugins["cognia-clipboard-tools"].status).toBe("error")
+
+      // The retry must heal it — clear the error, reset to a loadable resting
+      // state, and re-run load + activate — rather than throw the guard error.
+      await expect(manager.enablePlugin("cognia-clipboard-tools")).resolves.not.toThrow()
+
+      expect(store.setPluginError).toHaveBeenCalledWith("cognia-clipboard-tools", null)
+      expect(store.setPluginStatus).toHaveBeenCalledWith("cognia-clipboard-tools", "installed")
+      expect(store.plugins["cognia-clipboard-tools"].status).toBe("enabled")
+    })
+
+    it("enables a builtin plugin without signature verification even when signatures are required", async () => {
+      // Built-ins are statically bundled into the renderer (path
+      // `builtin://<id>`, no on-disk signature.json) and trusted by
+      // construction. With the default-on `requireSignatures` policy, the
+      // verifier would reject them ("Signature required but not found"), so
+      // the enable path must exempt `source === "builtin"` — mirroring the
+      // scan path, which never verifies built-ins.
+      Object.defineProperty(global.navigator, "clipboard", {
+        configurable: true,
+        value: {
+          readText: jest.fn().mockResolvedValue("browser clipboard"),
+          writeText: jest.fn().mockResolvedValue(undefined),
+        },
+      })
+
+      // Real-world policy: signatures required, untrusted signers rejected.
+      mockVerifier.getConfig.mockReturnValue({
+        requireSignatures: true,
+        allowUntrusted: false,
+      })
+      // A built-in has no signature file, so verify would fail if called.
+      mockVerifier.verify.mockResolvedValue({
+        valid: false,
+        reason: "Signature required but not found",
+      })
+
+      const store = {
+        plugins: {} as Record<string, Plugin>,
+        discoverPlugin: jest.fn(
+          (
+            manifest: PluginManifest,
+            source: string,
+            path: string,
+            options?: Record<string, unknown>
+          ) => {
+            store.plugins[manifest.id] = {
+              manifest,
+              status: "discovered",
+              source: source as never,
+              path,
+              descriptor: options?.descriptor as Plugin["descriptor"],
+              config: {},
+            }
+          }
+        ),
+        installPlugin: jest.fn(async (pluginId: string) => {
+          const plugin = store.plugins[pluginId]
+          store.plugins[pluginId] = { ...plugin, status: "installed", installedAt: new Date() }
+        }),
+        loadPlugin: jest.fn(async (pluginId: string) => {
+          const plugin = store.plugins[pluginId]
+          store.plugins[pluginId] = { ...plugin, status: "loaded" }
+        }),
+        enablePlugin: jest.fn(async (pluginId: string) => {
+          const plugin = store.plugins[pluginId]
+          store.plugins[pluginId] = { ...plugin, status: "enabled" }
+        }),
+        registerPluginHooks: jest.fn(),
+        registerPluginTool: jest.fn(
+          (pluginId: string, tool: NonNullable<Plugin["tools"]>[number]) => {
+            const plugin = store.plugins[pluginId]
+            store.plugins[pluginId] = { ...plugin, tools: [...(plugin.tools || []), tool] }
+          }
+        ),
+        registerPluginCommand: jest.fn(),
+        setPluginError: jest.fn(),
+        setPluginVerificationSnapshot: jest.fn(),
+      }
+
+      mockGetState.mockReturnValue(store)
+      mockInvoke.mockResolvedValue(undefined)
+
+      const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "browser" })
+      await manager.scanPlugins()
+
+      await expect(manager.enablePlugin("cognia-clipboard-tools")).resolves.not.toThrow()
+
+      expect(store.plugins["cognia-clipboard-tools"].status).toBe("enabled")
+      // The signature verifier must never be consulted for a built-in.
+      expect(mockVerifier.verify).not.toHaveBeenCalled()
+    })
+
+    it("applies a plugin's declared Dexie tables BEFORE loadPlugin runs activate()", async () => {
+      // Regression: loadPlugin runs the plugin's activate(), and activate()
+      // may touch ctx.dexie right away. If applyPluginTables runs AFTER loadPlugin, that first
+      // db.table() throws "Table <id>:<name> does not exist" on a first-ever
+      // enable (no persisted pluginDexieMeta row to restore at boot), and the
+      // meta row is never written — so the plugin can never be enabled on any
+      // later boot either. applyPluginTables MUST precede loadPlugin.
+      const { applyPluginTables } = jest.requireMock("@/lib/plugin/dexie/bridge") as {
+        applyPluginTables: jest.Mock
+      }
+      applyPluginTables.mockClear()
+
+      const pluginId = "dexie-order-fixture"
+      const store = {
+        plugins: {
+          [pluginId]: {
+            manifest: {
+              ...createManifest(pluginId),
+              dexie: { tables: [{ name: "items", schema: "++id" }] },
+            },
+            status: "installed",
+            source: "builtin",
+            path: pluginId,
+            config: {},
+          },
+        } as Record<string, Plugin>,
+        discoverPlugin: jest.fn((manifest: PluginManifest, source: string, path: string) => {
+          store.plugins[manifest.id] = {
+            manifest,
+            status: "discovered",
+            source: source as never,
+            path,
+            config: {},
+          }
+        }),
+        installPlugin: jest.fn(async (pluginId: string) => {
+          store.plugins[pluginId] = {
+            ...store.plugins[pluginId],
+            status: "installed",
+            installedAt: new Date(),
+          }
+        }),
+        loadPlugin: jest.fn(),
+        enablePlugin: jest.fn(async (pluginId: string) => {
+          store.plugins[pluginId] = { ...store.plugins[pluginId], status: "enabled" }
+        }),
+        registerPluginHooks: jest.fn(),
+        registerPluginTool: jest.fn(),
+        registerPluginCommand: jest.fn(),
+        setPluginError: jest.fn(),
+        setPluginVerificationSnapshot: jest.fn(),
+      }
+
+      mockGetState.mockReturnValue(store)
+      mockInvoke.mockResolvedValue(undefined)
+
+      const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "browser" })
+
+      // The fixture declares a `dexie` block in its manifest, so
+      // applyPluginTables must fire. Stub the manager's loadPlugin (which is
+      // what actually runs activate()) so we can observe invocation order
+      // without a real IndexedDB / module load.
+      const loadSpy = jest.spyOn(manager, "loadPlugin").mockResolvedValue(undefined)
+
+      await manager.enablePlugin(pluginId)
+
+      expect(applyPluginTables).toHaveBeenCalledTimes(1)
+      expect(applyPluginTables.mock.calls[0][0]).toEqual(expect.any(Function))
+      expect(loadSpy).toHaveBeenCalledTimes(1)
+      expect(applyPluginTables.mock.invocationCallOrder[0]).toBeLessThan(
+        loadSpy.mock.invocationCallOrder[0]
+      )
+    })
+
+    it("does not mutate Dexie schema for a runtime-incompatible plugin", async () => {
+      const { applyPluginTables } = jest.requireMock("@/lib/plugin/dexie/bridge") as {
+        applyPluginTables: jest.Mock
+      }
+      applyPluginTables.mockClear()
+
+      const pluginId = "desktop-only-dexie-fixture"
+      const store = {
+        plugins: {
+          [pluginId]: {
+            manifest: {
+              ...createManifest(pluginId),
+              dexie: { tables: [{ name: "items", schema: "++id" }] },
+              runtimeCompatibility: {
+                browser: {
+                  availability: "blocked" as const,
+                  reason: "Requires a desktop runtime.",
+                },
+              },
+            },
+            status: "installed",
+            source: "builtin",
+            path: pluginId,
+            config: {},
+          },
+        } as Record<string, Plugin>,
+        registerPluginHooks: jest.fn(),
+        registerPluginTool: jest.fn(),
+        registerPluginCommand: jest.fn(),
+        setPluginError: jest.fn(),
+        setPluginVerificationSnapshot: jest.fn(),
+      }
+
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({
+        pluginDirectory: "",
+        runtimeProfile: "browser",
+        compatibilityMode: "block",
+      })
+      const loadSpy = jest.spyOn(manager, "loadPlugin")
+
+      await expect(manager.enablePlugin(pluginId)).rejects.toThrow(/Incompatible plugin/i)
+
+      expect(applyPluginTables).not.toHaveBeenCalled()
+      expect(loadSpy).not.toHaveBeenCalled()
+    })
+
+    it("registers a WASM plugin's declared tools so the agent can call them", async () => {
+      const wasmManifest: PluginManifest = {
+        id: "demo.wasm.tools",
+        name: "Demo WASM Tools",
+        version: "0.1.0",
+        description: "x",
+        type: "wasm",
+        capabilities: ["tools"],
+        wasmMain: "main.wasm",
+        wasm: { apiVersion: "0.1.0" },
+        permissions: ["notification"],
+        tools: [
+          { name: "do_thing", description: "Does a thing", parametersSchema: { type: "object" } },
+        ],
+      }
+
+      const store = {
+        plugins: {
+          "demo.wasm.tools": {
+            manifest: wasmManifest,
+            status: "installed",
+            source: "local",
+            path: "/plugins/demo.wasm.tools",
+            config: {},
+          },
+        } as Record<string, Plugin>,
+        loadPlugin: jest.fn(async (pluginId: string) => {
+          store.plugins[pluginId] = { ...store.plugins[pluginId], status: "loaded" }
+        }),
+        enablePlugin: jest.fn(async (pluginId: string) => {
+          store.plugins[pluginId] = { ...store.plugins[pluginId], status: "enabled" }
+        }),
+        registerPluginHooks: jest.fn(),
+        registerPluginTool: jest.fn(
+          (pluginId: string, tool: NonNullable<Plugin["tools"]>[number]) => {
+            const plugin = store.plugins[pluginId]
+            store.plugins[pluginId] = { ...plugin, tools: [...(plugin.tools || []), tool] }
+          }
+        ),
+        registerPluginCommand: jest.fn(),
+        setPluginError: jest.fn(),
+        setPluginVerificationSnapshot: jest.fn(),
+        setPluginStatus: jest.fn(),
+      }
+
+      mockGetState.mockReturnValue(store)
+      mockInvoke.mockResolvedValue(undefined)
+      resetMessageBus()
+      resetPluginIPC()
+
+      // Default "tauri" profile so the wasm plugin passes the runtime gate; the
+      // loader still returns a stub definition in jsdom (no wasm host), but the
+      // manifest-tool bridge runs regardless of the host being live.
+      const manager = new PluginManager({ pluginDirectory: "" })
+      const loadSpy = jest.spyOn(
+        (
+          manager as unknown as {
+            loader: { load(plugin: Plugin): Promise<unknown> }
+          }
+        ).loader,
+        "load"
+      )
+      await manager.enablePlugin("demo.wasm.tools")
+
+      // Permission mirroring goes through the shared transport (see
+      // `grantPluginPermission`), and must land before the module loads so the
+      // host-side gates are already primed when the plugin first runs.
+      const grantCallIndex = mockTransportCall.mock.calls.findIndex(
+        ([command]) => command === "plugin_permission_grant"
+      )
+      expect(grantCallIndex).toBeGreaterThanOrEqual(0)
+      expect(mockTransportCall.mock.invocationCallOrder[grantCallIndex]).toBeLessThan(
+        loadSpy.mock.invocationCallOrder[0]
+      )
+
+      // The declared tool is registered under the namespaced name and is
+      // resolvable from the registry — proving the manifest → tool-execute
+      // bridge runs at enable time.
+      expect(store.registerPluginTool).toHaveBeenCalledWith(
+        "demo.wasm.tools",
+        expect.objectContaining({ name: "demo.wasm.tools:do_thing" })
+      )
+      expect(manager.getRegistry().getTool("demo.wasm.tools:do_thing")).toBeDefined()
     })
   })
 
@@ -1281,6 +2065,10 @@ describe("PluginManager", () => {
 
   describe("uninstallPlugin", () => {
     it("should call plugin_uninstall and then store.uninstallPlugin with skipFileRemoval=true", async () => {
+      const { removePluginTables } = jest.requireMock("@/lib/plugin/dexie/bridge") as {
+        removePluginTables: jest.Mock
+      }
+      removePluginTables.mockClear()
       const manifest = createManifest("to-remove")
 
       const store: {
@@ -1325,6 +2113,7 @@ describe("PluginManager", () => {
         skipFileRemoval: true,
         viaManager: false,
       })
+      expect(removePluginTables.mock.calls[0][0]).toEqual(expect.any(Function))
     })
   })
 
@@ -1364,7 +2153,7 @@ describe("PluginManager", () => {
                 type: "custom",
                 name: "Mode A",
                 description: "Mode A",
-                icon: "bot",
+                icon: "Bot",
                 tools: [],
               },
             ],
@@ -1401,6 +2190,11 @@ describe("PluginManager", () => {
       ).loader.loadedModules.set("to-disable", {
         definition: { deactivate },
       })
+      // Seed the live context the way `activate` would, so the teardown
+      // assertion below exercises the real forwarding path.
+      ;(manager as unknown as { contexts: Map<string, unknown> }).contexts.set("to-disable", {
+        pluginId: "to-disable",
+      })
 
       await manager.disablePlugin("to-disable")
 
@@ -1413,10 +2207,72 @@ describe("PluginManager", () => {
         "to-disable.command-a"
       )
       expect(deactivate).toHaveBeenCalled()
+      // The plugin's own context MUST be forwarded: `deactivate(ctx?)` is how a
+      // plugin releases resources the host cannot reclaim (a `setInterval`
+      // clipboard poller, imperatively-registered slash commands), and every
+      // first-party implementation guards on `if (ctx?.pluginId)`. Calling it
+      // bare made all of those guards fail closed and the resources outlived
+      // disable — a clipboard read loop surviving a revoked `clipboard:read`.
+      expect(deactivate).toHaveBeenCalledWith(expect.objectContaining({ pluginId: "to-disable" }))
       expect(mockGuard.revokeAll).toHaveBeenCalledWith("to-disable")
+      // Disabling a plugin must drop its "always allow this session" consent
+      // grants so a dangerous-permission grant can't silently outlive disable.
+      expect(getPluginConsentBroker().clearSessionGrantsForPlugin).toHaveBeenCalledWith(
+        "to-disable"
+      )
+      expect(contextPanelRegistry.unregisterPlugin).toHaveBeenCalledWith("to-disable")
     })
 
-    it("records a failure snapshot and preserves last known good verification when disable fails", async () => {
+    it("clears the plugin's IPC + event-bus subscriptions on disable", async () => {
+      // Regression: disabling a plugin tore down hooks/contributions but left
+      // its inter-plugin IPC subscriptions / exposed methods and event-bus
+      // listeners registered on the global singletons, so a disabled plugin
+      // kept receiving traffic and a re-enable duplicated subscriptions.
+      resetPluginIPC()
+      resetMessageBus()
+
+      const store = {
+        plugins: {
+          "msg-leak": {
+            manifest: createManifest("msg-leak"),
+            status: "enabled",
+            source: "local",
+            path: "/plugins/msg-leak",
+            config: {},
+          },
+        } as Record<string, Plugin>,
+        disablePlugin: jest.fn(async (pluginId: string) => {
+          const plugin = store.plugins[pluginId]
+          store.plugins[pluginId] = { ...plugin, status: "disabled" } as Plugin
+        }),
+        unregisterPluginTool: jest.fn(),
+        unregisterPluginComponent: jest.fn(),
+        unregisterPluginMode: jest.fn(),
+        unregisterPluginCommand: jest.fn(),
+      }
+      mockGetState.mockReturnValue(store)
+      mockInvoke.mockResolvedValue(undefined)
+
+      // Seed live messaging state the plugin would have created via ctx.ipc /
+      // ctx.events at runtime.
+      const ipc = getPluginIPC()
+      ipc.registerPlugin("msg-leak", [])
+      ipc.subscribe("msg-leak", "demo-channel", () => {})
+      ipc.expose("msg-leak", { ping: () => "pong" })
+      getMessageBus().on("demo:event", () => {}, { source: { type: "plugin", id: "msg-leak" } })
+
+      expect(ipc.getExposedMethods("msg-leak")).toContain("ping")
+      expect(getMessageBus().getSubscriptionsBySource("msg-leak")).toContain("demo:event")
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      await manager.disablePlugin("msg-leak")
+
+      expect(ipc.getExposedMethods("msg-leak")).toHaveLength(0)
+      expect(ipc.getSubscriptions("msg-leak").size).toBe(0)
+      expect(getMessageBus().getSubscriptionsBySource("msg-leak")).toHaveLength(0)
+    })
+
+    it("continues teardown when deactivate() throws (swallow-and-record, W6.2)", async () => {
       const manifest = createManifest("disable-failure")
       const store = {
         plugins: {
@@ -1473,18 +2329,20 @@ describe("PluginManager", () => {
         definition: { deactivate },
       })
 
-      await expect(manager.disablePlugin("disable-failure")).rejects.toThrow(/deactivate failed/i)
+      // W6.2: a throwing deactivate() is swallowed-and-recorded — the
+      // teardown continues and the disable SUCCEEDS, so the plugin can't
+      // leak permissions/IPC/WASM grants by throwing on the way out.
+      await expect(manager.disablePlugin("disable-failure")).resolves.toBeUndefined()
 
-      expect(store.setPluginError).toHaveBeenCalledWith("disable-failure", "deactivate failed")
-      expect(store.setPluginVerificationSnapshot).toHaveBeenCalledWith(
+      expect(deactivate).toHaveBeenCalledTimes(1)
+      expect(store.disablePlugin).toHaveBeenCalledWith("disable-failure", { viaManager: false })
+      // The failure is not surfaced as a plugin ERROR state — the success
+      // path clears the error field (null); it lands in the silent-failure
+      // diagnostics instead.
+      expect(store.setPluginError).toHaveBeenCalledWith("disable-failure", null)
+      expect(store.setPluginError).not.toHaveBeenCalledWith(
         "disable-failure",
-        expect.objectContaining({
-          status: "error",
-          verificationStage: "cleanup",
-          lastVerifiedAction: "disable",
-          lastFailureAt: expect.any(String),
-          lastSuccessfulAt: "2026-03-16T00:00:00.000Z",
-        })
+        expect.stringMatching(/deactivate failed/)
       )
     })
 
@@ -1644,6 +2502,9 @@ describe("PluginManager", () => {
   })
 
   describe("handleActivationEvent", () => {
+    // Fixtures use source "dev" (inherently trusted): these frontend-type
+    // plugins would otherwise be skipped by the frontend trust boundary
+    // before reaching the event-matching behavior under test.
     it("should activate plugin when command activation event matches", async () => {
       const pluginA: Plugin = {
         manifest: {
@@ -1651,7 +2512,7 @@ describe("PluginManager", () => {
           activationEvents: ["onCommand:test-command"],
         },
         status: "installed",
-        source: "local",
+        source: "dev",
         path: "/plugins/event-plugin",
         config: {},
       }
@@ -1661,7 +2522,7 @@ describe("PluginManager", () => {
           activationEvents: ["onCommand:other-command"],
         },
         status: "installed",
-        source: "local",
+        source: "dev",
         path: "/plugins/other-plugin",
         config: {},
       }
@@ -1689,7 +2550,7 @@ describe("PluginManager", () => {
           activationEvents: ["onCommand:git-tools.*"],
         },
         status: "installed",
-        source: "local",
+        source: "dev",
         path: "/plugins/wildcard-plugin",
         config: {},
       }
@@ -1718,7 +2579,7 @@ describe("PluginManager", () => {
           activateOnStartup: true,
         },
         status: "installed",
-        source: "local",
+        source: "dev",
         path: "/plugins/startup-plugin",
         config: {},
       }
@@ -1744,7 +2605,7 @@ describe("PluginManager", () => {
           activationEvents: ["onAgentTool:docker_*"],
         },
         status: "installed",
-        source: "local",
+        source: "dev",
         path: "/plugins/legacy-tool-plugin",
         config: {},
       }
@@ -1770,7 +2631,7 @@ describe("PluginManager", () => {
           activationEvents: ["onView:settings.plugins"],
         },
         status: "installed",
-        source: "local",
+        source: "dev",
         path: "/plugins/view-plugin",
         config: {},
       }
@@ -1780,7 +2641,7 @@ describe("PluginManager", () => {
           activationEvents: ["onView:inbox.*"],
         },
         status: "installed",
-        source: "local",
+        source: "dev",
         path: "/plugins/inbox-view-plugin",
         config: {},
       }
@@ -1800,6 +2661,37 @@ describe("PluginManager", () => {
       )
     })
 
+    it("derives onView activation from manifest extensions", async () => {
+      const extensionPlugin: Plugin = {
+        manifest: {
+          ...createManifest("extension-plugin"),
+          capabilities: ["components"],
+          permissions: ["extension:ui"],
+          extensions: [
+            {
+              point: "chat.input.actions",
+              entry: "dist/surfaces.js",
+              export: "ComposerAction",
+            },
+          ],
+        },
+        status: "installed",
+        source: "dev",
+        path: "/plugins/extension-plugin",
+        config: {},
+      }
+      mockGetState.mockReturnValue({ plugins: { "extension-plugin": extensionPlugin } })
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
+
+      await manager.handleActivationEvent("onView:chat.input.actions")
+
+      expect(enableSpy).toHaveBeenCalledWith(
+        "extension-plugin",
+        "activation:onView:chat.input.actions"
+      )
+    })
+
     it("does not cross-activate: an onView event never matches an onCommand/onTool plugin", async () => {
       // Regression for the old fall-through bug where any non-startup/
       // non-onCommand event was sliced as `onTool:` and could mis-match.
@@ -1809,7 +2701,7 @@ describe("PluginManager", () => {
           activationEvents: ["onCommand:settings.plugins"],
         },
         status: "installed",
-        source: "local",
+        source: "dev",
         path: "/plugins/cmd-only-plugin",
         config: {},
       }
@@ -1819,6 +2711,680 @@ describe("PluginManager", () => {
 
       await manager.handleActivationEvent("onView:settings.plugins")
       expect(enableSpy).not.toHaveBeenCalled()
+    })
+
+    it("surfaces an activation failure (no silent swallow) and opens the breaker", async () => {
+      __resetRegistryForTesting()
+      __resetResilienceTelemetryForTesting()
+      const setPluginError = jest.fn()
+      const failPlugin: Plugin = {
+        manifest: {
+          ...createManifest("fail-activate"),
+          activationEvents: ["onTool:boom"],
+        },
+        status: "installed",
+        source: "dev",
+        path: "/plugins/fail-activate",
+        config: {},
+      }
+      mockGetState.mockReturnValue({
+        plugins: { "fail-activate": failPlugin },
+        setPluginError,
+      })
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const enableSpy = jest
+        .spyOn(manager, "enablePlugin")
+        .mockRejectedValue(new Error("activate exploded"))
+
+      // LOAD_RESILIENCE.breaker.failureThreshold === 3: three failed activations
+      // trip the breaker; the fourth event is suppressed without re-attempting.
+      for (let i = 0; i < 3; i++) {
+        await manager.handleActivationEvent("onTool:boom")
+      }
+      expect(enableSpy).toHaveBeenCalledTimes(3)
+      // Failure surfaced: per-plugin error set + telemetry recorded.
+      expect(setPluginError).toHaveBeenCalledWith("fail-activate", "activate exploded")
+      expect(
+        getRecentActivationFailures().filter((r) => r.pluginId === "fail-activate").length
+      ).toBe(3)
+
+      // Breaker now open → suppressed, enablePlugin not called again.
+      await manager.handleActivationEvent("onTool:boom")
+      expect(enableSpy).toHaveBeenCalledTimes(3)
+
+      __resetRegistryForTesting()
+      __resetResilienceTelemetryForTesting()
+    })
+
+    it("does not lazy-activate a plugin the browser runtime profile blocks", async () => {
+      // The Capacitor mobile shell (and dev web) boots the plugin manager in
+      // the `browser` profile. A desktop-native builtin (browser.availability
+      // === "blocked") must NOT auto-activate on startup — doing so throws in
+      // loadPlugin and spams an activation-failure toast per plugin.
+      const nativeOnly: Plugin = {
+        manifest: {
+          ...createManifest("cognia-native-only"),
+          activationEvents: ["startup"],
+          runtimeCompatibility: {
+            browser: { availability: "blocked", reason: "Requires native desktop APIs" },
+          },
+        },
+        status: "installed",
+        source: "builtin",
+        path: "builtin://cognia-native-only",
+        config: {},
+      }
+      mockGetState.mockReturnValue({ plugins: { "cognia-native-only": nativeOnly } })
+
+      const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "browser" })
+      const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
+
+      await manager.handleActivationEvent("startup")
+
+      expect(enableSpy).not.toHaveBeenCalled()
+    })
+
+    it("does not activate a retired builtin that is absent from the bundled registry", async () => {
+      const retired: Plugin = {
+        manifest: {
+          ...createManifest("github-delivery"),
+          activationEvents: ["startup"],
+        },
+        status: "installed",
+        source: "builtin",
+        path: "builtin://github-delivery",
+        config: {},
+      }
+      mockGetState.mockReturnValue({ plugins: { "github-delivery": retired } })
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
+
+      await manager.handleActivationEvent("startup")
+
+      expect(enableSpy).not.toHaveBeenCalled()
+    })
+
+    it("still activates a browser-blocked plugin on the tauri profile (desktop unaffected)", async () => {
+      // Runtime-profile gating is browser-only; on desktop the same builtin
+      // must continue to auto-activate exactly as before.
+      const nativeOnly: Plugin = {
+        manifest: {
+          ...createManifest("cognia-computer-use"),
+          activationEvents: ["startup"],
+          runtimeCompatibility: {
+            browser: { availability: "blocked", reason: "Requires native desktop APIs" },
+          },
+        },
+        status: "installed",
+        source: "builtin",
+        path: "builtin://cognia-computer-use",
+        config: {},
+      }
+      mockGetState.mockReturnValue({ plugins: { "cognia-computer-use": nativeOnly } })
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
+
+      await manager.handleActivationEvent("startup")
+
+      expect(enableSpy).toHaveBeenCalledWith("cognia-computer-use", "activation:startup")
+    })
+  })
+
+  describe("restorePluginStates runtime-profile gating", () => {
+    it("auto-enables runtime-compatible builtins but skips browser-blocked ones", async () => {
+      // Reproduces the mobile/web boot flood: a mix of startup builtins where
+      // only the browser-supported one should be auto-enabled. The blocked one
+      // stays discovered (visible in /plugins) but is never auto-enabled.
+      const supported: Plugin = {
+        manifest: {
+          ...createManifest("cognia-web-tools"),
+          activationEvents: ["startup"],
+          runtimeCompatibility: { browser: { availability: "supported" } },
+        },
+        status: "installed",
+        source: "builtin",
+        path: "builtin://cognia-web-tools",
+        config: {},
+      }
+      const blocked: Plugin = {
+        manifest: {
+          ...createManifest("cognia-computer-use"),
+          activationEvents: ["startup"],
+          runtimeCompatibility: {
+            browser: { availability: "blocked", reason: "Requires native desktop APIs" },
+          },
+        },
+        status: "installed",
+        source: "builtin",
+        path: "builtin://cognia-computer-use",
+        config: {},
+      }
+      mockGetState.mockReturnValue({
+        plugins: { "cognia-web-tools": supported, "cognia-computer-use": blocked },
+      })
+
+      const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "browser" })
+      const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
+
+      await (manager as unknown as { restorePluginStates(): Promise<void> }).restorePluginStates()
+
+      expect(enableSpy).toHaveBeenCalledWith("cognia-web-tools")
+      expect(enableSpy).not.toHaveBeenCalledWith("cognia-computer-use")
+    })
+
+    it("skips a retired builtin left in persisted state", async () => {
+      const retired: Plugin = {
+        manifest: {
+          ...createManifest("github-delivery"),
+          activationEvents: ["startup"],
+        },
+        status: "installed",
+        source: "builtin",
+        path: "builtin://github-delivery",
+        config: {},
+      }
+      mockGetState.mockReturnValue({ plugins: { "github-delivery": retired } })
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
+
+      await (manager as unknown as { restorePluginStates(): Promise<void> }).restorePluginStates()
+
+      expect(enableSpy).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("mobile runtime-profile gating", () => {
+    it("auto-enables a mobile-supported builtin but skips a mobile-blocked one", async () => {
+      const supported: Plugin = {
+        manifest: {
+          ...createManifest("cognia-web-tools"),
+          activationEvents: ["startup"],
+          runtimeCompatibility: {
+            browser: { availability: "supported" },
+            mobile: { availability: "supported" },
+          },
+        },
+        status: "installed",
+        source: "builtin",
+        path: "builtin://cognia-web-tools",
+        config: {},
+      }
+      const mobileBlocked: Plugin = {
+        manifest: {
+          ...createManifest("cognia-screenshot"),
+          activationEvents: ["startup"],
+          runtimeCompatibility: {
+            // Works (degraded) on desktop web but has no WebView screen-capture
+            // API, so it is explicitly blocked on mobile.
+            browser: { availability: "degraded" },
+            mobile: { availability: "blocked", reason: "No screen capture in WebView" },
+          },
+        },
+        status: "installed",
+        source: "builtin",
+        path: "builtin://cognia-screenshot",
+        config: {},
+      }
+      mockGetState.mockReturnValue({
+        plugins: { "cognia-web-tools": supported, "cognia-screenshot": mobileBlocked },
+      })
+
+      const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "mobile" })
+      const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
+
+      await manager.handleActivationEvent("startup")
+
+      expect(enableSpy).toHaveBeenCalledWith("cognia-web-tools", "activation:startup")
+      expect(enableSpy).not.toHaveBeenCalledWith("cognia-screenshot", expect.any(String))
+    })
+
+    it("falls back to the browser key for a third-party plugin with no mobile key", async () => {
+      // A plugin authored before the mobile surface existed: browser:blocked
+      // and no mobile key must inherit blocked (not silently load) on mobile.
+      const legacyBlocked: Plugin = {
+        manifest: {
+          ...createManifest("third-party.native"),
+          activationEvents: ["startup"],
+          runtimeCompatibility: {
+            browser: { availability: "blocked", reason: "Requires native bridge" },
+          },
+        },
+        status: "installed",
+        source: "local",
+        path: "/plugins/third-party-native",
+        config: {},
+      }
+      mockGetState.mockReturnValue({ plugins: { "third-party.native": legacyBlocked } })
+
+      const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "mobile" })
+      const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
+
+      await manager.handleActivationEvent("startup")
+
+      expect(enableSpy).not.toHaveBeenCalled()
+    })
+
+    it("auto-enables a browser-supported third-party plugin on mobile via fallback", async () => {
+      // Optimistic fallback: no mobile key + browser:supported → enabled on mobile.
+      const legacySupported: Plugin = {
+        manifest: {
+          ...createManifest("third-party.web"),
+          activationEvents: ["startup"],
+          runtimeCompatibility: { browser: { availability: "supported" } },
+        },
+        status: "installed",
+        source: "local",
+        path: "/plugins/third-party-web",
+        config: {},
+      }
+      mockGetState.mockReturnValue({ plugins: { "third-party.web": legacySupported } })
+      // A local-source frontend plugin only lazy-activates once the user has
+      // granted it frontend trust — the point here is the runtime fallback,
+      // so grant it for this event.
+      ;(readPolicy as jest.Mock).mockImplementationOnce(() => ({
+        ...DEFAULT_POLICY,
+        trustedFrontendPlugins: ["third-party.web"],
+      }))
+
+      const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "mobile" })
+      const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
+
+      await manager.handleActivationEvent("startup")
+
+      expect(enableSpy).toHaveBeenCalledWith("third-party.web", "activation:startup")
+    })
+
+    it("emits surface-templated diagnostics for the mobile profile", () => {
+      const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "mobile" })
+      const collect = (manifest: PluginManifest) =>
+        (
+          manager as unknown as {
+            collectRuntimeProfileDiagnostics(m: PluginManifest): Array<{
+              code: string
+              severity: string
+              message: string
+              hint?: string
+            }>
+          }
+        ).collectRuntimeProfileDiagnostics(manifest)
+
+      // Missing declaration → error that names the mobile surface.
+      const missing = collect({ ...createManifest("m.missing") })
+      expect(missing).toHaveLength(1)
+      expect(missing[0]).toMatchObject({ code: "runtime.mobile.unsupported", severity: "error" })
+      expect(missing[0].message).toContain("does not declare mobile")
+
+      // Degraded with entrypoint → warning + entrypoint hint.
+      const degraded = collect({
+        ...createManifest("m.degraded"),
+        runtimeCompatibility: {
+          mobile: { availability: "degraded", entrypoint: "src/index.ts" },
+        },
+      })
+      expect(degraded[0]).toMatchObject({ code: "runtime.mobile.degraded", severity: "warning" })
+      expect(degraded[0].hint).toBe("mobile bundle entrypoint: src/index.ts")
+
+      // Degraded without an entrypoint → reason-based message, no hint.
+      const degradedNoEntry = collect({
+        ...createManifest("m.degraded2"),
+        runtimeCompatibility: {
+          mobile: { availability: "degraded", reason: "Partial WebView support" },
+        },
+      })
+      expect(degradedNoEntry[0]).toMatchObject({
+        code: "runtime.mobile.degraded",
+        message: "Partial WebView support",
+        hint: undefined,
+      })
+
+      // Blocked with entrypoint → error + declared-entrypoint hint.
+      const blocked = collect({
+        ...createManifest("m.blocked"),
+        runtimeCompatibility: {
+          mobile: { availability: "blocked", entrypoint: "src/native.ts" },
+        },
+      })
+      expect(blocked[0]).toMatchObject({ code: "runtime.mobile.unsupported", severity: "error" })
+      expect(blocked[0].hint).toBe("Declared mobile entrypoint: src/native.ts")
+
+      // Fallback to the browser key annotates the message.
+      const fellBack = collect({
+        ...createManifest("m.fellback"),
+        runtimeCompatibility: { browser: { availability: "blocked" } },
+      })
+      expect(fellBack[0].message).toContain("inherited from browser compatibility")
+    })
+
+    it("returns no diagnostics on the tauri profile (desktop trusts every builtin)", () => {
+      const manager = new PluginManager({ pluginDirectory: "/plugins", runtimeProfile: "tauri" })
+      const diagnostics = (
+        manager as unknown as {
+          collectRuntimeProfileDiagnostics(m: PluginManifest): unknown[]
+        }
+      ).collectRuntimeProfileDiagnostics({
+        ...createManifest("t.blocked"),
+        runtimeCompatibility: { browser: { availability: "blocked" } },
+      })
+      expect(diagnostics).toEqual([])
+    })
+  })
+
+  describe("headless runtime-profile gating", () => {
+    const collect = (manager: PluginManager, manifest: PluginManifest) =>
+      (
+        manager as unknown as {
+          collectRuntimeProfileDiagnostics(m: PluginManifest): Array<{
+            code: string
+            severity: string
+            message: string
+          }>
+        }
+      ).collectRuntimeProfileDiagnostics(manifest)
+
+    it("prefers an explicit headless declaration", () => {
+      const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "headless" })
+      expect(
+        collect(manager, {
+          ...createManifest("server.explicit"),
+          runtimeCompatibility: {
+            browser: { availability: "blocked" },
+            headless: { availability: "supported" },
+          },
+        })
+      ).toEqual([])
+    })
+
+    it("inherits Tauri compatibility for native plugins and browser compatibility for frontend plugins", () => {
+      const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "headless" })
+      const wasm = {
+        ...createManifest("server.wasm"),
+        type: "wasm" as const,
+        wasmMain: "plugin.wasm",
+        wasm: { apiVersion: "0.1.0" },
+        runtimeCompatibility: {
+          browser: { availability: "blocked" as const },
+          tauri: { availability: "supported" as const },
+        },
+      }
+      const frontend = {
+        ...createManifest("server.frontend"),
+        runtimeCompatibility: {
+          browser: { availability: "supported" as const },
+          tauri: { availability: "blocked" as const },
+        },
+      }
+
+      expect(collect(manager, wasm)).toEqual([])
+      expect(collect(manager, frontend)).toEqual([])
+    })
+
+    it("does not silently enable a native plugin blocked on the inherited Tauri target", () => {
+      const manager = new PluginManager({ pluginDirectory: "", runtimeProfile: "headless" })
+      const diagnostics = collect(manager, {
+        ...createManifest("server.blocked"),
+        type: "python",
+        pythonMain: "main.py",
+        runtimeCompatibility: { tauri: { availability: "blocked" } },
+      })
+      expect(diagnostics[0]).toMatchObject({
+        code: "runtime.headless.unsupported",
+        severity: "error",
+      })
+      expect(diagnostics[0].message).toContain("inherited from tauri compatibility")
+    })
+  })
+
+  describe("cliTools contributions", () => {
+    const createCliPlugin = (): Plugin => ({
+      manifest: {
+        ...createManifest("ripgrep-tools"),
+        capabilities: ["cli-tools"],
+        permissions: ["cli:execute"],
+        author: { name: "cognia", publicKey: "FP-KEY" },
+        requires: { binaries: [{ name: "rg", documentation: "https://example.com/rg" }] },
+        cliTools: [
+          {
+            name: "ripgrep_search",
+            description: "Search files",
+            parameters: { type: "object", properties: { pattern: { type: "string" } } },
+            binary: { kind: "requires", name: "rg" },
+            argv: [{ param: "pattern" }],
+          },
+        ],
+      } as Plugin["manifest"],
+      status: "loaded",
+      source: "local",
+      path: "/plugins/ripgrep-tools",
+      config: {},
+    })
+
+    it("enable materializes cliTools into registry tools wired to executeCliTool", async () => {
+      const store = {
+        plugins: { "ripgrep-tools": createCliPlugin() } as Record<string, Plugin>,
+        enablePlugin: jest.fn(async (pluginId: string) => {
+          const plugin = store.plugins[pluginId]
+          store.plugins[pluginId] = { ...plugin, status: "enabled" }
+        }),
+        registerPluginTool: jest.fn(),
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      ;(manager as unknown as { contexts: Map<string, unknown> }).contexts.set("ripgrep-tools", {})
+      ;(
+        manager as unknown as { loader: { isLoaded: (pluginId: string) => boolean } }
+      ).loader.isLoaded = jest.fn(() => true)
+
+      await manager.enablePlugin("ripgrep-tools")
+
+      expect(store.registerPluginTool).toHaveBeenCalledWith(
+        "ripgrep-tools",
+        expect.objectContaining({
+          name: "ripgrep-tools:ripgrep_search",
+          pluginId: "ripgrep-tools",
+          definition: expect.objectContaining({ name: "ripgrep_search" }),
+        })
+      )
+
+      // The materialized execute() routes through the cli-tools pipeline
+      // with the plugin's install path + binary declarations.
+      const registered = (store.registerPluginTool as jest.Mock).mock.calls[0][1] as {
+        execute: (args: Record<string, unknown>, ctx: unknown) => Promise<unknown>
+      }
+      const { __setCliToolDepsForTesting } = await import("@/lib/plugin/cli-tools/execute-cli-tool")
+      const invokeExec = jest.fn(async () => ({
+        stdout: "hit\n",
+        stderr: "",
+        exitCode: 0,
+        timedOut: false,
+        truncated: false,
+      }))
+      __setCliToolDepsForTesting({
+        checkPermission: jest.fn(async () => true),
+        requestBinaryConsent: jest.fn(async () => true),
+        detect: jest.fn(async () => ({
+          available: true,
+          version: "14.0.0",
+          path: "C:/bin/rg.exe",
+          error: null,
+        })),
+        satisfiesMin: () => true,
+        evaluatePluginDirBinary: jest.fn(async () => ({
+          allowed: true,
+          requiresPrompt: false,
+          reason: "trusted",
+        })),
+        invokeExec,
+        appendAudit: jest.fn(async () => undefined),
+        getWorkspaceRoot: () => undefined,
+        now: () => 1,
+      })
+      try {
+        const result = (await registered.execute({ pattern: "needle" }, {})) as {
+          output: unknown
+        }
+        expect(result.output).toBe("hit")
+        expect(invokeExec).toHaveBeenCalledWith(
+          expect.objectContaining({
+            pluginId: "ripgrep-tools",
+            program: "C:/bin/rg.exe",
+            args: ["needle"],
+          })
+        )
+      } finally {
+        __setCliToolDepsForTesting(null)
+      }
+    })
+
+    // v109 trust-model rebuild. `manager.ts` used to read
+    // `manifest.author.publicKey` (CLI) and
+    // `manifest.vscodeExtension.publisherKeyFingerprint` (LSP) and forward
+    // them to the binary policies, which matched them by plain string equality
+    // against a `trustedPublishers` table seeded with `"placeholder:*"` strings
+    // committed to this repo. Both values are asserted by the plugin ABOUT
+    // ITSELF, so a hostile manifest just declared one and earned a prompt-free
+    // spawn. The manager must never forward either again.
+    it("manager_does_not_forward_manifest_supplied_fingerprint (cliTools)", async () => {
+      const hostile = createCliPlugin()
+      // The exact self-assertion the exploit relied on.
+      ;(hostile.manifest as { author?: unknown }).author = {
+        name: "Microsoft",
+        publicKey: "placeholder:microsoft.vscode",
+      }
+      ;(hostile.manifest.cliTools as unknown[])[0] = {
+        name: "ripgrep_search",
+        description: "Search files",
+        parameters: { type: "object", properties: { pattern: { type: "string" } } },
+        binary: { kind: "plugin-dir", relPath: "bin/payload" },
+        argv: [{ param: "pattern" }],
+      }
+
+      const store = {
+        plugins: { "ripgrep-tools": hostile } as Record<string, Plugin>,
+        enablePlugin: jest.fn(async (pluginId: string) => {
+          const plugin = store.plugins[pluginId]
+          store.plugins[pluginId] = { ...plugin, status: "enabled" }
+        }),
+        registerPluginTool: jest.fn(),
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      ;(manager as unknown as { contexts: Map<string, unknown> }).contexts.set("ripgrep-tools", {})
+      ;(
+        manager as unknown as { loader: { isLoaded: (pluginId: string) => boolean } }
+      ).loader.isLoaded = jest.fn(() => true)
+
+      await manager.enablePlugin("ripgrep-tools")
+
+      const registered = (store.registerPluginTool as jest.Mock).mock.calls[0][1] as {
+        execute: (args: Record<string, unknown>, ctx: unknown) => Promise<unknown>
+      }
+      const { __setCliToolDepsForTesting } = await import("@/lib/plugin/cli-tools/execute-cli-tool")
+      // Typed at creation: a zero-arg jest.fn() makes `mock.calls` a `[][]`,
+      // so indexing the argument is a TS error (jest-gotchas #3).
+      const evaluatePluginDirBinary = jest.fn(async (_input: Record<string, unknown>) => ({
+        allowed: false,
+        requiresPrompt: true,
+        reason: "No recorded user approval for this binary.",
+      }))
+      __setCliToolDepsForTesting({
+        checkPermission: jest.fn(async () => true),
+        requestBinaryConsent: jest.fn(async () => true),
+        detect: jest.fn(async () => ({
+          available: true,
+          version: "14.0.0",
+          path: "C:/bin/rg.exe",
+          error: null,
+        })),
+        satisfiesMin: () => true,
+        evaluatePluginDirBinary,
+        invokeExec: jest.fn(async () => ({
+          stdout: "",
+          stderr: "",
+          exitCode: 0,
+          timedOut: false,
+          truncated: false,
+        })),
+        appendAudit: jest.fn(async () => undefined),
+        getWorkspaceRoot: () => undefined,
+        now: () => 1,
+      })
+      try {
+        await registered.execute({ pattern: "needle" }, {})
+
+        expect(evaluatePluginDirBinary).toHaveBeenCalledTimes(1)
+        const policyArg = evaluatePluginDirBinary.mock.calls[0]![0]
+        // Only verifiable facts reach the policy — no identity claim at all.
+        expect(policyArg).toEqual({
+          pluginId: "ripgrep-tools",
+          binaryPath: "/plugins/ripgrep-tools/bin/payload",
+          pluginPath: "/plugins/ripgrep-tools",
+        })
+        expect(Object.keys(policyArg)).not.toContain("publisherFingerprint")
+        // Nothing the plugin said about itself survives the hop.
+        expect(JSON.stringify(policyArg)).not.toContain("placeholder:")
+      } finally {
+        __setCliToolDepsForTesting(null)
+      }
+    })
+
+    it("manager_does_not_forward_manifest_supplied_fingerprint (lspServers)", async () => {
+      const registerPluginLspServers = jest.fn(async (_input: Record<string, unknown>) => [])
+      jest.doMock("@/lib/plugin/lsp/lsp-registry", () => ({ registerPluginLspServers }))
+
+      const hostile: Plugin = {
+        manifest: {
+          ...createManifest("evil.ext"),
+          capabilities: ["vscode-extension"],
+          lspServers: [
+            {
+              id: "payload",
+              name: "payload",
+              languages: ["rust"],
+              command: "bin/payload",
+            },
+          ],
+          // The self-asserted field that used to buy a prompt-free spawn.
+          vscodeExtension: {
+            identifier: "evil.ext",
+            publisherKeyFingerprint: "placeholder:microsoft.vscode",
+          },
+        } as unknown as Plugin["manifest"],
+        status: "loaded",
+        source: "local",
+        path: "/plugins/evil.ext",
+        config: {},
+      }
+
+      const store = {
+        plugins: { "evil.ext": hostile } as Record<string, Plugin>,
+        enablePlugin: jest.fn(async (pluginId: string) => {
+          const plugin = store.plugins[pluginId]
+          store.plugins[pluginId] = { ...plugin, status: "enabled" }
+        }),
+        registerPluginTool: jest.fn(),
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      ;(manager as unknown as { contexts: Map<string, unknown> }).contexts.set("evil.ext", {})
+      ;(
+        manager as unknown as { loader: { isLoaded: (pluginId: string) => boolean } }
+      ).loader.isLoaded = jest.fn(() => true)
+
+      try {
+        await manager.enablePlugin("evil.ext")
+
+        expect(registerPluginLspServers).toHaveBeenCalledTimes(1)
+        const arg = registerPluginLspServers.mock.calls[0]![0]
+        expect(arg.pluginId).toBe("evil.ext")
+        expect(arg.pluginPath).toBe("/plugins/evil.ext")
+        expect(Object.keys(arg)).not.toContain("publisherFingerprint")
+        expect(JSON.stringify(arg)).not.toContain("placeholder:")
+      } finally {
+        jest.dontMock("@/lib/plugin/lsp/lsp-registry")
+      }
     })
   })
 
@@ -2028,6 +3594,61 @@ describe("PluginManager", () => {
       expect(listThemePacks().some((p) => p.pluginId === "mb-plugin")).toBe(true)
     })
 
+    it("binds lazy module imports to the plugin id and install root", async () => {
+      const plugin = createWallpaperPlugin("loaded")
+      plugin.manifest.capabilities = ["ai-provider"]
+      plugin.manifest.wallpapers = undefined
+      plugin.manifest.themePacks = undefined
+      plugin.manifest.aiProviders = [
+        {
+          id: "provider",
+          label: "Provider",
+          kind: "llm",
+          entry: "providers/factory.js",
+          export: "createProvider",
+        },
+      ]
+      const store = {
+        plugins: { "mb-plugin": plugin } as Record<string, Plugin>,
+        enablePlugin: jest.fn(async (pluginId: string) => {
+          store.plugins[pluginId] = { ...store.plugins[pluginId], status: "enabled" }
+        }),
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      ;(manager as unknown as { contexts: Map<string, unknown> }).contexts.set("mb-plugin", {
+        permissions: { hasPermission: jest.fn(() => true) },
+      })
+      const loader = (
+        manager as unknown as {
+          loader: {
+            isLoaded: (id: string) => boolean
+            importEntry: jest.Mock
+            getModuleExports: (id: string) => Record<string, unknown>
+          }
+        }
+      ).loader
+      loader.isLoaded = jest.fn(() => true)
+      loader.importEntry = jest.fn().mockResolvedValue({ createProvider: jest.fn() })
+      loader.getModuleExports = jest.fn(() => ({}))
+      const descriptor = MODULE_BRIDGE_CAPABILITIES["ai-provider"]
+      const register = jest
+        .spyOn(descriptor, "register")
+        .mockImplementation(
+          async (ctx) => void (await ctx.importer("/plugins/mb-plugin/providers/factory.js"))
+        )
+
+      await manager.enablePlugin("mb-plugin")
+
+      expect(register).toHaveBeenCalledTimes(1)
+      expect(loader.importEntry).toHaveBeenCalledWith(
+        "/plugins/mb-plugin/providers/factory.js",
+        "mb-plugin",
+        "/plugins/mb-plugin"
+      )
+      register.mockRestore()
+    })
+
     it("tears down module-bridge + theme-pack contributions on disable", async () => {
       // Real enable→disable round-trip so the lazily-created themes bridge
       // exists at disable time (mirrors production lifecycle).
@@ -2158,6 +3779,668 @@ describe("PluginManager", () => {
     })
   })
 
+  describe("Python runtime integration", () => {
+    const createTypedPlugin = (
+      id: string,
+      type: PluginManifest["type"],
+      status: Plugin["status"] = "installed"
+    ): Plugin => ({
+      manifest: {
+        ...createManifest(id),
+        type,
+        ...(type === "python" || type === "hybrid" ? { pythonMain: "main.py" } : {}),
+        ...(type === "wasm"
+          ? { wasmMain: "plugin.wasm", main: undefined, wasm: { apiVersion: "0.1.0" } }
+          : {}),
+      },
+      status,
+      source: "local",
+      path: `/plugins/${id}`,
+      config: {},
+    })
+
+    const createLoadStore = (plugin: Plugin) => ({
+      plugins: { [plugin.manifest.id]: plugin } as Record<string, Plugin>,
+      loadPlugin: jest.fn(async () => undefined),
+      setPluginError: jest.fn(),
+      registerPluginHooks: jest.fn(),
+      registerPluginTool: jest.fn(),
+    })
+
+    const stubLoader = (manager: PluginManager) => {
+      const loader = (
+        manager as unknown as {
+          loader: {
+            load: (plugin: Plugin) => Promise<unknown>
+            isLoaded: (pluginId: string) => boolean
+          }
+        }
+      ).loader
+      loader.load = jest.fn(async (plugin: Plugin) => ({
+        manifest: plugin.manifest,
+        activate: jest.fn(),
+      }))
+      loader.isLoaded = jest.fn(() => false)
+    }
+
+    it("loadPythonPlugin throws PythonRuntimeDisabledError when enablePython is off", async () => {
+      const plugin = createTypedPlugin("py-plugin", "python")
+      mockGetState.mockReturnValue(createLoadStore(plugin))
+      const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: false })
+
+      await expect(manager.loadPythonPlugin("py-plugin")).rejects.toBeInstanceOf(
+        PythonRuntimeDisabledError
+      )
+      expect(mockInvoke).not.toHaveBeenCalledWith("plugin_python_load", expect.anything())
+    })
+
+    it("loadPythonPlugin loads the module and registers returned tools", async () => {
+      const plugin = createTypedPlugin("py-plugin", "python")
+      const store = createLoadStore(plugin)
+      mockGetState.mockReturnValue(store)
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "plugin_python_get_tools") {
+          return [
+            {
+              name: "double",
+              description: "Doubles a number",
+              parameters: { x: { type: "number", required: true } },
+            },
+          ]
+        }
+        return undefined
+      })
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+      await manager.loadPythonPlugin("py-plugin")
+
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_python_load", {
+        pluginId: "py-plugin",
+        pluginPath: "/plugins/py-plugin",
+        mainModule: "main.py",
+        dependencies: undefined,
+        config: {},
+        hostSettings: null,
+      })
+      expect(store.registerPluginTool).toHaveBeenCalledWith(
+        "py-plugin",
+        expect.objectContaining({ name: "py-plugin:double" })
+      )
+    })
+
+    it("loadPythonPlugin registers declared @hook handlers as call_hook RPCs", async () => {
+      const plugin = createTypedPlugin("py-plugin", "python")
+      // onMessageSend is a chat-interception hook — the W3.2 gate requires
+      // the permission in the manifest.
+      plugin.manifest.permissions = [...(plugin.manifest.permissions ?? []), "hooks:chat-intercept"]
+      const store = createLoadStore(plugin)
+      mockGetState.mockReturnValue(store)
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "plugin_python_load") {
+          return {
+            tool_count: 0,
+            hook_count: 1,
+            hooks: [{ event: "onMessageSend", name: "rewrite" }],
+          }
+        }
+        if (cmd === "plugin_python_get_tools") return []
+        if (cmd === "plugin_python_call_hook") return { text: "HI" }
+        return undefined
+      })
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+      await manager.loadPythonPlugin("py-plugin")
+
+      expect(store.registerPluginHooks).toHaveBeenCalledWith(
+        "py-plugin",
+        expect.objectContaining({ onMessageSend: expect.any(Function) })
+      )
+      // The bridged hook RPCs into the host and returns the transformed value.
+      const hooks = (store.registerPluginHooks as jest.Mock).mock.calls[0][1] as Record<
+        string,
+        (payload: unknown) => Promise<unknown>
+      >
+      const result = await hooks.onMessageSend({ text: "hi" })
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_python_call_hook", {
+        pluginId: "py-plugin",
+        event: "onMessageSend",
+        name: "rewrite",
+        payload: { text: "hi" },
+      })
+      expect(result).toEqual({ text: "HI" })
+    })
+
+    it("loadPythonPlugin skips hook registration when none are declared", async () => {
+      const plugin = createTypedPlugin("py-plugin", "python")
+      const store = createLoadStore(plugin)
+      mockGetState.mockReturnValue(store)
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "plugin_python_load") return { tool_count: 0, hook_count: 0, hooks: [] }
+        if (cmd === "plugin_python_get_tools") return []
+        return undefined
+      })
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+      await manager.loadPythonPlugin("py-plugin")
+      expect(store.registerPluginHooks).not.toHaveBeenCalled()
+    })
+
+    it("notifyPluginConfigChanged pushes config into python hosts only", async () => {
+      const plugin = createTypedPlugin("py-plugin", "python")
+      const store = createLoadStore(plugin)
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+
+      await manager.notifyPluginConfigChanged("py-plugin", { greeting: "yo" })
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_python_push_config", {
+        pluginId: "py-plugin",
+        config: { greeting: "yo" },
+      })
+
+      // Frontend plugins never reach the python host.
+      mockInvoke.mockClear()
+      const frontend = createTypedPlugin("js-plugin", "frontend")
+      mockGetState.mockReturnValue(createLoadStore(frontend))
+      await manager.notifyPluginConfigChanged("js-plugin", { a: 1 })
+      expect(mockInvoke).not.toHaveBeenCalledWith("plugin_python_push_config", expect.anything())
+    })
+
+    it("notifyPluginConfigChanged tolerates a failing python push", async () => {
+      const plugin = createTypedPlugin("py-plugin", "python")
+      mockGetState.mockReturnValue(createLoadStore(plugin))
+      mockInvoke.mockRejectedValue(new Error("not loaded"))
+      const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+      await expect(
+        manager.notifyPluginConfigChanged("py-plugin", { a: 1 })
+      ).resolves.toBeUndefined()
+    })
+
+    it("installPythonDeps and pushPythonConfig delegate to the backend commands", async () => {
+      const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+      await manager.installPythonDeps("py-plugin", ["requests>=2"])
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_python_install_deps", {
+        pluginId: "py-plugin",
+        dependencies: ["requests>=2"],
+      })
+      await manager.callPythonHook("py-plugin", "onMessageSend", "rewrite", null)
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_python_call_hook", {
+        pluginId: "py-plugin",
+        event: "onMessageSend",
+        name: "rewrite",
+        payload: null,
+      })
+    })
+
+    it("loadPlugin routes python plugins through the Python host", async () => {
+      const plugin = createTypedPlugin("py-plugin", "python")
+      const store = createLoadStore(plugin)
+      mockGetState.mockReturnValue(store)
+      mockInvoke.mockImplementation(async (cmd: string) =>
+        cmd === "plugin_python_get_tools" ? [] : undefined
+      )
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+      stubLoader(manager)
+      await manager.loadPlugin("py-plugin")
+
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "plugin_python_load",
+        expect.objectContaining({ pluginId: "py-plugin" })
+      )
+      // Success path clears the error slot with null — only a string
+      // (an actual failure message) would indicate a load error.
+      expect(store.setPluginError).not.toHaveBeenCalledWith("py-plugin", expect.any(String))
+    })
+
+    it("loadPlugin does NOT route wasm plugins through the Python host", async () => {
+      const plugin = createTypedPlugin("wasm-plugin", "wasm")
+      const store = createLoadStore(plugin)
+      mockGetState.mockReturnValue(store)
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+      stubLoader(manager)
+      await manager.loadPlugin("wasm-plugin")
+
+      expect(mockInvoke).not.toHaveBeenCalledWith("plugin_python_load", expect.anything())
+      expect(mockInvoke).not.toHaveBeenCalledWith("plugin_python_get_tools", expect.anything())
+    })
+
+    it("registers manifest i18n and extensions before activate", async () => {
+      const plugin = createTypedPlugin("surface-plugin", "frontend")
+      plugin.source = "dev"
+      plugin.manifest.capabilities = ["components"]
+      plugin.manifest.permissions = ["extension:ui"]
+      plugin.manifest.extensions = [
+        {
+          point: "chat.input.actions",
+          entry: "dist/surfaces.js",
+          export: "ComposerAction",
+        },
+      ]
+      plugin.manifest.i18n = {
+        locales: {
+          en: { "surfaces.action": "Action" },
+          "zh-CN": { "surfaces.action": "操作" },
+        },
+      }
+      const store = createLoadStore(plugin)
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const activate = jest.fn((context: { i18n: { t: (key: string) => string } }) => {
+        expect(getPluginExtensionRegistrationCount(plugin.manifest.id)).toBe(1)
+        expect(context.i18n.t("surfaces.action")).toBe("Action")
+      })
+      const loader = (
+        manager as unknown as {
+          loader: {
+            load: (plugin: Plugin) => Promise<unknown>
+            importEntry: (entry: string) => Promise<Record<string, unknown>>
+            isLoaded: (pluginId: string) => boolean
+          }
+        }
+      ).loader
+      loader.load = jest.fn(async () => ({ manifest: plugin.manifest, activate }))
+      loader.importEntry = jest.fn(async () => ({ ComposerAction: () => null }))
+      loader.isLoaded = jest.fn(() => false)
+
+      await manager.loadPlugin(plugin.manifest.id)
+
+      expect(activate).toHaveBeenCalledTimes(1)
+    })
+
+    it("emits PLUGIN_ERROR with a bounded error class name (no message) on load failure", async () => {
+      const plugin = createTypedPlugin("boom-plugin", "frontend")
+      mockGetState.mockReturnValue(createLoadStore(plugin))
+      // Force a fast, deterministic failure at the signature gate — this is
+      // BEFORE the load-resilience retry boundary, so no retry timers leak past
+      // the test (a throwing loader.load would retry with backoff timers).
+      mockVerifier.getConfig.mockReturnValueOnce({
+        requireSignatures: true,
+        allowUntrusted: false,
+      })
+      mockVerifier.verify.mockResolvedValueOnce({ valid: false, reason: "secret bad sig detail" })
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+
+      resetMessageBus()
+      const errorEvents: Array<Record<string, unknown>> = []
+      getMessageBus().on(SystemEvents.PLUGIN_ERROR, (event) => {
+        errorEvents.push(event.payload as Record<string, unknown>)
+      })
+
+      await expect(manager.loadPlugin("boom-plugin")).rejects.toThrow()
+
+      expect(errorEvents).toHaveLength(1)
+      expect(errorEvents[0]).toMatchObject({ pluginId: "boom-plugin" })
+      // PII red-line: the bus payload carries only a bounded error CLASS name
+      // (a short identifier like "Error"), never the error message (which can
+      // carry user/prompt text).
+      expect(typeof errorEvents[0].error).toBe("string")
+      expect((errorEvents[0].error as string).length).toBeGreaterThan(0)
+      expect((errorEvents[0].error as string).length).toBeLessThan(64)
+      expect(JSON.stringify(errorEvents[0])).not.toContain("secret")
+    })
+
+    it("disablePlugin unloads the Python module only for python/hybrid plugins", async () => {
+      const pythonPlugin = createTypedPlugin("py-plugin", "hybrid", "enabled")
+      const store = {
+        plugins: { "py-plugin": pythonPlugin } as Record<string, Plugin>,
+        disablePlugin: jest.fn(async () => undefined),
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+      await manager.disablePlugin("py-plugin")
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_python_unload", { pluginId: "py-plugin" })
+
+      mockInvoke.mockClear()
+      const wasmPlugin = createTypedPlugin("wasm-plugin", "wasm", "enabled")
+      const wasmStore = {
+        plugins: { "wasm-plugin": wasmPlugin } as Record<string, Plugin>,
+        disablePlugin: jest.fn(async () => undefined),
+      }
+      mockGetState.mockReturnValue(wasmStore)
+      await manager.disablePlugin("wasm-plugin")
+      expect(mockInvoke).not.toHaveBeenCalledWith("plugin_python_unload", expect.anything())
+    })
+
+    it("initializes and subscribes through the service transport in the headless brain", async () => {
+      ;(globalThis as Record<string, unknown>).__COGNIA_HEADLESS__ = true
+      const unsubscribe = jest.fn()
+      mockTransportSubscribe.mockReturnValue(unsubscribe)
+      mockTransportCall.mockImplementation(async (cmd: string) => {
+        if (cmd === "plugin_python_runtime_info") {
+          return {
+            available: true,
+            version: "3.12.4",
+            plugin_count: 0,
+            total_calls: 0,
+            total_execution_time_ms: 0,
+            failed_calls: 0,
+          }
+        }
+        return undefined
+      })
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+      await (
+        manager as unknown as { initializePythonRuntime: () => Promise<void> }
+      ).initializePythonRuntime()
+
+      expect(mockTransportCall).toHaveBeenCalledWith("plugin_python_initialize", {
+        pythonPath: undefined,
+      })
+      expect(mockTransportCall).toHaveBeenCalledWith("plugin_python_runtime_info", undefined)
+      expect(mockTransportSubscribe).toHaveBeenCalledWith("plugin:python", expect.any(Function))
+      expect(mockInvoke).not.toHaveBeenCalled()
+      await (
+        manager as unknown as { pythonEventsUnlisten: (() => void) | null }
+      ).pythonEventsUnlisten?.()
+      expect(unsubscribe).toHaveBeenCalledTimes(1)
+    })
+
+    it("initializePythonRuntime warns (not errors) when the backend reports unavailable", async () => {
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "plugin_python_runtime_info") {
+          return {
+            available: false,
+            version: null,
+            plugin_count: 0,
+            total_calls: 0,
+            total_execution_time_ms: 0,
+            failed_calls: 0,
+          }
+        }
+        return undefined
+      })
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+      await (
+        manager as unknown as { initializePythonRuntime: () => Promise<void> }
+      ).initializePythonRuntime()
+
+      expect(mockInvoke).toHaveBeenCalledWith("plugin_python_initialize", {
+        pythonPath: undefined,
+      })
+      // available:false must not record a python version.
+      expect(
+        (manager as unknown as { compatibilityRuntime: { pythonVersion?: string } })
+          .compatibilityRuntime.pythonVersion
+      ).toBeUndefined()
+    })
+
+    it("initializePythonRuntime records the interpreter version when available", async () => {
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "plugin_python_runtime_info") {
+          return {
+            available: true,
+            version: "3.12.4",
+            plugin_count: 0,
+            total_calls: 0,
+            total_execution_time_ms: 0,
+            failed_calls: 0,
+          }
+        }
+        return undefined
+      })
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+      await (
+        manager as unknown as { initializePythonRuntime: () => Promise<void> }
+      ).initializePythonRuntime()
+
+      expect(
+        (manager as unknown as { compatibilityRuntime: { pythonVersion?: string } })
+          .compatibilityRuntime.pythonVersion
+      ).toBe("3.12.4")
+    })
+
+    it("initializePythonRuntime swallows backend failures and continues", async () => {
+      mockInvoke.mockRejectedValue(new Error("command plugin_python_initialize not found"))
+
+      const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+      await expect(
+        (
+          manager as unknown as { initializePythonRuntime: () => Promise<void> }
+        ).initializePythonRuntime()
+      ).resolves.toBeUndefined()
+    })
+  })
+
+  describe("frontend trust boundary (ADR 0013)", () => {
+    const mockReadPolicy = readPolicy as jest.MockedFunction<typeof readPolicy>
+    const mockWritePolicy = writePolicy as jest.MockedFunction<typeof writePolicy>
+
+    const createTrustPlugin = (
+      id: string,
+      type: PluginManifest["type"],
+      source: Plugin["source"]
+    ): Plugin => ({
+      manifest: {
+        ...createManifest(id),
+        type,
+        ...(type === "hybrid" ? { pythonMain: "main.py" } : {}),
+        ...(type === "wasm"
+          ? { wasmMain: "plugin.wasm", main: undefined, wasm: { apiVersion: "0.1.0" } }
+          : {}),
+      },
+      status: "installed",
+      source,
+      path: `/plugins/${id}`,
+      config: {},
+    })
+
+    const createTrustStore = (plugin: Plugin) => ({
+      plugins: { [plugin.manifest.id]: plugin } as Record<string, Plugin>,
+      loadPlugin: jest.fn(async () => undefined),
+      setPluginError: jest.fn(),
+      registerPluginHooks: jest.fn(),
+      registerPluginTool: jest.fn(),
+    })
+
+    const stubTrustLoader = (manager: PluginManager) => {
+      const loader = (
+        manager as unknown as {
+          loader: {
+            load: jest.Mock
+            isLoaded: (pluginId: string) => boolean
+          }
+        }
+      ).loader
+      loader.load = jest.fn(async (plugin: Plugin) => ({
+        manifest: plugin.manifest,
+        activate: jest.fn(),
+      }))
+      loader.isLoaded = jest.fn(() => false)
+      return loader
+    }
+
+    const withTrusted = (ids: string[]) => ({ ...DEFAULT_POLICY, trustedFrontendPlugins: ids })
+
+    beforeEach(() => {
+      mockReadPolicy.mockReset()
+      mockReadPolicy.mockImplementation(() => DEFAULT_POLICY)
+      mockWritePolicy.mockReset()
+    })
+
+    it("isFrontendTrusted reflects the persisted trust list", () => {
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      mockReadPolicy.mockReturnValue(withTrusted(["alpha"]))
+      expect(manager.isFrontendTrusted("alpha")).toBe(true)
+      expect(manager.isFrontendTrusted("beta")).toBe(false)
+    })
+
+    it("setFrontendTrust(true) adds the id once, even when already trusted", async () => {
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      mockReadPolicy.mockReturnValue(withTrusted(["alpha"]))
+      await manager.setFrontendTrust("alpha", true)
+      expect(mockWritePolicy).toHaveBeenCalledWith(withTrusted(["alpha"]))
+    })
+
+    it("setFrontendTrust(false) removes the id and preserves other grants", async () => {
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      mockReadPolicy.mockReturnValue(withTrusted(["alpha", "beta"]))
+      mockGetState.mockReturnValue({ plugins: {} })
+      await manager.setFrontendTrust("alpha", false)
+      expect(mockWritePolicy).toHaveBeenCalledWith(withTrusted(["beta"]))
+    })
+
+    it("revoking trust disables a currently enabled gated plugin", async () => {
+      const plugin = { ...createTrustPlugin("fe-run", "frontend", "local"), status: "enabled" }
+      mockGetState.mockReturnValue(createTrustStore(plugin as Plugin))
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const disableSpy = jest.spyOn(manager, "disablePlugin").mockResolvedValue(undefined)
+      const unloadSpy = jest.spyOn(manager, "unloadPlugin").mockResolvedValue(undefined)
+
+      await manager.setFrontendTrust("fe-run", false)
+
+      expect(disableSpy).toHaveBeenCalledWith("fe-run", "frontend-trust-revoked")
+      expect(unloadSpy).not.toHaveBeenCalled()
+    })
+
+    it("revoking trust unloads a loaded-but-not-enabled gated plugin", async () => {
+      const plugin = { ...createTrustPlugin("fe-loaded", "frontend", "local"), status: "loaded" }
+      mockGetState.mockReturnValue(createTrustStore(plugin as Plugin))
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const loader = stubTrustLoader(manager)
+      ;(loader.isLoaded as jest.Mock).mockReturnValue(true)
+      const disableSpy = jest.spyOn(manager, "disablePlugin").mockResolvedValue(undefined)
+      const unloadSpy = jest.spyOn(manager, "unloadPlugin").mockResolvedValue(undefined)
+
+      await manager.setFrontendTrust("fe-loaded", false)
+
+      expect(unloadSpy).toHaveBeenCalledWith("fe-loaded")
+      expect(disableSpy).not.toHaveBeenCalled()
+    })
+
+    it("revoking trust does not touch a plugin from an inherently trusted source", async () => {
+      const plugin = { ...createTrustPlugin("fe-dev", "frontend", "dev"), status: "enabled" }
+      mockGetState.mockReturnValue(createTrustStore(plugin as Plugin))
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const disableSpy = jest.spyOn(manager, "disablePlugin").mockResolvedValue(undefined)
+
+      await manager.setFrontendTrust("fe-dev", false)
+
+      expect(disableSpy).not.toHaveBeenCalled()
+    })
+
+    it("granting trust never disables anything", async () => {
+      const plugin = { ...createTrustPlugin("fe-run", "frontend", "local"), status: "enabled" }
+      mockGetState.mockReturnValue(createTrustStore(plugin as Plugin))
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const disableSpy = jest.spyOn(manager, "disablePlugin").mockResolvedValue(undefined)
+      const unloadSpy = jest.spyOn(manager, "unloadPlugin").mockResolvedValue(undefined)
+
+      await manager.setFrontendTrust("fe-run", true)
+
+      expect(disableSpy).not.toHaveBeenCalled()
+      expect(unloadSpy).not.toHaveBeenCalled()
+    })
+
+    it("startup restore skips an untrusted gated plugin instead of toasting every boot", async () => {
+      const gated: Plugin = {
+        ...createTrustPlugin("fe-revoked", "frontend", "local"),
+        manifest: {
+          ...createTrustPlugin("fe-revoked", "frontend", "local").manifest,
+          activationEvents: ["startup"],
+        },
+      }
+      mockGetState.mockReturnValue({ plugins: { "fe-revoked": gated } })
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
+
+      await (manager as unknown as { restorePluginStates(): Promise<void> }).restorePluginStates()
+      expect(enableSpy).not.toHaveBeenCalled()
+
+      // Once trusted, the same restore pass enables it again.
+      mockReadPolicy.mockReturnValue(withTrusted(["fe-revoked"]))
+      await (manager as unknown as { restorePluginStates(): Promise<void> }).restorePluginStates()
+      expect(enableSpy).toHaveBeenCalledWith("fe-revoked")
+    })
+
+    it("activation events skip an untrusted gated plugin instead of toasting per event", async () => {
+      const gated: Plugin = {
+        ...createTrustPlugin("fe-lazy", "frontend", "local"),
+        manifest: {
+          ...createTrustPlugin("fe-lazy", "frontend", "local").manifest,
+          activationEvents: ["startup"],
+        },
+      }
+      mockGetState.mockReturnValue({
+        plugins: { "fe-lazy": gated },
+        setPluginError: jest.fn(),
+      })
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
+
+      await manager.handleActivationEvent("startup")
+      expect(enableSpy).not.toHaveBeenCalled()
+
+      mockReadPolicy.mockReturnValue(withTrusted(["fe-lazy"]))
+      await manager.handleActivationEvent("startup")
+      expect(enableSpy).toHaveBeenCalledWith("fe-lazy", "activation:startup")
+    })
+
+    it("loadPlugin refuses an untrusted-source frontend plugin before any JS executes", async () => {
+      const plugin = createTrustPlugin("fe-local", "frontend", "local")
+      mockGetState.mockReturnValue(createTrustStore(plugin))
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const loader = stubTrustLoader(manager)
+
+      await expect(manager.loadPlugin("fe-local")).rejects.toBeInstanceOf(PluginFrontendTrustError)
+      expect(loader.load).not.toHaveBeenCalled()
+    })
+
+    it("loadPlugin refuses an untrusted-source hybrid plugin", async () => {
+      const plugin = createTrustPlugin("hy-market", "hybrid", "marketplace")
+      mockGetState.mockReturnValue(createTrustStore(plugin))
+      const manager = new PluginManager({ pluginDirectory: "/plugins", enablePython: true })
+      const loader = stubTrustLoader(manager)
+
+      await expect(manager.loadPlugin("hy-market")).rejects.toBeInstanceOf(PluginFrontendTrustError)
+      expect(loader.load).not.toHaveBeenCalled()
+    })
+
+    it("loadPlugin loads a frontend plugin once the user has trusted it", async () => {
+      const plugin = createTrustPlugin("fe-local", "frontend", "local")
+      mockGetState.mockReturnValue(createTrustStore(plugin))
+      mockReadPolicy.mockReturnValue(withTrusted(["fe-local"]))
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const loader = stubTrustLoader(manager)
+
+      await manager.loadPlugin("fe-local")
+      expect(loader.load).toHaveBeenCalled()
+    })
+
+    it("loadPlugin does not gate frontend plugins from an inherently trusted source", async () => {
+      const plugin = createTrustPlugin("fe-dev", "frontend", "dev")
+      mockGetState.mockReturnValue(createTrustStore(plugin))
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const loader = stubTrustLoader(manager)
+
+      await manager.loadPlugin("fe-dev")
+      expect(loader.load).toHaveBeenCalled()
+    })
+
+    it("loadPlugin does not gate isolated-host plugin types from an untrusted source", async () => {
+      const plugin = createTrustPlugin("wasm-local", "wasm", "local")
+      mockGetState.mockReturnValue(createTrustStore(plugin))
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const loader = stubTrustLoader(manager)
+
+      await manager.loadPlugin("wasm-local")
+      expect(loader.load).toHaveBeenCalled()
+    })
+
+    it("carries pluginId + source on the typed error", () => {
+      const error = new PluginFrontendTrustError("alpha", "marketplace")
+      expect(error.name).toBe("PluginFrontendTrustError")
+      expect(error.pluginId).toBe("alpha")
+      expect(error.source).toBe("marketplace")
+      expect(error.message).toContain("alpha")
+      expect(error.message).toContain("marketplace")
+    })
+  })
+
   describe("Factory + __resetForTesting (PR-E)", () => {
     beforeEach(() => {
       try {
@@ -2211,6 +4494,25 @@ describe("PluginManager", () => {
       // dependency on the symbol so a future rename can't silently
       // drop the façade.
       expect(typeof initializePluginManager).toBe("function")
+    })
+
+    it("keeps concurrent initialization single-flight", async () => {
+      let release!: () => void
+      const gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const initialize = jest
+        .spyOn(PluginManager.prototype, "initialize")
+        .mockImplementation(async () => gate)
+
+      const first = initializePluginManager({ pluginDirectory: "/tmp/plugins" })
+      const second = initializePluginManager({ pluginDirectory: "/tmp/plugins" })
+
+      expect(initialize).toHaveBeenCalledTimes(1)
+      release()
+      const [firstManager, secondManager] = await Promise.all([first, second])
+      expect(firstManager).toBe(secondManager)
+      initialize.mockRestore()
     })
   })
 
@@ -2339,5 +4641,475 @@ describe("PluginManager", () => {
       // Already enabled → no throw even though `a` is missing.
       await expect(manager.enablePlugin("b")).resolves.toBeUndefined()
     })
+  })
+
+  describe("lifecycle: install/update hooks + suspend/resume + idle sweep", () => {
+    const mockGetPlugin = getPlugin as jest.MockedFunction<typeof getPlugin>
+    const mockUpdatePlugin = updatePlugin as jest.MockedFunction<typeof updatePlugin>
+
+    const mkPlugin = (
+      id: string,
+      status: Plugin["status"],
+      overrides: Partial<PluginManifest> = {},
+      extra: Partial<Plugin> = {}
+    ): Plugin => ({
+      manifest: { ...createManifest(id), ...overrides },
+      status,
+      source: "local" as never,
+      path: `/plugins/${id}`,
+      config: {},
+      ...extra,
+    })
+
+    beforeEach(() => {
+      mockGetPlugin.mockReset()
+      mockUpdatePlugin.mockReset()
+      mockUpdatePlugin.mockResolvedValue(undefined)
+    })
+
+    it("fires onInstall once on the first post-install load and persists the flag", async () => {
+      mockGetState.mockReturnValue({ plugins: {} })
+      mockGetPlugin.mockResolvedValue({
+        id: "p",
+        installHookFiredAt: undefined,
+        lastActivatedVersion: undefined,
+      } as never)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const hooks = getPluginLifecycleHooks()
+      const installSpy = jest.spyOn(hooks, "dispatchOnInstall").mockResolvedValue(undefined)
+      const updateSpy = jest.spyOn(hooks, "dispatchOnUpdate").mockResolvedValue(undefined)
+
+      await (
+        manager as unknown as {
+          fireInstallOrUpdateHooks: (id: string, v: string) => Promise<void>
+        }
+      ).fireInstallOrUpdateHooks("p", "1.0.0")
+
+      expect(installSpy).toHaveBeenCalledWith("p")
+      expect(updateSpy).not.toHaveBeenCalled()
+      expect(mockUpdatePlugin).toHaveBeenCalledWith(
+        "p",
+        expect.objectContaining({ lastActivatedVersion: "1.0.0" })
+      )
+      installSpy.mockRestore()
+      updateSpy.mockRestore()
+    })
+
+    it("fires onUpdate with version info when the persisted version changed", async () => {
+      mockGetState.mockReturnValue({ plugins: {} })
+      mockGetPlugin.mockResolvedValue({
+        id: "p",
+        installHookFiredAt: 123,
+        lastActivatedVersion: "1.0.0",
+      } as never)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const hooks = getPluginLifecycleHooks()
+      const installSpy = jest.spyOn(hooks, "dispatchOnInstall").mockResolvedValue(undefined)
+      const updateSpy = jest.spyOn(hooks, "dispatchOnUpdate").mockResolvedValue(undefined)
+
+      await (
+        manager as unknown as {
+          fireInstallOrUpdateHooks: (id: string, v: string) => Promise<void>
+        }
+      ).fireInstallOrUpdateHooks("p", "1.1.0")
+
+      expect(installSpy).not.toHaveBeenCalled()
+      expect(updateSpy).toHaveBeenCalledWith("p", { fromVersion: "1.0.0", toVersion: "1.1.0" })
+      expect(mockUpdatePlugin).toHaveBeenCalledWith("p", { lastActivatedVersion: "1.1.0" })
+      installSpy.mockRestore()
+      updateSpy.mockRestore()
+    })
+
+    it("fires neither hook when the version is unchanged", async () => {
+      mockGetState.mockReturnValue({ plugins: {} })
+      mockGetPlugin.mockResolvedValue({
+        id: "p",
+        installHookFiredAt: 123,
+        lastActivatedVersion: "1.0.0",
+      } as never)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const hooks = getPluginLifecycleHooks()
+      const installSpy = jest.spyOn(hooks, "dispatchOnInstall").mockResolvedValue(undefined)
+      const updateSpy = jest.spyOn(hooks, "dispatchOnUpdate").mockResolvedValue(undefined)
+
+      await (
+        manager as unknown as {
+          fireInstallOrUpdateHooks: (id: string, v: string) => Promise<void>
+        }
+      ).fireInstallOrUpdateHooks("p", "1.0.0")
+
+      expect(installSpy).not.toHaveBeenCalled()
+      expect(updateSpy).not.toHaveBeenCalled()
+      expect(mockUpdatePlugin).not.toHaveBeenCalled()
+      installSpy.mockRestore()
+      updateSpy.mockRestore()
+    })
+
+    it("skips install/update tracking when the plugin has no persisted row", async () => {
+      mockGetState.mockReturnValue({ plugins: {} })
+      mockGetPlugin.mockResolvedValue(undefined)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const hooks = getPluginLifecycleHooks()
+      const installSpy = jest.spyOn(hooks, "dispatchOnInstall").mockResolvedValue(undefined)
+
+      await (
+        manager as unknown as {
+          fireInstallOrUpdateHooks: (id: string, v: string) => Promise<void>
+        }
+      ).fireInstallOrUpdateHooks("p", "1.0.0")
+
+      expect(installSpy).not.toHaveBeenCalled()
+      expect(mockUpdatePlugin).not.toHaveBeenCalled()
+      installSpy.mockRestore()
+    })
+
+    it("suspendPlugin no-ops unless the plugin is enabled", async () => {
+      const store = { plugins: { p: mkPlugin("p", "disabled") } }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      await expect(manager.suspendPlugin("p")).resolves.toBeUndefined()
+      expect(store.plugins.p.status).toBe("disabled")
+    })
+
+    it("resumePlugin no-ops unless the plugin is suspended", async () => {
+      const store = { plugins: { p: mkPlugin("p", "enabled") } }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      await expect(manager.resumePlugin("p")).resolves.toBeUndefined()
+      expect(store.plugins.p.status).toBe("enabled")
+    })
+
+    it("suspendPlugin tears down and transitions to suspended, firing onSuspend", async () => {
+      const store: {
+        plugins: Record<string, Plugin>
+        setPluginStatus: jest.Mock
+        setPluginError: jest.Mock
+      } = {
+        plugins: { p: mkPlugin("p", "enabled", { idleSuspend: true }) },
+        setPluginStatus: jest.fn((id: string, s: Plugin["status"]) => {
+          store.plugins[id].status = s
+        }),
+        setPluginError: jest.fn(),
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const internals = manager as unknown as {
+        unregisterPluginContributions: (id: string) => Promise<void>
+        deactivatePluginRuntime: (id: string, opts?: unknown) => Promise<void>
+        syncBackendStatus: (id: string, status: string) => Promise<void>
+        recordPluginVerification: (id: string, input: unknown) => void
+      }
+      jest.spyOn(internals, "unregisterPluginContributions").mockResolvedValue(undefined)
+      jest.spyOn(internals, "deactivatePluginRuntime").mockResolvedValue(undefined)
+      jest.spyOn(internals, "syncBackendStatus").mockResolvedValue(undefined)
+      jest.spyOn(internals, "recordPluginVerification").mockReturnValue(undefined)
+      const hooks = getPluginLifecycleHooks()
+      const suspendSpy = jest.spyOn(hooks, "dispatchOnSuspend").mockResolvedValue(undefined)
+
+      await manager.suspendPlugin("p")
+
+      expect(suspendSpy).toHaveBeenCalledWith("p")
+      expect(store.plugins.p.status).toBe("suspended")
+      suspendSpy.mockRestore()
+    })
+
+    it("resumePlugin reloads, re-registers, and fires onResume", async () => {
+      const store: {
+        plugins: Record<string, Plugin>
+        setPluginStatus: jest.Mock
+        setPluginError: jest.Mock
+      } = {
+        plugins: { p: mkPlugin("p", "suspended", { idleSuspend: true }) },
+        setPluginStatus: jest.fn((id: string, s: Plugin["status"]) => {
+          store.plugins[id].status = s
+        }),
+        setPluginError: jest.fn(),
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const internals = manager as unknown as {
+        registerPluginContributions: (id: string) => Promise<void>
+        syncBackendStatus: (id: string, status: string) => Promise<void>
+        recordPluginVerification: (id: string, input: unknown) => void
+      }
+      jest.spyOn(manager, "loadPlugin").mockResolvedValue(undefined)
+      jest.spyOn(internals, "registerPluginContributions").mockResolvedValue(undefined)
+      jest.spyOn(internals, "syncBackendStatus").mockResolvedValue(undefined)
+      jest.spyOn(internals, "recordPluginVerification").mockReturnValue(undefined)
+      const hooks = getPluginLifecycleHooks()
+      const resumeSpy = jest.spyOn(hooks, "dispatchOnResume").mockResolvedValue(undefined)
+
+      await manager.resumePlugin("p")
+
+      expect(resumeSpy).toHaveBeenCalledWith("p")
+      expect(store.plugins.p.status).toBe("enabled")
+      resumeSpy.mockRestore()
+    })
+
+    it("suspendIdlePlugins suspends only enabled, opted-in, idle plugins", async () => {
+      const now = 2_000_000_000_000
+      const idleMs = 31 * 60 * 1000
+      const store = {
+        plugins: {
+          idle: mkPlugin("idle", "enabled", { idleSuspend: true }, { lastUsedAt: now - idleMs }),
+          fresh: mkPlugin("fresh", "enabled", { idleSuspend: true }, { lastUsedAt: now - 1000 }),
+          notOptedIn: mkPlugin("notOptedIn", "enabled", {}, { lastUsedAt: now - idleMs }),
+          disabledIdle: mkPlugin(
+            "disabledIdle",
+            "disabled",
+            { idleSuspend: true },
+            { lastUsedAt: now - idleMs }
+          ),
+        },
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const suspendSpy = jest.spyOn(manager, "suspendPlugin").mockResolvedValue(undefined)
+
+      const suspended = await manager.suspendIdlePlugins(now)
+
+      expect(suspended).toEqual(["idle"])
+      expect(suspendSpy).toHaveBeenCalledTimes(1)
+      expect(suspendSpy).toHaveBeenCalledWith("idle", "idle")
+      suspendSpy.mockRestore()
+    })
+
+    it("startIdleSweep starts a timer only when a plugin opts in; stopIdleSweep clears it", () => {
+      jest.useFakeTimers()
+      try {
+        const store = {
+          plugins: { p: mkPlugin("p", "enabled", { idleSuspend: true }, { lastUsedAt: 0 }) },
+        }
+        mockGetState.mockReturnValue(store)
+        const manager = new PluginManager({ pluginDirectory: "/plugins" })
+        const sweepSpy = jest.spyOn(manager, "suspendIdlePlugins").mockResolvedValue([])
+
+        manager.startIdleSweep()
+        // Calling again is idempotent (no second timer).
+        manager.startIdleSweep()
+        jest.advanceTimersByTime(5 * 60 * 1000)
+        expect(sweepSpy).toHaveBeenCalledTimes(1)
+
+        manager.stopIdleSweep()
+        sweepSpy.mockClear()
+        jest.advanceTimersByTime(10 * 60 * 1000)
+        expect(sweepSpy).not.toHaveBeenCalled()
+        sweepSpy.mockRestore()
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    it("startIdleSweep does nothing when no plugin opts in", () => {
+      jest.useFakeTimers()
+      try {
+        const store = { plugins: { p: mkPlugin("p", "enabled") } }
+        mockGetState.mockReturnValue(store)
+        const manager = new PluginManager({ pluginDirectory: "/plugins" })
+        const sweepSpy = jest.spyOn(manager, "suspendIdlePlugins").mockResolvedValue([])
+
+        manager.startIdleSweep()
+        jest.advanceTimersByTime(10 * 60 * 1000)
+        expect(sweepSpy).not.toHaveBeenCalled()
+        manager.stopIdleSweep()
+        sweepSpy.mockRestore()
+      } finally {
+        jest.useRealTimers()
+      }
+    })
+
+    it("wakes a suspended plugin on ANY activation event, even one it never declared", async () => {
+      // A plugin that declared only `startup` and then idle-suspended must
+      // still wake on an onTool event — suspension is internal, not a declared-
+      // activation gate.
+      const store = {
+        plugins: {
+          // builtin source → bypasses the frontend-trust gate so the test
+          // isolates the suspended-wake bypass, not the trust check.
+          p: mkPlugin(
+            "p",
+            "suspended",
+            { activationEvents: ["startup"] },
+            {
+              source: "builtin" as never,
+            }
+          ),
+        },
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const resumeSpy = jest.spyOn(manager, "resumePlugin").mockResolvedValue(undefined)
+
+      await manager.handleActivationEvent("onTool:some_tool")
+
+      expect(resumeSpy).toHaveBeenCalledWith("p", "activation:onTool:some_tool")
+      resumeSpy.mockRestore()
+    })
+
+    it("does NOT lazy-activate a DISABLED plugin for an undeclared event", async () => {
+      // The suspended-wake bypass must not leak to disabled plugins — those
+      // still lazy-activate only for their declared events.
+      const store = {
+        plugins: {
+          p: mkPlugin("p", "disabled", { activationEvents: ["onCommand:foo"] }),
+        },
+      }
+      mockGetState.mockReturnValue(store)
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      const resumeSpy = jest.spyOn(manager, "resumePlugin").mockResolvedValue(undefined)
+      const enableSpy = jest.spyOn(manager, "enablePlugin").mockResolvedValue(undefined)
+
+      await manager.handleActivationEvent("onTool:some_tool")
+
+      expect(resumeSpy).not.toHaveBeenCalled()
+      expect(enableSpy).not.toHaveBeenCalled()
+      resumeSpy.mockRestore()
+      enableSpy.mockRestore()
+    })
+
+    it("recordPluginToolUse refreshes the plugin's idle-suspend clock", () => {
+      const updateLastUsedAt = jest.fn()
+      mockGetState.mockReturnValue({ plugins: {}, updateLastUsedAt })
+      const manager = new PluginManager({ pluginDirectory: "/plugins" })
+      manager.recordPluginToolUse("p")
+      expect(updateLastUsedAt).toHaveBeenCalledWith("p")
+    })
+  })
+})
+
+describe("toClonableManifest", () => {
+  it("strips function-valued members so the manifest is structured-clone-safe", () => {
+    const write = jest.fn()
+    const manifest = {
+      id: "cognia-agent-team-examples",
+      name: "Agent Team Examples",
+      version: "1.0.0",
+      sharedMemoryAdapters: [
+        { id: "demo", name: "In-Memory (demo)", write, read: () => undefined },
+      ],
+    } as unknown as PluginManifest
+
+    const clonable = toClonableManifest(manifest)
+
+    // Serializable metadata survives…
+    expect(clonable.id).toBe("cognia-agent-team-examples")
+    const adapters = (
+      clonable as unknown as { sharedMemoryAdapters: Array<Record<string, unknown>> }
+    ).sharedMemoryAdapters
+    expect(adapters[0].id).toBe("demo")
+    expect(adapters[0].name).toBe("In-Memory (demo)")
+    // …but the function members are gone, so structuredClone no longer throws.
+    expect(adapters[0].write).toBeUndefined()
+    expect(adapters[0].read).toBeUndefined()
+    expect(() => structuredClone(clonable)).not.toThrow()
+  })
+
+  it("returns a manifest with no functions unchanged in shape", () => {
+    const manifest = {
+      id: "plain",
+      name: "Plain",
+      version: "0.1.0",
+      capabilities: ["tools"],
+    } as unknown as PluginManifest
+
+    expect(toClonableManifest(manifest)).toEqual(manifest)
+  })
+})
+
+// ── W3.2: chat-intercept hook permission gate ────────────────────────────────
+describe("chat-intercept hook permission gate", () => {
+  type WithValidate = { validateHookDeclarations: (id: string, hooks: unknown) => void }
+  const mockGetStateW32 = usePluginStore.getState as unknown as jest.Mock
+
+  const seed = (permissions: string[]) => {
+    mockGetStateW32.mockReturnValue({
+      plugins: {
+        wiretap: { manifest: { id: "wiretap", permissions }, status: "enabled" },
+      },
+    })
+  }
+
+  const validate = (hooks: Record<string, unknown>) => {
+    const manager = new PluginManager({ pluginDirectory: "/plugins" })
+    ;(manager as unknown as WithValidate).validateHookDeclarations("wiretap", hooks)
+  }
+
+  it.each([
+    "onUserPromptSubmit",
+    "onPreToolUse",
+    "onPostToolUse",
+    "onMessageSend",
+    "onMessageReceive",
+  ])("refuses %s without hooks:chat-intercept", (hookName) => {
+    seed([])
+    expect(() => validate({ [hookName]: jest.fn() })).toThrow(/hooks:chat-intercept/)
+  })
+
+  it("accepts intercept hooks when hooks:chat-intercept is declared", () => {
+    seed(["hooks:chat-intercept"])
+    expect(() => validate({ onPreToolUse: jest.fn(), onUserPromptSubmit: jest.fn() })).not.toThrow()
+  })
+
+  it("leaves non-intercept hooks ungated", () => {
+    seed([])
+    expect(() => validate({ onLoad: jest.fn(), onEnable: jest.fn() })).not.toThrow()
+  })
+})
+
+// ── W6.4: per-plugin lifecycle serialization ─────────────────────────────────
+describe("lifecycle serialization (W6.4)", () => {
+  type WithLock = {
+    withLifecycleLock: <T>(pluginId: string, fn: () => Promise<T>) => Promise<T>
+  }
+  const lockOf = (m: PluginManager) =>
+    (m as unknown as WithLock).withLifecycleLock.bind(m as unknown as WithLock)
+
+  it("serializes overlapping transitions for the same plugin", async () => {
+    const withLock = lockOf(new PluginManager({ pluginDirectory: "/plugins" }))
+    const order: string[] = []
+    const a = withLock("p", async () => {
+      order.push("a-start")
+      // Microtask deferral (not a real timer): keeps the interleaving window
+      // open without letting unrelated detached rejections land in this test.
+      for (let i = 0; i < 5; i++) await Promise.resolve()
+      order.push("a-end")
+    })
+    const b = withLock("p", async () => {
+      order.push("b-start")
+      order.push("b-end")
+    })
+    await Promise.all([a, b])
+    expect(order).toEqual(["a-start", "a-end", "b-start", "b-end"])
+  })
+
+  it("keeps different plugins concurrent", async () => {
+    const withLock = lockOf(new PluginManager({ pluginDirectory: "/plugins" }))
+    const order: string[] = []
+    let releaseA!: () => void
+    const gate = new Promise<void>((r) => {
+      releaseA = r
+    })
+    const a = withLock("p1", async () => {
+      order.push("p1-start")
+      await gate
+      order.push("p1-end")
+    })
+    const b = withLock("p2", async () => {
+      order.push("p2-done")
+    })
+    await b
+    expect(order).toEqual(["p1-start", "p2-done"])
+    releaseA()
+    await a
+  })
+
+  it("a rejected transition does not wedge the queue", async () => {
+    const withLock = lockOf(new PluginManager({ pluginDirectory: "/plugins" }))
+    await expect(
+      withLock("p", async () => {
+        throw new Error("boom")
+      })
+    ).rejects.toThrow("boom")
+    await expect(withLock("p", async () => "next")).resolves.toBe("next")
   })
 })

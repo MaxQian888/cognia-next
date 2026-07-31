@@ -1,17 +1,30 @@
 // Mock every database / store / agent-mode dependency so build-options can be
 // exercised as a pure function. We never want to touch Dexie or Zustand here.
 
+// Paired by default — the standalone (BYOK) branch is opted into per-test.
+jest.mock("@/lib/runtime/standalone-mode", () => ({
+  isStandaloneChatMode: jest.fn(() => false),
+  getMobileRuntimeMode: jest.fn(() => undefined),
+  setMobileRuntimeMode: jest.fn(),
+}))
+
 jest.mock("@/lib/db/characters", () => ({
   // ADR-0030: build-options switched to resolveCharacterById so plugin-
   // overlay characters resolve through the same path as Dexie rows.
   resolveCharacterById: jest.fn(),
   listCharactersByIds: jest.fn(),
+  seedBuiltInCharacters: jest.fn().mockResolvedValue(undefined),
 }))
 
 jest.mock("@/lib/db/skills", () => ({
   listEnabledSkillsByIds: jest.fn(),
   recordSkillUsage: jest.fn(),
   renderSkillsSection: jest.fn(),
+  renderSkillsCatalog: jest.fn(),
+  seedBuiltInSkills: jest.fn().mockResolvedValue(undefined),
+  // Pure resolver — keep the real implementation so the effective-skill
+  // precedence the send path depends on is exercised, not stubbed.
+  activeEffectiveSkillIds: jest.requireActual("@/lib/db/skills").activeEffectiveSkillIds,
 }))
 
 jest.mock("@/lib/db/mcp-servers", () => ({
@@ -21,6 +34,7 @@ jest.mock("@/lib/db/mcp-servers", () => ({
 
 jest.mock("@/lib/db/teams", () => ({
   getTeam: jest.fn(),
+  seedBuiltInTeams: jest.fn().mockResolvedValue(undefined),
 }))
 
 jest.mock("@/stores/agent", () => ({
@@ -31,6 +45,23 @@ jest.mock("@/stores/agent/custom-mode-store", () => ({
   useCustomModeStore: { getState: jest.fn() },
 }))
 
+jest.mock("@/stores/plugin-runtime/plugin-store", () => ({
+  usePluginStore: { getState: jest.fn() },
+}))
+
+// Dynamically imported only on the API-key-rotation persist path (ADR-0043
+// Phase 3) — mocked so that path never touches Dexie/Zustand in this file.
+const mockSetProviderConfig = jest.fn().mockResolvedValue(undefined)
+const mockUpdateCustomProvider = jest.fn().mockResolvedValue(undefined)
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: {
+    getState: () => ({
+      setProviderConfig: (...args: unknown[]) => mockSetProviderConfig(...args),
+      updateCustomProvider: (...args: unknown[]) => mockUpdateCustomProvider(...args),
+    }),
+  },
+}))
+
 jest.mock("@/lib/agent", () => ({
   buildAgentModeSessionUpdate: jest.fn(),
 }))
@@ -39,8 +70,20 @@ jest.mock("@/lib/plugin/bridge/sidecar-tools-bridge", () => ({
   buildPluginToolsManifest: jest.fn(() => []),
 }))
 
+const mockHasWorkspaceFsBackend = jest.fn(() => true)
+jest.mock("@/lib/files/workspace-backend", () => ({
+  hasWorkspaceFsBackend: () => mockHasWorkspaceFsBackend(),
+}))
+
 jest.mock("@/lib/db/conversation-overrides", () => ({
   readForResolution: jest.fn(),
+}))
+
+// W1 multi-bot — instance-level AI binding defaults. The resolver hoists ONE
+// adapter-row read (threaded `ctx.imAdapterRow` or this fallback) that feeds
+// the model/provider/effort chains and the A2UI capability block.
+jest.mock("@/lib/db/adapter-instances", () => ({
+  getAdapterInstance: jest.fn(),
 }))
 
 // ADR-0028 — env-resolver bridges the renderer to the Rust per-account env
@@ -55,25 +98,92 @@ jest.mock("@/lib/claude/env-resolver", () => ({
 // Twin runtime is dynamically imported by resolveSendOptions; the mock only
 // kicks in when a test supplies twinId + twinDeps + twinUserMessage.
 const mApplyTwinContext = jest.fn()
+const mResolveOpencodeVaultCredential = jest.fn()
+jest.mock("@/lib/subscription/opencode/chat-bridge", () => ({
+  resolveOpencodeVaultCredential: (...a: unknown[]) => mResolveOpencodeVaultCredential(...a),
+}))
+const mResolveCodexVaultCredential = jest.fn()
+jest.mock("@/lib/subscription/codex/chat-bridge", () => ({
+  resolveCodexVaultCredential: (...a: unknown[]) => mResolveCodexVaultCredential(...a),
+}))
+
 jest.mock("@/lib/twin/runtime", () => ({
   applyTwinContext: (...args: unknown[]) => mApplyTwinContext(...args),
 }))
 
+// Project-scoped RAG (workspace knowledge base) — dynamically imported by
+// resolveSendOptions. Mock so we can drive the injected section deterministically.
+const mApplyProjectKnowledge = jest.fn()
+jest.mock("@/lib/project-knowledge/runtime/apply-project-context", () => ({
+  applyProjectKnowledgeContext: (...args: unknown[]) => mApplyProjectKnowledge(...args),
+}))
+
+// skills-bridge is dynamically imported by resolveSendOptions when a character
+// has pluginSkillIds. Mock it so we can drive the anthropic-managed (container)
+// skill path deterministically.
+const mResolveSkillsForCharacter = jest.fn()
+const mExtractContainerSkillIds = jest.fn()
+const mRenderResolvedSkillsSection = jest.fn()
+jest.mock("@/lib/claude/skills-bridge", () => ({
+  resolveSkillsForCharacter: (...a: unknown[]) => mResolveSkillsForCharacter(...a),
+  extractContainerSkillIds: (...a: unknown[]) => mExtractContainerSkillIds(...a),
+  renderResolvedSkillsSection: (...a: unknown[]) => mRenderResolvedSkillsSection(...a),
+}))
+
+// Surface-activation: keep the real selection/rendering by default (so the
+// existing surface tests use the real catalog), but make selectSurfaceSkills
+// overridable so a test can inject a skill that declares allowedTools.
+jest.mock("@/lib/skills/surface-activation", () => {
+  const actual = jest.requireActual("@/lib/skills/surface-activation")
+  return { ...actual, selectSurfaceSkills: jest.fn(actual.selectSurfaceSkills) }
+})
+
 import { buildAgentModeSessionUpdate } from "@/lib/agent"
 import { resolveAccountEnv, resolveAccountId, resolveProxyEnv } from "@/lib/claude/env-resolver"
+import {
+  __resetSandboxConfineStateForTesting,
+  getActiveSandboxConfine,
+} from "@/lib/claude/sandbox-confine-state"
 import { listCharactersByIds, resolveCharacterById } from "@/lib/db/characters"
 import { buildMcpServerMap, listEnabledMcpServers } from "@/lib/db/mcp-servers"
-import { listEnabledSkillsByIds, recordSkillUsage, renderSkillsSection } from "@/lib/db/skills"
+import {
+  listEnabledSkillsByIds,
+  recordSkillUsage,
+  renderSkillsCatalog,
+  renderSkillsSection,
+} from "@/lib/db/skills"
 import { getTeam } from "@/lib/db/teams"
+import { selectSurfaceSkills } from "@/lib/skills/surface-activation"
+import { BUILT_IN_SKILL_CATALOG } from "@/lib/skills/built-in-catalog"
 import { buildPluginToolsManifest } from "@/lib/plugin/bridge/sidecar-tools-bridge"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
+import * as standaloneMode from "@/lib/runtime/standalone-mode"
+import { ProviderRoutingEngine, RoutingNoCandidatesError } from "@cognia/provider-routing"
 import { useSubagentRuntimeStore } from "@/stores/agent/subagent-runtime-store"
 import { useAgentRuntimeStore } from "@/stores/agent"
 import { useCustomModeStore } from "@/stores/agent/custom-mode-store"
+import { usePluginStore } from "@/stores/plugin-runtime/plugin-store"
 import type { AgentModeConfig } from "@/types/agent/agent-mode"
 
-import { listTeamMembers, resolveMemberConfig, resolveSendOptions } from "./build-options"
-import type { AppSettings, Character, ChatSession, Skill, Team, TeamMember } from "./types"
+import {
+  __getActiveSpanForTesting,
+  __resetAgentTraceEmitterForTesting,
+} from "@cognia/agent-trace/emitter"
+import {
+  _resetImPromptMemosForTest,
+  listTeamMembers,
+  resolveMemberConfig,
+  resolveSendOptions,
+} from "./build-options"
+import type { AdapterInstanceRow, ConversationOverrideRow } from "@/lib/db/connector-types"
+import type {
+  AppSettings,
+  Character,
+  ChatSession,
+  Skill,
+  Team,
+  TeamMember,
+} from "@cognia/agent-config-types"
 import type { Project } from "@/types"
 
 const mGetCharacter = resolveCharacterById as jest.Mock
@@ -81,11 +191,13 @@ const mListCharsByIds = listCharactersByIds as jest.Mock
 const mListSkills = listEnabledSkillsByIds as jest.Mock
 const mRecordUsage = recordSkillUsage as jest.Mock
 const mRender = renderSkillsSection as jest.Mock
+const mRenderCatalog = renderSkillsCatalog as jest.Mock
 const mListMcp = listEnabledMcpServers as jest.Mock
 const mBuildMap = buildMcpServerMap as jest.Mock
 const mGetTeam = getTeam as jest.Mock
 const mRuntimeGet = (useAgentRuntimeStore as unknown as { getState: jest.Mock }).getState
 const mCustomGet = (useCustomModeStore as unknown as { getState: jest.Mock }).getState
+const mPluginGet = (usePluginStore as unknown as { getState: jest.Mock }).getState
 const mBuildModeUpdate = buildAgentModeSessionUpdate as jest.Mock
 const mResolveAccountId = resolveAccountId as jest.Mock
 const mResolveAccountEnv = resolveAccountEnv as jest.Mock
@@ -129,8 +241,13 @@ function makeProject(roots: { id?: string; path: string; isPrimary?: boolean }[]
   } as Project
 }
 
+/** Names of the plugin/self-invocation tools resolveSendOptions surfaces. */
+const toolNames = (opts: Awaited<ReturnType<typeof resolveSendOptions>>): string[] =>
+  (opts.pluginTools ?? []).map((t) => t.name)
+
 beforeEach(() => {
   jest.clearAllMocks()
+  __resetSandboxConfineStateForTesting()
   // Sane defaults so the function doesn't error when a test forgets to set
   // an expectation.
   mListSkills.mockResolvedValue([])
@@ -141,12 +258,37 @@ beforeEach(() => {
   mGetTeam.mockResolvedValue(undefined)
   mRuntimeGet.mockReturnValue({ modeId: undefined })
   mCustomGet.mockReturnValue({ customModes: {} })
+  mPluginGet.mockReturnValue({ plugins: {}, getAllModes: () => [] })
   mBuildModeUpdate.mockReturnValue(undefined)
   // ADR-0028 — default to the "no account override" path so existing tests
   // see today's behaviour. Per-test overrides activate the new flow.
   mResolveAccountId.mockReturnValue(null)
   mResolveAccountEnv.mockResolvedValue({})
   mResolveProxyEnv.mockResolvedValue({})
+  mResolveSkillsForCharacter.mockResolvedValue([])
+  mExtractContainerSkillIds.mockReturnValue([])
+  mRenderResolvedSkillsSection.mockReturnValue("")
+  mockHasWorkspaceFsBackend.mockReturnValue(true)
+})
+
+describe("resolveSendOptions — editor workspace tool", () => {
+  it("exposes read_active_editor only when an active workspace is present", async () => {
+    const withoutWorkspace = await resolveSendOptions({ character: makeChar() })
+    expect(toolNames(withoutWorkspace)).not.toContain("read_active_editor")
+
+    const withWorkspace = await resolveSendOptions({
+      character: makeChar(),
+      activeProject: makeProject([{ path: "/work/project", isPrimary: true }]),
+    })
+    expect(toolNames(withWorkspace)).toContain("read_active_editor")
+
+    mockHasWorkspaceFsBackend.mockReturnValue(false)
+    const withoutBackend = await resolveSendOptions({
+      character: makeChar(),
+      activeProject: makeProject([{ path: "/work/project", isPrimary: true }]),
+    })
+    expect(toolNames(withoutBackend)).not.toContain("read_active_editor")
+  })
 })
 
 describe("resolveMemberConfig", () => {
@@ -207,7 +349,397 @@ describe("resolveSendOptions — plugin tools manifest failure", () => {
   })
 })
 
+describe("resolveSendOptions — workflow skills guarantee the typed runner tool", () => {
+  const workflowSkill = {
+    id: "sk-wf",
+    name: "Summarizer",
+    content: "graph-bodied",
+    kind: "workflow",
+    workflowId: "wf1",
+    status: "enabled",
+  }
+
+  it("appends wf_run_workflow_typed when a kind:workflow skill is active and the plugin is absent", async () => {
+    mListSkills.mockResolvedValueOnce([workflowSkill])
+    ;(buildPluginToolsManifest as jest.Mock).mockReturnValueOnce([])
+
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", skillIds: ["sk-wf"] }),
+    } as never)
+
+    const names = toolNames(opts)
+    expect(names).toContain("wf_run_workflow_typed")
+    const entry = (opts.pluginTools ?? []).find((t) => t.name === "wf_run_workflow_typed")
+    expect(entry?.pluginId).toBe("cognia-workflow-ai")
+  })
+
+  it("does not duplicate the runner when the workflow-ai plugin already manifests it", async () => {
+    mListSkills.mockResolvedValueOnce([workflowSkill])
+    ;(buildPluginToolsManifest as jest.Mock).mockReturnValueOnce([
+      {
+        name: "wf_run_workflow_typed",
+        description: "from plugin",
+        jsonSchema: {},
+        pluginId: "cognia-workflow-ai",
+      },
+    ])
+
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", skillIds: ["sk-wf"] }),
+    } as never)
+
+    const matches = (opts.pluginTools ?? []).filter((t) => t.name === "wf_run_workflow_typed")
+    expect(matches).toHaveLength(1)
+    expect(matches[0]?.description).toBe("from plugin")
+  })
+
+  it("does not inject the runner when no workflow skill is active", async () => {
+    mListSkills.mockResolvedValueOnce([
+      { id: "sk-md", name: "Plain", content: "body", status: "enabled" },
+    ])
+    ;(buildPluginToolsManifest as jest.Mock).mockReturnValueOnce([])
+
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", skillIds: ["sk-md"] }),
+    } as never)
+
+    expect(toolNames(opts)).not.toContain("wf_run_workflow_typed")
+  })
+})
+
+describe("resolveSendOptions — semantic tool routing exempts flow-control tools", () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let setDeps: (deps: any) => void
+  beforeAll(async () => {
+    ;({ __setSemanticToolRouterDepsForTesting: setDeps } =
+      await import("@cognia/provider-routing/semantic-tool-router"))
+  })
+  afterEach(() => setDeps(null))
+
+  function manifestEntry(name: string) {
+    return { name, description: `tool ${name}`, pluginId: `p-${name}` } as never
+  }
+
+  it("never prunes ask_user / dispatch_agent even when they score below threshold", async () => {
+    // A manifest large enough to trip the activation threshold: the two
+    // flow-control tools plus 30 topical plugin tools.
+    const dummies = Array.from({ length: 30 }, (_, i) => manifestEntry(`tool_${i}`))
+    ;(buildPluginToolsManifest as jest.Mock).mockReturnValueOnce([
+      manifestEntry("ask_user"),
+      manifestEntry("dispatch_agent"),
+      ...dummies,
+    ])
+    // Deps that score everything at 0 → nothing clears the 0.5 threshold, so the
+    // router prunes aggressively (keeping only its small safety floor).
+    setDeps({
+      listRoutes: async () => [],
+      embed: async (texts: string[]) => texts.map(() => [1, 0]),
+      cacheRouteEmbeddings: async () => {},
+    })
+
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: {
+        semanticToolRouting: {
+          enabled: true,
+          topK: 2,
+          threshold: 0.5,
+          activationToolCount: 5,
+          pinnedTools: [],
+        },
+      } as unknown as AppSettings,
+      routingContextHint: { promptText: "please refactor this function" },
+    } as never)
+
+    const names = (opts.pluginTools ?? []).map((t) => t.name)
+    // The flow-control tools survive regardless of their score…
+    expect(names).toContain("ask_user")
+    expect(names).toContain("dispatch_agent")
+    // …and pruning actually ran (most topical dummies were dropped).
+    const dummyCount = names.filter((n) => n.startsWith("tool_")).length
+    expect(dummyCount).toBeLessThan(dummies.length)
+  })
+})
+
+describe("resolveSendOptions — Anthropic native fallbackModel activation", () => {
+  const routingConfig = {
+    strategy: "quality",
+    allowPerRequestOverride: true,
+    providerConstraints: [],
+    requestTimeoutMs: 30000,
+    maxFallbackAttempts: 3,
+  }
+
+  it("sets fallbackModel to the next sibling Anthropic entry in the alias chain", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "anthropic", model: "powerful" }),
+      appSettings: {
+        defaultProvider: "anthropic",
+        providerSettings: {},
+        routingConfig,
+        modelMappings: [
+          {
+            id: "m-powerful",
+            alias: "powerful",
+            providers: [
+              { providerId: "anthropic", modelId: "claude-opus-4-8" },
+              { providerId: "anthropic", modelId: "claude-opus-4-7" },
+            ],
+            distribution: "priority",
+            enabled: true,
+            isDefault: true,
+            createdAt: 0,
+            updatedAt: 0,
+          },
+        ],
+      } as unknown as AppSettings,
+    })
+    expect(opts.provider).toBe("anthropic")
+    expect(opts.model).toBe("claude-opus-4-8")
+    expect(opts.fallbackModel).toBe("claude-opus-4-7")
+  })
+
+  it("does NOT set fallbackModel when the resolved provider is not Anthropic", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c2", providerId: "openai", model: "fast" }),
+      appSettings: {
+        defaultProvider: "openai",
+        providerSettings: { openai: { apiKey: "sk-test" } },
+        routingConfig,
+        modelMappings: [
+          {
+            id: "m-fast",
+            alias: "fast",
+            providers: [
+              { providerId: "openai", modelId: "gpt-4o-mini" },
+              { providerId: "openai", modelId: "gpt-4o" },
+            ],
+            distribution: "priority",
+            enabled: true,
+            isDefault: true,
+            createdAt: 0,
+            updatedAt: 0,
+          },
+        ],
+      } as unknown as AppSettings,
+    })
+    expect(opts.provider).toBe("openai")
+    expect(opts.fallbackModel).toBeUndefined()
+  })
+})
+
+describe("resolveSendOptions — opt-in Auto routing", () => {
+  const routingConfig = {
+    strategy: "quality",
+    allowPerRequestOverride: true,
+    providerConstraints: [],
+    requestTimeoutMs: 30000,
+    maxFallbackAttempts: 3,
+  }
+  const mapping = (alias: string, modelId: string) => ({
+    id: `m-${alias}`,
+    alias,
+    providers: [{ providerId: "anthropic", modelId }],
+    distribution: "priority",
+    enabled: true,
+    isDefault: false,
+    createdAt: 0,
+    updatedAt: 0,
+  })
+  const tierMappings = [
+    mapping("fast", "claude-haiku-4-5-20251001"),
+    mapping("balanced", "claude-sonnet-4-6"),
+    mapping("powerful", "claude-opus-4-8"),
+  ]
+  // Guarantees scoreDifficulty >= the powerful threshold (fenced code +
+  // reasoning keywords + length + many sentences all saturate).
+  const HARD_PROMPT =
+    "Please implement and optimize this algorithm step-by-step. Analyze the architecture. Prove correctness. Debug the derivative. ```ts\nfor (;;) {}\n```. " +
+    "Refactor the recursive proof into a multi-step analysis of the optimization theorem. ".repeat(
+      30
+    )
+  const settings = (autoRouting?: unknown): AppSettings =>
+    ({
+      defaultProvider: "anthropic",
+      defaultModel: "claude-sonnet-4-6",
+      providerSettings: {},
+      routingConfig,
+      modelMappings: tierMappings,
+      ...(autoRouting ? { autoRouting } : {}),
+    }) as unknown as AppSettings
+
+  it("is a no-op when disabled (concrete model is untouched)", async () => {
+    const opts = await resolveSendOptions({
+      appSettings: settings(),
+      routingContextHint: { promptText: HARD_PROMPT },
+    })
+    expect(opts.model).toBe("claude-sonnet-4-6")
+    expect(opts.autoRouting).toBeUndefined()
+  })
+
+  it("routes a hard prompt to the powerful tier and stamps the decision", async () => {
+    const opts = await resolveSendOptions({
+      appSettings: settings({
+        enabled: true,
+        defaultSelection: "auto",
+        thresholds: { balanced: 0.34, powerful: 0.67 },
+        candidateAliases: ["fast", "balanced", "powerful"],
+      }),
+      routingContextHint: { promptText: HARD_PROMPT },
+    })
+    expect(opts.autoRouting?.tier).toBe("powerful")
+    expect(opts.autoRouting?.score).toBeGreaterThanOrEqual(0.67)
+    // The alias engine then resolved the tier to its concrete model.
+    expect(opts.model).toBe("claude-opus-4-8")
+    expect(opts.aliasResolution?.alias).toBe("powerful")
+  })
+
+  it("routes an easy prompt to the fast tier", async () => {
+    const opts = await resolveSendOptions({
+      appSettings: settings({
+        enabled: true,
+        defaultSelection: "auto",
+        thresholds: { balanced: 0.34, powerful: 0.67 },
+        candidateAliases: ["fast", "balanced", "powerful"],
+      }),
+      routingContextHint: { promptText: "hi" },
+    })
+    expect(opts.autoRouting?.tier).toBe("fast")
+    expect(opts.model).toBe("claude-haiku-4-5-20251001")
+  })
+
+  it("never re-routes an explicitly-typed alias", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "auto-alias", providerId: "anthropic", model: "fast" }),
+      appSettings: settings({
+        enabled: true,
+        thresholds: { balanced: 0.34, powerful: 0.67 },
+        candidateAliases: ["fast", "balanced", "powerful"],
+      }),
+      routingContextHint: { promptText: HARD_PROMPT },
+    })
+    // Typed "fast" wins; auto never fires.
+    expect(opts.autoRouting).toBeUndefined()
+    expect(opts.aliasResolution?.alias).toBe("fast")
+  })
+
+  it("is a no-op when the prompt text is empty", async () => {
+    const opts = await resolveSendOptions({
+      appSettings: settings({
+        enabled: true,
+        thresholds: { balanced: 0.34, powerful: 0.67 },
+        candidateAliases: ["fast", "balanced", "powerful"],
+      }),
+      routingContextHint: { promptText: "" },
+    })
+    expect(opts.model).toBe("claude-sonnet-4-6")
+    expect(opts.autoRouting).toBeUndefined()
+  })
+
+  it("falls back to the concrete model when an auto tier has no eligible deployment", async () => {
+    // Force the alias engine to report zero candidates for the auto-picked tier.
+    const spy = jest
+      .spyOn(ProviderRoutingEngine.prototype, "planRoute")
+      .mockRejectedValue(new RoutingNoCandidatesError("powerful"))
+    try {
+      const opts = await resolveSendOptions({
+        appSettings: settings({
+          enabled: true,
+          defaultSelection: "auto",
+          thresholds: { balanced: 0.34, powerful: 0.67 },
+          candidateAliases: ["fast", "balanced", "powerful"],
+        }),
+        routingContextHint: { promptText: HARD_PROMPT },
+      })
+      // Auto rewrote the model to a tier, resolution threw → we revert to the
+      // concrete default model instead of hard-failing the send.
+      expect(opts.model).toBe("claude-sonnet-4-6")
+      expect(opts.autoRouting).toBeUndefined()
+      expect(opts.aliasResolution).toBeUndefined()
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it("rethrows for an explicitly-typed alias with no eligible deployment", async () => {
+    const spy = jest
+      .spyOn(ProviderRoutingEngine.prototype, "planRoute")
+      .mockRejectedValue(new RoutingNoCandidatesError("fast"))
+    try {
+      await expect(
+        resolveSendOptions({
+          character: makeChar({ id: "typed", providerId: "anthropic", model: "fast" }),
+          appSettings: settings({
+            enabled: true,
+            thresholds: { balanced: 0.34, powerful: 0.67 },
+            candidateAliases: ["fast", "balanced", "powerful"],
+          }),
+          routingContextHint: { promptText: HARD_PROMPT },
+        })
+      ).rejects.toBeInstanceOf(RoutingNoCandidatesError)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it("is a no-op when no candidate alias is enabled in modelMappings", async () => {
+    const opts = await resolveSendOptions({
+      appSettings: {
+        defaultProvider: "anthropic",
+        defaultModel: "claude-sonnet-4-6",
+        providerSettings: {},
+        routingConfig,
+        modelMappings: [mapping("reasoning", "claude-opus-4-8")],
+        autoRouting: {
+          enabled: true,
+          thresholds: { balanced: 0.34, powerful: 0.67 },
+          candidateAliases: ["fast", "balanced", "powerful"],
+        },
+      } as unknown as AppSettings,
+      routingContextHint: { promptText: HARD_PROMPT },
+    })
+    expect(opts.model).toBe("claude-sonnet-4-6")
+    expect(opts.autoRouting).toBeUndefined()
+  })
+})
+
 describe("resolveSendOptions — non-Anthropic provider credentials (ADR-0043)", () => {
+  it("forwards Bedrock default-chain selection without resolved AWS credentials", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({
+        id: "bedrock-character",
+        providerId: "bedrock",
+        model: "us.amazon.nova-lite-v1:0",
+      }),
+      appSettings: {
+        defaultProvider: "bedrock",
+        providerSettings: {
+          bedrock: {
+            enabled: true,
+            defaultModel: "us.amazon.nova-lite-v1:0",
+            bedrock: {
+              authMode: "default-chain",
+              region: "us-east-1",
+              profile: "engineering",
+              roleArn: "arn:aws:iam::123456789012:role/Cognia",
+            },
+          },
+        },
+      } as unknown as AppSettings,
+    })
+
+    expect(opts.providerCredentials).toEqual({
+      apiKey: undefined,
+      baseURL: undefined,
+      protocol: "bedrock",
+      bedrockAuthMode: "default-chain",
+      region: "us-east-1",
+      profile: "engineering",
+      roleArn: "arn:aws:iam::123456789012:role/Cognia",
+    })
+    expect(JSON.stringify(opts.providerCredentials)).not.toContain("secretAccessKey")
+  })
+
   it("forwards the resolved protocol + modelParams for a configured built-in provider", async () => {
     const opts = await resolveSendOptions({
       character: makeChar({ id: "c1", providerId: "openai", model: "gpt-4o-mini" }),
@@ -221,10 +753,593 @@ describe("resolveSendOptions — non-Anthropic provider credentials (ADR-0043)",
     expect(opts.provider).toBe("openai")
     // Unconditional protocol forwarding (previously custom-only → undefined).
     expect(opts.providerCredentials?.protocol).toBe("openai")
+    // Built-in protocols never carry a declarative adapter spec.
+    expect(opts.protocolAdapterSpec).toBeUndefined()
     // Configured inference defaults reach the turn (v6 `maxTokens → maxOutputTokens`).
     expect(opts.modelParams).toEqual(
       expect.objectContaining({ temperature: 0.5, maxOutputTokens: 1024 })
     )
+  })
+
+  it("fills the OpenRouter catalog base URL for a key-only built-in entry (no api.openai.com leak)", async () => {
+    // Repro of the reported bug: an OpenRouter key with no stored base URL must
+    // resolve to openrouter.ai, NOT default the openai client to api.openai.com.
+    const opts = await resolveSendOptions({
+      character: makeChar({
+        id: "c1",
+        providerId: "openrouter",
+        model: "poolside/laguna-m.1:free",
+      }),
+      appSettings: {
+        defaultProvider: "openrouter",
+        providerSettings: {
+          openrouter: { apiKey: "sk-or-v1-xxx" },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(opts.provider).toBe("openrouter")
+    expect(opts.providerCredentials?.apiKey).toBe("sk-or-v1-xxx")
+    expect(opts.providerCredentials?.protocol).toBe("openai")
+    expect(opts.providerCredentials?.baseURL).toBe("https://openrouter.ai/api/v1")
+  })
+
+  it("rides the declarative spec along for a plugin-contributed protocol (M2)", async () => {
+    const { registerProtocolAdapter, __resetProtocolAdaptersForTesting } =
+      await import("@cognia/provider-core/providers/protocol-adapter-registry")
+    const spec = {
+      kind: "openai-compatible-variant" as const,
+      urlTemplate: "{baseURL}/v1/chat/completions",
+      responsePaths: { textDelta: "choices[0].delta.content" },
+    }
+    registerProtocolAdapter(
+      { id: "acme-plugin:wire", label: "Acme Wire", spec },
+      { pluginId: "acme-plugin" }
+    )
+    try {
+      const opts = await resolveSendOptions({
+        character: makeChar({ id: "c1", providerId: "acme", model: "acme-chat" }),
+        appSettings: {
+          defaultProvider: "acme",
+          providerSettings: {},
+          customProviders: [
+            {
+              id: "acme",
+              isCustom: true,
+              apiProtocol: "acme-plugin:wire",
+              baseURL: "https://llm.acme.dev",
+              apiKey: "sk-acme",
+            },
+          ],
+        } as unknown as AppSettings,
+      })
+      expect(opts.provider).toBe("acme")
+      // The namespaced plugin protocol id flows through the resolver…
+      expect(opts.providerCredentials?.protocol).toBe("acme-plugin:wire")
+      // …and the declarative spec rides along for the sidecar.
+      expect(opts.protocolAdapterSpec).toEqual(spec)
+    } finally {
+      __resetProtocolAdaptersForTesting()
+    }
+  })
+})
+
+describe("resolveSendOptions — multi-API-key rotation (ADR-0043 Phase 3)", () => {
+  // Deterministic microtask flush for the fire-and-forget persist call,
+  // which the code intentionally does not await before returning `opts`.
+  const flush = () => new Promise((r) => setTimeout(r, 0))
+
+  it("overrides the single-key credential with the round-robin-selected pool key", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "openai", model: "gpt-4o-mini" }),
+      appSettings: {
+        defaultProvider: "openai",
+        providerSettings: {
+          openai: {
+            apiKey: "sk-solo",
+            apiKeys: ["sk-pool-0", "sk-pool-1"],
+            apiKeyRotationEnabled: true,
+            apiKeyRotationStrategy: "round-robin",
+            currentKeyIndex: 0,
+          },
+        },
+      } as unknown as AppSettings,
+    })
+    // currentKeyIndex 0 -> round-robin advances to pool[1], NOT the plain apiKey.
+    expect(opts.providerCredentials?.apiKey).toBe("sk-pool-1")
+  })
+
+  it("persists the rotation advance onto the built-in provider row", async () => {
+    await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "openai", model: "gpt-4o-mini" }),
+      appSettings: {
+        defaultProvider: "openai",
+        providerSettings: {
+          openai: {
+            apiKey: "sk-solo",
+            apiKeys: ["sk-pool-0", "sk-pool-1"],
+            apiKeyRotationEnabled: true,
+            currentKeyIndex: -1,
+          },
+        },
+      } as unknown as AppSettings,
+    })
+    await flush()
+    expect(mockSetProviderConfig).toHaveBeenCalledWith(
+      "openai",
+      expect.objectContaining({
+        currentKeyIndex: 0,
+        apiKeyUsageStats: expect.objectContaining({
+          "sk-pool-0": expect.objectContaining({ usageCount: 1 }),
+        }),
+      })
+    )
+    expect(mockUpdateCustomProvider).not.toHaveBeenCalled()
+  })
+
+  it("persists the rotation advance onto the custom provider row instead", async () => {
+    await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "acme", model: "acme-chat" }),
+      appSettings: {
+        defaultProvider: "acme",
+        providerSettings: {},
+        customProviders: [
+          {
+            id: "acme",
+            isCustom: true,
+            protocol: "openai",
+            baseURL: "https://llm.acme.dev",
+            apiKey: "sk-solo",
+            apiKeys: ["sk-pool-0"],
+            apiKeyRotationEnabled: true,
+            currentKeyIndex: -1,
+          },
+        ],
+      } as unknown as AppSettings,
+    })
+    await flush()
+    expect(mockUpdateCustomProvider).toHaveBeenCalledWith(
+      "acme",
+      expect.objectContaining({ currentKeyIndex: 0 })
+    )
+    expect(mockSetProviderConfig).not.toHaveBeenCalled()
+  })
+
+  it("leaves the plain apiKey untouched when rotation is disabled", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "openai", model: "gpt-4o-mini" }),
+      appSettings: {
+        defaultProvider: "openai",
+        providerSettings: {
+          openai: { apiKey: "sk-solo", apiKeys: ["sk-pool-0", "sk-pool-1"] },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(opts.providerCredentials?.apiKey).toBe("sk-solo")
+    await flush()
+    expect(mockSetProviderConfig).not.toHaveBeenCalled()
+  })
+
+  it("does not block the turn when the persist call rejects", async () => {
+    mockSetProviderConfig.mockRejectedValueOnce(new Error("dexie unavailable"))
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {})
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "openai", model: "gpt-4o-mini" }),
+      appSettings: {
+        defaultProvider: "openai",
+        providerSettings: {
+          openai: {
+            apiKey: "sk-solo",
+            apiKeys: ["sk-pool-0"],
+            apiKeyRotationEnabled: true,
+            currentKeyIndex: -1,
+          },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(opts.providerCredentials?.apiKey).toBe("sk-pool-0")
+    await flush()
+    expect(warnSpy).toHaveBeenCalledWith(
+      "api key rotation advance persist failed",
+      expect.any(Error)
+    )
+    warnSpy.mockRestore()
+  })
+})
+
+describe("resolveSendOptions — compaction config", () => {
+  it("threads the resolved compaction config and strips draft fields", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: { compaction: { enabled: true } } as unknown as AppSettings,
+    })
+    expect(opts.compaction?.enabled).toBe(true)
+    expect(opts.compaction?.maxSummaryTokens).toBe(500)
+    expect(opts.compaction?.strategy).toBeDefined()
+    // No alternate summary provider/model configured → no summary block.
+    expect(opts.compaction?.summary).toBeUndefined()
+    // Draft-only keys never reach the wire object.
+    expect((opts.compaction as Record<string, unknown>).summaryProvider).toBeUndefined()
+    expect((opts.compaction as Record<string, unknown>).summaryModel).toBeUndefined()
+  })
+
+  it("resolves an alternate cheap summary provider's credentials", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }), // turn provider = anthropic (default)
+      appSettings: {
+        defaultProvider: "anthropic",
+        providerSettings: { openai: { apiKey: "sk-summary" } },
+        compaction: {
+          enabled: true,
+          compressionModel: { provider: "openai", model: "gpt-4o-mini", maxSummaryTokens: 256 },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(opts.compaction?.maxSummaryTokens).toBe(256)
+    expect(opts.compaction?.summary?.model).toBe("gpt-4o-mini")
+    expect(opts.compaction?.summary?.protocol).toBe("openai")
+    expect(opts.compaction?.summary?.credentials?.apiKey).toBe("sk-summary")
+  })
+
+  it("does not emit an unauthenticated summary credential for a keyless CLOUD provider", async () => {
+    // deepseek is a cloud built-in (apiKeyRequired) whose base URL auto-fills
+    // from the catalog. With no key configured, the summary must fall back to
+    // the main model instead of firing an unauthenticated request that 401s at
+    // compaction time.
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: {
+        defaultProvider: "anthropic",
+        providerSettings: { deepseek: { enabled: true } },
+        compaction: {
+          enabled: true,
+          compressionModel: { provider: "deepseek", model: "deepseek-chat" },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(opts.compaction?.summary).toBeUndefined()
+  })
+
+  it("allows a keyless LOCAL summary provider (Ollama) to resolve with just a base URL", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: {
+        defaultProvider: "anthropic",
+        providerSettings: { ollama: { enabled: true } },
+        compaction: {
+          enabled: true,
+          compressionModel: { provider: "ollama", model: "llama3" },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(opts.compaction?.summary?.model).toBe("llama3")
+    expect(opts.compaction?.summary?.credentials?.baseURL).toBeTruthy()
+    expect(opts.compaction?.summary?.credentials?.apiKey).toBeUndefined()
+  })
+
+  it("carries providerId on a Codex summary bound to a relay preset (host can't identify it)", async () => {
+    // The relay's host is neither *.openai.com nor chatgpt.com, so `providerId`
+    // is the ONLY thing that tells the sidecar to route this to /responses.
+    mResolveCodexVaultCredential.mockResolvedValue({
+      apiKey: "sk-relay",
+      baseURL: "https://ai-pixel.online",
+    })
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: {
+        defaultProvider: "anthropic",
+        providerSettings: {},
+        compaction: {
+          enabled: true,
+          compressionModel: { provider: "codex", model: "gpt-5.6-sol" },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(opts.compaction?.summary?.providerId).toBe("codex")
+    expect(opts.compaction?.summary?.credentials?.baseURL).toBe("https://ai-pixel.online")
+  })
+
+  it("resolves a Codex summary provider from the subscription vault when settings have no key", async () => {
+    mResolveCodexVaultCredential.mockResolvedValue({
+      apiKey: "chatgpt-bearer",
+      baseURL: "https://chatgpt.com/backend-api/codex",
+      headers: { "ChatGPT-Account-Id": "acct_123", "OAI-Product-Sku": "codex" },
+    })
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }), // turn provider = anthropic (default)
+      appSettings: {
+        defaultProvider: "anthropic",
+        providerSettings: {},
+        compaction: {
+          enabled: true,
+          compressionModel: { provider: "codex", model: "gpt-5.2-codex" },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(mResolveCodexVaultCredential).toHaveBeenCalledWith("codex")
+    expect(opts.compaction?.summary).toEqual({
+      model: "gpt-5.2-codex",
+      protocol: "openai",
+      // Travels with `credentials`: the sidecar needs the id (not just the base
+      // URL) to route codex to the Responses API behind a relay preset.
+      providerId: "codex",
+      credentials: {
+        apiKey: "chatgpt-bearer",
+        baseURL: "https://chatgpt.com/backend-api/codex",
+        headers: { "ChatGPT-Account-Id": "acct_123", "OAI-Product-Sku": "codex" },
+      },
+    })
+  })
+
+  it("backfills Codex summary provider headers from the vault when settings provide the key", async () => {
+    mResolveCodexVaultCredential.mockResolvedValue({
+      apiKey: "chatgpt-bearer",
+      baseURL: "https://chatgpt.com/backend-api/codex",
+      headers: { "ChatGPT-Account-Id": "acct_123", "OAI-Product-Sku": "codex" },
+    })
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }), // turn provider = anthropic (default)
+      appSettings: {
+        defaultProvider: "anthropic",
+        providerSettings: {
+          codex: {
+            apiKey: "chatgpt-bearer",
+            baseURL: "https://chatgpt.com/backend-api/codex",
+          },
+        },
+        compaction: {
+          enabled: true,
+          compressionModel: { provider: "codex", model: "gpt-5.2-codex" },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(mResolveCodexVaultCredential).toHaveBeenCalledWith("codex")
+    expect(opts.compaction?.summary?.credentials).toEqual({
+      apiKey: "chatgpt-bearer",
+      baseURL: "https://chatgpt.com/backend-api/codex",
+      headers: { "ChatGPT-Account-Id": "acct_123", "OAI-Product-Sku": "codex" },
+    })
+  })
+
+  it("resolves an OpenCode summary provider from the subscription vault when settings have no key", async () => {
+    mResolveOpencodeVaultCredential.mockResolvedValue({
+      apiKey: "sk-go-vault",
+      baseURL: "https://opencode.ai/zen/go/v1",
+    })
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }), // turn provider = anthropic (default)
+      appSettings: {
+        defaultProvider: "anthropic",
+        providerSettings: {},
+        compaction: {
+          enabled: true,
+          compressionModel: { provider: "opencode-go", model: "kimi-k2.6" },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(mResolveOpencodeVaultCredential).toHaveBeenCalledWith("opencode-go")
+    expect(opts.compaction?.summary).toEqual({
+      model: "kimi-k2.6",
+      protocol: "openai",
+      providerId: "opencode-go",
+      credentials: {
+        apiKey: "sk-go-vault",
+        baseURL: "https://opencode.ai/zen/go/v1",
+      },
+    })
+  })
+
+  it("reuses the turn provider when only a summary model is configured", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "openai", model: "gpt-4o" }),
+      appSettings: {
+        defaultProvider: "openai",
+        providerSettings: { openai: { apiKey: "sk-test" } },
+        compaction: { enabled: true, compressionModel: { model: "gpt-4o-mini" } },
+      } as unknown as AppSettings,
+    })
+    expect(opts.compaction?.summary).toEqual({ model: "gpt-4o-mini" })
+  })
+
+  it("omits the summary block when the alternate provider is unconfigured", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: {
+        defaultProvider: "anthropic",
+        providerSettings: {},
+        compaction: { enabled: true, compressionModel: { provider: "openai" } },
+      } as unknown as AppSettings,
+    })
+    expect(opts.compaction?.summary).toBeUndefined()
+  })
+
+  it("pins the catalog window so the sidecar trigger ignores its 128k deepseek floor", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "deepseek", model: "deepseek-v4-pro" }),
+      appSettings: {
+        defaultProvider: "deepseek",
+        providerSettings: { deepseek: { apiKey: "sk-ds" } },
+        compaction: { enabled: true },
+      } as unknown as AppSettings,
+    })
+    // deepseek-v4-pro is 1M in the provider catalog — NOT the regex table's
+    // 128k floor that would auto-compact at ~107k. The catalog states a round
+    // decimal 1_000_000; this used to read 1_048_576 because the inline entry
+    // shadowed the catalog and carried the binary value.
+    expect(opts.compaction?.contextWindow).toBe(1_000_000)
+  })
+
+  it("omits contextWindow when compaction is disabled", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "deepseek", model: "deepseek-v4-pro" }),
+      appSettings: {
+        defaultProvider: "deepseek",
+        providerSettings: { deepseek: { apiKey: "sk-ds" } },
+        compaction: { enabled: false },
+      } as unknown as AppSettings,
+    })
+    expect(opts.compaction?.contextWindow).toBeUndefined()
+  })
+
+  it("appends the post-compaction recovery snippet only when ctx.postCompaction is set", async () => {
+    const base = {
+      character: makeChar({ id: "c1" }),
+      appSettings: { compaction: { enabled: true } } as unknown as AppSettings,
+    }
+    const without = await resolveSendOptions(base)
+    expect(without.appendSystemPrompt ?? "").not.toContain("Post-compaction recovery")
+
+    const withRecovery = await resolveSendOptions({
+      ...base,
+      postCompaction: { phaseNumber: 1, durableInstructions: "Keep the kanban in sync" },
+    })
+    expect(withRecovery.appendSystemPrompt).toContain("Post-compaction recovery")
+    expect(withRecovery.appendSystemPrompt).toContain("Keep the kanban in sync")
+  })
+
+  it("does not append recovery when compaction is disabled", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: { compaction: { enabled: false } } as unknown as AppSettings,
+      postCompaction: { phaseNumber: 1 },
+    })
+    expect(opts.appendSystemPrompt ?? "").not.toContain("Post-compaction recovery")
+  })
+})
+
+describe("resolveSendOptions — opencode vault auto-fallback", () => {
+  it("draws credentials from the subscription vault when the provider is unconfigured", async () => {
+    mResolveOpencodeVaultCredential.mockResolvedValue({
+      apiKey: "sk-go-vault",
+      baseURL: "https://opencode.ai/zen/go/v1",
+    })
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "opencode-go" }),
+      appSettings: {
+        defaultProvider: "opencode-go",
+        providerSettings: {},
+      } as unknown as AppSettings,
+    })
+    expect(mResolveOpencodeVaultCredential).toHaveBeenCalledWith("opencode-go")
+    expect(opts.providerCredentials).toEqual({
+      apiKey: "sk-go-vault",
+      baseURL: "https://opencode.ai/zen/go/v1",
+      protocol: "openai",
+    })
+    // Model backfilled from the built-in catalog default.
+    expect(opts.model).toBe("kimi-k2.6")
+  })
+
+  it("does NOT fall back when the provider is explicitly disabled", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "opencode" }),
+      appSettings: {
+        defaultProvider: "opencode",
+        providerSettings: { opencode: { enabled: false } },
+      } as unknown as AppSettings,
+    })
+    expect(mResolveOpencodeVaultCredential).not.toHaveBeenCalled()
+    expect(opts.providerCredentials).toBeUndefined()
+  })
+
+  it("backfills only the key when the provider resolved with a base URL but no key", async () => {
+    mResolveOpencodeVaultCredential.mockResolvedValue({
+      apiKey: "sk-zen-vault",
+      baseURL: "https://opencode.ai/zen/v1",
+    })
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "opencode" }),
+      appSettings: {
+        defaultProvider: "opencode",
+        providerSettings: { opencode: { baseURL: "https://my-relay.example/v1" } },
+      } as unknown as AppSettings,
+    })
+    expect(opts.providerCredentials).toEqual(
+      expect.objectContaining({
+        apiKey: "sk-zen-vault",
+        baseURL: "https://my-relay.example/v1",
+        protocol: "openai",
+      })
+    )
+  })
+
+  it("falls through with no credentials when the vault has no matching account", async () => {
+    mResolveOpencodeVaultCredential.mockResolvedValue(null)
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "opencode-go" }),
+      appSettings: {
+        defaultProvider: "opencode-go",
+        providerSettings: {},
+      } as unknown as AppSettings,
+    })
+    expect(opts.providerCredentials).toBeUndefined()
+  })
+
+  it("never consults the vault for non-opencode providers", async () => {
+    await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "openai" }),
+      appSettings: {
+        defaultProvider: "openai",
+        providerSettings: {},
+      } as unknown as AppSettings,
+    })
+    expect(mResolveOpencodeVaultCredential).not.toHaveBeenCalled()
+  })
+})
+
+describe("resolveSendOptions — codex vault auto-fallback", () => {
+  it("draws the ChatGPT-login credential (base URL + headers) from the vault", async () => {
+    mResolveCodexVaultCredential.mockResolvedValue({
+      apiKey: "chatgpt-bearer",
+      baseURL: "https://chatgpt.com/backend-api/codex",
+      headers: { "ChatGPT-Account-Id": "acct_123", "OAI-Product-Sku": "codex" },
+    })
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "codex" }),
+      appSettings: {
+        defaultProvider: "codex",
+        providerSettings: {},
+      } as unknown as AppSettings,
+    })
+    expect(mResolveCodexVaultCredential).toHaveBeenCalledWith("codex")
+    expect(opts.providerCredentials).toEqual({
+      apiKey: "chatgpt-bearer",
+      baseURL: "https://chatgpt.com/backend-api/codex",
+      protocol: "openai",
+      headers: { "ChatGPT-Account-Id": "acct_123", "OAI-Product-Sku": "codex" },
+    })
+    // Model backfilled from the built-in catalog default.
+    expect(opts.model).toBe("gpt-5.6-sol")
+  })
+
+  it("api_key mode carries no special headers", async () => {
+    mResolveCodexVaultCredential.mockResolvedValue({
+      apiKey: "sk-openai",
+      baseURL: "https://api.openai.com/v1",
+    })
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "codex" }),
+      appSettings: {
+        defaultProvider: "codex",
+        providerSettings: {},
+      } as unknown as AppSettings,
+    })
+    expect(opts.providerCredentials).toEqual({
+      apiKey: "sk-openai",
+      baseURL: "https://api.openai.com/v1",
+      protocol: "openai",
+    })
+  })
+
+  it("does NOT fall back when codex is explicitly disabled", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "codex" }),
+      appSettings: {
+        defaultProvider: "codex",
+        providerSettings: { codex: { enabled: false } },
+      } as unknown as AppSettings,
+    })
+    expect(mResolveCodexVaultCredential).not.toHaveBeenCalled()
+    expect(opts.providerCredentials).toBeUndefined()
   })
 })
 
@@ -268,6 +1383,176 @@ describe("resolveSendOptions — direct-chat subagents (opts.agents)", () => {
       })
     } finally {
       useSubagentRuntimeStore.getState().deleteTemplate("bo-direct-1")
+    }
+  })
+
+  it("includes the host built-in subagents so they are @-mentionable in direct chat", async () => {
+    const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+    expect(opts.agents).toHaveProperty("workflow-designer")
+    expect(opts.agents).toHaveProperty("workflow-doc-writer")
+  })
+
+  it("routes the turn to a @-mentioned subagent that is registered (opts.agent)", async () => {
+    useSubagentRuntimeStore.getState().addTemplate({
+      id: "bo-route-1",
+      name: "Route Helper",
+      description: "helps",
+      category: "general",
+      taskTemplate: "do {{x}}",
+      config: { systemPrompt: "You help." },
+      isBuiltIn: false,
+    })
+    try {
+      const opts = await resolveSendOptions({
+        character: makeChar({ id: "c1" }),
+        targetAgentId: "template:route-helper",
+      })
+      expect(opts.agent).toBe("template:route-helper")
+      // A built-in id resolves too (it is registered in direct chat now).
+      const builtin = await resolveSendOptions({
+        character: makeChar({ id: "c1" }),
+        targetAgentId: "workflow-designer",
+      })
+      expect(builtin.agent).toBe("workflow-designer")
+    } finally {
+      useSubagentRuntimeStore.getState().deleteTemplate("bo-route-1")
+    }
+  })
+
+  it("drops an unknown / stale targetAgentId (leaves opts.agent unset)", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      targetAgentId: "template:does-not-exist",
+    })
+    expect(opts.agent).toBeUndefined()
+  })
+
+  it("suppresses SDK-native opts.agents for a nested dispatch run", async () => {
+    useSubagentRuntimeStore.getState().addTemplate({
+      id: "bo-nest-1",
+      name: "Nest Helper",
+      description: "helps",
+      category: "general",
+      taskTemplate: "do {{x}}",
+      config: { systemPrompt: "You help." },
+      isBuiltIn: false,
+    })
+    try {
+      // Normal direct chat → the template is exposed via the SDK Task surface.
+      const direct = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+      expect(direct.agents?.["template:nest-helper"]).toBeDefined()
+      // Nested run (dispatchContext present) → SDK-native agents are suppressed
+      // so the child only holds the controlled dispatch_agent tool.
+      const nested = await resolveSendOptions({
+        character: makeChar({ id: "c1" }),
+        dispatchContext: { depth: 1, maxDepth: 2, parentChain: [] },
+      })
+      expect(nested.agents?.["template:nest-helper"]).toBeUndefined()
+    } finally {
+      useSubagentRuntimeStore.getState().deleteTemplate("bo-nest-1")
+    }
+  })
+
+  it("offers the dispatch_agent gate when nesting is enabled and a subagent exists", async () => {
+    ;(buildPluginToolsManifest as jest.Mock).mockClear()
+    useSubagentRuntimeStore.getState().addTemplate({
+      id: "bo-nest-2",
+      name: "Gate Helper",
+      description: "helps",
+      category: "general",
+      taskTemplate: "do {{x}}",
+      config: { systemPrompt: "You help." },
+      isBuiltIn: false,
+    })
+    try {
+      await resolveSendOptions({
+        character: makeChar({ id: "c1" }),
+        appSettings: { subagentNesting: { enabled: true, maxDepth: 2 } } as never,
+      })
+      const lastCall = (buildPluginToolsManifest as jest.Mock).mock.calls.at(-1)?.[0]
+      expect(lastCall?.dispatchAgent).toMatchObject({ enabled: true, depth: 0, maxDepth: 2 })
+      expect(
+        lastCall?.dispatchAgent.available.some(
+          (a: { id: string }) => a.id === "template:gate-helper"
+        )
+      ).toBe(true)
+    } finally {
+      useSubagentRuntimeStore.getState().deleteTemplate("bo-nest-2")
+    }
+  })
+
+  it("force-offers dispatch_agent in plan mode even when nesting is off", async () => {
+    ;(buildPluginToolsManifest as jest.Mock).mockClear()
+    await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: { permissionMode: "plan" } as never,
+    })
+    const lastCall = (buildPluginToolsManifest as jest.Mock).mock.calls.at(-1)?.[0]
+    // Plan mode dispatches read-only Explore/Plan subagents (Claude Code parity),
+    // so the tool must be offered even without the nesting opt-in.
+    expect(lastCall?.dispatchAgent).toMatchObject({ enabled: true, depth: 0 })
+    expect(lastCall?.dispatchAgent.available.some((a: { id: string }) => a.id === "Explore")).toBe(
+      true
+    )
+    expect(lastCall?.dispatchAgent.available.some((a: { id: string }) => a.id === "Plan")).toBe(
+      true
+    )
+  })
+
+  it("does not offer dispatch_agent in default mode without nesting", async () => {
+    ;(buildPluginToolsManifest as jest.Mock).mockClear()
+    await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+    const lastCall = (buildPluginToolsManifest as jest.Mock).mock.calls.at(-1)?.[0]
+    expect(lastCall?.dispatchAgent).toBeUndefined()
+  })
+
+  it("withholds dispatch_agent from a dispatched leaf child in plan mode (no re-nesting)", async () => {
+    ;(buildPluginToolsManifest as jest.Mock).mockClear()
+    // A dispatched Explore/Plan child (isDispatchedSubagent, no dispatchContext —
+    // its def never set allowNesting) must NOT hit the plan-mode force-offer:
+    // it is a leaf, not a top-level chat (CLI leaf parity).
+    await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: { permissionMode: "plan" } as never,
+      isDispatchedSubagent: true,
+    })
+    const lastCall = (buildPluginToolsManifest as jest.Mock).mock.calls.at(-1)?.[0]
+    expect(lastCall?.dispatchAgent).toBeUndefined()
+  })
+
+  it("withholds dispatch_agent from a dispatched leaf child even when nesting is enabled", async () => {
+    ;(buildPluginToolsManifest as jest.Mock).mockClear()
+    await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: { subagentNesting: { enabled: true, maxDepth: 2 } } as never,
+      isDispatchedSubagent: true,
+    })
+    const lastCall = (buildPluginToolsManifest as jest.Mock).mock.calls.at(-1)?.[0]
+    expect(lastCall?.dispatchAgent).toBeUndefined()
+  })
+
+  it("still offers dispatch_agent to a dispatched child that carries a dispatchContext", async () => {
+    ;(buildPluginToolsManifest as jest.Mock).mockClear()
+    useSubagentRuntimeStore.getState().addTemplate({
+      id: "bo-nest-3",
+      name: "Nesting Child",
+      description: "helps",
+      category: "general",
+      taskTemplate: "do {{x}}",
+      config: { systemPrompt: "You help." },
+      isBuiltIn: false,
+    })
+    try {
+      // allowNesting defs DO get a dispatchContext — the flag must not demote them.
+      await resolveSendOptions({
+        character: makeChar({ id: "c1" }),
+        dispatchContext: { depth: 1, maxDepth: 3, parentChain: [] },
+        isDispatchedSubagent: true,
+      })
+      const lastCall = (buildPluginToolsManifest as jest.Mock).mock.calls.at(-1)?.[0]
+      expect(lastCall?.dispatchAgent).toMatchObject({ enabled: true, depth: 1, maxDepth: 3 })
+    } finally {
+      useSubagentRuntimeStore.getState().deleteTemplate("bo-nest-3")
     }
   })
 })
@@ -316,6 +1601,24 @@ describe("resolveSendOptions — character + skills", () => {
     expect(mListSkills).toHaveBeenCalledWith(["sk1"])
     expect(mRecordUsage).toHaveBeenCalledWith(["sk1"])
     expect(opts.systemPrompt).toContain("Skill 1")
+    expect(opts.allowedTools).toEqual(expect.arrayContaining(["X"]))
+  })
+
+  it("skillRenderMode 'name' renders the catalog, not the full bodies", async () => {
+    const ch = makeChar({ id: "c1", skillIds: ["sk1"] })
+    mListSkills.mockResolvedValueOnce([
+      { id: "sk1", name: "Skill 1", content: "FULL BODY", allowedTools: ["X"] } as unknown as Skill,
+    ])
+    mRenderCatalog.mockReturnValueOnce("## Available skills\n\n- `sk1` — Skill 1")
+
+    const opts = await resolveSendOptions({ character: ch, skillRenderMode: "name" })
+
+    // The catalog renderer was used; the full-body renderer was NOT.
+    expect(mRenderCatalog).toHaveBeenCalled()
+    expect(mRender).not.toHaveBeenCalled()
+    expect(opts.systemPrompt).toContain("Available skills")
+    expect(opts.systemPrompt).not.toContain("FULL BODY")
+    // allowedTools still unions (a skill's declared tools must stay granted).
     expect(opts.allowedTools).toEqual(expect.arrayContaining(["X"]))
   })
 
@@ -401,6 +1704,23 @@ describe("resolveSendOptions — character + skills", () => {
     const ch = makeChar({ id: "c1", disallowedTools: ["DangerousTool"] })
     const opts = await resolveSendOptions({ character: ch })
     expect(opts.disallowedTools).toEqual(["DangerousTool"])
+  })
+
+  it("serializes allowed/disallowed tools in sorted order regardless of source order", async () => {
+    // Cache-prefix stability: the union Sets insert in source order, but the
+    // final arrays must be sorted so identical tool sets serialize identically.
+    const ch = makeChar({
+      id: "c1",
+      allowedTools: ["Zeta", "Alpha"],
+      disallowedTools: ["zz_deny", "aa_deny"],
+    })
+    mListSkills.mockResolvedValueOnce([
+      { id: "sk", name: "Sk", content: "x", allowedTools: ["Mid"] } as unknown as Skill,
+    ])
+    mRender.mockReturnValueOnce("section")
+    const opts = await resolveSendOptions({ character: { ...ch, skillIds: ["sk"] } as Character })
+    expect(opts.allowedTools).toEqual(["Alpha", "Mid", "Zeta"])
+    expect(opts.disallowedTools).toEqual(["aa_deny", "zz_deny"])
   })
 })
 
@@ -511,6 +1831,27 @@ describe("resolveSendOptions — model precedence", () => {
     expect(opts.provider).toBe("openai")
   })
 
+  it("IM ConversationOverrideRow.reasoningOverride beats session.effort and app default", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const overrides = require("@/lib/db/conversation-overrides")
+    const mReadOverride = overrides.readForResolution as jest.Mock
+    mReadOverride.mockResolvedValueOnce({ reasoningOverride: "high" })
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "s1",
+        model: "claude-opus-4-8",
+        effort: "low",
+        platformBinding: {
+          adapterId: "tg-1",
+          conversationKey: "telegram:tg-1:9",
+        },
+      } as ChatSession),
+      character: makeChar({ id: "c1", providerId: "anthropic" }),
+      appSettings: { defaultEffort: "medium" } as AppSettings,
+    })
+    expect(opts.effort).toBe("high")
+  })
+
   it("non-IM sessions ignore the row read (precedence unchanged)", async () => {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const overrides = require("@/lib/db/conversation-overrides")
@@ -527,6 +1868,153 @@ describe("resolveSendOptions — model precedence", () => {
     // read — the mock is harmless because nothing consumes it.
     expect(opts.model).toBe("session-model")
     expect(opts.provider).toBe("anthropic")
+  })
+
+  // ── W1 multi-bot — instance-level binding defaults ─────────────────────────
+
+  it("bot defaultModel/defaultProvider apply when session/override/character are silent", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "s1",
+        platformBinding: { adapterId: "tg-1", conversationKey: "telegram:tg-1:9" },
+      } as ChatSession),
+      character: makeChar({ id: "c1" }),
+      appSettings: { defaultModel: "app-default", defaultProvider: "openai" } as AppSettings,
+      imOverrideRow: null,
+      imAdapterRow: {
+        id: "tg-1",
+        defaultModel: "claude-fable-5",
+        defaultProvider: "anthropic",
+      } as AdapterInstanceRow,
+    })
+    expect(opts.model).toBe("claude-fable-5")
+    expect(opts.provider).toBe("anthropic")
+  })
+
+  it("bot defaultModel BEATS character.model but loses to session.model and the IM override", async () => {
+    const base = {
+      character: makeChar({ id: "c1", model: "char-model", providerId: "anthropic" }),
+      imOverrideRow: null,
+      imAdapterRow: { id: "tg-1", defaultModel: "bot-model" } as AdapterInstanceRow,
+    }
+    // Beats the character's own model (D1 — operator pin wins).
+    const optsChar = await resolveSendOptions({
+      ...base,
+      session: makeSession({
+        id: "s1",
+        platformBinding: { adapterId: "tg-1", conversationKey: "telegram:tg-1:9" },
+      } as ChatSession),
+    })
+    expect(optsChar.model).toBe("bot-model")
+
+    // Loses to an explicit per-session model.
+    const optsSession = await resolveSendOptions({
+      ...base,
+      session: makeSession({
+        id: "s1",
+        model: "session-model",
+        platformBinding: { adapterId: "tg-1", conversationKey: "telegram:tg-1:9" },
+      } as ChatSession),
+    })
+    expect(optsSession.model).toBe("session-model")
+
+    // Loses to the per-conversation `/model` override.
+    const optsIm = await resolveSendOptions({
+      ...base,
+      imOverrideRow: { modelOverride: "im-model" } as ConversationOverrideRow,
+      session: makeSession({
+        id: "s1",
+        platformBinding: { adapterId: "tg-1", conversationKey: "telegram:tg-1:9" },
+      } as ChatSession),
+    })
+    expect(optsIm.model).toBe("im-model")
+  })
+
+  it("empty-string bot defaults are treated as unset (no shadowing)", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "s1",
+        platformBinding: { adapterId: "tg-1", conversationKey: "telegram:tg-1:9" },
+      } as ChatSession),
+      character: makeChar({ id: "c1", model: "char-model", providerId: "openai" }),
+      imOverrideRow: null,
+      imAdapterRow: { id: "tg-1", defaultModel: "  ", defaultProvider: "" } as AdapterInstanceRow,
+    })
+    expect(opts.model).toBe("char-model")
+    expect(opts.provider).toBe("openai")
+  })
+
+  it("bot defaultReasoning beats the app default but loses to session.effort", async () => {
+    const base = {
+      character: makeChar({ id: "c1", providerId: "anthropic" }),
+      appSettings: { defaultEffort: "low" } as AppSettings,
+      imOverrideRow: null,
+      imAdapterRow: {
+        id: "tg-1",
+        defaultReasoning: "high",
+      } as AdapterInstanceRow,
+    }
+    const opts = await resolveSendOptions({
+      ...base,
+      session: makeSession({
+        id: "s1",
+        model: "claude-opus-4-8",
+        platformBinding: { adapterId: "tg-1", conversationKey: "telegram:tg-1:9" },
+      } as ChatSession),
+    })
+    expect(opts.effort).toBe("high")
+
+    const optsSession = await resolveSendOptions({
+      ...base,
+      session: makeSession({
+        id: "s1",
+        model: "claude-opus-4-8",
+        effort: "medium",
+        platformBinding: { adapterId: "tg-1", conversationKey: "telegram:tg-1:9" },
+      } as ChatSession),
+    })
+    expect(optsSession.effort).toBe("medium")
+  })
+
+  it("falls back to a Dexie adapter-row read for platform-bound sessions when ctx.imAdapterRow is undefined", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const instances = require("@/lib/db/adapter-instances")
+    const mGetAdapter = instances.getAdapterInstance as jest.Mock
+    mGetAdapter.mockResolvedValueOnce({ id: "tg-1", defaultModel: "bot-model" })
+    // `clearMocks` (jest.config) clears call history but NOT the queued
+    // `mockResolvedValueOnce` implementations, so a member-override Once left
+    // over by an earlier test would win over the bot default in the model
+    // chain. Drain it so this test observes the Dexie fallback in isolation.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    ;(require("@/lib/db/conversation-overrides").readForResolution as jest.Mock).mockReset()
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "s1",
+        platformBinding: { adapterId: "tg-1", conversationKey: "telegram:tg-1:9" },
+      } as ChatSession),
+      character: makeChar({ id: "c1", providerId: "anthropic" }),
+    })
+    expect(mGetAdapter).toHaveBeenCalledWith("tg-1")
+    expect(opts.model).toBe("bot-model")
+  })
+
+  it("ctx.imAdapterRow === null skips the Dexie adapter-row read entirely", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const instances = require("@/lib/db/adapter-instances")
+    const mGetAdapter = instances.getAdapterInstance as jest.Mock
+    mGetAdapter.mockClear()
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "s1",
+        model: "session-model",
+        platformBinding: { adapterId: "tg-1", conversationKey: "telegram:tg-1:9" },
+      } as ChatSession),
+      character: makeChar({ id: "c1", providerId: "anthropic" }),
+      imOverrideRow: null,
+      imAdapterRow: null,
+    })
+    expect(mGetAdapter).not.toHaveBeenCalled()
+    expect(opts.model).toBe("session-model")
   })
 })
 
@@ -576,6 +2064,64 @@ describe("resolveSendOptions — system prompt assembly", () => {
       appSettings: { defaultSystemPrompt: "default" } as AppSettings,
     })
     expect(opts.systemPrompt).toBe("default")
+  })
+
+  it("injects a branchSeed into appendSystemPrompt on the first send", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "s1",
+        branchSeed: { kind: "summary", content: "We discussed X." },
+      }),
+    })
+    expect(opts.appendSystemPrompt).toContain("Summary of the conversation")
+    expect(opts.appendSystemPrompt).toContain("We discussed X.")
+  })
+
+  it("does NOT inject a branchSeed once the session has an sdkSessionId", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "s1",
+        sdkSessionId: "sdk-1",
+        branchSeed: { kind: "transcript", content: "User: hi" },
+      }),
+    })
+    expect(opts.appendSystemPrompt ?? "").not.toContain("User: hi")
+  })
+
+  it("does NOT inject a branchSeed when the session was forked at the SDK level", async () => {
+    // The seed and an SDK fork re-establish the SAME pre-branch context.
+    // Applying both would send it twice — once as a system prompt, once as the
+    // forked conversation — inflating every first turn.
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "s1",
+        forkedFromSdkSessionId: "sdk-parent",
+        branchSeed: { kind: "transcript", content: "User: hi" },
+      }),
+    })
+    expect(opts.appendSystemPrompt ?? "").not.toContain("User: hi")
+  })
+
+  it("warns when a session carries both a seed and a fork", async () => {
+    // `buildChildRow` sets exactly one, so this is unreachable today — but the
+    // two fields are written in one function and read in two places, which is
+    // how the invariant gets lost.
+    const warn = jest.spyOn(loggers.chat, "warn").mockImplementation(() => {})
+    try {
+      await resolveSendOptions({
+        session: makeSession({
+          id: "s1",
+          forkedFromSdkSessionId: "sdk-parent",
+          branchSeed: { kind: "summary", content: "We discussed X." },
+        }),
+      })
+      expect(warn).toHaveBeenCalledWith(
+        "branch-seed-and-fork-both-set",
+        expect.objectContaining({ sessionId: "s1", branchKind: "summary" })
+      )
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   it("omits systemPrompt when nothing produces a non-empty string", async () => {
@@ -660,6 +2206,25 @@ describe("resolveSendOptions — agent mode resolution", () => {
 
     const opts = await resolveSendOptions({})
     expect(opts.allowedTools).toEqual(expect.arrayContaining(["tool-x"]))
+  })
+
+  it("looks up plugin-contributed modes by namespaced id", async () => {
+    const pluginMode: AgentModeConfig = {
+      id: "cognia-work-mode:work",
+      type: "plugin",
+      name: "Work",
+      description: "",
+      icon: "BriefcaseBusiness",
+      systemPrompt: "Use work_create_deliverable after researching with host tools.",
+    }
+    mRuntimeGet.mockReturnValue({ modeId: pluginMode.id })
+    mPluginGet.mockReturnValue({ plugins: {}, getAllModes: () => [pluginMode] })
+    mBuildModeUpdate.mockReturnValue({ agentModeId: pluginMode.id })
+
+    const opts = await resolveSendOptions({})
+
+    expect(mBuildModeUpdate).toHaveBeenCalledWith(pluginMode)
+    expect(opts.allowedTools).toBeUndefined()
   })
 
   it("returns no mode when modeId is unknown in both registries", async () => {
@@ -840,6 +2405,148 @@ describe("resolveSendOptions — workspace Restricted Mode", () => {
     expect(opts.disallowedTools).toEqual(
       expect.arrayContaining(["mcp__cognia-plugin-tools__computer_use"])
     )
+  })
+})
+
+describe("resolveSendOptions — workspace Restricted Mode (coreFiles)", () => {
+  it("denies the coreFiles mutators but not the read-only core tools", async () => {
+    const opts = await resolveSendOptions({
+      activeProject: makeProject([{ path: "/a", isPrimary: true }]),
+      workspaceRestricted: true,
+    })
+    expect(opts.disallowedTools).toEqual(
+      expect.arrayContaining(["bash", "edit", "write", "multi_edit", "mcp__cognia-tools__bash"])
+    )
+    for (const t of ["read", "grep", "glob", "ls"]) {
+      expect(opts.disallowedTools).not.toContain(t)
+    }
+  })
+})
+
+describe("resolveSendOptions — permission ruleset merge", () => {
+  it("wraps legacy commandRules under Bash (unchanged behavior)", async () => {
+    const opts = await resolveSendOptions({
+      appSettings: {
+        agentPermissions: { commandRules: { "git *": "allow" } },
+      } as unknown as AppSettings,
+    })
+    expect(opts.permissionRuleset).toEqual({ Bash: { "git *": "allow" } })
+  })
+
+  it("merges toolRules with commandRules; toolRules wins on conflicts", async () => {
+    const opts = await resolveSendOptions({
+      appSettings: {
+        agentPermissions: {
+          commandRules: { "git *": "allow", "rm *": "deny" },
+          toolRules: {
+            Bash: { "git *": "ask" },
+            grep: "allow",
+            edit: { "**/*.env": "deny" },
+          },
+        },
+      } as unknown as AppSettings,
+    })
+    expect(opts.permissionRuleset).toEqual({
+      Bash: { "git *": "ask", "rm *": "deny" },
+      edit: { "**/*.env": "deny" },
+      grep: "allow",
+    })
+  })
+
+  it("serializes the merged ruleset byte-identically regardless of key order", async () => {
+    const a = await resolveSendOptions({
+      appSettings: {
+        agentPermissions: { toolRules: { b: { z: "ask", a: "allow" }, a: "deny" } },
+      } as unknown as AppSettings,
+    })
+    const b = await resolveSendOptions({
+      appSettings: {
+        agentPermissions: { toolRules: { a: "deny", b: { a: "allow", z: "ask" } } },
+      } as unknown as AppSettings,
+    })
+    expect(JSON.stringify(a.permissionRuleset)).toBe(JSON.stringify(b.permissionRuleset))
+  })
+
+  it("omits permissionRuleset entirely when no rules are configured", async () => {
+    const opts = await resolveSendOptions({
+      appSettings: { agentPermissions: {} } as unknown as AppSettings,
+    })
+    expect(opts.permissionRuleset).toBeUndefined()
+  })
+})
+
+describe("resolveSendOptions — IM core-tool safeguard", () => {
+  it("denies coreFiles mutators for IM-bound sessions by default", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "s-im",
+        platformBinding: {
+          adapterId: "tg-1",
+          platform: "telegram",
+          conversationKey: "c1",
+          conversationRef: { platform: "telegram", adapterId: "tg-1", chatId: 1 },
+        },
+      }),
+    })
+    expect(opts.disallowedTools).toEqual(
+      expect.arrayContaining(["bash", "edit", "write", "multi_edit"])
+    )
+    expect(opts.disallowedTools).not.toContain("read")
+  })
+
+  it("does not deny coreFiles mutators for plain desktop sessions", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s-plain" }),
+    })
+    expect(opts.disallowedTools ?? []).not.toContain("bash")
+  })
+})
+
+describe("resolveSendOptions — surface-aware built-in skills", () => {
+  const imSession = () =>
+    makeSession({
+      id: "s-im",
+      platformBinding: {
+        adapterId: "tg-1",
+        platform: "telegram",
+        conversationKey: "c1",
+        conversationRef: { platform: "telegram", adapterId: "tg-1", chatId: 1 },
+      },
+    })
+
+  it("auto-injects the IM guidance skill for an IM-bound session (default on)", async () => {
+    const opts = await resolveSendOptions({ session: imSession() })
+    expect(opts.appendSystemPrompt).toContain("## IM auto-reply etiquette")
+  })
+
+  it("does not inject surface skills for a plain desktop session", async () => {
+    const opts = await resolveSendOptions({ session: makeSession({ id: "s-plain" }) })
+    expect(opts.appendSystemPrompt ?? "").not.toContain("IM auto-reply etiquette")
+  })
+
+  it("suppresses surface skills when surfaceSkillsEnabled is false", async () => {
+    const opts = await resolveSendOptions({
+      session: imSession(),
+      appSettings: { surfaceSkillsEnabled: false } as AppSettings,
+    })
+    expect(opts.appendSystemPrompt ?? "").not.toContain("IM auto-reply etiquette")
+  })
+
+  it("injects the goal/loop skill when a loop is driving the session", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s-loop" }),
+      activeLoop: true,
+    })
+    expect(opts.appendSystemPrompt).toContain("## Goal-driven execution")
+  })
+
+  it("unions an activated surface skill's allowedTools into the allowlist", async () => {
+    const base = BUILT_IN_SKILL_CATALOG.find((e) => e.id === "im-auto-reply")!
+    ;(selectSurfaceSkills as jest.Mock).mockReturnValueOnce([
+      { ...base, allowedTools: ["surface_tool_x"] },
+    ])
+    const opts = await resolveSendOptions({ session: imSession() })
+    expect(opts.allowedTools).toEqual(expect.arrayContaining(["surface_tool_x"]))
   })
 })
 
@@ -1041,6 +2748,55 @@ describe("resolveSendOptions — debug mode", () => {
   })
 })
 
+describe("resolveSendOptions — plan mode prompt", () => {
+  it("appends the plan-mode reminder when permissionMode is plan", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", permissionMode: "plan" }),
+    })
+    expect(opts.permissionMode).toBe("plan")
+    expect(opts.appendSystemPrompt).toContain("Plan mode (READ-ONLY")
+    expect(opts.appendSystemPrompt).toContain("ExitPlanMode")
+    // Guides the Claude-Code-style research flow via read-only subagents.
+    expect(opts.appendSystemPrompt).toContain("Explore")
+  })
+
+  it("omits the plan-mode reminder outside plan mode", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", permissionMode: "acceptEdits" }),
+    })
+    expect(opts.appendSystemPrompt ?? "").not.toContain("Plan mode (READ-ONLY")
+  })
+
+  it("appends the structured-steps snippet only when enhanced plan mode is on", async () => {
+    const on = await resolveSendOptions({
+      session: makeSession({ id: "s1", permissionMode: "plan" }),
+      appSettings: {
+        id: "singleton",
+        planSettings: { interactiveHtmlView: true },
+      } as AppSettings,
+    })
+    expect(on.appendSystemPrompt).toContain("Plan mode (READ-ONLY")
+    expect(on.appendSystemPrompt).toContain("## Steps")
+
+    const off = await resolveSendOptions({
+      session: makeSession({ id: "s1", permissionMode: "plan" }),
+      appSettings: { id: "singleton" } as AppSettings,
+    })
+    expect(off.appendSystemPrompt).toContain("Plan mode (READ-ONLY")
+    expect(off.appendSystemPrompt ?? "").not.toContain("## Steps")
+
+    // Outside plan mode the snippet never appears, even with the setting on.
+    const notPlan = await resolveSendOptions({
+      session: makeSession({ id: "s1", permissionMode: "acceptEdits" }),
+      appSettings: {
+        id: "singleton",
+        planSettings: { interactiveHtmlView: true },
+      } as AppSettings,
+    })
+    expect(notPlan.appendSystemPrompt ?? "").not.toContain("## Steps")
+  })
+})
+
 describe("resolveSendOptions — brief mode", () => {
   it("appends BRIEF_OUTPUT_SNIPPET to appendSystemPrompt when set", async () => {
     const opts = await resolveSendOptions({
@@ -1081,6 +2837,49 @@ describe("resolveSendOptions — brief mode", () => {
       appSettings: { id: "singleton", briefMode: true } as AppSettings,
     })
     expect(opts.appendSystemPrompt).toContain("Respond concisely")
+  })
+})
+
+describe("resolveSendOptions — output style", () => {
+  it("appends a preset style snippet to appendSystemPrompt", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", outputStyle: "bullets" } as ChatSession),
+    })
+    expect(opts.appendSystemPrompt).toContain("Bullet points")
+  })
+
+  it("uses the custom instruction for the custom style", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "s1",
+        outputStyle: "custom",
+        customOutputStyle: "Answer in haiku.",
+      } as ChatSession),
+    })
+    expect(opts.appendSystemPrompt).toContain("Answer in haiku.")
+  })
+
+  it("omits a snippet for the default style", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", outputStyle: "default" } as ChatSession),
+    })
+    expect(opts.appendSystemPrompt ?? "").not.toMatch(/Output style/)
+  })
+
+  it("composes with brief mode (both append)", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", briefMode: true, outputStyle: "teacher" } as ChatSession),
+    })
+    expect(opts.appendSystemPrompt).toContain("Respond concisely")
+    expect(opts.appendSystemPrompt).toContain("Explanatory")
+  })
+
+  it("character.outputStyle applies in absence of a session override", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      character: makeChar({ outputStyle: "detailed" } as Partial<Character>),
+    })
+    expect(opts.appendSystemPrompt).toContain("Detailed")
   })
 })
 
@@ -1128,6 +2927,70 @@ describe("resolveSendOptions — extended thinking budget", () => {
       appSettings: { id: "singleton" } as AppSettings,
     })
     expect(opts.maxThinkingTokens).toBeUndefined()
+  })
+})
+
+describe("resolveSendOptions — reasoning effort (thinking level)", () => {
+  it("session effort wins over the app default", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", effort: "max" }),
+      appSettings: { id: "singleton", defaultEffort: "low" } as AppSettings,
+    })
+    expect(opts.effort).toBe("max")
+  })
+
+  it("falls through to the app default when the session is unset", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      appSettings: { id: "singleton", defaultEffort: "high" } as AppSettings,
+    })
+    expect(opts.effort).toBe("high")
+  })
+
+  it("omits the field when nothing is configured", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      appSettings: { id: "singleton" } as AppSettings,
+    })
+    expect(opts.effort).toBeUndefined()
+  })
+
+  it("drops effort when the resolved model does not support it (Haiku → no 400)", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", effort: "high", model: "claude-haiku-4-5" }),
+      appSettings: { id: "singleton", defaultProvider: "anthropic" } as AppSettings,
+    })
+    expect(opts.model).toBe("claude-haiku-4-5")
+    expect(opts.effort).toBeUndefined()
+  })
+
+  it("flags droppedCapabilityWarning when effort is dropped for an unsupported model", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", effort: "high", model: "claude-haiku-4-5" }),
+      appSettings: { id: "singleton", defaultProvider: "anthropic" } as AppSettings,
+    })
+    expect(opts.droppedCapabilityWarning).toEqual({
+      capability: "effort",
+      model: "claude-haiku-4-5",
+      provider: "anthropic",
+    })
+  })
+
+  it("keeps effort when the resolved model supports it (Opus 4.6)", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", effort: "high", model: "claude-opus-4-6" }),
+      appSettings: { id: "singleton", defaultProvider: "anthropic" } as AppSettings,
+    })
+    expect(opts.effort).toBe("high")
+    expect(opts.droppedCapabilityWarning).toBeUndefined()
+  })
+
+  it("does not flag a warning when no effort was requested", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", model: "claude-haiku-4-5" }),
+      appSettings: { id: "singleton", defaultProvider: "anthropic" } as AppSettings,
+    })
+    expect(opts.droppedCapabilityWarning).toBeUndefined()
   })
 })
 
@@ -1180,12 +3043,20 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
     mReadOverride.mockReset()
   })
 
+  // The first-class web tools (web_search / web_fetch) are appended to every
+  // manifest by default and are orthogonal to Computer Use gating, so these
+  // assertions exclude them to stay focused.
+  const notWeb = (n: string) => n !== "web_search" && n !== "web_fetch"
+
   it("includes computer-use plugin tools when character.enableComputerUse=true", async () => {
     const opts = await resolveSendOptions({
       session: makeSession({ id: "s1" }),
       character: makeChar({ enableComputerUse: true }),
     })
-    const names = (opts.pluginTools ?? []).map((t) => t.name).sort()
+    const names = (opts.pluginTools ?? [])
+      .map((t) => t.name)
+      .filter(notWeb)
+      .sort()
     expect(names).toEqual(["bash", "computer_use", "github_pr", "text_editor"])
   })
 
@@ -1194,7 +3065,7 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
       session: makeSession({ id: "s1" }),
       character: makeChar({ enableComputerUse: false }),
     })
-    const names = (opts.pluginTools ?? []).map((t) => t.name)
+    const names = (opts.pluginTools ?? []).map((t) => t.name).filter(notWeb)
     expect(names).toEqual(["github_pr"])
     expect(names).not.toContain("computer_use")
   })
@@ -1204,8 +3075,37 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
       session: makeSession({ id: "s1" }),
       character: makeChar(),
     })
-    const names = (opts.pluginTools ?? []).map((t) => t.name)
+    const names = (opts.pluginTools ?? []).map((t) => t.name).filter(notWeb)
     expect(names).toEqual(["github_pr"])
+  })
+
+  const browserTool = {
+    name: "browser_snapshot",
+    description: "snapshot the preview",
+    jsonSchema: {},
+    pluginId: "cognia-browser-tools",
+  }
+
+  it("includes browser tools when character.enableBrowserTools=true", async () => {
+    mBuildManifest.mockReturnValueOnce([browserTool, otherTool])
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      character: makeChar({ enableBrowserTools: true }),
+    })
+    const names = (opts.pluginTools ?? []).map((t) => t.name).filter(notWeb)
+    expect(names).toContain("browser_snapshot")
+    expect(names).toContain("github_pr")
+  })
+
+  it("filters browser tools when character.enableBrowserTools !== true", async () => {
+    mBuildManifest.mockReturnValueOnce([browserTool, otherTool])
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      character: makeChar({ enableBrowserTools: false }),
+    })
+    const names = (opts.pluginTools ?? []).map((t) => t.name).filter(notWeb)
+    expect(names).not.toContain("browser_snapshot")
+    expect(names).toContain("github_pr")
   })
 
   it("IM-session default-denies computer-use plugin tools even when character allows", async () => {
@@ -1220,7 +3120,7 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
       } as ChatSession),
       character: makeChar({ enableComputerUse: true }),
     })
-    const names = (opts.pluginTools ?? []).map((t) => t.name)
+    const names = (opts.pluginTools ?? []).map((t) => t.name).filter(notWeb)
     expect(names).toEqual(["github_pr"])
   })
 
@@ -1236,16 +3136,106 @@ describe("resolveSendOptions — Computer Use plugin-tool gating", () => {
       } as ChatSession),
       character: makeChar({ enableComputerUse: true }),
     })
-    const names = (opts.pluginTools ?? []).map((t) => t.name).sort()
+    const names = (opts.pluginTools ?? [])
+      .map((t) => t.name)
+      .filter(notWeb)
+      .sort()
     expect(names).toEqual(["bash", "computer_use", "github_pr", "text_editor"])
   })
 
-  it("disablePluginTools wipes the manifest regardless of Computer Use", async () => {
+  it("withholds scheduler agent tools from IM sessions by default", async () => {
+    mReadOverride.mockResolvedValueOnce(undefined)
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "s1",
+        platformBinding: { adapterId: "telegram", conversationKey: "tg:123" },
+      } as ChatSession),
+      character: makeChar(),
+    })
+    expect(opts.allowedTools ?? []).not.toContain("mcp__cognia__schedule_task")
+  })
+
+  it("offers scheduler agent tools only after the conversation opts in", async () => {
+    mReadOverride.mockResolvedValueOnce({ allowScheduleTools: true })
+    const opts = await resolveSendOptions({
+      session: makeSession({
+        id: "s1",
+        platformBinding: { adapterId: "telegram", conversationKey: "tg:123" },
+      } as ChatSession),
+      character: makeChar(),
+    })
+    expect(opts.allowedTools).toEqual(
+      expect.arrayContaining([
+        "mcp__cognia__schedule_task",
+        "mcp__cognia__list_scheduled_tasks",
+        "mcp__cognia__cancel_scheduled_task",
+      ])
+    )
+  })
+
+  it("disablePluginTools wipes plugin tools but the first-class web tools survive", async () => {
     const opts = await resolveSendOptions({
       session: makeSession({ id: "s1" }),
       character: makeChar({ enableComputerUse: true, disablePluginTools: true }),
     })
-    expect(opts.pluginTools).toBeUndefined()
+    // web_search / web_fetch are first-class built-ins (ungated by the plugin
+    // toggle); every other plugin tool is gone.
+    expect((opts.pluginTools ?? []).map((t) => t.name)).toEqual(["web_search", "web_fetch"])
+  })
+
+  it("appends the first-class web tools by default (web capability on)", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      character: makeChar(),
+    })
+    const names = (opts.pluginTools ?? []).map((t) => t.name)
+    expect(names).toContain("web_search")
+    expect(names).toContain("web_fetch")
+  })
+})
+
+describe("resolveSendOptions — first-class web tools supersede the plugin", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const sidecarBridge = require("@/lib/plugin/bridge/sidecar-tools-bridge")
+  const mBuildManifest = sidecarBridge.buildPluginToolsManifest as jest.Mock
+
+  beforeEach(() => {
+    // The web-tools plugin still registers all four of its tools.
+    mBuildManifest.mockReset().mockReturnValue([
+      {
+        name: "web_search",
+        description: "plugin search",
+        jsonSchema: {},
+        pluginId: "cognia-web-tools",
+      },
+      {
+        name: "web_fetch",
+        description: "plugin fetch",
+        jsonSchema: {},
+        pluginId: "cognia-web-tools",
+      },
+      { name: "web_download", description: "dl", jsonSchema: {}, pluginId: "cognia-web-tools" },
+      { name: "web_research", description: "rsrch", jsonSchema: {}, pluginId: "cognia-web-tools" },
+    ])
+  })
+
+  afterAll(() => mBuildManifest.mockReset().mockReturnValue([]))
+
+  it("drops the plugin's duplicate web_search/web_fetch and keeps exactly one of each", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      character: makeChar(),
+    })
+    const tools = opts.pluginTools ?? []
+    const names = tools.map((t) => t.name)
+    expect(names.filter((n) => n === "web_search")).toHaveLength(1)
+    expect(names.filter((n) => n === "web_fetch")).toHaveLength(1)
+    // The single surviving web_search/web_fetch are the promoted built-ins.
+    const search = tools.find((t) => t.name === "web_search")
+    expect(search?.pluginId).toBe("cognia-web-builtin")
+    // The plugin's exclusive tools are untouched.
+    expect(names).toContain("web_download")
+    expect(names).toContain("web_research")
   })
 })
 
@@ -1410,6 +3400,10 @@ describe("resolveSendOptions — ADR-0028 sandbox builtin replacement", () => {
     expect(disallowed).toContain("Bash")
     expect(disallowed).toContain("Edit")
     expect(disallowed).toContain("Write")
+    // Process-execution escape hatches are gated too (ADR-0028 Phase 4).
+    expect(disallowed).toContain("start_process")
+    expect(disallowed).toContain("shell_execute_advanced")
+    expect(disallowed).toContain("mcp__cognia-tools__start_process")
     // text_editor must NOT survive on anthropicTools when sandbox is on.
     if (Array.isArray(opts.anthropicTools)) {
       expect(opts.anthropicTools.map((t) => t.name)).not.toContain("text_editor")
@@ -1453,6 +3447,97 @@ describe("resolveSendOptions — ADR-0028 sandbox builtin replacement", () => {
       session: makeSession({ id: "s1", characterId: "c1" }),
     })
     expect(opts.disallowedTools ?? []).not.toContain("Bash")
+  })
+
+  it("stamps the resolved writable and readable ceiling onto Computer Use confine", async () => {
+    mGetCharacter.mockResolvedValue(
+      makeChar({
+        id: "c1",
+        sandboxEnabled: true,
+        sandboxPolicy: {
+          writableRoots: ["/workspace"],
+          readableRoots: ["/vendor/include"],
+          network: "allowlist",
+          networkAllowlist: ["api.github.com"],
+        },
+      })
+    )
+
+    await resolveSendOptions({
+      session: makeSession({ id: "s1", characterId: "c1" }),
+    })
+
+    expect(getActiveSandboxConfine("s1")).toEqual({
+      writable: ["/workspace"],
+      readable: ["/vendor/include"],
+      network: "allowlist",
+      networkHosts: ["api.github.com"],
+    })
+  })
+})
+
+describe("resolveSendOptions — ADR-0028 lite workspace confinement", () => {
+  it("defaults ON: stamps confinement.roots from cwd + additionalDirectories", async () => {
+    const opts = await resolveSendOptions({
+      activeProject: makeProject([{ path: "/ws", isPrimary: true }, { path: "/ws/extra" }]),
+    })
+    expect(opts.confinement?.enabled).toBe(true)
+    expect(opts.confinement?.roots?.sort()).toEqual(["/ws", "/ws/extra"].sort())
+  })
+
+  it("does NOT confine when the heavy OS sandbox is enabled (mutually exclusive)", async () => {
+    mGetCharacter.mockResolvedValue(makeChar({ id: "c1", sandboxEnabled: true }))
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", characterId: "c1" }),
+      activeProject: makeProject([{ path: "/ws", isPrimary: true }]),
+    })
+    expect(opts.confinement).toBeUndefined()
+  })
+
+  it("session.workspaceConfinementEnabled = false opts the session out", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", workspaceConfinementEnabled: false }),
+      activeProject: makeProject([{ path: "/ws", isPrimary: true }]),
+    })
+    expect(opts.confinement).toBeUndefined()
+  })
+
+  it("character override beats the app default", async () => {
+    mGetCharacter.mockResolvedValue(makeChar({ id: "c1", workspaceConfinementEnabled: false }))
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", characterId: "c1" }),
+      activeProject: makeProject([{ path: "/ws", isPrimary: true }]),
+      appSettings: { id: "singleton", workspaceConfinementEnabled: true } as AppSettings,
+    })
+    expect(opts.confinement).toBeUndefined()
+  })
+
+  it("carries no policy for a rootless session (no active project)", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+    })
+    expect(opts.confinement).toBeUndefined()
+  })
+})
+
+describe("resolveSendOptions — alwaysAllowTools passthrough", () => {
+  it("copies (sorted) appSettings.alwaysAllowTools onto SendOptions", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      appSettings: {
+        id: "singleton",
+        alwaysAllowTools: ["Write", "Bash", "Read"],
+      } as AppSettings,
+    })
+    expect(opts.alwaysAllowTools).toEqual(["Bash", "Read", "Write"])
+  })
+
+  it("omits the field when the list is empty", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1" }),
+      appSettings: { id: "singleton", alwaysAllowTools: [] as string[] } as AppSettings,
+    })
+    expect(opts.alwaysAllowTools).toBeUndefined()
   })
 })
 
@@ -1654,5 +3739,874 @@ describe("resolveSendOptions — runtime tool-search policy", () => {
   it("leaves toolSearchEnabled unset when disabled", async () => {
     const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
     expect(opts.toolSearchEnabled).toBeUndefined()
+  })
+})
+
+describe("resolveSendOptions — unified LSP (sendOptions.lsp)", () => {
+  it("resolves builtin + user layers onto opts.lsp when enabled with a cwd", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", workingDir: "/proj" }),
+      appSettings: {
+        lsp: {
+          enabled: true,
+          servers: [{ id: "lsp_custom", name: "Lua", languages: ["lua"], command: "lua-ls" }],
+        },
+      } as AppSettings,
+    })
+    expect(opts.lsp?.enabled).toBe(true)
+    const ids = (opts.lsp?.servers ?? []).map((srv) => srv.id)
+    expect(ids).toContain("typescript")
+    expect(ids).toContain("lsp_custom")
+    // jsdom is not Tauri — the managed install dir stays unset.
+    expect(opts.lsp?.installDir).toBeUndefined()
+    expect(opts.lsp?.autoInstall).toBe(true)
+  })
+
+  it("falls back to the legacy builtinTools.lsp toggle when settings.lsp.enabled is unset", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", workingDir: "/proj" }),
+      appSettings: { builtinTools: { lsp: true } } as AppSettings,
+    })
+    expect(opts.lsp?.enabled).toBe(true)
+  })
+
+  it("omits opts.lsp without a cwd", async () => {
+    const opts = await resolveSendOptions({
+      appSettings: { lsp: { enabled: true, servers: [] } } as unknown as AppSettings,
+    })
+    expect(opts.lsp).toBeUndefined()
+  })
+
+  it("omits opts.lsp when the master toggle is off", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", workingDir: "/proj" }),
+      appSettings: { lsp: { enabled: false, servers: [] } } as unknown as AppSettings,
+    })
+    expect(opts.lsp).toBeUndefined()
+  })
+
+  it("propagates autoInstall: false", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s1", workingDir: "/proj" }),
+      appSettings: {
+        lsp: { enabled: true, servers: [], autoInstall: false },
+      } as unknown as AppSettings,
+    })
+    expect(opts.lsp?.autoInstall).toBe(false)
+  })
+})
+
+describe("desktop-independent DI seams (standalone CLI)", () => {
+  // The standalone agent CLI cannot reach Dexie or the Rust account/proxy
+  // resolvers, so it injects pre-resolved data via ctx. These tests assert the
+  // seams short-circuit the Dexie/IPC calls AND that the desktop path (fields
+  // left undefined) is byte-identical to before.
+
+  describe("preloadedMcpServers", () => {
+    it("uses the injected list verbatim and never touches Dexie", async () => {
+      const injected = [{ id: "cli-mcp", name: "CLI MCP" }] as unknown as Awaited<
+        ReturnType<typeof listEnabledMcpServers>
+      >
+      mBuildMap.mockReturnValueOnce({ "cli-mcp": { command: "x", args: [] } })
+      const opts = await resolveSendOptions({
+        session: makeSession({ id: "s1" }),
+        preloadedMcpServers: injected,
+      })
+      expect(mListMcp).not.toHaveBeenCalled()
+      expect(mBuildMap).toHaveBeenCalledWith(injected)
+      expect(opts.mcpServers).toEqual({ "cli-mcp": { command: "x", args: [] } })
+    })
+
+    it("empty array means no MCP and still skips Dexie", async () => {
+      const opts = await resolveSendOptions({
+        session: makeSession({ id: "s1" }),
+        preloadedMcpServers: [],
+      })
+      expect(mListMcp).not.toHaveBeenCalled()
+      expect(opts.mcpServers).toBeUndefined()
+    })
+
+    it("desktop path (undefined) still queries Dexie", async () => {
+      await resolveSendOptions({ session: makeSession({ id: "s1" }) })
+      expect(mListMcp).toHaveBeenCalled()
+    })
+  })
+
+  describe("preloadedEnv", () => {
+    it("forwards the injected env and skips the Rust account/proxy resolvers", async () => {
+      const opts = await resolveSendOptions({
+        session: makeSession({ id: "s1" }),
+        preloadedEnv: { ANTHROPIC_API_KEY: "sk-cli", HTTPS_PROXY: "http://p" },
+      })
+      expect(mResolveAccountEnv).not.toHaveBeenCalled()
+      expect(mResolveProxyEnv).not.toHaveBeenCalled()
+      expect(opts.env).toMatchObject({ ANTHROPIC_API_KEY: "sk-cli", HTTPS_PROXY: "http://p" })
+    })
+
+    it("null means no env and still skips the resolvers", async () => {
+      const opts = await resolveSendOptions({
+        session: makeSession({ id: "s1" }),
+        preloadedEnv: null,
+      })
+      expect(mResolveAccountEnv).not.toHaveBeenCalled()
+      expect(mResolveProxyEnv).not.toHaveBeenCalled()
+      expect(opts.env).toBeUndefined()
+    })
+
+    it("desktop path (undefined) still calls the Rust resolvers", async () => {
+      await resolveSendOptions({ session: makeSession({ id: "s1" }) })
+      expect(mResolveAccountEnv).toHaveBeenCalled()
+      expect(mResolveProxyEnv).toHaveBeenCalled()
+    })
+  })
+
+  describe("onBuildOptions plugin hook (ADR-0026 §4 §B)", () => {
+    it("applies a plugin's returned patch as the final option tweak", async () => {
+      const hooks = await import("@/lib/plugin/messaging/hooks-system")
+      const spy = jest
+        .spyOn(hooks.getPluginEventHooks(), "dispatchBuildOptions")
+        .mockResolvedValue({
+          sessionId: "s1",
+          model: "patched-model",
+          appendSystemPrompt: "PATCHED",
+        })
+      try {
+        const opts = await resolveSendOptions({
+          character: makeChar({ id: "c1" }),
+          session: makeSession({ id: "s1", characterId: "c1" }),
+        })
+        expect(spy).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "s1" }))
+        expect(opts.model).toBe("patched-model")
+        expect(opts.appendSystemPrompt).toBe("PATCHED")
+      } finally {
+        spy.mockRestore()
+      }
+    })
+
+    it("leaves options untouched when no plugin returns a patch", async () => {
+      const hooks = await import("@/lib/plugin/messaging/hooks-system")
+      // dispatcher echoes the input back unchanged (no registered plugins).
+      const spy = jest
+        .spyOn(hooks.getPluginEventHooks(), "dispatchBuildOptions")
+        .mockImplementation(async (input) => input)
+      try {
+        const opts = await resolveSendOptions({
+          character: makeChar({ id: "c1", model: "base-model" }),
+          session: makeSession({ id: "s1", characterId: "c1" }),
+        })
+        expect(opts.model).toBe("base-model")
+      } finally {
+        spy.mockRestore()
+      }
+    })
+  })
+
+  describe("parent permission ceiling (fail-closed clamp)", () => {
+    const {
+      getResolvedPermissionCeiling,
+      __clearAllDispatchContextsForTesting,
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+    } = require("@/lib/claude/agents/dispatch-context-registry")
+
+    beforeEach(() => {
+      __clearAllDispatchContextsForTesting()
+    })
+
+    it("intersects allowedTools — a child cannot widen beyond the parent", async () => {
+      const opts = await resolveSendOptions({
+        character: makeChar({ id: "c1", allowedTools: ["Read", "Bash", "Edit"] }),
+        permissionCeiling: { allowedTools: ["Read"] },
+      })
+      expect(opts.allowedTools).toEqual(["Read"])
+    })
+
+    it("unions disallowedTools — a parent deny always cascades", async () => {
+      const opts = await resolveSendOptions({
+        character: makeChar({ id: "c1", allowedTools: ["Read"], disallowedTools: ["Write"] }),
+        permissionCeiling: { disallowedTools: ["Bash"] },
+      })
+      expect(opts.disallowedTools).toEqual(["Bash", "Write"])
+    })
+
+    it("clamps permissionMode down to the lesser-permissive of parent and child", async () => {
+      const opts = await resolveSendOptions({
+        character: makeChar({ id: "c1", permissionMode: "bypassPermissions" }),
+        permissionCeiling: { permissionMode: "plan" },
+      })
+      expect(opts.permissionMode).toBe("plan")
+    })
+
+    it("a dontAsk parent ceiling clamps the child's mode (dontAsk is a valid SendOptions mode)", async () => {
+      // Regression: the final clamp used to guard `!== "dontAsk"` out as
+      // "type-unsafe", silently dropping a dontAsk parent's ceiling.
+      const opts = await resolveSendOptions({
+        character: makeChar({ id: "c1", permissionMode: "acceptEdits" }),
+        permissionCeiling: { permissionMode: "dontAsk" },
+      })
+      expect(opts.permissionMode).toBe("dontAsk")
+    })
+
+    it("a restricted parent caps a child that declared NO allow-list (no widening to all)", async () => {
+      const opts = await resolveSendOptions({
+        character: makeChar({ id: "c1" }), // no allowedTools ⇒ "all"
+        permissionCeiling: { allowedTools: ["Read", "Grep"] },
+      })
+      expect(opts.allowedTools).toEqual(["Grep", "Read"])
+    })
+
+    it("an unrestricted parent (no allow-list) imposes no ceiling", async () => {
+      const opts = await resolveSendOptions({
+        character: makeChar({ id: "c1", allowedTools: ["Read", "Bash"] }),
+        permissionCeiling: {},
+      })
+      expect(opts.allowedTools).toEqual(["Bash", "Read"])
+    })
+
+    it("runs AFTER the plugin onBuildOptions hook — a plugin cannot re-open a forbidden tool", async () => {
+      const hooks = await import("@/lib/plugin/messaging/hooks-system")
+      const spy = jest
+        .spyOn(hooks.getPluginEventHooks(), "dispatchBuildOptions")
+        // Malicious/over-eager plugin tries to re-add Bash after the union pass.
+        .mockResolvedValue({
+          sessionId: "s1",
+          model: "claude-opus-4-7",
+          allowedTools: ["Read", "Bash"],
+        })
+      try {
+        const opts = await resolveSendOptions({
+          character: makeChar({ id: "c1", allowedTools: ["Read"] }),
+          session: makeSession({ id: "s1", characterId: "c1" }),
+          permissionCeiling: { allowedTools: ["Read"] },
+        })
+        expect(opts.allowedTools).toEqual(["Read"]) // Bash dropped by the final clamp
+      } finally {
+        spy.mockRestore()
+      }
+    })
+
+    it("records the resolved ceiling keyed by session id (post-clamp)", async () => {
+      await resolveSendOptions({
+        character: makeChar({ id: "c1", allowedTools: ["Read", "Bash"] }),
+        session: makeSession({ id: "sess-rec", characterId: "c1" }),
+        permissionCeiling: { allowedTools: ["Read"] },
+      })
+      expect(getResolvedPermissionCeiling("sess-rec")).toEqual({
+        allowedTools: ["Read"],
+      })
+    })
+
+    it("leaves tools untouched and records nothing extra when no ceiling is given", async () => {
+      const opts = await resolveSendOptions({
+        character: makeChar({ id: "c1", allowedTools: ["Read", "Bash"] }),
+        session: makeSession({ id: "sess-noceil", characterId: "c1" }),
+      })
+      expect(opts.allowedTools).toEqual(["Bash", "Read"])
+      // Still deposits its own resolved surface for any child it might dispatch.
+      expect(getResolvedPermissionCeiling("sess-noceil")?.allowedTools).toEqual(["Bash", "Read"])
+    })
+  })
+})
+
+describe("native Anthropic web tools (Tier C opt-in)", () => {
+  const webNames = (opts: Awaited<ReturnType<typeof resolveSendOptions>>): string[] =>
+    (opts.pluginTools ?? []).map((t) => t.name)
+
+  it("surfaces the custom web tools by default", async () => {
+    const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+    expect(webNames(opts)).toEqual(expect.arrayContaining(["web_search", "web_fetch"]))
+    expect(opts.allowedTools ?? []).not.toContain("WebSearch")
+  })
+
+  it("swaps to native WebSearch/WebFetch on the Anthropic path when opted in", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: { webTools: { enabled: true, nativeOnAnthropic: true } } as AppSettings,
+    })
+    expect(webNames(opts)).not.toContain("web_search")
+    expect(webNames(opts)).not.toContain("web_fetch")
+    expect(opts.allowedTools).toEqual(expect.arrayContaining(["WebSearch", "WebFetch"]))
+  })
+
+  it("keeps the custom tools for non-Anthropic providers even when opted in", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", providerId: "openai", model: "gpt-4o-mini" }),
+      appSettings: { webTools: { enabled: true, nativeOnAnthropic: true } } as AppSettings,
+    })
+    expect(webNames(opts)).toEqual(expect.arrayContaining(["web_search", "web_fetch"]))
+    expect(opts.allowedTools ?? []).not.toContain("WebSearch")
+  })
+
+  it("un-disallows WebSearch/WebFetch when opted in", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", disallowedTools: ["WebSearch", "Bash"] }),
+      appSettings: { webTools: { enabled: true, nativeOnAnthropic: true } } as AppSettings,
+    })
+    expect(opts.disallowedTools ?? []).not.toContain("WebSearch")
+    expect(opts.disallowedTools ?? []).toContain("Bash")
+  })
+
+  it("keeps the custom tools in standalone mode even on Anthropic", async () => {
+    // `allowedTools` is forwarded to `query()` by the Agent SDK path only. A
+    // standalone (BYOK) turn goes straight to the provider API through the AI
+    // SDK, which reads no such field — so taking the native branch there does
+    // not swap the web tools, it deletes them, and the phone loses the
+    // search/fetch loop entirely.
+    const standalone = standaloneMode.isStandaloneChatMode as jest.MockedFunction<
+      typeof standaloneMode.isStandaloneChatMode
+    >
+    standalone.mockReturnValue(true)
+    try {
+      const opts = await resolveSendOptions({
+        character: makeChar({ id: "c1" }),
+        appSettings: { webTools: { enabled: true, nativeOnAnthropic: true } } as AppSettings,
+      })
+      expect(webNames(opts)).toEqual(expect.arrayContaining(["web_search", "web_fetch"]))
+      expect(opts.allowedTools ?? []).not.toContain("WebSearch")
+    } finally {
+      standalone.mockReturnValue(false)
+    }
+  })
+})
+
+describe("agent self-invocation tools (Skill / SlashCommand)", () => {
+  it("does not surface Skill / SlashCommand by default (opt-in)", async () => {
+    const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+    expect(toolNames(opts)).not.toContain("Skill")
+    expect(toolNames(opts)).not.toContain("SlashCommand")
+  })
+
+  it("appends the Skill tool when selfInvokeTools.skill is on", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: { selfInvokeTools: { skill: true } } as AppSettings,
+    })
+    expect(toolNames(opts)).toContain("Skill")
+  })
+
+  it("appends the SlashCommand tool when selfInvokeTools.slashCommand is on", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: { selfInvokeTools: { slashCommand: true } } as AppSettings,
+    })
+    expect(toolNames(opts)).toContain("SlashCommand")
+  })
+
+  it("appends team-collaboration tools only on a team session with the flag on", async () => {
+    const teamSession = makeSession({ id: "s1", characterId: "c1", kind: "team" })
+    const opts = await resolveSendOptions({
+      session: teamSession,
+      character: makeChar({ id: "c1" }),
+      appSettings: { selfInvokeTools: { teamCollaboration: true } } as AppSettings,
+    })
+    expect(toolNames(opts)).toContain("team_send_message")
+    expect(toolNames(opts)).toContain("team_delegate")
+  })
+
+  it("does NOT append team-collaboration tools on a non-team session even with the flag", async () => {
+    const directSession = makeSession({ id: "s1", characterId: "c1", kind: "direct" })
+    const opts = await resolveSendOptions({
+      session: directSession,
+      character: makeChar({ id: "c1" }),
+      appSettings: { selfInvokeTools: { teamCollaboration: true } } as AppSettings,
+    })
+    expect(toolNames(opts)).not.toContain("team_send_message")
+  })
+})
+
+describe("plugin conversion skill tools", () => {
+  beforeEach(() => {
+    _resetImPromptMemosForTest()
+  })
+
+  it("surfaces inspect/apply when the prompt skill is active in a desktop workspace", async () => {
+    mListSkills.mockResolvedValueOnce([
+      {
+        id: "skill_builtin_plugin_conversion",
+        canonicalId: "builtin:plugin-conversion",
+        name: "Plugin conversion",
+        content: "Inspect before applying.",
+      } as unknown as Skill,
+    ])
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", disablePluginTools: true }),
+      activeProject: makeProject([{ path: "/work/project", isPrimary: true }]),
+      ephemeralSkillIds: ["skill_builtin_plugin_conversion"],
+    })
+
+    expect(toolNames(opts)).toEqual(
+      expect.arrayContaining(["inspect_plugin_conversion", "apply_plugin_conversion"])
+    )
+  })
+
+  it("does not surface conversion tools when the skill is inactive", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      activeProject: makeProject([{ path: "/work/project", isPrimary: true }]),
+    })
+
+    expect(toolNames(opts)).not.toContain("inspect_plugin_conversion")
+    expect(toolNames(opts)).not.toContain("apply_plugin_conversion")
+  })
+
+  it("preloads conversion tools when Skill self-invocation can load the prompt skill", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      activeProject: makeProject([{ path: "/work/project", isPrimary: true }]),
+      appSettings: { selfInvokeTools: { skill: true } } as AppSettings,
+    })
+
+    expect(toolNames(opts)).toEqual(
+      expect.arrayContaining(["Skill", "inspect_plugin_conversion", "apply_plugin_conversion"])
+    )
+  })
+
+  it("never surfaces conversion tools in an IM-bound session", async () => {
+    mListSkills.mockResolvedValueOnce([
+      {
+        id: "skill_builtin_plugin_conversion",
+        canonicalId: "builtin:plugin-conversion",
+        name: "Plugin conversion",
+        content: "Inspect before applying.",
+      } as unknown as Skill,
+    ])
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      session: makeSession({
+        id: "s1",
+        platformBinding: {
+          adapterId: "adapter-1",
+          platform: "lark",
+          conversationKey: "lark:adapter-1:chat-1",
+          conversationRef: { platform: "lark", adapterId: "adapter-1", channelId: "chat-1" },
+        },
+      }),
+      activeProject: makeProject([{ path: "/work/project", isPrimary: true }]),
+      ephemeralSkillIds: ["skill_builtin_plugin_conversion"],
+    })
+
+    expect(toolNames(opts)).not.toContain("inspect_plugin_conversion")
+    expect(toolNames(opts)).not.toContain("apply_plugin_conversion")
+  })
+})
+
+describe("anthropic-managed (container) skills", () => {
+  it("appends twin_knowledge_search when the dispatching teammate is twin-bound", async () => {
+    // A twin-bound teammate is a sufficient signal — teamHasKnowledgeTwins
+    // short-circuits on character.twinId without needing a dispatch context.
+    const teamSession = makeSession({ id: "s1", characterId: "c1", kind: "team" })
+    const opts = await resolveSendOptions({
+      session: teamSession,
+      character: makeChar({ id: "c1", twinId: "twX" }),
+      appSettings: { selfInvokeTools: { teamCollaboration: true } } as AppSettings,
+    })
+    expect(toolNames(opts)).toContain("twin_knowledge_search")
+  })
+
+  it("omits twin_knowledge_search when the team exposes no knowledge twins", async () => {
+    // No character twinId and no resolvable team dispatch context → false leg.
+    const teamSession = makeSession({ id: "s1", characterId: "c1", kind: "team" })
+    const opts = await resolveSendOptions({
+      session: teamSession,
+      character: makeChar({ id: "c1" }),
+      appSettings: { selfInvokeTools: { teamCollaboration: true } } as AppSettings,
+    })
+    expect(toolNames(opts)).toContain("team_send_message")
+    expect(toolNames(opts)).not.toContain("twin_knowledge_search")
+  })
+  it("warns and does NOT set containerSkillIds — the SDK cannot attach uploaded skill_ids", async () => {
+    const char = makeChar({ id: "c1", pluginSkillIds: ["plg-managed"] })
+    mResolveSkillsForCharacter.mockResolvedValue([
+      {
+        id: "plg-managed",
+        name: "Managed",
+        description: "",
+        source: "plugin",
+        containerSkillId: "sk-1",
+        containerSkillVersion: "1.0.0",
+      },
+    ])
+    mExtractContainerSkillIds.mockReturnValue([{ skill_id: "sk-1", version: "1.0.0" }])
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+
+    const opts = await resolveSendOptions({ character: char })
+
+    // The dead-drop is gone: the field is never populated…
+    expect(opts.containerSkillIds).toBeUndefined()
+    // …and the user is told the managed skill won't run (named explicitly).
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("cannot be attached"))
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("sk-1"))
+
+    warn.mockRestore()
+  })
+
+  it("does not warn when no managed skills are resolved", async () => {
+    const char = makeChar({ id: "c1", pluginSkillIds: ["plg-inline"] })
+    mResolveSkillsForCharacter.mockResolvedValue([
+      { id: "plg-inline", name: "Inline", description: "", source: "plugin", body: "do things" },
+    ])
+    mExtractContainerSkillIds.mockReturnValue([])
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {})
+
+    const opts = await resolveSendOptions({ character: char })
+
+    expect(opts.containerSkillIds).toBeUndefined()
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining("cannot be attached"))
+
+    warn.mockRestore()
+  })
+})
+
+describe("includePartialMessages (token-level streaming gate)", () => {
+  it("enables on an interactive send by default (no setting)", async () => {
+    const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+    expect(opts.includePartialMessages).toBe(true)
+  })
+
+  it("respects streamPartialMessages = false", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      appSettings: { streamPartialMessages: false } as AppSettings,
+    })
+    expect(opts.includePartialMessages).toBeUndefined()
+  })
+
+  it("does NOT enable on a connector send (conversationKey set)", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      conversationKey: "telegram:123",
+    })
+    expect(opts.includePartialMessages).toBeUndefined()
+  })
+
+  it("does NOT enable on a standalone/headless send (preloadedEnv provided)", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      preloadedEnv: null,
+      preloadedMcpServers: [],
+    })
+    expect(opts.includePartialMessages).toBeUndefined()
+  })
+
+  it("enables on an interactive CLI send (interactive flag set despite preloadedEnv/Mcp)", async () => {
+    // The CLI TUI injects preloadedEnv/preloadedMcpServers but IS a live turn —
+    // it must get partials so the deltas keep feeding the idle watchdog through
+    // a long single generation (large file write).
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      preloadedEnv: null,
+      preloadedMcpServers: [],
+      interactive: true,
+    })
+    expect(opts.includePartialMessages).toBe(true)
+  })
+
+  it("interactive flag still defers to streamPartialMessages = false", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      preloadedEnv: null,
+      preloadedMcpServers: [],
+      interactive: true,
+      appSettings: { streamPartialMessages: false } as AppSettings,
+    })
+    expect(opts.includePartialMessages).toBeUndefined()
+  })
+
+  it("interactive flag does NOT override a connector send (conversationKey still wins)", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      conversationKey: "telegram:123",
+      interactive: true,
+    })
+    expect(opts.includePartialMessages).toBeUndefined()
+  })
+})
+
+describe("maxBudgetUsd from active goal (/goal cost ceiling)", () => {
+  const activeGoal = (maxBudgetUsd?: number) =>
+    ({
+      id: "g1",
+      sessionId: "s1",
+      status: "active",
+      turnsUsed: 0,
+      tokensUsed: 0,
+      config: {
+        maxTurns: 20,
+        maxTokens: 200_000,
+        maxJudgeFailures: 3,
+        timeoutMs: 1,
+        ...(maxBudgetUsd !== undefined ? { maxBudgetUsd } : {}),
+      },
+    }) as unknown as import("@/types/goal").Goal
+
+  it("forwards a positive goal budget to opts.maxBudgetUsd", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      activeGoal: activeGoal(3.5),
+    })
+    expect(opts.maxBudgetUsd).toBe(3.5)
+  })
+
+  it("does not set maxBudgetUsd when the goal has no (or zero) budget", async () => {
+    const none = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      activeGoal: activeGoal(undefined),
+    })
+    expect(none.maxBudgetUsd).toBeUndefined()
+    const zero = await resolveSendOptions({
+      character: makeChar({ id: "c1" }),
+      activeGoal: activeGoal(0),
+    })
+    expect(zero.maxBudgetUsd).toBeUndefined()
+  })
+
+  it("does not set maxBudgetUsd without an active goal", async () => {
+    const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+    expect(opts.maxBudgetUsd).toBeUndefined()
+  })
+})
+
+describe("resolveSendOptions — agent-trace root span minting", () => {
+  const HEX32 = /^[0-9a-f]{32}$/
+  const HEX16 = /^[0-9a-f]{16}$/
+
+  afterEach(() => {
+    __resetAgentTraceEmitterForTesting()
+  })
+
+  it("does NOT mint a root span unless emitTrace is set (opt-in)", async () => {
+    const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+    expect(opts.traceId).toBeUndefined()
+    expect(opts.spanId).toBeUndefined()
+  })
+
+  it("mints traceId + spanId with W3C shapes when emitTrace is true", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s-trace" }),
+      character: makeChar({ id: "c1" }),
+      emitTrace: true,
+    })
+    expect(opts.traceId).toMatch(HEX32)
+    expect(opts.spanId).toMatch(HEX16)
+    expect(opts.traceparent).toBe(`00-${opts.traceId}-${opts.spanId}-01`)
+  })
+
+  it("stamps the root span surface from traceSurface and carries session/provider metadata", async () => {
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s-conn" }),
+      character: makeChar({ id: "c1" }),
+      emitTrace: true,
+      traceSurface: "connector",
+      conversationKey: "conv-9",
+      routingContextHint: { promptText: "hello there" },
+    })
+    const span = __getActiveSpanForTesting(opts.spanId!)
+    expect(span).toBeDefined()
+    expect(span?.surface).toBe("connector")
+    expect(span?.sessionId).toBe("s-conn")
+    expect(span?.operationName).toBe("invoke_agent")
+    expect(span?.inputPreview).toBe("hello there")
+    expect(span?.metadata).toMatchObject({ conversationKey: "conv-9" })
+    // parentSpanId is absent on a root span.
+    expect(span?.parentSpanId).toBeUndefined()
+  })
+
+  it("stamps a parentTrace verbatim and does NOT mint a new root span", async () => {
+    const parentTrace = { traceId: "a".repeat(32), rootSpanId: "b".repeat(16) }
+    const opts = await resolveSendOptions({
+      session: makeSession({ id: "s-child" }),
+      character: makeChar({ id: "c1" }),
+      emitTrace: true,
+      parentTrace,
+    })
+    // Verbatim stamping — fresh ids would differ (random), so equality proves
+    // no new span was minted.
+    expect(opts.traceId).toBe(parentTrace.traceId)
+    expect(opts.spanId).toBe(parentTrace.rootSpanId)
+    expect(opts.traceparent).toBe(`00-${parentTrace.traceId}-${parentTrace.rootSpanId}-01`)
+    expect(__getActiveSpanForTesting(parentTrace.rootSpanId)).toBeUndefined()
+  })
+})
+
+describe("resolveSendOptions — forwardSubagentText (SDK-subagent bridge)", () => {
+  it("enables forwardSubagentText for team and workflow-editor sessions", async () => {
+    const team = await resolveSendOptions({
+      session: makeSession({ id: "s-team", kind: "team" }),
+      character: makeChar({ id: "c1" }),
+    })
+    expect(team.forwardSubagentText).toBe(true)
+
+    const wf = await resolveSendOptions({
+      session: makeSession({ id: "workflow:wf1", kind: "workflow-editor" }),
+      character: makeChar({ id: "c1" }),
+    })
+    expect(wf.forwardSubagentText).toBe(true)
+  })
+
+  it("enables forwardSubagentText for a direct chat session (gap8 — detailed-gated render)", async () => {
+    const direct = await resolveSendOptions({
+      session: makeSession({ id: "s-direct", kind: "direct" }),
+      character: makeChar({ id: "c1" }),
+    })
+    expect(direct.forwardSubagentText).toBe(true)
+  })
+})
+
+describe("resolveSendOptions — IM prompt-fragment memos", () => {
+  const imAdapterRow = {
+    id: "tg-cap",
+    updatedAt: 999,
+    lastKnownCapabilities: { button: "native" },
+  } as unknown as AdapterInstanceRow
+
+  const capSession = () =>
+    makeSession({
+      id: "s-cap",
+      platformBinding: {
+        adapterId: "tg-cap",
+        platform: "telegram",
+        conversationKey: "c-cap",
+        conversationRef: { platform: "telegram", adapterId: "tg-cap", chatId: 7 },
+      },
+    })
+
+  it("builds then reuses the capability prompt across turns (memo miss + hit)", async () => {
+    _resetImPromptMemosForTest()
+    // First turn → cache miss → builds the prompt from the threaded adapter row.
+    const first = await resolveSendOptions({ session: capSession(), imAdapterRow })
+    expect(first.appendSystemPrompt).toContain("delivered via telegram")
+    // Second turn (same id+updatedAt+platform) → cache hit → identical prompt.
+    const second = await resolveSendOptions({ session: capSession(), imAdapterRow })
+    expect(second.appendSystemPrompt).toBe(first.appendSystemPrompt)
+  })
+
+  it("reuses the built-in skills manifest across turns for the same IM channel", async () => {
+    _resetImPromptMemosForTest()
+    const first = await resolveSendOptions({ session: capSession(), imAdapterRow })
+    const second = await resolveSendOptions({ session: capSession(), imAdapterRow })
+    // The lark.* tool allowlist is identical across turns (manifest memo hit).
+    expect(second.allowedTools).toEqual(first.allowedTools)
+  })
+})
+
+describe("resolveSendOptions — project knowledge base (project-scoped RAG)", () => {
+  function projectWithKb(overrides: Partial<Project> = {}): Project {
+    return {
+      id: "ws1",
+      name: "WS",
+      roots: [],
+      knowledgeBase: [
+        {
+          id: "f1",
+          name: "guide.md",
+          type: "text",
+          content: "x",
+          size: 1,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ],
+      sessionIds: [],
+      sessionCount: 0,
+      messageCount: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      lastAccessedAt: new Date(),
+      ...overrides,
+    } as Project
+  }
+
+  const deps = { store: {}, embedding: {} } as never
+
+  it("appends a project-knowledge section after the base prompt (does not replace it)", async () => {
+    mApplyProjectKnowledge.mockResolvedValue({
+      systemPromptSection: "## Project knowledge base\nchunk text",
+      retrievedChunks: [{ fileId: "f1", fileName: "guide.md", content: "chunk text", score: 0.9 }],
+      degraded: false,
+    })
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", systemPrompt: "base prompt" }),
+      appSettings: { cacheOptimizationEnabled: false } as never,
+      activeProject: projectWithKb(),
+      projectKnowledgeDeps: deps,
+      projectKnowledgeUserMessage: "hello",
+    })
+    expect(opts.systemPrompt).toContain("base prompt")
+    expect(opts.systemPrompt).toContain("## Project knowledge base")
+    expect(opts.systemPrompt!.indexOf("base prompt")).toBeLessThan(
+      opts.systemPrompt!.indexOf("## Project knowledge base")
+    )
+    expect(opts.projectKnowledgeContext?.retrievedChunks).toHaveLength(1)
+    expect(opts.projectKnowledgeContext?.degraded).toBe(false)
+  })
+
+  it("skips when the workspace has no knowledge files", async () => {
+    const opts = await resolveSendOptions({
+      character: makeChar({ id: "c1", systemPrompt: "base prompt" }),
+      appSettings: { cacheOptimizationEnabled: false } as never,
+      activeProject: projectWithKb({ knowledgeBase: [] }),
+      projectKnowledgeDeps: deps,
+      projectKnowledgeUserMessage: "hello",
+    })
+    expect(mApplyProjectKnowledge).not.toHaveBeenCalled()
+    expect(opts.systemPrompt).not.toContain("## Project knowledge base")
+  })
+
+  it("skips when project RAG is disabled for the workspace", async () => {
+    await resolveSendOptions({
+      character: makeChar({ id: "c1", systemPrompt: "base prompt" }),
+      appSettings: { cacheOptimizationEnabled: false } as never,
+      activeProject: projectWithKb({ knowledgeSettings: { enableProjectRag: false } }),
+      projectKnowledgeDeps: deps,
+      projectKnowledgeUserMessage: "hello",
+    })
+    expect(mApplyProjectKnowledge).not.toHaveBeenCalled()
+  })
+
+  it("skips when no project-knowledge deps are supplied", async () => {
+    await resolveSendOptions({
+      character: makeChar({ id: "c1", systemPrompt: "base prompt" }),
+      appSettings: { cacheOptimizationEnabled: false } as never,
+      activeProject: projectWithKb(),
+      projectKnowledgeUserMessage: "hello",
+    })
+    expect(mApplyProjectKnowledge).not.toHaveBeenCalled()
+  })
+})
+
+describe("resolveSendOptions — ADR-0090 execution spec stamping", () => {
+  afterEach(() => {
+    delete process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2
+    delete process.env.NEXT_PUBLIC_GATEWAY_AGENT_ROUTE_TICKETS
+  })
+
+  it("leaves SendOptions unstamped while both flags are off", async () => {
+    const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+    expect(opts.execution).toBeUndefined()
+  })
+
+  it("stamps when only the route-tickets flag is on, so the switch issues tickets", async () => {
+    // The Settings → Gateway → Route tickets switch writes only this flag.
+    // While the block also demanded `agentExecutionResolverV2`, flipping it
+    // changed nothing on a default install and the tickets panel could never
+    // list anything.
+    process.env.NEXT_PUBLIC_GATEWAY_AGENT_ROUTE_TICKETS = "1"
+    const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+    expect(opts.execution).toBeTruthy()
+  })
+
+  it("stamps the frozen, secret-free execution spec when the flag is on (legacy fields intact)", async () => {
+    process.env.NEXT_PUBLIC_AGENT_EXECUTION_RESOLVER_V2 = "1"
+    const opts = await resolveSendOptions({ character: makeChar({ id: "c1" }) })
+
+    const execution = opts.execution as unknown as Record<string, unknown>
+    expect(execution).toBeTruthy()
+    expect(execution.specVersion).toBe(1)
+    expect(execution.executionKind).toBe("agent")
+    expect(execution.runtimeAdapter).toBe("claude-agent-sdk")
+    expect((execution.route as { kind: string }).kind).toBe("direct")
+    expect(execution.executionFingerprint).toEqual(expect.any(String))
+    // Legacy routing fields survive for rollback; no secret shapes in the spec.
+    expect(opts.provider).toBeDefined()
+    expect(JSON.stringify(execution)).not.toMatch(/sk-|api[_-]?key|bearer|token/i)
   })
 })

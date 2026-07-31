@@ -4,7 +4,21 @@ import {
   buildLeadPlanningPrompt,
 } from "./agent-team-runtime-deps"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import type { AppSettings } from "@cognia/agent-config-types"
 import type { AgentTeam, AgentTeammate, AgentTeamTask } from "@/types/agent/agent-team"
+
+function makeSettings(overrides: Partial<AppSettings> = {}): AppSettings {
+  return {
+    defaultProvider: "anthropic",
+    defaultModel: "claude-opus-4-8",
+    providerSettings: {
+      anthropic: { enabled: true, apiKey: "sk-ant-test", defaultModel: "claude-opus-4-8" },
+    },
+    ...overrides,
+  } as AppSettings
+}
+
+const readSettings = async () => makeSettings()
 
 function makeTeam(overrides: Partial<AgentTeam> = {}): AgentTeam {
   return {
@@ -132,11 +146,142 @@ describe("buildLeadPlanningPrompt", () => {
     expect(prompt).toContain("Add a verification step.")
     expect(prompt).toContain("Revise the plan accordingly.")
   })
+
+  it("never leaks raw credentials or endpoints into the coordinator prompt (ADR-0090)", () => {
+    // Legacy rows may still carry raw apiKey/baseURL (deprecated-readable);
+    // the coordinator sees candidate names/roles + refs ONLY.
+    const prompt = buildLeadPlanningPrompt(
+      makeTeam(),
+      [
+        makeTeammate({
+          id: "tm-legacy",
+          name: "LegacyWorker",
+          description: "legacy",
+          config: {
+            provider: "zhipu",
+            apiKey: "sk-raw-legacy-key-123456",
+            baseURL: "https://open.bigmodel.cn/api",
+            execution: { mode: "pool", candidateIds: ["dep-a", "dep-b"] },
+          },
+        } as never),
+      ],
+      undefined
+    )
+    expect(prompt).toContain("LegacyWorker")
+    expect(prompt).not.toContain("sk-raw-legacy-key-123456")
+    expect(prompt).not.toContain("open.bigmodel.cn")
+    expect(prompt).not.toMatch(/api[_-]?key/i)
+  })
+})
+
+describe("buildAgentTeamRuntimeDeps", () => {
+  it("exposes lead-planning, notifier, and the PR-feedback resolver seams", () => {
+    const deps = buildAgentTeamRuntimeDeps()
+    expect(typeof deps.runLeadPlanning).toBe("function")
+    expect(deps.notifierDeps).toBeDefined()
+    // PR feedback loop resolvers (ADR — team PR feedback) must be wired so the
+    // loop is reachable when a team enables it.
+    expect(typeof deps.resolveTeamRepo).toBe("function")
+    expect(typeof deps.resolvePrObserveOctokit).toBe("function")
+    expect(typeof deps.runPrReview).toBe("function")
+  })
 })
 
 // runTeammateTask was deleted in the PR 4 cutover (ADR-0022 §3.9).
 // Per-task dispatch now lives in the action.team.task.dispatch workflow node
 // executor; its tests are in lib/workflow/nodes/built-ins.test.ts.
+
+describe("runLeadReview", () => {
+  const reviewArgs = (over: Record<string, unknown> = {}) => ({
+    team: makeTeam(),
+    lead: makeLead(),
+    task: { id: "t1", title: "Add validation", description: "Validate input" },
+    workerName: "Coder",
+    workerOutput: "I added validation",
+    evidence: { kind: "commit" as const, diff: "--- a.ts\n+b", truncated: false, files: ["a.ts"] },
+    revision: 0,
+    signal: new AbortController().signal,
+    ...over,
+  })
+
+  const verdictExecutor = (text: string) =>
+    jest.fn(async () => ({ text, channel: "text" as const, toolsAvailable: false }))
+
+  it("returns the lead's structured verdict", async () => {
+    const executeAgent = verdictExecutor('```json\n{"verdict":"approved","feedback":"lgtm"}\n```')
+    const { runLeadReview } = buildAgentTeamRuntimeDeps({ executeAgent, readSettings })
+
+    await expect(runLeadReview!(reviewArgs())).resolves.toEqual({
+      verdict: "approved",
+      feedback: "lgtm",
+    })
+  })
+
+  it("resolves the same provider planning does", async () => {
+    // A lead that planned on one provider and reviewed on another would be two
+    // different judgements wearing one name.
+    const executeAgent = verdictExecutor('```json\n{"verdict":"approved","feedback":"ok"}\n```')
+    const { runLeadReview } = buildAgentTeamRuntimeDeps({ executeAgent, readSettings })
+
+    await runLeadReview!(reviewArgs())
+
+    const opts = (executeAgent as jest.Mock).mock.calls[0]?.[1] as Record<string, unknown>
+    expect(opts.defaultProvider).toBe("anthropic")
+    expect(opts.model).toBe("claude-opus-4-8")
+  })
+
+  it("never gives the lead execution tools", async () => {
+    // The reviewer reviews; it is handed the diff rather than fetching it.
+    const executeAgent = verdictExecutor('```json\n{"verdict":"approved","feedback":"ok"}\n```')
+    const { runLeadReview } = buildAgentTeamRuntimeDeps({ executeAgent, readSettings })
+
+    await runLeadReview!(reviewArgs())
+
+    const opts = (executeAgent as jest.Mock).mock.calls[0]?.[1] as Record<string, unknown>
+    expect(opts.toolsEnabled).toBeUndefined()
+    expect(opts.tools).toBeUndefined()
+  })
+
+  it("carries the diff evidence into the prompt", async () => {
+    const executeAgent = verdictExecutor('```json\n{"verdict":"approved","feedback":"ok"}\n```')
+    const { runLeadReview } = buildAgentTeamRuntimeDeps({ executeAgent, readSettings })
+
+    await runLeadReview!(reviewArgs())
+
+    const prompt = (executeAgent as jest.Mock).mock.calls[0]?.[0] as string
+    expect(prompt).toContain("+b")
+    expect(prompt).toContain("I added validation")
+  })
+
+  it("throws on an unparseable verdict rather than reading it as approval", async () => {
+    const executeAgent = verdictExecutor("I think it looks fine, ship it!")
+    const { runLeadReview } = buildAgentTeamRuntimeDeps({ executeAgent, readSettings })
+
+    await expect(runLeadReview!(reviewArgs())).rejects.toThrow(/not valid JSON/)
+  })
+
+  it("throws on a well-formed but invalid verdict", async () => {
+    const executeAgent = verdictExecutor('```json\n{"verdict":"probably","feedback":"eh"}\n```')
+    const { runLeadReview } = buildAgentTeamRuntimeDeps({ executeAgent, readSettings })
+
+    await expect(runLeadReview!(reviewArgs())).rejects.toThrow(/usable verdict/)
+  })
+
+  it("brackets the review with its own lifecycle phase", async () => {
+    const executeAgent = verdictExecutor('```json\n{"verdict":"approved","feedback":"ok"}\n```')
+    const seen: Array<Record<string, unknown>> = []
+    const firer = jest.fn(async (_event: string, _ctx: unknown, payload: unknown) => {
+      seen.push(payload as Record<string, unknown>)
+      return null
+    })
+    const { runLeadReview } = buildAgentTeamRuntimeDeps({ executeAgent, firer, readSettings })
+
+    await runLeadReview!(reviewArgs())
+
+    // Distinct from planning, so spend tracking can tell them apart.
+    expect(JSON.stringify(seen)).toContain("team-review")
+  })
+})
 
 describe("runLeadPlanning", () => {
   // After the PR 4 cutover (ADR-0022 §3.9) runLeadPlanning is silent — it
@@ -153,7 +298,7 @@ describe("runLeadPlanning", () => {
       channel: "text" as const,
       toolsAvailable: false,
     }))
-    const { runLeadPlanning } = buildAgentTeamRuntimeDeps({ executeAgent })
+    const { runLeadPlanning } = buildAgentTeamRuntimeDeps({ executeAgent, readSettings })
 
     const out = await runLeadPlanning!({
       team,
@@ -175,7 +320,7 @@ describe("runLeadPlanning", () => {
       channel: "text" as const,
       toolsAvailable: false,
     }))
-    const { runLeadPlanning } = buildAgentTeamRuntimeDeps({ executeAgent })
+    const { runLeadPlanning } = buildAgentTeamRuntimeDeps({ executeAgent, readSettings })
 
     await runLeadPlanning!({
       team,
@@ -197,7 +342,7 @@ describe("runLeadPlanning", () => {
     const executeAgent = jest.fn(async () => {
       throw new Error("planning blew up")
     })
-    const { runLeadPlanning } = buildAgentTeamRuntimeDeps({ executeAgent })
+    const { runLeadPlanning } = buildAgentTeamRuntimeDeps({ executeAgent, readSettings })
 
     await expect(
       runLeadPlanning!({
@@ -207,5 +352,164 @@ describe("runLeadPlanning", () => {
         signal: new AbortController().signal,
       })
     ).rejects.toThrow("planning blew up")
+  })
+
+  describe("provider resolution", () => {
+    // Regression: runLeadPlanning called executeAgent with only a systemPrompt
+    // and an abortSignal. executeAgent reads NO store, so its resolver built
+    // zero candidates and threw "No candidate providers were available." on
+    // every invocation in every environment — the lead could never plan. Every
+    // test here that uses a fake executor asserts on the OPTIONS it receives,
+    // because a fake executor is exactly what hid this defect.
+    it("passes the app provider snapshot into executeAgent", async () => {
+      const team = makeTeam()
+      const lead = makeLead()
+      seedStore(team, [lead, makeTeammate()])
+      const executeAgent = jest.fn(async () => ({
+        text: "```json\n{}\n```",
+        channel: "text" as const,
+        toolsAvailable: false,
+      }))
+      const { runLeadPlanning } = buildAgentTeamRuntimeDeps({ executeAgent, readSettings })
+
+      await runLeadPlanning!({
+        team,
+        lead,
+        feedback: undefined,
+        signal: new AbortController().signal,
+      })
+
+      const opts = (executeAgent as jest.Mock).mock.calls[0]?.[1] as Record<string, unknown>
+      expect(opts.providerSettings).toEqual({
+        anthropic: { enabled: true, apiKey: "sk-ant-test", defaultModel: "claude-opus-4-8" },
+      })
+      expect(opts.defaultProvider).toBe("anthropic")
+      expect(opts.model).toBe("claude-opus-4-8")
+    })
+
+    it("prefers the lead's own provider and model over the app defaults", async () => {
+      const team = makeTeam()
+      const lead = makeLead({ config: { provider: "openai", model: "gpt-5.6-sol" } })
+      seedStore(team, [lead, makeTeammate()])
+      const executeAgent = jest.fn(async () => ({
+        text: "```json\n{}\n```",
+        channel: "text" as const,
+        toolsAvailable: false,
+      }))
+      const { runLeadPlanning } = buildAgentTeamRuntimeDeps({ executeAgent, readSettings })
+
+      await runLeadPlanning!({
+        team,
+        lead,
+        feedback: undefined,
+        signal: new AbortController().signal,
+      })
+
+      const opts = (executeAgent as jest.Mock).mock.calls[0]?.[1] as Record<string, unknown>
+      expect(opts.provider).toBe("openai")
+      expect(opts.model).toBe("gpt-5.6-sol")
+    })
+
+    it("fails with an actionable message when no provider is configured", async () => {
+      const team = makeTeam()
+      const lead = makeLead()
+      seedStore(team, [lead, makeTeammate()])
+      const executeAgent = jest.fn()
+      const { runLeadPlanning } = buildAgentTeamRuntimeDeps({
+        executeAgent,
+        readSettings: async () => makeSettings({ providerSettings: {}, customProviders: [] }),
+      })
+
+      await expect(
+        runLeadPlanning!({
+          team,
+          lead,
+          feedback: undefined,
+          signal: new AbortController().signal,
+        })
+      ).rejects.toThrow(/Settings → Providers/)
+      // It must not have burned a turn on a run that cannot resolve.
+      expect(executeAgent).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("lifecycle-hook bracketing (ADR-0040 follow-up)", () => {
+    it("fires SessionStart, UserPromptSubmit, Stop, SessionEnd around a successful plan", async () => {
+      const team = makeTeam()
+      const lead = makeLead()
+      seedStore(team, [lead, makeTeammate()])
+      const executeAgent = jest.fn(async () => ({
+        text: "```json\n{}\n```",
+        channel: "text" as const,
+        toolsAvailable: false,
+      }))
+      const events: string[] = []
+      const firer = jest.fn(async (event: string) => {
+        events.push(event)
+        return null
+      })
+      const { runLeadPlanning } = buildAgentTeamRuntimeDeps({ executeAgent, firer, readSettings })
+
+      await runLeadPlanning!({
+        team,
+        lead,
+        feedback: undefined,
+        signal: new AbortController().signal,
+      })
+
+      expect(events).toEqual(["SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"])
+    })
+
+    it("injects pre-hook additionalContext into the planning system prompt", async () => {
+      const team = makeTeam()
+      const lead = makeLead()
+      seedStore(team, [lead, makeTeammate()])
+      const executeAgent = jest.fn(async () => ({
+        text: "```json\n{}\n```",
+        channel: "text" as const,
+        toolsAvailable: false,
+      }))
+      const firer = jest.fn(async (event: string) =>
+        event === "SessionStart"
+          ? { block: null, additionalContext: "TEAM CONTEXT", warnings: [] }
+          : null
+      )
+      const { runLeadPlanning } = buildAgentTeamRuntimeDeps({ executeAgent, firer, readSettings })
+
+      await runLeadPlanning!({
+        team,
+        lead,
+        feedback: undefined,
+        signal: new AbortController().signal,
+      })
+
+      const opts = (executeAgent as jest.Mock).mock.calls[0]?.[1] as { systemPrompt: string }
+      expect(opts.systemPrompt).toContain("TEAM CONTEXT")
+    })
+
+    it("fires StopFailure then SessionEnd when planning throws, then rethrows", async () => {
+      const team = makeTeam()
+      const lead = makeLead()
+      seedStore(team, [lead, makeTeammate()])
+      const executeAgent = jest.fn(async () => {
+        throw new Error("boom")
+      })
+      const events: string[] = []
+      const firer = jest.fn(async (event: string) => {
+        events.push(event)
+        return null
+      })
+      const { runLeadPlanning } = buildAgentTeamRuntimeDeps({ executeAgent, firer, readSettings })
+
+      await expect(
+        runLeadPlanning!({
+          team,
+          lead,
+          feedback: undefined,
+          signal: new AbortController().signal,
+        })
+      ).rejects.toThrow("boom")
+      expect(events).toEqual(["SessionStart", "UserPromptSubmit", "StopFailure", "SessionEnd"])
+    })
   })
 })

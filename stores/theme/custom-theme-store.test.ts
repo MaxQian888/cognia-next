@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { act, renderHook } from "@testing-library/react"
 import { useCustomThemeStore, seedTokens, type CustomTheme } from "./custom-theme-store"
 import { THEMES } from "@/lib/export/html/syntax-themes"

@@ -6,6 +6,7 @@ const baseSnapshot: TrayStateSnapshot = {
   automation: { running: false, armed: true },
   chat: { streaming: false, hasActiveSession: false },
   platform: { os: "windows" },
+  app: { autostart: false, version: "0.0.0" },
 }
 
 afterEach(() => __resetWhenCacheForTesting())

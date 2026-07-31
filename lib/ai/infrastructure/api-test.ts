@@ -2,4 +2,4 @@
 // `@/lib/ai/infrastructure/api-test`; we ported the module to
 // `@/lib/ai/providers/api-test`. Keeping this shim avoids touching every
 // component's import.
-export * from "@/lib/ai/providers/api-test"
+export * from "@cognia/provider-core/providers/api-test"

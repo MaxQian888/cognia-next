@@ -34,6 +34,13 @@ export interface LastRunSummary {
   errorMessage?: string
   /** Number of retry attempts collapsed into this entry. */
   attempt: number
+  /**
+   * True when the step FAILED but its per-node error handling substituted an
+   * output and the run continued (step_failed followed by step_completed
+   * with no new attempt in between). Status is "succeeded"; the UI renders
+   * a warning state instead of plain success.
+   */
+  handled?: boolean
 }
 
 function statusFromType(type: string): LastRunStatus | null {
@@ -78,24 +85,39 @@ export function deriveLastRunSummary(
   const sorted = [...events].sort((a, b) => a.ts - b.ts)
   const startedAt: Record<string, number> = {}
   const attempts: Record<string, number> = {}
+  // Failure message seen since the step's last start — a step_completed
+  // arriving while this is set (no new attempt in between) means the
+  // orchestrator's per-node error handling substituted an output.
+  const failedSinceStart: Record<string, string | undefined> = {}
   const out: Record<string, LastRunSummary> = {}
   for (const ev of sorted) {
     if (!ev.stepId) continue
     if (ev.type === "step_started") {
       startedAt[ev.stepId] = ev.ts
       attempts[ev.stepId] = (attempts[ev.stepId] ?? 0) + 1
+      delete failedSinceStart[ev.stepId]
       continue
     }
     const status = statusFromType(ev.type)
     if (!status) continue
+    if (status === "failed") {
+      failedSinceStart[ev.stepId] = extractErrorMessage(ev.payload)
+    }
+    const handled = status === "succeeded" && ev.stepId in failedSinceStart
     const start = startedAt[ev.stepId] ?? 0
     out[ev.stepId] = {
       status,
       startedAt: start,
       finishedAt: ev.ts,
       durationMs: start > 0 ? Math.max(0, ev.ts - start) : 0,
-      errorMessage: status === "failed" ? extractErrorMessage(ev.payload) : undefined,
+      errorMessage:
+        status === "failed"
+          ? extractErrorMessage(ev.payload)
+          : handled
+            ? failedSinceStart[ev.stepId]
+            : undefined,
       attempt: attempts[ev.stepId] ?? 1,
+      ...(handled ? { handled: true } : {}),
     }
     // Reset only the start tracker so a re-attempt (which fires another
     // `step_started`) measures duration correctly. `attempts` keeps counting

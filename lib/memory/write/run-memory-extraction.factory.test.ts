@@ -38,6 +38,7 @@ jest.mock("@/lib/memory/extract/extractor", () => ({
 }))
 jest.mock("@/lib/memory/consolidate/consolidator", () => ({
   consolidate: (...a: unknown[]) => mockConsolidate(...a),
+  sameMemoryNamespace: () => true,
 }))
 
 import { buildAutoExtractionDeps } from "./run-memory-extraction"
@@ -86,10 +87,26 @@ describe("buildAutoExtractionDeps", () => {
     // findSimilar → retriever
     const similar = await captured!.findSimilar(
       { type: "semantic", text: "q", importance: 5 },
-      "global",
-      "char_1"
+      {
+        scope: "agent",
+        projectId: "p1",
+        agentId: "a1",
+        branch: "main",
+        pathPattern: "src",
+      }
     )
-    expect(mockRetrieveMemories).toHaveBeenCalled()
+    expect(mockRetrieveMemories).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reader: {
+          scope: "agent",
+          projectId: "p1",
+          agentId: "a1",
+          branch: "main",
+          pathPattern: "src",
+        },
+      }),
+      expect.anything()
+    )
     expect(similar).toEqual([{ id: "sim1" }])
 
     // persist → createMemory (no vector sink configured)
@@ -144,7 +161,7 @@ describe("buildAutoExtractionDeps", () => {
     await deps!.consolidate({ candidates: [], scope: "global", provenance: "user" })
     const similar = await captured!.findSimilar(
       { type: "semantic", text: "q", importance: 5 },
-      "global"
+      { scope: "global" }
     )
     expect(similar).toEqual([])
     expect(mockRetrieveMemories).not.toHaveBeenCalled()
@@ -170,5 +187,30 @@ describe("buildAutoExtractionDeps", () => {
       provenance: "user",
     })
     expect(row.id).toBe("new1")
+  })
+
+  it("blocks PII at the update and vector-upsert boundary", async () => {
+    const upsert = jest.fn(async () => undefined)
+    mockTryBuildMemoryVectorSink.mockResolvedValue({ upsert })
+    let captured: ConsolidateDeps | undefined
+    mockConsolidate.mockImplementation(async (_i, deps: ConsolidateDeps) => {
+      captured = deps
+      return { applied: [] }
+    })
+    const deps = await buildAutoExtractionDeps(params, cfg())
+    await deps!.consolidate({ candidates: [], scope: "global", provenance: "user" })
+    await captured!.update("id1", "email bob@example.com")
+    expect(mockUpdateMemory).not.toHaveBeenCalled()
+    expect(upsert).not.toHaveBeenCalled()
+
+    mockCreateMemory.mockResolvedValueOnce({ id: "unsafe", text: "email bob@example.com" })
+    await captured!.persist({
+      scope: "global",
+      type: "semantic",
+      text: "safe input",
+      importance: 5,
+      provenance: "user",
+    })
+    expect(upsert).not.toHaveBeenCalled()
   })
 })

@@ -4,10 +4,11 @@
 // with Dexie live-query, then layers the in-memory store filters on top
 // (mirror of `hooks/skills/use-skills.ts`).
 
-import { useMemo } from "react"
+import { createContext, useContext, useDeferredValue, useMemo } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { listPlugins } from "@/lib/db/plugins"
 import type { PluginRow } from "@/lib/db/plugin-types"
+import { pluginExposesConfig } from "@/lib/plugin/core/plugin-config-detect"
 import { usePluginsStore, type PluginFilters } from "@/stores/plugins"
 
 export interface PluginsView {
@@ -33,16 +34,35 @@ export interface PluginsView {
   loading: boolean
 }
 
+// Shared view context — `PluginsViewProvider` (use-plugins-provider.tsx)
+// runs ONE live-query + buildView for the whole /plugins panel; without it
+// every consumer (header, sub-filter chips, category rail, list, grid,
+// detail-empty) opened its own Dexie subscription and re-filtered the same
+// rows in parallel. `usePlugins()` falls back to a standalone query when no
+// provider is mounted, so embedded reuse (Settings overlay, stories, tests)
+// keeps working unchanged.
+export const PluginsViewContext = createContext<PluginsView | null>(null)
+
 export function usePlugins(): PluginsView {
-  const rows = useLiveQuery(() => listPlugins(), [])
+  const shared = useContext(PluginsViewContext)
+  const hasShared = shared !== null
+  // When a provider supplies the view, the querier touches no Dexie table,
+  // so this live-query never re-fires — hooks stay unconditional without a
+  // duplicate subscription.
+  const rows = useLiveQuery(() => (hasShared ? undefined : listPlugins()), [hasShared])
   const filters = usePluginsStore((s) => s.filters)
+  // Defer filter application so fast keystrokes in the search input update
+  // the input immediately and re-filter the (potentially large) list at
+  // lower priority.
+  const deferredFilters = useDeferredValue(filters)
   // Pass `rows` (possibly undefined) straight through so buildView can
   // distinguish "no live-query response yet" (loading) from "rows resolved
   // to []" (empty database) — `rows ?? null` collapsed both cases.
-  return useMemo(() => buildView(rows, filters), [rows, filters])
+  const standalone = useMemo(() => buildView(rows, deferredFilters), [rows, deferredFilters])
+  return shared ?? standalone
 }
 
-function buildView(rows: PluginRow[] | undefined, filters: PluginFilters): PluginsView {
+export function buildView(rows: PluginRow[] | undefined, filters: PluginFilters): PluginsView {
   const all = rows ?? []
   const countsBySource: Record<string, number> = {}
   const countsByCapability: Record<string, number> = {}
@@ -107,9 +127,11 @@ function applyFilters(rows: PluginRow[], filters: PluginFilters): PluginRow[] {
       const hasUpdate = !!(row.manifest as { updateAvailable?: boolean })?.updateAvailable
       if (!hasUpdate) return false
     }
-    if (filters.configurable) {
-      const hasSchema = !!(row.manifest as { configSchema?: unknown })?.configSchema
-      if (!hasSchema) return false
+    if (filters.configurable && !pluginExposesConfig(row)) {
+      // Matches the retired "Plugin configuration" settings section: a plugin
+      // is configurable if it ships a configSchema with properties OR a custom
+      // configComponent.
+      return false
     }
     if (q) {
       const description = (

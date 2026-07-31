@@ -8,7 +8,7 @@ description: A2UI 表面必须降级为平台原生富内容 —— Lark、Teleg
 <Status variant="experimental" />
 
 <TLDR>
-  A2UI 输出的是声明式 React 组件树，但一个 IM 平台（Lark / Telegram / Discord）只能渲染自己的富内容原语 —— 一张卡片、一行按钮、一张图片、一个链接。本桥接层就是两个世界之间「有损但忠实」的适配层。**出站**方向：用面向插件的工厂构建表面（`surface-builder.ts`），把助手回复转成带 `plainTextMirror` 兜底的出站 `MessageSegment[]`（`a2ui-to-segments.ts`），并按目标适配器的能力矩阵给每个表面评分（`capability-evaluator.ts`）。**入站**方向：把平台分片折叠回单个 A2UI `Column` 表面（`segments-to-a2ui.ts`），并把按钮点击路由到 AI 摘要轮次或某个工作流控制处理器。**工作流投射**：把实时运行渲染为审批卡片、逐步进度行、就地编辑的累积状态卡片，以及终态摘要 —— 由一个事件驱动的后台 runner（`workflow-progress-runner.ts`）扇出到每个订阅频道，**无轮询计时器**。
+  A2UI 输出的是声明式 React 组件树，但一个 IM 平台（Lark / Telegram / Discord）只能渲染自己的富内容原语 —— 一张卡片、一行按钮、一张图片、一个链接。本桥接层就是两个世界之间「有损但忠实」的适配层。**出站**方向：用面向插件的工厂构建表面（`surface-builder.ts`），把助手回复转成带 `plainTextMirror` 兜底的出站 `MessageSegment[]`（`a2ui-to-segments.ts`），并按目标适配器的能力矩阵给每个表面评分（`capability-evaluator.ts`）。**入站**方向：把平台富内容投射成给 Inbox 渲染器用的 `InboundA2UIBlock`（`projectInboundToA2UI` → 各平台 `inbound-to-a2ui.ts`），并把按钮点击路由到 AI 摘要轮次或某个工作流控制处理器。**工作流投射**：把实时运行渲染为审批卡片、逐步进度行、就地编辑的累积状态卡片，以及终态摘要 —— 由一个事件驱动的后台 runner（`workflow-progress-runner.ts`）扇出到每个订阅频道，**无轮询计时器**。
 </TLDR>
 
 <StatGrid>
@@ -28,7 +28,7 @@ A2UI 的核心前提是模型能输出**真正的 UI**。这在 webview 里行�
   - lib/connectors/a2ui-bridge/surface-builder.ts — 面向插件的纯表面构建器（支撑 `ctx.connectors.a2ui`）
   - lib/connectors/a2ui-bridge/capability-evaluator.ts — 表面 vs 适配器能力矩阵
   - lib/connectors/a2ui-bridge/a2ui-to-segments.ts — 助手回复 → 出站 `MessageSegment[]`
-  - lib/connectors/a2ui-bridge/segments-to-a2ui.ts — 入站平台分片 → 单个 A2UI `Column`
+  - lib/connectors/adapters/_shared/inbound-a2ui-dispatch.ts — `projectInboundToA2UI`：入站平台负载 → `InboundA2UIBlock`
   - lib/connectors/a2ui-bridge/workflow-to-a2ui.ts — 纯函数 工作流 → A2UI 构建器
   - lib/connectors/a2ui-bridge/workflow-progress-runner.ts — 后台扇出循环
   - lib/a2ui/connector-callback-handler.ts — 通用回调 → AI 摘要轮次
@@ -105,24 +105,30 @@ flowchart LR
 
 `A2UICapabilityMatrix`（`capability.ts:126`）由 `buildA2UICapabilityMatrix`（`capability.ts:133`）生成；`isKnownKind`（`capability-evaluator.ts:147`）与 `A2UI_COMPONENT_KINDS` 防范无法识别的组件字符串。
 
-## 入站：分片 → 表面 + 回调
+## 入站：平台负载 → InboundA2UIBlock + 回调
 
-### 把平台分片折叠成一个 Column（`segments-to-a2ui.ts`）
+### 把平台负载投射成 `InboundA2UIBlock`（`inbound-a2ui-dispatch.ts`）
 
-`segmentsToA2UI`（`segments-to-a2ui.ts:48`）把一条入站平台消息折回成单个 A2UI `Column` 表面。每种分片 kind 通过 `:67-144` 的 switch 映射到一个组件：
+> 本文档的早期版本描述过一个 `segmentsToA2UI`（`segments-to-a2ui.ts`）模块，声称它把入站分片折叠成单个 A2UI `Column` 表面。该模块已**作为死代码移除** —— 它零调用者。真实的入站投影**不**复用出站的 A2UI 表面形状，而是为 Inbox 渲染器产出一棵专用的 `InboundA2UIBlock` 树。
 
-| 分片 kind | → 组件（id 前缀） | 备注（`segments-to-a2ui.ts`） |
-| --- | --- | --- |
-| `text` (68) | `Text`（`text-`） | 同时 push 进 `textParts` |
-| `markdown` (75) | `Text`（`text-`） | |
-| `image` (82) | `Image` `src/alt/width/height`（`img-`） | |
-| `card` (96) | `Card` `title=card.kind`（`card-`） | |
-| `video` / `voice` / `file` (112) | `Link`，标签 `[file]` / `[voice]` / `[video]`（`link-`） | |
-| `location` (127) | `Text` 📍 标签（`text-`） | glyph 在 `:130` |
-| `a2ui` (135) | **原样**返回 | 已是表面 |
-| 默认 (142) | 折叠进文本 | `mention` / `emoji` / `code` / `reply` / `poll` |
+`projectInboundToA2UI`（`inbound-a2ui-dispatch.ts:26`）是总线侧的派发器。总线对每条入站 `create` 事件调用它一次，传入平台 kind 与原始平台负载；它 switch 到匹配的各平台 mapper（`../<platform>/inbound-to-a2ui.ts`，`slack`、`lark`、`discord`、`telegram`、`onebot`、`wecom`、`wechat-personal`、`wechat-oa`、`matrix`、`qq-official`、`dingtalk` 各一个），返回一个 `InboundA2UIBlock`（`inbound-a2ui-types.ts:50`）或 `null`。mapper 是**尽力而为**的：nullish 负载、未映射的平台，或抛异常的 mapper，都会归结为 `null`（`:40`、`:66`、`:68-76`），总线随即回退到纯文本渲染。
 
-`nextSurfaceId`（`segments-to-a2ui.ts:27`）铸造 `inbound:<platform>:<adapterId>:<messageId>:<n>`（`:29`，基于模块级 `surfaceCounter`，在 `:25`）。空输入 → `null`（`:54`）；无可映射子项 → `null`（`:147`）。根 `Column` 携带 `children: childIds`，id `"root"`（`:149-150`）；内容为 `{components, dataModel:{}, rootId, surfaceType:"inline"}`（`:152-157`），且 `plainTextMirror = textParts.join("\n")`（`:163`）。
+产出的 `InboundA2UIBlock` 会被持久化到 `StoredMessage.metadata.inboundA2UI`，并由 `components/chat/message-parts/inbound-a2ui-renderer.tsx` 遍历，使 Inbox 展示平台原生的富结构。该 block 是完整 `A2UISurface` 的一个刻意收窄的子集 —— 一个 `source` 芯片、一个可选 `title`，以及一个 `InboundA2UINode` 数组构成的 `body`：
+
+| 节点 kind（`inbound-a2ui-types.ts`） | 渲染为 |
+| --- | --- |
+| `text`（emphasis `muted`/`bold`/`italic`/`code`） | 行内文本 |
+| `heading`（level 1–3） | 标题 |
+| `image`（`url/alt/width/height`） | 图片 |
+| `link`（`href/label`） | 超链接 |
+| `button`（`url` 或 `actionId`、`style`） | 动作按钮 |
+| `divider` | 分隔线 |
+| `row` / `column` / `list`（`ordered?`） | 布局容器 |
+| `card`（`title/subtitle/children`） | 卡片 |
+| `alert`（tone `info`/`warning`/`success`/`error`） | 提示框 |
+| `mention` / `reply_context` / `raw_json` | 提及 · 回复预览 · 原始逃生舱 |
+
+mapper 无法在 `body` 里表达的内容会塞进 `raw`，并藏在 `<details>` 后面供调试。注意这条入站路径**不是**出站 `assistantReplyToSegments`（`a2ui-to-segments.ts`）的逆操作 —— 出站把助手表面扁平化为可传输的 `MessageSegment[]`，入站则把原始平台负载提升为紧凑的 `InboundA2UIBlock`；二者是各自独立的投影，并非一对互逆。
 
 ### 按钮点击 → AI 摘要轮次（`connector-callback-handler.ts`）
 

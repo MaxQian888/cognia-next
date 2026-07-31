@@ -5,7 +5,7 @@ import {
   mergeSources,
   type TwinRetrievedChunk,
 } from "./citations"
-import type { BetaContentBlock } from "./types"
+import type { BetaContentBlock } from "@cognia/agent-config-types"
 
 describe("extractAnthropicCitations", () => {
   it("returns [] when no text block carries citations", () => {

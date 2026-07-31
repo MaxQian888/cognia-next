@@ -17,17 +17,23 @@ import type {
   StoredMessage,
   SystemPromptPreset,
   Team,
-} from "@/lib/claude/types"
+} from "@cognia/agent-config-types"
 import type { TrustedWorkspace } from "@/lib/db/trusted-workspaces"
-import type { SessionStateRow, TtsProviderKeyRow } from "@/lib/db/schema"
+import type { TemplateDefinitionRow, TemplatePackageRow } from "@/lib/db/template-platform"
+import type { TemplateInstanceRecord } from "@/lib/templates/repository"
+import type { CogniaDB, SessionStateRow, TtsProviderKeyRow } from "@/lib/db/schema"
 import { getDb } from "@/lib/db/schema"
+import { contextCommentRowFromCanvas } from "@/lib/db/context-comments"
 import type {
   PluginAnalyticsRow,
   PluginPermissionRow,
+  PluginReviewRow,
   PluginRow,
-  PluginScheduledJobRow,
 } from "@/lib/db/plugin-types"
 import type { TwinChunk, TwinDraft, TwinJob, TwinProfile, TwinSource } from "@/types/twin"
+import { isMemorySourceChannel, type Memory } from "@/types/memory/memory"
+import type { MemoryAuditEvent, MemoryEvidence, MemoryJob } from "@/types/memory/governance"
+import { hasNoLeakingPii, redactText } from "@cognia/redact"
 import {
   emptySummary,
   type BackupPackageV3,
@@ -40,6 +46,11 @@ import { browserSnapshotStorage, SNAPSHOT_MODULES } from "./snapshots/registry"
 import { readAllSnapshots, restoreFromPreSnap, writeAllSnapshots } from "./snapshots/helpers"
 import type { LocalStorageSnapshot, SnapshotEnv, SnapshotStorage } from "./snapshots/types"
 import { projectMcpToAllAgents } from "./sync-projection"
+import {
+  importProfiles as validateProfilesImport,
+  PROFILE_STORE_SCHEMA_VERSION,
+} from "@cognia/provider-types"
+import { deepStripSecrets } from "@/lib/settings/profile-transfer"
 
 interface BuiltInRow {
   id: string
@@ -84,6 +95,12 @@ export async function applyBackupPackage(
   const summary = emptySummary()
   const db = getDb()
   const env = pkg.payload
+  const importedProfiles = env.providerProfileStore
+    ? validateProfilesImport(env.providerProfileStore)
+    : undefined
+  if (importedProfiles && !importedProfiles.ok) {
+    throw new Error(`provider profile import failed: ${importedProfiles.errors.join("; ")}`)
+  }
 
   // Stage 1: snapshot localStorage face *before* Dexie writes so we can
   // roll it back if something blows up after the Dexie commit. Tauri/web
@@ -111,27 +128,41 @@ export async function applyBackupPackage(
       db.tts_provider_keys,
       db.canvasDocuments,
       db.canvasVersions,
-      db.canvasComments,
+      db.contextComments,
       db.canvasSessions,
       db.a2uiApps,
       db.a2uiTemplates,
       db.a2uiEventHistory,
       db.plugins,
       db.pluginPermissions,
+      db.pluginReviews,
       db.pluginAnalytics,
-      db.pluginScheduledJobs,
       db.twinSources,
       db.twinChunks,
       db.twinProfile,
       db.twinDrafts,
       db.twinJobs,
+      db.memories,
+      db.memoryEvidence,
+      db.memoryJobs,
+      db.memoryAuditEvents,
+      db.templateDefinitions,
+      db.templatePackages,
+      db.templateInstances,
+      db.providerProfiles,
+      db.deploymentProfiles,
+      db.transportProfiles,
+      db.profileStoreMeta,
     ],
     async () => {
       // --- settings (singleton) -------------------------------------------
       if (env.settings) {
         const existing = await db.settings.get("singleton")
-        const incoming: AppSettings = { ...env.settings, id: "singleton" }
-        if (!opts.includeApiKey) delete incoming.apiKey
+        const incoming = (
+          opts.includeApiKey
+            ? { ...env.settings, id: "singleton" }
+            : { ...(deepStripSecrets(env.settings) as AppSettings), id: "singleton" }
+        ) as AppSettings
         if (!existing) {
           await db.settings.put(incoming)
           incrementCounter(summary.added, "settings")
@@ -180,6 +211,73 @@ export async function applyBackupPackage(
         summary,
         idPrefix: "team",
       })
+      await applyKeyedCollection<TemplateDefinitionRow>({
+        rows: env.templateDefinitions,
+        table: db.templateDefinitions,
+        kind: "templateDefinitions",
+        opts,
+        summary,
+        keyOf: (row) => row.storageKey,
+      })
+      await applyKeyedCollection<TemplatePackageRow>({
+        rows: env.templatePackages,
+        table: db.templatePackages,
+        kind: "templatePackages",
+        opts,
+        summary,
+        keyOf: (row) => row.key,
+      })
+      await applyKeyedCollection<TemplateInstanceRecord>({
+        rows: env.templateInstances,
+        table: db.templateInstances,
+        kind: "templateInstances",
+        opts,
+        summary,
+        keyOf: (row) => row.id,
+      })
+
+      // Provider Profile Store documents are a referential bundle. A
+      // duplicate import cannot safely rename ids without rewriting every
+      // reference, so conflicts use the conservative skip behavior while
+      // non-conflicting documents are still added.
+      if (importedProfiles?.ok) {
+        const profileOpts =
+          opts.mergeStrategy === "duplicate" ? { ...opts, mergeStrategy: "skip" as const } : opts
+        await applyCollection({
+          rows: importedProfiles.value.providerProfiles,
+          table: db.providerProfiles,
+          kind: "providerProfiles",
+          opts: profileOpts,
+          summary,
+          idPrefix: "provider",
+          respectBuiltIn: false,
+        })
+        await applyCollection({
+          rows: importedProfiles.value.deploymentProfiles,
+          table: db.deploymentProfiles,
+          kind: "deploymentProfiles",
+          opts: profileOpts,
+          summary,
+          idPrefix: "deployment",
+          respectBuiltIn: false,
+        })
+        await applyCollection({
+          rows: importedProfiles.value.transportProfiles,
+          table: db.transportProfiles,
+          kind: "transportProfiles",
+          opts: profileOpts,
+          summary,
+          idPrefix: "transport",
+          respectBuiltIn: false,
+        })
+        const currentMeta = await db.profileStoreMeta.get("singleton")
+        await db.profileStoreMeta.put({
+          id: "singleton",
+          profileVersion: (currentMeta?.profileVersion ?? 0) + 1,
+          schemaVersion: PROFILE_STORE_SCHEMA_VERSION,
+          migratedAt: new Date().toISOString(),
+        })
+      }
 
       // --- presets / MCP servers / trusted workspaces / tts keys ---------
       await applyCollection<SystemPromptPreset>({
@@ -241,8 +339,8 @@ export async function applyBackupPackage(
         respectBuiltIn: false,
       })
       await applyCollection({
-        rows: env.canvasComments,
-        table: db.canvasComments,
+        rows: env.canvasComments?.map(contextCommentRowFromCanvas),
+        table: db.contextComments,
         kind: "canvasComments",
         opts,
         summary,
@@ -296,12 +394,12 @@ export async function applyBackupPackage(
       //   • Imported plugins are forced to `enabled: false` so a fresh restore
       //     doesn't silently reactivate a plugin the user might have disabled
       //     for security reasons before the export.
-      // Permissions/analytics/scheduled jobs follow the parent plugin via
+      // Permissions/reviews/analytics follow the parent plugin via
       // `bulkPut` keyed on their composite primary keys — overwrite is the
       // only sensible strategy for derived per-plugin data.
       if (env.plugins && env.plugins.length > 0) {
         const incomingPlugins = env.plugins as PluginRow[]
-        const importedIds = new Set<string>()
+        const importedPluginIds = new Map<string, string>()
         for (const row of incomingPlugins) {
           if (row.source === "builtin") {
             incrementCounter(summary.builtInsSkipped, "plugins")
@@ -316,7 +414,7 @@ export async function applyBackupPackage(
           if (!existing) {
             await db.plugins.put(safeRow)
             incrementCounter(summary.added, "plugins")
-            importedIds.add(safeRow.id)
+            importedPluginIds.set(row.id, safeRow.id)
             continue
           }
           switch (opts.mergeStrategy) {
@@ -326,45 +424,45 @@ export async function applyBackupPackage(
             case "overwrite":
               await db.plugins.put(safeRow)
               incrementCounter(summary.overwritten, "plugins")
-              importedIds.add(safeRow.id)
+              importedPluginIds.set(row.id, safeRow.id)
               break
             case "duplicate": {
               const copy: PluginRow = { ...safeRow, id: newId("plugin") }
               await db.plugins.put(copy)
               incrementCounter(summary.added, "plugins")
-              importedIds.add(copy.id)
+              importedPluginIds.set(row.id, copy.id)
               break
             }
           }
         }
 
-        // Permissions / analytics / scheduled jobs follow the imported plugin
-        // rows. Skip rows whose owning plugin wasn't imported.
+        // Child rows follow the imported plugin, including a duplicate's fresh
+        // id. Skip rows whose owning plugin wasn't imported.
+        const remapChildRows = <T extends { pluginId: string }>(rows: T[]): T[] =>
+          rows.flatMap((row) => {
+            const pluginId = importedPluginIds.get(row.pluginId)
+            return pluginId === undefined ? [] : [{ ...row, pluginId }]
+          })
+
         if (env.pluginPermissions && env.pluginPermissions.length > 0) {
-          const perms = (env.pluginPermissions as PluginPermissionRow[]).filter((r) =>
-            importedIds.has(r.pluginId)
-          )
+          const perms = remapChildRows(env.pluginPermissions as PluginPermissionRow[])
           if (perms.length > 0) {
             await db.pluginPermissions.bulkPut(perms)
             incrementCounterBy(summary.added, "pluginPermissions", perms.length)
           }
         }
         if (env.pluginAnalytics && env.pluginAnalytics.length > 0) {
-          const rows = (env.pluginAnalytics as PluginAnalyticsRow[]).filter((r) =>
-            importedIds.has(r.pluginId)
-          )
+          const rows = remapChildRows(env.pluginAnalytics as PluginAnalyticsRow[])
           if (rows.length > 0) {
             await db.pluginAnalytics.bulkPut(rows)
             incrementCounterBy(summary.added, "pluginAnalytics", rows.length)
           }
         }
-        if (env.pluginScheduledJobs && env.pluginScheduledJobs.length > 0) {
-          const rows = (env.pluginScheduledJobs as PluginScheduledJobRow[]).filter((r) =>
-            importedIds.has(r.pluginId)
-          )
+        if (env.pluginReviews && env.pluginReviews.length > 0) {
+          const rows = remapChildRows(env.pluginReviews as PluginReviewRow[])
           if (rows.length > 0) {
-            await db.pluginScheduledJobs.bulkPut(rows)
-            incrementCounterBy(summary.added, "pluginScheduledJobs", rows.length)
+            await db.pluginReviews.bulkPut(rows)
+            incrementCounterBy(summary.added, "pluginReviews", rows.length)
           }
         }
       }
@@ -418,6 +516,20 @@ export async function applyBackupPackage(
         summary,
         idPrefix: "twj",
         respectBuiltIn: false,
+      })
+
+      // --- learned memory + governance (schema v118) --------------------
+      // These tables form one referential bundle. The duplicate strategy
+      // remaps every colliding id and then rewrites child references so
+      // evidence, durable jobs, and audit history remain connected.
+      await applyMemoryBundle({
+        memories: env.memories,
+        evidence: env.memoryEvidence,
+        jobs: env.memoryJobs,
+        audits: env.memoryAuditEvents,
+        db,
+        opts,
+        summary,
       })
 
       // --- sessions + messages + sessionState (off by default) -----------
@@ -589,6 +701,454 @@ async function applyKeyedCollection<T>(args: KeyedApplyArgs<T>): Promise<void> {
       incrementCounter(summary.overwritten, kind)
     }
   }
+}
+
+interface MemoryBundleArgs {
+  memories: Memory[] | undefined
+  evidence: MemoryEvidence[] | undefined
+  jobs: MemoryJob[] | undefined
+  audits: MemoryAuditEvent[] | undefined
+  db: CogniaDB
+  opts: ImportOptions
+  summary: ImportSummary
+}
+
+async function applyMemoryBundle(args: MemoryBundleArgs): Promise<void> {
+  const { db, opts, summary } = args
+  const memories = (args.memories ?? []).flatMap((row) => {
+    const safe = sanitizeImportedMemory(row)
+    return safe ? [safe] : []
+  })
+  const evidence = (args.evidence ?? []).flatMap((row) => {
+    const safe = sanitizeImportedEvidence(row)
+    return safe ? [safe] : []
+  })
+  const jobs = (args.jobs ?? []).flatMap((row) => {
+    const safe = sanitizeImportedJob(row)
+    return safe ? [safe] : []
+  })
+  const audits = (args.audits ?? []).flatMap((row) => {
+    const safe = sanitizeImportedAudit(row)
+    return safe ? [safe] : []
+  })
+  const importedMemoryIds = new Set(memories.map((memory) => memory.id))
+  const memoryIdMap = new Map<string, string>()
+  const evidenceIdMap = new Map<string, string>()
+
+  for (const memory of memories) {
+    const importedId = await applyMappedRow({
+      row: memory,
+      table: db.memories,
+      kind: "memories",
+      idPrefix: "mem",
+      opts,
+      summary,
+    })
+    if (importedId) memoryIdMap.set(memory.id, importedId)
+  }
+
+  for (const memory of memories) {
+    const importedId = memoryIdMap.get(memory.id)
+    if (!importedId) continue
+    const supersededById = memory.supersededById
+      ? (memoryIdMap.get(memory.supersededById) ?? memory.supersededById)
+      : undefined
+    const conflictWithIds = memory.conflictWithIds?.map((id) => memoryIdMap.get(id) ?? id)
+    if (
+      supersededById !== memory.supersededById ||
+      conflictWithIds?.some((id, index) => id !== memory.conflictWithIds?.[index])
+    ) {
+      await db.memories.update(importedId, { supersededById, conflictWithIds })
+    }
+  }
+
+  for (const item of evidence) {
+    if (item.memoryId && importedMemoryIds.has(item.memoryId) && !memoryIdMap.has(item.memoryId)) {
+      incrementCounter(summary.skipped, "memoryEvidence")
+      continue
+    }
+    const row: MemoryEvidence = {
+      ...item,
+      ...(item.memoryId ? { memoryId: memoryIdMap.get(item.memoryId) ?? item.memoryId } : {}),
+    }
+    const importedId = await applyMappedRow({
+      row,
+      table: db.memoryEvidence,
+      kind: "memoryEvidence",
+      idPrefix: "mev",
+      opts,
+      summary,
+    })
+    if (importedId) evidenceIdMap.set(item.id, importedId)
+  }
+
+  for (const item of jobs) {
+    await applyMappedRow<MemoryJob>({
+      row: {
+        ...item,
+        evidenceIds: item.evidenceIds.map((id) => evidenceIdMap.get(id) ?? id),
+      },
+      table: db.memoryJobs,
+      kind: "memoryJobs",
+      idPrefix: "mjob",
+      opts,
+      summary,
+    })
+  }
+
+  for (const item of audits) {
+    if (item.memoryId && importedMemoryIds.has(item.memoryId) && !memoryIdMap.has(item.memoryId)) {
+      incrementCounter(summary.skipped, "memoryAuditEvents")
+      continue
+    }
+    await applyMappedRow({
+      row: {
+        ...item,
+        ...(item.memoryId ? { memoryId: memoryIdMap.get(item.memoryId) ?? item.memoryId } : {}),
+      },
+      table: db.memoryAuditEvents,
+      kind: "memoryAuditEvents",
+      idPrefix: "maudit",
+      opts,
+      summary,
+    })
+  }
+}
+
+const MEMORY_SCOPES = new Set(["global", "workspace", "character", "agent"])
+const MEMORY_TYPES = new Set(["semantic", "episodic", "procedural"])
+const MEMORY_STATUSES = new Set(["active", "invalidated"])
+const MEMORY_PROVENANCE = new Set(["user", "explicit", "inbound", "system", "external"])
+const EVIDENCE_KINDS = new Set([
+  "message",
+  "file",
+  "external",
+  "manual",
+  "checkpoint",
+  "agent-finding",
+])
+const JOB_KINDS = new Set(["turn-extraction", "session-distill", "vector-reconcile"])
+const JOB_STATUSES = new Set(["queued", "running", "completed", "failed"])
+const AUDIT_ACTIONS = new Set([
+  "recall-allowed",
+  "recall-denied",
+  "learn-allowed",
+  "learn-denied",
+  "created",
+  "revised",
+  "promoted",
+  "invalidated",
+  "deleted",
+  "conflict",
+  "pinned",
+  "unpinned",
+])
+const SAFE_IDENTIFIER = /^[\w./:@-]{1,512}$/u
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value)
+}
+
+function optionalIdentifier(value: unknown): string | undefined {
+  return typeof value === "string" && SAFE_IDENTIFIER.test(value) && hasNoLeakingPii(value)
+    ? value
+    : undefined
+}
+
+function optionalFiniteNumber(value: unknown): number | undefined {
+  return isFiniteNumber(value) ? value : undefined
+}
+
+function sanitizeImportedMemory(value: unknown): Memory | undefined {
+  if (!isRecord(value)) return undefined
+  const {
+    id,
+    scope,
+    type,
+    text,
+    tags,
+    importance,
+    createdAt,
+    updatedAt,
+    lastAccessedAt,
+    accessCount,
+    version,
+    status,
+    pinned,
+    provenance,
+  } = value
+  if (
+    typeof id !== "string" ||
+    !SAFE_IDENTIFIER.test(id) ||
+    typeof scope !== "string" ||
+    !MEMORY_SCOPES.has(scope) ||
+    typeof type !== "string" ||
+    !MEMORY_TYPES.has(type) ||
+    typeof text !== "string" ||
+    !Array.isArray(tags) ||
+    !tags.every((tag) => typeof tag === "string" && tag.length <= 128) ||
+    !isFiniteNumber(importance) ||
+    importance < 1 ||
+    importance > 10 ||
+    !isFiniteNumber(createdAt) ||
+    !isFiniteNumber(updatedAt) ||
+    !isFiniteNumber(lastAccessedAt) ||
+    !isFiniteNumber(accessCount) ||
+    accessCount < 0 ||
+    !isFiniteNumber(version) ||
+    version < 1 ||
+    typeof status !== "string" ||
+    !MEMORY_STATUSES.has(status) ||
+    typeof pinned !== "boolean" ||
+    typeof provenance !== "string" ||
+    !MEMORY_PROVENANCE.has(provenance)
+  ) {
+    return undefined
+  }
+  const characterId = optionalIdentifier(value.characterId)
+  const projectId = optionalIdentifier(value.projectId)
+  const agentId = optionalIdentifier(value.agentId)
+  if (
+    (scope === "workspace" && !projectId) ||
+    (scope === "character" && !characterId) ||
+    (scope === "agent" && !agentId)
+  ) {
+    return undefined
+  }
+  const redacted = redactText(text).redacted.trim()
+  if (!redacted || !hasNoLeakingPii(redacted)) return undefined
+  const row: Memory = {
+    id,
+    scope: scope as Memory["scope"],
+    type: type as Memory["type"],
+    text: redacted,
+    tags: [...new Set(tags)],
+    importance,
+    createdAt,
+    updatedAt,
+    lastAccessedAt,
+    accessCount,
+    version,
+    status: status as Memory["status"],
+    pinned,
+    provenance: provenance as Memory["provenance"],
+    ...(characterId ? { characterId } : {}),
+    ...(projectId ? { projectId } : {}),
+    ...(agentId ? { agentId } : {}),
+  }
+  const stringFields = [
+    "branch",
+    "pathPattern",
+    "key",
+    "vectorDocId",
+    "supersededById",
+    "sourceSessionId",
+    "sourceMessageId",
+    "sourcePluginId",
+  ] as const
+  for (const field of stringFields) {
+    const safe = optionalIdentifier(value[field])
+    if (safe) row[field] = safe
+  }
+  // Guard rather than a literal union so a new channel cannot silently be
+  // dropped on import again — `selection` was, for exactly that reason.
+  if (isMemorySourceChannel(value.sourceChannel)) {
+    row.sourceChannel = value.sourceChannel
+  }
+  if (value.evidenceState === "legacy" || value.evidenceState === "supported") {
+    row.evidenceState = value.evidenceState
+  }
+  if (
+    value.reviewStatus === "unreviewed" ||
+    value.reviewStatus === "verified" ||
+    value.reviewStatus === "conflict"
+  ) {
+    row.reviewStatus = value.reviewStatus
+  }
+  if (
+    value.contaminationState === "clean" ||
+    value.contaminationState === "external-context" ||
+    value.contaminationState === "unknown"
+  ) {
+    row.contaminationState = value.contaminationState
+  }
+  if (value.sensitivity === "normal" || value.sensitivity === "sensitive") {
+    row.sensitivity = value.sensitivity
+  }
+  if (Array.isArray(value.conflictWithIds)) {
+    row.conflictWithIds = value.conflictWithIds.flatMap((item) => {
+      const safe = optionalIdentifier(item)
+      return safe ? [safe] : []
+    })
+  }
+  const invalidatedAt = optionalFiniteNumber(value.invalidatedAt)
+  if (invalidatedAt !== undefined) row.invalidatedAt = invalidatedAt
+  return row
+}
+
+function sanitizeImportedEvidence(value: unknown): MemoryEvidence | undefined {
+  if (!isRecord(value)) return undefined
+  const id = optionalIdentifier(value.id)
+  const sourceId = optionalIdentifier(value.sourceId)
+  if (
+    !id ||
+    !sourceId ||
+    typeof value.kind !== "string" ||
+    !EVIDENCE_KINDS.has(value.kind) ||
+    typeof value.contaminationState !== "string" ||
+    !["clean", "external-context", "unknown"].includes(value.contaminationState) ||
+    typeof value.reviewed !== "boolean" ||
+    !isFiniteNumber(value.createdAt)
+  ) {
+    return undefined
+  }
+  return {
+    id,
+    kind: value.kind as MemoryEvidence["kind"],
+    sourceId,
+    contaminationState: value.contaminationState as MemoryEvidence["contaminationState"],
+    reviewed: value.reviewed,
+    createdAt: value.createdAt,
+    ...(optionalIdentifier(value.memoryId) ? { memoryId: optionalIdentifier(value.memoryId) } : {}),
+    ...(optionalIdentifier(value.sessionId)
+      ? { sessionId: optionalIdentifier(value.sessionId) }
+      : {}),
+    ...(optionalIdentifier(value.messageId)
+      ? { messageId: optionalIdentifier(value.messageId) }
+      : {}),
+    ...(optionalIdentifier(value.excerptHash)
+      ? { excerptHash: optionalIdentifier(value.excerptHash) }
+      : {}),
+  }
+}
+
+function sanitizeImportedJob(value: unknown): MemoryJob | undefined {
+  if (!isRecord(value)) return undefined
+  const id = optionalIdentifier(value.id)
+  const dedupeKey = optionalIdentifier(value.dedupeKey)
+  if (
+    !id ||
+    !dedupeKey ||
+    typeof value.kind !== "string" ||
+    !JOB_KINDS.has(value.kind) ||
+    typeof value.status !== "string" ||
+    !JOB_STATUSES.has(value.status) ||
+    typeof value.scope !== "string" ||
+    !MEMORY_SCOPES.has(value.scope) ||
+    typeof value.provenance !== "string" ||
+    !MEMORY_PROVENANCE.has(value.provenance) ||
+    !Array.isArray(value.evidenceIds) ||
+    !isFiniteNumber(value.queuedAt) ||
+    !isFiniteNumber(value.retryCount) ||
+    value.retryCount < 0
+  ) {
+    return undefined
+  }
+  const evidenceIds = value.evidenceIds.flatMap((item) => {
+    const safe = optionalIdentifier(item)
+    return safe ? [safe] : []
+  })
+  if (evidenceIds.length !== value.evidenceIds.length) return undefined
+  const row: MemoryJob = {
+    id,
+    dedupeKey,
+    kind: value.kind as MemoryJob["kind"],
+    status: value.status as MemoryJob["status"],
+    scope: value.scope as MemoryJob["scope"],
+    provenance: value.provenance as MemoryJob["provenance"],
+    evidenceIds,
+    queuedAt: value.queuedAt,
+    retryCount: value.retryCount,
+  }
+  for (const field of [
+    "sessionId",
+    "projectId",
+    "characterId",
+    "leaseOwner",
+    "errorCode",
+  ] as const) {
+    const safe = optionalIdentifier(value[field])
+    if (safe) row[field] = safe
+  }
+  for (const field of ["startedAt", "completedAt", "leaseExpiresAt", "nextAttemptAt"] as const) {
+    const safe = optionalFiniteNumber(value[field])
+    if (safe !== undefined) row[field] = safe
+  }
+  return row
+}
+
+function sanitizeImportedAudit(value: unknown): MemoryAuditEvent | undefined {
+  if (!isRecord(value)) return undefined
+  const id = optionalIdentifier(value.id)
+  if (
+    !id ||
+    typeof value.action !== "string" ||
+    !AUDIT_ACTIONS.has(value.action) ||
+    !isFiniteNumber(value.createdAt)
+  ) {
+    return undefined
+  }
+  const reason = optionalIdentifier(value.reason) ?? "imported"
+  const metadata: MemoryAuditEvent["metadata"] = isRecord(value.metadata)
+    ? (Object.fromEntries(
+        Object.entries(value.metadata).filter(
+          ([key, item]) =>
+            SAFE_IDENTIFIER.test(key) &&
+            (typeof item === "boolean" ||
+              (typeof item === "number" && Number.isFinite(item)) ||
+              (typeof item === "string" && SAFE_IDENTIFIER.test(item) && hasNoLeakingPii(item)))
+        )
+      ) as Record<string, string | number | boolean>)
+    : undefined
+  return {
+    id,
+    action: value.action as MemoryAuditEvent["action"],
+    reason,
+    createdAt: value.createdAt,
+    ...(optionalIdentifier(value.memoryId) ? { memoryId: optionalIdentifier(value.memoryId) } : {}),
+    ...(optionalIdentifier(value.sessionId)
+      ? { sessionId: optionalIdentifier(value.sessionId) }
+      : {}),
+    ...(metadata && Object.keys(metadata).length > 0 ? { metadata } : {}),
+  }
+}
+
+interface MappedRowArgs<T extends { id: string }> {
+  row: T
+  table: { get(id: string): Promise<T | undefined>; put(row: T): Promise<unknown> }
+  kind: string
+  idPrefix: string
+  opts: ImportOptions
+  summary: ImportSummary
+}
+
+async function applyMappedRow<T extends { id: string }>(
+  args: MappedRowArgs<T>
+): Promise<string | undefined> {
+  const { row, table, kind, idPrefix, opts, summary } = args
+  const existing = await table.get(row.id)
+  if (!existing) {
+    await table.put(row)
+    incrementCounter(summary.added, kind)
+    return row.id
+  }
+  if (opts.mergeStrategy === "skip") {
+    incrementCounter(summary.skipped, kind)
+    return undefined
+  }
+  if (opts.mergeStrategy === "overwrite") {
+    await table.put(row)
+    incrementCounter(summary.overwritten, kind)
+    return row.id
+  }
+  const id = newId(idPrefix)
+  await table.put({ ...row, id })
+  incrementCounter(summary.added, kind)
+  return id
 }
 
 function incrementCounter(target: Record<string, number>, key: string): void {

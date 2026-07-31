@@ -14,7 +14,7 @@ Object.assign(navigator, {
 })
 
 // Mock local-providers config
-jest.mock("@/lib/ai/providers/local-providers", () => ({
+jest.mock("@cognia/provider-core/providers/local-providers", () => ({
   LOCAL_PROVIDER_CONFIGS: {
     ollama: {
       id: "ollama",
@@ -47,13 +47,20 @@ jest.mock("@/lib/ai/providers/local-providers", () => ({
 const mockGetStatus = jest.fn()
 const mockCreateLocalProviderService = jest.fn()
 
-jest.mock("@/lib/ai/providers/local-provider-service", () => ({
+jest.mock("@cognia/provider-core/providers/local-provider-service", () => ({
   getInstallInstructions: jest.fn((providerId: string) => ({
     title: `Install ${providerId === "ollama" ? "Ollama" : "LM Studio"}`,
     steps: ["Download the installer", "Run the installer", "Start the application"],
     downloadUrl:
       providerId === "ollama" ? "https://ollama.ai/download" : "https://lmstudio.ai/download",
     docsUrl: providerId === "ollama" ? "https://ollama.ai/docs" : "https://lmstudio.ai/docs",
+    // Ollama is CLI-driven; LM Studio is a GUI app with no shell commands.
+    serveCommand: providerId === "ollama" ? "ollama serve" : undefined,
+    modelPullCommand: providerId === "ollama" ? "ollama pull llama3.2" : undefined,
+    modelsUrl:
+      providerId === "ollama"
+        ? "https://ollama.ai/library"
+        : "https://huggingface.co/models?library=gguf",
   })),
   createLocalProviderService: () => mockCreateLocalProviderService(),
 }))
@@ -450,6 +457,19 @@ describe("LocalProviderSetupWizard", () => {
 
       const downloadLink = screen.getByRole("link", { name: /Download LM Studio/i })
       expect(downloadLink).toHaveAttribute("href", "https://lmstudio.ai/download")
+    })
+
+    it("hides the shell start command for GUI providers like LM Studio", async () => {
+      render(<LocalProviderSetupWizard providerId="lmstudio" />)
+
+      // Advance to the Install step.
+      fireEvent.click(screen.getByText(/next/i))
+      await waitFor(() => {
+        expect(screen.getByText("Installation Steps")).toBeInTheDocument()
+      })
+
+      // A GUI app has no serve command, so no command box is rendered.
+      expect(screen.queryByText("ollama serve")).not.toBeInTheDocument()
     })
   })
 

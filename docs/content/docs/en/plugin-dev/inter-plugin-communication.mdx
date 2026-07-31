@@ -1,0 +1,108 @@
+---
+title: Inter-Plugin Communication
+description: How plugins talk to each other and to the host — the permission-gated ctx.ipc RPC/messaging surface, the ctx.events global bus, per-method arg schemas, service discovery, and the circuit-breaker safety net.
+---
+
+# Inter-Plugin Communication
+
+Two plugin-facing surfaces live on `ctx.events`:
+
+- **`ctx.events.ipc`** — directed messaging + RPC between named plugins
+  (request/response, circuit-broken, permission-gated).
+- **`ctx.events.bus`** — the global pub/sub event bus (namespaced events,
+  wildcard / regex subscriptions, replay). Read-only side is ungated.
+
+Both are backed by host singletons; the framework cleans up a plugin's
+subscriptions and exposed methods automatically when it is disabled,
+suspended, or unloaded — you never leak listeners across a toggle.
+
+## Permissions
+
+Outbound IPC is permission-gated. Declare what you need in `plugin.json`:
+
+```jsonc
+{
+  "permissions": [
+    "ipc:call", // send / broadcast / call another plugin
+    "ipc:expose", // publish RPC methods other plugins can invoke
+  ],
+}
+```
+
+Receiving (`ctx.events.ipc.on`), service discovery
+(`getExposedMethods` / `describeExposedMethods`), and the entire event bus
+(`ctx.events.bus.*`) are **not** gated — only the outbound IPC verbs are.
+
+> Without `ipc:call` / `ipc:expose` in the manifest, the matching calls reject
+> with a clear "requires the … permission" error.
+
+## Exposing RPC methods
+
+A bare function works, but prefer a descriptor with an **argument schema** so
+callers get fast, typed failures instead of a crashed handler:
+
+```ts
+ctx.events.ipc.expose({
+  // bare handler — no validation
+  ping: () => "pong",
+
+  // descriptor — validated + discoverable
+  add: {
+    handler: (a, b) => (a as number) + (b as number),
+    description: "Add two numbers",
+    schema: {
+      args: [{ type: "number" }, { type: "number" }],
+    },
+  },
+})
+```
+
+Schema `type` is one of `string | number | boolean | object | array | unknown`.
+Mark trailing arguments `{ optional: true }` to allow omission. Argument
+validation runs **before** the breaker and the remote handler, so a bad call
+never opens the endpoint's breaker.
+
+## Calling another plugin
+
+```ts
+const sum = await ctx.events.ipc.call<number>("other-plugin", "add", [2, 3], {
+  timeoutMs: 5000, // optional; defaults to 30s, pass 0 to disable
+  signal: abortController.signal, // optional cancellation
+})
+```
+
+Each `(targetPlugin, method)` pair has its own **circuit breaker** (30s window,
+opens at 50% failure over ≥5 events, 30s cooldown). An open breaker rejects
+synchronously with `CircuitOpenError`. Aborts reject with `AbortError` and do
+**not** charge the breaker.
+
+## Service discovery
+
+```ts
+// names only
+ctx.events.ipc.getExposedMethods("other-plugin") // → ["ping", "add"]
+
+// names + descriptions + arg schemas (no handlers leaked)
+ctx.events.ipc.describeExposedMethods("other-plugin")
+// → [{ name: "add", description: "Add two numbers", schema: { args: [...] } }]
+```
+
+## Broadcast + the event bus
+
+```ts
+// fire-and-forget to all subscribers on a channel
+ctx.events.ipc.broadcast("cache:invalidated", { key: "users" })
+
+// global pub/sub — wildcard + regex subscriptions supported
+const off = ctx.events.bus.on("system:plugin:enabled", (event) => {
+  console.log(event.source.id, "was enabled")
+})
+// off() to unsubscribe; the host also drops it on disable
+```
+
+## Observability
+
+The **Settings → Observability → Diagnostics → System** tab includes a
+**Plugin messaging** card showing exposed methods, active channels,
+subscription counts, and any degraded (open / half-open) breakers — use it to
+debug plugin↔plugin wiring at runtime.

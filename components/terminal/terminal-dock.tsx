@@ -24,13 +24,30 @@
 import { useCallback, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { XIcon } from "lucide-react"
+import { Columns2Icon, EraserIcon, Maximize2Icon, Minimize2Icon, XIcon } from "lucide-react"
+import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { findProfile, profileToSpawnFields, type TerminalProfile } from "@/lib/terminal/profiles"
 import { resolveDefaultShell } from "@/lib/terminal/shell-detect"
 import { selectTerminalTransport } from "@/lib/terminal/pick-transport"
-import { killFromDock, restartFromDock, spawnFromDock } from "@/lib/terminal/spawn-orchestrator"
+import {
+  detachFromDock,
+  killFromDock,
+  restartFromDock,
+  spawnFromDock,
+} from "@/lib/terminal/spawn-orchestrator"
+import { getLiveSession } from "@/lib/terminal/session-registry"
 import { useChatStore } from "@/stores/chat/chat-store"
 import { useProjectStore } from "@/stores/project/project-store"
 import { useSettingsStore } from "@/stores/settings"
@@ -39,12 +56,15 @@ import { useTerminalStore, type TerminalSessionRow } from "@/stores/terminal/ter
 import { FileViewerDialog } from "./file-viewer-dialog"
 import { TerminalEmptyState } from "./terminal-empty-state"
 import { TerminalHistoryPanel } from "./terminal-history-panel"
+import { TerminalHostStateBanner } from "./terminal-host-state-banner"
 import { type TerminalInstanceHandle } from "./terminal-instance"
 import { TerminalPaneGroup } from "./terminal-pane-group"
 import { TerminalSearchOverlay } from "./terminal-search-overlay"
 import { TerminalShellPicker } from "./terminal-shell-picker"
 import { TerminalTabContextMenu } from "./terminal-tab-context-menu"
 import { TerminalTabStrip } from "./terminal-tab-strip"
+import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
+import { messagePermalinkQuery } from "@/lib/chat/message-permalink"
 
 export function TerminalDock() {
   const t = useTranslations("terminal.dock")
@@ -59,6 +79,8 @@ export function TerminalDock() {
   const addPaneToGroup = useTerminalStore((s) => s.addPaneToGroup)
 
   const setPanelHeight = useTerminalStore((s) => s.setPanelHeight)
+  const maximized = useTerminalStore((s) => s.maximized)
+  const toggleMaximized = useTerminalStore((s) => s.toggleMaximized)
 
   const activeProjectId = useProjectStore((s) => s.activeProjectId)
   const project = useProjectStore((s) =>
@@ -70,6 +92,16 @@ export function TerminalDock() {
   )
   const settingsForceUtf8 = useSettingsStore(
     (s) => (s.settings?.terminal as { forceUtf8?: boolean } | undefined)?.forceUtf8 ?? true
+  )
+  // ADR-0028 Phase 3 (P4.1) — opt-in sandboxed terminal. Off by default.
+  const settingsSandboxed = useSettingsStore(
+    (s) => (s.settings?.terminal as { sandboxed?: boolean } | undefined)?.sandboxed ?? false
+  )
+  // Confirm before killing a tab that's still running a command. On by default
+  // (VS Code parity) — guards against an accidental × losing an in-flight run.
+  const confirmOnClose = useSettingsStore(
+    (s) =>
+      (s.settings?.terminal as { confirmOnClose?: boolean } | undefined)?.confirmOnClose ?? true
   )
   const settingsProfiles = useSettingsStore(
     (s) => (s.settings?.terminal as { profiles?: TerminalProfile[] } | undefined)?.profiles
@@ -106,6 +138,25 @@ export function TerminalDock() {
   )
   const [searchOpen, setSearchOpen] = useState(false)
   const [renameTarget, setRenameTarget] = useState<string | null>(null)
+  // Anchor id of the tab awaiting close confirmation (running-command guard).
+  const [closeConfirmTarget, setCloseConfirmTarget] = useState<string | null>(null)
+
+  // Spawn + surface failures. Without this, an `error`/`denied` outcome was
+  // dropped silently — the user clicked "+ New" and nothing happened, no
+  // toast. Now every spawn path reports why it failed (incl. the spawn
+  // timeout that guards against a wedged backend).
+  const spawnWithFeedback = useCallback(
+    async (input: Parameters<typeof spawnFromDock>[0]) => {
+      const outcome = await spawnFromDock(input)
+      if (outcome.kind === "error") {
+        toast.error(t("spawnError", { message: outcome.message }))
+      } else if (outcome.kind === "denied") {
+        toast.error(t("spawnDenied"))
+      }
+      return outcome
+    },
+    [t]
+  )
 
   const handleNewWithShell = useCallback(
     async (shellOverride?: string) => {
@@ -120,7 +171,7 @@ export function TerminalDock() {
             })
       const cwd = project?.terminalConfig?.cwd?.trim() || project?.rootDir?.trim() || undefined
       const env = project?.terminalConfig?.env
-      await spawnFromDock({
+      await spawnWithFeedback({
         req: {
           shell,
           rows: 24,
@@ -130,11 +181,19 @@ export function TerminalDock() {
           projectId: activeProjectId ?? undefined,
           enableShellIntegration: true,
           forceUtf8: settingsForceUtf8,
+          sandboxed: settingsSandboxed,
         },
         store: useTerminalStore.getState(),
       })
     },
-    [project, activeProjectId, settingsTerminalShell, settingsForceUtf8]
+    [
+      project,
+      activeProjectId,
+      settingsTerminalShell,
+      settingsForceUtf8,
+      settingsSandboxed,
+      spawnWithFeedback,
+    ]
   )
 
   const handleNewFromProfile = useCallback(
@@ -146,19 +205,28 @@ export function TerminalDock() {
         await handleNewWithShell()
         return
       }
-      await spawnFromDock({
+      await spawnWithFeedback({
         req: {
           ...fields,
+          profileId,
           rows: 24,
           cols: 80,
           projectId: activeProjectId ?? undefined,
           enableShellIntegration: true,
           forceUtf8: settingsForceUtf8,
+          sandboxed: settingsSandboxed,
         },
         store: useTerminalStore.getState(),
       })
     },
-    [settingsProfiles, activeProjectId, settingsForceUtf8, handleNewWithShell]
+    [
+      settingsProfiles,
+      activeProjectId,
+      settingsForceUtf8,
+      settingsSandboxed,
+      handleNewWithShell,
+      spawnWithFeedback,
+    ]
   )
 
   // Plain "+ New": launch the default profile when one is set, else resolve
@@ -171,19 +239,65 @@ export function TerminalDock() {
     }
   }, [settingsDefaultProfileId, settingsProfiles, handleNewFromProfile, handleNewWithShell])
 
-  // Close a single split pane — kills just that session; the group's
-  // other panes (and the tab) survive via the store's anchor-promotion.
-  const handleClosePane = useCallback((id: string) => {
-    void killFromDock(id, useTerminalStore.getState())
-  }, [])
+  // Close a single split pane by detaching this renderer. The host-owned
+  // process remains available to other viewers and for later reattachment.
+  const handleClosePane = useCallback(
+    (id: string) => {
+      void detachFromDock(id, useTerminalStore.getState()).catch((error) => {
+        toast.error(
+          t("detachError", { message: error instanceof Error ? error.message : String(error) })
+        )
+      })
+    },
+    [t]
+  )
 
   // Close a whole tab — kills every pane in the group.
-  const handleCloseTab = useCallback((anchorId: string) => {
+  const doCloseTab = useCallback((anchorId: string) => {
     const state = useTerminalStore.getState()
     for (const paneId of state.panesForGroup(anchorId)) {
       void killFromDock(paneId, state)
     }
   }, [])
+
+  const doDetachTab = useCallback(
+    (anchorId: string) => {
+      const state = useTerminalStore.getState()
+      for (const paneId of state.panesForGroup(anchorId)) {
+        void detachFromDock(paneId, state).catch((error) => {
+          toast.error(
+            t("detachError", { message: error instanceof Error ? error.message : String(error) })
+          )
+        })
+      }
+    },
+    [t]
+  )
+
+  // A host-owned process is live even when its shell is currently idle. Closing
+  // its tab must detach by default instead of destroying it for every client.
+  const groupHasLiveProcess = useCallback((anchorId: string) => {
+    const state = useTerminalStore.getState()
+    return state
+      .panesForGroup(anchorId)
+      .some((id) => getLiveSession(id)?.info.alive !== false && !!getLiveSession(id))
+  }, [])
+
+  // Close entry point for the × button and the context menu. Routes through a
+  // choice dialog while the process is live. The primary action detaches this
+  // device; termination is an explicitly destructive secondary action.
+  const requestCloseTab = useCallback(
+    (anchorId: string) => {
+      if (confirmOnClose && groupHasLiveProcess(anchorId)) {
+        setCloseConfirmTarget(anchorId)
+      } else if (groupHasLiveProcess(anchorId)) {
+        doDetachTab(anchorId)
+      } else {
+        doCloseTab(anchorId)
+      }
+    },
+    [confirmOnClose, groupHasLiveProcess, doCloseTab, doDetachTab]
+  )
 
   const handleSelect = useCallback(
     (id: string) => {
@@ -227,7 +341,7 @@ export function TerminalDock() {
         settingShell: settingsTerminalShell,
       })
       const cwd = project?.terminalConfig?.cwd?.trim() || project?.rootDir?.trim() || undefined
-      const outcome = await spawnFromDock({
+      const outcome = await spawnWithFeedback({
         req: {
           shell,
           rows: 24,
@@ -237,6 +351,7 @@ export function TerminalDock() {
           projectId: activeProjectId ?? undefined,
           enableShellIntegration: true,
           forceUtf8: settingsForceUtf8,
+          sandboxed: settingsSandboxed,
         },
         store: useTerminalStore.getState(),
       })
@@ -244,7 +359,16 @@ export function TerminalDock() {
         addPaneToGroup(anchor, outcome.sessionId, direction)
       }
     },
-    [project, activeProjectId, settingsTerminalShell, settingsForceUtf8, projectKey, addPaneToGroup]
+    [
+      project,
+      activeProjectId,
+      settingsTerminalShell,
+      settingsForceUtf8,
+      settingsSandboxed,
+      projectKey,
+      addPaneToGroup,
+      spawnWithFeedback,
+    ]
   )
 
   // Alt+Arrow cycles focus through the panes of the active group.
@@ -273,11 +397,18 @@ export function TerminalDock() {
   // Locate the chat session that spawned an agent-driven terminal tab.
   // The dock is global across routes, so switch the active chat session
   // AND navigate to the chat view (root route).
+  //
+  // With a spawning message recorded, route through the message permalink
+  // instead: the chat page consumes it and scrolls to that turn. ADR-0033
+  // deferred exactly this for want of a scroll-to-message seam. Falling back to
+  // the plain route keeps tabs spawned before the field existed working.
   const router = useRouter()
   const handleLocateInChat = useCallback(
-    (chatSessionId: string) => {
+    (chatSessionId: string, messageId?: string | null) => {
       useChatStore.getState().setActiveSession(chatSessionId)
-      router.push("/")
+      router.push(
+        messageId ? `/${messagePermalinkQuery({ sessionId: chatSessionId, messageId })}` : "/"
+      )
     },
     [router]
   )
@@ -300,15 +431,6 @@ export function TerminalDock() {
   const emptyVariant: "desktop" | "mobile" | "unsupported" =
     transport === "tauri-channel" ? "desktop" : transport === "ws" ? "mobile" : "unsupported"
 
-  // Wrap each rendered tab in its own context-menu trigger by hooking the
-  // strip's onContextMenu — but the menu needs to render *inline* per tab
-  // so Radix's portal anchors correctly. We re-render the strip with the
-  // contextual menu wrapper applied to each TerminalTab.
-  // (TerminalTabStrip already iterates and renders TerminalTab; we use the
-  // onContextMenu callback to position the menu via DOM.)
-  // For simplicity v1 wires the menu as a per-tab wrapper via the strip's
-  // built-in onContextMenu prop AND a separate render layer.
-
   return (
     <div
       className="relative flex h-full w-full flex-col border-t bg-background"
@@ -325,7 +447,9 @@ export function TerminalDock() {
         tabIndex={0}
         aria-label={t("resize")}
         data-testid="terminal-dock-resize-handle"
-        className="absolute -top-0.5 left-0 right-0 z-10 h-1 cursor-row-resize bg-transparent hover:bg-primary/50 focus-visible:bg-primary focus-visible:outline-none"
+        // 10px transparent hit zone (was a 4px sliver — too small to grab,
+        // especially by touch) with a 2px visible line centred on the border.
+        className="group absolute -top-1 left-0 right-0 z-10 flex h-2.5 cursor-row-resize items-center focus-visible:outline-none"
         onPointerDown={(e) => beginResize(e, setPanelHeight)}
         onKeyDown={(e) => {
           if (e.key === "ArrowUp") {
@@ -336,15 +460,25 @@ export function TerminalDock() {
             adjustPanelHeight(useTerminalStore.getState().panelHeightPct, 2, setPanelHeight)
           }
         }}
-      />
+      >
+        <span
+          aria-hidden
+          className="h-0.5 w-full bg-transparent transition-colors group-hover:bg-primary/50 group-focus-visible:bg-primary"
+        />
+      </div>
       <TerminalTabStrip
         tabs={tabs}
         activeId={activeId}
         onSelect={handleSelect}
-        onClose={handleCloseTab}
+        onClose={requestCloseTab}
         testId="terminal-dock-tabs"
         trailing={
           <>
+            <PluginExtensionSlot
+              point="terminal.toolbar"
+              className="flex items-center gap-1"
+              context={{ sessionId: activeId, transport }}
+            />
             {transport === "tauri-channel" ? (
               <TerminalShellPicker
                 onNew={handleNewWithShell}
@@ -352,6 +486,35 @@ export function TerminalDock() {
                 onNewProfile={handleNewFromProfile}
               />
             ) : null}
+            {transport === "tauri-channel" && activeRow ? (
+              <>
+                <DockToolbarButton
+                  label={t("splitRight")}
+                  testId="terminal-dock-split"
+                  onClick={() => void handleSplit("row")}
+                >
+                  <Columns2Icon className="h-3 w-3" />
+                </DockToolbarButton>
+                <DockToolbarButton
+                  label={t("clear")}
+                  testId="terminal-dock-clear"
+                  onClick={() => focusedHandleRef.current?.clearScreen()}
+                >
+                  <EraserIcon className="h-3 w-3" />
+                </DockToolbarButton>
+              </>
+            ) : null}
+            <DockToolbarButton
+              label={maximized ? t("restore") : t("maximize")}
+              testId="terminal-dock-maximize"
+              onClick={toggleMaximized}
+            >
+              {maximized ? (
+                <Minimize2Icon className="h-3 w-3" />
+              ) : (
+                <Maximize2Icon className="h-3 w-3" />
+              )}
+            </DockToolbarButton>
             <Button
               size="sm"
               variant="ghost"
@@ -365,6 +528,15 @@ export function TerminalDock() {
           </>
         }
       />
+      <TerminalHostStateBanner
+        onRetry={() => {
+          useTerminalStore.getState().setHostState("reconnecting")
+          void import("@/lib/terminal/rehydrate").then(({ rehydrateTerminals }) =>
+            rehydrateTerminals()
+          )
+        }}
+        onOpenSettings={() => router.push("/settings?section=terminal")}
+      />
       <div className="relative flex-1 overflow-hidden">
         {activeRow ? (
           <>
@@ -375,7 +547,7 @@ export function TerminalDock() {
               row={activeRow}
               onRename={handleRename}
               onRestart={handleRestart}
-              onClose={handleCloseTab}
+              onClose={requestCloseTab}
               onCloseOthers={handleCloseOthers}
               onToggleAgentTrust={handleToggleTrust}
               onLocateInChat={handleLocateInChat}
@@ -442,7 +614,77 @@ export function TerminalDock() {
       </div>
       {/* Read-only viewer for clicked terminal file links (1D). */}
       <FileViewerDialog />
+      {/* Live sessions default to detach; termination is always explicit. */}
+      <AlertDialog
+        open={closeConfirmTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setCloseConfirmTarget(null)
+        }}
+      >
+        <AlertDialogContent data-testid="terminal-dock-close-confirm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("closeConfirm.title")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("closeConfirm.body")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="terminal-dock-close-confirm-cancel">
+              {t("closeConfirm.cancel")}
+            </AlertDialogCancel>
+            <Button
+              variant="destructive"
+              data-testid="terminal-dock-close-terminate"
+              onClick={() => {
+                if (closeConfirmTarget) doCloseTab(closeConfirmTarget)
+                setCloseConfirmTarget(null)
+              }}
+            >
+              {t("closeConfirm.terminate")}
+            </Button>
+            <AlertDialogAction
+              data-testid="terminal-dock-close-confirm-accept"
+              onClick={() => {
+                if (closeConfirmTarget) doDetachTab(closeConfirmTarget)
+                setCloseConfirmTarget(null)
+              }}
+            >
+              {t("closeConfirm.detach")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
+  )
+}
+
+/**
+ * Ghost icon button for the dock's trailing toolbar. The label doubles as the
+ * accessible name and the native hover tooltip (which carries the keyboard
+ * shortcut) — no Radix TooltipProvider dependency, so it works everywhere the
+ * dock mounts.
+ */
+function DockToolbarButton({
+  label,
+  testId,
+  onClick,
+  children,
+}: {
+  label: string
+  testId: string
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <Button
+      size="sm"
+      variant="ghost"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      data-testid={testId}
+      className="h-7 w-7 p-0"
+    >
+      {children}
+    </Button>
   )
 }
 

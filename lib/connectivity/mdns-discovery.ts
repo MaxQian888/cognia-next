@@ -13,7 +13,8 @@
  *     start/stop the broadcaster has one place to import.
  */
 
-import { isCapacitor, isTauri } from "@/lib/platform/detect"
+import { makeDefaultLoader } from "@/lib/capacitor/_shared"
+import { isTauri } from "@/lib/platform/detect"
 
 export interface DiscoveredService {
   /** Display name pulled from the service instance, e.g. `cognia-AB12CD`. */
@@ -46,43 +47,48 @@ const SERVICE_TYPE = "_cognia._tcp"
  * minimal so the dynamic-import never pulls in extra surface, and so this
  * module remains testable without the native side present.
  */
+export interface ZeroconfWatchResult {
+  /** `added` = seen but unresolved; `resolved` = addresses available. */
+  action: "added" | "removed" | "resolved"
+  service: {
+    name?: string
+    hostname?: string
+    ipv4Addresses?: string[]
+    ipv6Addresses?: string[]
+    port?: number
+    txtRecord?: Record<string, string>
+  }
+}
+
 interface ZeroconfPluginShape {
   watch(opts: { type: string; domain: string }): Promise<void>
   unwatch(opts?: { type: string; domain: string }): Promise<void>
   addListener(
-    event: "discovered",
-    handler: (svc: {
-      name?: string
-      hostname?: string
-      ipv4Addresses?: string[]
-      ipv6Addresses?: string[]
-      port?: number
-      txtRecord?: Record<string, string>
-    }) => void
+    event: "discover",
+    handler: (result: ZeroconfWatchResult) => void
   ): Promise<{ remove(): Promise<void> | void }>
-  requestPermissions?(): Promise<{ localNetwork: "granted" | "denied" | "prompt" }>
 }
 
+// Resolve through the shared loader: window.Capacitor.Plugins.ZeroConf first
+// (registered at mobile boot from PluginHeaders), then the dynamic import.
+// NOTE the casing — the package exports and registers as "ZeroConf".
+const loadZeroconf = makeDefaultLoader<ZeroconfPluginShape>("capacitor-zeroconf", "ZeroConf")
+
 /**
- * Default mobile loader — dynamic-imports `capacitor-zeroconf` and adapts
- * its `watch`/`addListener("discovered")` surface to our internal
- * `MdnsScannerShape`. Falls back to a throw on web / Tauri so `subscribe()`
- * returns a no-op for those platforms.
+ * Default mobile loader — adapts `capacitor-zeroconf`'s
+ * `watch`/`addListener("discover")` surface to our internal
+ * `MdnsScannerShape`. The shared loader throws on web / Tauri so
+ * `subscribe()` returns a no-op for those platforms.
+ *
+ * The plugin fires `discover` with `{ action, service }`; only `resolved`
+ * events carry addresses, so `added`/`removed` are dropped here — callers
+ * want connectable endpoints, not liveness churn.
  *
  * The plugin's `txtRecord.fp` carries the desktop's SHA-256 SPKI fingerprint
  * we use for TLS pinning before the first request.
  */
 const defaultMobileLoader: MdnsLoader = async () => {
-  if (typeof window === "undefined") throw new Error("mDNS not available on server")
-  if (!isCapacitor()) {
-    throw new Error("mDNS only available on Capacitor mobile")
-  }
-  const moduleId = "capacitor-zeroconf"
-  const mod = (await import(/* webpackIgnore: true */ moduleId)) as {
-    Zeroconf?: ZeroconfPluginShape
-  }
-  const plugin = mod.Zeroconf
-  if (!plugin) throw new Error("capacitor-zeroconf did not export Zeroconf")
+  const plugin = await loadZeroconf()
 
   // Split `_cognia._tcp` into `type` + assume `.local.` domain so the
   // plugin's IDL matches.
@@ -94,7 +100,9 @@ const defaultMobileLoader: MdnsLoader = async () => {
       await plugin.unwatch({ type: SERVICE_TYPE, domain: "local." })
     },
     async addListener(_event, handler) {
-      const sub = await plugin.addListener("discovered", (svc) => {
+      const sub = await plugin.addListener("discover", (result) => {
+        if (result.action !== "resolved") return
+        const svc = result.service
         const ip = svc.ipv4Addresses?.[0] ?? svc.ipv6Addresses?.[0] ?? ""
         handler({
           name: svc.name ?? "cognia",

@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for the TTS keyring frontend wrapper. Drives both code paths:
  *   - Tauri (mocks `@tauri-apps/api/core` and `lib/tauri.isTauri`)
@@ -45,6 +46,7 @@ describe("keyringProviderFor", () => {
     expect(keyringProviderFor("hume")).toBe("hume")
     expect(keyringProviderFor("cartesia")).toBe("cartesia")
     expect(keyringProviderFor("deepgram")).toBe("deepgram")
+    expect(keyringProviderFor("mistral")).toBe("mistral")
   })
 
   it("returns null for free providers", () => {
@@ -54,9 +56,9 @@ describe("keyringProviderFor", () => {
 })
 
 describe("KEYRING_PROVIDER_IDS", () => {
-  it("matches the eight non-system, non-edge providers", () => {
-    expect(KEYRING_PROVIDER_IDS).toHaveLength(8)
-    expect(new Set(KEYRING_PROVIDER_IDS).size).toBe(8)
+  it("matches the nine keyed provider accounts", () => {
+    expect(KEYRING_PROVIDER_IDS).toHaveLength(9)
+    expect(new Set(KEYRING_PROVIDER_IDS).size).toBe(9)
   })
 })
 

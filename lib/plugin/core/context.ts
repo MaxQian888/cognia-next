@@ -3,11 +3,20 @@
  */
 
 import { invoke } from "@tauri-apps/api/core"
+import { toast } from "sonner"
 import { createPluginSystemLogger, loggers } from "./logger"
+import { usePluginModalStore } from "@/stores/plugin-runtime/plugin-modal-store"
+import { PluginDataDialog } from "@/components/plugins/dialogs/plugin-data-dialog"
 import { getPluginRateLimiter } from "@/lib/plugin/security/rate-limiter"
+import { assertEgressAllowed } from "@/lib/plugin/security/network-allowlist"
+import { getPluginSecurityPosture } from "@/lib/plugin/security/security-posture"
 import type {
   Plugin,
+  PluginManifest,
+  PluginBaseContext,
   PluginContext,
+  PluginPermission,
+  PluginCapability,
   PluginLogger,
   PluginStorage,
   PluginEventEmitter,
@@ -29,8 +38,6 @@ import type {
   PluginDialog,
   PluginInputDialog,
   PluginConfirmDialog,
-  PluginStatusBarItem,
-  PluginSidebarPanel,
   PluginTool,
   PluginA2UIComponent,
   A2UITemplateDef,
@@ -60,13 +67,31 @@ import type {
   PluginNativeAnthropicToolDef,
   PluginSkillDef,
   PluginExternalAgentPresetDef,
+  PluginGuardrail,
+  PluginSubagentDef,
+  PluginDispatchSubagentOptions,
+  PluginRunTeamOptions,
+  PluginCreateSessionOptions,
+  PluginContextProvider,
+  PluginSharedMemoryReadOptions,
+  PluginTwinMemoryQueryOptions,
 } from "@/types/plugin"
+import type { AgentTeamConfig } from "@/lib/ai/agent/agent-team"
 import type { PluginNodeDef, PluginTriggerDef } from "@/types/plugin/plugin-workflow"
 import { registerNodeExecutor, unregisterNodeExecutor } from "@/lib/workflow/nodes/registry"
 import { registerMcpServerPreset } from "@/lib/plugin/registries/mcp-server-preset-registry"
 import { registerNativeAnthropicTool } from "@/lib/plugin/registries/native-anthropic-tool-registry"
 import { registerSkill } from "@/lib/plugin/registries/skill-registry"
+import {
+  registerGuardrail,
+  unregisterGuardrailById,
+  listGuardrailIds,
+} from "@/lib/plugin/registries/guardrail-registry"
 import { registerPreset as registerExternalAgentPresetOverlay } from "@/lib/ai/agent/external/presets"
+import {
+  registerPluginProtocolAdapter,
+  type ProtocolAdapterFactory,
+} from "@/lib/ai/agent/external/protocol-adapter"
 import {
   addPluginCatalogEntry,
   removePluginCatalogEntry,
@@ -81,15 +106,17 @@ import type { A2UIComponent, A2UISurfaceType } from "@/types/artifact/a2ui"
 import type { AgentModeConfig } from "@/types/agent/agent-mode"
 import { usePluginStore } from "@/stores/plugin-runtime"
 import { useA2UIStore } from "@/stores/a2ui"
-import { useSettingsStore } from "@/stores/settings"
 import type { PluginManager } from "./manager"
-import type { PluginContextAPI } from "@/types/plugin/plugin-extended"
+import type { IntrospectablePluginPermission, PluginContextAPI } from "@/types/plugin/plugin"
 import {
   createSessionAPI,
   createProjectAPI,
   createVectorAPI,
   createThemeAPI,
   createExportAPI,
+  createImportAPI,
+  createConfigAPI,
+  createSecretsAPI,
   createI18nAPI,
   createCanvasAPI,
   createArtifactAPI,
@@ -99,80 +126,80 @@ import {
   createPermissionAPI,
   createMediaAPI,
   createStorageAPI,
+  createContextPanelAPI,
+  createTemplatesAPI,
 } from "../api"
+import { createEditorAPI } from "../api/editor-api"
 import { createMessagePartAPI } from "../api/message-part-api"
+import { createToolResultAPI } from "../api/tool-result-api"
 import { createDexieAPI } from "../api/dexie-api"
-import { createOcrAPI, type PluginOcrAPI } from "../api/ocr-api"
-import { createWorkspaceAPI, type PluginWorkspaceAPI } from "../api/workspace-api"
-import { createModalAPI, type PluginModalAPI } from "../api/modal-api"
-import { createChatAPI, type PluginChatAPI } from "../api/chat-api"
-import { createCapabilitiesAPI, type PluginCapabilitiesAPI } from "../api/capabilities-api"
-import { createGitAPI, type PluginGitAPI } from "../api/git-api"
-import { createGoalAPI, type PluginGoalAPI } from "../api/goal-api"
-import { createSubscriptionAPI, type PluginSubscriptionAPI } from "../api/subscription-api"
-import { createTerminalAPI, type PluginTerminalAPI } from "../api/terminal-api"
-import { createPerfAPI, type PluginPerfAPI } from "../api/perf-api"
-import { createConnectorsAPI, type PluginConnectorsAPI } from "../api/connectors-api"
-import { createShareAPI, type PluginShareAPI } from "../api/share-api"
-import { createBackupAPI, type PluginBackupAPI } from "../api/backup-api"
-import { createAutomationAPI, type PluginAutomationAPI } from "../api/automation-api"
-import { createCompanionAPI, type PluginCompanionAPI } from "../api/companion-api"
+import { createOcrAPI } from "../api/ocr-api"
+import { createWorkspaceAPI } from "../api/workspace-api"
+import { createModalAPI } from "../api/modal-api"
+import { createWebviewAPI } from "../api/webview-api"
+import { createAuthAPI } from "../api/auth-api"
+import { createUriAPI } from "../api/uri-api"
+import { createChatAPI } from "../api/chat-api"
+import { createCapabilitiesAPI } from "../api/capabilities-api"
+import { createGitAPI } from "../api/git-api"
+import { createGoalAPI } from "../api/goal-api"
+import { createMemoryAPI } from "../api/memory-api"
+import { createTeamAPI } from "../api/team-api"
+import { createSubscriptionAPI } from "../api/subscription-api"
+import { createTerminalAPI } from "../api/terminal-api"
+import { createPerfAPI } from "../api/perf-api"
+import { createConnectorsAPI } from "../api/connectors-api"
+import { createIntegrationsAPI } from "../api/integrations-api"
+import { createShareAPI } from "../api/share-api"
+import { createBackupAPI } from "../api/backup-api"
+import { createAutomationAPI } from "../api/automation-api"
+import { createCompanionAPI } from "../api/companion-api"
+import { createPetAPI } from "../api/pet-api"
+import { getPluginConsentBroker } from "@/lib/plugin/security/consent-broker"
+import { getTemplateRuntime } from "@/lib/templates/runtime"
 import { getDb } from "@/lib/db/schema"
 import { createIPCAPI } from "../messaging/ipc"
 import { createEventAPI } from "../messaging/message-bus"
-import { getPluginI18nLoader } from "../utils/i18n-loader"
 import { getPluginDebugger } from "../devtools/debugger"
-import { invokePluginApi, PluginGatewayError } from "./transport"
+import {
+  invokePluginApi,
+  PluginGatewayError,
+  grantPluginPermission,
+  isPluginGatewayAvailable,
+} from "./transport"
+import { createGuardedAPI } from "@/lib/plugin/security/permission-guard"
 import { isTauri } from "@/lib/native/utils"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
 import { createTrayAPI } from "@/lib/plugin/api/tray-api"
+import { createQuickActionsAPI } from "@/lib/plugin/api/quick-actions-api"
 import { prefixPluginKind } from "../bridge/kind-prefix"
-import { dispatchPluginTrigger } from "../bridge/trigger-bridge"
+import { dispatchPluginTrigger } from "../bridge/plugin-trigger-dispatch"
+import { pluginHasApiPermission } from "@/lib/plugin/api/permission-api"
+import {
+  runPluginAgent,
+  runPluginAgentStreamed,
+  dispatchSubagent,
+  runTeam,
+  createPluginAgentSession,
+  resumePluginAgentSession,
+  readSharedMemory,
+  queryTwinMemory,
+} from "@/lib/plugin/agent-sdk"
+import {
+  registerContextProvider,
+  unregisterContextProviderById,
+  listContextProviderIds,
+} from "@/lib/plugin/registries/context-provider-registry"
+import { invokePluginTool } from "@/lib/plugin/core/invoke-plugin-tool"
+import type {
+  PluginAgentRun,
+  PluginAgentRunOptions,
+  PluginAgentRunResult,
+} from "@/types/plugin/plugin-agent-sdk"
+import type { FullPluginContext as PublicFullPluginContext } from "@cognia/plugin-sdk/context"
 
-/**
- * Full plugin context combining base and extended APIs.
- * The extended storage API intentionally replaces the legacy async storage shape.
- *
- * ADR-0026 v2 namespaces (`ocr`, `workspace`) are intersected at the end so
- * the existing `PluginContextAPI` interface stays untouched — plugins gain
- * the new namespaces without breaking any structural-type consumers in the
- * SDK or sidecar that already type the existing keys.
- */
-export type FullPluginContext = Omit<PluginContext, "storage"> &
-  Omit<PluginContextAPI, "storage"> & {
-    storage: PluginContextAPI["storage"]
-  } & {
-    /** OCR provider registration (ADR-0026 §2 §A). */
-    ocr: PluginOcrAPI
-    /** Workspace backend registration (ADR-0026 §2 §D). */
-    workspace: PluginWorkspaceAPI
-    /** Modal stack push/close (ADR-0026 §3 §A). */
-    modal: PluginModalAPI
-    /** Chat-middleware registration (ADR-0026 §4 §A). */
-    chat: PluginChatAPI
-    /** Read-only platform-capability flags (ADR-0026 §5 §C). */
-    capabilities: PluginCapabilitiesAPI
-    /** Active source-control repository read/write (gated `git:read`/`git:write`). */
-    git: PluginGitAPI
-    /** Self-driving goal read/drive (gated `goal:read`/`goal:write`). */
-    goals: PluginGoalAPI
-    /** Read-only subscription plan + usage metrics (gated `subscription:read`). */
-    subscription: PluginSubscriptionAPI
-    /** Integrated-terminal dock spawn/write/kill (gated `terminal:*`, ownership-checked). */
-    terminal: PluginTerminalAPI
-    /** Read-only performance dashboard snapshots + live samples (gated `perf:read`). */
-    perf: PluginPerfAPI
-    /** Connector adapter list + outbound send (gated `connectors:read`/`connectors:send`). */
-    connectors: PluginConnectorsAPI
-    /** Public share-link create/revoke/inspect (gated `share:read`/`share:create`). */
-    share: PluginShareAPI
-    /** Encrypted backup build/restore/history (gated `backup:read`/`backup:write`; never the API key). */
-    backup: PluginBackupAPI
-    /** Desktop automation / Computer Use action surface (gated `automation:*`, all DANGEROUS). */
-    automation: PluginAutomationAPI
-    /** Paired-device + remote-control + host goal-loop steering (gated `companion:*`). */
-    companion: PluginCompanionAPI
-  }
+/** @deprecated `PluginContext` is now the complete activated context. */
+export type FullPluginContext = PluginContext
 
 // =============================================================================
 // Create Plugin Context
@@ -182,14 +209,18 @@ export function createPluginContext(
   plugin: Plugin,
   manager: PluginManager,
   options?: { enableDebug?: boolean }
-): PluginContext {
+): PluginBaseContext {
   const pluginId = plugin.manifest.id
 
-  const baseContext: PluginContext = {
+  const baseContext: PluginBaseContext = {
     pluginId,
     pluginPath: plugin.path,
     config: plugin.config,
     logger: createLogger(pluginId),
+    // The initial context uses the local storage implementation. Manager
+    // construction then supplies the public author-context storage API through
+    // the final object spread, so every activated plugin sees one `storage`
+    // field with the complete runtime contract.
     storage: createStorage(pluginId),
     events: createEventEmitter(pluginId),
     ui: createUIAPI(pluginId),
@@ -197,20 +228,34 @@ export function createPluginContext(
     agent: createAgentAPI(pluginId, manager),
     settings: createSettingsAPI(pluginId),
     python: plugin.manifest.type !== "frontend" ? createPythonAPI(pluginId, manager) : undefined,
-    network: createNetworkAPI(pluginId),
-    fs: createFileSystemAPI(pluginId),
-    clipboard: createClipboardAPI(pluginId),
+    network: guardNativeApi(
+      pluginId,
+      createNetworkAPI(pluginId, plugin.manifest.networkAccess),
+      NETWORK_GUARD_MAP
+    ),
+    fs: guardNativeApi(pluginId, createFileSystemAPI(pluginId), FS_GUARD_MAP, [
+      "getDataDir",
+      "getCacheDir",
+      "getTempDir",
+    ]),
+    clipboard: guardNativeApi(pluginId, createClipboardAPI(pluginId), CLIPBOARD_GUARD_MAP),
     shell: createShellAPI(pluginId),
-    db: createDatabaseAPI(pluginId),
+    db: guardNativeApi(pluginId, createDatabaseAPI(pluginId), DB_GUARD_MAP),
     shortcuts: createShortcutsAPI(pluginId),
     contextMenu: createContextMenuAPI(pluginId),
     tray: createTrayAPI({
       pluginId,
       capabilities: plugin.manifest.capabilities ?? [],
     }),
+    quickActions: createQuickActionsAPI({
+      pluginId,
+      capabilities: plugin.manifest.capabilities ?? [],
+    }),
     window: createWindowAPI(pluginId),
-    secrets: createSecretsAPI(pluginId),
-    scheduler: createSchedulerAPI(pluginId),
+    secrets: guardNativeApi(pluginId, createSecretsAPI(pluginId), SECRETS_GUARD_MAP, [
+      "onDidChange",
+    ]),
+    scheduler: createSchedulerAPI(pluginId, plugin.manifest.capabilities ?? []),
     workflow: createWorkflowAPI(pluginId),
     dexie: plugin.manifest.dexie
       ? createDexieAPI(getDb() as unknown as import("dexie").default, pluginId)
@@ -228,7 +273,7 @@ export function createPluginContext(
 }
 
 /**
- * Create a full plugin context with all APIs (base + extended)
+ * Create a full plugin context with every host-mounted API.
  */
 export function createFullPluginContext(
   plugin: Plugin,
@@ -241,6 +286,7 @@ export function createFullPluginContext(
   const baseContext = createPluginContext(plugin, manager, options)
 
   const permissionsAPI = createPermissionAPI(pluginId, plugin.manifest.permissions || [])
+  const templateRuntime = getTemplateRuntime()
 
   // Create feature APIs
   const contextAPI: PluginContextAPI = {
@@ -249,6 +295,8 @@ export function createFullPluginContext(
     vector: createVectorAPI(pluginId),
     theme: createThemeAPI(pluginId),
     export: createExportAPI(pluginId),
+    import: createImportAPI(pluginId),
+    configuration: createConfigAPI(pluginId, manager),
     i18n: createI18nAPI(pluginId),
     canvas: createCanvasAPI(pluginId),
     artifact: createArtifactAPI(pluginId),
@@ -260,16 +308,38 @@ export function createFullPluginContext(
       governanceMode: manager.getPluginPointGovernanceMode(),
       hasPermission: (permission) => permissionsAPI.hasPermission(permission as never),
     }),
+    contextPanels: createContextPanelAPI(pluginId, (permission) =>
+      permissionsAPI.hasPermission(permission as never)
+    ),
+    editor: createEditorAPI(pluginId, (permission) =>
+      permissionsAPI.hasPermission(permission as never)
+    ),
     permissions: permissionsAPI,
+    templates: createTemplatesAPI(pluginId, {
+      catalog: templateRuntime.catalog,
+      service: templateRuntime.service,
+      // The templates API resolves a definition's declared *capabilities* into
+      // permission ids, and an unrecognised capability falls through as its own
+      // raw string — so what arrives here is `string`, not a known permission.
+      // The cast is safe because `hasPermission` is a set-membership check:
+      // a string that is not a real permission is simply denied.
+      hasPermission: (permission) =>
+        permissionsAPI.hasPermission(permission as IntrospectablePluginPermission),
+      confirm: ({ action, definitionId }) =>
+        getPluginConsentBroker().request({
+          pluginId,
+          permission:
+            action === "instantiate" ? "templates:instantiate" : "templates:library:write",
+          reason: `${action}:${definitionId}`,
+        }),
+    }),
     messagePart: createMessagePartAPI(pluginId),
+    toolResult: createToolResultAPI(pluginId),
   }
 
   // Add new communication and utility APIs to base context
   const ipcAPI = createIPCAPI(pluginId)
   const eventAPI = createEventAPI(pluginId)
-  const i18nLoader = getPluginI18nLoader()
-  const pluginI18n = i18nLoader.createPluginAPI(pluginId)
-
   // Merge IPC and events into the base context events
   const enhancedEvents = {
     ...baseContext.events,
@@ -277,17 +347,13 @@ export function createFullPluginContext(
     bus: eventAPI,
   }
 
-  // Enhanced i18n combining base API with loader
+  // Keep the compatibility aliases on the same shared overlay-backed API.
+  // Using the legacy i18n loader for `t` here would hide manifest messages
+  // registered by PluginManager immediately before activate().
   const enhancedI18n = {
     ...contextAPI.i18n,
-    t: pluginI18n.t,
-    getLocale: pluginI18n.getLocale,
-    hasKey: pluginI18n.hasKey,
-    // Wrap onLocaleChange to match PluginI18nAPI signature (Locale instead of string)
-    onLocaleChange: (handler: (locale: import("@/types/plugin/plugin-extended").Locale) => void) =>
-      pluginI18n.onLocaleChange((locale: string) =>
-        handler(locale as import("@/types/plugin/plugin-extended").Locale)
-      ),
+    getLocale: contextAPI.i18n.getCurrentLocale,
+    hasKey: contextAPI.i18n.hasTranslation,
   }
 
   // Combine base and feature API contexts with enhanced APIs + ADR-0026
@@ -302,25 +368,38 @@ export function createFullPluginContext(
     ocr: createOcrAPI(pluginId),
     workspace: createWorkspaceAPI(pluginId),
     modal: createModalAPI(pluginId),
+    webview: createWebviewAPI(pluginId, plugin.manifest.networkAccess),
+    auth: createAuthAPI(pluginId, {
+      hasPermission: (p) => (plugin.manifest.permissions ?? []).includes(p as never),
+    }),
+    uri: createUriAPI(pluginId),
     chat: createChatAPI(pluginId),
     capabilities: createCapabilitiesAPI(),
     git: createGitAPI(pluginId),
     goals: createGoalAPI(pluginId),
+    memory: createMemoryAPI(pluginId),
+    team: createTeamAPI(pluginId),
     subscription: createSubscriptionAPI(pluginId),
     terminal: createTerminalAPI(pluginId),
     perf: createPerfAPI(pluginId),
     connectors: createConnectorsAPI(pluginId),
+    integrations: createIntegrationsAPI(pluginId, (permission) =>
+      permissionsAPI.hasPermission(permission as never)
+    ),
     share: createShareAPI(pluginId),
     backup: createBackupAPI(pluginId),
     automation: createAutomationAPI(pluginId),
     companion: createCompanionAPI(pluginId),
-  }
+    pet: createPetAPI({ pluginId, capabilities: plugin.manifest.capabilities ?? [] }),
+  } satisfies PublicFullPluginContext
 }
 
 /**
  * Check if a context is a full plugin context
  */
-export function isFullPluginContext(context: PluginContext): context is FullPluginContext {
+export function isFullPluginContext(
+  context: PluginBaseContext | PluginContext
+): context is FullPluginContext {
   return "session" in context && "project" in context && "vector" in context
 }
 
@@ -454,10 +533,40 @@ function createEventEmitter(pluginId: string): PluginEventEmitter {
 // =============================================================================
 
 function createUIAPI(pluginId: string): PluginUIAPI {
-  // Status bar items registry
-  const statusBarItems = new Map<string, PluginStatusBarItem>()
-  // Sidebar panels registry
-  const sidebarPanels = new Map<string, PluginSidebarPanel>()
+  // Push a data-driven dialog onto the plugin modal stack and resolve when the
+  // user acts (or with the dismiss default if they close it). Routes through
+  // the WIRED `<PluginModalRoot />` instead of `window.prompt`/`confirm`, which
+  // are unreliable in the Tauri / Capacitor shells.
+  const openDataDialog = <T>(
+    args:
+      | { kind: "dialog"; options: PluginDialog }
+      | { kind: "input"; options: PluginInputDialog }
+      | { kind: "confirm"; options: PluginConfirmDialog },
+    dismiss: T
+  ): Promise<T> => {
+    return new Promise<T>((resolve) => {
+      let settled = false
+      const settle = (value: unknown): void => {
+        if (settled) return
+        settled = true
+        resolve(value as T)
+      }
+      try {
+        usePluginModalStore.getState().open({
+          pluginId,
+          component: PluginDataDialog,
+          args: { ...args, settle },
+        })
+      } catch (error) {
+        recordSilentFailure(
+          pluginId,
+          { site: "ui.showDialog", message: "Failed to open plugin dialog", expected: false },
+          error
+        )
+        settle(dismiss)
+      }
+    })
+  }
 
   return {
     showNotification: async (options: PluginNotification) => {
@@ -481,56 +590,30 @@ function createUIAPI(pluginId: string): PluginUIAPI {
     },
 
     showToast: (message: string, type: "info" | "success" | "warning" | "error" = "info") => {
-      // This would integrate with a toast system
-      // For now, use console
-      loggers.manager.info(`[Toast:${type}] ${message}`)
-    },
-
-    showDialog: async (options: PluginDialog): Promise<unknown> => {
-      // This would show a custom dialog
-      // For now, return a promise that resolves with the first action
-      loggers.manager.debug("Dialog:", options.title, options.content)
-      return options.actions?.[0]?.value
-    },
-
-    showInputDialog: async (options: PluginInputDialog): Promise<string | null> => {
-      // Use browser prompt as fallback
-      const result = window.prompt(
-        `${options.title}\n${options.message || ""}`,
-        options.defaultValue
-      )
-
-      if (result !== null && options.validate) {
-        const error = options.validate(result)
-        if (error) {
-          loggers.manager.error("Validation error:", error)
-          return null
-        }
-      }
-
-      return result
-    },
-
-    showConfirmDialog: async (options: PluginConfirmDialog): Promise<boolean> => {
-      // Use browser confirm as fallback
-      return window.confirm(`${options.title}\n\n${options.message}`)
-    },
-
-    registerStatusBarItem: (item: PluginStatusBarItem) => {
-      statusBarItems.set(item.id, item)
-      // Would emit event to update status bar UI
-      return () => {
-        statusBarItems.delete(item.id)
+      // Route to the sonner `<Toaster />` already mounted in `app/layout.tsx`.
+      switch (type) {
+        case "success":
+          toast.success(message)
+          break
+        case "warning":
+          toast.warning(message)
+          break
+        case "error":
+          toast.error(message)
+          break
+        default:
+          toast.info(message)
       }
     },
 
-    registerSidebarPanel: (panel: PluginSidebarPanel) => {
-      sidebarPanels.set(panel.id, panel)
-      // Would emit event to update sidebar UI
-      return () => {
-        sidebarPanels.delete(panel.id)
-      }
-    },
+    showDialog: (options: PluginDialog): Promise<unknown> =>
+      openDataDialog<unknown>({ kind: "dialog", options }, undefined),
+
+    showInputDialog: (options: PluginInputDialog): Promise<string | null> =>
+      openDataDialog<string | null>({ kind: "input", options }, null),
+
+    showConfirmDialog: (options: PluginConfirmDialog): Promise<boolean> =>
+      openDataDialog<boolean>({ kind: "confirm", options }, false),
   }
 }
 
@@ -585,6 +668,20 @@ function createA2UIAPI(pluginId: string, manager: PluginManager): PluginA2UIAPI 
 // Agent API
 // =============================================================================
 
+/**
+ * Gate a tool-enabled agent run behind the plugin's declared `agent:control`
+ * permission. Tool-enabled runs reach the host's full tool surface through the
+ * sidecar; text-only runs stay ungated (parity with prior behaviour). Throws
+ * synchronously so both `run` (async) and `runStreamed` (sync) can call it.
+ */
+function gateToolEnabledRun(pluginId: string, toolsEnabled: boolean | undefined): void {
+  if (toolsEnabled === true && !pluginHasApiPermission(pluginId, "agent:control")) {
+    throw new Error(
+      'agent run: tool-enabled runs require the "agent:control" permission — declare it in the plugin manifest.'
+    )
+  }
+}
+
 function createAgentAPI(pluginId: string, manager: PluginManager): PluginAgentAPI {
   return {
     registerTool: (tool: PluginTool) => {
@@ -612,51 +709,60 @@ function createAgentAPI(pluginId: string, manager: PluginManager): PluginAgentAP
       usePluginStore.getState().unregisterPluginMode(pluginId, prefixedId)
     },
 
+    run: async (
+      prompt: string,
+      options: PluginAgentRunOptions = {}
+    ): Promise<PluginAgentRunResult> => {
+      gateToolEnabledRun(pluginId, options.toolsEnabled)
+      return runPluginAgent(prompt, options, { pluginId })
+    },
+
+    runStreamed: (prompt: string, options: PluginAgentRunOptions = {}): PluginAgentRun => {
+      gateToolEnabledRun(pluginId, options.toolsEnabled)
+      return runPluginAgentStreamed(prompt, options, { pluginId })
+    },
+
+    invokeTool: async (
+      name: string,
+      args: Record<string, unknown>,
+      opts?: { signal?: AbortSignal }
+    ) => {
+      if (!pluginHasApiPermission(pluginId, "agent:control")) {
+        throw new Error(
+          'agent.invokeTool requires the "agent:control" permission — declare it in the plugin manifest.'
+        )
+      }
+      if (typeof name !== "string" || !name) {
+        throw new Error("agent.invokeTool requires a tool name")
+      }
+      const { result } = await invokePluginTool(pluginId, name, args ?? {}, {
+        ...(opts?.signal ? { signal: opts.signal } : {}),
+        reason: `plugin ${pluginId} invoked tool ${name}`,
+      })
+      return result
+    },
+
     executeAgent: async (config: Record<string, unknown>) => {
       const prompt = typeof config.prompt === "string" ? config.prompt : ""
       if (!prompt) {
         throw new Error("agent.execute requires config.prompt")
       }
-
-      const { executeAgent } = await import("@/lib/ai/agent/agent-executor")
-      const { getBackgroundAgentManager } = await import("@/lib/ai/agent/background-agent-manager")
-      const { prompt: _ignored, agentId: providedId, label, ...agentConfig } = config
-
-      // Tool-enabled runs reach the host's full tool surface through the
-      // sidecar — gate them behind the plugin's declared `agent:control`
-      // permission. Text-only runs stay ungated (parity with prior behaviour).
-      if (agentConfig.toolsEnabled === true) {
-        const { pluginHasApiPermission } = await import("@/lib/plugin/api/permission-api")
-        if (!pluginHasApiPermission(pluginId, "agent:control")) {
-          throw new Error(
-            'agent.executeAgent: tool-enabled runs require the "agent:control" permission — declare it in the plugin manifest.'
-          )
-        }
+      // Map the legacy config bag onto the typed run options. Legacy callers
+      // used the executor's field names (`systemPrompt` / `defaultProvider`);
+      // translate them to the SDK's (`system` / `provider`). A caller-supplied
+      // `agentId` still chooses the cancellation handle.
+      const { prompt: _ignored, agentId, label, systemPrompt, defaultProvider, ...rest } = config
+      gateToolEnabledRun(pluginId, rest.toolsEnabled === true)
+      const options = {
+        ...(rest as PluginAgentRunOptions),
+        ...(typeof systemPrompt === "string" ? { system: systemPrompt } : {}),
+        ...(typeof defaultProvider === "string" ? { provider: defaultProvider } : {}),
       }
-
-      // Register the run so `agent.cancelAgent(id)` can abort it mid-flight.
-      // A caller-supplied `agentId` lets the plugin choose the cancellation
-      // handle up front (fire-and-forget pattern); otherwise we mint one and
-      // return it on the result.
-      const backgroundManager = getBackgroundAgentManager()
-      const agentId =
-        typeof providedId === "string" && providedId ? providedId : crypto.randomUUID()
-      const managedSignal = backgroundManager.registerAgent(agentId, {
+      return runPluginAgent(prompt, options, {
         pluginId,
+        ...(typeof agentId === "string" && agentId ? { agentId } : {}),
         ...(typeof label === "string" ? { label } : {}),
       })
-      const callerSignal = agentConfig.abortSignal as AbortSignal | undefined
-      const signal = callerSignal ? AbortSignal.any([callerSignal, managedSignal]) : managedSignal
-
-      try {
-        const result = await executeAgent(prompt, {
-          ...(agentConfig as Parameters<typeof executeAgent>[1]),
-          abortSignal: signal,
-        })
-        return { ...result, agentId }
-      } finally {
-        backgroundManager.finishAgent(agentId)
-      }
     },
 
     runExternalAgent: async (
@@ -747,6 +853,100 @@ function createAgentAPI(pluginId: string, manager: PluginManager): PluginAgentAP
       const { id, ...config } = def
       registerExternalAgentPresetOverlay(id, config, { pluginId })
     },
+
+    registerExternalAgentAdapter: (id: string, factory: ProtocolAdapterFactory) => {
+      registerPluginProtocolAdapter(`${pluginId}:${id}`, factory, { pluginId })
+    },
+
+    // Package B — input/output guardrails. Registration is ungated (a plugin's
+    // own validators); guardrails only take effect on runs the plugin starts.
+    guardrails: {
+      register: (guardrail: PluginGuardrail) => {
+        registerGuardrail(guardrail.id, guardrail, { pluginId })
+      },
+      unregister: (id: string) => {
+        unregisterGuardrailById(id)
+      },
+      list: () => listGuardrailIds(),
+    },
+
+    // Package C — programmatic dispatch. Both reach the host's agent fan-out
+    // surface, so they require the `agent:dispatch` permission.
+    dispatchSubagent: async (
+      idOrDef: string | PluginSubagentDef,
+      prompt: string,
+      options?: PluginDispatchSubagentOptions
+    ) => {
+      if (!pluginHasApiPermission(pluginId, "agent:dispatch")) {
+        throw new Error(
+          'agent.dispatchSubagent requires the "agent:dispatch" permission — declare it in the plugin manifest.'
+        )
+      }
+      return dispatchSubagent(idOrDef, prompt, options)
+    },
+
+    runTeam: async (teamOrConfig: string | AgentTeamConfig, options?: PluginRunTeamOptions) => {
+      if (!pluginHasApiPermission(pluginId, "agent:dispatch")) {
+        throw new Error(
+          'agent.runTeam requires the "agent:dispatch" permission — declare it in the plugin manifest.'
+        )
+      }
+      return runTeam(teamOrConfig, options)
+    },
+
+    // Package D — durable multi-turn sessions. Creating/resuming a session
+    // reaches the chat-session store, so it requires the session permissions.
+    sessions: {
+      create: async (options?: PluginCreateSessionOptions) => {
+        if (!pluginHasApiPermission(pluginId, "session:write")) {
+          throw new Error(
+            'agent.sessions.create requires the "session:write" permission — declare it in the plugin manifest.'
+          )
+        }
+        return createPluginAgentSession(options)
+      },
+      resume: async (sessionId: string) => {
+        if (!pluginHasApiPermission(pluginId, "session:read")) {
+          throw new Error(
+            'agent.sessions.resume requires the "session:read" permission — declare it in the plugin manifest.'
+          )
+        }
+        return resumePluginAgentSession(sessionId)
+      },
+    },
+
+    // Package E — context/memory providers + guarded reads. Provider
+    // registration is ungated (a plugin's own ambient context); the reads reach
+    // new sensitive data domains so each needs its own permission.
+    context: {
+      registerProvider: (provider: PluginContextProvider) => {
+        registerContextProvider(provider.id, provider, { pluginId })
+      },
+      unregisterProvider: (id: string) => {
+        unregisterContextProviderById(id)
+      },
+      listProviders: () => listContextProviderIds(),
+      readSharedMemory: async (teamId: string, opts?: PluginSharedMemoryReadOptions) => {
+        if (!pluginHasApiPermission(pluginId, "agent:shared-memory:read")) {
+          throw new Error(
+            'agent.context.readSharedMemory requires the "agent:shared-memory:read" permission — declare it in the plugin manifest.'
+          )
+        }
+        return readSharedMemory(teamId, opts)
+      },
+      queryTwinMemory: async (
+        characterId: string,
+        query: string,
+        opts?: PluginTwinMemoryQueryOptions
+      ) => {
+        if (!pluginHasApiPermission(pluginId, "twin:read")) {
+          throw new Error(
+            'agent.context.queryTwinMemory requires the "twin:read" permission — declare it in the plugin manifest.'
+          )
+        }
+        return queryTwinMemory(characterId, query, opts)
+      },
+    },
   }
 }
 
@@ -755,26 +955,51 @@ function createAgentAPI(pluginId: string, manager: PluginManager): PluginAgentAP
 // =============================================================================
 
 function createSettingsAPI(pluginId: string): PluginSettingsAPI {
-  const settingsKey = `plugin:${pluginId}`
+  // Persist plugin settings in localStorage under a per-plugin namespace so
+  // `get`/`set` read/write the same place, round-trip, and survive reloads
+  // (works across browser / Tauri / Capacitor shells, mirroring `createStorage`
+  // above). Previously `set` only logged and `get` read a `useSettingsStore`
+  // slice that never existed, so the round-trip silently lost every write.
+  const settingsKey = `cognia-plugin-settings:${pluginId}`
   const listeners = new Map<string, Set<(value: unknown) => void>>()
+
+  const readAll = (): Record<string, unknown> => {
+    try {
+      const raw = localStorage.getItem(settingsKey)
+      return raw ? (JSON.parse(raw) as Record<string, unknown>) : {}
+    } catch {
+      return {}
+    }
+  }
 
   return {
     get: <T>(key: string): T | undefined => {
-      const state = useSettingsStore.getState()
-      const pluginSettings = (state as unknown as Record<string, unknown>)[settingsKey] as
-        | Record<string, unknown>
-        | undefined
-      return pluginSettings?.[key] as T | undefined
+      return readAll()[key] as T | undefined
     },
 
     set: <T>(key: string, value: T) => {
-      // This would integrate with settings store
-      loggers.manager.debug(`Plugin ${pluginId} setting ${key}:`, value)
+      const data = readAll()
+      data[key] = value
+      try {
+        localStorage.setItem(settingsKey, JSON.stringify(data))
+      } catch (error) {
+        loggers.manager.error(`Plugin ${pluginId} failed to persist setting ${key}:`, error)
+        return
+      }
 
-      // Notify listeners
+      // Notify same-context listeners synchronously on a real write.
       const keyListeners = listeners.get(key)
       if (keyListeners) {
-        keyListeners.forEach((listener) => listener(value))
+        keyListeners.forEach((listener) => {
+          try {
+            listener(value)
+          } catch (error) {
+            loggers.manager.error(
+              `Plugin ${pluginId} settings onChange handler for ${key} threw:`,
+              error
+            )
+          }
+        })
       }
     },
 
@@ -829,7 +1054,7 @@ function createPythonAPI(pluginId: string, _manager: PluginManager): PluginPytho
           {
             site: "python.import",
             message: `Failed to import Python module: ${moduleName}`,
-            expected: !isTauri(),
+            expected: false,
           },
           error
         )
@@ -862,7 +1087,96 @@ function createPythonAPI(pluginId: string, _manager: PluginManager): PluginPytho
 // Network API
 // =============================================================================
 
-function createNetworkAPI(pluginId: string): PluginNetworkAPI {
+/**
+ * Persist a ledger grant once the user consents to a "confirm"-tier native
+ * call. The native fs/secrets/clipboard/network namespaces route through the
+ * `plugin_api_invoke` gateway, which the Rust host re-gates against its own
+ * ledger — so after a renderer consent we must mirror the grant to the host or
+ * the very next gateway call is denied. No-op in the browser (no Rust ledger).
+ */
+function persistHostConsentGrant(pluginId: string, permission: string): void {
+  if (!isPluginGatewayAvailable()) return
+  void grantPluginPermission(pluginId, permission, "user").catch(() => undefined)
+}
+
+/**
+ * Wrap a native gateway namespace so every method (a) requires its declared
+ * permission and (b) routes dangerous-tier actions through the per-call consent
+ * overlay before running — closing the gap where these namespaces previously
+ * only rate-limited. Pure helpers go in `unguarded`.
+ */
+function guardNativeApi<T extends object>(
+  pluginId: string,
+  api: T,
+  permissionMap: Partial<Record<keyof T, PluginPermission | PluginPermission[]>>,
+  unguarded?: ReadonlyArray<keyof T>
+): T {
+  return createGuardedAPI(pluginId, api, permissionMap, {
+    unguarded,
+    onConsentGranted: (permission) => persistHostConsentGrant(pluginId, permission),
+  })
+}
+
+const NETWORK_GUARD_MAP: Partial<Record<keyof PluginNetworkAPI, PluginPermission>> = {
+  get: "network:fetch",
+  post: "network:fetch",
+  put: "network:fetch",
+  delete: "network:fetch",
+  patch: "network:fetch",
+  fetch: "network:fetch",
+  download: "network:fetch",
+  upload: "network:fetch",
+}
+
+const FS_GUARD_MAP: Partial<Record<keyof PluginFileSystemAPI, PluginPermission>> = {
+  readText: "filesystem:read",
+  readBinary: "filesystem:read",
+  readJson: "filesystem:read",
+  exists: "filesystem:read",
+  readDir: "filesystem:read",
+  stat: "filesystem:read",
+  watch: "filesystem:read",
+  writeText: "filesystem:write",
+  writeBinary: "filesystem:write",
+  writeJson: "filesystem:write",
+  appendText: "filesystem:write",
+  mkdir: "filesystem:write",
+  remove: "filesystem:write",
+  copy: "filesystem:write",
+  move: "filesystem:write",
+}
+
+const CLIPBOARD_GUARD_MAP: Partial<Record<keyof PluginClipboardAPI, PluginPermission>> = {
+  readText: "clipboard:read",
+  readImage: "clipboard:read",
+  hasText: "clipboard:read",
+  hasImage: "clipboard:read",
+  writeText: "clipboard:write",
+  writeImage: "clipboard:write",
+  clear: "clipboard:write",
+}
+
+const SECRETS_GUARD_MAP: Partial<Record<keyof PluginSecretsAPI, PluginPermission>> = {
+  get: "secrets:read",
+  has: "secrets:read",
+  keys: "secrets:read",
+  store: "secrets:write",
+  delete: "secrets:write",
+}
+
+const DB_GUARD_MAP: Partial<Record<keyof PluginDatabaseAPI, PluginPermission>> = {
+  query: "database:read",
+  tableExists: "database:read",
+  execute: "database:write",
+  createTable: "database:write",
+  dropTable: "database:write",
+  transaction: "database:write",
+}
+
+function createNetworkAPI(
+  pluginId: string,
+  networkAccess?: PluginManifest["networkAccess"]
+): PluginNetworkAPI {
   const rateLimiter = getPluginRateLimiter()
   const parseBrowserResponse = async <T>(
     response: Response,
@@ -898,7 +1212,11 @@ function createNetworkAPI(pluginId: string): PluginNetworkAPI {
     options?: NetworkRequestOptions
   ): Promise<NetworkResponse<T>> => {
     rateLimiter.check(pluginId, "network:fetch")
-    if (!isTauri()) {
+    // Renderer-side egress allowlist. The Tauri path is also clamped in Rust
+    // (defense-in-depth); this is the SOLE enforcement in web/mobile mode where
+    // there is no Rust host. Mirrors `manifest.networkAccess.allowedDomains`.
+    assertEgressAllowed(pluginId, url, networkAccess, getPluginSecurityPosture())
+    if (!isPluginGatewayAvailable()) {
       const response = await fetch(url, {
         method: options?.method,
         headers: options?.headers,
@@ -934,10 +1252,10 @@ function createNetworkAPI(pluginId: string): PluginNetworkAPI {
     download: async (
       url: string,
       destPath: string,
-      _options?: DownloadOptions
+      options?: DownloadOptions
     ): Promise<DownloadResult> => {
       rateLimiter.check(pluginId, "network:download")
-      if (!isTauri()) {
+      if (!isPluginGatewayAvailable()) {
         const response = await fetch(url)
         if (!response.ok) {
           throw new PluginGatewayError({
@@ -964,21 +1282,28 @@ function createNetworkAPI(pluginId: string): PluginNetworkAPI {
         }
       }
 
+      // The host streams the body into the plugin's data sandbox; `onProgress`
+      // can't cross the IPC boundary, so only the static request shape is sent.
       return invokePluginApi<DownloadResult>(pluginId, "network:download", {
         url,
         destPath,
+        headers: options?.headers,
       })
     },
 
     upload: async (
       url: string,
       filePath: string,
-      _options?: UploadOptions
+      options?: UploadOptions
     ): Promise<NetworkResponse<unknown>> => {
       rateLimiter.check(pluginId, "network:upload")
       return invokePluginApi<NetworkResponse<unknown>>(pluginId, "network:upload", {
         url,
         filePath,
+        headers: options?.headers,
+        // When set, the host sends multipart/form-data with this field name;
+        // otherwise the file bytes are the raw request body.
+        fieldName: options?.fieldName,
       })
     },
   }
@@ -1008,13 +1333,13 @@ function createFileSystemAPI(pluginId: string): PluginFileSystemAPI {
   return {
     readText: (path: string) => {
       rateLimiter.check(pluginId, "fs:read")
-      if (!isTauri()) return notSupported("fs:readText")
+      if (!isPluginGatewayAvailable()) return notSupported("fs:readText")
       return invokePluginApi<string>(pluginId, "fs:readText", { path })
     },
 
     readBinary: (path: string) => {
       rateLimiter.check(pluginId, "fs:read")
-      if (!isTauri()) return notSupported("fs:readBinary")
+      if (!isPluginGatewayAvailable()) return notSupported("fs:readBinary")
       return invokePluginApi<number[]>(pluginId, "fs:readBinary", { path }).then((bytes) =>
         Uint8Array.from(bytes)
       )
@@ -1022,20 +1347,20 @@ function createFileSystemAPI(pluginId: string): PluginFileSystemAPI {
 
     readJson: async <T>(path: string) => {
       rateLimiter.check(pluginId, "fs:read")
-      if (!isTauri()) return notSupported("fs:readText")
+      if (!isPluginGatewayAvailable()) return notSupported("fs:readText")
       const raw = await invokePluginApi<string>(pluginId, "fs:readText", { path })
       return JSON.parse(raw) as T
     },
 
     writeText: (path: string, content: string) => {
       rateLimiter.check(pluginId, "fs:write")
-      if (!isTauri()) return notSupported("fs:writeText")
+      if (!isPluginGatewayAvailable()) return notSupported("fs:writeText")
       return invokePluginApi<void>(pluginId, "fs:writeText", { path, content })
     },
 
     writeBinary: (path: string, content: Uint8Array) => {
       rateLimiter.check(pluginId, "fs:write")
-      if (!isTauri()) return notSupported("fs:writeBinary")
+      if (!isPluginGatewayAvailable()) return notSupported("fs:writeBinary")
       return invokePluginApi<void>(pluginId, "fs:writeBinary", {
         path,
         content: Array.from(content),
@@ -1044,14 +1369,14 @@ function createFileSystemAPI(pluginId: string): PluginFileSystemAPI {
 
     writeJson: async (path: string, data: unknown, pretty = true) => {
       rateLimiter.check(pluginId, "fs:write")
-      if (!isTauri()) return notSupported("fs:writeText")
+      if (!isPluginGatewayAvailable()) return notSupported("fs:writeText")
       const content = pretty ? JSON.stringify(data, null, 2) : JSON.stringify(data)
       await invokePluginApi<void>(pluginId, "fs:writeText", { path, content })
     },
 
     appendText: async (path: string, content: string) => {
       rateLimiter.check(pluginId, "fs:write")
-      if (!isTauri()) return notSupported("fs:writeText")
+      if (!isPluginGatewayAvailable()) return notSupported("fs:writeText")
       let current = ""
       try {
         current = await invokePluginApi<string>(pluginId, "fs:readText", { path })
@@ -1066,43 +1391,43 @@ function createFileSystemAPI(pluginId: string): PluginFileSystemAPI {
 
     exists: (path: string) => {
       rateLimiter.check(pluginId, "fs:read")
-      if (!isTauri()) return notSupported("fs:exists")
+      if (!isPluginGatewayAvailable()) return notSupported("fs:exists")
       return invokePluginApi<boolean>(pluginId, "fs:exists", { path })
     },
 
     mkdir: (path: string, recursive = true) => {
       rateLimiter.check(pluginId, "fs:write")
-      if (!isTauri()) return notSupported("fs:mkdir")
+      if (!isPluginGatewayAvailable()) return notSupported("fs:mkdir")
       return invokePluginApi<void>(pluginId, "fs:mkdir", { path, recursive })
     },
 
     remove: (path: string, recursive = false) => {
       rateLimiter.check(pluginId, "fs:delete")
-      if (!isTauri()) return notSupported("fs:remove")
+      if (!isPluginGatewayAvailable()) return notSupported("fs:remove")
       return invokePluginApi<void>(pluginId, "fs:remove", { path, recursive })
     },
 
     copy: (src: string, dest: string) => {
       rateLimiter.check(pluginId, "fs:write")
-      if (!isTauri()) return notSupported("fs:copy")
+      if (!isPluginGatewayAvailable()) return notSupported("fs:copy")
       return invokePluginApi<void>(pluginId, "fs:copy", { src, dest })
     },
 
     move: (src: string, dest: string) => {
       rateLimiter.check(pluginId, "fs:write")
-      if (!isTauri()) return notSupported("fs:move")
+      if (!isPluginGatewayAvailable()) return notSupported("fs:move")
       return invokePluginApi<void>(pluginId, "fs:move", { src, dest })
     },
 
     readDir: (path: string) => {
       rateLimiter.check(pluginId, "fs:read")
-      if (!isTauri()) return notSupported("fs:readDir")
+      if (!isPluginGatewayAvailable()) return notSupported("fs:readDir")
       return invokePluginApi<FileEntry[]>(pluginId, "fs:readDir", { path })
     },
 
     stat: (path: string) => {
       rateLimiter.check(pluginId, "fs:read")
-      if (!isTauri()) return notSupported("fs:stat")
+      if (!isPluginGatewayAvailable()) return notSupported("fs:stat")
       return invokePluginApi<FileStat>(pluginId, "fs:stat", { path })
     },
 
@@ -1271,56 +1596,20 @@ function createShellAPI(pluginId: string): PluginShellAPI {
       return invokePluginApi<ShellResult>(pluginId, "shell:execute", { command, options })
     },
 
-    spawn: (command: string, args?: string[], options?: SpawnOptions): ChildProcess => {
+    spawn: (_command: string, _args?: string[], _options?: SpawnOptions): ChildProcess => {
       rateLimiter.check(pluginId, "process:spawn")
-      const processId = `${pluginId}:${Date.now()}`
-
-      let pid = 0
-      void invokePluginApi<{ pid?: number }>(pluginId, "shell:spawn", {
-        processId,
-        command,
-        args,
-        options,
+      // The shell/process domain has no host backend (api_bridge.rs routes it to
+      // NOT_SUPPORTED on every platform). `spawn` is synchronous, so it cannot
+      // surface that rejection through a Promise — it must throw. Returning a
+      // hollow ChildProcess (pid:0, dead streams) handed plugin authors silent
+      // garbage that looks live; failing loud is the honest contract.
+      throw new PluginGatewayError({
+        code: "NOT_SUPPORTED",
+        message: "ctx.shell.spawn is not supported: the host has no process backend",
+        requestId: `${pluginId}:shell:spawn`,
+        api: "shell:spawn",
+        pluginId,
       })
-        .then((result) => {
-          pid = result.pid || 0
-        })
-        .catch((error) =>
-          recordSilentFailure(
-            pluginId,
-            {
-              site: "shell.spawn",
-              message: `Failed to spawn process: ${command}`,
-              expected: false,
-            },
-            error
-          )
-        )
-
-      return {
-        pid,
-        stdin: new WritableStream(),
-        stdout: new ReadableStream(),
-        stderr: new ReadableStream(),
-        kill: (signal?: string) => {
-          invoke("plugin_process_kill", { processId, signal }).catch((error) =>
-            recordSilentFailure(
-              pluginId,
-              {
-                site: "process.kill",
-                message: `Failed to kill process ${processId}`,
-                expected: false,
-              },
-              error
-            )
-          )
-        },
-        onExit: (callback: (code: number) => void) => {
-          window.addEventListener(`plugin-process-exit:${processId}`, ((e: CustomEvent) => {
-            callback(e.detail.code)
-          }) as EventListener)
-        },
-      }
     },
 
     open: (path: string) => invokePluginApi<void>(pluginId, "shell:open", { path }),
@@ -1390,46 +1679,47 @@ function createDatabaseAPI(pluginId: string): PluginDatabaseAPI {
 function createShortcutsAPI(pluginId: string): PluginShortcutsAPI {
   const registeredShortcuts = new Set<string>()
 
-  return {
+  const api: PluginShortcutsAPI = {
     register: (shortcut: string, callback: () => void, options?: ShortcutOptions) => {
-      const id = `${pluginId}:${shortcut}`
       registeredShortcuts.add(shortcut)
 
-      invoke("plugin_shortcut_register", { pluginId, shortcut, options }).catch((error) =>
-        recordSilentFailure(
-          pluginId,
-          {
-            site: "shortcut.register",
-            message: `Failed to register shortcut: ${shortcut}`,
-            expected: false,
-          },
-          error
+      // Route onto the live shortcut rail (Rust ShortcutRegistry on
+      // desktop, the shared keydown fallback in the browser) via the
+      // plugin shortcut bridge. The bind is async (conflict check + IPC);
+      // the sync disposer contract is kept with a deferred handle.
+      let dispose: (() => void) | null = null
+      let disposed = false
+      import("@/lib/plugin/shortcuts/plugin-shortcut-bridge")
+        .then(({ bindPluginShortcut }) =>
+          bindPluginShortcut({ pluginId, chord: shortcut, run: callback, options })
         )
-      )
-
-      const handler = () => callback()
-      window.addEventListener(`plugin-shortcut:${id}`, handler)
-
-      return () => {
-        registeredShortcuts.delete(shortcut)
-        window.removeEventListener(`plugin-shortcut:${id}`, handler)
-        invoke("plugin_shortcut_unregister", { pluginId, shortcut }).catch((error) =>
+        .then((d) => {
+          if (disposed) d()
+          else dispose = d
+        })
+        .catch((error) =>
           recordSilentFailure(
             pluginId,
             {
-              site: "shortcut.unregister",
-              message: `Failed to unregister shortcut: ${shortcut}`,
+              site: "shortcut.register",
+              message: `Failed to register shortcut: ${shortcut}`,
               expected: false,
             },
             error
           )
         )
+
+      return () => {
+        disposed = true
+        registeredShortcuts.delete(shortcut)
+        dispose?.()
+        dispose = null
       }
     },
 
     registerMany: (shortcuts: ShortcutRegistration[]) => {
       const unsubscribes = shortcuts.map(({ shortcut, callback, options }) =>
-        createShortcutsAPI(pluginId).register(shortcut, callback, options)
+        api.register(shortcut, callback, options)
       )
 
       return () => unsubscribes.forEach((unsub) => unsub())
@@ -1438,6 +1728,8 @@ function createShortcutsAPI(pluginId: string): PluginShortcutsAPI {
     isAvailable: (shortcut: string) => !registeredShortcuts.has(shortcut),
     getRegistered: () => Array.from(registeredShortcuts),
   }
+
+  return api
 }
 
 // =============================================================================
@@ -1447,11 +1739,33 @@ function createShortcutsAPI(pluginId: string): PluginShortcutsAPI {
 function createContextMenuAPI(pluginId: string): PluginContextMenuAPI {
   const handlers = new Map<string, (context: ContextMenuClickContext) => void>()
 
-  return {
+  const api: PluginContextMenuAPI = {
     register: (item: ContextMenuItem) => {
       const id = `${pluginId}:${item.id}`
       handlers.set(id, item.onClick)
 
+      // Renderer registry — the consumer half. UI surfaces (chat message
+      // menu, workflow canvas menu, …) read items per zone via
+      // `usePluginContextMenuItems` and dispatch the CustomEvent below.
+      let unregisterRenderer: (() => void) | null = null
+      import("@/lib/plugin/context-menu/registry")
+        .then(({ registerContextMenuItem, unregisterContextMenuItem }) => {
+          registerContextMenuItem({ id, pluginId, item: { ...item, id } })
+          unregisterRenderer = () => unregisterContextMenuItem(id)
+        })
+        .catch((error) =>
+          recordSilentFailure(
+            pluginId,
+            {
+              site: "contextMenu.register",
+              message: `Failed to register context menu in renderer registry: ${item.id}`,
+              expected: false,
+            },
+            error
+          )
+        )
+
+      // Rust mirror — persistence of the registration intent (desktop).
       invoke("plugin_context_menu_register", {
         pluginId,
         item: { ...item, id },
@@ -1476,6 +1790,8 @@ function createContextMenuAPI(pluginId: string): PluginContextMenuAPI {
       return () => {
         handlers.delete(id)
         window.removeEventListener(`plugin-context-menu:${id}`, handler)
+        unregisterRenderer?.()
+        unregisterRenderer = null
         invoke("plugin_context_menu_unregister", { pluginId, itemId: id }).catch((error) =>
           recordSilentFailure(
             pluginId,
@@ -1491,11 +1807,13 @@ function createContextMenuAPI(pluginId: string): PluginContextMenuAPI {
     },
 
     registerMany: (items: ContextMenuItem[]) => {
-      const unsubscribes = items.map((item) => createContextMenuAPI(pluginId).register(item))
+      const unsubscribes = items.map((item) => api.register(item))
 
       return () => unsubscribes.forEach((unsub) => unsub())
     },
   }
+
+  return api
 }
 
 // =============================================================================
@@ -1526,13 +1844,17 @@ function createWindowAPI(pluginId: string): PluginWindowAPI {
     minimize: () => invoke<void>("plugin_window_minimize", { windowId: id }),
     maximize: () => invoke<void>("plugin_window_maximize", { windowId: id }),
     unmaximize: () => invoke<void>("plugin_window_unmaximize", { windowId: id }),
-    isMaximized: () => false, // Would need async check
+    isMaximized: () => invokePluginApi<boolean>(pluginId, "window:isMaximized", { windowId: id }),
     setSize: (width: number, height: number) =>
       invokePluginApi<void>(pluginId, "window:setSize", { windowId: id, width, height }),
-    getSize: () => ({ width: 800, height: 600 }), // Would need async check
+    getSize: () =>
+      invokePluginApi<{ width: number; height: number }>(pluginId, "window:getSize", {
+        windowId: id,
+      }),
     setPosition: (x: number, y: number) =>
       invokePluginApi<void>(pluginId, "window:setPosition", { windowId: id, x, y }),
-    getPosition: () => ({ x: 0, y: 0 }), // Would need async check
+    getPosition: () =>
+      invokePluginApi<{ x: number; y: number }>(pluginId, "window:getPosition", { windowId: id }),
     center: () => invokePluginApi<void>(pluginId, "window:center", { windowId: id }),
     setAlwaysOnTop: (flag: boolean) =>
       invoke<void>("plugin_window_set_always_on_top", { windowId: id, flag }),
@@ -1572,23 +1894,6 @@ function createWindowAPI(pluginId: string): PluginWindowAPI {
 }
 
 // =============================================================================
-// Secrets API
-// =============================================================================
-
-function createSecretsAPI(pluginId: string): PluginSecretsAPI {
-  return {
-    store: (key: string, value: string) =>
-      invokePluginApi<void>(pluginId, "secrets:store", { key, value }),
-
-    get: (key: string) => invokePluginApi<string | null>(pluginId, "secrets:get", { key }),
-
-    delete: (key: string) => invokePluginApi<void>(pluginId, "secrets:delete", { key }),
-
-    has: (key: string) => invokePluginApi<boolean>(pluginId, "secrets:has", { key }),
-  }
-}
-
-// =============================================================================
 // Scheduler API
 // =============================================================================
 
@@ -1612,34 +1917,72 @@ import { schedulerDb } from "@/lib/scheduler/scheduler-db"
 import type { ScheduledTask, TaskExecution } from "@/types/scheduler"
 import { nanoid } from "nanoid"
 
-function createSchedulerAPI(pluginId: string): PluginSchedulerAPI {
+function mapPluginTaskTrigger(trigger: PluginTaskTrigger): ScheduledTask["trigger"] {
+  return {
+    type: trigger.type,
+    cronExpression: trigger.type === "cron" ? trigger.expression : undefined,
+    intervalMs: trigger.type === "interval" ? trigger.seconds * 1000 : undefined,
+    runAt: trigger.type === "once" ? new Date(trigger.runAt) : undefined,
+    eventType: trigger.type === "event" ? trigger.eventType : undefined,
+    eventSource: trigger.type === "event" ? trigger.eventSource : undefined,
+    timezone: trigger.type === "cron" ? trigger.timezone : undefined,
+  }
+}
+
+async function loadTaskScheduler() {
+  const { getTaskScheduler } = await import("@/lib/scheduler/task-scheduler")
+  return getTaskScheduler()
+}
+
+const SCHEDULER_SYNC_METHODS = new Set([
+  "registerHandler",
+  "unregisterHandler",
+  "hasHandler",
+  "getHandlers",
+])
+
+function deniedSchedulerAPI(pluginId: string): PluginSchedulerAPI {
+  return new Proxy({} as PluginSchedulerAPI, {
+    get: (_target, property) => {
+      const error = new Error(
+        "Plugin '" +
+          pluginId +
+          "' must declare the 'scheduler' capability before using ctx.scheduler"
+      )
+      if (SCHEDULER_SYNC_METHODS.has(String(property))) {
+        return () => {
+          throw error
+        }
+      }
+      return () => Promise.reject(error)
+    },
+  })
+}
+
+function createSchedulerAPI(
+  pluginId: string,
+  capabilities: readonly PluginCapability[]
+): PluginSchedulerAPI {
+  if (!capabilities.includes("scheduler")) {
+    return deniedSchedulerAPI(pluginId)
+  }
   // Local handler registry for this plugin
   const handlers = new Map<string, PluginTaskHandler>()
 
   return {
     // Task Management
     createTask: async (input: CreatePluginTaskInput): Promise<PluginScheduledTask> => {
-      const taskId = nanoid()
-      const now = new Date()
-
-      const task: ScheduledTask = {
-        id: taskId,
+      const scheduler = await loadTaskScheduler()
+      const task = await scheduler.createTask({
         name: input.name,
         description: input.description,
         type: "plugin",
-        trigger: {
-          type: input.trigger.type,
-          cronExpression: input.trigger.type === "cron" ? input.trigger.expression : undefined,
-          intervalMs: input.trigger.type === "interval" ? input.trigger.seconds * 1000 : undefined,
-          runAt: input.trigger.type === "once" ? new Date(input.trigger.runAt) : undefined,
-          eventType: input.trigger.type === "event" ? input.trigger.eventType : undefined,
-          eventSource: input.trigger.type === "event" ? input.trigger.eventSource : undefined,
-          timezone: input.trigger.type === "cron" ? input.trigger.timezone : undefined,
-        },
+        trigger: mapPluginTaskTrigger(input.trigger),
         payload: {
           pluginId,
           handler: input.handler,
           args: input.handlerArgs || {},
+          ...(input.metadata && { metadata: input.metadata }),
         },
         config: {
           timeout: (input.timeout || 300) * 1000,
@@ -1656,16 +1999,13 @@ function createSchedulerAPI(pluginId: string): PluginSchedulerAPI {
           onProgress: false,
           channels: ["toast"],
         },
-        status: input.enabled !== false ? "active" : "paused",
         tags: input.tags,
-        runCount: 0,
-        successCount: 0,
-        failureCount: 0,
-        createdAt: now,
-        updatedAt: now,
-      }
+      })
 
-      await schedulerDb.createTask(task)
+      if (input.enabled === false) {
+        await scheduler.pauseTask(task.id)
+        return mapToPluginTask({ ...task, status: "paused" }, pluginId)
+      }
       return mapToPluginTask(task, pluginId)
     },
 
@@ -1681,36 +2021,35 @@ function createSchedulerAPI(pluginId: string): PluginSchedulerAPI {
         return null
       }
 
-      const updatedTask: ScheduledTask = { ...existingTask, updatedAt: new Date() }
-
-      if (input.name !== undefined) updatedTask.name = input.name
-      if (input.description !== undefined) updatedTask.description = input.description
-      if (input.trigger !== undefined) {
-        updatedTask.trigger = {
-          type: input.trigger.type,
-          cronExpression: input.trigger.type === "cron" ? input.trigger.expression : undefined,
-          intervalMs: input.trigger.type === "interval" ? input.trigger.seconds * 1000 : undefined,
-          runAt: input.trigger.type === "once" ? new Date(input.trigger.runAt) : undefined,
-          eventType: input.trigger.type === "event" ? input.trigger.eventType : undefined,
-          eventSource: input.trigger.type === "event" ? input.trigger.eventSource : undefined,
-          timezone: input.trigger.type === "cron" ? input.trigger.timezone : undefined,
-        }
-      }
-      if (input.handler !== undefined) {
-        updatedTask.payload = {
-          ...(existingTask.payload as Record<string, unknown>),
-          handler: input.handler,
-        }
-      }
-      if (input.handlerArgs !== undefined) {
-        updatedTask.payload = {
-          ...(existingTask.payload as Record<string, unknown>),
-          args: input.handlerArgs,
-        }
-      }
-      if (input.tags !== undefined) updatedTask.tags = input.tags
-
-      await schedulerDb.updateTask(updatedTask)
+      const scheduler = await loadTaskScheduler()
+      const updatedTask = await scheduler.updateTask(taskId, {
+        name: input.name,
+        description: input.description,
+        trigger: input.trigger ? mapPluginTaskTrigger(input.trigger) : undefined,
+        payload:
+          input.handler !== undefined ||
+          input.handlerArgs !== undefined ||
+          input.metadata !== undefined
+            ? {
+                ...(existingTask.payload as Record<string, unknown>),
+                ...(input.handler !== undefined && { handler: input.handler }),
+                ...(input.handlerArgs !== undefined && { args: input.handlerArgs }),
+                ...(input.metadata !== undefined && { metadata: input.metadata }),
+              }
+            : undefined,
+        config:
+          input.timeout !== undefined || input.retry !== undefined
+            ? {
+                ...(input.timeout !== undefined && { timeout: input.timeout * 1000 }),
+                ...(input.retry !== undefined && {
+                  maxRetries: input.retry.maxAttempts,
+                  retryDelay: input.retry.delaySeconds * 1000,
+                }),
+              }
+            : undefined,
+        tags: input.tags,
+      })
+      if (!updatedTask) return null
       return mapToPluginTask(updatedTask, pluginId)
     },
 
@@ -1722,7 +2061,8 @@ function createSchedulerAPI(pluginId: string): PluginSchedulerAPI {
       ) {
         return false
       }
-      return schedulerDb.deleteTask(taskId)
+      const scheduler = await loadTaskScheduler()
+      return scheduler.deleteTask(taskId)
     },
 
     getTask: async (taskId: string): Promise<PluginScheduledTask | null> => {
@@ -1784,9 +2124,8 @@ function createSchedulerAPI(pluginId: string): PluginSchedulerAPI {
       ) {
         return false
       }
-      const updatedTask = { ...existingTask, status: "paused" as const, updatedAt: new Date() }
-      await schedulerDb.updateTask(updatedTask)
-      return true
+      const scheduler = await loadTaskScheduler()
+      return scheduler.pauseTask(taskId)
     },
 
     resumeTask: async (taskId: string): Promise<boolean> => {
@@ -1797,9 +2136,8 @@ function createSchedulerAPI(pluginId: string): PluginSchedulerAPI {
       ) {
         return false
       }
-      const updatedTask = { ...existingTask, status: "active" as const, updatedAt: new Date() }
-      await schedulerDb.updateTask(updatedTask)
-      return true
+      const scheduler = await loadTaskScheduler()
+      return scheduler.resumeTask(taskId)
     },
 
     runTaskNow: async (taskId: string, _args?: Record<string, unknown>): Promise<string> => {
@@ -1971,6 +2309,7 @@ function mapToPluginTask(task: ScheduledTask, pluginId: string): PluginScheduled
     trigger: pluginTrigger,
     handler: (payload?.handler as string) || "",
     handlerArgs: payload?.args as Record<string, unknown> | undefined,
+    metadata: payload?.metadata as Record<string, unknown> | undefined,
     status: task.status as "active" | "paused" | "disabled" | "completed" | "error",
     lastRunAt: task.lastRunAt,
     nextRunAt: task.nextRunAt,
@@ -2054,7 +2393,7 @@ function getOrCreatePluginRegistry(pluginId: string) {
 // readable. Single source of truth lives in `lib/plugin/bridge/kind-prefix.ts`.
 const prefixKind = prefixPluginKind
 
-function createWorkflowAPI(pluginId: string): PluginWorkflowAPI {
+export function createWorkflowAPI(pluginId: string): PluginWorkflowAPI {
   return {
     registerNode(def: PluginNodeDef): () => void {
       const prefixed = prefixKind(pluginId, def.kind)
@@ -2074,16 +2413,19 @@ function createWorkflowAPI(pluginId: string): PluginWorkflowAPI {
       })
       const catalogEntry: NodeCatalogEntry = {
         kind: prefixed as never,
+        typeVersion: def.typeVersion,
         category: def.category,
         label: def.label,
         description: def.description,
         iconName: def.iconName,
         keywords: def.keywords ?? [],
         desktopOnly: def.desktopOnly,
+        requires: def.requires,
         pluginId,
         // Surfacing the JSON Schema lets the inspector render a SchemaForm
         // instead of falling back to a raw-JSON editor.
         paramsSchema: def.paramsSchema,
+        defaultParams: def.defaultParams,
       }
       addPluginCatalogEntry(catalogEntry)
       registry.nodes.add(prefixed)
@@ -2111,6 +2453,7 @@ function createWorkflowAPI(pluginId: string): PluginWorkflowAPI {
       // category so authors can drag them onto canvases.
       addPluginCatalogEntry({
         kind: prefixed as never,
+        typeVersion: def.typeVersion,
         category: "trigger",
         label: def.label,
         description: def.description,
@@ -2119,6 +2462,7 @@ function createWorkflowAPI(pluginId: string): PluginWorkflowAPI {
         desktopOnly: def.desktopOnly,
         pluginId,
         paramsSchema: def.paramsSchema,
+        defaultParams: def.defaultParams,
       })
       registry.triggers.add(prefixed)
       registry.triggerVersions.set(prefixed, def.typeVersion)
@@ -2130,7 +2474,7 @@ function createWorkflowAPI(pluginId: string): PluginWorkflowAPI {
       }
     },
 
-    emitTriggerEvent(workflowId: string, kind: string, payload: unknown): void {
+    emitTriggerEvent(workflowId: string, kind: string, payload: unknown, triggerId?: string): void {
       // Phase 2: route into the orchestrator via `dispatchPluginTrigger`,
       // which prefixes the kind, verifies registration, and hands off to
       // `lib/workflow/runtime/trigger-bridge.dispatchTrigger`. Fire-and-
@@ -2141,6 +2485,7 @@ function createWorkflowAPI(pluginId: string): PluginWorkflowAPI {
         workflowId,
         kind,
         payload,
+        triggerId,
       }).then((result) => {
         if (!result.ok) {
           loggers.manager.debug("plugin emitTriggerEvent rejected", {

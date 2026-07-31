@@ -5,7 +5,7 @@
 // adapter that owns the file knows about these — this module just provides
 // the canonical normalize/denormalize used when shapes match.
 
-import type { McpTransport } from "@/lib/claude/types"
+import type { McpTransport } from "@cognia/agent-config-types"
 import type { McpImportDraft } from "@/lib/db/mcp-servers"
 
 /**

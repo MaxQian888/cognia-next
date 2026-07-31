@@ -4,23 +4,56 @@
   "version": "0.1.0",
   "description": "Run code in ephemeral Firecracker microVM sandboxes via E2B — useful for safe Computer Use isolation, code interpretation, and untrusted execution.",
   "type": "frontend",
-  "capabilities": ["mcp-server-preset", "commands"],
+  "capabilities": ["mcp-server-preset", "commands", "configuration"],
   "main": "src/index.ts",
   "author": "cognia-next",
   "license": "MIT",
+  "minAppVersion": "0.1.0",
   "engines": {
     "cognia": ">=0.1.0"
   },
   "permissions": [],
-  "activationEvents": ["onStartup"],
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "apiKey": {
+        "type": "string",
+        "secret": true,
+        "title": "E2B / AgentENV API key",
+        "description": "Required for E2B Cloud; optional for local AgentENV if auth is disabled."
+      },
+      "apiUrl": {
+        "type": "string",
+        "title": "AgentENV / E2B API URL",
+        "description": "Set this to your AgentENV server URL, for example http://127.0.0.1:8000."
+      }
+    }
+  },
+  "defaultConfig": {
+    "apiKey": "",
+    "apiUrl": ""
+  },
+  "activationEvents": ["startup", "onCommand:sandbox"],
   "runtimeCompatibility": {
     "browser": {
       "availability": "blocked",
-      "hint": "Requires npx to spawn @e2b/mcp-server — desktop only."
+      "reason": "Requires npx to spawn @e2b/mcp-server — desktop only."
     },
     "tauri": {
       "availability": "supported",
       "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "blocked",
+      "reason": "Spawns @e2b/mcp-server via npx — unavailable on mobile."
     }
-  }
+  },
+  "commands": [
+    {
+      "id": "sandbox",
+      "name": "/sandbox",
+      "description": "Attach the E2B sandbox MCP to the current character.",
+      "icon": "Box"
+    }
+  ]
 }

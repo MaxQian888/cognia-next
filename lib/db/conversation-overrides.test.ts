@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for lib/db/conversation-overrides.ts — per-conversation settings CRUD.
  */
@@ -6,9 +7,19 @@ import "fake-indexeddb/auto"
 import {
   upsertByConversationKey,
   readForResolution,
+  patchConversationOverride,
   setPinned,
   setArchived,
+  effectiveStatus,
+  setStatus,
+  wakeSnoozedConversations,
+  setAssignee,
+  addLabel,
+  removeLabel,
+  setSlaDue,
+  markResponded,
 } from "./conversation-overrides"
+import { listAssignmentEvents } from "./conversation-assignment-events"
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
 
 beforeEach(async () => {
@@ -59,6 +70,60 @@ describe("conversation-overrides", () => {
 
   it("readForResolution returns undefined for unknown key", async () => {
     expect(await readForResolution("unknown:key")).toBeUndefined()
+  })
+
+  describe("patchConversationOverride", () => {
+    it("creates the row (with sessionId) and applies the patch", async () => {
+      const row = await patchConversationOverride(
+        "telegram:adp_1:chat_777",
+        { reasoningOverride: "high", teamId: "team_a" },
+        "sess_new"
+      )
+      expect(row.id).toMatch(/^cov_/)
+      expect(row.sessionId).toBe("sess_new")
+      expect(row.reasoningOverride).toBe("high")
+      expect(row.teamId).toBe("team_a")
+    })
+
+    it("merges into an existing row without a sessionId and bumps updatedAt", async () => {
+      const created = await upsertByConversationKey(baseInput())
+      await new Promise((r) => setTimeout(r, 2))
+      const patched = await patchConversationOverride("telegram:adp_1:chat_123", {
+        approvalMode: "yolo",
+        proactivePush: true,
+      })
+      expect(patched.id).toBe(created.id)
+      expect(patched.mode).toBe("auto") // untouched
+      expect(patched.approvalMode).toBe("yolo")
+      expect(patched.proactivePush).toBe(true)
+      expect(patched.updatedAt).toBeGreaterThan(created.updatedAt)
+    })
+
+    it("throws when the row is absent and no sessionId is supplied", async () => {
+      await expect(
+        patchConversationOverride("telegram:adp_1:absent", { activeSessionId: "s1" })
+      ).rejects.toThrow(/no sessionId/)
+    })
+
+    it("sets activeSessionId for /switch", async () => {
+      await upsertByConversationKey(baseInput())
+      const patched = await patchConversationOverride("telegram:adp_1:chat_123", {
+        activeSessionId: "sess_switched",
+      })
+      expect(patched.activeSessionId).toBe("sess_switched")
+    })
+
+    it("binds and clears workflowId for /workflow", async () => {
+      await upsertByConversationKey(baseInput())
+      const bound = await patchConversationOverride("telegram:adp_1:chat_123", {
+        workflowId: "wf_n",
+      })
+      expect(bound.workflowId).toBe("wf_n")
+      const cleared = await patchConversationOverride("telegram:adp_1:chat_123", {
+        workflowId: undefined,
+      })
+      expect(cleared.workflowId).toBeUndefined()
+    })
   })
 
   it("setPinned sets pinned=true and bumps updatedAt", async () => {
@@ -159,5 +224,114 @@ describe("conversation-overrides", () => {
     expect(second.id).toBe(first.id)
     expect(second.allowedBuiltInSkillIds).toEqual(["lark.task.list"])
     expect(second.requireHitlForWrites).toBe(false)
+  })
+})
+
+describe("conversation-overrides — CRM (v83)", () => {
+  const KEY = "discord:adp_1:ch_crm"
+
+  it("effectiveStatus defaults a missing/absent status to open", async () => {
+    expect(effectiveStatus(undefined)).toBe("open")
+    const row = await upsertByConversationKey({ conversationKey: KEY, sessionId: "s1" })
+    expect(effectiveStatus(row)).toBe("open")
+  })
+
+  it("setStatus auto-creates the row, persists status, and emits a trail entry", async () => {
+    await setStatus(KEY, "resolved", { sessionId: "s1" })
+    const row = await readForResolution(KEY)
+    expect(row?.status).toBe("resolved")
+    const trail = await listAssignmentEvents(KEY)
+    expect(trail.at(-1)).toMatchObject({ kind: "status.resolved" })
+  })
+
+  it("setStatus throws when the row is absent and no sessionId is given", async () => {
+    await expect(setStatus("never:seen", "pending")).rejects.toThrow(/sessionId/)
+  })
+
+  it("setStatus does not emit a trail entry when the status is unchanged", async () => {
+    await upsertByConversationKey({ conversationKey: KEY, sessionId: "s1", status: "open" })
+    await setStatus(KEY, "open", { sessionId: "s1" })
+    expect(await listAssignmentEvents(KEY)).toHaveLength(0)
+  })
+
+  it("snooze stores snoozeUntil and wakeSnoozedConversations reopens elapsed ones", async () => {
+    await setStatus(KEY, "snoozed", { sessionId: "s1", snoozeUntil: 1000 })
+    expect((await readForResolution(KEY))?.snoozeUntil).toBe(1000)
+
+    const wokeNone = await wakeSnoozedConversations(500)
+    expect(wokeNone).toBe(0)
+    expect((await readForResolution(KEY))?.status).toBe("snoozed")
+
+    const woke = await wakeSnoozedConversations(2000)
+    expect(woke).toBe(1)
+    const row = await readForResolution(KEY)
+    expect(row?.status).toBe("open")
+    expect(row?.snoozeUntil).toBeUndefined()
+  })
+
+  it("setAssignee emits assigned → reassigned → unassigned and mirrors assigneeKind", async () => {
+    await setAssignee(KEY, { kind: "character", id: "char-1" }, { sessionId: "s1" })
+    let row = await readForResolution(KEY)
+    expect(row?.assigneeKind).toBe("character")
+
+    await setAssignee(KEY, { kind: "team", id: "team-1" }, { sessionId: "s1" })
+    await setAssignee(KEY, null, { sessionId: "s1" })
+    row = await readForResolution(KEY)
+    expect(row?.assignee).toBeUndefined()
+    expect(row?.assigneeKind).toBeUndefined()
+
+    const kinds = (await listAssignmentEvents(KEY)).map((e) => e.kind)
+    expect(kinds).toEqual(["assigned", "reassigned", "unassigned"])
+  })
+
+  it("addLabel / removeLabel are idempotent and emit label events", async () => {
+    await addLabel(KEY, "lbl-1", "s1")
+    await addLabel(KEY, "lbl-1", "s1") // no-op
+    await addLabel(KEY, "lbl-2", "s1")
+    expect((await readForResolution(KEY))?.labelIds).toEqual(["lbl-1", "lbl-2"])
+
+    await removeLabel(KEY, "lbl-1", "s1")
+    await removeLabel(KEY, "lbl-1", "s1") // no-op
+    expect((await readForResolution(KEY))?.labelIds).toEqual(["lbl-2"])
+
+    const kinds = (await listAssignmentEvents(KEY)).map((e) => e.kind)
+    expect(kinds).toEqual(["label.added", "label.added", "label.removed"])
+  })
+
+  it("setSlaDue sets timers and markResponded clears next + stamps first response once", async () => {
+    await setSlaDue(KEY, { firstResponseDueAt: 100, nextResponseDueAt: 200 }, "s1")
+    let row = await readForResolution(KEY)
+    expect(row).toMatchObject({ firstResponseDueAt: 100, nextResponseDueAt: 200 })
+
+    await markResponded(KEY, 150)
+    row = await readForResolution(KEY)
+    expect(row?.nextResponseDueAt).toBeUndefined()
+    expect(row?.firstRespondedAt).toBe(150)
+
+    // A later response does not overwrite firstRespondedAt.
+    await setSlaDue(KEY, { nextResponseDueAt: 300 }, "s1")
+    await markResponded(KEY, 400)
+    expect((await readForResolution(KEY))?.firstRespondedAt).toBe(150)
+  })
+
+  it("markResponded is a no-op when no override row exists", async () => {
+    await expect(markResponded("absent:key")).resolves.toBeUndefined()
+  })
+
+  describe("workspace (project) scoping", () => {
+    it("stamps a new override row with the session's projectId", async () => {
+      await getDb().sessions.put({
+        id: "ses_ov",
+        projectId: "proj-A",
+        title: "a",
+        updatedAt: 1,
+        createdAt: 1,
+      } as never)
+      const row = await upsertByConversationKey({
+        conversationKey: "slack:c:u",
+        sessionId: "ses_ov",
+      })
+      expect(row.projectId).toBe("proj-A")
+    })
   })
 })

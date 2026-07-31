@@ -1,7 +1,12 @@
 /**
  * @jest-environment jsdom
  */
-import { useAgentTeamStore } from "../store"
+import {
+  activateAgentTeamAccountStorage,
+  clearAgentTeamAccountStorage,
+  purgeAgentTeamAccountStorage,
+  useAgentTeamStore,
+} from "../store"
 import type {
   AgentTeammate,
   AgentTeamTask,
@@ -14,7 +19,7 @@ import type {
   SharedMemoryEntry,
 } from "@/types/agent/agent-team"
 
-jest.mock("@/lib/logging", () => {
+jest.mock("@cognia/logging", () => {
   const child = {
     debug: jest.fn(),
     info: jest.fn(),
@@ -23,14 +28,27 @@ jest.mock("@/lib/logging", () => {
     child: () => child,
   }
   return {
+    // `createLogger` + `logger` are needed by modules now pulled into the store's
+    // import graph (e.g. lib/execution/broker.ts calls createLogger at module load).
+    createLogger: () => ({ ...child, child: () => child }),
+    logger: { ...child, child: () => child },
     loggers: {
       agent: { ...child, child: () => child },
+      plugin: { ...child, child: () => child },
     },
   }
 })
 
+// Controllable active workspace for Workspace-isolation tests (v86).
+let mockActiveProjectId: string | null = null
+jest.mock("@/stores/project/project-store", () => ({
+  useProjectStore: { getState: () => ({ activeProjectId: mockActiveProjectId }) },
+}))
+
 const reset = () => {
+  localStorage.clear()
   useAgentTeamStore.getState().reset()
+  mockActiveProjectId = null
 }
 
 describe("useAgentTeamStore createTeam", () => {
@@ -111,6 +129,33 @@ describe("useAgentTeamStore deleteTeam", () => {
     useAgentTeamStore.getState().deleteTeam(team.id)
     expect(useAgentTeamStore.getState().teams[team.id]).toBeUndefined()
     expect(useAgentTeamStore.getState().teammates[tm.id]).toBeUndefined()
+  })
+})
+
+describe("useAgentTeamStore editorSession", () => {
+  beforeEach(() => reset())
+
+  it("keeps legacy editor sessions as read-only compatibility data", () => {
+    expect(useAgentTeamStore.getState()).not.toHaveProperty("setEditorSession")
+  })
+
+  it("cleanupTeam drops the deleted team's editor session", () => {
+    const team = useAgentTeamStore.getState().createTeam({ name: "E", task: "t" })
+    useAgentTeamStore.setState({
+      editorSession: { [team.id]: { rootKey: "/proj", openPaths: [], activePath: null } },
+    })
+    useAgentTeamStore.getState().deleteTeam(team.id)
+    expect(useAgentTeamStore.getState().editorSession[team.id]).toBeUndefined()
+  })
+
+  it("purgeProject drops editor sessions for the project's teams", () => {
+    mockActiveProjectId = "proj-1"
+    const team = useAgentTeamStore.getState().createTeam({ name: "P", task: "t" })
+    useAgentTeamStore.setState({
+      editorSession: { [team.id]: { rootKey: "/proj", openPaths: [], activePath: null } },
+    })
+    useAgentTeamStore.getState().purgeProject("proj-1")
+    expect(useAgentTeamStore.getState().editorSession[team.id]).toBeUndefined()
   })
 })
 
@@ -241,6 +286,48 @@ describe("useAgentTeamStore Teammate CRUD", () => {
     ).toThrow(/Team not found/)
   })
 
+  it("rejects NEW raw apiKey/baseURL writes; legacy unchanged values stay readable (ADR-0090)", () => {
+    const team = useAgentTeamStore.getState().createTeam({ name: "X", task: "t" })
+    // New config with a raw key is refused at the store boundary.
+    expect(() =>
+      useAgentTeamStore.getState().addTeammate({
+        teamId: team.id,
+        name: "W",
+        config: { apiKey: "sk-raw-key" },
+      })
+    ).toThrow(/raw "apiKey" writes are retired/)
+
+    // A pinned-reference binding is the sanctioned shape.
+    const tm = useAgentTeamStore.getState().addTeammate({
+      teamId: team.id,
+      name: "W",
+      config: { execution: { mode: "pinned", deploymentRef: "dep-1" } },
+    })
+
+    // Updating with a NEW raw baseURL is refused; carrying an unchanged
+    // legacy value through an update passes.
+    expect(() =>
+      useAgentTeamStore
+        .getState()
+        .updateTeammate(tm.id, { config: { baseURL: "https://vendor.example" } })
+    ).toThrow(/raw "baseURL" writes are retired/)
+    useAgentTeamStore.getState().updateTeammate(tm.id, {
+      config: { execution: { mode: "pool", candidateIds: ["dep-1", "dep-2"] } },
+    })
+    expect(useAgentTeamStore.getState().teammates[tm.id].config.execution).toEqual({
+      mode: "pool",
+      candidateIds: ["dep-1", "dep-2"],
+    })
+
+    // upsertTeammate (whole-object replace) is guarded too — no bypass channel.
+    expect(() =>
+      useAgentTeamStore.getState().upsertTeammate({
+        ...useAgentTeamStore.getState().teammates[tm.id],
+        config: { apiKey: "sk-smuggled" },
+      })
+    ).toThrow(/raw "apiKey" writes are retired/)
+  })
+
   it("upsertTeammate replaces an existing teammate", () => {
     const team = useAgentTeamStore.getState().createTeam({ name: "X", task: "t" })
     const tm = useAgentTeamStore.getState().addTeammate({ teamId: team.id, name: "W" })
@@ -342,6 +429,91 @@ describe("useAgentTeamStore Teammate CRUD", () => {
     useAgentTeamStore.getState().setTeammateProgress(tm.id, 50)
     expect(useAgentTeamStore.getState().teammates[tm.id].progress).toBe(50)
     useAgentTeamStore.getState().setTeammateProgress("missing", 50)
+  })
+})
+
+describe("useAgentTeamStore task comments & attachments", () => {
+  beforeEach(() => reset())
+
+  const seedTask = () => {
+    const team = useAgentTeamStore.getState().createTeam({ name: "C", task: "t" })
+    const member = useAgentTeamStore
+      .getState()
+      .addTeammate({ teamId: team.id, name: "Ada", role: "teammate" })
+    const task = useAgentTeamStore
+      .getState()
+      .createTask({ teamId: team.id, title: "Do", description: "" })
+    return { team, member, task }
+  }
+
+  it("addTaskComment appends a comment, resolving the author name", () => {
+    const { member, task } = seedTask()
+    const c = useAgentTeamStore
+      .getState()
+      .addTaskComment({ taskId: task.id, authorId: member.id, text: "  found a bug  " })
+    expect(c).not.toBeNull()
+    expect(c?.text).toBe("found a bug")
+    expect(c?.authorName).toBe("Ada")
+    expect(useAgentTeamStore.getState().getTaskComments(task.id)).toHaveLength(1)
+  })
+
+  it("addTaskComment labels the operator and system authors", () => {
+    const { task } = seedTask()
+    const u = useAgentTeamStore
+      .getState()
+      .addTaskComment({ taskId: task.id, authorId: "user", text: "hi" })
+    const s = useAgentTeamStore
+      .getState()
+      .addTaskComment({ taskId: task.id, authorId: "system", text: "yo" })
+    expect(u?.authorName).toBe("You")
+    expect(s?.authorName).toBe("System")
+  })
+
+  it("addTaskComment mints attachment ids", () => {
+    const { member, task } = seedTask()
+    const c = useAgentTeamStore.getState().addTaskComment({
+      taskId: task.id,
+      authorId: member.id,
+      text: "see file",
+      attachments: [{ name: "log.txt", kind: "file", ref: "logs/log.txt" }],
+    })
+    expect(c?.attachments?.[0].id).toBeTruthy()
+    expect(c?.attachments?.[0].name).toBe("log.txt")
+  })
+
+  it("addTaskComment returns null for an unknown task or empty text", () => {
+    const { member, task } = seedTask()
+    expect(
+      useAgentTeamStore
+        .getState()
+        .addTaskComment({ taskId: "ghost", authorId: member.id, text: "x" })
+    ).toBeNull()
+    expect(
+      useAgentTeamStore
+        .getState()
+        .addTaskComment({ taskId: task.id, authorId: member.id, text: "   " })
+    ).toBeNull()
+  })
+
+  it("attachTaskFile adds a task-level attachment with a minted id", () => {
+    const { task } = seedTask()
+    useAgentTeamStore
+      .getState()
+      .attachTaskFile(task.id, { name: "spec.md", kind: "link", ref: "https://x/spec" })
+    const stored = useAgentTeamStore.getState().tasks[task.id].attachments
+    expect(stored).toHaveLength(1)
+    expect(stored?.[0]).toMatchObject({ name: "spec.md", kind: "link" })
+    expect(stored?.[0].id).toBeTruthy()
+  })
+
+  it("attachTaskFile is a no-op for an unknown task", () => {
+    expect(() =>
+      useAgentTeamStore.getState().attachTaskFile("ghost", { name: "n", kind: "file", ref: "r" })
+    ).not.toThrow()
+  })
+
+  it("getTaskComments returns [] for an unknown task", () => {
+    expect(useAgentTeamStore.getState().getTaskComments("ghost")).toEqual([])
   })
 })
 
@@ -534,6 +706,131 @@ describe("useAgentTeamStore Task CRUD", () => {
     useAgentTeamStore.getState().assignTask(t.id, tm.id)
     expect(useAgentTeamStore.getState().tasks[t.id].assignedTo).toBe(tm.id)
     useAgentTeamStore.getState().assignTask("missing", tm.id)
+  })
+})
+
+describe("useAgentTeamStore moveTask / reorderTask", () => {
+  beforeEach(() => reset())
+
+  const setup = () => {
+    const state = useAgentTeamStore.getState()
+    const team = state.createTeam({ name: "T", task: "t" })
+    const task = state.createTask({ teamId: team.id, title: "X", description: "" })
+    return { team, task }
+  }
+
+  it("returns task-not-found for unknown ids", () => {
+    expect(useAgentTeamStore.getState().moveTask("missing", "cancelled")).toEqual({
+      ok: false,
+      reason: "task-not-found",
+    })
+  })
+
+  it("denies illegal transitions with the guard's reason and leaves the task untouched", () => {
+    const { task } = setup()
+    const result = useAgentTeamStore.getState().moveTask(task.id, "completed")
+    expect(result).toEqual({ ok: false, reason: "illegal-transition" })
+    expect(useAgentTeamStore.getState().tasks[task.id].status).toBe("pending")
+  })
+
+  it("pending → cancelled stamps completedAt", () => {
+    const { task } = setup()
+    expect(useAgentTeamStore.getState().moveTask(task.id, "cancelled")).toEqual({ ok: true })
+    const moved = useAgentTeamStore.getState().tasks[task.id]
+    expect(moved.status).toBe("cancelled")
+    expect(moved.completedAt).toBeInstanceOf(Date)
+  })
+
+  it("failed → pending (manual retry) clears run-owned fields", () => {
+    const { task } = setup()
+    useAgentTeamStore.getState().updateTask(task.id, {
+      status: "failed",
+      error: "boom",
+      claimedBy: "tm-1",
+      startedAt: new Date(Date.now() - 5000),
+      completedAt: new Date(),
+      actualDuration: 5000,
+    })
+    expect(useAgentTeamStore.getState().moveTask(task.id, "pending")).toEqual({ ok: true })
+    const moved = useAgentTeamStore.getState().tasks[task.id]
+    expect(moved.status).toBe("pending")
+    expect(moved.error).toBeUndefined()
+    expect(moved.claimedBy).toBeUndefined()
+    expect(moved.startedAt).toBeUndefined()
+    expect(moved.completedAt).toBeUndefined()
+    expect(moved.actualDuration).toBeUndefined()
+  })
+
+  it("review → completed stamps completedAt and actualDuration from startedAt", () => {
+    const { task } = setup()
+    const startedAt = new Date(Date.now() - 3000)
+    useAgentTeamStore.getState().updateTask(task.id, { status: "review", startedAt })
+    expect(useAgentTeamStore.getState().moveTask(task.id, "completed")).toEqual({ ok: true })
+    const moved = useAgentTeamStore.getState().tasks[task.id]
+    expect(moved.status).toBe("completed")
+    expect(moved.completedAt).toBeInstanceOf(Date)
+    expect(moved.actualDuration).toBeGreaterThanOrEqual(3000)
+  })
+
+  it("claimed → pending at rest releases the teammate's currentTaskId mirror", () => {
+    const { team, task } = setup()
+    const state = useAgentTeamStore.getState()
+    const mate = state.addTeammate({
+      teamId: team.id,
+      name: "W",
+      description: "",
+      role: "teammate",
+    })
+    state.claimTask(task.id, mate.id)
+    expect(useAgentTeamStore.getState().tasks[task.id].status).toBe("claimed")
+    expect(useAgentTeamStore.getState().teammates[mate.id].currentTaskId).toBe(task.id)
+
+    expect(useAgentTeamStore.getState().moveTask(task.id, "pending")).toEqual({ ok: true })
+    expect(useAgentTeamStore.getState().tasks[task.id].status).toBe("pending")
+    expect(useAgentTeamStore.getState().tasks[task.id].claimedBy).toBeUndefined()
+    expect(useAgentTeamStore.getState().teammates[mate.id].currentTaskId).toBeUndefined()
+  })
+
+  it("claimed → pending is denied while the team is executing", () => {
+    const { team, task } = setup()
+    const state = useAgentTeamStore.getState()
+    const mate = state.addTeammate({
+      teamId: team.id,
+      name: "W",
+      description: "",
+      role: "teammate",
+    })
+    state.claimTask(task.id, mate.id)
+    state.setTeamStatus(team.id, "executing")
+    expect(useAgentTeamStore.getState().moveTask(task.id, "pending")).toEqual({
+      ok: false,
+      reason: "runtime-owned",
+    })
+    expect(useAgentTeamStore.getState().tasks[task.id].status).toBe("claimed")
+  })
+
+  it("reorderTask renumbers only the task's own column", () => {
+    const state = useAgentTeamStore.getState()
+    const team = state.createTeam({ name: "T", task: "t" })
+    const a = state.createTask({ teamId: team.id, title: "a", description: "" })
+    const b = state.createTask({ teamId: team.id, title: "b", description: "" })
+    const c = state.createTask({ teamId: team.id, title: "c", description: "" })
+    // A task in another column keeps its order untouched.
+    const other = state.createTask({ teamId: team.id, title: "other", description: "" })
+    state.updateTask(other.id, { status: "cancelled" })
+
+    useAgentTeamStore.getState().reorderTask(a.id, 2)
+    const tasks = useAgentTeamStore.getState().tasks
+    expect(tasks[b.id].order).toBe(0)
+    expect(tasks[c.id].order).toBe(1)
+    expect(tasks[a.id].order).toBe(2)
+    expect(tasks[other.id].order).toBe(3)
+  })
+
+  it("reorderTask is a no-op for unknown ids", () => {
+    const before = useAgentTeamStore.getState().tasks
+    useAgentTeamStore.getState().reorderTask("missing", 0)
+    expect(useAgentTeamStore.getState().tasks).toBe(before)
   })
 })
 
@@ -750,6 +1047,69 @@ describe("useAgentTeamStore Events", () => {
     })
     useAgentTeamStore.getState().clearEvents()
     expect(useAgentTeamStore.getState().events).toHaveLength(0)
+  })
+
+  it("replaces the live progress_update row for a task in place", () => {
+    const s = () => useAgentTeamStore.getState()
+    s().addEvent({
+      type: "progress_update",
+      teamId: "t",
+      taskId: "task-1",
+      timestamp: new Date(),
+      data: { phase: "start", toolCount: 0 },
+    })
+    s().addEvent({
+      type: "progress_update",
+      teamId: "t",
+      taskId: "task-1",
+      timestamp: new Date(),
+      data: { phase: "running", toolCount: 2 },
+    })
+    // A different task does NOT collapse onto task-1.
+    s().addEvent({
+      type: "progress_update",
+      teamId: "t",
+      taskId: "task-2",
+      timestamp: new Date(),
+      data: { phase: "running", toolCount: 1 },
+    })
+
+    const progress = s().events.filter((e) => e.type === "progress_update")
+    expect(progress).toHaveLength(2)
+    const task1 = progress.find((e) => e.taskId === "task-1")!
+    expect(task1.data?.phase).toBe("running")
+    expect(task1.data?.toolCount).toBe(2)
+  })
+
+  it("freezes a terminal progress_update so later frames append instead of replacing", () => {
+    const s = () => useAgentTeamStore.getState()
+    s().addEvent({
+      type: "progress_update",
+      teamId: "t",
+      taskId: "task-1",
+      timestamp: new Date(),
+      data: { phase: "running", toolCount: 1 },
+    })
+    s().addEvent({
+      type: "progress_update",
+      teamId: "t",
+      taskId: "task-1",
+      timestamp: new Date(),
+      data: { phase: "done", toolCount: 3 },
+    })
+    // The done frame replaced the running one (still one row).
+    expect(s().events.filter((e) => e.type === "progress_update")).toHaveLength(1)
+    expect(s().events[0]!.data?.phase).toBe("done")
+
+    // A subsequent frame for the same task can no longer replace the frozen row.
+    s().addEvent({
+      type: "progress_update",
+      teamId: "t",
+      taskId: "task-1",
+      timestamp: new Date(),
+      data: { phase: "running", toolCount: 4 },
+    })
+    expect(s().events.filter((e) => e.type === "progress_update")).toHaveLength(2)
   })
 })
 
@@ -1544,5 +1904,115 @@ describe("useAgentTeamStore clearStaleCapabilityIds", () => {
     expect(useAgentTeamStore.getState().teams[team.id].config.capabilities?.skillIds).toEqual([
       "keep",
     ])
+  })
+})
+
+describe("workspace (project) isolation", () => {
+  beforeEach(() => {
+    reset()
+  })
+
+  it("createTeam stamps the active project id", () => {
+    mockActiveProjectId = "proj-A"
+    const team = useAgentTeamStore.getState().createTeam({ name: "T", task: "t" })
+    expect(team.projectId).toBe("proj-A")
+  })
+
+  it("purgeProject removes only the target workspace's teams, teammates, and tasks", () => {
+    mockActiveProjectId = "proj-A"
+    const teamA = useAgentTeamStore.getState().createTeam({ name: "A", task: "a" })
+    useAgentTeamStore.getState().createTask({ teamId: teamA.id, title: "tA", description: "d" })
+    mockActiveProjectId = "proj-B"
+    const teamB = useAgentTeamStore.getState().createTeam({ name: "B", task: "b" })
+
+    useAgentTeamStore.getState().purgeProject("proj-A")
+
+    const s = useAgentTeamStore.getState()
+    expect(s.teams[teamA.id]).toBeUndefined()
+    expect(s.teams[teamB.id]).toBeDefined()
+    // Teammates + tasks of the purged team are gone.
+    expect(Object.values(s.teammates).some((tm) => tm.teamId === teamA.id)).toBe(false)
+    expect(Object.values(s.tasks).some((t) => t.teamId === teamA.id)).toBe(false)
+    // Team B's lead teammate survives.
+    expect(Object.values(s.teammates).some((tm) => tm.teamId === teamB.id)).toBe(true)
+  })
+
+  it("purgeProject leaves shared templates untouched", () => {
+    mockActiveProjectId = "proj-A"
+    const team = useAgentTeamStore.getState().createTeam({ name: "A", task: "a" })
+    const templateCountBefore = Object.keys(useAgentTeamStore.getState().templates).length
+    useAgentTeamStore.getState().purgeProject("proj-A")
+    expect(useAgentTeamStore.getState().teams[team.id]).toBeUndefined()
+    expect(Object.keys(useAgentTeamStore.getState().templates).length).toBe(templateCountBefore)
+  })
+})
+
+describe("account storage isolation", () => {
+  const persistedTeam = (id: string, name: string) => ({
+    id,
+    name,
+    description: "",
+    task: "",
+    status: "idle",
+    config: {},
+    selectedExecutionPattern: "sequential",
+    leadId: `${id}-lead`,
+    teammateIds: [`${id}-lead`],
+    taskIds: [],
+    messageIds: [],
+    progress: 0,
+    totalTokenUsage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+    createdAt: new Date("2026-01-01T00:00:00.000Z").toISOString(),
+  })
+
+  beforeEach(() => {
+    reset()
+  })
+
+  it("activates an account-local team snapshot without leaking the previous account", () => {
+    localStorage.setItem(
+      "cognia-agent-teams:acct_a",
+      JSON.stringify({ state: { teams: { team_a: persistedTeam("team_a", "Alpha team") } } })
+    )
+    localStorage.setItem(
+      "cognia-agent-teams:acct_b",
+      JSON.stringify({ state: { teams: { team_b: persistedTeam("team_b", "Beta team") } } })
+    )
+
+    activateAgentTeamAccountStorage("acct_a")
+    expect(Object.keys(useAgentTeamStore.getState().teams)).toEqual(["team_a"])
+
+    activateAgentTeamAccountStorage("acct_b")
+    expect(Object.keys(useAgentTeamStore.getState().teams)).toEqual(["team_b"])
+    expect(useAgentTeamStore.getState().teams.team_a).toBeUndefined()
+  })
+
+  it("clears in-memory account state without deleting the account snapshot", () => {
+    localStorage.setItem(
+      "cognia-agent-teams:acct_a",
+      JSON.stringify({ state: { teams: { team_a: persistedTeam("team_a", "Alpha team") } } })
+    )
+
+    activateAgentTeamAccountStorage("acct_a")
+    clearAgentTeamAccountStorage()
+
+    expect(useAgentTeamStore.getState().teams).toEqual({})
+    expect(localStorage.getItem("cognia-agent-teams:acct_a")).toContain("Alpha team")
+  })
+
+  it("purges only the deleted account's team bucket", () => {
+    localStorage.setItem(
+      "cognia-agent-teams:acct_a",
+      JSON.stringify({ state: { teams: { team_a: persistedTeam("team_a", "A") } } })
+    )
+    localStorage.setItem(
+      "cognia-agent-teams:acct_b",
+      JSON.stringify({ state: { teams: { team_b: persistedTeam("team_b", "B") } } })
+    )
+
+    purgeAgentTeamAccountStorage("acct_a")
+
+    expect(localStorage.getItem("cognia-agent-teams:acct_a")).toBeNull()
+    expect(localStorage.getItem("cognia-agent-teams:acct_b")).toContain("team_b")
   })
 })

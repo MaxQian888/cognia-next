@@ -1,0 +1,11 @@
+{
+  "kindCharacter": "Character",
+  "kindSkill": "Skill",
+  "noSummary": "No summary",
+  "qualityScore": "Score {percent}%",
+  "statusAccepted": "Accepted",
+  "statusEdited": "Edited",
+  "statusPending": "Pending",
+  "statusRejected": "Rejected",
+  "untitled": "Untitled draft"
+}

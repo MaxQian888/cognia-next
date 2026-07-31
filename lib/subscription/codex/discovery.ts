@@ -37,7 +37,9 @@ export async function discoverCodexAuth(): Promise<DiscoveredCodexAuth | null> {
 /**
  * Translate a `DiscoveredCodexAuth` into the shape we persist into our own
  * vault. This is the "Adopt" operation: copy fields verbatim, never mutate
- * codex-cli's source files.
+ * codex-cli's source files. `originalSource` keeps reused accounts linked to
+ * the CLI store so refresh re-discovers the current token pair instead of
+ * rotating a copied refresh token behind codex-cli's back.
  *
  * Returns `null` when the discovered payload has neither a ChatGPT bearer
  * nor an API key (in which case the renderer should treat it as "credential
@@ -77,7 +79,17 @@ function chatGptCredentialFrom(
     accessToken: tokens.accessToken,
     refreshToken: tokens.refreshToken,
     idTokenRaw: tokens.idTokenRaw,
-    expiresAtMs: 0,
+    // A ChatGPT-login access token is a short-lived JWT, but codex-cli's
+    // auth.json stores no separate expiry — so read it from the token itself.
+    // When it can't be decoded, fall back to "already expired" (storedAtMs) so
+    // the first use refreshes via the long-lived refresh_token.
+    //
+    // The old hard-coded `0` made `isCodexCredentialFresh` report the credential
+    // fresh forever (the `expiresAtMs === 0` branch), so a reused ChatGPT
+    // subscription was NEVER refreshed and 401'd on both the chat and the
+    // external-agent spawn paths the moment its stored bearer aged out — i.e.
+    // "reuse the codex-cli login" adopted a subscription that stopped working.
+    expiresAtMs: accessTokenExpiryMs(tokens.accessToken) ?? stored.storedAtMs,
     authMode: "chatgpt",
     email: tokens.email,
     chatgptPlanType: tokens.chatgptPlanType,
@@ -85,6 +97,35 @@ function chatGptCredentialFrom(
     accountId: tokens.accountId ?? tokens.chatgptAccountId,
     ...stored,
   }
+}
+
+/**
+ * Extract the `exp` claim (as epoch ms) from a JWT access token. ChatGPT-login
+ * access tokens are JWTs; the `exp` is what `isCodexCredentialFresh` compares
+ * against to decide when to renew via the refresh_token. Returns `null` when the
+ * token isn't a decodable JWT carrying a positive numeric `exp` (e.g. an opaque
+ * token) — the caller then treats it as already-expired and refreshes on first
+ * use.
+ */
+function accessTokenExpiryMs(accessToken: string): number | null {
+  const parts = accessToken.split(".")
+  if (parts.length < 2) return null
+  try {
+    const payload = base64UrlToString(parts[1])
+    const claims = JSON.parse(payload) as { exp?: unknown }
+    const expSeconds = typeof claims.exp === "number" ? claims.exp : null
+    return expSeconds != null && expSeconds > 0 ? expSeconds * 1000 : null
+  } catch {
+    return null
+  }
+}
+
+/** Decode a base64url segment (JWT payload) to a string. `atob` is available in
+ * both the Tauri renderer and the Node/jsdom test envs. */
+function base64UrlToString(segment: string): string {
+  const base64 = segment.replace(/-/g, "+").replace(/_/g, "/")
+  const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=")
+  return atob(padded)
 }
 
 function apiKeyCredentialFrom(

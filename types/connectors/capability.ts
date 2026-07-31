@@ -28,6 +28,33 @@ export const ALL_CAPABILITIES = [
   "delete",
   "typing",
   "history.fetch",
+  // The adapter can forward an existing message (or merge-forward several) to
+  // another conversation (`forwardMessage()`).
+  "forward",
+  // The adapter can escalate a sent message to users via an urgent channel
+  // (Feishu 加急: in-app / SMS / phone — `sendUrgent()`). Requires an elevated
+  // platform scope many bots lack.
+  "urgent",
+  // presence — the adapter can surface a short, periodically refreshed
+  // status text next to a user/bot identity (Lark 系统状态 badge, Slack
+  // users.profile.set, Discord gateway presence). Declared when the
+  // adapter implements `setPresenceStatus()`.
+  "presence.status",
+  // The adapter can pin a message so a periodically edited card stays
+  // visible at the top of a conversation (`pinMessage()`).
+  "pin",
+  // Chat management (W2 multi-bot) — declared when the adapter implements
+  // the matching optional `PlatformAdapter` method. These flags gate the
+  // platform-neutral `im.*` built-in skills via `requires:` in the skill
+  // manifest, so incapable platforms simply never surface the tools.
+  //   - `chat.create`     — `createChat()` (make a new group chat)
+  //   - `chat.members`    — `addChatMembers()` + `removeChatMembers()`
+  //   - `chat.update`     — `updateChat()` (rename / description)
+  //   - `contact.resolve` — `resolveContacts()` (email/phone/name → member id)
+  "chat.create",
+  "chat.members",
+  "chat.update",
+  "contact.resolve",
   // platform-specific rich content (escape hatches)
   "rich-markdown.telegram",
   "rich-markdown.slack",
@@ -160,10 +187,15 @@ export function componentKindsByLevel(
 }
 
 /**
- * Default per-segment-type degradation order. Each adapter MAY override via
- * its own degrade table; this is the conservative default. The bus walks
- * the chain from index 0 onward, picking the first segment type whose
- * `send.<type>` capability the adapter declares.
+ * Default per-segment-type degradation order — the conservative reference
+ * chain, read from index 0 onward: the first segment type whose
+ * `send.<type>` capability an adapter declares is the one to emit.
+ *
+ * NOTE (reality check): no central walker consumes this today. Degradation
+ * happens ad-hoc INSIDE each adapter's serializer (e.g. markdown→text
+ * flattening in the per-platform mappers); the bus does not walk this
+ * chain. The helper is kept as the documented default order and stays
+ * available for future central wiring in the bus/runner.
  */
 export function defaultDegradeChain(from: SegmentType): SegmentType[] {
   switch (from) {

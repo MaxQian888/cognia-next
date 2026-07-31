@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Plugin Storage API Tests
  */
@@ -9,6 +10,11 @@ jest.mock("./crypto-helpers", () => {
   return {
     deriveKey: jest.fn(async (pluginId: string) => {
       const key = `mock-key-${pluginId}`
+      keys.set(key, pluginId)
+      return key
+    }),
+    deriveInstallKey: jest.fn(async (pluginId: string) => {
+      const key = `mock-install-key-${pluginId}`
       keys.set(key, pluginId)
       return key
     }),

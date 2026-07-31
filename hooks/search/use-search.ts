@@ -7,13 +7,13 @@
 import { useCallback, useState } from "react"
 import { useSettingsStore } from "@/stores/settings"
 import { search } from "@/lib/search/search-service"
-import { getSearchCache } from "@/lib/search/search-cache"
+import { getSearchCache } from "@cognia/web-search/search-cache"
 import type {
   SearchOptions,
   SearchProviderType,
   SearchResponse,
   SearchType,
-} from "@/lib/search/types"
+} from "@cognia/web-search/types"
 
 export interface UseSearchOptions {
   /** Override the default provider for all calls from this hook instance. */
@@ -67,6 +67,7 @@ export function useSearch(options: UseSearchOptions = {}): UseSearchReturn {
           provider,
           providerSettings,
           fallbackEnabled: settings?.searchFallbackEnabled ?? true,
+          maxRetries: settings?.searchMaxRetries,
           maxResults: opts.maxResults ?? settings?.searchMaxResults ?? 5,
           searchType: opts.searchType ?? settings?.defaultSearchType,
           searchDepth: opts.searchDepth ?? settings?.defaultSearchDepth,

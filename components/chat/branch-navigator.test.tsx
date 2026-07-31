@@ -80,6 +80,63 @@ describe("BranchNavigator", () => {
     expect(useChatStore.getState().activeBranchByGroup.g1).toBe("a")
   })
 
+  it("reads and writes the message's OWN session, not the focused one", () => {
+    // A split pane or a sidechat renders its own thread; reading the top-level
+    // projection flipped branches against whatever happened to be in front.
+    const own = (id: string, idx: number) =>
+      ({
+        id,
+        role: "assistant",
+        parts: [],
+        metadata: { branchGroupId: "g1", branchIndex: idx, sessionId: "pane-b" },
+      }) as unknown as UIMessage
+    const a = own("a", 0)
+    const b = own("b", 1)
+    act(() => {
+      useChatStore.setState({
+        activeSessionId: "pane-a",
+        // The focused thread has nothing to do with this group.
+        messages: [branchMsg("unrelated", "gX", 0)],
+        activeBranchByGroup: {},
+        sessions: {
+          "pane-b": {
+            ...useChatStore.getState().sessions["pane-b"],
+            messages: [a, b],
+            activeBranchByGroup: { g1: "b" },
+          },
+        } as never,
+      })
+    })
+
+    render(<BranchNavigator message={b} />)
+    expect(screen.getByTestId("branch-navigator-counter")).toHaveTextContent("2 / 2")
+
+    fireEvent.click(screen.getByTestId("branch-navigator-prev"))
+    expect(useChatStore.getState().sessions["pane-b"].activeBranchByGroup.g1).toBe("a")
+    // The focused pane's own selection is untouched.
+    expect(useChatStore.getState().activeBranchByGroup.g1).toBeUndefined()
+  })
+
+  it("renders sibling arrows on an edited USER message", () => {
+    // Editing keeps the original question as a sibling instead of deleting its
+    // tail, so the navigator has to work on user rows too.
+    const v0 = {
+      id: "q0",
+      role: "user",
+      parts: [],
+      metadata: { branchGroupId: "edit::q0", branchIndex: 0 },
+    } as unknown as UIMessage
+    const v1 = {
+      id: "q1",
+      role: "user",
+      parts: [],
+      metadata: { branchGroupId: "edit::q0", branchIndex: 1 },
+    } as unknown as UIMessage
+    act(() => useChatStore.getState().replaceMessages([v0, v1]))
+    render(<BranchNavigator message={v1} />)
+    expect(screen.getByTestId("branch-navigator-counter")).toHaveTextContent("2 / 2")
+  })
+
   it("wraps Prev from the first branch to the last", () => {
     const a = branchMsg("a", "g1", 0)
     const b = branchMsg("b", "g1", 1)

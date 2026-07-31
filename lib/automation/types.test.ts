@@ -5,6 +5,41 @@ import {
   keyChord,
   parseAutomationError,
 } from "./types"
+import type { GetAppStateOptions, InstructionPack, UiTreeProjectionKind } from "./types"
+
+describe("app-state projection types", () => {
+  it("keeps model and inspector projections explicit", () => {
+    const projections: UiTreeProjectionKind[] = ["model", "inspector"]
+    const options: GetAppStateOptions = { projection: projections[1], maxNodes: 25_000 }
+
+    expect(options).toEqual({ projection: "inspector", maxNodes: 25_000 })
+  })
+
+  it("keeps instruction packs navigation-only", () => {
+    const pack: InstructionPack = {
+      bundleId: "com.apple.Notes",
+      version: 1,
+      guidance: ["Prefer stable AX identifiers."],
+      preferredLocators: [
+        {
+          purpose: "new note",
+          automationId: "new-note",
+          role: "AXButton",
+          name: null,
+        },
+      ],
+      loadingRoleHints: ["AXProgressIndicator"],
+    }
+
+    expect(Object.keys(pack)).toEqual([
+      "bundleId",
+      "version",
+      "guidance",
+      "preferredLocators",
+      "loadingRoleHints",
+    ])
+  })
+})
 
 describe("element ref helpers", () => {
   it("round-trips through elementRef / elementRefValue", () => {

@@ -4,7 +4,7 @@
  * This module exposes the legacy `buildProgressiveSkillsPrompt` /
  * `executeSkill` symbols expected by upstream agent code, but does NOT
  * duplicate any of cognia-next's skill model. It delegates to:
- *   - `Skill` type from `@/lib/claude/types`
+ *   - `Skill` type from `@cognia/agent-config-types`
  *   - `renderSkillsSection` from `@/lib/db/skills`
  *
  * Anything fancier (token-budgeted progressive disclosure, MCP-aware
@@ -12,7 +12,7 @@
  * fleshed out in place when the agent-trace / planning layers land.
  */
 
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 import { renderSkillsSection } from "@/lib/db/skills"
 
 export interface SkillExecutionContext {

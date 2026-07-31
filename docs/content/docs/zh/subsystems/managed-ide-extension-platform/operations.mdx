@@ -1,0 +1,50 @@
+---
+title: 运维、更新与排障
+description: 本地/配对托管、事务更新、迁移、Dev Mode 与恢复。
+---
+
+# 运维、更新与排障
+
+本地运行留在 Tauri。配对主机上的 code-server、profile、插件、权限、secret、
+proxy 与协议进程全部属于远程 Cognia host；桌面端不会升级该二进制。桌面端通过
+本地临时 relay 访问远端 workbench：先固定配对证书 SPKI fingerprint，再把现有
+device JWT 放进 `Authorization` header。真实远端端口和凭据始终仅限 loopback。
+
+插件更新使用持久事务：
+
+1. `plugin_stage_version` 下载并校验 checksum/signature，在 host-owned transaction
+   storage 解包并校验 manifest/资源，不触碰工作版本。
+2. Renderer 检查权限扩张与声明式 migration plan，并 stage 确定性 proxy。
+3. Host snapshot 旧 package 与 `.host-state`，包括 Managed IDE SQLite state 和
+   secret index。
+4. 旧 runtime 被 disable/unload，`plugin_commit_staged_update` 用同文件系统
+   rename 原子提交 staged package。
+5. 激活精确 staged proxy。code-server host 先尝试 live activation，仅在需要时
+   restart extension host；handshake 失败则恢复旧 proxy。
+6. Runtime verification 成功后才 finalize transaction。
+
+提交后任一步失败都会恢复 package 与 host state、重新扫描 runtime，并重新 enable
+旧版本。只有确认旧 package/state 已恢复但旧 runtime 仍无法激活时，才建议完整 Pro
+IDE restart。未提交 artifact 没有 activation marker，code-server 重启时会忽略。
+
+首次 profile 迁移会把 native Open VSX 安装移入隔离 native profile，旧 shim 仅在
+一个 major 内保留导出能力。只同步过滤后的 settings、keybinding 与 theme；扩展
+state、secret、trust decision 与 ticket 不复制。
+
+该同步是**一次性播种**，由迁移 marker 旁边独立的 `.portable-preferences-v1`
+把关，并且是**增量的**——只写 allowlist 内的键，managed profile 里的其余内容原样
+保留。播种之后，managed 的 `settings.json` 归渲染端的主题同步与你在 VS Code 内的
+设置所有，`keybindings.json` 完全归你。每次启动都重跑，会让 native profile 对两个
+allowlist 共有的键拥有最终发言权，并抹掉其余内容。
+
+Dev Mode 复用相同 catalog 与授权路径，并增加 schema diagnostics、资源监听、临时
+proxy rebuild、RPC inspection、permission simulation 与本地开发签名。
+
+Contribution 不可用时：
+
+1. 检查插件状态与 Workspace Trust。
+2. 比较 plugin version、manifest hash、catalog hash、platform version 与 generation。
+3. 检查 `cognia.<pluginId>.*` namespace conflict。
+4. 从脱敏本地 trace 检查 permission、path、deadline、backpressure、cancel 与 breaker。
+5. 确认 proxy activation marker 仍指向签名 cache artifact。
+6. 重建 proxy；只有旧 artifact 仍可恢复时才 restart extension host。

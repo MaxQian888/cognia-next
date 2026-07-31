@@ -23,10 +23,11 @@ Every `cognia plugin *` command accepts the same five global flags:
 | `--color [auto\|always\|never]`   | Color mode for stdout/stderr. Default `auto` follows TTY detection and the standard `NO_COLOR` / `FORCE_COLOR` env vars.                                                |
 | `--no-color`                      | Shortcut for `--color=never`. Takes precedence over `--color`.                                                                                                          |
 | `--quiet`, `-q`                   | Suppress spinners, progress bars, and informational chatter. Errors and JSON output still print.                                                                        |
-| `--verbose`, `-v`                 | Increase log verbosity. Repeatable: `-vv` enables debug-level traces. Today the flag is reserved — most subcommands don't yet read it but accept it for future wiring.  |
+| `--verbose`, `-v`                 | Increase log verbosity. Repeatable up to `-vv`. Human `plugin info` emits a command diagnostic on stderr; JSON and `--quiet` modes stay silent.                         |
 | `--yes`, `-y`                     | Pre-confirm every interactive prompt. **Required for CI**. See [Confirmation prompts](#confirmation-prompts) for the list of gates this skips.                          |
 
-A subset of subcommands also accept `--json` (see [JSON output](#json-output)).
+Every plugin subcommand with a bounded execution also accepts `--json` (see [JSON output](#json-output));
+`plugin dev --json` requires `--once` so stdout stays a single parseable report.
 
 ## TTY vs non-TTY behavior
 
@@ -110,15 +111,31 @@ Dispatch is by `manifest.type`:
 | Type       | Build pipeline                                                                                                                 | Output                             |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------- |
 | `wasm`     | `cargo component build --release` → embed `cognia:api-version` custom section → zip                                            | `target/cognia/<id>-<version>.zip` |
-| `frontend` | `npx --no-install esbuild src/index.ts --bundle --format=cjs --platform=neutral --target=es2022 --outfile=dist/index.js` → zip | `target/cognia/<id>-<version>.zip` |
+| `frontend` | `npx --no-install esbuild src/index.ts --bundle --format=cjs --platform=neutral --target=es2022 --outfile=dist/index.js` plus the `--external:` flags below → zip | `target/cognia/<id>-<version>.zip` |
+| `python` | validate `pythonMain` → copy existing Python entry file + `bundle_include[]` → zip | `target/cognia/<id>-<version>.zip` |
+| `hybrid` | copy existing `main`, `pythonMain`, optional `styles`, and `bundle_include[]` → zip | `target/cognia/<id>-<version>.zip` |
+| `vscode-extension` | validate `vscodeMain` → copy existing extension entry file + optional `styles` + `bundle_include[]` → zip | `target/cognia/<id>-<version>.zip` |
 
-For frontend plugins, **`plugin.json`'s `main` field must point at the bundled JS** (`dist/index.js` by default). The cognia host loads `<plugin_path>/<main>` at runtime via dynamic `import()` — it does not transpile TypeScript on the fly.
+For frontend plugins, **`plugin.json`'s `main` field must point at the bundled JS** (`dist/index.js` by default) — the host does not transpile TypeScript on the fly. It reads that file at runtime and evaluates it as CommonJS in a module wrapper, which is why the build emits `--format=cjs`.
 
-Other plugin types (`python`, `hybrid`, `vscode-extension`) declared in the schema are not yet covered by `cognia plugin build`; for those, package the bundle manually until the corresponding pipeline ships.
+### Externals
+
+The build marks a fixed set of specifiers external, and the host supplies its own already-loaded instances for them when the bundle calls `require`:
+
+| Specifier | Why |
+| --- | --- |
+| `react`, `react/jsx-runtime`, `react/jsx-dev-runtime` | Two React instances do not share a hook dispatcher, so a bundled copy makes every hook in your components throw `Invalid hook call`. `--external:react` alone is insufficient — esbuild matches import paths literally, so the jsx runtime needs its own entry. |
+| `@cognia/plugin-sdk`, `@cognia/plugin-ui` | Shared so every plugin gets one instance of the SDK's registries and one copy of the component kit. |
+| `react-dom` | Externalised but **not** supplied. Keeping it external means it is never bundled; a `require` for it fails at load with an explicit message rather than a second reconciler rendering into a tree the host does not own. |
+| `@/types/plugin`, `@/lib/*` | Host path aliases, resolved by the host at runtime. |
+
+Everything else is bundled normally. Requiring a specifier that is neither bundled nor host-shared fails at load with an error naming it. See [Surfaces](./surfaces#sharing-the-hosts-react).
+
+For Python, hybrid, and VS Code-extension plugins, `cognia plugin build` is intentionally build-free: it packages files already named in the manifest instead of guessing at your Python, JS, or VSIX toolchain. Missing entry files and paths that escape the plugin directory fail the build.
 
 ### Adding extra files to the bundle
 
-By default the bundle contains `plugin.json` plus the type-specific artifact (`<wasmMain>.wasm` or `dist/index.js`). Add `bundle_include` in `plugin.json` to ship more:
+By default the bundle contains `plugin.json` plus the type-specific artifact (`wasmMain`, `main`, `pythonMain`, `vscodeMain`, and optional `styles` where applicable). Add `bundle_include` in `plugin.json` to ship more:
 
 ```json
 {
@@ -130,15 +147,16 @@ Paths are relative to `plugin.json`. Missing files surface as build errors.
 
 ## Inspect
 
-`cognia plugin info <bundle.zip>` decompresses a bundle in memory and prints what the host would see at install time — manifest summary, declared capabilities + permissions, file list, signature status, public-key fingerprint, and (for WASM bundles) the embedded `cognia:api-version` section. Useful before shipping to confirm you packaged the right artifact.
+`cognia plugin info <bundle.zip|directory>` inspects a packaged bundle or an unpacked plugin directory and prints what the host would see at install time — manifest summary, declared capabilities + permissions, file list, signature status, public-key fingerprint, and (for WASM inputs) the embedded `cognia:api-version` section. Useful before shipping to confirm you packaged the right artifact.
 
 ```bash
 cognia plugin info target/cognia/my-plugin-0.1.0.zip            # compact summary
 cognia plugin info target/cognia/my-plugin-0.1.0.zip --detailed  # full file table + sig breakdown
+cognia plugin info . --json                                      # inspect an unpacked plugin directory
 cognia plugin info target/cognia/my-plugin-0.1.0.zip --json      # machine-readable payload
 ```
 
-The default mode is compact: manifest summary, file count + total inner bytes, one-line signature verdict. `--detailed` adds a comfy-table file listing and a multi-line signature breakdown. `--json` emits a versioned payload (see [JSON output](#json-output)).
+The default mode is compact: manifest summary, file count + total inner bytes, one-line signature verdict. `--detailed` adds a comfy-table file listing and a multi-line signature breakdown. `--json` emits a versioned payload (see [JSON output](#json-output)). Directory inputs skip symlinks, report signature status as `not-applicable`, and only probe `wasmMain` files that stay inside the selected plugin root; escaping, missing, or corrupt WASM entries simply omit `wasmApiVersion`.
 
 ## Signing
 
@@ -158,7 +176,7 @@ cognia plugin verify target/cognia/<id>-<version>.zip
 # ✓ valid; public key: ...; fingerprint: ...
 ```
 
-`cognia plugin verify` reads `author.publicKey` from the bundle's manifest by default. Pass `--public-key <b64>` to override (useful when verifying a bundle whose manifest you don't yet trust). `--json` emits a versioned `{schemaVersion, ok, bundle, signature, publicKey, fingerprint, error?}` payload — convenient for scripted release gates.
+`cognia plugin verify` reads `author.publicKey` from the bundle's manifest by default. Pass `--public-key <b64>` to override (useful when verifying a bundle whose manifest you don't yet trust). `--json` emits a versioned `{schemaVersion, ok, action, bundle, signature, publicKey, fingerprint, stage?, error?}` payload — convenient for scripted release gates. Successful verification omits `stage`; failure payloads use `stage: "bundle" | "public-key" | "signature" | "verify"` so scripts can separate local input/read/key failures from the final signature check.
 
 ### Overwriting existing key / signature files
 
@@ -193,7 +211,7 @@ cognia plugin dev                         # rebuild on save, no reload
 cognia plugin dev --reload-url <URL>      # rebuild + POST to a running cognia to hot-reload
 ```
 
-If a running cognia is discoverable via the endpoint file, `cognia plugin dev` auto-fills `--reload-url` so the rebuild → reload loop works out of the box. Watches `src/`, `wit/`, `dist/`, `Cargo.toml`, `package.json`, and `plugin.json`.
+If a running cognia is discoverable via the endpoint file, `cognia plugin dev` auto-fills `--reload-url` so the rebuild -> reload loop works out of the box. It watches the standard source/build paths (`src/`, `wit/`, `dist/`, `Cargo.toml`, `package.json`, `plugin.json`) plus manifest-declared runtime entries such as `main`, `pythonMain`, `vscodeMain`, `styles`, and `bundle_include[]`.
 
 ### Status panel
 
@@ -229,15 +247,26 @@ A "No" answer (or a non-TTY without `--yes`) **aborts** the operation without wr
 
 ## JSON output
 
-Three subcommands accept `--json` for machine-readable output:
+Every bounded plugin subcommand accepts `--json` for machine-readable output:
 
 | Command                          | Schema                                                                                                            |
 | -------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `cognia plugin new --json`       | `{schemaVersion, ok, action, pluginId, pluginType, templateKind, directory, manifestPath, files[], keygen}`       |
 | `cognia plugin lint --json`      | `{schemaVersion, manifestPath, valid, diagnostics: [{severity, field, code, message, hint?}, ...]}`                |
-| `cognia plugin info --json`      | `{schemaVersion, path, sizeBytes, manifest, files, signature: {status, ...}, wasmApiVersion?}`                     |
-| `cognia plugin verify --json`    | `{schemaVersion, ok, bundle, signature, publicKey, fingerprint, error?}`                                          |
+| `cognia plugin build --json`     | `{schemaVersion, ok, action, pluginId, version, pluginType, bundle}`                                              |
+| `cognia plugin info --json`      | `{schemaVersion, ok, action, inputKind, path, sizeBytes, manifest, files, signature: {status, ...}, wasmApiVersion?}` |
+| `cognia plugin sign --json`      | `{schemaVersion, ok, action, bundle, signature, publicKey, fingerprint}`                                          |
+| `cognia plugin verify --json`    | `{schemaVersion, ok, action, bundle, signature, publicKey, fingerprint, stage?, error?}`                          |
+| `cognia plugin keygen --json`    | `{schemaVersion, ok, action, privateKeyPath, publicKeyPath, publicKey, fingerprint}`                              |
+| `cognia plugin install --json`   | `{schemaVersion, ok, action, pluginId, inputKind, path, warnings[]}`                                              |
+| `cognia plugin uninstall --json` | `{schemaVersion, ok, action, pluginId, purgeData}`                                                               |
+| `cognia plugin list --json`      | `{schemaVersion, ok, action, plugins[]}`                                                                          |
+| `cognia plugin reload --json`    | `{schemaVersion, ok, action, pluginId, inputKind?, path?, warnings[]}`                                            |
+| `cognia plugin status --json`    | `{schemaVersion, ok, action, running, endpointFile?, baseUrl?, error?}`                                           |
+| `cognia plugin dev --once --json` | `{schemaVersion, ok, action, mode, pluginId, version, pluginType, bundle, reload}`                              |
+| `cognia plugin embed-version --json` | `{schemaVersion, ok, action, version, input, output}`                                                         |
 
-Every payload carries a `schemaVersion` integer; new fields can be added without bumping it, but a breaking shape change will increment it. The other subcommands (`build`, `sign`, `new`, `keygen`, `install`, `uninstall`, `dev`) deliberately do not accept `--json` today — their primary use case is interactive — but the flag may extend to them in a future release if scripted use cases emerge.
+Every payload carries a `schemaVersion` integer; new fields can be added without bumping it, but a breaking shape change will increment it. `cognia plugin build --json` failure payloads use `stage: "input"` for missing or unreadable plugin roots/manifests, `stage: "lint"` for manifest diagnostics, and stage-specific build/pack payloads after the manifest is known. `cognia plugin keygen --json` failure payloads add `stage: "prepare" | "overwrite" | "write"` with `privateKeyPath`, `publicKeyPath`, and `error`; write failures stay on stdout and keep stderr empty for CI. `cognia plugin verify --json` uses `stage: "bundle" | "public-key" | "signature" | "verify"` only on failures. `cognia plugin dev` watch mode stays human-oriented and rejects `--json`; use `cognia plugin dev --once --json` for CI/editor smoke checks.
 
 ## Manual / marketplace distribution
 

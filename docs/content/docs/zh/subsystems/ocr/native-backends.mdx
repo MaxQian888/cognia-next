@@ -59,10 +59,12 @@ flowchart TD
   DISP -->|id match| FEAT{feature enabled?}
   FEAT -->|ocr-ocrs| OCRS["OcrsBackend::extract<br/>backend/ocrs.rs:150"]
   FEAT -->|ocr-paddle| PAD["PaddleOcrBackend::extract<br/>backend/paddle.rs:157"]
-  FEAT -->|tesseract / windows / apple<br/>no crate today| PH["PlaceholderBackend::extract<br/>backend/placeholder.rs:27"]
+  FEAT -->|"apple-vision（macOS 目标）"| AV["AppleVisionBackend::extract<br/>backend/apple.rs"]
+  FEAT -->|tesseract / windows<br/>no crate today| PH["PlaceholderBackend::extract<br/>backend/placeholder.rs:27"]
   PH --> MB["Err MissingBinding(id)<br/>→ TS unsupported_shell → router falls through"]
   OCRS --> RES["NativeOcrResult {text, blocks, w, h}"]
   PAD --> RES
+  AV --> RES
 ```
 
 `install_platform_backends`（`backend/mod.rs:36`）注册每个槽位——真实后端置于其 feature 之下，否则使用
@@ -72,20 +74,22 @@ flowchart TD
 ## Cargo features
 
 ```toml
-# src-tauri/Cargo.toml:396 — three are empty flags; only ocrs/paddle link crates
-ocr-tesseract = []                                                  # :400
-ocr-windows   = []                                                  # :403
-ocr-apple     = []                                                  # :406
-ocr-ocrs      = ["dep:ocrs", "dep:rten", "dep:rten-imageproc", "dep:image"]   # :410
-ocr-paddle    = ["dep:oar-ocr", "dep:ort", "dep:image"]                       # :414
+# crates/cognia-ocr/Cargo.toml — two are empty flags; only ocrs/paddle link crates
+ocr-tesseract = []
+ocr-windows   = []
+ocr-ocrs      = ["dep:ocrs", "dep:rten", "dep:rten-imageproc", "dep:image"]
+ocr-paddle    = ["dep:oar-ocr", "dep:ort", "dep:image"]
 ```
 
-<Callout type="warn" title="tesseract-rs / winocr / Apple Vision 在当前代码树中仅停留在文档层面">
-  ADR-0024 描述了五个真实绑定（tesseract-rs、winocr、一个 Swift sidecar、ocrs、oar-ocr）。在当前
-  manifest 中，`tesseract-rs` 与 `winocr` **并未被声明为依赖**——`ocr-tesseract`、`ocr-windows` 与
-  `ocr-apple` 是空 feature 标志，因此这三个后端会编译为 `PlaceholderBackend` 并返回
-  `MissingBinding`。如今只有 **ocrs** 与 **paddle-ocr** 拥有真实的支撑 crate。`ort = "=2.0.0-rc.12"`
-  这一钉定（`Cargo.toml:310`）是精确版本，与 ADR 一致。
+`apple-vision` 没有 feature 标志：只要目标平台是 macOS 就会编译（`backend/apple.rs`），
+通过 `objc2-vision` 绑定在进程内运行 Vision.framework 的 `VNRecognizeTextRequest`——
+无 sidecar、无模型下载。
+
+<Callout type="warn" title="tesseract-rs / winocr 在当前代码树中仅停留在文档层面">
+  在当前 manifest 中，`tesseract-rs` 与 `winocr` **并未被声明为依赖**——`ocr-tesseract` 与
+  `ocr-windows` 是空 feature 标志，因此这两个后端会编译为 `PlaceholderBackend` 并返回
+  `MissingBinding`。如今 **ocrs**、**paddle-ocr** 以及（macOS 上的）**apple-vision** 拥有真实实现。
+  `ort = "=2.0.0-rc.12"` 这一钉定是精确版本，与 ADR 一致。
 </Callout>
 
 `ort` 钉定到一个候选发布版本（`=2.0.0-rc.12`，`default-features = false`，features

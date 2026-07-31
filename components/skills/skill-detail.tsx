@@ -7,7 +7,16 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { CopyIcon, DownloadIcon, PencilIcon, PowerIcon, Trash2Icon } from "lucide-react"
+import {
+  ArrowUpCircleIcon,
+  CopyIcon,
+  DownloadIcon,
+  PencilIcon,
+  PowerIcon,
+  Trash2Icon,
+} from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
+import { useSkillUpdate } from "@/hooks/skills"
 import { duplicateSkill, inferCategory, inferSource, setSkillStatus } from "@/lib/db/skills"
 import { listResourcesForSkill } from "@/lib/db/skill-resources"
 import { getCategoryMeta, getSourceMeta } from "@/lib/skills/categories"
@@ -15,13 +24,13 @@ import { useSkillsStore } from "@/stores/skills"
 import { serializeSkill, skillFilename } from "@/lib/claude/skills-io"
 import { saveFileAs } from "@/lib/files/file-bridge"
 import { toast } from "sonner"
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 import { SkillResourceManager } from "./skill-resource-manager"
 import { SkillSecurityScanner } from "./skill-security-scanner"
 import { SkillValidationSection } from "./skill-validation-section"
 import { SkillSyncSection } from "./skill-sync-section"
 import { useSkillValidation } from "@/hooks/skills"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 interface Props {
   skill: Skill
@@ -35,8 +44,10 @@ export function SkillDetail({ skill }: Props) {
   const source = getSourceMeta(inferSource(skill))
   const Icon = category.icon
   const status = skill.status ?? "enabled"
-  const openEdit = useSkillsStore((s) => s.openEdit)
   const setDeleteTarget = useSkillsStore((s) => s.setDeleteTarget)
+  const openSkillInEditor = useSkillsStore((s) => s.openSkillInEditor)
+  const setActiveTab = useSkillsStore((s) => s.setActiveTab)
+  const closeDetail = useSkillsStore((s) => s.closeDetail)
   const resources = useLiveQuery(() => listResourcesForSkill(skill.id), [skill.id])
   useSkillValidation(skill.id)
 
@@ -105,11 +116,21 @@ export function SkillDetail({ skill }: Props) {
           </div>
         </div>
         <div className="flex w-full shrink-0 flex-wrap items-center justify-end gap-1.5 sm:w-auto sm:flex-col sm:items-stretch">
+          {/* Single edit entry: jumps straight to the workspace editor (file
+              tree + Monaco + validation). Metadata is edited from the editor's
+              "Skill settings" panel, so there is no separate form dialog. */}
           <Button
             size="sm"
             variant="outline"
-            onClick={() => openEdit(skill.id)}
+            onClick={() => {
+              openSkillInEditor(skill.id, skill.content)
+              setActiveTab("editor")
+              // On mobile the detail renders inside a full-screen Sheet that
+              // would otherwise keep covering the editor tab.
+              closeDetail()
+            }}
             disabled={skill.isBuiltIn}
+            data-testid="skill-open-in-editor"
           >
             <PencilIcon className="mr-1.5 size-3.5" />
             {t("card.edit")}
@@ -214,6 +235,7 @@ function OverviewSection({ skill }: { skill: Skill }) {
   }
   return (
     <div className="space-y-4">
+      <SkillUpdateBanner skill={skill} />
       <SkillSyncSection skill={skill} />
       <div className="grid gap-3 text-xs">
         <Row label={t("metaCategory")}>{skill.category ?? "—"}</Row>
@@ -234,6 +256,53 @@ function OverviewSection({ skill }: { skill: Skill }) {
           </Row>
         )}
       </div>
+    </div>
+  )
+}
+
+/**
+ * "Update available" banner with a one-click update, shown when the last
+ * explicit update check flagged this skill. The flag lives in the skills
+ * store so the toolbar's check, the list badge, and this banner agree.
+ * Exported for parity in the mobile skill sheet's Overview tab.
+ */
+export function SkillUpdateBanner({ skill }: { skill: Skill }) {
+  const t = useTranslations("skills.detail")
+  const tToasts = useTranslations("skills.toasts")
+  const updateAvailable = useSkillsStore((s) => Boolean(s.updateAvailable[skill.id]))
+  const updates = useSkillUpdate()
+  if (!updateAvailable) return null
+  const handleUpdate = async () => {
+    try {
+      await updates.updateOne(skill)
+      toast.success(tToasts("updated", { name: skill.name }))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+    }
+  }
+  return (
+    <div
+      className="flex items-center justify-between gap-3 rounded-lg border border-dashed bg-muted/30 px-3 py-2"
+      data-testid="skill-update-banner"
+    >
+      <span className="flex items-center gap-1.5 text-xs">
+        <ArrowUpCircleIcon className="size-3.5 text-emerald-500" />
+        {t("updateAvailable")}
+      </span>
+      <Button
+        size="sm"
+        className="min-h-11 md:min-h-8"
+        onClick={() => void handleUpdate()}
+        disabled={updates.updatingId === skill.id}
+        data-testid="skill-update-button"
+      >
+        {updates.updatingId === skill.id ? (
+          <Spinner className="mr-1.5 size-3" />
+        ) : (
+          <DownloadIcon className="mr-1.5 size-3.5" />
+        )}
+        {t("update")}
+      </Button>
     </div>
   )
 }

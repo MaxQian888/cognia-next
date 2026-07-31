@@ -7,6 +7,11 @@ import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { listTemplateWorkflows } from "@/lib/db/workflows"
 import { validateWorkflow } from "./validate"
 
+// Dexie cold-open of the full schema (v100+) can exceed the default 5s hook
+// timeout on the first test of a fresh worker — same pattern as the other
+// DB-touching suites that raise the per-suite timeout.
+jest.setTimeout(30_000)
+
 beforeEach(async () => {
   await getDb().delete()
   __resetDbForTesting()
@@ -60,13 +65,12 @@ describe("buildBuiltInWorkflowTemplates", () => {
     }
   })
 
-  it("ships the four Phase B advanced templates with correct ids and shapes", () => {
+  it("ships the platform-neutral Phase B advanced templates with correct ids and shapes", () => {
     const templates = buildBuiltInWorkflowTemplates()
     const advancedIds = [
       "wf_builtin_http_retry_fallback",
       "wf_builtin_parallel_analysts",
       "wf_builtin_inbox_triage_twin",
-      "wf_builtin_github_issue_to_pr",
     ]
     for (const id of advancedIds) {
       const t = templates.find((x) => x.id === id)
@@ -82,6 +86,20 @@ describe("buildBuiltInWorkflowTemplates", () => {
         expect(nodeIds.has(e.target)).toBe(true)
       }
     }
+  })
+
+  it("does not seed Marketplace platform workflows from Core", () => {
+    const templates = buildBuiltInWorkflowTemplates()
+    expect(templates.some((template) => template.id.includes("github"))).toBe(false)
+    expect(
+      templates.some((template) =>
+        template.nodes.some(
+          (node) =>
+            node.type === ("trigger.github.webhook" as never) ||
+            node.type.startsWith("action.github.")
+        )
+      )
+    ).toBe(false)
   })
 })
 

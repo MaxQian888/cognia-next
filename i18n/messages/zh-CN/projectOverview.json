@@ -1,0 +1,43 @@
+{
+  "actions": {
+    "openFullSourceControl": "打开完整源代码管理",
+    "openSourceControl": "源代码管理",
+    "openWorkspace": "打开工作区"
+  },
+  "analysis": {
+    "contextConfigured": "已配置 {count}/{total} 项项目上下文来源",
+    "contextLabel": "项目上下文",
+    "multiRoot": "已挂载 {count} 个工作区根目录",
+    "scopeLabel": "工作区范围",
+    "scmChanges": "有 {count} 项工作区变更需要处理",
+    "scmClean": "工作区没有未提交变更",
+    "scmConflicts": "有 {count} 个合并冲突需要解决",
+    "scmLoading": "正在加载源代码管理状态",
+    "scmNotRepo": "当前根目录不是 Git 仓库",
+    "scmUnavailable": "源代码管理需要桌面应用",
+    "singleRoot": "已挂载 1 个工作区根目录",
+    "sourceControlLabel": "源代码管理",
+    "title": "项目分析"
+  },
+  "noDescription": "尚未填写项目描述。",
+  "panelTitle": "项目",
+  "roots": {
+    "primary": "主目录",
+    "title": "工作区根目录"
+  },
+  "sourceControl": {
+    "clean": "没有未提交的变更",
+    "loading": "正在加载仓库状态…",
+    "notRepository": "此工作区根目录不是 Git 仓库。",
+    "title": "源代码管理",
+    "unavailable": "源代码管理状态和操作可在桌面应用中使用。"
+  },
+  "summary": {
+    "conversations": "对话",
+    "knowledge": "知识文件",
+    "messages": "消息",
+    "roots": "根目录",
+    "title": "项目信息"
+  },
+  "workspaceBadge": "对话工作区"
+}

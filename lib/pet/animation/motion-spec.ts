@@ -4,7 +4,7 @@
 // framer-motion keyframes. Keeping it pure means the whole expression system is
 // unit-tested without mounting anything.
 
-import type { PetEyes, PetOneShot, PetVisualState } from "@/types/pet"
+import type { PetEyes, PetMood, PetOneShot, PetVisualState } from "@/types/pet"
 
 export type PetMouthShape = "neutral" | "smile" | "grin" | "open" | "frown" | "flat" | "o"
 
@@ -123,6 +123,14 @@ function baseSpec(state: PetVisualState, bonesEyes: PetEyes): PetMotionSpec {
         durationSec: 0.7,
         loop: true,
       }
+    case "unwell":
+      return {
+        eyes: "sleepy",
+        mouth: "frown",
+        body: { scale: [1, 0.99, 1], y: [0, 2, 0], x: [0], rotate: [0] },
+        durationSec: 4.0,
+        loop: true,
+      }
   }
 }
 
@@ -181,6 +189,112 @@ function oneShotSpec(shot: PetOneShot, base: PetMotionSpec): PetMotionSpec {
         durationSec: 1,
         loop: false,
       }
+    case "sad":
+      return {
+        ...base,
+        eyes: "sleepy",
+        mouth: "frown",
+        body: { scale: [1, 0.96, 0.98], y: [0, 4, 3], x: [0], rotate: [0] },
+        durationSec: 1.4,
+        loop: false,
+      }
+    case "surprised":
+      return {
+        ...base,
+        eyes: "wide",
+        mouth: "o",
+        body: { scale: [1, 1.15, 1], y: [0, -12, 0], x: [0], rotate: [0] },
+        durationSec: 0.5,
+        loop: false,
+      }
+    case "love":
+      return {
+        ...base,
+        eyes: "star",
+        mouth: "smile",
+        body: { scale: [1, 1.06, 1], y: [0, -4, 0], x: [0], rotate: [0, -6, 6, -4, 0] },
+        durationSec: 1,
+        loop: false,
+      }
+    case "sleepy":
+      return {
+        ...base,
+        eyes: "sleepy",
+        mouth: "neutral",
+        body: { scale: [1, 1.02, 1], y: [0, 2, 4], x: [0], rotate: [0] },
+        durationSec: 1.8,
+        loop: false,
+      }
+    case "land":
+      // Impact squash-and-recover after a throw/fall settles.
+      return {
+        ...base,
+        eyes: "wide",
+        mouth: "o",
+        body: { scale: [1, 1.18, 0.85, 1.06, 1], y: [0, 2, 3, 0, 0], x: [0], rotate: [0] },
+        durationSec: 0.45,
+        loop: false,
+      }
+    case "hatch":
+      // Shell-crack pop: a sharp wiggle then a joyful settle.
+      return {
+        ...base,
+        eyes: "star",
+        mouth: "open",
+        body: {
+          scale: [0.9, 1.12, 0.96, 1.05, 1],
+          y: [0, -6, 0, -3, 0],
+          x: [0],
+          rotate: [0, -8, 8, -4, 0],
+        },
+        durationSec: 0.9,
+        loop: false,
+      }
+  }
+}
+
+/**
+ * Mood-flavored idle: the docstring contract of `PetMood` ("picks idle
+ * flavour") — a lonely pet breathes slower with a flat mouth, a happy one
+ * quicker with a grin. Only the plain idle loop is flavored; expressive
+ * states keep their own meaning. Pure.
+ */
+function applyMoodToIdle(spec: PetMotionSpec, mood: PetMood | undefined): PetMotionSpec {
+  if (!mood) return spec
+  switch (mood) {
+    case "lonely":
+      return { ...spec, mouth: "flat", durationSec: 4.2 }
+    case "happy":
+      return { ...spec, mouth: "grin", durationSec: 2.6 }
+    // content keeps the default; tired/grumpy never reach idle (the reducer
+    // maps them to sleeping/sad resting states).
+    default:
+      return spec
+  }
+}
+
+export interface ResolvePetMotionOptions {
+  /**
+   * Low-power mode: halve the cadence of LOOPING specs (idle breathing etc.)
+   * so the always-on widget animates at half rate. One-shots keep full speed —
+   * interaction feedback must stay snappy.
+   */
+  lowPower?: boolean
+  /** Coarse mood — flavors the plain idle loop only. */
+  mood?: PetMood
+  /** User is holding/dragging the pet — slow dangle pendulum + startled face. */
+  held?: boolean
+}
+
+/** Dangle pose while the user holds the pet (overrides the resting spec). */
+function heldSpec(base: PetMotionSpec): PetMotionSpec {
+  return {
+    ...base,
+    eyes: "wide",
+    mouth: "o",
+    body: { scale: [1], y: [0], x: [0], rotate: [4, -4, 4] },
+    durationSec: 1.2,
+    loop: true,
   }
 }
 
@@ -193,10 +307,19 @@ export function resolvePetMotion(
   state: PetVisualState,
   oneShot: PetOneShot | null,
   reducedMotion: boolean,
-  bonesEyes: PetEyes
+  bonesEyes: PetEyes,
+  options: ResolvePetMotionOptions = {}
 ): PetMotionSpec {
-  const base = baseSpec(state, bonesEyes)
-  const spec = oneShot ? oneShotSpec(oneShot, base) : base
+  const base =
+    state === "idle" && !oneShot
+      ? applyMoodToIdle(baseSpec(state, bonesEyes), options.mood)
+      : baseSpec(state, bonesEyes)
+  let spec = oneShot ? oneShotSpec(oneShot, base) : base
+  // Held wins over the resting loop but never interrupts one-shot feedback.
+  if (options.held && !oneShot) spec = heldSpec(spec)
+  if (options.lowPower && spec.loop) {
+    spec = { ...spec, durationSec: spec.durationSec * 2 }
+  }
   if (!reducedMotion) return spec
   return {
     ...spec,

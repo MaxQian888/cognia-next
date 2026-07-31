@@ -25,9 +25,6 @@ jest.mock("@/lib/shell/exec", () => ({
 jest.mock("@/lib/files/memory", () => ({
   appendMemory: jest.fn(),
 }))
-jest.mock("./composer/screenshot-button", () => ({
-  ScreenshotButton: () => null,
-}))
 jest.mock("./composer/voice-controls", () => ({
   VoiceControls: () => null,
 }))
@@ -41,7 +38,7 @@ import type { DataAdapter } from "@/lib/data-hooks/types"
 import { useChatStore } from "@/stores/chat"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { setDraft } from "@/lib/db/chat-drafts"
-import type { ChatSession, Character } from "@/lib/claude/types"
+import type { ChatSession, Character } from "@cognia/agent-config-types"
 
 function makeAdapter(overrides: Partial<DataAdapter> = {}): DataAdapter {
   return {
@@ -283,5 +280,45 @@ describe("Composer — per-session draft persistence", () => {
     await waitFor(() => {
       expect(ta.value).toBe("beta draft")
     })
+  })
+
+  // Regression: the Composer is not remounted per session (no key), so switching
+  // to a session that has NO draft must explicitly clear the box — otherwise the
+  // previous session's text lingers and gets persisted into the new session.
+  it("clears the composer when switching to a session with no draft", async () => {
+    await setDraft("ses_has", "carried over text")
+    const Wrapper = withAdapter(makeAdapter())
+    const { rerender } = render(
+      <Wrapper>
+        <Composer
+          session={mkSession({ id: "ses_has" })}
+          onStartNewSession={async () => undefined}
+          onOpenSettings={() => undefined}
+          onSend={async () => undefined}
+          onStop={async () => undefined}
+        />
+      </Wrapper>
+    )
+    const ta = document.querySelector("textarea")! as HTMLTextAreaElement
+    await waitFor(() => {
+      expect(ta.value).toBe("carried over text")
+    })
+    rerender(
+      <Wrapper>
+        <Composer
+          session={mkSession({ id: "ses_no_draft" })}
+          onStartNewSession={async () => undefined}
+          onOpenSettings={() => undefined}
+          onSend={async () => undefined}
+          onStop={async () => undefined}
+        />
+      </Wrapper>
+    )
+    await waitFor(() => {
+      expect(ta.value).toBe("")
+    })
+    // And the empty session must not have inherited the previous draft's text.
+    const bled = await getDb().chatDrafts.get("ses_no_draft")
+    expect(bled?.text ?? "").toBe("")
   })
 })

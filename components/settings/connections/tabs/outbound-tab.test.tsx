@@ -16,6 +16,9 @@ import type {
 const mockDbUpdate = jest.fn().mockResolvedValue(undefined)
 const mockDbDelete = jest.fn().mockResolvedValue(undefined)
 const mockBulkModify = jest.fn().mockResolvedValue(undefined)
+const mockDbGet = jest.fn().mockResolvedValue(undefined)
+const mockReplayDeadlettered = jest.fn().mockResolvedValue(undefined)
+const mockAppendAudit = jest.fn().mockResolvedValue(undefined)
 
 jest.mock("@/lib/db/schema", () => ({
   getDb: jest.fn(() => ({
@@ -23,6 +26,7 @@ jest.mock("@/lib/db/schema", () => ({
       orderBy: jest.fn().mockReturnThis(),
       reverse: jest.fn().mockReturnThis(),
       toArray: jest.fn().mockResolvedValue([]),
+      get: mockDbGet,
       update: mockDbUpdate,
       delete: mockDbDelete,
       where: jest.fn().mockReturnValue({
@@ -40,6 +44,16 @@ jest.mock("@/lib/db/schema", () => ({
       }),
     },
   })),
+}))
+
+jest.mock("@/lib/db/outbound-jobs", () => ({
+  __esModule: true,
+  replayDeadlettered: (...a: unknown[]) => mockReplayDeadlettered(...(a as [string])),
+}))
+
+jest.mock("@/lib/connectors/audit", () => ({
+  __esModule: true,
+  appendAudit: (...a: unknown[]) => mockAppendAudit(...a),
 }))
 
 jest.mock("dexie-react-hooks", () => ({
@@ -190,20 +204,29 @@ describe("OutboundTab", () => {
 
   it("renders status filter chips for all statuses", () => {
     render(<OutboundTab />)
-    const statuses = ["pending", "sending", "sent", "failed", "deadlettered"]
-    for (const s of statuses) {
+    // Labels are reused from the inbox's `inbox.outboundStatus.status.*` namespace
+    // (pending→Queued, deadlettered→Dead-lettered, …) instead of the raw enum.
+    const statusLabels = [
+      "Queued",
+      "Sending",
+      "Sent",
+      "Failed",
+      "Delivery unknown",
+      "Dead-lettered",
+    ]
+    for (const s of statusLabels) {
       expect(
         screen.getByRole("button", { name: new RegExp(`filter ${s}`, "i") })
       ).toBeInTheDocument()
     }
   })
 
-  it("renders status badges for each job", () => {
+  it("renders translated status badges for each job", () => {
     render(<OutboundTab />)
-    // "pending"/"failed"/"sent" each appear in both the filter chip and the job badge
-    expect(screen.getAllByText("pending").length).toBeGreaterThanOrEqual(2)
-    expect(screen.getAllByText("failed").length).toBeGreaterThanOrEqual(2)
-    expect(screen.getAllByText("sent").length).toBeGreaterThanOrEqual(2)
+    // Each translated label appears in both the filter chip and the job badge.
+    expect(screen.getAllByText("Queued").length).toBeGreaterThanOrEqual(2)
+    expect(screen.getAllByText("Failed").length).toBeGreaterThanOrEqual(2)
+    expect(screen.getAllByText("Sent").length).toBeGreaterThanOrEqual(2)
   })
 
   it("renders Retry button for failed jobs", () => {
@@ -226,13 +249,55 @@ describe("OutboundTab", () => {
     expect(screen.queryByRole("button", { name: /cancel job-sent/i })).not.toBeInTheDocument()
   })
 
-  it("clicking Retry sets job status back to pending", async () => {
+  it("clicking Retry re-arms a failed job and audits the replay", async () => {
+    mockDbGet.mockResolvedValue({ ...failedJob })
+    mockDbUpdate.mockClear()
+    mockAppendAudit.mockClear()
     render(<OutboundTab />)
     fireEvent.click(screen.getByRole("button", { name: /retry job-failed/i }))
     await waitFor(() => {
       expect(mockDbUpdate).toHaveBeenCalledWith(
         "job-failed",
         expect.objectContaining({ status: "pending" })
+      )
+    })
+    await waitFor(() => {
+      expect(mockAppendAudit).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "outbound.replayed", adapterId: "a1" })
+      )
+    })
+  })
+
+  it("manual retry of a failed job resets attempts (matches replayDeadlettered)", async () => {
+    // A job already at max attempts would instantly re-dead-letter on the
+    // runner's max-attempts gate if the retry left `attempts` untouched.
+    const maxedJob = { ...failedJob, id: "job-maxed", attempts: 5 }
+    setupQueries({ jobs: [maxedJob] })
+    mockDbGet.mockResolvedValue({ ...maxedJob })
+    mockDbUpdate.mockClear()
+    render(<OutboundTab />)
+    fireEvent.click(screen.getByRole("button", { name: /retry job-maxed/i }))
+    await waitFor(() => {
+      expect(mockDbUpdate).toHaveBeenCalledWith(
+        "job-maxed",
+        expect.objectContaining({ status: "pending", attempts: 0 })
+      )
+    })
+  })
+
+  it("clicking Retry on a dead-lettered job routes through replayDeadlettered", async () => {
+    setupQueries({ jobs: [deadletteredJob] })
+    mockDbGet.mockResolvedValue({ ...deadletteredJob })
+    mockReplayDeadlettered.mockClear()
+    mockAppendAudit.mockClear()
+    render(<OutboundTab />)
+    fireEvent.click(screen.getByRole("button", { name: /retry job-dead-1/i }))
+    await waitFor(() => {
+      expect(mockReplayDeadlettered).toHaveBeenCalledWith("job-dead-1")
+    })
+    await waitFor(() => {
+      expect(mockAppendAudit).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "outbound.replayed" })
       )
     })
   })
@@ -247,7 +312,7 @@ describe("OutboundTab", () => {
 
   it("filters to only pending jobs when 'pending' filter is pressed", async () => {
     render(<OutboundTab />)
-    fireEvent.click(screen.getByRole("button", { name: /filter pending/i }))
+    fireEvent.click(screen.getByRole("button", { name: /filter queued/i }))
     await waitFor(() => {
       expect(screen.getByText("telegram:a1:12345")).toBeInTheDocument()
       expect(screen.queryByText("telegram:a1:99999")).not.toBeInTheDocument()
@@ -334,16 +399,19 @@ describe("OutboundTab — bulk-retry deadlettered (Task 5.2)", () => {
   it("shows the bulk-retry trigger when filter is 'deadlettered' with jobs present", async () => {
     setupQueries({ jobs: [deadletteredJob, deadletteredJob2] })
     render(<OutboundTab />)
-    fireEvent.click(screen.getByRole("button", { name: /filter deadlettered/i }))
+    fireEvent.click(screen.getByRole("button", { name: /filter dead-lettered/i }))
     await waitFor(() => {
       expect(screen.getByTestId("outbound-bulk-retry-trigger")).toBeInTheDocument()
     })
   })
 
-  it("calls outboundQueue.where('id').anyOf(ids).modify on confirmation", async () => {
+  it("replays each dead-lettered job via replayDeadlettered on confirmation", async () => {
     setupQueries({ jobs: [deadletteredJob, deadletteredJob2] })
+    mockDbGet.mockImplementation(async (id: string) => ({ ...deadletteredJob, id }))
+    mockReplayDeadlettered.mockClear()
+    mockAppendAudit.mockClear()
     render(<OutboundTab />)
-    fireEvent.click(screen.getByRole("button", { name: /filter deadlettered/i }))
+    fireEvent.click(screen.getByRole("button", { name: /filter dead-lettered/i }))
     await waitFor(() => {
       expect(screen.getByTestId("outbound-bulk-retry-trigger")).toBeInTheDocument()
     })
@@ -353,7 +421,11 @@ describe("OutboundTab — bulk-retry deadlettered (Task 5.2)", () => {
     })
     fireEvent.click(screen.getByTestId("outbound-bulk-retry-confirm"))
     await waitFor(() => {
-      expect(mockBulkModify).toHaveBeenCalledWith(expect.objectContaining({ status: "pending" }))
+      expect(mockReplayDeadlettered).toHaveBeenCalledWith("job-dead-1")
+      expect(mockReplayDeadlettered).toHaveBeenCalledWith("job-dead-2")
+    })
+    await waitFor(() => {
+      expect(mockAppendAudit).toHaveBeenCalledTimes(2)
     })
   })
 })

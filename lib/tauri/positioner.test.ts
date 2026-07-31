@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { moveWindowToPosition, Position } from "./positioner"
 
 jest.mock("@tauri-apps/plugin-positioner", () => ({

@@ -67,7 +67,47 @@ async function resolveTriggeredFrom(
     adapterId: binding.adapterId,
     conversationKey: binding.conversationKey,
     sessionId,
+    ...(await resolveTurnInitiator(binding.conversationKey)),
   }
+}
+
+/**
+ * Identify the human whose message is driving the CURRENT turn: this tool
+ * executes mid-turn, so the conversation's `running` inbound job carries the
+ * verified sender (plus the resolved principal/account stamp when the
+ * registry is on). The initiator feeds both the workflow run's initiator
+ * field and the approval binding's actorScope — the callback authorization
+ * guard only lets this user (or a configured operator) tap Approve.
+ */
+async function resolveTurnInitiator(
+  conversationKey: string
+): Promise<Pick<WorkflowTriggeredFrom, "initiator">> {
+  const jobs = await getDb()
+    .connectorInboundJobs.where("conversationKey")
+    .equals(conversationKey)
+    .filter((row) => row.status === "running")
+    .toArray()
+  const current = jobs.sort((a, b) => b.receivedAt - a.receivedAt)[0]
+  if (!current) return {}
+  const sender = current.event.sender
+  return {
+    initiator: {
+      platformIdentityId: sender.id,
+      remoteUserId: sender.remoteUserId,
+      displayName: sender.displayName,
+      ...(current.principalId && current.accountId
+        ? { principalId: current.principalId, accountId: current.accountId }
+        : {}),
+    },
+  }
+}
+
+/** Actor scope for approval bindings: the turn initiator, else operators. */
+function approvalActorScope(
+  triggeredFrom: WorkflowTriggeredFrom
+): import("@/types/connectors/interaction").CallbackActorScope {
+  const initiatorId = triggeredFrom.initiator?.remoteUserId
+  return initiatorId ? { mode: "initiator", allowedUserIds: [initiatorId] } : { mode: "operators" }
 }
 
 function summariesToBullets(candidates: WorkflowSummary[]): string {
@@ -192,6 +232,7 @@ export function buildRunByNameTools(): PluginTool[] {
             triggeredFrom,
           }
 
+          const actorScope = approvalActorScope(triggeredFrom)
           await Promise.all([
             recordCallbackBinding({
               adapterId: triggeredFrom.adapterId!,
@@ -201,6 +242,8 @@ export function buildRunByNameTools(): PluginTool[] {
               componentId: "approve",
               conversationKey: triggeredFrom.conversationKey,
               payload,
+              actorScope,
+              allowedActions: ["approve", "cancel"],
             }),
             recordCallbackBinding({
               adapterId: triggeredFrom.adapterId!,
@@ -210,6 +253,8 @@ export function buildRunByNameTools(): PluginTool[] {
               componentId: "cancel",
               conversationKey: triggeredFrom.conversationKey,
               payload,
+              actorScope,
+              allowedActions: ["approve", "cancel"],
             }),
           ])
 
@@ -314,6 +359,7 @@ export function buildRunByNameTools(): PluginTool[] {
             createdBy: "claude-tool",
           }
 
+          const actorScope = approvalActorScope(triggeredFrom)
           await Promise.all([
             recordCallbackBinding({
               adapterId: triggeredFrom.adapterId!,
@@ -323,6 +369,8 @@ export function buildRunByNameTools(): PluginTool[] {
               componentId: "approve",
               conversationKey: triggeredFrom.conversationKey,
               payload,
+              actorScope,
+              allowedActions: ["approve", "cancel"],
             }),
             recordCallbackBinding({
               adapterId: triggeredFrom.adapterId!,
@@ -332,6 +380,8 @@ export function buildRunByNameTools(): PluginTool[] {
               componentId: "cancel",
               conversationKey: triggeredFrom.conversationKey,
               payload,
+              actorScope,
+              allowedActions: ["approve", "cancel"],
             }),
           ])
 

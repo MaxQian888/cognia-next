@@ -1,14 +1,15 @@
 import React from "react"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { PayloadView } from "./payload-view"
 import type { SharePayload } from "@/lib/share/types"
 
-// jsdom doesn't implement object URLs; the backup card needs them.
+// jsdom doesn't implement object URLs; the backup card + image download need them.
 beforeAll(() => {
   Object.defineProperty(URL, "createObjectURL", {
     writable: true,
     value: jest.fn(() => "blob:mock"),
   })
+  Object.defineProperty(URL, "revokeObjectURL", { writable: true, value: jest.fn() })
 })
 
 function payload(over: Partial<SharePayload>): SharePayload {
@@ -23,16 +24,40 @@ describe("PayloadView", () => {
     expect(frame.getAttribute("srcdoc")).toContain("<p>hi</p>")
   })
 
+  it("renders usage-card in the same script-free sandbox as chat-html", () => {
+    render(
+      <PayloadView payload={payload({ kind: "usage-card", data: '<div class="ucard"></div>' })} />
+    )
+    const frame = screen.getByTitle("Shared conversation") as HTMLIFrameElement
+    expect(frame.getAttribute("sandbox")).toBe("")
+    expect(frame.getAttribute("srcdoc")).toContain("ucard")
+  })
+
   it("allows scripts only for chat-animated", () => {
     render(<PayloadView payload={payload({ kind: "chat-animated", data: "<p>x</p>" })} />)
     const frame = screen.getByTitle("Shared conversation") as HTMLIFrameElement
     expect(frame.getAttribute("sandbox")).toBe("allow-scripts")
   })
 
-  it("renders text formats as preformatted text", () => {
-    render(<PayloadView payload={payload({ kind: "chat-md", data: "# title", title: "Doc" })} />)
-    expect(screen.getByText("Doc")).toBeInTheDocument()
-    expect(screen.getByText("# title")).toBeInTheDocument()
+  it("renders shared Markdown with interactive links and images", () => {
+    render(
+      <PayloadView
+        payload={payload({
+          kind: "chat-md",
+          data: "# title\n\n[Docs](https://example.com)\n\n![Plot](data:image/png;base64,YQ==)",
+          title: "Doc",
+        })}
+      />
+    )
+    expect(screen.getByRole("heading", { name: "title" })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Docs" })).toHaveAttribute(
+      "href",
+      "https://example.com"
+    )
+    expect(screen.getByRole("img", { name: "Plot" })).toHaveAttribute(
+      "src",
+      "data:image/png;base64,YQ=="
+    )
   })
 
   it("renders untitled text without a heading", () => {
@@ -54,6 +79,32 @@ describe("PayloadView", () => {
     )
     const img = screen.getByAltText("Shared workflow") as HTMLImageElement
     expect(img.getAttribute("src")).toBe("data:image/png;base64,AAA")
+  })
+
+  it("renders chat-quote in the same script-free sandbox", () => {
+    render(
+      <PayloadView payload={payload({ kind: "chat-quote", data: '<div class="qcard"></div>' })} />
+    )
+    const frame = screen.getByTitle("Shared conversation") as HTMLIFrameElement
+    expect(frame.getAttribute("sandbox")).toBe("")
+    expect(frame.getAttribute("srcdoc")).toContain("qcard")
+  })
+
+  it("offers download and copy actions for shared images", () => {
+    render(
+      <PayloadView
+        payload={payload({
+          kind: "workflow-png",
+          mime: "image/png",
+          data: "AAA",
+          encoding: "base64",
+          title: "My Flow",
+        })}
+      />
+    )
+    fireEvent.click(screen.getByText("Download image"))
+    expect(URL.createObjectURL).toHaveBeenCalled()
+    expect(screen.getByText("Copy image")).toBeInTheDocument()
   })
 
   it("renders a backup as a download card", () => {
@@ -134,5 +185,53 @@ describe("PayloadView", () => {
     await waitFor(() =>
       expect(screen.getByText("This shared app could not be loaded.")).toBeInTheDocument()
     )
+  })
+
+  it("renders a shared character definition read-only", () => {
+    const data = JSON.stringify({
+      kind: "character",
+      name: "Researcher",
+      description: "Finds things",
+      systemPrompt: "Be careful.",
+      model: "claude-opus-4-8",
+    })
+    render(<PayloadView payload={payload({ kind: "discover-item", data })} />)
+    expect(screen.getByText("Character")).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Researcher" })).toBeInTheDocument()
+    expect(screen.getByText("System prompt")).toBeInTheDocument()
+    expect(screen.getByText("Be careful.")).toBeInTheDocument()
+  })
+
+  it("renders a shared team with the descriptive-roster note", () => {
+    const data = JSON.stringify({
+      kind: "team",
+      name: "Squad",
+      orchestration: "supervisor",
+      members: [{ role: "Lead", systemPromptOverride: "Coordinate." }, {}],
+    })
+    render(<PayloadView payload={payload({ kind: "discover-item", data })} />)
+    expect(screen.getByText("Team")).toBeInTheDocument()
+    expect(screen.getByText("Coordinate.")).toBeInTheDocument()
+    expect(
+      screen.getByText("This is a descriptive snapshot — member links are not importable.")
+    ).toBeInTheDocument()
+  })
+
+  it("renders a shared workflow template with required slot + note", () => {
+    const data = JSON.stringify({
+      kind: "workflowTemplate",
+      name: "Cron report",
+      tags: ["cron"],
+      slots: [{ key: "channel", type: "string", label: "Channel", required: true }],
+    })
+    render(<PayloadView payload={payload({ kind: "discover-item", data })} />)
+    expect(screen.getByText("Workflow template")).toBeInTheDocument()
+    expect(screen.getByText("Channel")).toBeInTheDocument()
+    expect(screen.getByText("Required")).toBeInTheDocument()
+  })
+
+  it("shows the fallback when the discover-item JSON is malformed", () => {
+    render(<PayloadView payload={payload({ kind: "discover-item", data: "not json" })} />)
+    expect(screen.getByText("This shared item could not be loaded.")).toBeInTheDocument()
   })
 })

@@ -22,6 +22,8 @@ import type {
   StepExecutionResult,
   WorkflowNodeCategory,
 } from "@/types/workflow/visual"
+import type { CapabilityId } from "@/lib/platform/capabilities"
+import type { PluginIconName } from "./plugin-icon"
 
 /** Node executor function — same shape as built-in node executors. */
 export type PluginNodeExecuteFn = (ctx: StepExecutionContext) => Promise<StepExecutionResult>
@@ -43,12 +45,24 @@ export interface PluginNodeDef {
    * category to interleave with the host's nodes.
    */
   category: WorkflowNodeCategory | "plugin"
-  /** Display name in the catalog. */
+  /**
+   * Display name in the catalog (palette / inspector / canvas). Used verbatim
+   * as the fallback. To LOCALIZE it, ship `manifest.i18n.locales.<locale>` with
+   * the UNPREFIXED key `"workflow.nodes.<kind>.label"` (the host prefixes it to
+   * `plugin.<pluginId>.workflow.nodes.<kind>.label`, where `<kind>` is THIS
+   * `kind` field). The editor resolves that overlay key per the active locale
+   * and falls back to this string when no translation is registered. See
+   * `lib/workflow/i18n/node-translate.ts:pluginNodeMessageKey`.
+   */
   label: string
-  /** Short description shown in the catalog tooltip. */
+  /**
+   * Short description shown in the catalog tooltip / inspector. Localize via
+   * the UNPREFIXED key `"workflow.nodes.<kind>.description"` (same scheme as
+   * `label` above).
+   */
   description: string
   /** lucide-react icon name; falls back to `Box` when missing. */
-  iconName: string
+  iconName: PluginIconName
   /** Search keywords beyond label/description. Optional. */
   keywords?: string[]
   /**
@@ -60,6 +74,12 @@ export interface PluginNodeDef {
   defaultParams?: Record<string, unknown>
   /** Marks the node as desktop-only; the editor shows a `Desktop` badge. */
   desktopOnly?: boolean
+  /**
+   * Platform capabilities the executor needs at run time (ADR 0060) — see
+   * `lib/platform/capabilities.ts`. Checked by the orchestrator's capability
+   * preflight; without it a bare `desktopOnly` maps to `["shell"]`.
+   */
+  requires?: readonly CapabilityId[]
   /** Whether the orchestrator should retry on transient failure. Default true. */
   retryable?: boolean
   /** Per-node timeout (ms). Falls back to the workflow's default. */
@@ -80,6 +100,8 @@ export interface PluginTriggerHandle {
 export interface PluginTriggerStartContext {
   /** The workflow this trigger feeds. */
   workflowId: string
+  /** Exact trigger-node root this live source instance feeds. */
+  triggerId: string
   /** Workflow author's per-instance trigger params. */
   params: Record<string, unknown>
   /**
@@ -105,9 +127,17 @@ export interface PluginTriggerDef {
   /** Unprefixed kind (e.g. `"trigger.cronEx"`). Runtime prefixes pluginId. */
   kind: string
   typeVersion: number
+  /**
+   * Catalog display name (fallback). Localize via the UNPREFIXED overlay key
+   * `"workflow.nodes.<kind>.label"` in `manifest.i18n.locales` — the host
+   * resolves `plugin.<pluginId>.workflow.nodes.<kind>.label` for triggers too
+   * (the leading `trigger.` segment is preserved). See
+   * `lib/workflow/i18n/node-translate.ts:pluginNodeMessageKey`.
+   */
   label: string
+  /** Catalog description (fallback). Localize via `"workflow.nodes.<kind>.description"`. */
   description: string
-  iconName: string
+  iconName: PluginIconName
   paramsSchema: Record<string, unknown>
   defaultParams?: Record<string, unknown>
   desktopOnly?: boolean
@@ -126,11 +156,12 @@ export interface PluginManifestNodeDef {
   category: WorkflowNodeCategory | "plugin"
   label: string
   description: string
-  iconName: string
+  iconName: PluginIconName
   keywords?: string[]
   paramsSchema: Record<string, unknown>
   defaultParams?: Record<string, unknown>
   desktopOnly?: boolean
+  requires?: readonly CapabilityId[]
   retryable?: boolean
   timeoutMs?: number
 }
@@ -141,7 +172,7 @@ export interface PluginManifestTriggerDef {
   typeVersion: number
   label: string
   description: string
-  iconName: string
+  iconName: PluginIconName
   paramsSchema: Record<string, unknown>
   defaultParams?: Record<string, unknown>
   desktopOnly?: boolean

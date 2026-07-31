@@ -55,14 +55,28 @@ describe("<EmptyChatState />", () => {
   })
 
   // ── Welcome style (rich vs minimal) ───────────────────────────────────
-  it("renders the aurora backdrop in the rich style", () => {
+  it("renders the workspace illustration in the rich style", () => {
     render(<EmptyChatState {...baseProps()} />)
-    expect(screen.getByTestId("welcome-aurora")).toBeInTheDocument()
+    expect(screen.getByTestId("welcome-illustration")).toBeInTheDocument()
+    expect(screen.getByRole("img", { name: "illustrationAlt" })).toHaveAttribute("loading", "eager")
   })
 
-  it("drops the aurora in the minimal style", () => {
+  it("adapts the rich hero to its pane width instead of the viewport width", () => {
+    const { container } = render(<EmptyChatState {...baseProps()} />)
+    const scroller = container.firstElementChild
+    const hero = screen.getByTestId("welcome-hero")
+
+    // Split view keeps the browser viewport wide while each ChatPane is narrow.
+    // The hero must therefore switch columns from its own container width;
+    // viewport `md:` classes collapse the copy to one CJK character per line.
+    expect(scroller).toHaveClass("@container")
+    expect(hero).toHaveClass("@3xl:grid-cols-[minmax(0,1fr)_minmax(16rem,0.9fr)]")
+    expect(hero).not.toHaveClass("md:grid-cols-[minmax(0,1fr)_minmax(16rem,0.9fr)]")
+  })
+
+  it("drops the workspace illustration in the minimal style", () => {
     render(<EmptyChatState {...baseProps()} welcomeStyle="minimal" />)
-    expect(screen.queryByTestId("welcome-aurora")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("welcome-illustration")).not.toBeInTheDocument()
   })
 
   it("shows the style toggle only when onToggleStyle is provided and fires the opposite style", async () => {
@@ -99,6 +113,18 @@ describe("<EmptyChatState />", () => {
     expect(screen.getByRole("heading", { level: 2 }).textContent).toMatch(/^greeting\./)
     expect(screen.getByTestId("quick-actions")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /newChat/ })).toBeInTheDocument()
+  })
+
+  // ── AI starter suggestion chips ───────────────────────────────────────
+  it("renders model-suggested prompts as suggestion chips and fires onUseSample", async () => {
+    const props = baseProps()
+    const user = userEvent.setup()
+    render(<EmptyChatState {...props} aiSamples={["Plan my week", "  ", "Draft an email"]} />)
+    // Blank entries are filtered out; only the two real prompts become chips.
+    expect(screen.getByTestId("ai-starters")).toBeInTheDocument()
+    expect(screen.getByText("sections.aiPrompts")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Plan my week" }))
+    expect(props.onUseSample).toHaveBeenCalledWith("Plan my week")
   })
 
   // ── Dev-tool starter prompts ──────────────────────────────────────────

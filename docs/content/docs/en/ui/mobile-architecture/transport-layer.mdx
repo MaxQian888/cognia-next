@@ -148,8 +148,8 @@ automatic. Full mechanics are in [WebRTC transport](./webrtc-transport).
 
 ## Credential storage
 
-`CompanionConfig` (`companion-storage.ts:28`) is `{ baseUrl, deviceJwt, deviceId, serverVersion,
-serverFingerprint?, rendezvousId?, rendezvousSecret? }`. The `CompanionConfigStorage` interface (`:62`)
+`CompanionConfig` (`companion-storage.ts`) includes `{ baseUrl, deviceJwt, deviceId, serverVersion,
+serverFingerprint?, rendezvousId?, signalingRoomDescriptor?, signalingPrivateKey? }`. The `CompanionConfigStorage` interface
 has two implementations selected by `pickCompanionStorage()` (`:165`):
 
 - **`LocalStorageCompanionStorage`** (`:74`) — `window.localStorage`, for web/jsdom.

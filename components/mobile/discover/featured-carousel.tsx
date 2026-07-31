@@ -7,7 +7,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
 import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 import { cn } from "@/lib/utils"
 
 export interface FeaturedCarouselProps {

@@ -19,13 +19,29 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 
-import { MOBILE_OUTBOUND_COMMANDS } from "./mobile-outbound-types"
+import { MOBILE_OUTBOUND_COMMANDS, type MobileOutboundJobRow } from "./mobile-outbound-types"
 
 const REPO_ROOT = path.join(__dirname, "..", "..")
 const RPC_RS = path.join(REPO_ROOT, "src-tauri", "src", "companion_api", "rpc.rs")
 const E2E_SPEC = path.join(REPO_ROOT, "tests", "e2e", "mobile", "outbound-queue.spec.ts")
 
 describe("MOBILE_OUTBOUND_COMMANDS spec parity", () => {
+  it("requires the account and runtime target on every queued row", () => {
+    const row = {
+      id: "job-1",
+      accountId: "account-1",
+      targetId: "target-1",
+      command: MOBILE_OUTBOUND_COMMANDS[0],
+      payload: {},
+      status: "pending",
+      attempts: 0,
+      createdAt: 1,
+      nextAttemptAt: 1,
+      idempotencyKey: "job-1",
+    } satisfies MobileOutboundJobRow
+
+    expect(row).toMatchObject({ accountId: "account-1", targetId: "target-1" })
+  })
   it("every command appears verbatim in rpc.rs KNOWN_COMMANDS", async () => {
     const src = await fs.readFile(RPC_RS, "utf8")
     for (const cmd of MOBILE_OUTBOUND_COMMANDS) {

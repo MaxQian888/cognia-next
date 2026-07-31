@@ -28,15 +28,7 @@ export type ShellPlatform = "windows" | "macos" | "linux" | "other"
  * though the Rust integration layer treats a bare `sh` as `unknown`.
  */
 export type ShellKind =
-  | "bash"
-  | "zsh"
-  | "sh"
-  | "pwsh"
-  | "powershell"
-  | "cmd"
-  | "fish"
-  | "nu"
-  | "unknown"
+  "bash" | "zsh" | "sh" | "pwsh" | "powershell" | "cmd" | "fish" | "nu" | "unknown"
 
 /**
  * Classify a shell binary path into a `ShellKind`. Mirrors the Rust
@@ -100,6 +92,70 @@ export function platformDefaultShell(platform: ShellPlatform): string {
     default:
       return "/bin/sh"
   }
+}
+
+/** A built-in shell choice offered by the "+ New" shell picker. */
+export interface ShellOption {
+  /** Shell binary to spawn — absolute path or PATH-resolvable name. */
+  value: string
+  /** i18n key (under `terminal.shellPicker`) for the menu label. */
+  labelKey: string
+  /** Executable basename used to detect the shell on PATH (no extension). */
+  bin: string
+}
+
+/**
+ * Built-in shell choices appropriate for a platform — Windows shells on
+ * Windows, POSIX shells on macOS/Linux. Excludes the "auto / default"
+ * entry, which the picker always renders. This is the platform half of
+ * "show what fits the OS"; `filterDetectedShellOptions` is the
+ * "show only what's installed" half.
+ */
+export function platformShellOptions(platform: ShellPlatform): ShellOption[] {
+  switch (platform) {
+    case "windows":
+      return [
+        { value: "pwsh.exe", labelKey: "terminal.shellPicker.pwsh", bin: "pwsh" },
+        { value: "powershell.exe", labelKey: "terminal.shellPicker.powershell", bin: "powershell" },
+        { value: "cmd.exe", labelKey: "terminal.shellPicker.cmd", bin: "cmd" },
+      ]
+    case "macos":
+      return [
+        { value: "/bin/zsh", labelKey: "terminal.shellPicker.zsh", bin: "zsh" },
+        { value: "/bin/bash", labelKey: "terminal.shellPicker.bash", bin: "bash" },
+        { value: "/bin/sh", labelKey: "terminal.shellPicker.sh", bin: "sh" },
+        { value: "fish", labelKey: "terminal.shellPicker.fish", bin: "fish" },
+        { value: "nu", labelKey: "terminal.shellPicker.nu", bin: "nu" },
+      ]
+    case "linux":
+      return [
+        { value: "/bin/bash", labelKey: "terminal.shellPicker.bash", bin: "bash" },
+        { value: "/bin/zsh", labelKey: "terminal.shellPicker.zsh", bin: "zsh" },
+        { value: "/bin/sh", labelKey: "terminal.shellPicker.sh", bin: "sh" },
+        { value: "fish", labelKey: "terminal.shellPicker.fish", bin: "fish" },
+        { value: "nu", labelKey: "terminal.shellPicker.nu", bin: "nu" },
+      ]
+    case "other":
+    default:
+      return [{ value: "/bin/sh", labelKey: "terminal.shellPicker.sh", bin: "sh" }]
+  }
+}
+
+/**
+ * Narrow a platform option list to the shells actually present on PATH.
+ * `detectedBins` is the set of executable basenames found (lowercased, no
+ * extension). When it is empty — detection unavailable (web) or the scan
+ * failed — the full list is returned unchanged. As a safety net, if the
+ * filter would hide everything (e.g. a misbehaving scan), the full list is
+ * kept so the menu is never empty.
+ */
+export function filterDetectedShellOptions(
+  options: readonly ShellOption[],
+  detectedBins: ReadonlySet<string>
+): ShellOption[] {
+  if (detectedBins.size === 0) return [...options]
+  const kept = options.filter((o) => detectedBins.has(o.bin.toLowerCase()))
+  return kept.length > 0 ? kept : [...options]
 }
 
 export interface ResolveShellInput {

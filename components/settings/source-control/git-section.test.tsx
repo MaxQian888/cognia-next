@@ -8,6 +8,16 @@ function setSettings(commitMessageAI: unknown) {
   })
 }
 
+function setPanel(panel: Record<string, unknown>) {
+  act(() => {
+    useSettingsStore.setState({
+      settings: {
+        gitSettings: { commitMessageAI: { enabled: false, conventionalCommits: true }, panel },
+      } as never,
+    })
+  })
+}
+
 const save = jest.fn().mockResolvedValue(undefined)
 
 beforeEach(() => {
@@ -59,5 +69,77 @@ describe("GitSection", () => {
         }),
       })
     )
+  })
+
+  it("renders the review + explain AI toggles", () => {
+    render(<GitSection />)
+    expect(screen.getByLabelText(/AI code review/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/AI change explanation/i)).toBeInTheDocument()
+  })
+
+  it("enables AI code review on toggle", () => {
+    render(<GitSection />)
+    fireEvent.click(screen.getByLabelText(/AI code review/i))
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        gitSettings: expect.objectContaining({
+          reviewAI: expect.objectContaining({ enabled: true }),
+        }),
+      })
+    )
+  })
+
+  it("enables AI change explanation on toggle", () => {
+    render(<GitSection />)
+    fireEvent.click(screen.getByLabelText(/AI change explanation/i))
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        gitSettings: expect.objectContaining({
+          explainAI: expect.objectContaining({ enabled: true }),
+        }),
+      })
+    )
+  })
+
+  it("reveals the review provider override when enabled", () => {
+    act(() => {
+      useSettingsStore.setState({
+        settings: {
+          gitSettings: {
+            commitMessageAI: { enabled: false, conventionalCommits: true },
+            reviewAI: { enabled: true },
+          },
+        } as never,
+      })
+    })
+    render(<GitSection />)
+    expect(screen.getByTestId("git-ai-review-provider")).toBeInTheDocument()
+  })
+
+  it("renders the Panel & workflow card with its guardrail toggles", () => {
+    render(<GitSection />)
+    expect(screen.getByLabelText(/Confirm before discarding/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/Confirm before force push/i)).toBeInTheDocument()
+  })
+
+  it("saves a guardrail toggle to the panel prefs", () => {
+    render(<GitSection />)
+    // Default is on → toggling turns it off, persisted under gitSettings.panel.
+    fireEvent.click(screen.getByLabelText(/Confirm before discarding/i))
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        gitSettings: expect.objectContaining({
+          panel: expect.objectContaining({ confirmDiscard: false }),
+        }),
+      })
+    )
+  })
+
+  it("shows the interval input only when auto-fetch is enabled", () => {
+    const { rerender } = render(<GitSection />)
+    expect(screen.queryByTestId("git-auto-fetch-interval")).not.toBeInTheDocument()
+    setPanel({ autoFetch: true })
+    rerender(<GitSection />)
+    expect(screen.getByTestId("git-auto-fetch-interval")).toBeInTheDocument()
   })
 })

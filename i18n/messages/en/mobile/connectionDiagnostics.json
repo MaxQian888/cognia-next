@@ -1,0 +1,25 @@
+{
+  "noTierToast": "No WebRTC tier active — using HTTPS+WS.",
+  "reconnectButton": "Reconnect now",
+  "rowNever": "never synced",
+  "rowRetry": "Retry",
+  "rowSince": "since",
+  "syncAllButton": "Sync all",
+  "syncLabel": "Sync progress",
+  "tier": {
+    "offline": "Offline",
+    "rtc-direct": "RTC direct",
+    "rtc-relay": "RTC relay",
+    "ws-lan": "WS LAN",
+    "ws-tunnel": "WS tunnel"
+  },
+  "tierHint": {
+    "offline": "Not connected to the desktop.",
+    "rtc-direct": "Peer-to-peer DataChannel — lowest latency.",
+    "rtc-relay": "Peer connection via TURN relay — still encrypted end-to-end.",
+    "ws-lan": "Fallback over LAN HTTPS+WS.",
+    "ws-tunnel": "Fallback via Cloudflared tunnel."
+  },
+  "tierLabel": "WebRTC tier",
+  "title": "Connection diagnostics"
+}

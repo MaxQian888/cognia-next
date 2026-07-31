@@ -24,20 +24,66 @@ describe("lib/connectors/adapter-metadata", () => {
     expect(t?.iconName).toBe("Send")
   })
 
-  it("github is exposed as beta (PR delivery plugin, no outbound)", () => {
-    const gh = getConnectorMeta("github")
-    expect(gh?.status).toBe("beta")
+  it("does not model Marketplace integrations as Connector platforms", () => {
+    expect(getConnectorMeta("github")).toBeUndefined()
+    expect(ALL_PLATFORM_KINDS).not.toContain("github")
   })
 
-  it("planned platforms cover everything not currently shipped by adapter-registry", () => {
-    // Hard-coded ground truth — if adapter-registry adds a new built-in,
-    // bump the status here in the same PR. Phase 1 builtins are telegram /
-    // discord / slack / lark / onebot. The delivery-plugin github adapter
-    // sits on beta.
+  it("native adapter registry platforms are exposed as stable", () => {
     const stableSet = new Set(
       CONNECTOR_METADATA.filter((m) => m.status === "stable").map((m) => m.type)
     )
-    expect(stableSet).toEqual(new Set(["telegram", "discord", "slack", "lark", "onebot"]))
+    expect(stableSet).toEqual(
+      new Set([
+        "telegram",
+        "discord",
+        "slack",
+        "lark",
+        "onebot",
+        "wecom",
+        "wechat-personal",
+        "matrix",
+        "qq-official",
+        "wechat-oa",
+        "dingtalk",
+      ])
+    )
+  })
+
+  it("native rich-capable adapter metadata exposes rich message support", () => {
+    for (const kind of [
+      "matrix",
+      "wecom",
+      "dingtalk",
+      "telegram",
+      "discord",
+      "slack",
+      "lark",
+    ] as const) {
+      expect(getConnectorMeta(kind)).toMatchObject({ status: "stable", richMessages: true })
+    }
+  })
+
+  it("stable text-only adapters do not overclaim rich outbound support", () => {
+    for (const kind of ["qq-official", "wechat-oa"] as const) {
+      expect(getConnectorMeta(kind)).toMatchObject({ status: "stable", richMessages: false })
+    }
+  })
+
+  it("reply-only personal WeChat is stable without rich outbound claims", () => {
+    expect(getConnectorMeta("wechat-personal")).toMatchObject({
+      status: "stable",
+      oauth: false,
+      richMessages: false,
+    })
+  })
+
+  it("dingtalk does not claim OAuth (appKey/appSecret keyring config only)", () => {
+    expect(getConnectorMeta("dingtalk")).toMatchObject({
+      status: "stable",
+      oauth: false,
+      richMessages: true,
+    })
   })
 
   it("never produces a duplicate type entry", () => {

@@ -291,6 +291,29 @@ export interface VsCodeTerminalProfile {
   icon?: string
 }
 
+export interface VsCodeNotebookContribution {
+  type: string
+  displayName: string
+  selector: Array<{ filenamePattern?: string; excludeFileNamePattern?: string }>
+  priority?: "default" | "option"
+}
+
+export interface VsCodeNotebookRendererContribution {
+  id: string
+  displayName: string
+  mimeTypes?: string[]
+  entrypoint: string | { extends: string; path: string }
+  dependencies?: string[]
+  optionalDependencies?: string[]
+  requiresMessaging?: "always" | "optional" | "never"
+}
+
+export interface VsCodeNotebookPreloadContribution {
+  type: string
+  entrypoint: string
+  localResourceRoots?: string[]
+}
+
 export interface VsCodeAuthentication {
   id: string
   label: string
@@ -324,6 +347,39 @@ export interface VsCodeChatParticipant {
   description?: string
   isSticky?: boolean
   commands?: Array<{ name: string; description: string; isSticky?: boolean }>
+  when?: string
+}
+
+export interface VsCodeLanguageModelToolSet {
+  name: string
+  description: string
+  icon?: string
+  tools: string[]
+}
+
+export interface VsCodeSpeechProvider {
+  name: string
+  description?: string
+}
+
+export interface VsCodeLocalization {
+  languageId: string
+  languageName?: string
+  localizedLanguageName?: string
+  translations: Array<{ id: string; path: string }>
+}
+
+export interface VsCodeChatAgent {
+  path: string
+  when?: string
+  sessionTypes?: string[]
+}
+
+export interface VsCodeLanguageModelChatProvider {
+  vendor: string
+  displayName: string
+  configuration?: Record<string, unknown>
+  managementCommand?: string
   when?: string
 }
 
@@ -400,6 +456,8 @@ export interface VsCodeContributions {
 
   // Custom editors / debuggers / tasks / terminal
   customEditors?: VsCodeCustomEditor[]
+  notebooks?: VsCodeNotebookContribution[]
+  notebookRenderer?: VsCodeNotebookRendererContribution[]
   debuggers?: VsCodeDebugger[]
   breakpoints?: VsCodeBreakpoint[]
   taskDefinitions?: VsCodeTaskDefinition[]
@@ -410,20 +468,25 @@ export interface VsCodeContributions {
   // Authentication, AI & MCP
   authentication?: VsCodeAuthentication[]
   chatParticipants?: VsCodeChatParticipant[]
+  chatAgents?: VsCodeChatAgent[]
+  languageModelChatProviders?: VsCodeLanguageModelChatProvider[]
   mcpServerDefinitionProviders?: VsCodeMcpServerDefinitionProvider[]
   chatInstructions?: Array<{ path: string }>
   chatPromptFiles?: Array<{ path: string }>
-  chatSkills?: Array<{ id: string; name: string; description?: string }>
+  chatSkills?: Array<{ path: string; when?: string }>
   languageModelTools?: Array<{
     name: string
     displayName?: string
     modelDescription?: string
+    userDescription?: string
     toolReferenceName?: string
+    icon?: string
     tags?: string[]
     when?: string
     canBeReferencedInPrompt?: boolean
     inputSchema?: unknown
   }>
+  localizations?: VsCodeLocalization[]
 
   // Misc
   resourceLabelFormatters?: VsCodeResourceLabelFormatter[]
@@ -584,6 +647,17 @@ export interface VsCodePermissionInference {
   confidence: "high" | "medium" | "low"
   // True if static analysis couldn't parse the bundle (e.g. wasm, native).
   unparsedBundle: boolean
+  /**
+   * `vscode.*` namespaces the bundle references that the shim mounts but does
+   * not implement (every method throws `NotSupportedError`). See
+   * `lib/plugin/vscode-shim/engine-compat.ts`.
+   *
+   * **UX signal only.** The walk fails open on minified bundles, so an empty
+   * list means "no evidence found", never "uses nothing unsupported" — read it
+   * together with `confidence` / `unparsedBundle`. It must never be wired into
+   * a permission or security decision.
+   */
+  unsupportedApis: string[]
 }
 
 export interface VsCodePermissionReason {
@@ -634,6 +708,30 @@ export interface VsCodeExtensionBlock {
   publisherKeyFingerprint?: string
   /** Marketplace source. `null` for `.vsix` drag-drop installs. */
   source: "openvsx" | "vsix-upload" | "dev" | null
+  /**
+   * The Open VSX `targetPlatform` this build was resolved for (one of the 12
+   * enum values in `lib/plugin/vscode-shim/openvsx-platform.ts`, typically the
+   * host platform or `"universal"`).
+   *
+   * Recorded so the update check can re-query the platform the user actually
+   * installed rather than the platform of whatever machine is asking. Those
+   * differ whenever a `universal` fallback was installed, and re-querying by
+   * host would silently offer a platform-specific build as an "update".
+   *
+   * Absent for `.vsix` uploads — a local file carries no registry platform.
+   * Typed `string` rather than the enum because `types/` must not depend on
+   * `lib/`; the union is enforced where the value is produced.
+   */
+  targetPlatform?: string
+  /**
+   * `vscode.*` namespaces the bundle references that cognia's shim does not
+   * implement, captured at install time so the warning survives onto the
+   * extension card instead of vanishing with the install dialog.
+   *
+   * Best-effort and fails open — see `VsCodePermissionInference.unsupportedApis`.
+   * Advisory copy only; never a gate.
+   */
+  unsupportedApis?: string[]
   /** Bundle module format detected at install time. */
   bundleFormat: "cjs" | "esm" | "mixed"
   /** Activation events declared in the VS Code manifest, preserved verbatim. */

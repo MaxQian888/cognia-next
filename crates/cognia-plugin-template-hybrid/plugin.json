@@ -1,0 +1,37 @@
+{
+  "id": "cognia-plugin-template-hybrid",
+  "name": "Cognia Plugin Template Hybrid",
+  "version": "0.1.0",
+  "description": "Hybrid plugin template — combines a frontend lifecycle entry with one Python tool. Replace this manifest with your own plugin's metadata.",
+  "type": "hybrid",
+  "capabilities": ["tools", "python"],
+  "main": "frontend/index.js",
+  "pythonMain": "backend/main.py",
+  "styles": "styles.css",
+  "author": {
+    "name": "Your Name"
+  },
+  "license": "MIT",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "permissions": [],
+  "activationEvents": ["onStartup"],
+  "tools": [
+    {
+      "name": "template_echo",
+      "description": "Echo the supplied message back to the agent from the Python backend.",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "The message to echo."
+          }
+        },
+        "required": ["message"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

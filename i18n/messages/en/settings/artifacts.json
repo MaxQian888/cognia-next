@@ -1,0 +1,23 @@
+{
+  "autoCreateHint": "When on, qualifying code blocks in assistant replies are converted into artifacts and the side panel slides in.",
+  "autoCreateLabel": "Enable auto-detection",
+  "defaultPanelMode": {
+    "code": "Code",
+    "preview": "Preview"
+  },
+  "defaultPanelModeHint": "Initial tab when the panel opens for previewable artifacts.",
+  "defaultPanelModeLabel": "Default open view",
+  "description": "Tune how the assistant lifts long blocks of generated content into addressable, previewable artifacts. Changes apply to new responses.",
+  "enabledTypesHint": "Toggle any type off to skip it during auto-detection.",
+  "enabledTypesLabel": "Allowed types",
+  "minLinesHint": "Always-create types (HTML, React, SVG, Mermaid, charts, Jupyter) ignore this — they only need 3 lines.",
+  "minLinesLabel": "Minimum lines for code / document",
+  "persistAcrossSessionsHint": "When on, artifacts survive restarts via localStorage. When off, they’re cleared with the session.",
+  "persistAcrossSessionsLabel": "Persist across sessions",
+  "resetDefaults": "Reset to defaults",
+  "reviewBeforeApplyHint": "When on, the assistant's edits to an existing artifact are staged as a diff proposal you review hunk-by-hunk before they apply. When off, edits overwrite the artifact directly.",
+  "reviewBeforeApplyLabel": "Review AI edits before applying",
+  "showNotificationHint": "Show a brief sonner toast when a new artifact is auto-created.",
+  "showNotificationLabel": "Toast on auto-create",
+  "title": "Artifacts"
+}

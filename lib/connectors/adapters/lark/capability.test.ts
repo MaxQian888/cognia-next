@@ -6,6 +6,8 @@ describe("LARK_CAPS", () => {
       "delete",
       "edit",
       "history.fetch",
+      "pin",
+      "presence.status",
       "rich-card.lark",
       "send.a2ui",
       "send.card",
@@ -21,6 +23,12 @@ describe("LARK_CAPS", () => {
       "send.voice",
     ]
     for (const cap of expected) {
+      expect(LARK_CAPS).toContain(cap)
+    }
+  })
+
+  it("declares the four chat-management capabilities (W2 multi-bot)", () => {
+    for (const cap of ["chat.create", "chat.members", "chat.update", "contact.resolve"]) {
       expect(LARK_CAPS).toContain(cap)
     }
   })

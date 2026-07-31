@@ -1,14 +1,18 @@
 import { DEFAULT_MEMORY_CONFIG, type MemoryConfig } from "@/types/memory/memory"
 
 const mockTryBuildTwinDeps = jest.fn()
-const mockGenerateEmbedding = jest.fn()
+const mockCreateProviderEmbeddingAdapter = jest.fn()
 const mockSearchByEmbedding = jest.fn()
 
 jest.mock("@/lib/twin/runtime/build-deps", () => ({
   tryBuildTwinDeps: () => mockTryBuildTwinDeps(),
 }))
-jest.mock("@/lib/ai/embedding/embedding", () => ({
-  generateEmbedding: (...args: unknown[]) => mockGenerateEmbedding(...args),
+jest.mock("@cognia/memory/runtime/provider-embedding-adapter", () => ({
+  createProviderEmbeddingAdapter: (...args: unknown[]) =>
+    mockCreateProviderEmbeddingAdapter(...args),
+}))
+jest.mock("@/lib/claude/feature-call", () => ({
+  createBedrockSidecarEmbeddingModel: jest.fn(() => ({ specificationVersion: "v3" })),
 }))
 jest.mock("@/lib/db/memories", () => ({
   listActiveForReader: jest.fn(async () => [{ id: "c1" }]),
@@ -19,6 +23,7 @@ jest.mock("@/lib/db/memories", () => ({
 import {
   tryBuildMemoryDeps,
   tryBuildMemoryVectorSink,
+  describeMemoryRetrievalMode,
   MEMORY_VECTOR_COLLECTION,
 } from "./build-deps"
 
@@ -29,12 +34,18 @@ function cfg(over: Partial<MemoryConfig> = {}): MemoryConfig {
 beforeEach(() => {
   jest.clearAllMocks()
   mockSearchByEmbedding.mockResolvedValue([{ id: "v1", content: "x", score: 0.7 }])
-  mockGenerateEmbedding.mockResolvedValue({ embedding: [0.1, 0.2] })
+  mockCreateProviderEmbeddingAdapter.mockReturnValue(async () => [0.1, 0.2])
 })
 
 describe("tryBuildMemoryDeps", () => {
   it("returns undefined when memory is disabled", async () => {
     expect(await tryBuildMemoryDeps(cfg({ enabled: false }))).toBeUndefined()
+    expect(await tryBuildMemoryDeps(cfg({ temporary: true }))).toBeUndefined()
+  })
+
+  it("builds local deps when global recall is off so a chat-level opt-in can work", async () => {
+    mockTryBuildTwinDeps.mockResolvedValue(undefined)
+    expect(await tryBuildMemoryDeps(cfg({ useMemory: false }))).toBeDefined()
   })
 
   it("returns base (BM25-only) deps when no twin backend is available", async () => {
@@ -83,6 +94,30 @@ describe("tryBuildMemoryDeps", () => {
     expect(deps!.vectorSearch).toBeDefined()
   })
 
+  it("builds a sidecar embedding proxy for Bedrock default-chain auth", async () => {
+    const bedrock = { authMode: "default-chain" as const, region: "us-west-2", profile: "dev" }
+    mockTryBuildTwinDeps.mockResolvedValue({
+      store: { searchByEmbedding: mockSearchByEmbedding },
+      embedding: {
+        provider: "amazon-bedrock",
+        model: "amazon.titan-embed-text-v2:0",
+        apiKey: "",
+        bedrock,
+      },
+    })
+
+    const deps = await tryBuildMemoryDeps(cfg({ allowCloudEmbedding: true }))
+
+    expect(deps?.embed).toBeDefined()
+    expect(mockCreateProviderEmbeddingAdapter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "amazon-bedrock",
+        bedrock,
+        bedrockModel: { specificationVersion: "v3" },
+      })
+    )
+  })
+
   it("falls back to BM25-only when building the backend throws", async () => {
     mockTryBuildTwinDeps.mockRejectedValue(new Error("boom"))
     const deps = await tryBuildMemoryDeps(cfg())
@@ -97,6 +132,30 @@ describe("tryBuildMemoryDeps", () => {
     })
     const deps = await tryBuildMemoryDeps(cfg())
     expect(deps!.vectorSearch).toBeUndefined()
+  })
+
+  it("stays BM25-only when hybridEnabled is off, even with a usable local backend", async () => {
+    mockTryBuildTwinDeps.mockResolvedValue({
+      store: { searchByEmbedding: mockSearchByEmbedding },
+      embedding: { provider: "transformersjs", model: "x", apiKey: "" },
+    })
+    const deps = await tryBuildMemoryDeps(cfg({ hybridEnabled: false }))
+    expect(deps).toBeDefined()
+    expect(deps!.embed).toBeUndefined()
+    expect(deps!.vectorSearch).toBeUndefined()
+  })
+
+  it("reuses prebuilt twin deps and does not call tryBuildTwinDeps again", async () => {
+    const prebuilt = {
+      store: { searchByEmbedding: mockSearchByEmbedding },
+      embedding: { provider: "transformersjs", model: "x", apiKey: "" },
+    } as never
+    const deps = await tryBuildMemoryDeps(cfg(), prebuilt)
+    expect(deps!.embed).toBeDefined()
+    expect(deps!.vectorSearch).toBeDefined()
+    // The second tryBuildTwinDeps() call is skipped — the backend came from the
+    // caller-supplied deps.
+    expect(mockTryBuildTwinDeps).not.toHaveBeenCalled()
   })
 })
 
@@ -120,8 +179,9 @@ describe("tryBuildMemoryVectorSink", () => {
 
   it("upserts a memory's text into the collection when a backend is available", async () => {
     const addDocuments = jest.fn(async () => undefined)
+    const deleteDocuments = jest.fn(async () => undefined)
     mockTryBuildTwinDeps.mockResolvedValue({
-      store: { searchByEmbedding: mockSearchByEmbedding, addDocuments },
+      store: { searchByEmbedding: mockSearchByEmbedding, addDocuments, deleteDocuments },
       embedding: { provider: "transformersjs", model: "x", apiKey: "" },
     })
     const sink = await tryBuildMemoryVectorSink(cfg())
@@ -130,6 +190,46 @@ describe("tryBuildMemoryVectorSink", () => {
     expect(addDocuments).toHaveBeenCalledWith(MEMORY_VECTOR_COLLECTION, [
       { id: "m1", content: "The user prefers pnpm" },
     ])
+    await sink!.delete(["m1"])
+    expect(deleteDocuments).toHaveBeenCalledWith(MEMORY_VECTOR_COLLECTION, ["m1"])
+  })
+
+  it("exposes listIds paging over scrollDocuments, absent otherwise", async () => {
+    const addDocuments = jest.fn(async () => undefined)
+    // No scrollDocuments → no listIds (reconcile degrades to heal-only).
+    mockTryBuildTwinDeps.mockResolvedValue({
+      store: { searchByEmbedding: mockSearchByEmbedding, addDocuments },
+      embedding: { provider: "transformersjs", model: "x", apiKey: "" },
+    })
+    expect((await tryBuildMemoryVectorSink(cfg()))!.listIds).toBeUndefined()
+
+    // With scrollDocuments → pages until hasMore is false.
+    const scrollDocuments = jest
+      .fn()
+      .mockResolvedValueOnce({ documents: [{ id: "a" }, { id: "b" }], hasMore: true })
+      .mockResolvedValueOnce({ documents: [{ id: "c" }], hasMore: false })
+    mockTryBuildTwinDeps.mockResolvedValue({
+      store: { searchByEmbedding: mockSearchByEmbedding, addDocuments, scrollDocuments },
+      embedding: { provider: "transformersjs", model: "x", apiKey: "" },
+    })
+    const sink = await tryBuildMemoryVectorSink(cfg())
+    await expect(sink!.listIds!()).resolves.toEqual(["a", "b", "c"])
+    expect(scrollDocuments).toHaveBeenNthCalledWith(1, MEMORY_VECTOR_COLLECTION, {
+      offset: 0,
+      limit: 500,
+    })
+    expect(scrollDocuments).toHaveBeenNthCalledWith(2, MEMORY_VECTOR_COLLECTION, {
+      offset: 2,
+      limit: 500,
+    })
+  })
+
+  it("returns undefined when hybridEnabled is off", async () => {
+    mockTryBuildTwinDeps.mockResolvedValue({
+      store: { searchByEmbedding: mockSearchByEmbedding, addDocuments: jest.fn() },
+      embedding: { provider: "transformersjs", model: "x", apiKey: "" },
+    })
+    expect(await tryBuildMemoryVectorSink(cfg({ hybridEnabled: false }))).toBeUndefined()
   })
 
   it("respects the cloud-embedding privacy gate", async () => {
@@ -139,5 +239,99 @@ describe("tryBuildMemoryVectorSink", () => {
     })
     expect(await tryBuildMemoryVectorSink(cfg({ allowCloudEmbedding: false }))).toBeUndefined()
     expect(await tryBuildMemoryVectorSink(cfg({ allowCloudEmbedding: true }))).toBeDefined()
+  })
+})
+
+describe("describeMemoryRetrievalMode", () => {
+  it("reports `off` rather than a degradation when memory is not running", async () => {
+    await expect(describeMemoryRetrievalMode(cfg({ enabled: false }))).resolves.toEqual({
+      kind: "off",
+      reason: "disabled",
+    })
+    await expect(describeMemoryRetrievalMode(cfg({ temporary: true }))).resolves.toEqual({
+      kind: "off",
+      reason: "temporary",
+    })
+    expect(mockTryBuildTwinDeps).not.toHaveBeenCalled()
+  })
+
+  it("reports hybrid_disabled without even consulting the backend", async () => {
+    await expect(describeMemoryRetrievalMode(cfg({ hybridEnabled: false }))).resolves.toEqual({
+      kind: "bm25",
+      reason: "hybrid_disabled",
+    })
+    expect(mockTryBuildTwinDeps).not.toHaveBeenCalled()
+  })
+
+  it("reports no_backend when twin embeddings were never configured", async () => {
+    mockTryBuildTwinDeps.mockResolvedValue(undefined)
+    await expect(describeMemoryRetrievalMode(cfg())).resolves.toEqual({
+      kind: "bm25",
+      reason: "no_backend",
+    })
+  })
+
+  it("reports store_unsupported when the vector store cannot search by embedding", async () => {
+    mockTryBuildTwinDeps.mockResolvedValue({
+      store: {},
+      embedding: { provider: "transformersjs", model: "x", apiKey: "" },
+    })
+    await expect(describeMemoryRetrievalMode(cfg())).resolves.toEqual({
+      kind: "bm25",
+      reason: "store_unsupported",
+      provider: "transformersjs",
+    })
+  })
+
+  it("reports cloud_blocked — the default state for a cloud embedder", async () => {
+    // hybridEnabled defaults to true and allowCloudEmbedding defaults to false,
+    // so anyone whose twin embedder is cloud-hosted silently gets keyword-only
+    // recall while the config claims hybrid. This is the case the alert exists for.
+    mockTryBuildTwinDeps.mockResolvedValue({
+      store: { searchByEmbedding: mockSearchByEmbedding },
+      embedding: { provider: "openai", model: "x", apiKey: "k" },
+    })
+    await expect(describeMemoryRetrievalMode(cfg())).resolves.toEqual({
+      kind: "bm25",
+      reason: "cloud_blocked",
+      provider: "openai",
+    })
+  })
+
+  it("reports hybrid once every gate passes", async () => {
+    mockTryBuildTwinDeps.mockResolvedValue({
+      store: { searchByEmbedding: mockSearchByEmbedding },
+      embedding: { provider: "transformersjs", model: "x", apiKey: "" },
+    })
+    await expect(describeMemoryRetrievalMode(cfg())).resolves.toEqual({
+      kind: "hybrid",
+      provider: "transformersjs",
+    })
+  })
+
+  it("never throws — a backend explosion reads as no_backend", async () => {
+    mockTryBuildTwinDeps.mockRejectedValue(new Error("boom"))
+    await expect(describeMemoryRetrievalMode(cfg())).resolves.toEqual({
+      kind: "bm25",
+      reason: "no_backend",
+    })
+  })
+
+  it("agrees with tryBuildMemoryDeps about whether the vector leg attached", async () => {
+    // The probe and the runtime share `resolveMemoryBackendOutcome`; this pins
+    // that they can never disagree about a given configuration.
+    for (const embedding of [
+      { provider: "transformersjs", model: "x", apiKey: "" },
+      { provider: "openai", model: "x", apiKey: "k" },
+    ]) {
+      mockTryBuildTwinDeps.mockResolvedValue({
+        store: { searchByEmbedding: mockSearchByEmbedding },
+        embedding,
+      })
+      const config = cfg()
+      const mode = await describeMemoryRetrievalMode(config)
+      const deps = await tryBuildMemoryDeps(config)
+      expect(mode.kind === "hybrid").toBe(deps?.vectorSearch !== undefined)
+    }
   })
 })

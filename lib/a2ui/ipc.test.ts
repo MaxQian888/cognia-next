@@ -24,7 +24,7 @@ jest.mock("@tauri-apps/api/event", () => ({
   listen: (...args: unknown[]) => mockListen(...args),
 }))
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: {
     app: { warn: jest.fn(), error: jest.fn(), info: jest.fn(), debug: jest.fn() },
   },

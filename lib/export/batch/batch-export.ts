@@ -2,13 +2,13 @@
 // separate file under `<slug>.<ext>`. JSZip is loaded lazily to keep it out
 // of the main bundle until the user opens the batch dialog.
 
-import type { ChatSession } from "@/lib/claude/types"
+import type { ChatSession } from "@cognia/agent-config-types"
 import { listMessages } from "@/lib/db/messages"
 import { renderSingleExport, type SingleExportFormat } from "@/lib/export/single"
 import type { ThemeId, ThemeTokens } from "@/lib/export/html/syntax-themes"
 import { getDb } from "@/lib/db/schema"
 import type { UIMessage } from "ai"
-import type { StoredMessage } from "@/lib/claude/types"
+import type { StoredMessage } from "@cognia/agent-config-types"
 
 export interface BatchExportOptions {
   /** Sessions to export. */

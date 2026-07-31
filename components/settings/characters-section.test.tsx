@@ -72,7 +72,7 @@ jest.mock("@/lib/files/download", () => ({
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 
 import { CharacterEditor, CharactersSection, type EditorState } from "./characters-section"
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 
 // Narrow view of the EditorOutput payload the assertions read.
 type SavePayload = {
@@ -103,6 +103,7 @@ function baseInitial(overrides: Partial<EditorState> = {}): EditorState {
     twinId: undefined,
     twinSettings: undefined,
     enableComputerUse: false,
+    enableBrowserTools: false,
     computerUseSettings: undefined,
     sandboxEnabled: false,
     sandboxTier: "inherit",
@@ -197,6 +198,14 @@ describe("CharacterEditor — v2 fields", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
     expect(onSave.mock.calls[0][0].availableOnPlatforms).toEqual(["tauri"])
+  })
+
+  it("can restrict a character to the mobile platform", async () => {
+    const { onSave } = renderEditor(baseInitial())
+    fireEvent.click(screen.getByText("platforms.mobile"))
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(onSave.mock.calls[0][0].availableOnPlatforms).toEqual(["mobile"])
   })
 
   it("clears the avatar image via the remove button", async () => {

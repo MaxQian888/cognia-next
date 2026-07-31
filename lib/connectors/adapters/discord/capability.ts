@@ -8,8 +8,14 @@ import {
  * Capability flags declared by the Discord adapter.
  *
  * Kept in alphabetical order for stable diffs. G3.2 added `send.voice`
- * (multipart upload via `voice-upload.ts`) plus the full A2UI projection.
+ * (voice-flagged Discord message fallback via `voice-upload.ts`) plus the full
+ * A2UI projection. Native multipart upload still depends on a future Tauri
+ * upload bridge.
  */
+// GAP: webhook-mode static capability drift — this list is declared once per
+// adapter type, but in `transportMode: "webhook"` the gateway-only features
+// (presence.status, typing, live message events feeding history consumers)
+// don't apply; splitting the matrix per transport is a separate follow-up.
 export const DISCORD_CAPS: readonly Capability[] = [
   "delete",
   "edit",
@@ -19,6 +25,11 @@ export const DISCORD_CAPS: readonly Capability[] = [
   // returns newest-first; the cursor for the next (older) page is the
   // oldest message id in the previous response.
   "history.fetch",
+  // `PUT|DELETE /channels/{channel}/messages/pins/{message}` (current
+  // endpoint; the bare `/channels/{c}/pins/{m}` form is deprecated) +
+  // gateway op 3 Custom Status.
+  "pin",
+  "presence.status",
   "send.a2ui",
   "send.file",
   "send.image",

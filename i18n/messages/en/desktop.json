@@ -1,0 +1,702 @@
+{
+  "chatRuntime": {
+    "title": "Chat is read-only right now",
+    "states": {
+      "available": "Chat is available.",
+      "readOnly": "Cached conversations remain available, but sending is disabled.",
+      "queued": "This action will be sent when the current host reconnects.",
+      "offline": "The current host is offline. Drafts stay in this browser and are not sent automatically.",
+      "requiresUnlock": "Unlock the local Vault to use this host.",
+      "requiresPairing": "Pair this browser with a host, or switch to standalone mode.",
+      "requiresGrant": "This device is missing the host permission required for chat.",
+      "incompatible": "The current host does not provide a compatible chat protocol.",
+      "unsupported": "Chat is not implemented for the current runtime target."
+    },
+    "actions": {
+      "pair": "Pair a host",
+      "connectionSettings": "Connection settings"
+    }
+  },
+  "barCustomize": {
+    "dragHint": "Drag to reorder",
+    "hidden": "Hidden",
+    "hiddenEmpty": "Nothing hidden.",
+    "hideItem": "Remove from bar",
+    "inBar": "In the bar",
+    "inBarEmpty": "Nothing in the bar — every item is hidden.",
+    "items": {
+      "accountStatus": "Account",
+      "accountTop": "Account",
+      "appIcon": "App icon",
+      "attention": "Needs attention",
+      "branch": "Git branch",
+      "commandCenter": "Command centre",
+      "connectivity": "Connectivity",
+      "jobs": "Running jobs",
+      "layoutControls": "Views menu",
+      "navArrows": "Back / forward",
+      "notifications": "Notifications",
+      "panelToggle": "Panel toggle",
+      "perf": "Performance monitor",
+      "primarySidebarToggle": "Primary Side Bar toggle",
+      "quickActions": "Quick actions",
+      "runStatus": "Run state",
+      "search": "Search & title",
+      "secondarySidebarToggle": "Secondary Side Bar toggle",
+      "sync": "Sync status",
+      "usage": "Usage & limits",
+      "workspace": "Workspace"
+    },
+    "restoreDefaults": "Restore defaults",
+    "showItem": "Add back to bar",
+    "zoneHint": "Items move within their own region — start, centre or end — because the window controls and the drag region are fixed.",
+    "zones": {
+      "center": "Centre",
+      "end": "End",
+      "start": "Start"
+    }
+  },
+  "channelList": {
+    "bucketOlder": "Older",
+    "bucketPrev30": "Previous 30 Days",
+    "bucketPrev7": "Previous 7 Days",
+    "bucketToday": "Today",
+    "bucketYesterday": "Yesterday",
+    "bulk": {
+      "archive": "Archive",
+      "archiveSuccess": "{count, plural, one {Archived # conversation} other {Archived # conversations}}",
+      "cancel": "Cancel",
+      "delete": "Delete",
+      "deleteConfirmBody": "This permanently removes the conversations and all their messages. This cannot be undone.",
+      "deleteConfirmTitle": "{count, plural, one {Delete # conversation?} other {Delete # conversations?}}",
+      "deleteSuccess": "{count, plural, one {Deleted # conversation} other {Deleted # conversations}}",
+      "pin": "Pin",
+      "pinSuccess": "{count, plural, one {Pinned # conversation} other {Pinned # conversations}}",
+      "selectedCount": "{count, plural, one {# selected} other {# selected}}",
+      "share": "Share",
+      "unarchive": "Unarchive",
+      "unarchiveSuccess": "{count, plural, one {Restored # conversation} other {Restored # conversations}}",
+      "unpin": "Unpin",
+      "unpinSuccess": "{count, plural, one {Unpinned # conversation} other {Unpinned # conversations}}"
+    },
+    "cancel": "Cancel",
+    "clearSearch": "Clear search",
+    "compactDensity": "Compact rows",
+    "conversationsTitle": "Conversations",
+    "deleteFolder": "Delete folder",
+    "deleteFolderConfirmBody": "The folder is removed; its conversations stay and return to the date list. This cannot be undone.",
+    "deleteFolderConfirmTitle": "Delete the folder “{name}”?",
+    "directMessages": "Direct Messages",
+    "displayOptions": "Display options",
+    "emptyArchived": "No archived conversations.",
+    "emptyDm": "No chats yet. Pick a character to begin.",
+    "emptyFolder": "Empty — move conversations here.",
+    "emptySearch": "No conversations match “{query}”.",
+    "emptyTeam": "No conversations yet. Start one above.",
+    "folderActions": "Folder actions",
+    "groupBy": {
+      "label": "Group by",
+      "options": {
+        "agent": "Agent",
+        "date": "Date",
+        "none": "No grouping",
+        "team": "Direct messages / Team",
+        "workspace": "Workspace"
+      }
+    },
+    "groupOther": "Other",
+    "newChat": "New chat",
+    "newConversation": "New conversation",
+    "newFolder": "New folder",
+    "newFolderName": "New folder",
+    "openSessions": "Open sessions",
+    "renameFolder": "Rename folder",
+    "resizeHandle": "Resize sidebar",
+    "searchAria": "Search conversations",
+    "searchMessageContent": "Search message content",
+    "searchPlaceholder": "Search conversations…",
+    "searchTruncated": "Some results may be hidden — refine your search.",
+    "sectionPinned": "Pinned",
+    "sectionRecent": "Recent",
+    "showPreview": "Show message previews",
+    "showUnreadBadges": "Show unread badges",
+    "teamFallback": "Team",
+    "ungroupedAgent": "No agent",
+    "ungroupedWorkspace": "No workspace",
+    "viewActive": "Show active conversations",
+    "viewArchived": "Show archived conversations"
+  },
+  "commandPalette": {
+    "actions": {
+      "checkUpdates": "Check for updates",
+      "clearChat": "Clear current conversation",
+      "exportMd": "Export current chat as Markdown",
+      "manageApiKey": "Manage API key",
+      "manageCharacters": "Manage characters",
+      "manageMcp": "Manage MCP servers",
+      "manageSkills": "Manage skills",
+      "manageTeams": "Manage teams",
+      "newChat": "New chat",
+      "newChatHint": "new",
+      "openFolder": "Open folder as workspace…",
+      "openSettings": "Open settings",
+      "toggleTheme": "Toggle theme"
+    },
+    "description": "Search for commands and sessions",
+    "empty": "No matches found.",
+    "groups": {
+      "actions": "Actions",
+      "messages": "Messages",
+      "navigate": "Go to",
+      "newChat": "New chat with character",
+      "pluginActions": "Plugin actions",
+      "sessions": "Sessions",
+      "settings": "Settings",
+      "switchTeam": "Switch to team",
+      "workbenchPanels": "Workbench panels",
+      "workspaces": "Switch workspace"
+    },
+    "placeholder": "Type a command or session name…",
+    "search": {
+      "coverage": "Search is still indexing older history; some matches may be missing.",
+      "error": "Message search is temporarily unavailable.",
+      "jumpFailed": "The matching message could not be opened.",
+      "loading": "Searching message history…"
+    },
+    "title": "Command palette",
+    "titles": {
+      "chatWith": "Chat with {name}"
+    },
+    "toasts": {
+      "conversationCleared": "Conversation cleared.",
+      "nothingToExport": "Nothing to export — start a conversation first.",
+      "openFolderDesktopOnly": "Opening folders as workspaces is only available in the desktop build.",
+      "upToDate": "You're on the latest version.",
+      "updateAvailable": "Update available: {version}",
+      "updateFailed": "Update check failed: {message}",
+      "updatesDesktopOnly": "Updates are only available in the desktop build."
+    }
+  },
+  "find": {
+    "close": "Close find",
+    "matchOf": "{index} of {total}",
+    "next": "Next match",
+    "noMatches": "No results",
+    "placeholder": "Find in page",
+    "previous": "Previous match"
+  },
+  "guildRail": {
+    "agentRuns": "Agent runs",
+    "agentTeams": "Agent teams",
+    "auxiliaryGroup": "Profile and logs",
+    "browser": "Browser",
+    "canvas": "Canvas",
+    "createTeam": "Create team",
+    "customize": {
+      "description": "Pin the items you use most to the rail; the rest collapse into the More menu. Drag to reorder, or hide items you never use.",
+      "dragHint": "Drag to reorder",
+      "hidden": "Hidden",
+      "hiddenEmpty": "Nothing hidden.",
+      "hideItem": "Hide",
+      "more": "In More menu",
+      "moreEmpty": "Nothing in the More menu — every item is pinned or hidden.",
+      "moveToMore": "Move to More",
+      "pin": "Pin to rail",
+      "pinned": "Pinned",
+      "pinnedEmpty": "No pinned items — everything is in the More menu.",
+      "restoreDefaults": "Restore defaults",
+      "showItem": "Show",
+      "side": "Rail position",
+      "sideLeft": "Left",
+      "sideRight": "Right",
+      "title": "Customize sidebar"
+    },
+    "directMessages": "Direct Messages",
+    "discover": "Discover",
+    "eval": "Evaluation",
+    "featuresGroup": "Features",
+    "goals": "Goals",
+    "inbox": "Inbox",
+    "label": "Guild rail",
+    "logs": "Logs",
+    "me": "Me",
+    "memory": "Memory",
+    "more": "More",
+    "observability": "Observability",
+    "openSettings": "Open settings",
+    "performance": "Performance",
+    "pet": "Pet",
+    "plugins": "Plugins",
+    "scheduler": "Scheduler",
+    "settings": "Settings",
+    "skills": "Skills",
+    "sourceControl": "Source Control",
+    "templates": "Templates",
+    "twin": "Digital twin",
+    "workflows": "Workflows",
+    "workspacesGroup": "Workspaces"
+  },
+  "jobCenter": {
+    "actions": {
+      "cancel": "Cancel",
+      "cancelAria": "Cancel background run {runId}",
+      "clearSettled": "Clear settled",
+      "collect": "Collect",
+      "collectAria": "Collect background run {runId}",
+      "logTail": "Log",
+      "reDispatched": "re-dispatched",
+      "rerun": "Re-run",
+      "stop": "Stop"
+    },
+    "delivery": {
+      "pending": "Pending delivery",
+      "pendingHint": "Delivered when the originating chat is open and idle."
+    },
+    "description": "Agent runs, supervised background processes, and durable monitors on the active host.",
+    "duration": {
+      "minutesSeconds": "{minutes}m {seconds}s",
+      "seconds": "{seconds}s"
+    },
+    "empty": {
+      "activeDescription": "Detached subagents will appear here while they are still running.",
+      "activeTitle": "No active background jobs",
+      "historyDescription": "Done, failed, and interrupted runs remain here until cleared.",
+      "historyTitle": "No background history",
+      "supervisorDescription": "Background commands and Monitor watches will appear here.",
+      "supervisorTitle": "No supervised jobs or monitors"
+    },
+    "fields": {
+      "elapsed": "Elapsed: {value}",
+      "startedAt": "Started: {value}",
+      "tokens": "Tokens: {value}",
+      "toolCalls": "Tools: {value}"
+    },
+    "kind": {
+      "pluginAgent": "Plugin agent",
+      "subagent": "Subagent",
+      "teamDelegation": "Team delegation"
+    },
+    "mode": {
+      "background": "Background",
+      "foreground": "Foreground"
+    },
+    "notify": {
+      "autoResumed": "{count, plural, one {Auto-resumed # interrupted background run} other {Auto-resumed # interrupted background runs}}",
+      "body": "Run {runId}",
+      "doneTitle": "Subagent \"{subagentId}\" finished ({elapsed})",
+      "failedTitle": "Subagent \"{subagentId}\" failed ({elapsed})"
+    },
+    "open": "Open Job Center",
+    "status": {
+      "done": "Done",
+      "error": "Error",
+      "interrupted": "Interrupted",
+      "running": "Running"
+    },
+    "supervisor": {
+      "jobStatus": {
+        "exited": "Exited",
+        "failed": "Failed",
+        "interrupted": "Interrupted",
+        "killed": "Killed",
+        "running": "Running"
+      },
+      "jobs": "Background jobs",
+      "monitorStatus": {
+        "cancelled": "Cancelled",
+        "expired": "Expired",
+        "fired": "Fired",
+        "unsatisfiable": "Unsatisfiable",
+        "waiting": "Waiting"
+      },
+      "monitors": "Monitors",
+      "noOutput": "No output yet.",
+      "owner": {
+        "app": "App",
+        "scheduledTask": "Task {id}",
+        "session": "Session {id}"
+      }
+    },
+    "tabs": {
+      "active": "Active",
+      "history": "History",
+      "running": "Running",
+      "supervisor": "Processes"
+    },
+    "title": "Job Center",
+    "toast": {
+      "cancelUnavailable": "This background run is no longer cancellable.",
+      "cancelled": "Background run cancelled.",
+      "clearFailed": "Could not clear settled jobs: {error}",
+      "cleared": "Settled background jobs cleared.",
+      "collectFailed": "Could not collect background result: {error}",
+      "collectMissing": "That background run is no longer available.",
+      "collected": "Background result collected.",
+      "jobStopFailed": "Could not stop background job: {error}",
+      "jobStopped": "Background job stopped.",
+      "logFailed": "Could not read job output: {error}",
+      "monitorCancelFailed": "Could not cancel monitor: {error}",
+      "monitorCancelled": "Monitor cancelled.",
+      "rerunFailed": "Could not re-run: {reason}",
+      "rerunStarted": "Re-running in the background."
+    },
+    "trigger": "Jobs"
+  },
+  "memberList": {
+    "charsCount": "{count} chars",
+    "empty": "No members.",
+    "heading": "Members — {count}",
+    "hide": "Hide member list",
+    "label": "Team members",
+    "mentionTitle": "Mention {name}",
+    "notesPlaceholder": "Notes injected into every member's transcript on each turn…",
+    "sharedNotes": "Shared notes",
+    "show": "Show member list",
+    "statusLabel": "Status: {status}",
+    "stopMember": "Stop this member"
+  },
+  "menu": {
+    "edit": {
+      "copy": "Copy",
+      "cut": "Cut",
+      "find": "Find…",
+      "label": "Edit",
+      "paste": "Paste",
+      "redo": "Redo",
+      "selectAll": "Select All",
+      "undo": "Undo"
+    },
+    "file": {
+      "label": "File",
+      "newAgentTeam": "New Agent Team",
+      "newCharacter": "New Character",
+      "newChat": "New Chat",
+      "newWorkflow": "New Workflow",
+      "openLogs": "Open Logs",
+      "openSettings": "Settings…",
+      "openWorkspace": "Open Workspace…",
+      "quit": "Quit Cognia",
+      "recentSessions": "Recent Sessions",
+      "recentSessionsEmpty": "No recent sessions"
+    },
+    "go": {
+      "a2ui": "Mini-Apps",
+      "agentTeams": "Agent Teams",
+      "canvas": "Canvas",
+      "discover": "Discover",
+      "dms": "Direct Messages",
+      "inbox": "Inbox",
+      "label": "Go",
+      "logs": "Logs",
+      "plugins": "Plugins",
+      "scheduler": "Scheduler",
+      "settings": "Settings",
+      "sites": "Sites",
+      "skills": "Skills",
+      "twin": "Twin Workbench",
+      "workflows": "Workflows"
+    },
+    "help": {
+      "about": "About Cognia",
+      "documentation": "Documentation",
+      "keyboardShortcuts": "Keyboard Shortcuts…",
+      "keyboardShortcutsClose": "Close",
+      "keyboardShortcutsDescription": "All shortcuts surfaced by the Cognia desktop chrome.",
+      "keyboardShortcutsTitle": "Keyboard Shortcuts",
+      "label": "Help"
+    },
+    "run": {
+      "agentTeams": "Agent Teams",
+      "killSwitch": "Automation Kill-Switch",
+      "label": "Run",
+      "newWorkflowRun": "New Workflow Run",
+      "openScheduler": "Open Scheduler"
+    },
+    "shortcut": {
+      "cmdOrCtrl0": "Ctrl+0",
+      "cmdOrCtrl1": "Ctrl+1",
+      "cmdOrCtrl2": "Ctrl+2",
+      "cmdOrCtrl3": "Ctrl+3",
+      "cmdOrCtrl4": "Ctrl+4",
+      "cmdOrCtrl5": "Ctrl+5",
+      "cmdOrCtrl6": "Ctrl+6",
+      "cmdOrCtrl7": "Ctrl+7",
+      "cmdOrCtrl8": "Ctrl+8",
+      "cmdOrCtrlAltI": "Ctrl+Alt+I",
+      "cmdOrCtrlB": "Ctrl+B",
+      "cmdOrCtrlComma": "Ctrl+,",
+      "cmdOrCtrlF": "Ctrl+F",
+      "cmdOrCtrlMinus": "Ctrl+-",
+      "cmdOrCtrlN": "Ctrl+N",
+      "cmdOrCtrlO": "Ctrl+O",
+      "cmdOrCtrlPlus": "Ctrl+=",
+      "cmdOrCtrlR": "Ctrl+R",
+      "cmdOrCtrlShiftL": "Ctrl+Shift+L",
+      "cmdOrCtrlShiftN": "Ctrl+Shift+N",
+      "cmdOrCtrlShiftP": "Ctrl+Shift+P",
+      "ctrlAltK": "Ctrl+Alt+K",
+      "f11": "F11"
+    },
+    "terminal": {
+      "label": "Terminal",
+      "new": "New Terminal",
+      "restartSidecar": "Restart Sidecar",
+      "togglePanel": "Toggle Terminal Panel"
+    },
+    "tools": {
+      "automationKillSwitch": "Automation Kill-Switch",
+      "automationKillSwitchToastDone": "Automation halted.",
+      "automationKillSwitchToastFail": "Kill-switch failed: {message}",
+      "clearCache": "Clear Cache…",
+      "clearCacheConfirm": "Clear cached search results, TTS audio, and request snapshots? Settings and conversations are untouched.",
+      "clearCacheToastDone": "Cache cleared.",
+      "clearCacheToastFail": "Clear cache failed: {message}",
+      "commandPalette": "Command Palette…",
+      "label": "Tools",
+      "manageConnectors": "Manage Connectors…",
+      "manageMcpServer": "Manage MCP Server…",
+      "pluginDevtools": "Plugin DevTools",
+      "sidecarRestart": "Restart Sidecar",
+      "sidecarRestartToastDone": "Sidecar restarted.",
+      "sidecarRestartToastFail": "Sidecar restart failed: {message}"
+    },
+    "view": {
+      "commandPalette": "Command Palette…",
+      "label": "View",
+      "language": "Language",
+      "languageChinese": "简体中文",
+      "languageEnglish": "English",
+      "openLogs": "Open Logs",
+      "reduceMotion": "Reduce Motion",
+      "reload": "Reload",
+      "theme": "Theme",
+      "themeDark": "Dark",
+      "themeLight": "Light",
+      "themeSystem": "System",
+      "toggleDevtools": "Toggle Developer Tools",
+      "toggleFullscreen": "Toggle Full Screen",
+      "toggleGuildRail": "Toggle Guild Rail",
+      "toggleSidebar": "Toggle Sidebar",
+      "toggleStatusBar": "Toggle Status Bar",
+      "zoomIn": "Zoom In",
+      "zoomOut": "Zoom Out",
+      "zoomReset": "Reset Zoom"
+    },
+    "window": {
+      "alwaysOnTop": "Always on Top",
+      "close": "Close",
+      "label": "Window",
+      "maximize": "Maximize",
+      "minimize": "Minimize",
+      "restore": "Restore"
+    }
+  },
+  "onboarding": {
+    "apiKeyHintHost": "console.anthropic.com",
+    "apiKeyHintPrefix": "Get one at ",
+    "apiKeyHintSuffix": ". The key never leaves your machine.",
+    "apiKeyLabel": "Anthropic API key",
+    "apiKeyPlaceholder": "sk-ant-…",
+    "back": "Back",
+    "continue": "Continue",
+    "done": "Done",
+    "provider": {
+      "apiKey": {
+        "cta": "Use API key",
+        "description": "Use this if you have a workspace API key from console.anthropic.com instead of a subscription.",
+        "title": "Paste an Anthropic API key"
+      },
+      "backToChooser": "Choose a different sign-in method",
+      "claude": {
+        "cta": "Sign in with Anthropic",
+        "description": "Sign in with your Anthropic subscription via PKCE in your browser.",
+        "title": "Claude Pro / Max"
+      },
+      "codex": {
+        "cta": "Sign in with ChatGPT",
+        "description": "Pair this app with your ChatGPT subscription via the device-code flow.",
+        "title": "ChatGPT Plus / Pro (Codex)"
+      },
+      "description": "Use the same login method you already pay for. You can add more accounts later in Settings → Subscription.",
+      "loggedInBadge": "Connected",
+      "loggedInDescription": "{provider} is connected. You can move on or pick another character below.",
+      "opencode": {
+        "cta": "Paste OpenCode key",
+        "description": "Paste an OpenCode Zen API key. Optional region override available.",
+        "title": "OpenCode Zen"
+      },
+      "title": "How do you want to sign in?"
+    },
+    "saving": "Saving…",
+    "skip": "Skip for now",
+    "step1Description": "Pick how you want to sign in. Subscription logins live in your OS keyring; pasted API keys live in your browser's IndexedDB and the embedded Node sidecar.",
+    "step1Title": "Welcome to Cognia",
+    "step2Description": "Each character carries its own system prompt and tools. You can edit, duplicate, or create more later in Settings → Characters.",
+    "step2Title": "Pick a character to start",
+    "toastNeedKey": "Paste your Anthropic API key to continue.",
+    "tour": {
+      "computerUse": {
+        "cta": "Open automation settings",
+        "description": "Computer Use is off by default. Enable it per character and pick a permission tier (off / whitelist / per-call).",
+        "title": "Let the AI drive the desktop"
+      },
+      "connectors": {
+        "cta": "Configure connectors",
+        "description": "Run the assistant as a bot in your favorite messaging platform with auto / manual / draft modes.",
+        "title": "Bridge to Telegram, Discord, Slack, Lark, OneBot"
+      },
+      "description": "These ship with Cognia today. Skip if you'd rather discover them yourself.",
+      "done": "Done",
+      "mobile": {
+        "cta": "Open companion settings",
+        "description": "Generate a 5-minute pair token, then scan it from the mobile app. Falls back from mDNS to WebRTC to Cloudflare tunnel automatically.",
+        "title": "Pair your phone over LAN or WAN"
+      },
+      "next": "Next",
+      "ocr": {
+        "cta": "Configure OCR",
+        "description": "Hover an attachment in the composer to pull text into your prompt. Local engines work offline; cloud providers are optional.",
+        "title": "Extract text from images and PDFs"
+      },
+      "openSettings": "Open settings",
+      "previous": "Previous",
+      "progress": "{current} of {total}",
+      "sandbox": {
+        "cta": "Open sandbox settings",
+        "description": "Bash / Edit / Write can be routed through an OS sandbox (sandbox-exec / bwrap / Windows synthetic-user) or an opt-in e2b microVM. Strict mode refuses calls when no backend is healthy — no bypass.",
+        "title": "Shell tools run inside a sandbox"
+      },
+      "skip": "Skip tour",
+      "title": "What you can do next",
+      "twin": {
+        "cta": "Open twin settings",
+        "description": "Upload documents and the distill pipeline builds a redacted style profile you can bind to any character.",
+        "title": "Train a digital twin on your writing"
+      }
+    }
+  },
+  "sessionRow": {
+    "actionsMenu": "Session actions",
+    "archive": "Archive",
+    "branchedFrom": "Branched conversation — open parent",
+    "cancel": "Cancel",
+    "cogniaAgentChecking": "Checking for the Cognia agent…",
+    "cogniaAgentNotInstalled": "The Cognia agent CLI isn't installed",
+    "delete": "Delete",
+    "deleteConfirmAction": "Delete conversation",
+    "deleteConfirmBody": "This permanently removes the conversation and all its messages. This cannot be undone.",
+    "deleteConfirmBranches": "{count, plural, =1 {Its 1 branch will be kept as a conversation of its own.} other {Its # branches will be kept as conversations of their own.}}",
+    "deleteConfirmTitle": "Delete “{title}”?",
+    "deselect": "Deselect",
+    "dragHandle": "Drag to reorder or move to a folder",
+    "moveToFolder": "Move to folder",
+    "openInTerminal": "Open in terminal",
+    "openInTerminalFailed": "Could not export this session for the terminal",
+    "openedInTerminal": "Run in your terminal: {command}",
+    "pin": "Pin",
+    "pinned": "Pinned",
+    "removeFromFolder": "Remove from folder",
+    "rename": "Rename",
+    "select": "Select",
+    "unarchive": "Unarchive",
+    "unpin": "Unpin",
+    "untitled": "(untitled)"
+  },
+  "shell": {
+    "desktopOnlyBodyMiddle": " rather than ",
+    "desktopOnlyBodyPrefix": "The Claude Code agent runs in a Node sidecar that ships with the desktop build. To use the chat, launch the app with ",
+    "desktopOnlyBodySuffix": ".",
+    "desktopOnlyTitle": "Run inside Tauri",
+    "emptyTitle": "Cognia"
+  },
+  "shellLayout": {
+    "customizeStatusBar": "Customize status bar…",
+    "customizeTitleBar": "Customize layout…",
+    "description": {
+      "dialog": "Choose what appears in the sidebar, the top bar and the bottom bar — and in what order.",
+      "section": "Choose what appears in the sidebar, the top bar and the bottom bar — and in what order. Changes apply immediately and sync with your other devices.",
+      "sidebar": "Pin the items you use most to the rail; the rest collapse into the More menu. Drag to reorder, or hide items you never use.",
+      "status": "The bottom bar carries ambient status. Hidden segments are unmounted, not just invisible, so hiding the performance monitor also stops its sampling.",
+      "title": "The top bar carries navigation, search and window controls. Hidden items are removed entirely — the window buttons and the app menu always stay.",
+      "workbench": "The icon column inside the right-hand workbench. Drag to reorder; hiding one only removes its button — the panel stays reachable from the command palette and its shortcut."
+    },
+    "tab": {
+      "sidebar": "Sidebar",
+      "status": "Bottom bar",
+      "title": "Top bar",
+      "workbench": "Workbench"
+    },
+    "title": "Shell layout"
+  },
+  "shellLayoutNotice": {
+    "description": "Panel toggles, theme, zoom and language now live in the Views menu in the title bar. The pet, OCR and clipboard buttons moved there too. Press ⌘B to show or hide the conversation list.",
+    "title": "Layout simplified"
+  },
+  "statusBar": {
+    "awaitingApproval": "Awaiting approval",
+    "connOffline": "Offline",
+    "connOnline": "Online",
+    "connReconnecting": "Reconnecting…",
+    "error": "Error",
+    "idle": "Idle",
+    "perf": "Performance",
+    "perfCpu": "CPU",
+    "perfMem": "Memory",
+    "streaming": "Streaming",
+    "syncLast": "Synced {time}",
+    "syncNever": "Not synced",
+    "syncNow": "Sync now",
+    "usage": "Usage & limits",
+    "usageOpen": "Open usage & limits"
+  },
+  "titleBar": {
+    "alwaysOnTop": "Always on top",
+    "appName": "Cognia",
+    "back": "Go back",
+    "close": "Close",
+    "commandCenter": {
+      "goToView": "Go to View",
+      "menuLabel": "Command center menu",
+      "noRecent": "No recent sessions",
+      "recentSessions": "Recent Sessions",
+      "untitled": "Untitled"
+    },
+    "forward": "Go forward",
+    "kbdHint": "Ctrl+K",
+    "layout": {
+      "appearanceGroup": "Appearance",
+      "customize": "Customize layout",
+      "customizeBars": "Customize layout…",
+      "localeEn": "English",
+      "localeZh": "简体中文",
+      "openBrowser": "Open browser panel",
+      "themeDark": "Dark",
+      "themeLight": "Light",
+      "themeSystem": "System",
+      "title": "Customize Layout",
+      "toggleGuildRail": "Toggle Guild Rail",
+      "togglePanel": "Toggle Panel",
+      "toggleRightSidebar": "Toggle Right Sidebar",
+      "toggleSidebar": "Toggle Sidebar",
+      "toggleStatusBar": "Toggle Status Bar",
+      "zoomIn": "Zoom in",
+      "zoomLabel": "Zoom",
+      "zoomOut": "Zoom out",
+      "zoomReset": "Reset zoom"
+    },
+    "maximize": "Maximize",
+    "minimize": "Minimize",
+    "openMenus": "Open menus",
+    "quickActions": {
+      "capture": "Content capture",
+      "hidePet": "Hide desktop pet",
+      "ocr": "Screen OCR",
+      "showPet": "Show desktop pet"
+    },
+    "restore": "Restore",
+    "searchPlaceholder": "Search or run command…",
+    "separator": " — ",
+    "workspace": "Workspace",
+    "workspaceUntitled": "Untitled workspace"
+  }
+}

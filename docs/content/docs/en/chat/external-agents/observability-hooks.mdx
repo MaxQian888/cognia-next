@@ -13,7 +13,7 @@ description: How an external turn is traced and governed — agent-trace-bridge.
   `surface = "agent-team"` (`:79`): `createExternalAgentTraceBridge` (`:52`) returns
   `{onStart, onEvent, onComplete, onError}`, which the manager calls at the lifecycle edges
   (`manager.ts:1577`/`:1653`/`:1659`/`:1721`); the span lands in the shared `agentTraces` sink via
-  `@/lib/agent-trace/emitter`. `agent-hooks.ts` wires external events into **two** hook systems:
+  `@cognia/agent-trace/emitter`. `agent-hooks.ts` wires external events into **two** hook systems:
   in-process plugin hooks (System A — `dispatchExternalAgentToolCall`, `PostToolUse`, …) and the
   settings.json hook runtime (System B — `fireAgentHook` `:47` invokes the Rust `run_agent_hook`
   command). Its sharpest tool is `gateExternalAgentPermission` (`:117`): a **blocking `PreToolUse`
@@ -32,7 +32,7 @@ description: How an external turn is traced and governed — agent-trace-bridge.
 ## agent-trace-bridge.ts — One Span per Run
 
 The bridge wraps the shared emitter (`startSpan`/`recordEvent`/`endSpan` from
-`@/lib/agent-trace/emitter`, imported `:16`) so the external runtime produces the same span shape as
+`@cognia/agent-trace/emitter`, imported `:16`) so the external runtime produces the same span shape as
 every other agent. The manager builds one per run in `createTraceBridge` (`manager.ts:1472`) and
 drives it through the turn.
 

@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Coverage for `lib/db/mcp-audit-log.ts` — append/list/count/clear plus the
  * 5000-row cap (overflow behavior in `pruneOldest`).

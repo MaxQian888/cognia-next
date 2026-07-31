@@ -1,130 +1,141 @@
 /**
  * Kahn-style topological sort with cycle detection. Used by the orchestrator
- * to compute step execution order. Cycles that pass through `flow.loop` /
- * `flow.wait` nodes are removed before sorting (they're back-edges) so the
- * caller can run a DAG in the normal case and only special-case the
- * declared back-edges.
+ * to compute step execution order.
  *
  * The sorter operates on the validated graph — `validateGraphIntegrity` has
- * already rejected dangling endpoints and unauthorized cycles.
+ * already rejected dangling endpoints and ALL cycles (iteration lives inside
+ * `flow.loop` v2 containers, never in top-level back-edges). Historically the
+ * sorter silently REMOVED edges targeting `flow.loop`/`flow.wait` nodes as
+ * "authorized back-edges" — but the scheduler never re-traversed them, so a
+ * cyclic graph ran every node exactly once while looking valid. That
+ * tolerance is gone: a cycle that reaches this function (i.e. snuck past
+ * validation) now throws loudly instead of degrading to a single pass.
  */
 
 import type { VisualWorkflow, WorkflowEdge, WorkflowNode } from "@/types/workflow/visual"
 
-export interface TopoSortResult {
-  /** Stable order of node ids that respects all forward edges. */
-  order: string[]
-  /** Edges that were removed because they form an authorized back-edge. */
-  backEdges: WorkflowEdge[]
-}
-
-const BACK_EDGE_KINDS = new Set<WorkflowNode["type"]>(["flow.loop", "flow.wait"])
-
-export function topoSort(workflow: VisualWorkflow): TopoSortResult {
-  const nodeMap = new Map<string, WorkflowNode>()
-  for (const n of workflow.nodes) nodeMap.set(n.id, n)
-
-  // Identify back-edges before sorting. A back-edge is any edge whose target
-  // is a flow.loop / flow.wait node — those are explicit "loop entry points"
-  // and the orchestrator handles them with their own semantics.
-  const backEdges: WorkflowEdge[] = []
-  const forwardEdges: WorkflowEdge[] = []
-  for (const edge of workflow.edges) {
-    const targetNode = nodeMap.get(edge.target)
-    const sourceNode = nodeMap.get(edge.source)
-    if (
-      targetNode &&
-      sourceNode &&
-      BACK_EDGE_KINDS.has(targetNode.type) &&
-      // Only treat as back-edge if the target is "before" the source in any
-      // BFS of forward edges. We approximate by checking whether source is
-      // reachable from target via non-back-edges; if so, this is a cycle.
-      isReachable(workflow.edges, edge.target, edge.source, BACK_EDGE_KINDS, nodeMap)
-    ) {
-      backEdges.push(edge)
-    } else {
-      forwardEdges.push(edge)
-    }
-  }
-
-  // Kahn's algorithm on the forward edges.
-  const inDegree = new Map<string, number>()
-  const adj = new Map<string, string[]>()
-  for (const n of workflow.nodes) {
-    inDegree.set(n.id, 0)
-    adj.set(n.id, [])
-  }
-  for (const edge of forwardEdges) {
-    if (!inDegree.has(edge.target) || !adj.has(edge.source)) continue
-    inDegree.set(edge.target, (inDegree.get(edge.target) ?? 0) + 1)
-    adj.get(edge.source)!.push(edge.target)
-  }
-
-  const queue: string[] = []
-  for (const [id, deg] of inDegree) {
-    if (deg === 0) queue.push(id)
-  }
-  // Stable: sort by the node array's original order so re-runs produce
-  // identical traces.
-  const idIndex = new Map(workflow.nodes.map((n, i) => [n.id, i] as const))
-  queue.sort((a, b) => (idIndex.get(a) ?? 0) - (idIndex.get(b) ?? 0))
-
-  const order: string[] = []
-  while (queue.length > 0) {
-    const id = queue.shift()!
-    order.push(id)
-    const next = adj.get(id) ?? []
-    for (const target of next) {
-      const deg = (inDegree.get(target) ?? 0) - 1
-      inDegree.set(target, deg)
-      if (deg === 0) queue.push(target)
-    }
-    queue.sort((a, b) => (idIndex.get(a) ?? 0) - (idIndex.get(b) ?? 0))
-  }
-
-  // If we didn't reach every node, the (forward) graph still has a cycle —
-  // which means validateGraphIntegrity missed it. Shouldn't happen if the
-  // caller validates first, but we surface it loudly.
-  if (order.length !== workflow.nodes.length) {
-    const remaining = workflow.nodes.map((n) => n.id).filter((id) => !order.includes(id))
-    throw new Error(`Cycle detected after back-edge removal: ${remaining.join(", ")}`)
-  }
-
-  return { order, backEdges }
+export interface WorkflowGraphIndex {
+  nodeById: ReadonlyMap<string, WorkflowNode>
+  incomingEdgesByNode: ReadonlyMap<string, readonly WorkflowEdge[]>
+  outgoingEdgesByNode: ReadonlyMap<string, readonly WorkflowEdge[]>
 }
 
 /**
- * Returns true if `to` is reachable from `from` along edges whose target is
- * NOT one of the excluded kinds. Used to detect "is this a cycle?".
+ * Build the immutable adjacency index shared by preparation and execution.
+ * Keeping this per-run avoids repeatedly scanning every node/edge while the
+ * orchestrator resolves dependencies, routes branches, and propagates skips.
  */
-function isReachable(
-  edges: WorkflowEdge[],
-  from: string,
-  to: string,
-  excludeKindsAtTarget: Set<WorkflowNode["type"]>,
-  nodeMap: Map<string, WorkflowNode>
-): boolean {
-  if (from === to) return true
-  const visited = new Set<string>([from])
-  const stack: string[] = [from]
-  const adj = new Map<string, string[]>()
-  for (const edge of edges) {
-    const targetNode = nodeMap.get(edge.target)
-    if (targetNode && excludeKindsAtTarget.has(targetNode.type)) continue
-    if (!adj.has(edge.source)) adj.set(edge.source, [])
-    adj.get(edge.source)!.push(edge.target)
+export function createWorkflowGraphIndex(workflow: VisualWorkflow): WorkflowGraphIndex {
+  const nodeById = new Map<string, WorkflowNode>()
+  const incomingEdgesByNode = new Map<string, WorkflowEdge[]>()
+  const outgoingEdgesByNode = new Map<string, WorkflowEdge[]>()
+
+  for (const node of workflow.nodes) {
+    nodeById.set(node.id, node)
+    incomingEdgesByNode.set(node.id, [])
+    outgoingEdgesByNode.set(node.id, [])
   }
-  while (stack.length > 0) {
-    const cur = stack.pop()!
-    for (const next of adj.get(cur) ?? []) {
-      if (next === to) return true
-      if (!visited.has(next)) {
-        visited.add(next)
-        stack.push(next)
-      }
+  for (const edge of workflow.edges) {
+    outgoingEdgesByNode.get(edge.source)?.push(edge)
+    incomingEdgesByNode.get(edge.target)?.push(edge)
+  }
+
+  return { nodeById, incomingEdgesByNode, outgoingEdgesByNode }
+}
+
+export interface TopoSortResult {
+  /** Stable order of node ids that respects all forward edges. */
+  order: string[]
+  /**
+   * Always empty since the back-edge tolerance was removed; kept in the
+   * result shape so downstream call sites need no change if a future
+   * event-resume design reintroduces genuine back-edges.
+   */
+  backEdges: WorkflowEdge[]
+}
+
+export function topoSort(
+  workflow: VisualWorkflow,
+  graph = createWorkflowGraphIndex(workflow)
+): TopoSortResult {
+  const forwardEdges = workflow.edges
+  const backEdges: WorkflowEdge[] = []
+
+  // Kahn's algorithm on the forward edges.
+  const inDegree = new Map<string, number>()
+  for (const n of workflow.nodes) {
+    inDegree.set(n.id, 0)
+  }
+  for (const edge of forwardEdges) {
+    if (!inDegree.has(edge.target) || !graph.nodeById.has(edge.source)) continue
+    inDegree.set(edge.target, (inDegree.get(edge.target) ?? 0) + 1)
+  }
+
+  // A min-heap of original node positions preserves deterministic order
+  // without sorting and shifting the whole ready queue after every node.
+  const queue: number[] = []
+  const pushReady = (index: number): void => {
+    queue.push(index)
+    let child = queue.length - 1
+    while (child > 0) {
+      const parent = Math.floor((child - 1) / 2)
+      if (queue[parent] <= queue[child]) break
+      ;[queue[parent], queue[child]] = [queue[child], queue[parent]]
+      child = parent
     }
   }
-  return false
+  const popReady = (): number | undefined => {
+    const first = queue[0]
+    const last = queue.pop()
+    if (last !== undefined && queue.length > 0) {
+      queue[0] = last
+      let parent = 0
+      while (true) {
+        const left = parent * 2 + 1
+        const right = left + 1
+        let smallest = parent
+        if (left < queue.length && queue[left] < queue[smallest]) smallest = left
+        if (right < queue.length && queue[right] < queue[smallest]) smallest = right
+        if (smallest === parent) break
+        ;[queue[parent], queue[smallest]] = [queue[smallest], queue[parent]]
+        parent = smallest
+      }
+    }
+    return first
+  }
+  for (let index = 0; index < workflow.nodes.length; index += 1) {
+    if ((inDegree.get(workflow.nodes[index].id) ?? 0) === 0) pushReady(index)
+  }
+  const nodeIndex = new Map(workflow.nodes.map((node, index) => [node.id, index] as const))
+
+  const order: string[] = []
+  while (queue.length > 0) {
+    const index = popReady()!
+    const id = workflow.nodes[index].id
+    order.push(id)
+    for (const edge of graph.outgoingEdgesByNode.get(id) ?? []) {
+      const target = edge.target
+      const deg = (inDegree.get(target) ?? 0) - 1
+      inDegree.set(target, deg)
+      const targetIndex = nodeIndex.get(target)
+      if (deg === 0 && targetIndex !== undefined) pushReady(targetIndex)
+    }
+  }
+
+  // If we didn't reach every node, the graph has a cycle — which means
+  // validateGraphIntegrity missed it (a caller skipped validation). Surface
+  // it loudly rather than running a partial order.
+  if (order.length !== workflow.nodes.length) {
+    const emitted = new Set(order)
+    const remaining = workflow.nodes.map((n) => n.id).filter((id) => !emitted.has(id))
+    throw new Error(
+      `Cycle detected through nodes: ${remaining.join(", ")}. ` +
+        "Top-level back-edges never re-execute — move the nodes that should repeat " +
+        "INSIDE a flow.loop container (typeVersion 2) instead."
+    )
+  }
+
+  return { order, backEdges }
 }
 
 /**
@@ -132,7 +143,9 @@ function isReachable(
  * orchestrator needs to enqueue successors after a step completes.
  */
 export function downstream(workflow: VisualWorkflow, nodeId: string): string[] {
-  return workflow.edges.filter((e) => e.source === nodeId).map((e) => e.target)
+  return (createWorkflowGraphIndex(workflow).outgoingEdgesByNode.get(nodeId) ?? []).map(
+    (edge) => edge.target
+  )
 }
 
 /**
@@ -140,5 +153,7 @@ export function downstream(workflow: VisualWorkflow, nodeId: string): string[] {
  * input outputs for the step executor.
  */
 export function upstream(workflow: VisualWorkflow, nodeId: string): string[] {
-  return workflow.edges.filter((e) => e.target === nodeId).map((e) => e.source)
+  return (createWorkflowGraphIndex(workflow).incomingEdgesByNode.get(nodeId) ?? []).map(
+    (edge) => edge.source
+  )
 }

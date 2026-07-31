@@ -4,13 +4,23 @@
   "version": "0.1.0",
   "description": "Filesystem and project-aware helpers for plugin authors.",
   "type": "frontend",
-  "capabilities": ["tools"],
+  "capabilities": ["tools", "workflow"],
   "main": "src/index.ts",
   "author": "cognia-next",
   "license": "MIT",
+  "minAppVersion": "0.1.0",
   "engines": {
     "cognia": ">=0.1.0"
   },
-  "permissions": ["filesystem:read", "filesystem:write"],
-  "activationEvents": ["onStartup"]
+  "permissions": ["filesystem:read"],
+  "activationEvents": ["startup"],
+  "runtimeCompatibility": {
+    "browser": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "tauri": { "availability": "supported", "entrypoint": "src/index.ts" },
+    "mobile": {
+      "availability": "degraded",
+      "entrypoint": "src/index.ts",
+      "reason": "Capacitor filesystem is restricted to app-scoped paths on mobile; arbitrary workspace paths are unavailable."
+    }
+  }
 }

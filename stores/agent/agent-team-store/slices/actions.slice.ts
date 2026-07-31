@@ -4,6 +4,8 @@ import {
   type AgentTeam,
   type AgentTeammate,
   type AgentTeamTask,
+  type AgentTaskComment,
+  type TaskCommentAttachment,
   type AgentTeamMessage,
   type AgentTeamConfig,
   type AgentTeamTemplate,
@@ -12,7 +14,10 @@ import {
   type TeammateCapabilityOverlay,
 } from "@/types/agent/agent-team"
 import { normalizeAgentTeamConfig, normalizeAgentTeamTask } from "@/lib/ai/agent/agent-team-compat"
-import { loggers } from "@/lib/logging"
+import { assertNoNewRawTeammateCredentials } from "@/lib/ai/agent/team/execution-binding-resolver"
+import { canMoveTask, reorderColumn, sortColumn } from "@/lib/ai/agent/team/task-move-guard"
+import { loggers } from "@cognia/logging"
+import { useProjectStore } from "@/stores/project/project-store"
 import { initialState, builtInTemplatesMap } from "../initial-state"
 import type { AgentTeamState } from "../types"
 import type {
@@ -156,6 +161,9 @@ export const createAgentTeamActionsSlice = (
 
     const team: AgentTeam = {
       id: teamId,
+      // Workspace isolation (Dexie v86): a live team belongs to the active
+      // workspace. Reusable templates stay profile-shared (no projectId).
+      projectId: useProjectStore.getState().activeProjectId ?? undefined,
       name: input.name,
       description: input.description || "",
       task: input.task,
@@ -308,6 +316,33 @@ export const createAgentTeamActionsSlice = (
     get().cleanupTeam(teamId)
   },
 
+  purgeProject: (projectId) => {
+    // Workspace isolation cascade (Dexie v86): drop every team owned by the
+    // deleted workspace, plus its teammates + tasks. Templates are
+    // profile-shared and left untouched. Called by `deleteProjectCascade`.
+    set((state) => {
+      const removedTeamIds = new Set<string>()
+      const teams: Record<string, AgentTeam> = {}
+      for (const [id, team] of Object.entries(state.teams)) {
+        if (team.projectId === projectId) removedTeamIds.add(id)
+        else teams[id] = team
+      }
+      if (removedTeamIds.size === 0) return state
+      const teammates = Object.fromEntries(
+        Object.entries(state.teammates).filter(([, tm]) => !removedTeamIds.has(tm.teamId))
+      )
+      const tasks = Object.fromEntries(
+        Object.entries(state.tasks).filter(([, t]) => !removedTeamIds.has(t.teamId))
+      )
+      const activeTeamId =
+        state.activeTeamId && removedTeamIds.has(state.activeTeamId) ? null : state.activeTeamId
+      const editorSession = Object.fromEntries(
+        Object.entries(state.editorSession).filter(([teamId]) => !removedTeamIds.has(teamId))
+      )
+      return { teams, teammates, tasks, activeTeamId, editorSession }
+    })
+  },
+
   setTeamStatus: (teamId, status) => {
     set((state) => {
       const team = state.teams[teamId]
@@ -333,6 +368,8 @@ export const createAgentTeamActionsSlice = (
   addTeammate: (input) => {
     const team = get().teams[input.teamId]
     if (!team) throw new Error(`Team not found: ${input.teamId}`)
+    // ADR-0090 Phase 7: new configs bind credentials by REFERENCE only.
+    assertNoNewRawTeammateCredentials(input.config)
 
     const teammate: AgentTeammate = {
       id: nanoid(),
@@ -364,6 +401,10 @@ export const createAgentTeamActionsSlice = (
   },
 
   upsertTeammate: (teammate) => {
+    // ADR-0090 Phase 7: the raw-credential rejection covers EVERY teammate
+    // write path — upsert included (whole-object replace would otherwise be a
+    // bypass channel). Legacy rows carrying an unchanged value stay readable.
+    assertNoNewRawTeammateCredentials(teammate.config, get().teammates[teammate.id]?.config)
     set((state) => {
       const destinationTeam = state.teams[teammate.teamId]
       if (!destinationTeam) {
@@ -435,6 +476,12 @@ export const createAgentTeamActionsSlice = (
   },
 
   updateTeammate: (teammateId, updates) => {
+    // ADR-0090 Phase 7: reject NEW raw apiKey/baseURL values (legacy rows
+    // carrying an unchanged value stay readable). Checked outside the set()
+    // updater so a rejection never half-applies state.
+    if (updates.config) {
+      assertNoNewRawTeammateCredentials(updates.config, get().teammates[teammateId]?.config)
+    }
     set((state) => {
       const teammate = state.teammates[teammateId]
       if (!teammate) return state
@@ -634,6 +681,78 @@ export const createAgentTeamActionsSlice = (
     })
   },
 
+  moveTask: (taskId, to) => {
+    const task = get().tasks[taskId]
+    if (!task) return { ok: false, reason: "task-not-found" }
+    const team = get().teams[task.teamId]
+    const verdict = canMoveTask(task, task.status, to, team?.status ?? "idle")
+    if (!verdict.allowed) return { ok: false, reason: verdict.reason }
+    if (task.status === to) return { ok: true }
+
+    set((state) => {
+      const current = state.tasks[taskId]
+      if (!current) return state
+
+      const updates: Partial<AgentTeamTask> = { status: to }
+      if (to === "pending") {
+        // Un-strand / manual retry: clear the run-owned fields so the next
+        // run (or resume) re-dispatches the task from a clean slate.
+        updates.claimedBy = undefined
+        updates.startedAt = undefined
+        updates.completedAt = undefined
+        updates.actualDuration = undefined
+        updates.error = undefined
+      } else if (to === "completed" || to === "failed" || to === "cancelled") {
+        updates.completedAt = new Date()
+        if (current.startedAt) {
+          updates.actualDuration = updates.completedAt.getTime() - current.startedAt.getTime()
+        }
+      }
+
+      // Release the claim mirror when the task leaves a claimed state.
+      const claimedBy = current.claimedBy
+      const teammate = claimedBy ? state.teammates[claimedBy] : undefined
+      const releaseTeammate = to === "pending" && teammate?.currentTaskId === taskId
+
+      return {
+        tasks: { ...state.tasks, [taskId]: { ...current, ...updates } },
+        ...(releaseTeammate && claimedBy
+          ? {
+              teammates: {
+                ...state.teammates,
+                [claimedBy]: { ...teammate, currentTaskId: undefined },
+              },
+            }
+          : {}),
+      }
+    })
+    return { ok: true }
+  },
+
+  reorderTask: (taskId, targetIndex) => {
+    const task = get().tasks[taskId]
+    if (!task) return
+
+    set((state) => {
+      const current = state.tasks[taskId]
+      if (!current) return state
+      const column = sortColumn(
+        Object.values(state.tasks).filter(
+          (t) => t.teamId === current.teamId && t.status === current.status
+        )
+      )
+      const changes = reorderColumn(column, taskId, targetIndex)
+      if (changes.length === 0) return state
+
+      const tasks = { ...state.tasks }
+      for (const { id, order } of changes) {
+        const row = tasks[id]
+        if (row) tasks[id] = { ...row, order }
+      }
+      return { tasks }
+    })
+  },
+
   claimTask: (taskId, teammateId) => {
     set((state) => {
       const task = state.tasks[taskId]
@@ -664,6 +783,55 @@ export const createAgentTeamActionsSlice = (
         tasks: {
           ...state.tasks,
           [taskId]: { ...task, assignedTo: teammateId },
+        },
+      }
+    })
+  },
+
+  addTaskComment: (input) => {
+    const task = get().tasks[input.taskId]
+    if (!task) return null
+    const text = typeof input.text === "string" ? input.text.trim() : ""
+    if (!text) return null
+    const author = get().teammates[input.authorId]
+    const authorName =
+      input.authorName ||
+      (input.authorId === "user"
+        ? "You"
+        : author?.name || (input.authorId === "system" ? "System" : "Unknown"))
+    const comment: AgentTaskComment = {
+      id: nanoid(),
+      taskId: input.taskId,
+      authorId: input.authorId,
+      authorName,
+      text,
+      createdAt: new Date(),
+      ...(input.attachments && input.attachments.length > 0
+        ? { attachments: input.attachments.map((a) => ({ ...a, id: nanoid() })) }
+        : {}),
+    }
+    set((state) => {
+      const current = state.tasks[input.taskId]
+      if (!current) return state
+      return {
+        tasks: {
+          ...state.tasks,
+          [input.taskId]: { ...current, comments: [...(current.comments ?? []), comment] },
+        },
+      }
+    })
+    return comment
+  },
+
+  attachTaskFile: (taskId, attachment) => {
+    set((state) => {
+      const task = state.tasks[taskId]
+      if (!task) return state
+      const next: TaskCommentAttachment = { ...attachment, id: nanoid() }
+      return {
+        tasks: {
+          ...state.tasks,
+          [taskId]: { ...task, attachments: [...(task.attachments ?? []), next] },
         },
       }
     })
@@ -826,9 +994,30 @@ export const createAgentTeamActionsSlice = (
   // ====================================================================
 
   addEvent: (event) => {
-    set((state) => ({
-      events: [...state.events.slice(-99), event], // Keep last 100
-    }))
+    set((state) => {
+      // Live teammate-progress events update a single row in place: a
+      // `progress_update` for a given task replaces the existing non-terminal
+      // progress row for that same task instead of appending one row per
+      // streamed frame. Terminal frames (phase done/failed) replace the live
+      // row and then freeze (later frames append, though none are expected).
+      if (event.type === "progress_update" && event.taskId) {
+        const idx = state.events.findIndex(
+          (e) =>
+            e.type === "progress_update" &&
+            e.taskId === event.taskId &&
+            e.data?.phase !== "done" &&
+            e.data?.phase !== "failed"
+        )
+        if (idx !== -1) {
+          const next = state.events.slice()
+          next[idx] = event
+          return { events: next }
+        }
+      }
+      return {
+        events: [...state.events.slice(-99), event], // Keep last 100
+      }
+    })
   },
 
   clearEvents: (teamId) => {
@@ -988,6 +1177,8 @@ export const createAgentTeamActionsSlice = (
   setDisplayMode: (mode) => set({ displayMode: mode }),
   setIsPanelOpen: (open) => set({ isPanelOpen: open }),
   setWorkspaceTab: (tab) => set({ workspaceTab: tab }),
+
+  setTasksView: (view) => set({ tasksView: view }),
   setWorkspaceFocus: (focus) =>
     set((state) => ({
       workspaceFocus: {
@@ -1053,6 +1244,10 @@ export const createAgentTeamActionsSlice = (
       .map((id) => get().tasks[id])
       .filter((t): t is AgentTeamTask => t !== undefined)
       .sort((a, b) => a.order - b.order)
+  },
+
+  getTaskComments: (taskId) => {
+    return get().tasks[taskId]?.comments ?? []
   },
 
   getTeamMessages: (teamId) => {
@@ -1157,6 +1352,9 @@ export const createAgentTeamActionsSlice = (
         if (d.sourceTeamId === teamId) delete restDelegations[id]
       }
 
+      // Drop the team's persisted project-Editor session.
+      const { [teamId]: _es, ...restEditorSession } = state.editorSession
+
       return {
         teams: restTeams,
         teammates: restTeammates,
@@ -1165,6 +1363,7 @@ export const createAgentTeamActionsSlice = (
         consensus: restConsensus,
         sharedMemory: restSharedMemory,
         delegations: restDelegations,
+        editorSession: restEditorSession,
         activeTeamId: state.activeTeamId === teamId ? null : state.activeTeamId,
       }
     })

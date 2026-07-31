@@ -7,7 +7,7 @@
 // neither — `getStats` is an on-demand walk of the Dexie schema.
 
 import { getDb } from "@/lib/db/schema"
-import { getNativeVectorStoreSize } from "@/lib/vector"
+import { getNativeVectorStoreSize } from "@cognia/vector"
 import { categoryForTable, CATEGORY_INFO, defaultDisplayName } from "./category-info"
 import type {
   StorageCategory,

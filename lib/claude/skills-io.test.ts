@@ -142,6 +142,21 @@ describe("resolveSkillMarkdown (M4)", () => {
     expect(body).toBe("# Code Review\n\nDo it carefully.")
   })
 
+  it("binds plugin-root tokens in inline skill bodies", async () => {
+    const def: PluginSkillDef = {
+      id: "plugin-script",
+      name: "Plugin Script",
+      description: "Run a bundled script.",
+      source: {
+        kind: "inline",
+        markdown: "Run `${CLAUDE_PLUGIN_ROOT}/scripts/check.ts`.",
+      },
+      runtimePluginRoot: "/plugins/acme",
+    }
+
+    await expect(resolveSkillMarkdown(def)).resolves.toBe("Run `/plugins/acme/scripts/check.ts`.")
+  })
+
   it("returns undefined for anthropic-managed source", async () => {
     const def: PluginSkillDef = {
       id: "managed",

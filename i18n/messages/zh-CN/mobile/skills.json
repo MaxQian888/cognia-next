@@ -1,0 +1,16 @@
+{
+  "content": "内容",
+  "description": "描述",
+  "metaCategory": "类别",
+  "metaUpdated": "最近更新",
+  "metaUsage": "使用次数",
+  "name": "名称",
+  "openSheet": "打开 {name}",
+  "save": "保存",
+  "saved": "已保存。",
+  "tabEdit": "编辑",
+  "tabOverview": "概览",
+  "tabResources": "资源",
+  "tabValidation": "验证",
+  "toggleEnabled": "启用技能"
+}

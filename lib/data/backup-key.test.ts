@@ -1,7 +1,20 @@
+/** @jest-environment jsdom */
 // Behavior of the auto-key fallback. We test both the web (localStorage) path
 // and the desktop branch's resilience when the plugin isn't loaded — the
 // __mocks__/tauri-plugin-store.js shim returns null from `get`, so the code
 // path that *generates* a fresh key is exercised even without a real store.
+
+const headlessState = { enabled: false }
+const transportCall = jest.fn()
+
+jest.mock("@/lib/platform/detect", () => ({
+  isHeadlessHost: () => headlessState.enabled,
+}))
+
+jest.mock("@/lib/tauri", () => ({
+  isTauri: () => false,
+  transport: { call: (...args: unknown[]) => transportCall(...args) },
+}))
 
 import {
   getDefaultBackupPassphrase,
@@ -14,6 +27,8 @@ const { WEB_BACKUP_KEY_STORAGE } = __TESTING__
 
 beforeEach(() => {
   localStorage.clear()
+  headlessState.enabled = false
+  transportCall.mockReset()
 })
 
 describe("getDefaultBackupPassphrase", () => {
@@ -67,5 +82,41 @@ describe("clearBackupKey", () => {
 
   it("is a no-op when nothing is stored", async () => {
     await expect(clearBackupKey()).resolves.toBeUndefined()
+  })
+})
+
+describe("headless server auto-key", () => {
+  beforeEach(() => {
+    headlessState.enabled = true
+  })
+
+  it("loads or creates the key through the service-scoped secret store", async () => {
+    transportCall.mockResolvedValueOnce(null).mockResolvedValueOnce(undefined)
+
+    const key = await getDefaultBackupPassphrase()
+
+    expect(key).toBeTruthy()
+    expect(transportCall).toHaveBeenNthCalledWith(1, "keyring_secret_get", {
+      input: { namespace: "backup", key: "encryption.key.v1" },
+    })
+    expect(transportCall).toHaveBeenNthCalledWith(2, "keyring_secret_set", {
+      input: { namespace: "backup", key: "encryption.key.v1", value: key },
+    })
+    expect(localStorage.getItem(WEB_BACKUP_KEY_STORAGE)).toBeNull()
+  })
+
+  it("rotates and clears the server-stored key without touching browser storage", async () => {
+    transportCall.mockResolvedValue(undefined)
+
+    const rotated = await rotateBackupKey()
+    expect(transportCall).toHaveBeenNthCalledWith(1, "keyring_secret_set", {
+      input: { namespace: "backup", key: "encryption.key.v1", value: rotated },
+    })
+
+    await clearBackupKey()
+    expect(transportCall).toHaveBeenNthCalledWith(2, "keyring_secret_clear", {
+      input: { namespace: "backup", key: "encryption.key.v1" },
+    })
+    expect(localStorage.getItem(WEB_BACKUP_KEY_STORAGE)).toBeNull()
   })
 })

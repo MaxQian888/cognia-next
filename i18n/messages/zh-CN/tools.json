@@ -1,0 +1,12 @@
+{
+  "alwaysAllowTool": "本会话内始终允许此工具",
+  "approvalDescription": "外部代理请求执行此工具，请确认是否允许。",
+  "approvalRequired": "需要工具授权",
+  "approve": "批准",
+  "cancel": "取消",
+  "deny": "拒绝",
+  "parameters": "参数",
+  "riskHigh": "高风险",
+  "riskLow": "低风险",
+  "riskMedium": "中风险"
+}

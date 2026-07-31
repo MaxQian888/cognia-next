@@ -16,7 +16,7 @@
  * `ctx.workflow.registerNode`. Desktop-only: it requires the Tauri sidecar.
  */
 
-import type { PluginNodeDef } from "@/types/plugin/plugin-workflow"
+import { defineWorkflowNode } from "@cognia/plugin-sdk"
 import type { StepExecutionContext, StepExecutionResult } from "@/types/workflow/visual"
 import { isTauri } from "@/lib/tauri"
 import { REFACTOR_ROLES, roleCharacterId, type RefactorRole } from "../characters/pack"
@@ -90,6 +90,9 @@ export async function executeAgentTurn(ctx: StepExecutionContext): Promise<StepE
   }
 
   // Tool-enabled turns need the sidecar; fail loudly in the browser shell.
+  // Direct `isTauri()` is intentional here: node executors receive a
+  // StepExecutionContext, which carries no `ctx.capabilities` API
+  // (the node is declared `desktopOnly`).
   if (!isTauri()) {
     throw new Error(
       "agent.turn requires the desktop runtime: the tool-enabled Claude turn is driven through the Tauri sidecar."
@@ -119,6 +122,13 @@ export async function executeAgentTurn(ctx: StepExecutionContext): Promise<StepE
     character,
     appSettings: appSettings ?? null,
   })
+  // Headless runs have no UI to answer a permission prompt, so the turn would
+  // hang forever waiting on one. Scope the bypass to THIS call site rather than
+  // to the character definitions: a character's `permissionMode` is consulted
+  // for every interactive chat with that character too (see the pack header),
+  // which silently handed un-prompted Edit/Write/Bash to anyone who picked a
+  // refactor role from the character list.
+  sendOptions.permissionMode = "bypassPermissions"
 
   const timeoutSec =
     typeof params.timeoutSec === "number" && params.timeoutSec > 0
@@ -142,14 +152,14 @@ export async function executeAgentTurn(ctx: StepExecutionContext): Promise<StepE
   }
 }
 
-export const AGENT_TURN_NODE: PluginNodeDef = {
+export const AGENT_TURN_NODE = defineWorkflowNode({
   kind: AGENT_TURN_KIND,
   typeVersion: 1,
   category: "plugin",
   label: "Refactor Agent Turn",
   description:
     "Run a role persona as a synchronous, tool-enabled Claude turn scoped to the target repo. This is the node that actually edits code.",
-  iconName: "bot",
+  iconName: "Bot",
   keywords: ["refactor", "agent", "claude", "code", "edit", "go"],
   desktopOnly: true,
   retryable: false,
@@ -188,4 +198,4 @@ export const AGENT_TURN_NODE: PluginNodeDef = {
     cwd: "{{ $vars.repoPath }}",
   },
   execute: executeAgentTurn,
-}
+})

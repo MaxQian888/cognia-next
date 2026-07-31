@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Plugin Context Tests
  */
@@ -7,9 +8,17 @@ import type { Plugin, PluginManifest } from "@/types/plugin"
 import type { PluginManager } from "./manager"
 import { invoke } from "@tauri-apps/api/core"
 import { isTauri } from "@/lib/native/utils"
+import { getPermissionGuard, resetPermissionGuard, PermissionError } from "@/lib/plugin/security"
 import { executeAgent } from "@/lib/ai/agent/agent-executor"
 import { getExternalAgentManager } from "@/lib/ai/agent/external/manager"
 import { createAgentFromPreset } from "@/lib/ai/agent/external/presets"
+import {
+  protocolAdapterRegistry,
+  unregisterPluginProtocolAdaptersByPlugin,
+  __resetPluginProtocolAdaptersForTesting,
+} from "@/lib/ai/agent/external/protocol-adapter"
+import { invokePluginTool } from "@/lib/plugin/core/invoke-plugin-tool"
+import { usePluginModalStore } from "@/stores/plugin-runtime/plugin-modal-store"
 import {
   initializePluginPermissions,
   revokePluginPermissions,
@@ -18,10 +27,19 @@ import {
   getBackgroundAgentManager,
   __resetBackgroundAgentManagerForTesting,
 } from "@/lib/ai/agent/background-agent-manager"
+import { nodeCatalogEntry, __resetPluginCatalogForTesting } from "@/lib/workflow/nodes/catalog"
+import { schedulerDb } from "@/lib/scheduler/scheduler-db"
+import { getTaskScheduler } from "@/lib/scheduler/task-scheduler"
+import type { ScheduledTask } from "@/types/scheduler"
 
 // Mock Tauri invoke
 jest.mock("@tauri-apps/api/core", () => ({
   invoke: jest.fn().mockResolvedValue(null),
+}))
+jest.mock("@/lib/tauri/transport-instance", () => ({
+  transport: {
+    call: (...args: unknown[]) => jest.requireMock("@tauri-apps/api/core").invoke(...args),
+  },
 }))
 
 // Mock the logger so it routes to console for test assertions
@@ -49,6 +67,31 @@ jest.mock("@/lib/native/utils", () => ({
   isTauri: jest.fn(() => false),
 }))
 
+jest.mock("@/lib/scheduler/scheduler-db", () => ({
+  schedulerDb: {
+    getTask: jest.fn(),
+    getFilteredTasks: jest.fn().mockResolvedValue([]),
+    getExecution: jest.fn(),
+    getTaskExecutions: jest.fn().mockResolvedValue([]),
+    createExecution: jest.fn().mockResolvedValue(undefined),
+    updateExecution: jest.fn().mockResolvedValue(undefined),
+  },
+}))
+
+jest.mock("@/lib/scheduler/task-scheduler", () => ({
+  getTaskScheduler: jest.fn(),
+}))
+
+// Sonner toast — `ui.showToast` routes here.
+jest.mock("sonner", () => ({
+  toast: Object.assign(jest.fn(), {
+    info: jest.fn(),
+    success: jest.fn(),
+    warning: jest.fn(),
+    error: jest.fn(),
+  }),
+}))
+
 jest.mock("../contracts/diagnostics-store", () => ({
   recordSilentFailure: jest.fn(),
   recordPluginPointDiagnostic: jest.fn(),
@@ -58,6 +101,14 @@ jest.mock("../contracts/diagnostics-store", () => ({
   clearAllPluginPointDiagnostics: jest.fn(),
   subscribePluginPointDiagnostics: jest.fn(() => () => {}),
   getPluginPointDiagnosticsRevision: jest.fn(() => 0),
+}))
+
+const dispatchPluginTrigger = jest.fn(async (_input: unknown) => ({
+  ok: true,
+  prefixedKind: "trigger.test-plugin.webhookLite",
+}))
+jest.mock("../bridge/plugin-trigger-dispatch", () => ({
+  dispatchPluginTrigger: (input: unknown) => dispatchPluginTrigger(input),
 }))
 
 // Mock IPC, message-bus, i18n-loader, debugger
@@ -124,6 +175,13 @@ jest.mock("@/lib/ai/agent/agent-executor", () => ({
     toolsAvailable: false,
   })),
 }))
+jest.mock("@/lib/plugin/core/invoke-plugin-tool", () => ({
+  invokePluginTool: jest.fn(async (pluginId: string, toolName: string) => ({
+    result: { ok: true, toolName },
+    pluginId,
+    toolName,
+  })),
+}))
 jest.mock("@/lib/ai/agent/external/manager", () => ({
   getExternalAgentManager: jest.fn(),
 }))
@@ -158,10 +216,54 @@ const mockManager = {
 } as unknown as PluginManager
 
 const mockIsTauri = isTauri as jest.MockedFunction<typeof isTauri>
+const mockSchedulerDb = schedulerDb as jest.Mocked<typeof schedulerDb>
+const mockGetTaskScheduler = getTaskScheduler as jest.MockedFunction<typeof getTaskScheduler>
+
+function pluginTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
+  const now = new Date("2026-07-16T00:00:00.000Z")
+  return {
+    id: "plugin-task-1",
+    name: "Plugin task",
+    type: "plugin",
+    trigger: { type: "interval", intervalMs: 60_000 },
+    payload: { pluginId: "test-plugin", handler: "heartbeat", args: {} },
+    config: {
+      timeout: 300_000,
+      maxRetries: 0,
+      retryDelay: 60_000,
+      runMissedOnStartup: false,
+      allowConcurrent: false,
+    },
+    notification: { onStart: false, onComplete: false, onError: true },
+    status: "active",
+    runCount: 0,
+    successCount: 0,
+    failureCount: 0,
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  }
+}
 
 describe("createPluginContext", () => {
   beforeEach(() => {
     mockIsTauri.mockReturnValue(false)
+    // The native fs/clipboard/secrets/network namespaces are now guarded — a
+    // call fails closed unless the plugin's permission is registered. Register
+    // the superset the suite exercises so the existing call-site assertions
+    // still reach their implementations.
+    resetPermissionGuard()
+    getPermissionGuard().registerPlugin("test-plugin", [
+      "filesystem:read",
+      "filesystem:write",
+      "clipboard:read",
+      "clipboard:write",
+      "secrets:read",
+      "secrets:write",
+      "network:fetch",
+      "database:read",
+      "database:write",
+    ])
     Object.defineProperty(global.navigator, "clipboard", {
       configurable: true,
       value: {
@@ -176,6 +278,159 @@ describe("createPluginContext", () => {
     const context = createPluginContext(plugin, mockManager)
 
     expect(context.pluginId).toBe("test-plugin")
+  })
+
+  describe("workflow extension API", () => {
+    beforeEach(() => {
+      dispatchPluginTrigger.mockClear()
+    })
+
+    afterEach(() => {
+      __resetPluginCatalogForTesting()
+    })
+
+    it("surfaces plugin node default params on the hot-merged catalog entry", () => {
+      const context = createPluginContext(createMockPlugin(), mockManager)
+      const dispose = context.workflow.registerNode({
+        kind: "action.format",
+        typeVersion: 1,
+        category: "plugin",
+        label: "Format",
+        description: "Format text",
+        iconName: "Wand",
+        paramsSchema: { type: "object" },
+        defaultParams: { mode: "markdown", retries: 2 },
+        execute: async () => ({ output: {} }),
+      })
+
+      const entry = nodeCatalogEntry("test-plugin.action.format" as never)
+      expect(entry.defaultParams).toEqual({ mode: "markdown", retries: 2 })
+      expect(entry.typeVersion).toBe(1)
+
+      dispose()
+    })
+
+    it("surfaces plugin trigger default params on the hot-merged catalog entry", () => {
+      const context = createPluginContext(createMockPlugin(), mockManager)
+      const dispose = context.workflow.registerTrigger({
+        kind: "trigger.webhookLite",
+        typeVersion: 1,
+        label: "Webhook lite",
+        description: "Receive webhook events",
+        iconName: "Webhook",
+        paramsSchema: { type: "object" },
+        defaultParams: { path: "/demo", method: "POST" },
+        start: async () => ({ stop: jest.fn() }),
+      })
+
+      const entry = nodeCatalogEntry("trigger.test-plugin.webhookLite" as never)
+      expect(entry.defaultParams).toEqual({ path: "/demo", method: "POST" })
+      expect(entry.typeVersion).toBe(1)
+
+      dispose()
+    })
+
+    it("forwards an exact workflow trigger-node id for plugin emissions", async () => {
+      const context = createPluginContext(createMockPlugin(), mockManager)
+
+      context.workflow.emitTriggerEvent(
+        "wf-1",
+        "trigger.webhookLite",
+        { event: "created" },
+        "root-b"
+      )
+      await Promise.resolve()
+
+      expect(dispatchPluginTrigger).toHaveBeenCalledWith({
+        pluginId: "test-plugin",
+        workflowId: "wf-1",
+        kind: "trigger.webhookLite",
+        payload: { event: "created" },
+        triggerId: "root-b",
+      })
+    })
+  })
+
+  describe("scheduler API", () => {
+    const createTask = jest.fn()
+    const updateTask = jest.fn()
+    const deleteTask = jest.fn()
+    const pauseTask = jest.fn()
+    const resumeTask = jest.fn()
+
+    beforeEach(() => {
+      jest.clearAllMocks()
+      mockGetTaskScheduler.mockReturnValue({
+        createTask,
+        updateTask,
+        deleteTask,
+        pauseTask,
+        resumeTask,
+      } as never)
+    })
+
+    const schedulerPlugin = () =>
+      createMockPlugin({
+        manifest: { ...mockManifest, capabilities: ["tools", "scheduler"] },
+      })
+
+    it("rejects scheduler calls when the manifest omits the capability", async () => {
+      const context = createPluginContext(createMockPlugin(), mockManager)
+
+      await expect(context.scheduler.listTasks()).rejects.toThrow(/scheduler.*capability/i)
+
+      expect(mockGetTaskScheduler).not.toHaveBeenCalled()
+    })
+
+    it("creates tasks through the live scheduler engine", async () => {
+      createTask.mockResolvedValue(
+        pluginTask({
+          payload: { pluginId: "test-plugin", handler: "heartbeat", metadata: { tier: 2 } },
+        })
+      )
+      const context = createPluginContext(schedulerPlugin(), mockManager)
+
+      const created = await context.scheduler.createTask({
+        name: "Plugin task",
+        trigger: { type: "interval", seconds: 60 },
+        handler: "heartbeat",
+      })
+
+      expect(createTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "Plugin task",
+          type: "plugin",
+          trigger: expect.objectContaining({ type: "interval", intervalMs: 60_000 }),
+          payload: expect.objectContaining({
+            pluginId: "test-plugin",
+            handler: "heartbeat",
+          }),
+        })
+      )
+      expect(created.id).toBe("plugin-task-1")
+      expect(created.metadata).toEqual({ tier: 2 })
+    })
+
+    it("pauses owned tasks through the engine so the timing driver is disarmed", async () => {
+      mockSchedulerDb.getTask.mockResolvedValue(pluginTask())
+      pauseTask.mockResolvedValue(true)
+      const context = createPluginContext(schedulerPlugin(), mockManager)
+
+      await expect(context.scheduler.pauseTask("plugin-task-1")).resolves.toBe(true)
+
+      expect(pauseTask).toHaveBeenCalledWith("plugin-task-1")
+    })
+
+    it("preserves the cross-plugin ownership boundary before mutations", async () => {
+      mockSchedulerDb.getTask.mockResolvedValue(
+        pluginTask({ payload: { pluginId: "another-plugin", handler: "heartbeat" } })
+      )
+      const context = createPluginContext(schedulerPlugin(), mockManager)
+
+      await expect(context.scheduler.deleteTask("plugin-task-1")).resolves.toBe(false)
+
+      expect(deleteTask).not.toHaveBeenCalled()
+    })
   })
 
   it("should create context with plugin path", () => {
@@ -359,6 +614,37 @@ describe("createPluginContext", () => {
         expect.any(Error)
       )
     })
+
+    it("routes showToast to the matching sonner variant", () => {
+      const { toast } = jest.requireMock("sonner") as {
+        toast: { success: jest.Mock; error: jest.Mock; warning: jest.Mock; info: jest.Mock }
+      }
+      const context = createPluginContext(createMockPlugin(), mockManager)
+
+      context.ui.showToast("done", "success")
+      context.ui.showToast("boom", "error")
+      context.ui.showToast("careful", "warning")
+      context.ui.showToast("fyi")
+
+      expect(toast.success).toHaveBeenCalledWith("done")
+      expect(toast.error).toHaveBeenCalledWith("boom")
+      expect(toast.warning).toHaveBeenCalledWith("careful")
+      expect(toast.info).toHaveBeenCalledWith("fyi")
+    })
+
+    it("showConfirmDialog pushes a modal entry and resolves when settled", async () => {
+      usePluginModalStore.getState().closeAll()
+
+      const context = createPluginContext(createMockPlugin(), mockManager)
+      const pending = context.ui.showConfirmDialog({ title: "t", message: "m" })
+
+      const entries = usePluginModalStore.getState().stack
+      expect(entries).toHaveLength(1)
+      const settle = (entries[0].args as { settle: (v: boolean) => void }).settle
+      settle(true)
+
+      await expect(pending).resolves.toBe(true)
+    })
   })
 
   describe("a2ui", () => {
@@ -414,22 +700,67 @@ describe("createPluginContext", () => {
   })
 
   describe("settings", () => {
-    it("should have get method", () => {
-      const plugin = createMockPlugin()
-      const context = createPluginContext(plugin, mockManager)
+    beforeEach(() => {
+      localStorage.clear()
+    })
+
+    it("should have get / set / onChange methods", () => {
+      const context = createPluginContext(createMockPlugin(), mockManager)
       expect(typeof context.settings.get).toBe("function")
-    })
-
-    it("should have set method", () => {
-      const plugin = createMockPlugin()
-      const context = createPluginContext(plugin, mockManager)
       expect(typeof context.settings.set).toBe("function")
+      expect(typeof context.settings.onChange).toBe("function")
     })
 
-    it("should have onChange method", () => {
-      const plugin = createMockPlugin()
-      const context = createPluginContext(plugin, mockManager)
-      expect(typeof context.settings.onChange).toBe("function")
+    it("round-trips a set value through get", () => {
+      const context = createPluginContext(createMockPlugin(), mockManager)
+      context.settings.set("theme", "dark")
+      expect(context.settings.get<string>("theme")).toBe("dark")
+    })
+
+    it("persists across a fresh context instance (reload simulation)", () => {
+      const first = createPluginContext(createMockPlugin(), mockManager)
+      first.settings.set("count", 7)
+      // A new context (e.g. after reload) must read the persisted value.
+      const second = createPluginContext(createMockPlugin(), mockManager)
+      expect(second.settings.get<number>("count")).toBe(7)
+    })
+
+    it("returns undefined for an unknown key", () => {
+      const context = createPluginContext(createMockPlugin(), mockManager)
+      expect(context.settings.get("missing")).toBeUndefined()
+    })
+
+    it("fires onChange listeners on a real write", () => {
+      const context = createPluginContext(createMockPlugin(), mockManager)
+      const handler = jest.fn()
+      context.settings.onChange("lang", handler)
+      context.settings.set("lang", "zh-CN")
+      expect(handler).toHaveBeenCalledWith("zh-CN")
+    })
+
+    it("stops firing after the onChange disposer runs", () => {
+      const context = createPluginContext(createMockPlugin(), mockManager)
+      const handler = jest.fn()
+      const dispose = context.settings.onChange("lang", handler)
+      dispose()
+      context.settings.set("lang", "en")
+      expect(handler).not.toHaveBeenCalled()
+    })
+
+    it("isolates settings between two plugin ids", () => {
+      const a = createPluginContext(createMockPlugin(), mockManager)
+      const bPlugin = createMockPlugin({
+        manifest: { ...mockManifest, id: "other-plugin" },
+      })
+      const b = createPluginContext(bPlugin, mockManager)
+      a.settings.set("shared", "from-a")
+      expect(b.settings.get("shared")).toBeUndefined()
+    })
+
+    it("tolerates corrupt persisted JSON (get returns undefined)", () => {
+      localStorage.setItem("cognia-plugin-settings:test-plugin", "{not json")
+      const context = createPluginContext(createMockPlugin(), mockManager)
+      expect(context.settings.get("anything")).toBeUndefined()
     })
   })
 
@@ -478,11 +809,8 @@ describe("createPluginContext", () => {
         }),
         expect.any(Error)
       )
-      // expected flag should be !isTauri() because the Python handler is
-      // deferred to ADR 0017 — the gate at scripts/check-silent-failure-flags
-      // will flip this to false once that handler ships.
       const ctxArg = recordSilentFailure.mock.calls[0][1] as { expected: boolean }
-      expect(ctxArg.expected).toBe(true) // isTauri mock returns false
+      expect(ctxArg.expected).toBe(false)
     })
   })
 
@@ -604,6 +932,16 @@ describe("createPluginContext", () => {
       expect(typeof context.shell.open).toBe("function")
       expect(typeof context.shell.showInFolder).toBe("function")
     })
+
+    it("spawn() throws instead of returning a fake pid-0 ChildProcess", () => {
+      const plugin = createMockPlugin()
+      const context = createPluginContext(plugin, mockManager)
+
+      // The shell/process domain has no host backend (NOT_SUPPORTED). The old
+      // implementation swallowed the rejection and handed back a hollow
+      // ChildProcess (pid:0, empty streams) — silent garbage. It must fail loud.
+      expect(() => context.shell.spawn("ls", ["-la"])).toThrow(/not supported/i)
+    })
   })
 
   describe("database api", () => {
@@ -699,6 +1037,31 @@ describe("createPluginContext", () => {
       expect(mainWindow.id).toBe("main")
       expect(mainWindow.title).toBe("Cognia")
     })
+
+    it("getSize queries the real host window instead of returning a placeholder", async () => {
+      const context = createPluginContext(createMockPlugin(), mockManager)
+      const mockInvoke = invoke as jest.MockedFunction<typeof invoke>
+      mockInvoke.mockResolvedValueOnce({
+        success: true,
+        data: { width: 1280, height: 720 },
+        requestId: "req-test",
+        runtimeVersion: "2.0.0",
+        compat: { sdkVersion: "2.0.0", minSupportedSdk: "2.0.0", compatible: true },
+      })
+
+      const size = await context.window.getMain().getSize()
+
+      expect(size).toEqual({ width: 1280, height: 720 })
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "plugin_api_invoke",
+        expect.objectContaining({
+          request: expect.objectContaining({
+            api: "window:getSize",
+            payload: { windowId: "main" },
+          }),
+        })
+      )
+    })
   })
 
   describe("secrets api", () => {
@@ -716,6 +1079,139 @@ describe("createPluginContext", () => {
 
       expect(typeof context.secrets.delete).toBe("function")
       expect(typeof context.secrets.has).toBe("function")
+    })
+
+    const okEnvelope = (data: unknown) => ({
+      success: true,
+      data,
+      requestId: "req-test",
+      runtimeVersion: "2.0.0",
+      compat: { sdkVersion: "2.0.0", minSupportedSdk: "2.0.0", compatible: true },
+    })
+
+    it("store() sends the secrets:set wire op so the host gateway accepts it", async () => {
+      const plugin = createMockPlugin()
+      const context = createPluginContext(plugin, mockManager)
+      // secrets-api checks isTauri at call time; flip to the desktop gateway
+      // path only for the call so context creation doesn't consume the mock.
+      mockIsTauri.mockReturnValue(true)
+      const mockInvoke = invoke as jest.MockedFunction<typeof invoke>
+      mockInvoke.mockResolvedValue(okEnvelope(null))
+
+      await context.secrets.store("api-key", "secret-value")
+
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "plugin_api_invoke",
+        expect.objectContaining({
+          request: expect.objectContaining({
+            api: "secrets:set",
+            payload: { key: "api-key", value: "secret-value" },
+          }),
+        })
+      )
+    })
+
+    it("has() reads via secrets:get and returns true/false on presence", async () => {
+      const plugin = createMockPlugin()
+      const context = createPluginContext(plugin, mockManager)
+      mockIsTauri.mockReturnValue(true)
+      const mockInvoke = invoke as jest.MockedFunction<typeof invoke>
+
+      mockInvoke.mockResolvedValueOnce(okEnvelope("present"))
+      expect(await context.secrets.has("known")).toBe(true)
+
+      mockInvoke.mockResolvedValueOnce(okEnvelope(null))
+      expect(await context.secrets.has("missing")).toBe(false)
+
+      expect(mockInvoke).toHaveBeenLastCalledWith(
+        "plugin_api_invoke",
+        expect.objectContaining({
+          request: expect.objectContaining({ api: "secrets:get", payload: { key: "missing" } }),
+        })
+      )
+    })
+  })
+
+  describe("native ctx permission boundary", () => {
+    const okEnvelope = (data: unknown) => ({
+      success: true,
+      data,
+      requestId: "req-test",
+      runtimeVersion: "2.0.0",
+      compat: { sdkVersion: "2.0.0", minSupportedSdk: "2.0.0", compatible: true },
+    })
+
+    it("fs read fails closed when the plugin never declared filesystem:read", () => {
+      resetPermissionGuard()
+      getPermissionGuard().registerPlugin("test-plugin", []) // declares nothing
+      const context = createPluginContext(createMockPlugin(), mockManager)
+
+      // filesystem:read is silent-tier → the guard rejects synchronously.
+      expect(() => context.fs.readText("notes.txt")).toThrow(PermissionError)
+    })
+
+    it("network egress is denied when the plugin never declared network:fetch", () => {
+      resetPermissionGuard()
+      getPermissionGuard().registerPlugin("test-plugin", [])
+      const context = createPluginContext(createMockPlugin(), mockManager)
+
+      // Undeclared → no confirm-tier row → the guard's synchronous fast-path
+      // gate rejects the call before it can reach the network.
+      expect(() => context.network.get("https://api.example.com/data")).toThrow(PermissionError)
+    })
+
+    it("db query fails closed without the database:read grant", () => {
+      resetPermissionGuard()
+      getPermissionGuard().registerPlugin("test-plugin", [])
+      const context = createPluginContext(createMockPlugin(), mockManager)
+
+      // database:read is silent-tier → the guard rejects synchronously.
+      expect(() => context.db.query("SELECT 1")).toThrow(PermissionError)
+    })
+
+    it("db query reaches the gateway with the database:read grant", async () => {
+      resetPermissionGuard()
+      getPermissionGuard().registerPlugin("test-plugin", ["database:read"])
+      mockIsTauri.mockReturnValue(true)
+      const mockInvoke = invoke as jest.MockedFunction<typeof invoke>
+      mockInvoke.mockResolvedValueOnce(okEnvelope([{ n: 1 }]))
+      const context = createPluginContext(createMockPlugin(), mockManager)
+
+      const rows = await context.db.query("SELECT 1 AS n")
+
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "plugin_api_invoke",
+        expect.objectContaining({
+          request: expect.objectContaining({ api: "db:query" }),
+        })
+      )
+      expect(rows).toEqual([{ n: 1 }])
+    })
+
+    it("network egress persists a host ledger grant after consent on desktop", async () => {
+      resetPermissionGuard()
+      getPermissionGuard().registerPlugin("test-plugin", ["network:fetch"])
+      mockIsTauri.mockReturnValue(true)
+      const mockInvoke = invoke as jest.MockedFunction<typeof invoke>
+      mockInvoke.mockResolvedValue(okEnvelope({ ok: true, status: 200, data: {} }))
+      // Declare an allowlist covering the target host — undeclared egress is
+      // now denied fail-closed before the consent path could even fire.
+      const context = createPluginContext(
+        createMockPlugin({
+          manifest: { ...mockManifest, networkAccess: { allowedDomains: ["example.com"] } },
+        }),
+        mockManager
+      )
+
+      await context.network.get("https://api.example.com/data")
+
+      // network:fetch is now confirm-tier → the consent path fires the
+      // onConsentGranted hook, which mirrors the grant to the Rust ledger so the
+      // gateway call that follows isn't denied by the independent host gate.
+      expect(mockInvoke).toHaveBeenCalledWith(
+        "plugin_permission_grant",
+        expect.objectContaining({ pluginId: "test-plugin", permission: "network:fetch" })
+      )
     })
   })
 
@@ -769,6 +1265,12 @@ describe("createFullPluginContext", () => {
     expect(context.ai).toBeDefined()
     expect(context.extensions).toBeDefined()
     expect(context.permissions).toBeDefined()
+    expect(context.contextPanels).toBeDefined()
+    expect(context.memory).toBeDefined()
+    expect(context.pet).toBeDefined()
+    expect(context.webview).toBeDefined()
+    expect(context.auth).toBeDefined()
+    expect(context.uri).toBeDefined()
   })
 
   it("should have session API methods", () => {
@@ -810,6 +1312,26 @@ describe("createFullPluginContext", () => {
     const context = createFullPluginContext(plugin, mockManager)
 
     expect(typeof context.permissions.hasPermission).toBe("function")
+  })
+
+  it("should expose resource-scoped context panel registration", () => {
+    const plugin = createMockPlugin()
+    const context = createFullPluginContext(plugin, mockManager)
+
+    expect(typeof context.contextPanels.register).toBe("function")
+  })
+
+  it("agent.registerExternalAgentAdapter registers a namespaced adapter into the registry", () => {
+    const plugin = createMockPlugin()
+    const context = createFullPluginContext(plugin, mockManager)
+    expect(typeof context.agent.registerExternalAgentAdapter).toBe("function")
+    // The registry only stores the factory; a no-op factory is enough to prove
+    // namespaced registration + per-plugin cleanup.
+    context.agent.registerExternalAgentAdapter("demo", (() => ({})) as never)
+    expect(protocolAdapterRegistry.has("test-plugin:demo")).toBe(true)
+    expect(unregisterPluginProtocolAdaptersByPlugin("test-plugin")).toBe(1)
+    expect(protocolAdapterRegistry.has("test-plugin:demo")).toBe(false)
+    __resetPluginProtocolAdaptersForTesting()
   })
 })
 
@@ -908,6 +1430,77 @@ describe("agent imperative API", () => {
         expect.objectContaining({ toolsEnabled: true })
       )
     })
+
+    it("maps legacy systemPrompt/defaultProvider onto the typed run options", async () => {
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      await ctx.agent.executeAgent({ prompt: "hi", systemPrompt: "S", defaultProvider: "openai" })
+      expect(mockExecuteAgent).toHaveBeenCalledWith(
+        "hi",
+        expect.objectContaining({ systemPrompt: "S", defaultProvider: "openai" })
+      )
+    })
+  })
+
+  describe("run / runStreamed", () => {
+    it("run() returns a typed result with an agentId", async () => {
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      const result = await ctx.agent.run("hi")
+      expect(result.text).toBe("agent reply")
+      expect(typeof result.agentId).toBe("string")
+    })
+
+    it("run() rejects tool-enabled runs without agent:control", async () => {
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      await expect(ctx.agent.run("hi", { toolsEnabled: true })).rejects.toThrow(/agent:control/)
+      expect(mockExecuteAgent).not.toHaveBeenCalled()
+    })
+
+    it("runStreamed() yields events and resolves the result", async () => {
+      mockExecuteAgent.mockImplementation(async (_p, cfg) => {
+        cfg?.onEvent?.({ type: "text-delta", delta: "hi" })
+        return { text: "hi", channel: "text", toolsAvailable: false }
+      })
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      const run = ctx.agent.runStreamed("go")
+      const types: string[] = []
+      for await (const ev of run) types.push(ev.type)
+      expect(types).toEqual(["text-delta", "result"])
+      await expect(run.result).resolves.toMatchObject({ text: "hi" })
+    })
+
+    it("runStreamed() throws synchronously when tool-enabled lacks agent:control", () => {
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      expect(() => ctx.agent.runStreamed("go", { toolsEnabled: true })).toThrow(/agent:control/)
+    })
+  })
+
+  describe("invokeTool", () => {
+    const mockInvokePluginTool = invokePluginTool as jest.MockedFunction<typeof invokePluginTool>
+
+    it("rejects without the agent:control permission", async () => {
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      await expect(ctx.agent.invokeTool("web_fetch", { url: "x" })).rejects.toThrow(/agent:control/)
+      expect(mockInvokePluginTool).not.toHaveBeenCalled()
+    })
+
+    it("routes to invokePluginTool and unwraps the result once granted", async () => {
+      initializePluginPermissions(PLUGIN_ID, ["agent:control"])
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      const result = await ctx.agent.invokeTool("web_fetch", { url: "x" })
+      expect(mockInvokePluginTool).toHaveBeenCalledWith(
+        PLUGIN_ID,
+        "web_fetch",
+        { url: "x" },
+        expect.objectContaining({ reason: expect.stringContaining("web_fetch") })
+      )
+      expect(result).toEqual({ ok: true, toolName: "web_fetch" })
+    })
+
+    it("rejects an empty tool name", async () => {
+      initializePluginPermissions(PLUGIN_ID, ["agent:control"])
+      const ctx = createPluginContext(createMockPlugin(), mockManager)
+      await expect(ctx.agent.invokeTool("", {})).rejects.toThrow(/tool name/)
+    })
   })
 
   describe("runExternalAgent", () => {
@@ -968,6 +1561,63 @@ describe("agent imperative API", () => {
       await expect(ctx.agent.runExternalAgent("unknown", "x")).rejects.toThrow(
         /no live agent or preset/
       )
+    })
+  })
+
+  describe("network egress allowlist (renderer path)", () => {
+    const fetchMock = jest.fn()
+
+    beforeEach(() => {
+      mockIsTauri.mockReturnValue(false)
+      fetchMock.mockReset()
+      fetchMock.mockResolvedValue({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => ({ ok: true }),
+      } as unknown as Response)
+      global.fetch = fetchMock as unknown as typeof fetch
+    })
+
+    const pluginWithEgress = (allowedDomains?: string[]) =>
+      createMockPlugin({
+        manifest: {
+          ...mockManifest,
+          networkAccess: allowedDomains ? { allowedDomains } : undefined,
+        },
+      })
+
+    it("allows a fetch to a declared domain (and its subdomains)", async () => {
+      const ctx = createPluginContext(pluginWithEgress(["example.com"]), mockManager)
+      await expect(ctx.network.get("https://api.example.com/v1")).resolves.toMatchObject({
+        ok: true,
+      })
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    })
+
+    it("blocks a fetch to an undeclared domain before hitting the network", async () => {
+      const ctx = createPluginContext(pluginWithEgress(["example.com"]), mockManager)
+      await expect(ctx.network.get("https://evil.com/steal")).rejects.toThrow(
+        /not in plugin test-plugin's allowedDomains/
+      )
+      expect(fetchMock).not.toHaveBeenCalled()
+    })
+
+    it("denies egress when no allowlist is declared (balanced, fail-closed)", async () => {
+      const ctx = createPluginContext(pluginWithEgress(undefined), mockManager)
+      await expect(ctx.network.get("https://anywhere.dev")).rejects.toThrow(
+        /not in plugin test-plugin's allowedDomains/
+      )
+      expect(fetchMock).not.toHaveBeenCalled()
+    })
+
+    it("keeps the explicit '*' wildcard opt-in unrestricted", async () => {
+      const ctx = createPluginContext(pluginWithEgress(["*"]), mockManager)
+      await expect(ctx.network.get("https://anywhere.dev")).resolves.toMatchObject({
+        ok: true,
+      })
+      expect(fetchMock).toHaveBeenCalledTimes(1)
     })
   })
 })

@@ -40,7 +40,7 @@ jest.mock("@/hooks/plugins", () => ({
 }))
 
 import { usePluginsStore } from "@/stores/plugins"
-import { PluginLibrarySubFilter } from "./plugin-library-sub-filter"
+import { PluginLibrarySubFilter, deriveActiveSubFilter } from "./plugin-library-sub-filter"
 
 function makePlugin(overrides: Partial<PluginRow> = {}): PluginRow {
   return {
@@ -88,5 +88,25 @@ describe("PluginLibrarySubFilter", () => {
     fireEvent.click(screen.getByText("configurable"))
     expect(usePluginsStore.getState().librarySubFilter).toBe("configurable")
     expect(usePluginsStore.getState().filters.configurable).toBe(true)
+  })
+})
+
+describe("deriveActiveSubFilter (single source of truth)", () => {
+  const base = { configurable: false, hasUpdate: false, status: "all" }
+  it("maps configurable first", () => {
+    expect(deriveActiveSubFilter({ ...base, configurable: true })).toBe("configurable")
+  })
+  it("maps hasUpdate to 'updates'", () => {
+    expect(deriveActiveSubFilter({ ...base, hasUpdate: true })).toBe("updates")
+  })
+  it("maps status enabled / error", () => {
+    expect(deriveActiveSubFilter({ ...base, status: "enabled" })).toBe("enabled")
+    expect(deriveActiveSubFilter({ ...base, status: "error" })).toBe("errored")
+  })
+  it("maps the all-clear filters to 'all'", () => {
+    expect(deriveActiveSubFilter(base)).toBe("all")
+  })
+  it("returns '' for a custom status set via the filter sheet (no chip)", () => {
+    expect(deriveActiveSubFilter({ ...base, status: "disabled" })).toBe("")
   })
 })

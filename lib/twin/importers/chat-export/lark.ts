@@ -18,7 +18,12 @@
  */
 
 import type { RawSource } from "@/lib/twin/ingest/parse"
-import { conversationToRawSource, type ChatImporterOptions, type ChatMessageBlock } from "./types"
+import {
+  conversationToRawSource,
+  parseChatExportJson,
+  type ChatImporterOptions,
+  type ChatMessageBlock,
+} from "./types"
 
 interface OfficialMessage {
   msg_id?: string
@@ -148,7 +153,7 @@ export function isLarkExportShape(value: unknown): boolean {
 export function parseLarkExport(text: string, opts: ChatImporterOptions): RawSource[] {
   const trimmed = text.trim()
   if (!trimmed) return []
-  const parsed: unknown = JSON.parse(trimmed)
+  const parsed: unknown = parseChatExportJson(trimmed, "Lark")
   let blocks: ChatMessageBlock[] = []
   let title = opts.source || "Lark chat"
   if (Array.isArray(parsed)) {

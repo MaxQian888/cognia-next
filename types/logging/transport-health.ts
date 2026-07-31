@@ -3,7 +3,7 @@
  */
 
 import type { NativeLoggingReadiness } from "@/lib/native/native-logging-readiness"
-import type { TransportHealthSnapshot } from "./transport"
+import type { TransportHealthSnapshot } from "@cognia/logging/types/transport"
 
 export interface UseTransportHealthOptions {
   autoRefresh?: boolean

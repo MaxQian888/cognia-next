@@ -18,7 +18,7 @@ jest.mock("./task-scheduler", () => ({
 }))
 
 // Mock logger — supply every namespace the scheduler module touches.
-jest.mock("@/lib/logging", () => {
+jest.mock("@cognia/logging", () => {
   const stub = { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() }
   return {
     loggers: { app: stub, scheduler: stub, store: stub, plugin: stub },
@@ -104,6 +104,7 @@ describe("event-integration", () => {
         "backup:completed",
         "workflow:completed",
         "agent:completed",
+        "connection:housekeeping:daily",
         "custom",
       ]
 

@@ -13,9 +13,11 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Item, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item"
 import { updateSkill } from "@/lib/db/skills"
 import { SkillResourceManager } from "@/components/skills/skill-resource-manager"
+import { SkillUpdateBanner } from "@/components/skills/skill-detail"
 import { SkillValidationSection } from "@/components/skills/skill-validation-section"
 import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
+import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
 
 interface Props {
   skill: Skill
@@ -29,6 +31,9 @@ interface Props {
  * + bundle reasons). Sync UI is intentionally hidden — sync is desktop-only.
  */
 export function MobileSkillSheet({ skill, open, onOpenChange }: Props) {
+  // Android hardware / browser back closes the sheet instead of navigating.
+  useBackDismiss(open, () => onOpenChange(false))
+
   const t = useTranslations("mobile.skills")
   const [name, setName] = useState(skill.name)
   const [description, setDescription] = useState(skill.description ?? "")
@@ -51,7 +56,7 @@ export function MobileSkillSheet({ skill, open, onOpenChange }: Props) {
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="bottom" className="h-[90vh] p-0">
+      <SheetContent side="bottom" className="h-[90vh] p-0 safe-area-pb">
         <SheetHeader className="border-b px-4 py-3">
           <SheetTitle>{skill.name}</SheetTitle>
         </SheetHeader>
@@ -73,6 +78,7 @@ export function MobileSkillSheet({ skill, open, onOpenChange }: Props) {
             </TabsList>
           </div>
           <TabsContent value="overview" className="flex-1 overflow-y-auto px-4 py-3">
+            <SkillUpdateBanner skill={skill} />
             <motion.div
               role="list"
               className="group/item-group flex flex-col"

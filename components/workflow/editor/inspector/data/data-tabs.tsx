@@ -11,6 +11,7 @@ import { useShallow } from "zustand/react/shallow"
 import { useTranslations } from "next-intl"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { useLatestRunOutputs } from "@/hooks/workflow/use-latest-run-outputs"
+import { useStepStream } from "@/hooks/workflow/use-step-stream"
 import { resolveNodeIo } from "@/lib/workflow/editor/node-io-data"
 import type { EditorState, EditorStore } from "@/lib/workflow/editor/store"
 import { DataPanel } from "./data-panel"
@@ -47,6 +48,9 @@ export function DataTabs({
   )
 
   const latestOutputs = useLatestRunOutputs(workflowId, !isDraggingAny, { anyStatus: true })
+  // Live LLM output for a currently-running step (step_stream events of the
+  // latest run). Gated like the IO query; only rendered on the Output tab.
+  const stream = useStepStream(workflowId, nodeId, !isDraggingAny && tab === "output")
 
   const io = useMemo(
     () =>
@@ -84,17 +88,33 @@ export function DataTabs({
       {tab === "config" ? children : null}
 
       {tab === "output" ? (
-        <DataPanel
-          sourceNodeId={nodeId}
-          value={io.output.value}
-          source={io.output.source}
-          pin={{
-            pinned: io.output.pinned,
-            onPin: (value) => pinNodeData(nodeId, value),
-            onUnpin: () => unpinNodeData(nodeId),
-          }}
-          onRunStep={() => requestRunSingleStep(nodeId)}
-        />
+        <>
+          {stream.isStreaming ? (
+            <div className="space-y-1.5">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                {t("streaming")}
+              </p>
+              <pre
+                className="max-h-48 overflow-y-auto whitespace-pre-wrap rounded-md border border-wf-status-running/40 bg-wf-status-running/5 p-2.5 text-xs"
+                data-testid="ndv-streaming-output"
+              >
+                {stream.text}
+                <span className="animate-pulse">▌</span>
+              </pre>
+            </div>
+          ) : null}
+          <DataPanel
+            sourceNodeId={nodeId}
+            value={io.output.value}
+            source={io.output.source}
+            pin={{
+              pinned: io.output.pinned,
+              onPin: (value) => pinNodeData(nodeId, value),
+              onUnpin: () => unpinNodeData(nodeId),
+            }}
+            onRunStep={() => requestRunSingleStep(nodeId)}
+          />
+        </>
       ) : null}
 
       {tab === "input" ? (

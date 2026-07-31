@@ -1,0 +1,35 @@
+{
+  "id": "cognia-plugin-template-python",
+  "name": "Cognia Plugin Template Python",
+  "version": "0.1.0",
+  "description": "Python plugin template — registers one tool. Replace this manifest with your own plugin's metadata.",
+  "type": "python",
+  "capabilities": ["tools", "python"],
+  "pythonMain": "main.py",
+  "author": {
+    "name": "Your Name"
+  },
+  "license": "MIT",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "permissions": [],
+  "activationEvents": ["onStartup"],
+  "tools": [
+    {
+      "name": "template_echo",
+      "description": "Echo the supplied message back to the agent. Replace with your own tool.",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "The message to echo."
+          }
+        },
+        "required": ["message"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

@@ -140,6 +140,16 @@ describe("AdapterListRow", () => {
     expect(screen.getByText(/Telegram · longpoll/)).toBeInTheDocument()
   })
 
+  it("renders DingTalk Stream Mode instead of the internal longpoll bucket", () => {
+    renderRow({
+      id: "dt-1",
+      type: "dingtalk",
+      displayName: "DingTalk Bot",
+      transportMode: "longpoll",
+    })
+    expect(screen.getByText(/DingTalk .* · Stream Mode WSS/)).toBeInTheDocument()
+  })
+
   it("selects the adapter when the row is clicked", () => {
     renderRow()
     fireEvent.click(screen.getByTestId("adapter-card-tg-1"))
@@ -221,6 +231,17 @@ describe("AdapterListRow", () => {
     const badge = screen.getByTestId("adapter-row-status-tg-1")
     expect(badge).toHaveAttribute("data-status", "warning")
     expect(badge.textContent).toMatch(/Degraded/)
+  })
+
+  it("tooltips the localized reason on the status badge when down for a known cause", () => {
+    mockHealth.current = {
+      state: "down",
+      reason: "credentials_missing",
+    } as typeof mockHealth.current
+    renderRow()
+    const badge = screen.getByTestId("adapter-row-status-tg-1")
+    expect(badge.getAttribute("title")).toMatch(/Credentials missing/i)
+    mockHealth.current = { state: "running" }
   })
 
   it("renders the pending chip only when there are queued jobs", () => {

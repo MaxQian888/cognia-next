@@ -37,6 +37,19 @@ const WORKFLOW_ID_SCHEMA = {
 // is removed once the run resolves regardless of outcome.
 const ACTIVE_RUNS = new Map<string, AbortController>()
 
+/**
+ * Mint a run id in the orchestrator's own `run_<12 chars>` shape so the tool
+ * can register its AbortController before the run starts. Passed through as
+ * `RunWorkflowInput.runId`, which the orchestrator accepts as an override.
+ */
+function newRunId(): string {
+  const raw =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID().replace(/-/g, "")
+      : Math.random().toString(36).slice(2).padEnd(12, "0")
+  return `run_${raw.slice(0, 12)}`
+}
+
 function pickTrigger(workflowId: string, payload?: unknown): TriggerEvent {
   return {
     workflowId,
@@ -92,18 +105,32 @@ export function buildRunTools(): PluginTool[] {
           // Honour the host-supplied AbortSignal so an upstream cancel
           // propagates to the orchestrator (PluginToolContext.signal).
           context.signal?.addEventListener("abort", () => ac.abort(), { once: true })
-          const result = await runOrchestrator({ workflow: wf, trigger, signal: ac.signal })
-          ACTIVE_RUNS.set(result.runId, ac)
-          // Drop the entry on completion — the orchestrator already
-          // resolved, so subsequent cancel calls would be no-ops anyway.
-          ACTIVE_RUNS.delete(result.runId)
-          return {
-            ok: true,
-            workflowId,
-            runId: result.runId,
-            status: result.status,
-            output: result.output,
-            error: result.error,
+          // Mint the run id UP FRONT and hand it to the orchestrator
+          // (`RunWorkflowInput.runId` is an accepted override) so the
+          // controller can be registered BEFORE the await. Registering it
+          // afterwards — which is what this did — meant `ACTIVE_RUNS` was
+          // always empty by the time anyone could look, so `wf_cancel_run`
+          // could never cancel anything and always answered
+          // `wasActive: false` after prompting the user for approval.
+          const runId = newRunId()
+          ACTIVE_RUNS.set(runId, ac)
+          try {
+            const result = await runOrchestrator({
+              workflow: wf,
+              trigger,
+              signal: ac.signal,
+              runId,
+            })
+            return {
+              ok: true,
+              workflowId,
+              runId: result.runId,
+              status: result.status,
+              output: result.output,
+              error: result.error,
+            }
+          } finally {
+            ACTIVE_RUNS.delete(runId)
           }
         } catch (err) {
           return formatToolError(err)

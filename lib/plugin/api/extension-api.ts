@@ -10,7 +10,7 @@ import type {
   ExtensionOptions,
   ExtensionRegistration,
   ExtensionProps,
-} from "@/types/plugin/plugin-extended"
+} from "@/types/plugin/plugin"
 import { nanoid } from "nanoid"
 import React from "react"
 import { createPluginSystemLogger } from "../core/logger"
@@ -23,6 +23,7 @@ import {
   clearPluginPointDiagnostics,
   recordPluginPointDiagnostic,
 } from "../contracts/diagnostics-store"
+import { evaluateContextWhen } from "../context-keys/context-key-store"
 
 interface CreateExtensionAPIOptions {
   governanceMode?: PluginPointGovernanceMode
@@ -57,6 +58,38 @@ export function subscribeExtensionChanges(listener: () => void): () => void {
 /** Get the current revision number (for useSyncExternalStore snapshot). */
 export function getExtensionRevision(): number {
   return extensionRevision
+}
+
+/**
+ * An extension is visible only when BOTH its imperative `condition()` (if any)
+ * and its declarative `when` clause (if any) pass. `condition` failures are
+ * swallowed (a throwing predicate hides the item, never the host). `when` is
+ * evaluated fail-closed against the live context-key store.
+ */
+function passesVisibility(ext: ExtensionRegistration): boolean {
+  if (ext.options.condition) {
+    try {
+      if (!ext.options.condition()) return false
+    } catch {
+      return false
+    }
+  }
+  if (ext.options.when && !evaluateContextWhen(ext.options.when)) return false
+  return true
+}
+
+/**
+ * Width hints arrive as untyped JS from plugin code, so they are sanitised at
+ * the single ingest point rather than at the render site: `restorePluginExtensions`
+ * replays registrations that already passed through here, and the slot renderer
+ * should never have to re-audit a number it did not accept.
+ *
+ * `NaN`/`Infinity` would serialise into the style attribute as garbage and
+ * silently drop the declaration; zero or negative widths are meaningless as a
+ * bound and would only make a contribution disappear.
+ */
+function sanitizeWidthHint(value: number | undefined): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined
 }
 
 function recordExtensionDiagnostic(
@@ -108,6 +141,9 @@ export function createExtensionAPI(
       const normalizedPoint = validation.canonicalId as ExtensionPoint
       const extensionId = `${pluginId}:${nanoid()}`
 
+      const minWidth = sanitizeWidthHint(extensionOptions.minWidth)
+      const maxWidth = sanitizeWidthHint(extensionOptions.maxWidth)
+
       const registration: ExtensionRegistration = {
         id: extensionId,
         pluginId,
@@ -115,7 +151,19 @@ export function createExtensionAPI(
         component,
         options: {
           priority: extensionOptions.priority || 0,
+          labelKey: extensionOptions.labelKey,
           condition: extensionOptions.condition,
+          when: extensionOptions.when,
+          // An inverted pair is a typo, not an intent. Left as-is, CSS resolves
+          // it by letting `min-width` win — handing the plugin the *larger* of
+          // the two numbers, which is the one direction the host cannot afford
+          // to guess wrong. Collapse toward the ceiling so the smaller declared
+          // bound is what survives.
+          minWidth:
+            minWidth !== undefined && maxWidth !== undefined && minWidth > maxWidth
+              ? maxWidth
+              : minWidth,
+          maxWidth,
         },
       }
 
@@ -158,32 +206,12 @@ export function createExtensionAPI(
 
     getExtensions: (point: ExtensionPoint): ExtensionRegistration[] => {
       const pointExtensions = extensions.get(point) || []
-
-      // Filter by condition if specified
-      return pointExtensions.filter((ext) => {
-        if (ext.options.condition) {
-          try {
-            return ext.options.condition()
-          } catch {
-            return false
-          }
-        }
-        return true
-      })
+      return pointExtensions.filter(passesVisibility)
     },
 
     hasExtensions: (point: ExtensionPoint): boolean => {
       const pointExtensions = extensions.get(point) || []
-      return pointExtensions.some((ext) => {
-        if (ext.options.condition) {
-          try {
-            return ext.options.condition()
-          } catch {
-            return false
-          }
-        }
-        return true
-      })
+      return pointExtensions.some(passesVisibility)
     },
   }
 }
@@ -193,17 +221,7 @@ export function createExtensionAPI(
  */
 export function getExtensionsForPoint(point: ExtensionPoint): ExtensionRegistration[] {
   const pointExtensions = extensions.get(point) || []
-
-  return pointExtensions.filter((ext) => {
-    if (ext.options.condition) {
-      try {
-        return ext.options.condition()
-      } catch {
-        return false
-      }
-    }
-    return true
-  })
+  return pointExtensions.filter(passesVisibility)
 }
 
 export function getPluginExtensions(pluginId: string): ExtensionRegistration[] {

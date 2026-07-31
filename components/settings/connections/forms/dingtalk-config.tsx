@@ -12,25 +12,42 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
+import { CheckCircle2Icon, LoaderIcon, XCircleIcon } from "lucide-react"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { createAdapterInstance, updateAdapterInstance } from "@/lib/db/adapter-instances"
 import { connectorsKeyringSet } from "@/lib/connectors/tauri/commands"
 import { emitCredentialsRotated } from "@/lib/connectors/credentials-events"
+import { getDingTalkAccessToken } from "@/lib/connectors/adapters/dingtalk/auth"
+import { isTauri } from "@/lib/tauri"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 import { defaultGroupChatPolicy } from "@/types/connectors/policy"
 import { AdapterFormSections, type FormSection } from "./_shared/adapter-form-sections"
 import { QuietHoursAndMute, type QuietHoursValue } from "./quiet-hours-and-mute"
 
+interface DingTalkCredentialTestResult {
+  ok: boolean
+  error?: string
+}
+
 interface DingTalkConfigDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Called with the new adapter id after a successful create, so the parent
+   * can auto-select and open the freshly created adapter. */
+  onCreated?: (id: string) => void
   row: AdapterInstanceRow | null
 }
 
-export function DingTalkConfigDialog({ open, onOpenChange, row }: DingTalkConfigDialogProps) {
+export function DingTalkConfigDialog({
+  open,
+  onOpenChange,
+  row,
+  onCreated,
+}: DingTalkConfigDialogProps) {
   const t = useTranslations("settings.connections.dingtalk")
   const isNew = row === null
 
@@ -39,7 +56,11 @@ export function DingTalkConfigDialog({ open, onOpenChange, row }: DingTalkConfig
   const [appSecret, setAppSecret] = useState("")
   const [muted, setMuted] = useState<boolean>(row?.muted ?? false)
   const [quietHours, setQuietHours] = useState<QuietHoursValue | null>(row?.quietHours ?? null)
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<DingTalkCredentialTestResult | null>(null)
   const [saving, setSaving] = useState(false)
+
+  const desktop = isTauri()
 
   const dirty =
     isNew ||
@@ -48,6 +69,27 @@ export function DingTalkConfigDialog({ open, onOpenChange, row }: DingTalkConfig
     appSecret.length > 0 ||
     muted !== (row?.muted ?? false) ||
     quietHours !== (row?.quietHours ?? null)
+
+  const handleTest = async () => {
+    if (!appKey.trim() || !appSecret.trim()) {
+      toast.error(t("credentialsRequired"))
+      return
+    }
+
+    setTesting(true)
+    setTestResult(null)
+    try {
+      await getDingTalkAccessToken(appKey.trim(), appSecret.trim())
+      setTestResult({ ok: true })
+      toast.success(t("testSucceededToast"))
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err)
+      setTestResult({ ok: false, error })
+      toast.error(t("testFailedToast", { error }))
+    } finally {
+      setTesting(false)
+    }
+  }
 
   const handleSave = async () => {
     if (!displayName.trim()) {
@@ -71,7 +113,10 @@ export function DingTalkConfigDialog({ open, onOpenChange, row }: DingTalkConfig
           type: "dingtalk",
           displayName: displayName.trim(),
           enabled: true,
-          transportMode: "longpoll",
+          // Stream mode = persistent outbound WebSocket ("gateway"). Older
+          // rows may still carry "longpoll"; the registry ignores the value
+          // when building the DingTalk adapter, so both are tolerated.
+          transportMode: "gateway",
           settings: {},
           credentialsRef: {
             keyringService: "com.cognia.platforms",
@@ -98,6 +143,7 @@ export function DingTalkConfigDialog({ open, onOpenChange, row }: DingTalkConfig
       if (!isNew) emitCredentialsRotated(adapterId)
 
       toast.success(isNew ? t("adapterCreated") : t("adapterUpdated"))
+      if (isNew) onCreated?.(adapterId)
       onOpenChange(false)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
@@ -144,17 +190,58 @@ export function DingTalkConfigDialog({ open, onOpenChange, row }: DingTalkConfig
               {isNew && <span className="ml-1 text-destructive">*</span>}
             </Label>
             <p className="text-xs text-muted-foreground">{t("appSecretHelp")}</p>
-            <Input
-              id="dingtalk-app-secret"
-              type="password"
-              autoComplete="new-password"
-              value={appSecret}
-              onChange={(e) => setAppSecret(e.target.value)}
-              placeholder={isNew ? t("appSecretPlaceholder") : t("credentialUnchangedPlaceholder")}
-              disabled={saving}
-            />
+            <div className="flex gap-2">
+              <Input
+                id="dingtalk-app-secret"
+                type="password"
+                autoComplete="new-password"
+                value={appSecret}
+                onChange={(e) => setAppSecret(e.target.value)}
+                placeholder={
+                  isNew ? t("appSecretPlaceholder") : t("credentialUnchangedPlaceholder")
+                }
+                disabled={saving}
+                className="min-w-0 flex-1"
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={handleTest}
+                disabled={testing || saving || !desktop}
+                aria-label={t("testCredentialsAria")}
+                className="shrink-0"
+              >
+                {testing ? (
+                  <LoaderIcon data-icon="inline-start" className="animate-spin" />
+                ) : (
+                  t("testButtonLabel")
+                )}
+              </Button>
+            </div>
           </div>
         </div>
+        {testResult !== null && (
+          <div
+            className={`flex items-center gap-2 rounded-md px-3 py-2 text-xs ${
+              testResult.ok
+                ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300"
+                : "bg-destructive/10 text-destructive"
+            }`}
+            role="status"
+            aria-label={testResult.ok ? t("testSucceededLabel") : t("testFailedLabel")}
+          >
+            {testResult.ok ? (
+              <CheckCircle2Icon className="h-3.5 w-3.5 shrink-0" />
+            ) : (
+              <XCircleIcon className="h-3.5 w-3.5 shrink-0" />
+            )}
+            {testResult.ok ? t("testSucceededStatus") : testResult.error}
+          </div>
+        )}
+        {!desktop && (
+          <p className="text-xs text-amber-600 dark:text-amber-400">{t("testRequiresDesktop")}</p>
+        )}
       </div>
     ),
   }

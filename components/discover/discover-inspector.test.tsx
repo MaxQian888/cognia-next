@@ -5,9 +5,9 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-import type { Character, Skill, Team } from "@/lib/claude/types"
+import type { Character, Skill, Team } from "@cognia/agent-config-types"
 import type { PluginRow } from "@/lib/db/plugin-types"
-import type { TwinDraft } from "@/types/twin"
+import type { TwinDraft, TwinProfile, TwinSource } from "@/types/twin"
 import type { DiscoverItem } from "@/hooks/discover/use-discover-query"
 
 jest.mock("next-intl", () => ({
@@ -86,8 +86,13 @@ jest.mock("@/hooks/use-platform", () => ({
   usePlatform: () => platformValue,
 }))
 
+const mockLiveQuery = jest.fn<unknown, []>(() => [])
 jest.mock("dexie-react-hooks", () => ({
-  useLiveQuery: () => [],
+  useLiveQuery: () => mockLiveQuery(),
+}))
+
+jest.mock("@/lib/db/twin-profile", () => ({
+  getTwinProfile: jest.fn(),
 }))
 
 jest.mock("@/lib/db/plugins", () => ({
@@ -96,6 +101,17 @@ jest.mock("@/lib/db/plugins", () => ({
 
 jest.mock("@/lib/db/adapter-instances", () => ({
   listAdapterInstancesByType: jest.fn().mockResolvedValue([]),
+}))
+
+const getTemplateWarningsMock = jest.fn((_id: string) => [] as unknown[])
+jest.mock("@/lib/plugin/registries/agent-team-template-registry", () => ({
+  getTemplateWarnings: (id: string) => getTemplateWarningsMock(id),
+}))
+
+// Stub the skill marketplace sheet so its heavy SkillMarketplace → streamdown
+// chain doesn't load in jsdom (streamdown is ESM-only).
+jest.mock("@/components/discover/skill-marketplace-sheet", () => ({
+  SkillMarketplaceSheet: () => <div data-testid="stub-skill-marketplace-sheet" />,
 }))
 
 import { DiscoverInspector } from "./discover-inspector"
@@ -153,11 +169,35 @@ const draft: TwinDraft = {
   createdAt: 0,
 } as unknown as TwinDraft
 
+const twinSource: TwinSource = {
+  id: "src_1",
+  twinId: "twin_1",
+  kind: "note",
+  status: "ready",
+  bytes: 2048,
+  chunkCount: 4,
+} as unknown as TwinSource
+
+const twinProfileRow: TwinProfile = {
+  id: "twin_1",
+  twinId: "twin_1",
+  styleSamples: [
+    { id: "s1", summary: "a", sourceChunkId: "c1" },
+    { id: "s2", summary: "b", sourceChunkId: "c2" },
+  ],
+  playbooks: [],
+  entities: [{ name: "Ada", role: "person" }],
+  decisions: [],
+  voiceSummary: "Concise.",
+  updatedAt: 7,
+} as unknown as TwinProfile
+
 const characterItem: DiscoverItem = { kind: "character", id: character.id, data: character }
 const teamItem: DiscoverItem = { kind: "team", id: team.id, data: team }
 const skillItem: DiscoverItem = { kind: "skill", id: skill.id, data: skill }
 const pluginItem: DiscoverItem = { kind: "plugin", id: plugin.id, data: plugin }
 const draftItem: DiscoverItem = { kind: "twinDraft", id: draft.id, data: draft }
+const twinSourceItem: DiscoverItem = { kind: "twinSource", id: twinSource.id, data: twinSource }
 
 beforeEach(() => {
   setSkillStatusMock.mockReset()
@@ -168,6 +208,8 @@ beforeEach(() => {
   toastSuccessMock.mockReset()
   marketInstallMock.mockReset().mockResolvedValue(undefined)
   marketUninstallMock.mockReset().mockResolvedValue(undefined)
+  mockLiveQuery.mockReset()
+  mockLiveQuery.mockReturnValue([])
   platformValue = "web"
 })
 
@@ -208,7 +250,7 @@ describe("<DiscoverInspector />", () => {
     // `<Button asChild>` flattens into the child `<a>` from next/link, so
     // the testid lands on the anchor itself — no nested querySelector needed.
     const link = screen.getByTestId("discover-inspector-open-team")
-    expect(link).toHaveAttribute("href", "/agent-teams/t1")
+    expect(link).toHaveAttribute("href", "/agent-teams/workspace?teamId=t1")
   })
 
   it("calls setSkillStatus + enqueue when toggling a skill", async () => {
@@ -287,6 +329,24 @@ describe("<DiscoverInspector />", () => {
     expect(screen.getByText("Distilled from notes")).toBeInTheDocument()
     const link = screen.getByTestId("discover-inspector-open-twin")
     expect(link).toHaveAttribute("href", "/twin")
+  })
+
+  it("renders the twin source inspector with the Dexie-backed profile card", () => {
+    mockLiveQuery.mockReturnValue(twinProfileRow)
+    render(
+      <DiscoverInspector
+        category="twinIngest"
+        itemId={twinSource.id}
+        items={[twinSourceItem]}
+        onClose={jest.fn()}
+      />
+    )
+    // The profile summary card is wired above the source meta + open link.
+    expect(screen.getByTestId("twin-profile-card")).toBeInTheDocument()
+    expect(screen.getByTestId("discover-inspector-open-twin-source")).toHaveAttribute(
+      "href",
+      "/twin"
+    )
   })
 
   it("calls onClose when the close button is clicked", async () => {
@@ -493,5 +553,178 @@ describe("<DiscoverInspector />", () => {
     // Sonner toast fires after the await resolves
     await new Promise((r) => setTimeout(r, 0))
     expect(toastSuccessMock).toHaveBeenCalled()
+  })
+
+  // ── WF1 registry-backed kinds ───────────────────────────────────────────
+
+  const slashItem: DiscoverItem = {
+    kind: "slashCommand",
+    id: "gitx.status",
+    data: {
+      id: "gitx.status",
+      name: "gitx.status",
+      description: "Show git status",
+      source: "plugin",
+      pluginId: "gitx",
+      handler: jest.fn(),
+    },
+  }
+  const mcpPresetItem: DiscoverItem = {
+    kind: "mcpPreset",
+    id: "filesystem",
+    data: {
+      id: "filesystem",
+      name: "Filesystem",
+      description: "Read/write files",
+      icon: "📁",
+      transport: "stdio",
+      config: {},
+      fields: [{ key: "PATH", label: "Dir", placement: "arg-replace" }],
+      docsUrl: "https://example.com/fs",
+      tags: ["files"],
+    },
+  }
+  const teamTemplateItem: DiscoverItem = {
+    kind: "teamTemplate",
+    id: "parallel-review",
+    data: {
+      id: "parallel-review",
+      name: "Parallel Review",
+      description: "Split review",
+      teammateCount: 3,
+      category: "review",
+      isBuiltIn: true,
+    },
+  }
+  const externalPresetItem: DiscoverItem = {
+    kind: "externalAgentPreset",
+    id: "codex",
+    data: {
+      id: "codex",
+      name: "Codex",
+      description: "OpenAI Codex",
+      tags: ["cli"],
+      setupHint: "Install codex on PATH",
+      docsUrl: "https://example.com/codex",
+    },
+  }
+  const subagentItem: DiscoverItem = {
+    kind: "subagent",
+    id: "workflow-designer",
+    data: {
+      id: "workflow-designer",
+      name: "Workflow Designer",
+      description: "designs workflows",
+      prompt: "",
+    },
+  }
+
+  it("renders a slash command and links to the slash-commands settings", () => {
+    render(
+      <DiscoverInspector
+        category="slashCommands"
+        itemId={slashItem.id}
+        items={[slashItem]}
+        onClose={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("discover-inspector-title")).toHaveTextContent("/gitx.status")
+    expect(screen.getByText("Show git status")).toBeInTheDocument()
+    expect(screen.getByTestId("discover-inspector-open-slash-command")).toHaveAttribute(
+      "href",
+      "/settings/slash-commands"
+    )
+  })
+
+  it("renders an MCP preset with an add-server deep link carrying the preset id", () => {
+    render(
+      <DiscoverInspector
+        category="mcpPresets"
+        itemId={mcpPresetItem.id}
+        items={[mcpPresetItem]}
+        onClose={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("discover-inspector-add-mcp-preset")).toHaveAttribute(
+      "href",
+      "/settings/external-bridge?preset=filesystem"
+    )
+    expect(screen.getByText("stdio")).toBeInTheDocument()
+  })
+
+  it("renders a team template with member count and a link to /agent-teams", () => {
+    render(
+      <DiscoverInspector
+        category="teamTemplates"
+        itemId={teamTemplateItem.id}
+        items={[teamTemplateItem]}
+        onClose={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("discover-inspector-title")).toHaveTextContent("Parallel Review")
+    expect(screen.getByTestId("discover-inspector-use-template")).toHaveAttribute(
+      "href",
+      "/agent-teams"
+    )
+    // Built-in template → getTemplateWarnings not consulted.
+    expect(getTemplateWarningsMock).not.toHaveBeenCalled()
+  })
+
+  it("surfaces missing-dependency warnings for a plugin team template", () => {
+    getTemplateWarningsMock.mockReturnValueOnce([{ code: "missing-skill", missingId: "x" }])
+    const pluginTemplate: DiscoverItem = {
+      kind: "teamTemplate",
+      id: "gitx:review",
+      data: {
+        id: "gitx:review",
+        name: "Plugin Review",
+        description: "review",
+        teammateCount: 1,
+        isBuiltIn: false,
+        pluginId: "gitx",
+      },
+    }
+    render(
+      <DiscoverInspector
+        category="teamTemplates"
+        itemId={pluginTemplate.id}
+        items={[pluginTemplate]}
+        onClose={jest.fn()}
+      />
+    )
+    expect(getTemplateWarningsMock).toHaveBeenCalledWith("gitx:review")
+    expect(screen.getByTestId("discover-inspector-template-warnings")).toBeInTheDocument()
+  })
+
+  it("renders an external-agent preset with setup hint + add link", () => {
+    render(
+      <DiscoverInspector
+        category="agentPresets"
+        itemId={externalPresetItem.id}
+        items={[externalPresetItem]}
+        onClose={jest.fn()}
+      />
+    )
+    expect(screen.getByText("Install codex on PATH")).toBeInTheDocument()
+    expect(screen.getByTestId("discover-inspector-add-external-agent")).toHaveAttribute(
+      "href",
+      "/me/external-agents"
+    )
+  })
+
+  it("renders a subagent with a link to /me/subagents", () => {
+    render(
+      <DiscoverInspector
+        category="agentPresets"
+        itemId={subagentItem.id}
+        items={[subagentItem]}
+        onClose={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("discover-inspector-title")).toHaveTextContent("Workflow Designer")
+    expect(screen.getByTestId("discover-inspector-open-subagent")).toHaveAttribute(
+      "href",
+      "/me/subagents"
+    )
   })
 })

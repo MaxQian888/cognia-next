@@ -4,6 +4,7 @@
 
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 import type { ThemeTokens } from "@/lib/export/html/syntax-themes"
 import { THEMES } from "@/lib/export/html/syntax-themes"
 
@@ -57,7 +58,7 @@ export const useCustomThemeStore = create<CustomThemeState>()(
         return get().upsert({ name: newName, tokens: { ...src.tokens } })
       },
     }),
-    { name: "cognia-custom-themes" }
+    { name: "cognia-custom-themes", storage: persistLocalStorage() }
   )
 )
 

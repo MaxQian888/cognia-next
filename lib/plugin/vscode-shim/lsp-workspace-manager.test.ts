@@ -8,6 +8,8 @@ import {
   flushDocument,
   listWorkspaceFolders,
   resolveWorkspaceFolder,
+  registerProjectWorkspace,
+  unregisterProjectWorkspace,
   type LspWorkspaceFsAdapter,
 } from "./lsp-workspace-manager"
 
@@ -258,6 +260,75 @@ describe("lsp-workspace-manager", () => {
       const folders = listWorkspaceFolders()
       expect(folders).toHaveLength(2)
       expect(folders.map((f) => f.name).sort()).toEqual(["canvas-b", "skill-a"])
+    })
+  })
+
+  describe("registerProjectWorkspace (real file:// project roots)", () => {
+    it("resolves a file:// document to its enclosing project root", () => {
+      registerProjectWorkspace("/home/me/proj")
+      const folder = resolveWorkspaceFolder("file:///home/me/proj/src/index.ts")
+      expect(folder).toEqual({ uri: "file:///home/me/proj", name: "proj" })
+    })
+
+    it("returns the root itself when the document URI is the root", () => {
+      registerProjectWorkspace("/home/me/proj", "My Project")
+      expect(resolveWorkspaceFolder("file:///home/me/proj")).toEqual({
+        uri: "file:///home/me/proj",
+        name: "My Project",
+      })
+    })
+
+    it("picks the longest matching root for nested projects", () => {
+      registerProjectWorkspace("/home/me/proj")
+      registerProjectWorkspace("/home/me/proj/packages/inner")
+      const folder = resolveWorkspaceFolder("file:///home/me/proj/packages/inner/a.ts")
+      expect(folder?.uri).toBe("file:///home/me/proj/packages/inner")
+    })
+
+    it("returns null for a file:// URI outside every registered root", () => {
+      registerProjectWorkspace("/home/me/proj")
+      expect(resolveWorkspaceFolder("file:///elsewhere/a.ts")).toBeNull()
+    })
+
+    it("does not treat a sibling prefix as a match", () => {
+      registerProjectWorkspace("/home/me/proj")
+      // `/home/me/proj2` must not match root `/home/me/proj`.
+      expect(resolveWorkspaceFolder("file:///home/me/proj2/a.ts")).toBeNull()
+    })
+
+    it("is idempotent per root and updates the name on re-register", () => {
+      const uriA = registerProjectWorkspace("/home/me/proj")
+      const uriB = registerProjectWorkspace("/home/me/proj", "Renamed")
+      expect(uriA).toBe(uriB)
+      expect(resolveWorkspaceFolder("file:///home/me/proj/a.ts")?.name).toBe("Renamed")
+    })
+
+    it("unregister removes the root", () => {
+      registerProjectWorkspace("/home/me/proj")
+      unregisterProjectWorkspace("/home/me/proj")
+      expect(resolveWorkspaceFolder("file:///home/me/proj/a.ts")).toBeNull()
+    })
+
+    it("lists project roots first, ahead of synthetic workspaces", async () => {
+      const fs = makeFakeFs()
+      configureLspWorkspaceManager(fs)
+      await ensureWorkspace({
+        surface: "skill",
+        documentId: "a",
+        fileName: "a.ts",
+        initialContent: "",
+        monacoUri: "skill:///A/a.ts",
+      })
+      registerProjectWorkspace("/home/me/proj")
+      const folders = listWorkspaceFolders()
+      expect(folders).toHaveLength(2)
+      expect(folders[0]?.name).toBe("proj")
+      expect(folders[0]?.uri).toBe("file:///home/me/proj")
+    })
+
+    it("tolerates a trailing slash in the root path", () => {
+      registerProjectWorkspace("/home/me/proj/")
+      expect(resolveWorkspaceFolder("file:///home/me/proj/a.ts")?.uri).toBe("file:///home/me/proj")
     })
   })
 

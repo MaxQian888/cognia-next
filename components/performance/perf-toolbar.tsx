@@ -57,8 +57,14 @@ export function PerfToolbar({
       </Button>
 
       <Select value={String(intervalMs)} onValueChange={(v) => onIntervalChange(Number(v))}>
-        <SelectTrigger className="h-8 w-[130px]" data-testid="perf-interval-trigger">
-          <SelectValue aria-label={t("intervalLabel")} />
+        {/* The label belongs on the trigger — it is the combobox. On
+            `SelectValue` it is announced as the value, not the control. */}
+        <SelectTrigger
+          className="h-8 w-[130px]"
+          aria-label={t("intervalLabel")}
+          data-testid="perf-interval-trigger"
+        >
+          <SelectValue />
         </SelectTrigger>
         <SelectContent align="end">
           {PERF_INTERVAL_OPTIONS.map((ms) => (

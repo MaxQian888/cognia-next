@@ -5,8 +5,11 @@
 // uses, passing the full selection.
 
 import { useTranslations } from "next-intl"
-import { FolderInputIcon, TagIcon, Trash2Icon, XIcon } from "lucide-react"
+import { toast } from "sonner"
+import { DownloadIcon, FolderInputIcon, TagIcon, Trash2Icon, XIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { getDb } from "@/lib/db/schema"
+import { downloadWorkflowJson, downloadWorkflowsBundle } from "@/lib/workflow/editor/workflow-json"
 import { useWorkflowLibraryStore } from "@/stores/workflow"
 
 export function WorkflowBulkActionBar() {
@@ -21,6 +24,14 @@ export function WorkflowBulkActionBar() {
 
   const ids = () => Array.from(useWorkflowLibraryStore.getState().selection)
 
+  const handleExport = async () => {
+    const rows = (await getDb().workflows.bulkGet(ids())).filter((w) => w !== undefined)
+    if (rows.length === 0) return
+    if (rows.length === 1) downloadWorkflowJson(rows[0])
+    else downloadWorkflowsBundle(rows)
+    toast.success(t("exported", { count: rows.length }))
+  }
+
   return (
     <div
       className="flex items-center gap-2 border-b bg-muted/50 px-6 py-2"
@@ -30,6 +41,15 @@ export function WorkflowBulkActionBar() {
         {t("selected", { count: selectionSize })}
       </span>
       <div className="ml-auto flex items-center gap-1.5">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleExport}
+          data-testid="workflow-bulk-export"
+        >
+          <DownloadIcon className="size-3.5 sm:mr-1.5" />
+          <span className="hidden sm:inline">{t("export")}</span>
+        </Button>
         <Button
           variant="outline"
           size="sm"

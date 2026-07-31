@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-telemetry-configure-sidecar"
+description = "Enables the telemetry_configure_sidecar command without any pre-configured scope."
+commands.allow = ["telemetry_configure_sidecar"]
+
+[[permission]]
+identifier = "deny-telemetry-configure-sidecar"
+description = "Denies the telemetry_configure_sidecar command without any pre-configured scope."
+commands.deny = ["telemetry_configure_sidecar"]

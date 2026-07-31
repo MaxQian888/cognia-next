@@ -9,6 +9,7 @@
 
 import { invoke } from "@tauri-apps/api/core"
 import { listen, UnlistenFn } from "@tauri-apps/api/event"
+import { safeUnlisten } from "@/lib/tauri/safe-unlisten"
 import { loggers } from "../core/logger"
 import { openUrl } from "@/lib/native/opener"
 
@@ -176,7 +177,7 @@ export class PluginDevServer {
 
       // Stop listening for events
       if (this.unlistenFn) {
-        this.unlistenFn()
+        safeUnlisten(this.unlistenFn)
         this.unlistenFn = null
       }
 
@@ -334,6 +335,7 @@ export class PluginDevServer {
     const startTime = Date.now()
 
     try {
+      // invoke-parity-exempt: plugin build backend not yet shipped in Rust; caught and returned as build failure
       const result = await invoke<{
         success: boolean
         outputPath?: string

@@ -34,8 +34,7 @@ import {
 } from "@/stores/inbox/inbox-layout-store"
 import { InboxSidebar, InboxSidebarContent } from "./inbox-sidebar"
 import { ConversationList } from "./conversation-list"
-import { ConnectionLossBanner } from "./connection-loss-banner"
-import { OutboundSaturationBanner } from "./outbound-saturation-banner"
+import { InboxNoticeArea } from "./notices/notice-area"
 import { InboxCommandPalette } from "./inbox-command-palette"
 
 export type InboxView = "all" | "by-adapter" | "by-platform" | "conversation"
@@ -51,17 +50,6 @@ export interface InboxShellProps {
   conversationKey?: string
   /** Right-pane content (typically the ChatSession view). */
   children?: React.ReactNode
-}
-
-/** Cross-cutting degradation notices. Hidden on mobile to keep the single-pane
- * stack tight — per-conversation badges surface the same signal there. */
-function DetailBanners() {
-  return (
-    <div className="hidden md:block">
-      <ConnectionLossBanner />
-      <OutboundSaturationBanner />
-    </div>
-  )
 }
 
 /** Detail-pane content with a subtle mount-in slide (each conversation route
@@ -171,7 +159,7 @@ function DesktopInboxShell({
           data-testid="inbox-detail-pane"
           data-bg-target="chat"
         >
-          <DetailBanners />
+          <InboxNoticeArea conversationKey={conversationKey} />
           <DetailContent emptyPrompt={emptyPrompt}>{children}</DetailContent>
         </ResizablePanel>
       </ResizablePanelGroup>
@@ -247,7 +235,7 @@ export function InboxShell({
           !showDetail && "hidden md:flex"
         )}
       >
-        <DetailBanners />
+        <InboxNoticeArea conversationKey={conversationKey} />
         <DetailContent emptyPrompt={t("selectPrompt")}>{children}</DetailContent>
       </SidebarInset>
       <InboxCommandPalette />

@@ -30,7 +30,7 @@ interface Props {
  *  - Overlay synthetic ids: render a destructive alert with a "Pick
  *    another" CTA so the user can rebind the session.
  *
- * Visual treatment mirrors `components/chat/inline-error.tsx` so the
+ * Visual treatment mirrors `components/error/diagnostic-card.tsx` so the
  * chat surface stays homogeneous; we deliberately don't define a new
  * variant or color palette.
  */

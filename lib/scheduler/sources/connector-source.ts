@@ -47,6 +47,7 @@ import type {
   ScheduledItemSourceObserver,
   ScheduledItemSubscription,
 } from "./types"
+import { filterRunsByKind, toUnifiedFromAudit, toUnifiedFromTaskExecution } from "./run-mappers"
 
 /**
  * Task-type prefix that distinguishes connector-owned scheduler rows from
@@ -75,6 +76,11 @@ export interface ConnectorSourceScheduler {
 export interface ConnectorSourceDb {
   getAllTasks(): Promise<ScheduledTask[]>
   getTask(taskId: string): Promise<ScheduledTask | null>
+  getRecentExecutions?(limit: number): Promise<import("@/types/scheduler").TaskExecution[]>
+  getRecentExecutionsMatching?(
+    ownsTaskType: (taskType: string) => boolean,
+    limit: number
+  ): Promise<import("@/types/scheduler").TaskExecution[]>
 }
 
 export interface OutboundQueueProbe {
@@ -112,6 +118,7 @@ export interface ConnectorSourceDeps {
    * `outboundQueueProbe.count()` via `liveQuery`.
    */
   observeQueueCount?: (querier: () => Promise<number>) => RawObservable<number>
+  listAuditRuns?: (limit: number) => Promise<import("@/lib/db/connector-types").ConnectorAuditRow[]>
 }
 
 export function createConnectorSource(
@@ -124,6 +131,9 @@ export function createConnectorSource(
   }
   const observe = deps.observe ?? ((querier) => liveQuery(querier))
   const observeQueueCount = deps.observeQueueCount ?? ((querier) => liveQuery(querier))
+  const listAuditRuns =
+    deps.listAuditRuns ??
+    ((limit: number) => getDb().connectorAudit.orderBy("at").reverse().limit(limit).toArray())
 
   /**
    * Compose the unified list: connector digest items + the queue rollup row.
@@ -182,6 +192,26 @@ export function createConnectorSource(
 
     async list(): Promise<UnifiedScheduledItem[]> {
       return buildItems()
+    },
+
+    async listRuns(limit) {
+      const [executions, auditRows] = await Promise.all([
+        db.getRecentExecutionsMatching?.(
+          (taskType) => taskType.startsWith(CONNECTOR_TASK_TYPE_PREFIX),
+          limit
+        ) ??
+          schedulerDb.getRecentExecutionsMatching(
+            (taskType) => taskType.startsWith(CONNECTOR_TASK_TYPE_PREFIX),
+            limit
+          ),
+        listAuditRuns(limit),
+      ])
+      return [
+        ...filterRunsByKind(executions.map(toUnifiedFromTaskExecution), "connector"),
+        ...auditRows.map(toUnifiedFromAudit),
+      ]
+        .sort((a, b) => b.startedAt - a.startedAt)
+        .slice(0, limit)
     },
 
     async get(sourceId: string): Promise<UnifiedScheduledItem | undefined> {

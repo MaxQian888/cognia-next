@@ -35,6 +35,19 @@ describe("settings-nav-config", () => {
       expect(item?.descriptionKey).toBe("agentTeams")
     })
 
+    it("splits AI Connections and Model Catalog without reusing generic Connections", () => {
+      expect(SETTINGS_NAV.find((item) => item.id === "ai-connections")).toMatchObject({
+        group: "ai",
+        labelKey: "aiConnections",
+      })
+      expect(SETTINGS_NAV.find((item) => item.id === "model-catalog")).toMatchObject({
+        group: "ai",
+        labelKey: "modelCatalog",
+      })
+      expect(SETTINGS_NAV.find((item) => item.id === "connections")).toBeDefined()
+      expect(SETTINGS_NAV.find((item) => item.id === "providers")).toBeUndefined()
+    })
+
     it("plugins sits in the Extensions group", () => {
       const item = SETTINGS_NAV.find((n) => n.id === "plugins")
       expect(item).toBeDefined()
@@ -48,6 +61,19 @@ describe("settings-nav-config", () => {
       expect(item?.group).toBe("system")
       expect(item?.desktopOnly).toBe(true)
       expect(item?.labelKey).toBe("remoteControl")
+    })
+
+    it("Pro IDE is a searchable desktop-only interface section", () => {
+      const item = SETTINGS_NAV.find((n) => n.id === "pro-ide")
+      expect(item).toMatchObject({
+        group: "interface",
+        labelKey: "proIde",
+        descriptionKey: "proIde",
+        desktopOnly: true,
+      })
+      expect(SETTINGS_SEARCH_KEYWORDS["pro-ide"]).toEqual(
+        expect.arrayContaining(["code-server", "vscode", "内嵌编辑器"])
+      )
     })
 
     it("each nav group appears in SETTINGS_GROUP_ORDER", () => {

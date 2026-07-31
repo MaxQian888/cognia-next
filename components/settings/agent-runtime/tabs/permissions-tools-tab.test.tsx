@@ -51,6 +51,12 @@ jest.mock("@/components/settings/agent-runtime/command-auto-mode-card", () => ({
   CommandAutoModeCard: () => null,
 }))
 
+// Tool-search runtime card has its own suite + adds an enable switch; stub it
+// so this tab's switch-count / category assertions stay scoped.
+jest.mock("@/components/settings/agent-runtime/tool-search-runtime-card", () => ({
+  ToolSearchRuntimeCard: () => null,
+}))
+
 jest.mock("@/lib/tauri", () => ({
   isTauri: () => isTauriRef.current,
 }))

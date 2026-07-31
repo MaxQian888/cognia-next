@@ -2,8 +2,12 @@
 // for collapsible sections; no external network requests at view time.
 
 import type { UIMessage } from "ai"
-import type { ChatSession, StoredMessage } from "@/lib/claude/types"
+import type { ChatSession, StoredMessage } from "@cognia/agent-config-types"
 import { THEMES, type ThemeId, type ThemeTokens } from "./syntax-themes"
+import { getStylePreset } from "./style-presets"
+import { buildWallpaperBackdropCss } from "./theme-wallpaper"
+import { renderSafeInlineMarkdown } from "./safe-inline-markdown"
+import { isImageFile } from "../file-utils"
 
 export interface BeautifulHtmlOptions {
   session: ChatSession
@@ -16,6 +20,12 @@ export interface BeautifulHtmlOptions {
   includeTimestamps?: boolean
   /** Show <details> blocks for tool calls / reasoning. Default true. */
   expandDetails?: boolean
+  /**
+   * Inlined theme wallpaper data-URL. When present, a photo backdrop (with a
+   * legibility scrim) is laid behind the export. Resolved by the caller via
+   * `resolveThemeWallpaper` so this module stays pure/sync.
+   */
+  wallpaperDataUrl?: string
 }
 
 export function exportToBeautifulHtml(options: BeautifulHtmlOptions): string {
@@ -28,8 +38,17 @@ export function exportToBeautifulHtml(options: BeautifulHtmlOptions): string {
     includeMetadata = true,
     includeTimestamps = true,
     expandDetails = true,
+    wallpaperDataUrl,
   } = options
   const tokens = customTheme ?? THEMES[theme]
+  const preset = getStylePreset(theme)
+  const banner = preset?.bannerText
+    ? `<div class="preset-banner">${escapeHtml(preset.bannerText)}</div>\n`
+    : ""
+  const footerTag = preset?.footerText ? ` · ${escapeHtml(preset.footerText)}` : ""
+  // Wallpaper backdrop is appended LAST so its transparent-body rule wins over
+  // the base `body{background:${t.bg}}` while the preset chrome layers on top.
+  const wallpaperCss = wallpaperDataUrl ? buildWallpaperBackdropCss(wallpaperDataUrl, tokens) : ""
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -37,15 +56,15 @@ export function exportToBeautifulHtml(options: BeautifulHtmlOptions): string {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${escapeHtml(session.title)}</title>
-<style>${stylesheet(tokens)}</style>
+<style>${stylesheet(tokens)}${preset ? preset.css(tokens) : ""}${wallpaperCss}</style>
 </head>
 <body>
 <main class="container">
-${renderHeader(session, exportedAt, includeMetadata)}
+${banner}${renderHeader(session, exportedAt, includeMetadata)}
 <section class="conversation">
 ${messages.map((m) => renderMessage(m, { includeTimestamps, expandDetails })).join("\n")}
 </section>
-<footer class="exported">Exported from Cognia · ${escapeHtml(exportedAt.toLocaleString())}</footer>
+<footer class="exported">Exported from Cognia · ${escapeHtml(exportedAt.toLocaleString())}${footerTag}</footer>
 </main>
 </body>
 </html>`
@@ -90,7 +109,7 @@ function renderMessage(
 
 function renderPart(part: UIMessage["parts"][number], expandDetails: boolean): string {
   if (part.type === "text") {
-    return `<div class="text">${linkify(escapeHtml((part as { text: string }).text))}</div>`
+    return `<div class="text">${renderSafeInlineMarkdown(escapeHtml((part as { text: string }).text))}</div>`
   }
   if (part.type === "reasoning") {
     const text = (part as { text: string }).text ?? ""
@@ -117,9 +136,13 @@ function renderPart(part: UIMessage["parts"][number], expandDetails: boolean): s
   }
   if (part.type === "file") {
     const fp = part as { url?: string; mediaType?: string; filename?: string }
+    const label = fp.filename ?? fp.mediaType ?? "file"
+    if (fp.url && isImageFile(fp)) {
+      return `<figure class="image"><img src="${escapeHtml(fp.url)}" alt="${escapeHtml(label)}" loading="lazy"><figcaption>${escapeHtml(label)}</figcaption></figure>`
+    }
     return fp.url
-      ? `<p class="file">📎 <a href="${escapeHtml(fp.url)}">${escapeHtml(fp.filename ?? fp.mediaType ?? "file")}</a></p>`
-      : `<p class="file">📎 ${escapeHtml(fp.filename ?? fp.mediaType ?? "file")}</p>`
+      ? `<p class="file">📎 <a href="${escapeHtml(fp.url)}">${escapeHtml(label)}</a></p>`
+      : `<p class="file">📎 ${escapeHtml(label)}</p>`
   }
   if (part.type === "source-url") {
     const sp = part as { url: string; title?: string }
@@ -148,15 +171,6 @@ function escapeHtml(text: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;")
-}
-
-function linkify(escaped: string): string {
-  // Convert plain URLs to anchors. Operates on already-escaped HTML so the
-  // url tokens are matched in their escaped form and rebuilt safely.
-  return escaped.replace(
-    /(https?:\/\/[^\s<>"']+)/g,
-    (m) => `<a href="${m}" target="_blank" rel="noreferrer">${m}</a>`
-  )
 }
 
 function safeJson(value: unknown): string {
@@ -188,6 +202,9 @@ header details pre { background: ${t.codeBg}; color: ${t.codeText}; padding: 12p
 .parts > * { margin: 6px 0; }
 .text { white-space: pre-wrap; word-wrap: break-word; }
 .text a { color: ${t.accent}; }
+.image { margin: 10px 0; }
+.image img { display: block; max-width: 100%; max-height: 720px; border-radius: 8px; object-fit: contain; }
+.image figcaption { margin-top: 4px; color: ${t.muted}; font-size: 12px; }
 pre { background: ${t.codeBg}; color: ${t.codeText}; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 13px; line-height: 1.45; }
 details.tool, details.reasoning { background: ${t.detailBg}; border: 1px solid ${t.border}; border-radius: 6px; padding: 8px 12px; }
 details summary { cursor: pointer; font-weight: 500; }

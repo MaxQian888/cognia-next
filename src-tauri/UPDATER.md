@@ -1,6 +1,31 @@
 # Tauri Updater Setup
 
-This template ships the `tauri-plugin-updater` plugin **disabled** (`tauri.conf.json` → `plugins.updater.active = false`). Follow these steps to enable in-app updates.
+In-app auto-updates are **fully configured** and ready:
+
+- `tauri.conf.json` → `bundle.createUpdaterArtifacts: true`, `plugins.updater.endpoints`
+  set, and `plugins.updater.pubkey` **populated** with the real minisign public key.
+- Plugin registered in `src-tauri/src/lib.rs`; least-privilege permissions
+  (`updater:allow-check`, `updater:allow-download`, `updater:allow-install`, and
+  `process:allow-restart`) granted in `capabilities/default.json`. The combined
+  updater command and process exit command are intentionally not exposed.
+- CI (`release.yml` → `build-tauri.yml`) builds + signs via
+  `tauri-apps/tauri-action`. Every platform uploads to one draft; a final job
+  publishes only after the complete matrix succeeds.
+- Signing secrets `TAURI_SIGNING_PRIVATE_KEY` / `..._PASSWORD` are already set in
+  GitHub Actions.
+- Tagged macOS releases additionally require a `Developer ID Application`
+  certificate and notarization credentials. The release workflow validates the
+  identity and Team ID before building and never falls back to ad-hoc signing.
+
+The updater channel itself is configured. The only reason it reports
+`Could not fetch a valid release JSON from the remote` is that **no release has
+been published yet**, so `releases/latest/download/latest.json` 404s. Cut the
+first `v*` tag after the macOS release secrets below are installed and the
+endpoint goes live. Until then the boot-time check logs this as a quiet `debug`
+(`about.autoUpdateCheckNoRelease`), not a warn.
+
+The sections below document the one-time signing setup (already done for this
+repo) so the steps aren't lost if the key ever needs rotating.
 
 ## 1. Generate a signing key pair
 
@@ -8,49 +33,86 @@ This template ships the `tauri-plugin-updater` plugin **disabled** (`tauri.conf.
 pnpm tauri signer generate -w ~/.tauri/cognia-next.key
 ```
 
-You'll be prompted for a password (optional but recommended). The command writes:
+You'll be prompted for a password (optional but recommended). It writes:
 
 - `~/.tauri/cognia-next.key` — **PRIVATE KEY**, never commit
-- `~/.tauri/cognia-next.key.pub` — public key
+- `~/.tauri/cognia-next.key.pub` — public key (single line)
 
-## 2. Wire the public key into config
+## 2. Paste the public key into config
 
-Copy the **single-line** content of `~/.tauri/cognia-next.key.pub` into
-`src-tauri/tauri.conf.json` → `plugins.updater.pubkey`.
+Copy the single-line content of `~/.tauri/cognia-next.key.pub` into
+`src-tauri/tauri.conf.json` → `plugins.updater.pubkey`. The app uses it at
+runtime to verify update signatures. **(Already done — the field holds the live
+public key.)**
 
-## 3. Configure the update endpoint
+## 3. Add the signing secrets in CI
 
-GitHub Releases is the simplest host. Set:
+In GitHub → Settings → Secrets and variables → Actions, add:
 
-```json
-"plugins": {
-  "updater": {
-    "active": true,
-    "endpoints": [
-      "https://github.com/AstroAir/cognia-next/releases/latest/download/latest.json"
-    ],
-    "pubkey": "<paste public key here>"
-  }
-}
+- `TAURI_SIGNING_PRIVATE_KEY` — contents of `~/.tauri/cognia-next.key`
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` — the password (empty string if none)
+
+`.github/workflows/build-tauri.yml` already reads these env vars and
+`release.yml` forwards them via `secrets: inherit`. With
+`createUpdaterArtifacts: true`, a **tagged** build FAILS without them by
+design — an unsigned release would be un-updatable. **(Already done — both
+secrets exist in this repo's Actions settings.)**
+
+## 4. Ship
+
+Before creating a tag, configure these additional repository secrets:
+
+- `APPLE_CERTIFICATE` — base64-encoded Developer ID Application `.p12`
+- `APPLE_CERTIFICATE_PASSWORD` — password used to export the `.p12`
+- `APPLE_SIGNING_IDENTITY` — full `Developer ID Application: … (TEAMID)` name
+- `APPLE_ID` — Apple account used for notarization
+- `APPLE_PASSWORD` — app-specific password for that account
+- `APPLE_TEAM_ID` — the 10-character Team ID present in the signing identity
+
+`scripts/ci/require-macos-release-signing.mjs` checks the complete set before
+the release matrix starts. Tauri imports the certificate and performs signing,
+notarization, and stapling; the repository does not implement a second signing
+pipeline. Each matrix job uploads to a draft, and the draft remains unpublished
+if any platform fails.
+
+```bash
+git tag v0.1.1 && git push origin v0.1.1
 ```
 
-The `latest.json` file format is documented at https://v2.tauri.app/plugin/updater/.
+`tauri-action` builds every platform, signs the bundles, and assembles a draft
+with the installers, their `*.sig` signatures, and `latest.json`. The workflow
+publishes that release only after the complete matrix succeeds, exposing the
+manifest at:
 
-## 4. Sign builds in CI
-
-Set the following GitHub Actions secrets:
-
-- `TAURI_PRIVATE_KEY` — base64-encoded contents of your private key file
-- `TAURI_KEY_PASSWORD` — the password (empty string if you skipped one)
-
-The existing `.github/workflows/release.yml` references these env vars in the
-Tauri build step (currently behind comments — uncomment when ready).
-
-## 5. Flip `active` to `true` and ship
-
-```diff
-- "active": false,
-+ "active": true,
+```
+https://github.com/MaxQian888/cognia-next/releases/latest/download/latest.json
 ```
 
-Tag a release. The updater will check the configured endpoint on app startup.
+— the endpoint configured in `plugins.updater.endpoints`.
+
+> **Why draft first:** `releases/latest` resolves only to a published,
+> non-prerelease release. The matrix therefore assembles an invisible draft,
+> then publishes it atomically after all platforms finish. The new tag must be
+> a higher version than the installed app (e.g. an app at `0.1.0` only sees
+> `v0.1.1+`).
+
+The `latest.json` format is documented at https://v2.tauri.app/plugin/updater/.
+
+## Runtime behavior
+
+All renderer entry points reuse `lib/tauri/updater.ts`. The wrapper deduplicates
+concurrent checks/downloads, closes superseded native update resources, applies
+the configured request timeout and active network proxy, and downloads and
+installs through separate Tauri commands. Settings → About controls the check
+interval, background download, post-install relaunch, request timeout, and proxy
+use. Installation remains user-confirmed even when background download is on.
+
+## Notes
+
+- OS trust signing is a **separate** concern from updater signing. macOS bundles
+  are hardened and require Developer ID signing plus notarization for tagged
+  releases. The signing identity stays in CI secrets rather than
+  `tauri.conf.json`; no ad-hoc production fallback is configured. Windows
+  Authenticode remains separate from this macOS requirement.
+- There is no `active` field in the Tauri v2 updater config — enablement is
+  `createUpdaterArtifacts` + `endpoints` + `pubkey`.

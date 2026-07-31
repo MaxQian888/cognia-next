@@ -1,12 +1,15 @@
 "use client"
 
 import React from "react"
-import { Settings, Trash2 } from "lucide-react"
+import { Settings, Star, Trash2 } from "lucide-react"
 import { useTranslations } from "next-intl"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
+import { hasBrandIcon } from "@/components/icons/brand-icon"
+import { ProviderIcon } from "@/components/providers/ai/provider-icon"
 
 interface ProviderDetailPanelProvider {
   id: string
@@ -20,10 +23,19 @@ interface ProviderDetailPanelProps {
   onTest?: () => void
   onToggleEnabled?: (enabled: boolean) => void
   onDelete?: () => void
+  /** This provider is the app-wide default for new chats. */
+  isDefault?: boolean
+  /**
+   * Make this provider the app-wide default (`AppSettings.defaultProvider`).
+   * Omit to hide the action (e.g. read-only contexts).
+   */
+  onSetDefault?: () => void
   isEnabled?: boolean
+  /** Whether an incomplete disabled provider may be enabled. */
+  canEnable?: boolean
   isTesting?: boolean
   isCustom?: boolean
-  connectionStatus?: "connected" | "error" | "not-configured" | "warning"
+  connectionStatus?: "connected" | "error" | "not-configured" | "warning" | "limited" | "untested"
   /** Tab content slots — passed by parent to inject actual tab components */
   configTab?: React.ReactNode
   modelsTab?: React.ReactNode
@@ -35,7 +47,10 @@ export function ProviderDetailPanel({
   provider,
   onToggleEnabled,
   onDelete,
+  isDefault,
+  onSetDefault,
   isEnabled,
+  canEnable = true,
   isCustom,
   connectionStatus,
   configTab,
@@ -63,9 +78,13 @@ export function ProviderDetailPanel({
     <div className="flex flex-1 flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center gap-3 border-b px-4 py-3 shrink-0">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted text-lg">
-          {provider.icon ?? provider.name.charAt(0)}
-        </div>
+        {hasBrandIcon(provider.id) || provider.icon == null ? (
+          <ProviderIcon providerId={provider.id} label={provider.name} size={40} />
+        ) : (
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted text-lg">
+            {provider.icon}
+          </div>
+        )}
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-base font-semibold">{provider.name}</h3>
           <p className="truncate text-xs text-muted-foreground">
@@ -73,12 +92,31 @@ export function ProviderDetailPanel({
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          {isDefault ? (
+            <Badge variant="secondary" data-testid="provider-default-badge" className="gap-1">
+              <Star className="h-3 w-3" />
+              {t("detailPanel.defaultBadge")}
+            </Badge>
+          ) : onSetDefault ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1.5 text-xs"
+              data-testid="provider-set-default"
+              aria-label={t("detailPanel.setDefaultAria")}
+              title={t("detailPanel.setDefaultAria")}
+              onClick={onSetDefault}
+            >
+              <Star className="h-3 w-3" />
+              {t("detailPanel.setDefault")}
+            </Button>
+          ) : null}
           {connectionStatus === "connected" && (
             <Badge
               variant="outline"
               className="border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-950 dark:text-green-400"
             >
-              {t("detailPanel.connected") || "Connected"}
+              {t("detailPanel.connected")}
             </Badge>
           )}
           {connectionStatus === "error" && (
@@ -86,7 +124,38 @@ export function ProviderDetailPanel({
               variant="outline"
               className="border-red-200 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-400"
             >
-              {t("detailPanel.connectionFailed") || "Error"}
+              {t("detailPanel.connectionFailed")}
+            </Badge>
+          )}
+          {connectionStatus === "limited" && (
+            <Badge
+              variant="outline"
+              className="border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-400"
+            >
+              {t("verificationLimitedShort")}
+            </Badge>
+          )}
+          {connectionStatus === "untested" && (
+            <Badge variant="outline" className="text-muted-foreground">
+              {t("sidebar.statusUntested")}
+            </Badge>
+          )}
+          {connectionStatus === "warning" && (
+            <Badge
+              variant="outline"
+              title={t("detailPanel.warningHint")}
+              className="border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-400"
+            >
+              {t("detailPanel.warning")}
+            </Badge>
+          )}
+          {connectionStatus === "not-configured" && (
+            <Badge
+              variant="outline"
+              className="text-muted-foreground"
+              title={t("detailPanel.notConfiguredHint")}
+            >
+              {t("detailPanel.notConfigured")}
             </Badge>
           )}
           {isCustom && onDelete && (
@@ -95,36 +164,62 @@ export function ProviderDetailPanel({
               size="icon"
               className="h-8 w-8 text-muted-foreground hover:text-destructive"
               onClick={onDelete}
+              aria-label={t("delete")}
             >
               <Trash2 className="h-4 w-4" />
             </Button>
           )}
-          <Switch checked={isEnabled} onCheckedChange={onToggleEnabled} />
+          <Switch
+            checked={isEnabled}
+            disabled={!isEnabled && !canEnable}
+            onCheckedChange={onToggleEnabled}
+          />
         </div>
       </div>
 
       {/* Tabs */}
       <Tabs defaultValue="config" className="flex flex-1 flex-col overflow-hidden">
+        {/* A tab appears only when its slot is filled. Local inference engines
+            have no cloud models/cost/routing story, so they render just Config
+            — and still keep the shared header (enable switch, default badge,
+            status) instead of replacing the whole panel with a foreign shell. */}
         <TabsList className="w-full shrink-0 justify-start rounded-none border-b bg-transparent px-4">
           <TabsTrigger value="config">{t("tabs.config")}</TabsTrigger>
-          <TabsTrigger value="models">{t("tabs.models")}</TabsTrigger>
-          <TabsTrigger value="cost">{t("tabs.cost")}</TabsTrigger>
-          <TabsTrigger value="advanced">{t("tabs.advanced")}</TabsTrigger>
+          {modelsTab && <TabsTrigger value="models">{t("tabs.models")}</TabsTrigger>}
+          {costTab && <TabsTrigger value="cost">{t("tabs.cost")}</TabsTrigger>}
+          {advancedTab && <TabsTrigger value="advanced">{t("tabs.advanced")}</TabsTrigger>}
         </TabsList>
-        <div className="flex-1 overflow-y-auto">
-          <TabsContent value="config" className="m-0 p-4">
-            {configTab ?? <div>Config placeholder</div>}
-          </TabsContent>
-          <TabsContent value="models" className="m-0 p-4">
-            {modelsTab ?? <div>Models placeholder</div>}
-          </TabsContent>
-          <TabsContent value="cost" className="m-0 p-4">
-            {costTab ?? <div>Cost placeholder</div>}
-          </TabsContent>
-          <TabsContent value="advanced" className="m-0 p-4">
-            {advancedTab ?? <div>Advanced placeholder</div>}
-          </TabsContent>
-        </div>
+        {/* Themed `ScrollArea`, matching this feature's dialogs — a native
+            scrollbar here made the pane and the dialogs look unrelated.
+
+            `max-w-4xl`: the providers section opts out of the settings shell's
+            `max-w-5xl` cap (it owns a fill-height master/detail frame), so on an
+            ultrawide window these forms stretched edge to edge. The cap lives
+            here, once, rather than in each of Config / Models / Cost / Advanced.
+            Container queries still resolve against `@container/provider-pane`
+            one level up, so the cost tab's `@3xl` grid is unaffected. */}
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="mx-auto w-full max-w-4xl">
+            <TabsContent value="config" className="m-0 p-4">
+              {configTab ?? <div>{t("detailPanel.configPlaceholder")}</div>}
+            </TabsContent>
+            {modelsTab && (
+              <TabsContent value="models" className="m-0 p-4">
+                {modelsTab}
+              </TabsContent>
+            )}
+            {costTab && (
+              <TabsContent value="cost" className="m-0 p-4">
+                {costTab}
+              </TabsContent>
+            )}
+            {advancedTab && (
+              <TabsContent value="advanced" className="m-0 p-4">
+                {advancedTab}
+              </TabsContent>
+            )}
+          </div>
+        </ScrollArea>
       </Tabs>
     </div>
   )

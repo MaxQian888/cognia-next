@@ -27,7 +27,7 @@ import {
 import { PassphraseInput } from "@/components/data/shared/passphrase-input"
 import { ImportSummary as ImportSummaryView } from "./import-summary"
 import { listRemoteSnapshots, restoreFromWebDav, type RemoteSnapshot } from "@/lib/webdav/restore"
-import type { ImportMergeStrategy, ImportSummary } from "@/lib/data/types"
+import type { BackupManifestV3, ImportMergeStrategy, ImportSummary } from "@/lib/data/types"
 
 const LATEST_VALUE = "__latest__"
 
@@ -36,7 +36,7 @@ type Phase =
   | { status: "loading" }
   | { status: "ready"; snapshots: RemoteSnapshot[] }
   | { status: "restoring" }
-  | { status: "done"; summary: ImportSummary }
+  | { status: "done"; summary: ImportSummary; sourceDevice?: BackupManifestV3["device"] }
   | { status: "error"; message: string }
 
 interface Props {
@@ -87,8 +87,8 @@ export function WebDavRestoreDialog({
     setPhase({ status: "restoring" })
     try {
       const path = selected === LATEST_VALUE ? undefined : selected
-      const summary = await restoreFromWebDav({ path, passphrase, mergeStrategy: strategy })
-      setPhase({ status: "done", summary })
+      const result = await restoreFromWebDav({ path, passphrase, mergeStrategy: strategy })
+      setPhase({ status: "done", summary: result.summary, sourceDevice: result.sourceDevice })
     } catch (err) {
       setPhase({ status: "error", message: err instanceof Error ? err.message : String(err) })
     }
@@ -157,7 +157,18 @@ export function WebDavRestoreDialog({
           <p className="text-xs italic text-muted-foreground">{t("restoring")}</p>
         )}
 
-        {phase.status === "done" && <ImportSummaryView summary={phase.summary} />}
+        {phase.status === "done" && (
+          <div className="space-y-2">
+            <ImportSummaryView summary={phase.summary} />
+            <p className="text-[11px] text-muted-foreground" data-testid="webdav-restore-device">
+              {phase.sourceDevice?.label || phase.sourceDevice?.id
+                ? t("producedBy", {
+                    device: phase.sourceDevice.label ?? phase.sourceDevice.id,
+                  })
+                : t("producedByUnknown")}
+            </p>
+          </div>
+        )}
 
         {phase.status === "error" && (
           <p className="rounded-md border border-destructive/40 bg-destructive/5 p-2 text-xs text-destructive">

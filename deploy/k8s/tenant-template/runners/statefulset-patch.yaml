@@ -1,0 +1,23 @@
+# Enables the k8s exec backend on cognia-server (ADR-0059 R13): mounts the
+# shared workspaces PVC and tells the backend where the workspace root lives.
+# COGNIA_EXEC_BACKEND / COGNIA_RUNNER_IMAGE / COGNIA_WORKSPACES_VOLUME come
+# from the cognia-config ConfigMap (see the tenant kustomization.yaml).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: cognia-server
+spec:
+  template:
+    spec:
+      containers:
+        - name: cognia-server
+          env:
+            - name: COGNIA_WORKSPACES_DIR
+              value: /workspaces
+          volumeMounts:
+            - name: workspaces
+              mountPath: /workspaces
+      volumes:
+        - name: workspaces
+          persistentVolumeClaim:
+            claimName: cognia-workspaces

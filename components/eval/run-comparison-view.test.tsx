@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { EvalRunRow } from "@/lib/db/eval-runs"
 import type { EvalRunCaseRow } from "@/lib/db/eval-run-cases"
 
@@ -21,7 +21,10 @@ jest.mock("@/lib/db/eval-run-cases", () => ({
 
 import { RunComparisonView } from "./run-comparison-view"
 
-const run = (runId: string, passAt1: number): EvalRunRow =>
+// `legacy: true` omits `scoringVersion` — a run written before the scoring fix.
+// (Do NOT model this as an optional `scoringVersion` param: passing `undefined`
+// explicitly still triggers a JS default parameter, so the run comes back v2.)
+const run = (runId: string, passAt1: number, legacy = false): EvalRunRow =>
   ({
     runId,
     datasetId: "d",
@@ -29,25 +32,86 @@ const run = (runId: string, passAt1: number): EvalRunRow =>
     targetLabel: runId,
     k: 1,
     caseCount: 1,
+    gradedCaseCount: 1,
+    ungradedCaseCount: 0,
     scorers: {},
     passAt1,
     passHatK: 0,
     totalCostUsd: 0,
     avgLatencyMs: 0,
     createdAt: 0,
+    ...(legacy ? {} : { scoringVersion: 2 }),
   }) as EvalRunRow
 
 describe("RunComparisonView", () => {
   it("auto-selects two runs, loads results, and flags a regression cell", async () => {
     render(<RunComparisonView runs={[run("A", 1), run("B", 0)]} inputsByCase={{ c1: "hi" }} />)
-    await waitFor(() => expect(screen.getByText("hi")).toBeInTheDocument())
+    // the case input renders twice: small-screen cards + the desktop table
+    await waitFor(() => expect(screen.getAllByText("hi")).toHaveLength(2))
     // c1: A passed, B failed -> B cell is a regression
     const regressionCells = document.querySelectorAll('[data-regression="true"]')
     expect(regressionCells.length).toBe(1)
   })
 
+  it("renders the per-case card list for small screens alongside the table", async () => {
+    render(<RunComparisonView runs={[run("A", 1), run("B", 0)]} inputsByCase={{ c1: "hi" }} />)
+    await waitFor(() => expect(screen.getByTestId("compare-cards")).toBeInTheDocument())
+    const cards = screen.getByTestId("compare-cards")
+    expect(cards).toHaveTextContent("A: compare.pass")
+    expect(cards).toHaveTextContent("B: compare.fail")
+  })
+
   it("prompts to pick two when fewer than two runs exist", () => {
     render(<RunComparisonView runs={[run("A", 1)]} />)
     expect(screen.getByText("compare.pickTwo")).toBeInTheDocument()
+  })
+
+  it("toggles a run out of the selection via its checkbox", async () => {
+    render(<RunComparisonView runs={[run("A", 1), run("B", 0)]} />)
+    await waitFor(() => expect(screen.getByTestId("compare-cards")).toBeInTheDocument())
+    fireEvent.click(screen.getByLabelText('compare.selectRun:{"label":"B"}'))
+    expect(screen.getByText("compare.pickTwo")).toBeInTheDocument()
+    // re-adding restores the grid
+    fireEvent.click(screen.getByLabelText('compare.selectRun:{"label":"B"}'))
+    await waitFor(() => expect(screen.getByTestId("compare-cards")).toBeInTheDocument())
+  })
+
+  it("warns when the selection straddles the scoring change", async () => {
+    // A legacy run counted measurement-only scorers as passes, so putting it
+    // next to a v2 run in the same grid invites the wrong conclusion.
+    render(<RunComparisonView runs={[run("A", 1, true), run("B", 0)]} />)
+    await waitFor(() => expect(screen.getByTestId("mixed-scoring-warning")).toBeInTheDocument())
+  })
+
+  it("does not warn when every selected run uses the same scoring", async () => {
+    const { rerender } = render(<RunComparisonView runs={[run("A", 1), run("B", 0)]} />)
+    await waitFor(() => expect(screen.getByTestId("compare-cards")).toBeInTheDocument())
+    expect(screen.queryByTestId("mixed-scoring-warning")).not.toBeInTheDocument()
+    // …including when they are all legacy.
+    rerender(<RunComparisonView runs={[run("A", 1, true), run("B", 0, true)]} />)
+    await waitFor(() =>
+      expect(screen.queryByTestId("mixed-scoring-warning")).not.toBeInTheDocument()
+    )
+  })
+
+  it("shows a loading state, not an empty one, while results are in flight", async () => {
+    // It used to render "no per-case results recorded" during the load, which
+    // reads as a finished, empty answer.
+    let release: (v: EvalRunCaseRow[]) => void = () => {}
+    listCaseResults.mockImplementationOnce(
+      () => new Promise<EvalRunCaseRow[]>((r) => (release = r))
+    )
+    render(<RunComparisonView runs={[run("A", 1), run("B", 0)]} />)
+    expect(screen.getByRole("status")).toBeInTheDocument()
+    expect(screen.queryByText("compare.noCases")).not.toBeInTheDocument()
+    release([])
+    await waitFor(() => expect(screen.queryByRole("status")).not.toBeInTheDocument())
+  })
+
+  it("reports a genuinely empty comparison once loading finishes", async () => {
+    listCaseResults.mockImplementation(async () => [])
+    render(<RunComparisonView runs={[run("A", 1), run("B", 0)]} />)
+    await waitFor(() => expect(screen.getByText("compare.noCases")).toBeInTheDocument())
+    listCaseResults.mockImplementation(async (id: string) => rows[id] ?? [])
   })
 })

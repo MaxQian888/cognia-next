@@ -7,11 +7,23 @@
 module.exports = {
   preset: "ts-jest",
   testEnvironment: "jsdom",
-  testMatch: ["<rootDir>/src/**/*.test.ts"],
+  // `.tsx` too — the template ships a React panel and its test alongside the
+  // plain-TS entry point, and a `.ts`-only pattern silently skips them.
+  testMatch: ["<rootDir>/src/**/*.test.ts", "<rootDir>/src/**/*.test.tsx"],
+  // Supplies `toBeInTheDocument` and friends to the panel test.
+  setupFilesAfterEnv: ["@testing-library/jest-dom"],
+  // The `@cognia/*` packages are not installed — the host supplies them at
+  // runtime and `tsconfig.json` `paths` covers type-checking. Jest resolves for
+  // real, so it needs somewhere to land. See `src/__stubs__/`.
   moduleNameMapper: {
-    // Host types are injected at runtime by cognia — keep them as `any`
-    // shims at test time so we don't pull the whole monorepo in.
-    "^@/(.*)$": "<rootDir>/src/__shims__/$1",
+    "^@cognia/plugin-sdk$": "<rootDir>/src/__stubs__/plugin-sdk.ts",
+    "^@cognia/plugin-ui$": "<rootDir>/src/__stubs__/plugin-ui.tsx",
   },
-  collectCoverageFrom: ["src/**/*.ts", "!src/**/*.test.ts", "!src/__shims__/**"],
+  collectCoverageFrom: [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "!src/**/*.test.ts",
+    "!src/**/*.test.tsx",
+    "!src/__stubs__/**",
+  ],
 }

@@ -54,9 +54,21 @@ Cognia 的提供商「配置面」异常完整：丰富的类型系统（`types/
 
 `lib/ai/embedding/local-embedding.ts`（新）+ `getEmbeddingModel` 中的分支把 OpenAI 兼容本地引擎（LM Studio、llama.cpp、vLLM、LocalAI、Jan）经 AI SDK openai embedding 客户端 + 其 `/v1` baseURL 接通（Ollama 早已有原生路径）。vector embedding 适配层（`lib/vector/embedding.ts`）新增本地 provider id、无密钥处理与 baseURL 透传；twin embedding 设置（`twin-settings-tab` + `TwinRuntimeEmbeddingSettings`）现暴露本地引擎与 Base URL 字段，`use-twin-worker` 让无密钥 provider 无需 API key 即可激活。任何给出本地 `provider` + `baseURL` 的 RAG / twin / memory 调用方现在即本地向量化。
 
+### Phase 6 —— ai-sdk 路径的无界 agentic 循环（已实现）
+
+Phase 2 给 `streamText` 传入单个 `stopWhen` 步数上限。交互轮次不设 `maxTurns`，故该上限默认 **16 步**——单段——任何需要更多工具调用的任务在段上限掐断循环时静默结束。Anthropic 路径无此限制（Agent SDK 跑到模型完成为止），两条通道因此严重不对称，非-Anthropic 通道"跑一会儿就自动停"。`dispatchAiSdk` 现采用 AI SDK 官方的_手动 agent 循环_（`if (finishReason === "tool-calls") continue; else break`）：每段流式一个 16 步分块，以 `tool-calls` 收尾的段自动续跑——以累积对话重新流式，并**在段间**跑自动压缩以防长循环撑爆上下文——直到模型自然停止或耗尽本轮预算。预算 `maxStepsBudget` = `maxTurns`（子代理 / `/goal`）▸ 新增的 `aiSdkMaxSteps` 配置（默认 256）▸ 256；耗尽时若仍有工具待调，会追加一条可见的"再发一条消息可继续"提示，而非静默结束。同批对齐了 capture 侧空闲看门狗（`lib/claude/run-and-capture.ts`）：工具执行期间暂停（长本地工具不是提供商停流），并在工具返回或权限/审查决策派发时立即重新武装。
+
+### Phase 7 —— 只读内置工具的单次执行截止时限（已实现）
+
+Phase 6 的空闲看门狗暂停有一处利刃：若某工具的 `execute` 永不 resolve，看门狗一直暂停，本轮只能在 5 分钟**挂钟**上死亡（`session … did not end within 300000ms`）。在 ai-sdk 路径上，这恰好咬住只读文件工具——`content_search`、`file_search`、`glob`、`grep`、`read`、git 只读工具、`lsp_*`——它们遍历工作区且**没有内部截止**，故超大/含环目录会让 handler 挂起、拖垮整个会话超时。插件工具早有 120s 安全网（`awaitPluginToolResponse`），但此路径上的内置工具没有。
+
+`dispatch/ai-sdk-tools.mjs` 现对每个只读内置 handler 设限（`runBuiltinHandler`）：handler 与一个截止时限竞速，超时则 `execute` reject，使 AI SDK 抛出可恢复的 `tool-error`。event-adapter 将其投射为带错的 `tool_result`，从而清空 in-flight 集合并**重新武装空闲看门狗**，本轮继续推进而非卡到挂钟。执行类工具（`bash` / shell / process / git-run）自带超时、被刻意**排除**（判据为 `READ_ONLY_TOOL_NAMES`）——一刀切的网会误杀合法的长命令。时限 = `sendOptions.toolExecutionTimeoutMs` ▸ 桥默认（120000ms）；CLI 从 `toolExecutionTimeoutMs` 配置取值（默认 120000，`0` 关闭），由 `session-runner` / `subagent-runner` 注入，与 `aiSdkMaxSteps` 完全同构。
+
 ## 后果
 
 - 内置本地提供商（Ollama、LM Studio、llama.cpp、vLLM、LocalAI、Jan…）现在真正能跑一轮聊天，长期损坏的 `xai`/`togetherai`/`fireworks` 聚合商也能分发。
+- 非-Anthropic 提供商上的多工具任务现在能跑到完成，而非约 16 步后静默停止；每轮步数预算可配置（`aiSdkMaxSteps`，默认 256），失控循环会显式提示上限而非无解释结束。
+- 在大型工作区上挂起的只读内置工具（`content_search` 等）现在会在 `toolExecutionTimeoutMs`（默认 120s）后以可恢复的 `tool-error` 失败，而非把整个会话拖到 5 分钟挂钟；执行类工具保留各自（更长的）超时。
 - 用户配置的采样设置终于对非-Anthropic 轮次生效。
 - 协议 + 端点 + 参数由解析器一处决定，sidecar 信任它。新增一个 OpenAI 兼容提供商现在是目录/解析器的事，不再需要改 sidecar 分发表。
 - `anthropic` 与 `ai-sdk` 的执行分叉仍在：主 agent 循环（MCP、权限、A2UI、computer-use）仍只存在于 Claude Agent SDK 路径。Phase 2 收窄但不消除该缺口。成熟的单路径设计（Cherry Studio、LobeChat、LibreChat）通过把每个提供商路由经同一个支持工具的客户端来避免分叉；Cognia 的分叉是把主循环绑定到 Claude Agent SDK 的有意后果。

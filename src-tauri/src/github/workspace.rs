@@ -1,17 +1,17 @@
-//! Git workspace operations for the GitHub Delivery plugin's `local` backend.
+//! Git workspace operations for Marketplace repository plugins' local backend.
 //!
 //! Previously `lib/github/workspace.ts` shelled out to Node's `simple-git`
 //! which pulled `node:fs/promises` / `node:child_process` into the static
 //! browser graph through `lib/plugin/core/browser-builtin-registry.ts`.
 //! That broke the Next.js bundle once the `NODE_ONLY_MODULES` aliases were
 //! deleted from `next.config.ts`. Moving the local backend into Rust here
-//! keeps the renderer free of Node built-ins; the github-delivery plugin
-//! reaches us via Tauri `invoke()`.
+//! keeps the renderer free of Node built-ins; plugins reach it through the
+//! host-owned workspace API.
 //!
 //! We shell out to the user's system `git` for clone/push (same model
 //! simple-git used) instead of pulling libgit2's `https` + `openssl-sys`
-//! features. The github-delivery feature has always required a working
-//! `git` on PATH, so this doesn't add a new prerequisite.
+//! features. Repository automation already requires a working `git` on PATH,
+//! so this doesn't add a new prerequisite.
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -52,6 +52,11 @@ pub struct CommitAndPushArgs {
     pub branch: String,
     pub message: String,
     pub remote_branch: Option<String>,
+    /// PAT or installation token, supplied per-push. Required because the
+    /// clone deliberately stores a credential-free remote URL — see
+    /// `apply_git_auth_env`. Optional so a caller pushing to an
+    /// already-authenticated remote (e.g. a user's own checkout) still works.
+    pub token: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -83,12 +88,18 @@ pub async fn github_workspace_clone(args: CloneArgs) -> Result<CloneResult, Stri
         .await
         .map_err(|e| format!("mkdir {path_str}: {e}"))?;
 
-    let remote = format!(
-        "https://x-access-token:{}@github.com/{}.git",
-        args.token, args.repo_full_name
-    );
+    // The remote URL is credential-FREE on purpose. `git clone` writes whatever
+    // URL it is given verbatim into `<workspace>/.git/config` and leaves it
+    // there — and the Issue→PR loop then points an agent at this very directory
+    // with shell/process/environment tools enabled. A token embedded in the URL
+    // would therefore be readable with a plain `cat .git/config` by anything the
+    // agent runs, including instructions injected through an issue body (which
+    // is attacker-controlled: anyone can file an issue). The credential is
+    // instead supplied per-invocation via `git_auth_env` below.
+    let remote = format!("https://github.com/{}.git", args.repo_full_name);
 
-    let output = Command::new("git")
+    let mut command = Command::new("git");
+    command
         .args([
             "clone",
             &remote,
@@ -99,7 +110,9 @@ pub async fn github_workspace_clone(args: CloneArgs) -> Result<CloneResult, Stri
             "20",
         ])
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    apply_git_auth_env(&mut command, &args.token);
+    let output = command
         .output()
         .await
         .map_err(|e| format!("git clone spawn: {e}"))?;
@@ -121,9 +134,7 @@ pub async fn github_workspace_clone(args: CloneArgs) -> Result<CloneResult, Stri
 /// `git status --porcelain` is empty (matches the legacy JS behavior the
 /// workflow node already pattern-matches against).
 #[tauri::command]
-pub async fn github_workspace_commit_and_push(
-    args: CommitAndPushArgs,
-) -> Result<String, String> {
+pub async fn github_workspace_commit_and_push(args: CommitAndPushArgs) -> Result<String, String> {
     let workspace = PathBuf::from(&args.workspace_path);
     let workspace_str = workspace.to_string_lossy().into_owned();
 
@@ -136,9 +147,10 @@ pub async fn github_workspace_commit_and_push(
     run_git_silent(&workspace, ["commit", "-m", &args.message]).await?;
 
     let push_branch = args.remote_branch.as_deref().unwrap_or(&args.branch);
-    run_git_silent(
+    run_git_silent_auth(
         &workspace,
         ["push", "origin", push_branch, "--set-upstream"],
+        args.token.as_deref(),
     )
     .await?;
 
@@ -230,13 +242,46 @@ fn redact_token(text: &str, token: &str) -> String {
     text.replace(token, "<redacted>")
 }
 
+/// Supply the GitHub credential to a single `git` invocation without ever
+/// writing it to disk or putting it on the command line.
+///
+/// `GIT_CONFIG_COUNT`/`_KEY_n`/`_VALUE_n` is git's env-based config override:
+/// it applies only to this child process, so nothing lands in
+/// `<workspace>/.git/config` (which an agent working in the clone can read) and
+/// nothing lands in argv (which any process listing can read).
+fn apply_git_auth_env(command: &mut Command, token: &str) {
+    use base64::Engine as _;
+    let basic = base64::engine::general_purpose::STANDARD.encode(format!("x-access-token:{token}"));
+    command
+        .env("GIT_CONFIG_COUNT", "1")
+        .env("GIT_CONFIG_KEY_0", "http.extraheader")
+        .env(
+            "GIT_CONFIG_VALUE_0",
+            format!("Authorization: Basic {basic}"),
+        )
+        // Never let git fall back to an interactive credential prompt: in a
+        // headless workflow that would hang the run instead of failing it.
+        .env("GIT_TERMINAL_PROMPT", "0");
+}
+
 async fn run_git_silent<I, S>(cwd: &Path, args: I) -> Result<(), String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<std::ffi::OsStr>,
+{
+    run_git_silent_auth(cwd, args, None).await
+}
+
+async fn run_git_silent_auth<I, S>(cwd: &Path, args: I, token: Option<&str>) -> Result<(), String>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<std::ffi::OsStr>,
 {
     let mut command = Command::new("git");
     command.current_dir(cwd).args(args);
+    if let Some(token) = token {
+        apply_git_auth_env(&mut command, token);
+    }
     let output = command
         .output()
         .await
@@ -274,7 +319,10 @@ mod tests {
 
     #[test]
     fn sanitize_repo_name_replaces_unsafe_chars() {
-        assert_eq!(sanitize_repo_name("octocat/hello-world"), "octocat_hello-world");
+        assert_eq!(
+            sanitize_repo_name("octocat/hello-world"),
+            "octocat_hello-world"
+        );
         assert_eq!(sanitize_repo_name("my org/cool repo"), "my_org_cool_repo");
         assert_eq!(sanitize_repo_name("a.b_c-d.123"), "a.b_c-d.123");
         assert_eq!(sanitize_repo_name("foo@bar/baz"), "foo_bar_baz");
@@ -361,6 +409,54 @@ mod tests {
             .is_ok()
     }
 
+    #[test]
+    fn git_auth_env_carries_the_credential_out_of_band() {
+        // The credential must travel in the child's ENV, never in argv (visible
+        // to any process listing) and never in a config file git would persist.
+        let mut command = Command::new("git");
+        command.arg("push");
+        apply_git_auth_env(&mut command, "ghs_SECRET");
+
+        let std_command = command.as_std();
+        let argv: Vec<String> = std_command
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            !argv.iter().any(|a| a.contains("ghs_SECRET")),
+            "token leaked into argv: {argv:?}"
+        );
+
+        let envs: std::collections::HashMap<String, String> = std_command
+            .get_envs()
+            .filter_map(|(k, v)| {
+                Some((
+                    k.to_string_lossy().into_owned(),
+                    v?.to_string_lossy().into_owned(),
+                ))
+            })
+            .collect();
+        assert_eq!(envs.get("GIT_CONFIG_COUNT").map(String::as_str), Some("1"));
+        assert_eq!(
+            envs.get("GIT_CONFIG_KEY_0").map(String::as_str),
+            Some("http.extraheader")
+        );
+        // base64("x-access-token:ghs_SECRET")
+        let expected = {
+            use base64::Engine as _;
+            base64::engine::general_purpose::STANDARD.encode("x-access-token:ghs_SECRET")
+        };
+        assert_eq!(
+            envs.get("GIT_CONFIG_VALUE_0").map(String::as_str),
+            Some(format!("Authorization: Basic {expected}").as_str())
+        );
+        // A headless run must fail rather than block on a credential prompt.
+        assert_eq!(
+            envs.get("GIT_TERMINAL_PROMPT").map(String::as_str),
+            Some("0")
+        );
+    }
+
     #[tokio::test]
     async fn commit_and_push_rejects_when_no_changes() {
         // Skip the test if `git` isn't on PATH — environment-conditional so the
@@ -405,6 +501,7 @@ mod tests {
             branch: "main".into(),
             message: "noop".into(),
             remote_branch: None,
+            token: None,
         })
         .await
         .expect_err("should error on clean tree");

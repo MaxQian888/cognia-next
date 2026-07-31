@@ -1,4 +1,4 @@
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 import type { CharacterDraft } from "@/lib/db/characters"
 import type { SubAgentTemplate } from "@/types/agent/sub-agent"
 

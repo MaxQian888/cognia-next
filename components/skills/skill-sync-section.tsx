@@ -6,7 +6,7 @@ import { useSkillSync } from "@/hooks/skills"
 import { isTauri } from "@/lib/tauri"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 
 type SyncStatus = "synced" | "outOfSync" | "error" | "never"
 

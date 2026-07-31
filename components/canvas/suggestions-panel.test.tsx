@@ -3,14 +3,22 @@
  */
 import React from "react"
 import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { SuggestionsPanel } from "./suggestions-panel"
 
 // Mock stores
+const mockApplySuggestion = jest.fn()
+const mockUpdateSuggestionStatus = jest.fn()
+const mockProposeCanvasReview = jest.fn()
 jest.mock("@/stores", () => ({
   useArtifactStore: jest.fn((selector) =>
     selector({
-      applySuggestion: jest.fn(),
-      updateSuggestionStatus: jest.fn(),
+      applySuggestion: mockApplySuggestion,
+      updateSuggestionStatus: mockUpdateSuggestionStatus,
+      proposeCanvasReview: mockProposeCanvasReview,
+      canvasDocuments: {
+        "doc-1": { id: "doc-1", content: "line 0\nconst x = 1;\nline 2" },
+      },
     })
   ),
 }))
@@ -87,6 +95,7 @@ const mockSuggestions = [
 describe("SuggestionsPanel", () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    mockProposeCanvasReview.mockReturnValue({ id: "review-1" })
   })
 
   it("should render nothing when no pending suggestions and not generating", () => {
@@ -137,5 +146,25 @@ describe("SuggestionsPanel", () => {
     )
     expect(screen.getByText("Improve variable naming")).toBeInTheDocument()
     expect(screen.getByText("Fix off-by-one error")).toBeInTheDocument()
+  })
+
+  it("keeps the legacy suggestion path as a direct apply", async () => {
+    render(<SuggestionsPanel documentId="doc-1" suggestions={[mockSuggestions[0]]} />)
+    await userEvent.click(screen.getByRole("button", { name: "Apply" }))
+    expect(mockApplySuggestion).toHaveBeenCalledWith("doc-1", "sugg-1")
+    expect(mockProposeCanvasReview).not.toHaveBeenCalled()
+  })
+
+  it("routes Workbench suggestions through proposal review", async () => {
+    render(<SuggestionsPanel documentId="doc-1" suggestions={[mockSuggestions[0]]} proposalFirst />)
+    await userEvent.click(screen.getByRole("button", { name: "Apply" }))
+
+    expect(mockApplySuggestion).not.toHaveBeenCalled()
+    expect(mockProposeCanvasReview).toHaveBeenCalledWith(
+      "doc-1",
+      "line 0\nconst count = 1;\nline 2",
+      { requestId: "sugg-1", actionType: "improve" }
+    )
+    expect(mockUpdateSuggestionStatus).toHaveBeenCalledWith("doc-1", "sugg-1", "accepted")
   })
 })

@@ -3,11 +3,12 @@ import {
   projectMcpToAllAgents,
   summarizeSyncResult,
 } from "./sync-projection"
-import type { AgentId } from "@/lib/claude/types"
+import type { AgentId } from "@cognia/agent-config-types"
 
 describe("sync-projection", () => {
-  it("lists the seven writable agents in adapter order", () => {
+  it("lists the writable agents in adapter order (cognia CLI first)", () => {
     expect(ALL_WRITABLE_AGENT_IDS).toEqual([
+      "cognia",
       "claude-code",
       "claude-desktop",
       "cursor",

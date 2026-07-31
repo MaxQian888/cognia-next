@@ -5,9 +5,18 @@
 "use client"
 
 import { useTranslations } from "next-intl"
-import { StarIcon, SparklesIcon } from "lucide-react"
+import { StarIcon, SparklesIcon, SunIcon, TrendingUpIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { PetBones, PetSoul, PetStage, PetStats } from "@/types/pet"
+import type {
+  PetBones,
+  PetEvolutionFlavor,
+  PetSoul,
+  PetStage,
+  PetStatKey,
+  PetStatProgress,
+  PetStats,
+} from "@/types/pet"
+import { effectiveStats } from "@/types/pet"
 import { PetRenderer } from "./pet-renderer"
 
 const STAT_ORDER: (keyof PetStats)[] = ["debugging", "patience", "chaos", "wisdom", "snark"]
@@ -24,11 +33,40 @@ export interface PetStatCardProps {
   bones: PetBones
   soul: PetSoul | null
   stage: PetStage
+  /** Earned additive growth on top of the base bones stats. */
+  progress?: PetStatProgress
+  /** Stat keys that grew on the most recent event (shows a "grew" marker). */
+  grew?: PetStatKey[]
+  /**
+   * Care-quality evolution flavor stamped at the last evolution
+   * (`profile.evolutionFlavor`). `radiant` earns a badge; `plain` a muted
+   * hint (its tooltip explains care quality drives it); absent/normal shows
+   * nothing.
+   */
+  flavor?: PetEvolutionFlavor
+  /**
+   * Skin for the live preview avatar. Defaults to the SVG mascot; callers that
+   * know the resolved live skin (the widget click panel + the desktop popup)
+   * pass the EFFECTIVE skin so the card matches the floating pet instead of
+   * always showing SVG.
+   */
+  skinId?: string
   className?: string
 }
 
-export function PetStatCard({ bones, soul, stage, className }: PetStatCardProps) {
+export function PetStatCard({
+  bones,
+  soul,
+  stage,
+  progress,
+  grew,
+  flavor,
+  skinId,
+  className,
+}: PetStatCardProps) {
   const t = useTranslations("pet")
+  const effective = effectiveStats(bones.stats, progress)
+  const grewSet = new Set(grew ?? [])
 
   return (
     <div
@@ -41,7 +79,7 @@ export function PetStatCard({ bones, soul, stage, className }: PetStatCardProps)
     >
       <div className="flex items-center gap-4">
         <div className={cn("rounded-lg bg-muted/40 p-2 ring-2", RARITY_RING[bones.rarity])}>
-          <PetRenderer bones={bones} stage={stage} state="idle" size={72} />
+          <PetRenderer bones={bones} stage={stage} state="idle" size={72} skinId={skinId} />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
@@ -57,6 +95,22 @@ export function PetStatCard({ bones, soul, stage, className }: PetStatCardProps)
                 {t("statCard.shiny")}
               </span>
             )}
+            {flavor && flavor !== "normal" && (
+              <span
+                data-testid="pet-flavor-badge"
+                data-flavor={flavor}
+                title={t(`statCard.flavorHint.${flavor}`)}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium",
+                  flavor === "radiant"
+                    ? "bg-sky-400/20 text-sky-600 dark:text-sky-300"
+                    : "bg-muted text-muted-foreground"
+                )}
+              >
+                <SunIcon className="size-3" />
+                {t(`statCard.flavor.${flavor}`)}
+              </span>
+            )}
           </div>
           <div className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
             <span>{t(`rarity.${bones.rarity}`)}</span>
@@ -70,22 +124,49 @@ export function PetStatCard({ bones, soul, stage, className }: PetStatCardProps)
       </div>
 
       <dl className="grid gap-2">
-        {STAT_ORDER.map((key) => (
-          <div
-            key={key}
-            data-stat={key}
-            className="grid grid-cols-[5rem_1fr_2rem] items-center gap-2"
-          >
-            <dt className="text-xs text-muted-foreground">{t(`stat.${key}`)}</dt>
-            <div className="h-2 overflow-hidden rounded-full bg-muted">
-              <div
-                className="h-full rounded-full bg-primary"
-                style={{ width: `${bones.stats[key]}%` }}
-              />
+        {STAT_ORDER.map((key) => {
+          const grewHere = grewSet.has(key)
+          return (
+            <div
+              key={key}
+              data-stat={key}
+              data-grew={grewHere || undefined}
+              className="grid grid-cols-[5rem_1fr_2rem] items-center gap-2"
+            >
+              <dt className="flex items-center gap-1 text-xs text-muted-foreground">
+                {t(`stat.${key}`)}
+                {grewHere && (
+                  <TrendingUpIcon
+                    aria-label={t("statCard.grew")}
+                    className="size-3 text-emerald-500"
+                  />
+                )}
+              </dt>
+              {/* Base fill underneath, earned growth as a brighter overfill. */}
+              <div className="relative h-2 overflow-hidden rounded-full bg-muted">
+                <div
+                  className="absolute inset-y-0 left-0 rounded-full bg-primary/40"
+                  style={{ width: `${bones.stats[key]}%` }}
+                />
+                <div
+                  className="absolute inset-y-0 left-0 rounded-full bg-primary"
+                  style={{ width: `${Math.min(bones.stats[key], effective[key])}%` }}
+                />
+                {effective[key] > bones.stats[key] && (
+                  <div
+                    data-testid={`pet-stat-growth-${key}`}
+                    className="absolute inset-y-0 rounded-full bg-emerald-500"
+                    style={{
+                      left: `${bones.stats[key]}%`,
+                      width: `${effective[key] - bones.stats[key]}%`,
+                    }}
+                  />
+                )}
+              </div>
+              <dd className="text-right text-xs tabular-nums">{effective[key]}</dd>
             </div>
-            <dd className="text-right text-xs tabular-nums">{bones.stats[key]}</dd>
-          </div>
-        ))}
+          )
+        })}
       </dl>
     </div>
   )

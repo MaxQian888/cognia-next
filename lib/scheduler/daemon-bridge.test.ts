@@ -72,7 +72,24 @@ describe("daemon-bridge (Tauri mode)", () => {
     const stop = await listenTaskDue((e) => received.push(e))
     expect(listenMock).toHaveBeenCalledWith("scheduler:task-due", expect.any(Function))
     expect(received).toEqual([{ taskId: "task_1", firedAtMs: 42 }])
-    expect(stop).toBe(unsub)
+    expect(unsub).not.toHaveBeenCalled()
+    stop()
+    expect(unsub).toHaveBeenCalledTimes(1)
+  })
+
+  it("unsubscribe swallows Tauri's listeners[eventId].handlerId rejection", async () => {
+    const unsub = jest
+      .fn()
+      .mockRejectedValue(
+        new TypeError("undefined is not an object (evaluating 'listeners[eventId].handlerId')")
+      )
+    listenMock.mockResolvedValue(unsub)
+
+    const stop = await listenTaskDue(() => {})
+    expect(() => stop()).not.toThrow()
+    expect(unsub).toHaveBeenCalledTimes(1)
+    // Drain the microtask queue — an unhandled rejection here would fail the run.
+    await Promise.resolve()
   })
 
   it("swallows invoke errors so the renderer never hard-fails", async () => {

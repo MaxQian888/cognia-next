@@ -80,9 +80,12 @@ describe("parseSlackExport", () => {
     expect(parseSlackExport(json, { twinId: "t1" })).toEqual([])
   })
 
-  it("returns no source for non-JSON input", () => {
-    // JSON.parse throws — caller is responsible for catching, but the
-    // behaviour is documented via this test.
-    expect(() => parseSlackExport("not json", { twinId: "t1" })).toThrow()
+  it("throws a clear platform-labelled error for non-JSON input", () => {
+    // The caller catches and stores this as the source error; the label lets
+    // the user trace it back to a malformed Slack file rather than a bare
+    // SyntaxError.
+    expect(() => parseSlackExport("not json", { twinId: "t1" })).toThrow(
+      /Slack import: malformed JSON/
+    )
   })
 })

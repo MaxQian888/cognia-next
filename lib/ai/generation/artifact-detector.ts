@@ -247,6 +247,54 @@ export function detectArtifacts(
   return artifacts
 }
 
+/** A code block that is still being written in a streaming response. */
+export interface StreamingArtifact {
+  type: ArtifactType
+  language?: ArtifactLanguage
+  title: string
+  lineCount: number
+}
+
+/**
+ * The trailing fence that has been opened but not yet closed, if any. Every
+ * completed block is dropped first so only an unterminated fence can match.
+ */
+function findOpenCodeBlock(content: string): { language: string; code: string } | null {
+  const remainder = content.replace(new RegExp(CODE_BLOCK_REGEX.source, "g"), "")
+  const match = /```(\w+)?\n([\s\S]*)$/.exec(remainder)
+  return match ? { language: match[1] || "", code: match[2] } : null
+}
+
+/**
+ * Detect the artifact an assistant turn is part-way through writing.
+ *
+ * `detectArtifacts` only ever matches *closed* fences, and auto-creation runs
+ * when the turn seals — so nothing exists in the artifact store while the model
+ * is mid-block, which is why a finished artifact appears to pop in from
+ * nowhere. This reports the still-open fence instead, and only once it already
+ * clears the same `shouldAutoCreate` bar the sealed block will have to clear,
+ * so the UI never promises an artifact that is never going to arrive.
+ */
+export function detectStreamingArtifact(
+  responseContent: string,
+  config: ArtifactDetectionConfig = DEFAULT_DETECTION_CONFIG
+): StreamingArtifact | null {
+  const open = findOpenCodeBlock(responseContent)
+  if (!open) return null
+  const code = open.code.trim()
+  if (!code) return null
+
+  const { type } = detectArtifactType(code, open.language)
+  if (!shouldAutoCreate(code, type, config)) return null
+
+  return {
+    type,
+    language: LANGUAGE_MAP[open.language.toLowerCase()] || (open.language as ArtifactLanguage),
+    title: generateTitle(code, type, open.language),
+    lineCount: countLines(code),
+  }
+}
+
 /**
  * Get the best artifact from a list (highest confidence, longest content)
  */

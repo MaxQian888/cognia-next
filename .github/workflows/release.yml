@@ -8,8 +8,14 @@ name: Release
 #
 # This workflow:
 # 1. Runs quality checks and tests
-# 2. Builds Tauri desktop applications for all platforms
-# 3. Creates a draft GitHub release with all artifacts
+# 2. Builds Tauri desktop apps for all platforms via tauri-action, which also
+#    creates the draft GitHub release and uploads installers + the updater
+#    signatures (*.sig) and latest.json manifest the in-app updater consumes.
+#
+# `secrets: inherit` forwards updater signing plus Developer ID/notarization
+# credentials to the reusable build-tauri workflow. Tagged macOS jobs fail
+# closed if any required release credential is missing or inconsistent. See
+# src-tauri/UPDATER.md for setup.
 # ============================================================================
 
 on:
@@ -32,43 +38,20 @@ jobs:
     name: Test Suite
     uses: ./.github/workflows/test.yml
 
-  # Build Tauri apps for all platforms
+  # Build Tauri apps for all platforms AND publish the draft release with
+  # signed updater artifacts + latest.json (tauri-action owns release creation
+  # because the manifest needs the uploaded asset URLs).
   build-tauri:
     name: Build Tauri
     needs: [quality, test]
-    uses: ./.github/workflows/build-tauri.yml
-
-  # Create the GitHub release
-  create-release:
-    name: Create Release
-    needs: [quality, test, build-tauri]
-    runs-on: ubuntu-latest
-
+    # The write scope lives on the CALLER, not inside build-tauri.yml: a
+    # reusable workflow cannot request more than its caller holds, and the
+    # other caller (ci.yml) runs read-only. tauri-action needs `contents:
+    # write` to create the release and upload the installers, `.sig` files
+    # and latest.json.
     permissions:
       contents: write
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v8
-        with:
-          path: artifacts/
-
-      - name: Display structure of downloaded files
-        run: ls -R artifacts/
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v3
-        with:
-          draft: true
-          generate_release_notes: true
-          files: |
-            artifacts/**/*.AppImage
-            artifacts/**/*.deb
-            artifacts/**/*.msi
-            artifacts/**/*.exe
-            artifacts/**/*.dmg
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    uses: ./.github/workflows/build-tauri.yml
+    with:
+      tagName: ${{ github.ref_name }}
+    secrets: inherit

@@ -46,6 +46,28 @@ export const TOOL_TO_SCOPE: Record<string, BridgeScope> = {
   connectors_export_audit: "inbox:connectors:read",
   connectors_list_drafts: "inbox:connectors:read",
   connectors_send_message: "inbox:connectors:send",
+  // Orchestration tools — let an external agent drive Cognia's own agent
+  // runtime / teams / plugin tools (Thread D). Default OFF; outward text is
+  // PII-gated and plugin tools keep their own consent gate.
+  agent_dispatch: "agent:dispatch",
+  team_run: "agent:team",
+  team_list: "agent:team",
+  plugin_tool_invoke: "plugin:tools",
+  schedule_task: "agent:dispatch",
+  list_scheduled_tasks: "agent:dispatch",
+  cancel_scheduled_task: "agent:dispatch",
+  // Inbound write tools (ADR-0008 Phase 4). All three share one scope; each
+  // submission lands in the `inboundDrafts` review queue, never live state.
+  record_lesson: "inbound:write",
+  save_skill_draft: "inbound:write",
+  ingest_note: "inbound:write",
+  // Long-term memory tools (ADR-0069). Read/write split like the inbox pair;
+  // writes carry `external` provenance, are PII-block-gated, never procedural.
+  memory_search: "memory:read",
+  memory_list: "memory:read",
+  memory_store: "memory:write",
+  memory_update: "memory:write",
+  memory_forget: "memory:write",
 }
 
 /**

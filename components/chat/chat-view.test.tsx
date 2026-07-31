@@ -4,11 +4,16 @@
 
 import * as ReactForMocks from "react"
 
+const mockComposerProps: Array<Record<string, unknown>> = []
 jest.mock("./composer", () => {
   const react = jest.requireActual<typeof import("react")>("react")
   return {
     // forwardRef so the callback ref ChatPane now attaches doesn't warn.
-    Composer: react.forwardRef(function Composer(_props: unknown, ref: React.Ref<unknown>) {
+    Composer: react.forwardRef(function Composer(
+      props: Record<string, unknown>,
+      ref: React.Ref<unknown>
+    ) {
+      mockComposerProps.push(props)
       react.useImperativeHandle(ref, () => ({ insertMention: () => {}, focus: () => {} }), [])
       return react.createElement("div", { "data-testid": "composer" })
     }),
@@ -21,9 +26,17 @@ jest.mock("./character-missing-banner", () => ({
   CharacterMissingBanner: () => null,
 }))
 jest.mock("./empty-state", () => ({ EmptyChatState: jest.fn(() => null) }))
-jest.mock("./inline-error", () => ({ InlineError: () => null }))
+jest.mock("@/components/error/diagnostic-card", () => ({
+  InlineError: jest.fn(() => null),
+  DiagnosticCard: jest.fn(() => null),
+}))
 jest.mock("./message-list", () => ({
   MessageList: jest.fn(() => null),
+}))
+jest.mock("./workspace-changes-card", () => ({
+  WorkspaceChangesCard: ({ session }: { session: { id: string } }) => (
+    <div data-testid="workspace-changes-card" data-session={session.id} />
+  ),
 }))
 jest.mock("@/components/agent/external-agent/session-panel", () => ({
   ExternalAgentSessionPanel: () => null,
@@ -38,10 +51,36 @@ const storeState = {
   messages: [{ id: "m1", role: "user", parts: [] }] as unknown[],
   status: "idle",
   errorMessage: null as string | null,
+  errorDiagnostic: null as CogniaDiagnostic | null,
+  messagesLoading: false,
+  messagesLoadError: null as string | null,
+  atCapacity: false,
+  // Raw-selector consumers (RunPanel's usage signature) read per-session
+  // slices directly off the state object.
+  sessions: {} as Record<string, { messages: unknown[] }>,
+  setSessionError: jest.fn(),
+  requestSessionMessagesReload: jest.fn(),
 }
 
+// ChatPane now reads its bound session via the per-session selector hooks; the
+// test models a single session whose slice IS `storeState`.
 jest.mock("@/stores/chat", () => ({
-  useChatStore: jest.fn((sel: (s: typeof storeState) => unknown) => sel(storeState)),
+  useChatStore: Object.assign(
+    jest.fn((sel: (s: typeof storeState) => unknown) => sel(storeState)),
+    { getState: () => storeState, subscribe: () => () => {} }
+  ),
+  useSessionMessages: () => storeState.messages,
+  useSessionStatus: () => storeState.status,
+  useSessionErrorMessage: () => storeState.errorMessage,
+  useSessionErrorDiagnostic: () => storeState.errorDiagnostic,
+  useSessionHasMessages: () => storeState.messages.length > 0,
+  useSessionMessagesLoading: () => storeState.messagesLoading,
+  useSessionMessagesLoadError: () => storeState.messagesLoadError,
+  useIsAtStreamCap: () => storeState.atCapacity,
+  useSessionRunTiming: () => ({ startedAt: null, pausedAt: null, pausedAccumMs: 0 }),
+  useSessionSteerQueue: () => [],
+  useSessionRunId: () => 0,
+  useSessionToolTimestamps: () => ({}),
 }))
 
 // Welcome-section dismissal persistence (AppSettings.welcomeHidden).
@@ -65,11 +104,27 @@ jest.mock("@/hooks/ui/use-mobile", () => ({
   useIsMobile: () => false,
 }))
 
-import { render } from "@testing-library/react"
+jest.mock("@/hooks/chat/use-effective-cwd", () => ({
+  useEffectiveCwd: () => "/repo",
+}))
+
+const consumePendingChatPromptMock = jest.fn<string | null, [string]>(() => null)
+jest.mock("@/lib/chat/pending-prompt", () => ({
+  consumePendingChatPrompt: (sessionId: string) => consumePendingChatPromptMock(sessionId),
+}))
+
+import { act, render, screen, waitFor } from "@testing-library/react"
 import { SparklesIcon } from "lucide-react"
 import { ChatPane } from "./chat-view"
 import { MessageList } from "./message-list"
-import type { ChatSession, SendContent } from "@/lib/claude/types"
+import { DiagnosticCard, InlineError } from "@/components/error/diagnostic-card"
+import { createDiagnostic } from "@cognia/diagnostics"
+import type { CogniaDiagnostic } from "@cognia/diagnostics"
+import type { ChatSession, SendContent } from "@cognia/agent-config-types"
+import {
+  clearComputerUsePipState,
+  publishComputerUseActivity,
+} from "@/lib/automation/computer-use-pip"
 
 const mockSession = { id: "s1", title: "Test" } as unknown as ChatSession
 
@@ -87,6 +142,98 @@ function makeProps() {
 }
 
 describe("ChatPane", () => {
+  beforeEach(() => {
+    consumePendingChatPromptMock.mockReset().mockReturnValue(null)
+    clearComputerUsePipState()
+  })
+
+  it("mounts live Computer Use activity inside the real chat pane", async () => {
+    publishComputerUseActivity("s1", "screenshot", {
+      ok: true,
+      output: "FRAME",
+      display_width_px: 1440,
+      display_height_px: 900,
+    })
+
+    render(<ChatPane {...makeProps()} />)
+
+    expect(await screen.findByRole("region", { name: "title" })).toBeInTheDocument()
+    expect(screen.getByRole("img", { name: "screenAlt" })).toHaveAttribute(
+      "src",
+      "data:image/png;base64,FRAME"
+    )
+  })
+
+  it("sends a queued configuration prompt once through the normal sender", async () => {
+    consumePendingChatPromptMock.mockReturnValueOnce("Configure WebDAV")
+    const props = makeProps()
+    const { rerender } = render(<ChatPane {...props} />)
+
+    await waitFor(() => expect(props.onSend).toHaveBeenCalledWith("Configure WebDAV", undefined))
+    expect(consumePendingChatPromptMock).toHaveBeenCalledWith("s1")
+
+    rerender(<ChatPane {...props} />)
+    expect(props.onSend).toHaveBeenCalledTimes(1)
+  })
+
+  it("fails closed before sending a queued prompt that contains PII", async () => {
+    consumePendingChatPromptMock.mockReturnValueOnce("Configure alice@example.com")
+    const props = makeProps()
+    render(<ChatPane {...props} />)
+
+    await waitFor(() => expect(consumePendingChatPromptMock).toHaveBeenCalledWith("s1"))
+    expect(props.onSend).not.toHaveBeenCalled()
+  })
+
+  it("forwards the attachment manifest from Composer to the workspace sender", async () => {
+    const props = makeProps()
+    render(<ChatPane {...props} />)
+    const onSend = mockComposerProps.at(-1)?.onSend as (
+      content: SendContent,
+      manifest: readonly unknown[]
+    ) => Promise<void>
+    const manifest = [{ filename: "report.txt", mediaType: "text/plain", kind: "document" }]
+
+    await act(async () => {
+      await onSend("summarize", manifest)
+    })
+
+    expect(props.onSend).toHaveBeenCalledWith("summarize", manifest)
+  })
+
+  it("binds Composer to this pane's streaming status", () => {
+    storeState.status = "streaming"
+    try {
+      render(<ChatPane {...makeProps()} />)
+      expect(mockComposerProps.at(-1)).toEqual(
+        expect.objectContaining({
+          status: "streaming",
+        })
+      )
+    } finally {
+      storeState.status = "idle"
+    }
+  })
+
+  it("disables the Composer when runtime writes are unavailable", () => {
+    render(<ChatPane {...makeProps()} composerDisabled />)
+
+    expect(mockComposerProps.at(-1)).toEqual(expect.objectContaining({ disabled: true }))
+  })
+
+  it("passes the effective session cwd to the message list", () => {
+    render(<ChatPane {...makeProps()} />)
+    expect(MessageList).toHaveBeenCalledWith(
+      expect.objectContaining({ projectRoot: "/repo" }),
+      undefined
+    )
+  })
+
+  it("mounts the workspace changes card for this pane's session", () => {
+    render(<ChatPane {...makeProps()} />)
+    expect(screen.getByTestId("workspace-changes-card")).toHaveAttribute("data-session", "s1")
+  })
+
   it("passes stable onCopy reference across re-renders", () => {
     const MockList = MessageList as jest.Mock
     const props = makeProps()
@@ -118,6 +265,48 @@ describe("ChatPane", () => {
     const second = MockList.mock.calls[0]?.[0]?.onRegenerate
 
     expect(first).toBe(second)
+  })
+
+  it("renders the structured card when the producer emitted a diagnostic", () => {
+    const MockDiagnosticCard = DiagnosticCard as jest.Mock
+    const MockInlineError = InlineError as jest.Mock
+    MockDiagnosticCard.mockClear()
+    MockInlineError.mockClear()
+    const diagnostic = createDiagnostic("sidecarExited", {
+      source: "chat",
+      now: () => 0,
+      id: "d1",
+    })
+    storeState.errorDiagnostic = diagnostic
+    storeState.errorMessage = diagnostic.message
+    try {
+      render(<ChatPane {...makeProps()} />)
+      // The card owns the label/hint/buttons now — the view no longer maps a
+      // sentinel string onto a localized message.
+      expect(MockDiagnosticCard).toHaveBeenCalledWith(
+        expect.objectContaining({ diagnostic }),
+        undefined
+      )
+      expect(MockInlineError).not.toHaveBeenCalled()
+    } finally {
+      storeState.errorDiagnostic = null
+      storeState.errorMessage = null
+    }
+  })
+
+  it("passes any other error message through unchanged", () => {
+    const MockInlineError = InlineError as jest.Mock
+    MockInlineError.mockClear()
+    storeState.errorMessage = "network down"
+    try {
+      render(<ChatPane {...makeProps()} />)
+      expect(MockInlineError).toHaveBeenCalledWith(
+        expect.objectContaining({ message: "network down" }),
+        undefined
+      )
+    } finally {
+      storeState.errorMessage = null
+    }
   })
 
   it("passes stable onEditResend reference when prop is unchanged", () => {
@@ -171,8 +360,7 @@ describe("ChatPane", () => {
     const props = makeProps()
     render(<ChatPane {...props} />)
     const onRegenerate = MockList.mock.calls[0]?.[0]?.onRegenerate as
-      | (() => void | Promise<void>)
-      | undefined
+      (() => void | Promise<void>) | undefined
     expect(onRegenerate).toBeDefined()
     await onRegenerate?.()
     expect(props.onRegenerate).toHaveBeenCalled()
@@ -184,11 +372,34 @@ describe("ChatPane", () => {
     const props = makeProps()
     render(<ChatPane {...props} />)
     const onEditResend = MockList.mock.calls[0]?.[0]?.onEditResend as
-      | ((id: string, content: unknown) => void | Promise<void>)
-      | undefined
+      ((id: string, content: unknown) => void | Promise<void>) | undefined
     expect(onEditResend).toBeDefined()
     await onEditResend?.("msg-1", { text: "edited" })
     expect(props.onEditResend).toHaveBeenCalledWith("msg-1", { text: "edited" })
+  })
+
+  describe("concurrency cap", () => {
+    it("renders the over-capacity notice when the bound session is at the stream cap", () => {
+      storeState.atCapacity = true
+      const { getByRole } = render(<ChatPane {...makeProps()} />)
+      const notice = getByRole("status")
+      expect(notice.textContent).toContain("overCapacity")
+      storeState.atCapacity = false
+    })
+
+    it("omits the over-capacity notice when below the cap", () => {
+      storeState.atCapacity = false
+      const { queryByRole } = render(<ChatPane {...makeProps()} />)
+      expect(queryByRole("status")).toBeNull()
+    })
+
+    it("binds to an explicit sessionId prop over the active session", () => {
+      const MockList = MessageList as jest.Mock
+      MockList.mockClear()
+      // No assertion on slice value here (mock is single-session); this simply
+      // exercises the sessionId-prop branch of `boundId` without throwing.
+      expect(() => render(<ChatPane {...makeProps()} sessionId="explicit" />)).not.toThrow()
+    })
   })
 
   describe("showHeader prop", () => {
@@ -199,6 +410,26 @@ describe("ChatPane", () => {
       ChatHeader.mockClear()
       render(<ChatPane {...makeProps()} />)
       expect(ChatHeader).toHaveBeenCalled()
+    })
+
+    it("forwards the compact split exit action to ChatHeader", () => {
+      const { ChatHeader } = jest.requireMock("./chat-header") as {
+        ChatHeader: jest.Mock
+      }
+      const onExitSplit = jest.fn()
+      ChatHeader.mockClear()
+      render(<ChatPane {...makeProps()} onExitSplit={onExitSplit} />)
+      expect(ChatHeader.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ onExitSplit }))
+    })
+
+    it("forwards the compact split entry action to ChatHeader", () => {
+      const { ChatHeader } = jest.requireMock("./chat-header") as {
+        ChatHeader: jest.Mock
+      }
+      const onSplitView = jest.fn()
+      ChatHeader.mockClear()
+      render(<ChatPane {...makeProps()} onSplitView={onSplitView} />)
+      expect(ChatHeader.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ onSplitView }))
     })
 
     it("omits ChatHeader when showHeader is false", () => {

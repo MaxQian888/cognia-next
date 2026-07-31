@@ -1,14 +1,22 @@
 import "fake-indexeddb/auto"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { seedBuiltInCharacters } from "@/lib/db/characters"
+import { useRouter } from "next/navigation"
 import { GoalTrackerConfig } from "./goal-tracker-config"
+
+// Factory references no outer vars (avoids the jest.mock hoist TDZ trap).
+jest.mock("next/navigation", () => ({ useRouter: jest.fn() }))
+
+const push = jest.fn()
 
 beforeEach(async () => {
   await getDb().delete()
   __resetDbForTesting()
   getDb()
   await whenSeeded()
+  push.mockClear()
+  ;(useRouter as jest.Mock).mockReturnValue({ push })
 })
 
 describe("GoalTrackerConfig", () => {
@@ -28,5 +36,13 @@ describe("GoalTrackerConfig", () => {
     await getDb().characters.clear()
     render(<GoalTrackerConfig />)
     await waitFor(() => expect(screen.getByTestId("goal-tracker-missing")).toBeInTheDocument())
+  })
+
+  it("deep-links to the Characters settings section on click", async () => {
+    await seedBuiltInCharacters()
+    render(<GoalTrackerConfig />)
+    const button = await screen.findByTestId("goal-tracker-open-characters")
+    fireEvent.click(button)
+    expect(push).toHaveBeenCalledWith("/settings?section=characters")
   })
 })

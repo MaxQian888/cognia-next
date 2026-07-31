@@ -12,8 +12,9 @@
  *   - create / delete: not applicable — the row is a singleton config
  */
 
-import { DEFAULT_BACKUP_AUTO_SCHEDULE, type BackupAutoSchedule } from "@/lib/claude/types"
+import { DEFAULT_BACKUP_AUTO_SCHEDULE, type BackupAutoSchedule } from "@cognia/agent-config-types"
 import { getSettings, saveSettings } from "@/lib/db/settings"
+import { listBackupHistory } from "@/lib/db/backup-history"
 import { runOnce as runBackupOnce } from "@/components/providers/backup-scheduler-provider"
 import {
   makeUnifiedId,
@@ -25,6 +26,7 @@ import type {
   ScheduledItemSourceObserver,
   ScheduledItemSubscription,
 } from "./types"
+import { toUnifiedFromBackupHistory } from "./run-mappers"
 
 export const BACKUP_SOURCE_ID = "default"
 const POLL_INTERVAL_MS = 60_000
@@ -38,6 +40,7 @@ export interface BackupSourceDeps {
    * a synchronous tick.
    */
   pollIntervalMs?: number
+  listRuns?: typeof listBackupHistory
 }
 
 export function createBackupSource(
@@ -56,6 +59,7 @@ export function createBackupSource(
     })
   const runNow = deps.runNow ?? runBackupOnce
   const pollMs = deps.pollIntervalMs ?? POLL_INTERVAL_MS
+  const readRuns = deps.listRuns ?? listBackupHistory
 
   return {
     kind: "backup",
@@ -87,6 +91,10 @@ export function createBackupSource(
     async list(): Promise<UnifiedScheduledItem[]> {
       const cfg = await read()
       return [toUnifiedBackup(cfg)]
+    },
+
+    async listRuns(limit) {
+      return (await readRuns({ limit })).map(toUnifiedFromBackupHistory)
     },
 
     async get(sourceId: string): Promise<UnifiedScheduledItem | undefined> {

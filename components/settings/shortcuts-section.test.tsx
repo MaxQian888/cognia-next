@@ -27,6 +27,28 @@ describe("ShortcutsSection", () => {
     expect(screen.getByText("Show / hide window")).toBeInTheDocument()
     expect(screen.getByText("Open log panel")).toBeInTheDocument()
     expect(screen.getByText("Automation kill switch")).toBeInTheDocument()
+    expect(screen.getByText("Capture copied selection")).toBeInTheDocument()
+  })
+
+  it("offers a row for every selection-toolbar action chord", () => {
+    // Rust's `bind_action_shortcuts` skips any of these the user has re-bound
+    // (ADR-0093 §8). Without rows here that branch was unreachable: nothing in
+    // the app could produce the override it defends against.
+    render(<ShortcutsSection />)
+    for (const label of [
+      "Selection toolbar: copy",
+      "Selection toolbar: explain",
+      "Selection toolbar: translate",
+      "Selection toolbar: ask",
+      "Selection toolbar: add to memory",
+      "Selection toolbar: read aloud",
+    ]) {
+      expect(screen.getByText(label)).toBeInTheDocument()
+    }
+    // Their defaults have to match the Rust table, or "Reset" hands the user a
+    // chord the toolbar never listens on.
+    expect(screen.getByText("Alt+Shift+1")).toBeInTheDocument()
+    expect(screen.getByText("Alt+Shift+6")).toBeInTheDocument()
   })
 
   it("Record swaps the row's controls into capture mode", () => {
@@ -80,5 +102,30 @@ describe("ShortcutsSection", () => {
       "shortcut_bind",
       expect.objectContaining({ id: "tray.show", chord: "ctrl+shift+space" })
     )
+  })
+
+  describe("optional shortcut rows (no built-in default)", () => {
+    it("renders 'Not set' with no Clear button until the user records one", () => {
+      render(<ShortcutsSection />)
+      expect(screen.getByText("Toggle desktop pet")).toBeInTheDocument()
+      expect(screen.getByText("Not set")).toBeInTheDocument()
+      expect(screen.queryByLabelText("Clear")).toBeNull()
+    })
+
+    it("shows the bound chord and a Clear button once bound, which unbinds on click", async () => {
+      invoke.mockResolvedValue(undefined)
+      useShortcutStore.setState({
+        bindings: { "pet.toggle-window": "ctrl+alt+p" },
+        hydrated: true,
+      })
+      render(<ShortcutsSection />)
+      expect(screen.queryByText("Not set")).toBeNull()
+      const clearButton = screen.getByLabelText("Clear")
+      fireEvent.click(clearButton)
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(invoke).toHaveBeenCalledWith("shortcut_unbind", { id: "pet.toggle-window" })
+    })
   })
 })

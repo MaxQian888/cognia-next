@@ -89,10 +89,67 @@ describe("<MobileTabBar />", () => {
     expect(screen.getByTestId("mobile-tab-badge-chat")).toHaveTextContent("99+")
   })
 
+  it("truncates tab labels so long-locale text can't overflow the cell", () => {
+    render(<MobileTabBar />)
+    const label = screen.getByTestId("mobile-tab-chat").querySelector(".truncate")
+    expect(label).toBeTruthy()
+    expect(label).toHaveClass("max-w-full")
+  })
+
   it("triggers haptic selectionFeedback on tap", async () => {
     const user = userEvent.setup()
     render(<MobileTabBar />)
     await user.click(screen.getByTestId("mobile-tab-discover"))
     expect(selectionFeedbackMock).toHaveBeenCalled()
+  })
+
+  it("slides off-screen and blocks pointer events when keyboardHidden", () => {
+    render(<MobileTabBar keyboardHidden />)
+    const bar = screen.getByTestId("mobile-tab-bar")
+    expect(bar).toHaveAttribute("data-keyboard-hidden", "true")
+    expect(bar).toHaveAttribute("aria-hidden", "true")
+    expect(bar.className).toContain("translate-y-full")
+    expect(bar.className).toContain("pointer-events-none")
+  })
+
+  it("stays interactive when keyboardHidden is false (default)", () => {
+    render(<MobileTabBar />)
+    const bar = screen.getByTestId("mobile-tab-bar")
+    expect(bar).toHaveAttribute("data-keyboard-hidden", "false")
+    expect(bar).not.toHaveAttribute("aria-hidden")
+    expect(bar.className).not.toContain("translate-y-full")
+  })
+})
+
+describe("<MobileTabBar /> — active indicator", () => {
+  it("mounts exactly one indicator, inside the active tab", () => {
+    // One instance is the whole point: `layoutId` can only slide a shared
+    // element between stops if there is a single one to slide.
+    pathnameMock.mockReturnValue("/workflows")
+    render(<MobileTabBar />)
+    const indicators = screen.getAllByTestId("mobile-tab-indicator")
+    expect(indicators).toHaveLength(1)
+    expect(screen.getByTestId("mobile-tab-workflows")).toContainElement(indicators[0])
+  })
+
+  it("moves the indicator when the active route changes", () => {
+    pathnameMock.mockReturnValue("/")
+    const { rerender } = render(<MobileTabBar />)
+    expect(screen.getByTestId("mobile-tab-chat")).toContainElement(
+      screen.getByTestId("mobile-tab-indicator")
+    )
+
+    pathnameMock.mockReturnValue("/me")
+    rerender(<MobileTabBar />)
+    expect(screen.getByTestId("mobile-tab-me")).toContainElement(
+      screen.getByTestId("mobile-tab-indicator")
+    )
+    expect(screen.getAllByTestId("mobile-tab-indicator")).toHaveLength(1)
+  })
+
+  it("keeps the indicator decorative (the aria-selected state carries the meaning)", () => {
+    pathnameMock.mockReturnValue("/")
+    render(<MobileTabBar />)
+    expect(screen.getByTestId("mobile-tab-indicator")).toHaveAttribute("aria-hidden", "true")
   })
 })

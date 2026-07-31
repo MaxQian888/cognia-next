@@ -1,0 +1,10 @@
+{
+  "abort": "中止",
+  "continue": "仍然继续",
+  "description": "请先核查冲突再继续。",
+  "highCount": "高严重 {count}",
+  "lowCount": "低严重 {count}",
+  "mediumCount": "中严重 {count}",
+  "relatedPlugin": "相关插件：",
+  "title": "{id} 检测到冲突"
+}

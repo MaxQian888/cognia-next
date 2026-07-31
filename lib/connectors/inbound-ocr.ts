@@ -24,6 +24,7 @@ import { buildOcrDeps } from "@/lib/ocr/deps"
 import { getSettings } from "@/lib/db/settings"
 import { DEFAULT_OCR_SETTINGS, type OcrInput, type OcrResult } from "@/types/ocr"
 import type { MessageSegment } from "@/types/connectors/segment"
+import { appendAudit } from "./audit"
 
 /** Image segment widened with the inline byte fields adapters attach. */
 type InboundImageSegment = Extract<MessageSegment, { type: "image" }> & {
@@ -36,6 +37,26 @@ export interface InboundOcrDeps {
   enabled: boolean
   extract: (input: OcrInput, deps: ExtractDeps) => Promise<OcrResult>
   ocrDeps: ExtractDeps
+  /** Optional failure sink — fired when extraction throws, so a silently
+   * dropped image's OCR failure is traceable instead of invisible. The
+   * extractor still best-effort-ignores the error (delivery never blocks). */
+  onError?: (info: { error: unknown }) => void
+}
+
+/**
+ * True when at least one segment is an image carrying inline bytes
+ * (`dataBase64`) — the only case `runInboundOcr` does any work. Lets the
+ * inbound pipeline skip the settings read + OCR-dep build entirely for the
+ * common text-only / URL-only message (an image that arrives as a bare URL /
+ * platform key has no inline bytes and is skipped by `maybeOcrInboundSegments`
+ * anyway).
+ */
+export function hasOcrableInboundImage(segments: MessageSegment[]): boolean {
+  return segments.some((seg) => {
+    if (seg.type !== "image") return false
+    const b64 = (seg as InboundImageSegment).dataBase64
+    return typeof b64 === "string" && b64.length > 0
+  })
 }
 
 /**
@@ -64,8 +85,10 @@ export async function maybeOcrInboundSegments(
       )
       const text = result.combinedText.trim()
       if (text.length > 0) img.ocrText = text
-    } catch {
+    } catch (err) {
       // Best-effort: a provider failure leaves the segment as a plain [image].
+      // Surface it via the optional sink so the failure isn't silent.
+      deps.onError?.({ error: err })
     }
   }
 }
@@ -73,18 +96,39 @@ export async function maybeOcrInboundSegments(
 /**
  * Production wrapper: load OCR settings, build real deps, and run the inbound
  * OCR pass over the event's segments. Best-effort — callers should ignore
- * rejections so OCR never blocks the inbound pipeline.
+ * rejections so OCR never blocks the inbound pipeline. Extraction failures
+ * are audited as `inbound.ocr_failed` (instead of swallowed silently) when
+ * the event carries the audit context.
  */
-export async function runInboundOcr(event: { segments: MessageSegment[] }): Promise<void> {
+export async function runInboundOcr(event: {
+  segments: MessageSegment[]
+  adapterId?: string
+  conversationKey?: string
+}): Promise<void> {
   let settings = DEFAULT_OCR_SETTINGS
   try {
     settings = (await getSettings()).ocrSettings ?? DEFAULT_OCR_SETTINGS
   } catch {
     // Dexie unavailable — fall back to defaults (inbound OCR on).
   }
+  const adapterId = event.adapterId
+  const conversationKey = event.conversationKey
   await maybeOcrInboundSegments(event.segments, {
     enabled: settings.ocrInboundImages !== false,
     extract: defaultExtract,
     ocrDeps: buildOcrDeps({ settings }),
+    onError:
+      adapterId != null
+        ? ({ error }) => {
+            void appendAudit({
+              adapterId,
+              kind: "inbound.ocr_failed",
+              at: Date.now(),
+              ...(conversationKey != null ? { conversationKey } : {}),
+              reason: "ocr_extract_threw",
+              message: error instanceof Error ? error.message : String(error),
+            })
+          }
+        : undefined,
   })
 }

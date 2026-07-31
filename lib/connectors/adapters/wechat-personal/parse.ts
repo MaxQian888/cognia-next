@@ -26,6 +26,28 @@ export interface WechatPersonalConversationRef extends ConversationReference {
   sessionId?: string
 }
 
+/**
+ * cyrb53 — tiny 53-bit non-cryptographic hash (same construction the
+ * webhook event normalizers inline). Used to fingerprint message
+ * content for the derived messageId: a gateway redelivery of the same
+ * message hashes identically (so the bus dedup ledger drops it), while a
+ * context_token that ever carried different content stays distinguishable.
+ */
+function cyrb53(str: string, seed = 0): number {
+  let h1 = 0xdeadbeef ^ seed
+  let h2 = 0x41c6ce57 ^ seed
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i)
+    h1 = Math.imul(h1 ^ ch, 2654435761)
+    h2 = Math.imul(h2 ^ ch, 1597334677)
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507)
+  h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909)
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507)
+  h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909)
+  return 4294967296 * (2097151 & h2) + (h1 >>> 0)
+}
+
 function itemToSegment(item: IlinkItem): MessageSegment | null {
   switch (item.type) {
     case ILINK_ITEM.text:
@@ -85,8 +107,13 @@ export function parseIlinkMessage(
     adapterId,
     selfId: msg.to_user_id ?? "",
     // Personal WeChat gives no stable per-message id; derive one from the
-    // context_token + session so the dedup ledger has a key.
-    messageId: `${msg.context_token}:${msg.session_id ?? ""}:${now}`,
+    // context_token + session + a content fingerprint so the dedup ledger
+    // has a key that is STABLE across gateway redeliveries (a wall-clock
+    // component here would defeat dedup entirely) yet still distinguishes
+    // different content should the gateway ever reuse a context_token.
+    messageId: `${msg.context_token}:${msg.session_id ?? ""}:${cyrb53(
+      JSON.stringify(msg.item_list ?? [])
+    ).toString(36)}`,
     conversationRef,
     conversationKey,
     sender: {

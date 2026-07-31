@@ -26,14 +26,18 @@ describe("PluginFilterSheet", () => {
     expect(container.querySelector("[role='dialog']")).toBeNull()
   })
 
-  it("renders fields for query / capability / permission / source / status / sort", () => {
+  it("renders fields for query / capability / permission / source / status", () => {
     render(<PluginFilterSheet />)
     expect(screen.getByText("query")).toBeInTheDocument()
     expect(screen.getByText("capability")).toBeInTheDocument()
     expect(screen.getByText("permission")).toBeInTheDocument()
     expect(screen.getByText("source")).toBeInTheDocument()
     expect(screen.getByText("status")).toBeInTheDocument()
-    expect(screen.getByText("sort")).toBeInTheDocument()
+  })
+
+  it("no longer renders the sort control (moved to the library header)", () => {
+    render(<PluginFilterSheet />)
+    expect(screen.queryByText("sort")).not.toBeInTheDocument()
   })
 
   it("renders signedOnly + hasUpdate switches", () => {

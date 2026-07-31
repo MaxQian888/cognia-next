@@ -4,13 +4,7 @@
 import { getDb } from "@/lib/db/schema"
 
 export type ClearableTable =
-  | "sessions"
-  | "characters"
-  | "skills"
-  | "teams"
-  | "promptPresets"
-  | "mcpServers"
-  | "settings"
+  "sessions" | "characters" | "skills" | "teams" | "promptPresets" | "mcpServers" | "settings"
 
 /**
  * Clear the named tables. Sessions also clear their associated messages and

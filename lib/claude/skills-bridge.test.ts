@@ -12,7 +12,7 @@ jest.mock("@/lib/tauri", () => ({
 
 import { listEnabledSkillsByIds } from "@/lib/db/skills"
 import { __resetSkillsForTesting, registerSkill } from "@/lib/plugin/registries/skill-registry"
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 import type { PluginSkillDef } from "@/types/plugin/plugin-skill"
 
 import {

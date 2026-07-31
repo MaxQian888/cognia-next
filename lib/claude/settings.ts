@@ -4,6 +4,22 @@
 
 import { invoke } from "@tauri-apps/api/core"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
+import { defaultLifecycleFirer } from "@/lib/claude/hooks/lifecycle-firer"
+
+/**
+ * Fire the `ConfigChange` lifecycle hook after a settings write (ADR-0040
+ * follow-up — lights up a previously-dormant event). Best-effort + fire-and-
+ * forget: observational only, never blocks or fails the write. No-ops on web.
+ */
+function fireConfigChange(scope: "user" | "project" | "local", cwd?: string): void {
+  void defaultLifecycleFirer(
+    "ConfigChange",
+    { agentId: "settings", sessionId: scope, cwd },
+    {
+      payload: { scope },
+    }
+  )
+}
 
 /**
  * Subset of `~/.claude/settings.json` fields we explicitly model. Anything
@@ -78,7 +94,9 @@ export interface ClaudeSettingsWriteResult {
 export async function writeClaudeUserSettings(
   payload: ClaudeSettings
 ): Promise<ClaudeSettingsWriteResult> {
-  return invoke<ClaudeSettingsWriteResult>("write_claude_user_settings", { payload })
+  const result = await invoke<ClaudeSettingsWriteResult>("write_claude_user_settings", { payload })
+  fireConfigChange("user")
+  return result
 }
 
 /** Atomically write `<cwd>/.claude/settings.json`. Creates `.claude/` if missing. */
@@ -86,7 +104,12 @@ export async function writeClaudeProjectSettings(
   cwd: string,
   payload: ClaudeSettings
 ): Promise<ClaudeSettingsWriteResult> {
-  return invoke<ClaudeSettingsWriteResult>("write_claude_project_settings", { cwd, payload })
+  const result = await invoke<ClaudeSettingsWriteResult>("write_claude_project_settings", {
+    cwd,
+    payload,
+  })
+  fireConfigChange("project", cwd)
+  return result
 }
 
 /** Atomically write `<cwd>/.claude/settings.local.json`. Creates `.claude/` if missing. */
@@ -94,7 +117,12 @@ export async function writeClaudeLocalSettings(
   cwd: string,
   payload: ClaudeSettings
 ): Promise<ClaudeSettingsWriteResult> {
-  return invoke<ClaudeSettingsWriteResult>("write_claude_local_settings", { cwd, payload })
+  const result = await invoke<ClaudeSettingsWriteResult>("write_claude_local_settings", {
+    cwd,
+    payload,
+  })
+  fireConfigChange("local", cwd)
+  return result
 }
 
 /**

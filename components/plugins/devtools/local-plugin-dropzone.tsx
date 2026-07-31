@@ -74,7 +74,7 @@ export function LocalPluginDropzone({ className, onInstalled }: LocalPluginDropz
     <>
       <Card
         className={cn(
-          "border-dashed text-center p-6 transition-colors",
+          "min-h-32 cursor-pointer justify-center gap-0 border-dashed p-4 py-4 text-center shadow-sm transition-[border-color,background-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:border-foreground/30 hover:bg-muted/30 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
           isDragOver && "border-primary bg-primary/5",
           busy && "opacity-70",
           className
@@ -96,10 +96,12 @@ export function LocalPluginDropzone({ className, onInstalled }: LocalPluginDropz
         }}
         data-testid="local-plugin-dropzone"
       >
-        <div className="flex flex-col items-center gap-2">
-          <FolderUpIcon className="size-8 text-muted-foreground" aria-hidden="true" />
+        <div className="flex flex-col items-center gap-1.5">
+          <div className="mb-1 flex size-10 items-center justify-center rounded-lg border bg-muted/50">
+            <FolderUpIcon className="size-5 text-muted-foreground" aria-hidden="true" />
+          </div>
           <p className="text-sm font-medium">{t("title")}</p>
-          <p className="text-xs text-muted-foreground max-w-sm">{t("hint")}</p>
+          <p className="max-w-sm text-xs leading-relaxed text-muted-foreground">{t("hint")}</p>
         </div>
       </Card>
       {error && (

@@ -10,7 +10,7 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { CompassIcon, Settings2Icon, StarIcon } from "lucide-react"
+import { CompassIcon, Settings2Icon, SparklesIcon, StarIcon } from "lucide-react"
 
 import {
   Accordion,
@@ -32,6 +32,7 @@ import { useDiscoverLayout } from "@/hooks/discover/use-discover-layout"
 import {
   DISCOVER_GROUPS,
   FAVORITES_CATEGORY,
+  FORYOU_CATEGORY,
   type DiscoverCategory,
   type DiscoverGroup,
   type DiscoverView,
@@ -69,6 +70,24 @@ export function DiscoverCategorySidebar({
       className={cn("flex h-full flex-col overflow-y-auto py-2", className)}
       data-testid="discover-category-sidebar"
     >
+      <div className="px-3 pb-1">
+        <Button
+          type="button"
+          variant={activeCategory === FORYOU_CATEGORY ? "secondary" : "ghost"}
+          size="sm"
+          onClick={() => onSelect(FORYOU_CATEGORY)}
+          className={cn(
+            "w-full justify-start gap-2 px-2 font-normal",
+            activeCategory === FORYOU_CATEGORY && "font-medium"
+          )}
+          aria-current={activeCategory === FORYOU_CATEGORY ? "page" : undefined}
+          data-testid="discover-category-foryou"
+        >
+          <SparklesIcon className="size-4 shrink-0" />
+          <span className="truncate">{t("categories.foryou")}</span>
+        </Button>
+      </div>
+
       <div className="flex items-center justify-between gap-2 px-3 pb-1">
         <Button
           type="button"

@@ -6,7 +6,7 @@
 import type {
   NormalizedModelsDevCatalog,
   NormalizedModelsDevProvider,
-} from "@/lib/ai/providers/models-dev"
+} from "@cognia/provider-core/providers/models-dev"
 import { getDb } from "./schema"
 
 /**

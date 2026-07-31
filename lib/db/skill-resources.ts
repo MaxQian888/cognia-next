@@ -3,7 +3,7 @@
 // on [skillId+path] so the resource manager can detect path collisions before
 // writing.
 
-import type { SkillResource, SkillResourceKind } from "@/lib/claude/types"
+import type { SkillResource, SkillResourceKind } from "@cognia/agent-config-types"
 import { getDb } from "./schema"
 
 function newId() {

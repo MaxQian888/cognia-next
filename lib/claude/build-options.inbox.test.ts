@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests the inbox / connector suppression branch added to
  * `resolveSendOptions` in §B of the IM completion plan. Focused on the

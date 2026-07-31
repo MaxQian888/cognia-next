@@ -16,7 +16,7 @@
  *     Without a passphrase the fallback refuses writes; reads return null.
  *
  * Both paths share the same TS interface so call sites don't branch on
- * runtime — they just `await getSecret("github-delivery", "pat:repo/owner")`.
+ * runtime — they just `await getSecret("demo-delivery", "account:primary")`.
  */
 
 import { isTauri } from "@/lib/tauri"

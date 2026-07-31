@@ -1,0 +1,64 @@
+{
+  "add": {
+    "baseUrlHint": "远程 cognia-server 地址。跨网络访问时请使用其公网 URL(cloudflared 或反向代理)。",
+    "baseUrlLabel": "服务器 URL",
+    "baseUrlPlaceholder": "https://your-host:27890",
+    "connectAfter": "配对后立即连接",
+    "errBaseUrl": "请输入形如 https://your-host:27890 的 URL。",
+    "errGeneric": "配对失败,请重试。",
+    "errHttp": "配对失败(HTTP {status})。请在主机上生成新的 pair token 后重试。",
+    "errMissing": "请粘贴配对载荷或 pair JWT。",
+    "errNetwork": "无法到达主机。请检查 URL,以及其 companion 服务器是否在运行。",
+    "errPayload": "这看起来不像配对载荷或 JWT。",
+    "labelLabel": "名称(可选)",
+    "labelPlaceholder": "我的 dev box",
+    "payloadHint": "在主机上运行 `cognia-server pair` 并粘贴其打印内容。完整载荷会自动填好 URL。",
+    "payloadLabel": "配对载荷或 JWT",
+    "payloadPlaceholder": "粘贴 `cognia-server pair` 打印的 cgnp2 载荷,或一段裸 pair JWT",
+    "submit": "配对主机",
+    "submitting": "配对中…",
+    "success": "已配对 {label}。"
+  },
+  "description": "从这台桌面驱动一台远程 Cognia 主机——它的终端、文件与 git。配对后即可读取文件与 git;写入需要主机授权本设备控制。",
+  "list": {
+    "activeBadge": "已连接",
+    "activeBanner": "正在驱动 {label}——新的终端、文件与 git 操作都指向该主机。",
+    "cancel": "取消",
+    "capabilitiesUnknown": "能力未知——连接一次以向该主机查询",
+    "capabilityNote": "读取(打开文件、git status、diff、log)在配对后即可用。写入文件、commit 与 push 需要主机在其 allow-list 中授权本设备控制。",
+    "connect": "连接",
+    "disconnect": "断开",
+    "emptyBody": "配对一台远程 Cognia 服务器,即可从这里驱动它的终端、文件与 git。在「添加主机」标签页添加一台。",
+    "emptyTitle": "还没有远程主机",
+    "neverConnected": "从未连接",
+    "featureCategory": {
+      "host": "远程主机执行",
+      "proxy": "控制端代理",
+      "unavailable": "当前不可用"
+    },
+    "featureManifest": "功能契约 schema {schema} · 主机构建 {build}",
+    "featureManifestUnknown": "缺少 operation 级功能契约——主机返回契约前保持写操作禁用",
+    "featurePermissionNote": "已声明的 operation 仍需通过对应命令权限；管理写入需要 remote-control，高风险写入还需要 Owner admin lease。",
+    "featureVersion": "{feature} v{version}",
+    "none": "无",
+    "remove": "移除",
+    "removeA11y": "移除 {label}",
+    "rename": "重命名",
+    "renameLabel": "主机名称",
+    "save": "保存",
+    "serverVersion": "cognia {version}",
+    "state": {
+      "connecting": "连接中",
+      "degraded": "降级",
+      "disconnected": "已断开",
+      "ready": "就绪",
+      "revoked": "已撤销",
+      "versionMismatch": "需要升级"
+    }
+  },
+  "tabs": {
+    "add": "添加主机",
+    "hosts": "主机"
+  },
+  "title": "远程主机"
+}

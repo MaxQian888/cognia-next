@@ -10,35 +10,96 @@
 // Mouse interactions (click) work through the regular onMouseDown/onClick
 // handlers.
 
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
+import {
+  useCallback,
+  useDeferredValue,
+  forwardRef,
+  Fragment,
+  memo,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import { useTranslations } from "next-intl"
 import {
+  ActivityIcon,
   AtSignIcon,
+  BlocksIcon,
   BookMarkedIcon,
+  BoxIcon,
+  CircleHelpIcon,
+  CornerDownRightIcon,
+  FileCode2Icon,
   FileIcon,
   FolderIcon,
-  SlashIcon,
+  ListPlusIcon,
+  MessageCircleMoreIcon,
+  PinIcon,
+  PinOffIcon,
+  Repeat2Icon,
+  SearchIcon,
+  SearchXIcon,
+  Settings2Icon,
+  SparklesIcon,
+  SplineIcon,
+  SquareTerminalIcon,
+  TargetIcon,
   TerminalIcon,
+  WandSparklesIcon,
 } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Kbd, KbdGroup } from "@/components/ui/kbd"
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
 import { searchWorkspace } from "@/lib/files/workspace-search"
 import type { WorkspaceEntry } from "@/lib/files/types"
 import type { SlashCommand } from "@/lib/slash-commands/builtin"
+import type { SystemPromptPreset } from "@cognia/agent-config-types"
+import type { SkillMentionTarget } from "@/hooks/chat/use-mentionable-skills"
+import { fuzzyFilterSort, fuzzyFilterSortRanked } from "@/lib/chat/completion/fuzzy-match"
+import { MatchHighlight } from "@/components/chat/completion/match-highlight"
+import {
+  orderedCommandsForEmptyQuery,
+  slashGroupLabel,
+  type SlashGroup,
+} from "./composer-popover-groups"
 import { cn } from "@/lib/utils"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import {
   AgentMentionRow,
+  SubagentMentionRow,
   filterMentionables,
+  filterSubagents,
 } from "@/components/agent/workspace/agent-mention-picker"
 import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
+import type { SubagentMentionTarget } from "@/lib/claude/agents/chat-mention-targets"
 
-import type { ComposerTrigger, TriggerKind } from "./composer-trigger"
+import type { ComposerTrigger, MentionableWorkflowElement, TriggerKind } from "./composer-trigger"
 
 export type PopoverItem =
-  | { kind: "slash"; command: SlashCommand }
+  | {
+      kind: "slash"
+      command: SlashCommand
+      /** Matched indices in the command name (non-empty query only). */
+      positions?: number[]
+      /** Section tag for the empty-query grouped view. */
+      group?: SlashGroup
+    }
+  | {
+      kind: "slashArgument"
+      command: SlashCommand
+      value: string
+      replaceStart: number
+      replaceEnd: number
+    }
   | { kind: "file"; entry: WorkspaceEntry }
   | { kind: "memory"; scope: "project" | "user"; preview: string }
   | { kind: "agent"; target: MentionTarget }
+  | { kind: "subagent"; target: SubagentMentionTarget }
+  | { kind: "skill"; skill: SkillMentionTarget }
+  | { kind: "preset"; preset: SystemPromptPreset }
+  | { kind: "wfElement"; element: MentionableWorkflowElement }
 
 export interface ComposerPopoverHandle {
   /** Move the highlighted index by `delta` (-1 for up, +1 for down). */
@@ -61,6 +122,44 @@ interface Props {
    * `mentionMode` is `"agents"`. Empty in file mode.
    */
   mentionables?: readonly MentionTarget[]
+  /**
+   * Subagents mentionable in the GENERAL chat composer (combined `@` mode).
+   * When non-empty, the `@file` panel prepends an "Agents" section with these,
+   * above the workspace file results. Empty / undefined in file-only or
+   * team (`mentionMode="agents"`) composers.
+   */
+  chatAgents?: readonly SubagentMentionTarget[]
+  /**
+   * Enabled skills surfaced by the `@skill:` namespaced mention. Picking one
+   * ENABLES it for the session (no text inserted) — see `composer.tsx`'s
+   * `onPickPopoverItem`. Empty / undefined outside the general chat composer.
+   */
+  chatSkills?: readonly SkillMentionTarget[]
+  /**
+   * Prompt presets surfaced by the `@preset:` namespaced mention. Picking one
+   * APPLIES it to the active session (system prompt + model + … ; no text
+   * inserted). Empty / undefined outside the general chat composer.
+   */
+  chatPresets?: readonly SystemPromptPreset[]
+  /**
+   * Workflow graph elements surfaced by the workflow composer's `@` / `@node:`
+   * / `@edge:` mentions. Picking one stages a reference chip (no text inserted)
+   * — see `composer.tsx`'s `onPickPopoverItem`. Empty / undefined outside the
+   * workflow-editor composer.
+   */
+  workflowElements?: readonly MentionableWorkflowElement[]
+  /**
+   * Fired when the highlighted row changes to (or away from) a workflow
+   * element — the workflow composer maps this to a transient canvas highlight
+   * so arrowing through the picker pulses the matching node.
+   */
+  onHighlightElement?: (element: MentionableWorkflowElement | null) => void
+  /** Recently-used command names (newest first) for the empty-query view. */
+  recentCommands?: readonly string[]
+  /** Pinned command names (pin order) for the empty-query view + pin toggles. */
+  pinnedCommands?: readonly string[]
+  /** Toggle a command's pinned state from a row's pin button. */
+  onTogglePin?: (name: string) => void
   /** Called when the user picks an item. */
   onPick: (item: PopoverItem) => void
   /** Called when the user dismisses the popover (Escape / outside click). */
@@ -75,13 +174,31 @@ interface ItemList {
 }
 
 export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function ComposerPopover(
-  { trigger, cwd, slashCommands, anchor, mentionables, onPick, onDismiss },
+  {
+    trigger,
+    cwd,
+    slashCommands,
+    anchor,
+    mentionables,
+    chatAgents,
+    chatSkills,
+    chatPresets,
+    workflowElements,
+    onHighlightElement,
+    recentCommands,
+    pinnedCommands,
+    onTogglePin,
+    onPick,
+    onDismiss,
+  },
   ref
 ) {
   const t = useTranslations("chat.composer.popover")
   const tMemory = useTranslations("chat.composer.memory")
   const tAgent = useTranslations("agentTeamsWorkspace.chat.composer")
   const [highlight, setHighlight] = useState(0)
+  const [slashSearch, setSlashSearch] = useState<string | null>(null)
+  const listRef = useRef<HTMLUListElement>(null)
   // The async file-search produces an `ItemList` over time; for slash, memory
   // and bash kinds we derive the list synchronously below. The combined view
   // is `displayList`.
@@ -92,10 +209,14 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
   // side-effect of the trigger identity changing.
   const triggerKind = trigger?.kind
   const triggerStart = trigger?.tokenStart
+  const slashQuery =
+    trigger?.kind === "slash" ? (slashSearch ?? trigger.argumentQuery ?? trigger.query) : ""
+  const deferredSlashQuery = useDeferredValue(slashQuery)
   useEffect(() => {
     if (triggerKind !== undefined) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setHighlight(0)
+      setSlashSearch(null)
     }
   }, [triggerKind, triggerStart])
 
@@ -157,10 +278,52 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
       return { items: [], loading: false, error: null, emptyMessage: "" }
     }
     if (trigger.kind === "slash") {
-      const q = trigger.query.toLowerCase()
-      const items: PopoverItem[] = slashCommands
-        .filter((c) => !q || c.name.toLowerCase().includes(q))
-        .map((command) => ({ kind: "slash" as const, command }))
+      const query = deferredSlashQuery.trim()
+      const command = slashCommands.find((candidate) => candidate.name === trigger.query)
+      const argumentOptions = commandArgumentOptions(command)
+      if (
+        command &&
+        argumentOptions.length > 0 &&
+        trigger.argumentQuery !== undefined &&
+        trigger.argumentStart !== undefined &&
+        trigger.argumentEnd !== undefined
+      ) {
+        // Argument option sets are intentionally tiny and selection correctness
+        // matters more than deferral here: a quick "p" → Enter must never
+        // confirm an option from the previous empty-query frame.
+        const items = fuzzyFilterSort(argumentOptions, slashQuery, (value) => value).map(
+          (value) => ({
+            kind: "slashArgument" as const,
+            command,
+            value,
+            replaceStart: trigger.argumentStart as number,
+            replaceEnd: trigger.argumentEnd as number,
+          })
+        )
+        return {
+          items,
+          loading: false,
+          error: null,
+          emptyMessage: t("noArgumentMatches", { query: slashQuery }),
+        }
+      }
+      // Empty query → grouped view: Pinned → Recent → per-category, each with a
+      // section header. Non-empty → flat fuzzy-ranked list with matched-char
+      // highlight (ranking wins; grouping would fight the relevance order).
+      const items: PopoverItem[] =
+        query === ""
+          ? orderedCommandsForEmptyQuery(
+              slashCommands,
+              recentCommands ?? [],
+              pinnedCommands ?? []
+            ).map(({ command, group }) => ({ kind: "slash" as const, command, group }))
+          : fuzzyFilterSortRanked(slashCommands, deferredSlashQuery, (c) => c.name, {
+              secondaryText: (c) => c.description,
+            }).map(({ item, positions }) => ({
+              kind: "slash" as const,
+              command: item,
+              positions,
+            }))
       return {
         items,
         loading: false,
@@ -168,7 +331,7 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
         emptyMessage:
           slashCommands.length === 0
             ? t("noCommands")
-            : t("noCommandMatches", { query: trigger.query }),
+            : t("noCommandMatches", { query: deferredSlashQuery }),
       }
     }
     if (trigger.kind === "memory") {
@@ -201,16 +364,102 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
               }),
       }
     }
-    // file
-    return (
-      fileList ?? {
-        items: [],
-        loading: true,
+    if (trigger.kind === "skill") {
+      const list = chatSkills ?? []
+      const filtered = fuzzyFilterSort(list, trigger.query, (s) => s.name, {
+        secondaryText: (s) => s.description ?? "",
+      })
+      return {
+        items: filtered.map((skill) => ({ kind: "skill" as const, skill })),
+        loading: false,
         error: null,
-        emptyMessage: "",
+        emptyMessage:
+          list.length === 0 ? t("noSkills") : t("noSkillMatches", { query: trigger.query }),
       }
-    )
-  }, [trigger, slashCommands, fileList, t, tMemory, tAgent, mentionables])
+    }
+    if (trigger.kind === "preset") {
+      const list = chatPresets ?? []
+      const filtered = fuzzyFilterSort(list, trigger.query, (p) => p.name, {
+        secondaryText: (p) => p.description ?? "",
+      })
+      return {
+        items: filtered.map((preset) => ({ kind: "preset" as const, preset })),
+        loading: false,
+        error: null,
+        emptyMessage:
+          list.length === 0 ? t("noPresets") : t("noPresetMatches", { query: trigger.query }),
+      }
+    }
+    if (trigger.kind === "wfNode" || trigger.kind === "wfEdge") {
+      const wantType = trigger.kind === "wfNode" ? "node" : "edge"
+      const list = (workflowElements ?? []).filter((el) => el.type === wantType)
+      // Fuzzy over the pre-lowercased haystack (id + label + kind + endpoints).
+      const filtered = fuzzyFilterSort(list, trigger.query, (el) => el.searchText)
+      return {
+        items: filtered.map((element) => ({ kind: "wfElement" as const, element })),
+        loading: false,
+        error: null,
+        emptyMessage:
+          list.length === 0
+            ? wantType === "node"
+              ? t("noWorkflowNodes")
+              : t("noWorkflowEdges")
+            : wantType === "node"
+              ? t("noWorkflowNodeMatches", { query: trigger.query })
+              : t("noWorkflowEdgeMatches", { query: trigger.query }),
+      }
+    }
+    // file (and combined @ mode: subagents on top, then workspace files)
+    const base = fileList ?? {
+      items: [] as PopoverItem[],
+      loading: true,
+      error: null as string | null,
+      emptyMessage: "",
+    }
+    const agentItems: PopoverItem[] =
+      chatAgents && chatAgents.length > 0
+        ? filterSubagents(chatAgents, trigger.query).map((target) => ({
+            kind: "subagent" as const,
+            target,
+          }))
+        : []
+    if (agentItems.length === 0) return base
+    return {
+      items: [...agentItems, ...base.items],
+      loading: base.loading,
+      // Agents are showing — never surface a file-search error (e.g. no
+      // workspace in web mode) that would replace the whole list. Files just
+      // don't appear in that case; the agent section still works.
+      error: null,
+      emptyMessage: base.emptyMessage,
+    }
+  }, [
+    trigger,
+    slashQuery,
+    deferredSlashQuery,
+    slashCommands,
+    fileList,
+    t,
+    tMemory,
+    tAgent,
+    mentionables,
+    chatAgents,
+    chatSkills,
+    chatPresets,
+    workflowElements,
+    recentCommands,
+    pinnedCommands,
+  ])
+
+  // A changed search result set should always start from its most relevant
+  // command. Deferring the query keeps large plugin/custom registries from
+  // blocking keystrokes while preserving deterministic keyboard selection.
+  useEffect(() => {
+    if (triggerKind === "slash") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setHighlight(0)
+    }
+  }, [slashQuery, deferredSlashQuery, triggerKind])
 
   // Clamp the highlight whenever the visible list shrinks below it. The
   // updater form means the clamp is idempotent if it fires multiple times.
@@ -221,28 +470,59 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
     )
   }, [displayList.items.length])
 
-  useImperativeHandle(
-    ref,
-    () => ({
-      navigate: (delta) => {
-        setHighlight((h) => {
-          if (displayList.items.length === 0) return h
-          const next = (h + delta + displayList.items.length) % displayList.items.length
-          return next
-        })
-      },
-      confirm: () => {
-        const item = displayList.items[highlight]
-        if (!item) return false
-        onPick(item)
-        return true
-      },
-    }),
-    [displayList.items, highlight, onPick]
+  // Keep the highlighted row in view while navigating with the keyboard —
+  // the list caps at max-h-72 and long result sets would otherwise scroll
+  // the selection out of sight.
+  useEffect(() => {
+    const el = listRef.current?.querySelector<HTMLElement>(`[data-index="${highlight}"]`)
+    // `scrollIntoView` is unimplemented in jsdom and absent on very old
+    // engines — guard the method, not just the element.
+    el?.scrollIntoView?.({ block: "nearest" })
+  }, [highlight, displayList.items.length])
+
+  // Surface the highlighted workflow element to the composer so it can pulse
+  // the matching node on the canvas. Fires with `null` when the highlight is on
+  // a non-workflow row or the popover closes (the list empties → item is
+  // undefined). No-op unless a workflow composer wired `onHighlightElement`.
+  useEffect(() => {
+    if (!onHighlightElement) return
+    const item = displayList.items[highlight]
+    onHighlightElement(item && item.kind === "wfElement" ? item.element : null)
+  }, [highlight, displayList.items, onHighlightElement])
+
+  const navigate = useCallback(
+    (delta: number) => {
+      setHighlight((h) => {
+        if (displayList.items.length === 0) return h
+        return (h + delta + displayList.items.length) % displayList.items.length
+      })
+    },
+    [displayList.items.length]
   )
+  const confirm = useCallback(() => {
+    const item = displayList.items[highlight]
+    if (!item) return false
+    onPick(item)
+    return true
+  }, [displayList.items, highlight, onPick])
+
+  useImperativeHandle(ref, () => ({ navigate, confirm }), [navigate, confirm])
 
   const open = trigger !== null && anchor !== null
   const title = useMemo(() => triggerTitle(trigger?.kind, t, tAgent), [trigger?.kind, t, tAgent])
+  const argumentCommand =
+    trigger?.kind === "slash" && trigger.argumentQuery !== undefined
+      ? slashCommands.find((command) => command.name === trigger.query)
+      : undefined
+  const showingArgumentSuggestions =
+    argumentCommand !== undefined && commandArgumentOptions(argumentCommand).length > 0
+  // O(1) pin lookups per row instead of a linear scan of pinnedCommands.
+  const pinnedSet = useMemo(() => new Set(pinnedCommands ?? []), [pinnedCommands])
+  // Hoisted out of the per-row header check so it isn't recomputed N times.
+  const hasSubagentSection = useMemo(
+    () => displayList.items.some((i) => i.kind === "subagent"),
+    [displayList.items]
+  )
 
   return (
     <Popover open={open} onOpenChange={(v) => (!v ? onDismiss() : undefined)}>
@@ -251,45 +531,151 @@ export const ComposerPopover = forwardRef<ComposerPopoverHandle, Props>(function
         side="top"
         align="start"
         sideOffset={8}
-        className="w-[480px] max-w-[90vw] p-0"
+        // The command surface is a visual extension of the composer, so both
+        // share the exact anchor width at every reading-column/container size.
+        className="w-[var(--radix-popper-anchor-width)] overflow-hidden rounded-xl border-border/70 bg-popover/95 p-0 shadow-xl backdrop-blur-xl duration-200 ease-out motion-reduce:animate-none motion-reduce:duration-0"
         // Don't steal focus from the textarea.
         onOpenAutoFocus={(e) => e.preventDefault()}
         onCloseAutoFocus={(e) => e.preventDefault()}
       >
-        <div className="flex items-center gap-2 border-b px-3 py-2 text-xs text-muted-foreground">
-          {title.icon}
-          <span className="flex-1 truncate">{title.label}</span>
-          {displayList.loading ? <span>{t("searchingShort")}</span> : null}
-        </div>
+        {trigger?.kind === "slash" ? (
+          <div className="border-b bg-muted/20 p-2">
+            <div className="flex h-10 items-center gap-2 rounded-lg border border-input/70 bg-background/80 px-3 shadow-xs transition-[border-color,box-shadow] duration-200 focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/20 motion-reduce:transition-none">
+              <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
+              <input
+                aria-label={
+                  showingArgumentSuggestions && argumentCommand
+                    ? t("searchArgumentsAria", { name: argumentCommand.name })
+                    : t("searchAria")
+                }
+                autoComplete="off"
+                className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                onBlur={() => setSlashSearch(null)}
+                onChange={(event) => setSlashSearch(event.currentTarget.value)}
+                onFocus={() => setSlashSearch(trigger.argumentQuery ?? trigger.query)}
+                onKeyDown={(event) => {
+                  if (event.nativeEvent.isComposing) return
+                  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                    event.preventDefault()
+                    navigate(event.key === "ArrowDown" ? 1 : -1)
+                    return
+                  }
+                  if (event.key === "Enter" || event.key === "Tab") {
+                    if (confirm()) event.preventDefault()
+                    return
+                  }
+                  if (event.key === "Escape") {
+                    // Radix owns Escape dismissal and emits one onOpenChange(false).
+                    // Calling onDismiss here as well would double-fire the callback.
+                    return
+                  }
+                }}
+                placeholder={
+                  showingArgumentSuggestions
+                    ? t("searchArgumentsPlaceholder")
+                    : t("searchPlaceholder")
+                }
+                spellCheck={false}
+                type="search"
+                value={slashQuery}
+              />
+              <KbdGroup aria-hidden className="hidden sm:inline-flex">
+                <Kbd>↑</Kbd>
+                <Kbd>↓</Kbd>
+                <Kbd>↵</Kbd>
+              </KbdGroup>
+            </div>
+            <div className="flex items-center gap-2 px-1 pt-2 text-[11px] text-muted-foreground">
+              {title.icon}
+              <span className="font-medium">
+                {showingArgumentSuggestions && argumentCommand
+                  ? t("argumentTitle", { name: argumentCommand.name })
+                  : title.label}
+              </span>
+              <span className="ml-auto tabular-nums">
+                {t(showingArgumentSuggestions ? "suggestionCount" : "resultCount", {
+                  count: displayList.items.length,
+                })}
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 border-b bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+            {title.icon}
+            <span className="flex-1 truncate">{title.label}</span>
+            {displayList.loading ? <span>{t("searchingShort")}</span> : null}
+          </div>
+        )}
         {trigger?.kind === "bash" ? (
           <BashHint query={trigger.query} />
         ) : displayList.error ? (
           <div className="px-3 py-3 text-sm text-destructive">{displayList.error}</div>
         ) : displayList.items.length === 0 ? (
-          <div className="px-3 py-3 text-sm text-muted-foreground">
-            {displayList.loading ? t("searching") : displayList.emptyMessage}
+          <div className="flex min-h-28 flex-col items-center justify-center gap-2 px-6 py-7 text-center text-sm text-muted-foreground">
+            {!displayList.loading && trigger?.kind === "slash" ? (
+              <span className="rounded-full bg-muted p-2">
+                <SearchXIcon className="size-4" />
+              </span>
+            ) : null}
+            <span>{displayList.loading ? t("searching") : displayList.emptyMessage}</span>
           </div>
         ) : (
-          <ul className="max-h-72 overflow-auto py-1">
-            {displayList.items.map((item, idx) => (
-              <li
-                key={itemKey(item, idx)}
-                className={cn(
-                  "flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm",
-                  idx === highlight ? "bg-accent text-accent-foreground" : "hover:bg-accent/40"
-                )}
-                onMouseEnter={() => setHighlight(idx)}
-                onMouseDown={(e) => {
-                  // Prevent the textarea blur that would otherwise fire.
-                  e.preventDefault()
-                  onPick(item)
-                }}
-              >
-                <ItemRow item={item} />
-              </li>
-            ))}
+          <ul
+            ref={listRef}
+            className="max-h-80 scroll-py-2 overflow-y-auto overscroll-contain p-1.5"
+          >
+            {displayList.items.map((item, idx) => {
+              // Section headers are non-selectable (no `data-index`, absent from
+              // the flat item array) so keyboard nav still walks every real row.
+              // Two sources: combined `@` mode (subagents/files by kind change),
+              // and the empty-query slash view (Pinned/Recent/category groups).
+              const prev = idx === 0 ? undefined : displayList.items[idx - 1]
+              const header = sectionHeader(item, prev, hasSubagentSection, t)
+              return (
+                <Fragment key={itemKey(item, idx)}>
+                  {header ? (
+                    <li
+                      aria-hidden
+                      className="sticky top-0 bg-popover/95 px-2.5 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground backdrop-blur-sm"
+                    >
+                      {header}
+                    </li>
+                  ) : null}
+                  <li
+                    data-index={idx}
+                    data-active={idx === highlight ? "true" : undefined}
+                    className={cn(
+                      "group/row flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition-colors duration-150 motion-reduce:transition-none",
+                      idx === highlight ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
+                    )}
+                    onMouseEnter={() => setHighlight(idx)}
+                    onMouseDown={(e) => {
+                      // Prevent the textarea blur that would otherwise fire.
+                      e.preventDefault()
+                      onPick(item)
+                    }}
+                  >
+                    <ItemRow
+                      item={item}
+                      pinned={item.kind === "slash" ? pinnedSet.has(item.command.name) : false}
+                      onTogglePin={onTogglePin}
+                    />
+                  </li>
+                </Fragment>
+              )
+            })}
           </ul>
         )}
+        {trigger?.kind === "slash" || trigger?.kind === "skill" ? (
+          <div className="flex items-center gap-2 border-t bg-muted/15 px-3 py-2 text-[11px] leading-4 text-muted-foreground">
+            {trigger.kind === "slash" ? (
+              <ListPlusIcon className="size-3.5 shrink-0" />
+            ) : (
+              <SparklesIcon className="size-3.5 shrink-0" />
+            )}
+            <span>{t(trigger.kind === "slash" ? "multiCommandHint" : "multiSkillHint")}</span>
+          </div>
+        ) : null}
       </PopoverContent>
     </Popover>
   )
@@ -305,7 +691,7 @@ function triggerTitle(
 } {
   switch (kind) {
     case "slash":
-      return { icon: <SlashIcon className="size-3.5" />, label: t("slashTitle") }
+      return { icon: <SquareTerminalIcon className="size-3.5" />, label: t("slashTitle") }
     case "file":
       return { icon: <FileIcon className="size-3.5" />, label: t("fileTitle") }
     case "memory":
@@ -315,6 +701,14 @@ function triggerTitle(
       }
     case "bash":
       return { icon: <TerminalIcon className="size-3.5" />, label: t("bashTitle") }
+    case "skill":
+      return { icon: <SparklesIcon className="size-3.5" />, label: t("skillTitle") }
+    case "preset":
+      return { icon: <WandSparklesIcon className="size-3.5" />, label: t("presetTitle") }
+    case "wfNode":
+      return { icon: <BoxIcon className="size-3.5" />, label: t("wfNodeTitle") }
+    case "wfEdge":
+      return { icon: <SplineIcon className="size-3.5" />, label: t("wfEdgeTitle") }
     case "agent":
       return {
         icon: <AtSignIcon className="size-3.5" />,
@@ -323,6 +717,31 @@ function triggerTitle(
     default:
       return { icon: null, label: "" }
   }
+}
+
+/**
+ * Section-header label for a row, or null when no header precedes it. Covers the
+ * empty-query slash grouping (Pinned/Recent/category) and the combined-`@` mode
+ * (subagents/files). Headers carry no `data-index`, so keyboard nav is unaffected.
+ */
+function sectionHeader(
+  item: PopoverItem,
+  prev: PopoverItem | undefined,
+  hasSubagentSection: boolean,
+  t: (key: string, params?: Record<string, string | number | Date>) => string
+): string | null {
+  if (item.kind === "slash" && item.group) {
+    const prevGroup = prev && prev.kind === "slash" ? prev.group : undefined
+    return item.group !== prevGroup ? slashGroupLabel(item.group, t, safeLookup) : null
+  }
+  if (
+    hasSubagentSection &&
+    item.kind !== prev?.kind &&
+    (item.kind === "subagent" || item.kind === "file")
+  ) {
+    return item.kind === "subagent" ? t("agentsSection") : t("filesSection")
+  }
+  return null
 }
 
 function safeLookup(
@@ -340,32 +759,177 @@ function safeLookup(
   return fallback
 }
 
+function commandArgumentOptions(command: SlashCommand | undefined): readonly string[] {
+  if (!command) return []
+  if (command.argumentOptions && command.argumentOptions.length > 0) {
+    return command.argumentOptions
+  }
+  return command.params?.find((param) => param.type === "enum")?.options ?? []
+}
+
+function argumentHintParts(hint: string | undefined): string[] {
+  if (!hint) return []
+  const trimmed = hint.trim()
+  const hasWrapper =
+    (trimmed.startsWith("<") && trimmed.endsWith(">")) ||
+    (trimmed.startsWith("[") && trimmed.endsWith("]"))
+  const unwrapped = hasWrapper ? trimmed.slice(1, -1) : trimmed
+  return unwrapped
+    .split("|")
+    .map((part) => part.trim())
+    .filter(Boolean)
+}
+
+function commandIconKey(command: SlashCommand): string {
+  if (command.name === "loop") return "loop"
+  if (command.scope === "plugin" || command.category === "plugins") return "plugins"
+  if (command.scope === "project" || command.scope === "user") return "custom"
+  return command.category ?? "other"
+}
+
+function CommandCategoryIcon({ command }: { command: SlashCommand }) {
+  const className = "size-4"
+  switch (commandIconKey(command)) {
+    case "chat":
+      return <MessageCircleMoreIcon className={className} />
+    case "diagnostics":
+      return <ActivityIcon className={className} />
+    case "system":
+      return <Settings2Icon className={className} />
+    case "goal":
+      return <TargetIcon className={className} />
+    case "help":
+      return <CircleHelpIcon className={className} />
+    case "plugins":
+      return <BlocksIcon className={className} />
+    case "template":
+      return <WandSparklesIcon className={className} />
+    case "loop":
+      return <Repeat2Icon className={className} />
+    case "custom":
+      return <FileCode2Icon className={className} />
+    default:
+      return <SquareTerminalIcon className={className} />
+  }
+}
+
 function itemKey(item: PopoverItem, idx: number): string {
   if (item.kind === "slash") return `slash-${item.command.name}`
+  if (item.kind === "slashArgument") {
+    return `slash-argument-${item.command.name}-${item.value}`
+  }
   if (item.kind === "file") return `file-${item.entry.absolutePath}`
   if (item.kind === "memory") return `memory-${item.scope}`
   if (item.kind === "agent") return `agent-${item.target.id}`
+  if (item.kind === "subagent") return `subagent-${item.target.id}`
+  if (item.kind === "skill") return `skill-${item.skill.id}`
+  if (item.kind === "preset") return `preset-${item.preset.id}`
+  if (item.kind === "wfElement") return `wf-${item.element.type}-${item.element.id}`
   return `idx-${idx}`
 }
 
-function ItemRow({ item }: { item: PopoverItem }) {
+// Memoised so navigating the highlight (a parent-level class change) only
+// re-renders the two affected rows, not the entire candidate list.
+const ItemRow = memo(function ItemRow({
+  item,
+  pinned,
+  onTogglePin,
+}: {
+  item: PopoverItem
+  pinned: boolean
+  onTogglePin?: (name: string) => void
+}) {
   const t = useTranslations("chat.composer.popover")
   const tMemory = useTranslations("chat.composer.memory")
   if (item.kind === "slash") {
     const c = item.command
+    const hintParts = argumentHintParts(c.argumentHint)
     return (
       <>
-        <SlashIcon className="size-4 shrink-0 text-muted-foreground" />
-        <span className={cn("font-mono text-xs", c.disabled && "opacity-60")}>/{c.name}</span>
-        {c.argumentHint ? (
-          <span className="text-xs text-muted-foreground">{c.argumentHint}</span>
-        ) : null}
         <span
-          className={cn("ml-auto truncate text-xs text-muted-foreground", c.disabled && "italic")}
+          className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/70 text-muted-foreground transition-colors group-data-[active=true]/row:bg-background/70 group-data-[active=true]/row:text-foreground motion-reduce:transition-none"
+          data-command-icon={commandIconKey(c)}
         >
-          {c.disabled ? t("comingSoon") : c.description}
+          <CommandCategoryIcon command={c} />
         </span>
-        <span className="rounded border px-1 text-[10px] text-muted-foreground">{c.scope}</span>
+        <span className="min-w-0 flex-1">
+          <span className="flex min-w-0 items-baseline gap-2">
+            <span
+              className={cn("shrink-0 font-mono text-xs font-medium", c.disabled && "opacity-60")}
+            >
+              /<MatchHighlight text={c.name} positions={item.positions ?? []} />
+            </span>
+            {hintParts.length > 0 ? (
+              <>
+                {" "}
+                <span
+                  className="flex min-w-0 items-center gap-1 overflow-hidden"
+                  title={c.argumentHint}
+                >
+                  {hintParts.slice(0, 4).map((part) => (
+                    <span
+                      key={part}
+                      className="shrink-0 rounded-md border border-border/70 bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] leading-none text-muted-foreground"
+                      data-slot="command-argument"
+                    >
+                      {part}
+                    </span>
+                  ))}
+                  {hintParts.length > 4 ? (
+                    <span className="shrink-0 text-[10px] text-muted-foreground">
+                      +{hintParts.length - 4}
+                    </span>
+                  ) : null}
+                </span>
+              </>
+            ) : null}
+          </span>
+          <span
+            className={cn(
+              "block truncate text-xs leading-5 text-muted-foreground",
+              c.disabled && "italic"
+            )}
+          >
+            {c.disabled ? t("comingSoon") : c.description}
+          </span>
+        </span>
+        {onTogglePin ? (
+          <button
+            type="button"
+            aria-label={
+              pinned ? t("unpinAction", { name: c.name }) : t("pinAction", { name: c.name })
+            }
+            className={cn(
+              "shrink-0 rounded p-0.5 text-muted-foreground transition-opacity hover:text-foreground",
+              pinned
+                ? "opacity-100"
+                : // Reveal on row hover / keyboard-highlight at pointer-fine; always
+                  // visible on touch (no hover, no keyboard) so pinning is reachable.
+                  "opacity-0 group-hover/row:opacity-100 group-data-[active=true]/row:opacity-100 [@media(hover:none)]:opacity-100"
+            )}
+            onMouseDown={(e) => {
+              // A pin click must not pick/insert the command underneath it.
+              e.preventDefault()
+              e.stopPropagation()
+              onTogglePin(c.name)
+            }}
+          >
+            {pinned ? <PinOffIcon className="size-3.5" /> : <PinIcon className="size-3.5" />}
+          </button>
+        ) : null}
+        <Badge variant="outline" className="shrink-0 px-1.5 text-[10px] font-normal">
+          {c.scope}
+        </Badge>
+      </>
+    )
+  }
+  if (item.kind === "slashArgument") {
+    return (
+      <>
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/70 text-muted-foreground">
+          <CornerDownRightIcon className="size-4" />
+        </span>
+        <span className="font-mono text-sm font-medium">{item.value}</span>
       </>
     )
   }
@@ -399,14 +963,58 @@ function ItemRow({ item }: { item: PopoverItem }) {
   if (item.kind === "agent") {
     return <AgentMentionRow target={item.target} />
   }
+  if (item.kind === "subagent") {
+    return <SubagentMentionRow target={item.target} />
+  }
+  if (item.kind === "skill") {
+    return (
+      <>
+        <SparklesIcon className="size-4 shrink-0 text-muted-foreground" />
+        <span className="truncate font-medium">{item.skill.name}</span>
+        {item.skill.description ? (
+          <span className="ml-auto truncate text-xs text-muted-foreground">
+            {item.skill.description}
+          </span>
+        ) : null}
+      </>
+    )
+  }
+  if (item.kind === "preset") {
+    const p = item.preset
+    return (
+      <>
+        <span aria-hidden className="shrink-0 text-sm">
+          {p.icon ? p.icon : <WandSparklesIcon className="size-4 text-muted-foreground" />}
+        </span>
+        <span className="truncate font-medium">{p.name}</span>
+        {p.description ? (
+          <span className="ml-auto truncate text-xs text-muted-foreground">{p.description}</span>
+        ) : null}
+      </>
+    )
+  }
+  if (item.kind === "wfElement") {
+    const el = item.element
+    const Icon = el.type === "node" ? BoxIcon : SplineIcon
+    return (
+      <>
+        <Icon className="size-4 shrink-0 text-muted-foreground" />
+        <span className="truncate font-medium">{el.label}</span>
+        <span className="ml-auto shrink-0 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+          {el.kind}
+        </span>
+      </>
+    )
+  }
   return null
-}
+})
 
 function BashHint({ query }: { query: string }) {
   const t = useTranslations("chat.composer.popover")
   return (
     <div className="px-3 py-3 text-sm text-muted-foreground">
       <p className="mb-1">
+        {/* i18n-exempt: keyboard key cap, locale-invariant */}
         {t("bashHintPrefix")} <kbd>Enter</kbd> {t("bashHintSuffix")}
       </p>
       <code className="block truncate rounded bg-muted px-2 py-1 font-mono text-xs">

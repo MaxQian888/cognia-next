@@ -2,18 +2,20 @@
  * @jest-environment jsdom
  */
 
-import { listen, emit } from "@tauri-apps/api/event"
+import { invoke } from "@tauri-apps/api/core"
+import { listen } from "@tauri-apps/api/event"
 import {
   subscribeOneBotEvents,
   subscribeOneBotOpen,
   subscribeOneBotClose,
   subscribeOneBotResponses,
   sendToOneBot,
+  createReverseWsTransport,
 } from "./transport-reverse-ws"
 import type { SerializedOneBotCall } from "./serialize"
 
 const mockListen = listen as jest.Mock
-const mockEmit = emit as jest.Mock
+const mockInvoke = invoke as jest.Mock
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -23,7 +25,6 @@ type ListenerMap = Map<string, ((event: { payload: string }) => void)[]>
 
 function createEventBus(): {
   listenImpl: jest.Mock
-  emitImpl: jest.Mock
   trigger: (topic: string, payload: string) => void
 } {
   const listeners: ListenerMap = new Map()
@@ -36,14 +37,12 @@ function createEventBus(): {
       return jest.fn() // unlisten
     })
 
-  const emitImpl = jest.fn().mockResolvedValue(undefined)
-
   function trigger(topic: string, payload: string) {
     const handlers = listeners.get(topic) ?? []
     for (const h of handlers) h({ payload })
   }
 
-  return { listenImpl, emitImpl, trigger }
+  return { listenImpl, trigger }
 }
 
 // ---------------------------------------------------------------------------
@@ -53,7 +52,7 @@ function createEventBus(): {
 describe("subscribeOneBotEvents", () => {
   beforeEach(() => {
     mockListen.mockReset()
-    mockEmit.mockReset()
+    mockInvoke.mockReset()
   })
 
   it("subscribes to the correct topic and calls onEvent with parsed JSON", async () => {
@@ -146,13 +145,13 @@ describe("subscribeOneBotClose", () => {
 describe("sendToOneBot", () => {
   beforeEach(() => {
     mockListen.mockReset()
-    mockEmit.mockReset()
+    mockInvoke.mockReset()
   })
 
   it("emits the call to the send topic and resolves on echo-matched response", async () => {
     const bus = createEventBus()
     mockListen.mockImplementation(bus.listenImpl)
-    mockEmit.mockImplementation(bus.emitImpl)
+    mockInvoke.mockResolvedValue(undefined)
 
     await subscribeOneBotResponses("adapter-rpc")
 
@@ -163,7 +162,7 @@ describe("sendToOneBot", () => {
     }
 
     // Simulate a response arriving shortly after the emit
-    mockEmit.mockImplementation(async () => {
+    mockInvoke.mockImplementation(async () => {
       setTimeout(() => {
         bus.trigger(
           "connectors://onebot/adapter-rpc/response",
@@ -177,14 +176,14 @@ describe("sendToOneBot", () => {
     expect(result.echo).toBe("echo-001")
 
     // Verify the send topic was called
-    expect(mockEmit).toHaveBeenCalledWith(
-      "connectors://onebot/adapter-rpc/send",
-      JSON.stringify(call)
-    )
+    expect(mockInvoke).toHaveBeenCalledWith("connectors_onebot_send", {
+      adapterId: "adapter-rpc",
+      callJson: JSON.stringify(call),
+    })
   })
 
   it("rejects on timeout", async () => {
-    mockEmit.mockResolvedValue(undefined)
+    mockInvoke.mockResolvedValue(undefined)
     mockListen.mockResolvedValue(jest.fn())
 
     const call: SerializedOneBotCall = {
@@ -195,4 +194,90 @@ describe("sendToOneBot", () => {
 
     await expect(sendToOneBot("adapter-timeout", call, 50)).rejects.toThrow("timeout")
   }, 5000)
+})
+
+// ---------------------------------------------------------------------------
+// createReverseWsTransport — liveness-gated RPC
+// ---------------------------------------------------------------------------
+
+describe("createReverseWsTransport", () => {
+  beforeEach(() => {
+    mockListen.mockReset()
+    mockInvoke.mockReset()
+    mockInvoke.mockResolvedValue(undefined)
+  })
+
+  const call = (echo: string): SerializedOneBotCall => ({
+    action: "get_login_info",
+    echo,
+    params: {},
+  })
+
+  const handlers = () => ({ onOpen: jest.fn(), onClose: jest.fn(), onEvent: jest.fn() })
+
+  it("fails RPCs fast (no 10s timeout, no emit) while no client is connected", async () => {
+    const bus = createEventBus()
+    mockListen.mockImplementation(bus.listenImpl)
+
+    const transport = createReverseWsTransport("rt-idle")
+    await transport.start(handlers())
+
+    await expect(transport.send(call("e-idle"))).rejects.toThrow(/no connected client/)
+    expect(mockInvoke).not.toHaveBeenCalled()
+    await transport.stop()
+  })
+
+  it("allows RPCs after the open event and fails fast again after close", async () => {
+    const bus = createEventBus()
+    mockListen.mockImplementation(bus.listenImpl)
+    mockInvoke.mockImplementation(async (_name: string, args: { callJson: string }) => {
+      const c = JSON.parse(args.callJson) as { echo: string }
+      setTimeout(() => {
+        bus.trigger(
+          "connectors://onebot/rt-live/response",
+          JSON.stringify({ status: "ok", retcode: 0, data: {}, echo: c.echo })
+        )
+      }, 0)
+    })
+
+    const h = handlers()
+    const transport = createReverseWsTransport("rt-live")
+    await transport.start(h)
+
+    bus.trigger("connectors://onebot/rt-live/open", "")
+    expect(h.onOpen).toHaveBeenCalledTimes(1)
+    await expect(transport.send(call("e-live"))).resolves.toMatchObject({ status: "ok" })
+
+    bus.trigger("connectors://onebot/rt-live/close", "")
+    expect(h.onClose).toHaveBeenCalledTimes(1)
+    await expect(transport.send(call("e-closed"))).rejects.toThrow(/no connected client/)
+
+    await transport.stop()
+  })
+
+  it("treats an inbound event frame as proof of a live client", async () => {
+    const bus = createEventBus()
+    mockListen.mockImplementation(bus.listenImpl)
+    mockInvoke.mockImplementation(async (_name: string, args: { callJson: string }) => {
+      const c = JSON.parse(args.callJson) as { echo: string }
+      setTimeout(() => {
+        bus.trigger(
+          "connectors://onebot/rt-evt/response",
+          JSON.stringify({ status: "ok", retcode: 0, data: {}, echo: c.echo })
+        )
+      }, 0)
+    })
+
+    const h = handlers()
+    const transport = createReverseWsTransport("rt-evt")
+    await transport.start(h)
+
+    // No open event observed (e.g. adapter restarted mid-connection) — an
+    // event frame still marks the client as connected.
+    bus.trigger("connectors://onebot/rt-evt/event", JSON.stringify({ post_type: "message" }))
+    expect(h.onEvent).toHaveBeenCalledTimes(1)
+    await expect(transport.send(call("e-evt"))).resolves.toMatchObject({ status: "ok" })
+
+    await transport.stop()
+  })
 })

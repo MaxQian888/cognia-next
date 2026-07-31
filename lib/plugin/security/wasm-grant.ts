@@ -10,6 +10,11 @@
  */
 
 import { loggers } from "../core/logger"
+import {
+  clearWasmGrantRecords,
+  listWasmGrantRecords,
+  replaceWasmGrantRecords,
+} from "@/lib/db/wasm-grant-ledger"
 import { getPermissionGuard } from "./permission-guard"
 import type { PluginPermission } from "@/types/plugin"
 
@@ -34,9 +39,18 @@ export interface ApplyWasmGrantOptions {
 }
 
 const PREOPEN_STORAGE_KEY = "cognia:wasm-plugin:preopens"
+export const WASM_GRANT_DRIFT_WARNING =
+  "WASM preopen grants differ from the active plugin manifest; denied drifted paths until the user reviews permissions."
 
 interface PreopenLedger {
   [pluginId: string]: string[]
+}
+
+export interface WasmGrantReconciliation {
+  allowedPreopens: string[]
+  deniedLedgerPreopens: string[]
+  ungrantedManifestPreopens: string[]
+  warning?: string
 }
 
 function readPreopenLedger(): PreopenLedger {
@@ -73,10 +87,10 @@ function writePreopenLedger(ledger: PreopenLedger): void {
  * `plugin_wasm_load` command so the WASI ctx is built with the right
  * preopens.
  */
-export function applyWasmCapabilityGrant(
+export async function applyWasmCapabilityGrant(
   decision: WasmCapabilityGrantDecision,
   options: ApplyWasmGrantOptions = {}
-): { permissions: PluginPermission[]; preopens: string[] } {
+): Promise<{ permissions: PluginPermission[]; preopens: string[] }> {
   const guard = getPermissionGuard()
   const grantedBy = options.grantedBy ?? "user"
   // Snapshot existing grants so we can revoke anything the user removed
@@ -93,9 +107,12 @@ export function applyWasmCapabilityGrant(
     }
   }
 
+  const sortedPreopens = Array.from(new Set(decision.grantedPreopens)).sort()
+  await replaceWasmGrantRecords(decision.pluginId, sortedPreopens, grantedBy)
+
   const ledger = readPreopenLedger()
   if (decision.grantedPreopens.length > 0) {
-    ledger[decision.pluginId] = [...decision.grantedPreopens].sort()
+    ledger[decision.pluginId] = sortedPreopens
   } else {
     delete ledger[decision.pluginId]
   }
@@ -112,21 +129,72 @@ export function applyWasmCapabilityGrant(
  * re-launching an already-installed WASM plugin so the host's WASI ctx
  * preopens are reapplied.
  */
-export function getGrantedPreopens(pluginId: string): string[] {
+export async function getGrantedPreopens(pluginId: string): Promise<string[]> {
+  const records = await listWasmGrantRecords(pluginId)
+  if (records.length > 0) {
+    return records.map((record) => record.preopen).sort()
+  }
+
   const ledger = readPreopenLedger()
-  return ledger[pluginId] ?? []
+  const mirrored = Array.from(new Set(ledger[pluginId] ?? [])).sort()
+  if (mirrored.length > 0) {
+    await replaceWasmGrantRecords(pluginId, mirrored, "localStorage")
+  }
+  return mirrored
 }
 
 /**
  * Wipe every grant and preopen for a plugin. Called by the manager during
  * uninstall + by the per-plugin "revoke all" UI.
  */
-export function clearWasmCapabilityGrant(pluginId: string): void {
+export async function clearWasmCapabilityGrant(pluginId: string): Promise<void> {
   const guard = getPermissionGuard()
   guard.revokeAll(pluginId)
+  await clearWasmGrantRecords(pluginId)
   const ledger = readPreopenLedger()
   if (pluginId in ledger) {
     delete ledger[pluginId]
     writePreopenLedger(ledger)
+  }
+}
+
+export async function reconcileWasmGrantLedgerWithManifest(
+  pluginId: string,
+  manifestPreopens: readonly string[]
+): Promise<WasmGrantReconciliation> {
+  const granted = await getGrantedPreopens(pluginId)
+  const manifest = Array.from(
+    new Set(manifestPreopens.map((path) => path.trim()).filter(Boolean))
+  ).sort()
+  const grantedSet = new Set(granted)
+  const manifestSet = new Set(manifest)
+  const allowedPreopens = granted.filter((path) => manifestSet.has(path))
+  const deniedLedgerPreopens = granted.filter((path) => !manifestSet.has(path))
+  const ungrantedManifestPreopens = manifest.filter((path) => !grantedSet.has(path))
+  const drifted = deniedLedgerPreopens.length > 0 || ungrantedManifestPreopens.length > 0
+  if (drifted) {
+    wasmGrantLogger.warn(WASM_GRANT_DRIFT_WARNING, {
+      pluginId,
+      deniedLedgerCount: deniedLedgerPreopens.length,
+      ungrantedManifestCount: ungrantedManifestPreopens.length,
+    })
+  }
+  return {
+    allowedPreopens,
+    deniedLedgerPreopens,
+    ungrantedManifestPreopens,
+    warning: drifted ? WASM_GRANT_DRIFT_WARNING : undefined,
+  }
+}
+
+export async function verifyPreopenAllowedForCall(
+  pluginId: string,
+  loadedPreopens: readonly string[]
+): Promise<void> {
+  if (loadedPreopens.length === 0) return
+  const granted = new Set(await getGrantedPreopens(pluginId))
+  const denied = loadedPreopens.filter((preopen) => !granted.has(preopen))
+  if (denied.length > 0) {
+    throw new Error(`wasm-runtime: preopen access denied for ${pluginId}: ${denied.join(", ")}`)
   }
 }

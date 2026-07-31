@@ -7,7 +7,7 @@
 
 import type { ReactElement } from "react"
 import type { Artifact } from "@/types"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 export interface PluginArtifactRenderer {
   /** Stable id used for de-duplication when registered via plugin reload. */

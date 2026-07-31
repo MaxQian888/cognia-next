@@ -36,7 +36,7 @@ export function A2UIComparisonCards({
           {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
         </div>
       ) : null}
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 @md:grid-cols-2">
         {items.map((item) => {
           const card = (
             <Card className="h-full border-border/60 bg-background/80 text-left">
@@ -72,7 +72,7 @@ export function A2UIComparisonCards({
             <button
               key={item.id}
               type="button"
-              className="rounded-xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="cursor-pointer rounded-xl text-left transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none motion-reduce:hover:translate-y-0"
               onClick={() =>
                 onAction(component.itemClickAction!, {
                   itemId: item.id,

@@ -9,12 +9,6 @@ jest.mock("next-intl", () => ({
     vars ? `${key}:${JSON.stringify(vars)}` : key,
 }))
 
-// Toolbar pulls Tauri/native bridges + URL dialogs we don't care about
-// here — stub it so this test focuses on the search + filter + toggle
-// composition.
-jest.mock("../plugin-panel-toolbar", () => ({
-  PluginPanelToolbar: () => <div data-testid="plugin-panel-toolbar" />,
-}))
 jest.mock("../dialogs/plugin-category-sheet", () => ({
   PluginCategorySheet: ({ className }: { className?: string }) => (
     <div data-testid="plugin-category-sheet" className={className} />
@@ -63,11 +57,21 @@ describe("PluginLibraryHeader", () => {
     expect(usePluginsStore.getState().filterSheetOpen).toBe(true)
   })
 
-  it("renders the view toggle, sub-filter chips, and toolbar slots", () => {
+  it("renders the view toggle and sub-filter controls", () => {
     render(<PluginLibraryHeader />)
     expect(screen.getByTestId("plugin-library-view-toggle")).toBeInTheDocument()
     expect(screen.getByTestId("plugin-library-sub-filter")).toBeInTheDocument()
-    expect(screen.getByTestId("plugin-panel-toolbar")).toBeInTheDocument()
+  })
+
+  it("renders the first-class Sort control reflecting filters.sort", () => {
+    usePluginsStore.setState({
+      filters: { ...usePluginsStore.getState().filters, sort: "updated" },
+    })
+    render(<PluginLibraryHeader />)
+    const sort = screen.getByTestId("plugin-library-sort")
+    expect(sort).toBeInTheDocument()
+    // The trigger shows the active sort mode's label (sortMode.updated).
+    expect(sort.textContent).toContain("sortMode.updated")
   })
 
   it("renders the capability sheet trigger gated to lg:hidden so the rail is only fallback for narrow viewports", () => {

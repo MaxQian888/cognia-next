@@ -7,7 +7,8 @@
 // read through `useLiveQuery`; this store holds only UI intent.
 
 import { create } from "zustand"
-import { persist, createJSONStorage } from "zustand/middleware"
+import { persist } from "zustand/middleware"
+import { persistLocalStorage } from "@/stores/persist-storage"
 import { ROOT_FOLDER_ID } from "@/types/workflow/folder"
 
 export type WorkflowViewMode = "grid" | "list"
@@ -148,7 +149,7 @@ export const useWorkflowLibraryStore = create<WorkflowLibraryState>()(
     {
       name: "workflow-library-prefs",
       version: 1,
-      storage: createJSONStorage(() => localStorage),
+      storage: persistLocalStorage(),
       // Only the view/sort/filter preferences survive reloads. Folder, search,
       // and selection are session state and reset each load.
       partialize: (s) => ({ viewMode: s.viewMode, sort: s.sort, filters: s.filters }),

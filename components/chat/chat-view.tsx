@@ -1,9 +1,10 @@
 "use client"
 
-import { useCallback, useRef, type ReactNode, type Ref } from "react"
+import { useCallback, useEffect, useRef, type ReactNode, type Ref } from "react"
 import { useTranslations } from "next-intl"
 import { AlertTriangle, Loader2 } from "lucide-react"
-import { Composer, type ComposerHandle } from "./composer"
+import { Composer, type ComposerHandle, type ComposerWorkflowMention } from "./composer"
+import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import { ChatHeader } from "./chat-header"
 import { CharacterMissingBanner } from "./character-missing-banner"
 import {
@@ -12,19 +13,42 @@ import {
   type RecentSessionEntry,
   type WelcomeSection,
 } from "./empty-state"
-import { InlineError } from "./inline-error"
+import { DiagnosticCard, InlineError } from "@/components/error/diagnostic-card"
+import type { SettingsSectionId } from "@/components/settings/settings-nav-config"
 import { MessageList } from "./message-list"
+import { RunStatusBar } from "./run-status-bar"
+import { PlanApprovalDock } from "@/components/agent/plan/plan-approval-dock"
+import { PlanTrackerDock } from "@/components/agent/plan/plan-tracker-dock"
+import { useRunRecordPersistence } from "@/hooks/chat/use-run-record-persistence"
+import { useStableCallback } from "@/hooks/ui/use-stable-callback"
+import { FollowUpSuggestions } from "./follow-up-suggestions"
+import { useStarterSuggestions } from "@/hooks/chat/use-starter-suggestions"
 import { Button } from "@/components/ui/button"
 import { ExternalAgentSessionPanel } from "@/components/agent/external-agent/session-panel"
-import { useChatStore } from "@/stores/chat"
+import {
+  useChatStore,
+  useSessionHasMessages,
+  useSessionStatus,
+  useSessionMessages,
+  useSessionErrorMessage,
+  useSessionErrorDiagnostic,
+  useSessionMessagesLoading,
+  useSessionMessagesLoadError,
+  useIsAtStreamCap,
+} from "@/stores/chat"
 import { useSettingsStore } from "@/stores/settings"
 import { useCharacter } from "@/lib/data-hooks/context"
-import type { Character, ChatSession, SendContent } from "@/lib/claude/types"
+import type { Character, ChatSession, SendContent } from "@cognia/agent-config-types"
 import { toast } from "sonner"
 import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { mobileTransition } from "@/lib/ui/motion"
 import { useIsMobile } from "@/hooks/ui/use-mobile"
+import { WorkspaceChangesCard } from "./workspace-changes-card"
+import { useEffectiveCwd } from "@/hooks/chat/use-effective-cwd"
+import { ComputerUsePictureInPicture } from "./computer-use-picture-in-picture"
+import { consumePendingChatPrompt } from "@/lib/chat/pending-prompt"
+import { hasNoLeakingPii } from "@cognia/redact"
 
 /**
  * Attach `node` to a (possibly absent) callback or object ref. Defined at
@@ -38,8 +62,19 @@ function attachRef<T>(ref: Ref<T> | undefined, node: T | null): void {
 
 interface ChatPaneProps {
   activeSession: ChatSession | null
-  onSend: (content: SendContent) => Promise<void>
+  /**
+   * Session this pane is bound to. Defaults to `activeSession?.id`. In the
+   * multi-pane workspace each pane passes its own id so a background (split /
+   * unfocused-tab) pane reads + streams its own slice rather than the focused
+   * projection.
+   */
+  sessionId?: string
+  onSend: (content: SendContent, manifest?: readonly AttachmentManifestEntry[]) => Promise<void>
   onStop: () => Promise<void>
+  /** Interrupt the running turn and immediately replay the queued steer. */
+  onSteerNow?: () => Promise<void> | void
+  /** Replay the queued steer now without a turn boundary (errored/idle queue). */
+  onSteerFlush?: () => Promise<void> | void
   onRegenerate: () => Promise<void>
   onEditResend: (messageId: string, newContent: SendContent) => Promise<void>
   onCreate: () => void
@@ -55,8 +90,34 @@ interface ChatPaneProps {
    * member-list rail.
    */
   composerRef?: Ref<ComposerHandle>
+  /** Keep cached history readable while runtime writes are unavailable. */
+  composerDisabled?: boolean
   /** When provided, opens the mobile inline @-mention popover on `@`. */
   mobileMentionMembers?: readonly Character[]
+  /**
+   * Workflow-editor copilot wiring — forwarded to the `<Composer>` so `@`
+   * opens a workflow node/edge picker. Only the workflow chat tab passes this.
+   */
+  workflowMention?: ComposerWorkflowMention
+  /**
+   * Resume the chat turn after the user approves a plan in the plan-approval
+   * dock. The host switches the session permission mode to `mode`
+   * (acceptEdits / default / auto) and sends the resume prompt. When omitted
+   * the dock is not rendered (e.g. surfaces without a send pipeline).
+   */
+  onResumeAfterPlanApproval?: (
+    prompt: string,
+    mode: import("@/components/agent/plan/plan-approval-card").PlanResumeMode
+  ) => void | Promise<void>
+  /**
+   * "Keep planning" feedback channel: send `feedback` as a normal user turn
+   * (session stays in plan mode). Optional — keep-planning works without it.
+   */
+  onSendPlanFeedback?: (feedback: string) => void | Promise<void>
+  /** Compact split-view entry action rendered in the focused pane header. */
+  onSplitView?: () => void
+  /** Compact split-view exit action rendered in the secondary pane header. */
+  onExitSplit?: () => void
   /**
    * When false, the internal `<ChatHeader>` is omitted. The Inbox detail
    * panel uses this so its own `<ConversationHeader>` (mode + policy +
@@ -93,8 +154,11 @@ interface ChatPaneProps {
  */
 export function ChatPane({
   activeSession,
+  sessionId,
   onSend,
   onStop,
+  onSteerNow,
+  onSteerFlush,
   onRegenerate,
   onEditResend,
   onCreate,
@@ -103,23 +167,39 @@ export function ChatPane({
   recentSessions,
   onResumeSession,
   composerRef,
+  composerDisabled,
   mobileMentionMembers,
+  onResumeAfterPlanApproval,
+  onSendPlanFeedback,
+  onSplitView,
+  onExitSplit,
   showHeader = true,
   emptyState,
   welcomeExtras,
+  workflowMention,
 }: ChatPaneProps) {
   const tCopy = useTranslations("chat.copy")
   const tHistory = useTranslations("chat.history")
+  const tConcurrent = useTranslations("chat.concurrent")
+  const tInlineErr = useTranslations("chat.inlineError")
+  // The pane is bound to its own session slice (defaulting to the focused
+  // session) so a background pane reads + streams its own state independently.
+  const boundId = sessionId ?? activeSession?.id ?? null
   // Subscribe to a boolean, not the whole `messages` array: the empty/chat
   // layout swap and the focus/retry gates only care whether any message
   // exists. Streaming tokens mutate `messages` but not this boolean, so the
   // chrome (header, composer, footer) no longer re-renders per token — only
   // the inner `ChatMessages` subtree does.
-  const hasMessages = useChatStore((s) => s.messages.length > 0)
-  const status = useChatStore((s) => s.status)
-  const errorMessage = useChatStore((s) => s.errorMessage)
-  const messagesLoading = useChatStore((s) => s.messagesLoading)
-  const messagesLoadError = useChatStore((s) => s.messagesLoadError)
+  const hasMessages = useSessionHasMessages(boundId)
+  // Snapshot each turn into the durable run-records table (Run Panel "second
+  // clock") — runs regardless of whether the panel is expanded or rendered.
+  useRunRecordPersistence(boundId)
+  const status = useSessionStatus(boundId)
+  const errorMessage = useSessionErrorMessage(boundId)
+  const errorDiagnostic = useSessionErrorDiagnostic(boundId)
+  const messagesLoading = useSessionMessagesLoading(boundId)
+  const messagesLoadError = useSessionMessagesLoadError(boundId)
+  const atCapacity = useIsAtStreamCap(boundId)
   const reduce = useReducedMotion()
   const isMobile = useIsMobile()
 
@@ -127,7 +207,12 @@ export function ChatPane({
   // chips on the empty inline state. `useCharacter` resolves Dexie + overlay
   // characters; returns undefined for legacy/unset ids.
   const activeCharacter = useCharacter(activeSession?.characterId)
+  const projectRoot = useEffectiveCwd(activeSession)
   const characterSamples = activeCharacter?.persona?.exemplarPrompts
+  const aiStarters = useStarterSuggestions(activeSession, {
+    name: activeCharacter?.name,
+    description: activeCharacter?.description,
+  })
 
   // The composer remounts when the layout swaps from the centered empty state
   // to the docked chat state (the two motion branches mount it at different
@@ -144,37 +229,53 @@ export function ChatPane({
     [composerRef]
   )
 
-  const handleCopySuccess = useCallback(() => {
+  // Stable-identity wrappers (not plain useCallback): these three cross the
+  // `MessageRenderer` memo comparator for EVERY mounted row. The upstream
+  // `onRegenerate`/`onEditResend` props are rebuilt whenever the workspace
+  // re-renders (each sessions-liveQuery refresh, i.e. several times per
+  // agentic turn), and a dep-keyed useCallback would forward that identity
+  // churn and re-reconcile the whole visible list at ~11ms/row.
+  const handleCopySuccess = useStableCallback(() => {
     toast.success(tCopy("success"))
-  }, [tCopy])
+  })
 
-  const handleRegenerate = useCallback(() => {
+  const handleRegenerate = useStableCallback(() => {
     void onRegenerate()
-  }, [onRegenerate])
+  })
 
-  const handleEditResend = useCallback(
-    (id: string, newText: string) => {
-      void onEditResend(id, newText)
-    },
-    [onEditResend]
-  )
+  const handleEditResend = useStableCallback((id: string, newText: string) => {
+    void onEditResend(id, newText)
+  })
 
   const handleSend = useCallback(
-    async (content: SendContent) => {
-      await onSend(content)
+    async (content: SendContent, manifest?: readonly AttachmentManifestEntry[]) => {
+      await onSend(content, manifest)
     },
     [onSend]
   )
 
+  useEffect(() => {
+    if (!boundId || status !== "idle" || messagesLoading || activeSession?.kind === "subagent") {
+      return
+    }
+    const pendingPrompt = consumePendingChatPrompt(boundId)
+    if (!pendingPrompt) return
+    if (!hasNoLeakingPii(pendingPrompt)) {
+      toast.error(tInlineErr("pendingPromptPiiBlocked"))
+      return
+    }
+    void handleSend(pendingPrompt)
+  }, [activeSession?.kind, boundId, handleSend, messagesLoading, status, tInlineErr])
+
   const handleRetry = useCallback(async () => {
-    useChatStore.getState().setError(null)
+    if (boundId) useChatStore.getState().setSessionError(boundId, null)
     await onRegenerate()
-  }, [onRegenerate])
+  }, [onRegenerate, boundId])
 
   // Re-trigger the Dexie history load after a load failure.
   const handleRetryLoad = useCallback(() => {
-    useChatStore.getState().requestMessagesReload()
-  }, [])
+    if (boundId) useChatStore.getState().requestSessionMessagesReload(boundId)
+  }, [boundId])
 
   // Welcome-section dismissals (`AppSettings.welcomeHidden`) — the ✕ on a
   // section header persists the flag; Settings → General → Personalization
@@ -207,16 +308,38 @@ export function ChatPane({
   // starts. It remounts across that branch swap; `setComposerRef` re-attaches
   // our ref (and the external one) to the new instance, and `onExitComplete`
   // restores focus to it so the first send doesn't drop the keyboard.
-  const composerEl = (
-    <Composer
-      ref={setComposerRef}
-      session={activeSession}
-      onStartNewSession={() => onCreate()}
-      onOpenSettings={(tab) => onOpenSettings(tab)}
-      onSend={handleSend}
+  //
+  // `subagent` sessions (ADR-0062) are read-only imported inner transcripts —
+  // no composer at all (they have no continuation path).
+  const composerEl =
+    activeSession?.kind === "subagent" ? null : (
+      <Composer
+        ref={setComposerRef}
+        session={activeSession}
+        onStartNewSession={() => onCreate()}
+        onOpenSettings={(tab) => onOpenSettings(tab)}
+        onSend={handleSend}
+        onStop={() => void onStop()}
+        status={status}
+        // Only the concurrent-stream cap blocks the composer (this pane isn't
+        // one of the streamers, so there is nothing to steer). Awaiting approval
+        // stays writable on purpose: that is exactly when the user wants to say
+        // "don't use that tool, do it another way", and `send` already routes a
+        // message in that state into the steer queue rather than a new turn.
+        disabled={atCapacity || composerDisabled}
+        mobileMentionMembers={mobileMentionMembers}
+        workflowMention={workflowMention}
+      />
+    )
+
+  // Transient run-status layer (timer / interrupt / live tools / steer queue),
+  // pinned directly above the composer. Self-hides when idle with no queue.
+  const runStatusEl = (
+    <RunStatusBar
+      sessionId={boundId}
       onStop={() => void onStop()}
-      disabled={status === "awaiting_approval"}
-      mobileMentionMembers={mobileMentionMembers}
+      onSteerNow={onSteerNow ? () => void onSteerNow() : undefined}
+      onSteerFlush={onSteerFlush ? () => void onSteerFlush() : undefined}
     />
   )
 
@@ -224,13 +347,42 @@ export function ChatPane({
   // just above the composer. Only one layout branch mounts at a time.
   const errorAndFooter = (
     <>
-      {errorMessage && (
-        <InlineError
-          message={errorMessage}
-          onRetry={hasMessages ? handleRetry : undefined}
-          onOpenSettings={() => onOpenSettings("api-key")}
-          onDismiss={() => useChatStore.getState().setError(null)}
+      {atCapacity && (
+        <div
+          role="status"
+          className="mx-3 mb-1 flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-700 dark:text-amber-300"
+        >
+          <AlertTriangle className="size-3.5 shrink-0" aria-hidden />
+          <span>{tConcurrent("overCapacity", { max: 3 })}</span>
+        </div>
+      )}
+      {/* Structured failures render the shared card, which derives its label,
+          hint and buttons from the diagnostic's code. The string branch below
+          is the fallback for producers not yet migrated. */}
+      {errorDiagnostic ? (
+        <DiagnosticCard
+          className="mx-4 mt-2"
+          diagnostic={errorDiagnostic}
+          handlers={{
+            ...(hasMessages ? { retry: () => void handleRetry() } : {}),
+            "open-settings": (action) =>
+              onOpenSettings(
+                action.kind === "open-settings"
+                  ? (action.section as SettingsSectionId)
+                  : "providers"
+              ),
+          }}
+          onDismiss={() => boundId && useChatStore.getState().setSessionError(boundId, null)}
         />
+      ) : (
+        errorMessage && (
+          <InlineError
+            message={errorMessage}
+            onRetry={hasMessages ? handleRetry : undefined}
+            onOpenSettings={() => onOpenSettings("providers")}
+            onDismiss={() => boundId && useChatStore.getState().setSessionError(boundId, null)}
+          />
+        )
       )}
       <PluginExtensionSlot
         point="chat.footer"
@@ -242,7 +394,12 @@ export function ChatPane({
   return (
     <>
       {showHeader && (
-        <ChatHeader session={activeSession} onOpenSettings={() => onOpenSettings("api-key")} />
+        <ChatHeader
+          session={activeSession}
+          onOpenSettings={() => onOpenSettings("api-key")}
+          onSplitView={onSplitView}
+          onExitSplit={onExitSplit}
+        />
       )}
       {/* ADR-0030 — surfaces a destructive Alert when session.characterId
           no longer resolves (plugin disabled, local pack deleted). Renders
@@ -298,6 +455,7 @@ export function ChatPane({
                 recentSessions={recentSessions}
                 onResumeSession={onResumeSession}
                 characterSamples={characterSamples}
+                aiSamples={aiStarters}
                 override={emptyState}
                 hiddenSections={welcomeHidden}
                 onDismissSection={handleDismissSection}
@@ -316,13 +474,32 @@ export function ChatPane({
             animate={{ opacity: 1 }}
             transition={mobileTransition("normal")}
           >
-            <ChatMessages
-              directCharacter={activeCharacter ?? null}
-              onCopy={handleCopySuccess}
-              onRegenerate={handleRegenerate}
-              onEditResend={handleEditResend}
-            />
+            <div className="relative flex min-h-0 flex-1 flex-col" data-computer-use-pip-host>
+              <ChatMessages
+                sessionId={boundId}
+                directCharacter={activeCharacter ?? null}
+                projectRoot={projectRoot}
+                onCopy={handleCopySuccess}
+                onRegenerate={handleRegenerate}
+                onEditResend={handleEditResend}
+              />
+              {boundId && <ComputerUsePictureInPicture sessionId={boundId} />}
+            </div>
+            <FollowUpSuggestions session={activeSession} onUseSample={onUseSample} />
             {errorAndFooter}
+            {boundId && onResumeAfterPlanApproval && (
+              <PlanApprovalDock
+                sessionId={boundId}
+                session={activeSession}
+                onResume={onResumeAfterPlanApproval}
+                onSendPlanFeedback={onSendPlanFeedback}
+              />
+            )}
+            {/* Executing/paused plans surface the live tracker in the same slot
+                (statuses are mutually exclusive with awaiting_approval). */}
+            {boundId && <PlanTrackerDock sessionId={boundId} />}
+            <WorkspaceChangesCard session={activeSession} />
+            {runStatusEl}
             {composerEl}
           </motion.div>
         )}
@@ -338,23 +515,29 @@ export function ChatPane({
  * / `MessageRenderer` memo identity.
  */
 function ChatMessages({
+  sessionId,
   directCharacter,
+  projectRoot,
   onCopy,
   onRegenerate,
   onEditResend,
 }: {
+  sessionId: string | null
   directCharacter?: Character | null
+  projectRoot?: string | null
   onCopy: () => void
   onRegenerate: () => void
   onEditResend: (messageId: string, newText: string) => void
 }) {
-  const messages = useChatStore((s) => s.messages)
-  const status = useChatStore((s) => s.status)
+  const messages = useSessionMessages(sessionId)
+  const status = useSessionStatus(sessionId)
   return (
     <MessageList
       messages={messages}
       status={status}
+      paneSessionId={sessionId}
       directCharacter={directCharacter}
+      projectRoot={projectRoot}
       onCopy={onCopy}
       onRegenerate={onRegenerate}
       onEditResend={onEditResend}

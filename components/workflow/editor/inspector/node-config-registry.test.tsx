@@ -11,9 +11,6 @@ import {
 // Kinds that intentionally fall back to the raw-JSON editor (no dedicated form).
 // Keep this list tight — adding a kind here must be a deliberate decision.
 const INTENTIONAL_FALLBACKS = new Set<WorkflowNodeKind>([
-  // GitHub actions ship their own forms via the github-delivery plugin overlay,
-  // but the trigger + 13 actions ARE wired below, so none remain here.
-  //
   // The kinds below are synthesizer-emitted only — they carry NO palette /
   // catalog entry (see `lib/workflow/nodes/catalog.ts` and the "not placed by
   // users in the editor" comments in `types/workflow/visual.ts`), so the
@@ -23,7 +20,10 @@ const INTENTIONAL_FALLBACKS = new Set<WorkflowNodeKind>([
   //     Hub, ADR-0045).
   //   • the six `pattern.*` kinds — ultracode orchestration nodes emitted by
   //     `synthesize-ultracode.ts` (ADR-0022 addendum).
+  //   • `action.team.task.review` — one-per-task blocking lead review, emitted
+  //     by `synthesize-workflow.ts` when `taskReview.enabled` (ADR-0071).
   "action.plan.step.dispatch",
+  "action.team.task.review",
   "pattern.multi-modal-sweep",
   "pattern.loop-until-dry",
   "pattern.adversarial-verify",
@@ -33,23 +33,54 @@ const INTENTIONAL_FALLBACKS = new Set<WorkflowNodeKind>([
 ])
 
 const DESKTOP_KINDS: WorkflowNodeKind[] = [
-  "action.desktop.screenshot",
-  "action.desktop.findElement",
-  "action.desktop.readTree",
-  "action.desktop.click",
-  "action.desktop.type",
-  "action.desktop.keys",
-  "action.desktop.invokePattern",
-  "action.desktop.windowFocus",
-  "action.desktop.windowClose",
-  "action.desktop.windowResize",
-  "action.desktop.wait",
+  "action.desktop.listApps",
+  "action.desktop.getAppState",
+  "action.desktop.queryElements",
+  "action.desktop.expandElement",
+  "action.desktop.performAction",
 ]
 
 const NEWLY_WIRED: WorkflowNodeKind[] = [
+  "trigger.integration.event",
   "trigger.team",
   "action.team.task.dispatch",
   "trigger.desktop.event",
+  "trigger.pet.event",
+  "action.pet.interact",
+  "ai.council",
+  "ai.browserModel",
+  "action.plan.create",
+  "action.plan.get",
+  "action.plan.list",
+  "action.plan.events",
+  "action.plan.updateDraft",
+  "action.plan.approve",
+  "action.plan.reject",
+  "action.plan.refine",
+  "action.plan.pause",
+  "action.plan.resume",
+  "action.plan.cancel",
+  "action.plan.delete",
+  "action.plan.run",
+  "action.plan.setStepStatus",
+  "action.scheduler.task.create",
+  "action.scheduler.task.get",
+  "action.scheduler.task.list",
+  "action.scheduler.task.update",
+  "action.scheduler.task.pause",
+  "action.scheduler.task.resume",
+  "action.scheduler.task.delete",
+  "action.scheduler.task.runNow",
+  "action.scheduler.task.executions",
+  "action.scheduler.task.backfill",
+  "action.scheduler.task.export",
+  "action.scheduler.task.import",
+  "action.scheduler.status",
+  "action.scheduler.statistics",
+  "action.scheduler.upcoming",
+  "action.scheduler.executions.recent",
+  "action.scheduler.execution.get",
+  "action.scheduler.event.trigger",
   ...DESKTOP_KINDS,
 ]
 

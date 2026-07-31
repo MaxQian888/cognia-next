@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { __resetSharedOcrRegistry, getSharedOcrRegistry } from "./registry"
@@ -78,6 +79,32 @@ describe("installOcrRuntime", () => {
     )
     expect(invoker).toHaveBeenCalled()
     expect(result.providerId).toBe("tesseract-native")
+  })
+
+  it("surfaces the Rust MissingBinding rejection as unsupported_shell so the router falls through", async () => {
+    // The PlaceholderBackend registered when a Cargo OCR feature is off
+    // rejects `ocr_extract_native` with this exact message shape
+    // (crates/cognia-ocr/src/native.rs `NativeOcrError::MissingBinding`).
+    const invoker = jest.fn(async () => {
+      throw new Error("OCR backend `tesseract` is not bound on this platform")
+    })
+    await installOcrRuntime({ nativeInvoker: invoker })
+    const tesseract = getSharedOcrRegistry().get("tesseract-native")!
+    await expect(
+      tesseract.extract(
+        {
+          source: {
+            kind: "data-url",
+            dataUrl: "data:image/png;base64,YWJj",
+            mimeType: "image/png",
+          },
+        },
+        { credentials: { secrets: {} }, config: {}, platform: "tauri" }
+      )
+    ).rejects.toMatchObject({
+      code: "unsupported_shell",
+      message: "This build does not include the tesseract native binding.",
+    })
   })
 
   it("accepts a windows readiness probe override", async () => {

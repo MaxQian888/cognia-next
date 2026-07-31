@@ -1,0 +1,273 @@
+{
+  "a2ui": {
+    "description": "允许代理通过桥接 MCP 服务器驱动 A2UI 小应用。",
+    "hint": "关闭后，角色默认看不到 mcp__a2ui-bridge__* 工具；自定义模式编辑器中的逐模式覆盖仍然可用。",
+    "title": "A2UI 桥接"
+  },
+  "defaults": {
+    "appendDesc": "追加到所有默认角色的系统提示词末尾。请适度使用——长文会显著抬高 token 成本。",
+    "appendPlaceholder": "例如：始终用简洁的项目要点回答。",
+    "appendTitle": "追加到系统提示词",
+    "bareMode": "极简模式",
+    "bareModeHint": "跳过磁盘上的自动发现（CLAUDE.md、hooks、插件、MCP）。冷启动更快；但 agent 看不到你的项目设置。",
+    "behaviorDesc": "轻量的逐条发送行为开关。",
+    "behaviorTitle": "行为",
+    "briefMode": "简短输出",
+    "briefModeHint": "在每次发送时附加一段「精简输出」指令。适合一问一答、快速分流。",
+    "cacheOptDesc": "实验性功能。重排提示词分层：把每轮变化的上下文（记忆召回、数字分身片段、目标/计划状态）移到末尾，保持前缀逐轮稳定，以最大化提供商的提示缓存命中率、降低输入成本。",
+    "cacheOptTitle": "缓存优化（实验性）",
+    "modelClear": "清除默认值",
+    "modelDesc": "在角色和会话都未指定模型时使用。",
+    "modelEmpty": "暂未配置任何提供商。请前往「设置 → 提供商」添加。",
+    "modelLabel": "默认模型选择器",
+    "modelSearch": "搜索模型…",
+    "modelTitle": "默认模型",
+    "modelUnset": "未选择默认模型",
+    "outputStyle": {
+      "bullets": "要点列表",
+      "custom": "自定义…",
+      "customPlaceholder": "描述你想要的回复风格（例如：用正式语气回答）。",
+      "default": "默认",
+      "detailed": "详细",
+      "hint": "调整智能体回复的表达方式。可与简短输出叠加。",
+      "label": "输出风格",
+      "teacher": "讲解式"
+    },
+    "permAcceptEdits": "接受编辑 — 自动允许写文件",
+    "permAuto": "自动 — 多数操作在后台安全检查下运行",
+    "permBypass": "绕过 — 允许全部（危险）",
+    "permDefault": "默认 — 编辑前询问",
+    "permDontAsk": "不询问 — 仅预先批准和只读的工具",
+    "permPlan": "计划 — 仅读取并提出建议",
+    "permissionDesc": "新会话的默认权限模式，角色和会话仍可覆盖。",
+    "permissionMode": "模式",
+    "permissionTitle": "权限模式",
+    "planDesc": "计划模式回合提出计划（ExitPlanMode）时应用的默认设置。",
+    "planInteractiveHtml": "交互式计划视图",
+    "planInteractiveHtmlHint": "增强计划模式：在可交互的 HTML 编辑器中审阅提议的计划——批准前可拖动排序、行内编辑、添加或删除步骤。",
+    "planInteractiveStyle": "交互视图样式",
+    "planInteractiveStyleHint": "交互式计划编辑器的内置视觉样式。",
+    "planMaxAutoRefinements": "最大自动优化次数",
+    "planMaxAutoRefinementsHint": "步骤失败后自动修复重规划的上限（0–10）。",
+    "planRequireApproval": "计划需要审批",
+    "planStyleCards": "卡片",
+    "planStyleCompact": "紧凑",
+    "planStyleDefault": "默认",
+    "planStyleTimeline": "时间线",
+    "planRequireApprovalHint": "实施前显示审批卡片。关闭后，捕获的计划将以自动接受编辑模式直接继续。",
+    "planTitle": "计划模式",
+    "routingDesc": "某次发送失败时，自动尝试别名回退链中的下一项。关闭后会保留原始错误，便于排查。",
+    "routingTitle": "路由回退",
+    "thinkingActiveHint": "已开启：每轮最多预留 {budget} token 用于回复前的推理。",
+    "thinkingDesc": "为 SDK 的扩展思考预留的 token 数。设为 0 关闭思考。注意：思考开启时不会再发送流式 partial events。",
+    "thinkingDisabledHint": "已关闭——Claude 不进行扩展思考，直接给出回答。",
+    "thinkingNumberLabel": "思考预算 token 数",
+    "thinkingReset": "重置",
+    "thinkingTitle": "思考预算",
+    "workingDirDesc": "作为 cwd 传给侧载。当大部分会话面向同一项目时很方便。",
+    "workingDirPlaceholder": "/path/to/project",
+    "workingDirTitle": "默认工作目录"
+  },
+  "description": "配置进程内 Claude SDK 侧载的默认行为——这些值会用于所有新会话，除非角色或会话级别覆盖。",
+  "permissions": {
+    "addBtn": "添加",
+    "addToolPlaceholder": "工具名（例如 mcp__cognia-tools__file_hash）",
+    "addedToast": "已添加 {tool} 到始终允许列表。",
+    "alwaysAllowDesc": "下列工具在所有聊天中都会跳过逐次审批弹窗。",
+    "alwaysAllowTitle": "始终允许的工具",
+    "approveAllBuiltin": "批准全部内置工具",
+    "approveAllBuiltinDoneToast": "已批准 {count} 个内置工具。",
+    "autoMode": {
+      "addRule": "添加规则",
+      "denyHighRisk": "自动拦截高风险命令",
+      "denyHighRiskHint": "当模型判定命令为高风险时，直接拒绝而不是询问。",
+      "desc": "自动判断 Agent 的 Shell 命令是否安全，只在不确定时才向你询问。",
+      "enable": "启用自动模式",
+      "modeHint": "规则在本地离线分类命令；加入模型后，规则无法确定的命令会交给一个廉价的后台小模型判断。",
+      "modeLabel": "判定引擎",
+      "modeRules": "仅规则（离线）",
+      "modeRulesModel": "规则 + 小模型",
+      "noRules": "暂无自定义命令规则。",
+      "patternPlaceholder": "命令通配符（如 git push*）",
+      "privacyNote": "只有在命令中未检测到密钥或个人信息时，才会把命令发送给模型。",
+      "removeRule": "删除规则",
+      "rulesDesc": "为匹配某个通配符的命令强制指定结果——它们会覆盖自动模式。请使用结尾通配符（如 git push*）。",
+      "rulesTitle": "命令规则",
+      "title": "命令自动模式",
+      "verdictAllow": "允许",
+      "verdictAsk": "询问",
+      "verdictDeny": "拒绝"
+    },
+    "categories": {
+      "astGrep": {
+        "desc": "通过 ast-grep 模式在代码库中进行结构化搜索与改写（ast_grep_search、ast_grep_replace）。高风险 —— replace 会改动文件。",
+        "name": "AST 结构搜索"
+      },
+      "codeGraph": {
+        "desc": "基于 tree-sitter 图谱的结构化代码智能：查找符号、调用方/被调用方、影响范围以及文件/上下文映射。",
+        "name": "代码图谱"
+      },
+      "coreFiles": {
+        "desc": "面向非 Anthropic 模型的搜索、读取、补丁、Shell、可等待后台命令和结构化会话任务工具集。文件系统和 Shell 变更需审批。",
+        "name": "核心文件工具"
+      },
+      "dependencyResearch": {
+        "desc": "将依赖的源码克隆到本地，供代理阅读（clone_dep_source、list_cloned_deps）。",
+        "name": "依赖研究"
+      },
+      "environment": {
+        "desc": "读取环境变量与系统信息，密钥在到达代理前已脱敏。",
+        "name": "环境变量"
+      },
+      "fileExtras": {
+        "desc": "在 SDK 内置 Read/Write/Edit 之外，额外提供哈希、结构化 diff、内容搜索等。",
+        "name": "文件扩展"
+      },
+      "git": {
+        "desc": "对 git_status / git_diff / git_log 的结构化封装，比解析原始 shell 输出更稳。",
+        "name": "Git"
+      },
+      "lsp": {
+        "desc": "语言服务器代码智能：跳转定义、查找引用、悬停、符号、诊断。",
+        "name": "LSP 智能"
+      },
+      "process": {
+        "desc": "列出、启动、终止进程。高风险，仅在受信任工作流中开启。",
+        "name": "进程"
+      },
+      "shellAdvanced": {
+        "desc": "白名单单程序 shell，常用于项目特有的构建命令。",
+        "name": "Shell（高级）"
+      },
+      "terminalRepl": {
+        "desc": "代理专属的持久交互式 PTY 会话（python / sql / REPL）。",
+        "name": "终端 REPL"
+      },
+      "webclone": {
+        "desc": "抓取并转换网页源码，供离线阅读与参考（web_clone、web_clone_convert）。",
+        "name": "网页克隆"
+      }
+    },
+    "desktopOnlyHint": "内置工具分类运行在桌面侧载中，请切换到桌面端启用。",
+    "infoLabel": "查看 {name} 包含的工具",
+    "infoListTitle": "{count} 个工具",
+    "risk": {
+      "high": "高风险",
+      "low": "低风险",
+      "medium": "中风险"
+    },
+    "toolRules": {
+      "addRule": "添加规则",
+      "addRuleTitle": "新建规则",
+      "bashSegmentHint": "Shell 规则按命令段匹配——请使用尾部通配（如 git push*）。Bash 下的规则同样约束核心 bash 工具。",
+      "customTool": "自定义…",
+      "customToolPlaceholder": "工具名（如 my_plugin_tool）",
+      "desc": "按工具和输入模式固定允许 / 询问 / 拒绝。显式规则跳过审批弹窗；第三次完全相同的调用仍会询问（循环防护）。",
+      "noRules": "暂无工具规则——所有受控调用都会弹出审批。",
+      "patternPlaceholder": "输入通配（路径或命令，如 src/**、git push*）",
+      "previewDefault": "没有显式规则匹配——走默认审批流程。",
+      "previewExplicit": "命中了一条显式规则。",
+      "previewPlaceholder": "测试一个输入（如 git push origin、src/index.ts）",
+      "previewTitle": "哪条规则生效？",
+      "removeRule": "删除规则",
+      "title": "工具权限规则",
+      "toolLabel": "工具",
+      "verdictAllow": "允许",
+      "verdictAsk": "询问",
+      "verdictDeny": "拒绝",
+      "verdictLabel": "裁决",
+      "wildcardTool": "所有工具（*）"
+    }
+  },
+  "sessions": {
+    "ago": {
+      "days": "{n} 天前",
+      "hours": "{n} 小时前",
+      "justNow": "刚刚",
+      "minutes": "{n} 分钟前"
+    },
+    "cancel": "取消",
+    "colActions": "操作",
+    "colCost": "成本",
+    "colKind": "类型",
+    "colTitle": "会话",
+    "colTokens": "Token",
+    "colTurns": "轮次",
+    "colUpdated": "更新于",
+    "delete": "删除",
+    "deleteDesc": "将永久移除 `{title}` 以及绑定的所有消息和用量记录，无法撤销。",
+    "deleteTitle": "删除该会话？",
+    "deletedToast": "会话已删除。",
+    "description": "展示每个会话，附带从 SDK result 收集到的 token 与 USD 累计。Resume 切换当前活跃会话；Fork 在 SDK 会话上分支；可在此处直接重命名或删除。",
+    "emptyAll": "暂无会话，开始聊天后会出现在这里。",
+    "emptyFilter": "没有匹配该筛选条件的会话。",
+    "filterPlaceholder": "按标题或 id 过滤…",
+    "fork": "SDK 会话 fork",
+    "forkDisabledTip": "需要该会话已有可 fork 的 SDK 对话 —— 至少完成一次回复，且只有会下发 session id 的 provider 才有。",
+    "forkFailedToast": "无法 fork 该 SDK 会话。",
+    "forkedToast": "已分支为 `{title}`。",
+    "rename": "重命名",
+    "renameDesc": "为会话选择新的显示名。重命名不会影响聊天历史或底层 SDK 会话。",
+    "renameEmpty": "标题不能为空。",
+    "renamePlaceholder": "会话标题",
+    "renameTitle": "重命名会话",
+    "renamedToast": "已重命名。",
+    "resume": "切换到此会话",
+    "resumedToast": "已切换到 `{title}`。",
+    "save": "保存",
+    "title": "会话列表",
+    "untitled": "（未命名）"
+  },
+  "sidecar": {
+    "capabilities": {
+      "commandsLabel": "智能体命令（{count}）",
+      "description": "当前运行 SDK 会话所声明支持的能力。不影响 cognia 自有的模型选择器与斜杠菜单。",
+      "effortFlag": "思考强度",
+      "modelsLabel": "账户模型（{count}）",
+      "title": "会话实时能力"
+    },
+    "checking": "检查中…",
+    "countHooks": "Hook",
+    "countHooksHint": "打开 hooks",
+    "countMcpServers": "MCP 服务器",
+    "countSessions": "会话",
+    "countSlashCommands": "Slash 命令",
+    "countsDescription": "与 Claude Code 相关的设置面板的实时计数——点击对应卡片跳转。",
+    "countsTitle": "关联面板",
+    "description": "进程内 Claude SDK 侧载的只读视图。",
+    "desktopOnlyHint": "重启功能仅在桌面端版本中提供。",
+    "restartBtn": "重启侧载",
+    "restartedToast": "已请求重启侧载。",
+    "running": "运行中",
+    "sdkSessionLabel": "最近一次 SDK 会话 id",
+    "sdkVersionLabel": "SDK 版本",
+    "sidecarVersionLabel": "侧载版本",
+    "statusLabel": "状态",
+    "stopped": "已停止",
+    "title": "侧载诊断",
+    "webOnly": "仅桌面端可用"
+  },
+  "tabs": {
+    "a2ui": "A2UI 桥接",
+    "defaults": "默认值",
+    "permissions": "权限与工具",
+    "sessions": "会话",
+    "sidecar": "侧载诊断"
+  },
+  "title": "内置代理运行时",
+  "toolSearch": {
+    "addAria": "添加",
+    "description": "按需加载工具以保持系统提示精简。在下方固定服务器或工具以使其始终可用。",
+    "enableHelp": "工具将按需被发现，而非一次性全部注入。",
+    "enableLabel": "启用工具延迟加载",
+    "removeAria": "移除 {value}",
+    "serversHelp": "这些 MCP 服务器将常驻、永不延迟加载。",
+    "serversLabel": "始终加载的 MCP 服务器",
+    "serversPlaceholder": "服务器名称，例如 cognia-tools",
+    "title": "延迟加载工具",
+    "toolsHelp": "这些裸工具名将常驻、永不延迟加载。",
+    "toolsLabel": "始终加载的工具",
+    "toolsPlaceholder": "工具名称，例如 read_file",
+    "unknownHint": "未在当前工具目录中找到——在匹配的服务器或工具存在之前，此固定项不会生效。"
+  }
+}

@@ -25,7 +25,8 @@ import { Loader2Icon, SquareIcon } from "lucide-react"
 import { Composer, type ComposerHandle } from "@/components/chat/composer"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import type { SendContent } from "@/lib/claude/types"
+import type { SendContent } from "@cognia/agent-config-types"
+import type { AttachmentManifestEntry } from "@/lib/chat/attachments/dispatch"
 import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
 
 export interface TeamComposerProps {
@@ -50,7 +51,11 @@ export const TeamComposer = forwardRef<ComposerHandle, TeamComposerProps>(functi
   const t = useTranslations("agentTeamsWorkspace.chat.composer")
   const tStreaming = useTranslations("agentTeamsWorkspace.chat")
   const handleSend = useCallback(
-    async (content: SendContent) => {
+    async (content: SendContent, manifest?: readonly AttachmentManifestEntry[]) => {
+      if (manifest?.length) {
+        toast.warning(t("attachmentsNotSupported"))
+        return
+      }
       const text = sendContentToText(content)
       const trimmed = text.trim()
       if (!trimmed) return
@@ -93,6 +98,7 @@ export const TeamComposer = forwardRef<ComposerHandle, TeamComposerProps>(functi
         ref={ref}
         onSend={handleSend}
         onStop={onStop ?? (() => undefined)}
+        status={isStreaming ? "streaming" : "idle"}
         onStartNewSession={() => undefined}
         onOpenSettings={() => undefined}
         disabled={disabled}

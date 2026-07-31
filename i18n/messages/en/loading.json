@@ -1,0 +1,20 @@
+{
+  "cancel": "Cancel",
+  "loading": "Loading…",
+  "offline": "You're offline — this will retry once the connection returns",
+  "page": {
+    "description": "Loading your interface, preferences, and recent context",
+    "progressLabel": "Workspace preparation",
+    "reload": "Reload app",
+    "reloadHint": "Taking longer than expected. You can reload and try again.",
+    "stages": {
+      "finalizing": "Finishing setup",
+      "interface": "Starting the interface",
+      "workspace": "Restoring your workspace"
+    },
+    "title": "Preparing your workspace"
+  },
+  "pageLoading": "Loading…",
+  "stillWorking": "Still working… ({seconds}s)",
+  "thinking": "Claude is thinking…"
+}

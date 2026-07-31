@@ -41,22 +41,33 @@ export const WECOM_CAPS: readonly Capability[] = [
 /**
  * A2UI capability matrix for the WeCom adapter.
  *
- * Display + layout primitives project natively into the markdown body
- * (Text / Link / Divider / Badge) or a `template_card` header (Card / Alert).
  * `Button` maps to `template_card` `button_interaction` actions — the one
- * interactive component WeCom delivers a callback for (`template_card_event`),
- * so it is `native`. Every other interactive component (Select, Checkbox,
- * TextField, …) has no native template-card analogue and degrades to the
- * surface's `plainTextMirror` appended to the markdown body, so they default
- * to `fallback` via {@link buildA2UICapabilityMatrix}.
+ * interactive component WeCom delivers a callback for (`template_card_event`)
+ * — so it is `native`.
+ *
+ * `Text` / `Alert` / `Card` are kept `native` with an honest caveat: the
+ * a2ui-mapper only projects them into the template_card header (title/desc)
+ * when the surface carries at least one Button; otherwise their content still
+ * reaches the user at full fidelity through the surface's `plainTextMirror`
+ * in the markdown body. They are deliberately NOT `"simulated"` — the
+ * build-options prompt (`buildCapabilityPromptSection`) describes simulated
+ * kinds as "multi-step UX, do not assume a synchronous reply", which would
+ * wrongly warn the assistant off plain display primitives and needlessly
+ * degrade the evaluator's `worstCase` for ordinary card surfaces.
+ *
+ * `Image` / `Link` / `Divider` / `Badge` are `fallback`: the mapper never
+ * projects them into a template_card — they survive only as plain text via
+ * `plainTextMirror`. Every other interactive component (Select, Checkbox,
+ * TextField, …) also defaults to `fallback` via
+ * {@link buildA2UICapabilityMatrix}.
  */
 export const WECOM_A2UI_CAPABILITY: A2UICapabilityMatrix = buildA2UICapabilityMatrix({
   Text: "native",
-  Image: "native",
-  Link: "native",
-  Divider: "native",
-  Badge: "native",
   Alert: "native",
   Card: "native",
   Button: "native",
+  Image: "fallback",
+  Link: "fallback",
+  Divider: "fallback",
+  Badge: "fallback",
 })

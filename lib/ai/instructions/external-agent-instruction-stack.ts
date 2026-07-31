@@ -1,11 +1,26 @@
-// Adapted to cognia-next's existing skills system. The upstream Cognia
-// version assumed a `Skill` shape with `metadata.name` / `metadata.description`
-// and a `Project` model with a `knowledgeBase` array. cognia-next's `Skill`
-// (in `lib/claude/types`) carries `name`, `description`, `content` directly,
-// and there is no Project model yet — we use a lightweight stub.
-import { buildProjectContext } from "@/lib/document/knowledge-rag"
+/**
+ * @deprecated Superseded by the shared CLI context assembler
+ * (`cli/src/agent/session-context.ts`), which resolves an external agent's
+ * instructions through the SAME `toBuildContext` → `resolveSendOptions`
+ * pipeline the built-in backend uses.
+ *
+ * This module is a SECOND prompt stack. It has no production call site (only
+ * its own test), and wiring it into the external TUI session would reintroduce
+ * exactly the divergence the parity work removed: it knows nothing about agent
+ * modes, instruction-file discovery, output styles, disabled tools,
+ * attachments, twin dynamics, or CLI subagent dispatch. Do not adopt it; extend
+ * the shared assembler instead. Kept only so its inputs/outputs stay readable
+ * while the external-agent docs still reference the shape.
+ *
+ * Adapted to cognia-next's existing skills system. The upstream Cognia
+ * version assumed a `Skill` shape with `metadata.name` / `metadata.description`
+ * and a `Project` model with a `knowledgeBase` array. cognia-next's `Skill`
+ * (in `lib/claude/types`) carries `name`, `description`, `content` directly,
+ * and there is no Project model yet — we use a lightweight stub.
+ */
+import { buildProjectContext } from "@cognia/document/knowledge-rag"
 import { buildProgressiveSkillsPrompt } from "@/lib/skills/executor"
-import type { Skill } from "@/lib/claude/types"
+import type { Skill } from "@cognia/agent-config-types"
 import type { Project } from "@/types"
 
 export interface GlobalCustomInstructionsInput {

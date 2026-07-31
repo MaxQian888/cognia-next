@@ -40,7 +40,7 @@ Defined inline in `context.ts`.
 | `ctx.logger` | `context.ts:331` | plugin logger | no | `createLogger` |
 | `ctx.storage` (base) | `context.ts:340` | localStorage | no | get/set/delete/keys/clear (`:357-381`) |
 | `ctx.events` | `context.ts:389` | in-mem emitter (+ipc, bus merged `:274-278`) | no | on/off/emit/once (`:394-432`) |
-| `ctx.ui` | `context.ts:456` | toasts / dialogs / statusbar | no | `showToast:483`, `showDialog:489`, `registerStatusBarItem:519` |
+| `ctx.ui` | `context.ts:456` | toasts / dialogs | no | `showToast` (→ sonner), `showDialog` / `showInputDialog` / `showConfirmDialog` (→ plugin modal stack) |
 | `ctx.a2ui` | `context.ts:541` | useA2UIStore | no | `createSurface:545`, `updateComponents:553`, `registerComponent:574` |
 | `ctx.agent` | `context.ts:588` | registry + agent-executor | manifest-checked inline | `registerTool:590`, `executeAgent:615` (`agent:control` if toolsEnabled `:630`), `runExternalAgent:662` (`agent:dispatch-external` `:668`) |
 | `ctx.settings` | `context.ts:757` | useSettingsStore | no | `get:762`, `set:770`, `onChange:781` |

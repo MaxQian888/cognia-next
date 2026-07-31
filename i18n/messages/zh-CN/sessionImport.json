@@ -1,0 +1,66 @@
+{
+  "back": "返回",
+  "cancel": "取消",
+  "cancelledTitle": "已停止导入",
+  "cardBody": "从 Claude Code、Codex 或 OpenCode 导入历史会话。",
+  "cardTitle": "编程 Agent 会话",
+  "close": "关闭",
+  "description": "将你的 Claude Code、Codex 和 OpenCode 命令行历史导入 Cognia，作为可继续的对话。",
+  "deselectAll": "清除选择",
+  "doneBody": "已添加 {sessions, plural, one {# 个对话} other {# 个对话}}，共 {messages, plural, one {# 条消息} other {# 条消息}}。",
+  "doneTitle": "导入完成",
+  "empty": "未找到会话。",
+  "emptyHint": "磁盘上没有找到内容。可尝试手动选择会话文件。",
+  "errorTitle": "导入失败",
+  "importSelected": "导入选中的 {count} 项",
+  "importing": "正在导入…",
+  "liveSync": "实时同步",
+  "liveSyncHint": "持续监视这些 Agent 并自动导入新会话。已在 Cognia 中续聊的会话会被冻结，永不被覆盖。",
+  "loadMore": "再显示 {count} 个",
+  "messagesLabel": "{count, plural, one {# 条消息} other {# 条消息}}",
+  "parsingProgress": "正在解析 {done}/{total}…",
+  "pickButton": "选择文件…",
+  "retry": "重试",
+  "scanButton": "扫描已安装的 Agent",
+  "scanning": "正在查找会话…",
+  "selectAll": "全选",
+  "someSourcesFailed": "部分来源无法读取：{sources}",
+  "sources": {
+    "aider": "Aider",
+    "claude-code": "Claude Code",
+    "codex": "Codex CLI",
+    "continue-dev": "Continue",
+    "gemini-cli": "Gemini CLI",
+    "opencode": "OpenCode"
+  },
+  "title": "导入 Agent 会话",
+  "unrecognized": "这些文件未被识别为受支持的 Agent 会话。",
+  "webHint": "自动扫描和实时同步仅支持桌面端。在 iOS 和网页端，请手动选择导出的会话文件。",
+  "writingProgress": "正在写入 {done}/{total}…",
+  "fidelityReport": {
+    "title": "转换保真度",
+    "rebuilt": "重建",
+    "rebuiltHint": "该记录由可信工件重建，带有溯源标记，不冒充原始转录。",
+    "noLosses": "转换无损。",
+    "lossCount": "{count} 项未能携带",
+    "lossKinds": {
+      "dropped": "已丢弃",
+      "approximated": "已近似",
+      "summarized": "已摘要"
+    },
+    "fidelity": {
+      "native-exact": "原生（精确）",
+      "structured": "结构化",
+      "contextual": "上下文重放",
+      "summary-only": "仅摘要",
+      "unsupported": "不支持"
+    },
+    "fidelityHint": {
+      "native-exact": "运行时可将该会话作为其自身会话精确恢复。",
+      "structured": "文本与工具历史可携带；运行时私有状态不可携带。",
+      "contextual": "以转录重放为种子创建新会话继续。",
+      "summary-only": "仅携带会话摘要。",
+      "unsupported": "该来源不支持此方向的转换。"
+    }
+  }
+}

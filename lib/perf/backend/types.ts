@@ -69,6 +69,43 @@ export interface SystemMemory {
   usedBytes: number
 }
 
+/** The cognia subsystem that owns a managed process (matches Rust `ManagedSubsystem`). */
+export type ManagedSubsystem =
+  | "externalAgent"
+  | "chatSidecar"
+  | "acpTerminal"
+  | "integratedTerminal"
+  | "headlessTerminal"
+  | "mcpServer"
+  | "codeServer"
+  | "pluginHost"
+  | "tunnel"
+  | "backgroundJob"
+
+/** Normalized lifecycle state of a managed process (matches Rust `ManagedStatus`). */
+export type ManagedStatus = "starting" | "running" | "stopping" | "stopped" | "error"
+
+/** A lifecycle action requestable on a managed process (matches Rust `ManagedControlAction`). */
+export type ManagedControlAction = "kill" | "restart"
+
+/**
+ * One cognia-spawned child process attributed to its owning subsystem
+ * (matches Rust `ManagedProcess`). Joined to {@link ProcessSample} by `pid`
+ * for live CPU/memory in the performance panel's Managed Processes tab.
+ */
+export interface ManagedProcess {
+  subsystem: ManagedSubsystem
+  /** Logical id within the subsystem (used to route control actions). */
+  id: string
+  /** Process/command identifier (not a translatable label). */
+  name: string
+  pid: number | null
+  status: ManagedStatus
+  canKill: boolean
+  canRestart: boolean
+  detail: string | null
+}
+
 /** One composed performance frame emitted on `perf://sample`. */
 export interface PerfSample {
   tsMs: number
@@ -77,6 +114,8 @@ export interface PerfSample {
   runtime: RuntimeSample
   topSpans: SpanSnapshot[]
   systemMemory: SystemMemory | null
+  /** cognia-spawned child processes attributed to their owning subsystem. */
+  managed: ManagedProcess[]
 }
 
 /** Initial pull payload from `perf_snapshot`. */

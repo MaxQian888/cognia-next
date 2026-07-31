@@ -1,5 +1,11 @@
-import { validateGraphIntegrity, validateWorkflow, visualWorkflowSchema } from "./validate"
-import type { VisualWorkflow } from "@/types/workflow/visual"
+import {
+  collectGraphIntegrityIssues,
+  collectUnauthorizedCycleNodes,
+  validateGraphIntegrity,
+  validateWorkflow,
+  visualWorkflowSchema,
+} from "./validate"
+import { DEFAULT_MAX_CONCURRENCY, type VisualWorkflow } from "@/types/workflow/visual"
 
 function baseWorkflow(overrides: Partial<VisualWorkflow> = {}): VisualWorkflow {
   return {
@@ -44,6 +50,72 @@ describe("visualWorkflowSchema", () => {
   it("rejects an empty name", () => {
     const result = visualWorkflowSchema.safeParse(baseWorkflow({ name: "" }))
     expect(result.success).toBe(false)
+  })
+
+  it("preserves per-node errorHandling through safeParse (zod strips unknown keys)", () => {
+    const wf = baseWorkflow()
+    wf.nodes[1].data.errorHandling = {
+      retry: { maxRetries: 3, retryIntervalMs: 250, backoff: "fixed" },
+      onError: "defaultValue",
+      defaultValue: { completion: "fallback" },
+    }
+    const result = visualWorkflowSchema.safeParse(wf)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.nodes[1].data.errorHandling).toEqual(wf.nodes[1].data.errorHandling)
+    }
+  })
+
+  it("preserves every serializable workflow, node, and edge metadata field", () => {
+    const wf = baseWorkflow({
+      complexity: "advanced",
+      folderId: "folder-a",
+      interface: {
+        inputSchema: { type: "object", properties: { query: { type: "string" } } },
+        outputSchema: { type: "object" },
+      },
+      published: { at: 123, toolName: "advanced_flow" },
+    })
+    wf.nodes[1].data = {
+      ...wf.nodes[1].data,
+      authoredBy: "ai",
+      pluginMetadata: { stable: true },
+    }
+    wf.edges[0].data = { kind: "conditional", comment: "Keep this note" }
+
+    const result = visualWorkflowSchema.safeParse(wf)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.complexity).toBe("advanced")
+      expect(result.data.folderId).toBe("folder-a")
+      expect(result.data.interface).toEqual(wf.interface)
+      expect(result.data.published).toEqual(wf.published)
+      expect(result.data.nodes[1].data.authoredBy).toBe("ai")
+      expect(result.data.nodes[1].data.pluginMetadata).toEqual({ stable: true })
+      expect(result.data.edges[0].data?.comment).toBe("Keep this note")
+    }
+  })
+
+  it("rejects malformed errorHandling (negative retries / unknown onError)", () => {
+    const wf = baseWorkflow()
+    wf.nodes[1].data.errorHandling = {
+      retry: { maxRetries: -1, retryIntervalMs: 0, backoff: "fixed" },
+    } as unknown as VisualWorkflow["nodes"][number]["data"]["errorHandling"]
+    expect(visualWorkflowSchema.safeParse(wf).success).toBe(false)
+
+    const wf2 = baseWorkflow()
+    wf2.nodes[1].data.errorHandling = {
+      onError: "explode",
+    } as unknown as VisualWorkflow["nodes"][number]["data"]["errorHandling"]
+    expect(visualWorkflowSchema.safeParse(wf2).success).toBe(false)
+  })
+
+  it("accepts error-kind edges", () => {
+    const wf = baseWorkflow()
+    wf.edges = [
+      { id: "e1", source: "n2", sourceHandle: "error", target: "n1", data: { kind: "error" } },
+    ]
+    expect(visualWorkflowSchema.safeParse(wf).success).toBe(true)
   })
 
   it("accepts schemaVersion 2 and nodes carrying a parentId", () => {
@@ -171,6 +243,27 @@ describe("visualWorkflowSchema", () => {
     expect(result.success).toBe(false)
   })
 
+  it("backfills maxConcurrency to the shared default when absent", () => {
+    // baseWorkflow's settings carry no maxConcurrency — the schema must
+    // backfill DEFAULT_MAX_CONCURRENCY so the orchestrator, editor, and seed
+    // all execute legacy blobs at the same width.
+    const result = visualWorkflowSchema.safeParse(baseWorkflow())
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.settings.maxConcurrency).toBe(DEFAULT_MAX_CONCURRENCY)
+    }
+  })
+
+  it("keeps an explicit maxConcurrency untouched", () => {
+    const wf = baseWorkflow()
+    wf.settings = { ...wf.settings, maxConcurrency: 1 }
+    const result = visualWorkflowSchema.safeParse(wf)
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.settings.maxConcurrency).toBe(1)
+    }
+  })
+
   it("rejects negative timeoutMs and zero concurrency", () => {
     expect(
       visualWorkflowSchema.safeParse(
@@ -202,6 +295,61 @@ describe("validateGraphIntegrity", () => {
     expect(r.errors.some((e) => e.includes("unknown node"))).toBe(true)
   })
 
+  it("rejects edges that omit or invent a required routing handle", () => {
+    const wf = baseWorkflow()
+    wf.nodes[1] = {
+      ...wf.nodes[1],
+      type: "flow.branch",
+      typeVersion: 2,
+      data: { label: "Branch", params: { conditions: [] } },
+    }
+    wf.nodes.push({
+      id: "n3",
+      type: "ai.prompt",
+      typeVersion: 1,
+      position: { x: 400, y: 0 },
+      data: { label: "Prompt", params: {} },
+    })
+
+    wf.edges = [
+      { id: "e1", source: "n1", target: "n2" },
+      { id: "e2", source: "n2", target: "n3" },
+      { id: "e3", source: "n2", sourceHandle: "maybe", target: "n3" },
+    ]
+
+    const result = validateGraphIntegrity(wf)
+    expect(result.errors).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("Pick one of this node's output handles"),
+        expect.stringContaining("Unknown output handle on the source node"),
+      ])
+    )
+  })
+
+  it("accepts all declared routing handles", () => {
+    const wf = baseWorkflow()
+    wf.nodes[1] = {
+      ...wf.nodes[1],
+      type: "flow.branch",
+      typeVersion: 2,
+      data: { label: "Branch", params: { conditions: [] } },
+    }
+    wf.nodes.push({
+      id: "n3",
+      type: "ai.prompt",
+      typeVersion: 1,
+      position: { x: 400, y: 0 },
+      data: { label: "Prompt", params: {} },
+    })
+    wf.edges = [
+      { id: "e1", source: "n1", target: "n2" },
+      { id: "e2", source: "n2", sourceHandle: "true", target: "n3" },
+      { id: "e3", source: "n2", sourceHandle: "false", target: "n3" },
+    ]
+
+    expect(validateGraphIntegrity(wf).errors).toEqual([])
+  })
+
   it("warns when no trigger is present", () => {
     const wf = baseWorkflow()
     wf.nodes = wf.nodes.filter((n) => !n.type.startsWith("trigger."))
@@ -217,7 +365,10 @@ describe("validateGraphIntegrity", () => {
     expect(r.errors.some((e) => e.includes("Cycle"))).toBe(true)
   })
 
-  it("permits a cycle that goes through a flow.loop node", () => {
+  it("rejects a cycle even when a flow.loop node sits on it (back-edges never iterate)", () => {
+    // The scheduler drops back-edges, so this graph used to validate and then
+    // silently run each node ONCE. It must now fail with guidance pointing at
+    // the loop CONTAINER instead.
     const wf = baseWorkflow()
     wf.nodes.push({
       id: "n_loop",
@@ -229,7 +380,24 @@ describe("validateGraphIntegrity", () => {
     wf.edges.push({ id: "e2", source: "n2", target: "n_loop" })
     wf.edges.push({ id: "e3", source: "n_loop", target: "n2" })
     const r = validateGraphIntegrity(wf)
-    expect(r.errors).toEqual([])
+    const cycleError = r.errors.find((e) => e.includes("Cycle"))
+    expect(cycleError).toBeDefined()
+    expect(cycleError).toMatch(/flow\.loop container/)
+  })
+
+  it("rejects a cycle through a flow.wait node (event mode is not a back-edge)", () => {
+    const wf = baseWorkflow()
+    wf.nodes.push({
+      id: "n_wait",
+      type: "flow.wait",
+      typeVersion: 1,
+      position: { x: 400, y: 0 },
+      data: { label: "Wait", params: { mode: "duration", durationMs: 10 } },
+    })
+    wf.edges.push({ id: "e2", source: "n2", target: "n_wait" })
+    wf.edges.push({ id: "e3", source: "n_wait", target: "n2" })
+    const r = validateGraphIntegrity(wf)
+    expect(r.errors.some((e) => e.includes("Cycle"))).toBe(true)
   })
 })
 
@@ -248,5 +416,95 @@ describe("validateWorkflow", () => {
     expect(r.ok).toBe(false)
     if (r.ok) throw new Error("Expected error")
     expect(r.errors.some((e) => e.includes("name"))).toBe(true)
+  })
+})
+
+describe("collectUnauthorizedCycleNodes", () => {
+  it("returns empty for a DAG", () => {
+    expect(collectUnauthorizedCycleNodes(baseWorkflow()).size).toBe(0)
+  })
+
+  it("returns the cycle nodes for an unauthorized cycle", () => {
+    const wf = baseWorkflow()
+    wf.edges = [
+      { id: "e1", source: "n1", target: "n2" },
+      { id: "e2", source: "n2", target: "n1" },
+    ]
+    const cycle = collectUnauthorizedCycleNodes(wf)
+    expect(cycle.has("n1")).toBe(true)
+    expect(cycle.has("n2")).toBe(true)
+  })
+
+  it("returns the cycle nodes even when a flow.loop sits on the cycle (no authorization)", () => {
+    const wf = baseWorkflow()
+    wf.nodes[1] = { ...wf.nodes[1], type: "flow.loop", typeVersion: 2 }
+    wf.edges = [
+      { id: "e1", source: "n1", target: "n2" },
+      { id: "e2", source: "n2", target: "n1" },
+    ]
+    const cycle = collectUnauthorizedCycleNodes(wf)
+    expect(cycle.has("n1")).toBe(true)
+    expect(cycle.has("n2")).toBe(true)
+  })
+
+  it("does not flag a loop@2 container graph (body nesting is not a cycle)", () => {
+    const wf = baseWorkflow({ schemaVersion: 2 })
+    wf.nodes = [
+      wf.nodes[0],
+      {
+        id: "loop",
+        type: "flow.loop",
+        typeVersion: 2,
+        position: { x: 100, y: 0 },
+        data: { label: "Loop", params: { mode: "forEach", source: "{{ $trigger.payload.x }}" } },
+      },
+      {
+        id: "child",
+        type: "flow.set",
+        typeVersion: 1,
+        parentId: "loop",
+        position: { x: 10, y: 10 },
+        data: { label: "Body", params: { variable: "v", value: "1" } },
+      },
+    ]
+    wf.edges = [{ id: "e1", source: "n1", target: "loop" }]
+    expect(collectUnauthorizedCycleNodes(wf).size).toBe(0)
+    expect(validateWorkflow(wf).ok).toBe(true)
+  })
+})
+
+describe("collectGraphIntegrityIssues", () => {
+  it("returns no issues for a well-formed workflow", () => {
+    expect(collectGraphIntegrityIssues(baseWorkflow())).toEqual([])
+  })
+
+  it("flags a dangling edge target with the edge id and ref", () => {
+    const wf = baseWorkflow()
+    wf.edges = [{ id: "e9", source: "n1", target: "ghost" }]
+    const issues = collectGraphIntegrityIssues(wf)
+    const dangling = issues.find((i) => i.code === "danglingTarget")
+    expect(dangling).toMatchObject({ edgeId: "e9", params: { ref: "ghost" } })
+  })
+
+  it("warns when there is no trigger", () => {
+    const wf = baseWorkflow()
+    wf.nodes[0] = { ...wf.nodes[0], type: "ai.prompt" }
+    const issues = collectGraphIntegrityIssues(wf)
+    expect(issues.some((i) => i.code === "missingTrigger" && i.severity === "warning")).toBe(true)
+  })
+
+  it("emits one clickable graphCycle issue per node on an unauthorized cycle", () => {
+    const wf = baseWorkflow()
+    wf.edges = [
+      { id: "e1", source: "n1", target: "n2" },
+      { id: "e2", source: "n2", target: "n1" },
+    ]
+    const cycleIssues = collectGraphIntegrityIssues(wf).filter((i) => i.code === "graphCycle")
+    expect(cycleIssues).toHaveLength(2)
+    expect(cycleIssues.every((i) => typeof i.nodeId === "string")).toBe(true)
+    // validateGraphIntegrity re-collapses them into a single string line.
+    expect(
+      validateGraphIntegrity(wf).errors.filter((e) => e.includes("Cycle detected"))
+    ).toHaveLength(1)
   })
 })

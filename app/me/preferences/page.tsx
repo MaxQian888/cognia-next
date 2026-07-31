@@ -15,7 +15,7 @@
  */
 
 import { useTranslations } from "next-intl"
-
+import { useEffect } from "react"
 import { BiometricRow } from "@/components/mobile/me/biometric-row"
 import { MeSection } from "@/components/mobile/me/me-section"
 import { SubPageShell } from "@/components/mobile/me/sub-page-shell"
@@ -28,9 +28,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { enqueue } from "@/lib/db/mobile-outbound-queue"
-import type { AppSettings, BiometricGuardPolicy } from "@/lib/claude/types"
-import { DEFAULT_BIOMETRIC_GUARD } from "@/lib/claude/types"
+import type { BiometricGuardPolicy } from "@cognia/agent-config-types"
+import { DEFAULT_BIOMETRIC_GUARD } from "@cognia/agent-config-types"
+import { useSettingsPatch } from "@/hooks/use-settings-patch"
+import {
+  getBehaviorTelemetrySettings,
+  setBehaviorTelemetryEnabled,
+} from "@/lib/telemetry/events/settings"
+import { trackEvent } from "@/lib/telemetry/events/track-event"
 import { useSettingsStore } from "@/stores/settings"
 
 export default function MobilePreferencesPage() {
@@ -39,21 +44,22 @@ export default function MobilePreferencesPage() {
   const tSec = useTranslations("mobile.security")
 
   const settings = useSettingsStore((s) => s.settings)
-  const save = useSettingsStore((s) => s.save)
+  const update = useSettingsPatch()
 
   const fontScale = settings?.fontScale ?? "md"
   const defaultModel = settings?.defaultModel ?? ""
   const policy: BiometricGuardPolicy = settings?.biometricRequiredFor ?? DEFAULT_BIOMETRIC_GUARD
+  const reduceMotion = settings?.reduceMotion ?? false
+  const telemetryEnabled =
+    settings?.behaviorTelemetry?.enabled ??
+    settings?.telemetryEnabled ??
+    getBehaviorTelemetrySettings().enabled
 
-  const update = async (patch: Partial<AppSettings>) => {
-    await save(patch as never)
-    const keys = Object.keys(patch ?? {}).join(", ")
-    await enqueue({
-      command: "app_settings_update",
-      payload: { patch },
-      label: tPanel("queueLabel", { keys }),
-    })
-  }
+  useEffect(() => {
+    if (!settings?.behaviorTelemetry && settings?.telemetryEnabled) {
+      setBehaviorTelemetryEnabled(true)
+    }
+  }, [settings?.behaviorTelemetry, settings?.telemetryEnabled])
 
   const updateBiometric = (patch: Partial<BiometricGuardPolicy>) =>
     update({ biometricRequiredFor: { ...policy, ...patch } })
@@ -130,6 +136,28 @@ export default function MobilePreferencesPage() {
             checked={policy.signOut}
             onChange={(v) => void updateBiometric({ signOut: v })}
             testid="pref-biometric-sign-out"
+          />
+        </MeSection>
+
+        <MeSection title={tPanel("privacyTitle")} testid="me-section-pref-privacy">
+          <BiometricRow
+            label={tPanel("reduceMotion")}
+            help={tPanel("reduceMotionHelp")}
+            checked={reduceMotion}
+            onChange={(v) => void update({ reduceMotion: v })}
+            testid="pref-reduce-motion"
+          />
+          <BiometricRow
+            label={tPanel("telemetry")}
+            help={tPanel("telemetryHelp")}
+            checked={telemetryEnabled}
+            onChange={(v) => {
+              if (!v) void trackEvent("telemetry.preference.changed", { enabled: false })
+              const behaviorTelemetry = setBehaviorTelemetryEnabled(v)
+              if (v) void trackEvent("telemetry.preference.changed", { enabled: true })
+              void update({ telemetryEnabled: v, behaviorTelemetry })
+            }}
+            testid="pref-telemetry"
           />
         </MeSection>
       </div>

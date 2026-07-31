@@ -1,5 +1,5 @@
 import { buildUtilityLlmClient } from "./utility-client"
-import type { AppSettings, ChatSession } from "@/lib/claude/types"
+import type { AppSettings, ChatSession } from "@cognia/agent-config-types"
 
 const createLlmClientMock = jest.fn((config: unknown) => ({
   __config: config,

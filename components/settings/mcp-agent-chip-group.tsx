@@ -18,7 +18,7 @@ import { useTranslations } from "next-intl"
 import { cn } from "@/lib/utils"
 import { isTauri } from "@/lib/tauri"
 import { updateMcpServer } from "@/lib/db/mcp-servers"
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 import { useAgentStatuses, type AgentStatus } from "@/hooks/agent"
 
 // Re-export for back-compat with callers.

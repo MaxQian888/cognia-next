@@ -51,6 +51,20 @@ describe("fetchUrlAsRawSource", () => {
     mockFetch("not found", { "content-type": "text/plain" }, 404)
     await expect(fetchUrlAsRawSource("https://example.com/missing")).rejects.toThrow(/404/)
   })
+
+  it("rejects a private/loopback URL (SSRF guard) without fetching", async () => {
+    const mock = mockFetch("secret", { "content-type": "text/plain" })
+    await expect(fetchUrlAsRawSource("http://169.254.169.254/latest/")).rejects.toThrow(
+      /private\/loopback/i
+    )
+    expect(mock).not.toHaveBeenCalled()
+  })
+
+  it("allows a private URL when allowPrivateHosts is set", async () => {
+    mockFetch("<html><title>Local</title></html>", { "content-type": "text/html" })
+    const result = await fetchUrlAsRawSource("http://localhost:8080/", { allowPrivateHosts: true })
+    expect(result.title).toBe("Local")
+  })
 })
 
 describe("pickFormatForUrl", () => {

@@ -3,30 +3,34 @@
 /**
  * Conversation header strip for the Inbox detail pane.
  *
- * Left: platform avatar (PlatformBadge) + character chip + conversation name.
- * Middle: mode chip (ModeSwitcher live in Tauri; static disabled badge on web).
- * Right: adapter degradation indicator + policy info chip + overrides gear.
+ * Deliberately thin: identity (platform avatar + character chip + name), the
+ * one control that says what the next turn will run as (ModeSwitcher), and
+ * three trailing affordances — overflow, artifact dock, overrides gear.
+ *
+ * Everything else lives in `ConversationHeaderOverflow`. This strip used to
+ * carry twenty flat siblings, and because `buttonVariants` / `badgeVariants`
+ * bake `shrink-0` into their base, none of them compressed — the row ran past
+ * the pane, which `ResizablePanel` clips, so the trailing controls became
+ * unclickable. `lib/ui/chrome-budget.ts` pins the new count.
+ *
+ * Height matches `chat-header.tsx` (`h-9`) so the Inbox detail pane and the
+ * main chat page present the same seam.
  */
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { useTranslations } from "next-intl"
-import { ChevronLeftIcon, ListChecksIcon, Settings2Icon } from "lucide-react"
+import { ChevronLeftIcon, Settings2Icon } from "lucide-react"
 import { ModeSwitcher } from "./mode-switcher"
-import { ProviderModelSwitcher } from "./provider-model-switcher"
-import { PolicyInfo } from "./policy-info"
+import { ContactProfileDrawer } from "./contact-profile-drawer"
 import { PlatformBadge } from "./platform-badge"
 import { ConversationOverrideDialog } from "./overrides/conversation-override-dialog"
 import { CallbackBindingsInspector } from "./debug/callback-bindings-inspector"
-import { ComputerUseToggle } from "./overrides/computer-use-toggle"
-import { AdapterHealthBadge } from "./adapter-health-badge"
-import { ComputerUseChip } from "./computer-use-chip"
-import { QuietHoursChip } from "./quiet-hours-chip"
-import { AtStrategyChip } from "./at-strategy-chip"
+import { ConversationHeaderOverflow } from "./conversation-header-overflow"
 import { useConversationOverride } from "@/hooks/connectors/use-conversation-overrides"
-import { useLastInboundForConversation } from "@/hooks/connectors/use-last-inbound"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { ArtifactDockToggle } from "@/components/artifacts/artifact-dock-toggle"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { isTauri } from "@/lib/tauri"
@@ -35,54 +39,6 @@ import { avatarColor, avatarGlyph } from "@/lib/ui/avatar"
 import { parseConversationKey } from "@/types/connectors/event"
 import type { ConnectorMode, TriggerPolicy } from "@/types/connectors/policy"
 import type { PlatformKind } from "@/types/connectors/platform-kind"
-
-/**
- * Compact "last inbound X ago" chip — Task P2.5.
- *
- * Reuses `useLastInboundForConversation` to read the newest `inbound.received`
- * audit row for the current conversationKey. Hides itself when no inbound has
- * ever landed (empty conversation) so it doesn't crowd the header chrome
- * with `Last message —` placeholders.
- */
-function LastInboundChip({ conversationKey }: { conversationKey: string }) {
-  const t = useTranslations("inbox.conversationHeader")
-  const lastAt = useLastInboundForConversation(conversationKey)
-  // Lazy init keeps Date.now() out of the render body; the interval re-ticks
-  // the chip every 30s so "5 minutes ago" stays current without polluting
-  // the render path with impure reads.
-  const [now, setNow] = useState<number>(() => Date.now())
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 30_000)
-    return () => clearInterval(id)
-  }, [])
-  if (lastAt === null) return null
-  const ageMs = Math.max(0, now - lastAt)
-  const label = (() => {
-    const minutes = Math.round(ageMs / 60_000)
-    if (minutes < 1) return t("lastInboundJustNow")
-    if (minutes < 60) return t("lastInboundMinutes", { minutes })
-    const hours = Math.round(minutes / 60)
-    if (hours < 48) return t("lastInboundHours", { hours })
-    const days = Math.round(hours / 24)
-    return t("lastInboundDays", { days })
-  })()
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Badge
-          variant="outline"
-          className="hidden md:inline-flex text-xs"
-          data-testid="conversation-header-last-inbound"
-        >
-          {label}
-        </Badge>
-      </TooltipTrigger>
-      <TooltipContent className="text-xs">
-        {t("lastInboundTooltip", { time: new Date(lastAt).toLocaleString() })}
-      </TooltipContent>
-    </Tooltip>
-  )
-}
 
 interface ConversationHeaderProps {
   conversationKey: string
@@ -113,12 +69,12 @@ export function ConversationHeader({
 }: ConversationHeaderProps) {
   const t = useTranslations("inbox.conversationHeader")
   const tModes = useTranslations("inbox.modeSwitcher.modes")
-  const tBindings = useTranslations("inbox.bindingsInspector")
   const desktop = isTauri()
   const character = useCharacter(characterId)
   const router = useRouter()
   const [overrideDialogOpen, setOverrideDialogOpen] = useState(false)
   const [bindingsOpen, setBindingsOpen] = useState(false)
+  const [contactOpen, setContactOpen] = useState(false)
   const overrideRow = useConversationOverride(conversationKey)
   // The conversationKey carries `${platform}:${adapterId}:${chatId}` — extract
   // the middle segment so the override dialog can audit + namespace correctly.
@@ -142,7 +98,7 @@ export function ConversationHeader({
 
   return (
     <header
-      className="flex h-12 shrink-0 items-center gap-2 border-b px-2 md:gap-3 md:px-4"
+      className="flex h-9 shrink-0 items-center gap-2 border-b bg-background/80 px-2 backdrop-blur md:px-3"
       data-testid="conversation-header"
     >
       {/* Mobile-only nav cluster: back to the conversation list + open the
@@ -152,12 +108,12 @@ export function ConversationHeader({
         type="button"
         variant="ghost"
         size="icon"
-        className="md:hidden"
+        className="size-7 md:hidden"
         onClick={handleBack}
         aria-label={t("backToList")}
         data-testid="conversation-header-back"
       >
-        <ChevronLeftIcon className="h-4 w-4" />
+        <ChevronLeftIcon className="size-4" />
       </Button>
       <SidebarTrigger
         className="md:hidden"
@@ -166,15 +122,15 @@ export function ConversationHeader({
       />
 
       {/* Left: platform + character chip + title */}
-      <div className="flex items-center gap-2 min-w-0 flex-1">
+      <div className="flex min-w-0 flex-1 items-center gap-2">
         <PlatformBadge platform={platform} iconOnly />
         {character && (
           <span
-            className="flex items-center gap-1.5 min-w-0"
+            className="flex min-w-0 items-center gap-1.5"
             data-testid="conversation-character-chip"
           >
             <span
-              className="flex size-6 shrink-0 items-center justify-center rounded-full text-[10px] font-medium"
+              className="flex size-5 shrink-0 items-center justify-center rounded-full text-[10px] font-medium"
               style={{ backgroundColor: avatarColor(character), color: "white" }}
               aria-hidden
               title={character.name}
@@ -186,26 +142,20 @@ export function ConversationHeader({
             </span>
           </span>
         )}
-        <h2 className="text-sm font-semibold truncate">{title}</h2>
+        {/* `font-medium`, matching `chat-header.tsx` — same seam, same weight. */}
+        <h2 className="truncate text-sm font-medium">{title}</h2>
       </div>
 
-      {/* Middle: live ModeSwitcher on desktop, static disabled badge on web */}
+      {/* The one control that answers "what will the next turn run as" earns
+          its place in the strip; every other setting lives behind `⋯`.
+          Live ModeSwitcher on desktop, static disabled badge on web. */}
       {desktop ? (
-        <>
-          <ModeSwitcher
-            conversationKey={conversationKey}
-            sessionId={sessionId}
-            currentMode={currentMode}
-            onModeChange={onModeChange}
-          />
-          {/* A6 — per-channel provider/model override (ADR-0009 v41). */}
-          <ProviderModelSwitcher
-            conversationKey={conversationKey}
-            sessionId={sessionId}
-            providerOverride={providerOverride}
-            modelOverride={modelOverride}
-          />
-        </>
+        <ModeSwitcher
+          conversationKey={conversationKey}
+          sessionId={sessionId}
+          currentMode={currentMode}
+          onModeChange={onModeChange}
+        />
       ) : (
         <Tooltip>
           <TooltipTrigger asChild>
@@ -222,32 +172,27 @@ export function ConversationHeader({
         </Tooltip>
       )}
 
-      {/* Right: last-inbound chip + Computer-Use toggle + adapter
-       * degradation badge + policy + gear. Computer-Use lives close to
-       * the degradation surface so the high-blast-radius opt-in is
-       * visible whenever the conversation is open. */}
-      <LastInboundChip conversationKey={conversationKey} />
-      {parsedAdapterId && (
-        <QuietHoursChip adapterId={parsedAdapterId} conversationKey={conversationKey} />
-      )}
-      {parsedAdapterId && <AtStrategyChip adapterId={parsedAdapterId} />}
-      {parsedAdapterId && desktop && (
-        <ComputerUseToggle
-          conversationKey={conversationKey}
-          sessionId={sessionId}
-          adapterId={parsedAdapterId}
-          currentValue={overrideRow?.allowComputerUse === true}
-        />
-      )}
-      {/* Web-mode mirror of the computer-use opt-in — read-only chip so
-       * the operator still sees the elevated-permission state even when
-       * the biometric toggle isn't available (web build / mobile shell). */}
-      {!desktop && <ComputerUseChip active={overrideRow?.allowComputerUse === true} />}
-      {/* v49 — replaces inline AdapterDegradationBadge with the wider
-       * health surface that picks up breaker / rate-bucket signals from
-       * the heartbeat snapshots, not just the current.state. */}
-      {parsedAdapterId && <AdapterHealthBadge adapterId={parsedAdapterId} />}
-      <PolicyInfo policy={policy} />
+      {/* Status, routing, health and tooling — one popover, opened on demand. */}
+      <ConversationHeaderOverflow
+        conversationKey={conversationKey}
+        sessionId={sessionId}
+        adapterId={parsedAdapterId}
+        policy={policy}
+        overrideRow={overrideRow}
+        providerOverride={providerOverride}
+        modelOverride={modelOverride}
+        desktop={desktop}
+        onOpenContact={() => setContactOpen(true)}
+        onOpenBindings={() => setBindingsOpen(true)}
+      />
+
+      {/* The chat pane below mounts with `showHeader={false}`, so the copy of
+       * this control in `chat-header` never renders here. Without it the dock —
+       * which defaults to collapsed — had no in-page opener on this route at
+       * all. That applies doubly on a phone, where the `AppShellMobile` top bar
+       * (the other standing opener) isn't mounted either, so the toggle must
+       * NOT be breakpoint-gated. */}
+      <ArtifactDockToggle className="size-7" />
 
       <Tooltip>
         <TooltipTrigger asChild>
@@ -255,39 +200,19 @@ export function ConversationHeader({
             type="button"
             variant="ghost"
             size="icon"
-            className="h-7 w-7 shrink-0"
+            className="size-7 shrink-0"
             onClick={() => setOverrideDialogOpen(true)}
             aria-label={t("openOverridesAria")}
             data-testid="conversation-header-overrides"
           >
-            <Settings2Icon className="h-3.5 w-3.5" />
+            <Settings2Icon className="size-3.5" />
           </Button>
         </TooltipTrigger>
         <TooltipContent>{t("openOverrides")}</TooltipContent>
       </Tooltip>
 
-      {/* A2UI callback-bindings inspector — diagnostic surface for triaging
-       * "the button didn't route my surface". Desktop-only because the row
-       * "test" action drives the live bus runtime. */}
-      {parsedAdapterId && desktop && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 shrink-0"
-              onClick={() => setBindingsOpen(true)}
-              aria-label={tBindings("openInspector")}
-              data-testid="conversation-header-bindings"
-            >
-              <ListChecksIcon className="h-3.5 w-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{tBindings("openInspector")}</TooltipContent>
-        </Tooltip>
-      )}
-
+      {/* The dialogs stay mounted here — only their triggers moved into the
+          overflow, so opening one still works after the popover closes. */}
       <ConversationOverrideDialog
         open={overrideDialogOpen}
         onOpenChange={setOverrideDialogOpen}
@@ -295,6 +220,12 @@ export function ConversationHeader({
         conversationKey={conversationKey}
         sessionId={sessionId}
         initialRow={overrideRow ?? null}
+      />
+
+      <ContactProfileDrawer
+        open={contactOpen}
+        onOpenChange={setContactOpen}
+        conversationKey={conversationKey}
       />
 
       {parsedAdapterId && desktop && (

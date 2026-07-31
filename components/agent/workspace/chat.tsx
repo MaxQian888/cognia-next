@@ -1,14 +1,16 @@
 "use client"
 
-import { forwardRef, useEffect, useRef } from "react"
+import { forwardRef, memo, useEffect, useRef, useState } from "react"
 import { useTranslations } from "next-intl"
-import { motion, useReducedMotion } from "motion/react"
+import { AnimatePresence, motion, useReducedMotion } from "motion/react"
+import { STAGGER_CHILD, STAGGER_INTERVAL, mobileTransition } from "@/lib/ui/motion"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { AlertCircleIcon, Loader2Icon, MessageCircleIcon } from "lucide-react"
+import { cn } from "@/lib/utils"
 import type { AgentTeamMessage } from "@/types/agent/agent-team"
 import {
   TEAM_MESSAGE_METADATA_KEYS,
@@ -16,6 +18,7 @@ import {
 } from "@/lib/agent-team/team-runtime-dispatcher"
 import type { MentionTarget } from "@/lib/agent-team/runtime-targets"
 import { senderColor } from "./sender-color"
+import { firstUnreadId } from "./unread"
 import { RuntimeBadge } from "./runtime-badge"
 import { TeamMentionChips } from "./team-mention-chips"
 import { TeamComposer } from "./team-composer"
@@ -23,11 +26,13 @@ import { ToolCallList } from "./tool-call-card"
 import { TokenUsageLine } from "./token-usage-line"
 import { MessageActionsMenu } from "./message-actions-menu"
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
+import { stripAgentBlocks } from "@/lib/agent-team/agent-blocks"
 import type { RuntimeAvailabilityMap } from "@/lib/agent-team/use-runtime-availability"
 import type { ComposerHandle } from "@/components/chat/composer"
 import { TEAM_USER_SENDER_ID } from "@/types/agent/agent-team"
 import type { TeammateRuntime } from "@/types/agent/agent-team"
 import type { SubAgentTokenUsage } from "@/types/agent/sub-agent"
+import type { ProjectFileReference } from "@/lib/files/project-file-reference"
 
 /* ------------------------------------------------------------------ */
 /*  Border color per message type                                       */
@@ -100,16 +105,26 @@ function isErrored(msg: AgentTeamMessage): boolean {
  * agent messages get the full MarkdownRenderer treatment so code blocks,
  * lists, tables, etc. display properly.
  */
-function renderMessageBody(msg: AgentTeamMessage, streaming: boolean) {
+function renderMessageBody(
+  msg: AgentTeamMessage,
+  streaming: boolean,
+  projectRoot?: string,
+  onOpenProjectFile?: (target: ProjectFileReference) => void
+) {
   const isFromUser = msg.senderId === TEAM_USER_SENDER_ID
-  if (isFromUser || streaming || !msg.content) {
-    return <p className="whitespace-pre-wrap text-xs leading-relaxed">{msg.content}</p>
+  // Hide teammate-to-teammate operational instructions wrapped in <info_for_agent>;
+  // the full text stays in the store for the recipient's context.
+  const visible = stripAgentBlocks(msg.content)
+  if (isFromUser || streaming || !visible) {
+    return <p className="whitespace-pre-wrap text-xs leading-relaxed">{visible}</p>
   }
   return (
     <div className="text-xs leading-relaxed">
       <MarkdownRenderer
-        content={msg.content}
+        content={visible}
         messageId={msg.id}
+        projectRoot={projectRoot}
+        onOpenProjectFile={onOpenProjectFile}
         enableMermaid
         enableMath
         enableDiff
@@ -117,6 +132,116 @@ function renderMessageBody(msg: AgentTeamMessage, streaming: boolean) {
     </div>
   )
 }
+
+/* ------------------------------------------------------------------ */
+
+interface ChatMessageItemProps {
+  msg: AgentTeamMessage
+  /** Stagger-animate only the last few new messages. */
+  animate: boolean
+  /** 0-based position within the animated tail window (drives the delay). */
+  animationSlot: number
+  onRetry?: AgentTeamChatProps["onRetry"]
+  onDelete?: AgentTeamChatProps["onDelete"]
+  projectRoot?: string
+  onOpenProjectFile?: (target: ProjectFileReference) => void
+}
+
+/**
+ * A single chat message card. Memoised so that streaming deltas — which
+ * replace only the streaming message's object in the store — re-render just
+ * that card instead of every MarkdownRenderer in the history.
+ */
+const ChatMessageItem = memo(function ChatMessageItem({
+  msg,
+  animate,
+  animationSlot,
+  onRetry,
+  onDelete,
+  projectRoot,
+  onOpenProjectFile,
+}: ChatMessageItemProps) {
+  const t = useTranslations("agentTeamsWorkspace.chat")
+  const tMsg = useTranslations("agentTeamsWorkspace.chat.messageTypes")
+  const runtime = readRuntimeFromMetadata(msg)
+  const streaming = isStreaming(msg)
+  const errored = isErrored(msg)
+  const toolCalls = readToolCalls(msg)
+  const tokenUsage = readTokenUsage(msg)
+  return (
+    <motion.div
+      layout
+      initial={animate ? "initial" : false}
+      animate="animate"
+      exit="exit"
+      variants={STAGGER_CHILD}
+      transition={{
+        ...mobileTransition("fast"),
+        delay: animate ? Math.min(animationSlot * STAGGER_INTERVAL, 0.12) : 0,
+      }}
+    >
+      <Card
+        className={`group space-y-1 border-l-2 p-3 ${typeBorderColor(msg.type)} ${
+          streaming ? "ring-1 ring-primary/20" : ""
+        } ${errored ? "ring-1 ring-destructive/40" : ""}`}
+        data-testid={`chat-msg-${msg.id}`}
+        data-streaming={streaming ? "true" : "false"}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span
+              className="flex size-6 items-center justify-center rounded-full text-[10px] font-medium"
+              style={{ backgroundColor: senderColor(msg.senderName), color: "white" }}
+              aria-hidden
+            >
+              {msg.senderName.charAt(0).toUpperCase()}
+            </span>
+            <span className="text-xs font-medium">{msg.senderName}</span>
+            {runtime && <RuntimeBadge runtime={runtime} iconOnly />}
+            <Badge variant="outline" className="text-[9px]">
+              {tMsg(msg.type as never) ?? msg.type}
+            </Badge>
+            {errored && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button type="button" className="text-destructive" aria-label={t("errorReason")}>
+                    <AlertCircleIcon className="size-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs text-xs">{t("errorGeneric")}</TooltipContent>
+              </Tooltip>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <span className="font-mono text-[10px] text-muted-foreground">
+              {formatTimestamp(msg.timestamp)}
+            </span>
+            {!streaming && (onRetry || onDelete) && (
+              <span className="opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                <MessageActionsMenu message={msg} onRetry={onRetry} onDelete={onDelete} />
+              </span>
+            )}
+          </div>
+        </div>
+        {toolCalls && toolCalls.length > 0 && <ToolCallList calls={toolCalls} />}
+        {renderMessageBody(msg, streaming, projectRoot, onOpenProjectFile)}
+        {streaming && (
+          <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+            <Loader2Icon className="size-3 animate-spin" />
+            <span>{t("streaming")}</span>
+          </div>
+        )}
+        {!streaming && tokenUsage && <TokenUsageLine usage={tokenUsage} />}
+        {msg.structuredPayload && (
+          <div className="rounded bg-muted/50 p-2 text-[10px] text-muted-foreground">
+            <span className="font-medium">{t("structuredPayload")}:</span>{" "}
+            {JSON.stringify(msg.structuredPayload).slice(0, 200)}
+          </div>
+        )}
+      </Card>
+    </motion.div>
+  )
+})
 
 /* ------------------------------------------------------------------ */
 
@@ -149,6 +274,17 @@ export interface AgentTeamChatProps {
   }) => void | Promise<void>
   /** Remove a message from the chat. */
   onDelete?: (messageId: string) => void | Promise<void>
+  /** Root used to resolve relative file links in completed agent messages. */
+  projectRoot?: string
+  /** Owner override for switching to and mounting the project editor. */
+  onOpenProjectFile?: (target: ProjectFileReference) => void
+  /**
+   * Extra classes for the root container. The workspace passes
+   * `flex-1 min-h-0` so the chat fills the tab height (message list scrolls
+   * internally, composer pinned at the bottom) instead of being a
+   * fixed-height box that leaves the lower half of the pane empty.
+   */
+  className?: string
 }
 
 export const AgentTeamChat = forwardRef<ComposerHandle, AgentTeamChatProps>(function AgentTeamChat(
@@ -162,14 +298,28 @@ export const AgentTeamChat = forwardRef<ComposerHandle, AgentTeamChatProps>(func
     availability,
     onRetry,
     onDelete,
+    projectRoot,
+    onOpenProjectFile,
+    className,
   },
   composerRef
 ) {
   const t = useTranslations("agentTeamsWorkspace.chat")
-  const tMsg = useTranslations("agentTeamsWorkspace.chat.messageTypes")
   const prefersReducedMotion = useReducedMotion()
   const bottomRef = useRef<HTMLDivElement>(null)
   const localComposerRef = useRef<ComposerHandle | null>(null)
+
+  // Snapshot of where the unread run started, taken once per visit. The
+  // workspace marks the thread read as soon as the chat tab is active, so
+  // reading this live would render the divider for a single frame and then drop
+  // it. This component unmounts when you leave the tab, so the snapshot is
+  // naturally recomputed on the next visit.
+  const [unread] = useState(() => {
+    const anchorId = firstUnreadId(messages)
+    if (!anchorId) return null
+    const start = messages.findIndex((m) => m.id === anchorId)
+    return start < 0 ? null : { anchorId, count: messages.length - start }
+  })
 
   // Track total streaming text length so we re-scroll as deltas land. Using a
   // hash of (count, last-msg content length, last-msg streaming flag) keeps
@@ -192,9 +342,12 @@ export const AgentTeamChat = forwardRef<ComposerHandle, AgentTeamChatProps>(func
   }
 
   return (
-    <div className="flex flex-col gap-3" data-testid="agent-team-chat-root">
+    <div
+      className={cn("flex min-h-0 w-full flex-col gap-3", className)}
+      data-testid="agent-team-chat-root"
+    >
       {messages.length === 0 ? (
-        <div className="rounded-md border bg-muted/30 px-4 py-8">
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center rounded-md border bg-muted/30 px-4 py-8">
           <Empty>
             <EmptyMedia variant="icon">
               <MessageCircleIcon />
@@ -208,108 +361,55 @@ export const AgentTeamChat = forwardRef<ComposerHandle, AgentTeamChatProps>(func
           </Empty>
         </div>
       ) : (
-        <ScrollArea className="h-[clamp(360px,55vh,calc(100vh-280px))]">
+        <ScrollArea className="min-h-0 flex-1">
           <div className="space-y-2" data-testid="workspace-chat">
-            {messages.map((msg, index) => {
-              const runtime = readRuntimeFromMetadata(msg)
-              const streaming = isStreaming(msg)
-              const errored = isErrored(msg)
-              const toolCalls = readToolCalls(msg)
-              const tokenUsage = readTokenUsage(msg)
-              // Only stagger the last few new messages — established history
-              // would otherwise flicker on every render.
-              const shouldAnimate = !prefersReducedMotion && index >= messages.length - 5
-              return (
-                <motion.div
-                  key={msg.id}
-                  initial={shouldAnimate ? { opacity: 0, y: 4 } : false}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{
-                    duration: 0.15,
-                    ease: "easeOut",
-                    delay: shouldAnimate
-                      ? Math.min((index - Math.max(messages.length - 5, 0)) * 0.03, 0.12)
-                      : 0,
-                  }}
-                >
-                  <Card
-                    className={`group space-y-1 border-l-2 p-3 ${typeBorderColor(msg.type)} ${
-                      streaming ? "ring-1 ring-primary/20" : ""
-                    } ${errored ? "ring-1 ring-destructive/40" : ""}`}
-                    data-testid={`chat-msg-${msg.id}`}
-                    data-streaming={streaming ? "true" : "false"}
+            {/* flatMap, not a Fragment per row: AnimatePresence tracks its
+                direct children via React.Children, which does NOT look inside a
+                Fragment — wrapping each row would silently kill the exit
+                animation on delete. Emitting the divider as a sibling keeps
+                every node a directly-keyed child. */}
+            <AnimatePresence initial={false}>
+              {messages.flatMap((msg, index) => {
+                // Only stagger the last few new messages — established history
+                // would otherwise flicker on every render.
+                const shouldAnimate = !prefersReducedMotion && index >= messages.length - 5
+                const row = (
+                  <ChatMessageItem
+                    key={msg.id}
+                    msg={msg}
+                    animate={shouldAnimate}
+                    animationSlot={index - Math.max(messages.length - 5, 0)}
+                    onRetry={onRetry}
+                    onDelete={onDelete}
+                    projectRoot={projectRoot}
+                    onOpenProjectFile={onOpenProjectFile}
+                  />
+                )
+                if (msg.id !== unread?.anchorId) return [row]
+                return [
+                  <div
+                    key="chat-unread-divider"
+                    className="flex items-center gap-2 pt-1"
+                    data-testid="chat-unread-divider"
+                    role="separator"
+                    aria-label={t("unreadDivider", { count: unread.count })}
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <span
-                          className="flex size-6 items-center justify-center rounded-full text-[10px] font-medium"
-                          style={{ backgroundColor: senderColor(msg.senderName), color: "white" }}
-                          aria-hidden
-                        >
-                          {msg.senderName.charAt(0).toUpperCase()}
-                        </span>
-                        <span className="text-xs font-medium">{msg.senderName}</span>
-                        {runtime && <RuntimeBadge runtime={runtime} iconOnly />}
-                        <Badge variant="outline" className="text-[9px]">
-                          {tMsg(msg.type as never) ?? msg.type}
-                        </Badge>
-                        {errored && (
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <button
-                                type="button"
-                                className="text-destructive"
-                                aria-label={t("errorReason")}
-                              >
-                                <AlertCircleIcon className="size-3.5" />
-                              </button>
-                            </TooltipTrigger>
-                            <TooltipContent className="max-w-xs text-xs">
-                              {t("errorGeneric")}
-                            </TooltipContent>
-                          </Tooltip>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <span className="font-mono text-[10px] text-muted-foreground">
-                          {formatTimestamp(msg.timestamp)}
-                        </span>
-                        {!streaming && (onRetry || onDelete) && (
-                          <span className="opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-                            <MessageActionsMenu
-                              message={msg}
-                              onRetry={onRetry}
-                              onDelete={onDelete}
-                            />
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    {toolCalls && toolCalls.length > 0 && <ToolCallList calls={toolCalls} />}
-                    {renderMessageBody(msg, streaming)}
-                    {streaming && (
-                      <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                        <Loader2Icon className="size-3 animate-spin" />
-                        <span>{t("streaming")}</span>
-                      </div>
-                    )}
-                    {!streaming && tokenUsage && <TokenUsageLine usage={tokenUsage} />}
-                    {msg.structuredPayload && (
-                      <div className="rounded bg-muted/50 p-2 text-[10px] text-muted-foreground">
-                        <span className="font-medium">{t("structuredPayload")}:</span>{" "}
-                        {JSON.stringify(msg.structuredPayload).slice(0, 200)}
-                      </div>
-                    )}
-                  </Card>
-                </motion.div>
-              )
-            })}
+                    <span className="h-px flex-1 bg-destructive/40" />
+                    <span className="shrink-0 text-[10px] font-medium uppercase tracking-wider text-destructive">
+                      {t("unreadDivider", { count: unread.count })}
+                    </span>
+                    <span className="h-px flex-1 bg-destructive/40" />
+                  </div>,
+                  row,
+                ]
+              })}
+            </AnimatePresence>
             <div ref={bottomRef} />
           </div>
         </ScrollArea>
       )}
       {showComposer && (
-        <div className="space-y-2">
+        <div className="shrink-0 space-y-2">
           <TeamMentionChips
             targets={mentionables!}
             onPick={handleChipPick}

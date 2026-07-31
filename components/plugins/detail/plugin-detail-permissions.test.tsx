@@ -15,8 +15,28 @@ let mockPlugin: PluginRow | undefined
 jest.mock("dexie-react-hooks", () => ({
   useLiveQuery: () => mockPlugin,
 }))
+
+// The approved-binaries card runs its own Dexie live query (which this file's
+// blanket `useLiveQuery` stub would answer with a PluginRow) and is covered by
+// its co-located test. Stub it to a marker so this suite stays about the
+// permission table, while still pinning that the card is mounted here.
+jest.mock("./plugin-approved-binaries-card", () => ({
+  PluginApprovedBinariesCard: ({ pluginId }: { pluginId: string }) => (
+    <div>approved-binaries-card:{pluginId}</div>
+  ),
+}))
 jest.mock("@/lib/db/plugins", () => ({
   getPlugin: jest.fn(),
+}))
+
+// The embedded PluginFrontendTrustCard reads its persisted grant through the
+// manager singleton in a state initializer; the real one throws when
+// uninitialized.
+jest.mock("@/lib/plugin/core/manager", () => ({
+  getPluginManager: () => ({
+    isFrontendTrusted: () => false,
+    setFrontendTrust: jest.fn(),
+  }),
 }))
 
 const mockGetGranted = jest.fn<PluginPermission[], [string]>(() => [])
@@ -87,11 +107,46 @@ describe("PluginDetailPermissions", () => {
     expect(screen.getAllByText("shell:execute").length).toBeGreaterThan(0)
   })
 
+  it("mounts the approved-binaries card so durable grants are revocable", () => {
+    // A permanent binary grant the user cannot see or withdraw is its own
+    // security problem; the ledger's only reader has to be reachable.
+    mockPlugin = makePlugin(["cli:execute"])
+    render(<PluginDetailPermissions pluginId="alpha" />)
+    expect(screen.getByText("approved-binaries-card:alpha")).toBeInTheDocument()
+  })
+
   it("merges declared + granted permissions into one sorted list", () => {
     mockPlugin = makePlugin(["clipboard:read"])
     mockGetGranted.mockReturnValue(["network:fetch"])
     render(<PluginDetailPermissions pluginId="alpha" />)
     expect(screen.getAllByText("clipboard:read").length).toBeGreaterThan(0)
     expect(screen.getAllByText("network:fetch").length).toBeGreaterThan(0)
+  })
+
+  it("renders the frontend trust card for a renderer-JS plugin from an untrusted source", () => {
+    // makePlugin defaults to type:"frontend" + source:"marketplace" — the
+    // exact combination the trust boundary gates.
+    mockPlugin = makePlugin(["clipboard:read"])
+    render(<PluginDetailPermissions pluginId="alpha" />)
+    expect(screen.getByTestId("plugin-frontend-trust-card")).toBeInTheDocument()
+  })
+
+  it("renders the frontend trust card in the no-permissions empty state too", () => {
+    mockPlugin = makePlugin([])
+    render(<PluginDetailPermissions pluginId="alpha" />)
+    expect(screen.getByText("noPermissions")).toBeInTheDocument()
+    expect(screen.getByTestId("plugin-frontend-trust-card")).toBeInTheDocument()
+  })
+
+  it("does not render the trust card for an inherently trusted source", () => {
+    mockPlugin = { ...makePlugin(["clipboard:read"]), source: "builtin" }
+    render(<PluginDetailPermissions pluginId="alpha" />)
+    expect(screen.queryByTestId("plugin-frontend-trust-card")).not.toBeInTheDocument()
+  })
+
+  it("does not render the trust card for an isolated-host plugin type", () => {
+    mockPlugin = { ...makePlugin(["clipboard:read"]), type: "wasm" }
+    render(<PluginDetailPermissions pluginId="alpha" />)
+    expect(screen.queryByTestId("plugin-frontend-trust-card")).not.toBeInTheDocument()
   })
 })

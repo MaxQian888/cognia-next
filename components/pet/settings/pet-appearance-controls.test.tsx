@@ -1,0 +1,94 @@
+import { render, screen, fireEvent } from "@testing-library/react"
+
+let coreAvailable: boolean | undefined = true
+jest.mock("@/hooks/pet/use-active-live2d-model", () => ({
+  useCubismCoreAvailable: () => coreAvailable,
+}))
+jest.mock("@/components/settings/pet/pet-model-manager", () => ({
+  PetModelManager: () => <div data-testid="pet-model-manager" />,
+}))
+jest.mock("@/components/settings/pet/pet-sprite-pack-manager", () => ({
+  PetSpritePackManager: () => <div data-testid="pet-sprite-pack-manager" />,
+}))
+
+import { PetAppearanceControls } from "./pet-appearance-controls"
+import { DEFAULT_PET_SETTINGS } from "@/types/pet"
+
+beforeEach(() => {
+  coreAvailable = true
+})
+
+describe("PetAppearanceControls", () => {
+  it("patches anchor, motion, skin, and size", () => {
+    const patch = jest.fn()
+    render(<PetAppearanceControls pet={DEFAULT_PET_SETTINGS} patch={patch} />)
+    fireEvent.change(document.getElementById("pet-anchor") as HTMLSelectElement, {
+      target: { value: "top-left" },
+    })
+    expect(patch).toHaveBeenCalledWith({ anchor: "top-left" })
+    fireEvent.change(document.getElementById("pet-motion") as HTMLSelectElement, {
+      target: { value: "reduced" },
+    })
+    expect(patch).toHaveBeenCalledWith({ motion: "reduced" })
+    fireEvent.change(document.getElementById("pet-skin") as HTMLSelectElement, {
+      target: { value: "live2d" },
+    })
+    expect(patch).toHaveBeenCalledWith({ skinId: "live2d" })
+    fireEvent.keyDown(screen.getByRole("slider"), { key: "ArrowRight" })
+    expect(patch).toHaveBeenCalledWith({ size: expect.any(Number) })
+  })
+
+  it("warns when the live2d skin is selected but the core is missing", () => {
+    coreAvailable = false
+    render(
+      <PetAppearanceControls
+        pet={{ ...DEFAULT_PET_SETTINGS, skinId: "live2d" }}
+        patch={jest.fn()}
+      />
+    )
+    expect(screen.getByText(/runtime isn't ready/i)).toBeInTheDocument()
+  })
+
+  it("prompts to pick a model when live2d is ready but none is active", () => {
+    coreAvailable = true
+    render(
+      <PetAppearanceControls
+        pet={{ ...DEFAULT_PET_SETTINGS, skinId: "live2d" }}
+        patch={jest.fn()}
+      />
+    )
+    expect(screen.getByText(/pick a model below/i)).toBeInTheDocument()
+  })
+
+  it("drops the pick-a-model hint once a model is active", () => {
+    coreAvailable = true
+    render(
+      <PetAppearanceControls
+        pet={{ ...DEFAULT_PET_SETTINGS, skinId: "live2d", activeLive2dModelId: "m1" }}
+        patch={jest.fn()}
+      />
+    )
+    expect(screen.queryByText(/pick a model below/i)).toBeNull()
+  })
+
+  it("mounts the model manager only for the live2d skin", () => {
+    const { rerender } = render(
+      <PetAppearanceControls pet={DEFAULT_PET_SETTINGS} patch={jest.fn()} />
+    )
+    expect(screen.queryByTestId("pet-model-manager")).toBeNull()
+    rerender(
+      <PetAppearanceControls
+        pet={{ ...DEFAULT_PET_SETTINGS, skinId: "live2d" }}
+        patch={jest.fn()}
+      />
+    )
+    expect(screen.getByTestId("pet-model-manager")).toBeInTheDocument()
+  })
+
+  it("offers and mounts the v2 sprite pack manager", () => {
+    const pet = { ...DEFAULT_PET_SETTINGS, skinId: "sprite-v2" }
+    render(<PetAppearanceControls pet={pet} patch={jest.fn()} />)
+    expect(screen.getByRole("option", { name: /v2|sprite/i })).toBeInTheDocument()
+    expect(screen.getByTestId("pet-sprite-pack-manager")).toBeInTheDocument()
+  })
+})

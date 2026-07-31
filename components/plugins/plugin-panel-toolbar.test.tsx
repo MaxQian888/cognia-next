@@ -44,6 +44,16 @@ jest.mock("./dialogs/plugin-signed-install-from-url-dialog", () => ({
     ) : null,
 }))
 
+jest.mock("./dialogs/plugin-vsix-install-dialog", () => ({
+  PluginVsixInstallDialog: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="vsix-dialog" /> : null,
+}))
+
+jest.mock("./dialogs/plugin-wasm-from-git-dialog", () => ({
+  PluginWasmFromGitDialog: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="wasm-git-dialog" /> : null,
+}))
+
 // The radix DropdownMenu uses pointer events that fireEvent.click does not
 // drive — render its content unconditionally so the menu items are always in
 // the DOM tree, matching the pattern used by other tests in this repo.
@@ -263,6 +273,27 @@ describe("PluginPanelToolbar", () => {
       canUseTauriInvokeMock.mockReturnValue(true)
       render(<PluginPanelToolbar />)
       expect(screen.getAllByTestId("wasm-grant-sheet-mounted")).toHaveLength(1)
+    })
+
+    it("From .vsix menu item opens the VSIX dialog", async () => {
+      canUseTauriInvokeMock.mockReturnValue(true)
+      render(<PluginPanelToolbar />)
+      fireEvent.click(screen.getByText("fromVsix"))
+      expect(await screen.findByTestId("vsix-dialog")).toBeInTheDocument()
+    })
+
+    it("From Git (WASM) menu item opens the wasm-from-git dialog", async () => {
+      canUseTauriInvokeMock.mockReturnValue(true)
+      render(<PluginPanelToolbar />)
+      fireEvent.click(screen.getByText("fromWasmGit"))
+      expect(await screen.findByTestId("wasm-git-dialog")).toBeInTheDocument()
+    })
+
+    it("hides the VSIX and Git (WASM) items in web mode", () => {
+      canUseTauriInvokeMock.mockReturnValue(false)
+      render(<PluginPanelToolbar />)
+      expect(screen.queryByText("fromVsix")).not.toBeInTheDocument()
+      expect(screen.queryByText("fromWasmGit")).not.toBeInTheDocument()
     })
   })
 

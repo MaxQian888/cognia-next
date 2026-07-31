@@ -15,6 +15,7 @@ import { useTranslations } from "next-intl"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { NodeSearchSidebar } from "@/components/workflow/editor/node-search-sidebar"
 import type { NodeCatalogEntry } from "@/lib/workflow/nodes/catalog"
+import { useBackDismiss } from "@/hooks/ui/use-back-dismiss"
 
 export interface MobileNodePaletteSheetProps {
   open: boolean
@@ -24,6 +25,9 @@ export interface MobileNodePaletteSheetProps {
 }
 
 export function MobileNodePaletteSheet({ open, onOpenChange, onAdd }: MobileNodePaletteSheetProps) {
+  // Android hardware / browser back closes the sheet instead of navigating.
+  useBackDismiss(open, () => onOpenChange(false))
+
   const t = useTranslations("mobile.workflow.editor")
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>

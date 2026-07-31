@@ -26,7 +26,7 @@ import { useSettingsStore } from "@/stores"
 import { getCurrencyForLocale, CURRENCIES } from "@/types/system/usage"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
-import type { Model } from "@/types/provider"
+import type { Model } from "@cognia/provider-types"
 
 type FilterType = "all" | "vision" | "tools" | "reasoning"
 

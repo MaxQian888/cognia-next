@@ -12,7 +12,11 @@ import {
   getPluginExtensionDiagnostics,
   clearAllExtensionDiagnostics,
 } from "./extension-api"
-import type { ExtensionPoint, ExtensionProps } from "@/types/plugin/plugin-extended"
+import type { ExtensionPoint, ExtensionProps } from "@/types/plugin/plugin"
+import {
+  setContextKey,
+  __resetContextKeysForTesting,
+} from "@/lib/plugin/context-keys/context-key-store"
 
 describe("Extension API", () => {
   const testPluginId = "test-plugin"
@@ -24,7 +28,53 @@ describe("Extension API", () => {
     clearPluginExtensions("plugin-2")
     clearPluginExtensions("plugin-a")
     clearPluginExtensions("plugin-b")
+    clearPluginExtensions("when-plugin")
     clearAllExtensionDiagnostics()
+    __resetContextKeysForTesting()
+  })
+
+  describe("when-clause visibility", () => {
+    const Cmp: React.ComponentType<ExtensionProps> = () => null
+
+    it("hides an extension while its when-clause is unmet and shows it when met", () => {
+      const api = createExtensionAPI("when-plugin")
+      api.registerExtension("chat.header", Cmp, { when: "chat.active" })
+
+      // Context key absent → clause false → hidden.
+      expect(getExtensionsForPoint("chat.header")).toHaveLength(0)
+      expect(api.hasExtensions("chat.header")).toBe(false)
+
+      // Flip the key → clause true → visible.
+      setContextKey("chat.active", true)
+      expect(getExtensionsForPoint("chat.header")).toHaveLength(1)
+      expect(api.hasExtensions("chat.header")).toBe(true)
+
+      // Flip back → hidden again.
+      setContextKey("chat.active", false)
+      expect(getExtensionsForPoint("chat.header")).toHaveLength(0)
+    })
+
+    it("requires both condition() and when to pass", () => {
+      const api = createExtensionAPI("when-plugin")
+      setContextKey("chat.active", true)
+      api.registerExtension("chat.header", Cmp, {
+        when: "chat.active",
+        condition: () => false,
+      })
+      expect(getExtensionsForPoint("chat.header")).toHaveLength(0)
+    })
+
+    it("treats an extension without a when-clause as always visible", () => {
+      const api = createExtensionAPI("when-plugin")
+      api.registerExtension("chat.header", Cmp)
+      expect(getExtensionsForPoint("chat.header")).toHaveLength(1)
+    })
+
+    it("hides an extension whose when-clause is malformed (fail-closed)", () => {
+      const api = createExtensionAPI("when-plugin")
+      api.registerExtension("chat.header", Cmp, { when: "chat.active &&" })
+      expect(getExtensionsForPoint("chat.header")).toHaveLength(0)
+    })
   })
 
   describe("createExtensionAPI", () => {
@@ -270,6 +320,57 @@ describe("Extension API", () => {
       restorePluginExtensions(testPluginId, snapshot)
       expect(getExtensionsForPoint("chat.header")).toHaveLength(1)
       expect(getPluginExtensions(testPluginId)).toHaveLength(1)
+    })
+  })
+
+  describe("width hints", () => {
+    const Cmp: React.ComponentType<ExtensionProps> = () => null
+
+    const optionsFor = (hints: { minWidth?: number; maxWidth?: number }) => {
+      createExtensionAPI(testPluginId).registerExtension("chat.header", Cmp, hints)
+      return getExtensionsForPoint("chat.header")[0].options
+    }
+
+    it("leaves both bounds unset when none are declared", () => {
+      const options = optionsFor({})
+      expect(options.minWidth).toBeUndefined()
+      expect(options.maxWidth).toBeUndefined()
+    })
+
+    it("carries valid bounds onto the registration", () => {
+      expect(optionsFor({ minWidth: 120, maxWidth: 320 })).toMatchObject({
+        minWidth: 120,
+        maxWidth: 320,
+      })
+    })
+
+    it.each([
+      ["zero", 0],
+      ["negative", -40],
+      ["NaN", Number.NaN],
+      ["Infinity", Number.POSITIVE_INFINITY],
+    ])("drops a %s bound rather than serialising it into a style", (_label, value) => {
+      const options = optionsFor({ minWidth: value, maxWidth: value })
+      expect(options.minWidth).toBeUndefined()
+      expect(options.maxWidth).toBeUndefined()
+    })
+
+    it("drops a non-numeric bound coming from untyped plugin code", () => {
+      const options = optionsFor({ minWidth: "200" as unknown as number })
+      expect(options.minWidth).toBeUndefined()
+    })
+
+    it("collapses an inverted pair toward the ceiling so the smaller bound wins", () => {
+      expect(optionsFor({ minWidth: 400, maxWidth: 100 })).toMatchObject({
+        minWidth: 100,
+        maxWidth: 100,
+      })
+    })
+
+    it("keeps a floor whose paired ceiling was dropped as invalid", () => {
+      const options = optionsFor({ minWidth: 200, maxWidth: -1 })
+      expect(options.minWidth).toBe(200)
+      expect(options.maxWidth).toBeUndefined()
     })
   })
 })

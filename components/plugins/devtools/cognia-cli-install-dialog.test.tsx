@@ -49,6 +49,10 @@ describe("CogniaCliInstallDialog", () => {
     renderDialog()
     expect(screen.getByTestId("cognia-cli-install-dialog")).toBeInTheDocument()
     expect(screen.getByTestId("cognia-cli-download-button")).toBeInTheDocument()
+    expect(screen.getByTestId("cognia-cli-release-key-fingerprint")).toHaveTextContent(
+      /^[^:]+: [a-f0-9]{64}$/
+    )
+    expect(screen.getByText(/SHA-256 checksum only/)).toBeInTheDocument()
   })
 
   it("runs the download and calls onInstalled on success", async () => {

@@ -5,14 +5,17 @@ import {
   DISCOVER_GROUPS,
   DISCOVER_VIEW_MODES,
   FAVORITES_CATEGORY,
+  FORYOU_CATEGORY,
   firstVisibleCategory,
   getCategoriesByGroup,
   getCategory,
   isFavoritesView,
+  isForYouView,
   isValidCategoryId,
   isValidView,
   isValidViewMode,
   resolveDiscoverLayout,
+  resolveLandingCategory,
   type DiscoverCategoryId,
 } from "./categories"
 
@@ -77,13 +80,21 @@ describe("lib/discover/categories", () => {
     const allFromGroups = DISCOVER_GROUPS.flatMap((g) => getCategoriesByGroup(g))
     expect(allFromGroups).toHaveLength(DISCOVER_CATEGORIES.length)
     const agents = getCategoriesByGroup("agents")
-    expect(agents.map((c) => c.id)).toEqual(["characters", "teams", "skills"])
+    expect(agents.map((c) => c.id)).toEqual([
+      "characters",
+      "teams",
+      "skills",
+      "teamTemplates",
+      "agentPresets",
+    ])
     const extensions = getCategoriesByGroup("extensions")
     expect(extensions.map((c) => c.id)).toEqual([
       "plugins",
       "mcpTools",
+      "mcpPresets",
       "connectors",
       "ocrProviders",
+      "slashCommands",
     ])
     const templates = getCategoriesByGroup("templates")
     expect(templates.map((c) => c.id)).toEqual(["workflowTemplates"])
@@ -147,6 +158,64 @@ describe("lib/discover/categories", () => {
       const result = firstVisibleCategory({ pinned: [], hidden: [first] })
       expect(result).not.toBe(first)
       expect(isValidCategoryId(result)).toBe(true)
+    })
+  })
+
+  describe("resolveLandingCategory", () => {
+    it("falls back to the foryou aggregated landing when preference is unset", () => {
+      expect(resolveLandingCategory(null, DEFAULT_DISCOVER_LAYOUT)).toBe(FORYOU_CATEGORY)
+      // The default landing is foryou regardless of pinned layout.
+      expect(resolveLandingCategory(undefined, { pinned: ["plugins"], hidden: [] })).toBe(
+        FORYOU_CATEGORY
+      )
+    })
+
+    it("always honours the foryou pseudo-category", () => {
+      expect(resolveLandingCategory(FORYOU_CATEGORY, DEFAULT_DISCOVER_LAYOUT)).toBe(FORYOU_CATEGORY)
+    })
+
+    it("always honours the favorites pseudo-category", () => {
+      expect(resolveLandingCategory(FAVORITES_CATEGORY, DEFAULT_DISCOVER_LAYOUT)).toBe(
+        FAVORITES_CATEGORY
+      )
+    })
+
+    it("honours a visible category preference", () => {
+      expect(resolveLandingCategory("skills", DEFAULT_DISCOVER_LAYOUT)).toBe("skills")
+    })
+
+    it("ignores a hidden category preference and falls back to foryou", () => {
+      const result = resolveLandingCategory("skills", { pinned: [], hidden: ["skills"] })
+      expect(result).toBe(FORYOU_CATEGORY)
+    })
+
+    it("ignores an invalid preference and falls back to foryou", () => {
+      expect(resolveLandingCategory("nonsense" as never, DEFAULT_DISCOVER_LAYOUT)).toBe(
+        FORYOU_CATEGORY
+      )
+    })
+  })
+
+  describe("foryou pseudo-category", () => {
+    it("is not part of the real registry", () => {
+      expect(DISCOVER_CATEGORIES.some((c) => c.id === (FORYOU_CATEGORY as string))).toBe(false)
+      expect(isValidCategoryId(FORYOU_CATEGORY)).toBe(false)
+    })
+
+    it("isForYouView only matches the sentinel", () => {
+      expect(isForYouView(FORYOU_CATEGORY)).toBe(true)
+      expect(isForYouView(FAVORITES_CATEGORY)).toBe(false)
+      expect(isForYouView("characters")).toBe(false)
+    })
+
+    it("isValidView accepts foryou, favorites and real ids", () => {
+      expect(isValidView(FORYOU_CATEGORY)).toBe(true)
+      expect(isValidView(FAVORITES_CATEGORY)).toBe(true)
+      expect(isValidView("teamTemplates")).toBe(true)
+      expect(isValidView("agentPresets")).toBe(true)
+      expect(isValidView("mcpPresets")).toBe(true)
+      expect(isValidView("slashCommands")).toBe(true)
+      expect(isValidView("nope")).toBe(false)
     })
   })
 })

@@ -6,6 +6,7 @@ import type {
   ExternalAgentEcosystemReadinessSnapshot,
   ExternalAgentExecutionEligibility,
   ExternalAgentLifecycleCompletenessStage,
+  ExternalAgentRecommendedAction,
   ExternalAgentSessionExtensionSupport,
   ExternalAgentValiditySnapshot,
 } from "@/types/agent/external-agent"
@@ -45,6 +46,19 @@ function resolveCanonicalReasonCode(
   )
 }
 
+/**
+ * The first plain-prose entry of a recommended-action list.
+ *
+ * `canonicalReason` is a prose sentence, but a recommended action may instead
+ * be a `{ id }` message reference — taking `[0]` blindly would put a raw key
+ * id (or `[object Object]`) into the reason a user reads.
+ */
+function firstProseAction(
+  actions: ExternalAgentRecommendedAction[] | undefined
+): string | undefined {
+  return actions?.find((action): action is string => typeof action === "string")
+}
+
 function resolveCanonicalReason(
   snapshot: Partial<ExternalAgentValiditySnapshot>
 ): string | undefined {
@@ -52,7 +66,7 @@ function resolveCanonicalReason(
     if (snapshot.ecosystem?.supportTier === "documented-only") {
       return (
         snapshot.ecosystem.limitationNote ??
-        snapshot.ecosystem.recommendedActions?.[0] ??
+        firstProseAction(snapshot.ecosystem.recommendedActions) ??
         "This official surface is documented but not directly executable in Cognia yet."
       )
     }
@@ -63,7 +77,7 @@ function resolveCanonicalReason(
       return (
         missingPrerequisite?.detail ??
         missingPrerequisite?.label ??
-        snapshot.ecosystem.recommendedActions?.[0]
+        firstProseAction(snapshot.ecosystem.recommendedActions)
       )
     }
   }
@@ -122,34 +136,40 @@ function mapSourceToLifecycleStage(
   return "execution"
 }
 
+/**
+ * Remediation advice for a branch reason, as i18n key ids.
+ *
+ * These used to be English sentences returned from `lib/`, which meant the only
+ * actionable text the external-agent subsystem produced could never be shown in
+ * Chinese — and, in practice, was never rendered at all. Returning ids keeps the
+ * advice here (where the reason codes live) while leaving the wording to
+ * `i18n/messages/{en,zh-CN}/diagnostics.json` under `recoveryHint.*`.
+ *
+ * Callers must resolve them: `t(\`recoveryHint.${id}\`)` in the `diagnostics`
+ * namespace.
+ */
 function resolveRecoveryHints(reasonCode: ExternalAgentBranchReasonCode): string[] {
   switch (reasonCode) {
     case "ecosystem_prerequisite_missing":
-      return ["Complete the required external-agent setup, then retry the connection."]
+      return ["completeSetupThenRetry"]
     case "ecosystem_documented_only":
-      return [
-        "Use the linked official product workflow for this surface.",
-        "Select an executable local surface in Cognia for direct connection.",
-      ]
+      return ["useOfficialWorkflow", "selectLocalSurface"]
     case "protocol_unsupported":
-      return ["Switch agent protocol to ACP.", "Re-save external-agent configuration."]
+      return ["switchToAcp", "resaveConfiguration"]
     case "transport_blocked":
-      return ["Run Cognia in desktop (Tauri) runtime for stdio transport."]
+      return ["useDesktopRuntime"]
     case "initialization_failed":
-      return ["Check ACP process command and startup arguments.", "Retry after reconnect."]
+      return ["checkCommandAndArgs", "retryAfterReconnect"]
     case "health_check_failed":
-      return ["Inspect external-agent health endpoint/logs.", "Reconnect and retry."]
+      return ["inspectHealthEndpoint", "reconnectAndRetry"]
     case "extension_unsupported":
-      return [
-        "Use operations supported by this endpoint.",
-        "Create a new session when resume/fork is unavailable.",
-      ]
+      return ["useSupportedOperations", "createNewSession"]
     case "session_resolution_failed":
-      return ["Resume with an existing session id or allow new session creation."]
+      return ["resumeWithSessionIdOrAllowNew"]
     case "permission_denied":
-      return ["Adjust permission mode or approve required actions."]
+      return ["adjustPermissionMode"]
     case "execution_failed":
-      return ["Check runtime diagnostics and retry with scoped input."]
+      return ["checkDiagnosticsAndRetry"]
     default:
       return []
   }
@@ -198,11 +218,14 @@ export function normalizeExternalAgentValiditySnapshot(
     hasAgentCapabilities: Boolean(snapshot.negotiation?.agentCapabilities),
     sessionExtensions,
   }
-  const recoveryHints =
-    snapshot.recoveryHints ??
-    (ecosystem?.recommendedActions && ecosystem.recommendedActions.length > 0
-      ? ecosystem.recommendedActions
-      : resolveRecoveryHints(reasonCode))
+  // `recoveryHints` is a list of i18n key ids — its only consumer resolves each
+  // through `t(\`recoveryHint.${id}\`)`. `ecosystem.recommendedActions` is
+  // English prose assembled from runtime data (a command name, a docs URL), so
+  // substituting it here fell straight through that lookup and printed raw
+  // English into a Chinese UI — for `ecosystem_prerequisite_missing`, the very
+  // code the localized advice was written for. The two are rendered as separate
+  // lines by the panel; they are not interchangeable.
+  const recoveryHints = snapshot.recoveryHints ?? resolveRecoveryHints(reasonCode)
 
   return {
     executable: snapshot.executable ?? executionEligibility === "eligible",
@@ -372,6 +395,181 @@ export function createExternalAgentBenchmarkBaseline(
         rationale: "Preserve chat continuity when ACP endpoints lack session/resume support.",
         tradeOff: "Session lineage can diverge from requested preferredSessionId.",
         userImpact: "Users can continue execution without hard failure; session history may split.",
+        review: {
+          reviewedBy: "external-agent-maintainers",
+          reviewedAt: now,
+          reviewLink:
+            "openspec/changes/improve-existing-external-agent-support-completeness/design.md",
+        },
+      },
+      updatedAt: now,
+    },
+    {
+      id: "codex-failure-error-event-parity",
+      title: "Codex turn-failure error-event parity",
+      referenceBehavior:
+        "OpenCode/A2A adapters emit a dedicated `error` event when a turn fails so consumers branch uniformly.",
+      cogniaBehavior:
+        "Codex now emits an `error` event on a failed turn before the terminal `done`, matching the other adapters.",
+      adaptationTarget:
+        "Surface Codex turn failures through the canonical `error` event, not only `done{success:false}`.",
+      gapGrade: "major",
+      status: "validated",
+      owner: "external-agent",
+      evidence: [
+        {
+          id: "codex-failed-turn-error-event-test",
+          kind: "test",
+          summary: "Codex app-server failed turn emits a canonical error event",
+          reference: "lib/ai/agent/external/codex-app-server-client.test.ts",
+          recordedAt: now,
+        },
+      ],
+      updatedAt: now,
+    },
+    {
+      id: "codex-session-extension-deterministic-gating",
+      title: "Codex session-extension deterministic gating",
+      referenceBehavior:
+        "Mature clients report session list/fork/resume support deterministically instead of leaving it unknown.",
+      cogniaBehavior:
+        "Codex adapter reports session/list|fork|resume as deterministically `unsupported` (the protocol exposes only thread/start), so gating short-circuits with a clear reason.",
+      adaptationTarget:
+        "Expose getSessionExtensionSupport from the Codex adapter with deterministic unsupported state.",
+      gapGrade: "minor",
+      status: "validated",
+      owner: "external-agent",
+      evidence: [
+        {
+          id: "codex-extension-support-test",
+          kind: "test",
+          summary: "Codex app-server reports deterministic unsupported session extensions",
+          reference: "lib/ai/agent/external/codex-app-server-client.test.ts",
+          recordedAt: now,
+        },
+      ],
+      updatedAt: now,
+    },
+    {
+      id: "opencode-session-extension-connection-gated",
+      title: "OpenCode session-extension support is connection-gated",
+      referenceBehavior:
+        "Support state should reflect real readiness, not assert a capability before the server is reachable.",
+      cogniaBehavior:
+        "OpenCode adapter reports list/fork/resume as `supported` only while connected (a static SDK contract) and `unknown` before connect, instead of a hardcoded `supported`.",
+      adaptationTarget:
+        "Derive OpenCode session-extension support from the live connection plus the typed SDK contract.",
+      gapGrade: "minor",
+      status: "validated",
+      owner: "external-agent",
+      evidence: [
+        {
+          id: "opencode-extension-support-test",
+          kind: "test",
+          summary: "OpenCode reports unknown before connect and supported once connected",
+          reference: "lib/ai/agent/external/opencode-client.test.ts",
+          recordedAt: now,
+        },
+      ],
+      updatedAt: now,
+    },
+    {
+      id: "a2a-surface-reachability",
+      title: "A2A surface reachable from the UI",
+      referenceBehavior:
+        "A registered protocol adapter should be selectable by users, not only constructable in code.",
+      cogniaBehavior:
+        "The A2A protocol is now selectable in the add-agent protocol dropdown (HTTP transport, endpoint-based), no longer disabled as 'coming soon'.",
+      adaptationTarget:
+        "Wire the registered A2A adapter into the add-agent UI so it is not dormant.",
+      gapGrade: "major",
+      status: "validated",
+      owner: "external-agent",
+      evidence: [
+        {
+          id: "a2a-selectable-test",
+          kind: "test",
+          summary: "Add-agent dropdown exposes A2A as a selectable protocol",
+          reference: "components/agent/external-agent/manager.test.tsx",
+          recordedAt: now,
+        },
+      ],
+      updatedAt: now,
+    },
+    {
+      id: "a2a-task-protocol-projection-scope",
+      title: "A2A projects the task-protocol slice only",
+      referenceBehavior:
+        "Rich coding agents stream reasoning, tool calls, plans, and permission requests.",
+      cogniaBehavior:
+        "A2A projects message text, progress, error, and done. A2A is a remote task-exchange protocol with no canonical tool-call/plan/permission streaming, so those internal events are not synthesizable.",
+      adaptationTarget:
+        "Map the A2A Task/Message/Artifact surface to internal streaming/progress/done events.",
+      gapGrade: "minor",
+      status: "intentional-deviation",
+      owner: "external-agent",
+      evidence: [],
+      deviation: {
+        rationale:
+          "The A2A spec models opaque remote tasks (Task/Message/Artifact), not granular tool/plan/permission streams, so those internal events have no source to project from.",
+        tradeOff: "A2A turns surface less granular live detail than ACP/Codex/OpenCode turns.",
+        userImpact:
+          "A2A shows streamed text, progress, completion, and errors but not per-tool or plan timelines.",
+        review: {
+          reviewedBy: "external-agent-maintainers",
+          reviewedAt: now,
+          reviewLink:
+            "openspec/changes/improve-existing-external-agent-support-completeness/design.md",
+        },
+      },
+      updatedAt: now,
+    },
+    {
+      id: "acp-usage-context-window-only",
+      title: "ACP usage is context-window occupancy only",
+      referenceBehavior: "Native usage reporting splits prompt vs completion tokens.",
+      cogniaBehavior:
+        "ACP `usage_update` carries only context-window `used`/`size`/`cost`; the adapter maps `used` to totalTokens and leaves prompt/completion at 0 because the protocol provides no split.",
+      adaptationTarget: "Surface per-turn prompt/completion token usage for ACP agents.",
+      gapGrade: "minor",
+      status: "intentional-deviation",
+      owner: "external-agent",
+      evidence: [],
+      deviation: {
+        rationale:
+          "The canonical ACP usage_update notification reports context-window occupancy (used/size) and cumulative cost, not a prompt/completion breakdown.",
+        tradeOff:
+          "Per-turn ACP token accounting reports a total rather than an input/output split.",
+        userImpact:
+          "Usage panels show total context tokens for ACP agents instead of separate prompt/completion counts.",
+        review: {
+          reviewedBy: "external-agent-maintainers",
+          reviewedAt: now,
+          reviewLink:
+            "openspec/changes/improve-existing-external-agent-support-completeness/design.md",
+        },
+      },
+      updatedAt: now,
+    },
+    {
+      id: "codex-agent-auth-env-based",
+      title: "Codex agent auth is environment-based",
+      referenceBehavior:
+        "Some clients drive interactive account login/logout through the protocol.",
+      cogniaBehavior:
+        "Codex auth flows through CODEX_ACCESS_TOKEN (ChatGPT) or OPENAI_API_KEY/CODEX_API_KEY env injection — matching the codex-cli contract and the ACP path — rather than the protocol's account/login methods.",
+      adaptationTarget: "Authenticate Codex through the protocol account/login surface.",
+      gapGrade: "minor",
+      status: "intentional-deviation",
+      owner: "external-agent",
+      evidence: [],
+      deviation: {
+        rationale:
+          "Codex CLI's real contract is env-based credentials; reusing them keeps auth consistent with the ACP shim and the rest of the subsystem.",
+        tradeOff:
+          "The adapter cannot surface an unauthenticated/expired state at the protocol level; failures appear as turn errors.",
+        userImpact:
+          "Auth issues show up when a turn fails rather than as a distinct pre-flight auth prompt.",
         review: {
           reviewedBy: "external-agent-maintainers",
           reviewedAt: now,

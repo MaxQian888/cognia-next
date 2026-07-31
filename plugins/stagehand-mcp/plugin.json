@@ -2,25 +2,38 @@
   "id": "cognia-stagehand-mcp",
   "name": "Stagehand Browser",
   "version": "0.1.0",
-  "description": "AI-native browser automation via Browserbase Stagehand — act/extract/observe/agent primitives over a managed Chromium runtime.",
+  "description": "AI-native browser automation via Browserbase Stagehand \u2014 act/extract/observe/agent primitives over a managed Chromium runtime.",
   "type": "frontend",
   "capabilities": ["mcp-server-preset", "commands"],
   "main": "src/index.ts",
   "author": "cognia-next",
   "license": "MIT",
+  "minAppVersion": "0.1.0",
   "engines": {
     "cognia": ">=0.1.0"
   },
   "permissions": [],
-  "activationEvents": ["onStartup"],
+  "activationEvents": ["startup", "onCommand:stagehand"],
   "runtimeCompatibility": {
     "browser": {
       "availability": "blocked",
-      "hint": "Requires npx to spawn @browserbasehq/mcp-stagehand — desktop only."
+      "reason": "Requires npx to spawn @browserbasehq/mcp-stagehand \u2014 desktop only."
     },
     "tauri": {
       "availability": "supported",
       "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "blocked",
+      "reason": "Spawns @browserbasehq/mcp-stagehand via npx \u2014 unavailable on mobile."
     }
-  }
+  },
+  "commands": [
+    {
+      "id": "stagehand",
+      "name": "/stagehand",
+      "description": "Attach the Stagehand MCP browser to the current character.",
+      "icon": "Drama"
+    }
+  ]
 }

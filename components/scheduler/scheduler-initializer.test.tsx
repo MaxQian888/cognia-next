@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 
+import { StrictMode } from "react"
 import { render, act } from "@testing-library/react"
 
 const stopSchedulerSystem = jest.fn()
@@ -11,13 +12,21 @@ jest.mock("@/lib/scheduler", () => ({
 
 const logInfo = jest.fn()
 const logError = jest.fn()
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: {
     scheduler: {
       info: (...args: unknown[]) => logInfo(...args),
       error: (...args: unknown[]) => logError(...args),
     },
   },
+}))
+
+// The execution-event bridge is wired into the scheduler boot; mock it so the
+// initializer test doesn't pull the real broker / logging chain.
+const teardownBridgeMock = jest.fn()
+const installBridgeMock = jest.fn(() => teardownBridgeMock)
+jest.mock("@/lib/execution/event-bridge", () => ({
+  installExecutionEventBridge: () => installBridgeMock(),
 }))
 
 type StoreState = {
@@ -27,22 +36,40 @@ type StoreState = {
 }
 
 let storeState: StoreState
+const storeListeners = new Set<() => void>()
 
 jest.mock("@/stores/scheduler", () => ({
-  useSchedulerStore: <T,>(selector: (s: StoreState) => T) => selector(storeState),
+  useSchedulerStore: <T,>(selector: (s: StoreState) => T) => {
+    const { useSyncExternalStore } = jest.requireActual<typeof import("react")>("react")
+    return useSyncExternalStore(
+      (listener) => {
+        storeListeners.add(listener)
+        return () => storeListeners.delete(listener)
+      },
+      () => selector(storeState),
+      () => selector(storeState)
+    )
+  },
 }))
 
 import { SchedulerInitializer } from "./scheduler-initializer"
 
 beforeEach(() => {
+  storeListeners.clear()
   storeState = {
     initialize: jest.fn(async () => undefined),
     isInitialized: false,
-    setSchedulerStatus: jest.fn(),
+    setSchedulerStatus: jest.fn((status) => {
+      if (status !== "stopped" || !storeState.isInitialized) return
+      storeState = { ...storeState, isInitialized: false }
+      storeListeners.forEach((listener) => listener())
+    }),
   }
   stopSchedulerSystem.mockClear()
   logInfo.mockClear()
   logError.mockClear()
+  installBridgeMock.mockClear()
+  teardownBridgeMock.mockClear()
 })
 
 describe("SchedulerInitializer", () => {
@@ -55,6 +82,47 @@ describe("SchedulerInitializer", () => {
     expect(storeState.initialize).toHaveBeenCalledTimes(1)
     expect(storeState.setSchedulerStatus).toHaveBeenCalledWith("running")
     expect(logInfo).toHaveBeenCalled()
+  })
+
+  it("does not stop the live scheduler during the StrictMode effect replay", async () => {
+    const view = render(
+      <StrictMode>
+        <SchedulerInitializer />
+      </StrictMode>
+    )
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    // The effect body is replayed, while the real store deduplicates both
+    // calls through its shared in-flight initialization promise.
+    expect(storeState.initialize).toHaveBeenCalledTimes(2)
+    expect(stopSchedulerSystem).not.toHaveBeenCalled()
+
+    view.unmount()
+    await act(async () => {
+      await Promise.resolve()
+    })
+  })
+
+  it("does not stop when the store transitions to initialized", async () => {
+    const view = render(<SchedulerInitializer />)
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    storeState.isInitialized = true
+    view.rerender(<SchedulerInitializer />)
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(stopSchedulerSystem).not.toHaveBeenCalled()
+    view.unmount()
+    await act(async () => {
+      await Promise.resolve()
+    })
   })
 
   it("logs an error and sets status to stopped when initialize fails", async () => {
@@ -82,9 +150,25 @@ describe("SchedulerInitializer", () => {
     await act(async () => {
       await Promise.resolve()
     })
-    unmount()
+    await act(async () => {
+      unmount()
+      await Promise.resolve()
+    })
     expect(stopSchedulerSystem).toHaveBeenCalled()
     expect(storeState.setSchedulerStatus).toHaveBeenCalledWith("stopped")
+  })
+
+  it("installs the execution-event bridge on mount and tears it down on unmount", async () => {
+    const { unmount } = render(<SchedulerInitializer />)
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(installBridgeMock).toHaveBeenCalledTimes(1)
+    unmount()
+    expect(teardownBridgeMock).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      await Promise.resolve()
+    })
   })
 
   it("captures beforeunload to stop the scheduler", async () => {
@@ -97,6 +181,33 @@ describe("SchedulerInitializer", () => {
     expect(stopSchedulerSystem).toHaveBeenCalled()
   })
 
+  it("does not update scheduler subscribers during another component's render", async () => {
+    function Router({ isNavigating }: { isNavigating: boolean }) {
+      if (isNavigating) window.dispatchEvent(new Event("beforeunload"))
+      return null
+    }
+
+    storeState.isInitialized = true
+    const consoleError = jest.spyOn(console, "error").mockImplementation(() => undefined)
+    const view = render(
+      <>
+        <SchedulerInitializer />
+        <Router isNavigating={false} />
+      </>
+    )
+
+    view.rerender(
+      <>
+        <SchedulerInitializer />
+        <Router isNavigating />
+      </>
+    )
+
+    const warnings = consoleError.mock.calls.flat().join(" ")
+    consoleError.mockRestore()
+    expect(warnings).not.toContain("Cannot update a component")
+  })
+
   it("logs an error when stopSchedulerSystem throws on unmount", async () => {
     stopSchedulerSystem.mockImplementationOnce(() => {
       throw new Error("stop boom")
@@ -105,7 +216,10 @@ describe("SchedulerInitializer", () => {
     await act(async () => {
       await Promise.resolve()
     })
-    unmount()
+    await act(async () => {
+      unmount()
+      await Promise.resolve()
+    })
     expect(logError).toHaveBeenCalled()
   })
 

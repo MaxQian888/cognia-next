@@ -16,7 +16,7 @@ jest.mock("@/lib/db/schema", () => ({
 }))
 
 import { useLiveQuery } from "dexie-react-hooks"
-import { TeamRunsList } from "./runs-list"
+import { TeamRunsList, isSynthesizedTeamRunPayload } from "./runs-list"
 
 const renderList = (teamId: string) =>
   render(
@@ -24,6 +24,25 @@ const renderList = (teamId: string) =>
       <TeamRunsList teamId={teamId} />
     </NextIntlClientProvider>
   )
+
+describe("isSynthesizedTeamRunPayload", () => {
+  it("accepts the synthesizer's bare { teamId } marker for this team only", () => {
+    expect(isSynthesizedTeamRunPayload({ teamId: "team-1" }, "team-1")).toBe(true)
+    expect(isSynthesizedTeamRunPayload({ teamId: "team-2" }, "team-1")).toBe(false)
+    expect(isSynthesizedTeamRunPayload(undefined, "team-1")).toBe(false)
+  })
+
+  it("excludes 'on team finished' fan-out runs (payload carries event)", () => {
+    // Same trigger kind + teamId, but a user workflow started by the
+    // completion fan-out — must NOT appear in the team's run history.
+    expect(
+      isSynthesizedTeamRunPayload(
+        { teamId: "team-1", event: "team.completed", chainDepth: 1 },
+        "team-1"
+      )
+    ).toBe(false)
+  })
+})
 
 describe("TeamRunsList", () => {
   beforeEach(() => {

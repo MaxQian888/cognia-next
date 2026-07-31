@@ -15,8 +15,21 @@
  * primitives carries the answer all the way back.
  */
 
-import type { Skill, StoredMessage, ChatSession, Character } from "@/lib/claude/types"
+import type {
+  AppSettings,
+  Skill,
+  StoredMessage,
+  ChatSession,
+  Character,
+  McpServer,
+} from "@cognia/agent-config-types"
+import { CROSS_PLATFORM_SETTING_KEYS } from "@cognia/agent-config-types/settings-sync"
+import type { WorkflowRunRow } from "@/types/workflow/visual"
+import type { TerminalHistoryRow } from "@/lib/db/terminal-history"
 import { getDb } from "@/lib/db/schema"
+import { resolveTurnServerCredentials } from "@/lib/credentials/turn-credentials"
+import { getProvisionedTurnSnapshot } from "@/lib/signaling/provisioned-turn-state"
+import { useAccountStore } from "@/stores/account/account-store"
 import { listen } from "@tauri-apps/api/event"
 import { invoke } from "@tauri-apps/api/core"
 
@@ -30,6 +43,7 @@ interface SyncPullRequestEvent {
   request_id: string
   table: SyncableTable | string
   since: number
+  account_id?: string
 }
 
 const REQUEST_EVENT = "companion://sync-pull-request"
@@ -82,6 +96,7 @@ async function respondToSyncRequest(
 ): Promise<void> {
   const { request_id, table, since } = request
   try {
+    assertRequestAccountMatchesActiveAccount(request)
     const delta = await readDexieDelta(table, since)
     await bridge.invoke(RESPONSE_COMMAND, { requestId: request_id, delta, error: null })
   } catch (err: unknown) {
@@ -90,6 +105,19 @@ async function respondToSyncRequest(
       delta: null,
       error: err instanceof Error ? err.message : String(err),
     })
+  }
+}
+
+function assertRequestAccountMatchesActiveAccount(request: SyncPullRequestEvent): void {
+  const activeAccountId = useAccountStore.getState().unlockedAccountId
+  if (!activeAccountId) {
+    throw new Error("sync pull rejected: no unlocked local account")
+  }
+  if (!request.account_id) {
+    throw new Error("sync pull rejected: missing local account id")
+  }
+  if (request.account_id !== activeAccountId) {
+    throw new Error("sync pull rejected: account mismatch")
   }
 }
 
@@ -109,16 +137,34 @@ export async function readDexieDelta(
       return readMessagesDelta(since)
     case "workflows":
       return readWorkflowsDelta(since)
+    case "workflowRuns":
+      return readWorkflowRunsDelta(since)
     case "twinProfile":
       return readTwinProfileDelta(since)
     case "plugins":
       return readPluginsDelta(since)
     case "adapterInstances":
       return readAdapterInstancesDelta(since)
+    case "mcpServers":
+      return readMcpServersDelta(since)
+    case "terminalHistory":
+      return readTerminalHistoryDelta(since)
     case "settings":
       return readSettingsDelta(since)
     case "conversationOverrides":
       return readConversationOverridesDelta(since)
+    case "goals":
+      return readGoalsDelta(since)
+    case "memories":
+      return readMemoriesDelta(since)
+    case "agentTeamBoard":
+      return readAgentTeamBoardDelta(since)
+    case "templateDefinitions":
+      return readTemplateDefinitionsDelta(since)
+    case "templatePackages":
+      return readTemplatePackagesDelta(since)
+    case "templateInstances":
+      return readTemplateInstancesDelta(since)
     default:
       throw new Error(`unknown sync table: ${table}`)
   }
@@ -132,8 +178,11 @@ async function readCharactersDelta(since: number): Promise<SyncDelta<Character>>
 }
 
 async function readSkillsDelta(since: number): Promise<SyncDelta<Skill>> {
-  const all = await getDb().skills.toArray()
-  const rows = all.filter((row) => Number(row.updatedAt ?? 0) > since)
+  // skills carries an `updatedAt` index (schema `id, name, updatedAt, ...`),
+  // so pull only the rows past the cursor instead of scanning the whole
+  // table into memory and filtering — a large skill library otherwise
+  // hydrated every row on every pull. Mirrors readSessionsDelta.
+  const rows = await getDb().skills.where("updatedAt").above(since).toArray()
   return finalizeDelta("skills", rows, since)
 }
 
@@ -143,11 +192,21 @@ async function readSessionsDelta(since: number): Promise<SyncDelta<ChatSession>>
 }
 
 async function readMessagesDelta(since: number): Promise<SyncDelta<StoredMessage>> {
-  // Page chat history by creation order via the v61 `[createdAt+id]` index
-  // (no more full-table scan, no global newest-200 cap). One pull returns
-  // up to MESSAGES_PAGE_SIZE rows past the cursor; the mobile handler keeps
-  // pulling while the cursor advances, so a long conversation's full history
-  // streams across several round-trips instead of being truncated.
+  const index = getDb().messages.orderBy("[createdAt+id]")
+
+  if (since === 0) {
+    // Cold-start fold: transfer only the newest global tail. The session rows
+    // already carry list previews, and opening a conversation hydrates its
+    // complete transcript through `message_get_by_session`. This bounds boot
+    // payload/round-trips independently of account age while retaining full
+    // history on demand.
+    const newest = await index.reverse().limit(MESSAGES_PAGE_SIZE).toArray()
+    newest.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
+    return finalizeDelta("messages", newest, since, false)
+  }
+
+  // Incremental pulls still drain every newly-created row after the durable
+  // cursor, in ascending order, so live/offline changes are never folded away.
   const page = await getDb()
     .messages.where("[createdAt+id]")
     .above([since, ""])
@@ -159,6 +218,66 @@ async function readMessagesDelta(since: number): Promise<SyncDelta<StoredMessage
 async function readWorkflowsDelta(since: number): Promise<SyncDelta<unknown>> {
   const rows = await getDb().workflows.where("updatedAt").above(since).toArray()
   return finalizeDelta("workflows", rows as UpdatedAtRow[], since)
+}
+
+async function readTemplateDefinitionsDelta(since: number): Promise<SyncDelta<unknown>> {
+  const rows = await getDb().templateDefinitions.where("updatedAt").above(since).toArray()
+  return finalizeDelta("templateDefinitions", rows, since)
+}
+
+async function readTemplatePackagesDelta(since: number): Promise<SyncDelta<unknown>> {
+  const rows = await getDb().templatePackages.where("importedAt").above(since).toArray()
+  return finalizeDelta(
+    "templatePackages",
+    rows.map((item) => ({ ...item, updatedAt: item.importedAt })),
+    since
+  )
+}
+
+async function readTemplateInstancesDelta(since: number): Promise<SyncDelta<unknown>> {
+  const rows = await getDb().templateInstances.where("updatedAt").above(since).toArray()
+  return finalizeDelta("templateInstances", rows, since)
+}
+
+/**
+ * Workflow RUN history. Unlike the other tables, run rows carry no
+ * `updatedAt` — a run is written at creation (`startedAt`) and again at
+ * completion (`completedAt`), and the mobile run surfaces only care about the
+ * status flip across those two moments. So the cursor rides
+ * `max(startedAt, completedAt)`: a run crosses the wire once when it starts
+ * (status "running") and once when it finishes (final status), which is
+ * exactly what the library badges / runs feed need.
+ *
+ * Both `startedAt` and `completedAt` are indexed (schema v22), so we union the
+ * two range queries instead of scanning the whole table. The first sync
+ * (`since === 0`) is bounded to the last 30 days, and the result is paged
+ * (oldest-activity first) so a heavy run history streams across several pulls
+ * rather than one multi-MB payload — each run embeds its `workflowSnapshot`.
+ */
+const RUN_FIRST_SYNC_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
+const RUN_PAGE_SIZE = 200
+
+function runActivityAt(run: WorkflowRunRow): number {
+  return Math.max(run.startedAt ?? 0, run.completedAt ?? 0)
+}
+
+async function readWorkflowRunsDelta(since: number): Promise<SyncDelta<WorkflowRunRow>> {
+  const db = getDb()
+  // Floor the first full sync to a recent window so a years-deep run history
+  // doesn't hydrate in one shot; incremental pulls use the real cursor.
+  const floor = since === 0 ? Math.max(0, Date.now() - RUN_FIRST_SYNC_WINDOW_MS) : since
+  const [started, completed] = await Promise.all([
+    db.workflowRuns.where("startedAt").above(floor).toArray(),
+    db.workflowRuns.where("completedAt").above(floor).toArray(),
+  ])
+  const byId = new Map<string, WorkflowRunRow>()
+  for (const run of [...started, ...completed]) {
+    if (runActivityAt(run) > since) byId.set(run.id, run)
+  }
+  const ordered = [...byId.values()].sort((a, b) => runActivityAt(a) - runActivityAt(b))
+  const page = ordered.slice(0, RUN_PAGE_SIZE)
+  const hasMore = ordered.length > RUN_PAGE_SIZE
+  return finalizeDelta("workflowRuns", page, since, hasMore, runActivityAt)
 }
 
 async function readTwinProfileDelta(since: number): Promise<SyncDelta<unknown>> {
@@ -180,12 +299,63 @@ async function readAdapterInstancesDelta(since: number): Promise<SyncDelta<unkno
   return finalizeDelta("adapterInstances", rows as UpdatedAtRow[], since)
 }
 
+async function readMcpServersDelta(since: number): Promise<SyncDelta<McpServer>> {
+  // mcpServers carries `updatedAt` (set on every create/update) but the index
+  // is `id, name, enabled` — no `updatedAt` index — so we read all and filter,
+  // mirroring readPluginsDelta. The configured-server set is small. The mobile
+  // `/me/mcp` page is a read-only viewer, so deltas only ever flow desktop→phone.
+  const all = await getDb().mcpServers.toArray()
+  const rows = all.filter((row) => Number(row.updatedAt ?? 0) > since)
+  return finalizeDelta("mcpServers", rows, since)
+}
+
+/**
+ * Durable terminal command history (ADR-0039 phase 2). Unlike every other
+ * synced table, `terminalHistory` rows carry no `updatedAt`/`createdAt` — the
+ * only monotonic field is `ts` (last-execution epoch ms), which schema v74
+ * indexes. So we range-query on `ts` and ride the cursor on `ts` via the
+ * `finalizeDelta` override, exactly the way `readWorkflowRunsDelta` cursors on
+ * `max(startedAt, completedAt)`.
+ *
+ * Re-run semantics are correct as-is: re-executing a command bumps `ts` on the
+ * same `id`, so the row re-crosses the wire and the phone's `bulkPut`
+ * overwrites in place. Prune-deletions are not tombstoned (same as
+ * mcpServers/settings) — the phone ages stale rows out passively.
+ */
+async function readTerminalHistoryDelta(since: number): Promise<SyncDelta<TerminalHistoryRow>> {
+  const rows = await getDb().terminalHistory.where("ts").above(since).toArray()
+  return finalizeDelta("terminalHistory", rows, since, false, (r) => r.ts)
+}
+
 async function readConversationOverridesDelta(since: number): Promise<SyncDelta<unknown>> {
   // v49 table; carries an `updatedAt` index (schema `&id, &conversationKey,
   // sessionId, pinned, archived, updatedAt`). Mobile mirrors pinned /
   // archived / lastReadAt so the Inbox renders correct buckets offline.
   const rows = await getDb().conversationOverrides.where("updatedAt").above(since).toArray()
   return finalizeDelta("conversationOverrides", rows as unknown as UpdatedAtRow[], since)
+}
+
+async function readGoalsDelta(since: number): Promise<SyncDelta<unknown>> {
+  // chatGoals carries an `updatedAt` index (schema `…, createdAt, updatedAt`),
+  // so pull only the rows past the cursor instead of scanning the whole table.
+  const rows = await getDb().chatGoals.where("updatedAt").above(since).toArray()
+  return finalizeDelta("goals", rows as UpdatedAtRow[], since)
+}
+
+async function readMemoriesDelta(since: number): Promise<SyncDelta<unknown>> {
+  // memories has an `updatedAt` field but NOT an index on it (schema indexes
+  // scope/type/status/…), so we can't `.where("updatedAt").above`. Read all
+  // and filter — mirrors readPluginsDelta. The personal memory store is small.
+  const all = await getDb().memories.toArray()
+  const rows = all.filter((row) => Number((row as { updatedAt?: number }).updatedAt ?? 0) > since)
+  return finalizeDelta("memories", rows as UpdatedAtRow[], since)
+}
+
+async function readAgentTeamBoardDelta(since: number): Promise<SyncDelta<unknown>> {
+  // v104 board projection rows carry an indexed `updatedAt` stamped by the
+  // desktop projector (`lib/db/agent-team-projection.ts`) — cursor directly.
+  const rows = await getDb().agentTeamBoard.where("updatedAt").above(since).toArray()
+  return finalizeDelta("agentTeamBoard", rows as UpdatedAtRow[], since)
 }
 
 /**
@@ -198,15 +368,59 @@ async function readConversationOverridesDelta(since: number): Promise<SyncDelta<
 async function readSettingsDelta(since: number): Promise<SyncDelta<unknown>> {
   const row = await getDb().settings.get("singleton")
   if (!row) return { rows: [], deleted_ids: [], next_since: since }
-  const updatedAt = Number((row as { updatedAt?: number }).updatedAt ?? 0)
+  const provisionedTurn = getProvisionedTurnSnapshot()
+  const updatedAt = Math.max(
+    Number((row as { updatedAt?: number }).updatedAt ?? 0),
+    provisionedTurn.updatedAt
+  )
   if (since === 0 || updatedAt > since) {
     return {
-      rows: [row],
+      rows: [await projectMirroredSettings(row, provisionedTurn.servers, updatedAt)],
       deleted_ids: [],
       next_since: updatedAt > 0 ? updatedAt : Date.now(),
     }
   }
   return { rows: [], deleted_ids: [], next_since: since }
+}
+
+/**
+ * Narrow the settings singleton to the fields a paired client is allowed to
+ * see, before it goes on the wire.
+ *
+ * This used to emit the whole row. The client only *applied* the mirrored
+ * subset, so the omission looked harmless — but the full row had already
+ * crossed the wire, which meant every paired device received the host's
+ * `apiKey`, `apiBaseUrl`, `providerSettings`, `customProviders`,
+ * `searchProviders`, `skillsShToken`, `subscriptionSettings`, `webdavSync`
+ * credentials and `networkProxy` auth. The `app_settings_update` allowlist
+ * documented "provider configuration stays desktop-only", but that only ever
+ * constrained the write direction; nothing constrained the read direction.
+ *
+ * Redacting at the source rather than at the client is the point: a client
+ * cannot un-receive a secret, and non-first-party clients speak this same wire
+ * protocol.
+ */
+async function projectMirroredSettings(
+  row: AppSettings,
+  provisionedTurnServers: RTCIceServer[],
+  updatedAt: number
+): Promise<Partial<AppSettings>> {
+  // `id` and `updatedAt` are envelope fields, not preferences: the client keys
+  // its singleton by `id` and the cursor arithmetic above reads `updatedAt`.
+  const projected: Record<string, unknown> = {
+    id: row.id,
+    updatedAt,
+  }
+  for (const key of CROSS_PLATFORM_SETTING_KEYS) {
+    if (row[key] !== undefined) projected[key] = row[key]
+  }
+  const staticTurnServers = row.turnServers
+    ? await resolveTurnServerCredentials(row.turnServers)
+    : []
+  if (row.turnServers !== undefined || provisionedTurnServers.length > 0) {
+    projected.turnServers = [...staticTurnServers, ...provisionedTurnServers]
+  }
+  return projected as Partial<AppSettings>
 }
 
 interface UpdatedAtRow {
@@ -219,7 +433,13 @@ async function finalizeDelta<T extends UpdatedAtRow>(
   table: SyncableTable,
   rows: T[],
   since: number,
-  hasMore = false
+  hasMore = false,
+  /**
+   * How to read a row's cursor watermark. Defaults to `updatedAt ?? createdAt`
+   * — the shape every other table carries. `workflowRuns` has neither, so it
+   * passes `max(startedAt, completedAt)` instead (see readWorkflowRunsDelta).
+   */
+  cursorOf: (row: T) => number = (row) => Number(row.updatedAt ?? row.createdAt ?? 0)
 ): Promise<SyncDelta<T>> {
   // Fold in tombstones recorded since the cursor (v61). The phone applies
   // `deleted_ids` via `bulkDelete`, so a desktop deletion finally reaches
@@ -229,7 +449,7 @@ async function finalizeDelta<T extends UpdatedAtRow>(
 
   let highestCursor = since
   for (const row of rows) {
-    const candidate = Number(row.updatedAt ?? row.createdAt ?? 0)
+    const candidate = cursorOf(row)
     if (candidate > highestCursor) highestCursor = candidate
   }
   if (maxDeletedAt > highestCursor) highestCursor = maxDeletedAt

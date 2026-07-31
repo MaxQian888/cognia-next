@@ -15,7 +15,7 @@
  *  - `captureContent: false` (default) strips `inputPreview` / `outputPreview`
  *    *before* anything is buffered, so opt-in content never lands on disk.
  *  - `captureContent: true` truncates each preview to `maxPreviewBytes` and
- *    passes it through `lib/twin/ingest/redact.ts:hasNoLeakingPii`; spans
+ *    passes it through `packages/redact/src/index.ts:hasNoLeakingPii`; spans
  *    whose previews leak PII have that single field dropped (the rest of
  *    the span is still persisted).
  */
@@ -24,7 +24,7 @@ import type { StructuredLogEntry, Transport, TransportHealthSnapshot } from "@/t
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
 import { AGENT_TRACE_SPAN_KIND } from "@/types/agent-trace/span"
 import { bulkInsertSpans, pruneOlderThan } from "@/lib/db/agent-traces"
-import { hasNoLeakingPii } from "@/lib/twin/ingest/redact"
+import { hasNoLeakingPii } from "@cognia/redact"
 
 const consoleApi = globalThis.console
 

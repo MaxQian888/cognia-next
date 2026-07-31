@@ -1,0 +1,36 @@
+{
+  "name": "cognia-chibi-companion",
+  "version": 2,
+  "source": {
+    "identityReference": "public/icons/icon-512.png",
+    "styleReference": "/var/folders/h3/mypbg9ks5cj9ht4p61ffnwz40000gn/T/codex-clipboard-681eaa4e-76eb-4495-b732-dbd7c5ef84bf.png",
+    "productContext": "Cognia mobile companion"
+  },
+  "preamble": "A cohesive set of cute Japanese chibi anime character spot icons featuring the same Cognia AI companion in every cell. Preserve her identity from the existing app icon: very long silver-white hair with cool pale-blue and lavender shading, bright sapphire-blue eyes, slim black-and-white futuristic outfit, angular cyan ear-device, small cyan diamond pendant, and a thin luminous technology halo. Adapt only the rendering language from the supplied chibi reference: oversized head, tiny body, short limbs, soft rounded face, delicate blush, expressive eyes, simplified clean cel shading, compact readable pose, and gentle comic charm. Do not copy the reference character's dark-blue hair, animal ears, tail, maid costume, pointing hand, text, or speech bubble.",
+  "palette": [
+    "#0B1638",
+    "#214D9C",
+    "#39C6FF",
+    "#7D82E8",
+    "#B8C8FF",
+    "#E8E7FF",
+    "#F4D8D2",
+    "#FFF9F7"
+  ],
+  "cutout": "rembg",
+  "threshold": 30,
+  "construction": {
+    "grid": "One shared 82% live-area keyline with generous optical padding around each character",
+    "angles": "Mostly organic curves with technology props constrained to horizontal, vertical, and 45-degree angles",
+    "stroke": "Uniform slim deep-navy anime outline with soft rounded joins",
+    "cornerRadius": "Soft rounded chibi silhouette throughout",
+    "fillRule": "Clean two-step cel shading with one subtle cyan rim-light and no painterly texture",
+    "colorRule": "Silver-white hair and pale skin are dominant; navy outfit anchors the figure; cyan and blue-violet remain small luminous accents",
+    "detailBudget": "One character, one clear pose, and one small prop or effect per icon",
+    "sharedParts": "Reuse the same face, bangs, long twin hair masses, ear-device, diamond pendant, outfit, halo, and four-point spark",
+    "perspective": "Front or gentle three-quarter chibi view only, at one consistent eye level",
+    "shadow": "No cast or contact shadow on the background; one small internal shadow under the chin is allowed",
+    "motif": "The cyan diamond pendant and a partial luminous halo appear in every icon",
+    "weightHierarchy": "The character silhouette and face are primary; the prop is secondary; glow and spark effects stay small"
+  }
+}

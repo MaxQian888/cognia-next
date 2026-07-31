@@ -13,10 +13,16 @@ jest.mock("@/lib/tauri", () => ({
   isTauri: jest.fn(),
 }))
 
+jest.mock("@/lib/pet/window-role", () => ({
+  isMainAppWindow: jest.fn(),
+}))
+
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const tauriCore = require("@tauri-apps/api/core") as { invoke: jest.Mock }
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const tauri = require("@/lib/tauri") as { isTauri: jest.Mock }
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const windowRole = require("@/lib/pet/window-role") as { isMainAppWindow: jest.Mock }
 
 const { useSettingsStore } =
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -40,6 +46,7 @@ const baseSettings = (np: Partial<typeof DEFAULT_NETWORK_PROXY_SETTINGS> = {}) =
 
 beforeEach(() => {
   jest.clearAllMocks()
+  windowRole.isMainAppWindow.mockReturnValue(true)
   jest.spyOn(console, "warn").mockImplementation(() => {})
   jest.spyOn(console, "debug").mockImplementation(() => {})
   useSettingsStore.setState({ settings: null, loaded: false, providerKeys: {} })
@@ -187,6 +194,15 @@ describe("applyProxyToRust", () => {
     expect(tauriCore.invoke).not.toHaveBeenCalled()
   })
 
+  it("does not invoke proxy_set from a least-privilege secondary window", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    windowRole.isMainAppWindow.mockReturnValue(false)
+
+    await proxyStore.applyProxyToRust()
+
+    expect(tauriCore.invoke).not.toHaveBeenCalled()
+  })
+
   it("invokes proxy_set with the snake_case payload in Tauri", async () => {
     tauri.isTauri.mockReturnValue(true)
     tauriCore.invoke.mockResolvedValue(undefined)
@@ -289,6 +305,102 @@ describe("applyProxyToRust", () => {
         cfg: expect.objectContaining({ host: "10.10.10.10", port: 8888 }),
       })
     )
+  })
+})
+
+describe("maybeAutoDetectProxy", () => {
+  it("is a no-op outside Tauri", async () => {
+    tauri.isTauri.mockReturnValue(false)
+    await proxyStore.maybeAutoDetectProxy()
+    expect(tauriCore.invoke).not.toHaveBeenCalled()
+  })
+
+  it("does not invoke proxy detection from a least-privilege secondary window", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    windowRole.isMainAppWindow.mockReturnValue(false)
+    useSettingsStore.setState({
+      settings: baseSettings({ mode: "auto" }),
+      loaded: true,
+      providerKeys: {},
+    })
+
+    await proxyStore.maybeAutoDetectProxy()
+
+    expect(tauriCore.invoke).not.toHaveBeenCalled()
+  })
+
+  it("is a no-op when mode is not auto", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    useSettingsStore.setState({
+      settings: baseSettings({ mode: "manual", host: "127.0.0.1", port: 7890 }),
+      loaded: true,
+      providerKeys: {},
+    })
+    await proxyStore.maybeAutoDetectProxy()
+    expect(tauriCore.invoke).not.toHaveBeenCalled()
+  })
+
+  it("adopts the top candidate when it differs from the stored host/port", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    const saveSpy = jest.fn().mockResolvedValue(undefined)
+    useSettingsStore.setState({
+      settings: baseSettings({ mode: "auto", host: "127.0.0.1", port: 1111 }),
+      loaded: true,
+      providerKeys: {},
+      save: saveSpy,
+    })
+    tauriCore.invoke.mockResolvedValue([
+      { kind: "socks5", host: "127.0.0.1", port: 1080, label: "SOCKS @ 1080" },
+    ])
+    await proxyStore.maybeAutoDetectProxy()
+    expect(tauriCore.invoke).toHaveBeenCalledWith("proxy_detect")
+    expect(saveSpy).toHaveBeenCalled()
+    const patch = saveSpy.mock.calls[0][0]
+    expect(patch.networkProxy.host).toBe("127.0.0.1")
+    expect(patch.networkProxy.port).toBe(1080)
+    expect(patch.networkProxy.protocol).toBe("socks5")
+    expect(patch.networkProxy.mode).toBe("auto")
+  })
+
+  it("does not re-save when the top candidate matches the stored host/port", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    const saveSpy = jest.fn().mockResolvedValue(undefined)
+    useSettingsStore.setState({
+      settings: baseSettings({ mode: "auto", host: "127.0.0.1", port: 7890 }),
+      loaded: true,
+      providerKeys: {},
+      save: saveSpy,
+    })
+    tauriCore.invoke.mockResolvedValue([
+      { kind: "http", host: "127.0.0.1", port: 7890, label: "HTTP @ 7890" },
+    ])
+    await proxyStore.maybeAutoDetectProxy()
+    expect(saveSpy).not.toHaveBeenCalled()
+  })
+
+  it("leaves the config untouched when detection finds nothing", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    const saveSpy = jest.fn().mockResolvedValue(undefined)
+    useSettingsStore.setState({
+      settings: baseSettings({ mode: "auto", host: "1.2.3.4", port: 9 }),
+      loaded: true,
+      providerKeys: {},
+      save: saveSpy,
+    })
+    tauriCore.invoke.mockResolvedValue([])
+    await proxyStore.maybeAutoDetectProxy()
+    expect(saveSpy).not.toHaveBeenCalled()
+  })
+
+  it("swallows detection errors so the caller never throws", async () => {
+    tauri.isTauri.mockReturnValue(true)
+    useSettingsStore.setState({
+      settings: baseSettings({ mode: "auto" }),
+      loaded: true,
+      providerKeys: {},
+    })
+    tauriCore.invoke.mockRejectedValue(new Error("boom"))
+    await expect(proxyStore.maybeAutoDetectProxy()).resolves.toBeUndefined()
   })
 })
 

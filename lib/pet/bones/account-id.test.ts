@@ -1,5 +1,5 @@
 import { petAccountIdFrom, ensurePetAccountId } from "./account-id"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 function settings(partial: Partial<AppSettings>): AppSettings {
   return partial as AppSettings

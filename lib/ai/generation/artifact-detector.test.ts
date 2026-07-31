@@ -1,6 +1,7 @@
 import {
   detectArtifacts,
   detectArtifactType,
+  detectStreamingArtifact,
   extractCodeBlocks,
   shouldAutoCreate,
   getBestArtifact,
@@ -201,5 +202,54 @@ describe("module exports", () => {
     expect(detectorDefault.detectArtifacts).toBe(detectArtifacts)
     expect(detectorDefault.shouldAutoCreate).toBe(shouldAutoCreate)
     expect(detectorDefault.DEFAULT_DETECTION_CONFIG).toBe(DEFAULT_DETECTION_CONFIG)
+  })
+})
+
+describe("detectStreamingArtifact", () => {
+  const openBlock = (lines: number, language = "python") =>
+    `Here you go:\n\n\`\`\`${language}\n` +
+    Array.from({ length: lines }, (_, index) => `print(${index})`).join("\n")
+
+  it("reports nothing when every fence is already closed", () => {
+    expect(detectStreamingArtifact("```python\nprint(1)\n```\nall done")).toBeNull()
+  })
+
+  it("reports nothing for a fence that has only just opened", () => {
+    expect(detectStreamingArtifact("```python\n")).toBeNull()
+  })
+
+  it("waits until the open block clears the same bar auto-create uses", () => {
+    // Below `minLines` the sealed block would not become an artifact either, so
+    // promising one here would be a lie.
+    expect(detectStreamingArtifact(openBlock(3))).toBeNull()
+    expect(detectStreamingArtifact(openBlock(12))).not.toBeNull()
+  })
+
+  it("describes the block still being written", () => {
+    const pending = detectStreamingArtifact(openBlock(12))
+    expect(pending?.type).toBe("code")
+    expect(pending?.lineCount).toBe(12)
+    expect(pending?.title).toBeTruthy()
+  })
+
+  it("only considers the trailing unterminated fence", () => {
+    const finished = "```js\nconst a = 1\n```\n\nand now the real one:\n\n"
+    const pending = detectStreamingArtifact(
+      finished + "```python\n" + openBlock(12).split("\n").slice(3).join("\n")
+    )
+    expect(pending?.type).toBe("code")
+    expect(pending?.lineCount).toBe(12)
+  })
+
+  it("honours a raised minLines threshold", () => {
+    expect(
+      detectStreamingArtifact(openBlock(12), { ...DEFAULT_DETECTION_CONFIG, minLines: 50 })
+    ).toBeNull()
+  })
+
+  it("honours the enabled-types opt-out", () => {
+    expect(
+      detectStreamingArtifact(openBlock(12), { ...DEFAULT_DETECTION_CONFIG, enabledTypes: ["svg"] })
+    ).toBeNull()
   })
 })

@@ -4,6 +4,7 @@
     "index",
     "cli-core",
     "scaffolding",
+    "importing",
     "lint",
     "build-pipeline",
     "signing-and-keys",

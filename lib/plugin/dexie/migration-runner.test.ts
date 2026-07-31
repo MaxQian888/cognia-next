@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import "fake-indexeddb/auto"
 import type { Transaction } from "dexie"
 import { runPendingMigrations, type MigrationContext } from "./migration-runner"

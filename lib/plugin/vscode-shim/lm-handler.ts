@@ -28,8 +28,8 @@
  */
 
 import { generateText, type ModelMessage } from "ai"
-import { getProviderModel } from "@/lib/ai/core/client"
-import { loggers } from "@/lib/logging"
+import { getProviderModel } from "@cognia/provider-core/core/client"
+import { loggers } from "@cognia/logging"
 
 const lmHandlerLogger = loggers.plugin.child("vscode-lm")
 
@@ -120,6 +120,17 @@ interface ProviderRegistration {
   meta?: Record<string, unknown>
 }
 
+// Records VS Code `lm.registerTool` / `registerChatModelProvider` /
+// `registerMcpServerDefinitionProvider` registrations by token. The handlers
+// below acknowledge each with `{ registered: true }` (the VS Code API contract)
+// and tear them down on extension disable. KNOWN LIMITATION: these are not yet
+// SURFACED into cognia's native registries — a registered LanguageModelTool
+// does not yet reach the agent's tool registry, an MCP definition provider does
+// not yet populate the MCP gallery, and a chat-model provider is not yet listed
+// as a CogniaChatModel. Forward-surfacing requires a renderer→sidecar→extension
+// round-trip over the `extension:call` token channel and is scoped as a
+// dedicated follow-up (see docs/.../vscode-and-lsp). Until then this Map is the
+// authoritative record consumed only by teardown.
 const providerRegistry = new Map<string, ProviderRegistration>()
 
 let resolveDefaultModelImpl: (() => Promise<string | undefined>) | null = null
@@ -200,6 +211,11 @@ export async function handleSendChatRequest(payload: LmSendRequestPayload): Prom
     model,
     messages,
     temperature: payload.options?.temperature,
+    // Honor the extension's per-request output cap (previously silently dropped),
+    // falling back to the model's BASE_MODELS budget so output is always bounded.
+    maxOutputTokens:
+      payload.options?.maxOutputTokens ??
+      BASE_MODELS.find((m) => m.id === modelId)?.maxOutputTokens,
   })
   return {
     modelId,

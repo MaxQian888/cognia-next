@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Card, CardContent } from "@/components/ui/card"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
 interface ErrorBoundaryProps {
   children: ReactNode
@@ -83,7 +83,7 @@ function CanvasErrorFallbackContent({ error, errorInfo, onReset }: ErrorFallback
   const t = useTranslations("canvas")
 
   return (
-    <div className="flex flex-col items-center justify-center h-full p-8 bg-background">
+    <div className="flex h-full min-w-0 w-full flex-1 flex-col items-center justify-center bg-background p-8">
       <Card className="max-w-lg border-destructive/50">
         <CardContent className="pt-6">
           <Alert variant="destructive" className="border-0 p-0">

@@ -22,6 +22,14 @@
  * `webServer` block. Set PLAYWRIGHT_NO_SERVER=1 to opt out (when you already
  * have `pnpm dev` running in another shell).
  *
+ * Set PLAYWRIGHT_STATIC=1 to serve the prebuilt static export (`out/`) via
+ * `scripts/e2e/serve-out.mjs` instead of `pnpm dev`. This removes Turbopack's
+ * per-route on-demand compilation (~30s worst case on first hit) so the test
+ * timeout drops back to 30s. The export must be built with
+ * `NEXT_PUBLIC_E2E=1 pnpm build` first — `pnpm test:e2e:build` does exactly
+ * that, and `pnpm test:e2e:static` runs the suite against it. The serve
+ * script refuses to start when the export lacks the E2E bridge.
+ *
  * Set PLAYWRIGHT_NO_GLOBAL_SETUP=1 to skip the V2 + per-service mock fleet
  * (only useful for the existing connector tests which spin up their own
  * mocks).
@@ -32,14 +40,53 @@ import { defineConfig, devices } from "@playwright/test"
 const tauriEnabled =
   process.env.PLAYWRIGHT_TAURI === "1" || process.env.PLAYWRIGHT_TAURI_DRIVER === "1"
 const iosEnabled = process.env.PLAYWRIGHT_MOBILE_IOS === "1"
+const crossBrowserEnabled = process.env.PLAYWRIGHT_CROSS_BROWSER === "1"
+const staticMode = process.env.PLAYWRIGHT_STATIC === "1"
+const isCI = Boolean(process.env.CI)
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  fullyParallel: false, // connector + workflow tests share Dexie singleton in dev
-  forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 1 : 0,
-  workers: 1,
-  reporter: process.env.CI
+  // Visual baselines are generated from the same checked-in web fonts and
+  // fixed Chromium project in CI. Keeping the path OS-neutral makes the
+  // baseline reviewable once instead of silently creating per-runner copies.
+  snapshotPathTemplate: "{testDir}/{testFilePath}-snapshots/{arg}{ext}",
+  // Individual tests — not just files — spread across workers. Every
+  // chromium/mobile spec is parallel-safe: each test gets a fresh browser
+  // context (fresh IndexedDB/Dexie), workflow specs reset the DB per test, and
+  // the shared global-setup mock fleet is only consumed read-only at its
+  // default scenario from these projects. File-level parallelism alone pins a
+  // big file to one worker: tests/e2e/plugins/responsive.spec.ts holds 60 tests
+  // in a single file and dominated the suite's wall-clock as a result. The
+  // tauri project opts out (see below) — its fixture reuses the ONE WebView2
+  // page/context (tests/e2e/tauri/fixtures.ts) and its chat specs mutate the
+  // shared anthropic mock scenario via /__control, so its tests must stay
+  // serial.
+  fullyParallel: true,
+  // Each test's beforeEach re-boots the full app through AccountGate (fresh
+  // browser context per test), and boot includes the plugin manager's dynamic
+  // Dexie table registration — measured at 10-25s under parallel-worker
+  // contention even on the static export. The historical 30s static budget
+  // assumed "mounts fast" and made every heavyweight spec fail in its
+  // beforeEach the moment workers competed; 60s reflects the measured cost.
+  timeout: Number(process.env.PLAYWRIGHT_TEST_TIMEOUT ?? 60_000),
+  // The same measurement applies to the FIRST assertion of a `beforeEach`,
+  // which is what actually waits for that boot — typically
+  // `expect(...).toBeVisible()` on a landmark of the route under test. Raising
+  // only the test budget above left that assertion on Playwright's 5s default,
+  // so a spec would fail its beforeEach at 5s while 55s of its own budget went
+  // unused, and the failure looked like a broken page (the app was still on
+  // AccountGate's loading shell) rather than a clock that was set too tight.
+  // Measured here: gate-open is ~1.9s with one worker and ~9-10s at seven,
+  // against the config's documented 10-25s band under heavier contention.
+  expect: { timeout: Number(process.env.PLAYWRIGHT_EXPECT_TIMEOUT ?? 20_000) },
+  forbidOnly: isCI,
+  // A retry is diagnostic evidence, not permission to merge an unstable test.
+  retries: isCI ? 1 : 0,
+  failOnFlakyTests: isCI,
+  workers: tauriEnabled ? 1 : isCI ? 4 : "50%",
+  maxFailures: isCI ? 10 : 0,
+  globalTimeout: isCI ? 30 * 60_000 : 0,
+  reporter: isCI
     ? [["list"], ["html", { open: "never", outputFolder: "playwright-report" }], ["github"]]
     : [["list"], ["html", { open: "never", outputFolder: "playwright-report" }]],
 
@@ -50,21 +97,34 @@ export default defineConfig({
     trace: "retain-on-failure",
     video: "retain-on-failure",
     screenshot: "only-on-failure",
+    locale: process.env.E2E_LOCALE ?? "en-US",
+    timezoneId: process.env.E2E_TIMEZONE ?? "UTC",
   },
 
   webServer: process.env.PLAYWRIGHT_NO_SERVER
     ? undefined
-    : {
-        command: "pnpm dev",
-        url: "http://localhost:3000",
-        reuseExistingServer: !process.env.CI,
-        timeout: Number(process.env.PLAYWRIGHT_WEBSERVER_TIMEOUT ?? 300_000),
-        stdout: "ignore",
-        stderr: "pipe",
-        env: {
-          NEXT_PUBLIC_E2E: "1",
+    : staticMode
+      ? {
+          // Serves the prebuilt `out/` export — binds in well under a second,
+          // so a short startup budget fails fast on a missing/stale build.
+          command: "node scripts/e2e/serve-out.mjs --port 3000 --host 127.0.0.1",
+          url: "http://localhost:3000",
+          reuseExistingServer: !process.env.CI,
+          timeout: Number(process.env.PLAYWRIGHT_WEBSERVER_TIMEOUT ?? 30_000),
+          stdout: "ignore",
+          stderr: "pipe",
+        }
+      : {
+          command: "pnpm dev",
+          url: "http://localhost:3000",
+          reuseExistingServer: !process.env.CI,
+          timeout: Number(process.env.PLAYWRIGHT_WEBSERVER_TIMEOUT ?? 300_000),
+          stdout: "ignore",
+          stderr: "pipe",
+          env: {
+            NEXT_PUBLIC_E2E: "1",
+          },
         },
-      },
 
   projects: [
     {
@@ -72,11 +132,31 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"] },
       testIgnore: ["**/tests/e2e/tauri/**", "**/tests/e2e/mobile/**"],
     },
+    ...(crossBrowserEnabled
+      ? [
+          {
+            name: "firefox",
+            use: { ...devices["Desktop Firefox"] },
+            testIgnore: ["**/tests/e2e/tauri/**", "**/tests/e2e/mobile/**"],
+          },
+          {
+            name: "webkit",
+            use: { ...devices["Desktop Safari"] },
+            testIgnore: ["**/tests/e2e/tauri/**", "**/tests/e2e/mobile/**"],
+          },
+        ]
+      : []),
     // Mobile-viewport e2e suite. Pixel 7 covers the Android Chromium path; the
     // iPhone 13 project is opt-in (webkit must be installed separately).
+    // 60s budget even in static mode: with the Capacitor mock injected the
+    // full app boots (plugin manager included, whose dynamic Dexie table
+    // registration briefly self-blocks the 'cognia-claude' upgrade), and
+    // resetCogniaDb pays that boot twice per test (initial goto + the
+    // post-account-seed reload) — ~15-25s under worker contention.
     {
       name: "mobile-pixel-7",
       testDir: "./tests/e2e/mobile",
+      timeout: 90_000,
       use: { ...devices["Pixel 7"] },
     },
     ...(iosEnabled
@@ -84,6 +164,7 @@ export default defineConfig({
           {
             name: "mobile-iphone-13",
             testDir: "./tests/e2e/mobile",
+            timeout: 90_000,
             use: { ...devices["iPhone 13"] },
           },
         ]
@@ -99,6 +180,12 @@ export default defineConfig({
           {
             name: "tauri",
             testDir: "./tests/e2e/tauri",
+            // Opts out of the global fullyParallel: the CDP fixture reuses one
+            // WebView2 page/context and chat specs mutate the shared mock
+            // scenario, so tests must not interleave. (The tauriEnabled branch
+            // of `workers` above already forces a single worker; this keeps the
+            // constraint explicit at the project level.)
+            fullyParallel: false,
           },
         ]
       : []),

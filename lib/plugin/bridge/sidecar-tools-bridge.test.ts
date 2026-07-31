@@ -3,7 +3,13 @@
  * Plugin tools manifest builder for the SDK sidecar runtime.
  */
 
-import { buildPluginToolsManifest, buildTerminalDockManifestEntries } from "./sidecar-tools-bridge"
+import {
+  buildPluginToolsManifest,
+  buildTerminalDockManifestEntries,
+  buildDispatchAgentManifestEntries,
+  type PluginToolManifestEntry,
+} from "./sidecar-tools-bridge"
+import { DISPATCH_AGENT_TOOL_NAME } from "@/lib/claude/agents/dispatch-agent-tool"
 import { TERMINAL_DOCK_PLUGIN_ID } from "./terminal-dock-schemas"
 import { usePluginStore } from "@/stores/plugin-runtime"
 import type { Plugin, PluginTool } from "@/types/plugin"
@@ -70,9 +76,14 @@ describe("buildPluginToolsManifest", () => {
     jest.clearAllMocks()
   })
 
-  it("returns an empty array when no plugins are registered", () => {
+  // The manifest always carries synthetic entries (ask_user, and dock tools
+  // when gated on); these assertions target only the plugin-derived rows.
+  const pluginsOnly = (result: PluginToolManifestEntry[]) =>
+    result.filter((t) => t.name !== "ask_user" && !t.name.startsWith("terminal_dock_"))
+
+  it("returns no plugin entries when no plugins are registered", () => {
     setStore({})
-    expect(buildPluginToolsManifest()).toEqual([])
+    expect(pluginsOnly(buildPluginToolsManifest())).toEqual([])
   })
 
   it("skips disabled plugins", () => {
@@ -82,7 +93,7 @@ describe("buildPluginToolsManifest", () => {
       "p-loading": makePlugin("p-loading", { status: "loading", tools: [makeTool("c")] }),
     })
     const result = buildPluginToolsManifest()
-    expect(result.map((t) => t.name)).toEqual(["a"])
+    expect(pluginsOnly(result).map((t) => t.name)).toEqual(["a"])
   })
 
   it("flattens multiple tools across multiple enabled plugins", () => {
@@ -90,7 +101,7 @@ describe("buildPluginToolsManifest", () => {
       alpha: makePlugin("alpha", { tools: [makeTool("t_a1"), makeTool("t_a2")] }),
       beta: makePlugin("beta", { tools: [makeTool("t_b1")] }),
     })
-    const result = buildPluginToolsManifest()
+    const result = pluginsOnly(buildPluginToolsManifest())
     expect(result).toHaveLength(3)
     const names = result.map((t) => t.name).sort()
     expect(names).toEqual(["t_a1", "t_a2", "t_b1"])
@@ -100,7 +111,7 @@ describe("buildPluginToolsManifest", () => {
     setStore({
       "host-id": makePlugin("host-id", { tools: [makeTool("only")] }),
     })
-    const result = buildPluginToolsManifest()
+    const result = pluginsOnly(buildPluginToolsManifest())
     expect(result).toHaveLength(1)
     expect(result[0].pluginId).toBe("host-id")
   })
@@ -151,7 +162,7 @@ describe("buildPluginToolsManifest", () => {
       "has-tools": makePlugin("has-tools", { tools: [makeTool("kept")] }),
     })
     const result = buildPluginToolsManifest()
-    expect(result.map((t) => t.name)).toEqual(["kept"])
+    expect(pluginsOnly(result).map((t) => t.name)).toEqual(["kept"])
   })
 
   it("does NOT include terminal-dock entries by default (gate off)", () => {
@@ -177,7 +188,18 @@ describe("buildPluginToolsManifest", () => {
     setStore({ alpha: makePlugin("alpha", { tools: [makeTool("plug_a")] }) })
     const result = buildPluginToolsManifest({ exposeDockToAgents: true })
     expect(result[0].name).toBe("plug_a")
-    expect(result.slice(1).every((t) => t.name.startsWith("terminal_dock_"))).toBe(true)
+    // dock entries follow plugin entries; ask_user is appended last.
+    const middle = result.slice(1, -1)
+    expect(middle.every((t) => t.name.startsWith("terminal_dock_"))).toBe(true)
+  })
+
+  it("always appends the ask_user elicitation tool (both gates off)", () => {
+    setStore({})
+    const result = buildPluginToolsManifest()
+    const ask = result.find((t) => t.name === "ask_user")
+    expect(ask).toBeDefined()
+    expect(ask?.pluginId).toBe("cognia-ask-user")
+    expect(result[result.length - 1].name).toBe("ask_user")
   })
 })
 
@@ -204,5 +226,57 @@ describe("buildTerminalDockManifestEntries", () => {
     const b = buildTerminalDockManifestEntries({ exposeDockToAgents: true })
     // Schema objects are imported constants — must be the same reference.
     expect(a[0].jsonSchema).toBe(b[0].jsonSchema)
+  })
+})
+
+describe("buildDispatchAgentManifestEntries — nesting gate", () => {
+  const available = [{ id: "coder", description: "writes code" }]
+
+  it("returns no entry when the gate is absent or disabled", () => {
+    expect(buildDispatchAgentManifestEntries({})).toEqual([])
+    expect(
+      buildDispatchAgentManifestEntries({
+        dispatchAgent: { enabled: false, depth: 0, maxDepth: 2, available },
+      })
+    ).toEqual([])
+  })
+
+  it("exposes the entry while depth < maxDepth", () => {
+    const entries = buildDispatchAgentManifestEntries({
+      dispatchAgent: { enabled: true, depth: 1, maxDepth: 2, available },
+    })
+    expect(entries).toHaveLength(1)
+    expect(entries[0].name).toBe(DISPATCH_AGENT_TOOL_NAME)
+  })
+
+  it("withholds the entry once depth >= maxDepth (cap reached)", () => {
+    expect(
+      buildDispatchAgentManifestEntries({
+        dispatchAgent: { enabled: true, depth: 2, maxDepth: 2, available },
+      })
+    ).toEqual([])
+  })
+})
+
+describe("buildPluginToolsManifest — dispatch_agent inclusion", () => {
+  beforeEach(() => {
+    mockedUsePluginStore.getState.mockReturnValue({ plugins: {} } as never)
+  })
+
+  it("appends dispatch_agent when the gate allows it", () => {
+    const manifest = buildPluginToolsManifest({
+      dispatchAgent: {
+        enabled: true,
+        depth: 0,
+        maxDepth: 2,
+        available: [{ id: "coder", description: "x" }],
+      },
+    })
+    expect(manifest.some((e) => e.name === DISPATCH_AGENT_TOOL_NAME)).toBe(true)
+  })
+
+  it("omits dispatch_agent by default (no gate)", () => {
+    const manifest = buildPluginToolsManifest({})
+    expect(manifest.some((e) => e.name === DISPATCH_AGENT_TOOL_NAME)).toBe(false)
   })
 })

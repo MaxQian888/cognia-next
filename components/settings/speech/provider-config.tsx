@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
 import { Textarea } from "@/components/ui/textarea"
+import { isTauri } from "@/lib/tauri"
 import { useSettingsStore } from "@/stores/settings"
 import {
   CARTESIA_TTS_MODELS,
@@ -32,14 +33,18 @@ import {
   ELEVENLABS_TTS_MODELS,
   ELEVENLABS_TTS_VOICES,
   GEMINI_TTS_VOICES,
+  GEMINI_TTS_MODELS,
   HUME_TTS_VOICES,
   LMNT_TTS_VOICES,
+  MISTRAL_TTS_MODELS,
   OPENAI_TTS_MODELS,
   OPENAI_TTS_VOICES,
+  REALTIME_TTS_MODELS,
+  REALTIME_TTS_VOICES,
   XIAOMI_TTS_VOICES,
   XIAOMI_TTS_MODELS,
   XIAOMI_TTS_STYLES,
-} from "@/types/media/tts"
+} from "@cognia/tts/types"
 import { ApiKeyInput } from "./api-key-input"
 
 // -- Generic helper for a labelled slider value ------------------------------
@@ -145,7 +150,11 @@ export function OpenAiConfig() {
 
   return (
     <div className="space-y-3">
-      <ApiKeyInput provider="openai" label={t("label.openai")} placeholder="sk-…" />
+      <ApiKeyInput
+        provider="openai"
+        label={t("label.openai")}
+        placeholder={t("apiKeyPlaceholder.generic")}
+      />
       <div className="space-y-2">
         <Label className="text-xs">{t("voice")}</Label>
         <Select value={voice} onValueChange={(v) => void save({ openaiVoice: v })}>
@@ -225,10 +234,30 @@ export function GeminiConfig() {
   const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
   const voice = settings?.geminiVoice ?? "Kore"
+  const model = settings?.geminiModel ?? "gemini-3.1-flash-tts-preview"
 
   return (
     <div className="space-y-3">
-      <ApiKeyInput provider="google" label={t("label.google")} placeholder="AIza…" />
+      <ApiKeyInput
+        provider="google"
+        label={t("label.google")}
+        placeholder={t("apiKeyPlaceholder.google")}
+      />
+      <div className="space-y-2">
+        <Label className="text-xs">{t("model")}</Label>
+        <Select value={model} onValueChange={(v) => void save({ geminiModel: v })}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {GEMINI_TTS_MODELS.map((item) => (
+              <SelectItem key={item.id} value={item.id}>
+                {item.name} — {item.description}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
       <div className="space-y-2">
         <Label className="text-xs">{t("voice")}</Label>
         <Select value={voice} onValueChange={(v) => void save({ geminiVoice: v })}>
@@ -239,6 +268,65 @@ export function GeminiConfig() {
             {GEMINI_TTS_VOICES.map((v) => (
               <SelectItem key={v.id} value={v.id}>
                 {v.name} — {v.description}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  )
+}
+
+// -- Mistral -----------------------------------------------------------------
+
+export function MistralConfig() {
+  const t = useTranslations("settings.speech.provider")
+  const settings = useSettingsStore((s) => s.settings)
+  const save = useSettingsStore((s) => s.save)
+  const voiceId = settings?.mistralVoiceId ?? ""
+  const model = settings?.mistralModel ?? "voxtral-mini-tts-2603"
+  const responseFormat = settings?.mistralResponseFormat ?? "mp3"
+
+  return (
+    <div className="space-y-3">
+      <ApiKeyInput provider="mistral" label={t("label.mistral")} />
+      <div className="space-y-2">
+        <Label className="text-xs">{t("voice")}</Label>
+        <Input
+          value={voiceId}
+          onChange={(event) => void save({ mistralVoiceId: event.target.value })}
+          placeholder={t("mistralVoiceIdPlaceholder")}
+        />
+        <p className="text-[10px] text-muted-foreground">{t("mistralVoiceIdHint")}</p>
+      </div>
+      <div className="space-y-2">
+        <Label className="text-xs">{t("model")}</Label>
+        <Select value={model} onValueChange={(value) => void save({ mistralModel: value })}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {MISTRAL_TTS_MODELS.map((item) => (
+              <SelectItem key={item.id} value={item.id}>
+                {item.name} — {item.description}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-2">
+        <Label className="text-xs">{t("audioFormat")}</Label>
+        <Select
+          value={responseFormat}
+          onValueChange={(value) => void save({ mistralResponseFormat: value })}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {OPENAI_RESPONSE_FORMATS.filter((format) => format.id !== "aac").map((format) => (
+              <SelectItem key={format.id} value={format.id}>
+                {format.name}
               </SelectItem>
             ))}
           </SelectContent>
@@ -295,6 +383,7 @@ export function EdgeConfig() {
           <Input
             value={pitch}
             onChange={(e) => void save({ edgePitch: e.target.value })}
+            // i18n-exempt: locale-invariant Edge TTS pitch format literal
             placeholder="+0Hz"
           />
         </div>
@@ -303,6 +392,7 @@ export function EdgeConfig() {
         {t("edgeFormatHintBefore")}
         <code>+/-N%</code>
         {t("edgeFormatHintMid")}
+        {/* i18n-exempt: locale-invariant Edge TTS pitch format literal */}
         <code>+/-NHz</code>
         {t("edgeFormatHintAfter")}
       </p>
@@ -323,7 +413,11 @@ export function ElevenLabsConfig() {
 
   return (
     <div className="space-y-3">
-      <ApiKeyInput provider="elevenlabs" label={t("label.elevenlabs")} placeholder="sk_…" />
+      <ApiKeyInput
+        provider="elevenlabs"
+        label={t("label.elevenlabs")}
+        placeholder={t("apiKeyPlaceholder.elevenlabs")}
+      />
       <div className="space-y-2">
         <Label className="text-xs">{t("voice")}</Label>
         <Select value={voice} onValueChange={(v) => void save({ elevenlabsVoice: v })}>
@@ -585,7 +679,11 @@ export function XiaomiConfig() {
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">{t("xiaomiIntro")}</p>
-      <ApiKeyInput provider="xiaomi" label={t("label.xiaomi")} placeholder="sk-…" />
+      <ApiKeyInput
+        provider="xiaomi"
+        label={t("label.xiaomi")}
+        placeholder={t("apiKeyPlaceholder.generic")}
+      />
       <div className="space-y-2">
         <Label className="text-xs">{t("voice")}</Label>
         <Select value={voice} onValueChange={(v) => void save({ xiaomiVoice: v })}>
@@ -644,13 +742,78 @@ export function XiaomiConfig() {
   )
 }
 
+// -- OpenAI Realtime ---------------------------------------------------------
+
+export function OpenAiRealtimeConfig() {
+  const t = useTranslations("settings.speech.provider")
+  const settings = useSettingsStore((s) => s.settings)
+  const save = useSettingsStore((s) => s.save)
+  const voice = settings?.realtimeVoice ?? "marin"
+  const model = settings?.realtimeModel ?? "gpt-realtime-2.1"
+  const instructions = settings?.realtimeInstructions ?? ""
+
+  return (
+    <div className="space-y-3">
+      {!isTauri() && (
+        <p className="text-xs text-amber-600 dark:text-amber-500">{t("realtimeDesktopOnly")}</p>
+      )}
+      <p className="text-xs text-muted-foreground">{t("realtimeIntro")}</p>
+      <ApiKeyInput
+        provider="openai"
+        label={t("label.openai")}
+        placeholder={t("apiKeyPlaceholder.generic")}
+      />
+      <div className="space-y-2">
+        <Label className="text-xs">{t("voice")}</Label>
+        <Select value={voice} onValueChange={(v) => void save({ realtimeVoice: v })}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="max-h-72">
+            {REALTIME_TTS_VOICES.map((v) => (
+              <SelectItem key={v.id} value={v.id}>
+                {v.name} — {v.description}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-2">
+        <Label className="text-xs">{t("model")}</Label>
+        <Select value={model} onValueChange={(v) => void save({ realtimeModel: v })}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {REALTIME_TTS_MODELS.map((m) => (
+              <SelectItem key={m.id} value={m.id}>
+                {m.name} — {m.description}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-2">
+        <Label className="text-xs">{t("voiceInstructions")}</Label>
+        <Textarea
+          value={instructions}
+          onChange={(e) => void save({ realtimeInstructions: e.target.value })}
+          placeholder={t("voiceInstructionsPlaceholder")}
+          rows={3}
+        />
+      </div>
+    </div>
+  )
+}
+
 // -- Mapping -----------------------------------------------------------------
 
-import type { TTSProvider } from "@/types/media/tts"
+import type { TTSProvider } from "@cognia/tts/types"
 
 export const PROVIDER_CONFIG_COMPONENTS: Record<TTSProvider, () => React.ReactElement> = {
   system: SystemConfig,
   openai: OpenAiConfig,
+  "openai-realtime": OpenAiRealtimeConfig,
   gemini: GeminiConfig,
   edge: EdgeConfig,
   elevenlabs: ElevenLabsConfig,
@@ -659,4 +822,5 @@ export const PROVIDER_CONFIG_COMPONENTS: Record<TTSProvider, () => React.ReactEl
   cartesia: CartesiaConfig,
   deepgram: DeepgramConfig,
   xiaomi: XiaomiConfig,
+  mistral: MistralConfig,
 }

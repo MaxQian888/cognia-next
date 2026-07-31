@@ -1,0 +1,222 @@
+{
+  "actions": {
+    "back": "后退",
+    "cancelSelect": "取消选择",
+    "find": "查找",
+    "forward": "前进",
+    "more": "更多浏览器操作",
+    "openExternal": "在外部浏览器打开",
+    "reload": "刷新",
+    "screenshot": "截图发送到对话",
+    "selectElement": "选择元素"
+  },
+  "agent": {
+    "driving": "智能体操作中",
+    "human": "你在操作",
+    "lastAction": "最近操作：{action}"
+  },
+  "annotation": {
+    "add": "加入队列",
+    "intent": {
+      "approve": "认可",
+      "change": "修改",
+      "fix": "修复",
+      "question": "问题",
+      "label": "标注意图"
+    },
+    "queued": "已加入 {count} 条标注",
+    "remove": "移除标注",
+    "resolve": "解决标注",
+    "send": "发送 {count} 条",
+    "sent": "已向聊天发送 {count} 条标注",
+    "severity": {
+      "blocking": "阻塞",
+      "important": "重要",
+      "suggestion": "建议",
+      "label": "标注严重程度"
+    },
+    "status": {
+      "acknowledged": "已确认",
+      "dismissed": "已忽略",
+      "pending": "待处理",
+      "resolved": "已解决"
+    }
+  },
+  "comment": {
+    "cancel": "取消",
+    "failed": "评论发送失败",
+    "hint": "Esc 关闭 · Ctrl+Enter 发送",
+    "noSession": "请先打开一个对话会话",
+    "placeholder": "描述你想要的修改…",
+    "send": "发送到对话",
+    "sent": "已发送到对话",
+    "title": "对该元素评论"
+  },
+  "cookieImport": {
+    "action": "复用 Chromium 登录态",
+    "browser": {
+      "brave": "Brave",
+      "chrome": "Google Chrome",
+      "chromium": "Chromium",
+      "edge": "Microsoft Edge"
+    },
+    "browserLabel": "浏览器",
+    "cancel": "取消",
+    "consent": {
+      "continue": "我已了解，继续",
+      "description": "Cognia 将从所选 Chromium 配置中读取当前站点保存的登录 Cookie，并注入此预览。",
+      "localOnly": "Cookie 值不会跨越 Cognia 的 IPC 边界，也不会进入其渲染进程、日志或上传到 Cognia；目标站点仍会正常收到自己的 Cookie。",
+      "title": "允许读取本机 Cookie？"
+    },
+    "description": "选择要为当前站点复用登录态的本机浏览器配置。",
+    "import": "导入并刷新",
+    "importing": "正在导入…",
+    "keychainHint": "macOS 可能请求访问钥匙串；拒绝后预览不会发生变化。",
+    "profileLabel": "配置",
+    "reason": {
+      "checking": "正在检查本机 Chromium 配置…",
+      "checkFailed": "无法检查本机 Chromium 配置，请重启桌面 App 后重试。",
+      "featureDisabled": "请先在「设置 → 桌面」中启用 Chromium Cookie 导入。",
+      "noProfiles": "这台 Mac 上未找到兼容的 Chromium 配置。",
+      "openPage": "请先打开一个公网网页，再导入 Cookie。",
+      "unsupported": "当前平台不支持 Cookie 导入。不会绕过 Windows App-Bound Encryption；请改用独立浏览器配置。"
+    },
+    "result": {
+      "failed": "Cookie 导入失败，Cookie 值未被暴露。",
+      "featureDisabled": "设置中未启用 Chromium Cookie 导入。",
+      "noMatchingCookies": "所选配置中没有当前站点的 Cookie。",
+      "noProfile": "所选浏览器配置已不可用。",
+      "ok": "已导入 {count} 条 Cookie 并刷新预览。",
+      "permissionDenied": "钥匙串访问被拒绝，未导入任何 Cookie。",
+      "unsupported": "当前平台不支持 Cookie 导入。"
+    },
+    "title": "复用 Chromium 登录态"
+  },
+  "detail": {
+    "compact": "精简",
+    "detailed": "详细",
+    "forensic": "取证",
+    "label": "标注详细程度",
+    "standard": "标准"
+  },
+  "empty": {
+    "hint": "输入任意网址或 localhost 地址即可在此渲染，然后选择元素进行评论。",
+    "quickOpen": "快速打开：",
+    "title": "预览网页"
+  },
+  "errors": {
+    "navigate": "无法导航到该地址"
+  },
+  "find": {
+    "close": "关闭查找",
+    "count": "{current}/{total}",
+    "next": "下一个",
+    "noMatches": "无匹配",
+    "placeholder": "在页面中查找",
+    "previous": "上一个"
+  },
+  "history": {
+    "clear": "清空历史",
+    "empty": "暂无最近页面",
+    "label": "历史"
+  },
+  "loading": {
+    "label": "页面加载中",
+    "title": "正在加载 {host}…"
+  },
+  "panel": {
+    "collapse": "收起",
+    "details": "详情"
+  },
+  "rail": {
+    "label": "元素审阅"
+  },
+  "record": {
+    "addAssertion": "断言文本…",
+    "assertionPlaceholder": "预期出现的文本",
+    "collapse": "折叠录制面板",
+    "empty": "在页面上操作 —— 你的点击、输入和按键都会记录到这里。",
+    "expand": "展开录制面板",
+    "export": "导出",
+    "exportAgent": "发送到对话",
+    "exportJson": "流程 JSON",
+    "exportPlaywright": "Playwright 测试",
+    "exported": "已复制到剪贴板",
+    "delete": "删除流程",
+    "deleted": "流程已删除",
+    "name": "名称",
+    "recording": "录制中 —— {count} 步",
+    "removeStep": "删除该步骤",
+    "rename": "重命名流程",
+    "renameCancel": "取消",
+    "renameConfirm": "重命名",
+    "renameLabel": "新名称",
+    "renamed": "流程已重命名",
+    "replay": "回放",
+    "replayFailed": "第 {index} 步失败：{error}",
+    "replaySucceeded": "已回放 {count} 步",
+    "replaying": "回放中…",
+    "save": "保存流程",
+    "saved": "流程已保存",
+    "savedSteps": "{count} 步",
+    "savedTitle": "已保存的流程",
+    "secretNeeded": "该流程需要 {names} —— 密码不会被录制。",
+    "secretPlaceholder": "{name} 的值",
+    "start": "录制",
+    "startHint": "请先加载页面",
+    "step": {
+      "click": "点击 {target}",
+      "doubleClick": "双击 {target}",
+      "direction": {
+        "down": "下",
+        "left": "左",
+        "right": "右",
+        "up": "上"
+      },
+      "fill": "填写 {target}",
+      "hover": "悬停在 {target}",
+      "navigate": "打开 {url}",
+      "pressKey": "按下 {key}",
+      "secret": "填写 {target}（密钥）",
+      "select": "在 {target} 中选择 {value}",
+      "scroll": "向{direction}滚动 {amount}px",
+      "waitFor": "预期出现「{text}」"
+    },
+    "stop": "停止",
+    "stopReplay": "停止回放",
+    "title": "录制操作"
+  },
+  "remote": {
+    "canvas": "远程浏览器画布",
+    "closePage": "关闭页面",
+    "error": "远程浏览器不可用（{code}）",
+    "find": "在页面中查找",
+    "humanControl": "由你控制",
+    "takeover": "接管控制",
+    "untitledPage": "未命名页面",
+    "url": "远程浏览器地址",
+    "waiting": "正在等待远程浏览器…"
+  },
+  "screenshot": {
+    "failed": "无法截取预览画面",
+    "sent": "截图已发送到对话"
+  },
+  "selection": {
+    "selector": "选择器"
+  },
+  "title": "浏览器",
+  "url": {
+    "placeholder": "http://localhost:3000"
+  },
+  "webFallback": {
+    "enableRemote": "启用云端浏览器",
+    "frameTitle": "网页预览",
+    "notice": "部分网站会阻止嵌入式预览。请在外部打开页面，或启用云端浏览器以进行完整交互。"
+  },
+  "zoom": {
+    "in": "放大",
+    "level": "{percent}%",
+    "out": "缩小",
+    "reset": "重置缩放"
+  }
+}

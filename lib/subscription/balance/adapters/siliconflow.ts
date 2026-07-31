@@ -7,8 +7,10 @@
 // all in CNY.
 // Docs: https://docs.siliconflow.com/en/api-reference/userinfo/get-user-info
 //
-// The preset baseUrl is "https://api.siliconflow.cn/v1", so `${baseUrl}/user/info`
-// is the documented path.
+// The documented path is "{origin}/v1/user/info". We build from the baseUrl
+// ORIGIN + the fixed "/v1/user/info" path so both the chat preset
+// ("https://api.siliconflow.cn/v1") and the Anthropic relay preset
+// ("https://api.siliconflow.cn") resolve correctly.
 
 import type {
   BalanceAdapter,
@@ -17,7 +19,7 @@ import type {
   BalanceSnapshot,
 } from "@/types/subscription"
 
-import { bearer, errorSnapshot, parseJsonObject, toNum, trimBase } from "./_shared"
+import { apiRootOf, bearer, errorSnapshot, parseJsonObject, toNum } from "./_shared"
 
 export const siliconflowBalanceAdapter: BalanceAdapter = {
   key: "siliconflow",
@@ -28,7 +30,7 @@ export const siliconflowBalanceAdapter: BalanceAdapter = {
   },
 
   request(q: BalanceQuery): BalanceRequestDescriptor {
-    return { url: `${trimBase(q.baseUrl)}/user/info`, headers: bearer(q.token) }
+    return { url: `${apiRootOf(q.baseUrl)}/v1/user/info`, headers: bearer(q.token) }
   },
 
   parse(status: number, body: string, q: BalanceQuery): BalanceSnapshot {

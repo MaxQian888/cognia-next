@@ -14,10 +14,22 @@ import { z } from "zod"
 import { registerBuiltInSkill } from "../registry"
 import type { BuiltInSkill, BuiltInSkillMutation } from "../types"
 import type { BuiltInSkillImAccess } from "../types"
-import { argsToFlags, buildConfirmSurface, runLarkCli } from "./_helpers"
+import { argsToFlags, buildConfirmSurface, larkAdapterIdFromCtx, runLarkCli } from "./_helpers"
 
 const FAMILY = "lark.sheets"
 const PLATFORMS = ["lark"] as const
+
+// Shared, described params (serialized to the model via manifest.ts).
+const spreadsheetTokenParam = z
+  .string()
+  .min(1)
+  .describe(
+    'Spreadsheet token (looks like "shtcn…"). Find it via lark-drive search, or it is returned by lark.sheets.create.'
+  )
+const sheetIdParam = z.string().min(1).describe("Worksheet (tab) id within the spreadsheet.")
+const grid = z
+  .array(z.array(z.union([z.string(), z.number(), z.boolean(), z.null()])))
+  .describe("2D array of cell values, outer = rows, inner = columns.")
 
 function mk<S extends z.ZodTypeAny>(input: {
   id: string
@@ -48,6 +60,7 @@ function mk<S extends z.ZodTypeAny>(input: {
       runLarkCli({
         args: [...input.subcommand, ...argsToFlags(args as Record<string, unknown>)],
         confirmed: ctx.hitlBypass === true,
+        adapterId: larkAdapterIdFromCtx(ctx),
       }),
   }
   if (input.mutation !== "read") {
@@ -75,9 +88,9 @@ registerBuiltInSkill(
       "zh-CN": "读取 Lark 电子表格的指定区域（如 A1:D20）。",
     },
     schema: z.object({
-      spreadsheetToken: z.string().min(1),
-      sheetId: z.string().min(1),
-      range: z.string().min(1).describe("A1 notation, e.g. A1:D20"),
+      spreadsheetToken: spreadsheetTokenParam,
+      sheetId: sheetIdParam,
+      range: z.string().min(1).describe("A1 notation, e.g. A1:D20."),
     }),
     subcommand: ["sheets", "+read-range"],
     mutation: "read",
@@ -95,11 +108,14 @@ registerBuiltInSkill(
       "zh-CN": "在 Lark 电子表格中查找值，返回单元格位置。",
     },
     schema: z.object({
-      spreadsheetToken: z.string().min(1),
-      sheetId: z.string().min(1),
-      query: z.string().min(1),
-      matchCase: z.boolean().optional(),
-      matchEntireCell: z.boolean().optional(),
+      spreadsheetToken: spreadsheetTokenParam,
+      sheetId: sheetIdParam,
+      query: z.string().min(1).describe("Value or text to find within the sheet."),
+      matchCase: z.boolean().optional().describe("Case-sensitive match (default false)."),
+      matchEntireCell: z
+        .boolean()
+        .optional()
+        .describe("Require the whole cell to equal the query (default false)."),
     }),
     subcommand: ["sheets", "+find"],
     mutation: "read",
@@ -117,8 +133,11 @@ registerBuiltInSkill(
       "zh-CN": "在指定文件夹中新建 Lark 电子表格。",
     },
     schema: z.object({
-      title: z.string().min(1),
-      folderToken: z.string().optional(),
+      title: z.string().min(1).describe("Title of the new spreadsheet."),
+      folderToken: z
+        .string()
+        .optional()
+        .describe("Optional Drive folder token to create it in; omit for the root."),
     }),
     subcommand: ["sheets", "+create"],
     mutation: "write",
@@ -140,10 +159,13 @@ registerBuiltInSkill(
       "zh-CN": "用二维数组覆盖 Lark 电子表格的指定区域。",
     },
     schema: z.object({
-      spreadsheetToken: z.string().min(1),
-      sheetId: z.string().min(1),
-      range: z.string().min(1),
-      values: z.array(z.array(z.union([z.string(), z.number(), z.boolean(), z.null()]))),
+      spreadsheetToken: spreadsheetTokenParam,
+      sheetId: sheetIdParam,
+      range: z
+        .string()
+        .min(1)
+        .describe("A1 range to overwrite; its size should match the values grid."),
+      values: grid,
     }),
     subcommand: ["sheets", "+write-range"],
     mutation: "write",
@@ -165,9 +187,9 @@ registerBuiltInSkill(
       "zh-CN": "在 Lark 电子表格末尾追加行。",
     },
     schema: z.object({
-      spreadsheetToken: z.string().min(1),
-      sheetId: z.string().min(1),
-      rows: z.array(z.array(z.union([z.string(), z.number(), z.boolean(), z.null()]))),
+      spreadsheetToken: spreadsheetTokenParam,
+      sheetId: sheetIdParam,
+      rows: grid.describe("2D array of rows to append after the last used row."),
     }),
     subcommand: ["sheets", "+append-rows"],
     mutation: "write",
@@ -189,9 +211,9 @@ registerBuiltInSkill(
       "zh-CN": "将 Lark 电子表格导出为本地文件（xlsx / csv / pdf）。",
     },
     schema: z.object({
-      spreadsheetToken: z.string().min(1),
-      format: z.enum(["xlsx", "csv", "pdf"]),
-      outputPath: z.string().min(1),
+      spreadsheetToken: spreadsheetTokenParam,
+      format: z.enum(["xlsx", "csv", "pdf"]).describe("Export file format."),
+      outputPath: z.string().min(1).describe("Local file path to write the exported file to."),
     }),
     subcommand: ["sheets", "+export"],
     mutation: "write",

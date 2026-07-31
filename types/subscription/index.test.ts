@@ -73,8 +73,10 @@ describe("DEFAULT_*_SUBSCRIPTION_SETTINGS", () => {
     )
   })
 
-  it("codex defaults prefer live discovery + auto-refresh", () => {
-    expect(DEFAULT_CODEX_SUBSCRIPTION_SETTINGS.preferDiscovered).toBe(true)
+  it("codex defaults auto-refresh, and carry no live-discovery opt-in", () => {
     expect(DEFAULT_CODEX_SUBSCRIPTION_SETTINGS.autoRefreshNearExpiry).toBe(true)
+    // Env injection requires an explicitly adopted account (ADR-0025); there is
+    // no flag that re-enables reading ~/.codex/auth.json at spawn.
+    expect(DEFAULT_CODEX_SUBSCRIPTION_SETTINGS).not.toHaveProperty("preferDiscovered")
   })
 })

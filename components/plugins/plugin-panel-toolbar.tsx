@@ -23,6 +23,8 @@ import {
   ShieldCheckIcon,
   FolderOpenIcon,
   GitBranchIcon,
+  FileArchiveIcon,
+  GitMergeIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -38,6 +40,8 @@ import { usePluginsStore } from "@/stores/plugins"
 import { PluginInstallFromUrlDialog } from "./dialogs/plugin-install-from-url-dialog"
 import { PluginInstallFromGithubDialog } from "./dialogs/plugin-install-from-github-dialog"
 import { PluginSignedInstallFromUrlDialog } from "./dialogs/plugin-signed-install-from-url-dialog"
+import { PluginVsixInstallDialog } from "./dialogs/plugin-vsix-install-dialog"
+import { PluginWasmFromGitDialog } from "./dialogs/plugin-wasm-from-git-dialog"
 import { useInstallWasmFromLocal } from "./dialogs/install-wasm-plugin-button"
 import { useLoadUnpackedFlow } from "./dialogs/load-unpacked-button"
 import { CliStatusChip } from "./cli-status-chip"
@@ -60,6 +64,8 @@ export function PluginPanelToolbar({ onCheckUpdates, onSyncRegistry, syncing = f
   const [urlDialogOpen, setUrlDialogOpen] = useState(false)
   const [githubDialogOpen, setGithubDialogOpen] = useState(false)
   const [signedUrlDialogOpen, setSignedUrlDialogOpen] = useState(false)
+  const [vsixDialogOpen, setVsixDialogOpen] = useState(false)
+  const [wasmGitDialogOpen, setWasmGitDialogOpen] = useState(false)
   const wasmLocal = useInstallWasmFromLocal()
   const loadUnpacked = useLoadUnpackedFlow()
   const wasmAvailable = canUseTauriInvoke()
@@ -154,6 +160,10 @@ export function PluginPanelToolbar({ onCheckUpdates, onSyncRegistry, syncing = f
                   <FolderOpenIcon className="size-3.5 mr-2" />
                   {t("loadUnpacked")}
                 </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setVsixDialogOpen(true)}>
+                  <FileArchiveIcon className="size-3.5 mr-2" />
+                  {t("fromVsix")}
+                </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuLabel>{t("groupWasm")}</DropdownMenuLabel>
                 <DropdownMenuItem
@@ -166,6 +176,10 @@ export function PluginPanelToolbar({ onCheckUpdates, onSyncRegistry, syncing = f
                 <DropdownMenuItem onClick={() => setSignedUrlDialogOpen(true)}>
                   <ShieldCheckIcon className="size-3.5 mr-2" />
                   {t("fromUrlSigned")}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setWasmGitDialogOpen(true)}>
+                  <GitMergeIcon className="size-3.5 mr-2" />
+                  {t("fromWasmGit")}
                 </DropdownMenuItem>
               </>
             )}
@@ -214,6 +228,12 @@ export function PluginPanelToolbar({ onCheckUpdates, onSyncRegistry, syncing = f
           open={signedUrlDialogOpen}
           onOpenChange={setSignedUrlDialogOpen}
         />
+      )}
+      {wasmAvailable && (
+        <PluginVsixInstallDialog open={vsixDialogOpen} onOpenChange={setVsixDialogOpen} />
+      )}
+      {wasmAvailable && (
+        <PluginWasmFromGitDialog open={wasmGitDialogOpen} onOpenChange={setWasmGitDialogOpen} />
       )}
       {wasmLocal.sheet}
       {loadUnpacked.dialog}

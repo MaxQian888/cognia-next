@@ -32,7 +32,7 @@ import {
 import { SettingsCard } from "@/components/settings/common/settings-section"
 import { listAllPackCharacters } from "@/lib/plugin/registries/character-pack-registry"
 import { listCharacters } from "@/lib/db/characters"
-import type { Character } from "@/lib/claude/types"
+import type { Character } from "@cognia/agent-config-types"
 
 import type { PresetEditorState } from "../preset-editor-state"
 

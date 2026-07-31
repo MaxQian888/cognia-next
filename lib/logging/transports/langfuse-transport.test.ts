@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 
-import type { StructuredLogEntry } from "@/types/logging"
+import type { StructuredLogEntry } from "@cognia/logging/types"
 
 // We mock the langfuse-client module that the transport lazy-imports.
 const mockSpan = {
@@ -83,6 +83,39 @@ describe("LangfuseTransport buffering + level filter", () => {
 })
 
 describe("LangfuseTransport.flush behavior", () => {
+  it("uses the native batch exporter without resolving a secret in JavaScript", async () => {
+    const { LangfuseTransport } = await import("./langfuse-transport")
+    const nativeExport = jest.fn().mockResolvedValue(undefined)
+    const resolveSecretKey = jest.fn()
+    const t = new LangfuseTransport({
+      batchSize: 99,
+      flushInterval: 60_000,
+      nativeExport,
+      resolveSecretKey,
+    })
+    t.log(makeEntry({ level: "error", traceId: "native-trace" }))
+    await t.flush()
+    expect(nativeExport).toHaveBeenCalledWith([
+      expect.objectContaining({ traceId: "native-trace" }),
+    ])
+    expect(resolveSecretKey).not.toHaveBeenCalled()
+    expect(mockGetLangfuse).not.toHaveBeenCalled()
+    await t.close()
+  })
+
+  it("resolves a secure secret immediately before client creation", async () => {
+    const { LangfuseTransport } = await import("./langfuse-transport")
+    const resolveSecretKey = jest.fn().mockResolvedValue("sk-secure")
+    const t = new LangfuseTransport({ batchSize: 99, flushInterval: 60_000, resolveSecretKey })
+    t.log(makeEntry({ level: "error" }))
+    await t.flush()
+    expect(resolveSecretKey).toHaveBeenCalledTimes(1)
+    expect(mockGetLangfuse).toHaveBeenCalledWith(
+      expect.objectContaining({ secretKey: "sk-secure" })
+    )
+    await t.close()
+  })
+
   it("groups entries by traceId and creates one trace per group", async () => {
     const { LangfuseTransport } = await import("./langfuse-transport")
     const t = new LangfuseTransport({ batchSize: 99, flushInterval: 60_000 })

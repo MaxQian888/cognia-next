@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "cognia-next — AI-powered desktop application built with Next.js 16 + Tauri 2"
 authors = ["AstroAir <astro_air@126.com>"]
 license = "AGPL-3.0-or-later"
+publish = false
 repository = "https://github.com/MaxQian888/cognia-next"
 edition = "2021"
 # 1.89.0 floor — driven by transitive deps in the workspace Cargo.lock
@@ -21,7 +22,10 @@ default-run = "cognia-next"
 
 [lib]
 name = "app_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# Desktop binaries consume the Rust library directly. Mobile ships through the
+# Capacitor workspace (`mobile/`), so producing Tauri's mobile `staticlib` and
+# `cdylib` artifacts here only added a multi-gigabyte archive to every rebuild.
+crate-type = ["rlib"]
 
 # Headless cognia-server binary (Phase D / ADR-0014).
 [[bin]]
@@ -37,14 +41,12 @@ name = "cognia-sandbox-setup"
 path = "src/bin/cognia-sandbox-setup.rs"
 required-features = []
 
-# ADR-0028 Phase 4.2 / Phase 13 — Windows sandbox runner binary.
-# Non-elevated. Re-launches the requested argv under the synthetic
-# user via `runas /trustlevel:0x20000`. The sandbox backend's
-# `run()` shells into this binary.
-[[bin]]
-name = "cognia-sandbox-runner"
-path = "src/bin/cognia-sandbox-runner.rs"
-required-features = []
+# ADR-0028 Phase 4 — the Windows sandbox runner moved to its own workspace
+# member crate (`crates/cognia-sandbox-runner`) so the security-sensitive
+# restricted-token + low-integrity + Job Object code builds/checks in
+# isolation (`cargo check -p cognia-sandbox-runner`) instead of recompiling the
+# whole Tauri tree. It still emits `cognia-sandbox-runner.exe` into the shared
+# workspace `target/`, so bundling is unchanged.
 
 # ADR-0020 follow-up — screen-off Computer Use virtual-display driver
 # installer. UAC-elevated (launched via Start-Process -Verb RunAs by the
@@ -54,6 +56,16 @@ required-features = []
 name = "cognia-vdd-setup"
 path = "src/bin/cognia-vdd-setup.rs"
 required-features = []
+
+# ADR-0021 — WebRTC pair-test harness (`pnpm webrtc:pair`). A headless desktop
+# answerer that drives the PRODUCTION signaling client + webrtc-rs peer against
+# a real browser `RTCPeerConnection` through a real signaling server. Gated
+# behind the `webrtc-harness` feature so normal desktop/release builds never
+# compile it.
+[[bin]]
+name = "cognia-webrtc-peer"
+path = "src/bin/cognia-webrtc-peer.rs"
+required-features = ["webrtc-harness"]
 
 [build-dependencies]
 tauri-build = { version = "2.5.0", features = [] }
@@ -65,9 +77,76 @@ serde = { version = "1.0", features = ["derive"] }
 # frame/envelope types, also consumed by the standalone signaling-server and
 # its Cloudflare Worker. The desktop peer (companion_api::signaling) keeps its
 # own HMAC/replay logic but reuses these structs to prevent wire-format drift.
-cognia-signaling-core = { path = "../signaling-server/core" }
+cognia-signaling-core = { path = "../services/signaling-server/core" }
+# ADR-0067 — foundation utilities (fs_atomic). Re-aliased as `crate::fs_atomic`.
+cognia-core = { path = "../crates/cognia-core" }
+# ADR-0067 Tier B prep — secret_store/keyring_secrets/api_key foundation.
+# Re-aliased as crate::{secret_store,api_key}; keyring_secrets keeps an
+# app-side facade for its command shells. The `test-inmemory` feature is
+# enabled from [dev-dependencies] so unit tests never touch the OS keyring.
+cognia-secrets = { path = "../crates/cognia-secrets" }
+# ADR-0067 Tier B prep — proxy_config foundation (state + detection + WSS
+# dialer); `proxy_config/` stays as an app-side facade for the command shells.
+cognia-net = { path = "../crates/cognia-net" }
+# Native local-video metadata, frame extraction, trimming, and analysis.
+cognia-media = { path = "../crates/cognia-media" }
+# ADR-0067 Tier B — integrated terminal subsystem (portable-pty). Re-aliased
+# as `crate::terminal`; commands referenced from generate_handler!.
+cognia-terminal = { path = "../crates/cognia-terminal" }
+# Background-job supervisor — the non-interactive sibling of cognia-terminal.
+# Owns `bash(run_in_background)` and scheduled-task background work.
+cognia-jobs = { path = "../crates/cognia-jobs" }
+# ADR-0067 Tier B — subscription vault/providers (ADR-0025); `subscription/`
+# stays as an app-side facade holding the top-level command surface.
+cognia-subscription = { path = "../crates/cognia-subscription" }
+# ADR-0067 Tier B — Platform Connectors (matrix E2EE stack). Re-aliased as
+# `crate::connectors`; the BusEventEmitter impl stays in companion_api.
+cognia-connectors = { path = "../crates/cognia-connectors" }
+# ADR-0067 Tier B — plugin runtime (wasmtime/cranelift). Re-aliased as
+# `crate::plugin_api`; the vscode LSP host's sidecar-dir resolver is
+# registered from run().
+cognia-plugin-runtime = { path = "../crates/cognia-plugin-runtime" }
+# ADR-0067 follow-up — skills subsystem. Re-aliased as `crate::skills`.
+cognia-skills = { path = "../crates/cognia-skills" }
+# ADR-0067 follow-up — TTS subsystem. Re-aliased as `crate::tts`.
+cognia-tts = { path = "../crates/cognia-tts" }
+# ADR-0067 follow-up — remote-control LAN API. Re-aliased as
+# `crate::remote_control`.
+cognia-remote-control = { path = "../crates/cognia-remote-control" }
+# ADR-0067 follow-up — local OpenAI-compatible gateway. Re-aliased as
+# `crate::gateway`.
+cognia-gateway = { path = "../crates/cognia-gateway" }
+# ADR-0067 follow-up — CCSwitch provider-relay switcher. Re-aliased as
+# `crate::ccswitch`.
+cognia-ccswitch = { path = "../crates/cognia-ccswitch" }
+# ADR-0067 follow-up — embedded MCP server. Re-aliased as `crate::mcp_server`.
+cognia-mcp-server = { path = "../crates/cognia-mcp-server" }
+# ADR-0067 follow-up — external agent exec backends (bollard/kube isolated
+# behind the crate's own features; see [features] forwarding below).
+# Re-aliased as `crate::external_agent`.
+cognia-external-agent = { path = "../crates/cognia-external-agent" }
+# ADR-0067 Phase 5 — Computer Use automation + execution sandbox cluster. Owns
+# uiautomation/enigo/xcap/accessibility/seccompiler; re-aliased as
+# crate::{automation,sandbox,cua_sandbox}. windows/core-graphics/core-foundation/
+# libc stay below (shared with pet_window/fleet/scheduler/etc.).
+cognia-automation = { path = "../crates/cognia-automation" }
+# ADR-0067 Phase 1 — process-global span instrumentation registry, extracted
+# from `perf/{span,registry}.rs` so the Tier-A leaf crates (cognia-git,
+# cognia-vector, cognia-ocr) can instrument without depending on the whole app.
+# `perf/mod.rs` re-exports its symbols so `crate::perf::guard` call sites are
+# unchanged, and the perf panel reads its shared global `REGISTRY`.
+cognia-instrument = { path = "../crates/cognia-instrument" }
+# ADR-0067 Phase 2 — Source Control subsystem (ADR-0038), extracted so the
+# git2/vendored-libgit2 C compile isolates. Re-aliased as `crate::git` in
+# lib.rs; its `commands::git_*` are referenced from `generate_handler!`.
+cognia-git = { path = "../crates/cognia-git" }
+cognia-task-workspace = { path = "../crates/cognia-task-workspace" }
 log = "0.4"
-tauri = { version = "2.11.1", features = ["tray-icon", "image-png"] }
+# `unstable` unlocks the built-in multi-webview API (`Window::add_child`,
+# `Manager::get_webview`) that powers the embedded in-app browser pane
+# (`src-tauri/src/browser/embedded.rs`). Pinned exactly because unstable APIs
+# may shift across minor versions.
+tauri = { version = "=2.11.1", features = ["macos-private-api", "macos-proxy", "tray-icon", "image-png", "unstable"] }
 tauri-plugin-log = "2"
 
 # Native logging — fern dispatch chain mirrors records into the OS-native
@@ -76,6 +155,11 @@ tauri-plugin-log = "2"
 fern = "0.7"
 chrono = { version = "0.4", features = ["serde"] }
 once_cell = "1"
+# Structured tracing layer (separate native subscriber; tauri-plugin-log keeps
+# ownership of the global `log` logger — we never call LogTracer::init). Emits
+# JSON to cognia-structured.log, gated by a runtime-mutable per-target filter.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json", "registry"] }
 # Crash-report System Details (OS version / memory / CPU). Pinned to 0.33 —
 # the latest line bumped its MSRV to 1.95, above our 1.93 toolchain pin
 # (`rust-toolchain.toml`). Only the `system` feature is needed; disabling the
@@ -95,8 +179,7 @@ tauri-plugin-notification = "2"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-os = "2"
-# `tauri-plugin-shell` powers cloudflared tunnel spawn for the
-# GitHub Delivery one-click webhook receiver (`lib/github/cloudflared-tauri.ts`).
+# `tauri-plugin-shell` powers the host-managed cloudflared companion tunnel.
 # Scope-locked to the `cloudflared` binary in `tauri.conf.json`.
 tauri-plugin-shell = "2"
 tauri-plugin-store = "2"
@@ -123,13 +206,17 @@ ignore = "0.4"
 # launchd / systemd, plus a sqlite-backed metadata store for recovery.
 async-trait = "0.1"
 parking_lot = "0.12"
-rusqlite = { version = "0.39", features = ["bundled"] }
-# Native vector store backend — sqlite-vec FFI is loaded as a SQLite
-# auto-extension before any connection opens (mirrors the pattern in the
-# crate's own integration test). The crate itself has no rusqlite dep, so
-# its only constraint is that the host SQLite supports loadable extensions
-# (the `bundled` feature does).
-sqlite-vec = "0.1"
+# ADR-0059 R13 — bollard (docker) and kube moved to
+# `crates/cognia-external-agent` (ADR-0067); the `container-exec` / `k8s-exec`
+rusqlite = { version = "0.37", features = ["bundled"] }
+matrix-sdk-crypto = { version = "0.18.0", default-features = false }
+matrix-sdk-sqlite = { version = "0.18.0", default-features = false, features = ["crypto-store", "bundled"] }
+ruma = { version = "0.16.0", features = ["client-api-c", "events", "rand"] }
+# ADR-0067 Phase 4 — the native (sqlite-vec) + cloud (qdrant/…) vector store
+# lives in `crates/cognia-vector`, which owns the `sqlite-vec` + `qdrant-client`
+# deps. Re-aliased as `crate::vector` in lib.rs; the app installs a keyring-backed
+# `CredentialStore` at boot so the crate never touches `secret_store` directly.
+cognia-vector = { path = "../crates/cognia-vector" }
 
 gray_matter = { version = "0.3", default-features = false, features = ["yaml"] }
 wait-timeout = "0.2"
@@ -138,24 +225,27 @@ wait-timeout = "0.2"
 # upstream of choice — accept its known ConPTY quirks (resize artifacts,
 # Alt-key duplication) for v1 and patch downstream if hit.
 portable-pty = "0.8"
+# System font enumeration for the appearance / terminal font pickers
+# (`src-tauri/src/fonts.rs`). Pure-Rust — loads the OS font set and reports
+# each face's monospaced flag so the terminal picker can show only
+# fixed-pitch families. The webview can't do this (WKWebView has no Local
+# Font Access API).
+fontdb = "0.18"
 regex = "1"
 toml_edit = { version = "0.22", features = ["serde"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "socks", "http2", "multipart"] }
+opentelemetry = { version = "0.32", optional = true, features = ["trace", "metrics"] }
+opentelemetry_sdk = { version = "0.32", optional = true, features = ["trace", "metrics", "rt-tokio"] }
+opentelemetry-otlp = { version = "0.32", optional = true, default-features = false, features = ["trace", "metrics", "http-proto", "reqwest-rustls"] }
+tracing-opentelemetry = { version = "0.33", optional = true }
 tokio-socks = "0.5"
 tokio-rustls = "0.26"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 futures-util = { version = "0.3", default-features = false }
 bytes = "1"
 
-# Vector cloud backends (ADR-0022) — port the 5 cloud vector providers from
-# the dead-coded JS layer into Rust so they actually execute in Tauri.
-# Qdrant: official client, verified 1.18.0 on crates.io 2026-05-17. REST mode
-# keeps TLS handling identical to our existing reqwest stack.
-qdrant-client = { version = "1.18", default-features = false, features = ["serde"] }
-# Milvus: deliberately NOT taking the `milvus-sdk-rust` 0.1.0 dep — its build
-# script panics without a local `protoc` install (verified 2026-05-17). We use
-# the HTTP `/v2/vectordb/*` API instead, which is the same reqwest path as
-# Pinecone/Chroma/Weaviate. See ADR-0022.
+# Vector cloud backends (ADR-0022, qdrant/milvus/pinecone/chroma/weaviate) moved
+# to `crates/cognia-vector` (ADR-0067 Phase 4).
 
 # TTS support — provider key vault, Edge-TTS WebSocket bridge, and HTTP proxy.
 # keyring v3 has NO default features: without an explicit platform backend it
@@ -176,11 +266,10 @@ base64 = "0.22"
 # See `src-tauri/src/connectors/lark_ws.rs`.
 prost = "0.13"
 
-# Workflow cron daemon — `cron` is just the expression parser; we drive
-# firing via a small tokio loop in `src-tauri/src/workflow/triggers/cron_daemon.rs`
-# rather than pull in `tokio-cron-scheduler` (which is heavier and has its
-# own runtime semantics that conflict with our existing scheduler module).
-cron = "0.16"
+# ADR-0067 Phase 6 — scheduler + workflow + timing (and the `cron` expression
+# parser) live in `crates/cognia-scheduling`; re-aliased as
+# crate::{scheduler,workflow,timing}.
+cognia-scheduling = { path = "../crates/cognia-scheduling" }
 
 # MCP HTTP server — axum for the inbound listener, subtle for constant-time
 # bearer-token comparison, tower-http for body-size limits.
@@ -194,12 +283,18 @@ tower-http = { version = "0.6", features = ["limit", "trace", "cors"] }
 hmac = "0.13"
 sha1 = "0.11"
 sha2 = "0.11"
+sha2-v10 = { package = "sha2", version = "0.10" }
+hkdf = "0.12"
+p256 = { version = "0.13", features = ["ecdsa", "ecdh"] }
+argon2 = "0.5"
 ed25519-dalek = "2"
 hex = "0.4"
 url = "2"
 aes-gcm = { version = "0.10", features = ["aes"] }
 aes = "0.9"
 cbc = { version = "0.2", features = ["alloc"] }
+pbkdf2 = "0.13"
+psl = "2.1"
 rand = "0.8"
 jsonwebtoken = "9"
 serde_urlencoded = "0.7"
@@ -217,7 +312,7 @@ local-ip-address = "0.6"
 # `vendored-libgit2` ships libgit2's C source inside `libgit2-sys` so
 # developer machines don't need a system install — critical on Windows
 # where libgit2 isn't typically present.
-git2 = { version = "0.19", default-features = false, features = ["vendored-libgit2"] }
+git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2"] }
 
 # Companion TLS (Wave 1.4 / M2.8) — self-signed certificate generation +
 # SHA-256 SubjectPublicKeyInfo fingerprint computation. The mobile client
@@ -229,7 +324,7 @@ time = { version = "0.3", features = ["std"] }
 # mDNS (Wave 1.5 / M2.9) — service advertisement for `_cognia._tcp.local.`
 # so the mobile app can pick the desktop server out of the LAN without
 # manual baseUrl entry.
-mdns-sd = "0.20"
+mdns-sd = "0.13"
 
 # Cloudflared launcher (Wave 1.6) — runs the cloudflared subprocess and
 # parses the trycloudflare URL out of stderr. We use std::process via
@@ -251,16 +346,14 @@ tempfile = "3"
 # the `cognia plugin build` CLI emits. Pure-Rust, no system zlib dep.
 zip = { version = "2", default-features = false, features = ["deflate", "bzip2"] }
 
-# WASM plugin runtime (ADR 0013) — wasmtime 26 with the component-model
+# WASM plugin runtime (ADR 0013) — Wasmtime 36 LTS with the component-model
 # feature on by default. `wasmtime-wasi` provides the WASI Preview 2
 # interfaces we host (clocks/random/io/cli/filesystem). `wasmparser` is used
 # to scan for the embedded `cognia:api-version` custom section before the
-# component is compiled. wasmtime 26 is the last release before the major
-# version churn around the Pulley interpreter; pinning to 26 keeps us on a
-# stable wit-bindgen surface (0.34) until we revisit ABI in v0.2.
-# Re-verified 2026-05-18: latest is 44.0.1 — ABI revisit per ADR-0013 still pending.
-wasmtime = { version = "26", default-features = false, features = ["runtime", "cranelift", "component-model", "async"] }
-wasmtime-wasi = "26"
+# component is compiled. Pin the patched 36.x LTS line: older 24/26 releases
+# are affected by sandbox-escape advisories that were fixed in 36.0.12.
+wasmtime = { version = "=36.0.12", default-features = false, features = ["runtime", "cranelift", "component-model", "async"] }
+wasmtime-wasi = "=36.0.12"
 wasmparser = "0.221"
 
 # CLI argument parsing for the cognia-server binary (Phase D follow-up).
@@ -269,10 +362,8 @@ wasmparser = "0.221"
 # maintaining a hand-rolled parser as the subcommand surface grows.
 clap = { version = "4", features = ["derive"] }
 
-# UI automation — cross-platform screenshot (xcap works on Win/macOS/Linux).
-# Windows UIA bindings (`uiautomation`) and macOS/Linux a11y crates are
-# target-gated below.
-xcap = "0.0.12"
+# ADR-0067 Phase 5 — `xcap` (screenshot) + the UIA/a11y crates moved to
+# `crates/cognia-automation`.
 dial9-tokio-telemetry = "0.3"
 
 # WebRTC stack (ADR-0021) — full ICE/DTLS/SCTP suite that integrates with
@@ -286,32 +377,13 @@ dial9-tokio-telemetry = "0.3"
 # connectivity win.
 webrtc = "0.17"
 
-# ADR-0024 — local OCR engines (opt-in via `ocr-ocrs` / `ocr-paddle` features).
-#
-# `ocrs` + `rten` form a pure-Rust ONNX-style OCR pipeline that needs no
-# system deps (no CMake, no onnxruntime DLLs). Models (~12 MB total) are
-# downloaded on first use into `<app_data>/cognia/ocr/ocrs/`. Note: `rten`
-# is unusable in dev profile without opt-level=3 per upstream README — see
-# the [profile.dev.package.rten] block below.
-ocrs           = { version = "0.12", optional = true }
-rten           = { version = "0.24", optional = true, default-features = false }
-# `rten-imageproc` is pulled transitively via `rten`/`ocrs` (its `RotatedRect`
-# type leaks through `find_text_lines`). Keeping it as an explicit optional
-# dep so backend code can `use rten_imageproc::*` directly without depending
-# on upstream re-export stability.
-rten-imageproc = { version = "0.24", optional = true }
-
-# `oar-ocr` wraps PaddleOCR PP-OCRv5 models through ONNX Runtime. Strong CJK
-# accuracy, ~17 MB models. Uses `ort` (still pre-1.0); pin EXACTLY to avoid
-# ABI drift between RCs across crate consumers. The `download-binaries`
-# feature pulls a prebuilt onnxruntime tarball at build time; `copy-dylibs`
-# copies the runtime DLL next to the binary so Tauri's bundle picks it up.
-oar-ocr        = { version = "0.6",  optional = true }
-ort            = { version = "=2.0.0-rc.12", optional = true, default-features = false, features = ["download-binaries", "copy-dylibs"] }
-
-# Shared image decoder used by both OCR backends — feature-gated so it
-# doesn't get pulled into default builds.
-image          = { version = "0.25", optional = true, default-features = false, features = ["png", "jpeg", "webp", "bmp", "tiff"] }
+# ADR-0067 Phase 3 — native OCR subsystem (ADR-0024) lives in `crates/cognia-ocr`.
+# The optional ocrs/rten/rten-imageproc/oar-ocr/ort/image deps and the 5 `ocr-*`
+# features moved there; the `[features]` block below forwards them. Re-aliased as
+# `crate::ocr` in lib.rs; `ort`'s copy-dylibs still stages the onnxruntime DLL
+# into the shared target dir, so bundling is unchanged. The dev-profile
+# `[profile.dev.package.rten]` opt-level=3 override lives at the workspace root.
+cognia-ocr = { path = "../crates/cognia-ocr" }
 
 # Native PDF parsing with per-item bounding boxes (PDFium via pdfium-sys,
 # which downloads a prebuilt PDFium at build time and loads it through
@@ -341,10 +413,7 @@ minidumper = "0.10"
 # note in [dependencies]. Without this feature keyring uses the mock store.
 keyring = { version = "3", features = ["windows-native"] }
 eventlog = "0.3"
-# UI Automation — leexgone/uiautomation-rs. Pins `windows = 0.62.2`; if that
-# duplicates with Tauri's `windows` dep, run `cargo tree -d` and either pin
-# down or accept the duplication (it's at most a few hundred kB).
-uiautomation = { version = "0.25", features = ["process"] }
+# ADR-0067 Phase 5 — `uiautomation` moved to `crates/cognia-automation`.
 # Direct windows-rs dep for SendInput/MOUSEEVENTF_WHEEL/GetSystemMetrics calls
 # that aren't exposed publicly through `uiautomation::inputs`. Version pinned
 # to match uiautomation's own transitive `windows = 0.62.2` to avoid duplicate
@@ -362,17 +431,77 @@ windows = { version = "0.62.2", features = [
     "Win32_System_Power",              # SetThreadExecutionState, ES_*
     "Win32_Devices_Display",           # (reserved) QueryDisplayConfig family
     "Win32_Graphics_Gdi",              # ChangeDisplaySettingsExW, EnumDisplay*, DEVMODEW
+    # Desktop-pet window perching (pet_window/surfaces.rs): DwmGetWindowAttribute
+    # + DWMWA_CLOAKED to skip virtual-desktop / UWP ghost windows during
+    # EnumWindows surface enumeration.
+    "Win32_Graphics_Dwm",
 ] }
 
 [target."cfg(target_os = \"macos\")".dependencies]
+block2 = "0.6"
 # Real OS credential store (macOS/iOS Keychain) — see the keyring note in
 # [dependencies]. Without this feature keyring uses the mock store.
 keyring = { version = "3", features = ["apple-native"] }
 oslog = "0.2"
-# Cross-platform input simulation for the macOS automation backend
-# (`automation/platform/ax/mod.rs`). Pinned to a major version that's known to
-# build cleanly against Core Graphics on Apple Silicon + Intel Macs.
-enigo = "0.6"
+# ADR-0067 Phase 5 — `enigo` moved to `crates/cognia-automation`.
+# CGEventTap-based global input capture for the skill recorder
+# (`automation/record/hook_mac.rs`) — the macOS counterpart to the Windows
+# low-level hook. `enigo` already pulls both transitively, so naming them as
+# direct deps keeps the event-tap FFI explicit without adding a new version to
+# the lock.
+core-graphics = "0.25"
+core-graphics-types = "0.2"
+core-foundation = "0.10"
+# Non-activating NSPanel conversion for the desktop-pet overlay + popup windows
+# (pet_window/macos_panel.rs): floats over all Spaces + full-screen apps and
+# never steals foreground focus. macOS-only; pulls objc2* transitively. Cargo.lock
+# pins the resolved v2.1 commit for reproducibility.
+tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.1" }
+# NSScreen.safeAreaInsets for the fleet island placement
+# (fleet/island_window.rs): the island anchors to the FULL monitor frame (the
+# work area / visibleFrame shrinks and grows with menu-bar visibility, so a
+# fullscreen Space would strand the strip below a phantom menu bar) and needs
+# the notch height to pad content below the camera housing. Both crates are
+# already in the lock transitively (wry / tauri-nspanel); naming them adds no
+# new versions.
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSScreen"] }
+objc2-foundation = { version = "0.3.2", features = [
+  "NSArray",
+  "NSDate",
+  "NSDictionary",
+  "NSHTTPCookie",
+  "NSString",
+] }
+objc2-web-kit = { version = "0.3.2", features = [
+  "WKHTTPCookieStore",
+  "WKWebView",
+  "WKWebViewConfiguration",
+  "WKWebsiteDataStore",
+  "block2",
+] }
+# macOS Accessibility (AX) element tree — backs the bounded `read_tree` / `find`
+# Computer Use surface (ADR-0020 cross-platform subset, ax/mod.rs + ax/raw.rs).
+# The high-level `accessibility` crate covers reading role/title/children; the
+# raw `-sys` crates below back the three things it can't do but a useful tree
+# needs (all verified against Chrome / VS Code): activating lazy web-content
+# a11y on Chromium/WebKit/Electron apps, resolving the focused/main window, and
+# reading element geometry (AXPosition/AXSize). The whole graph shares one
+# `core-foundation-sys` (0.8), so the raw `*Ref` C types are interchangeable;
+# only `accessibility`'s core-foundation-0.9 `TCFType` methods
+# (`as_concrete_TypeRef` / `wrap_under_create_rule`) need that version, imported
+# under an alias in `ax/raw.rs` and never leaking into the rest of the app
+# (which is on core-foundation 0.10).
+# ADR-0067 Phase 5 — `accessibility` + `accessibility-sys` moved to
+# `crates/cognia-automation`. The lower-level CF crates stay (shared).
+core-foundation-sys = "0.8"
+core-foundation-0-9 = { package = "core-foundation", version = "0.9" }
+
+[target."cfg(unix)".dependencies]
+# Direct syscalls for the execution sandbox (ADR-0028): `setrlimit` for the
+# CPU / address-space caps applied via `Command::pre_exec` on the Linux
+# `bwrap` and macOS `sandbox-exec` backends (`sandbox/limits.rs`).
+libc = "0.2"
 
 [target."cfg(target_os = \"linux\")".dependencies]
 # Real OS credential store (freedesktop Secret Service over D-Bus) — see the
@@ -383,12 +512,14 @@ enigo = "0.6"
 keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
 libsystemd = "0.7"
 syslog = "7"
-# Cross-platform input simulation for the Linux automation backend
-# (`automation/platform/atspi/mod.rs`). Requires X11 / libxdo at runtime; on
-# headless systems the backend's `capabilities()` reports `hasInputSim: false`.
-enigo = "0.6"
+# ADR-0067 Phase 5 — `enigo` (atspi input sim) + `seccompiler` (bwrap seccomp
+# filter) moved to `crates/cognia-automation`.
 
 [dev-dependencies]
+# Keep app_lib's own test suite hermetic: the secret store's file+keyring
+# global becomes in-memory when tests build (dev-dep feature unification);
+# production builds never see the feature.
+cognia-secrets = { path = "../crates/cognia-secrets", features = ["test-inmemory"] }
 # HTTP mock server for connectors::http_client and attachments tests.
 # (`tempfile` is in `[dependencies]` for runtime plugin staging and is
 # transitively available in unit tests, so it isn't re-declared here.)
@@ -402,23 +533,40 @@ urlencoding = "2"
 # feature flag links a real binding for one platform.
 [features]
 default = []
-# Cross-platform Tesseract via `tesseract-rs` (statically links libtesseract
-# + leptonica). Requires CMake + a C++ toolchain on Linux.
-ocr-tesseract = []
-# Windows.Media.Ocr via the `winocr` crate. Requires the running process to
-# have an MSIX package identity; see `tauri.conf.json` bundle targets.
-ocr-windows = []
-# Apple Vision via the Swift sidecar at `sidecars/apple-vision-ocr/`. The
-# binary is bundled through `tauri.conf.json` `bundle.externalBin`.
-ocr-apple = []
-# Pure-Rust OCR via `ocrs` + RTen. No system deps; models downloaded on
-# first use into `<app_data>/cognia/ocr/ocrs/`. English-biased — pair with
-# `ocr-paddle` for CJK coverage.
-ocr-ocrs = ["dep:ocrs", "dep:rten", "dep:rten-imageproc", "dep:image"]
-# PaddleOCR PP-OCRv5 via `oar-ocr` + ONNX Runtime. Best open CJK accuracy;
-# ships an onnxruntime DLL alongside the executable (handled by `ort`'s
-# `copy-dylibs` feature).
-ocr-paddle = ["dep:oar-ocr", "dep:ort", "dep:image"]
+# ADR-0021 — compiles the `cognia-webrtc-peer` harness binary. Off by default
+# so the extra bin never enters normal builds; enabled only by `pnpm webrtc:pair`.
+webrtc-harness = []
+# ADR-0073 — native OTLP trace/metric export is deliberately opt-in so the
+# OpenTelemetry dependency graph does not slow normal desktop development.
+otel-export = [
+  "dep:opentelemetry",
+  "dep:opentelemetry_sdk",
+  "dep:opentelemetry-otlp",
+  "dep:tracing-opentelemetry",
+]
+# Cross-platform Tesseract via the local `tesseract` CLI. The feature links
+# no native library; runtime availability depends on the executable being
+# installed on PATH or packaged by the app shell.
+# ADR-0067 Phase 3 — these forward to the extracted `cognia-ocr` crate, which
+# owns the real ocrs/rten/oar-ocr/ort/image optional deps.
+ocr-tesseract = ["cognia-ocr/ocr-tesseract"]
+# Windows.Media.Ocr — requires MSIX package identity; see `tauri.conf.json`.
+ocr-windows = ["cognia-ocr/ocr-windows"]
+# Apple Vision needs no feature — `cognia-ocr` wires Vision.framework
+# in-process whenever the target is macOS.
+# Pure-Rust OCR via `ocrs` + RTen. Models downloaded on first use.
+ocr-ocrs = ["cognia-ocr/ocr-ocrs"]
+# PaddleOCR PP-OCRv5 via `oar-ocr` + ONNX Runtime (ships an onnxruntime DLL).
+ocr-paddle = ["cognia-ocr/ocr-paddle"]
+# ADR-0059 R13 — ExecBackend::Container for per-workspace runner containers
+# (T2 topology). Off desktop builds: only the headless `cognia-server` image
+# enables it, so the Docker client never enters the Tauri binary.
+container-exec = ["cognia-external-agent/container-exec"]
+# ADR-0059 R13 (T3) — kubernetes flavor of the exec backend: runner Pods with
+# attached stdio, PVC-subPath workspace mounts. In-cluster only; enabled in
+# the headless image alongside `container-exec`.
+k8s-exec = ["cognia-external-agent/k8s-exec"]
+workspace-runtime-exec = ["cognia-external-agent/workspace-runtime-exec"]
 # Native PDF parsing with bounding boxes via `liteparse` (PDFium). Needs
 # network at build time (pdfium-sys downloads a prebuilt PDFium); the
 # PDFium dynamic library must ship next to the executable — see

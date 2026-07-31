@@ -1,15 +1,15 @@
-// Common shape used by both marketplace adapters (registry + SkillsMP).
+// Common shape used by both marketplace adapters (registry + skills.sh).
 // The UI consumes this; adapters normalise their wire formats to it.
 
-import type { SkillCategory } from "@/lib/claude/types"
+import type { SkillCategory } from "@cognia/agent-config-types"
 
-export type MarketplaceSourceId = "registry" | "skillsmp"
+export type MarketplaceSourceId = "registry" | "skillssh"
 
 export interface MarketplaceItem {
-  /** Globally-unique id within its source — `registry:ai-elements`, `skillsmp:1234`. */
+  /** Globally-unique id within its source — `registry:ai-elements`, `skillssh:owner/repo/slug`. */
   id: string
   source: MarketplaceSourceId
-  /** Source-local id (slug for registry, integer or UUID for SkillsMP). */
+  /** Source-local id (slug for registry, `owner/repo/slug` triple for skills.sh). */
   sourceId: string
   name: string
   description?: string

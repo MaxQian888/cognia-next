@@ -28,6 +28,13 @@ export interface SharedLinkRow {
   maxViews?: number
   burnAfterRead: boolean
   hasPassphrase: boolean
+  /**
+   * Per-share owner secret returned by the worker at create time. Required to
+   * call stats/delete on a multi-tenant deployment. Stays on this device only
+   * (never in the shareable URL). Undefined for rows created before this field
+   * existed — those fall back to the worker's upload-secret gate.
+   */
+  ownerToken?: string
   /** Owner-side revoke flag; the worker DELETE is authoritative. */
   revoked: boolean
 }
@@ -51,6 +58,7 @@ export async function recordSharedLink(
     maxViews: partial.maxViews,
     burnAfterRead: partial.burnAfterRead,
     hasPassphrase: partial.hasPassphrase,
+    ownerToken: partial.ownerToken,
     revoked: partial.revoked ?? false,
   }
   await getDb().sharedLinks.put(row)
@@ -72,6 +80,11 @@ export async function getSharedLinkByCode(code: string): Promise<SharedLinkRow |
 /** Flip the local revoke flag. The caller is responsible for the worker DELETE. */
 export async function markSharedLinkRevoked(code: string): Promise<void> {
   await getDb().sharedLinks.where("code").equals(code).modify({ revoked: true })
+}
+
+/** Update the local mirror's cached expiry after a successful worker renew. */
+export async function updateSharedLinkExpiry(code: string, expiresAt: number): Promise<void> {
+  await getDb().sharedLinks.where("code").equals(code).modify({ expiresAt })
 }
 
 export async function deleteSharedLink(code: string): Promise<void> {

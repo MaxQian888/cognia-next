@@ -1,3 +1,18 @@
+const mockTransportCall = jest.fn()
+let mockRemoteActive = false
+const mockInvokeVscodeRpc = jest.fn()
+
+jest.mock("@/lib/tauri", () => ({
+  transport: { call: (...args: unknown[]) => mockTransportCall(...args) },
+}))
+jest.mock("@/lib/tauri/transport-routing", () => ({
+  isRemoteHostActive: jest.fn(() => mockRemoteActive),
+}))
+jest.mock("@/lib/plugin/core/vscode-loader", () => ({
+  invokeVscodeRpc: (...args: unknown[]) => mockInvokeVscodeRpc(...args),
+  isVscodeHostAvailable: jest.fn(() => true),
+}))
+
 /**
  * Tests for `TauriLspClientAdapter`. Mocks `invokeVscodeRpc` and the
  * rpc-dispatcher's `registerMethod` so the adapter is tested without
@@ -47,6 +62,33 @@ function makeAdapter(opts?: {
 }
 
 describe("TauriLspClientAdapter", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockRemoteActive = false
+  })
+
+  it("uses the confined Companion LSP facade when a remote host is active", async () => {
+    mockRemoteActive = true
+    mockTransportCall.mockResolvedValue(JSON.stringify([{ key: "user:eslint" }]))
+    const adapter = new TauriLspClientAdapter({ registerHandler: () => () => {} })
+
+    await expect(adapter.status()).resolves.toEqual([{ key: "user:eslint" }])
+    expect(mockTransportCall).toHaveBeenCalledWith("lsp_host_request", {
+      method: "lsp:status",
+      payloadJson: "{}",
+    })
+    expect(mockInvokeVscodeRpc).not.toHaveBeenCalled()
+  })
+
+  it("keeps the existing VS Code RPC path for the local host", async () => {
+    mockInvokeVscodeRpc.mockResolvedValue([{ key: "user:rust-analyzer" }])
+    const adapter = new TauriLspClientAdapter({ registerHandler: () => () => {} })
+
+    await expect(adapter.status()).resolves.toEqual([{ key: "user:rust-analyzer" }])
+    expect(mockInvokeVscodeRpc).toHaveBeenCalledWith(LSP_TAURI_CHANNEL_ID, "lsp:status", {})
+    expect(mockTransportCall).not.toHaveBeenCalled()
+  })
+
   it("start() calls invokeVscodeRpc with the canonical channel and lsp:start method", async () => {
     const { adapter, invokeCalls } = makeAdapter()
     await adapter.start({
@@ -88,11 +130,74 @@ describe("TauriLspClientAdapter", () => {
     ).rejects.toThrow(/host unavailable/i)
   })
 
-  it("install() registers exactly one handler and is idempotent", () => {
+  it("install() registers each LSP notification handler exactly once", () => {
     const { adapter, installCount } = makeAdapter()
     adapter.install()
     adapter.install()
-    expect(installCount()).toBe(1)
+    expect(installCount()).toBe(3)
+  })
+
+  it("routes correlated server requests and notifications to the owning session", async () => {
+    const onServerRequest = jest.fn()
+    const onServerNotification = jest.fn()
+    const { adapter, handlers } = makeAdapter()
+    await adapter.start({
+      ownerId: "managed-pro:acme",
+      serverId: "ts",
+      config: { id: "ts", name: "TypeScript", languages: ["ts"], command: "/x" },
+      onDiagnostics: jest.fn(),
+      onServerRequest,
+      onServerNotification,
+    })
+
+    handlers.get("lsp:serverRequest")?.({
+      ownerId: "managed-pro:acme",
+      serverId: "ts",
+      requestId: "server-1",
+      method: "workspace/applyEdit",
+      payload: { edit: { changes: {} } },
+      preconditions: {},
+    })
+    handlers.get("lsp:serverNotification")?.({
+      ownerId: "managed-pro:acme",
+      serverId: "ts",
+      method: "$/progress",
+      payload: { token: "index", value: { kind: "begin" } },
+    })
+
+    expect(onServerRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: "server-1", method: "workspace/applyEdit" })
+    )
+    expect(onServerNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ method: "$/progress" })
+    )
+  })
+
+  it("rejects an orphaned server request instead of leaving the LSP hung", async () => {
+    const calls: Array<{ pluginId: string; method: string; payload: unknown }> = []
+    const { adapter, handlers } = makeAdapter({
+      invokeImpl: async (pluginId, method, payload) => {
+        calls.push({ pluginId, method, payload })
+        return { accepted: true }
+      },
+    })
+    adapter.install()
+    handlers.get("lsp:serverRequest")?.({
+      ownerId: "missing",
+      serverId: "ts",
+      requestId: "server-1",
+      method: "window/showDocument",
+      payload: {},
+    })
+    await Promise.resolve()
+
+    expect(calls.at(-1)).toMatchObject({
+      method: "lsp:serverResponse",
+      payload: {
+        requestId: "server-1",
+        error: { code: -32601 },
+      },
+    })
   })
 
   it("forwards lsp:publishDiagnostics through onDiagnostics after running them through the adapter", async () => {
@@ -217,7 +322,7 @@ describe("TauriLspClientAdapter", () => {
     expect(onDiagnostics2).toHaveBeenCalledTimes(1)
   })
 
-  it("didOpen / didChange / didClose / request route via lsp:* RPC methods", async () => {
+  it("didOpen / didChange / didClose / request / serverResponse route via lsp:* RPC methods", async () => {
     const { adapter, invokeCalls } = makeAdapter()
     await adapter.didOpen({
       ownerId: "user",
@@ -239,8 +344,20 @@ describe("TauriLspClientAdapter", () => {
       method: "completion",
       payload: { uri: "file:///foo.ts", position: { line: 0, character: 0 } },
     })
+    await adapter.serverResponse({
+      ownerId: "user",
+      serverId: "eslint",
+      requestId: "server-1",
+      result: { applied: true },
+    })
     const methods = invokeCalls.map((c) => c.method)
-    expect(methods).toEqual(["lsp:didOpen", "lsp:didChange", "lsp:didClose", "lsp:request"])
+    expect(methods).toEqual([
+      "lsp:didOpen",
+      "lsp:didChange",
+      "lsp:didClose",
+      "lsp:request",
+      "lsp:serverResponse",
+    ])
   })
 
   it("stop() in browser mode (host unavailable) succeeds without invoking", async () => {

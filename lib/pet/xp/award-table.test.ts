@@ -20,4 +20,14 @@ describe("xpForEvent", () => {
     const values = Object.values(XP_AWARD) as number[]
     expect(Math.max(...values)).toBe(XP_AWARD.goalComplete)
   })
+
+  it("grants no XP for ambient twin-awareness signals", () => {
+    expect(xpForEvent("twinBusy")).toBe(0)
+    expect(xpForEvent("twinMilestone")).toBe(0)
+  })
+
+  it("treats scheduled-task cues as low-signal (a due reminder pays nothing)", () => {
+    expect(xpForEvent("scheduledRunStarting")).toBe(1)
+    expect(xpForEvent("scheduledRunDue")).toBe(0)
+  })
 })

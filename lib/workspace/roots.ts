@@ -13,6 +13,18 @@ export function primaryRootOf(project: Pick<Project, "roots">): WorkspaceRoot | 
   return project.roots?.find((r) => r.isPrimary) ?? project.roots?.[0]
 }
 
+/** Resolve the linked project and primary root for a chat/editor session. */
+export function resolveSessionProjectRoot(
+  session: { projectId?: string } | null | undefined,
+  projects: readonly Pick<Project, "id" | "roots">[]
+): { project?: Pick<Project, "id" | "roots">; root?: WorkspaceRoot } {
+  if (!session?.projectId) return {}
+  const project = projects.find((candidate) => candidate.id === session.projectId)
+  if (!project) return {}
+  const root = primaryRootOf(project)
+  return root ? { project, root } : { project }
+}
+
 /** Non-primary root paths (forwarded as additionalDirectories). */
 export function additionalDirsOf(project: Pick<Project, "roots">): string[] {
   const primary = primaryRootOf(project)

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { ErrorPage } from "./error-page"
@@ -7,7 +7,7 @@ jest.mock("@/lib/logging/crash-log", () => ({
   exportCrashLogBundleNow: jest.fn(),
 }))
 
-jest.mock("@/lib/logging", () => {
+jest.mock("@cognia/logging", () => {
   const fakeLogger = () => ({
     trace: jest.fn(),
     debug: jest.fn(),
@@ -33,9 +33,16 @@ jest.mock("sonner", () => ({
   },
 }))
 
+const mockNetStatus = { connected: true, connectionType: "wifi" as const }
+jest.mock("@/hooks/use-network-status", () => ({
+  useNetworkStatus: () => ({ loading: false, status: mockNetStatus }),
+}))
+
 import { exportCrashLogBundleNow } from "@/lib/logging/crash-log"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { toast } from "sonner"
+import { recordRecentErrorLog, resetRecentErrorLogsForTest } from "@cognia/logging/recent-errors"
+import type { StructuredLogEntry } from "@/types/logging"
 
 const exportMock = exportCrashLogBundleNow as jest.MockedFunction<typeof exportCrashLogBundleNow>
 const toastSuccess = (toast as unknown as { success: jest.Mock }).success
@@ -53,6 +60,8 @@ beforeEach(() => {
   exportMock.mockReset()
   toastSuccess.mockReset()
   toastError.mockReset()
+  mockNetStatus.connected = true
+  resetRecentErrorLogsForTest()
   Object.values(appLogger).forEach((m) => m.mockReset())
   Object.values(uiLogger).forEach((m) => m.mockReset())
   Object.values(schedulerLogger).forEach((m) => m.mockReset())
@@ -218,6 +227,14 @@ describe("ErrorPage — variant: global-error with staticLocale='en'", () => {
     expect(screen.getByTestId("error-page-export")).toBeInTheDocument()
   })
 
+  it("renders the intl global-error copy on the non-static provider path", () => {
+    render(
+      <ErrorPage variant="global-error" error={new Error("layout crashed")} reset={() => {}} />
+    )
+    expect(screen.getByTestId("error-page")).toHaveAttribute("data-variant", "global-error")
+    expect(screen.getByText("Cognia stopped working")).toBeInTheDocument()
+  })
+
   it("logs at fatal level via loggers.app", () => {
     render(
       <ErrorPage
@@ -265,5 +282,164 @@ describe("ErrorPage — exportCrashLogImpl seam", () => {
     await userEvent.click(screen.getByTestId("error-page-export"))
     expect(stub).toHaveBeenCalledTimes(1)
     expect(exportMock).not.toHaveBeenCalled()
+  })
+})
+
+describe("ErrorPage — classification & tailored recovery", () => {
+  it("classifies a render error and uses the reset primary action", () => {
+    const reset = jest.fn()
+    render(<ErrorPage variant="error" error={new Error("boom")} reset={reset} />)
+    expect(screen.getByTestId("error-page")).toHaveAttribute("data-category", "render")
+    expect(screen.getByTestId("error-page-retry")).toHaveTextContent("Try again")
+  })
+
+  it("classifies a chunk-load error and reloads instead of resetting", async () => {
+    // jsdom's window.location.reload is locked and unmockable (see
+    // lib/desktop/menu-actions.test.ts) — assert the label + that reset is not
+    // called and the reload click doesn't throw; reload() itself is a no-op here.
+    const reset = jest.fn()
+    const error = Object.assign(new Error("Loading chunk 5 failed"), { name: "ChunkLoadError" })
+    render(<ErrorPage variant="error" error={error} reset={reset} />)
+
+    expect(screen.getByTestId("error-page")).toHaveAttribute("data-category", "chunk-load")
+    const primary = screen.getByTestId("error-page-retry")
+    expect(primary).toHaveTextContent("Reload app")
+    await userEvent.click(primary)
+    expect(reset).not.toHaveBeenCalled()
+  })
+
+  it("classifies a fetch failure as offline when the network is down", () => {
+    mockNetStatus.connected = false
+    const error = Object.assign(new Error("Failed to fetch"), { name: "TypeError" })
+    render(<ErrorPage variant="error" error={error} reset={() => {}} />)
+    expect(screen.getByTestId("error-page")).toHaveAttribute("data-category", "offline")
+  })
+
+  it("shows the category-specific description for offline errors", () => {
+    mockNetStatus.connected = false
+    render(<ErrorPage variant="error" error={new Error("anything")} reset={() => {}} />)
+    expect(screen.getByText(/retry automatically once you're back online/i)).toBeInTheDocument()
+  })
+
+  it("shows the auto-retry countdown after reconnecting on a network error", () => {
+    jest.useFakeTimers()
+    try {
+      const error = Object.assign(new Error("Failed to fetch"), { name: "TypeError" })
+      mockNetStatus.connected = false
+      const { rerender } = render(<ErrorPage variant="error" error={error} reset={jest.fn()} />)
+      expect(screen.queryByTestId("error-page-auto-retry")).toBeNull()
+
+      // Reconnect → the countdown UI appears.
+      mockNetStatus.connected = true
+      rerender(<ErrorPage variant="error" error={error} reset={jest.fn()} />)
+      const countdown = screen.getByTestId("error-page-auto-retry")
+      expect(countdown).toHaveTextContent(/Retrying in/i)
+
+      // Cancel stands it down.
+      fireEvent.click(screen.getByTestId("error-page-cancel-auto-retry"))
+      expect(screen.queryByTestId("error-page-auto-retry")).toBeNull()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+})
+
+describe("ErrorPage — auxiliary modules", () => {
+  it("renders the diagnostics card and copy-report action on the error variant", () => {
+    render(<ErrorPage variant="error" error={new Error("boom")} reset={() => {}} />)
+    expect(screen.getByTestId("error-diagnostics-card")).toBeInTheDocument()
+    expect(screen.getByTestId("error-page-copy-report")).toBeInTheDocument()
+  })
+
+  it("surfaces the recent-errors panel when prior errors exist", () => {
+    const prior: StructuredLogEntry = {
+      id: "prior-1",
+      timestamp: "2026-06-23T10:00:00.000Z",
+      level: "error",
+      message: "earlier failure",
+      module: "app",
+    } as StructuredLogEntry
+    recordRecentErrorLog(prior)
+    render(<ErrorPage variant="error" error={new Error("boom")} reset={() => {}} />)
+    expect(screen.getByTestId("recent-errors-panel")).toBeInTheDocument()
+  })
+
+  it("omits auxiliary modules on the not-found variant", () => {
+    render(<ErrorPage variant="not-found" />)
+    expect(screen.queryByTestId("error-diagnostics-card")).toBeNull()
+    expect(screen.queryByTestId("error-page-copy-report")).toBeNull()
+  })
+
+  it("renders the diagnostics card and copy-report in the static global-error path", () => {
+    render(
+      <ErrorPage
+        variant="global-error"
+        error={new Error("layout crashed")}
+        reset={() => {}}
+        staticLocale="en"
+      />
+    )
+    expect(screen.getByTestId("error-diagnostics-card")).toBeInTheDocument()
+    expect(screen.getByTestId("error-page-copy-report")).toBeInTheDocument()
+  })
+
+  it("renders static not-found copy without providers", () => {
+    render(<ErrorPage variant="not-found" staticLocale="en" />)
+    expect(screen.getByText("Page not found")).toBeInTheDocument()
+    expect(screen.queryByTestId("error-diagnostics-card")).toBeNull()
+  })
+
+  it("renders static error copy without providers", () => {
+    render(
+      <ErrorPage variant="error" error={new Error("boom")} reset={() => {}} staticLocale="en" />
+    )
+    expect(screen.getByText("Something went wrong")).toBeInTheDocument()
+    expect(screen.getByTestId("error-diagnostics-card")).toBeInTheDocument()
+  })
+})
+
+describe("ErrorPage — layout & feedback", () => {
+  it("labels the error variant with a classification badge", () => {
+    render(<ErrorPage variant="error" error={new Error("boom")} reset={() => {}} />)
+    expect(screen.getByTestId("error-page-category")).toHaveTextContent("Application error")
+  })
+
+  it("renders the scrollable detail band when there is error info to show", () => {
+    render(<ErrorPage variant="error" error={new Error("boom")} reset={() => {}} />)
+    expect(screen.getByTestId("error-page-body")).toBeInTheDocument()
+  })
+
+  it("drops the badge and detail band on the compact not-found variant", () => {
+    render(<ErrorPage variant="not-found" />)
+    expect(screen.queryByTestId("error-page-category")).toBeNull()
+    expect(screen.queryByTestId("error-page-body")).toBeNull()
+  })
+
+  it("shows an inline 'Copied' confirmation after copying the error id", async () => {
+    const error = Object.assign(new Error("boom"), { digest: "cafebabe" })
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: jest.fn().mockResolvedValue(undefined) },
+    })
+    render(<ErrorPage variant="error" error={error} reset={() => {}} />)
+    const button = screen.getByTestId("error-page-copy-id")
+    expect(button).toHaveTextContent("Copy ID")
+    await userEvent.click(button)
+    expect(button).toHaveTextContent("Copied")
+  })
+
+  it("shows an inline 'Exported' confirmation after a successful crash export", async () => {
+    const stub = jest.fn().mockResolvedValue(undefined)
+    render(
+      <ErrorPage
+        variant="error"
+        error={new Error("boom")}
+        reset={() => {}}
+        exportCrashLogImpl={stub}
+      />
+    )
+    const button = screen.getByTestId("error-page-export")
+    await userEvent.click(button)
+    await waitFor(() => expect(button).toHaveTextContent("Exported"))
   })
 })

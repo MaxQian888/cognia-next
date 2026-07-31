@@ -13,6 +13,11 @@ export interface PetCharacterBinding {
   hat?: PetHat
   bodyType?: PetBodyType
   palette?: PetPalette
+  /**
+   * Per-character Live2D model override. When set, the skin resolver prefers
+   * this over the global `PetSettings.activeLive2dModelId`.
+   */
+  live2dModelId?: string
   /** ISO 8601. */
   updatedAt: string
 }

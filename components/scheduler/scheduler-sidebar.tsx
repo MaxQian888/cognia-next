@@ -5,7 +5,7 @@
  * Displays app tasks, system tasks, search, filters, and footer stats.
  */
 
-import React, { useMemo, useState } from "react"
+import React, { useCallback, useMemo, useState } from "react"
 import { Calendar, Search, X } from "lucide-react"
 import { useTranslations } from "next-intl"
 
@@ -24,7 +24,11 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import type { ScheduledTask, SystemTask, TaskStatistics } from "@/types/scheduler"
-import type { ScheduledItemKind, UnifiedScheduledItem } from "@/types/scheduler/unified"
+import {
+  SCHEDULED_ITEM_KINDS,
+  type ScheduledItemKind,
+  type UnifiedScheduledItem,
+} from "@/types/scheduler/unified"
 
 import { FilterChips } from "./filter-chips"
 import { TaskSidebarItem } from "./task-sidebar-item"
@@ -45,6 +49,7 @@ export interface SchedulerSidebarProps {
   countsByKind?: Record<ScheduledItemKind, number>
   selectedTaskId: string | null
   schedulerStatus: string // 'running' | 'stopped' | 'idle'
+  schedulerHost?: "local" | "remote"
   statistics: TaskStatistics | null
   activeCount: number
   pausedCount: number
@@ -78,13 +83,28 @@ export interface SchedulerSidebarProps {
 // Component
 // ---------------------------------------------------------------------------
 
-export function SchedulerSidebar({
+/**
+ * Chrome wrapper — the offcanvas/collapsible `<Sidebar>` used on tablet and
+ * mobile. Desktop renders `SchedulerSidebarContent` directly inside a
+ * resizable panel instead (mirrors the InboxSidebar/InboxSidebarContent
+ * dual-export pattern).
+ */
+export function SchedulerSidebar(props: SchedulerSidebarProps) {
+  return (
+    <Sidebar collapsible="icon" className="border-r">
+      <SchedulerSidebarContent {...props} />
+    </Sidebar>
+  )
+}
+
+export function SchedulerSidebarContent({
   tasks,
   systemTasks,
   unifiedItems,
   countsByKind,
   selectedTaskId,
   schedulerStatus,
+  schedulerHost = "local",
   statistics,
   activeCount,
   pausedCount,
@@ -118,20 +138,25 @@ export function SchedulerSidebar({
         ? "bg-red-500"
         : "bg-gray-400"
 
-  // Filter chips configuration
-  const filters = [
-    { key: "all", label: t("filter.all") || "All", count: tasks.length },
-    {
-      key: "active",
-      label: t("statuses.active") || "Active",
-      count: tasks.filter((task) => task.status === "active").length,
-    },
-    {
-      key: "paused",
-      label: t("statuses.paused") || "Paused",
-      count: tasks.filter((task) => task.status === "paused").length,
-    },
-  ]
+  // Filter chips configuration — one pass over the task list per render of
+  // this memo instead of one filter() pass per chip.
+  const filters = useMemo(() => {
+    let active = 0
+    let paused = 0
+    let loop = 0
+    for (const task of tasks) {
+      if (task.status === "active") active++
+      else if (task.status === "paused") paused++
+      // /loop interval tasks (tagged by lib/loop/interval.ts).
+      if (task.tags?.includes("loop")) loop++
+    }
+    return [
+      { key: "all", label: t("filter.all") || "All", count: tasks.length },
+      { key: "active", label: t("statuses.active") || "Active", count: active },
+      { key: "paused", label: t("statuses.paused") || "Paused", count: paused },
+      { key: "loop", label: t("filter.loop") || "Loop", count: loop },
+    ]
+  }, [tasks, t])
 
   // Footer success rate
   const successRate =
@@ -166,8 +191,28 @@ export function SchedulerSidebar({
   const showFilteredEmpty =
     !!unifiedItems && unifiedItems.length > 0 && filteredUnified && filteredUnified.length === 0
 
+  // O(1) membership lookups instead of Array#includes per row.
+  const selectedUnifiedIdSet = useMemo(
+    () => new Set(selectedUnifiedIds ?? []),
+    [selectedUnifiedIds]
+  )
+
+  // Stable row-click dispatcher so `React.memo` on the row components holds.
+  const handleUnifiedItemClick = useCallback(
+    (clickedItem: UnifiedScheduledItem) => {
+      if (clickedItem.kind === "app") {
+        onSelectTask(clickedItem.sourceId)
+      } else if (clickedItem.kind === "system") {
+        onSelectSystemTask?.(clickedItem.sourceId)
+      } else {
+        onSelectUnifiedItem?.(clickedItem)
+      }
+    },
+    [onSelectTask, onSelectSystemTask, onSelectUnifiedItem]
+  )
+
   return (
-    <Sidebar collapsible="icon" className="border-r">
+    <>
       {/* Header */}
       <SidebarHeader>
         <div className="flex items-center gap-2 px-3 py-2 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
@@ -182,6 +227,13 @@ export function SchedulerSidebar({
               schedulerDotClass
             )}
           />
+          <Badge
+            variant="outline"
+            className="h-5 px-1.5 text-[10px] group-data-[collapsible=icon]:hidden"
+            data-testid="scheduler-host"
+          >
+            {t(`host.${schedulerHost}`)}
+          </Badge>
         </div>
       </SidebarHeader>
 
@@ -251,9 +303,7 @@ export function SchedulerSidebar({
         {/* Unified groups by kind — preferred path when unified data is supplied. */}
         {groupedUnified && !showEmptyState && !showFilteredEmpty && (
           <>
-            {(
-              ["app", "workflow", "backup", "plugin", "system", "connector"] as ScheduledItemKind[]
-            ).map((kind) => {
+            {SCHEDULED_ITEM_KINDS.map((kind) => {
               const items = groupedUnified[kind]
               if (items.length === 0) return null
               return (
@@ -272,17 +322,9 @@ export function SchedulerSidebar({
                             item={item}
                             isActive={item.kind === "app" && selectedTaskId === item.sourceId}
                             isHighlighted={item.kind === "app" && idx === highlightedIndex}
-                            isSelected={selectedUnifiedIds?.includes(item.unifiedId)}
+                            isSelected={selectedUnifiedIdSet.has(item.unifiedId)}
                             onToggleSelect={onToggleUnifiedSelection}
-                            onClick={(clickedItem) => {
-                              if (clickedItem.kind === "app") {
-                                onSelectTask(clickedItem.sourceId)
-                              } else if (clickedItem.kind === "system") {
-                                onSelectSystemTask?.(clickedItem.sourceId)
-                              } else {
-                                onSelectUnifiedItem?.(clickedItem)
-                              }
-                            }}
+                            onClick={handleUnifiedItemClick}
                             onRunNow={onUnifiedRunNow}
                             onPause={onUnifiedPause}
                             onResume={onUnifiedResume}
@@ -350,6 +392,6 @@ export function SchedulerSidebar({
           </div>
         </div>
       </SidebarFooter>
-    </Sidebar>
+    </>
   )
 }

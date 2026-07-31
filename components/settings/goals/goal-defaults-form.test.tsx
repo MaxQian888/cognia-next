@@ -1,5 +1,7 @@
 import "fake-indexeddb/auto"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { PROVIDERS } from "@cognia/provider-types/provider"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import { GoalDefaultsForm } from "./goal-defaults-form"
 
@@ -34,6 +36,71 @@ describe("GoalDefaultsForm", () => {
     expect(screen.getByTestId("goal-defaults-max-judge-failures")).toBeInTheDocument()
     expect(screen.getByTestId("goal-defaults-timeout")).toBeInTheDocument()
     expect(screen.getByTestId("goal-defaults-start-paused")).toBeInTheDocument()
+  })
+
+  it("renders the previously-dormant defaults (budget / provider / pacing / gate)", () => {
+    render(<GoalDefaultsForm />)
+    expect(screen.getByTestId("goal-defaults-max-budget-usd")).toBeInTheDocument()
+    expect(screen.getByTestId("goal-judge-model-picker")).toBeInTheDocument()
+    expect(screen.getByTestId("goal-defaults-adaptive-pacing")).toBeInTheDocument()
+    expect(screen.getByTestId("goal-defaults-max-promise-denials")).toBeInTheDocument()
+    expect(screen.getByTestId("goal-defaults-reset")).toBeInTheDocument()
+  })
+
+  it("persists a per-turn USD ceiling default", async () => {
+    render(<GoalDefaultsForm />)
+    fireEvent.change(screen.getByTestId("goal-defaults-max-budget-usd"), { target: { value: "5" } })
+    fireEvent.click(screen.getByTestId("goal-defaults-save"))
+    await waitFor(() => {
+      expect(saveMock).toHaveBeenCalledWith(
+        expect.objectContaining({ goals: expect.objectContaining({ maxBudgetUsd: 5 }) })
+      )
+    })
+  })
+
+  it("persists a judge model + provider chosen from the picker", async () => {
+    const user = userEvent.setup()
+    render(<GoalDefaultsForm />)
+    // No providerSettings in the mock → the picker offers the built-in
+    // anthropic catalog fallback.
+    await user.click(screen.getByTestId("goal-judge-model-picker"))
+    await user.click(screen.getByText(PROVIDERS.anthropic.defaultModel))
+    fireEvent.click(screen.getByTestId("goal-defaults-save"))
+    await waitFor(() => {
+      expect(saveMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          goals: expect.objectContaining({
+            judgeModel: PROVIDERS.anthropic.defaultModel,
+            judgeProvider: "anthropic",
+          }),
+        })
+      )
+    })
+  })
+
+  it("persists the adaptive-pacing opt-in", async () => {
+    render(<GoalDefaultsForm />)
+    fireEvent.click(screen.getByTestId("goal-defaults-adaptive-pacing"))
+    fireEvent.click(screen.getByTestId("goal-defaults-save"))
+    await waitFor(() => {
+      expect(saveMock).toHaveBeenCalledWith(
+        expect.objectContaining({ goals: expect.objectContaining({ adaptivePacing: true }) })
+      )
+    })
+  })
+
+  it("reset stages the hard defaults, clearing a stored override on save", async () => {
+    mockedSettings = { goals: { maxTurns: 7 } }
+    render(<GoalDefaultsForm />)
+    expect((screen.getByTestId("goal-defaults-max-turns") as HTMLInputElement).value).toBe("7")
+    fireEvent.click(screen.getByTestId("goal-defaults-reset"))
+    expect((screen.getByTestId("goal-defaults-max-turns") as HTMLInputElement).value).toBe("20")
+    fireEvent.click(screen.getByTestId("goal-defaults-save"))
+    await waitFor(() => {
+      expect(saveMock).toHaveBeenCalledWith(
+        expect.objectContaining({ goals: expect.objectContaining({ maxTurns: 20 }) })
+      )
+    })
   })
 
   it("save button starts disabled when no edits made", () => {

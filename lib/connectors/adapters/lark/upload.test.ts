@@ -52,6 +52,44 @@ describe("resolveLarkMediaKeys", () => {
     })
   })
 
+  it("degrades a non-opus voice source to a file attachment (unplayable as audio otherwise)", async () => {
+    // Lark's audio bubble plays only opus; uploading an mp3 with
+    // file_type=opus "succeeds" but produces a broken voice message.
+    mockInvoke.mockResolvedValueOnce("file_v3_mp3_as_file")
+    const segments: MessageSegment[] = [
+      { type: "voice", url: "https://media.example.com/memo.mp3", durationSec: 12 },
+    ]
+    const out = await resolveLarkMediaKeys(segments, {
+      getAccessToken: async () => "t-token",
+    })
+
+    expect(out).toEqual([
+      {
+        type: "file",
+        url: "file_v3_mp3_as_file",
+        name: "memo.mp3",
+        mimeType: "application/octet-stream",
+        sizeBytes: 0,
+      },
+    ])
+    expect(mockInvoke).toHaveBeenCalledWith("connectors_lark_upload_file", {
+      accessToken: "t-token",
+      sourceUrl: "https://media.example.com/memo.mp3",
+      fileType: "stream",
+      fileName: "memo.mp3",
+      durationMs: undefined,
+    })
+  })
+
+  it("keeps an already-resolved voice key untouched even without an opus extension", async () => {
+    const segments: MessageSegment[] = [{ type: "voice", url: "file_v3_resolved_voice" }]
+    const out = await resolveLarkMediaKeys(segments, {
+      getAccessToken: async () => "t-token",
+    })
+    expect(out).toEqual(segments)
+    expect(mockInvoke).not.toHaveBeenCalled()
+  })
+
   it("uploads a remote video URL via connectors_lark_upload_file with mp4", async () => {
     mockInvoke.mockResolvedValueOnce("file_v3_new_video")
     const segments: MessageSegment[] = [
@@ -175,5 +213,81 @@ describe("resolveLarkMediaKeys", () => {
     await expect(
       resolveLarkMediaKeys(segments, { getAccessToken: async () => "t-token" })
     ).rejects.toThrow(/HTTP 500/)
+  })
+})
+
+describe("resolveLarkMediaKeys — A2UI card images", () => {
+  function a2uiSegment(src: string): MessageSegment {
+    return {
+      type: "a2ui",
+      surfaceId: "sfc_1",
+      plainTextMirror: "[image]",
+      content: {
+        rootId: "root",
+        dataModel: {},
+        components: {
+          root: { component: "Card", children: ["img1"] },
+          img1: { component: "Image", src, alt: "diagram" },
+        },
+      },
+    }
+  }
+
+  beforeEach(() => {
+    ;(invoke as jest.Mock).mockReset()
+  })
+
+  it("uploads remote card images and swaps src for the image_key (clone, no mutation)", async () => {
+    ;(invoke as jest.Mock).mockResolvedValueOnce("img_v3_card_1")
+    const seg = a2uiSegment("https://cdn.example.com/diagram.png")
+    const out = await resolveLarkMediaKeys([seg], { getAccessToken: async () => "t-token" })
+
+    const outSeg = out[0] as Extract<MessageSegment, { type: "a2ui" }>
+    expect((outSeg.content.components.img1 as { src?: string }).src).toBe("img_v3_card_1")
+    // The original segment is untouched — retries re-serialize from the
+    // persisted request.
+    expect(
+      (
+        (seg as Extract<MessageSegment, { type: "a2ui" }>).content.components.img1 as {
+          src?: string
+        }
+      ).src
+    ).toBe("https://cdn.example.com/diagram.png")
+    expect(invoke).toHaveBeenCalledWith("connectors_lark_upload_image", {
+      accessToken: "t-token",
+      sourceUrl: "https://cdn.example.com/diagram.png",
+      imageType: undefined,
+    })
+  })
+
+  it("leaves already-resolved image keys untouched (no upload)", async () => {
+    const seg = a2uiSegment("img_v3_already")
+    const out = await resolveLarkMediaKeys([seg], { getAccessToken: async () => "t-token" })
+    expect(out[0]).toBe(seg)
+    expect(invoke).not.toHaveBeenCalled()
+  })
+
+  it("degrades per-URL on upload failure (URL kept → card falls back to a link)", async () => {
+    ;(invoke as jest.Mock).mockRejectedValueOnce(new Error("upload boom"))
+    const seg = a2uiSegment("https://cdn.example.com/broken.png")
+    const out = await resolveLarkMediaKeys([seg], { getAccessToken: async () => "t-token" })
+    const outSeg = out[0] as Extract<MessageSegment, { type: "a2ui" }>
+    expect((outSeg.content.components.img1 as { src?: string }).src).toBe(
+      "https://cdn.example.com/broken.png"
+    )
+  })
+
+  it("reuses the uploadCache across calls for the same URL", async () => {
+    const cache = new Map<string, string>([
+      ["https://cdn.example.com/diagram.png", "img_v3_cached"],
+    ])
+    const seg = a2uiSegment("https://cdn.example.com/diagram.png")
+    const out = await resolveLarkMediaKeys([seg], {
+      getAccessToken: async () => "t-token",
+      uploadCache: cache,
+    })
+    const outSeg = out[0] as Extract<MessageSegment, { type: "a2ui" }>
+    expect((outSeg.content.components.img1 as { src?: string }).src).toBe("img_v3_cached")
+    expect(invoke).not.toHaveBeenCalled()
   })
 })

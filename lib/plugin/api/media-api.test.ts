@@ -38,8 +38,10 @@ import {
   type VideoEffectDefinition,
   type VideoTransitionDefinition,
 } from "./media-api"
+import { initializePluginPermissions } from "./permission-api"
 import { invoke } from "@tauri-apps/api/core"
 import { proxyFetch } from "@/lib/network/proxy-fetch"
+import { generateProviderImage, generateProviderVideo } from "@/lib/ai/media/provider-generation"
 import {
   clearAllPluginPointDiagnostics,
   getPluginPointDiagnostics,
@@ -64,6 +66,11 @@ jest.mock("@/lib/utils", () => ({
 
 jest.mock("@/lib/network/proxy-fetch", () => ({
   proxyFetch: jest.fn(),
+}))
+
+jest.mock("@/lib/ai/media/provider-generation", () => ({
+  generateProviderImage: jest.fn(),
+  generateProviderVideo: jest.fn(),
 }))
 
 jest.mock("@/stores", () => ({
@@ -466,13 +473,46 @@ describe("Media Registry", () => {
             codec: "h264",
             fileSize: 1024,
             hasAudio: true,
+            sourceToken: "authorized-source-token",
           }
         }
         if (command === "plugin_media_get_video_frame") {
+          const payload = new Uint8Array(8 + 4 * 2 * 2)
+          const header = new DataView(payload.buffer)
+          header.setUint32(0, 2, true)
+          header.setUint32(4, 2, true)
+          return payload.buffer
+        }
+        if (command === "video_analyze") {
           return {
-            data: new Uint8Array(4 * 2 * 2),
-            width: 2,
-            height: 2,
+            sourcePath: "/tmp/source.mp4",
+            outputDirectory: "/tmp/cognia-video/analysis-id",
+            mode: "scene",
+            range: { startTime: 2, endTime: 8 },
+            metadata: {
+              durationMs: 12_000,
+              width: 1920,
+              height: 1080,
+              fps: 30,
+              codec: "h264",
+              fileSize: 1024,
+              hasAudio: true,
+            },
+            candidateCount: 5,
+            deduplicatedCount: 2,
+            frames: [
+              {
+                path: "/tmp/cognia-video/analysis-id/frame-0001.jpg",
+                timestamp: 2,
+                reason: "scene-change",
+              },
+              {
+                path: "/tmp/cognia-video/analysis-id/frame-0004.jpg",
+                timestamp: 7.5,
+                reason: "scene-change",
+              },
+            ],
+            warnings: [],
           }
         }
         if (command === "plugin_media_concatenate_videos") {
@@ -496,13 +536,97 @@ describe("Media Registry", () => {
 
     it("should provide a real frame extraction path", async () => {
       const api = createMediaAPI(testPluginId, {} as never)
-      const imageData = await api.video.getFrame("clip-id", 1.5)
+      const clip = await api.video.loadClip("/tmp/source.mp4")
+      const imageData = await api.video.getFrame(clip.id, 1.5)
       expect(imageData).toBeInstanceOf(ImageData)
       expect(imageData.width).toBe(2)
       expect(invoke).toHaveBeenCalledWith(
         "plugin_media_get_video_frame",
-        expect.objectContaining({ clipId: "clip-id", time: 1.5 })
+        expect.objectContaining({
+          sourceToken: "authorized-source-token",
+          time: 1.5,
+        })
       )
+    })
+
+    it("should analyze a focused local-video range through the native pipeline", async () => {
+      const api = createMediaAPI(testPluginId, {} as never)
+      const manifest = await api.video.analyze("/tmp/source.mp4", {
+        mode: "scene",
+        startTime: 2,
+        endTime: 8,
+        maxFrames: 12,
+        deduplicate: true,
+      })
+
+      expect(manifest.frames).toHaveLength(2)
+      expect(manifest.frames[0]).toEqual(
+        expect.objectContaining({
+          timestamp: 2,
+          reason: "scene-change",
+        })
+      )
+      expect(invoke).toHaveBeenCalledWith("video_analyze", {
+        options: {
+          sourceToken: "authorized-source-token",
+          mode: "scene",
+          startTime: 2,
+          endTime: 8,
+          maxFrames: 12,
+          deduplicate: true,
+        },
+      })
+
+      await api.video.cleanupAnalysis(manifest)
+      expect(invoke).toHaveBeenCalledWith("video_cleanup_analysis", {
+        outputDirectory: "/tmp/cognia-video/analysis-id",
+      })
+    })
+
+    it("should use native analysis defaults when no options are provided", async () => {
+      const api = createMediaAPI(testPluginId, {} as never)
+
+      await api.video.analyze("/tmp/source.mp4")
+
+      expect(invoke).toHaveBeenCalledWith("video_analyze", {
+        options: {
+          sourceToken: "authorized-source-token",
+        },
+      })
+    })
+
+    it("should trim into a native-owned output without accepting a caller destination", async () => {
+      ;(invoke as jest.Mock).mockImplementation(async (command: string) => {
+        if (command === "video_get_info") {
+          return {
+            durationMs: 12_000,
+            width: 1920,
+            height: 1080,
+            fps: 30,
+            codec: "h264",
+            fileSize: 1024,
+            hasAudio: true,
+            sourceToken: "authorized-source-token",
+          }
+        }
+        if (command === "video_trim") {
+          return { outputPath: "/tmp/cognia-video/trims/trim-id.mp4" }
+        }
+        return undefined
+      })
+      const api = createMediaAPI(testPluginId, {} as never)
+      const clip = await api.video.loadClip("/tmp/source.mp4")
+
+      await api.video.trim(clip.id, 1, 3)
+
+      expect(invoke).toHaveBeenCalledWith("video_trim", {
+        options: {
+          sourceToken: "authorized-source-token",
+          startTime: 1,
+          endTime: 3,
+          format: "mp4",
+        },
+      })
     })
 
     it("should concatenate clips without throwing NOT_SUPPORTED", async () => {
@@ -540,6 +664,123 @@ describe("Media Registry", () => {
   })
 
   describe("AI image processing implementation", () => {
+    it("generates an image through the unified provider execution layer", async () => {
+      ;(generateProviderImage as jest.Mock).mockResolvedValue({
+        image: {
+          uint8Array: new Uint8Array([1, 2, 3]),
+          base64: "AQID",
+          mediaType: "image/png",
+        },
+      })
+      const api = createMediaAPI(testPluginId, {} as never)
+
+      const result = await api.ai.generateImage("A porcelain whale", {
+        providerId: "doubao",
+        model: "seedream-5-0-260128",
+        aspectRatio: "16:9",
+      })
+
+      expect(result).toBeInstanceOf(ImageData)
+      expect(generateProviderImage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          prompt: "A porcelain whale",
+          providerId: "doubao",
+          model: "seedream-5-0-260128",
+          aspectRatio: "16:9",
+          snapshot: expect.objectContaining({ defaultProvider: "openai" }),
+        })
+      )
+
+      await api.ai.generateImage("Merge these references", {
+        referenceImages: [createTestImageData()],
+        mask: createTestImageData(),
+        size: "1024x1024",
+        seed: 12,
+        providerOptions: { bytedance: { watermark: false } },
+        abortSignal: new AbortController().signal,
+      })
+      expect(generateProviderImage).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          prompt: expect.objectContaining({
+            text: "Merge these references",
+            images: [expect.stringMatching(/^data:image\/png;base64,/)],
+            mask: expect.stringMatching(/^data:image\/png;base64,/),
+          }),
+          size: "1024x1024",
+          seed: 12,
+          providerOptions: { bytedance: { watermark: false } },
+          abortSignal: expect.any(AbortSignal),
+        })
+      )
+    })
+
+    it("generates text-to-video and image-to-video through the unified provider layer", async () => {
+      ;(generateProviderVideo as jest.Mock).mockResolvedValue({
+        video: {
+          uint8Array: new Uint8Array([4, 5, 6]),
+          base64: "BAUG",
+          mediaType: "video/mp4",
+        },
+      })
+      const api = createMediaAPI(testPluginId, {} as never)
+
+      const textVideo = await api.ai.generateVideo("A kite rises", {
+        providerId: "volcengine",
+        duration: 5,
+        model: "dreamina-seedance-2-0-260128",
+        aspectRatio: "16:9",
+        resolution: "1280x720",
+        fps: 24,
+        seed: 9,
+        providerOptions: { bytedance: { generateAudio: true } },
+        abortSignal: new AbortController().signal,
+      })
+      const imageVideo = await api.ai.generateVideo("The portrait smiles", {
+        inputImage: createTestImageData(),
+      })
+
+      expect(textVideo).toBeInstanceOf(Blob)
+      expect(textVideo.type).toBe("video/mp4")
+      expect(imageVideo).toBeInstanceOf(Blob)
+      expect(generateProviderVideo).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          providerId: "volcengine",
+          model: "dreamina-seedance-2-0-260128",
+          aspectRatio: "16:9",
+          resolution: "1280x720",
+          duration: 5,
+          fps: 24,
+          seed: 9,
+          providerOptions: { bytedance: { generateAudio: true } },
+          abortSignal: expect.any(AbortSignal),
+        })
+      )
+      expect(generateProviderVideo).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          prompt: expect.objectContaining({
+            text: "The portrait smiles",
+            image: expect.stringMatching(/^data:image\/png;base64,/),
+          }),
+        })
+      )
+    })
+
+    it("blocks generated-media prompts that fail the plugin PII gate", async () => {
+      const api = createMediaAPI(testPluginId, {} as never)
+
+      await expect(api.ai.generateImage("Contact alice@example.com")).rejects.toMatchObject({
+        name: "PluginPiiError",
+      })
+      await expect(api.ai.generateVideo("Send this to bob@example.com")).rejects.toMatchObject({
+        name: "PluginPiiError",
+      })
+      expect(generateProviderImage).not.toHaveBeenCalled()
+      expect(generateProviderVideo).not.toHaveBeenCalled()
+    })
+
     it("routes upscale requests through the configured image provider", async () => {
       mockImageEditResponse()
       const api = createMediaAPI(testPluginId, {} as never)
@@ -727,5 +968,26 @@ describe("Media Registry", () => {
       expect(diagnostics).toHaveLength(1)
       expect(diagnostics[0]).toMatchObject({ pointId: "ai.inpaint" })
     })
+  })
+})
+
+// W2.3: the media video/ai namespaces are permission-gated; grant the
+// suite's plugin.
+beforeAll(() => {
+  initializePluginPermissions("test-plugin", [
+    "media:video:read",
+    "media:video:write",
+    "media:video:export",
+    "ai:chat",
+  ])
+})
+
+describe("permission gate", () => {
+  it("throws PermissionError on video/ai namespaces without grants", () => {
+    const api = createMediaAPI("no-perms-plugin", {} as never)
+    expect(() => api.video.getMetadata("x")).toThrow(/media:video:read/)
+    expect(() => api.ai.generateImage("x")).toThrow(/ai:chat/)
+    expect(() => api.ai.generateVideo("x")).toThrow(/ai:chat/)
+    expect(() => api.ai.removeBackground({} as ImageData)).toThrow(/ai:chat/)
   })
 })

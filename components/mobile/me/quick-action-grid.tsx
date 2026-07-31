@@ -37,7 +37,7 @@ import { MobileServerScanSheet } from "@/components/mobile/connection-state-shee
 import { selectionFeedback } from "@/lib/capacitor/haptics"
 import { useSettingsStore } from "@/stores/settings"
 import { cn } from "@/lib/utils"
-import type { AppLanguage, AppTheme } from "@/lib/claude/types"
+import type { AppLanguage, AppTheme } from "@cognia/agent-config-types"
 
 const THEME_CYCLE: AppTheme[] = ["system", "light", "dark"]
 const LANGUAGE_CYCLE: AppLanguage[] = ["en", "zh-CN"]
@@ -120,7 +120,14 @@ export function QuickActionGrid({ className }: QuickActionGridProps) {
   const cycleTheme = () => {
     const idx = THEME_CYCLE.indexOf(currentTheme)
     const next = THEME_CYCLE[(idx + 1) % THEME_CYCLE.length]
+    // Apply to next-themes for instant feedback AND persist to the settings
+    // store. Persisting is the load-bearing half: `SettingsSyncProvider`
+    // re-applies `settings.theme` to next-themes on every settings-object
+    // change (sync tick, any other save). Without writing it back, the next
+    // such pass reverts the toggle to the stored value — the "flashes then
+    // snaps back" bug. Mirrors the desktop appearance theme-tab.
     setTheme(next)
+    void save({ theme: next })
     void selectionFeedback()
   }
 

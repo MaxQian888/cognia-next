@@ -43,6 +43,13 @@ export function PluginStatusPill({ status, enabled, loading, className }: Plugin
       </Badge>
     )
   }
+  if (status === "suspended") {
+    return (
+      <Badge variant="outline" className={cn("text-xs", className)}>
+        {t("suspended")}
+      </Badge>
+    )
+  }
   if (!enabled) {
     return (
       <Badge variant="outline" className={cn("text-xs", className)}>

@@ -40,7 +40,7 @@ struct CrashContext {
 static CONTEXT: Lazy<Mutex<CrashContext>> = Lazy::new(|| Mutex::new(CrashContext::default()));
 
 /// Replace the redacted config object. The renderer is responsible for
-/// scrubbing secrets/PII (via `lib/twin/ingest/redact.ts`) before calling.
+/// scrubbing secrets/PII (via `packages/redact/src/index.ts`) before calling.
 pub fn set_config(config: serde_json::Value) {
     if let Ok(mut ctx) = CONTEXT.lock() {
         ctx.config = config;

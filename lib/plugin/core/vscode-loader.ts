@@ -17,8 +17,8 @@
  * in later phases of the plan (~/.claude/plans/vscode-snug-squid.md).
  */
 
-import { isTauri } from "@/lib/platform/detect"
-import { loggers } from "@/lib/logging"
+import { isHeadlessHost, isTauri } from "@/lib/platform/detect"
+import { loggers } from "@cognia/logging"
 import type { PluginDefinition, PluginManifest } from "@/types/plugin"
 import {
   configureRpcDispatcher,
@@ -26,6 +26,7 @@ import {
 } from "@/lib/plugin/vscode-shim/rpc-dispatcher"
 import { installVscodeRpcHandlers } from "@/lib/plugin/vscode-shim/setup-handlers"
 import { configureLmHandler } from "@/lib/plugin/vscode-shim/lm-handler"
+import { loadConfiguredMonaco } from "@/lib/canvas/monaco-loader"
 
 const vscodeLoaderLogger = loggers.plugin.child("vscode-loader")
 
@@ -37,13 +38,20 @@ let dispatcherConfigured = false
  * `loadVscodeDefinition` so plain `import("..vscode-loader")` doesn't
  * trigger the Tauri shim outside of the desktop runtime.
  */
-async function ensureDispatcherConfigured(): Promise<void> {
+export async function ensureDispatcherConfigured(): Promise<void> {
   if (dispatcherConfigured) return
   if (!isVscodeHostAvailable()) return
-  const [{ invoke }, { listen }] = await Promise.all([
-    import("@tauri-apps/api/core"),
-    import("@tauri-apps/api/event"),
-  ])
+  const invoke = await getInvoke()
+  const listen: (event: string, cb: (event: { payload: string }) => void) => Promise<() => void> =
+    isHeadlessHost()
+      ? async (event, cb) => {
+          const { transport } = await import("@/lib/tauri/transport-instance")
+          return transport.subscribe<string>(event, (payload) => cb({ payload }))
+        }
+      : async (event, cb) => {
+          const { listen: listenTauri } = await import("@tauri-apps/api/event")
+          return listenTauri<string>(event, cb)
+        }
   configureRpcDispatcher({
     sendResponse: async (pluginId, responseJson) => {
       await invoke("plugin_vscode_send_response", {
@@ -51,13 +59,16 @@ async function ensureDispatcherConfigured(): Promise<void> {
         responseJson,
       })
     },
-    listen: (event, cb) =>
-      listen<string>(event, (e) => cb({ payload: e.payload })) as Promise<() => void>,
+    listen: (event, cb) => listen(event, (e) => cb({ payload: e.payload })) as Promise<() => void>,
   })
   // Resolve cognia's currently configured Claude model for lm.selectChatModels.
   configureLmHandler({
     resolveDefaultModel: async () => {
       try {
+        if (isHeadlessHost()) {
+          const { useSettingsStore } = await import("@/stores/settings")
+          return useSettingsStore.getState().settings?.defaultModel
+        }
         const settings = await invoke<{ model?: string } | null>("read_claude_user_settings")
         return settings?.model
       } catch {
@@ -67,11 +78,11 @@ async function ensureDispatcherConfigured(): Promise<void> {
   })
   installVscodeRpcHandlers()
 
-  // Wire the monaco-bridge to the real Monaco API + the renderer→sidecar
-  // request channel. Lazy-imported so non-Tauri code paths never pull
-  // monaco-editor (the asset bundle is ~3 MB).
+  // Wire the monaco-bridge to the Monaco instance already managed by
+  // @monaco-editor/react. Loading its prebuilt AMD assets avoids bundling and
+  // compiling the full monaco-editor ESM source graph during every dev start.
   try {
-    const monaco = await import("monaco-editor")
+    const monaco = await loadConfiguredMonaco()
     const { configureMonacoBridge } = await import("@/lib/plugin/vscode-shim/monaco-bridge")
     configureMonacoBridge({
       // The bridge's `MonacoApi` interface is structurally compatible with
@@ -91,9 +102,23 @@ async function ensureDispatcherConfigured(): Promise<void> {
       },
       dispatchRpc: (pluginId, method, payload) => invokeVscodeRpc(pluginId, method, payload),
     })
+
+    // Consume `contributes.languages[]` (populated by the manager via
+    // languages-bridge): register each contributed language id into Monaco and
+    // keep it in sync as VS Code extensions enable / disable.
+    const { installContributedLanguageSync } =
+      await import("@/lib/plugin/vscode-shim/contributed-languages-monaco")
+    installContributedLanguageSync({
+      register: (language) => monaco.languages.register(language),
+      setLanguageConfiguration: (languageId, configuration) =>
+        monaco.languages.setLanguageConfiguration(
+          languageId,
+          configuration as Parameters<typeof monaco.languages.setLanguageConfiguration>[1]
+        ),
+    })
   } catch (error) {
     vscodeLoaderLogger.warn(
-      "configureMonacoBridge skipped — monaco-editor failed to load; LSP providers will be dormant",
+      "configureMonacoBridge skipped — configured Monaco assets failed to load; LSP providers will be dormant",
       { error: error instanceof Error ? error.message : String(error) }
     )
   }
@@ -103,6 +128,11 @@ async function ensureDispatcherConfigured(): Promise<void> {
   // Guarded by try/catch so a missing settings store (extremely early
   // boot) never blocks the VS Code extension activation path.
   try {
+    // Migrate legacy developer.userLspServers / unsignedLspAllowed →
+    // settings.lsp BEFORE the registry bootstraps so the editor resolves
+    // from the unified field.
+    const { initLspSettingsMigration } = await import("@/lib/lsp/migrate-settings-initializer")
+    initLspSettingsMigration()
     const { bootstrapLspRegistry } = await import("@/lib/plugin/lsp/lsp-bootstrap")
     bootstrapLspRegistry()
   } catch (error) {
@@ -138,6 +168,11 @@ let cachedInvoke: InvokeFn | undefined
 
 async function getInvoke(): Promise<InvokeFn> {
   if (cachedInvoke) return cachedInvoke
+  if (isHeadlessHost()) {
+    const { transport } = await import("@/lib/tauri/transport-instance")
+    cachedInvoke = (cmd, args) => transport.call(cmd, args)
+    return cachedInvoke
+  }
   const mod = await import("@tauri-apps/api/core")
   cachedInvoke = mod.invoke as InvokeFn
   return cachedInvoke
@@ -148,7 +183,7 @@ async function getInvoke(): Promise<InvokeFn> {
  * only). Browser-mode users see a "desktop required" stub instead.
  */
 export function isVscodeHostAvailable(): boolean {
-  return isTauri()
+  return isTauri() || isHeadlessHost()
 }
 
 /**
@@ -171,6 +206,16 @@ export async function loadVscodeDefinition(
   if (!manifest.vscodeExtension?.identifier) {
     throw new Error(
       `VS Code extension ${manifest.id} is missing the vscodeExtension.identifier block — manifest adapter must populate this at install`
+    )
+  }
+  // Defense in depth: `adaptVscodeManifest` derives both from the same
+  // publisher/name, so a mismatch means the block did not come from the
+  // adapter — i.e. someone persisted an attacker-supplied manifest. Refuse to
+  // load rather than let an extension present itself as another one.
+  if (manifest.vscodeExtension.identifier !== manifest.id) {
+    throw new Error(
+      `VS Code extension ${manifest.id} declares a mismatched vscodeExtension.identifier ` +
+        `(${manifest.vscodeExtension.identifier}) — refusing to load a manifest the adapter did not produce`
     )
   }
 
@@ -323,6 +368,13 @@ export async function unloadVscodeExtension(pluginId: string): Promise<void> {
  * the Node sidecar.
  */
 function hasThemeOnlyContributions(manifest: PluginManifest): boolean {
-  const themesCount = (manifest.themes ?? []).length
-  return themesCount > 0
+  // W5.1: grammar-only / icon-theme-only / snippet-only extensions are as
+  // legitimate as theme-only ones — none of them need a `vscodeMain` bundle.
+  return (
+    (manifest.themes ?? []).length > 0 ||
+    (manifest.vscodeGrammars ?? []).length > 0 ||
+    (manifest.vscodeIconThemes ?? []).length > 0 ||
+    (manifest.vscodeSnippets ?? []).length > 0 ||
+    (manifest.vscodeLanguages ?? []).length > 0
+  )
 }

@@ -17,7 +17,7 @@
 // `paletteAsCssVars` (for the chart / workflow tokens that don't live in
 // `ThemeColors`).
 
-import type { ThemeColors } from "@/types/plugin/plugin-extended"
+import type { ThemeColors } from "@/types/plugin/plugin"
 import type { ColorblindMode } from "@/types/appearance"
 
 /** CSS custom-property names this module knows about, beyond ThemeColors. */

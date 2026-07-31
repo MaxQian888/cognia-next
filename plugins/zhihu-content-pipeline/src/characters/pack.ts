@@ -17,7 +17,7 @@
  * their namespaced ids via `pluginSkillIds`.
  */
 
-import { defineCharacterPack } from "@/lib/plugin/sdk/define-character-pack"
+import { defineCharacterPack } from "@cognia/plugin-sdk"
 import type { PluginCharacterDef } from "@/types/plugin/plugin-character-pack"
 import { ROLE_PACK_ID, packSkillId, PLUGIN_ID } from "../ids"
 

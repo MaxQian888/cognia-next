@@ -12,9 +12,46 @@
  * surface as "no executor registered" run failures.
  */
 
-import type { StepExecutionContext, WorkflowTriggeredFrom } from "@/types/workflow/visual"
+import type { Goal, GoalConfig, GoalTemplate } from "@/types/goal"
+import type {
+  CreateScheduledTaskInput,
+  ScheduledTask,
+  ScheduledTaskStatus,
+  ScheduledTaskType,
+  TaskExecution,
+  TaskExecutionConfig,
+  TaskFilter,
+  TaskNotificationConfig,
+  TaskTrigger,
+  TaskTriggerType,
+  UpdateScheduledTaskInput,
+} from "@/types/scheduler"
+import type {
+  AgentPlan,
+  CreatePlanInput,
+  CreatePlanStepInput,
+  PlanConfig,
+  PlanExecutionMode,
+  PlanRefinementTrigger,
+  PlanRefinementType,
+  PlanSource,
+  PlanStatus,
+  PlanStep,
+  PlanStepKind,
+  PlanStepStatus,
+  UpdatePlanInput,
+} from "@/types/agent/plan"
+import type {
+  StepExecutionContext,
+  WorkflowNodeKind,
+  WorkflowTriggeredFrom,
+} from "@/types/workflow/visual"
+import type { McpServer } from "@cognia/agent-config-types"
 import { registerNodeExecutor } from "./registry"
 import { resolveExpression } from "@/lib/workflow/runtime/expression"
+import { respondToWebhook } from "@/lib/workflow/runtime/tauri-bridge"
+import { computeGoalAnalytics } from "@/lib/goal/analytics"
+import { getGoalRuntime } from "@/lib/goal/runtime"
 import {
   evaluateConditionGroup,
   type ResolvedConditionGroup,
@@ -29,12 +66,36 @@ import {
 } from "@/lib/db/skills"
 import { getSkill as getPluginSkill } from "@/lib/plugin/registries/skill-registry"
 import { getMcpServerPreset } from "@/lib/plugin/registries/mcp-server-preset-registry"
+import { invokeMcpTool } from "@/lib/mcp/invoke"
 import { createCharacter, deleteCharacter, updateCharacter } from "@/lib/db/characters"
 import { createTeam, deleteTeam, updateTeam } from "@/lib/db/teams"
 import { enqueueOutbound } from "@/lib/db/outbound-jobs"
 import { createDraft } from "@/lib/db/connector-drafts"
-import { generateTextEmbedding } from "@/lib/ai/embedding/multimodal-embedding"
-import { extractJson } from "@/lib/twin/distill/llm"
+import {
+  getActiveGoalForSession,
+  getGoal,
+  getOpenGoalForSession,
+  listAllGoals,
+  listGoalEvents,
+  listGoalsBySession,
+} from "@/lib/db/goals"
+import {
+  deleteGoalTemplate,
+  getGoalTemplate,
+  listGoalTemplates,
+  setTemplateFavorite,
+  upsertGoalTemplate,
+} from "@/lib/db/goal-templates"
+import { createGoalFromTemplate } from "@/lib/goal/templates"
+import { seedGoalTemplates } from "@/lib/goal/seed-templates"
+import { getPlanRuntime } from "@/lib/agent/plan/runtime"
+import { listAllPlans, listPlanEvents } from "@/lib/db/plans"
+import { schedulerDb } from "@/lib/scheduler/scheduler-db"
+import { getTaskScheduler } from "@/lib/scheduler/task-scheduler"
+import { getSession } from "@/lib/db/sessions"
+import { buildRendererLlmClient } from "@/lib/ai/renderer-llm-client"
+import { useSettingsStore } from "@/stores/settings/settings-store"
+import { generateTextEmbedding } from "@cognia/provider-embedding/multimodal-embedding"
 // Side-effect import — registers the 12 desktop UI-automation executors at
 // module load time. Keeps the catalog and the registry in sync without any
 // cross-module wiring.
@@ -43,35 +104,43 @@ import "./desktop"
 // OCR extraction node (ADR-0024) — turns an image/PDF/screen into text.
 import "./ocr"
 
+// Desktop-pet nodes — the `action.pet.interact` emitter + the
+// `trigger.pet.event` pass-through (real firing: runtime/pet-event-trigger).
+import "./pet"
+
+// Eval nodes — run a dataset eval / gate a run from a workflow.
+import "./eval"
+
+// Optional browser-local Transformers.js inference. The module only registers
+// an executor; the runtime itself is dynamically imported when the node runs.
+import "./browser-model"
+
 // Wave 3 — registers the `action.system.terminal` executor that drives
 // the integrated terminal dock from a workflow step.
 import "./terminal"
+
+// Persistent terminal-session nodes (open / run / close) — dock or
+// unattended-headless mode, with run-scoped cleanup via the orchestrator.
+import "./terminal-session"
+
+// Script-file node — runs a .sh/.ps1/.py/… file under its detected
+// interpreter (lib/terminal/script-runner.ts), dock or unattended mode.
+import "./terminal-script"
 
 // Local Git action nodes (ADR-0038) — stage / commit / push / branch against
 // the active workspace repo.
 import "./git"
 
+// Web-clone node (`io.webClone`) — snapshot a live page + assets into a
+// self-contained file/bundle via the vendored sidecar engine (desktop only).
+import "./web-clone"
+
 // ── AI structured-output helpers (shared by ai.prompt / ai.extract) ─────────
-
-/**
- * Non-throwing JSON extraction from an LLM completion. Reuses the robust
- * `extractJson` (handles fenced blocks + leading/trailing prose) and converts
- * its throw into a `{ value, error }` result so node executors can surface a
- * `parseError` downstream instead of failing the whole run.
- */
-function parseStructured(completion: string): { value: unknown; error?: string } {
-  try {
-    return { value: extractJson<unknown>(completion) }
-  } catch (err) {
-    return { value: null, error: err instanceof Error ? err.message : String(err) }
-  }
-}
-
-/** Build the JSON-only system instruction appended in `responseFormat: "json"`. */
-function buildJsonInstruction(schema?: string): string {
-  const base = "Respond with ONLY a single valid JSON value — no prose, no markdown code fences."
-  return schema && schema.trim() ? `${base}\nMatch this shape:\n${schema.trim()}` : base
-}
+// parseStructured / buildJsonInstruction moved to ./ai/structured so the
+// ai.prompt v2 module can share them without a circular import.
+import { buildJsonInstruction, parseStructured } from "./ai/structured"
+import { runStructuredTurn } from "./ai/structured-turn"
+import { validateAgainstJsonSchema } from "./ai/schema-validate"
 
 /** Coerce an extracted value to a declared type hint (best-effort). */
 function coerceToType(value: unknown, typeHint: string): unknown {
@@ -92,33 +161,36 @@ function coerceToType(value: unknown, typeHint: string): unknown {
   return value
 }
 
-// ── trigger.manual ────────────────────────────────────────────────────────
-registerNodeExecutor({
-  kind: "trigger.manual",
-  typeVersion: 1,
-  execute: async (ctx) => ({
-    output: {
-      firedAt: ctx.trigger.originAt,
-      payload: ctx.trigger.payload,
-    },
-  }),
-})
+// ── built-in trigger pass-throughs ────────────────────────────────────────
+// Trigger producers live outside the graph (Rust cron/webhook router or TS
+// event bridges), but their nodes are still executable graph roots: they
+// expose the event envelope to downstream expressions. Keep the side-effect-
+// free execution contract in one function so every built-in producer behaves
+// identically and adding a trigger cannot leave a catalog-only dormant node.
+const PASSTHROUGH_TRIGGER_KINDS = [
+  "trigger.manual",
+  "trigger.cron",
+  "trigger.connector.inbound",
+  "trigger.chat.message",
+  "trigger.goal.completed",
+  "trigger.webhook",
+  "trigger.integration.event",
+  "trigger.team",
+  "trigger.workflow.completed",
+] as const satisfies readonly WorkflowNodeKind[]
 
-// ── trigger.team ──────────────────────────────────────────────────────────
-// Synthesizer-internal: real firing happens in the agent-team runtime. This
-// passthrough exists so the node round-trips when a workflow runs in
-// "manual + trigger.team" mode (mirrors trigger.manual). Must stay side-effect
-// free — it must NOT kick off a team run.
-registerNodeExecutor({
-  kind: "trigger.team",
-  typeVersion: 1,
-  execute: async (ctx) => ({
+async function runTriggerPassthrough(ctx: StepExecutionContext) {
+  return {
     output: {
       firedAt: ctx.trigger.originAt,
       payload: ctx.trigger.payload,
     },
-  }),
-})
+  }
+}
+
+for (const kind of PASSTHROUGH_TRIGGER_KINDS) {
+  registerNodeExecutor({ kind, typeVersion: 1, execute: runTriggerPassthrough })
+}
 
 // ── flow.set ──────────────────────────────────────────────────────────────
 registerNodeExecutor({
@@ -243,17 +315,35 @@ registerNodeExecutor({
       case "flatten":
         return { output: arr.flat() }
       case "reduce":
-        // Phase 4 ships a sum-by-default reduce; Phase 6 wires a real
-        // reducer expression.
+        // Back-compat sum: delegates to the shared aggregator (numeric/sum over
+        // the item expression). For richer folds (collect / group-by / dedupe /
+        // merge / custom reducer) use the dedicated `data.aggregate` node.
         return {
-          output: arr.reduce((acc, item) => {
-            const v = evalItemExpression(expr, item, ctx)
-            return typeof v === "number" ? acc + v : acc
-          }, 0),
+          output: aggregateArray(
+            arr,
+            { operation: "numeric", numericOp: "sum", numericField: expr || undefined },
+            ctx
+          ),
         }
       default:
         throw new Error(`Unsupported transform operation: ${operation}`)
     }
+  },
+})
+
+// ── data.aggregate ─────────────────────────────────────────────────────────
+// Real reduce/aggregate (D6③): collect / concat / merge-objects / group-by /
+// dedupe / numeric (sum·avg·min·max·count) / custom (reducer expression with
+// $acc·$item·$index). Input is a single array upstream, a single scalar
+// (wrapped), or — on a fan-in — the set of all upstream outputs. The Dify
+// Variable Aggregator / n8n Aggregate+Merge analogue, but expression-driven.
+registerNodeExecutor({
+  kind: "data.aggregate",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as AggregateParams
+    const arr = resolveAggregateInput(ctx)
+    return { output: aggregateArray(arr, params, ctx) }
   },
 })
 
@@ -271,6 +361,8 @@ registerNodeExecutor({
       model?: string
       apiKey?: string
       baseURL?: string
+      apiFlavor?: import("@cognia/provider-types/provider").ApiFlavor
+      headers?: Record<string, string>
       systemPrompt?: string
       userPrompt?: string
       temperature?: number
@@ -279,6 +371,14 @@ registerNodeExecutor({
       responseFormat?: "text" | "json"
       /** Optional shape hint injected into the JSON-mode system prompt. */
       jsonSchema?: string
+      /**
+       * Optional JSON object schema the JSON-mode output must satisfy (D3).
+       * When set on a real (non-stub) call, the completion is validated and
+       * auto-fixed once; `schemaValid` / `schemaErrors` ride the output.
+       */
+      outputSchema?: Record<string, unknown>
+      /** `fail` (default) throws on violation; `soft` keeps the unvalidated value. */
+      onSchemaViolation?: "fail" | "soft"
     }
     const apiKey =
       params.apiKey ??
@@ -289,13 +389,19 @@ registerNodeExecutor({
       ))
     const userPrompt = params.userPrompt ?? ""
     const jsonMode = params.responseFormat === "json"
+    const outputSchema = params.outputSchema
+    const enforceSchema = jsonMode && !!outputSchema && Object.keys(outputSchema).length > 0
+    // When an output schema is declared it doubles as the JSON shape hint.
+    const schemaHint = enforceSchema ? JSON.stringify(outputSchema, null, 2) : params.jsonSchema
     // In JSON mode, append an instruction (and optional shape) so the model
     // returns parseable JSON regardless of the authored system prompt.
     const systemPrompt = jsonMode
-      ? [params.systemPrompt, buildJsonInstruction(params.jsonSchema)].filter(Boolean).join("\n\n")
+      ? [params.systemPrompt, buildJsonInstruction(schemaHint)].filter(Boolean).join("\n\n")
       : params.systemPrompt
 
     // Shared tail: attach `structured` / `parseError` when JSON mode is on.
+    // A declared schema is validated softly here (no retry, never throws) so
+    // the stub / pre-credential path still runs end-to-end.
     const finalize = (out: {
       provider?: string
       model?: string
@@ -305,11 +411,21 @@ registerNodeExecutor({
     }) => {
       if (!jsonMode) return { output: out }
       const parsed = parseStructured(out.completion)
+      const schemaFields =
+        enforceSchema && !parsed.error
+          ? (() => {
+              const v = validateAgainstJsonSchema(outputSchema, parsed.value)
+              return v.ok ? { schemaValid: true } : { schemaValid: false, schemaErrors: v.errors }
+            })()
+          : enforceSchema
+            ? { schemaValid: false }
+            : {}
       return {
         output: {
           ...out,
           structured: parsed.value,
           ...(parsed.error ? { parseError: parsed.error } : {}),
+          ...schemaFields,
         },
       }
     }
@@ -336,12 +452,14 @@ registerNodeExecutor({
       model: params.model,
       apiKey,
       baseURL: params.baseURL,
+      apiFlavor: params.apiFlavor,
+      headers: params.headers,
       defaultTemperature: params.temperature,
     })
     // Emit a `chat` span for the LLM call so eval (and observability) can
     // assemble the workflow run. The eval workflow target threads `ctx.traceId`;
     // ai.classify / ai.extract delegate to this executor, so they're covered too.
-    const { startSpan, endSpan } = await import("@/lib/agent-trace/emitter")
+    const { startSpan, endSpan } = await import("@cognia/agent-trace/emitter")
     const span = startSpan({
       operationName: "chat",
       providerName: "cognia.workflow",
@@ -350,23 +468,36 @@ registerNodeExecutor({
       ...(ctx.traceId ? { traceId: ctx.traceId } : {}),
       ...(params.model ? { requestModel: params.model } : {}),
     })
-    let completion: string
+    let completion = ""
+    let usage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 }
     try {
-      completion = await client.complete(userPrompt, {
-        system: systemPrompt,
-        temperature: params.temperature,
-      })
+      // One model call; `fix` carries the corrective re-prompt on the auto-fix
+      // retry (only reached when an output schema is enforced).
+      const runOnce = async (fix?: string) => {
+        const up = fix ? `${userPrompt}\n\n${fix}` : userPrompt
+        completion = await client.complete(up, {
+          system: systemPrompt,
+          temperature: params.temperature,
+        })
+        const parsed = parseStructured(completion)
+        return { object: parsed.value, parseError: parsed.error }
+      }
+      if (enforceSchema) {
+        await runStructuredTurn({
+          outputSchema,
+          onSchemaViolation: params.onSchemaViolation,
+          runOnce,
+        })
+      } else {
+        await runOnce()
+      }
+      usage = client.getUsageSnapshot?.() ?? usage
     } catch (err) {
       endSpan(span.spanId, {
         errorType: err instanceof Error ? err.name : "Error",
         errorMessage: err instanceof Error ? err.message : String(err),
       })
       throw err
-    }
-    const usage = client.getUsageSnapshot?.() ?? {
-      inputTokens: 0,
-      outputTokens: 0,
-      totalTokens: 0,
     }
     endSpan(span.spanId, {
       usage: {
@@ -386,6 +517,41 @@ registerNodeExecutor({
       stub: false,
     })
   },
+})
+
+// ── ai.prompt v2 ──────────────────────────────────────────────────────────
+// Adds routed mode (ADR-0043 provider-routing engine + fallback chains),
+// the PII gate, live output streaming, and per-step usage/cost reporting.
+// Explicit mode stays wire-compatible with v1 (including the echo stub).
+// Full logic lives in ./ai/ai-prompt-v2 so it's independently testable.
+registerNodeExecutor({
+  kind: "ai.prompt",
+  typeVersion: 2,
+  execute: async (ctx) => (await import("./ai/ai-prompt-v2")).executeAiPromptV2(ctx),
+})
+
+// ── ai.council ────────────────────────────────────────────────────────────
+// Multi-model consensus: fan the prompt out to several councillor models (by
+// routing alias) in parallel, then a synthesizer model merges them into one
+// answer with a confidence rating. Not retryable (it already runs N provider
+// calls; a blanket retry would multiply cost). Logic in ./ai/ai-council.
+registerNodeExecutor({
+  kind: "ai.council",
+  typeVersion: 1,
+  retryable: false,
+  execute: async (ctx) => (await import("./ai/ai-council")).executeAiCouncil(ctx),
+})
+
+// ── ai.ensemble ────────────────────────────────────────────────────────────
+// Run one target (inline agent.turn OR a sub-workflow) N times with optional
+// per-sample lenses, then apply a bundled aggregation policy (majority-vote /
+// threshold / best-of / synthesize). The signature N-vote / adversarial-verify
+// harness. Not retryable (it already runs N calls). Logic in ./ai/ai-ensemble.
+registerNodeExecutor({
+  kind: "ai.ensemble",
+  typeVersion: 1,
+  retryable: false,
+  execute: async (ctx) => (await import("./ai/ai-ensemble")).executeAiEnsemble(ctx),
 })
 
 // ── flow.switch ───────────────────────────────────────────────────────────
@@ -478,16 +644,24 @@ registerNodeExecutor({
   kind: "flow.join",
   typeVersion: 1,
   execute: async (ctx) => {
-    const params = ctx.params as { joinPolicy?: "all" | "any" | "race" }
+    const params = ctx.params as {
+      joinPolicy?: "all" | "any" | "race"
+      /** Optional gather→reduce in one step (D6③). Omit to just gather. */
+      aggregate?: AggregateParams
+    }
     const joinPolicy = params.joinPolicy ?? "all"
     const upstreamCount = Object.keys(ctx.upstream).length
-    return {
-      output: {
-        joinPolicy,
-        gathered: ctx.upstream,
-        upstreamCount,
-      },
+    const base = {
+      joinPolicy,
+      gathered: ctx.upstream,
+      upstreamCount,
     }
+    if (params.aggregate?.operation) {
+      // Reduce the gathered upstream outputs (the set of branch results).
+      const aggregated = aggregateArray(Object.values(ctx.upstream), params.aggregate, ctx)
+      return { output: { ...base, aggregated } }
+    }
+    return { output: base }
   },
 })
 
@@ -617,14 +791,55 @@ registerNodeExecutor({
 registerNodeExecutor({
   kind: "flow.wait",
   typeVersion: 1,
+  // Event waits may legitimately outlast the workflow's step timeout budget;
+  // the run-level wall-clock guard + the node's own `timeoutMs` bound them.
+  timeoutMs: 0,
   execute: async (ctx) => {
-    const params = ctx.params as { mode?: string; durationMs?: number }
+    const params = ctx.params as {
+      mode?: string
+      durationMs?: number
+      eventKey?: string
+      timeoutMs?: number
+    }
     const mode = params.mode ?? "duration"
     if (mode !== "duration") {
-      // Event-based wait wires up in Phase 5+ (Rust trigger daemon needs to
-      // surface external wake-ups via the IPC contract). Until then, this
-      // mode is a no-op so workflows authored against it still load.
-      return { output: { skipped: "event mode not yet implemented" } }
+      // Event mode: block on the in-process wake bus until an external source
+      // fires the key (approval registry pattern). The default key is run- and
+      // step-scoped so parallel runs never collide; a custom `eventKey` makes
+      // the wait addressable from outside (e.g. the `wf_emit_workflow_event`
+      // agent tool) without knowing the runId. The run-level abort signal and
+      // the optional `timeoutMs` both unblock; a timeout is NON-retryable —
+      // re-waiting would silently double the budget.
+      const key =
+        typeof params.eventKey === "string" && params.eventKey.trim()
+          ? params.eventKey.trim()
+          : `${ctx.runId}:${ctx.stepId}`
+      const timeoutMs = Math.max(0, Number(params.timeoutMs ?? 0))
+      const startedAt = Date.now()
+      ctx.log(
+        "info",
+        `flow.wait: waiting for event "${key}"` + (timeoutMs > 0 ? ` (timeout ${timeoutMs}ms)` : "")
+      )
+      const { subscribeWake } = await import("@/lib/workflow/runtime/wake-bus")
+      try {
+        const wake = await subscribeWake(key, {
+          ...(timeoutMs > 0 ? { timeoutMs } : {}),
+          signal: ctx.signal,
+        })
+        return {
+          output: {
+            event: key,
+            source: wake.source,
+            data: wake.data,
+            waitedMs: Date.now() - startedAt,
+          },
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        const wrapped = new Error(`flow.wait: ${message}`) as Error & { retryable?: boolean }
+        wrapped.retryable = false
+        throw wrapped
+      }
     }
     const ms = Math.max(0, Number(params.durationMs ?? 0))
     if (ms > 0) {
@@ -929,6 +1144,947 @@ registerNodeExecutor({
   },
 })
 
+// ── action.goal.* ──────────────────────────────────────────────────────────
+// Goal nodes are workflow adapters over GoalRuntime. Mutations must keep
+// using the runtime so abort controllers, audit rows, redaction, IM guardrails,
+// plugin hooks, and terminal fan-out stay identical to slash/UI goal actions.
+registerNodeExecutor({
+  kind: "action.goal.create",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as {
+      sessionId?: string
+      rawObjective?: string
+      characterId?: string
+      startPaused?: boolean
+      config?: Record<string, unknown>
+      configJson?: string
+    }
+    const sessionId = params.sessionId?.trim()
+    const rawObjective = params.rawObjective?.trim()
+    if (!sessionId) throw nonRetryable("action.goal.create requires 'sessionId'")
+    if (!rawObjective) throw nonRetryable("action.goal.create requires non-empty 'rawObjective'")
+    const config = parseGoalConfig(params)
+    const goal = await getGoalRuntime().createGoal({
+      sessionId,
+      rawObjective,
+      characterId: params.characterId?.trim() || undefined,
+      startPaused: params.startPaused,
+      config,
+      appSettings: useSettingsStore.getState().settings,
+      // Headless: no operator to hold turns for (ADR-0070 Phase 2).
+      origin: "workflow",
+    })
+    return { output: { goalId: goal.id, goal: toWorkflowGoal(goal) } }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.goal.get",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const goalId = requireGoalId(ctx, "action.goal.get")
+    const goal = await getGoal(goalId)
+    return { output: { goalId, goal: toWorkflowGoal(goal) } }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.goal.list",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as {
+      mode?: "all" | "session" | "activeForSession" | "openForSession"
+      sessionId?: string
+      limit?: number
+    }
+    const mode = params.mode ?? "all"
+    const limit = clampGoalLimit(params.limit)
+    let goals: Goal[]
+    if (mode === "session") {
+      const sessionId = requireGoalSessionId(params.sessionId, "action.goal.list")
+      goals = applyGoalLimit(await listGoalsBySession(sessionId), limit)
+    } else if (mode === "activeForSession") {
+      const sessionId = requireGoalSessionId(params.sessionId, "action.goal.list")
+      const goal = await getActiveGoalForSession(sessionId)
+      goals = goal ? [goal] : []
+    } else if (mode === "openForSession") {
+      const sessionId = requireGoalSessionId(params.sessionId, "action.goal.list")
+      const goal = await getOpenGoalForSession(sessionId)
+      goals = goal ? [goal] : []
+    } else {
+      goals = await listAllGoals(limit)
+    }
+    const safeGoals = goals.map(toWorkflowGoal)
+    return {
+      output: {
+        mode,
+        count: safeGoals.length,
+        goals: safeGoals,
+        goal: safeGoals[0] ?? null,
+      },
+    }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.goal.events",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as { limit?: number }
+    const goalId = requireGoalId(ctx, "action.goal.events")
+    const limit = clampGoalEventLimit(params.limit)
+    const events = await listGoalEvents(goalId, limit)
+    return { output: { goalId, count: events.length, events } }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.goal.updateObjective",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as { rawObjective?: string }
+    const goalId = requireGoalId(ctx, "action.goal.updateObjective")
+    const rawObjective = params.rawObjective?.trim()
+    if (!rawObjective) {
+      throw nonRetryable("action.goal.updateObjective requires non-empty 'rawObjective'")
+    }
+    const result = await getGoalRuntime().updateObjective(goalId, rawObjective)
+    return {
+      output: {
+        goalId,
+        changed: result !== null,
+        goal: toWorkflowGoal(result?.goal ?? (await getGoal(goalId))),
+        updatePrompt: result?.updatePrompt,
+      },
+    }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.goal.pause",
+  typeVersion: 1,
+  execute: async (ctx) =>
+    goalLifecycleOutput(ctx, "action.goal.pause", (id) => getGoalRuntime().pauseGoal(id)),
+})
+
+registerNodeExecutor({
+  kind: "action.goal.resume",
+  typeVersion: 1,
+  execute: async (ctx) =>
+    goalLifecycleOutput(ctx, "action.goal.resume", (id) => getGoalRuntime().resumeGoal(id)),
+})
+
+registerNodeExecutor({
+  kind: "action.goal.stop",
+  typeVersion: 1,
+  execute: async (ctx) =>
+    goalLifecycleOutput(ctx, "action.goal.stop", (id) => getGoalRuntime().stopGoal(id)),
+})
+
+registerNodeExecutor({
+  kind: "action.goal.preempt",
+  typeVersion: 1,
+  execute: async (ctx) =>
+    goalLifecycleOutput(ctx, "action.goal.preempt", (id) => getGoalRuntime().preemptGoal(id)),
+})
+
+registerNodeExecutor({
+  kind: "action.goal.updateConfig",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const goalId = requireGoalId(ctx, "action.goal.updateConfig")
+    const config = parseGoalConfig(
+      ctx.params as { config?: Record<string, unknown>; configJson?: string }
+    )
+    if (Object.keys(config).length === 0) {
+      throw nonRetryable("action.goal.updateConfig requires a non-empty config patch")
+    }
+    const goal = await getGoalRuntime().updateConfig(goalId, config)
+    return { output: { goalId, goal: toWorkflowGoal(goal) } }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.goal.decomposeSubgoals",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const goalId = requireGoalId(ctx, "action.goal.decomposeSubgoals")
+    const goal = await getGoal(goalId)
+    if (!goal) return { output: { goalId, goal: null } }
+    const session = await getSession(goal.sessionId)
+    const client = buildRendererLlmClient({
+      session,
+      appSettings: useSettingsStore.getState().settings,
+      featureId: "goal-subgoals",
+    })
+    if (!client) {
+      throw nonRetryable("action.goal.decomposeSubgoals requires a configured judge model")
+    }
+    const updated = await getGoalRuntime().generateSubgoals(goalId, client)
+    return { output: { goalId, goal: toWorkflowGoal(updated) } }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.goal.toggleSubgoal",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as { subgoalId?: string }
+    const goalId = requireGoalId(ctx, "action.goal.toggleSubgoal")
+    const subgoalId = params.subgoalId?.trim()
+    if (!subgoalId) throw nonRetryable("action.goal.toggleSubgoal requires 'subgoalId'")
+    const goal = await getGoalRuntime().toggleSubgoal(goalId, subgoalId)
+    return { output: { goalId, subgoalId, goal: toWorkflowGoal(goal) } }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.goal.clearSubgoals",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const goalId = requireGoalId(ctx, "action.goal.clearSubgoals")
+    const goal = await getGoalRuntime().clearSubgoals(goalId)
+    return { output: { goalId, goal: toWorkflowGoal(goal) } }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.goal.delete",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const goalId = requireGoalId(ctx, "action.goal.delete")
+    await getGoalRuntime().deleteGoal(goalId)
+    return { output: { goalId, deleted: true } }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.goal.analytics",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as {
+      scope?: "all" | "session"
+      sessionId?: string
+      limit?: number
+      windowDays?: number
+    }
+    const scope = params.scope ?? "all"
+    const limit = clampGoalLimit(params.limit)
+    const goals =
+      scope === "session"
+        ? applyGoalLimit(
+            await listGoalsBySession(
+              requireGoalSessionId(params.sessionId, "action.goal.analytics")
+            ),
+            limit
+          )
+        : await listAllGoals(limit)
+    const analytics = computeGoalAnalytics(goals, { windowDays: params.windowDays })
+    return { output: { scope, count: goals.length, analytics } }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.goal.template.list",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as {
+      includeBuiltIn?: boolean
+      favoriteOnly?: boolean
+      query?: string
+      limit?: number
+    }
+    await seedGoalTemplates()
+    const query = params.query?.trim().toLocaleLowerCase()
+    const limit = clampGoalTemplateLimit(params.limit)
+    let templates = await listGoalTemplates()
+    if (params.includeBuiltIn === false) templates = templates.filter((tpl) => !tpl.builtin)
+    if (params.favoriteOnly) templates = templates.filter((tpl) => tpl.isFavorite)
+    if (query) {
+      templates = templates.filter((tpl) =>
+        [tpl.id, tpl.title, tpl.objectiveText].some((value) =>
+          value.toLocaleLowerCase().includes(query)
+        )
+      )
+    }
+    const safeTemplates = templates.slice(0, limit).map(toWorkflowGoalTemplate)
+    return {
+      output: {
+        count: safeTemplates.length,
+        templates: safeTemplates,
+        template: safeTemplates[0] ?? null,
+      },
+    }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.goal.template.createGoal",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as { templateId?: string; sessionId?: string; characterId?: string }
+    const templateId = requireGoalTemplateId(ctx, "action.goal.template.createGoal")
+    const sessionId = requireGoalSessionId(params.sessionId, "action.goal.template.createGoal")
+    const goal = await createGoalFromTemplate({
+      templateId,
+      sessionId,
+      characterId: params.characterId?.trim() || undefined,
+      appSettings: useSettingsStore.getState().settings,
+    })
+    return { output: { templateId, goalId: goal.id, goal: toWorkflowGoal(goal) } }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.goal.template.upsert",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as {
+      templateId?: string
+      title?: string
+      objectiveText?: string
+      configJson?: string
+      configOverrides?: Record<string, unknown>
+      isFavorite?: boolean
+      sortOrder?: number
+    }
+    const title = params.title?.trim()
+    const objectiveText = params.objectiveText?.trim()
+    if (!title) throw nonRetryable("action.goal.template.upsert requires non-empty 'title'")
+    if (!objectiveText) {
+      throw nonRetryable("action.goal.template.upsert requires non-empty 'objectiveText'")
+    }
+    const requestedId = params.templateId?.trim()
+    const existing = requestedId ? await getGoalTemplate(requestedId) : undefined
+    const cloneBuiltIn = existing?.builtin === true
+    const now = Date.now()
+    const row: GoalTemplate = {
+      id: requestedId && !cloneBuiltIn ? requestedId : `gtpl_${crypto.randomUUID()}`,
+      title,
+      objectiveText,
+      configOverrides: parseGoalTemplateConfig(params),
+      builtin: false,
+      isFavorite: params.isFavorite ?? existing?.isFavorite ?? false,
+      sortOrder:
+        typeof params.sortOrder === "number" && Number.isFinite(params.sortOrder)
+          ? params.sortOrder
+          : (existing?.sortOrder ?? 0),
+      createdAt: existing && !cloneBuiltIn ? existing.createdAt : now,
+      updatedAt: now,
+    }
+    const saved = await upsertGoalTemplate(row)
+    return {
+      output: {
+        templateId: saved.id,
+        sourceTemplateId: cloneBuiltIn ? requestedId : undefined,
+        template: toWorkflowGoalTemplate(saved),
+      },
+    }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.goal.template.favorite",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as { isFavorite?: boolean }
+    const templateId = requireGoalTemplateId(ctx, "action.goal.template.favorite")
+    await setTemplateFavorite(templateId, Boolean(params.isFavorite))
+    const template = await getGoalTemplate(templateId)
+    return {
+      output: {
+        templateId,
+        changed: template !== undefined,
+        template: toWorkflowGoalTemplate(template),
+      },
+    }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.goal.template.delete",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const templateId = requireGoalTemplateId(ctx, "action.goal.template.delete")
+    const template = await getGoalTemplate(templateId)
+    if (template?.builtin) {
+      throw nonRetryable("cannot delete built-in goal template")
+    }
+    if (!template) return { output: { templateId, deleted: false } }
+    await deleteGoalTemplate(templateId)
+    return { output: { templateId, deleted: true } }
+  },
+})
+
+// ── action.plan.* ─────────────────────────────────────────────────────────
+registerNodeExecutor({
+  kind: "action.plan.create",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as {
+      sessionId?: string
+      characterId?: string
+      title?: string
+      description?: string
+      source?: PlanSource
+      executionMode?: PlanExecutionMode
+      stepsJson?: string
+      steps?: unknown
+      configJson?: string
+      config?: Record<string, unknown>
+      metadataJson?: string
+      metadata?: Record<string, unknown>
+    }
+    const sessionId = requirePlanSessionId(params.sessionId, "action.plan.create")
+    const title = params.title?.trim()
+    if (!title) throw nonRetryable("action.plan.create requires non-empty 'title'")
+    const input: CreatePlanInput = {
+      sessionId,
+      title,
+      source: normalizePlanSource(params.source),
+      steps: parsePlanCreateSteps(params),
+      ...(params.characterId?.trim() ? { characterId: params.characterId.trim() } : {}),
+      ...(params.description !== undefined ? { description: params.description } : {}),
+      ...(params.executionMode
+        ? { executionMode: normalizePlanExecutionMode(params.executionMode) }
+        : {}),
+      ...(parsePlanConfig(params) ? { config: parsePlanConfig(params) } : {}),
+      ...(parsePlanMetadata(params) ? { metadata: parsePlanMetadata(params) } : {}),
+    }
+    const plan = await getPlanRuntime().createPlan(input)
+    return { output: { planId: plan.id, plan: toWorkflowPlan(plan) } }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.plan.get",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const planId = requirePlanId(ctx, "action.plan.get")
+    const plan = await getPlanRuntime().getPlan(planId)
+    return { output: { planId, plan: toWorkflowPlan(plan) } }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.plan.list",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as {
+      mode?: "all" | "session" | "openForSession" | "executingForSession"
+      sessionId?: string
+      status?: PlanStatus | ""
+      projectId?: string
+      limit?: number
+    }
+    const mode = params.mode ?? "all"
+    const limit = clampPlanLimit(params.limit)
+    const runtime = getPlanRuntime()
+    let plans: AgentPlan[]
+    if (mode === "all") {
+      plans = await listAllPlans(limit, params.projectId?.trim() || undefined)
+    } else {
+      const sessionId = requirePlanSessionId(params.sessionId, "action.plan.list")
+      if (mode === "openForSession") {
+        const plan = await runtime.getOpenPlanForSession(sessionId)
+        plans = plan ? [plan] : []
+      } else if (mode === "executingForSession") {
+        const plan = await runtime.getExecutingPlanForSession(sessionId)
+        plans = plan ? [plan] : []
+      } else {
+        plans = await runtime.listPlansBySession(sessionId)
+      }
+    }
+    if (params.status) plans = plans.filter((plan) => plan.status === params.status)
+    const safePlans = plans.slice(0, limit).map(toWorkflowPlan)
+    return {
+      output: {
+        mode,
+        count: safePlans.length,
+        plans: safePlans,
+        plan: safePlans[0] ?? null,
+      },
+    }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.plan.events",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as { limit?: number }
+    const planId = requirePlanId(ctx, "action.plan.events")
+    const events = await listPlanEvents(planId, clampPlanEventLimit(params.limit))
+    return { output: { planId, count: events.length, events, event: events[0] ?? null } }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.plan.updateDraft",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as {
+      title?: string
+      description?: string
+      executionMode?: PlanExecutionMode | ""
+      stepsJson?: string
+      steps?: unknown
+      configJson?: string
+      config?: Record<string, unknown>
+      metadataJson?: string
+      metadata?: Record<string, unknown>
+    }
+    const planId = requirePlanId(ctx, "action.plan.updateDraft")
+    const patch = buildPlanDraftPatch(params)
+    if (Object.keys(patch).length === 0) {
+      throw nonRetryable("action.plan.updateDraft requires at least one patch field")
+    }
+    const plan = await getPlanRuntime().updatePlanDraft(planId, patch)
+    return { output: { planId, changed: plan !== null, plan: toWorkflowPlan(plan) } }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.plan.approve",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const planId = requirePlanId(ctx, "action.plan.approve")
+    const plan = await getPlanRuntime().approvePlan(planId)
+    return { output: { planId, changed: plan !== null, plan: toWorkflowPlan(plan) } }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.plan.reject",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as { feedback?: string }
+    const planId = requirePlanId(ctx, "action.plan.reject")
+    const plan = await getPlanRuntime().rejectPlan(planId, params.feedback)
+    return { output: { planId, changed: plan !== null, plan: toWorkflowPlan(plan) } }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.plan.refine",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as {
+      refinementType?: PlanRefinementType
+      trigger?: PlanRefinementTrigger
+      failedStepId?: string
+      customInstructions?: string
+    }
+    const planId = requirePlanId(ctx, "action.plan.refine")
+    const current = await getPlanRuntime().getPlan(planId)
+    if (!current) return { output: { planId, changed: false, plan: null } }
+    const session = await getSession(current.sessionId)
+    const client = buildRendererLlmClient({
+      session: session ?? null,
+      appSettings: useSettingsStore.getState().settings,
+      featureId: "plan-refine",
+    })
+    if (!client) {
+      throw nonRetryable("action.plan.refine requires a configured planner model")
+    }
+    const refined = await getPlanRuntime().refinePlan(
+      {
+        planId,
+        refinementType: normalizePlanRefinementType(params.refinementType),
+        trigger: normalizePlanRefinementTrigger(params.trigger),
+        ...(params.failedStepId?.trim() ? { failedStepId: params.failedStepId.trim() } : {}),
+        ...(params.customInstructions?.trim()
+          ? { customInstructions: params.customInstructions.trim() }
+          : {}),
+      },
+      client,
+      { signal: ctx.signal }
+    )
+    return {
+      output: {
+        planId,
+        changed: refined !== null && refined.generationId !== current.generationId,
+        plan: toWorkflowPlan(refined),
+      },
+    }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.plan.pause",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const planId = requirePlanId(ctx, "action.plan.pause")
+    const plan = await getPlanRuntime().pausePlan(planId)
+    return { output: { planId, changed: plan !== null, plan: toWorkflowPlan(plan) } }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.plan.resume",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const planId = requirePlanId(ctx, "action.plan.resume")
+    const plan = await getPlanRuntime().resumePlan(planId)
+    return { output: { planId, changed: plan !== null, plan: toWorkflowPlan(plan) } }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.plan.cancel",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const planId = requirePlanId(ctx, "action.plan.cancel")
+    const plan = await getPlanRuntime().cancelPlan(planId)
+    return { output: { planId, changed: plan !== null, plan: toWorkflowPlan(plan) } }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.plan.delete",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const planId = requirePlanId(ctx, "action.plan.delete")
+    const existing = await getPlanRuntime().getPlan(planId)
+    if (!existing) return { output: { planId, deleted: false } }
+    await getPlanRuntime().deletePlan(planId)
+    return { output: { planId, deleted: true } }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.plan.run",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const planId = requirePlanId(ctx, "action.plan.run")
+    const result = await getPlanRuntime().runPlan(planId, { signal: ctx.signal })
+    if (!result) throw nonRetryable(`action.plan.run: plan ${planId} not found`)
+    return { output: { planId, status: result.status, result: result.output } }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.plan.setStepStatus",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as {
+      stepId?: string
+      status?: PlanStepStatus
+      result?: string
+      error?: string
+      outputJson?: string
+      output?: unknown
+      attempts?: number
+    }
+    const planId = requirePlanId(ctx, "action.plan.setStepStatus")
+    const stepId = params.stepId?.trim()
+    if (!stepId) throw nonRetryable("action.plan.setStepStatus requires 'stepId'")
+    const status = normalizePlanStepStatus(params.status)
+    const patch = buildPlanStepPatch(params)
+    const plan = await getPlanRuntime().setStepStatus(planId, stepId, status, patch)
+    return {
+      output: { planId, stepId, status, changed: plan !== null, plan: toWorkflowPlan(plan) },
+    }
+  },
+})
+
+// ── action.scheduler.task.* ───────────────────────────────────────────────
+registerNodeExecutor({
+  kind: "action.scheduler.task.create",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const task = await getTaskScheduler().createTask(buildSchedulerCreateInput(ctx.params))
+    return { output: { taskId: task.id, task: toWorkflowScheduledTask(task) } }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.scheduler.task.get",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const taskId = requireSchedulerTaskId(ctx, "action.scheduler.task.get")
+    const task = await getTaskScheduler().getTask(taskId)
+    return { output: { taskId, task: toWorkflowScheduledTask(task) } }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.scheduler.task.list",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as {
+      statuses?: ScheduledTaskStatus[]
+      statusesRaw?: string
+      types?: ScheduledTaskType[]
+      typesRaw?: string
+      tags?: string[]
+      tagsRaw?: string
+      search?: string
+      limit?: number
+    }
+    const limit = clampSchedulerTaskLimit(params.limit)
+    const filter: TaskFilter = {
+      statuses: normalizeSchedulerStatuses(params.statuses, params.statusesRaw),
+      types: normalizeSchedulerTypes(params.types, params.typesRaw),
+      tags: normalizeStringList(params.tags, params.tagsRaw),
+      search: normalizeOptionalString(params.search),
+    }
+    const hasFilter = Boolean(
+      filter.statuses?.length || filter.types?.length || filter.tags?.length || filter.search
+    )
+    const tasks = hasFilter
+      ? await schedulerDb.getFilteredTasks(filter)
+      : await schedulerDb.getAllTasks()
+    const safeTasks = tasks.slice(0, limit)
+    return {
+      output: {
+        count: safeTasks.length,
+        tasks: safeTasks.map(toWorkflowScheduledTask),
+        task: toWorkflowScheduledTask(safeTasks[0]),
+      },
+    }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.scheduler.task.update",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const taskId = requireSchedulerTaskId(ctx, "action.scheduler.task.update")
+    const patch = buildSchedulerUpdateInput(ctx.params)
+    if (Object.keys(patch).length === 0) {
+      throw nonRetryable("action.scheduler.task.update requires at least one patch field")
+    }
+    const task = await getTaskScheduler().updateTask(taskId, patch)
+    return { output: { taskId, changed: task !== null, task: toWorkflowScheduledTask(task) } }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.scheduler.task.pause",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const taskId = requireSchedulerTaskId(ctx, "action.scheduler.task.pause")
+    const changed = await getTaskScheduler().pauseTask(taskId)
+    return { output: { taskId, changed } }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.scheduler.task.resume",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const taskId = requireSchedulerTaskId(ctx, "action.scheduler.task.resume")
+    const changed = await getTaskScheduler().resumeTask(taskId)
+    return { output: { taskId, changed } }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.scheduler.task.delete",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const taskId = requireSchedulerTaskId(ctx, "action.scheduler.task.delete")
+    const deleted = await getTaskScheduler().deleteTask(taskId)
+    return { output: { taskId, deleted } }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.scheduler.task.runNow",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const taskId = requireSchedulerTaskId(ctx, "action.scheduler.task.runNow")
+    const execution = await getTaskScheduler().runTaskNow(taskId, { triggerSource: "run-now" })
+    return {
+      output: {
+        taskId,
+        ran: execution !== null,
+        executionId: execution?.id ?? null,
+        execution: toWorkflowTaskExecution(execution),
+      },
+    }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.scheduler.task.executions",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as { limit?: number }
+    const taskId = requireSchedulerTaskId(ctx, "action.scheduler.task.executions")
+    const executions = await getTaskScheduler().getTaskExecutions(
+      taskId,
+      clampSchedulerExecutionLimit(params.limit)
+    )
+    const safeExecutions = executions.map(toWorkflowTaskExecution)
+    return {
+      output: {
+        taskId,
+        count: safeExecutions.length,
+        executions: safeExecutions,
+        execution: safeExecutions[0] ?? null,
+      },
+    }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.scheduler.task.backfill",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as { start?: string; end?: string }
+    const taskId = requireSchedulerTaskId(ctx, "action.scheduler.task.backfill")
+    const start = normalizeSchedulerDate(params.start, "scheduler backfill start")
+    const end = normalizeSchedulerDate(params.end, "scheduler backfill end")
+    if (!start) throw nonRetryable("action.scheduler.task.backfill requires 'start'")
+    if (!end) throw nonRetryable("action.scheduler.task.backfill requires 'end'")
+    const executions = await getTaskScheduler().backfillTask(taskId, { start, end })
+    const safeExecutions = executions.map(toWorkflowTaskExecution)
+    return {
+      output: {
+        taskId,
+        count: safeExecutions.length,
+        executions: safeExecutions,
+        execution: safeExecutions[0] ?? null,
+      },
+    }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.scheduler.task.export",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as { taskIds?: string[]; taskIdsRaw?: string }
+    const taskIds = normalizeStringList(params.taskIds, params.taskIdsRaw)
+    const data = await getTaskScheduler().exportTasks(taskIds)
+    const tasks = data.tasks.map(toWorkflowScheduledTask)
+    return {
+      output: {
+        version: data.version,
+        exportedAt: data.exportedAt,
+        count: tasks.length,
+        data,
+        tasks,
+        task: tasks[0] ?? null,
+      },
+    }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.scheduler.task.import",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as {
+      data?: unknown
+      dataJson?: string
+      mode?: "merge" | "replace"
+    }
+    const data = parseSchedulerImportData(params.data, params.dataJson)
+    const mode = params.mode === "replace" ? "replace" : "merge"
+    const result = await getTaskScheduler().importTasks(data, mode)
+    return { output: result }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.scheduler.status",
+  typeVersion: 1,
+  execute: async () => ({ output: getTaskScheduler().getStatus() }),
+})
+
+registerNodeExecutor({
+  kind: "action.scheduler.statistics",
+  typeVersion: 1,
+  execute: async () => ({ output: await schedulerDb.getStatistics() }),
+})
+
+registerNodeExecutor({
+  kind: "action.scheduler.upcoming",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as { limit?: number }
+    const tasks = await schedulerDb.getUpcomingTasks(clampSchedulerTaskLimit(params.limit))
+    const safeTasks = tasks.map(toWorkflowScheduledTask)
+    return {
+      output: {
+        count: safeTasks.length,
+        tasks: safeTasks,
+        task: safeTasks[0] ?? null,
+      },
+    }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.scheduler.executions.recent",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as { limit?: number }
+    const executions = await schedulerDb.getRecentExecutions(
+      clampSchedulerExecutionLimit(params.limit)
+    )
+    const safeExecutions = executions.map(toWorkflowTaskExecution)
+    return {
+      output: {
+        count: safeExecutions.length,
+        executions: safeExecutions,
+        execution: safeExecutions[0] ?? null,
+      },
+    }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.scheduler.execution.get",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const executionId = requireSchedulerExecutionId(ctx, "action.scheduler.execution.get")
+    const execution = await schedulerDb.getExecution(executionId)
+    return {
+      output: {
+        executionId,
+        execution: toWorkflowTaskExecution(execution),
+      },
+    }
+  },
+})
+
+registerNodeExecutor({
+  kind: "action.scheduler.event.trigger",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as {
+      eventType?: string
+      eventSource?: string
+      payload?: Record<string, unknown>
+      payloadJson?: string
+    }
+    const eventType = readRequiredSchedulerString(
+      params.eventType,
+      "scheduler event trigger eventType"
+    )
+    const eventSource = normalizeOptionalString(params.eventSource)
+    const payload = parseSchedulerObjectParam(
+      params.payload,
+      params.payloadJson,
+      "scheduler event payloadJson"
+    )
+    await getTaskScheduler().triggerEventTask(eventType, eventSource, payload)
+    return {
+      output: {
+        eventType,
+        eventSource,
+        triggered: true,
+        payload: payload ?? {},
+      },
+    }
+  },
+})
+
 // ── action.skill.upsert ───────────────────────────────────────────────────
 // "upsert" — create when no `skillId`, update otherwise. Allows workflows to
 // idempotently keep a skill in sync without branching on existence.
@@ -984,25 +2140,96 @@ registerNodeExecutor({
       adapterId?: string
       conversationKey?: string
       content?: string
+      cardJson?: string
       idempotencyKey?: string
       replyToMessageId?: string
+      threadId?: string
+      editTargetMessageId?: string
+      waitForDelivery?: boolean
+      waitTimeoutMs?: number
     }
     const adapterId = params.adapterId?.trim()
-    const conversationKey = params.conversationKey?.trim()
+    const rawConversationKey = params.conversationKey?.trim()
     const content = params.content ?? ""
     if (!adapterId) throw nonRetryable("action.connector.send requires 'adapterId'")
-    if (!conversationKey) throw nonRetryable("action.connector.send requires 'conversationKey'")
+    if (!rawConversationKey) throw nonRetryable("action.connector.send requires 'conversationKey'")
     if (!content) throw nonRetryable("action.connector.send requires non-empty 'content'")
     const idempotencyKey = params.idempotencyKey?.trim() || `${ctx.runId}:${ctx.stepId}`
+    // Derive a real conversation ref from the composite key so adapters
+    // (which read `channelId` / `threadTs` off the ref, not the key) can
+    // resolve the platform recipient. An explicit `threadId` param targets
+    // a thread inside the conversation and extends the FIFO lane key.
+    const { parseConversationKey, buildConversationKey } = await import("@/types/connectors/event")
+    let parsedKey: ReturnType<typeof parseConversationKey>
+    try {
+      parsedKey = parseConversationKey(rawConversationKey)
+    } catch (err) {
+      throw nonRetryable(
+        `action.connector.send: malformed conversationKey '${rawConversationKey}' — ` +
+          (err instanceof Error ? err.message : String(err))
+      )
+    }
+    const threadId = params.threadId?.trim() || parsedKey.threadId
+    const conversationKey = threadId
+      ? buildConversationKey(
+          parsedKey.platform,
+          parsedKey.adapterId,
+          parsedKey.remoteChatId,
+          threadId
+        )
+      : rawConversationKey
+    const editTargetMessageId = params.editTargetMessageId?.trim()
+    // Optional A2UI interactive card: `cardJson` carries the surface
+    // (`{components, dataModel, rootId, …}`); `content` doubles as the
+    // plain-text mirror so capability-fallback platforms still get text.
+    type Segments = Parameters<typeof enqueueOutbound>[0]["request"]["segments"]
+    let segments: Segments = [{ type: "text", text: content }]
+    const rawCardJson = params.cardJson?.trim()
+    if (rawCardJson) {
+      let surface: { components?: unknown; rootId?: unknown }
+      try {
+        surface = JSON.parse(rawCardJson) as { components?: unknown; rootId?: unknown }
+      } catch (err) {
+        throw nonRetryable(
+          `action.connector.send: cardJson is not valid JSON — ${err instanceof Error ? err.message : String(err)}`
+        )
+      }
+      if (
+        typeof surface !== "object" ||
+        surface === null ||
+        typeof surface.components !== "object" ||
+        surface.components === null ||
+        typeof surface.rootId !== "string"
+      ) {
+        throw nonRetryable(
+          "action.connector.send: cardJson must be an A2UI surface object with 'components' and 'rootId'"
+        )
+      }
+      segments = [
+        {
+          type: "a2ui",
+          surfaceId: `wf:${ctx.runId}:${ctx.stepId}`,
+          content: surface,
+          plainTextMirror: content,
+        },
+      ] as unknown as Segments
+    }
     const job = await enqueueOutbound({
       adapterId,
       conversationKey,
       request: {
-        conversationRef: { adapterId, conversationKey } as unknown as Parameters<
-          typeof enqueueOutbound
-        >[0]["request"]["conversationRef"],
-        segments: [{ type: "text", text: content }],
+        conversationRef: {
+          platform: parsedKey.platform,
+          adapterId,
+          channelId: parsedKey.remoteChatId,
+          ...(threadId ? { threadTs: threadId } : {}),
+        } as Parameters<typeof enqueueOutbound>[0]["request"]["conversationRef"],
+        segments,
         replyTo: params.replyToMessageId ? { messageId: params.replyToMessageId } : undefined,
+        // Edit-in-place: the outbound runner routes jobs carrying an
+        // editTargetMessageId to `adapter.edit()` (falling back to send()
+        // with an `edit_unsupported` audit on platforms without edit).
+        ...(editTargetMessageId ? { editTargetMessageId } : {}),
         metadata: { idempotencyKey },
       },
       // Provenance per ADR-0009 v41 — the inbox UI uses this to render a
@@ -1016,14 +2243,32 @@ registerNodeExecutor({
         nodeId: ctx.stepId,
       },
     })
-    return {
-      output: {
-        jobId: job.id,
-        adapterId,
-        conversationKey,
-        idempotencyKey,
-      },
+    const baseOutput = {
+      jobId: job.id,
+      adapterId,
+      conversationKey,
+      idempotencyKey,
     }
+    // Delivery feedback: optionally block until the job settles (or the
+    // wait budget elapses) so downstream nodes can branch on the outcome.
+    // `delivered` is the crisp boolean; `status` carries the raw job state
+    // ("pending"/"sending"/"failed" when the budget ran out first).
+    if (params.waitForDelivery === true) {
+      const timeoutMs = Math.min(Math.max(params.waitTimeoutMs ?? 30_000, 100), 300_000)
+      const { waitForOutboundTerminal } = await import("@/lib/db/outbound-jobs")
+      const settled = (await waitForOutboundTerminal(job.id, timeoutMs)) ?? job
+      return {
+        output: {
+          ...baseOutput,
+          delivered: settled.status === "sent",
+          status: settled.status,
+          ...(settled.platformMessageId ? { platformMessageId: settled.platformMessageId } : {}),
+          ...(settled.lastErrorCode ? { errorCode: settled.lastErrorCode } : {}),
+          ...(settled.lastError ? { errorMessage: settled.lastError } : {}),
+        },
+      }
+    }
+    return { output: baseOutput }
   },
 })
 
@@ -1060,6 +2305,298 @@ registerNodeExecutor({
   },
 })
 
+// ── action.connector.reaction ─────────────────────────────────────────────
+// Add OR remove an emoji reaction on an existing platform message via the
+// live adapter (bus.addReactionOutbound / removeReactionOutbound). Immediate
+// op — no outbound queue. The add path surfaces the platform `reactionId` on
+// the output so a later remove node can target exactly this reaction.
+registerNodeExecutor({
+  kind: "action.connector.reaction",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as {
+      adapterId?: string
+      messageId?: string
+      emoji?: string
+      op?: "add" | "remove"
+      reactionId?: string
+    }
+    const adapterId = params.adapterId?.trim()
+    const messageId = params.messageId?.trim()
+    const op = params.op ?? "add"
+    if (!adapterId) throw nonRetryable("action.connector.reaction requires 'adapterId'")
+    if (!messageId) throw nonRetryable("action.connector.reaction requires 'messageId'")
+    const { getBus } = await import("@/lib/connectors/bus")
+    if (op === "remove") {
+      const reactionId = params.reactionId?.trim()
+      if (!reactionId)
+        throw nonRetryable("action.connector.reaction op='remove' requires 'reactionId'")
+      const result = await getBus().removeReactionOutbound(adapterId, messageId, reactionId)
+      if (!result.ok) {
+        const err = result.error
+        if (err && (err.code === "adapter_not_found" || err.code === "unsupported")) {
+          throw nonRetryable(`action.connector.reaction: ${err.code} — ${err.message}`)
+        }
+        throw new Error(err?.message ?? "reaction removal failed")
+      }
+      return { output: { adapterId, messageId, op, reactionId, reacted: false } }
+    }
+    const emoji = params.emoji?.trim()
+    if (!emoji) throw nonRetryable("action.connector.reaction requires 'emoji'")
+    const result = await getBus().addReactionOutbound(adapterId, messageId, emoji)
+    if (!result.ok) {
+      const err = result.error
+      // Unsupported platform / unknown adapter are configuration errors —
+      // retrying can't fix them. Transient platform errors stay retryable.
+      if (err && (err.code === "adapter_not_found" || err.code === "unsupported")) {
+        throw nonRetryable(`action.connector.reaction: ${err.code} — ${err.message}`)
+      }
+      throw new Error(err?.message ?? "reaction failed")
+    }
+    return {
+      output: {
+        adapterId,
+        messageId,
+        op,
+        emoji,
+        reacted: true,
+        ...(result.reactionId ? { reactionId: result.reactionId } : {}),
+      },
+    }
+  },
+})
+
+// ── action.connector.delete ───────────────────────────────────────────────
+// Recall / delete an already-sent platform message via the live adapter
+// (bus.deleteOutbound). Immediate op — no outbound queue.
+registerNodeExecutor({
+  kind: "action.connector.delete",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as { adapterId?: string; messageId?: string }
+    const adapterId = params.adapterId?.trim()
+    const messageId = params.messageId?.trim()
+    if (!adapterId) throw nonRetryable("action.connector.delete requires 'adapterId'")
+    if (!messageId) throw nonRetryable("action.connector.delete requires 'messageId'")
+    const { getBus } = await import("@/lib/connectors/bus")
+    const result = await getBus().deleteOutbound(adapterId, messageId)
+    if (!result.ok) {
+      const err = result.error
+      if (err && (err.code === "adapter_not_found" || err.code === "unsupported")) {
+        throw nonRetryable(`action.connector.delete: ${err.code} — ${err.message}`)
+      }
+      throw new Error(err?.message ?? "delete failed")
+    }
+    return { output: { adapterId, messageId, deleted: true } }
+  },
+})
+
+// ── action.connector.forward ──────────────────────────────────────────────
+// Forward a single message, or merge-forward several as one combined card,
+// to another conversation via the live adapter (bus.forwardOutbound).
+// Immediate op — no outbound queue.
+registerNodeExecutor({
+  kind: "action.connector.forward",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as {
+      adapterId?: string
+      messageId?: string
+      messageIds?: string[]
+      targetConversationKey?: string
+    }
+    const adapterId = params.adapterId?.trim()
+    const target = params.targetConversationKey?.trim()
+    const messageId = params.messageId?.trim()
+    const messageIds = (params.messageIds ?? []).map((s) => s.trim()).filter(Boolean)
+    if (!adapterId) throw nonRetryable("action.connector.forward requires 'adapterId'")
+    if (!target) throw nonRetryable("action.connector.forward requires 'targetConversationKey'")
+    if (!messageId && messageIds.length === 0) {
+      throw nonRetryable("action.connector.forward requires 'messageId' or 'messageIds'")
+    }
+    const { getBus } = await import("@/lib/connectors/bus")
+    const result = await getBus().forwardOutbound(adapterId, {
+      ...(messageId ? { messageId } : {}),
+      ...(messageIds.length > 0 ? { messageIds } : {}),
+      target,
+    })
+    if (!result.ok) {
+      const err = result.error
+      if (err && (err.code === "adapter_not_found" || err.code === "unsupported")) {
+        throw nonRetryable(`action.connector.forward: ${err.code} — ${err.message}`)
+      }
+      throw new Error(err?.message ?? "forward failed")
+    }
+    return {
+      output: {
+        adapterId,
+        target,
+        forwarded: true,
+        ...(result.platformMessageId ? { platformMessageId: result.platformMessageId } : {}),
+      },
+    }
+  },
+})
+
+// ── action.connector.waitReply ────────────────────────────────────────────
+// Workflow-side feedback loop: block the run until a matching inbound
+// message arrives in the conversation (bus.subscribeInbound), or the wait
+// budget elapses. Timeout is NOT an error — the node resolves with
+// `replied: false` so downstream branches can route on it. Not retryable:
+// a retry would silently double the wait.
+registerNodeExecutor({
+  kind: "action.connector.waitReply",
+  typeVersion: 1,
+  retryable: false,
+  execute: async (ctx) => {
+    const params = ctx.params as {
+      conversationKey?: string
+      senderIds?: string[]
+      keywords?: string[]
+      requireMention?: boolean
+      timeoutMs?: number
+    }
+    const conversationKey = params.conversationKey?.trim()
+    if (!conversationKey)
+      throw nonRetryable("action.connector.waitReply requires 'conversationKey'")
+    const timeoutMs = Math.min(Math.max(params.timeoutMs ?? 120_000, 1_000), 3_600_000)
+    const senderIds = (params.senderIds ?? []).map((s) => s.trim()).filter(Boolean)
+    const keywords = (params.keywords ?? []).map((k) => k.trim().toLowerCase()).filter(Boolean)
+    const { getBus } = await import("@/lib/connectors/bus")
+
+    const reply = await new Promise<
+      import("@/types/connectors/event").NormalizedInboundEvent | null
+    >((resolve) => {
+      let settled = false
+      const settle = (
+        value: import("@/types/connectors/event").NormalizedInboundEvent | null
+      ): void => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        dispose()
+        resolve(value)
+      }
+      const timer = setTimeout(() => settle(null), timeoutMs)
+      const dispose = getBus().subscribeInbound((event) => {
+        // Fresh messages only — edits/deletes/system events don't count as
+        // a reply. `kind` is undefined on plain creates.
+        if (event.kind !== undefined && event.kind !== "create") return
+        // Match the conversation, tolerating a thread suffix on either side.
+        if (
+          event.conversationKey !== conversationKey &&
+          !event.conversationKey.startsWith(`${conversationKey}:`)
+        ) {
+          return
+        }
+        if (
+          senderIds.length > 0 &&
+          !senderIds.includes(event.sender.remoteUserId) &&
+          !senderIds.includes(event.sender.id)
+        ) {
+          return
+        }
+        if (params.requireMention === true && event.mentions?.selfMentioned !== true) return
+        if (keywords.length > 0) {
+          const text = (event.plainText ?? "").toLowerCase()
+          if (!keywords.some((k) => text.includes(k))) return
+        }
+        settle(event)
+      })
+    })
+
+    if (reply === null) {
+      return { output: { replied: false, timedOut: true, conversationKey } }
+    }
+    return {
+      output: {
+        replied: true,
+        timedOut: false,
+        conversationKey: reply.conversationKey,
+        messageId: reply.messageId,
+        senderId: reply.sender.remoteUserId,
+        text: reply.plainText ?? "",
+      },
+    }
+  },
+})
+
+// ── action.agent.turn ─────────────────────────────────────────────────────
+// Full tool-enabled agent turn (sidecar on desktop, honest text-only
+// degradation on web). Logic in ./actions/agent-turn for testability.
+// Not retryable — an agent turn can have side effects (tool calls).
+registerNodeExecutor({
+  kind: "action.agent.turn",
+  typeVersion: 1,
+  retryable: false,
+  execute: async (ctx) => (await import("./actions/agent-turn")).runAgentTurn(ctx),
+})
+
+// ── action.approval.request ───────────────────────────────────────────────
+// Human-in-the-loop gate (ADR 0061 P2): blocks on the wake bus until a
+// desktop notification action or a paired device resolves it, then routes
+// via `approved` / `rejected` decision handles. Logic in ./actions/approval.
+// Not retryable — a retry would re-ask an already-answered question.
+registerNodeExecutor({
+  kind: "action.approval.request",
+  typeVersion: 1,
+  retryable: false,
+  execute: async (ctx) => (await import("./actions/approval")).runApprovalRequest(ctx),
+})
+
+// ── action.mobile.* (ADR 0061 P3) ─────────────────────────────────────────
+// Hub-side proxies: pick a capable paired device and dispatch through the
+// remote-step broker. Not retryable — most open interactive native UI on
+// the phone; a retry would re-prompt the human.
+registerNodeExecutor({
+  kind: "action.mobile.camera",
+  typeVersion: 1,
+  retryable: false,
+  execute: async (ctx) => (await import("./actions/mobile")).runMobileCamera(ctx),
+})
+registerNodeExecutor({
+  kind: "action.mobile.scanBarcode",
+  typeVersion: 1,
+  retryable: false,
+  execute: async (ctx) => (await import("./actions/mobile")).runMobileScanBarcode(ctx),
+})
+registerNodeExecutor({
+  kind: "action.mobile.location",
+  typeVersion: 1,
+  retryable: false,
+  execute: async (ctx) => (await import("./actions/mobile")).runMobileLocation(ctx),
+})
+registerNodeExecutor({
+  kind: "action.mobile.share",
+  typeVersion: 1,
+  retryable: false,
+  execute: async (ctx) => (await import("./actions/mobile")).runMobileShare(ctx),
+})
+registerNodeExecutor({
+  kind: "action.mobile.notify",
+  typeVersion: 1,
+  retryable: false,
+  execute: async (ctx) => (await import("./actions/mobile")).runMobileNotify(ctx),
+})
+
+// ── action.memory.recall / action.memory.store ───────────────────────────
+// Long-term memory access (lib/memory). Recall is read-only and best-effort
+// (degrades, never throws on a missing backend); store mirrors /remember's
+// explicit-capture path through the shared consolidator with a mandatory
+// PII gate. Store is not retryable (it writes).
+registerNodeExecutor({
+  kind: "action.memory.recall",
+  typeVersion: 1,
+  retryable: true,
+  execute: async (ctx) => (await import("./actions/memory-recall")).runMemoryRecall(ctx),
+})
+registerNodeExecutor({
+  kind: "action.memory.store",
+  typeVersion: 1,
+  retryable: false,
+  execute: async (ctx) => (await import("./actions/memory-store")).runMemoryStore(ctx),
+})
+
 // ── ai.classify ───────────────────────────────────────────────────────────
 // Reuses the `ai.prompt` executor under the hood with a constrained system
 // prompt. The output is normalized to the matched label so downstream
@@ -1073,9 +2610,14 @@ registerNodeExecutor({
       model?: string
       apiKey?: string
       baseURL?: string
+      apiFlavor?: import("@cognia/provider-types/provider").ApiFlavor
+      headers?: Record<string, string>
       input?: string
       labels?: string[]
       hint?: string
+      mode?: "explicit" | "routed"
+      modelAlias?: string
+      piiGate?: "off" | "block" | "redact"
     }
     const labels = (params.labels ?? []).map((l) => l.trim()).filter(Boolean)
     if (labels.length === 0) {
@@ -1088,8 +2630,10 @@ registerNodeExecutor({
       `You are a strict text classifier. ` +
       `Return EXACTLY ONE of the following labels with no extra text:\n${labelList}` +
       (params.hint ? `\n\nGuidance: ${params.hint}` : "")
-    // Delegate to ai.prompt — same provider routing + stub fallback.
-    const aiPrompt = (await import("./registry")).getExecutor("ai.prompt", 1)
+    // Delegate to ai.prompt v2 — explicit mode is wire-compatible with v1
+    // (same provider handling + stub fallback) and inherits routed mode +
+    // the PII gate when those params are set on the classify node.
+    const aiPrompt = (await import("./registry")).getExecutor("ai.prompt", 2)
     if (!aiPrompt) throw new Error("ai.classify: ai.prompt executor unavailable")
     const inner = await aiPrompt.execute({
       ...ctx,
@@ -1098,9 +2642,14 @@ registerNodeExecutor({
         model: params.model,
         apiKey: params.apiKey,
         baseURL: params.baseURL,
+        apiFlavor: params.apiFlavor,
+        headers: params.headers,
         systemPrompt,
         userPrompt: input,
         temperature: 0,
+        mode: params.mode,
+        modelAlias: params.modelAlias,
+        piiGate: params.piiGate,
       } as Record<string, unknown>,
     })
     const completion = String(
@@ -1138,11 +2687,16 @@ registerNodeExecutor({
       model?: string
       apiKey?: string
       baseURL?: string
+      apiFlavor?: import("@cognia/provider-types/provider").ApiFlavor
+      headers?: Record<string, string>
       input?: string
       schema?: Record<string, string>
       /** Field names that must be present + non-null for `valid` to be true. */
       required?: string[]
       hint?: string
+      mode?: "explicit" | "routed"
+      modelAlias?: string
+      piiGate?: "off" | "block" | "redact"
     }
     const input = params.input ?? ""
     if (!input) throw nonRetryable("ai.extract requires non-empty 'input'")
@@ -1154,7 +2708,26 @@ registerNodeExecutor({
       `Extract data from the user message. Reply with ONLY a JSON object ` +
       `matching this shape:\n{\n${fieldList}\n}` +
       (params.hint ? `\n\nGuidance: ${params.hint}` : "")
-    const aiPrompt = (await import("./registry")).getExecutor("ai.prompt", 1)
+    // Lift the REQUIRED field names into a presence-only JSON object schema so
+    // the inner v2 turn validates the completion and auto-fixes ONCE when a
+    // required field is missing (D3). Deliberately presence-only: this node
+    // coerces type hints AFTER parsing (`coerceToType`), so a model returning
+    // `"42"` for a number hint is fine — a type-strict schema would burn the
+    // retry on completions the coercion already handles. `soft` mode on
+    // purpose: this node's own `valid` / `missing` output is the caller-facing
+    // contract, so a persistent violation degrades to the legacy best-effort
+    // parse instead of failing the step.
+    const required = Array.isArray(params.required) ? params.required : []
+    const innerOutputSchema =
+      required.length > 0
+        ? {
+            type: "object",
+            properties: Object.fromEntries(Object.keys(schema).map((k) => [k, {}])),
+            required,
+          }
+        : undefined
+    // Delegate to ai.prompt v2 (see ai.classify above for the rationale).
+    const aiPrompt = (await import("./registry")).getExecutor("ai.prompt", 2)
     if (!aiPrompt) throw new Error("ai.extract: ai.prompt executor unavailable")
     const inner = await aiPrompt.execute({
       ...ctx,
@@ -1163,9 +2736,21 @@ registerNodeExecutor({
         model: params.model,
         apiKey: params.apiKey,
         baseURL: params.baseURL,
+        apiFlavor: params.apiFlavor,
+        headers: params.headers,
         systemPrompt,
         userPrompt: input,
         temperature: 0,
+        mode: params.mode,
+        modelAlias: params.modelAlias,
+        piiGate: params.piiGate,
+        ...(innerOutputSchema
+          ? {
+              responseFormat: "json",
+              outputSchema: innerOutputSchema,
+              onSchemaViolation: "soft",
+            }
+          : {}),
       } as Record<string, unknown>,
     })
     const completion = String(
@@ -1187,7 +2772,6 @@ registerNodeExecutor({
       extracted = obj
     }
 
-    const required = Array.isArray(params.required) ? params.required : []
     const present =
       extracted && typeof extracted === "object" && !Array.isArray(extracted)
         ? (extracted as Record<string, unknown>)
@@ -1245,7 +2829,7 @@ registerNodeExecutor({
     // authored before credentials still run end-to-end.
     if (params.provider && params.model) {
       try {
-        const { generateEmbedding } = await import("@/lib/vector/embedding")
+        const { generateEmbedding } = await import("@cognia/vector/embedding")
         const result = await generateEmbedding(
           text,
           {
@@ -1283,6 +2867,21 @@ registerNodeExecutor({
         kind: "deterministic-hash",
       },
     }
+  },
+})
+
+// ── flow.catch ─────────────────────────────────────────────────────────────
+// Terminal-failure recovery entrypoint (run-fallback safety net). Executes
+// only when the failure handler spawns a catch sub-run; the error envelope
+// rides in on the trigger's `$catch` payload. Pure passthrough: surfaces the
+// error as its output so downstream nodes can read `{{ $node['id'].error }}`
+// and drive a notify / cleanup path.
+registerNodeExecutor({
+  kind: "flow.catch",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const caught = (ctx.trigger.payload as { $catch?: unknown } | undefined)?.$catch ?? null
+    return { output: { caught: caught !== null, error: caught } }
   },
 })
 
@@ -1327,6 +2926,17 @@ registerNodeExecutor({
     if (!workflow) {
       throw nonRetryable(`flow.subworkflow: workflow ${workflowId} not found`)
     }
+    // Typed-interface validation (D5): when the target declares an input
+    // schema, the call payload must satisfy it BEFORE the run starts.
+    const inputSchema = workflow.interface?.inputSchema
+    if (inputSchema && Object.keys(inputSchema).length > 0) {
+      const v = validateAgainstJsonSchema(inputSchema, params.input ?? null)
+      if (!v.ok) {
+        throw nonRetryable(
+          `flow.subworkflow: input violates the target's schema — ${v.errors.join("; ")}`
+        )
+      }
+    }
     const result = await runWorkflow({
       workflow,
       trigger: {
@@ -1346,6 +2956,16 @@ registerNodeExecutor({
       const message = result.error?.message ?? "subworkflow run failed"
       throw nonRetryable(`flow.subworkflow: ${message}`)
     }
+    // Validate the terminal output against the declared output schema.
+    const outputSchema = workflow.interface?.outputSchema
+    if (outputSchema && Object.keys(outputSchema).length > 0) {
+      const v = validateAgainstJsonSchema(outputSchema, result.output)
+      if (!v.ok) {
+        throw nonRetryable(
+          `flow.subworkflow: output violates the target's schema — ${v.errors.join("; ")}`
+        )
+      }
+    }
     return {
       output: {
         runId: result.runId,
@@ -1357,10 +2977,13 @@ registerNodeExecutor({
 })
 
 // ── io.webhook.respond ────────────────────────────────────────────────────
-// Phase 5a's webhook receiver isn't shipped yet, so this executor is a
-// passthrough that records what the response WOULD have been. Once the Rust
-// webhook router lands (Phase 5b webhook trigger work), this executor will
-// route the body back through a Tauri command.
+// Delivers a dynamic HTTP response back to a held-open webhook request. When
+// the run started from a `trigger.webhook` whose workflow contains this node,
+// the Rust receiver holds the inbound request open and surfaces a
+// `correlationId` in the trigger payload; we route the body back through the
+// `workflow_webhook_respond` command. Without a correlation id (manual run, or
+// web mode where there's no receiver) it degrades to a passthrough that
+// records what the response WOULD have been.
 registerNodeExecutor({
   kind: "io.webhook.respond",
   typeVersion: 1,
@@ -1370,17 +2993,69 @@ registerNodeExecutor({
       body?: unknown
       headers?: Record<string, string>
     }
+    const status = typeof params.status === "number" ? params.status : 200
+    const body = params.body ?? null
+    const headers = params.headers ?? {}
+
+    const correlationId = (ctx.trigger.payload as { correlationId?: unknown } | undefined)
+      ?.correlationId
+    if (typeof correlationId === "string" && correlationId.length > 0) {
+      // Serialize non-string bodies to JSON so the HTTP response carries a
+      // real payload (the Rust side delivers the string verbatim).
+      const wireBody = typeof body === "string" ? body : JSON.stringify(body ?? null)
+      const delivered = await respondToWebhook(correlationId, { status, body: wireBody, headers })
+      return { output: { status, body, headers, delivered } }
+    }
+
     return {
       output: {
-        status: typeof params.status === "number" ? params.status : 200,
-        body: params.body ?? null,
-        headers: params.headers ?? {},
-        // Surface that the response was queued but not delivered (no
-        // webhook receiver to respond to). Removed once Phase 5a webhook
-        // routing lands.
+        status,
+        body,
+        headers,
+        // No held-open request to answer (manual run / web mode): record the
+        // intended response without delivering it.
         deliveryDeferred: true,
       },
     }
+  },
+})
+
+// ── io.output ──────────────────────────────────────────────────────────────
+// Declares a workflow's terminal output (D5). The resolved `value` (or the
+// first upstream when omitted) is validated against the node's `outputSchema`
+// — the published interface's output contract — then returned as the run's
+// terminal output. `onSchemaViolation: "fail"` (default) rejects a contract
+// breach; "soft" passes the value through with a warning.
+registerNodeExecutor({
+  kind: "io.output",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as {
+      value?: unknown
+      outputSchema?: Record<string, unknown>
+      onSchemaViolation?: "fail" | "soft"
+    }
+    // `value` rides resolveDeep ({{ }} already resolved); fall back to upstream.
+    const value =
+      "value" in params && params.value !== undefined ? params.value : firstUpstream(ctx)
+    const schema = params.outputSchema
+    if (schema && Object.keys(schema).length > 0) {
+      const result = validateAgainstJsonSchema(schema, value)
+      if (!result.ok) {
+        if ((params.onSchemaViolation ?? "fail") === "soft") {
+          ctx.log(
+            "warn",
+            `io.output: value violates the output schema — ${result.errors.join("; ")}`
+          )
+          return { output: { value, schemaValid: false, schemaErrors: result.errors } }
+        }
+        throw nonRetryable(
+          `io.output: value violates the output schema — ${result.errors.join("; ")}`
+        )
+      }
+      return { output: { value, schemaValid: true } }
+    }
+    return { output: { value } }
   },
 })
 
@@ -1496,10 +3171,21 @@ registerNodeExecutor({
           }
         : undefined
 
+    // Loop guard: when THIS workflow was itself started by a team-completion
+    // fan-out (trigger.team payload carries chainDepth), thread the depth
+    // into the nested lifecycle so its own fan-out can stop at the cap.
+    const triggerPayload = ctx.trigger.payload as { chainDepth?: unknown } | undefined
+    const triggerChainDepth =
+      typeof triggerPayload?.chainDepth === "number" ? triggerPayload.chainDepth : 0
+
     const partial = buildAgentTeamRuntimeDeps()
     const deps = {
       ...partial,
       ...(triggeredFrom ? { triggeredFrom } : {}),
+      triggerChainDepth,
+      // IM-originated workflows run headless (gate policy "im"); UI-launched
+      // workflows keep the interactive blocking gates.
+      origin: triggeredFrom ? ("im" as const) : ("interactive" as const),
       storeReader: {
         getTeam: (id: string) => useAgentTeamStore.getState().getTeam(id),
         getTeammates: (id: string) => useAgentTeamStore.getState().getTeammates(id),
@@ -1521,6 +3207,19 @@ registerNodeExecutor({
           teammateId: string,
           updates: Parameters<ReturnType<typeof useAgentTeamStore.getState>["updateTeammate"]>[1]
         ) => useAgentTeamStore.getState().updateTeammate(teammateId, updates),
+        addTask: (
+          input: Parameters<ReturnType<typeof useAgentTeamStore.getState>["createTask"]>[0]
+        ) => useAgentTeamStore.getState().createTask(input),
+        updateTask: (
+          taskId: string,
+          updates: Parameters<ReturnType<typeof useAgentTeamStore.getState>["updateTask"]>[1]
+        ) => useAgentTeamStore.getState().updateTask(taskId, updates),
+        addEvent: (
+          event: Parameters<ReturnType<typeof useAgentTeamStore.getState>["addEvent"]>[0]
+        ) => useAgentTeamStore.getState().addEvent(event),
+        addTeammate: (
+          input: Parameters<ReturnType<typeof useAgentTeamStore.getState>["addTeammate"]>[0]
+        ) => useAgentTeamStore.getState().addTeammate(input),
       },
     }
 
@@ -1563,17 +3262,25 @@ registerNodeExecutor({
       title?: string
       description?: string
       expectedOutput?: string
+      assignedTo?: string
+      dependencies?: string[]
     }
     if (!params.teamId || !params.taskId) {
       throw nonRetryable("action.team.task.dispatch requires 'teamId' and 'taskId'")
     }
+    const teamId = params.teamId
     const taskId = params.taskId
-    const [{ getTeamRunContext }, { buildTeammatePrompt }, { dispatchTeammate }] =
-      await Promise.all([
-        import("@/lib/ai/agent/team/team-run-context"),
-        import("@/lib/ai/agent/agent-team-runtime-deps"),
-        import("@/lib/ai/agent/team/dispatch-teammate"),
-      ])
+    const [
+      { getTeamRunContext },
+      { buildTeammatePrompt },
+      { dispatchTeammate },
+      { readDependencyResults, autoPublishTaskResult },
+    ] = await Promise.all([
+      import("@/lib/ai/agent/team/team-run-context"),
+      import("@/lib/ai/agent/agent-team-runtime-deps"),
+      import("@/lib/ai/agent/team/dispatch-teammate"),
+      import("@/lib/ai/agent/team/shared-memory-orchestrator"),
+    ])
     const teamCtx = getTeamRunContext(ctx.runId)
     if (!teamCtx) {
       throw nonRetryable(
@@ -1588,14 +3295,54 @@ registerNodeExecutor({
       expectedOutput: params.expectedOutput,
     } as Parameters<typeof buildTeammatePrompt>[2]
 
+    // Blackboard read: pull the results of this task's upstream dependencies so
+    // the teammate builds on prior work instead of starting cold. Dependency
+    // nodes always finish first (they're DAG predecessors), so their
+    // `task:<id>` entries are on the board by the time this node runs.
+    const depIds = Array.isArray(params.dependencies)
+      ? params.dependencies.filter((d): d is string => typeof d === "string" && d.length > 0)
+      : []
+    const upstream = readDependencyResults(teamId, depIds)
+    const upstreamBlock =
+      upstream.length > 0
+        ? [
+            "Upstream results from teammates whose tasks you depend on — build on these:",
+            ...upstream.map(
+              (u) =>
+                `### ${u.taskTitle ?? u.taskId}${u.writerName ? ` (by ${u.writerName})` : ""}\n${u.value}`
+            ),
+            "",
+          ].join("\n\n")
+        : ""
+
     const result = await dispatchTeammate(teamCtx, {
       taskId,
-      // Persona-aware prompt built from the teammate the pool actually claims.
-      prompt: (teammate) => buildTeammatePrompt(teamCtx.team, teammate, task),
+      // Persona-aware prompt built from the teammate the pool actually claims,
+      // prefixed with any upstream dependency results.
+      prompt: (teammate) => {
+        const base = buildTeammatePrompt(teamCtx.team, teammate, task)
+        return upstreamBlock ? `${upstreamBlock}\n${base}` : base
+      },
       signal: ctx.signal,
       validateOutput: true,
       recordToStore: true,
+      // Skill-aware claim: prefer the teammate the task was assigned to.
+      ...(params.assignedTo ? { preferTeammateId: params.assignedTo } : {}),
     })
+
+    // Blackboard write: publish this task's result under `task:<taskId>` so
+    // downstream teammates can read it. PII-gated + best-effort — a blackboard
+    // write must never fail the task itself.
+    try {
+      autoPublishTaskResult(
+        { id: teamId },
+        { id: taskId, title: params.title ?? taskId },
+        result.text,
+        { id: result.teammateId, name: result.teammateName }
+      )
+    } catch {
+      /* never fail a completed task on a blackboard write */
+    }
 
     return {
       output: {
@@ -1604,9 +3351,328 @@ registerNodeExecutor({
         teammateName: result.teammateName,
         tokenUsage: result.usage,
         attempt: 1,
+        // ADR-0090 Phase 6: surface a degraded dispatch (lesser rail than the
+        // teammate's configuration asked for) on the workflow event stream.
+        ...(result.degradedReason ? { degradedReason: result.degradedReason } : {}),
       },
     }
   },
+})
+
+// ── action.team.task.review ───────────────────────────────────────────────
+// Per ADR-0071. Synthesizer-emitted: one per task when `taskReview.enabled`,
+// placed between a task's dispatch node and that task's dependents, so an
+// unapproved task blocks downstream work at the SCHEDULER — dependents are not
+// runnable, rather than downstream nodes being trusted to check a flag.
+//
+// The lead judges the worker's output plus a deterministic diff of what the
+// task actually changed, and returns approved / changes_requested. A
+// changes_requested re-dispatches the SAME worker into the SAME worktree with
+// the lead's feedback, then reviews again, up to the budget frozen at synthesis.
+//
+// Not retryable: every failure mode here (exhausted budget, missing worker,
+// reviewer failure) is a decision that unreviewed work must not land. Retrying
+// would re-run the worker against the same wall and, worse, could let a flaky
+// reviewer eventually rubber-stamp.
+registerNodeExecutor({
+  kind: "action.team.task.review",
+  typeVersion: 1,
+  retryable: false,
+  execute: async (ctx) => {
+    const params = ctx.params as {
+      teamId?: string
+      taskId?: string
+      title?: string
+      description?: string
+      expectedOutput?: string
+      dispatchNodeId?: string
+      maxRevisions?: number
+    }
+    if (!params.teamId || !params.taskId || !params.dispatchNodeId) {
+      throw nonRetryable("action.team.task.review requires 'teamId', 'taskId' and 'dispatchNodeId'")
+    }
+    const { teamId, taskId } = params
+    const [
+      { getTeamRunContext },
+      { dispatchTeammate, UnavailableRequiredTeammateError },
+      { buildReviewEvidence },
+      { DEFAULT_TASK_REVIEW_MAX_REVISIONS },
+    ] = await Promise.all([
+      import("@/lib/ai/agent/team/team-run-context"),
+      import("@/lib/ai/agent/team/dispatch-teammate"),
+      import("@/lib/ai/agent/team/review-evidence"),
+      import("@/lib/ai/agent/team/task-review-policy"),
+    ])
+
+    const teamCtx = getTeamRunContext(ctx.runId)
+    if (!teamCtx) {
+      throw nonRetryable(
+        `action.team.task.review: no TeamRunContext registered for runId=${ctx.runId}`
+      )
+    }
+    // Fail closed. Review is on, so work that reaches here has to be reviewed;
+    // silently skipping would be the worst outcome — an unreviewed task
+    // presented as approved.
+    if (!teamCtx.lead || !teamCtx.runLeadReview) {
+      throw nonRetryable(
+        "action.team.task.review: task review is enabled but no lead/reviewer is wired for this run"
+      )
+    }
+    const runLeadReview = teamCtx.runLeadReview
+    const lead = teamCtx.lead
+
+    const task = {
+      id: taskId,
+      title: params.title ?? taskId,
+      description: params.description ?? "",
+      ...(params.expectedOutput ? { expectedOutput: params.expectedOutput } : {}),
+    }
+
+    // The dispatch node's output carries both the deliverable and its author —
+    // the author is what makes "send it back to whoever wrote it" possible.
+    const upstream = ctx.upstream[params.dispatchNodeId] as
+      { text?: string; teammateId?: string; teammateName?: string } | undefined
+    if (!upstream || typeof upstream.text !== "string") {
+      throw nonRetryable(
+        `action.team.task.review: no output from dispatch node "${params.dispatchNodeId}"`
+      )
+    }
+
+    let workerOutput = upstream.text
+    let workerId = upstream.teammateId
+    let workerName = upstream.teammateName
+    // Schema-validated at the node boundary (`z.number().int().min(0)`), and
+    // baked in by the synthesizer — no clamping needed here.
+    const maxRevisions = params.maxRevisions ?? DEFAULT_TASK_REVIEW_MAX_REVISIONS
+    let previousFeedback: string | undefined
+
+    const fail = (reason: string): never => {
+      teamCtx.storeWriter.setTaskStatus(taskId, "failed", undefined, reason)
+      throw nonRetryable(`action.team.task.review: ${reason}`)
+    }
+
+    for (let revision = 0; revision <= maxRevisions; revision++) {
+      // A worktree is only diffable alongside the allocator that can commit it,
+      // so the two are resolved together or not at all.
+      const handle = teamCtx.workspaceLedger?.get(taskId)?.handle
+      const allocator = teamCtx.workspaceAllocator
+      const baseRef = teamCtx.team.config?.workspaceIsolation?.baseRef
+      const evidence = await buildReviewEvidence({
+        ...(handle && allocator
+          ? {
+              worktree: {
+                handle,
+                repoPath: allocator.repo,
+                commit: (h, message) => allocator.commit(h, message),
+                ...(baseRef ? { baseRef } : {}),
+              },
+            }
+          : {}),
+        ...(teamCtx.team.config?.workingDir ? { workingDir: teamCtx.team.config.workingDir } : {}),
+        taskId,
+      })
+
+      // Record what was reviewed, so reconcile / the UI can point at the commit
+      // the verdict was actually about. `dispatchTeammate` already commits the
+      // worker's work, so our own commit usually finds a clean tree and returns
+      // null — the dispatcher's recorded sha is then the one we diffed.
+      const ledgerEntry = teamCtx.workspaceLedger?.get(taskId)
+      const reviewedCommitSha = evidence.commitSha ?? ledgerEntry?.commitSha
+      if (ledgerEntry && reviewedCommitSha) {
+        teamCtx.workspaceLedger!.set(taskId, { ...ledgerEntry, reviewedCommitSha })
+      }
+
+      let verdict: { verdict: "approved" | "changes_requested"; feedback: string }
+      try {
+        verdict = await runLeadReview({
+          team: teamCtx.team,
+          lead,
+          task,
+          ...(workerName ? { workerName } : {}),
+          workerOutput,
+          evidence,
+          revision,
+          ...(previousFeedback ? { previousFeedback } : {}),
+          signal: ctx.signal,
+        })
+      } catch (err) {
+        // A reviewer/provider failure is not an approval.
+        return fail(
+          `the lead could not review this task (${err instanceof Error ? err.message : String(err)})`
+        )
+      }
+
+      teamCtx.storeWriter.addMessage({
+        teamId,
+        senderId: lead.id,
+        type: "direct",
+        ...(workerId ? { recipientId: workerId } : {}),
+        content: `[review] ${verdict.verdict === "approved" ? "Approved" : "Changes requested"}: ${verdict.feedback}`,
+        taskId,
+      })
+      teamCtx.storeWriter.addEvent?.({
+        type: verdict.verdict === "approved" ? "plan_approved" : "plan_rejected",
+        teamId,
+        teammateId: lead.id,
+        taskId,
+        data: { scope: "task-review", revision, feedback: verdict.feedback },
+        timestamp: new Date(),
+      })
+
+      if (verdict.verdict === "approved") {
+        // The human board gate composes with this one: an automated approval
+        // hands the card to a human when they asked for the last word,
+        // otherwise it completes it.
+        const requireHumanReview =
+          teamCtx.team?.config?.governancePolicy?.approval?.requireResultReview === true
+        teamCtx.storeWriter.setTaskStatus(
+          taskId,
+          requireHumanReview ? "review" : "completed",
+          workerOutput
+        )
+        return {
+          output: {
+            text: workerOutput,
+            verdict: "approved",
+            revisions: revision,
+            reviewedCommitSha,
+            ...(workerId ? { teammateId: workerId } : {}),
+            ...(workerName ? { teammateName: workerName } : {}),
+          },
+        }
+      }
+
+      previousFeedback = verdict.feedback
+      if (revision === maxRevisions) break
+
+      if (!workerId) {
+        return fail("the original worker is unknown, so the lead's changes cannot be applied")
+      }
+      try {
+        const revised = await dispatchTeammate(teamCtx, {
+          taskId,
+          prompt: [
+            `Your work on "${task.title}" was reviewed and needs changes.`,
+            "",
+            "Reviewer feedback:",
+            verdict.feedback,
+            "",
+            "Revise your work in the same workspace and report what you changed.",
+          ].join("\n"),
+          signal: ctx.signal,
+          validateOutput: true,
+          recordToStore: true,
+          // Same author, same worktree: a revision addresses feedback on a diff
+          // this teammate wrote, so substituting anyone else is meaningless.
+          requireTeammateId: workerId,
+          workspaceKey: taskId,
+        })
+        workerOutput = revised.text
+        workerId = revised.teammateId
+        workerName = revised.teammateName
+      } catch (err) {
+        if (err instanceof UnavailableRequiredTeammateError) {
+          return fail(`the original worker is no longer available to revise this task`)
+        }
+        return fail(
+          `the revision dispatch failed (${err instanceof Error ? err.message : String(err)})`
+        )
+      }
+    }
+
+    return fail(
+      `the lead still requested changes after ${maxRevisions} revision(s): ${previousFeedback ?? "no feedback recorded"}`
+    )
+  },
+})
+
+// ── action.team.reconcile ─────────────────────────────────────────────────
+// Workspace-isolation reconcile for a fan-out group. Reads the per-run
+// TeamRunContext; when isolation is active, reconciles the agent branches
+// recorded in the ledger SO FAR using this node's mode (falling back to the
+// team's default), then clears the ledger so a later run-end reconcile only
+// sees dispatches that came after. Lets a workflow mix e.g. `merge-all` after
+// one fan-out and `select` after another. No-op when isolation is off.
+registerNodeExecutor({
+  kind: "action.team.reconcile",
+  typeVersion: 1,
+  execute: async (ctx) => {
+    const params = ctx.params as {
+      mode?: "manual" | "merge-all" | "select" | "pipeline"
+      selectStrategy?: "manual" | "first-success" | "judge"
+      retain?: "all" | "keep-winner" | "prune-losers"
+    }
+    const { getTeamRunContext } = await import("@/lib/ai/agent/team/team-run-context")
+    const teamCtx = getTeamRunContext(ctx.runId)
+    if (!teamCtx) {
+      throw nonRetryable(
+        `action.team.reconcile: no TeamRunContext registered for runId=${ctx.runId}`
+      )
+    }
+    if (!teamCtx.workspaceAllocator || !teamCtx.workspaceLedger) {
+      return { output: { reconciled: false } }
+    }
+    const [{ reconcile }, { selectWinnerByJudge }, { executeAgent }] = await Promise.all([
+      import("@/lib/ai/agent/team/workspace/reconciler"),
+      import("@/lib/ai/agent/team/workspace/judge"),
+      import("@/lib/ai/agent/agent-executor"),
+    ])
+    const mode = params.mode ?? teamCtx.workspaceIsolation?.mode ?? "manual"
+    const selectStrategy = params.selectStrategy ?? teamCtx.workspaceIsolation?.selectStrategy
+    const retain = params.retain ?? teamCtx.workspaceIsolation?.retain
+    const result = await reconcile(
+      teamCtx.workspaceAllocator,
+      [...teamCtx.workspaceLedger.values()],
+      {
+        runId: ctx.runId,
+        mode,
+        ...(selectStrategy ? { selectStrategy } : {}),
+        ...(retain ? { retain } : {}),
+        ...(selectStrategy === "judge"
+          ? {
+              judge: (cands) =>
+                selectWinnerByJudge(cands, {
+                  run: async (p) => (await executeAgent(p, {})).text ?? "",
+                }),
+            }
+          : {}),
+      }
+    )
+    // Consumed this group; a run-end reconcile should only see later dispatches.
+    teamCtx.workspaceLedger.clear()
+    return { output: { reconciled: true, ...result } }
+  },
+})
+
+// ── action.team.compose / status / delegate / message ────────────────────
+// Agent-team surface exposure (multi-bot orchestration) — logic in
+// ./actions/team-ops so this registry stays thin. Compose can run a whole
+// team lifecycle (autoStart) and delegate can await a full background /
+// external / team run — both are single-shot side effects, so no retry.
+registerNodeExecutor({
+  kind: "action.team.compose",
+  typeVersion: 1,
+  retryable: false,
+  execute: async (ctx) => (await import("./actions/team-ops")).runTeamCompose(ctx),
+})
+
+registerNodeExecutor({
+  kind: "action.team.status",
+  typeVersion: 1,
+  execute: async (ctx) => (await import("./actions/team-ops")).runTeamStatus(ctx),
+})
+
+registerNodeExecutor({
+  kind: "action.team.delegate",
+  typeVersion: 1,
+  retryable: false,
+  execute: async (ctx) => (await import("./actions/team-ops")).runTeamDelegate(ctx),
+})
+
+registerNodeExecutor({
+  kind: "action.team.message",
+  typeVersion: 1,
+  execute: async (ctx) => (await import("./actions/team-ops")).runTeamMessage(ctx),
 })
 
 // ── action.plan.step.dispatch ─────────────────────────────────────────────
@@ -1663,7 +3729,7 @@ registerNodeExecutor({
       { getTwinSource },
     ] = await Promise.all([
       import("@/lib/twin/runtime/build-deps"),
-      import("@/lib/ai/embedding/embedding"),
+      import("@cognia/provider-embedding/embedding"),
       import("@/lib/twin/ingest/persist"),
       import("@/lib/db/twin-chunks"),
       import("@/lib/db/twin-sources"),
@@ -1828,82 +3894,134 @@ registerNodeExecutor({
       unknown
     >
 
+    // Resolve the server up front so the connect hook carries the human name and
+    // the not-found case maps to a non-retryable failure. Falls back to a
+    // plugin-contributed preset (overlay registry) when the Dexie table has no
+    // row — presets share the `{ name, transport, config }` shape.
     const { getMcpServer } = await import("@/lib/db/mcp-servers")
     const dbServer = await getMcpServer(serverId)
-    // Fall back to a plugin-contributed MCP server preset (overlay registry)
-    // when the Dexie table has no row for this id. Presets share the
-    // `{ name, transport, config }` shape with stored servers.
-    const preset = dbServer ? null : getMcpServerPreset(serverId)
-    const server =
-      dbServer ??
-      (preset ? { name: preset.name, transport: preset.transport, config: preset.config } : null)
+    const preset = dbServer ? undefined : getMcpServerPreset(serverId)
+    const server = dbServer
+      ? dbServer
+      : preset
+        ? ({
+            id: serverId,
+            name: preset.name,
+            transport: preset.transport,
+            config: preset.config,
+            enabled: true,
+          } as McpServer)
+        : undefined
     if (!server) throw nonRetryable(`MCP server ${serverId} not found`)
-
-    // Lazily import the SDK to keep the workflow runtime tree-shakable.
-    const [{ Client }, { StdioClientTransport }, { StreamableHTTPClientTransport }] =
-      await Promise.all([
-        import("@modelcontextprotocol/sdk/client/index.js"),
-        import("@modelcontextprotocol/sdk/client/stdio.js"),
-        import("@modelcontextprotocol/sdk/client/streamableHttp.js"),
-      ])
-
-    const client = new Client({ name: "cognia-workflow", version: "1.0.0" }, { capabilities: {} })
-    const transport =
-      server.transport === "stdio"
-        ? new StdioClientTransport({
-            command: String(server.config.command ?? ""),
-            args: Array.isArray(server.config.args) ? (server.config.args as string[]) : [],
-            env: (server.config.env as Record<string, string>) ?? undefined,
-          })
-        : new StreamableHTTPClientTransport(new URL(String(server.config.url ?? "")))
 
     const { getPluginEventHooks } = await import("@/lib/plugin")
     const hooks = getPluginEventHooks()
 
     try {
-      await client.connect(transport)
       hooks.dispatchMCPServerConnect(serverId, server.name)
       hooks.dispatchMCPToolCall(serverId, toolName, args)
-      const result = await client.callTool({ name: toolName, arguments: args })
-      hooks.dispatchMCPToolResult(serverId, toolName, result)
+      // Shared invoke seam: correct stdio/sse/http split + static headers +
+      // (future) OAuth authProvider. Inject the already-resolved server so we
+      // don't re-hit Dexie / the preset registry.
+      const result = await invokeMcpTool(
+        {
+          serverId,
+          toolName,
+          args,
+          signal: ctx.signal,
+          clientInfo: { name: "cognia-workflow", version: "1.0.0" },
+        },
+        { getServer: async () => server }
+      )
+      hooks.dispatchMCPToolResult(serverId, toolName, {
+        isError: result.isError,
+        content: result.content,
+        structuredContent: result.structuredContent,
+      })
       return {
         output: {
           serverId,
           toolName,
-          isError: result.isError ?? false,
-          content: result.content ?? [],
-          structuredContent: (result as unknown as { structuredContent?: unknown })
-            .structuredContent,
+          isError: result.isError,
+          content: result.content,
+          structuredContent: result.structuredContent,
         },
       }
     } finally {
-      await client.close().catch(() => undefined)
       hooks.dispatchMCPServerDisconnect(serverId)
     }
   },
 })
 
 // ── action.plugin.invoke ──────────────────────────────────────────────────
-// Looks up an enabled plugin by id and dispatches a task to its registered
-// task handler via the plugin runtime bridge. Tasks are arbitrary string
-// keys; the plugin's manifest declares which tasks it accepts.
+// Two dispatch modes, inferred for persisted-node back-compat:
+//
+//  - "tool" (new, UI default): invokes a plugin-registered agent tool
+//    (`ctx.agent.registerTool()` / manifest `tools[]`) through the unified
+//    `invokePluginTool` seam — the same path the chat agent's sidecar
+//    round-trip uses, so lazy `onTool:` activation and the permission
+//    consent gate behave identically.
+//  - "task" (legacy, ADR-0017): dispatches to a `workflow.task` extension
+//    registered under the plugin id. Kept verbatim so existing nodes and
+//    the formalized extension path stay valid.
+//
+// The registration deliberately stays at typeVersion 1: executor lookup is
+// an exact `(kind, typeVersion)` match with no fallback
+// (`lib/workflow/runtime/step-executor.ts`), so a bump would orphan every
+// persisted v1 node, and the params change is purely additive.
 registerNodeExecutor({
   kind: "action.plugin.invoke",
   typeVersion: 1,
   execute: async (ctx) => {
     const params = ctx.params as {
       pluginId?: string
+      mode?: "task" | "tool"
+      toolName?: string
       taskId?: string
       args?: Record<string, unknown>
     }
     const pluginId = params.pluginId?.trim()
+    const toolName = params.toolName?.trim()
     const taskId = params.taskId?.trim()
     if (!pluginId) throw nonRetryable("action.plugin.invoke requires 'pluginId'")
-    if (!taskId) throw nonRetryable("action.plugin.invoke requires 'taskId'")
+    const mode = params.mode ?? (toolName ? "tool" : "task")
     const args = (params.args && typeof params.args === "object" ? params.args : {}) as Record<
       string,
       unknown
     >
+
+    if (mode === "tool") {
+      if (!toolName) {
+        throw nonRetryable("action.plugin.invoke (tool mode) requires 'toolName'")
+      }
+      const { invokePluginTool, PluginToolInvocationError } =
+        await import("@/lib/plugin/core/invoke-plugin-tool")
+      try {
+        const { result } = await invokePluginTool(pluginId, toolName, args, {
+          signal: ctx.signal,
+          reason: "workflow:action.plugin.invoke",
+        })
+        return {
+          output: { pluginId, toolName, ok: true, data: result },
+        }
+      } catch (err) {
+        if (err instanceof PluginToolInvocationError) {
+          // Configuration/permission failures won't heal on retry; runtime
+          // failures (execution-failed / aborted) stay retryable.
+          if (
+            err.code === "plugin-not-found" ||
+            err.code === "plugin-disabled" ||
+            err.code === "tool-not-found" ||
+            err.code === "permission-denied"
+          ) {
+            throw nonRetryable(err.message)
+          }
+        }
+        throw err
+      }
+    }
+
+    if (!taskId) throw nonRetryable("action.plugin.invoke requires 'taskId'")
 
     const { getPlugin } = await import("@/lib/db/plugins")
     const plugin = await getPlugin(pluginId)
@@ -1961,6 +4079,787 @@ function nonRetryable(message: string): Error {
   return err
 }
 
+type WorkflowGoalSnapshot = Omit<Goal, "rawObjective" | "redactionMapEnc"> & {
+  goalId: string
+  hasRedactions: boolean
+}
+
+type WorkflowGoalTemplateSnapshot = GoalTemplate & {
+  templateId: string
+}
+
+type WorkflowPlanSnapshot = AgentPlan & {
+  planId: string
+}
+
+type WorkflowScheduledTaskSnapshot = ScheduledTask & {
+  taskId: string
+}
+
+type WorkflowTaskExecutionSnapshot = TaskExecution & {
+  executionId: string
+}
+
+const SCHEDULER_TASK_TYPES = new Set<ScheduledTaskType>([
+  "workflow",
+  "agent",
+  "sync",
+  "backup",
+  "custom",
+  "plugin",
+  "script",
+  "test",
+  "ai-generation",
+  "chat",
+  "im-push",
+  "skill",
+  "external-agent",
+  "agent-team",
+  "goal",
+  "plan",
+  "twin",
+  "connection:scheduled:digest",
+  "connection:outbound:send",
+  "wiki-rebuild",
+])
+
+const SCHEDULER_TASK_STATUSES = new Set<ScheduledTaskStatus>([
+  "active",
+  "paused",
+  "disabled",
+  "expired",
+])
+
+const SCHEDULER_TRIGGER_TYPES = new Set<TaskTriggerType>(["cron", "interval", "once", "event"])
+
+const PLAN_STEP_KINDS = new Set<PlanStepKind>([
+  "agent_turn",
+  "teammate_dispatch",
+  "tool_call",
+  "mcp_tool_call",
+  "sub_workflow",
+  "approval_gate",
+])
+
+const PLAN_STEP_STATUSES = new Set<PlanStepStatus>([
+  "pending",
+  "ready",
+  "in_progress",
+  "completed",
+  "failed",
+  "skipped",
+  "blocked",
+])
+
+const PLAN_REFINEMENT_TYPES = new Set<PlanRefinementType>([
+  "optimize",
+  "simplify",
+  "expand",
+  "reorder",
+  "repair",
+])
+
+const PLAN_REFINEMENT_TRIGGERS = new Set<PlanRefinementTrigger>([
+  "manual",
+  "step_failure",
+  "judge_deviation",
+])
+
+const PLAN_SOURCES = new Set<PlanSource>([
+  "exit_plan_mode",
+  "agent_tool",
+  "planner_llm",
+  "team_projection",
+  "goal_projection",
+  "manual",
+])
+
+const PLAN_EXECUTION_MODES = new Set<PlanExecutionMode>(["in_session", "orchestrated", "auto"])
+
+function toWorkflowGoal(goal: Goal | null | undefined): WorkflowGoalSnapshot | null {
+  if (!goal) return null
+  const { rawObjective: _rawObjective, redactionMapEnc, ...safe } = goal
+  void _rawObjective
+  return {
+    ...safe,
+    goalId: goal.id,
+    hasRedactions: redactionMapEnc.length > 0,
+  }
+}
+
+function toWorkflowGoalTemplate(
+  template: GoalTemplate | null | undefined
+): WorkflowGoalTemplateSnapshot | null {
+  if (!template) return null
+  return { ...template, templateId: template.id }
+}
+
+function toWorkflowPlan(plan: AgentPlan | null | undefined): WorkflowPlanSnapshot | null {
+  if (!plan) return null
+  return { ...plan, planId: plan.id }
+}
+
+function toWorkflowScheduledTask(
+  task: ScheduledTask | null | undefined
+): WorkflowScheduledTaskSnapshot | null {
+  if (!task) return null
+  return { ...task, taskId: task.id }
+}
+
+function toWorkflowTaskExecution(
+  execution: TaskExecution | null | undefined
+): WorkflowTaskExecutionSnapshot | null {
+  if (!execution) return null
+  return { ...execution, executionId: execution.id }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value)
+}
+
+function parseJsonParam(raw: unknown, fieldName: string): unknown | undefined {
+  if (typeof raw !== "string") return undefined
+  const trimmed = raw.trim()
+  if (!trimmed) return undefined
+  try {
+    return JSON.parse(trimmed)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    throw nonRetryable(`${fieldName} must be valid JSON: ${message}`)
+  }
+}
+
+function parseObjectParam(
+  structured: unknown,
+  raw: unknown,
+  fieldName: string
+): Record<string, unknown> | undefined {
+  const base = isRecord(structured) ? structured : undefined
+  const parsed = parseJsonParam(raw, fieldName)
+  if (parsed === undefined) return base
+  if (!isRecord(parsed)) throw nonRetryable(`${fieldName} must decode to an object`)
+  return { ...(base ?? {}), ...parsed }
+}
+
+function buildSchedulerCreateInput(rawParams: unknown): CreateScheduledTaskInput {
+  const params = isRecord(rawParams) ? rawParams : {}
+  const name = readRequiredSchedulerString(params.name, "scheduler task name")
+  return {
+    name,
+    ...(typeof params.description === "string" ? { description: params.description } : {}),
+    type: normalizeSchedulerTaskType(params.type),
+    trigger: buildSchedulerCreateTrigger(params),
+    ...(parseSchedulerObjectParam(params.payload, params.payloadJson, "scheduler payloadJson")
+      ? {
+          payload: parseSchedulerObjectParam(
+            params.payload,
+            params.payloadJson,
+            "scheduler payloadJson"
+          ),
+        }
+      : {}),
+    ...(parseSchedulerConfig(params) ? { config: parseSchedulerConfig(params) } : {}),
+    ...(parseSchedulerNotification(params)
+      ? { notification: parseSchedulerNotification(params) }
+      : {}),
+    ...(normalizeStringList(params.tags, params.tagsRaw)
+      ? { tags: normalizeStringList(params.tags, params.tagsRaw) }
+      : {}),
+    ...(normalizeSchedulerDate(params.endAt, "scheduler endAt")
+      ? { endAt: normalizeSchedulerDate(params.endAt, "scheduler endAt") }
+      : {}),
+    ...(normalizeStringList(params.onSuccessTaskIds, params.onSuccessTaskIdsRaw)
+      ? {
+          onSuccessTaskIds: normalizeStringList(
+            params.onSuccessTaskIds,
+            params.onSuccessTaskIdsRaw
+          ),
+        }
+      : {}),
+    ...(normalizeStringList(params.onFailureTaskIds, params.onFailureTaskIdsRaw)
+      ? {
+          onFailureTaskIds: normalizeStringList(
+            params.onFailureTaskIds,
+            params.onFailureTaskIdsRaw
+          ),
+        }
+      : {}),
+  }
+}
+
+function buildSchedulerUpdateInput(rawParams: unknown): UpdateScheduledTaskInput {
+  const params = isRecord(rawParams) ? rawParams : {}
+  const patch: UpdateScheduledTaskInput = {}
+  if (params.name !== undefined) {
+    patch.name = readRequiredSchedulerString(params.name, "scheduler task name")
+  }
+  if (typeof params.description === "string") patch.description = params.description
+  const status = normalizeOptionalSchedulerStatus(params.status)
+  if (status) patch.status = status
+  const trigger = buildSchedulerUpdateTrigger(params)
+  if (trigger) patch.trigger = trigger
+  const payload = parseSchedulerObjectParam(
+    params.payload,
+    params.payloadJson,
+    "scheduler payloadJson"
+  )
+  if (payload) patch.payload = payload
+  const config = parseSchedulerConfig(params)
+  if (config) patch.config = config
+  const notification = parseSchedulerNotification(params)
+  if (notification) patch.notification = notification
+  const tags = normalizeStringList(params.tags, params.tagsRaw)
+  if (tags) patch.tags = tags
+  if (params.clearEndAt === true) {
+    patch.endAt = null
+  } else {
+    const endAt = normalizeSchedulerDate(params.endAt, "scheduler endAt")
+    if (endAt) patch.endAt = endAt
+  }
+  const onSuccessTaskIds = normalizeStringList(params.onSuccessTaskIds, params.onSuccessTaskIdsRaw)
+  if (onSuccessTaskIds) patch.onSuccessTaskIds = onSuccessTaskIds
+  const onFailureTaskIds = normalizeStringList(params.onFailureTaskIds, params.onFailureTaskIdsRaw)
+  if (onFailureTaskIds) patch.onFailureTaskIds = onFailureTaskIds
+  return patch
+}
+
+function buildSchedulerCreateTrigger(params: Record<string, unknown>): TaskTrigger {
+  const type = normalizeSchedulerTriggerType(params.triggerType)
+  const trigger: TaskTrigger = { type }
+  applySchedulerTriggerFields(trigger, params, true)
+  return trigger
+}
+
+function buildSchedulerUpdateTrigger(
+  params: Record<string, unknown>
+): Partial<TaskTrigger> | undefined {
+  const trigger: Partial<TaskTrigger> = {}
+  if (typeof params.triggerType === "string" && params.triggerType.trim()) {
+    trigger.type = normalizeSchedulerTriggerType(params.triggerType)
+  }
+  applySchedulerTriggerFields(trigger, params, false)
+  return Object.keys(trigger).length > 0 ? trigger : undefined
+}
+
+function applySchedulerTriggerFields(
+  trigger: Partial<TaskTrigger>,
+  params: Record<string, unknown>,
+  requireForType: boolean
+): void {
+  const type = trigger.type
+  if (type === "cron") {
+    const cronExpression = normalizeOptionalString(params.cronExpression)
+    if (cronExpression) trigger.cronExpression = cronExpression
+    else if (requireForType) throw nonRetryable("scheduler cron trigger requires 'cronExpression'")
+  }
+  if (type === "interval") {
+    const intervalMs = normalizeOptionalPositiveNumber(params.intervalMs, "intervalMs")
+    if (intervalMs !== undefined) trigger.intervalMs = intervalMs
+    else if (requireForType) throw nonRetryable("scheduler interval trigger requires 'intervalMs'")
+  }
+  if (type === "once") {
+    const runAt = normalizeSchedulerDate(params.runAt, "scheduler runAt")
+    if (runAt) trigger.runAt = runAt
+    else if (requireForType) throw nonRetryable("scheduler once trigger requires 'runAt'")
+  }
+  if (type === "event") {
+    const eventType = normalizeOptionalString(params.eventType)
+    if (eventType) trigger.eventType = eventType
+    else if (requireForType) throw nonRetryable("scheduler event trigger requires 'eventType'")
+  }
+  const eventSource = normalizeOptionalString(params.eventSource)
+  if (eventSource) trigger.eventSource = eventSource
+  const timezone = normalizeOptionalString(params.timezone)
+  if (timezone) trigger.timezone = timezone
+  const dependsOn = normalizeStringList(params.dependsOn, params.dependsOnRaw)
+  if (dependsOn) trigger.dependsOn = dependsOn
+  const jitterMs = normalizeOptionalNonNegativeNumber(params.jitterMs, "jitterMs")
+  if (jitterMs !== undefined) trigger.jitterMs = jitterMs
+}
+
+function parseSchedulerObjectParam(
+  structured: unknown,
+  raw: unknown,
+  fieldName: string
+): Record<string, unknown> | undefined {
+  const parsed = parseObjectParam(structured, raw, fieldName)
+  return parsed && Object.keys(parsed).length > 0 ? parsed : undefined
+}
+
+function parseSchedulerImportData(
+  structured: unknown,
+  raw: unknown
+): { version: number; tasks: ScheduledTask[] } {
+  const parsed = structured ?? parseJsonParam(raw, "scheduler import dataJson")
+  if (!isRecord(parsed)) {
+    throw nonRetryable("action.scheduler.task.import requires 'dataJson'")
+  }
+  return parsed as { version: number; tasks: ScheduledTask[] }
+}
+
+function parseSchedulerConfig(
+  rawParams: Record<string, unknown>
+): Partial<TaskExecutionConfig> | undefined {
+  return parseSchedulerObjectParam(
+    rawParams.config,
+    rawParams.configJson,
+    "scheduler configJson"
+  ) as Partial<TaskExecutionConfig> | undefined
+}
+
+function parseSchedulerNotification(
+  rawParams: Record<string, unknown>
+): Partial<TaskNotificationConfig> | undefined {
+  return parseSchedulerObjectParam(
+    rawParams.notification,
+    rawParams.notificationJson,
+    "scheduler notificationJson"
+  ) as Partial<TaskNotificationConfig> | undefined
+}
+
+function normalizeSchedulerTaskType(value: unknown): ScheduledTaskType {
+  if (typeof value === "string" && SCHEDULER_TASK_TYPES.has(value as ScheduledTaskType)) {
+    return value as ScheduledTaskType
+  }
+  throw nonRetryable(`unsupported scheduler task type: ${String(value)}`)
+}
+
+function normalizeSchedulerTriggerType(value: unknown): TaskTriggerType {
+  if (typeof value === "string" && SCHEDULER_TRIGGER_TYPES.has(value as TaskTriggerType)) {
+    return value as TaskTriggerType
+  }
+  throw nonRetryable(`unsupported scheduler trigger type: ${String(value)}`)
+}
+
+function normalizeOptionalSchedulerStatus(value: unknown): ScheduledTaskStatus | undefined {
+  if (value === undefined || value === "") return undefined
+  if (typeof value === "string" && SCHEDULER_TASK_STATUSES.has(value as ScheduledTaskStatus)) {
+    return value as ScheduledTaskStatus
+  }
+  throw nonRetryable(`unsupported scheduler task status: ${String(value)}`)
+}
+
+function normalizeSchedulerStatuses(
+  values: unknown,
+  raw: unknown
+): ScheduledTaskStatus[] | undefined {
+  const list = normalizeStringList(values, raw)
+  if (!list) return undefined
+  return list.map((value) => {
+    if (!SCHEDULER_TASK_STATUSES.has(value as ScheduledTaskStatus)) {
+      throw nonRetryable(`unsupported scheduler task status: ${value}`)
+    }
+    return value as ScheduledTaskStatus
+  })
+}
+
+function normalizeSchedulerTypes(values: unknown, raw: unknown): ScheduledTaskType[] | undefined {
+  const list = normalizeStringList(values, raw)
+  if (!list) return undefined
+  return list.map((value) => normalizeSchedulerTaskType(value))
+}
+
+function normalizeOptionalString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined
+  const trimmed = value.trim()
+  return trimmed ? trimmed : undefined
+}
+
+function readRequiredSchedulerString(value: unknown, fieldName: string): string {
+  const text = normalizeOptionalString(value)
+  if (!text) throw nonRetryable(`${fieldName} must be a non-empty string`)
+  return text
+}
+
+function normalizeStringList(values: unknown, raw: unknown): string[] | undefined {
+  if (Array.isArray(values)) {
+    const normalized = values
+      .map((value) => (typeof value === "string" ? value.trim() : ""))
+      .filter(Boolean)
+    return normalized.length > 0 || values.length === 0 ? normalized : undefined
+  }
+  const text = normalizeOptionalString(raw)
+  if (!text) return undefined
+  return text
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean)
+}
+
+function normalizeSchedulerDate(value: unknown, fieldName: string): Date | undefined {
+  const text = normalizeOptionalString(value)
+  if (!text) return undefined
+  const date = new Date(text)
+  if (Number.isNaN(date.getTime())) throw nonRetryable(`${fieldName} must be a valid date`)
+  return date
+}
+
+function normalizeOptionalPositiveNumber(value: unknown, fieldName: string): number | undefined {
+  if (value === undefined || value === null || value === "") return undefined
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw nonRetryable(`${fieldName} must be a positive number`)
+  }
+  return parsed
+}
+
+function parsePlanConfig(params: {
+  config?: Record<string, unknown>
+  configJson?: string
+}): Partial<PlanConfig> | undefined {
+  const config = parseObjectParam(params.config, params.configJson, "plan configJson")
+  return config && Object.keys(config).length > 0 ? (config as Partial<PlanConfig>) : undefined
+}
+
+function parsePlanMetadata(params: {
+  metadata?: Record<string, unknown>
+  metadataJson?: string
+}): Record<string, unknown> | undefined {
+  const metadata = parseObjectParam(params.metadata, params.metadataJson, "plan metadataJson")
+  return metadata && Object.keys(metadata).length > 0 ? metadata : undefined
+}
+
+function parsePlanCreateSteps(params: {
+  steps?: unknown
+  stepsJson?: string
+}): CreatePlanStepInput[] {
+  const parsed = params.steps ?? parseJsonParam(params.stepsJson, "plan stepsJson")
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    throw nonRetryable("action.plan.create requires a non-empty steps array")
+  }
+  return parsed.map((step, index) => normalizePlanCreateStep(step, index))
+}
+
+function normalizePlanCreateStep(step: unknown, index: number): CreatePlanStepInput {
+  if (!isRecord(step)) throw nonRetryable(`plan step ${index} must be an object`)
+  const title = readRequiredPlanString(step.title, `plan step ${index}.title`)
+  const kind = normalizePlanStepKind(step.kind)
+  const dependsOn = normalizePlanDependsOn(step.dependsOn, index)
+  const params = isRecord(step.params) ? (step.params as CreatePlanStepInput["params"]) : undefined
+  const estimatedDurationMs = normalizeOptionalNonNegativeNumber(
+    step.estimatedDurationMs,
+    `plan step ${index}.estimatedDurationMs`
+  )
+  return {
+    title,
+    kind,
+    ...(typeof step.description === "string" ? { description: step.description } : {}),
+    ...(dependsOn ? { dependsOn } : {}),
+    ...(params ? { params } : {}),
+    ...(estimatedDurationMs !== undefined ? { estimatedDurationMs } : {}),
+  }
+}
+
+function parsePlanUpdateSteps(params: {
+  steps?: unknown
+  stepsJson?: string
+}): PlanStep[] | undefined {
+  const parsed = params.steps ?? parseJsonParam(params.stepsJson, "plan stepsJson")
+  if (parsed === undefined) return undefined
+  if (!Array.isArray(parsed)) throw nonRetryable("plan stepsJson must decode to an array")
+  return parsed.map((step, index) => normalizePlanStep(step, index))
+}
+
+function normalizePlanStep(step: unknown, index: number): PlanStep {
+  if (!isRecord(step)) throw nonRetryable(`plan step ${index} must be an object`)
+  const id = readRequiredPlanString(step.id, `plan step ${index}.id`)
+  const title = readRequiredPlanString(step.title, `plan step ${index}.title`)
+  const kind = normalizePlanStepKind(step.kind)
+  const status = normalizePlanStepStatus(step.status)
+  const order = normalizeRequiredInteger(step.order, `plan step ${index}.order`)
+  const dependencies = normalizeStringArray(step.dependencies, `plan step ${index}.dependencies`)
+  return {
+    ...(step as unknown as PlanStep),
+    id,
+    title,
+    kind,
+    status,
+    order,
+    dependencies,
+  }
+}
+
+function buildPlanDraftPatch(params: {
+  title?: string
+  description?: string
+  executionMode?: PlanExecutionMode | ""
+  steps?: unknown
+  stepsJson?: string
+  config?: Record<string, unknown>
+  configJson?: string
+  metadata?: Record<string, unknown>
+  metadataJson?: string
+}): UpdatePlanInput {
+  const patch: UpdatePlanInput = {}
+  if (params.title !== undefined) patch.title = params.title
+  if (params.description !== undefined) patch.description = params.description
+  if (params.executionMode) patch.executionMode = normalizePlanExecutionMode(params.executionMode)
+  const steps = parsePlanUpdateSteps(params)
+  if (steps !== undefined) patch.steps = steps
+  const config = parsePlanConfig(params)
+  if (config !== undefined) patch.config = config
+  const metadata = parsePlanMetadata(params)
+  if (metadata !== undefined) patch.metadata = metadata
+  return patch
+}
+
+function buildPlanStepPatch(params: {
+  result?: string
+  error?: string
+  outputJson?: string
+  output?: unknown
+  attempts?: number
+}): Partial<Omit<PlanStep, "id" | "status">> {
+  const patch: Partial<Omit<PlanStep, "id" | "status">> = {}
+  if (params.result !== undefined) patch.result = params.result
+  if (params.error !== undefined) patch.error = params.error
+  const parsedOutput = parseJsonParam(params.outputJson, "plan step outputJson")
+  if (parsedOutput !== undefined) patch.output = parsedOutput
+  else if (params.output !== undefined) patch.output = params.output
+  if (params.attempts !== undefined) {
+    patch.attempts = normalizeRequiredInteger(params.attempts, "attempts")
+  }
+  return patch
+}
+
+function readRequiredPlanString(value: unknown, fieldName: string): string {
+  const text = typeof value === "string" ? value.trim() : ""
+  if (!text) throw nonRetryable(`${fieldName} must be a non-empty string`)
+  return text
+}
+
+function normalizeRequiredInteger(value: unknown, fieldName: string): number {
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw nonRetryable(`${fieldName} must be a non-negative integer`)
+  }
+  return parsed
+}
+
+function normalizeOptionalNonNegativeNumber(value: unknown, fieldName: string): number | undefined {
+  if (value === undefined || value === null || value === "") return undefined
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw nonRetryable(`${fieldName} must be a non-negative number`)
+  }
+  return parsed
+}
+
+function normalizePlanDependsOn(value: unknown, stepIndex: number): number[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value)) throw nonRetryable(`plan step ${stepIndex}.dependsOn must be an array`)
+  return value.map((item, depIndex) => {
+    const parsed = Number(item)
+    if (!Number.isInteger(parsed) || parsed < 0) {
+      throw nonRetryable(
+        `plan step ${stepIndex}.dependsOn[${depIndex}] must be a non-negative integer`
+      )
+    }
+    return parsed
+  })
+}
+
+function normalizeStringArray(value: unknown, fieldName: string): string[] {
+  if (value === undefined) return []
+  if (!Array.isArray(value)) throw nonRetryable(`${fieldName} must be an array`)
+  return value.map((item, index) => {
+    if (typeof item !== "string") throw nonRetryable(`${fieldName}[${index}] must be a string`)
+    return item
+  })
+}
+
+function normalizePlanStepKind(value: unknown): PlanStepKind {
+  if (typeof value === "string" && PLAN_STEP_KINDS.has(value as PlanStepKind)) {
+    return value as PlanStepKind
+  }
+  throw nonRetryable(`unsupported plan step kind: ${String(value)}`)
+}
+
+function normalizePlanStepStatus(value: unknown): PlanStepStatus {
+  if (typeof value === "string" && PLAN_STEP_STATUSES.has(value as PlanStepStatus)) {
+    return value as PlanStepStatus
+  }
+  throw nonRetryable(`unsupported plan step status: ${String(value)}`)
+}
+
+function normalizePlanRefinementType(value: unknown): PlanRefinementType {
+  if (value === undefined || value === "") return "optimize"
+  if (typeof value === "string" && PLAN_REFINEMENT_TYPES.has(value as PlanRefinementType)) {
+    return value as PlanRefinementType
+  }
+  throw nonRetryable(`unsupported plan refinementType: ${String(value)}`)
+}
+
+function normalizePlanRefinementTrigger(value: unknown): PlanRefinementTrigger {
+  if (value === undefined || value === "") return "manual"
+  if (typeof value === "string" && PLAN_REFINEMENT_TRIGGERS.has(value as PlanRefinementTrigger)) {
+    return value as PlanRefinementTrigger
+  }
+  throw nonRetryable(`unsupported plan refinement trigger: ${String(value)}`)
+}
+
+function normalizePlanSource(value: unknown): PlanSource {
+  if (typeof value === "string" && PLAN_SOURCES.has(value as PlanSource)) {
+    return value as PlanSource
+  }
+  return "manual"
+}
+
+function normalizePlanExecutionMode(value: unknown): PlanExecutionMode {
+  if (typeof value === "string" && PLAN_EXECUTION_MODES.has(value as PlanExecutionMode)) {
+    return value as PlanExecutionMode
+  }
+  throw nonRetryable(`unsupported plan executionMode: ${String(value)}`)
+}
+
+function parseGoalConfig(params: {
+  config?: Record<string, unknown>
+  configJson?: string
+}): Partial<GoalConfig> {
+  const config =
+    params.config && typeof params.config === "object" && !Array.isArray(params.config)
+      ? params.config
+      : {}
+  const raw = typeof params.configJson === "string" ? params.configJson.trim() : ""
+  if (!raw) return config as Partial<GoalConfig>
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    throw nonRetryable(`goal configJson must be valid JSON: ${message}`)
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw nonRetryable("goal configJson must decode to an object")
+  }
+  return { ...config, ...(parsed as Record<string, unknown>) } as Partial<GoalConfig>
+}
+
+function parseGoalTemplateConfig(params: {
+  configOverrides?: Record<string, unknown>
+  configJson?: string
+}): Partial<GoalConfig> | undefined {
+  const config =
+    params.configOverrides &&
+    typeof params.configOverrides === "object" &&
+    !Array.isArray(params.configOverrides)
+      ? params.configOverrides
+      : {}
+  const raw = typeof params.configJson === "string" ? params.configJson.trim() : ""
+  if (!raw) {
+    return Object.keys(config).length > 0 ? (config as Partial<GoalConfig>) : undefined
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    throw nonRetryable(`goal template configJson must be valid JSON: ${message}`)
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw nonRetryable("goal template configJson must decode to an object")
+  }
+  return { ...config, ...(parsed as Record<string, unknown>) } as Partial<GoalConfig>
+}
+
+function requireGoalId(ctx: StepExecutionContext, nodeName: string): string {
+  const goalId = String((ctx.params as { goalId?: unknown }).goalId ?? "").trim()
+  if (!goalId) throw nonRetryable(`${nodeName} requires 'goalId'`)
+  return goalId
+}
+
+function requireGoalTemplateId(ctx: StepExecutionContext, nodeName: string): string {
+  const templateId = String((ctx.params as { templateId?: unknown }).templateId ?? "").trim()
+  if (!templateId) throw nonRetryable(`${nodeName} requires 'templateId'`)
+  return templateId
+}
+
+function requireGoalSessionId(value: unknown, nodeName: string): string {
+  const sessionId = String(value ?? "").trim()
+  if (!sessionId) throw nonRetryable(`${nodeName} requires 'sessionId'`)
+  return sessionId
+}
+
+function requirePlanId(ctx: StepExecutionContext, nodeName: string): string {
+  const planId = String((ctx.params as { planId?: unknown }).planId ?? "").trim()
+  if (!planId) throw nonRetryable(`${nodeName} requires 'planId'`)
+  return planId
+}
+
+function requireSchedulerTaskId(ctx: StepExecutionContext, nodeName: string): string {
+  const taskId = String((ctx.params as { taskId?: unknown }).taskId ?? "").trim()
+  if (!taskId) throw nonRetryable(`${nodeName} requires 'taskId'`)
+  return taskId
+}
+
+function requireSchedulerExecutionId(ctx: StepExecutionContext, nodeName: string): string {
+  const executionId = String((ctx.params as { executionId?: unknown }).executionId ?? "").trim()
+  if (!executionId) throw nonRetryable(`${nodeName} requires 'executionId'`)
+  return executionId
+}
+
+function requirePlanSessionId(value: unknown, nodeName: string): string {
+  const sessionId = String(value ?? "").trim()
+  if (!sessionId) throw nonRetryable(`${nodeName} requires 'sessionId'`)
+  return sessionId
+}
+
+function clampGoalLimit(value: unknown): number {
+  const parsed = Math.floor(Number(value ?? 500))
+  if (!Number.isFinite(parsed)) return 500
+  return Math.max(1, Math.min(1000, parsed))
+}
+
+function clampGoalEventLimit(value: unknown): number {
+  const parsed = Math.floor(Number(value ?? 200))
+  if (!Number.isFinite(parsed)) return 200
+  return Math.max(1, Math.min(5000, parsed))
+}
+
+function clampGoalTemplateLimit(value: unknown): number {
+  const parsed = Math.floor(Number(value ?? 500))
+  if (!Number.isFinite(parsed)) return 500
+  return Math.max(1, Math.min(1000, parsed))
+}
+
+function clampPlanLimit(value: unknown): number {
+  const parsed = Math.floor(Number(value ?? 500))
+  if (!Number.isFinite(parsed)) return 500
+  return Math.max(1, Math.min(1000, parsed))
+}
+
+function clampPlanEventLimit(value: unknown): number {
+  const parsed = Math.floor(Number(value ?? 200))
+  if (!Number.isFinite(parsed)) return 200
+  return Math.max(1, Math.min(5000, parsed))
+}
+
+function clampSchedulerTaskLimit(value: unknown): number {
+  const parsed = Math.floor(Number(value ?? 500))
+  if (!Number.isFinite(parsed)) return 500
+  return Math.max(1, Math.min(1000, parsed))
+}
+
+function clampSchedulerExecutionLimit(value: unknown): number {
+  const parsed = Math.floor(Number(value ?? 200))
+  if (!Number.isFinite(parsed)) return 200
+  return Math.max(1, Math.min(5000, parsed))
+}
+
+function applyGoalLimit(goals: Goal[], limit: number): Goal[] {
+  return goals.length > limit ? goals.slice(0, limit) : goals
+}
+
+async function goalLifecycleOutput(
+  ctx: StepExecutionContext,
+  nodeName: string,
+  mutate: (goalId: string) => Promise<Goal | null>
+) {
+  const goalId = requireGoalId(ctx, nodeName)
+  const goal = await mutate(goalId)
+  return { output: { goalId, goal: toWorkflowGoal(goal) } }
+}
+
 // Suppress unused-import warning when only one of these helpers is exercised
 // by the test suite — both are real call sites in production paths.
 void deleteSkill
@@ -1996,6 +4895,174 @@ function evalItemExpression(expression: string, item: unknown, ctx: StepExecutio
     staticData: {},
     params: ctx.params as Record<string, unknown>,
   })
+}
+
+/**
+ * Compile a custom reducer for `data.aggregate`'s custom op. The body is a JS
+ * *expression* returning the next accumulator, with `acc` / `item` / `index`
+ * (and read-only `upstream` / `trigger`) in scope — same sandbox shape as
+ * `data.code`. Compiled once per run, applied per item.
+ */
+function compileReducer(
+  expression: string
+): (acc: unknown, item: unknown, index: number, upstream: unknown, trigger: unknown) => unknown {
+  return new Function(
+    "acc",
+    "item",
+    "index",
+    "upstream",
+    "trigger",
+    `"use strict"; return (${expression});`
+  ) as (acc: unknown, item: unknown, index: number, upstream: unknown, trigger: unknown) => unknown
+}
+
+/** Stable key for value-equality (order-insensitive object keys). */
+function stableKey(value: unknown): string {
+  const seen = new WeakSet<object>()
+  const norm = (v: unknown): unknown => {
+    if (v === null || typeof v !== "object") return v
+    if (seen.has(v as object)) return "[circular]"
+    seen.add(v as object)
+    if (Array.isArray(v)) return v.map(norm)
+    const obj = v as Record<string, unknown>
+    const out: Record<string, unknown> = {}
+    for (const k of Object.keys(obj).sort()) out[k] = norm(obj[k])
+    return out
+  }
+  try {
+    return JSON.stringify(norm(value)) ?? String(value)
+  } catch {
+    return String(value)
+  }
+}
+
+export type AggregateOperation =
+  "collect" | "concat" | "merge-objects" | "group-by" | "dedupe" | "numeric" | "custom"
+
+export interface AggregateParams {
+  operation?: AggregateOperation
+  /** group-by / dedupe: per-item key expression (without `{{ }}`). */
+  keyExpression?: string
+  /** numeric: per-item value expression; empty ⇒ the item itself. */
+  numericField?: string
+  numericOp?: "sum" | "avg" | "min" | "max" | "count"
+  /** custom: reducer expression with `$acc`/`$item`/`$index` in scope. */
+  reducerExpression?: string
+  /** custom: seed accumulator. */
+  initialValue?: unknown
+}
+
+/**
+ * Core reduce/aggregate over a value array. Shared by `data.aggregate`, the
+ * `data.transform` reduce delegation, and `flow.join`'s gather→reduce option.
+ */
+function aggregateArray(
+  arr: unknown[],
+  params: AggregateParams,
+  ctx: StepExecutionContext
+): unknown {
+  const operation = params.operation ?? "collect"
+  switch (operation) {
+    case "collect":
+      return [...arr]
+    case "concat":
+      return arr.flatMap((x) => (Array.isArray(x) ? x : [x]))
+    case "merge-objects":
+      return arr.reduce<Record<string, unknown>>((acc, x) => {
+        if (x && typeof x === "object" && !Array.isArray(x)) {
+          return { ...acc, ...(x as Record<string, unknown>) }
+        }
+        return acc
+      }, {})
+    case "group-by": {
+      const expr = params.keyExpression?.trim() ?? ""
+      const out: Record<string, unknown[]> = {}
+      for (const item of arr) {
+        const key = String(evalItemExpression(expr, item, ctx) ?? "")
+        ;(out[key] ??= []).push(item)
+      }
+      return out
+    }
+    case "dedupe": {
+      const expr = params.keyExpression?.trim() ?? ""
+      const seen = new Set<string>()
+      const out: unknown[] = []
+      for (const item of arr) {
+        const key = stableKey(expr ? evalItemExpression(expr, item, ctx) : item)
+        if (!seen.has(key)) {
+          seen.add(key)
+          out.push(item)
+        }
+      }
+      return out
+    }
+    case "numeric": {
+      const op = params.numericOp ?? "sum"
+      if (op === "count") return arr.length
+      const field = params.numericField?.trim() ?? ""
+      const nums = arr
+        .map((item) => (field ? evalItemExpression(field, item, ctx) : item))
+        .filter((v): v is number => typeof v === "number" && Number.isFinite(v))
+      switch (op) {
+        case "sum":
+          return nums.reduce((a, b) => a + b, 0)
+        case "avg":
+          return nums.length > 0 ? nums.reduce((a, b) => a + b, 0) / nums.length : null
+        case "min":
+          return nums.length > 0 ? Math.min(...nums) : null
+        case "max":
+          return nums.length > 0 ? Math.max(...nums) : null
+        default:
+          return null
+      }
+    }
+    case "custom": {
+      const expr = params.reducerExpression?.trim() ?? ""
+      if (!expr) return params.initialValue
+      let fn: ReturnType<typeof compileReducer>
+      try {
+        fn = compileReducer(expr)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        const wrapped = new Error(
+          `data.aggregate custom reducer is not a valid expression: ${message}`
+        ) as Error & { retryable?: boolean }
+        wrapped.retryable = false
+        throw wrapped
+      }
+      let acc = params.initialValue
+      arr.forEach((item, index) => {
+        try {
+          acc = fn(acc, item, index, ctx.upstream, ctx.trigger)
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          const wrapped = new Error(`data.aggregate custom reducer failed: ${message}`) as Error & {
+            retryable?: boolean
+          }
+          wrapped.retryable = false
+          throw wrapped
+        }
+      })
+      return acc
+    }
+    default:
+      throw new Error(`Unsupported aggregate operation: ${operation}`)
+  }
+}
+
+/**
+ * Resolve the array `data.aggregate` operates on: a single array upstream is
+ * used as-is; a single scalar upstream is wrapped; multiple upstreams (a
+ * fan-in) are aggregated as the set of their outputs.
+ */
+function resolveAggregateInput(ctx: StepExecutionContext): unknown[] {
+  const values = Object.values(ctx.upstream)
+  if (values.length === 0) return []
+  if (values.length === 1) {
+    const v = values[0]
+    return Array.isArray(v) ? v : [v]
+  }
+  return values
 }
 
 /**

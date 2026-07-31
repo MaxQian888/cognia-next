@@ -1,0 +1,89 @@
+{
+  "candidates": {
+    "clash": "Clash / Mihomo",
+    "http": "HTTP 代理",
+    "socks5": "SOCKS5 代理"
+  },
+  "description": "把所有 HTTP / HTTPS / WebSocket 出站请求统一走本地代理 — Clash Verge、Mihomo、V2Ray、Shadowsocks 等。",
+  "detection": {
+    "apply": "应用",
+    "button": "立即检测",
+    "controllerSecured": "控制台 API 需要密钥",
+    "currentBadge": "当前使用",
+    "empty": "未在常见端口找到本地代理，可在「通用」分页手动配置。",
+    "heading": "扫描本地代理",
+    "quickClash": "检测到 Clash / Mihomo 内核 v{version}（127.0.0.1:9090）——点击「立即检测」列出其端口。",
+    "results": "发现的代理",
+    "running": "正在扫描端口…",
+    "source": {
+      "config": "已从客户端配置文件读取端口",
+      "port": "通过开放端口探测发现",
+      "process": "检测到客户端进程，使用其默认端口"
+    },
+    "subheading": "通过运行中的进程与配置文件发现 FlClash、Clash Verge Rev、Mihomo、v2rayN，并探测常见回环端口。",
+    "webUnsupported": "自动检测仅支持 Tauri 桌面端。"
+  },
+  "form": {
+    "addBypass": "添加",
+    "bypass": "绕过列表",
+    "bypassHint": "命中以下主机或域名后缀的请求直接走直连。以「.」开头表示匹配域名后缀，例如「.internal」。",
+    "host": "主机",
+    "optionalPlaceholder": "可选",
+    "password": "密码",
+    "port": "端口",
+    "protocol": "协议",
+    "proxyWebsocketsHint": "通过 HTTP CONNECT 隧道或 SOCKS5 转发 Discord Gateway、Slack Socket Mode 等 WSS 长连接。",
+    "proxyWebsocketsLabel": "WebSocket 走代理",
+    "removeBypass": "从绕过列表中移除 {entry}",
+    "username": "用户名"
+  },
+  "ipInfo": {
+    "disabled": "IP 查询已关闭。开启后将从 ipinfo.io 获取当前公网 IP 及归属地。",
+    "enableHint": "从公共接口 ipinfo.io 获取当前公网 IP 与地理位置。请求走当前代理，因此显示的是代理的出口 IP。",
+    "enableLabel": "显示当前 IP 与位置",
+    "error": "获取 IP 信息失败：{error}",
+    "fields": {
+      "city": "城市",
+      "country": "国家/地区",
+      "hostname": "主机名",
+      "ip": "IP 地址",
+      "loc": "经纬度",
+      "org": "网络 / ASN",
+      "postal": "邮编",
+      "region": "省/州",
+      "timezone": "时区"
+    },
+    "heading": "当前公网 IP",
+    "refresh": "刷新"
+  },
+  "mode": {
+    "auto": "自动检测",
+    "manual": "手动配置",
+    "off": "关闭"
+  },
+  "modeHint": {
+    "auto": "由「自动检测」填入，行为同手动配置。",
+    "manual": "使用下方填写的 host / port / 凭据。",
+    "off": "直连，所有代理设置无效。"
+  },
+  "modeLabel": "代理模式",
+  "tabs": {
+    "detection": "自动检测",
+    "general": "通用",
+    "ipInfo": "IP",
+    "test": "连通性测试"
+  },
+  "test": {
+    "directConnection": "直连，未应用代理。",
+    "failure": "失败",
+    "latencyMs": "延迟",
+    "proxyUrl": "代理通道",
+    "run": "发送请求",
+    "running": "发送中…",
+    "statusLabel": "HTTP 状态码",
+    "success": "可达",
+    "urlLabel": "测试 URL",
+    "webUnsupported": "实时连通性测试仅支持 Tauri 桌面端。"
+  },
+  "title": "网络代理"
+}

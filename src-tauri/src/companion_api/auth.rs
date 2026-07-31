@@ -14,7 +14,7 @@
 //! All failures return JSON `{ "error": { "code": "...", "message": "..." } }`.
 
 use axum::{
-    extract::State,
+    extract::{ConnectInfo, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     Extension, Json,
@@ -23,18 +23,31 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::net::SocketAddr;
 use uuid::Uuid;
 
+use cognia_signaling_core::{proto::RoomDescriptorV2, v2::validate_room_descriptor};
+
+use super::signaling::envelope_v2::{build_room_descriptor, V2Identity, SIGNALING_KEY_NAMESPACE};
 use super::{
     jwt::{issue_device_jwt, issue_pair_jwt, verify, JwtError},
     middleware::DeviceContext,
+    pair_code_guard,
     pair_code_lru::{PairCodeEntry, TakeOutcome},
     SharedState,
 };
+const ROOM_DESCRIPTOR_TTL_MS: i64 = 10 * 365 * 24 * 60 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // Request / response shapes
 // ---------------------------------------------------------------------------
+
+/// Request body for `POST /api/v1/auth/pair/issue`.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IssueRequest {
+    pub account_id: String,
+}
 
 /// Response body for `POST /api/v1/auth/pair/issue`.
 ///
@@ -73,6 +86,8 @@ pub struct RedeemCodeRequest {
     pub device_platform: String,
     pub device_pubkey: String,
     pub app_version: String,
+    #[serde(alias = "mobile_signing_key")]
+    pub mobile_signing_key: String,
 }
 
 /// Request body for `POST /api/v1/auth/pair`.
@@ -84,16 +99,15 @@ pub struct PairRequest {
     pub device_platform: String,
     pub device_pubkey: String,
     pub app_version: String,
+    #[serde(alias = "mobile_signing_key")]
+    pub mobile_signing_key: String,
 }
 
 /// Response body for `POST /api/v1/auth/pair`.
 ///
-/// `rendezvous_id` and `rendezvous_secret` are minted alongside the device
-/// JWT (ADR-0021): both peers use them to authenticate signaling-server
-/// messages end-to-end without trusting the public rendezvous service. The
-/// secret is 32 random bytes encoded as URL-safe base64 (unpadded); the id is
-/// a UUIDv4. Devices that don't receive these fields (legacy pair payloads)
-/// will skip the WebRTC transport tier and continue with HTTPS+WS only.
+/// Signaling v2 role keys and a self-certifying room descriptor are minted
+/// alongside the device JWT. The desktop private key stays in the host
+/// keyring; only its reference and public descriptor leave this handler.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PairResponse {
@@ -101,7 +115,12 @@ pub struct PairResponse {
     pub device_jwt: String,
     pub server_version: String,
     pub rendezvous_id: String,
-    pub rendezvous_secret: String,
+    pub room_descriptor: RoomDescriptorV2,
+    pub signaling_key_ref: String,
+    /// Local account the pair JWT was minted for (ADR-0059 C4/F3). Clients
+    /// persist it in `CompanionConfig` so multi-account servers can route.
+    /// Additive - older clients ignore it.
+    pub account_id: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -110,16 +129,50 @@ pub struct PairResponse {
 
 /// `POST /api/v1/auth/pair/issue`
 ///
-/// Issues a fresh pair JWT.  The desktop QR generator calls this; the token is
-/// encoded into the QR code image.  Empty request body.
+/// Issues a fresh pair JWT for the supplied local account.  The desktop QR
+/// generator calls this; the token is encoded into the QR code image.
 ///
 /// Also mints a 6-digit numeric code that resolves to the same pair JWT
 /// server-side. The desktop UI renders both surfaces with a shared
 /// countdown.
-pub async fn issue_handler(State(state): State<SharedState>) -> Response {
+pub async fn issue_handler(
+    State(state): State<SharedState>,
+    ConnectInfo(peer_addr): ConnectInfo<SocketAddr>,
+    maybe_body: Option<Json<IssueRequest>>,
+) -> Response {
+    if !peer_addr.ip().is_loopback() {
+        return error_response(
+            StatusCode::FORBIDDEN,
+            "pair_issue_loopback_only",
+            "pair invitations can only be issued from the host itself",
+        );
+    }
+
+    let Some(Json(req)) = maybe_body else {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "account_id_required",
+            "accountId is required",
+        );
+    };
+    if req.account_id.trim().is_empty() {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "account_id_required",
+            "accountId is required",
+        );
+    }
+
     let secret = state.secret.read().clone();
-    let (pair_jwt, exp_secs) = match issue_pair_jwt(&secret) {
+    let (pair_jwt, exp_secs) = match issue_pair_jwt(&secret, &req.account_id) {
         Ok(t) => t,
+        Err(JwtError::InvalidAccountId(_)) => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                "invalid_account_id",
+                "accountId must be 6-64 characters and contain only letters, numbers, underscores, or hyphens",
+            );
+        }
         Err(e) => {
             return error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -182,11 +235,7 @@ pub async fn pair_handler(
     let Json(req) = match result {
         Ok(j) => j,
         Err(e) => {
-            return error_response(
-                StatusCode::BAD_REQUEST,
-                "malformed_request",
-                &e.to_string(),
-            );
+            return error_response(StatusCode::BAD_REQUEST, "malformed_request", &e.to_string());
         }
     };
 
@@ -197,6 +246,7 @@ pub async fn pair_handler(
         &req.device_platform,
         &req.device_pubkey,
         &req.app_version,
+        &req.mobile_signing_key,
     )
 }
 
@@ -215,11 +265,7 @@ pub async fn redeem_code_handler(
     let Json(req) = match result {
         Ok(j) => j,
         Err(e) => {
-            return error_response(
-                StatusCode::BAD_REQUEST,
-                "malformed_request",
-                &e.to_string(),
-            );
+            return error_response(StatusCode::BAD_REQUEST, "malformed_request", &e.to_string());
         }
     };
 
@@ -233,9 +279,23 @@ pub async fn redeem_code_handler(
         );
     }
 
+    // Global brute-force guard. Source-independent (covers the loopback
+    // exemption and IP rotation that defeat the per-IP pre-auth limiter) so the
+    // total number of guesses against a live code is bounded.
+    let guard = pair_code_guard::global();
+    let now_instant = std::time::Instant::now();
+    if !guard.allow(now_instant) {
+        return error_response(
+            StatusCode::TOO_MANY_REQUESTS,
+            "too_many_attempts",
+            "too many failed pair-code attempts; wait a minute and request a fresh code",
+        );
+    }
+
     let entry = match state.pair_code_lru.take(&req.code, now_ms()) {
         TakeOutcome::Hit(e) => e,
         TakeOutcome::NotFound => {
+            guard.record_failure(now_instant);
             return error_response(
                 StatusCode::NOT_FOUND,
                 "pair_code_not_found",
@@ -243,6 +303,7 @@ pub async fn redeem_code_handler(
             );
         }
         TakeOutcome::Expired => {
+            guard.record_failure(now_instant);
             return error_response(
                 StatusCode::GONE,
                 "pair_code_expired",
@@ -250,6 +311,8 @@ pub async fn redeem_code_handler(
             );
         }
     };
+    // A live code was found — reset the brute-force counter.
+    guard.record_success();
 
     redeem_with_pair_jwt(
         &state,
@@ -258,6 +321,7 @@ pub async fn redeem_code_handler(
         &req.device_platform,
         &req.device_pubkey,
         &req.app_version,
+        &req.mobile_signing_key,
     )
 }
 
@@ -274,6 +338,7 @@ fn redeem_with_pair_jwt(
     device_platform: &str,
     device_pubkey: &str,
     app_version: &str,
+    mobile_signing_key: &str,
 ) -> Response {
     if device_label.chars().count() > 64 {
         return error_response(
@@ -287,7 +352,10 @@ fn redeem_with_pair_jwt(
 
     let claims = match verify(&secret, pair_jwt, "pair") {
         Ok(c) => c,
-        Err(JwtError::WrongScope { .. }) | Err(JwtError::Invalid(_)) => {
+        Err(JwtError::WrongScope { .. })
+        | Err(JwtError::WrongAccount { .. })
+        | Err(JwtError::InvalidAccountId(_))
+        | Err(JwtError::Invalid(_)) => {
             return error_response(
                 StatusCode::UNAUTHORIZED,
                 "invalid_pair_jwt",
@@ -307,7 +375,11 @@ fn redeem_with_pair_jwt(
         }
     };
 
-    if !state.redemption_lru.mark_redeemed(&jti) {
+    let now_secs = chrono::Utc::now().timestamp();
+    if !state
+        .redemption_lru
+        .mark_redeemed(&jti, claims.exp, now_secs)
+    {
         return error_response(
             StatusCode::CONFLICT,
             "pair_jwt_redeemed",
@@ -317,7 +389,18 @@ fn redeem_with_pair_jwt(
 
     let device_id = Uuid::new_v4().to_string();
 
-    let device_jwt = match issue_device_jwt(&secret, &device_id) {
+    let account_id = match claims.account_id.clone() {
+        Some(id) if !id.trim().is_empty() => id,
+        _ => {
+            return error_response(
+                StatusCode::UNAUTHORIZED,
+                "invalid_pair_jwt",
+                "pair JWT is missing account_id claim",
+            );
+        }
+    };
+
+    let device_jwt = match issue_device_jwt(&secret, &device_id, &account_id) {
         Ok(t) => t,
         Err(e) => {
             return error_response(
@@ -328,20 +411,67 @@ fn redeem_with_pair_jwt(
         }
     };
 
-    // ADR-0021: mint a rendezvous room id and 32-byte shared HMAC secret
-    // alongside the device JWT. The rendezvous service routes signaling by
-    // `rendezvous_id`; both peers sign signaling envelopes with the secret
-    // so the service can never impersonate either side. We use the OS RNG
-    // (rand::thread_rng() seeds from getrandom) — same primitive that backs
-    // jti generation in `jwt.rs`.
-    let rendezvous_id = Uuid::new_v4().to_string();
-    let rendezvous_secret = {
-        let mut bytes = [0u8; 32];
+    let paired_at_ms = now_ms();
+    let desktop_identity = V2Identity::generate();
+    let room_nonce = {
+        let mut bytes = [0u8; 16];
         rand::thread_rng().fill_bytes(&mut bytes);
         URL_SAFE_NO_PAD.encode(bytes)
     };
-
-    let paired_at_ms = now_ms();
+    let room_descriptor = build_room_descriptor(
+        room_nonce,
+        desktop_identity.public_key_base64(),
+        mobile_signing_key.to_string(),
+        paired_at_ms.saturating_add(ROOM_DESCRIPTOR_TTL_MS),
+    );
+    if validate_room_descriptor(&room_descriptor, paired_at_ms).is_err() {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "invalid_mobile_signing_key",
+            "mobileSigningKey must be an uncompressed P-256 public key",
+        );
+    }
+    let signaling_key_ref = device_id.clone();
+    let desktop_private_key = URL_SAFE_NO_PAD.encode(desktop_identity.private_bytes());
+    if let Err(error) = cognia_secrets::keyring_secrets::set(
+        SIGNALING_KEY_NAMESPACE,
+        &signaling_key_ref,
+        &desktop_private_key,
+    ) {
+        return error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "signaling_key_store_failed",
+            &format!("failed to store signaling identity: {error}"),
+        );
+    }
+    let rendezvous_id = room_descriptor.room_id.clone();
+    if let Some(store) = super::signaling::registration_store::installed() {
+        let registration = super::signaling::DeviceRegistration {
+            device_id: device_id.clone(),
+            rendezvous_id: rendezvous_id.clone(),
+            room_descriptor: room_descriptor.clone(),
+            signaling_key_ref: signaling_key_ref.clone(),
+        };
+        if let Err(error) = store.upsert(&registration, paired_at_ms) {
+            let _ =
+                cognia_secrets::keyring_secrets::clear(SIGNALING_KEY_NAMESPACE, &signaling_key_ref);
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "signaling_registration_store_failed",
+                &format!("failed to persist signaling registration: {error}"),
+            );
+        }
+        if let Err(error) = super::signaling::refresh_installed_hub() {
+            let _ = store.remove_device(&device_id);
+            let _ =
+                cognia_secrets::keyring_secrets::clear(SIGNALING_KEY_NAMESPACE, &signaling_key_ref);
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "signaling_registration_activate_failed",
+                &error,
+            );
+        }
+    }
 
     if let Some(app) = &state.app_handle {
         use tauri::Emitter as _;
@@ -352,8 +482,10 @@ fn redeem_with_pair_jwt(
             "pubkey": device_pubkey,
             "paired_at_ms": paired_at_ms,
             "app_version": app_version,
+            "account_id": account_id,
             "rendezvous_id": rendezvous_id,
-            "rendezvous_secret": rendezvous_secret,
+            "room_descriptor": room_descriptor,
+            "signaling_key_ref": signaling_key_ref,
         });
         if let Err(e) = app.emit("companion://device-paired", payload) {
             log::warn!("failed to emit companion://device-paired: {e}");
@@ -367,7 +499,9 @@ fn redeem_with_pair_jwt(
             device_jwt,
             server_version: env!("CARGO_PKG_VERSION").to_string(),
             rendezvous_id,
-            rendezvous_secret,
+            room_descriptor,
+            signaling_key_ref,
+            account_id,
         }),
     )
         .into_response()
@@ -391,6 +525,7 @@ pub async fn whoami_handler(Extension(ctx): Extension<DeviceContext>) -> Respons
         StatusCode::OK,
         Json(json!({
             "device_id": ctx.device_id,
+            "account_id": ctx.account_id,
             "server_version": env!("CARGO_PKG_VERSION"),
             "tls_fingerprint": super::tls_fingerprint(),
         })),
@@ -425,17 +560,23 @@ fn error_response(status: StatusCode, code: &str, message: &str) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::companion_api::{
-        jwt::issue_pair_jwt,
-        redemption_lru::RedemptionLru,
-        SharedState,
-    };
+    use crate::companion_api::{jwt::issue_pair_jwt, redemption_lru::RedemptionLru, SharedState};
     use axum::{body::Body, http::Request, Router};
     use parking_lot::RwLock;
     use std::sync::Arc;
     use tower::ServiceExt as _;
 
     const SECRET: &[u8] = b"test-secret-32-bytes-exactly____";
+    const ACCOUNT_ID: &str = "local_acct_a";
+    const MOBILE_SIGNING_KEY: &str =
+        "BFUPRxAD89-Xw99QaseX9nIfsaH7e49vg9IkSYplyI4kE2CT1wEuUJpzcVy9CwCjzA_0tcAbP_oZarH7MnA2uOY";
+
+    /// Serializes the redeem-code tests, which share the process-global
+    /// `pair_code_guard`. One test deliberately drives the guard into lockout;
+    /// without this lock it could race a concurrent redeem test. Each redeem
+    /// test takes this lock and then `reset_for_test()`s the guard for a clean
+    /// slate.
+    static REDEEM_GUARD_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 
     fn test_state() -> SharedState {
         use crate::companion_api::{
@@ -444,7 +585,9 @@ mod tests {
         Arc::new(crate::companion_api::CompanionState {
             secret: RwLock::new(SECRET.to_vec()),
             redemption_lru: RedemptionLru::new(),
-            pair_code_lru: std::sync::Arc::new(crate::companion_api::pair_code_lru::PairCodeLru::new()),
+            pair_code_lru: std::sync::Arc::new(
+                crate::companion_api::pair_code_lru::PairCodeLru::new(),
+            ),
             deny_list: Arc::new(DenyList::new()),
             app_handle: None,
             idempotency: Arc::new(IdempotencyCache::new()),
@@ -454,18 +597,18 @@ mod tests {
                 crate::companion_api::desktop_messages_bridge::DesktopMessagesBridge::new(),
             desktop_writes_bridge:
                 crate::companion_api::desktop_writes_bridge::DesktopWritesBridge::new(),
-            sync_registry:
-                crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
-            rate_limiter:
-                crate::companion_api::rate_limit::RateLimiter::with_defaults(),
-            push_tokens:
-                crate::companion_api::push::PushTokenRegistry::new(),
+            sync_registry: crate::companion_api::sync_registry::SyncTableRegistry::with_defaults(),
+            rate_limiter: crate::companion_api::rate_limit::RateLimiter::with_defaults(),
+            push_tokens: crate::companion_api::push::PushTokenRegistry::new(),
         })
     }
 
     fn build_router(state: SharedState) -> Router {
         Router::new()
-            .route("/api/v1/auth/pair/issue", axum::routing::post(issue_handler))
+            .route(
+                "/api/v1/auth/pair/issue",
+                axum::routing::post(issue_handler),
+            )
             .route("/api/v1/auth/pair", axum::routing::post(pair_handler))
             .route(
                 "/api/v1/auth/pair/redeem-code",
@@ -481,19 +624,36 @@ mod tests {
         serde_json::from_slice(&bytes).expect("json parse")
     }
 
+    fn with_peer(mut request: Request<Body>, peer: &str) -> Request<Body> {
+        request.extensions_mut().insert(axum::extract::ConnectInfo(
+            peer.parse::<std::net::SocketAddr>().expect("peer address"),
+        ));
+        request
+    }
+
+    fn loopback(request: Request<Body>) -> Request<Body> {
+        with_peer(request, "127.0.0.1:43123")
+    }
+
     // ── /api/v1/auth/pair/issue ──────────────────────────────────────────
 
     #[tokio::test]
     async fn issue_returns_200_with_pair_jwt() {
         let router = build_router(test_state());
-        let req = Request::builder()
-            .method("POST")
-            .uri("/api/v1/auth/pair/issue")
-            .body(Body::empty())
-            .unwrap();
+        let req = loopback(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/pair/issue")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&serde_json::json!({ "accountId": ACCOUNT_ID })).unwrap(),
+                ))
+                .unwrap(),
+        );
         let resp = router.oneshot(req).await.unwrap();
-        assert_eq!(resp.status().as_u16(), 200);
+        let status = resp.status();
         let body = body_json(resp).await;
+        assert_eq!(status.as_u16(), 200, "unexpected pair response: {body}");
         assert!(body["pairJwt"].is_string());
         assert!(body["expiresAtMs"].is_number());
         // 6-digit numeric code minted alongside the QR payload.
@@ -513,6 +673,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn issue_rejects_non_loopback_peer_even_with_spoofed_forwarding_headers() {
+        let router = build_router(test_state());
+        let mut req = Request::builder()
+            .method("POST")
+            .uri("/api/v1/auth/pair/issue")
+            .header("content-type", "application/json")
+            .header("x-forwarded-for", "127.0.0.1")
+            .body(Body::from(
+                serde_json::to_vec(&serde_json::json!({ "accountId": ACCOUNT_ID })).unwrap(),
+            ))
+            .unwrap();
+        req = with_peer(req, "192.0.2.10:43123");
+
+        let resp = router.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        let body = body_json(resp).await;
+        assert_eq!(body["code"], "pair_issue_loopback_only");
+    }
+
+    #[tokio::test]
     async fn issue_persists_code_into_lru() {
         // The mint path is responsible for writing into pair_code_lru —
         // verify by checking len changes from 0 to 1 around a single
@@ -521,11 +701,16 @@ mod tests {
         let state = test_state();
         assert_eq!(state.pair_code_lru.len(), 0);
         let router = build_router(Arc::clone(&state));
-        let req = Request::builder()
-            .method("POST")
-            .uri("/api/v1/auth/pair/issue")
-            .body(Body::empty())
-            .unwrap();
+        let req = loopback(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/pair/issue")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&serde_json::json!({ "accountId": ACCOUNT_ID })).unwrap(),
+                ))
+                .unwrap(),
+        );
         let resp = router.oneshot(req).await.unwrap();
         assert_eq!(resp.status().as_u16(), 200);
         assert_eq!(state.pair_code_lru.len(), 1);
@@ -535,19 +720,25 @@ mod tests {
 
     #[tokio::test]
     async fn redeem_code_happy_path_returns_device_jwt() {
+        let _serial = REDEEM_GUARD_LOCK.lock();
+        pair_code_guard::global().reset_for_test();
         let state = test_state();
         let router = build_router(Arc::clone(&state));
 
         // Issue first so a code exists in the LRU.
         let issue_resp = router
             .clone()
-            .oneshot(
+            .oneshot(loopback(
                 Request::builder()
                     .method("POST")
                     .uri("/api/v1/auth/pair/issue")
-                    .body(Body::empty())
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&serde_json::json!({ "accountId": ACCOUNT_ID }))
+                            .unwrap(),
+                    ))
                     .unwrap(),
-            )
+            ))
             .await
             .unwrap();
         let issue_body = body_json(issue_resp).await;
@@ -559,6 +750,7 @@ mod tests {
             "devicePlatform": "android",
             "devicePubkey": "abc",
             "appVersion": "0.1.0",
+            "mobileSigningKey": MOBILE_SIGNING_KEY,
         });
         let req = Request::builder()
             .method("POST")
@@ -572,23 +764,30 @@ mod tests {
         assert!(body["deviceJwt"].is_string());
         assert!(body["deviceId"].is_string());
         assert!(body["rendezvousId"].is_string());
-        assert!(body["rendezvousSecret"].is_string());
+        assert_eq!(body["roomDescriptor"]["v"], 2);
+        assert!(body["signalingKeyRef"].is_string());
     }
 
     #[tokio::test]
     async fn redeem_code_is_single_use() {
+        let _serial = REDEEM_GUARD_LOCK.lock();
+        pair_code_guard::global().reset_for_test();
         let state = test_state();
         let router = build_router(Arc::clone(&state));
 
         let issue_resp = router
             .clone()
-            .oneshot(
+            .oneshot(loopback(
                 Request::builder()
                     .method("POST")
                     .uri("/api/v1/auth/pair/issue")
-                    .body(Body::empty())
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&serde_json::json!({ "accountId": ACCOUNT_ID }))
+                            .unwrap(),
+                    ))
                     .unwrap(),
-            )
+            ))
             .await
             .unwrap();
         let code = body_json(issue_resp).await["pairCode"]
@@ -608,6 +807,7 @@ mod tests {
                         "devicePlatform": "android",
                         "devicePubkey": "",
                         "appVersion": "0.1.0",
+                        "mobileSigningKey": MOBILE_SIGNING_KEY,
                     }))
                     .unwrap(),
                 ))
@@ -624,6 +824,8 @@ mod tests {
 
     #[tokio::test]
     async fn redeem_unknown_code_returns_404() {
+        let _serial = REDEEM_GUARD_LOCK.lock();
+        pair_code_guard::global().reset_for_test();
         let router = build_router(test_state());
         let req = Request::builder()
             .method("POST")
@@ -636,6 +838,7 @@ mod tests {
                     "devicePlatform": "android",
                     "devicePubkey": "",
                     "appVersion": "0.1.0",
+                    "mobileSigningKey": MOBILE_SIGNING_KEY,
                 }))
                 .unwrap(),
             ))
@@ -646,7 +849,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn redeem_code_brute_force_locks_out_after_threshold() {
+        let _serial = REDEEM_GUARD_LOCK.lock();
+        pair_code_guard::global().reset_for_test();
+        let router = build_router(test_state());
+
+        let make_req = |code: &str| {
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/pair/redeem-code")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&serde_json::json!({
+                        "code": code,
+                        "deviceLabel": "attacker",
+                        "devicePlatform": "android",
+                        "devicePubkey": "",
+                        "appVersion": "0.1.0",
+                        "mobileSigningKey": MOBILE_SIGNING_KEY,
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap()
+        };
+
+        // Burn through the failure threshold with wrong (but well-formed) codes.
+        for _ in 0..pair_code_guard::FAIL_THRESHOLD {
+            let resp = router.clone().oneshot(make_req("654321")).await.unwrap();
+            assert_eq!(resp.status().as_u16(), 404);
+        }
+        // The next attempt is locked out regardless of source.
+        let locked = router.oneshot(make_req("654321")).await.unwrap();
+        assert_eq!(locked.status().as_u16(), 429);
+        assert_eq!(body_json(locked).await["code"], "too_many_attempts");
+        pair_code_guard::global().reset_for_test();
+    }
+
+    #[tokio::test]
     async fn redeem_expired_code_returns_410() {
+        let _serial = REDEEM_GUARD_LOCK.lock();
+        pair_code_guard::global().reset_for_test();
         // Insert manually with a past expiry to bypass the issue path.
         let state = test_state();
         state.pair_code_lru.insert(
@@ -670,6 +912,7 @@ mod tests {
                     "devicePlatform": "android",
                     "devicePubkey": "",
                     "appVersion": "0.1.0",
+                    "mobileSigningKey": MOBILE_SIGNING_KEY,
                 }))
                 .unwrap(),
             ))
@@ -708,16 +951,13 @@ mod tests {
                         "devicePlatform": "android",
                         "devicePubkey": "",
                         "appVersion": "0.1.0",
+                        "mobileSigningKey": MOBILE_SIGNING_KEY,
                     }))
                     .unwrap(),
                 ))
                 .unwrap();
             let resp = router.clone().oneshot(req).await.unwrap();
-            assert_eq!(
-                resp.status().as_u16(),
-                400,
-                "code {bad:?} should be 400"
-            );
+            assert_eq!(resp.status().as_u16(), 400, "code {bad:?} should be 400");
             assert_eq!(body_json(resp).await["code"], "invalid_pair_code");
         }
     }
@@ -739,7 +979,7 @@ mod tests {
         let state = test_state();
         let router = build_router(Arc::clone(&state));
 
-        let (pair_jwt, _) = issue_pair_jwt(SECRET).expect("issue pair jwt");
+        let (pair_jwt, _) = issue_pair_jwt(SECRET, ACCOUNT_ID).expect("issue pair jwt");
 
         let req_body = serde_json::json!({
             "pairJwt": pair_jwt,
@@ -747,6 +987,7 @@ mod tests {
             "devicePlatform": "ios",
             "devicePubkey": "base64pubkeyhere==",
             "appVersion": "0.1.0",
+            "mobileSigningKey": MOBILE_SIGNING_KEY,
         });
         let req = Request::builder()
             .method("POST")
@@ -756,28 +997,25 @@ mod tests {
             .unwrap();
 
         let resp = router.oneshot(req).await.unwrap();
-        assert_eq!(resp.status().as_u16(), 200);
+        let status = resp.status();
         let body = body_json(resp).await;
+        assert_eq!(status.as_u16(), 200, "unexpected pair response: {body}");
         assert!(body["deviceId"].is_string());
         assert!(body["deviceJwt"].is_string());
         assert!(body["serverVersion"].is_string());
-        // ADR-0021: rendezvous fields must be present and well-formed.
+        // Signaling v2 returns a self-certifying room and no shared secret.
         let rid = body["rendezvousId"].as_str().expect("rendezvousId string");
-        assert!(
-            Uuid::parse_str(rid).is_ok(),
-            "rendezvousId is not a UUID: {rid}"
-        );
-        let rsec = body["rendezvousSecret"]
-            .as_str()
-            .expect("rendezvousSecret string");
-        let decoded = URL_SAFE_NO_PAD
-            .decode(rsec.as_bytes())
-            .expect("rendezvousSecret decodes as base64url");
-        assert_eq!(decoded.len(), 32, "rendezvousSecret must be 32 bytes");
+        assert_eq!(rid.len(), 43);
+        assert_eq!(body["roomDescriptor"]["v"], 2);
+        assert_eq!(body["roomDescriptor"]["roomId"], rid);
+        assert!(body.get("rendezvousSecret").is_none());
+        assert!(body["signalingKeyRef"].is_string());
     }
 
     #[tokio::test]
     async fn pair_two_redeems_produce_distinct_rendezvous() {
+        let _serial = REDEEM_GUARD_LOCK.lock();
+        pair_code_guard::global().reset_for_test();
         // Each pair flow gets a fresh rendezvous tuple — secrets do not
         // collide across devices and the id is not derived from any
         // predictable input.
@@ -785,8 +1023,8 @@ mod tests {
         let secret_b = test_state();
         let router_a = build_router(Arc::clone(&secret_a));
         let router_b = build_router(Arc::clone(&secret_b));
-        let (jwt_a, _) = issue_pair_jwt(SECRET).expect("issue jwt a");
-        let (jwt_b, _) = issue_pair_jwt(SECRET).expect("issue jwt b");
+        let (jwt_a, _) = issue_pair_jwt(SECRET, ACCOUNT_ID).expect("issue jwt a");
+        let (jwt_b, _) = issue_pair_jwt(SECRET, ACCOUNT_ID).expect("issue jwt b");
 
         let send = |router: Router, jwt: String| async move {
             let req = Request::builder()
@@ -800,6 +1038,7 @@ mod tests {
                         "devicePlatform": "ios",
                         "devicePubkey": "",
                         "appVersion": "0.1.0",
+                        "mobileSigningKey": MOBILE_SIGNING_KEY,
                     }))
                     .unwrap(),
                 ))
@@ -810,7 +1049,7 @@ mod tests {
         let body_a = send(router_a, jwt_a).await;
         let body_b = send(router_b, jwt_b).await;
         assert_ne!(body_a["rendezvousId"], body_b["rendezvousId"]);
-        assert_ne!(body_a["rendezvousSecret"], body_b["rendezvousSecret"]);
+        assert_ne!(body_a["roomDescriptor"], body_b["roomDescriptor"]);
     }
 
     // ── 401 invalid_pair_jwt ─────────────────────────────────────────────
@@ -824,6 +1063,7 @@ mod tests {
             "devicePlatform": "android",
             "devicePubkey": "abc",
             "appVersion": "0.1.0",
+            "mobileSigningKey": MOBILE_SIGNING_KEY,
         });
         let req = Request::builder()
             .method("POST")
@@ -839,8 +1079,9 @@ mod tests {
 
     #[tokio::test]
     async fn pair_wrong_scope_jwt_returns_401() {
-        let device_jwt = crate::companion_api::jwt::issue_device_jwt(SECRET, "some-device")
-            .expect("issue device jwt");
+        let device_jwt =
+            crate::companion_api::jwt::issue_device_jwt(SECRET, "some-device", ACCOUNT_ID)
+                .expect("issue device jwt");
         let router = build_router(test_state());
         let req_body = serde_json::json!({
             "pairJwt": device_jwt,
@@ -848,6 +1089,7 @@ mod tests {
             "devicePlatform": "android",
             "devicePubkey": "abc",
             "appVersion": "0.1.0",
+            "mobileSigningKey": MOBILE_SIGNING_KEY,
         });
         let req = Request::builder()
             .method("POST")
@@ -866,13 +1108,14 @@ mod tests {
     #[tokio::test]
     async fn pair_redeemed_jwt_returns_409() {
         let state = test_state();
-        let (pair_jwt, _) = issue_pair_jwt(SECRET).expect("issue pair jwt");
+        let (pair_jwt, _) = issue_pair_jwt(SECRET, ACCOUNT_ID).expect("issue pair jwt");
         let req_body = serde_json::json!({
             "pairJwt": pair_jwt,
             "deviceLabel": "Phone",
             "devicePlatform": "ios",
             "devicePubkey": "abc",
             "appVersion": "0.1.0",
+            "mobileSigningKey": MOBILE_SIGNING_KEY,
         });
 
         // First request succeeds.
@@ -905,7 +1148,7 @@ mod tests {
     #[tokio::test]
     async fn pair_label_too_long_returns_400() {
         let state = test_state();
-        let (pair_jwt, _) = issue_pair_jwt(SECRET).expect("issue pair jwt");
+        let (pair_jwt, _) = issue_pair_jwt(SECRET, ACCOUNT_ID).expect("issue pair jwt");
         let label_65 = "a".repeat(65);
         let req_body = serde_json::json!({
             "pairJwt": pair_jwt,
@@ -913,6 +1156,7 @@ mod tests {
             "devicePlatform": "ios",
             "devicePubkey": "abc",
             "appVersion": "0.1.0",
+            "mobileSigningKey": MOBILE_SIGNING_KEY,
         });
         let router = build_router(state);
         let req = Request::builder()
@@ -930,7 +1174,7 @@ mod tests {
     #[tokio::test]
     async fn pair_label_exactly_64_chars_is_ok() {
         let state = test_state();
-        let (pair_jwt, _) = issue_pair_jwt(SECRET).expect("issue pair jwt");
+        let (pair_jwt, _) = issue_pair_jwt(SECRET, ACCOUNT_ID).expect("issue pair jwt");
         let label_64 = "x".repeat(64);
         let req_body = serde_json::json!({
             "pairJwt": pair_jwt,
@@ -938,6 +1182,7 @@ mod tests {
             "devicePlatform": "ios",
             "devicePubkey": "abc",
             "appVersion": "0.1.0",
+            "mobileSigningKey": MOBILE_SIGNING_KEY,
         });
         let router = build_router(state);
         let req = Request::builder()

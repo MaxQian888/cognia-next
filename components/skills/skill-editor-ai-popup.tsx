@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { Streamdown } from "streamdown"
+import { MarkdownRenderer } from "@/components/chat/markdown-renderer"
 import {
   Dialog,
   DialogContent,
@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
-import type { SkillValidationError } from "@/lib/claude/types"
+import type { SkillValidationError } from "@cognia/agent-config-types"
 
 type AiIntent = "optimize" | "simplify" | "expand" | "fixErrors"
 
@@ -109,9 +109,7 @@ export function SkillEditorAiPopup({
             <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               {t("diff")}
             </p>
-            <div className="prose prose-sm dark:prose-invert max-w-none">
-              <Streamdown>{suggested}</Streamdown>
-            </div>
+            <MarkdownRenderer content={suggested} rhythm="document" />
           </Card>
         )}
 

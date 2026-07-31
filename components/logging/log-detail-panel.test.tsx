@@ -6,7 +6,7 @@ import React from "react"
 import { render, screen, fireEvent, act } from "@testing-library/react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 
-jest.mock("@/lib/agent-trace/log-adapter", () => ({
+jest.mock("@cognia/agent-trace/log-adapter", () => ({
   AGENT_TRACE_MODULE: "agent.trace",
   getAgentTraceLogData: (log: { data?: unknown }) => log.data,
 }))
@@ -24,12 +24,12 @@ jest.mock("@/lib/agent", () => ({
   formatTokens: (n: number) => `${n}t`,
 }))
 
-jest.mock("@/lib/agent-trace/cost-estimator", () => ({
+jest.mock("@cognia/agent-trace/cost-formatter", () => ({
   formatCost: (cost: number) => `$${cost.toFixed(4)}`,
 }))
 
 import { LogDetailPanel } from "./log-detail-panel"
-import type { StructuredLogEntry } from "@/lib/logging"
+import type { StructuredLogEntry } from "@cognia/logging"
 
 beforeAll(() => {
   Object.defineProperty(navigator, "clipboard", {
@@ -361,5 +361,62 @@ describe("JsonTreeNode — primitive fallback", () => {
     renderPanel({ log: makeLog({ data: ["a", "b"] as unknown as Record<string, unknown> }) })
     expect(screen.getByText('"a"')).toBeInTheDocument()
     expect(screen.getByText('"b"')).toBeInTheDocument()
+  })
+})
+
+describe("LogDetailPanel — prev/next navigation", () => {
+  it("renders nav controls with position when onNavigate + navPosition provided", () => {
+    renderPanel({
+      log: makeLog(),
+      onNavigate: jest.fn(),
+      navPosition: { index: 3, total: 50 },
+    })
+    expect(screen.getByTestId("log-detail-nav")).toBeInTheDocument()
+    expect(screen.getByText("3/50")).toBeInTheDocument()
+  })
+
+  it("fires onNavigate(-1) / onNavigate(1) from the arrow buttons", () => {
+    const onNavigate = jest.fn()
+    renderPanel({ log: makeLog(), onNavigate, navPosition: { index: 3, total: 50 } })
+    fireEvent.click(screen.getByTestId("log-detail-nav-prev"))
+    expect(onNavigate).toHaveBeenCalledWith(-1)
+    fireEvent.click(screen.getByTestId("log-detail-nav-next"))
+    expect(onNavigate).toHaveBeenCalledWith(1)
+  })
+
+  it("disables prev at the first entry and next at the last entry", () => {
+    const { rerender } = renderPanel({
+      log: makeLog(),
+      onNavigate: jest.fn(),
+      navPosition: { index: 1, total: 5 },
+    })
+    expect(screen.getByTestId("log-detail-nav-prev")).toBeDisabled()
+    expect(screen.getByTestId("log-detail-nav-next")).not.toBeDisabled()
+    rerender(
+      <TooltipProvider delayDuration={0}>
+        <LogDetailPanel
+          log={makeLog()}
+          onNavigate={jest.fn()}
+          navPosition={{ index: 5, total: 5 }}
+        />
+      </TooltipProvider>
+    )
+    expect(screen.getByTestId("log-detail-nav-prev")).not.toBeDisabled()
+    expect(screen.getByTestId("log-detail-nav-next")).toBeDisabled()
+  })
+
+  it("hides nav controls when onNavigate is not provided", () => {
+    renderPanel({ log: makeLog() })
+    expect(screen.queryByTestId("log-detail-nav")).not.toBeInTheDocument()
+  })
+})
+
+describe("LogDetailPanel — lazy JSON copy", () => {
+  it("serializes log.data only when the copy button is clicked", () => {
+    const data = { nested: { value: 42 } }
+    renderPanel({ log: makeLog({ data }) })
+    const copyJson = screen.getByText("Copy JSON").closest("button") as HTMLButtonElement
+    fireEvent.click(copyJson)
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(JSON.stringify(data, null, 2))
   })
 })

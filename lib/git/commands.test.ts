@@ -1,6 +1,17 @@
 const isTauriMock = jest.fn()
+const isCapacitorMock = jest.fn()
+const hasWebCompanionTargetMock = jest.fn()
 const callMock = jest.fn()
 const subscribeMock = jest.fn()
+
+jest.mock("@/lib/platform/detect", () => ({
+  isTauri: () => isTauriMock(),
+  isCapacitor: () => isCapacitorMock(),
+}))
+
+jest.mock("@/lib/platform/web-companion", () => ({
+  hasWebCompanionTarget: () => hasWebCompanionTargetMock(),
+}))
 
 jest.mock("@/lib/tauri", () => ({
   isTauri: () => isTauriMock(),
@@ -13,28 +24,52 @@ jest.mock("@/lib/tauri", () => ({
 import {
   gitBranches,
   gitCheckoutBranch,
+  gitCherryPick,
+  gitClone,
   gitCommit,
+  gitCommitFiles,
   gitConflicts,
   gitCreateBranch,
+  gitCreateTag,
   gitDeleteBranch,
+  gitDeleteTag,
+  gitDiffCommit,
   gitDiffFile,
+  gitDiffStagedAll,
+  gitDiffStat,
   gitDiffRefsFile,
   gitDiffRefsFiles,
   gitDiscard,
   gitDiscardAll,
   gitFetch,
   gitFileHistory,
+  gitBlame,
   gitIgnoreAdd,
+  gitIdentity,
   gitInit,
   gitIsRepo,
   gitLog,
   gitMerge,
   gitMergeAbort,
+  gitInteractiveRebase,
   gitPull,
   gitPush,
+  gitPushTag,
+  gitRebase,
+  gitRebaseCommits,
+  gitRefs,
+  gitRemoteAdd,
+  gitRemoteRemove,
+  gitRemotes,
   gitRenameBranch,
   gitRepoState,
+  gitReset,
+  gitRestore,
+  gitRevert,
   gitResolveConflict,
+  gitSequencerAbort,
+  gitSequencerContinue,
+  gitSetIdentity,
   gitStage,
   gitStashApply,
   gitStashDrop,
@@ -43,25 +78,38 @@ import {
   gitStashPush,
   gitStatus,
   gitSync,
+  gitTags,
   gitUnstage,
   gitWatchStart,
   gitWatchStop,
+  gitWorktreeAdd,
+  gitWorktreeCommit,
+  gitWorktreeList,
+  gitWorktreePrune,
+  gitWorktreeRemove,
+  hasGitBridge,
+  isSourceControlUiAvailable,
 } from "./commands"
 import { EMPTY_REPO_STATE, EMPTY_STATUS } from "@/types/git"
 
 beforeEach(() => {
   isTauriMock.mockReset()
+  isCapacitorMock.mockReset()
+  hasWebCompanionTargetMock.mockReset()
+  isCapacitorMock.mockReturnValue(false)
+  hasWebCompanionTargetMock.mockReturnValue(false)
   callMock.mockReset()
   subscribeMock.mockReset()
 })
 
-describe("when not in Tauri", () => {
+describe("when no git bridge is available (plain unpaired browser)", () => {
   beforeEach(() => isTauriMock.mockReturnValue(false))
 
   it("returns inert values without calling transport", async () => {
     expect(await gitIsRepo("/r")).toBe(false)
     expect(await gitRepoState("/r")).toBe(EMPTY_REPO_STATE)
     expect(await gitStatus("/r")).toBe(EMPTY_STATUS)
+    expect(await gitDiffStat("/r")).toEqual([])
     expect(await gitBranches("/r")).toEqual([])
     expect(await gitStashList("/r")).toEqual([])
     expect(await gitConflicts("/r")).toEqual([])
@@ -76,7 +124,99 @@ describe("when not in Tauri", () => {
     await gitDiscard("/r", ["a"])
     await gitWatchStart("/r")
     await gitWatchStop("/r")
+    expect(await gitWorktreeList("/r")).toEqual([])
+    expect(await gitWorktreeCommit("/wt", "m")).toBeNull()
+    await gitWorktreeAdd("/r", "/wt", "agent/x")
+    await gitWorktreeRemove("/r", "/wt", true, "agent/x")
+    await gitWorktreePrune("/r")
+
+    expect((await gitDiffCommit("/r", "abc", "a.ts")).hunks).toEqual([])
+    expect(await gitCommitFiles("/r", "abc")).toEqual([])
+    expect(await gitDiffRefsFiles("/r", "main", "feature")).toEqual([])
+    expect((await gitDiffRefsFile("/r", "main", "feature", "a.ts")).hunks).toEqual([])
+    expect(await gitDiffStagedAll("/r")).toBe("")
+    expect(await gitRefs("/r")).toEqual([])
+    expect(await gitBlame("/r", "a.ts")).toEqual([])
+    expect(await gitRemotes("/r")).toEqual([])
+    expect(await gitTags("/r")).toEqual([])
+    await gitDiscardAll("/r", true)
+    await gitCheckoutBranch("/r", "feature")
+    await gitCreateBranch("/r", "feature", true)
+    await gitDeleteBranch("/r", "feature", true)
+    await gitRenameBranch("/r", "renamed")
+    await gitFetch("/r")
+    await gitPull("/r")
+    await gitPush("/r")
+    await gitRemoteAdd("/r", "origin", "https://example.test/repo.git")
+    await gitRemoteRemove("/r", "origin")
+    await gitCreateTag("/r", "v1")
+    await gitDeleteTag("/r", "v1")
+    await gitPushTag("/r", "v1")
+    await gitReset("/r", "mixed", "HEAD")
+    await gitRestore("/r", ["a.ts"])
+    await gitStashPush("/r")
+    await gitStashPop("/r", 0)
+    await gitStashApply("/r", 0)
+    await gitStashDrop("/r", 0)
+    await gitIgnoreAdd("/r", "tmp.log")
+    await gitResolveConflict("/r", "a.ts", { side: "ours" })
+    await gitInit("/r")
+    await gitMerge("/r", "feature")
+    await gitMergeAbort("/r")
+    await gitRebase("/r", "main")
+    await gitCherryPick("/r", "abc")
+    await gitRevert("/r", "abc")
+    await gitSequencerContinue("/r")
+    await gitSequencerAbort("/r")
+    expect(await gitRebaseCommits("/r", "main")).toEqual([])
+    await gitInteractiveRebase("/r", "main", [])
     expect(callMock).not.toHaveBeenCalled()
+  })
+})
+
+describe("when on a companion transport (Capacitor / paired web)", () => {
+  beforeEach(() => {
+    isTauriMock.mockReturnValue(false)
+    isCapacitorMock.mockReturnValue(true)
+    callMock.mockResolvedValue(undefined)
+  })
+
+  it("reads and writes go through the transport", async () => {
+    callMock.mockResolvedValueOnce(true)
+    expect(await gitIsRepo("/r")).toBe(true)
+    expect(callMock).toHaveBeenCalledWith("git_is_repo", { repoPath: "/r" })
+
+    await gitStage("/r", ["a.ts"])
+    expect(callMock).toHaveBeenCalledWith("git_stage", {
+      repoPath: "/r",
+      paths: ["a.ts"],
+      hunkPatch: null,
+    })
+  })
+
+  it("the fs watcher stays Tauri-only", async () => {
+    await gitWatchStart("/r")
+    await gitWatchStop("/r")
+    expect(callMock).not.toHaveBeenCalled()
+  })
+
+  it("hasGitBridge reflects the web-companion pairing too", () => {
+    isCapacitorMock.mockReturnValue(false)
+    expect(hasGitBridge()).toBe(false)
+    hasWebCompanionTargetMock.mockReturnValue(true)
+    expect(hasGitBridge()).toBe(true)
+  })
+
+  it("isSourceControlUiAvailable stays desktop-only, narrower than hasGitBridge", () => {
+    // The seam can reach git over a web-companion...
+    isTauriMock.mockReturnValue(false)
+    hasWebCompanionTargetMock.mockReturnValue(true)
+    expect(hasGitBridge()).toBe(true)
+    // ...but the panel/chip UI is not offered off the desktop.
+    expect(isSourceControlUiAvailable()).toBe(false)
+    // On Tauri desktop both are live.
+    isTauriMock.mockReturnValue(true)
+    expect(isSourceControlUiAvailable()).toBe(true)
   })
 })
 
@@ -95,6 +235,12 @@ describe("when in Tauri", () => {
     await gitStatus("/r")
     expect(callMock).toHaveBeenCalledWith("git_status", { repoPath: "/r" })
 
+    callMock.mockResolvedValueOnce([{ path: "src/a.ts", insertions: 2, deletions: 1 }])
+    await expect(gitDiffStat("/r")).resolves.toEqual([
+      { path: "src/a.ts", insertions: 2, deletions: 1 },
+    ])
+    expect(callMock).toHaveBeenCalledWith("git_diff_stat", { repoPath: "/r" })
+
     callMock.mockResolvedValueOnce([])
     await gitLog("/r", 50, 10)
     expect(callMock).toHaveBeenCalledWith("git_log", { repoPath: "/r", maxCount: 50, skip: 10 })
@@ -105,6 +251,66 @@ describe("when in Tauri", () => {
       repoPath: "/r",
       path: "a.ts",
       maxCount: 20,
+    })
+  })
+
+  it("covers the extended read and history command surface", async () => {
+    const diff = { path: "a.ts", oldContent: "", newContent: "", hunks: [], isBinary: false }
+    callMock.mockResolvedValueOnce(diff)
+    expect((await gitDiffCommit("/r", "abc", "a.ts")).language).toBe("typescript")
+    await gitCommitFiles("/r", "abc")
+    await gitDiffStagedAll("/r")
+    await gitRefs("/r")
+    await gitBlame("/r", "a.ts", "HEAD")
+    await gitBlame("/r", "a.ts")
+    await gitRemotes("/r")
+    await gitTags("/r")
+    expect(callMock).toHaveBeenCalledWith("git_diff_commit", {
+      repoPath: "/r",
+      sha: "abc",
+      path: "a.ts",
+    })
+    expect(callMock).toHaveBeenCalledWith("git_blame", {
+      repoPath: "/r",
+      path: "a.ts",
+      rev: "HEAD",
+    })
+  })
+
+  it("covers remote, tag, restore, and sequencer command surfaces", async () => {
+    await gitRemoteAdd("/r", "upstream", "https://example.test/repo.git")
+    await gitRemoteRemove("/r", "upstream")
+    await gitCreateTag("/r", "v1", "release", "HEAD")
+    await gitCreateTag("/r", "v2")
+    await gitDeleteTag("/r", "v1")
+    await gitPushTag("/r", "v1")
+    await gitReset("/r", "mixed", "HEAD~1")
+    await gitRestore("/r", ["a.ts"], true, "HEAD")
+    await gitRestore("/r", ["b.ts"])
+    await gitRebase("/r", "main")
+    await gitCherryPick("/r", "abc")
+    await gitRevert("/r", "def")
+    await gitSequencerContinue("/r")
+    await gitSequencerAbort("/r")
+    await gitRebaseCommits("/r", "main")
+    await gitInteractiveRebase("/r", "main", [{ action: "pick", sha: "abc" }])
+
+    expect(callMock).toHaveBeenCalledWith("git_create_tag", {
+      repoPath: "/r",
+      name: "v1",
+      message: "release",
+      target: "HEAD",
+    })
+    expect(callMock).toHaveBeenCalledWith("git_restore", {
+      repoPath: "/r",
+      paths: ["a.ts"],
+      staged: true,
+      source: "HEAD",
+    })
+    expect(callMock).toHaveBeenCalledWith("git_interactive_rebase", {
+      repoPath: "/r",
+      base: "main",
+      entries: [{ action: "pick", sha: "abc" }],
     })
   })
 
@@ -196,6 +402,52 @@ describe("when in Tauri", () => {
     })
   })
 
+  it("worktree ops pass null defaults", async () => {
+    await gitWorktreeAdd("/r", "/wt", "agent/run/alice/t1")
+    expect(callMock).toHaveBeenCalledWith("git_worktree_add", {
+      repoPath: "/r",
+      path: "/wt",
+      branch: "agent/run/alice/t1",
+      baseRef: null,
+    })
+    await gitWorktreeAdd("/r", "/wt", "agent/b", "HEAD")
+    expect(callMock).toHaveBeenCalledWith("git_worktree_add", {
+      repoPath: "/r",
+      path: "/wt",
+      branch: "agent/b",
+      baseRef: "HEAD",
+    })
+    await gitWorktreeRemove("/r", "/wt", true, "agent/b")
+    expect(callMock).toHaveBeenCalledWith("git_worktree_remove", {
+      repoPath: "/r",
+      path: "/wt",
+      force: true,
+      deleteBranch: "agent/b",
+    })
+    await gitWorktreeRemove("/r", "/wt", false)
+    expect(callMock).toHaveBeenCalledWith("git_worktree_remove", {
+      repoPath: "/r",
+      path: "/wt",
+      force: false,
+      deleteBranch: null,
+    })
+    callMock.mockResolvedValueOnce([{ path: "/r", branch: "main", head: "abc", isMain: true }])
+    const wts = await gitWorktreeList("/r")
+    expect(callMock).toHaveBeenCalledWith("git_worktree_list", { repoPath: "/r" })
+    expect(wts[0]?.isMain).toBe(true)
+
+    callMock.mockResolvedValueOnce("sha123")
+    const sha = await gitWorktreeCommit("/wt", "agent work")
+    expect(callMock).toHaveBeenCalledWith("git_worktree_commit", {
+      worktreePath: "/wt",
+      message: "agent work",
+    })
+    expect(sha).toBe("sha123")
+
+    await gitWorktreePrune("/r")
+    expect(callMock).toHaveBeenCalledWith("git_worktree_prune", { repoPath: "/r" })
+  })
+
   it("network ops", async () => {
     await gitFetch("/r", "origin", true)
     expect(callMock).toHaveBeenCalledWith("git_fetch", {
@@ -255,6 +507,27 @@ describe("when in Tauri", () => {
     })
     await gitInit("/dir")
     expect(callMock).toHaveBeenCalledWith("git_init", { path: "/dir" })
+    callMock.mockResolvedValueOnce("/work/cloned")
+    await expect(gitClone("https://example.com/team/repo.git", "/work/cloned")).resolves.toBe(
+      "/work/cloned"
+    )
+    expect(callMock).toHaveBeenCalledWith("git_clone", {
+      remoteUrl: "https://example.com/team/repo.git",
+      destination: "/work/cloned",
+    })
+    callMock.mockResolvedValueOnce({ name: "Cognia Developer", email: "developer@example.com" })
+    await expect(gitIdentity("/work/cloned")).resolves.toEqual({
+      name: "Cognia Developer",
+      email: "developer@example.com",
+    })
+    expect(callMock).toHaveBeenCalledWith("git_identity", { repoPath: "/work/cloned" })
+    await gitSetIdentity("/work/cloned", "Cognia Developer", "developer@example.com", true)
+    expect(callMock).toHaveBeenCalledWith("git_set_identity", {
+      repoPath: "/work/cloned",
+      name: "Cognia Developer",
+      email: "developer@example.com",
+      global: true,
+    })
     callMock.mockResolvedValueOnce([])
     await gitDiffRefsFiles("/r", "main", "feature")
     expect(callMock).toHaveBeenCalledWith("git_diff_refs_files", {

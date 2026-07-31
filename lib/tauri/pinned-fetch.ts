@@ -20,22 +20,19 @@
  * - **Web / dev** (`!isCapacitor`): uses the platform `fetch` — plain HTTP
  *   only, or HTTPS with OS trust. Cannot reach the desktop's self-signed
  *   cert; mobile dev runs against a separate dev server.
- * - **Capacitor LAN**: `serverTrustMode: "self-signed"`. Accepts the
- *   server's cert without chain validation. Identity is established via
- *   the QR-encoded fingerprint stored in `CompanionConfig.serverFingerprint`,
- *   which the JS layer compares against `/api/v1/whoami` server response
- *   data (see P0.3). This is **not** strict TLS pinning — true pinning
- *   requires runtime cert hash injection (Android Network Security Config /
- *   iOS Info.plist) which is tracked in `mobile/docs/p0-tls-trust-setup.md`.
+ * - **Capacitor LAN**: `serverTrustMode: "pinned"` plus the exact SHA-256
+ *   SPKI fingerprint accepted during pairing. A native implementation that
+ *   cannot enforce this contract must fail the request; self-signed trust
+ *   without identity binding is never selected after pairing.
  * - **Capacitor tunnel** (cloudflared): `serverTrustMode: "default"`.
  *   Standard OS trust chain since Cloudflare issues a real cert.
  *
- * # WebSocket caveat
+ * # WebSocket boundary
  *
- * Capacitor does not ship a native WebSocket plugin with cert pinning. WS
- * traffic uses the browser `WebSocket` API and inherits its trust model —
- * same self-signed acceptance question. Android Network Security Config /
- * iOS ATS exception covers this at the platform layer; same TODOs apply.
+ * Stock Capacitor does not provide SPKI-pinned WebSockets. A self-signed LAN
+ * host therefore cannot be treated as WS-capable until a native transport
+ * explicitly attests that it enforces the accepted fingerprint. Public-PKI
+ * WSS remains available through the browser stack.
  */
 
 // CapacitorHttp shim — types + runtime detector are owned by the
@@ -51,14 +48,11 @@ function pickTrustMode(
   if (/\.trycloudflare\.com$/i.test(new URL(url).hostname)) {
     return "default"
   }
-  // LAN: self-signed acceptance plus app-layer fingerprint check (P0.3).
-  // TODO(P0.2 native): switch to "pinned" once Network Security Config /
-  // Info.plist carry the cert hash at build time.
-  return hasPinnedFingerprint ? "self-signed" : "default"
+  return hasPinnedFingerprint ? "pinned" : "default"
 }
 
 export interface PinnedFetchInit extends Omit<RequestInit, "body"> {
-  body?: string
+  body?: BodyInit | null
   /** Pinned SHA-256 SPKI fingerprint (lower-case hex) from the pair payload. */
   serverFingerprint?: string
 }
@@ -82,6 +76,14 @@ export async function pinnedFetch(url: string, init: PinnedFetchInit = {}): Prom
   const headers = normalizeHeaders(init.headers)
   const method = (init.method ?? "GET").toUpperCase() as CapacitorHttpRequest["method"]
   const trustMode = pickTrustMode(url, Boolean(init.serverFingerprint))
+  if (trustMode === "pinned") {
+    const capabilities = await cap.getSecurityCapabilities?.()
+    if (capabilities?.spkiPinning !== true) {
+      throw new Error(
+        "native_spki_pinning_unavailable: the native HTTP transport cannot attest SPKI enforcement"
+      )
+    }
+  }
 
   const resp = await cap.request({
     url,
@@ -89,6 +91,7 @@ export async function pinnedFetch(url: string, init: PinnedFetchInit = {}): Prom
     headers,
     data: init.body,
     serverTrustMode: trustMode,
+    ...(trustMode === "pinned" ? { serverFingerprint: init.serverFingerprint } : {}),
     responseType: "text",
   })
 
@@ -107,6 +110,12 @@ function buildResponseLike(
   data: unknown
 ): Response {
   const text = typeof data === "string" ? data : JSON.stringify(data)
+  const bytes =
+    data instanceof ArrayBuffer
+      ? data
+      : ArrayBuffer.isView(data)
+        ? data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)
+        : new TextEncoder().encode(text).buffer
   const lowerHeaders: Record<string, string> = {}
   for (const [k, v] of Object.entries(headers)) {
     lowerHeaders[k.toLowerCase()] = v
@@ -122,6 +131,7 @@ function buildResponseLike(
     },
     text: async () => text,
     json: async () => JSON.parse(text),
+    arrayBuffer: async () => bytes,
   }
   return responseLike as unknown as Response
 }

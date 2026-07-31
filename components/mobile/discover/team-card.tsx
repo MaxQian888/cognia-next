@@ -6,7 +6,7 @@ import { UsersIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Item, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/components/ui/item"
-import type { Team } from "@/lib/claude/types"
+import type { Team } from "@cognia/agent-config-types"
 import { cn } from "@/lib/utils"
 
 export interface TeamCardProps {
@@ -19,7 +19,7 @@ export function TeamCard({ team, className }: TeamCardProps) {
   const memberCount = team.members?.length ?? 0
   return (
     <Link
-      href={`/agent-teams/${encodeURIComponent(team.id)}`}
+      href={`/agent-teams/workspace?teamId=${encodeURIComponent(team.id)}`}
       className="block"
       data-testid={`team-card-${team.id}`}
     >

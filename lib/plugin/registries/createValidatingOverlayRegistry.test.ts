@@ -99,3 +99,28 @@ describe("createValidatingOverlayRegistry", () => {
     expect(reg.getWarnings("a")).toEqual([])
   })
 })
+
+// ── W4.4: hardValidate rejects structurally-broken contributions ─────────────
+describe("hardValidate (W4.4)", () => {
+  it("throws on a structurally broken entry and never registers it", () => {
+    const reg = createValidatingOverlayRegistry<{ name?: string }, string>({
+      name: "test-hard",
+      validate: () => [],
+      hardValidate: (entry) => (entry.name ? [] : ["missing name"]),
+    })
+    expect(() => reg.register("bad", {})).toThrow(/test-hard rejected "bad": missing name/)
+    expect(reg.get("bad")).toBeUndefined()
+    expect(() => reg.register("good", { name: "ok" })).not.toThrow()
+    expect(reg.get("good")).toEqual({ name: "ok" })
+  })
+
+  it("keeps soft warnings advisory (entry still registers)", () => {
+    const reg = createValidatingOverlayRegistry<{ dep?: string }, string>({
+      name: "test-soft",
+      validate: (entry) => (entry.dep ? [] : ["missing dep"]),
+    })
+    reg.register("warned", {})
+    expect(reg.get("warned")).toEqual({})
+    expect(reg.getWarnings("warned")).toEqual(["missing dep"])
+  })
+})

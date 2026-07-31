@@ -16,7 +16,7 @@
 "use client"
 
 import { invoke } from "@tauri-apps/api/core"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import type { PluginCapability, PluginTrayAPI, PluginTrayItemInput } from "@/types/plugin/plugin"
 import { registerTrayItem, unregisterTrayItem } from "@/lib/tray/registry"
 import { recordSilentFailure } from "../contracts/diagnostics-store"
@@ -68,10 +68,12 @@ export function createTrayAPI({ pluginId, capabilities }: CreateTrayAPIArgs): Pl
       id: fullId,
       pluginId,
       label: item.label,
+      labelKey: item.labelKey,
       icon: item.icon,
       when: item.when,
       category: item.category,
       accelerator: item.accelerator,
+      run: item.onClick,
     })
 
     const listener = () => {

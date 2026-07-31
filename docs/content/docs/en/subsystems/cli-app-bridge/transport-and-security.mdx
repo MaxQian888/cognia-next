@@ -1,0 +1,100 @@
+---
+title: Transport and security
+description: Endpoint discovery, the complete 12-route catalog, per-launch authentication, route ownership, and WebView-backed request/response behavior.
+---
+
+# Transport and security
+
+## Discovery lifecycle
+
+At Tauri startup, `cli_bridge::init` binds `127.0.0.1:0`, generates 32 random bytes, hex-encodes
+them into a 64-character token, and writes the following discovery file under the OS config
+directory at `cognia/cli-endpoint.json`:
+
+```json
+{
+  "baseUrl": "http://127.0.0.1:<ephemeral-port>",
+  "devToken": "<64-character hex token>"
+}
+```
+
+Unix permissions are changed to `0600` best-effort after the write; Windows relies on the user
+profile ACL. The file can remain after shutdown. Clients therefore treat it as a discovery hint,
+not proof of liveness: `cognia-agent` performs an authenticated health probe, while `cognia`
+translates connection refusal into a stale-endpoint diagnostic. Each successful restart overwrites
+the file and rotates the token.
+
+## Request boundary
+
+- The listener binds only IPv4 loopback, and middleware rejects a non-loopback `ConnectInfo` with
+  403 even if the socket configuration changes later.
+- Every route, including health, requires `X-Cognia-Dev-Token`.
+- Equal-length tokens are compared byte-by-byte without early exit; a length mismatch fails.
+- A 4 MiB request-body cap wraps the whole router.
+- The channel protects against unrelated local callers that cannot read the endpoint file. It is
+  not a security boundary against a malicious process already running as the same OS user.
+
+## Route catalog
+
+There are exactly **12** registered paths. A Rust characterization test in
+`src-tauri/src/cli_bridge/server.rs` locks this list and the router's route count.
+
+| Method and path | Consumer | Execution |
+| --- | --- | --- |
+| `GET /api/v1/dev/health` | both CLIs | Rust liveness response |
+| `GET /api/v1/dev/plugins/installed` | `cognia` | Privacy-safe plugin snapshot |
+| `POST /api/v1/dev/plugins/install` | `cognia` | Install bundle |
+| `POST /api/v1/dev/plugins/install-directory` | `cognia` | Install unpacked directory |
+| `POST /api/v1/dev/plugins/uninstall` | `cognia` | Remove plugin |
+| `POST /api/v1/dev/plugins/reload` | `cognia` | Reload or reinstall artifact |
+| `POST /api/v1/dev/acp/token` | `cognia` | Mint device-scope companion JWT for ACP |
+| `POST /api/v1/dev/sessions/handoff` | `cognia-agent` | Emit asynchronous renderer import event |
+| `POST /api/v1/dev/twin/context` | `cognia-agent` | Renderer round-trip |
+| `POST /api/v1/dev/teams/list` | `cognia-agent` | Renderer round-trip |
+| `POST /api/v1/dev/teams/run` | `cognia-agent` | Renderer round-trip |
+| `POST /api/v1/dev/teams/run-status` | `cognia-agent` | Renderer round-trip |
+
+`cognia-agent` uses six paths; `cognia` uses seven. Health is the only shared path, so their union
+is 12. The installed-plugin projection deliberately excludes `runtime_state`, and twin context
+returns redacted prompt segments rather than raw source chunks.
+
+## Renderer request/response
+
+Twin and team routes cannot be answered from Rust alone because their authoritative data lives in
+the WebView. They use a real pending-request protocol, not a fire-and-forget event:
+
+```mermaid
+sequenceDiagram
+  participant CLI as cognia-agent
+  participant HTTP as cli_bridge Axum
+  participant RB as Rust RendererBridge
+  participant WV as Desktop WebView
+  participant Store as Dexie / Vector / Zustand
+
+  CLI->>HTTP: POST + X-Cognia-Dev-Token
+  HTTP->>RB: dispatch command and payload
+  RB->>RB: UUID + pending oneshot
+  RB-->>WV: cli-bridge://renderer-request
+  WV->>Store: execute handler
+  Store-->>WV: result or error
+  WV->>RB: cli_bridge_renderer_response
+  RB-->>HTTP: resolve pending request
+  HTTP-->>CLI: JSON response
+```
+
+Rust expires pending requests after 30 seconds. The agent CLI aborts its fetch after 10 seconds, so
+the client returns first while Rust still guarantees eventual pending-map cleanup. By contrast,
+`sessions/handoff` acknowledges as soon as Rust emits its renderer event; its HTTP success does not
+mean the Dexie import has completed.
+
+## Why Companion API stays separate
+
+| Property | CLI bridge | Companion API |
+| --- | --- | --- |
+| Audience | Same-user local CLIs | Paired mobile devices |
+| Bind | `127.0.0.1:0` | Configurable LAN listener, default port 27890 |
+| Transport | HTTP | HTTPS, WebSocket, WebRTC tiers |
+| Authentication | Per-launch dev token | Pairing flow and device JWT |
+| Discovery | Local endpoint file | Health, mDNS, tunnel, signaling |
+
+See [External API](../companion-api) for the device-facing server.

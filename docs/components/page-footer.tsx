@@ -1,15 +1,15 @@
-"use client"
-
-import Link from "next/link"
-import { useState } from "react"
-
 const REPO = "MaxQian888/cognia-next"
 const BRANCH = "master"
-const DOCS_ROOT = "docs/content/docs"
 
 type Props = {
   /** Page slug, e.g. ["en", "getting-started"]. May be empty for the index. */
   slug: string[]
+  /**
+   * Repo-relative path of the page's source file. Comes from fumadocs'
+   * `page.path`, so locale-shared pages (`content/docs/plugin-dev/**`) link
+   * to the file that actually exists rather than a guessed `{lang}/` path.
+   */
+  sourcePath: string
   /** Build-time last-modified ISO string (or null). */
   lastModified?: string | null
 }
@@ -20,10 +20,8 @@ function detectLocale(slug: string[]): "en" | "zh" | null {
   return null
 }
 
-function buildEditPath(slug: string[]): string {
-  // Treat root index specially — it lives at content/docs/index.mdx.
-  const path = slug.length === 0 ? "index.mdx" : `${slug.join("/")}.mdx`
-  return `https://github.com/${REPO}/edit/${BRANCH}/${DOCS_ROOT}/${path}`
+export function buildEditPath(sourcePath: string): string {
+  return `https://github.com/${REPO}/edit/${BRANCH}/${sourcePath}`
 }
 
 function buildAlternateHref(slug: string[]): string | null {
@@ -34,19 +32,30 @@ function buildAlternateHref(slug: string[]): string | null {
   return rest ? `/docs/${target}/${rest}` : `/docs/${target}`
 }
 
-export function PageFooter({ slug, lastModified }: Props) {
-  const editHref = buildEditPath(slug)
+export function buildFeedbackHref(slug: string[], sourcePath: string, helpful: boolean): string {
+  const path = slug.length > 0 ? slug.join("/") : "index"
+  const sentiment = helpful ? "Helpful" : "Needs improvement"
+  const title = `[Docs feedback] ${sentiment}: ${path}`
+  const body = [
+    `Page: https://github.com/${REPO}/blob/${BRANCH}/${sourcePath}`,
+    "",
+    helpful ? "What was especially useful?" : "What should we improve?",
+    "",
+  ].join("\n")
+  return `https://github.com/${REPO}/issues/new?title=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}&labels=documentation`
+}
+
+export function PageFooter({ slug, sourcePath, lastModified }: Props) {
+  const editHref = buildEditPath(sourcePath)
   const altHref = buildAlternateHref(slug)
   const locale = detectLocale(slug)
   const altLabel = locale === "en" ? "中文版本" : locale === "zh" ? "English version" : null
-
-  const [feedback, setFeedback] = useState<"up" | "down" | null>(null)
 
   return (
     <footer className="not-prose mt-16 space-y-6 border-t border-fd-border pt-8 text-sm text-fd-muted-foreground">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">
-          <Link
+          <a
             href={editHref}
             target="_blank"
             rel="noreferrer"
@@ -66,10 +75,10 @@ export function PageFooter({ slug, lastModified }: Props) {
               <path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" />
             </svg>
             Edit this page on GitHub
-          </Link>
+          </a>
 
           {altHref && altLabel ? (
-            <Link
+            <a
               href={altHref}
               className="inline-flex items-center gap-1.5 rounded-md border border-fd-border bg-fd-card px-3 py-1.5 transition-colors hover:bg-fd-accent hover:text-fd-accent-foreground"
             >
@@ -88,7 +97,7 @@ export function PageFooter({ slug, lastModified }: Props) {
                 <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
               </svg>
               {altLabel}
-            </Link>
+            </a>
           ) : null}
         </div>
 
@@ -104,30 +113,26 @@ export function PageFooter({ slug, lastModified }: Props) {
         <span className="text-sm">
           {locale === "zh" ? "这页有用吗？" : "Was this page helpful?"}
         </span>
-        {feedback ? (
-          <span className="text-xs italic">
-            {locale === "zh" ? "感谢反馈！" : "Thanks for the feedback!"}
-          </span>
-        ) : (
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setFeedback("up")}
-              aria-label="Helpful"
-              className="flex h-8 w-8 items-center justify-center rounded-md border border-fd-border transition-colors hover:bg-fd-accent hover:text-fd-accent-foreground"
-            >
-              👍
-            </button>
-            <button
-              type="button"
-              onClick={() => setFeedback("down")}
-              aria-label="Not helpful"
-              className="flex h-8 w-8 items-center justify-center rounded-md border border-fd-border transition-colors hover:bg-fd-accent hover:text-fd-accent-foreground"
-            >
-              👎
-            </button>
-          </div>
-        )}
+        <div className="flex gap-2">
+          <a
+            href={buildFeedbackHref(slug, sourcePath, true)}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={locale === "zh" ? "有帮助" : "Helpful"}
+            className="flex h-8 w-8 items-center justify-center rounded-md border border-fd-border transition-colors hover:bg-fd-accent hover:text-fd-accent-foreground"
+          >
+            👍
+          </a>
+          <a
+            href={buildFeedbackHref(slug, sourcePath, false)}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={locale === "zh" ? "没有帮助" : "Not helpful"}
+            className="flex h-8 w-8 items-center justify-center rounded-md border border-fd-border transition-colors hover:bg-fd-accent hover:text-fd-accent-foreground"
+          >
+            👎
+          </a>
+        </div>
       </div>
     </footer>
   )

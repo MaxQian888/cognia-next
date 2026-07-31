@@ -2,19 +2,29 @@
  * @jest-environment jsdom
  */
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import {
   PairOnboardingClient,
   describeHttpError,
   describeNetworkError,
+  readPairParams,
+  resolveParamSelection,
   validateBaseUrl,
   validatePairJwt,
 } from "./pair-onboarding-client"
 import type { DiscoveredServer } from "@/lib/connectivity/lan-scanner"
 
 const VALID_JWT = "aaa.bbb.ccc"
+
+// The coordinator branches on the runtime platform (ADR-0059 C2): jsdom
+// detects as "web", which would flip every legacy test into the web pair
+// flow — pin "mobile" by default and let the web-mode cases override.
+let platformMock: "tauri" | "mobile" | "web" = "mobile"
+jest.mock("@/hooks/use-platform", () => ({
+  usePlatform: () => platformMock,
+}))
 
 // Stub the transport singleton — no real RPC layer in jsdom.
 jest.mock("@/lib/tauri", () => ({
@@ -29,6 +39,54 @@ jest.mock("@/lib/tauri", () => ({
 // Stub the QR scanner; keep the legacy mock path so any transitive callers keep working.
 jest.mock("@/lib/capacitor/barcode", () => ({ scan: jest.fn() }))
 jest.mock("@/lib/qr/barcode-scanner", () => ({ scanQrCode: jest.fn() }))
+jest.mock("@/lib/signaling/v2-crypto", () => ({
+  generatePersistableV2SigningIdentity: async () => ({
+    privateKey: {},
+    publicKey: {},
+    privateKeyJwk: { kty: "EC", crv: "P-256", d: "private" },
+    encodedPublicKey: "mobile-signing-key",
+  }),
+  buildRoomDescriptorV2: async (input: Record<string, unknown>) => ({
+    v: 2,
+    roomId: "room-1",
+    ...input,
+  }),
+  importV2SigningPrivateKey: async () => ({}),
+}))
+
+// Control hydration timing so the loading-screen escape paths are testable.
+// Defaults mirror the real LocalStorage backend (read/clear the config key)
+// so the existing hydrate/sign-out cases behave exactly as before.
+const COMPANION_KEY = "cognia.companion.config.v1"
+
+function withSignalingV2(body: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...body,
+    rendezvous_id: "room-1",
+    room_descriptor: {
+      v: 2,
+      roomId: "room-1",
+      roomNonce: "room-nonce",
+      desktopSigningKey: "desktop-signing-key",
+      mobileSigningKey: "mobile-signing-key",
+      notAfter: Date.now() + 60_000,
+    },
+  }
+}
+let hydrateImpl: () => Promise<unknown> = async () => {
+  const raw = window.localStorage.getItem(COMPANION_KEY)
+  return raw ? JSON.parse(raw) : null
+}
+let clearImpl: () => Promise<void> = async () => {
+  window.localStorage.removeItem(COMPANION_KEY)
+}
+jest.mock("@/lib/tauri/transport-companion", () => ({
+  hydrateCompanionConfig: () => hydrateImpl(),
+  clearCompanionConfig: () => clearImpl(),
+  saveCompanionConfig: async (config: unknown) => {
+    window.localStorage.setItem(COMPANION_KEY, JSON.stringify(config))
+  },
+}))
 
 // Stub the LAN scanner — the coordinator imports DiscoverStep, which imports
 // scanLan. Per-step tests cover the scan internals directly.
@@ -147,12 +205,22 @@ jest.mock("next-intl", () => ({
 }))
 
 beforeEach(() => {
+  platformMock = "mobile"
+  delete process.env.NEXT_PUBLIC_COGNIA_SERVER_URL
   window.localStorage.clear()
   ;(globalThis as unknown as { fetch: jest.Mock }).fetch = jest.fn()
   pushMock.mockReset()
   mockScanLan.mockReset()
   // Default scan stub: settles fast with no hits.
   mockScanLan.mockImplementation(async () => [])
+  // Reset hydrate/clear to the localStorage-backed defaults.
+  hydrateImpl = async () => {
+    const raw = window.localStorage.getItem(COMPANION_KEY)
+    return raw ? JSON.parse(raw) : null
+  }
+  clearImpl = async () => {
+    window.localStorage.removeItem(COMPANION_KEY)
+  }
 })
 
 afterEach(() => {
@@ -181,6 +249,53 @@ describe("<PairOnboardingClient /> — coordinator", () => {
     expect(await screen.findByTestId("pair-paired-step")).toBeInTheDocument()
     expect(screen.getByTestId("pair-onboarding")).toHaveAttribute("data-step", "paired")
     expect(screen.getByTestId("pair-status")).toHaveTextContent("dev-existing")
+  })
+
+  it("reveals a manual escape when hydration stalls, and tapping it shows discover", async () => {
+    jest.useFakeTimers()
+    try {
+      // Hydration that never settles — the device-stall scenario that used to
+      // trap the user on the spinner forever.
+      hydrateImpl = () => new Promise(() => {})
+      render(<PairOnboardingClient />)
+      expect(screen.getByTestId("pair-onboarding")).toHaveAttribute("data-step", "loading")
+      // No escape yet — under the slow-hint threshold.
+      expect(screen.queryByTestId("pair-loading-skip")).not.toBeInTheDocument()
+
+      act(() => {
+        jest.advanceTimersByTime(2500)
+      })
+      const skip = screen.getByTestId("pair-loading-skip")
+      act(() => {
+        fireEvent.click(skip)
+      })
+      expect(screen.getByTestId("pair-discover-step")).toBeInTheDocument()
+      // Flush the discover step's async LAN scan so its trailing setState
+      // doesn't fire outside act after the test ends.
+      await act(async () => {
+        await Promise.resolve()
+      })
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("auto-falls through to discover after the ceiling when hydration never settles", async () => {
+    jest.useFakeTimers()
+    try {
+      hydrateImpl = () => new Promise(() => {})
+      render(<PairOnboardingClient />)
+      expect(screen.getByTestId("pair-onboarding")).toHaveAttribute("data-step", "loading")
+      act(() => {
+        jest.advanceTimersByTime(8000)
+      })
+      expect(screen.getByTestId("pair-discover-step")).toBeInTheDocument()
+      await act(async () => {
+        await Promise.resolve()
+      })
+    } finally {
+      jest.useRealTimers()
+    }
   })
 
   it("Skip from discover advances to the pair step with an empty form", async () => {
@@ -234,11 +349,11 @@ describe("<PairOnboardingClient /> — coordinator", () => {
       ok: true,
       status: 200,
       json: () =>
-        Promise.resolve({
+        Promise.resolve(withSignalingV2({
           device_id: "dev-001",
           device_jwt: "jwt.value",
           server_version: "0.1.0",
-        }),
+        })),
       text: () => Promise.resolve(""),
     })
     const user = userEvent.setup()
@@ -290,9 +405,185 @@ describe("<PairOnboardingClient /> — coordinator", () => {
   })
 })
 
+describe("<PairOnboardingClient /> — web host (ADR-0059 C2)", () => {
+  beforeEach(() => {
+    platformMock = "web"
+  })
+
+  it("skips discover and lands straight on the pair step", async () => {
+    render(<PairOnboardingClient />)
+    expect(await screen.findByTestId("pair-pair-step")).toBeInTheDocument()
+    expect(screen.queryByTestId("pair-discover-step")).not.toBeInTheDocument()
+    expect(screen.getByTestId("pair-onboarding")).toHaveAttribute("data-step", "pair")
+  })
+
+  it("renders a two-step stepper (no Discover) and hides QR + back affordances", async () => {
+    render(<PairOnboardingClient />)
+    await screen.findByTestId("pair-pair-step")
+    const stepper = screen.getByTestId("pair-stepper")
+    expect(stepper.querySelectorAll("li")).toHaveLength(2)
+    expect(screen.queryByTestId("pair-scan-qr")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("pair-back-to-discover")).not.toBeInTheDocument()
+    expect(screen.getByTestId("pair-web-storage-notice")).toBeInTheDocument()
+  })
+
+  it("prefills and locks the server URL from NEXT_PUBLIC_COGNIA_SERVER_URL", async () => {
+    process.env.NEXT_PUBLIC_COGNIA_SERVER_URL = "https://cloud.example.com:7890/"
+    render(<PairOnboardingClient />)
+    const baseUrl = (await screen.findByTestId("pair-baseurl")) as HTMLInputElement
+    expect(baseUrl.value).toBe("https://cloud.example.com:7890")
+    expect(baseUrl).toHaveAttribute("readonly")
+  })
+
+  it("sign-out returns to the pair step, not discover", async () => {
+    window.localStorage.setItem(
+      "cognia.companion.config.v1",
+      JSON.stringify({
+        baseUrl: "http://test:7890",
+        deviceJwt: "jwt",
+        deviceId: "dev-existing",
+        serverVersion: "9.9.9",
+      })
+    )
+    const user = userEvent.setup()
+    render(<PairOnboardingClient />)
+    await user.click(await screen.findByTestId("pair-signout"))
+    await waitFor(() => expect(screen.getByTestId("pair-pair-step")).toBeInTheDocument())
+    expect(screen.queryByTestId("pair-discover-step")).not.toBeInTheDocument()
+  })
+})
+
 // ---------------------------------------------------------------------------
 // Pure helpers (re-exported from ./pair/pair-helpers)
 // ---------------------------------------------------------------------------
+
+describe("readPairParams / resolveParamSelection", () => {
+  const RECENTS = [
+    {
+      baseUrl: "https://192.168.1.5:7890",
+      fingerprint: "FP-A",
+      label: "deviceAA",
+      lastSeenAt: 1,
+    },
+    { baseUrl: "https://192.168.1.9:7890", label: "deviceBB", lastSeenAt: 2 },
+  ]
+
+  it("parses switchTo/baseUrl/fingerprint from a search string", () => {
+    expect(readPairParams("?switchTo=deviceAA-1234&baseUrl=https%3A%2F%2Fx&fingerprint=F")).toEqual(
+      { switchTo: "deviceAA-1234", baseUrl: "https://x", fingerprint: "F" }
+    )
+    expect(readPairParams("")).toEqual({ switchTo: null, baseUrl: null, fingerprint: null })
+  })
+
+  it("prefers an explicit baseUrl param and locks the selection", () => {
+    const sel = resolveParamSelection(
+      { switchTo: null, baseUrl: "https://192.168.1.7:7890", fingerprint: "FP-X" },
+      RECENTS
+    )
+    expect(sel).toEqual({
+      baseUrl: "https://192.168.1.7:7890",
+      pairJwt: "",
+      fingerprint: "FP-X",
+      locked: true,
+      autoScan: false,
+    })
+  })
+
+  it("resolves switchTo through the recent-server label (deviceId prefix)", () => {
+    const sel = resolveParamSelection(
+      { switchTo: "deviceAA-full-uuid", baseUrl: null, fingerprint: null },
+      RECENTS
+    )
+    expect(sel).toEqual({
+      baseUrl: "https://192.168.1.5:7890",
+      pairJwt: "",
+      fingerprint: "FP-A",
+      locked: true,
+      autoScan: false,
+    })
+  })
+
+  it("resolves switchTo by exact deviceId ahead of the legacy label match", () => {
+    const recents = [
+      // Legacy-label decoy: label happens to equal the switchTo prefix.
+      { baseUrl: "https://decoy:7890", label: "deviceAA", lastSeenAt: 1 },
+      {
+        baseUrl: "https://real:7890",
+        fingerprint: "FP-R",
+        label: "other",
+        deviceId: "deviceAA-full-uuid",
+        lastSeenAt: 2,
+      },
+    ]
+    const sel = resolveParamSelection(
+      { switchTo: "deviceAA-full-uuid", baseUrl: null, fingerprint: null },
+      recents
+    )
+    expect(sel?.baseUrl).toBe("https://real:7890")
+    expect(sel?.fingerprint).toBe("FP-R")
+  })
+
+  it("returns null for a switchTo with no recent record and for empty params", () => {
+    expect(
+      resolveParamSelection({ switchTo: "unknown-device", baseUrl: null, fingerprint: null }, [])
+    ).toBeNull()
+    expect(
+      resolveParamSelection({ switchTo: null, baseUrl: null, fingerprint: null }, RECENTS)
+    ).toBeNull()
+  })
+})
+
+describe("<PairOnboardingClient /> — incoming query params", () => {
+  afterEach(() => {
+    window.history.replaceState(null, "", "/pair")
+  })
+
+  it("lands on the pair step with the server pre-filled for ?baseUrl=", async () => {
+    window.history.replaceState(null, "", "/pair?baseUrl=https%3A%2F%2F192.168.1.7%3A7890")
+    render(<PairOnboardingClient />)
+    expect(await screen.findByTestId("pair-pair-step")).toBeInTheDocument()
+    expect(screen.getByTestId("pair-onboarding")).toHaveAttribute("data-step", "pair")
+    expect(screen.getByTestId("pair-baseurl")).toHaveValue("https://192.168.1.7:7890")
+  })
+
+  it("lands on the pair step for ?switchTo= of a different, remembered server", async () => {
+    // Currently paired to dev-existing; switching to dev-other (remembered).
+    window.localStorage.setItem(
+      "cognia.companion.config.v1",
+      JSON.stringify({
+        baseUrl: "http://test:7890",
+        deviceJwt: "jwt",
+        deviceId: "dev-existing",
+        serverVersion: "9.9.9",
+      })
+    )
+    window.localStorage.setItem(
+      "cognia.mobile.recentServers",
+      JSON.stringify([
+        { baseUrl: "https://10.0.0.9:7890", fingerprint: "FP-B", label: "dev-othe", lastSeenAt: 5 },
+      ])
+    )
+    window.history.replaceState(null, "", "/pair?switchTo=dev-other-uuid")
+    render(<PairOnboardingClient />)
+    expect(await screen.findByTestId("pair-pair-step")).toBeInTheDocument()
+    expect(screen.getByTestId("pair-baseurl")).toHaveValue("https://10.0.0.9:7890")
+  })
+
+  it("stays on the paired step when switchTo targets the already-active device", async () => {
+    window.localStorage.setItem(
+      "cognia.companion.config.v1",
+      JSON.stringify({
+        baseUrl: "http://test:7890",
+        deviceJwt: "jwt",
+        deviceId: "dev-existing",
+        serverVersion: "9.9.9",
+      })
+    )
+    window.history.replaceState(null, "", "/pair?switchTo=dev-existing")
+    render(<PairOnboardingClient />)
+    expect(await screen.findByTestId("pair-paired-step")).toBeInTheDocument()
+  })
+})
 
 describe("validateBaseUrl", () => {
   it("rejects empty input", () => {

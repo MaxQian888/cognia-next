@@ -12,13 +12,16 @@
 // rollback handlers are wired here so PluginLibraryRow stays presentation-
 // only; this matches the wiring already done by `plugin-panel-grid.tsx`.
 
+import { useCallback } from "react"
 import { useTranslations } from "next-intl"
 import { BoxesIcon, CompassIcon } from "lucide-react"
 import { setPluginEnabled } from "@/lib/db/plugins"
+import type { PluginRow } from "@/lib/db/plugin-types"
 import { usePlugins } from "@/hooks/plugins"
 import { usePluginsStore } from "@/stores/plugins"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Empty,
   EmptyContent,
@@ -29,6 +32,7 @@ import {
 } from "@/components/ui/empty"
 import { PluginPanelGrid } from "../plugin-panel-grid"
 import { PluginLibraryRow } from "./plugin-library-row"
+import { PluginLibraryListSkeleton, PluginLibraryGridSkeleton } from "./plugin-library-skeleton"
 
 export function PluginLibraryList() {
   const t = useTranslations("plugins.grid")
@@ -44,9 +48,27 @@ export function PluginLibraryList() {
   const openPermissionReview = usePluginsStore((s) => s.openPermissionReview)
   const setRollbackTarget = usePluginsStore((s) => s.setRollbackTarget)
   const setActiveSection = usePluginsStore((s) => s.setActiveSection)
+  const selectAll = usePluginsStore((s) => s.selectAll)
+  const clearSelection = usePluginsStore((s) => s.clearSelection)
+
+  // Stable handlers so the memoized rows only re-render when their own
+  // plugin / selected / active props change (matters for 50+ plugin lists
+  // where every keystroke used to re-render every row).
+  const handleToggleEnabled = useCallback(
+    (plugin: PluginRow) => void setPluginEnabled(plugin.id, !plugin.enabled),
+    []
+  )
+  const handleUninstall = useCallback(
+    (plugin: PluginRow) => setDeleteTarget({ pluginId: plugin.id, name: plugin.name }),
+    [setDeleteTarget]
+  )
 
   if (loading) {
-    return <p className="p-4 text-sm text-muted-foreground">{t("loading")}</p>
+    return (
+      <div className="p-4">
+        {viewMode === "card" ? <PluginLibraryGridSkeleton /> : <PluginLibraryListSkeleton />}
+      </div>
+    )
   }
 
   if (totals.total === 0) {
@@ -80,31 +102,58 @@ export function PluginLibraryList() {
     )
   }
 
+  // Select-all over the *visible* (filtered) set — the batch-actions bar
+  // appears as soon as anything is selected, so this is the entry point for
+  // bulk enable/disable/uninstall without checking rows one by one.
+  const allSelected = filtered.length > 0 && filtered.every((row) => selection.has(row.id))
+  const someSelected = !allSelected && filtered.some((row) => selection.has(row.id))
+  const selectAllBar = (
+    <div className="flex items-center gap-2 border-b px-3 py-1.5">
+      <Checkbox
+        checked={allSelected ? true : someSelected ? "indeterminate" : false}
+        onCheckedChange={() =>
+          allSelected ? clearSelection() : selectAll(filtered.map((row) => row.id))
+        }
+        aria-label={t("selectAllAria")}
+        data-testid="plugin-library-select-all"
+      />
+      <span className="text-xs text-muted-foreground">
+        {t("selectAll", { count: filtered.length })}
+      </span>
+    </div>
+  )
+
   if (viewMode === "card") {
     return (
-      <div className="p-4">
-        <PluginPanelGrid />
-      </div>
+      <>
+        {selectAllBar}
+        <div className="p-4">
+          <PluginPanelGrid />
+        </div>
+      </>
     )
   }
 
   return (
-    <div role="list" className="divide-y" data-testid="plugin-library-list">
-      {filtered.map((row) => (
-        <PluginLibraryRow
-          key={row.id}
-          plugin={row}
-          selected={selection.has(row.id)}
-          active={detailPluginId === row.id}
-          onToggleSelect={toggleSelection}
-          onOpen={openDetail}
-          onConfigure={openConfigure}
-          onToggleEnabled={(plugin) => void setPluginEnabled(plugin.id, !plugin.enabled)}
-          onUninstall={(plugin) => setDeleteTarget({ pluginId: plugin.id, name: plugin.name })}
-          onReviewPermissions={openPermissionReview}
-          onRollback={setRollbackTarget}
-        />
-      ))}
-    </div>
+    <>
+      {selectAllBar}
+      <div role="list" className="divide-y" data-testid="plugin-library-list">
+        {filtered.map((row) => (
+          <PluginLibraryRow
+            key={row.id}
+            plugin={row}
+            selected={selection.has(row.id)}
+            active={detailPluginId === row.id}
+            onToggleSelect={toggleSelection}
+            onOpen={openDetail}
+            onConfigure={openConfigure}
+            onToggleEnabled={handleToggleEnabled}
+            onUninstall={handleUninstall}
+            onReviewPermissions={openPermissionReview}
+            onRollback={setRollbackTarget}
+          />
+        ))}
+      </div>
+    </>
   )
 }

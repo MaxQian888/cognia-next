@@ -11,16 +11,34 @@
 import { useEffect, useRef } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { useTranslations } from "next-intl"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/tauri"
 
+import { APP_VERSION } from "@/lib/app-version"
+
 import { buildTrayPayload, type TrayTranslator } from "./builder"
+import { rasterizeAndRegisterTrayIcons } from "./icon-builder"
 import { subscribeTrayItems } from "./registry"
 import { useTrayStore } from "./store"
 import { useTrayStateSnapshot } from "./state-snapshot"
-import type { TrayStateSnapshot } from "./types"
+import { deriveTrayTooltip } from "./tooltip"
+import { usageShortText, usageTooltipFragment } from "./usage-format"
+import type { TrayStateSnapshot, TrayUsageMeterSummary } from "./types"
 
 const PUSH_DEBOUNCE_MS = 150
+
+/**
+ * Badge fill per meter severity — mirrors the status-bar chip's emerald /
+ * amber / rose classes (`components/desktop/status-bar-usage.tsx`) so the
+ * tray and the in-app chip never disagree on what a color means.
+ */
+export const BADGE_STATUS_COLORS: Record<TrayUsageMeterSummary["status"], string> = {
+  ok: "#10b981",
+  warn: "#f59e0b",
+  crit: "#f43f5e",
+  exceeded: "#f43f5e",
+  unknown: "#64748b",
+}
 
 /**
  * Shape of the translator returned by next-intl's `useTranslations()`. We only
@@ -93,6 +111,7 @@ export function defaultSnapshot(): TrayStateSnapshot {
     automation: { running: false, armed: true },
     chat: { streaming: false, hasActiveSession: false },
     platform: { os: os as TrayStateSnapshot["platform"]["os"] },
+    app: { autostart: false, version: APP_VERSION },
   }
 }
 
@@ -110,6 +129,7 @@ export function useSyncTrayToRust(): void {
   const tooltipKey = useTrayStore((s) => s.tooltip)
   const iconState = useTrayStore((s) => s.iconState)
   const items = useTrayStore((s) => s.items)
+  const display = useTrayStore((s) => s.display)
   const hydrated = useTrayStore((s) => s.hydrated)
   // Live state snapshot. Reading it as a hook means every store change
   // (chat streaming flip, goal pause, kill-switch engage, …) re-runs the
@@ -118,6 +138,11 @@ export function useSyncTrayToRust(): void {
   const snapshot = useTrayStateSnapshot()
   const lastPushedTooltip = useRef<string | null>(null)
   const lastPushedIcon = useRef<string | null>(null)
+  const lastPushedTitle = useRef<string | null>(null)
+  // Seeded with the default-raster key: `tauri-provider` already registers
+  // the plain black icons at boot, so the effect only re-rasters when the
+  // user's prefs actually differ from those defaults.
+  const lastRasterKey = useRef<string | null>("#000000||")
   const debounceHandle = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Menu pushes — debounced, re-runs on store or plugin registry change
@@ -131,6 +156,7 @@ export function useSyncTrayToRust(): void {
         items,
         t: resilientT,
         snapshot,
+        display,
       })
       void invoke("tray_set_menu", { items: dto }).catch((err) => {
         loggers.tray.warn("tray_set_menu failed", { error: String(err) })
@@ -152,7 +178,7 @@ export function useSyncTrayToRust(): void {
       off()
       if (debounceHandle.current) clearTimeout(debounceHandle.current)
     }
-  }, [items, t, hydrated, snapshot])
+  }, [items, t, hydrated, snapshot, display])
 
   // Icon state — small enough that we don't debounce; only push on change.
   useEffect(() => {
@@ -164,13 +190,50 @@ export function useSyncTrayToRust(): void {
     })
   }, [iconState, hydrated])
 
-  // Tooltip — same idea as icon state.
+  // Tooltip — dynamic: reflects the live status (e.g. "Cognia — Goal: …"),
+  // falling back to the user's configured tooltip when idle. Re-derives on
+  // every snapshot transition and only pushes when the rendered text changes.
   useEffect(() => {
     if (!isTauri() || !hydrated) return
-    if (lastPushedTooltip.current === tooltipKey) return
-    lastPushedTooltip.current = tooltipKey
-    void invoke("tray_set_tooltip", { text: tooltipKey }).catch((err) => {
+    const resilientT = makeResilientTrayTranslator(t)
+    const usageText = display.showUsageInTooltip
+      ? usageTooltipFragment(snapshot.usage, Date.now())
+      : null
+    const text = deriveTrayTooltip(snapshot, resilientT, tooltipKey, usageText)
+    if (lastPushedTooltip.current === text) return
+    lastPushedTooltip.current = text
+    void invoke("tray_set_tooltip", { text }).catch((err) => {
       loggers.tray.warn("tray_set_tooltip failed", { error: String(err) })
     })
-  }, [tooltipKey, hydrated])
+  }, [snapshot, tooltipKey, hydrated, t, display.showUsageInTooltip])
+
+  // Taskbar-adjacent usage readout, two OS surfaces:
+  //   - `title`: text next to the icon via `tray_set_title` (macOS menu bar,
+  //     Linux appindicator; a documented no-op on Windows).
+  //   - `iconBadge`: the readout rasterized onto the icon itself (works
+  //     everywhere) — re-registers all four state icons so the badge
+  //     survives idle/busy/error flips. Also owns the custom icon color.
+  const short = usageShortText(snapshot.usage)
+  const titleText = display.taskbarUsageMode === "title" && short ? short.text : null
+  useEffect(() => {
+    if (!isTauri() || !hydrated) return
+    if (lastPushedTitle.current === titleText) return
+    lastPushedTitle.current = titleText
+    void invoke("tray_set_title", { text: titleText }).catch((err) => {
+      loggers.tray.warn("tray_set_title failed", { error: String(err) })
+    })
+  }, [titleText, hydrated])
+
+  const badgeText = display.taskbarUsageMode === "iconBadge" && short ? short.text : null
+  const badgeColor = short ? BADGE_STATUS_COLORS[short.status] : BADGE_STATUS_COLORS.unknown
+  useEffect(() => {
+    if (!isTauri() || !hydrated) return
+    const key = `${display.iconColor}|${badgeText ?? ""}|${badgeText ? badgeColor : ""}`
+    if (lastRasterKey.current === key) return
+    lastRasterKey.current = key
+    void rasterizeAndRegisterTrayIcons({
+      color: display.iconColor,
+      badge: badgeText ? { text: badgeText, color: badgeColor } : undefined,
+    })
+  }, [display.iconColor, badgeText, badgeColor, hydrated])
 }

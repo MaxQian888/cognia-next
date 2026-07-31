@@ -39,14 +39,9 @@ pub fn install() -> Result<(), Report> {
 /// Kept on the public API so future call sites can adopt the canonical
 /// hint format without rewriting the wrapper.
 #[allow(dead_code)]
-pub fn report_with_hint<E: Into<Report>>(
-    inner: E,
-    hint: impl Into<String>,
-) -> Report {
+pub fn report_with_hint<E: Into<Report>>(inner: E, hint: impl Into<String>) -> Report {
     let h = hint.into();
-    inner
-        .into()
-        .wrap_err(format!("hint: {h}"))
+    inner.into().wrap_err(format!("hint: {h}"))
 }
 
 #[cfg(test)]
@@ -67,10 +62,7 @@ mod tests {
         let inner = eyre::eyre!("primary failure");
         let r = report_with_hint(inner, "cognia plugin lint --path .");
         let chain: String = format!("{r:?}");
-        assert!(
-            chain.contains("primary failure"),
-            "missing inner: {chain}"
-        );
+        assert!(chain.contains("primary failure"), "missing inner: {chain}");
         assert!(
             chain.contains("cognia plugin lint"),
             "missing hint: {chain}"

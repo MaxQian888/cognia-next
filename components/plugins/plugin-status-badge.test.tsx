@@ -29,6 +29,11 @@ describe("PluginStatusPill", () => {
     expect(screen.getByText("disabled")).toBeInTheDocument()
   })
 
+  it("renders the suspended variant when idle-suspended (status suspended, still enabled)", () => {
+    render(<PluginStatusPill status="suspended" enabled={true} />)
+    expect(screen.getByText("suspended")).toBeInTheDocument()
+  })
+
   it("renders the enabled variant otherwise", () => {
     render(<PluginStatusPill status="enabled" enabled={true} />)
     expect(screen.getByText("enabled")).toBeInTheDocument()

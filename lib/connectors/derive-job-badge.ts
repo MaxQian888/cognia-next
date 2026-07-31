@@ -27,10 +27,7 @@ import type { OutboundJobRow } from "@/lib/db/connector-types"
 import type { AdapterInstanceRow } from "@/lib/db/connector-types"
 
 export type DerivedJobBadgeKind =
-  | "normal"
-  | "paused-muted"
-  | "paused-quiet-hours"
-  | "circuit-blocked"
+  "normal" | "paused-muted" | "paused-quiet-hours" | "circuit-blocked"
 
 export interface DerivedJobBadge {
   kind: DerivedJobBadgeKind

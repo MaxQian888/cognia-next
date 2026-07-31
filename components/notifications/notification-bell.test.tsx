@@ -11,7 +11,11 @@ jest.mock("@/hooks/notifications/use-notifications", () => ({ useNotifications: 
 
 // Stub the heavy center so the bell test stays focused on the badge/trigger.
 jest.mock("./notification-center", () => ({
-  NotificationCenter: () => <div data-testid="center-stub" />,
+  NotificationCenter: ({ onNavigate }: { onNavigate?: () => void }) => (
+    <button type="button" data-testid="center-stub" onClick={onNavigate}>
+      Center
+    </button>
+  ),
 }))
 
 import { NotificationBell } from "./notification-bell"
@@ -59,6 +63,20 @@ it("opens the center on click", async () => {
   render(<NotificationBell />)
   await userEvent.click(screen.getByTestId("status-notifications"))
   expect(await screen.findByTestId("center-stub")).toBeInTheDocument()
+})
+
+it("constrains the popover content to the viewport", async () => {
+  render(<NotificationBell />)
+  await userEvent.click(screen.getByTestId("status-notifications"))
+  const content = await screen.findByTestId("center-stub")
+  expect(content.parentElement).toHaveClass("max-w-[calc(100vw-0.5rem)]", "overflow-hidden", "p-0")
+})
+
+it("closes the popover after the center navigates", async () => {
+  render(<NotificationBell />)
+  await userEvent.click(screen.getByTestId("status-notifications"))
+  await userEvent.click(await screen.findByTestId("center-stub"))
+  expect(screen.queryByTestId("center-stub")).not.toBeInTheDocument()
 })
 
 it("labels the trigger with the unread count when directed", () => {

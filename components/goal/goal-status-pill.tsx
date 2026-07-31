@@ -5,12 +5,10 @@
  * chat composer. Renders nothing when no active goal exists, so the
  * composer area only changes when the user actually opted in.
  *
- * Controls:
- *  - 🎯 + objective summary (truncated)
- *  - turn / token progress text
- *  - ⏸ pause / ▶ resume button
- *  - ⏹ stop button
- *  - 🔍 open detail sheet
+ * Composes the shared `ActivityPill` primitive (also used by the /loop
+ * status pill) — the primitive owns layout, truncation, the status chip,
+ * and the mobile action collapse (≥44px touch targets, secondary actions
+ * behind a dropdown). This file only maps goal domain state onto it.
  *
  * No keyboard shortcut wiring here — the user already has `/goal pause`
  * / `/goal stop` slash commands. The pill is an at-a-glance affordance,
@@ -27,8 +25,7 @@ import {
   StepForwardIcon,
   TargetIcon,
 } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
+import { ActivityPill, type ActivityPillAction } from "@/components/shared/activity-pill"
 import { getGoalRuntime } from "@/lib/goal/runtime"
 import type { Goal } from "@/types/goal"
 import { useOpenGoal } from "./use-active-goal"
@@ -59,112 +56,94 @@ export function GoalStatusPill({ sessionId, goalOverride, className }: Props) {
     tokens: (goal.tokensUsed / 1000).toFixed(1),
   })
 
+  // "Next continuation at HH:mm (reason)" — stamped by the pacing gate on a
+  // defer (adaptive pacing) and cleared on dispatch, so rendering whenever
+  // it's present on an active goal stays honest without clock reads here.
+  const footnote =
+    isActive && goal.nextContinuationAt
+      ? t("pill.nextContinuation", {
+          time: new Intl.DateTimeFormat(undefined, {
+            hour: "2-digit",
+            minute: "2-digit",
+          }).format(goal.nextContinuationAt),
+          reason: t(`pill.pacingReason.${goal.nextContinuationSource ?? "interval"}`),
+        })
+      : undefined
+
+  const actions: ActivityPillAction[] = []
+  if (isActive && goal.config.manualContinue) {
+    actions.push({
+      id: "continue",
+      icon: <StepForwardIcon />,
+      label: t("pill.continue"),
+      onClick: () => {
+        getGoalRuntime().requestManualContinue(goal.id)
+      },
+      testId: "goal-continue-button",
+      primary: true,
+    })
+  }
+  if (isActive) {
+    actions.push({
+      id: "pause",
+      icon: <PauseIcon />,
+      label: t("pill.pause"),
+      onClick: () => {
+        void getGoalRuntime().pauseGoal(goal.id)
+      },
+      testId: "goal-pause-button",
+      primary: true,
+    })
+  }
+  if (isPaused) {
+    actions.push({
+      id: "resume",
+      icon: <PlayIcon />,
+      label: t("pill.resume"),
+      onClick: () => {
+        void getGoalRuntime().resumeGoal(goal.id)
+      },
+      testId: "goal-resume-button",
+      primary: true,
+    })
+  }
+  actions.push({
+    id: "stop",
+    icon: <SquareIcon />,
+    label: t("pill.stop"),
+    onClick: () => {
+      void getGoalRuntime().stopGoal(goal.id)
+    },
+    testId: "goal-stop-button",
+  })
+  actions.push({
+    id: "details",
+    icon: <SearchIcon />,
+    label: t("pill.details"),
+    onClick: () => setOpen(true),
+    testId: "goal-show-button",
+  })
+
   return (
     <>
-      <div
+      <ActivityPill
+        icon={<TargetIcon className="size-4" aria-hidden />}
+        title={goal.safeObjective}
+        titleTooltip={goal.safeObjective}
+        chip={{
+          label: t(`status.${goal.status}`),
+          chipClassName: style.chip,
+          dotClassName: style.dot,
+          pulse: style.pulse,
+        }}
+        subtext={progressLabel}
+        footnote={footnote}
+        actions={actions}
+        ariaLabel={t("pill.ariaActiveGoal", { objective: goal.safeObjective })}
+        moreLabel={t("pill.moreActions")}
+        className={className}
         data-testid="goal-status-pill"
-        role="status"
-        aria-label={t("pill.ariaActiveGoal", { objective: goal.safeObjective })}
-        className={cn(
-          "flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-1.5 text-xs",
-          className
-        )}
-      >
-        <TargetIcon className="size-4 shrink-0 text-primary" aria-hidden />
-        <div className="flex min-w-0 flex-1 flex-col">
-          <div className="flex items-center gap-2">
-            <span className="truncate font-medium" title={goal.safeObjective}>
-              {goal.safeObjective}
-            </span>
-            <span
-              className={cn(
-                "inline-flex shrink-0 items-center gap-1 rounded-sm px-1.5 py-0.5 text-[10px] uppercase tracking-wide",
-                style.chip
-              )}
-            >
-              <span className="relative flex size-1.5">
-                {style.pulse && (
-                  <span
-                    className={cn(
-                      "absolute inline-flex size-full animate-ping rounded-full opacity-60",
-                      style.dot
-                    )}
-                  />
-                )}
-                <span className={cn("relative inline-flex size-1.5 rounded-full", style.dot)} />
-              </span>
-              {t(`status.${goal.status}`)}
-            </span>
-          </div>
-          <span className="text-[10px] text-muted-foreground">{progressLabel}</span>
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          {isActive && goal.config.manualContinue && (
-            <Button
-              size="icon"
-              variant="ghost"
-              className="size-7"
-              aria-label={t("pill.continue")}
-              data-testid="goal-continue-button"
-              onClick={() => {
-                getGoalRuntime().requestManualContinue(goal.id)
-              }}
-            >
-              <StepForwardIcon className="size-3.5" aria-hidden />
-            </Button>
-          )}
-          {isActive && (
-            <Button
-              size="icon"
-              variant="ghost"
-              className="size-7"
-              aria-label={t("pill.pause")}
-              data-testid="goal-pause-button"
-              onClick={() => {
-                void getGoalRuntime().pauseGoal(goal.id)
-              }}
-            >
-              <PauseIcon className="size-3.5" aria-hidden />
-            </Button>
-          )}
-          {isPaused && (
-            <Button
-              size="icon"
-              variant="ghost"
-              className="size-7"
-              aria-label={t("pill.resume")}
-              data-testid="goal-resume-button"
-              onClick={() => {
-                void getGoalRuntime().resumeGoal(goal.id)
-              }}
-            >
-              <PlayIcon className="size-3.5" aria-hidden />
-            </Button>
-          )}
-          <Button
-            size="icon"
-            variant="ghost"
-            className="size-7"
-            aria-label={t("pill.stop")}
-            data-testid="goal-stop-button"
-            onClick={() => {
-              void getGoalRuntime().stopGoal(goal.id)
-            }}
-          >
-            <SquareIcon className="size-3.5" aria-hidden />
-          </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="size-7"
-            aria-label={t("pill.details")}
-            data-testid="goal-show-button"
-            onClick={() => setOpen(true)}
-          >
-            <SearchIcon className="size-3.5" aria-hidden />
-          </Button>
-        </div>
-      </div>
+      />
       <GoalDetailSheet goal={goal} open={open} onOpenChange={setOpen} />
     </>
   )

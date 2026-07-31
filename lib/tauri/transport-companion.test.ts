@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for CompanionTransport (M2.7).
  *
@@ -17,6 +18,7 @@ import {
   CompanionError,
   CompanionTransport,
   __resetCompanionConfigCacheForTests,
+  __setBackoffRandomForTests,
   classifyWsHost,
   clearCompanionConfig,
   hydrateCompanionConfig,
@@ -25,6 +27,32 @@ import {
   type CompanionConfig,
   type TransportTier,
 } from "./transport-companion"
+import { remoteEventResyncCoordinator } from "./resync-coordinator"
+
+const mockVaultSecrets = new Map<string, string>()
+jest.mock("@/lib/runtime/browser-vault", () => ({
+  getActiveBrowserVault: () => ({
+    accountId: "acct_transport",
+    async storeSecret(name: string, value: string) {
+      mockVaultSecrets.set(name, value)
+    },
+    async loadSecret(name: string) {
+      return mockVaultSecrets.get(name) ?? null
+    },
+    async deleteSecret(name: string) {
+      mockVaultSecrets.delete(name)
+    },
+    async encryptSecret(name: string, value: string) {
+      mockVaultSecrets.set(name, value)
+      return { version: 1, iv: `iv-${name}`, ciphertext: `sealed-${name}` }
+    },
+    async decryptSecret(name: string) {
+      const value = mockVaultSecrets.get(name)
+      if (!value) throw new Error("secret missing")
+      return value
+    },
+  }),
+}))
 
 // ---------------------------------------------------------------------------
 // Mock fetch response factory — avoids `new Response(...)` which jsdom lacks.
@@ -145,6 +173,7 @@ const g = globalThis as Record<string, unknown>
 
 beforeEach(() => {
   MockWebSocket.reset()
+  mockVaultSecrets.clear()
 
   // Inject our MockWebSocket so CompanionTransport uses it.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -208,8 +237,9 @@ describe("config helpers", () => {
     await saveCompanionConfig(MOCK_CONFIG)
     __resetCompanionConfigCacheForTests()
     expect(loadCompanionConfig()).toBeNull()
-    expect(await hydrateCompanionConfig()).toEqual(MOCK_CONFIG)
-    expect(loadCompanionConfig()).toEqual(MOCK_CONFIG)
+    const hydrated = { ...MOCK_CONFIG, targetId: MOCK_CONFIG.deviceId }
+    expect(await hydrateCompanionConfig()).toEqual(hydrated)
+    expect(loadCompanionConfig()).toEqual(hydrated)
   })
 })
 
@@ -248,6 +278,70 @@ describe("call() — success", () => {
 })
 
 // ---------------------------------------------------------------------------
+// configProvider injection (ADR-0059 T-B2)
+// ---------------------------------------------------------------------------
+
+describe("configProvider injection", () => {
+  it("calls use the injected config even when storage is empty", async () => {
+    // Storage cache deliberately empty — the provider is the only source.
+    fetchSpy.mockResolvedValueOnce(mockResponse({ ok: true }, 200))
+    transport = new CompanionTransport({
+      configProvider: () => ({
+        baseUrl: "https://127.0.0.1:7999",
+        deviceJwt: "service.token.abc",
+        deviceId: "brain-1",
+        serverVersion: "headless",
+      }),
+    })
+
+    const result = await transport.call("claude_sidecar_status")
+    expect(result).toEqual({ ok: true })
+    const [calledUrl, init] = fetchSpy.mock.calls[0] as [string, RequestInit]
+    expect(calledUrl).toBe("https://127.0.0.1:7999/api/v1/_rpc/claude_sidecar_status")
+    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer service.token.abc")
+    // Nothing was persisted — the provider config never touches storage.
+    expect(loadCompanionConfig()).toBeNull()
+  })
+
+  it("a provider returning null yields not_paired", async () => {
+    transport = new CompanionTransport({ configProvider: () => null })
+    await expect(transport.call("anything")).rejects.toMatchObject({ code: "not_paired" })
+  })
+
+  it("provider swaps (token refresh) take effect on the next call", async () => {
+    let token = "tok-1"
+    fetchSpy.mockResolvedValue(mockResponse({}, 200))
+    transport = new CompanionTransport({
+      configProvider: () => ({
+        baseUrl: "https://127.0.0.1:7999",
+        deviceJwt: token,
+        deviceId: "brain-1",
+        serverVersion: "headless",
+      }),
+    })
+
+    await transport.call("claude_sidecar_status")
+    token = "tok-2"
+    await transport.call("claude_sidecar_status")
+
+    const auths = fetchSpy.mock.calls.map(
+      (call) => ((call as [string, RequestInit])[1].headers as Record<string, string>).Authorization
+    )
+    expect(auths).toEqual(["Bearer tok-1", "Bearer tok-2"])
+  })
+
+  it("the provider does not shadow storage-configured instances", async () => {
+    // A plain instance still reads the storage cache (mobile behavior).
+    await setConfig()
+    fetchSpy.mockResolvedValueOnce(mockResponse({ ok: 1 }, 200))
+    transport = new CompanionTransport()
+    await transport.call("claude_sidecar_status")
+    const [calledUrl] = fetchSpy.mock.calls[0] as [string, RequestInit]
+    expect(calledUrl).toContain(MOCK_CONFIG.baseUrl)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // call() — idempotency key
 // ---------------------------------------------------------------------------
 
@@ -267,6 +361,16 @@ describe("call() — idempotency key", () => {
     )
   })
 
+  it("reuses a caller-provided idempotency key for queued mutations", async () => {
+    fetchSpy.mockResolvedValue(mockResponse({}, 200))
+
+    transport = new CompanionTransport()
+    await transport.call("connector_send", { text: "hello" }, { idempotencyKey: "queue-key-1" })
+
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit]
+    expect((init.headers as Record<string, string>)["Idempotency-Key"]).toBe("queue-key-1")
+  })
+
   it("does NOT include Idempotency-Key for read-only commands", async () => {
     fetchSpy.mockResolvedValue(mockResponse({}, 200))
 
@@ -282,14 +386,24 @@ describe("call() — idempotency key", () => {
       "claude_has_oauth_bearer",
       "skills_load_registry",
       "skills_scan_native",
+      "skills_catalog_get",
+      "external_bridge_config_get",
+      "external_bridge_client_list",
+      "external_bridge_status",
       "mcp_server_status",
+      "lsp_host_ensure",
+      "codeserver_supported",
+      "codeserver_status",
+      "codeserver_list_proxies",
       "read_agent_config",
       "session_list",
+      "message_get_by_session",
       "companion_can_control",
       // Wave 4.1 reads.
       "git_is_repo",
       "git_repo_state",
       "git_status",
+      "git_diff_stat",
       "git_diff_file",
       "git_diff_commit",
       "git_commit_files",
@@ -299,18 +413,45 @@ describe("call() — idempotency key", () => {
       "git_remotes",
       "git_stash_list",
       "git_conflicts",
+      "git_diff_refs_files",
+      "git_diff_refs_file",
+      "git_diff_staged_all",
+      "git_refs",
+      "git_blame",
+      "git_tags",
+      "git_worktree_list",
+      "git_rebase_commits",
+      "git_identity",
       "read_text_file",
       "default_export_dir",
       "fs_search_workspace",
+      "fs_search_content_workspace",
       "fs_read_workspace_file",
+      "fs_list_workspace_dir",
+      "fs_stat_workspace_file",
+      "task_workspace_status",
+      "task_workspace_get",
+      "task_workspace_list",
+      "task_workspace_list_runs",
+      "task_workspace_list_resources",
+      "task_workspace_get_resource",
+      "task_workspace_get_patch_set",
+      "task_resource_read_text",
+      "task_resource_read_diff",
+      "task_resource_download_open",
+      "task_resource_download_read_chunk",
+      "task_resource_download_close",
       "terminal_list_all",
       "terminal_list_for_project",
       "plugin_list",
       "plugin_runtime_snapshot",
+      "plugin_permission_list",
+      "plugin_get_capabilities",
       "workflow_run_list",
       "twin_source_list",
       "twin_job_status",
       "backup_export",
+      "fleet_get_snapshot",
     ]
 
     for (const cmd of readOnlyCommands) {
@@ -336,6 +477,10 @@ describe("call() — idempotency key", () => {
       "git_commit",
       "write_text_file",
       "fs_write_workspace_file",
+      "fs_create_workspace_dir",
+      "fs_delete_workspace_entry",
+      "fs_rename_workspace_entry",
+      "fs_copy_workspace_entry",
       "terminal_exec",
       "terminal_kill",
       "plugin_install",
@@ -375,6 +520,75 @@ describe("call() — idempotency key", () => {
   })
 })
 
+describe("managed IDE raw content transport", () => {
+  beforeEach(() => setConfig({ ...MOCK_CONFIG, serverFingerprint: "ab".repeat(32) }))
+
+  it("uploads bytes as a raw body with service context in a header", async () => {
+    fetchSpy.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ $type: "ContentHandle", id: "handle-1" }),
+    })
+    transport = new CompanionTransport()
+
+    await transport.uploadManagedIdeContent(
+      {
+        root: "/workspace",
+        generation: 4,
+        pluginId: "demo",
+        providerId: "cognia.demo.fs",
+        permission: "filesystem:read",
+      },
+      Uint8Array.from([0, 1, 255])
+    )
+
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe("https://192.168.1.42:7890/api/v1/ide/content")
+    expect(init.body).toBeInstanceOf(ArrayBuffer)
+    expect(Array.from(new Uint8Array(init.body as ArrayBuffer))).toEqual([0, 1, 255])
+    const headers = init.headers as Record<string, string>
+    expect(headers.Authorization).toBe("Bearer test.jwt.token")
+    const context = JSON.parse(
+      atob(
+        headers["X-Cognia-Content-Context"]
+          .replace(/-/g, "+")
+          .replace(/_/g, "/")
+          .padEnd(Math.ceil(headers["X-Cognia-Content-Context"].length / 4) * 4, "=")
+      )
+    )
+    expect(context).toMatchObject({
+      root: "/workspace",
+      generation: 4,
+      pluginId: "demo",
+    })
+  })
+
+  it("redeems a one-shot handle as raw response bytes", async () => {
+    fetchSpy.mockResolvedValue({
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => Uint8Array.from([7, 8, 9]).buffer,
+    })
+    transport = new CompanionTransport()
+
+    await expect(
+      transport.redeemManagedIdeContent(
+        {
+          root: "/workspace",
+          generation: 4,
+          pluginId: "demo",
+          providerId: "cognia.demo.fs",
+          permission: null,
+        },
+        "handle/opaque"
+      )
+    ).resolves.toEqual(Uint8Array.from([7, 8, 9]))
+    expect(fetchSpy.mock.calls[0][0]).toBe(
+      "https://192.168.1.42:7890/api/v1/ide/content/handle%2Fopaque"
+    )
+  })
+})
+
 // ---------------------------------------------------------------------------
 // call() — 4xx errors
 // ---------------------------------------------------------------------------
@@ -409,6 +623,24 @@ describe("call() — 4xx errors", () => {
       retryable: false,
     })
     expect(stateHandler).toHaveBeenCalledWith("unauthenticated")
+  })
+
+  it.each([
+    [401, "unauthenticated", "device unauthenticated"],
+    [418, "http_418", "HTTP 418"],
+  ])("uses HTTP fallbacks when a %i response has no JSON body", async (status, code, message) => {
+    fetchSpy.mockResolvedValue({
+      ok: false,
+      status,
+      json: () => Promise.reject(new Error("invalid JSON")),
+    })
+    transport = new CompanionTransport()
+
+    await expect(transport.call("bad_command")).rejects.toMatchObject({
+      code,
+      message,
+      retryable: false,
+    })
   })
 })
 
@@ -482,6 +714,42 @@ describe("call() — retries", () => {
     expect(result).toEqual({ ok: true })
     expect(fetchSpy.mock.calls.length).toBe(2)
   })
+
+  it("stringifies non-Error network failures", async () => {
+    jest.useFakeTimers()
+    fetchSpy.mockRejectedValue("socket closed")
+    transport = new CompanionTransport()
+    const callPromise = transport.call("claude_send").catch((error: unknown) => error)
+
+    await jest.advanceTimersByTimeAsync(250)
+    await jest.advanceTimersByTimeAsync(500)
+    await jest.advanceTimersByTimeAsync(1000)
+
+    await expect(callPromise).resolves.toMatchObject({
+      code: "network",
+      message: "socket closed",
+    })
+  })
+
+  it("uses the status text when a 5xx response has no JSON body", async () => {
+    jest.useFakeTimers()
+    fetchSpy.mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: () => Promise.reject(new Error("invalid JSON")),
+    })
+    transport = new CompanionTransport()
+    const callPromise = transport.call("claude_send").catch((error: unknown) => error)
+
+    await jest.advanceTimersByTimeAsync(250)
+    await jest.advanceTimersByTimeAsync(500)
+    await jest.advanceTimersByTimeAsync(1000)
+
+    await expect(callPromise).resolves.toMatchObject({
+      code: "server_error",
+      message: "HTTP 503",
+    })
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -529,6 +797,15 @@ describe("subscribe() — WebSocket frame dispatch", () => {
     expect(ws.url).toContain("token=test.jwt.token")
   })
 
+  it("fails closed instead of opening an unpinned browser WebSocket to a paired LAN host", async () => {
+    await setConfig({ ...MOCK_CONFIG, serverFingerprint: "ab".repeat(32) })
+    transport = new CompanionTransport()
+    transport.subscribe("claude://message", jest.fn())
+
+    expect(wsSpy).not.toHaveBeenCalled()
+    expect(transport.getActiveTier()).toBe("offline")
+  })
+
   it("dispatches payload to handler on matching frame type", () => {
     transport = new CompanionTransport()
     const handler = jest.fn()
@@ -572,6 +849,27 @@ describe("subscribe() — WebSocket frame dispatch", () => {
 
     expect(h1).toHaveBeenCalledWith("hello")
     expect(h2).toHaveBeenCalledWith("hello")
+  })
+
+  it("does not dispatch duplicate or out-of-order WebSocket events", () => {
+    transport = new CompanionTransport()
+    const handler = jest.fn()
+    transport.subscribe("claude://message", handler)
+
+    const ws = MockWebSocket.lastInstance!
+    ws.triggerOpen()
+    ws.triggerMessage(
+      JSON.stringify({ type: "claude://message", seq: 4, payload: "fresh", ts_ms: 0 })
+    )
+    ws.triggerMessage(
+      JSON.stringify({ type: "claude://message", seq: 4, payload: "duplicate", ts_ms: 0 })
+    )
+    ws.triggerMessage(
+      JSON.stringify({ type: "claude://message", seq: 3, payload: "stale", ts_ms: 0 })
+    )
+
+    expect(handler).toHaveBeenCalledTimes(1)
+    expect(handler).toHaveBeenCalledWith("fresh")
   })
 
   it("unsubscribed handler stops receiving payloads", () => {
@@ -635,7 +933,9 @@ describe("subscribe() — ping / pong", () => {
 // ---------------------------------------------------------------------------
 
 describe("subscribe() — resync_required", () => {
-  it("clears cursors and triggers reconnect on resync_required", async () => {
+  it("runs authoritative resync, advances cursor, and reconnects", async () => {
+    const resolver = jest.fn(async () => {})
+    const removeResolver = remoteEventResyncCoordinator.register("*", resolver)
     await setConfig()
     transport = new CompanionTransport()
     const handler = jest.fn()
@@ -650,18 +950,21 @@ describe("subscribe() — resync_required", () => {
     )
 
     // Server sends resync_required.
-    ws1.triggerMessage(JSON.stringify({ type: "resync_required" }))
+    ws1.triggerMessage(JSON.stringify({ type: "resync_required", domains: ["*"], cursor: 25 }))
+    await new Promise((resolve) => setTimeout(resolve, 0))
 
     // A synthetic resync event was emitted to all handlers.
-    expect(handler).toHaveBeenCalledWith({ type: "resync_required" })
+    expect(resolver).toHaveBeenCalledTimes(1)
+    expect(handler).toHaveBeenCalledWith({ type: "resync_required", domains: ["*"] })
 
     // Old WS is closed and a new one is opened.
     expect(ws1.closed).toBe(true)
     expect(MockWebSocket.instances.length).toBe(2)
 
-    // New WS should use since= without the previous cursor (cursors cleared).
+    // New WS resumes from the authoritative snapshot high-water mark.
     const ws2 = MockWebSocket.instances[1]
-    expect(ws2.url).not.toContain("since=10")
+    expect(ws2.url).toContain("since=25")
+    removeResolver()
   })
 })
 
@@ -673,6 +976,46 @@ describe("WebSocket reconnect", () => {
   beforeEach(() => {
     setConfig()
     jest.useFakeTimers()
+    // Pin the backoff jitter to its midpoint (factor 1.0) so these tests can
+    // assert the exact 1s → 2s → 4s schedule.
+    __setBackoffRandomForTests(() => 0.5)
+  })
+
+  afterEach(() => {
+    __setBackoffRandomForTests(null)
+  })
+
+  it("jitters the reconnect delay around the base backoff", async () => {
+    // Max jitter (factor 1.15) pushes the first 1s step out past 1000ms.
+    __setBackoffRandomForTests(() => 1)
+    transport = new CompanionTransport()
+    transport.subscribe("ch:test", jest.fn())
+    const ws1 = MockWebSocket.lastInstance!
+    ws1.triggerOpen()
+    ws1.triggerClose()
+
+    await jest.advanceTimersByTimeAsync(1000)
+    expect(MockWebSocket.instances.length).toBe(1) // not yet — jitter widened it
+    await jest.advanceTimersByTimeAsync(150)
+    expect(MockWebSocket.instances.length).toBe(2)
+  })
+
+  it("does not schedule a reconnect while the OS reports offline", async () => {
+    const onLineSpy = jest.spyOn(window.navigator, "onLine", "get").mockReturnValue(false)
+    try {
+      transport = new CompanionTransport()
+      transport.subscribe("ch:test", jest.fn())
+      const ws1 = MockWebSocket.lastInstance!
+      ws1.triggerOpen()
+      ws1.triggerClose()
+
+      // Even after well past every backoff step, no new socket is created —
+      // the online listener owns resumption when connectivity returns.
+      await jest.advanceTimersByTimeAsync(60_000)
+      expect(MockWebSocket.instances.length).toBe(1)
+    } finally {
+      onLineSpy.mockRestore()
+    }
   })
 
   it("reconnects after close with backoff 1s → 2s → 4s", async () => {
@@ -1012,39 +1355,280 @@ describe("reconnectRtc()", () => {
     expect(transport.reconnectRtc()).toBe("no-tier")
   })
 
-  it("returns 'ok' when TransportRtc.reconnectNow fires", async () => {
+  const fakeRtcReturning = (outcome: "started" | "busy" | "throttled") => ({
+    getState: () => "open" as const,
+    onStateChange: () => () => undefined,
+    connect: async () => undefined,
+    close: () => undefined,
+    reconnectNow: () => outcome,
+    getSelectedCandidateKind: async () => "host" as const,
+    call: async () => undefined,
+    subscribe: () => () => undefined,
+    getSeqCursor: () => ({}),
+  })
+
+  it("maps TransportRtc 'started' to 'ok'", async () => {
     await setConfig()
     transport = new CompanionTransport()
-    const fakeRtc = {
-      getState: () => "open" as const,
-      onStateChange: () => () => undefined,
-      connect: async () => undefined,
-      close: () => undefined,
-      reconnectNow: () => true,
-      getSelectedCandidateKind: async () => "host" as const,
-      call: async () => undefined,
-      subscribe: () => () => undefined,
-      getSeqCursor: () => ({}),
-    }
-    ;(transport as unknown as { rtc: unknown }).rtc = fakeRtc
+    ;(transport as unknown as { rtc: unknown }).rtc = fakeRtcReturning("started")
     expect(transport.reconnectRtc()).toBe("ok")
   })
 
-  it("returns 'throttled' when TransportRtc.reconnectNow is suppressed", async () => {
+  it("passes through TransportRtc 'busy' (ADR-0021 F3)", async () => {
     await setConfig()
     transport = new CompanionTransport()
-    const fakeRtc = {
-      getState: () => "open" as const,
-      onStateChange: () => () => undefined,
-      connect: async () => undefined,
-      close: () => undefined,
-      reconnectNow: () => false,
-      getSelectedCandidateKind: async () => "host" as const,
-      call: async () => undefined,
-      subscribe: () => () => undefined,
-      getSeqCursor: () => ({}),
-    }
-    ;(transport as unknown as { rtc: unknown }).rtc = fakeRtc
+    ;(transport as unknown as { rtc: unknown }).rtc = fakeRtcReturning("busy")
+    expect(transport.reconnectRtc()).toBe("busy")
+  })
+
+  it("passes through TransportRtc 'throttled'", async () => {
+    await setConfig()
+    transport = new CompanionTransport()
+    ;(transport as unknown as { rtc: unknown }).rtc = fakeRtcReturning("throttled")
     expect(transport.reconnectRtc()).toBe("throttled")
+  })
+
+  it("re-establishes the tier from cached options after it dropped (ADR-0021 F2)", async () => {
+    await setConfig()
+    transport = new CompanionTransport()
+    // Simulate: the tier was enabled once (options cached) but has since
+    // dropped to failed/closed, nulling `this.rtc`. The button must NOT report
+    // no-tier — it must rebuild from the cached options.
+    let enableCalls = 0
+    ;(transport as unknown as { lastEnableOptions: unknown }).lastEnableOptions = {
+      signalingUrl: "wss://signaling.test/v2/signaling",
+    }
+    ;(
+      transport as unknown as { enableWebRtcTier: (o: unknown) => Promise<void> }
+    ).enableWebRtcTier = async () => {
+      enableCalls += 1
+    }
+    expect((transport as unknown as { rtc: unknown }).rtc).toBeNull()
+    expect(transport.reconnectRtc()).toBe("ok")
+    expect(enableCalls).toBe(1)
+  })
+
+  it("returns 'no-tier' when there is neither a live instance nor cached options", () => {
+    transport = new CompanionTransport()
+    expect((transport as unknown as { lastEnableOptions: unknown }).lastEnableOptions).toBeNull()
+    expect(transport.reconnectRtc()).toBe("no-tier")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// LAN-first gate (ADR-0021)
+// ---------------------------------------------------------------------------
+
+const TUNNEL_URL = "https://abc-1234.trycloudflare.com"
+
+interface FakeRtcOpts {
+  kind?: "host" | "srflx" | "prflx" | "relay" | "unknown"
+}
+function makeFakeRtc(opts: FakeRtcOpts = {}) {
+  return {
+    getState: () => "open" as const,
+    call: jest.fn(async () => "RTC_RESULT"),
+    subscribe: jest.fn(() => () => undefined),
+    getSelectedCandidateKind: jest.fn(async () => opts.kind ?? "host"),
+    onStateChange: () => () => undefined,
+    reconnectNow: () => true,
+    close: jest.fn(),
+    getSeqCursor: () => ({}),
+  }
+}
+
+/** Open a connected WS for the given (already-stored) config. */
+function openConnectedWs(tx: CompanionTransport): MockWebSocket {
+  tx.subscribe("ch:gate", jest.fn())
+  const ws = MockWebSocket.lastInstance!
+  ws.triggerOpen()
+  return ws
+}
+
+describe("isOnConnectedLan()", () => {
+  it("is true when the WS is connected against a LAN host", () => {
+    return setConfig({ ...MOCK_CONFIG, baseUrl: "https://192.168.1.42:7890" }).then(() => {
+      transport = new CompanionTransport()
+      openConnectedWs(transport)
+      expect(transport.isOnConnectedLan()).toBe(true)
+    })
+  })
+
+  it("is false when the WS is connected against a tunnel host", () => {
+    return setConfig({ ...MOCK_CONFIG, baseUrl: TUNNEL_URL }).then(() => {
+      transport = new CompanionTransport()
+      openConnectedWs(transport)
+      expect(transport.isOnConnectedLan()).toBe(false)
+    })
+  })
+
+  it("is false when no WS is connected even on a LAN baseUrl", async () => {
+    await setConfig({ ...MOCK_CONFIG, baseUrl: "https://192.168.1.42:7890" })
+    transport = new CompanionTransport()
+    expect(transport.isOnConnectedLan()).toBe(false)
+  })
+
+  it("is false when there is no stored config", () => {
+    transport = new CompanionTransport()
+    expect(transport.isOnConnectedLan()).toBe(false)
+  })
+})
+
+describe("call() — LAN-first gate", () => {
+  it("routes through HTTPS (not the DataChannel) while on a connected LAN", async () => {
+    await setConfig({ ...MOCK_CONFIG, baseUrl: "https://192.168.1.42:7890" })
+    transport = new CompanionTransport()
+    openConnectedWs(transport)
+    const fakeRtc = makeFakeRtc()
+    ;(transport as unknown as { rtc: unknown }).rtc = fakeRtc
+    fetchSpy.mockResolvedValueOnce(mockResponse({ ok: true }, 200))
+
+    const result = await transport.call("claude_sidecar_status")
+
+    expect(result).toEqual({ ok: true })
+    expect(fakeRtc.call).not.toHaveBeenCalled()
+    expect(fetchSpy).toHaveBeenCalled()
+  })
+
+  it("routes through the DataChannel when NOT on a LAN (tunnel/offline)", async () => {
+    await setConfig({ ...MOCK_CONFIG, baseUrl: TUNNEL_URL })
+    transport = new CompanionTransport()
+    const fakeRtc = makeFakeRtc()
+    ;(transport as unknown as { rtc: unknown }).rtc = fakeRtc
+
+    const result = await transport.call("claude_sidecar_status")
+
+    expect(result).toBe("RTC_RESULT")
+    expect(fakeRtc.call).toHaveBeenCalled()
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("falls back to HTTPS with the same mutation key when the DataChannel fails", async () => {
+    await setConfig({ ...MOCK_CONFIG, baseUrl: TUNNEL_URL })
+    transport = new CompanionTransport()
+    const fakeRtc = makeFakeRtc()
+    fakeRtc.call.mockRejectedValueOnce(new Error("channel closed"))
+    ;(transport as unknown as { rtc: unknown }).rtc = fakeRtc
+    fetchSpy.mockResolvedValueOnce(mockResponse({ ok: true }, 200))
+
+    await expect(transport.call("git_set_identity", { repoPath: "/repo" })).resolves.toEqual({
+      ok: true,
+    })
+    const rtcArgs = (fakeRtc.call.mock.calls as unknown[][])[0][1] as Record<string, unknown>
+    const rtcCallOptions = (fakeRtc.call.mock.calls as unknown[][])[0][2] as {
+      idempotencyKey?: string
+    }
+    const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit]
+    expect(rtcCallOptions.idempotencyKey).toBe(
+      (init.headers as Record<string, string>)["Idempotency-Key"]
+    )
+    expect(rtcArgs).not.toHaveProperty("idempotencyKey")
+  })
+})
+
+describe("subscribe() — LAN-first gate", () => {
+  it("does NOT wire the DataChannel for a new subscription while on a connected LAN", () => {
+    return setConfig({ ...MOCK_CONFIG, baseUrl: "https://192.168.1.42:7890" }).then(() => {
+      transport = new CompanionTransport()
+      openConnectedWs(transport)
+      const fakeRtc = makeFakeRtc()
+      ;(transport as unknown as { rtc: unknown }).rtc = fakeRtc
+      transport.subscribe("ch:new", jest.fn())
+      expect(fakeRtc.subscribe).not.toHaveBeenCalled()
+    })
+  })
+
+  it("wires the DataChannel for a new subscription when NOT on a LAN", () => {
+    return setConfig({ ...MOCK_CONFIG, baseUrl: TUNNEL_URL }).then(() => {
+      transport = new CompanionTransport()
+      openConnectedWs(transport)
+      const fakeRtc = makeFakeRtc()
+      ;(transport as unknown as { rtc: unknown }).rtc = fakeRtc
+      transport.subscribe("ch:new", jest.fn())
+      expect(fakeRtc.subscribe).toHaveBeenCalledWith("ch:new", expect.any(Function))
+    })
+  })
+})
+
+describe("recomputeTier() — LAN wins over an open DataChannel", () => {
+  it("reports ws-lan even when a DataChannel peer is open", async () => {
+    await setConfig({ ...MOCK_CONFIG, baseUrl: "https://192.168.1.42:7890" })
+    transport = new CompanionTransport()
+    transport.subscribe("ch:gate", jest.fn())
+    ;(transport as unknown as { rtc: unknown }).rtc = makeFakeRtc({ kind: "host" })
+    MockWebSocket.lastInstance!.triggerOpen()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(transport.getActiveTier()).toBe("ws-lan")
+  })
+
+  it("reports rtc-direct when the open peer is off-LAN (tunnel)", async () => {
+    await setConfig({ ...MOCK_CONFIG, baseUrl: TUNNEL_URL })
+    transport = new CompanionTransport()
+    transport.subscribe("ch:gate", jest.fn())
+    ;(transport as unknown as { rtc: unknown }).rtc = makeFakeRtc({ kind: "host" })
+    MockWebSocket.lastInstance!.triggerOpen()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(transport.getActiveTier()).toBe("rtc-direct")
+  })
+})
+
+describe("reconnectWs()", () => {
+  it("re-opens the WS against the current baseUrl when channels are active", async () => {
+    await setConfig({ ...MOCK_CONFIG, baseUrl: "https://192.168.1.42:7890" })
+    transport = new CompanionTransport()
+    const ws1 = openConnectedWs(transport)
+    expect(MockWebSocket.instances.length).toBe(1)
+
+    // Repoint to a freshly-discovered LAN address, then force a reconnect.
+    await saveCompanionConfig({ ...MOCK_CONFIG, baseUrl: "https://192.168.1.99:7890" })
+    transport.reconnectWs()
+
+    expect(ws1.closed).toBe(true)
+    expect(MockWebSocket.instances.length).toBe(2)
+    expect(MockWebSocket.instances[1].url).toContain("192.168.1.99")
+  })
+
+  it("is a no-op when there are no active channels", () => {
+    transport = new CompanionTransport()
+    transport.reconnectWs()
+    expect(MockWebSocket.instances.length).toBe(0)
+  })
+
+  it("is a no-op after the transport is destroyed", () => {
+    transport = new CompanionTransport()
+    transport.destroy()
+    transport.reconnectWs()
+    expect(MockWebSocket.instances).toHaveLength(0)
+  })
+})
+
+describe("defensive teardown and frame parsing", () => {
+  it("detaches and tolerates a throwing WebRTC close", () => {
+    transport = new CompanionTransport()
+    const detach = jest.fn()
+    const close = jest.fn(() => {
+      throw new Error("already closed")
+    })
+    ;(transport as unknown as { rtcDetach: (() => void) | null }).rtcDetach = detach
+    ;(transport as unknown as { rtc: unknown }).rtc = { ...makeFakeRtc(), close }
+
+    expect(() => transport.disableWebRtcTier()).not.toThrow()
+    expect(detach).toHaveBeenCalled()
+    expect(close).toHaveBeenCalled()
+  })
+
+  it("ignores malformed and typeless WebSocket frames", async () => {
+    await setConfig()
+    const handler = jest.fn()
+    transport = new CompanionTransport()
+    transport.subscribe("ch:test", handler)
+    const ws = MockWebSocket.lastInstance!
+
+    ws.triggerMessage("{invalid")
+    ws.triggerMessage(JSON.stringify({ payload: "missing type" }))
+
+    expect(handler).not.toHaveBeenCalled()
   })
 })

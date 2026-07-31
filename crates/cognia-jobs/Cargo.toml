@@ -1,0 +1,40 @@
+# Background-job supervisor: the ONE owner of non-interactive long-running
+# commands started by the built-in agent (`bash(run_in_background)`,
+# `start_process`) and by scheduled tasks. Deliberately NOT a PTY — stdout and
+# stderr stay separate and exit codes stay real, which is what distinguishes it
+# from `cognia-terminal`'s PTY sessions.
+#
+# Linked by BOTH `src-tauri` (desktop) and the headless `cognia-server` binary,
+# so there is one implementation and no headless divergence.
+[package]
+name = "cognia-jobs"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89.0"
+description = "Background-job supervisor: process-group-safe spawn/kill, ring+disk output, SQLite journal."
+license = "AGPL-3.0-or-later"
+publish = false
+
+[lib]
+name = "cognia_jobs"
+path = "src/lib.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "fs", "io-util", "sync", "time"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2"
+parking_lot = "0.12"
+uuid = { version = "1", features = ["v4"] }
+bytes = "1"
+log = "0.4"
+regex = "1"
+
+# Process-group creation (`setsid`) and group kill (`killpg`). Mirrors the
+# idiom in `cognia-automation/src/sandbox/macos.rs`.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"

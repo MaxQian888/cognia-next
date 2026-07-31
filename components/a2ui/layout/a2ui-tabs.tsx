@@ -40,7 +40,7 @@ export const A2UITabs = memo(function A2UITabs({
       className={cn("w-full", component.className)}
       style={component.style as React.CSSProperties}
     >
-      <TabsList className="w-full justify-start">
+      <TabsList className="w-full justify-start overflow-x-auto">
         {component.tabs.map((tab) => (
           <TabsTrigger key={tab.id} value={tab.id} disabled={tab.disabled}>
             {tab.label}
@@ -48,7 +48,7 @@ export const A2UITabs = memo(function A2UITabs({
         ))}
       </TabsList>
       {component.tabs.map((tab) => (
-        <TabsContent key={tab.id} value={tab.id}>
+        <TabsContent key={tab.id} value={tab.id} className="min-w-0">
           <A2UIChildRenderer childIds={tab.children} />
         </TabsContent>
       ))}

@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { act, renderHook } from "@testing-library/react"
 import { useMcpStore, type McpToolSelectionResult } from "./mcp-store"
 import { DEFAULT_TOOL_SELECTION_CONFIG } from "@/types/mcp"

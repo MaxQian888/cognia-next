@@ -44,11 +44,13 @@ Click **Save**.
 
 A public HTTPS endpoint on the same machine is required.
 
-1. Go to **Event subscriptions** in your app's menu.
-2. Under **Subscription method**, select **Configure request URL**.
-3. Enter your webhook URL (e.g. `https://your-host.example.com/connectors/lark/<adapterId>`).
-4. Lark will send a verification request; cognia-next's Rust HTTP proxy handles the handshake.
-5. Subscribe to the following event:
+1. In cognia-next, create the Lark adapter with **Webhook** selected, then reopen the saved adapter.
+2. Start the Cloudflared tunnel from **Settings → Companion → Tunnel**.
+3. Copy the generated callback URL from the Lark configuration dialog. It has the shape `https://.../webhook/lark/<adapterId>`.
+4. In Lark, go to **Event subscriptions** in your app's menu.
+5. Under **Subscription method**, select **Configure request URL** and paste the generated callback URL.
+6. Lark will send a verification request; cognia-next's Rust HTTP proxy handles the handshake.
+7. Subscribe to the following event:
    - `im.message.receive_v1` — Bot receives a message
 
 Click **Save**.
@@ -75,6 +77,7 @@ Your app needs the following permissions. Go to **Permission management** and ad
 | Scope                    | Purpose                                |
 | ------------------------ | -------------------------------------- |
 | `im:message`             | Read messages sent to the bot          |
+| `im:message.group_msg`   | Receive group messages that do not @ the bot (required for topic activation) |
 | `im:message:send_as_bot` | Send messages as the bot               |
 | `im:chat`                | Access chat information                |
 | `im:resource`            | Access media resources (images, files) |
@@ -148,6 +151,50 @@ you choose, then runs an assistant turn when the menu is clicked.
    `event_key` with no mapping falls back to its label / raw key as the prompt, so
    the click is never silently dropped.
 
+Bot menus are static developer-console configuration and are mainly useful in
+direct bot chats. Keep them to commands such as `status`, `new`, and `help`;
+they are not a per-topic progress surface. CardKit progress cards are used for
+live Agent status inside topics.
+
+Feishu exposes follow-up bubbles through
+`POST /im/v1/messages/:message_id/push_follow_up`. In **bot-user direct chats**,
+cognia-next projects up to three temporary Stop, status, and approval controls
+from the latest progress card. A click is authorized using the real inbound
+sender. The feature requires Feishu 7.20+ and a latest bot message no older than
+600 seconds. The API rejects groups and topics with `230003`, so durable CardKit
+buttons remain the topic control surface. Expired, superseded, or ambiguous
+bubble delivery degrades only this temporary enhancement, never the progress
+card or final reply.
+
+### Verify topic no-@ delivery
+
+Enabling `im:message.group_msg` in the console is not enough: permission and
+event-subscription changes only take effect after a new app version is released.
+
+1. Grant `im:message.group_msg`, keep `im.message.receive_v1` subscribed, and release the app.
+2. Add the released bot to a test group and create two separate topics.
+3. In cognia-next open **Settings → Connections → Lark → Admission** and click
+   **Start delivery probe** (or run `/agent verify` as an operator).
+4. Within ten minutes, send one ordinary group/topic message without @-mentioning the bot.
+5. Confirm readiness becomes **All messages verified**. The probe message is audited and is not
+   executed as an Agent turn.
+6. @-mention the Agent once inside topic A, then continue without @. Topic B and the parent group
+   must remain mention-gated until independently activated.
+
+Topic controls:
+
+- `/agent status` — policy, expiry, dispatch mode, queue depth, active run, readiness, and recovery count.
+- `/agent off` — close activation (activator or configured operator).
+- `/agent verify` — start the ten-minute no-@ probe (configured operator only).
+
+Choose **Queue** to preserve every new message as an independent FIFO turn. Choose **Steer** to
+request live injection into an active run. The built-in Anthropic sidecar first persists the real
+sender's message, then uses acknowledged SDK streaming input to queue it into the current query.
+After a short burst window it closes that query's input so the run settles normally. A missing
+acknowledgement, closed input, or non-Anthropic provider keeps the message and attachments durable
+for replay at the earliest safe boundary. This guarantees live queued input; it does not claim to
+rewrite a model HTTP request that has already been issued.
+
 ---
 
 ## 9. Help & Welcome Cards
@@ -173,6 +220,42 @@ adapter's detail panel). The welcome card is on by default.
 
 ---
 
+## 10. Send as Me (User OAuth)
+
+By default the bot replies under its own identity. **Send as me** lets replies go out under
+_your_ Lark identity instead, via an OAuth 2.0 authorization-code flow. This is optional — the
+bot works fully without it, and falls back to the bot identity if the authorization ever expires.
+
+Because Feishu only accepts **http/https** redirect URLs (custom app schemes like `cognia://`
+cannot be registered in the console), cognia-next relays the callback through the same Cloudflared
+tunnel used for webhooks: `https://<your-tunnel-host>/oauth/lark/callback` bounces the result back
+into the desktop app.
+
+### Setup
+
+1. **Start a stable tunnel.** Open **Settings → Mobile Companion → Tunnel** and start the
+   Cloudflared tunnel. Use a **named tunnel** so the host stays stable across restarts — Feishu
+   matches the exact registered URL on every authorization.
+2. **Grant user scopes.** In the Lark console → **Permission management**, enable and get approval
+   for:
+   - `offline_access` — **required**; Feishu only issues a refresh token when this is granted.
+   - `im:message` — send messages as the user.
+
+   Re-release the app version after changing scopes.
+3. **Register the redirect URL.** In the Lark console → **Security Settings → Redirect URL**, add
+   the exact URL shown in cognia-next under **Settings → Connections → Lark → Send as me** (the
+   "OAuth redirect URL" field, e.g. `https://<tunnel>/oauth/lark/callback`). Leave the field blank
+   in cognia-next to use the tunnel-derived URL, or paste a custom one if you front the relay with
+   your own domain.
+4. **Connect.** Click **Connect account**. Your browser opens the Feishu consent page; approve it,
+   and the relay returns you to cognia-next, which shows **Connected as \<name\>**.
+5. **Enable.** Toggle **Send replies as me** on.
+
+The flow uses PKCE (`S256`) — the verifier never leaves your device — and refreshes the user token
+automatically, falling back to the bot identity if a refresh fails.
+
+---
+
 ## Troubleshooting
 
 | Symptom                               | Likely cause                                                                 |
@@ -185,3 +268,5 @@ adapter's detail panel). The welcome card is on by default.
 | Bot menu click does nothing           | Subscribe `application.bot.menu_v6` and map the `event_key` under Quick commands |
 | No welcome card on join               | Subscribe `im.chat.member.bot.added_v1`; ensure Welcome card is enabled under Help & Welcome |
 | Interactive cards render as plain text | Grant the `cardkit:card:write` scope and re-release the app version            |
+| "Connect account" fails / `redirect_uri unmatch` | The redirect URL isn't registered in Security Settings, or the tunnel host changed — use a named tunnel and register the exact URL |
+| "Send as me" still sends as the bot   | `offline_access` + `im:message` not granted/approved, or the authorization expired — reconnect the account |

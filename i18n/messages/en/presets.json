@@ -1,0 +1,198 @@
+{
+  "actions": {
+    "cancel": "Cancel",
+    "clearDefault": "Clear default",
+    "create": "Create preset",
+    "delete": "Delete",
+    "doneReorder": "Done",
+    "duplicate": "Duplicate",
+    "edit": "Edit",
+    "export": "Export presets…",
+    "favorite": "Add to favorites",
+    "import": "Import presets…",
+    "new": "New preset",
+    "reorder": "Reorder",
+    "reset": "Reset to built-ins",
+    "save": "Save",
+    "setDefault": "Set as default",
+    "toggleSelection": "Toggle selection",
+    "unfavorite": "Remove from favorites"
+  },
+  "applyDialog": {
+    "description": "This preset would overwrite the following session field(s): {fields}.",
+    "fillEmpty": "Only fill empty fields",
+    "fillEmptyDescription": "Keep your existing values; only apply preset fields where the session is currently empty. Safest default.",
+    "merge": "Merge",
+    "mergeDescription": "Same as \"fill empty\" for scalar fields. Useful when applying through the section editor where array fields are unioned.",
+    "overwriteAll": "Overwrite everything",
+    "overwriteAllDescription": "Every preset field replaces the session value, even when the session already has one set.",
+    "title": "Apply preset \"{name}\"?"
+  },
+  "bulk": {
+    "builtInsSkipped": "Built-in presets in your selection will be skipped.",
+    "deleteAll": "Delete",
+    "deleteConfirmDescription": "The selected presets will be removed from your library. Built-in presets in the selection are skipped automatically. This can't be undone.",
+    "deleteConfirmTitle": "Delete {count} presets?",
+    "exitSelectMode": "Done",
+    "favoriteAll": "Favorite",
+    "selectMode": "Select",
+    "unfavoriteAll": "Unfavorite"
+  },
+  "card": {
+    "builtIn": "Built-in",
+    "clearDefault": "Clear default on {name}",
+    "default": "Default",
+    "dragHandle": "Drag to reorder",
+    "favorite": "Favorite {name}",
+    "setDefault": "Set {name} as default",
+    "unfavorite": "Unfavorite {name}",
+    "usedNTimes": "Used {count} times"
+  },
+  "category": {
+    "business": "Business",
+    "coding": "Coding",
+    "creative": "Creative",
+    "education": "Education",
+    "general": "General",
+    "productivity": "Productivity",
+    "research": "Research",
+    "uncategorized": "Uncategorized",
+    "writing": "Writing"
+  },
+  "deleteConfirmDescription": "\"{name}\" will be removed from your library. Sessions currently using it keep their copy of the system prompt.",
+  "deleteConfirmTitle": "Delete preset?",
+  "editor": {
+    "agentMode": "Agent mode",
+    "allowedTools": "Allowed tools (comma-separated)",
+    "category": "Category",
+    "customModelPlaceholder": "Or paste a model id",
+    "description": "Description",
+    "descriptionPlaceholder": "(optional) one-line summary",
+    "disallowedTools": "Disallowed tools (comma-separated)",
+    "effort": "Effort",
+    "favorite": "Favorite",
+    "favoriteHelp": "Pinned to the top of your library.",
+    "icon": "Icon emoji",
+    "mcpServers": "MCP servers",
+    "mcpServersEmptyHint": "(uses all enabled MCP servers)",
+    "mcpServersHelp": "Leave all unselected to mean \"use every enabled server\".",
+    "model": "Model",
+    "name": "Name",
+    "namePlaceholder": "Code Reviewer",
+    "permissionMode": "Permission mode",
+    "pickColor": "Pick color",
+    "pickWorkingDir": "Pick directory",
+    "saving": "Saving…",
+    "sections": {
+      "advanced": {
+        "description": "Working directory, agent-mode override, and library flags.",
+        "title": "Advanced"
+      },
+      "capability": {
+        "description": "System prompt and the model / permission / effort overrides applied to sessions using this preset.",
+        "title": "Capability"
+      },
+      "character": {
+        "description": "Project a persona onto this subject. Plugin-pack characters are listed alongside the library.",
+        "inherit": "Inherit (none)",
+        "pickerLabel": "Character",
+        "title": "Character"
+      },
+      "externalPreset": {
+        "description": "Optional handoff target — Claude Code / Codex / Gemini-CLI / etc.",
+        "inherit": "Inherit (none)",
+        "pickerLabel": "Preset",
+        "title": "External agent preset"
+      },
+      "identity": {
+        "description": "Name, category, and visual treatment shown in the picker.",
+        "title": "Identity"
+      },
+      "nativeTools": {
+        "description": "Computer use / bash / text editor, contributed by plugins.",
+        "empty": "No native Anthropic tools are registered.",
+        "requiresNativeInputPermission": "Requires native input/screen permissions.",
+        "title": "Native Anthropic tools"
+      },
+      "subagent": {
+        "builtinBadge": "Built-in",
+        "description": "Built-in workflow-* subagents plus any plugin-registered subagents.",
+        "empty": "No subagents are available.",
+        "pluginBadge": "Plugin",
+        "title": "Subagents"
+      },
+      "teamCapabilityOverlay": {
+        "addedLabel": "Added",
+        "description": "Shows which capability ids come from the team default, which were added on this teammate, and which were removed.",
+        "inheritedLabel": "Inherited",
+        "mcpServers": "MCP servers",
+        "nativeTools": "Native tools",
+        "removedLabel": "Removed",
+        "skills": "Skills",
+        "subagents": "Subagents",
+        "title": "Inherited vs override"
+      },
+      "tools": {
+        "description": "Tool whitelists, ordered skill stack, and MCP server subset.",
+        "title": "Tools",
+        "noneDefined": "(none defined yet)",
+        "reorderLabel": "Reorder:"
+      }
+    },
+    "setDefault": "Set as default",
+    "setDefaultHelp": "Auto-applied to new sessions without a character.",
+    "skills": "Skills",
+    "skillsEmptyHint": "(no skills selected)",
+    "skillsHelp": "Order matters — earlier skills are appended first to the system prompt.",
+    "systemPrompt": "System prompt",
+    "systemPromptPlaceholder": "You are…",
+    "uncategorized": "Uncategorized",
+    "useAppDefault": "Use app default",
+    "workingDir": "Working directory",
+    "workingDirPlaceholder": "/path/to/project (optional)"
+  },
+  "emptyFiltered": "No presets match your filters.",
+  "emptyState": "No presets yet. The 12 built-ins should appear here on first launch.",
+  "filter": {
+    "all": "All",
+    "builtIn": "Built-in",
+    "custom": "Custom",
+    "favorites": "Favorites",
+    "hasMcp": "Has MCP",
+    "hasSkills": "Has Skills",
+    "recent": "Recently used"
+  },
+  "pickWorkingDir": "Select working directory",
+  "readOnlyDeleteTooltip": "Built-in presets can't be deleted",
+  "readOnlyTooltip": "Built-in preset — duplicate to edit",
+  "resetConfirmDescription": "Every preset — including custom ones you created — is removed and the built-ins are restored. This can't be undone.",
+  "resetConfirmTitle": "Reset to built-in presets?",
+  "searchPlaceholder": "Search presets…",
+  "subtitle": "Reusable session configurations — system prompt plus model, tool, MCP, and skill overrides. Apply per session or set one as the default for new chats.",
+  "title": "Presets",
+  "toast": {
+    "created": "Preset \"{name}\" created.",
+    "defaultCleared": "Default preset cleared.",
+    "defaultSet": "\"{name}\" is now the default.",
+    "deleted": "Deleted \"{name}\".",
+    "duplicated": "Duplicated as \"{name}\".",
+    "exported": "Exported {count} presets.",
+    "importInvalid": "Not a recognised preset export.",
+    "imported": "Imported {added} new presets ({skipped} skipped).",
+    "reset": "Reset to built-in presets.",
+    "updated": "Preset \"{name}\" updated."
+  },
+  "toolbar": {
+    "bulkAriaLabel": "Bulk preset actions",
+    "clearSelection": "Clear selection",
+    "filterGroupAriaLabel": "Filter presets",
+    "searchAriaLabel": "Search presets",
+    "searchPlaceholder": "Search presets…",
+    "selected": "{count} selected"
+  },
+  "validation": {
+    "contentRequired": "System prompt cannot be empty.",
+    "nameRequired": "Preset name is required."
+  },
+  "moreActions": "More actions"
+}

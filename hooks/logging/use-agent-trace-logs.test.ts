@@ -8,13 +8,15 @@ import { __clearAgentTracesForTesting, bulkInsertSpans } from "@/lib/db/agent-tr
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
 import type { AgentTraceSpan } from "@/types/agent-trace/span"
 
+// 30s: a cold Dexie open replays the full schema chain (v100+), which blows
+// the default 5s hook timeout on the first test of the file.
 beforeEach(async () => {
   await getDb().delete()
   __resetDbForTesting()
   getDb()
   await whenSeeded()
   await __clearAgentTracesForTesting()
-})
+}, 30_000)
 
 function span(over: Partial<AgentTraceSpan>): AgentTraceSpan {
   const id = over.id ?? "span-" + Math.random().toString(36).slice(2, 8)

@@ -18,6 +18,7 @@
  */
 
 import type { WorkflowSettings } from "@/types/workflow/visual"
+import type { PluginIconName } from "./plugin-icon"
 
 /**
  * Cross-capability dependencies declared by a plugin workflow template. Each
@@ -63,12 +64,7 @@ export interface PluginWorkflowTemplateEdge {
 
 /** Category mirrors the editor's template-picker buckets. */
 export type PluginWorkflowTemplateCategory =
-  | "automation"
-  | "integration"
-  | "ai"
-  | "data"
-  | "github"
-  | "general"
+  "automation" | "integration" | "ai" | "data" | "github" | "general"
 
 /**
  * Plugin-contributed visual workflow template — a self-contained blueprint
@@ -85,7 +81,7 @@ export interface PluginWorkflowTemplateDef {
   /** Template category — drives sorting/filtering. */
   category: PluginWorkflowTemplateCategory
   /** Lucide icon name shown on the template card. */
-  icon?: string
+  icon?: PluginIconName
   /** Optional complexity hint (matches `VisualWorkflow.complexity`). */
   complexity?: "starter" | "intermediate" | "advanced"
   /** The blueprint's nodes. */

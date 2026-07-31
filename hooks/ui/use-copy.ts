@@ -2,7 +2,8 @@
 
 import { useCallback, useRef, useState } from "react"
 
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
+import { writeText as capWriteText } from "@/lib/capacitor/clipboard"
 
 export interface UseCopyOptions {
   /** Milliseconds to keep `copied` true after a successful write. Defaults to 1500. */
@@ -41,7 +42,13 @@ export function useCopy(options: UseCopyOptions | number = {}): UseCopyResult {
     async (value: string) => {
       setIsCopying(true)
       try {
-        if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+        // Native mobile clipboard first — Capacitor's WebView frequently blocks
+        // `navigator.clipboard`. The wrapper self-gates to mobile, so this is a
+        // fast no-op (`unsupported`) on web / Tauri and the web paths below run.
+        const cap = await capWriteText(value)
+        if (cap.kind === "ok") {
+          // fall through to the shared success bookkeeping below.
+        } else if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
           await navigator.clipboard.writeText(value)
         } else if (typeof document !== "undefined") {
           const ta = document.createElement("textarea")

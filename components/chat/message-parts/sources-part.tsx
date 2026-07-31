@@ -8,12 +8,36 @@
  * "View source" link that deep-links into the Twin workbench.
  */
 
+import { memo, useMemo } from "react"
 import { useTranslations } from "next-intl"
 import Link from "next/link"
+import {
+  InlineCitation,
+  InlineCitationCard,
+  InlineCitationCardBody,
+  InlineCitationCardTrigger,
+  InlineCitationCarousel,
+  InlineCitationCarouselContent,
+  InlineCitationCarouselHeader,
+  InlineCitationCarouselIndex,
+  InlineCitationCarouselItem,
+  InlineCitationCarouselNext,
+  InlineCitationCarouselPrev,
+  InlineCitationSource,
+  InlineCitationText,
+} from "@/components/ai-elements/inline-citation"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
-import { BookIcon, BrainIcon, ChevronDownIcon, ExternalLinkIcon, SparklesIcon } from "lucide-react"
+import { ExternalLink } from "@/components/shared/external-link"
+import {
+  AlertTriangleIcon,
+  BookIcon,
+  BrainIcon,
+  ChevronDownIcon,
+  ExternalLinkIcon,
+  SparklesIcon,
+} from "lucide-react"
 import type { SourcesPart as SourcesPartType, SourcesPartItem } from "@/lib/claude/parts-extensions"
 
 interface SourcesPartProps {
@@ -56,76 +80,150 @@ function partition(sources: SourcesPartItem[]) {
 
 export function SourcesPart({ part, className, defaultOpen }: SourcesPartProps) {
   const t = useTranslations("chat.sourcesPart")
-  if (!part.sources || part.sources.length === 0) return null
+  // Both the retrieval-only check (a `.every` pass) and the partition (an O(n)
+  // bucketing that allocates four arrays) only depend on the sources array;
+  // memoize them so unrelated parent re-renders don't repeat the work.
+  const isRetrievalOnly = useMemo(() => isOnlyRetrieval(part.sources ?? []), [part.sources])
+  const buckets = useMemo(() => partition(part.sources ?? []), [part.sources])
+  const hasSources = Boolean(part.sources && part.sources.length > 0)
+  // A degraded twin turn must still render — the warning is the point — even
+  // when retrieval came back empty.
+  if (!hasSources && !part.twinDegraded) return null
+
+  const degradedNotice = part.twinDegraded ? (
+    <div
+      data-testid="sources-part-degraded"
+      role="status"
+      className="not-prose my-2 flex items-start gap-1.5 text-xs text-amber-600 dark:text-amber-400"
+    >
+      <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+      <span>{t("degradedNotice")}</span>
+    </div>
+  ) : null
+
+  // Degraded with no retrieved sources → the notice is all there is to show.
+  if (!hasSources) return degradedNotice
 
   // Default-open when the only sources are twin-* so the user discovers the
   // retrieval feedback without an extra click. Explicit prop wins.
-  const open = defaultOpen ?? isOnlyRetrieval(part.sources)
-  const { twinRag, twinStyle, memory, other } = partition(part.sources)
+  const open = defaultOpen ?? isRetrievalOnly
+  const { twinRag, twinStyle, memory, other } = buckets
 
   return (
-    <Collapsible
-      data-testid="sources-part"
-      className={cn("not-prose my-2 text-primary text-xs", className)}
-      defaultOpen={open}
-    >
-      <CollapsibleTrigger className="flex items-center gap-2" data-testid="sources-part-trigger">
-        <p className="font-medium">{t("usedSources", { count: part.sources.length })}</p>
-        <ChevronDownIcon className="h-4 w-4" />
-      </CollapsibleTrigger>
-      <CollapsibleContent
-        className={cn(
-          "mt-3 flex w-fit flex-col gap-3",
-          "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 outline-none data-[state=closed]:animate-out data-[state=open]:animate-in"
-        )}
+    <>
+      {degradedNotice}
+      <Collapsible
+        data-testid="sources-part"
+        className={cn("not-prose my-2 text-primary text-xs", className)}
+        defaultOpen={open}
       >
-        {twinRag.length > 0 && (
-          <section className="flex flex-col gap-2" data-testid="sources-part-section-twin-rag">
-            <h4 className="text-[11px] font-medium text-muted-foreground">
-              {t("retrievedChunksHeader", { count: twinRag.length })}
-            </h4>
-            <div className="flex flex-col gap-1">
-              {twinRag.map((s) => (
+        <CollapsibleTrigger
+          className="group flex items-center gap-2 rounded-sm transition-colors hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+          data-testid="sources-part-trigger"
+        >
+          <p className="font-medium">{t("usedSources", { count: part.sources.length })}</p>
+          <ChevronDownIcon className="h-4 w-4 shrink-0 transition-transform group-data-[state=open]:rotate-180" />
+        </CollapsibleTrigger>
+        <CollapsibleContent
+          className={cn(
+            "mt-3 flex w-fit flex-col gap-3",
+            "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 outline-none data-[state=closed]:animate-out data-[state=open]:animate-in"
+          )}
+        >
+          {twinRag.length > 0 && (
+            <section className="flex flex-col gap-2" data-testid="sources-part-section-twin-rag">
+              <h4 className="text-[11px] font-medium text-muted-foreground">
+                {t("retrievedChunksHeader", { count: twinRag.length })}
+              </h4>
+              <div className="flex flex-col gap-1">
+                {twinRag.map((s) => (
+                  <SourceRow key={s.id} source={s} />
+                ))}
+              </div>
+            </section>
+          )}
+          {twinStyle.length > 0 && (
+            <section className="flex flex-col gap-2" data-testid="sources-part-section-twin-style">
+              <h4 className="text-[11px] font-medium text-muted-foreground">
+                {t("styleSamplesHeader", { count: twinStyle.length })}
+              </h4>
+              <div className="flex flex-col gap-1">
+                {twinStyle.map((s) => (
+                  <SourceRow key={s.id} source={s} />
+                ))}
+              </div>
+            </section>
+          )}
+          {memory.length > 0 && (
+            <section className="flex flex-col gap-2" data-testid="sources-part-section-memory">
+              <h4 className="text-[11px] font-medium text-muted-foreground">
+                {t("recalledMemoriesHeader", { count: memory.length })}
+              </h4>
+              <div className="flex flex-col gap-1">
+                {memory.map((s) => (
+                  <SourceRow key={s.id} source={s} />
+                ))}
+              </div>
+            </section>
+          )}
+          {other.length > 0 && (
+            <section className="flex flex-col gap-1" data-testid="sources-part-section-other">
+              <WebCitations sources={other} />
+              {other.map((s) => (
                 <SourceRow key={s.id} source={s} />
               ))}
-            </div>
-          </section>
-        )}
-        {twinStyle.length > 0 && (
-          <section className="flex flex-col gap-2" data-testid="sources-part-section-twin-style">
-            <h4 className="text-[11px] font-medium text-muted-foreground">
-              {t("styleSamplesHeader", { count: twinStyle.length })}
-            </h4>
-            <div className="flex flex-col gap-1">
-              {twinStyle.map((s) => (
-                <SourceRow key={s.id} source={s} />
-              ))}
-            </div>
-          </section>
-        )}
-        {memory.length > 0 && (
-          <section className="flex flex-col gap-2" data-testid="sources-part-section-memory">
-            <h4 className="text-[11px] font-medium text-muted-foreground">
-              {t("recalledMemoriesHeader", { count: memory.length })}
-            </h4>
-            <div className="flex flex-col gap-1">
-              {memory.map((s) => (
-                <SourceRow key={s.id} source={s} />
-              ))}
-            </div>
-          </section>
-        )}
-        {other.length > 0 && (
-          <section className="flex flex-col gap-1" data-testid="sources-part-section-other">
-            {other.map((s) => (
-              <SourceRow key={s.id} source={s} />
-            ))}
-          </section>
-        )}
-      </CollapsibleContent>
-    </Collapsible>
+            </section>
+          )}
+        </CollapsibleContent>
+      </Collapsible>
+    </>
   )
 }
+
+// Only absolute http(s) URLs are safe to feed the citation trigger, which
+// constructs `new URL(...)` to show the hostname.
+const ABSOLUTE_URL_RE = /^https?:\/\//i
+
+// Summarize the web/footnote sources (those carrying a URL) as a single
+// inline-citation badge whose hover-card flips through each source's
+// title/url/snippet. Additive to the per-source rows below — nothing renders
+// when none of the "other" sources have a usable URL (e.g. plain footnotes).
+const WebCitations = memo(function WebCitations({ sources }: { sources: SourcesPartItem[] }) {
+  const t = useTranslations("chat.sourcesPart")
+  const webSources = useMemo(
+    () => sources.filter((s) => s.url && ABSOLUTE_URL_RE.test(s.url)),
+    [sources]
+  )
+  if (webSources.length === 0) return null
+  const urls = webSources.map((s) => s.url as string)
+
+  return (
+    <InlineCitation className="mb-1" data-testid="sources-part-inline-citation">
+      <InlineCitationText className="text-[11px] font-medium text-muted-foreground">
+        {t("citationsLabel", { count: webSources.length })}
+      </InlineCitationText>
+      <InlineCitationCard>
+        <InlineCitationCardTrigger sources={urls} />
+        <InlineCitationCardBody>
+          <InlineCitationCarousel>
+            <InlineCitationCarouselHeader>
+              <InlineCitationCarouselPrev />
+              <InlineCitationCarouselNext />
+              <InlineCitationCarouselIndex />
+            </InlineCitationCarouselHeader>
+            <InlineCitationCarouselContent>
+              {webSources.map((s) => (
+                <InlineCitationCarouselItem key={s.id}>
+                  <InlineCitationSource title={s.title} url={s.url} description={s.snippet} />
+                </InlineCitationCarouselItem>
+              ))}
+            </InlineCitationCarouselContent>
+          </InlineCitationCarousel>
+        </InlineCitationCardBody>
+      </InlineCitationCard>
+    </InlineCitation>
+  )
+})
 
 function originIcon(origin: SourcesPartItem["origin"]) {
   if (origin === "twin-style") {
@@ -151,7 +249,7 @@ function buildTwinDeepLink(ref: NonNullable<SourcesPartItem["chunkRef"]>): strin
   return `/twin?${params.toString()}`
 }
 
-function SourceRow({ source }: { source: SourcesPartItem }) {
+const SourceRow = memo(function SourceRow({ source }: { source: SourcesPartItem }) {
   const t = useTranslations("chat.sourcesPart")
   const body = (
     <div
@@ -202,17 +300,15 @@ function SourceRow({ source }: { source: SourcesPartItem }) {
 
   if (source.url) {
     return (
-      <a
-        className="block rounded px-1 py-0.5 hover:bg-muted/60"
+      <ExternalLink
+        className="block rounded px-1 py-0.5 transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
         href={source.url}
-        target="_blank"
-        rel="noopener noreferrer"
       >
         {body}
-      </a>
+      </ExternalLink>
     )
   }
   return <div className="rounded px-1 py-0.5">{body}</div>
-}
+})
 
 export default SourcesPart

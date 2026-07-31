@@ -7,23 +7,17 @@
  * triggering command label visible. Optional summary text replaces the
  * default body.
  *
- * Phase 8 of the ClaudeCode 完整化 plan. Used by the chat composer's
- * `pushSystemMessage(blockOrString)` extension.
+ * Emitted by slash actions via `ctx.pushSystemMessage({ kind: "slash-result",
+ * … })` (see `lib/slash-commands/system-blocks.ts`); the chat message renderer
+ * dispatches the carrying `data-diagnostics` part here on `kind`.
  */
 
 import { useTranslations } from "next-intl"
 import { TerminalSquareIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import type { SlashCommandResultBlock } from "@/lib/slash-commands/system-blocks"
 
-export interface SlashCommandResultBlock {
-  kind: "slash-result"
-  /** Name of the command that fired (without the leading `/`). */
-  commandId: string
-  /** Optional argument string the user typed after the command name. */
-  args?: string
-  /** Inline summary; falls through to a default i18n message if omitted. */
-  summary?: string
-}
+export type { SlashCommandResultBlock }
 
 export function SlashCommandResultChip({ block }: { block: SlashCommandResultBlock }) {
   const t = useTranslations("chat.slashCommand")
@@ -33,11 +27,21 @@ export function SlashCommandResultChip({ block }: { block: SlashCommandResultBlo
       data-testid="slash-command-result"
       data-command={block.commandId}
     >
-      <Badge variant="outline" className="gap-1 border-primary/40 bg-primary/5 text-[10px]">
-        <TerminalSquareIcon className="size-3" />/{block.commandId}
-        {block.args ? <span className="text-muted-foreground"> {block.args}</span> : null}
+      <Badge
+        variant="outline"
+        className="max-w-[16rem] gap-1 border-primary/40 bg-primary/5 text-[10px]"
+      >
+        <TerminalSquareIcon className="size-3 shrink-0" />
+        <span className="shrink-0">/{block.commandId}</span>
+        {block.args ? (
+          <span className="truncate text-muted-foreground" title={block.args}>
+            {block.args}
+          </span>
+        ) : null}
       </Badge>
-      <span className="text-muted-foreground">{block.summary ?? t("ranSlashCommand")}</span>
+      <span className="min-w-0 truncate text-muted-foreground">
+        {block.summary ?? t("ranSlashCommand")}
+      </span>
     </span>
   )
 }

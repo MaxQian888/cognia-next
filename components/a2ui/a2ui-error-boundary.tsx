@@ -10,7 +10,7 @@ import { useTranslations } from "next-intl"
 import { AlertTriangle, RotateCcw } from "lucide-react"
 import { ErrorTraceDetails } from "@/components/ai-elements/error-trace"
 import { Button } from "@/components/ui/button"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import type { A2UIErrorBoundaryProps, A2UIErrorBoundaryState } from "@/types/a2ui/renderer"
 
 /**

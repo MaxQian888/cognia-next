@@ -1,0 +1,10 @@
+{
+  "cancel": "取消",
+  "capabilitiesLabel": "能力：",
+  "confirm": "安装 {count} 个",
+  "description": "确认从 {source} 暂存的条目后再安装。",
+  "emptyDrafts": "没有可导入项——所有文件均解析失败。",
+  "errorsTitle": "{count} 个解析错误",
+  "importing": "导入中…",
+  "title": "导入插件"
+}

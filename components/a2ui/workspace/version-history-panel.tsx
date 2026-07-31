@@ -14,10 +14,14 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { useA2UIStore } from "@/stores/a2ui"
 import { useWorkspaceContext } from "./a2ui-workspace-context"
 
+// Stable fallback so the selector keeps referential equality when the stack
+// is absent (a fresh [] would re-render on every store change)
+const EMPTY_UNDO_STACK: never[] = []
+
 export function VersionHistoryPanel() {
   const t = useTranslations("a2ui")
   const { surfaceId } = useWorkspaceContext()
-  const undoStack = useA2UIStore((state) => state.undoStacks[surfaceId] || [])
+  const undoStack = useA2UIStore((state) => state.undoStacks[surfaceId] ?? EMPTY_UNDO_STACK)
   const undo = useA2UIStore((state) => state.undo)
 
   const handleRestore = useCallback(
@@ -65,17 +69,17 @@ export function VersionHistoryPanel() {
                   </div>
                   {i === 0 && (
                     <Badge variant="secondary" className="text-[10px] h-4 px-1 shrink-0">
-                      Latest
+                      {t("latest")}
                     </Badge>
                   )}
                   {i > 0 && (
                     <Button
                       variant="ghost"
-                      size="sm"
-                      className="h-6 px-2 text-[10px] opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                      size="xs"
+                      className="opacity-0 transition-opacity group-hover:opacity-100"
                       onClick={() => handleRestore(originalIndex)}
                     >
-                      <RotateCcw className="h-3 w-3 mr-1" />
+                      <RotateCcw data-icon="inline-start" />
                       {t("restoreVersion")}
                     </Button>
                   )}

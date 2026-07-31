@@ -32,6 +32,26 @@ function nodeById(wf: ReturnType<typeof synthesizeUltracodeWorkflow>["workflow"]
 }
 
 describe("synthesizeUltracodeWorkflow", () => {
+  it("sources settings.retryDefaults from team.config (maxRetries / enableTaskRetry)", () => {
+    const plan: UltracodePlan = {
+      summary: "audit",
+      stages: [{ pattern: "synthesize", instruction: "report" }],
+    }
+    const retry = synthesizeUltracodeWorkflow({
+      team: team({ config: { ...team().config, maxRetries: 4 } }),
+      plan,
+      initialConcurrency: 2,
+    })
+    expect(retry.workflow.settings.retryDefaults?.attempts).toBe(5)
+
+    const noRetry = synthesizeUltracodeWorkflow({
+      team: team({ config: { ...team().config, maxRetries: 4, enableTaskRetry: false } }),
+      plan,
+      initialConcurrency: 2,
+    })
+    expect(noRetry.workflow.settings.retryDefaults?.attempts).toBe(1)
+  })
+
   it("builds a sweep → verify → critic → synthesize DAG with fan-in to synthesize", () => {
     const plan: UltracodePlan = {
       summary: "audit",

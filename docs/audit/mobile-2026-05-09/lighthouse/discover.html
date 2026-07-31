@@ -4789,7 +4789,7 @@ SPDX-License-Identifier: Apache-2.0
             static splitMarkdownLink(e) {
               let t = [],
                 n = e.split(/\[([^\]]+?)\]\((https?:\/\/.*?)\)/g)
-              for (; n.length; ) {
+              for (; n.length;) {
                 let [r, i, a] = n.splice(0, 3)
                 ;(r && t.push({ isLink: !1, text: r }),
                   i && a && t.push({ isLink: !0, text: i, linkHref: a }))
@@ -4882,7 +4882,7 @@ SPDX-License-Identifier: Apache-2.0
                 t.forEach(({ lineNumber: a }) => {
                   let l = a - n,
                     s = a + n
-                  for (; l < 1; ) (l++, s++)
+                  for (; l < 1;) (l++, s++)
                   i.has(l - r - 1) && (l -= r)
                   for (let c = l; c <= s; c++) {
                     let d = c
@@ -8666,13 +8666,11 @@ details[open] .lh-clump-toggletext--hide { display: block;}
                 i = 0
               for (let a of e.auditRefs) {
                 let l = o.showAsPassed(a.result)
-                if (
-                  !(
-                    a.group === "hidden" ||
-                    a.result.scoreDisplayMode === "manual" ||
-                    a.result.scoreDisplayMode === "notApplicable"
-                  )
-                ) {
+                if (!(
+                  a.group === "hidden" ||
+                  a.result.scoreDisplayMode === "manual" ||
+                  a.result.scoreDisplayMode === "notApplicable"
+                )) {
                   if (a.result.scoreDisplayMode === "informative") {
                     l || ++r
                     continue
@@ -10982,7 +10980,7 @@ details[open] .lh-clump-toggletext--hide { display: block;}
                   let u = f.target instanceof HTMLInputElement && !f.target.checked,
                     v = !0,
                     _ = l[0]
-                  for (; _; ) {
+                  for (; _;) {
                     let x = u && s.includes(_)
                     do
                       (_.classList.toggle("lh-row--hidden", x),

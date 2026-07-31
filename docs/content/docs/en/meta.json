@@ -1,5 +1,5 @@
 {
-  "title": "cognia-next",
+  "title": "Cognia",
   "pages": [
     "---Getting started---",
     "index",
@@ -12,7 +12,6 @@
     "data",
     "---Subsystems---",
     "subsystems",
-    "github-delivery",
     "---UI & platform---",
     "ui",
     "companion",

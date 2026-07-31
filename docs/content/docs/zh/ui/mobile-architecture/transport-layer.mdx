@@ -147,8 +147,8 @@ flowchart TB
 
 ## 凭据存储
 
-`CompanionConfig`（`companion-storage.ts:28`）的结构为
-`{ baseUrl, deviceJwt, deviceId, serverVersion, serverFingerprint?, rendezvousId?, rendezvousSecret? }`。
+`CompanionConfig`（`companion-storage.ts`）包含
+`{ baseUrl, deviceJwt, deviceId, serverVersion, serverFingerprint?, rendezvousId?, signalingRoomDescriptor?, signalingPrivateKey? }`。
 `CompanionConfigStorage` 接口（`:62`）有两个实现，由 `pickCompanionStorage()`（`:165`）选定：
 
 - **`LocalStorageCompanionStorage`**（`:74`）——使用 `window.localStorage`，适用于 web/jsdom。

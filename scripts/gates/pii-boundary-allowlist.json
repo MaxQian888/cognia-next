@@ -1,0 +1,263 @@
+[
+  {
+    "file": "hooks/canvas/use-canvas-actions.ts",
+    "boundaries": ["ai"],
+    "reason": "User explicitly requests canvas generation.",
+    "protection": "User-directed provider request; derived-data review remains in the PII auditor."
+  },
+  {
+    "file": "hooks/canvas/use-canvas-suggestions.ts",
+    "boundaries": ["ai"],
+    "reason": "User explicitly requests canvas suggestions.",
+    "protection": "User-directed provider request; derived-data review remains in the PII auditor."
+  },
+  {
+    "file": "hooks/chat/use-team-chat.ts",
+    "boundaries": ["@cognia/provider-embedding/embedding"],
+    "reason": "Team-chat retrieval delegates to the shared embedding boundary.",
+    "protection": "Callers provide already-reviewed chat query text."
+  },
+  {
+    "file": "lib/agent-team/runtime-streamers.ts",
+    "boundaries": ["ai"],
+    "reason": "Low-level team streaming adapter receives prepared prompts.",
+    "protection": "Agent-team orchestration gates derived shared-memory content before this adapter."
+  },
+  {
+    "file": "lib/ai/agent/agent-executor.ts",
+    "boundaries": ["ai"],
+    "reason": "Core user-configured agent execution boundary.",
+    "protection": "User-authored turns are intentional sends; derived context is gated by its owning feature."
+  },
+  {
+    "file": "lib/ai/chat/standalone-engine.ts",
+    "boundaries": ["ai"],
+    "reason": "Core chat execution boundary.",
+    "protection": "User-authored chat is intentional; derived context must be gated before options reach this engine."
+  },
+  {
+    "file": "lib/ai/generation/canvas-actions.ts",
+    "boundaries": ["ai"],
+    "reason": "Canvas generation is an explicit user action.",
+    "protection": "User-directed provider request."
+  },
+  {
+    "file": "lib/ai/providers/bedrock-connection.ts",
+    "boundaries": ["ai"],
+    "reason": "Bedrock connection verification sends a fixed application-owned probe.",
+    "protection": "The only model payload is the constant prompt `Reply with OK.`; no user or locally-derived text enters this boundary."
+  },
+  {
+    "file": "lib/ai/provider-consumption.ts",
+    "boundaries": [
+      "@ai-sdk/anthropic",
+      "@ai-sdk/amazon-bedrock",
+      "@ai-sdk/azure",
+      "@ai-sdk/cohere",
+      "@ai-sdk/google",
+      "@ai-sdk/mistral",
+      "@ai-sdk/openai",
+      "@ai-sdk/alibaba",
+      "@ai-sdk/xai",
+      "@ai-sdk/togetherai",
+      "@ai-sdk/fireworks",
+      "@ai-sdk/deepinfra"
+    ],
+    "reason": "Constructs provider clients; it does not assemble derived payloads.",
+    "protection": "Payload gates live at higher-level feature boundaries."
+  },
+  {
+    "file": "lib/ai/tools/tool-utils.ts",
+    "boundaries": ["ai"],
+    "reason": "Imports AI SDK tool types/runtime helpers, not a model send.",
+    "protection": "No outbound model payload is emitted here."
+  },
+  {
+    "file": "lib/ai/vision/caption.ts",
+    "boundaries": ["ai"],
+    "reason": "Image captioning is explicitly initiated by the user.",
+    "protection": "User-selected image content is the intentional provider payload."
+  },
+  {
+    "file": "lib/claude/routing-runtime-deps.ts",
+    "boundaries": ["@cognia/provider-embedding/embedding"],
+    "reason": "Routing uses the shared embedding adapter.",
+    "protection": "Routing queries are user-authored; local candidate metadata is application-owned."
+  },
+  {
+    "file": "lib/plugin/api/ai-provider-api.ts",
+    "boundaries": ["ai"],
+    "reason": "Plugin AI API is wrapped by the plugin PII gate contract.",
+    "protection": "lib/plugin/api/plugin-pii-gate.ts validates plugin-derived prompt content."
+  },
+  {
+    "file": "lib/plugin/vscode-shim/lm-handler.ts",
+    "boundaries": ["ai"],
+    "reason": "VS Code LM compatibility boundary handles extension-requested sends.",
+    "protection": "Extension input is an explicit model request; semantic review remains in the PII auditor."
+  },
+  {
+    "file": "lib/twin/distill/llm.ts",
+    "boundaries": [
+      "ai",
+      "@ai-sdk/anthropic",
+      "@ai-sdk/openai",
+      "@ai-sdk/azure",
+      "@ai-sdk/google",
+      "@ai-sdk/mistral",
+      "@ai-sdk/cohere"
+    ],
+    "reason": "Twin distillation consumes redacted ingest data.",
+    "protection": "Twin ingest applies @cognia/redact before distillation."
+  },
+  {
+    "file": "lib/workflow/nodes/built-ins.ts",
+    "boundaries": ["@cognia/provider-embedding/embedding"],
+    "reason": "Workflow node delegates to the shared embedding boundary.",
+    "protection": "Workflow inputs are explicit node inputs; derived-data flows require auditor review."
+  },
+  {
+    "file": "packages/provider-core/src/core/client.ts",
+    "boundaries": [
+      "@ai-sdk/anthropic",
+      "@ai-sdk/amazon-bedrock",
+      "@ai-sdk/openai",
+      "@ai-sdk/azure",
+      "@ai-sdk/google",
+      "@ai-sdk/mistral",
+      "@ai-sdk/cohere"
+    ],
+    "reason": "Provider package constructs clients and has no application data ownership.",
+    "protection": "Application feature boundaries own redaction before invoking provider-core."
+  },
+  {
+    "file": "packages/provider-embedding/src/chunking.ts",
+    "boundaries": ["ai"],
+    "reason": "Uses AI SDK token utilities only.",
+    "protection": "No outbound embedding call is emitted here."
+  },
+  {
+    "file": "packages/provider-embedding/src/embedding-utils.ts",
+    "boundaries": ["ai"],
+    "reason": "Shared embedding result utilities have no payload ownership.",
+    "protection": "No outbound embedding call is emitted here."
+  },
+  {
+    "file": "packages/provider-embedding/src/embedding.ts",
+    "boundaries": [
+      "ai",
+      "@ai-sdk/amazon-bedrock",
+      "@ai-sdk/openai",
+      "@ai-sdk/google",
+      "@ai-sdk/cohere",
+      "@ai-sdk/mistral"
+    ],
+    "reason": "Low-level provider-agnostic embedding transport.",
+    "protection": "Callers must redact derived local data before invoking this package boundary."
+  },
+  {
+    "file": "packages/rag/src/answer-grounding.ts",
+    "boundaries": ["ai"],
+    "reason": "Reusable RAG primitive receives caller-prepared text.",
+    "protection": "Owning feature gates derived local data before calling the package."
+  },
+  {
+    "file": "packages/rag/src/contextual-retrieval.ts",
+    "boundaries": ["ai"],
+    "reason": "Reusable RAG primitive receives caller-prepared text.",
+    "protection": "Owning feature gates derived local data before calling the package."
+  },
+  {
+    "file": "packages/rag/src/find-relevant.ts",
+    "boundaries": ["ai", "@cognia/provider-embedding/embedding"],
+    "reason": "Reusable RAG primitive receives caller-prepared text.",
+    "protection": "Owning feature gates derived local data before calling the package."
+  },
+  {
+    "file": "packages/rag/src/query-expansion.ts",
+    "boundaries": ["ai"],
+    "reason": "Query expansion operates on an intentional search query.",
+    "protection": "User-authored query; derived query sources require caller-side gating."
+  },
+  {
+    "file": "packages/rag/src/rag-evaluator.ts",
+    "boundaries": ["ai"],
+    "reason": "Offline/evaluation primitive receives explicit evaluation data.",
+    "protection": "Not an application-derived automatic send path."
+  },
+  {
+    "file": "packages/rag/src/rag-pipeline.ts",
+    "boundaries": ["@cognia/provider-embedding/embedding"],
+    "reason": "Reusable RAG pipeline receives caller-prepared text.",
+    "protection": "Owning feature gates derived local data before calling the package."
+  },
+  {
+    "file": "packages/rag/src/reranker.ts",
+    "boundaries": ["@cognia/provider-embedding/embedding", "ai"],
+    "reason": "Reusable reranker receives caller-prepared documents.",
+    "protection": "Owning feature gates derived local data before calling the package."
+  },
+  {
+    "file": "packages/rag/src/retrieval-grader.ts",
+    "boundaries": ["ai"],
+    "reason": "Reusable grader receives caller-prepared documents.",
+    "protection": "Owning feature gates derived local data before calling the package."
+  },
+  {
+    "file": "packages/rag/src/tool-utils.ts",
+    "boundaries": ["ai"],
+    "reason": "Imports AI SDK tool helpers, not a model send.",
+    "protection": "No outbound model payload is emitted here."
+  },
+  {
+    "file": "packages/vector/src/embedding.ts",
+    "boundaries": ["@cognia/provider-embedding/embedding"],
+    "reason": "Vector package delegates to the low-level embedding transport.",
+    "protection": "Owning application feature gates derived data before vector embedding."
+  },
+  {
+    "file": "packages/web-search/src/standalone-answer.ts",
+    "boundaries": ["ai"],
+    "reason": "Standalone web answer uses user-requested search results.",
+    "protection": "Explicit user-directed provider request; local derived data is not added here."
+  },
+  {
+    "file": "sidecar/dispatch/ai-sdk-mcp.mjs",
+    "boundaries": ["@ai-sdk/mcp", "@ai-sdk/mcp/mcp-stdio"],
+    "reason": "MCP transport imports are tool protocol boundaries, not model sends.",
+    "protection": "No LLM or embedding payload is emitted by these imports."
+  },
+  {
+    "file": "sidecar/dispatch/ai-sdk-tool-search.mjs",
+    "boundaries": ["ai"],
+    "reason": "Uses the AI SDK `tool()` helper only to declare the ToolSearch schema.",
+    "protection": "Sees just the already-permission-filtered tool registry (names + descriptions) and the model's own query; no locally-derived user content crosses this import."
+  },
+  {
+    "file": "sidecar/dispatch/ai-sdk-tools.mjs",
+    "boundaries": ["ai"],
+    "reason": "Converts tool definitions for the sidecar protocol.",
+    "protection": "No outbound model payload is emitted here."
+  },
+  {
+    "file": "sidecar/dispatch/feature-call.mjs",
+    "boundaries": ["@ai-sdk/amazon-bedrock"],
+    "reason": "Low-level sidecar feature transport constructs the Bedrock embedding model for a renderer-prepared request.",
+    "protection": "Owning renderer feature boundaries redact derived payloads before dispatch; this import only constructs the provider model."
+  },
+  {
+    "file": "sidecar/dispatch/protocol-adapters/ai-sdk-adapter.mjs",
+    "boundaries": [
+      "ai",
+      "@ai-sdk/openai",
+      "@ai-sdk/anthropic",
+      "@ai-sdk/google",
+      "@ai-sdk/mistral",
+      "@ai-sdk/cohere",
+      "@ai-sdk/azure",
+      "@ai-sdk/amazon-bedrock"
+    ],
+    "reason": "Low-level sidecar protocol adapter receives fully assembled user turns.",
+    "protection": "Application feature boundaries gate derived context before sidecar dispatch."
+  }
+]

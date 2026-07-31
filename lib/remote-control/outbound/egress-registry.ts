@@ -7,7 +7,7 @@
  * Standard Webhooks secret (resolved from the OS keyring on desktop).
  */
 
-import type { OutboundWebhookEvent } from "@/types/remote-control"
+import { endpointSubscribesTo, type OutboundWebhookEvent } from "@/types/remote-control"
 import { useRemoteControlStore } from "@/stores/remote-control/store"
 import { isTauri } from "@/lib/tauri"
 import { remoteControlGetSigningSecret } from "@/lib/tauri/remote-control"
@@ -20,9 +20,12 @@ export interface PublishResult {
 }
 
 export async function publishOutboundEvent(event: OutboundWebhookEvent): Promise<PublishResult[]> {
-  const endpoints = useRemoteControlStore
-    .getState()
-    .config.outbound.endpoints.filter((e) => e.enabled)
+  const outbound = useRemoteControlStore.getState().config.outbound
+  // Fan out only to enabled endpoints whose subscription filter matches this
+  // event type (empty filter = all events, GitHub/Svix-style).
+  const endpoints = outbound.endpoints.filter(
+    (e) => e.enabled && endpointSubscribesTo(e, event.eventType)
+  )
   if (endpoints.length === 0) return []
 
   const signingSecret = isTauri()
@@ -31,7 +34,12 @@ export async function publishOutboundEvent(event: OutboundWebhookEvent): Promise
 
   const out: PublishResult[] = []
   for (const endpoint of endpoints) {
-    const result = await deliverWebhook({ endpoint, event, signingSecret })
+    const result = await deliverWebhook({
+      endpoint,
+      event,
+      signingSecret,
+      limits: outbound.delivery,
+    })
     out.push({ endpointId: endpoint.id, result })
     void appendRemoteControlAudit({
       direction: "outbound",

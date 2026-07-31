@@ -1,4 +1,4 @@
-import { partitionByLayout } from "@/lib/shell/layout-partition"
+import { partitionByLayout, resolveOrderedLayout } from "@/lib/shell/layout-partition"
 
 interface Item {
   id: string
@@ -50,5 +50,49 @@ describe("partitionByLayout", () => {
     expect(pinned).toEqual([])
     expect(hidden).toEqual([])
     expect(overflow.map((i) => i.id)).toEqual(["a", "b", "c", "d"])
+  })
+})
+
+describe("resolveOrderedLayout", () => {
+  it("keeps the stored order and splits out the hidden ids", () => {
+    const { order, visible, hidden } = resolveOrderedLayout(catalog, {
+      order: ["c", "a", "b", "d"],
+      hidden: ["a"],
+    })
+    expect(order.map((i) => i.id)).toEqual(["c", "a", "b", "d"])
+    expect(visible.map((i) => i.id)).toEqual(["c", "b", "d"])
+    expect(hidden.map((i) => i.id)).toEqual(["a"])
+  })
+
+  it("appends catalog items the stored order never mentioned", () => {
+    const { order, visible } = resolveOrderedLayout(catalog, { order: ["d"], hidden: [] })
+    expect(order.map((i) => i.id)).toEqual(["d", "a", "b", "c"])
+    expect(visible.map((i) => i.id)).toEqual(["d", "a", "b", "c"])
+  })
+
+  it("dedupes the stored order and drops unknown ids from both arrays", () => {
+    const { order, hidden } = resolveOrderedLayout(catalog, {
+      order: ["b", "b", "zzz", "a"],
+      hidden: ["nope", "a"],
+    })
+    expect(order.map((i) => i.id)).toEqual(["b", "a", "c", "d"])
+    expect(hidden.map((i) => i.id)).toEqual(["a"])
+  })
+
+  it("keeps a hidden item's slot so unhiding restores its position", () => {
+    const withHidden = resolveOrderedLayout(catalog, { order: ["a", "b", "c", "d"], hidden: ["b"] })
+    expect(withHidden.order.map((i) => i.id)).toEqual(["a", "b", "c", "d"])
+
+    const unhidden = resolveOrderedLayout(catalog, {
+      order: withHidden.order.map((i) => i.id),
+      hidden: [],
+    })
+    expect(unhidden.visible.map((i) => i.id)).toEqual(["a", "b", "c", "d"])
+  })
+
+  it("falls back to catalog order for an empty layout", () => {
+    const { visible, hidden } = resolveOrderedLayout(catalog, { order: [], hidden: [] })
+    expect(visible.map((i) => i.id)).toEqual(["a", "b", "c", "d"])
+    expect(hidden).toEqual([])
   })
 })

@@ -30,6 +30,16 @@ export function validateBaseUrl(input: string): string | null {
   return null
 }
 
+export type WebPairingTransportError = "https_required"
+
+export function validateWebPairingTransport(
+  baseUrl: string,
+  webMode: boolean
+): WebPairingTransportError | null {
+  if (!webMode) return null
+  return new URL(baseUrl).protocol === "https:" ? null : "https_required"
+}
+
 /**
  * Returns an error string if the JWT is not shaped like a JWT
  * (`header.payload.signature`, base64url of each part), otherwise null.
@@ -70,6 +80,39 @@ export function describeNetworkError(err: unknown): string {
     return "Could not reach the desktop server. Check the URL, that the desktop has the Companion server enabled, and that both devices are on the same network."
   }
   return raw
+}
+
+export type PairNetworkErrorKind =
+  | "certificate"
+  | "browser_policy"
+  | "browser_blocked"
+  | "offline"
+  | "unreachable"
+  | "unknown"
+
+export function classifyPairNetworkError(
+  err: unknown,
+  online = typeof navigator === "undefined" ? true : navigator.onLine
+): PairNetworkErrorKind {
+  if (!online) return "offline"
+  const raw = err instanceof Error ? err.message : String(err)
+  if (/ERR_CERT|certificate|certificate verify|SSL|TLS handshake/i.test(raw)) {
+    return "certificate"
+  }
+  if (
+    /CORS|cross-origin|private network access|Access-Control-Allow|mixed content/i.test(
+      raw
+    )
+  ) {
+    return "browser_policy"
+  }
+  if (/Failed to fetch|NetworkError when attempting to fetch resource/i.test(raw)) {
+    return "browser_blocked"
+  }
+  if (/ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|timeout/i.test(raw)) {
+    return "unreachable"
+  }
+  return "unknown"
 }
 
 export function getDeviceLabel(): string {

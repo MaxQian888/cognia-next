@@ -7,7 +7,16 @@
 
 import { useMemo } from "react"
 import { useTranslations } from "next-intl"
-import { Play, Pause, Pencil, MoreHorizontal, Trash2, RefreshCw, Network } from "lucide-react"
+import {
+  Play,
+  Pause,
+  Pencil,
+  MoreHorizontal,
+  Trash2,
+  RefreshCw,
+  Network,
+  History,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -57,6 +66,8 @@ export interface TaskDetailViewProps {
   onSelectTask?: (taskId: string) => void
   /** Open the full dependency-graph dialog. */
   onOpenDependencyGraph?: () => void
+  /** Opens the backfill dialog (recurring triggers only). */
+  onBackfill?: () => void
 }
 
 const statusBadgeClass: Record<string, string> = {
@@ -81,6 +92,7 @@ export function TaskDetailView({
   allTasks,
   onSelectTask,
   onOpenDependencyGraph,
+  onBackfill,
 }: TaskDetailViewProps) {
   const t = useTranslations("scheduler")
 
@@ -198,6 +210,13 @@ export function TaskDetailView({
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
+                  {onBackfill &&
+                    (task.trigger.type === "cron" || task.trigger.type === "interval") && (
+                      <DropdownMenuItem onClick={onBackfill} data-testid="open-backfill-dialog">
+                        <History className="mr-2 h-3.5 w-3.5" />
+                        {t("backfill.open")}
+                      </DropdownMenuItem>
+                    )}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     className="text-destructive focus:text-destructive"

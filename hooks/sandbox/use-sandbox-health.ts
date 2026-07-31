@@ -32,6 +32,27 @@ interface RawSandboxHealth {
   lastError?: string
 }
 
+/** Active-probe state surfaced by `verify()`. Distinct from `health` — this
+ * reflects whether confinement was actually exercised and enforced, not just
+ * whether the backend binary exists. */
+export type SandboxProbeStatus = "idle" | "running" | "ok" | "failed"
+
+export interface SandboxProbe {
+  status: SandboxProbeStatus
+  /** Backend id reported by the probe (empty until first run). */
+  backend: string
+  /** Human-readable detail: `"ok"` or the reason confinement failed. */
+  detail: string
+}
+
+const IDLE_PROBE: SandboxProbe = { status: "idle", backend: "", detail: "" }
+
+interface RawProbeReport {
+  backend: string
+  confined: boolean
+  detail: string
+}
+
 function normaliseHealth(raw: RawSandboxHealth | null | undefined): SandboxHealth {
   if (!raw) return DEFAULT_HEALTH
   return {
@@ -60,10 +81,17 @@ export function useSandboxHealth(options: UseSandboxHealthOptions = {}): {
   health: SandboxHealth
   refresh: () => Promise<void>
   error: string | null
+  /** Active confinement probe state. `idle` until `verify()` is called. */
+  probe: SandboxProbe
+  /** Run the active confinement probe on demand. Spawns real confined
+   * commands, so it is NOT part of the background poll — call it from a
+   * "Verify confinement" action. */
+  verify: () => Promise<void>
 } {
   const { pollIntervalMs = 5_000, paused = false } = options
   const [health, setHealth] = useState<SandboxHealth>(DEFAULT_HEALTH)
   const [error, setError] = useState<string | null>(null)
+  const [probe, setProbe] = useState<SandboxProbe>(IDLE_PROBE)
   const aliveRef = useRef(true)
 
   const refresh = useCallback(async () => {
@@ -75,6 +103,27 @@ export function useSandboxHealth(options: UseSandboxHealthOptions = {}): {
     } catch (err) {
       if (!aliveRef.current) return
       setError(err instanceof Error ? err.message : String(err))
+    }
+  }, [])
+
+  const verify = useCallback(async () => {
+    setProbe((p) => ({ ...p, status: "running" }))
+    try {
+      const raw = await transport.call<RawProbeReport>("sandbox_health_check")
+      if (!aliveRef.current) return
+      setProbe({
+        status: raw?.confined ? "ok" : "failed",
+        backend: raw?.backend ?? "",
+        detail: raw?.detail ?? "",
+      })
+    } catch (err) {
+      if (!aliveRef.current) return
+      // Web mode (and any IPC failure) → confinement is not verifiable here.
+      setProbe({
+        status: "failed",
+        backend: "",
+        detail: err instanceof Error ? err.message : String(err),
+      })
     }
   }, [])
 
@@ -97,5 +146,5 @@ export function useSandboxHealth(options: UseSandboxHealthOptions = {}): {
     }
   }, [paused, pollIntervalMs, refresh])
 
-  return { health, refresh, error }
+  return { health, refresh, error, probe, verify }
 }

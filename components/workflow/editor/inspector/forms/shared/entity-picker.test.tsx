@@ -1,19 +1,27 @@
 /**
  * @jest-environment jsdom
  */
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { NextIntlClientProvider } from "next-intl"
-import { EntityPicker, TeamPicker } from "./entity-picker"
+import { EntityPicker, McpToolPicker, TeamPicker } from "./entity-picker"
 
+const getMcpServerMock = jest.fn()
 jest.mock("@/lib/db/characters", () => ({ listCharacters: jest.fn(async () => []) }))
 jest.mock("@/lib/db/teams", () => ({
   listTeams: jest.fn(async () => [{ id: "team_1", name: "Alpha" }]),
 }))
 jest.mock("@/lib/db/skills", () => ({ listSkills: jest.fn(async () => []) }))
-jest.mock("@/lib/db/mcp-servers", () => ({ listMcpServers: jest.fn(async () => []) }))
+jest.mock("@/lib/db/mcp-servers", () => ({
+  listMcpServers: jest.fn(async () => []),
+  getMcpServer: (...a: unknown[]) => getMcpServerMock(...a),
+}))
 jest.mock("@/lib/db/plugins", () => ({ listPlugins: jest.fn(async () => []) }))
 jest.mock("@/lib/db/workflows", () => ({ listWorkflows: jest.fn(async () => []) }))
 jest.mock("@/lib/db/twins", () => ({ listTwins: jest.fn(async () => []) }))
+jest.mock("@/lib/claude/ipc", () => ({ testMcpServer: jest.fn() }))
+jest.mock("@/lib/tauri", () => ({ isTauri: jest.fn(() => true) }))
+import { isTauri } from "@/lib/tauri"
+const isTauriMock = isTauri as jest.Mock
 
 const messages = {
   workflows: {
@@ -24,6 +32,14 @@ const messages = {
         noResults: "No matches",
         useExpression: "Use expression",
         usePicker: "Pick from list",
+      },
+      mcpInvokeTool: {
+        toolName: {
+          placeholder: "search_repos",
+          loading: "Discovering tools…",
+          probeError: "Couldn't reach the server — type the tool name.",
+          empty: "No tools discovered — type the tool name.",
+        },
       },
     },
   },
@@ -117,5 +133,99 @@ describe("entity wrappers", () => {
   it("TeamPicker loads teams from Dexie and renders the picker", async () => {
     wrap(<TeamPicker id="tp" value="" onChange={jest.fn()} />)
     expect(await screen.findByLabelText("Select a team")).toBeInTheDocument()
+  })
+})
+
+describe("McpToolPicker", () => {
+  beforeEach(() => {
+    isTauriMock.mockReturnValue(true)
+    getMcpServerMock.mockReset()
+  })
+
+  it("probes the selected server's tools and offers them as options", async () => {
+    getMcpServerMock.mockResolvedValue({
+      id: "srv1",
+      name: "S",
+      transport: "http",
+      config: { url: "https://x/mcp" },
+      enabled: true,
+    })
+    const probe = jest.fn(async () => ({
+      ok: true,
+      toolCount: 1,
+      tools: [{ name: "search_repos" }],
+      durationMs: 1,
+    }))
+    wrap(
+      <McpToolPicker id="mt" serverId="srv1" value="" onChange={jest.fn()} probe={probe as never} />
+    )
+    // The probe ran against the resolved server's transport/url.
+    await waitFor(() =>
+      expect(probe).toHaveBeenCalledWith(
+        expect.objectContaining({ transport: "http", url: "https://x/mcp" })
+      )
+    )
+  })
+
+  it("shows the empty hint and stays free-text when the probe finds no tools", async () => {
+    getMcpServerMock.mockResolvedValue({
+      id: "srv1",
+      name: "S",
+      transport: "http",
+      config: { url: "https://x/mcp" },
+      enabled: true,
+    })
+    const probe = jest.fn(async () => ({ ok: true, toolCount: 0, tools: [], durationMs: 1 }))
+    wrap(
+      <McpToolPicker id="mt" serverId="srv1" value="" onChange={jest.fn()} probe={probe as never} />
+    )
+    expect(await screen.findByTestId("mcp-tool-empty")).toBeInTheDocument()
+  })
+
+  it("surfaces a probe error and keeps free-text entry reachable", async () => {
+    getMcpServerMock.mockResolvedValue({
+      id: "srv1",
+      name: "S",
+      transport: "stdio",
+      config: { command: "x" },
+      enabled: true,
+    })
+    const probe = jest.fn(async () => ({
+      ok: false,
+      toolCount: 0,
+      tools: [],
+      error: "spawn failed",
+      durationMs: 1,
+    }))
+    wrap(
+      <McpToolPicker
+        id="mt"
+        serverId="srv1"
+        value="foo"
+        onChange={jest.fn()}
+        probe={probe as never}
+      />
+    )
+    expect(await screen.findByTestId("mcp-tool-error")).toBeInTheDocument()
+    // The expression/free-text toggle is available as the fallback.
+    expect(screen.getByTestId("mt-use-expression")).toBeInTheDocument()
+  })
+
+  it("does not probe in web mode (isTauri false)", async () => {
+    isTauriMock.mockReturnValue(false)
+    getMcpServerMock.mockResolvedValue({
+      id: "srv1",
+      name: "S",
+      transport: "http",
+      config: { url: "https://x" },
+      enabled: true,
+    })
+    const probe = jest.fn()
+    wrap(
+      <McpToolPicker id="mt" serverId="srv1" value="" onChange={jest.fn()} probe={probe as never} />
+    )
+    // Yield a tick for the effect.
+    await screen.findByTestId("mt-use-expression")
+    expect(probe).not.toHaveBeenCalled()
   })
 })

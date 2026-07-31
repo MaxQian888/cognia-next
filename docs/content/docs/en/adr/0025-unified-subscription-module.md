@@ -200,16 +200,92 @@ sections.
 
 | Capability                              | Anthropic                                            | Codex                                      | OpenCode                            |
 | --------------------------------------- | ---------------------------------------------------- | ------------------------------------------ | ----------------------------------- |
-| Login flow                              | PKCE (paste-the-code)                                | Device-code                                | Discovery + paste-Zen-key           |
+| Login flow                              | PKCE (paste-the-code)                                | Device-code                                | Discovery + paste-key (Zen / Go)    |
 | Client id                               | `9d1c250a-e61b-44d9-88ed-5944d1962f5e` (Claude Code) | `app_EMoamEEZ73f0CkXaXp7hrann` (codex-cli) | n/a (paste-key)                     |
 | Source of truth at startup              | v2 vault, then v1 migration once                     | v2 vault, then v1 migration once           | v2 vault only (no v1)               |
 | Multi-account                           | yes                                                  | yes                                        | yes                                 |
 | Active account triggers sidecar restart | yes                                                  | no (env-builder picks up next spawn)       | no                                  |
-| Provider preset                         | yes (Bedrock, custom proxy)                          | yes (Azure, OpenAI-compatible)             | no                                  |
+| Provider preset                         | yes (Bedrock, custom proxy)                          | yes (Azure, OpenAI-compatible)             | yes (gateway relays/mirrors)        |
 | Usage tracking                          | yes (passive + opt-in probe)                         | no (no unified headers)                    | no                                  |
+
+## Amendment 2026-06-07 — OpenCode Go, chat wiring, preset parity, cloud sync
+
+Verified against a live opencode install + the Zen gateway:
+
+1. **Real auth.json keys.** The opencode CLI stores its managed plans under
+   `"opencode"` (Zen) and `"opencode-go"` (Go flat-rate plan) with shape
+   `{"type":"api","key":"sk-…"}` — the originally assumed `"opencode-zen"`
+   spelling never appears (kept in the whitelist for back-compat). The
+   discovery whitelist is now
+   `anthropic / openai / opencode / opencode-go / opencode-zen`, the
+   classifier recognises `type:"api"` / bare `key` fields, and the Windows
+   path probe uses `~/.local/share/opencode/auth.json` (XDG-style on every
+   platform; `%LOCALAPPDATA%` was wrong) with a LOCALAPPDATA fallback.
+2. **Go plan credential.** `OpencodeZenData` gained an optional
+   `plan: "zen" | "go"` (additive — vault `SCHEMA_VERSION` stays 3; absent =
+   zen). `opencode_save_zen_key` takes an optional `plan` param;
+   `env_for_sidecar` always emits `OPENCODE_BASE_URL` (preset > account
+   override > plan default: Zen `https://opencode.ai/zen/v1`, Go
+   `https://opencode.ai/zen/go/v1`).
+3. **Chat providers.** Two built-in chat providers `opencode` / `opencode-go`
+   (OpenAI-compatible, verified live via `/models` + `/chat/completions`).
+   When Settings → Providers holds no API key, `resolveSendOptions` falls
+   back to the subscription vault via
+   `lib/subscription/opencode/chat-bridge.ts` (active account first, then
+   most-recently-used account of the matching plan; bound/default preset
+   base URL wins).
+4. **Preset parity.** `supports_preset()` is now true for OpenCode; presets
+   model relays/mirrors in front of the managed gateway and emit
+   `OPENCODE_BASE_URL` / `OPENCODE_MODEL` / `OPENCODE_CUSTOM_HEADER_*`. We
+   still never write back to OpenCode's own auth.json.
+5. **Cloud sync.** The previously deferred vault cloud sync shipped as a
+   WebDAV pipeline parallel to the data backup: encrypted
+   `cogniabak-subscription-v1` envelopes under
+   `cognia-subscription-<ts>.cogniabak.json` + a `latest-subscription`
+   pointer, own passphrase (session + opt-in keyring), own toggle
+   (`webdavSync.subscriptionSyncEnabled`), debounced auto-upload off a
+   transport-layer dirty marker, restore-with-preview. See
+   `lib/subscription/sync/`.
 | Discovery of external CLI auth          | n/a (no Claude Code CLI auth.json)                   | `~/.codex/auth.json` + codex-cli keyring   | `~/.local/share/opencode/auth.json` |
 
+## Amendment 2026-06-11 — billing maturation (plugin balance adapters, chat commands, non-resident sync)
+
+1. **Pluggable balance adapters.** The balance-adapter registry is no longer a
+   closed array. A new `balance-adapter` plugin capability
+   (`types/plugin/plugin-balance-adapter.ts`,
+   `lib/plugin/registries/balance-adapter-registry.ts`, wired through
+   `OVERLAY_REGISTRY_CAPABILITIES`) lets a plugin contribute a
+   `PluginBalanceAdapterDef` via `manifest.balanceAdapters[]`. `findBalanceAdapter`
+   now consults the overlay registry **before** the built-in adapters, so a
+   plugin can extend or override the bundled set. Reference implementation:
+   `plugins/agent-team-examples/src/demo-balance-adapter.ts`.
+2. **Chat-side billing commands.** New built-in slash commands surface the
+   subscription data in chat: `/usage` (Anthropic 5h/7d quota windows, reusing
+   `summarizeCurrentWindow`), `/balance` (latest per-account snapshots via
+   `latestBalanceSnapshot`), `/models` (catalog sync via `syncModelsDevCatalog`),
+   and `/login` (opens Settings → Subscription). See
+   `lib/slash-commands/actions/billing.ts`.
+3. **Non-resident sync surfaces.** The always-mounted models.dev and
+   subscription WebDAV sync cards collapse to a shared compact `SyncStatusStrip`
+   (`components/settings/_shared/`): a small Sync button plus a transient status
+   line that disappears when idle; the subscription controls move behind a
+   collapsed-by-default panel.
+
 ## Renderer-side IPC surface
+
+> **Amended 2026-07-25.** Two things drifted from the list below.
+>
+> 1. **The count is 28, not 20.** The v3 preset *library* commands
+>    (`subscription_list_presets`, `subscription_save_preset`,
+>    `subscription_delete_preset`, `subscription_set_default_preset`), the
+>    generic `subscription_authed_get`, `subscription_volcengine_usage`, and the
+>    ADR-0028 env resolvers (`claude_env_for_account`,
+>    `claude_proxy_env_for_session`) all landed after this section was written.
+> 2. **The implementation moved.** Per ADR-0067, the vault / active-pointer /
+>    preset / per-provider discovery + OAuth logic now lives in
+>    `crates/cognia-subscription/`; `src-tauri/src/subscription/` is a thin
+>    re-export facade plus the Volcengine SigV4 usage command. Paths quoted
+>    elsewhere in this ADR should be read against the crate.
 
 20 commands total registered in `src-tauri/src/lib.rs`:
 

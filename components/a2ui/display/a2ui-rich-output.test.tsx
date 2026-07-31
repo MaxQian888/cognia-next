@@ -4,6 +4,16 @@ import { A2UIRichOutput } from "./a2ui-rich-output"
 import type { A2UIComponentProps, A2UIRichOutputComponent } from "@/types/a2ui/schema"
 import { richOutputFixtures } from "@/lib/a2ui/rich-output-fixtures"
 
+const mockRuntimeSettings = {
+  a2uiDefaultHostStrategy: "native" as const,
+  a2uiDefaultTheme: "dark" as const,
+}
+
+jest.mock("@/stores/settings", () => ({
+  useSettingsStore: (selector: (state: { settings: typeof mockRuntimeSettings }) => unknown) =>
+    selector({ settings: mockRuntimeSettings }),
+}))
+
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) =>
     ({
@@ -11,6 +21,7 @@ jest.mock("next-intl", () => ({
       next: "Next",
       richOutputFallback: "Fallback",
       richOutputUnavailable: "Unavailable",
+      loadingRuntime: "Loading rich runtime...",
     })[key] || key,
 }))
 
@@ -97,7 +108,7 @@ jest.mock(
   { virtual: true }
 )
 
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: {
     ui: {
       info: jest.fn(),
@@ -211,6 +222,7 @@ describe("A2UIRichOutput", () => {
     expect(screen.getByTestId("a2ui-widget-shell")).toBeInTheDocument()
     expect(screen.getByText("Shell Title")).toBeInTheDocument()
     expect(screen.getByText("native")).toBeInTheDocument()
+    expect(screen.getByTestId("a2ui-widget-shell")).toHaveAttribute("data-theme", "dark")
   })
 
   it("renders native metric cards when KPI items are provided", () => {

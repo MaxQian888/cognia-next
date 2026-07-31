@@ -1,4 +1,4 @@
-import type { ThemeColors } from "@/types/plugin/plugin-extended"
+import type { ThemeColors } from "@/types/plugin/plugin"
 import { THEME_COLOR_KEYS } from "./vscode-theme/token-mapping"
 
 /**

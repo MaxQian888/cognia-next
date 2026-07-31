@@ -13,6 +13,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { enqueue } from "@/lib/db/mobile-outbound-queue"
 import { deleteWorkflow } from "@/lib/db/workflows"
 import type { WorkflowRow } from "@/types/workflow/visual"
 
@@ -39,12 +40,21 @@ export function WorkflowDeleteConfirm({
   async function handleConfirm() {
     if (!workflow) return
     try {
-      // Wave 4 / ADR-0026 — local Dexie delete only. The desktop is the
-      // canonical source; if the workflow still exists upstream, the next
-      // `sync_pull` cursor re-emits the row. A server-side
-      // `workflow_delete` RPC mirror is a Wave 5 follow-up (would need a
-      // new entry in MOBILE_OUTBOUND_COMMANDS + Rust dispatcher).
+      // Local Dexie delete fires immediately so the row leaves the list.
       await deleteWorkflow(workflow.id)
+      // Mirror the deletion to the desktop's canonical store via the outbound
+      // queue. Without this the next `sync_pull` cursor re-emits the row,
+      // because the desktop never learned of the delete. `workflow_delete`
+      // routes through the companion RPC bridge → desktop `deleteWorkflow`,
+      // which records a tombstone that `sync_pull` then replays as a
+      // `deleted_ids` entry. The command is control-gated; if this device
+      // lacks remote-control capability the job deadletters through the
+      // existing outbound-queue retry UX rather than silently losing the edit.
+      await enqueue({
+        command: "workflow_delete",
+        payload: { id: workflow.id },
+        label: t("queueLabel", { name: workflow.name }),
+      })
       toast.success(t("toast", { name: workflow.name }))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))

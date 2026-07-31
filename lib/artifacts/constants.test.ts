@@ -20,6 +20,8 @@ import {
   getMonacoLanguage,
   canPreview,
   canDesign,
+  RUNNABLE_ARTIFACT_TYPES,
+  isRunnableArtifactType,
   matchesTypePatterns,
   getLanguageDisplayName,
 } from "./constants"
@@ -38,6 +40,22 @@ describe("artifact type tables", () => {
   it("MERMAID_TYPE_NAMES + CHART_COLORS are non-empty", () => {
     expect(Object.keys(MERMAID_TYPE_NAMES).length).toBeGreaterThan(0)
     expect(CHART_COLORS.length).toBeGreaterThan(0)
+  })
+})
+
+describe("isRunnableArtifactType", () => {
+  it("accepts exactly the executable / live-preview types", () => {
+    expect([...RUNNABLE_ARTIFACT_TYPES].sort()).toEqual(["code", "html", "jupyter", "react"])
+  })
+
+  it("classifies every artifact type without throwing", () => {
+    // One source for both the `run` capability and the "Runnable" badge; a new
+    // artifact type must be a deliberate decision on both at once.
+    for (const type of ARTIFACT_TYPES) {
+      expect(typeof isRunnableArtifactType(type)).toBe("boolean")
+    }
+    expect(isRunnableArtifactType("react")).toBe(true)
+    expect(isRunnableArtifactType("document")).toBe(false)
   })
 })
 

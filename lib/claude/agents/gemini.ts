@@ -8,7 +8,7 @@
 // write we always re-stamp the URL into the right field key based on the
 // canonical transport.
 
-import type { McpServer } from "@/lib/claude/types"
+import type { McpServer } from "@cognia/agent-config-types"
 import type { McpImportDraft } from "@/lib/db/mcp-servers"
 import type { McpAgentAdapter } from "./index"
 import { dropInvalidDrafts, normalizeMcpEntry } from "./shared"

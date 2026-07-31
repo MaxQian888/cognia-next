@@ -4,7 +4,7 @@
  * scheduler).
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../helpers/db-reset"
 import { seedAndOpenWorkflow } from "../helpers/seed-workflow"
 
@@ -27,9 +27,8 @@ test.describe("workflow editor — trigger.cron config", () => {
     // Inspector forms expose form fields by label/id; cron schema typically
     // exposes a `schedule` or `expression` field. Be tolerant of either name.
     const cronInput = page.locator("input[name='schedule'], input[name='expression']").first()
-    if (await cronInput.count()) {
-      await cronInput.fill("*/5 * * * *")
-    }
+    await expect(cronInput).toBeVisible()
+    await cronInput.fill("*/5 * * * *")
 
     // Save and wait for the dirty flag to clear.
     await page.getByTestId("workflow-save").click()

@@ -11,6 +11,15 @@ jest.mock("@/lib/appearance/wallpaper-storage", () => ({
   disposeUrl: jest.fn(),
 }))
 
+// The transparent pet windows must never paint a wallpaper. Default "main" so
+// the ordinary applier tests are unaffected; the pet tests flip it.
+let mockPetRole: "main" | "web" | "overlay" | "popup" = "main"
+jest.mock("@/lib/pet/window-role", () => ({
+  getPetWindowRole: () => mockPetRole,
+  isSecondaryOverlayRole: (role: string) =>
+    role === "overlay" || role === "popup" || role === "island",
+}))
+
 // Mock the settings store with a manual selector implementation.
 jest.mock("@/stores/settings", () => {
   const state: {
@@ -63,6 +72,7 @@ beforeEach(() => {
   // Clear any scope target nodes a prior test may have appended.
   document.querySelectorAll("[data-bg-target]").forEach((el) => el.remove())
   jest.clearAllMocks()
+  mockPetRole = "main"
   settingsModule.__setStoreState({
     background: { ...DEFAULT_BACKGROUND_SETTINGS },
     wallpapers: [],
@@ -92,6 +102,33 @@ describe("BackgroundApplier", () => {
     expect(document.body.getAttribute(__INTERNALS__.ATTR_ENABLED)).toBe("false")
     expect(document.body.getAttribute(__INTERNALS__.ATTR_SCOPE)).toBeNull()
   })
+
+  it.each(["overlay", "popup"] as const)(
+    "forces the wallpaper off in the %s pet window even with an active wallpaper",
+    async (role) => {
+      mockPetRole = role
+      const wp = wallpaper("wp-1", { kind: "gradient", css: "linear-gradient(0,red,blue)" })
+      wallpaperStorage.resolveSourceToCss.mockResolvedValue("linear-gradient(0,red,blue)")
+      settingsModule.__setStoreState({
+        background: {
+          ...DEFAULT_BACKGROUND_SETTINGS,
+          enabled: true,
+          activeId: "wp-1",
+          scope: "all",
+        },
+        wallpapers: [wp],
+      })
+      await act(async () => {
+        render(<BackgroundApplier />)
+      })
+      // Pet windows own no surface that should carry the app background — the
+      // wallpaper pseudo-layers key off data-bg-enabled, so this keeps them off.
+      expect(document.body.getAttribute(__INTERNALS__.ATTR_ENABLED)).toBe("false")
+      expect(document.body.getAttribute(__INTERNALS__.ATTR_SCOPE)).toBeNull()
+      // We never even resolved the wallpaper source — the gate short-circuits.
+      expect(wallpaperStorage.resolveSourceToCss).not.toHaveBeenCalled()
+    }
+  )
 
   it("falls back to disabled when activeId references a missing wallpaper", async () => {
     settingsModule.__setStoreState({

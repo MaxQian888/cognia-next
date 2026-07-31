@@ -1,0 +1,10 @@
+{
+  "description": "{error}",
+  "diagnostic": {
+    "compactHint": "The failed compact contribution was removed without affecting the surrounding UI.",
+    "message": "Plugin surface \"{surfaceId}\" crashed while rendering: {error}",
+    "retryHint": "Retry the surface. If it fails again, inspect the plugin component and diagnostics."
+  },
+  "retry": "Retry",
+  "title": "{pluginName} could not render"
+}

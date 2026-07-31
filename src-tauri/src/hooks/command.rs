@@ -141,32 +141,41 @@ pub(super) fn parse_zero_exit_output(stdout: &str) -> HookOutcome {
 
 fn extract_decision(json: &Value) -> HookOutcome {
     // Format documented in Claude Code hooks: an object with an optional
-    // `permissionDecision` (deny|allow|ask), `additionalContext`, etc.
-    if let Some(decision) = json.get("permissionDecision").and_then(|v| v.as_str()) {
+    // `permissionDecision` (deny|allow|ask), `additionalContext`, etc. These
+    // fields may live at the top level (legacy / simple form) OR nested under
+    // `hookSpecificOutput` — the schema the bundled UserPromptSubmit /
+    // SessionStart / PreToolUse hooks actually emit (e.g.
+    // `auto-context-loader.mjs` writes `{ hookSpecificOutput: { additionalContext } }`).
+    // Resolve each field from the nested object first, then fall back to the top
+    // level, so BOTH shapes are honoured — otherwise the default-on context
+    // loader's output is silently dropped.
+    let hso = json.get("hookSpecificOutput");
+    let field = |key: &str| -> Option<String> {
+        hso.and_then(|h| h.get(key))
+            .or_else(|| json.get(key))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+    };
+
+    if let Some(decision) = field("permissionDecision") {
         if decision.eq_ignore_ascii_case("deny") || decision.eq_ignore_ascii_case("block") {
-            let reason = json
-                .get("decisionReason")
-                .or_else(|| json.get("permissionDecisionReason"))
-                .or_else(|| json.get("reason"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("hook returned permissionDecision=deny")
-                .to_string();
+            let reason = field("permissionDecisionReason")
+                .or_else(|| field("decisionReason"))
+                .or_else(|| field("reason"))
+                .unwrap_or_else(|| "hook returned permissionDecision=deny".to_string());
             return HookOutcome::Block { reason };
         }
     }
-    if let Some(decision) = json.get("decision").and_then(|v| v.as_str()) {
+    if let Some(decision) = field("decision") {
         if decision.eq_ignore_ascii_case("block") {
-            let reason = json
-                .get("reason")
-                .and_then(|v| v.as_str())
-                .unwrap_or("hook returned decision=block")
-                .to_string();
+            let reason =
+                field("reason").unwrap_or_else(|| "hook returned decision=block".to_string());
             return HookOutcome::Block { reason };
         }
     }
-    if let Some(ctx) = json.get("additionalContext").and_then(|v| v.as_str()) {
+    if let Some(ctx) = field("additionalContext") {
         return HookOutcome::AllowWithContext {
-            additional_context: ctx.to_string(),
+            additional_context: ctx,
         };
     }
     HookOutcome::Allow
@@ -209,6 +218,52 @@ mod tests {
     fn extract_decision_allow_default() {
         let v = json!({"foo": 1});
         matches!(extract_decision(&v), HookOutcome::Allow);
+    }
+
+    #[test]
+    fn extract_decision_hook_specific_output_context() {
+        // The bundled auto-context-loader / SessionStart hooks emit context
+        // nested under `hookSpecificOutput`; it must NOT be dropped.
+        let v = json!({
+            "hookSpecificOutput": {
+                "hookEventName": "UserPromptSubmit",
+                "additionalContext": "project standing instructions"
+            }
+        });
+        match extract_decision(&v) {
+            HookOutcome::AllowWithContext { additional_context } => {
+                assert_eq!(additional_context, "project standing instructions");
+            }
+            _ => panic!("expected AllowWithContext from hookSpecificOutput"),
+        }
+    }
+
+    #[test]
+    fn extract_decision_hook_specific_output_deny() {
+        let v = json!({
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": "blocked by policy"
+            }
+        });
+        match extract_decision(&v) {
+            HookOutcome::Block { reason } => assert_eq!(reason, "blocked by policy"),
+            _ => panic!("expected Block from hookSpecificOutput permissionDecision"),
+        }
+    }
+
+    #[test]
+    fn extract_decision_top_level_still_wins_when_present() {
+        // Back-compat: a top-level additionalContext (no hookSpecificOutput)
+        // continues to resolve.
+        let v = json!({"additionalContext": "legacy shape"});
+        match extract_decision(&v) {
+            HookOutcome::AllowWithContext { additional_context } => {
+                assert_eq!(additional_context, "legacy shape");
+            }
+            _ => panic!("expected AllowWithContext"),
+        }
     }
 
     #[test]

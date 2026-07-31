@@ -60,10 +60,12 @@ flowchart TD
   DISP -->|id match| FEAT{feature enabled?}
   FEAT -->|ocr-ocrs| OCRS["OcrsBackend::extract<br/>backend/ocrs.rs:150"]
   FEAT -->|ocr-paddle| PAD["PaddleOcrBackend::extract<br/>backend/paddle.rs:157"]
-  FEAT -->|tesseract / windows / apple<br/>no crate today| PH["PlaceholderBackend::extract<br/>backend/placeholder.rs:27"]
+  FEAT -->|"apple-vision (macOS target)"| AV["AppleVisionBackend::extract<br/>backend/apple.rs"]
+  FEAT -->|tesseract / windows<br/>no crate today| PH["PlaceholderBackend::extract<br/>backend/placeholder.rs:27"]
   PH --> MB["Err MissingBinding(id)<br/>→ TS unsupported_shell → router falls through"]
   OCRS --> RES["NativeOcrResult {text, blocks, w, h}"]
   PAD --> RES
+  AV --> RES
 ```
 
 `install_platform_backends` (`backend/mod.rs:36`) registers each slot — the real backend under its feature, else
@@ -73,20 +75,22 @@ panics on a missing id regardless of which features are compiled in.
 ## The Cargo features
 
 ```toml
-# src-tauri/Cargo.toml:396 — three are empty flags; only ocrs/paddle link crates
-ocr-tesseract = []                                                  # :400
-ocr-windows   = []                                                  # :403
-ocr-apple     = []                                                  # :406
-ocr-ocrs      = ["dep:ocrs", "dep:rten", "dep:rten-imageproc", "dep:image"]   # :410
-ocr-paddle    = ["dep:oar-ocr", "dep:ort", "dep:image"]                       # :414
+# crates/cognia-ocr/Cargo.toml — two are empty flags; only ocrs/paddle link crates
+ocr-tesseract = []
+ocr-windows   = []
+ocr-ocrs      = ["dep:ocrs", "dep:rten", "dep:rten-imageproc", "dep:image"]
+ocr-paddle    = ["dep:oar-ocr", "dep:ort", "dep:image"]
 ```
 
-<Callout type="warn" title="tesseract-rs / winocr / Apple Vision are doc-only in the current tree">
-  ADR-0024 describes five real bindings (tesseract-rs, winocr, a Swift sidecar, ocrs, oar-ocr). In the current
-  manifest, `tesseract-rs` and `winocr` are **not declared dependencies** — `ocr-tesseract`, `ocr-windows`, and
-  `ocr-apple` are empty feature flags, so those three backends compile to a `PlaceholderBackend` and return
-  `MissingBinding`. Only **ocrs** and **paddle-ocr** have real backing crates today. The `ort = "=2.0.0-rc.12"`
-  pin (`Cargo.toml:310`) is exact, matching the ADR.
+`apple-vision` has no feature flag: it is compiled whenever the target is macOS
+(`backend/apple.rs`), running Vision.framework's `VNRecognizeTextRequest`
+in-process through the `objc2-vision` bindings — no sidecar, no model downloads.
+
+<Callout type="warn" title="tesseract-rs / winocr are doc-only in the current tree">
+  In the current manifest, `tesseract-rs` and `winocr` are **not declared dependencies** — `ocr-tesseract` and
+  `ocr-windows` are empty feature flags, so those two backends compile to a `PlaceholderBackend` and return
+  `MissingBinding`. **ocrs**, **paddle-ocr**, and (on macOS) **apple-vision** have real backing today. The
+  `ort = "=2.0.0-rc.12"` pin is exact, matching the ADR.
 </Callout>
 
 `ort` is pinned to a release candidate (`=2.0.0-rc.12`, `default-features = false`, features

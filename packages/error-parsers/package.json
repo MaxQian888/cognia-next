@@ -1,0 +1,25 @@
+{
+  "name": "@cognia/error-parsers",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Cognia error-parsing toolkit: framework-agnostic parsers and presets that turn raw error/log text (JSON, stack traces, Python/Rust tracebacks, ANSI, compile/network/API/runtime errors) into structured, renderer-ready nodes.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "cognia-source": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "cognia-source": "./src/*.ts",
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=26.0.0"
+  }
+}

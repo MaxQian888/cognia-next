@@ -15,7 +15,8 @@ import { useTranslations } from "next-intl"
 import { Button } from "@/components/ui/button"
 import { useSettingsStore } from "@/stores"
 import { useModelsDevCatalog } from "@/hooks/settings/use-models-dev-catalog"
-import { getBuiltInProviderCatalogEntry } from "@/types/provider/built-in-provider-catalog"
+import { getBuiltInProviderCatalogEntry } from "@cognia/provider-types/built-in-provider-catalog"
+import type { ModelPricing } from "@cognia/provider-types/provider"
 
 /* ── Types ───────────────────────────────────────────────────────────────── */
 
@@ -68,6 +69,53 @@ interface ModelRow {
   inputTokens: number
   outputTokens: number
   estimatedCost: number | null // null → show "N/A"
+  /** Full rate card (input/output/cache/batch/audio) for the rate breakdown line. */
+  pricing?: Partial<ModelPricing>
+}
+
+/** Per-1M rate dimensions shown under a model's id, in display order. */
+const RATE_DIMS: { field: Exclude<keyof ModelPricing, "currency">; labelKey: RateLabelKey }[] = [
+  { field: "promptPer1M", labelKey: "comparison.inputPrice" },
+  { field: "completionPer1M", labelKey: "comparison.outputPrice" },
+  { field: "cachedInputPer1M", labelKey: "comparison.cacheReadPrice" },
+  { field: "cacheCreationPer1M", labelKey: "comparison.cacheWritePrice" },
+  { field: "batchInputPer1M", labelKey: "comparison.batchInputPrice" },
+  { field: "batchOutputPer1M", labelKey: "comparison.batchOutputPrice" },
+  { field: "audioInputPer1M", labelKey: "comparison.audioInputPrice" },
+  { field: "audioOutputPer1M", labelKey: "comparison.audioOutputPrice" },
+]
+
+type RateLabelKey =
+  | "comparison.inputPrice"
+  | "comparison.outputPrice"
+  | "comparison.cacheReadPrice"
+  | "comparison.cacheWritePrice"
+  | "comparison.batchInputPrice"
+  | "comparison.batchOutputPrice"
+  | "comparison.audioInputPrice"
+  | "comparison.audioOutputPrice"
+
+/** Compact "$X/1M" per-token rate. */
+function formatRate(v: number): string {
+  return v === 0 ? "Free" : `$${v.toFixed(2)}`
+}
+
+/** A muted one-line rate breakdown under a model id — only the dimensions the
+ * catalog/models.dev actually declares are shown. */
+function PricingRates({
+  pricing,
+  t,
+}: {
+  pricing: Partial<ModelPricing>
+  t: (key: RateLabelKey) => string
+}) {
+  const parts = RATE_DIMS.filter(({ field }) => typeof pricing[field] === "number").map(
+    ({ field, labelKey }) => `${t(labelKey)} ${formatRate(pricing[field] as number)}`
+  )
+  if (parts.length === 0) return null
+  return (
+    <div className="mt-0.5 text-[10px] font-normal text-muted-foreground">{parts.join(" · ")}</div>
+  )
 }
 
 /* ── Empty State ─────────────────────────────────────────────────────────── */
@@ -143,29 +191,21 @@ export function ProviderCostTab({ providerId }: ProviderCostTabProps) {
   // Build a model pricing map: modelId → { promptPer1M, completionPer1M }. The
   // static catalog wins; models.dev fills pricing for models it omits.
   const pricingMap = useMemo(() => {
-    const map = new Map<string, { promptPer1M: number; completionPer1M: number }>()
+    // Keep the FULL rate card (cache/batch/audio too) so the per-model rate line
+    // can surface every dimension models.dev declares — not just input/output.
+    const map = new Map<string, Partial<ModelPricing>>()
     if (catalogEntry?.models) {
       for (const model of catalogEntry.models) {
-        if (model.pricing) {
-          map.set(model.id, {
-            promptPer1M: model.pricing.promptPer1M,
-            completionPer1M: model.pricing.completionPer1M,
-          })
-        }
+        if (model.pricing) map.set(model.id, model.pricing)
       }
     }
     const devModels = modelsDevRow?.providers[providerId]?.models ?? []
     for (const dev of devModels) {
       if (map.has(dev.id)) continue
       // `dev.pricing` is only set when models.dev declares real per-token rates
-      // (cache-only entries now map to undefined, not a coerced 0), and when set
-      // it always carries both prompt+completion — so this presence check is the
-      // correct gate AND narrows the Partial<ModelPricing> fields to `number`.
+      // (cache-only entries map to undefined, not a coerced 0).
       if (dev.pricing?.promptPer1M !== undefined && dev.pricing.completionPer1M !== undefined) {
-        map.set(dev.id, {
-          promptPer1M: dev.pricing.promptPer1M,
-          completionPer1M: dev.pricing.completionPer1M,
-        })
+        map.set(dev.id, dev.pricing)
       }
     }
     return map
@@ -192,12 +232,13 @@ export function ProviderCostTab({ providerId }: ProviderCostTabProps) {
       }
 
       const pricing = pricingMap.get(modelId)
-      const estimatedCost = pricing
-        ? (inputTokens * pricing.promptPer1M) / 1_000_000 +
-          (outputTokens * pricing.completionPer1M) / 1_000_000
-        : null
+      const estimatedCost =
+        pricing && pricing.promptPer1M !== undefined && pricing.completionPer1M !== undefined
+          ? (inputTokens * pricing.promptPer1M) / 1_000_000 +
+            (outputTokens * pricing.completionPer1M) / 1_000_000
+          : null
 
-      return { modelId, callCount, inputTokens, outputTokens, estimatedCost }
+      return { modelId, callCount, inputTokens, outputTokens, estimatedCost, pricing }
     })
   }, [providerStats, period, pricingMap])
 
@@ -242,7 +283,7 @@ export function ProviderCostTab({ providerId }: ProviderCostTabProps) {
       </div>
 
       {/* ── Overview cards ────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 gap-3 @3xl/provider-pane:grid-cols-4">
         <OverviewCard label={t("costTab.monthlyCost")} value={formatCost(totals.totalCost)} />
         <OverviewCard label={t("costTab.totalCalls")} value={String(totals.totalCalls)} />
         <OverviewCard
@@ -253,8 +294,10 @@ export function ProviderCostTab({ providerId }: ProviderCostTabProps) {
       </div>
 
       {/* ── Per-model cost table ──────────────────────────────────────── */}
-      <div className="rounded-lg border overflow-hidden">
-        <table className="w-full text-sm">
+      {/* overflow-x-auto, not just overflow-hidden: five columns plus the rate
+          breakdown clip rather than scroll in a narrow pane. */}
+      <div className="overflow-x-auto rounded-lg border">
+        <table className="w-full min-w-[32rem] text-sm">
           <thead>
             <tr className="border-b bg-muted/40">
               <th className="px-3 py-2 text-left font-medium text-muted-foreground">
@@ -280,7 +323,10 @@ export function ProviderCostTab({ providerId }: ProviderCostTabProps) {
                 key={row.modelId}
                 className="border-b last:border-b-0 hover:bg-muted/20 transition-colors"
               >
-                <td className="px-3 py-2 font-mono text-xs">{row.modelId}</td>
+                <td className="px-3 py-2 font-mono text-xs">
+                  <div>{row.modelId}</div>
+                  {row.pricing && <PricingRates pricing={row.pricing} t={(k) => t(k)} />}
+                </td>
                 <td className="px-3 py-2 text-right tabular-nums">{row.callCount}</td>
                 <td className="px-3 py-2 text-right tabular-nums">
                   {formatTokens(row.inputTokens)}

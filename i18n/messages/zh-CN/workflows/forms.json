@@ -1,0 +1,3028 @@
+{
+  "agentTurn": {
+    "allowedTools": {
+      "hint": "限制临时角色的工具面。留空 = 主机默认。",
+      "label": "允许的工具（逗号分隔）",
+      "placeholder": "Bash, Read, Edit"
+    },
+    "characterId": {
+      "hint": "以现有角色身份运行——沿用其系统提示词、模型和工具白名单。",
+      "label": "角色（可选）"
+    },
+    "cwd": {
+      "hint": "工具调用的作用范围（仅桌面端）。",
+      "label": "工作目录"
+    },
+    "maxTurns": {
+      "hint": "智能体步骤的上限。",
+      "label": "最大回合数"
+    },
+    "model": {
+      "hint": "默认使用提供方配置的模型。",
+      "label": "模型（可选）"
+    },
+    "prompt": {
+      "label": "提示词"
+    },
+    "requireTools": {
+      "hint": "sidecar 不可用时（Web/移动端）直接失败，而不是降级为纯文本。",
+      "label": "必须有工具"
+    },
+    "systemPrompt": {
+      "hint": "未选择角色时使用。",
+      "label": "系统提示词"
+    },
+    "toolsEnabled": {
+      "hint": "使用桌面 sidecar 的工具管线。关闭 = 纯文本补全。",
+      "label": "启用工具"
+    }
+  },
+  "aggregate": {
+    "keyExpression": {
+      "hint": "逐项取键。$item 为当前项，例如 $item.category",
+      "label": "键表达式"
+    },
+    "numericField": {
+      "hint": "逐项取数值。留空表示项本身。",
+      "label": "取值表达式"
+    },
+    "numericOp": {
+      "label": "函数",
+      "options": {
+        "avg": "平均",
+        "count": "计数",
+        "max": "最大",
+        "min": "最小",
+        "sum": "求和"
+      }
+    },
+    "operation": {
+      "hint": "如何把输入列表归约为单个值。",
+      "label": "操作",
+      "options": {
+        "collect": "收集（成列表）",
+        "concat": "拼接（展开一层）",
+        "custom": "自定义归约",
+        "dedupe": "去重",
+        "groupBy": "按键分组",
+        "mergeObjects": "合并对象",
+        "numeric": "数值（求和 / 平均 / …）"
+      }
+    },
+    "reducerExpression": {
+      "hint": "返回新累加器的 JS 表达式。作用域内有 acc、item、index。",
+      "label": "归约表达式 (JS)",
+      "placeholder": "acc + item.value"
+    }
+  },
+  "aiBrowserModel": {
+    "cacheEnabled": {
+      "label": "缓存模型"
+    },
+    "candidateLabels": {
+      "label": "候选标签",
+      "placeholder": "正向, 负向"
+    },
+    "device": {
+      "label": "设备"
+    },
+    "dtype": {
+      "label": "数据类型"
+    },
+    "hypothesisTemplate": {
+      "label": "假设模板",
+      "placeholder": "这个示例是 '{}'。"
+    },
+    "input": {
+      "label": "输入"
+    },
+    "inputJson": {
+      "label": "输入 JSON",
+      "placeholder": "可选的结构化模型输入"
+    },
+    "language": {
+      "label": "语言",
+      "placeholder": "zh"
+    },
+    "maxCachedModels": {
+      "label": "缓存模型数"
+    },
+    "maxLength": {
+      "label": "最大长度"
+    },
+    "maxNewTokens": {
+      "label": "最大新令牌数"
+    },
+    "modelId": {
+      "label": "模型 ID",
+      "placeholder": "Xenova/model-name"
+    },
+    "operation": {
+      "disposeAll": "释放所有模型",
+      "disposeModel": "释放模型",
+      "infer": "运行推理",
+      "label": "操作",
+      "preload": "预加载模型",
+      "status": "运行时状态"
+    },
+    "preset": {
+      "label": "模型预设",
+      "placeholder": "选择精选模型"
+    },
+    "returnTimestamps": {
+      "label": "返回时间戳",
+      "none": "不返回",
+      "segment": "分段",
+      "word": "逐词"
+    },
+    "runtime": {
+      "available": "运行时可用",
+      "unavailable": "运行时不可用",
+      "wasm": "WASM",
+      "webgpu": "WebGPU"
+    },
+    "task": {
+      "label": "任务"
+    },
+    "tasks": {
+      "audio-classification": "音频分类",
+      "automatic-speech-recognition": "自动语音识别",
+      "depth-estimation": "深度估计",
+      "feature-extraction": "特征提取",
+      "fill-mask": "掩码填充",
+      "image-classification": "图像分类",
+      "image-segmentation": "图像分割",
+      "image-to-text": "图像转文本",
+      "object-detection": "目标检测",
+      "question-answering": "问答",
+      "sentence-similarity": "句子相似度",
+      "summarization": "摘要",
+      "text-classification": "文本分类",
+      "text-generation": "文本生成",
+      "text2text-generation": "文本到文本生成",
+      "text-to-speech": "文本转语音",
+      "token-classification": "词元分类",
+      "translation": "翻译",
+      "zero-shot-classification": "零样本分类",
+      "zero-shot-image-classification": "零样本图像分类"
+    },
+    "temperature": {
+      "label": "温度"
+    },
+    "timeoutMs": {
+      "label": "超时（毫秒）"
+    },
+    "topK": {
+      "label": "Top K"
+    }
+  },
+  "aiClassify": {
+    "apiFlavor": {
+      "auto": "自动",
+      "chat": "Chat Completions",
+      "hint": "仅影响 OpenAI 兼容提供方。自动模式会按 Base URL / provider 启发式判断。",
+      "label": "OpenAI 端点",
+      "responses": "Responses API"
+    },
+    "apiKey": {
+      "label": "API Key"
+    },
+    "baseURL": {
+      "hint": "用于代理或自建 OpenAI 兼容端点。",
+      "label": "Base URL（可选）",
+      "placeholder": "https://api.openai.com/v1"
+    },
+    "headersJson": {
+      "hint": "静态 provider 请求头 JSON 对象。值必须是字符串。",
+      "label": "Headers JSON（可选）",
+      "placeholder": "'{' \"HTTP-Referer\": \"https://app.example\" '}'"
+    },
+    "hint": {
+      "label": "辅助说明（可选）"
+    },
+    "input": {
+      "hint": "支持 '{{ }}' 表达式。",
+      "label": "输入"
+    },
+    "labelsRaw": {
+      "hint": "分类器从中选一个。顺序决定确定性回退。",
+      "label": "标签（逗号分隔）",
+      "placeholder": "urgent, normal, spam"
+    },
+    "model": {
+      "hint": "提供方专属的模型 ID。",
+      "label": "模型",
+      "placeholder": "claude-haiku-4-5-20251001"
+    },
+    "provider": {
+      "hint": "Provider id，可填写 openrouter、deepseek、groq、codex、azure 等 OpenAI 兼容 id。",
+      "label": "提供方",
+      "placeholder": "openrouter"
+    }
+  },
+  "aiCouncil": {
+    "councillorsJson": {
+      "hint": "'{' name, modelAlias, systemPrompt? '}' 对象数组。modelAlias 使用「设置 -> 路由」中的别名。",
+      "label": "议会成员 JSON",
+      "placeholder": "[\n  '{' \"name\": \"Reviewer\", \"modelAlias\": \"smart\" '}',\n  '{' \"name\": \"Fast pass\", \"modelAlias\": \"fast\" '}'\n]"
+    },
+    "executionMode": {
+      "label": "执行模式",
+      "options": {
+        "parallel": "并行",
+        "serial": "串行"
+      }
+    },
+    "maxConcurrency": {
+      "hint": "并行模式下同时运行的议会成员调用数上限。",
+      "label": "最大并发"
+    },
+    "piiGate": {
+      "block": "拦截（让步骤失败）",
+      "hint": "在提示词外发到每个议会成员和综合器前运行。",
+      "label": "PII 闸",
+      "off": "关闭",
+      "redact": "脱敏"
+    },
+    "prompt": {
+      "label": "提示词"
+    },
+    "synthesisInstructions": {
+      "hint": "终审综合步骤的可选指导。",
+      "label": "综合指导"
+    },
+    "synthesizerAlias": {
+      "hint": "用于合并各模型回答的路由模型别名。",
+      "label": "综合器别名",
+      "placeholder": "quality"
+    },
+    "timeoutMs": {
+      "hint": "单个议会成员的超时时间。有效范围：1000-600000 毫秒。",
+      "label": "超时（毫秒）"
+    }
+  },
+  "aiEmbed": {
+    "apiKey": {
+      "hint": "托管嵌入提供方需要。留空则使用本地 / 哈希回退。",
+      "label": "API Key（可选）"
+    },
+    "dimension": {
+      "hint": "向量长度。用于哈希回退，并传给支持该参数的提供方。",
+      "label": "维度"
+    },
+    "input": {
+      "hint": "支持 '{{ }}' 表达式。",
+      "label": "输入"
+    },
+    "model": {
+      "hint": "真实语义嵌入时必填。",
+      "label": "模型（可选）",
+      "placeholder": "text-embedding-3-small"
+    },
+    "provider": {
+      "label": "提供方（可选）",
+      "placeholder": "哈希回退"
+    }
+  },
+  "aiExtract": {
+    "apiFlavor": {
+      "auto": "自动",
+      "chat": "Chat Completions",
+      "hint": "仅影响 OpenAI 兼容提供方。自动模式会按 Base URL / provider 启发式判断。",
+      "label": "OpenAI 端点",
+      "responses": "Responses API"
+    },
+    "apiKey": {
+      "label": "API Key"
+    },
+    "baseURL": {
+      "hint": "用于代理或自建 OpenAI 兼容端点。",
+      "label": "Base URL（可选）",
+      "placeholder": "https://api.openai.com/v1"
+    },
+    "headersJson": {
+      "hint": "静态 provider 请求头 JSON 对象。值必须是字符串。",
+      "label": "Headers JSON（可选）",
+      "placeholder": "'{' \"HTTP-Referer\": \"https://app.example\" '}'"
+    },
+    "hint": {
+      "label": "辅助说明（可选）"
+    },
+    "input": {
+      "label": "输入"
+    },
+    "model": {
+      "hint": "提供方专属的模型 ID。",
+      "label": "模型",
+      "placeholder": "claude-haiku-4-5-20251001"
+    },
+    "provider": {
+      "hint": "Provider id，可填写 openrouter、deepseek、groq、codex、azure 等 OpenAI 兼容 id。",
+      "label": "提供方",
+      "placeholder": "openrouter"
+    },
+    "required": {
+      "hint": "逗号分隔。任一缺失则 output.valid 为 false。",
+      "label": "必填字段（可选）",
+      "placeholder": "name, amount"
+    },
+    "schemaJson": {
+      "hint": "字段 → 期望类型。例如：'{ \"name\": \"string\", \"amount\": \"number\" }'",
+      "label": "Schema（JSON）"
+    }
+  },
+  "aiPrompt": {
+    "apiFlavor": {
+      "auto": "自动",
+      "chat": "Chat Completions",
+      "hint": "仅影响 OpenAI 兼容提供方。自动模式会按 Base URL / provider 启发式判断。",
+      "label": "OpenAI 端点",
+      "responses": "Responses API"
+    },
+    "apiKey": {
+      "hint": "明文存入工作流。分享给他人时建议使用凭证引用。",
+      "label": "API Key"
+    },
+    "baseURL": {
+      "hint": "用于代理或自建 OpenAI 兼容端点。",
+      "label": "Base URL（可选）",
+      "placeholder": "https://api.openai.com/v1"
+    },
+    "headersJson": {
+      "hint": "静态 provider 请求头 JSON 对象。值必须是字符串。",
+      "label": "Headers JSON（可选）",
+      "placeholder": "'{' \"HTTP-Referer\": \"https://app.example\", \"X-Title\": \"Cognia\" '}'"
+    },
+    "jsonSchema": {
+      "hint": "希望模型匹配的示例形状，会注入到提示词中。",
+      "label": "JSON 形状（可选）",
+      "placeholder": "'{'\n  \"title\": \"string\",\n  \"score\": \"number\"\n'}'"
+    },
+    "mode": {
+      "explicit": "指定提供方",
+      "hint": "「智能路由」按路由映射自动选择提供方（含回退链）；「指定提供方」使用下方字段。",
+      "label": "提供方模式",
+      "routed": "智能路由（自动）"
+    },
+    "model": {
+      "hint": "提供方专属的模型 ID。",
+      "label": "模型",
+      "placeholder": "claude-sonnet-4-6"
+    },
+    "modelAlias": {
+      "hint": "来自「设置 → 路由」模型映射的别名（如 \"fast\"、\"smart\"）。留空使用默认路由策略。",
+      "label": "模型别名",
+      "placeholder": "fast"
+    },
+    "piiGate": {
+      "block": "拦截（步骤失败）",
+      "hint": "在内容发送给模型前检查邮箱 / 手机号 / 证件号 / 密钥等隐私信息。",
+      "label": "PII 防护",
+      "off": "关闭",
+      "redact": "脱敏占位符"
+    },
+    "provider": {
+      "hint": "Provider id，可填写 openrouter、deepseek、groq、codex、azure 等 OpenAI 兼容 id。",
+      "label": "提供方",
+      "placeholder": "openrouter"
+    },
+    "responseFormat": {
+      "hint": "选 JSON 会把回复解析为结构化输出，供下游节点引用。",
+      "json": "JSON（结构化）",
+      "label": "响应格式",
+      "text": "文本"
+    },
+    "systemPrompt": {
+      "label": "系统提示词"
+    },
+    "temperature": {
+      "hint": "0 = 确定性。值越大输出越多样。",
+      "label": "Temperature"
+    },
+    "userPrompt": {
+      "label": "用户提示词"
+    }
+  },
+  "approvalRequest": {
+    "message": {
+      "label": "说明（可选）"
+    },
+    "onTimeout": {
+      "fail": "步骤失败",
+      "label": "超时处理",
+      "reject": "按已拒绝路由"
+    },
+    "timeoutMs": {
+      "hint": "等待决定的时长。默认 1 小时。",
+      "label": "超时（毫秒）"
+    },
+    "title": {
+      "label": "标题"
+    }
+  },
+  "arrayField": {
+    "add": "添加",
+    "removeItem": "移除第 {index} 项"
+  },
+  "branch": {
+    "condition": {
+      "hint": "表达式，求值为真值则走真分支。支持 '{{ }}' 表达式。",
+      "label": "条件",
+      "placeholder": "'{{ $node[''n_classify''].out.label }}' === 'urgent'"
+    },
+    "conditions": {
+      "hint": "条件组通过时走「真」端口，否则走「假」端口。",
+      "label": "条件组"
+    },
+    "falsyLabel": {
+      "label": "假分支标签"
+    },
+    "truthyLabel": {
+      "label": "真分支标签"
+    }
+  },
+  "catch": {
+    "intro": "仅在工作流终态失败时运行。可在下游通过 '{{' $node[''id''].error '}}' 读取错误并驱动恢复/通知路径。",
+    "scope": {
+      "hint": "保留项——当前对任意终态失败都会运行。",
+      "label": "范围",
+      "options": {
+        "upstream": "仅直接上游",
+        "workflow": "整个工作流"
+      }
+    }
+  },
+  "characterCreate": {
+    "avatarColor": {
+      "label": "头像颜色",
+      "placeholder": "#6d28d9"
+    },
+    "avatarEmoji": {
+      "label": "头像 emoji",
+      "placeholder": "🤖"
+    },
+    "description": {
+      "label": "描述（可选）"
+    },
+    "model": {
+      "label": "默认模型（可选）",
+      "placeholder": "claude-sonnet-4-6"
+    },
+    "name": {
+      "label": "名称",
+      "placeholder": "研究助手"
+    },
+    "systemPrompt": {
+      "hint": "支持 '{{ }}' 表达式以注入动态内容。",
+      "label": "系统提示词"
+    }
+  },
+  "characterSend": {
+    "character": {
+      "label": "角色"
+    },
+    "content": {
+      "hint": "支持 '{{ $node[''id''].out.field }}' 表达式。",
+      "label": "消息内容",
+      "placeholder": "Hello, '{{ $trigger.payload.userName }}'"
+    },
+    "sessionId": {
+      "label": "目标会话 ID（可选）"
+    }
+  },
+  "characterUpdate": {
+    "characterId": {
+      "label": "角色"
+    },
+    "patchJson": {
+      "hint": "要更新的字段。例如：'{ \"systemPrompt\": \"{{ $node.n_extract.out.text }}\" }'",
+      "label": "Patch（JSON）"
+    }
+  },
+  "chatMessageTrigger": {
+    "character": {
+      "label": "角色"
+    },
+    "sessionId": {
+      "hint": "限定单个聊天会话。留空时该角色的任意会话都会触发。",
+      "label": "会话 ID（可选）"
+    }
+  },
+  "code": {
+    "code": {
+      "hint": "在沙箱 Function() 中运行，超时 5 秒。可用变量：upstream、params、trigger。",
+      "label": "JS 代码"
+    }
+  },
+  "conditionBuilder": {
+    "addCondition": "添加条件",
+    "caseSensitive": "区分大小写",
+    "coercionHint": "比较操作符在两侧都是数字时按数值比较，否则按文本比较；文本比较默认不区分大小写，可勾选「区分大小写」。",
+    "combinator": {
+      "all": "全部满足（与）",
+      "any": "任一满足（或）",
+      "aria": "条件组合方式"
+    },
+    "left": {
+      "aria": "左操作数",
+      "placeholder": "'{{ $node[''n1''].out.value }}'"
+    },
+    "operator": {
+      "aria": "操作符"
+    },
+    "operators": {
+      "contains": "包含",
+      "endsWith": "结尾是",
+      "eq": "等于",
+      "gt": "大于",
+      "gte": "不小于",
+      "inRange": "在区间内",
+      "isEmpty": "为空",
+      "isNotEmpty": "不为空",
+      "lt": "小于",
+      "lte": "不大于",
+      "neq": "不等于",
+      "notContains": "不包含",
+      "regex": "匹配正则",
+      "startsWith": "开头是",
+      "truthy": "为真值"
+    },
+    "removeCondition": "移除条件",
+    "right": {
+      "aria": "右操作数",
+      "placeholder": "值或表达式"
+    },
+    "rightUpper": {
+      "aria": "区间上界",
+      "placeholder": "上界"
+    }
+  },
+  "connectorDelete": {
+    "adapter": {
+      "label": "适配器"
+    },
+    "messageId": {
+      "label": "消息 ID",
+      "hint": "要撤回/删除的平台消息 ID。",
+      "placeholder": "om_..."
+    }
+  },
+  "connectorDraft": {
+    "content": {
+      "label": "草稿内容"
+    },
+    "conversationKey": {
+      "label": "会话标识"
+    },
+    "sessionId": {
+      "label": "会话 ID"
+    },
+    "sourceMessageId": {
+      "label": "源消息 ID（可选）"
+    },
+    "ttlMs": {
+      "hint": "0 = 永不过期",
+      "label": "TTL（毫秒，可选）"
+    }
+  },
+  "connectorInbound": {
+    "adapter": {
+      "hint": "适配器实例 id，例如某个 Telegram 机器人。",
+      "label": "适配器",
+      "placeholder": "telegram_main"
+    },
+    "channelKinds": {
+      "hint": "仅在选中的会话类型中触发；不选表示全部。",
+      "label": "会话类型（可选）",
+      "options": {
+        "channel": "频道",
+        "group": "群聊",
+        "private": "私聊",
+        "thread": "话题"
+      }
+    },
+    "characterId": {
+      "label": "角色（可选）"
+    },
+    "conversationKey": {
+      "hint": "可选。限定特定会话；留空时任意会话都会触发。",
+      "label": "会话标识"
+    },
+    "keywords": {
+      "hint": "逗号分隔、不区分大小写的子串；任一命中消息文本即触发。",
+      "label": "关键词（可选）",
+      "placeholder": "部署, 发布"
+    },
+    "requireMention": {
+      "hint": "仅当机器人被 @ 提及时触发。",
+      "label": "要求 @ 提及"
+    },
+    "senderIds": {
+      "hint": "逗号分隔的平台用户 ID；仅这些发送者的消息会触发。",
+      "label": "发送者 ID（可选）",
+      "placeholder": "ou_abc, ou_def"
+    }
+  },
+  "integrationEventTrigger": {
+    "pluginId": {
+      "label": "插件（可选）",
+      "hint": "仅接收指定已安装 Marketplace 插件的事件。",
+      "placeholder": "example-delivery"
+    },
+    "integrationId": {
+      "label": "Integration（可选）",
+      "hint": "仅接收插件中指定 Integration 定义的事件。",
+      "placeholder": "delivery"
+    },
+    "accountId": {
+      "label": "账号（可选）",
+      "hint": "仅接收指定已连接账号的事件。",
+      "placeholder": "account_..."
+    },
+    "resourceKind": {
+      "label": "资源类型（可选）",
+      "hint": "仅接收指定规范化资源类型的事件。",
+      "placeholder": "repository"
+    },
+    "resourceId": {
+      "label": "资源 ID（可选）",
+      "hint": "仅接收指定仓库、工作区、团队或其他资源的事件。",
+      "placeholder": "owner/project"
+    },
+    "eventTypes": {
+      "label": "事件类型（可选）",
+      "hint": "以逗号分隔的规范化事件类型；留空匹配全部事件。",
+      "placeholder": "pull_request.opened, issue.updated"
+    }
+  },
+  "connectorReaction": {
+    "adapter": {
+      "label": "适配器"
+    },
+    "op": {
+      "label": "操作",
+      "options": {
+        "add": "添加回应",
+        "remove": "移除回应"
+      }
+    },
+    "messageId": {
+      "label": "消息 ID",
+      "hint": "要添加回应的平台消息 ID。",
+      "placeholder": "om_..."
+    },
+    "emoji": {
+      "label": "表情",
+      "hint": "平台回应代码（飞书：THUMBSUP、OK 等）或 Unicode 表情。",
+      "placeholder": "THUMBSUP"
+    },
+    "reactionId": {
+      "label": "回应 ID",
+      "hint": "要移除的回应 ID（来自前置添加节点的输出）。",
+      "placeholder": "ZCaGnix..."
+    }
+  },
+  "connectorForward": {
+    "adapter": {
+      "label": "适配器"
+    },
+    "messageId": {
+      "label": "消息 ID",
+      "hint": "要转发的平台消息 ID。",
+      "placeholder": "om_..."
+    },
+    "target": {
+      "label": "目标会话",
+      "hint": "目标会话键（platform:adapterId:chatId）或原始 receive id。",
+      "placeholder": "lark:bot:oc_..."
+    }
+  },
+  "connectorSend": {
+    "adapter": {
+      "label": "适配器",
+      "placeholder": "telegram_main"
+    },
+    "content": {
+      "label": "消息内容"
+    },
+    "conversationKey": {
+      "label": "会话标识"
+    },
+    "editTarget": {
+      "hint": "原位编辑该条已发送的平台消息，而不是发送新消息。不支持编辑的平台会退回发送新消息。",
+      "label": "编辑消息 ID（可选）",
+      "placeholder": "om_..."
+    },
+    "idempotencyKey": {
+      "hint": "去重键；默认为运行 ID + 步骤 ID。",
+      "label": "幂等键（可选）"
+    },
+    "replyTo": {
+      "hint": "支持回复的平台会引用该消息。",
+      "label": "回复消息 ID（可选）",
+      "placeholder": "om_..."
+    },
+    "threadId": {
+      "hint": "发送到该话题而非主会话。",
+      "label": "话题 ID（可选）"
+    },
+    "waitForDelivery": {
+      "hint": "阻塞此步骤直到消息送达（或进入死信），并在节点输出中暴露 delivered / status / platformMessageId / errorCode。",
+      "label": "等待送达"
+    },
+    "waitTimeoutMs": {
+      "hint": "等待送达的最长时间（毫秒），超时后携带最新状态继续（默认 30000，最大 300000）。",
+      "label": "送达等待超时（毫秒）"
+    },
+    "cardJson": {
+      "label": "A2UI 卡片 JSON（可选）",
+      "hint": "A2UI surface 对象（'{'components, dataModel, rootId, …'}'）。设置后发送交互卡片，消息内容作为纯文本降级。",
+      "placeholder": "'{'\"components\": '{'...'}', \"dataModel\": '{}', \"rootId\": \"root\"'}'"
+    }
+  },
+  "connectorWaitReply": {
+    "conversationKey": {
+      "label": "会话键",
+      "hint": "组合键 platform:adapterId:chatId——要监听的会话。"
+    },
+    "senderIds": {
+      "label": "发送者 ID（可选）",
+      "hint": "逗号分隔的平台用户 ID；留空则接受任何发送者。",
+      "placeholder": "ou_abc, ou_def"
+    },
+    "keywords": {
+      "label": "关键词（可选）",
+      "hint": "逗号分隔、不区分大小写的子串；任一匹配即接受回复。",
+      "placeholder": "approve, done"
+    },
+    "requireMention": {
+      "label": "要求 @提及",
+      "hint": "只接受 @提及机器人的回复。"
+    },
+    "timeoutMs": {
+      "label": "超时（毫秒）",
+      "hint": "等待预算，超时后以 replied=false 继续（默认 120000，最大 3600000）。"
+    }
+  },
+  "cron": {
+    "builder": {
+      "invalidExpression": "无效的 cron 表达式",
+      "nextRunsLabel": "接下来的运行",
+      "presetLabel": "预设",
+      "presets": {
+        "custom": "自定义",
+        "daily": "每天 9:00",
+        "everyMinute": "每分钟",
+        "hourly": "每小时",
+        "monthly": "每月（1 号 9:00）",
+        "weekdays": "工作日 9:00",
+        "weekly": "每周（周一 9:00）"
+      }
+    },
+    "cronExpression": {
+      "hint": "五字段：分钟 小时 日 月 周。* 表示任意值。",
+      "label": "Cron 表达式",
+      "placeholder": "0 9 * * 1-5"
+    },
+    "timezone": {
+      "hint": "可选。默认使用工作流的时区设置。",
+      "label": "时区",
+      "placeholder": "Asia/Shanghai"
+    }
+  },
+  "desktopClick": {
+    "button": {
+      "label": "按钮"
+    },
+    "clickCount": {
+      "label": "点击次数"
+    },
+    "selector": {
+      "hint": "目标元素的 UIA 选择器，必填。"
+    }
+  },
+  "desktopEventTrigger": {
+    "cooldownMs": {
+      "hint": "本工作流两次触发之间的最短间隔——防止工作流自身的桌面操作再次触发它。",
+      "label": "冷却时间（毫秒）"
+    },
+    "desktopOnly": "仅桌面端——由 Windows 原生 UI Automation 的焦点、结构和属性变化触发；浏览器中无效。",
+    "kinds": {
+      "hint": "当所选的任一原生 UI Automation 事件发生时触发。",
+      "label": "事件类型",
+      "options": {
+        "focus-changed": "焦点变化",
+        "property-changed": "属性变化",
+        "structure-changed": "结构变化"
+      }
+    },
+    "scope": {
+      "hint": "可选的 UIA 元素引用。事件将限定在该元素及其后代范围内。",
+      "label": "UIA 元素作用域",
+      "placeholder": "粘贴元素引用"
+    }
+  },
+  "desktopFindElement": {
+    "selector": {
+      "hint": "UIA 选择器，必填 — 节点会返回元素的边界与句柄供下游节点使用。"
+    }
+  },
+  "desktopInvokePattern": {
+    "pattern": {
+      "label": "模式",
+      "options": {
+        "expandCollapse": "展开/折叠",
+        "invoke": "调用",
+        "rangeValue": "范围值",
+        "scrollItem": "滚动到项目",
+        "selectionItem": "选择项",
+        "text": "文本",
+        "toggle": "切换",
+        "transform": "变换",
+        "value": "值",
+        "window": "窗口"
+      }
+    },
+    "selector": {
+      "hint": "支持所选模式的元素的 UIA 选择器。"
+    },
+    "value": {
+      "hint": "`Value` / `RangeValue` 必填；其余模式可选。",
+      "label": "值"
+    }
+  },
+  "desktopKeys": {
+    "chord": {
+      "hint": "修饰键之间用「+」分隔，例如 `ctrl+shift+t`。组合键会派发到焦点窗口。",
+      "label": "组合键",
+      "placeholder": "ctrl+shift+p"
+    }
+  },
+  "desktopLaunchApp": {
+    "action": {
+      "focus": "聚焦已有窗口",
+      "label": "操作",
+      "launch": "启动"
+    },
+    "app": {
+      "hint": "可执行文件路径或应用名称。聚焦按进程名匹配。",
+      "label": "应用程序",
+      "placeholder": "notepad.exe"
+    }
+  },
+  "desktopPaste": {
+    "text": {
+      "hint": "通过剪贴板粘贴（之后会恢复原剪贴板内容）。长文本远快于逐字输入。",
+      "label": "文本",
+      "placeholder": "要粘贴到焦点元素的文本"
+    }
+  },
+  "desktopReadTree": {
+    "maxDepth": {
+      "hint": "遍历多少层。值越大越慢；默认值能让典型桌面在 1 秒内响应。",
+      "label": "最大深度"
+    },
+    "selector": {
+      "hint": "可选。设置后控件树以匹配元素为根；否则从前台窗口开始。"
+    }
+  },
+  "desktopScreenshot": {
+    "format": {
+      "label": "格式"
+    },
+    "fullScreen": {
+      "label": "全屏"
+    },
+    "outputPath": {
+      "hint": "可选。设置后会同时把截图写入磁盘的此路径。",
+      "label": "输出路径",
+      "placeholder": "C:/temp/cap.png"
+    },
+    "selector": {
+      "hint": "可选。设置后会截取到元素边界；否则截取整个窗口（开启 fullScreen 时截取整个屏幕）。"
+    }
+  },
+  "desktopShared": {
+    "retries": {
+      "label": "重试次数"
+    },
+    "selector": {
+      "defaultHint": "UIA 选择器（role / name / automationId）。留空时作用于前台窗口。",
+      "defaultPlaceholder": "role=\"Button\" name~=\"Submit\"",
+      "label": "选择器"
+    },
+    "timeout": {
+      "label": "超时（毫秒）"
+    }
+  },
+  "desktopType": {
+    "delayMs": {
+      "hint": "按键之间的小延迟，适用于在快速输入时会漏键的应用。",
+      "label": "按键间延迟（毫秒）"
+    },
+    "selector": {
+      "hint": "目标输入框的 UIA 选择器。可选 — 默认作用于焦点元素。"
+    },
+    "text": {
+      "label": "文本",
+      "placeholder": "Hello, world!"
+    }
+  },
+  "desktopWait": {
+    "eventKind": {
+      "hint": "什么状态变化结束等待。",
+      "label": "事件",
+      "options": {
+        "elementHidden": "元素隐藏",
+        "elementVisible": "元素可见",
+        "propertyChanged": "属性变化",
+        "windowReady": "窗口就绪"
+      }
+    },
+    "selector": {
+      "hint": "要等待的元素 / 模式的 UIA 选择器。"
+    }
+  },
+  "desktopWindowClose": {
+    "selector": {
+      "hint": "UIA 窗口选择器。留空时关闭前台窗口。"
+    }
+  },
+  "desktopWindowFocus": {
+    "selector": {
+      "hint": "UIA 窗口选择器（例如 `name~='记事本'`）。留空时使用前台窗口。"
+    }
+  },
+  "desktopWindowResize": {
+    "height": {
+      "label": "高度（像素）"
+    },
+    "selector": {
+      "hint": "UIA 窗口选择器。留空时回退到前台窗口。"
+    },
+    "width": {
+      "label": "宽度（像素）"
+    }
+  },
+  "ensemble": {
+    "aggField": {
+      "hint": "用于投票/计数的对象字段。留空表示整个结果。",
+      "label": "字段"
+    },
+    "aggregation": {
+      "hint": "如何把 N 个样本归约为单个结果。",
+      "label": "聚合",
+      "options": {
+        "bestOf": "最优（按分数）",
+        "majority": "按字段多数投票",
+        "synthesize": "综合（终审 agent）",
+        "threshold": "阈值计数"
+      }
+    },
+    "iterationConcurrency": {
+      "hint": "同时运行的最大样本数。",
+      "label": "并发"
+    },
+    "lens": {
+      "hint": "每行一个引导提示，按样本循环（例如对抗校验）。",
+      "label": "视角（可选）",
+      "placeholder": "支持该论点\n反驳该论点"
+    },
+    "n": {
+      "hint": "目标运行的次数。",
+      "label": "样本数 (N)"
+    },
+    "outputSchema": {
+      "hint": "类型化输出可启用按字段投票。",
+      "label": "样本输出结构"
+    },
+    "piiGate": {
+      "block": "拦截（让步骤失败）",
+      "hint": "在提示词外发到每个样本前运行。",
+      "label": "PII 闸",
+      "off": "关闭",
+      "redact": "脱敏"
+    },
+    "prompt": {
+      "label": "提示词"
+    },
+    "scoreField": {
+      "hint": "要最大化的数值字段。",
+      "label": "分数字段"
+    },
+    "synthesizerAlias": {
+      "hint": "终审合并模型的路由别名。",
+      "label": "综合器别名",
+      "placeholder": "例如 quality"
+    },
+    "targetKind": {
+      "hint": "要运行 N 次的对象。",
+      "label": "目标",
+      "options": {
+        "agentTurn": "Agent 轮次（内联）",
+        "subworkflow": "子工作流"
+      }
+    },
+    "targetModel": {
+      "hint": "每个 agent 样本使用的模型。",
+      "label": "模型（可选）"
+    },
+    "threshold": {
+      "hint": "通过所需的最少匹配样本数。",
+      "label": "阈值"
+    },
+    "workflowId": {
+      "hint": "每个样本运行的工作流。",
+      "label": "子工作流"
+    }
+  },
+  "eval": {
+    "gate": {
+      "maxTotalCostUsd": {
+        "label": "最高总成本（USD）"
+      },
+      "minPassAt1": {
+        "label": "最低 pass@1"
+      },
+      "minPassHatK": {
+        "label": "最低 pass^k"
+      },
+      "minScorerPassRate": {
+        "label": "最低单评分器通过率"
+      },
+      "runId": {
+        "hint": "要判定的评估运行。可从上游运行评估节点接入 '{{ $node['…'].out.runIds[0] }}'。",
+        "label": "运行 ID",
+        "placeholder": "evrun_…"
+      }
+    },
+    "run": {
+      "capabilities": {
+        "label": "能力（逗号分隔）"
+      },
+      "characterId": {
+        "label": "角色 ID（可选）",
+        "placeholder": "char_…"
+      },
+      "datasetId": {
+        "hint": "要运行的评估数据集。支持 '{{ }}' 表达式。",
+        "label": "数据集 ID",
+        "placeholder": "evds_…"
+      },
+      "k": {
+        "hint": "每个用例的重复次数，用于 pass^k 可靠性。",
+        "label": "重复次数（k）"
+      },
+      "label": {
+        "hint": "显示在报告上。默认为目标引用。",
+        "label": "运行标签"
+      },
+      "model": {
+        "hint": "聊天目标的模型 ID。",
+        "label": "模型",
+        "placeholder": "claude-opus-4-8"
+      },
+      "scorerIds": {
+        "hint": "逗号分隔的评分器 ID。留空 = 全部评分器。",
+        "label": "评分器",
+        "placeholder": "assertion, cost"
+      },
+      "split": {
+        "label": "子集筛选"
+      },
+      "targetKind": {
+        "chat": "聊天模型",
+        "label": "目标类型",
+        "team": "Agent 团队",
+        "workflow": "工作流"
+      },
+      "teamId": {
+        "label": "团队 ID",
+        "placeholder": "team_…"
+      },
+      "workflowId": {
+        "label": "工作流 ID",
+        "placeholder": "wf_…"
+      }
+    }
+  },
+  "genericJson": {
+    "errorInvalidJson": "无效的 JSON",
+    "errorTopLevelObject": "顶层必须是 JSON 对象",
+    "params": {
+      "hint": "编辑原始 params 对象。无效 JSON 不会保存。",
+      "label": "参数（JSON）"
+    }
+  },
+  "git": {
+    "branch": {
+      "checkout": {
+        "hint": "创建完成后将工作区切换到新分支。",
+        "label": "创建后切换"
+      },
+      "from": {
+        "hint": "可选起点（分支、标签或提交），默认为 HEAD。",
+        "label": "基于",
+        "placeholder": "main"
+      },
+      "name": {
+        "hint": "必填。支持 '{{ }}' 表达式。",
+        "label": "分支名",
+        "placeholder": "feat/my-feature"
+      }
+    },
+    "commit": {
+      "message": {
+        "hint": "必填。支持 '{{ }}' 表达式。",
+        "label": "提交信息",
+        "placeholder": "feat: 描述这次变更"
+      },
+      "signoff": {
+        "hint": "在提交信息末尾追加 Signed-off-by 署名。",
+        "label": "添加 Signed-off-by"
+      }
+    },
+    "push": {
+      "branch": {
+        "hint": "默认为当前分支。支持 '{{ }}' 表达式。",
+        "label": "分支",
+        "placeholder": "main"
+      },
+      "remote": {
+        "hint": "默认为 origin。支持 '{{ }}' 表达式。",
+        "label": "远程仓库",
+        "placeholder": "origin"
+      },
+      "setUpstream": {
+        "hint": "推送时附带 -u，让本地分支跟踪远程分支。",
+        "label": "设置上游"
+      }
+    },
+    "repoPath": {
+      "hint": "可选。默认为当前工作区根目录。支持 '{{ }}' 表达式。",
+      "label": "仓库路径",
+      "placeholder": "D:/Projects/my-repo"
+    },
+    "stage": {
+      "paths": {
+        "hint": "逗号分隔的文件路径或通配符。留空则暂存全部改动。",
+        "label": "要暂存的路径",
+        "placeholder": "src/index.ts, docs/*.md"
+      }
+    }
+  },
+  "goalAnalytics": {
+    "limit": {
+      "hint": "最大行数。",
+      "label": "数量限制"
+    },
+    "scope": {
+      "label": "范围",
+      "options": {
+        "all": "全部目标",
+        "session": "按会话列出目标"
+      }
+    },
+    "sessionId": {
+      "hint": "会话范围必填。",
+      "label": "会话 ID"
+    },
+    "windowDays": {
+      "hint": "时间线回看窗口。",
+      "label": "窗口（天）"
+    }
+  },
+  "goalCommon": {
+    "goalId": {
+      "hint": "目标的 ID。",
+      "label": "目标 ID",
+      "placeholder": "goal_"
+    }
+  },
+  "goalCompletedTrigger": {
+    "characterId": {
+      "label": "角色（可选）"
+    },
+    "goalId": {
+      "hint": "限定指定目标。留空时任意完成的目标都会触发。",
+      "label": "目标 ID（可选）"
+    },
+    "sessionId": {
+      "hint": "限定在单个聊天会话中启动的目标。",
+      "label": "会话 ID（可选）"
+    },
+    "status": {
+      "hint": "限定单一结果，如 completed、stopped、budget、turn、timeout。留空时任意状态都会触发。",
+      "label": "终止状态（可选）",
+      "placeholder": "completed"
+    }
+  },
+  "goalCreate": {
+    "characterId": {
+      "label": "角色（可选）"
+    },
+    "configJson": {
+      "hint": "局部 GoalConfig 覆盖。",
+      "label": "配置 JSON"
+    },
+    "rawObjective": {
+      "hint": "原始目标；运行时会在提示前进行脱敏。",
+      "label": "目标",
+      "placeholder": "发布版本"
+    },
+    "sessionId": {
+      "hint": "要驱动的聊天会话。",
+      "label": "会话 ID",
+      "placeholder": "ses_"
+    },
+    "startPaused": {
+      "hint": "创建后不自动驱动。",
+      "label": "创建为暂停状态"
+    }
+  },
+  "goalEvents": {
+    "limit": {
+      "hint": "最大事件数。",
+      "label": "数量限制"
+    }
+  },
+  "goalList": {
+    "limit": {
+      "hint": "最大行数。",
+      "label": "数量限制"
+    },
+    "mode": {
+      "label": "读取模式",
+      "options": {
+        "activeForSession": "会话活跃目标",
+        "all": "全部目标",
+        "openForSession": "会话未关闭目标",
+        "session": "按会话列出目标"
+      }
+    },
+    "sessionId": {
+      "hint": "会话模式必填。",
+      "label": "会话 ID"
+    }
+  },
+  "goalTemplateCommon": {
+    "templateId": {
+      "hint": "目标 goal 模板 ID。",
+      "label": "模板 ID",
+      "placeholder": "gtpl_"
+    }
+  },
+  "goalTemplateCreateGoal": {
+    "characterId": {
+      "label": "角色（可选）"
+    },
+    "sessionId": {
+      "hint": "要驱动的聊天会话。",
+      "label": "会话 ID",
+      "placeholder": "ses_"
+    }
+  },
+  "goalTemplateFavorite": {
+    "isFavorite": {
+      "hint": "设置模板收藏状态。",
+      "label": "收藏"
+    }
+  },
+  "goalTemplateList": {
+    "favoriteOnly": {
+      "hint": "仅返回收藏模板。",
+      "label": "仅收藏"
+    },
+    "includeBuiltIn": {
+      "hint": "包含内置种子模板。",
+      "label": "包含内置模板"
+    },
+    "limit": {
+      "hint": "最大行数。",
+      "label": "数量限制"
+    },
+    "query": {
+      "hint": "按 ID、标题或目标文本匹配。",
+      "label": "搜索",
+      "placeholder": "release"
+    }
+  },
+  "goalTemplateUpsert": {
+    "configJson": {
+      "hint": "局部 GoalConfig 覆盖。",
+      "label": "配置 JSON"
+    },
+    "isFavorite": {
+      "hint": "将模板固定在选择器顶部附近。",
+      "label": "收藏"
+    },
+    "objectiveText": {
+      "hint": "从模板创建 goal 时使用的目标。",
+      "label": "目标",
+      "placeholder": "Review the release"
+    },
+    "sortOrder": {
+      "hint": "数值越小排序越靠前。",
+      "label": "排序"
+    },
+    "title": {
+      "hint": "简短模板标题。",
+      "label": "标题",
+      "placeholder": "Release review"
+    }
+  },
+  "goalToggleSubgoal": {
+    "subgoalId": {
+      "hint": "检查项 ID。",
+      "label": "子目标 ID",
+      "placeholder": "sub_"
+    }
+  },
+  "goalUpdateConfig": {
+    "configJson": {
+      "hint": "局部 GoalConfig 补丁。",
+      "label": "配置 JSON"
+    }
+  },
+  "goalUpdateObjective": {
+    "rawObjective": {
+      "hint": "替换后的目标。",
+      "label": "新目标"
+    }
+  },
+  "groupAnnotation": {
+    "color": {
+      "label": "颜色",
+      "options": {
+        "amber": "琥珀",
+        "cyan": "青色",
+        "emerald": "翠绿",
+        "rose": "玫红",
+        "sky": "天蓝",
+        "violet": "紫罗兰",
+        "zinc": "石墨"
+      }
+    },
+    "height": {
+      "label": "高度（像素）"
+    },
+    "title": {
+      "label": "标题",
+      "placeholder": "校验流水线"
+    },
+    "width": {
+      "label": "宽度（像素）"
+    }
+  },
+  "httpRequest": {
+    "body": {
+      "hint": "以 application/json 发送。",
+      "label": "请求体"
+    },
+    "followRedirects": {
+      "hint": "关闭后只返回重定向状态码，不会跳转。",
+      "label": "跟随重定向"
+    },
+    "method": {
+      "label": "方法"
+    },
+    "url": {
+      "hint": "支持 '{{ }}' 表达式。",
+      "label": "URL",
+      "placeholder": "https://api.example.com/v1/things"
+    }
+  },
+  "join": {
+    "aggregate": {
+      "hint": "把汇聚的分支输出一步归约。",
+      "label": "聚合汇聚结果"
+    },
+    "joinPolicy": {
+      "label": "汇聚策略",
+      "options": {
+        "all": "All — 等待全部父节点",
+        "any": "Any — 任一父节点成功即可",
+        "race": "Race — 先完成的父节点胜出"
+      }
+    },
+    "timeoutMs": {
+      "hint": "0 = 无限等待；否则到时中止汇聚。",
+      "label": "超时（毫秒，可选）"
+    }
+  },
+  "loop": {
+    "bodyExpression": {
+      "hint": "每轮迭代的值。$item 是 forEach 模式下的当前元素。",
+      "label": "Body 表达式",
+      "placeholder": "$item.name"
+    },
+    "inputExpression": {
+      "hint": "求值后得到要迭代的数组。留空时使用第一条上游输出。",
+      "label": "输入表达式",
+      "placeholder": "'{{ $node[''n_search''].out.results }}'"
+    },
+    "maxIterations": {
+      "hint": "硬性上限。达到后强制退出循环。",
+      "label": "最大迭代次数"
+    },
+    "mode": {
+      "label": "模式",
+      "options": {
+        "forEach": "对数组逐项",
+        "times": "重复 N 次",
+        "while": "当条件为真"
+      }
+    },
+    "times": {
+      "label": "次数"
+    },
+    "whileCondition": {
+      "hint": "每轮迭代都会重新求值。为假或达到 maxIterations 时退出。",
+      "label": "While 条件"
+    }
+  },
+  "loopJump": {
+    "breakIntro": "在当前迭代结束后停止最内层循环。无需配置。",
+    "continueIntro": "跳过当前迭代的剩余部分。无需配置。"
+  },
+  "loopV2": {
+    "batchSize": {
+      "hint": "把数组分成串行执行的批次；批内迭代仍按「并行迭代数」并行。留空 = 单一批次。",
+      "label": "批次大小",
+      "placeholder": "10"
+    },
+    "conditionTiming": {
+      "hint": "「先执行后判断」会在首次检查前先跑一轮循环体，即 do-while。两种时机都是条件为真时继续。",
+      "label": "条件判断时机",
+      "post": "先执行后判断（do-while）",
+      "pre": "先判断后执行（while）"
+    },
+    "intro": "容器循环：把节点拖进循环体内即可。每次迭代提供 $item 与 $loop；输出表达式决定收集到 items[] 的内容。",
+    "iterationConcurrency": {
+      "hint": "同时执行的迭代上限（受全局 16 的闸门约束）。",
+      "label": "并行迭代数"
+    },
+    "maxIterations": {
+      "hint": "硬上限，防止循环失控。",
+      "label": "最大迭代数",
+      "placeholder": "1000"
+    },
+    "mode": {
+      "forEach": "遍历数组",
+      "label": "模式",
+      "times": "固定次数",
+      "while": "条件循环"
+    },
+    "onItemError": {
+      "break": "中止并保留部分输出",
+      "fail": "整个循环失败",
+      "hint": "节点自身错误处理之后的兜底策略。被跳过的失败会收集到 errors[]。",
+      "label": "迭代出错时",
+      "skip": "跳过并收集错误"
+    },
+    "output": {
+      "hint": "每轮结束后求值，结果推入 items[]。缺省收集迭代序号。",
+      "label": "输出映射",
+      "placeholder": "'{{ $node[''n_body''].value }}'"
+    },
+    "source": {
+      "hint": "解析为待遍历数组的表达式。",
+      "label": "数据源",
+      "placeholder": "'{{ $node[''n1''].items }}'"
+    },
+    "times": {
+      "hint": "数字或解析为数字的表达式。",
+      "label": "迭代次数"
+    },
+    "whileExpression": {
+      "hint": "每轮开始前重新求值；为真则继续。可配合 $static 使用。",
+      "label": "循环条件",
+      "placeholder": "'{{ $static.keepGoing }}'"
+    }
+  },
+  "manualTrigger": {
+    "inputSchema": {
+      "hint": "声明运行载荷（$trigger.payload），用于把该工作流发布为可调用单元。",
+      "label": "输入结构（可选）"
+    },
+    "intro": "在编辑器中点击「运行」按钮时触发，无需额外配置。"
+  },
+  "mcpInvokeTool": {
+    "argsJson": {
+      "hint": "作为工具调用的 arguments 转发。支持表达式。",
+      "label": "参数（JSON）"
+    },
+    "serverId": {
+      "label": "MCP 服务器"
+    },
+    "toolName": {
+      "empty": "未发现工具——请手动输入工具名。",
+      "label": "工具名",
+      "loading": "正在发现工具…",
+      "placeholder": "search_repos",
+      "probeError": "无法连接服务器——请手动输入工具名。"
+    }
+  },
+  "memoryRecall": {
+    "agentId": {
+      "label": "智能体 ID"
+    },
+    "branch": {
+      "label": "分支限制"
+    },
+    "characterId": {
+      "label": "角色"
+    },
+    "path": {
+      "label": "工作区相对路径"
+    },
+    "projectId": {
+      "label": "项目 ID"
+    },
+    "query": {
+      "label": "查询"
+    },
+    "scope": {
+      "agent": "智能体",
+      "character": "角色",
+      "global": "全局",
+      "label": "作用域",
+      "workspace": "工作区"
+    },
+    "topK": {
+      "label": "Top K"
+    }
+  },
+  "memoryStore": {
+    "agentId": {
+      "label": "智能体 ID"
+    },
+    "branch": {
+      "label": "分支限制"
+    },
+    "characterId": {
+      "label": "角色"
+    },
+    "importance": {
+      "hint": "这条事实有多关键。/remember 使用 7。",
+      "label": "重要度（1–10）"
+    },
+    "piiGate": {
+      "block": "拦截（步骤失败）",
+      "hint": "记忆会持久保存——拦截（含 PII 即失败）或脱敏占位符。不可关闭。",
+      "label": "PII 防护",
+      "redact": "脱敏占位符"
+    },
+    "pathPattern": {
+      "label": "工作区相对路径前缀"
+    },
+    "projectId": {
+      "label": "项目 ID"
+    },
+    "scope": {
+      "agent": "智能体",
+      "character": "角色",
+      "global": "全局",
+      "label": "作用域",
+      "workspace": "工作区"
+    },
+    "text": {
+      "hint": "一条自洽的陈述。会经整合器与既有记忆去重。",
+      "label": "事实"
+    }
+  },
+  "mobileCamera": {
+    "quality": {
+      "label": "JPEG 质量（1–100）"
+    },
+    "width": {
+      "label": "最大宽度（px）"
+    }
+  },
+  "mobileLocation": {
+    "enableHighAccuracy": {
+      "label": "高精度（GPS）"
+    }
+  },
+  "mobileNotify": {
+    "body": {
+      "label": "内容"
+    },
+    "title": {
+      "label": "标题"
+    }
+  },
+  "mobileScanBarcode": {
+    "formats": {
+      "hint": "逗号分隔（如 QR_CODE, EAN_13）。留空 = 仅二维码。",
+      "label": "格式"
+    }
+  },
+  "mobileShare": {
+    "text": {
+      "hint": "文本或 URL 必填其一。",
+      "label": "文本"
+    },
+    "title": {
+      "label": "标题（可选）"
+    },
+    "url": {
+      "label": "URL（可选）"
+    }
+  },
+  "mobileStep": {
+    "deviceId": {
+      "hint": "留空 = 任意具备能力的已配对设备（最近活跃优先）。",
+      "label": "设备 ID（可选）"
+    },
+    "timeoutMs": {
+      "label": "超时（毫秒）"
+    }
+  },
+  "note": {
+    "color": {
+      "ariaGroup": "便签颜色",
+      "label": "颜色",
+      "options": {
+        "blue": "蓝色",
+        "green": "绿色",
+        "pink": "粉色",
+        "violet": "紫色",
+        "yellow": "黄色"
+      }
+    },
+    "text": {
+      "label": "便签文本"
+    }
+  },
+  "ocr": {
+    "dataUrl": {
+      "hint": "图片的内联 data: URL。支持 '{{ }}' 表达式。",
+      "label": "Data URL",
+      "placeholder": "data:image/png;base64,…"
+    },
+    "format": {
+      "hint": "提取文本返回给工作流的形式。",
+      "label": "输出格式",
+      "options": {
+        "blocks": "结构化块",
+        "markdown": "Markdown",
+        "text": "纯文本"
+      }
+    },
+    "imageBase64": {
+      "hint": "base64 编码的原始图片字节。支持 '{{ }}' 表达式。",
+      "label": "图片 base64",
+      "placeholder": "iVBORw0KGgo…"
+    },
+    "languages": {
+      "hint": "逗号分隔的语言提示，传给 OCR 引擎。",
+      "label": "语言",
+      "placeholder": "en, zh"
+    },
+    "pageRange": {
+      "hint": "用于 PDF。示例：1-3,5。留空表示全部页面。",
+      "label": "页码范围",
+      "placeholder": "1-3,5"
+    },
+    "provider": {
+      "hint": "可选的 OCR 提供方 id。留空由自动路由选择。",
+      "label": "提供方",
+      "placeholder": "auto"
+    },
+    "screen": {
+      "hint": "对实时截图执行 OCR，而不是使用提供的图片。",
+      "label": "截取屏幕"
+    },
+    "url": {
+      "hint": "要提取文本的远程文件。支持 '{{ }}' 表达式。",
+      "label": "图片 / PDF URL",
+      "placeholder": "https://example.com/scan.pdf"
+    }
+  },
+  "output": {
+    "onSchemaViolation": {
+      "fail": "让运行失败",
+      "hint": "输出值不符合结构时的处理方式。",
+      "label": "校验失败时",
+      "soft": "带警告透传"
+    },
+    "outputSchema": {
+      "hint": "发布接口的输出契约。",
+      "label": "输出结构"
+    },
+    "value": {
+      "hint": "终端输出的表达式。留空则使用上游值。",
+      "label": "输出值"
+    }
+  },
+  "outputSchema": {
+    "addField": "添加字段",
+    "editFields": "按字段编辑",
+    "editRaw": "按 JSON 编辑",
+    "empty": "暂无字段——添加一个以强制类型化输出。",
+    "fieldDescription": "描述",
+    "fieldDescriptionPlaceholder": "该字段的含义（有助于模型理解）",
+    "fieldName": "字段名",
+    "fieldNamePlaceholder": "例如 verdict",
+    "fieldType": "类型",
+    "hint": "声明回复必须满足的 JSON 结构。留空则为自由文本。",
+    "onSchemaViolation": {
+      "fail": "让步骤失败",
+      "hint": "一次自动修复重试后输出仍不符合结构时的处理方式。",
+      "label": "校验失败时",
+      "soft": "保留未校验输出"
+    },
+    "rawLabel": "JSON Schema",
+    "removeField": "移除字段",
+    "required": "必填",
+    "sectionTitle": "类型化输出"
+  },
+  "petEventTrigger": {
+    "cooldownMs": {
+      "hint": "同一工作流两次触发之间的最短间隔，避免工作流自触发循环。",
+      "label": "冷却时间（毫秒）"
+    },
+    "intro": "当桌面宠物进入受支持的生命周期事件时触发。",
+    "kinds": {
+      "hint": "全部不选时会监听所有受支持的宠物生命周期事件。",
+      "label": "宠物事件",
+      "options": {
+        "achievementUnlocked": "解锁成就",
+        "evolved": "进化",
+        "levelUp": "升级",
+        "unwell": "不适"
+      }
+    }
+  },
+  "petInteract": {
+    "itemId": {
+      "hint": "可选的商店物品 ID，由宠物控制器消耗。",
+      "label": "物品 ID",
+      "placeholder": "pet_item_..."
+    },
+    "kind": {
+      "label": "互动",
+      "options": {
+        "cleaned": "清洁",
+        "fed": "喂食",
+        "petted": "抚摸",
+        "played": "玩耍",
+        "slept": "休息",
+        "talked": "聊天",
+        "treated": "治疗"
+      }
+    }
+  },
+  "pickers": {
+    "adapterInstance": "选择适配器实例",
+    "character": "选择角色",
+    "mcpServer": "选择 MCP 服务器",
+    "noResults": "无匹配项",
+    "none": "无",
+    "plugin": "选择插件",
+    "skill": "选择技能",
+    "skillNew": "新建",
+    "skillNoneItem": "— 新建 —",
+    "subworkflow": "选择工作流",
+    "team": "选择团队",
+    "twin": "选择数字分身",
+    "useExpression": "使用表达式",
+    "usePicker": "从列表选择"
+  },
+  "planCommon": {
+    "planId": {
+      "hint": "目标 AgentPlan ID。",
+      "label": "计划 ID",
+      "placeholder": "plan_"
+    }
+  },
+  "planCreate": {
+    "characterId": {
+      "label": "角色（可选）"
+    },
+    "configJson": {
+      "hint": "局部 PlanConfig 覆盖。",
+      "label": "配置 JSON"
+    },
+    "description": {
+      "hint": "可选的计划上下文。",
+      "label": "描述"
+    },
+    "executionMode": {
+      "label": "执行模式",
+      "options": {
+        "auto": "自动",
+        "in_session": "会话内",
+        "orchestrated": "编排执行"
+      }
+    },
+    "metadataJson": {
+      "hint": "结构化计划元数据。",
+      "label": "元数据 JSON"
+    },
+    "sessionId": {
+      "hint": "计划所属聊天会话。",
+      "label": "会话 ID",
+      "placeholder": "ses_"
+    },
+    "source": {
+      "label": "来源",
+      "options": {
+        "agent_tool": "Agent 工具",
+        "exit_plan_mode": "退出计划模式",
+        "goal_projection": "Goal 投影",
+        "manual": "手动",
+        "planner_llm": "规划 LLM",
+        "team_projection": "团队投影"
+      }
+    },
+    "stepsJson": {
+      "hint": "CreatePlanStepInput 行数组。",
+      "label": "步骤 JSON"
+    },
+    "title": {
+      "hint": "在追踪器中显示的计划标题。",
+      "label": "标题",
+      "placeholder": "Ship feature"
+    }
+  },
+  "planEvents": {
+    "limit": {
+      "hint": "最大事件数。",
+      "label": "数量限制"
+    }
+  },
+  "planList": {
+    "limit": {
+      "hint": "最大行数。",
+      "label": "数量限制"
+    },
+    "mode": {
+      "label": "读取模式",
+      "options": {
+        "all": "所有计划",
+        "executingForSession": "会话执行中计划",
+        "openForSession": "会话打开计划",
+        "session": "按会话读取"
+      }
+    },
+    "projectId": {
+      "hint": "覆盖当前工作区范围。",
+      "label": "项目 ID（可选）"
+    },
+    "sessionId": {
+      "hint": "会话范围模式必填。",
+      "label": "会话 ID"
+    },
+    "status": {
+      "label": "状态筛选",
+      "options": {
+        "any": "任意",
+        "approved": "已批准",
+        "awaiting_approval": "等待批准",
+        "cancelled": "已取消",
+        "completed": "已完成",
+        "draft": "草稿",
+        "executing": "执行中",
+        "failed": "失败",
+        "paused": "已暂停"
+      }
+    }
+  },
+  "planRefine": {
+    "customInstructions": {
+      "hint": "传给规划器的额外指令。",
+      "label": "自定义指令"
+    },
+    "failedStepId": {
+      "hint": "修复流程中的可选失败步骤 ID。",
+      "label": "失败步骤 ID"
+    },
+    "refinementType": {
+      "label": "优化类型",
+      "options": {
+        "expand": "扩展",
+        "optimize": "优化",
+        "reorder": "重排",
+        "repair": "修复",
+        "simplify": "简化"
+      }
+    },
+    "trigger": {
+      "label": "触发原因",
+      "options": {
+        "judge_deviation": "评审偏差",
+        "manual": "手动",
+        "step_failure": "步骤失败"
+      }
+    }
+  },
+  "planReject": {
+    "feedback": {
+      "hint": "记录到拒绝事件中的原因。",
+      "label": "反馈"
+    }
+  },
+  "planSetStepStatus": {
+    "attempts": {
+      "hint": "重试计数。",
+      "label": "尝试次数"
+    },
+    "error": {
+      "hint": "失败摘要。",
+      "label": "错误"
+    },
+    "outputJson": {
+      "hint": "结构化步骤输出。",
+      "label": "输出 JSON"
+    },
+    "result": {
+      "hint": "简短结果摘要。",
+      "label": "结果"
+    },
+    "status": {
+      "label": "状态",
+      "options": {
+        "blocked": "已阻塞",
+        "completed": "已完成",
+        "failed": "失败",
+        "in_progress": "进行中",
+        "pending": "待处理",
+        "ready": "就绪",
+        "skipped": "已跳过"
+      }
+    },
+    "stepId": {
+      "hint": "目标计划步骤 ID。",
+      "label": "步骤 ID",
+      "placeholder": "step_"
+    }
+  },
+  "planUpdateDraft": {
+    "configJson": {
+      "hint": "局部 PlanConfig 补丁。",
+      "label": "配置 JSON"
+    },
+    "description": {
+      "hint": "替换描述。",
+      "label": "描述"
+    },
+    "executionMode": {
+      "label": "执行模式",
+      "options": {
+        "auto": "自动",
+        "in_session": "会话内",
+        "orchestrated": "编排执行",
+        "unchanged": "不变"
+      }
+    },
+    "metadataJson": {
+      "hint": "替换元数据对象。",
+      "label": "元数据 JSON"
+    },
+    "stepsJson": {
+      "hint": "用于草稿替换的完整 PlanStep 数组。",
+      "label": "步骤 JSON"
+    },
+    "title": {
+      "hint": "替换标题。",
+      "label": "标题"
+    }
+  },
+  "pluginInvoke": {
+    "argsJson": {
+      "hint": "转发给插件的任务处理器。",
+      "label": "参数（JSON）",
+      "toolHint": "期望字段：{fields}"
+    },
+    "mode": {
+      "label": "模式",
+      "options": {
+        "task": "任务处理器（旧版）",
+        "tool": "插件工具"
+      }
+    },
+    "pluginId": {
+      "label": "插件",
+      "toolPlaceholder": "选择已启用的插件"
+    },
+    "taskId": {
+      "label": "任务 ID",
+      "placeholder": "generate-report"
+    },
+    "toolName": {
+      "empty": "请先选择插件",
+      "label": "工具",
+      "placeholder": "选择工具"
+    }
+  },
+  "schedulerEventTrigger": {
+    "eventSource": {
+      "hint": "可选调度器事件来源。",
+      "label": "事件来源"
+    },
+    "eventType": {
+      "hint": "要分发的调度器事件类型。",
+      "label": "事件类型"
+    },
+    "payloadJson": {
+      "hint": "可选事件 payload 对象。",
+      "label": "Payload JSON"
+    }
+  },
+  "schedulerExecutionGet": {
+    "executionId": {
+      "hint": "目标调度器执行记录 ID。",
+      "label": "执行记录 ID",
+      "placeholder": "exec_"
+    }
+  },
+  "schedulerExecutionsRecent": {
+    "limit": {
+      "hint": "最大近期执行记录数。",
+      "label": "数量限制"
+    }
+  },
+  "schedulerTaskBackfill": {
+    "end": {
+      "hint": "回填窗口结束的 ISO 时间。",
+      "label": "结束时间"
+    },
+    "start": {
+      "hint": "回填窗口开始的 ISO 时间。",
+      "label": "开始时间"
+    }
+  },
+  "schedulerTaskCommon": {
+    "taskId": {
+      "hint": "目标计划任务 ID。",
+      "label": "任务 ID",
+      "placeholder": "task_"
+    }
+  },
+  "schedulerTaskCreate": {
+    "configJson": {
+      "hint": "局部 TaskExecutionConfig 覆盖。",
+      "label": "配置 JSON"
+    },
+    "cronExpression": {
+      "hint": "标准五段 cron 表达式。",
+      "label": "Cron"
+    },
+    "dependsOnRaw": {
+      "hint": "逗号分隔，必须先完成的任务 ID。",
+      "label": "依赖任务"
+    },
+    "description": {
+      "hint": "可选任务描述。",
+      "label": "描述"
+    },
+    "endAt": {
+      "hint": "可选 ISO 日期，超过后任务过期。",
+      "label": "结束时间"
+    },
+    "eventType": {
+      "hint": "事件触发任务使用的调度器事件类型。",
+      "label": "事件类型"
+    },
+    "intervalMs": {
+      "hint": "间隔触发的毫秒数。",
+      "label": "间隔（毫秒）"
+    },
+    "jitterMs": {
+      "hint": "每次触发可追加的最大随机延迟。",
+      "label": "抖动（毫秒）"
+    },
+    "name": {
+      "hint": "计划任务名称。",
+      "label": "名称",
+      "placeholder": "Nightly run"
+    },
+    "notificationJson": {
+      "hint": "局部 TaskNotificationConfig 覆盖。",
+      "label": "通知 JSON"
+    },
+    "onFailureTaskIdsRaw": {
+      "hint": "逗号分隔，失败后触发的任务 ID。",
+      "label": "失败后"
+    },
+    "onSuccessTaskIdsRaw": {
+      "hint": "逗号分隔，成功后触发的任务 ID。",
+      "label": "成功后"
+    },
+    "payloadJson": {
+      "hint": "传给任务执行器的 ScheduledTaskPayload 对象。",
+      "label": "Payload JSON"
+    },
+    "runAt": {
+      "hint": "一次性触发的 ISO 日期。",
+      "label": "运行时间"
+    },
+    "tagsRaw": {
+      "hint": "逗号分隔的任务标签。",
+      "label": "标签"
+    },
+    "timezone": {
+      "hint": "cron 表达式使用的时区。",
+      "label": "时区"
+    },
+    "triggerType": {
+      "label": "触发器",
+      "options": {
+        "cron": "Cron",
+        "event": "事件",
+        "interval": "间隔",
+        "once": "一次"
+      }
+    },
+    "type": {
+      "label": "任务类型",
+      "options": {
+        "agent": "Agent",
+        "agent-team": "Agent 团队",
+        "ai-generation": "AI 生成",
+        "backup": "备份",
+        "chat": "聊天",
+        "connection:outbound:send": "连接器外发",
+        "connection:scheduled:digest": "连接器摘要",
+        "custom": "自定义",
+        "external-agent": "外部 Agent",
+        "goal": "Goal",
+        "im-push": "IM 推送",
+        "plan": "Plan",
+        "plugin": "插件",
+        "script": "脚本",
+        "skill": "技能",
+        "sync": "同步",
+        "test": "测试",
+        "twin": "数字孪生",
+        "wiki-rebuild": "Wiki 重建",
+        "workflow": "工作流"
+      }
+    }
+  },
+  "schedulerTaskExecutions": {
+    "limit": {
+      "hint": "最大执行记录数。",
+      "label": "数量限制"
+    }
+  },
+  "schedulerTaskExport": {
+    "taskIdsRaw": {
+      "hint": "逗号分隔的任务 ID；留空则导出全部任务。",
+      "label": "任务 ID"
+    }
+  },
+  "schedulerTaskImport": {
+    "dataJson": {
+      "hint": "调度器任务导出包 JSON。",
+      "label": "导入 JSON"
+    },
+    "mode": {
+      "label": "模式",
+      "options": {
+        "merge": "合并",
+        "replace": "替换"
+      }
+    }
+  },
+  "schedulerTaskList": {
+    "limit": {
+      "hint": "最大任务数。",
+      "label": "数量限制"
+    },
+    "search": {
+      "hint": "匹配任务名称或描述。",
+      "label": "搜索"
+    },
+    "statusesRaw": {
+      "hint": "逗号分隔的状态：active、paused、disabled、expired。",
+      "label": "状态"
+    },
+    "tagsRaw": {
+      "hint": "逗号分隔的标签。",
+      "label": "标签"
+    },
+    "typesRaw": {
+      "hint": "逗号分隔的任务类型。",
+      "label": "类型"
+    }
+  },
+  "schedulerTaskUpdate": {
+    "configJson": {
+      "hint": "局部 TaskExecutionConfig 补丁。",
+      "label": "配置 JSON"
+    },
+    "cronExpression": {
+      "hint": "替换 cron 表达式。",
+      "label": "Cron"
+    },
+    "dependsOnRaw": {
+      "hint": "逗号分隔的依赖任务 ID。",
+      "label": "依赖任务"
+    },
+    "description": {
+      "hint": "替换描述。",
+      "label": "描述"
+    },
+    "endAt": {
+      "hint": "可选 ISO 日期，超过后任务过期。",
+      "label": "结束时间"
+    },
+    "eventType": {
+      "hint": "调度器事件类型。",
+      "label": "事件类型"
+    },
+    "intervalMs": {
+      "hint": "替换间隔毫秒数。",
+      "label": "间隔（毫秒）"
+    },
+    "jitterMs": {
+      "hint": "替换最大随机延迟。",
+      "label": "抖动（毫秒）"
+    },
+    "name": {
+      "hint": "替换任务名称。",
+      "label": "名称"
+    },
+    "notificationJson": {
+      "hint": "局部通知补丁。",
+      "label": "通知 JSON"
+    },
+    "onFailureTaskIdsRaw": {
+      "hint": "逗号分隔，失败后触发的任务 ID。",
+      "label": "失败后"
+    },
+    "onSuccessTaskIdsRaw": {
+      "hint": "逗号分隔，成功后触发的任务 ID。",
+      "label": "成功后"
+    },
+    "payloadJson": {
+      "hint": "由任务类型归一化合并的 payload 补丁。",
+      "label": "Payload JSON"
+    },
+    "runAt": {
+      "hint": "替换 ISO 运行日期。",
+      "label": "运行时间"
+    },
+    "status": {
+      "label": "状态",
+      "options": {
+        "active": "激活",
+        "disabled": "禁用",
+        "expired": "已过期",
+        "paused": "已暂停",
+        "unchanged": "不变"
+      }
+    },
+    "tagsRaw": {
+      "hint": "逗号分隔的替换标签。",
+      "label": "标签"
+    },
+    "timezone": {
+      "hint": "替换 cron 时区。",
+      "label": "时区"
+    },
+    "triggerType": {
+      "label": "触发器",
+      "options": {
+        "cron": "Cron",
+        "event": "事件",
+        "interval": "间隔",
+        "once": "一次",
+        "unchanged": "不变"
+      }
+    }
+  },
+  "schedulerUpcoming": {
+    "limit": {
+      "hint": "最大 upcoming 任务触发数。",
+      "label": "数量限制"
+    }
+  },
+  "setVariable": {
+    "value": {
+      "hint": "表达式。结果会写入运行的静态数据。",
+      "label": "值"
+    },
+    "variable": {
+      "label": "变量名",
+      "placeholder": "counter"
+    }
+  },
+  "skillInvoke": {
+    "skillIds": {
+      "hint": "所选技能会追加到下游 AI 节点的提示词中。",
+      "label": "技能 ID（逗号分隔）",
+      "placeholder": "skill_writing, skill_research"
+    }
+  },
+  "skillUpsert": {
+    "content": {
+      "hint": "技能正文。支持表达式；被调用时渲染进 AI 提示词。",
+      "label": "Markdown 正文"
+    },
+    "description": {
+      "label": "描述"
+    },
+    "name": {
+      "label": "名称",
+      "placeholder": "研究框架"
+    },
+    "skillId": {
+      "hint": "已设置则更新该技能；否则新建。",
+      "label": "技能 ID（可选）"
+    },
+    "tagsRaw": {
+      "hint": "用逗号分隔",
+      "label": "标签",
+      "placeholder": "research, planning"
+    }
+  },
+  "split": {
+    "branchLabels": {
+      "addBranch": "添加分支",
+      "branchPlaceholder": "分支 {n}",
+      "hint": "每个标签对应一条从该 Split 出发的边。",
+      "label": "分支标签",
+      "removeBranch": "移除分支"
+    }
+  },
+  "subworkflow": {
+    "inputJson": {
+      "hint": "作为子工作流的触发负载转发。",
+      "label": "输入（JSON）"
+    },
+    "typedInput": {
+      "hint": "根据已发布目标声明的输入 schema 生成的字段。运行时会按该 schema 校验。",
+      "label": "类型化输入"
+    },
+    "workflowId": {
+      "label": "子工作流"
+    }
+  },
+  "switch": {
+    "cases": {
+      "addCase": "添加 case",
+      "hint": "先匹配先生效，严格等值。",
+      "label": "Cases",
+      "labelPlaceholder": "标签",
+      "removeCase": "移除 case",
+      "valuePlaceholder": "值"
+    },
+    "defaultLabel": {
+      "label": "默认标签"
+    },
+    "subject": {
+      "hint": "求值后与各 case 进行匹配的表达式。",
+      "label": "Subject",
+      "placeholder": "'{{ $node[''n_classify''].out.label }}'"
+    }
+  },
+  "switchV2": {
+    "cases": {
+      "addCase": "添加分支",
+      "caseLabelPlaceholder": "分支标签",
+      "caseTitle": "分支 {index}",
+      "hint": "自上而下求值——第一个命中的分支生效；都不命中则走默认端口。",
+      "label": "分支条件",
+      "removeCase": "移除分支"
+    }
+  },
+  "systemTerminal": {
+    "command": {
+      "hint": "将输入到当前活动 dock 标签页（或新建一个），shell 自行分词。",
+      "label": "命令",
+      "placeholder": "pnpm test --filter @cognia/twin"
+    },
+    "cwd": {
+      "hint": "可选；默认沿用 dock 标签的 cwd。",
+      "label": "工作目录",
+      "placeholder": "/repo"
+    },
+    "onFailure": {
+      "hint": "当命令以非零码退出时如何响应。",
+      "label": "退出码非零时的处理",
+      "options": {
+        "branch": "路由到 failure 出口",
+        "throw": "让工作流步骤失败"
+      }
+    },
+    "shell": {
+      "hint": "留空时沿用 settings.terminal.defaultShell。",
+      "label": "Shell（覆盖）",
+      "placeholder": "/bin/bash"
+    },
+    "tabId": {
+      "hint": "填入后写入到该标签；留空则新建标签。",
+      "label": "复用已有标签 ID",
+      "placeholder": "留空将新建标签"
+    },
+    "timeoutSec": {
+      "hint": "范围 5–600；默认沿用用户设置 runInDockTimeoutSec。",
+      "label": "超时（秒）"
+    }
+  },
+  "teamCompose": {
+    "autoStart": {
+      "hint": "组建完成后立即运行团队生命周期并等待终态。",
+      "label": "立即启动"
+    },
+    "maxRoster": {
+      "label": "最大成员数（含队长）"
+    },
+    "name": {
+      "label": "团队名称（可选）"
+    },
+    "objective": {
+      "hint": "一句话目标。发送模型前会先做 PII 脱敏；若仍残留敏感信息则组建失败。",
+      "label": "目标"
+    },
+    "preferredPattern": {
+      "label": "执行模式",
+      "options": {
+        "auto": "自动（由路由决定）",
+        "background_handoff": "后台交接",
+        "external_handoff": "外部交接",
+        "manager_worker": "管理者 / 执行者",
+        "parallel_specialists": "并行专家",
+        "single_agent_recommended": "单智能体",
+        "ultracode_orchestration": "Ultracode 编排"
+      }
+    },
+    "ultracode": {
+      "label": "Ultracode"
+    }
+  },
+  "teamCreate": {
+    "description": {
+      "label": "描述"
+    },
+    "members": {
+      "hint": "['{ \"characterId\": \"...\", \"role\": \"researcher\" }']",
+      "label": "成员（JSON 数组）"
+    },
+    "name": {
+      "label": "团队名称"
+    },
+    "orchestration": {
+      "label": "编排方式",
+      "options": {
+        "mention_round_robin": "提及轮询",
+        "round_robin": "轮询",
+        "supervisor": "Supervisor"
+      }
+    },
+    "supervisor": {
+      "label": "Supervisor 角色"
+    }
+  },
+  "teamDelegate": {
+    "awaitCompletion": {
+      "hint": "等待委派结束并返回结果；关闭则立即返回已启动的记录。",
+      "label": "等待完成"
+    },
+    "force": {
+      "hint": "即使处于团队勿扰时段也立即启动。",
+      "label": "无视勿扰时段"
+    },
+    "prompt": {
+      "label": "提示词"
+    },
+    "reason": {
+      "label": "原因（审计日志）"
+    },
+    "systemPrompt": {
+      "label": "系统提示词（可选）"
+    },
+    "target": {
+      "label": "委派给",
+      "options": {
+        "background": "后台智能体",
+        "external": "外部智能体",
+        "team": "另一个团队",
+        "twin": "数字孪生"
+      }
+    },
+    "targetAgentId": {
+      "hint": "外部运行时 ID，例如 claude-code 或 codex。",
+      "label": "外部智能体 ID"
+    },
+    "targetTeamId": {
+      "label": "目标团队"
+    },
+    "teamId": {
+      "label": "来源团队"
+    },
+    "twinId": {
+      "label": "数字孪生"
+    }
+  },
+  "teamMessage": {
+    "content": {
+      "label": "消息内容"
+    },
+    "recipientId": {
+      "label": "接收成员 ID（可选）"
+    },
+    "senderId": {
+      "hint": "默认使用队长身份。",
+      "label": "发送成员 ID（可选）"
+    },
+    "taskId": {
+      "label": "关联任务 ID（可选）"
+    },
+    "teamId": {
+      "label": "团队"
+    }
+  },
+  "teamReconcile": {
+    "inherit": "继承团队配置",
+    "intro": "整合本次运行至今产生的各派发分支。仅在工作区隔离的团队运行中生效。",
+    "mode": {
+      "label": "模式",
+      "options": {
+        "manual": "手动",
+        "merge-all": "全部合并",
+        "pipeline": "流水线",
+        "select": "择优选取"
+      }
+    },
+    "retain": {
+      "label": "分支保留",
+      "options": {
+        "all": "全部保留",
+        "keep-winner": "仅保留胜者",
+        "prune-losers": "清理落选分支"
+      }
+    },
+    "selectStrategy": {
+      "label": "选取策略",
+      "options": {
+        "first-success": "首个成功",
+        "judge": "AI 评审",
+        "manual": "手动"
+      }
+    }
+  },
+  "teamRun": {
+    "goal": {
+      "hint": "希望团队完成什么。会转交到 Lead 的规划阶段。",
+      "label": "目标 / 简介"
+    },
+    "teamId": {
+      "label": "团队 ID",
+      "placeholder": "team_..."
+    }
+  },
+  "teamStatus": {
+    "includeDelegations": {
+      "label": "包含委派记录"
+    },
+    "includeTasks": {
+      "label": "包含任务"
+    },
+    "includeTeammates": {
+      "label": "包含成员"
+    },
+    "teamId": {
+      "label": "团队"
+    }
+  },
+  "teamTaskDispatch": {
+    "description": {
+      "label": "描述",
+      "placeholder": "分配给成员的详细说明。"
+    },
+    "expectedOutput": {
+      "hint": "成功结果的样子——用于校验成员的输出。",
+      "label": "期望产出（可选）"
+    },
+    "taskId": {
+      "hint": "派发任务的稳定标识。",
+      "label": "任务 id",
+      "placeholder": "task_..."
+    },
+    "teamId": {
+      "label": "团队"
+    },
+    "title": {
+      "label": "标题",
+      "placeholder": "总结最新报告"
+    }
+  },
+  "teamTrigger": {
+    "intro": "当智能体团队运行结束时触发。留空则对所有团队和所有终态生效。",
+    "status": {
+      "hint": "仅在运行以该状态结束时触发。",
+      "label": "状态",
+      "options": {
+        "any": "任意终态",
+        "cancelled": "已取消",
+        "completed": "已完成",
+        "failed": "已失败"
+      }
+    },
+    "teamId": {
+      "hint": "留空则对所有团队生效。",
+      "label": "团队"
+    }
+  },
+  "teamUpdate": {
+    "patchJson": {
+      "hint": "例如：'{ \"orchestration\": \"supervisor\" }'",
+      "label": "Patch（JSON）"
+    },
+    "teamId": {
+      "label": "团队"
+    }
+  },
+  "template": {
+    "template": {
+      "hint": "类 Mustache 的 '{{ }}' 表达式，会对上游 / 触发 / 静态数据求值。",
+      "label": "模板"
+    }
+  },
+  "terminalCommandTrigger": {
+    "commandContains": {
+      "hint": "仅当命令行包含该子串时触发。疑似含密钥的命令会被脱敏，不参与匹配。",
+      "label": "命令包含（可选）",
+      "placeholder": "pnpm test"
+    },
+    "projectId": {
+      "hint": "仅对绑定到该项目的标签页触发。",
+      "label": "项目 id（可选）",
+      "placeholder": "proj-…"
+    },
+    "sessionId": {
+      "hint": "仅对该终端标签页触发。留空匹配任意用户打开的标签页。",
+      "label": "标签页 id（可选）",
+      "placeholder": "term-…"
+    },
+    "status": {
+      "hint": "任意退出、仅成功（退出码 0）或仅失败时触发。",
+      "label": "退出状态",
+      "options": {
+        "any": "任意退出",
+        "failure": "仅失败",
+        "success": "仅成功（退出码 0）"
+      }
+    }
+  },
+  "terminalReadRecent": {
+    "lineLimit": {
+      "hint": "返回最近 1–50 条命令记录（默认 10）。",
+      "label": "最大记录数"
+    },
+    "tabId": {
+      "hint": "要读取的终端 dock 标签页。可用表达式引用先前打开的会话。",
+      "label": "标签页 id",
+      "placeholder": "'{{ $node[\"open\"].sessionId }}'"
+    }
+  },
+  "terminalScript": {
+    "cwd": {
+      "hint": "可选。默认为 shell 解析的工作目录。",
+      "label": "工作目录",
+      "placeholder": "D:\\repo"
+    },
+    "interpreter": {
+      "hint": "显式指定解释器，跳过扩展名检测。",
+      "label": "解释器（可选）",
+      "placeholder": "python3"
+    },
+    "onFailure": {
+      "hint": "抛出将使运行失败；分支则路由到失败端口。",
+      "label": "失败时",
+      "options": {
+        "branch": "路由到失败分支",
+        "throw": "使运行失败"
+      }
+    },
+    "scriptPath": {
+      "hint": "脚本文件路径。解释器按扩展名检测（.sh、.ps1、.py、.js 等）。",
+      "label": "脚本路径",
+      "placeholder": "scripts/deploy.ps1"
+    },
+    "timeoutSec": {
+      "hint": "5–600。等待脚本结束的最长时间。",
+      "label": "超时（秒）"
+    }
+  },
+  "terminalSessionClose": {
+    "sessionId": {
+      "hint": "要关闭的会话。运行结束时会自动关闭遗留会话。",
+      "label": "会话 ID",
+      "placeholder": "'{{ $node[\"open\"].sessionId }}'"
+    }
+  },
+  "terminalSessionOpen": {
+    "cwd": {
+      "hint": "可选；默认为用户主目录。",
+      "label": "工作目录",
+      "placeholder": "/repo"
+    },
+    "shell": {
+      "hint": "留空时沿用默认 shell。",
+      "label": "Shell（覆盖）",
+      "placeholder": "/bin/bash"
+    },
+    "unattended": {
+      "hint": "打开私有后台 shell 而非可见 dock 标签。在其中运行的每条命令都会经过安全分类器筛查。",
+      "label": "无人值守（后台执行）"
+    }
+  },
+  "terminalSessionRun": {
+    "command": {
+      "hint": "单行命令，由会话的 shell 自行分词。",
+      "label": "命令",
+      "placeholder": "pnpm test"
+    },
+    "onAskVerdict": {
+      "hint": "仅无人值守会话有效 — 安全分类器无法确定时的处理方式。",
+      "label": "需要确认时",
+      "options": {
+        "consent": "在终端面板中询问",
+        "fail": "使该步骤失败",
+        "run": "仍然执行"
+      }
+    },
+    "onFailure": {
+      "hint": "当命令以非零码退出时如何响应。",
+      "label": "退出码非零时的处理",
+      "options": {
+        "branch": "路由到 failure 出口",
+        "throw": "让工作流步骤失败"
+      }
+    },
+    "sessionId": {
+      "hint": "取自「打开终端会话」节点的输出，可用表达式。",
+      "label": "会话 ID",
+      "placeholder": "'{{ $node[\"open\"].sessionId }}'"
+    },
+    "timeoutSec": {
+      "hint": "范围 5–600；等待命令完成的最长时间。",
+      "label": "超时（秒）"
+    }
+  },
+  "terminalUnattended": {
+    "onAskVerdict": {
+      "hint": "当安全分类器无法确定某条命令时的处理方式。",
+      "label": "需要确认时",
+      "options": {
+        "consent": "在终端面板中询问",
+        "fail": "使该步骤失败",
+        "run": "仍然执行"
+      }
+    },
+    "unattended": {
+      "hint": "不占用可见终端标签、无需逐条确认。需先开启无人值守执行设置；每条命令都会经过安全分类器筛查。",
+      "label": "无人值守（后台执行）"
+    }
+  },
+  "terminalWaitForExit": {
+    "onFailure": {
+      "hint": "抛出将使运行失败；分支则路由到失败端口。",
+      "label": "失败时",
+      "options": {
+        "branch": "路由到失败分支",
+        "throw": "使运行失败"
+      }
+    },
+    "tabId": {
+      "hint": "要等待下一条命令结束的终端 dock 标签页。",
+      "label": "标签页 id",
+      "placeholder": "'{{ $node[\"open\"].sessionId }}'"
+    },
+    "timeoutSec": {
+      "hint": "5–600。窗口期内没有命令结束则失败。",
+      "label": "超时（秒）"
+    }
+  },
+  "transform": {
+    "expression": {
+      "hint": "按操作类型不同。例如 map: 'x.field'；filter: 'x.value > 0'。",
+      "label": "表达式"
+    },
+    "operation": {
+      "label": "操作",
+      "options": {
+        "filter": "Filter（筛选）",
+        "flatten": "Flatten（扁平化）",
+        "map": "Map（映射）",
+        "reduce": "Reduce（归约）",
+        "sort": "Sort（排序）"
+      },
+      "reduceHint": "此处的 reduce 仅对条目表达式做数值求和。需要通用折叠（collect / group-by / dedupe / merge / 自定义 reducer）请使用 data.aggregate 节点。"
+    }
+  },
+  "twinIngest": {
+    "content": {
+      "hint": "支持 '{{ }}' 表达式。",
+      "label": "内容"
+    },
+    "format": {
+      "label": "格式",
+      "options": {
+        "chat": "聊天导出",
+        "code": "代码",
+        "markdown": "Markdown",
+        "text": "纯文本"
+      }
+    },
+    "sourceMode": {
+      "label": "来源方式",
+      "options": {
+        "fetch": "拉取 URL",
+        "paste": "粘贴内容"
+      }
+    },
+    "title": {
+      "label": "标题（可选）"
+    },
+    "twinId": {
+      "label": "数字分身 ID",
+      "placeholder": "twin_alex"
+    },
+    "url": {
+      "hint": "支持 '{{ }}' 表达式。",
+      "label": "URL",
+      "placeholder": "https://..."
+    }
+  },
+  "twinRag": {
+    "query": {
+      "hint": "用于向量检索的文本，支持表达式。",
+      "label": "查询",
+      "placeholder": "'{{ $trigger.payload.text }}'"
+    },
+    "topK": {
+      "hint": "返回的片段数量，默认 6。",
+      "label": "Top K"
+    },
+    "twinId": {
+      "label": "数字分身 ID",
+      "placeholder": "twin_alex"
+    }
+  },
+  "wait": {
+    "durationMs": {
+      "hint": "编排器会把运行暂停这么长后继续。",
+      "label": "时长",
+      "units": {
+        "hour": "小时",
+        "min": "分钟",
+        "ms": "毫秒",
+        "sec": "秒"
+      }
+    },
+    "eventKey": {
+      "hint": "外部来源触发的唤醒键（例如 wf_emit_workflow_event 工具）。留空表示仅限本次运行与本节点的私有键。",
+      "label": "事件键（可选）",
+      "placeholder": "deploy-approved"
+    },
+    "mode": {
+      "label": "等待方式",
+      "options": {
+        "duration": "固定时长",
+        "event": "等待事件（Phase 4+）"
+      }
+    },
+    "timeoutMs": {
+      "hint": "等待超过该时长后放弃。0 表示一直等到运行被取消或超时。",
+      "label": "等待超时"
+    }
+  },
+  "webClone": {
+    "allowPrivateHosts": {
+      "hint": "放行私有 / 回环 / 链路本地地址（SSRF 放行）。除非信任目标，否则请保持关闭。",
+      "label": "允许私有地址"
+    },
+    "concurrency": {
+      "hint": "并发下载数（1–32）。",
+      "label": "并发数"
+    },
+    "extractComponents": {
+      "hint": "同时把页面分析成组件结构（模板 / 样式 / 逻辑）。",
+      "label": "提取组件"
+    },
+    "framework": {
+      "hint": "从提取的组件结构生成该框架的组件代码。会隐含开启组件提取。",
+      "label": "生成框架代码",
+      "options": {
+        "angular": "Angular",
+        "jquery": "jQuery",
+        "none": "无",
+        "react": "React",
+        "svelte": "Svelte",
+        "vue": "Vue"
+      }
+    },
+    "frameworkHint": {
+      "hint": "提示提取器页面原本的框架，以改善组件边界识别。",
+      "label": "框架提示",
+      "options": {
+        "none": "自动检测",
+        "react": "React",
+        "svelte": "Svelte",
+        "vue": "Vue"
+      }
+    },
+    "maxAssets": {
+      "hint": "最多下载的资源数（1–5000）。",
+      "label": "最大资源数"
+    },
+    "maxFileSize": {
+      "hint": "单个文件的硬字节上限。留空使用引擎默认值；填 0 关闭限制。",
+      "label": "单文件大小上限（字节）"
+    },
+    "mode": {
+      "hint": "'目录 bundle' 写入含分离资源的目录；'单文件' 把所有内容内联进一个自包含 HTML 文件。",
+      "label": "模式",
+      "options": {
+        "bundle": "目录 bundle",
+        "single": "单文件"
+      }
+    },
+    "output": {
+      "hint": "快照写入位置。相对路径基于已打开的工作区解析；'single' 模式写 .html 文件，'bundle' 模式写目录。",
+      "label": "输出路径",
+      "placeholder": "./snapshots/site"
+    },
+    "pretty": {
+      "hint": "格式化输出的 HTML 以便阅读。",
+      "label": "美化 HTML"
+    },
+    "timeout": {
+      "hint": "单个资源的超时时间，毫秒（1000–120000）。",
+      "label": "超时（毫秒）"
+    },
+    "url": {
+      "hint": "要快照的页面。支持 '{{ }}' 表达式。",
+      "label": "URL",
+      "placeholder": "https://example.com/"
+    }
+  },
+  "webhookBanner": {
+    "desktopOnly": "仅桌面端。Webhook 接收器运行在 Tauri sidecar 中。",
+    "loading": "正在加载 Webhook URL…",
+    "saveFirst": "保存工作流以注册 Webhook 并显示其 URL。",
+    "urlLabel": "URL："
+  },
+  "webhookRespond": {
+    "body": {
+      "hint": "支持 '{{ }}' 表达式。",
+      "label": "正文"
+    },
+    "desktopOnly": "仅桌面端。响应通过 Tauri Webhook 路由发送。",
+    "headersJson": {
+      "hint": "例如：'{ \"Content-Type\": \"application/json\" }'",
+      "label": "Header（JSON）",
+      "placeholder": "'{ \"Content-Type\": \"application/json\" }'"
+    },
+    "status": {
+      "label": "状态码"
+    }
+  },
+  "webhookTrigger": {
+    "hmacSecret": {
+      "hint": "校验 X-Signature-256 头部。留空跳过校验。",
+      "label": "HMAC 密钥（可选）"
+    },
+    "method": {
+      "label": "方法",
+      "options": {
+        "any": "任意"
+      }
+    },
+    "path": {
+      "hint": "挂载在 /webhook/'<path>'",
+      "label": "路径",
+      "placeholder": "incoming-events"
+    },
+    "responseStatus": {
+      "label": "响应状态码"
+    },
+    "responseTemplate": {
+      "hint": "可选。默认为工作流运行 ID。",
+      "label": "响应正文模板",
+      "placeholder": "'{ \"ok\": true, \"runId\": \"{{ $run.id }}\" }'"
+    }
+  },
+  "workflowCompletedTrigger": {
+    "status": {
+      "hint": "仅在指定结果时触发。“任意”表示成功与失败都会触发。",
+      "label": "结果过滤",
+      "options": {
+        "any": "任意",
+        "failed": "失败",
+        "succeeded": "成功"
+      }
+    },
+    "workflowId": {
+      "hint": "要监听的来源工作流。留空表示任何工作流完成都会触发（始终排除本工作流自身）。",
+      "label": "来源工作流（可选）"
+    }
+  }
+}

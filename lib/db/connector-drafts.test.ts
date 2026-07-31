@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for lib/db/connector-drafts.ts — outbound draft approval queue.
  */
@@ -112,5 +113,19 @@ describe("connector-drafts", () => {
     expect(count).toBe(0)
     const updated = await getDb().connectorDrafts.get(draft.id)
     expect(updated?.status).toBe("approved")
+  })
+
+  describe("workspace (project) scoping", () => {
+    it("stamps a draft with the session's projectId", async () => {
+      await getDb().sessions.put({
+        id: "sess_abc",
+        projectId: "proj-A",
+        title: "a",
+        updatedAt: 1,
+        createdAt: 1,
+      } as never)
+      const draft = await createDraft(baseInput())
+      expect(draft.projectId).toBe("proj-A")
+    })
   })
 })

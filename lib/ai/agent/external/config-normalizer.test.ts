@@ -11,7 +11,17 @@ import {
   projectExternalAgentReadinessMetadata,
   normalizeExternalAgentConfigInput,
 } from "./config-normalizer"
-import type { ExternalAgentConfig } from "@/types/agent/external-agent"
+import {
+  registerPluginProtocolAdapter,
+  unregisterPluginProtocolAdaptersByPlugin,
+  __resetPluginProtocolAdaptersForTesting,
+  BaseProtocolAdapter,
+} from "./protocol-adapter"
+import type {
+  ExternalAgentConfig,
+  ExternalAgentEvent,
+  ExternalAgentSession,
+} from "@/types/agent/external-agent"
 
 function baseConfig(overrides: Partial<ExternalAgentConfig> = {}): ExternalAgentConfig {
   return {
@@ -35,15 +45,24 @@ function baseConfig(overrides: Partial<ExternalAgentConfig> = {}): ExternalAgent
 }
 
 describe("SUPPORTED_EXTERNAL_AGENT_PROTOCOLS", () => {
-  it("contains acp and opencode", () => {
-    expect(SUPPORTED_EXTERNAL_AGENT_PROTOCOLS).toEqual(["acp", "opencode"])
+  it("contains the five registered built-in adapters", () => {
+    expect(SUPPORTED_EXTERNAL_AGENT_PROTOCOLS).toEqual([
+      "acp",
+      "codex-app-server",
+      "opencode",
+      "opencode-v2",
+      "a2a",
+    ])
   })
 })
 
 describe("isSupportedExternalAgentProtocol", () => {
-  it("returns true for acp/opencode", () => {
+  it("returns true for the five built-in protocols", () => {
     expect(isSupportedExternalAgentProtocol("acp")).toBe(true)
     expect(isSupportedExternalAgentProtocol("opencode")).toBe(true)
+    expect(isSupportedExternalAgentProtocol("opencode-v2")).toBe(true)
+    expect(isSupportedExternalAgentProtocol("codex-app-server")).toBe(true)
+    expect(isSupportedExternalAgentProtocol("a2a")).toBe(true)
   })
   it("returns false for unknown protocols", () => {
     expect(isSupportedExternalAgentProtocol("custom" as never)).toBe(false)
@@ -55,7 +74,10 @@ describe("getUnsupportedProtocolReason", () => {
     expect(getUnsupportedProtocolReason("acp")).toBe("")
   })
   it("returns a migration reason for unsupported protocols", () => {
-    expect(getUnsupportedProtocolReason("a2a" as never)).toMatch(/not executable yet/i)
+    expect(getUnsupportedProtocolReason("websocket" as never)).toMatch(/not executable yet/i)
+  })
+  it("returns a plugin-specific reason for a namespaced (plugin) protocol", () => {
+    expect(getUnsupportedProtocolReason("acme:demo" as never)).toMatch(/plugin adapter/i)
   })
 })
 
@@ -69,6 +91,14 @@ describe("isTransportSupportedOnCurrentPlatform", () => {
   })
   it("returns false for stdio when runtimeIsTauri=false", () => {
     expect(isTransportSupportedOnCurrentPlatform("stdio", false)).toBe(false)
+  })
+  it("uses headless-host capability when no runtime override is supplied", () => {
+    ;(globalThis as Record<string, unknown>).__COGNIA_HEADLESS__ = true
+    try {
+      expect(isTransportSupportedOnCurrentPlatform("stdio")).toBe(true)
+    } finally {
+      delete (globalThis as Record<string, unknown>).__COGNIA_HEADLESS__
+    }
   })
 })
 
@@ -90,6 +120,65 @@ describe("getExternalAgentExecutionBlock", () => {
 
   it("returns null for a healthy executable acp config in Tauri runtime", () => {
     expect(getExternalAgentExecutionBlock(baseConfig(), true)).toBeNull()
+  })
+
+  it("does NOT block a plugin-contributed protocol while its adapter is registered", () => {
+    class StubAdapter extends BaseProtocolAdapter {
+      readonly protocol = "acme:demo"
+      async connect() {}
+      async disconnect() {}
+      async createSession(): Promise<ExternalAgentSession> {
+        const s = {
+          id: "s",
+          agentId: "a",
+          status: "active",
+          createdAt: new Date(),
+          lastActivityAt: new Date(),
+        } as ExternalAgentSession
+        this._sessions.set(s.id, s)
+        return s
+      }
+      async closeSession() {}
+      async *prompt(): AsyncIterable<ExternalAgentEvent> {}
+      async respondToPermission() {}
+      async cancel() {}
+    }
+    registerPluginProtocolAdapter("acme:demo", () => new StubAdapter(), { pluginId: "acme" })
+    try {
+      const cfg = baseConfig({ protocol: "acme:demo" as never, metadata: {} })
+      expect(getExternalAgentExecutionBlock(cfg, true)).toBeNull()
+    } finally {
+      unregisterPluginProtocolAdaptersByPlugin("acme")
+    }
+    // Once the providing plugin is disabled (adapter unregistered), it blocks.
+    const cfg = baseConfig({ protocol: "acme:demo" as never, metadata: {} })
+    expect(getExternalAgentExecutionBlock(cfg, true)?.code).toBe("protocol_unsupported")
+    __resetPluginProtocolAdaptersForTesting()
+  })
+
+  it("blocks an auto-spawn OpenCode config off-desktop (spawn needs Tauri)", () => {
+    const cfg = baseConfig({
+      protocol: "opencode" as never,
+      transport: "sse" as never,
+      process: { command: "opencode", args: [] },
+      metadata: { autoSpawnServer: true },
+    })
+    const block = getExternalAgentExecutionBlock(cfg, false)
+    expect(block?.code).toBe("transport_blocked")
+    expect(block?.reason).toMatch(/desktop/i)
+    // Same config IS executable on desktop.
+    expect(getExternalAgentExecutionBlock(cfg, true)).toBeNull()
+  })
+
+  it("does not block a remote OpenCode config (explicit endpoint) off-desktop", () => {
+    const cfg = baseConfig({
+      protocol: "opencode" as never,
+      transport: "sse" as never,
+      process: undefined,
+      network: { endpoint: "http://127.0.0.1:4096" },
+      metadata: {},
+    })
+    expect(getExternalAgentExecutionBlock(cfg, false)).toBeNull()
   })
 
   it("blocks documented-only ecosystem surfaces", () => {
@@ -213,9 +302,78 @@ describe("probeExternalAgentEcosystemReadiness", () => {
       }
     )
     expect(out?.prerequisites?.find((p) => p.id === "local-command")?.status).toBe("missing")
+    // The command name rides in `params` now — the sentence itself lives in
+    // the message catalogue, so it is no longer asserted here as English.
     expect(out?.recommendedActions).toEqual(
-      expect.arrayContaining([expect.stringMatching(/Install or expose "fake"/)])
+      expect.arrayContaining([{ id: "installCommand", params: { command: "fake" } }])
     )
+  })
+
+  it("names the install command for a known agent CLI", async () => {
+    const out = await probeExternalAgentEcosystemReadiness(
+      {
+        metadata: { preset: "codex-app-server" },
+        transport: "stdio",
+        process: { command: "codex", args: ["app-server"] },
+      },
+      { runtimeIsTauri: true, checkCommandExists: async () => false }
+    )
+    expect(out?.recommendedActions).toEqual(expect.arrayContaining([{ id: "installHintCodex" }]))
+  })
+
+  it("probes the command for a hand-written stdio config with no ecosystem identity", async () => {
+    const out = await probeExternalAgentEcosystemReadiness(
+      {
+        metadata: {},
+        transport: "stdio",
+        process: { command: "codex", args: ["app-server"] },
+      },
+      { runtimeIsTauri: true, checkCommandExists: async () => false }
+    )
+    // Without this the missing binary slipped past the execution gate and only
+    // surfaced as a raw spawn "os error 2".
+    expect(out?.prerequisites?.find((p) => p.id === "local-command")?.status).toBe("missing")
+    expect(out?.prerequisiteStatus).toBe("action-required")
+  })
+
+  it("replaces a stale 'local-command' prerequisite instead of appending a second one", async () => {
+    const stale = await probeExternalAgentEcosystemReadiness(
+      {
+        metadata: { preset: "codex-app-server" },
+        transport: "stdio",
+        process: { command: "codex", args: [] },
+      },
+      { runtimeIsTauri: true, checkCommandExists: async () => true }
+    )
+    expect(stale?.prerequisites?.find((p) => p.id === "local-command")?.status).toBe("satisfied")
+
+    // Re-probe after the CLI was uninstalled, against the persisted snapshot.
+    const out = await probeExternalAgentEcosystemReadiness(
+      {
+        metadata: projectExternalAgentReadinessMetadata({ preset: "codex-app-server" }, stale!),
+        transport: "stdio",
+        process: { command: "codex", args: [] },
+      },
+      { runtimeIsTauri: true, checkCommandExists: async () => false }
+    )
+    const entries = out?.prerequisites?.filter((p) => p.id === "local-command") ?? []
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.status).toBe("missing")
+  })
+
+  it("blocks connect for a hand-written stdio config whose command is missing", async () => {
+    const probed = await probeExternalAgentEcosystemReadiness(
+      { metadata: {}, transport: "stdio", process: { command: "codex", args: [] } },
+      { runtimeIsTauri: true, checkCommandExists: async () => false }
+    )
+    const config = baseConfig({
+      transport: "stdio",
+      process: { command: "codex", args: [] },
+      metadata: projectExternalAgentReadinessMetadata({}, probed!),
+    })
+    const block = getExternalAgentExecutionBlock(config, true)
+    expect(block?.code).toBe("ecosystem_prerequisite_missing")
+    expect(block?.reason).toMatch(/codex/)
   })
 
   it("adds a Windows-specific recommendation for the codex acp-stdio surface", async () => {
@@ -231,9 +389,7 @@ describe("probeExternalAgentEcosystemReadiness", () => {
         platform: "win32",
       }
     )
-    expect(out?.recommendedActions).toEqual(
-      expect.arrayContaining([expect.stringMatching(/WSL2/i)])
-    )
+    expect(out?.recommendedActions).toEqual(expect.arrayContaining([{ id: "codexWsl2" }]))
   })
 
   it("returns undefined when readiness cannot be derived", async () => {
@@ -295,17 +451,77 @@ describe("normalizeExternalAgentConfigInput", () => {
     expect(cfg.enabled).toBe(true)
   })
 
+  it("clamps the default permission mode to one the protocol can enforce", () => {
+    // Codex has no `dontAsk` — persisting it would store a backend-incompatible
+    // mode, so it is clamped down to the nearest supported mode (`plan`).
+    const codex = normalizeExternalAgentConfigInput(
+      {
+        name: "Codex",
+        protocol: "codex-app-server",
+        transport: "stdio",
+        defaultPermissionMode: "dontAsk",
+      } as never,
+      { runtimeIsTauri: true }
+    )
+    expect(codex.defaultPermissionMode).toBe("plan")
+
+    // ACP supports every mode, so it round-trips unchanged.
+    const acp = normalizeExternalAgentConfigInput(
+      {
+        name: "Claude",
+        protocol: "acp",
+        transport: "stdio",
+        defaultPermissionMode: "dontAsk",
+      } as never,
+      { runtimeIsTauri: true }
+    )
+    expect(acp.defaultPermissionMode).toBe("dontAsk")
+  })
+
+  it("passes codexOptions through to the normalized config", () => {
+    const cfg = normalizeExternalAgentConfigInput(
+      {
+        name: "Codex",
+        protocol: "codex-app-server",
+        transport: "stdio",
+        codexOptions: {
+          sandboxMode: "workspaceWrite",
+          networkAccess: true,
+          defaultReasoningEffort: "high",
+          reasoningSummary: "detailed",
+        },
+      } as never,
+      { runtimeIsTauri: true }
+    )
+    expect(cfg.codexOptions).toEqual({
+      sandboxMode: "workspaceWrite",
+      networkAccess: true,
+      defaultReasoningEffort: "high",
+      reasoningSummary: "detailed",
+    })
+  })
+
   it("flags an unsupported protocol in metadata", () => {
     const cfg = normalizeExternalAgentConfigInput(
       {
         name: "Old",
-        protocol: "a2a" as never,
-        transport: "http",
+        protocol: "websocket" as never,
+        transport: "websocket",
       } as never,
       { runtimeIsTauri: true }
     )
     expect(cfg.metadata?.unsupported).toBe(true)
-    expect(cfg.metadata?.unsupportedProtocol).toBe("a2a")
+    expect(cfg.metadata?.unsupportedProtocol).toBe("websocket")
+  })
+
+  it("does NOT flag the built-in codex-app-server / a2a protocols as unsupported", () => {
+    for (const protocol of ["codex-app-server", "a2a"] as const) {
+      const cfg = normalizeExternalAgentConfigInput(
+        { name: protocol, protocol, transport: protocol === "a2a" ? "http" : "stdio" } as never,
+        { runtimeIsTauri: true }
+      )
+      expect(cfg.metadata?.unsupported).toBeUndefined()
+    }
   })
 
   it("removes prior unsupported markers when a supported protocol is set", () => {
@@ -357,5 +573,82 @@ describe("normalizeExternalAgentConfigInput", () => {
     )
     expect(cfg.validitySnapshot?.executable).toBe(false)
     expect(cfg.validitySnapshot?.blockingReasonCode).toBe("transport_blocked")
+  })
+})
+
+describe("recommended actions — persisted shape", () => {
+  it("keeps prose an older build (or a third-party preset) persisted", async () => {
+    const out = await probeExternalAgentEcosystemReadiness(
+      {
+        metadata: {
+          preset: "codex-app-server",
+          ecosystemReadiness: { recommendedActions: ["Read the vendor runbook first."] },
+        },
+        transport: "stdio",
+        process: { command: "codex", args: ["app-server"] },
+      },
+      { runtimeIsTauri: true, checkCommandExists: async () => true }
+    )
+    expect(out?.recommendedActions).toContain("Read the vendor runbook first.")
+  })
+
+  it("drops persisted entries that are neither prose nor a message reference", async () => {
+    // This array round-trips through config metadata, so it is untrusted:
+    // an unchecked value reaches the renderer and prints [object Object].
+    const out = await probeExternalAgentEcosystemReadiness(
+      {
+        metadata: {
+          preset: "codex-app-server",
+          ecosystemReadiness: {
+            recommendedActions: [42, null, { params: { a: "b" } }, ["nested"], { id: "  " }, "  "],
+          },
+        },
+        transport: "stdio",
+        process: { command: "codex", args: ["app-server"] },
+      },
+      { runtimeIsTauri: true, checkCommandExists: async () => true }
+    )
+    expect(out?.recommendedActions ?? []).toEqual([])
+  })
+
+  it("keeps non-string params out of a message reference", async () => {
+    const out = await probeExternalAgentEcosystemReadiness(
+      {
+        metadata: {
+          preset: "codex-app-server",
+          ecosystemReadiness: {
+            recommendedActions: [{ id: "installCommand", params: { command: "x", bad: 7 } }],
+          },
+        },
+        transport: "stdio",
+        process: { command: "codex", args: ["app-server"] },
+      },
+      { runtimeIsTauri: true, checkCommandExists: async () => true }
+    )
+    expect(out?.recommendedActions).toEqual([{ id: "installCommand", params: { command: "x" } }])
+  })
+
+  it("does not collapse two message references that differ only in params", async () => {
+    const out = await probeExternalAgentEcosystemReadiness(
+      {
+        metadata: {
+          preset: "codex-app-server",
+          ecosystemReadiness: {
+            recommendedActions: [
+              { id: "installCommand", params: { command: "a" } },
+              { id: "installCommand", params: { command: "b" } },
+              { id: "installCommand", params: { command: "a" } },
+            ],
+          },
+        },
+        transport: "stdio",
+        process: { command: "codex", args: ["app-server"] },
+      },
+      { runtimeIsTauri: true, checkCommandExists: async () => true }
+    )
+    expect(out?.recommendedActions).toEqual([
+      { id: "installCommand", params: { command: "a" } },
+      { id: "installCommand", params: { command: "b" } },
+    ])
   })
 })

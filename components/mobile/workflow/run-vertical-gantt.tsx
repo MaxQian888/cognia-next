@@ -3,17 +3,32 @@
 import { useTranslations } from "next-intl"
 import Link from "next/link"
 import { motion, useReducedMotion } from "motion/react"
+import { XIcon } from "lucide-react"
 
+import { Button } from "@/components/ui/button"
 import type { WorkflowRunRow } from "@/types/workflow/visual"
 import { STAGGER_CHILD, STAGGER_CONTAINER } from "@/lib/ui/motion"
 import { cn } from "@/lib/utils"
 
 import { RunStatusBadge } from "./run-status-badge"
 
+/** Statuses a remote `workflow_cancel_run` can still act on. */
+const CANCELLABLE_STATUSES: ReadonlySet<WorkflowRunRow["status"]> = new Set([
+  "running",
+  "pending",
+  "waiting",
+  "paused",
+])
+
 export interface RunVerticalGanttProps {
   runs: WorkflowRunRow[]
   /** Optional href builder; defaults to `/workflows/<id>/runs/<runId>`. */
   hrefForRun?: (run: WorkflowRunRow) => string
+  /**
+   * When provided, non-terminal runs (running / pending / waiting / paused)
+   * render a cancel affordance that calls back with the run.
+   */
+  onCancelRun?: (run: WorkflowRunRow) => void
   className?: string
 }
 
@@ -27,7 +42,12 @@ function formatDuration(run: WorkflowRunRow): string {
   return `${minutes}m ${seconds}s`
 }
 
-export function RunVerticalGantt({ runs, hrefForRun, className }: RunVerticalGanttProps) {
+export function RunVerticalGantt({
+  runs,
+  hrefForRun,
+  onCancelRun,
+  className,
+}: RunVerticalGanttProps) {
   const t = useTranslations("mobile.workflow")
   const reduce = useReducedMotion()
 
@@ -51,7 +71,7 @@ export function RunVerticalGantt({ runs, hrefForRun, className }: RunVerticalGan
       {runs.map((run) => {
         const href = hrefForRun
           ? hrefForRun(run)
-          : `/workflows/${encodeURIComponent(run.workflowId)}/runs/${encodeURIComponent(run.id)}`
+          : `/workflows/run?id=${encodeURIComponent(run.workflowId)}&runId=${encodeURIComponent(run.id)}`
         const startedDate = new Date(run.startedAt).toLocaleString()
         const duration = formatDuration(run)
         return (
@@ -90,6 +110,23 @@ export function RunVerticalGantt({ runs, hrefForRun, className }: RunVerticalGan
                   <p className="line-clamp-1 text-[11px] text-destructive">{run.error.message}</p>
                 ) : null}
               </div>
+              {onCancelRun && CANCELLABLE_STATUSES.has(run.status) ? (
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="size-8 shrink-0 text-destructive"
+                  aria-label={t("cancelRun")}
+                  onClick={(e) => {
+                    // Inside the row <Link> — don't navigate to the run page.
+                    e.preventDefault()
+                    e.stopPropagation()
+                    onCancelRun(run)
+                  }}
+                  data-testid={`run-cancel-${run.id}`}
+                >
+                  <XIcon className="size-4" />
+                </Button>
+              ) : null}
             </Link>
           </motion.li>
         )

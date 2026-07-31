@@ -38,7 +38,7 @@ import {
   serializePackage,
   defaultExportFileName,
 } from "@/lib/data/build-package"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { ShareSettingsCard } from "@/components/share/share-settings-card"
 import { ShareLinkDialog } from "@/components/share/share-link-dialog"
 import { backupPayload } from "@/lib/share/payload"

@@ -9,19 +9,11 @@
  */
 
 import { useTranslations } from "next-intl"
-import {
-  BotIcon,
-  CommandIcon,
-  GanttChartIcon,
-  HexagonIcon,
-  TerminalIcon,
-  type LucideIcon,
-} from "lucide-react"
+import { BrandIcon } from "@/components/icons/brand-icon"
 import { cn } from "@/lib/utils"
 import type { TeammateRuntime } from "@/types/agent/agent-team"
 
 interface RuntimeMeta {
-  Icon: LucideIcon
   /** Tailwind classes for the rounded pill background + foreground text. */
   classes: string
   /** i18n key under `agentTeamsWorkspace.chat.runtime.*`. */
@@ -30,29 +22,56 @@ interface RuntimeMeta {
 
 const RUNTIME_META: Record<TeammateRuntime, RuntimeMeta> = {
   claude: {
-    Icon: HexagonIcon,
     classes: "bg-orange-500/15 text-orange-700 dark:text-orange-300 ring-orange-500/30",
     labelKey: "claude",
   },
   codex: {
-    Icon: TerminalIcon,
     classes: "bg-zinc-500/15 text-zinc-700 dark:text-zinc-200 ring-zinc-500/30",
     labelKey: "codex",
   },
   "claude-code": {
-    Icon: CommandIcon,
     classes: "bg-blue-500/15 text-blue-700 dark:text-blue-300 ring-blue-500/30",
     labelKey: "claudeCode",
   },
   "gemini-cli": {
-    Icon: GanttChartIcon,
     classes: "bg-violet-500/15 text-violet-700 dark:text-violet-300 ring-violet-500/30",
     labelKey: "geminiCli",
   },
   "cursor-cli": {
-    Icon: BotIcon,
     classes: "bg-slate-700/20 text-slate-100 ring-slate-500/30",
     labelKey: "cursorCli",
+  },
+  "codex-app-server": {
+    classes: "bg-neutral-500/15 text-neutral-700 dark:text-neutral-200 ring-neutral-500/30",
+    labelKey: "codexAppServer",
+  },
+  "copilot-cli": {
+    classes: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 ring-emerald-500/30",
+    labelKey: "copilotCli",
+  },
+  kiro: {
+    classes: "bg-amber-500/15 text-amber-700 dark:text-amber-300 ring-amber-500/30",
+    labelKey: "kiro",
+  },
+  "qwen-code": {
+    classes: "bg-rose-500/15 text-rose-700 dark:text-rose-300 ring-rose-500/30",
+    labelKey: "qwenCode",
+  },
+  pi: {
+    classes: "bg-teal-500/15 text-teal-700 dark:text-teal-300 ring-teal-500/30",
+    labelKey: "pi",
+  },
+  droid: {
+    classes: "bg-green-500/15 text-green-700 dark:text-green-300 ring-green-500/30",
+    labelKey: "droid",
+  },
+  "opencode-server": {
+    classes: "bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 ring-cyan-500/30",
+    labelKey: "opencodeServer",
+  },
+  "opencode-remote": {
+    classes: "bg-sky-500/15 text-sky-700 dark:text-sky-300 ring-sky-500/30",
+    labelKey: "opencodeRemote",
   },
 }
 
@@ -66,7 +85,6 @@ export interface RuntimeBadgeProps {
 export function RuntimeBadge({ runtime, iconOnly = false, className }: RuntimeBadgeProps) {
   const t = useTranslations("agentTeamsWorkspace.chat.runtime")
   const meta = RUNTIME_META[runtime]
-  const Icon = meta.Icon
   const label = safeRuntimeLabel(t, meta.labelKey, runtime)
 
   return (
@@ -81,7 +99,7 @@ export function RuntimeBadge({ runtime, iconOnly = false, className }: RuntimeBa
       )}
       title={label}
     >
-      <Icon className="size-3" aria-hidden />
+      <BrandIcon id={runtime} label={label} size={12} />
       {!iconOnly && <span className="leading-none">{label}</span>}
     </span>
   )

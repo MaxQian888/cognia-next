@@ -8,7 +8,7 @@ description: 真正落地（非桩）的自动模式回合 —— safeSendPrompt
 <Status variant="stable" />
 
 <TLDR>
-当一条入站 IM 消息在没有人在环的情况下驱动一次 Claude 回合时，连接器子系统无法复用经人工审阅的聊天输入框路径 —— 于是 `safeSendPrompt`（`lib/connectors/ai-loop/safe-send-prompt.ts:69`）用 `lib/twin/ingest/` 强制执行的同一条 PII 红线包裹 `runAndCaptureAssistantReply`：遍历 prompt 与 build-options 的 `appendSystemPrompt`，对每段调用 `hasNoLeakingPii`，并在调用模型**之前中止**（写入一条 `pii_blocked` 审计行）而非脱敏 —— 因为没有人来决定要删掉什么。捕获到的回复由 `assistantReplyToSegments`（`a2ui-to-segments.ts:52`）投影为可传输的 segment；入站平台富内容由 `segmentsToA2UI`（`segments-to-a2ui.ts:48`）反向提升为 surface；插件通过 `createA2UIBuilder`（`surface-builder.ts:315`）声明式地编写 surface；build-options 解析器追加一段感知能力的降级说明（`capability-evaluator.ts:106`）；交互组件通过 `buildActionId` / `recordCallbackBinding` / `resolveCallbackBinding`（`_shared/a2ui-mapper.ts`）往返；由 IM 触发的工作流运行经 `startWorkflowProgressRunner`（`workflow-progress-runner.ts:145`）把进度扇出为原地编辑的状态卡片。
+当一条入站 IM 消息在没有人在环的情况下驱动一次 Claude 回合时，连接器子系统无法复用经人工审阅的聊天输入框路径 —— 于是 `safeSendPrompt`（`lib/connectors/ai-loop/safe-send-prompt.ts:69`）用 `lib/twin/ingest/` 强制执行的同一条 PII 红线包裹 `runAndCaptureAssistantReply`：遍历 prompt 与 build-options 的 `appendSystemPrompt`，对每段调用 `hasNoLeakingPii`，并在调用模型**之前中止**（写入一条 `pii_blocked` 审计行）而非脱敏 —— 因为没有人来决定要删掉什么。捕获到的回复由 `assistantReplyToSegments`（`a2ui-to-segments.ts:52`）投影为可传输的 segment；入站平台富内容由 `projectInboundToA2UI`（`inbound-a2ui-dispatch.ts:26`）投射为给 Inbox 渲染器用的 `InboundA2UIBlock`；插件通过 `createA2UIBuilder`（`surface-builder.ts:315`）声明式地编写 surface；build-options 解析器追加一段感知能力的降级说明（`capability-evaluator.ts:106`）；交互组件通过 `buildActionId` / `recordCallbackBinding` / `resolveCallbackBinding`（`_shared/a2ui-mapper.ts`）往返；由 IM 触发的工作流运行经 `startWorkflowProgressRunner`（`workflow-progress-runner.ts:145`）把进度扇出为原地编辑的状态卡片。
 </TLDR>
 
 <StatGrid>
@@ -41,7 +41,7 @@ if (!isPiiSafeSendContent(prompt)) {
 }
 ```
 
-`isPiiSafeSendContent`（`safe-send-prompt.ts:123`）通过 `hasNoLeakingPii`（来自 `@/lib/twin/ingest/redact`）遍历 `SendContent` 联合体里的每个 `type: "text"` 块 —— 图片/文件块被跳过，因为该门只针对可泄漏文本；二进制附件改由 `attachments.rs` 在磁盘上加密。收敛路径为：build-options 的 `resolveSendOptions` 组装 prompt 与能力尾巴 → `safeSendPrompt` 门控 → `runAndCaptureAssistantReply` 跑回合 → `assistantReplyToSegments` 投影捕获的回复 → `enqueueOutbound` 交接给队列。
+`isPiiSafeSendContent`（`safe-send-prompt.ts:123`）通过 `hasNoLeakingPii`（来自 `@cognia/redact`）遍历 `SendContent` 联合体里的每个 `type: "text"` 块 —— 图片/文件块被跳过，因为该门只针对可泄漏文本；二进制附件改由 `attachments.rs` 在磁盘上加密。收敛路径为：build-options 的 `resolveSendOptions` 组装 prompt 与能力尾巴 → `safeSendPrompt` 门控 → `runAndCaptureAssistantReply` 跑回合 → `assistantReplyToSegments` 投影捕获的回复 → `enqueueOutbound` 交接给队列。
 
 ```mermaid
 flowchart TD
@@ -63,11 +63,11 @@ flowchart TD
 
 `buildA2UISegment`（`a2ui-to-segments.ts:84`）烤制 `plainTextMirror`：模型提供的 `widget.fallbackText` 优先于自动生成的 `generatePlainTextMirror`。同一构造器被 `scheduled-outbound.ts` 以及工作流进度 runner 直接复用，用于正常助手回复路径之外发出的 surface。运行时在 `runtime.ts:437` 调用 `assistantReplyToSegments`。
 
-## 入站投影：segmentsToA2UI
+## 入站投影：projectInboundToA2UI
 
-`segmentsToA2UI`（`segments-to-a2ui.ts:48`）是反向操作：它把扁平的入站 `MessageSegment[]`（由 Slack rich_text / 飞书互动卡片 / Telegram 标题 + 内联键盘 / Discord embed + components 构建）提升为**一个** A2UI Surface，使总线与渲染器把入站消息视同助手生成的那样。segment 种类的 switch 将 `text`/`markdown` → `Text`、`image` → `Image`、`card` → `Card`、`video`/`voice`/`file` → `Link`、`location` → `Text`；入站 `a2ui` segment 原样交回（`segments-to-a2ui.ts:138`）。所有子节点挂在一个 `Column` 根下（`segments-to-a2ui.ts:150`），`plainTextMirror` 为各文本部分的拼接。
+`projectInboundToA2UI`（`inbound-a2ui-dispatch.ts:26`）是总线侧的入站投影。总线对每条入站 `create` 事件调用它一次，传入平台 kind 与原始平台负载（来自 Slack rich_text / 飞书互动卡片 / Telegram 标题 + 内联键盘 / Discord embed + components）；它派发到匹配的各平台 mapper（`../<platform>/inbound-to-a2ui.ts`），返回一个 `InboundA2UIBlock`（`inbound-a2ui-types.ts:50`）或 `null`。该 block 会被持久化到 `StoredMessage.metadata.inboundA2UI`，并由 `components/chat/message-parts/inbound-a2ui-renderer.tsx` 遍历，使 Inbox 展示平台原生的富结构。mapper 尽力而为：nullish 负载、未映射的平台，或抛异常的 mapper 都归结为 `null`，总线随即回退到纯文本渲染。
 
-这与渲染端的 `projectInboundToA2UI`（它构建 `InboundA2UIBlock`）不同：`segmentsToA2UI` 是平台解析器调用的“A2UI 长什么样”的规范投影，使该形状的维护集中在一处。
+> 本页的早期修订声称有一个 `segmentsToA2UI`（`segments-to-a2ui.ts`）模块，是每个平台解析器都会调用的规范入站投影。这是不准确的 —— 该模块零调用者，现已**作为死代码移除**。真实的入站路径是 `projectInboundToA2UI` → `InboundA2UIBlock`，且它**不是**出站 `assistantReplyToSegments`（`a2ui-to-segments.ts`）的逆操作：出站把助手 surface 扁平化为可传输的 `MessageSegment[]`，入站则把原始平台负载提升为紧凑的 `InboundA2UIBlock` —— 二者是各自独立的投影，并非一对互逆。
 
 ## 插件 Surface 构造器
 

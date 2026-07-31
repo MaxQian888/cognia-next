@@ -15,10 +15,20 @@ import { z } from "zod"
 import { registerBuiltInSkill } from "../registry"
 import type { BuiltInSkill, BuiltInSkillMutation } from "../types"
 import type { BuiltInSkillImAccess } from "../types"
-import { argsToFlags, buildConfirmSurface, runLarkCli } from "./_helpers"
+import { argsToFlags, buildConfirmSurface, larkAdapterIdFromCtx, runLarkCli } from "./_helpers"
 
 const FAMILY = "lark.task"
 const PLATFORMS = ["lark"] as const
+
+// Shared, described params (serialized to the model via manifest.ts).
+const taskGuidParam = z
+  .string()
+  .min(1)
+  .describe("Task GUID. Obtain it from lark.task.list_my_tasks or lark.task.create.")
+const tasklistGuidParam = z.string().min(1).describe("Tasklist GUID to file the task under.")
+const assigneesParam = z
+  .array(z.string())
+  .describe("Collaborator open_ids (resolve names → open_id via the lark-contact skill first).")
 
 function mk<S extends z.ZodTypeAny>(input: {
   id: string
@@ -49,6 +59,7 @@ function mk<S extends z.ZodTypeAny>(input: {
       runLarkCli({
         args: [...input.subcommand, ...argsToFlags(args as Record<string, unknown>)],
         confirmed: ctx.hitlBypass === true,
+        adapterId: larkAdapterIdFromCtx(ctx),
       }),
   }
   if (input.mutation !== "read") {
@@ -76,8 +87,17 @@ registerBuiltInSkill(
       "zh-CN": "列出当前用户的任务，可选按状态过滤。",
     },
     schema: z.object({
-      status: z.enum(["pending", "completed", "all"]).optional(),
-      pageSize: z.number().int().min(1).max(100).optional(),
+      status: z
+        .enum(["pending", "completed", "all"])
+        .optional()
+        .describe("Filter by completion status (default pending)."),
+      pageSize: z
+        .number()
+        .int()
+        .min(1)
+        .max(100)
+        .optional()
+        .describe("Max tasks to return (1–100)."),
     }),
     subcommand: ["task", "+get-my-tasks"],
     mutation: "read",
@@ -94,7 +114,7 @@ registerBuiltInSkill(
       en: "Fetch a single Lark task by id.",
       "zh-CN": "按 id 读取单条 Lark 任务。",
     },
-    schema: z.object({ taskGuid: z.string().min(1) }),
+    schema: z.object({ taskGuid: taskGuidParam }),
     subcommand: ["task", "+get-task"],
     mutation: "read",
     imAccess: "always",
@@ -111,11 +131,17 @@ registerBuiltInSkill(
       "zh-CN": "创建 Lark 任务，可选截止时间和协作人。",
     },
     schema: z.object({
-      summary: z.string().min(1),
-      description: z.string().optional(),
-      dueTime: z.string().optional().describe("RFC3339"),
-      assignees: z.array(z.string()).optional().describe("Open IDs"),
-      tasklistGuid: z.string().optional(),
+      summary: z.string().min(1).describe("Task title."),
+      description: z.string().optional().describe("Optional longer task description."),
+      dueTime: z
+        .string()
+        .optional()
+        .describe("Optional due time in RFC3339, e.g. 2026-07-01T17:00:00Z."),
+      assignees: assigneesParam.optional(),
+      tasklistGuid: z
+        .string()
+        .optional()
+        .describe("Optional tasklist GUID to file the task under."),
     }),
     subcommand: ["task", "+create"],
     mutation: "write",
@@ -142,7 +168,7 @@ registerBuiltInSkill(
       en: "Mark a Lark task as done.",
       "zh-CN": "将 Lark 任务标记为完成。",
     },
-    schema: z.object({ taskGuid: z.string().min(1) }),
+    schema: z.object({ taskGuid: taskGuidParam }),
     subcommand: ["task", "+complete"],
     mutation: "write",
     imAccess: "always",
@@ -163,10 +189,10 @@ registerBuiltInSkill(
       "zh-CN": "更新 Lark 任务的标题、描述或截止时间。",
     },
     schema: z.object({
-      taskGuid: z.string().min(1),
-      summary: z.string().optional(),
-      description: z.string().optional(),
-      dueTime: z.string().optional(),
+      taskGuid: taskGuidParam,
+      summary: z.string().optional().describe("New task title."),
+      description: z.string().optional().describe("New task description."),
+      dueTime: z.string().optional().describe("New due time in RFC3339."),
     }),
     subcommand: ["task", "+update"],
     mutation: "write",
@@ -188,8 +214,8 @@ registerBuiltInSkill(
       "zh-CN": "为 Lark 任务分配协作人。",
     },
     schema: z.object({
-      taskGuid: z.string().min(1),
-      assignees: z.array(z.string()).min(1).describe("Open IDs"),
+      taskGuid: taskGuidParam,
+      assignees: assigneesParam.min(1),
     }),
     subcommand: ["task", "+assign"],
     mutation: "write",
@@ -212,8 +238,8 @@ registerBuiltInSkill(
       "zh-CN": "将 Lark 任务加入指定的任务清单。",
     },
     schema: z.object({
-      taskGuid: z.string().min(1),
-      tasklistGuid: z.string().min(1),
+      taskGuid: taskGuidParam,
+      tasklistGuid: tasklistGuidParam,
     }),
     subcommand: ["task", "+add-to-tasklist"],
     mutation: "write",

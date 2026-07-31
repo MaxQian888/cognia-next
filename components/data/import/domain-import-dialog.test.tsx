@@ -28,7 +28,7 @@ jest.mock("sonner", () => ({
   toast: { success: jest.fn(), error: jest.fn() },
 }))
 // Silence the expected-failure log lines in test output.
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   createLogger: () => ({ error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() }),
 }))
 
@@ -214,5 +214,48 @@ describe("DomainImportDialog", () => {
     await openDialog(user)
     expect(screen.getByRole("button", { name: "Choose file…" })).toBeInTheDocument()
     expect(screen.queryByText(/Loaded skills/)).not.toBeInTheDocument()
+  })
+})
+
+// This dialog used to commit on nothing but the domain name and a timestamp,
+// while its sibling full-restore dialog showed a per-table row count.
+describe("DomainImportDialog review step", () => {
+  it("shows what the file will write before Apply is reachable", async () => {
+    const user = userEvent.setup()
+    pickMock.mockResolvedValue([
+      {
+        content: JSON.stringify({
+          ...VALID_FILE,
+          payload: { skills: [{ id: "s1" }, { id: "s2" }], characters: [{ id: "c1" }] },
+        }),
+      },
+    ])
+    setup()
+    await openDialog(user)
+    await user.click(screen.getByRole("button", { name: "Choose file…" }))
+    const preview = await screen.findByTestId("domain-import-preview")
+    expect(within(preview).getByText("skills:")).toBeInTheDocument()
+    expect(within(preview).getByText("2")).toBeInTheDocument()
+    expect(within(preview).getByText("characters:")).toBeInTheDocument()
+  })
+
+  it("renders zero counts rather than hiding empty tables", async () => {
+    const user = userEvent.setup()
+    pickMock.mockResolvedValue([
+      { content: JSON.stringify({ ...VALID_FILE, payload: { skills: [] } }) },
+    ])
+    setup()
+    await openDialog(user)
+    await user.click(screen.getByRole("button", { name: "Choose file…" }))
+    const preview = await screen.findByTestId("domain-import-preview")
+    expect(within(preview).getByText("skills:")).toBeInTheDocument()
+    expect(within(preview).getAllByText("0").length).toBeGreaterThan(0)
+  })
+
+  it("keeps the preview out of the way until a file is picked", async () => {
+    const user = userEvent.setup()
+    setup()
+    await openDialog(user)
+    expect(screen.queryByTestId("domain-import-preview")).not.toBeInTheDocument()
   })
 })

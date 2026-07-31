@@ -3,15 +3,23 @@
  */
 import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (k: string) => k,
 }))
 
-jest.mock("@/lib/tauri", () => ({
-  isTauri: () => false,
-}))
+// Desktop detection reads the `__TAURI_INTERNALS__` marker directly (via
+// `useDesktopAvailable`), so jsdom is already "web mode" with no mock needed.
+// Tests that need the desktop-only entries call `setDesktop(true)`.
+const TAURI_MARKER = "__TAURI_INTERNALS__"
+function setDesktop(on: boolean) {
+  if (on) {
+    ;(window as unknown as Record<string, unknown>)[TAURI_MARKER] = {}
+  } else {
+    delete (window as unknown as Record<string, unknown>)[TAURI_MARKER]
+  }
+}
 
 const save = jest.fn().mockResolvedValue(undefined)
 
@@ -44,10 +52,9 @@ async function setup({
       />
     </SidebarProvider>
   )
-  // Flush the deferred `isTauri()` detection (setTimeout 0) inside act.
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 0))
-  })
+  // `useDesktopAvailable` settles as part of the initial commit — no timer to
+  // flush — but let effects (group auto-expand) drain before assertions.
+  await act(async () => {})
   return { ...utils, onSelect, onSearchChange }
 }
 
@@ -55,12 +62,29 @@ beforeEach(() => {
   save.mockClear()
 })
 
+afterEach(() => setDesktop(false))
+
+describe("SettingsSidebar desktop-only entries", () => {
+  it("hides desktop-only sections in web mode", async () => {
+    await setup()
+    expect(screen.queryByText("settings.tabs.subscription")).not.toBeInTheDocument()
+    expect(screen.queryByText("settings.tabs.ccswitch")).not.toBeInTheDocument()
+  })
+
+  it("shows them on desktop", async () => {
+    setDesktop(true)
+    await setup()
+    expect(screen.getByText("settings.tabs.subscription")).toBeInTheDocument()
+    expect(screen.getByText("settings.tabs.ccswitch")).toBeInTheDocument()
+  })
+})
+
 describe("SettingsSidebar group collapse", () => {
   it("renders all groups expanded by default", async () => {
     await setup()
     expect(screen.getByText("settings.groupAi")).toBeInTheDocument()
     expect(screen.getByText("settings.groupData")).toBeInTheDocument()
-    expect(screen.getByText("settings.tabs.general")).toBeInTheDocument()
+    expect(screen.getByText("settings.tabs.aiConnections")).toBeInTheDocument()
     expect(screen.getByText("settings.tabs.data")).toBeInTheDocument()
   })
 
@@ -76,7 +100,7 @@ describe("SettingsSidebar group collapse", () => {
     expect(screen.queryByText("settings.tabs.data")).not.toBeInTheDocument()
     expect(screen.queryByText("settings.tabs.workflows")).not.toBeInTheDocument()
     // Other groups stay expanded.
-    expect(screen.getByText("settings.tabs.general")).toBeInTheDocument()
+    expect(screen.getByText("settings.tabs.aiConnections")).toBeInTheDocument()
   })
 
   it("expanding a collapsed group persists the removal", async () => {

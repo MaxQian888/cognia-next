@@ -81,10 +81,7 @@ export interface TaskProviderRegistration {
 }
 
 export type TaskRegistryEventType =
-  | "register-provider"
-  | "unregister-provider"
-  | "task-start"
-  | "task-end"
+  "register-provider" | "unregister-provider" | "task-start" | "task-end"
 
 export interface TaskRegistryEvent {
   type: TaskRegistryEventType

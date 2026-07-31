@@ -1,10 +1,29 @@
 name: Code Quality
 
 # ============================================================================
-# Code Quality & Security Checks
+# Deterministic quality gates — derived, not hand-written
 # ============================================================================
-# Runs ESLint, TypeScript type checking, and security audits.
-# This workflow works OUT-OF-THE-BOX without requiring any secrets.
+# The gate list lives in ONE place: `scripts/gates/check-all.mjs`. This
+# workflow does not restate it. The `prepare` job asks that file for its group
+# manifest and the `gates` job fans out one runner per group.
+#
+# Why derived: the previous version of this workflow was a single job with 25
+# hand-written sequential steps. Two things went wrong with that shape.
+#
+#   1. Drift. `check:all` (the local aggregate) and this file were two
+#      hand-maintained copies of the same list, and they diverged — four gates
+#      ran only locally, nine only in CI, and `build:packages` /
+#      `lint:claude-md` ran nowhere at all. `pnpm gates:registry` now fails the
+#      build if any verification-shaped script is wired to nothing.
+#
+#   2. Truncation. With no `continue-on-error`, the first red gate stopped the
+#      other 24. Finding out what is actually broken took one 30–50 minute run
+#      per failure. Groups run in parallel with `fail-fast: false`, so one run
+#      returns the COMPLETE list.
+#
+# Adding a gate: add it to REGISTRY in scripts/gates/check-all.mjs. Nothing
+# here needs to change — including for a brand-new group, which becomes a new
+# matrix entry automatically.
 # ============================================================================
 
 on:
@@ -16,71 +35,120 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  quality:
-    name: Code Quality & Security
+  prepare:
+    name: Gate Matrix
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    outputs:
+      groups: ${{ steps.manifest.outputs.groups }}
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v6
 
-      - name: Display CI/CD Configuration
-        shell: bash
+      # No pnpm install here on purpose: check-all.mjs imports nothing outside
+      # node: builtins, so the manifest is available in seconds rather than
+      # after a full dependency install.
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 26.x
+
+      - name: Read the gate group manifest
+        id: manifest
         run: |
-          echo "## 🔧 CI/CD Configuration" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "### Optional Features Status:" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "⚪ All optional integrations are **DISABLED** by default" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Optional features (currently disabled):" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Codecov integration" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Vercel deployments" >> "$GITHUB_STEP_SUMMARY"
-          echo "- macOS code signing" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Windows code signing" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "ℹ️ To enable optional features:" >> "$GITHUB_STEP_SUMMARY"
-          echo "1. Add the required secrets to your GitHub repository" >> "$GITHUB_STEP_SUMMARY"
-          echo "2. Uncomment the relevant sections in the workflow files" >> "$GITHUB_STEP_SUMMARY"
-          echo "3. See \`CI_CD.md\` for detailed setup instructions" >> "$GITHUB_STEP_SUMMARY"
+          groups="$(node scripts/gates/check-all.mjs --list-groups --json)"
+          echo "groups=$groups" >> "$GITHUB_OUTPUT"
+          echo "Gate groups: $groups"
+
+  gates:
+    name: Gates (${{ matrix.group }})
+    needs: prepare
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    strategy:
+      # Never stop sibling groups because one failed — the whole point is to
+      # surface every failure in a single run.
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.prepare.outputs.groups) }}
+
+    steps:
+      # Full history: several gates diff against git (lint-i18n --staged
+      # semantics, the static-export scanner's file listing, command parity).
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
-        with:
-          version: 10
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 20.x
+          node-version: 26.x
           cache: "pnpm"
+
+      - name: Setup Python
+        if: matrix.python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # `components:` is not optional here — dtolnay/rust-toolchain installs
+      # the minimal profile, which ships neither clippy nor rustfmt.
+      - name: Setup Rust toolchain
+        if: matrix.rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo build
+        if: matrix.rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      # cargo-deny is not a rustup component; without it the `rust:deny` gate
+      # reports as advisory-failed and the supply-chain scan never runs.
+      - name: Install cargo-deny
+        if: matrix.group == 'supply-chain'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      # ADR-0068 C2 — restore the incremental-typecheck state so `pnpm
+      # typecheck` on a small PR re-checks only what changed. *.tsbuildinfo is
+      # gitignored, so without this cache every CI typecheck is a cold full
+      # program check. The buildinfo is advisory: stale or missing simply
+      # falls back to a full check.
+      - name: Cache TypeScript incremental state
+        if: matrix.group == 'types'
+        uses: actions/cache@v5
+        with:
+          path: |
+            tsconfig.tsbuildinfo
+            tsconfig.build.tsbuildinfo
+          key: ${{ runner.os }}-tsbuildinfo-${{ hashFiles('**/pnpm-lock.yaml') }}-${{ hashFiles('**/*.ts', '**/*.tsx') }}
+          restore-keys: |
+            ${{ runner.os }}-tsbuildinfo-${{ hashFiles('**/pnpm-lock.yaml') }}-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Run ESLint
-        run: pnpm lint
-        continue-on-error: true
+      - name: Install the Python plugin SDK
+        if: matrix.python
+        run: python -m pip install -e "plugin-sdk/python[dev]"
 
-      - name: Check formatting (Prettier)
-        run: pnpm format:check
-
-      - name: TypeScript type checking
-        run: pnpm typecheck
-
-      - name: Plugin extension slot audit
-        run: pnpm audit:slots
-
-      - name: Plugin silent-failure flag audit (ADR 0016 T4)
-        run: pnpm audit:silent-flags
-
-      - name: i18n lint (key parity + hardcoded-string baseline)
-        run: pnpm lint:i18n
-
-      - name: Security audit
-        run: pnpm audit --audit-level=moderate
-        continue-on-error: true
-
-      - name: Check for outdated dependencies
-        run: pnpm outdated
-        continue-on-error: true
+      # check-all.mjs runs every gate in the group, continues past failures,
+      # writes a ✓/✗ table to the job summary, and exits non-zero if any
+      # blocking gate failed.
+      - name: Run gate group
+        run: node scripts/gates/check-all.mjs --group ${{ matrix.group }}

@@ -15,6 +15,7 @@ jest.mock("next-intl", () => ({
       disconnected: "Not connected",
       configuration: "Configuration",
       serverUrl: "Server URL",
+      setupGuide: "Setup guide",
     }
     return translations[key] || key
   },
@@ -25,7 +26,7 @@ const renderWithProviders = (ui: React.ReactElement) => {
 }
 
 // Mock local-providers
-jest.mock("@/lib/ai/providers/local-providers", () => ({
+jest.mock("@cognia/provider-core/providers/local-providers", () => ({
   LOCAL_PROVIDER_CONFIGS: {
     ollama: {
       id: "ollama",
@@ -55,7 +56,7 @@ jest.mock("@/lib/ai/providers/local-providers", () => ({
 }))
 
 // Mock local-provider-service
-jest.mock("@/lib/ai/providers/local-provider-service", () => ({
+jest.mock("@cognia/provider-core/providers/local-provider-service", () => ({
   getProviderCapabilities: jest.fn(() => ({
     canListModels: true,
     canPullModels: true,
@@ -212,6 +213,27 @@ describe("LocalProviderCard", () => {
 
     // Component should still render
     expect(screen.getByText("Ollama")).toBeInTheDocument()
+  })
+
+  it("should show a setup guide button when onSetup is provided", () => {
+    const onSetup = jest.fn()
+    renderWithProviders(<LocalProviderCard {...defaultProps} onSetup={onSetup} />)
+
+    expect(screen.getByRole("button", { name: "Setup guide" })).toBeInTheDocument()
+  })
+
+  it("should not show a setup guide button when onSetup is omitted", () => {
+    renderWithProviders(<LocalProviderCard {...defaultProps} onSetup={undefined} />)
+
+    expect(screen.queryByRole("button", { name: "Setup guide" })).not.toBeInTheDocument()
+  })
+
+  it("should call onSetup when the setup guide button is clicked", () => {
+    const onSetup = jest.fn()
+    renderWithProviders(<LocalProviderCard {...defaultProps} onSetup={onSetup} />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Setup guide" }))
+    expect(onSetup).toHaveBeenCalledTimes(1)
   })
 
   it("should expand settings when configuration button is clicked", async () => {

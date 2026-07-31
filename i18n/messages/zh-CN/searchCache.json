@@ -1,0 +1,13 @@
+{
+  "allProviders": "全部 Provider",
+  "clearCache": "清空",
+  "description": "搜索结果 LRU 缓存。",
+  "entries": "条目",
+  "hitRate": "命中率",
+  "hits": "命中",
+  "maxEntries": "最大条目数",
+  "misses": "未命中",
+  "title": "缓存",
+  "ttl": "有效期",
+  "ttlMinutes": "{minutes} 分钟"
+}

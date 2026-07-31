@@ -1,14 +1,17 @@
 /**
  * Plugin Hooks System - Unified hook management
  *
- * Combines three hook systems into a single, cohesive architecture:
- * - HookDispatcher: Generic hook execution framework with middleware, caching, timeouts
+ * Two hook managers cover the live needs:
  * - PluginLifecycleHooks: Core plugin lifecycle and event hooks
  * - PluginEventHooks: Application event integration hooks
+ *
+ * (A generic middleware/caching `HookDispatcher` framework once lived here but
+ * was never instantiated outside tests; removed 2026-06-10.)
  */
 
 import type {
   PluginHooks,
+  PluginUpdateInfo,
   PluginA2UIAction,
   PluginA2UIDataChange,
   PluginAgentStep,
@@ -38,11 +41,19 @@ import type {
   PluginTerminalLifecycleEvent,
   GoalHookPayload,
   ShareLinkHookPayload,
+  ConnectorHookDecision,
+  ConnectorInboundHookPayload,
+  ConnectorOutboundHookPayload,
+  PetInteractHookPayload,
+  PetLevelUpHookPayload,
+  PetEvolvedHookPayload,
+  PetAchievementUnlockedHookPayload,
+  PetUnwellHookPayload,
 } from "@/types/plugin/plugin-hooks"
 import type { Project, KnowledgeFile } from "@/types/plugin/_compat"
 import type { Artifact } from "@/types/artifact/artifact"
-import type { PluginCanvasDocument } from "@/types/plugin/plugin-extended"
-import { emitFinishedSpan } from "@/lib/agent-trace/emitter"
+import type { PluginCanvasDocument } from "@/types/plugin/plugin"
+import { emitFinishedSpan } from "@cognia/agent-trace/emitter"
 
 // =============================================================================
 // Plugin hook failure telemetry
@@ -210,432 +221,8 @@ export function priorityToString(priority: HookPriority): string {
   }
 }
 
-export interface HookRegistration<T extends (...args: unknown[]) => unknown> {
-  pluginId: string
-  hook: T
-  priority: HookPriority
-  enabled: boolean
-  timeout?: number
-  metadata?: Record<string, unknown>
-}
-
 // Re-export HookSandboxExecutionResult from types
 export type { HookSandboxExecutionResult } from "@/types/plugin/plugin-hooks"
-
-export interface HookMiddleware<T extends (...args: unknown[]) => unknown> {
-  before?: (args: Parameters<T>, pluginId: string) => Parameters<T> | void
-  after?: (result: Awaited<ReturnType<T>>, pluginId: string) => Awaited<ReturnType<T>> | void
-  error?: (error: Error, pluginId: string) => void
-}
-
-export interface HookExecutionConfig {
-  defaultTimeout: number
-  continueOnError: boolean
-  enableCaching: boolean
-  cacheTTL: number
-  maxConcurrent: number
-}
-
-type AnyFunction = (...args: unknown[]) => unknown
-
-// =============================================================================
-// HookDispatcher - Base Execution Framework
-// =============================================================================
-
-/**
- * Generic hook execution framework with priority-based execution,
- * middleware support, async chains, caching, and timeout handling.
- */
-export class HookDispatcher {
-  private hooks: Map<string, Map<string, HookRegistration<AnyFunction>>> = new Map()
-  private middleware: Map<string, HookMiddleware<AnyFunction>[]> = new Map()
-  private cache: Map<string, { result: unknown; timestamp: number }> = new Map()
-  private config: HookExecutionConfig
-  private executionHistory: Array<{
-    hookName: string
-    results: HookSandboxExecutionResult<unknown>[]
-  }> = []
-
-  constructor(config: Partial<HookExecutionConfig> = {}) {
-    this.config = {
-      defaultTimeout: 30000,
-      continueOnError: true,
-      enableCaching: false,
-      cacheTTL: 60000,
-      maxConcurrent: 10,
-      ...config,
-    }
-  }
-
-  // ===========================================================================
-  // Hook Registration
-  // ===========================================================================
-
-  registerHook<T extends AnyFunction>(
-    hookName: string,
-    pluginId: string,
-    hook: T,
-    options: Partial<Omit<HookRegistration<T>, "pluginId" | "hook">> = {}
-  ): () => void {
-    if (!this.hooks.has(hookName)) {
-      this.hooks.set(hookName, new Map())
-    }
-
-    const hookMap = this.hooks.get(hookName)!
-    hookMap.set(pluginId, {
-      pluginId,
-      hook,
-      priority: options.priority ? normalizePriority(options.priority) : HookPriority.NORMAL,
-      enabled: options.enabled ?? true,
-      timeout: options.timeout,
-      metadata: options.metadata,
-    })
-
-    return () => this.unregisterHook(hookName, pluginId)
-  }
-
-  unregisterHook(hookName: string, pluginId: string): void {
-    const hookMap = this.hooks.get(hookName)
-    if (hookMap) {
-      hookMap.delete(pluginId)
-      if (hookMap.size === 0) {
-        this.hooks.delete(hookName)
-      }
-    }
-  }
-
-  unregisterAllHooks(pluginId: string): void {
-    for (const [hookName, hookMap] of this.hooks.entries()) {
-      hookMap.delete(pluginId)
-      if (hookMap.size === 0) {
-        this.hooks.delete(hookName)
-      }
-    }
-  }
-
-  // ===========================================================================
-  // Middleware
-  // ===========================================================================
-
-  addMiddleware<T extends AnyFunction>(
-    hookName: string,
-    middleware: HookMiddleware<T>
-  ): () => void {
-    if (!this.middleware.has(hookName)) {
-      this.middleware.set(hookName, [])
-    }
-
-    const middlewares = this.middleware.get(hookName)!
-    middlewares.push(middleware as HookMiddleware<AnyFunction>)
-
-    return () => {
-      const idx = middlewares.indexOf(middleware as HookMiddleware<AnyFunction>)
-      if (idx !== -1) {
-        middlewares.splice(idx, 1)
-      }
-    }
-  }
-
-  // ===========================================================================
-  // Hook Execution
-  // ===========================================================================
-
-  async executeHook<T>(
-    hookName: string,
-    args: unknown[],
-    options: {
-      parallel?: boolean
-      stopOnFirst?: boolean
-      filter?: (pluginId: string) => boolean
-    } = {}
-  ): Promise<HookSandboxExecutionResult<T>[]> {
-    const hookMap = this.hooks.get(hookName)
-    if (!hookMap || hookMap.size === 0) {
-      return []
-    }
-
-    const sortedHooks = this.getSortedHooks(hookName, options.filter)
-    const middlewares = this.middleware.get(hookName) || []
-    const results: HookSandboxExecutionResult<T>[] = []
-
-    if (options.parallel) {
-      const promises = sortedHooks.map((reg) => this.executeOneHook<T>(reg, args, middlewares))
-      const settled = await Promise.allSettled(promises)
-
-      for (const result of settled) {
-        if (result.status === "fulfilled") {
-          results.push(result.value)
-        }
-      }
-    } else {
-      for (const reg of sortedHooks) {
-        const result = await this.executeOneHook<T>(reg, args, middlewares)
-        results.push(result)
-
-        if (options.stopOnFirst && result.success && result.result !== undefined) {
-          break
-        }
-
-        if (!this.config.continueOnError && !result.success) {
-          break
-        }
-      }
-    }
-
-    this.recordExecution(hookName, results as HookSandboxExecutionResult<unknown>[])
-    return results
-  }
-
-  private async executeOneHook<T>(
-    registration: HookRegistration<AnyFunction>,
-    args: unknown[],
-    middlewares: HookMiddleware<AnyFunction>[]
-  ): Promise<HookSandboxExecutionResult<T>> {
-    const startTime = Date.now()
-
-    if (!registration.enabled) {
-      return {
-        success: true,
-        pluginId: registration.pluginId,
-        executionTime: 0,
-        duration: 0,
-        skipped: true,
-      }
-    }
-
-    try {
-      let processedArgs = args
-      for (const mw of middlewares) {
-        if (mw.before) {
-          const result = mw.before(processedArgs as Parameters<AnyFunction>, registration.pluginId)
-          if (result) {
-            processedArgs = result as unknown[]
-          }
-        }
-      }
-
-      const timeout = registration.timeout || this.config.defaultTimeout
-      let result = await this.withTimeout(
-        registration.hook(...processedArgs),
-        timeout,
-        `Hook ${registration.pluginId} timed out`
-      )
-
-      for (const mw of middlewares) {
-        if (mw.after) {
-          const processed = mw.after(result, registration.pluginId)
-          if (processed !== undefined) {
-            result = processed
-          }
-        }
-      }
-
-      return {
-        success: true,
-        result: result as T,
-        executionTime: Date.now() - startTime,
-        duration: Date.now() - startTime,
-        pluginId: registration.pluginId,
-        skipped: false,
-      }
-    } catch (error) {
-      const err = error instanceof Error ? error : new Error(String(error))
-
-      for (const mw of middlewares) {
-        if (mw.error) {
-          mw.error(err, registration.pluginId)
-        }
-      }
-
-      loggers.hooks.error(`Error in ${registration.pluginId}:`, err)
-
-      return {
-        success: false,
-        error: err,
-        executionTime: Date.now() - startTime,
-        duration: Date.now() - startTime,
-        pluginId: registration.pluginId,
-        skipped: false,
-      }
-    }
-  }
-
-  // ===========================================================================
-  // Pipeline Execution (Transform Chain)
-  // ===========================================================================
-
-  async executePipeline<T>(
-    hookName: string,
-    initialValue: T,
-    options: {
-      filter?: (pluginId: string) => boolean
-    } = {}
-  ): Promise<{ result: T; transformations: string[] }> {
-    const sortedHooks = this.getSortedHooks(hookName, options.filter)
-    const transformations: string[] = []
-    let currentValue = initialValue
-
-    for (const reg of sortedHooks) {
-      if (!reg.enabled) continue
-
-      try {
-        const result = await this.withTimeout(
-          reg.hook(currentValue),
-          reg.timeout || this.config.defaultTimeout,
-          `Pipeline hook ${reg.pluginId} timed out`
-        )
-
-        if (result !== undefined) {
-          currentValue = result as T
-          transformations.push(reg.pluginId)
-        }
-      } catch (error) {
-        loggers.hooks.error(`Pipeline error in ${reg.pluginId}:`, error)
-        if (!this.config.continueOnError) {
-          throw error
-        }
-      }
-    }
-
-    return { result: currentValue, transformations }
-  }
-
-  // ===========================================================================
-  // Utilities
-  // ===========================================================================
-
-  private getSortedHooks(
-    hookName: string,
-    filter?: (pluginId: string) => boolean
-  ): HookRegistration<AnyFunction>[] {
-    const hookMap = this.hooks.get(hookName)
-    if (!hookMap) return []
-
-    let hooks = Array.from(hookMap.values())
-
-    if (filter) {
-      hooks = hooks.filter((h) => filter(h.pluginId))
-    }
-
-    // Deterministic dispatch order: priority desc, then plugin ID lexicographic
-    // (stable across restarts regardless of plugin discovery scan order). See
-    // docs/features/plugin-development.md#hook-execution-order.
-    return hooks.sort((a, b) => {
-      const priorityDiff = priorityToNumber(b.priority) - priorityToNumber(a.priority)
-      if (priorityDiff !== 0) return priorityDiff
-      return a.pluginId.localeCompare(b.pluginId)
-    })
-  }
-
-  private async withTimeout<T>(
-    promise: Promise<T> | T,
-    timeout: number,
-    message: string
-  ): Promise<T> {
-    if (!(promise instanceof Promise)) {
-      return promise
-    }
-
-    return Promise.race([
-      promise,
-      new Promise<T>((_, reject) => setTimeout(() => reject(new Error(message)), timeout)),
-    ])
-  }
-
-  private recordExecution(hookName: string, results: HookSandboxExecutionResult<unknown>[]): void {
-    this.executionHistory.push({ hookName, results })
-    if (this.executionHistory.length > 100) {
-      this.executionHistory = this.executionHistory.slice(-100)
-    }
-  }
-
-  // ===========================================================================
-  // Introspection
-  // ===========================================================================
-
-  getRegisteredHooks(hookName?: string): Map<string, string[]> {
-    const result = new Map<string, string[]>()
-
-    if (hookName) {
-      const hookMap = this.hooks.get(hookName)
-      if (hookMap) {
-        result.set(hookName, Array.from(hookMap.keys()))
-      }
-    } else {
-      for (const [name, hookMap] of this.hooks.entries()) {
-        result.set(name, Array.from(hookMap.keys()))
-      }
-    }
-
-    return result
-  }
-
-  getHookRegistration(
-    hookName: string,
-    pluginId: string
-  ): HookRegistration<AnyFunction> | undefined {
-    return this.hooks.get(hookName)?.get(pluginId)
-  }
-
-  setHookEnabled(hookName: string, pluginId: string, enabled: boolean): void {
-    const reg = this.hooks.get(hookName)?.get(pluginId)
-    if (reg) {
-      reg.enabled = enabled
-    }
-  }
-
-  setHookPriority(hookName: string, pluginId: string, priority: HookPriority): void {
-    const reg = this.hooks.get(hookName)?.get(pluginId)
-    if (reg) {
-      reg.priority = priority
-    }
-  }
-
-  getExecutionHistory(): Array<{
-    hookName: string
-    results: HookSandboxExecutionResult<unknown>[]
-  }> {
-    return [...this.executionHistory]
-  }
-
-  clearExecutionHistory(): void {
-    this.executionHistory = []
-  }
-
-  // ===========================================================================
-  // Cache Management
-  // ===========================================================================
-
-  setCacheEnabled(enabled: boolean): void {
-    this.config.enableCaching = enabled
-    if (!enabled) {
-      this.cache.clear()
-    }
-  }
-
-  clearCache(hookName?: string): void {
-    if (hookName) {
-      for (const key of this.cache.keys()) {
-        if (key.startsWith(`${hookName}:`)) {
-          this.cache.delete(key)
-        }
-      }
-    } else {
-      this.cache.clear()
-    }
-  }
-
-  // ===========================================================================
-  // Cleanup
-  // ===========================================================================
-
-  clear(): void {
-    this.hooks.clear()
-    this.middleware.clear()
-    this.cache.clear()
-    this.executionHistory = []
-  }
-}
 
 // =============================================================================
 // PluginLifecycleHooks - Core Plugin Lifecycle Management
@@ -717,6 +304,41 @@ export class PluginLifecycleHooks {
     const registered = this.registeredHooks.get(pluginId)
     if (registered?.hooks.onUnload) {
       await registered.hooks.onUnload()
+    }
+  }
+
+  async dispatchOnInstall(pluginId: string): Promise<void> {
+    const registered = this.registeredHooks.get(pluginId)
+    if (registered?.hooks.onInstall) {
+      await registered.hooks.onInstall()
+    }
+  }
+
+  async dispatchOnUninstall(pluginId: string): Promise<void> {
+    const registered = this.registeredHooks.get(pluginId)
+    if (registered?.hooks.onUninstall) {
+      await registered.hooks.onUninstall()
+    }
+  }
+
+  async dispatchOnUpdate(pluginId: string, info: PluginUpdateInfo): Promise<void> {
+    const registered = this.registeredHooks.get(pluginId)
+    if (registered?.hooks.onUpdate) {
+      await registered.hooks.onUpdate(info)
+    }
+  }
+
+  async dispatchOnSuspend(pluginId: string): Promise<void> {
+    const registered = this.registeredHooks.get(pluginId)
+    if (registered?.hooks.onSuspend) {
+      await registered.hooks.onSuspend()
+    }
+  }
+
+  async dispatchOnResume(pluginId: string): Promise<void> {
+    const registered = this.registeredHooks.get(pluginId)
+    if (registered?.hooks.onResume) {
+      await registered.hooks.onResume()
     }
   }
 
@@ -1294,6 +916,18 @@ export class PluginLifecycleHooks {
     return registered?.hooks[hookName] !== undefined
   }
 
+  /**
+   * Cheap existence check: does ANY registered plugin contribute `hookName`?
+   * Powers the adapter-hooks no-listener fast path so dispatch is skipped when
+   * no plugin is wired. Distinct from the per-plugin `hasHook(pluginId, …)`.
+   */
+  hasAnyHook(hookName: HookName): boolean {
+    for (const reg of this.registeredHooks.values()) {
+      if (reg.hooks[hookName] !== undefined) return true
+    }
+    return false
+  }
+
   getPluginsWithHook(hookName: HookName): string[] {
     return Array.from(this.registeredHooks.entries())
       .filter(([_, reg]) => reg.hooks[hookName] !== undefined)
@@ -1302,6 +936,19 @@ export class PluginLifecycleHooks {
 
   getRegisteredPlugins(): string[] {
     return Array.from(this.registeredHooks.keys())
+  }
+
+  /**
+   * Hook names a plugin has actually registered (a non-undefined handler).
+   * Powers the detail pane's "Capabilities → Hooks" enumeration so users can
+   * see which lifecycle hooks a plugin contributes, not just filter by them.
+   */
+  getHooksByPlugin(pluginId: string): string[] {
+    const registered = this.registeredHooks.get(pluginId)
+    if (!registered) return []
+    return Object.keys(registered.hooks).filter(
+      (name) => registered.hooks[name as HookName] !== undefined
+    )
   }
 
   clear(): void {
@@ -1361,6 +1008,16 @@ export class PluginEventHooks {
       .map((p) => p.id)
   }
 
+  /**
+   * Cheap existence check: is there at least one ENABLED plugin contributing
+   * `hookName`? Reuses `getPluginsByPriority` so the enabled-only + has-handler
+   * filter stays identical to the dispatch path. Powers the adapter-hooks
+   * no-listener fast path.
+   */
+  hasAnyHook(hookName: keyof PluginHooksAll): boolean {
+    return this.getPluginsByPriority(hookName).length > 0
+  }
+
   /** Default timeout for hook execution in milliseconds */
   private static readonly HOOK_TIMEOUT_MS = 10_000
 
@@ -1381,17 +1038,22 @@ export class PluginEventHooks {
       if (!plugin || plugin.status !== "enabled" || !plugin.hooks) continue
 
       const startTime = performance.now()
+      // The timeout timer must be cleared on the fast path (W3.7): per-chunk
+      // dispatchers (dispatchStreamChunk) call executeHook thousands of times
+      // per stream, and an uncleared racer both leaks a pending timer per call
+      // and rejects into the void later.
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined
       try {
         const hookPromise = Promise.resolve(executor(plugin.hooks as PluginHooksAll, pluginId))
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeoutHandle = setTimeout(
             () =>
               reject(
                 new Error(`Hook ${hookName} timed out after ${timeoutMs}ms for plugin ${pluginId}`)
               ),
             timeoutMs
           )
-        )
+        })
         const result = await Promise.race([hookPromise, timeoutPromise])
         results.push({
           success: true,
@@ -1411,6 +1073,8 @@ export class PluginEventHooks {
           duration: performance.now() - startTime,
           skipped: false,
         })
+      } finally {
+        if (timeoutHandle !== undefined) clearTimeout(timeoutHandle)
       }
     }
 
@@ -1457,6 +1121,28 @@ export class PluginEventHooks {
 
   async dispatchGoalDelete(goalId: string) {
     return this.executeHook("onGoalDelete", (hooks) => hooks.onGoalDelete?.(goalId))
+  }
+
+  async dispatchPetInteract(payload: PetInteractHookPayload) {
+    return this.executeHook("onPetInteract", (hooks) => hooks.onPetInteract?.(payload))
+  }
+
+  async dispatchPetLevelUp(payload: PetLevelUpHookPayload) {
+    return this.executeHook("onPetLevelUp", (hooks) => hooks.onPetLevelUp?.(payload))
+  }
+
+  async dispatchPetEvolved(payload: PetEvolvedHookPayload) {
+    return this.executeHook("onPetEvolved", (hooks) => hooks.onPetEvolved?.(payload))
+  }
+
+  async dispatchPetAchievementUnlocked(payload: PetAchievementUnlockedHookPayload) {
+    return this.executeHook("onPetAchievementUnlocked", (hooks) =>
+      hooks.onPetAchievementUnlocked?.(payload)
+    )
+  }
+
+  async dispatchPetUnwell(payload: PetUnwellHookPayload) {
+    return this.executeHook("onPetUnwell", (hooks) => hooks.onPetUnwell?.(payload))
   }
 
   async dispatchShareLinkCreate(link: ShareLinkHookPayload) {
@@ -1747,7 +1433,15 @@ export class PluginEventHooks {
   }
 
   /**
-   * Dispatch pre-compact hook - allows plugins to customize context compression
+   * Dispatch pre-compact hook - allows plugins to customize context compression.
+   *
+   * NOTE: this dispatcher is part of the public plugin `onPreCompact` API
+   * surface but is not yet wired into a live compaction trigger. The Anthropic
+   * path self-manages compaction inside the Agent SDK, and the generic
+   * (AI-SDK) path summarizes in the sidecar, which cannot call back into `lib/`
+   * (`types/plugin/plugin-compaction-strategy.ts:11-14`). Kept for contract
+   * parity (mirrored in the Python `PluginHook.ON_PRE_COMPACT` enum and guarded
+   * by `runtime-proof-audit.test.ts`).
    */
   async dispatchPreCompact(
     context: import("@/types/plugin/plugin-hooks").PreCompactContext
@@ -1946,6 +1640,46 @@ export class PluginEventHooks {
       req = { ...req, ...value }
     }
     return { decision: "allow", req }
+  }
+
+  /**
+   * Observe + veto + transform gate for IM connector inbound / outbound
+   * (plugin⇄IM extensibility). Deterministic aggregation across all subscribed
+   * plugins (priority order):
+   *
+   *   - First `{action:"block"}` short-circuits → returns block immediately.
+   *   - `{action:"transform", segments}` replaces the segment list; later
+   *     transforms in the SAME dispatch saw the pre-mutation payload, so the
+   *     last transform wins on the full-replacement (documented, matches
+   *     `dispatchTerminalWillSpawn`).
+   *   - `allow` / `void` / `undefined` → no-op.
+   *
+   * A throwing/timing-out plugin is treated as `allow` (fail-OPEN for plugin
+   * ERRORS, so a buggy plugin never wedges IM). The HOST is responsible for the
+   * fail-CLOSED PII re-gate on any returned transform — this method only
+   * aggregates decisions.
+   */
+  async dispatchConnectorDecision(
+    hookName: "onConnectorInbound" | "onConnectorOutbound",
+    payload: ConnectorInboundHookPayload | ConnectorOutboundHookPayload
+  ): Promise<ConnectorHookDecision> {
+    const results = await this.executeHook(hookName, (hooks) => {
+      const fn = hooks[hookName] as
+        | ((
+            p: typeof payload
+          ) => ConnectorHookDecision | void | Promise<ConnectorHookDecision | void>)
+        | undefined
+      return fn?.(payload)
+    })
+    let transformed: unknown[] | null = null
+    for (const r of results) {
+      if (!r.success) continue
+      const value = r.result as ConnectorHookDecision | undefined | void
+      if (!value || value.action === "allow") continue
+      if (value.action === "block") return { action: "block", reason: value.reason }
+      if (value.action === "transform") transformed = value.segments
+    }
+    return transformed ? { action: "transform", segments: transformed } : { action: "allow" }
   }
 
   /**

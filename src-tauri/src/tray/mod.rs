@@ -63,6 +63,9 @@ struct TrayMenuStateInner {
     items: Vec<TrayMenuItem>,
     index: HashMap<String, TrayActionPayload>,
     tooltip: Option<String>,
+    /// Text next to the icon (macOS menu bar / Linux appindicator; Windows
+    /// ignores it). Used by the renderer's taskbar usage readout.
+    title: Option<String>,
 }
 
 #[cfg(desktop)]
@@ -88,6 +91,14 @@ impl TrayMenuStateStore {
     pub fn tooltip(&self) -> Option<String> {
         self.inner.lock().tooltip.clone()
     }
+
+    pub fn set_title(&self, title: Option<String>) {
+        self.inner.lock().title = title;
+    }
+
+    pub fn title(&self) -> Option<String> {
+        self.inner.lock().title.clone()
+    }
 }
 
 #[cfg(not(desktop))]
@@ -106,6 +117,10 @@ impl TrayMenuStateStore {
     }
     pub fn set_tooltip(&self, _tooltip: Option<String>) {}
     pub fn tooltip(&self) -> Option<String> {
+        None
+    }
+    pub fn set_title(&self, _title: Option<String>) {}
+    pub fn title(&self) -> Option<String> {
         None
     }
 }
@@ -162,16 +177,7 @@ pub fn install(app: &App) -> tauri::Result<()> {
                 ..
             } = event
             {
-                let app = tray.app_handle();
-                if let Some(window) = app.get_webview_window("main") {
-                    let visible = window.is_visible().unwrap_or(false);
-                    let focused = window.is_focused().unwrap_or(false);
-                    if visible && focused {
-                        let _ = window.hide();
-                    } else {
-                        window_utils::bring_window_to_front(&window);
-                    }
-                }
+                toggle_main_window(tray.app_handle());
             }
         })
         .build(app)?;
@@ -207,6 +213,22 @@ fn dispatch_click<R: tauri::Runtime>(
     }
 }
 
+/// Toggle the main window: hide it when it's already visible AND focused,
+/// otherwise bring it to the front. Shared by the tray left-click handler and
+/// the `toggle-window` menu action so both behave identically.
+#[cfg(desktop)]
+fn toggle_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(window) = app.get_webview_window("main") {
+        let visible = window.is_visible().unwrap_or(false);
+        let focused = window.is_focused().unwrap_or(false);
+        if visible && focused {
+            let _ = window.hide();
+        } else {
+            window_utils::bring_window_to_front(&window);
+        }
+    }
+}
+
 #[cfg(desktop)]
 fn apply_native<R: tauri::Runtime>(app: &tauri::AppHandle<R>, action: &str) {
     match action {
@@ -217,6 +239,37 @@ fn apply_native<R: tauri::Runtime>(app: &tauri::AppHandle<R>, action: &str) {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.hide();
             }
+        }
+        "toggle-window" => {
+            toggle_main_window(app);
+        }
+        // Renderer-handled actions: Rust just emits the matching legacy event
+        // (mirroring the `settings` / `open-logs` pattern) so the existing
+        // `hooks/system/use-tauri-events.ts` listeners run the real work
+        // (clipboard, OS opener, autostart plugin) renderer-side.
+        "open-data-folder" => {
+            let _ = app.emit("tray://open-data-folder", serde_json::Value::Null);
+        }
+        "copy-diagnostics" => {
+            let _ = app.emit("tray://copy-diagnostics", serde_json::Value::Null);
+        }
+        "open-docs" => {
+            let _ = app.emit("tray://open-docs", serde_json::Value::Null);
+        }
+        "report-issue" => {
+            let _ = app.emit("tray://report-issue", serde_json::Value::Null);
+        }
+        "check-updates" => {
+            window_utils::bring_main_window_to_front(app);
+            let _ = app.emit("tray://check-updates", serde_json::Value::Null);
+        }
+        "toggle-autostart" => {
+            let _ = app.emit("tray://toggle-autostart", serde_json::Value::Null);
+        }
+        "noop" => {
+            // Inert info rows in the live status section carry this action so
+            // they pass `validate_payload`; clicking a disabled row never
+            // fires, and an enabled one is intentionally a no-op.
         }
         "new-chat" => {
             window_utils::bring_main_window_to_front(app);
@@ -237,6 +290,40 @@ fn apply_native<R: tauri::Runtime>(app: &tauri::AppHandle<R>, action: &str) {
             let state = app.state::<crate::automation::commands::AutomationState>();
             state.gate.engage_kill_switch();
             let _ = app.emit("automation:kill-switch", serde_json::Value::Null);
+        }
+        "pet-toggle" => {
+            // Toggle the desktop pet: hide if visible, otherwise open with
+            // defaults. The tray has no PetWindowOpts from the renderer, so
+            // the open path uses the persisted-size-agnostic defaults.
+            let handle = app.app_handle();
+            if crate::pet_window::is_pet_window_open_inner(handle) {
+                let _ = crate::pet_window::close_pet_window_inner(handle);
+            } else {
+                let _ = crate::pet_window::open_pet_window_inner(
+                    handle,
+                    crate::pet_window::PetWindowOpts::default(),
+                );
+            }
+        }
+        "pet-disable-click-through" => {
+            // Click-through recovery path — re-enable cursor events so a
+            // pointer-trapped overlay becomes interactive again. Routed
+            // through the shared helper so the renderer hears the
+            // `pet://state-changed` broadcast and its settings store resyncs.
+            let _ = crate::pet_window::set_pet_click_through_inner(app.app_handle(), false);
+        }
+        "island-toggle" => {
+            // Toggle the fleet agent-monitor island (hide if visible, else
+            // open at defaults) — mirrors "pet-toggle".
+            let handle = app.app_handle();
+            if crate::fleet::island_window::is_island_window_open_inner(handle) {
+                let _ = crate::fleet::island_window::close_island_window_inner(handle);
+            } else {
+                let _ = crate::fleet::island_window::open_island_window_inner(
+                    handle,
+                    crate::fleet::island_window::IslandWindowOpts::default(),
+                );
+            }
         }
         "quit" => {
             // Handled by PredefinedMenuItem::quit — should never reach here
@@ -282,5 +369,15 @@ mod tests {
         assert_eq!(store.tooltip().as_deref(), Some("Cognia (idle)"));
         store.set_tooltip(None);
         assert!(store.tooltip().is_none());
+    }
+
+    #[test]
+    fn title_round_trips_through_store() {
+        let store = TrayMenuStateStore::default();
+        assert!(store.title().is_none());
+        store.set_title(Some("42%".into()));
+        assert_eq!(store.title().as_deref(), Some("42%"));
+        store.set_title(None);
+        assert!(store.title().is_none());
     }
 }

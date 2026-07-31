@@ -83,7 +83,7 @@ three **thin** orchestrator modules over them:
   on threshold) / `resolveConsensus` (lead override) / `cancelConsensus`.
   Pure helpers `tallyVotes` / `computeWinner` carry the math.
 - `shared-memory-orchestrator.ts` — `publishEntry` (PII-gated through
-  `lib/twin/ingest/redact.ts:hasNoLeakingPii`) / `deleteEntry` /
+  `packages/redact/src/index.ts:hasNoLeakingPii`) / `deleteEntry` /
   `autoPublishTaskResult` / `clearTeamMemory`.
 - `delegation-orchestrator.ts` — `delegateToBackground` (drives
   `background-agent-manager` + `executeAgent`) / `delegateToExternal` /
@@ -154,7 +154,7 @@ Each carries a typed payload (see `types/plugin/plugin.ts`).
 - `BudgetGuard.on(...)` emitter API was unchanged — hook dispatch added as
   listeners.
 - `<PresetEditor>` reused instead of building a new `AgentSubjectEditor`.
-- `lib/twin/ingest/redact.ts:hasNoLeakingPii` reused as the SharedMemory PII
+- `packages/redact/src/index.ts:hasNoLeakingPii` reused as the SharedMemory PII
   gate (red-line per ADR-0003).
 
 ## See also

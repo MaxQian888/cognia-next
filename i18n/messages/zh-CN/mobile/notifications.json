@@ -1,0 +1,86 @@
+{
+  "permissionCta": {
+    "description": "Cognia 可以在长时任务或定时备份需要关注时通知你。",
+    "descriptionDenied": "通知权限被拒绝。请前往 设置 → Cognia → 通知 开启。",
+    "enableButton": "启用",
+    "enableInProgress": "请求中…",
+    "settingsButton": "前往设置",
+    "title": "启用后台提醒"
+  },
+  "preferences": {
+    "badge": "未读角标",
+    "badgeHelp": "在应用图标和标签上显示未读计数。",
+    "behaviourTitle": "行为",
+    "channel": {
+      "os": "系统通知",
+      "push": "推送通知",
+      "toast": "应用内提示"
+    },
+    "channelHelp": {
+      "os": "显示系统原生通知。",
+      "push": "应用关闭时仍推送到本设备。",
+      "toast": "在应用内短暂弹出消息。"
+    },
+    "channelsHelp": "新通知默认出现的位置。",
+    "channelsTitle": "默认渠道",
+    "days": "{count, plural, other {# 天}}",
+    "focusAware": "聚焦感知",
+    "focusAwareHelp": "查看相关会话时，抑制系统通知。",
+    "gatesTitle": "级别门槛",
+    "level": {
+      "critical": "严重",
+      "error": "错误",
+      "info": "信息",
+      "success": "成功",
+      "warning": "警告"
+    },
+    "minOsLevel": "系统通知最低级别",
+    "minOsLevelHelp": "仅在不低于该级别时触发系统通知。",
+    "minPushLevel": "推送最低级别",
+    "minPushLevelHelp": "仅在不低于该级别时发送推送通知。",
+    "perSourceHelp": "屏蔽来自特定子系统的通知。",
+    "perSourceTitle": "按来源",
+    "quietHoursEnabled": "勿扰时段",
+    "quietHoursEnabledHelp": "在每日时段内静音非严重通知。",
+    "quietHoursEnd": "结束时间",
+    "quietHoursHelp": "夜间暂停提醒；严重通知仍会送达。",
+    "quietHoursStart": "开始时间",
+    "quietHoursTitle": "勿扰",
+    "resetDefaults": "恢复默认",
+    "retentionDays": "保留时长",
+    "retentionItems": "最多保存",
+    "retentionTitle": "保留",
+    "snoozeAutoWake": "活动时唤醒",
+    "snoozeAutoWakeHelp": "相关活动恢复时，重新显示已暂停的通知。",
+    "sound": "声音",
+    "soundHelp": "新通知时播放提示音。",
+    "source": {
+      "agent-team": "智能体团队",
+      "connector": "连接器",
+      "plugin": "插件",
+      "scheduler": "计划任务",
+      "session": "会话",
+      "system": "系统",
+      "workflow": "工作流"
+    },
+    "sourceHelp": "允许来自该来源的通知。"
+  },
+  "queue": {
+    "cancel": "取消",
+    "cancelFailed": "取消失败：{message}",
+    "empty": "暂无已排队通知。",
+    "errorTitle": "无法加载通知列表",
+    "loading": "加载中…",
+    "refresh": "刷新",
+    "scheduledAt": "在 {time}",
+    "title": "已排队通知",
+    "unsupportedDescription": "本地通知仅在 iOS / Android 上可用。",
+    "unsupportedTitle": "当前平台不支持"
+  },
+  "section": {
+    "description": "用于备份提醒和长时任务的后台通知。",
+    "queueRowDescription": "查看或取消待发送的提醒。",
+    "queueRowTitle": "已排队通知",
+    "title": "通知"
+  }
+}

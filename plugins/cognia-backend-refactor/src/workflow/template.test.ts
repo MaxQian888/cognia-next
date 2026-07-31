@@ -118,3 +118,28 @@ describe("REFACTOR_PIPELINE_TEMPLATE requires resolution", () => {
     expect(result.ok).toBe(true)
   })
 })
+
+describe("REFACTOR_PIPELINE_TEMPLATE upstream references", () => {
+  const byId = Object.fromEntries(REFACTOR_PIPELINE_TEMPLATE.nodes.map((n) => [n.id, n]))
+
+  // The runtime stores a node's RAW executor output at `upstream[id]`
+  // (orchestrator.ts `stepOutputs.set(stepId, result.output)`; expression.ts
+  // `scope.upstream[head.id]`). A `.out.` wrapper resolves to undefined, and
+  // `interpolate` renders undefined as "" — so a stale `.out.` path silently
+  // feeds an EMPTY prompt to a multi-minute agent turn and the run still
+  // reports success. Pin the shapes each producer actually emits:
+  //   agent.turn            -> { text, messageId, characterId, role, sessionId }
+  //   action.system.terminal -> { exitCode, output, sessionId, command }
+  it("never uses a `.out.` wrapper in any prompt expression", () => {
+    for (const node of REFACTOR_PIPELINE_TEMPLATE.nodes) {
+      const params = JSON.stringify(node.data?.params ?? {})
+      expect(params).not.toContain(".out.")
+    }
+  })
+
+  it("reads agent.turn text and terminal output off the raw upstream shape", () => {
+    expect(String(byId.plan.data.params?.prompt)).toContain("$node['analyze'].text")
+    expect(String(byId.refactor.data.params?.prompt)).toContain("$node['plan'].text")
+    expect(String(byId.fix1.data.params?.prompt)).toContain("$node['gate1'].output")
+  })
+})

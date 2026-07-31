@@ -71,7 +71,7 @@ TypeScript layer (renderer)
 | Telegram      | 长轮询（`getUpdates`）或 webhook | X-Telegram-Bot-Api-Secret-Token (HMAC-SHA256) |
 | Discord       | Gateway WS (v10)                    | Ed25519 (X-Signature-Ed25519)                 |
 | Slack         | Events API webhook                  | HMAC-SHA256 (X-Slack-Signature v0)            |
-| 飞书 / Lark | 事件回调 webhook              | HMAC-SHA256 (X-Lark-Signature)                |
+| 飞书 / Lark | 长连接 WS（protobuf，**默认**）或事件回调 webhook | 长连接：app_id/app_secret WS 握手。Webhook：verification token（`header.token`）+ 可选 AES-256-CBC 解密（schema 2.0） |
 | OneBot v11    | 反向 WS（设备主动连入）             | Bearer token（可选）                       |
 
 ### 出站执行器的保证
@@ -166,6 +166,32 @@ Outbound / Audit。每个标签是 `./tabs/` 下的一个独立组件。
   Phase 2。
 - Slack/Lark 的 OAuth 流程部分接入；生产令牌需要 Tauri keyring
   集成和一个托管的重定向 URL。
+
+---
+
+## 修订 — 2026-07（飞书链路完整性补齐）
+
+一次连接器链路审计发现若干「写好却没接通」的飞书/公共管线缺口。本次补齐它们
+（纯 TypeScript——无 Rust 改动；Rust 侧附件缓存与 OAuth 完成处理器早已存在）：
+
+- **入站富媒体摄取（关闭「附件缓存 Phase 2」标记）。**
+  `lib/connectors/adapters/lark/inbound-media.ts:enrichLarkInboundMedia` 作为适配器
+  `dispatchEnvelope` 的第二遍,经既有加密缓存(`connectors_attachment_fetch` /
+  `connectors_attachment_read`)下载图片/文件字节,挂上内联 `dataBase64`(被已接线的入站
+  OCR + 模型视觉路径消费),文档类文件再经 `processDocumentAsync` 抽取文本。
+  `parse.ts:buildSegments` 现在把 `post` / `file` / `audio` / `media` 投影成类型化 segment,
+  而非 `[type]` 占位。
+- **以用户身份发送（关闭「OAuth 部分接入」标记）。**
+  `auth.ts:getUserAccessToken` / `refreshUserToken` 解析并静默刷新 OAuth 处理器持久化的
+  `user_token`;`index.ts:doRequest` 使用它(opt-in `settings.sendAsUser`),带 401 刷新与
+  优雅回退到机器人身份。`lark-config.tsx` 新增「以我的身份发送」区块:OAuth **连接账号**
+  按钮(打开授权 URL,由 deep-link 路由完成回调)+ opt-in 开关。
+- **公共管线修复:** `cooldown-after-bot-reply` blocker 现在真正被回写
+  (`ConnectorBus.recordBotReply`,由出站 runner 的 `onDelivered` 接线——默认群聊反刷屏冷却
+  此前从未生效);团队/工作流的 IM 派发现在与单角色路径过同一条 fail-closed PII 网关
+  (`runtime.ts`,关闭一处已确认的红线绕过);异步出站序列化器尊重显式 open_id/user_id/email
+  路由;`larkInboundToA2UI` 正确解包真实事件信封;死模块 `segments-to-a2ui.ts` 与孤儿
+  `connectors_bind_webhook_route` invoke 已移除。
 
 ---
 

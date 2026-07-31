@@ -5,7 +5,13 @@
  * tests stay in-process (no Dexie writes, no event subscription).
  */
 
-import { PiiGateBlocked, isPiiSafeSendContent, safeSendPrompt } from "./safe-send-prompt"
+import {
+  PiiGateBlocked,
+  _resetSystemPromptPiiCacheForTest,
+  hasNoLeakingPiiCached,
+  isPiiSafeSendContent,
+  safeSendPrompt,
+} from "./safe-send-prompt"
 
 jest.mock("@/lib/claude/run-and-capture", () => {
   return {
@@ -25,17 +31,44 @@ jest.mock("@/lib/connectors/audit", () => {
   }
 })
 
+jest.mock("@/lib/db/session-usage", () => {
+  return {
+    __esModule: true,
+    recordConnectorUsage: jest.fn(async () => ({ messageId: "conn-row" })),
+    swallowUsageWrite: jest.fn(),
+  }
+})
+
+jest.mock("@/lib/claude/provider-telemetry", () => {
+  return {
+    __esModule: true,
+    recordProviderOutcome: jest.fn(),
+  }
+})
+
 import { runAndCaptureAssistantReply } from "@/lib/claude/run-and-capture"
 import { appendAudit } from "@/lib/connectors/audit"
+import { recordProviderOutcome } from "@/lib/claude/provider-telemetry"
+import { recordConnectorUsage, swallowUsageWrite } from "@/lib/db/session-usage"
 
 const mockRun = runAndCaptureAssistantReply as jest.MockedFunction<
   typeof runAndCaptureAssistantReply
 >
 const mockAudit = appendAudit as jest.MockedFunction<typeof appendAudit>
+const mockRecordConnectorUsage = recordConnectorUsage as jest.MockedFunction<
+  typeof recordConnectorUsage
+>
+const mockSwallowUsageWrite = swallowUsageWrite as jest.MockedFunction<typeof swallowUsageWrite>
+const mockRecordProviderOutcome = recordProviderOutcome as jest.MockedFunction<
+  typeof recordProviderOutcome
+>
 
 beforeEach(() => {
   mockRun.mockClear()
   mockAudit.mockClear()
+  mockRecordConnectorUsage.mockClear()
+  mockSwallowUsageWrite.mockClear()
+  mockRecordProviderOutcome.mockClear()
 })
 
 describe("isPiiSafeSendContent", () => {
@@ -83,7 +116,12 @@ describe("safeSendPrompt", () => {
   it("delegates to runAndCaptureAssistantReply when prompt is clean", async () => {
     const result = await safeSendPrompt("sess_1", "hello", undefined, auditCtx)
     expect(result).toEqual({ text: "model reply", messageId: "msg-1" })
-    expect(mockRun).toHaveBeenCalledWith("sess_1", "hello", undefined, expect.any(Object))
+    expect(mockRun).toHaveBeenCalledWith(
+      "sess_1",
+      "hello",
+      undefined,
+      expect.objectContaining({ execution: expect.objectContaining({ kind: "connector" }) })
+    )
     expect(mockAudit).not.toHaveBeenCalled()
   })
 
@@ -142,5 +180,159 @@ describe("safeSendPrompt", () => {
       undefined,
       expect.objectContaining({ signal: ac.signal, timeoutMs: 10_000 })
     )
+  })
+
+  it("forwards onPermissionRequest + onEvent so IM HITL and live-activity survive the gate", async () => {
+    const onPermissionRequest = jest.fn()
+    const onEvent = jest.fn()
+    await safeSendPrompt("sess_1", "clean", undefined, {
+      ...auditCtx,
+      onPermissionRequest,
+      onEvent,
+    })
+    expect(mockRun).toHaveBeenCalledWith(
+      "sess_1",
+      "clean",
+      undefined,
+      expect.objectContaining({ onPermissionRequest, onEvent })
+    )
+  })
+
+  it("records connector usage and provider telemetry when the captured result includes usage", async () => {
+    const usage = {
+      inputTokens: 100,
+      outputTokens: 25,
+      cacheReadInputTokens: 7,
+      cacheCreationInputTokens: 3,
+      totalCostUsd: 0.012,
+      durationMs: 750,
+    }
+    mockRun.mockResolvedValueOnce({
+      text: "model reply",
+      messageId: "msg-usage",
+      a2uiSurfaces: {},
+      a2uiSurfaceOrder: [],
+      usage,
+    })
+
+    const result = await safeSendPrompt(
+      "sess_1",
+      "clean",
+      { provider: "openai", model: "gpt-4o" },
+      auditCtx
+    )
+
+    expect(result.usage).toBe(usage)
+    expect(mockRecordConnectorUsage).toHaveBeenCalledWith({
+      adapterId: "adp_1",
+      conversationKey: "telegram:adp_1:c1",
+      usage,
+    })
+    expect(mockSwallowUsageWrite).toHaveBeenCalledWith(expect.any(Promise))
+    expect(mockRecordProviderOutcome).toHaveBeenCalledWith({
+      providerId: "openai",
+      ok: true,
+      latencyMs: 750,
+      estimatedCostUsd: 0.012,
+      modelId: "gpt-4o",
+      tokensUsed: 125,
+      inputTokens: 100,
+      outputTokens: 25,
+      cacheReadTokens: 7,
+      cacheCreationTokens: 3,
+      sessionId: "sess_1",
+      surface: "connector",
+    })
+  })
+
+  it("threads the connector turn's traceId/spanId into the provider outcome", async () => {
+    const usage = {
+      inputTokens: 10,
+      outputTokens: 5,
+      cacheReadInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      totalCostUsd: 0.001,
+      durationMs: 120,
+    }
+    mockRun.mockResolvedValueOnce({
+      text: "reply",
+      messageId: "msg-trace",
+      a2uiSurfaces: {},
+      a2uiSurfaceOrder: [],
+      usage,
+    })
+
+    await safeSendPrompt(
+      "sess_1",
+      "clean",
+      { provider: "openai", model: "gpt-4o", traceId: "a".repeat(32), spanId: "b".repeat(16) },
+      auditCtx
+    )
+
+    expect(mockRecordProviderOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        traceId: "a".repeat(32),
+        parentSpanId: "b".repeat(16),
+        surface: "connector",
+      })
+    )
+  })
+
+  it("does not write usage telemetry when the captured result has no usage", async () => {
+    await safeSendPrompt("sess_1", "clean", undefined, auditCtx)
+
+    expect(mockRecordConnectorUsage).not.toHaveBeenCalled()
+    expect(mockSwallowUsageWrite).not.toHaveBeenCalled()
+    expect(mockRecordProviderOutcome).not.toHaveBeenCalled()
+  })
+
+  it("records connector usage without provider outcome when provider is unresolved", async () => {
+    const usage = {
+      inputTokens: 10,
+      outputTokens: 5,
+      totalCostUsd: 0.002,
+      durationMs: 100,
+    }
+    mockRun.mockResolvedValueOnce({
+      text: "model reply",
+      messageId: "msg-usage",
+      a2uiSurfaces: {},
+      a2uiSurfaceOrder: [],
+      usage,
+    })
+
+    await safeSendPrompt("sess_1", "clean", undefined, auditCtx)
+
+    expect(mockRecordConnectorUsage).toHaveBeenCalledWith({
+      adapterId: "adp_1",
+      conversationKey: "telegram:adp_1:c1",
+      usage,
+    })
+    expect(mockRecordProviderOutcome).not.toHaveBeenCalled()
+  })
+})
+
+describe("hasNoLeakingPiiCached", () => {
+  beforeEach(() => _resetSystemPromptPiiCacheForTest())
+
+  it("returns true for clean text and false for leaking text", () => {
+    expect(hasNoLeakingPiiCached("just a friendly hello")).toBe(true)
+    expect(hasNoLeakingPiiCached("email me at alice@example.com")).toBe(false)
+  })
+
+  it("returns the cached result on a repeat call (LRU recency-refresh path)", () => {
+    const text = "a stable system prompt with no pii in it"
+    expect(hasNoLeakingPiiCached(text)).toBe(true)
+    // Second call hits the cache (delete + re-set refreshes recency).
+    expect(hasNoLeakingPiiCached(text)).toBe(true)
+  })
+
+  it("evicts the oldest entry once the cap is exceeded and stays correct", () => {
+    for (let i = 0; i < 70; i++) {
+      expect(hasNoLeakingPiiCached(`clean system prompt number ${i}`)).toBe(true)
+    }
+    expect(hasNoLeakingPiiCached("clean system prompt number 69")).toBe(true)
+    // A never-seen leaking prompt is a cache miss and still fails the gate.
+    expect(hasNoLeakingPiiCached("reach me at bob@example.org any time")).toBe(false)
   })
 })

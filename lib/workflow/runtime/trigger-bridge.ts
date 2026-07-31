@@ -10,7 +10,7 @@
  */
 
 import { getWorkflow } from "@/lib/db/workflows"
-import type { TriggerEvent } from "@/types/workflow/visual"
+import type { TriggerEvent, WorkflowTriggeredFrom } from "@/types/workflow/visual"
 import { getPluginEventHooks } from "@/lib/plugin/messaging/hooks-system"
 import { runWorkflow } from "./orchestrator"
 import { listenTriggerEvents } from "./tauri-bridge"
@@ -40,17 +40,48 @@ export async function installTriggerBridge(): Promise<TriggerBridgeDisposer> {
  * Resolve the workflow row, then invoke the orchestrator. Exported for
  * tests so they can drive the bridge without going through Tauri.
  */
-export async function dispatchTrigger(event: TriggerEvent): Promise<void> {
+export async function dispatchTrigger(
+  event: TriggerEvent,
+  opts?: {
+    /**
+     * Run origin persisted onto `WorkflowRunRow.triggeredBy` (ADR-0060) —
+     * lets companion-originated manual triggers record `source: "api"` +
+     * the caller `deviceId` instead of defaulting to `"ui"`.
+     */
+    triggeredBy?: WorkflowTriggeredFrom
+  }
+): Promise<void> {
   const workflow = await getWorkflow(event.workflowId)
   if (!workflow) {
     console.warn(`workflow trigger bridge: workflow ${event.workflowId} not found; ignoring`)
     return
   }
+  const triggerId = resolveTriggerId(event)
+  if (triggerId) {
+    const triggerNode = workflow.nodes.find((node) => node.id === triggerId)
+    if (!triggerNode || triggerNode.type !== event.kind || triggerNode.data.disabled === true) {
+      console.warn(
+        `workflow trigger bridge: trigger ${triggerId} is missing, disabled, or not ${event.kind}; ignoring`
+      )
+      return
+    }
+  }
+  const normalizedEvent =
+    triggerId && event.triggerId !== triggerId ? { ...event, triggerId } : event
   // Single canonical fan-in for every trigger path (cron / webhook / connector
   // / chat / plugin all route through here). Resume does NOT call this, so a
   // resumed run correctly does not re-fire the trigger hook.
   getPluginEventHooks().dispatchWorkflowTriggerFired(event.workflowId, event.kind, event.payload)
-  await runWorkflow({ workflow, trigger: event })
+  await runWorkflow({ workflow, trigger: normalizedEvent, triggeredBy: opts?.triggeredBy })
+}
+
+function resolveTriggerId(event: TriggerEvent): string | undefined {
+  if (typeof event.triggerId === "string" && event.triggerId.length > 0) return event.triggerId
+  if (!event.payload || typeof event.payload !== "object") return undefined
+  const legacyTriggerId = (event.payload as Record<string, unknown>).triggerId
+  return typeof legacyTriggerId === "string" && legacyTriggerId.length > 0
+    ? legacyTriggerId
+    : undefined
 }
 
 /**
@@ -62,6 +93,9 @@ export function isTriggerEvent(value: unknown): value is TriggerEvent {
   if (!value || typeof value !== "object") return false
   const v = value as Record<string, unknown>
   return (
-    typeof v.workflowId === "string" && typeof v.kind === "string" && typeof v.originAt === "number"
+    typeof v.workflowId === "string" &&
+    typeof v.kind === "string" &&
+    typeof v.originAt === "number" &&
+    (v.triggerId === undefined || typeof v.triggerId === "string")
   )
 }

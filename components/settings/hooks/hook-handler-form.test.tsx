@@ -4,10 +4,35 @@
 
 import { fireEvent, render, screen } from "@testing-library/react"
 import type { HookHandler } from "@/lib/claude/hooks"
-import { HookHandlerForm } from "./hook-handler-form"
+import { HookHandlerForm, validateHandler } from "./hook-handler-form"
 
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
+}))
+
+// The command field now renders the shared CodeMirror `LightCodeEditor`, which
+// needs jsdom DOM-measurement shims to mount. Swap it for a plain textarea that
+// honours the same `value` / `onChange(string)` / `data-testid` contract so the
+// form's own logic (not CM internals) is what these tests exercise.
+jest.mock("@/components/editor/light-code-editor", () => ({
+  LightCodeEditor: ({
+    value,
+    onChange,
+    "data-testid": testId,
+    "aria-label": ariaLabel,
+  }: {
+    value: string
+    onChange: (next: string) => void
+    "data-testid"?: string
+    "aria-label"?: string
+  }) => (
+    <textarea
+      data-testid={testId}
+      aria-label={ariaLabel}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  ),
 }))
 
 describe("HookHandlerForm", () => {
@@ -214,5 +239,81 @@ describe("HookHandlerForm", () => {
       />
     )
     expect(screen.getByText("headersEmpty")).toBeInTheDocument()
+  })
+
+  it("shows the webhook-unsupported note only for webhook handlers", () => {
+    const { rerender } = render(
+      <HookHandlerForm
+        value={{ type: "command", command: "echo hi" }}
+        onChange={() => undefined}
+        onRemove={() => undefined}
+      />
+    )
+    expect(screen.queryByTestId("handler-webhook-unsupported")).toBeNull()
+
+    rerender(
+      <HookHandlerForm
+        value={{ type: "webhook", url: "https://x.test" }}
+        onChange={() => undefined}
+        onRemove={() => undefined}
+      />
+    )
+    expect(screen.getByTestId("handler-webhook-unsupported")).toBeInTheDocument()
+  })
+
+  it("surfaces an inline error for an empty command", () => {
+    render(
+      <HookHandlerForm
+        value={{ type: "command", command: "  " }}
+        onChange={() => undefined}
+        onRemove={() => undefined}
+      />
+    )
+    expect(screen.getByTestId("handler-error").textContent).toBe("commandRequired")
+  })
+
+  it("surfaces an inline error for a malformed webhook URL", () => {
+    render(
+      <HookHandlerForm
+        value={{ type: "webhook", url: "not a url", headers: {} }}
+        onChange={() => undefined}
+        onRemove={() => undefined}
+      />
+    )
+    expect(screen.getByTestId("handler-error").textContent).toBe("urlInvalid")
+  })
+
+  it("shows no inline error for a valid command handler", () => {
+    render(
+      <HookHandlerForm
+        value={{ type: "command", command: "echo ok" }}
+        onChange={() => undefined}
+        onRemove={() => undefined}
+      />
+    )
+    expect(screen.queryByTestId("handler-error")).toBeNull()
+  })
+})
+
+describe("validateHandler", () => {
+  it("accepts a non-empty command and rejects a blank one", () => {
+    expect(validateHandler({ type: "command", command: "echo hi" })).toBeNull()
+    expect(validateHandler({ type: "command", command: "" })).toBe("commandRequired")
+    expect(validateHandler({ type: "command", command: "   " })).toBe("commandRequired")
+  })
+
+  it("accepts a valid http(s) webhook URL", () => {
+    expect(validateHandler({ type: "webhook", url: "https://example.com/hook" })).toBeNull()
+    expect(validateHandler({ type: "webhook", url: "http://localhost:3000/x" })).toBeNull()
+  })
+
+  it("rejects an empty URL", () => {
+    expect(validateHandler({ type: "webhook", url: "" })).toBe("urlRequired")
+    expect(validateHandler({ type: "webhook", url: "   " })).toBe("urlRequired")
+  })
+
+  it("rejects a non-parseable or non-http(s) URL", () => {
+    expect(validateHandler({ type: "webhook", url: "not a url" })).toBe("urlInvalid")
+    expect(validateHandler({ type: "webhook", url: "ftp://example.com" })).toBe("urlInvalid")
   })
 })

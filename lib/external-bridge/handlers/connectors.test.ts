@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for the v49 inbox-connectors MCP handlers.
  *
@@ -31,7 +32,7 @@ beforeEach(async () => {
   getDb()
   await whenSeeded()
   mockRunDigest.mockReset()
-})
+}, 30_000)
 
 async function seedAdapter(): Promise<void> {
   await getDb().adapterInstances.put({

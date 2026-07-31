@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { openExternal, openPath, revealInExplorer } from "./opener"
 
 jest.mock("@tauri-apps/plugin-opener", () => ({
@@ -5,6 +6,16 @@ jest.mock("@tauri-apps/plugin-opener", () => ({
   openPath: jest.fn(),
   revealItemInDir: jest.fn(),
 }))
+
+jest.mock("@/lib/capacitor/browser", () => ({
+  open: jest.fn(),
+}))
+
+import { open as capacitorBrowserOpen } from "@/lib/capacitor/browser"
+
+const mockedCapBrowserOpen = capacitorBrowserOpen as jest.MockedFunction<
+  typeof capacitorBrowserOpen
+>
 
 import {
   openUrl as openUrlNative,
@@ -21,6 +32,12 @@ const TAURI_KEY = "__TAURI_INTERNALS__"
 function setTauri(on: boolean) {
   if (on) (window as unknown as Record<string, unknown>)[TAURI_KEY] = {}
   else delete (window as unknown as Record<string, unknown>)[TAURI_KEY]
+}
+
+function setCapacitor(on: boolean) {
+  const w = window as unknown as Record<string, unknown>
+  if (on) w.Capacitor = { isNativePlatform: () => true }
+  else delete w.Capacitor
 }
 
 describe("lib/tauri/opener", () => {
@@ -53,6 +70,30 @@ describe("lib/tauri/opener", () => {
       await openExternal("https://example.com")
       expect(openSpy).toHaveBeenCalledWith("https://example.com", "_blank", "noopener,noreferrer")
       expect(mockedOpenUrl).not.toHaveBeenCalled()
+    })
+
+    it("routes through the Capacitor in-app browser on the mobile shell", async () => {
+      setCapacitor(true)
+      try {
+        mockedCapBrowserOpen.mockResolvedValue({ kind: "ok" })
+        await openExternal("https://example.com")
+        expect(mockedCapBrowserOpen).toHaveBeenCalledWith({ url: "https://example.com" })
+        expect(openSpy).not.toHaveBeenCalled()
+        expect(mockedOpenUrl).not.toHaveBeenCalled()
+      } finally {
+        setCapacitor(false)
+      }
+    })
+
+    it("falls back to window.open when the Capacitor Browser plugin is unavailable", async () => {
+      setCapacitor(true)
+      try {
+        mockedCapBrowserOpen.mockResolvedValue({ kind: "unsupported" })
+        await openExternal("https://example.com")
+        expect(openSpy).toHaveBeenCalledWith("https://example.com", "_blank", "noopener,noreferrer")
+      } finally {
+        setCapacitor(false)
+      }
     })
   })
 

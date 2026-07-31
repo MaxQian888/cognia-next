@@ -16,10 +16,26 @@ import { z } from "zod"
 import { registerBuiltInSkill } from "../registry"
 import type { BuiltInSkill, BuiltInSkillMutation } from "../types"
 import type { BuiltInSkillImAccess } from "../types"
-import { argsToFlags, buildConfirmSurface, runLarkCli } from "./_helpers"
+import { argsToFlags, buildConfirmSurface, larkAdapterIdFromCtx, runLarkCli } from "./_helpers"
 
 const FAMILY = "lark.base"
 const PLATFORMS = ["lark"] as const
+
+// Shared, richly-described params. These schemas are serialized straight to the
+// model (manifest.ts → z.toJSONSchema), so the `.describe()` text — including
+// the discovery chain for each opaque token id — is what the model reads.
+const appTokenParam = z
+  .string()
+  .min(1)
+  .describe('Bitable base app token (looks like "bascn…"). Obtain it from lark.base.search.')
+const tableIdParam = z
+  .string()
+  .min(1)
+  .describe('Table id within the base (looks like "tbl…"). Obtain it from lark.base.list_tables.')
+const recordIdParam = z
+  .string()
+  .min(1)
+  .describe('Record id (looks like "rec…"). Obtain it from lark.base.list_records.')
 
 function mk<S extends z.ZodTypeAny>(input: {
   id: string
@@ -50,6 +66,7 @@ function mk<S extends z.ZodTypeAny>(input: {
       runLarkCli({
         args: [...input.subcommand, ...argsToFlags(args as Record<string, unknown>)],
         confirmed: ctx.hitlBypass === true,
+        adapterId: larkAdapterIdFromCtx(ctx),
       }),
   }
   if (input.mutation !== "read") {
@@ -76,7 +93,9 @@ registerBuiltInSkill(
       en: "Search Lark Bitable bases by name.",
       "zh-CN": "按名称搜索 Lark 多维表格。",
     },
-    schema: z.object({ query: z.string().min(1) }),
+    schema: z.object({
+      query: z.string().min(1).describe("Base name or keywords to search for."),
+    }),
     subcommand: ["base", "+search"],
     mutation: "read",
     imAccess: "always",
@@ -92,7 +111,7 @@ registerBuiltInSkill(
       en: "List the tables inside a Lark Bitable base.",
       "zh-CN": "列出 Lark 多维表格中的所有表。",
     },
-    schema: z.object({ appToken: z.string().min(1) }),
+    schema: z.object({ appToken: appTokenParam }),
     subcommand: ["base", "+list-tables"],
     mutation: "read",
     imAccess: "always",
@@ -109,11 +128,20 @@ registerBuiltInSkill(
       "zh-CN": "列出 Bitable 表中的记录，可选视图和过滤条件。",
     },
     schema: z.object({
-      appToken: z.string().min(1),
-      tableId: z.string().min(1),
-      viewId: z.string().optional(),
-      filter: z.string().optional().describe("Lark filter expression"),
-      pageSize: z.number().int().min(1).max(500).optional(),
+      appToken: appTokenParam,
+      tableId: tableIdParam,
+      viewId: z.string().optional().describe('Optional view id ("vew…") to scope the listing.'),
+      filter: z
+        .string()
+        .optional()
+        .describe('Lark filter expression, e.g. CurrentValue.[Status]="Done".'),
+      pageSize: z
+        .number()
+        .int()
+        .min(1)
+        .max(500)
+        .optional()
+        .describe("Max records to return (1–500; default is the server's page size)."),
     }),
     subcommand: ["base", "+list-records"],
     mutation: "read",
@@ -131,9 +159,9 @@ registerBuiltInSkill(
       "zh-CN": "按 id 读取单条 Bitable 记录。",
     },
     schema: z.object({
-      appToken: z.string().min(1),
-      tableId: z.string().min(1),
-      recordId: z.string().min(1),
+      appToken: appTokenParam,
+      tableId: tableIdParam,
+      recordId: recordIdParam,
     }),
     subcommand: ["base", "+read-record"],
     mutation: "read",
@@ -151,9 +179,14 @@ registerBuiltInSkill(
       "zh-CN": "向 Bitable 表追加一条或多条记录。",
     },
     schema: z.object({
-      appToken: z.string().min(1),
-      tableId: z.string().min(1),
-      records: z.array(z.record(z.string(), z.unknown())).min(1),
+      appToken: appTokenParam,
+      tableId: tableIdParam,
+      records: z
+        .array(z.record(z.string(), z.unknown()))
+        .min(1)
+        .describe(
+          'One or more records to add. Each object maps field NAME → value, e.g. {"Name":"Acme","Stage":"Lead"}.'
+        ),
     }),
     subcommand: ["base", "+append-records"],
     mutation: "write",
@@ -175,10 +208,12 @@ registerBuiltInSkill(
       "zh-CN": "更新单条 Bitable 记录的字段。",
     },
     schema: z.object({
-      appToken: z.string().min(1),
-      tableId: z.string().min(1),
-      recordId: z.string().min(1),
-      fields: z.record(z.string(), z.unknown()),
+      appToken: appTokenParam,
+      tableId: tableIdParam,
+      recordId: recordIdParam,
+      fields: z
+        .record(z.string(), z.unknown())
+        .describe("Field NAME → new value map. Only the fields you include are changed."),
     }),
     subcommand: ["base", "+update-record"],
     mutation: "write",
@@ -201,11 +236,21 @@ registerBuiltInSkill(
       "zh-CN": "向 Bitable 表新增字段（列）。",
     },
     schema: z.object({
-      appToken: z.string().min(1),
-      tableId: z.string().min(1),
-      fieldName: z.string().min(1),
-      fieldType: z.string().min(1),
-      property: z.record(z.string(), z.unknown()).optional(),
+      appToken: appTokenParam,
+      tableId: tableIdParam,
+      fieldName: z.string().min(1).describe("Display name of the new field (column)."),
+      fieldType: z
+        .string()
+        .min(1)
+        .describe(
+          'Lark field type, e.g. "text", "number", "single_select", "multi_select", "date", "checkbox", "user", "phone", "url", "attachment". See the Lark Bitable field-type docs for the full set.'
+        ),
+      property: z
+        .record(z.string(), z.unknown())
+        .optional()
+        .describe(
+          "Type-specific config, e.g. select options or number formatting. Shape depends on fieldType."
+        ),
     }),
     subcommand: ["base", "+create-field"],
     mutation: "write",
@@ -227,9 +272,9 @@ registerBuiltInSkill(
       "zh-CN": "永久删除一条 Bitable 记录，无法撤销。",
     },
     schema: z.object({
-      appToken: z.string().min(1),
-      tableId: z.string().min(1),
-      recordId: z.string().min(1),
+      appToken: appTokenParam,
+      tableId: tableIdParam,
+      recordId: recordIdParam,
     }),
     subcommand: ["base", "+delete-record"],
     mutation: "destructive",

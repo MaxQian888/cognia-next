@@ -20,6 +20,8 @@ import { toast } from "sonner"
 
 import { AlwaysAllowList } from "@/components/settings/tools/always-allow-list"
 import { CommandAutoModeCard } from "@/components/settings/agent-runtime/command-auto-mode-card"
+import { ToolPermissionRulesCard } from "@/components/settings/agent-runtime/tool-permission-rules-card"
+import { ToolSearchRuntimeCard } from "@/components/settings/agent-runtime/tool-search-runtime-card"
 import { useSettingsStore } from "@/stores/settings"
 import { isTauri } from "@/lib/tauri"
 import {
@@ -28,7 +30,7 @@ import {
   namespaced,
   type BuiltinToolCategoryId,
 } from "@/lib/settings/builtin-tools"
-import { DEFAULT_BUILTIN_TOOLS } from "@/lib/claude/types"
+import { DEFAULT_BUILTIN_TOOLS } from "@cognia/agent-config-types"
 
 export function PermissionsToolsTab() {
   const t = useTranslations("settings.agentRuntimeSection.permissions")
@@ -73,6 +75,10 @@ export function PermissionsToolsTab() {
   return (
     <div className="space-y-4">
       <CommandAutoModeCard />
+
+      <ToolPermissionRulesCard />
+
+      <ToolSearchRuntimeCard />
 
       <Card>
         <CardHeader className="pb-3">

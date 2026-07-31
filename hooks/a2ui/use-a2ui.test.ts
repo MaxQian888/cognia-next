@@ -16,25 +16,27 @@ const mockGetDataValue = jest.fn()
 const mockClearEventHistory = jest.fn()
 const mockSetActiveSurface = jest.fn()
 
-jest.mock("@/stores/a2ui", () => ({
-  useA2UIStore: jest.fn((selector) => {
-    const state = {
-      surfaces: {},
-      eventHistory: [],
-      activeSurfaceId: null,
-      createSurface: mockCreateSurface,
-      deleteSurface: mockDeleteSurface,
-      getSurface: mockGetSurface,
-      processMessage: mockProcessMessage,
-      processMessages: mockProcessMessages,
-      setDataValue: mockSetDataValue,
-      getDataValue: mockGetDataValue,
-      clearEventHistory: mockClearEventHistory,
-      setActiveSurface: mockSetActiveSurface,
-    }
-    return selector(state)
-  }),
-}))
+jest.mock("@/stores/a2ui", () => {
+  const state = () => ({
+    surfaces: {},
+    eventHistory: [],
+    activeSurfaceId: null,
+    createSurface: mockCreateSurface,
+    deleteSurface: mockDeleteSurface,
+    getSurface: mockGetSurface,
+    processMessage: mockProcessMessage,
+    processMessages: mockProcessMessages,
+    setDataValue: mockSetDataValue,
+    getDataValue: mockGetDataValue,
+    clearEventHistory: mockClearEventHistory,
+    setActiveSurface: mockSetActiveSurface,
+  })
+  const useA2UIStore = Object.assign(
+    jest.fn((selector) => selector(state())),
+    { getState: jest.fn(() => state()) }
+  )
+  return { useA2UIStore }
+})
 
 // Mock parser functions
 jest.mock("@/lib/a2ui/parser", () => ({
@@ -84,7 +86,7 @@ describe("useA2UI", () => {
       expect(result.current.getSurface).toBeDefined()
       expect(result.current.processMessage).toBeDefined()
       expect(result.current.processMessages).toBeDefined()
-      expect(result.current.eventHistory).toEqual([])
+      expect(result.current.getEventHistory()).toEqual([])
       expect(result.current.activeSurfaceId).toBeNull()
     })
 
@@ -96,8 +98,18 @@ describe("useA2UI", () => {
 
       // Event listeners should be set up via the mock
       const { globalEventEmitter } = jest.requireMock("@/lib/a2ui/events")
-      expect(globalEventEmitter.onAction).toHaveBeenCalledWith(onAction)
-      expect(globalEventEmitter.onDataChange).toHaveBeenCalledWith(onDataChange)
+      expect(globalEventEmitter.onAction).toHaveBeenCalledTimes(1)
+      expect(globalEventEmitter.onDataChange).toHaveBeenCalledTimes(1)
+
+      // The registered listeners delegate to the latest handler refs
+      const registeredAction = globalEventEmitter.onAction.mock.calls[0][0]
+      const registeredDataChange = globalEventEmitter.onDataChange.mock.calls[0][0]
+      const actionPayload = { surfaceId: "s1", action: "click" }
+      const changePayload = { surfaceId: "s1", path: "/a", value: 1 }
+      registeredAction(actionPayload)
+      registeredDataChange(changePayload)
+      expect(onAction).toHaveBeenCalledWith(actionPayload)
+      expect(onDataChange).toHaveBeenCalledWith(changePayload)
     })
   })
 

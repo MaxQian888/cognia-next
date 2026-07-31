@@ -61,7 +61,9 @@ export async function upsertIdentity(input: UpsertIdentityInput): Promise<Platfo
 
 /**
  * Merge secondary identity into primary. Appends secondaryId to
- * `primary.mergedFromIds` and deletes the secondary row.
+ * `primary.mergedFromIds`, snapshots the secondary row into
+ * `primary.mergedSnapshots` (so the merge is losslessly reversible), and
+ * deletes the secondary row.
  */
 export async function mergeIdentities(
   primaryId: string,
@@ -71,14 +73,63 @@ export async function mergeIdentities(
   return db.transaction("rw", db.platformIdentities, async () => {
     const primary = await db.platformIdentities.get(primaryId)
     if (!primary) throw new Error(`platform-identities: primary id "${primaryId}" not found`)
+    const secondary = await db.platformIdentities.get(secondaryId)
     const merged: PlatformIdentityRow = {
       ...primary,
       mergedFromIds: [...(primary.mergedFromIds ?? []), secondaryId],
+      mergedSnapshots: secondary
+        ? [...(primary.mergedSnapshots ?? []), secondary]
+        : primary.mergedSnapshots,
     }
     await db.platformIdentities.put(merged)
     await db.platformIdentities.delete(secondaryId)
     return merged
   })
+}
+
+/**
+ * Reverse a merge: restore the snapshotted secondary row and drop it from the
+ * primary's `mergedFromIds` / `mergedSnapshots`. No-op when the primary is
+ * unknown or never absorbed that secondary. Returns the restored row (or null).
+ */
+export async function unmergeIdentity(
+  primaryId: string,
+  secondaryId: string
+): Promise<PlatformIdentityRow | null> {
+  const db = getDb()
+  return db.transaction("rw", db.platformIdentities, async () => {
+    const primary = await db.platformIdentities.get(primaryId)
+    if (!primary) return null
+    const snapshot = (primary.mergedSnapshots ?? []).find((s) => s.id === secondaryId)
+    if (!snapshot) return null
+    const updated: PlatformIdentityRow = {
+      ...primary,
+      mergedFromIds: (primary.mergedFromIds ?? []).filter((id) => id !== secondaryId),
+      mergedSnapshots: (primary.mergedSnapshots ?? []).filter((s) => s.id !== secondaryId),
+    }
+    await db.platformIdentities.put(updated)
+    // Restore the secondary exactly as it was captured at merge time.
+    await db.platformIdentities.put(snapshot)
+    return snapshot
+  })
+}
+
+/**
+ * A unified contact: the surviving primary identity plus the platform
+ * identities it has absorbed (from `mergedSnapshots`). Single-identity
+ * contacts come back with an empty `merged` array.
+ */
+export interface ContactGroup {
+  primary: PlatformIdentityRow
+  merged: PlatformIdentityRow[]
+}
+
+/** Group all surviving identities with the secondaries they have absorbed. */
+export async function listMergedGroups(): Promise<ContactGroup[]> {
+  const all = await getDb().platformIdentities.toArray()
+  return all
+    .sort((a, b) => b.lastSeenAt - a.lastSeenAt)
+    .map((primary) => ({ primary, merged: primary.mergedSnapshots ?? [] }))
 }
 
 /** List all identities for one adapter, ordered by lastSeenAt descending. */

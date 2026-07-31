@@ -1,0 +1,10 @@
+{
+  "asChart": "作为图表",
+  "asCode": "作为代码",
+  "asDocument": "作为文档",
+  "asHtml": "作为 HTML 页面",
+  "asMath": "作为数学表达式",
+  "asMermaid": "作为 Mermaid 图表",
+  "asReact": "作为 React 组件",
+  "createArtifact": "创建 Artifact"
+}

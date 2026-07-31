@@ -20,6 +20,9 @@
  *  - Phase 6 — runtime reads `twinProfile` + `twinChunks` for RAG injection
  */
 
+import type { RagEmbeddingProvider } from "@cognia/provider-embedding/embedding-catalog"
+import type { BedrockConnectionSettings } from "@cognia/provider-types"
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Sources — original ingested artifacts.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -36,6 +39,7 @@ export type TwinSourceFormat =
   | "markdown"
   | "pdf"
   | "docx"
+  | "xlsx"
   | "pptx"
   | "odt"
   | "odp"
@@ -98,9 +102,18 @@ export interface TwinSource {
    * Encrypted PII↔placeholder map. Encrypted with the user's stronghold key
    * before being written here so the Dexie row never holds raw originals.
    * Stored as base64-encoded ciphertext + nonce + tag (format owned by
-   * `lib/twin/ingest/redact.ts`).
+   * `packages/redact/src/index.ts`).
    */
   redactionMapEnc?: string
+  /**
+   * Participant names captured at import time (chat speakers, email "From"
+   * headers, git authors). Fed to `deriveNameHints` so the redaction pass
+   * can scrub them before any cloud embed/LLM call. Non-indexed → schemaless
+   * in Dexie: old rows and plain documents simply omit it. Cleartext here is
+   * not a privacy regression — the row's `source` field already holds the
+   * full raw text.
+   */
+  speakers?: string[]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -436,6 +449,15 @@ export interface TwinJob {
   /** Resource-accounting fields, populated by the executors. */
   llmTokensUsed?: number
   embeddingTokensUsed?: number
+
+  /**
+   * Per-agent failure messages from a `distill` run that COMPLETED but had
+   * one or more sub-agents fall back under isolation (e.g. KnowledgeAgent
+   * timed out → empty entities). Keyed by agent label. Absent / empty on a
+   * clean run. Surfaced as a non-blocking warning in the Jobs tab so a
+   * suspiciously sparse profile has a visible cause.
+   */
+  partialFailures?: Record<string, string>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -448,6 +470,9 @@ export interface TwinJob {
  * `styleSamplesK = 3`, `enableHybrid = false`, `hybridKeywordWeight = 0.5`).
  * Apply via `runtime/apply-twin-context.ts` (Phase 6).
  */
+/** Citation style for the twin RAG SourcesPart. Mirrors `@cognia/rag` `CitationStyle`. */
+export type TwinCitationStyle = "simple" | "apa" | "mla" | "chicago" | "harvard" | "ieee"
+
 export interface TwinSettings {
   enableRag: boolean
   ragTopK: number
@@ -466,6 +491,26 @@ export interface TwinSettings {
    * is false.
    */
   hybridKeywordWeight: number
+  /**
+   * Heuristic synonym expansion of the BM25 keyword leg (recall lift for the
+   * hybrid path). Off by default; the LLM HyDE/step-back leg additionally
+   * requires the global `queryExpansion` block. Optional — resolves to false.
+   */
+  enableQueryExpansion?: boolean
+  /**
+   * Corrective-RAG relevance grading — drops low-relevance retrieved chunks
+   * after fusion/rerank (never below `correctiveMinKeep`). Optional → false.
+   */
+  enableCorrectiveFilter?: boolean
+  /** Minimum chunks the corrective filter always keeps. Optional → 1. */
+  correctiveMinKeep?: number
+  /**
+   * Attach formatted source citations to the Twin-RAG SourcesPart (metadata
+   * only — never changes the assembled system prompt). Optional → false.
+   */
+  enableCitations?: boolean
+  /** Citation style when `enableCitations` is on. Optional → "simple". */
+  citationStyle?: TwinCitationStyle
 }
 
 export const DEFAULT_TWIN_SETTINGS: TwinSettings = {
@@ -475,6 +520,11 @@ export const DEFAULT_TWIN_SETTINGS: TwinSettings = {
   styleSamplesK: 3,
   enableHybrid: false,
   hybridKeywordWeight: 0.5,
+  enableQueryExpansion: false,
+  enableCorrectiveFilter: false,
+  correctiveMinKeep: 1,
+  enableCitations: false,
+  citationStyle: "simple",
 }
 
 /**
@@ -535,15 +585,20 @@ export interface TwinRuntimeStorageConfig {
 }
 
 export interface TwinRuntimeEmbeddingSettings {
-  provider: "openai" | "google" | "cohere" | "mistral" | "transformersjs"
+  provider: RagEmbeddingProvider
   model: string
   apiKey: string
   baseURL?: string
+  bedrock?: BedrockConnectionSettings
 }
 
 export interface TwinRuntimeLlmSettings {
-  /** Currently only "anthropic" is wired through to a real client. */
-  provider: "anthropic"
+  /**
+   * Distill LLM provider. All five are wired through `createLlmClient`
+   * (`lib/twin/distill/llm.ts`); OpenAI-compatible endpoints use
+   * `provider: "openai"` with a custom `baseURL`.
+   */
+  provider: "anthropic" | "openai" | "google" | "mistral" | "cohere"
   model: string
   apiKey: string
   baseURL?: string
@@ -564,6 +619,19 @@ export interface TwinRuntimeRerankSettings {
   model: "lexical" | (string & {})
 }
 
+export interface TwinRuntimeQueryExpansionSettings {
+  /**
+   * When true (AND a character opts in via `enableQueryExpansion`), the runtime
+   * runs an LLM query-expansion leg before the vector search: it generates a
+   * hypothetical answer (HyDE) or a step-back query with the twin's distill
+   * LLM, embeds it, runs a second vector search, and RRF-fuses the two vector
+   * rankings. Falls back to heuristic-only when the LLM is unconfigured.
+   */
+  enabled: boolean
+  /** `"hyde"` = hypothetical-answer embedding; `"stepback"` = broader step-back query. */
+  strategy: "hyde" | "stepback"
+}
+
 export interface TwinRuntimeSettings {
   /** When false, the workbench does not auto-start its job-worker even if
    *  jobs are queued. */
@@ -573,10 +641,22 @@ export interface TwinRuntimeSettings {
   llm: TwinRuntimeLlmSettings
   /** Optional RAG reranking stage. Off by default. */
   reranker?: TwinRuntimeRerankSettings
+  /** Optional LLM query-expansion (HyDE / step-back) stage. Off by default. */
+  queryExpansion?: TwinRuntimeQueryExpansionSettings
+  /**
+   * User-configured names that must ALWAYS be redacted during ingest,
+   * regardless of source metadata — e.g. the user's own name, which chat
+   * exports never list as a speaker (ChatGPT/Claude label the human side
+   * "User"). Applied to every source via the job worker's `nameHints`.
+   * Unlike import-time speakers these are NOT filtered through the
+   * generic-label list: they are explicit user intent.
+   */
+  extraNameHints: string[]
 }
 
 export const DEFAULT_TWIN_RUNTIME_SETTINGS: TwinRuntimeSettings = {
   workerEnabled: false,
+  extraNameHints: [],
   storage: {
     vectorBackend: "qdrant",
   },
@@ -593,5 +673,9 @@ export const DEFAULT_TWIN_RUNTIME_SETTINGS: TwinRuntimeSettings = {
   reranker: {
     enabled: false,
     model: "lexical",
+  },
+  queryExpansion: {
+    enabled: false,
+    strategy: "hyde",
   },
 }

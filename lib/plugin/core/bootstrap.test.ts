@@ -19,6 +19,23 @@ describe("resolvePluginRuntimeBootstrap", () => {
     })
   })
 
+  it("returns the mobile runtime profile inside the Capacitor shell (non-Tauri + isMobile)", () => {
+    expect(
+      resolvePluginRuntimeBootstrap({
+        isTauri: false,
+        isMobile: true,
+        windowLabel: null,
+      })
+    ).toEqual({
+      shouldInitialize: true,
+      config: {
+        runtimeProfile: "mobile",
+        pluginDirectory: "",
+        enablePython: false,
+      },
+    })
+  })
+
   it("returns tauri runtime bootstrap config for the main window", () => {
     expect(
       resolvePluginRuntimeBootstrap({

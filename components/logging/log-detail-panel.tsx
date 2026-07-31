@@ -16,6 +16,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   ExternalLink,
   Tag,
   Clock,
@@ -43,7 +44,7 @@ import {
   AGENT_TRACE_MODULE,
   getAgentTraceLogData,
   type AgentTraceLogData,
-} from "@/lib/agent-trace/log-adapter"
+} from "@cognia/agent-trace/log-adapter"
 import { AgentTraceTree } from "./agent-trace-tree"
 import {
   LIVE_TRACE_EVENT_ICONS,
@@ -51,10 +52,10 @@ import {
   formatDuration,
   formatTokens,
 } from "@/lib/agent"
-import { formatCost } from "@/lib/agent-trace/cost-estimator"
+import { formatCost } from "@cognia/agent-trace/cost-formatter"
 import type { AgentTraceEventType } from "@/types/agent/agent-trace"
-import type { StructuredLogEntry } from "@/lib/logging"
-import { LEVEL_THEME } from "@/lib/logging/level-theme"
+import type { StructuredLogEntry } from "@cognia/logging"
+import { LEVEL_THEME } from "@cognia/logging/level-theme"
 
 export interface LogDetailPanelProps {
   log: StructuredLogEntry
@@ -63,6 +64,10 @@ export interface LogDetailPanelProps {
   onClose?: () => void
   onToggleBookmark?: (id: string) => void
   onSelectRelated?: (log: StructuredLogEntry) => void
+  /** Steps the selection to the previous/next log in the visible list. */
+  onNavigate?: (delta: -1 | 1) => void
+  /** 1-based position of this log in the visible list, for the header. */
+  navPosition?: { index: number; total: number }
   className?: string
 }
 
@@ -115,6 +120,7 @@ function parseStackTrace(stack: string): { fn: string; file: string; line: strin
 
 function JsonPrimitive({ value }: { value: unknown }) {
   if (typeof value === "string") {
+    // i18n-exempt: JSON syntax literal in the raw log value renderer
     return <span className="text-chart-2">&quot;{value}&quot;</span>
   }
   if (typeof value === "number") {
@@ -124,6 +130,7 @@ function JsonPrimitive({ value }: { value: unknown }) {
     return <span className="text-chart-1">{String(value)}</span>
   }
   if (value === null) {
+    // i18n-exempt: JSON syntax literal in the raw log value renderer
     return <span className="text-chart-1">null</span>
   }
   return <span>{String(value)}</span>
@@ -155,6 +162,7 @@ function JsonTreeNode({
       <div className="font-mono text-xs leading-5" style={{ paddingLeft: depth * 12 }}>
         {label ? (
           <>
+            {/* i18n-exempt: JSON syntax literal in the raw log value renderer */}
             <span className="text-chart-4">&quot;{label}&quot;</span>
             <span>: </span>
           </>
@@ -172,6 +180,7 @@ function JsonTreeNode({
       <div style={{ paddingLeft: depth * 12 }}>
         <CollapsibleTrigger className="flex items-center gap-1 text-xs font-mono hover:text-foreground">
           {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+          {/* i18n-exempt: JSON syntax literal in the raw log value renderer */}
           {label ? <span className="text-chart-4">&quot;{label}&quot;:</span> : null}
           <span>{wrapperOpen}</span>
           <span className="text-muted-foreground">{entries.length}</span>
@@ -204,14 +213,15 @@ function CopyButton({
   label,
   showText = false,
 }: {
-  text: string
+  /** Copy payload — pass a function to defer expensive serialization to click time. */
+  text: string | (() => string)
   label: string
   showText?: boolean
 }) {
   const [copied, setCopied] = useState(false)
 
   const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(text)
+    navigator.clipboard.writeText(typeof text === "function" ? text() : text)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }, [text])
@@ -417,6 +427,8 @@ export function LogDetailPanel({
   onClose,
   onToggleBookmark,
   onSelectRelated,
+  onNavigate,
+  navPosition,
   className,
 }: LogDetailPanelProps) {
   const t = useTranslations("logging")
@@ -443,6 +455,15 @@ export function LogDetailPanel({
     return relatedLogs.filter((r) => r.id !== log.id).slice(0, 20)
   }, [relatedLogs, log.id])
 
+  // Serialize on demand — stringifying a large `data` payload on every render
+  // is one of the things that made opening the detail panel feel sluggish.
+  const copyDataJson = useCallback(() => JSON.stringify(log.data, null, 2), [log.data])
+
+  // The JSON tree only depends on `log.data`; memoizing the element keeps the
+  // recursive Collapsible tree from re-rendering on unrelated parent updates
+  // (e.g. relatedLogs churning on every poll).
+  const dataTree = useMemo(() => (log.data ? <JsonTreeNode value={log.data} /> : null), [log.data])
+
   return (
     <div className={cn("flex flex-col border-l bg-background", className)}>
       {/* Header */}
@@ -454,6 +475,45 @@ export function LogDetailPanel({
           </Badge>
         </div>
         <div className="flex items-center gap-1 shrink-0">
+          {onNavigate && navPosition && (
+            <div className="flex items-center gap-0.5 mr-1" data-testid="log-detail-nav">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    disabled={navPosition.index <= 1}
+                    aria-label={t("detail.prevLog")}
+                    data-testid="log-detail-nav-prev"
+                    onClick={() => onNavigate(-1)}
+                  >
+                    <ChevronUp className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{t("detail.prevLog")}</TooltipContent>
+              </Tooltip>
+              <span className="text-[11px] font-mono text-muted-foreground tabular-nums px-0.5">
+                {navPosition.index}/{navPosition.total}
+              </span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    disabled={navPosition.index >= navPosition.total}
+                    aria-label={t("detail.nextLog")}
+                    data-testid="log-detail-nav-next"
+                    onClick={() => onNavigate(1)}
+                  >
+                    <ChevronDown className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{t("detail.nextLog")}</TooltipContent>
+              </Tooltip>
+            </div>
+          )}
           {onToggleBookmark && (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -608,15 +668,9 @@ export function LogDetailPanel({
                   <span className="text-xs font-medium text-muted-foreground">
                     {t("panel.data")}
                   </span>
-                  <CopyButton
-                    text={JSON.stringify(log.data, null, 2)}
-                    label={t("detail.copyJson")}
-                    showText
-                  />
+                  <CopyButton text={copyDataJson} label={t("detail.copyJson")} showText />
                 </div>
-                <div className="rounded-md bg-muted/50 p-3">
-                  <JsonTreeNode value={log.data} />
-                </div>
+                <div className="rounded-md bg-muted/50 p-3">{dataTree}</div>
               </div>
             </>
           )}

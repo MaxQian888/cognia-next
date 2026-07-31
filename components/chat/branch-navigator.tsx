@@ -1,12 +1,16 @@
 "use client"
 
 /**
- * BranchNavigator — prev/next arrow pair for switching between assistant
- * regenerations. Reads `activeBranchByGroup` from the chat store, locates
- * siblings via `selectBranchSiblings`, and dispatches `setActiveBranch`.
+ * BranchNavigator — prev/next arrow pair for switching between siblings.
  *
- * Hidden when the message has no `metadata.branchGroupId` or when only one
- * branch exists in the group.
+ * Two things produce siblings: regenerating an assistant reply, and editing a
+ * user message (which keeps the original rather than deleting its tail). The
+ * navigator is role-agnostic — it works off `metadata.branchGroupId` — and is
+ * mounted on both roles.
+ *
+ * Reads `activeBranchByGroup` from the chat store, locates siblings via
+ * `selectBranchSiblings`, and dispatches `setSessionActiveBranch`. Hidden when
+ * the message has no group or the group has a single member.
  */
 
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react"
@@ -22,17 +26,43 @@ interface BranchNavigatorProps {
   className?: string
 }
 
+const NO_SIBLINGS: UIMessage[] = []
+
 export function BranchNavigator({ message, className }: BranchNavigatorProps) {
   const t = useTranslations("chat.branchNavigator")
-  const groupId = (message.metadata as { branchGroupId?: string } | undefined)?.branchGroupId
-  const messages = useChatStore((s) => s.messages)
-  const activeId = useChatStore((s) => (groupId ? s.activeBranchByGroup[groupId] : undefined))
+  const meta = message.metadata as { branchGroupId?: string; sessionId?: string } | undefined
+  const groupId = meta?.branchGroupId
+  // The session this message belongs to, which is NOT necessarily the focused
+  // one — a split pane or a sidechat renders its own thread. Reading the
+  // top-level projection here flipped branches against whatever happened to be
+  // in front instead of the pane the arrows are in.
+  const activeSessionId = useChatStore((s) => s.activeSessionId)
+  const sessionId = typeof meta?.sessionId === "string" ? meta.sessionId : activeSessionId
+  // Subscribe to the message COUNT, not the array: this navigator mounts in
+  // every row, and the array ref swaps on every streamed token frame. Branch
+  // siblings only change when a message lands or is removed (regenerations and
+  // edits stamp their branch metadata together with a fresh message), so the
+  // count is a sufficient — and O(1)-per-store-set — signal.
+  const messageCount = useChatStore((s) => {
+    if (!groupId) return 0
+    const slice = sessionId ? s.sessions[sessionId] : undefined
+    return slice ? slice.messages.length : s.messages.length
+  })
+  const activeId = useChatStore((s) => {
+    if (!groupId) return undefined
+    const slice = sessionId ? s.sessions[sessionId] : undefined
+    return (slice ? slice.activeBranchByGroup : s.activeBranchByGroup)[groupId]
+  })
+  const setSessionActiveBranch = useChatStore((s) => s.setSessionActiveBranch)
   const setActiveBranch = useChatStore((s) => s.setActiveBranch)
 
-  const siblings = useMemo(
-    () => (groupId ? selectBranchSiblings(messages, groupId) : []),
-    [messages, groupId]
-  )
+  const siblings = useMemo(() => {
+    if (!groupId) return NO_SIBLINGS
+    const state = useChatStore.getState()
+    const slice = sessionId ? state.sessions[sessionId] : undefined
+    return selectBranchSiblings(slice ? slice.messages : state.messages, groupId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- messageCount keys the getState() read above
+  }, [messageCount, groupId, sessionId])
 
   if (!groupId || siblings.length <= 1) return null
 
@@ -48,7 +78,11 @@ export function BranchNavigator({ message, className }: BranchNavigatorProps) {
   const goTo = (nextIdx: number) => {
     const wrapped = ((nextIdx % siblings.length) + siblings.length) % siblings.length
     const target = siblings[wrapped]
-    if (target) setActiveBranch(groupId, target.id)
+    if (!target) return
+    // `sessionId` is null only before a session exists (the pre-session
+    // ephemeral chat the store's top-level projection stands in for).
+    if (sessionId) setSessionActiveBranch(sessionId, groupId, target.id)
+    else setActiveBranch(groupId, target.id)
   }
 
   return (

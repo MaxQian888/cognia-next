@@ -1,0 +1,14 @@
+{
+  "integrityChecked": "Integrity checked",
+  "integrityCheckedTooltip": "The download matched Open VSX's SHA-256 checksum, which confirms the file was not corrupted in transit. This is not a signature: it does not verify the publisher, and it cannot detect a compromised registry — the same server supplies both the file and the checksum.",
+  "installNotice": "VS Code extensions are real programs. This one runs with the same access to your files, network, and processes as any other program you install — cognia checks the download's checksum, not what the code does.",
+  "publisherVerified": "Publisher verified by Open VSX",
+  "publisherVerifiedTooltip": "Open VSX states that this publisher controls the \"{namespace}\" namespace. That is Open VSX's claim about ownership, not cognia's, and not a claim that the extension is safe.",
+  "searchPlaceholder": "Search Open VSX extensions…",
+  "unsupportedApis": "May not work: {apis}",
+  "unsupportedApisTooltip": "This extension uses APIs cognia doesn't implement ({apis}) — it may not work. Detected by scanning the extension's code, which is best-effort: a minified extension can hide its API use, so this is a hint, not a guarantee.",
+  "vscodeEmpty": "No extensions matched. Try a different search.",
+  "vscodeError": "Open VSX error: {message}",
+  "vscodeLoadMore": "Load more ({shown}/{total})",
+  "vscodeSectionHint": "Extensions from Open VSX — the registry VS Codium and code-server use. Microsoft's marketplace is not available: its terms limit it to Microsoft products."
+}

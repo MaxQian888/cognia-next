@@ -17,7 +17,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import type { CustomTheme } from "@/types/plugin/plugin-extended"
+import type { CustomTheme } from "@/types/plugin/plugin"
 import { cn } from "@/lib/utils"
 
 export interface SavedThemesRailLabels {

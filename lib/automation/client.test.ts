@@ -15,15 +15,55 @@ jest.mock("@/lib/tauri", () => ({
   },
 }))
 
+const mockUiaListen = jest.fn()
+jest.mock("@tauri-apps/api/event", () => ({
+  listen: (event: string, handler: (event: { payload: unknown }) => void) =>
+    mockUiaListen(event, handler),
+}))
+
 import { transport } from "@/lib/tauri"
 
-import { desktop, defaultAutomationSettings } from "./client"
+import {
+  desktop,
+  defaultAutomationSettings,
+  listenUiaEvents,
+  UIA_EVENT_NAME,
+  type UiaEventPayload,
+} from "./client"
 import { elementRef, keyChord } from "./types"
 
 const mockCall = transport.call as unknown as jest.Mock
 
 afterEach(() => {
   mockCall.mockReset()
+  mockUiaListen.mockReset()
+})
+
+describe("UIA event client", () => {
+  it("forwards native property and structure metadata without dropping fields", async () => {
+    const unlisten = jest.fn()
+    const payload: UiaEventPayload = {
+      subscriptionId: 7,
+      kind: "structure-changed",
+      controlType: "Window",
+      processId: 42,
+      property: "Name",
+      structureChangeType: "ChildAdded",
+      runtimeId: [1, 2, 3],
+      at: 100,
+    }
+    mockUiaListen.mockImplementationOnce(
+      async (_event: string, handler: (event: { payload: UiaEventPayload }) => void) => {
+        handler({ payload })
+        return unlisten
+      }
+    )
+    const handler = jest.fn()
+
+    await expect(listenUiaEvents(handler)).resolves.toBe(unlisten)
+    expect(mockUiaListen).toHaveBeenCalledWith(UIA_EVENT_NAME, expect.any(Function))
+    expect(handler).toHaveBeenCalledWith(payload)
+  })
 })
 
 describe("desktop client", () => {
@@ -34,6 +74,7 @@ describe("desktop client", () => {
       hasInputSim: true,
       hasScreenshot: true,
       hasEvents: true,
+      hasA11yTree: false,
     })
     const caps = await desktop.capabilities()
     expect(mockCall).toHaveBeenCalledWith("desktop_capabilities", {})
@@ -45,6 +86,80 @@ describe("desktop client", () => {
     await desktop.getFocus({ surface: "mcp", pluginId: "demo" })
     expect(mockCall).toHaveBeenCalledWith("desktop_get_focus", {
       ctx: { surface: "mcp", pluginId: "demo" },
+    })
+  })
+
+  it("desktop app-session methods preserve revision and opaque continuation tokens", async () => {
+    mockCall.mockResolvedValueOnce([])
+    await desktop.listApps({ surface: "computerUse" })
+    expect(mockCall).toHaveBeenLastCalledWith("desktop_list_apps", {
+      ctx: { surface: "computerUse" },
+    })
+
+    mockCall.mockResolvedValueOnce({})
+    await desktop.getAppState(
+      "session-1",
+      { kind: "bundleId", bundleId: "com.apple.Notes" },
+      { projection: "inspector", maxNodes: 25_000 },
+      { surface: "computerUse" }
+    )
+    expect(mockCall).toHaveBeenLastCalledWith("desktop_get_app_state", {
+      args: {
+        sessionId: "session-1",
+        locator: { kind: "bundleId", bundleId: "com.apple.Notes" },
+        options: { projection: "inspector", maxNodes: 25_000 },
+        ctx: { surface: "computerUse" },
+      },
+    })
+
+    mockCall.mockResolvedValueOnce([])
+    await desktop.queryElements(
+      { sessionId: "session-1", lineageId: "lineage-1", revision: 3 },
+      { controlType: "button" },
+      20
+    )
+    expect(mockCall).toHaveBeenLastCalledWith("desktop_query_elements", {
+      args: {
+        sessionId: "session-1",
+        lineageId: "lineage-1",
+        revision: 3,
+        locator: { controlType: "button" },
+        limit: 20,
+        ctx: {},
+      },
+    })
+
+    const handle = {
+      sessionId: "session-1",
+      lineageId: "lineage-1",
+      revision: 3,
+      index: 4,
+      fingerprint: "fingerprint",
+    }
+    mockCall.mockResolvedValueOnce({ nodes: [], continuationToken: null })
+    await desktop.expandElement(handle, "opaque-token", 50)
+    expect(mockCall).toHaveBeenLastCalledWith("desktop_expand_element", {
+      args: {
+        handle,
+        continuationToken: "opaque-token",
+        limit: 50,
+        ctx: {},
+      },
+    })
+
+    const request = {
+      turnToken: "turn-token",
+      target: { kind: "element" as const, handle },
+      action: { kind: "click" as const },
+      strategy: "auto" as const,
+    }
+    mockCall.mockResolvedValueOnce({ status: "delivered" })
+    await desktop.performAction(request, { surface: "computerUse" })
+    expect(mockCall).toHaveBeenLastCalledWith("desktop_perform_action", {
+      args: {
+        request,
+        ctx: { surface: "computerUse" },
+      },
     })
   })
 
@@ -138,6 +253,18 @@ describe("desktop client", () => {
     expect(mockCall).toHaveBeenCalledWith("automation_settings_set", { settings: s })
   })
 
+  it("desktop.setEnabled invokes the dedicated enable command", async () => {
+    mockCall.mockResolvedValueOnce(undefined)
+    await desktop.setEnabled(true)
+    expect(mockCall).toHaveBeenCalledWith("automation_set_enabled", { enabled: true })
+  })
+
+  it("desktop.killSwitchEngaged reads the engaged flag", async () => {
+    mockCall.mockResolvedValueOnce(true)
+    await expect(desktop.killSwitchEngaged()).resolves.toBe(true)
+    expect(mockCall).toHaveBeenCalledWith("automation_kill_switch_engaged", {})
+  })
+
   it("desktop.killSwitch invokes the kill switch command", async () => {
     mockCall.mockResolvedValueOnce(undefined)
     await desktop.killSwitch()
@@ -167,6 +294,104 @@ describe("desktop client", () => {
       args: { target, opts: { count: 3 }, ctx: { surface: "computerUse" } },
     })
   })
+
+  it("M5 pointer/key primitives marshal their commands", async () => {
+    mockCall.mockResolvedValue(undefined)
+    await desktop.mouseMove({ x: 1, y: 2 }, { surface: "computerUse" })
+    expect(mockCall).toHaveBeenCalledWith("desktop_mouse_move", {
+      args: { point: { x: 1, y: 2 }, ctx: { surface: "computerUse" } },
+    })
+    await desktop.drag({ x: 0, y: 0 }, { x: 5, y: 5 })
+    expect(mockCall).toHaveBeenCalledWith("desktop_drag", {
+      args: { from: { x: 0, y: 0 }, to: { x: 5, y: 5 }, opts: {}, ctx: {} },
+    })
+    await desktop.scroll({ kind: "point", x: 3, y: 4 }, { dy: 120 })
+    expect(mockCall).toHaveBeenCalledWith("desktop_scroll", {
+      args: { target: { kind: "point", x: 3, y: 4 }, opts: { dy: 120 }, ctx: {} },
+    })
+    await desktop.holdKey(keyChord("shift"), 500)
+    expect(mockCall).toHaveBeenCalledWith("desktop_hold_key", {
+      args: { chord: keyChord("shift"), durationMs: 500, ctx: {} },
+    })
+    await desktop.mouseButton("left", "down")
+    expect(mockCall).toHaveBeenCalledWith("desktop_mouse_button", {
+      args: { button: "left", transition: "down", ctx: {} },
+    })
+    await desktop.windowOp(elementRef("w1"), { kind: "focus" })
+    expect(mockCall).toHaveBeenCalledWith("desktop_window_op", {
+      args: { target: elementRef("w1"), op: { kind: "focus" }, ctx: {} },
+    })
+  })
+
+  it("pick affordance commands marshal point + session lifecycle", async () => {
+    mockCall.mockResolvedValue(undefined)
+    await desktop.pickAtPoint({ x: 9, y: 9 }, { surface: "computerUse" })
+    expect(mockCall).toHaveBeenCalledWith("desktop_pick_at_point", {
+      args: { point: { x: 9, y: 9 }, ctx: { surface: "computerUse" } },
+    })
+    await desktop.pickSessionStart()
+    expect(mockCall).toHaveBeenCalledWith("desktop_pick_session_start", { args: { ctx: {} } })
+    await desktop.pickSessionCancel()
+    expect(mockCall).toHaveBeenCalledWith("desktop_pick_session_cancel", { args: { ctx: {} } })
+  })
+
+  it("consentRespond forwards the broker reply", async () => {
+    mockCall.mockResolvedValueOnce(undefined)
+    await desktop.consentRespond({
+      id: "c1",
+      allow: true,
+      persist: true,
+      grantDurationMs: 15 * 60 * 1000,
+    })
+    expect(mockCall).toHaveBeenCalledWith("automation_consent_respond", {
+      args: {
+        id: "c1",
+        allow: true,
+        persist: true,
+        grantDurationMs: 15 * 60 * 1000,
+      },
+    })
+  })
+
+  it("virtual display commands marshal correctly", async () => {
+    mockCall.mockResolvedValue(undefined)
+    await desktop.virtualDisplayHealthProbe()
+    expect(mockCall).toHaveBeenCalledWith("virtual_display_health_probe", {})
+    await desktop.virtualDisplaySetup()
+    expect(mockCall).toHaveBeenCalledWith("virtual_display_setup", {})
+    await desktop.virtualDisplayProbe()
+    expect(mockCall).toHaveBeenCalledWith("virtual_display_probe", {})
+    await desktop.virtualDisplayArm()
+    expect(mockCall).toHaveBeenCalledWith("virtual_display_arm", {})
+    await desktop.virtualDisplayRelease("sess-9")
+    expect(mockCall).toHaveBeenCalledWith("virtual_display_release", {
+      args: { sessionId: "sess-9" },
+    })
+  })
+
+  it("desktop.paste posts text through desktop_paste", async () => {
+    mockCall.mockResolvedValueOnce(undefined)
+    await desktop.paste("hello", { surface: "workflow" })
+    expect(mockCall).toHaveBeenCalledWith("desktop_paste", {
+      args: { text: "hello", ctx: { surface: "workflow" } },
+    })
+  })
+
+  it("desktop.launchApp posts app + action", async () => {
+    mockCall.mockResolvedValueOnce(undefined)
+    await desktop.launchApp("notepad.exe", "launch", { surface: "workflow" })
+    expect(mockCall).toHaveBeenCalledWith("desktop_launch_app", {
+      args: { app: "notepad.exe", action: "launch", ctx: { surface: "workflow" } },
+    })
+  })
+
+  it("desktop.launchApp focus variant", async () => {
+    mockCall.mockResolvedValueOnce(undefined)
+    await desktop.launchApp("notepad.exe", "focus")
+    expect(mockCall).toHaveBeenCalledWith("desktop_launch_app", {
+      args: { app: "notepad.exe", action: "focus", ctx: {} },
+    })
+  })
 })
 
 describe("defaultAutomationSettings", () => {
@@ -176,5 +401,16 @@ describe("defaultAutomationSettings", () => {
     expect(s.defaultTier).toBe("off")
     expect(s.perSurface.workflow.tier).toBe("off")
     expect(s.perSurface.plugin.perPluginOverrides).toEqual({})
+  })
+
+  it("includes behavior defaults (scaling on, dedup on, paste 200)", () => {
+    const s = defaultAutomationSettings()
+    // Mirrors `ScreenshotScalingSettings::default()` in cognia-automation —
+    // the two defaults must not disagree.
+    expect(s.screenshotScaling).toEqual({ enabled: true, maxWidth: 1280, maxHeight: 800 })
+    expect(s.screenshotDedup).toBe(true)
+    expect(s.alwaysHidePictureInPicture).toBe(false)
+    expect(s.pasteThresholdChars).toBe(200)
+    expect(s.consentTimeoutMs).toBe(90_000)
   })
 })

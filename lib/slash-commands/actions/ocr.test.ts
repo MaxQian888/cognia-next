@@ -1,4 +1,5 @@
-import { handleOcrSlashCommand, parseOcrArgs } from "./ocr"
+import { createNullOcrCache, createNullOcrPageCache } from "@/lib/ocr/cache-contract"
+import { buildOcrResultPart, handleOcrSlashCommand, parseOcrArgs } from "./ocr"
 import { createOcrRegistry } from "@/lib/ocr/registry"
 import { DEFAULT_OCR_SETTINGS, type OcrResult } from "@/types/ocr"
 import { OcrError } from "@/lib/ocr/errors"
@@ -10,6 +11,8 @@ function makeDeps(): ExtractDeps {
     settings: { ...DEFAULT_OCR_SETTINGS },
     platform: "web",
     credentialsResolver: async () => ({ secrets: {} }),
+    cache: createNullOcrCache(),
+    pageCache: createNullOcrPageCache(),
   }
 }
 
@@ -111,6 +114,24 @@ describe("handleOcrSlashCommand", () => {
     expect(out.composerText).toBeUndefined()
   })
 
+  it("returns an attachment-id sourceRef for an att_* source (gap4)", async () => {
+    const out = await handleOcrSlashCommand({
+      argv: "att_9",
+      deps: makeDeps(),
+      extractImpl: async () => sampleResult,
+    })
+    expect(out.sourceRef).toEqual({ kind: "attachment-id", value: "att_9" })
+  })
+
+  it("returns a file-path sourceRef for a path source (gap4)", async () => {
+    const out = await handleOcrSlashCommand({
+      argv: "/tmp/scan.png",
+      deps: makeDeps(),
+      extractImpl: async () => sampleResult,
+    })
+    expect(out.sourceRef).toEqual({ kind: "file-path", value: "/tmp/scan.png" })
+  })
+
   it("propagates OcrError code on extraction failure", async () => {
     const out = await handleOcrSlashCommand({
       argv: "att_1",
@@ -151,5 +172,49 @@ describe("handleOcrSlashCommand", () => {
       },
     })
     expect(captured[0]?.attachmentResolver).toBe(attachmentResolver)
+  })
+})
+
+describe("buildOcrResultPart (gap4)", () => {
+  it("maps an OcrResult into an ocr-result part", () => {
+    const part = buildOcrResultPart(sampleResult, { kind: "file-path", value: "/x.png" })
+    expect(part).toMatchObject({
+      type: "ocr-result",
+      providerId: "mock",
+      languages: ["en"],
+      text: "Hello",
+      markdown: "# Hello",
+      durationMs: 12,
+      cached: false,
+      sourceRef: { kind: "file-path", value: "/x.png" },
+    })
+  })
+
+  it("reports null confidence when the result has no document", () => {
+    expect(buildOcrResultPart(sampleResult).confidence).toBeNull()
+  })
+
+  it("computes mean confidence from the document blocks", () => {
+    const withDoc: OcrResult = {
+      ...sampleResult,
+      document: {
+        pages: [
+          {
+            pageNumber: 1,
+            width: 0,
+            height: 0,
+            blocks: [
+              { id: "b1", text: "a", confidence: 0.9, bbox: { x: 0, y: 0, width: 1, height: 1 } },
+              { id: "b2", text: "b", confidence: 0.7, bbox: { x: 0, y: 0, width: 1, height: 1 } },
+            ],
+          },
+        ],
+      } as never,
+    }
+    expect(buildOcrResultPart(withDoc).confidence).toBeCloseTo(0.8)
+  })
+
+  it("omits sourceRef when none is provided", () => {
+    expect(buildOcrResultPart(sampleResult).sourceRef).toBeUndefined()
   })
 })

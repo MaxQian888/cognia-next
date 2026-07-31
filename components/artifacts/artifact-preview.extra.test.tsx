@@ -51,12 +51,7 @@ jest.mock("./artifact-renderers", () => {
         return {
           owner: "builtin" as const,
           rendererType: map[artifact.type] as
-            | "code"
-            | "document"
-            | "mermaid"
-            | "chart"
-            | "math"
-            | undefined,
+            "code" | "document" | "mermaid" | "chart" | "math" | undefined,
         }
       }
       return { owner: "runtime" as const }

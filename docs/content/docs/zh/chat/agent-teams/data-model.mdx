@@ -78,8 +78,20 @@ export interface AgentTeamConfig {
     dryRoundsToStop?: number
   }
   workingDir?: string
+  /** 在依赖任务开始前，由 Lead 阻塞式评审每个任务（ADR-0071）。 */
+  taskReview?: {
+    enabled?: boolean
+    /** 收到 `changes_requested` 后允许成员修订的次数。默认 2。 */
+    maxRevisions?: number
+  }
 }
 ```
+
+`taskReview` **默认关闭**；开启后，合成器会为每个任务额外产出一个
+`action.team.task.review` 节点，并把该任务的下游依赖改指向它，因此未通过评审的产出无法被继续使用。
+它是 `governancePolicy.approval.requireResultReview`（一个**人工**看板闸门）的自动化同胞，两者可以叠加：
+当 `requireResultReview` 也开启时，自动通过的任务会交给人工复核，否则直接标记完成。
+开关与预算的解析集中在 `lib/ai/agent/team/task-review-policy.ts`，以确保合成器与执行器不会各自解读。
 
 `DEFAULT_TEAM_CONFIG`（`:376`）填充 `maxTeammates: 10`、`maxConcurrentTeammates: 5`、`executionMode: "coordinated"`、`preferredExecutionPattern: "manager_worker"`、`displayMode: "expanded"`。`TeamGovernancePolicy`（`:135-166`）将四个子策略分组：**approval**（`requirePlanApproval`、`requireDelegationApproval`）、**budget**（`tokenBudget`、警告/告急阈值，以及一个 `onCritical` 动作）、**escalation**（`allowOperatorPatternOverride`、`pauseOnHighRisk`），以及 **delivery**（带时区的静默时段窗口）。
 

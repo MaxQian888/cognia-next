@@ -28,13 +28,17 @@ import { toast } from "sonner"
 
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import type { AgentTeam } from "@/types/agent/agent-team"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 
 import { OverviewSection } from "./settings/section-overview"
 import { PluginsSection } from "./settings/section-plugins"
 import { GovernanceSection } from "./settings/section-governance"
+import { ExecutionSection } from "./settings/section-execution"
 import { UltracodeSection } from "./settings/section-ultracode"
+import { WorktreesSection } from "./settings/section-worktrees"
+import { PrFeedbackSection } from "./settings/section-pr-feedback"
 import { MemorySection } from "./settings/section-memory"
+import { TeamKnowledgeTwinsCard } from "./settings/team-knowledge-twins-card"
 import { SettingsSaveIndicator } from "./settings/settings-save-indicator"
 import { ConfirmActionDialog } from "./settings/confirm-action-dialog"
 
@@ -60,7 +64,7 @@ export function AgentTeamSettings({ team }: AgentTeamSettingsProps) {
   }
 
   return (
-    <div className="space-y-4" data-testid="workspace-settings">
+    <div className="mx-auto w-full max-w-4xl space-y-4" data-testid="workspace-settings">
       <SettingsSaveIndicator teamId={team.id} />
       <Accordion type="multiple" defaultValue={["overview"]} className="space-y-2">
         <AccordionItem value="overview" className="border-none">
@@ -90,6 +94,15 @@ export function AgentTeamSettings({ team }: AgentTeamSettingsProps) {
           </AccordionContent>
         </AccordionItem>
 
+        <AccordionItem value="execution" className="border-none">
+          <AccordionTrigger className="rounded-md bg-muted/40 px-3 text-sm font-medium">
+            {t("accordion.execution")}
+          </AccordionTrigger>
+          <AccordionContent className="pt-3">
+            <ExecutionSection team={team} />
+          </AccordionContent>
+        </AccordionItem>
+
         <AccordionItem value="ultracode" className="border-none">
           <AccordionTrigger className="rounded-md bg-muted/40 px-3 text-sm font-medium">
             {t("accordion.ultracode")}
@@ -99,11 +112,30 @@ export function AgentTeamSettings({ team }: AgentTeamSettingsProps) {
           </AccordionContent>
         </AccordionItem>
 
+        <AccordionItem value="worktrees" className="border-none">
+          <AccordionTrigger className="rounded-md bg-muted/40 px-3 text-sm font-medium">
+            {t("accordion.worktrees")}
+          </AccordionTrigger>
+          <AccordionContent className="pt-3">
+            <WorktreesSection team={team} />
+          </AccordionContent>
+        </AccordionItem>
+
+        <AccordionItem value="prFeedback" className="border-none">
+          <AccordionTrigger className="rounded-md bg-muted/40 px-3 text-sm font-medium">
+            {t("accordion.prFeedback")}
+          </AccordionTrigger>
+          <AccordionContent className="pt-3">
+            <PrFeedbackSection team={team} />
+          </AccordionContent>
+        </AccordionItem>
+
         <AccordionItem value="memory" className="border-none">
           <AccordionTrigger className="rounded-md bg-muted/40 px-3 text-sm font-medium">
             {t("accordion.memory")}
           </AccordionTrigger>
-          <AccordionContent className="pt-3">
+          <AccordionContent className="space-y-3 pt-3">
+            <TeamKnowledgeTwinsCard team={team} />
             <MemorySection team={team} />
           </AccordionContent>
         </AccordionItem>

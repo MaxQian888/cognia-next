@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 // CRUD coverage for the workflows table — list/get/create/update/replace/
 // delete plus duplicate, seed, and the regenerateNodeIds helper.
 
@@ -7,10 +8,19 @@ import {
   addTagToWorkflows,
   createWorkflow,
   deleteWorkflow,
+  deleteWorkflowRun,
+  deleteWorkflowRuns,
+  deleteAllRunsForWorkflow,
   duplicateWorkflow,
+  acknowledgeRun,
+  getLastRunStatuses,
   getRecentlyFailedWorkflowIds,
   getRunCounts,
   getWorkflow,
+  getWorkflowRun,
+  listDeadLetters,
+  markReplayed,
+  saveWorkflowAsTemplate,
   listTemplateWorkflows,
   listUserWorkflows,
   listWorkflows,
@@ -26,6 +36,19 @@ import {
 import { __resetDbForTesting, getDb, whenSeeded } from "./schema"
 import { ROOT_FOLDER_ID } from "@/types/workflow/folder"
 import { DEFAULT_WORKFLOW_SETTINGS, type VisualWorkflow } from "@/types/workflow/visual"
+import { publishWorkflow } from "@/lib/workflow/publish/publish-workflow"
+
+jest.mock("@/lib/workflow/runtime/webhook-bridge", () => ({
+  syncWorkflowTriggers: jest.fn(async () => undefined),
+  unsyncWorkflowTriggers: jest.fn(async () => undefined),
+}))
+
+const triggerProjectionMocks = jest.requireMock("@/lib/workflow/runtime/webhook-bridge") as {
+  syncWorkflowTriggers: jest.Mock
+  unsyncWorkflowTriggers: jest.Mock
+}
+const syncWorkflowTriggersMock = triggerProjectionMocks.syncWorkflowTriggers
+const unsyncWorkflowTriggersMock = triggerProjectionMocks.unsyncWorkflowTriggers
 
 beforeEach(async () => {
   await getDb().delete()
@@ -36,6 +59,8 @@ beforeEach(async () => {
   await getDb().workflowFolders.clear()
   await getDb().workflowRuns.clear()
   __resetRunCountCacheForTesting()
+  syncWorkflowTriggersMock.mockReset().mockResolvedValue(undefined)
+  unsyncWorkflowTriggersMock.mockClear()
 })
 
 function manualNode(id: string, x = 0): VisualWorkflow["nodes"][number] {
@@ -60,8 +85,33 @@ describe("createWorkflow", () => {
     expect(wf.nodes).toEqual([])
     expect(wf.edges).toEqual([])
     expect(wf.settings.errorPolicy).toBe("stop")
+    // New workflows default to parallel ready-set scheduling. Regression for
+    // the field-enumerated cloneSettings dropping maxConcurrency.
+    expect(wf.settings.maxConcurrency).toBe(4)
     expect(wf.viewport).toEqual({ x: 0, y: 0, zoom: 1 })
     expect(wf.createdAt).toBe(wf.updatedAt)
+  })
+
+  // ── ADR-0070 Phase 3 — migration stamp ─────────────────────────────────
+  it("stamps riskGating on new workflows", async () => {
+    const wf = await createWorkflow({ name: "X" })
+    expect(wf.settings.riskGating).toBe(true)
+  })
+
+  it("stamps riskGating even when the caller supplies its own settings", async () => {
+    // The stamp merges over draft.settings rather than living in the defaults,
+    // so a seeded/templated workflow is gated too.
+    const wf = await createWorkflow({
+      name: "X",
+      settings: {
+        errorPolicy: "continue",
+        timeoutMs: 1000,
+        concurrency: 5,
+        retryDefaults: { attempts: 1, backoff: "fixed", baseMs: 500 },
+      },
+    })
+    expect(wf.settings.riskGating).toBe(true)
+    expect(wf.settings.errorPolicy).toBe("continue")
   })
 
   it("falls back to 'Untitled workflow' on empty name", async () => {
@@ -88,6 +138,66 @@ describe("createWorkflow", () => {
     expect(wf.settings.errorPolicy).toBe("continue")
     expect(wf.settings.concurrency).toBe(5)
     expect(wf.viewport?.zoom).toBe(1.5)
+  })
+
+  it("preserves every content field supplied by a complete draft", async () => {
+    const wf = await createWorkflow({
+      name: "Complete",
+      complexity: "advanced",
+      variables: { REGION: "eu" },
+      pinData: { n1: { preview: true } },
+      staticData: { cursor: 7 },
+      interface: { inputSchema: { type: "object" }, outputSchema: { type: "string" } },
+      settings: {
+        ...DEFAULT_WORKFLOW_SETTINGS,
+        riskGating: false,
+        onFailure: { runCatchNodes: false, notify: true },
+      },
+    })
+
+    expect(wf).toMatchObject({
+      complexity: "advanced",
+      variables: { REGION: "eu" },
+      pinData: { n1: { preview: true } },
+      staticData: { cursor: 7 },
+      interface: { inputSchema: { type: "object" }, outputSchema: { type: "string" } },
+    })
+    expect(wf.settings.riskGating).toBe(false)
+    expect(wf.settings.onFailure).toEqual({ runCatchNodes: false, notify: true })
+  })
+
+  it("never accepts publication state through the ordinary create boundary", async () => {
+    const wf = await createWorkflow({
+      name: "Cannot bypass publish",
+      published: { at: 100, toolName: "wf_bypass" },
+    } as Parameters<typeof createWorkflow>[0] & {
+      published: { at: number; toolName: string }
+    })
+
+    expect(wf.published).toBeUndefined()
+  })
+
+  it("projects the persisted workflow into the trigger runtime", async () => {
+    const wf = await createWorkflow({ name: "Projected", nodes: [manualNode("trigger-a")] })
+
+    expect(syncWorkflowTriggersMock).toHaveBeenCalledTimes(1)
+    expect(syncWorkflowTriggersMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: wf.id, nodes: wf.nodes })
+    )
+  })
+
+  it("keeps the database write when trigger projection fails", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined)
+    syncWorkflowTriggersMock.mockRejectedValueOnce(new Error("native runtime unavailable"))
+
+    const wf = await createWorkflow({ name: "Still persisted", nodes: [manualNode("trigger-a")] })
+
+    expect((await getWorkflow(wf.id))?.name).toBe("Still persisted")
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("trigger projection failed"),
+      expect.any(Error)
+    )
+    warn.mockRestore()
   })
 })
 
@@ -152,6 +262,64 @@ describe("updateWorkflow / replaceWorkflow", () => {
     expect(fresh?.nodes).toHaveLength(1)
     await expect(replaceWorkflow({ ...wf, id: "wf_missing" })).rejects.toThrow(/not found/)
   })
+
+  it("projects the complete post-update and replacement snapshots", async () => {
+    const wf = await createWorkflow({ name: "A" })
+    syncWorkflowTriggersMock.mockClear()
+
+    await updateWorkflow(wf.id, { nodes: [manualNode("updated-trigger")] })
+    expect(syncWorkflowTriggersMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: wf.id, nodes: [manualNode("updated-trigger")] })
+    )
+
+    const replacement = {
+      ...(await getWorkflow(wf.id))!,
+      nodes: [manualNode("replacement-trigger")],
+    }
+    await replaceWorkflow(replacement)
+    expect(syncWorkflowTriggersMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: wf.id, nodes: [manualNode("replacement-trigger")] })
+    )
+  })
+
+  it("rejects protected metadata injected through an ordinary update patch", async () => {
+    const initialInterface = {
+      inputSchema: { type: "object" },
+      outputSchema: { type: "string" },
+    }
+    const wf = await createWorkflow({ name: "Protected", interface: initialInterface })
+    const canonicalUpdatedAt = wf.updatedAt + 500
+    const now = jest.spyOn(Date, "now").mockReturnValue(canonicalUpdatedAt)
+
+    try {
+      const updated = await updateWorkflow(wf.id, {
+        id: "wf_injected",
+        createdAt: 0,
+        updatedAt: 0,
+        schemaVersion: 999,
+        interface: {
+          inputSchema: { type: "array" },
+          outputSchema: { type: "number" },
+        },
+        published: { at: 1, toolName: "wf_injected" },
+        description: "Allowed",
+      } as Parameters<typeof updateWorkflow>[1] & Record<string, unknown>)
+
+      if (!updated) throw new Error("updated workflow was not returned")
+      expect(updated).toMatchObject({
+        id: wf.id,
+        createdAt: wf.createdAt,
+        updatedAt: canonicalUpdatedAt,
+        schemaVersion: wf.schemaVersion,
+        interface: initialInterface,
+        description: "Allowed",
+      })
+      expect(updated.published).toBeUndefined()
+      expect(await getWorkflow("wf_injected")).toBeUndefined()
+    } finally {
+      now.mockRestore()
+    }
+  })
 })
 
 describe("deleteWorkflow", () => {
@@ -159,6 +327,35 @@ describe("deleteWorkflow", () => {
     const wf = await createWorkflow({ name: "A" })
     await deleteWorkflow(wf.id)
     expect(await getWorkflow(wf.id)).toBeUndefined()
+  })
+
+  it("unregisters trigger nodes after deleting the workflow row and Skill atomically", async () => {
+    const wf = await createWorkflow({ name: "A", nodes: [manualNode("n_manual")] })
+
+    await deleteWorkflow(wf.id)
+
+    expect(unsyncWorkflowTriggersMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: wf.id, nodes: wf.nodes })
+    )
+    expect(await getWorkflow(wf.id)).toBeUndefined()
+  })
+
+  it("keeps triggers registered when the atomic workflow and Skill delete rolls back", async () => {
+    const wf = await createWorkflow({ name: "A", nodes: [manualNode("n_manual")] })
+    const publication = await publishWorkflow(wf.id, 10)
+    const skillDelete = jest
+      .spyOn(getDb().skills, "delete")
+      .mockRejectedValueOnce(new Error("skill delete failed"))
+
+    try {
+      await expect(deleteWorkflow(wf.id)).rejects.toThrow("skill delete failed")
+
+      expect(unsyncWorkflowTriggersMock).not.toHaveBeenCalled()
+      expect(await getWorkflow(wf.id)).toBeDefined()
+      expect(await getDb().skills.get(publication.skillId)).toBeDefined()
+    } finally {
+      skillDelete.mockRestore()
+    }
   })
 
   it("records a tombstone so the deletion mirrors to phones (v61)", async () => {
@@ -209,6 +406,17 @@ describe("duplicateWorkflow", () => {
 
   it("throws when the source is missing", async () => {
     await expect(duplicateWorkflow("wf_missing")).rejects.toThrow(/not found/)
+  })
+
+  it("projects the duplicated workflow under its new id", async () => {
+    const wf = await createWorkflow({ name: "Original", nodes: [manualNode("n1")] })
+    syncWorkflowTriggersMock.mockClear()
+
+    const copy = await duplicateWorkflow(wf.id)
+
+    expect(syncWorkflowTriggersMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: copy.id, nodes: copy.nodes })
+    )
   })
 })
 
@@ -394,5 +602,251 @@ describe("schemaVersion 2 funnel", () => {
     const out = await getWorkflow(wf.id)
     expect(out?.schemaVersion).toBe(2)
     expect(out?.name).toBe("rw2")
+  })
+
+  describe("dead-letter queue (A3)", () => {
+    async function seedRun(
+      id: string,
+      patch: Partial<import("@/types/workflow/visual").WorkflowRunRow> = {}
+    ): Promise<void> {
+      const snapshot: VisualWorkflow = {
+        id: "wf_dl",
+        schemaVersion: 2,
+        name: "dl",
+        createdAt: 0,
+        updatedAt: 0,
+        nodes: [],
+        edges: [],
+        settings: DEFAULT_WORKFLOW_SETTINGS,
+      }
+      await getDb().workflowRuns.put({
+        id,
+        workflowId: "wf_dl",
+        status: "failed",
+        triggerKind: "trigger.manual",
+        triggerPayload: {},
+        startedAt: 1,
+        workflowSnapshot: snapshot,
+        ...patch,
+      })
+    }
+
+    it("lists only unacknowledged failed runs, newest first", async () => {
+      await seedRun("r1", { startedAt: 10 })
+      await seedRun("r2", { startedAt: 20 })
+      await seedRun("r3", { startedAt: 30, status: "succeeded" })
+      const dl = await listDeadLetters()
+      expect(dl.map((r) => r.id)).toEqual(["r2", "r1"])
+    })
+
+    it("scopes to a workflow id", async () => {
+      await seedRun("r1")
+      await seedRun("r2", { workflowId: "other" })
+      expect((await listDeadLetters("wf_dl")).map((r) => r.id)).toEqual(["r1"])
+    })
+
+    it("acknowledgeRun removes a run from the queue", async () => {
+      await seedRun("r1")
+      await acknowledgeRun("r1")
+      expect(await listDeadLetters()).toHaveLength(0)
+      expect((await getDb().workflowRuns.get("r1"))?.acknowledgedAt).toBeGreaterThan(0)
+    })
+
+    it("markReplayed links the replay run and bumps the counter", async () => {
+      await seedRun("r1")
+      await markReplayed("r1", "replay_1")
+      await markReplayed("r1", "replay_2")
+      const row = await getDb().workflowRuns.get("r1")
+      expect(row?.replayedByRunId).toBe("replay_2")
+      expect(row?.replayCount).toBe(2)
+    })
+
+    it("getWorkflowRun returns a single run row, or undefined when absent", async () => {
+      await seedRun("r1")
+      expect((await getWorkflowRun("r1"))?.id).toBe("r1")
+      expect(await getWorkflowRun("missing")).toBeUndefined()
+    })
+  })
+
+  describe("run deletion", () => {
+    async function seedRun(
+      id: string,
+      workflowId = "wf_run",
+      patch: Partial<import("@/types/workflow/visual").WorkflowRunRow> = {}
+    ): Promise<void> {
+      const snapshot: VisualWorkflow = {
+        id: workflowId,
+        schemaVersion: 2,
+        name: "r",
+        createdAt: 0,
+        updatedAt: 0,
+        nodes: [],
+        edges: [],
+        settings: DEFAULT_WORKFLOW_SETTINGS,
+      }
+      await getDb().workflowRuns.put({
+        id,
+        workflowId,
+        status: "succeeded",
+        triggerKind: "trigger.manual",
+        triggerPayload: {},
+        startedAt: 1,
+        workflowSnapshot: snapshot,
+        ...patch,
+      })
+    }
+    async function seedEvent(id: string, runId: string): Promise<void> {
+      await getDb().workflowRunEvents.put({ id, runId, ts: 1, type: "step_started", stepId: "s1" })
+    }
+
+    it("deleteWorkflowRun removes the run and cascades its events", async () => {
+      await seedRun("r1")
+      await seedEvent("e1", "r1")
+      await seedEvent("e2", "r1")
+      await deleteWorkflowRun("r1")
+      expect(await getDb().workflowRuns.get("r1")).toBeUndefined()
+      expect(await getDb().workflowRunEvents.where("runId").equals("r1").count()).toBe(0)
+    })
+
+    it("deleteWorkflowRun is a no-op for empty/unknown ids", async () => {
+      await seedRun("r1")
+      await expect(deleteWorkflowRun("")).resolves.toBeUndefined()
+      await expect(deleteWorkflowRun("missing")).resolves.toBeUndefined()
+      expect(await getDb().workflowRuns.get("r1")).toBeDefined()
+    })
+
+    it("deleteWorkflowRuns removes many runs and their events", async () => {
+      await seedRun("r1")
+      await seedRun("r2")
+      await seedRun("r3")
+      await seedEvent("e1", "r1")
+      await seedEvent("e2", "r2")
+      await deleteWorkflowRuns(["r1", "r2", ""])
+      expect((await getDb().workflowRuns.toArray()).map((r) => r.id)).toEqual(["r3"])
+      expect(await getDb().workflowRunEvents.count()).toBe(0)
+    })
+
+    it("deleteWorkflowRuns is a no-op for an empty list", async () => {
+      await seedRun("r1")
+      await expect(deleteWorkflowRuns([])).resolves.toBeUndefined()
+      expect(await getDb().workflowRuns.count()).toBe(1)
+    })
+
+    it("deleteAllRunsForWorkflow clears scoped runs+events and returns the count", async () => {
+      await seedRun("r1", "wf_a")
+      await seedRun("r2", "wf_a")
+      await seedRun("r3", "wf_b")
+      await seedEvent("e1", "r1")
+      await seedEvent("e2", "r3")
+      const removed = await deleteAllRunsForWorkflow("wf_a")
+      expect(removed).toBe(2)
+      expect((await getDb().workflowRuns.toArray()).map((r) => r.id)).toEqual(["r3"])
+      expect(await getDb().workflowRunEvents.where("runId").equals("r1").count()).toBe(0)
+      expect(await getDb().workflowRunEvents.where("runId").equals("r3").count()).toBe(1)
+    })
+
+    it("deleteAllRunsForWorkflow returns 0 for empty/unknown workflow ids", async () => {
+      expect(await deleteAllRunsForWorkflow("")).toBe(0)
+      expect(await deleteAllRunsForWorkflow("nope")).toBe(0)
+    })
+
+    it("deleteWorkflow cascades the run history + event log", async () => {
+      const wf = await createWorkflow({ name: "with runs" })
+      await seedRun("r1", wf.id)
+      await seedEvent("e1", "r1")
+      await deleteWorkflow(wf.id)
+      expect(await getWorkflow(wf.id)).toBeUndefined()
+      expect(await getDb().workflowRuns.where("workflowId").equals(wf.id).count()).toBe(0)
+      expect(await getDb().workflowRunEvents.where("runId").equals("r1").count()).toBe(0)
+    })
+  })
+
+  describe("saveWorkflowAsTemplate", () => {
+    it("clones a workflow into a template copy", async () => {
+      const src = await createWorkflow({
+        name: "Pipeline",
+        nodes: [manualNode("n1")],
+        tags: ["x"],
+      })
+      const tpl = await saveWorkflowAsTemplate(src.id)
+      expect(tpl.id).not.toBe(src.id)
+      expect(tpl.name).toBe("Pipeline (template)")
+      expect(tpl.isTemplate).toBe(true)
+      expect(tpl.isBuiltIn).toBe(false)
+      expect(tpl.nodes).toHaveLength(1)
+      expect(tpl.tags).toEqual(["x"])
+      expect((await listTemplateWorkflows()).map((w) => w.id)).toContain(tpl.id)
+    })
+
+    it("keeps reusable content while clearing source publication identity", async () => {
+      const src = await createWorkflow({
+        name: "Published pipeline",
+        complexity: "intermediate",
+        variables: { REGION: "us" },
+        pinData: { n1: { sample: 1 } },
+        staticData: { cursor: 3 },
+        interface: { inputSchema: { type: "object" }, outputSchema: { type: "object" } },
+      })
+      await getDb().workflows.update(src.id, {
+        published: { at: 10, toolName: "published_pipeline" },
+      })
+
+      const tpl = await saveWorkflowAsTemplate(src.id)
+      expect(tpl).toMatchObject({
+        complexity: "intermediate",
+        variables: { REGION: "us" },
+        pinData: { n1: { sample: 1 } },
+        staticData: { cursor: 3 },
+        interface: { inputSchema: { type: "object" }, outputSchema: { type: "object" } },
+      })
+      expect(tpl.published).toBeUndefined()
+    })
+
+    it("throws when the source workflow is missing", async () => {
+      await expect(saveWorkflowAsTemplate("missing")).rejects.toThrow(/not found/)
+    })
+  })
+
+  describe("getLastRunStatuses", () => {
+    async function seedRun(
+      id: string,
+      workflowId: string,
+      startedAt: number,
+      status: import("@/types/workflow/visual").RunStatus
+    ): Promise<void> {
+      const snapshot: VisualWorkflow = {
+        id: workflowId,
+        schemaVersion: 2,
+        name: "s",
+        createdAt: 0,
+        updatedAt: 0,
+        nodes: [],
+        edges: [],
+        settings: DEFAULT_WORKFLOW_SETTINGS,
+      }
+      await getDb().workflowRuns.put({
+        id,
+        workflowId,
+        status,
+        triggerKind: "trigger.manual",
+        triggerPayload: {},
+        startedAt,
+        workflowSnapshot: snapshot,
+      })
+    }
+
+    it("returns the newest run's status per workflow, omitting run-less ids", async () => {
+      await seedRun("a1", "wf_a", 10, "failed")
+      await seedRun("a2", "wf_a", 20, "succeeded")
+      await seedRun("b1", "wf_b", 5, "running")
+      const map = await getLastRunStatuses(["wf_a", "wf_b", "wf_none"])
+      expect(map.get("wf_a")).toBe("succeeded")
+      expect(map.get("wf_b")).toBe("running")
+      expect(map.has("wf_none")).toBe(false)
+    })
+
+    it("returns an empty map for no ids", async () => {
+      expect((await getLastRunStatuses([])).size).toBe(0)
+    })
   })
 })

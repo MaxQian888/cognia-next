@@ -56,6 +56,17 @@ describe("WorkflowCard", () => {
     expect(screen.getByTestId("workflow-card-wf_a")).toHaveTextContent("Daily digest")
   })
 
+  it("shows the run-count badge and last-run status when provided", () => {
+    render(<WorkflowCard workflow={makeWorkflow()} runCount={12} lastStatus="failed" />)
+    expect(screen.getByTestId("workflow-runcount-wf_a")).toHaveTextContent("12")
+    expect(screen.getByTestId("run-status-failed")).toBeInTheDocument()
+  })
+
+  it("hides the run-count badge when there are no runs", () => {
+    render(<WorkflowCard workflow={makeWorkflow()} runCount={0} />)
+    expect(screen.queryByTestId("workflow-runcount-wf_a")).not.toBeInTheDocument()
+  })
+
   it("toggles selection via the checkbox", () => {
     render(<WorkflowCard workflow={makeWorkflow()} />)
     fireEvent.click(screen.getByTestId("workflow-select-wf_a"))
@@ -116,6 +127,32 @@ describe("WorkflowCard", () => {
     expect(useWorkflowLibraryStore.getState().selection.size).toBe(0)
   })
 
+  it("activates from anywhere on the card, not just the title", () => {
+    // Whole-card affordance: clicking the body (badges/padding) must activate,
+    // not only the small header title button.
+    useWorkflowLibraryStore.setState({ selectionMode: true })
+    render(<WorkflowCard workflow={makeWorkflow()} />)
+    fireEvent.click(screen.getByTestId("workflow-card-wf_a"))
+    expect(useWorkflowLibraryStore.getState().selection.has("wf_a")).toBe(true)
+  })
+
+  it("activates exactly once when the title button is clicked", () => {
+    // The title button must not double-fire by also bubbling to the card.
+    useWorkflowLibraryStore.setState({ selectionMode: true })
+    render(<WorkflowCard workflow={makeWorkflow()} />)
+    fireEvent.click(screen.getByTestId("workflow-open-wf_a"))
+    // A second toggle would clear it again; selection proves a single toggle.
+    expect(useWorkflowLibraryStore.getState().selection.has("wf_a")).toBe(true)
+  })
+
+  it("does not activate the card when opening the actions menu", async () => {
+    const user = userEvent.setup()
+    useWorkflowLibraryStore.setState({ selectionMode: true })
+    render(<WorkflowCard workflow={makeWorkflow()} />)
+    await user.click(screen.getByTestId("workflow-card-menu-wf_a"))
+    expect(useWorkflowLibraryStore.getState().selection.has("wf_a")).toBe(false)
+  })
+
   it("opens the rename dialog from the menu", async () => {
     const user = userEvent.setup()
     render(<WorkflowCard workflow={makeWorkflow()} />)
@@ -130,5 +167,19 @@ describe("WorkflowCard", () => {
     await user.click(screen.getByTestId("workflow-card-menu-wf_a"))
     fireEvent.click(await screen.findByTestId("workflow-action-tags-wf_a"))
     expect(await screen.findByTestId("workflow-tags-input")).toBeInTheDocument()
+  })
+
+  it("renders a direct Run button that opens the run dialog", async () => {
+    render(<WorkflowCard workflow={makeWorkflow()} />)
+    fireEvent.click(screen.getByTestId("workflow-card-run-wf_a"))
+    expect(await screen.findByTestId("workflow-run-dialog")).toBeInTheDocument()
+  })
+
+  it("opens the run dialog from the actions menu", async () => {
+    const user = userEvent.setup()
+    render(<WorkflowCard workflow={makeWorkflow()} />)
+    await user.click(screen.getByTestId("workflow-card-menu-wf_a"))
+    fireEvent.click(await screen.findByTestId("workflow-action-run-wf_a"))
+    expect(await screen.findByTestId("workflow-run-dialog")).toBeInTheDocument()
   })
 })

@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Apply Update + clone-hides-overlay dedupe tests (ADR-0030 v49).
  *

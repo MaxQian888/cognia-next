@@ -7,13 +7,25 @@
 // `priority` order. Each plugin is wrapped in its own ErrorBoundary so a
 // throwing extension can't take down the host UI.
 
-import { Component, useEffect, useSyncExternalStore, type ReactNode } from "react"
+import { useEffect, useSyncExternalStore, type ReactNode } from "react"
+import { PluginSurface } from "@/components/plugins/plugin-surface"
 import {
   getExtensionsForPoint,
   getExtensionRevision,
   subscribeExtensionChanges,
 } from "@/lib/plugin/api"
-import type { CanonicalExtensionPoint } from "@/lib/plugin/contracts/plugin-points"
+import {
+  getContextKeyRevision,
+  subscribeContextKeys,
+} from "@/lib/plugin/context-keys/context-key-store"
+import {
+  getExtensionPointFormFactor,
+  type CanonicalExtensionPoint,
+  type PluginPointFormFactor,
+} from "@/lib/plugin/contracts/plugin-points"
+
+/** Hoisted so the slot wrapper's style prop keeps a stable identity. */
+const INLINE_SIZE_CONTAINER = { containerType: "inline-size" } as const
 
 interface Props {
   point: CanonicalExtensionPoint
@@ -39,6 +51,9 @@ export function PluginExtensionSlot({ point, className, limit, fallback, context
   // (a primitive — stable identity), not the registration array, so React's
   // "snapshot should be cached" check passes.
   useSyncExternalStore(subscribeExtensionChanges, getExtensionRevision, () => 0)
+  // Also re-render when context keys flip, so `when`-gated extensions
+  // (ExtensionOptions.when) appear/disappear live as app state changes.
+  useSyncExternalStore(subscribeContextKeys, getContextKeyRevision, () => 0)
 
   // Lazy activation: a plugin gated on `onView:<point>` activates the first
   // time a slot for that point mounts. Fire-and-forget — the manager dedups
@@ -68,79 +83,61 @@ export function PluginExtensionSlot({ point, className, limit, fallback, context
     return fallback ? <>{fallback}</> : null
   }
 
+  const formFactor = getExtensionPointFormFactor(point)
+
   return (
     <div
       className={className}
       data-plugin-extension-slot={point}
       data-extension-count={visible.length}
+      data-form-factor={formFactor}
+      // Makes this wrapper a query container, so a plugin's scoped stylesheet
+      // can respond to how wide its slot actually is (`@container (min-width:
+      // …)`) without the host measuring anything per frame. `inline-size` only
+      // — a `size` container would need a fixed block size and would collapse
+      // slots whose height is driven by their content.
+      style={INLINE_SIZE_CONTAINER}
     >
       {visible.map((ext) => {
         const Cmp = ext.component as unknown as React.ComponentType<{
           pluginId: string
           extensionId: string
+          formFactor: PluginPointFormFactor
           context?: Record<string, unknown>
         }>
         return (
-          <PluginExtensionBoundary key={ext.id} pluginId={ext.pluginId} extensionId={ext.id}>
-            <Cmp pluginId={ext.pluginId} extensionId={ext.id} context={context} />
-          </PluginExtensionBoundary>
+          <PluginSurface
+            key={ext.id}
+            pluginId={ext.pluginId}
+            surfaceId={ext.id}
+            formFactor={formFactor}
+            minWidth={ext.options.minWidth}
+            maxWidth={ext.options.maxWidth}
+          >
+            <Cmp
+              pluginId={ext.pluginId}
+              extensionId={ext.id}
+              formFactor={formFactor}
+              context={context}
+            />
+          </PluginSurface>
         )
       })}
     </div>
   )
 }
 
-interface BoundaryProps {
-  pluginId: string
-  extensionId: string
-  children: ReactNode
-}
-
-interface BoundaryState {
-  hasError: boolean
-}
-
-export class PluginExtensionBoundary extends Component<BoundaryProps, BoundaryState> {
-  constructor(props: BoundaryProps) {
-    super(props)
-    this.state = { hasError: false }
-  }
-
-  static getDerivedStateFromError(): BoundaryState {
-    return { hasError: true }
-  }
-
-  componentDidCatch(error: unknown) {
-    const errorMessage = error instanceof Error ? error.message : String(error)
-    // Plug into the analytics event stream rather than console.error so the
-    // /plugins panel can surface the failure later. Importing analytics lazily
-    // avoids pulling that module into every host page.
-    void import("@/lib/plugin/utils/analytics").then((mod) => {
-      mod.trackPluginEvent?.({
-        pluginId: this.props.pluginId,
-        eventType: "error",
-        success: false,
-        errorMessage,
-        metadata: { extensionId: this.props.extensionId, scope: "extension.render_error" },
-      })
-    })
-    // Also record a runtime diagnostic so the render failure shows up in the
-    // plugin diagnostics panel + per-plugin badge alongside load/conflict/
-    // dependency failures — not only in the analytics stream (C4).
-    void import("@/lib/plugin/contracts/diagnostics-store").then((mod) => {
-      mod.recordPluginPointDiagnostic(this.props.pluginId, {
-        code: "plugin.silent-failure",
-        severity: "error",
-        pointKind: "ui-slot",
-        pointId: this.props.extensionId,
-        message: `Extension "${this.props.extensionId}" crashed while rendering and was removed from its slot: ${errorMessage}`,
-        hint: "The rest of the UI is unaffected. Check the plugin's component for a runtime error.",
-      })
-    })
-  }
-
-  render() {
-    if (this.state.hasError) return null
-    return this.props.children
-  }
+/**
+ * Reactive check for whether a UI extension point currently has at least one
+ * visible (context-key gated) contribution. Hosts use this to decide whether
+ * to render surrounding chrome (a toolbar row, a bordered panel) that would
+ * otherwise show empty when only a plugin — and no native content — occupies
+ * the surface. Subscribes to the same registry + context-key revisions as
+ * `PluginExtensionSlot`, so it stays in sync as plugins enable/disable and as
+ * `when`-gated extensions appear/disappear.
+ */
+export function usePluginSlotHasExtensions(point: CanonicalExtensionPoint): boolean {
+  useSyncExternalStore(subscribeExtensionChanges, getExtensionRevision, () => 0)
+  useSyncExternalStore(subscribeContextKeys, getContextKeyRevision, () => 0)
+  return getExtensionsForPoint(point).length > 0
 }

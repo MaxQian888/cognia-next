@@ -1,0 +1,195 @@
+{
+  "desktopOnly": {
+    "description": "Runtime and process metrics are sampled from the native Rust backend, which only runs in the desktop app.",
+    "title": "Performance panel is desktop-only"
+  },
+  "hotspots": {
+    "columns": {
+      "avg": "Avg",
+      "calls": "Calls",
+      "distribution": "Distribution",
+      "errors": "Errors",
+      "max": "Max",
+      "name": "Operation",
+      "p50": "p50",
+      "p95": "p95",
+      "total": "Total"
+    },
+    "empty": "No hotspots recorded yet.",
+    "hint": "Run an instrumented operation (send a message, run an OCR, run a terminal or git command) to populate the table."
+  },
+  "managed": {
+    "actions": {
+      "kill": "Kill",
+      "restart": "Restart",
+      "restartUnavailable": "Restart is not available for this process."
+    },
+    "columns": {
+      "actions": "Actions",
+      "cpu": "CPU",
+      "memory": "Memory",
+      "name": "Process",
+      "pid": "PID",
+      "status": "Status",
+      "uptime": "Uptime"
+    },
+    "confirm": {
+      "cancel": "Cancel",
+      "confirm": "Kill process",
+      "description": "This stops {name}. External agents reconnect on next use; supervised processes may respawn automatically.",
+      "title": "Kill this process?"
+    },
+    "empty": "No cognia-managed processes are running.",
+    "status": {
+      "error": "Error",
+      "running": "Running",
+      "starting": "Starting",
+      "stopped": "Stopped",
+      "stopping": "Stopping"
+    },
+    "subsystems": {
+      "acpTerminal": "Agent terminals",
+      "backgroundJob": "Background jobs",
+      "chatSidecar": "Chat sidecar",
+      "codeServer": "Pro IDE (code-server)",
+      "externalAgent": "External agents",
+      "headlessTerminal": "Headless shells",
+      "integratedTerminal": "Terminals",
+      "mcpServer": "MCP server",
+      "pluginHost": "Plugin hosts",
+      "tunnel": "Tunnel"
+    },
+    "summary": {
+      "managed": "Managed",
+      "running": "Running",
+      "totalCpu": "Total CPU",
+      "totalMemory": "Total memory"
+    },
+    "toast": {
+      "failed": "Action failed: {error}",
+      "killed": "Stopped {name}",
+      "restarted": "Restarted {name}"
+    }
+  },
+  "memoryPressure": {
+    "high": "Critical",
+    "low": "Normal",
+    "moderate": "Moderate",
+    "title": "Memory pressure"
+  },
+  "metrics": {
+    "cpu": "App CPU",
+    "diskIo": "Disk I/O",
+    "memory": "App memory",
+    "runtimeBusy": "Runtime busy",
+    "tasks": "Async tasks"
+  },
+  "overview": {
+    "selectMetric": "Select a metric"
+  },
+  "process": {
+    "columns": {
+      "cpu": "CPU",
+      "diskRead": "Disk read",
+      "diskWrite": "Disk write",
+      "memory": "Memory",
+      "name": "Name",
+      "pid": "PID",
+      "role": "Role",
+      "trend": "Trend",
+      "uptime": "Uptime"
+    },
+    "empty": "No processes sampled yet.",
+    "noMatch": "No processes match your search.",
+    "roles": {
+      "child": "Child",
+      "main": "Main",
+      "sidecar": "Sidecar"
+    },
+    "searchPlaceholder": "Search processes…",
+    "summary": {
+      "processes": "Processes",
+      "totalCpu": "Total CPU",
+      "totalDisk": "Disk I/O",
+      "totalMemory": "Total memory"
+    }
+  },
+  "runtime": {
+    "aliveTasks": "Alive tasks",
+    "blockingQueue": "Blocking queue",
+    "blockingThreads": "Blocking threads",
+    "busy": "Busy",
+    "empty": "Waiting for the first runtime sample…",
+    "forcedYields": "Forced yields",
+    "globalQueue": "Global queue",
+    "groups": {
+      "queues": "Queues",
+      "tasks": "Tasks",
+      "throughput": "Throughput",
+      "workers": "Workers"
+    },
+    "overflow": "Overflows",
+    "park": "Parks",
+    "perWorker": "Per-worker busy",
+    "spawned": "Spawned (total)",
+    "steal": "Steals",
+    "traces": {
+      "description": "dial9 writes binary async traces to disk for offline analysis.",
+      "empty": "No trace files yet.",
+      "open": "Open folder",
+      "title": "Flight-recorder traces"
+    },
+    "workerN": "Worker {n}",
+    "workers": "Worker threads"
+  },
+  "subtitle": "Live view of the Rust backend's process tree, async runtime, and operation hotspots.",
+  "system": {
+    "build": {
+      "appVersion": "App version",
+      "features": "Enabled features",
+      "noFeatures": "No optional features enabled",
+      "profile": "Build profile",
+      "tauriVersion": "Tauri version",
+      "title": "Build"
+    },
+    "error": "Could not read system details.",
+    "hardware": {
+      "cores": "Logical cores",
+      "cpu": "Processor",
+      "title": "Hardware",
+      "totalMemory": "Installed memory",
+      "usedMemory": "Memory in use"
+    },
+    "host": {
+      "arch": "Architecture",
+      "hostname": "Host name",
+      "kernel": "Kernel",
+      "os": "Operating system",
+      "title": "Host"
+    },
+    "loading": "Reading system details…"
+  },
+  "tabs": {
+    "hotspots": "Hotspots",
+    "managed": "Managed",
+    "overview": "Performance",
+    "processes": "Processes",
+    "runtime": "Async runtime",
+    "system": "System"
+  },
+  "title": "Performance",
+  "toolbar": {
+    "export": {
+      "done": "Exported {filename}",
+      "hotspots": "Hotspots (CSV)",
+      "json": "Snapshot (JSON)",
+      "label": "Export",
+      "processes": "Processes (CSV)"
+    },
+    "intervalLabel": "Sampling interval",
+    "intervalValue": "{seconds}s",
+    "pause": "Pause",
+    "reset": "Reset hotspots",
+    "resume": "Resume"
+  }
+}

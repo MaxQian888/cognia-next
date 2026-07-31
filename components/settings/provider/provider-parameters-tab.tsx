@@ -7,10 +7,10 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
-import { getSchemaForProvider } from "@/lib/ai/providers/provider-parameter-schemas"
+import { getSchemaForProvider } from "@cognia/provider-core/providers/provider-parameter-schemas"
 import { useSettingsStore } from "@/stores/settings/settings-store"
 import { DynamicParameterForm } from "./dynamic-parameter-form"
-import type { ModelConfig, UserProviderSettings } from "@/types/provider"
+import type { ModelConfig, UserProviderSettings } from "@cognia/provider-types"
 
 const SECTION_ICONS = {
   inference: Sliders,
@@ -30,28 +30,25 @@ interface SectionTriggerProps {
 function SectionTrigger({ category, label, count, onReset, resetLabel }: SectionTriggerProps) {
   const Icon = SECTION_ICONS[category]
   return (
-    <CollapsibleTrigger className="flex items-center gap-2 w-full py-2 px-2 rounded-md hover:bg-muted/50 group transition-colors">
-      <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
-      <span className="font-medium text-sm">{label}</span>
-      <Badge variant="secondary" className="ml-1 text-xs h-4 px-1.5">
-        {count}
-      </Badge>
-      <div className="ml-auto flex items-center gap-1">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
-          onClick={(e) => {
-            e.stopPropagation()
-            onReset()
-          }}
-          title={resetLabel}
-        >
-          <RotateCcw className="h-3 w-3" />
-        </Button>
-        <ChevronDown className="h-4 w-4 transition-transform duration-200 group-data-[state=open]:rotate-180" />
-      </div>
-    </CollapsibleTrigger>
+    <div className="group flex items-center gap-1 w-full rounded-md hover:bg-muted/50 transition-colors">
+      <CollapsibleTrigger className="group/trigger flex flex-1 min-w-0 items-center gap-2 py-2 px-2 rounded-md">
+        <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
+        <span className="font-medium text-sm">{label}</span>
+        <Badge variant="secondary" className="ml-1 text-xs h-4 px-1.5">
+          {count}
+        </Badge>
+        <ChevronDown className="h-4 w-4 ml-auto transition-transform duration-200 group-data-[state=open]/trigger:rotate-180" />
+      </CollapsibleTrigger>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-6 w-6 mr-2 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+        onClick={onReset}
+        title={resetLabel}
+      >
+        <RotateCcw className="h-3 w-3" />
+      </Button>
+    </div>
   )
 }
 
@@ -172,7 +169,7 @@ export function ProviderParametersTab({
       <Collapsible>
         <SectionTrigger
           category="connection"
-          label={t("connection")}
+          label={t("connectionSection")}
           count={paramCount("connection")}
           resetLabel={t("resetAll")}
           onReset={() => {

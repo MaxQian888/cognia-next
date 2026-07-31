@@ -5,7 +5,7 @@
  * create (+checkout), delete, and rename-current. Opened from the BranchHeader.
  */
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { useTranslations } from "next-intl"
 import {
   GitBranchIcon,
@@ -27,6 +27,7 @@ import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import type { GitBranch } from "@/types/git"
 import type { UseGitActionsResult } from "@/hooks/git/use-git-actions"
+import { useSourceControlPrefs } from "@/hooks/git/use-source-control-prefs"
 
 interface BranchPickerProps {
   branches: GitBranch[]
@@ -39,8 +40,18 @@ interface BranchPickerProps {
 
 export function BranchPicker({ branches, actions, onPicked }: BranchPickerProps) {
   const t = useTranslations("sourceControl")
+  const { prefs } = useSourceControlPrefs()
   const [mode, setMode] = useState<"create" | "rename">("create")
   const [name, setName] = useState("")
+
+  // Order per the branch-sort preference; "default" keeps the backend order.
+  const orderedBranches = useMemo(
+    () =>
+      prefs.branchSort === "name"
+        ? [...branches].sort((a, b) => a.name.localeCompare(b.name))
+        : branches,
+    [branches, prefs.branchSort]
+  )
 
   const submit = async () => {
     const trimmed = name.trim()
@@ -58,7 +69,7 @@ export function BranchPicker({ branches, actions, onPicked }: BranchPickerProps)
         <CommandList>
           <CommandEmpty>{t("branches.empty")}</CommandEmpty>
           <CommandGroup>
-            {branches.map((branch) => (
+            {orderedBranches.map((branch) => (
               <CommandItem
                 key={`${branch.isRemote ? "r" : "l"}:${branch.name}`}
                 value={branch.name}

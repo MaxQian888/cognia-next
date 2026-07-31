@@ -1,47 +1,215 @@
-## Phase D — headless cognia-server binary.
+# syntax=docker/dockerfile:1.12
+## cognia-server — headless Cognia container (ADR-0059 W6).
 ##
-## Two-stage build: compile the Rust binary in a builder stage, then ship a
-## minimal runtime image with the binary + a Node sidecar layer for the
-## Anthropic agent SDK once that path is wired (placeholder for now).
+## Stages:
+##   chef → planner → deps        cargo-chef: the tauri/wasmtime dependency
+##                                cook is the expensive, highly-cacheable layer
+##                                (invalidated only by manifest/lock changes).
+##   builder | check              full release build vs. codegen-free
+##                                `cargo check` (the PR CI target).
+##   brain-builder                Node stage bundling the brain (cognia-agent
+##                                CLI layout) + sidecar via
+##                                scripts/build/build-cli-binary.mjs --layout-only.
+##   plugin-node-runtime          pinned Node used only for sandboxed JS plugins.
+##   runtime-slim                 binary + brain + sidecar (default image).
+##   runtime-full                 + git + preinstalled external agent CLIs
+##                                (deploy/runner/install-agents.sh — shared with
+##                                the cognia-runner image so versions can't drift).
 ##
 ## Usage:
-##   docker build -f Dockerfile.cognia-server -t cognia-server .
-##   docker run --rm -v $HOME/cognia-data:/data -p 7890:7890 cognia-server
+##   docker build -f Dockerfile.cognia-server --target runtime-slim -t cognia-server .
+##   docker run --rm -v $HOME/cognia-data:/data -p 27890:27890 cognia-server
 ##
-## The container expects `/data` to be a writable volume so the SQLite store
-## and the self-signed TLS cert persist across restarts.
+## The container expects `/data` to be a writable volume so the SQLite store,
+## the secret store, and the self-signed TLS cert persist across restarts.
+## Headless secret-store note (ADR-0059 W5): set COGNIA_MASTER_KEY or
+## COGNIA_MASTER_KEY_FILE — there is no OS keyring in a container.
 
-FROM rust:1.84-bookworm AS builder
+# ── Rust: cargo-chef base ────────────────────────────────────────────────────
+# Base tracks the `rust-toolchain.toml` pin (1.93.0); matching the base avoids
+# downloading a second channel at build time.
+FROM rust:1.93-bookworm AS chef
+# cognia-server links the full app_lib, which (today) compiles the Tauri
+# desktop stack wholesale — the standard Tauri v2 Linux build deps are
+# required even though no WebView ever opens headless. Slimming this via a
+# no-tauri cargo feature on app_lib is a tracked follow-up (ADR-0059).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       pkg-config libssl-dev libglib2.0-dev libgtk-3-dev \
+       libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev \
+       libayatana-appindicator3-dev librsvg2-dev \
+    && rm -rf /var/lib/apt/lists/*
+RUN cargo install cargo-chef --locked
 WORKDIR /work
-# Workspace root files first — Cargo.toml declares members, rust-toolchain.toml
-# pins the MSRV (rustup auto-installs the pinned channel), and .cargo/config.toml
-# carries `--cfg tokio_unstable` (required by dial9-tokio-telemetry).
-COPY Cargo.toml rust-toolchain.toml ./
+
+FROM chef AS planner
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY .cargo ./.cargo
-# Workspace members. crates/cognia-cli is included so the workspace resolves;
-# we still build only the cognia-server binary.
 COPY src-tauri ./src-tauri
 COPY crates ./crates
-RUN cargo build --release --bin cognia-server
+# Out-of-workspace path dependency of src-tauri (cognia-signaling-core).
+COPY services/signaling-server/core ./services/signaling-server/core
+RUN cargo chef prepare --recipe-path recipe.json
 
-FROM debian:bookworm-slim AS runtime
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates libssl3 \
-    && rm -rf /var/lib/apt/lists/*
+# The cook layer compiles every dependency of the workspace (tauri, wasmtime,
+# axum, …) and is reused as long as Cargo.lock + manifests are unchanged.
+FROM chef AS deps
+COPY rust-toolchain.toml ./
+COPY .cargo ./.cargo
+# The recipe skeleton still resolves the path dep at cook time.
+COPY services/signaling-server/core ./services/signaling-server/core
+COPY --from=planner /work/recipe.json .
+RUN cargo chef cook --release --recipe-path recipe.json
 
-# Sidecar Node runtime — added preemptively so the serve subcommand can
-# spawn @anthropic-ai/claude-agent-sdk once the Phase D follow-up wires it.
+# tauri-build validates every plain-file resource path in tauri.conf.json at
+# compile time (even for the headless bin). Ship the small sidecar/hook
+# scripts it lists; the `**/*` node_modules globs match nothing and pass.
+FROM deps AS builder
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY src-tauri ./src-tauri
+COPY crates ./crates
+COPY services/signaling-server/core ./services/signaling-server/core
+# src-tauri/src/plugins/computer_use reaches this crate via #[path] includes.
+COPY plugins/computer-use/rust ./plugins/computer-use/rust
+# Out-of-tree include_str! targets (release: browser overlay JS; the spec
+# fixtures under cli/ + docs/ are test-cfg but cheap to keep coherent).
+COPY lib/browser/overlay.injected.js ./lib/browser/overlay.injected.js
+COPY cli/src/serve/fixtures/bridge-frames.json ./cli/src/serve/fixtures/bridge-frames.json
+COPY docs/api/mobile-companion-api.openapi.yaml docs/api/remote-control.openapi.yaml ./docs/api/
+COPY sidecar/agent-host.mjs sidecar/claude-host.mjs sidecar/a2ui-mcp.mjs sidecar/mcp-oauth-helper.mjs sidecar/package.json ./sidecar/
+COPY sidecar/vscode-ext-host/package.json ./sidecar/vscode-ext-host/package.json
+COPY sidecar/webclone/package.json ./sidecar/webclone/package.json
+COPY hooks/builtin ./hooks/builtin
+# tauri-build also requires each resource GLOB to match >=1 file; the real
+# trees are desktop bundle content the headless bin never reads.
+RUN mkdir -p sidecar/node_modules/cognia-placeholder sidecar/vscode-ext-host/dist sidecar/vscode-ext-host/node_modules/cognia-placeholder sidecar/webclone/dist sidecar/webclone/node_modules/cognia-placeholder
+RUN echo placeholder > sidecar/node_modules/cognia-placeholder/keep.txt && echo placeholder > sidecar/vscode-ext-host/dist/keep.txt && echo placeholder > sidecar/vscode-ext-host/node_modules/cognia-placeholder/keep.txt && echo placeholder > sidecar/webclone/dist/keep.txt && echo placeholder > sidecar/webclone/node_modules/cognia-placeholder/keep.txt
+# container-exec + k8s-exec (R13): the headless image ships both flavors of
+# the container backend, so COGNIA_EXEC_BACKEND=container works at T2
+# (Docker socket proxy) and =kubernetes at T3 (runner Pods, in-cluster).
+RUN cargo build --release --locked --bin cognia-server --features container-exec,k8s-exec,workspace-runtime-exec
+
+# PR CI target: type/borrow-check the whole graph without codegen or linking.
+FROM deps AS check
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY src-tauri ./src-tauri
+COPY crates ./crates
+COPY services/signaling-server/core ./services/signaling-server/core
+# src-tauri/src/plugins/computer_use reaches this crate via #[path] includes.
+COPY plugins/computer-use/rust ./plugins/computer-use/rust
+# Out-of-tree include_str! targets (release: browser overlay JS; the spec
+# fixtures under cli/ + docs/ are test-cfg but cheap to keep coherent).
+COPY lib/browser/overlay.injected.js ./lib/browser/overlay.injected.js
+COPY cli/src/serve/fixtures/bridge-frames.json ./cli/src/serve/fixtures/bridge-frames.json
+COPY docs/api/mobile-companion-api.openapi.yaml docs/api/remote-control.openapi.yaml ./docs/api/
+COPY sidecar/agent-host.mjs sidecar/claude-host.mjs sidecar/a2ui-mcp.mjs sidecar/mcp-oauth-helper.mjs sidecar/package.json ./sidecar/
+COPY sidecar/vscode-ext-host/package.json ./sidecar/vscode-ext-host/package.json
+COPY sidecar/webclone/package.json ./sidecar/webclone/package.json
+COPY hooks/builtin ./hooks/builtin
+# tauri-build also requires each resource GLOB to match >=1 file; the real
+# trees are desktop bundle content the headless bin never reads.
+RUN mkdir -p sidecar/node_modules/cognia-placeholder sidecar/vscode-ext-host/dist sidecar/vscode-ext-host/node_modules/cognia-placeholder sidecar/webclone/dist sidecar/webclone/node_modules/cognia-placeholder
+RUN echo placeholder > sidecar/node_modules/cognia-placeholder/keep.txt && echo placeholder > sidecar/vscode-ext-host/dist/keep.txt && echo placeholder > sidecar/vscode-ext-host/node_modules/cognia-placeholder/keep.txt && echo placeholder > sidecar/webclone/dist/keep.txt && echo placeholder > sidecar/webclone/node_modules/cognia-placeholder/keep.txt
+RUN cargo check --release --locked --bin cognia-server --features container-exec,k8s-exec,workspace-runtime-exec
+
+# ── Node: brain (cognia-agent) + sidecar bundle ─────────────────────────────
+# Full (non-slim) image: node-gyp needs python3/make/g++ for the sidecar's
+# native optional deps (node-pty, better-sqlite3).
+FROM node:26-bookworm AS brain-builder
+ENV HUSKY=0 \
+    CI=1
+RUN corepack enable && corepack prepare pnpm@10.30.3 --activate
+WORKDIR /work
+# Workspace manifests first so the store-heavy install layer survives source
+# edits. pnpm --frozen-lockfile needs every workspace member's package.json
+# present; packages/* are small first-party TS libs, copied wholesale (their
+# node_modules/dist are stripped by .dockerignore). docs/ + mobile/ only need
+# their manifest here — full source arrives with the COPY . . below.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY packages ./packages
+COPY docs/package.json ./docs/package.json
+COPY mobile/package.json ./mobile/package.json
+# postinstall needs its guard script (it skips the sidecar steps here — the
+# sidecar tree arrives later; its deps install as their own layer below).
+COPY scripts/postinstall.mjs ./scripts/postinstall.mjs
+RUN pnpm install --frozen-lockfile
+COPY sidecar/package.json sidecar/pnpm-lock.yaml ./sidecar/
+RUN pnpm --dir sidecar install --ignore-workspace --frozen-lockfile
+# Sources last; the bundle step reaches cli/ + lib/ + the wider @/* TS graph.
+COPY . .
+RUN npm --prefix sidecar/vscode-ext-host ci --no-audit --no-fund \
+    && npm --prefix sidecar/vscode-ext-host run build
+RUN pnpm sidecar:codeserver-agent:build
+RUN NODE_OPTIONS=--max-old-space-size=8192 node scripts/build/build-cli-binary.mjs --layout-only
+
+# Pinned managed Pro IDE binary. The release digest is selected per BuildKit
+# TARGETARCH and verified before extraction; runtime hosts never download or
+# self-upgrade this artifact.
+FROM node:26-bookworm-slim AS codeserver-preload
+ARG TARGETARCH
+ARG CODE_SERVER_VERSION=4.128.0
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
-    && curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
-    && apt-get install -y nodejs \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && case "$TARGETARCH" in \
+         amd64) digest=79ba26bf186e5268a22b7c17b30a5f288a16c37791f0b86c27859e8fef103188 ;; \
+         arm64) digest=f8f02c2a81d1a433a4d132716a6f0405f690f6d70dd955942e95e87356db8a10 ;; \
+         *) echo "unsupported code-server architecture: $TARGETARCH" >&2; exit 1 ;; \
+       esac \
+    && asset="code-server-${CODE_SERVER_VERSION}-linux-${TARGETARCH}.tar.gz" \
+    && curl --fail --location --proto '=https' --tlsv1.2 \
+         "https://github.com/coder/code-server/releases/download/v${CODE_SERVER_VERSION}/${asset}" \
+         --output "/tmp/${asset}" \
+    && echo "${digest}  /tmp/${asset}" | sha256sum --check --strict \
+    && mkdir -p "/opt/cognia/code-server/${CODE_SERVER_VERSION}" \
+    && tar -xzf "/tmp/${asset}" --strip-components=1 \
+         -C "/opt/cognia/code-server/${CODE_SERVER_VERSION}" \
+    && rm -f "/tmp/${asset}"
+
+# The plugin permission model is pinned independently from the brain's Node
+# runtime. cognia-plugin-runtime verifies this exact major/minimum patch before
+# executing any installed JavaScript plugin.
+FROM node:26.3.1-bookworm-slim AS plugin-node-runtime
+RUN node --version
+
+# ── Runtime: slim (sidecar-only execution plane) ────────────────────────────
+FROM node:26-bookworm-slim AS runtime-slim
+# The binary dynamically links the Tauri desktop stack (see the chef-stage
+# note) — ship the runtime .so set alongside the headless essentials.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       ca-certificates libssl3 curl git \
+       libgtk-3-0 libwebkit2gtk-4.1-0 libjavascriptcoregtk-4.1-0 \
+       libsoup-3.0-0 libayatana-appindicator3-1 librsvg2-2 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /work/target/release/cognia-server /usr/local/bin/cognia-server
+COPY --from=brain-builder /work/cli/dist/bin/cognia-agent-layout /app/brain
+COPY --from=brain-builder /work/sidecar/codeserver-agent-ext/cognia-agent-bridge.vsix /opt/cognia/codeserver-agent-ext/cognia-agent-bridge.vsix
+COPY --from=codeserver-preload /opt/cognia/code-server /opt/cognia/code-server
+COPY --from=plugin-node-runtime /usr/local/bin/node /opt/cognia/plugin-node/bin/node
+# Smoke stub agent (ADR-0059 D6): admitted by SpawnPolicy ONLY when
+# COGNIA_SMOKE_AGENT=1 is set on the server — inert otherwise.
+COPY scripts/smoke/stub-acp-agent.mjs /opt/cognia/smoke/stub-acp-agent.mjs
 
-ENV COGNIA_DATA_DIR=/data
+ENV COGNIA_DATA_DIR=/data \
+    COGNIA_BRAIN_ENTRY=/app/brain/cli.mjs \
+    COGNIA_PLUGIN_NODE_PATH=/opt/cognia/plugin-node/bin/node \
+    COGNIA_SIDECAR_SCRIPT=/app/brain/sidecar/agent-host.mjs \
+    COGNIA_VSCODE_EXT_HOST_SCRIPT=/app/brain/sidecar/vscode-ext-host/dist/host.js \
+    COGNIA_MCP_SIDECAR_PATH=/app/brain/sidecar/cognia-mcp.mjs
+ENV COGNIA_CODE_SERVER_BIN=/opt/cognia/code-server/4.128.0/bin/code-server \
+    COGNIA_CODE_SERVER_AGENT_VSIX=/opt/cognia/codeserver-agent-ext/cognia-agent-bridge.vsix
 VOLUME /data
-EXPOSE 7890
+# 27890 tracks companion_api::server::DEFAULT_PORT — 7890/7891 are the Clash
+# mixed/SOCKS defaults and collide with a proxy on most dev hosts.
+EXPOSE 27890
 
 ENTRYPOINT ["/usr/local/bin/cognia-server"]
-CMD ["serve", "--port", "7890"]
+CMD ["serve", "--port", "27890"]
+
+# ── Runtime: full (external agent CLIs preinstalled + git) ──────────────────
+FROM runtime-slim AS runtime-full
+COPY deploy/runner/install-agents.sh /tmp/install-agents.sh
+RUN bash /tmp/install-agents.sh \
+    && rm -f /tmp/install-agents.sh \
+    && rm -rf /var/lib/apt/lists/*

@@ -1,0 +1,14 @@
+{
+  "integrityChecked": "完整性已校验",
+  "integrityCheckedTooltip": "下载文件与 Open VSX 提供的 SHA-256 校验和一致，说明文件在传输过程中没有损坏。这不是签名：它不验证发布者，也无法发现被攻陷的注册表——文件和校验和由同一台服务器提供。",
+  "installNotice": "VS Code 扩展是真正的程序。它拥有与你安装的任何其他程序同等的文件、网络与进程访问权限；cognia 校验的是下载文件的校验和，而不是代码的行为。",
+  "publisherVerified": "发布者由 Open VSX 验证",
+  "publisherVerifiedTooltip": "Open VSX 声明该发布者拥有「{namespace}」命名空间。这是 Open VSX 对归属权的声明，不是 cognia 的声明，也不代表该扩展是安全的。",
+  "searchPlaceholder": "搜索 Open VSX 扩展…",
+  "unsupportedApis": "可能无法工作：{apis}",
+  "unsupportedApisTooltip": "该扩展使用了 cognia 未实现的 API（{apis}），可能无法工作。此结论通过扫描扩展代码得出，属于尽力而为：经过压缩混淆的扩展可能隐藏其 API 调用，因此这只是提示，而非保证。",
+  "vscodeEmpty": "没有匹配的扩展，换个关键词试试。",
+  "vscodeError": "Open VSX 错误：{message}",
+  "vscodeLoadMore": "加载更多 ({shown}/{total})",
+  "vscodeSectionHint": "来自 Open VSX 的扩展——VS Codium 与 code-server 使用的同一个注册表。不支持微软官方市场：其服务条款限定仅可用于微软自家产品。"
+}

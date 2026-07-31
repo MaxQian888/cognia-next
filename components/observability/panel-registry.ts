@@ -14,12 +14,7 @@ export type PanelKind = "stat" | "timeseries" | "donut" | "bar" | "traces"
 
 /** Which headline number a stat panel shows. */
 export type StatMetric =
-  | "totalCost"
-  | "totalSpans"
-  | "errorRate"
-  | "cacheHitRate"
-  | "p95Latency"
-  | "reqPerMin"
+  "totalCost" | "totalSpans" | "errorRate" | "cacheHitRate" | "p95Latency" | "reqPerMin"
 
 /** Which derived series a time-series panel plots. */
 export type SeriesKind = "cost" | "requestRate" | "errorRate" | "latency" | "tokens"

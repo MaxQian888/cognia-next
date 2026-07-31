@@ -145,7 +145,7 @@ distill 是最可能 *重新引入* PII 的路径，因为 LLM 可能把一个�
 
 ## 辅助件
 
-- **`with-timeout.ts`** 是对 `@/lib/utils/with-timeout` 的再导出薄封装。`withTimeout` 是会拒绝的硬截止；
+- **`with-timeout.ts`** 是对 `@cognia/primitives` 的再导出薄封装。`withTimeout` 是会拒绝的硬截止；
   `withTimeoutOrFallback` 返回 `{ value, error }`，经 `onError` 记日志并产出给定回退值。默认 agent 超时为 90 秒。
 - **`heuristics/style-prefilter.ts`**（`selectStyleCandidates`，L50）用 **TF-IDF 信息量 + 贪心 MMR 多样性**
   （`MMR_LAMBDA = 0.7`）把 StyleAgent 的候选池缩到约 30 个 chunk，并施加每源惩罚使一篇长文档无法独占样本。双语停用词（英文 + 中文）。

@@ -1,0 +1,12 @@
+{
+  "description": "Agents can run Bash, edit files and drive Computer-Use inside a workspace's folders. Trust a folder before allowing that; untrusted workspaces run in Restricted Mode (read-only tools only).",
+  "enabledHint": "When off, every workspace is treated as trusted and no Restricted Mode is applied.",
+  "enabledLabel": "Enable Workspace Trust",
+  "noTrusted": "No folders trusted yet.",
+  "promptOnSwitchHint": "Ask to trust as soon as you switch to an untrusted workspace, instead of waiting for the first message.",
+  "promptOnSwitchLabel": "Prompt when switching workspaces",
+  "revoke": "Revoke",
+  "title": "Workspace Trust",
+  "trustedAt": "Trusted {date}",
+  "trustedFoldersLabel": "Trusted folders"
+}

@@ -2,17 +2,26 @@
 
 import { useState } from "react"
 import { useTranslations } from "next-intl"
-import { motion, useReducedMotion } from "motion/react"
+import { AnimatePresence, motion } from "motion/react"
 import { MoreHorizontalIcon, PlusIcon, Settings2Icon, Trash2Icon, UsersIcon } from "lucide-react"
+
+import {
+  MOBILE_SPRING,
+  STAGGER_CHILD,
+  STAGGER_CONTAINER,
+  useReducedMotionTransition,
+  useReducedMotionVariants,
+} from "@/lib/ui/motion"
 
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { StatusBadge } from "@/components/status-badge"
+import { PrStatusBadge } from "./pr-status-badge"
+import { useTeamPrStatusByTeammate } from "@/hooks/agent-runs/use-team-pr-status"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Progress } from "@/components/ui/progress"
 import {
   Dialog,
   DialogContent,
@@ -48,35 +57,14 @@ import {
 import { Empty, EmptyContent, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { toast } from "sonner"
 
+import { PluginExtensionSlot } from "@/components/plugins/plugin-extension-slot"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
 import { TEAMMATE_STATUS_CONFIG } from "@/types/agent/agent-team"
 import type { AgentTeam, AgentTeammate, TeammateRuntime } from "@/types/agent/agent-team"
 import { DEFAULT_TEAMMATE_RUNTIME } from "@/types/agent/agent-team"
 import { RuntimeBadge } from "./runtime-badge"
+import { RUNTIME_OPTIONS, runtimeLabelKey } from "./runtime-options"
 import { TeammateConfigDialog } from "./teammate-config-dialog"
-
-const RUNTIME_OPTIONS: TeammateRuntime[] = [
-  "claude",
-  "codex",
-  "claude-code",
-  "gemini-cli",
-  "cursor-cli",
-]
-
-function runtimeLabelKey(runtime: TeammateRuntime): string {
-  switch (runtime) {
-    case "claude":
-      return "claude"
-    case "codex":
-      return "codex"
-    case "claude-code":
-      return "claudeCode"
-    case "gemini-cli":
-      return "geminiCli"
-    case "cursor-cli":
-      return "cursorCli"
-  }
-}
 
 export interface AgentTeamMembersProps {
   /**
@@ -100,7 +88,13 @@ export function AgentTeamMembers({
 }: AgentTeamMembersProps) {
   const teamId = team?.id ?? legacyTeamId ?? ""
   const t = useTranslations("agentTeamsWorkspace.members")
-  const prefersReducedMotion = useReducedMotion()
+  // House motion tokens (`@/lib/ui/motion`) rather than the hand-rolled
+  // `y:4 / 0.15s / easeOut` this file used to carry — the same idiom was copied
+  // into four workspace panels and none of them matched the rest of the app.
+  // `layout` + a spring is what makes a roster reflow when a member is removed
+  // instead of the survivors jumping into the gap.
+  const childVariants = useReducedMotionVariants(STAGGER_CHILD)
+  const layoutTransition = useReducedMotionTransition(MOBILE_SPRING)
   const addTeammate = useAgentTeamStore((s) => s.addTeammate)
   const removeTeammate = useAgentTeamStore((s) => s.removeTeammate)
   const updateTeammate = useAgentTeamStore((s) => s.updateTeammate)
@@ -147,7 +141,7 @@ export function AgentTeamMembers({
 
   if (teammates.length === 0) {
     return (
-      <Empty>
+      <Empty className="mx-auto w-full max-w-lg">
         <EmptyMedia variant="icon">
           <UsersIcon />
         </EmptyMedia>
@@ -182,6 +176,7 @@ export function AgentTeamMembers({
         <Card className="p-3" data-testid={`member-${lead.id}`}>
           <MemberRow
             member={lead}
+            teamId={teamId}
             isLead
             onRemove={() => setRemoving(lead)}
             onConfigure={() => setConfiguring(lead)}
@@ -192,29 +187,36 @@ export function AgentTeamMembers({
 
       {/* Workers */}
       {workers.length > 0 && (
-        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-          {workers.map((m, index) => (
-            <motion.div
-              key={m.id}
-              initial={prefersReducedMotion ? false : { opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{
-                duration: 0.15,
-                ease: "easeOut",
-                delay: prefersReducedMotion ? 0 : Math.min(index * 0.03, 0.15),
-              }}
-            >
-              <Card className="p-3" data-testid={`member-${m.id}`}>
-                <MemberRow
-                  member={m}
-                  onRemove={() => setRemoving(m)}
-                  onConfigure={() => setConfiguring(m)}
-                  onRuntimeChange={(r) => handleRuntimeChange(m, r)}
-                />
-              </Card>
-            </motion.div>
-          ))}
-        </div>
+        <motion.div
+          className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 items-start"
+          variants={STAGGER_CONTAINER}
+          initial="initial"
+          animate="animate"
+        >
+          <AnimatePresence initial={false}>
+            {workers.map((m) => (
+              <motion.div
+                key={m.id}
+                layout
+                variants={childVariants}
+                initial="initial"
+                animate="animate"
+                exit="exit"
+                transition={layoutTransition}
+              >
+                <Card className="p-3" data-testid={`member-${m.id}`}>
+                  <MemberRow
+                    member={m}
+                    teamId={teamId}
+                    onRemove={() => setRemoving(m)}
+                    onConfigure={() => setConfiguring(m)}
+                    onRuntimeChange={(r) => handleRuntimeChange(m, r)}
+                  />
+                </Card>
+              </motion.div>
+            ))}
+          </AnimatePresence>
+        </motion.div>
       )}
 
       {configuring && team ? (
@@ -264,12 +266,14 @@ export function AgentTeamMembers({
 
 function MemberRow({
   member,
+  teamId,
   isLead,
   onRemove,
   onConfigure,
   onRuntimeChange,
 }: {
   member: AgentTeammate
+  teamId: string
   isLead?: boolean
   onRemove: () => void
   onConfigure: () => void
@@ -279,6 +283,7 @@ function MemberRow({
   const tRuntime = useTranslations("agentTeamsWorkspace.chat.runtime")
   const statusCfg = TEAMMATE_STATUS_CONFIG[member.status]
   const runtime = member.config.runtime ?? DEFAULT_TEAMMATE_RUNTIME
+  const prRow = useTeamPrStatusByTeammate(teamId).get(member.id)
 
   return (
     <div className="flex items-start gap-3">
@@ -300,6 +305,7 @@ function MemberRow({
               data-testid={`member-${member.id}-status`}
             />
           )}
+          {prRow && <PrStatusBadge status={prRow.derivedStatus} prUrl={prRow.prUrl} />}
           <RuntimeBadge runtime={runtime} />
         </div>
         {member.description && (
@@ -313,7 +319,10 @@ function MemberRow({
         <div className="mt-2 flex items-center gap-2">
           <Label className="text-[10px] text-muted-foreground">{t("runtime")}</Label>
           <Select value={runtime} onValueChange={(v) => onRuntimeChange(v as TeammateRuntime)}>
-            <SelectTrigger className="h-7 w-36 text-xs" data-testid={`runtime-select-${member.id}`}>
+            <SelectTrigger
+              className="h-7 w-full max-w-[12rem] text-xs sm:w-36"
+              data-testid={`runtime-select-${member.id}`}
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -325,7 +334,6 @@ function MemberRow({
             </SelectContent>
           </Select>
         </div>
-        {member.progress > 0 && <Progress value={member.progress} className="mt-2 h-1" />}
       </div>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -345,6 +353,18 @@ function MemberRow({
               {t("removeAction")}
             </DropdownMenuItem>
           )}
+          {/* Plugin-contributed teammate-scoped actions. */}
+          <PluginExtensionSlot
+            point="agent.teammate.actions"
+            context={{
+              teamId,
+              teammateId: member.id,
+              role: isLead ? "lead" : member.role,
+              status: member.status,
+              runtime: member.config.runtime ?? DEFAULT_TEAMMATE_RUNTIME,
+              specialization: member.config?.specialization,
+            }}
+          />
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

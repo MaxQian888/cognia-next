@@ -1,9 +1,16 @@
 import "fake-indexeddb/auto"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { __resetDbForTesting, getDb, whenSeeded } from "@/lib/db/schema"
-import { createGoal } from "@/lib/db/goals"
+import { createGoal, deleteGoal } from "@/lib/db/goals"
 import type { Goal } from "@/types/goal"
 import { GoalsHistoryTable } from "./history-table"
+
+const mockToastError = jest.fn()
+const mockDeleteGoal = jest.fn()
+jest.mock("sonner", () => ({ toast: { error: (...args: unknown[]) => mockToastError(...args) } }))
+jest.mock("@/lib/goal/runtime", () => ({
+  getGoalRuntime: () => ({ deleteGoal: (...args: unknown[]) => mockDeleteGoal(...args) }),
+}))
 
 const CONFIG: Goal["config"] = {
   maxTurns: 20,
@@ -30,6 +37,8 @@ function buildGoal(overrides: Partial<Goal> = {}): Parameters<typeof createGoal>
 }
 
 beforeEach(async () => {
+  mockToastError.mockClear()
+  mockDeleteGoal.mockReset().mockImplementation((id: string) => deleteGoal(id))
   await getDb().delete()
   __resetDbForTesting()
   getDb()
@@ -78,8 +87,24 @@ describe("GoalsHistoryTable", () => {
     await waitFor(() => expect(screen.getByTestId("goals-history-delete")).toBeInTheDocument())
     fireEvent.click(screen.getByTestId("goals-history-delete"))
     fireEvent.click(await screen.findByTestId("goals-history-delete-confirm"))
+    await waitFor(async () => expect(await getDb().chatGoals.count()).toBe(0))
     await waitFor(() => expect(screen.getByTestId("goals-history-empty")).toBeInTheDocument())
   })
+
+  it("keeps the confirmation open and reports a failed delete", async () => {
+    await createGoal(buildGoal({ id: "g_a", safeObjective: "alpha" }))
+    mockDeleteGoal.mockRejectedValueOnce(new Error("disk unavailable"))
+    render(<GoalsHistoryTable />)
+    await waitFor(() => expect(screen.getByTestId("goals-history-delete")).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId("goals-history-delete"))
+    fireEvent.click(await screen.findByTestId("goals-history-delete-confirm"))
+
+    await waitFor(() =>
+      expect(mockToastError).toHaveBeenCalledWith("Could not delete the goal: disk unavailable")
+    )
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument()
+    expect(await getDb().chatGoals.get("g_a")).toBeDefined()
+  }, 10_000)
 
   it("toggles sort direction", async () => {
     await createGoal(buildGoal({ id: "g_a", safeObjective: "alpha" }))

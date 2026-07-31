@@ -2,7 +2,7 @@
 name = "cognia-cli"
 version = "0.1.0"
 edition = "2021"
-description = "Cognia WASM plugin author CLI (scaffold / build / sign / verify / dev)"
+description = "Cognia plugin author CLI (scaffold / lint / build / sign / verify / inspect / bridge ops / dev)"
 license = "AGPL-3.0-or-later"
 rust-version = "1.82"
 
@@ -23,10 +23,14 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 anyhow = "1"
 notify = "6"
 wasmparser = "0.221"
-# Used by `install` / `uninstall` / `dev --reload-url` to talk to a
-# running cognia desktop's CLI bridge. Plain HTTP because the bridge
-# binds to 127.0.0.1 only — see src-tauri/src/cli_bridge/.
+# Used by status/install/uninstall/list/reload/dev to talk to a running
+# cognia desktop's CLI bridge. Plain HTTP because the bridge binds to
+# 127.0.0.1 only — see src-tauri/src/cli_bridge/.
 ureq = { version = "2", default-features = false, features = ["json"] }
+# `cognia acp` stdio↔WS bridge to the companion API's ACP endpoint. Sync
+# (blocking) client keeps tokio out of the binary, matching the ureq choice.
+tungstenite = { version = "0.26", features = ["native-tls"] }
+native-tls = "0.2"
 directories = "5"
 parking_lot = "0.12"
 # ── UX/TUI stack (Phase 1 — see plans/cli-tui-majestic-quokka.md) ─────────

@@ -1,0 +1,687 @@
+{
+  "account": {
+    "errorTitle": "操作失败",
+    "expiresLabel": "Token 过期",
+    "keychainNoticeBody": "Token 保存在系统钥匙串（macOS Keychain / Windows Credential Manager / Linux Secret Service）。Cognia 不会写 ~/.claude/.credentials.json——那个文件归官方 Claude Code CLI 所有。",
+    "keychainNoticeTitle": "关于凭据存储",
+    "modeLine": "{mode} 流程",
+    "planLine": "{plan} · {mode}",
+    "refresh": "立即刷新",
+    "scopeLabel": "作用域",
+    "signInCta": "登录",
+    "signOut": "登出",
+    "signedOutBody": "用 Claude 账号授权 Cognia。",
+    "signedOutTitle": "未登录",
+    "unknownEmail": "已登录（服务器未返回邮箱）"
+  },
+  "balance": {
+    "description": "该账号所用提供商的剩余额度 / 配额。",
+    "empty": "尚未获取余额，点击刷新。",
+    "error": "余额查询失败：{message}",
+    "fetchedAt": "更新于 {time}",
+    "noValue": "—",
+    "refresh": "刷新",
+    "remaining": "剩余",
+    "total": "总额 {value}",
+    "unavailable": "该提供商不支持余额查询。",
+    "used": "已用 {value}"
+  },
+  "codex": {
+    "account": {
+      "expiresLabel": "Token 过期时间",
+      "planLine": "{plan} · {mode}",
+      "refresh": "立即刷新 Token",
+      "revokeOnSignOut": "服务端同步撤销",
+      "revokeOnSignOutHint": "同时告诉 auth.openai.com 让该 token 失效。默认关闭——仅本地登出可恢复。",
+      "signedOutBody": "登录后即可在外部代理中使用 Codex。",
+      "signedOutTitle": "暂无账号",
+      "unknownEmail": "（未提供邮箱）"
+    },
+    "description": "用 ChatGPT 账号登录或粘贴 OpenAI API key。激活的账号会被 codex 外部代理使用。",
+    "login": {
+      "actions": {
+        "cancel": "取消",
+        "close": "关闭",
+        "startOauth": "开始 OAuth"
+      },
+      "modeGroupLabel": "登录方式",
+      "modes": {
+        "oauth": {
+          "description": "用 codex-cli 的官方 client_id 在 auth.openai.com 上重新登录 ChatGPT。",
+          "label": "Device-code OAuth"
+        },
+        "reuse": {
+          "description": "从 `~/.codex/auth.json` 或 codex-cli 钥匙串条目中读取现有凭证，只读，不会写回。",
+          "label": "复用 codex-cli"
+        }
+      },
+      "oauth": {
+        "accessDenied": "在 OpenAI 一侧取消了登录。",
+        "expired": "device code 已过期，请重新登录。",
+        "granted": "登录成功。",
+        "openVerificationUri": "打开授权页面",
+        "pasteHint": "在打开的页面里输入上方的用户码，等待自动确认。",
+        "polling": "等待 OpenAI 服务器确认…",
+        "saveFailed": "保存凭证失败：{error}",
+        "starting": "正在从 auth.openai.com 申请 device code…",
+        "userCodeLabel": "用户码",
+        "verificationUriLabel": "授权页面"
+      },
+      "reuse": {
+        "adopt": "复用该凭证",
+        "adoptFailed": "复用失败：{error}",
+        "adopted": "已复用。",
+        "authJsonPath": "auth.json 路径",
+        "authMode": "认证模式",
+        "email": "邮箱",
+        "lastRefresh": "上次刷新",
+        "noneFound": "没找到 codex-cli 凭证。可以安装 codex-cli 并运行 `codex login`，或改用 OAuth 流程。",
+        "notAdoptable": "该凭证既没有 ChatGPT bearer 也没有 OpenAI API key，无法复用。请运行 `codex login` 刷新。",
+        "plan": "套餐",
+        "rescan": "重新扫描",
+        "scanning": "正在扫描 codex-cli 凭证…",
+        "sourceFile": "~/.codex/auth.json",
+        "sourceKeyring": "codex-cli 系统钥匙串",
+        "sourceLabel": "来源"
+      },
+      "title": "登录 Codex"
+    },
+    "overview": {
+      "activeTitle": "当前激活的 Codex 账号",
+      "authMode": "认证模式",
+      "authModeApiKey": "API key",
+      "authModeChatGpt": "ChatGPT",
+      "noUsageBody": "OpenAI 没有提供 Claude 那套统一限流响应头。账号标签仍能看到套餐 + 过期时间。",
+      "noUsageTitle": "Codex 不暴露 usage",
+      "signInCta": "添加账号",
+      "signedOutBody": "添加一个 Codex 账号即可启用 codex 外部代理。",
+      "signedOutTitle": "尚未激活 Codex 账号"
+    },
+    "settings": {
+      "autoRefresh": {
+        "description": "当 ChatGPT Token 还剩约 5 分钟过期时自动刷新；关闭则等到下一次 401 再懒刷新。",
+        "label": "自动刷新临近过期的 Token",
+        "title": "临近过期时自动刷新"
+      },
+      "cardDescription": "该服务商的自动刷新行为。",
+      "cardTitle": "连接设置",
+      "probe": {
+        "cardDescription": "在后台轮询你的 Codex 5 小时与每周额度。",
+        "cardTitle": "用量追踪",
+        "enableDescription": "定期读取当前 Codex 账号的限流窗口并以仪表展示。默认关闭。",
+        "enableTitle": "在后台追踪用量",
+        "idleHelp": "应用隐藏时的刷新频率。最低 60 秒。",
+        "idleLabel": "空闲轮询间隔（秒）",
+        "visibleHelp": "应用处于前台时的刷新频率。最低 60 秒。",
+        "visibleLabel": "前台轮询间隔（秒）",
+        "warnHelp": "当某个窗口用量达到该百分比时高亮显示。",
+        "warnLabel": "预警阈值（%）"
+      }
+    },
+    "quotaApiKeyOnly": "额度窗口需要 ChatGPT 登录——OpenAI API Key 没有用量查询端点，因此该账号无额度可展示。此模式按请求计费，用量请在 OpenAI 平台控制台查看。",
+    "title": "Codex（OpenAI）",
+    "webModeBanner": "Codex 凭证存放在 OS 钥匙串中——仅在桌面版可用。"
+  },
+  "common": {
+    "accountList": {
+      "active": "当前激活",
+      "addAccount": "添加账号",
+      "cancel": "取消",
+      "confirm": "保存",
+      "empty": "暂无账号。先添加一个再使用此服务商。",
+      "expiryStale": "访问令牌已过期——下次使用时自动刷新",
+      "expiryValid": "令牌有效期至 {at}",
+      "inUseByCharacter": "角色：{name}",
+      "inUseBySession": "会话：{name}",
+      "inUseMore": "另有 {count} 项",
+      "remove": "删除",
+      "removeConfirm": "删除",
+      "removeDialogBody": "凭证会从 OS 系统钥匙串中移除。随时可以重新登录。",
+      "removeDialogTitle": "删除该账号？",
+      "rename": "重命名",
+      "renameClearHint": "留空则回退到根据套餐 / 邮箱自动生成的标签。",
+      "renameDialogTitle": "重命名账号",
+      "renameLabel": "别名",
+      "renamePlaceholder": "例如：公司 Pro",
+      "secretsHidden": "Token 不显示——如需查看请打开 OS 钥匙串管理器。",
+      "setActive": "设为激活",
+      "title": "账号",
+      "unlink": "解绑",
+      "unlinkConfirm": "解绑",
+      "unlinkDialogBody": "仅从 Cognia 保险库中移除这条发现到的凭证；磁盘上的 OpenCode auth.json 文件不受影响。",
+      "unlinkDialogTitle": "解绑这个发现到的账户？"
+    },
+    "accountPreset": {
+      "ariaLabel": "该账户的端点预设",
+      "useDefault": "使用默认"
+    },
+    "cloudSync": {
+      "cancel": "取消",
+      "connectionHint": "请先在 设置 → 数据 → WebDAV 同步 中配置服务器连接——订阅同步与其共用。",
+      "description": "将订阅保险库（账户、preset、活跃指针）的加密副本镜像到你的 WebDAV 服务器。零知识：服务器只会看到密文。",
+      "expand": "云同步选项",
+      "lastSyncAt": "上次同步 {time}",
+      "passphraseField": "同步口令",
+      "passphraseHint": "与数据备份口令相互独立。若在数据设置中开启了“记住口令”，会保存到系统钥匙串以便无人值守同步。",
+      "passphraseRequired": "请先输入同步口令。",
+      "passphraseUnlockedPlaceholder": "已解锁——留空则复用缓存的口令",
+      "passphraseWrong": "口令与该快照不匹配。",
+      "phase": {
+        "building": "生成快照…",
+        "done": "完成",
+        "encrypting": "加密中…",
+        "uploading": "上传中…"
+      },
+      "restoreAccountCount": "{count} 个账户",
+      "restoreApply": "恢复",
+      "restoreButton": "恢复…",
+      "restoreCreatedAt": "快照时间 {time}",
+      "restoreDialogBody": "从 WebDAV 下载最新订阅快照并解锁预览。确认前不会写入任何内容。",
+      "restoreDialogTitle": "恢复订阅",
+      "restoreEmpty": "快照中没有保险库内容。",
+      "restoreFailed": "恢复失败：{error}",
+      "restoreFromDevice": "来自 {device}",
+      "restorePreviewBody": "请确认将写入本机钥匙串的内容。相同 id 的现有账户会被替换。",
+      "restorePreviewTitle": "恢复预览",
+      "restoreSuccess": "已恢复 {count} 个账户。",
+      "restoreUnlock": "解锁",
+      "syncFailed": "同步失败：{error}",
+      "syncNow": "立即同步",
+      "syncSuccess": "订阅保险库已同步。",
+      "synced": "已同步",
+      "syncing": "同步中…",
+      "title": "云同步（WebDAV）"
+    },
+    "importExport": {
+      "cancel": "取消",
+      "confirmImport": "导入",
+      "description": "把订阅凭证仓导出为加密文件，方便在另一台机器上恢复。",
+      "downloading": "正在准备下载…",
+      "exportButton": "导出…",
+      "exportDialogBody": "请设置加密口令。文件采用 AES-GCM（PBKDF2-SHA256，600 000 轮）加密，口令是保护 token 的唯一一道防线。",
+      "exportDialogTitle": "导出订阅凭证仓",
+      "exportFailed": "导出失败：{error}",
+      "exportSuccess": "已保存加密备份。",
+      "fileField": "备份文件",
+      "fileFieldHint": "拖入 `.cogniabak` 文件，或点击选择。",
+      "importButton": "导入…",
+      "importDialogBody": "选择加密备份文件，并输入创建时使用的口令。",
+      "importDialogTitle": "导入订阅凭证仓",
+      "importFailed": "导入失败：{error}",
+      "importSuccess": "已导入 {count, plural, =1 {1 个账号} other {# 个账号}}。",
+      "passphraseConfirmField": "确认口令",
+      "passphraseEmpty": "口令不能为空。",
+      "passphraseField": "口令",
+      "passphraseMismatch": "两次口令不一致。",
+      "passphraseWrong": "口令无法解密这份备份。",
+      "preview": {
+        "apply": "应用导入",
+        "decrypting": "正在解密（PBKDF2 60 万次迭代）…",
+        "description": "应用之前查看一下这份文件会写回哪些数据。已存在的同 id 账号会被更新；预设和激活账号指针都将从文件中恢复。",
+        "empty": "这份备份是空的——没有账号或预设可以导入。",
+        "hasPreset": "预设",
+        "noAccounts": "无账号（仅预设 / 指针）。",
+        "title": "预览备份内容",
+        "unlock": "解密并预览"
+      },
+      "title": "备份与还原"
+    },
+    "preset": {
+      "addPreset": "添加预设",
+      "baseUrlField": "Base URL",
+      "baseUrlPlaceholder": "https://bedrock-runtime.us-west-2.amazonaws.com",
+      "cancel": "取消",
+      "customTemplate": "自定义端点",
+      "defaultBadge": "默认",
+      "defaultModelField": "默认模型（可选）",
+      "defaultModelPlaceholder": "例如：claude-sonnet-4-5",
+      "description": "覆盖上游 Base URL，常用于 AWS Bedrock、Azure OpenAI、OpenRouter 等中转。",
+      "editPreset": "编辑预设",
+      "fastModelField": "快速模型（可选）",
+      "fastModelPlaceholder": "例如：claude-haiku-4-5",
+      "headersField": "额外请求头（可选）",
+      "headersHint": "每行一条 `Key: Value`，会附加到每次请求。",
+      "labelField": "名称",
+      "labelPlaceholder": "例如：AWS Bedrock",
+      "modelMappingHint": "重写传给服务商的模型环境变量。留空则沿用上游默认值。",
+      "newFromTemplate": "从模板新建",
+      "noPreset": "暂未配置预设。",
+      "presetActive": "预设已生效",
+      "presetInactive": "使用默认端点",
+      "removeConfirmDescription": "“{label}”将被清除，服务商会回到内置端点。你可以随时重新添加。",
+      "removeConfirmTitle": "删除该预设？",
+      "removePreset": "删除预设",
+      "save": "保存预设",
+      "setDefault": "设为默认",
+      "title": "第三方端点",
+      "validationEmptyBaseUrl": "Base URL 不能为空。",
+      "validationEmptyKey": "请求头 Key 不能为空。",
+      "validationInvalidUrl": "Base URL 必须是合法的 URL。"
+    },
+    "switchToast": {
+      "cleared": "已清除激活账号。",
+      "switchFailed": "切换激活账号失败：{error}",
+      "switched": "已切换激活账号到 {label}。"
+    }
+  },
+  "customSources": {
+    "add": "添加自定义源",
+    "cancel": "取消",
+    "description": "通过描述余额/用量接口，把任意 CodingPlan 或中转提供商接入限额面板——无需写代码。",
+    "disableSource": "关闭 {name} 的额度查询",
+    "edit": "编辑",
+    "empty": "暂无自定义源。",
+    "enableSource": "启用 {name} 的额度查询",
+    "fields": {
+      "auth": "鉴权方式",
+      "authBearer": "Bearer 令牌",
+      "authRaw": "原始密钥（无前缀）",
+      "baseUrl": "基础 URL",
+      "enabled": "保存后立即启用",
+      "extraHeaderName": "额外请求头（名称）",
+      "extraHeaderValue": "额外请求头（值）",
+      "kind": "读取类型",
+      "kindBalance": "余额",
+      "kindWindow": "用量窗口",
+      "name": "名称",
+      "namePlaceholder": "我的中转",
+      "path": "请求路径",
+      "remainingPath": "剩余字段路径",
+      "refreshMinutes": "最短刷新间隔（分钟）",
+      "resetAtPath": "重置时间路径",
+      "scale": "缩放系数",
+      "token": "令牌",
+      "tokenPlaceholder": "API 密钥 / 访问令牌",
+      "totalPath": "总额字段路径",
+      "unit": "单位",
+      "usedPath": "已用字段路径",
+      "usedPctPath": "已用百分比路径",
+      "windowLabel": "窗口标签"
+    },
+    "presets": {
+      "codingPlanCount": "编程套餐（计数窗口）",
+      "custom": "自定义（空白）",
+      "genericBalance": "通用余额",
+      "glmCoding": "GLM 编程套餐",
+      "githubCopilot": "GitHub Copilot",
+      "kimiCoding": "Kimi 编程套餐",
+      "label": "预设模板",
+      "minimaxTokenPlan": "MiniMax Token Plan",
+      "newApi": "New-API 中转（one-api）",
+      "zenmux": "ZenMux 编程套餐"
+    },
+    "remove": "删除",
+    "save": "保存",
+    "securityCaveat": "自定义源的令牌保存在本地应用设置中，而非操作系统钥匙串。",
+    "test": "测试",
+    "testError": "测试失败：{error}",
+    "testNoData": "未返回可用数据——请检查路径。",
+    "testOk": "获取到：{summary}",
+    "testing": "测试中…",
+    "title": "自定义源",
+    "webModeHint": "自定义源需要桌面版——查询通过原生 HTTP 桥执行。"
+  },
+  "description": "用 Claude Pro/Max、Codex（ChatGPT）或 OpenCode 订阅登录，启用 OAuth 认证并实时查看速率限制窗口与余额。",
+  "limits": {
+    "amountLeft": "剩余 {amount}",
+    "description": "该账号的订阅限额与使用情况。",
+    "empty": "尚未获取限额数据，点击刷新。",
+    "error": "限额查询失败：{message}",
+    "fetchedAt": "更新于 {time}",
+    "meter": {
+      "credit": "余额",
+      "monthly": "本月",
+      "overage": "按量付费超额",
+      "session": "当前会话",
+      "weekly": "本周（所有模型）",
+      "weekly_opus": "本周（仅 Opus）",
+      "weekly_sonnet": "本周（仅 Sonnet）"
+    },
+    "noMeters": "该账号未上报任何限额窗口。",
+    "noValue": "—",
+    "percentUsed": "已用 {pct}%",
+    "query": {
+      "disable": "关闭额度查询",
+      "disabledBody": "启用当前账号前不会向提供商发送请求。仅在你接受提供商、中转站及网络路径风险时开启。",
+      "disabledTitle": "网络额度查询已关闭",
+      "enable": "启用额度查询",
+      "enabledBody": "当前账号可以查询提供商或中转站额度；请求会合并、节流，并在限流后自动退避。",
+      "enabledTitle": "网络额度查询已启用"
+    },
+    "refresh": "刷新",
+    "resetExpired": "即将重置",
+    "resetsInHm": "{hours} 小时 {minutes} 分后重置",
+    "resetsInM": "{minutes} 分后重置",
+    "unavailable": "该提供商不支持限额查询。"
+  },
+  "login": {
+    "actions": {
+      "cancel": "取消",
+      "openAuthorize": "打开授权页",
+      "signIn": "登录"
+    },
+    "awaitingCode": "在刚才打开的页面中授权 Cognia，然后把显示的 code 粘贴回这里。",
+    "chooseMode": "选择要授权的 Claude 账号类型。",
+    "codeFieldLabel": "授权 code（或完整回调 URL）",
+    "codeFieldPlaceholder": "粘贴跳转页给你的 code 或 URL",
+    "done": "登录成功。",
+    "errors": {
+      "codeMalformed": "输入里找不到 code。请粘贴 code 或完整回调 URL。",
+      "flowStateMissing": "OAuth 流程状态丢失，请重新登录。",
+      "stateMismatch": "OAuth state 不匹配——可能是 CSRF。请重新登录。"
+    },
+    "exchanging": "正在用 code 换取访问令牌…",
+    "modeGroupLabel": "OAuth 流程",
+    "modes": {
+      "console": {
+        "description": "通过 console.anthropic.com 授权。使用计费 API 额度。",
+        "label": "Console（API 计费）"
+      },
+      "reuse": {
+        "description": "直接复用本机 Claude Code CLI 的订阅登录。只读操作——我们不会写回其凭据文件。",
+        "label": "复用 Claude Code 登录"
+      },
+      "subscription": {
+        "description": "通过 claude.ai 授权。使用订阅的 5 小时 / 7 天滚动配额。",
+        "label": "订阅（Pro / Max）"
+      }
+    },
+    "pasteHint": "如果页面没有自动打开，请点击下方链接。授权后把页面显示的 code 或完整 URL 复制粘贴到下面。",
+    "reopenLink": "重新打开授权页",
+    "reuse": {
+      "adopt": "复用此登录",
+      "credentialsPath": "凭据路径",
+      "expiresAt": "令牌过期时间",
+      "noneFound": "本机未检测到 Claude Code 登录。请先运行 `claude` 并登录，或改用下方的 OAuth 流程。",
+      "notAdoptable": "该登录缺少令牌对——请运行 `claude login` 刷新后重新扫描。",
+      "plan": "订阅计划",
+      "rescan": "重新扫描",
+      "scanning": "正在查找本机 Claude Code 登录…",
+      "sourceFile": "~/.claude/.credentials.json",
+      "sourceKeyring": "Claude Code 系统钥匙串条目",
+      "sourceLabel": "来源"
+    },
+    "title": "登录 Claude"
+  },
+  "migration": {
+    "toastBody": "已将 {count, plural, =1 {1 个旧账号} other {# 个旧账号}} 迁移到新版凭证仓。",
+    "toastTitle": "订阅模块已升级"
+  },
+  "nav": {
+    "groups": {
+      "providersGroup": "提供方",
+      "usageGroup": "用量与限额",
+      "vaultGroup": "凭证仓"
+    },
+    "items": {
+      "backup": {
+        "description": "导出或导入加密的凭证仓副本",
+        "label": "备份与迁移"
+      },
+      "claude": {
+        "description": "Claude Pro/Max 账号、额度与端点",
+        "label": "Claude"
+      },
+      "codex": {
+        "description": "供 codex 智能体使用的 ChatGPT 或 OpenAI API Key",
+        "label": "Codex"
+      },
+      "opencode": {
+        "description": "OpenCode Zen/Go 密钥与已发现的凭证",
+        "label": "OpenCode"
+      },
+      "overview": {
+        "description": "当前账号的实时额度窗口",
+        "label": "总览"
+      },
+      "probes": {
+        "description": "后台轮询用量的频率",
+        "label": "用量追踪"
+      },
+      "sync": {
+        "description": "将加密的凭证仓副本同步到 WebDAV",
+        "label": "云同步"
+      },
+      "usage": {
+        "description": "覆盖全部提供方的历史与分析",
+        "label": "用量"
+      }
+    },
+    "mobileTrigger": "分组",
+    "title": "订阅设置"
+  },
+  "opencode": {
+    "description": "从 `~/.local/share/opencode/auth.json` 读取已配置的凭证；OpenCode-Zen 订阅以「粘贴 API key」的方式接入。OpenCode 本身管理大量服务商，我们只展示白名单内的几项。",
+    "discovery": {
+      "adopt": "采纳",
+      "adoptFailed": "凭据采纳失败：{error}",
+      "adoptSuccess": "已将 \"{subProvider}\" 采纳进保险库。",
+      "description": "只读地扫描 OpenCode CLI 的 auth.json，从不写回。",
+      "empty": "auth.json 中没有白名单内的条目。运行 opencode auth 配置 Anthropic / OpenAI / OpenCode Zen / OpenCode Go 之一。",
+      "kindApiKey": "API key",
+      "kindLabel": "类型",
+      "kindOauth": "OAuth",
+      "kindUnknown": "未知",
+      "pathLabel": "auth.json",
+      "rescan": "重新扫描",
+      "scanning": "正在扫描 auth.json…",
+      "subProviderLabel": "服务商",
+      "title": "OpenCode 中已配置的服务商",
+      "whitelistLabel": "白名单"
+    },
+    "quotaConsoleLink": "OpenCode 控制台",
+    "quotaConsoleOnly": "Zen/Go 的余额与配额无法通过 API key 查询——OpenCode 仅在其登录态控制台中展示。",
+    "title": "OpenCode",
+    "webModeBanner": "OpenCode 凭证存放在 OS 钥匙串中——仅在桌面版可用。",
+    "zen": {
+      "accessTokenField": "Zen API key",
+      "accessTokenPlaceholder": "粘贴 opencode.ai/auth 显示的 key",
+      "addKey": "添加 Zen key",
+      "baseUrlField": "Base URL（可选）",
+      "baseUrlPlaceholder": "留空则使用默认 Zen 端点",
+      "cancel": "取消",
+      "description": "粘贴 opencode.ai 给出的 API key（Zen 按请求付费或 Go 包月）。等上游公开 OAuth 接口后，会替换为完整 OAuth 流程。",
+      "labelField": "别名（可选）",
+      "labelPlaceholder": "OpenCode Zen",
+      "labelPlaceholderGo": "OpenCode Go",
+      "pasteKey": "粘贴 Zen API key",
+      "planField": "订阅计划",
+      "planGo": "Go（包月）",
+      "planZen": "Zen（按请求付费）",
+      "save": "保存 Zen key",
+      "saveFailed": "保存失败：{error}",
+      "title": "OpenCode 订阅 key"
+    }
+  },
+  "overview": {
+    "loading": "正在加载配额…",
+    "noDataBody": "点击刷新可直接从 Anthropic 免费用量接口获取额度——不消耗 token，也无需先发消息。",
+    "noDataTitle": "暂无用量数据",
+    "officialQuotaDisabledBody": "仅在你接受上游兼容性和网络路径风险时前往订阅设置启用。正常工作产生的被动用量仍可显示。",
+    "officialQuotaDisabledTitle": "官方额度查询已关闭",
+    "refresh": "刷新",
+    "signedOutBody": "登录 Claude 账号即可监控 5 小时 / 7 天速率限制窗口。",
+    "signedOutTitle": "未登录",
+    "signInCta": "登录",
+    "sourceEndpoint": "用量接口实时数据",
+    "sourceHeaders": "来自对话响应头",
+    "status": {
+      "allowed": "正常",
+      "allowed_warning": "警告",
+      "rate_limited": "已限流",
+      "unknown": "状态未知"
+    },
+    "updated": "更新于{when}"
+  },
+  "providers": {
+    "anthropic": "Claude",
+    "codex": "Codex",
+    "opencode": "OpenCode"
+  },
+  "settings": {
+    "actions": {
+      "reset": "恢复默认",
+      "save": "保存"
+    },
+    "probe": {
+      "description": "定期发送一次近乎空的 /v1/messages 请求来读取 rate-limit headers。每次探测约消耗 10 input + 1 output tokens 配额。",
+      "enableHelp": "默认关闭。被动收集（真实对话流量）始终在跑，优先级更高。",
+      "enableLabel": "启用主动探测",
+      "idleHelp": "下限 60 秒。建议设大一些以节省配额。",
+      "idleLabel": "本页隐藏时的探测周期（秒）",
+      "title": "主动探测",
+      "visibleHelp": "下限 60 秒。",
+      "visibleLabel": "本页可见时的探测周期（秒）"
+    },
+    "threshold": {
+      "description": "用量达到该比例时，「概览」标签会高亮提醒。",
+      "help": "0–100，默认 90。",
+      "label": "警告阈值（%）",
+      "title": "警告阈值"
+    }
+  },
+  "tabs": {
+    "account": "账号",
+    "overview": "概览",
+    "settings": "设置",
+    "usage": "用量"
+  },
+  "title": "订阅",
+  "usage": {
+    "col": {
+      "fetchedAt": "采集时间",
+      "fiveHour": "5h",
+      "sevenDay": "7d",
+      "source": "来源",
+      "status": "状态"
+    },
+    "collapseAll": "全部收起",
+    "costOverTime": {
+      "description": "所选范围内每日估算花费。",
+      "empty": "该范围内还没有用量。",
+      "title": "成本随时间"
+    },
+    "display": {
+      "aria": "用量展示模式",
+      "detailed": "详细",
+      "simplified": "简化",
+      "standard": "标准"
+    },
+    "emptyBody": "发一条对话或启用主动探测以填充本表。",
+    "emptyTitle": "还没有用量样本",
+    "expandAll": "全部展开",
+    "export": {
+      "csv": "下载 CSV",
+      "json": "下载 JSON",
+      "label": "导出"
+    },
+    "insights": {
+      "automatedSurface": {
+        "advice": "智能体团队、工作流和连接器各自会发起独立请求。谨慎安排无人值守的运行，简单任务可考虑使用更便宜的模型。",
+        "headline": "{pct}% 的成本来自自动化场景"
+      },
+      "description": "本时间范围内用量的独立特征——来自本机本地会话，并非加总为 100% 的占比拆分。",
+      "empty": "本时间范围内没有显著的用量特征。",
+      "highContext": {
+        "advice": "更长的会话即便命中缓存也更昂贵。可在任务中途压缩上下文，或切换新任务时另开会话。",
+        "headline": "{pct}% 的轮次运行在 >150k 上下文"
+      },
+      "title": "哪些因素在推高你的用量？"
+    },
+    "loading": "加载中…",
+    "models": {
+      "cacheHitRate": "缓存命中率",
+      "colCache": "缓存读取",
+      "colCacheWrite": "缓存写入",
+      "colCost": "成本",
+      "colInput": "输入",
+      "colModel": "模型",
+      "colOutput": "输出",
+      "colSpeed": "速度",
+      "colTurns": "轮次",
+      "description": "各模型的 Token 与估算成本。SDK 未上报的成本会按模型定价回填。",
+      "donutCenter": "合计",
+      "empty": "该范围内还没有用量。",
+      "speed": "速度",
+      "speedUnit": "{value} tok/s",
+      "title": "按模型成本",
+      "totalCost": "总成本",
+      "totalTokens": "总 Token",
+      "totalTurns": "总轮次"
+    },
+    "range": {
+      "30d": "最近 30 天",
+      "7d": "最近 7 天",
+      "all": "全部时间",
+      "label": "时间范围"
+    },
+    "shareCard": {
+      "action": "分享卡片",
+      "cardTitle": "Cognia 使用量档案",
+      "description": "把你的使用量统计生成风格化卡片，可下载为图片或发布加密分享链接。",
+      "downloadPng": "下载 PNG",
+      "downloading": "渲染中…",
+      "pngError": "图片渲染失败，请重试。",
+      "previewTitle": "卡片预览",
+      "shareLink": "以链接分享",
+      "styleLabel": "风格",
+      "title": "分享使用量卡片",
+      "wallpaperLabel": "主题壁纸"
+    },
+    "surface": {
+      "agentTeam": "智能体团队",
+      "all": "全部",
+      "chat": "对话",
+      "label": "来源",
+      "workflow": "工作流"
+    },
+    "tableDescription": "最新 200 条。passive 来自真实对话流量；probe 来自可选的主动探测。",
+    "tableTitle": "最近样本",
+    "topSessions": {
+      "colActions": "操作",
+      "colCost": "成本",
+      "colInput": "输入",
+      "colOutput": "输出",
+      "colSession": "会话",
+      "colTokens": "Token",
+      "colTurns": "轮次",
+      "description": "汇总自每次 SDK result 写入的 sessionUsage 行，便于快速看出哪些会话在持续消耗预算。",
+      "empty": "尚无持久化用量记录，开始聊天后会出现在这里。",
+      "loading": "加载中…",
+      "resume": "切换",
+      "title": "成本最高的会话",
+      "untitled": "（未命名）"
+    },
+    "trend": {
+      "description": "所选范围内 5 小时与 7 天窗口的利用率变化。",
+      "empty": "该范围内还没有快照。",
+      "fiveHour": "5h",
+      "sevenDay": "7d",
+      "title": "利用率趋势"
+    },
+    "window": {
+      "description": "来自最新速率限制快照的实时利用率，以及各窗口距离重置的时间。",
+      "fallback": "回退缓冲位于 {pct}%。",
+      "fiveHour": "5 小时窗口",
+      "level": {
+        "crit": "已达上限",
+        "ok": "正常",
+        "warn": "接近上限"
+      },
+      "noData": "未上报",
+      "noSnapshot": "尚无配额快照。发一条对话或启用主动探测。",
+      "overageDisabled": "超额已禁用：{reason}。",
+      "refresh": "刷新",
+      "representative": "代表窗口",
+      "resetExpired": "正在重置",
+      "resetUnknown": "重置时间未知",
+      "resetsInHm": "{hours} 小时 {minutes} 分后重置",
+      "resetsInM": "{minutes} 分后重置",
+      "sevenDay": "7 天窗口",
+      "sourceEndpoint": "用量接口实时数据",
+      "sourceHeaders": "来自对话响应头",
+      "title": "当前配额窗口"
+    }
+  },
+  "webModeBanner": "订阅凭据保存在系统钥匙串中——仅桌面应用支持。"
+}

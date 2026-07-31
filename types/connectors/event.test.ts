@@ -1,4 +1,9 @@
-import { buildConversationKey, parseConversationKey, type NormalizedInboundEvent } from "./event"
+import {
+  buildConversationKey,
+  deliveryTargetFromEvent,
+  parseConversationKey,
+  type NormalizedInboundEvent,
+} from "./event"
 
 describe("conversationKey", () => {
   it("formats and parses without thread", () => {
@@ -88,5 +93,70 @@ describe("conversationKey", () => {
     }
     expect(ev.kind).toBe("system")
     expect(ev.systemKind).toBe("read_indicator")
+  })
+
+  it("builds a delivery target from an explicit address without parsing the opaque key", () => {
+    const ev: NormalizedInboundEvent = {
+      platform: "lark",
+      adapterId: "lk-1",
+      selfId: "bot",
+      messageId: "om_1",
+      conversationRef: {
+        platform: "lark",
+        adapterId: "lk-1",
+        channelId: "oc_chat",
+        threadTs: "omt_topic",
+        threadRootMessageId: "om_1",
+      },
+      conversationKey: "opaque:key:that:core:must:not:split",
+      conversationAddress: {
+        conversationKey: "opaque:key:that:core:must:not:split",
+        platform: "lark",
+        adapterId: "lk-1",
+        scopeKind: "thread",
+        containerId: "oc_chat",
+        topicId: "omt_topic",
+      },
+      sender: { id: "u-1", platform: "lark", adapterId: "lk-1", remoteUserId: "ou_1" },
+      channel: { id: "oc_chat", kind: "thread", platformChannelId: "oc_chat" },
+      segments: [{ type: "text", text: "continue" }],
+      plainText: "continue",
+      mentions: { selfMentioned: false, users: [] },
+      timestamp: 123,
+      raw: {},
+    }
+
+    expect(deliveryTargetFromEvent(ev)).toEqual({
+      address: ev.conversationAddress,
+      conversationRef: ev.conversationRef,
+      sourceMessageId: "om_1",
+      refreshedAt: 123,
+    })
+  })
+
+  it("builds a platform-neutral fallback address for a legacy adapter event", () => {
+    const ev: NormalizedInboundEvent = {
+      platform: "telegram",
+      adapterId: "tg-1",
+      selfId: "bot",
+      messageId: "42",
+      conversationRef: { platform: "telegram", adapterId: "tg-1", chatId: "chat-1" },
+      conversationKey: "opaque-legacy-key",
+      sender: { id: "u-1", platform: "telegram", adapterId: "tg-1", remoteUserId: "1" },
+      channel: { id: "chat-1", kind: "private" },
+      segments: [{ type: "text", text: "hello" }],
+      plainText: "hello",
+      mentions: { selfMentioned: false, users: [] },
+      timestamp: 123,
+      raw: {},
+    }
+
+    expect(deliveryTargetFromEvent(ev).address).toEqual({
+      conversationKey: "opaque-legacy-key",
+      platform: "telegram",
+      adapterId: "tg-1",
+      scopeKind: "private",
+      containerId: "chat-1",
+    })
   })
 })

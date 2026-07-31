@@ -79,6 +79,36 @@ describe("useRemoteControlStore — web mode (no Tauri)", () => {
     ])
   })
 
+  it("updateInbound replaces the disabledTargets array without leaking the caller's reference", async () => {
+    const denied = ["plugin.disable", "terminal.exec"] as const
+    await useRemoteControlStore.getState().updateInbound({ disabledTargets: [...denied] })
+    const stored = useRemoteControlStore.getState().config.inbound.disabledTargets
+    expect(stored).toEqual(["plugin.disable", "terminal.exec"])
+  })
+
+  it("updateOutbound deep-clones endpoints (headers + eventTypes) and delivery", async () => {
+    const endpoint = {
+      id: "ep_1",
+      name: "hook",
+      url: "https://x.test",
+      headers: [{ name: "X-A", value: "1" }],
+      enabled: true,
+      eventTypes: ["complete"],
+    }
+    await useRemoteControlStore.getState().updateOutbound({
+      endpoints: [endpoint],
+      delivery: { maxRetries: 5, timeoutMs: 20000, baseDelayMs: 2000 },
+    })
+    const out = useRemoteControlStore.getState().config.outbound
+    expect(out.endpoints[0]).toEqual(endpoint)
+    // Mutating the source must not affect the stored copy.
+    endpoint.headers[0].value = "mutated"
+    endpoint.eventTypes.push("error")
+    expect(out.endpoints[0].headers[0].value).toBe("1")
+    expect(out.endpoints[0].eventTypes).toEqual(["complete"])
+    expect(out.delivery).toEqual({ maxRetries: 5, timeoutMs: 20000, baseDelayMs: 2000 })
+  })
+
   it("setOutboundHeaders is a thin wrapper", async () => {
     await useRemoteControlStore
       .getState()

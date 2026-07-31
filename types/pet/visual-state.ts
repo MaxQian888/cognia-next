@@ -16,9 +16,25 @@ export type PetVisualState =
   | "greeting" // app just opened / pet summoned
   | "evolving" // mid stage-up morph
   | "interacting" // being fed/played-with/petted/talked-to
+  | "unwell" // persistent low-needs condition (recoverable by care; not transient)
 
 /** One-shot animations that play once then return to the resting state. */
-export type PetOneShot = "wave" | "happy" | "fed" | "petted" | "evolving" | "levelUp"
+export type PetOneShot =
+  | "wave"
+  | "happy"
+  | "fed"
+  | "petted"
+  | "evolving"
+  | "levelUp"
+  // emotion flourishes (LLM reply tags → `lib/pet/llm/emotion-tags.ts`)
+  | "sad"
+  | "surprised"
+  | "love"
+  | "sleepy"
+  // impact squash + dust after a throw/fall settles (overlay locomotion)
+  | "land"
+  // shell-crack flourish when the egg hatches
+  | "hatch"
 
 /** Coarse mood bucket derived from needs — picks idle flavour + bubble tone. */
 export type PetMood = "content" | "happy" | "tired" | "lonely" | "grumpy"

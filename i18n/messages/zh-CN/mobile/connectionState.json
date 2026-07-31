@@ -1,0 +1,76 @@
+{
+  "actions": {
+    "goToPair": "配对新设备",
+    "reconnect": "立即重连",
+    "scanLan": "扫描局域网",
+    "switchServer": "切换已配对服务器",
+    "webrtcTier": "WebRTC 链路"
+  },
+  "aria": {
+    "menu": "连接：{label} — 打开菜单"
+  },
+  "live": "在线",
+  "menu": {
+    "title": "连接"
+  },
+  "offline": "离线",
+  "reconnecting": "正在重连",
+  "repairNeeded": "需重新配对",
+  "scan": {
+    "empty": "暂无发现。请确认桌面端已在同一 Wi-Fi 上运行。",
+    "fingerprintMismatch": {
+      "description": "{count} 台服务器返回的 TLS 指纹与已配对记录不一致——可能是证书重新生成，也可能是另一台设备占用了同一地址。",
+      "dismiss": "知道了",
+      "title": "指纹已变更"
+    },
+    "mdnsDenied": "本地网络权限被拒绝",
+    "openSettings": "前往设置",
+    "portLabel": "端口",
+    "rescan": "重新扫描",
+    "scanning": "扫描中…",
+    "source": {
+      "history": "历史",
+      "mdns": "mDNS",
+      "paired": "已配对",
+      "pairedTag": "上次配对",
+      "probe": "探测"
+    },
+    "title": "在此网络中查找桌面端"
+  },
+  "switch": {
+    "daysAgo": "{n} 天",
+    "empty": "尚无历史配对。",
+    "forget": "移除 {name}",
+    "forgot": "已从此设备移除 {name}。",
+    "hoursAgo": "{n} 小时",
+    "justNow": "刚刚",
+    "lastSeen": "最近一次",
+    "minutesAgo": "{n} 分钟",
+    "never": "从未",
+    "switchingTo": "正在切换到 {name}…",
+    "title": "已配对的桌面端"
+  },
+  "sync": {
+    "daysAgo": "{n} 天前",
+    "heading": "上次同步",
+    "hoursAgo": "{n} 小时前",
+    "justNow": "刚刚",
+    "minutesAgo": "{n} 分钟前",
+    "never": "从未"
+  },
+  "tiers": {
+    "offline": "离线",
+    "rtc-direct": "RTC 直连",
+    "rtc-relay": "RTC 中继",
+    "ws-lan": "WS 局域网",
+    "ws-tunnel": "WS 隧道"
+  },
+  "toasts": {
+    "noTier": "当前没有 WebRTC 链路，仍走 HTTPS+WS。",
+    "reconnectBusy": "正在重连中…",
+    "reconnectStarted": "重新握手中…",
+    "reconnectThrottled": "请稍等几秒再点重连。",
+    "syncFailed": "同步失败（{message}）。",
+    "syncKicked": "已同步。"
+  }
+}

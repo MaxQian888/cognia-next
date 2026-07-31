@@ -13,6 +13,7 @@
  */
 
 import type { UnifiedScheduledItem, ScheduledItemKind } from "@/types/scheduler/unified"
+import type { UnifiedExecutionRun } from "@/types/scheduler/unified-runs"
 
 export interface ScheduledItemSubscription {
   unsubscribe(): void
@@ -42,6 +43,9 @@ export interface ScheduledItemSource<CreateInput = unknown, UpdateInput = unknow
 
   /** One-shot read of all items in this source. */
   list(): Promise<UnifiedScheduledItem[]>
+
+  /** One-shot read of recent executions owned by this source, newest first. */
+  listRuns?(limit: number): Promise<UnifiedExecutionRun[]>
 
   /** One-shot read of a single item by source-native id. */
   get(sourceId: string): Promise<UnifiedScheduledItem | undefined>

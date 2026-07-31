@@ -14,6 +14,7 @@ import type { MouseEvent as ReactMouseEvent } from "react"
 import { useTranslations } from "next-intl"
 import { XIcon } from "lucide-react"
 
+import { MotionStatusSwap } from "@/components/chat/motion/motion-reveal"
 import { cn } from "@/lib/utils"
 import { displayTitle, type TerminalSessionRow } from "@/stores/terminal/terminal-store"
 
@@ -74,11 +75,13 @@ export function TerminalTab({ row, active, onSelect, onClose, onContextMenu }: T
         row.agentTrusted && "ring-1 ring-amber-500/40"
       )}
     >
-      <span
-        className={cn("inline-block h-1.5 w-1.5 rounded-full", dotClass)}
-        aria-label={t(statusKey)}
-        title={t(statusKey)}
-      />
+      <MotionStatusSwap swapKey={`${row.status}:${row.exitCode ?? ""}`}>
+        <span
+          className={cn("inline-block h-1.5 w-1.5 rounded-full", dotClass)}
+          aria-label={t(statusKey)}
+          title={t(statusKey)}
+        />
+      </MotionStatusSwap>
       <span className="max-w-[180px] truncate">{displayTitle(row)}</span>
       <button
         type="button"
@@ -89,7 +92,7 @@ export function TerminalTab({ row, active, onSelect, onClose, onContextMenu }: T
         }}
         className={cn(
           "ml-1 rounded p-0.5 opacity-0 transition-opacity hover:bg-muted",
-          "group-hover:opacity-100",
+          "group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100",
           active && "opacity-60"
         )}
       >

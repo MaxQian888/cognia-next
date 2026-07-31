@@ -40,7 +40,7 @@ describe("useDexieFirstQuery", () => {
     expect(result.current.error).toBeNull()
   })
 
-  it("kicks runSyncDown once on mount when `table` is provided", async () => {
+  it("kicks runSyncDown once on mount, scoped to only the consumer's table", async () => {
     renderHook(() =>
       useDexieFirstQuery<string[]>({
         query: () => [],
@@ -53,6 +53,8 @@ describe("useDexieFirstQuery", () => {
     await waitFor(() => {
       expect(runSyncDown).toHaveBeenCalledTimes(1)
     })
+    // The fix: a single-table consumer must not kick a full 10-table pull.
+    expect(runSyncDown).toHaveBeenCalledWith({ only: ["characters"] })
   })
 
   it("does NOT kick runSyncDown when `table` is omitted", async () => {

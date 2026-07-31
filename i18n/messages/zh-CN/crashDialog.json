@@ -1,0 +1,8 @@
+{
+  "description": "{time} 开始的会话（版本 {version}）因崩溃而结束。已保存包含详细信息的崩溃报告。",
+  "dismiss": "关闭",
+  "noReport": "无法读取报告文件。",
+  "openFolder": "打开文件夹",
+  "title": "Cognia 异常退出",
+  "viewReport": "查看报告"
+}

@@ -10,8 +10,18 @@ import {
   companionStorage,
   pickCompanionStorage,
 } from "./companion-storage"
+import {
+  buildRoomDescriptorV2,
+  generatePersistableV2SigningIdentity,
+  generateV2SigningKeyPair,
+} from "@/lib/signaling/v2-crypto"
+import {
+  clearActiveRuntimeTargetContext,
+  setActiveRuntimeTargetContext,
+} from "@/lib/runtime/runtime-target-context"
 
 const MOCK: CompanionConfig = {
+  targetId: "companion-studio",
   baseUrl: "https://192.168.1.42:7890",
   deviceJwt: "jwt.token.value",
   deviceId: "device-abc",
@@ -20,12 +30,39 @@ const MOCK: CompanionConfig = {
 
 afterEach(() => {
   window.localStorage.clear()
+  clearActiveRuntimeTargetContext()
   delete (window as { Capacitor?: unknown }).Capacitor
   __setCompanionStorageForTests(null)
 })
 
 describe("LocalStorageCompanionStorage", () => {
-  const storage = new LocalStorageCompanionStorage()
+  const vaultSecrets = new Map<string, string>()
+  const vault = {
+    accountId: "acct_test",
+    async encryptSecret(name: string, value: string) {
+      vaultSecrets.set(name, value)
+      return { version: 1 as const, iv: `iv-${name}`, ciphertext: `sealed-${name}` }
+    },
+    async decryptSecret(name: string) {
+      const value = vaultSecrets.get(name)
+      if (!value) throw new Error("secret missing")
+      return value
+    },
+    async storeSecret(name: string, value: string) {
+      vaultSecrets.set(name, value)
+    },
+    async loadSecret(name: string) {
+      return vaultSecrets.get(name) ?? null
+    },
+    async deleteSecret(name: string) {
+      vaultSecrets.delete(name)
+    },
+  }
+  const storage = new LocalStorageCompanionStorage(undefined, () => vault)
+
+  beforeEach(() => {
+    vaultSecrets.clear()
+  })
 
   it("returns null when nothing is stored", async () => {
     expect(await storage.load()).toBeNull()
@@ -34,6 +71,60 @@ describe("LocalStorageCompanionStorage", () => {
   it("save + load round-trips the config", async () => {
     await storage.save(MOCK)
     expect(await storage.load()).toEqual(MOCK)
+    const raw = window.localStorage.getItem("cognia.companion.targets.v2")!
+    expect(raw).not.toContain(MOCK.deviceJwt)
+    expect(raw).toContain("companion-studio")
+    expect(window.localStorage.getItem("cognia.companion.config.v1")).toBeNull()
+    expect(vaultSecrets.get("companion:companion-studio:device-jwt")).toBe(MOCK.deviceJwt)
+  })
+
+  it("keeps the v2 private key out of localStorage and reloads a non-extractable key", async () => {
+    const mobile = await generatePersistableV2SigningIdentity()
+    const desktop = await generateV2SigningKeyPair()
+    const descriptor = await buildRoomDescriptorV2({
+      roomNonce: "AAECAwQFBgcICQoLDA0ODw",
+      desktopSigningKey: desktop.encodedPublicKey,
+      mobileSigningKey: mobile.encodedPublicKey,
+      notAfter: Date.now() + 60_000,
+    })
+    const keys = new Map<string, CryptoKey>()
+    const keyStore = {
+      async save(deviceId: string, jwk: JsonWebKey) {
+        const key = await crypto.subtle.importKey(
+          "jwk",
+          jwk,
+          { name: "ECDSA", namedCurve: "P-256" },
+          false,
+          ["sign"]
+        )
+        keys.set(deviceId, key)
+        return key
+      },
+      async load(deviceId: string) {
+        return keys.get(deviceId) ?? null
+      },
+      async clear(deviceId: string) {
+        keys.delete(deviceId)
+      },
+    }
+    const isolated = new LocalStorageCompanionStorage(keyStore, () => vault)
+    await isolated.save({
+      ...MOCK,
+      rendezvousId: descriptor.roomId,
+      signalingRoomDescriptor: descriptor,
+      signalingPrivateKeyJwk: mobile.privateKeyJwk,
+    })
+
+    const raw = window.localStorage.getItem("cognia.companion.targets.v2")!
+    expect(raw).not.toContain(mobile.privateKeyJwk.d!)
+    expect(raw).not.toContain("signalingPrivateKeyJwk")
+    expect(raw).toContain("signalingRoomDescriptor")
+    expect(vaultSecrets.get("companion:companion-studio:signaling-private-jwk")).toContain(
+      mobile.privateKeyJwk.d!
+    )
+    const loaded = await isolated.load()
+    expect(loaded?.signalingPrivateKey?.extractable).toBe(false)
+    expect(loaded?.signalingPrivateKeyJwk).toBeUndefined()
   })
 
   it("clear removes the stored value", async () => {
@@ -47,20 +138,48 @@ describe("LocalStorageCompanionStorage", () => {
     expect(await storage.load()).toBeNull()
   })
 
-  it("treats SSR (no window) as empty", async () => {
-    // Simulate the server-rendering branch by stashing then deleting window.
-    const realWindow = globalThis.window
-    // @ts-expect-error — exercising the SSR guard.
-    delete globalThis.window
-    try {
-      const ssrStorage = new LocalStorageCompanionStorage()
-      expect(await ssrStorage.load()).toBeNull()
-      await ssrStorage.save(MOCK) // no-op
-      await ssrStorage.clear() // no-op
-    } finally {
-      globalThis.window = realWindow
-    }
+  it("migrates a legacy plaintext device JWT after the Vault is unlocked", async () => {
+    window.localStorage.setItem("cognia.companion.config.v1", JSON.stringify(MOCK))
+
+    await expect(storage.load()).resolves.toEqual(MOCK)
+
+    const migrated = window.localStorage.getItem("cognia.companion.config.v1")!
+    expect(migrated).toBeNull()
+    expect(window.localStorage.getItem("cognia.companion.targets.v2")).not.toContain(MOCK.deviceJwt)
   })
+
+  it("keeps multiple target credentials isolated and loads only the active target", async () => {
+    const second: CompanionConfig = {
+      ...MOCK,
+      targetId: "companion-cloud",
+      baseUrl: "https://cloud.example.com",
+      deviceJwt: "jwt.cloud.value",
+      deviceId: "device-cloud",
+    }
+    await storage.save(MOCK)
+    await storage.save(second)
+
+    setActiveRuntimeTargetContext("acct_test", "companion-studio")
+    await expect(storage.load()).resolves.toEqual(MOCK)
+
+    setActiveRuntimeTargetContext("acct_test", "companion-cloud")
+    await expect(storage.load()).resolves.toEqual(second)
+
+    const raw = window.localStorage.getItem("cognia.companion.targets.v2")!
+    expect(raw).not.toContain(MOCK.deviceJwt)
+    expect(raw).not.toContain(second.deviceJwt)
+  })
+
+  it("fails closed while the Browser Vault is locked", async () => {
+    const locked = new LocalStorageCompanionStorage(undefined, () => null)
+    window.localStorage.setItem("cognia.companion.config.v1", JSON.stringify(MOCK))
+
+    await expect(locked.load()).resolves.toBeNull()
+    await expect(locked.save(MOCK)).rejects.toThrow(/Vault.*unlocked/i)
+  })
+
+  // The SSR (no-window) branch lives in `companion-storage.ssr.test.ts` —
+  // jsdom's `window` is non-configurable from Node 26 on.
 })
 
 describe("SecureStorageCompanionStorage", () => {

@@ -34,12 +34,7 @@ jest.mock("./artifact-renderers", () => ({
       return {
         owner: "builtin" as const,
         rendererType: rendererTypeMap[artifact.type] as
-          | "code"
-          | "document"
-          | "mermaid"
-          | "chart"
-          | "math"
-          | undefined,
+          "code" | "document" | "mermaid" | "chart" | "math" | undefined,
       }
     }
     return { owner: "runtime" as const }
@@ -53,7 +48,8 @@ jest.mock("./jupyter-renderer", () => ({
 }))
 
 import { ArtifactPreview } from "./artifact-preview"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
+import { useArtifactStore } from "@/stores/artifact/artifact-store"
 import type { Artifact } from "@/types"
 
 const dummy = (overrides: Partial<Artifact> = {}): Artifact => ({
@@ -123,5 +119,63 @@ describe("ArtifactPreview", () => {
       expect.objectContaining({ message: "boom" })
     )
     warnSpy.mockRestore()
+  })
+
+  describe("persisting how the preview settled", () => {
+    function seedArtifact(overrides: Partial<Artifact> = {}) {
+      return useArtifactStore.getState().createArtifact({
+        sessionId: "s",
+        messageId: "m",
+        type: "code",
+        title: "t",
+        content: "x",
+        ...overrides,
+      })
+    }
+
+    beforeEach(() => {
+      useArtifactStore.setState({ artifacts: {} })
+    })
+
+    it("records a settled render so the workspace runtime filter has something to match", async () => {
+      const artifact = seedArtifact()
+      render(<ArtifactPreview artifact={artifact} />)
+
+      await waitFor(() =>
+        expect(useArtifactStore.getState().artifacts[artifact.id]?.metadata?.runtimeHealth).toBe(
+          "ready"
+        )
+      )
+      // Settling is not an edit: routing this through updateArtifact would spin
+      // the version counter every time the panel opens.
+      expect(useArtifactStore.getState().artifacts[artifact.id]?.version).toBe(artifact.version)
+    })
+
+    it("never writes the transient loading state", async () => {
+      // An iframe artifact starts out loading; only the settled value lands.
+      const artifact = seedArtifact({ type: "html", content: "<html></html>" })
+      const written: Array<string | undefined> = []
+      const unsubscribe = useArtifactStore.subscribe((state) =>
+        written.push(state.artifacts[artifact.id]?.metadata?.runtimeHealth)
+      )
+      render(<ArtifactPreview artifact={artifact} />)
+
+      await waitFor(() =>
+        expect(
+          useArtifactStore.getState().artifacts[artifact.id]?.metadata?.runtimeHealth
+        ).toBeDefined()
+      )
+      expect(written).not.toContain("loading")
+      unsubscribe()
+    })
+
+    it("leaves synthetic previews alone", async () => {
+      // Canvas documents are projected onto a throwaway Artifact that has no
+      // row in the store.
+      render(<ArtifactPreview artifact={dummy({ id: "canvas-doc-1" })} />)
+
+      await waitFor(() => expect(screen.getByTestId("artifact-renderer-code")).toBeInTheDocument())
+      expect(useArtifactStore.getState().artifacts["canvas-doc-1"]).toBeUndefined()
+    })
   })
 })

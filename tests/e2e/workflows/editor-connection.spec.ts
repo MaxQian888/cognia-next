@@ -10,9 +10,23 @@
  * toast surface.
  */
 
-import { expect, test, type Page } from "@playwright/test"
+import { expect, test, type Page } from "@/tests/e2e/fixtures/test"
 import { resetCogniaDb } from "../helpers/db-reset"
 import { seedAndOpenWorkflow } from "../helpers/seed-workflow"
+
+/** Seed a raw workflow graph through the in-bundle bridge (a raw page.evaluate
+ *  `import("@/...")` does not resolve under Turbopack dev). Returns its id. */
+async function seedRawWorkflow(page: Page, graph: unknown): Promise<string> {
+  return page.evaluate(async (g) => {
+    const w = window as Window & {
+      __cogniaSeedRawWorkflow?: (draft: unknown) => Promise<string>
+    }
+    if (typeof w.__cogniaSeedRawWorkflow !== "function") {
+      throw new Error("window.__cogniaSeedRawWorkflow is not wired")
+    }
+    return w.__cogniaSeedRawWorkflow(g)
+  }, graph)
+}
 
 async function dragHandle(
   page: Page,
@@ -61,68 +75,79 @@ test.describe("workflow editor — connections", () => {
     expect(edgesCount).toBeGreaterThanOrEqual(1)
   })
 
-  test("self-loop attempt surfaces a validation toast", async ({ page }) => {
-    await seedAndOpenWorkflow(page, "manual-ai")
-    const triggerNode = page.getByTestId("wf-node-trigger.manual").first()
-    const handleSource = triggerNode.locator(
-      ".react-flow__handle.source, .react-flow__handle[data-handlepos='bottom']"
-    )
-    const handleTarget = triggerNode.locator(
-      ".react-flow__handle.target, .react-flow__handle[data-handlepos='top']"
-    )
-    // If both handles exist, attempt the self-loop. (Some node kinds render
-    // only one handle direction; skip the assertion if there is nothing to
-    // drag from.)
-    if ((await handleSource.count()) === 0 || (await handleTarget.count()) === 0) {
-      test.info().annotations.push({
-        type: "skip",
-        description: "node renders only one handle direction",
-      })
-      return
-    }
+  test("self-loop attempt is rejected by the connection validator", async ({ page }) => {
+    // Use a `flow.set` node — unlike a trigger (source-only), it exposes BOTH a
+    // target (left) and a source (right) handle, so a self-loop is actually
+    // attemptable. Seeded with no edges so the count starts at 0.
+    const id = await seedRawWorkflow(page, {
+      name: "Self-loop probe",
+      nodes: [
+        {
+          id: "n_trigger",
+          type: "trigger.manual",
+          typeVersion: 1,
+          position: { x: 60, y: 80 },
+          data: { label: "Manual", params: {} },
+        },
+        {
+          id: "n_set",
+          type: "flow.set",
+          typeVersion: 1,
+          position: { x: 360, y: 80 },
+          data: { label: "Set", params: { variable: "k", value: "v" } },
+        },
+      ],
+      edges: [],
+    })
+    await page.goto(`/workflows/editor?id=${id}`)
+    await expect(page.getByTestId("workflow-canvas")).toBeVisible()
+
+    const setNode = page.getByTestId("wf-node-flow.set").first()
+    const handleSource = setNode.locator(".react-flow__handle[data-handlepos='right']")
+    const handleTarget = setNode.locator(".react-flow__handle[data-handlepos='left']")
+    // Hard requirement — a regression that stops rendering RF handles must go
+    // RED here, not silently skip. `flow.set` always has both directions.
+    await expect(handleSource.first()).toBeVisible()
+    await expect(handleTarget.first()).toBeVisible()
+
     const srcBox = await handleSource.first().boundingBox()
     const tgtBox = await handleTarget.first().boundingBox()
-    if (!srcBox || !tgtBox) return
+    if (!srcBox || !tgtBox) throw new Error("flow.set handles have no bounding box")
     await page.mouse.move(srcBox.x + srcBox.width / 2, srcBox.y + srcBox.height / 2)
     await page.mouse.down()
     await page.mouse.move(tgtBox.x + tgtBox.width / 2, tgtBox.y + tgtBox.height / 2, { steps: 8 })
     await page.mouse.up()
-    // A self-loop is rejected: the edge count should not grow.
-    // Existing seed has 1 edge.
+
+    // A self-loop is rejected by `connection-validator.ts`: no edge is added.
     const after = await page.evaluate(() => document.querySelectorAll(".react-flow__edge").length)
-    expect(after).toBe(1)
+    expect(after).toBe(0)
   })
 
   test("dragging from trigger handle to a newly-added node creates an edge", async ({ page }) => {
-    // Reset to a workflow with two nodes but no edge between them.
-    await page.evaluate(async () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const w = window as any
-      const { createWorkflow } = await import("@/lib/db/workflows")
-      const wf = await createWorkflow({
-        name: "Edgeless",
-        nodes: [
-          {
-            id: "n_trigger",
-            type: "trigger.manual",
-            typeVersion: 1,
-            position: { x: 60, y: 80 },
-            data: { label: "Manual", params: {} },
-          },
-          {
-            id: "n_set",
-            type: "flow.set",
-            typeVersion: 1,
-            position: { x: 360, y: 80 },
-            data: { label: "Set", params: { key: "k", value: "v" } },
-          },
-        ],
-        edges: [],
-      })
-      w.__seededId = wf.id
+    // Two nodes, no edge between them — seeded through the in-bundle bridge so
+    // the `@/lib/db/workflows` import resolves (a raw page.evaluate import does
+    // not under Turbopack dev).
+    const id = await seedRawWorkflow(page, {
+      name: "Edgeless",
+      nodes: [
+        {
+          id: "n_trigger",
+          type: "trigger.manual",
+          typeVersion: 1,
+          position: { x: 60, y: 80 },
+          data: { label: "Manual", params: {} },
+        },
+        {
+          id: "n_set",
+          type: "flow.set",
+          typeVersion: 1,
+          position: { x: 360, y: 80 },
+          data: { label: "Set", params: { variable: "k", value: "v" } },
+        },
+      ],
+      edges: [],
     })
-    const id = await page.evaluate(() => (window as { __seededId?: string }).__seededId)
-    await page.goto(`/workflows/${id}`)
+    await page.goto(`/workflows/editor?id=${id}`)
     await expect(page.getByTestId("workflow-canvas")).toBeVisible()
     await expect(page.getByTestId("wf-node-trigger.manual").first()).toBeVisible()
     await expect(page.getByTestId("wf-node-flow.set").first()).toBeVisible()
@@ -130,22 +155,19 @@ test.describe("workflow editor — connections", () => {
     const triggerSource = page
       .getByTestId("wf-node-trigger.manual")
       .first()
-      .locator(".react-flow__handle[data-handlepos='bottom']")
+      .locator(".react-flow__handle[data-handlepos='right']")
     const setTarget = page
       .getByTestId("wf-node-flow.set")
       .first()
-      .locator(".react-flow__handle[data-handlepos='top']")
-    if ((await triggerSource.count()) === 0 || (await setTarget.count()) === 0) {
-      test.info().annotations.push({
-        type: "skip",
-        description: "handles not exposed in current React Flow build",
-      })
-      return
-    }
+      .locator(".react-flow__handle[data-handlepos='left']")
+    // Hard requirement — the editor MUST expose these handles. A regression
+    // that drops them goes RED here instead of silently skipping green.
+    await expect(triggerSource.first()).toBeVisible()
+    await expect(setTarget.first()).toBeVisible()
     await dragHandle(
       page,
-      "[data-testid='wf-node-trigger.manual'] .react-flow__handle[data-handlepos='bottom']",
-      "[data-testid='wf-node-flow.set'] .react-flow__handle[data-handlepos='top']"
+      "[data-testid='wf-node-trigger.manual'] .react-flow__handle[data-handlepos='right']",
+      "[data-testid='wf-node-flow.set'] .react-flow__handle[data-handlepos='left']"
     )
     // React Flow renders edges asynchronously; allow a tick before counting.
     await page.waitForTimeout(150)

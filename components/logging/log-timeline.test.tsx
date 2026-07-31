@@ -7,7 +7,7 @@ import { render, screen, fireEvent } from "@testing-library/react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 
 import { LogTimeline } from "./log-timeline"
-import type { StructuredLogEntry } from "@/lib/logging"
+import type { StructuredLogEntry } from "@cognia/logging"
 
 function makeLog(
   id: string,

@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Integration coverage for the five Employee Digital Twin Dexie tables and
  * their CRUD modules. Lives next to `lib/db/twin-{sources,chunks,profile,
@@ -119,6 +120,20 @@ describe("twinSources CRUD", () => {
     const created = await createTwinSource(baseDraft)
     const fetched = await getTwinSource(created.id)
     expect(fetched).toEqual(created)
+  })
+
+  it("persists import-time speakers and omits them when absent", async () => {
+    const withSpeakers = await createTwinSource({
+      ...baseDraft,
+      fingerprint: "sha256:spk",
+      speakers: ["Alice Zhang", "张伟"],
+    })
+    const fetched = await getTwinSource(withSpeakers.id)
+    expect(fetched?.speakers).toEqual(["Alice Zhang", "张伟"])
+
+    const without = await createTwinSource({ ...baseDraft, fingerprint: "sha256:nospk" })
+    const fetchedWithout = await getTwinSource(without.id)
+    expect(fetchedWithout?.speakers).toBeUndefined()
   })
 
   it("filters by twinId + kind / status", async () => {
@@ -715,6 +730,27 @@ describe("twinJobs CRUD + scheduler", () => {
     expect(done?.outputDraftIds).toEqual(["twd_1", "twd_2"])
     expect(done?.llmTokensUsed).toBe(12345)
     expect(done?.completedAt).toBeGreaterThan(0)
+  })
+
+  it("completeJob persists per-agent partialFailures from a degraded distill run", async () => {
+    const job = await createTwinJob({
+      twinId: "twin_alice",
+      kind: "distill",
+      sourceIds: [],
+      status: "running",
+      phase: "synthesizer",
+      progress: 80,
+    })
+    await completeJob(job.id, {
+      outputDraftIds: ["twd_1"],
+      partialFailures: { knowledge: "timed out after 90s", playbook: "LLM returned no JSON" },
+    })
+    const done = await getTwinJob(job.id)
+    expect(done?.status).toBe("completed")
+    expect(done?.partialFailures).toEqual({
+      knowledge: "timed out after 90s",
+      playbook: "LLM returned no JSON",
+    })
   })
 
   it("failJob records the message and increments retryCount", async () => {

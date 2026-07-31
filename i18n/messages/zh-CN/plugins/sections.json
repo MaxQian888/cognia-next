@@ -1,0 +1,21 @@
+{
+  "detailSheetLabel": "插件详情",
+  "devtools": "开发工具",
+  "discover": "发现",
+  "governance": "治理",
+  "governanceSub": {
+    "analytics": "使用统计",
+    "audit": "审计日志",
+    "permissions": "权限",
+    "policy": "策略",
+    "scheduled": "定时任务"
+  },
+  "library": "已安装",
+  "librarySub": {
+    "all": "全部",
+    "configurable": "可配置",
+    "enabled": "已启用",
+    "errored": "出错",
+    "updates": "可更新"
+  }
+}

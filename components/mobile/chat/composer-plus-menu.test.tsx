@@ -126,7 +126,7 @@ describe("<ComposerPlusMenu />", () => {
     )
   })
 
-  it("forwards a chosen file via the file input change", async () => {
+  it("forwards a single chosen file via the file input change", async () => {
     const onAttach = jest.fn()
     const user = userEvent.setup()
     render(<ComposerPlusMenu onAttach={onAttach} />)
@@ -134,7 +134,19 @@ describe("<ComposerPlusMenu />", () => {
     const input = screen.getByTestId("composer-plus-file-input") as HTMLInputElement
     const file = new File(["payload"], "doc.txt", { type: "text/plain" })
     await user.upload(input, file)
-    expect(onAttach).toHaveBeenCalledWith({ kind: "file", file })
+    expect(onAttach).toHaveBeenCalledWith({ kind: "files", files: [file] })
+  })
+
+  it("forwards multiple chosen files via the file input change", async () => {
+    const onAttach = jest.fn()
+    const user = userEvent.setup()
+    render(<ComposerPlusMenu onAttach={onAttach} />)
+    await user.click(screen.getByTestId("composer-plus-toggle"))
+    const input = screen.getByTestId("composer-plus-file-input") as HTMLInputElement
+    const a = new File(["a"], "a.txt", { type: "text/plain" })
+    const b = new File(["b"], "b.txt", { type: "text/plain" })
+    await user.upload(input, [a, b])
+    expect(onAttach).toHaveBeenCalledWith({ kind: "files", files: [a, b] })
   })
 
   it("voice button reports unsupported on web (no native plugin)", async () => {
@@ -203,6 +215,36 @@ describe("<ComposerPlusMenu />", () => {
     expect(typeof block?.source?.data).toBe("string")
   })
 
+  it("forwards multiple image files as multiple SendContent blocks in one onSend", async () => {
+    const onSend = jest.fn(async () => {})
+    const user = userEvent.setup()
+    render(<ComposerPlusMenu onAttach={jest.fn()} onSend={onSend} />)
+    await user.click(screen.getByTestId("composer-plus-toggle"))
+    const input = screen.getByTestId("composer-plus-file-input") as HTMLInputElement
+    const a = new File([new Uint8Array([1])], "a.png", { type: "image/png" })
+    const b = new File([new Uint8Array([2])], "b.jpg", { type: "image/jpeg" })
+    await user.upload(input, [a, b])
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1))
+    const blocks = (onSend.mock.calls[0] as unknown as [unknown[]])[0]
+    expect(blocks).toHaveLength(2)
+  })
+
+  it("for a mixed selection forwards all files but only sends image blocks", async () => {
+    const onAttach = jest.fn()
+    const onSend = jest.fn(async () => {})
+    const user = userEvent.setup()
+    render(<ComposerPlusMenu onAttach={onAttach} onSend={onSend} />)
+    await user.click(screen.getByTestId("composer-plus-toggle"))
+    const input = screen.getByTestId("composer-plus-file-input") as HTMLInputElement
+    const png = new File([new Uint8Array([1])], "p.png", { type: "image/png" })
+    const txt = new File(["t"], "t.txt", { type: "text/plain" })
+    await user.upload(input, [png, txt])
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1))
+    expect(onAttach).toHaveBeenCalledWith({ kind: "files", files: [png, txt] })
+    const blocks = (onSend.mock.calls[0] as unknown as [unknown[]])[0]
+    expect(blocks).toHaveLength(1)
+  })
+
   it("file input does NOT call onSend for non-image files", async () => {
     const onSend = jest.fn(async () => {})
     const user = userEvent.setup()
@@ -229,5 +271,81 @@ describe("<ComposerPlusMenu />", () => {
     await user.click(screen.getByTestId("composer-plus-camera"))
     await new Promise((r) => setTimeout(r, 0))
     expect(onSend).not.toHaveBeenCalled()
+  })
+
+  it("hides the voice branch when showVoice is false and applies fileAccept", async () => {
+    const user = userEvent.setup()
+    render(
+      <ComposerPlusMenu
+        onAttach={jest.fn()}
+        showVoice={false}
+        fileAccept="image/*,.pdf"
+        capabilities={<div data-testid="mobile-composer-capabilities">Capabilities</div>}
+      />
+    )
+    await user.click(screen.getByTestId("composer-plus-toggle"))
+    expect(screen.queryByTestId("composer-plus-voice")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("composer-plus-voice-stop")).not.toBeInTheDocument()
+    expect(screen.getByTestId("mobile-composer-capabilities")).toBeInTheDocument()
+    const input = screen.getByTestId("composer-plus-file-input") as HTMLInputElement
+    expect(input.accept).toBe("image/*,.pdf")
+  })
+})
+
+describe("attachmentToFiles", () => {
+  // jsdom has no fetch for data: URLs — stub it to return a Blob-shaped
+  // response like the browser/WebView would.
+  const realFetch = globalThis.fetch
+  beforeEach(() => {
+    globalThis.fetch = jest.fn(async () => ({
+      blob: async () => new Blob(["img-bytes"], { type: "image/png" }),
+    })) as unknown as typeof fetch
+  })
+  afterEach(() => {
+    globalThis.fetch = realFetch
+  })
+
+  it("passes file/files payloads through untouched", async () => {
+    const { attachmentToFiles } = await import("./composer-plus-menu")
+    const file = new File(["x"], "a.txt", { type: "text/plain" })
+    expect(await attachmentToFiles({ kind: "file", file })).toEqual([file])
+    expect(await attachmentToFiles({ kind: "files", files: [file] })).toEqual([file])
+  })
+
+  it("converts a base64 photo into a typed File", async () => {
+    const { attachmentToFiles } = await import("./composer-plus-menu")
+    const files = await attachmentToFiles({ kind: "photo", base64: "AAAA", mime: "image/png" })
+    expect(files).toHaveLength(1)
+    expect(files[0]!.type).toBe("image/png")
+    expect(files[0]!.name).toMatch(/^photo-\d+\.png$/)
+  })
+
+  it("returns [] for a photo with neither base64 nor uri", async () => {
+    const { attachmentToFiles } = await import("./composer-plus-menu")
+    expect(await attachmentToFiles({ kind: "photo", mime: "image/jpeg" })).toEqual([])
+  })
+
+  it("converts an album multi-pick into one File per item", async () => {
+    const { attachmentToFiles } = await import("./composer-plus-menu")
+    const files = await attachmentToFiles({
+      kind: "photos",
+      items: [
+        { uri: "blob:1", mime: "image/jpeg" },
+        { uri: "blob:2", mime: "image/png" },
+      ],
+    })
+    expect(files.map((f) => f.type)).toEqual(["image/jpeg", "image/png"])
+  })
+
+  it("converts a voice recording into an audio File", async () => {
+    const { attachmentToFiles } = await import("./composer-plus-menu")
+    const files = await attachmentToFiles({
+      kind: "voice",
+      recordingDataUrl: "data:audio/aac;base64,AAAA",
+      mimeType: "audio/aac",
+    })
+    expect(files).toHaveLength(1)
+    expect(files[0]!.name).toMatch(/^voice-\d+\.aac$/)
+    expect(files[0]!.type).toBe("audio/aac")
   })
 })

@@ -1,0 +1,114 @@
+import { getExecutionRun } from "@/lib/db/execution-runs"
+import { getDb } from "@/lib/db/schema"
+import { registerRunControlHandler, type RunControlHandler } from "./run-control"
+
+const agentControllers = new Map<string, AbortController>()
+
+export function registerAgentRunController(runId: string, controller: AbortController): () => void {
+  agentControllers.set(runId, controller)
+  return () => {
+    if (agentControllers.get(runId) === controller) agentControllers.delete(runId)
+  }
+}
+
+export function installExecutionRunControlHandlers(): {
+  agent: RunControlHandler
+  workflow: RunControlHandler
+  goal: RunControlHandler
+  plan: RunControlHandler
+  dispose(): void
+} {
+  const agent: RunControlHandler = async (command) => {
+    if (command.action === "open_details") return
+    if (command.action === "stop") {
+      const controller = agentControllers.get(command.runId)
+      if (!controller) throw new Error("Agent run is not active in this process")
+      controller.abort("execution_run_stopped")
+      return
+    }
+    if (command.action === "approve" || command.action === "deny") {
+      const run = await getExecutionRun(command.runId)
+      const interrupt = command.interruptId
+        ? await getDb().executionRunInterrupts.get(command.interruptId)
+        : undefined
+      if (!run?.sessionId || !interrupt?.requestDigest) {
+        throw new Error("Agent permission request cannot be resumed")
+      }
+      const { resolveApproval } = await import("@/lib/connectors/hitl/approval-registry")
+      if (
+        !resolveApproval(run.sessionId, interrupt.requestDigest, {
+          decision: command.action === "approve" ? "allow" : "deny",
+        })
+      ) {
+        throw new Error("Agent permission request is no longer active")
+      }
+      return
+    }
+    throw new Error(`Unsupported agent control: ${command.action}`)
+  }
+
+  const workflow: RunControlHandler = async (command) => {
+    if (command.action === "open_details") return
+    const run = await getExecutionRun(command.runId)
+    if (!run) throw new Error("Execution run not found")
+    if (command.action === "stop") {
+      const { cancelWorkflowRun } = await import("@/lib/workflow/runtime/cancel-run")
+      await cancelWorkflowRun(run.sourceId, "im_control")
+      return
+    }
+    throw new Error(`Unsupported workflow control: ${command.action}`)
+  }
+
+  const goal: RunControlHandler = async (command) => {
+    if (command.action === "open_details") return
+    const run = await getExecutionRun(command.runId)
+    if (!run) throw new Error("Execution run not found")
+    const { getGoalRuntime } = await import("@/lib/goal/runtime")
+    const runtime = getGoalRuntime()
+    const result =
+      command.action === "pause"
+        ? await runtime.pauseGoal(run.sourceId)
+        : command.action === "resume"
+          ? await runtime.resumeGoal(run.sourceId)
+          : command.action === "stop"
+            ? await runtime.stopGoal(run.sourceId)
+            : null
+    if (!result) throw new Error(`Unsupported goal control: ${command.action}`)
+  }
+
+  const plan: RunControlHandler = async (command) => {
+    if (command.action === "open_details") return
+    const run = await getExecutionRun(command.runId)
+    if (!run) throw new Error("Execution run not found")
+    const { getPlanRuntime } = await import("@/lib/agent/plan/runtime")
+    const runtime = getPlanRuntime()
+    const result =
+      command.action === "pause"
+        ? await runtime.pausePlan(run.sourceId)
+        : command.action === "resume"
+          ? await runtime.resumePlan(run.sourceId)
+          : command.action === "stop"
+            ? await runtime.cancelPlan(run.sourceId)
+            : null
+    if (!result) throw new Error(`Unsupported plan control: ${command.action}`)
+  }
+
+  const unregisterAgent = registerRunControlHandler("agent-turn", agent)
+  const unregisterWorkflows = (["workflow", "team", "scheduled"] as const).map((kind) =>
+    registerRunControlHandler(kind, workflow)
+  )
+  const unregisterGoal = registerRunControlHandler("goal", goal)
+  const unregisterPlan = registerRunControlHandler("plan", plan)
+  return {
+    agent,
+    workflow,
+    goal,
+    plan,
+    dispose() {
+      unregisterAgent()
+      for (const unregister of unregisterWorkflows) unregister()
+      unregisterGoal()
+      unregisterPlan()
+    },
+  }
+}

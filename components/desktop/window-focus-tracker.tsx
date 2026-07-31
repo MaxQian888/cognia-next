@@ -1,6 +1,6 @@
 "use client"
 
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 import { isTauri } from "@/lib/tauri"
 import { useEffect } from "react"
 

@@ -39,6 +39,12 @@ export interface LoadOrderPluginInput {
 export interface LoadOrderResult {
   /** Plugin ids in dependency-respecting enable order (deps before dependents). */
   order: string[]
+  /**
+   * The same survivors grouped into dependency layers: every plugin in
+   * `layers[n]` has all its required deps in `layers[0..n-1]`, so a layer's
+   * members can be enabled CONCURRENTLY. `layers.flat()` equals `order`.
+   */
+  layers: string[][]
   /** Each dependency cycle as the list of ids forming it (reported once). */
   cycles: string[][]
   /** pluginId → reasons its required deps can't be satisfied (excluded from `order`). */
@@ -189,17 +195,25 @@ export function resolveLoadOrder(plugins: readonly LoadOrderPluginInput[]): Load
     }
   }
 
-  // Seed the queue in input order so independent plugins stay stable.
-  const queue = survivors.filter((id) => (indegree.get(id) ?? 0) === 0)
+  // Seed the first frontier in input order so independent plugins stay stable,
+  // then drain frontier-by-frontier. Processing a whole frontier before its
+  // dependents yields the same flattened sequence as a FIFO Kahn drain while
+  // also exposing the dependency layers for concurrent enable.
   const order: string[] = []
-  while (queue.length > 0) {
-    const id = queue.shift()!
-    order.push(id)
-    for (const dependent of dependents.get(id) ?? []) {
-      const next = (indegree.get(dependent) ?? 0) - 1
-      indegree.set(dependent, next)
-      if (next === 0) queue.push(dependent)
+  const layers: string[][] = []
+  let frontier = survivors.filter((id) => (indegree.get(id) ?? 0) === 0)
+  while (frontier.length > 0) {
+    layers.push([...frontier])
+    const nextFrontier: string[] = []
+    for (const id of frontier) {
+      order.push(id)
+      for (const dependent of dependents.get(id) ?? []) {
+        const next = (indegree.get(dependent) ?? 0) - 1
+        indegree.set(dependent, next)
+        if (next === 0) nextFrontier.push(dependent)
+      }
     }
+    frontier = nextFrontier
   }
 
   // Degraded: unmet optional deps for plugins that DID make it into the order.
@@ -216,5 +230,5 @@ export function resolveLoadOrder(plugins: readonly LoadOrderPluginInput[]): Load
     if (unmet.length > 0) degraded.set(id, unmet)
   }
 
-  return { order, cycles, blocked, degraded }
+  return { order, layers, cycles, blocked, degraded }
 }

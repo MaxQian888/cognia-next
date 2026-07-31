@@ -41,9 +41,12 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { useSettingsStore } from "@/stores"
-import type { CLIProxyAPIProviderSettings, ProviderModelDiscoveryEntry } from "@/types/provider"
-import { testConnection, getWebUIURL, getAPIURL } from "@/lib/ai/providers/cliproxyapi"
-import { discoverCLIProxyAPIModels } from "@/lib/ai/providers/model-discovery"
+import type {
+  CLIProxyAPIProviderSettings,
+  ProviderModelDiscoveryEntry,
+} from "@cognia/provider-types"
+import { testConnection, getWebUIURL, getAPIURL } from "@cognia/provider-core/providers/cliproxyapi"
+import { discoverCLIProxyAPIModels } from "@cognia/provider-core/providers/model-discovery"
 
 interface CLIProxyAPISettingsProps {
   className?: string

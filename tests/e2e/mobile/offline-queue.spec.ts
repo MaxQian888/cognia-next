@@ -8,7 +8,7 @@
  * - Drain the queue → banner hides.
  */
 
-import { expect, test } from "@playwright/test"
+import { expect, test } from "@/tests/e2e/fixtures/test"
 import { injectCapacitor } from "../helpers/inject-capacitor"
 import { resetCogniaDb, waitForTestGlobals } from "../helpers/db-reset"
 
@@ -32,7 +32,7 @@ test.describe("mobile — offline banner + outbound queue", () => {
     // Flip network offline.
     await page.evaluate(() => {
       ;(
-        window as {
+        window as unknown as {
           __cogniaCapMock: { setNetwork: (n: { connected: boolean }) => void }
         }
       ).__cogniaCapMock.setNetwork({ connected: false })
@@ -44,7 +44,7 @@ test.describe("mobile — offline banner + outbound queue", () => {
     // Flip back online.
     await page.evaluate(() => {
       ;(
-        window as {
+        window as unknown as {
           __cogniaCapMock: { setNetwork: (n: { connected: boolean }) => void }
         }
       ).__cogniaCapMock.setNetwork({ connected: true })
@@ -52,7 +52,7 @@ test.describe("mobile — offline banner + outbound queue", () => {
     await expect(page.getByTestId("offline-banner")).toHaveCount(0, { timeout: 20_000 })
   })
 
-  test("pending outbound row drives the banner into queued mode even when online", async ({
+  test("@critical pending outbound work drives the queued state while online", async ({
     page,
   }) => {
     await page.goto("/")
@@ -63,7 +63,11 @@ test.describe("mobile — offline banner + outbound queue", () => {
       const { getDb } = await import("@/lib/db/schema")
       await getDb().mobileOutboundQueue.put({
         id: "q_test_pending_1",
-        command: "rpc_generic",
+        accountId: "acct_e2e",
+        targetId: "mobile-companion",
+        // Must be a live MOBILE_OUTBOUND_COMMANDS member — "rpc_generic" was
+        // trimmed from the command surface in the 2026-05-17 audit.
+        command: "app_settings_update",
         payload: {},
         idempotencyKey: "test-idem",
         status: "pending",

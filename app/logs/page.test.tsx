@@ -79,7 +79,7 @@ describe("/logs page", () => {
     renderPage()
     expect(screen.getByTestId("logs-page-header")).toBeInTheDocument()
     expect(screen.getByText("Home")).toBeInTheDocument()
-    expect(screen.getByText("Logs")).toBeInTheDocument()
+    expect(screen.getAllByText("Logs")).toHaveLength(2)
   })
 
   it("renders the live-pill with filteredCount / totalCount", () => {

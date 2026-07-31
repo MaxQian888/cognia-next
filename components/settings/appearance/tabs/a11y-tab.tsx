@@ -8,9 +8,12 @@
 //     → consumed by `CustomThemeApplier` (high-contrast / colorblind layers)
 //     and by `auditTokens / autoFixViolations` (custom-theme tab + audit
 //     pipeline).
-//   - `settings.motion.{speed,reduce}` → consumed by `MotionApplier`. Legacy
-//     `settings.reduceMotion` toggle stays in typography-tab for backward
-//     compat; this tab provides the canonical new control.
+//   - `settings.motion.{speed,reduce}` → consumed by `MotionApplier`. This tab
+//     is now the single home for motion controls (they were removed from the
+//     Typography tab). The reduce-motion toggle writes BOTH the canonical
+//     `motion.reduce` and the legacy `settings.reduceMotion` boolean so the
+//     desktop View menu, mobile preferences, and backup stay in agreement, and
+//     it reads whichever source is authoritative (mirrors MotionApplier).
 
 import { useTranslations } from "next-intl"
 import { Label } from "@/components/ui/label"
@@ -22,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { responsiveSelectClass } from "@/lib/utils"
 import { useSettingsStore } from "@/stores/settings"
 import {
   DEFAULT_A11Y,
@@ -70,6 +74,9 @@ export function A11yTab() {
 
   const a11y = { ...DEFAULT_A11Y, ...(settings?.a11y ?? {}) }
   const motion = { ...DEFAULT_MOTION, ...(settings?.motion ?? {}) }
+  // Explicit `motion.reduce` wins; otherwise fall back to the legacy
+  // `reduceMotion` baseline so a toggle set from the desktop menu is reflected.
+  const reduceMotionChecked = settings?.motion?.reduce ?? Boolean(settings?.reduceMotion)
 
   return (
     <div className="space-y-6">
@@ -81,7 +88,7 @@ export function A11yTab() {
             void save({ a11y: { ...a11y, wcagTarget: value as WcagTarget } })
           }}
         >
-          <SelectTrigger className="w-full max-w-xs">
+          <SelectTrigger className={responsiveSelectClass}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -103,7 +110,7 @@ export function A11yTab() {
             void save({ a11y: { ...a11y, enforcement: value as WcagEnforcement } })
           }}
         >
-          <SelectTrigger className="w-full max-w-xs">
+          <SelectTrigger className={responsiveSelectClass}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -125,7 +132,7 @@ export function A11yTab() {
             void save({ a11y: { ...a11y, highContrast: value as HighContrastMode } })
           }}
         >
-          <SelectTrigger className="w-full max-w-xs">
+          <SelectTrigger className={responsiveSelectClass}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -147,7 +154,7 @@ export function A11yTab() {
             void save({ a11y: { ...a11y, colorblindMode: value as ColorblindMode } })
           }}
         >
-          <SelectTrigger className="w-full max-w-xs">
+          <SelectTrigger className={responsiveSelectClass}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -170,7 +177,7 @@ export function A11yTab() {
             void save({ motion: { ...motion, speed } })
           }}
         >
-          <SelectTrigger className="w-full max-w-xs">
+          <SelectTrigger className={responsiveSelectClass}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -189,9 +196,10 @@ export function A11yTab() {
           <p className="text-xs text-muted-foreground">{t("motion.reduceHint")}</p>
         </div>
         <Switch
-          checked={motion.reduce}
+          checked={reduceMotionChecked}
           onCheckedChange={(checked) => {
-            void save({ motion: { ...motion, reduce: checked } })
+            // Keep the legacy boolean in lock-step with the canonical one.
+            void save({ motion: { ...motion, reduce: checked }, reduceMotion: checked })
           }}
           aria-label={t("motion.reduceLabel")}
         />

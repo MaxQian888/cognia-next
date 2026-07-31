@@ -7,6 +7,7 @@ jest.mock("@/lib/ocr", () => ({ extract: (...a: unknown[]) => extractMock(...a) 
 jest.mock("@/lib/ocr/deps", () => ({ buildOcrDeps: () => ({ marker: "deps" }) }))
 
 import { ocrScreen, ocrScreenWith, type OcrScreenDeps } from "./ocr-screen"
+import { OcrError } from "@/lib/ocr/errors"
 import type { OcrResult } from "@/types/ocr"
 
 function ocrResult(text: string): OcrResult {
@@ -69,6 +70,37 @@ describe("ocrScreenWith", () => {
       { region: { x: 0, y: 0, width: 10, height: 10 } },
       { surface: "plugin", pluginId: "cognia-ocr" }
     )
+  })
+
+  it("wraps capture failures in a descriptive OcrError", async () => {
+    const screenshot = jest.fn(async () => {
+      throw new Error("UNSUPPORTED_PLATFORM")
+    })
+    await expect(ocrScreenWith(deps({ screenshot }))).rejects.toMatchObject({
+      name: "OcrError",
+      code: "invalid_input",
+      providerId: "ocr-screen",
+      message: expect.stringContaining("screen OCR failed at capture: UNSUPPORTED_PLATFORM"),
+    })
+  })
+
+  it("wraps extraction failures in a descriptive OcrError", async () => {
+    const extract = jest.fn(async () => {
+      throw new Error("provider exploded")
+    })
+    await expect(ocrScreenWith(deps({ extract }))).rejects.toMatchObject({
+      name: "OcrError",
+      code: "provider_failed",
+      message: expect.stringContaining("screen OCR failed at extract: provider exploded"),
+    })
+  })
+
+  it("passes typed OcrErrors through unchanged", async () => {
+    const typed = new OcrError("missing_credentials", "mistral-ocr", "no key configured")
+    const extract = jest.fn(async () => {
+      throw typed
+    })
+    await expect(ocrScreenWith(deps({ extract }))).rejects.toBe(typed)
   })
 })
 

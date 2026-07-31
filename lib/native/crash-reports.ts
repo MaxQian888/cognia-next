@@ -26,6 +26,19 @@ export interface PendingCrash {
   reportCount: number
 }
 
+/** Aggregated crash + log health for the diagnostics surfaces. */
+export interface CrashLoggingDiagnostics {
+  crashReportCount: number
+  latestCrashAt?: string
+  latestCrashKind?: string
+  logDirBytes: number
+  retentionMaxAgeDays: number
+  retentionMaxReports: number
+  rotatedLogKeep: number
+  lastPrunePruned?: number
+  lastPruneRemaining?: number
+}
+
 export async function listCrashReports(): Promise<CrashReportSummary[]> {
   if (!isTauri()) return []
   try {
@@ -68,6 +81,15 @@ export async function takePendingCrash(): Promise<PendingCrash | null> {
   if (!isTauri()) return null
   try {
     return await invoke<PendingCrash | null>("crash_take_pending")
+  } catch {
+    return null
+  }
+}
+
+export async function getCrashLoggingDiagnostics(): Promise<CrashLoggingDiagnostics | null> {
+  if (!isTauri()) return null
+  try {
+    return await invoke<CrashLoggingDiagnostics>("crash_logging_diagnostics")
   } catch {
     return null
   }

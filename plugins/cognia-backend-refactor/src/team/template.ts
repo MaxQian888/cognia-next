@@ -14,7 +14,7 @@
  * contributed by this same plugin (see `validateTemplateRequires`).
  */
 
-import { defineAgentTeamTemplate } from "@/lib/plugin/sdk/define-agent-team-template"
+import { defineAgentTeamTemplate } from "@cognia/plugin-sdk"
 import type { PluginAgentTeamTemplateDef } from "@/types/plugin/plugin-agent-team-template"
 import { REFACTOR_PACK_ID } from "../characters/pack"
 import { packSkillId, subagentRuntimeId } from "../ids"
@@ -25,7 +25,7 @@ export const REVIEW_BOARD_TEMPLATE = defineAgentTeamTemplate({
   description:
     "Architect, analyst, and reviewer deliberate on the refactor plan and review the result. Use for the reasoning phases; edits run via the agent.turn workflow node.",
   category: "review",
-  icon: "users",
+  icon: "Users",
   teammates: [
     {
       name: "Architect",

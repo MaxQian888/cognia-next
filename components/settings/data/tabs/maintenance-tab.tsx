@@ -33,12 +33,17 @@ import {
 import { clearAll, clearTables, type ClearableTable } from "@/lib/data/clear"
 import { useSettingsStore } from "@/stores/settings"
 import { toast } from "sonner"
-import { createLogger } from "@/lib/logging"
+import { createLogger } from "@cognia/logging"
 
 const log = createLogger("settings.data.maintenance")
 import { RotateCcwIcon, ShieldAlertIcon, ShieldIcon, Trash2Icon } from "lucide-react"
 import { StorageCleanupDialog } from "@/components/data/storage/storage-cleanup-dialog"
 import { useStorageBreakdown } from "@/hooks/storage"
+import {
+  getBehaviorTelemetrySettings,
+  setBehaviorTelemetryEnabled,
+} from "@/lib/telemetry/events/settings"
+import { trackEvent } from "@/lib/telemetry/events/track-event"
 
 const CLEAR_TARGETS: { value: ClearableTable | "all"; label: string }[] = [
   { value: "sessions", label: "Conversations + messages" },
@@ -55,9 +60,53 @@ export function MaintenanceTab() {
   return (
     <div className="space-y-6">
       <CleanupBlock />
+      <RetentionBlock />
       <ClearBlock />
       <PrivacyBlock />
     </div>
+  )
+}
+
+function RetentionBlock() {
+  const t = useTranslations("settings.data.retention")
+  const settings = useSettingsStore((s) => s.settings)
+  const save = useSettingsStore((s) => s.save)
+  const days = settings?.storageRetention?.traceRetentionDays ?? 30
+  const [draft, setDraft] = useState<string>(String(days))
+
+  const commit = (raw: string) => {
+    // A number input only ever yields a numeric string or empty; `|| 0` maps
+    // an empty / unparseable entry to 0 (keep forever).
+    const next = Math.max(0, Math.floor(Number(raw) || 0))
+    setDraft(String(next))
+    void save({ storageRetention: { traceRetentionDays: next } })
+    log.info("trace_retention_changed", { days: next })
+  }
+
+  return (
+    <Card className="space-y-3 p-4">
+      <div className="flex items-center gap-2">
+        <RotateCcwIcon className="size-4" />
+        <Label className="text-sm" htmlFor="trace-retention-days">
+          {t("title")}
+        </Label>
+      </div>
+      <p className="text-xs text-muted-foreground">{t("desc")}</p>
+      <div className="flex items-center gap-2">
+        <Input
+          id="trace-retention-days"
+          type="number"
+          min={0}
+          inputMode="numeric"
+          className="w-24"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={(e) => commit(e.target.value)}
+        />
+        <span className="text-xs text-muted-foreground">{t("unit")}</span>
+      </div>
+      <p className="text-[11px] text-muted-foreground">{t("zeroHint")}</p>
+    </Card>
   )
 }
 
@@ -162,6 +211,7 @@ function ClearBlock() {
               <Input
                 value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}
+                // i18n-exempt: type-to-confirm token must match the required literal input
                 placeholder="DELETE"
                 autoFocus
               />
@@ -188,9 +238,11 @@ function ClearBlock() {
 
 function PrivacyBlock() {
   const t = useTranslations("settings.data")
-  const settings = useSettingsStore((s) => s.settings)
   const save = useSettingsStore((s) => s.save)
-  const telemetryEnabled = Boolean(settings?.telemetryEnabled)
+  const canonicalTelemetryEnabled = useSettingsStore(
+    (s) => s.settings?.behaviorTelemetry?.enabled ?? s.settings?.telemetryEnabled
+  )
+  const telemetryEnabled = canonicalTelemetryEnabled ?? getBehaviorTelemetrySettings().enabled
 
   return (
     <Card className="space-y-3 p-4">
@@ -207,7 +259,10 @@ function PrivacyBlock() {
           checked={telemetryEnabled}
           onCheckedChange={(v) => {
             log.info("telemetry_toggled", { enabled: v })
-            void save({ telemetryEnabled: v })
+            if (!v) void trackEvent("telemetry.preference.changed", { enabled: false })
+            const behaviorTelemetry = setBehaviorTelemetryEnabled(v)
+            if (v) void trackEvent("telemetry.preference.changed", { enabled: true })
+            void save({ telemetryEnabled: v, behaviorTelemetry })
           }}
         />
       </div>

@@ -31,6 +31,12 @@ import {
   getMicrovmExec,
   type MicrovmExecPayload,
 } from "@/lib/sandbox/microvm-bridge"
+import {
+  clampPolicyRequest,
+  getActiveSandboxPolicy,
+  isPathUnderRoot,
+} from "@/lib/sandbox/policy-bridge"
+import { applyInsert, applyStrReplace, sliceViewRange } from "./edit-ops"
 
 const PLUGIN_ID = "cognia-sandboxed-tools"
 
@@ -55,9 +61,9 @@ const SANDBOX_WRITE_DESCRIPTION =
   "are scoped to target_files only. Use this instead of the unsandboxed Write tool."
 
 const SANDBOX_TEXT_EDITOR_DESCRIPTION =
-  "Anthropic-style text editor (view / create / str_replace / insert / undo_edit) " +
-  "executed inside the sandbox. Used when the character has Computer Use disabled but " +
-  "still needs file edits — replaces the native text_editor tool."
+  "Anthropic-style text editor (view / create / str_replace / insert) executed inside " +
+  "the sandbox. The read and write both run under the OS sandbox, confined to the " +
+  "target path. Replaces the native text_editor tool when sandbox mode is enabled."
 
 const SANDBOX_BASH_SCHEMA = {
   type: "object",
@@ -96,24 +102,64 @@ const SANDBOX_BASH_SCHEMA = {
 
 const SANDBOX_EDIT_SCHEMA = {
   type: "object",
-  required: ["targetFiles"],
+  required: ["path", "oldString", "newString"],
   properties: {
-    targetFiles: {
-      type: "array",
-      items: { type: "string" },
-      description: "Exact file paths allowed to be written.",
+    path: { type: "string", description: "Absolute path of the file to edit." },
+    oldString: {
+      type: "string",
+      description: "Exact text to replace. Must be unique in the file unless replaceAll is set.",
     },
-    readable: { type: "array", items: { type: "string" } },
-    edit: {
-      type: "object",
-      description: "Editor payload (the actual diff/patch the renderer is expected to apply).",
+    newString: { type: "string", description: "Replacement text." },
+    replaceAll: {
+      type: "boolean",
+      description: "Replace every occurrence instead of requiring a unique match.",
     },
+    readable: { type: "array", items: { type: "string" }, description: "Extra read-only paths." },
     timeoutSeconds: { type: "integer", minimum: 0 },
   },
 } as const
 
-const SANDBOX_WRITE_SCHEMA = SANDBOX_EDIT_SCHEMA
-const SANDBOX_TEXT_EDITOR_SCHEMA = SANDBOX_EDIT_SCHEMA
+const SANDBOX_WRITE_SCHEMA = {
+  type: "object",
+  required: ["path", "content"],
+  properties: {
+    path: { type: "string", description: "Absolute path of the file to create or overwrite." },
+    content: { type: "string", description: "Full file content to write." },
+    readable: { type: "array", items: { type: "string" }, description: "Extra read-only paths." },
+    timeoutSeconds: { type: "integer", minimum: 0 },
+  },
+} as const
+
+const SANDBOX_TEXT_EDITOR_SCHEMA = {
+  type: "object",
+  required: ["command", "path"],
+  properties: {
+    command: {
+      type: "string",
+      enum: ["view", "create", "str_replace", "insert"],
+      description: "Editor sub-command.",
+    },
+    path: { type: "string", description: "Absolute path of the target file." },
+    fileText: { type: "string", description: "For create: the full file content." },
+    oldStr: { type: "string", description: "For str_replace: the unique text to replace." },
+    newStr: { type: "string", description: "For str_replace: the replacement text." },
+    insertLine: {
+      type: "integer",
+      minimum: 0,
+      description: "For insert: 1-based line to insert AFTER (0 = before the first line).",
+    },
+    insertText: { type: "string", description: "For insert: the text to insert." },
+    viewRange: {
+      type: "array",
+      items: { type: "integer" },
+      minItems: 2,
+      maxItems: 2,
+      description: "For view: [start, end] 1-based inclusive line range (end -1 = end of file).",
+    },
+    readable: { type: "array", items: { type: "string" }, description: "Extra read-only paths." },
+    timeoutSeconds: { type: "integer", minimum: 0 },
+  },
+} as const
 
 interface BashCallInputs {
   command: string
@@ -128,13 +174,40 @@ interface BashCallInputs {
   env?: Record<string, string>
 }
 
-interface FileToolInputs {
-  targetFiles: string[]
+/** Tool names whose `policy_for` maps to a single-file write scope. */
+type FileToolName =
+  typeof TOOL_SANDBOX_EDIT | typeof TOOL_SANDBOX_WRITE | typeof TOOL_SANDBOX_TEXT_EDITOR
+
+interface WriteCallInputs {
+  path: string
+  content: string
   readable?: string[]
   timeoutSeconds?: number
   env?: Record<string, string>
-  command?: string
-  cwd?: string
+}
+
+interface EditCallInputs {
+  path: string
+  oldString: string
+  newString: string
+  replaceAll?: boolean
+  readable?: string[]
+  timeoutSeconds?: number
+  env?: Record<string, string>
+}
+
+interface TextEditorCallInputs {
+  command: "view" | "create" | "str_replace" | "insert"
+  path: string
+  fileText?: string
+  oldStr?: string
+  newStr?: string
+  insertLine?: number
+  insertText?: string
+  viewRange?: [number, number]
+  readable?: string[]
+  timeoutSeconds?: number
+  env?: Record<string, string>
 }
 
 interface SandboxResultShape {
@@ -170,15 +243,63 @@ async function dispatchSandbox(
     }
     return impl(payload)
   }
+  // OS sandbox path: the Rust `SandboxCommand.stdin` is `Option<Vec<u8>>`,
+  // which serde deserializes from a JSON byte array — not a string. Convert
+  // the UTF-8 stdin string to bytes here (the e2b microvm path above keeps
+  // the string form, since its adapter pipes it through bash `<<<`).
+  const osPayload = {
+    ...payload,
+    command: {
+      ...payload.command,
+      stdin:
+        payload.command.stdin == null
+          ? null
+          : Array.from(new TextEncoder().encode(payload.command.stdin)),
+    },
+  }
   return transport.call<SandboxResultShape>(
     "sandbox_exec",
-    payload as unknown as Record<string, unknown>
+    osPayload as unknown as Record<string, unknown>
   )
 }
 
 async function execBash(args: BashCallInputs, ctx: PluginToolContext): Promise<SandboxResultShape> {
   const cwd = args.cwd
-  const writable = args.writable && args.writable.length > 0 ? args.writable : [cwd]
+  assertPathUnderCeiling(cwd, ctx, "working directory")
+  const policy = getActiveSandboxPolicy(ctx.sessionId)
+  const explicitWritable = args.writable && args.writable.length > 0 ? args.writable : null
+  const narrowedExplicitWritable = explicitWritable
+    ? clampPolicyRequest(
+        {
+          writable: explicitWritable,
+          readable: [],
+          targetFiles: [],
+          maxCpuSeconds: 0,
+          maxMemoryMb: 0,
+          network: "off",
+          networkHosts: [],
+        },
+        policy
+      ).writable
+    : []
+  const writable = explicitWritable
+    ? Array.from(new Set([cwd, ...narrowedExplicitWritable]))
+    : [cwd]
+  // Clamp the model-supplied resource caps + network down to the per-session
+  // ceiling (character override beats the app default). The model cannot widen
+  // past the configured policy because this is the only path to `sandbox_exec`.
+  const request = clampPolicyRequest(
+    {
+      writable,
+      readable: args.readable ?? [],
+      targetFiles: [],
+      maxCpuSeconds: args.maxCpuSeconds ?? 0,
+      maxMemoryMb: args.maxMemoryMb ?? 0,
+      network: args.network ?? "off",
+      networkHosts: args.networkHosts ?? [],
+    },
+    policy
+  )
   return dispatchSandbox(
     {
       tool: TOOL_SANDBOX_BASH,
@@ -189,45 +310,64 @@ async function execBash(args: BashCallInputs, ctx: PluginToolContext): Promise<S
         stdin: null,
         timeout: args.timeoutSeconds ?? 300,
       },
-      request: {
-        writable,
-        readable: args.readable ?? [],
-        targetFiles: [],
-        maxCpuSeconds: args.maxCpuSeconds ?? 0,
-        maxMemoryMb: args.maxMemoryMb ?? 0,
-        network: args.network ?? "off",
-        networkHosts: args.networkHosts ?? [],
-      },
+      request,
     },
     ctx
   )
 }
 
-async function execFileTool(
-  tool: typeof TOOL_SANDBOX_EDIT | typeof TOOL_SANDBOX_WRITE | typeof TOOL_SANDBOX_TEXT_EDITOR,
-  args: FileToolInputs,
-  ctx: PluginToolContext
-): Promise<SandboxResultShape> {
-  // Edit / Write / text_editor are renderer-side operations that the
-  // Rust sandbox supervises by exec'ing a small helper inside the
-  // sandboxed view of the FS. V1 ships the shape contract; the
-  // renderer-side caller is responsible for emitting the actual edit
-  // through the tool (V1 just verifies the policy gate before letting
-  // the renderer execute its own apply-edit logic).
-  return dispatchSandbox(
+/**
+ * Enforce the per-session writable-root ceiling on a single-file write target.
+ * Bash narrows its writable set via `clampPolicyRequest`; the file tools take a
+ * single `path` directly, so they guard here. No ceiling configured → no-op
+ * (the always-on Rust floor still rejects system / app-data targets).
+ */
+function assertPathUnderCeiling(path: string, ctx: PluginToolContext, label = "path"): void {
+  const roots = getActiveSandboxPolicy(ctx.sessionId)?.writableRoots ?? []
+  if (roots.length > 0 && !roots.some((r) => isPathUnderRoot(path, r))) {
+    throw new Error(
+      `sandbox: ${label} '${path}' is outside the configured writable roots — widen ` +
+        "Settings → Sandbox writable roots or choose a path inside them."
+    )
+  }
+}
+
+function parentDir(p: string): string {
+  const sep = p.includes("\\") ? "\\" : "/"
+  const idx = p.lastIndexOf(sep)
+  return idx > 0 ? p.slice(0, idx) : "/"
+}
+
+const DEFAULT_FILE_TOOL_TIMEOUT_SECONDS = 60
+
+/**
+ * Read a file's content from INSIDE the sandbox. The file-tool policy
+ * (`edit` / `write` / `text_editor`) grants read+write to exactly `path`,
+ * so a read can never escape to an undeclared file. Throws when the
+ * sandbox `cat` exits non-zero (missing file, permission denied, etc.).
+ */
+async function sandboxReadFile(
+  tool: FileToolName,
+  path: string,
+  readable: string[],
+  timeoutSeconds: number,
+  ctx: PluginToolContext,
+  env?: Record<string, string>
+): Promise<string> {
+  const res = await dispatchSandbox(
     {
       tool,
       command: {
-        argv: ["true"],
-        cwd: args.cwd ?? (args.targetFiles[0] ? parentDir(args.targetFiles[0]) : "/"),
-        env: args.env ?? {},
+        argv: ["cat", "--", path],
+        cwd: parentDir(path),
+        env: env ?? {},
         stdin: null,
-        timeout: args.timeoutSeconds ?? 60,
+        timeout: timeoutSeconds,
       },
       request: {
         writable: [],
-        readable: args.readable ?? [],
-        targetFiles: args.targetFiles,
+        readable,
+        targetFiles: [path],
         maxCpuSeconds: 0,
         maxMemoryMb: 0,
         network: "off",
@@ -236,12 +376,132 @@ async function execFileTool(
     },
     ctx
   )
+  if (res.exit_code !== 0) {
+    throw new Error(res.stderr.trim() || `failed to read ${path} (exit ${res.exit_code})`)
+  }
+  return res.stdout
 }
 
-function parentDir(p: string): string {
-  const sep = p.includes("\\") ? "\\" : "/"
-  const idx = p.lastIndexOf(sep)
-  return idx > 0 ? p.slice(0, idx) : "/"
+/**
+ * Write `content` to `path` from INSIDE the sandbox. `cat > "$1"` pipes the
+ * stdin payload to the single target file; the file-tool policy makes only
+ * `path` writable, so the write is OS-confined and recorded in the sandbox
+ * audit ring. Returns the raw result so callers can surface duration / etc.
+ */
+async function sandboxWriteFile(
+  tool: FileToolName,
+  path: string,
+  content: string,
+  readable: string[],
+  timeoutSeconds: number,
+  ctx: PluginToolContext,
+  env?: Record<string, string>
+): Promise<SandboxResultShape> {
+  const res = await dispatchSandbox(
+    {
+      tool,
+      command: {
+        // `$1` is the target path; `cat > "$1"` writes stdin verbatim. The
+        // path is a separate argv element so it is never shell-interpreted.
+        argv: ["bash", "-lc", 'cat > "$1"', "sandbox_write", path],
+        cwd: parentDir(path),
+        env: env ?? {},
+        stdin: content,
+        timeout: timeoutSeconds,
+      },
+      request: {
+        writable: [],
+        readable,
+        targetFiles: [path],
+        maxCpuSeconds: 0,
+        maxMemoryMb: 0,
+        network: "off",
+        networkHosts: [],
+      },
+    },
+    ctx
+  )
+  if (res.exit_code !== 0) {
+    throw new Error(res.stderr.trim() || `failed to write ${path} (exit ${res.exit_code})`)
+  }
+  return res
+}
+
+async function execWrite(
+  args: WriteCallInputs,
+  ctx: PluginToolContext
+): Promise<SandboxResultShape> {
+  assertPathUnderCeiling(args.path, ctx)
+  const timeout = args.timeoutSeconds ?? DEFAULT_FILE_TOOL_TIMEOUT_SECONDS
+  return sandboxWriteFile(
+    TOOL_SANDBOX_WRITE,
+    args.path,
+    args.content,
+    args.readable ?? [],
+    timeout,
+    ctx,
+    args.env
+  )
+}
+
+async function execEdit(args: EditCallInputs, ctx: PluginToolContext): Promise<SandboxResultShape> {
+  assertPathUnderCeiling(args.path, ctx)
+  const timeout = args.timeoutSeconds ?? DEFAULT_FILE_TOOL_TIMEOUT_SECONDS
+  const readable = args.readable ?? []
+  const current = await sandboxReadFile(
+    TOOL_SANDBOX_EDIT,
+    args.path,
+    readable,
+    timeout,
+    ctx,
+    args.env
+  )
+  const next = applyStrReplace(current, args.oldString, args.newString, args.replaceAll ?? false)
+  return sandboxWriteFile(TOOL_SANDBOX_EDIT, args.path, next, readable, timeout, ctx, args.env)
+}
+
+async function execTextEditor(
+  args: TextEditorCallInputs,
+  ctx: PluginToolContext
+): Promise<SandboxResultShape> {
+  // Every sub-command except read-only `view` writes the target file.
+  if (args.command !== "view") assertPathUnderCeiling(args.path, ctx)
+  const timeout = args.timeoutSeconds ?? DEFAULT_FILE_TOOL_TIMEOUT_SECONDS
+  const readable = args.readable ?? []
+  const tool = TOOL_SANDBOX_TEXT_EDITOR
+  switch (args.command) {
+    case "view": {
+      const content = await sandboxReadFile(tool, args.path, readable, timeout, ctx, args.env)
+      const text = args.viewRange
+        ? sliceViewRange(content, args.viewRange[0], args.viewRange[1])
+        : content
+      return { exit_code: 0, stdout: text, stderr: "", duration: 0, timed_out: false }
+    }
+    case "create": {
+      return sandboxWriteFile(
+        tool,
+        args.path,
+        args.fileText ?? "",
+        readable,
+        timeout,
+        ctx,
+        args.env
+      )
+    }
+    case "str_replace": {
+      const current = await sandboxReadFile(tool, args.path, readable, timeout, ctx, args.env)
+      const next = applyStrReplace(current, args.oldStr ?? "", args.newStr ?? "")
+      return sandboxWriteFile(tool, args.path, next, readable, timeout, ctx, args.env)
+    }
+    case "insert": {
+      const current = await sandboxReadFile(tool, args.path, readable, timeout, ctx, args.env)
+      const next = applyInsert(current, args.insertLine ?? 0, args.insertText ?? "")
+      return sandboxWriteFile(tool, args.path, next, readable, timeout, ctx, args.env)
+    }
+    default: {
+      throw new Error(`unknown text_editor command: ${String(args.command)}`)
+    }
+  }
 }
 
 function buildPluginTools(): PluginTool[] {
@@ -268,8 +528,7 @@ function buildPluginTools(): PluginTool[] {
         requiresApproval: true,
         parametersSchema: SANDBOX_EDIT_SCHEMA as unknown as Record<string, unknown>,
       },
-      execute: async (args, ctx) =>
-        execFileTool(TOOL_SANDBOX_EDIT, args as unknown as FileToolInputs, ctx),
+      execute: async (args, ctx) => execEdit(args as unknown as EditCallInputs, ctx),
     },
     {
       name: TOOL_SANDBOX_WRITE,
@@ -281,8 +540,7 @@ function buildPluginTools(): PluginTool[] {
         requiresApproval: true,
         parametersSchema: SANDBOX_WRITE_SCHEMA as unknown as Record<string, unknown>,
       },
-      execute: async (args, ctx) =>
-        execFileTool(TOOL_SANDBOX_WRITE, args as unknown as FileToolInputs, ctx),
+      execute: async (args, ctx) => execWrite(args as unknown as WriteCallInputs, ctx),
     },
     {
       name: TOOL_SANDBOX_TEXT_EDITOR,
@@ -294,8 +552,7 @@ function buildPluginTools(): PluginTool[] {
         requiresApproval: true,
         parametersSchema: SANDBOX_TEXT_EDITOR_SCHEMA as unknown as Record<string, unknown>,
       },
-      execute: async (args, ctx) =>
-        execFileTool(TOOL_SANDBOX_TEXT_EDITOR, args as unknown as FileToolInputs, ctx),
+      execute: async (args, ctx) => execTextEditor(args as unknown as TextEditorCallInputs, ctx),
     },
   ]
 }

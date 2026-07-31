@@ -119,3 +119,51 @@ describe("snippets bridge", () => {
     }
   })
 })
+
+// ── W5.1: enable-time manifest registration ──────────────────────────────────
+jest.mock("@/lib/file/file-operations", () => ({
+  readTextFile: jest.fn(),
+}))
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const fileOps = require("@/lib/file/file-operations") as { readTextFile: jest.Mock }
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { registerSnippetsForPlugin } = require("./snippets-bridge") as {
+  registerSnippetsForPlugin: (
+    pluginId: string,
+    entries: Array<{ language: string; path: string }>,
+    baseDir: string
+  ) => Promise<{ registered: number; errors: string[] }>
+}
+
+describe("registerSnippetsForPlugin (W5.1)", () => {
+  beforeEach(() => {
+    __resetSnippetsForTesting()
+    fileOps.readTextFile.mockReset()
+  })
+
+  it("registers every snippet from the contributed file", async () => {
+    fileOps.readTextFile.mockResolvedValue(
+      JSON.stringify({
+        log: { prefix: "log", body: "console.log($1)" },
+        warn: { prefix: ["warn"], body: ["console.warn($1)"] },
+      })
+    )
+    const result = await registerSnippetsForPlugin(
+      "p1",
+      [{ language: "typescript", path: "snippets/ts.json" }],
+      "/plugins/p1"
+    )
+    expect(result).toEqual({ registered: 2, errors: [] })
+    expect(listSnippetsForLanguage("typescript")).toHaveLength(2)
+  })
+
+  it("rejects traversal paths", async () => {
+    const result = await registerSnippetsForPlugin(
+      "p1",
+      [{ language: "ts", path: "/etc/passwd" }],
+      "/plugins/p1"
+    )
+    expect(result.registered).toBe(0)
+    expect(result.errors[0]).toMatch(/unsafe snippet path/)
+  })
+})

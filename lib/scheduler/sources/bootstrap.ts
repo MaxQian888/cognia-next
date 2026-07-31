@@ -7,10 +7,9 @@
  */
 
 import { getSchedulerSourceRegistry } from "./registry"
-import { createAppSource } from "./app-source"
+import { createAppSource, createPluginTaskSource } from "./app-source"
 import { createWorkflowSource } from "./workflow-source"
 import { createBackupSource } from "./backup-source"
-import { createPluginSource } from "./plugin-source"
 import { createSystemSource } from "./system-source"
 import { createConnectorSource } from "./connector-source"
 
@@ -20,9 +19,9 @@ export function bootstrapSchedulerSources(): void {
   if (bootstrapped) return
   const registry = getSchedulerSourceRegistry()
   registry.register(createAppSource())
+  registry.register(createPluginTaskSource())
   registry.register(createWorkflowSource())
   registry.register(createBackupSource())
-  registry.register(createPluginSource())
   registry.register(createSystemSource())
   registry.register(createConnectorSource())
   bootstrapped = true

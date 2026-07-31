@@ -39,6 +39,7 @@ import { runSynthesizer, type SynthDraft } from "./agents/synthesizer"
 import { runEvaluator } from "./agents/evaluator"
 import type { LlmClient } from "./llm"
 import { DEFAULT_AGENT_TIMEOUT_MS, withTimeout, withTimeoutOrFallback } from "./with-timeout"
+import { runWithConcurrency } from "@/lib/plugin/core/concurrency"
 
 /**
  * Thrown when the load-bearing Synthesizer stage times out or fails to produce
@@ -57,6 +58,10 @@ export class SynthesizerError extends Error {
 }
 
 const KNOWLEDGE_BATCH_SIZE = 100
+// Knowledge batches are independent (results accumulate order-free), so run a
+// few concurrently instead of strictly serially — bounded to avoid a
+// thundering-herd of provider calls.
+const KNOWLEDGE_CONCURRENCY = 4
 
 export interface OrchestratorInput {
   llm: LlmClient
@@ -98,27 +103,41 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     partialFailures[label] = message
   }
 
-  // ───── Stage 1: KnowledgeAgent (chunk-level, batched) ─────
+  // ───── Stage 1: KnowledgeAgent (chunk-level, batched, bounded-concurrent) ─────
   const allEntities: ProfileEntity[] = []
   const chunkEntityTags: Record<string, string[]> = {}
+  const knowledgeBatches: { batch: TwinChunk[]; label: string }[] = []
   for (let i = 0; i < chunks.length; i += KNOWLEDGE_BATCH_SIZE) {
-    const batch = chunks.slice(i, i + KNOWLEDGE_BATCH_SIZE)
-    const batchLabel = `knowledge-agent#${Math.floor(i / KNOWLEDGE_BATCH_SIZE)}`
-    const { value, error } = await withTimeoutOrFallback(
-      () => runKnowledgeAgent(llm, { chunks: batch }),
-      batchLabel,
+    knowledgeBatches.push({
+      batch: chunks.slice(i, i + KNOWLEDGE_BATCH_SIZE),
+      label: `knowledge-agent#${Math.floor(i / KNOWLEDGE_BATCH_SIZE)}`,
+    })
+  }
+  // Collect per-batch results by index so the merged order stays deterministic
+  // regardless of completion order.
+  const batchResults: { entities: ProfileEntity[]; perChunk: Record<string, string[]> }[] =
+    new Array(knowledgeBatches.length)
+  let processedChunks = 0
+  await runWithConcurrency(knowledgeBatches, KNOWLEDGE_CONCURRENCY, async (b, idx) => {
+    const { value } = await withTimeoutOrFallback(
+      () => runKnowledgeAgent(llm, { chunks: b.batch }),
+      b.label,
       {
         timeoutMs: agentTimeoutMs,
         fallback: { entities: [] as ProfileEntity[], perChunk: {} as Record<string, string[]> },
-        onError: recordFailure,
+        onError: recordFailure, // captured into partialFailures
       }
     )
-    allEntities.push(...value.entities)
-    Object.assign(chunkEntityTags, value.perChunk)
+    batchResults[idx] = value
+    processedChunks += b.batch.length
     if (onProgress) {
-      await onProgress("knowledge-agent", (i + batch.length) / chunks.length / 5)
+      await onProgress("knowledge-agent", processedChunks / chunks.length / 5)
     }
-    void error // already captured into partialFailures via onError
+  })
+  for (const r of batchResults) {
+    if (!r) continue
+    allEntities.push(...r.entities)
+    Object.assign(chunkEntityTags, r.perChunk)
   }
   await onProgress?.("knowledge-agent", 0.2)
 
@@ -162,28 +181,23 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   }
   await onProgress?.("entity-merge-agent", 0.3)
 
-  // ───── Stage 2: StyleAgent ─────
-  const styleResult = await withTimeoutOrFallback(
-    () => runStyleAgent(llm, { chunks }),
-    "style-agent",
-    {
+  // ───── Stages 2 + 3: StyleAgent ‖ PlaybookAgent (independent — run together) ─────
+  // Neither depends on the other's output (they join only at the synthesizer),
+  // so run them concurrently. Each keeps its own timeout + fallback + failure
+  // capture, so one degrading doesn't affect the other.
+  const [styleResult, playbookResult] = await Promise.all([
+    withTimeoutOrFallback(() => runStyleAgent(llm, { chunks }), "style-agent", {
       timeoutMs: agentTimeoutMs,
       fallback: { samples: [] as StyleSample[] },
       onError: recordFailure,
-    }
-  )
-  await onProgress?.("style-agent", 0.4)
-
-  // ───── Stage 3: PlaybookAgent ─────
-  const playbookResult = await withTimeoutOrFallback(
-    () => runPlaybookAgent(llm, { chunks }),
-    "playbook-agent",
-    {
+    }),
+    withTimeoutOrFallback(() => runPlaybookAgent(llm, { chunks }), "playbook-agent", {
       timeoutMs: agentTimeoutMs,
       fallback: { playbooks: [] as Playbook[] },
       onError: recordFailure,
-    }
-  )
+    }),
+  ])
+  await onProgress?.("style-agent", 0.4)
   await onProgress?.("playbook-agent", 0.6)
 
   // ───── Stage 4: Synthesizer (load-bearing — failure aborts the run) ─────

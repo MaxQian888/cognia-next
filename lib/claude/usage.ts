@@ -11,18 +11,26 @@
  * importing `types/provider/built-in-provider-catalog` so the provider data
  * set isn't pulled into the chat composer bundle; the table below is correct
  * for every model the Claude Agent SDK actually drives and falls back to a
- * safe 200k for anything unknown.
+ * conservative 128k for anything unknown.
+ *
+ * IMPORTANT: this table + {@link DEFAULT_CONTEXT_WINDOW} + {@link AUTO_COMPACT_FRACTION}
+ * are MIRRORED in `sidecar/dispatch/compaction.mjs` (the sidecar cannot import
+ * `lib/`). The two are kept in lock-step by `lib/claude/usage.compaction-parity.test.ts`
+ * — update both sides together or that test goes red.
  */
 
 import type { UIMessage } from "ai"
 import type { UsageInfo } from "@/lib/claude/adapter"
 
 /**
- * Default context-window size for an unknown / unrecognised model id. 200k is
- * the standard window for current Anthropic frontier tiers (Sonnet 4.5, Haiku
- * 4.5, Opus 4 / 4.1, all Claude 3.x), so it is the safe floor.
+ * Default context-window size for an unknown / unrecognised model id. 128k is a
+ * conservative floor: many local / OpenAI-compatible engines expose only 128k,
+ * and under-reporting the window is the safe direction (the auto-compact trigger
+ * fires early rather than overflowing a genuinely-128k model — `0.835 × 200k`
+ * would exceed a real 128k window before compaction ever ran). Mirrored in
+ * `sidecar/dispatch/compaction.mjs`.
  */
-export const DEFAULT_CONTEXT_WINDOW = 200_000
+export const DEFAULT_CONTEXT_WINDOW = 128_000
 
 /**
  * Fraction of the window at which Claude Code auto-compacts the conversation
@@ -50,14 +58,18 @@ const MODEL_CONTEXT_WINDOWS: Array<{ pattern: RegExp; window: number }> = [
   { pattern: /claude-opus-4-(6|7|8)/i, window: 1_000_000 },
   { pattern: /claude-sonnet-4-(6|7|8)/i, window: 1_000_000 },
   // Every other Claude (Opus 4 / 4.1, Sonnet 4.5, Haiku 4.x, and all Claude
-  // 3.x — `claude-3-5-sonnet` etc. still contain opus/sonnet/haiku) — 200k.
-  { pattern: /claude-(opus|sonnet|haiku)/i, window: 200_000 },
+  // 3.x) — 200k. The optional `(-[\d.]+)*` segment matches BOTH the family-first
+  // ids (`claude-sonnet-4-5`) and the version-first 3.x ids (`claude-3-5-sonnet`,
+  // `claude-3-opus`). The 1M-tier patterns above win first, so 4.6+ is unaffected.
+  { pattern: /claude(-[\d.]+)*-(opus|sonnet|haiku)/i, window: 200_000 },
   // OpenAI.
   { pattern: /gpt-4o/i, window: 128_000 },
   { pattern: /gpt-4\.1/i, window: 1_000_000 },
   { pattern: /(^|[^a-z])o[134]([^a-z]|$)/i, window: 200_000 },
   // Google Gemini long-context tiers.
   { pattern: /gemini-(1\.5|2\.5|3)/i, window: 1_000_000 },
+  // DeepSeek V3 / V3.1 (deepseek-chat, deepseek-reasoner) — 128k context.
+  { pattern: /deepseek/i, window: 128_000 },
 ]
 
 export function getModelContextWindow(modelId: string | undefined): number {
@@ -83,7 +95,8 @@ export function getLatestUsage(messages: UIMessage[]): UsageInfo | null {
     if (
       usage.inputTokens !== undefined ||
       usage.outputTokens !== undefined ||
-      usage.cacheReadInputTokens !== undefined
+      usage.cacheReadInputTokens !== undefined ||
+      usage.contextTokens !== undefined
     ) {
       return usage
     }
@@ -101,11 +114,62 @@ export function getLatestUsage(messages: UIMessage[]): UsageInfo | null {
  * Code and Codex report current context occupancy.
  */
 export function tokensInWindow(usage: UsageInfo): number {
-  const input = usage.inputTokens ?? 0
+  if (usage.contextTokens !== undefined) return usage.contextTokens
+  // Prefer the explicit window-prompt size when the channel reports one (the
+  // ai-sdk agent loop sums every leg's prompt into `inputTokens` for billing,
+  // but only the last leg's prompt actually occupies the window).
+  const input = usage.contextInputTokens ?? usage.inputTokens ?? 0
   const output = usage.outputTokens ?? 0
   const cacheRead = usage.cacheReadInputTokens ?? 0
   const cacheCreation = usage.cacheCreationInputTokens ?? 0
   return input + output + cacheRead + cacheCreation
+}
+
+/**
+ * Cumulative billed usage across an entire session.
+ *
+ * Distinct from {@link tokensInWindow} (which reports the *current* window
+ * occupancy = latest turn only). Here every assistant turn is summed, because
+ * an API bill re-charges the full prompt on every turn — so the session total
+ * is what the user actually pays. `turns` is the number of assistant turns
+ * that carried usage metadata.
+ */
+export interface SessionUsageTotals {
+  inputTokens: number
+  outputTokens: number
+  cacheCreationInputTokens: number
+  cacheReadInputTokens: number
+  totalCostUsd: number
+  turns: number
+}
+
+/**
+ * Sum usage across every assistant turn in the message log. A turn counts when
+ * its assistant message carries a `usage` metadata object — even one with only
+ * a cost and no token counts (the SDK result can be cost-only).
+ */
+export function sumSessionUsage(messages: UIMessage[]): SessionUsageTotals {
+  const total: SessionUsageTotals = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheCreationInputTokens: 0,
+    cacheReadInputTokens: 0,
+    totalCostUsd: 0,
+    turns: 0,
+  }
+  for (const msg of messages) {
+    if (msg.role !== "assistant") continue
+    const meta = (msg as { metadata?: Record<string, unknown> }).metadata
+    const usage = meta?.usage as UsageInfo | undefined
+    if (!usage) continue
+    total.inputTokens += usage.inputTokens ?? 0
+    total.outputTokens += usage.outputTokens ?? 0
+    total.cacheCreationInputTokens += usage.cacheCreationInputTokens ?? 0
+    total.cacheReadInputTokens += usage.cacheReadInputTokens ?? 0
+    total.totalCostUsd += usage.totalCostUsd ?? 0
+    total.turns += 1
+  }
+  return total
 }
 
 /** Severity of context-window fill, mirroring the observability threshold dots. */

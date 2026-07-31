@@ -20,7 +20,10 @@
  */
 
 import { getDb } from "@/lib/db/schema"
-import type { ConnectorCallbackBindingRow } from "@/types/connectors/interaction"
+import type {
+  CallbackActorScope,
+  ConnectorCallbackBindingRow,
+} from "@/types/connectors/interaction"
 import type { A2UIComponentKind } from "@/types/connectors/capability"
 import type { A2UISegmentContent } from "@/types/connectors/segment"
 
@@ -65,8 +68,7 @@ export function walkA2UISurface(
       {
         id,
         component: (typeof node.component === "string" ? node.component : "Text") as
-          | A2UIComponentKind
-          | string,
+          A2UIComponentKind | string,
         raw: node,
         childIds,
       },
@@ -191,6 +193,12 @@ export async function recordCallbackBinding(input: {
    * HITL bypass; `"modal_open"` may carry the platform view payload.
    */
   payload?: Record<string, unknown>
+  // Callback authorization guard fields (plan 2026-07-24 Phase 2). Optional
+  // pass-throughs — absent fields leave the guard on its per-kind legacy
+  // fallbacks (see lib/connectors/callback-authorization.ts).
+  accountId?: string
+  actorScope?: CallbackActorScope
+  allowedActions?: string[]
 }): Promise<void> {
   const createdAt = input.createdAt ?? Date.now()
   const row: ConnectorCallbackBindingRow = {
@@ -204,6 +212,9 @@ export async function recordCallbackBinding(input: {
     createdAt,
     expiresAt: input.expiresAt ?? createdAt + DEFAULT_CALLBACK_BINDING_TTL_MS,
     payload: input.payload,
+    accountId: input.accountId,
+    actorScope: input.actorScope,
+    allowedActions: input.allowedActions,
   }
   await getDb().connectorCallbackBindings.put(row)
 }
@@ -212,15 +223,22 @@ export async function recordCallbackBinding(input: {
  * Reverse lookup: given the actionId the platform sent back, return the
  * surface/component context. Adapters call this from `parse.ts` when an
  * inbound callback arrives.
+ *
+ * A binding whose `expiresAt` has passed resolves as `undefined`: expiry is
+ * enforced at read time, not only by the daily cleanup sweep, so a click on
+ * a stale card cannot fire through a binding that is already scheduled for
+ * reaping. Rows without `expiresAt` (pre-TTL legacy) never expire here.
  */
 export async function resolveCallbackBinding(
   adapterId: string,
   actionId: string
 ): Promise<ConnectorCallbackBindingRow | undefined> {
-  return getDb()
+  const row = await getDb()
     .connectorCallbackBindings.where("[adapterId+actionId]")
     .equals([adapterId, actionId])
     .first()
+  if (row?.expiresAt !== undefined && row.expiresAt <= Date.now()) return undefined
+  return row
 }
 
 /**

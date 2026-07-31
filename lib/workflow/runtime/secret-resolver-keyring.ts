@@ -12,7 +12,8 @@
  */
 
 import { getSecret } from "@/lib/keyring"
-import type { SecretResolver } from "./secret-resolver"
+import { isTauri } from "@/lib/tauri"
+import { NoopSecretResolver, type SecretResolver } from "./secret-resolver"
 
 export function createKeyringSecretResolver(): SecretResolver {
   return {
@@ -23,6 +24,18 @@ export function createKeyringSecretResolver(): SecretResolver {
       return value ?? undefined
     },
   }
+}
+
+/**
+ * The production default resolver for `runWorkflow`. On desktop (Tauri) this
+ * reads credential refs out of the OS keyring; in web/test (jsdom) it degrades
+ * to {@link NoopSecretResolver}. Wiring this as the orchestrator default fixes
+ * the gap where every production `runWorkflow` caller omitted a resolver, so
+ * keyring-backed credential refs (e.g. `ai.prompt` node API keys) silently
+ * resolved to `undefined` and fell back to stub output.
+ */
+export function getDefaultSecretResolver(): SecretResolver {
+  return isTauri() ? createKeyringSecretResolver() : NoopSecretResolver
 }
 
 interface ParsedRef {

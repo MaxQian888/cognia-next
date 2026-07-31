@@ -8,6 +8,15 @@ import { makeDefaultLoader, withPlugin, type SimpleOutcome, type ValueOutcome } 
  * and by Backup to remind users when an automatic backup is due.
  */
 
+/**
+ * The app-wide Android notification channel. Created at boot
+ * (`companion-boot-provider`) with IMPORTANCE_HIGH so reminders can
+ * heads-up; [`schedule`] routes every notification here by default —
+ * a spec without an explicit `channelId` would otherwise land on the
+ * plugin's auto-created default-importance `"default"` channel.
+ */
+export const DEFAULT_CHANNEL_ID = "cognia-default"
+
 export interface LocalNotificationSpec {
   id: number
   title: string
@@ -20,10 +29,23 @@ export interface LocalNotificationSpec {
   extra?: Record<string, unknown>
 }
 
+export interface LocalNotificationAction {
+  /** Plugin-reported action: "tap" for a plain body tap. */
+  actionId: string
+  notification: {
+    id: number
+    extra?: Record<string, unknown>
+  }
+}
+
 interface LocalNotificationsShape {
   schedule(opts: { notifications: LocalNotificationSpec[] }): Promise<{
     notifications: Array<{ id: number }>
   }>
+  addListener(
+    event: "localNotificationActionPerformed",
+    handler: (action: LocalNotificationAction) => void
+  ): Promise<{ remove(): Promise<void> | void }>
   cancel(opts: { notifications: Array<{ id: number }> }): Promise<void>
   getPending(): Promise<{ notifications: LocalNotificationSpec[] }>
   requestPermissions(): Promise<{
@@ -102,7 +124,12 @@ export async function schedule(
   loader: LocalNotificationsLoader = defaultLoader
 ): Promise<ValueOutcome<number[]>> {
   return withPlugin(loader, async (n) => {
-    const result = await n.schedule({ notifications })
+    const result = await n.schedule({
+      notifications: notifications.map((spec) => ({
+        channelId: DEFAULT_CHANNEL_ID,
+        ...spec,
+      })),
+    })
     return {
       kind: "ok" as const,
       value: result.notifications.map((x) => x.id),
@@ -129,6 +156,30 @@ export async function listPending(
   })
 }
 
+export type Unsubscribe = () => void
+
+/**
+ * Subscribe to notification taps (`localNotificationActionPerformed`).
+ * A tapped reminder brings the app to the foreground; without this
+ * listener the tap routes nowhere. The boot provider registers one
+ * handler and navigates via the notification's `extra.route` payload.
+ * Returns `null` when the plugin isn't available (web / desktop).
+ */
+export async function onAction(
+  handler: (action: LocalNotificationAction) => void,
+  loader: LocalNotificationsLoader = defaultLoader
+): Promise<Unsubscribe | null> {
+  try {
+    const n = await loader()
+    const listener = await n.addListener("localNotificationActionPerformed", handler)
+    return () => {
+      void listener.remove()
+    }
+  } catch {
+    return null
+  }
+}
+
 export async function ensureChannel(
   opts: {
     id: string
@@ -141,7 +192,15 @@ export async function ensureChannel(
 ): Promise<SimpleOutcome> {
   const { id, name, description, importance = 4, sound } = opts
   return withPlugin(loader, async (n) => {
-    if (!n.createChannel) return { kind: "ok" as const } // iOS — no-op
+    // Channels are Android-only. The `!n.createChannel` property check is NOT
+    // enough against the real Capacitor proxy (it fabricates a callable for
+    // any name and then rejects "not implemented" on iOS), so gate on the
+    // reported platform first; keep the property check for test doubles.
+    const platform = (
+      globalThis as { Capacitor?: { getPlatform?: () => string } }
+    ).Capacitor?.getPlatform?.()
+    if (platform === "ios") return { kind: "ok" as const }
+    if (!n.createChannel) return { kind: "ok" as const }
     await n.createChannel({ id, name, description, importance, sound })
     return { kind: "ok" as const }
   })

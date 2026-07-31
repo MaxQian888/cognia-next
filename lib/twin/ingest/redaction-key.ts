@@ -22,7 +22,7 @@
 import { isTauri } from "@/lib/tauri"
 import { getDb } from "@/lib/db/schema"
 import { getSecret, setSecret, clearSecret } from "@/lib/keyring"
-import type { AppSettings } from "@/lib/claude/types"
+import type { AppSettings } from "@cognia/agent-config-types"
 
 const KEYRING_REF = { namespace: "twin-redaction", key: "master" } as const
 
@@ -66,7 +66,15 @@ function getSubtle(): SubtleCrypto {
   return subtle
 }
 
-function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+function toBufferSource(bytes: Uint8Array): BufferSource {
+  // Jest's jsdom realm creates its own Uint8Array / ArrayBuffer constructors,
+  // while the test harness supplies Node's WebCrypto implementation. Node
+  // correctly rejects those foreign-realm objects as BufferSource inputs.
+  // Buffer is backed by Node's native realm, so copy through it when present;
+  // browsers keep the ordinary detached ArrayBuffer copy below.
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(bytes) as unknown as BufferSource
+  }
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
 }
 
@@ -112,8 +120,7 @@ async function readMasterKeyBytes(): Promise<Uint8Array | null> {
     }
   }
   const row = (await getDb().settings.get("singleton")) as
-    | (AppSettings & { [SETTINGS_FIELD]?: string })
-    | undefined
+    (AppSettings & { [SETTINGS_FIELD]?: string }) | undefined
   const raw = row?.[SETTINGS_FIELD]
   if (typeof raw !== "string" || raw.length === 0) return null
   try {
@@ -125,14 +132,13 @@ async function readMasterKeyBytes(): Promise<Uint8Array | null> {
 
 /** Base64 SHA-256 of the raw key bytes — the fingerprint we persist + compare. */
 async function fingerprintOf(bytes: Uint8Array): Promise<string> {
-  const digest = await getSubtle().digest("SHA-256", toArrayBuffer(bytes))
+  const digest = await getSubtle().digest("SHA-256", toBufferSource(bytes))
   return encodeBase64(new Uint8Array(digest))
 }
 
 async function readStoredFingerprint(): Promise<string | null> {
   const row = (await getDb().settings.get("singleton")) as
-    | (AppSettings & { [FINGERPRINT_FIELD]?: string })
-    | undefined
+    (AppSettings & { [FINGERPRINT_FIELD]?: string }) | undefined
   const fp = row?.[FINGERPRINT_FIELD]
   return typeof fp === "string" && fp.length > 0 ? fp : null
 }
@@ -209,7 +215,7 @@ export async function getRedactionKey(): Promise<CryptoKey> {
     if (!storedFingerprint) await writeStoredFingerprint(fp)
   }
 
-  return getSubtle().importKey("raw", toArrayBuffer(bytes), { name: "AES-GCM" }, false, [
+  return getSubtle().importKey("raw", toBufferSource(bytes), { name: "AES-GCM" }, false, [
     "encrypt",
     "decrypt",
   ])
@@ -239,7 +245,7 @@ export async function __resetRedactionKey(): Promise<void> {
 
 // ── Encryption primitives ────────────────────────────────────────────────────
 
-import type { RedactionRecord } from "./redact"
+import type { RedactionRecord } from "@cognia/redact"
 
 /** Encrypted blob shape stored as `twinSources.redactionMapEnc`. */
 export interface EncryptedRedactionMap {
@@ -259,9 +265,9 @@ export async function encryptRedactionMap(map: Record<string, RedactionRecord>):
   const iv = randomBytes(12)
   const plaintext = new TextEncoder().encode(JSON.stringify(map))
   const ciphertext = await getSubtle().encrypt(
-    { name: "AES-GCM", iv: toArrayBuffer(iv) },
+    { name: "AES-GCM", iv: toBufferSource(iv) },
     key,
-    toArrayBuffer(plaintext)
+    toBufferSource(plaintext)
   )
   const blob: EncryptedRedactionMap = {
     v: 1,
@@ -291,9 +297,9 @@ export async function decryptRedactionMap(
   let plaintext: ArrayBuffer
   try {
     plaintext = await getSubtle().decrypt(
-      { name: "AES-GCM", iv: toArrayBuffer(iv) },
+      { name: "AES-GCM", iv: toBufferSource(iv) },
       key,
-      toArrayBuffer(ciphertext)
+      toBufferSource(ciphertext)
     )
   } catch (err) {
     // A GCM tag failure here means the key in hand differs from the one that

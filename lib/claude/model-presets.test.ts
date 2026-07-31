@@ -8,9 +8,9 @@ import {
 describe("MODEL_PRESET_VALUES", () => {
   it("exposes the canonical Claude model ids", () => {
     expect(MODEL_PRESET_VALUES).toEqual([
+      "claude-opus-4-8",
       "claude-opus-4-7",
-      "claude-opus-4-5",
-      "claude-sonnet-4-5",
+      "claude-sonnet-4-6",
       "claude-haiku-4-5",
     ])
   })
@@ -29,8 +29,15 @@ describe("MODEL_PRESET_VALUES", () => {
 })
 
 describe("PERMISSION_MODE_VALUES", () => {
-  it("covers the four documented permission modes", () => {
-    expect(PERMISSION_MODE_VALUES).toEqual(["default", "acceptEdits", "plan", "bypassPermissions"])
+  it("covers every Claude Agent SDK permission mode", () => {
+    expect(PERMISSION_MODE_VALUES).toEqual([
+      "default",
+      "acceptEdits",
+      "plan",
+      "bypassPermissions",
+      "dontAsk",
+      "auto",
+    ])
   })
 
   it("PermissionModeValue is type-compatible with each entry", () => {

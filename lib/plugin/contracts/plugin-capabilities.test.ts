@@ -1,6 +1,51 @@
-import { PLUGIN_CAPABILITY_CONTRACTS, getPluginCapabilityContract } from "./plugin-capabilities"
+import {
+  PLUGIN_CAPABILITY_CONTRACTS,
+  getPluginCapabilityContract,
+  validatePluginCapabilities,
+} from "./plugin-capabilities"
+import { AUTHOR_CAPABILITY_CONTRACTS } from "@/packages/plugin-sdk/src/contracts/catalog"
 
 describe("plugin capability contracts", () => {
+  it("keeps host proof metadata aligned with the public author catalog", () => {
+    expect(
+      PLUGIN_CAPABILITY_CONTRACTS.map(({ id, support, manifestFields }) => ({
+        id,
+        support,
+        manifestFields: [...manifestFields],
+      }))
+    ).toEqual(
+      AUTHOR_CAPABILITY_CONTRACTS.map(({ id, support, manifestFields }) => ({
+        id,
+        support,
+        manifestFields: [...manifestFields],
+      }))
+    )
+  })
+  const fieldDrivenModuleBridgeContracts = [
+    ["workspace-backend", "workspaceBackends"],
+    ["message-renderer", "messageRenderers"],
+    ["density-preset", "densityPresets"],
+    ["chat-middleware", "chatMiddlewares"],
+    ["modal-mount", "modalMounts"],
+    ["terminal-completion", "terminalCompletionProviders"],
+    ["routing-strategy", "routingStrategies"],
+    ["deployment-filter", "deploymentFilters"],
+    ["protocol-adapter", "protocolAdapters"],
+    ["tool-route", "toolRoutes"],
+    ["context-provider", "contextProviders"],
+  ] as const
+
+  it("accepts the automation + companion capability tags (no longer 'unknown')", () => {
+    for (const id of ["automation", "companion"] as const) {
+      const contract = getPluginCapabilityContract(id)
+      expect(contract).toBeDefined()
+      expect(contract?.support).toBe("experimental")
+    }
+    const outcome = validatePluginCapabilities(["automation", "companion"])
+    expect(outcome.allowed).toBe(true)
+    expect(outcome.diagnostics.some((d) => d.code === "plugin.capability.unknown")).toBe(false)
+  })
+
   it("covers each canonical plugin capability exactly once", () => {
     const ids = PLUGIN_CAPABILITY_CONTRACTS.map((entry) => entry.id)
     expect(new Set(ids).size).toBe(ids.length)
@@ -25,6 +70,26 @@ describe("plugin capability contracts", () => {
         "scheduler",
       ])
     )
+  })
+
+  it("promotes field-driven module bridge surfaces into canonical capability contracts", () => {
+    const ids = fieldDrivenModuleBridgeContracts.map(([id]) => id)
+    const outcome = validatePluginCapabilities(ids)
+
+    expect(outcome.allowed).toBe(true)
+    expect(outcome.diagnostics.some((d) => d.code === "plugin.capability.unknown")).toBe(false)
+
+    for (const [id, manifestField] of fieldDrivenModuleBridgeContracts) {
+      expect(getPluginCapabilityContract(id)).toEqual(
+        expect.objectContaining({
+          id,
+          support: "supported",
+          manifestFields: [manifestField],
+          hostBindings: expect.arrayContaining(["lib/plugin/contracts/module-bridge-map.ts"]),
+          typescriptSdk: expect.arrayContaining([`packages/plugin-sdk/src/define/define-${id}.ts`]),
+        })
+      )
+    }
   })
 
   it("exposes support level and runtime metadata for a capability", () => {
@@ -61,6 +126,7 @@ describe("plugin capability contracts", () => {
       expect.objectContaining({
         id: "media",
         support: "supported",
+        typescriptSdk: expect.arrayContaining(["packages/plugin-sdk/src/api/media.ts"]),
         requiredTests: expect.arrayContaining(["lib/plugin/api/media-api.test.ts"]),
       })
     )
@@ -69,6 +135,7 @@ describe("plugin capability contracts", () => {
       expect.objectContaining({
         id: "canvas",
         support: "supported",
+        typescriptSdk: expect.arrayContaining(["packages/plugin-sdk/src/api/canvas.ts"]),
         requiredTests: expect.arrayContaining(["lib/plugin/api/canvas-api.test.ts"]),
       })
     )
@@ -77,7 +144,50 @@ describe("plugin capability contracts", () => {
       expect.objectContaining({
         id: "ai-provider",
         support: "supported",
+        typescriptSdk: expect.arrayContaining(["packages/plugin-sdk/src/api/ai-provider.ts"]),
         requiredTests: expect.arrayContaining(["lib/plugin/api/ai-provider-api.test.ts"]),
+      })
+    )
+  })
+
+  it("records runtime-only SDK facades without promoting experimental capabilities", () => {
+    expect(getPluginCapabilityContract("python")).toEqual(
+      expect.objectContaining({
+        id: "python",
+        support: "supported",
+        typescriptSdk: expect.arrayContaining(["packages/plugin-sdk/src/api/python.ts"]),
+      })
+    )
+
+    expect(getPluginCapabilityContract("providers")).toEqual(
+      expect.objectContaining({
+        id: "providers",
+        support: "experimental",
+        typescriptSdk: expect.arrayContaining(["packages/plugin-sdk/src/api/ai-provider.ts"]),
+      })
+    )
+
+    expect(getPluginCapabilityContract("automation")).toEqual(
+      expect.objectContaining({
+        id: "automation",
+        support: "experimental",
+        typescriptSdk: ["packages/plugin-sdk/src/api/automation.ts"],
+      })
+    )
+
+    expect(getPluginCapabilityContract("companion")).toEqual(
+      expect.objectContaining({
+        id: "companion",
+        support: "experimental",
+        typescriptSdk: ["packages/plugin-sdk/src/api/companion.ts"],
+      })
+    )
+
+    expect(getPluginCapabilityContract("processors")).toEqual(
+      expect.objectContaining({
+        id: "processors",
+        support: "experimental",
+        typescriptSdk: [],
       })
     )
   })

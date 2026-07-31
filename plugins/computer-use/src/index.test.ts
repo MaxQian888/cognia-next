@@ -1,24 +1,19 @@
 /**
- * Tests for the computer-use plugin's activate() / deactivate() lifecycle
- * focused on the plugin-tool registration path. The slash-command + i18n
- * paths already existed before this change and are covered indirectly
- * through host integration tests.
- *
- * We mock `lib/automation/anthropic-action-mapper` and
- * `lib/automation/plugin-tauri` so the executor callbacks can be
- * inspected without driving real Tauri commands.
+ * Tests for the Computer Use plugin's thin adapter over the canonical
+ * app-session automation client.
  */
 
-jest.mock("@/lib/automation/anthropic-action-mapper", () => ({
-  dispatchAnthropicAction: jest.fn(),
+jest.mock("@/lib/automation/client", () => ({
+  desktop: {
+    getAppState: jest.fn(),
+    listApps: jest.fn(),
+    queryElements: jest.fn(),
+    expandElement: jest.fn(),
+    performAction: jest.fn(),
+  },
 }))
 
-jest.mock("@/lib/automation/plugin-tauri", () => ({
-  pluginComputerUseBash: jest.fn(),
-  pluginComputerUseTextEditor: jest.fn(),
-}))
-
-jest.mock("@/lib/chat/slash-command-registry", () => ({
+jest.mock("@/lib/slash-commands/registry", () => ({
   registerSlashCommand: jest.fn(),
   unregisterCommandsByPlugin: jest.fn(),
 }))
@@ -28,9 +23,6 @@ jest.mock("@/lib/i18n/plugin-i18n-registry", () => ({
   unregisterPluginI18n: jest.fn(),
 }))
 
-// `buildChatCallContext` reads the active session id from the chat store and
-// the per-session computer-use settings. Default to "no active session" so the
-// existing executor tests see a bare ctx; individual tests override.
 jest.mock("@/stores/chat/chat-store", () => ({
   useChatStore: { getState: jest.fn(() => ({ activeSessionId: undefined })) },
 }))
@@ -40,43 +32,52 @@ jest.mock("@/lib/claude/computer-use-active-settings", () => ({
 }))
 
 import definition from "./index"
-import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/chat/slash-command-registry"
+import { desktop } from "@/lib/automation/client"
+import { registerSlashCommand, unregisterCommandsByPlugin } from "@/lib/slash-commands/registry"
 import { registerPluginI18n, unregisterPluginI18n } from "@/lib/i18n/plugin-i18n-registry"
-import { dispatchAnthropicAction } from "@/lib/automation/anthropic-action-mapper"
-import { pluginComputerUseBash, pluginComputerUseTextEditor } from "@/lib/automation/plugin-tauri"
 import { useChatStore } from "@/stores/chat/chat-store"
 import { getActiveComputerUseSettings } from "@/lib/claude/computer-use-active-settings"
+import type { ActionRequest } from "@/lib/automation/types"
 import type { PluginTool } from "@/types/plugin/plugin"
 
-const mockedDispatchAction = dispatchAnthropicAction as jest.Mock
-const mockedBash = pluginComputerUseBash as jest.Mock
-const mockedTextEditor = pluginComputerUseTextEditor as jest.Mock
+const mockedDesktop = desktop as jest.Mocked<typeof desktop>
 const mockedGetState = (useChatStore as unknown as { getState: jest.Mock }).getState
 const mockedGetSettings = getActiveComputerUseSettings as jest.Mock
 
-type ToolArg = PluginTool
-
-interface MockAgentCtx {
+interface MockAgentContext {
   pluginId: string
   logger?: { info: jest.Mock; warn: jest.Mock }
   agent?: {
-    registerTool: jest.Mock<void, [ToolArg]>
+    registerTool: jest.Mock<void, [PluginTool]>
     unregisterTool: jest.Mock<void, [string]>
+    context: { registerProvider: jest.Mock }
   }
 }
 
-function buildCtx(opts: { withAgent?: boolean } = {}): MockAgentCtx {
-  const ctx: MockAgentCtx = {
+function buildContext(options: { withAgent?: boolean } = {}): MockAgentContext {
+  const context: MockAgentContext = {
     pluginId: "cognia-computer-use",
     logger: { info: jest.fn(), warn: jest.fn() },
   }
-  if (opts.withAgent !== false) {
-    ctx.agent = {
+  if (options.withAgent !== false) {
+    context.agent = {
       registerTool: jest.fn(),
       unregisterTool: jest.fn(),
+      context: { registerProvider: jest.fn() },
     }
   }
-  return ctx
+  return context
+}
+
+async function getTool(name: string): Promise<PluginTool> {
+  const context = buildContext()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await definition.activate(context as any)
+  const tool = context
+    .agent!.registerTool.mock.calls.map((call) => call[0])
+    .find((candidate) => candidate.name === name)
+  if (!tool) throw new Error(`tool not registered: ${name}`)
+  return tool
 }
 
 afterEach(() => {
@@ -84,156 +85,155 @@ afterEach(() => {
 })
 
 describe("computer-use plugin activate()", () => {
-  it("registers the slash command (i18n is now declarative via manifest.i18n)", async () => {
-    const ctx = buildCtx()
+  it("declares i18n and leaves manifest commands to the host manager", async () => {
+    const context = buildContext()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await definition.activate(ctx as any)
-    // ADR-0026 §5 §D — i18n migration: the plugin no longer calls
-    // `registerPluginI18n` directly. The strings ship in
-    // `manifest.i18n.locales` and `lib/plugin/core/manager.ts` auto-wires
-    // them on enable. So this test verifies the slash command is still
-    // registered AND the imperative i18n registry is no longer touched.
-    expect(registerPluginI18n).not.toHaveBeenCalled()
-    expect(registerSlashCommand).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "/cu", source: "plugin" })
-    )
-  })
+    await definition.activate(context as any)
 
-  it("declares the i18n bundle on the manifest", () => {
-    // The host's auto-wire (lib/plugin/core/manager.ts:1057-1071) reads
-    // this block during enablePlugin(); verifying the shape here so a
-    // future refactor that drops the field gets caught.
     const manifest = definition.manifest as {
       i18n?: { locales?: Record<string, Record<string, string>> }
     }
     expect(manifest.i18n?.locales?.en?.["slash.cu.description"]).toBeDefined()
     expect(manifest.i18n?.locales?.["zh-CN"]?.["slash.cu.body"]).toBeDefined()
+    expect(registerPluginI18n).not.toHaveBeenCalled()
+    expect(registerSlashCommand).not.toHaveBeenCalled()
   })
 
-  it("registers computer_use, bash, and text_editor plugin tools", async () => {
-    const ctx = buildCtx()
+  it("registers only the canonical app-session tools", async () => {
+    const context = buildContext()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await definition.activate(ctx as any)
-    const calls = ctx.agent!.registerTool.mock.calls.map((c) => c[0])
-    expect(calls).toHaveLength(3)
-    const names = calls.map((c) => c.name).sort()
-    expect(names).toEqual(["bash", "computer_use", "text_editor"])
-    for (const c of calls) {
-      expect(c.pluginId).toBe("cognia-computer-use")
-      expect(c.definition.requiresApproval).toBe(true)
-      expect(c.definition.parametersSchema).toBeDefined()
-      expect(typeof c.execute).toBe("function")
+    await definition.activate(context as any)
+
+    const tools = context.agent!.registerTool.mock.calls.map((call) => call[0])
+    expect(tools.map((tool) => tool.name).sort()).toEqual([
+      "expand_element",
+      "get_app_state",
+      "list_apps",
+      "perform_action",
+      "query_elements",
+    ])
+    for (const tool of tools) {
+      expect(tool.pluginId).toBe("cognia-computer-use")
+      expect(tool.definition.requiresApproval).toBe(true)
+      expect(tool.definition.parametersSchema).toBeDefined()
     }
   })
 
-  it("warns and skips tool registration if ctx.agent is absent", async () => {
-    const ctx = buildCtx({ withAgent: false })
+  it("registers guidance for the app-session state/action loop", async () => {
+    const context = buildContext()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await definition.activate(ctx as any)
-    expect(ctx.logger!.warn).toHaveBeenCalled()
-    // Slash command + i18n still register — the chat-side tool surface is
-    // optional, not load-bearing for the rest of the plugin.
-    expect(registerSlashCommand).toHaveBeenCalled()
+    await definition.activate(context as any)
+
+    const providers = context.agent!.context.registerProvider.mock.calls.map((call) => call[0])
+    expect(providers).toHaveLength(1)
+    const text = providers[0].provide()
+    expect(text).toMatch(/get_app_state/)
+    expect(text).toMatch(/perform_action/)
+    expect(text).toMatch(/browser_\*/)
   })
 
-  describe("registered tool executors route correctly", () => {
-    async function getTool(name: string): Promise<ToolArg | undefined> {
-      const ctx = buildCtx()
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await definition.activate(ctx as any)
-      return ctx.agent!.registerTool.mock.calls.map((c) => c[0]).find((c) => c.name === name)
+  it("warns when the host cannot register tools", async () => {
+    const context = buildContext({ withAgent: false })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await definition.activate(context as any)
+    expect(context.logger!.warn).toHaveBeenCalled()
+  })
+
+  it("routes all tool calls directly to the canonical client", async () => {
+    const state = { sessionId: "automation-session", lineageId: "lineage", revision: 7 }
+    const locator = { kind: "bundleId" as const, bundleId: "com.apple.TextEdit" }
+    const elementLocator = { nameContains: "Document" }
+    const handle = { ...state, index: 4, fingerprint: "fingerprint" }
+    const request: ActionRequest = {
+      turnToken: "turn-token",
+      target: { kind: "element", handle },
+      action: { kind: "click" },
+      strategy: "semantic",
     }
 
-    it("computer_use → dispatchAnthropicAction with computerUse surface", async () => {
-      const tool = await getTool("computer_use")
-      mockedDispatchAction.mockResolvedValueOnce({ ok: true })
-      await tool!.execute({ action: "screenshot" }, { config: {} })
-      expect(mockedDispatchAction).toHaveBeenCalledWith(
-        { action: "screenshot" },
-        { surface: "computerUse", pluginId: "cognia-computer-use" }
-      )
-    })
+    const toolContext = {
+      config: {},
+      sessionId: "chat-session",
+      messageId: "message-1",
+    }
+    await (await getTool("list_apps")).execute({}, toolContext)
+    await (
+      await getTool("get_app_state")
+    ).execute({ sessionId: state.sessionId, locator, options: {} }, toolContext)
+    await (
+      await getTool("query_elements")
+    ).execute({ ...state, locator: elementLocator, limit: 40 }, toolContext)
+    await (
+      await getTool("expand_element")
+    ).execute({ handle, continuationToken: "next", limit: 25 }, toolContext)
+    await (await getTool("perform_action")).execute({ request }, toolContext)
 
-    it("bash → pluginComputerUseBash with computerUse surface", async () => {
-      const tool = await getTool("bash")
-      mockedBash.mockResolvedValueOnce({
-        stdout: "",
-        stderr: "",
-        exit_code: 0,
-        duration_ms: 0,
-      })
-      await tool!.execute({ command: "ls" }, { config: {} })
-      expect(mockedBash).toHaveBeenCalledWith(
-        { command: "ls" },
-        { surface: "computerUse", pluginId: "cognia-computer-use" }
-      )
-    })
+    const callContext = {
+      surface: "computerUse",
+      pluginId: "cognia-computer-use",
+      sessionKey: "chat-session",
+      turnKey: "message-1",
+    }
+    expect(mockedDesktop.listApps).toHaveBeenCalledWith(callContext)
+    expect(mockedDesktop.getAppState).toHaveBeenCalledWith(
+      state.sessionId,
+      locator,
+      {},
+      callContext
+    )
+    expect(mockedDesktop.queryElements).toHaveBeenCalledWith(state, elementLocator, 40, callContext)
+    expect(mockedDesktop.expandElement).toHaveBeenCalledWith(handle, "next", 25, callContext)
+    expect(mockedDesktop.performAction).toHaveBeenCalledWith(request, callContext)
+  })
 
-    it("text_editor → pluginComputerUseTextEditor with computerUse surface", async () => {
-      const tool = await getTool("text_editor")
-      mockedTextEditor.mockResolvedValueOnce({ ok: true })
-      await tool!.execute({ action: "view", path: "/tmp/x" }, { config: {} })
-      expect(mockedTextEditor).toHaveBeenCalledWith(
-        { action: "view", path: "/tmp/x" },
-        { surface: "computerUse", pluginId: "cognia-computer-use" }
-      )
-    })
+  it("binds consent policy to the originating session, not current focus", async () => {
+    mockedGetSettings.mockReturnValueOnce({ requireConsent: true })
+    const locator = { kind: "displayName" as const, displayName: "TextEdit" }
 
-    it("computer_use stamps screenOffMode + forceTier from active settings", async () => {
-      const tool = await getTool("computer_use")
-      // Only the executor reads the session/settings, so single-shot
-      // overrides line up with the one dispatch below.
-      mockedGetState.mockReturnValueOnce({ activeSessionId: "sess-1" })
-      mockedGetSettings.mockReturnValueOnce({ screenOffMode: true, requireConsent: true })
-      mockedDispatchAction.mockResolvedValueOnce({ ok: true })
-      await tool!.execute({ action: "screenshot" }, { config: {} })
-      expect(mockedDispatchAction).toHaveBeenCalledWith(
-        { action: "screenshot" },
-        {
-          surface: "computerUse",
-          pluginId: "cognia-computer-use",
-          forceTier: "perCall",
-          screenOffMode: true,
-        }
-      )
-    })
+    await (
+      await getTool("get_app_state")
+    ).execute(
+      { sessionId: "automation-session", locator },
+      { config: {}, sessionId: "origin-session" }
+    )
 
-    it("computer_use omits screenOffMode when the setting is off", async () => {
-      const tool = await getTool("computer_use")
-      mockedGetState.mockReturnValueOnce({ activeSessionId: "sess-2" })
-      mockedGetSettings.mockReturnValueOnce({ screenOffMode: false })
-      mockedDispatchAction.mockResolvedValueOnce({ ok: true })
-      await tool!.execute({ action: "screenshot" }, { config: {} })
-      expect(mockedDispatchAction).toHaveBeenCalledWith(
-        { action: "screenshot" },
-        { surface: "computerUse", pluginId: "cognia-computer-use" }
-      )
-    })
+    expect(mockedGetSettings).toHaveBeenCalledWith("origin-session")
+    expect(mockedGetState).not.toHaveBeenCalled()
+    expect(mockedDesktop.getAppState).toHaveBeenCalledWith(
+      "automation-session",
+      locator,
+      undefined,
+      {
+        surface: "computerUse",
+        pluginId: "cognia-computer-use",
+        sessionKey: "origin-session",
+        forceTier: "perCall",
+      }
+    )
   })
 })
 
 describe("computer-use plugin deactivate()", () => {
-  it("unregisters commands and plugin tools (i18n teardown handled by manager)", async () => {
-    const ctx = buildCtx()
+  it("unregisters all canonical tools", async () => {
+    const context = buildContext()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await definition.deactivate!(ctx as any)
-    expect(unregisterCommandsByPlugin).toHaveBeenCalledWith("cognia-computer-use")
-    // ADR-0026 §5 §D — the plugin no longer calls `unregisterPluginI18n`
-    // directly. The manager tears down the manifest.i18n bundle when the
-    // plugin disables.
+    await definition.deactivate!(context as any)
+
+    expect(context.agent!.unregisterTool.mock.calls.map((call) => call[0]).sort()).toEqual([
+      "expand_element",
+      "get_app_state",
+      "list_apps",
+      "perform_action",
+      "query_elements",
+    ])
+    expect(unregisterCommandsByPlugin).not.toHaveBeenCalled()
     expect(unregisterPluginI18n).not.toHaveBeenCalled()
-    const unregistered = ctx.agent!.unregisterTool.mock.calls.map((c) => c[0])
-    expect(unregistered.sort()).toEqual(["bash", "computer_use", "text_editor"])
   })
 
-  it("survives without ctx", async () => {
+  it("survives missing context or agent", async () => {
     await expect(definition.deactivate!()).resolves.toBeUndefined()
-  })
-
-  it("skips tool unregistration when ctx.agent is absent", async () => {
-    const ctx = buildCtx({ withAgent: false })
+    const context = buildContext({ withAgent: false })
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await definition.deactivate!(ctx as any)
-    expect(unregisterCommandsByPlugin).toHaveBeenCalledWith("cognia-computer-use")
+    await expect(definition.deactivate!(context as any)).resolves.toBeUndefined()
   })
 })

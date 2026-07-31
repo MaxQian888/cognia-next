@@ -1,0 +1,39 @@
+{
+  "id": "cognia-web-clone",
+  "name": "Web Clone",
+  "version": "0.1.0",
+  "description": "Snapshot a live web page \u2014 HTML + all CSS/JS/image/font assets \u2014 into a self-contained file or a directory bundle, with optional component extraction and framework codegen. Adds a /web-clone slash command.",
+  "type": "frontend",
+  "capabilities": ["commands"],
+  "main": "src/index.ts",
+  "author": "cognia-next",
+  "license": "MIT",
+  "minAppVersion": "0.1.0",
+  "engines": {
+    "cognia": ">=0.1.0"
+  },
+  "permissions": ["network:fetch", "filesystem:write"],
+  "activationEvents": ["startup", "onCommand:web-clone"],
+  "runtimeCompatibility": {
+    "browser": {
+      "availability": "blocked",
+      "reason": "The snapshot engine is a Node process reached via a Tauri command; it does not exist in the browser build."
+    },
+    "tauri": {
+      "availability": "supported",
+      "entrypoint": "src/index.ts"
+    },
+    "mobile": {
+      "availability": "blocked",
+      "reason": "No sidecar / Tauri command host in the mobile WebView."
+    }
+  },
+  "commands": [
+    {
+      "id": "web-clone",
+      "name": "/web-clone",
+      "description": "Snapshot a web page into the workspace.",
+      "icon": "Download"
+    }
+  ]
+}

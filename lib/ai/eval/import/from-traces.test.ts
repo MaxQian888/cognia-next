@@ -48,4 +48,31 @@ describe("tracesToCases", () => {
       tracesToCases(list, deps, { traceIds: ["a", "c"] }).cases.map((c) => c.sourceTraceId)
     ).toEqual(["a", "c"])
   })
+
+  it("prefers the resolved original prompt over the truncated preview", () => {
+    // `preview` is a PII-gated, truncated span field. Using it as the case
+    // input meant every case built from real traffic was a clipped fragment of
+    // what the user actually asked — and the agent was then graded on it.
+    const summaries = [summary({ traceId: "t1", preview: "explain the diff bet…" })]
+    const out = tracesToCases(summaries, deps, undefined, {
+      prompts: { t1: "explain the difference between a mutex and a semaphore" },
+    })
+    expect(out.cases[0].input).toBe("explain the difference between a mutex and a semaphore")
+  })
+
+  it("falls back to the preview when no prompt could be recovered", () => {
+    const summaries = [summary({ traceId: "t1", preview: "a preview" })]
+    expect(tracesToCases(summaries, deps, undefined, { prompts: {} }).cases[0].input).toBe(
+      "a preview"
+    )
+    expect(tracesToCases(summaries, deps).cases[0].input).toBe("a preview")
+  })
+
+  it("uses a recovered prompt even when the trace has no preview at all", () => {
+    const summaries = [summary({ traceId: "t1", preview: "" })]
+    const out = tracesToCases(summaries, deps, undefined, { prompts: { t1: "the real question" } })
+    expect(out.cases).toHaveLength(1)
+    expect(out.skipped).toEqual([])
+    expect(out.cases[0].input).toBe("the real question")
+  })
 })

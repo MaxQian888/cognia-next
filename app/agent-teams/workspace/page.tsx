@@ -15,26 +15,31 @@
  * build time.
  */
 
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useTranslations } from "next-intl"
-import {
-  ActivityIcon,
-  ArrowLeftIcon,
-  BarChart3Icon,
-  MessageCircleIcon,
-  Settings2Icon,
-  ListTodoIcon,
-  UsersIcon,
-} from "lucide-react"
+import { AnimatePresence, motion, useReducedMotion } from "motion/react"
+import { ArrowLeftIcon } from "lucide-react"
+
+import { mobileTransition } from "@/lib/ui/motion"
 
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
+import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 
 import { useShallow } from "zustand/react/shallow"
 import { useAgentTeamStore } from "@/stores/agent/agent-team-store"
+import { usePendingGatesStore } from "@/stores/agent/pending-gates-store"
 import { useExternalAgentStore } from "@/stores/agent/external-agent-store"
 import { useExternalAgent } from "@/hooks/agent"
 import { useSettingsStore } from "@/stores/settings"
@@ -44,8 +49,14 @@ import { AgentTeamOverview } from "@/components/agent/workspace/overview"
 import { AgentTeamTasks } from "@/components/agent/workspace/tasks"
 import { AgentTeamChat } from "@/components/agent/workspace/chat"
 import { AgentTeamActivity } from "@/components/agent/workspace/activity"
+import { WorktreesPanel } from "@/components/agent/workspace/worktrees-panel"
+import { AgentTeamEditor } from "@/components/agent/workspace/editor/agent-team-editor"
 import { AgentTeamMembers } from "@/components/agent/workspace/members"
 import { AgentTeamSettings } from "@/components/agent/workspace/settings"
+import { WorkspaceTabNav } from "@/components/agent/workspace/workspace-tab-nav"
+import { WorkspaceHeader } from "@/components/agent/workspace/workspace-header"
+import { countUnread } from "@/components/agent/workspace/unread"
+import { GateModalsHost } from "@/components/agent/team/gate-modals-host"
 import type { ComposerHandle } from "@/components/chat/composer"
 
 import { parseLeadingMention } from "@/lib/agent-team/mention-parser"
@@ -56,21 +67,48 @@ import {
 } from "@/lib/agent-team/runtime-targets"
 import { dispatchTeamMention } from "@/lib/agent-team/team-runtime-dispatcher"
 import { createCompositeStreamer } from "@/lib/agent-team/runtime-streamers"
+import { usePlatform } from "@/hooks/use-platform"
+import { TeamWorkspaceMobile } from "@/components/mobile/agent-teams/team-workspace-mobile"
 import { useRuntimeAvailability } from "@/lib/agent-team/use-runtime-availability"
 import { buildConversationHistory } from "@/lib/agent-team/conversation-context"
-import { getProviderModel } from "@/lib/ai/core/client"
-import type { TeammateRuntime } from "@/types/agent/agent-team"
+import { buildTeamClaudeRuntimeModel } from "@/lib/agent-team/provider-model"
+import type { AgentFileActivity } from "@/lib/agent-team/file-activity"
+import { resolveLinkPath } from "@/lib/terminal/terminal-links"
+import { deferProjectEditorOpen, openInProjectEditor } from "@/lib/files/project-editor-bridge"
+import type { ProjectFileReference } from "@/lib/files/project-file-reference"
+import { useProjectEditorSessionStore } from "@/stores/editor/project-editor-session-store"
+import type {
+  AgentTeamEvent,
+  AgentTeamMessage,
+  AgentTeamTask,
+  TeammateRuntime,
+} from "@/types/agent/agent-team"
 
-const ALL_TABS = ["overview", "tasks", "chat", "activity", "members", "settings"] as const
+const ALL_TABS = [
+  "overview",
+  "tasks",
+  "chat",
+  "activity",
+  "worktrees",
+  "editor",
+  "members",
+  "settings",
+] as const
 type Tab = (typeof ALL_TABS)[number]
+
+// Stable empty slices returned by the tab-gated selectors below so
+// useShallow sees the same reference while a tab is inactive.
+const EMPTY_TASKS: AgentTeamTask[] = []
+const EMPTY_MESSAGES: AgentTeamMessage[] = []
+const EMPTY_EVENTS: AgentTeamEvent[] = []
 
 function AgentTeamWorkspaceInner() {
   const searchParams = useSearchParams()
   const teamId = searchParams.get("teamId")
   const router = useRouter()
   const t = useTranslations("agentTeamsWorkspace")
-  const tTabs = useTranslations("agentTeamsWorkspace.tabs")
   const tComposer = useTranslations("agentTeamsWorkspace.chat.composer")
+  const reduceMotion = useReducedMotion()
 
   const team = useAgentTeamStore((s) => (teamId ? s.teams[teamId] : undefined))
   // Each of these selectors materialises a fresh array on every store change;
@@ -80,19 +118,47 @@ function AgentTeamWorkspaceInner() {
   const teammates = useAgentTeamStore(
     useShallow((s) => Object.values(s.teammates).filter((m) => m.teamId === teamId))
   )
+  // Tab-gated slices: tasks / messages / events are only materialised while
+  // their tab is visible. During a live run the store receives a delta per
+  // streamed token and per emitted event — without the gate every delta
+  // re-rendered the whole workspace page regardless of the active tab.
   const tasks = useAgentTeamStore(
-    useShallow((s) => Object.values(s.tasks).filter((task) => task.teamId === teamId))
+    useShallow((s) =>
+      s.workspaceTab === "tasks"
+        ? Object.values(s.tasks).filter((task) => task.teamId === teamId)
+        : EMPTY_TASKS
+    )
   )
   const messages = useAgentTeamStore(
-    useShallow((s) => Object.values(s.messages).filter((m) => m.teamId === teamId))
+    useShallow((s) =>
+      s.workspaceTab === "chat"
+        ? Object.values(s.messages).filter((m) => m.teamId === teamId)
+        : EMPTY_MESSAGES
+    )
   )
-  const events = useAgentTeamStore(useShallow((s) => s.events.filter((e) => e.teamId === teamId)))
+  const events = useAgentTeamStore(
+    useShallow((s) =>
+      s.workspaceTab === "activity" ? s.events.filter((e) => e.teamId === teamId) : EMPTY_EVENTS
+    )
+  )
+  // Live tab signals. Both are SCALARS on purpose: they are read on every store
+  // delta (one per streamed token during a run), and a number lets zustand bail
+  // out of the re-render unless the value actually moves — unlike the slices
+  // above, which materialise arrays and therefore have to stay tab-gated.
+  const unreadCount = useAgentTeamStore((s) => countUnread(s.messages, teamId))
+  const pendingGateCount = usePendingGatesStore(
+    (s) => s.gates.filter((g) => g.teamId === teamId).length
+  )
   const upsertMessage = useAgentTeamStore((s) => s.upsertMessage)
   const removeMessage = useAgentTeamStore((s) => s.removeMessage)
+  const markTeamMessagesRead = useAgentTeamStore((s) => s.markTeamMessagesRead)
   const activeTab = useAgentTeamStore((s) => s.workspaceTab)
   const setWorkspaceTab = useAgentTeamStore((s) => s.setWorkspaceTab)
   const setWorkspaceTeamFromRoute = useAgentTeamStore((s) => s.setWorkspaceTeamFromRoute)
   const updateTeam = useAgentTeamStore((s) => s.updateTeam)
+  const selectedEditorRoot = useProjectEditorSessionStore((s) =>
+    teamId ? s.sessions[`team:${teamId}`]?.rootKey : undefined
+  )
 
   const externalAgent = useExternalAgent()
   const { setActiveAgent, executeStreaming } = externalAgent
@@ -109,15 +175,39 @@ function AgentTeamWorkspaceInner() {
     return () => setWorkspaceTeamFromRoute(null)
   }, [teamId, setWorkspaceTeamFromRoute])
 
+  // Close the unread loop. Without this the badge is a number that only ever
+  // climbs. Keyed on `unreadCount` rather than just the tab so a reply landing
+  // while you are already reading the thread clears too; `countUnread` excludes
+  // streaming messages, so this fires once per finished reply, not per token.
+  useEffect(() => {
+    if (!teamId || activeTab !== "chat" || unreadCount === 0) return
+    markTeamMessagesRead(teamId)
+  }, [teamId, activeTab, unreadCount, markTeamMessagesRead])
+
   const mentionables = useMemo(() => buildMentionableTargets(teammates), [teammates])
   const availability = useRuntimeAvailability()
 
-  // Snapshot the latest messages in a ref so handlers (which are memoised)
-  // always read the freshest list when building conversation history.
-  const messagesRef = useRef(messages)
-  useEffect(() => {
-    messagesRef.current = messages
-  }, [messages])
+  const handleAgentFileActivity = useCallback(
+    (activity: AgentFileActivity): void => {
+      if (!teamId || useAgentTeamStore.getState().workspaceTab !== "editor") return
+      const currentTeam = useAgentTeamStore.getState().teams[teamId]
+      const workingDir = currentTeam?.config.workingDir
+      if (!workingDir) return
+      const root =
+        useProjectEditorSessionStore.getState().sessions[`team:${teamId}`]?.rootKey ?? workingDir
+      const absolutePath = resolveLinkPath(root, activity.path)
+      openInProjectEditor(absolutePath, activity.line, activity.column)
+    },
+    [teamId]
+  )
+
+  const handleConversationFileOpen = useCallback(
+    (target: ProjectFileReference): void => {
+      deferProjectEditorOpen(target.absolutePath, target.line, target.column)
+      setWorkspaceTab("editor")
+    },
+    [setWorkspaceTab]
+  )
 
   const dispatchPair = useCallback(
     async (params: { targetId: string; prompt: string; rawText: string }): Promise<void> => {
@@ -128,14 +218,8 @@ function AgentTeamWorkspaceInner() {
         return
       }
 
-      const apiKey = settings?.apiKey ?? ""
-      const model = getProviderModel({
-        provider: "anthropic",
-        model: settings?.defaultModel ?? "claude-sonnet-4-5",
-        apiKey,
-      })
       const streamer = createCompositeStreamer({
-        claude: { model },
+        claude: { model: buildTeamClaudeRuntimeModel(settings) },
         external: {
           setActiveAgent,
           executeStreaming,
@@ -143,7 +227,12 @@ function AgentTeamWorkspaceInner() {
         },
       })
 
-      const history = buildConversationHistory(messagesRef.current)
+      // Read the freshest message list straight off the store — the rendered
+      // `messages` slice is tab-gated and may be empty when dispatching from
+      // a retry while another tab is active.
+      const history = buildConversationHistory(
+        Object.values(useAgentTeamStore.getState().messages).filter((m) => m.teamId === teamId)
+      )
 
       activeDispatchRef.current?.abort()
       const ac = new AbortController()
@@ -163,6 +252,7 @@ function AgentTeamWorkspaceInner() {
           {
             writer: { upsertMessage },
             streamer,
+            onFileActivity: handleAgentFileActivity,
           }
         )
       } catch (err) {
@@ -179,7 +269,16 @@ function AgentTeamWorkspaceInner() {
         setIsSending(false)
       }
     },
-    [teamId, mentionables, settings, setActiveAgent, executeStreaming, upsertMessage, tComposer]
+    [
+      teamId,
+      mentionables,
+      settings,
+      setActiveAgent,
+      executeStreaming,
+      upsertMessage,
+      tComposer,
+      handleAgentFileActivity,
+    ]
   )
 
   const handleSendMention = useCallback(
@@ -257,105 +356,164 @@ function AgentTeamWorkspaceInner() {
     ? (activeTab as Tab)
     : "overview"
 
+  // Live-dot signal for the rail. Read straight off the store rather than
+  // `useTeamLiveStatus`: that hook needs a non-null team (this component still
+  // has to render the not-found card) and opens a second Dexie subscription the
+  // header already owns. `deriveTeamStatus` lets a live store status win over
+  // the run row anyway, so this only ever under-signals — never the reverse —
+  // in the narrow case of a stale-terminal store with a run still going, which
+  // the header badge already corrects. Under-signalling is the safe direction
+  // for an attention cue.
+  const isTeamLive = team.status === "executing" || team.status === "planning"
+
+  // Panel cross-fade props, or nothing at all for the editor / reduced motion.
+  // `initial={false}` (rather than a zero-duration transition) keeps the node
+  // out of motion's animation loop entirely, which is what the pinned webview
+  // needs — a compositing pass on the ancestor is enough to tear it.
+  const animatePanels = !reduceMotion && tab !== "editor"
+  const panelMotion = animatePanels
+    ? {
+        initial: { opacity: 0, y: 6 },
+        animate: { opacity: 1, y: 0 },
+        exit: { opacity: 0, y: -6 },
+        transition: mobileTransition("fast"),
+      }
+    : { initial: false as const }
+
+  // One console layout for all eight tabs: the chrome (tab rail + header) is
+  // pinned and only the panel body scrolls.
+  //
+  // This used to be two competing models — chat and editor were full-height
+  // while the other six scrolled as a whole page, which took the header with
+  // them despite it being the surface that carries the live status and the run
+  // controls. The editor forced the question: in CodeServer mode a native
+  // webview is pinned over the pane and cannot follow DOM scroll, so it can
+  // *only* work full-height. Making that the single model everywhere removes
+  // the split and keeps Abort reachable on every tab.
+  //
+  // Chat and the editor opt out of the scroll container entirely (they manage
+  // their own internal scrolling and must not be nested inside a second
+  // scroller).
+  const managesOwnScroll = tab === "chat" || tab === "editor"
+
   return (
-    <div
-      className="mx-auto max-w-5xl space-y-4 p-4 sm:p-6"
+    <SidebarProvider
+      className="h-full min-h-0"
+      style={{ "--sidebar-width": "14rem", "--sidebar-width-icon": "3rem" } as CSSProperties}
       data-testid="agent-team-workspace"
       data-bg-target="chat"
     >
-      {/* Back + Title */}
-      <div className="flex items-center gap-3">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-xs"
-          onClick={() => router.push("/agent-teams")}
-        >
-          <ArrowLeftIcon className="mr-1 size-3" />
-          {t("listTitle")}
-        </Button>
-        <span className="hidden sm:inline text-xs text-muted-foreground">/</span>
-        <span className="hidden sm:inline text-sm font-medium truncate">{team.name}</span>
-      </div>
+      <WorkspaceTabNav
+        value={tab}
+        onValueChange={(v) => setWorkspaceTab(v as typeof activeTab)}
+        onBack={() => router.push("/agent-teams")}
+        teamName={team.name}
+        counts={{ members: teammates.length }}
+        signals={{
+          chat: { count: unreadCount > 0 ? unreadCount : undefined },
+          activity: { live: isTeamLive },
+          overview: { live: isTeamLive },
+        }}
+      />
 
-      <Tabs value={tab} onValueChange={(v) => setWorkspaceTab(v as typeof activeTab)}>
-        <div className="overflow-x-auto">
-          <TabsList className="inline-flex h-9 w-max gap-1">
-            <TabsTrigger value="overview" data-testid="tab-overview" className="gap-1.5">
-              <BarChart3Icon className="size-3.5 sm:hidden" />
-              <span className="hidden sm:inline">{tTabs("overview")}</span>
-            </TabsTrigger>
-            <TabsTrigger value="tasks" data-testid="tab-tasks" className="gap-1.5">
-              <ListTodoIcon className="size-3.5 sm:hidden" />
-              <span className="hidden sm:inline">{tTabs("tasks")}</span>
-            </TabsTrigger>
-            <TabsTrigger value="chat" data-testid="tab-chat" className="gap-1.5">
-              <MessageCircleIcon className="size-3.5 sm:hidden" />
-              <span className="hidden sm:inline">{tTabs("chat")}</span>
-            </TabsTrigger>
-            <TabsTrigger value="activity" data-testid="tab-activity" className="gap-1.5">
-              <ActivityIcon className="size-3.5 sm:hidden" />
-              <span className="hidden sm:inline">{tTabs("activity")}</span>
-            </TabsTrigger>
-            <TabsTrigger value="members" data-testid="tab-members" className="gap-1.5">
-              <UsersIcon className="size-3.5 sm:hidden" />
-              <span className="hidden sm:inline">{tTabs("members")}</span>
-            </TabsTrigger>
-            <TabsTrigger value="settings" data-testid="tab-settings" className="gap-1.5">
-              <Settings2Icon className="size-3.5 sm:hidden" />
-              <span className="hidden sm:inline">{tTabs("settings")}</span>
-            </TabsTrigger>
-          </TabsList>
-        </div>
-
-        <TabsContent value="overview" className="pt-4">
-          <AgentTeamOverview
+      <SidebarInset className="min-h-0 overflow-hidden" data-bg-target="chat">
+        <div className="flex min-h-0 flex-1 flex-col gap-4 p-4 sm:p-6">
+          <WorkspaceHeader
             team={team}
             teammates={teammates}
+            pendingGateCount={pendingGateCount}
             onStart={() => void agentTeamManager.start(team.id).catch(() => undefined)}
             onStartUltracode={() =>
               void agentTeamManager.start(team.id, { ultracode: true }).catch(() => undefined)
             }
             onAbort={() => void abortTeam(team.id, new Error("user-aborted"))}
-            onUpdateTeam={(updates) => {
-              updateTeam(team.id, updates)
-              toast.success(t("teamUpdated"))
-            }}
+            onPause={() => void agentTeamManager.pause(team.id).catch(() => undefined)}
+            onResume={() => void agentTeamManager.resume(team.id).catch(() => undefined)}
+            onStop={() => void agentTeamManager.shutdown(team.id).catch(() => undefined)}
           />
-        </TabsContent>
-        <TabsContent value="tasks" className="pt-4">
-          <AgentTeamTasks teamId={team.id} tasks={tasks} teammates={teammates} />
-        </TabsContent>
-        <TabsContent value="chat" className="pt-4">
-          <AgentTeamChat
-            ref={composerRef}
-            teamId={team.id}
-            messages={messages}
-            mentionables={mentionables}
-            onSend={handleSendMention}
-            onStop={handleStopDispatch}
-            isSending={isSending}
-            availability={availability}
-            onRetry={handleRetry}
-            onDelete={handleDelete}
-          />
-        </TabsContent>
-        <TabsContent value="activity" className="pt-4">
-          <AgentTeamActivity
-            events={events}
-            report={team.executionReport}
-            team={team}
-            teammates={teammates}
-          />
-        </TabsContent>
-        <TabsContent value="members" className="pt-4">
-          <AgentTeamMembers team={team} teammates={teammates} leadId={team.leadId} />
-        </TabsContent>
-        <TabsContent value="settings" className="pt-4">
-          <AgentTeamSettings team={team} />
-        </TabsContent>
-      </Tabs>
-    </div>
+
+          <div
+            className={cn(
+              "min-h-0 flex-1",
+              // Chat and the editor need a flex column so their `flex-1` bodies
+              // can claim the remaining height. The other six are plain scroll
+              // blocks — nesting them in a flex column risks a tall panel being
+              // shrunk instead of scrolled.
+              managesOwnScroll ? "flex flex-col" : "overflow-y-auto"
+            )}
+            data-testid="workspace-panel-scroll"
+          >
+            {/* Cross-fade between panels. `mode="wait"` so the outgoing panel is
+                gone before the incoming one measures — overlapping them makes
+                the scroll container jump.
+
+                The editor is deliberately excluded: in CodeServer mode a native
+                webview is pinned over the pane and cannot be composited with an
+                animating ancestor, which is also why globals.css force-collapses
+                every transition under `html[data-pro-ide-active]`. Animating into
+                it would tear. `panelMotion` therefore resolves to a no-op for
+                that tab (and under reduced motion). */}
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.div
+                key={tab}
+                className={cn("min-h-0", managesOwnScroll && "flex flex-1 flex-col")}
+                {...panelMotion}
+              >
+                {tab === "overview" && (
+                  <AgentTeamOverview
+                    team={team}
+                    teammates={teammates}
+                    chrome="header"
+                    onUpdateTeam={(updates) => {
+                      updateTeam(team.id, updates)
+                      toast.success(t("teamUpdated"))
+                    }}
+                  />
+                )}
+                {tab === "tasks" && (
+                  <AgentTeamTasks teamId={team.id} tasks={tasks} teammates={teammates} />
+                )}
+                {tab === "chat" && (
+                  <AgentTeamChat
+                    ref={composerRef}
+                    className="min-h-0 flex-1"
+                    teamId={team.id}
+                    messages={messages}
+                    mentionables={mentionables}
+                    onSend={handleSendMention}
+                    onStop={handleStopDispatch}
+                    isSending={isSending}
+                    availability={availability}
+                    onRetry={handleRetry}
+                    onDelete={handleDelete}
+                    projectRoot={selectedEditorRoot ?? team.config.workingDir}
+                    onOpenProjectFile={handleConversationFileOpen}
+                  />
+                )}
+                {tab === "activity" && (
+                  <AgentTeamActivity
+                    events={events}
+                    report={team.executionReport}
+                    team={team}
+                    teammates={teammates}
+                  />
+                )}
+                {tab === "worktrees" && <WorktreesPanel team={team} />}
+                {tab === "editor" && <AgentTeamEditor team={team} />}
+                {tab === "members" && (
+                  <AgentTeamMembers team={team} teammates={teammates} leadId={team.leadId} />
+                )}
+                {tab === "settings" && <AgentTeamSettings team={team} />}
+              </motion.div>
+            </AnimatePresence>
+          </div>
+        </div>
+      </SidebarInset>
+
+      {/* HITL approval gates (budget / deadlock / teammate-fix) — the consumer
+          for usePendingGatesStore; without it a paused run has no release UI. */}
+      <GateModalsHost />
+    </SidebarProvider>
   )
 }
 
@@ -374,10 +532,22 @@ function resolveExternalAgentIdByPreset(runtime: TeammateRuntime): string | null
   return match?.id ?? null
 }
 
+/**
+ * Platform router. The mobile companion renders a read-mostly workspace body
+ * (the desktop tab shell has no usable mobile layout); desktop keeps the full
+ * inner workspace. Dispatching here — not inside the inner component — keeps
+ * the rules-of-hooks intact (each branch is its own component).
+ */
+function AgentTeamWorkspaceRouter() {
+  const platform = usePlatform()
+  if (platform === "mobile") return <TeamWorkspaceMobile />
+  return <AgentTeamWorkspaceInner />
+}
+
 export default function AgentTeamWorkspacePage() {
   return (
     <Suspense fallback={null}>
-      <AgentTeamWorkspaceInner />
+      <AgentTeamWorkspaceRouter />
     </Suspense>
   )
 }

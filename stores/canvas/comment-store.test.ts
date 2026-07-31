@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 /**
  * Tests for stores/canvas/comment-store — Dexie-backed reactive comment cache.
  *

@@ -1,4 +1,5 @@
-// ADR-0028 Phase 5 / T2 — re-exec a plugin JS entry under Node 24
+// ADR-0028 Phase 5 / T2 — re-exec a plugin JS entry under the verified,
+// bundled Node 26.3.1+ runtime
 // `--permission` so the entry's filesystem / network / child-process
 // surface is bounded by the manifest's declared `PluginPermission[]`.
 //
@@ -7,20 +8,22 @@
 // `disallowedTools`) and the model routes through our `sandbox_*` tools
 // instead.
 //
-// V1 ships the policy translator + re-exec helper; the host plugin
-// manager picks this up when activating Node-target plugins (separate
-// commit in the plugin-system refactor — beyond the ADR-0028 V1 scope).
-// Until then this module is consumed only by its tests; it ships so the
-// surface is locked in and reviewable.
+// The loader builds a Node-target plugin definition from this helper;
+// the manager reaches it through the normal load/activate lifecycle and
+// kills the spawned process through the definition's deactivate hook.
 
 import type { PluginPermission } from "@/types/plugin"
+import { invoke } from "@tauri-apps/api/core"
 
 /**
  * Permission scope inputs the plugin manifest carries. `PluginPermission`
  * is an opaque enum of permission strings (`"filesystem:read"`,
  * `"network:fetch"`, etc.); the manifest also separately carries the
- * concrete path / host lists the renderer-side permission UI consumes —
- * we re-shape both into Node `--allow-*` flag values here.
+ * concrete path / host lists the renderer-side permission UI consumes.
+ *
+ * Node 26's permission model gives us scoped filesystem flags, but its
+ * network and subprocess switches are all-or-nothing. Those permissions
+ * remain host-broker-only.
  */
 export interface NodePermissionScope {
   /** Permissions declared on the plugin manifest. */
@@ -29,23 +32,71 @@ export interface NodePermissionScope {
   readPaths: ReadonlyArray<string>
   /** Concrete write-allowed paths (absolute). */
   writePaths: ReadonlyArray<string>
-  /** Concrete host allowlist for `--allow-net=`. */
+  /** Concrete host allowlist requested by the manifest. Never emitted as a broad grant. */
   netHosts: ReadonlyArray<string>
-  /** Subprocess names the plugin may spawn (e.g. `["git", "curl"]`). */
+  /** Subprocess names requested by the manifest. Never emitted as a broad grant. */
   allowedSubprocesses: ReadonlyArray<string>
 }
 
+export type PluginJsHostInvoker = <T>(command: string, args: Record<string, unknown>) => Promise<T>
+
+export interface HostPluginProcess {
+  killed: boolean
+  isRunning(): Promise<boolean>
+  kill(): Promise<void>
+}
+
+export interface LaunchPluginJsOptions {
+  pluginId: string
+  entryPath: string
+  scope: NodePermissionScope
+  extraArgs?: ReadonlyArray<string>
+  cwd?: string
+  hostInvoker?: PluginJsHostInvoker
+}
+
+export interface LaunchPluginJsResult {
+  command: string
+  argv: string[]
+  process: HostPluginProcess
+  activation: NodePluginActivationSnapshot
+  invokeCallback(callbackId: string, args: unknown[]): Promise<unknown>
+  deactivate(): Promise<void>
+}
+
+export interface NodePluginContextCall {
+  path: string
+  args: unknown[]
+}
+
+export interface NodePluginActivationSnapshot {
+  calls: NodePluginContextCall[]
+  hooks: unknown
+  exports: Record<string, unknown>
+}
+
+function cleanAllowValues(values: ReadonlyArray<string>): string[] {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0 && !value.includes("*"))
+    )
+  )
+}
+
 /**
- * Translate a permission scope into the `--allow-*` flags for Node 24.
+ * Translate a permission scope into safe `--allow-*` flags for Node 26.3.1+.
  * Returns the argv prefix that callers prepend before the entry path.
  *
- * Node 24 `--permission` semantics:
+ * Node 26.3.1+ `--permission` semantics:
  *   - The flag itself ENABLES the permission model (everything is
  *     denied unless allowed).
- *   - `--allow-fs-read=<csv>` / `--allow-fs-write=<csv>` accept
- *     comma-separated absolute paths or `*` for "all".
- *   - `--allow-net=<csv>` accepts hosts. `*` for "all".
- *   - `--allow-child-process=<csv>` accepts subprocess names.
+ *   - Each filesystem path uses its own `--allow-fs-read=<path>` or
+ *     `--allow-fs-write=<path>` flag. Node does not accept CSV path lists.
+ *   - `--allow-net` is all-or-nothing and is therefore never emitted.
+ *   - `--allow-child-process` is all-or-nothing, so it is not used for
+ *     manifest subprocess allowlists.
  *
  * Empty lists translate to OMITTED flags, NOT to `*`. The fail-safe is
  * a deny.
@@ -54,17 +105,25 @@ export interface NodePermissionScope {
  */
 export function nodePermissionArgs(scope: NodePermissionScope): string[] {
   const args: string[] = ["--permission"]
-  if (scope.readPaths.length > 0) {
-    args.push(`--allow-fs-read=${scope.readPaths.join(",")}`)
+  const readPaths = cleanAllowValues(scope.readPaths)
+  const writePaths = cleanAllowValues(scope.writePaths)
+  const netHosts = cleanAllowValues(scope.netHosts)
+  const allowedSubprocesses = cleanAllowValues(scope.allowedSubprocesses)
+  if (netHosts.length > 0) {
+    throw new Error(
+      "Node network grants require a scoped host broker; refusing broad --allow-net access."
+    )
   }
-  if (scope.writePaths.length > 0) {
-    args.push(`--allow-fs-write=${scope.writePaths.join(",")}`)
+  if (allowedSubprocesses.length > 0) {
+    throw new Error(
+      "Node subprocess grants require a scoped host broker; refusing broad --allow-child-process access."
+    )
   }
-  if (scope.netHosts.length > 0) {
-    args.push(`--allow-net=${scope.netHosts.join(",")}`)
+  if (readPaths.length > 0) {
+    args.push(...readPaths.map((path) => `--allow-fs-read=${path}`))
   }
-  if (scope.allowedSubprocesses.length > 0) {
-    args.push(`--allow-child-process=${scope.allowedSubprocesses.join(",")}`)
+  if (writePaths.length > 0) {
+    args.push(...writePaths.map((path) => `--allow-fs-write=${path}`))
   }
   return args
 }
@@ -98,11 +157,7 @@ export function deriveScopeFromManifest(
 
 /**
  * Build the full argv to re-exec a plugin JS file. Result is the
- * sequence callers would pass to `child_process.spawn("node", argv)`.
- *
- * The plugin manager OWNS the actual spawn (it tracks pids for
- * deactivate-on-disable, attaches stdio handlers, etc.); this helper is
- * the pure flag-construction half.
+ * sequence the native plugin host passes to its verified Node child process.
  */
 export function buildLaunchArgv(
   entryPath: string,
@@ -110,4 +165,74 @@ export function buildLaunchArgv(
   extraArgs: ReadonlyArray<string> = []
 ): string[] {
   return [...nodePermissionArgs(scope), entryPath, ...extraArgs]
+}
+
+export async function launchPluginJs(
+  options: LaunchPluginJsOptions
+): Promise<LaunchPluginJsResult> {
+  if (!options.pluginId.trim()) {
+    throw new Error("launchPluginJs: pluginId is required")
+  }
+  if (!options.entryPath.trim()) {
+    throw new Error(`launchPluginJs: entryPath is required for ${options.pluginId}`)
+  }
+  if (!options.cwd?.trim()) {
+    throw new Error(`launchPluginJs: cwd is required for ${options.pluginId}`)
+  }
+  const argv = buildLaunchArgv(options.entryPath, options.scope, options.extraArgs ?? [])
+  if (argv.some((arg) => arg.includes("*"))) {
+    throw new Error(`launchPluginJs: wildcard grants are forbidden for ${options.pluginId}`)
+  }
+  const hostInvoker = options.hostInvoker ?? invoke
+  const launched = await hostInvoker<{
+    command: string
+    argv: string[]
+    generation: string
+    activation: NodePluginActivationSnapshot
+  }>("plugin_launch_js", {
+    pluginId: options.pluginId,
+    pluginPath: options.cwd,
+    entry: options.entryPath,
+    extraArgs: options.extraArgs ?? [],
+  })
+  const process: HostPluginProcess = {
+    killed: false,
+    async isRunning() {
+      if (process.killed) return false
+      return hostInvoker<boolean>("plugin_js_status", {
+        pluginId: options.pluginId,
+        generation: launched.generation,
+      })
+    },
+    async kill() {
+      if (process.killed) return
+      await hostInvoker<void>("plugin_stop_js", {
+        pluginId: options.pluginId,
+        generation: launched.generation,
+      })
+      process.killed = true
+    },
+  }
+  return {
+    command: launched.command,
+    argv: launched.argv,
+    process,
+    activation: launched.activation,
+    invokeCallback(callbackId, args) {
+      return hostInvoker("plugin_invoke_js_callback", {
+        pluginId: options.pluginId,
+        pluginPath: options.cwd,
+        entry: options.entryPath,
+        callbackId,
+        args,
+      })
+    },
+    async deactivate() {
+      await hostInvoker<void>("plugin_deactivate_js", {
+        pluginId: options.pluginId,
+        pluginPath: options.cwd,
+        entry: options.entryPath,
+      })
+    },
+  }
 }

@@ -2,8 +2,10 @@
 
 // OpenCode add-account dialog. Two paths:
 //
-//   • Paste Zen API key — the user copies the key from opencode.ai/auth and
-//     pastes it here. Stored in the unified vault as an `OpencodeZen` account.
+//   • Paste API key — the user copies their managed-plan key (Zen
+//     pay-per-request or Go flat-rate) from opencode.ai and pastes it here.
+//     Stored in the unified vault as an `OpencodeZen` account tagged with
+//     the chosen plan.
 //   • Discovery is surfaced INLINE in the OpenCode provider tab (not in this
 //     dialog) because it's read-only and never blocks; the dialog is reserved
 //     for the explicit write path.
@@ -23,9 +25,10 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 
 import { saveOpencodeZenKey } from "@/lib/subscription/opencode/discovery"
-import type { Account } from "@/types/subscription"
+import type { Account, OpencodePlan } from "@/types/subscription"
 
 export interface OpencodeAddAccountDialogProps {
   open: boolean
@@ -43,6 +46,7 @@ export function OpencodeAddAccountDialog({
   const [accessToken, setAccessToken] = useState("")
   const [baseUrl, setBaseUrl] = useState("")
   const [label, setLabel] = useState("")
+  const [plan, setPlan] = useState<OpencodePlan>("zen")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -53,6 +57,7 @@ export function OpencodeAddAccountDialog({
       setAccessToken("")
       setBaseUrl("")
       setLabel("")
+      setPlan("zen")
       setError(null)
       setBusy(false)
     }
@@ -67,6 +72,7 @@ export function OpencodeAddAccountDialog({
         accessToken: accessToken.trim(),
         baseUrl: baseUrl.trim() || undefined,
         label: label.trim() || undefined,
+        plan,
       })
       onAdded?.(account)
       onOpenChange(false)
@@ -86,6 +92,27 @@ export function OpencodeAddAccountDialog({
         </DialogHeader>
 
         <div className="space-y-3">
+          <div className="space-y-1">
+            <Label>{t("planField")}</Label>
+            <RadioGroup
+              value={plan}
+              onValueChange={(next) => setPlan(next === "go" ? "go" : "zen")}
+              className="flex gap-4"
+            >
+              <div className="flex items-center gap-2">
+                <RadioGroupItem id="opencode-plan-zen" value="zen" />
+                <Label htmlFor="opencode-plan-zen" className="font-normal">
+                  {t("planZen")}
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <RadioGroupItem id="opencode-plan-go" value="go" />
+                <Label htmlFor="opencode-plan-go" className="font-normal">
+                  {t("planGo")}
+                </Label>
+              </div>
+            </RadioGroup>
+          </div>
           <div className="space-y-1">
             <Label htmlFor="opencode-zen-token">{t("accessTokenField")}</Label>
             <Input
@@ -115,7 +142,7 @@ export function OpencodeAddAccountDialog({
               id="opencode-zen-label"
               value={label}
               onChange={(e) => setLabel(e.target.value)}
-              placeholder={t("labelPlaceholder")}
+              placeholder={plan === "go" ? t("labelPlaceholderGo") : t("labelPlaceholder")}
             />
           </div>
           {error && <p className="text-xs text-destructive">{error}</p>}

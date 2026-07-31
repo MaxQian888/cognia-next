@@ -6,12 +6,12 @@ import { AlertCircle, Copy, Check, Maximize2, Code2, RefreshCw } from "lucide-re
 import { cn } from "@/lib/utils"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { TooltipIconButton } from "@/components/chat/ui/tooltip-icon-button"
-import { renderMathSafe } from "@/lib/latex/cache"
+import { renderMathSafe } from "@cognia/latex"
 import { withMathErrorBoundary } from "./math-error-boundary"
 import { useCopy } from "@/hooks/ui/use-copy"
-import { loggers } from "@/lib/logging"
+import { loggers } from "@cognia/logging"
 
-interface MathBlockProps {
+export interface MathBlockProps {
   content: string
   className?: string
   scale?: number
@@ -100,7 +100,7 @@ function MathBlockBase({ content, className, scale = 1, alignment = "center" }: 
         role="math"
         aria-label={t("expressionLabel")}
       >
-        <div className="absolute top-0 right-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity z-10 bg-background/80 rounded-lg p-0.5">
+        <div className="absolute top-0 right-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 transition-opacity z-10 bg-background/80 rounded-lg p-0.5">
           <TooltipIconButton
             variant="ghost"
             size="icon"

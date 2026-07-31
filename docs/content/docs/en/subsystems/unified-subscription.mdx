@@ -1,0 +1,101 @@
+---
+title: Unified Subscription
+description: One account model across Anthropic, Codex and OpenCode — keyring-backed provider vaults, an ordered limits-source registry that prefers a real utilization window over a credit meter, nine balance adapters, and an encrypted export envelope.
+---
+
+# Unified Subscription
+
+<Status variant="stable">Stable · ADR-0025 · keyring v2 / v20</Status>
+
+<TLDR>
+  Three subscription providers — Anthropic, Codex, OpenCode — share one account model, one vault format
+  and one limits surface. The interesting piece is the **limits-source registry**
+  (`lib/subscription/limits/registry.ts`): a flat ordered list where windowed sources come *before* the
+  generic balance source, so the runner prefers a real utilization window and only falls through to a
+  credit meter when no window applies. Aggregation (`limits/aggregate.ts`) queries every configured
+  account and returns them with the active one pinned first — which is what both the TUI `/limits` panel
+  and the desktop multi-provider view consume. Every seam is injected, so the same code runs offline in
+  tests and in the CLI with a Node-`fetch`-backed `authedGet`.
+</TLDR>
+
+<StatGrid>
+  <Stat label="Source files" value="129" hint="lib/subscription — incl. tests" />
+  <Stat label="Providers" value="3" hint="anthropic · codex · opencode" />
+  <Stat label="Balance adapters" value="9" hint="deepinfra · deepseek · moonshot · novita · openrouter · ppio · siliconflow · 302 · _shared" />
+  <Stat label="Built-in limits sources" value="4" hint="anthropic · codex · volcengine · balance" />
+  <Stat label="Tauri commands" value="17" hint="src-tauri/src/subscription/commands.rs" />
+  <Stat label="Vault KDF" value="600k" hint="PBKDF2-SHA256 + AES-GCM-256" />
+</StatGrid>
+
+Design rationale: [ADR-0025](../adr/0025-unified-subscription-module). Codex-specific expansion is in
+[ADR-0048](../adr/0048-codex-support-expansion).
+
+## Order is the design
+
+A "limit" can mean two different things: a rolling utilization window (Anthropic, Codex) or a credit
+balance (most OpenAI-compatible resellers). Presenting a credit meter when a real window exists would be
+a downgrade, so the registry encodes the preference as list order — windowed sources first, the generic
+balance source last. The runner walks the returned candidate list and stops at the first source that
+yields a snapshot.
+
+Plugin-contributed sources overlay in front of the built-ins, resolved through
+`lib/plugin/registries/limits-source-registry.ts`. The registry itself is pure: a list plus a resolver
+that returns *every* matching source rather than picking one, which keeps the fallback decision in the
+runner where it can be tested.
+
+## Where it lives
+
+```
+lib/subscription/
+  core/
+    transport.ts           # authedGet + account access — the injected seam
+    encrypted-package.ts   # encrypted export / import envelope
+    vault-snapshot.ts  migration.ts  account-expiry.ts
+    subscription-events.ts # the change bus
+    now-ticker.ts  uuidv7.ts  hooks.ts
+  anthropic/   oauth · discovery · refresh · scheduler · parser
+               usage-analytics · overview-windows · sidecar-sync
+  codex/       oauth · discovery · refresh · scheduler · usage-probe · chat-bridge
+  opencode/    discovery · chat-bridge
+  limits/
+    registry.ts  runner.ts  aggregate.ts     # resolve → run → aggregate
+    coalesce.ts  coalesce-record.ts  meters.ts  policy.ts
+    sources/     anthropic · codex · volcengine · balance
+    descriptor/  catalog · engine · path        # declarative source descriptors
+    custom/      presets · runner · store       # user-defined sources
+  balance/
+    registry.ts  runner.ts  store.ts  adapters/  # 9 OpenAI-compatible providers
+  sync/        subscription-sync · change-tracker · passphrase-cache
+
+src-tauri/src/subscription/
+  mod.rs         # facade over the cognia-subscription crate (ADR-0067 Tier B)
+  commands.rs    # the 17-command IPC surface — owns the sidecar-restart seam
+  volcengine.rs
+
+components/settings/subscription/
+```
+
+The vault, provider and discovery logic lives in the `cognia-subscription` crate; `mod.rs` re-exports it
+so existing `crate::subscription::…` call sites stay unchanged, while the command surface stays app-side
+because it owns the sidecar-restart seam and `ApiKeyState`.
+
+## Export is encrypted with the backup primitives
+
+`core/encrypted-package.ts` reuses the same crypto as the Dexie-wide backup in `lib/data/` —
+PBKDF2-SHA256 at 600,000 iterations plus AES-GCM-256 — but ships a simpler envelope sized for just the
+three provider vaults (`SUBSCRIPTION_PACKAGE_VERSION = "subscription-v1"`). The smaller payload keeps
+backup files readable in tooling and makes it obvious which vaults are inside.
+
+<Callout type="warn">
+  Writes must go through the settings store, not straight to Dexie. Bypassing it leaves the in-memory
+  store stale — a real bug that has been fixed once already in the ccswitch path.
+</Callout>
+
+## Related
+
+<Cards>
+  <Card title="ADR-0025" href="../adr/0025-unified-subscription-module" description="The unified subscription decision record" />
+  <Card title="ADR-0048" href="../adr/0048-codex-support-expansion" description="Codex support expansion" />
+  <Card title="Provider System" href="../chat/provider-system" description="How a configured account becomes a usable model" />
+  <Card title="Backup & Data" href="../data/backup-and-data" description="The backup primitives the export envelope reuses" />
+</Cards>

@@ -1,0 +1,14 @@
+{
+  "activation": "Couldn't activate {pluginName}",
+  "config": "Couldn't apply settings for {pluginName}",
+  "disable": "Couldn't disable {pluginName}",
+  "enable": "Couldn't enable {pluginName}",
+  "hotReload": "Hot reload failed for {pluginName}",
+  "install": "Couldn't install {pluginName}",
+  "installRollback": "Couldn't roll back {pluginName} after install failure",
+  "load": "Couldn't load {pluginName}",
+  "localInstall": "Couldn't install local plugin {pluginName}",
+  "permissionRegister": "Couldn't register permissions for {pluginName}",
+  "uninstall": "Couldn't uninstall {pluginName}",
+  "wasmPreload": "WASM preload failed for {pluginName}"
+}

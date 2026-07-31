@@ -16,17 +16,29 @@ let mockConfigComponentResult: React.ComponentType<{
   onSave: (next: Record<string, unknown>) => Promise<void>
   pluginId: string
 }> | null = null
+const importPluginEntryMock = jest.fn(async (_entry: string, _pluginId?: string) => ({}))
 
 jest.mock("@/lib/plugin/bridge/config-component-bridge", () => ({
-  loadConfigComponent: jest.fn(async () => mockConfigComponentResult),
+  loadConfigComponent: jest.fn(
+    async (
+      _manifest: unknown,
+      _installRoot: string,
+      options?: { importer?: (entry: string) => Promise<Record<string, unknown>> }
+    ) => {
+      await options?.importer?.("resolved-entry")
+      return mockConfigComponentResult
+    }
+  ),
 }))
 
 jest.mock("@/lib/plugin/core/manager", () => ({
-  getPluginManager: () => ({ importPluginEntry: async () => ({}) }),
+  getPluginManager: () => ({
+    importPluginEntry: (...args: [string, string?]) => importPluginEntryMock(...args),
+  }),
 }))
 
-jest.mock("@/components/plugins/plugin-extension-slot", () => ({
-  PluginExtensionBoundary: ({ children }: { children: React.ReactNode }) => children,
+jest.mock("@/components/plugins/plugin-surface", () => ({
+  PluginSurface: ({ children }: { children: React.ReactNode }) => children,
 }))
 
 jest.mock("next-intl", () => ({
@@ -42,8 +54,11 @@ jest.mock("@/lib/db/plugins", () => ({
   setPluginConfig: (id: string, cfg: Record<string, unknown>) => setPluginConfigMock(id, cfg),
 }))
 
-import { PluginConfigForm } from "./plugin-config-form"
-import { usePluginsStore } from "@/stores/plugins"
+import { PluginConfigFormContent } from "./plugin-config-form"
+
+function renderForm() {
+  return render(<PluginConfigFormContent pluginId="p_conf" onClose={() => undefined} />)
+}
 
 const schemaPlugin: PluginRow = {
   id: "p_conf",
@@ -85,18 +100,12 @@ beforeEach(() => {
   mockPlugin = schemaPlugin
   mockConfigComponentResult = null
   setPluginConfigMock.mockClear()
-  usePluginsStore.setState({ configTarget: { pluginId: "p_conf" } })
+  importPluginEntryMock.mockClear()
 })
 
-describe("PluginConfigForm", () => {
-  it("does not render when configTarget is null", () => {
-    usePluginsStore.setState({ configTarget: null })
-    render(<PluginConfigForm />)
-    expect(screen.queryByText("description")).not.toBeInTheDocument()
-  })
-
+describe("PluginConfigFormContent", () => {
   it("renders one field per declared schema property", () => {
-    render(<PluginConfigForm />)
+    renderForm()
     expect(screen.getByText("token")).toBeInTheDocument()
     expect(screen.getByText("maxItems")).toBeInTheDocument()
     expect(screen.getByText("privacyMode")).toBeInTheDocument()
@@ -104,7 +113,7 @@ describe("PluginConfigForm", () => {
   })
 
   it("hydrates fields from existing plugin.config when present", () => {
-    render(<PluginConfigForm />)
+    renderForm()
     const tokenInput = screen.getByLabelText("token") as HTMLInputElement
     expect(tokenInput.value).toBe("abc")
     const maxItemsInput = screen.getByLabelText("maxItems") as HTMLInputElement
@@ -112,7 +121,7 @@ describe("PluginConfigForm", () => {
   })
 
   it("save calls setPluginConfig with current values", () => {
-    render(<PluginConfigForm />)
+    renderForm()
     fireEvent.click(screen.getByText("save"))
     expect(setPluginConfigMock).toHaveBeenCalledWith(
       "p_conf",
@@ -120,12 +129,61 @@ describe("PluginConfigForm", () => {
     )
   })
 
+  it("uses title as the label, sorts fields by order, and shows a deprecation note", () => {
+    mockPlugin = {
+      ...schemaPlugin,
+      manifest: {
+        id: "p_conf",
+        configSchema: {
+          type: "object",
+          properties: {
+            second: { type: "string", order: 2, title: "Second Field" },
+            first: {
+              type: "string",
+              order: 1,
+              title: "First Field",
+              deprecationMessage: "use somethingElse",
+            },
+          },
+        },
+      },
+      config: {},
+    }
+    renderForm()
+    // title is used as the label instead of the raw key
+    expect(screen.getByText("First Field")).toBeInTheDocument()
+    expect(screen.getByText("Second Field")).toBeInTheDocument()
+    // deprecationMessage surfaced
+    expect(screen.getByText(/use somethingElse/)).toBeInTheDocument()
+    // order: First (order 1) renders before Second (order 2)
+    const text = document.body.textContent ?? ""
+    expect(text.indexOf("First Field")).toBeLessThan(text.indexOf("Second Field"))
+  })
+
+  it("falls back to markdownDescription text when description is absent", () => {
+    mockPlugin = {
+      ...schemaPlugin,
+      manifest: {
+        id: "p_conf",
+        configSchema: {
+          type: "object",
+          properties: {
+            token: { type: "string", markdownDescription: "Your **API** token" },
+          },
+        },
+      },
+      config: {},
+    }
+    renderForm()
+    expect(screen.getByText("Your **API** token")).toBeInTheDocument()
+  })
+
   it("renders the noSchema fallback when manifest has no configSchema", () => {
     mockPlugin = {
       ...schemaPlugin,
       manifest: { id: "p_conf" },
     }
-    render(<PluginConfigForm />)
+    renderForm()
     expect(screen.getByText("noSchema")).toBeInTheDocument()
   })
 
@@ -143,7 +201,7 @@ describe("PluginConfigForm", () => {
       },
       config: {},
     }
-    render(<PluginConfigForm />)
+    renderForm()
     const textarea = screen.getByLabelText("tags") as HTMLTextAreaElement
     expect(textarea.placeholder).toBe("arrayPlaceholder")
   })
@@ -162,14 +220,8 @@ describe("PluginConfigForm", () => {
       },
       config: {},
     }
-    render(<PluginConfigForm />)
+    renderForm()
     expect(screen.getByText("unsupportedField")).toBeInTheDocument()
-  })
-
-  it("applies mobile-first w-[95vw] width to DialogContent", () => {
-    render(<PluginConfigForm />)
-    const dialog = screen.getByRole("dialog")
-    expect(dialog.className).toContain("w-[95vw]")
   })
 
   it("renders nested object fields recursively", () => {
@@ -193,7 +245,7 @@ describe("PluginConfigForm", () => {
       },
       config: { db: { host: "prod.db", port: 5433 } },
     }
-    render(<PluginConfigForm />)
+    renderForm()
     expect(screen.getByText("host")).toBeInTheDocument()
     expect(screen.getByText("port")).toBeInTheDocument()
     expect(screen.getByDisplayValue("prod.db")).toBeInTheDocument()
@@ -229,7 +281,7 @@ describe("PluginConfigForm", () => {
         ],
       },
     }
-    render(<PluginConfigForm />)
+    renderForm()
     expect(screen.getAllByText("url")).toHaveLength(2)
     expect(screen.getByDisplayValue("https://a")).toBeInTheDocument()
     expect(screen.getByDisplayValue("https://b")).toBeInTheDocument()
@@ -251,9 +303,30 @@ describe("PluginConfigForm", () => {
       },
       config: { email: "not-an-email" },
     }
-    render(<PluginConfigForm />)
+    renderForm()
     const save = screen.getByText("save").closest("button") as HTMLButtonElement
     expect(save.disabled).toBe(true)
+  })
+
+  it("renders validation errors via i18n keys, never hard-coded English", () => {
+    // The next-intl mock returns the key verbatim, so a localized message
+    // surfaces as its `validation.*` key. If any branch regressed to a
+    // hard-coded English string, the rendered text would not match the key.
+    mockPlugin = {
+      ...schemaPlugin,
+      manifest: {
+        ...schemaPlugin.manifest,
+        configSchema: {
+          type: "object",
+          properties: {
+            port: { type: "number", min: 1, max: 65535, default: 8080 },
+          },
+        },
+      },
+      config: { port: 70000 },
+    }
+    renderForm()
+    expect(screen.getByText("validation.max")).toBeInTheDocument()
   })
 
   it("min/max bounds on a number reject out-of-range values", () => {
@@ -270,7 +343,7 @@ describe("PluginConfigForm", () => {
       },
       config: { port: 70000 },
     }
-    render(<PluginConfigForm />)
+    renderForm()
     const save = screen.getByText("save").closest("button") as HTMLButtonElement
     expect(save.disabled).toBe(true)
   })
@@ -306,7 +379,7 @@ describe("PluginConfigForm", () => {
       },
       config: { auth: { __variant: "oauth", clientId: "abc", secret: "xyz" } },
     }
-    render(<PluginConfigForm />)
+    renderForm()
     expect(screen.getByText("oneOfVariant")).toBeInTheDocument()
     expect(screen.getByText("clientId")).toBeInTheDocument()
     expect(screen.getByText("secret")).toBeInTheDocument()
@@ -318,8 +391,9 @@ describe("PluginConfigForm", () => {
     mockConfigComponentResult = ({ config }) => (
       <div data-testid="custom-config">custom:{String(config.greeting)}</div>
     )
-    render(<PluginConfigForm />)
+    renderForm()
     expect(await screen.findByTestId("custom-config")).toHaveTextContent("custom:hi")
+    expect(importPluginEntryMock).toHaveBeenCalledWith("resolved-entry", "p_conf")
   })
 
   it("custom configComponent onSave persists via setPluginConfig", async () => {
@@ -327,7 +401,7 @@ describe("PluginConfigForm", () => {
     mockConfigComponentResult = ({ onSave }) => (
       <button onClick={() => void onSave({ greeting: "bye" })}>save-custom</button>
     )
-    render(<PluginConfigForm />)
+    renderForm()
     fireEvent.click(await screen.findByText("save-custom"))
     await Promise.resolve()
     expect(setPluginConfigMock).toHaveBeenCalledWith("p_conf", { greeting: "bye" })
@@ -346,7 +420,7 @@ describe("PluginConfigForm", () => {
       },
     }
     mockConfigComponentResult = null // bridge resolves null → fallback
-    render(<PluginConfigForm />)
+    renderForm()
     expect(await screen.findByText("token")).toBeInTheDocument()
   })
 
@@ -374,7 +448,7 @@ describe("PluginConfigForm", () => {
       },
       config: { db: { host: "x" }, servers: [{ url: "a" }] },
     }
-    render(<PluginConfigForm />)
+    renderForm()
     fireEvent.click(screen.getByText("save"))
     await Promise.resolve()
     expect(setPluginConfigMock).toHaveBeenCalledWith(

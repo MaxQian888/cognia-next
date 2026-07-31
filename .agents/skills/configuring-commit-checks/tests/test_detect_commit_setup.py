@@ -120,7 +120,7 @@ class DetectCommitSetupTests(unittest.TestCase):
         payload = json.loads(result.stdout)
 
         self.assertEqual(result.returncode, 0)
-        self.assertEqual(payload["detected_root"], str(repo_root))
+        self.assertEqual(Path(payload["detected_root"]).resolve(), repo_root.resolve())
         self.assertEqual(payload["recommended_tool"], "lefthook")
         self.assertEqual(payload["recommendation"], "preserve-existing")
 

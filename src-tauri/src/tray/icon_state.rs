@@ -75,6 +75,22 @@ pub fn apply<R: Runtime>(app: &AppHandle<R>, state: TrayIconState) -> Result<(),
     Ok(())
 }
 
+/// Dispatch [`apply`] to the main thread. `apply` touches AppKit
+/// (`NSStatusItem` icon swap; dropping the `tray_by_id` handle can tear down
+/// the old status item), and AppKit traps (EXC_BREAKPOINT in
+/// `removeStatusItem`) when that runs off-main — which is exactly where async
+/// Tauri commands execute (tokio workers). Fire-and-forget: apply errors are
+/// logged, not returned, since the caller can't await the main loop anyway.
+pub fn apply_on_main<R: Runtime>(app: &AppHandle<R>, state: TrayIconState) -> Result<(), String> {
+    let handle = app.clone();
+    app.run_on_main_thread(move || {
+        if let Err(e) = apply(&handle, state) {
+            log::warn!("tray: applying icon state failed: {e}");
+        }
+    })
+    .map_err(|e| e.to_string())
+}
+
 fn load_image_for<R: Runtime>(
     app: &AppHandle<R>,
     state: TrayIconState,
@@ -99,7 +115,10 @@ fn load_image_for<R: Runtime>(
         TrayIconState::Error => "icons/tray/error.png",
         TrayIconState::Muted => "icons/tray/muted.png",
     };
-    if let Ok(resolved) = app.path().resolve(file, tauri::path::BaseDirectory::Resource) {
+    if let Ok(resolved) = app
+        .path()
+        .resolve(file, tauri::path::BaseDirectory::Resource)
+    {
         if resolved.exists() {
             return Image::from_path(&resolved)
                 .map(Image::to_owned)

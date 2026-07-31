@@ -1,0 +1,35 @@
+{
+  "dialog": {
+    "applyButton": "Apply",
+    "applying": "Applying…",
+    "cancel": "Cancel",
+    "description": "Bring chat history from another AI assistant into Cognia. Pick a file and we'll auto-detect the format.",
+    "done": "Close",
+    "loading": "Reading file…",
+    "pickButton": "Choose file…",
+    "pickPrompt": "Pick a JSON export to begin.",
+    "title": "Import conversations",
+    "tryAgain": "Try another file"
+  },
+  "platform": {
+    "chatgpt": {
+      "hint": "ChatGPT Data Export → conversations.json"
+    },
+    "claude": {
+      "hint": "Claude.ai Data Export → conversations.json"
+    },
+    "gemini": {
+      "hint": "Google Takeout → Bard or Gemini → MyActivity.json"
+    }
+  },
+  "preview": {
+    "detected": "Detected format: {format}",
+    "row": "{count, plural, =1 {# message} other {# messages}}",
+    "summary": "{sessions, plural, =1 {# conversation} other {# conversations}} · {messages, plural, =1 {# message} other {# messages}}"
+  },
+  "summary": {
+    "body": "Added {sessions, plural, =1 {# conversation} other {# conversations}} and {messages, plural, =1 {# message} other {# messages}} from {format}.",
+    "success": "Imported {sessions, plural, =1 {# conversation} other {# conversations}} ({messages, plural, =1 {# message} other {# messages}}).",
+    "title": "Import complete"
+  }
+}

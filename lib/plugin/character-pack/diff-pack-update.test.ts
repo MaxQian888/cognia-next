@@ -4,7 +4,7 @@
  * Pure function under test, no Dexie or registry plumbing.
  */
 
-import type { Character, PackPristineSnapshot } from "@/lib/claude/types"
+import type { Character, PackPristineSnapshot } from "@cognia/agent-config-types"
 import type { PluginCharacterDef } from "@/types/plugin/plugin-character-pack"
 import { buildPristineSnapshot, diffPackUpdate, PACK_MANAGED_FIELD_LIST } from "./diff-pack-update"
 
@@ -46,7 +46,7 @@ function makeRow(overrides: Partial<Character> = {}): Character {
 describe("buildPristineSnapshot", () => {
   it("captures every pack-managed field listed in PACK_MANAGED_FIELD_LIST", () => {
     const overlay = makeOverlay({
-      avatarImage: { tauriPath: "./alice.png" },
+      avatarImage: { webDataUrl: "data:image/png;base64,AAAA" },
       persona: { tone: "warm" },
       voiceProfile: { provider: "openai", voiceId: "alloy" },
     })
@@ -57,7 +57,7 @@ describe("buildPristineSnapshot", () => {
       expect(Object.prototype.hasOwnProperty.call(snap, field)).toBe(true)
     }
     expect(snap.systemPrompt).toBe("v2 prompt")
-    expect(snap.avatarImage?.tauriPath).toBe("./alice.png")
+    expect(snap.avatarImage?.webDataUrl).toBe("data:image/png;base64,AAAA")
     expect(snap.voiceProfile?.voiceId).toBe("alloy")
   })
 

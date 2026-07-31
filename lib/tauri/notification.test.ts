@@ -1,3 +1,4 @@
+/** @jest-environment jsdom */
 import { ensureNotificationPermission, notify } from "./notification"
 
 jest.mock("@tauri-apps/plugin-notification", () => ({

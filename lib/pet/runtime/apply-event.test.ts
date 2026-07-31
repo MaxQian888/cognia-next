@@ -35,6 +35,23 @@ describe("applyPetEvent", () => {
     expect(res.profile.needs.energy).toBeGreaterThan(50)
   })
 
+  it("plays the new interaction one-shots and restores the right needs", () => {
+    const base = {
+      needs: { energy: 30, mood: 40, bond: 40, lastTickAt: new Date(0).toISOString() },
+    }
+    const slept = applyPetEvent(profile(base), event("slept"), 0)
+    expect(slept.oneShots).toContain("sleepy")
+    expect(slept.profile.needs.energy).toBeGreaterThan(30)
+
+    const cleaned = applyPetEvent(profile(base), event("cleaned"), 0)
+    expect(cleaned.oneShots).toContain("happy")
+    expect(cleaned.profile.needs.mood).toBeGreaterThan(40)
+
+    const treated = applyPetEvent(profile(base), event("treated"), 0)
+    expect(treated.oneShots).toContain("love")
+    expect(treated.profile.needs.bond).toBeGreaterThan(40)
+  })
+
   it("evolves when the stage changes (and is not an egg)", () => {
     // jump from level 4 (baby) into juvenile by crossing 800 → 1000 xp boundary
     const res = applyPetEvent(
@@ -48,6 +65,67 @@ describe("applyPetEvent", () => {
     expect(res.oneShots).toContain("evolving")
   })
 
+  it("stamps the care-quality flavor at the moment of evolution", () => {
+    const evolve = (careQuality: number) =>
+      applyPetEvent(
+        profile({
+          xp: 990,
+          level: 4,
+          stage: "baby",
+          care: {
+            lowSince: null,
+            condition: "well",
+            notifiedAt: null,
+            everUnwell: false,
+            careQuality,
+          },
+        }),
+        event("goalComplete", 200),
+        0
+      )
+    expect(evolve(90).profile.evolutionFlavor).toBe("radiant")
+    expect(evolve(50).profile.evolutionFlavor).toBe("normal")
+    expect(evolve(10).profile.evolutionFlavor).toBe("plain")
+  })
+
+  it("never changes a stored flavor outside an evolution", () => {
+    const res = applyPetEvent(
+      profile({ evolutionFlavor: "radiant", xp: 10, level: 1 }),
+      event("fed"),
+      0
+    )
+    expect(res.profile.evolutionFlavor).toBe("radiant")
+    expect(res.evolvedTo).toBeNull()
+  })
+
+  it("uses the care state derived from THIS event's needs at evolution (fresh-care regression)", () => {
+    // careQuality EMA moves toward the current needs level on derive; seed a
+    // borderline quality so the fresh derive tips it across the radiant line
+    // only if care is computed BEFORE the stage/flavor step.
+    const start = 1_000_000
+    const res = applyPetEvent(
+      profile({
+        xp: 990,
+        level: 4,
+        stage: "baby",
+        needs: { energy: 100, mood: 100, bond: 100, lastTickAt: new Date(start).toISOString() },
+        care: {
+          lowSince: null,
+          condition: "well",
+          notifiedAt: null,
+          everUnwell: false,
+          careQuality: 75.5, // stale value sits below radiant only pre-derive
+        },
+      }),
+      event("goalComplete", 200),
+      start
+    )
+    // The flavor must match the care the RESULT reports, not the stale input.
+    expect(res.profile.evolutionFlavor).toBe(
+      res.care.careQuality > 75 ? "radiant" : res.care.careQuality < 40 ? "plain" : "normal"
+    )
+  })
+
   it("keeps the egg stage and never evolves while unhatched", () => {
     const res = applyPetEvent(
       profile({ soul: null, stage: "egg", xp: 0 }),
@@ -58,10 +136,205 @@ describe("applyPetEvent", () => {
     expect(res.evolvedTo).toBeNull()
   })
 
-  it("does not change needs for non-interaction events", () => {
-    const p = profile()
-    const res = applyPetEvent(p, event("thinking"), 5000)
-    expect(res.profile.needs).toBe(p.needs)
+  it("settles decay (but adds no restore) for non-interaction events", () => {
+    // Stored needs are mid-range and last settled an hour before `now`, so a
+    // non-interaction event must advance `lastTickAt` and let decay lower them —
+    // this is what lets an idle/heartbeat tick drive the neglect loop.
+    const start = 1_000_000
+    const p = profile({
+      needs: { energy: 60, mood: 60, bond: 60, lastTickAt: new Date(start).toISOString() },
+    })
+    const res = applyPetEvent(p, event("thinking"), start + 3_600_000)
+    expect(res.profile.needs.lastTickAt).toBe(new Date(start + 3_600_000).toISOString())
+    expect(res.profile.needs.energy).toBeLessThan(60)
     expect(res.oneShots).toEqual([])
+  })
+
+  it("becomes unwell from elapsed-time decay alone on an idle tick", () => {
+    // Needs start healthy but were last settled long ago; the idle event settles
+    // decay forward, dropping energy/mood low, and (with lowSince already set)
+    // crosses the sustain threshold — the loop closes without any interaction.
+    const start = 1_000_000
+    const p = profile({
+      needs: { energy: 100, mood: 100, bond: 100, lastTickAt: new Date(start).toISOString() },
+      care: {
+        lowSince: start,
+        condition: "well",
+        notifiedAt: null,
+        everUnwell: false,
+        careQuality: 50,
+      },
+    })
+    // 48h later: default decay rates pull energy/mood under the 25 threshold.
+    const res = applyPetEvent(p, event("idle"), start + 48 * 3_600_000)
+    expect(res.profile.needs.energy).toBeLessThan(25)
+    expect(res.becameUnwell).toBe(true)
+    expect(res.care.condition).toBe("unwell")
+  })
+
+  it("grows stats from a work event and reports the grown keys", () => {
+    const res = applyPetEvent(profile(), event("goalComplete"), 1000)
+    expect(res.statProgress.patience).toBeGreaterThan(0)
+    expect(res.statProgress.wisdom).toBeGreaterThan(0)
+    expect(res.grewStats).toEqual(expect.arrayContaining(["patience", "wisdom"]))
+    expect(res.profile.statProgress).toEqual(res.statProgress)
+  })
+
+  it("accumulates stat growth on top of prior progress", () => {
+    const prior = profile({
+      statProgress: { debugging: 0, patience: 10, chaos: 0, wisdom: 0, snark: 0 },
+    })
+    const res = applyPetEvent(prior, event("goalComplete"), 1000)
+    expect(res.statProgress.patience).toBeCloseTo(11.5) // 10 + 1.5
+  })
+
+  it("derives a care state and reports no transition for a healthy pet", () => {
+    const res = applyPetEvent(profile(), event("thinking"), 1000)
+    expect(res.care.condition).toBe("well")
+    expect(res.becameUnwell).toBe(false)
+    expect(res.recovered).toBe(false)
+    expect(res.profile.care).toEqual(res.care)
+  })
+
+  it("flags becameUnwell once sustained low needs cross the threshold", () => {
+    const start = 1_000_000
+    const lowNeeds = {
+      energy: 5,
+      mood: 5,
+      bond: 50,
+      lastTickAt: new Date(start).toISOString(),
+    }
+    const p = profile({
+      needs: lowNeeds,
+      care: {
+        lowSince: start,
+        condition: "well",
+        notifiedAt: null,
+        everUnwell: false,
+        careQuality: 50,
+      },
+    })
+    const res = applyPetEvent(p, event("idle"), start + 7 * 3_600_000)
+    expect(res.becameUnwell).toBe(true)
+    expect(res.care.condition).toBe("unwell")
+  })
+
+  describe("coins + streak", () => {
+    const DAY = new Date("2026-07-02T12:00:00").getTime()
+    const YESTERDAY_KEY = "2026-07-01"
+
+    it("mints table coins for a user interaction and starts the streak", () => {
+      const res = applyPetEvent(profile(), event("fed"), DAY)
+      expect(res.coinsEarned).toBe(2) // COIN_AWARD.fed × 1
+      expect(res.profile.coins).toBe(2)
+      expect(res.profile.streak).toEqual({ days: 1, lastDay: "2026-07-02" })
+    })
+
+    it("applies the streak multiplier reached by this event", () => {
+      const p = profile({ coins: 10, streak: { days: 6, lastDay: YESTERDAY_KEY } })
+      const res = applyPetEvent(p, event("played"), DAY)
+      // Advancing to day 7 → ×1.5 on played's 3 coins = 4 (floored).
+      expect(res.profile.streak).toEqual({ days: 7, lastDay: "2026-07-02" })
+      expect(res.coinsEarned).toBe(4)
+      expect(res.profile.coins).toBe(14)
+    })
+
+    it("does not re-increment the streak on a same-day repeat", () => {
+      const p = profile({ streak: { days: 3, lastDay: "2026-07-02" } })
+      const res = applyPetEvent(p, event("fed"), DAY)
+      expect(res.profile.streak).toEqual({ days: 3, lastDay: "2026-07-02" })
+    })
+
+    it("mints coins for milestones without advancing the streak", () => {
+      const p = profile({ streak: { days: 3, lastDay: YESTERDAY_KEY } })
+      const res = applyPetEvent(p, { source: "goal", kind: "goalComplete", at: DAY }, DAY)
+      expect(res.profile.streak).toEqual({ days: 3, lastDay: YESTERDAY_KEY })
+      // 12 × 1.25 (3-day streak) = 15.
+      expect(res.coinsEarned).toBe(15)
+    })
+
+    it("never advances the streak for non-user interaction sources", () => {
+      const res = applyPetEvent(profile(), { source: "workflow", kind: "fed", at: DAY }, DAY)
+      expect(res.profile.streak).toEqual({ days: 0, lastDay: null })
+      expect(res.coinsEarned).toBe(2)
+    })
+
+    it("honors an explicit meta.coins amount over the table", () => {
+      const res = applyPetEvent(
+        profile(),
+        { source: "workflow", kind: "workflowRun", meta: { coins: 9 }, at: DAY },
+        DAY
+      )
+      expect(res.coinsEarned).toBe(9)
+    })
+
+    it("applies an item's differentiated restore instead of the base effect", () => {
+      const base = {
+        needs: { energy: 30, mood: 50, bond: 50, lastTickAt: new Date(DAY).toISOString() },
+      }
+      const feast = applyPetEvent(
+        profile(base),
+        { source: "user", kind: "fed", meta: { itemId: "royal-feast" }, at: DAY },
+        DAY
+      )
+      // royal-feast restores +45 energy (base fed is +25).
+      expect(feast.profile.needs.energy).toBe(75)
+      expect(feast.oneShots).toContain("fed")
+
+      const unknown = applyPetEvent(
+        profile(base),
+        { source: "user", kind: "fed", meta: { itemId: "not-a-thing" }, at: DAY },
+        DAY
+      )
+      expect(unknown.profile.needs.energy).toBe(55) // base fed +25
+    })
+
+    it("earns nothing on passive kinds and normalizes a legacy coin-less profile", () => {
+      const res = applyPetEvent(profile(), event("idle"), DAY)
+      expect(res.coinsEarned).toBe(0)
+      expect(res.profile.coins).toBe(0)
+      expect(res.profile.streak).toEqual({ days: 0, lastDay: null })
+    })
+
+    it("reports streakAdvancedTo only when the day count actually grows", () => {
+      // First-ever interaction → day 1.
+      expect(applyPetEvent(profile(), event("fed"), DAY).streakAdvancedTo).toBe(1)
+      // Next-day continuation → day 4.
+      const cont = applyPetEvent(
+        profile({ streak: { days: 3, lastDay: YESTERDAY_KEY } }),
+        event("fed"),
+        DAY
+      )
+      expect(cont.streakAdvancedTo).toBe(4)
+      // Same-day repeat → no advance.
+      const repeat = applyPetEvent(
+        profile({ streak: { days: 3, lastDay: "2026-07-02" } }),
+        event("fed"),
+        DAY
+      )
+      expect(repeat.streakAdvancedTo).toBeNull()
+      // A gap resets to day 1 — NOT an advance past the previous count.
+      const lapsed = applyPetEvent(
+        profile({ streak: { days: 5, lastDay: "2026-06-20" } }),
+        event("fed"),
+        DAY
+      )
+      expect(lapsed.profile.streak).toEqual({ days: 1, lastDay: "2026-07-02" })
+      expect(lapsed.streakAdvancedTo).toBeNull()
+      // Non-interaction events never advance.
+      expect(applyPetEvent(profile(), event("idle"), DAY).streakAdvancedTo).toBeNull()
+    })
+
+    it("mints a level-up dividend of newLevel × 5 on top of the event's coins", () => {
+      // 90 + 25 xp → level 2: dividend 10 on top of goalComplete's 12.
+      const res = applyPetEvent(profile({ xp: 90 }), event("goalComplete"), DAY)
+      expect(res.leveledUpTo).toBe(2)
+      expect(res.coinsEarned).toBe(12 + 10)
+      expect(res.profile.coins).toBe(22)
+      // No level-up → no dividend.
+      const flat = applyPetEvent(profile(), event("fed"), DAY)
+      expect(flat.leveledUpTo).toBeNull()
+      expect(flat.coinsEarned).toBe(2)
+    })
   })
 })

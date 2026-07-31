@@ -28,7 +28,7 @@ jest.mock("@/stores/settings", () => ({
 }))
 
 const logWarn = jest.fn()
-jest.mock("@/lib/logging", () => ({
+jest.mock("@cognia/logging", () => ({
   loggers: {
     ui: { warn: (...args: unknown[]) => logWarn(...args), info: jest.fn(), error: jest.fn() },
   },
@@ -52,7 +52,25 @@ jest.mock("@/lib/plugin", () => ({
 }))
 
 import { ZoomShortcuts } from "./zoom-shortcuts"
+import { AppShortcutDispatcher } from "@/components/providers/app-shortcut-dispatcher"
 import { DEFAULT_ZOOM, ZOOM_STEP } from "@/lib/tauri/webview-zoom"
+import { __resetAppRuntimeForTesting } from "@/lib/shortcuts/app-runtime"
+import { __resetAppKeybindingStoreForTesting } from "@/stores/shortcuts/app-keybinding-store"
+import {
+  setContextKeys,
+  __resetContextKeysForTesting,
+} from "@/lib/plugin/context-keys/context-key-store"
+
+// ZoomShortcuts registers the actions; the single dispatcher fires them. The
+// zoom descriptors carry `when: "platform.tauri"`, so the context key gates them.
+function renderZoom() {
+  return render(
+    <>
+      <AppShortcutDispatcher />
+      <ZoomShortcuts />
+    </>
+  )
+}
 
 beforeEach(() => {
   jest.useFakeTimers()
@@ -61,6 +79,11 @@ beforeEach(() => {
   logWarn.mockReset()
   settingsRef.loaded = true
   settingsRef.webviewZoom = DEFAULT_ZOOM
+  __resetAppRuntimeForTesting()
+  __resetAppKeybindingStoreForTesting()
+  __resetContextKeysForTesting()
+  localStorage.clear()
+  setContextKeys({ "platform.tauri": true })
 })
 
 afterEach(() => {
@@ -74,7 +97,7 @@ function press(key: string, mod: "ctrl" | "meta" = "ctrl") {
 }
 
 test("Ctrl+= triggers zoom-in by one step", async () => {
-  render(<ZoomShortcuts />)
+  renderZoom()
   await act(async () => {
     press("=")
   })
@@ -84,7 +107,7 @@ test("Ctrl+= triggers zoom-in by one step", async () => {
 })
 
 test("Ctrl++ also triggers zoom-in (shifted form)", async () => {
-  render(<ZoomShortcuts />)
+  renderZoom()
   await act(async () => {
     press("+")
   })
@@ -94,7 +117,7 @@ test("Ctrl++ also triggers zoom-in (shifted form)", async () => {
 })
 
 test("Ctrl+- triggers zoom-out by one step", async () => {
-  render(<ZoomShortcuts />)
+  renderZoom()
   await act(async () => {
     press("-")
   })
@@ -105,7 +128,7 @@ test("Ctrl+- triggers zoom-out by one step", async () => {
 
 test("Ctrl+0 resets zoom to default", async () => {
   settingsRef.webviewZoom = 1.5
-  render(<ZoomShortcuts />)
+  renderZoom()
   await act(async () => {
     press("0")
   })
@@ -113,7 +136,7 @@ test("Ctrl+0 resets zoom to default", async () => {
 })
 
 test("Cmd+= works on macOS", async () => {
-  render(<ZoomShortcuts />)
+  renderZoom()
   await act(async () => {
     press("=", "meta")
   })
@@ -121,7 +144,7 @@ test("Cmd+= works on macOS", async () => {
 })
 
 test("non-mod keys are ignored", async () => {
-  render(<ZoomShortcuts />)
+  renderZoom()
   await act(async () => {
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "=" }))
   })
@@ -129,7 +152,7 @@ test("non-mod keys are ignored", async () => {
 })
 
 test("debounced save fires after the timer", async () => {
-  render(<ZoomShortcuts />)
+  renderZoom()
   await act(async () => {
     press("=")
   })
@@ -146,7 +169,7 @@ test("debounced save fires after the timer", async () => {
 
 test("logs a warning when persist rejects", async () => {
   save.mockRejectedValueOnce(new Error("io"))
-  render(<ZoomShortcuts />)
+  renderZoom()
   await act(async () => {
     press("=")
   })
@@ -163,7 +186,7 @@ test("logs a warning when persist rejects", async () => {
 })
 
 test("removes the listener on unmount", async () => {
-  const { unmount } = render(<ZoomShortcuts />)
+  const { unmount } = renderZoom()
   unmount()
   await act(async () => {
     press("=")

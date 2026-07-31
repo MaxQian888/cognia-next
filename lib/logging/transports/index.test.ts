@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  *
  * Smoke test for the transports barrel — re-exports ConsoleTransport,
- * IndexedDBTransport, RemoteTransport, NativeTransport, OtelTransport,
+ * IndexedDBTransport, RemoteTransport, NativeTransport,
  * LangfuseTransport plus the retry-queue store factory and the Sentry /
  * Loggly transforms.
  */
@@ -27,13 +27,6 @@ describe("transports barrel exports", () => {
     expect(typeof transports.createRemoteTransport).toBe("function")
     expect(typeof transports.sentryTransform).toBe("function")
     expect(typeof transports.logglyTransform).toBe("function")
-  })
-
-  it("re-exports otel transport class + factory + helpers", () => {
-    expect(typeof transports.OtelTransport).toBe("function")
-    expect(typeof transports.createOtelTransport).toBe("function")
-    expect(typeof transports.getOtelContext).toBe("function")
-    expect(typeof transports.withOtelSpan).toBe("function")
   })
 
   it("re-exports langfuse transport class + factory", () => {

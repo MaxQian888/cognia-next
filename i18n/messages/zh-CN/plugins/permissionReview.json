@@ -1,0 +1,26 @@
+{
+  "auditEmpty": "尚无审计事件。",
+  "auditLogTitle": "最近审计事件",
+  "close": "关闭",
+  "colActions": "",
+  "colDeclared": "声明",
+  "colGranted": "已授予",
+  "colOptional": "可选",
+  "colPermission": "权限",
+  "colTier": "等级",
+  "description": "查看该插件声明的、当前已授予的权限，并按需调整运行时授权。危险权限会高亮显示。",
+  "empty": "此插件未声明或持有任何权限。",
+  "grant": "授予",
+  "revoke": "撤销",
+  "revokeAll": "全部撤销",
+  "tierHint": {
+    "confirm": "每次调用都弹出授权确认。",
+    "forbid": "始终拒绝 — 即使 manifest 声明了。",
+    "silent": "允许已授权的调用静默执行。"
+  },
+  "tierLabel": {
+    "confirm": "每次确认",
+    "forbid": "禁止",
+    "silent": "静默"
+  }
+}

@@ -1,0 +1,158 @@
+{
+  "empty": {
+    "hint": "Agent 运行、工具调用、对话和工作流都会在此记录 span。发起一次对话或运行一个 Agent，或放宽时间范围以查看更早的遥测数据。",
+    "title": "该时间窗口内暂无遥测数据",
+    "widen": "放宽至近 30 天"
+  },
+  "export": {
+    "dashboardJson": "导出仪表盘为 JSON",
+    "importDashboard": "导入仪表盘…",
+    "importFailed": "导入失败：仪表盘文件无效",
+    "imported": "已导入仪表盘配置",
+    "label": "导出",
+    "noTraces": "该时间窗口内无 Trace 可导出",
+    "saveFailed": "导出失败：{message}",
+    "saved": "已保存至 {location}",
+    "tracesCsv": "导出 Trace 为 CSV"
+  },
+  "filters": {
+    "clear": "清除",
+    "dims": {
+      "model": "模型",
+      "operation": "操作",
+      "session": "会话",
+      "surface": "来源",
+      "tool": "工具"
+    },
+    "empty": "无可选项",
+    "search": "搜索…"
+  },
+  "metricToggle": {
+    "cost": "成本",
+    "errors": "错误",
+    "label": "度量",
+    "spans": "Span"
+  },
+  "noData": "该时间窗口内暂无数据",
+  "panels": {
+    "byModel": "按模型分布",
+    "bySurface": "按来源分布",
+    "cacheHitRate": "缓存命中率",
+    "costOverTime": "成本走势",
+    "errorRate": "错误率",
+    "errorRateOverTime": "错误率",
+    "latencyPercentiles": "延迟分位",
+    "p95Latency": "延迟 (p95)",
+    "recentTraces": "最近 Trace",
+    "requestRate": "请求速率",
+    "tokenThroughput": "Token 吞吐",
+    "totalCost": "总成本",
+    "totalSpans": "Span 总数"
+  },
+  "range": {
+    "absolute": "绝对范围",
+    "apply": "应用",
+    "custom": "自定义范围",
+    "from": "起始",
+    "presets": {
+      "15m": "近 15 分钟",
+      "1h": "近 1 小时",
+      "24h": "近 24 小时",
+      "30d": "近 30 天",
+      "5m": "近 5 分钟",
+      "6h": "近 6 小时",
+      "7d": "近 7 天"
+    },
+    "quickRanges": "快捷范围",
+    "to": "结束"
+  },
+  "refresh": {
+    "hoursAgo": "{count} 小时前",
+    "justNow": "刚刚",
+    "label": "自动刷新",
+    "minutesAgo": "{count} 分钟前",
+    "off": "关闭",
+    "refreshNow": "立即刷新",
+    "secondsAgo": "{count} 秒前"
+  },
+  "series": {
+    "cacheCreation": "缓存写入",
+    "cacheRead": "缓存读取",
+    "cost": "成本",
+    "errorRate": "错误率",
+    "input": "输入",
+    "output": "输出",
+    "p50": "p50",
+    "p95": "p95",
+    "p99": "p99",
+    "perSec": "请求/秒"
+  },
+  "settings": {
+    "data": {
+      "clearAll": "清空全部遥测",
+      "clearCancel": "取消",
+      "clearConfirm": "全部清空",
+      "clearConfirmBody": "此操作将永久删除所有已存储的 span。在记录到新遥测数据前仪表盘将为空，且无法撤销。",
+      "clearConfirmTitle": "确认清空全部遥测？",
+      "cleared": "已清空 {count} 条 Trace",
+      "olderThan": "早于 {days} 天",
+      "prune": "清理",
+      "pruneDone": "已清理 {count} 条 Trace",
+      "stored": "已存储 {count} 个 span",
+      "title": "数据"
+    },
+    "defaults": {
+      "range": "默认时间范围",
+      "refresh": "自动刷新",
+      "title": "默认值"
+    },
+    "description": "调整可观测性仪表盘的阈值、面板与数据保留。",
+    "metrics": {
+      "cacheHitRate": "缓存命中率",
+      "cost": "窗口成本",
+      "errorRate": "错误率",
+      "latencyP95": "延迟 p95"
+    },
+    "panels": {
+      "description": "隐藏不需要的面板 —— 布局保持不变。",
+      "title": "面板"
+    },
+    "thresholds": {
+      "crit": "严重",
+      "description": "指标越过这些阈值时，其数值/图表会先转橙再转红。",
+      "reset": "重置",
+      "title": "阈值",
+      "warn": "警告"
+    },
+    "title": "仪表盘设置",
+    "unitFraction": "0–1 小数",
+    "unitMs": "毫秒",
+    "unitUsd": "美元"
+  },
+  "subtitle": "Agent 遥测 —— trace、token、成本与延迟。",
+  "title": "可观测性",
+  "toolbar": {
+    "edit": "编辑布局",
+    "lock": "锁定布局",
+    "resetLayout": "重置布局",
+    "settings": "仪表盘设置"
+  },
+  "traces": {
+    "cost": "成本",
+    "duration": "耗时",
+    "empty": "该时间窗口内暂无 Trace",
+    "root": "Trace",
+    "spans": "Span 数",
+    "started": "开始时间",
+    "surface": "来源"
+  },
+  "waterfall": {
+    "cost": "成本 {value}",
+    "empty": "该 Trace 暂无 span",
+    "spanCount": "{count} 个 span",
+    "title": "Trace 详情",
+    "toggleEvents": "展开/收起 span 详情",
+    "tokens": "{count} tokens",
+    "totalDuration": "耗时 {value}"
+  }
+}

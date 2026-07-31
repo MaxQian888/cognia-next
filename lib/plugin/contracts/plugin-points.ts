@@ -10,12 +10,33 @@
  * these definitions to avoid contract drift.
  */
 
+import type { PluginSurfaceFormFactor } from "@/types/plugin/plugin-surface"
+
 export type PluginPointKind = "ui-slot" | "hook" | "activation" | "runtime"
 export type PluginPointStability = "stable" | "experimental" | "deprecated"
 export type PluginPointStatus = "implemented" | "virtual" | "deprecated"
 export type PluginPointGovernanceMode = "warn" | "block"
 
 export type PluginPointHostKind = "jsx-mount" | "registration"
+
+/**
+ * The shape a slot expects its contributions to take.
+ *
+ * Without this a plugin author reads `statusbar.right` and `sidebar.right.top`
+ * and gets identical information from the contract, then guesses — so a status
+ * bar ends up with a full card in it. Declared per point rather than measured,
+ * because the answer is a property of the host region and the author needs it
+ * at authoring time, not at render time. For the cases where width genuinely
+ * varies (the context workbench's narrow/wide/focus modes), slot wrappers carry
+ * `container-type: inline-size` so plugin CSS can use `@container` instead.
+ *
+ *   - `icon`   a single square control; assume ~24-32px and no room for a label
+ *   - `row`    one item in a horizontal action row; keep it to a button or two
+ *   - `block`  full-width band stacked with host content; any height
+ *   - `panel`  an owned region with its own scroll; render a whole view
+ */
+/** @deprecated Use `PluginSurfaceFormFactor`; this alias remains source-compatible. */
+export type PluginPointFormFactor = PluginSurfaceFormFactor
 
 export interface PluginPointContract {
   id: string
@@ -36,6 +57,8 @@ export interface PluginPointContract {
    * Hook / runtime / activation contracts leave this undefined.
    */
   hostKind?: PluginPointHostKind
+  /** UI slots only — the shape the host region expects. See the type's doc. */
+  formFactor?: PluginPointFormFactor
   owner: string
   binding: string
   docs: string
@@ -121,6 +144,17 @@ export const CANONICAL_EXTENSION_POINTS = [
   "chat.message.after",
   "chat.message.actions",
   "chat.message.footer",
+  // Per-tool-call action row — plugins mount controls beneath an individual
+  // tool call (inspect / debug / export / rerun) without forking the message
+  // renderer. Context bag: `toolName` / `toolState` / `toolInput` /
+  // `messageId` / `sessionId`. Companion to the message-level
+  // `chat.message.actions` (which targets the whole message).
+  "chat.tool-call.actions",
+  // Per-message-part action row — UI companion to the
+  // `provider.message-renderer` runtime point: plugins that register a custom
+  // part TYPE can also mount actions beneath any rendered part. Context bag:
+  // `partType` / `messageId` / `sessionId` / `isStreaming`.
+  "chat.message-part.actions",
   "artifact.toolbar",
   "artifact.actions",
   "canvas.toolbar",
@@ -130,9 +164,66 @@ export const CANONICAL_EXTENSION_POINTS = [
   // with `goalId` / `status`.
   "goal.toolbar",
   "goal.detail.actions",
+  // Pet surfaces (main-window only — the transparent overlay window stays
+  // plugin-free by the three-window-role model). `pet.console.tab` fills the
+  // /pet console's host-owned "Plugins" tab (shown only when ≥1 contribution);
+  // `pet.panel.actions` is the action row in the interaction panel. Context
+  // bag: `level` / `stage` / `mood` / `condition` — safe aggregates only,
+  // never soul/bones data.
+  "pet.console.tab",
+  "pet.panel.actions",
   // Performance dashboard — plugins mount a tile/panel (e.g. a custom metric)
   // alongside the native Rust-sampled graphs.
   "perf.panel",
+  // Integrated terminal — plugins mount controls in the terminal dock's
+  // trailing toolbar (next to the shell picker / close). Each contribution
+  // receives a `context` bag with `sessionId` + `transport`.
+  "terminal.toolbar",
+  // Agent-Team workspace — plugins mount an insight/governance panel in the
+  // team overview tab (alongside the consensus/delegation views). Context bag:
+  // `teamId` / `status` / `teammateCount` / `taskCount` / `completedTaskCount`
+  // (ids + aggregates only).
+  "agent.team.panel",
+  // Agent-Team execution report — plugins mount a custom analytics section
+  // beneath the native KPI / taskline / token-burn cards in the activity
+  // report. Companion to `agent.team.panel` (governance) but report-scoped.
+  // Context bag: `teamId` / `reportId` / `status` / `traceSessionId` /
+  // `completedTasks` / `totalTokens` (ids + redacted aggregates only).
+  "agent.team.report",
+  // Per-teammate action row — plugins mount teammate-scoped controls inside
+  // each member's dropdown menu in the members panel (e.g. open transcript /
+  // send directive / attach a capability). Context bag: `teamId` /
+  // `teammateId` / `role` / `status` / `runtime` / `specialization`.
+  "agent.teammate.actions",
+  // Task-board card menu — plugins mount per-task actions inside each kanban
+  // card's "⋯" dropdown (e.g. push to an external tracker, generate
+  // subtasks). Context bag: `teamId` / `taskId` / `status` / `assignedTo` /
+  // `tags` (ids + labels only — no task description/result bodies).
+  "agent.team.task.actions",
+  // Task-board toolbar — plugins mount board-scoped controls next to the
+  // filter/swimlane toggles (e.g. import issues from an external tracker).
+  // Context bag: `teamId` + the active `filter` (tags/priorities/assignees).
+  "agent.team.board.toolbar",
+  // External-agent live session toolbar — plugins mount controls in the
+  // ACP/OpenCode/Codex run header (next to commands / config / fork) during a
+  // live external-agent session. Context bag: `sessionId` / `isExecuting` /
+  // `hasPlan` / `hasCommands`.
+  "agent.external-session.toolbar",
+  // Employee Digital Twin workbench (ADR-0003) — brings the twin panel to
+  // parity with the other panels: plugins mount contributed UI in its four
+  // main regions. Context bags carry ids + numeric aggregates ONLY (PII
+  // red-line — never chunk text, persona content, or source bodies):
+  //   • twin.panel.header   — header toolbar actions. Bag: `twinId` / `tab`.
+  //   • twin.persona.panel  — insight panel below the persona sub-tabs. Bag:
+  //     `twinId` / `entityCount` / `playbookCount` / `styleCount`.
+  //   • twin.settings.cards — extra card at the foot of the Settings column.
+  //     Bag: `twinId`.
+  //   • twin.overview.panel — metric tile beside the overview charts. Bag:
+  //     `twinId` / `sourceCount` / `chunkCount`.
+  "twin.panel.header",
+  "twin.persona.panel",
+  "twin.settings.cards",
+  "twin.overview.panel",
   "panel.header",
   "panel.footer",
   "settings.general",
@@ -163,6 +254,8 @@ export type CanonicalExtensionPoint = (typeof CANONICAL_EXTENSION_POINTS)[number
 const IMPLEMENTED_EXTENSION_POINTS = new Set<CanonicalExtensionPoint>([
   "sidebar.left.top",
   "sidebar.left.bottom",
+  "sidebar.right.top",
+  "sidebar.right.bottom",
   "toolbar.left",
   "toolbar.center",
   "toolbar.right",
@@ -179,13 +272,30 @@ const IMPLEMENTED_EXTENSION_POINTS = new Set<CanonicalExtensionPoint>([
   "chat.message.after",
   "chat.message.actions",
   "chat.message.footer",
+  "chat.tool-call.actions",
+  "chat.message-part.actions",
   "artifact.toolbar",
   "artifact.actions",
   "canvas.toolbar",
   "canvas.sidebar",
   "goal.toolbar",
   "goal.detail.actions",
+  "pet.console.tab",
+  "pet.panel.actions",
   "perf.panel",
+  "terminal.toolbar",
+  "agent.team.panel",
+  "agent.team.report",
+  "agent.teammate.actions",
+  "agent.team.task.actions",
+  "agent.team.board.toolbar",
+  "agent.external-session.toolbar",
+  "twin.panel.header",
+  "twin.persona.panel",
+  "twin.settings.cards",
+  "twin.overview.panel",
+  "panel.header",
+  "panel.footer",
   "settings.general",
   "settings.appearance",
   "settings.ai",
@@ -232,9 +342,97 @@ const REGISTRATION_HOST_EXTENSION_POINTS = new Set<CanonicalExtensionPoint>([
   "vscode.terminal.output",
 ])
 
+/**
+ * Shape each UI slot expects, keyed by point id. Exhaustive by type — a new
+ * `CanonicalExtensionPoint` will not compile until it is classified here, which
+ * is the point: an unclassified slot is one an author has to guess at.
+ *
+ * Read off the host binding rather than invented: `statusbar.*` mounts into a
+ * ~24px-tall bar, `chat.input.actions` into the composer's flex button row,
+ * `sidebar.right.*` into the context workbench's scrollable column.
+ */
+export const EXTENSION_POINT_FORM_FACTORS: Record<
+  CanonicalExtensionPoint,
+  PluginSurfaceFormFactor
+> = {
+  // Icon rails and bars — square controls, no room for a label.
+  "sidebar.left.top": "icon",
+  "sidebar.left.bottom": "icon",
+  "toolbar.left": "icon",
+  "toolbar.center": "icon",
+  "toolbar.right": "icon",
+  "statusbar.left": "icon",
+  "statusbar.center": "icon",
+  "statusbar.right": "icon",
+  "vscode.activity-bar": "icon",
+
+  // Horizontal action rows — a button or two alongside the host's own.
+  "chat.input.actions": "row",
+  "chat.input.menu": "row",
+  "chat.message.actions": "row",
+  "chat.message.footer": "row",
+  "chat.tool-call.actions": "row",
+  "chat.message-part.actions": "row",
+  "artifact.toolbar": "row",
+  "artifact.actions": "row",
+  "canvas.toolbar": "row",
+  "goal.toolbar": "row",
+  "goal.detail.actions": "row",
+  "pet.panel.actions": "row",
+  "terminal.toolbar": "row",
+  "agent.teammate.actions": "row",
+  "agent.team.task.actions": "row",
+  "agent.team.board.toolbar": "row",
+  "agent.external-session.toolbar": "row",
+  "panel.header": "row",
+  "panel.footer": "row",
+  "inbox.conversation.actions": "row",
+  "inbox.composer.actions": "row",
+  "inbox.draft.actions": "row",
+
+  // Full-width bands stacked with host content.
+  "chat.header": "block",
+  "chat.footer": "block",
+  "chat.input.above": "block",
+  "chat.input.below": "block",
+  "chat.message.before": "block",
+  "chat.message.after": "block",
+  "twin.panel.header": "block",
+  "twin.settings.cards": "block",
+  "settings.general": "block",
+  "settings.appearance": "block",
+  "settings.ai": "block",
+  "settings.plugins": "block",
+  "command-palette": "block",
+  "inbox.sidebar.section": "block",
+  "vscode.terminal.output": "block",
+
+  // Owned regions with their own scroll — render a whole view.
+  "sidebar.right.top": "panel",
+  "sidebar.right.bottom": "panel",
+  "canvas.sidebar": "panel",
+  "pet.console.tab": "panel",
+  "perf.panel": "panel",
+  "agent.team.panel": "panel",
+  "agent.team.report": "panel",
+  "twin.persona.panel": "panel",
+  "twin.overview.panel": "panel",
+  "vscode.sidebar.view": "panel",
+  "vscode.webview.panel": "panel",
+}
+
+/** The shape a slot expects its contributions to take. */
+export function getExtensionPointFormFactor(
+  point: CanonicalExtensionPoint
+): PluginSurfaceFormFactor {
+  return EXTENSION_POINT_FORM_FACTORS[point]
+}
+
 const IMPLEMENTED_EXTENSION_POINT_BINDINGS: Partial<Record<CanonicalExtensionPoint, string>> = {
   "sidebar.left.top": "components/shell/guild-rail.tsx",
   "sidebar.left.bottom": "components/shell/guild-rail.tsx",
+  "sidebar.right.top": "components/context-workbench/context-workbench.tsx",
+  "sidebar.right.bottom": "components/context-workbench/context-workbench.tsx",
   "toolbar.left": "components/desktop/title-bar.tsx",
   "toolbar.center": "components/desktop/title-bar.tsx",
   "toolbar.right": "components/desktop/title-bar.tsx",
@@ -251,16 +449,33 @@ const IMPLEMENTED_EXTENSION_POINT_BINDINGS: Partial<Record<CanonicalExtensionPoi
   "chat.message.after": "components/chat/message-renderer.tsx",
   "chat.message.actions": "components/chat/message-renderer.tsx",
   "chat.message.footer": "components/chat/message-renderer.tsx",
-  "artifact.toolbar": "components/artifacts/artifact-panel.tsx",
-  "artifact.actions": "components/artifacts/artifact-panel.tsx",
+  "chat.tool-call.actions": "components/chat/message-renderer.tsx",
+  "chat.message-part.actions": "components/chat/message-renderer.tsx",
+  "artifact.toolbar": "components/artifacts/artifact-panel-content.tsx",
+  "artifact.actions": "components/artifacts/artifact-panel-content.tsx",
   "canvas.toolbar": "components/canvas/canvas-panel.tsx",
   "canvas.sidebar": "components/canvas/canvas-side-panels.tsx",
   "goal.toolbar": "components/goal/console/goal-console.tsx",
   "goal.detail.actions": "components/goal/goal-detail-sheet.tsx",
+  "pet.console.tab": "components/pet/console/pet-console.tsx",
+  "pet.panel.actions": "components/pet/pet-interaction-panel.tsx",
   "perf.panel": "components/performance/performance-dashboard.tsx",
-  "settings.general": "components/settings/general-section.tsx",
+  "terminal.toolbar": "components/terminal/terminal-dock.tsx",
+  "agent.team.panel": "components/agent/workspace/overview.tsx",
+  "agent.team.report": "components/agent/workspace/activity-report/report-plugin-slot.tsx",
+  "agent.teammate.actions": "components/agent/workspace/members.tsx",
+  "agent.team.task.actions": "components/agent/workspace/board/task-card.tsx",
+  "agent.team.board.toolbar": "components/agent/workspace/board/board-toolbar.tsx",
+  "agent.external-session.toolbar": "components/agent/external-agent/session-panel.tsx",
+  "twin.panel.header": "components/twin/twin-plugin-slots.tsx",
+  "twin.persona.panel": "components/twin/twin-plugin-slots.tsx",
+  "twin.settings.cards": "components/twin/twin-plugin-slots.tsx",
+  "twin.overview.panel": "components/twin/twin-plugin-slots.tsx",
+  "panel.header": "components/context-workbench/context-workbench.tsx",
+  "panel.footer": "components/context-workbench/context-workbench.tsx",
+  "settings.general": "components/settings/agent-runtime/tabs/defaults-tab.tsx",
   "settings.appearance": "components/settings/appearance/appearance-section.tsx",
-  "settings.ai": "components/settings/api-key-section.tsx",
+  "settings.ai": "components/settings/provider/anthropic-subscription-reuse-card.tsx",
   "settings.plugins": "components/plugins/plugin-panel.tsx",
   "command-palette": "components/desktop/command-palette.tsx",
   "inbox.sidebar.section": "components/inbox/inbox-sidebar.tsx",
@@ -313,6 +528,14 @@ export const CANONICAL_HOOK_POINTS = [
   "onEnable",
   "onDisable",
   "onUnload",
+  // Lifecycle stage hooks fired by lib/plugin/core/manager.ts: onInstall (once
+  // after first post-install load), onUpdate (version changed across loads),
+  // onUninstall (before file removal), onSuspend/onResume (idle deactivation).
+  "onInstall",
+  "onUninstall",
+  "onUpdate",
+  "onSuspend",
+  "onResume",
   "onConfigChange",
   "onA2UISurfaceCreate",
   "onA2UISurfaceDestroy",
@@ -320,12 +543,10 @@ export const CANONICAL_HOOK_POINTS = [
   "onA2UIDataChange",
   "onAgentStart",
   "onAgentStep",
-  "onAgentToolCall",
   "onAgentComplete",
   "onAgentError",
   "onMessageSend",
   "onMessageReceive",
-  "onMessageRender",
   "onMessageDelete",
   "onMessageEdit",
   "onSessionCreate",
@@ -357,6 +578,15 @@ export const CANONICAL_HOOK_POINTS = [
   "onGoalProgress",
   "onGoalComplete",
   "onGoalDelete",
+  // Desktop-pet lifecycle. Dispatched by lib/pet/runtime/pet-controller.ts —
+  // onPetInteract fires only for the 7 direct care kinds (radar/passive kinds
+  // are deliberately excluded: they fire continuously), the rest fire on
+  // controller-detected transitions. Payloads carry NO event meta (PII).
+  "onPetInteract",
+  "onPetLevelUp",
+  "onPetEvolved",
+  "onPetAchievementUnlocked",
+  "onPetUnwell",
   // Public share-link lifecycle (ADR-0037). Dispatched by lib/share/client.ts.
   // Owner-observable transitions only — no onShareLinkAccess (reads happen on
   // the worker/viewer, not the owner). URL payload is fragment-stripped.
@@ -389,7 +619,6 @@ export const CANONICAL_HOOK_POINTS = [
   "onExportTransform",
   "onProjectExportStart",
   "onProjectExportComplete",
-  "onChatRequest",
   // ADR-0026 §4 §B — transform-pipeline hook for the resolved SendOptions
   // dict. Plugins that only want to tweak systemPrompt / maxTokens /
   // allowedTools (without short-circuiting the chain) should prefer this
@@ -467,6 +696,14 @@ export const CANONICAL_HOOK_POINTS = [
   "onSharedMemoryDelete",
   "onTeamDelegationStart",
   "onTeamDelegationComplete",
+  // Connector (IM) lifecycle — observe + veto + transform over IM inbound and
+  // outbound (plugin⇄IM extensibility). `onConnectorInbound` dispatched by
+  // `lib/connectors/bus.ts` before route resolution; `onConnectorOutbound` by
+  // `lib/connectors/outbound-runner.ts` before the adapter send. Both carry IM
+  // context (adapterId / conversationKey / platform); a transform's result is
+  // re-gated through the PII redaction line (fail-closed) before it is applied.
+  "onConnectorInbound",
+  "onConnectorOutbound",
 ] as const
 
 export type CanonicalHookPoint = (typeof CANONICAL_HOOK_POINTS)[number]
@@ -489,6 +726,14 @@ export const DEPRECATED_HOOK_POINTS = [
   "onAgentPlanStepComplete",
   "onArtifactExecute",
   "onArtifactExport",
+  // 2026-06-10 — demoted from CANONICAL: no host call site and no clean seam
+  // (verified against the runtime-proof audit grep). Dispatcher methods +
+  // PluginHooks types stay so existing plugins compile; the host never fires
+  // them. onMessageRender (use ctx.messagePart), onAgentToolCall (use the
+  // ai-sdk PostToolUse rewrite), onChatRequest (use onBuildOptions).
+  "onMessageRender",
+  "onAgentToolCall",
+  "onChatRequest",
 ] as const
 
 export type DeprecatedHookPoint = (typeof DEPRECATED_HOOK_POINTS)[number]
@@ -586,43 +831,11 @@ interface UiSlotOverride {
 }
 
 const UI_SLOT_OVERRIDES: Partial<Record<CanonicalExtensionPoint, UiSlotOverride>> = {
-  "sidebar.right.top": {
-    status: "deprecated",
-    stability: "deprecated",
-    binding: "retired (no right sidebar surface mounted)",
-    replacementId: "sidebar.left.top",
-    deprecatedIn: "0.2.0",
-    retirementNote: "No right sidebar surface is mounted; use sidebar.left.top instead.",
-  },
-  "sidebar.right.bottom": {
-    status: "deprecated",
-    stability: "deprecated",
-    binding: "retired (no right sidebar surface mounted)",
-    replacementId: "sidebar.left.bottom",
-    deprecatedIn: "0.2.0",
-    retirementNote: "No right sidebar surface is mounted; use sidebar.left.bottom instead.",
-  },
   // ADR-0026 §5 §A — `chat.message.actions` was previously retired but is
   // revived in the v2 surface. The new mount is a hover action bar above
   // each message (distinct from `chat.message.footer`, which holds copy /
   // regenerate). Listed in `IMPLEMENTED_EXTENSION_POINTS` below so it
   // resolves to status=implemented, not deprecated.
-  "panel.header": {
-    status: "deprecated",
-    stability: "deprecated",
-    binding: "retired (no generic panel shell component exists)",
-    deprecatedIn: "0.4.0",
-    retirementNote:
-      "No generic panel-shell wrapper exists in cognia-next; demoted in SP-1 (2026-05-11) after Phase A audit found no viable host.",
-  },
-  "panel.footer": {
-    status: "deprecated",
-    stability: "deprecated",
-    binding: "retired (no generic panel shell component exists)",
-    deprecatedIn: "0.4.0",
-    retirementNote:
-      "No generic panel-shell wrapper exists in cognia-next; demoted in SP-1 (2026-05-11) after Phase A audit found no viable host.",
-  },
   // ADR-0026 §5 §B — `settings.ai` revived. The mount lives at the top of
   // `components/settings/api-key-section.tsx`. Listed in
   // `IMPLEMENTED_EXTENSION_POINTS` below so it resolves to status=implemented.
@@ -640,6 +853,7 @@ const extensionPointContracts: Record<CanonicalExtensionPoint, PluginPointContra
             kind: "ui-slot",
             stability: override.stability,
             status: override.status,
+            formFactor: EXTENSION_POINT_FORM_FACTORS[id],
             owner: "plugin-platform",
             binding: override.binding,
             docs: UI_POINT_DOCS,
@@ -675,6 +889,7 @@ const extensionPointContracts: Record<CanonicalExtensionPoint, PluginPointContra
                 : "deprecated",
           status,
           hostKind,
+          formFactor: EXTENSION_POINT_FORM_FACTORS[id],
           owner: "plugin-platform",
           binding:
             status === "deprecated"
@@ -729,11 +944,59 @@ export const CANONICAL_RUNTIME_POINTS = [
   "chat.middleware",
   "modal.mount",
   "scheduler.task",
+  // Implemented registry-backed contribution points that predate this
+  // contract registry or landed through feature-specific ADRs. They are
+  // runtime points because plugins add executable/registry entries rather than
+  // mounting JSX.
+  "terminal.completion",
+  "provider.routing-strategy",
+  "provider.deployment-filter",
+  "provider.protocol-adapter",
+  "agent.external-agent-adapter",
+  "agent.tool-route",
+  "agent.context-provider",
+  "connectors.adapter",
+  "subscription.balance-adapter",
+  "subscription.limits-source",
+  "connectors.im-rate-source",
+  "chat.compaction-strategy",
+  "quick-action",
+  "appearance.font",
+  "appearance.wallpaper",
+  "appearance.density-preset",
+  "view.container",
+  "view.tree",
+  "view.webview",
+  "agent.skill",
+  "agent.mcp-server-preset",
+  "agent.native-anthropic-tool",
+  "agent.external-agent-preset",
+  "character.pack",
+  "agent.subagent",
+  "agent.team-template",
+  "agent.shared-memory-adapter",
+  "workflow.template",
+  "auth.provider",
+  "agent.tool",
+  "a2ui.component",
+  "a2ui.template",
+  "agent.mode",
+  "command.slash",
+  "importer.format",
+  "exporter.format",
+  "appearance.theme",
+  "appearance.theme-pack",
+  "lsp.server",
+  "cli.tool",
+  "tray.item",
+  "uri.handler",
 ] as const
 
 export type CanonicalRuntimePoint = (typeof CANONICAL_RUNTIME_POINTS)[number]
 
-const RUNTIME_POINT_BINDINGS: Record<CanonicalRuntimePoint, string> = {
+// Exported for the W3.4 dispatch-reachability gate (runtime-proof-audit.test.ts)
+// which verifies each binding function is referenced by production code.
+export const RUNTIME_POINT_BINDINGS: Record<CanonicalRuntimePoint, string> = {
   "workflow.node": "lib/workflow/nodes/registry.ts:registerNodeExecutor",
   "workflow.trigger": "lib/workflow/triggers/registry.ts:registerPluginTrigger",
   "workflow.task":
@@ -752,6 +1015,63 @@ const RUNTIME_POINT_BINDINGS: Record<CanonicalRuntimePoint, string> = {
   "chat.middleware": "lib/claude/chat-middleware/registry.ts:registerChatMiddleware",
   "modal.mount": "stores/plugin/plugin-modal-store.ts:registerPluginModal",
   "scheduler.task": "lib/scheduler/executors/plugin-executor.ts (plugin scheduled task)",
+  "terminal.completion": "lib/terminal/completion/registry.ts:registerCompletionProvider",
+  "provider.routing-strategy":
+    "packages/provider-routing/src/strategy-registry.ts:registerRoutingStrategy",
+  "provider.deployment-filter":
+    "packages/provider-routing/src/filter-registry.ts:registerDeploymentFilter",
+  "provider.protocol-adapter":
+    "packages/provider-core/src/providers/protocol-adapter-registry.ts:registerProtocolAdapter",
+  "agent.external-agent-adapter":
+    "lib/ai/agent/external/protocol-adapter.ts:registerPluginProtocolAdapter",
+  "agent.tool-route": "lib/plugin/bridge/tool-routes-bridge.ts:registerToolRoutesForPlugin",
+  "agent.context-provider":
+    "lib/plugin/registries/context-provider-registry.ts:registerContextProvider",
+  "connectors.adapter": "lib/connectors/bus.ts:registerAdapter",
+  "subscription.balance-adapter":
+    "lib/plugin/registries/balance-adapter-registry.ts:registerBalanceAdapter",
+  "subscription.limits-source":
+    "lib/plugin/registries/limits-source-registry.ts:registerLimitsSource",
+  "connectors.im-rate-source":
+    "lib/plugin/registries/im-rate-source-registry.ts:registerImRateSource",
+  "chat.compaction-strategy":
+    "lib/plugin/registries/compaction-strategy-registry.ts:registerCompactionStrategy",
+  "quick-action": "lib/plugin/registries/quick-action-registry.ts:registerQuickAction",
+  "appearance.font": "lib/plugin/bridge/font-bridge.ts:applyPluginFonts",
+  "appearance.wallpaper": "lib/plugin/bridge/wallpaper-bridge.ts:applyPluginWallpapers",
+  "appearance.density-preset":
+    "lib/appearance/density-preset-registry.ts:registerDensityPresetsForPlugin",
+  "view.container": "lib/plugin/registries/view-container-registry.ts:registerViewContainer",
+  "view.tree": "lib/plugin/bridge/view-bridge.ts:registerViewsForPlugin",
+  "view.webview": "lib/plugin/bridge/plugin-webview-bridge.ts:registerWebviewsForPlugin",
+  "agent.skill": "lib/plugin/registries/skill-registry.ts:registerSkill",
+  "agent.mcp-server-preset":
+    "lib/plugin/registries/mcp-server-preset-registry.ts:registerMcpServerPreset",
+  "agent.native-anthropic-tool":
+    "lib/plugin/registries/native-anthropic-tool-registry.ts:registerNativeAnthropicTool",
+  "agent.external-agent-preset": "lib/ai/agent/external/presets.ts:registerPreset",
+  "character.pack": "lib/plugin/registries/character-pack-registry.ts:registerCharacterPack",
+  "agent.subagent": "lib/plugin/registries/subagent-registry.ts:registerSubagent",
+  "agent.team-template":
+    "lib/plugin/registries/agent-team-template-registry.ts:registerAgentTeamTemplate",
+  "agent.shared-memory-adapter":
+    "lib/plugin/registries/shared-memory-adapter-registry.ts:registerSharedMemoryAdapter",
+  "workflow.template":
+    "lib/plugin/registries/workflow-template-registry.ts:registerWorkflowTemplate",
+  "auth.provider": "lib/plugin/auth/auth-provider-registry.ts:registerAuthenticationProvider",
+  "agent.tool": "lib/plugin/core/registry.ts:registerTool",
+  "a2ui.component": "lib/plugin/bridge/a2ui-bridge.ts:registerComponent",
+  "a2ui.template": "lib/plugin/bridge/a2ui-bridge.ts:registerTemplate",
+  "agent.mode": "lib/plugin/core/registry.ts:registerMode",
+  "command.slash": "lib/chat/slash-command-registry.ts:registerSlashCommand",
+  "importer.format": "lib/plugin/api/import-api.ts:registerImporter",
+  "exporter.format": "lib/plugin/api/export-api.ts:registerExporter",
+  "appearance.theme": "lib/plugin/bridge/themes-bridge.ts:registerPluginThemes",
+  "appearance.theme-pack": "lib/plugin/bridge/themes-bridge.ts:registerPluginThemePacks",
+  "lsp.server": "lib/plugin/lsp/lsp-registry.ts:registerPluginLspServers",
+  "cli.tool": "lib/plugin/core/manager.ts:registerPluginContributions cliTools",
+  "tray.item": "lib/plugin/api/tray-api.ts:register",
+  "uri.handler": "lib/plugin/uri/uri-handler-registry.ts:registerUriHandler",
 }
 
 /**
@@ -772,30 +1092,72 @@ const RUNTIME_POINT_PERMISSIONS: Partial<Record<CanonicalRuntimePoint, string>> 
   "chat.middleware": "agent:control",
   "modal.mount": "extension:ui",
   "scheduler.task": "extension:workflow",
+  "terminal.completion": "terminal:completion",
+  "provider.routing-strategy": "network:fetch",
+  "provider.deployment-filter": "network:fetch",
+  "provider.protocol-adapter": "network:fetch",
+  "agent.external-agent-adapter": "agent:dispatch-external",
+  "agent.tool-route": "agent:control",
+  "agent.context-provider": "agent:control",
+  "connectors.adapter": "connectors:read",
+  "subscription.balance-adapter": "subscription:read",
+  "subscription.limits-source": "subscription:read",
+  "connectors.im-rate-source": "connectors:read",
+  "chat.compaction-strategy": "agent:control",
+  "quick-action": "extension:ui",
+  "appearance.font": "extension:ui",
+  "appearance.wallpaper": "extension:ui",
+  "appearance.density-preset": "extension:ui",
+  "view.container": "extension:ui",
+  "view.tree": "extension:ui",
+  "view.webview": "extension:ui",
+  "agent.skill": "agent:control",
+  "agent.mcp-server-preset": "agent:control",
+  "agent.native-anthropic-tool": "agent:control",
+  "agent.external-agent-preset": "agent:dispatch-external",
+  "character.pack": "agent:control",
+  "agent.subagent": "agent:dispatch",
+  "agent.team-template": "agent:dispatch",
+  "agent.shared-memory-adapter": "agent:shared-memory:read",
+  "workflow.template": "extension:workflow",
+  "auth.provider": "auth:provide",
+  "cli.tool": "cli:execute",
 }
+
+// Runtime points that are NOT yet stable (everything else defaults to
+// "stable" below). Currently empty: `lsp.server` and `cli.tool` graduated
+// experimental→stable alongside their capability promotions in
+// plugin-capabilities.ts — the host runtime is fully wired (lsp-registry /
+// cli-tools exec pipeline), the typed SDK helpers `defineLspServer()` /
+// `defineCliTool()` ship, and their required tests are in place. Add a point
+// here only while its wiring or plugin-facing API surface is still landing.
+const RUNTIME_POINT_STABILITY: Partial<Record<CanonicalRuntimePoint, PluginPointStability>> = {}
 
 const runtimePointContracts: Record<CanonicalRuntimePoint, PluginPointContract> =
   Object.fromEntries(
-    CANONICAL_RUNTIME_POINTS.map((id) => [
-      id,
-      {
+    CANONICAL_RUNTIME_POINTS.map((id) => {
+      const permission = RUNTIME_POINT_PERMISSIONS[id]
+      return [
         id,
-        kind: "runtime",
-        stability: "stable",
-        // Phase 1 of ADR-0026 declares the new runtime points before their
-        // ctx.* / bridge wiring lands. They are still `implemented` from a
-        // contract perspective — the binding registry exists; the
-        // plugin-facing API surface ships in Phases 2-4.
-        status: "implemented",
-        owner: "plugin-platform",
-        binding: RUNTIME_POINT_BINDINGS[id],
-        docs: RUNTIME_POINT_DOCS,
-        requiredTests: RUNTIME_POINT_TESTS,
-        // Workflow points predate ADR-0026; v2 points enter at 0.5.0.
-        introducedIn: id.startsWith("workflow.") ? "0.3.0" : "0.5.0",
-        permission: RUNTIME_POINT_PERMISSIONS[id] ?? "extension:workflow",
-      } as PluginPointContract,
-    ])
+        {
+          id,
+          kind: "runtime",
+          stability: RUNTIME_POINT_STABILITY[id] ?? "stable",
+          // Phase 1 of ADR-0026 declares the new runtime points before their
+          // ctx.* / bridge wiring lands. They are still `implemented` from a
+          // contract perspective — the binding registry exists; the
+          // plugin-facing API surface ships in Phases 2-4.
+          status: "implemented",
+          owner: "plugin-platform",
+          binding: RUNTIME_POINT_BINDINGS[id],
+          docs: RUNTIME_POINT_DOCS,
+          requiredTests: RUNTIME_POINT_TESTS,
+          // Workflow points predate ADR-0026; v2 points enter at 0.5.0.
+          introducedIn: id.startsWith("workflow.") ? "0.3.0" : "0.5.0",
+          ...(permission ? { permission } : {}),
+        } as PluginPointContract,
+      ]
+    })
   ) as Record<CanonicalRuntimePoint, PluginPointContract>
 
 const activationPatternContracts: Record<CanonicalActivationPattern, PluginPointContract> = {
@@ -1026,6 +1388,13 @@ export function auditPluginPointContracts(): PluginPointProofAudit[] {
 
 const extensionPointSet = new Set<string>(CANONICAL_EXTENSION_POINTS)
 const hookPointSet = new Set<string>(CANONICAL_HOOK_POINTS)
+const contextWorkbenchResourceKinds = new Set([
+  "canvas-document",
+  "project-file",
+  "artifact",
+  "workflow",
+  "session",
+])
 
 export function getExtensionPointContract(point: CanonicalExtensionPoint): PluginPointContract {
   return extensionPointContracts[point]
@@ -1212,6 +1581,22 @@ export function validateActivationEvent(
 ): PluginPointValidationOutcome {
   const mode = options.governanceMode || "warn"
   const diagnostics: PluginPointDiagnostic[] = []
+
+  if (event.startsWith("onView:context-workbench:")) {
+    const resourceKind = event.slice("onView:context-workbench:".length)
+    if (!contextWorkbenchResourceKinds.has(resourceKind)) {
+      diagnostics.push({
+        code: "plugin.point.unknown",
+        severity: toSeverity(mode),
+        message: `Unknown context-workbench resource kind "${resourceKind}".`,
+        hint: 'Use one of "canvas-document", "project-file", "artifact", "workflow", or "session".',
+        pointKind: "activation",
+        pointId: event,
+      })
+      return { allowed: mode !== "block", diagnostics }
+    }
+  }
+
   const pattern = resolveActivationPattern(event)
 
   if (!pattern) {

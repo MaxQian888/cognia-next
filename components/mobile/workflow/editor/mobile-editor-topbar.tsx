@@ -25,6 +25,8 @@ import {
   Save as SaveIcon,
   Pencil as EditIcon,
   Eye as ReadIcon,
+  Sparkles as CopilotIcon,
+  PanelRight as WorkbenchIcon,
   Undo2 as UndoIcon,
   Redo2 as RedoIcon,
   LayoutGrid as AutoLayoutIcon,
@@ -61,6 +63,10 @@ export interface MobileEditorTopbarProps {
   reactFlowInstance: WorkflowFlowInstance | null
   mode: "read" | "edit"
   onToggleMode: () => void
+  /** Open the AI copilot sheet. */
+  onOpenCopilot: () => void
+  /** Open the shared Context Workbench. */
+  onOpenWorkbench: () => void
 }
 
 export function MobileEditorTopbar({
@@ -68,9 +74,12 @@ export function MobileEditorTopbar({
   reactFlowInstance,
   mode,
   onToggleMode,
+  onOpenCopilot,
+  onOpenWorkbench,
 }: MobileEditorTopbarProps) {
   const t = useTranslations("mobile.workflow.editor")
   const tRun = useTranslations("mobile.workflow")
+  const tWorkbench = useTranslations("contextWorkbench")
 
   const { id, name, dirty, snapToGrid } = store(
     useShallow((s: EditorState) => ({
@@ -103,8 +112,12 @@ export function MobileEditorTopbar({
     if (saving) return
     setSaving(true)
     try {
-      const issueCount = await persistEditorWorkflow(store)
-      toast.success(issueCount > 0 ? t("savedWithIssues", { count: issueCount }) : t("saved"))
+      const { issueCount, publicationInvalidated } = await persistEditorWorkflow(store)
+      if (publicationInvalidated) {
+        toast.warning(t("publicationInvalidated"))
+      } else {
+        toast.success(issueCount > 0 ? t("savedWithIssues", { count: issueCount }) : t("saved"))
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("saveFailed"))
     } finally {
@@ -172,11 +185,14 @@ export function MobileEditorTopbar({
         try {
           const text = typeof reader.result === "string" ? reader.result : ""
           const parsed = parseWorkflowImport(text)
-          store.getState().loadWorkflow({
-            ...store.getState().toWorkflow(),
-            ...parsed,
-            id: store.getState().baseWorkflow.id,
-          } as VisualWorkflow)
+          store.getState().loadWorkflow(
+            {
+              ...store.getState().toWorkflow(),
+              ...parsed,
+              id: store.getState().baseWorkflow.id,
+            } as VisualWorkflow,
+            { dirty: true }
+          )
           toast.success(t("imported"))
         } catch (err) {
           toast.error(err instanceof Error ? `${t("importFailed")}: ${err.message}` : t("importFailed"))
@@ -233,6 +249,18 @@ export function MobileEditorTopbar({
         variant="ghost"
         size="icon"
         className="size-11 shrink-0"
+        onClick={onOpenWorkbench}
+        aria-label={tWorkbench("mobileTitle")}
+        data-testid="mobile-editor-workbench"
+      >
+        <WorkbenchIcon className="size-5" aria-hidden="true" />
+      </Button>
+
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="size-11 shrink-0"
         onClick={handleSave}
         disabled={saving || !dirty}
         aria-label={t("save")}
@@ -267,6 +295,11 @@ export function MobileEditorTopbar({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-48">
+          <DropdownMenuItem onSelect={onOpenCopilot} data-testid="mobile-editor-copilot">
+            <CopilotIcon className="mr-2 size-4" aria-hidden="true" />
+            {t("copilot")}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={handleUndo} disabled={!canUndo}>
             <UndoIcon className="mr-2 size-4" aria-hidden="true" />
             {t("undo")}
@@ -290,7 +323,7 @@ export function MobileEditorTopbar({
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem asChild data-testid="mobile-editor-run-history">
-            <Link href={`/workflows/${encodeURIComponent(id)}/runs`}>
+            <Link href={`/workflows/runs?id=${encodeURIComponent(id)}`}>
               <HistoryIcon className="mr-2 size-4" aria-hidden="true" />
               {t("runHistory")}
             </Link>

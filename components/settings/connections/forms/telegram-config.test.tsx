@@ -142,7 +142,7 @@ describe("TelegramConfigDialog — create new", () => {
     })
   })
 
-  it("declares both botToken and webhookSecret in credentialsRef.accounts on create", async () => {
+  it("declares only botToken in credentialsRef.accounts for long-poll create", async () => {
     render(<TelegramConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
 
     fireEvent.change(screen.getByLabelText(/bot token/i), {
@@ -155,9 +155,69 @@ describe("TelegramConfigDialog — create new", () => {
       expect(mockCreateAdapterInstance).toHaveBeenCalledWith(
         expect.objectContaining({
           credentialsRef: expect.objectContaining({
-            accounts: expect.arrayContaining(["botToken", "webhookSecret"]),
+            accounts: ["botToken"],
           }),
         })
+      )
+    })
+  })
+
+  it("declares botToken, secretToken and webhookSecret in credentialsRef.accounts for webhook create", async () => {
+    render(<TelegramConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+
+    fireEvent.change(screen.getByLabelText(/bot token/i), {
+      target: { value: "123:VALIDTOKEN" },
+    })
+    fireEvent.click(screen.getByRole("combobox", { name: /transport/i }))
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: /webhook/i })).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole("option", { name: /webhook/i }))
+
+    fireEvent.click(screen.getByRole("button", { name: /create/i }))
+
+    await waitFor(() => {
+      expect(mockCreateAdapterInstance).toHaveBeenCalledWith(
+        expect.objectContaining({
+          transportMode: "webhook",
+          credentialsRef: expect.objectContaining({
+            accounts: ["botToken", "secretToken", "webhookSecret"],
+          }),
+        })
+      )
+    })
+  })
+
+  it("saves the webhook secret under 'secretToken' (Rust verifier key) AND legacy 'webhookSecret'", async () => {
+    render(<TelegramConfigDialog open={true} onOpenChange={jest.fn()} row={null} />)
+
+    fireEvent.change(screen.getByLabelText(/bot token/i), {
+      target: { value: "123:VALIDTOKEN" },
+    })
+    fireEvent.click(screen.getByRole("combobox", { name: /transport/i }))
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: /webhook/i })).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole("option", { name: /webhook/i }))
+
+    fireEvent.change(screen.getByLabelText(/webhook secret/i), {
+      target: { value: "shh-secret" },
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: /create/i }))
+
+    await waitFor(() => {
+      // Rust's verify_telegram reads "secretToken" — the old form only wrote
+      // "webhookSecret", so webhook deliveries always 401'd (audited fix #2).
+      expect(mockConnectorsKeyringSet).toHaveBeenCalledWith(
+        "new-adapter-id",
+        "secretToken",
+        "shh-secret"
+      )
+      expect(mockConnectorsKeyringSet).toHaveBeenCalledWith(
+        "new-adapter-id",
+        "webhookSecret",
+        "shh-secret"
       )
     })
   })
@@ -215,32 +275,49 @@ describe("TelegramConfigDialog — edit existing", () => {
     })
   })
 
-  it("migrates credentialsRef.accounts to include webhookSecret when missing", async () => {
-    // Existing row has only ["botToken"] — should be upgraded to ["botToken", "webhookSecret"].
+  it("does not migrate long-poll credentialsRef.accounts to include webhook secret keys", async () => {
     render(<TelegramConfigDialog open={true} onOpenChange={jest.fn()} row={existingRow} />)
     fireEvent.change(screen.getByDisplayValue("Prod Bot"), {
-      target: { value: "Migrated Bot" },
+      target: { value: "Long Poll Bot" },
     })
+    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+
+    await waitFor(() => {
+      expect(mockUpdateAdapterInstance).toHaveBeenCalled()
+    })
+    const patchArg = mockUpdateAdapterInstance.mock.calls[0][1]
+    expect(patchArg).not.toHaveProperty("credentialsRef")
+  })
+
+  it("migrates credentialsRef.accounts when switching an existing row to webhook", async () => {
+    render(<TelegramConfigDialog open={true} onOpenChange={jest.fn()} row={existingRow} />)
+    fireEvent.click(screen.getByRole("combobox", { name: /transport/i }))
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: /webhook/i })).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole("option", { name: /webhook/i }))
     fireEvent.click(screen.getByRole("button", { name: /save/i }))
 
     await waitFor(() => {
       expect(mockUpdateAdapterInstance).toHaveBeenCalledWith(
         "cai_existing",
         expect.objectContaining({
+          transportMode: "webhook",
           credentialsRef: expect.objectContaining({
-            accounts: expect.arrayContaining(["botToken", "webhookSecret"]),
+            accounts: ["botToken", "secretToken", "webhookSecret"],
           }),
         })
       )
     })
   })
 
-  it("skips credentialsRef migration when accounts already include webhookSecret", async () => {
+  it("skips credentialsRef migration for webhook rows when accounts already match", async () => {
     const migratedRow: AdapterInstanceRow = {
       ...existingRow,
+      transportMode: "webhook",
       credentialsRef: {
         keyringService: "com.cognia.platforms",
-        accounts: ["botToken", "webhookSecret"],
+        accounts: ["botToken", "secretToken", "webhookSecret"],
       },
     }
     render(<TelegramConfigDialog open={true} onOpenChange={jest.fn()} row={migratedRow} />)

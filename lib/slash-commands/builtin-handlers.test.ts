@@ -16,6 +16,7 @@ jest.mock("./actions/sessions", () => ({
 jest.mock("./actions/diagnostics", () => ({
   handleStatus: jest.fn(),
   handleCost: jest.fn(),
+  handleCompact: jest.fn(),
 }))
 
 import { BUILTIN_SLASH_COMMANDS } from "./builtin"
@@ -160,11 +161,13 @@ describe("/add-dir handler", () => {
   })
 })
 
-describe("/compact is enabled and forwards as a template", () => {
-  it("ships the literal `/compact` template that the SDK intercepts", () => {
+describe("/compact is enabled and runs a handler", () => {
+  it("routes a manual compaction via a handler (works on both send paths)", () => {
     const c = find("compact")
     expect(c.disabled).not.toBe(true)
-    expect(c.template).toBe("/compact")
-    expect(c.handler).toBeUndefined()
+    // Converted from a template to a handler so manual compaction works on the
+    // generic (AI-SDK) path too, not just Anthropic's literal `/compact`.
+    expect(c.template).toBeUndefined()
+    expect(typeof c.handler).toBe("function")
   })
 })

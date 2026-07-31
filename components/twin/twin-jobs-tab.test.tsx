@@ -72,6 +72,41 @@ describe("TwinJobsTab", () => {
     expect(statusBadge.getAttribute("data-variant")).toBe("secondary")
   })
 
+  it("surfaces per-agent partial failures on a completed distill job", async () => {
+    await seedJob({
+      id: "job_pf",
+      kind: "distill",
+      status: "completed",
+      phase: "completed",
+      progress: 100,
+      outputDraftIds: ["twd_1"],
+      partialFailures: {
+        knowledge: "timed out after 90s",
+        playbook: "LLM returned no JSON",
+      },
+    })
+    render(<TwinJobsTab twinId="twin_alice" />)
+    // A non-destructive warning badge + each failed agent and its reason.
+    expect(await screen.findByText(/timed out after 90s/i)).toBeInTheDocument()
+    expect(screen.getByText(/LLM returned no JSON/i)).toBeInTheDocument()
+    expect(screen.getByText(/knowledge/i)).toBeInTheDocument()
+  })
+
+  it("does not show the partial-failure block when the map is empty", async () => {
+    await seedJob({
+      id: "job_clean",
+      kind: "distill",
+      status: "completed",
+      phase: "completed",
+      progress: 100,
+      outputDraftIds: ["twd_1"],
+      partialFailures: {},
+    })
+    render(<TwinJobsTab twinId="twin_alice" />)
+    await screen.findByTestId("twin-job-job_clean-status")
+    expect(screen.queryByTestId("twin-job-job_clean-partial")).not.toBeInTheDocument()
+  })
+
   it("uses the destructive variant for failed jobs and shows the error", async () => {
     await seedJob({
       id: "job_b",
@@ -91,6 +126,26 @@ describe("TwinJobsTab", () => {
     await screen.findByTestId("twin-job-job_ok-status")
     expect(screen.queryByTestId("twin-job-retry-job_ok")).toBeNull()
     expect(screen.getByTestId("twin-job-retry-job_bad")).toBeInTheDocument()
+  })
+
+  it("queue-distill button enqueues a distill job", async () => {
+    render(<TwinJobsTab twinId="twin_alice" />)
+    const distillBtn = await screen.findByRole("button", { name: /Queue distill/i })
+    await userEvent.click(distillBtn)
+    await waitFor(async () => {
+      const jobs = await getDb().twinJobs.where("twinId").equals("twin_alice").toArray()
+      expect(jobs.some((j) => j.kind === "distill")).toBe(true)
+    })
+  })
+
+  it("retrying a failed job requeues it", async () => {
+    await seedJob({ id: "job_retry", status: "failed", errorMessage: "boom", retryCount: 1 })
+    render(<TwinJobsTab twinId="twin_alice" />)
+    await userEvent.click(await screen.findByTestId("twin-job-retry-job_retry"))
+    await waitFor(async () => {
+      const updated = await getDb().twinJobs.get("job_retry")
+      expect(updated?.status).toBe("queued")
+    })
   })
 
   it("queue-ingest button picks up pending sources", async () => {

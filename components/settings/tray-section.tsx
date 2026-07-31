@@ -25,10 +25,19 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Switch } from "@/components/ui/switch"
 import { useTrayStore } from "@/lib/tray/store"
+import { useTrayUsage } from "@/lib/tray/usage"
 import { listSlashCommands } from "@/lib/slash-commands/registry"
 import { listTrayItems } from "@/lib/tray/registry"
-import type { TrayMenuItem, TrayActionPayload } from "@/lib/tray/types"
+import type { TrayMenuItem, TrayActionPayload, TrayTaskbarUsageMode } from "@/lib/tray/types"
 
 type Direction = -1 | 1
 
@@ -68,6 +77,145 @@ function collectPickerEntries(): PickerEntry[] {
     })
   }
   return out.sort((a, b) => a.label.localeCompare(b.label))
+}
+
+const REFRESH_MINUTE_CHOICES = [5, 15, 30, 60, 0] as const
+const TASKBAR_MODES: TrayTaskbarUsageMode[] = ["off", "iconBadge", "title"]
+
+/**
+ * Display customization: subscription-quota surfaces (menu section, tooltip
+ * suffix, taskbar readout + pinned subscription + refresh cadence), tooltip
+ * base text, and the tray icon color. Persisted via
+ * `useTrayStore.setDisplay` / `setTooltip` (`tray.display.v1` /
+ * `tray.tooltip.v1`).
+ */
+function TrayDisplayCard() {
+  const t = useTranslations("settings.tray.display")
+  const display = useTrayStore((s) => s.display)
+  const setDisplay = useTrayStore((s) => s.setDisplay)
+  const tooltip = useTrayStore((s) => s.tooltip)
+  const setTooltip = useTrayStore((s) => s.setTooltip)
+  // Same feed the tray itself renders — seeds the subscription picker (and
+  // fetches once on open, so the picker isn't empty on first visit).
+  const usage = useTrayUsage(true, 0)
+  const accounts = usage?.accounts ?? []
+
+  const anyCompactSurface = display.showUsageInTooltip || display.taskbarUsageMode !== "off"
+
+  return (
+    <div className="space-y-4 rounded-md border bg-card p-4">
+      <div>
+        <h3 className="text-sm font-semibold">{t("title")}</h3>
+        <p className="text-sm text-muted-foreground">{t("description")}</p>
+      </div>
+
+      <div className="flex items-center justify-between gap-4">
+        <Label htmlFor="tray-usage-menu">{t("showUsageInMenu")}</Label>
+        <Switch
+          id="tray-usage-menu"
+          checked={display.showUsageInMenu}
+          onCheckedChange={(on) => setDisplay({ showUsageInMenu: on })}
+        />
+      </div>
+
+      <div className="flex items-center justify-between gap-4">
+        <Label htmlFor="tray-usage-tooltip">{t("showUsageInTooltip")}</Label>
+        <Switch
+          id="tray-usage-tooltip"
+          checked={display.showUsageInTooltip}
+          onCheckedChange={(on) => setDisplay({ showUsageInTooltip: on })}
+        />
+      </div>
+
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <Label>{t("taskbarMode")}</Label>
+          <p className="text-xs text-muted-foreground">{t("taskbarModeHint")}</p>
+        </div>
+        <Select
+          value={display.taskbarUsageMode}
+          onValueChange={(v) => setDisplay({ taskbarUsageMode: v as TrayTaskbarUsageMode })}
+        >
+          <SelectTrigger className="w-44" aria-label={t("taskbarMode")}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {TASKBAR_MODES.map((mode) => (
+              <SelectItem key={mode} value={mode}>
+                {t(`taskbarModes.${mode}`)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {anyCompactSurface && (
+        <div className="flex items-center justify-between gap-4">
+          <Label>{t("pinnedSubscription")}</Label>
+          <Select
+            value={display.usageAccountKey ?? "auto"}
+            onValueChange={(v) => setDisplay({ usageAccountKey: v === "auto" ? null : v })}
+          >
+            <SelectTrigger className="w-44" aria-label={t("pinnedSubscription")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="auto">{t("pinnedAuto")}</SelectItem>
+              {accounts.map((account) => (
+                <SelectItem key={account.key} value={account.key}>
+                  {account.accountLabel?.trim() || account.provider}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
+      <div className="flex items-center justify-between gap-4">
+        <Label>{t("refreshInterval")}</Label>
+        <Select
+          value={String(display.usageRefreshMinutes)}
+          onValueChange={(v) => setDisplay({ usageRefreshMinutes: Number(v) })}
+        >
+          <SelectTrigger className="w-44" aria-label={t("refreshInterval")}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {REFRESH_MINUTE_CHOICES.map((mins) => (
+              <SelectItem key={mins} value={String(mins)}>
+                {mins === 0 ? t("refreshManual") : t("refreshEveryMinutes", { minutes: mins })}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="flex items-center justify-between gap-4">
+        <Label htmlFor="tray-tooltip-base">{t("tooltipBase")}</Label>
+        <Input
+          id="tray-tooltip-base"
+          value={tooltip}
+          onChange={(e) => setTooltip(e.target.value)}
+          className="h-8 w-44"
+        />
+      </div>
+
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <Label htmlFor="tray-icon-color">{t("iconColor")}</Label>
+          <p className="text-xs text-muted-foreground">{t("iconColorHint")}</p>
+        </div>
+        <input
+          id="tray-icon-color"
+          type="color"
+          value={display.iconColor}
+          onChange={(e) => setDisplay({ iconColor: e.target.value })}
+          aria-label={t("iconColor")}
+          className="h-8 w-16 cursor-pointer rounded-md border bg-transparent p-1"
+        />
+      </div>
+    </div>
+  )
 }
 
 export function TraySection() {
@@ -211,6 +359,8 @@ export function TraySection() {
           </Button>
         </div>
       </div>
+
+      <TrayDisplayCard />
 
       <ul className="divide-y rounded-md border bg-card">
         {items.map((item, idx) => {

@@ -31,17 +31,91 @@ export type WorkflowNodeKind =
   | "trigger.connector.inbound"
   | "trigger.chat.message"
   | "trigger.webhook"
-  | "trigger.github.webhook"
+  | "trigger.integration.event"
   | "trigger.team"
   | "trigger.goal.completed"
   // Actions on cognia-next runtime entities
   | "action.character.send"
   | "action.character.create"
   | "action.character.update"
+  // Full tool-enabled agent turn (sidecar on desktop; text-only fallback on
+  // web). User-placeable — the workflow-native "ask an agent" primitive.
+  | "action.agent.turn"
+  // Goal lifecycle actions (mirrors lib/plugin/api/goal-api.ts over
+  // GoalRuntime so workflow nodes preserve redaction, guardrails, events, and
+  // terminal fan-out side effects).
+  | "action.goal.create"
+  | "action.goal.get"
+  | "action.goal.list"
+  | "action.goal.events"
+  | "action.goal.updateObjective"
+  | "action.goal.pause"
+  | "action.goal.resume"
+  | "action.goal.stop"
+  | "action.goal.preempt"
+  | "action.goal.updateConfig"
+  | "action.goal.decomposeSubgoals"
+  | "action.goal.toggleSubgoal"
+  | "action.goal.clearSubgoals"
+  | "action.goal.delete"
+  | "action.goal.analytics"
+  | "action.goal.template.list"
+  | "action.goal.template.createGoal"
+  | "action.goal.template.upsert"
+  | "action.goal.template.favorite"
+  | "action.goal.template.delete"
   | "action.team.run"
   | "action.team.create"
   | "action.team.update"
   | "action.team.task.dispatch"
+  // Blocking lead review of a task's work (ADR-0071). Synthesizer-emitted only,
+  // never placed by users in the editor.
+  | "action.team.task.review"
+  | "action.team.reconcile"
+  // Agent-team surface exposure (multi-bot orchestration): auto-compose a
+  // team from an objective, query team state/results mid-workflow, delegate
+  // to twin/background/external/team, and post into the team blackboard.
+  | "action.team.compose"
+  | "action.team.status"
+  | "action.team.delegate"
+  | "action.team.message"
+  // User-placeable plan lifecycle actions (ADR-0045). These expose the
+  // AgentPlan runtime and DB readers without going through the synthesized
+  // per-step dispatch node below.
+  | "action.plan.create"
+  | "action.plan.get"
+  | "action.plan.list"
+  | "action.plan.events"
+  | "action.plan.updateDraft"
+  | "action.plan.approve"
+  | "action.plan.reject"
+  | "action.plan.refine"
+  | "action.plan.pause"
+  | "action.plan.resume"
+  | "action.plan.cancel"
+  | "action.plan.delete"
+  | "action.plan.run"
+  | "action.plan.setStepStatus"
+  // Native scheduler task actions. These wrap lib/scheduler TaskScheduler so
+  // workflows can manage existing scheduled-task capability directly.
+  | "action.scheduler.task.create"
+  | "action.scheduler.task.get"
+  | "action.scheduler.task.list"
+  | "action.scheduler.task.update"
+  | "action.scheduler.task.pause"
+  | "action.scheduler.task.resume"
+  | "action.scheduler.task.delete"
+  | "action.scheduler.task.runNow"
+  | "action.scheduler.task.executions"
+  | "action.scheduler.task.backfill"
+  | "action.scheduler.task.export"
+  | "action.scheduler.task.import"
+  | "action.scheduler.status"
+  | "action.scheduler.statistics"
+  | "action.scheduler.upcoming"
+  | "action.scheduler.executions.recent"
+  | "action.scheduler.execution.get"
+  | "action.scheduler.event.trigger"
   // Unified Plan Execution Hub (ADR-0045). Synthesizer-emitted only: one per
   // PlanStep. Looks up the per-run PlanRunContext and executes the step by its
   // `kind` (agent_turn / approval_gate / sub_workflow / tool_call /
@@ -51,24 +125,33 @@ export type WorkflowNodeKind =
   | "action.skill.upsert"
   | "action.twin.rag"
   | "action.twin.ingest"
+  // Autonomous long-term memory (lib/memory): hybrid recall + explicit store.
+  | "action.memory.recall"
+  | "action.memory.store"
   | "action.connector.send"
   | "action.connector.draft"
+  // Fine-grained connector feedback ops (multi-bot round 3): react to /
+  // delete a platform message by id, and block until a reply arrives in a
+  // conversation (the workflow-side feedback loop for IM sends).
+  | "action.connector.reaction"
+  | "action.connector.delete"
+  // Forward / merge-forward an existing message to another conversation.
+  | "action.connector.forward"
+  | "action.connector.waitReply"
+  // Human-in-the-loop gate (ADR 0061 P2): blocks until a human approves or
+  // rejects — desktop notification action, or a paired device via the
+  // `workflow_approval_respond` RPC. Routes downstream via decision handles.
+  | "action.approval.request"
+  // Remote device steps (ADR 0061 P3): hub-side proxy executors dispatch to
+  // a capable paired device via the remote-step broker and marshal the
+  // device's output back into the run.
+  | "action.mobile.camera"
+  | "action.mobile.scanBarcode"
+  | "action.mobile.location"
+  | "action.mobile.share"
+  | "action.mobile.notify"
   | "action.mcp.invokeTool"
   | "action.plugin.invoke"
-  // GitHub Delivery (provided by the github-delivery plugin)
-  | "action.github.openPr"
-  | "action.github.closePr"
-  | "action.github.mergePr"
-  | "action.github.reviewPr"
-  | "action.github.reviewPrInline"
-  | "action.github.commentPr"
-  | "action.github.commentIssue"
-  | "action.github.labelIssue"
-  | "action.github.closeIssue"
-  | "action.github.createRelease"
-  | "action.github.generateChangelog"
-  | "action.github.pushTag"
-  | "action.github.runIssueLoop"
   // Local Git (Source Control panel backend — ADR-0038)
   | "action.git.stage"
   | "action.git.commit"
@@ -76,28 +159,55 @@ export type WorkflowNodeKind =
   | "action.git.branch"
   // Desktop UI automation (provided by the automation subsystem — see
   // `docs/superpowers/specs/2026-05-12-ui-automation-subsystem-design.md`)
-  | "action.desktop.screenshot"
-  | "action.desktop.findElement"
-  | "action.desktop.readTree"
-  | "action.desktop.click"
-  | "action.desktop.type"
-  | "action.desktop.keys"
-  | "action.desktop.invokePattern"
-  | "action.desktop.windowFocus"
-  | "action.desktop.windowClose"
-  | "action.desktop.windowResize"
-  | "action.desktop.wait"
+  | "action.desktop.listApps"
+  | "action.desktop.getAppState"
+  | "action.desktop.queryElements"
+  | "action.desktop.expandElement"
+  | "action.desktop.performAction"
   | "trigger.desktop.event"
   // Wave 3 — integrated terminal action. Runs a command in a dock tab
   // (or spawns a fresh tab), surfaces stdout / exit code downstream.
   // Reuses `lib/terminal/run-in-dock.ts` so the consent + tab gating
   // matches the chat affordance and the agent's MCP tool path.
   | "action.system.terminal"
+  // Persistent terminal sessions — open once, run several commands in the
+  // same shell/cwd, close (or let the orchestrator's run cleanup close).
+  // Dock mode shares the consent gate with `action.system.terminal`;
+  // `unattended: true` routes through the headless policy layer
+  // (`lib/terminal/headless-exec.ts`).
+  | "action.terminal.session.open"
+  | "action.terminal.session.run"
+  | "action.terminal.session.close"
+  // Run a script file (.sh / .ps1 / .py / .js / …) under the right
+  // interpreter — reuses `lib/terminal/script-runner.ts:detectScriptType`
+  // for the extension → interpreter mapping; same dock / unattended gates
+  // as `action.system.terminal`.
+  | "action.terminal.script"
+  // Dock parity nodes for the remaining `terminal_dock_*` actions: read the
+  // recent-commands ring of a tab, or wait for the next OSC 633 command_end.
+  | "action.terminal.readRecent"
+  | "action.terminal.waitForExit"
+  // Fires when a command finishes in a *user-spawned* dock tab (agent /
+  // workflow-spawned tabs are excluded to prevent self-trigger loops).
+  // TS-hook trigger — fan-out lives in `lib/terminal/command-trigger.ts`.
+  | "trigger.terminal.command"
+  // Desktop-pet lifecycle trigger (levelUp/evolved/achievementUnlocked/unwell)
+  // + nurture action. Runner lives in `lib/workflow/runtime/pet-event-trigger.ts`.
+  | "trigger.pet.event"
+  | "action.pet.interact"
+  // Chained workflows (ADR-0081): fires when another workflow's run reaches a
+  // terminal status (succeeded/failed). Emitted by the orchestrator through
+  // `lib/workflow/runtime/workflow-completion-fanout.ts` with a chain-depth
+  // guard + self-trigger protection, consumed via the TS-hook trigger index.
+  | "trigger.workflow.completed"
   // AI primitives
   | "ai.prompt"
   | "ai.classify"
   | "ai.extract"
   | "ai.embed"
+  | "ai.browserModel"
+  | "ai.council"
+  | "ai.ensemble"
   // Flow control
   | "flow.branch"
   | "flow.switch"
@@ -109,14 +219,26 @@ export type WorkflowNodeKind =
   | "flow.subworkflow"
   | "flow.break"
   | "flow.continue"
+  // Terminal-failure catch (run-fallback safety net). Executes only when the
+  // run hits a terminal failure (retries exhausted / errorPolicy=stop / no
+  // error edge); its downstream is the recovery / notify path. Input is the
+  // error envelope `{ stepId, message, code }`. See orchestrator's
+  // terminal-failure block + `lib/workflow/runtime/failure-handler.ts`.
+  | "flow.catch"
   // Data
   | "data.transform"
+  | "data.aggregate"
   | "data.code"
   | "data.template"
   | "ocr.extract"
+  // Eval (agent evaluation engine)
+  | "eval.run"
+  | "eval.gate"
   // I/O
   | "io.http"
   | "io.webhook.respond"
+  | "io.output"
+  | "io.webClone"
   // Annotation
   | "annotation.note"
   | "annotation.group"
@@ -132,13 +254,7 @@ export type WorkflowNodeKind =
   | "pattern.synthesize"
 
 export type WorkflowNodeCategory =
-  | "trigger"
-  | "action"
-  | "ai"
-  | "flow"
-  | "data"
-  | "io"
-  | "annotation"
+  "trigger" | "action" | "ai" | "flow" | "data" | "io" | "annotation"
 
 export function workflowNodeCategory(kind: WorkflowNodeKind): WorkflowNodeCategory {
   const head = kind.split(".")[0]
@@ -150,6 +266,8 @@ export function workflowNodeCategory(kind: WorkflowNodeKind): WorkflowNodeCatego
   if (head === "io") return "io"
   // OCR extraction is a data-producing node (ADR-0024).
   if (head === "ocr") return "data"
+  // Eval nodes run / judge agent evaluations — a flavour of action.
+  if (head === "eval") return "action"
   // Ultracode pattern nodes are a flavour of action.
   if (head === "pattern") return "action"
   return "annotation"
@@ -165,59 +283,124 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "trigger.connector.inbound",
   "trigger.chat.message",
   "trigger.webhook",
-  "trigger.github.webhook",
+  "trigger.integration.event",
   "trigger.team",
   "trigger.goal.completed",
   "action.character.send",
   "action.character.create",
   "action.character.update",
+  "action.agent.turn",
+  "action.goal.create",
+  "action.goal.get",
+  "action.goal.list",
+  "action.goal.events",
+  "action.goal.updateObjective",
+  "action.goal.pause",
+  "action.goal.resume",
+  "action.goal.stop",
+  "action.goal.preempt",
+  "action.goal.updateConfig",
+  "action.goal.decomposeSubgoals",
+  "action.goal.toggleSubgoal",
+  "action.goal.clearSubgoals",
+  "action.goal.delete",
+  "action.goal.analytics",
+  "action.goal.template.list",
+  "action.goal.template.createGoal",
+  "action.goal.template.upsert",
+  "action.goal.template.favorite",
+  "action.goal.template.delete",
   "action.team.run",
   "action.team.create",
   "action.team.update",
   "action.team.task.dispatch",
+  "action.team.task.review",
+  "action.team.reconcile",
+  "action.plan.create",
+  "action.plan.get",
+  "action.plan.list",
+  "action.plan.events",
+  "action.plan.updateDraft",
+  "action.plan.approve",
+  "action.team.compose",
+  "action.team.status",
+  "action.team.delegate",
+  "action.team.message",
+  "action.plan.reject",
+  "action.plan.refine",
+  "action.plan.pause",
+  "action.plan.resume",
+  "action.plan.cancel",
+  "action.plan.delete",
+  "action.plan.run",
+  "action.plan.setStepStatus",
+  "action.scheduler.task.create",
+  "action.scheduler.task.get",
+  "action.scheduler.task.list",
+  "action.scheduler.task.update",
+  "action.scheduler.task.pause",
+  "action.scheduler.task.resume",
+  "action.scheduler.task.delete",
+  "action.scheduler.task.runNow",
+  "action.scheduler.task.executions",
+  "action.scheduler.task.backfill",
+  "action.scheduler.task.export",
+  "action.scheduler.task.import",
+  "action.scheduler.status",
+  "action.scheduler.statistics",
+  "action.scheduler.upcoming",
+  "action.scheduler.executions.recent",
+  "action.scheduler.execution.get",
+  "action.scheduler.event.trigger",
   "action.plan.step.dispatch",
   "action.skill.invoke",
   "action.skill.upsert",
   "action.twin.rag",
   "action.twin.ingest",
+  "action.memory.recall",
+  "action.memory.store",
   "action.connector.send",
   "action.connector.draft",
+  "action.approval.request",
+  "action.mobile.camera",
+  "action.mobile.scanBarcode",
+  "action.mobile.location",
+  "action.mobile.share",
+  "action.mobile.notify",
+  "action.connector.reaction",
+  "action.connector.delete",
+  "action.connector.forward",
+  "action.connector.waitReply",
   "action.mcp.invokeTool",
   "action.plugin.invoke",
-  "action.github.openPr",
-  "action.github.closePr",
-  "action.github.mergePr",
-  "action.github.reviewPr",
-  "action.github.reviewPrInline",
-  "action.github.commentPr",
-  "action.github.commentIssue",
-  "action.github.labelIssue",
-  "action.github.closeIssue",
-  "action.github.createRelease",
-  "action.github.generateChangelog",
-  "action.github.pushTag",
-  "action.github.runIssueLoop",
   "action.git.stage",
   "action.git.commit",
   "action.git.push",
   "action.git.branch",
-  "action.desktop.screenshot",
-  "action.desktop.findElement",
-  "action.desktop.readTree",
-  "action.desktop.click",
-  "action.desktop.type",
-  "action.desktop.keys",
-  "action.desktop.invokePattern",
-  "action.desktop.windowFocus",
-  "action.desktop.windowClose",
-  "action.desktop.windowResize",
-  "action.desktop.wait",
+  "action.desktop.listApps",
+  "action.desktop.getAppState",
+  "action.desktop.queryElements",
+  "action.desktop.expandElement",
+  "action.desktop.performAction",
   "trigger.desktop.event",
   "action.system.terminal",
+  "action.terminal.session.open",
+  "action.terminal.session.run",
+  "action.terminal.session.close",
+  "action.terminal.script",
+  "action.terminal.readRecent",
+  "action.terminal.waitForExit",
+  "trigger.terminal.command",
+  "trigger.pet.event",
+  "action.pet.interact",
+  "trigger.workflow.completed",
   "ai.prompt",
   "ai.classify",
   "ai.extract",
   "ai.embed",
+  "ai.browserModel",
+  "ai.council",
+  "ai.ensemble",
   "flow.branch",
   "flow.switch",
   "flow.split",
@@ -228,12 +411,18 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   "flow.subworkflow",
   "flow.break",
   "flow.continue",
+  "flow.catch",
   "data.transform",
+  "data.aggregate",
   "data.code",
   "data.template",
   "ocr.extract",
+  "eval.run",
+  "eval.gate",
   "io.http",
   "io.webhook.respond",
+  "io.output",
+  "io.webClone",
   "annotation.note",
   "annotation.group",
   "pattern.multi-modal-sweep",
@@ -305,6 +494,31 @@ export interface VisualWorkflow {
   staticData?: Record<string, unknown>
   /** Last saved canvas viewport so reopening lands the user where they were. */
   viewport?: WorkflowViewport
+  /**
+   * Declared call interface (D5). When present the workflow can be published as
+   * a typed callable unit — an agent tool, a typed `flow.subworkflow` target,
+   * and a skill-catalog entry. Stored as serializable JSON Schemas; the canvas
+   * `trigger.manual` input + `io.output` node edit them. Interface (schema) is
+   * declared separately from implementation (the graph).
+   */
+  interface?: WorkflowInterface
+  /** Set when the workflow has been published as a callable unit. */
+  published?: WorkflowPublication
+}
+
+/** Typed input/output contract a published workflow exposes to callers. */
+export interface WorkflowInterface {
+  /** JSON object schema for the run payload (surfaces as `$trigger.payload`). */
+  inputSchema?: Record<string, unknown>
+  /** JSON object schema the terminal output must satisfy. */
+  outputSchema?: Record<string, unknown>
+}
+
+/** Publication record: registers the 3 call surfaces (tool / subworkflow / skill). */
+export interface WorkflowPublication {
+  at: number
+  /** Display-only slug; execution always uses the shared typed workflow runner. */
+  toolName: string
 }
 
 export interface WorkflowNode<TParams = Record<string, unknown>> {
@@ -331,6 +545,47 @@ export interface WorkflowNode<TParams = Record<string, unknown>> {
  * React Flow v12's `Node<TData extends Record<string, unknown>>` constraint
  * without forcing every consumer to widen at the boundary.
  */
+/**
+ * Per-node error handling (n8n/Dify parity). Lives in node SETTINGS (not
+ * params — kind-agnostic), purely additive: nodes without it keep the legacy
+ * behavior (workflow-level `settings.errorPolicy`, workflow retryDefaults).
+ */
+export interface WorkflowNodeErrorHandling {
+  /** Per-node retry override; absent → workflow `settings.retryDefaults`. */
+  retry?: {
+    /** Extra attempts after the first failure (0 = no retry). */
+    maxRetries: number
+    retryIntervalMs: number
+    backoff: "fixed" | "exponential"
+    /** Cap for exponential mode. */
+    maxIntervalMs?: number
+  }
+  /**
+   * What to do when the step ultimately fails (after retries):
+   *  - "fail"        — legacy: defer to the workflow-level errorPolicy.
+   *  - "continue"    — output `{ error }` and RUN downstream (n8n semantics).
+   *  - "errorBranch" — route to edges leaving the node's "error" handle.
+   *  - "defaultValue"— substitute `defaultValue` as the output, run downstream.
+   */
+  onError?: "fail" | "continue" | "errorBranch" | "defaultValue"
+  /** Static output used when `onError === "defaultValue"`. */
+  defaultValue?: unknown
+  /**
+   * Per-node circuit breaker. After `threshold` consecutive failures of this
+   * (workflowId, nodeId) pair, the breaker opens: subsequent attempts
+   * fail-fast with a non-retryable `CircuitOpenError` for `cooldownMs`,
+   * routing through the same onError / error-edge path. A success resets the
+   * counter. State is process-local (`lib/workflow/runtime/circuit-breaker.ts`).
+   * Absent → no breaker.
+   */
+  circuitBreaker?: {
+    /** Consecutive failures that trip the breaker (≥1). */
+    threshold: number
+    /** How long the breaker stays open before a half-open retry (ms). */
+    cooldownMs: number
+  }
+}
+
 export interface WorkflowNodeData<TParams = Record<string, unknown>> {
   [key: string]: unknown
   /** User-visible label. Often the node type's default at create time. */
@@ -349,6 +604,14 @@ export interface WorkflowNodeData<TParams = Record<string, unknown>> {
    * authoring, undefined for nodes that pre-date the field.
    */
   authoredBy?: "ai" | "user"
+  /** Per-node error handling; absent = legacy "fail" behavior. */
+  errorHandling?: WorkflowNodeErrorHandling
+  /**
+   * Canvas lock: when true the node cannot be dragged or resized (React Flow
+   * `draggable: false`). Purely an editor affordance — does not affect runs.
+   * Carried explicitly through `reactFlowToWorkflow` (field-by-field rebuild).
+   */
+  locked?: boolean
 }
 
 export interface WorkflowEdge {
@@ -359,27 +622,55 @@ export interface WorkflowEdge {
   targetHandle?: string
   /** Optional label rendered on the edge (e.g., "true" / "false" for branch). */
   label?: string
-  data?: { kind?: WorkflowEdgeKind }
+  /** Optional author annotation on the connection (distinct from the label;
+   * shown as a hover indicator on the canvas). Additive — no schema bump. */
+  data?: { kind?: WorkflowEdgeKind; comment?: string }
 }
 
 export type WorkflowEdgeKind = "default" | "conditional" | "parallel" | "loop" | "error"
 
 export interface WorkflowSettings {
   errorPolicy: "stop" | "continue" | "branch"
+  /**
+   * Auto-gate medium/high-risk nodes behind an approval wait (ADR-0070 Phase 3).
+   *
+   * Unlike `AgentTeamConfig.riskGating` and `GoalConfig.riskGating`, this is
+   * **opt-in**: `undefined` means OFF. A workflow authored before ADR-0070 has
+   * no field, and turning gating on retroactively would start pausing
+   * (interactive) or failing (headless) automations users already rely on.
+   * `createWorkflow` stamps `true` on newly created workflows, so new work is
+   * gated and existing work is left exactly as it was.
+   */
+  riskGating?: boolean
   /** Hard ceiling on a single run's wall-clock time. */
   timeoutMs: number
   /** How many runs of THIS workflow may execute concurrently. */
   concurrency: number
   /**
    * Per ADR-0022 §3.7. Max in-flight nodes WITHIN a single run for the
-   * ready-set scheduler. Optional and defaults to 1 in `runWorkflow` to
-   * preserve the legacy sequential behavior. NOT the same as `concurrency`
-   * (that field caps concurrent RUNS of the same workflow).
+   * ready-set scheduler. Optional; absent values are backfilled to
+   * {@link DEFAULT_MAX_CONCURRENCY} by the zod settings schema, so the
+   * orchestrator, the editor forms, and new-workflow seeds all agree on ONE
+   * default. NOT the same as `concurrency` (that field caps concurrent RUNS
+   * of the same workflow).
    */
   maxConcurrency?: number
   retryDefaults: WorkflowRetryPolicy
   /** Default cron timezone — falls back to AppSettings.timezone. */
   timezone?: string
+  /**
+   * Terminal-failure safety net. When a run fails terminally (retries
+   * exhausted / errorPolicy resolves to stop with no handled branch):
+   *  - `runCatchNodes` (default true): execute any `flow.catch` nodes + their
+   *    downstream as a finalization phase before the run is marked failed.
+   *  - `notify` (default false): append a `run_failed` NOTICE event so the UI
+   *    can surface a toast / banner.
+   * Absent → `{ runCatchNodes: true, notify: false }`.
+   */
+  onFailure?: {
+    runCatchNodes?: boolean
+    notify?: boolean
+  }
 }
 
 export interface WorkflowRetryPolicy {
@@ -408,13 +699,7 @@ export interface WorkflowViewport {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type RunStatus =
-  | "pending"
-  | "running"
-  | "waiting"
-  | "paused"
-  | "succeeded"
-  | "failed"
-  | "cancelled"
+  "pending" | "running" | "waiting" | "paused" | "succeeded" | "failed" | "cancelled"
 
 /**
  * Trigger envelope — produced by triggers (manual button, cron daemon, webhook
@@ -425,6 +710,8 @@ export interface TriggerEvent {
   workflowId: string
   /** Which trigger node kind produced this event. */
   kind: WorkflowNodeKind
+  /** Exact workflow trigger-node id that produced this event. */
+  triggerId?: string
   /** Free-form payload — chat message body, webhook headers/body, etc. */
   payload: unknown
   /** Wall-clock when the trigger fired (Rust mirror or webview Date.now()). */
@@ -436,10 +723,14 @@ export interface TriggerEvent {
 export interface WorkflowTriggerBinding {
   adapterId?: string
   sessionId?: string
+  /** Platform-native inbound message id used to anchor thread-native run streams. */
+  sourceMessageId?: string
   conversationKey?: string
   characterId?: string
   /** Scopes a `trigger.goal.completed` subscription to a specific goal id. */
   goalId?: string
+  /** Scopes a `trigger.team` subscription to a specific team id. */
+  teamId?: string
 }
 
 /**
@@ -453,10 +744,32 @@ export interface WorkflowTriggerBinding {
  * to `triggeredBy.conversationKey` via `enqueueOutbound`.
  */
 export interface WorkflowTriggeredFrom {
-  source: "im" | "ui" | "api"
+  /**
+   * `"chat"` = the main chat `/workflow` slash command; `"desktop"` = the
+   * library card Run button. Both are surfaced by the global run-progress
+   * toaster (`"ui"` — editor/run-list — keeps its own inline toasts).
+   */
+  source: "im" | "ui" | "api" | "chat" | "desktop"
   adapterId?: string
   conversationKey?: string
+  sourceMessageId?: string
+  deliveryTarget?: import("@/types/connectors/event").ConversationDeliveryTarget
   sessionId?: string
+  initiator?: {
+    platformIdentityId?: string
+    remoteUserId?: string
+    displayName?: string
+    /** Resolved principal/account stamp — see `ExecutionRunInitiator`. */
+    principalId?: string
+    accountId?: string
+  }
+  /**
+   * Paired-device id of the companion caller (ADR-0060). Stamped server-side
+   * from the verified device JWT — never client-supplied — so run history and
+   * audit surfaces can answer "which device triggered this". Absent for runs
+   * originating on the desktop itself.
+   */
+  deviceId?: string
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -469,12 +782,35 @@ export interface WorkflowTriggeredFrom {
  */
 export type WorkflowRow = VisualWorkflow
 
+/**
+ * Execution lease (ADR 0061 P4). Exactly one executor process may drive a
+ * run: the lease is claimed before the first step and heartbeat-renewed
+ * while the run is live, so a second process (crash-resume race, a future
+ * cloud brain) backs off instead of double-executing. Additive +
+ * non-indexed — no Dexie version bump.
+ */
+export interface WorkflowRunLease {
+  /** Per-process executor id (`lib/workflow/runtime/run-lease.ts`). */
+  ownerId: string
+  claimedAt: number
+  /** Epoch ms; a lease past this is stale and free to claim. */
+  expiresAt: number
+}
+
 export interface WorkflowRunRow {
   id: string
   workflowId: string
+  /**
+   * Owning workspace id — Workspace isolation column (Dexie v86). Workflow
+   * DEFINITIONS stay profile-shared; only their RUN history is per-project.
+   * Stamped from the active project at run start. See `lib/db/project-scope.ts`.
+   */
+  projectId?: string
   status: RunStatus
   /** Which trigger kind started this run. */
   triggerKind: WorkflowNodeKind
+  /** Exact trigger-node id, when the producer identified one. */
+  triggerId?: string
   triggerPayload: unknown
   triggerBinding?: WorkflowTriggerBinding
   input?: unknown
@@ -490,12 +826,53 @@ export interface WorkflowRunRow {
   /** Highest stepId successfully completed; resume picks up at the next one. */
   lastCompletedStepId?: string
   /**
+   * Small-model "work content" title summarising what this particular run did,
+   * generated once on completion (see `lib/ai/generation/run-title-task.ts`).
+   * Falls back to `workflowSnapshot.name` in the agent-runs view when absent.
+   * Additive + non-indexed — no Dexie version bump.
+   */
+  title?: string
+  /**
+   * `true`/undefined while the run title is machine-managed; a manual rename
+   * sets it `false` to opt out of (re)generation. Mirrors `ChatSession.titleAuto`.
+   */
+  titleAuto?: boolean
+  /**
    * Origin metadata for runs whose `trigger.kind === "trigger.manual"` was
    * fired by an external surface (IM Claude tool, desktop button, HTTP API)
    * rather than the workflow's own trigger node. Drives IM-side progress
    * fan-out — see `lib/connectors/a2ui-bridge/workflow-progress-runner.ts`.
    */
   triggeredBy?: WorkflowTriggeredFrom
+  /**
+   * Denormalised copy of `triggeredBy.source` (Dexie v91), promoted to a
+   * top-level INDEXED column because Dexie cannot index nested object props.
+   * Lets `workflow-progress-runner` watch only IM-triggered runs via
+   * `.where("triggeredBySource").equals("im")` instead of scanning the whole
+   * `workflowRuns` table on every run. Stamped at run creation and backfilled
+   * for legacy rows (`triggeredBy?.source ?? "ui"`).
+   */
+  triggeredBySource?: string
+  /** Execution lease (ADR 0061 P4) — see {@link WorkflowRunLease}. */
+  lease?: WorkflowRunLease
+  /**
+   * Epoch ms when a cancel was requested by a surface that could NOT abort
+   * the run locally (the lease is held by another live executor). The lease
+   * owner's heartbeat observes this and aborts. Additive + non-indexed.
+   */
+  cancelRequestedAt?: number
+  /**
+   * Dead-letter / replay metadata (A3). All additive + non-indexed (no Dexie
+   * version bump): the dead-letter panel queries the existing `status` index
+   * for `"failed"` rows.
+   *  - `acknowledgedAt`: epoch ms a user dismissed this failure (hides it from
+   *    the dead-letter list).
+   *  - `replayedByRunId`: the run id spawned by the most recent replay.
+   *  - `replayCount`: how many times this failed run has been replayed.
+   */
+  acknowledgedAt?: number
+  replayedByRunId?: string
+  replayCount?: number
 }
 
 export interface WorkflowRunError {
@@ -526,6 +903,18 @@ export type RunEventType =
   | "run_cancelled"
   | "step.long_running.checkpoint"
   | "step.long_running.progress"
+  // Streaming LLM output chunks (throttled via stream-sink; payload
+  // `{ delta, seq }`). Presentation-only — resume reads the final output
+  // from `step_completed`, never reassembles chunks.
+  | "step_stream"
+  // User-visible agent narration, kept separate from model reasoning and
+  // coalesced by the runtime before presentation.
+  | "step_commentary"
+  // Token/cost usage snapshot for one step (payload = StepUsage).
+  | "step_usage"
+  // Emitted before each retry backoff wait (payload
+  // `{ attempt, maxAttempts, delayMs, error }`).
+  | "step_retrying"
 
 export type RunEventLogLevel = "debug" | "info" | "warn" | "error"
 
@@ -547,6 +936,8 @@ export interface WorkflowTriggerRow {
   enabled: boolean
   /** Cron expression (only meaningful for `trigger.cron`). */
   cron?: string
+  /** IANA timezone used for cron wall-clock evaluation; absent means host local. */
+  timezone?: string
   /** Pre-computed next-fire timestamp (used by the editor preview). */
   nextFireAt?: number
   /** Webhook path or connector binding (kind-dependent). */
@@ -559,6 +950,25 @@ export interface WorkflowTriggerRow {
 // ─────────────────────────────────────────────────────────────────────────────
 // Step execution — passed to `NodeExecutor.execute(ctx)` at run time.
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Token/cost usage reported by an LLM-backed step. Persisted as the payload
+ * of a `step_usage` event; aggregated per-run by the Runs UI.
+ */
+export interface StepUsage {
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+  /** Prompt-cache READ tokens (billed at a discount). Absent ⇒ 0. */
+  cacheReadTokens?: number
+  /** Prompt-cache WRITE/creation tokens (billed at a premium). Absent ⇒ 0. */
+  cacheCreationTokens?: number
+  /** Provider that actually served the call (post-routing/fallback). */
+  providerId?: string
+  modelId?: string
+  /** Estimated USD cost; undefined when no pricing is known for the model. */
+  costUsd?: number
+}
 
 /**
  * Per-step execution context. The runtime constructs one of these per
@@ -589,6 +999,23 @@ export interface StepExecutionContext<TParams = Record<string, unknown>> {
   log: (level: RunEventLogLevel, message: string, payload?: unknown) => void
   /** Resolves a credential ref id to its keychain value. */
   resolveSecret: (refId: string) => Promise<string | undefined>
+  /**
+   * Push one streaming output delta (LLM token chunk). Buffered/throttled by
+   * the runtime's stream sink before landing as `step_stream` events, so
+   * executors may call this per token without write amplification. Absent
+   * when the run surface doesn't render live output.
+   */
+  emitStream?: (delta: string) => void
+  /**
+   * Push user-visible mid-turn agent narration. This is distinct from
+   * `emitStream` (the final answer) and never carries raw model analysis.
+   */
+  emitCommentary?: (delta: string) => void
+  /**
+   * Report token/cost usage for this step. Lands as a `step_usage` event;
+   * call at most once, after the LLM call settles.
+   */
+  reportUsage?: (usage: StepUsage) => void
 }
 
 /**
@@ -633,6 +1060,8 @@ export interface RegisterTriggerInput {
   triggerId: string
   kind: WorkflowNodeKind
   cron?: string
+  /** IANA timezone used by the Rust cron daemon; absent means host local. */
+  timezone?: string
   webhookPath?: string
   /** HTTP method the receiver allows. Defaults to POST. */
   webhookMethod?: string
@@ -643,14 +1072,16 @@ export interface RegisterTriggerInput {
   /** Optional response body template. */
   webhookResponseBody?: string
   /**
-   * Which signature header convention to verify against:
-   *   - "cognia" (default) → reads `x-signature-256: sha256=<hex>`
-   *   - "github"           → reads `x-hub-signature-256: sha256=<hex>`
-   * Used by the Rust verifier; the trigger node kind alone (e.g.
-   * trigger.github.webhook) is also a valid signal but this field is the
-   * authoritative override.
+   * True when the workflow contains an `io.webhook.respond` node — the Rust
+   * receiver then holds the inbound request open for a dynamic response
+   * instead of replying with the static body immediately.
    */
-  signatureMode?: "cognia" | "github"
+  webhookAwaitResponse?: boolean
+  /**
+   * How long (ms) to hold an `await_response` request before falling back to
+   * the static response. Absent / 0 = the Rust default (~25s).
+   */
+  webhookResponseTimeoutMs?: number
   binding?: WorkflowTriggerBinding
   enabled: boolean
 }
@@ -659,11 +1090,23 @@ export interface RegisterTriggerInput {
 // Defaults — the editor and seed loaders use these when creating new entities.
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * The ONE in-run ready-set parallelism default. Four sources used to disagree
+ * (zod: none, seed: 4, orchestrator: 1, editor: 1/4) — making the same
+ * workflow sequential or 4-wide depending on whether its persisted `settings`
+ * blob happened to carry the field. Every consumer now derives from this
+ * constant: the zod settings schema backfills it at validation, so legacy
+ * no-field workflows run 4-wide like new ones.
+ */
+export const DEFAULT_MAX_CONCURRENCY = 4
+
 export const DEFAULT_WORKFLOW_SETTINGS: WorkflowSettings = {
   errorPolicy: "stop",
   timeoutMs: 600_000,
   concurrency: 1,
+  maxConcurrency: DEFAULT_MAX_CONCURRENCY,
   retryDefaults: { attempts: 3, backoff: "exponential", baseMs: 1000, maxMs: 30_000 },
+  onFailure: { runCatchNodes: true, notify: false },
 }
 
 export const DEFAULT_RETRY_POLICY: WorkflowRetryPolicy = {
@@ -708,13 +1151,7 @@ export interface NodeIoData {
 
 /** Primitive/structural type tag used by the Schema view + drag-to-map rows. */
 export type SchemaRowType =
-  | "string"
-  | "number"
-  | "boolean"
-  | "object"
-  | "array"
-  | "null"
-  | "undefined"
+  "string" | "number" | "boolean" | "object" | "array" | "null" | "undefined"
 
 /**
  * One row of the Schema view — a flattened path into a node's output object.
@@ -777,6 +1214,13 @@ export interface LoopNodeParams {
   /** while: per-iteration boolean expression, re-evaluated each round. */
   whileExpression?: string
   /**
+   * while only — when the condition is checked relative to the body.
+   * `"pre"` (default) is a classic while; `"post"` runs the body first and
+   * checks AFTER each round (do-while: at least one iteration). Both timings
+   * continue while truthy.
+   */
+  conditionTiming?: "pre" | "post"
+  /**
    * Expression evaluated at the END of each iteration; its result is pushed
    * into the loop's `items[]` output. `$item`/`$loop` are in scope. When
    * omitted, the iteration index is collected instead.
@@ -787,6 +1231,31 @@ export interface LoopNodeParams {
    * Bounded at run time by the shared global in-flight gate.
    */
   iterationConcurrency?: number
+  /**
+   * forEach only — groups the source into sequential batches of this size
+   * (n8n SplitInBatches semantics). Items INSIDE a batch still parallelize up
+   * to `iterationConcurrency`; the next batch starts only when the previous
+   * one fully drains. Unset/0 → one implicit batch (today's behavior).
+   */
+  batchSize?: number
   /** Hard cap on total iterations (defends against runaway while-loops). */
   maxIterations?: number
+  /**
+   * Container-level backstop for iteration errors that the child's own
+   * error handling (errorBranch / continue / defaultValue) did NOT absorb:
+   * `"fail"` (default) rejects the container — today's behavior;
+   * `"skip"` records the failure in `output.errors[]` and keeps looping;
+   * `"break"` records it and stops the loop with partial output.
+   */
+  onItemError?: "fail" | "skip" | "break"
+}
+
+/** One failed iteration collected by `onItemError: "skip" | "break"`. */
+export interface LoopItemError {
+  /** Global iteration index (source order). */
+  index: number
+  /** The forEach item, when applicable (undefined for times/while). */
+  item?: unknown
+  error: string
+  errorType?: string
 }

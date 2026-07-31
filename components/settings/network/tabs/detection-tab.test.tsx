@@ -45,23 +45,48 @@ const isTauriMock = tauriModule.isTauri
 
 import { NetworkDetectionTab } from "./detection-tab"
 
+/** Render inside act so the mount-time auto-scan settles before assertions. */
+async function mount() {
+  await act(async () => {
+    render(<NetworkDetectionTab />)
+  })
+}
+
 beforeEach(() => {
   saveMock.mockClear()
   applyProxyToRustMock.mockClear()
   invokeMock.mockClear()
   isTauriMock.mockReturnValue(true)
+  invokeMock.mockResolvedValue([])
   mockedSettings = {}
 })
 
 describe("NetworkDetectionTab", () => {
-  it("shows a 'Detect now' button initially", () => {
-    render(<NetworkDetectionTab />)
+  it("auto-scans on mount without a button click", async () => {
+    invokeMock.mockResolvedValue([
+      { kind: "http", host: "127.0.0.1", port: 8080, label: "HTTP proxy @ 127.0.0.1:8080" },
+    ])
+    await mount()
+    expect(invokeMock).toHaveBeenCalledWith("proxy_detect")
+    await waitFor(() => {
+      expect(screen.getByText("HTTP proxy @ 127.0.0.1:8080")).toBeInTheDocument()
+    })
+  })
+
+  it("does not auto-scan outside Tauri", async () => {
+    isTauriMock.mockReturnValue(false)
+    await mount()
+    expect(invokeMock).not.toHaveBeenCalled()
+  })
+
+  it("shows a 'Detect now' button", async () => {
+    await mount()
     expect(screen.getByText("detection.button")).toBeInTheDocument()
   })
 
   it("renders empty state when no candidates are found", async () => {
     invokeMock.mockResolvedValue([])
-    render(<NetworkDetectionTab />)
+    await mount()
     await act(async () => {
       fireEvent.click(screen.getByLabelText("detection.button"))
     })
@@ -80,10 +105,7 @@ describe("NetworkDetectionTab", () => {
         version: "1.18.0",
       },
     ])
-    render(<NetworkDetectionTab />)
-    await act(async () => {
-      fireEvent.click(screen.getByLabelText("detection.button"))
-    })
+    await mount()
     await waitFor(() => {
       expect(screen.getByText("Clash mixed @ 127.0.0.1:7890")).toBeInTheDocument()
     })
@@ -102,10 +124,7 @@ describe("NetworkDetectionTab", () => {
     invokeMock.mockResolvedValue([
       { kind: "socks5", host: "127.0.0.1", port: 1080, label: "SOCKS5 @ 127.0.0.1:1080" },
     ])
-    render(<NetworkDetectionTab />)
-    await act(async () => {
-      fireEvent.click(screen.getByLabelText("detection.button"))
-    })
+    await mount()
     await waitFor(() => {
       expect(screen.getByText("SOCKS5 @ 127.0.0.1:1080")).toBeInTheDocument()
     })
@@ -118,10 +137,7 @@ describe("NetworkDetectionTab", () => {
 
   it("renders the error card when invoke rejects", async () => {
     invokeMock.mockRejectedValue(new Error("permission denied"))
-    render(<NetworkDetectionTab />)
-    await act(async () => {
-      fireEvent.click(screen.getByLabelText("detection.button"))
-    })
+    await mount()
     await waitFor(() => {
       expect(screen.getByText(/permission denied/)).toBeInTheDocument()
     })
@@ -140,10 +156,7 @@ describe("NetworkDetectionTab", () => {
         controllerSecured: true,
       },
     ])
-    render(<NetworkDetectionTab />)
-    await act(async () => {
-      fireEvent.click(screen.getByLabelText("detection.button"))
-    })
+    await mount()
     await waitFor(() => {
       expect(screen.getByText("Clash Verge Rev @ 127.0.0.1:7897")).toBeInTheDocument()
     })
@@ -166,10 +179,7 @@ describe("NetworkDetectionTab", () => {
         source: "process",
       },
     ])
-    render(<NetworkDetectionTab />)
-    await act(async () => {
-      fireEvent.click(screen.getByLabelText("detection.button"))
-    })
+    await mount()
     await waitFor(() => {
       expect(screen.getByText("FlClash")).toBeInTheDocument()
     })
@@ -182,10 +192,7 @@ describe("NetworkDetectionTab", () => {
     invokeMock.mockResolvedValue([
       { kind: "http", host: "127.0.0.1", port: 8080, label: "HTTP proxy @ 127.0.0.1:8080" },
     ])
-    render(<NetworkDetectionTab />)
-    await act(async () => {
-      fireEvent.click(screen.getByLabelText("detection.button"))
-    })
+    await mount()
     await waitFor(() => {
       expect(screen.getByText("HTTP proxy @ 127.0.0.1:8080")).toBeInTheDocument()
     })
@@ -201,11 +208,53 @@ describe("NetworkDetectionTab", () => {
 
   it("shows a web-unsupported notice and skips invoke when not in Tauri", async () => {
     isTauriMock.mockReturnValue(false)
-    render(<NetworkDetectionTab />)
+    await mount()
     await act(async () => {
       fireEvent.click(screen.getByLabelText("detection.button"))
     })
     expect(invokeMock).not.toHaveBeenCalled()
     expect(screen.getByText("detection.webUnsupported")).toBeInTheDocument()
+  })
+
+  describe("quick Clash status", () => {
+    it("probes the controller on mount and shows the status line on a version hit", async () => {
+      invokeMock.mockImplementation((cmd: string) =>
+        cmd === "proxy_identify_clash" ? Promise.resolve("1.18.0") : Promise.resolve([])
+      )
+      await mount()
+      expect(invokeMock).toHaveBeenCalledWith("proxy_identify_clash")
+      expect(screen.getByText("detection.quickClash")).toBeInTheDocument()
+    })
+
+    it("renders no status line when the controller is absent", async () => {
+      invokeMock.mockImplementation((cmd: string) =>
+        cmd === "proxy_identify_clash" ? Promise.resolve(null) : Promise.resolve([])
+      )
+      await mount()
+      expect(screen.queryByText("detection.quickClash")).not.toBeInTheDocument()
+    })
+
+    it("ignores non-string payloads from the quick probe", async () => {
+      invokeMock.mockResolvedValue([])
+      await mount()
+      expect(screen.queryByText("detection.quickClash")).not.toBeInTheDocument()
+    })
+
+    it("skips the quick probe outside Tauri", async () => {
+      isTauriMock.mockReturnValue(false)
+      await mount()
+      expect(invokeMock).not.toHaveBeenCalled()
+    })
+
+    it("swallows quick-probe failures silently", async () => {
+      invokeMock.mockImplementation((cmd: string) =>
+        cmd === "proxy_identify_clash"
+          ? Promise.reject(new Error("probe boom"))
+          : Promise.resolve([])
+      )
+      await mount()
+      expect(screen.queryByText(/probe boom/)).not.toBeInTheDocument()
+      expect(screen.queryByText("detection.quickClash")).not.toBeInTheDocument()
+    })
   })
 })
